@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nx-agent"
+version = "0.1.0"
+description = "Control a CFW Nintendo Switch over USB: daemon, CLI and MCP server for agents"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["pyusb>=1.2", "pillow>=10"]
+
+[project.optional-dependencies]
+mcp = ["mcp>=2.3,<3"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+nxagentd = "nxagent.daemon:main"
+nxctl = "nxagent.cli:main"
+nxagent-mcp = "nxagent.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nxagent = ["data/*.md", "data/native/*", "data/skill/*", "data/skill/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F"]

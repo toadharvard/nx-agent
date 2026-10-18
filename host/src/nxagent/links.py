@@ -1,0 +1,129 @@
+"""Real hardware adapters. Thin wrappers over proto/transport.py, proto/hekate.py
+and the MTP mailbox helpers; tests replace this whole object with fakes."""
+import json
+import struct
+import subprocess
+import sys
+import time
+
+from . import paths
+from .common import KNOWN_DEVICES, OpError, STATE_DIR
+
+MAILBOX_STATUS = 'config/usb-worker-mailbox/status.json'
+
+
+class UsbLinks:
+    def __init__(self):
+        self.mailbox = MtpMailbox()
+
+    def devices(self):
+        import usb.core
+
+        found = set()
+
+        for dev in usb.core.find(find_all=True):
+            key = f'{dev.idVendor:04x}:{dev.idProduct:04x}'
+
+            if key in KNOWN_DEVICES:
+                found.add(key)
+
+        return found
+
+    def open(self, target):
+        if target == 'nyx':
+            from .proto.hekate import Nyx
+
+            return Nyx()
+
+        from .proto.transport import UsbSocket
+
+        return UsbSocket(connect_gdb=False, interface_number=0 if target == 'worker' else 1)
+
+    def drain(self, target):
+        if target == 'nyx':
+            return drain_nyx()
+
+        from .proto.transport import UsbSocket
+
+        transport = UsbSocket(connect_gdb=False, interface_number=0 if target == 'worker' else 1)
+
+        try:
+            return transport.drain_pending_replies()
+        finally:
+            transport.close()
+
+    def external_disks(self):
+        from .disks import external_disks
+
+        return external_disks()
+
+
+def drain_nyx(seconds=3):
+    import usb.core
+    from .proto.hekate import Nyx
+
+    nyx = Nyx()
+
+    try:
+        end = time.monotonic() + seconds
+        count = quiet = 0
+
+        while time.monotonic() < end:
+            try:
+                nyx.input.read(4096, timeout=250)
+            except usb.core.USBTimeoutError:
+                quiet += 1
+
+                if quiet == 2:
+                    return count
+
+                continue
+
+            quiet = 0
+            count += 1
+
+        raise TimeoutError('Remote Hekate replies did not quiesce')
+    finally:
+        nyx.close()
+
+
+class MtpMailbox:
+    """SD mailbox used while DBI MTP (057e:201d) replaces the sidecar interface."""
+
+    def read_status(self):
+        out = STATE_DIR / 'mailbox' / str(time.time_ns())
+        out.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run([sys.executable, '-m', 'nxagent.mtp_read', str(out), MAILBOX_STATUS],
+                                capture_output=True, text=True, timeout=90)
+        status = out / MAILBOX_STATUS
+
+        if result.returncode or not status.exists():
+            raise OpError('absent', 'Mailbox status is not readable over MTP')
+
+        return json.loads(status.read_text())
+
+    def submit(self, request):
+        path = STATE_DIR / 'mailbox' / f'request-{time.time_ns()}.bin'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(request)
+
+        return subprocess.run([str(paths.tool_path('mtp_mailbox_submit')), str(path)], timeout=90).returncode
+
+
+def build_mailbox_request(token_hex, sequence, now_ms, op, data):
+    if len(data) > 80:
+        raise ValueError('Mailbox payload is limited to 80 bytes (128-byte request)')
+
+    request = bytearray(128)
+    struct.pack_into('<8sQQQII', request, 0, b'SCMAIL01', int(token_hex, 16), sequence,
+                     now_ms + 20000, op, len(data))
+    request[40:40 + len(data)] = data
+    digest = 14695981039346656037
+
+    for byte in request[:120]:
+        digest = ((digest ^ byte) * 1099511628211) & ((1 << 64) - 1)
+
+    struct.pack_into('<Q', request, 120, digest)
+
+    return bytes(request)
+

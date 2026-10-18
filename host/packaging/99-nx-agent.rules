@@ -1,0 +1,5 @@
+# nx-agent: give the logged-in user access to the Switch USB interfaces.
+# Worker/Rescue (HOS), Remote Hekate, DBI MTP
+SUBSYSTEM=="usb", ATTR{idVendor}=="057e", ATTR{idProduct}=="3000", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="11ec", ATTR{idProduct}=="a7e1", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="057e", ATTR{idProduct}=="201d", TAG+="uaccess"
