@@ -161,6 +161,8 @@ def build_parser():
     h.add_parser('watchdog').add_argument('seconds', type=int)
 
     sub.add_parser('sleep-settings')
+    p = sub.add_parser('autohold', help='Worker keeps the sleep lease from boot (on) or releases it and restores sleep settings (off)')
+    p.add_argument('state', choices=['on', 'off'])
     p = sub.add_parser('logs')
     p.add_argument('action', choices=['collect'])
     p.add_argument('dir')
@@ -219,6 +221,9 @@ def to_request(a):
 
     if a.cmd == 'reboot':
         return 'reboot', {'force': a.force}
+
+    if a.cmd == 'autohold':
+        return 'autohold', {'enable': a.state == 'on'}
 
     if a.cmd == 'wait':
         return 'wait_state', {'state': a.state, 'timeout': a.timeout}

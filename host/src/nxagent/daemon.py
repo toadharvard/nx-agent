@@ -41,6 +41,7 @@ COMMANDS = {
     'guard.confirm': lambda d, force=False: d.guard.confirm(force),
     'guard.status': lambda d: d.guard.status(),
     'sleep_settings': lambda d: d.sleep_settings(),
+    'autohold': lambda d, enable: d.autohold(enable),
     'logs.collect': lambda d, local: d.collect(local),
     'mtp.status': lambda d: d.mtp_status(),
     'hekate.screen': lambda d, path: d.nyx_screen(path),

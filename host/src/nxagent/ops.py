@@ -232,6 +232,14 @@ class Daemon(DaemonCore):
 
         return self.run('worker', name, (op,), body, verify)
 
+    def autohold(self, enable):
+        result = self.worker_op('autohold', 56, bytes([1 if enable else 0]))
+
+        if not enable:
+            result['lease_released'] = self.sleep_lease(0)
+
+        return {'autohold': bool(enable), **result}
+
     def sleep_lease(self, seconds):
         seconds = int(seconds)
 
