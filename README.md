@@ -51,6 +51,20 @@ The installer adds `[Remote USB Control]` to `bootloader/hekate_ipl.ini` without
 
 Use `--profile full` only when you want the agent to reboot, write files or update sysmodules.
 
+**ChatGPT** (remote MCP over HTTPS). ChatGPT connects from the internet, so expose the local HTTP endpoint
+through a tunnel and keep the path secret - with "No authentication" the URL is the only key:
+
+```sh
+TOKEN=$(openssl rand -hex 16)
+cloudflared tunnel --url http://127.0.0.1:8765          # prints https://<name>.trycloudflare.com
+nxagent-mcp --profile interactive --transport streamable-http --port 8765 \
+  --path /mcp-$TOKEN --allowed-host <name>.trycloudflare.com
+```
+
+In ChatGPT: Settings -> Apps & Connectors -> Advanced -> Developer mode, then add a connector with URL
+`https://<name>.trycloudflare.com/mcp-$TOKEN`. Prefer `--profile readonly` or `interactive` over the network;
+anyone with the URL controls the console within that profile. Stop the tunnel when you are done.
+
 ## Use
 
 ```sh

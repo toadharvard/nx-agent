@@ -328,8 +328,26 @@ def build_server(profile='interactive'):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', default=os.environ.get('NXAGENT_MCP_PROFILE', 'interactive'), choices=PROFILES)
+    parser.add_argument('--transport', choices=('stdio', 'streamable-http'), default='stdio')
+    parser.add_argument('--host', default='127.0.0.1', help='bind address for streamable-http')
+    parser.add_argument('--port', type=int, default=8765)
+    parser.add_argument('--path', default=os.environ.get('NXAGENT_MCP_PATH', '/mcp'),
+                        help='HTTP endpoint path; use an unguessable one (e.g. /mcp-<random>) behind a public tunnel')
+    parser.add_argument('--allowed-host', action='append', default=[], metavar='HOST',
+                        help='extra Host header accepted (e.g. the tunnel domain); repeatable')
     args = parser.parse_args(argv)
-    build_server(args.profile).run('stdio')
+    server = build_server(args.profile)
+
+    if args.transport == 'stdio':
+        server.run('stdio')
+
+        return
+
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    hosts = ['127.0.0.1', '127.0.0.1:*', 'localhost', 'localhost:*', *args.allowed_host]
+    server.run('streamable-http', host=args.host, port=args.port, stateless_http=True, streamable_http_path=args.path,
+               transport_security=TransportSecuritySettings(allowed_hosts=hosts))
 
 
 if __name__ == '__main__':
