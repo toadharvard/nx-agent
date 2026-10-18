@@ -1,0 +1,63 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+jobs:
+  sysmodules:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -C console/worker && make -C console/rescue
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sysmodules
+          path: |
+            console/worker/worker.nsp
+            console/rescue/rescue.nsp
+  remote-hekate:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh console/remote-hekate/scripts/fetch-and-apply.sh
+      - run: |
+          cd console/remote-hekate/hekate
+          make -j4 && make -C nyx -j4
+          mkdir -p ../build && cp output/hekate.bin ../build/Remote-Hekate.bin && cp output/nyx.bin ../build/nyx.bin
+          cd .. && tar --exclude=.git --exclude=output --exclude=build -czf remote-hekate-src.tar.gz hekate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remote-hekate
+          path: |
+            console/remote-hekate/build/*.bin
+            console/remote-hekate/remote-hekate-src.tar.gz
+  publish:
+    needs: [sysmodules, remote-hekate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - run: |
+          V=${GITHUB_REF_NAME#v}
+          python tools/make_sd_zip.py --version "$V" \
+            --worker artifacts/sysmodules/worker/worker.nsp --rescue artifacts/sysmodules/rescue/rescue.nsp \
+            --hekate artifacts/remote-hekate/build/Remote-Hekate.bin --nyx artifacts/remote-hekate/build/nyx.bin
+          cp artifacts/remote-hekate/remote-hekate-src.tar.gz "dist/remote-hekate-src-$V.tar.gz"
+          pip install build && python -m build host --outdir dist
+          cd dist && sha256sum * > SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*'
+      - run: gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes "Draft release; verify on a device before publishing." dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}

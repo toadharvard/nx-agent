@@ -1,0 +1,60 @@
+name: console
+on: [push, pull_request]
+jobs:
+  host-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - run: pip install -e './host'
+      - run: |
+          cd console
+          sh tests/build_tests.sh
+          for t in test_launch_job test_listener test_mailbox test_mailbox_runtime test_worker_logic; do tests/bin/$t; done
+          python -m unittest discover -s tests -p 'test_*.py'
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -C console/worker && make -C console/rescue
+      - run: sha256sum console/worker/worker.nsp console/rescue/rescue.nsp | tee console-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: console-sysmodules
+          path: |
+            console/worker/worker.nsp
+            console/rescue/rescue.nsp
+            console-sha256.txt
+  remote-hekate-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: sh console/remote-hekate/scripts/fetch-and-apply.sh
+      - run: sh console/remote-hekate/tests/run.sh
+  remote-hekate-build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh console/remote-hekate/scripts/fetch-and-apply.sh
+      - run: |
+          cd console/remote-hekate/hekate
+          make -j4 && make -C nyx -j4
+          mkdir -p ../build && cp output/hekate.bin ../build/Remote-Hekate.bin && cp output/nyx.bin ../build/nyx.bin
+          sha256sum ../build/*.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remote-hekate
+          path: console/remote-hekate/build/*.bin
