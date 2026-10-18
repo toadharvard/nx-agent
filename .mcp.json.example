@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "nx-agent": {
+      "command": "nxagent-mcp",
+      "args": ["--profile", "interactive"]
+    }
+  }
+}
