@@ -1,0 +1,8 @@
+/hekate/
+/build/
+/tests/core.so
+/tests/core.dylib
+/tests/*.dSYM/
+/tests/fuzz_core
+/tests/test_r2c_crosscheck
+/tests/__pycache__/

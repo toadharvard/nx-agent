@@ -1,0 +1,138 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nx-agent contributors <nx-agent@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 00:00:00 +0000
+Subject: [PATCH 3/3] nyx: hook the remote USB service into the GUI
+
+Build remote.c and remote_core.c (added separately under
+nyx/nyx_gui/frontend/) and wire them in:
+
+- nyx_remote_init() before the GUI loop and nyx_remote_poll() on every
+  loop iteration;
+- nyx_remote_service() from manual_system_maintenance() so USB stays
+  alive while a blocking tool runs;
+- injected touch from the host takes priority over the touch panel, and
+  local touches restart the watchdog;
+- the remote gadget is suspended around the HID and UMS gadgets and in
+  hw_deinit() before any payload launch or power state change.
+---
+ bdk/soc/hw_init.c                | 4 ++++
+ nyx/Makefile                     | 2 +-
+ nyx/nyx_gui/frontend/gui.c       | 9 +++++++++
+ nyx/nyx_gui/frontend/gui_tools.c | 5 +++++
+ 4 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/bdk/soc/hw_init.c b/bdk/soc/hw_init.c
+index 2493497..e9f49bf 100644
+--- a/bdk/soc/hw_init.c
++++ b/bdk/soc/hw_init.c
+@@ -470,6 +470,10 @@ void hw_init()
+ 
+ void hw_deinit(bool keep_display)
+ {
++#ifdef BDK_HW_EXTRA_DEINIT
++	extern void nyx_remote_suspend(void);
++	nyx_remote_suspend();
++#endif
+ 	// Seamless display or display power off.
+ 	if (!keep_display)
+ 	{
+diff --git a/nyx/Makefile b/nyx/Makefile
+index e7b3fa9..2cf221d 100644
+--- a/nyx/Makefile
++++ b/nyx/Makefile
+@@ -29,7 +29,7 @@ TRACK_LDFLAGS = $(BUILDDIR)/.ldflags
+ # Main and graphics.
+ OBJS =  start exception_handlers nyx heap gfx \
+ 		gui gui_info gui_tools gui_options gui_emmc_tools gui_emummc_tools gui_tools_partition_manager \
+-		fe_emummc_tools fe_emmc_tools
++		fe_emummc_tools fe_emmc_tools remote remote_core
+ 
+ # Hardware.
+ OBJS += actmon bpmp ccplex clock di vic i2c irq timer \
+diff --git a/nyx/nyx_gui/frontend/gui.c b/nyx/nyx_gui/frontend/gui.c
+index 8736597..cfd9485 100644
+--- a/nyx/nyx_gui/frontend/gui.c
++++ b/nyx/nyx_gui/frontend/gui.c
+@@ -19,6 +19,7 @@
+ #include <bdk.h>
+ 
+ #include "gui.h"
++#include "remote.h"
+ #include "gui_emummc_tools.h"
+ #include "gui_tools.h"
+ #include "gui_info.h"
+@@ -337,7 +338,11 @@ static bool _fts_touch_read(lv_indev_data_t *data)
+ 	if (!touch_enabled)
+ 		return false;
+ 
++	uint32_t rx,ry;int pressed;
++	if(remote_core_touch(get_tmr_ms(),&rx,&ry,&pressed)){data->point.x=rx;data->point.y=ry;data->state=pressed?LV_INDEV_STATE_PR:LV_INDEV_STATE_REL;return false;}
+ 	int res = touch_poll(&touchpad);
++	if (!res && touchpad.touch)
++		nyx_remote_local_activity();
+ 
+ 	// Take a screenshot if 3rd finger.
+ 	if (touchpad.finger > 2)
+@@ -639,6 +644,7 @@ static system_maintenance_tasks_t system_tasks;
+ 
+ void manual_system_maintenance(bool refresh)
+ {
++	nyx_remote_service();
+ 	for (u32 task_idx = 0; task_idx < (sizeof(system_maintenance_tasks_t) / sizeof(lv_task_t *)); task_idx++)
+ 	{
+ 		lv_task_t *task = system_tasks.tasks[task_idx];
+@@ -2551,12 +2557,14 @@ void nyx_load_and_run()
+ 		lv_task_once(task_run_sd_errors);
+ 	}
+ 
++	nyx_remote_init();
+ 	// Gui loop.
+ 	if (h_cfg.t210b01)
+ 	{
+ 		// Minerva not supported on T210B01 yet. Slight power saving via spinlock.
+ 		while (true)
+ 		{
++			nyx_remote_poll();
+ 			lv_task_handler();
+ 			usleep(400);
+ 		}
+@@ -2568,6 +2576,7 @@ void nyx_load_and_run()
+ 		{
+ 			minerva_change_freq(FREQ_1600);  // Takes 295 us.
+ 
++			nyx_remote_poll();
+ 			lv_task_handler();
+ 
+ 			minerva_change_freq(FREQ_800);   // Takes 80 us.
+diff --git a/nyx/nyx_gui/frontend/gui_tools.c b/nyx/nyx_gui/frontend/gui_tools.c
+index 8d60c30..1b62851 100644
+--- a/nyx/nyx_gui/frontend/gui_tools.c
++++ b/nyx/nyx_gui/frontend/gui_tools.c
+@@ -20,6 +20,7 @@
+ #include <bdk.h>
+ 
+ #include "gui.h"
++#include "remote.h"
+ #include "gui_tools.h"
+ #include "gui_tools_partition_manager.h"
+ #include "gui_emmc_tools.h"
+@@ -208,7 +209,9 @@ static lv_res_t _create_mbox_hid(usb_ctxt_t *usbs)
+ 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
+ 	lv_obj_set_top(mbox, true);
+ 
++	nyx_remote_suspend();
+ 	usb_device_gadget_hid(usbs);
++	nyx_remote_resume();
+ 
+ 	lv_mbox_add_btns(mbox, mbox_btn_map, nyx_mbox_action);
+ 
+@@ -305,7 +308,9 @@ static lv_res_t _create_mbox_ums(usb_ctxt_t *usbs)
+ 	// Dim backlight.
+ 	display_backlight_brightness(20, 1000);
+ 
++	nyx_remote_suspend();
+ 	usb_device_gadget_ums(usbs);
++	nyx_remote_resume();
+ 
+ 	// Restore backlight.
+ 	display_backlight_brightness(h_cfg.backlight - 20, 1000);

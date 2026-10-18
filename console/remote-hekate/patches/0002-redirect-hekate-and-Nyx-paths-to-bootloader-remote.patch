@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nx-agent contributors <nx-agent@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 00:00:00 +0000
+Subject: [PATCH 2/3] redirect hekate and Nyx paths to bootloader/remote
+
+Remote Hekate is chainloaded as a payload next to an existing hekate
+install, so it keeps its own state: hekate_ipl.ini, nyx.ini, nyx.bin and
+update.bin are read from and written to bootloader/remote/ instead of
+bootloader/. The installed hekate and its configuration are never
+touched.
+---
+ bootloader/main.c                  | 12 ++++++------
+ nyx/nyx_gui/config.c               |  8 ++++----
+ nyx/nyx_gui/frontend/gui.c         |  6 +++---
+ nyx/nyx_gui/frontend/gui_options.c |  2 +-
+ nyx/nyx_gui/nyx.c                  |  4 ++--
+ 5 files changed, 16 insertions(+), 16 deletions(-)
+
+diff --git a/bootloader/main.c b/bootloader/main.c
+index aa20ce8..2a96639 100644
+--- a/bootloader/main.c
++++ b/bootloader/main.c
+@@ -447,7 +447,7 @@ static void _launch_config()
+ 	emummc_load_cfg();
+ 
+ 	// Parse main configuration.
+-	ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false);
++	ini_parse(&ini_sections, "bootloader/remote/hekate_ipl.ini", false);
+ 
+ 	// Build configuration menu.
+ 	ments = (ment_t *)malloc(sizeof(ment_t) * (max_entries + 6));
+@@ -579,7 +579,7 @@ out:
+ 
+ static void _nyx_load_run()
+ {
+-	u8 *nyx = sd_file_read("bootloader/sys/nyx.bin", NULL);
++	u8 *nyx = sd_file_read("bootloader/remote/nyx.bin", NULL);
+ 	if (!nyx)
+ 		return;
+ 
+@@ -708,12 +708,12 @@ static void _check_for_updated_bootloader()
+ 	else
+ 	{
+ 		// Check if update.bin exists and is newer and launch it. Otherwise create it.
+-		if (!f_stat("bootloader/update.bin", NULL))
+-			_launch_payload("bootloader/update.bin", true, false);
++		if (!f_stat("bootloader/remote/update.bin", NULL))
++			_launch_payload("bootloader/remote/update.bin", true, false);
+ 		else
+ 		{
+ 			u8 *buf = zalloc(0x200);
+-			is_ipl_updated(buf, 0, "bootloader/update.bin", true);
++			is_ipl_updated(buf, 0, "bootloader/remote/update.bin", true);
+ 			free(buf);
+ 		}
+ 	}
+@@ -752,7 +752,7 @@ static void _auto_launch()
+ 	emummc_load_cfg();
+ 
+ 	// Parse hekate main configuration.
+-	if (ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false))
++	if (ini_parse(&ini_sections, "bootloader/remote/hekate_ipl.ini", false))
+ 		goto out; // Can't load hekate_ipl.ini.
+ 
+ 	// Load configuration.
+diff --git a/nyx/nyx_gui/config.c b/nyx/nyx_gui/config.c
+index e5fc541..ecfc32d 100644
+--- a/nyx/nyx_gui/config.c
++++ b/nyx/nyx_gui/config.c
+@@ -69,11 +69,11 @@ int create_config_entry()
+ 
+ 	LIST_INIT(ini_sections);
+ 
+-	if (!ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false))
++	if (!ini_parse(&ini_sections, "bootloader/remote/hekate_ipl.ini", false))
+ 		ini_found = true;
+ 	else
+ 	{
+-		u8 res = f_open(&fp, "bootloader/hekate_ipl.ini", FA_READ);
++		u8 res = f_open(&fp, "bootloader/remote/hekate_ipl.ini", FA_READ);
+ 		if (res == FR_NO_FILE || res == FR_NO_PATH)
+ 		{
+ 			f_mkdir("bootloader");
+@@ -89,7 +89,7 @@ int create_config_entry()
+ 		}
+ 	}
+ 
+-	if (f_open(&fp, "bootloader/hekate_ipl.ini", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
++	if (f_open(&fp, "bootloader/remote/hekate_ipl.ini", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
+ 		return 1;
+ 
+ 	// Add config entry.
+@@ -197,7 +197,7 @@ int create_nyx_config_entry(bool force_unmount)
+ 	// Make sure that bootloader folder exists.
+ 	f_mkdir("bootloader");
+ 
+-	if (f_open(&fp, "bootloader/nyx.ini", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
++	if (f_open(&fp, "bootloader/remote/nyx.ini", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
+ 		return 1;
+ 
+ 	// Add config entry.
+diff --git a/nyx/nyx_gui/frontend/gui.c b/nyx/nyx_gui/frontend/gui.c
+index f1bff0b..8736597 100644
+--- a/nyx/nyx_gui/frontend/gui.c
++++ b/nyx/nyx_gui/frontend/gui.c
+@@ -924,7 +924,7 @@ void reload_nyx(lv_obj_t *obj, bool force)
+ 		sd_mount();
+ 
+ 		// Check that Nyx still exists.
+-		if (f_stat("bootloader/sys/nyx.bin", NULL))
++		if (f_stat("bootloader/remote/nyx.bin", NULL))
+ 		{
+ 			sd_unmount();
+ 
+@@ -1770,7 +1770,7 @@ static lv_res_t _create_window_home_launch(lv_obj_t *btn)
+ 	// Choose what to parse.
+ 	bool ini_parse_success = false;
+ 	if (!more_cfg)
+-		ini_parse_success = !ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false);
++		ini_parse_success = !ini_parse(&ini_sections, "bootloader/remote/hekate_ipl.ini", false);
+ 	else
+ 		ini_parse_success = !ini_parse(&ini_sections, "bootloader/ini", true);
+ 
+@@ -1982,7 +1982,7 @@ failed_sd_mount:
+ 		{
+ 			lv_label_set_static_text(label_error,
+ 				"#FFDD00 No main boot entries found...#\n"
+-				"Check that #96FF00 bootloader/hekate_ipl.ini# has boot entries\n"
++				"Check that #96FF00 bootloader/remote/hekate_ipl.ini# has boot entries\n"
+ 				"or use #C7EA46 More configs# button for more boot entries.");
+ 		}
+ 		else
+diff --git a/nyx/nyx_gui/frontend/gui_options.c b/nyx/nyx_gui/frontend/gui_options.c
+index 7022c3c..1569b6e 100644
+--- a/nyx/nyx_gui/frontend/gui_options.c
++++ b/nyx/nyx_gui/frontend/gui_options.c
+@@ -228,7 +228,7 @@ static void _create_autoboot_window()
+ 
+ 	// Parse hekate main configuration.
+ 	LIST_INIT(ini_sections);
+-	if (!ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false))
++	if (!ini_parse(&ini_sections, "bootloader/remote/hekate_ipl.ini", false))
+ 	{
+ 		LIST_FOREACH_ENTRY(ini_sec_t, ini_sec, &ini_sections, link)
+ 		{
+diff --git a/nyx/nyx_gui/nyx.c b/nyx/nyx_gui/nyx.c
+index 9b7df26..33ef158 100644
+--- a/nyx/nyx_gui/nyx.c
++++ b/nyx/nyx_gui/nyx.c
+@@ -167,7 +167,7 @@ static void _load_saved_configuration()
+ 	LIST_INIT(ini_sections);
+ 	LIST_INIT(ini_nyx_sections);
+ 
+-	if (ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false))
++	if (ini_parse(&ini_sections, "bootloader/remote/hekate_ipl.ini", false))
+ 	{
+ 		create_config_entry();
+ 		goto skip_main_cfg_parse;
+@@ -212,7 +212,7 @@ static void _load_saved_configuration()
+ 	ini_free(&ini_sections);
+ 
+ skip_main_cfg_parse:
+-	if (ini_parse(&ini_nyx_sections, "bootloader/nyx.ini", false))
++	if (ini_parse(&ini_nyx_sections, "bootloader/remote/nyx.ini", false))
+ 		return;
+ 
+ 	// Load Nyx configuration.
