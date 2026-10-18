@@ -196,5 +196,19 @@ class Mcp(unittest.TestCase):
         self.assertIn('Do NOT retry', str(ctx.exception))
 
 
-if __name__ == '__main__':
-    unittest.main()
+class RemoteHekateDetection(unittest.TestCase):
+    @staticmethod
+    def dev(*classes):
+        from types import SimpleNamespace
+
+        return [[SimpleNamespace(bInterfaceClass=c, bInterfaceSubClass=s, bInterfaceProtocol=p) for c, s, p in classes]]
+
+    def test_vendor_interface_is_remote(self):
+        from nxagent.links import is_remote_hekate
+
+        self.assertTrue(is_remote_hekate(self.dev((0xff, 0x52, 1))))
+
+    def test_stock_hid_gamepad_is_not_remote(self):
+        from nxagent.links import is_remote_hekate
+
+        self.assertFalse(is_remote_hekate(self.dev((3, 0, 0))))

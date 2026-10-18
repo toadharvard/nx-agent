@@ -7,9 +7,18 @@ import sys
 import time
 
 from . import paths
-from .common import KNOWN_DEVICES, OpError, STATE_DIR
+from .common import KNOWN_DEVICES, NYX, OpError, STATE_DIR
 
 MAILBOX_STATUS = 'config/usb-worker-mailbox/status.json'
+
+
+def is_remote_hekate(dev):
+    """Stock hekate reuses 11ec:a7e1 for its HID gamepad gadget; Remote Hekate exposes vendor class 0xff/0x52/1."""
+    try:
+        return any((i.bInterfaceClass, i.bInterfaceSubClass, i.bInterfaceProtocol) == (0xff, 0x52, 1)
+                   for cfg in dev for i in cfg)
+    except Exception:
+        return True
 
 
 class UsbLinks:
@@ -24,7 +33,7 @@ class UsbLinks:
         for dev in usb.core.find(find_all=True):
             key = f'{dev.idVendor:04x}:{dev.idProduct:04x}'
 
-            if key in KNOWN_DEVICES:
+            if key in KNOWN_DEVICES and (key != NYX or is_remote_hekate(dev)):
                 found.add(key)
 
         return found
