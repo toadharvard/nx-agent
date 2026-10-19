@@ -360,7 +360,8 @@ class FakeUsb:
 
         return error, payload, marker
 
-    def stream_command(self, op, data):
+    def stream_command(self, op, data, timeout=2000):
+        self.console.__dict__.setdefault('stream_timeouts', []).append((op, timeout))
         error, payload, marker = self.command(op, data)
 
         if error:

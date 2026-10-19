@@ -13,6 +13,10 @@ from . import paths
 
 LIMIT = 0xFFFFFFFF
 BACKUP_LIMIT = 256 * 1024 * 1024
+# The console hashes the whole file before it answers a read (op 81) and allocates the new file and hashes the
+# old one before it answers a write (op 80); SD runs at >=10 MB/s, so allow 1 ms per 10 kB on top of a base.
+GET_REPLY_MS = 600_000
+PUT_REPLY_BASE_MS = 30_000
 
 
 class HashingSink:
@@ -35,7 +39,7 @@ def file_sha256(path):
 
 
 def get(usb, remote, local):
-    payload = usb.stream_command(81, remote.encode())
+    payload = usb.stream_command(81, remote.encode(), GET_REPLY_MS)
     size, = struct.unpack_from('<Q', payload, 8)
     expected = payload[16:48].hex()
     digest = hashlib.sha256()
@@ -73,7 +77,7 @@ def put(usb, remote, local, old):
 
     save(run, record)
     usb.stream_command(80, struct.pack('<BQ', old is not None, size) + (old[1] if old else bytes(32)) + digest +
-                       remote.encode())
+                       remote.encode(), PUT_REPLY_BASE_MS + (size + (old[0] if old else 0)) // 10_000)
     record['status'] = 'streaming'
     save(run, record)
 

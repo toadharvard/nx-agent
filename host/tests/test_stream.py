@@ -39,6 +39,13 @@ class StreamDaemonTests(unittest.TestCase):
         self.assertIn(80, self.ops())
         self.assertNotIn(33, self.ops('worker'))
 
+    def test_reply_timeouts_cover_console_work(self):
+        self.console.files[PATH] = b'o' * 3_000_000
+        self.daemon.put(PATH, self.local(b'n' * 2_000_000))
+        timeouts = self.console.stream_timeouts
+        self.assertIn((80, 30_000 + 5_000_000 // 10_000), timeouts)
+        self.assertTrue(all(t >= 600_000 for op, t in timeouts if op == 81))
+
     def test_overwrite_keeps_old_copy(self):
         self.console.files[PATH] = b'old'
         result = self.daemon.put(PATH, self.local(b'new'))

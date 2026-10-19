@@ -51,14 +51,14 @@ class UsbSocket:
             time.sleep(.05);error,_,retry=self.command(5)
         if error:
             self.close();raise RuntimeError(f'Console debugger connection failed: guest errno {error}')
-    def command(self,op,data=b''):
+    def command(self,op,data=b'',timeout=2000):
         if self.closed or self.faulted:
             raise RuntimeError('USB stream is closed or reply state is uncertain; no command sent')
         if len(data)>4080:raise ValueError('USB frame overflow')
         frame=struct.pack('<4I',MAGIC,op,len(data),0)+data+bytes(4080-len(data))
         try:
             if self.epout.write(frame,timeout=2000)!=4096:raise IOError('Short USB write')
-            reply=bytes(self.epin.read(4096,timeout=2000))
+            reply=bytes(self.epin.read(4096,timeout=timeout))
             if len(reply)!=4096:raise IOError('Short USB reply')
             magic,error,size,retry=struct.unpack_from('<4I',reply)
             if magic!=MAGIC or size>4080:raise IOError('Malformed USB relay reply')
@@ -91,9 +91,10 @@ class UsbSocket:
                 count+=1
                 if count>max_frames:break
         raise TimeoutError('Pending USB replies did not quiesce within drain bounds')
-    def stream_command(self,op,data):
-        """Frame op that must answer with STREAM_MAGIC; returns the reply payload."""
-        error,payload,marker=self.command(op,data)
+    def stream_command(self,op,data,timeout=2000):
+        """Frame op that must answer with STREAM_MAGIC; returns the reply payload. The console may do work
+        proportional to the file (hash, allocation) before it replies, so the caller sizes the timeout."""
+        error,payload,marker=self.command(op,data,timeout)
         if error:raise RuntimeError(f'Sidecar command {op}: console error 0x{error:x}')
         if marker!=STREAM_MAGIC:
             self.faulted=True
