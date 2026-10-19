@@ -25,7 +25,7 @@ class BootGuard(unittest.TestCase):
  def make(self,path,data=b''):p=Path(path);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
  def test_versions_and_feature_bit(self):
   e,d=call(6);self.assertEqual((e,struct.unpack('<4I',d)),(0,(7,0x52534355,1,0)))
-  e,d=call(9);v=struct.unpack('<6I',d);self.assertEqual((e,v[0],v[5]),(0,7,3))
+  e,d=call(9);v=struct.unpack('<6I',d);self.assertEqual((e,v[0],v[5]),(0,7,5))
  def test_strict_path_validation(self):
   f=flag();bad=[(f,f),(f+SUFFIX,f+SUFFIX),(f,flag('0100000000000353')+SUFFIX),(f,f+'.disabled'),
    (f,f+SUFFIX+'x'),(f.replace('boot2.flag','boot2.flg'),f.replace('boot2.flag','boot2.flg')+SUFFIX),

@@ -15,16 +15,13 @@ typedef SHA256_CTX Sha256Context;
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include "stream.h"
+#include <fcntl.h>
 
 #define BASE "sdmc:/config/usb-sidecar"
 #define JOURNAL BASE "/pending.bin"
 #define TEMP BASE "/upload.tmp"
 #define BACKUP BASE "/previous.bin"
-#define LIMIT STREAM_MAX
-#define STREAM_CHUNK (64*1024)
+#define LIMIT (256*1024*1024ULL)
 /* One recoverable transaction. Host archives previous content before BEGIN.
  * The persistent journal protects the rename gap on FAT; this is not a claim
  * of power-loss atomicity of the SD controller or filesystem itself. */
@@ -100,11 +97,12 @@ int sidecar_mkdir(const char *p) {
     if(!sidecar_path(p,true))return EACCES;
     return mkdir(p,0777)?errno:0;
 }
+static unsigned char hash_buf[128*1024];
 int sidecar_hash(const char *path,unsigned char hash[32],uint64_t *size) {
-    FILE *f=fopen(path,"rb");if(!f)return errno;
-    unsigned char buf[8192];Sha256Context ctx;sha256ContextCreate(&ctx);*size=0;
-    size_t n;while((n=fread(buf,1,sizeof(buf),f))){sha256ContextUpdate(&ctx,buf,n);*size+=n;}
-    int e=ferror(f)?EIO:0;fclose(f);if(!e)sha256ContextGetHash(&ctx,hash);return e;
+    int fd=open(path,O_RDONLY);if(fd<0)return errno;
+    Sha256Context ctx;sha256ContextCreate(&ctx);*size=0;
+    ssize_t n;while((n=read(fd,hash_buf,sizeof(hash_buf)))>0){sha256ContextUpdate(&ctx,hash_buf,(size_t)n);*size+=(uint64_t)n;}
+    int e=n<0?errno:0;close(fd);if(!e)sha256ContextGetHash(&ctx,hash);return e;
 }
 static int flush_close(FILE *f) {
     int e=0;if(fflush(f) || fsync(fileno(f)))e=errno;
@@ -182,51 +180,3 @@ int sidecar_recover(void) {
     active=false;return 0;
 }
 int sidecar_abort(void){return sidecar_recover();}
-static unsigned char stream_buf[STREAM_CHUNK];
-static int wait_fd(int fd,short events,int ms) {
-    struct pollfd p={.fd=fd,.events=events};
-    int r=poll(&p,1,ms);
-    if(r<0)return errno==EINTR?0:errno;
-    if(!r)return ETIMEDOUT;
-    return (p.revents&events)?0:ECONNRESET;
-}
-static int send_all(int peer,const unsigned char *data,size_t size,int idle_ms) {
-    while(size) {
-        int e=wait_fd(peer,POLLOUT,idle_ms);if(e)return e;
-        ssize_t n=send(peer,data,size,0);
-        if(n>0){data+=n;size-=(size_t)n;}
-        else if(n<0 && errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR)return errno;
-    }
-    return 0;
-}
-/* Fill the open transaction's temporary file from the socket. A local write error keeps draining the
- * socket so the stream stays in step and the caller can report the real error; commit or abort is up to it. */
-int sidecar_stream_in(int peer,int idle_ms) {
-    if(!active || received)return EINVAL;
-    FILE *f=fopen(TEMP,"wb");if(!f)return errno;
-    int e=0,io=0;uint64_t total=0;
-    while(!e && total<current.size) {
-        if((e=wait_fd(peer,POLLIN,idle_ms)))break;
-        uint64_t left=current.size-total;
-        ssize_t n=recv(peer,stream_buf,left<STREAM_CHUNK?(size_t)left:STREAM_CHUNK,0);
-        if(n>0) {
-            total+=(uint64_t)n;
-            if(!io && fwrite(stream_buf,1,(size_t)n,f)!=(size_t)n)io=errno?errno:EIO;
-        }
-        else if(!n)e=ECONNRESET;
-        else if(errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR)e=errno;
-    }
-    int closed=flush_close(f);
-    if(!e && !io && !closed)received=total;
-    return e?e:io?io:closed;
-}
-int sidecar_stream_out(int peer,const char *path,uint64_t size,int idle_ms) {
-    FILE *f=fopen(path,"rb");if(!f)return errno;
-    int e=0;
-    while(!e && size) {
-        size_t want=size<STREAM_CHUNK?(size_t)size:STREAM_CHUNK;
-        if(fread(stream_buf,1,want,f)!=want){e=ferror(f)?EIO:ESTALE;break;}
-        e=send_all(peer,stream_buf,want,idle_ms);size-=want;
-    }
-    fclose(f);return e;
-}

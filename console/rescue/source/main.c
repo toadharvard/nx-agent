@@ -10,6 +10,7 @@
 #include "bridge.h"
 #include "launch_job.h"
 #include "boot_guard.h"
+#include "bulk.h"
 #include "stream.h"
 static unsigned char launch_stack[0x4000] __attribute__((aligned(4096)));
 static Thread launch_thread;
@@ -20,9 +21,7 @@ static unsigned char tx[2][4096] __attribute__((aligned(4096)));
 static unsigned char bridge_stack[0x10000] __attribute__((aligned(4096)));
 static Thread bridge_thread;
 static bool boot_recovered;
-static unsigned char stream_buf[0x20000] __attribute__((aligned(4096)));
-static unsigned stream_direction;
-static uint64_t stream_left,stream_total;
+static unsigned char bulk_buf[0x20000] __attribute__((aligned(4096)));
 u32 __nx_applet_type=AppletType_None;
 u32 __nx_fs_num_sessions=1;
 static Result init_result;static bool sm_ready,fs_ready,sd_ready;
@@ -43,37 +42,37 @@ static void log_stage(const char *stage,Result rc){
     FILE *f=fopen(path,"a");
     if(f){fprintf(f,"tick=%llu stage=%s result=%08X\n",(unsigned long long)armGetSystemTick(),stage,rc);fclose(f);}
 }
-/* A Worker reply carrying STREAM_MAGIC announces raw bytes after it has been delivered to the host. */
-static void stream_note(const unsigned char *tx){
-    uint32_t h[4];memcpy(h,tx,16);stream_direction=0;
-    if(h[1] || h[3]!=STREAM_MAGIC || h[2]<16)return;
-    uint32_t direction;uint64_t size;memcpy(&direction,tx+16,4);memcpy(&size,tx+24,8);
-    if((direction==STREAM_IN || direction==STREAM_OUT) && size<=STREAM_MAX){stream_direction=direction;stream_left=stream_total=size;}
-}
 static bool usb_configured(void){UsbState state;return R_SUCCEEDED(usbDsGetState(&state)) && state==UsbState_Configured;}
-/* Exactly stream_total bytes always cross USB so the frame stream stays in step: inbound bytes are drained
- * after a Worker failure, outbound bytes are zero-filled (the host checks SHA-256). Returns true if tx holds
- * a final frame to send. */
-static bool stream_pump(unsigned char *tx){
-    int e=0;unsigned direction=stream_direction;stream_direction=0;
-    log_stage(direction==STREAM_IN?"stream-in":"stream-out",0);
-    while(stream_left){
-        size_t want=stream_left<sizeof(stream_buf)?(size_t)stream_left:sizeof(stream_buf),got=0;
+/* After an op80/81 reply exactly bulk_size raw bytes cross the Rescue channel in large transfers, directly
+ * between USB and the SD card. Inbound bytes are always consumed (a write error is reported in the final
+ * frame); outbound bytes are zero-filled after a read error (the host checks SHA-256). Returns true if tx
+ * holds the final frame of an upload. */
+static bool bulk_pump(unsigned char *tx){
+    unsigned direction=bulk_direction;uint64_t left=bulk_size;bulk_direction=0;
+    u64 started=armGetSystemTick();int e=0;
+    while(left){
+        size_t want=left<sizeof(bulk_buf)?(size_t)left:sizeof(bulk_buf);
         if(direction==STREAM_IN){
-            got=usbCommsReadEx(stream_buf,want,0);
-            if(!got){if(!usb_configured()){e=EIO;break;}continue;}
-            if(!e)e=bridge_send(stream_buf,got,30000);
+            size_t got=usbCommsReadEx(bulk_buf,want,1);
+            if(!got){if(!usb_configured()){e=EIO;break;}svcSleepThread(1000000);continue;}
+            int w=bulk_write(bulk_buf,got);if(w && !e)e=w;
+            left-=got;
         }else{
-            if(!e)e=bridge_recv(stream_buf,want,&got,30000);
-            if(e){memset(stream_buf,0,want);got=want;}
-            if(!got)continue;
-            if(usbCommsWriteEx(stream_buf,got,0)!=got){e=EIO;break;}
+            long n=e?0:bulk_read(bulk_buf,want);
+            if(n<=0){if(!e)e=n<0?(int)-n:ESTALE;memset(bulk_buf,0,want);n=(long)want;}
+            if(usbCommsWriteEx(bulk_buf,(size_t)n,1)!=(size_t)n){e=EIO;break;}
+            left-=(uint64_t)n;
         }
-        stream_left-=got;
     }
-    log_stage(direction==STREAM_IN?"stream-in-end":"stream-out-end",e);
-    if(direction!=STREAM_IN)return false;
-    bridge_final(tx,e,60000+(int64_t)(stream_total/16000));
+    char tag[96];
+    snprintf(tag,sizeof(tag),"bulk-%s-%llu-bytes-%llu-ms",direction==STREAM_IN?"in":"out",(unsigned long long)bulk_size,
+             (unsigned long long)(armTicksToNs(armGetSystemTick()-started)/1000000ULL));
+    log_stage(tag,e);
+    if(direction!=STREAM_IN){bulk_close_read();return false;}
+    if(left){bulk_recover();if(!e)e=EIO;}
+    else{int c=bulk_commit();if(!e)e=c;}
+    memset(tx,0,4096);uint32_t h[]={RESCUE_MAGIC,(uint32_t)e,0,0};memcpy(tx,h,16);
+    log_stage("bulk-commit",e);
     return true;
 }
 static void channel_loop(unsigned channel,bool socket_ready){
@@ -96,14 +95,14 @@ static void channel_loop(unsigned channel,bool socket_ready){
             if(R_SUCCEEDED(rc) && size==4096){
                 requests++;
                 if(channel==1)rescue_dispatch(rx[channel],tx[channel]);
-                else if(socket_ready){bridge_exchange(rx[channel],tx[channel]);stream_note(tx[channel]);}
+                else if(socket_ready)bridge_exchange(rx[channel],tx[channel]);
                 else {memset(tx[channel],0,4096);uint32_t h[]={RESCUE_MAGIC,ENETDOWN,0,0};memcpy(tx[channel],h,16);}
                 state=2;
             }else state=0;
         }else if(state==2){rc=usbCommsWriteAsync(tx[channel],4096,&id,channel);if(R_SUCCEEDED(rc))state=3;}
         else if(state==3 && R_SUCCEEDED(eventWait(usbCommsGetWriteCompletionEvent(channel),0))){
             usbCommsGetWriteResult(id,&size,channel);
-            state=channel==0 && stream_direction && stream_pump(tx[channel])?2:0;
+            state=channel==1 && bulk_direction && bulk_pump(tx[channel])?2:0;
         }
         svcSleepThread(1000000);
     }
@@ -120,6 +119,7 @@ int main(void){
     /* Worker has no boot2.flag: only rescue starts it after recovery. */
     int recovery=sidecar_recover();boot_recovered=sd_ready && recovery==0;
     log_stage("transaction-recovery",recovery);
+    if(sd_ready)log_stage("bulk-recovery",bulk_recover());
     /* Boot guard runs before USB and before the features thread can start Worker. */
     if(sd_ready){uint32_t g[6];int guard=guard_boot();guard_status(g);
         char tag[64];snprintf(tag,sizeof(tag),"boot-guard-armed-%u-boots-%u-last-reverted-%u",g[0],g[1],g[5]);log_stage(tag,guard);}

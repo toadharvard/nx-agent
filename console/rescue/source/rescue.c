@@ -3,24 +3,28 @@
 #include "fileops.h"
 #include "launch_job.h"
 #include "boot_guard.h"
+#include "bulk.h"
+#include "stream.h"
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
 #include <stdatomic.h>
 
+unsigned bulk_direction;
+uint64_t bulk_size;
 static int stopped(void) {
     LaunchStatus job;launch_status(&job);if(job.state)return EBUSY;
     uint64_t pid=0;uint32_t rc=worker_query(&pid);
     return rc==PM_NOT_FOUND?0:(rc?(int)rc:EBUSY);
 }
 /* No worker-controlled code or synchronous IPC to the worker is used here.
- * features: 1 boot guard, 2 raw stream bridge on interface 0. */
+ * features: 1 boot guard, 4 direct bulk file transfers (ops 80-81). */
 void rescue_dispatch(const unsigned char *rx,unsigned char *tx) {
     uint32_t in[4],out[4]={RESCUE_MAGIC,0,0,0};memcpy(in,rx,16);
     memset(tx,0,4096);int e=0,n=0;unsigned op=in[1],len=in[2];
     if(in[0]!=RESCUE_MAGIC || len>4080)e=EINVAL;
     else if(op==6 && !len){uint32_t s[]={7,0x52534355,1,0};memcpy(tx+16,s,16);n=16;}
-    else if(op==9 && !len){uint32_t s[]={7,launch_ready()?1U:0U,16*1024*1024,0,sidecar_pending(),3};memcpy(tx+16,s,24);n=24;}
+    else if(op==9 && !len){uint32_t s[]={7,launch_ready()?1U:0U,16*1024*1024,0,sidecar_pending(),5};memcpy(tx+16,s,24);n=24;}
     else if(op==4 && !len){} /* Legacy client cleanup: local no-op. */
     else if(op==60 && !len){uint64_t pid=0;uint32_t rc=worker_query(&pid);memcpy(tx+16,&rc,4);memcpy(tx+20,&pid,8);n=12;}
     else if(op==61 && len==4 && !memcmp(rx+16,"STOP",4)){e=(int)worker_stop();if(e==PM_NOT_FOUND)e=0;}
@@ -60,6 +64,20 @@ void rescue_dispatch(const unsigned char *rx,unsigned char *tx) {
     else if(op==33){if(len<8)e=EINVAL;else {uint64_t off;memcpy(&off,rx+16,8);e=sidecar_chunk(off,rx+24,len-8);}}
     else if(op==34){if(len)e=EINVAL;else if((e=stopped())==0)e=sidecar_commit();}
     else if(op==35){if(len)e=EINVAL;else if((e=stopped())==0)e=sidecar_abort();}
+    else if(op==80){
+        if(len<=73 || len-73>=768 || rx[16]>1 || memchr(rx+89,0,len-73))e=EINVAL;
+        else {char path[768];uint64_t size;memcpy(&size,rx+17,8);memcpy(path,rx+89,len-73);path[len-73]=0;
+            e=sidecar_pending()?EBUSY:bulk_begin(path,size,rx+25,rx+57,rx[16]);
+            if(!e){uint32_t d[2]={STREAM_IN,0};memcpy(tx+16,d,8);memcpy(tx+24,&size,8);n=16;bulk_direction=STREAM_IN;bulk_size=size;}}
+    }
+    else if(op==81){
+        if(!len || len>=768 || memchr(rx+16,0,len))e=EINVAL;
+        else {char path[768];memcpy(path,rx+16,len);path[len]=0;uint64_t size=0;
+            e=bulk_open_read(path,&size,tx+32);
+            if(!e){uint32_t d[2]={STREAM_OUT,0};memcpy(tx+16,d,8);memcpy(tx+24,&size,8);n=48;bulk_direction=STREAM_OUT;bulk_size=size;}}
+    }
     else e=ENOSYS;
-    out[1]=(uint32_t)e;out[2]=e?0:(uint32_t)n;memcpy(tx,out,16);
+    out[1]=(uint32_t)e;out[2]=e?0:(uint32_t)n;
+    if(!e && (op==80 || op==81))out[3]=STREAM_MAGIC;
+    memcpy(tx,out,16);
 }
