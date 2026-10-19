@@ -130,15 +130,36 @@ channel and the SD card, without the Worker or its TCP bridge. Paths follow the 
 (same rules, checked by a console test). A reply whose reserved word 3 is `STREAM_MAGIC` (`0x4d525453`) carries
 `u32 direction, u32 0, u64 length` and is followed by exactly `length` raw bytes on interface 1.
 - `op80` (mutating) payload as `op32` (`u8 exists, u64 size, old_sha256[32], new_sha256[32], path`), up to
-  4 GiB - 1. Opens a journaled transaction (`config/usb-rescue/bulk-pending.bin`, temp `bulk.tmp`, sized up
-  front), replies `STREAM_IN`; the host sends `size` bytes, then reads one final frame whose error word is the
-  commit result: SHA-256 computed on the fly must match, the original must still match `old_sha256`, then the
-  target is replaced. `EBUSY` while another bulk or module transaction is open. A failed or interrupted
-  transfer leaves the original; Rescue repairs a half-done rename at boot.
+  4 GiB - 1. Opens a journaled transaction (`config/usb-rescue/bulk-pending.bin`, temp `bulk.tmp`, which grows
+  as the stream is written), replies `STREAM_IN`; the host sends `size` bytes, then reads one final frame whose
+  error word is the commit result: SHA-256 computed on the fly must match, the original must still match
+  `old_sha256`, then the target is replaced. `EBUSY` while another bulk or module transaction is open. A failed
+  or interrupted transfer leaves the original; Rescue repairs a half-done rename at boot.
 - `op81 path` (read-only) replies `STREAM_OUT` plus `sha256[32]`, then sends `size` bytes; the host checks the
   hash. After a local read error the remaining bytes are zero-filled.
+
+Before replying, the console hashes the whole file (`op81`) or hashes the old file (`op80`), so the host sizes
+the reply timeout by the file: `op81` 600 s, `op80` 30 s plus 1 ms per 10 kB of the new and old file. A fixed
+short timeout declares a large transfer lost while the console goes on to wait for the stream.
+
 Rescue always consumes or sends exactly `length` bytes so frames stay in step; a host that fails mid-upload pads
-with zeros (the commit then fails on the hash). The daemon uses these ops for `get`/`put` whenever Rescue
+with zeros (the commit then fails on the hash). An upload that receives no data for 30 s is rolled back at once
+(temp file closed and removed, journal cleared, stage `bulk-idle-rollback` in `status.txt`, final error
+`ETIMEDOUT`), but the remaining bytes are still consumed: usbComms cannot cancel the pending read.
+
+Recovering a Rescue channel left inside an upload stream (status shows `uncertain_streams: ["rescue"]`, Rescue
+commands time out, and on builds without the idle rollback `config/usb-rescue` lists with `EIO` because
+`bulk.tmp` is open):
+1. `nxctl daemon-stop`; make sure no host transfer is running.
+2. Open interface 1 (`UsbSocket(interface_number=1)`) and read late frames until 1 s of silence. A frame with
+   error 0 and word 3 = `STREAM_MAGIC` is the late `op80` reply: Rescue waits for `length` (u64 at offset 24)
+   bytes. If there is none, send `op6`: a normal reply means Rescue is idle and nothing is pending; no reply
+   means Rescue is inside the stream and took those 4096 bytes as data.
+3. Send the missing bytes as zeros on the bulk OUT endpoint. Every 4096-byte frame sent after the announcement
+   (including probes by the daemon while it reconnected) already counted as data.
+4. Read the final frame: error `EBADMSG` (77) means the hash check failed and the transaction rolled back; the
+   original file is untouched.
+5. `nxagentd --background`; `nxctl status` must show no `uncertain_streams`, and `config/usb-rescue` lists again. The daemon uses these ops for `get`/`put` whenever Rescue
 reports feature 4 (`"bulk_stream": false` in its config turns them off) and holds a sleep lease from 8 MiB.
 Existing ops 4, 17, 18, 32-35, 60-62, 64-66 unchanged.
 

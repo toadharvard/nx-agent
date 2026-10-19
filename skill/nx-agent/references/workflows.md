@@ -44,6 +44,13 @@ another owner is reported as `busy`. Host setup once: `brew install libmtp && nx
 Poll `nx_job_status` until `done`. The console reboots into Remote Hekate, exposes the SD over UMS, copies and
 verifies sha256, ejects, and boots HOS. Unlock the HOME screen afterwards.
 
+## Large transfer reported `uncertain`
+`get`/`put` of a big file returning `reply lost ... outcome unknown` with `nxctl status` showing
+`uncertain_streams: ["rescue"]` means Rescue may still be inside the upload stream. Never repeat the `put`, never
+kill the daemon while a transfer runs. Follow "Recovering a Rescue channel" in docs/PROTOCOL.md: stop the daemon,
+read late frames, send the missing bytes as zeros, read the final frame (`EBADMSG` = rolled back), start the
+daemon, then check `uncertain_streams` is empty before the next transfer.
+
 ## Worker not answering
 `nx_status` shows `worker_down`: wait 10 s (the daemon restarts it through Rescue), then `nx_status` again.
 If it stays down: `nx_console_update action=status`, then ask the human before `rollback`.
