@@ -28,8 +28,8 @@ saves, Nintendo, emuMMC and the nx-agent modules: `nx_list_dir`, `nx_read_file`,
 `nx_move_path`, `nx_delete_path`, `nx_make_dir`. Writes are transactional with SHA-256 readback; replaced and
 deleted files are copied to the host journal (`journal` in the result). Example, disable a kip:
 `nx_move_path source=sdmc:/atmosphere/kips/loader.kip dest=sdmc:/atmosphere/kips/loader.kip.disabled`.
-Files up to 4 GiB - 1 stream over USB in large blocks when `worker_features` lists `bulk_stream` (Rescue
-feature 2); otherwise writes go in 4 KiB frames (slow, 256 MiB limit). Large transfers hold a sleep lease, so
+Files up to 4 GiB - 1 go straight between USB and the SD card through Rescue (feature 4) like DBI does;
+without it writes use 4 KiB Worker frames (slow, 256 MiB limit). Transfers from 8 MiB hold a sleep lease, so
 the console does not fall asleep mid-copy. Kips and sysmodules change on the next boot. If `file_tree` is
 missing, update the Worker with
 `nx_console_update` (ask the human) or use one of the paths below.

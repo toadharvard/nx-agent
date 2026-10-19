@@ -129,24 +129,6 @@ class FakeConsole:
         if 36 <= op <= 39:
             return self.tree_op(op, data), b''
 
-        if op == 90:
-            size, = struct.unpack_from('<Q', data, 1)
-            self.stream = {'path': data[73:].decode(), 'size': size, 'sha': data[41:73]}
-            self.marker = STREAM_MAGIC
-
-            return 0, struct.pack('<IIQ', 1, 0, size)
-
-        if op == 91:
-            content = self.files.get(data.decode())
-
-            if content is None:
-                return 2, b''
-
-            self.stream = {'out': content}
-            self.marker = STREAM_MAGIC
-
-            return 0, struct.pack('<IIQ', 2, 0, len(content)) + hashlib.sha256(content).digest()
-
         if op == 32:
             self.tx = {'path': data[73:].decode(), 'data': bytearray()}
         elif op == 33:
@@ -276,6 +258,24 @@ class FakeConsole:
 
         if op == 9:
             return 0, struct.pack('<6I', self.rescue_version, self.launch_ready, 16 << 20, 0, 0, self.rescue_features)
+
+        if op == 80:
+            size, = struct.unpack_from('<Q', data, 1)
+            self.stream = {'path': data[73:].decode(), 'size': size, 'sha': data[41:73]}
+            self.marker = STREAM_MAGIC
+
+            return 0, struct.pack('<IIQ', 1, 0, size)
+
+        if op == 81:
+            content = self.files.get(data.decode())
+
+            if content is None:
+                return 2, b''
+
+            self.stream = {'out': content}
+            self.marker = STREAM_MAGIC
+
+            return 0, struct.pack('<IIQ', 2, 0, len(content)) + hashlib.sha256(content).digest()
 
         if op == 60:
             return 0, struct.pack('<IQ', 0 if self.worker_running else 0x20f, 0x55 if self.worker_running else 0)

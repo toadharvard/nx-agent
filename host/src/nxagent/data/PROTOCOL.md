@@ -26,10 +26,10 @@ Host rules:
 
 `op6` -> `u32[4] {7, 0xfffffffe, 0, command_count}` (version 7).
 `op9` -> `u32[6] {7, op_mask_legacy=0x3f, write_limit, 1000, transaction_pending, features}`
-(`write_limit` 4 GiB - 1 with `bulk_stream`, 256 MiB with `file_tree` only, 16 MiB before).
+(`write_limit` 256 MiB with `file_tree`, 16 MiB before; larger files go through the Rescue bulk ops).
 features bits: `1` rail pair, `2` sequences (op52), `4` R2C (op53), `8` wake alarm (op55),
 `16` wakes-at-power-change in sleep lease, `32` extended state (op54), `64` autohold, `128` power telemetry,
-`256` file tree (ops 36-39 and the whole-SD policy below), `512` bulk stream (ops 90-91).
+`256` file tree (ops 36-39 and the whole-SD policy below).
 
 Unchanged ops: 1-5 (debug relay), 7, 8, 16, 17, 18, 32-35 (transactional file write),
 43/44 (screenshot), 45 (application pid/title), 46 (`"REBOOT"`), 47 (boot2.flag rename),
@@ -119,26 +119,27 @@ short allow-list (`*.ini` in `atmosphere/config` and `config/4IFIR`, `hekate_ipl
 write transaction is pending. The host checks every step with a listing, copies deleted files to its journal
 first and never resends after a lost reply.
 
-### Bulk stream (feature `bulk_stream`, needs Rescue feature `2`)
-Large files bypass the 4 KiB request/reply frames. A Worker reply whose reserved word 3 is
-`STREAM_MAGIC` (`0x4d525453`, "STRM") carries `u32 direction, u32 0, u64 length` and switches the Rescue
-bridge to raw bytes for exactly `length` bytes; afterwards both sides return to frames.
-- `op90` (mutating) same payload as `op32` (`u8 exists, u64 size, old_sha256[32], new_sha256[32], path`);
-  opens the transaction and replies `STREAM_IN`. The host sends `size` raw bytes in large bulk transfers,
-  then reads one final frame: its error word is the commit result (SHA-256 checked, original replaced,
-  journal removed). A Worker write error keeps reading the stream and reports `ENOSPC`/`EIO` there.
-- `op91 path` (read-only) replies `STREAM_OUT` plus `sha256[32]`; the console then sends `size` raw bytes.
-  No final frame; the host checks the hash.
-Keeping in step: Rescue always moves exactly `length` bytes over USB. Inbound bytes are drained after a
-Worker or TCP failure and an error frame replaces the final reply; outbound bytes are zero-filled. If the
-host fails mid-upload it pads with zeros (the commit then fails on the hash); a USB disconnect ends the
-stream on the console. A host that lost an outbound stream discards the rest while draining.
-Streams of 8 MiB and more hold a 600 s sleep lease (op50) unless a session already does.
-
 ## Rescue v7 (iface 1)
 
 `op6` -> `u32[4] {7, 0x52534355, 1, 0}`; `op9` -> `u32[6] {7, launch_ready, 16 MiB, 0, pending,
-features}` features bit `1` boot guard, `2` raw stream bridge on interface 0.
+features}` features bit `1` boot guard, `4` direct bulk file transfers (ops 80-81).
+
+### Bulk file transfers (Rescue feature `4`)
+Large files move like in DBI or nxdumptool: raw bytes in 128 KiB USB transfers straight between the Rescue
+channel and the SD card, without the Worker or its TCP bridge. Paths follow the Worker `file_tree` policy
+(same rules, checked by a console test). A reply whose reserved word 3 is `STREAM_MAGIC` (`0x4d525453`) carries
+`u32 direction, u32 0, u64 length` and is followed by exactly `length` raw bytes on interface 1.
+- `op80` (mutating) payload as `op32` (`u8 exists, u64 size, old_sha256[32], new_sha256[32], path`), up to
+  4 GiB - 1. Opens a journaled transaction (`config/usb-rescue/bulk-pending.bin`, temp `bulk.tmp`, sized up
+  front), replies `STREAM_IN`; the host sends `size` bytes, then reads one final frame whose error word is the
+  commit result: SHA-256 computed on the fly must match, the original must still match `old_sha256`, then the
+  target is replaced. `EBUSY` while another bulk or module transaction is open. A failed or interrupted
+  transfer leaves the original; Rescue repairs a half-done rename at boot.
+- `op81 path` (read-only) replies `STREAM_OUT` plus `sha256[32]`, then sends `size` bytes; the host checks the
+  hash. After a local read error the remaining bytes are zero-filled.
+Rescue always consumes or sends exactly `length` bytes so frames stay in step; a host that fails mid-upload pads
+with zeros (the commit then fails on the hash). The daemon uses these ops for `get`/`put` whenever Rescue
+reports feature 4 (`"bulk_stream": false` in its config turns them off) and holds a sleep lease from 8 MiB.
 Existing ops 4, 17, 18, 32-35, 60-62, 64-66 unchanged.
 
 Boot guard journal `sdmc:/config/usb-rescue/boot-guard.bin`:
@@ -218,7 +219,7 @@ Besides the commands that mirror the CLI (`status`, `screen`, `press`, `seq`, `g
 
 - `wait_state {state, timeout}` - poll until the console is in `hos|hekate_remote|mtp|ums|absent`.
 - `ls`, `get`, `put`, `mv {source, dest}`, `rm {remote, recursive}` and `mkdir {remote, parents}` use the Worker
-  in `hos` (tree ops need `file_tree`) and `mtp_fs` in `mtp`.
+  in `hos` (tree ops need `file_tree`; `get`/`put` use the Rescue bulk ops when available) and `mtp_fs` in `mtp`.
 - `ums.put {files: [{remote, local}], hooks, wait}` - Remote Hekate UMS copy job, returns `job_id`.
 - `job.status {job_id?}` - progress of long jobs.
 - `console.update {action: status|install|promote|rollback, ...}` - Worker maintenance through Rescue.

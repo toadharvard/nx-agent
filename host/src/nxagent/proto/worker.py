@@ -18,17 +18,7 @@ BUTTONS.update(HOME=1 << 18, CAPTURE=1 << 19)
 LOG_ROOTS = ['atmosphere/crash_reports', 'atmosphere/fatal_reports', 'atmosphere/erpt_reports', 'atmosphere/binlogs', 'config/4IFIR']
 
 WRITE_LIMIT = 256 * 1024 * 1024
-STREAM_LIMIT = 0xFFFFFFFF
-BACKUP_LIMIT = 256 * 1024 * 1024
 
-
-class HashingSink:
-    def __init__(self, sink, digest):
-        self.sink, self.digest = sink, digest
-
-    def write(self, data):
-        self.digest.update(data)
-        self.sink.write(data)
 
 class Sidecar:
     @classmethod
@@ -117,53 +107,6 @@ class Sidecar:
 
     def mkdir(self, path):
         self.call(39, path.encode())
-
-    def get_stream(self, path, local):
-        payload = self.usb.stream_command(91, path.encode())
-        size, = struct.unpack_from('<Q', payload, 8)
-        expected = payload[16:48].hex()
-        digest = hashlib.sha256()
-        Path(local).parent.mkdir(parents=True, exist_ok=True)
-        with open(local, 'wb') as sink:
-            self.usb.read_stream(HashingSink(sink, digest), size)
-        if digest.hexdigest() != expected:
-            raise RuntimeError(f'Stream read of {path}: SHA-256 mismatch (console {expected}, got {digest.hexdigest()})')
-        return {'remote': path, 'local': str(local), 'bytes': size, 'sha256': expected, 'via': 'stream'}
-
-    def put_stream(self, path, local, create=False):
-        local = Path(local)
-        size = local.stat().st_size
-        if size > STREAM_LIMIT:
-            raise ValueError('Maximum streamed write is 4 GiB - 1 (FAT32)')
-        digest = hashlib.sha256()
-        with local.open('rb') as stream:
-            for block in iter(lambda: stream.read(1 << 20), b''):
-                digest.update(block)
-        run = paths.journal_dir() / f'sidecar-change-{time.time_ns()}'
-        run.mkdir(parents=True)
-        record = {'target': path, 'created': create, 'after_sha256': digest.hexdigest(), 'bytes': size,
-                  'via': 'stream', 'status': 'prepared'}
-        old_digest = bytes(32)
-        if not create:
-            old_size, old_digest = self.fingerprint(path)
-            record['before_sha256'] = old_digest.hex()
-            if old_size <= BACKUP_LIMIT:
-                self.get_stream(path, run / 'before.bin')
-            else:
-                record['before_skipped'] = f'{old_size} bytes is above the backup limit'
-        def save():
-            (run / 'manifest.json').write_text(json.dumps(record, indent=2))
-        save()
-        self.usb.stream_command(90, struct.pack('<BQ', not create, size) + old_digest + digest.digest() + path.encode())
-        record['status'] = 'streaming'; save()
-        with local.open('rb') as source:
-            self.usb.write_stream(source, size)
-        error = self.usb.read_frame(60000 + size // 16000)
-        if error:
-            record['status'] = f'console error 0x{error:x}'; save()
-            raise RuntimeError(f'Sidecar command 90: console error 0x{error:x}')
-        record['status'] = 'committed'; save()
-        return {'backup': str(run), **record}
 
     def put(self, path, content, create=False):
         if len(content) > WRITE_LIMIT:

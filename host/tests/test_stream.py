@@ -17,9 +17,8 @@ PATH = 'sdmc:/switch/game.nsp'
 
 class StreamDaemonTests(unittest.TestCase):
     def setUp(self):
-        self.daemon, self.console, self.tmp = make_daemon(config={'bulk_stream': True})
-        self.console.worker_features |= 256 | 512
-        self.console.rescue_features = 3
+        self.daemon, self.console, self.tmp = make_daemon()
+        self.console.rescue_features = 5
         journal = mock.patch('nxagent.paths.journal_dir', return_value=self.tmp / 'journal')
         journal.start()
         self.addCleanup(journal.stop)
@@ -30,21 +29,21 @@ class StreamDaemonTests(unittest.TestCase):
 
         return path
 
-    def ops(self):
-        return [c[1] for c in self.console.calls if c[0] == 'worker']
+    def ops(self, target='rescue'):
+        return [c[1] for c in self.console.calls if c[0] == target]
 
     def test_put_new_file_streams(self):
         result = self.daemon.put(PATH, self.local(b'x' * 100000), create=True)
         self.assertEqual(self.console.files[PATH], b'x' * 100000)
-        self.assertEqual(result['via'], 'stream')
-        self.assertIn(90, self.ops())
-        self.assertNotIn(33, self.ops())
+        self.assertEqual(result['via'], 'bulk')
+        self.assertIn(80, self.ops())
+        self.assertNotIn(33, self.ops('worker'))
 
     def test_overwrite_keeps_old_copy(self):
         self.console.files[PATH] = b'old'
         result = self.daemon.put(PATH, self.local(b'new'))
         self.assertEqual(self.console.files[PATH], b'new')
-        self.assertEqual((Path(result['backup']) / 'before.bin').read_bytes(), b'old')
+        self.assertEqual((Path(result['journal']) / 'before.bin').read_bytes(), b'old')
 
     def test_get_streams_and_checks_hash(self):
         self.console.files[PATH] = b'payload' * 1000
@@ -52,7 +51,7 @@ class StreamDaemonTests(unittest.TestCase):
         result = self.daemon.get(PATH, out)
         self.assertEqual(out.read_bytes(), b'payload' * 1000)
         self.assertEqual(result['sha256'], hashlib.sha256(b'payload' * 1000).hexdigest())
-        self.assertIn(91, self.ops())
+        self.assertIn(81, self.ops())
 
     def test_corrupted_stream_leaves_file(self):
         self.console.files[PATH] = b'old'
@@ -67,13 +66,13 @@ class StreamDaemonTests(unittest.TestCase):
         self.console.rescue_features = 1
         self.daemon.put(PATH, self.local(b'small'), create=True)
         self.assertEqual(self.console.files[PATH], b'small')
-        self.assertNotIn(90, self.ops())
-        self.assertIn(33, self.ops())
+        self.assertNotIn(80, self.ops())
+        self.assertIn(33, self.ops('worker'))
 
-    def test_stream_is_off_without_config(self):
-        self.daemon.config = {}
+    def test_config_can_turn_bulk_off(self):
+        self.daemon.config = {'bulk_stream': False}
         self.daemon.put(PATH, self.local(b'small'), create=True)
-        self.assertNotIn(90, self.ops())
+        self.assertNotIn(80, self.ops())
 
     def test_large_upload_holds_sleep_lease(self):
         with mock.patch('nxagent.ops.LEASE_FROM', 10):

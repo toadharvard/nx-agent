@@ -23,8 +23,8 @@ EXIT_CODES = {'ok': 0, 'absent': 2, 'worker_down': 3, 'uncertain': 4,
               'device_error': 5, 'busy': 6, 'invalid': 64}
 
 READ_ONLY = {
-    'worker': frozenset({6, 9, 16, 17, 18, 43, 44, 45, 48, 49, 54, 91}),
-    'rescue': frozenset({6, 9, 17, 18, 60, 65, 72}),
+    'worker': frozenset({6, 9, 16, 17, 18, 43, 44, 45, 48, 49, 54}),
+    'rescue': frozenset({6, 9, 17, 18, 60, 65, 72, 81}),
     'nyx': frozenset({1, 2, 3, 6, 12}),
 }
 MAX_READ_RETRIES = 3
@@ -34,7 +34,7 @@ ERRNO_NAMES = {1: 'EPERM', 2: 'ENOENT', 5: 'EIO', 13: 'EACCES', 16: 'EBUSY', 17:
                22: 'EINVAL', 28: 'ENOSPC', 71: 'EPROTO', 139: 'EOVERFLOW'}
 
 WORKER_FEATURES = {1: 'rail_pair', 2: 'sequences', 4: 'r2c', 8: 'wake_alarm',
-                   16: 'wake_on_power_change', 32: 'extended_state', 256: 'file_tree', 512: 'bulk_stream'}
+                   16: 'wake_on_power_change', 32: 'extended_state', 256: 'file_tree'}
 
 
 def is_read_only(target, ops):

@@ -226,7 +226,7 @@ async def nx_hekate_watchdog(seconds: int) -> dict:
 async def nx_write_file(path: str, content: str = '', local_path: str = '', create: bool = False,
                         content_base64: str = '') -> dict:
     """Write an SD file anywhere on the SD (including /switch and kips) except keys, saves, Nintendo, emuMMC and
-    the nx-agent modules; up to 4 GiB - 1 with bulk_stream (256 MiB in 4 KiB frames without it). Works in HOS
+    the nx-agent modules; up to 4 GiB - 1 through Rescue bulk transfers (256 MiB in 4 KiB frames without them). Works in HOS
     (Worker with file_tree) and in DBI MTP mode.
     Verified by SHA-256 readback; the replaced file is journaled on the host."""
     with tempfile.TemporaryDirectory() as tmp:
