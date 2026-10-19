@@ -4,6 +4,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from fakes import make_daemon
 
@@ -76,3 +77,25 @@ class CliExitCodes(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+
+
+class SetupTests(unittest.TestCase):
+    def test_builds_into_path_with_spaces_and_drops_old_helpers(self):
+        state = Path(tempfile.mkdtemp()) / 'Application Support' / 'nx-agent'
+        (state / 'bin').mkdir(parents=True)
+        (state / 'bin' / 'mtp_read').write_text('old')
+
+        def make(cmd):
+            out = Path(next(arg[4:] for arg in cmd if arg.startswith('OUT=')))
+            self.assertNotIn(' ', str(out))
+            (out / 'mtp_fs').write_text('new')
+
+            return mock.Mock(returncode=0)
+
+        with mock.patch('nxagent.paths.state_dir', return_value=state), \
+                mock.patch('subprocess.run', side_effect=make), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(switchctl.main(['setup', 'mtp']), 0)
+
+        self.assertEqual((state / 'bin' / 'mtp_fs').read_text(), 'new')
+        self.assertFalse((state / 'bin' / 'mtp_read').exists())
+

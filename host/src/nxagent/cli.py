@@ -4,6 +4,7 @@
 import argparse
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -372,19 +373,32 @@ def local_skill(args):
     return 0
 
 
+OBSOLETE_HELPERS = ('mtp_read', 'mtp_mailbox_submit')
+
+
 def local_setup(args):
+    import shutil
     import subprocess
 
     from . import paths
 
     native = Path(__file__).resolve().parent / 'data' / 'native'
     out = paths.ensure(paths.state_dir() / 'bin')
-    result = subprocess.run(['make', '-C', str(native), f'OUT={out}'])
 
-    if result.returncode == 0:
-        print(f'MTP helper mtp_fs built into {out}')
+    with tempfile.TemporaryDirectory(prefix='nxagent-build-') as build:
+        result = subprocess.run(['make', '-C', str(native), f'OUT={build}'])
 
-    return result.returncode
+        if result.returncode:
+            return result.returncode
+
+        shutil.copy2(Path(build) / 'mtp_fs', out / 'mtp_fs')
+
+    for name in OBSOLETE_HELPERS:
+        (out / name).unlink(missing_ok=True)
+
+    print(f'MTP helper mtp_fs built into {out}')
+
+    return 0
 
 
 LOCAL = {'install': local_install, 'skill': local_skill, 'setup': local_setup}
