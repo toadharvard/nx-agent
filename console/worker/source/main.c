@@ -56,6 +56,18 @@ static int read_log(unsigned op,unsigned len,int *error) {
     else {n=fread(tx+16,1,4080,f);if(ferror(f))*error=EIO;}
     fclose(f);return n;
 }
+static int path_arg(unsigned offset,unsigned len,char out[768]) {
+    if(!len || len>=768 || memchr(rx+16+offset,0,len))return EINVAL;
+    memcpy(out,rx+16+offset,len);out[len]=0;return 0;
+}
+static int tree_op(unsigned op,unsigned len) {
+    char from[768],to[768];
+    if(op!=36)return path_arg(0,len,from)?EINVAL:op==37?sidecar_unlink(from):op==38?sidecar_rmdir(from):sidecar_mkdir(from);
+    unsigned char *sep=len?memchr(rx+16,0,len):NULL;
+    unsigned a=sep?(unsigned)(sep-(rx+16)):0;
+    if(!a || path_arg(0,a,from) || path_arg(a+1,len-a-1,to))return EINVAL;
+    return sidecar_rename(from,to);
+}
 static void dispatch(void) {
     unsigned *in=(unsigned *)rx, *out=(unsigned *)tx;
     memset(tx,0,sizeof(tx)); out[0]=0x31425255;
@@ -67,8 +79,8 @@ static void dispatch(void) {
         unsigned info[]={7,0xfffffffeU,0,atomic_load(&commands)};
         memcpy(tx+16,info,sizeof(info));n=sizeof(info);
     } else if(op==9) {
-        /* features: rail pair, sequences, R2C, wake alarm, wakes-at-power-change, extended state, autohold, power telemetry. */
-        unsigned info[]={7,0x3f,16*1024*1024,1000,sidecar_pending(),255};
+        /* features: rail pair, sequences, R2C, wake alarm, wakes-at-power-change, extended state, autohold, power telemetry, file tree ops. */
+        unsigned info[]={7,0x3f,256*1024*1024,1000,sidecar_pending(),511};
         memcpy(tx+16,info,sizeof(info));n=sizeof(info);
     } else if(op>=40 && op<=62) n=sidecar_control(op,rx+16,len,tx+16,&error);
     else if(op==18) {
@@ -88,7 +100,8 @@ static void dispatch(void) {
     } else if(op==33) {
         if(len<8)error=EINVAL;
         else {uint64_t offset;memcpy(&offset,rx+16,8);error=sidecar_chunk(offset,rx+24,len-8);}
-    } else if(op==34) {error=len?EINVAL:sidecar_commit();}
+    } else if(op>=36 && op<=39) {error=tree_op(op,len);}
+    else if(op==34) {error=len?EINVAL:sidecar_commit();}
     else if(op==35) {error=len?EINVAL:sidecar_abort();}
     else if(op==7) {if(sidecar_pending())error=EBUSY;else shutdown_requested=true;}
     else if(op==8) {error=EACCES;} else if(op==16 || op==17) n=read_log(op,len,&error);

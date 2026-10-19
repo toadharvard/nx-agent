@@ -20,7 +20,7 @@ typedef SHA256_CTX Sha256Context;
 #define JOURNAL BASE "/pending.bin"
 #define TEMP BASE "/upload.tmp"
 #define BACKUP BASE "/previous.bin"
-#define LIMIT (16*1024*1024ULL)
+#define LIMIT (256*1024*1024ULL)
 /* One recoverable transaction. Host archives previous content before BEGIN.
  * The persistent journal protects the rename gap on FAT; this is not a claim
  * of power-loss atomicity of the SD controller or filesystem itself. */
@@ -37,37 +37,64 @@ static bool active;
 static bool under(const char *path, const char *root) {
     size_t n=strlen(root);return !strncmp(path,root,n) && (!path[n] || path[n]=='/');
 }
-bool sidecar_path(const char *p, bool write) {
+/* Whole SD except user secrets and data, the transaction area and the Worker/Rescue images. */
+static const char *const PROTECTED[]={"sdmc:/config/usb-rescue","sdmc:/config/usb-sidecar",
+    "sdmc:/atmosphere/contents/420000000000d06b","sdmc:/atmosphere/contents/420000000000d06c"};
+static bool lowercase(const char *p,char lower[768]) {
     if(!p || strlen(p)>=768 || strncmp(p,"sdmc:/",6) || strstr(p,"..") ||
        strchr(p,'\\') || strstr(p,"//") || strchr(p+6,':'))return false;
     for(const char *s=p;*s;s++)if((unsigned char)*s<32)return false;
-    char lower[768];size_t k=0;
+    size_t k=0;
     for(;p[k];k++)lower[k]=(char)tolower((unsigned char)p[k]);
     lower[k]=0;
-    if(strstr(lower,".keys") || strstr(lower,"/automatic_backups") || strstr(lower,"/saves") ||
-       strstr(lower,"/backup") || strstr(lower,"/emummc") || strstr(lower,"/nintendo"))return false;
-    if(write && (under(lower,"sdmc:/config/usb-rescue") ||
-        under(lower,"sdmc:/atmosphere/contents/420000000000d06b") ||
-        under(lower,"sdmc:/atmosphere/contents/420000000000d06c")))return false;
-    if(under(p,BASE))return !write;
-    if(!write)return under(p,"sdmc:/atmosphere") || under(p,"sdmc:/config") ||
-        under(p,"sdmc:/SaltySD") || under(p,"sdmc:/switch") || under(p,"sdmc:/bootloader");
-    size_t n=strlen(p);
-    if(under(p,"sdmc:/atmosphere/config") || under(p,"sdmc:/config/4IFIR"))
-        return n>4 && !strcmp(p+n-4,".ini");
-    if(!strcmp(p,"sdmc:/SaltySD/exceptions.txt"))return true;
-    if(!strcmp(p,"sdmc:/bootloader/hekate_ipl.ini") || !strcmp(p,"sdmc:/bootloader/payloads/Remote-Hekate.bin"))return true;
-    /* Files directly inside bootloader/remote only. */
-    const char *remote="sdmc:/bootloader/remote/";size_t m=strlen(remote);
-    if(!strncmp(p,remote,m))return n>m && !strchr(p+m,'/') && strcmp(p+m,".");
-
-    /* Exactly a title ID and flags/boot2.flag, no arbitrary content deletion. */
-    const char *root="sdmc:/atmosphere/contents/";size_t r=strlen(root);
-    if(!strncmp(p,root,r) && n==r+16+17 && !strcmp(p+r+16,"/flags/boot2.flag")) {
-        for(size_t i=r;i<r+16;i++)if(!strchr("0123456789abcdefABCDEF",p[i]))return false;
-        return true;
-    }
-    return false;
+    return !(strstr(lower,".keys") || strstr(lower,"/automatic_backups") || strstr(lower,"/saves") ||
+       strstr(lower,"/backup") || strstr(lower,"/emummc") || strstr(lower,"/nintendo"));
+}
+bool sidecar_path(const char *p, bool write) {
+    char lower[768];
+    if(!lowercase(p,lower))return false;
+    if(under(lower,BASE))return !write;
+    if(!write)return true;
+    size_t n=strlen(lower);
+    if(n<=6 || lower[n-1]=='/')return false;
+    for(size_t i=0;i<sizeof(PROTECTED)/sizeof(*PROTECTED);i++)if(under(lower,PROTECTED[i]))return false;
+    return true;
+}
+/* Renaming or deleting must not move or remove a protected directory with its parent. */
+bool sidecar_tree_path(const char *p) {
+    char lower[768];
+    if(!sidecar_path(p,true) || !lowercase(p,lower))return false;
+    for(size_t i=0;i<sizeof(PROTECTED)/sizeof(*PROTECTED);i++)if(under(PROTECTED[i],lower))return false;
+    return true;
+}
+int sidecar_rename(const char *from,const char *to) {
+    if(!sidecar_tree_path(from) || !sidecar_tree_path(to))return EACCES;
+    if(sidecar_pending())return EBUSY;
+    struct stat st;
+    if(stat(from,&st))return errno;
+    if(!stat(to,&st))return EEXIST;
+    if(errno!=ENOENT)return errno;
+    return rename(from,to)?errno:0;
+}
+int sidecar_unlink(const char *p) {
+    if(!sidecar_tree_path(p))return EACCES;
+    if(sidecar_pending())return EBUSY;
+    struct stat st;
+    if(stat(p,&st))return errno;
+    if(!S_ISREG(st.st_mode))return EISDIR;
+    return unlink(p)?errno:0;
+}
+int sidecar_rmdir(const char *p) {
+    if(!sidecar_tree_path(p))return EACCES;
+    if(sidecar_pending())return EBUSY;
+    struct stat st;
+    if(stat(p,&st))return errno;
+    if(!S_ISDIR(st.st_mode))return ENOTDIR;
+    return rmdir(p)?errno:0;
+}
+int sidecar_mkdir(const char *p) {
+    if(!sidecar_path(p,true))return EACCES;
+    return mkdir(p,0777)?errno:0;
 }
 int sidecar_hash(const char *path,unsigned char hash[32],uint64_t *size) {
     FILE *f=fopen(path,"rb");if(!f)return errno;

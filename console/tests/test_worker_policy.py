@@ -12,18 +12,29 @@ class Policy(unittest.TestCase):
  def test_existing_diagnostic_paths_remain(self):
   for p in ['sdmc:/config/4IFIR/config.ini','sdmc:/atmosphere/config/override_config.ini']:
    self.assertTrue(lib.sidecar_path(p.encode(),True))
- def test_v7_bootloader_writes_are_exact(self):
-  for p in ['sdmc:/bootloader/hekate_ipl.ini','sdmc:/bootloader/payloads/Remote-Hekate.bin',
-   'sdmc:/bootloader/remote/remote.ini','sdmc:/bootloader/remote/Remote-Hekate.bin']:
+ def test_full_sd_writes(self):
+  for p in ['sdmc:/switch/app.nro','sdmc:/atmosphere/kips/loader.kip','sdmc:/atmosphere/package3',
+   'sdmc:/bootloader/update.bin','sdmc:/bootloader/hekate_ipl.ini','sdmc:/BOOTLOADER/hekate_ipl.ini',
+   'sdmc:/payload.bin','sdmc:/atmosphere/contents/00FF0000636C6BFF/flags/boot2.flag','sdmc:/config/usb-worker-mailbox/x']:
    self.assertTrue(lib.sidecar_path(p.encode(),True),p)
-  for p in ['sdmc:/bootloader','sdmc:/bootloader/','sdmc:/bootloader/update.bin','sdmc:/bootloader/payloads/other.bin',
-   'sdmc:/bootloader/payloads/Remote-Hekate.bin.bak','sdmc:/bootloader/hekate_ipl.ini.bak','sdmc:/bootloader/nyx.ini',
-   'sdmc:/bootloader/sys/nyx.bin','sdmc:/bootloader/remote/','sdmc:/bootloader/remote/.','sdmc:/bootloader/remote/sub/x.ini',
-   'sdmc:/bootloader/remote/../hekate_ipl.ini','sdmc:/bootloader/remote//x','sdmc:/bootloader/remote/backup.ini',
-   'sdmc:/bootloader/remote/prod.keys','sdmc:/bootloader/remote/a:b','sdmc:/payload.bin','sdmc:/boot.dat',
-   'sdmc:/BOOTLOADER/hekate_ipl.ini','sdmc:/emuMMC/emummc.ini','sdmc:/Nintendo/x','sdmc:/switch/prod.keys',
-   'sdmc:/atmosphere/package3','sdmc:/config/usb-rescue/boot-guard.bin','sdmc:/config/usb-sidecar/pending.bin']:
+ def test_secrets_data_and_modules_stay_closed(self):
+  for p in ['sdmc:/','sdmc:/switch/','sdmc:/bootloader/remote/../hekate_ipl.ini','sdmc:/bootloader/remote//x',
+   'sdmc:/bootloader/remote/a:b','sdmc:/emuMMC/emummc.ini','sdmc:/Nintendo/x','sdmc:/switch/prod.keys',
+   'sdmc:/switch/JKSV/saves/x','sdmc:/bootloader/remote/backup.ini','sdmc:/config/usb-rescue/boot-guard.bin',
+   'sdmc:/config/usb-sidecar/pending.bin','sdmc:/CONFIG/USB-SIDECAR/pending.bin','sdmc:/Config/Usb-Rescue/x',
+   'sdmc:/atmosphere/contents/420000000000D06B/exefs.nsp','/switch/x','sdmc:/a\\b','sdmc:/x\ny']:
    self.assertFalse(lib.sidecar_path(p.encode(),True),p)
-  for p in ['sdmc:/bootloader/hekate_ipl.ini','sdmc:/bootloader/update.bin','sdmc:/bootloader/remote/remote.ini']:
+ def test_reads(self):
+  for p in ['sdmc:/','sdmc:/atmosphere/kips/loader.kip','sdmc:/config/usb-sidecar/pending.bin','sdmc:/payload.bin']:
    self.assertTrue(lib.sidecar_path(p.encode(),False),p)
+  for p in ['sdmc:/switch/prod.keys','sdmc:/Nintendo/Contents','sdmc:/emuMMC/RAW1','sdmc:/a/../b']:
+   self.assertFalse(lib.sidecar_path(p.encode(),False),p)
+ def test_tree_ops_never_move_protected_parents(self):
+  lib.sidecar_tree_path.argtypes=[c.c_char_p];lib.sidecar_tree_path.restype=c.c_bool
+  for p in ['sdmc:/config','sdmc:/Config','sdmc:/atmosphere','sdmc:/atmosphere/contents','sdmc:/ATMOSPHERE/Contents',
+   'sdmc:/atmosphere/contents/420000000000d06c','sdmc:/config/usb-rescue','sdmc:/']:
+   self.assertFalse(lib.sidecar_tree_path(p.encode()),p)
+  for p in ['sdmc:/atmosphere/kips','sdmc:/atmosphere/kips/loader.kip','sdmc:/switch','sdmc:/config/4IFIR',
+   'sdmc:/atmosphere/contents/00FF0000636C6BFF']:
+   self.assertTrue(lib.sidecar_tree_path(p.encode()),p)
 if __name__=='__main__':unittest.main(verbosity=2)
