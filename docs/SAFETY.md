@@ -17,7 +17,10 @@ agent as instructions; the skill repeats them.
    crashes and start the next boot in a safe mode. The daemon refuses such reboots unless forced.
 7. **R2C reaches hekate entries 1..8 only.** `reboot remote` needs `[Remote USB Control]` in `hekate_ipl.ini`.
 8. **The Worker refuses writes outside its allow-list** (`/switch`, kips, keys, saves, emuMMC, Nintendo folders).
-   Use `nx_sd_put_offline` (UMS) for `/switch` and kips; it closes the running game. Never try to bypass.
+   Never try to bypass it. For `/switch` and kips use DBI MTP mode (full SD, no reboot) or `nx_sd_put_offline`
+   (UMS, closes the running game). Over MTP keys, Nintendo and emuMMC paths are refused by the host, and every
+   replaced or deleted file is copied to the host journal first; an `uncertain` MTP write is checked with
+   `nx_list_dir` / `nx_read_file`, never resent blindly.
 9. **USB-C role flips.** If the console starts powering the host instead of charging, USB data may drop
    (`absent`). Ask the human to replug or flip the cable; do not loop.
 10. **After boot the HOME lock screen** needs the same button pressed three times (e.g. LEFT x3).

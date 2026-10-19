@@ -16,7 +16,9 @@ The console is real hardware with the user's data on it. Work in small observed 
 - After an `uncertain` error never repeat a mutation; verify with read-only tools first.
 - No sleep or power-button emulation exists. For sleep tests ask the human to press POWER.
 - No reboot within 60 s after boot (the daemon refuses unless forced).
-- `/switch`, kips and other non-allow-listed paths: only `nx_sd_put_offline` (closes the game). Never bypass.
+- `/switch`, kips and other non-allow-listed paths: in HOS the Worker refuses them, never bypass it. Use DBI MTP
+  mode (state `mtp`, full SD without reboot: `nx_write_file`, `nx_move_path`, `nx_delete_path`, `nx_make_dir`)
+  or `nx_sd_put_offline` (UMS, closes the game).
 - Keys, saves, NAND, emuMMC: never read or copy them.
 - `absent` with the cable plugged in: likely a USB-C role flip or sleep. Ask the human to replug or wake it.
 - Ask the human before: first install, `poweroff`, `nx_console_update install`, editing `hekate_ipl.ini`,
@@ -24,8 +26,10 @@ The console is real hardware with the user's data on it. Work in small observed 
 
 ## Recipes
 See `references/workflows.md` for: unlocking the HOME screen, launching a game, walking a character,
-closing an app, editing an ini, copying to `/switch`, recovering a dead Worker, Remote Hekate navigation.
+closing an app, editing an ini, full SD access over MTP, copying to `/switch`, recovering a dead Worker,
+Remote Hekate navigation.
 
 ## CLI equivalents
-`nxctl status | screen out.jpg | press A | seq steps.json | get REMOTE LOCAL | put REMOTE LOCAL |
-reboot-to remote | hekate launch | ums-put REMOTE=LOCAL | console status | events -f`
+`nxctl status | screen out.jpg | press A | seq steps.json | ls REMOTE | get REMOTE LOCAL | put REMOTE LOCAL |
+mv SRC DST | rm [-r] REMOTE | mkdir [-p] REMOTE | reboot-to remote | hekate launch | ums-put REMOTE=LOCAL |
+console status | events -f`

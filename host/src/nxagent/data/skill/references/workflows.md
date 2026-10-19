@@ -22,7 +22,18 @@ Hold `R` while pressing A on a game tile to open the homebrew menu in title-take
 `nx_read_file` -> modify -> `nx_write_file` (allow-listed `.ini` only) -> `nx_read_file` to verify.
 Keep the original text in the conversation so it can be restored.
 
-## Copy to /switch or replace a kip
+## Full SD access over MTP (DBI)
+In DBI choose "Run MTP responder"; `nx_status` then reports `mtp`. While DBI runs, file tools work on the whole SD
+card (except keys, Nintendo and emuMMC) without a reboot: `nx_list_dir`, `nx_read_file`, `nx_write_file`,
+`nx_move_path`, `nx_delete_path`, `nx_make_dir`. Buttons still work through the Worker mailbox. Writes are
+verified by SHA-256 readback, overwrites swap in a verified temporary file, and replaced or deleted files are
+copied to the host journal first (the result has a `journal` path). Example, disable a kip:
+`nx_move_path source=sdmc:/atmosphere/kips/loader.kip dest=sdmc:/atmosphere/kips/loader.kip.disabled`.
+Kips and sysmodules take effect on the next boot. Leave DBI (B, then HOME) to return to `hos`.
+On macOS the daemon releases the MTP interface from Image Capture (`ptpcamerad`); if another program holds it
+the tools return `busy` with its name. One-time host setup: `brew install libmtp && nxctl setup mtp`.
+
+## Copy to /switch or replace a kip without DBI
 `nx_sd_put_offline files=[{"local": "/abs/path", "remote": "switch/.packages/x/config.ini"}]` returns a job id.
 Poll `nx_job_status` until `done`. The console reboots into Remote Hekate, exposes the SD over UMS, copies and
 verifies sha256, ejects, and boots HOS. Unlock the HOME screen afterwards.

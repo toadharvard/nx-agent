@@ -145,6 +145,34 @@ Any valid request restarts the countdown.
 - `op51` (HOME/POWER button emulation through hiddbg) is removed: on a Switch Lite it powered the console off
   instead of sleeping. It returns ENOSYS.
 
+## DBI MTP file access (USB 057e:201d)
+
+While DBI runs its MTP responder the sidecar interface is gone. The host talks to the console only through
+`mtp_fs` (`host/src/nxagent/data/native/mtp_fs.c`, built by `nxctl setup mtp`, needs libmtp). One request per
+line on stdin, fields separated by TAB; one JSON reply per line on stdout. The first line after start is
+`{"ok":true,"ready":true}` or `{"ok":false,"open":false,...}`.
+
+| Request | Meaning | Reply |
+|---|---|---|
+| `S` | storages | `storages: [{id, description, access, free, max}]` |
+| `C` | capabilities | `edit, move, copy` |
+| `L storage parent` | children (`parent` 4294967295 = storage root) | `entries: [{id, parent, storage, size, folder, name}]` |
+| `I id` | metadata | `object` |
+| `G id local` | download | `ok` |
+| `P storage parent name local` | upload a new file | `id` |
+| `W id local` | overwrite in place (edit extension, then truncate) | `ok` |
+| `R id name` | rename | `ok` |
+| `V id storage parent` | move | `ok` |
+| `D id` | delete | `ok` |
+| `M storage parent name` | create folder | `id` |
+
+Errors: `{"ok":false,"error":"...","stack":["libmtp error text", ...]}`. The host uses only the storage whose
+description is `N: SD Card`. Paths are `sdmc:/...`; `..`, the `Nintendo` and `emuMMC` top folders and `*.keys`
+are refused before any request. Overwrite: upload `.<name>.nxagent-new-<ns>`, verify SHA-256, rename the
+original to `.<name>.nxagent-old-<ns>`, rename the new file into place, delete the old one. If the device
+refuses renames, the original is deleted and the file uploaded directly (the original is already journaled).
+The Worker mailbox (`status.json`, `request.bin`) uses the same helper.
+
 ## Host daemon commands (JSON lines over the Unix socket)
 
 Request `{"cmd": "...", "args": {...}}`, reply `{"ok": true, "result": ...}` or
@@ -154,6 +182,8 @@ Besides the commands that mirror the CLI (`status`, `screen`, `press`, `seq`, `g
 `reboot_to`, `hekate.*`, `session.*`, `guard.*`, `bootflag`, `logs.collect`, `mtp.status`):
 
 - `wait_state {state, timeout}` - poll until the console is in `hos|hekate_remote|mtp|ums|absent`.
+- `ls`, `get`, `put` use the Worker in `hos` and `mtp_fs` in `mtp`. `mv {source, dest}`, `rm {remote, recursive}`
+  and `mkdir {remote, parents}` exist only in `mtp` (`invalid` otherwise).
 - `ums.put {files: [{remote, local}], hooks, wait}` - Remote Hekate UMS copy job, returns `job_id`.
 - `job.status {job_id?}` - progress of long jobs.
 - `console.update {action: status|install|promote|rollback, ...}` - Worker maintenance through Rescue.
