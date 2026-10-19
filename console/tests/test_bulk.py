@@ -95,6 +95,21 @@ class BulkTransactions(unittest.TestCase):
         self.assertEqual(self.sd('switch/app.nro').read_bytes(), b'old content')
         self.assertEqual(self.leftovers(), [])
 
+    def test_begin_does_not_preallocate(self):
+        self.assertEqual(rescue.bulk_begin(b'sdmc:/switch/big.nro', 64 << 20, ZERO, sha(b'x'), False), 0)
+        self.assertEqual(self.sd('config/usb-rescue/bulk.tmp').stat().st_size, 0)
+        rescue.bulk_recover()
+
+    def test_rollback_mid_stream_keeps_original(self):
+        self.sd('switch/app.nro').write_bytes(b'original')
+        self.assertEqual(rescue.bulk_begin(b'sdmc:/switch/app.nro', 6, sha(b'original'), sha(b'abcdef'), True), 0)
+        self.assertEqual(rescue.bulk_write(b'abc', 3), 0)
+        self.assertEqual(rescue.bulk_recover(), 0)
+        self.assertEqual(self.sd('switch/app.nro').read_bytes(), b'original')
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(rescue.bulk_write(b'def', 3), errno.EINVAL)
+        self.assertEqual(rescue.bulk_commit(), errno.EINVAL)
+
     def test_read_streams_whole_file_with_hash(self):
         data = os.urandom(300000)
         self.sd('switch/big.bin').write_bytes(data)

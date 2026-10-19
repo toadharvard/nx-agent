@@ -106,9 +106,10 @@ int bulk_begin(const char *path,uint64_t size,const unsigned char old_hash[32],c
     if(!e && fsync(fd))e=errno;
     if(close(fd) && !e)e=errno;
     if(e){unlink(JOURNAL);return e;}
+    /* No preallocation: on FAT, sizing a large file takes seconds before the reply goes out. The file grows
+     * as the stream is written and commit checks the final size. */
     temp_fd=open(TEMP,O_WRONLY|O_CREAT|O_TRUNC,0600);
     if(temp_fd<0){e=errno;unlink(JOURNAL);return e;}
-    if(size && ftruncate(temp_fd,(off_t)size)){e=errno?errno:EIO;close(temp_fd);temp_fd=-1;unlink(TEMP);unlink(JOURNAL);return e;}
     current=j;received=0;write_error=0;active=true;sha256ContextCreate(&running);
     return 0;
 }

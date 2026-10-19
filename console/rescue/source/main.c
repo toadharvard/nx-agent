@@ -45,17 +45,32 @@ static void log_stage(const char *stage,Result rc){
 static bool usb_configured(void){UsbState state;return R_SUCCEEDED(usbDsGetState(&state)) && state==UsbState_Configured;}
 /* After an op80/81 reply exactly bulk_size raw bytes cross the Rescue channel in large transfers, directly
  * between USB and the SD card. Inbound bytes are always consumed (a write error is reported in the final
- * frame); outbound bytes are zero-filled after a read error (the host checks SHA-256). Returns true if tx
- * holds the final frame of an upload. */
+ * frame); outbound bytes are zero-filled after a read error (the host checks SHA-256). An upload idle for
+ * BULK_IDLE_NS is rolled back at once (temp file closed and removed, journal cleared), but the announced
+ * bytes are still consumed: usbComms cannot cancel the pending read, and a host that recovers by sending
+ * the rest keeps the channel in step. Returns true if tx holds the final frame of an upload. */
+#define BULK_IDLE_NS 30000000000ULL
 static bool bulk_pump(unsigned char *tx){
     unsigned direction=bulk_direction;uint64_t left=bulk_size;bulk_direction=0;
-    u64 started=armGetSystemTick();int e=0;
+    u64 started=armGetSystemTick();int e=0;bool rolled_back=false;
     while(left){
         size_t want=left<sizeof(bulk_buf)?(size_t)left:sizeof(bulk_buf);
         if(direction==STREAM_IN){
-            size_t got=usbCommsReadEx(bulk_buf,want,1);
-            if(!got){if(!usb_configured()){e=EIO;break;}svcSleepThread(1000000);continue;}
-            int w=bulk_write(bulk_buf,got);if(w && !e)e=w;
+            u32 id=0,got=0;
+            if(R_FAILED(usbCommsReadAsync(bulk_buf,want,&id,1))){
+                if(!usb_configured()){e=EIO;break;}
+                svcSleepThread(1000000);continue;
+            }
+            u64 idle_from=armGetSystemTick();bool unplugged=false;
+            while(R_FAILED(eventWait(usbCommsGetReadCompletionEvent(1),1000000000ULL))){
+                if(!usb_configured()){unplugged=true;break;}
+                if(!rolled_back && armTicksToNs(armGetSystemTick()-idle_from)>=BULK_IDLE_NS){
+                    rolled_back=true;int r=bulk_recover();if(!e)e=ETIMEDOUT;log_stage("bulk-idle-rollback",r);
+                }
+            }
+            if(unplugged){e=EIO;break;}
+            if(R_FAILED(usbCommsGetReadResult(id,&got,1)) || !got)continue;
+            if(!rolled_back){int w=bulk_write(bulk_buf,got);if(w && !e)e=w;}
             left-=got;
         }else{
             long n=e?0:bulk_read(bulk_buf,want);
@@ -70,7 +85,7 @@ static bool bulk_pump(unsigned char *tx){
     log_stage(tag,e);
     if(direction!=STREAM_IN){bulk_close_read();return false;}
     if(left){bulk_recover();if(!e)e=EIO;}
-    else{int c=bulk_commit();if(!e)e=c;}
+    else if(!rolled_back){int c=bulk_commit();if(!e)e=c;}
     memset(tx,0,4096);uint32_t h[]={RESCUE_MAGIC,(uint32_t)e,0,0};memcpy(tx,h,16);
     log_stage("bulk-commit",e);
     return true;
