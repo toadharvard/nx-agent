@@ -17,7 +17,7 @@ PATH = 'sdmc:/switch/game.nsp'
 
 class StreamDaemonTests(unittest.TestCase):
     def setUp(self):
-        self.daemon, self.console, self.tmp = make_daemon()
+        self.daemon, self.console, self.tmp = make_daemon(config={'bulk_stream': True})
         self.console.worker_features |= 256 | 512
         self.console.rescue_features = 3
         journal = mock.patch('nxagent.paths.journal_dir', return_value=self.tmp / 'journal')
@@ -69,6 +69,11 @@ class StreamDaemonTests(unittest.TestCase):
         self.assertEqual(self.console.files[PATH], b'small')
         self.assertNotIn(90, self.ops())
         self.assertIn(33, self.ops())
+
+    def test_stream_is_off_without_config(self):
+        self.daemon.config = {}
+        self.daemon.put(PATH, self.local(b'small'), create=True)
+        self.assertNotIn(90, self.ops())
 
     def test_large_upload_holds_sleep_lease(self):
         with mock.patch('nxagent.ops.LEASE_FROM', 10):

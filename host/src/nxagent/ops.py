@@ -396,7 +396,7 @@ class Daemon(DaemonCore):
         return self.on_usb(self.tree('mkdir').mkdir, remote, parents)
 
     def stream_ready(self):
-        if not self.worker_has(BULK_STREAM):
+        if not self.config.get('bulk_stream') or not self.worker_has(BULK_STREAM):
             return False
 
         if self.rescue_caps is None:
