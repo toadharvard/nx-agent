@@ -521,3 +521,19 @@ class AppModules(unittest.TestCase):
         app = daemon.app()
         self.assertEqual(app['modules_result'], '0x2f01')
         self.assertNotIn('hbloader', app)
+
+
+class StickOnlySteps(unittest.TestCase):
+    def test_stick_only_step_encodes_empty_mask(self):
+        from nxagent.ops import pack_step
+
+        packed = pack_step('', 500, (20000, 0, 0, 0))
+        self.assertEqual(struct.unpack('<Q4iI', packed), (0, 20000, 0, 0, 0, 500))
+
+    def test_single_stick_only_sequence_reaches_worker_as_one_step(self):
+        daemon, console, _ = make_daemon()
+        daemon.sequence([{'buttons': '', 'lx': 20000, 'ms': 500}])
+        data = console.ops('worker', 52)[-1][2]
+        count, = struct.unpack_from('<I', data)
+        self.assertEqual(count, 1)
+        self.assertEqual(struct.unpack_from('<Q4iI', data, 4), (0, 20000, 0, 0, 0, 500))

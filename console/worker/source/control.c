@@ -102,7 +102,9 @@ static void close_pad(void) {
     if(hid_ready)hiddbgExit();
     pad_ready=left_ready=work_ready=hid_ready=false;
 }
-static void detach_all(void){seq_active=false;close_pad();}
+/* Detach (op42, idle lifetime) also ends an explicit fullkey request: the fragile FullKey3 device is used only
+ * by the client that asked for it, never inherited by later presses. */
+static void detach_all(void){seq_active=false;close_pad();controller_mode=0;}
 static Result hdls_begin(void) {
     Result rc=0;
     if(!hid_ready){rc=hiddbgInitialize();if(R_FAILED(rc))return rc;hid_ready=true;}
@@ -154,13 +156,15 @@ static Result open_fullkey(void) {
 }
 static Result open_mode(unsigned mode){return mode==2?open_fullkey():open_rail();}
 static Result open_pad(void){return pad_ready?0:open_mode(controller_mode);}
-/* Any SetHdlsState failure: detach, re-attach once, re-apply; still failing leaves the pad detached. */
+/* Any SetHdlsState failure: detach, re-attach once as the rail pair, re-apply; still failing leaves the pad
+ * detached. Recovery never re-attaches FullKey3: hid may already have dropped it, and its attach waits up to
+ * 1 s for an npad inside the USB request. */
 static Result apply_state(u64 buttons,const s32 sticks[4]) {
     Result rc=open_pad();if(R_FAILED(rc))return rc;
     rc=set_state(buttons,sticks);
     if(R_FAILED(rc)) {
-        unsigned mode=controller_mode;close_pad();
-        rc=open_mode(mode);
+        last_control_result=rc;close_pad();
+        rc=open_rail();
         if(R_SUCCEEDED(rc))rc=set_state(buttons,sticks);
         if(R_FAILED(rc))close_pad();
     }

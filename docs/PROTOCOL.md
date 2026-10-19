@@ -52,6 +52,10 @@ against the new Worker.
     If none appears or the first neutral `SetHdlsState` fails, it detaches and falls back to the
     rail pair. Reply then reports the mode actually active.
   - Reply: `u32 mode_active (0 rail pair, 2 fullkey), u32 fullkey_result (0 or failure Result)`.
+  - Fullkey lasts only until the pad is detached (`op42` or the idle lifetime); the next implicit attach is
+    the rail pair again. If `SetHdlsState` fails, Worker detaches and re-attaches the rail pair, never
+    FullKey3 (hid may have dropped it, and its attach waits up to 1 s inside the USB request). Fullkey with a
+    stick input is the suspected trigger of a whole-console fatal on HOS 21; use the rail pair for automation.
 - `op41` press (unchanged layout, 28 bytes): `u64 buttons, s32 lx, ly, rx, ry, u32 ms (1..1000)`.
   Rail-pair routing — right device: A,B,X,Y,RSTICK,R,ZR,PLUS,HOME(bit18), right stick;
   left device: LSTICK,L,ZL,MINUS,LEFT,UP,RIGHT,DOWN,CAPTURE(bit19), left stick.
