@@ -3,6 +3,8 @@ import struct, time, fcntl
 import usb.core, usb.util
 from .. import paths
 MAGIC=0x31425255
+STREAM_MAGIC=0x4d525453
+STREAM_CHUNK=1<<20
 class UsbSocket:
     def __init__(self,connect_gdb=False,interface_number=0):
         if interface_number not in (0,1):raise ValueError("Unknown sidecar interface")
@@ -66,8 +68,9 @@ class UsbSocket:
             self.faulted=True
             raise
         return error,(size if op==2 else reply[16:16+size]),retry
-    def drain_pending_replies(self, seconds=3, max_frames=64):
-        """Read only; discard old replies, then require a fresh status handshake.
+    def drain_pending_replies(self, seconds=10, max_frames=64):
+        """Read only; discard old replies and the rest of an interrupted outbound stream, then require a
+        fresh status handshake.
 
         This never replays the operation whose result was lost. In particular,
         it does not resolve whether an earlier mutation completed on the device.
@@ -77,16 +80,61 @@ class UsbSocket:
             raise ValueError('Invalid drain bounds')
         self.faulted=True  # close() must not send cleanup on this old stream.
         end=time.monotonic()+seconds;count=quiet=0
-        while time.monotonic()<end and count<max_frames:
-            try:reply=bytes(self.epin.read(4096,timeout=250))
+        while time.monotonic()<end:
+            try:reply=bytes(self.epin.read(STREAM_CHUNK,timeout=250))
             except usb.core.USBTimeoutError:
                 quiet+=1
                 if quiet==2:return count
                 continue
-            quiet=0;count+=1
-            if len(reply)!=4096 or struct.unpack_from('<I',reply)[0]!=MAGIC:
-                raise IOError('Malformed pending USB reply; state remains uncertain')
+            quiet=0
+            if len(reply)==4096 and struct.unpack_from('<I',reply)[0]==MAGIC:
+                count+=1
+                if count>max_frames:break
         raise TimeoutError('Pending USB replies did not quiesce within drain bounds')
+    def stream_command(self,op,data):
+        """Frame op that must answer with STREAM_MAGIC; returns the reply payload."""
+        error,payload,marker=self.command(op,data)
+        if error:raise RuntimeError(f'Sidecar command {op}: console error 0x{error:x}')
+        if marker!=STREAM_MAGIC:
+            self.faulted=True
+            raise IOError(f'Sidecar command {op}: no stream announced')
+        return payload
+    def write_stream(self,source,size,timeout=30000):
+        """Send exactly size bytes. On failure pad with zeros so the console stays in step."""
+        sent=0
+        try:
+            while sent<size:
+                chunk=source.read(min(STREAM_CHUNK,size-sent))
+                if not chunk:raise IOError('Local file shrank during upload')
+                if self.epout.write(chunk,timeout=timeout)!=len(chunk):raise IOError('Short USB stream write')
+                sent+=len(chunk)
+        except Exception:
+            self.faulted=True
+            try:
+                while sent<size:
+                    n=min(STREAM_CHUNK,size-sent);self.epout.write(bytes(n),timeout=timeout);sent+=n
+            except Exception:pass
+            raise
+    def read_stream(self,sink,size,timeout=30000):
+        got=0
+        try:
+            while got<size:
+                data=bytes(self.epin.read(min(STREAM_CHUNK,size-got),timeout=timeout))
+                if not data:raise IOError('Empty USB stream read')
+                sink.write(data);got+=len(data)
+        except Exception:
+            self.faulted=True
+            raise
+    def read_frame(self,timeout):
+        try:
+            reply=bytes(self.epin.read(4096,timeout=timeout))
+            if len(reply)!=4096:raise IOError('Short USB reply')
+            magic,error,size,_=struct.unpack_from('<4I',reply)
+            if magic!=MAGIC or size>4080:raise IOError('Malformed USB relay reply')
+        except Exception:
+            self.faulted=True
+            raise
+        return error
     def sendall(self,data):
         deadline=time.monotonic()+5
         while data:

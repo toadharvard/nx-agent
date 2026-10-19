@@ -9,6 +9,7 @@ import usb.core
 
 from nxagent.common import HOS, MTP, NYX, EventLog, OpError
 from nxagent.mtp import ROOT, MtpFiles, Session
+from nxagent.proto.transport import STREAM_MAGIC
 from nxagent.ops import Daemon
 
 FB_SIZE = 1280 * 720 * 4
@@ -56,6 +57,9 @@ class FakeConsole:
         self.nyx_version = 2
         self.tx = None
         self.job = 0
+        self.marker = 0
+        self.stream = None
+        self.corrupt_stream = False
 
     def fault(self, target, op, *actions):
         self.faults.setdefault((target, op), []).extend(actions)
@@ -124,6 +128,24 @@ class FakeConsole:
 
         if 36 <= op <= 39:
             return self.tree_op(op, data), b''
+
+        if op == 90:
+            size, = struct.unpack_from('<Q', data, 1)
+            self.stream = {'path': data[73:].decode(), 'size': size, 'sha': data[41:73]}
+            self.marker = STREAM_MAGIC
+
+            return 0, struct.pack('<IIQ', 1, 0, size)
+
+        if op == 91:
+            content = self.files.get(data.decode())
+
+            if content is None:
+                return 2, b''
+
+            self.stream = {'out': content}
+            self.marker = STREAM_MAGIC
+
+            return 0, struct.pack('<IIQ', 2, 0, len(content)) + hashlib.sha256(content).digest()
 
         if op == 32:
             self.tx = {'path': data[73:].decode(), 'data': bytearray()}
@@ -334,7 +356,45 @@ class FakeUsb:
 
             raise usb_timeout()
 
-        return error, payload, 0
+        marker, console.marker = console.marker, 0
+
+        return error, payload, marker
+
+    def stream_command(self, op, data):
+        error, payload, marker = self.command(op, data)
+
+        if error:
+            raise RuntimeError(f'Sidecar command {op}: console error 0x{error:x}')
+
+        if marker != STREAM_MAGIC:
+            self.faulted = True
+
+            raise IOError(f'Sidecar command {op}: no stream announced')
+
+        return payload
+
+    def write_stream(self, source, size):
+        data = bytearray(source.read(size))
+
+        if self.console.corrupt_stream and data:
+            data[0] ^= 0xff
+
+        self.console.stream['data'] = bytes(data)
+
+    def read_frame(self, timeout):
+        stream, self.console.stream = self.console.stream, None
+        data = stream['data']
+
+        if len(data) != stream['size'] or hashlib.sha256(data).digest() != stream['sha']:
+            return 74
+
+        self.console.files[stream['path']] = data
+
+        return 0
+
+    def read_stream(self, sink, size):
+        stream, self.console.stream = self.console.stream, None
+        sink.write(stream['out'][:size])
 
     def close(self):
         self.closed = True

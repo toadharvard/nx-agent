@@ -19,6 +19,9 @@ R2C_REASON = {'entry': 1, 'remote': 1, 'menu': 2, 'ums': 3}
 MAILBOX_LEN = {40: (0, 1), 41: (28,), 42: (0,), 45: (0,), 48: (0,), 49: (0,), 54: (0,), 50: (4,),
                52: (32, 60)}
 FB = (1280, 720, 4, 1280 * 720 * 4)
+BULK_STREAM = 512
+RESCUE_STREAM = 2
+LEASE_FROM = 8 * 1024 * 1024
 
 
 def parse_buttons(spec):
@@ -184,6 +187,9 @@ class Daemon(DaemonCore):
     def get(self, remote, local, limit=256 * 1024 * 1024):
         if self.mtp_mode():
             return self.on_usb(self.links.mtp.get, remote, local)
+
+        if self.stream_ready():
+            return self.run('worker', 'get stream', (91,), lambda c: c.sidecar.get_stream(remote, local))
 
         data = self.run('worker', 'get', (17,), lambda c: c.sidecar.get(remote, limit))
         Path(local).parent.mkdir(parents=True, exist_ok=True)
@@ -357,6 +363,9 @@ class Daemon(DaemonCore):
         if self.mtp_mode():
             return self.on_usb(self.links.mtp.put, remote, local, create)
 
+        if self.stream_ready():
+            return self.put_stream(remote, local, create)
+
         content = Path(local).read_bytes()
         sha = hashlib.sha256(content).hexdigest()
         started = time.time_ns()
@@ -385,6 +394,44 @@ class Daemon(DaemonCore):
 
     def mkdir(self, remote, parents=False):
         return self.on_usb(self.tree('mkdir').mkdir, remote, parents)
+
+    def stream_ready(self):
+        if not self.worker_has(BULK_STREAM):
+            return False
+
+        if self.rescue_caps is None:
+            try:
+                self.run('rescue', 'capabilities', (6, 9), lambda c: c.caps)
+            except OpError:
+                return False
+
+        return bool(self.rescue_caps and self.rescue_caps[5] & RESCUE_STREAM)
+
+    def put_stream(self, remote, local, create):
+        digest = hashlib.sha256()
+
+        with open(local, 'rb') as stream:
+            for block in iter(lambda: stream.read(1 << 20), b''):
+                digest.update(block)
+
+        lease = Path(local).stat().st_size >= LEASE_FROM and not self.session.status().get('active')
+
+        if lease:
+            self._try_lease(600)
+
+        try:
+            return self.run('worker', 'put stream', (18, 17, 91, 90),
+                            lambda c: c.sidecar.put_stream(remote, local, create),
+                            verify=lambda: self.verify_file(remote, digest.hexdigest()))
+        finally:
+            if lease:
+                self._try_lease(0)
+
+    def _try_lease(self, seconds):
+        try:
+            self.sleep_lease(seconds)
+        except OpError as error:
+            self.events.emit('stream_lease_failed', seconds=seconds, error=str(error))
 
     def _journal_since(self, started, remote):
         from . import paths
