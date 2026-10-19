@@ -93,8 +93,15 @@ def console_update(daemon, action, sha256=None, image=None, fallback_sha256=None
             log.record('worker_probe', _probe_worker(daemon))
             content = _verified(daemon, WORKER, sha256)
             exists = daemon.run('rescue', 'known-good exists', (18,), lambda c: c.rescue.good_exists())
-            log.record('write', daemon.run('rescue', 'write known-good', (17, 32, 33, 34, 18),
-                                           lambda c: c.rescue.put(GOOD, content, create=not exists)))
+            log.record('worker_stop', daemon.run('rescue', 'stop worker', (61, 60), lambda c: c.rescue.stop_worker()))
+
+            try:
+                log.record('write', daemon.run('rescue', 'write known-good', (17, 32, 33, 34, 18),
+                                               lambda c: c.rescue.put(GOOD, content, create=not exists)))
+            finally:
+                log.record('worker_start', daemon.run('rescue', 'start worker', (62, 64, 65, 66),
+                                                      lambda c: c.rescue.start_worker()))
+                log.record('worker_probe_after', _probe_worker(daemon))
         else:
             _replace(daemon, log, WORKER, _verified(daemon, GOOD, sha256))
     except BaseException as exc:
