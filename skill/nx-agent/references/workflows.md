@@ -44,6 +44,11 @@ another owner is reported as `busy`. Host setup once: `brew install libmtp && nx
 Poll `nx_job_status` until `done`. The console reboots into Remote Hekate, exposes the SD over UMS, copies and
 verifies sha256, ejects, and boots HOS. Unlock the HOME screen afterwards.
 
+## Homebrew or the real title?
+Title takeover runs hbloader (hbmenu, any NRO) under the program id of the game it took over, so `title_id`
+alone cannot tell them apart. `nx_app` / `nxctl app` add `"hbloader": true` with `"modules": 1` while
+hbloader or an NRO runs, `false` with several modules when the real title runs. Check it before pressing A.
+
 ## Large transfer reported `uncertain`
 `get`/`put` of a big file returning `reply lost ... outcome unknown` with `nxctl status` showing
 `uncertain_streams: ["rescue"]` means Rescue may still be inside the upload stream. Never repeat the `put`, never

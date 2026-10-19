@@ -17,6 +17,7 @@
     "hid:dbg",
     "caps:sc",
     "pm:dmnt",
+    "ldr:dmnt",
     "bpc",
     "idle:sys",
     "hid",

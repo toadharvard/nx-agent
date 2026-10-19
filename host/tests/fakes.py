@@ -48,6 +48,7 @@ class FakeConsole:
         self.faults = {}
         self.files, self.dirs = {}, {}
         self.lease = self.pad_ready = self.wake_alarm = self.seq_active = 0
+        self.app_modules = None
         self.commands = 10
         self.locked = set()
         self.drains, self.opens = collections.Counter(), collections.Counter()
@@ -156,7 +157,13 @@ class FakeConsole:
 
             return 0, self.jpeg[offset:offset + 4080]
         elif op == 45:
-            return 0, struct.pack('<IQQ', 0, 0x77, 0x0100000000001000)
+            reply = struct.pack('<IQQ', 0, 0x77, 0x0100000000001000)
+
+            if self.app_modules is not None:
+                module_rc, count = self.app_modules
+                reply += struct.pack('<Ii', module_rc, count) + bytes.fromhex('a0ebd533') + bytes(28)
+
+            return 0, reply
         elif op in (46, 53):
             self.reboot()
         elif op == 47:

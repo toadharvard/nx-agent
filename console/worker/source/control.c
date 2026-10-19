@@ -481,7 +481,13 @@ int sidecar_control(unsigned op,const unsigned char *data,unsigned len,unsigned 
             pmdmntExit();
         }
         /* Return result explicitly: no-application is not a broken USB link. */
-        memcpy(out,&rc,4);memcpy(out+4,&pid,8);memcpy(out+12,&tid,8);n=20;rc=0;
+        memcpy(out,&rc,4);memcpy(out+4,&pid,8);memcpy(out+12,&tid,8);n=20;
+        /* Loaded modules tell hbloader (one module, "hbl") from the title it took over (rtld, main, sdk...),
+         * which share the program id: {u32 result, s32 count, build_id[32] of the first module}. */
+        Result mrc=rc;s32 count=0;LoaderModuleInfo modules[16];memset(modules,0,sizeof(modules));
+        if(R_SUCCEEDED(mrc))mrc=ldrDmntInitialize();
+        if(R_SUCCEEDED(mrc)){mrc=ldrDmntGetProcessModuleInfo(pid,modules,16,&count);ldrDmntExit();}
+        memcpy(out+20,&mrc,4);memcpy(out+24,&count,4);memcpy(out+28,modules[0].build_id,32);n=60;rc=0;
     } else if(op==46) {
         if(len!=6 || memcmp(data,"REBOOT",6)){*error=EINVAL;return 0;}
         if(sidecar_pending() || reboot_pending){*error=EBUSY;return 0;}

@@ -32,9 +32,16 @@ features bits: `1` rail pair, `2` sequences (op52), `4` R2C (op53), `8` wake ala
 `256` file tree (ops 36-39 and the whole-SD policy below).
 
 Unchanged ops: 1-5 (debug relay), 7, 8, 16, 17, 18, 32-35 (transactional file write),
-43/44 (screenshot), 45 (application pid/title), 46 (`"REBOOT"`), 47 (boot2.flag rename),
+43/44 (screenshot), 46 (`"REBOOT"`), 47 (boot2.flag rename),
 48 (`u32[4] pad_ready, release_pending, last_control_result, reboot_pending` — exactly 16 bytes),
 49, 50, 51.
+
+`op45` application: `u32 result, u64 pid, u64 program_id`, then (Worker with `ldr:dmnt`) `u32 module_result,
+s32 module_count, build_id[32]` of the first loaded module (60 bytes). hbloader runs as one module (`hbl`) under
+the program id of the title it took over, the title itself loads rtld, main and SDK modules, so the host reports
+`"modules"`, `"first_module_build_id"` and `"hbloader": module_count == 1` (or `"modules_result"` if the loader
+query failed). Hosts must accept both the 20- and 60-byte forms; a host that requires exactly 20 bytes fails
+against the new Worker.
 
 ### Controller
 - `op40` attach, data len 0 or 1:

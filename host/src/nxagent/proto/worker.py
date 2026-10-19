@@ -66,9 +66,22 @@ class Sidecar:
         self.usb.close()
 
     def app(self):
-        rc, pid, title = struct.unpack('<IQQ', self.call(45))
-        return {'result': f'0x{rc:x}', 'pid': pid, 'title_id': f'{title:016x}',
-                'query_succeeded': rc == 0}
+        reply = self.call(45)
+        rc, pid, title = struct.unpack_from('<IQQ', reply)
+        app = {'result': f'0x{rc:x}', 'pid': pid, 'title_id': f'{title:016x}', 'query_succeeded': rc == 0}
+
+        if len(reply) >= 60 and rc == 0:
+            # hbloader runs as a single module ("hbl") under the program id of the title it took over;
+            # the real title loads rtld, main and its SDK modules.
+            module_rc, count = struct.unpack_from('<Ii', reply, 20)
+
+            if module_rc == 0:
+                app.update({'modules': count, 'first_module_build_id': reply[28:60].hex(),
+                            'hbloader': count == 1})
+            else:
+                app['modules_result'] = f'0x{module_rc:x}'
+
+        return app
 
     def list(self, path):
         entries = []

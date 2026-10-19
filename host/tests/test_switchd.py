@@ -494,3 +494,30 @@ class Mailbox(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+
+
+class AppModules(unittest.TestCase):
+    def test_old_worker_reply_has_no_module_fields(self):
+        daemon, _, _ = make_daemon()
+        app = daemon.app()
+        self.assertTrue(app['query_succeeded'])
+        self.assertNotIn('hbloader', app)
+
+    def test_single_module_is_hbloader(self):
+        daemon, console, _ = make_daemon()
+        console.app_modules = (0, 1)
+        app = daemon.app()
+        self.assertEqual((app['modules'], app['hbloader']), (1, True))
+        self.assertTrue(app['first_module_build_id'].startswith('a0ebd533'))
+
+    def test_title_modules_are_not_hbloader(self):
+        daemon, console, _ = make_daemon()
+        console.app_modules = (0, 5)
+        self.assertEqual((daemon.app()['modules'], daemon.app()['hbloader']), (5, False))
+
+    def test_loader_error_is_reported_without_guess(self):
+        daemon, console, _ = make_daemon()
+        console.app_modules = (0x2f01, 0)
+        app = daemon.app()
+        self.assertEqual(app['modules_result'], '0x2f01')
+        self.assertNotIn('hbloader', app)
