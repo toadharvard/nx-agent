@@ -17,3 +17,8 @@ jobs:
       - run: pip install -e './host[mcp,dev]'
       - run: ruff check host/src host/tests
       - run: python -m pytest -q host/tests
+      - if: runner.os == 'macOS'
+        run: brew install libmtp
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libmtp-dev
+      - run: make -C host/src/nxagent/data/native OUT="$RUNNER_TEMP" CFLAGS=-Werror
