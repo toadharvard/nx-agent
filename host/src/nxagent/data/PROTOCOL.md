@@ -25,9 +25,11 @@ Host rules:
 ## Worker v7 (iface 0)
 
 `op6` -> `u32[4] {7, 0xfffffffe, 0, command_count}` (version 7).
-`op9` -> `u32[6] {7, op_mask_legacy=0x3f, 16 MiB, 1000, transaction_pending, features}`
+`op9` -> `u32[6] {7, op_mask_legacy=0x3f, write_limit, 1000, transaction_pending, features}`
+(`write_limit` 256 MiB with `file_tree`, 16 MiB before).
 features bits: `1` rail pair, `2` sequences (op52), `4` R2C (op53), `8` wake alarm (op55),
-`16` wakes-at-power-change in sleep lease, `32` extended state (op54).
+`16` wakes-at-power-change in sleep lease, `32` extended state (op54), `64` autohold, `128` power telemetry,
+`256` file tree (ops 36-39 and the whole-SD policy below).
 
 Unchanged ops: 1-5 (debug relay), 7, 8, 16, 17, 18, 32-35 (transactional file write),
 43/44 (screenshot), 45 (application pid/title), 46 (`"REBOOT"`), 47 (boot2.flag rename),
@@ -95,10 +97,27 @@ Unchanged ops: 1-5 (debug relay), 7, 8, 16, 17, 18, 32-35 (transactional file wr
 40 (len<=1), 41 (28), 42/45/48/49/54 (0), 50 (4), 52 (4+28*n; the mailbox data area is
 80 bytes, so count<=2). op40 while a sequence runs -> EBUSY.
 
-### Write policy additions (transactional ops 32-35 only)
-Exactly: `sdmc:/bootloader/hekate_ipl.ini`, `sdmc:/bootloader/payloads/Remote-Hekate.bin`,
-and files directly inside `sdmc:/bootloader/remote/`. Everything else unchanged
-(keys, saves, Nintendo, emuMMC, Worker/Rescue images stay forbidden).
+### File policy (feature `file_tree`)
+Paths are `sdmc:/...` without `..`, `//`, `\\`, control characters or a second `:`. Compared case-insensitively:
+- never readable or writable: anything containing `.keys`, `/saves`, `/nintendo`, `/emummc`, `/backup` or
+  `/automatic_backups`;
+- readable only: `sdmc:/config/usb-sidecar` (transaction area);
+- never writable: `sdmc:/config/usb-rescue`, `sdmc:/atmosphere/contents/420000000000d06b` and `...d06c`
+  (the Worker and Rescue images), the SD root itself and paths ending in `/`;
+- everything else on the SD is readable and writable (ops 16-18, 32-35 up to 256 MiB, 36-39).
+Before `file_tree` the Worker read only `atmosphere`, `config`, `switch`, `bootloader`, `SaltySD` and wrote a
+short allow-list (`*.ini` in `atmosphere/config` and `config/4IFIR`, `hekate_ipl.ini`, Remote-Hekate files,
+`boot2.flag`).
+
+### File tree ops (feature `file_tree`, mutating)
+- `op36 from\0to` rename or move a file or directory; `EEXIST` if `to` exists (no replace).
+- `op37 path` delete a regular file (`EISDIR` for a directory).
+- `op38 path` delete an empty directory (`ENOTEMPTY` otherwise; recursion is done by the host).
+- `op39 path` create a directory (`EEXIST` if present).
+36-38 refuse (`EACCES`) any path that is, or contains, a protected directory, so `sdmc:/config` or
+`sdmc:/atmosphere/contents` cannot be renamed or removed with the modules inside. 36-38 return `EBUSY` while a
+write transaction is pending. The host checks every step with a listing, copies deleted files to its journal
+first and never resends after a lost reply.
 
 ## Rescue v7 (iface 1)
 
@@ -182,8 +201,8 @@ Besides the commands that mirror the CLI (`status`, `screen`, `press`, `seq`, `g
 `reboot_to`, `hekate.*`, `session.*`, `guard.*`, `bootflag`, `logs.collect`, `mtp.status`):
 
 - `wait_state {state, timeout}` - poll until the console is in `hos|hekate_remote|mtp|ums|absent`.
-- `ls`, `get`, `put` use the Worker in `hos` and `mtp_fs` in `mtp`. `mv {source, dest}`, `rm {remote, recursive}`
-  and `mkdir {remote, parents}` exist only in `mtp` (`invalid` otherwise).
+- `ls`, `get`, `put`, `mv {source, dest}`, `rm {remote, recursive}` and `mkdir {remote, parents}` use the Worker
+  in `hos` (tree ops need `file_tree`) and `mtp_fs` in `mtp`.
 - `ums.put {files: [{remote, local}], hooks, wait}` - Remote Hekate UMS copy job, returns `job_id`.
 - `job.status {job_id?}` - progress of long jobs.
 - `console.update {action: status|install|promote|rollback, ...}` - Worker maintenance through Rescue.

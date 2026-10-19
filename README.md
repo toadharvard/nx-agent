@@ -75,7 +75,8 @@ nxctl press HOME
 nxctl get sdmc:/atmosphere/config/system_settings.ini ./system_settings.ini
 nxctl reboot-to remote && nxctl hekate launch
 nxctl ums-put switch/.packages/x/config.ini=./config.ini --wait
-nxctl mv sdmc:/atmosphere/kips/loader.kip sdmc:/atmosphere/kips/loader.kip.disabled   # DBI MTP mode
+nxctl mv sdmc:/atmosphere/kips/loader.kip sdmc:/atmosphere/kips/loader.kip.disabled
+nxctl rm -r sdmc:/switch/old-app && nxctl mkdir -p sdmc:/switch/new-app
 nxctl events -f
 ```
 
@@ -84,9 +85,9 @@ Docs: [Safety](docs/SAFETY.md) · [Protocol](docs/PROTOCOL.md) · [Console build
 
 ## Safety
 
-The console enforces a file allow-list: keys, saves, emuMMC and Nintendo folders are never readable or
-writable over USB. In DBI MTP mode the host applies the same exclusions, verifies every write and journals
-replaced or deleted files. Power-button emulation is deliberately absent. Read [docs/SAFETY.md](docs/SAFETY.md) before
+The Worker reads and writes the whole SD except keys, saves, emuMMC, Nintendo folders and its own modules; those
+are never reachable over USB, and DBI MTP mode applies the same exclusions on the host. Every write is verified
+and replaced or deleted files are journaled on the host. Power-button emulation is deliberately absent. Read [docs/SAFETY.md](docs/SAFETY.md) before
 giving an agent the `full` profile. Anyone who can reach the daemon socket controls the console; it is created
 with mode 0600 in a per-user runtime directory.
 
