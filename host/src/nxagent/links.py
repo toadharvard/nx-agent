@@ -1,15 +1,10 @@
 """Real hardware adapters. Thin wrappers over proto/transport.py, proto/hekate.py
-and the MTP mailbox helpers; tests replace this whole object with fakes."""
-import json
+and mtp.py; tests replace this whole object with fakes."""
 import struct
-import subprocess
-import sys
 import time
 
-from . import paths
-from .common import KNOWN_DEVICES, NYX, OpError, STATE_DIR
-
-MAILBOX_STATUS = 'config/usb-worker-mailbox/status.json'
+from .common import KNOWN_DEVICES, NYX
+from .mtp import MtpFiles, MtpMailbox
 
 
 def is_remote_hekate(dev):
@@ -23,7 +18,8 @@ def is_remote_hekate(dev):
 
 class UsbLinks:
     def __init__(self):
-        self.mailbox = MtpMailbox()
+        self.mtp = MtpFiles()
+        self.mailbox = MtpMailbox(self.mtp)
 
     def devices(self):
         import usb.core
@@ -94,29 +90,6 @@ def drain_nyx(seconds=3):
         raise TimeoutError('Remote Hekate replies did not quiesce')
     finally:
         nyx.close()
-
-
-class MtpMailbox:
-    """SD mailbox used while DBI MTP (057e:201d) replaces the sidecar interface."""
-
-    def read_status(self):
-        out = STATE_DIR / 'mailbox' / str(time.time_ns())
-        out.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run([sys.executable, '-m', 'nxagent.mtp_read', str(out), MAILBOX_STATUS],
-                                capture_output=True, text=True, timeout=90)
-        status = out / MAILBOX_STATUS
-
-        if result.returncode or not status.exists():
-            raise OpError('absent', 'Mailbox status is not readable over MTP')
-
-        return json.loads(status.read_text())
-
-    def submit(self, request):
-        path = STATE_DIR / 'mailbox' / f'request-{time.time_ns()}.bin'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(request)
-
-        return subprocess.run([str(paths.tool_path('mtp_mailbox_submit')), str(path)], timeout=90).returncode
 
 
 def build_mailbox_request(token_hex, sequence, now_ms, op, data):

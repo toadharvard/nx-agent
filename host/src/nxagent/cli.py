@@ -80,6 +80,18 @@ def build_parser():
     p = sub.add_parser('ls')
     p.add_argument('remote')
 
+    p = sub.add_parser('mv', help='rename or move an SD file or directory (DBI MTP mode)')
+    p.add_argument('source')
+    p.add_argument('dest')
+
+    p = sub.add_parser('rm', help='delete an SD file or directory (DBI MTP mode); the file is journaled first')
+    p.add_argument('remote')
+    p.add_argument('-r', '--recursive', action='store_true')
+
+    p = sub.add_parser('mkdir', help='create an SD directory (DBI MTP mode)')
+    p.add_argument('remote')
+    p.add_argument('-p', '--parents', action='store_true')
+
     sub.add_parser('app')
     sub.add_parser('reboot').add_argument('--force', action='store_true', help='skip the post-boot uptime guard')
 
@@ -119,7 +131,7 @@ def build_parser():
     p.add_argument('action', choices=['install'])
     p.add_argument('--dest', default=str(Path.home() / '.claude' / 'skills'))
 
-    p = sub.add_parser('setup', help='build optional native helpers')
+    p = sub.add_parser('setup', help='build optional native helpers (mtp: mtp_fs, needs libmtp)')
     p.add_argument('what', choices=['mtp'])
 
     p = sub.add_parser('guard')
@@ -214,6 +226,15 @@ def to_request(a):
 
     if a.cmd == 'ls':
         return 'ls', {'remote': a.remote}
+
+    if a.cmd == 'mv':
+        return 'mv', {'source': a.source, 'dest': a.dest}
+
+    if a.cmd == 'rm':
+        return 'rm', {'remote': a.remote, 'recursive': a.recursive}
+
+    if a.cmd == 'mkdir':
+        return 'mkdir', {'remote': a.remote, 'parents': a.parents}
 
     if a.cmd == 'reboot-to':
         return 'reboot_to', {'target': a.target, 'entry': a.index, 'wait': not a.no_wait, 'timeout': a.timeout,
@@ -361,7 +382,7 @@ def local_setup(args):
     result = subprocess.run(['make', '-C', str(native), f'OUT={out}'])
 
     if result.returncode == 0:
-        print(f'MTP helpers built into {out}')
+        print(f'MTP helper mtp_fs built into {out}')
 
     return result.returncode
 

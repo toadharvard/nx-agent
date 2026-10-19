@@ -8,6 +8,7 @@ from pathlib import Path
 import usb.core
 
 from nxagent.common import HOS, MTP, NYX, EventLog, OpError
+from nxagent.mtp import ROOT, MtpFiles, Session
 from nxagent.ops import Daemon
 
 FB_SIZE = 1280 * 720 * 4
@@ -351,10 +352,147 @@ class FakeMailbox:
         return 0
 
 
+class FakeMtpDevice:
+    SD, INSTALL = 0x10001, 0x10005
+
+    def __init__(self, console):
+        self.console = console
+        self.objects = {}
+        self.next_id = 100
+        self.rename_ok = True
+        self.calls = []
+        self.fail = {}
+
+    def add(self, path, data=None):
+        parent = 0
+
+        for part in path.strip('/').split('/')[:-1]:
+            found = self.find(parent, part)
+            parent = found['id'] if found else self._new(parent, part, None)['id']
+
+        return self._new(parent, path.strip('/').split('/')[-1], data)
+
+    def _new(self, parent, name, data):
+        self.next_id += 1
+        node = {'id': self.next_id, 'parent': parent, 'storage': self.SD, 'name': name, 'folder': data is None,
+                'data': b'' if data is None else bytes(data)}
+        self.objects[node['id']] = node
+
+        return node
+
+    def find(self, parent, name):
+        return next((o for o in self.objects.values() if o['parent'] == parent and o['name'] == name), None)
+
+    def path_data(self, path):
+        parent, node = 0, None
+
+        for part in path.strip('/').split('/'):
+            node = self.find(parent, part)
+
+            if node is None:
+                return None
+
+            parent = node['id']
+
+        return node['data'] if not node['folder'] else None
+
+    def public(self, node):
+        return {k: (len(node['data']) if k == 'data' else v) for k, v in node.items()} | {'size': len(node['data'])}
+
+    def call(self, fields):
+        op, args = fields[0], fields[1:]
+        self.calls.append(fields)
+
+        if MTP not in self.console.present:
+            raise OpError('uncertain', 'mtp_fs exited before replying')
+
+        if self.fail.get(op):
+            self.fail[op] -= 1
+
+            return {'ok': False, 'error': f'{op} failed', 'stack': []}
+
+        if op == 'S':
+            return {'ok': True, 'storages': [{'id': self.SD, 'description': '1: SD Card'},
+                                             {'id': self.INSTALL, 'description': '5: SD Card install'}]}
+
+        if op == 'L':
+            parent = 0 if int(args[1]) == ROOT else int(args[1])
+
+            return {'ok': True, 'entries': [self.public(o) for o in self.objects.values() if o['parent'] == parent]}
+
+        if op == 'G':
+            Path(args[1]).write_bytes(self.objects[int(args[0])]['data'])
+
+            return {'ok': True}
+
+        if op == 'P':
+            parent = 0 if int(args[1]) == ROOT else int(args[1])
+
+            return {'ok': True, 'id': self._new(parent, args[2], Path(args[3]).read_bytes())['id']}
+
+        if op == 'W':
+            self.objects[int(args[0])]['data'] = Path(args[1]).read_bytes()
+
+            return {'ok': True}
+
+        if op == 'R':
+            if not self.rename_ok:
+                return {'ok': False, 'error': 'rename', 'stack': ['Operation not supported']}
+
+            self.objects[int(args[0])]['name'] = args[1]
+
+            return {'ok': True}
+
+        if op == 'V':
+            self.objects[int(args[0])]['parent'] = 0 if int(args[2]) == ROOT else int(args[2])
+
+            return {'ok': True}
+
+        if op == 'D':
+            self._delete(int(args[0]))
+
+            return {'ok': True}
+
+        if op == 'M':
+            parent = 0 if int(args[1]) == ROOT else int(args[1])
+
+            return {'ok': True, 'id': self._new(parent, args[2], None)['id']}
+
+        return {'ok': False, 'error': 'bad request', 'stack': []}
+
+    def _delete(self, oid):
+        for child in [o['id'] for o in self.objects.values() if o['parent'] == oid]:
+            self._delete(child)
+
+        del self.objects[oid]
+
+
+class FakeMtpSession(Session):
+    def __init__(self, device):
+        if MTP not in device.console.present:
+            raise OpError('absent', 'DBI MTP device not available')
+
+        self.device = device
+        self.storage = None
+
+    def close(self):
+        pass
+
+    def call(self, *fields, timeout=60):
+        reply = self.device.call([str(f) for f in fields])
+
+        if not reply.get('ok'):
+            raise OpError('device_error', f"MTP {reply.get('error')}", request=fields[0])
+
+        return reply
+
+
 class FakeLinks:
     def __init__(self, console):
         self.console = console
         self.mailbox = FakeMailbox(console)
+        self.mtp_device = FakeMtpDevice(console)
+        self.mtp = MtpFiles(session=lambda: FakeMtpSession(self.mtp_device))
 
     def devices(self):
         return self.console.devices()

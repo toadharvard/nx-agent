@@ -29,8 +29,8 @@ HINTS = {
                    'Wait a few seconds and call nx_status.',
     'uncertain': 'The reply was lost. Do NOT retry the mutation. Verify the outcome with read-only tools first.',
     'busy': 'Another client or job holds USB. Poll nx_job_status or retry later.',
-    'device_error': 'The console rejected the request (see message). Writes outside the allow-list return EACCES; '
-                    'use nx_sd_put_offline for those paths.',
+    'device_error': 'The console rejected the request (see message). In HOS, writes outside the Worker allow-list '
+                    'return EACCES: switch DBI to MTP mode (full SD access) or use nx_sd_put_offline.',
     'invalid': 'Fix the arguments; nothing was sent.',
 }
 
@@ -107,12 +107,12 @@ async def nx_current_app() -> dict:
 
 
 async def nx_list_dir(path: str) -> list:
-    """List an SD directory, e.g. sdmc:/atmosphere/contents."""
+    """List an SD directory, e.g. sdmc:/atmosphere/contents. Works in HOS (Worker) and in DBI MTP mode."""
     return await acall('ls', remote=path)
 
 
 async def nx_read_file(path: str, max_bytes: int = 1048576) -> dict:
-    """Read an SD file (keys, saves, emuMMC and Nintendo folders are refused by the console).
+    """Read an SD file in HOS or DBI MTP mode (keys, saves, emuMMC and Nintendo folders are always refused).
     Returns text when it is UTF-8, otherwise base64."""
     with tempfile.TemporaryDirectory() as tmp:
         local = Path(tmp) / 'file'
@@ -224,8 +224,9 @@ async def nx_hekate_watchdog(seconds: int) -> dict:
 
 async def nx_write_file(path: str, content: str = '', local_path: str = '', create: bool = False,
                         content_base64: str = '') -> dict:
-    """Write an SD file through the Worker (allow-listed paths only: atmosphere/config and config/4IFIR *.ini,
-    hekate_ipl.ini, boot2.flag, ...). Transactional with readback; journaled on the host."""
+    """Write an SD file. In HOS the Worker allows only listed paths (atmosphere/config and config/4IFIR *.ini,
+    hekate_ipl.ini, boot2.flag, ...). In DBI MTP mode any SD path except keys/Nintendo/emuMMC is writable,
+    including /switch and kips. Verified by SHA-256 readback; the replaced file is journaled on the host."""
     with tempfile.TemporaryDirectory() as tmp:
         local = Path(local_path).expanduser().resolve() if local_path else Path(tmp) / 'content'
 
@@ -233,6 +234,23 @@ async def nx_write_file(path: str, content: str = '', local_path: str = '', crea
             local.write_bytes(base64.b64decode(content_base64) if content_base64 else content.encode())
 
         return await acall('put', remote=path, local=str(local), create=create)
+
+
+async def nx_move_path(source: str, dest: str) -> dict:
+    """Rename or move an SD file or directory (DBI MTP mode only). If dest is an existing directory the source
+    is moved into it. Verified by listing; e.g. sdmc:/atmosphere/kips/loader.kip -> loader.kip.disabled."""
+    return await acall('mv', source=source, dest=dest)
+
+
+async def nx_delete_path(path: str, recursive: bool = False) -> dict:
+    """Delete an SD file or directory (DBI MTP mode only). Files are copied to the host journal first;
+    a non-empty directory needs recursive=true."""
+    return await acall('rm', remote=path, recursive=recursive)
+
+
+async def nx_make_dir(path: str, parents: bool = False) -> dict:
+    """Create an SD directory (DBI MTP mode only); parents=true creates missing parents."""
+    return await acall('mkdir', remote=path, parents=parents)
 
 
 async def nx_set_bootflag(tid: str, enable: bool) -> dict:
@@ -290,8 +308,9 @@ TOOLS = {
                                    nx_session_status, nx_sleep_settings, nx_collect_logs, nx_job_status)],
     'interactive': [(f, ACT) for f in (nx_press, nx_hold, nx_sequence, nx_controller, nx_session_start,
                                        nx_session_stop, nx_hekate_tap, nx_hekate_drag, nx_hekate_watchdog)],
-    'full': [(f, DESTRUCTIVE) for f in (nx_write_file, nx_set_bootflag, nx_guard_confirm, nx_reboot,
-                                        nx_hekate_action, nx_sd_put_offline, nx_console_update)],
+    'full': [(f, DESTRUCTIVE) for f in (nx_write_file, nx_move_path, nx_delete_path, nx_make_dir, nx_set_bootflag,
+                                        nx_guard_confirm, nx_reboot, nx_hekate_action, nx_sd_put_offline,
+                                        nx_console_update)],
 }
 
 

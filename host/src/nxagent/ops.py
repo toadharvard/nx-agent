@@ -175,9 +175,15 @@ class Daemon(DaemonCore):
         return self.run('worker', 'sleep settings', (49, 54), body)
 
     def ls(self, remote):
+        if self.mtp_mode():
+            return self.on_usb(self.links.mtp.ls, remote)
+
         return self.run('worker', 'list', (16,), lambda c: c.sidecar.list(remote))
 
     def get(self, remote, local, limit=64 * 1024 * 1024):
+        if self.mtp_mode():
+            return self.on_usb(self.links.mtp.get, remote, local)
+
         data = self.run('worker', 'get', (17,), lambda c: c.sidecar.get(remote, limit))
         Path(local).parent.mkdir(parents=True, exist_ok=True)
         Path(local).write_bytes(data)
@@ -347,6 +353,9 @@ class Daemon(DaemonCore):
         return result
 
     def put(self, remote, local, create=False):
+        if self.mtp_mode():
+            return self.on_usb(self.links.mtp.put, remote, local, create)
+
         content = Path(local).read_bytes()
         sha = hashlib.sha256(content).hexdigest()
         started = time.time_ns()
@@ -358,6 +367,26 @@ class Daemon(DaemonCore):
             result['journal'] = self._journal_since(started, remote)
 
         return result
+
+    def require_mtp(self, label):
+        if not self.mtp_mode():
+            raise OpError('invalid', f'{label} needs DBI MTP mode (start "Run MTP responder" in DBI); '
+                                     f'in HOS use put, or ums-put for paths outside the Worker allow-list')
+
+    def mv(self, source, dest):
+        self.require_mtp('mv')
+
+        return self.on_usb(self.links.mtp.mv, source, dest)
+
+    def rm(self, remote, recursive=False):
+        self.require_mtp('rm')
+
+        return self.on_usb(self.links.mtp.rm, remote, recursive)
+
+    def mkdir(self, remote, parents=False):
+        self.require_mtp('mkdir')
+
+        return self.on_usb(self.links.mtp.mkdir, remote, parents)
 
     def _journal_since(self, started, remote):
         from . import paths
