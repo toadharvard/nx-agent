@@ -81,15 +81,15 @@ def build_parser():
     p = sub.add_parser('ls')
     p.add_argument('remote')
 
-    p = sub.add_parser('mv', help='rename or move an SD file or directory (DBI MTP mode)')
+    p = sub.add_parser('mv', help='rename or move an SD file or directory')
     p.add_argument('source')
     p.add_argument('dest')
 
-    p = sub.add_parser('rm', help='delete an SD file or directory (DBI MTP mode); the file is journaled first')
+    p = sub.add_parser('rm', help='delete an SD file or directory; files are journaled on the host first')
     p.add_argument('remote')
     p.add_argument('-r', '--recursive', action='store_true')
 
-    p = sub.add_parser('mkdir', help='create an SD directory (DBI MTP mode)')
+    p = sub.add_parser('mkdir', help='create an SD directory')
     p.add_argument('remote')
     p.add_argument('-p', '--parents', action='store_true')
 

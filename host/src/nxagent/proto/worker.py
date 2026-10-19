@@ -17,6 +17,8 @@ BUTTONS = {name: 1 << i for i, name in enumerate([
 BUTTONS.update(HOME=1 << 18, CAPTURE=1 << 19)
 LOG_ROOTS = ['atmosphere/crash_reports', 'atmosphere/fatal_reports', 'atmosphere/erpt_reports', 'atmosphere/binlogs', 'config/4IFIR']
 
+WRITE_LIMIT = 256 * 1024 * 1024
+
 class Sidecar:
     @classmethod
     def drain_usb(cls):
@@ -79,7 +81,7 @@ class Sidecar:
             entries.append({'name': name, 'directory': bool(data[0])})
         raise RuntimeError('Directory limit reached')
 
-    def get(self, path, limit=64 * 1024 * 1024):
+    def get(self, path, limit=WRITE_LIMIT):
         result = bytearray()
         while True:
             chunk = self.call(17, struct.pack('<Q', len(result)) + path.encode())
@@ -93,11 +95,23 @@ class Sidecar:
         data = self.call(18, path.encode())
         return struct.unpack_from('<Q', data)[0], data[8:40]
 
+    def rename(self, source, dest):
+        self.call(36, source.encode() + b'\0' + dest.encode())
+
+    def unlink(self, path):
+        self.call(37, path.encode())
+
+    def rmdir(self, path):
+        self.call(38, path.encode())
+
+    def mkdir(self, path):
+        self.call(39, path.encode())
+
     def put(self, path, content, create=False):
-        if len(content) > 16 * 1024 * 1024:
-            raise ValueError('Maximum write is 16 MiB')
+        if len(content) > WRITE_LIMIT:
+            raise ValueError('Maximum write is 256 MiB')
         # Missing file is explicit: never treat arbitrary read errors as absence.
-        old = None if create else self.get(path, 16 * 1024 * 1024)
+        old = None if create else self.get(path, WRITE_LIMIT)
         digest = hashlib.sha256(content).digest()
         old_digest = bytes(32) if create else hashlib.sha256(old).digest()
         run = paths.journal_dir() / f'sidecar-change-{time.time_ns()}'

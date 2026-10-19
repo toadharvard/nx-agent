@@ -96,9 +96,19 @@ class FakeConsole:
 
         if op == 16:
             index, = struct.unpack_from('<I', data)
-            names = self.listdir(data[4:].decode())
+            path = data[4:].decode()
 
-            return 0, (b'\0' + names[index].encode()) if index < len(names) else b''
+            if path not in self.dirs and not any(f.startswith(path.rstrip('/') + '/') for f in self.files):
+                return 2, b''
+
+            names = self.listdir(path)
+
+            if index >= len(names):
+                return 0, b''
+
+            flag = b'\1' if f"{path.rstrip('/')}/{names[index]}" in self.dirs else b'\0'
+
+            return 0, flag + names[index].encode()
 
         if op == 17:
             offset, = struct.unpack_from('<Q', data)
@@ -111,6 +121,9 @@ class FakeConsole:
 
             return (2, b'') if content is None else (0, struct.pack('<Q', len(content)) +
                                                      hashlib.sha256(content).digest())
+
+        if 36 <= op <= 39:
+            return self.tree_op(op, data), b''
 
         if op == 32:
             self.tx = {'path': data[73:].decode(), 'data': bytearray()}
@@ -161,6 +174,64 @@ class FakeConsole:
             return 22, b''
 
         return 0, b''
+
+    @staticmethod
+    def split(path):
+        parent, _, name = path.rpartition('/')
+
+        return (parent + '/' if parent == 'sdmc:' else parent), name
+
+    def tree_op(self, op, data):
+        if op == 36:
+            source, dest = (part.decode() for part in data.split(b'\0'))
+
+            if dest in self.files or dest in self.dirs:
+                return 17
+
+            if source not in self.files and source not in self.dirs:
+                return 2
+
+            for table in (self.files, self.dirs):
+                for key in [k for k in table if k == source or k.startswith(source + '/')]:
+                    table[dest + key[len(source):]] = table.pop(key)
+
+            (sp, sn), (dp, dn) = self.split(source), self.split(dest)
+            self.dirs[sp].remove(sn)
+            self.dirs.setdefault(dp, []).append(dn)
+
+            return 0
+
+        path = data.decode()
+        parent, name = self.split(path)
+
+        if op == 37:
+            if path not in self.files:
+                return 21 if path in self.dirs else 2
+
+            del self.files[path]
+        elif op == 38:
+            if path not in self.dirs:
+                return 20 if path in self.files else 2
+
+            if self.dirs[path]:
+                return 39
+
+            del self.dirs[path]
+        else:
+            if path in self.dirs or path in self.files:
+                return 17
+
+            if parent not in self.dirs:
+                return 2
+
+            self.dirs[path] = []
+            self.dirs[parent].append(name)
+
+            return 0
+
+        self.dirs[parent].remove(name)
+
+        return 0
 
     def rename_flag(self, enable, tid):
         names = self.dirs.setdefault(f'sdmc:/atmosphere/contents/{tid}/flags', [])

@@ -75,7 +75,7 @@ class RoutingTests(MtpCase):
 
         self.assertEqual(self.device.calls, [])
 
-    def test_mutations_need_mtp_mode(self):
+    def test_old_worker_without_file_tree_refuses_in_hos(self):
         self.console.present = {HOS}
         self.daemon.monitor.poll()
 
@@ -84,7 +84,8 @@ class RoutingTests(MtpCase):
             with self.assertRaises(OpError) as ctx:
                 call()
 
-            self.assertEqual(ctx.exception.kind, 'invalid')
+            self.assertEqual(ctx.exception.kind, 'device_error')
+            self.assertTrue(ctx.exception.details.get('unsupported'))
 
         self.assertEqual(self.device.calls, [])
 

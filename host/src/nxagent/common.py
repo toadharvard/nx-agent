@@ -34,7 +34,7 @@ ERRNO_NAMES = {1: 'EPERM', 2: 'ENOENT', 5: 'EIO', 13: 'EACCES', 16: 'EBUSY', 17:
                22: 'EINVAL', 28: 'ENOSPC', 71: 'EPROTO', 139: 'EOVERFLOW'}
 
 WORKER_FEATURES = {1: 'rail_pair', 2: 'sequences', 4: 'r2c', 8: 'wake_alarm',
-                   16: 'wake_on_power_change', 32: 'extended_state'}
+                   16: 'wake_on_power_change', 32: 'extended_state', 256: 'file_tree'}
 
 
 def is_read_only(target, ops):

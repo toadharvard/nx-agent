@@ -29,8 +29,9 @@ HINTS = {
                    'Wait a few seconds and call nx_status.',
     'uncertain': 'The reply was lost. Do NOT retry the mutation. Verify the outcome with read-only tools first.',
     'busy': 'Another client or job holds USB. Poll nx_job_status or retry later.',
-    'device_error': 'The console rejected the request (see message). In HOS, writes outside the Worker allow-list '
-                    'return EACCES: switch DBI to MTP mode (full SD access) or use nx_sd_put_offline.',
+    'device_error': 'The console rejected the request (see message). EACCES means a protected path (keys, saves, '
+                    'Nintendo, emuMMC, the nx-agent modules); "does not support file tree" means the Worker needs an '
+                    'update (nx_console_update) or DBI MTP mode.',
     'invalid': 'Fix the arguments; nothing was sent.',
 }
 
@@ -224,9 +225,9 @@ async def nx_hekate_watchdog(seconds: int) -> dict:
 
 async def nx_write_file(path: str, content: str = '', local_path: str = '', create: bool = False,
                         content_base64: str = '') -> dict:
-    """Write an SD file. In HOS the Worker allows only listed paths (atmosphere/config and config/4IFIR *.ini,
-    hekate_ipl.ini, boot2.flag, ...). In DBI MTP mode any SD path except keys/Nintendo/emuMMC is writable,
-    including /switch and kips. Verified by SHA-256 readback; the replaced file is journaled on the host."""
+    """Write an SD file anywhere on the SD (including /switch and kips) except keys, saves, Nintendo, emuMMC and
+    the nx-agent modules; up to 256 MiB. Works in HOS (Worker with file_tree) and in DBI MTP mode.
+    Verified by SHA-256 readback; the replaced file is journaled on the host."""
     with tempfile.TemporaryDirectory() as tmp:
         local = Path(local_path).expanduser().resolve() if local_path else Path(tmp) / 'content'
 
@@ -237,19 +238,20 @@ async def nx_write_file(path: str, content: str = '', local_path: str = '', crea
 
 
 async def nx_move_path(source: str, dest: str) -> dict:
-    """Rename or move an SD file or directory (DBI MTP mode only). If dest is an existing directory the source
-    is moved into it. Verified by listing; e.g. sdmc:/atmosphere/kips/loader.kip -> loader.kip.disabled."""
+    """Rename or move an SD file or directory (HOS with Worker file_tree, or DBI MTP mode). If dest is an existing
+    directory the source is moved into it. Verified by listing; e.g. sdmc:/atmosphere/kips/loader.kip ->
+    sdmc:/atmosphere/kips/loader.kip.disabled. Kips and sysmodules change on the next boot."""
     return await acall('mv', source=source, dest=dest)
 
 
 async def nx_delete_path(path: str, recursive: bool = False) -> dict:
-    """Delete an SD file or directory (DBI MTP mode only). Files are copied to the host journal first;
-    a non-empty directory needs recursive=true."""
+    """Delete an SD file or directory (HOS with Worker file_tree, or DBI MTP mode). Files are copied to the host
+    journal first; a non-empty directory needs recursive=true."""
     return await acall('rm', remote=path, recursive=recursive)
 
 
 async def nx_make_dir(path: str, parents: bool = False) -> dict:
-    """Create an SD directory (DBI MTP mode only); parents=true creates missing parents."""
+    """Create an SD directory (HOS with Worker file_tree, or DBI MTP mode); parents=true creates missing parents."""
     return await acall('mkdir', remote=path, parents=parents)
 
 

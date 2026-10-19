@@ -11,6 +11,7 @@ from .core import DaemonCore, decode_state
 from .features import FLAG, Guard, Session, normalize_tid
 from .jobs import Jobs
 from .links import build_mailbox_request
+from .worker_files import FILE_TREE, WorkerFiles
 
 HEKATE_INI = 'sdmc:/bootloader/hekate_ipl.ini'
 REMOTE_ENTRY = 'Remote USB Control'
@@ -180,7 +181,7 @@ class Daemon(DaemonCore):
 
         return self.run('worker', 'list', (16,), lambda c: c.sidecar.list(remote))
 
-    def get(self, remote, local, limit=64 * 1024 * 1024):
+    def get(self, remote, local, limit=256 * 1024 * 1024):
         if self.mtp_mode():
             return self.on_usb(self.links.mtp.get, remote, local)
 
@@ -368,25 +369,22 @@ class Daemon(DaemonCore):
 
         return result
 
-    def require_mtp(self, label):
-        if not self.mtp_mode():
-            raise OpError('invalid', f'{label} needs DBI MTP mode (start "Run MTP responder" in DBI); '
-                                     f'in HOS use put, or ums-put for paths outside the Worker allow-list')
+    def tree(self, label):
+        if self.mtp_mode():
+            return self.links.mtp
+
+        self.require(FILE_TREE, f'{label} (file tree ops 36-39); update the Worker or use DBI MTP mode')
+
+        return WorkerFiles(self)
 
     def mv(self, source, dest):
-        self.require_mtp('mv')
-
-        return self.on_usb(self.links.mtp.mv, source, dest)
+        return self.on_usb(self.tree('mv').mv, source, dest)
 
     def rm(self, remote, recursive=False):
-        self.require_mtp('rm')
-
-        return self.on_usb(self.links.mtp.rm, remote, recursive)
+        return self.on_usb(self.tree('rm').rm, remote, recursive)
 
     def mkdir(self, remote, parents=False):
-        self.require_mtp('mkdir')
-
-        return self.on_usb(self.links.mtp.mkdir, remote, parents)
+        return self.on_usb(self.tree('mkdir').mkdir, remote, parents)
 
     def _journal_since(self, started, remote):
         from . import paths
