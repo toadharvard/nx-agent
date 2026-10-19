@@ -8,6 +8,8 @@ from pathlib import Path
 from .. import disks
 from ..common import HOS, NYX, OpError
 
+NYX_SETTLE_S = 3
+
 POST_HOOKS = {
     'clear_4ifir_alarm': 'config/4IFIR/alarm.flag',
 }
@@ -50,14 +52,22 @@ def ums_put(daemon, files, hooks=(), step=lambda *a, **k: None, timeout=180):
     elif daemon.monitor.state != 'hekate_remote':
         raise OpError('absent', f'Need HOS or Remote Hekate, state is {daemon.monitor.state}')
 
+    daemon.wait_until(lambda: (daemon.monitor.uptime(NYX) or 0) >= NYX_SETTLE_S, NYX_SETTLE_S + 10)
     before = disks.external_disks()
     step('hekate_ums')
     daemon.nyx_action('ums', wait=False)
-    disk, root = None, None
+    started = daemon.clock.now()
+    disk, root, retried = None, None, False
 
     def found():
-        nonlocal disk, root
+        nonlocal disk, root, retried
         disk, root = disks.find_sd(disks.external_disks() - before, seconds=0)
+
+        if root is None and not retried and daemon.clock.now() - started > NYX_SETTLE_S and \
+                (daemon.present(), daemon.monitor.state)[1] == 'hekate_remote':
+            retried = True
+            step('hekate_ums_retry')
+            daemon.nyx_action('ums', wait=False)
 
         return root is not None
 
