@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-import ctypes as c,sys,unittest
+import ctypes as c,os,socket,sys,tempfile,threading,unittest
 from pathlib import Path
 lib=c.CDLL(str(Path(__file__).resolve().parent/'bin'/('worker-fileops-test'+('.dylib' if sys.platform=='darwin' else '.so'))))
 lib.sidecar_path.argtypes=[c.c_char_p,c.c_bool];lib.sidecar_path.restype=c.c_bool
@@ -37,4 +37,22 @@ class Policy(unittest.TestCase):
   for p in ['sdmc:/atmosphere/kips','sdmc:/atmosphere/kips/loader.kip','sdmc:/switch','sdmc:/config/4IFIR',
    'sdmc:/atmosphere/contents/00FF0000636C6BFF']:
    self.assertTrue(lib.sidecar_tree_path(p.encode()),p)
+ def test_stream_header_is_identical_in_both_modules(self):
+  root=Path(__file__).resolve().parent.parent
+  self.assertEqual((root/'worker/source/stream.h').read_bytes(),(root/'rescue/source/stream.h').read_bytes())
+ def test_stream_out_sends_exact_file_bytes(self):
+  lib.sidecar_stream_out.argtypes=[c.c_int,c.c_char_p,c.c_uint64,c.c_int];lib.sidecar_stream_out.restype=c.c_int
+  data=os.urandom(200000)
+  with tempfile.NamedTemporaryFile(delete=False) as f:f.write(data)
+  a,b=socket.socketpair();a.setblocking(False);got=bytearray()
+  reader=threading.Thread(target=lambda:[got.extend(chunk) for chunk in iter(lambda:b.recv(65536),b'')])
+  reader.start()
+  self.assertEqual(lib.sidecar_stream_out(a.fileno(),f.name.encode(),len(data),2000),0)
+  a.close();reader.join(5);b.close();os.unlink(f.name)
+  self.assertEqual(bytes(got),data)
+ def test_stream_in_needs_an_open_transaction(self):
+  lib.sidecar_stream_in.argtypes=[c.c_int,c.c_int];lib.sidecar_stream_in.restype=c.c_int
+  a,b=socket.socketpair()
+  self.assertEqual(lib.sidecar_stream_in(a.fileno(),100),22)
+  a.close();b.close()
 if __name__=='__main__':unittest.main(verbosity=2)

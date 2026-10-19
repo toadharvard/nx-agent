@@ -16,3 +16,5 @@ int sidecar_commit(void);
 int sidecar_abort(void);
 int sidecar_recover(void);
 bool sidecar_pending(void);
+int sidecar_stream_in(int peer, int idle_ms);
+int sidecar_stream_out(int peer, const char *path, uint64_t size, int idle_ms);

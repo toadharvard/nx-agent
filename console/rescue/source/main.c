@@ -10,6 +10,7 @@
 #include "bridge.h"
 #include "launch_job.h"
 #include "boot_guard.h"
+#include "stream.h"
 static unsigned char launch_stack[0x4000] __attribute__((aligned(4096)));
 static Thread launch_thread;
 static void launch_loop(void *unused){(void)unused;for(;;){launch_execute();svcSleepThread(1000000);}}
@@ -19,6 +20,9 @@ static unsigned char tx[2][4096] __attribute__((aligned(4096)));
 static unsigned char bridge_stack[0x10000] __attribute__((aligned(4096)));
 static Thread bridge_thread;
 static bool boot_recovered;
+static unsigned char stream_buf[0x20000] __attribute__((aligned(4096)));
+static unsigned stream_direction;
+static uint64_t stream_left,stream_total;
 u32 __nx_applet_type=AppletType_None;
 u32 __nx_fs_num_sessions=1;
 static Result init_result;static bool sm_ready,fs_ready,sd_ready;
@@ -39,6 +43,39 @@ static void log_stage(const char *stage,Result rc){
     FILE *f=fopen(path,"a");
     if(f){fprintf(f,"tick=%llu stage=%s result=%08X\n",(unsigned long long)armGetSystemTick(),stage,rc);fclose(f);}
 }
+/* A Worker reply carrying STREAM_MAGIC announces raw bytes after it has been delivered to the host. */
+static void stream_note(const unsigned char *tx){
+    uint32_t h[4];memcpy(h,tx,16);stream_direction=0;
+    if(h[1] || h[3]!=STREAM_MAGIC || h[2]<16)return;
+    uint32_t direction;uint64_t size;memcpy(&direction,tx+16,4);memcpy(&size,tx+24,8);
+    if((direction==STREAM_IN || direction==STREAM_OUT) && size<=STREAM_MAX){stream_direction=direction;stream_left=stream_total=size;}
+}
+static bool usb_configured(void){UsbState state;return R_SUCCEEDED(usbDsGetState(&state)) && state==UsbState_Configured;}
+/* Exactly stream_total bytes always cross USB so the frame stream stays in step: inbound bytes are drained
+ * after a Worker failure, outbound bytes are zero-filled (the host checks SHA-256). Returns true if tx holds
+ * a final frame to send. */
+static bool stream_pump(unsigned char *tx){
+    int e=0;unsigned direction=stream_direction;stream_direction=0;
+    log_stage(direction==STREAM_IN?"stream-in":"stream-out",0);
+    while(stream_left){
+        size_t want=stream_left<sizeof(stream_buf)?(size_t)stream_left:sizeof(stream_buf),got=0;
+        if(direction==STREAM_IN){
+            got=usbCommsReadEx(stream_buf,want,0);
+            if(!got){if(!usb_configured()){e=EIO;break;}continue;}
+            if(!e)e=bridge_send(stream_buf,got,30000);
+        }else{
+            if(!e)e=bridge_recv(stream_buf,want,&got,30000);
+            if(e){memset(stream_buf,0,want);got=want;}
+            if(!got)continue;
+            if(usbCommsWriteEx(stream_buf,got,0)!=got){e=EIO;break;}
+        }
+        stream_left-=got;
+    }
+    log_stage(direction==STREAM_IN?"stream-in-end":"stream-out-end",e);
+    if(direction!=STREAM_IN)return false;
+    bridge_final(tx,e,60000+(int64_t)(stream_total/16000));
+    return true;
+}
 static void channel_loop(unsigned channel,bool socket_ready){
     int state=0;u32 id=0,size=0;Result rc;
     u64 last_sample=0,last_heartbeat=0;int previous_usb=-1;unsigned requests=0;
@@ -53,25 +90,29 @@ static void channel_loop(unsigned channel,bool socket_ready){
                 char tag[64];snprintf(tag,sizeof(tag),"alive-transfer-%d-requests-%u",state,requests);log_stage(tag,0);last_heartbeat=now;
             }
         }
+        int before=state;
         if(state==0){rc=usbCommsReadAsync(rx[channel],4096,&id,channel);if(R_SUCCEEDED(rc))state=1;}
         else if(state==1 && R_SUCCEEDED(eventWait(usbCommsGetReadCompletionEvent(channel),0))){
             rc=usbCommsGetReadResult(id,&size,channel);
             if(R_SUCCEEDED(rc) && size==4096){
                 requests++;
                 if(channel==1)rescue_dispatch(rx[channel],tx[channel]);
-                else if(socket_ready)bridge_exchange(rx[channel],tx[channel]);
+                else if(socket_ready){bridge_exchange(rx[channel],tx[channel]);stream_note(tx[channel]);}
                 else {memset(tx[channel],0,4096);uint32_t h[]={RESCUE_MAGIC,ENETDOWN,0,0};memcpy(tx[channel],h,16);}
                 state=2;
             }else state=0;
         }else if(state==2){rc=usbCommsWriteAsync(tx[channel],4096,&id,channel);if(R_SUCCEEDED(rc))state=3;}
-        else if(state==3 && R_SUCCEEDED(eventWait(usbCommsGetWriteCompletionEvent(channel),0))){usbCommsGetWriteResult(id,&size,channel);state=0;}
-        svcSleepThread(1000000);
+        else if(state==3 && R_SUCCEEDED(eventWait(usbCommsGetWriteCompletionEvent(channel),0))){
+            usbCommsGetWriteResult(id,&size,channel);
+            state=channel==0 && stream_direction && stream_pump(tx[channel])?2:0;
+        }
+        if(state==before)svcSleepThread(1000000);
     }
 }
 static void features(void *unused){
     (void)unused;
     if(boot_recovered){uint64_t pid=0;worker_start(&pid);}
-    const SocketInitConfig cfg={.tcp_tx_buf_size=0x4000,.tcp_rx_buf_size=0x4000,.udp_tx_buf_size=0x1000,.udp_rx_buf_size=0x1000,.sb_efficiency=2,.num_bsd_sessions=2,.bsd_service_type=BsdServiceType_System};
+    const SocketInitConfig cfg={.tcp_tx_buf_size=0x20000,.tcp_rx_buf_size=0x10000,.udp_tx_buf_size=0x1000,.udp_rx_buf_size=0x1000,.sb_efficiency=2,.num_bsd_sessions=2,.bsd_service_type=BsdServiceType_System};
     Result rc=socketInitialize(&cfg);
     channel_loop(0,R_SUCCEEDED(rc));
 }

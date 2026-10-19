@@ -15,6 +15,7 @@
 #include "control.h"
 #include "listener.h"
 #include "mailbox.h"
+#include "stream.h"
 
 // Fixed-size request/reply frames: magic, opcode/status, length, reserved, data.
 // No attach, memory changes or debugger commands are generated on the console.
@@ -25,6 +26,9 @@ static atomic_uint commands;
 static atomic_bool stopping;
 static bool shutdown_requested;
 static u64 last_command_tick;
+static unsigned stream_pending;
+static uint64_t stream_size;
+static char stream_path[768];
 static void startup_log(const char *stage,Result rc);
 
 static int read_log(unsigned op,unsigned len,int *error) {
@@ -68,6 +72,18 @@ static int tree_op(unsigned op,unsigned len) {
     if(!a || path_arg(0,a,from) || path_arg(a+1,len-a-1,to))return EINVAL;
     return sidecar_rename(from,to);
 }
+static int stream_get(unsigned len,unsigned char *data) {
+    if(path_arg(0,len,stream_path))return EINVAL;
+    if(!sidecar_path(stream_path,false))return EACCES;
+    struct stat st;
+    if(stat(stream_path,&st))return errno;
+    if(!S_ISREG(st.st_mode))return EISDIR;
+    uint64_t size=0;int e=sidecar_hash(stream_path,data+16,&size);
+    if(e)return e;
+    uint32_t direction=STREAM_OUT,zero=0;
+    memcpy(data,&direction,4);memcpy(data+4,&zero,4);memcpy(data+8,&size,8);
+    stream_size=size;stream_pending=STREAM_OUT;return 0;
+}
 static void dispatch(void) {
     unsigned *in=(unsigned *)rx, *out=(unsigned *)tx;
     memset(tx,0,sizeof(tx)); out[0]=0x31425255;
@@ -80,7 +96,7 @@ static void dispatch(void) {
         memcpy(tx+16,info,sizeof(info));n=sizeof(info);
     } else if(op==9) {
         /* features: rail pair, sequences, R2C, wake alarm, wakes-at-power-change, extended state, autohold, power telemetry, file tree ops. */
-        unsigned info[]={7,0x3f,256*1024*1024,1000,sidecar_pending(),511};
+        unsigned info[]={7,0x3f,(unsigned)STREAM_MAX,1000,sidecar_pending(),1023};
         memcpy(tx+16,info,sizeof(info));n=sizeof(info);
     } else if(op>=40 && op<=62) n=sidecar_control(op,rx+16,len,tx+16,&error);
     else if(op==18) {
@@ -101,6 +117,16 @@ static void dispatch(void) {
         if(len<8)error=EINVAL;
         else {uint64_t offset;memcpy(&offset,rx+16,8);error=sidecar_chunk(offset,rx+24,len-8);}
     } else if(op>=36 && op<=39) {error=tree_op(op,len);}
+    else if(op==90) {
+        if(len<=73 || len-73>=768 || rx[16]>1 || memchr(rx+16+73,0,len-73))error=EINVAL;
+        else {
+            char path[768];uint64_t size;memcpy(&size,rx+17,8);
+            memcpy(path,rx+16+73,len-73);path[len-73]=0;
+            error=sidecar_begin(path,size,rx+25,rx+57,rx[16]);
+            if(!error){uint32_t direction=STREAM_IN,zero=0;memcpy(tx+16,&direction,4);memcpy(tx+20,&zero,4);
+                memcpy(tx+24,&size,8);n=16;stream_size=size;stream_pending=STREAM_IN;}
+        }
+    } else if(op==91) {error=stream_get(len,tx+16);if(!error)n=48;}
     else if(op==34) {error=len?EINVAL:sidecar_commit();}
     else if(op==35) {error=len?EINVAL:sidecar_abort();}
     else if(op==7) {if(sidecar_pending())error=EBUSY;else shutdown_requested=true;}
@@ -129,10 +155,33 @@ static void dispatch(void) {
     if(trace){snprintf(stage,sizeof(stage),"command-%u-end",op);startup_log(stage,(Result)error);}
     out[1]=error; out[2]=n>0?(unsigned)n:0;
     // Expose platform errno constants, avoiding host/guest errno assumptions.
-    out[3]=(error==EAGAIN||error==EWOULDBLOCK||error==EINPROGRESS)?1:0;
+    out[3]=stream_pending?STREAM_MAGIC:(error==EAGAIN||error==EWOULDBLOCK||error==EINPROGRESS)?1:0;
     atomic_fetch_add(&commands,1);
     last_command_tick=armGetSystemTick();
     sidecar_note_host();
+}
+/* Runs after the STREAM_MAGIC reply has been sent.
+ * Returns 1 when a final frame is ready in tx, 0 when done, -1 when the peer must be dropped. */
+static int run_stream(int peer) {
+    unsigned direction=stream_pending;stream_pending=0;
+    startup_log(direction==STREAM_IN?"stream-in-begin":"stream-out-begin",0);
+    int e;
+    if(direction==STREAM_OUT) {
+        e=sidecar_stream_out(peer,stream_path,stream_size,30000);
+        startup_log("stream-out-end",(Result)e);
+        return e?-1:0;
+    }
+    e=sidecar_stream_in(peer,30000);
+    if(!e)e=sidecar_commit();
+    else sidecar_abort();
+    startup_log("stream-in-end",(Result)e);
+    unsigned *out=(unsigned *)tx;
+    memset(tx,0,sizeof(tx));out[0]=0x31425255;out[1]=e;
+    return 1;
+}
+static void drop_stream(void) {
+    if(stream_pending==STREAM_IN)sidecar_abort();
+    stream_pending=0;
 }
 static void worker_loop(void) {
     WorkerListener listener={.fd=-1,.port=22226};
@@ -146,25 +195,31 @@ static void worker_loop(void) {
             if(error && error!=last_listener_error){startup_log("listener-retry",error);last_listener_error=error;}
             if(fresh>=0){
                 /* Rescue keeps one connection; a new one means the old peer is dead (e.g. after sleep). */
-                if(peer>=0){close(peer);startup_log("peer-replaced",0);}
+                if(peer>=0){close(peer);drop_stream();startup_log("peer-replaced",0);}
                 peer=fresh;
                 if(last_listener_error){startup_log("listener-recovered",0);last_listener_error=0;}
                 received=sent=0;replying=false;
             }
         }
+        bool progress=false;
         if(peer>=0){
             ssize_t n=replying?send(peer,tx+sent,sizeof(tx)-sent,0):recv(peer,rx+received,sizeof(rx)-received,0);
             if(n>0){
-                if(replying){sent+=n;if(sent==sizeof(tx)){replying=false;received=sent=0;if(shutdown_requested)atomic_store(&stopping,true);}}
+                progress=true;
+                if(replying){sent+=n;if(sent==sizeof(tx)){replying=false;received=sent=0;if(shutdown_requested)atomic_store(&stopping,true);
+                    int streamed=stream_pending?run_stream(peer):0;
+                    if(streamed>0)replying=true;
+                    else if(streamed<0){close(peer);peer=-1;}}}
                 else {received+=n;if(received==sizeof(rx)){dispatch();replying=true;sent=0;}}
             }else if(n==0 || (errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR)){
-                close(peer);peer=-1;
+                close(peer);peer=-1;drop_stream();
             }
         }
         /* Idle closes only the debug relay socket; the pad has its own 600 s lifetime. */
         if(fd>=0 && armTicksToNs(armGetSystemTick()-last_command_tick)>10000000000ULL){close(fd);fd=-1;}
         if(mailbox_tick(armTicksToNs(armGetSystemTick())/1000000ULL))last_command_tick=armGetSystemTick();
-        sidecar_control_tick();svcSleepThread(1000000);
+        sidecar_control_tick();
+        if(!progress)svcSleepThread(1000000);
     }
     if(peer>=0)close(peer);
     worker_listener_close(&listener);sidecar_control_shutdown();
@@ -206,7 +261,7 @@ int main(void) {
     if(R_FAILED(init_result)){startup_log("init",init_result);return 1;}
     int control_recovery=sidecar_control_boot();startup_log("sleep-recovery",(Result)control_recovery);
     int recovery=sidecar_recover();startup_log("transaction-recovery",(Result)recovery);
-    const SocketInitConfig cfg={.tcp_tx_buf_size=0x4000,.tcp_rx_buf_size=0x4000,
+    const SocketInitConfig cfg={.tcp_tx_buf_size=0x10000,.tcp_rx_buf_size=0x20000,
         .udp_tx_buf_size=0x1000,.udp_rx_buf_size=0x1000,.sb_efficiency=2,
         .num_bsd_sessions=2,.bsd_service_type=BsdServiceType_System};
     Result rc=socketInitialize(&cfg);startup_log("socket",rc);

@@ -13,13 +13,14 @@ static int stopped(void) {
     uint64_t pid=0;uint32_t rc=worker_query(&pid);
     return rc==PM_NOT_FOUND?0:(rc?(int)rc:EBUSY);
 }
-/* No worker-controlled code or synchronous IPC to the worker is used here. */
+/* No worker-controlled code or synchronous IPC to the worker is used here.
+ * features: 1 boot guard, 2 raw stream bridge on interface 0. */
 void rescue_dispatch(const unsigned char *rx,unsigned char *tx) {
     uint32_t in[4],out[4]={RESCUE_MAGIC,0,0,0};memcpy(in,rx,16);
     memset(tx,0,4096);int e=0,n=0;unsigned op=in[1],len=in[2];
     if(in[0]!=RESCUE_MAGIC || len>4080)e=EINVAL;
     else if(op==6 && !len){uint32_t s[]={7,0x52534355,1,0};memcpy(tx+16,s,16);n=16;}
-    else if(op==9 && !len){uint32_t s[]={7,launch_ready()?1U:0U,16*1024*1024,0,sidecar_pending(),1};memcpy(tx+16,s,24);n=24;}
+    else if(op==9 && !len){uint32_t s[]={7,launch_ready()?1U:0U,16*1024*1024,0,sidecar_pending(),3};memcpy(tx+16,s,24);n=24;}
     else if(op==4 && !len){} /* Legacy client cleanup: local no-op. */
     else if(op==60 && !len){uint64_t pid=0;uint32_t rc=worker_query(&pid);memcpy(tx+16,&rc,4);memcpy(tx+20,&pid,8);n=12;}
     else if(op==61 && len==4 && !memcmp(rx+16,"STOP",4)){e=(int)worker_stop();if(e==PM_NOT_FOUND)e=0;}
