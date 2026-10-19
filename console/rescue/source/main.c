@@ -90,7 +90,6 @@ static void channel_loop(unsigned channel,bool socket_ready){
                 char tag[64];snprintf(tag,sizeof(tag),"alive-transfer-%d-requests-%u",state,requests);log_stage(tag,0);last_heartbeat=now;
             }
         }
-        int before=state;
         if(state==0){rc=usbCommsReadAsync(rx[channel],4096,&id,channel);if(R_SUCCEEDED(rc))state=1;}
         else if(state==1 && R_SUCCEEDED(eventWait(usbCommsGetReadCompletionEvent(channel),0))){
             rc=usbCommsGetReadResult(id,&size,channel);
@@ -106,13 +105,13 @@ static void channel_loop(unsigned channel,bool socket_ready){
             usbCommsGetWriteResult(id,&size,channel);
             state=channel==0 && stream_direction && stream_pump(tx[channel])?2:0;
         }
-        if(state==before)svcSleepThread(1000000);
+        svcSleepThread(1000000);
     }
 }
 static void features(void *unused){
     (void)unused;
     if(boot_recovered){uint64_t pid=0;worker_start(&pid);}
-    const SocketInitConfig cfg={.tcp_tx_buf_size=0x20000,.tcp_rx_buf_size=0x10000,.udp_tx_buf_size=0x1000,.udp_rx_buf_size=0x1000,.sb_efficiency=2,.num_bsd_sessions=2,.bsd_service_type=BsdServiceType_System};
+    const SocketInitConfig cfg={.tcp_tx_buf_size=0x4000,.tcp_rx_buf_size=0x4000,.udp_tx_buf_size=0x1000,.udp_rx_buf_size=0x1000,.sb_efficiency=2,.num_bsd_sessions=2,.bsd_service_type=BsdServiceType_System};
     Result rc=socketInitialize(&cfg);
     channel_loop(0,R_SUCCEEDED(rc));
 }

@@ -201,11 +201,9 @@ static void worker_loop(void) {
                 received=sent=0;replying=false;
             }
         }
-        bool progress=false;
         if(peer>=0){
             ssize_t n=replying?send(peer,tx+sent,sizeof(tx)-sent,0):recv(peer,rx+received,sizeof(rx)-received,0);
             if(n>0){
-                progress=true;
                 if(replying){sent+=n;if(sent==sizeof(tx)){replying=false;received=sent=0;if(shutdown_requested)atomic_store(&stopping,true);
                     int streamed=stream_pending?run_stream(peer):0;
                     if(streamed>0)replying=true;
@@ -218,8 +216,7 @@ static void worker_loop(void) {
         /* Idle closes only the debug relay socket; the pad has its own 600 s lifetime. */
         if(fd>=0 && armTicksToNs(armGetSystemTick()-last_command_tick)>10000000000ULL){close(fd);fd=-1;}
         if(mailbox_tick(armTicksToNs(armGetSystemTick())/1000000ULL))last_command_tick=armGetSystemTick();
-        sidecar_control_tick();
-        if(!progress)svcSleepThread(1000000);
+        sidecar_control_tick();svcSleepThread(1000000);
     }
     if(peer>=0)close(peer);
     worker_listener_close(&listener);sidecar_control_shutdown();
@@ -261,7 +258,7 @@ int main(void) {
     if(R_FAILED(init_result)){startup_log("init",init_result);return 1;}
     int control_recovery=sidecar_control_boot();startup_log("sleep-recovery",(Result)control_recovery);
     int recovery=sidecar_recover();startup_log("transaction-recovery",(Result)recovery);
-    const SocketInitConfig cfg={.tcp_tx_buf_size=0x10000,.tcp_rx_buf_size=0x20000,
+    const SocketInitConfig cfg={.tcp_tx_buf_size=0x4000,.tcp_rx_buf_size=0x4000,
         .udp_tx_buf_size=0x1000,.udp_rx_buf_size=0x1000,.sb_efficiency=2,
         .num_bsd_sessions=2,.bsd_service_type=BsdServiceType_System};
     Result rc=socketInitialize(&cfg);startup_log("socket",rc);
