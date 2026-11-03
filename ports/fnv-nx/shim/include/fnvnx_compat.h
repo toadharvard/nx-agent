@@ -50,8 +50,62 @@
 #define __noop(...) ((void)0)
 #define __debugbreak() __builtin_trap()
 #define __alignof(t) __alignof__(t)
-#define _alloca(n) __builtin_alloca(n)
+#define _alloca(n) __builtin_alloca(n)   /* the decomp's own _alloca prototypes are dropped by DECL1 */
 #define __pragma(x) _Pragma(#x)
+
+/* MSVC compiler intrinsics the decomp declares itself (extern "C" void _ReadWriteBarrier(void); in 600 places) and
+ * calls qualified (::_ReadWriteBarrier()), so they must be functions with C linkage, not macros. */
+#ifdef __cplusplus
+extern "C" {
+#endif
+inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
+inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
+inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
+#ifdef __cplusplus
+}
+#endif
+
+/* SEH: there are no structured exceptions on the target; a __try body runs as a plain block and the __except
+ * filter / handler never run (S4 decides whether anything has to raise instead). The decomp has no __finally or
+ * __leave. */
+#define __try if (1)
+#define __except(filter) else if (0 && (filter))
+#define _exception_code() 0UL
+#define GetExceptionCode() 0UL
+
+/* Every definition tagged `// @fnv 0x...` is emitted out of line even where it is inlined everywhere: the link step
+ * (tools/link) binds references to it by address (prepare.py rule KEEP1). */
+#define FNVNX_KEEP __attribute__((used))
+
+/* MSVC class layout: derived members start at sizeof(base), never in its tail padding (prepare.py rule TAIL1
+ * puts FNVNX_MSVC_BASE_END(last base) first in every derived class body). A zero-width bit-field of an integer
+ * type with the base's alignment moves the next member to roundup(dsize(base), alignof(base)) == sizeof(base). */
+#ifdef __cplusplus
+template <unsigned A> struct fnvnx_int_of_align;
+template <> struct fnvnx_int_of_align<1> { typedef unsigned char type; };
+template <> struct fnvnx_int_of_align<2> { typedef unsigned short type; };
+template <> struct fnvnx_int_of_align<4> { typedef unsigned int type; };
+template <> struct fnvnx_int_of_align<8> { typedef unsigned long long type; };
+template <> struct fnvnx_int_of_align<16> { typedef unsigned __int128 type; };
+template <> struct fnvnx_int_of_align<32> { typedef unsigned int type __attribute__((aligned(32))); };
+template <> struct fnvnx_int_of_align<64> { typedef unsigned int type __attribute__((aligned(64))); };
+template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribute__((aligned(128))); };
+#define FNVNX_MSVC_BASE_END(...) typename fnvnx_int_of_align<alignof(__VA_ARGS__)>::type : 0;
+#endif
+
+/* SAL annotations (sal.h) used without an include in pasted CRT prototypes */
+#define _In_
+#define _In_opt_
+#define _Out_
+#define _Out_opt_
+#define _Inout_
+#define _Inout_opt_
+#define _In_z_
+#define _In_opt_z_
+#define _Printf_format_string_
+#define _Check_return_
+#define _Ret_maybenull_
+#define _Post_z_
 
 /* __declspec(x) -> __fnvnx_ds_x ; each supported specifier is defined below. */
 #define __declspec(x) __fnvnx_ds_##x
@@ -67,7 +121,8 @@
 #define __fnvnx_ds_restrict
 #define __fnvnx_ds_noalias
 #define __fnvnx_ds_align(n) __attribute__((aligned(n)))
-#define __fnvnx_ds_deprecated __attribute__((deprecated))
+#define __fnvnx_ds_deprecated(...) __attribute__((deprecated(__VA_ARGS__)))   /* always with a message */
+#define __fnvnx_ds_intrin_type
 #define __fnvnx_ds_property(...)
 #define __fnvnx_ds_uuid(...)
 

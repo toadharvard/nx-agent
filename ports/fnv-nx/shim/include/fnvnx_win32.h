@@ -5,6 +5,12 @@
  */
 #ifndef FNVNX_WIN32_H
 #define FNVNX_WIN32_H
+/* the SDK's own include guards: the decomp's generated layout headers (include/_FILETIME.h, _RTL_CRITICAL_SECTION.h,
+ * _ULARGE_INTEGER.h, _WIN32_FIND_DATAA.h) skip their copies when the SDK came first - their copies carry Xbox 360
+ * layouts (big-endian FILETIME / ULARGE_INTEGER halves, 28-byte RTL_CRITICAL_SECTION), the PC SDK ones are below. */
+#define _WINDEF_
+#define _WINNT_
+#define _WINBASE_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -123,8 +129,13 @@ typedef struct tagRECT { LONG left, top, right, bottom; } RECT, *PRECT, *LPRECT;
 typedef const RECT *LPCRECT;
 typedef struct tagSIZE { LONG cx, cy; } SIZE, *PSIZE, *LPSIZE;
 typedef struct _GUID { unsigned long Data1; unsigned short Data2, Data3; unsigned char Data4[8]; } GUID, IID, CLSID;
+#ifdef __cplusplus
 typedef const GUID &REFGUID;
 typedef const IID &REFIID;
+#else
+typedef const GUID *REFGUID;
+typedef const IID *REFIID;
+#endif
 typedef struct _FILETIME { DWORD dwLowDateTime, dwHighDateTime; } FILETIME, *PFILETIME, *LPFILETIME;
 typedef struct _SYSTEMTIME {
     WORD wYear, wMonth, wDayOfWeek, wDay, wHour, wMinute, wSecond, wMilliseconds;
@@ -147,6 +158,11 @@ void EnterCriticalSection(LPCRITICAL_SECTION);
 BOOL TryEnterCriticalSection(LPCRITICAL_SECTION);
 void LeaveCriticalSection(LPCRITICAL_SECTION);
 void DeleteCriticalSection(LPCRITICAL_SECTION);
+/* Interlocked*: compiler intrinsics on MSVC (linkage never mattered); declared with C++ linkage because the
+ * decomp's non-MSVC fallback (include/layout_support.h) defines InterlockedIncrement/Decrement as C++ inlines. */
+#ifdef __cplusplus
+}
+#endif
 LONG InterlockedIncrement(volatile LONG *);
 LONG InterlockedDecrement(volatile LONG *);
 LONG InterlockedExchange(volatile LONG *, LONG);
@@ -154,6 +170,9 @@ LONG InterlockedExchangeAdd(volatile LONG *, LONG);
 LONG InterlockedCompareExchange(volatile LONG *, LONG, LONG);
 PVOID InterlockedCompareExchangePointer(PVOID volatile *, PVOID, PVOID);
 PVOID InterlockedExchangePointer(PVOID volatile *, PVOID);
+#ifdef __cplusplus
+extern "C" {
+#endif
 HANDLE CreateEventA(void *, BOOL, BOOL, LPCSTR);
 HANDLE CreateMutexA(void *, BOOL, LPCSTR);
 HANDLE CreateSemaphoreA(void *, LONG, LONG, LPCSTR);
@@ -197,6 +216,7 @@ void GetSystemTime(LPSYSTEMTIME);
 void GetSystemTimeAsFileTime(LPFILETIME);
 DWORD GetLastError(void);
 void SetLastError(DWORD);
+void RaiseException(DWORD, DWORD, DWORD, const ULONG_PTR *);
 
 typedef struct _SYSTEM_INFO {
     union { DWORD dwOemId; struct { WORD wProcessorArchitecture; WORD wReserved; }; };
@@ -325,7 +345,7 @@ LPWSTR *CommandLineToArgvW(LPCWSTR, int *);
 /* ---- compiler intrinsics MSVC declares in <intrin.h> / <stdlib.h> */
 unsigned long long __rdtsc(void);
 unsigned long __readfsdword(unsigned long);
-#define _ReadWriteBarrier() __asm__ __volatile__("" ::: "memory")
+/* _ReadWriteBarrier: declared (as a function, the decomp re-declares and qualifies it) in fnvnx_compat.h */
 #define _byteswap_ulong(x) __builtin_bswap32(x)
 #define _byteswap_ushort(x) __builtin_bswap16(x)
 #define _byteswap_uint64(x) __builtin_bswap64(x)
@@ -336,7 +356,60 @@ static inline unsigned int _rotr(unsigned int v, int s) { s &= 31; return s ? (v
 typedef struct _ThrowInfo _ThrowInfo;
 void _CxxThrowException(void *, _ThrowInfo *);
 
+/* ---- GDI structures (wingdi.h / winnt.h); struct tags as in the SDK, d3d9.h forward-declares some of them */
+typedef struct tagPALETTEENTRY { BYTE peRed, peGreen, peBlue, peFlags; } PALETTEENTRY, *PPALETTEENTRY, *LPPALETTEENTRY;
+typedef struct _RGNDATAHEADER { DWORD dwSize, iType, nCount, nRgnSize; RECT rcBound; } RGNDATAHEADER, *PRGNDATAHEADER;
+typedef struct _RGNDATA { RGNDATAHEADER rdh; char Buffer[1]; } RGNDATA, *PRGNDATA, *LPRGNDATA;
+typedef struct _LUID { DWORD LowPart; LONG HighPart; } LUID, *PLUID;
+#pragma pack(push, 2)
+typedef struct tagBITMAPFILEHEADER {
+    WORD bfType; DWORD bfSize; WORD bfReserved1, bfReserved2; DWORD bfOffBits;
+} BITMAPFILEHEADER, *LPBITMAPFILEHEADER, *PBITMAPFILEHEADER;
+#pragma pack(pop)
+typedef struct tagBITMAPINFOHEADER {
+    DWORD biSize; LONG biWidth, biHeight; WORD biPlanes, biBitCount; DWORD biCompression, biSizeImage;
+    LONG biXPelsPerMeter, biYPelsPerMeter; DWORD biClrUsed, biClrImportant;
+} BITMAPINFOHEADER, *LPBITMAPINFOHEADER, *PBITMAPINFOHEADER;
+#define BI_RGB 0L
+
 #ifdef __cplusplus
 }
+#endif
+
+/* ---- COM base (unknwn.h); d3d9.h keeps its own copy behind FNVNX_IUNKNOWN_DEFINED */
+#define MAKE_HRESULT(sev, fac, code) ((HRESULT)(((unsigned long)(sev) << 31) | ((unsigned long)(fac) << 16) | ((unsigned long)(code))))
+#define E_NOTIMPL ((HRESULT)0x80004001L)
+#define E_NOINTERFACE ((HRESULT)0x80004002L)
+#define E_POINTER ((HRESULT)0x80004003L)
+#define E_ABORT ((HRESULT)0x80004004L)
+#define E_UNEXPECTED ((HRESULT)0x8000FFFFL)
+#define E_INVALIDARG ((HRESULT)0x80070057L)
+#ifdef __cplusplus
+#define FNVNX_IUNKNOWN_DEFINED
+struct IUnknown
+{
+    virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppvObject) = 0;
+    virtual ULONG STDMETHODCALLTYPE AddRef() = 0;
+    virtual ULONG STDMETHODCALLTYPE Release() = 0;
+};
+typedef IUnknown *LPUNKNOWN;
+#endif
+
+#ifdef __cplusplus
+/* The decomp declares the critical-section functions with its own parameter types (int*, char*, local copies of
+ * _RTL_CRITICAL_SECTION) and passes those; DECL1 drops those prototypes, these take their place (same function). */
+inline void InitializeCriticalSection(void *p) { InitializeCriticalSection((LPCRITICAL_SECTION)p); }
+inline BOOL InitializeCriticalSectionAndSpinCount(void *p, DWORD n) { return InitializeCriticalSectionAndSpinCount((LPCRITICAL_SECTION)p, n); }
+inline void EnterCriticalSection(void *p) { EnterCriticalSection((LPCRITICAL_SECTION)p); }
+inline BOOL TryEnterCriticalSection(void *p) { return TryEnterCriticalSection((LPCRITICAL_SECTION)p); }
+inline void LeaveCriticalSection(void *p) { LeaveCriticalSection((LPCRITICAL_SECTION)p); }
+inline void DeleteCriticalSection(void *p) { DeleteCriticalSection((LPCRITICAL_SECTION)p); }
+inline BOOL QueryPerformanceCounter(long long *p) { return QueryPerformanceCounter((LARGE_INTEGER *)p); }
+inline BOOL QueryPerformanceCounter(unsigned long long *p) { return QueryPerformanceCounter((LARGE_INTEGER *)p); }
+inline BOOL QueryPerformanceFrequency(long long *p) { return QueryPerformanceFrequency((LARGE_INTEGER *)p); }
+inline BOOL QueryPerformanceFrequency(unsigned long long *p) { return QueryPerformanceFrequency((LARGE_INTEGER *)p); }
+
+static_assert(sizeof(BITMAPFILEHEADER) == 14 && sizeof(BITMAPINFOHEADER) == 40 && sizeof(LUID) == 8, "SDK layout");
+static_assert(sizeof(CRITICAL_SECTION) == 24 && sizeof(LARGE_INTEGER) == 8 && sizeof(SYSTEM_INFO) == 36, "SDK layout");
 #endif
 #endif

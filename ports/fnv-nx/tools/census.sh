@@ -13,7 +13,7 @@ SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
 export CXX DECOMP OUT HERE SSE2NEON
 mkdir -p "$OUT/logs"
 
-FLAGS=(-mabi=ilp32 -std=gnu++17 -fsyntax-only -fms-extensions -fshort-wchar -fpermissive -w
+FLAGS=(-mabi=ilp32 -std=gnu++17 -fsyntax-only -fms-extensions -fshort-wchar -fpermissive -frounding-math -w
        -fmax-errors=200 -include "$HERE/shim/include/fnvnx_compat.h"
        -I"$HERE/shim/include" -I"$SSE2NEON" -I"$DECOMP/include")
 export FLAGS_STR="${FLAGS[*]}"
@@ -35,6 +35,9 @@ while read -r src; do
   first=$(grep -m1 ': error:' "$log" | sed -E 's/^[^:]+:[0-9]+:[0-9]+: error: //' || true)
   printf '%s\t%s\t%s\n' "$src" "$n" "$first" >> "$OUT/units.tsv"
 done < "$OUT/units.list"
+
+# the summary pipes end in `head`: a closed pipe upstream is expected, not a failure
+set +o pipefail
 
 {
   total=$(wc -l < "$OUT/units.list")
