@@ -1,0 +1,62 @@
+diff --git a/mojoshader_assembler.c b/mojoshader_assembler.c
+index b7e1d71..bee841a 100644
+--- a/mojoshader_assembler.c
++++ b/mojoshader_assembler.c
+@@ -734,6 +734,12 @@ static int parse_source_token_maybe_relative(Context *ctx, const int relok)
+ 
+             parse_source_token_maybe_relative(ctx, 0);
+             relative = 1;
++            // fnv-nx tests: < SM2 has no relative-address token (a0.x implied).
++            if (!shader_version_atleast(ctx, 2, 0))
++            {
++                ctx->tokenbufpos--;
++                retval--;
++            } // if
+ 
+             if (nexttoken(ctx) != ((Token) '+'))
+                 pushback(ctx);
+@@ -995,7 +1001,7 @@ static int parse_args_DCL(Context *ctx)
+         fail(ctx, "Invalid usage");
+     else if (samplerreg)
+         ctx->tokenbuf[0] = (usage << 27) | 0x80000000;
+-    else if (shader_is_pixel(ctx))  // all other pixel shader types are zero'd.
++    else if (shader_is_pixel(ctx) && !shader_version_atleast(ctx, 3, 0))  // fnv-nx tests: ps_3_0 dcl has usages
+         ctx->tokenbuf[0] = 0x80000000;
+     else
+         ctx->tokenbuf[0] = usage | (index << 16) | 0x80000000;
+@@ -1165,6 +1171,19 @@ static int parse_instruction_token(Context *ctx, Token token)
+         token = nexttoken(ctx);
+     } // if
+ 
++    // fnv-nx tests: predication prefix.
++    uint32 predtoken = 0;
++    if (token == ((Token) '('))
++    {
++        ctx->tokenbufpos = 0;
++        parse_source_token(ctx);
++        predtoken = ctx->tokenbuf[0];
++        predicated = 1;
++        if (nexttoken(ctx) != ((Token) ')'))
++            fail(ctx, "Expected ')'");
++        token = nexttoken(ctx);
++    } // if
++
+     if (token != TOKEN_IDENTIFIER)
+     {
+         fail(ctx, "Expected instruction");
+@@ -1254,7 +1273,14 @@ static int parse_instruction_token(Context *ctx, Token token)
+     if ((opcode == OPCODE_RCP) || (opcode == OPCODE_RSQ))
+         ctx->default_swizzle = 0;  // .xxxx replicate swizzle.
+ 
+-    const int tokcount = instruction->parse_args(ctx);
++    int tokcount = instruction->parse_args(ctx);
++    if (predicated && tokcount >= 2 && !tokenbuf_overflow(ctx))
++    {
++        // insert after the destination token (D3D9 order)
++        memmove(&ctx->tokenbuf[2], &ctx->tokenbuf[1], (tokcount - 2) * sizeof (uint32));
++        ctx->tokenbuf[1] = predtoken;
++        tokcount++;
++    } // if
+ 
+     // insttoks bits are reserved and should be zero if < SM2.
+     const uint32 insttoks = shader_version_atleast(ctx, 2, 0) ? tokcount-1 : 0;

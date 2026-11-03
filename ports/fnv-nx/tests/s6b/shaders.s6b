@@ -1,0 +1,356 @@
+// tests/s6b shader corpus (authored for this project; no game content).
+// Sections start with "=== name"; run.sh splits them, assembles each with s6b_asm,
+// packs them into synthetic .sdp packages and runs sdp2dksh. Directives in comments:
+//   // ctab: NAME SET REG COUNT CLASS TYPE ROWS COLS   CTAB symbol embedded by s6b_asm
+//   // expect: TEXT          generated GLSL must contain TEXT
+//   // json: TEXT            reflection JSON must contain TEXT
+//   // expect-fail: TEXT     translation must fail with an error containing TEXT (known gap)
+
+=== vs11_basic
+// SM1.1 VS: dcl semantics, m4x4 -> oPos, oD0/oD1, oT0/oT1, oFog, CTAB
+// ctab: WorldViewProj float 0 4 matrix_rows float 4 4
+// ctab: FogParams float 4 1 vector float 1 4
+// expect: layout(location = 0) in vec4 vs_v0;
+// expect: layout(location = 4) in vec4 vs_v1;
+// expect: layout(location = 6) in vec4 vs_v2;
+// expect: layout(location = 0) out highp vec4 io_10_0;
+// expect: layout(location = 1) out highp vec4 io_10_1;
+// expect: layout(location = 2) out highp vec4 io_5_0;
+// expect: layout(location = 18) out
+// expect: uniform vs_cbuf_f
+// expect: vs_drv_posfix
+// json: "WorldViewProj"
+// json: "usage": "COLOR"
+vs_1_1
+dcl_position v0
+dcl_color v1
+dcl_texcoord v2
+m4x4 oPos, v0, c0
+mov oD0, v1
+mov oD1, v1.zyxw
+mov oT0, v2
+mul oT1.xy, v2, c4
+dp4 r0.x, v0, c2
+mad oFog, r0.x, c4.x, c4.y
+
+=== vs11_reladdr
+// SM1.1 VS: a0 relative addressing (skinning palette), def literals, normal/blend semantics
+// ctab: Bones float 10 30 matrix_rows float 3 4
+// expect: ARRAYBASE_
+// expect: layout(location = 2) in vec4
+// expect: layout(location = 3) in vec4
+vs_1_1
+def c9, 3.0, 0.0, 1.0, 0.5
+dcl_position v0
+dcl_blendindices v1
+dcl_normal v2
+mul r1.x, v1.x, c9.x
+mov a0.x, r1.x
+dp4 r0.x, v0, c[a0.x + 10]
+dp4 r0.y, v0, c[a0.x + 11]
+dp4 r0.z, v0, c[a0.x + 12]
+mov r0.w, c9.z
+m4x4 oPos, r0, c0
+dp3 oT0.x, v2, c[a0.x + 10]
+mov oT0.yzw, c9.yyz
+
+=== vs11_constarray
+// SM1.1 VS: relative addressing into def'd constants (const array path)
+// ctab: Palette float 20 4 vector float 1 4
+// expect: const vec4 vs_const_array_
+vs_1_1
+def c20, 1.0, 0.0, 0.0, 1.0
+def c21, 0.0, 1.0, 0.0, 1.0
+def c22, 0.0, 0.0, 1.0, 1.0
+def c23, 1.0, 1.0, 1.0, 1.0
+dcl_position v0
+dcl_texcoord v1
+mov a0.x, v1.x
+mov oD0, c[a0.x + 20]
+m4x4 oPos, v0, c0
+
+=== vs20_flow
+// SM2.0 VS: loop aL/i#, rep, if b#/else, relative c[aL], int/bool constants, oPts, oT7
+// ctab: Lights float 8 8 vector float 1 4
+// ctab: NumLights int 0 1 scalar int 1 1
+// ctab: UseFog bool 0 1 scalar bool 1 1
+// expect: uniform vs_cbuf_ib
+// expect: for (
+// expect: gl_PointSize
+// expect: if (vs_b0)
+// json: "set": "int"
+// json: "set": "bool"
+vs_2_0
+defi i1, 3, 0, 1, 0
+dcl_position v0
+dcl_normal v1
+mov r0, c4.x
+loop aL, i0
+dp3 r1.x, v1, c[aL + 8]
+max r1.x, r1.x, c4.x
+add r0, r0, r1.x
+endloop
+rep i1
+add r0.y, r0.y, c4.w
+endrep
+if b0
+mov oT7, r0
+else
+mov oT7, c4.zzzz
+endif
+m4x4 oPos, v0, c0
+mov oD0, r0
+mov oPts, c5.x
+
+=== vs20_call
+// SM2.0 VS: call/label/ret subroutine, sincos, expp/logp, frc, sge/slt
+// expect: void vs_l0()
+vs_2_0
+def c10, -1.5500992e-006, -2.1701389e-005, 0.0026041667, 0.00026041668
+def c11, -0.020833334, -0.125, 1.0, 0.5
+dcl_position v0
+dcl_texcoord v1
+mov r2, c11.z
+call l0
+m4x4 oPos, v0, c0
+mov oD0, r2
+ret
+label l0
+sincos r2.xy, v1.x, c10, c11
+frc r3, v1
+sge r2.z, v1.y, c11.w
+slt r2.w, v1.y, c11.w
+expp r4, v1.z
+logp r4.y, r4.x
+add r2, r2, r3
+ret
+
+=== vs30_full
+// SM3.0 VS: dcl'd outputs, vertex texture fetch (texldl), predicates, break_gt, tangent/binormal
+// ctab: HeightMap sampler 0 1 object sampler2d 1 1
+// expect: layout(binding = 0) uniform sampler2D vs_s0;
+// expect: texture2DLod(
+// expect: layout(location = 14) in vec4
+// expect: layout(location = 15) in vec4
+// expect: layout(location = 21) out highp vec4 io_6_0;
+// expect: bvec4 vs_p0;
+// json: "type": "2d"
+vs_3_0
+def c10, 0.0, 1.0, 0.5, 8.0
+defi i0, 8, 0, 1, 0
+dcl_position v0
+dcl_texcoord v1
+dcl_tangent v2
+dcl_binormal v3
+dcl_2d s0
+dcl_position o0
+dcl_texcoord0 o1
+dcl_tangent o2
+dcl_color o3
+mov r1, v1
+mov r1.zw, c10.x
+texldl r0, r1, s0
+mad r2, r0.x, c10.z, v0
+setp_gt p0, r0.x, c10.z
+(p0) mov r2.y, c10.y
+(!p0) mov r2.y, c10.x
+mov r3, c10.x
+loop aL, i0
+add r3.x, r3.x, c10.y
+break_gt r3.x, c10.w
+endloop
+m4x4 o0, r2, c0
+mov o1, v1
+crs r4.xyz, v2, v3
+mov r4.w, c10.y
+mov o2, r4
+mov o3, r3
+
+=== ps11_tex
+// SM1.1 PS: tex t#, modulate with v0, r0 output, co-issue, fog/alpha epilogue, sampler bindings
+// expect: layout(binding = 0) uniform sampler2D ps_s0;
+// expect: layout(binding = 1) uniform sampler2D ps_s1;
+// expect: layout(location = 0) out highp vec4 _gl_FragData_0;
+// expect: ps_drv_alpha
+// expect: ps_drv_fog
+// expect: layout(location = 18) in highp vec4 dk_fog_in;
+ps_1_1
+def c0, 0.5, 0.5, 0.5, 1.0
+tex t0
+tex t1
+mul r0, t0, t1
+mul r0, r0, v0
+lrp r0.rgb, c0, r0, v1
++mov r0.a, t0.a
+
+=== ps11_texkill
+// SM1.1 PS: texkill + texcoord, cnd
+// expect: discard
+ps_1_1
+def c0, 0.5, 0.5, 0.5, 0.5
+texkill t0
+tex t1
+mov r0, t1
+cnd r0, r0.a, t1, v0
+
+=== ps11_texbem
+// SM1.1 PS: texbem (bump environment matrix from the driver UBO)
+// expect: ps_drv_texbem[2]
+ps_1_1
+tex t0
+texbem t1, t0
+mov r0, t1
+
+=== ps11_texbeml
+// SM1.1 PS: texbeml (luminance-scaled bump)
+// expect: ps_drv_texbem[3]
+ps_1_1
+tex t0
+texbeml t1, t0
+mul r0, t1, v0
+
+=== ps11_texm3x3
+// SM1.1 PS: texm3x3pad/texm3x3tex (environment bump through a 3x3 matrix)
+// expect: textureCube(ps_s3
+ps_1_1
+tex t0
+texm3x3pad t1, t0_bx2
+texm3x3pad t2, t0_bx2
+texm3x3tex t3, t0_bx2
+mov r0, t3
+
+=== ps12_texdp3tex
+// SM1.2 PS: texdp3tex - not implemented by MojoShader's GLSL emitter (known gap)
+// expect-fail: TEXDP3TEX
+ps_1_2
+tex t0
+texdp3tex t1, t0
+mov r0, t1
+
+=== ps14_phase
+// SM1.4 PS: texld/texcrd, phase, dependent read, cmp, bx2
+// expect: texture2D(ps_s
+ps_1_4
+def c0, 0.5, 0.5, 0.5, 0.5
+texcrd r1.rgb, t1
+texld r0, t0
+phase
+texld r2, r0
+mad r0, r2, r1_bx2, c0
+cmp r0, r0, r2, c0
+
+=== ps20_samplers
+// SM2.0 PS: dcl_2d/dcl_cube/dcl_volume, texld/texldp/texldb, texkill, CTAB samplers
+// ctab: DiffuseMap sampler 0 1 object sampler2d 1 1
+// ctab: EnvMap sampler 1 1 object samplercube 1 1
+// ctab: NoiseVol sampler 2 1 object sampler3d 1 1
+// expect: layout(binding = 1) uniform samplerCube ps_s1;
+// expect: layout(binding = 2) uniform sampler3D ps_s2;
+// expect: layout(location = 2) in highp vec4 io_5_0;
+// expect: layout(location = 0) in highp vec4 io_10_0;
+// expect: texture2DProj(
+// json: "type": "cube"
+// json: "type": "volume"
+// json: "EnvMap"
+ps_2_0
+dcl t0
+dcl t1.xyz
+dcl t2.xyz
+dcl v0
+dcl_2d s0
+dcl_cube s1
+dcl_volume s2
+texkill t0
+texld r0, t0, s0
+texld r1, t1, s1
+texld r2, t2, s2
+texldp r3, t0, s0
+texldb r4, t0, s0
+mul r0, r0, r1
+mad r0, r2, r3, r0
+add r0, r0, r4
+mul r0, r0, v0
+mov oC0, r0
+
+=== ps20_math
+// SM2.0 PS: rcp/rsq/pow/exp/log/nrm/dp2add/abs/cmp/lrp, sat/x2 modifiers, oDepth
+// expect: gl_FragDepth
+ps_2_0
+def c1, 0.5, 2.0, 0.25, 1.0
+dcl t0
+dcl v0
+rcp r0.x, t0.x
+rsq r0.y, t0.y
+pow r0.z, t0.z, c1.y
+exp r0.w, t0.w
+log r1.x, t0.x
+nrm r2.xyz, t0
+dp2add r1.y, t0, c1, c1.z
+abs r1.z, t0.z
+cmp r1.w, t0.x, c1.x, c1.y
+lrp_sat r3, c1.x, r0, r2
+mul r3, r3, v0
+mov oC0, r3
+mov oDepth, r1.x
+
+=== ps30_full
+// SM3.0 PS: dcl_texcoord/dcl_color v#, vPos, vFace, loop, if_gt, dsx/dsy, texldd/texldl,
+//           predicates, MRT oC0/oC1, relative c[aL]
+// ctab: Kernel float 16 8 vector float 1 4
+// expect: gl_FragCoord.xy - vec2(0.5)
+// expect: gl_FrontFacing
+// expect: dFdx(
+// expect: texture2DGrad(
+// expect: layout(location = 1) out highp vec4 _gl_FragData_1;
+// expect: layout(location = 3) in highp vec4 io_5_1;
+ps_3_0
+def c0, 0.0, 1.0, 0.5, 0.125
+defi i0, 8, 0, 1, 0
+dcl_texcoord0 v0
+dcl_texcoord1 v1.xy
+dcl_color0 v2
+dcl vPos.xy
+dcl vFace
+dcl_2d s0
+mov r0, c0.x
+loop aL, i0
+add r0, r0, c[aL + 16]
+endloop
+dsx r1, v0
+dsy r2, v0
+texldd r3, v0, s0, r1, r2
+mov r4, v1
+mov r4.zw, c0.x
+texldl r5, r4, s0
+setp_lt p0, v0, c0
+(p0) mov r3, r5
+if_gt vPos.x, c0.y
+mul r3, r3, c0.z
+endif
+mul r0, r0, c0.w
+mad oC0, r3, v2, r0
+mov oC1, r5
+
+=== ps30_predbreak
+// SM3.0 PS: rep + break_ge, if_lt/else, setp + predicated add, cube sampler from a normal input
+// expect: samplerCube
+// expect: break;
+ps_3_0
+def c0, 0.0, 1.0, 0.5, 4.0
+defi i0, 4, 0, 1, 0
+dcl_texcoord0 v0
+dcl_normal v1
+dcl_cube s3
+mov r0, c0.x
+rep i0
+add r0.x, r0.x, c0.y
+setp_ge p0, r0, c0.w
+(p0) add r0.y, r0.y, c0.y
+break_ge r0.x, c0.w
+endrep
+if_lt v0.x, c0.z
+texld r1, v1, s3
+else
+mov r1, c0.y
+endif
+mul oC0, r1, r0.x
