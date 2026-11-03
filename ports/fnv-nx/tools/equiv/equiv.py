@@ -599,7 +599,7 @@ def cmd_attribute(a):
             todo.append((i, c))
     if a.limit:
         todo = todo[:a.limit]
-    cands = [(rid, {rid}) for rid in sorted(allow)]
+    cands = [] if a.hier else [(rid, {rid}) for rid in sorted(allow)]
     for g in a.group or []:
         gname, _, ids = g.partition('=')
         cands.append((gname, set(ids.split(',')) & allow))
@@ -639,7 +639,9 @@ def cmd_attribute(a):
                    eh_differs=c.get('eh_differs', False), by_rule={})
         mine = work / ('u%d' % i)
         try:
-            for rid, ids in cands:
+            queue = list(cands)
+            while queue:
+                rid, ids = queue.pop(0)
                 if not ids:
                     continue
                 touched = {f: reduced(f, rid, ids) for f in closure}
@@ -668,6 +670,9 @@ def cmd_attribute(a):
                 row['by_rule'][rid] = dict(compiles=True, files=len(touched), fixed=fixed,
                                            identical=len(same) == len(fa) and fp['eh'] == A[i].get('eh'),
                                            eh_fixed=bool(row['eh_differs'] and fp['eh'] == A[i].get('eh')))
+                # --hier: a group that explains something is split into its rules
+                if a.hier and len(ids) > 1 and (fixed or row['by_rule'][rid]['eh_fixed'] or c['status'] != 'differs'):
+                    queue += [(r, {r}) for r in sorted(ids)]
         finally:
             shutil.rmtree(mine, ignore_errors=True)
         with lock:
@@ -681,6 +686,63 @@ def cmd_attribute(a):
             list(pool.map(one, todo))
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def cmd_summarize(a):
+    """Per-rule table from whole-tree runs: BASE (pristine) vs HEAD (prepared with a rule set) and, for each NAME,
+    a tree prepared with that set minus NAME (--without NAME=FP.jsonl, a rule id or a group). A HEAD function that
+    differs from BASE but is identical in the tree without NAME is attributed to NAME (single rules before groups);
+    a unit HEAD does not compile that compiles without NAME failed because of NAME. Kinds: retarget (same code
+    bytes), eh (identical when both sides build with /EHs-c-, --eh BASE_EHOFF HEAD_EHOFF), code."""
+    A, B = load_rows(a.base), load_rows(a.head)
+    without = []
+    for w in a.without or []:
+        name, _, path = w.partition('=')
+        without.append((name, load_rows(path)))
+    without.sort(key=lambda nw: (not RULE_ID.fullmatch(nw[0]), nw[0]))      # single rules first
+    eha, ehb = (load_rows(a.eh[0]), load_rows(a.eh[1])) if a.eh else ({}, {})
+    table, units_by, fails_by, examples, unexplained = {}, {}, {}, {}, []
+    totals = Counter()
+    for i in sorted(set(A) & set(B)):
+        c = compare_rows(A[i], B[i])
+        if c['status'] == 'differs':
+            ehc = compare_rows(eha[i], ehb[i]) if i in eha and i in ehb else None
+            for k in c['differ']:
+                kind = 'retarget' if k in c['same_bytes'] else (
+                    'eh' if ehc is not None and ehc['status'] in ('identical', 'differs') and k not in ehc['differ']
+                    else 'code')
+                totals[kind] += 1
+                who = [n for n, rows in without if i in rows and rows[i]['status'] == 'ok'
+                       and rows[i]['functions'].get(k, [None])[0] == A[i]['functions'][k][0]]
+                name = who[0] if who else '(interaction)'
+                table.setdefault(name, Counter())[kind] += 1
+                units_by.setdefault(name, set()).add(i)
+                examples.setdefault((name, kind), []).append((B[i]['source'], k))
+                if not who:
+                    unexplained.append((B[i]['source'], k))
+        elif c['status'] == 'does-not-compile':
+            totals['does-not-compile'] += 1
+            who = [n for n, rows in without if i in rows and rows[i]['status'] == 'ok']
+            name = who[0] if who else '(interaction)'
+            fails_by.setdefault(name, []).append((B[i]['source'], '%s %s: %s' % first_error(B[i].get('error', ''))))
+    print('differing functions: %s; units that do not compile: %d' % (
+        ', '.join('%s %d' % kv for kv in sorted(totals.items()) if kv[0] != 'does-not-compile'),
+        totals['does-not-compile']))
+    print('%-14s %6s %8s %6s %6s %6s %8s' % ('rule', 'units', 'retarget', 'eh', 'code', 'total', 'no-build'))
+    for name in sorted(set(table) | set(fails_by)):
+        t = table.get(name, Counter())
+        print('%-14s %6d %8d %6d %6d %6d %8d' % (name, len(units_by.get(name, ())), t['retarget'], t['eh'], t['code'],
+                                                 sum(t.values()), len(fails_by.get(name, []))))
+    if a.examples:
+        for (name, kind), ex in sorted(examples.items()):
+            print('\n%s / %s: %s' % (name, kind, '; '.join('%s %s' % e for e in ex[:a.examples])))
+        for name, ex in sorted(fails_by.items()):
+            print('\n%s / no-build: %s' % (name, '; '.join('%s (%s)' % e for e in ex[:a.examples])))
+    if a.out:
+        Path(a.out).write_text(json.dumps(dict(
+            totals=dict(totals), table={k: dict(v) for k, v in table.items()},
+            units={k: sorted(v) for k, v in units_by.items()},
+            examples={'%s/%s' % k: v for k, v in examples.items()}, fails=fails_by), indent=0) + '\n')
 
 
 DECORATED_FN = [re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$'), re.compile(r'^__imp_\?([A-Za-z_]\w*)@@Y'),
@@ -814,12 +876,18 @@ def main():
     p.add_argument('--only'); p.add_argument('--limit', type=int); p.add_argument('--workdir')
     p.add_argument('--group', action='append', help='NAME=ID,ID: also leave these rules out together')
     p.add_argument('--failed', action='store_true', help='also units B does not compile')
+    p.add_argument('--hier', action='store_true', help='try only the --group sets first; split a group into its rules '
+                   'when leaving it out fixes a function (or lets the unit compile)')
     p.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
     p = sub.add_parser('errors'); p.add_argument('fp')
     p = sub.add_parser('bindings'); p.add_argument('decomp')
+    p = sub.add_parser('summarize'); p.add_argument('base'); p.add_argument('head')
+    p.add_argument('--without', action='append', help='NAME=FP.jsonl: HEAD\'s rule set minus NAME')
+    p.add_argument('--eh', nargs=2, help='BASE and HEAD built with --eh-off'); p.add_argument('--out')
+    p.add_argument('--examples', type=int, default=0)
     a = ap.parse_args()
     dict(rules=cmd_rules, prepare=cmd_prepare, plan=cmd_plan, build=cmd_build, compare=cmd_compare,
-         show=cmd_show, attribute=cmd_attribute, errors=cmd_errors, refp=cmd_refp, bindings=cmd_bindings)[a.command](a)
+         show=cmd_show, attribute=cmd_attribute, errors=cmd_errors, refp=cmd_refp, bindings=cmd_bindings, summarize=cmd_summarize)[a.command](a)
 
 
 if __name__ == '__main__':
