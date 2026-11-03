@@ -14,14 +14,15 @@ import coffobj
 import a64image
 import conv as convmod
 import runner
+import libcalls
 
 STUB_ADDR = re.compile(r'^__fnv(?:nx_br)?_([0-9a-f]{8})')
 LOCAL_STATIC = re.compile(r'^\?(?:[^@?]+@\?\d+\?\?|\$S\d+@|\$TSS\d+@)')   # ?x@?1??f@@..., ?$S1@..., ?$TSS0@...
 
 
 class UnitCache:
-    def __init__(self, linkdir, workdir):
-        self.linkdir, self.workdir = linkdir, workdir
+    def __init__(self, linkdir, workdir, unit_closed=True):
+        self.linkdir, self.workdir, self.unit_closed = linkdir, workdir, unit_closed
         self.units = json.load(open(config.DECOMP / 'build/units.json'))['units']
         self.by_source = {}             # source -> [(index, unit)] (a source can be listed with two flag sets)
         self.def_at = {}
@@ -30,6 +31,7 @@ class UnitCache:
             for f in u['functions']:
                 self.def_at.setdefault(int(f['address'], 16), (u['source'], f['symbol']))
         self._x86, self._img, self._pin, self._callee = {}, {}, {}, {}
+        self._refmap = None
 
     def x86_unit(self, source, addr=None):
         """The oracle unit of `source` that defines `addr` (the first listing when addr is None)."""
@@ -48,12 +50,35 @@ class UnitCache:
             self._img[source] = a64image.build(source, self.linkdir, self.workdir)
         return self._img[source]
 
-    def stub_addrmap(self, image):
+    def _refs(self, source):
+        """{undefined name: original address} of the unit object (S2's refs.tsv), for names S2 kept (CRT addresses
+        without a definition, imports)."""
+        if self._refmap is None:
+            self._refmap = {}
+            path = config.WORK.parent / 'link/out/refs.tsv'
+            for line in open(path, encoding='utf-8', errors='replace'):
+                if line.startswith('#'):
+                    continue
+                f = line.rstrip('\n').split('\t')
+                if len(f) >= 5 and f[4] and f[2] in ('extern-text', 'import', 'code', 'code-bridge', 'code-manual',
+                                                     'code-pending', 'code-defmissing'):
+                    try:
+                        self._refmap.setdefault(f[0], {})[f[1]] = int(f[4], 16)
+                    except ValueError:
+                        pass
+        return self._refmap.get(source, {})
+
+    def stub_addrmap(self, image, source):
+        refs = self._refs(source)
         out = {}
         for addr, name in image.stubs.items():
             m = STUB_ADDR.match(name)
             if m:
                 out[addr] = int(m.group(1), 16)
+            elif name in refs:
+                out[addr] = refs[name]
+            elif name in libcalls.EQUIV:
+                out[addr] = libcalls.EQUIV[name]
         return out
 
     def callee_info_for(self, source):
@@ -62,25 +87,30 @@ class UnitCache:
             for n, a in u['symbols'].items():
                 refs.setdefault(int(a, 16), n)
 
-        def info(addr):
+        def conv_of(addr):
             key = (source, addr)
-            if key in self._callee:
-                return self._callee[key]
-            got = None
-            for src, name in ((self.def_at.get(addr) or (None, None)), (source, refs.get(addr))):
-                if not name:
-                    continue
-                try:
-                    cv = convmod.Conv(name, src)
-                except Exception:  # noqa: BLE001
-                    continue
-                kind = 'int'
-                if cv.x86_ret == 'st0':
-                    kind = 'f32' if cv.ret.size == 4 else 'f64'
-                got = (cv.pop, kind)
-                break
-            self._callee[key] = got
-            return got
+            if key not in self._callee:
+                got = None
+                for src, name in ((self.def_at.get(addr) or (None, None)), (source, refs.get(addr))):
+                    if not name:
+                        continue
+                    try:
+                        got = convmod.Conv(name, src)
+                        break
+                    except Exception:  # noqa: BLE001
+                        continue
+                self._callee[key] = got
+            return self._callee[key]
+
+        def info(addr):
+            cv = conv_of(addr)
+            if cv is None:
+                return None
+            kind = 'int'
+            if cv.x86_ret == 'st0':
+                kind = 'f32' if cv.ret.size == 4 else 'f64'
+            return (cv.pop, kind)
+        info.conv = conv_of
         return info
 
     def target(self, source, orig_addr):
@@ -99,7 +129,12 @@ class UnitCache:
             for n, a in u['symbols'].items():
                 if LOCAL_STATIC.match(n):
                     statics.update(range(int(a, 16), int(a, 16) + 16))
-        return runner.Target(cv, orig_addr, fn['code'], img, self.stub_addrmap(img), self.callee_info_for(source),
+        code = {orig_addr: fn['code']}
+        if self.unit_closed:
+            for a, f in xu.funcs.items():
+                if not f['unresolved']:
+                    code[a] = f['code']
+        return runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
                              statics)
 
     def pinned(self, source, orig_addr):

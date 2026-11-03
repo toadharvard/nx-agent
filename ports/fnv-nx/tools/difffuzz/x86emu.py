@@ -11,6 +11,7 @@ via a `fld` stub for float results when the callee is known to return one), pops
 the caller. The callee's own stack cleanup (stdcall/thiscall `ret N`) is applied when the callee's convention is
 known (callee_pop), else none (cdecl).
 """
+import bisect
 import struct
 
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE,
@@ -19,6 +20,7 @@ from unicorn.x86_const import (UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX, U
                                UC_X86_REG_EBX, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_GDTR,
                                UC_X86_REG_FS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_FPCW,
                                UC_X86_REG_FPSW)
+import libcalls
 import world
 
 PAGE = world.PAGE
@@ -29,6 +31,8 @@ FRET = 0x0e003000           # float result slot (80-bit)
 RESULT_BUF = 0x0e004000     # default hidden result buffer
 FLD_STUB = 0x0e005000       # `fld qword [FLD_VAL]; ret` for float results of intercepted calls
 FLD_VAL = 0x0e005800
+BUILTIN_STUB = 0x0e006000   # x87 helper code (_ftol2, _CIsqrt, ...) and its scratch slots
+BUILTIN_SLOT = 0x0e006800
 FPCW_MSVC = 0x027f          # MSVC CRT default: 53-bit precision, round to nearest, exceptions masked
 
 
@@ -61,11 +65,12 @@ class X86Engine:
         self.world = world_obj
         self.text_funcs = text_funcs
         self.callee_info = callee_info or (lambda a: None)
-        self.ranges = [(a, a + len(c)) for a, c in text_funcs.items()]
+        self.ranges = sorted((a, a + len(c)) for a, c in text_funcs.items())
+        self._starts = [lo for lo, _ in self.ranges]
         self.mapped = set()
         self.dynamic = set()
         uc = self.uc = Uc(UC_ARCH_X86, UC_MODE_32)
-        for base in (GDT, TEB, STUBS, FRET, RESULT_BUF, FLD_STUB):
+        for base in (GDT, TEB, STUBS, FRET, RESULT_BUF, FLD_STUB, BUILTIN_STUB):
             uc.mem_map(base, PAGE, UC_PROT_ALL)
             self.mapped.add(base)
         uc.mem_map(world.STACK[0], world.STACK[1] - world.STACK[0], UC_PROT_READ | UC_PROT_WRITE)
@@ -116,12 +121,10 @@ class X86Engine:
         uc.emu_stop()
 
     def _in_loaded(self, a):
-        for lo, hi in self.ranges:
-            if lo <= a < hi:
-                return True
-        return False
+        i = bisect.bisect_right(self._starts, a) - 1
+        return i >= 0 and a < self.ranges[i][1]
 
-    def run(self, conv, case, placement, max_steps=200000):
+    def run(self, conv, case, placement, max_steps=200000, start=None):
         uc = self.uc
         r = Result()
         for a, code in self.text_funcs.items():
@@ -148,7 +151,7 @@ class X86Engine:
                          end=world.TEXT[1] - 1)
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
                for lo, hi in world.COMPARED]
-        start = next(iter(self.text_funcs))
+        start = start if start is not None else next(iter(self.text_funcs))
         self._fault = None
         try:
             uc.emu_start(start, world.SENTINEL, count=max_steps)
@@ -211,7 +214,10 @@ class X86Engine:
             return
         esp = uc.reg_read(UC_X86_REG_ESP)
         retaddr = world.u32(uc.mem_read(esp, 4))
-        words = [world.u32(uc.mem_read(esp + 4 + 4 * i, 4)) for i in range(6)]
+        words = [world.u32(uc.mem_read(esp + 4 + 4 * i, 4)) for i in range(16)]
+        bname = libcalls.X86.get(address)
+        if bname is not None and self._builtin(uc, bname, esp, retaddr, words, r):
+            return
         k = len(r.calls)
         r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr))
         rb = case.ret_bytes(k)
@@ -234,6 +240,48 @@ class X86Engine:
             return
         uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
         uc.reg_write(UC_X86_REG_EIP, retaddr)
+
+    def _builtin(self, uc, name, esp, ret, words, r):
+        """Run a CRT function or compiler helper for real (not traced). True when handled."""
+        if name == 'cookie':                     # @__security_check_cookie@4 (ecx): nothing to check here
+            uc.reg_write(UC_X86_REG_ESP, esp + 4); uc.reg_write(UC_X86_REG_EIP, ret); return True
+        if name == 'chkstk':                     # _chkstk/_alloca_probe: esp -= eax (probing is a no-op here)
+            uc.reg_write(UC_X86_REG_ESP, (esp + 4 - uc.reg_read(UC_X86_REG_EAX)) & 0xffffffff)
+            uc.reg_write(UC_X86_REG_EIP, ret); return True
+        stub = libcalls.x87_stub(name, BUILTIN_SLOT)
+        if stub is not None:
+            uc.mem_write(BUILTIN_STUB, stub)
+            uc.reg_write(UC_X86_REG_EIP, BUILTIN_STUB); return True
+        if name in ('allmul', 'alldiv'):         # stdcall (a_lo, a_hi, b_lo, b_hi) -> edx:eax, ret 16
+            a = words[0] | words[1] << 32
+            b = words[2] | words[3] << 32
+            if name == 'allmul':
+                v = (a * b) & (2 ** 64 - 1)
+            else:
+                sa, sb = a - (a >> 63 << 64), b - (b >> 63 << 64)
+                if sb == 0:
+                    self._fault = 'div0'; uc.emu_stop(); return True
+                q = abs(sa) // abs(sb)
+                v = (q if (sa < 0) == (sb < 0) else -q) & (2 ** 64 - 1)
+            uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff); uc.reg_write(UC_X86_REG_EDX, v >> 32)
+            uc.reg_write(UC_X86_REG_ESP, esp + 4 + 16); uc.reg_write(UC_X86_REG_EIP, ret); return True
+        if name in ('allshl', 'allshr'):         # edx:eax << / >> cl (MSVC: counts >= 64 give 0 / the sign)
+            v = uc.reg_read(UC_X86_REG_EAX) | uc.reg_read(UC_X86_REG_EDX) << 32
+            c = uc.reg_read(UC_X86_REG_ECX) & 0xff
+            if name == 'allshl':
+                v = 0 if c >= 64 else (v << (c & 31 if c < 32 else c)) & (2 ** 64 - 1)
+            else:
+                sv = v - (v >> 63 << 64)
+                v = (sv >> min(c, 63)) & (2 ** 64 - 1)
+            uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff); uc.reg_write(UC_X86_REG_EDX, v >> 32)
+            uc.reg_write(UC_X86_REG_ESP, esp + 4); uc.reg_write(UC_X86_REG_EIP, ret); return True
+        try:
+            v = libcalls.run(name, libcalls.Mem(uc, r.writes, self._ensure), words)
+        except KeyError:
+            return False
+        uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff)
+        uc.reg_write(UC_X86_REG_ESP, esp + 4); uc.reg_write(UC_X86_REG_EIP, ret)
+        return True
 
     def _read_ret(self, conv, placement):
         uc = self.uc

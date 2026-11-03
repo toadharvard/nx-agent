@@ -19,6 +19,7 @@ from unicorn import (Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_BLOCK, UC_HOOK_MEM_
 from unicorn import arm64_const as A
 import world
 import a64image
+import libcalls
 
 PAGE = world.PAGE
 XR = [A.UC_ARM64_REG_X0 + i for i in range(29)] + [A.UC_ARM64_REG_X29, A.UC_ARM64_REG_X30]
@@ -28,10 +29,10 @@ BRK = struct.pack('<I', 0xd4200000)
 
 
 class Call:
-    __slots__ = ('target', 'args', 'fargs', 'x8')
+    __slots__ = ('target', 'args', 'fargs', 'x8', 'stack')
 
-    def __init__(self, target, args, fargs, x8):
-        self.target, self.args, self.fargs, self.x8 = target, args, fargs, x8
+    def __init__(self, target, args, fargs, x8, stack=b''):
+        self.target, self.args, self.fargs, self.x8, self.stack = target, args, fargs, x8, stack
 
 
 class Result:
@@ -211,11 +212,22 @@ class Arm64Engine:
         case, r = user
         if address < a64image.NAMED_STUB:
             target = address - a64image.CODE_STUB
+            name = None
         else:
             target = self.stub_orig.get(address, -address)
+            name = self.image.stubs.get(address)
+        if self._builtin(uc, name, target, r):
+            return
+        if name == '__stack_chk_fail':
+            self._fault = 'stack-protector'; uc.emu_stop(); return
         k = len(r.calls)
+        sp = uc.reg_read(A.UC_ARM64_REG_SP)
+        try:
+            stk = bytes(uc.mem_read(sp, 64))
+        except UcError:
+            stk = b''
         r.calls.append(Call(target, [uc.reg_read(XR[i]) for i in range(8)], [uc.reg_read(VR[i]) for i in range(8)],
-                            uc.reg_read(A.UC_ARM64_REG_X8)))
+                            uc.reg_read(A.UC_ARM64_REG_X8), stk))
         rb = case.ret_bytes(k)
         for i in list(range(1, 18)):
             uc.reg_write(XR[i], world.garbage32(case.seed, 600 + i + 32 * k))
@@ -224,6 +236,30 @@ class Arm64Engine:
         uc.reg_write(XR[0], int.from_bytes(rb[:8], 'little'))
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
         uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+
+    def _builtin(self, uc, name, target, r):
+        bname = libcalls.A64.get(name) if name else None
+        if bname is None and target is not None and target >= 0:
+            bname = libcalls.X86.get(target)
+            if bname not in libcalls.A64.values():
+                bname = None
+        if bname is None:
+            return False
+        if bname in libcalls.FLOAT_NAMES:
+            v = uc.reg_read(VR[0])
+            if bname.endswith('f'):
+                x = struct.unpack('<f', (v & 0xffffffff).to_bytes(4, 'little'))[0]
+                out = int.from_bytes(struct.pack('<f', libcalls.run_float(bname, x)), 'little')
+            else:
+                x = struct.unpack('<d', (v & (2 ** 64 - 1)).to_bytes(8, 'little'))[0]
+                out = int.from_bytes(struct.pack('<d', libcalls.run_float(bname, x)), 'little')
+            uc.reg_write(VR[0], out)
+        else:
+            args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
+            v = libcalls.run(bname, libcalls.Mem(uc, r.writes, self._ensure), args)
+            uc.reg_write(XR[0], v & 0xffffffff)
+        uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+        return True
 
     def _read_ret(self, conv, placement):
         uc = self.uc

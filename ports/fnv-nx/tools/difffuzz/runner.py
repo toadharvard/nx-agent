@@ -10,12 +10,15 @@ compare() returns the FIRST difference (so a reproducer stays minimal), or None:
   call-count   same prefix, one side makes more calls
   return       result bytes differ (float/double: also relative error and a tolerance verdict)
   mem-write    effective data writes (address -> final byte, outside the stacks) differ
+  call-args    same callee, different logical argument (decoded per the callee DEFINITION's signature on both sides:
+               after an S2 bridge the AArch64 registers must hold what the definition expects)
   callee-saved x86 ebx/esi/edi/ebp or AArch64 x19..x29/sp not preserved (an ABI break, e.g. a bridge or asm)
 Timeouts on either side are inconclusive (not a divergence), both sides faulting is agreement.
 """
 import math
 import struct
 
+import libcalls
 import world
 import x86emu
 import arm64emu
@@ -26,7 +29,11 @@ class Target:
         self.local_statics = set(local_statics)   # byte addresses of the unit's function-local statics
         self.conv = conv
         self.orig_addr = orig_addr
-        self.x86_code = {orig_addr: x86_code}
+        # x86_code: {addr: bytes} of every oracle function executed for real: the function under test and, in
+        # unit-closed mode (default), every other function of its unit, as the native unit object holds them too
+        # (GCC inlines same-unit callees MSVC called and the other way round; only calls leaving the unit are
+        # intercepted, on both machines)
+        self.x86_code = dict(x86_code) if isinstance(x86_code, dict) else {orig_addr: x86_code}
         self.image = image
         self.stub_orig = stub_orig
         self.callee_info = callee_info
@@ -68,11 +75,74 @@ def float_verdict(cls_size, bx, ba):
     return d
 
 
+NAMES = {}      # named-stub address -> symbol (set by Pair.run for reports)
+
+
 def _hex(t):
-    return '%08x' % (t & 0xffffffff) if t >= 0 else '-%x' % -t
+    return '%08x' % (t & 0xffffffff) if t >= 0 else 'name:%s' % NAMES.get(-t, '%x' % -t)
 
 
-def compare(conv, rx, ra, w, sret=None, local_statics=()):
+def _in_stack(v):
+    return world.STACK[0] <= v < world.STACK[1]
+
+
+def decode_x86(cv, call):
+    """{label: bytes} of an intercepted x86 call per the callee's convention (ecx, edx, stack words)."""
+    stack = b''.join(struct.pack('<I', w) for w in call.args[2:])
+    out = {}
+    for lab, space, off, size in cv.x86:
+        if space == 'ecx':
+            out[lab] = struct.pack('<I', call.args[0])[:size]
+        elif space == 'edx':
+            out[lab] = struct.pack('<I', call.args[1])[:size]
+        elif off + size <= len(stack):
+            out[lab] = stack[off:off + size]
+    return out
+
+
+def decode_a64(cv, call):
+    out = {}
+    for v in cv.vals:
+        buf = bytearray(v.size)
+        ok = True
+        for voff, cont, coff, ln in cv.a64[v.label]:
+            if cont[0] == 'x':
+                b = (call.args[cont[1]] & ((1 << 64) - 1)).to_bytes(8, 'little')
+            elif cont[0] == 'v':
+                b = (call.fargs[cont[1]] & ((1 << 128) - 1)).to_bytes(16, 'little')
+            elif cont[0] == 'stk' and cont[1] + coff + ln <= len(call.stack):
+                b = call.stack[cont[1]:cont[1] + 16]
+            else:
+                ok = False
+                break
+            buf[voff:voff + ln] = b[coff:coff + ln]
+        if ok:
+            out[v.label] = bytes(buf)
+    if cv.hidden:
+        out['sret'] = struct.pack('<I', call.x8 & 0xffffffff)
+    return out
+
+
+def compare_args(cv, cx, ca):
+    """First logical argument the two sides pass differently to the same callee (pointers to their own stack
+    frames are equal by definition: the frames differ by design)."""
+    dx, da = decode_x86(cv, cx), decode_a64(cv, ca)
+    for v in cv.vals:
+        if v.label not in dx or v.label not in da or v.kind not in ('gpr', 'fpr'):
+            continue
+        bx, ba = dx[v.label][:v.size], da[v.label][:v.size]
+        if v.cls == 'I8' and v.is_bool:
+            bx, ba = bytes([bx[0] != 0]), bytes([ba[0] != 0])
+        if bx == ba:
+            continue
+        if v.is_ptr and _in_stack(struct.unpack('<I', bx.ljust(4, b'\0'))[0]) and \
+                _in_stack(struct.unpack('<I', ba.ljust(4, b'\0'))[0]):
+            continue
+        return dict(arg=v.label, cls=v.cls, x86=bx.hex(), arm=ba.hex())
+    return None
+
+
+def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None):
     ex, ea = rx.error, ra.error
     if ex == 'timeout' or ea == 'timeout':
         return None
@@ -89,6 +159,15 @@ def compare(conv, rx, ra, w, sret=None, local_statics=()):
     if len(tx) != len(ta):
         return dict(kind='call-count', x86=len(tx), arm=len(ta), x86_trace=[_hex(t) for t in tx],
                     arm_trace=[_hex(t) for t in ta])
+    if callee_conv is not None:
+        for i, (cx, ca) in enumerate(zip(rx.calls, ra.calls)):
+            cv = callee_conv(cx.target) if cx.target >= 0 and cx.target not in libcalls.NO_ARGS else None
+            if cv is None:
+                continue
+            d = compare_args(cv, cx, ca)
+            if d:
+                d.update(kind='call-args', index=i, target=_hex(cx.target), callee=cv.name)
+                return d
     if rx.ret != ra.ret:
         d = dict(kind='return', x86=(rx.ret or b'').hex(), arm=(ra.ret or b'').hex())
         if conv.ret is not None and conv.ret.cls in ('F32', 'F64') and rx.ret and ra.ret:
@@ -146,6 +225,8 @@ class Pair:
         else:
             self.xe.reset(w)
             self.ae.reset(w)
-        rx = self.xe.run(self.target.conv, case, placement, max_steps=max_steps)
+        NAMES.clear(); NAMES.update(self.target.image.stubs)
+        rx = self.xe.run(self.target.conv, case, placement, max_steps=max_steps, start=self.target.orig_addr)
         ra = self.ae.run(self.target.conv, case, placement, self.target.orig_addr, max_steps=max_steps)
-        return rx, ra, compare(self.target.conv, rx, ra, w, placement.get('sret'), self.target.local_statics)
+        return rx, ra, compare(self.target.conv, rx, ra, w, placement.get('sret'), self.target.local_statics,
+                                getattr(self.target.callee_info, 'conv', None))
