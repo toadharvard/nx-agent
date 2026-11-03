@@ -159,3 +159,32 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   from every non-POD class used as a base (prepare rule appending explicit trailing padding, sizes found from GCC
   `-fdump-lang-class`, dsize < size); the decomp's 3,171 `static_assert`s are the oracle. Assigned to S1.
 * **next** - S1 reports the number of affected classes.
+
+### J-0008 | 2026-11-03 | stream: S2-link | status: wip | parent: J-0002
+
+* **did** - `tools/link/`: `compile.sh` (census flags, `-c -O2`, incremental objects), `fnvlink.py resolve|apply|check`
+  (llvm-undname + c++filt -> canonical signatures, strict-to-loose matching per unit then global, `__fnv_<addr>`
+  address symbols, own ELF renamer for many-to-one renames, `bridges.S`, `addrmap.tsv/.c`, trial link), `abi.py`
+  (x86 ecx/edx/stack and AAPCS64 slot models, hidden result pointer, parallel-move bridge thunks), `test_link.py`
+  (passes). Compiled all 2,978 units of a fresh prepared tree: 2,029 objects. Spec in `docs/LINK.md`.
+* **found** - 106,043 undefined (object, symbol) refs; 90,022 bound by address (data 41,037, native code 23,379,
+  code of not-yet-compiling units 23,676, CRT/thunk addresses 877, imports 124); of the bound code refs only 2,344
+  share the Itanium name of their definition (21,791 do not - a plain link would miss or mis-bind them). Unresolved
+  9,294: 6,088 only from GCC-emitted vtable slots (virtuals never named at an address), 749 implicit ctor/dtor
+  calls, 1,462 typeinfo/vtable/thunks, 995 other; 1 ambiguous. 6,361 variables defined natively are rebound weak to
+  their image address; 4,485 strong names defined in several objects (extra copies made local). Trial link: 0
+  multiple definitions.
+* **found** - ABI: 136 bridges generated (146 refs: register shifts, fastcall edx dummy, int/float swaps); 518 pairs
+  / 610 refs need aggregate layouts (aggregate params 236, hidden vs explicit result pointer 206, aggregate returns
+  159, varargs 15); 74 pairs x86-inconsistent (callers relying on ecx = this): source fixes, handed to S1. 173
+  definitions inlined away (need out-of-line emission, handed to S1).
+* **decided** - D4 detailed: link symbols `__fnv_<addr>` (code: alias of the native definition; data: absolute at
+  the original address); bridges `__fnvnx_br_<addr>_<hash>`; address map format v1 with runtime table
+  `fnvnx_addrmap[]` (`tools/link/fnvnx_addrmap.h`) for S3; natively defined image variables live in the image and
+  are constructed in place by the native static initializers. Native code must stay outside 0x00400000-0x0200d000
+  (handed to S5).
+* **metrics** - link_objects=2029 link_refs=106043 link_resolved=90022 link_ambiguous=1 link_unresolved=9294
+  link_bridges=136
+* **next** - per-unit layout probe (sizeof, trivially copyable, HFA) to settle the 518 manual pairs (continuing).
+* **fork** - S2b-vslots: map GCC vtable slots to MSVC vftable slots and read targets from the player's exe image
+  (6,088 refs, 643 vtables); needs J-0008 and the S3 image reader API.
