@@ -737,6 +737,129 @@ def r_va_list(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- VIEW1
+#
+# Some units carry a partial view of a class (only the members that unit's original code needed, as the decomp
+# reconstructed it) and then call a member the view lacks. When another definition of the same class in the decomp
+# declares that member as a non-virtual member function, VIEW1 adds that declaration (without its body) to the
+# partial view. A non-virtual member function takes no storage and no vtable slot, so the class layout cannot change
+# (checked on the affected units with GCC's class dumps: identical sizes and offsets). The call then binds to the
+# fuller definition's function (same class name, same signature) at link time. VIEW_MEMBERS lists the
+# (class, member) pairs GCC reported missing (census c9); only declarations whose types the unit already names are
+# added.
+# NOT IN RULES: measured on the 10 units with these errors it adds 55 declarations and makes none of them clean
+# (12->3, 26->22, 16->15 errors; the rest unchanged), while touching every definition of Actor / TESBoundObject.
+# Kept for when those units' other errors are gone.
+
+VIEW_MEMBERS = {
+    'NiD3DPass': ['GetRenderStateGroup', 'IncRefCount', 'DecRefCount'],
+    'TESBoundObject': ['GetFormType'],
+    'MemRouter': ['heap'],
+    'RouterX': ['heap'],
+    'FUN_008b70d0_shell': ['FUN_008b70d0'],
+    'P09PC': ['GetAnimation'],
+    'P09ActorH': ['GetAnimation'],
+    'hkpCdBody': ['getRootCollidable'],
+    'FUN_00b355d0': ['size', 'begin'],
+    'Actor': ['GetActorStateFlags'],
+    'TESObjectWEAP': ['GetWeaponType'],
+}
+_VIEW_DECLS = None
+CXX_WORDS = set('''const volatile unsigned signed int char short long float double bool void virtual static inline
+    struct class enum typename operator return this true false wchar_t __int64 __cdecl __stdcall __thiscall
+    __fastcall FNVNX_KEEP'''.split())
+
+def _class_body_spans(text, cls):
+    for m in re.finditer(r'\b(?:class|struct)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*%s\b\s*(?:final\s*)?'
+                         r'(?::[^;{}]*)?\{' % re.escape(cls), text):
+        yield m.end(), prepare.match_brace(text, m.end() - 1) - 1
+
+def _member_decl(body, member):
+    """The declaration of member function `member` in a class body (without its body), or None if it is virtual,
+    static data, or absent."""
+    depth, start = 0, 0
+    i = 0
+    while i < len(body):
+        c = body[i]
+        if c == '{':
+            if depth == 0:
+                stmt = body[start:i]
+                if re.search(r'(?<![\w~])%s\s*\(' % re.escape(member), stmt) and stmt.count('(') >= 1:
+                    return stmt
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0: start = i + 1
+        elif c == ';' and depth == 0:
+            stmt = body[start:i]
+            if re.search(r'(?<![\w~])%s\s*\(' % re.escape(member), stmt): return stmt
+            start = i + 1
+        elif c == ':' and depth == 0 and re.search(r'\b(?:public|private|protected)\s*$', body[start:i]):
+            start = i + 1
+        i += 1
+    return None
+
+def _view_decls(path):
+    global _VIEW_DECLS
+    if _VIEW_DECLS is not None: return _VIEW_DECLS
+    root, found = _roots(path), {}
+    for top in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(root, top)):
+            for f in sorted(fs):
+                if not f.endswith(('.h', '.cpp', '.inl', '.hpp')): continue
+                with open(os.path.join(dp, f), encoding='utf-8', errors='surrogateescape') as h: t = h.read()
+                for cls, members in VIEW_MEMBERS.items():
+                    if cls not in t: continue
+                    for a, b in _class_body_spans(t, cls):
+                        body = COMMENT.sub(' ', t[a:b])
+                        for mem in members:
+                            if (cls, mem) in found: continue
+                            d = _member_decl(body, mem)
+                            if not d or re.search(r'\bvirtual\b', d): continue
+                            d = re.sub(r'\s+', ' ', d).strip()
+                            d = re.sub(r'\)\s*:\s*[\w:]+\s*\(.*$', ')', d)       # constructor initializer list
+                            d = re.sub(r'^(?:FNVNX_KEEP\s+|__forceinline\s+|inline\s+)+', '', d)
+                            found[(cls, mem)] = d
+    _VIEW_DECLS = found
+    return found
+
+def _decl_type_names(d, mem):
+    """Identifiers naming types in a member function declaration (parameter names left out)."""
+    i = re.search(r'(?<![\w~])%s\s*\(' % re.escape(mem), d)
+    ret, rest = d[:i.start()], d[i.end():]
+    names = set(re.findall(r'\b[A-Za-z_]\w*\b', ret))
+    params = rest[:rest.rfind(')')] if ')' in rest else rest
+    for p in _split_args(params):
+        ids = [w for w in re.findall(r'\b[A-Za-z_]\w*\b', re.sub(r'=.*', '', p)) if w not in CXX_WORDS]
+        names |= set(ids[:-1] if len(ids) > 1 else ids)
+    return names - CXX_WORDS
+
+def r_complete_views(path, text, stats):
+    """VIEW1: add missing non-virtual member function declarations to partial class views (see above)."""
+    if not any(c in text for c in VIEW_MEMBERS): return text
+    decls = _view_decls(path)
+    edits = []
+    for cls, members in VIEW_MEMBERS.items():
+        if cls not in text: continue
+        for a, b in _class_body_spans(text, cls):
+            body = text[a:b]
+            add = []
+            for mem in members:
+                d = decls.get((cls, mem))
+                if not d or re.search(r'(?<![\w~])%s\s*\(' % re.escape(mem), body): continue
+                names = _decl_type_names(d, mem) - {cls}
+                if any(not re.search(r'\b%s\b' % re.escape(n), text[:a]) for n in names): continue
+                add.append(d + ';')
+            if add:
+                edits.append((b, ' public: ' + ' '.join(add) + ' /* fnv-nx VIEW1 */ '))
+                stats['VIEW1'] += len(add)
+    if not edits: return text
+    out, pos = [], 0
+    for at, s in sorted(edits):
+        out.append(text[pos:at]); out.append(s); pos = at
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
