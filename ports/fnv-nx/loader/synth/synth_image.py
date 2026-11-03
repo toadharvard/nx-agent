@@ -31,6 +31,7 @@ Output (all derived from the decomp: local only, never commit):
               them in static startup order (initializers in address order, then WinMain's call tree).
 """
 import argparse
+import array
 import bisect
 import collections
 import json
@@ -146,7 +147,7 @@ def global_ok(sym):
 class Item:
     """bytes one object (or a name) says are at an original address"""
     __slots__ = ('addr', 'data', 'unk', 'hard', 'unit', 'name', 'fam', 'kind', 'src', 'comdat', 'nrel', 'nunres',
-                 'secrel', 'spill_refs', 'copies')
+                 'secrel', 'spill_refs', 'copies', 'rank')
 
     def __init__(self, addr, data, unk, hard, unit, name, fam, kind, src, comdat):
         self.addr, self.data, self.unk, self.hard = addr, data, unk, hard
@@ -382,7 +383,7 @@ def process_object(i, coff, names, cls, stats, want_code=True):
                     if starts is None:
                         starts, sizes = cls.boundaries(sec.data, 0, len(sec.data))
                     use = cls.classify(sec.data, starts, sizes, off)
-                    if use == 'addr':
+                    if use in ('addr', 'arg', 'this'):
                         edges.append((fa, -base))       # address of a function taken (callback): kept apart
     stats['code_refs_unresolved'] += unres
     return items, unplaced, refs, edges
@@ -449,8 +450,26 @@ class Image:
         self.st = bytearray(WIN_HI - WIN_LO)
 
 
+def name_rank(it):
+    """how far the name of an item can be trusted to place it: 0 the name spells the content and the content
+    agrees (??_C@, __real@, __xmm@), 1 a decorated C++ name of the unit, 2 one from another unit, 3 a $SG
+    number or plain C static (numbered per compile; units.json maps several to one address in /Od units)"""
+    n = it.name
+    if n.startswith(('__real@', '__xmm@')):
+        b = msvcname.real_bytes(n)
+        return 0 if b is not None and it.data[:len(b)] == b else 4
+    if n.startswith('??_C@'):
+        r = msvcname.literal_bytes(n)
+        return 0 if r is not None and it.data[:len(r[0])] == r[0] else 4
+    if n.startswith('?'):
+        return 1 if it.src == 'unit' else 2
+    return 3
+
+
 def merge(items, report):
-    """dedupe identical copies, check every overlap of distinct items, write the byte map in trust order"""
+    """dedupe identical copies, check every overlap of distinct items, write the byte map: better rank first,
+    then more providing units (majority); equal rank and equal support with different bytes: contested
+    (left unknown)"""
     groups = collections.OrderedDict()
     for it in items:
         key = (it.addr, it.data, it.unk, it.hard)
@@ -463,16 +482,19 @@ def merge(items, report):
     for g in groups.values():
         g.sort(key=lambda x: (TRUST[x.src], x.unit))
         rep = g[0]
-        rep.copies = len(g)
+        rep.copies = len({x.unit for x in g})
+        rep.rank = min(name_rank(x) for x in g)
         distinct.append(rep)
     report['items'] = len(items)
     report['items_distinct'] = len(distinct)
     report['items_with_copies'] = sum(1 for d in distinct if d.copies > 1)
-    report['copies_agreeing'] = sum(d.copies - 1 for d in distinct)
-    # overlaps between distinct items
+    report['copies_agreeing'] = sum(len(g) - 1 for g in groups.values())
+    report['items_by_rank'] = dict(collections.Counter(d.rank for d in distinct))
+    # overlaps between distinct items (pairs), by rank pair
     distinct.sort(key=lambda x: x.addr)
     active = []
     cons = collections.Counter()
+    pairs = collections.Counter()
     conflicts = []
     for it in distinct:
         active = [a for a in active if a.end > it.addr]
@@ -486,27 +508,38 @@ def merge(items, report):
                         agree += 1
                     else:
                         diff += 1
-            if a.fam == 'bss' and it.fam not in ('bss',) or it.fam == 'bss' and a.fam not in ('bss',):
-                key = 'bss-vs-' + (it.fam if a.fam == 'bss' else a.fam)
+            if (a.fam == 'bss') != (it.fam == 'bss'):
+                other = it if a.fam == 'bss' else a
+                key = 'bss-vs-' + other.fam
                 cons[key] += 1
-                if diff or any(it.data[x - it.addr] for x in range(lo, hi) if x - it.addr < it.hard):
+                if any(other.data[x - other.addr] for x in range(lo, hi) if x - other.addr < other.hard):
                     cons[key + ':nonzero'] += 1
                 continue
+            if a.fam == 'bss':
+                continue
+            rp = '%d-%d' % tuple(sorted((a.rank, it.rank)))
             if diff:
                 cons['conflict'] += 1
                 cons['conflict_bytes'] += diff
+                pairs['conflict ' + rp] += 1
                 conflicts.append((a, it, agree, diff))
             elif agree:
                 cons['agree'] += 1
                 cons['agree_bytes'] += agree
+                pairs['agree ' + rp] += 1
             else:
                 cons['overlap_soft_only'] += 1
         active.append(it)
     report['overlaps'] = dict(cons)
-    # byte map: most trusted first; hard bytes never overwritten
+    report['overlaps_by_rank'] = dict(pairs)
+    # byte map
     img = Image()
     val, st = img.val, img.st
-    order = sorted(distinct, key=lambda x: (TRUST[x.src], 0 if x.comdat else 1, x.addr))
+    owner = {}                      # byte offset -> (rank, copies) of its hard value, only where contested
+    best = bytearray(b'\xff') * len(val)     # rank of the hard byte's provider
+    sup = array.array('H', bytes(2 * len(val)))   # support (providing units) of the hard byte
+    res = collections.Counter()
+    order = sorted(distinct, key=lambda x: (x.rank, -x.copies, TRUST[x.src], 0 if x.comdat else 1, x.addr))
     for it in order:
         if it.fam == 'bss':
             continue
@@ -514,17 +547,32 @@ def merge(items, report):
         if base < 0 or it.end > WIN_HI:
             continue
         d, u, h = it.data, it.unk, it.hard
+        r, c = it.rank, min(it.copies, 65535)
         for k in range(len(d)):
             p = base + k
             if k < h and not u[k]:
-                if st[p] != ST_HARD:
+                s = st[p]
+                if s == ST_HARD:
+                    if val[p] != d[k]:
+                        if best[p] == r and sup[p] == c:
+                            res['contested_bytes'] += 1
+                            st[p] = ST_UNK          # nobody wins: unknown
+                            owner[p] = (r, c)
+                        else:
+                            res['lost_bytes'] += 1
+                elif p in owner:
+                    res['contested_bytes'] += 1     # third claim on a contested byte: stays unknown
+                else:
                     val[p] = d[k]
                     st[p] = ST_HARD
+                    best[p] = r
+                    sup[p] = c
             elif u[k]:
                 if st[p] < ST_UNK:
                     st[p] = ST_UNK
             elif st[p] == ST_NONE:
                 st[p] = ST_SOFT
+    report['conflict_resolution'] = dict(res)
     return img, distinct, conflicts
 
 
@@ -570,10 +618,10 @@ def infer_sections(distinct, imports, report):
     w1, b1 = split(rdata, data_side)
     lo_ok = [a for a in rdata if a < b1]
     hi_ok = [a for a in data_side if a >= b1]
-    rdata_hi = page_up(max(lo_ok) + 1)
-    data_lo = page_down(min(hi_ok))
-    if data_lo < rdata_hi:
-        data_lo = rdata_hi
+    # MSVC lays sections out back to back (each starts on the page after the previous one ends), so .rdata
+    # runs up to the page where the first .data evidence lies
+    data_lo = max(page_down(min(hi_ok)), page_up(max(lo_ok) + 1))
+    rdata_hi = data_lo
     data = [a for a in ev.get('data', []) if a >= data_lo and (tls_lo is None or a < tls_lo)]
     bss = [a for a in ev.get('bss', []) if a >= data_lo and (tls_lo is None or a < tls_lo)]
     w2, b2 = split(data, bss)
@@ -662,7 +710,7 @@ def classify(units, names, img, sec, ph1, imports, order, phase, report, missing
         for a in {base, point}:
             if a in ref:
                 users[a].add((fa, use))
-                if INIT_LO <= fa < INIT_HI and use in ('store', 'rmw', 'addr'):
+                if INIT_LO <= fa < INIT_HI and use in ('store', 'rmw', 'this'):
                     init_w.add(a)
     val, st = img.val, img.st
     cls = {}
@@ -717,6 +765,10 @@ def classify(units, names, img, sec, ph1, imports, order, phase, report, missing
         key = best[1] if best else None
         groups[key].append((a, best[2] if best else '-'))
     reached = {k: v for k, v in groups.items() if k is not None}
+    tree_w = set()
+    for fa, base, point, use in refs:
+        if phase.get(fa) == 'init' and use in ('store', 'rmw', 'this'):
+            tree_w.add(base)
     first = collections.Counter()
     for k, v in reached.items():
         first[phase[k]] += len([x for x in v if cls[x[0]][0] == 'missing'])
@@ -727,6 +779,9 @@ def classify(units, names, img, sec, ph1, imports, order, phase, report, missing
         'missing_first_used_in_winmain_tree': first['winmain'],
         'missing_not_reached_statically': len([x for x in groups.get(None, []) if cls[x[0]][0] == 'missing']),
         'consumer_functions': len(reached),
+        'missing_written_somewhere_in_init_tree': sum(1 for a in miss if cls[a][0] == 'missing' and a in tree_w),
+        'missing_by_use_of_first_consumer': dict(collections.Counter(
+            u for k, v in reached.items() for a, u in v if cls[a][0] == 'missing')),
     }
     top = sorted(reached.items(), key=lambda kv: order[kv[0]])
     report['missing']['first_consumers_in_order'] = [
@@ -763,7 +818,21 @@ def byte_coverage(img, sec, report):
 
 
 def check_probes(units, img, report):
+    """S3's data probes (loader/tools/mkdataprobes.py: literal names, RTTI names) against the synthetic bytes.
+    mkdataprobes keeps the first unit's spelling of an address; where units spell one address differently
+    (struct/class keys of a TypeDescriptor), a match with another unit's spelling is counted apart"""
+    from mkdataprobes import decode_literal
     pr = data_probes({'units': units})
+    variants = collections.defaultdict(set)
+    for u in units:
+        for name, v in u.get('symbols', {}).items():
+            va = int(v, 16)
+            if name.startswith('??_C@_0'):
+                b = decode_literal(name)
+                if b and len(b) >= 4:
+                    variants[va].add(b)
+            elif name.startswith('??_R0') and name.endswith('@8'):
+                variants[va + 8].add(('.' + name[5:-2]).encode('latin-1'))
     res = collections.Counter()
     bad = []
     for va, b in pr:
@@ -772,9 +841,14 @@ def check_probes(units, img, report):
             continue
         o = va - WIN_LO
         sts = img.st[o:o + len(b)]
+        if len(variants[va]) > 1:
+            res['probes_with_disagreeing_units'] += 1
         if all(s == ST_HARD for s in sts):
-            if bytes(img.val[o:o + len(b)]) == b:
+            have = bytes(img.val[o:o + len(b)])
+            if have == b:
                 res['match'] += 1
+            elif any(have[:len(x)] == x for x in variants[va]):
+                res['match_other_units_spelling'] += 1
             else:
                 res['mismatch'] += 1
                 bad.append('0x%08x' % va)
@@ -807,6 +881,25 @@ def check_vftables(distinct, names, report):
 
 
 # --------------------------------------------------------------------------------------------- PE writer
+
+STATE_CODES = {0: 'missing', 1: 'soft-zero', 2: 'unknown', 3: 'known', 4: 'bss', 5: 'iat', 6: 'no-section'}
+
+
+def write_state(path, img, sec, iat_range):
+    """what the synthetic image knows about each byte of the window (for tests/s14: classify what the guest
+    reads); bss = zero is the original value, iat = bound by the loader"""
+    st = bytearray(img.st)
+    lo, hi = sec['bss_lo_evidence'], sec['data'][1]
+    st[lo - WIN_LO:hi - WIN_LO] = b'\4' * (hi - lo)
+    if iat_range:
+        st[iat_range[0] - WIN_LO:iat_range[1] - WIN_LO] = b'\5' * (iat_range[1] - iat_range[0])
+    ends = [sec['rdata'], sec['data']] + ([sec['tls']] if sec['tls'] else [])
+    for x in range(WIN_LO, WIN_HI, PAGE):
+        if not any(a <= x < b for a, b in ends):
+            st[x - WIN_LO:x - WIN_LO + PAGE] = b'\6' * PAGE
+    with open(path, 'wb') as f:
+        f.write(bytes(st))
+
 
 def read_imports(path):
     """iat slot -> (dll, api) from S4's imports.tsv"""
@@ -927,6 +1020,7 @@ def main(argv=None):
     ap.add_argument('--summary')
     ap.add_argument('--missing')
     ap.add_argument('--conflicts')
+    ap.add_argument('--state-out', help='per-byte provenance of the window (one byte each, codes in STATE_CODES)')
     ap.add_argument('--cache', help='pickle of the object scan (reused when present)')
     ap.add_argument('--limit', type=int, help='first N units only (tests)')
     a = ap.parse_args(argv)
@@ -986,6 +1080,8 @@ def main(argv=None):
             for x, y, ag, df in conflicts:
                 f.write('0x%08x\t%s\t%d\t%s\t0x%08x\t%s\t%d\t%s\t%d\t%d\n' % (x.addr, x.name, x.unit, x.src, y.addr,
                                                                             y.name, y.unit, y.src, ag, df))
+    if a.state_out:
+        write_state(a.state_out, img, sec, iat_range)
     if a.out:
         report['pe'] = write_pe(a.out, img, sec, imports, iat_range, None)
     if a.report:
@@ -1034,4 +1130,6 @@ def format_summary(r):
 
 
 if __name__ == '__main__':
+    sys.modules.setdefault('synth_image', sys.modules[__name__])
+    Item.__module__ = 'synth_image'
     sys.exit(main())

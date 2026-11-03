@@ -13,6 +13,8 @@ READ = 'read'
 STORE = 'store'
 RMW = 'rmw'
 ADDR = 'addr'
+THIS = 'this'        # mov ecx, offset x: the object a __thiscall (constructor) works on
+ARG = 'arg'          # push offset x
 CALL = 'call'
 JUMP = 'jump'
 TABLE = 'table'
@@ -57,6 +59,11 @@ class Classifier:
                 return CALL
             if m.startswith('j'):
                 return JUMP
+            if m == 'push':
+                return ARG
+            if m == 'mov' and insn.operands and insn.operands[0].type == cx86.X86_OP_REG and \
+                    insn.reg_name(insn.operands[0].reg) == 'ecx':
+                return THIS
             return ADDR
         if insn.disp_size == 4 and insn.disp_offset == field:
             if m == 'lea':
