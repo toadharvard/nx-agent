@@ -502,3 +502,23 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - shaders=26 shaders_ok=25 variant_compiles=413 programs=326 cache_identical=100/100 checks=614
 * **next** - patch 0004 for Nine's CALL/LABEL TGSI; real `.sdp` files when available + a first-run record cache;
   wire `nvc0_pcache_configure` into the host module; on hardware: hit rate and create-time savings.
+
+### J-0025 | 2026-11-03 | stream: S1-compile | status: wip | parent: J-0022
+
+* **did** - Rules CALL1 (Win32 call arguments cast to the SDK parameter types where DECL1 dropped the decomp's own
+  prototype, 488 files / 2,435), RCAST1 (`(T&)temporary` via `fnvnx_lvalue`, 11 / 34), CS28 (8 / 8), INTL1 (decomp's
+  inline `Interlocked*` fallbacks dropped, 25 / 50), NEW3 (`noexcept` on file-scope `operator delete`, 53 / 63),
+  TYPEID1 (5), UNIT1 (per-file renames: tesdatahandler's local FILETIME / WIN32_FIND_DATAA); DECL2 extended to
+  class/union keys. Win32 part of `fnvnx_win32_ext.h` merged into the shim; `Interlocked*` back to C linkage, `void*`
+  overloads visible to game units only; S5's `platform_adapt.sh` / `w32_c_aliases.c` removed. tests/s4 and tests/s7
+  pass.
+* **found** - The decomp's `_RTL_CRITICAL_SECTION` is the Xbox 360 type (28 bytes), and the byte-matched engine
+  layouts after it (RecursiveLock, BSThread, AbstractHeap, IO_Thread, NiCriticalSection) are asserted with 28 bytes,
+  so the PC image most likely holds CRITICAL_SECTION (24) + 4 unidentified bytes there. The c6 -> c7 error rise came
+  from SDK1 (24-byte CS winning), not from `fnvnx_crt.h`. WinMain's `misc/main.cpp` and 8 more boot-path units
+  compile; 4 fail on specialization-after-instantiation (3) and MSVC's va_list-as-`char*` (1).
+* **decided** - CS28: keep the PC 24-byte CRITICAL_SECTION and preserve the decomp's offsets with an explicit 4-byte
+  tail (`struct FNVNX_CS28 : CRITICAL_SECTION { DWORD fnvnx_after_cs; }`), all decomp asserts kept; verify on the PC
+  exe.
+* **metrics** - census_units=2978 census_clean=2740 census_errors=1664
+* **next** - hoisting rule for specializations used before definition; va_list chain; partial class views.
