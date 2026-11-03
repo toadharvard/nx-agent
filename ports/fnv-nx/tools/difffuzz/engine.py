@@ -164,7 +164,52 @@ class UnitCache:
                           statics)
         t.source = source
         t.vtables = self.vtable_map(img)
+        called = self.arm_called(img, source)
+        own = set(code)
+
+        def follow(addr):
+            # out-of-unit address the native object never names: GCC inlined it, the oracle runs its copy
+            if addr in own or addr in called or addr in libcalls.X86 or addr not in self.def_at:
+                return None
+            src, _ = self.def_at[addr]
+            try:
+                f = self.x86_unit(src, addr).funcs.get(addr)
+            except Exception:  # noqa: BLE001
+                return None
+            return f if f and not f['unresolved'] else None
+
+        # preload (transitively) every such callee of the oracle code: run for real, not intercepted
+        todo = [f for a, f in xu.funcs.items() if a in code]
+        added = 0
+        while todo and added < 256:
+            f = todo.pop()
+            for rel, kind, tg, _ in f['relocs']:
+                if kind != 0x14 or tg is None or tg in code or not (0x00401000 <= tg < 0x00fdf000):
+                    continue
+                g = follow(tg)
+                if g is not None:
+                    code[tg] = g['code']
+                    own.add(tg)
+                    todo.append(g)
+                    added += 1
+        t.x86_code = code
+        t.followed = added
         return t
+
+    def arm_called(self, image, source):
+        """Original addresses the native unit can call out of the unit: code stubs it binds (undefined
+        `__fnv_<addr>` and bridges' targets), named stubs with a known address, and its own definitions."""
+        out = set(image.entries.values())
+        for n in image.syms:
+            m = STUB_ADDR.match(n)
+            if m:
+                out.add(int(m.group(1), 16))
+        for addr, name in image.stubs.items():
+            m = STUB_ADDR.match(name)
+            if m:
+                out.add(int(m.group(1), 16))
+        out.update(self.stub_addrmap(image, source).values())
+        return out
 
     def vtable_map(self, image):
         """{native address point: image vftable address} for S2's kind-V address map rows whose vtable symbol the

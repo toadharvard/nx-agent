@@ -60,8 +60,11 @@ class Result:
 
 
 class X86Engine:
-    def __init__(self, world_obj, text_funcs, callee_info=None):
-        """text_funcs: {addr: bytes} executed for real. callee_info(addr) -> (pop_bytes, ret_kind) or None."""
+    def __init__(self, world_obj, text_funcs, callee_info=None, follow=None):
+        """text_funcs: {addr: bytes} executed for real. callee_info(addr) -> (pop_bytes, ret_kind) or None.
+        follow(addr) -> oracle bytes of a function outside the unit to run for real instead of intercepting, or None."""
+        self.follow = follow
+        self.followed = set()
         self.world = world_obj
         self.text_funcs = text_funcs
         self.callee_info = callee_info or (lambda a: None)
@@ -99,6 +102,10 @@ class X86Engine:
 
     def reset(self, world_obj):
         """Forget the previous case's world pages (the engine is reused across runs of one function)."""
+        if self.followed:
+            self.ranges = sorted((a, a + len(c)) for a, c in self.text_funcs.items())
+            self._starts = [lo for lo, _ in self.ranges]
+            self.followed = set()
         for p in self.dynamic:
             self.uc.mem_unmap(p, PAGE)
             self.mapped.discard(p)
@@ -217,6 +224,18 @@ class X86Engine:
         words = [world.u32(uc.mem_read(esp + 4 + 4 * i, 4)) for i in range(16)]
         bname = libcalls.X86.get(address)
         if bname is not None and self._builtin(uc, bname, esp, retaddr, words, r):
+            return
+        code = self.follow(address) if self.follow else None
+        if code:
+            # the native object never calls this address (GCC inlined it, typically a header inline function MSVC
+            # called out of line): run the oracle's copy for real so both sides do the same work
+            self._ensure(address, len(code))
+            uc.mem_write(address, code)
+            self.ranges.append((address, address + len(code)))
+            self.ranges.sort()
+            self._starts = [lo for lo, _ in self.ranges]
+            self.followed.add(address)
+            uc.reg_write(UC_X86_REG_EIP, address)
             return
         k = len(r.calls)
         r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr))
