@@ -33,6 +33,8 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
    localizes duplicate strong names and turns natively defined variables into weak address symbols; then the
    undefined symbols are renamed (`elfsyms.rename_undefined`: objcopy `--redefine-syms` refuses several old names
    for one new name, which is the normal case here). Assembles `bridges.S`, compiles `addrmap.c`.
+   Between two resolve runs, **probe** - `fnvlink.py probe out/ tree/` - measures the aggregates the ABI verdicts
+   need (`probe_requests.tsv` -> `layouts.tsv`, section "Layouts"); the second resolve decides on bytes.
 4. **check** - `fnvlink.py check out/ fixed/`: trial link of everything with `aliases.ld`; counts what is still
    undefined and any multiple definitions.
 
@@ -70,12 +72,16 @@ original code address the native build defines:
 * `address` - 8 lower-case hex digits, address in FalloutNV.exe 1.4.0.525.
 * `kind` - `F` function, `C` constructor (complete-object variant), `X` destructor (complete-object variant),
   `G` MSVC deleting destructor (`??_G`/`??_E`, takes a flags argument) mapped to the Itanium deleting destructor
-  (D0, no flags, always deletes): a code pointer to it in the image is only safe where the flags are 1.
-* `link_symbol` - the symbol to take the address of (`__fnv_<addr>`), stable across builds.
+  (D0, no flags, always deletes): a code pointer to it in the image is only safe where the flags are 1;
+  `V` image vftable (`??_7Class@@6B@` named by some unit): native = Itanium vtable address point of the class of
+  the same name (`_ZTV<Class>` + 8 on ILP32; primary vftables only, classes whose `_ZTV` is emitted somewhere);
+  `E` referenced `.text` address that no unit defines (CRT, thunks): native = 0, the loader traps it.
+* `link_symbol` - the symbol to take the address of (`__fnv_<addr>`, `_ZTV...` for `V`, empty for `E`).
 * `native_symbol`, `object` - for people; `note` - free text (`static in its unit`, the `G` caveat).
 
 The runtime form is `addrmap.c` (`fnvnx_addrmap_entry {unsigned orig; void *native;}`, sorted by `orig`,
-`fnvnx_addrmap_count` entries; header `tools/link/fnvnx_addrmap.h`), linked into the program so the loader can
+`fnvnx_addrmap_count` entries, `fnvnx_addrmap_kinds[i]` the kind letter of entry *i*; header
+`tools/link/fnvnx_addrmap.h`), linked into the program so the loader can
 binary-search it when it rewrites code pointers in `.rdata`/`.data` (vtables of the image, callback tables).
 Addresses absent from the map are either not compiled yet, CRT/thunks (`extern_text.tsv`), or mid-function; the
 loader should point them at a trap that reports the address. Bridges never appear in the map: a pointer taken
@@ -109,6 +115,30 @@ names, sizes unknown), `varargs`, `ref-passes-fewer`, plus the declaration shape
 `free-cdecl->static-member-cdecl`, `arity(...)`). `x86-inconsistent`: the pair cannot have worked on x86 as
 declared, e.g. `void __cdecl f(void)` calling `T::f()` - the caller relied on ecx already holding `this`; on AArch64
 x0 is not preserved, so the declaration has to be fixed in the source (S1 rule or patch).
+
+## Layouts (`layout.py`) and byte-level verdicts (`abi2.py`)
+
+For every pair that the class-level model above cannot settle, the aggregates passed or returned by value are
+measured in the unit that declares them: a probe translation unit includes the unit's source and, per type, emits
+`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible) and `__is_empty` as constants (read
+back from the object), and a function taking the type by value whose spills show the SIMD registers it arrives in.
+Class: `G1`/`G2` (one/two general registers), `H<n>x<w>` (HFA/HVA: n SIMD registers of w bytes), `IND` (by
+reference: over 16 bytes or not trivial for calls). Types the probe cannot name are dropped and stay `manual`.
+
+`abi2` then works on bytes: MSVC x86 locations with sizes (hidden result pointer always for members, for free
+functions unless a trivial 1/2/4/8-byte aggregate), AArch64 chunks per value (x/v registers, incoming stack, memory
+behind a pointer or x8). Each definition value collects its bytes from the overlapping reference values; when every
+chunk finds its bytes in the same container at the same offset and the results agree, the pair is `same`
+(differently named but layout-identical aggregates, a 4-byte struct vs an int, an HFA vs separate floats).
+Otherwise a general bridge is generated: a frame with saved x0-x7/q0-q7/x8, one buffer per definition value filled
+from the saved bytes (or through a saved pointer), definition registers / outgoing stack loaded from the buffers,
+by-reference parameters get a buffer pointer (or the reference's own pointer when it already points at all the
+bytes), then a tail call, or a call followed by the result conversion (hidden result <-> explicit out pointer,
+register <-> memory results, MSVC's returned buffer pointer in x0). No constructor or destructor runs for bridge
+temporaries (x86 saw a bitwise copy too); ownership stays with the caller. `test_bridges.py` runs eight such bridges
+(hidden vs out pointer both ways, 16-byte struct vs 4 ints both ways, 32-byte by-reference struct vs 8 ints,
+register-result conversion, pointer vs non-trivial holder, fastcall edx dummy with stack arguments) under
+qemu-aarch64 against C++ definitions, with layouts from the real probe.
 
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
@@ -145,6 +175,15 @@ ABI verdicts over references (distinct pairs in brackets): bridge 146 (136), man
 74 (74). By class: reg-shift 264 (bridge 121), aggregate-param 236, sret-explicit 206, ret-aggregate 159,
 edx-dummy 38, int-float-param 27, varargs 15, ret-regfile 2.
 
+### Second round (prepared tree with the S8 rules, layouts)
+
+2,067 objects; 107,294 references; 91,076 bound by address (84.9 %); trial link: 0 multiple definitions, 12,832
+names undefined (7,303 `__fnv_` of uncompiled units, 5,176 C++ by name, 353 runtime). 484 aggregates probed in 274
+units, all named (G1 165, IND 134, H3x4 125, H4x4 21, G2 16, H1x16 15, H1x4 4, H2x4 4). Of the 622 class-level
+`manual` refs: 347 `same`, 258 bridged, 2 x86-inconsistent, 15 still manual (varargs); 9 class-level
+x86-inconsistent refs became bridges. Now: 384 bridges (417 refs), 68 x86-inconsistent (66 `this-not-passed`,
+2 `result-pointer-not-passed`), 15 manual (varargs). Address map: F 24,817, C 895, X 496, G 41, V 446, E 138.
+
 ## Open problems
 
 * **Virtual functions behind native vtables** (6,088 refs, plus 643 undefined vtables): GCC emits vtables whose
@@ -153,9 +192,10 @@ edx-dummy 38, int-float-param 27, varargs 15, ret-regfile 2.
   it) -> dword *k'* read from the player's `FalloutNV.exe` (D3: allowed locally, never stored) -> code address ->
   `__fnv_`. Needs the image reader of S3 and the Itanium/MSVC slot correspondence (two destructor slots vs one,
   RTTI/offset-to-top header).
-* **Aggregate layouts**: `aggregate-param`, `ret-aggregate`, `sret-explicit` (~600 refs) need size,
-  trivially-copyable and HFA of each type; plan: a probe TU per unit that includes the unit and emits
-  `sizeof`/`__is_trivially_copyable` as constants, read back from the object.
+* **Varargs** pairs (15) stay manual. **Address map gaps**: `V` covers primary vftables of classes whose `_ZTV`
+  is emitted; secondary (`{for ...}`) vftables, synthesized vtables for classes without one, the `??_G` split into
+  D1/D0 entries and mid-function addresses are not emitted yet; `E` lists only the addresses compiled units
+  reference (138), not S4's full 4,618.
 * **x86-inconsistent** pairs (74) are source bugs that MSVC got away with (ecx coincidence); hand to S1 as a list.
 * **Code placement**: the trial link puts native code at the default 0x400000, inside the original image range
   (`.text` 0x401000.., data 0x00fdf000..0x0200c612); the S5 linker script must place native code and data

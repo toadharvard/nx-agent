@@ -17,6 +17,9 @@ struct fnvnx_addrmap_entry {
 
 extern const struct fnvnx_addrmap_entry fnvnx_addrmap[];
 extern const unsigned fnvnx_addrmap_count;
+/* kind of entry i: F function, C ctor (C1), X dtor (D1), G MSVC deleting dtor (-> D0), V image vftable (native =
+ * Itanium vtable address point of the same class), E referenced .text address without definition (native = 0). */
+extern const char fnvnx_addrmap_kinds[];
 
 #ifdef __cplusplus
 }
