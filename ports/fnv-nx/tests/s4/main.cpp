@@ -1,0 +1,57 @@
+/* main.cpp - runs every TEST in reverse registration order of the files, prints a summary. */
+#include "s4_test.h"
+
+#include <stdlib.h>
+
+int s4_failures, s4_checks;
+s4_case *s4_cases;
+
+static char g_root[1024];
+const char *s4_root(void) { return g_root; }
+
+void s4_write_file(const char *win_path, const char *data)
+{
+    HANDLE h = CreateFileA(win_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    CHECK(h != INVALID_HANDLE_VALUE);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    DWORD put = 0;
+    CHECK(WriteFile(h, data, (DWORD)strlen(data), &put, NULL));
+    CHECK_EQ(put, strlen(data));
+    CloseHandle(h);
+}
+
+int main(int argc, char **argv)
+{
+    const char *r = getenv("FNVNX_ROOT");
+    snprintf(g_root, sizeof g_root, "%s", r && *r ? r : "./fnvnx-root");
+    /* make the root and the game dir; the runtime creates the profile folders itself */
+    char cmd[1200];
+    snprintf(cmd, sizeof cmd, "mkdir -p '%s/game'", g_root);
+    if (system(cmd) != 0)
+        return 2;
+    fnvnx_path_reset(g_root);
+    fnvnx_set_command_line(argc, argv);
+    /* registration order is reversed per file; run in name order for stable output */
+    int n = 0;
+    for (s4_case *c = s4_cases; c; c = c->next)
+        n++;
+    s4_case **v = (s4_case **)malloc(sizeof(s4_case *) * (size_t)n);
+    int i = 0;
+    for (s4_case *c = s4_cases; c; c = c->next)
+        v[i++] = c;
+    qsort(v, (size_t)n, sizeof *v, [](const void *a, const void *b) {
+        return strcmp((*(s4_case *const *)a)->name, (*(s4_case *const *)b)->name);
+    });
+    int failed_cases = 0;
+    for (i = 0; i < n; i++) {
+        int before = s4_failures;
+        v[i]->fn();
+        int bad = s4_failures - before;
+        failed_cases += bad != 0;
+        printf("%-34s %s\n", v[i]->name, bad ? "FAIL" : "ok");
+    }
+    printf("\n%d tests, %d checks, %d failed checks, %d failed tests\n", n, s4_checks, s4_failures, failed_cases);
+    free(v);
+    return s4_failures ? 1 : 0;
+}

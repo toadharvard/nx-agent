@@ -1,0 +1,423 @@
+/* ini.cpp - GetPrivateProfile* / WritePrivateProfile* with the semantics of the Win32 profile API.
+ *
+ * The engine reads Fallout.ini, FalloutPrefs.ini and Fallout_default.ini through these (hundreds of calls at
+ * start-up), so files are parsed once and cached by host path, re-read when size or mtime change, and written
+ * through on every Write call (the change is visible to the next read, as on Windows).
+ *
+ * Rules (matching kernel32 / Wine):
+ *  - section and key names are case-insensitive; leading/trailing blanks are ignored; the first matching section
+ *    and the first matching key win;
+ *  - lines starting with ';' are comments; a line without '=' inside a section is a key with an empty value;
+ *  - a value is trimmed and one pair of matching surrounding quotes (" or ') is removed;
+ *  - a NULL section lists the section names, a NULL key lists the keys of the section, each 0-terminated plus a
+ *    final 0; on truncation those lists return size - 2, a single value returns size - 1;
+ *  - a missing value copies the default with trailing blanks removed (NULL default = "");
+ *  - GetPrivateProfileInt parses like RtlUnicodeStringToInteger(base 0): blanks, sign, 0x/0o/0b prefixes, digits
+ *    until the first non-digit; an empty or missing value returns the default;
+ *  - a file name without a directory refers to the Windows directory (C:\Windows\name).
+ */
+#include "w32.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include <string>
+#include <vector>
+
+namespace {
+
+struct IniFile {
+    std::string host;
+    std::vector<std::string> lines;
+    bool crlf = true;
+    bool exists = false;
+    uint64_t size = 0;
+    int64_t mtime = 0;
+};
+
+os_lock_t g_ini_lock;
+/* process-lifetime cache; a heap vector so no static destructor runs at exit (other threads may still read) */
+std::vector<IniFile *> &g_cache = *new std::vector<IniFile *>;
+
+std::string trim(const std::string &s)
+{
+    size_t b = 0, e = s.size();
+    while (b < e && (s[b] == ' ' || s[b] == '\t'))
+        b++;
+    while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\r'))
+        e--;
+    return s.substr(b, e - b);
+}
+
+bool ieq(const std::string &a, const char *b) { return w32_stricmp(a.c_str(), b) == 0; }
+
+/* the section name of a "[name]" line, or false */
+bool section_of(const std::string &line, std::string &name)
+{
+    std::string t = trim(line);
+    if (t.empty() || t[0] != '[')
+        return false;
+    size_t e = t.find(']');
+    name = trim(t.substr(1, e == std::string::npos ? std::string::npos : e - 1));
+    return true;
+}
+
+/* key/value of a key line; false for comments and blank lines */
+bool key_of(const std::string &line, std::string &key, std::string *val)
+{
+    std::string t = trim(line);
+    if (t.empty() || t[0] == ';' || t[0] == '[')
+        return false;
+    size_t eq = t.find('=');
+    key = trim(t.substr(0, eq));
+    if (val) {
+        *val = eq == std::string::npos ? std::string() : trim(t.substr(eq + 1));
+        if (val->size() >= 2 && ((*val)[0] == '"' || (*val)[0] == '\'') && val->back() == (*val)[0])
+            *val = val->substr(1, val->size() - 2);
+    }
+    return true;
+}
+
+bool load(IniFile *f)
+{
+    os_stat_t st;
+    if (os_stat(f->host.c_str(), &st) != 0 || st.is_dir) {
+        f->lines.clear();
+        f->exists = false;
+        f->size = 0;
+        f->mtime = 0;
+        return false;
+    }
+    if (f->exists && st.size == f->size && st.mtime_us == f->mtime)
+        return true;
+    f->lines.clear();
+    f->exists = true;
+    f->size = st.size;
+    f->mtime = st.mtime_us;
+    int fd = os_file_open(f->host.c_str(), OS_O_READ);
+    if (fd < 0)
+        return false;
+    std::string data;
+    char buf[16384];
+    int64_t r;
+    while ((r = os_file_read(fd, buf, sizeof buf)) > 0)
+        data.append(buf, (size_t)r);
+    os_file_close(fd);
+    f->crlf = data.find("\r\n") != std::string::npos || data.find('\n') == std::string::npos;
+    size_t p = 0;
+    if (data.size() >= 3 && (unsigned char)data[0] == 0xEF && (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF)
+        p = 3; /* UTF-8 BOM */
+    while (p < data.size()) {
+        size_t e = data.find('\n', p);
+        std::string line = data.substr(p, e == std::string::npos ? std::string::npos : e - p);
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        f->lines.push_back(line);
+        if (e == std::string::npos)
+            break;
+        p = e + 1;
+    }
+    return true;
+}
+
+bool save(IniFile *f)
+{
+    std::string out;
+    const char *eol = f->crlf ? "\r\n" : "\n";
+    for (const std::string &l : f->lines) {
+        out += l;
+        out += eol;
+    }
+    int fd = os_file_open(f->host.c_str(), OS_O_WRITE | OS_O_CREATE | OS_O_TRUNC);
+    if (fd < 0) {
+        SetLastError(w32_os_error(fd) == ERROR_FILE_NOT_FOUND ? ERROR_PATH_NOT_FOUND : w32_os_error(fd));
+        return false;
+    }
+    int64_t w = os_file_write(fd, out.data(), out.size());
+    os_file_close(fd);
+    os_stat_t st;
+    if (os_stat(f->host.c_str(), &st) == 0) {
+        f->exists = true;
+        f->size = st.size;
+        f->mtime = st.mtime_us;
+    }
+    return w == (int64_t)out.size();
+}
+
+/* cached file for a profile name; NULL + last error on a bad name. Caller holds g_ini_lock. */
+IniFile *open_ini(const char *name)
+{
+    if (!name || !*name) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+    std::string win = name;
+    if (win.find('\\') == std::string::npos && win.find('/') == std::string::npos && win.find(':') == std::string::npos)
+        win = "C:\\Windows\\" + win;
+    char host[W32_PATH_MAX];
+    DWORD e = w32_map_path(win.c_str(), host, sizeof host);
+    if (e) {
+        SetLastError(e);
+        return NULL;
+    }
+    for (IniFile *f : g_cache)
+        if (f->host == host) {
+            load(f);
+            return f;
+        }
+    IniFile *f = new IniFile;
+    f->host = host;
+    load(f);
+    g_cache.push_back(f);
+    return f;
+}
+
+/* [first, end) line range of the first section called sec (first = header line), or false */
+bool find_section(const IniFile *f, const char *sec, size_t &first, size_t &end)
+{
+    std::string n;
+    for (size_t i = 0; i < f->lines.size(); i++)
+        if (section_of(f->lines[i], n) && ieq(n, sec)) {
+            first = i;
+            end = i + 1;
+            while (end < f->lines.size() && !section_of(f->lines[end], n))
+                end++;
+            return true;
+        }
+    return false;
+}
+
+/* copy a 0-terminated list (names separated by 0, final extra 0) with the truncation rule */
+DWORD copy_list(const std::vector<std::string> &items, LPSTR buf, DWORD size)
+{
+    if (size == 0)
+        return 0;
+    if (size == 1) {
+        buf[0] = 0;
+        return 0;
+    }
+    DWORD o = 0;
+    for (const std::string &s : items) {
+        for (char c : s) {
+            if (o + 2 >= size) { /* room for the two terminators */
+                buf[o] = 0;
+                buf[o + 1] = 0;
+                return size - 2;
+            }
+            buf[o++] = c;
+        }
+        if (o + 2 >= size) {
+            buf[o] = 0;
+            buf[o + 1] = 0;
+            return size - 2;
+        }
+        buf[o++] = 0;
+    }
+    buf[o] = 0;
+    return o;
+}
+
+DWORD copy_value(const std::string &v, LPSTR buf, DWORD size)
+{
+    if (size == 0)
+        return 0;
+    DWORD n = (DWORD)v.size();
+    if (n > size - 1)
+        n = size - 1;
+    memcpy(buf, v.data(), n);
+    buf[n] = 0;
+    return n;
+}
+
+DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, DWORD size, const char *file)
+{
+    size = W32_DW(size);
+    if (!buf)
+        return 0;
+    os_lock(&g_ini_lock);
+    IniFile *f = open_ini(file);
+    DWORD r;
+    if (!f) {
+        r = copy_value("", buf, size);
+    } else if (!sec) {
+        std::vector<std::string> names;
+        std::string n;
+        for (const std::string &l : f->lines)
+            if (section_of(l, n))
+                names.push_back(n);
+        r = copy_list(names, buf, size);
+    } else {
+        size_t a, b;
+        bool have = find_section(f, sec, a, b);
+        if (!key) {
+            std::vector<std::string> keys;
+            std::string k;
+            if (have)
+                for (size_t i = a + 1; i < b; i++)
+                    if (key_of(f->lines[i], k, NULL) && !k.empty())
+                        keys.push_back(k);
+            r = copy_list(keys, buf, size);
+        } else {
+            std::string k, v;
+            bool found = false;
+            if (have)
+                for (size_t i = a + 1; i < b && !found; i++)
+                    if (key_of(f->lines[i], k, &v) && ieq(k, key))
+                        found = true;
+            if (!found) {
+                v = def ? def : "";
+                while (!v.empty() && v.back() == ' ')
+                    v.pop_back();
+                SetLastError(f->exists ? ERROR_SUCCESS : ERROR_FILE_NOT_FOUND);
+            } else {
+                SetLastError(ERROR_SUCCESS);
+            }
+            r = copy_value(v, buf, size);
+        }
+    }
+    os_unlock(&g_ini_lock);
+    return r;
+}
+
+} // namespace
+
+extern "C" DWORD GetPrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR def, LPSTR buf, DWORD size, LPCSTR file)
+{
+    return get_string(sec, key, def, buf, size, file);
+}
+
+extern "C" UINT GetPrivateProfileIntA(LPCSTR sec, LPCSTR key, INT def, LPCSTR file)
+{
+    char buf[30];
+    if (!get_string(sec, key, "", buf, sizeof buf, file) || !buf[0])
+        return (UINT)def;
+    const char *p = buf;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    int neg = 0;
+    while (*p == '+' || *p == '-') {
+        if (*p == '-')
+            neg = !neg;
+        p++;
+    }
+    unsigned base = 10;
+    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) { base = 16; p += 2; }
+    else if (p[0] == '0' && (p[1] == 'o' || p[1] == 'O')) { base = 8; p += 2; }
+    else if (p[0] == '0' && (p[1] == 'b' || p[1] == 'B')) { base = 2; p += 2; }
+    uint32_t v = 0;
+    for (;; p++) {
+        unsigned d;
+        if (*p >= '0' && *p <= '9') d = (unsigned)(*p - '0');
+        else if (*p >= 'a' && *p <= 'f') d = (unsigned)(*p - 'a' + 10);
+        else if (*p >= 'A' && *p <= 'F') d = (unsigned)(*p - 'A' + 10);
+        else break;
+        if (d >= base)
+            break;
+        v = v * base + d;
+    }
+    return (UINT)(neg ? (uint32_t)(0u - v) : v);
+}
+
+extern "C" DWORD GetPrivateProfileSectionNamesA(LPSTR buf, DWORD size, LPCSTR file)
+{
+    return get_string(NULL, NULL, NULL, buf, size, file);
+}
+
+extern "C" DWORD GetPrivateProfileSectionA(LPCSTR sec, LPSTR buf, DWORD size, LPCSTR file)
+{
+    size = W32_DW(size);
+    os_lock(&g_ini_lock);
+    IniFile *f = sec ? open_ini(file) : NULL;
+    std::vector<std::string> items;
+    size_t a, b;
+    if (f && find_section(f, sec, a, b))
+        for (size_t i = a + 1; i < b; i++) {
+            std::string t = trim(f->lines[i]);
+            if (!t.empty() && t[0] != ';')
+                items.push_back(t);
+        }
+    DWORD r = copy_list(items, buf, size);
+    os_unlock(&g_ini_lock);
+    return r;
+}
+
+extern "C" BOOL WritePrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file)
+{
+    if (!sec) {
+        /* (NULL, NULL, NULL, file): flush; we write through, so drop the cache instead */
+        os_lock(&g_ini_lock);
+        for (IniFile *f : g_cache)
+            delete f;
+        g_cache.clear();
+        os_unlock(&g_ini_lock);
+        return TRUE;
+    }
+    os_lock(&g_ini_lock);
+    IniFile *f = open_ini(file);
+    BOOL ok = FALSE;
+    if (f) {
+        size_t a, b;
+        bool have = find_section(f, sec, a, b);
+        bool changed = false;
+        if (!key) {
+            if (have) {
+                f->lines.erase(f->lines.begin() + (long)a, f->lines.begin() + (long)b);
+                changed = true;
+            }
+        } else {
+            std::string k;
+            size_t at = (size_t)-1, last_key = a;
+            if (have)
+                for (size_t i = a + 1; i < b; i++)
+                    if (key_of(f->lines[i], k, NULL)) {
+                        last_key = i;
+                        if (at == (size_t)-1 && ieq(k, key))
+                            at = i;
+                    }
+            if (!val) {
+                if (at != (size_t)-1) {
+                    f->lines.erase(f->lines.begin() + (long)at);
+                    changed = true;
+                }
+            } else {
+                std::string line = trim(key) + "=" + val;
+                if (at != (size_t)-1) {
+                    f->lines[at] = line;
+                } else if (have) {
+                    f->lines.insert(f->lines.begin() + (long)last_key + 1, line);
+                } else {
+                    if (!f->lines.empty() && !trim(f->lines.back()).empty())
+                        f->lines.push_back("");
+                    f->lines.push_back("[" + std::string(sec) + "]");
+                    f->lines.push_back(line);
+                }
+                changed = true;
+            }
+        }
+        ok = changed ? save(f) : TRUE;
+    }
+    os_unlock(&g_ini_lock);
+    return ok;
+}
+
+extern "C" BOOL WritePrivateProfileSectionA(LPCSTR sec, LPCSTR data, LPCSTR file)
+{
+    /* data: "key=value\0key=value\0\0"; replaces the whole section; NULL deletes it */
+    if (!sec)
+        return FALSE;
+    if (!WritePrivateProfileStringA(sec, NULL, NULL, file))
+        return FALSE;
+    if (!data)
+        return TRUE;
+    for (const char *p = data; *p; p += strlen(p) + 1) {
+        std::string l = p, k = l, v;
+        size_t eq = l.find('=');
+        if (eq != std::string::npos) {
+            k = l.substr(0, eq);
+            v = l.substr(eq + 1);
+        }
+        if (!WritePrivateProfileStringA(sec, k.c_str(), v.c_str(), file))
+            return FALSE;
+    }
+    return TRUE;
+}
