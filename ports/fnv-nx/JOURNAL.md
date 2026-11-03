@@ -382,3 +382,15 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - link_objects=2067 link_refs=107294 link_resolved=91076 link_bridges=384 link_addrmap_E=4622
 * **next** - S2b-vslots (needs the player's exe); secondary/synthesized vtables and `??_G` D1/D0 split; S6n's
   override table.
+
+### J-0018 | 2026-11-03 | stream: S0-arch | status: done | parent: J-0015,J-0017 | supersedes: J-0015
+
+* **decided** - User priority: shortest path to the game running on the Switch; no 6-month renderer. Critical path:
+  (1) boot the engine headless on hardware - full guest link (S2 objects + platform + loader) with a null D3D9
+  device (S5, S1 boot-path units first); (2) first pixels through **Gallium Nine** (Mesa's native D3D9 state tracker,
+  present until Mesa 25.1) on the nouveau Gallium driver as in devkitPro's switch-mesa, LP64 in the host module,
+  reached through generated ILP32 -> LP64 COM proxies from `shim/include/d3d9.h` (new stream S6c-nine). Native
+  renderer (J-0015) becomes the later performance phase; N0 paused. S6b translator off the critical path (wrap up).
+* **next** - S6c spike: does Nine + nouveau build for Switch; S5 headless boot; the player's exe (data image, vtable
+  slots, ABI patches) and a hardware loop (Remote Control on the machine with the console + nx-agent) are the two
+  external accelerators.
