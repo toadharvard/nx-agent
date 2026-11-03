@@ -246,6 +246,11 @@ CRT_HEADERS = {
           '_operator_delete_sized',   # in the force-included fnvnx_compat.h
 }
 CRT_NAMES = [n for v in CRT_HEADERS.values() for n in v.split()]
+# stdio functions S4b implements on MSVC's struct _iobuf (platform/crt/fnvnx_iobuf.h): a decomp prototype of one of
+# these that takes or returns _iobuf* is replaced by that header (its C++ overloads take _iobuf*)
+IOBUF_NAMES = set('''_fclose_nolock _fdopen _fileno _fseeki64 _fsopen _ftelli64 clearerr fclose feof ferror fflush fgetc
+    fgetpos fgets fopen_s fprintf fputc fputs fread fseek fsetpos ftell fwrite getc putc rewind setvbuf ungetc vfprintf
+    __iob_func'''.split())
 MACRO_NAMES = {'_alloca'}     # macros on the target (fnvnx_compat.h): no using-declaration possible
 
 OWN_STD = re.compile(r'\b(?:class|struct)\s+(?:exception|bad_alloc|bad_cast|type_info)\s*[:{]')
@@ -284,7 +289,7 @@ def r_platform_protos(path, text, stats):
     for m in PROTO.finditer(text):
         name = re.sub(r'\s+', ' ', m.group(1))
         is_op = name.startswith('operator')
-        if not is_op and name not in PLATFORM: continue
+        if not is_op and name not in PLATFORM and not (name in IOBUF_NAMES and '_iobuf' in m.group(0)): continue
         if spans is None: spans = scope_spans(text)
         chain = scope_chain(spans, m.start())
         if any(k not in ('namespace', 'extern') for k, _ in chain): continue
@@ -294,6 +299,8 @@ def r_platform_protos(path, text, stats):
         if is_op:   # the usual forms are declared implicitly in every unit; placement forms come from <new>
             params = re.search(r'\(([^;{}]*)\)', m.group(0)[m.group(0).index('operator'):]).group(1)
             hdr = new_header(text) if PLACEMENT_PARAMS.match(params) else ''
+        elif name in IOBUF_NAMES and '_iobuf' in m.group(0):
+            hdr = '"fnvnx_iobuf.h"'
         else:
             hdr = PLATFORM[name]
         nl = '\n' * m.group(0).count('\n')

@@ -90,6 +90,23 @@ inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volat
 template <class T> inline T &fnvnx_lvalue(T &&t) { return t; }
 #endif
 
+/* MSVC's va_list is a char*; the decomp passes va_lists through char* / void* parameters. prepare.py VA1 wraps
+ * each such argument in fnvnx_va: a char* / void* parameter receives the address of the real va_list, a va_list
+ * parameter the va_list itself (from a va_list or from such an address), and an ordinary char* passed to a char*
+ * parameter comes back unchanged. */
+#ifdef __cplusplus
+#include <stdarg.h>
+struct fnvnx_va_ref {
+    va_list *p;
+    operator char *() const { return (char *)p; }
+    operator const char *() const { return (const char *)p; }
+    operator void *() const { return (void *)p; }
+    operator va_list &() const { return *p; }
+};
+static inline fnvnx_va_ref fnvnx_va(va_list &v) { return fnvnx_va_ref{&v}; }
+static inline fnvnx_va_ref fnvnx_va(const void *p) { return fnvnx_va_ref{(va_list *)p}; }
+#endif
+
 /* MSVC class layout: derived members start at sizeof(base), never in its tail padding (prepare.py rule TAIL1
  * puts FNVNX_MSVC_BASE_END(last base) first in every derived class body). A zero-width bit-field of an integer
  * type with the base's alignment moves the next member to roundup(dsize(base), alignof(base)) == sizeof(base). */
