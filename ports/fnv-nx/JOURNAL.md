@@ -83,3 +83,20 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - census_units=2978 census_clean=2002 census_errors=8952
 * **next** - fill `fnvnx_win32.h` from the miss list; rule for `__asm` blocks (S8 owns the semantics, S1 only needs
   them to parse); look at the C-linkage conflicts.
+
+### J-0004 | 2026-11-03 | stream: S0-arch | status: done | parent: J-0003
+
+* **did** - Added rules SSE4 (qualified `N::__m128` -> global), DECL1 (drop the decomp's prototypes of CRT/Win32
+  functions and namespace-scope `operator new/delete` outside classes; the platform headers declare them with target
+  types - `size_t` is `unsigned long` on AArch64 ILP32, `unsigned int` on MSVC x86), NEW1 (`unsigned int` size
+  parameters of `operator new/delete` -> `size_t`); filled `fnvnx_win32.h` with the 32-bit SDK types and the Win32
+  subset (run3: 2,059 clean / 7,475 errors before SSE4/DECL1/NEW1; not yet measured with them).
+* **decided** - Per-stream ownership to work in parallel without conflicts: prepare rules owned by a stream live in
+  `tools/rules/<stream>.py` (loaded after the core rules); each stream owns its directories. Streams do not edit this
+  journal; they hand in a draft entry and it is appended here in order.
+* **did** - Opened S1-compile (continues), S2-link, S3-dataimage, S4-runtime, S5-toolchain, S6-render, S8-asm in
+  parallel. Ownership: S1 `tools/prepare.py`, `tools/rules/s1_compile.py`, `shim/include` except D3D9; S2
+  `tools/link/`, `docs/LINK.md`; S3 `loader/`, `docs/DATAIMAGE.md`; S4 `platform/`, `docs/RUNTIME.md`; S5
+  `toolchain/`, `docs/TOOLCHAIN.md`; S6 `shim/include/d3d9*.h`, `d3dx9*.h`, `render/`, `docs/RENDER.md`; S8
+  `tools/rules/s8_asm.py`, `shim/include/fnvnx_asm.h`, `docs/ASM.md`; tests under `tests/s<n>/`.
+* **next** - merge stream results as they land; S7-audio-input opens once S4 has the API list.
