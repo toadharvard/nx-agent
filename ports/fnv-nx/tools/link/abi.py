@@ -149,7 +149,7 @@ def ret_a64(cls):
 # ------------------------------------------------------------------------------------------------------------ compare
 
 class Verdict:
-    __slots__ = ('kind', 'classes', 'moves', 'notes', 'ret_fix')
+    __slots__ = ('kind', 'classes', 'moves', 'notes', 'ret_fix', 'plan')
 
     def __init__(self):
         self.kind = 'same'        # same | bridge | manual | x86-inconsistent
@@ -157,6 +157,7 @@ class Verdict:
         self.moves = []           # [(dst_loc, src_loc, cls_dst, cls_src)]
         self.notes = []
         self.ret_fix = None       # (from, to) when the return value has to move between register files
+        self.plan = None          # abi2.Plan when the verdict was made on bytes (aggregate layouts known)
 
 
 def _bucket(cls):

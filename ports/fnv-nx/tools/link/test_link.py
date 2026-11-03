@@ -11,6 +11,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import abi      # noqa: E402
 import fnvlink  # noqa: E402
+import layout   # noqa: E402
 import sigs     # noqa: E402
 
 # (MSVC decorated, Itanium mangled, expected tier)
@@ -89,6 +90,30 @@ def main():
         check(r.returncode == 0, 'bridges assemble: ' + r.stderr)
         seq = abi.sequentialize(vc.moves)
         check(any(m[0] == ('x', 16) for m in seq), 'swap goes through x16')
+    # layout probe on a hand-written unit
+    unit = '''struct A { int a; };
+struct F3 { float x, y, z; F3(); };
+struct Big { int a[8]; };
+struct NT { int a; ~NT(); };
+struct V { double a, b; };
+namespace ns { struct P { void *p; short s; long long q; }; }
+struct E {};
+template <class T> struct Ptr { T *p; };
+struct M { float a[4]; };
+struct D4 { double a, b, c, d; };
+'''
+    with tempfile.TemporaryDirectory() as tree:
+        os.makedirs(os.path.join(tree, 'src')); os.makedirs(os.path.join(tree, 'include'))
+        open(os.path.join(tree, 'src', 'u.cpp'), 'w').write(unit)
+        got = layout.probe_unit(tree, tree, 'src/u.cpp', ['A', 'F3', 'Big', 'NT', 'V', 'ns::P', 'E', 'Ptr<A>',
+                                                          'Nope', 'M', 'D4'])
+        want = {'A': (4, 'G1'), 'F3': (12, 'H3x4'), 'Big': (32, 'IND'), 'NT': (4, 'IND'), 'V': (16, 'H2x8'),
+                'ns::P': (16, 'G2'), 'E': (1, 'G1'), 'Ptr<A>': (4, 'G1'), 'M': (16, 'H4x4'), 'D4': (32, 'H4x8')}
+        for t, (size, cls) in want.items():
+            g = got.get(t)
+            check(g is not None and (g.size, g.cls) == (size, cls), 'layout %s: %s (want %s %s)' % (t, g, size, cls))
+        check(got.get('Nope') is None, 'unnameable type dropped')
+
     print('ok' if ok else 'FAILED')
     sys.exit(0 if ok else 1)
 
