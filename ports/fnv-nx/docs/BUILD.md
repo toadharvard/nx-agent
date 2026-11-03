@@ -38,11 +38,11 @@ the variables, `make clean` removes `build/`, and `make clean-<stage>` removes o
 | `toolchain` | `build/toolchain/{tools.tsv,toolchain.env}` | Validates fnvnx-a64 (version, the ILP32 multilib with libc/libsysbase/libm/libgcc/libstdc++/libsupc++), DEVKITPRO (libnx, switch.specs, packers) and the host tools each later stage uses. It chooses the game compiler. It builds the toolchain when `TC_DL` is given. | - |
 | `prepare` | `build/prepare/tree/` | `tools/prepare.py <decomp> build/prepare/staging`, then a sync into `tree/` that keeps unchanged files, mtimes included. The compile step then sees only real changes. Also writes `prepare_stats.tsv` and `changed.txt` (A/M/D). | fetch |
 | `census` | `build/census/` | `tools/census.sh` (`-fsyntax-only` of every unit) with the game compiler. `CENSUS=0` skips it. | prepare |
-| `compile` | `build/compile/{obj/,objects.tsv,failed.tsv}` | `tools/link/compile.sh` with `CXX="<game compiler> -MD"`. Before the call, an object is deleted when a header in its `.o.d` changed, since compile.sh checks only the unit's own source. Units that fail are listed with their first error in `failed.tsv` and excluded from the link. If the compiler, `OPT` or compile.sh changes, every object is rebuilt. | prepare |
-| `link` | `build/link/{out/,fixed/,check.txt,apply.log}` | `fnvlink.py resolve`, then `probe`, then `resolve` again if the layouts changed, then `apply` and `check`. `OVERRIDE` and `EXTERN_TEXT` pass `--override` and `--extern-text`. The probe uses the game compiler. Objects that apply cannot rewrite are listed and left out. | compile |
-| `guest` | `build/guest/{fnvnx.elf,guest.nso,undefined.txt,undefined_by_category.tsv}` | The full ILP32 guest link: S2's fixed objects, `aliases.ld`, bridges, addrmap, the guest runtime, `platform/`, `loader/`, `guest.specs`/`guest.ld`. It uses S5's `toolchain/game/build.sh` when present, otherwise the adapter. Undefined symbols are sorted by category and owner (`tools/pipeline/undef.py`). | link, toolchain |
-| `nine` | `build/nine/{work/,proxy/}` | NINE=1 only. `render/nine/build.sh` (Mesa st/nine + nouveau, LP64) and `render/nine/gen_proxy.py`. The guest proxy is compiled for ILP32. | toolchain |
-| `host` | `build/host/{host.elf,main,main.npdm}` | The LP64 host module, built with S5's `tests/s5/hello/build.sh` recipe (`host.c` + libnx). With NINE=1 the adapter `host_nine.py` links render/nine and Mesa into it. Then elf2nso (`main`) and npdmtool (`main.npdm`). | toolchain |
+| `compile` | `build/compile/{obj/,objects.tsv,failed.tsv}` | `tools/link/compile.sh` with `CXX="<game compiler> -MD"`. Before the call, an object is deleted when a header in its `.o.d` changed, since compile.sh checks only the unit's own source. Units that fail are listed with their first error in `failed.tsv` and excluded from the link. If the compiler, `OPT`, compile.sh or its `FLAGS=(...)` array changes, every object is rebuilt (the flag text is in the cache key and in the report). | prepare |
+| `link` | `build/link/{out/,fixed/,check.txt,apply.log}` | `fnvlink.py resolve`, then `probe` (layouts and synthesized vtables), then `resolve` again if the layouts changed, then `apply` and `check`. `OVERRIDE` and `EXTERN_TEXT` pass `--override` and `--extern-text`. The probe compiles through `build/link/cxx-probe`: the game compiler plus compile.sh's `-f` options (see "Adapters"). Objects that apply cannot rewrite are listed and left out. | compile |
+| `guest` | `build/guest/{fnvnx.elf,guest.nso,undefined.txt,undefined_by_category.tsv}` | The full ILP32 guest link: S2's fixed objects, `aliases.ld`, bridges, addrmap, the guest runtime, `platform/`, `loader/`, S10's startup objects, boot code. NINE=0 uses S5's `toolchain/game/build.sh` (null D3D9 device, relocatable guest). NINE=1 uses S6c's `render/nine/game/build.sh` with `GUEST_ONLY=1` (`D3D9=external`, Nine proxy guest, D3DX). The adapter is used only when neither script exists, or with `GUEST_LINK=adapter`. Undefined symbols are sorted by category and owner (`tools/pipeline/undef.py`). | link, toolchain |
+| `nine` | `build/nine/{work/,proxy/}` | NINE=1 only. `render/nine/build.sh` (Mesa st/nine + nouveau for Switch, LP64). `render/nine/gen_proxy.py` supplies the proxy method statistics. | toolchain |
+| `host` | `build/host/{host.elf,main,main.npdm}` | The LP64 host module. NINE=0: S5's `tests/s5/hello/build.sh` recipe (`host.c` + libnx + S10's window reservation). NINE=1: S6c's `render/nine/switch_host.sh` (host.c without console + `render/nine/host` + Mesa + libnx). Then elf2nso (`main`) and npdmtool (`main.npdm`). | toolchain (nine) |
 | `package` | `build/package/{exefs.nsp,sd/}` | `build_pfs0.py` makes `exefs.nsp` (main + main.npdm). The SD tree holds `atmosphere/contents/<PROGRAM_ID>/exefs.nsp` and `fnvnx/guest.nso`. | host (guest optional) |
 | `tests` | `build/tests/<suite>.log`, `results.json` | All host gates (below). Each suite is cached on a hash of its own inputs. | - |
 | `report` | `build/report.md`, `report.json`, `history/<run>.json` | Every run, at the end. | - |
@@ -81,6 +81,8 @@ progress lines of all runs.
   * one header of 4 units touched: 4 min (compile 22 s, then link 2 min and guest 1.5 min, which redo the whole
     image);
   * NINE=1 adds the Mesa build: 16 min the first time, 40 s when nothing changed.
+* The numbers above predate J-0034 and the merge of S5's game link (port `e4d2abb`). The final run's numbers are
+  in `build/report.md`.
 
 ## Variables
 
@@ -109,15 +111,18 @@ progress lines of all runs.
 
 | suite | commands | owner |
 |---|---|---|
-| `s2-link` | `tools/link/test_link.py`, `test_override.py`, `test_bridges.py` (qemu-aarch64) | S2 |
+| `s2-link` | every `tools/link/test_*.py` (link, override, bridges under qemu-aarch64, vtables, startup) | S2 |
 | `s3` | `tests/s3/test_s3.py` (FNVNX_S3_OUT under build/tests), `make -C loader ilp32-check` | S3 |
 | `s4`, `s7` | `make -C tests/<s> test` and `ilp32` (LIBNX = the pinned libnx) | S4, S7 |
 | `s5-tools` | `tests/s5/test_tools.py` | S5 |
 | `s5-emu-hello` | `tests/s5/hello/build.sh`, then `tests/s5/emu_guest.py` on its guest.nso (Unicorn) | S5 |
 | `s5-rt` | `tests/s5/rt/build.sh` when present | S5 |
 | `s6b` | `render/shaders/build.sh --tests` (deps cloned under build/tests/s6b), `tests/s6b/run.py` | S6b |
+| `s6d` | `render/nine/host/build_host.sh` (x86-64 Nine shader path; Mesa cloned, or the nine stage's tree with NINE=1), then `tests/s6d/run.py` with s6b's assembler; runs after s6b passes | S6d |
 | `s8` | `tests/s8/run.sh` | S8 |
-| `emu-game` | informational, not a gate: `emu_guest.py` on build/guest/guest.nso with `--expect "fnvnx boot"`, only when S5's guest script built it (the adapter has no boot code) | S5 |
+| `s10` | `tests/s10/run.sh` with `FNVNX_A64` (cross part: ILP32 startup objects, e2e guest under Unicorn) and DEVKITPRO (host part against libnx, hardware probe) | S10 |
+| `nine-gate` | NINE=1 only: `render/nine/test/run_gate.sh` (Mesa st/nine + softpipe for x86-64, the D3D9 proxy path end to end) | S6c |
+| `emu-game` | informational, not a gate: `emu_guest.py build/guest/guest.nso --elf fnvnx.elf --skip-faulting-init --expect "fnvnx boot: calling WinMain"` (traced boot without the player's exe), only when S5's game script built the guest. The summary gives the distinct unresolved symbols hit and the last STOP line. | S5 |
 | any other `tests/<x>/` | `make test`, or `run.sh`, or `run.py`, or every `test_*.py` (in that order of preference) | its stream |
 
 A suite reruns when the files it tests change. Its inputs are hashed: `tests/<s>` plus the directories under test.
@@ -164,14 +169,19 @@ Undefined-symbol categories (`tools/pipeline/undef.py`, owners in brackets):
 
 | adapter | stands in for | goes away when |
 |---|---|---|
-| `tools/pipeline/guest_link.py` + `guest_stub.c` | The full guest link of S2 objects + platform + loader + runtime (S5). It compiles the guest runtime, `platform/` (without the libnx-side files) and `loader/src` with fnvnx-a64. Sources that fail are listed and left out. It links the whole image (`--no-gc-sections`, since there is no boot code). Objects that binutils 2.45 refuses are left out and listed with the reason (`error adding symbols`; a relocation against a *defined* symbol that does not fit, mapped to the referencing object with nm), and the link is retried. Every undefined symbol is bound to a trap stub that reports it, and the result is packed as `guest.nso`. Its numbers count every compiled object; S5's script links from its boot code with gc. | S5's `toolchain/game/build.sh` is in the tree; `GUEST_LINK=auto` picks it automatically |
-| `tools/pipeline/host_nine.py` | The host-module build with Nine (render/nine README, "Host build integration"). It compiles `host.c`, `render/nine/host/*.c` and the generated `nine_proxy_host.c` against the Mesa tree, and links them with the Nine/nouveau libraries and libnx. Nine's entry points are forced into the link; whatever is still undefined is reported. | render/nine has its own host build script |
+| `build/link/cxx-probe` (written by the link stage) | `fnvlink.py probe`/`vtables` compile probe units with `tools/link/layout.py`'s own flag list, which lacks J-0034's `-fsigned-char ...`. `fnvnx_compat.h` now refuses an unsigned plain char, so every probe unit fails: no layouts, no synthesized vtables, and `test_bridges.py` fails 10/10. The wrapper is the game compiler plus compile.sh's `-f` options, passed as `CXX`. | layout.flags() carries compile.sh's semantics flags (S2) |
+| `tools/pipeline/guest_link.py` + `guest_stub.c` | Fallback only since S5's script landed (`GUEST_LINK=adapter`): the full guest link of S2 objects + platform + loader + runtime. It compiles the guest runtime, `platform/` (without the libnx-side files) and `loader/src` with fnvnx-a64. Sources that fail are listed and left out. It links the whole image (`--no-gc-sections`, since there is no boot code). Objects that binutils 2.45 refuses are left out and listed with the reason (`error adding symbols`; a relocation against a *defined* symbol that does not fit, mapped to the referencing object with nm), and the link is retried. Every undefined symbol is bound to a trap stub that reports it, and the result is packed as `guest.nso`. Its numbers count every compiled object; S5's script links from its boot code with gc. | S5's `toolchain/game/build.sh` is in the tree; `GUEST_LINK=auto` picks it automatically |
 | `build.py` link stage | Removes `build/link/out/objcopy/` before each `fnvlink.py resolve`. resolve writes one `.args`/`.redefine`/`.src` per object but never removes old ones, so `apply` would rewrite objects of units that no longer compile. | S2's resolve clears its per-object outputs |
 | `build.py` compile stage | Header dependencies: `-MD` in `CXX`, and objects deleted when a header changed. compile.sh compares the object with the unit's source only. | compile.sh tracks dependencies |
 
 ## Findings of the first runs (2026-11-03)
 
-These are interface problems the pipeline found, recorded here for their owners:
+These are interface problems the pipeline found, recorded here for their owners. The first three were found on
+port `a0f2c18`; S1's round 4 (J-0025) has since fixed the shim/platform conflict.
+
+* **S2 (after J-0034)**: `tools/link/layout.py` `flags()` lacks `-fsigned-char` (and the other D10 options), so
+  `fnvnx_compat.h`'s `#error` stops every probe and vtable-synthesis unit, and `test_bridges.py` fails all 10 pairs.
+  With the flags added (the pipeline's `cxx-probe` wrapper) the test passes, with 8 bridges executed.
 
 * **S2**: TLS-model references bound to absolute image addresses. `src/fallout_shared/tesscript.cpp` and
   `tesconditionfunctions.cpp` declare `__declspec(thread)` variables at image data addresses (`0x0126fd98`,

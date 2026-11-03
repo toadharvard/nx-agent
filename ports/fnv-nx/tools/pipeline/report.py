@@ -316,6 +316,21 @@ def render(b, stages, snap, prev):
         L.append('')
         L += table(['file', 'bytes', ''], arts, ['---', '--:', '--:'])
         L.append('')
+    # ---- disk
+    rows = []
+    for s_ in stages:
+        n = R(s_.name).get('disk_bytes')
+        if n:
+            rows.append(('`build/%s`' % s_.name, human(n)))
+    if rows:
+        st = os.statvfs(b.out)
+        L.append('## Disk')
+        L.append('')
+        L.append('Free on the build disk: %s. Per stage (measured when the stage last ran; `make clean-work` removes '
+                 're-creatable work trees, `CLEAN_WORK=1` does it after each success):' % human(st.f_bavail * st.f_frsize))
+        L.append('')
+        L += table(['directory', 'size'], rows, ['---', '--:'])
+        L.append('')
     # ---- diff
     L.append('## Changes since the previous report')
     L.append('')
@@ -364,6 +379,9 @@ def write(b, stages):
     md = render(b, stages, snap, prev)
     with open(os.path.join(hist, b.run_id + '.json'), 'w') as f:
         json.dump(snap, f, indent=1, sort_keys=True)
+    keep = max(2, int(b.cfg.get('KEEP_HISTORY', 50)))
+    for old in sorted(n for n in os.listdir(hist) if n.endswith('.json'))[:-keep]:
+        os.remove(os.path.join(hist, old))
     with open(os.path.join(b.out, 'report.json'), 'w') as f:
         json.dump(snap, f, indent=1, sort_keys=True)
     path = os.path.join(b.out, 'report.md')

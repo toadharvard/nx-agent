@@ -58,6 +58,10 @@ CONFIG = [
     ('TESTS', 'all', 'comma list of test suites to run (names in docs/BUILD.md), or all'),
     ('EMU_TIMEOUT', '1800', 'seconds for the emulator run of the game guest (informational)'),
     ('FORCE', '', 'comma list of stages to rerun even when cached (all = every stage)'),
+    ('CLEAN_WORK', '1', '1: remove re-creatable work trees (clones, third-party build dirs) once their stage or test '
+                        'suite succeeded; 0: keep them for faster reruns'),
+    ('MIN_FREE_GB', '10', 'free disk space (GiB) below which the toolchain stage warns'),
+    ('KEEP_HISTORY', '50', 'report snapshots kept in build/history'),
 ]
 STAGE_NAMES = ['fetch', 'toolchain', 'prepare', 'census', 'compile', 'link', 'guest', 'nine', 'host', 'package',
                'tests']
@@ -114,6 +118,38 @@ def listing_id(paths):
         except OSError:
             items.append((os.path.basename(p), None))
     return sha(items)
+
+
+def du(path):
+    """Bytes under path (files only, symlinks not followed)."""
+    total = 0
+    for dp, dn, fn in os.walk(path):
+        for n in fn:
+            try:
+                total += os.lstat(os.path.join(dp, n)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def free_bytes(path):
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize
+
+
+def remove_work(b, r, paths, why):
+    """CLEAN_WORK=1: drop re-creatable work trees (they are rebuilt or re-cloned when needed again)."""
+    if b.cfg['CLEAN_WORK'] == '0':
+        return 0
+    freed = 0
+    for p in paths:
+        if os.path.lexists(p):
+            n = du(p) if os.path.isdir(p) else os.path.getsize(p)
+            shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) and not os.path.islink(p) else os.remove(p)
+            freed += n
+    if freed and r is not None:
+        r.note('CLEAN_WORK: removed %s of %s' % (human(freed), why))
+    return freed
 
 
 def now_iso():
@@ -514,6 +550,12 @@ class Toolchain(Stage):
         chk('GAME_CXX (%s)' % kind, game_cxx or '-', bool(gver))
         r.metric('game_cxx', '%s: %s' % (kind, gver))
 
+        free = free_bytes(b.out)
+        r.metric('disk_free_gib', round(free / 2**30, 1))
+        if free < float(b.cfg['MIN_FREE_GB']) * 2**30:
+            r.note('only %s free on the build disk (MIN_FREE_GB=%s); a cold build with NINE=1 and all tests needs '
+                   'about 8 GiB (make clean-work frees the re-creatable work trees)' % (human(free), b.cfg['MIN_FREE_GB']))
+            r['status'] = 'warn'
         with open(os.path.join(d, 'tools.tsv'), 'w') as f:
             f.write('# item\tvalue\tstate\n')
             for c in checks:
@@ -1199,6 +1241,7 @@ class Nine(Stage):
             r['proxy_kinds'] = kinds
         r.artifact('work', work)
         r['output_id'] = sha(r['libs'])
+        remove_work(b, r, [os.path.join(src, 'mesa', 'build-nine')], 'the Mesa meson build directory')
         r['summary'] = '%d static libraries (%s), proxy methods %s' % (
             len(libs), human(r['metrics']['nine_libs_bytes']), r.get('proxy_kinds'))
 
@@ -1317,8 +1360,9 @@ class Package(Stage):
 # ----------------------------------------------------------------------------------------------------- 11 tests
 
 class Suite:
-    def __init__(self, name, inputs, cmds, needs=(), informational=False, fixed_inputs=None, after=()):
+    def __init__(self, name, inputs, cmds, needs=(), informational=False, fixed_inputs=None, after=(), work=()):
         self.name, self.inputs, self.cmds, self.needs, self.after = name, inputs, cmds, needs, after
+        self.work = work     # re-creatable trees (clones, third-party builds): removed after a pass (CLEAN_WORK)
         self.informational = informational
         self.fixed_inputs = fixed_inputs or (lambda b: [])
 
@@ -1378,7 +1422,7 @@ def suites(b):
             ['env', 'FNVNX_SHADERS_DEPS=' + deps, 'FNVNX_SHADERS_BUILD=' + bld, 'bash', 'render/shaders/build.sh',
              '--tests'],
             [PY, '-I', 'tests/s6b/run.py', '--build', bld, '--out', os.path.join(t, 's6b', 'out')]],
-            needs=('cmake', 'ninja', 'meson')))
+            needs=('cmake', 'ninja', 'meson'), work=(deps,)))
         if os.path.isfile(os.path.join(ROOT, 'tests', 's6d', 'run.py')):
             # nvc0 shader cache over the S6b and S6d corpora: x86-64 build of Nine's shader path (S6d) + S6b's asm
             w = os.path.join(t, 's6d', 'work')
@@ -1389,7 +1433,7 @@ def suites(b):
                                    'render/nine/precompile'], [
                 env + ['bash', 'render/nine/host/build_host.sh', w, str(b.jobs)],
                 [PY, '-I', 'tests/s6d/run.py', '--host', os.path.join(w, 'out'), '--asm', os.path.join(bld, 's6b_asm'),
-                 '--out', os.path.join(t, 's6d', 'out')]], after=('s6b',)))
+                 '--out', os.path.join(t, 's6d', 'out')]], after=('s6b',), work=(w,)))
     if os.path.isfile(os.path.join(ROOT, 'tests', 's8', 'run.sh')):
         s.append(Suite('s8', ['tests/s8', 'shim/include'], [['bash', 'tests/s8/run.sh', os.path.join(t, 's8')]]))
     if os.path.isfile(os.path.join(ROOT, 'tests', 's10', 'run.sh')):
@@ -1399,7 +1443,7 @@ def suites(b):
         # S6c's host gate of the D3D9 proxy path (Mesa st/nine + softpipe for x86-64, ILP32 test guest)
         s.append(Suite('nine-gate', ['render/nine'], [
             ['bash', 'render/nine/test/run_gate.sh', os.path.join(t, 'nine-gate'), str(b.jobs)]],
-            needs=('DEVKITPRO', 'unicorn', 'meson', 'ninja')))
+            needs=('DEVKITPRO', 'unicorn', 'meson', 'ninja'), work=(os.path.join(t, 'nine-gate', 'src'),)))
     known = {'s3', 's4', 's5', 's6b', 's6d', 's7', 's8', 's10'}
     for n in sorted(os.listdir(os.path.join(ROOT, 'tests'))):      # suites added later by other streams
         p = os.path.join(ROOT, 'tests', n)
@@ -1476,6 +1520,8 @@ class Tests(Stage):
             text = open(log, errors='replace').read()
             res.update(status='pass' if rc == 0 else 'fail', rc=rc, seconds=round(time.time() - t0, 1),
                        summary=summarize_output(text) or ('exit %d' % rc))
+            if rc == 0 and su.work:
+                res['work_freed'] = remove_work(b, None, su.work, su.name)
             if rc:
                 lines = [l.strip() for l in text.splitlines() if l.strip()]
                 res['tail'] = lines[-8:]
@@ -1579,6 +1625,7 @@ def execute(b, targets):
             with open(r['log'], 'a') as f:
                 f.write(traceback.format_exc())
         r['seconds'] = round(time.time() - t0, 1)
+        r['disk_bytes'] = du(os.path.join(b.out, st.name))
         if r['status'] == 'fail':
             r['fingerprint'] = None
             r.setdefault('summary', r.get('error', ''))
@@ -1619,6 +1666,14 @@ def main(argv):
         for n in names:
             shutil.rmtree(os.path.join(b.out, n), ignore_errors=True)
             print('removed %s' % os.path.join(b.out, n))
+        return 0
+    if cmd == 'clean-work':     # re-creatable work trees of every stage and suite, whatever their state
+        b.cfg['CLEAN_WORK'] = '1'
+        t = os.path.join(b.out, 'tests')
+        paths = [os.path.join(b.out, 'prepare', 'staging'), os.path.join(b.out, 'nine', 'work', 'src', 'mesa', 'build-nine'),
+                 os.path.join(t, 's6b', 'deps'), os.path.join(t, 's6d', 'work'), os.path.join(t, 'nine-gate', 'src'),
+                 os.path.join(b.out, 'guest', 'obj'), os.path.join(b.out, 'guest', 'nine')]
+        print('freed %s' % human(remove_work(b, None, paths, 'work trees')))
         return 0
     if cmd == 'status':
         for st in STAGES:
