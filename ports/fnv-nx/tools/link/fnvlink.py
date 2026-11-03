@@ -5,6 +5,7 @@
                        [--crt-symbols <tsv|none>] [--imports <tsv|none>]
                                                               # mapping, address map, ABI report, bridges
                                                               # (S4's provider tables: platform/ of this tree)
+                       [--msvc-objs <dir>]                    # vtable slots via the MSVC vftables (vslots.py)
     fnvlink.py probe   <out dir> <prepared tree> [jobs]        # layouts of the aggregates resolve asked for, and
                                                               # the synthesized vtables/typeinfo (vtables.py;
                                                               # FNVNX_NO_VTABLES=1 skips them); then resolve again
@@ -33,6 +34,7 @@ import elfsyms  # noqa: E402
 import layout   # noqa: E402
 import sigs     # noqa: E402
 import vtables  # noqa: E402
+import vslots as msvc_vslots  # noqa: E402  (`vslots` is a local name in resolve)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
 DATA_END = 0x0200c612
@@ -352,6 +354,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         del native[a]
     stats['import_thunks'] = len(thunks)
     bound = collections.defaultdict(set)  # unit -> addresses its object references by address
+    # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
+    vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
     for u in have:
         idx = KeyIndex()
         for n, a in u.refs.items():
@@ -373,6 +377,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             stats['refs'] += 1
             isig = itanium(un)
             cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc)
+            if un in vslots and vsb is not None:
+                cls, tier, addr, target, note = vsb.classify(u.host or u.source, u.obj, un, isig, native, def_at,
+                                                             (cls, tier, addr, target, note))
             if addr is not None and cls == 'addr':
                 ak = kind_of_addr(addr)
                 if ak == 'data' and un in tls_undef:   # thread-local: native TLS in the image's .tls layout
@@ -476,6 +483,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         renames.update(thunk_undef.get(u.source, {}))   # the object's own import-thunk definition (undefined)
         per_obj[u.source] = renames
     refs_out.close()
+    if vsb is not None:
+        vsb.write(out)
 
     # ---- per object objcopy args: renames, address symbols for the definitions it holds, localize duplicates
     alias_lines, localize = [], collections.defaultdict(list)
@@ -1263,6 +1272,10 @@ def main():
     if len(sys.argv) < 2:
         print(__doc__); sys.exit(2)
     cmd = sys.argv[1]
+    if cmd == 'resolve' and '--msvc-objs' in sys.argv:   # vslots.py: the pristine MSVC objects (u<index>.obj)
+        k = sys.argv.index('--msvc-objs')
+        os.environ['FNVNX_MSVC_OBJS'] = sys.argv[k + 1]
+        del sys.argv[k:k + 2]
     if cmd == 'resolve':
         argv, opts = [], {}
         it_ = iter(sys.argv[2:])
