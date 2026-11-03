@@ -33,7 +33,10 @@ A64 = {n: n for n in ('memcpy', 'memmove', 'memset', 'memcmp', 'strlen', 'strcmp
 A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp', 'strncasecmp': 'strnicmp',
             '_strnicmp': 'strnicmp', 'sqrt': 'sqrt', 'sqrtf': 'sqrtf', 'sin': 'sin', 'sinf': 'sinf', 'cos': 'cos',
             'cosf': 'cosf', 'fabs': 'fabs', 'fabsf': 'fabsf', '_memcpy': 'memcpy', '_memmove': 'memmove',
-            '_memset': 'memset', '_strlen': 'strlen', '_strcmp': 'strcmp'})
+            '_memset': 'memset', '_strlen': 'strlen', '_strcmp': 'strcmp',
+            # GCC's thread-safe local statics (MSVC 2008: a plain guard bit, no call): single-threaded semantics
+            '__cxa_guard_acquire': 'guard_acquire', '__cxa_guard_release': 'guard_release',
+            '__cxa_guard_abort': 'guard_abort'})
 
 EQUIV = {'_Znwm': 0x00401000, '_Znwj': 0x00401000, '_Znam': 0x00401000, '_Znaj': 0x00401000,
          '_ZdlPv': 0x00401030, '_ZdlPvm': 0x00401030, '_ZdlPvj': 0x00401030, '_ZdaPv': 0x00401030,
@@ -126,6 +129,12 @@ def run(name, m, a):
     if name == 'tolower':
         c = a[0] & 0xffffffff
         return c + 32 if 65 <= c <= 90 else c
+    if name == 'guard_acquire':
+        return 0 if m.read(a[0], 1)[0] else 1
+    if name == 'guard_release':
+        m.write(a[0], b'\x01'); return 0
+    if name == 'guard_abort':
+        return 0
     if name == 'toupper':
         c = a[0] & 0xffffffff
         return c - 32 if 97 <= c <= 122 else c

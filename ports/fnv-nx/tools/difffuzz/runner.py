@@ -229,5 +229,8 @@ class Pair:
         NAMES.clear(); NAMES.update(self.target.image.stubs)
         rx = self.xe.run(self.target.conv, case, placement, max_steps=max_steps, start=self.target.orig_addr)
         ra = self.ae.run(self.target.conv, case, placement, self.target.orig_addr, max_steps=max_steps)
-        return rx, ra, compare(self.target.conv, rx, ra, w, placement.get('sret'), self.target.local_statics,
+        d = compare(self.target.conv, rx, ra, w, placement.get('sret'), self.target.local_statics,
                                 getattr(self.target.callee_info, 'conv', None))
+        if d is not None and ra.private_reads:
+            d['arm_private_reads'] = ra.private_reads
+        return rx, ra, d

@@ -21,7 +21,7 @@ import os
 
 import config
 
-SOFT_CAUSES = {'local-static', 'vptr-store', 'bool-repr', 'ilp32-pointer', 'division', 'uninit-x86'}
+SOFT_CAUSES = {'local-static', 'vptr-store', 'bool-repr', 'ilp32-pointer', 'division', 'uninit-x86', 'nan-bits'}
 LINK_CAUSES = {'split-global', 'call-args', 'callee-saved'}
 
 
@@ -39,6 +39,18 @@ def reclassify(rec):
     except Exception:  # noqa: BLE001
         pass
     d = rec['divergence']
+    if rec.get('_now') is not None:
+        d = rec['_now']
+        if d.get('arm_private_reads'):
+            return 'split-global'
+    if d['kind'] in ('mem-write', 'return'):
+        try:
+            import classify
+            bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+            if len(bx) == len(ba) and len(bx) >= 4 and classify._nan_only(bx, ba):
+                return 'nan-bits'
+        except Exception:  # noqa: BLE001
+            pass
     if d['kind'] == 'mem-write' and d.get('only_x86') == d.get('ndiff') and d.get('ndiff', 0) <= 4:
         try:
             import classify
@@ -84,18 +96,21 @@ def main():
         for line in open(os.path.join(d, 'results.jsonl')):
             r = json.loads(line)
             results[r['address']] = r
-        gone = set()
+        gone, now = set(), {}
         rp = os.path.join(d, 'recheck.jsonl')
         if os.path.exists(rp):
             for line in open(rp):
                 x = json.loads(line)
                 if x['status'] == 'gone':
                     gone.add(x['file'])
+                elif x['status'] == 'still':
+                    now[x['file']] = x['divergence']
         for p in sorted(glob.glob(os.path.join(d, 'div', '*.json'))):
             if os.path.basename(p) in gone:
                 continue        # no longer reproduces: it was a harness limit fixed since
             rec = json.load(open(p))
             rec['_file'] = p
+            rec['_now'] = now.get(os.path.basename(p))
             rec['_cause'] = reclassify(rec)
             divs.append(rec)
     by_fn = collections.defaultdict(list)

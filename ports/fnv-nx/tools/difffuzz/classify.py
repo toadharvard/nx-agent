@@ -3,6 +3,7 @@
 Causes (first that applies):
   split-global    the native function reaches its unit's own copy of an image variable (S2 rebinding bypassed by a
                   section-relative relocation) while the oracle uses the image copy
+  nan-bits        only NaN payload/sign differ (x87 real indefinite vs AArch64 default NaN)
   vptr-store      only x86 stores an image vftable address (dead vptr store GCC drops in a destructor; D7 objects
                   hold Itanium vptrs anyway)
   division        x86 raised #DE (div by zero / INT_MIN/-1) where AArch64 sdiv/udiv returns 0 or wraps
@@ -19,6 +20,8 @@ Causes (first that applies):
   callee-saved    an ABI break: callee-saved registers clobbered
   unclassified
 """
+import struct
+
 import capstone
 
 import check_rebind
@@ -37,6 +40,20 @@ def _outcome(r):
 
 
 _VFT = None
+
+
+def _nan_only(bx, ba):
+    """Every differing aligned word is a NaN on both sides (payload/sign differ: x87 'real indefinite' 0xffc00000
+    vs AArch64 default NaN 0x7fc00000)."""
+    diff = False
+    for i in range(0, len(bx) - 3, 4):
+        x, a = struct.unpack_from('<I', bx, i)[0], struct.unpack_from('<I', ba, i)[0]
+        if x == a:
+            continue
+        diff = True
+        if not ((x & 0x7f800000) == 0x7f800000 and x & 0x7fffff and (a & 0x7f800000) == 0x7f800000 and a & 0x7fffff):
+            return False
+    return diff
 
 
 def image_vftables():
@@ -66,6 +83,12 @@ def hint(pair, target, case, div, fn, max_steps):
             hits = check_rebind.bypassing_functions(str(obj)).get(target.orig_addr)
             if hits:
                 h['cause'] = 'split-global'; h['vars'] = hits; return h
+    if div.get('arm_private_reads') and k in ('return', 'mem-write', 'call-args', 'error', 'call-target'):
+        h['cause'] = 'split-global'; h['note'] = 'native code read its unit-local data'; return h
+    if k in ('mem-write', 'return'):
+        bx, ba = bytes.fromhex(div.get('x86') or ''), bytes.fromhex(div.get('arm') or '')
+        if len(bx) == len(ba) and len(bx) >= 4 and _nan_only(bx, ba):
+            h['cause'] = 'nan-bits'; return h
     if k == 'mem-write' and div.get('only_x86') == div.get('ndiff') and div.get('ndiff', 0) <= 4:
         w = int.from_bytes(bytes.fromhex(div['x86'])[:4], 'little')
         if w in image_vftables():

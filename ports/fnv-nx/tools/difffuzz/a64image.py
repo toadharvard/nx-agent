@@ -83,16 +83,23 @@ class Image:
         # everything after the code (.rodata onwards) is restored between runs; .text never changes
         text = [a + len(b) for a, b in self.segments if a == A64_BASE]
         self.data_start = text[0] if text else A64_BASE
+        # writable data (.data.rel.ro onwards): the first segment that is not .text or .rodata
+        # the unit's own mutable state: .data and .bss only (not the GOT, not vtables/typeinfo in .data.rel.ro)
+        self.private = [(a, a + n) for nm, a, n in self.sections if nm in ('.data', '.bss')]
 
     def _read(self):
         d = open(self.elf, 'rb').read()
         shoff, = struct.unpack_from('<I', d, 0x20)
         shentsize, shnum, shstrndx = struct.unpack_from('<HHH', d, 0x2e)
         secs = [struct.unpack_from('<IIIIIIIIII', d, shoff + i * shentsize) for i in range(shnum)]
+        shstr = secs[shstrndx][4]
+        self.sections = []
         for name, typ, flags, addr, off, size, link, info, align, ent in secs:
             if flags & 2 and size and addr >= A64_BASE:      # SHF_ALLOC
                 data = bytes(size) if typ == 8 else d[off:off + size]   # SHT_NOBITS
                 self.segments.append((addr, data))
+                sname = d[shstr + name:d.index(b'\0', shstr + name)].decode('latin-1')
+                self.sections.append((sname, addr, size))
         for s in elfsyms.symbols(self.elf):
             if s.name and s.shndx != 0 and s.type not in ('section', 'file'):
                 self.syms.setdefault(s.name, s.value)

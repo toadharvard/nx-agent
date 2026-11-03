@@ -15,6 +15,7 @@ for an indirect result), caller-saved registers get garbage, and execution resum
 import struct
 
 from unicorn import (Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE,
+                     UC_HOOK_MEM_READ,
                      UC_HOOK_INTR, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
 from unicorn import arm64_const as A
 import world
@@ -45,6 +46,7 @@ class Result:
         self.blocks = set()
         self.saved_ok = True
         self.vptr_stores = 0
+        self.private_reads = 0
 
 
 class Arm64Engine:
@@ -136,6 +138,10 @@ class Arm64Engine:
                          end=max(self.image.end, a64image.A64_BASE + 4) - 1)
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
                for lo, hi in world.COMPARED]
+        # reads of the unit image's own data (.data/.bss after .rodata): state the native code keeps outside the
+        # image window (a unit-local copy of something the oracle reads at an original address)
+        for lo, hi in getattr(self.image, 'private', ()):
+            hws.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_private_read, user_data=r, begin=lo, end=hi - 1))
         self._fault = None
         try:
             uc.emu_start(native, world.SENTINEL, count=max_steps)
@@ -213,6 +219,9 @@ class Arm64Engine:
                 r.vptr_stores += 1
         for i in range(size):
             r.writes[address + i] = (value >> (8 * i)) & 0xff
+
+    def _on_private_read(self, uc, access, address, size, value, r):
+        r.private_reads += 1
 
     def _on_cov(self, uc, address, size, r):
         r.blocks.add(address)
