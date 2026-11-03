@@ -39,6 +39,19 @@ STATE = {0: 'missing', 1: 'soft-zero', 2: 'unknown', 3: 'known', 4: 'bss', 5: 'i
 PHASES = ('loader', 'gcc-init', 'xc-init', 'main', 'exit')
 
 
+class SkipList(list):
+    """emu_guest's list of skipped initializers; also keeps the window reads just before each fault"""
+
+    def __init__(self, emu):
+        super().__init__()
+        self.emu = emu
+
+    def append(self, x):
+        super().append(x)
+        self.emu.skip_ctx.append(list(self.emu.recent))
+        self.emu.recent.clear()
+
+
 class Run(emu_guest.Emu):
     def setup(self, mode, image, state):
         self.mode, self.image = mode, image
@@ -49,9 +62,14 @@ class Run(emu_guest.Emu):
         self.state = state
         self.window_mapped = False
         self.phase_at = {}
+        self.recent = collections.deque(maxlen=6)    # last window reads (address): context of a fault
+        self.skip_ctx = []
 
     # data-window watch: first access per byte
     def on_read(self, uc, access, addr, size, value, _):
+        if self.phase == 'loader':          # the boot zeroes / the loader fills the window: not the program
+            return
+        self.recent.append(addr)
         o = addr - WIN_LO
         f = self.first
         p = PHASES.index(self.phase) + 1
@@ -61,6 +79,8 @@ class Run(emu_guest.Emu):
                 self.first_phase[k] = p
 
     def on_write(self, uc, access, addr, size, value, _):
+        if self.phase == 'loader':
+            return
         o = addr - WIN_LO
         f = self.first
         p = PHASES.index(self.phase) + 1
@@ -119,6 +139,7 @@ def run_mode(a, mode, out_dir, state):
     emu.setup(mode, a.image, state)
     emu.load_symbols(a.elf)
     emu.install_guards()
+    emu.skipped = SkipList(emu)
     if mode == 'pe':
         # S10 claims header + .text range as backed zero memory; the loader maps only the data sections
         emu.uc.mem_map(0x00400000, 0x00fdf000 - 0x00400000, UC_PROT_READ | UC_PROT_WRITE)
@@ -156,6 +177,17 @@ def run_mode(a, mode, out_dir, state):
         if 'imports:' in line or 'code pointers:' in line or 'xc:' in line or 'image __xc' in line:
             res.setdefault('loader', []).append(line.strip())
     res['traps_distinct'] = sum(1 for line in con.splitlines() if 'trap #' in line)
+    if state is not None:
+        # what the guest last read from the window before each fault, by what the synthetic image knows
+        ctx = collections.Counter()
+        last = collections.Counter()
+        for reads in emu.skip_ctx:
+            kinds = [STATE[state[a - WIN_LO]] for a in reads]
+            ctx['none' if not kinds else ('after-missing-read' if 'missing' in kinds else 'after-known-reads')] += 1
+            if reads:
+                last['0x%08x %s' % (reads[-1], STATE[state[reads[-1] - WIN_LO]])] += 1
+        res['fault_context'] = dict(ctx)
+        res['fault_last_window_read'] = dict(last.most_common(12))
     res['phase_reached'] = emu.phase
     if state is not None:
         res['first_access'] = access_stats(emu, state)

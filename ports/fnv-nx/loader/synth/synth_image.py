@@ -911,7 +911,10 @@ def read_imports(path):
             if line.startswith('#') or not line.strip():
                 continue
             p = line.rstrip('\n').split('\t')
-            out[int(p[0], 16)] = (p[1].rstrip('?'), p[2])
+            dll, api = p[1].rstrip('?'), p[2]
+            if dll.startswith('(') or not api or ' ' in api or '?' in api:
+                continue            # not an IAT slot (decomp mislabel) / slot whose name S4 could not settle
+            out[int(p[0], 16)] = (dll, api)
     return out
 
 
