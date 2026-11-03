@@ -1,0 +1,430 @@
+# fnv-nx native renderer (stream S6n-native-render)
+
+Re-evaluation of D6 (a Direct3D 9 front end over deko3d, [`RENDER.md`](RENDER.md)) against a **native renderer**:
+replace Gamebryo's `NiDX9Renderer` and the render-time half of Bethesda's `bsshader` with code written directly on
+deko3d, keep the scene graph, culling and game logic. Numbers are measured on the decomp (`ext/fnv_decomp`, same
+checkout as J-0006) with the scripts named in each section; estimates are marked as such.
+
+Reading guide: §1 how the engine renders (what we replace), §2 the replacement boundary, §3 the deko3d design, §4 the
+shader plan, §5 the recommendation and milestones.
+
+Naming: the decomp names many functions `FUN_xxxxxxxx` or after a guessed owner class; this document uses the Gamebryo /
+Bethesda class names, and gives `@fnv` addresses only where the decomp itself names the function.
+
+## 1. The engine's render architecture (as the decomp shows it)
+
+### 1.1 Size of the render code
+
+Functions with an `@fnv` definition, by directory (`render/native/tools` scripts, decomp `src/`):
+
+| subsystem | functions | content |
+|---|---|---|
+| `src/bsshader` | 999 (231 files) | shaders 280, shader properties 174, shadows/scene nodes 180, image space 155, accumulator/batching 99, manager/util/textures 73 |
+| `src/gamebryo2.2/corelibs/niconsolerenderer` (= `NiDX9Renderer` + `NiD3D*`) | 772 (103 files) | NiD3D shader framework (passes, constant maps, program factories, render-state groups) 349, renderer core 253, textures/pixel formats 89, geometry groups/VB/IB 69 |
+| address block `0x00b40000-0x00c0ffff` (bsshader's link range) | 2,246 | of which 1,121 still live in `src/staging/blk_*` (not yet split into named units) |
+| address block `0x00e60000-0x00eaffff` (renderer's link range) | 1,228 | of which 325 in `staging`, 36 Havok |
+| `src/speedtree` (SpeedTreeRT 4.x CPU side) | 484 | tree geometry/wind/LOD on the CPU; feeds `BSTreeNode` geometry |
+| `gamebryo2.2/corelibs/niparticle` | 633 | particle simulation (CPU); draws are `NiParticles` geometry |
+
+So the render layer we would replace is about **2,300-3,400 functions** (named units + their staging share), against
+68,586 functions in the decomp. The particle and SpeedTree simulations stay.
+
+### 1.2 Frame loop
+
+1. **Cull.** The game (`TES`/`Main` render code in `fallout*`) culls the world scene graph whose root is
+   `ShadowSceneNode` (`ShadowSceneNode::AddObject 0x00b5eeb0`, `UpdateShadowLights 0x00b5c3c0`,
+   `CalculateLightingAtPoint 0x00b5b4d0`) with Gamebryo's `NiCullingProcess`; `BSFadeNode`/`BSMultiBound`/occlusion
+   planes prune; visible `NiGeometry` go to the **accumulator**.
+2. **Accumulate.** `BSShaderAccumulator` (an `NiAccumulator`, 38 functions; `SetupDepth 0x00b65550`,
+   `ClearActivePasses 0x00b65580`) asks each geometry's `BSShaderProperty` for its **render pass list**
+   (`BSShaderProperty::ShaderPassList::Add 0x00ba9ee0`, `ShaderPassEntry 0x00ba8ec0`): one entry per pass, each
+   entry = (geometry, `eBSSMPassEnum` pass id, up to N lights, flags). The pass list is built by the property from its
+   NIF flags (specular, skinned, vertex colours, parallax, facegen, env map, glow, ...), the lights assigned by
+   `ShadowSceneNode`, fog and the shader level.
+3. **Batch.** `BSBatchRenderer` (43 functions; `FindPassBucket 0x00b9a090`, `FindBucketIndex 0x00b98ae0`) buckets the
+   entries **by pass id**, then by texture/geometry group inside a bucket; alpha geometry is sorted by depth
+   (`ComputeAlphaDepth`). The accumulator renders buckets in pass-id order: the pass enum *is* the render order
+   (z-only/depth first, opaque lighting, land, LOD, sky, alpha passes from `FIRST_ALPHA_PASS=494`, water,
+   precipitation, sun glare, blood splatter).
+4. **Draw.** For each bucket the owning `BSShader` (a `NiD3DShader`) runs Gamebryo's shader protocol: setup pass
+   (pick VS/PS from the pass id, `NiD3DPass` render/sampler state through the `NiDX9RenderState` cache), update
+   constants (`NiD3DShaderConstantMap` entries: globals, per-object, per-light, by name/register), set textures,
+   then `NiDX9Renderer` binds streams/declaration (`NiD3DShaderDeclaration`, geometry groups) and issues
+   `DrawIndexedPrimitive`. Multi-pass lighting re-draws the geometry once per pass entry.
+5. **Image space.** `ImageSpaceManager` (60 functions + 95 in effect/shader files) runs end-of-frame effects on
+   `BSRenderedTexture` targets (§1.7).
+6. **UI.** The interface renders its tile scene graph after image space (§1.8), then `Present`.
+
+Extra scene renders per frame: shadow maps (§1.4), water reflection (§1.5), the cube-map camera
+(`BSCubeMapCamera`), local map / Pip-Boy render targets, VATS.
+
+### 1.3 Shader families (BSShader classes), passes and shader binaries
+
+`BSShaderManager` loads one `shaderpackage%03i.sdp` by shader level (`etShaderLevel`: 1_X, 2_0, 2_A96, 2_B96, 2_A,
+2_B, 3_0) and each shader class fetches its blobs by name; the decomp also keeps each class's **developer table**
+(HLSL source + `#define`s per index), which documents every permutation. Pass enum: **756 values** (`eBSSMPassEnum`,
+`bsshader_shader_layout.h`), 667 live render passes + shadow volume/tile/image-space + 83 unused.
+
+| class (family) | binaries it loads (count) | HLSL sources (dev table) | passes (examples) | notes |
+|---|---|---|---|---|
+| `ShadowLightShader` (SLS, the main per-pixel lighting) | `SLS1%03i.vso` 31, `SLS1S%03i.vso` 22, `SLS2%03i.vso` 103, `SLS1%03i.pso` 48, `SLS2%03i.pso` 160 (+`SLS2%03is%01i.pso` shadow-sample variants) | `ADTS`, `ADTS10`, `AD`, `DiffusePt`, `Specular`, `Texture`, `land`, `LandO`, `landlod`, `landlighting`, `decal`, `depthmap`, `SimpleShadow`, `WaterFog`, `EnvMap`, `renderNormals/Depth/Velocity`, `localMap` | ADTS* / ADT* (ambient+diffuse+texture+spec, 1/2/3/4/10 lights), AD2/AD3, DIFFUSEPT2/3, TEXTURE, 2x_SPECULAR*, LAND* (1-7 layers, `O4` 4-layer), ZONLY, DEPTHMAP, SIMPLESHADOW, FOG, ENVMAP | defines: `LIGHTS`/`MAXLIGHTS`/`NUM_PT_LIGHTS`, `SKIN`, `VC`, `SPECULAR`, `PROJ_SHADOW`/`SHADOWMAP`, `FOG`, `PARALLAX`, `FACEGENBLEND`, `HAIR`, `EYE`, `GLOW`, `MODELSPACENORM`, `LANDALPHA`, `TREE` |
+| `Lighting30Shader` (SM3 path) | `SM3%03i.pso` 50, `SM3LL%03i.pso`; VS from `SM3Lighting/SM3ZOnly/SM3DepthMap/SM3SimpleShadow` | `lighting\3x\*` | all `3X*` passes 306-409: 3XLIGHTING (+S/H/Px/Pxo/Fg/G/Vc/Spc/Shp), 3XZONLY, 3XDEPTHMAP, 3XENVMAP, 3XSILHOUETTE, 3XDEPTH/VELOCITY/LOCALMAP | the SM3 lighting loop does several lights in one pass |
+| `BSShaderNoLighting` | `NOLIGHT%03i.vso` 28, `NOLIGHT{MAT,TEX,TEXVC,TEXVCPMA,VCONLY,WF,WFAt}.pso` | `NoLighting` | NOLIGHTING* 66-87 (incl. particle-system strips, falloff) | effects, glow, UI-in-world |
+| `TallGrassShader` | `GRASS2%03i.vso` 24, `GRASS23x%03i.vso` 24, `GRASS2/23x %03i[TMS].pso` 4 each | `tallgrass\lowDetail/highDetail` | GRASS_* 20-59, 524-567 (dir only / 1 point light, vertex/fragment lit, shadow, `B`illboard) | instance data in per-batch constant arrays (`TallGrassGroup`: 16 B position+scale per instance) |
+| SpeedTree: `SpeedTreeBranchShader`/`FrondShader`/`LeafShader`, `BSDistantTreeShader` | `STB1%03i.vso` 10, `STB2%03i.vso` 20, `STB1%03i.pso`, `STFROND[2]%03i.*`, `DISTTREE[Sil].*` | `speedtree\frond`, `distanttree\DistantTree` | LEAVES_AD/ADPt, FRONDS, DISTANT_TREE_BASE/SILHOUETTE | leaf cards rotate in the VS (`STBB` billboard constants) |
+| `DistantLODShader` | `DISTLOD1/2%03i` 2+2 | `landlod` | ADT_OptLOD, LANDLO_A, LANDO_Am | distant land and object LOD |
+| `SkyShader` | `SKY*.vso/pso` 21 named binaries | `sky\sky[_quad]` | SKYBASEPRE, SKY, SKY_STARS/TEXTURE/CLOUDS/MOON_STARS_MASK, SKY_SUNGLARE | |
+| `WaterShader` | `WATER%03i.pso` 38, `WATER000-002.vso` | `water\2_ab\*` (water, waterhmap, displace, waterlighting) | WATER* 568-638 (wading, interior, no-reflection/refraction/depth, Vc), WATER_LOD, WATER_DEPTH* 642-665 | |
+| `ParticleShader`, `PrecipitationShader` | `PAR2%03i` 20 VS, `PARTICLE.*`, `PRECIP%03i` 4+2 | `particle`, `precipitation` | PARTICLE, PARTICLE_PREPASS, PRECIPITATION_RAIN | GPU-side particle expansion |
+| `GeometryDecalShader` | `GDECAL[S].vso`, `GDECAL.pso` | `decal` | GEOMDECAL[_S] | skinned decals |
+| `BSShaderBloodSplatter` | `BS.*`, `BSF.*` | `BloodSplatter` | BLOOD_SPLATTER[_FLARE] | screen-space splats |
+| `BoltShader`, `BeamShader` | `BOLT.*`, `BEAM.*` | `bolt`, `beam` | BOLT, BEAM | |
+| `VolumetricFogShader` | `VolumetricFog%03d` 2+2 | `vfog` | VFOG_* 519-523 | |
+| `TileShader` (UI) | `TILE1%03i` 3+3 | `tile` | TILE (671) | menus |
+| `ImageSpaceShader*` | `IS%s.vso/pso` (one per effect shader) | `imagespace\*` (base, copy, blur2, HDR*, DOF, radial blur, sunbeams, refraction, map, tv, noise, cinematic, scanlines, menuBG, motion blur, water FFT) | IMAGESPACE (672) | §1.7 |
+| `NiD3DDefaultShader` (Gamebryo) | none (fixed function) | - | - | debug lines, fallback; `SetTransform`/`SetLight`/texture stages |
+
+57 distinct `#define` tokens appear in the developer tables (`SKIN` 80, `SM3` 41, `LIGHTS` 39, `VC` 38, `SPECULAR` 31,
+`TREE` 30, `PROJ_SHADOW` 29, `MAXLIGHTS` 25, `FOG` 15, `FACEGENBLEND` 10, `LANDALPHA` 10, `ENVMAP` 8, `PARALLAX` 4,
+...): the real permutation space is a handful of orthogonal bits per family, not 667 shaders.
+
+**Vertex formats.** Geometry comes from `NiGeometryData` streams (position, normal, binormal, tangent, colour, up to
+N UV sets) and `NiSkinPartition` partitions (4 weights + 4 bone indices, a bone palette per partition, skinning in
+the VS). `NiD3DShaderDeclaration` builds one D3D9 vertex declaration per (shader, data layout); geometry groups
+(`NiStaticGeometryGroup` / `NiDynamicGeometryGroup` / `NiUnsharedGeometryGroup`) pack static meshes into shared
+VBs, dynamic ones (particles, morphs, lines) into lock-per-frame buffers.
+
+### 1.4 Shadows
+
+`ShadowSceneNode` owns `ShadowSceneLight`s (22 functions; `AddShadowObject 0x00b9f6a0`, `ProcessShadowObject
+0x00b9f5b0`, `TestSphereFrustum 0x00b9bbb0`); each shadow-casting light (actors, the sun canopy pass) renders its
+casters into a `BSRenderedTexture` depth map with the DEPTHMAP/3XDEPTHMAP/GRASS_SHADOW passes, then lit passes
+sample it (`PROJ_SHADOW`/`Shp` permutations, `SLS2%03is%01i.pso` sample-count variants). Shadow-map count and size
+come from INI settings (data image). `SHADOWVOLUME_*` passes exist but are debug/unused on PC.
+
+### 1.5 Water
+
+`WaterShader` + the game's water manager: reflection = a second scene render from the mirrored camera into a
+`BSRenderedTexture` (sky, LOD, large objects, with WATER_DEPTH passes for depth), refraction = copy of the scene
+colour, plus image-space `EFFECT_WATER_FFT` (8 shader steps: spectrum, butterflies, scrambles, normals, filter) and
+`EFFECT_WATER_DISPLACEMENT` for the ripple height map. Wading/interior/no-reflection variants are separate passes.
+
+### 1.6 Sky, grass, trees, particles, decals
+
+* **Sky**: `SkyShaderProperty` objects (sun, moons, stars, clouds, horizon fade) in their pass range, 21 binaries.
+* **Grass**: `TallGrassShader` draws `TallGrassGroup` batches: one mesh, instance data (position/scale, 16 B) in VS
+  constants, so one draw per batch; dir-only vs 1-point-light, vertex/fragment lighting, shadowed, billboard.
+* **Trees**: SpeedTreeRT 4.x on the CPU (`src/speedtree`, 484 functions: wind, LOD, leaf card geometry) and
+  `BSTreeNode`/`BSTreeModel`; three draws per tree (branch, frond, leaf) with per-tree wind/rotation constants;
+  `BSDistantTreeShader` draws far trees as billboards.
+* **Particles**: `niparticle` simulates on the CPU, `NiParticles` geometry is uploaded each frame (dynamic group) and
+  expanded by `PAR2` VS (20 variants); `NOLIGHTING_PSYS*` for simple systems. `BSTempEffect*` (170 references)
+  manages impact/temporary effects.
+* **Decals**: geometry decals (`GeometryDecalShader`, skinned and static) and `BSShaderBloodSplatter` (screen).
+
+### 1.7 Image space / post
+
+`ImageSpaceManager::ImageSpaceEffectEnum` lists **34 top-level effects and 66 effect shaders** (100 values):
+refraction, bloom, HDR (tone map with 9/16/4-tap downsamples, light adapt, lum clamp, blend-in, cinematic,
+alpha mask), cinematic, depth of field (+mask), depth radial blur, radial blur (3 qualities), full-screen blur,
+blur 3-15 taps (7) and bright-pass blur 3-15 (7), get-hit, sunbeams, interface (scanlines, VATS scan, menu unpack),
+motion blur, volumetric fog, map, menu background, TV, water FFT/displacement, noise, night vision, copy/stencil
+copy/restore/alpha-mult/blend/texture mask. Parameters (`ApplyTintColorParamModifier 0x00b8b540`,
+`SetDepthOfFieldParameters 0x00b8b0d0`, weather modifiers `0x00b8b130..0x00b8b6e0`) are game logic; the effects
+draw full-screen quads with `IS%s` shaders between `BSRenderedTexture` targets. Typical exterior chain: HDR
+(~6-8 passes) + bloom/blur (2-3) + cinematic + optional DOF/radial/refraction/VATS: **~10-20 full-screen passes**.
+
+### 1.8 UI / menus
+
+Menus are a scene graph too: the `Tile` tree (`fallout`, `bsmenu`) builds `NiNode`/`NiTriShape`s with
+`TileShaderProperty` (`TileShader::UpdateMaterial 0x00bcac60`), rendered by the interface with its own orthographic
+camera and accumulator through the TILE pass (3 VS/PS variants); fonts are textured quads; the Pip-Boy and local map
+render into render targets and the interface effects (scanlines, menu unpack) run through image space. So **menus use
+the same draw path as the world**, just one family (Tile) plus a few image-space shaders.
+
+### 1.9 Where the D3D boundary is
+
+`render/native/tools/d3d_boundary.py` (on top of S6's stand-in scan) and a call-name census over `src/`:
+
+| who calls D3D (stand-in or SDK) | files | distinct methods |
+|---|---|---|
+| `niconsolerenderer` (NiDX9Renderer, NiD3D*) | 11 | 28 (device creation, draws, streams, constants, RTs, textures) |
+| `staging/blk_00e60000_o2` (renderer bring-up, adapter/modes/caps, Present) | 1 | 18 |
+| `fallout` (`screenshot.cpp`, interface) | 3 | 11 (screenshot readback, `TestCooperativeLevel`) |
+| `staging/blk_00e80000_o2` (renderer, fixed function lights/stages) | 1 | 9 |
+| `bsshader` (`bsshaderutil.cpp`, `bsshader.cpp`: create shaders, procedural textures) | 2 | 7 |
+| `staging/blk_00ea0000_od`, `blk_00c40000_od_ob1` (query/scissor), `blk_00b60000` | 3 | 9 |
+| `nianimation` (morph VB unlock) | 1 | 2 |
+
+Draw calls themselves: `DrawIndexedPrimitive` 12 sites, `DrawPrimitive` 3, `SetStreamSource` 3, `SetIndices` 5 -
+**all inside the renderer**. Everything else goes through engine-level APIs: `SetRenderState` is called 314 times
+from `bsshader` and 69 from staging (via `NiDX9RenderState`, the cache), `SetVertexShader`/`SetPixelShader` 56/55
+from `bsshader` (via `NiD3DPass`), `SetTexture` 34 `fallout` + 30 `fallout_shared` + 23 staging (engine
+`NiTexturingProperty`/shader texture slots, not the device). So the engine draws through three narrow
+interfaces: **`NiRenderer` (virtual), `NiDX9RenderState` (virtual, the state cache), and the `NiD3DShader`/`BSShader`
+protocol (virtual)**, and only ~20 files touch the device directly.
+
+## 2. The replacement boundary
+
+### 2.1 What stays (untouched engine code)
+
+* The scene graph and all its data: `NiAVObject`/`NiNode`/`NiGeometry`/`NiGeometryData`/`NiSkinInstance`/
+  `NiSkinPartition`, properties, NIF streaming, controllers, `niparticle` simulation, SpeedTreeRT, `BSFadeNode`,
+  `BSMultiBound`, culling (`NiCullingProcess` and Bethesda's cullers).
+* `ShadowSceneNode` light assignment and shadow-caster selection (`AddObject`, `UpdateShadowLights`,
+  `CalculateLightingAtPoint`, `ShadowSceneLight::AddShadowObject/ProcessShadowObject/TestSphereFrustum`).
+* **`BSShaderProperty` and subclasses' pass selection** (`ShaderPassList::Add`, the property `GetRenderPasses`
+  logic and NIF flags). The pass id plus the entry's light list and the property flags is exactly the permutation
+  key we need (§3.4); keeping it keeps every gameplay-visible decision (which objects are lit by what, alpha,
+  glow, facegen, refraction) bit-identical.
+* `ImageSpaceManager` parameter logic (modifiers, weather, which effects are active, `IsEffectActive 0x00b8b390`,
+  `PrepareEndOfFrameEffects 0x00b8b3f0`) and the menu tile system.
+* All game code (`fallout*`, TES render sequencing); calls into the renderer keep their signatures.
+
+### 2.2 What we replace
+
+| layer | replaced by | how much |
+|---|---|---|
+| `NiDX9Renderer` (all `NiRenderer` virtuals: frame begin/end/display, render target groups, camera/viewport, `RenderShape`/tri-strips/points/lines dispatch, texture/geometry precache and purge, screenshot, device reset) | `nx::Renderer` on deko3d with the same object layout as `NiDX9Renderer` (fields other code reads stay where they are; our state lives in a side object) | renderer core 253 + geometry 69 + textures 89 functions |
+| `NiDX9RenderState` (state cache) | `nx::StateTracker`: the same virtual surface, but it only records packed render-state words (§3.4); nothing is sent per call | |
+| `NiD3D*` shader framework: `NiD3DShader`/`NiD3DDefaultShader`, `NiD3DPass`, `NiD3DRenderStateGroup`, `NiD3DShaderConstantMap`, program factories/creators/caches, `NiD3DShaderDeclaration`, `NiDX9TextureData`/`NiDX9SourceTextureData`, VB/IB managers, geometry groups | removed from the draw path; replaced by family objects (`nx::Family`) that build draw packets | 349 functions |
+| `BSShader` subclasses' render-time virtuals (setup pass, update constants, textures, alpha, pre/post render) and their `.sdp` loading | one native family per class (§4), filling typed constant structs | most of the 280 "shaders" functions (properties stay) |
+| `BSShaderAccumulator` render/flush + `BSBatchRenderer` bucket rendering | `nx::Batcher`: accumulates draw packets per frame-graph pass and sorts by 64-bit key | ~80 of 99 (registration entry points stay as the hook) |
+| `BSRenderedTexture`/`NiRenderedTexture`/`NiRenderTargetGroup` creation | `nx::RenderTarget` (deko3d images in the frame graph) | |
+| `ImageSpaceShader*` / `ImageSpaceEffect*` render functions | native image-space passes in the frame graph | ~95 of 155 |
+| the ~20 direct-D3D files of §1.9 outside the renderer | small native functions (screenshot readback, procedural texture creation, query, scissor) | ~40 functions |
+
+Total on the order of **1,000-1,300 functions replaced by perhaps 25-40 k lines of our own code** (estimate), all
+inside the two address blocks of §1.1 plus ~20 scattered sites.
+
+### 2.3 How the replacement is wired
+
+Three mechanisms, all already in the S1/S2/S3 design:
+
+1. **Link-by-address override (S2, `tools/link/`).** Native functions carry the address they replace (an
+   `// @fnv 0x...` comment, collected into `render/native/overrides.tsv`: address, our symbol, ABI). `fnvlink.py
+   resolve` gives an override precedence over the decomp definition at the same address, so every call, every
+   vtable-slot relocation and every code pointer the data image (S3) holds for that address lands on our function.
+   Request to S2: an `--override <tsv>` input with that precedence and a report of decomp definitions it shadowed.
+2. **Prepare rules (S1, `tools/prepare.py`).** A rule (`NATIVE1`, proposed) drops whole units that become dead
+   (`niconsolerenderer/*`, the replaced `bsshader` shader units, D3D stand-in headers) from the build list, so
+   their D3D-dependent code does not even need to compile; units that are only partly replaced compile as they are
+   and lose the replaced definitions to the override.
+3. **Vtables.** Replaced classes keep their original vtable address in the data image; S3's rewrite of code
+   pointers through the address map points each slot at our override. A replaced virtual therefore needs no source
+   change on the caller side. Classes we add (`nx::*`) are ordinary ILP32 C++ and never appear in the data image.
+
+Object layouts of replaced classes stay the decomp's (the 3,171 `static_assert`s still apply), because kept code
+reads fields directly (e.g. `BSShaderProperty` subclasses read renderer/shader-manager globals; `fallout` reads
+`NiDX9Renderer` fields for the screen size). New state goes in side structures reached from one reused pointer field.
+
+## 3. Native renderer design on deko3d
+
+### 3.1 Memory and the ILP32 boundary
+
+* Engine side (ILP32, below 4 GB): the `nx::` front (families, batcher, state tracker, frame graph) is ILP32 C++
+  like the engine, so it can be called directly by the overrides.
+* deko3d itself: compiled ILP32 if S5 makes libnx/deko3d ILP32-clean; otherwise a **command-stream boundary**:
+  the ILP32 front writes a compact *packet stream* (bind pipeline-state
+  id, bind UBO slice, bind texture handles, draw) into a ring in shared memory, and a small LP64 "nxgpu" worker
+  translates packets into `dkCmdBuf*` calls. Either way the hot path does not cross the ABI per call: one boundary
+  crossing per submitted command list.
+* GPU memory: `DkMemBlock`s are caller-backed, so all GPU-visible memory (rings, static geometry, textures,
+  render targets) is mapped below 4 GB and addressable from ILP32 code with 32-bit pointers. Budget estimate:
+  textures 700-1000 MB, static geometry 100-200 MB, rings 3 x 8 MB, render targets ~60 MB at 1080p.
+
+### 3.2 Resource model
+
+* **Textures**: DDS loaded once into `DkImage`s; DXT1/3/5 are native (`BC1/2/3`), so no transcoding; ARGB8, L8,
+  A8L8, V8U8, R5G6B5 map to native formats with component swizzles in the `DkImageView`. One upload via a staging
+  ring and `dkCmdBufCopyBufferToImage` (tiling handled by the copy). Every image gets a slot in **one global
+  descriptor set** (image + sampler descriptor tables, `dkCmdBufBindImageDescriptorSet`/`BindSamplerDescriptorSet`
+  once per frame): a texture is then a 32-bit `dkMakeTextureHandle(image, sampler)` - bindless-style; per draw we
+  only bind the handles the family needs (`dkCmdBufBindTextures`, 1 call for up to 8-12 slots).
+* **Static geometry**: `NiGeometryData` uploaded once into a big static buffer (sub-allocated); one vertex layout
+  per data layout, decided at upload. No geometry groups, no per-frame locks for static meshes.
+* **Dynamic geometry** (particles, morphs, lines, UI text, SpeedTree leaf updates): written straight into a
+  persistent mapped **vertex ring** (per-frame region, 3 frames in flight, fence-protected); no lock/unlock calls.
+* **Constants**: a persistent mapped **UBO ring**; each draw writes only its per-draw struct (typically 64-256 B);
+  per-pass and per-frame data (camera, fog, sun, shadow matrices) are written once per pass/frame and bound to
+  their own UBO slot. Skinning palettes: per-partition slice of the ring.
+
+### 3.3 Pipelines/state
+
+deko3d has no monolithic pipeline objects: state is bound in blocks (`DkRasterizerState`, `DkColorState`,
+`DkColorWriteState`, `DkBlendState`, `DkDepthStencilState`, `DkVtxAttribState`/`DkVtxBufferState`, shaders). We
+"prebake" per **(family, permutation, render-state word)**:
+
+* the shader pair (`DkShader` VS/PS, from DKSH compiled offline), identified by a 16-bit id;
+* the render-state word (64 bits: blend src/dst/op, alpha-to-coverage, depth test/write/func, cull, stencil
+  op/ref/mask, colour write mask, depth bias class) mapped once to prebuilt deko3d state blocks (a few hundred
+  distinct words in practice);
+* the vertex layout id.
+
+A `PipelineState` record = those ids plus the deko3d state structs; switching costs only the blocks whose id
+differs from the current one (typically 1-3 small bind calls).
+
+### 3.4 Draw submission
+
+* The kept `BSShaderProperty` pass entries arrive at the batcher; the family converts each entry into a **draw
+  packet** (32-64 B): sort key, pipeline id, geometry (buffer offset, index range), UBO offset, texture-handle
+  block, instance count.
+* **Sort key** (64 bit): frame-graph pass (8) | layer (opaque/alpha/order) | pipeline id (16) | texture block
+  hash (16) | depth (16, front-to-back for opaque, back-to-front for alpha). Opaque passes reorder freely across
+  objects as the engine's own bucketing allows (pass id first, as today), alpha keeps the engine's depth order.
+* **Instancing**: identical (geometry, pipeline, textures) runs inside a bucket become one instanced draw with a
+  per-instance transform array in the UBO ring. Candidates measured from the code paths: grass (already batched;
+  native draws one instanced mesh per group without constant re-upload), SpeedTree (branch/frond/leaf per tree
+  type: 3 draws per tree type instead of per tree), distant LOD blocks and distant trees, rocks/clutter repeated
+  per cell, decals.
+* **Multi-pass lighting collapse** (optional, behind a parity switch): the SM3 path (Lighting30, 3X passes) already
+  lights several lights per pass; we advertise SM3 caps so the engine selects it, and our 3XLIGHTING family loops
+  over up to 8 lights from a light UBO. The 2.x multi-pass path (ADTS + DIFFUSEPT2/3 extra passes) stays available
+  for parity tests.
+
+### 3.5 Frame graph
+
+Passes and their targets, declared once per frame by the overridden renderer entry points (begin/end render target
+group, image-space dispatch):
+
+1. shadow maps (one depth target per shadow light, the sun canopy pass) - depth only, front pipeline cache warm;
+2. water reflection (mirrored camera, reduced resolution) and water depth;
+3. main scene: depth/z-only pre-pass where the engine emits ZONLY passes, opaque, land, LOD, sky, alpha, water,
+   precipitation, decals, blood;
+4. image-space chain (HDR downsample/adapt, bloom/blur, DOF, cinematic, ... ) on transient targets;
+5. UI (tile scene graph), present.
+
+Targets are transient images aliased between passes where lifetimes do not overlap (HDR mip chain vs blur
+targets); barriers (`dkCmdBufBarrier`) are computed by the graph, not per call. Maxwell tiled caches benefit from
+binding each target once per pass rather than per draw.
+
+### 3.6 Threading
+
+* Main thread: game update, cull, accumulate (engine code, unchanged), packet build (families).
+* Render thread: sorts packets, records the deko3d command buffers for frame N while the main thread builds N+1;
+  GPU runs N-1. Hand-off is a per-frame packet arena (double buffered).
+* Later: split recording of the main pass across 2 cores (deko3d command buffers are independent per thread).
+
+### 3.7 Per-frame cost model (Mojave exterior)
+
+Estimates from the code paths (to be replaced by a counter in milestone N2: packets per pass, per family):
+
+| source | draws (estimate) |
+|---|---|
+| visible static objects, uGrids 5 (25 cells), after cull | 600-1,000 geometries; x 1.2-1.6 passes (z-only, extra light passes, fog) on the 2.x path |
+| land (25 cells x 4 quadrants, LAND*O multi-layer) | 100-150 |
+| distant LOD (land/object/tree billboards) | 100-200 |
+| trees (branch+frond+leaf) | 150-450 |
+| grass groups | 100-300 |
+| actors (skin partitions) | 50-200 |
+| shadow maps (2-4 lights x casters) | 100-300 |
+| water reflection re-render | 100-300 |
+| particles, decals, sky, effects | 50-150 |
+| image space + UI | 20-60 |
+| **total** | **~1,500-3,500 draws/frame** |
+
+Per-draw CPU cost on the A57 (1.02 GHz), estimates:
+
+* **D3D9 emulation (D6)**: the engine's own path stays (constant-map walk with per-entry dispatch, 10-30
+  `NiDX9RenderState` checks, 4-12 `SetTexture`/sampler calls, VS/PS/decl/stream sets, ~20-60 virtual calls into the
+  device per draw) plus the emulation's work (dirty tracking, state-word build and lookup, copying the dirty part
+  of the 256-register constant file into the UBO ring, texture handle building, translated shaders' generic
+  register-file layout). Roughly **10-20 us/draw -> 15-70 ms/frame**: over a 33 ms budget in exteriors without
+  further reductions.
+* **Native**: kept engine accumulation (~1-2 us/entry) + family packet build (typed struct fill, 64-256 B) + sorted
+  submission with id-compare state changes (~1-2 us/draw on the render thread) -> **~3-6 ms main thread +
+  2-4 ms render thread** for the same scene, before instancing; instancing (trees, grass, LOD) and the SM3 light
+  loop cut draw counts a further estimated 25-40 %.
+* GPU side the two approaches are close for identical shaders; hand-written shaders save mostly on removing
+  register-file indirection, redundant multi-pass lighting (bandwidth) and full-screen copies in image space.
+
+## 4. Shader plan
+
+Hand-written GLSL 4.60 (deko3d/uam profile), compiled offline by `uam` into DKSH at build time, shipped as our own
+work. Permutations are `#define`s compiled into separate DKSH binaries (uniform branches only where the cost is
+negligible). Families and their bits (from the engine's own pass enum and developer tables, §1.3):
+
+| family | VS bits | PS bits | variants (estimate) |
+|---|---|---|---|
+| `lit` (SLS + Lighting30: ADTS/ADT/AD/DIFFUSEPT/SPECULAR/TEXTURE, 3XLIGHTING) | `SKIN`, `VC`, `PROJ_SHADOW`, `FOG`, `MODELSPACENORM`, `TREE` | light count 0-8 (loop with constant bound by bucket: 1, 2-4, 5-8), `SPECULAR`, `PARALLAX`/`PARALLAXOCC`, `GLOW`, `ENVMAP`/`WINDOW`/`EYE`, `HAIR`, `FACEGENBLEND`, `SHADOWMAP` (sample count), `ALPHATEST`, `SI` | ~120-200 |
+| `land` (LAND*, LANDAD, LANDLO, LOD land) | `FOG`, `PROJ_SHADOW`, `LODLANDCLIP`, `GEOMORPH` | layers 1-7 (`O4` packed), `LANDALPHA`, simple | ~40 |
+| `depth` (ZONLY, DEPTHMAP, 3XDEPTH*, GRASS_SHADOW, WATER_DEPTH, renderNormals/Velocity/localMap) | `SKIN`, `VC`, `TREE` | `ALPHATEST`, `CLEAR`, output kind | ~30 |
+| `nolight` (NOLIGHTING*, PSYS strips) | `VC`, `SKIN`, falloff, subtex | tex/mat/vc, premultiplied, falloff | ~30 |
+| `grass` | instancing, `POINT`, vertex/fragment lit, billboard | `SHADOWMAP`, `TRANSPARENCYMS` | ~24 |
+| `speedtree` (branch, frond, leaf, distant tree, silhouette) | wind, leaf billboard (`STBB`), `PTLIGHT` | `SHADOWMAP`, silhouette | ~20 |
+| `sky` | quad/clouds/stars/moon/sun | texture fade, horizon fade, occlusion | ~16 |
+| `water` (+ wading/interior/no-reflection/no-refraction/no-depth, LOD) and water FFT compute | displace, Vc | reflection/refraction/depth/specular flags | ~24 + 8 FFT |
+| `particle`, `precip`, `bolt`, `beam`, `decal`, `blood`, `vfog` | per class | per class | ~30 |
+| `tile` (UI) | 3 | 3 | 3 |
+| image space (copy, blur N, bright-pass blur, HDR set, DOF, radial blur, sunbeams, refraction, cinematic, tv, noise, map, menuBG, scanlines, VATS, motion blur, night vision, stencil copy) | `base` | one per effect shader | ~66 |
+| fixed-function replacement (debug lines, `NiD3DDefaultShader` users) | 1 | 2 | 3 |
+
+About **400-500 DKSH binaries** from ~25 GLSL source files (estimate; the engine's PC packages hold ~600-900 blobs
+per shader level).
+
+**Parity checks against the originals** (S6b's translator `sdp2dksh` = MojoShader `dk` profile, used only as a
+reference, never shipped in place of our shaders unless as a temporary fallback):
+
+1. *Constant-level*: for each (family, permutation) the parity harness records the engine's constant writes
+   (register file) for a captured draw and feeds them to the translated original; our shader gets the same inputs
+   through our typed struct; both render the same geometry offscreen; compare per pixel (max abs error <= 2/255 on
+   8-bit targets, relative 1e-3 on float targets).
+2. *Scene-level*: captured frames (packet streams serialised on the console or in a host replay of deko3d through
+   a recorded stream) rendered once with all-translated shaders and once with ours; PSNR / per-pass diff images.
+3. *Coverage*: every pass id the engine emitted in a play-through route (Goodsprings, Primm, Strip, Vault 21
+   interior, night) must map to a family/permutation; unmapped pass ids fail loudly and fall back to the
+   translated original.
+4. The translated original remains a selectable per-family fallback (`nx::Family::Translated`), which also lets
+   world rendering come up before every family is hand-written.
+
+## 5. Recommendation
+
+**Native renderer, hybrid on the shader side; drop the D3D9 emulation layer as the main path.**
+
+* Native submission: the engine's draw path is already narrow (three virtual interfaces, draws only in the
+  renderer, ~20 direct-D3D files), the permutation key is already computed by kept engine code (pass id + lights +
+  flags), and per-draw CPU is the Switch's bottleneck: the native path costs an estimated 3-5x less CPU per draw
+  and enables instancing and light loops the D3D9 API shape prevents.
+* Shaders: hand-written per family (shippable, our work), with S6b's translated originals as reference and as a
+  temporary per-family fallback during bring-up - the useful half of D6 stays.
+* No D3D9 emulation even for UI/debug: UI is one family (Tile) on the same path; debug/fixed-function is 3 tiny
+  shaders. The remaining direct-D3D users (screenshot, procedural textures, adapter enumeration, queries) are ~40
+  functions rewritten natively. D6's `shim/include` D3D9 headers stay useful to compile the kept units that still
+  *name* D3D types (structs, enums) without calling the device.
+* Cost: native is more engine-specific work up front (understanding each BSShader's constants: done once per family
+  with the decomp + CTAB as reference), and the first pixel needs the engine to boot (S2/S3/S4), unlike D6's
+  standalone M0. Mitigated by a standalone harness (N0) and a packet-stream replay tool.
+
+### Milestones (one developer, estimates)
+
+| | content | estimate |
+|---|---|---|
+| **N0 core** | deko3d device/queue/swapchain, caller-backed memory below 4 GB, UBO/vertex/staging rings with fences, global descriptor sets, DDS->`DkImage`, `PipelineState` cache, packet format + sorter, frame graph skeleton, render thread; GLSL->DKSH build step; standalone test: textured, sorted, instanced quads | 3-4 weeks |
+| **N1 menus** | overrides of `NiDX9Renderer` frame/target/camera/`RenderShape` entry points, static/dynamic geometry upload from `NiGeometryData`, `NiDX9RenderState` -> state word, `tile` + `nolight` families, image-space copy/menuBG/scanlines, screenshot readback | 5-7 weeks |
+| N2 world opaque | `lit` (SM3 path first), `land`, `depth`, `sky`, distant LOD, skinning; pass/packet counters; parity harness against translated originals | 8-10 weeks |
+| N3 world complete | shadows, water (+FFT), speedtree, grass, particles/precip, decals/blood, bolt/beam/vfog, full image-space chain, render-to-texture (Pip-Boy, local map, VATS) | 8-12 weeks |
+| N4 performance | instancing (trees/grass/LOD/clutter), light-loop collapse of the 2.x path, transient target aliasing, 2-thread recording, docked/handheld resolution | ongoing |
+
+Total to in-game parity ~6-8 months, comparable to D6's 6-9, with a frame cost that fits the Switch.
+
+**First milestone (N0+N1 "native main menu")**: the game boots to the main menu and renders it entirely through
+`nx::Renderer` - the tile scene graph via the `tile`/`nolight` families, menu background image-space effect,
+textures from the player's BSAs, 60 fps at 1280x720, no D3D9 device object in the process; plus the standalone
+N0 test in `tests/` running on hardware. Exit criteria: menu screenshot matches a PC reference capture within the
+parity threshold for the tile family; packet/draw counters reported. Depends on S2 (override input), S3 (data
+image + vtable rewrite), S4 (boot), S5 (toolchain/deko3d linkage).
+
+### Requests to other streams
+
+* S2-link: `--override <tsv>` with precedence over decomp definitions at the same address; report of shadowed
+  definitions; overrides also rewrite vtable-slot and data-image code pointers through the address map.
+* S1-compile: rule `NATIVE1`, drop listed units from the build (from `render/native/drop_units.txt`).
+* S5-toolchain: decide deko3d ILP32 vs LP64 worker; the front only assumes "submit one packet arena per frame".
+* S6b-shaders: keep `sdp2dksh` as the parity reference; add a mode that dumps CTAB name->register per blob (the
+  family constant structs are checked against it).
+
+## 6. Scaffolding and tools
+
+* `render/native/include/nx/` - interfaces only (no implementation yet): packet, pipeline state, frame graph,
+  rings, family.
+* `render/native/tools/d3d_boundary.py <decomp>` - groups S6's D3D call-site scan by subsystem (§1.9).
