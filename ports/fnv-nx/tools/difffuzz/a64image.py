@@ -107,21 +107,29 @@ class Image:
 
 def build(source, linkdir, workdir):
     """Link the rewritten object of `source` -> Image (cached in workdir/<obj>.elf)."""
+    return build_many([source], linkdir, workdir, config.obj_name(source))
+
+
+def build_many(sources, linkdir, workdir, name):
+    """Link the rewritten objects of several units into one image (lockstep runs of a call tree)."""
     fixed = os.path.join(linkdir, 'fixed')
-    obj = os.path.join(fixed, config.obj_name(source))
-    if not os.path.exists(obj):
-        raise FileNotFoundError(obj)
+    units = []
+    for source in sources:
+        obj = os.path.join(fixed, config.obj_name(source))
+        if not os.path.exists(obj):
+            raise FileNotFoundError(obj)
+        units.append(obj)
     bridges = os.path.join(fixed, 'zz_bridges.o')
     os.makedirs(workdir, exist_ok=True)
-    base = os.path.join(workdir, config.obj_name(source))
+    base = os.path.join(workdir, name)
     elf, meta = base + '.elf', base + '.stubs.json'
-    srcs = [obj, bridges, os.path.join(linkdir, 'out', 'aliases.ld')]
+    srcs = units + [bridges, os.path.join(linkdir, 'out', 'aliases.ld')]
     if os.path.exists(elf) and os.path.exists(meta) and all(os.path.getmtime(elf) >= os.path.getmtime(s)
                                                             for s in srcs if os.path.exists(s)):
         m = json.load(open(meta))
-        if m.get('version') == LINK_VERSION:
+        if m.get('version') == LINK_VERSION and m.get('sources') == sorted(sources):
             return Image(elf, {int(k): v for k, v in m['stubs'].items()}, m['info'])
-    objs = [obj] + ([bridges] if os.path.exists(bridges) else [])
+    objs = units + ([bridges] if os.path.exists(bridges) else [])
     defined, undef, weak = set(), set(), set()
     for o in objs:
         for s in elfsyms.symbols(o):
@@ -174,5 +182,6 @@ def build(source, linkdir, workdir):
     open(base + '.ld.log', 'w').write(r.stderr)
     if not os.path.exists(elf):
         raise RuntimeError('link failed: %s' % r.stderr[:2000])
-    json.dump(dict(stubs={str(a): n for a, n in stubs.items()}, info=info, version=LINK_VERSION), open(meta, 'w'))
+    json.dump(dict(stubs={str(a): n for a, n in stubs.items()}, info=info, version=LINK_VERSION,
+                   sources=sorted(sources)), open(meta, 'w'))
     return Image(elf, stubs, info)

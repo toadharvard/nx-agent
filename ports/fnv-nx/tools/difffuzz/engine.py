@@ -164,11 +164,17 @@ class UnitCache:
                           statics)
         t.source = source
         t.vtables = self.vtable_map(img)
+        t.followed = self.preload(code, img, source)
+        t.x86_code = code
+        return t
+
+    def preload(self, code, img, source):
+        """Add to `code` (transitively) every oracle callee outside it that the native image never names: GCC
+        inlined it (typically a header inline function MSVC called out of line), so the oracle runs its copy."""
         called = self.arm_called(img, source)
         own = set(code)
 
         def follow(addr):
-            # out-of-unit address the native object never names: GCC inlined it, the oracle runs its copy
             if addr in own or addr in called or addr in libcalls.X86 or addr not in self.def_at:
                 return None
             src, _ = self.def_at[addr]
@@ -178,8 +184,7 @@ class UnitCache:
                 return None
             return f if f and not f['unresolved'] else None
 
-        # preload (transitively) every such callee of the oracle code: run for real, not intercepted
-        todo = [f for a, f in xu.funcs.items() if a in code]
+        todo = [f for xu in list(self._x86.values()) for a, f in xu.funcs.items() if a in code]
         added = 0
         while todo and added < 256:
             f = todo.pop()
@@ -192,9 +197,7 @@ class UnitCache:
                     own.add(tg)
                     todo.append(g)
                     added += 1
-        t.x86_code = code
-        t.followed = added
-        return t
+        return added
 
     def arm_called(self, image, source):
         """Original addresses the native unit can call out of the unit: code stubs it binds (undefined
