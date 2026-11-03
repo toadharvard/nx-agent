@@ -467,3 +467,18 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - the 12 boot-path units (void* overloads for GetSystemInfo / SYSTEMTIME functions, merge
   `fnvnx_win32_ext.h`, DECL2 for `class` SDK copies), fix the shim/platform linkage conflict from J-0021, then
   partial class views.
+
+### J-0023 | 2026-11-03 | stream: S6c-nine | status: wip | parent: J-0020,J-0021
+
+* **did** - Own IDirect3D9 over ID3DAdapter9 (`render/nine/host/nine_d3d9.c`: 1 adapter, 1280x720 / 1920x1080 at
+  60 Hz, caps via Nine); ID3DPresent / PresentGroup over nwindow (`host/nine_present.c`: `pipe_resource` ->
+  NvGraphicBuffer -> `nwindowConfigureBuffer`, queue with the nouveau syncpoint fence, release = dequeued);
+  `gen_proxy.py` emits ids + host cases for all methods; `nine_proxy_rt.cpp` (identity map, wrapping, 21 manual
+  bodies, `Direct3DCreate9`); host struct-layout asserts; test `render/nine/test/clear.cpp` (Create -> CreateDevice
+  -> Clear cycling + moving bar -> Present, logs caps and ms/frame) packaged as exefs.nsp.
+* **found** - Proxies compile ILP32 (guest) and LP64 (host); Mesa's LP64 layouts of every by-address struct equal
+  the 32-bit SDK sizes; proxy objects are 12 bytes. Test package: main NSO 2.2 MB, guest.nso 89 KB; the guest
+  starts under S5's emulator and stops at the missing Nine slot as expected.
+* **metrics** - proxy_host_cases=377 proxy_manual_bodies=21 nine_test_guest_nso_kib=87 hw_tests=0
+* **next** - hardware run (held until the host gates are green, user decision); move to S5's `ext_call` slot;
+  textured draw test (VB/IB lock, shaders) through the proxy; then the game link with `D3D9=external`.
