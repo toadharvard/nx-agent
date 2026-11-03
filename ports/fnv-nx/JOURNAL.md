@@ -546,3 +546,28 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   nine_test_guest_nso_kib=89
 * **next** - engine's first real D3D9 sequence through the gate; hardware run when the user allows.
 * **fork** - S4/S5: host/guest heap split for the game with Nine in the host module.
+
+### J-0027 | 2026-11-03 | stream: S10-startup | status: wip | parent: J-0012,J-0021
+
+* **did** - `startup/host/`: claim the data window 0x00fdf000..0x02100000, the guest range and the `.text` range
+  with `svcMapMemory` from the guest heap in `__libnx_initheap` (stack-state memory, so kernel and virtmem
+  placements avoid it; the image needs that memory anyway); relaunch via `appletRestartProgram` with an attempt
+  record in the UserChannel launch parameter (max 8; fallback `appletRequestLaunchApplication(0)`); portable planner
+  + libnx backend; hardware probe `tests/s10/nxprobe`. `startup/guest/`: initializer runner (ADDRESS order, or IMAGE
+  order from the exe's `__xc` slots captured before fixups) and one game onexit table with MSVC `doexit` semantics.
+  `startup/tools/`: `dyninit_rewrite.py` (proposed prepare rule XC1) and `mkxctab.py`. `docs/STARTUP.md`.
+* **found** - `0x00f34eb0..0x00fc7a70` holds 17,191 initializers (6,265 `??__E` + 10,926 `InitializeRuntime*`,
+  never called natively); `0x00fc7a70..0x00fde581` only `??__F`; no unit references an initializer; E/F pairs in the
+  same order in both groups (3 swaps / 4,692) -> `__xc` order = address order for the exe's objects. GCC's per-unit
+  init order is wrong (6 generated units interleave in 1,187 runs) and 2 flag-variant units copy 4,253 definitions
+  (double construction under address binding). 277 undecompiled initializer gaps (57,814 bytes). The kernel reports
+  the ASLR region as [0x200000, 4 GiB) in 32-bit spaces (S5's `as_name()` misreports). Modelled relaunch rate: 5.3 %
+  for the data window alone, 22-27 % with a 64 MiB guest at 0x10000000.
+* **decided** - Static init = one native per original initializer in original address order (image `__xc` order
+  when the exe is mapped); XC1 turns each generated `??__E` object into `extern` + `__fnvnx_dyninit_<addr>`, variant
+  copies become `extern`; one game exit table before libc exit.
+* **metrics** - initializers_native=17191 dyninit_rewritten=6265 dynexit=4692 variant_externs=4253 xctab_bytes=137544
+  s10_checks=177 hw_tests=0
+* **next** - integration: S5 host.c (reserve early/late, remap_code, guest placement right after the window to cut
+  relaunches), xc runner after `__libc_init_array`; S1 XC1 rule; S2 map `__fnvnx_dyninit_/dynexit_` + rename
+  `__cxa_atexit` in game objects; S4 atexit/doexit forwarding; S3 `__xc` capture before fixups.
