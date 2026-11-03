@@ -343,6 +343,24 @@ def load_stream_rules():
         rules += list(getattr(mod, 'RULES', []))
     return rules
 
+def drop_native_units(out_root, stats, files):
+    """NATIVE1: units listed in render/native/drop_units.txt (one source path per line; D6, the native renderer
+    replaces them) leave the build list (<out>/build/units.json, which census.sh and the link step read)."""
+    import json
+    lst = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'render', 'native', 'drop_units.txt')
+    drop = set()
+    if os.path.exists(lst):
+        drop = {l.strip() for l in open(lst) if l.strip() and not l.startswith('#')}
+    stats['NATIVE1'] += 0
+    if not drop: return
+    p = os.path.join(out_root, 'build', 'units.json')
+    data = json.load(open(p))
+    keep = [u for u in data['units'] if u.get('source') not in drop]
+    stats['NATIVE1'] += len(data['units']) - len(keep)
+    files['NATIVE1'] += len({u.get('source') for u in data['units']} & drop)
+    data['units'] = keep
+    json.dump(data, open(p, 'w'))
+
 def main():
     src_root, out_root = sys.argv[1], sys.argv[2]
     rules = RULES + load_stream_rules()
@@ -368,6 +386,7 @@ def main():
                 with open(d, 'w', encoding='utf-8', errors='surrogateescape') as f:
                     f.write(text)
     shutil.copytree(os.path.join(src_root, 'build'), os.path.join(out_root, 'build'), dirs_exist_ok=True)
+    drop_native_units(out_root, stats, files)
     with open(os.path.join(out_root, 'prepare_stats.tsv'), 'w') as f:
         for k in sorted(stats):
             f.write('%s\t%d files\t%d edits\n' % (k, files[k], stats[k]))
