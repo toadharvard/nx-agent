@@ -14,3 +14,7 @@ GCC_WARN=(-Wreturn-type -Wuninitialized -Wmaybe-uninitialized -Waggressive-loop-
           -Wconditionally-supported -Wvarargs -Wfree-nonheap-object -Wmismatched-new-delete -Wclobbered
           -Wint-in-bool-context -Wbool-compare -Wtautological-compare)
 GCC_DIAG=(-fno-diagnostics-show-caret -fdiagnostics-show-option -fno-diagnostics-color -fmax-errors=50)
+
+# Flags the gate proposes to add to D10 (docs/STATIC_CHECKS.md, "Flags"); tests/s12 checks what each one changes.
+PROPOSED_FLAGS=(-fwrapv-pointer -fno-finite-loops -fno-aggressive-loop-optimizations
+                -fno-isolate-erroneous-paths-dereference -funreachable-traps)

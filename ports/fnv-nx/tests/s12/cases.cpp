@@ -30,7 +30,7 @@ struct Obj { Obj *Next(); void Put(int); };
 void order4(Obj *o) { o->Next()->Put(ReadByte()); }                // expect: ORDER-OBJECT
 int order5() { return ReadByte() - ReadByte(); }                   // expect: ORDER-BINOP
 void fmt1(long long v) { Log("%d %s", v, "x"); }                   // expect: FMT-SIZE
-void fmt2(Str s) { Log("%s", s); }                                 // expect: FMT-STRUCT
+void fmt2(Str s) { Log("%s", s); }                                 // expect: FMT-STRUCT VA-STRUCT
 void fmt3(char *b, long long v) { sprintf(b, "%I64d", v); }        // expect: FMT-MSVC
 void fmt4(char *b, int v) { sprintf(b, "%f", v); }                 // expect: FMT-CLASS
 void va1(const char *fmt, ...) { const char **p = &fmt; (void)p; } // expect: VA-ADDR-PARAM
@@ -40,7 +40,7 @@ void unlock() { g_lock = 0; }
 #pragma pack(push, 1)
 struct Packed { char c; LONG v; };
 #pragma pack(pop)
-void pk(Packed *p) { InterlockedIncrement(&p->v); }                // expect: ATOMIC-UNALIGNED
+void pk(Packed *p) { InterlockedIncrement(&p->v); }                // expect: ATOMIC-UNALIGNED ATOMIC-USE
 void bar() { _ReadWriteBarrier(); }                                // expect: BARRIER
 volatile int g_flag;                                               // expect: VOLATILE-DECL
 int g_ready;

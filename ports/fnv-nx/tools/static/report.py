@@ -260,11 +260,14 @@ def main():
     uflags = load_units(tree)
 
     # ---- fnvcheck rows + clang diagnostics (gnu)
-    rows_dir = os.path.join(out, 'clang', 'gnu', 'rows')
-    if os.path.isdir(rows_dir):
+    for cfg in ('gnu', 'atomic'):
+      rows_dir = os.path.join(out, 'clang', cfg, 'rows')
+      if os.path.isdir(rows_dir):
         n = 0
         for name in sorted(os.listdir(rows_dir)):
             path = os.path.join(rows_dir, name)
+            if cfg == 'atomic' and not name.endswith('.tsv'):
+                continue
             unit = unit_of(name)
             if name.endswith('.tsv'):
                 n += 1
@@ -292,7 +295,7 @@ def main():
                         continue
                     S.add(WARN_CLASS.get(flag, 'W-OTHER'), r, m.group(2), m.group(3),
                           'clang -W%s: %s' % (flag, m.group(5)[:160]), unit)
-        passes['clang gnu (AST + warnings)'] = n
+        passes['clang %s' % ('gnu (AST + warnings)' if cfg == 'gnu' else 'atomic (plain stores)')] = n
 
     # ---- GCC diagnostics
     gcc_dir = os.path.join(out, 'gcc', 'logs')
