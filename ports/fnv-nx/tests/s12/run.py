@@ -9,6 +9,7 @@ libclang-18-dev headers (fnvcheck is built into the scratch dir given as argumen
 2. cases.cpp: every fnvcheck check fires where `// expect:` says, and nowhere else.
 3. layouts.cpp: the msvc and gnu clang configurations give the expected sizes, and the gnu proxy agrees with real
    GCC AArch64 ILP32 on every record.
+4. the layout steps of run.sh (clang_pass.sh, layout_diff.py, layout_probe.py) on a one-unit tree of layouts.cpp.
 """
 import os
 import re
@@ -140,6 +141,29 @@ def layouts(scratch):
             check(int(v) == gs, 'layouts %s GCC aarch64 ilp32 %s == gnu proxy %d' % (name, v, gs))
 
 
+def pipeline(scratch):
+    """the layout steps of run.sh on a one-unit tree made of layouts.cpp: diff causes, and GCC agrees with the proxy"""
+    import json
+    import shutil
+    e = os.path.join(scratch, 'e2e')
+    shutil.rmtree(e, ignore_errors=True)
+    for d in ('src', 'include', 'build'):
+        os.makedirs(os.path.join(e, 'tree', d))
+    shutil.copy(os.path.join(HERE, 'layouts.cpp'), os.path.join(e, 'tree', 'src'))
+    json.dump({'units': [{'source': 'src/layouts.cpp', 'flags': ['/O2']}]}, open(os.path.join(e, 'tree', 'build', 'units.json'), 'w'))
+    for cfg in ('gnu', 'msvc'):
+        subprocess.run(['bash', os.path.join(STATIC, 'clang_pass.sh'), 'tree', 'out', cfg, '1'], cwd=e, capture_output=True)
+    subprocess.run(['python3', os.path.join(STATIC, 'layout_diff.py'), 'out'], cwd=e, capture_output=True)
+    rows = [l.split('\t') for l in open(os.path.join(e, 'out', 'layout', 'diff.tsv')).read().splitlines()[1:]]
+    causes = {r[1].split('|')[1]: r[0] for r in rows}
+    want = {'B1': 'bitfield', 'B2': 'bitfield', 'B3': 'bitfield', 'B4': 'bitfield', 'P1': 'pack-align',
+            'P2': 'pack-align', 'TwoEmpty': 'empty-base', 'VEmpty': 'empty-base-offset'}
+    check(causes == want, 'layout_diff causes %s' % sorted(causes.items()))
+    r = subprocess.run(['python3', os.path.join(STATIC, 'layout_probe.py'), 'tree', 'out'], cwd=e, capture_output=True, text=True)
+    res = [l.split('\t') for l in open(os.path.join(e, 'out', 'probe', 'result.tsv')).read().splitlines()[1:]]
+    check(len(res) >= 20 and all(x[2] == 'ok' for x in res), 'layout_probe: GCC agrees with the proxy (%s)' % r.stdout.strip())
+
+
 def main():
     scratch = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, 'out'))
     os.makedirs(scratch, exist_ok=True)
@@ -149,6 +173,7 @@ def main():
     if r.returncode == 0:
         cases(scratch)
         layouts(scratch)
+        pipeline(scratch)
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)
 

@@ -8,6 +8,9 @@
 #define FNVNX_STATIC_MSVC 1
 
 #ifdef __cplusplus
+/* clang's x86 mm_malloc.h expects the MSVC CRT's aligned heap on this target */
+extern "C" void *_aligned_malloc(__SIZE_TYPE__, __SIZE_TYPE__);
+extern "C" void _aligned_free(void *);
 #include <sse2neon.h> /* tools/static/run.sh points this at clang's own x86 SSE headers */
 #endif
 
