@@ -140,8 +140,28 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
   struct Effects {
     int n = 0;                       // effectful sub-expressions (calls to non-const functions, ++/--, assignment, new)
     std::set<const Decl *> callees;  // non-const callees
+    std::set<std::string> names;     // their simple names
     std::string first;               // first effectful callee's name
   };
+  // a function whose visible body is `return <expression without calls or side effects>;` (the decomp's getters
+  // are rarely const-qualified)
+  bool trivialGetter(const FunctionDecl *FD) {
+    const FunctionDecl *Def = nullptr;
+    if (!FD->hasBody(Def) || !Def) return false;
+    auto *CS = dyn_cast_or_null<CompoundStmt>(Def->getBody());
+    if (!CS || CS->size() != 1) return false;
+    auto *RS = dyn_cast<ReturnStmt>(CS->body_front());
+    if (!RS || !RS->getRetValue() || RS->getRetValue()->isValueDependent()) return false;
+    return !RS->getRetValue()->HasSideEffects(C, true);
+  }
+  // callees whose order of calls is observable: stream reads, random numbers, iterators
+  static bool streamName(StringRef n) {
+    std::string l = n.lower();
+    for (const char *k : {"read", "pop", "next", "rand", "parse", "fetch", "advance", "consume", "getchar",
+                          "getbyte", "gettoken", "getline", "seek", "skip"})
+      if (l.find(k) != std::string::npos) return true;
+    return false;
+  }
   static bool pureName(StringRef n) {
     static const char *names[] = {"strlen", "strcmp", "stricmp", "_stricmp", "strncmp", "_strnicmp", "sqrt", "sqrtf",
                                   "fabs", "fabsf", "sin", "sinf", "cos", "cosf", "tan", "atan", "atan2", "atan2f",
@@ -164,10 +184,12 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
         if (auto *MD = dyn_cast<CXXMethodDecl>(FD))
           if (MD->isConst()) pure = true;
         if (isa<CXXConversionDecl>(FD)) pure = true;
+        if (!pure && trivialGetter(FD)) pure = true;
       }
       if (!pure) {
         E.n++;
         E.callees.insert(FD ? FD->getCanonicalDecl() : nullptr);
+        if (FD) E.names.insert(idName(FD).str());
         if (E.first.empty()) E.first = FD ? FD->getQualifiedNameAsString() : std::string("<indirect>");
       }
     } else if (auto *UO = dyn_cast<UnaryOperator>(S)) {
@@ -333,6 +355,13 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
     // strength: the same non-const callee in two arguments (Read() twice, rand() twice) or non-const member calls
     // on the same object; otherwise two independent effectful arguments
     std::string strength = "-";
+    int streamArgs = 0;
+    for (auto &e : E) {
+      bool st = false;
+      for (auto &nm : e.names) st |= streamName(nm);
+      streamArgs += st;
+    }
+    if (streamArgs >= 2) strength = "stream";
     for (size_t i = 0; i < Args.size() && strength == "-"; i++)
       for (size_t j = i + 1; j < Args.size(); j++) {
         for (auto *d : E[i].callees)
@@ -627,6 +656,11 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
   }
   void loop(const Stmt *L, const Expr *Cond, const Stmt *Body) {
     if (NoAst || !Cond) return;
+    {
+      bool sw = false, oth = false;
+      waitBody(Cond, sw, oth);    // ++ / assignment / calls in the condition: a scan, not a poll
+      if (oth) return;
+    }
     if (isVolatileRead(Cond)) {
       emit("POLL-VOLATILE", L->getBeginLoc(), fn() + "\t" + text(Cond->getSourceRange()));
       return;
@@ -708,8 +742,12 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
       }
     }
     // MSVC: every unscoped enum is int (0x80000000 is INT_MIN); GCC: unsigned int, or 64-bit past 32 bits
-    if (huge) emit("ENUM-64", D->getLocation(), D->getQualifiedNameAsString());
-    else if (big) emit("ENUM-UNSIGNED", D->getLocation(), D->getQualifiedNameAsString());
+    std::string name = D->getIdentifier() ? D->getQualifiedNameAsString()
+                                          : std::string("(anonymous enum ") +
+                                                (D->enumerator_begin() != D->enumerator_end()
+                                                     ? D->enumerator_begin()->getNameAsString() : std::string()) + ")";
+    if (huge) emit("ENUM-64", D->getLocation(), name);
+    else if (big) emit("ENUM-UNSIGNED", D->getLocation(), name);
     return true;
   }
 

@@ -23,9 +23,13 @@ bool psign(void *p, void *q) { return (int)p < (int)q; }           // expect: P2
 long long sh64(long long x, int n) { return x << n; }              // expect: SHIFT64-VAR
 int sh32(int x, int n) { return x << n; }                          // expect: SHIFT32-VAR
 int idiv(int a, int b) { return a / b; }                           // expect: DIV-VAR
-void order1() { Use(ReadByte(), ReadByte()); }                     // expect: ORDER-ARGS same-callee
-void order2(Stream *s) { Use(s->Read(), s->Read()); }              // expect: ORDER-ARGS same-callee
+void order1() { Use(ReadByte(), ReadByte()); }                     // expect: ORDER-ARGS stream
+void order2(Stream *s) { Use(s->Read(), s->Read()); }              // expect: ORDER-ARGS stream
 void order3() { Use(ReadByte(), Other()); }                        // expect: ORDER-ARGS -
+int Compute();
+void order6() { Use(Compute(), Compute()); }                       // expect: ORDER-ARGS same-callee
+struct G { int v; int Get() { return v; } };
+void order7(G *a, G *b) { Use(a->Get(), b->Get()); }               // trivial getters: nothing
 struct Obj { Obj *Next(); void Put(int); };
 void order4(Obj *o) { o->Next()->Put(ReadByte()); }                // expect: ORDER-OBJECT
 int order5() { return ReadByte() - ReadByte(); }                   // expect: ORDER-BINOP
@@ -44,6 +48,8 @@ void pk(Packed *p) { InterlockedIncrement(&p->v); }                // expect: AT
 void bar() { _ReadWriteBarrier(); }                                // expect: BARRIER
 volatile int g_flag;                                               // expect: VOLATILE-DECL
 int g_ready;
+char *g_text;
+void scan() { int i = 0; while (g_text[i++] != '>') {} }           // a scan, not a poll: nothing
 void poll1() { while (!g_flag) {} }                                // expect: POLL-VOLATILE
 void poll2() { while (!g_ready) Sleep(0); }                        // expect: POLL-PLAIN
 __thread int t_val;                                                // expect: TLS
