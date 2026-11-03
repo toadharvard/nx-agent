@@ -215,3 +215,28 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **fork** - S7-audio-input: API list ready (dinput8 `DirectInput8Create`, dsound `DirectSoundCreate8`, xinput1_3
   `XInputGetState`, vorbisfile `ov_*`; hooks `fnvnx_register_module/com_class`, `fnvnx_post_message/set_key_state`);
   needs J-0009.
+
+### J-0010 | 2026-11-03 | stream: S3-dataimage | status: wip | parent: J-0002,J-0008
+
+* **did** - `loader/`: portable C99 PE32 loader (ILP32-safe; host + aarch64 ILP32 `-Werror`): header validation,
+  code fingerprints (`image_check.json`) plus data fingerprints (5,712 string-literal / RTTI-name probes spelled by
+  units.json decorated names, `mkdataprobes.py`) and section plainness; maps non-code sections at original VAs via a
+  bias-aware `map_fixed` hook, zero-fills .bss, relocates, binds IAT + delay IAT through a resolver hook, scans data
+  for code pointers and applies checked fixups (kind-G deleting-dtor adapter honouring flags, trap stubs reporting
+  the original address). Offline twin `tools/scan_codeptrs.py` (byte-identical fixup lists). S2 map import,
+  vftable slot reader for S2b. `tests/s3/`: synthetic FalloutNV-shaped PE, 20 tests pass (ASan/UBSan, fuzz).
+* **found** - 73,275 known code addresses: a random word hits one with p = 1.7e-5, a `.text`-range word 0.59 %, a
+  16-aligned one 8.9 % (estimates until a real exe is scanned). 2,333 named vftables; 1,438 hand-written vftable
+  references (516 units); >= 409 raw MSVC slot-number calls (146 files); 6,266 `??__E` initializers, 183 `??_G`.
+* **decided** - Steam exe accepted on plain data + data probes; nothing is ever decrypted. Discovery: structural
+  (RTTI COL, name hints, TLS, .reloc) first, then runs, then filtered isolated words. D7 (vtables): an object only
+  ever holds the Itanium vtable; statics are rebuilt by the native `??__E` initializers run from the image's `__xc`
+  table; S2 binds image vftables to Itanium vtables (new map kind VTABLE) and synthesizes missing ones (`??_G` ->
+  D1 = `??_G(this,0)`, D0 = `??_G(this,1)`); raw slot-number calls become `FNVNX_MSVC_VCALL` via an S1 rule + S2
+  table; `__RTDynamicCast` maps MSVC type descriptors to Itanium `type_info`.
+* **metrics** - known_code_addrs=73275 vftables_named=2333 hand_vftable_refs=1438 raw_vcall_sites=409
+  data_probes=5712 s3_tests=20
+* **next** - scan a real 1.4.0.525 exe (blocked on the player's exe); S2: emit `fnvnx_addrmap_kinds[]`, VTABLE and
+  extern_text/mid entries; S4: import resolver + per-thread `.tls` copies; S5: fixed mapping of the window.
+* **fork** - S3b-island: trampoline island over 0x00401000..0x00fdf000 (branch at every original code address)
+  making code-pointer false positives harmless; needs S5's fixed-mapping decision.
