@@ -127,7 +127,14 @@ UNITS = {'units': [
     {'source': 'src/b/two.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [],
      'symbols': {LIT: '0x01011000', '$SG5': '0x01011002', '__real@3f800000': '0x01012200',
                  '?t_v@@3HA': '0x01272004'}},
+    # an /Od unit whose object numbers its string literals 43 higher than units.json does
+    {'source': 'src/c/three.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [],
+     'symbols': {'$SG7': '0x01013000', '$SG8': '0x01013010'}},
 ]}
+
+
+def unit2():
+    return coff([['.rdata', RD | ALIGN4, b'one\0two\0', []]], [['$SG50', 1, 0, 3, 0], ['$SG51', 1, 4, 3, 0]])
 
 
 class SynthTest(unittest.TestCase):
@@ -140,6 +147,8 @@ class SynthTest(unittest.TestCase):
             f.write(unit0())
         with open(os.path.join(t, 'obj', 'u1.obj'), 'wb') as f:
             f.write(unit1())
+        with open(os.path.join(t, 'obj', 'u2.obj'), 'wb') as f:
+            f.write(unit2())
         with open(os.path.join(t, 'units.json'), 'w') as f:
             json.dump(UNITS, f)
         with open(os.path.join(t, 'imports.tsv'), 'w') as f:
@@ -191,9 +200,15 @@ class SynthTest(unittest.TestCase):
     def test_ranks_and_conflicts(self):
         r = self.r
         self.assertEqual(r['copies_agreeing'], 1)                            # the literal twice
-        self.assertGreaterEqual(r['overlaps_by_rank'].get('conflict 0-3', 0), 1)
+        self.assertGreaterEqual(r['overlaps_by_rank'].get('conflict 0-1', 0), 1)   # literal vs $SG5
         self.assertGreater(r['conflict_resolution'].get('lost_bytes', 0), 0)
         self.assertEqual(self.img.read(0x01011002, 2), b'll')                # the content-named literal wins
+
+    def test_sg_shift(self):
+        self.assertEqual(self.r['stats'].get('sg_shift_43'), 1)
+        self.assertEqual(self.r['stats'].get('sg_shift_0'), 1)
+        self.assertEqual(self.img.read(0x01013000, 4), b'one\0')            # object $SG50 = units.json $SG7
+        self.assertEqual(self.img.read(0x01013010, 4), b'two\0')
 
     def test_sections(self):
         s = self.r['sections']

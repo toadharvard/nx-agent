@@ -58,6 +58,7 @@ PAGE = 0x1000
 
 ST_NONE, ST_SOFT, ST_UNK, ST_HARD = 0, 1, 2, 3
 TRUST = {'unit': 0, 'global': 1, 'name': 2, 'spill': 3}
+SG_SHIFT_OK = set()          # units whose $SG numbering was matched (filled by phase 1)
 
 
 def page_up(v):
@@ -122,8 +123,35 @@ class Names:
                 glob[n].add(a)
         self.glob = {n: (next(iter(s)) if len(s) == 1 else None) for n, s in glob.items()}
         self.func_starts = sorted(self.funcs)
+        self.shift = {}
+
+    def sg_shift(self, i, coff, stats):
+        """MSVC numbers string literals of /GF-less units $SG<n> by an internal symbol counter; the objects of
+        the build at hand can count differently from the build that wrote units.json (S11's force-included header
+        declares templates: +43 in every C++ unit). The shift is the delta that maps the most of the unit's
+        units.json $SG names onto $SG symbols the object defines; names are looked up through it."""
+        mine = [int(n[3:]) for n in self.unit[i] if n.startswith('$SG') and n[3:].isdigit()]
+        if not mine:
+            return
+        have = {int(s.name[3:]) for s in coff.symbols.values() if s.section > 0 and s.name.startswith('$SG')
+                and s.name[3:].isdigit()}
+        deltas = collections.Counter(b - a for a in mine for b in have if abs(b - a) < 100000)
+        if not deltas:
+            stats['sg_units_no_overlap'] += 1
+            return
+        d, n = deltas.most_common(1)[0]
+        stats['sg_units'] += 1
+        stats['sg_names'] += len(mine)
+        stats['sg_names_hit'] += n
+        stats['sg_shift_%d' % d] += 1
+        if n * 10 >= len(mine) * 9:
+            self.shift[i] = d
+            stats['sg_units_shift_validated'] += 1
 
     def lookup(self, i, name, global_ok):
+        d = self.shift.get(i)
+        if d and name.startswith('$SG') and name[3:].isdigit():
+            name = '$SG%d' % (int(name[3:]) - d)
         a = self.unit[i].get(name)
         if a is not None:
             return a, 'unit'
@@ -167,6 +195,7 @@ def is_secsym(coff, s):
 
 def process_object(i, coff, names, cls, stats, want_code=True):
     """items (placed and unplaced data), code references into the window, call edges"""
+    names.sg_shift(i, coff, stats)
     secs = coff.sections
     by_sec = collections.defaultdict(list)
     for s in coff.symbols.values():
@@ -417,7 +446,7 @@ def phase1(units, objdir, names, limit=None, log=print):
         if have % 500 == 0:
             log('  %d objects, %d items, %d refs (%.0f s)' % (have, len(items), len(refs), time.time() - t0))
     stats['objects'] = have
-    return dict(items=items, unplaced=unplaced, refs=refs, edges=edges, stats=stats)
+    return dict(items=items, unplaced=unplaced, refs=refs, edges=edges, stats=stats, sg_shift=dict(names.shift))
 
 
 # --------------------------------------------------------------------------------------------- phase 2
@@ -463,6 +492,8 @@ def name_rank(it):
         return 0 if r is not None and it.data[:len(r[0])] == r[0] else 4
     if n.startswith('?'):
         return 1 if it.src == 'unit' else 2
+    if n.startswith('$SG') and it.unit in SG_SHIFT_OK:
+        return 1          # numbering checked against the unit's own names (Names.sg_shift)
     return 3
 
 
@@ -1045,6 +1076,7 @@ def main(argv=None):
         ph1['stats']['objects'], len(ph1['items']), len(ph1['unplaced']), len(ph1['refs']), len(ph1['edges']),
         time.time() - t0))
     report = {'stats': dict(ph1['stats'])}
+    SG_SHIFT_OK.update(ph1.get('sg_shift', {}))
     imports = read_imports(a.imports)
     items = [it for it in ph1['items'] if WIN_LO <= it.addr and it.end <= WIN_HI]
     report['items_outside_window'] = len(ph1['items']) - len(items)
