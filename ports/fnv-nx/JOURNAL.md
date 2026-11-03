@@ -240,3 +240,23 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   extern_text/mid entries; S4: import resolver + per-thread `.tls` copies; S5: fixed mapping of the window.
 * **fork** - S3b-island: trampoline island over 0x00401000..0x00fdf000 (branch at every original code address)
   making code-pointer false positives harmless; needs S5's fixed-mapping decision.
+
+### J-0011 | 2026-11-03 | stream: S2-link | status: wip | parent: J-0008,J-0010
+
+* **did** - `tools/link/layout.py` + `fnvlink.py probe`: per-unit probe TU (sizeof/alignof/trivial-for-calls/empty
+  + a by-value spill function per aggregate) -> AAPCS64 class G1/G2/H<n>x<w>/IND, cached in `layouts.tsv`.
+  `abi2.py`: byte-level verdict (MSVC x86 locations incl. hidden result pointers vs AArch64 chunks) and a general
+  frame-based bridge generator (per-value buffers, by-reference pointers, outgoing stack, result conversion, tail
+  call when possible). `test_bridges.py` executes 8 generated bridges under qemu-aarch64. Address map:
+  `fnvnx_addrmap_kinds[]`, kinds V (image vftable -> Itanium vtable address point, 446) and E (referenced text with
+  no definition, native 0 -> loader trap, 138).
+* **found** - 484 aggregates in 274 units, all nameable (G1 165, IND 134, H3x4 125, H4x4 21, G2 16, H1x16 15). Of
+  622 manual refs: 347 need no bridge (layout-identical), 258 bridged, 2 x86-inconsistent; 15 varargs remain. Fresh
+  tree with S8 rules: 2,067 objects, 107,294 refs, 91,076 bound; trial link 0 multiple definitions.
+* **decided** - MSVC hidden-result rule: always for members; free functions unless a trivial 1/2/4/8-byte
+  aggregate. Bridge temporaries are bitwise copies (no ctor/dtor), as x86 saw them.
+* **metrics** - link_objects=2067 link_refs=107294 link_resolved=91076 link_ambiguous=1 link_unresolved=9381
+  link_bridges=384 link_abi_manual=15 link_abi_x86_inconsistent=68 link_layouts=484
+* **next** - S2b-vslots (6,098 vtable-slot refs, needs a real exe image); address map: secondary vftables,
+  synthesized vtables, `??_G` D1/D0 split, S4's 4,618 extern-text list, mid-function entries; 68 x86-inconsistent
+  declarations to S1.
