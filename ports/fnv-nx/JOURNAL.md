@@ -589,3 +589,26 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - shaders=32 compiled=30 variant_compiles=486 programs=391 cache_identical=120/120 checks=744
   switch_build_steps=563
 * **next** - S6c wires `nx_nine_shader_cache_init(NULL)` into host init; on hardware: hit rate, create-time savings.
+
+### J-0029 | 2026-11-03 | stream: S2c-vtables | status: wip | parent: J-0017,J-0027
+
+* **did** - `tools/link/vtables.py`: image vftables (primary and `{for B}`) mapped to Itanium address points, read
+  from the vtable copy the linker keeps and the typeinfo base lists of the same object. Missing vtables/typeinfo
+  synthesized by GCC itself (a probe derives `V<k> : C` with its own key function on a unit that sees C; V<k>'s
+  vtable minus that slot, renamed, is C's), emitted weak, one object per host unit, cached (`fnvlink.py vtables`,
+  also inside `probe`; `FNVNX_NO_VTABLES=1` skips). Address map: `addrmap.tsv` gains `offset`, `d1_symbol`,
+  `d1_native` columns; `addrmap.c` gains `fnvnx_addrmap_deldtors[] {orig, d1, d0}` (additive). S10 requests:
+  `__fnvnx_dyninit_/dynexit_<addr>` as F entries; `__cxa_atexit` -> `fnvnx_xc_cxa_atexit` in game objects only.
+  `test_vtables.py`, `test_startup.py` pass with the earlier link tests.
+* **found** - V entries 446 -> 1,182 (688 primary, 494 secondary; 374 synthesized), all verified in the trial-linked
+  image; 1,933 vtables, 1,865 typeinfos, 265 thunks synthesized; unresolved `vtable for` 661 -> 11, `typeinfo for`
+  812 -> 13; 41/41 `??_G` with D1 + D0. Units disagree on some classes, so typeinfo is read from the vtable's own
+  object. GCC writes 0 in both destructor slots of abstract classes (S3's D1 search cannot work there: use the
+  deldtors table). Trial link undefined 12,832 -> 14,406: synthesized slots add 2,662 names (1,464 implicit
+  destructors, 1,198 inline/never-defined virtuals); 0 multiple definitions.
+* **decided** - Synthesized RTTI always weak and only for names no compiled object defines; `addrmap.tsv` columns only
+  ever appended, one row per address.
+* **metrics** - link_addrmap_V=1182 link_addrmap_V_secondary=494 link_vtables_synth=1933 link_typeinfo_synth=1865
+  link_deldtor_pairs=41 link_trial_undefined=14406
+* **next** - emit inline virtuals / implicit destructors of synthesized classes; S3 loader: V rows as VTABLE, G
+  adapter on `fnvnx_addrmap_deldtors`.
