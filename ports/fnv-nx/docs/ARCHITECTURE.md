@@ -29,6 +29,9 @@ Global data has no definitions in source; matching only needs the address.
 `aarch64 -mabi=ilp32` keeps `sizeof(void*) == sizeof(long) == 4`, so:
 
 * the decomp's 3,171 `static_assert(sizeof...)` stay true and become a free layout check;
+* one exception, fixed by a layout pass (J-0007): GCC (Itanium ABI) puts derived members into the tail padding of
+  a non-POD base, MSVC never does; prepare appends explicit trailing padding to every such base so no tail padding
+  exists;
 * struct layouts read from disk (plugins, saves, NIF streams) stay byte-compatible;
 * the original data image (D3) can be mapped at its original virtual addresses and its data-to-data pointers stay
   valid as they are.
@@ -62,6 +65,13 @@ declarations differ in a way x86 tolerated and AArch64 does not (e.g. `__fastcal
 
 The decomp copies MSVC's `__m128` union into ~400 files; prepare removes those copies and the global `sse2neon` type
 is used everywhere; union member access (`v.m128_f32[i]`) becomes typed pointer access.
+
+### D6. Rendering: own D3D9 front end over deko3d, shaders translated offline (J-0006)
+
+The engine calls D3D9 through vtable slots (mostly via its own stand-in classes), so the front end is ILP32 C++ with
+SDK-order vtables implementing all Device9 slots. Shader bytecode (SM1.1-3.0 from `shaderpackage*.sdp`) is translated
+at install time: MojoShader (GLSL 4.5 profile for deko3d) -> uam -> DKSH, keyed by bytecode hash. Details:
+[`RENDER.md`](RENDER.md).
 
 ## Legal
 
