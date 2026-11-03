@@ -84,7 +84,16 @@ def main():
         for line in open(os.path.join(d, 'results.jsonl')):
             r = json.loads(line)
             results[r['address']] = r
+        gone = set()
+        rp = os.path.join(d, 'recheck.jsonl')
+        if os.path.exists(rp):
+            for line in open(rp):
+                x = json.loads(line)
+                if x['status'] == 'gone':
+                    gone.add(x['file'])
         for p in sorted(glob.glob(os.path.join(d, 'div', '*.json'))):
+            if os.path.basename(p) in gone:
+                continue        # no longer reproduces: it was a harness limit fixed since
             rec = json.load(open(p))
             rec['_file'] = p
             rec['_cause'] = reclassify(rec)

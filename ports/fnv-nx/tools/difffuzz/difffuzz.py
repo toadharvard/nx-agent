@@ -3,7 +3,8 @@
 
     difffuzz.py one <source> <addr>            run one function once (zero world), print both Results
     difffuzz.py fuzz <targets.jsonl> [opts]    the coverage-guided campaign over a list of functions
-    difffuzz.py repro <divergence.json>        re-run a saved minimal reproducer
+    difffuzz.py repro <divergence.json>        re-run a saved minimal reproducer (--trace: both instruction traces)
+    difffuzz.py recheck <campaign dir>         replay every saved divergence on the current engine
     difffuzz.py lockstep <addr> [opts]         run a call tree on both machines, compare the trace by address
 
 The x86 side is the oracle (pristine decomp built with MSVC 2008, byte-identical to FalloutNV.exe); the AArch64 side
@@ -61,6 +62,25 @@ def cmd_repro(a):
     print('divergence:', json.dumps(div, indent=1) if div else 'NONE (no longer reproduces)')
 
 
+def cmd_recheck(a):
+    """Replay every saved divergence of a campaign on the current engine: <dir>/recheck.jsonl, one line per file
+    (still / gone / error) with the current divergence."""
+    import glob
+    uc = _cache()
+    out = open(os.path.join(a.dir, 'recheck.jsonl'), 'w')
+    for p in sorted(glob.glob(os.path.join(a.dir, 'div', '*.json'))):
+        d = json.load(open(p))
+        try:
+            pair, t = uc.pair(d['source'], int(d['address'], 16))
+            _, _, div = pair.run(world.Case.from_json(d['case']))
+            st = 'still' if div else 'gone'
+        except Exception as e:  # noqa: BLE001
+            div, st = dict(error=str(e)[:200]), 'error'
+        out.write(json.dumps(dict(file=os.path.basename(p), status=st, divergence=div)) + '\n')
+        out.flush()
+    print('rechecked')
+
+
 def cmd_lockstep(a):
     import lockstep
     lockstep.run(a)
@@ -77,6 +97,7 @@ def main():
     p.add_argument('--resume', action='store_true'); p.add_argument('--tag', default='run'); p.set_defaults(fn=cmd_fuzz)
     p = sub.add_parser('repro'); p.add_argument('file'); p.add_argument('--trace', action='store_true')
     p.set_defaults(fn=cmd_repro)
+    p = sub.add_parser('recheck'); p.add_argument('dir'); p.set_defaults(fn=cmd_recheck)
     p = sub.add_parser('lockstep'); p.add_argument('addr'); p.add_argument('--source', default=None)
     p.add_argument('--bg', default='zero'); p.add_argument('--out', default=str(config.WORK / 'lockstep'))
     p.add_argument('--max-steps', type=int, default=2000000); p.add_argument('--depth', type=int, default=64)
