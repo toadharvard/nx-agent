@@ -77,7 +77,7 @@ def main():
                     % (objs['native/over.cpp'], objs['native/over.cpp']))
         out, fixed = os.path.join(t, 'out'), os.path.join(t, 'fixed')
         run([sys.executable, FNVLINK, 'resolve', os.path.join(t, 'units.json'), os.path.join(t, 'objects.tsv'), out,
-             '--override', os.path.join(t, 'override.tsv')])
+             '--override', os.path.join(t, 'override.tsv'), '--crt-symbols', 'none', '--imports', 'none'])
         rows = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'shadowed.tsv')) if not l.startswith('#')]
         byaddr = {r[0]: r for r in rows}
         check(set(byaddr) == {'00401000', '00401100'}, 'shadowed rows: %s' % sorted(byaddr))

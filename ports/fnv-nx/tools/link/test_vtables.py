@@ -7,7 +7,9 @@ Classes (header h.h): Base1 / Base2 (virtual destructors, Base2::g2 pure), Plain
 Plain, Base2 (key function in unit a, so GCC emits its group); Key : Plain, Base1, Base2 (key function Key::k is
 defined nowhere: its vtable is never emitted, unit b references it); Inl : Base1, Base2 (inline virtuals only, never
 constructed: no vtable anywhere); Abs2 : Base2 (abstract, inline virtual); Root (key function defined nowhere,
-reached only through the typeinfo of Leaf, which unit c constructs). units.json names their primary and
+reached only through the typeinfo of Leaf, which unit c constructs); KeyImp, KeyDel (key function defined nowhere,
+implicit virtual destructor, constructed by unit c; KeyDel has its own operator delete). units.json names their
+primary and
 `{for `B'}` secondary vftables and the scalar deleting destructors of Multi, Key and Base1.
 
 Pipeline: resolve -> vtables (probe) -> resolve -> apply -> check. Checks:
@@ -17,10 +19,13 @@ Pipeline: resolve -> vtables (probe) -> resolve -> apply -> check. Checks:
   `vptr=((& C::_ZTV...) + N)`, the class's own one for a primary base);
 * in the trial link: fnvnx_addrmap[] holds _ZTV<C> + offset for each vftable, with offset-to-top = -(subobject offset)
   and the class's typeinfo before it; every G entry has {D1, D0} in fnvnx_addrmap_deldtors[] equal to the class's
-  _ZN..D1Ev / _ZN..D0Ev, D0 also in fnvnx_addrmap[]; nothing but Key::k and Root::r (defined nowhere) and Inl's
-  implicit destructors (emitted only where GCC emits its vtable) is left undefined; thunks adjust this and branch to
-  their function (generated ones: w0, any offset).
+  _ZN..D1Ev / _ZN..D0Ev, D0 also in fnvnx_addrmap[]; nothing is left undefined: the inline virtual and deleting
+  destructors of KeyImp/KeyDel (vtables compiled code uses) are emitted from the host unit (D1, then the global
+  sized or the class's operator delete; a call of the host's own function stays a reference), the slots of
+  virtuals defined nowhere and of Inl (address map only) call trap stubs; thunks adjust this and branch to their
+  function (generated ones: w0, any offset).
 """
+import hashlib
 import json
 import os
 import re
@@ -44,18 +49,26 @@ struct Base1 { virtual ~Base1(); virtual int f1(); int a; };
 struct Base2 { virtual ~Base2(); virtual int f2(); virtual int g2() = 0; int b; };
 struct Multi : Base1, Plain, Base2 { ~Multi(); int f2() override; int g2() override; virtual int m(); int c; };
 struct Key : Plain, Base1, Base2 { virtual int k(); ~Key(); int g2() override; int d; };
+int helper_c();
 struct Inl : Base1, Base2 { int g2() override { return 7; } virtual int i() { return 8; } };
 struct Abs2 : Base2 { virtual int pure() = 0; int f2() override { return 3; } };
 struct Root { virtual int r(); };
 struct Leaf : Root { int r() override { return 1; } };
+struct KeyImp : Base1 { virtual int ki(); virtual int j() { return helper_c(); } int x; };
+struct KeyDel : Base1 { virtual int kd(); static void operator delete(void *); };
+struct KeyOut : Base1 { virtual int ko(); ~KeyOut(); };
 '''
 SRC = {
     'src/a.cpp': '#include "h.h"\nBase1::~Base1() {}\nint Base1::f1() { return 1; }\nBase2::~Base2() {}\n'
                  'int Base2::f2() { return 2; }\nMulti::~Multi() {}\nint Multi::f2() { return 3; }\n'
                  'int Multi::g2() { return 4; }\nint Multi::m() { return 5; }\n',
     'src/b.cpp': '#include "h.h"\nKey::~Key() {}\nint Key::g2() { return 6; }\nKey *mk() { return new Key; }\n',
-    'src/c.cpp': '#include "h.h"\nint use_inl(Inl *p) { return p->Inl::g2() + p->Inl::i(); }\n'
-                 'int use_abs(Abs2 *p) { return p->Abs2::f2(); }\nLeaf *mk_leaf() { return new Leaf; }\n',
+    'src/c.cpp': '#include "h.h"\nint use_inl(Inl *p) { return p->Inl::g2() + p->Inl::i(); }\nint helper_c() { return 9; }\n'
+                 'static int s_init = helper_c();\nint get_init() { return s_init; }\n'
+                 'int use_abs(Abs2 *p) { return p->Abs2::f2(); }\nLeaf *mk_leaf() { return new Leaf; }\n'
+                 'void KeyDel::operator delete(void *p) { ::operator delete(p); }\n'
+                 'KeyImp *mk_ki() { return new KeyImp; }\nKeyDel *mk_kd() { return new KeyDel; }\n'
+                 'KeyOut *mk_ko() { return new KeyOut; }\n',
 }
 ORACLE = '#include "h.h"\nint Key::k() { return 9; }\nint Root::r() { return 0; }\nInl *mk_inl() { return new Inl; }\n' \
          'struct AbsX : Abs2 { int pure() override { return 1; } int g2() override { return 2; } };\n' \
@@ -67,6 +80,7 @@ VFT = {   # vftable address -> (MSVC name, class, base named by {for ...} or Non
     0x01000200: ('??_7Key@@6BBase1@@@', 'Key', 'Base1'), 0x01000220: ('??_7Key@@6BBase2@@@', 'Key', 'Base2'),
     0x01000300: ('??_7Inl@@6BBase1@@@', 'Inl', 'Base1'), 0x01000320: ('??_7Inl@@6BBase2@@@', 'Inl', 'Base2'),
     0x01000340: ('??_7Abs2@@6B@', 'Abs2', None),
+    0x01000360: ('??_7KeyImp@@6B@', 'KeyImp', None), 0x01000380: ('??_7KeyDel@@6B@', 'KeyDel', None),
 }
 GDD = {0x00401050: 'Multi', 0x00401090: 'Base1', 0x00401120: 'Key'}   # ??_G address -> class
 UNITS = {'units': [
@@ -82,11 +96,15 @@ UNITS = {'units': [
      'symbols': {VFT[a][0]: '0x%08x' % a for a in (0x01000200, 0x01000220)}},
     {'source': 'src/c.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x401200, '?use_inl@@YAHPAUInl@@@Z'), F(0x401210, '?use_abs@@YAHPAUAbs2@@@Z'),
+        F(0x401230, '?mk_ki@@YAPAUKeyImp@@XZ'), F(0x401240, '?mk_kd@@YAPAUKeyDel@@XZ'),
+        F(0x401250, '?mk_ko@@YAPAUKeyOut@@XZ'),
         F(0x401220, '?mk_leaf@@YAPAULeaf@@XZ')],
-     'symbols': {VFT[a][0]: '0x%08x' % a for a in (0x01000300, 0x01000320, 0x01000340)}},
+     'symbols': {VFT[a][0]: '0x%08x' % a for a in (0x01000300, 0x01000320, 0x01000340, 0x01000360, 0x01000380)}},
+    {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: KeyOut's destructor
+        F(0x401500, '??1KeyOut@@UAE@XZ')], 'symbols': {}},
 ]}
 MANGLED = {'Multi': '5Multi', 'Base1': '5Base1', 'Base2': '5Base2', 'Key': '3Key', 'Inl': '3Inl', 'Abs2': '4Abs2',
-           'Root': '4Root'}
+           'Root': '4Root', 'KeyImp': '6KeyImp', 'KeyDel': '6KeyDel', 'KeyOut': '6KeyOut'}
 
 ok = True
 
@@ -154,9 +172,11 @@ class Elf:
 
 
 def main():
-    with tempfile.TemporaryDirectory() as t:
+    keep = os.environ.get('FNVNX_TEST_KEEP')   # a directory to keep the test's files in (debugging)
+    with tempfile.TemporaryDirectory() as tmp:
+        t = keep or tmp
         tree = os.path.join(t, 'tree')
-        os.makedirs(os.path.join(tree, 'include'))
+        os.makedirs(os.path.join(tree, 'include'), exist_ok=True)
         open(os.path.join(tree, 'include', 'h.h'), 'w').write(HEADER)
         fl = [f if f != '-O2' else '-O1' for f in layout.flags(tree)] + ['-fno-inline']
         objs = {}
@@ -176,7 +196,8 @@ def main():
             for rel in SRC:
                 f.write('%s\t%s\tok\n' % (rel, objs[rel]))
         out, fixed = os.path.join(t, 'out'), os.path.join(t, 'fixed')
-        resolve = [sys.executable, FNVLINK, 'resolve', os.path.join(t, 'units.json'), os.path.join(t, 'objects.tsv'), out]
+        resolve = [sys.executable, FNVLINK, 'resolve', os.path.join(t, 'units.json'), os.path.join(t, 'objects.tsv'), out,
+                   '--crt-symbols', 'none', '--imports', 'none']   # hand-written addresses: not S4's tables
         run(resolve)
         reqs = vtables.load_requests(os.path.join(out, 'vtable_requests.tsv'))
         check({'Key', 'Inl', 'Abs2', 'Root'} <= set(reqs), 'requests: %s' % sorted(reqs))
@@ -200,6 +221,10 @@ def main():
                     got, want = synth[n].ents(n), oracle.ents(n)
                     check(got == want, '%s differs from GCC:\n  got  %s\n  want %s' % (n, got, want))
         check('_ZTS3Key' in synth and '_ZTV5Multi' not in synth, 'typeinfo names synthesized, emitted vtables not')
+        for host, path in vtables.load_synth(out):   # unit c has a static initializer: it must never run twice
+            secs = vtables.Obj(path).secnames
+            check(not any(n.endswith(('.init_array', '.ctors', '.fini_array', '.dtors')) for n in secs),
+                  'no static-initializer table in %s' % os.path.basename(path))
 
         # 2. address map rows vs. GCC's class layout dump
         dumpd = class_dump(dump)
@@ -240,12 +265,47 @@ def main():
             d1, d0 = elf.sym.get('_ZN%sD1Ev' % MANGLED[c]), elf.sym.get('_ZN%sD0Ev' % MANGLED[c])
             check(d1 and d0 and dd.get(a) == (d1, d0) and table.get(a) == d0, '%08x deldtors %s, want %s'
                   % (a, dd.get(a), (d1, d0)))
-        undef = set(re.findall(r"undefined reference to `([^']+)'", open(os.path.join(out, 'trial_link.log')).read()))
+        log = open(os.path.join(out, 'trial_link.log')).read()
+        check('multiple definition' not in log, 'multiple definitions in the trial link')
+        undef = set(re.findall(r"undefined reference to `([^']+)'", log))
         undef = {u for u in undef if not fnvlink.RUNTIME.match(u)}
-        # left: Key::k is defined nowhere; Inl's implicit destructors are only emitted where GCC emits its vtable or
-        # destroys one (then the vtable is emitted too), which no unit does
-        check(undef == {'_ZN3Key1kEv', '_ZN3InlD0Ev', '_ZN3InlD1Ev', '_ZN4Root1rEv'},
-              'undefined after the link: %s' % sorted(undef))
+        check(undef >= {'__fnv_00401500'}, 'KeyOut::~KeyOut bound by address (pending): %s' % sorted(undef))
+        undef.discard('__fnv_00401500')
+        # the slot functions of the vtables compiled objects use (KeyImp, KeyDel: unit c constructs them) are
+        # emitted from the host unit; the virtuals defined nowhere (Key::k, Root::r, KeyImp::ki, KeyDel::kd) and
+        # the slots of vtables only the address map uses (Inl's implicit destructors) call trap stubs
+        check(not undef, 'undefined after the link: %s' % sorted(undef))
+        dis = run([OBJDUMP, '-d', '--no-show-raw-insn', os.path.join(out, 'trial.elf')])
+        for c, fn in (('Key', '_ZN3Key1kEv'), ('Root', '_ZN4Root1rEv'), ('KeyImp', '_ZN6KeyImp2kiEv'),
+                      ('Inl', '_ZN3InlD0Ev')):
+            stub = fnvlink.TRAP_SYM % int(hashlib.sha1(fn.encode()).hexdigest()[:8], 16)
+            ents = synth['_ZTV' + MANGLED[c]].ents('_ZTV' + MANGLED[c])
+            i = next((i for i, e in enumerate(ents) if e.sym == fn), None)
+            z = elf.sym.get('_ZTV' + MANGLED[c])
+            if check(i is not None and z is not None and stub in elf.sym, 'trap stub %s for %s' % (stub, fn)):
+                check(elf.word(z + 4 * i) == elf.sym[stub], '%s slot -> %s' % (fn, stub))
+                body = re.search(r'<%s>:\n((?:.*\n){3})' % stub, dis)
+                check(body is not None and 'adrp' in body.group(1) and '<fnvnx_vslot_trap>' in body.group(1),
+                      'trap stub code: %s' % (body and body.group(1)))
+        # deleting destructors of classes whose key function is never compiled: D1, then the right operator delete
+        # an emitted inline virtual calls the host's own function: a reference, not a copy of its body
+        j = synth.get('_ZN6KeyImp1jEv')
+        if check(j is not None and j.bind('_ZN6KeyImp1jEv') == 'weak', 'KeyImp::j emitted from the host (weak)'):
+            check('_Z8helper_cv' not in j.defs and any(s[0] == '_Z8helper_cv' and s[5] == 0 for s in j.syms),
+                  'helper_c stays a reference in the emitted object')
+        # KeyImp/KeyDel: GCC's own D0 (-fkeep-inline-functions; KeyDel's operator delete body inlined: the
+        # unsized ::operator delete it calls, never the global sized one); KeyOut (destructor defined in a unit
+        # that does not compile): the emulated D0 calls D1, bound by address, then the sized global delete
+        for c, dealloc in (('KeyImp', ('_ZdlPvm',)), ('KeyDel', ('_ZN6KeyDeldlEPv', '_ZdlPv')),
+                           ('KeyOut', ('_ZdlPvm',))):
+            d0 = '_ZN%sD0Ev' % MANGLED[c]
+            if check(d0 in synth, '%s emitted' % d0):
+                sdis = run([OBJDUMP, '-dr', '--no-show-raw-insn', synth[d0].path])
+                body = re.search(r'<%s>:\n(.*?)(?:\n\n|\Z)' % re.escape(d0), sdis, re.S)
+                calls = re.findall(r'R_AARCH64_P32_(?:CALL|JUMP)26\t(\S+)', body.group(1)) if body else []
+                # D1 (or, inlined, the base destructor it calls), then the class's or the global sized delete
+                check(len(calls) == 2 and calls[0] in ('_ZN%sD1Ev' % MANGLED[c], '_ZN5Base1D2Ev') and calls[1] in dealloc,
+                      '%s destroys, then calls %s: %s' % (d0, dealloc, calls))
         th = elf.sym.get('_ZThn8_N3Inl2g2Ev')
         if check(th is not None, 'thunk _ZThn8_N3Inl2g2Ev linked'):
             dis = run([OBJDUMP, '-d', '--no-show-raw-insn', '--start-address=%d' % th, '--stop-address=%d' % (th + 8),

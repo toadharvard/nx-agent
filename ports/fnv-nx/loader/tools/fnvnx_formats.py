@@ -18,7 +18,8 @@ Address map, binary form (linked into the program by S2, read by loader/src/code
     info = kind (FUNC=1, TEXT=2, MID=3, VTABLE=4) | init 0x100 | atexit 0x200 | bridge 0x400 | deldtor 0x800
 
 S2's own address map (tools/link/fnvlink.py, docs/LINK.md) is read with AddrMap.read_s2_tsv: kinds F/C/X -> FUNC,
-G -> FUNC + deldtor; its runtime form {orig, void *native} is converted by fnvnx_addrmap_from_s2 in the loader.
+G -> FUNC + deldtor, V -> VTABLE (native '<link_symbol>+<offset>'), E -> TEXT (no native); its runtime form
+{orig, void *native} + fnvnx_addrmap_kinds is converted by fnvnx_codemap_from_s2 in the loader.
 
 Fixup list (written by scan_codeptrs.py or fnvnx_fixups_serialize, read by fnvnx_fixups_parse):
     "FNVFIX01", u32 version=1, u32 count, u32 pe timestamp, u32 pe size_of_image, u32 entry_size=12, u32 0,
@@ -72,15 +73,25 @@ class AddrMap:
 
     @classmethod
     def read_s2_tsv(cls, path):
-        """S2's addrmap.tsv (# fnvnx-addrmap 1: address, kind F/C/X/G, link_symbol, native_symbol, ...)"""
+        """S2's addrmap.tsv (# fnvnx-addrmap 1: address, kind F/C/X/G/V/E, link_symbol, native_symbol, object, note,
+        offset, d1_symbol, d1_native; columns after the sixth are optional). V rows (image vftables) become VTABLE
+        entries whose native is the address point '<link_symbol>+<offset>' (offset 8 when the column is absent), E
+        rows (referenced .text without definition) TEXT entries without native."""
         m = cls()
         with open(path) as f:
             for line in f:
                 if not line.strip() or line.startswith('#'):
                     continue
                 col = line.rstrip('\n').split('\t')
-                info = KINDS['FUNC'] | (FLAGS['deldtor'] if col[1] == 'G' else 0)
-                m.entries[int(col[0], 16)] = (info, col[2] if len(col) > 2 and col[2] else None)
+                sym = col[2] if len(col) > 2 and col[2] else None
+                if col[1] == 'V':
+                    off = int(col[6]) if len(col) > 6 and col[6] else 8
+                    info, sym = KINDS['VTABLE'], (sym and '%s+%d' % (sym, off))
+                elif col[1] == 'E':
+                    info, sym = KINDS['TEXT'], None
+                else:
+                    info = KINDS['FUNC'] | (FLAGS['deldtor'] if col[1] == 'G' else 0)
+                m.entries[int(col[0], 16)] = (info, sym)
         return m
 
     def merge(self, other):

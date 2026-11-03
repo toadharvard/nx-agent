@@ -32,6 +32,10 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
      of the cases. Several addresses -> arity, then cv, else `ambiguous`.
    * The reference declaration and the definition at the address are compared for AArch64 argument passing
      (below); mismatches get a bridge or are reported.
+   * Addresses that are not decomp definitions (section "Platform, imports, thread-locals"): a referenced `.text`
+     address S4's `platform/crt/crt_symbols.tsv` gives a provider binds to that symbol (`provider`), an IAT slot to
+     the api `platform/win32/imports.tsv` + `exports.cpp` name for it, a thread-local variable at an image `.tls`
+     address to the native TLS block (`tls`), a virtual function defined nowhere to a trap stub.
 3. **apply** - `fnvlink.py apply out/ fixed/`: per object, objcopy adds the address symbols of its definitions,
    localizes duplicate strong names and turns natively defined variables into weak address symbols; then the
    undefined symbols are renamed (`elfsyms.rename_undefined`: objcopy `--redefine-syms` refuses several old names
@@ -46,6 +50,11 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
 4. **check** - `fnvlink.py check out/ fixed/`: trial link of everything with `aliases.ld`; counts what is still
    undefined and any multiple definitions.
 
+`out/` and `fixed/` of one run belong together (`aliases.ld`, `bridges.S`, `addrmap.c` and the rewritten objects
+name each other's symbols): never pair files of different runs. Write each run to a new directory (seed its
+caches by copying `out/cache`, `out/layouts.tsv`, `out/vtables` of the previous one) and switch a `latest` symlink
+atomically (`ln -sfn run-N latest.tmp && mv -T latest.tmp latest`) once `check` has passed.
+
 ## Symbols and files
 
 | Name / file | Meaning |
@@ -55,15 +64,19 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
 | `__fnvnx_br_<addr8>_<hash8>` | ABI bridge for one (address, reference declaration); hash of the MSVC reference name. |
 | `out/objcopy/<obj>.redefine` | `old new` per line (the objcopy `--redefine-syms` format): undefined Itanium name -> address symbol or bridge. |
 | `out/objcopy/<obj>.args` | objcopy options for the object (`--add-symbol`, `--localize-symbol`, `--weaken-symbol`, `--redefine-sym`). |
+| `out/objcopy/<obj>.undefine` | Definitions `apply` turns into undefined references before renaming (import thunks: their name then follows the `.redefine` mapping to the import). |
 | `out/aliases.ld` | Linker script: absolute data address symbols, aliases of COMDAT definitions. |
 | `out/refs.tsv` | Every (object, undefined symbol): class, tier, address, target, matched MSVC declaration. |
 | `out/abi.tsv` | Every reference whose declaration passes arguments differently from the definition: verdict, classes, register moves, notes, both demangled declarations. |
-| `out/bridges.S` | Generated bridge thunks (AArch64 asm, ILP32). |
+| `out/bridges.S` | Generated bridge thunks (AArch64 asm, ILP32), the trap stubs and the native TLS block (below). |
+| `__fnvnx_vtrap_<hash8>` | Trap stub for a virtual function defined nowhere (`vslot-unresolved`): `fnvnx_vslot_trap(this, "virtual function defined nowhere: <name> (slot k of _ZTV...)")`; the weak default in `bridges.S` is a `brk`, the platform may define a reporting one. |
+| `__fnvnx_tls_<addr8>`, `__fnvnx_tls_image` | Slot of the image `.tls` address `<addr8>` in the native TLS block `__fnvnx_tls_image` (layout of the image's `.tls` template; `__fnvnx_tls_image_orig` / `_size` give its range). |
+| `out/hand_vptrs.tsv` | Image vftable addresses the sources store into vptrs by hand: how they are mapped, the native vtable, the units and storing classes. |
 | `out/extern_text.tsv` | `.text` addresses referenced but defined by no unit (CRT, thunks; stream S4), with the names used. |
 | `out/data_defs.tsv` | Variables a unit defines natively at a data-image address. |
 | `out/addrmap.tsv`, `out/addrmap.c` | The address map (next section). |
-| `out/vtable_requests.tsv`, `out/rtti_defined.txt` | What resolve asks the vtable synthesis for (class, C++ spelling, why, host units), and the vtable/typeinfo/thunk names compiled objects define (never synthesized). Both from the compiled objects only, so a rerun asks the same. |
-| `out/vtables/` | `synth.tsv` (host unit, synthesized object, classes), `classes.tsv` (result per requested class), `stats.txt`, `<unit>.vt.S` + `zz_vt_<unit>.o`, the probe sources and objects, `cache.json` (probe results per host unit and source mtime). |
+| `out/vtable_requests.tsv`, `out/rtti_defined.txt` | What resolve asks the vtable synthesis for (class, C++ spelling, why, host units), and the C++ names compiled objects define (vtables, typeinfo, thunks, functions: never synthesized or emitted again). Both from the compiled objects only, so a rerun asks the same. |
+| `out/vtables/` | `synth.tsv` (host unit, synthesized object, classes), `classes.tsv` (result per requested class), `stats.txt`, `<unit>.vt.S` + `zz_vt_<unit>.o`, the probe sources and objects (`*.done.json`: compile cache), `cache.json` (probe results per host unit and source mtime), `emit_cache.json` (emitted slot functions per host unit). |
 | `out/stats.txt` | The numbers below. |
 
 Natively defined variables at data-image addresses (global objects with constructors, mostly the generated
@@ -87,8 +100,12 @@ original address (never two lines for one address):
   `V` image vftable named by some unit, primary (`??_7C@@6B@`) or secondary (`??_7C@@6B<B>@@@`,
   ``C::`vftable'{for `B'}``): native = `link_symbol` + `offset`, the Itanium address point of C's own vtable or of
   the vtable of its base-class subobject B, compiled or synthesized (section "Vtables");
-  `E` referenced `.text` address that no unit defines (CRT, thunks): native = 0, the loader traps it.
-* `link_symbol` - the symbol to take the address of (`__fnv_<addr>`, `_ZTV...` for `V`, empty for `E`).
+  `E` referenced `.text` address that no unit defines (CRT, thunks): native = 0, the loader traps it. A CRT /
+  library address with a provider in `crt_symbols.tsv` is an `F` entry naming the provider symbol itself
+  (`link_symbol` = `native_symbol` = e.g. `fnvnx_iob_fopen`, note `provider: ...`); every other row of that table is
+  an `E` entry, except `data`/`mid_data` rows (data symbols with a bogus address: no entry).
+* `link_symbol` - the symbol to take the address of (`__fnv_<addr>`, `_ZTV...` for `V`, the provider for a CRT
+  `F`, empty for `E`).
 * `native_symbol`, `object` - for people; `note` - free text (`static in its unit`, the `G` caveat, which base a
   secondary `V` stands for, `synthesized`).
 * `offset` (`V` only) - byte offset of the address point from `link_symbol`: 8 for a primary vftable (ILP32: after
@@ -228,9 +245,64 @@ Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the com
 `b f`) no object defines (GCC emits a thunk next to each out-of-line definition, so few are needed). The second
 resolve links each as an extra object of its host unit, resolved with the host's names: slot functions bind by
 address like everywhere else. Because all GCC vtables are weak too, a compiled copy wins as soon as its unit
-compiles. Limits: inline virtual functions and implicit destructors of a class that no unit constructs or destroys
-are emitted nowhere (GCC emits them with the vtable) and stay undefined slots, like those of GCC's own vtables
-(`vslot-unresolved`); GCC stores 0 in both destructor slots of an abstract class, genuine and synthesized alike.
+compiles. GCC stores 0 in both destructor slots of an abstract class, genuine and synthesized alike.
+
+**Slot functions no object defines.** Inline virtual functions and implicit destructors of a class that no unit
+constructs or destroys are emitted nowhere (GCC emits them with the vtable). For the synthesized vtables a compiled
+object references (`vtable-ref` requests: classes native code constructs), the slot symbols no compiled object
+defines (`rtti_defined.txt`) are emitted from the host unit itself: it is compiled again (`-O2
+-fkeep-inline-functions -ffunction-sections -fdata-sections`) with a qualified destructor call per class
+(`p->E::~E()`: the implicit D1/D2, and with `-fkeep-inline-functions` D0 and the inline virtuals, are defined); a
+deleting destructor still missing (a destructor declared, defined in a unit that does not compile) is emulated
+under its mangled name: D1, then the deallocation a delete expression would pick (the class's `operator delete`,
+unsized first, else the global sized one). In that object the host's own strong definitions are turned into
+undefined references (they bind to the real ones, by name or address), static initializers are removed, `ld -r
+--gc-sections` with the wanted symbols as roots keeps what they reach, and every remaining global definition is
+weakened (COMDAT copies dedupe with the compiled objects'). The result is linked into `zz_vt_<unit>.o`. The
+vtables only the address map uses (no compiled object references them) get no emitted slot functions: like the
+virtual functions declared but defined nowhere (and without an address) their missing slots stay
+`vslot-unresolved`, and resolve binds such slots, in GCC's vtables and synthesized ones, to trap stubs (above)
+instead of leaving the link undefined.
+
+## Platform, imports, thread-locals and hand-written vptrs
+
+* **CRT and library code** (S4b, RUNTIME.md): a reference to a `.text` address no unit defines that S4's
+  `platform/crt/crt_symbols.tsv` gives a provider (`libc: f`, `platform/crt: f`, `fnvnx_f`, the ws2_32 thunks
+  through `exports.cpp`) binds to that symbol (class `provider`), never to a libc function of the decomp's name:
+  the MSVC stdio functions take the runtime's `_iobuf`. The address is an `F` entry naming the provider.
+  `implicit` / `needs body` / unidentified rows stay `E`; `data` / `mid_data` rows are dropped. `resolve
+  --crt-symbols <tsv|none>` (default: this tree's file).
+* **Import thunks** (S6c): the decomp spells the `jmp [slot]` thunks of `.text` (6 bytes) as functions calling
+  the import (`void FUN_00ee6df2(void) { g_D3DXVec3TransformNormal(); }`, `FUN_00ee6e04` with its float angles
+  typed `unsigned int`); compiled, they drop or retype the caller's arguments. A decomp definition of 6 bytes whose
+  compiled body references nothing but one name its unit binds to an IAT slot is bound to the slot's import
+  instead: S4's implementation (`exports.cpp`) or the api name (S6/S7 provide those by name), as a provider (`F`
+  entry naming it). Every object that defines the thunk has its definition turned into a reference renamed to the
+  import (`objcopy/<obj>.undefine`, applied by `apply` before the renames), so its own calls follow too.
+* **Imports**: a call through an IAT slot (`__imp_` reference with the slot's address) binds to the api
+  `platform/win32/imports.tsv` names for the slot, through `exports.cpp`'s table (`E("dll", f)`, `K(f)`, `U(f)`,
+  explicit rows such as `fnvnx_ws2_*`): the decomp names 31 slots inconsistently, the slot decides. Slots S4 does
+  not implement keep the reference's name (S6/S7). `resolve --imports <tsv|none>`.
+* **Thread-local variables**: the decomp's `__declspec(thread)` variables are thread-local in GCC's code too
+  (initial-exec references); their addresses are in the image's `.tls` template, which S4 copies per thread for
+  the code that reaches it through `fs:[0x2c]`. A TLS reference bound to the absolute image address would be one
+  copy for all threads, and is no valid TLS relocation. Choice: **native TLS**. Resolve binds every TLS reference at
+  an image address to `__fnvnx_tls_<addr>`, the slot of that address in one native TLS block `__fnvnx_tls_image`
+  laid out like the template (`.tbss`, at least the template's page; `bridges.S`); a native TLS definition at such
+  an address (a unit that defines the variable) is renamed to its slot and weakened, so every name of the variable
+  shares one per-thread object. The block covers the template's page (the one of the highest TLS address); a
+  thread-local the source places at an address below it (outside `.tls`) gets a native TLS variable of its own. The block starts zeroed in each thread: S4 should point its per-thread template copy
+  at it (`&__fnvnx_tls_image` of the current thread, `__fnvnx_tls_image_orig` / `_size`) and copy the image's
+  template there at thread start, so `fs:[0x2c]` code and GCC's TLS accesses agree.
+* **Hand-written vptr stores** (S4b, DATAIMAGE.md D7 point 2): the sources store image vftable addresses into
+  objects by hand (`exception.vtable = (unsigned)&DAT_010176f8;`, `*(void **)this = kVtbl_X;`). Resolve scans the
+  compiled units' sources for assignments whose right side is (after casts and `&`) a name the unit binds to a data
+  address and whose left side looks like a vptr (a `vtbl`/`vtable`/`vptr`/`vft...` member, `*(T **)p`,
+  `((T **)p)[0]`), or whose address is a vftable some unit names. The address stands for the native vtable of the
+  class constructed there: the class of the same name when a unit names that vftable (`V` above), else the class
+  of the storing member function when it has a native vtable (a new `V` entry). Its data symbol `__fnv_<addr>` is
+  then the native address point (`aliases.ld: __fnv_X = _ZTV<C> + off;`), so the store installs the native vptr and
+  vptr comparisons match; addresses without a native class keep the image address (`hand_vptrs.tsv`).
 
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
@@ -296,6 +368,22 @@ synthesized vtables add 2,662 undefined C++ names (1,464 implicit-destructor D0/
 virtuals; all `vslot-unresolved`, like the slots of GCC's own vtables) and 126 `__fnv_` of uncompiled units:
 12,832 -> 14,406 undefined names.
 
+### Fourth round (slot functions, traps, providers, TLS, hand-written vptrs; S2c)
+
+Same objects. Of the compiled objects' 107,294 references: `provider` 526 (of the 892 `extern-text`; 366 stay),
+`import` 130 (bound by IAT slot where S4 implements the api), `tls` 24 (plus 5 in emitted host code: S5's 29
+initial-exec references), `vslot-unresolved` 6,098 now trap stubs. For the synthesized vtables compiled objects use,
+2,327 slot functions no object defines: 338 emitted from 229 host units (`-O2 -fkeep-inline-functions`), the rest
+(defined nowhere, or classes only the address map uses) trap; 4,650 trap stubs for 11,445 slot references in all.
+Thread-locals: 14 image `.tls` addresses (one outside the template page), 18 native definitions folded into the
+block. Hand-written vptr stores: 586 image addresses in compiled sources, 292 bound to a native address point (274
+named vftables, 18 by the storing class), 294 without a native class (`hand_vptrs.tsv`: shell structs, the
+ios_base / basic_ios / ostream vftables the runtime has no class for). Address map: F 24,982 (165 CRT providers),
+C 895, X 496, G 41 (all with D1), V 1,200 (every one checked in the linked image), E 4,447. Trial link: **9,360
+undefined names** (7,430 `__fnv_` of uncompiled units, 1,513 C++ by name, 417 runtime/C/platform - the provider and
+import symbols the platform objects define), 0 multiple definitions; linked text 6.1 -> 7.7 MB (1.1 MB synthesized
+vtables, typeinfo and emitted slot functions, 0.6 MB trap stubs and bridges).
+
 ## Open problems
 
 * **Virtual functions behind native vtables** (6,088 refs before the synthesized vtables, 11,668 with them): GCC
@@ -304,14 +392,14 @@ virtuals; all `vslot-unresolved`, like the slots of GCC's own vtables) and 126 `
   it) -> dword *k'* read from the player's `FalloutNV.exe` (D3: allowed locally, never stored) -> code address ->
   `__fnv_`. Needs the image reader of S3 and the Itanium/MSVC slot correspondence (two destructor slots vs one,
   RTTI/offset-to-top header).
-* **Slots of synthesized vtables**: inline virtuals and implicit destructors of classes no unit constructs or
-  destroys are emitted nowhere (2,662 names, 1,464 of them D0/D1). Either emit them from the probe (the probe object
-  holds them as COMDAT groups, but they may reference unit-local symbols) or bind them through the image vftable
-  slots with the rest (previous item; D7: the `??_G` slot gives D1 = `??_G(this, 0)`, D0 = `??_G(this, 1)`).
-  `FNVNX_NO_VTABLES=1` leaves the synthesis out of `probe`.
-* **Hand-written vftable references** (`kVtbl_*` and other data names at a vftable address) still bind to the image
-  address (`data`), not to the native address point that D7 point 2 asks for; with the `V` entries, `aliases.ld` can
-  define such `__fnv_<vftable>` as `_ZTV<C> + offset` once S1's raw-index calls go through `FNVNX_MSVC_VCALL`.
+* **Trapped slots**: 4,650 virtual functions are defined nowhere (or belong to vtables only the address map uses)
+  and trap when called; the image vftable slots (previous item, S2b) can bind most of them. Emitted host code keeps
+  local copies of the unit's `static` functions and data it reaches (none of its globals: those bind to the host).
+* **Hand-written vftable references**: only stores are rebound (292 addresses); a raw MSVC-index read through such a
+  data symbol now reads the Itanium vtable, so S1's raw-index calls must go through `FNVNX_MSVC_VCALL` (D7 point 4).
+  294 stored addresses have no native class (ios_base / basic_ios / ostream: S4b's runtime has no vtable for them).
+* **TLS template contents**: the native block starts zeroed; S4 must copy the image's `.tls` template into each
+  thread's `__fnvnx_tls_image` (and point its `fs:[0x2c]` copy at it) for non-zero initial values to appear.
 * **Varargs** pairs (15) stay manual. **Address map gaps**: `V` covers the 1,182 vftable addresses whose class some
   compiled unit sees; mid-function addresses are not emitted; `E` lists only the addresses compiled units
   reference (138); with `--extern-text` S4's 4,618 are included (4,622 E entries on the round-2 objects).

@@ -132,21 +132,25 @@ pipeline identical to the plain exe) and one whose `.rdata` is scrambled too (re
 ## Address map (S2 → S3)
 
 S2's map is authoritative (`docs/LINK.md`, `tools/link/fnvnx_addrmap.h`): `addrmap.tsv` with kinds `F` function,
-`C`/`X` complete-object constructor/destructor, `G` MSVC deleting destructor mapped to the Itanium D0, and the
+`C`/`X` complete-object constructor/destructor, `G` MSVC deleting destructor mapped to the Itanium D0, `V` image
+vftable (native: Itanium address point), `E` referenced `.text` without definition (native 0), and the
 runtime table `struct fnvnx_addrmap_entry {unsigned orig; void *native;}[fnvnx_addrmap_count]`, sorted. The loader
 takes it through `fnvnx_codemap_from_s2(map, os, (const fnvnx_s2_addrmap_entry *)fnvnx_addrmap,
 fnvnx_addrmap_count, kinds, extra, nextra)` (the loader's own types are named `fnvnx_codemap*` so both headers can
 be included in one unit; `fnvnx_s2_addrmap_entry` has S2's layout):
 
-* `kinds` - a parallel `char` array `F/C/X/G`. **Request to S2:** emit `const char fnvnx_addrmap_kinds[]` next to
-  the table (the runtime form has no kind, and `G` needs the adapter below); until then `NULL` (all `F`).
+* `kinds` - S2's parallel array `fnvnx_addrmap_kinds[]`: `F/C/X` -> FUNC, `G` -> FUNC + deldtor, `V` -> VTABLE (the
+  scanner rewrites words holding the vftable address as vptrs), `E` -> TEXT (trapped); `NULL` means all `F`.
+  `AddrMap.read_s2_tsv` reads the TSV the same way (`V` native `<link_symbol>+<offset>`).
 * `extra` - entries S2 does not have: `TEXT` (referenced `.text` addresses without definition, from
   `extern_text.tsv` or S4) and `MID` (inside a function). They tell the scanner what is code even where there is
   nothing to bind; S2's entry wins where both exist.
 * **Kind `G`.** An image pointer to `??_G`/`??_E` is called as `void *f(void *this, unsigned flags)`; D0 always
   deletes. `fnvnx_deldtor_adapter` hands out one of 1,024 adapters per distinct D0: flags bit 0 set -> D0; clear ->
-  D1, found in the object's own Itanium vtable as the slot just before D0 (the search stops at the first slot outside
-  the native code range given by `fnvnx_deldtor_set_text`); bit 1 (vector delete) or no D1 -> trap.
+  D1 from S2's table `fnvnx_addrmap_deldtors[] {orig, d1, d0}` (found through a weak reference when S2's
+  `addrmap.c` is linked, or set with `fnvnx_deldtor_set_table`); bit 1 (vector delete) or no D1 -> trap. Only
+  without any table (host tests) is D1 searched in the object's own Itanium vtable as the slot just before D0 (up to
+  the first slot outside `fnvnx_deldtor_set_text`'s range): GCC stores 0 there for abstract classes.
 * **Addresses not in the map** get one of 4,096 trap stubs that reports the original address (`fnvnx_trap_value`,
   `fnvnx_trap_report`), as LINK.md asks.
 

@@ -41,6 +41,8 @@ int fnvnx_codemap_from_s2(fnvnx_codemap *map, const fnvnx_os *os, const fnvnx_s2
         if (i < n && (j >= nextra || s2[i].orig <= extra[j].orig)) {
             uint32_t info = FNVNX_AM_FUNC;
             if (kinds && kinds[i] == 'G') info |= FNVNX_AM_F_DELDTOR;
+            else if (kinds && kinds[i] == 'V') info = FNVNX_AM_VTABLE;    /* image vftable -> native address point */
+            else if (kinds && kinds[i] == 'E') info = FNVNX_AM_TEXT;      /* referenced .text, no native */
             if (j < nextra && extra[j].orig == s2[i].orig) j++;     /* S2 wins */
             e[k].orig = s2[i].orig;
             e[k].native = (uint32_t)(uintptr_t)s2[i].native;

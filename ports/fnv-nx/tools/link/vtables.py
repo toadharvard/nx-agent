@@ -28,6 +28,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 
@@ -129,6 +130,28 @@ def address_points(ents):
         if ents[i].sym and ents[i].sym.startswith('_ZTI') and ents[i - 1].sym is None:
             pts.append(((i + 1) * 4, s32(ents[i - 1].word)))
     return pts
+
+
+_slot_cache = {}
+
+
+def slot_of(path, name):
+    """(vtable symbol, slot index from its address point) of the first slot naming `name` in the object at path, or
+    None (for the text of a trap stub)."""
+    if path not in _slot_cache:
+        found = {}
+        o = Obj(path)
+        for z in sorted(o.defs):
+            if z.startswith('_ZTV'):
+                ents = o.ents(z)
+                pts = [p for p, _ in address_points(ents)]
+                for i, e in enumerate(ents):
+                    below = [p for p in pts if p <= 4 * i]
+                    if e.sym and below and e.sym not in found:
+                        found[e.sym] = (z, (4 * i - below[-1]) // 4)
+        _slot_cache.clear()
+        _slot_cache[path] = found
+    return _slot_cache[path].get(name)
 
 
 def parse_typeinfo(ents):
@@ -358,6 +381,11 @@ template <class C> using db = typename std::tr2::direct_bases<C>::type;
 template <class C> using ab = typename std::tr2::bases<C>::type;
 template <class C, int I> using dbase = typename nth<I, db<C>>::type;
 template <class C, int I> using abase = typename nth<I, ab<C>>::type;
+// the deallocation of a deleting destructor: class operator delete (unsized first), else the global sized one
+template <class T> auto dealloc(void *p, int) -> decltype(T::operator delete(p), void()) { T::operator delete(p); }
+template <class T> auto dealloc(void *p, long) -> decltype(T::operator delete(p, sizeof(T)), void())
+{ T::operator delete(p, sizeof(T)); }
+template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T)); }
 }
 '''
 NS = '__fnvnx_vt::'
@@ -388,16 +416,27 @@ def probe_items(k, t, phase, nd=0, na=0):
     return items
 
 
-def compile_probe(tree, workdir, unit, items, tag):
+def compile_probe(tree, workdir, unit, items, tag, extra=()):
     """items: [(class k, item name, line)]. Drops the items GCC reports errors in (probe lines named by an error
     or by its 'required from' notes; an 'info' failure drops the whole class) and recompiles.
     -> (Obj or None, surviving items)."""
     base = unit.replace('/', '_') + '.' + tag
     src, obj = os.path.join(workdir, base + '.cpp'), os.path.join(workdir, base + '.o')
     alive = list(items)
-    fl = [f if f != '-O2' else '-O0' for f in layout.flags(tree)]
+    fl = [f if f != '-O2' else '-O0' for f in layout.flags(tree)] + list(extra)
     head = HEAD + '#include "%s"\n' % os.path.join(tree, unit)
     first = head.count('\n') + 1
+    srcfile = os.path.join(tree, unit)
+    key = hashlib.sha1(('%s|%s|%s' % (' '.join(fl), os.path.getmtime(srcfile) if os.path.exists(srcfile) else 0,
+                                      '\n'.join(line for _, _, line in alive))).encode()).hexdigest()
+    done = os.path.join(workdir, base + '.done.json')
+    try:
+        d = json.load(open(done))
+        if d.get('key') == key and os.path.exists(obj) and d.get('ok'):
+            names = set(map(tuple, d['alive']))
+            return Obj(obj), [it for it in alive if (it[0], it[1]) in names]
+    except (OSError, ValueError, KeyError):
+        pass
     for _ in range(10):
         if not alive:
             return None, []
@@ -410,6 +449,7 @@ def compile_probe(tree, workdir, unit, items, tag):
         if os.environ.get('FNVNX_PROBE_DEBUG'):
             print(r.stderr[:3000])
         if r.returncode == 0:
+            json.dump({'key': key, 'ok': True, 'alive': [[k, nm] for k, nm, _ in alive]}, open(done, 'w'))
             return Obj(obj), alive
         bad = {int(n) - first for n in re.findall(r'%s:(\d+):\d+:' % re.escape(os.path.basename(src)), r.stderr)}
         bad = {b for b in bad if 0 <= b < len(alive)}
@@ -612,6 +652,140 @@ def demangle(names):
     return dict(zip(names, p.stdout.split('\n')))
 
 
+LD = os.environ.get('LD', 'aarch64-linux-gnu-ld')
+OBJCOPY = os.environ.get('OBJCOPY', 'aarch64-linux-gnu-objcopy')
+EMIT_FLAGS = ('-O2', '-fkeep-inline-functions', '-ffunction-sections', '-fdata-sections')
+INIT_SECTIONS = ('.init_array', '.fini_array', '.preinit_array', '.ctors', '.dtors')
+
+
+def slot_wants(items, defined, used=None):
+    """Function symbols the synthesized vtables of one host unit need and no compiled object defines (thunks stand
+    for their target)."""
+    want = set()
+    for kind, enc, data in items:
+        if kind != 'vt' or (used is not None and enc not in used):
+            continue
+        for e in data:
+            s = e.sym
+            if not s or s.startswith(('.', '__cxa_')):
+                continue
+            m = THUNK.match(s)
+            if m:
+                s = '_Z' + m.group(3)
+            if not s.startswith('_ZT') and s not in defined:
+                want.add(s)
+    return want
+
+
+def extract_host(tree, workdir, unit, classes, want):
+    """Emit the inline functions and implicit destructors the synthesized vtables of a host unit need, from GCC.
+
+    classes: [(k, spelling, enc)] of the classes synthesized on this host; want: the slot symbols nobody defines.
+    The host unit is compiled again with -fkeep-inline-functions and, per class, a qualified destructor call (so the
+    implicit destructor D1/D2 is defined; for a class without key function its vtable, D0 and inline virtuals come
+    with it); a deleting destructor still missing is emulated (D1, then the class's or the global sized operator
+    delete) under its mangled name. `ld -r --gc-sections` keeps what the wanted symbols reach (static initializers
+    removed first, so they are no roots); every global definition is weakened: a copy of a definition of the host
+    unit loses to the real one, COMDAT copies dedupe. -> (path of the object or None, {wanted symbols defined})."""
+    base = unit.replace('/', '_')
+    items = []
+    for k, sp, enc in classes:
+        items.append((k, 'dtor', 'namespace __fnvnx_vt { typedef %s E%d; extern "C" void __fnvnx_vte_%d(E%d *p) '
+                      '{ p->E%d::~E%d(); } }' % (sp, k, k, k, k, k)))
+    obj3, alive3 = compile_probe(tree, workdir, unit, items, 'vt3', EMIT_FLAGS)
+    if obj3 is None:
+        return None, set()
+    have = {n for n in obj3.defs if obj3.bind(n) != 'local'}
+    items4 = []
+    for k, sp, enc in classes:
+        d0 = '_Z%sD0Ev' % class_prefix(enc)
+        if d0 in want and d0 not in have:
+            items4.append((k, 'd0', 'namespace __fnvnx_vt { typedef %s F%d; void __fnvnx_vtd_%d(void *) __asm__("%s"); '
+                           'void __fnvnx_vtd_%d(void *p) { static_cast<F%d *>(p)->F%d::~F%d(); dealloc<F%d>(p, 0); } }'
+                           % (sp, k, k, d0, k, k, k, k, k)))
+    inputs = []
+    clean = os.path.join(workdir, base + '.vt3s.o')
+    if not strip_init(obj3.path, clean):
+        return None, set()
+    inputs.append(clean)
+    if items4:
+        obj4, _ = compile_probe(tree, workdir, unit, items4, 'vt4', ('-O2',))
+        clean4 = os.path.join(workdir, base + '.vt4s.o')
+        if obj4 is not None and strip_init(obj4.path, clean4):
+            have |= {n for n in obj4.defs if n.startswith('_Z') and obj4.bind(n) != 'local'}
+            inputs.append(clean4)
+    parts, roots = [], set()
+    for i, path in enumerate(inputs):   # each input holds the whole host unit: gc and weaken them one by one
+        part = gc_weaken(path, want, os.path.join(workdir, '%s.x%d' % (base, i)))
+        if part:
+            parts.append(part[0])
+            roots |= part[1]
+    if not parts:
+        return None, set()
+    if len(parts) == 1:
+        return parts[0], roots
+    wo = os.path.join(workdir, base + '.vtx.o')
+    r = subprocess.run([LD, '-m', 'aarch64linux32', '-r', '-o', wo, *parts], capture_output=True, text=True)
+    if r.returncode:
+        print('vtables: ld -r failed for %s: %s' % (unit, r.stderr[:500]), flush=True)
+        return parts[0], roots
+    return wo, roots
+
+
+def strip_init(src, dst):
+    """Copy an object without its static-initializer tables: the host unit's initializers must never run twice (and
+    must not be gc roots)."""
+    args = []
+    for sec in INIT_SECTIONS:
+        args += ['-R', sec, '-R', '.rela' + sec]
+    return subprocess.run([OBJCOPY, *args, src, dst], capture_output=True).returncode == 0
+
+
+def undefine_strong(src, dst, keep):
+    """Copy an ELF32 object with its strong global definitions outside COMDAT groups turned into undefined
+    references (st_shndx 0), except the names in keep: what the emitted inline code calls or reads of the host unit
+    then binds to the host's real definition (by name or by address, like any reference) instead of being copied,
+    and `--gc-sections` drops those bodies."""
+    import elfsyms
+    data = bytearray(open(src, 'rb').read())
+    o = Obj(src)
+    comdat = {i for i, s in enumerate(elfsyms.symbols(src), 1) if s.comdat}
+    sym_sec = next(s for s in o.secs if s[1] == 2)
+    n = 0
+    for i, (nm, value, size, typ, bind, shndx) in enumerate(o.syms):
+        if bind == 1 and shndx and shndx < 0xff00 and typ in (1, 2) and i not in comdat and nm not in keep:
+            off = sym_sec[4] + 16 * i
+            struct.pack_into('<II', data, off + 4, 0, 0)            # st_value, st_size
+            struct.pack_into('<H', data, off + 14, 0)               # st_shndx
+            data[off + 12] = (bind << 4) | 0                        # st_info: global, NOTYPE
+            n += 1
+    open(dst, 'wb').write(data)
+    return n
+
+
+def gc_weaken(path, want, stem):
+    """`ld -r --gc-sections` of one object with the wanted symbols it defines as roots (the host's own strong
+    definitions undefined first), then every global definition weakened. -> (object path, roots) or None."""
+    o = Obj(path)
+    roots = sorted(n for n in want if n in o.defs and o.bind(n) != 'local')
+    if not roots:
+        return None
+    script, uo, xo, wo = stem + '.roots.ld', stem + 'u.o', stem + '.o', stem + 'w.o'
+    undefine_strong(path, uo, set(roots))
+    open(script, 'w').write('EXTERN(\n%s\n)\n' % '\n'.join(roots))
+    r = subprocess.run([LD, '-m', 'aarch64linux32', '-r', '--gc-sections', '-o', xo, script, uo],
+                       capture_output=True, text=True)
+    if r.returncode:
+        print('vtables: ld -r --gc-sections failed for %s: %s' % (path, r.stderr[:500]), flush=True)
+        return None
+    x = Obj(xo)
+    argf = stem + '.weaken'
+    open(argf, 'w').write('\n'.join('--weaken-symbol=' + n for n in sorted(x.defs) if x.bind(n) == 'global') + '\n')
+    if subprocess.run([OBJCOPY, '@' + argf, xo, wo], capture_output=True).returncode:
+        return None
+    return wo, set(roots)
+
+
 def encode(r):
     d = dict(r)
     if d.get('vt_ents') is not None:
@@ -739,7 +913,7 @@ def run(out, tree, jobs=4):
     for c, (sp, why, hosts) in reqs.items():
         if not (sp and hosts):
             stats['class without spelling or host (anonymous, units not compiled)'] += 1
-    synth_rows, thunks_done = [], set()
+    synth_rows, thunks_done, built = [], set(), []
     for h, items in sorted(per_host.items()):
         base = h.replace('/', '_')
         s_path, o_path = os.path.join(vdir, base + '.vt.S'), os.path.join(vdir, 'zz_vt_' + base + '.o')
@@ -760,12 +934,69 @@ def run(out, tree, jobs=4):
                 stats['thunks generated'] += 1
             thunks_done.add(t)
         open(s_path, 'w').write('\n'.join(text) + '\n')
-        r = subprocess.run([AS, '-mabi=ilp32', s_path, '-o', o_path], capture_output=True, text=True)
+        vt_o = os.path.join(work, base + '.vt.o')
+        r = subprocess.run([AS, '-mabi=ilp32', s_path, '-o', vt_o], capture_output=True, text=True)
         if r.returncode:
             print('vtables: as failed for %s: %s' % (s_path, r.stderr[:1000]), flush=True)
             stats['objects not assembled'] += 1
             continue
         synth_rows.append((h, o_path, ' '.join(sorted({enc for _, enc, _ in items}))))
+        built.append((h, vt_o, o_path, items))
+
+    # ---- the slot functions no object defines: inline virtuals and implicit destructors, emitted from the host
+    spell = {r['enc']: r['spelling'] for _, r in results.values()}
+    # slot functions are emitted only for classes whose vtable a compiled object references (the others back an
+    # address-map entry only: their slots trap, resolve binds them like the virtuals defined nowhere)
+    used = {r['enc'] for c, (_, r) in results.items() if 'vtable-ref' in reqs.get(c, (None, set(), []))[1]}
+    xcache_path = os.path.join(vdir, 'emit_cache.json')
+    try:
+        xcache = json.load(open(xcache_path))
+    except (OSError, ValueError):
+        xcache = {}
+    newx, wanted_all, emitted_all = {}, set(), set()
+
+    def emit_one(job):
+        h, vt_o, o_path, items = job
+        want = slot_wants(items, defined, used)
+        classes = [(i, spell[enc], enc) for i, (kind, enc, _) in enumerate(items) if kind == 'vt' and enc in spell
+                   and enc in used]
+        if not want or not classes:
+            return h, None, want, set(), None
+        src = os.path.join(tree, h)
+        key = hashlib.sha1(('emit4|%s|%s|%s|%s' % (h, os.path.getmtime(src) if os.path.exists(src) else 0,
+                                             ' '.join(sorted(want)), '|'.join(sp for _, sp, _ in classes))).encode()
+                           ).hexdigest()
+        got = xcache.get(key)
+        if got and (got[0] is None or os.path.exists(got[0])):
+            return h, got[0], want, set(got[1]), key
+        try:
+            path, roots = extract_host(tree, work, h, classes, want)
+        except Exception as e:   # one host must not stop the step
+            print('vtables: emitting the slot functions of %s failed: %r' % (h, e), flush=True)
+            path, roots = None, set()
+        return h, path, want, roots, key
+
+    with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
+        emitted = {h: (path, want, roots, key) for h, path, want, roots, key in ex.map(emit_one, built)}
+    for h, vt_o, o_path, items in built:
+        path, want, roots, key = emitted[h]
+        if key:
+            newx[key] = [path, sorted(roots)]
+        wanted_all |= want
+        emitted_all |= roots
+        if path:
+            tmp = o_path + '.tmp'
+            r = subprocess.run([LD, '-m', 'aarch64linux32', '-r', '-o', tmp, vt_o, path], capture_output=True,
+                               text=True)
+            if r.returncode == 0 and strip_init(tmp, o_path):   # never a static initializer in these objects
+                os.remove(tmp)
+                stats['objects with emitted slot functions'] += 1
+                continue
+            print('vtables: ld -r failed for %s: %s' % (h, r.stderr[:500]), flush=True)
+        shutil.copyfile(vt_o, o_path)
+    json.dump(newx, open(xcache_path, 'w'))
+    stats['slot functions no object defines'] = len(wanted_all)
+    stats['slot functions emitted from the host units'] = len(emitted_all & wanted_all)
     with open(os.path.join(vdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#host_unit\tobject\tclasses (mangled encodings)\n')
         for row in synth_rows:

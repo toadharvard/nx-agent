@@ -2,7 +2,9 @@
 """fnvlink.py - link the decomp's units by original address (ARCHITECTURE.md D4; docs/LINK.md).
 
     fnvlink.py resolve <units.json> <objects.tsv> <out dir> [--override <tsv>] [--extern-text <list>]
+                       [--crt-symbols <tsv|none>] [--imports <tsv|none>]
                                                               # mapping, address map, ABI report, bridges
+                                                              # (S4's provider tables: platform/ of this tree)
     fnvlink.py probe   <out dir> <prepared tree> [jobs]        # layouts of the aggregates resolve asked for, and
                                                               # the synthesized vtables/typeinfo (vtables.py;
                                                               # FNVNX_NO_VTABLES=1 skips them); then resolve again
@@ -19,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -48,6 +51,8 @@ RUNTIME = re.compile(r'^(?:__cxa_\w+|_Unwind_\w+|__gxx_personality_v0|__stack_ch
                      r'_ZTI[PKa-z]\w*|_ZTS[PKa-z]\w*|__cxa_pure_virtual|__fnvnx_\w+|__sse2neon\w*|__dynamic_cast|'
                      r'__\w+_chk|__isoc\d+_\w+|__errno_location|__assert_fail)$')
 ADDR_SYM = '__fnv_%08x'
+TRAP_SYM = '__fnvnx_vtrap_%08x'   # slot of a virtual function defined nowhere -> fnvnx_vslot_trap(this, text)
+TLS_SYM = '__fnvnx_tls_%08x'      # thread-local variable at an image .tls address: slot of the native TLS block
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
 # renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
 GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit'}
@@ -116,10 +121,10 @@ class DemangleCache:
 
 class Unit:
     """host: for the synthesized-vtable object of a unit (vtables.py), the unit whose names it is resolved with."""
-    __slots__ = ('source', 'defs', 'refs', 'obj', 'host')
+    __slots__ = ('source', 'defs', 'refs', 'obj', 'host', 'sizes')
 
     def __init__(self, source):
-        self.source, self.defs, self.refs, self.obj, self.host = source, [], {}, None, None
+        self.source, self.defs, self.refs, self.obj, self.host, self.sizes = source, [], {}, None, None, {}
 
 
 def load_units(path):
@@ -129,6 +134,7 @@ def load_units(path):
         unit = units.setdefault(u['source'], Unit(u['source']))
         for fn in u['functions']:
             a = int(fn['address'], 16)
+            unit.sizes[a] = fn.get('size')
             for name in [fn['symbol']] + list(fn.get('fold_aliases', [])):
                 unit.defs.append((a, name))
         for name, a in u['symbols'].items():
@@ -166,7 +172,9 @@ def kind_of_addr(a):
     return 'data' if DATA_START <= a < DATA_END + 0x1000 else ('text' if a < DATA_START else 'other')
 
 
-def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
+def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None):
+    """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
+    this tree, 'none': not used)."""
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
     os.makedirs(os.path.join(out, 'objcopy'), exist_ok=True)
     units = load_units(units_json)
@@ -320,11 +328,29 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
     stats = collections.Counter()
     byclass = collections.Counter()
     bridges, abi_rows, abi_classes = {}, [], collections.Counter()
+    traps = {}       # trap stub -> (slot symbol defined nowhere, (vtable, slot) where first seen)
     pair_classes = collections.Counter()
     extern_text = collections.defaultdict(set)
     per_obj = {}
     used_addr = set()
-    data_defs = []
+    data_defs, tls_defs, tls_addrs = [], [], set()
+    exports = load_exports(EXPORTS if imports is None else (os.path.join(os.path.dirname(imports), 'exports.cpp')
+                                                             if imports != 'none' else None))
+    providers, crt_classes = load_providers(CRT_SYMBOLS if crt_symbols is None else
+                                            (None if crt_symbols == 'none' else crt_symbols), exports)
+    import_syms = load_imports(IMPORTS if imports is None else (None if imports == 'none' else imports), exports)
+    # import thunks (`jmp [IAT]`, 6 bytes) the decomp spells as functions calling the import: compiled, they lose or
+    # retype the caller's arguments (S6c); their address binds to the import itself, like a provider
+    iat = load_iat(IMPORTS if imports is None else (None if imports == 'none' else imports))
+    thunks = find_import_thunks(native, units, iat, import_syms, gdef, gref, anydef, msvc, itanium)
+    thunk_undef = collections.defaultdict(dict)   # source -> {thunk definition: import symbol}: the object's own
+    for a, (sym, text) in thunks.items():         # calls follow (apply undefines, then renames them)
+        providers[a] = (sym, text)
+        name = native[a]['sym'].name
+        for src in set(strong.get(name, [])) | {native[a]['unit']}:
+            thunk_undef[src][name] = sym
+        del native[a]
+    stats['import_thunks'] = len(thunks)
     bound = collections.defaultdict(set)  # unit -> addresses its object references by address
     for u in have:
         idx = KeyIndex()
@@ -334,12 +360,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
             idx.add(msvc(n), a)
         # variables this object defines at a data address: the data image holds the same object (docs/LINK.md)
         for sym in objsyms[u.source]:
-            if sym.shndx != 0 and sym.type == 'object' and sym.bind != 'local' and not sym.name.startswith('_ZT'):
+            if sym.shndx != 0 and sym.type in ('object', 'tls') and sym.bind != 'local' and \
+                    not sym.name.startswith('_ZT'):
                 t, hit = idx.lookup(itanium(sym.name))
                 if len(hit) == 1 and kind_of_addr(next(iter(hit))) == 'data':
-                    data_defs.append((next(iter(hit)), sym.name, u.source))
+                    (tls_defs if sym.type == 'tls' else data_defs).append((next(iter(hit)), sym.name, u.source))
         renames = {}
         undefs = sorted({s.name for s in objsyms[u.source] if s.shndx == 0})
+        tls_undef = {s.name for s in objsyms[u.source] if s.shndx == 0 and s.type == 'tls'}
         vslots = elfsyms.vtable_slot_refs(u.obj)
         for un in undefs:
             stats['refs'] += 1
@@ -347,7 +375,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
             cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc)
             if addr is not None and cls == 'addr':
                 ak = kind_of_addr(addr)
-                if ak == 'data':
+                if ak == 'data' and un in tls_undef:   # thread-local: native TLS in the image's .tls layout
+                    cls = 'tls'; target = TLS_SYM % addr; tls_addrs.add(addr)
+                elif ak == 'data':
                     cls = 'data'; target = ADDR_SYM % addr; used_addr.add(addr)
                 elif addr in native:
                     cls = 'code'
@@ -408,6 +438,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
                                     cls = 'code-manual'
                             elif v.notes:
                                 pass
+                elif ak == 'text' and addr in providers:   # CRT/library code S4 implements, import thunks
+                    cls = 'provider'; target = providers[addr][0]
                 elif ak == 'text' and addr in def_at:
                     du = def_at[addr][0]
                     cls = 'code-pending' if not du.obj else 'code-defmissing'
@@ -418,6 +450,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
                     extern_text[addr].add(un)
                 else:
                     cls = 'other-addr'; target = None
+            elif cls == 'import' and addr in import_syms:   # IAT slot: the slot's api, not the decomp's spelling
+                target = import_syms[addr]
+                stats['imports_bound'] += 1
             if cls == 'unresolved' and un in vslots:
                 cls = 'vslot-unresolved'
             elif cls == 'unresolved' and isig.variant:
@@ -428,11 +463,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
                 stats['vslot_refs'] += 1
             if cls == 'runtime' and un in GAME_RENAMES:
                 target = GAME_RENAMES[un]
+            elif cls == 'vslot-unresolved':   # a virtual function defined nowhere: its slots call a trap stub
+                target = TRAP_SYM % int(hashlib.sha1(un.encode('utf-8', 'surrogateescape')).hexdigest()[:8], 16)
+                if target not in traps:
+                    traps[target] = (un, vtables.slot_of(u.obj, un))
             if target and target != un:
                 renames[un] = target
             byclass[cls] += 1
             refs_out.write('%s\t%s\t%s\t%s\t%s\t%s\t%s\n' % (u.source, un, cls, tier or '', '%08x' % addr if addr
                            is not None else '', target or '', note or ''))
+        renames.update(thunk_undef.get(u.source, {}))   # the object's own import-thunk definition (undefined)
         per_obj[u.source] = renames
     refs_out.close()
 
@@ -443,11 +483,15 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
             for s in sorted(srcs)[1:]:
                 localize[s].append(name)
     stats['duplicate_strong_names'] = sum(1 for s in strong.values() if len(s) > 1)
-    data_def_names = collections.defaultdict(dict)
+    data_def_names = collections.defaultdict(dict)   # source -> {native name: address symbol it becomes}
     for a, name, src in data_defs:
-        if a not in data_def_names[src].values():  # objcopy allows one old name per new name
-            data_def_names[src][name] = a
+        if ADDR_SYM % a not in data_def_names[src].values():  # objcopy allows one old name per new name
+            data_def_names[src][name] = ADDR_SYM % a
             used_addr.add(a)
+    for a, name, src in tls_defs:   # thread-local definitions at an image .tls address: the native block's slot
+        if TLS_SYM % a not in data_def_names[src].values():
+            data_def_names[src][name] = TLS_SYM % a
+            tls_addrs.add(a)
     defs_by_unit = collections.defaultdict(list)
     for a, nd in native.items():
         if nd['unit'] is None:
@@ -510,45 +554,24 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
             args.append('--weaken-symbol=' + name)
         dd = data_def_names.get(u.source, {})
         for name in localize.get(u.source, []):
-            if name not in dd:
+            if name not in dd and name not in thunk_undef.get(u.source, {}):
                 args.append('--localize-symbol=' + name)
-        for name, a in sorted(dd.items()):
+        for name, newsym in sorted(dd.items()):
             # a variable this unit defines lives in the data image: the definition becomes weak and is renamed to
             # the address symbol, which aliases.ld defines at the original address (the native static
-            # initializer then constructs the object in place, as the original CRT init did)
-            args.append('--redefine-sym=%s=%s' % (name, ADDR_SYM % a))
-            args.append('--weaken-symbol=' + ADDR_SYM % a)  # objcopy weakens after renaming
+            # initializer then constructs the object in place, as the original CRT init did); a thread-local one
+            # becomes the slot of the native TLS block (bridges.S)
+            args.append('--redefine-sym=%s=%s' % (name, newsym))
+            args.append('--weaken-symbol=' + newsym)  # objcopy weakens after renaming
         with open(os.path.join(out, 'objcopy', base + '.args'), 'w', encoding='utf-8', errors='surrogateescape') as f:
             f.write('\n'.join(args) + '\n')
         with open(os.path.join(out, 'objcopy', base + '.src'), 'w') as f:
             f.write(u.obj + '\n')
+        with open(os.path.join(out, 'objcopy', base + '.undefine'), 'w', encoding='utf-8',
+                  errors='surrogateescape') as f:   # definitions apply turns into references (import thunks)
+            f.write(''.join(n + '\n' for n in sorted(thunk_undef.get(u.source, {}))))
 
-    # ---- data addresses: absolute symbols at the original address (the data image is mapped there, D3)
-    with open(os.path.join(out, 'aliases.ld'), 'w') as f:
-        f.write('/* fnv-nx link-by-address aliases (generated by tools/link/fnvlink.py; local output) */\n')
-        for a in sorted(x for x in used_addr if kind_of_addr(x) == 'data'):
-            f.write('%s = 0x%08x;\n' % (ADDR_SYM % a, a))
-        for line in sorted(set(alias_lines)):
-            f.write(line + '\n')
-
-    # ---- bridges
-    with open(os.path.join(out, 'bridges.S'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('// fnv-nx ABI bridges (generated by tools/link/fnvlink.py; local output)\n    .text\n')
-        for bn in sorted(bridges):
-            if isinstance(bridges[bn], str):
-                f.write(bridges[bn]); continue
-            target, v, rtext, dtext = bridges[bn]
-            f.write(abi.emit_bridge(bn, target, v, 'ref: %s | def: %s' % (rtext, dtext)))
-    with open(os.path.join(out, 'abi.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('#object\tundefined\taddress\tref_msvc\tdef_msvc\tverdict\tclasses\tmoves\tnotes\tref\tdef\n')
-        for r in abi_rows:
-            f.write('\t'.join(r) + '\n')
-
-    with open(os.path.join(out, 'probe_requests.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-        for unit, t in sorted(probe_req):
-            f.write('%s\t%s\n' % (unit, t))
-
-    # ---- address map
+    # ---- vftables
     # image vftables (primary `vftable' and secondary `vftable'{for `B'}) -> address point of the Itanium vtable of
     # the class of the same name, emitted by a compiled object or synthesized (vtables.py, docs/LINK.md "Vtables")
     def canon_msvc(text):
@@ -563,13 +586,81 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
             rtti.add(vtables.Obj(u.obj), u.host is not None)
     vmap, vstats = vtables.vftable_map(vnames, rtti, canon_it)
     write_vtable_requests(out, real, objsyms, vnames, it, itanium)
+    # hand-written vptr stores of image vftable addresses (`obj.vtbl = &DAT_010176f8;`): the address stands for the
+    # native vtable of the class constructed there - the one of the same name when some unit names that vftable,
+    # else the class whose member function stores it; its data symbol is bound to that address point (D7, point 2)
+    hand = hand_vptr_stores(os.path.dirname(os.path.dirname(os.path.abspath(units_json))), real, vnames, msvc,
+                            canon_msvc)
+    by_cls = collections.defaultdict(list)
+    for n in rtti.where:
+        if n.startswith('_ZTV'):
+            by_cls[canon_it(n)].append(n)
+    rebind, hand_rows = {}, []
+    for a, sites in sorted(hand.items()):
+        how = 'named vftable' if a in vmap else None
+        if a not in vmap:
+            for unit, cls in sites:
+                z = sorted(by_cls.get(cls or '', []))
+                pts = vtables.address_points(rtti.ents(z[0]) or []) if z else []
+                if pts:
+                    obj = rtti.where[z[0]][0]
+                    vmap[a] = (z[0], pts[0][0], obj.path, 'primary, hand-written vptr store in %s (%s)' % (unit, cls))
+                    how = 'class of the storing function'
+                    vstats['mapped-hand-written'] += 1
+                    break
+        if a in vmap:
+            rebind[a] = vmap[a][:2]
+        hand_rows.append(('%08x' % a, how or 'no native vtable', vmap[a][0] if a in vmap else '',
+                          ' '.join(sorted({u for u, _ in sites})), ' '.join(sorted({c or '?' for _, c in sites}))))
+    with open(os.path.join(out, 'hand_vptrs.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#address\tmapped by\tnative vtable\tunits\tclasses of the storing functions\n')
+        for r in hand_rows:
+            f.write('\t'.join(r) + '\n')
+    stats['hand_vptr_addrs'], stats['hand_vptr_rebound'] = len(hand), len(rebind)
+
+    # ---- data addresses: absolute symbols at the original address (the data image is mapped there, D3)
+    with open(os.path.join(out, 'aliases.ld'), 'w') as f:
+        f.write('/* fnv-nx link-by-address aliases (generated by tools/link/fnvlink.py; local output) */\n')
+        for a in sorted(x for x in used_addr if kind_of_addr(x) == 'data'):
+            if a in rebind:   # an image vftable stored into vptrs by hand: the native address point
+                f.write('%s = %s + %d;\n' % (ADDR_SYM % a, rebind[a][0], rebind[a][1]))
+            else:
+                f.write('%s = 0x%08x;\n' % (ADDR_SYM % a, a))
+        for line in sorted(set(alias_lines)):
+            f.write(line + '\n')
+
+    # ---- bridges
+    with open(os.path.join(out, 'bridges.S'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('// fnv-nx ABI bridges (generated by tools/link/fnvlink.py; local output)\n    .text\n')
+        for bn in sorted(bridges):
+            if isinstance(bridges[bn], str):
+                f.write(bridges[bn]); continue
+            target, v, rtext, dtext = bridges[bn]
+            f.write(abi.emit_bridge(bn, target, v, 'ref: %s | def: %s' % (rtext, dtext)))
+        f.write(emit_traps(traps))
+        f.write(emit_tls(tls_addrs))
+    with open(os.path.join(out, 'abi.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#object\tundefined\taddress\tref_msvc\tdef_msvc\tverdict\tclasses\tmoves\tnotes\tref\tdef\n')
+        for r in abi_rows:
+            f.write('\t'.join(r) + '\n')
+
+    with open(os.path.join(out, 'probe_requests.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        for unit, t in sorted(probe_req):
+            f.write('%s\t%s\n' % (unit, t))
+
+    # ---- address map
     for a, names in load_extern_list(extern_list).items():
         extern_text.setdefault(a, set()).update(names)
-    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text)
+    for a, c in crt_classes.items():   # S4's table lists every referenced .text address without definition
+        if c in ('data', 'mid_data'):  # data symbols with a bogus "address": not code
+            extern_text.pop(a, None)
+        else:
+            extern_text.setdefault(a, set())
+    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers)
 
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
-                                         'code-defmissing', 'extern-text', 'import'))
+                                         'code-defmissing', 'extern-text', 'import', 'provider', 'tls'))
     with open(os.path.join(out, 'extern_text.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a in sorted(extern_text):
             f.write('%08x\t%s\n' % (a, ' '.join(sorted(extern_text[a]))))
@@ -596,6 +687,17 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
     lines += ['  %-18s %d' % (c, n) for c, n in sorted(def_stats.items())]
     lines += ['', 'duplicate strong names localized: %d' % stats['duplicate_strong_names'],
               'bridges generated: %d' % len(bridges),
+              'trap stubs for virtual functions defined nowhere: %d (%d slot references)'
+              % (len(traps), byclass['vslot-unresolved']),
+              'CRT/library addresses with a provider (crt_symbols.tsv): %d, references bound to it: %d'
+              % (len(providers), byclass['provider']),
+              'import references bound by IAT slot (imports.tsv + exports.cpp): %d of %d'
+              % (stats['imports_bound'], byclass['import']),
+              'import thunks bound to their import instead of the compiled decomp body: %d' % stats['import_thunks'],
+              'image vftable addresses stored into vptrs by hand: %d, bound to a native address point: %d '
+              '(hand_vptrs.tsv)' % (stats['hand_vptr_addrs'], stats['hand_vptr_rebound']),
+              'thread-local references bound to the native TLS block: %d (%d image .tls addresses, %d native '
+              'definitions folded in)' % (byclass['tls'], len(tls_addrs), len(tls_defs)),
               'aggregate layouts known: %d (probe_requests.tsv: %d)' % (len(layouts), len(probe_req)), '',
               'byte-level re-decisions with layouts (class-level verdict -> byte-level verdict, refs):']
     lines += ['  %-6d %s' % (n, k[5:]) for k, n in sorted(stats.items()) if k.startswith('abi2_')]
@@ -607,6 +709,72 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
     print('\n'.join(lines))
 
 
+VPTR_LHS = re.compile(r'(?i)(?:^|[^\w])(?:\w*_)?(?:vptr|vtbl|vtable|vftable|vfptr|vft|vftbl|vtab|vt)\w*\s*$')
+DEREF_LHS = re.compile(r'^\s*\*\s*(?:\(\s*[\w\s:]+\*\s*\*\s*\)|reinterpret_cast\s*<[^<>]*\*\s*\*\s*>)\s*\(?\s*\w+\s*\)?\s*$'
+                       r'|^\s*\(\s*\(\s*[\w\s:]+\*\s*\*\s*\)\s*\w+\s*\)\s*\[\s*0\s*\]\s*$')
+FUNC_HDR = re.compile(r'^[^\n;{}#]*?\b((?:\w+\s*::\s*)*\w+)\s*::\s*~?\w+\s*\([^;{}]*\)\s*(?:const\s*)?\{', re.M)
+
+
+def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
+    """Hand-written stores of image vftable addresses into vptrs in the unit sources: `x.vtbl = &DAT_010176f8;`,
+    `*(void **)this = kVtbl_X;`, ... -> {address: [(unit, canonical class of the storing member function or
+    None)]}. A store counts when the right side is (after casts and &) a name the unit binds to a data address and
+    the left side looks like a vptr (vtbl/vtable/vptr/vft... member, *(T **)p, ((T **)p)[0]), or the address is a
+    vftable some unit names (??_7) whatever the left side is called."""
+    known = {a for (_, a) in vnames}
+    sites = []
+    out = collections.defaultdict(list)
+    for u in real:
+        path = os.path.join(tree, u.source)
+        if not os.path.exists(path):
+            continue
+        names = {}
+        for n, a in u.refs.items():
+            if kind_of_addr(a) == 'data':
+                sg = msvc(n)
+                if sg.kind in ('data', 'cname') and sg.qual:
+                    names.setdefault(sg.qual[-1], a)
+        if not names:
+            continue
+        text = open(path, encoding='utf-8', errors='surrogateescape').read()
+        heads = [(m.start(), m.group(1)) for m in FUNC_HDR.finditer(text)]
+        pos = 0
+        for stmt in text.split(';'):
+            start, pos = pos, pos + len(stmt) + 1
+            st = re.split(r'[{}]', stmt)[-1]
+            spos = start + len(stmt) - len(st)   # where the statement itself begins (after the last brace)
+            m = re.match(r'^(?P<lhs>(?:[^=]|==)*?[^=!<>+\-*/%&|^])=(?!=)(?P<rhs>.*)$', st, re.S)
+            if not m:
+                continue
+            rhs = m.group('rhs')
+            while True:
+                r2 = re.sub(r'\(\s*(?:const\s+|unsigned\s+|signed\s+|struct\s+|class\s+)*[\w:<>]+(?:\s*\*)*\s*\)', '', rhs)
+                if r2 == rhs:
+                    break
+                rhs = r2
+            rhs = re.sub(r'[\s&()]', '', rhs)
+            a = names.get(rhs)
+            if a is None:
+                continue
+            lhs = m.group('lhs').strip()
+            if not (a in known or VPTR_LHS.search(lhs) or DEREF_LHS.match(lhs)):
+                continue
+            cls, fn = None, -1
+            for k, (hpos, hcls) in enumerate(heads):
+                if hpos > spos:
+                    break
+                cls, fn = hcls, k
+            sites.append((a, u.source, canon_msvc(cls) if cls else None, (u.source, fn)))
+    per_fn = collections.defaultdict(set)
+    for a, _, _, fn in sites:
+        per_fn[fn].add(a)
+    for a, unit, cls, fn in sites:
+        # the storing function's class only counts for a function that stores one vftable (a destructor resetting
+        # its own and then its base's vftable stores two)
+        out[a].append((unit, cls if len(per_fn[fn]) == 1 else None))
+    return out
+
+
 NOT_SYNTH = ('std::', '__gnu_cxx::', '__cxxabiv1::')   # the C++ runtime defines its own
 
 
@@ -614,12 +782,12 @@ def write_vtable_requests(out, real, objsyms, vnames, it, itanium):
     """What the synthesis step (vtables.run, `probe`) is asked for, from the compiled objects only (so a rerun after
     the second resolve asks for the same): vtable_requests.tsv - classes with an image vftable whose vtable no
     compiled object emits, and every _ZTV/_ZTI a compiled object references but none defines, each with the units
-    that can name the class (referencing units first); rtti_defined.txt - the vtable/typeinfo/thunk names compiled
-    objects define (never synthesized again)."""
+    that can name the class (referencing units first); rtti_defined.txt - the C++ names compiled objects define
+    (vtables, typeinfo, thunks and functions: never synthesized or emitted again)."""
     rdefs = set()
     for u in real:
         for s in objsyms[u.source]:
-            if s.shndx and s.bind != 'local' and s.name.startswith(vtables.SPECIAL_PREFIXES):
+            if s.shndx and s.bind != 'local' and s.name.startswith('_Z'):
                 rdefs.add(s.name)
     reqs = {}
 
@@ -646,6 +814,141 @@ def write_vtable_requests(out, real, objsyms, vnames, it, itanium):
     vtables.write_requests(os.path.join(out, 'vtable_requests.tsv'), {c: tuple(e) for c, e in reqs.items()})
     with open(os.path.join(out, 'rtti_defined.txt'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('\n'.join(sorted(rdefs)) + '\n')
+
+
+PORT = os.path.dirname(os.path.dirname(HERE))
+CRT_SYMBOLS = os.path.join(PORT, 'platform', 'crt', 'crt_symbols.tsv')
+IMPORTS = os.path.join(PORT, 'platform', 'win32', 'imports.tsv')
+EXPORTS = os.path.join(PORT, 'platform', 'win32', 'exports.cpp')
+IDENT = re.compile(r'^[A-Za-z_]\w*$')
+
+
+def load_exports(path):
+    """platform/win32/exports.cpp -> {(dll, api): native symbol} (E/K/U macros and explicit rows)."""
+    out = {}
+    if path and os.path.exists(path):
+        text = open(path, encoding='utf-8', errors='surrogateescape').read()
+        for m in re.finditer(r'\bE\("(\w+)",\s*(\w+)\)', text):
+            out[(m.group(1).lower(), m.group(2))] = m.group(2)
+        for mac, dll in (('K', 'kernel32'), ('U', 'user32')):
+            for m in re.finditer(r'\b%s\((\w+)\)' % mac, text):
+                out[(dll, m.group(1))] = m.group(1)
+        for m in re.finditer(r'\{\s*"(\w+)",\s*"(\w+)",\s*\(void \*\)&(\w+)\s*\}', text):
+            out[(m.group(1).lower(), m.group(2))] = m.group(3)
+    return {k: v for k, v in out.items() if k[1] != 'f'}   # the macro definitions themselves
+
+
+def load_providers(crt_tsv, exports):
+    """platform/crt/crt_symbols.tsv (S4) -> ({address: (native symbol, provider text)} for the referenced .text
+    addresses a platform/library symbol implements, {address: class} of every row). Provider spellings: 'libc: f',
+    'platform/crt: f', 'fnvnx_f ...', 'fnvnx_ws2_* (see imports.tsv)' (the thunk's api through exports.cpp);
+    'implicit', 'needs body', 'none' and unidentified ones give no symbol."""
+    prov, classes = {}, {}
+    if not crt_tsv or not os.path.exists(crt_tsv):
+        return prov, classes
+    for line in open(crt_tsv, encoding='utf-8', errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if line.startswith('#') or len(f) < 7 or not re.match(r'^0x[0-9a-fA-F]+$', f[0]):
+            continue
+        a, cls, ident, p = int(f[0], 16), f[1], f[2], f[6].strip()
+        classes[a] = cls
+        sym = None
+        m = re.match(r'^(?:libc|libm|platform/crt|platform/win32): (\S+)', p)
+        if m and IDENT.match(m.group(1)):
+            sym = m.group(1)
+        elif p.startswith('fnvnx_ws2_'):
+            w = ident.split()
+            sym = exports.get(('ws2_32', w[1])) if len(w) == 2 and w[0] == 'ws2_32' else None
+        else:
+            m = re.match(r'^(fnvnx_\w+)(?:\s|$)', p)
+            sym = m.group(1) if m else None
+        if sym:
+            prov[a] = (sym, p)
+    return prov, classes
+
+
+def load_imports(imports_tsv, exports):
+    """platform/win32/imports.tsv (S4: IAT slot, dll, api, ...) -> {slot address: native symbol} for the slots the
+    platform implements (the slot's api, not the decomp's spelling of it, decides)."""
+    out = {}
+    if imports_tsv and os.path.exists(imports_tsv):
+        for line in open(imports_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if line.startswith('#') or len(f) < 3 or not re.match(r'^0x[0-9a-fA-F]+$', f[0]):
+                continue
+            sym = exports.get((f[1].lower(), f[2]))
+            if sym:
+                out[int(f[0], 16)] = sym
+    return out
+
+
+def load_iat(imports_tsv):
+    """imports.tsv -> {IAT slot address: (dll, api)}."""
+    out = {}
+    if imports_tsv and os.path.exists(imports_tsv):
+        for line in open(imports_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 3 and re.match(r'^0x[0-9a-fA-F]+$', f[0]) and IDENT.match(f[2]):
+                out[int(f[0], 16)] = (f[1].lower(), f[2])
+    return out
+
+
+def has_branch(obj, sym):
+    """The AArch64 code of a defined function contains a branch (b, bl, br, blr): a thunk does, a getter does not."""
+    sec = obj.secs[sym.shndx]
+    for k in range(sym.size // 4):
+        w = struct.unpack_from('<I', obj.data, sec[4] + sym.value + 4 * k)[0]
+        if (w & 0x7c000000) == 0x14000000 or (w & 0xfffffc1f) in (0xd61f0000, 0xd63f0000):
+            return True
+    return False
+
+
+def func_refs(obj, sym):
+    """Names the relocations inside a defined function refer to (vtables.Obj, elfsyms.Sym)."""
+    if not sym.size:
+        return []
+    names = []
+    for off, (si, _, _) in obj.rel(sym.shndx).items():
+        if sym.value <= off < sym.value + sym.size:
+            t = obj.syms[si]
+            names.append(t[0] if t[3] != 3 else '.section:' + obj.secnames[t[5]])
+    return names
+
+
+def find_import_thunks(native, units, iat, import_syms, gdef, gref, anydef, msvc, itanium):
+    """{address: (native symbol, note)} for the decomp definitions that are import thunks: 6 bytes long (`jmp [slot]`)
+    and compiled to a function that branches and whose only reference is one name the defining unit binds to an IAT
+    slot (the dllimport declaration or an import-entry variable at the slot; a slot is any address of the IAT span,
+    imports.tsv names the slots units call by name). The native symbol is S4's implementation of the slot's api
+    (exports.cpp), else the api name (imports.tsv's, or the unit's name for the slot: g_X / __imp_X -> X; S6/S7
+    provide those by name)."""
+    out, objs, idxs = {}, {}, {}
+    lo, hi = (min(iat), max(iat) + 4) if iat else (0, 0)
+    for a, nd in native.items():
+        u = units.get(nd['unit']) if nd['unit'] else None
+        if u is None or u.sizes.get(a) != 6 or nd['sym'].shndx == 0:
+            continue
+        if u.obj not in objs:
+            objs[u.obj] = vtables.Obj(u.obj)
+        names = [n for n in func_refs(objs[u.obj], nd['sym']) if not RUNTIME.match(n)]
+        if len(set(names)) != 1 or names[0].startswith('.') or not has_branch(objs[u.obj], nd['sym']):
+            continue
+        if u.source not in idxs:
+            idx = KeyIndex()
+            for n, x in u.refs.items():
+                idx.add(msvc(n), x)
+            idxs[u.source] = idx
+        _, _, slot, _, _ = classify_ref(names[0], itanium(names[0]), idxs[u.source], gdef, gref, anydef, msvc)
+        if slot is None or not lo <= slot < hi:
+            continue
+        dll, api = iat.get(slot, ('?', None))
+        if api is None:
+            q = itanium(names[0]).qual
+            api = re.sub(r'^(?:__imp_|_imp_|g_)', '', q[-1] if q else names[0])
+            if not IDENT.match(api):
+                continue
+        out[a] = (import_syms.get(slot) or api, 'import thunk %s!%s (slot 0x%08x)' % (dll, api, slot))
+    return out
 
 
 def load_overrides(path):
@@ -744,14 +1047,65 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc):
     return 'addr', '%s/%s' % (scope, tier), a, None, best.text
 
 
+def emit_tls(addrs):
+    """Native TLS block in the layout of the image's .tls template (bridges.S): the decomp's __declspec(thread)
+    variables are thread-local in GCC's code too, so a reference by template address must not become the absolute
+    image address (one copy for all threads, and no valid TLS relocation). __fnvnx_tls_<addr> is the slot of each
+    referenced address in __fnvnx_tls_image (.tbss: zero in every new thread); __fnvnx_tls_image_orig / _size give
+    the template range, so the platform can copy the image's template into the block of each thread (S4)."""
+    if not addrs:
+        return ''
+    base = max(addrs) & ~0xfff   # the template's page (.tls is the last section before .rsrc)
+    size = max(0x1000, (max(addrs) + 8 - base + 15) & ~15)
+    out = []
+    for a in sorted(x for x in addrs if x < base):   # thread-local in the source, but outside the template: own slot
+        n = TLS_SYM % a
+        out += ['// 0x%08x is not in the .tls template: a thread-local of its own' % a,
+                '    .section .tbss.%s,"awT",%%nobits' % n, '    .p2align 3', '    .globl %s' % n,
+                '    .type %s, %%tls_object' % n, '    .size %s, 8' % n, '%s:' % n, '    .zero 8']
+    addrs = [x for x in addrs if x >= base]
+    out += ['// native TLS block in the image .tls layout (template 0x%08x..0x%08x)' % (base, base + size),
+           '    .section .tbss.__fnvnx_tls_image,"awT",%nobits', '    .p2align 4', '    .globl __fnvnx_tls_image',
+           '    .type __fnvnx_tls_image, %object', '    .size __fnvnx_tls_image, %d' % size, '__fnvnx_tls_image:',
+           '    .zero %d' % size, '    .globl __fnvnx_tls_image_orig', '    .set __fnvnx_tls_image_orig, 0x%08x' % base,
+           '    .globl __fnvnx_tls_image_size', '    .set __fnvnx_tls_image_size, %d' % size]
+    for a in sorted(addrs):
+        n = TLS_SYM % a
+        out += ['    .globl %s' % n, '    .type %s, %%tls_object' % n, '    .set %s, __fnvnx_tls_image + %d' % (n, a - base)]
+    return '\n'.join(out) + '\n'
+
+
+def emit_traps(traps):
+    """Trap stubs (bridges.S): x1 = what the slot was, then fnvnx_vslot_trap(this, text); the weak default here
+    stops at a brk (the platform overrides it with one that reports and aborts)."""
+    if not traps:
+        return ''
+    out = ['// virtual functions defined nowhere: their vtable slots call these stubs',
+           '    .text', '    .p2align 2', '    .weak fnvnx_vslot_trap', '    .type fnvnx_vslot_trap, %function',
+           'fnvnx_vslot_trap:', '    brk #0xf5', '    .size fnvnx_vslot_trap, .-fnvnx_vslot_trap']
+    for name in sorted(traps):
+        sym, where = traps[name]
+        text = 'virtual function defined nowhere: %s' % sym
+        if where:
+            text += ' (slot %d of %s)' % (where[1], where[0])
+        text = text.replace('\\', '\\\\').replace('"', '\\"')
+        out += ['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
+                '    adrp x1, .L%s' % name, '    add x1, x1, :lo12:.L%s' % name, '    b fnvnx_vslot_trap',
+                '    .size %s, .-%s' % (name, name), '    .section .rodata.%s,"a"' % name, '.L%s:' % name,
+                '    .asciz "%s"' % text]
+    return '\n'.join(out) + '\n'
+
+
 # ---------------------------------------------------------------------------------------------------- address map
 
-def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None):
+def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, providers=None):
     """addrmap.tsv / addrmap.c (docs/LINK.md, 'Address map'): code addresses the native build defines (F C X G),
     image vftables (V: the Itanium vtable address point of the same class, primary or secondary, compiled or
     synthesized), referenced .text addresses no unit defines (E: native NULL, the loader traps them), and per G
     entry its D1/D0 pair (fnvnx_addrmap_deldtors). vtables: {address: (vtable symbol, address-point offset, object
-    path, note)}. -> (Counter of kinds, number of G entries with a D1)."""
+    path, note)}; providers: {address: (platform symbol, provider)} (F entries naming the platform symbol).
+    -> (Counter of kinds, number of G entries with a D1)."""
     rows = []   # address, kind, link_symbol, native_symbol, object, note, offset, d1_symbol, d1_native
     for a in sorted(native):
         nd = native[a]
@@ -780,8 +1134,11 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None):
     for a, (zname, off, obj, note) in sorted((vtables or {}).items()):
         if a not in native:
             rows.append((a, 'V', zname, zname, os.path.basename(obj), note, str(off), '', ''))
+    for a, (sym, text) in sorted((providers or {}).items()):
+        if a not in native:   # CRT/library code the platform implements: the provider symbol itself
+            rows.append((a, 'F', sym, sym, '', 'provider: ' + text, '', '', ''))
     for a in sorted(extern_text or {}):
-        if a not in native:
+        if a not in native and a not in (providers or {}):
             rows.append((a, 'E', '', '', '', 'no native definition (CRT/thunk, S4)', '', '', ''))
     rows.sort()
     with open(os.path.join(out, 'addrmap.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
@@ -793,11 +1150,17 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None):
     with open(os.path.join(out, 'addrmap.c'), 'w') as f:
         f.write('/* fnv-nx address map table (generated by tools/link/fnvlink.py; local output). */\n'
                 '#include "fnvnx_addrmap.h"\n\n')
+        cname = {}
         for name in sorted({r[2] for r in rows if r[2]} | {r[7] for r in rows if r[7]}):
-            f.write('extern char %s[];\n' % name)
+            if name.startswith(('__fnv', '_Z')):
+                cname[name] = name
+                f.write('extern char %s[];\n' % name)
+            else:   # a platform/libc symbol: an asm label keeps it clear of the compiler's built-in declarations
+                cname[name] = '__fnvnx_am_%d' % len(cname)
+                f.write('extern char %s[] __asm__("%s");\n' % (cname[name], name))
         f.write('\nconst struct fnvnx_addrmap_entry fnvnx_addrmap[] = {\n')
         for a, kind, link, *rest in rows:
-            ptr = '0' if not link else ('%s + %s' % (link, rest[3]) if kind == 'V' else link)
+            ptr = '0' if not link else ('%s + %s' % (cname[link], rest[3]) if kind == 'V' else cname[link])
             f.write('    {0x%08xu, %s},\n' % (a, ptr))
         if not rows:
             f.write('    {0u, 0},\n')
@@ -805,7 +1168,7 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None):
         f.write('const unsigned fnvnx_addrmap_count = %d;\n' % len(rows))
         f.write('\nconst struct fnvnx_addrmap_deldtor fnvnx_addrmap_deldtors[] = {\n')
         for a, d1, d0 in dd:
-            f.write('    {0x%08xu, %s, %s},\n' % (a, d1 or '0', d0))
+            f.write('    {0x%08xu, %s, %s},\n' % (a, cname[d1] if d1 else '0', cname[d0]))
         if not dd:
             f.write('    {0u, 0, 0},\n')
         f.write('};\nconst unsigned fnvnx_addrmap_deldtor_count = %d;\n' % len(dd))
@@ -838,7 +1201,15 @@ def apply(out, fixed):
             for line in f:
                 old, new = line.split()
                 mapping[old] = new
+        und = os.path.join(out, 'objcopy', base + '.undefine')
+        names = set(open(und, encoding='utf-8', errors='surrogateescape').read().split()) if os.path.exists(und) \
+            else set()
+        if names:
+            elfsyms.undefine_symbols(obj, dst + '.und', names)
+            obj = dst + '.und'
         elfsyms.rename_undefined(obj, dst, mapping)
+        if names:
+            os.remove(obj)
         n += 1
     ov = os.path.join(out, 'overrides.list')
     if os.path.exists(ov):
@@ -895,11 +1266,12 @@ def main():
         argv, opts = [], {}
         it_ = iter(sys.argv[2:])
         for x in it_:
-            if x in ('--override', '--extern-text'):
+            if x in ('--override', '--extern-text', '--crt-symbols', '--imports'):
                 opts[x[2:].replace('-', '_')] = next(it_)
             else:
                 argv.append(x)
-        resolve(*argv[:3], override=opts.get('override'), extern_list=opts.get('extern_text'))
+        resolve(*argv[:3], override=opts.get('override'), extern_list=opts.get('extern_text'),
+                crt_symbols=opts.get('crt_symbols'), imports=opts.get('imports'))
         with open(os.path.join(argv[2], 'overrides.list'), 'w') as f:
             for _, _, obj in load_overrides(opts.get('override')):
                 f.write(obj + '\n')

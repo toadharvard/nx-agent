@@ -17,6 +17,11 @@ static void f_other(void *self) { (void)self; other_calls++; }
 static void f_d1(void *self) { (void)self; d1_calls++; }
 static void f_d0(void *self) { (void)self; d0_calls++; }
 static void f_d0b(void *self) { (void)self; d0_calls += 100; }
+static int d1c_calls, d0c_calls;
+static void f_d1c(void *self) { (void)self; d1c_calls++; }
+static void f_d0c(void *self) { (void)self; d0c_calls++; }
+static void f_d0d(void *self) { (void)self; }
+static void f_d0e(void *self) { (void)self; }
 static void *vtbl[4];   /* [3] = 0 stands for what follows a vtable in .rodata (next offset-to-top) */
 static struct { void **vptr; } obj = {vtbl};
 static uint32_t trapped_orig, reported;
@@ -48,6 +53,17 @@ int main(void) {
         CHECK(e && FNVNX_AM_KIND(e->info) == FNVNX_AM_MID);
         CHECK(fnvnx_codemap_find(&map, 0x00400800u) != NULL && fnvnx_codemap_find(&map, 0x00401004u) == NULL);
         free((void *)map.e);
+        /* V (image vftable) and E (text without definition) kinds */
+        {
+            static const fnvnx_s2_addrmap_entry s2v[] = {{0x00401000u, (void *)(uintptr_t)0x1000}, {0x00ec1000u, NULL},
+                                                         {0x01000100u, (void *)(uintptr_t)0x5008}};
+            CHECK(fnvnx_codemap_from_s2(&map, &os, s2v, 3, "FEV", NULL, 0) == FNVNX_OK && map.n == 3);
+            e = fnvnx_codemap_find(&map, 0x01000100u);
+            CHECK(e && FNVNX_AM_KIND(e->info) == FNVNX_AM_VTABLE && e->native == 0x5008);
+            e = fnvnx_codemap_find(&map, 0x00ec1000u);
+            CHECK(e && FNVNX_AM_KIND(e->info) == FNVNX_AM_TEXT && e->native == 0);
+            free((void *)map.e);
+        }
         /* unsorted input is refused */
         {
             static const fnvnx_s2_addrmap_entry bad[] = {{0x2000u, NULL}, {0x1000u, NULL}};
@@ -82,6 +98,27 @@ int main(void) {
         b(&obj, 1);
         CHECK(d0_calls == 101);
         CHECK(fnvnx_deldtor_fn(NULL, 0) == NULL);
+    }
+
+    /* with S2's D1/D0 table (fnvnx_addrmap_deldtors): D1 comes from the table, not from the object's vtable */
+    {
+        static fnvnx_s2_deldtor tab[2];
+        fnvnx_deldtor_fn_t c, d, e2;
+        int traps0 = trap_calls;
+        tab[0].orig = 0x00402200u; tab[0].d1 = (void *)(uintptr_t)f_d1c; tab[0].d0 = (void *)(uintptr_t)f_d0c;
+        tab[1].orig = 0x00402300u; tab[1].d1 = NULL; tab[1].d0 = (void *)(uintptr_t)f_d0d;
+        fnvnx_deldtor_set_table(tab, 2);
+        c = fnvnx_deldtor_fn(f_d0c, 0x00402200u);
+        CHECK(c && c(&obj, 0) == &obj && d1c_calls == 1 && d1_calls == 1);   /* obj's vtable does not hold f_d0c */
+        CHECK(c(&obj, 1) == &obj && d0c_calls == 1);
+        d = fnvnx_deldtor_fn(f_d0d, 0x00402300u);                             /* no D1 in the table: trap */
+        d(&obj, 0);
+        CHECK(trap_calls == traps0 + 1 && trapped_orig == 0x00402300u);
+        e2 = fnvnx_deldtor_fn(f_d0e, 0x00402400u);                            /* not in the table: trap, no search */
+        e2(&obj, 0);
+        CHECK(trap_calls == traps0 + 2 && trapped_orig == 0x00402400u && d1_calls == 1);
+        c(&obj, 2);                                                           /* vector delete: trap */
+        CHECK(trap_calls == traps0 + 3);
     }
 
     /* apply: kind G goes through the deldtor hook, never straight to D0 */

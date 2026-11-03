@@ -82,7 +82,7 @@ def main():
             f.write('00401500\t_Z4platv\t%s\n' % objs['native/plat.cpp'])
         out, fixed = os.path.join(t, 'out'), os.path.join(t, 'fixed')
         run([sys.executable, FNVLINK, 'resolve', os.path.join(t, 'units.json'), os.path.join(t, 'objects.tsv'), out,
-             '--override', os.path.join(t, 'override.tsv')])
+             '--override', os.path.join(t, 'override.tsv'), '--crt-symbols', 'none', '--imports', 'none'])
         rows = {int(r[0], 16): r for r in (l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'addrmap.tsv'))
                                           if not l.startswith('#'))}
         for a, name in ((0x401300, '__fnvnx_dyninit_00401300'), (0x401310, '__fnvnx_dynexit_00401310')):

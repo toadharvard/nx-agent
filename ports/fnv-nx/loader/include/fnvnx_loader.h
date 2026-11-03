@@ -219,11 +219,12 @@ typedef struct fnvnx_codemap {
 int fnvnx_codemap_from_blob(fnvnx_codemap *map, const void *blob, uint32_t size);
 const fnvnx_codemap_entry *fnvnx_codemap_find(const fnvnx_codemap *map, uint32_t orig);
 
-/* S2's runtime address map (tools/link/fnvnx_codemap.h, docs/LINK.md): {unsigned orig; void *native;} sorted by
- * orig, kinds F/C/X/G only in addrmap.tsv. fnvnx_codemap_from_s2 builds the loader's map from it: `kinds` is an
- * optional parallel array of 'F','C','X','G' (NULL: all F; G sets FNVNX_AM_F_DELDTOR), `extra` optional entries
- * (sorted; e.g. TEXT/MID addresses from S4 or units.json) merged in where S2 has none. The table is allocated with
- * os->alloc; free map->e with os->free. */
+/* S2's runtime address map (tools/link/fnvnx_addrmap.h, docs/LINK.md): {unsigned orig; void *native;} sorted by
+ * orig. fnvnx_codemap_from_s2 builds the loader's map from it: `kinds` is S2's optional parallel array
+ * fnvnx_addrmap_kinds (NULL: all F): F/C/X -> FUNC, G -> FUNC | FNVNX_AM_F_DELDTOR, V -> VTABLE (image vftable,
+ * native = Itanium address point: words holding it are rewritten as vptrs), E -> TEXT (native 0: trapped); `extra`
+ * optional entries (sorted; e.g. TEXT/MID addresses from S4 or units.json) merged in where S2 has none. The table is
+ * allocated with os->alloc; free map->e with os->free. */
 typedef struct fnvnx_s2_addrmap_entry {
     unsigned int orig;
     void *native;
@@ -297,15 +298,24 @@ int fnvnx_fixups_apply(fnvnx_image *img, const fnvnx_codemap *map, const fnvnx_f
 
 /* An image pointer to ??_G is called as `void *f(void *this, unsigned flags)`: bit 0 = delete after destroying,
  * bit 1 = vector delete. The adapter calls the native D0 when bit 0 is set; otherwise it destroys without deleting
- * through D1, found in the object's own (Itanium) vtable as the slot just before D0. Vector deletes and a D0 that
- * is not in the object's vtable go to the trap. FNVNX_DELDTOR_SLOTS adapters exist; returns 0 when they are used
- * up. The address is returned as a 32-bit value (target: ILP32); fnvnx_deldtor_fn gives the callable. */
+ * through D1: the one S2's table fnvnx_addrmap_deldtors (tools/link/fnvnx_addrmap.h: {orig, d1, d0} per G entry)
+ * gives for orig. The table is found by a weak reference when S2's addrmap.c is linked, or set with
+ * fnvnx_deldtor_set_table; an orig without a D1 there traps. Only without any table (host tests) is D1 searched in
+ * the object's own (Itanium) vtable as the slot just before D0 (abstract classes have 0 there). Vector deletes go
+ * to the trap. FNVNX_DELDTOR_SLOTS adapters exist; returns 0 when they are used up. The address is returned as a
+ * 32-bit value (target: ILP32); fnvnx_deldtor_fn gives the callable. */
 #define FNVNX_DELDTOR_SLOTS 1024u
 typedef void *(*fnvnx_deldtor_fn_t)(void *self, unsigned flags);
+typedef struct fnvnx_s2_deldtor {   /* layout of S2's struct fnvnx_addrmap_deldtor */
+    unsigned int orig;
+    void *d1;
+    void *d0;
+} fnvnx_s2_deldtor;
+void fnvnx_deldtor_set_table(const fnvnx_s2_deldtor *t, uint32_t n);   /* sorted by orig; NULL: weak S2 table */
 fnvnx_deldtor_fn_t fnvnx_deldtor_fn(void (*d0)(void *self), uint32_t orig);
 uint32_t fnvnx_deldtor_adapter(void *ctx, uint32_t orig, uint32_t native_d0);   /* fnvnx_apply_hooks.deldtor */
-/* The native code range ([__text_start, __text_end) of our binary): bounds the D1 search to the vtable. Set it
- * before the first adapter call; without it the search reads up to 255 slots past the address point. */
+/* The native code range ([__text_start, __text_end) of our binary): bounds the fallback D1 search to the vtable.
+ * Without it the search reads up to 255 slots past the address point. */
 void fnvnx_deldtor_set_text(const void *lo, const void *hi);
 /* called for an unsupported adapter call (vector delete, D1 not found); default: abort() */
 extern void (*fnvnx_deldtor_trap)(uint32_t orig, void *self, unsigned flags);

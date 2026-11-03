@@ -34,9 +34,14 @@ PORT = os.path.dirname(os.path.dirname(HERE))
 Layout = collections.namedtuple('Layout', 'size align trivial empty cls')
 
 
+SEMANTICS = ['-frounding-math', '-fsigned-char', '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks',
+             '-ffp-contract=off']   # compile.sh's MSVC-like semantics (J-0034): probes and emitted host code too
+
+
 def flags(tree):
     sse = os.environ.get('SSE2NEON') or os.path.join(PORT, 'ext', 'sse2neon')
-    return ['-mabi=ilp32', '-std=gnu++17', '-c', '-O2', '-fms-extensions', '-fshort-wchar', '-fpermissive', '-w',
+    return ['-mabi=ilp32', '-std=gnu++17', '-c', '-O2', '-fms-extensions', '-fshort-wchar', *SEMANTICS,
+            '-fpermissive', '-w',
             '-fmax-errors=200', '-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
             '-I' + os.path.join(PORT, 'shim', 'include'), '-I' + sse, '-I' + os.path.join(tree, 'include')]
 

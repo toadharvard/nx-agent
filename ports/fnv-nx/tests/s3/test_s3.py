@@ -177,6 +177,24 @@ class T01Python(unittest.TestCase):
         merged = AddrMap.read_s2_tsv(syn('addrmap_s2.tsv')).merge(mine)
         self.assertEqual(set(merged.entries), set(mine.entries))
 
+    def test_s2_addrmap_kinds(self):
+        path = os.path.join(OUT, 'addrmap_s2_kinds.tsv')
+        wr(path, '# fnvnx-addrmap 1\n# address\tkind\tlink_symbol\tnative_symbol\tobject\tnote\toffset\td1_symbol\t'
+                 'd1_native\n'
+                 '00401000\tF\t__fnv_00401000\t_Z1fv\ta.o\t\t\t\t\n'
+                 '00401010\tG\t__fnv_00401010\t_ZN1CD0Ev\ta.o\tdeldtor\t\t__fnv_00401010_D1\t_ZN1CD1Ev\n'
+                 '00401020\tE\t\t\t\tno native definition\t\t\t\n'
+                 '01000100\tV\t_ZTV1C\t_ZTV1C\ta.o\tprimary\t8\t\t\n'
+                 '01000120\tV\t_ZTV1C\t_ZTV1C\ta.o\tsecondary {for B} at +12\t28\t\t\n'
+                 '01000140\tV\t_ZTV1D\t_ZTV1D\ta.o\tprimary (old six-column row)\n')
+        m = AddrMap.read_s2_tsv(path)
+        self.assertEqual(m.entries[0x00401000], (1, '__fnv_00401000'))
+        self.assertEqual(m.entries[0x00401010], (1 | 0x800, '__fnv_00401010'))
+        self.assertEqual(m.entries[0x00401020], (2, None))
+        self.assertEqual(m.entries[0x01000100], (4, '_ZTV1C+8'))
+        self.assertEqual(m.entries[0x01000120], (4, '_ZTV1C+28'))
+        self.assertEqual(m.entries[0x01000140], (4, '_ZTV1D+8'))
+
     def test_mkprobes(self):
         hdr, txt = os.path.join(OUT, 'probes.h'), syn('probes.txt')
         r = run([sys.executable, os.path.join(LOADER, 'tools', 'mkprobes.py'), syn('image_check.json'), '--header', hdr,

@@ -1,16 +1,52 @@
 /* Adapters that let image code pointers to MSVC deleting destructors (S2 address map kind G) call the native
  * Itanium destructors with the MSVC contract: void *??_G(void *this, unsigned flags), bit 0 = delete, bit 1 =
- * vector delete. S2 maps ??_G to D0 (destroy + delete); without bit 0 we must destroy only, i.e. call D1, which
- * GCC places in the vtable slot right before D0. */
+ * vector delete. S2 maps ??_G to D0 (destroy + delete); without bit 0 we must destroy only, i.e. call D1, which S2's
+ * table fnvnx_addrmap_deldtors gives per original address. Without a table (host tests) D1 is searched in the
+ * object's vtable as the slot right before D0, where GCC places it (not for abstract classes: both slots are 0). */
 #include "internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 
 typedef void (*dtor_fn)(void *self);
 
-static struct { dtor_fn d0; uint32_t orig; } targets[FNVNX_DELDTOR_SLOTS];
+static struct { dtor_fn d0, d1; uint32_t orig; } targets[FNVNX_DELDTOR_SLOTS];
 static uint32_t used;
 static uintptr_t text_lo, text_hi;
+
+/* S2's table, when its addrmap.c is linked (weak: the loader links without it too) */
+#if defined(__GNUC__)
+extern const fnvnx_s2_deldtor fnvnx_addrmap_deldtors[] __attribute__((weak));
+extern const unsigned fnvnx_addrmap_deldtor_count __attribute__((weak));
+#endif
+static const fnvnx_s2_deldtor *table;
+static uint32_t ntable;
+static int table_set;
+
+void fnvnx_deldtor_set_table(const fnvnx_s2_deldtor *t, uint32_t n) {
+    table = t;
+    ntable = t ? n : 0;
+    table_set = t != NULL;
+}
+
+static const fnvnx_s2_deldtor *table_find(uint32_t orig) {
+    uint32_t lo = 0, hi;
+    if (!table_set) {
+#if defined(__GNUC__)
+        if (&fnvnx_addrmap_deldtor_count && fnvnx_addrmap_deldtors) {
+            table = fnvnx_addrmap_deldtors;
+            ntable = fnvnx_addrmap_deldtor_count;
+        }
+#endif
+        table_set = 1;
+    }
+    hi = table ? ntable : 0;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (table[mid].orig < orig) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < ntable && table && table[lo].orig == orig ? &table[lo] : NULL;
+}
 
 void fnvnx_deldtor_set_text(const void *lo, const void *hi) {
     text_lo = (uintptr_t)lo;
@@ -30,7 +66,10 @@ static void *dd_call(unsigned k, void *self, unsigned flags) {
         if (flags & 1u) {
             d0(self);
             return self;
-        } else {
+        } else if (targets[k].d1) {
+            targets[k].d1(self);
+            return self;
+        } else if (!table) {
             void **vptr = *(void ***)self;
             unsigned i;
             /* D0 sits in the primary vtable, D1 right before it. The vtable ends at the first word that is not a
@@ -68,11 +107,14 @@ static const fnvnx_deldtor_fn_t stubs[FNVNX_DELDTOR_SLOTS] = {TE256(0) TE256(1) 
 
 fnvnx_deldtor_fn_t fnvnx_deldtor_fn(void (*d0)(void *self), uint32_t orig) {
     uint32_t k;
+    const fnvnx_s2_deldtor *t;
     if (!d0) return NULL;
     for (k = 0; k < used; k++)
         if (targets[k].d0 == d0) return stubs[k];
     if (used == FNVNX_DELDTOR_SLOTS) return NULL;
+    t = table_find(orig);
     targets[used].d0 = d0;
+    targets[used].d1 = t && (uintptr_t)t->d0 == (uintptr_t)d0 ? (dtor_fn)(uintptr_t)t->d1 : NULL;
     targets[used].orig = orig;
     return stubs[used++];
 }

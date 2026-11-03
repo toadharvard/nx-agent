@@ -32,6 +32,8 @@ PAIRS = [
     ('_memset', 'memset', 'cname'),
     ('@Fast@8', 'Fast', 'cname'),
     ('_Std@12', 'Std', 'cname'),
+    ('?g_fp@@3P6AXXZA', 'g_fp', 'cname'),                                   # void (__cdecl *g_fp)(void)
+    ('?s_fp@ns@@3P6GHH@ZA', '_ZN2ns4s_fpE', 'name'),                         # int (__stdcall *ns::s_fp)(int)
 ]
 
 ok = True

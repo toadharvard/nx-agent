@@ -13,6 +13,7 @@ Design, formats and measurements: [`../../docs/LINK.md`](../../docs/LINK.md).
 | `vtables.py` | Image vftables (primary and `{for B}`) -> Itanium address points; synthesized vtables/typeinfo for classes no object emits. |
 | `test_override.py` | End-to-end `--override` test (three hand-written units). |
 | `test_bridges.py` | Runs generated bridges under qemu-aarch64 (hand-written declarations). |
+| `test_bindings.py` | CRT/library providers, IAT slots by api, thread-local variables, hand-written vptr stores. |
 | `test_startup.py` | `__fnvnx_dyninit_`/`_dynexit_` address entries and the game-only `__cxa_atexit` rename. |
 | `test_vtables.py` | Secondary/synthesized vtables and the `??_G` D1/D0 table against GCC's own output and the linked image. |
 | `elfsyms.py` | ELF symbol tables, vtable-slot relocations, renaming undefined symbols (many old names -> one new). |
@@ -26,10 +27,12 @@ SSE2NEON=ext/sse2neon tools/link/compile.sh $T $O   # [units.list] [jobs]; write
 tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L
 tools/link/fnvlink.py probe $L $T                   # layouts of the aggregates + synthesized vtables; resolve again
 tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L [--override o.tsv] [--extern-text s4.txt]
+                                                    # [--crt-symbols t.tsv|none] [--imports t.tsv|none]
 tools/link/fnvlink.py apply $L $L/fixed             # renamed objects + zz_bridges.o + zz_addrmap.o
 tools/link/fnvlink.py check $L $L/fixed             # trial link with aliases.ld; what is still undefined
 python3 tools/link/test_link.py; python3 tools/link/test_bridges.py   # need SSE2NEON; qemu-user for the second
 python3 tools/link/test_override.py; python3 tools/link/test_vtables.py; python3 tools/link/test_startup.py
+python3 tools/link/test_bindings.py
 ```
 
 Needs `llvm-undname` (or `llvm-undname-18`; `apt install llvm-18`), `c++filt`, and binutils/gcc for

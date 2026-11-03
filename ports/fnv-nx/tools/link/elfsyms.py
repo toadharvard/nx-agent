@@ -111,6 +111,32 @@ def rename_undefined(src, dst, mapping):
     return renamed
 
 
+def undefine_symbols(src, dst, names):
+    """Copy ELF32 object src to dst with the global definitions of `names` turned into undefined symbols (st_shndx
+    0, value and size 0, NOTYPE): the object's own references to them then go through the undefined symbol, which
+    rename_undefined can redirect. The bodies stay, unreferenced. Returns the number of symbols changed."""
+    data = bytearray(open(src, 'rb').read())
+    if data[4] != 1:
+        raise ValueError('%s: ELF32 only' % src)
+    shoff, = struct.unpack_from('<I', data, 0x20)
+    shentsize, shnum, _ = struct.unpack_from('<HHH', data, 0x2e)
+    secs = [struct.unpack_from('<IIIIIIIIII', data, shoff + i * shentsize) for i in range(shnum)]
+    n = 0
+    for s in secs:
+        if s[1] != SHT_SYMTAB:
+            continue
+        stroff = secs[s[6]][4]
+        for k in range(1, s[5] // 16):
+            o = s[4] + k * 16
+            nm, _, _, info, _, shndx = struct.unpack_from('<IIIBBH', data, o)
+            name = data[stroff + nm:data.index(b'\0', stroff + nm)].decode('utf-8', 'surrogateescape')
+            if name in names and shndx and info >> 4 in (1, 2):
+                struct.pack_into('<IIBBH', data, o + 4, 0, 0, (info >> 4) << 4, 0, 0)
+                n += 1
+    open(dst, 'wb').write(data)
+    return n
+
+
 def vtable_slot_refs(path):
     """Names of the symbols that relocations inside a vtable object (_ZTV*) point at: {symbol name: count}.
     These references come from virtual-function slots, not from code, so units.json never lists them."""

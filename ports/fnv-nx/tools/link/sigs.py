@@ -248,6 +248,13 @@ def parse_msvc(mangled, dem):
                 break
     if cc_at is None:  # data
         sig.kind = 'data'
+        # a function-pointer variable: 'void (__cdecl *g_fn)(int)' / '(__stdcall *const ns::p)(void)'
+        fp = re.match(r'^(.*?)\(\s*(?:__\w+\s+)?\*\s*(?:const\s+)?((?:[\w`\'{}]+|::|<[^()]*>)+)\s*\)\s*\(.*\)\s*$', s)
+        if fp:
+            sig.qual = canon_qual(split_qual(fp.group(2)))
+            sig.raw_ret = s[:fp.start(2)].strip()
+            sig.static = access is not None
+            return sig
         name_at = 0
         for i, c in top_level(s):
             if c in (' ', '*', '&'):
