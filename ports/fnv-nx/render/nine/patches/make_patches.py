@@ -99,6 +99,141 @@ EDITS = {
          "            sp_flush_tex_tile_cache(softpipe->tex_cache[sh][i]);\n      }\n   }\n\n"
          "   for (i = 0; i < softpipe->framebuffer.nr_cbufs; i++)\n"),
     ],
+    # D3DPOOL_MANAGED keeps a full system-memory copy of every texture level and buffer (managed_buffer,
+    # managed.data) and uploads it to the pipe resource on first use: on Switch (and the host gate) GPU memory is
+    # the same physical memory, so that copy doubles the footprint of every game texture. With
+    # d3dadapter9_context.managed_unified a MANAGED texture (2D, cube, volume) or vertex/index buffer is created as a
+    # DEFAULT resource (allocated at creation, Lock maps it through transfer_map, no dirty tracking or upload) and
+    # still reports D3DPOOL_MANAGED in GetDesc/GetLevelDesc. Not counted in GetAvailableTextureMem (as before);
+    # survives Reset (Nine never drops resources there); EvictManagedResources has nothing to evict for them;
+    # SetLOD is a no-op (returns 0). RENDERTARGET/DEPTHSTENCIL/DYNAMIC + MANAGED stay invalid.
+    '0007-nine-managed-unified.patch': [
+        ('src/gallium/state_trackers/nine/adapter9.h',
+         "    BOOL shader_inline_constants;\n",
+         "    BOOL shader_inline_constants;\n"
+         "    BOOL managed_unified; /* fnv-nx: MANAGED resources without the system-memory copy (patch 0007) */\n"),
+        ('src/gallium/state_trackers/nine/device9.h',
+         "    struct {\n        boolean dynamic_texture_workaround;\n    } workarounds;\n",
+         "    struct {\n        boolean dynamic_texture_workaround;\n    } workarounds;\n\n"
+         "    boolean managed_unified; /* fnv-nx (patch 0007) */\n"),
+        ('src/gallium/state_trackers/nine/device9.h',
+         "static inline struct NineDevice9 *\nNineDevice9( void *data )\n{\n"
+         "    return (struct NineDevice9 *)data;\n}\n",
+         "static inline struct NineDevice9 *\nNineDevice9( void *data )\n{\n"
+         "    return (struct NineDevice9 *)data;\n}\n\n"
+         "/* fnv-nx (patch 0007): the pool a resource is really created in. On unified memory a MANAGED resource is a\n"
+         " * DEFAULT one without the system-memory copy (reported as MANAGED: NineResource9.managed_unified). */\n"
+         "static inline D3DPOOL\n"
+         "NineDevice9_ManagedPool( struct NineDevice9 *This, D3DPOOL Pool, DWORD Usage )\n{\n"
+         "    if (Pool == D3DPOOL_MANAGED && This->managed_unified &&\n"
+         "        !(Usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL | D3DUSAGE_DYNAMIC)))\n"
+         "        return D3DPOOL_DEFAULT;\n"
+         "    return Pool;\n}\n"),
+        ('src/gallium/state_trackers/nine/device9.c',
+         "    This->workarounds.dynamic_texture_workaround = pCTX->dynamic_texture_workaround;\n",
+         "    This->workarounds.dynamic_texture_workaround = pCTX->dynamic_texture_workaround;\n"
+         "    This->managed_unified = pCTX->managed_unified;\n"),
+        ('src/gallium/state_trackers/nine/resource9.h',
+         "    struct pipe_resource info; /* resource configuration */\n\n    long long size;\n};\n",
+         "    struct pipe_resource info; /* resource configuration */\n\n    long long size;\n\n"
+         "    /* fnv-nx (patch 0007): created MANAGED, held as a DEFAULT resource (pool) without a RAM copy */\n"
+         "    BOOL managed_unified;\n};\n"),
+        ('src/gallium/state_trackers/nine/resource9.c',
+         "        if (This->info.target != PIPE_BUFFER) {\n",
+         "        if (This->info.target != PIPE_BUFFER && !This->managed_unified) {\n"),
+        ('src/gallium/state_trackers/nine/resource9.c',
+         "    if (This->pool != D3DPOOL_MANAGED || This->type == D3DRTYPE_SURFACE)\n        return 0;\n\n"
+         "    prev = This->priority;\n",
+         "    if ((This->pool != D3DPOOL_MANAGED && !This->managed_unified) || This->type == D3DRTYPE_SURFACE)\n"
+         "        return 0;\n\n    prev = This->priority;\n"),
+        ('src/gallium/state_trackers/nine/resource9.c',
+         "    if (This->pool != D3DPOOL_MANAGED || This->type == D3DRTYPE_SURFACE)\n        return 0;\n\n"
+         "    return This->priority;\n",
+         "    if ((This->pool != D3DPOOL_MANAGED && !This->managed_unified) || This->type == D3DRTYPE_SURFACE)\n"
+         "        return 0;\n\n    return This->priority;\n"),
+        ('src/gallium/state_trackers/nine/texture9.c',
+         "    D3DSURFACE_DESC sfdesc;\n    HRESULT hr;\n    void *user_buffer = NULL, *user_buffer_for_level;\n",
+         "    D3DSURFACE_DESC sfdesc;\n    HRESULT hr;\n    void *user_buffer = NULL, *user_buffer_for_level;\n"
+         "    D3DPOOL PoolApp = Pool;\n"),
+        ('src/gallium/state_trackers/nine/texture9.c',
+         "    if (Usage & D3DUSAGE_AUTOGENMIPMAP)\n        Levels = 0;\n\n"
+         "    pf = d3d9_to_pipe_format_checked(screen, Format, PIPE_TEXTURE_2D, 0,\n",
+         "    /* fnv-nx (patch 0007): MANAGED on unified memory -> DEFAULT resource, no managed_buffer */\n"
+         "    Pool = NineDevice9_ManagedPool(pParams->device, Pool, Usage);\n"
+         "    This->base.base.managed_unified = Pool != PoolApp;\n\n"
+         "    if (Usage & D3DUSAGE_AUTOGENMIPMAP)\n        Levels = 0;\n\n"
+         "    pf = d3d9_to_pipe_format_checked(screen, Format, PIPE_TEXTURE_2D, 0,\n"),
+        ('src/gallium/state_trackers/nine/texture9.c',
+         "                              &sfdesc, &This->surfaces[l]);\n        if (FAILED(hr))\n            return hr;\n",
+         "                              &sfdesc, &This->surfaces[l]);\n        if (FAILED(hr))\n            return hr;\n"
+         "        This->surfaces[l]->base.managed_unified = This->base.base.managed_unified;\n"),
+        ('src/gallium/state_trackers/nine/texture9.c',
+         "    *pDesc = This->surfaces[Level]->desc;\n",
+         "    *pDesc = This->surfaces[Level]->desc;\n"
+         "    if (This->base.base.managed_unified)\n        pDesc->Pool = D3DPOOL_MANAGED;\n"),
+        ('src/gallium/state_trackers/nine/cubetexture9.c',
+         "    D3DSURFACE_DESC sfdesc;\n    void *p;\n    HRESULT hr;\n",
+         "    D3DSURFACE_DESC sfdesc;\n    void *p;\n    HRESULT hr;\n    D3DPOOL PoolApp = Pool;\n"),
+        ('src/gallium/state_trackers/nine/cubetexture9.c',
+         "    if (Usage & D3DUSAGE_AUTOGENMIPMAP)\n        Levels = 0;\n\n"
+         "    pf = d3d9_to_pipe_format_checked(screen, Format, PIPE_TEXTURE_CUBE, 0,\n",
+         "    /* fnv-nx (patch 0007): MANAGED on unified memory -> DEFAULT resource, no managed_buffer */\n"
+         "    Pool = NineDevice9_ManagedPool(pParams->device, Pool, Usage);\n"
+         "    This->base.base.managed_unified = Pool != PoolApp;\n\n"
+         "    if (Usage & D3DUSAGE_AUTOGENMIPMAP)\n        Levels = 0;\n\n"
+         "    pf = d3d9_to_pipe_format_checked(screen, Format, PIPE_TEXTURE_CUBE, 0,\n"),
+        ('src/gallium/state_trackers/nine/cubetexture9.c',
+         "                                  l, f, &sfdesc, &This->surfaces[f + 6 * l]);\n"
+         "            if (FAILED(hr))\n                return hr;\n",
+         "                                  l, f, &sfdesc, &This->surfaces[f + 6 * l]);\n"
+         "            if (FAILED(hr))\n                return hr;\n"
+         "            This->surfaces[f + 6 * l]->base.managed_unified = This->base.base.managed_unified;\n"),
+        ('src/gallium/state_trackers/nine/cubetexture9.c',
+         "    *pDesc = This->surfaces[Level * 6]->desc;\n",
+         "    *pDesc = This->surfaces[Level * 6]->desc;\n"
+         "    if (This->base.base.managed_unified)\n        pDesc->Pool = D3DPOOL_MANAGED;\n"),
+        ('src/gallium/state_trackers/nine/volumetexture9.c',
+         "    D3DVOLUME_DESC voldesc;\n    HRESULT hr;\n",
+         "    D3DVOLUME_DESC voldesc;\n    HRESULT hr;\n    D3DPOOL PoolApp = Pool;\n"),
+        ('src/gallium/state_trackers/nine/volumetexture9.c',
+         "    This->volumes = CALLOC(info->last_level + 1, sizeof(*This->volumes));\n",
+         "    /* fnv-nx (patch 0007): MANAGED on unified memory -> DEFAULT resource (volumes map it) */\n"
+         "    Pool = NineDevice9_ManagedPool(pParams->device, Pool, Usage);\n"
+         "    This->base.base.managed_unified = Pool != PoolApp;\n\n"
+         "    This->volumes = CALLOC(info->last_level + 1, sizeof(*This->volumes));\n"),
+        ('src/gallium/state_trackers/nine/volumetexture9.c',
+         "                             &voldesc, &This->volumes[l]);\n        if (FAILED(hr))\n            return hr;\n",
+         "                             &voldesc, &This->volumes[l]);\n        if (FAILED(hr))\n            return hr;\n"
+         "        This->volumes[l]->managed_unified = This->base.base.managed_unified;\n"),
+        ('src/gallium/state_trackers/nine/volumetexture9.c',
+         "    *pDesc = This->volumes[Level]->desc;\n",
+         "    *pDesc = This->volumes[Level]->desc;\n"
+         "    if (This->base.base.managed_unified)\n        pDesc->Pool = D3DPOOL_MANAGED;\n"),
+        ('src/gallium/state_trackers/nine/volume9.h',
+         "    unsigned pending_uploads_counter; /* pending uploads */\n};\n",
+         "    unsigned pending_uploads_counter; /* pending uploads */\n\n"
+         "    BOOL managed_unified; /* fnv-nx (patch 0007): MANAGED container held as DEFAULT */\n};\n"),
+        ('src/gallium/state_trackers/nine/volume9.c',
+         "    user_assert(pDesc != NULL, E_POINTER);\n    *pDesc = This->desc;\n",
+         "    user_assert(pDesc != NULL, E_POINTER);\n    *pDesc = This->desc;\n"
+         "    if (This->managed_unified)\n        pDesc->Pool = D3DPOOL_MANAGED;\n"),
+        ('src/gallium/state_trackers/nine/volume9.c',
+         "    user_assert(This->desc.Pool != D3DPOOL_DEFAULT ||\n"
+         "                (This->desc.Usage & D3DUSAGE_DYNAMIC), D3DERR_INVALIDCALL);\n",
+         "    user_assert(This->desc.Pool != D3DPOOL_DEFAULT || This->managed_unified ||\n"
+         "                (This->desc.Usage & D3DUSAGE_DYNAMIC), D3DERR_INVALIDCALL);\n"),
+        ('src/gallium/state_trackers/nine/surface9.c',
+         "    user_assert(pDesc != NULL, E_POINTER);\n    *pDesc = This->desc;\n",
+         "    user_assert(pDesc != NULL, E_POINTER);\n    *pDesc = This->desc;\n"
+         "    if (This->base.managed_unified)\n        pDesc->Pool = D3DPOOL_MANAGED;\n"),
+        ('src/gallium/state_trackers/nine/buffer9.c',
+         "    user_assert(Pool != D3DPOOL_SCRATCH, D3DERR_INVALIDCALL);\n",
+         "    user_assert(Pool != D3DPOOL_SCRATCH, D3DERR_INVALIDCALL);\n\n"
+         "    /* fnv-nx (patch 0007): MANAGED on unified memory -> DEFAULT buffer, no managed.data copy (the\n"
+         "     * vertex/index buffer desc keeps reporting MANAGED) */\n"
+         "    if (NineDevice9_ManagedPool(pParams->device, Pool, Usage) != Pool) {\n"
+         "        Pool = D3DPOOL_DEFAULT;\n        This->base.managed_unified = TRUE;\n    }\n"),
+    ],
 }
 
 

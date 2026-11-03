@@ -18,6 +18,7 @@ uint64_t nine_ext(uint32_t fn, const uint64_t* args, uint32_t nargs) {
 #endif
         return (uint64_t)(uintptr_t)nx_direct3d_create9((UINT)a[0]);
     }
+    if (fn == NINE_FN_HEAPSTAT) return a[0] ? nx_heaplog_post((const NxHeapStat*)(uintptr_t)a[0]) : D3DERR_INVALIDCALL_;
     if (!remote) return D3DERR_INVALIDCALL_;
     return nine_dispatch(remote, fn, a);
 }
@@ -35,19 +36,13 @@ __attribute__((constructor)) static void nine_register(void) {
 #include <string.h>
 #include "nine_shader_cache.h"
 
-static void nine_host_log(const char* line) {   /* host.c's log handle is private to it: append to the same file */
-    svcOutputDebugString(line, strlen(line));
-    FILE* f = fopen("sdmc:/fnvnx/host.log", "a");
-    if (f) { fputs(line, f); fclose(f); }
-}
-
 static void nine_shader_cache_report(void) {
     unsigned entries = 0, hits = 0, misses = 0, stores = 0;
     nx_nine_shader_cache_stats(&entries, &hits, &misses, &stores);
     char buf[160];
     snprintf(buf, sizeof buf, "nine: nvc0 shader cache: %u entries, %u hits, %u misses, %u stored\n",
              entries, hits, misses, stores);
-    nine_host_log(buf);
+    nx_host_log(buf);
 }
 
 static void nine_host_init_once(void) {
@@ -55,7 +50,7 @@ static void nine_host_init_once(void) {
     if (done) return;
     done = 1;
     int rc = nx_nine_shader_cache_init(NULL);   /* $NVC0_SHADER_CACHE, else NX_NINE_SHADER_CACHE_PATH */
-    nine_host_log(rc ? "nine: nvc0 shader cache off (cannot create its directory)\n"
+    nx_host_log(rc ? "nine: nvc0 shader cache off (cannot create its directory)\n"
                      : "nine: nvc0 shader cache on (" NX_NINE_SHADER_CACHE_PATH ", read-write)\n");
     atexit(nine_shader_cache_report);
 }

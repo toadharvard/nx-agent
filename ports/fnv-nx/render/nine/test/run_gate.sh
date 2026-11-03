@@ -10,5 +10,8 @@ HERE=$(cd "$(dirname "$0")" && pwd); R=$(cd "$HERE/.." && pwd)
 "$R/build.sh" "$WORK" "$JOBS" host
 NINE=$WORK "$R/gate/build.sh" "$WORK/gate"
 GUEST_ONLY=1 "$HERE/build.sh" "$WORK/guest"
-exec python3 -I "$HERE/gate.py" --guest "$WORK/guest/guest.nso" --elf "$WORK/guest/guest.elf" \
+# through gate/gate_launcher when it was built (same python, low 4 GiB free: README.md §5), else python3
+PY=python3
+[ -x "$WORK/gate/gate_launcher" ] && PY="$WORK/gate/gate_launcher"
+exec "$PY" -I "$HERE/gate.py" --guest "$WORK/guest/guest.nso" --elf "$WORK/guest/guest.elf" \
 	--lib "$WORK/gate/libnine_gate.so" --out "$WORK/frames"

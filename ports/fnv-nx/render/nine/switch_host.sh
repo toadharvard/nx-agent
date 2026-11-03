@@ -25,7 +25,7 @@ HFLAGS="$HOST_ARCH -O2 -g -ffunction-sections -fdata-sections -D__SWITCH__ -DHAV
 	-DNINE_HOST_HEAP_MIB=${HOST_HEAP_MIB:-512}"
 $CC $HFLAGS -DFNVNX_HOST_NO_CONSOLE -I"$TC/include" -I"$DEVKITPRO/libnx/include" -c "$TC/host/host.c" -o host-obj/host.o
 for s in "$R/host/nine_host_call.c" "$R/host/nine_d3d9.c" "$R/host/nine_present.c" "$R/host/nine_adapter.c" \
-         "$R/host/nine_guid.c" "$R/host/nine_shader_cache.c" gen/nine_proxy_host.c; do
+         "$R/host/nine_guid.c" "$R/host/nine_shader_cache.c" "$R/host/nine_heaplog.c" gen/nine_proxy_host.c; do
 	$CC $HFLAGS $HINC -c "$s" -o "host-obj/$(basename "${s%.c}").o"
 done
 $CXX -specs="$DEVKITPRO/libnx/switch.specs" $HOST_ARCH host-obj/*.o -L"$L/lib" \

@@ -12,16 +12,23 @@ allocates everything from a low-VA arena that is mapped into Unicorn too, so the
 directly and the guest can use the pointers the host returns (Lock, LockRect). Address randomization is turned
 off for this process (personality ADDR_NO_RANDOMIZE, re-exec) so the brk heap cannot sit on those ranges.
 
-Checks (PASS when all hold): the guest returns 0 and prints "fnvnx nine test: OK"; clear frames match their exact
-colour and bar; draw frames match the reference (grey frame, centre rectangle split into red/green/blue/white
-quadrants), ignoring 2-pixel bands at the rectangle and quadrant edges. Writes frame_NNN.png, ref_draw.png and, on
-mismatch, diff_NNN.png into --out.
+Checks (PASS when all hold): the guest returns 0 and prints "fnvnx nine test: OK" (its D3DX checks and the
+lock-after-draw / Reset readbacks all passed); clear frames match their exact colour and bar; draw frames match the
+reference (grey frame, centre rectangle split into red/green/blue/white quadrants; the last two, after the texture
+was rewritten following two draws and after Reset, rotated: green/blue/white/red), ignoring 2-pixel bands at the
+rectangle and quadrant edges; at least 3 heap-statistics lines reached the host (render/nine/heaplog.c). Writes
+frame_NNN.png, ref_draw.png, ref_draw_rotated.png and, on mismatch, diff_NNN.png into --out. NINE_MANAGED_SYSMEM=1
+runs Nine with its system-memory copy of MANAGED resources (without patch 0007's path) for comparison.
 
 --game: the guest is the game image (game/build.sh). It boots as far as it goes (without FalloutNV.exe the image
 is empty and static init stops, J-0021), then the gate calls into it the way the engine does: LoadLibraryA("d3d9.dll"),
 GetProcAddress("Direct3DCreate9") (must be the proxy), Direct3DCreate9 -> Nine, GetAdapterCount, GetAdapterIdentifier,
-Release, plus the IAT lookup of d3d9!D3DPERF_SetOptions. The original-image window is emulator-only memory in this
-mode (this python occupies it in the host process).
+Release, plus the IAT lookup of d3d9!D3DPERF_SetOptions. Run through gate/gate_launcher (FNVNX_GATE_LAUNCHER set),
+the original-image window is host memory at the same address like every other guest region and the gate checks
+it both ways (host write -> emulator read, emulator write -> host read); under the system python3 (a non-PIE
+executable mapped at 0x00200000..0x01dxxxxx) the window can only be emulator-only memory, which is noted.
+
+    gate/gate_launcher -I render/nine/test/gate.py --game ...     (gate/build.sh builds the launcher)
 """
 import argparse
 import ctypes
@@ -93,13 +100,39 @@ def map_object_of(map_path, section):
     return None
 
 
-def game_probe(emu, a, lib, emu_guest):
+def window_check(emu, unshared):
+    """The original-image window must be the same memory in the host process and in the emulator (as on the
+    Switch, where host code and guest share one address space): host write -> emulator read and back."""
+    win = [(b, n) for b, n in getattr(emu, "mapped_fixed", []) if b < IMAGE_END and b + n > IMAGE_BASE]
+    if not win:
+        return ("image window mapped by the boot (map_fixed)", False, "not mapped")
+    base, size = win[0]
+    if any(u[0] == base for u in unshared):
+        return ("image window shared with the host process", False,
+                f"{base:#x}+{size:#x} emulator-only (run gate.py through gate/gate_launcher)")
+    uc = emu.uc
+    addr = base + size - 64                       # last bytes of the first window mapping: restored afterwards
+    saved = bytes(uc.mem_read(addr, 32))
+    ctypes.memmove(addr, b"fnvnx gate: host -> guest\0\0\0\0\0\0", 32)
+    ok1 = bytes(uc.mem_read(addr, 32)).startswith(b"fnvnx gate: host -> guest")
+    uc.mem_write(addr, b"fnvnx gate: guest -> host\0\0\0\0\0\0")
+    ok2 = ctypes.string_at(addr, 32).startswith(b"fnvnx gate: guest -> host")
+    uc.mem_write(addr, saved)
+    return ("image window shared with the host process", ok1 and ok2,
+            f"{base:#x}+{size:#x}, host write seen by the emulator {ok1}, emulator write seen by the host {ok2}")
+
+
+def game_probe(emu, a, lib, emu_guest, unshared):
     """Boot the game image as far as it goes (trace mode without FalloutNV.exe: static init stops, J-0021), then call
     into the guest the way the engine does: LoadLibraryA("d3d9.dll") -> GetProcAddress("Direct3DCreate9") -> call
     it -> IDirect3D9::GetAdapterCount / GetAdapterIdentifier / Release through the proxy vtable, served by Nine."""
     from unicorn.arm64_const import (UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, UC_ARM64_REG_X0,
                                      UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3)
     syms = elf_symbols(a.elf)
+    if getattr(emu, "relocatable", False):         # S5's relocatable guest: link base 0x30000000, run elsewhere
+        lo, hi, delta = emu.link_base, emu.link_base + emu.size, emu.base - emu.link_base
+        syms = {k: v + delta if lo <= v < hi else v for k, v in syms.items()}
+        print(f"   relocatable guest: link base {lo:#x}, running at {emu.base:#x}")
     need = ["LoadLibraryA", "GetProcAddress", "fnvnx_win32_lookup_export", "Direct3DCreate9", "D3DPERF_SetOptions",
             "fnvnx_d3d9_register"]
     missing = [n for n in need if n not in syms]
@@ -134,7 +167,10 @@ def game_probe(emu, a, lib, emu_guest):
         uc.reg_write(UC_ARM64_REG_LR, emu_guest.RETURN_ADDR)
         emu.cur = emu.threads[1]
         emu.cur.state = "running"
-        uc.emu_start(fn, emu_guest.RETURN_ADDR, count=200_000_000)
+        try:
+            uc.emu_start(fn, emu_guest.RETURN_ADDR, count=200_000_000)
+        except emu_guest.UcError as e:
+            raise SystemExit(f"probe call {fn:#x} faulted: {e} at pc {uc.reg_read(UC_ARM64_REG_PC):#x}")
         if uc.reg_read(UC_ARM64_REG_PC) != emu_guest.RETURN_ADDR:
             raise SystemExit(f"probe call {fn:#x} did not return (pc {uc.reg_read(UC_ARM64_REG_PC):#x})")
         return uc.reg_read(UC_ARM64_REG_X0)
@@ -142,7 +178,13 @@ def game_probe(emu, a, lib, emu_guest):
     def rd32(addr):
         return struct.unpack("<I", uc.mem_read(addr, 4))[0]
 
-    checks = []
+    checks = [window_check(emu, unshared)]
+    if not os.environ.get("FNVNX_GATE_LAUNCHER") and not checks[0][1]:
+        print(f"   note: {checks[0][0]}: {checks[0][2]} (not required without the launcher)")
+        checks = []
+    heap0 = lib.gate_heaplog_lines()
+    checks.append(("heap statistics posted during boot (HEAPLOG_S build: nine_register.cpp starts heaplog.c)",
+                   heap0 >= 1 or not a.heaplog, f"{heap0} line(s)"))
     try:
         dll = put(scratch, "d3d9.dll")
         name = put(scratch + 0x20, "Direct3DCreate9")
@@ -185,6 +227,8 @@ def main(argv):
     ap.add_argument("--elf", help="guest ELF for symbolized crash traces (required with --game)")
     ap.add_argument("--game", action="store_true", help="the guest is the game image (render/nine/game/build.sh): "
                     "boot it as far as it goes, then probe d3d9.dll -> Direct3DCreate9 -> Nine")
+    ap.add_argument("--heaplog", action="store_true", help="--game: the image was built with HEAPLOG_S (expect heap "
+                    "statistics lines from the boot)")
     a = ap.parse_args(argv)
     if a.game and not a.elf:
         ap.error("--game needs --elf (symbol addresses)")
@@ -230,6 +274,7 @@ def main(argv):
     for fn in ("gate_arena_base", "gate_arena_size", "gate_arena_peak"):
         getattr(lib, fn).restype = ctypes.c_uint64
     lib.gate_frame_count.restype = ctypes.c_int
+    lib.gate_heaplog_lines.restype = ctypes.c_uint
     lib.gate_get_frame.restype = ctypes.c_int
     lib.gate_get_frame.argtypes = [ctypes.c_int] + [ctypes.POINTER(ctypes.c_int)] * 4 + [ctypes.POINTER(ctypes.c_void_p)]
     total = CLEAR_FRAMES + DRAW_FRAMES
@@ -270,7 +315,7 @@ def main(argv):
     if a.elf:
         emu.load_symbols(a.elf)
     if a.game:
-        return game_probe(emu, a, lib, emu_guest)
+        return game_probe(emu, a, lib, emu_guest, unshared)
     try:
         rc = emu.run()
     except SystemExit as e:                 # the guest console was already printed live (h_console_write)
@@ -281,17 +326,26 @@ def main(argv):
           f"arena_peak={lib.gate_arena_peak() / 1048576:.1f} MiB")
     ok = rc == 0 and "fnvnx nine test: OK" in out and lib.gate_frame_count() == total
 
-    # reference for the textured draw
+    heap_lines = lib.gate_heaplog_lines()
+    print(f"   heap statistics lines (render/nine/heaplog.c -> host): {heap_lines}")
+    ok = ok and heap_lines >= 3
+
+    # reference for the textured draw: quadrants red, green / blue, white; the last two draw frames (after the
+    # lock-after-draw rewrite, and after Reset) rotated: green, blue / white, red
+    quads = [(180, 360, 320, 640), (180, 360, 640, 960), (360, 540, 320, 640), (360, 540, 640, 960)]
+    cols = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 255)]
     ref = np.full((H, W, 3), 64, np.uint8)
-    for (y0, y1, x0, x1), c in [((180, 360, 320, 640), (255, 0, 0)), ((180, 360, 640, 960), (0, 255, 0)),
-                                ((360, 540, 320, 640), (0, 0, 255)), ((360, 540, 640, 960), (255, 255, 255))]:
-        ref[y0:y1, x0:x1] = c
+    ref_rot = ref.copy()
+    for i, (y0, y1, x0, x1) in enumerate(quads):
+        ref[y0:y1, x0:x1] = cols[i]
+        ref_rot[y0:y1, x0:x1] = cols[(i + 1) % 4]
     band = np.zeros((H, W), bool)
     for x in (320, 640, 960):
         band[178:542, x - 2:x + 2] = True
     for y in (180, 360, 540):
         band[y - 2:y + 2, 318:962] = True
     write_png(os.path.join(a.out, "ref_draw.png"), ref)
+    write_png(os.path.join(a.out, "ref_draw_rotated.png"), ref_rot)
 
     for f in keep:
         w, h, stride, fmt, data = (ctypes.c_int(), ctypes.c_int(), ctypes.c_int(), ctypes.c_int(), ctypes.c_void_p())
@@ -314,8 +368,11 @@ def main(argv):
             exp[330:390, 0:f % 1280] = 255
             mask = np.ones((H, W), bool)
             what = f"clear {clear_color(f)} + bar {f % 1280} px"
-        else:
+        elif f < CLEAR_FRAMES + 2:
             exp, mask, what = ref, ~band, "textured draw (ref_draw.png)"
+        else:
+            exp, mask, what = ref_rot, ~band, ("relocked texture" if f == CLEAR_FRAMES + 2 else
+                                               "after Reset") + " (ref_draw_rotated.png)"
         diff = (np.abs(rgb.astype(np.int16) - exp.astype(np.int16)).max(axis=2) > 2) & mask
         bad = int(diff.sum())
         print(f"   frame {f}: {what}: {'ok' if bad == 0 else f'{bad} pixels differ'}")

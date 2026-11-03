@@ -45,6 +45,9 @@ HRESULT nx_nine_create_adapter(ID3DAdapter9** out) {
     ctx->csmt_force = 1;                 /* nine's CSMT worker thread: engine thread only records */
     ctx->dynamic_texture_workaround = FALSE;
     ctx->shader_inline_constants = FALSE;
+    /* patch 0007: GPU memory is system memory (Tegra X1; softpipe in the gate), so MANAGED textures and buffers
+     * are DEFAULT resources without Nine's system-memory copy. NINE_MANAGED_SYSMEM=1 (gate) restores the copy. */
+    ctx->managed_unified = !getenv("NINE_MANAGED_SYSMEM");
     ctx->destroy = nx_destroy;
     D3DADAPTER_IDENTIFIER9* id = &ctx->identifier;
     snprintf(id->Driver, sizeof id->Driver, "nine-nx");

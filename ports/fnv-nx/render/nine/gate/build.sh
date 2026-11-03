@@ -18,13 +18,25 @@ INC="-I$R/host -I$R -I$M/include -I$M/include/D3D9 -I$M/src -I$M/src/gallium/inc
 	-I$M/src/gallium/drivers -I$M/src/gallium/winsys -I$M/src/gallium/state_trackers/nine"
 CFLAGS="-O1 -g -fPIC -fvisibility=hidden -Wall -Wno-unused-function -DNINE_NX -D_GNU_SOURCE -DHAVE_ENDIAN_H -DHAVE_PTHREAD -DHAVE_TIMESPEC_GET"
 for s in "$R/host/nine_host_call.c" "$R/host/nine_d3d9.c" "$R/host/nine_present.c" "$R/host/nine_adapter.c" \
-         "$R/host/nine_guid.c" gen/nine_proxy_host.c "$HERE/gate_winsys.c" "$HERE/gate_alloc.c"; do
+         "$R/host/nine_guid.c" "$R/host/nine_heaplog.c" gen/nine_proxy_host.c "$HERE/gate_winsys.c" "$HERE/gate_alloc.c"; do
 	$CC $CFLAGS $INC -c "$s" -o "$(basename "${s%.c}").o"
 done
 WRAP=""
 for f in malloc calloc realloc free posix_memalign memalign aligned_alloc strdup; do WRAP="$WRAP -Wl,--wrap=$f"; done
 $CC -shared -o libnine_gate.so nine_host_call.o nine_d3d9.o nine_present.o nine_adapter.o nine_guid.o \
-	nine_proxy_host.o gate_winsys.o gate_alloc.o -L"$L" \
+	nine_heaplog.o nine_proxy_host.o gate_winsys.o gate_alloc.o -L"$L" \
 	-Wl,--start-group -lnine_st -lsoftpipe -lgallium -lnir -lcompiler -lmesa_util -lmesa_format -lgalliumvl_stub -lwsw \
 	-Wl,--end-group $WRAP -Wl,-z,defs -lz -lpthread -ldl -lm -lstdc++
 echo "built $OUT/libnine_gate.so"
+
+# gate_launcher: the same python (the one that has unicorn and numpy), embedded in a PIE executable, so the low
+# 4 GiB stay free for the guest's ranges (FalloutNV.exe's image window included). Needs a shared libpython.
+read -r PYINC PYLIB PYVER PYHOME PYSHARED < <(python3 -c "import sysconfig, sys; g = sysconfig.get_config_var; \
+print(g('INCLUDEPY'), g('LIBDIR'), g('LDVERSION'), sys.base_prefix, g('Py_ENABLE_SHARED') or 0)")
+if [ "$PYSHARED" = 1 ]; then
+	$CC -O2 -fPIE -pie -DGATE_PYTHON_HOME="\"$PYHOME\"" -I"$PYINC" "$HERE/launcher.c" -o gate_launcher \
+		-L"$PYLIB" -lpython"$PYVER" -Wl,-rpath,"$PYLIB" -lpthread -ldl -lutil -lm
+	echo "built $OUT/gate_launcher"
+else
+	echo "no shared libpython: gate_launcher not built (gate.py --game falls back to emulator-only image memory)"
+fi

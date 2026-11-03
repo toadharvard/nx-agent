@@ -46,7 +46,14 @@ FARPROC resolve(const char* proc) {
 int g_done;
 } // namespace
 
+#ifdef FNVNX_HEAPLOG_S
+extern "C" int fnvnx_heaplog_start(unsigned period_s);   // heaplog.c (game/build.sh HEAPLOG_S=<seconds>)
+#endif
+
 extern "C" void fnvnx_d3d9_register(void) {
     if (__atomic_exchange_n(&g_done, 1, __ATOMIC_ACQ_REL)) return;
     fnvnx_register_module("d3d9.dll", resolve);
+#ifdef FNVNX_HEAPLOG_S
+    fnvnx_heaplog_start(FNVNX_HEAPLOG_S);   // periodic guest + host heap statistics into host.log
+#endif
 }

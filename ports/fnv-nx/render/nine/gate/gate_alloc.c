@@ -37,7 +37,7 @@ static uintptr_t g_head = ARENA_BASE;
 static void* g_free[SMALL_SHIFT + 1];
 static Big* g_big;
 static int g_ready;
-static uint64_t g_peak;
+static uint64_t g_peak, g_inuse;   /* bump extent high-water; bytes in live blocks */
 
 void* __real_realloc(void*, size_t);
 void __real_free(void*);
@@ -94,6 +94,7 @@ static void* arena_alloc(size_t size, size_t align) {
     }
     pthread_mutex_unlock(&g_lock);
     if (!b) { errno = ENOMEM; return NULL; }
+    __atomic_add_fetch(&g_inuse, cls == LARGE ? (uint64_t)pages * PAGE : (uint64_t)1 << cls, __ATOMIC_RELAXED);
     uintptr_t p = ((uintptr_t)b + HDR + align - 1) & ~(uintptr_t)(align - 1);
     Hdr* h = (Hdr*)(p - HDR);
     h->magic = MAGIC; h->cls = cls; h->off = (uint32_t)(p - (uintptr_t)b); h->pages = pages;
@@ -121,6 +122,7 @@ void __wrap_free(void* p) {
     void* b = (char*)p - h->off;
     uint32_t cls = h->cls, pages = h->pages;
     h->magic = 0;
+    __atomic_sub_fetch(&g_inuse, cls == LARGE ? (uint64_t)pages * PAGE : (uint64_t)1 << cls, __ATOMIC_RELAXED);
     pthread_mutex_lock(&g_lock);
     if (cls == LARGE) { Big* n = b; n->pages = pages; n->next = g_big; g_big = n; }
     else { *(void**)b = g_free[cls]; g_free[cls] = b; }
@@ -155,5 +157,6 @@ char* __wrap_strdup(const char* s) {
 }
 
 __attribute__((visibility("default"))) uint64_t gate_arena_peak(void) { return g_peak; }
+__attribute__((visibility("default"))) uint64_t gate_arena_used(void) { return g_inuse; }
 __attribute__((visibility("default"))) uint64_t gate_arena_base(void) { return ARENA_BASE; }
 __attribute__((visibility("default"))) uint64_t gate_arena_size(void) { return ARENA_SIZE; }
