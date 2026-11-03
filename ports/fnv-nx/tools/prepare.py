@@ -254,7 +254,8 @@ IOBUF_NAMES = set('''_fclose_nolock _fdopen _fileno _fseeki64 _fsopen _ftelli64 
 MACRO_NAMES = {'_alloca'}     # macros on the target (fnvnx_compat.h): no using-declaration possible
 
 OWN_STD = re.compile(r'\b(?:class|struct)\s+(?:exception|bad_alloc|bad_cast|type_info)\s*[:{]')
-PLACEMENT_PARAMS = re.compile(r'^\s*(?:size_t|unsigned\s+int|void\s*\*)\s*\w*\s*,\s*void\s*\*\s*\w*\s*$')
+PLACEMENT_PARAMS = re.compile(r'^\s*(?:(?:std::)?size_t|__SIZE_TYPE__|unsigned(?:\s+(?:int|long))?|void\s*\*)\s*\w*\s*,'
+                              r'\s*void\s*\*\s*\w*\s*$')
 
 def new_header(text):
     """The header that declares placement new for this file: <new>, or the shim's fnvnx_new.h where the file
@@ -331,7 +332,93 @@ def r_newdel_size(path, text, stats):
         return m.group(1) + params + m.group(3)
     return NEWDEL_PARAMS.sub(sub, text)
 
-RULES = [r_sse_local_types, r_sse_local_protos, r_sse_members, r_sse_qualified, r_platform_protos, r_newdel_size]
+# ---- GAME1: platform-looking names that the decomp binds to game code (D13)
+#
+# DECL1 replaces the decomp's prototype of a CRT / Win32 function by the platform's, which binds every call by name.
+# That is only right where the unit's recipe (build/units.json `symbols`) binds the decorated name to the function's
+# own import slot, or (CRT names) to the CRT function of that name. Some units bind a Win32 name to other code: a game
+# function (GetCurrentThreadId -> 0x00830470, GetFileSize -> FileSizeInfo::GetFileSize, Sleep -> the spin lock's
+# acquire) or another import's slot (EnterCriticalSection -> InterlockedIncrement's IAT entry in memorymanager.cpp).
+# GAME1 renames such a name, in the unit and in the local headers it includes that declare it, to fnvnx_game_<name>
+# (declaration and calls; class members of that name are left alone) so DECL1 / CALL1 no longer see a platform
+# function and the link binds the call by the unit's address (S2: `fnvnx_game_X` is the decomp's X).
+
+GAME_PREFIX = 'fnvnx_game_'
+_GAME_FILES = None
+IAT_RANGE = (0x00fdf000, 0x00fe0000)
+_DECO = [re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$'), re.compile(r'^__imp_\?([A-Za-z_]\w*)@@Y'),
+         re.compile(r'^\?([A-Za-z_]\w*)@@Y'), re.compile(r'^@([A-Za-z_]\w*)@\d+$'),
+         re.compile(r'^_([A-Za-z_]\w*?)(?:@\d+)?$')]
+
+def _units_json(path):
+    d = os.path.dirname(os.path.abspath(path))
+    while d != os.path.dirname(d):
+        f = os.path.join(d, 'build', 'units.json')
+        if os.path.exists(f): return d, f
+        d = os.path.dirname(d)
+    return None, None
+
+def game_bound_names(path):
+    """{absolute file: {name}} - Win32 names to rename in that file (see above)."""
+    global _GAME_FILES
+    if _GAME_FILES is not None: return _GAME_FILES
+    import json
+    _GAME_FILES = {}
+    root, uj = _units_json(path)
+    if not uj: return _GAME_FILES
+    global PLATFORM
+    if PLATFORM is None: PLATFORM = platform_names()
+    win32 = {n for n, h in PLATFORM.items() if h == '"fnvnx_win32.h"'}
+    units = json.load(open(uj))['units']
+    iat_owner = {}
+    for u in units:
+        for k, v in u.get('symbols', {}).items():
+            m = _DECO[0].match(k)
+            if m: iat_owner.setdefault(int(v, 16), set()).add(m.group(1))
+    bad = {}                                         # unit source -> {name}
+    for u in units:
+        for k, v in u.get('symbols', {}).items():
+            for rx in _DECO:
+                m = rx.match(k)
+                if not m: continue
+                n, a = m.group(1), int(v, 16)
+                if n in win32:
+                    in_iat = IAT_RANGE[0] <= a < IAT_RANGE[1]
+                    if not (in_iat and (n in iat_owner.get(a, {n}))):
+                        bad.setdefault(u['source'], set()).add(n)
+                break
+    inc = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
+    for src, names in bad.items():
+        todo, seen = [os.path.normpath(os.path.join(root, src))], set()
+        while todo:                                  # the unit and the local headers it includes
+            f = todo.pop()
+            if f in seen or not os.path.isfile(f): continue
+            seen.add(f)
+            t = open(f, encoding='utf-8', errors='surrogateescape').read()
+            hit = {n for n in names if re.search(r'\b%s\b' % n, t)}
+            if hit: _GAME_FILES.setdefault(f, set()).update(hit)
+            for i in inc.findall(t):
+                for base in (os.path.dirname(f), os.path.join(root, 'include')):
+                    g = os.path.normpath(os.path.join(base, i))
+                    if os.path.isfile(g): todo.append(g); break
+    return _GAME_FILES
+
+def r_game_bound_names(path, text, stats):
+    """GAME1: rename Win32-looking names that this unit binds to game code (D13, see above)."""
+    names = game_bound_names(path).get(os.path.normpath(os.path.abspath(path)))
+    if not names: return text
+    spans = scope_spans(text)
+    out, pos = [], 0
+    for m in re.finditer(r'(?<![\w.>:~])(%s)\b' % '|'.join(sorted(names)), text):
+        chain = scope_chain(spans, m.start())
+        if chain and chain[-1][0] == 'class': continue               # a member of that name
+        out.append(text[pos:m.start()]); out.append(GAME_PREFIX + m.group(1)); pos = m.end()
+        stats['GAME1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+RULES = [r_sse_local_types, r_sse_local_protos, r_sse_members, r_sse_qualified, r_game_bound_names,
+         r_platform_protos, r_newdel_size]
 
 # ---------------------------------------------------------------------------------------------------------- driver
 
