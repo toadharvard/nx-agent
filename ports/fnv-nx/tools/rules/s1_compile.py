@@ -319,6 +319,36 @@ def r_c_data_linkage(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- GOTO1
+
+SCALAR_INIT = re.compile(r'^([ \t]*)((?:(?:unsigned|signed|volatile)\s+)*(?:bool|char|short|int|long(?:\s+long)?|float|'
+                         r'double|unsigned|\w+\s*\*+))\s+(\**\s*\w+)\s*=\s*([^;{}=][^;{}]*);', re.M)
+
+def r_goto_scalar_inits(path, text, stats):
+    """GOTO1: in functions that use goto, `T x = e;` (scalar or pointer T) -> `T x; x = e;` on the same line. MSVC
+    lets a goto jump past such an initialization; C++ (and GCC even with -fpermissive) does not, but jumping past a
+    declaration without initializer is allowed, and for a scalar the split changes nothing."""
+    if 'goto' not in text: return text
+    spans = [sp for sp in prepare.scope_spans(text) if sp[2] == 'function']
+    edits = []
+    for o, c, k, h in spans:
+        body = text[o:c]
+        if not re.search(r'\bgoto\s+\w+\s*;', body): continue
+        for m in SCALAR_INIT.finditer(text, o, c):
+            t = m.group(2)
+            if re.match(r'(?:return|else|case|goto|delete|throw|typedef|using)\b', t) or ',' in m.group(4) and '(' not in m.group(4):
+                continue
+            name = m.group(3).lstrip('* \t')
+            edits.append((m.start(), m.end(), '%s%s %s; %s = %s;' % (m.group(1), t, m.group(3), name, m.group(4))))
+    if not edits: return text
+    out, pos = [], 0
+    for s, e, r in sorted(set(edits)):
+        if s < pos: continue
+        out.append(text[pos:s]); out.append(r); pos = e
+        stats['GOTO1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -338,5 +368,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage,
+RULES = [r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits,
          r_msvc_base_layout]
