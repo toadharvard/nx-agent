@@ -71,6 +71,18 @@ progress lines of all runs.
     removed from the prepared tree.
   * fnvlink keeps its demangle and layout caches in `build/link/out/`.
   * Test suites are cached only when they passed; a failing suite runs again on every run.
+* Checkpoints (a killed run resumes; finished stages are skipped): a stage records `running` before it starts and
+  its result only at the end, so an interrupted stage reruns and the finished ones stay cached. Inside the long
+  stages:
+  * census keeps every unit's result in `build/census/cache/`, under the stage fingerprint, through a caching
+    compiler wrapper passed to census.sh as `CXX`;
+  * compile keeps every finished object; a unit interrupted mid-compile (left `.o.tmp`, or a log without an error)
+    is compiled again;
+  * the link caches stay in `build/link/out/`;
+  * tests write `results.json` after every suite.
+
+  On a shared machine, use `JOBS=2`. render/shaders/build.sh (suite s6b) runs ninja with its own default
+  parallelism.
 * The pipeline never stops at a failing stage. Stages that need it are skipped, and the independent ones run,
   including the tests. The exit code is 1 when any stage failed, including a failing test suite. Warnings do not
   set it.
