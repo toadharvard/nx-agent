@@ -365,3 +365,20 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   (largest bucket: Animation 34, NiAVObject 29, NiD3DPass 25); `_iobuf` -> FILE; float overload ambiguities;
   force-include `fnvnx_asm.h` for the 10 `fnv_FloatToInt` units; include S4's platform declarations and merge
   `fnvnx_win32_ext.h` into the shim.
+
+### J-0017 | 2026-11-03 | stream: S2-link | status: wip | parent: J-0011,J-0015
+
+* **did** - `fnvlink.py resolve --override <tsv>` (address, native symbol, object/archive): the override takes the
+  address (by-address refs via `__fnv_<addr>`, address map entry -> S3's code-pointer/vftable rewrite); the decomp
+  definition is weakened and its Itanium name (all ctor/dtor variants) aliased to the override, so its own object's
+  calls, GCC vtable slots and inline copies follow; `apply` adds the override objects. `shadowed.tsv` reports per
+  shadowed definition the units with inline copies and the units whose inlined callers still run the decomp body.
+  `--extern-text` adds S4's list as E entries. `test_override.py` passes (plus test_link, test_bridges).
+* **found** - Real build, 3 most-referenced addresses overridden: trial link clean, decomp name / `__fnv_` / override
+  at one address; `FUN_00c85750` has inlined callers in 9 units (to rebuild or rewrite with the override).
+  Address map F 24,817, C 895, X 496, G 41, V 446, E 4,622.
+* **decided** - Overrides keep the decomp definition's signature; static decomp definitions and names shared by
+  other addresses are not redirected (reported).
+* **metrics** - link_objects=2067 link_refs=107294 link_resolved=91076 link_bridges=384 link_addrmap_E=4622
+* **next** - S2b-vslots (needs the player's exe); secondary/synthesized vtables and `??_G` D1/D0 split; S6n's
+  override table.
