@@ -88,12 +88,128 @@ def r_sse_members(path, text, stats):
         return '((%s*)&(%s))[' % (ELEM[m.group(3)], m.group(1))
     return M128_MEMBER.sub(sub, text)
 
-RULES = [r_sse_local_types, r_sse_local_protos, r_sse_members]
+QUALIFIED_SSE = re.compile(r'\b(?:\w+::)+(?=(?:__m128[id]?|__m64|_mm_\w+)\b)')
+
+def r_sse_qualified(path, text, stats):
+    """SSE4: N::__m128 / N::_mm_mul_ps (qualified names of the removed local copies) -> the global names."""
+    text, n = QUALIFIED_SSE.subn('', text)
+    stats['SSE4'] += n
+    return text
+
+# ---- scopes: which kind of brace a position is inside (namespace / class / extern / function / other)
+
+SCOPE_HEAD = re.compile(r'(\bnamespace\b[^;{}()]*|\b(?:class|struct|union)\b[^;{}()]*|extern\s+"C\+?\+?"\s*'
+                        r'|\)[^;{}]*|=\s*|\benum\b[^;{}]*)$')
+
+def scope_map(text):
+    """Sorted list of (open, close, kind) for every brace pair.
+    kind: namespace / class / extern / function / init / enum / other."""
+    spans, stack, i, n = [], [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"' or c == "'":
+            q = c; i += 1
+            while i < n and text[i] != q:
+                i += 2 if text[i] == '\\' else 1
+        elif text.startswith('//', i):
+            j = text.find('\n', i); i = n if j < 0 else j
+        elif text.startswith('/*', i):
+            j = text.find('*/', i); i = n if j < 0 else j + 1
+        elif c == '{':
+            head = text[max(0, i - 300):i].rstrip()
+            m = SCOPE_HEAD.search(head)
+            kind = 'other'
+            if m:
+                h = m.group(1)
+                kind = ('namespace' if h.startswith('namespace') else 'extern' if h.startswith('extern') else
+                        'function' if h.startswith(')') else 'init' if h.startswith('=') else
+                        'enum' if h.startswith('enum') else 'class')
+            stack.append((i, kind))
+        elif c == '}':
+            if stack:
+                o, k = stack.pop(); spans.append((o, i, k))
+        i += 1
+    spans.sort()
+    return spans
+
+def innermost(spans, pos):
+    kind = 'file'
+    for o, c, k in spans:
+        if o > pos: break
+        if o < pos < c: kind = k
+    return kind
+
+CRT_NAMES = '''memset memcpy memmove memcmp memchr strlen strcmp strncmp strcpy strncpy strcat strncat strchr strrchr strstr
+    _stricmp _strnicmp stricmp strnicmp _strdup strtok sprintf _snprintf vsprintf _vsnprintf sscanf printf fprintf atoi
+    atof atol strtol strtoul strtod malloc free calloc realloc _msize abs labs fabs fabsf sqrt sqrtf sin sinf cos cosf
+    tan tanf asin asinf acos acosf atan atanf atan2 atan2f exp expf log logf log10 log10f pow powf floor floorf ceil
+    ceilf fmod fmodf modf frexp ldexp qsort bsearch rand srand toupper tolower isspace isdigit isalpha isalnum isupper
+    islower exit abort'''.split()
+
+def platform_names():
+    names = set(CRT_NAMES)
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'shim', 'include', 'fnvnx_win32.h')
+    for line in open(here):
+        m = re.match(r'^[A-Za-z_][\w \*]*?\b([A-Z_][A-Za-z0-9_]+)\(', line)
+        if m: names.add(m.group(1))
+    return names
+
+PLATFORM = None
+PROTO = re.compile(r'^[ \t]*(?:extern\s+"C"\s+)?(?:__declspec\(\w+\)\s+)?(?:static\s+)?(?:inline\s+)?'
+                   r'[A-Za-z_][\w \t\*&:<>,]*?[\s\*&](?:__cdecl\s+|__stdcall\s+|__fastcall\s+|WINAPI\s+)?'
+                   r'(\w+|operator\s+(?:new|delete)(?:\s*\[\s*\])?)\s*\([^;{}]*\)\s*(?:throw\s*\([^)]*\)\s*)?;[ \t]*$',
+                   re.M)
+
+def r_platform_protos(path, text, stats):
+    """DECL1: drop the decomp's own prototypes of CRT / Win32 functions (and namespace-scope operator new/delete)
+    outside classes; the platform headers declare them with the target's types (size_t is unsigned long on
+    AArch64 ILP32, unsigned int on MSVC x86)."""
+    global PLATFORM
+    if PLATFORM is None: PLATFORM = platform_names()
+    spans, out, pos = None, [], 0
+    for m in PROTO.finditer(text):
+        name = re.sub(r'\s+', ' ', m.group(1))
+        if not name.startswith('operator') and name not in PLATFORM: continue
+        if spans is None: spans = scope_map(text)
+        if innermost(spans, m.start()) not in ('file', 'namespace', 'extern'): continue
+        out.append(text[pos:m.start()]); out.append('/* fnv-nx DECL1 */'); pos = m.end()
+        stats['DECL1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+NEWDEL_PARAMS = re.compile(r'(\boperator\s+(?:new|delete)(?:\s*\[\s*\])?\s*\()([^;{}()]*)(\))')
+
+def r_newdel_size(path, text, stats):
+    """NEW1: operator new/delete size parameters spelled 'unsigned int' (MSVC x86 size_t) -> size_t."""
+    def sub(m):
+        params = re.sub(r'\bunsigned\s+int\b', 'size_t', m.group(2))
+        if params != m.group(2): stats['NEW1'] += 1
+        return m.group(1) + params + m.group(3)
+    return NEWDEL_PARAMS.sub(sub, text)
+
+RULES = [r_sse_local_types, r_sse_local_protos, r_sse_members, r_sse_qualified, r_platform_protos, r_newdel_size]
 
 # ---------------------------------------------------------------------------------------------------------- driver
 
+def load_stream_rules():
+    """Rules owned by work streams live in tools/rules/<stream>.py, each exporting RULES (list of functions with the
+    same signature as above). They run after the core rules, in file name order. Helpers here (match_brace,
+    scope_map, innermost) are importable as `prepare`."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, here)
+    sys.modules.setdefault('prepare', sys.modules[__name__])
+    rules = []
+    for name in sorted(os.listdir(os.path.join(here, 'rules'))):
+        if not name.endswith('.py') or name.startswith('_'): continue
+        spec = importlib.util.spec_from_file_location('fnvnx_rules_' + name[:-3], os.path.join(here, 'rules', name))
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        rules += list(getattr(mod, 'RULES', []))
+    return rules
+
 def main():
     src_root, out_root = sys.argv[1], sys.argv[2]
+    rules = RULES + load_stream_rules()
     stats, files = Counter(), Counter()
     for top in ('src', 'include'):
         for dirpath, _, names in os.walk(os.path.join(src_root, top)):
@@ -105,7 +221,7 @@ def main():
                     shutil.copyfile(s, d); continue
                 with open(s, encoding='utf-8', errors='surrogateescape') as f:
                     text = orig = f.read()
-                for rule in RULES:
+                for rule in rules:
                     before = Counter(stats)
                     text = rule(s, text, stats)
                     for k in stats:
