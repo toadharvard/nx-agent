@@ -349,6 +349,33 @@ def r_goto_scalar_inits(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- SDK1
+
+SDK_GUARD = re.compile(r'^([ \t]*#[ \t]*ifndef[ \t]+_WIN(?:DEF|NT|BASE)_\b)', re.M)
+
+def r_sdk_guarded_copies(path, text, stats):
+    """SDK1: the decomp's generated headers keep their own copy of an SDK type behind `#ifndef _WINNT_` (the SDK
+    guard, set when the SDK came first). The shim is included right before that test, so the PC SDK type (and its
+    guards) always win and the copy is skipped, whatever the include order of the unit."""
+    if '#' not in text or '_WIN' not in text: return text
+    text, n = SDK_GUARD.subn(r'#include "fnvnx_win32.h" /* fnv-nx SDK1 */\n\1', text)
+    stats['SDK1'] += n
+    return text
+
+STR_ADDR = re.compile(r'&\s*(str_[0-9a-fA-F]{8})\b(?!\s*\[)')
+
+def r_string_array_address(path, text, stats):
+    """STR1: `&str_01082ab8` where the decomp declares `extern char str_01082ab8[];` -> `str_01082ab8`: the same
+    address; MSVC converted char (*)[] to const char* silently, GCC does not."""
+    if 'str_' not in text: return text
+    arrays = set(re.findall(r'\b(str_[0-9a-fA-F]{8})\s*\[', text))
+    if not arrays: return text
+    def sub(m):
+        if m.group(1) not in arrays: return m.group(0)
+        stats['STR1'] += 1
+        return m.group(1)
+    return STR_ADDR.sub(sub, text)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -368,5 +395,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits,
+RULES = [r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address,
          r_msvc_base_layout]

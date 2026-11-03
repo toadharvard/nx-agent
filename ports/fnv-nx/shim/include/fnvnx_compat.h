@@ -136,6 +136,9 @@ extern "C" void _operator_delete_sized(void *, __SIZE_TYPE__);
 #endif
 
 /* x87 helper names (fnv_FloatToInt, fnv_SinCos, ...) for units that call them without the decomp's helper header */
+/* MSVC-only CRT names (secure CRT, _stricmp, ...) that units call without a declaration of their own */
+#include "fnvnx_crt.h"
+
 #define FNVNX_ASM_FNV_HELPERS
 #include "fnvnx_asm.h"
 
