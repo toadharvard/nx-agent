@@ -758,3 +758,14 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - msvc_units_compiled=2987 recipe_functions_present=68456 equiv_units_identical=1523
   equiv_units_differ=308 equiv_functions_differ=563 decl1_rebound_names=27
 * **next** - S1 fixes DECL1 per D13; S11 finishes the full neutral run, attribution, layout runs.
+
+### J-0038 | 2026-11-03 | stream: S0-arch | status: done | parent: J-0035,J-0037
+
+* **decided** - D14 (user): every stream result is verified twice before it counts as done: (a) an independent
+  verifier agent that gets the code and the claim but not the author's reasoning, writes its own tests and tries to
+  break the result (`V<n>-<stream>` entries, `status: done` only when the verifier agrees); (b) S13's differential
+  fuzzing against the MSVC-built pristine decomp on every function the result touches. Journal entries of streams
+  stay `wip` until both pass; a verifier finding reopens the stream.
+* **did** - Opened S14-dataimage-synth (how much of the data image can be rebuilt without the exe) and V1-link
+  (independent verification of link-by-address, ABI bridges, overrides, vtables).
+* **next** - verifiers for S8, S10, S3, S4/S4b, S6c, TAIL1/CS28 as capacity allows; S13 adds a lockstep boot mode.
