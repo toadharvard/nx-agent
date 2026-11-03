@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """fnvlink.py - link the decomp's units by original address (ARCHITECTURE.md D4; docs/LINK.md).
 
-    fnvlink.py resolve <units.json> <objects.tsv> <out dir>   # mapping, address map, ABI report, bridges
+    fnvlink.py resolve <units.json> <objects.tsv> <out dir> [--override <tsv>] [--extern-text <list>]
+                                                              # mapping, address map, ABI report, bridges
     fnvlink.py probe   <out dir> <prepared tree> [jobs]        # layouts of the aggregates resolve asked for;
                                                               # then resolve again to use them
     fnvlink.py apply   <out dir> <fixed dir>                   # objcopy every object with its generated args
@@ -15,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -157,7 +159,7 @@ def kind_of_addr(a):
     return 'data' if DATA_START <= a < DATA_END + 0x1000 else ('text' if a < DATA_START else 'other')
 
 
-def resolve(units_json, objects_tsv, out):
+def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
     os.makedirs(os.path.join(out, 'objcopy'), exist_ok=True)
     units = load_units(units_json)
@@ -211,10 +213,13 @@ def resolve(units_json, objects_tsv, out):
 
     strong = collections.defaultdict(list)   # Itanium name -> [unit] with a strong global definition
     anydef = set()
+    comdat_defs = collections.defaultdict(set)  # unit -> names it defines as COMDAT/weak (inline copies)
     for u in have:
         for s in objsyms[u.source]:
             if s.shndx != 0 and s.bind in ('global', 'weak'):
                 anydef.add(s.name)
+                if s.comdat or s.bind == 'weak':
+                    comdat_defs[u.source].add(s.name)
                 if s.bind == 'global' and not s.comdat:
                     strong[s.name].append(u.source)
 
@@ -263,6 +268,16 @@ def resolve(units_json, objects_tsv, out):
             native[a] = dict(unit=u.source, sym=pick, variants=variants, tier=tier, msvc=n)
             def_stats['matched-' + tier] += 1
 
+    # ---- overrides: a native implementation replaces the decomp definition at an address (docs/LINK.md)
+    shadowed = {}
+    for a, osym, oobj in load_overrides(override):
+        old = native.get(a)
+        if old is not None:
+            shadowed[a] = old
+        msv = old['msvc'] if old else (def_at[a][1] if a in def_at else '')
+        native[a] = dict(unit=None, sym=elfsyms.Sym(osym, 0, 0, 'func', 'global', 1, '', False), variants={},
+                         tier='override', msvc=msv, override=oobj)
+
     # ---- references
     layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv')).items() if v is not None}
     probe_req = set()
@@ -276,6 +291,7 @@ def resolve(units_json, objects_tsv, out):
     per_obj = {}
     used_addr = set()
     data_defs = []
+    bound = collections.defaultdict(set)  # unit -> addresses its object references by address
     for u in have:
         idx = KeyIndex()
         for n, a in u.refs.items():
@@ -301,6 +317,7 @@ def resolve(units_json, objects_tsv, out):
                     cls = 'data'; target = ADDR_SYM % addr; used_addr.add(addr)
                 elif addr in native:
                     cls = 'code'
+                    bound[u.source].add(addr)
                     nd = native[addr]
                     target = ADDR_SYM % addr
                     if isig.variant and nd['variants'].get(isig.variant) is not None:
@@ -325,7 +342,7 @@ def resolve(units_json, objects_tsv, out):
                                     for c in [c for _, c in abi.params_of(sg)] + [abi.ret_class(sg)]:
                                         if c.startswith('AGG:') and '{anon}' not in c:
                                             probe_req.add((unit, abi2.agg_name(c)))
-                                p2 = abi2.compare(rs, ds, lambda t, x=u.source: layouts.get((x, t)),
+                                p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.source: layouts.get((x, t)),
                                                   lambda t, x=nd['unit']: layouts.get((x, t)))
                                 if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge'):
                                     stats['abi2_' + v.kind + '->' + p2.kind] += 1
@@ -397,7 +414,44 @@ def resolve(units_json, objects_tsv, out):
             used_addr.add(a)
     defs_by_unit = collections.defaultdict(list)
     for a, nd in native.items():
-        defs_by_unit[nd['unit']].append(a)
+        if nd['unit'] is None:
+            alias_lines.append('%s = %s;' % (ADDR_SYM % a, nd['sym'].name))
+        else:
+            defs_by_unit[nd['unit']].append(a)
+    # the shadowed decomp definitions: weak, and their names follow the override (so the defining object's own
+    # calls and every GCC vtable naming them reach the override too)
+    weaken = collections.defaultdict(list)
+    shadow_rows = []
+    native_names = collections.Counter(nd['sym'].name for nd in native.values())
+    for a, old in sorted(shadowed.items()):
+        osym = native[a]['sym'].name
+        syms = [old['sym']] + [v for v in old['variants'].values() if v is not old['sym']]
+        notes = []
+        for sy in syms:
+            if sy.bind == 'local':
+                notes.append('%s is static in its unit: only by-address references follow' % sy.name)
+                continue
+            if len(strong.get(sy.name, [])) > 1 or native_names[sy.name] > 0:
+                notes.append('%s also names other definitions: not aliased' % sy.name)
+                continue
+            if not (sy.comdat or sy.bind == 'weak'):
+                weaken[old['unit']].append(sy.name)
+            if sy.name != osym:
+                alias_lines.append('%s = %s;' % (sy.name, osym))
+        copies = sorted(src for src, names in comdat_defs.items() for sy in syms if sy.name in names
+                        and src != old['unit'])
+        inl = sorted(src for src, uu in units.items() if uu.obj and src != old['unit'] and a in set(uu.refs.values())
+                     and a not in bound[src])
+        shadow_rows.append(('%08x' % a, old['msvc'], old['sym'].name, old['unit'], osym, native[a]['override'],
+                            ' '.join(copies), ' '.join(inl), '; '.join(notes)))
+    with open(os.path.join(out, 'shadowed.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#address\tdecomp_msvc\tdecomp_native\tdecomp_unit\toverride_symbol\toverride_object\t'
+                'inline_copies_in\tinlined_or_dropped_in\tnotes\n')
+        for r in shadow_rows:
+            f.write('\t'.join(r) + '\n')
+    stats['overrides'] = len(load_overrides(override))
+    stats['shadowed'] = len(shadow_rows)
+    stats['shadow_inlined_units'] = sum(1 for r in shadow_rows if r[7])
     for u in have:
         base = os.path.basename(u.obj)
         args = []
@@ -416,6 +470,8 @@ def resolve(units_json, objects_tsv, out):
                     alias_lines.append('%s = %s;' % (alias, s.name))   # whichever copy the linker keeps
                 else:
                     args.append('--add-symbol=%s=%s:0x%x,global,function' % (alias, s.section, s.value))
+        for name in weaken.get(u.source, []):
+            args.append('--weaken-symbol=' + name)
         dd = data_def_names.get(u.source, {})
         for name in localize.get(u.source, []):
             if name not in dd:
@@ -474,6 +530,8 @@ def resolve(units_json, objects_tsv, out):
                 cls = '::'.join(sigs.canon_qual(sigs.split_qual(d[:-len("::`vftable'")].replace('const ', '', 1))))
                 if cls in ztv:
                     vtables.setdefault(a, ztv[cls])
+    for a, names in load_extern_list(extern_list).items():
+        extern_text.setdefault(a, set()).update(names)
     amap_kinds = write_addrmap(out, native, def_at, units, vtables, extern_text)
 
     # ---- stats
@@ -492,6 +550,8 @@ def resolve(units_json, objects_tsv, out):
     with open(os.path.join(out, 'data_defs.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a, name, src in sorted(data_defs):
             f.write('%08x\t%s\t%s\n' % (a, name, src))
+    lines += ['', 'overrides: %d, shadowing a compiled decomp definition: %d (with possibly inlined callers in other '
+              'units: %d; shadowed.tsv)' % (stats['overrides'], stats['shadowed'], stats['shadow_inlined_units'])]
     lines += ['', 'variables defined natively at a data-image address: %d' % len(data_defs),
               'address map entries by kind: %s' % ' '.join('%s=%d' % kv for kv in sorted(amap_kinds.items()))]
     lines += ['', 'definitions matched to native symbols:']
@@ -507,6 +567,29 @@ def resolve(units_json, objects_tsv, out):
     lines += ['  %-6d %s' % (n, c) for c, n in pair_classes.most_common()]
     open(os.path.join(out, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
+
+
+def load_overrides(path):
+    """Override table: address (hex), native symbol, object or archive; '#' comments, tab-separated."""
+    out = []
+    if path:
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if line.startswith('#') or len(f) < 3:
+                continue
+            out.append((int(f[0], 16), f[1], f[2]))
+    return out
+
+
+def load_extern_list(path):
+    """Extern-text list (S4 addr_ids.txt: '0x<addr> name...' per line) -> {address: names}."""
+    out = {}
+    if path:
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.split()
+            if f and re.match(r'^(0x)?[0-9a-fA-F]+$', f[0]):
+                out[int(f[0], 16)] = set(f[1:])
+    return out
 
 
 def idx_lookup_msvc(idx, m):
@@ -601,7 +684,12 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None):
             kind = 'X'
         elif nd['sym'].bind == 'local':
             note = 'static in its unit'
-        rows.append((a, kind, ADDR_SYM % a, nd['sym'].name, os.path.basename(units[nd['unit']].obj), note))
+        if nd['unit'] is None:
+            kind, note = 'F', 'override of ' + (nd['msvc'] or '?')
+            obj = os.path.basename(nd['override'])
+        else:
+            obj = os.path.basename(units[nd['unit']].obj)
+        rows.append((a, kind, ADDR_SYM % a, nd['sym'].name, obj, note))
     for a, (zname, obj) in sorted((vtables or {}).items()):
         if a not in native:
             rows.append((a, 'V', zname, zname, obj, 'address point = symbol + 8 (ILP32)'))
@@ -656,6 +744,10 @@ def apply(out, fixed):
                 mapping[old] = new
         elfsyms.rename_undefined(obj, dst, mapping)
         n += 1
+    ov = os.path.join(out, 'overrides.list')
+    if os.path.exists(ov):
+        for obj in sorted(set(open(ov).read().split('\n')) - {''}):
+            shutil.copyfile(obj, os.path.join(fixed, 'zz_override_' + os.path.basename(obj)))
     br = os.path.join(out, 'bridges.S')
     r = subprocess.run([AS, '-mabi=ilp32', br, '-o', os.path.join(fixed, 'zz_bridges.o')], capture_output=True,
                        text=True)
@@ -669,7 +761,7 @@ def apply(out, fixed):
 
 
 def check(out, fixed):
-    objs = sorted(os.path.join(fixed, n) for n in os.listdir(fixed) if n.endswith('.o'))
+    objs = sorted(os.path.join(fixed, n) for n in os.listdir(fixed) if n.endswith(('.o', '.a')))
     elf = os.path.join(out, 'trial.elf')
     r = subprocess.run([LD, '-m', 'aarch64linux32', '--no-demangle', '--noinhibit-exec', '--defsym=__dso_handle=0', '-e', '0', '-o', elf,
                         os.path.join(out, 'aliases.ld'), *objs], capture_output=True, text=True,
@@ -704,7 +796,17 @@ def main():
         print(__doc__); sys.exit(2)
     cmd = sys.argv[1]
     if cmd == 'resolve':
-        resolve(*sys.argv[2:5])
+        argv, opts = [], {}
+        it_ = iter(sys.argv[2:])
+        for x in it_:
+            if x in ('--override', '--extern-text'):
+                opts[x[2:].replace('-', '_')] = next(it_)
+            else:
+                argv.append(x)
+        resolve(*argv[:3], override=opts.get('override'), extern_list=opts.get('extern_text'))
+        with open(os.path.join(argv[2], 'overrides.list'), 'w') as f:
+            for _, _, obj in load_overrides(opts.get('override')):
+                f.write(obj + '\n')
     elif cmd == 'probe':
         layout.run(sys.argv[2], sys.argv[3], int(sys.argv[4]) if len(sys.argv) > 4 else os.cpu_count())
     elif cmd == 'apply':

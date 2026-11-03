@@ -116,6 +116,28 @@ names, sizes unknown), `varargs`, `ref-passes-fewer`, plus the declaration shape
 declared, e.g. `void __cdecl f(void)` calling `T::f()` - the caller relied on ecx already holding `this`; on AArch64
 x0 is not preserved, so the declaration has to be fixed in the source (S1 rule or patch).
 
+## Overrides (`resolve --override <tsv>`, for native replacements, J-0015)
+
+The table (tab-separated, `#` comments) lists `address`, `native symbol`, `object or archive`. An override takes
+precedence over the decomp definition at that address:
+
+* every by-address reference binds to it (`__fnv_<addr> = <symbol>;` in `aliases.ld`); the address map entry names
+  it, so S3 rewrites image code pointers and vftables to it;
+* the decomp definition (all ctor/dtor variants) is weakened in its object and its Itanium name is aliased to the
+  override, so the defining object's own calls and every GCC vtable slot naming it reach the override too (a
+  linker-script definition wins over the weak copy; COMDAT copies in other objects follow the same way). Static
+  (local) decomp definitions and names that also stand for other addresses are left alone and reported;
+* `apply` copies the override objects next to the rewritten ones; the ABI check still compares each reference with
+  the *decomp* declaration, so the override must have the decomp definition's signature.
+
+`shadowed.tsv` reports, per shadowed definition: the decomp declaration, native name and unit, the override, units
+that hold an inline (COMDAT) copy, and units that name the address in units.json but whose object no longer
+references it - their callers were inlined or dropped by GCC and keep running the decomp body (rewrite or rebuild
+those callers). Test: `test_override.py` (vtable slot, same-object call and alias call land on the override).
+
+`resolve --extern-text <list>` adds S4's list of referenced `.text` addresses without definition (`addr_ids.txt`:
+`0x<addr> names...`) as `E` entries.
+
 ## Layouts (`layout.py`) and byte-level verdicts (`abi2.py`)
 
 For every pair that the class-level model above cannot settle, the aggregates passed or returned by value are
@@ -195,7 +217,7 @@ x86-inconsistent refs became bridges. Now: 384 bridges (417 refs), 68 x86-incons
 * **Varargs** pairs (15) stay manual. **Address map gaps**: `V` covers primary vftables of classes whose `_ZTV`
   is emitted; secondary (`{for ...}`) vftables, synthesized vtables for classes without one, the `??_G` split into
   D1/D0 entries and mid-function addresses are not emitted yet; `E` lists only the addresses compiled units
-  reference (138), not S4's full 4,618.
+  reference (138); with `--extern-text` S4's 4,618 are included (4,622 E entries on the round-2 objects).
 * **x86-inconsistent** pairs (74) are source bugs that MSVC got away with (ecx coincidence); hand to S1 as a list.
 * **Code placement**: the trial link puts native code at the default 0x400000, inside the original image range
   (`.text` 0x401000.., data 0x00fdf000..0x0200c612); the S5 linker script must place native code and data
