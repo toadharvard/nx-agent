@@ -178,13 +178,110 @@ void fnvnx_lockit_dtor(void *self);
 void fnvnx_xlength_error(void) __attribute__((noreturn));  /* std::_Xlen: length_error("string too long") */
 void fnvnx_xout_of_range(void) __attribute__((noreturn));  /* std::_Xran: out_of_range("invalid string position") */
 
+/* ---- S4b: CRT functions identified from the decomp's calls (crt_symbols.tsv) */
+unsigned long fnvnx_byteswap_ulong(unsigned long);         /* _byteswap_ulong (0x00ec3bad) */
+unsigned short fnvnx_byteswap_ushort(unsigned short);      /* _byteswap_ushort (0x00ec3bda) */
+unsigned long long fnvnx_byteswap_uint64(unsigned long long); /* _byteswap_uint64 (0x00ec3bf0) */
+char *fnvnx_mbstok(char *, const char *);                  /* _mbstok: its own per-thread position */
+unsigned char *_mbsnbcpy(unsigned char *, const unsigned char *, size_t); /* single-byte code page */
+unsigned char *_mbsncpy(unsigned char *, const unsigned char *, size_t);
+int _mbsnbcmp(const unsigned char *, const unsigned char *, size_t);
+int _mbsnbicmp(const unsigned char *, const unsigned char *, size_t);
+int fnvnx_wcsicmp16(const unsigned short *, const unsigned short *); /* _wcsicmp on 16-bit wchar_t */
+int fnvnx_wcscmp16(const unsigned short *, const unsigned short *);
+
+/* ---- S4b: MSVC 2008 C++ library (libcpmt) internals, object as first argument, MSVC object layouts
+ * (crt/cpplib.cpp, layouts in crt/fnvnx_msvc_cpp.h). Constructors return the object, as MSVC's do. */
+void *fnvnx_exception_ctor(void *self);                                /* std::exception::exception() */
+void *fnvnx_exception_ctor_str(void *self, const char *const *what);  /* exception(const char *const &) */
+void *fnvnx_exception_ctor_noalloc(void *self, const char *const *what, int);
+void *fnvnx_exception_copy_ctor(void *self, const void *other);
+void *fnvnx_exception_assign(void *self, const void *other);
+void fnvnx_exception_dtor(void *self);
+const char *fnvnx_exception_what(const void *self);
+void *fnvnx_bad_cast_ctor(void *self, const char *msg);               /* std::bad_cast::bad_cast(const char *) */
+void *fnvnx_mutex_ctor(void *self);                                    /* std::_Mutex */
+void fnvnx_mutex_dtor(void *self);
+void fnvnx_mutex_lock(void *self);
+void fnvnx_mutex_unlock(void *self);
+void *fnvnx_init_locks_ctor(void *self);                               /* std::_Init_locks */
+void fnvnx_init_locks_dtor(void *self);
+void *fnvnx_locale_init(void);                                         /* locale::_Init -> _Locimp* */
+void *fnvnx_locale_getgloballocale(void);                              /* locale::_Getgloballocale */
+void fnvnx_facet_register(void *facet);                                /* locale::facet::_Facet_Register */
+size_t fnvnx_cpplib_facet_count(void);
+void fnvnx_cpplib_facet_tidy(void);
+void fnvnx_locinfo_ctor(void *self, const char *locname);              /* _Locinfo::_Locinfo_ctor */
+void fnvnx_locinfo_dtor(void *self);                                   /* _Locinfo::_Locinfo_dtor */
+typedef struct {                                                       /* _Ctypevec, 16 bytes on ILP32 */
+    uint32_t _Hand;
+    uint32_t _Page;
+    const short *_Table;
+    int _Delfl;
+} fnvnx_ctypevec;
+fnvnx_ctypevec fnvnx_getctype(void);                                   /* _Getctype (returned by value) */
+int fnvnx_tolower_ctype(int c, const fnvnx_ctypevec *);                /* _Tolower */
+int fnvnx_toupper_ctype(int c, const fnvnx_ctypevec *);                /* _Toupper */
+const short *fnvnx_msvc_ctype_table(void);                             /* MSVC "C" locale _pctype[0..255] */
+void fnvnx_ios_base_addstd(void *ios);                                 /* ios_base::_Addstd */
+void fnvnx_ios_base_dtor(void *ios);                                   /* ios_base::_Ios_base_dtor */
+void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbase); /* basic_ostream<char> */
+void *fnvnx_fiopen(const char *name, int mode, int prot);              /* std::_Fiopen -> struct _iobuf * */
+
+/* ---- S4b: _CxxThrowException data (MSVC x86 EH tables in the image: absolute 32-bit addresses) */
+typedef struct {
+    uint32_t attributes;
+    uint32_t pmfnUnwind;          /* destructor of the thrown object (thiscall) */
+    uint32_t pForwardCompat;
+    uint32_t pCatchableTypeArray;
+} fnvnx_msvc_throw_info;
+typedef struct {
+    uint32_t properties;          /* 1 simple type, 2 by-reference only, 4 has virtual base */
+    uint32_t pType;               /* TypeDescriptor */
+    int32_t mdisp, pdisp, vdisp;  /* PMD: displacement of this base in the thrown object */
+    int32_t sizeOrOffset;         /* size of the object */
+    uint32_t copyFunction;        /* copy constructor (thiscall), 0 = bitwise */
+} fnvnx_msvc_catchable_type;
+typedef struct {
+    int32_t nCatchableTypes;      /* the most-derived type first */
+    uint32_t arrayOfCatchableTypes[1];
+} fnvnx_msvc_catchable_type_array;
+typedef struct {
+    uint32_t pVFTable;            /* type_info's vftable */
+    uint32_t spare;
+    char name[1];                 /* ".?AVbad_alloc@std@@" */
+} fnvnx_msvc_type_descriptor;
+typedef void (*fnvnx_eh_copy_fn)(void *dst, const void *src);
+typedef void (*fnvnx_eh_dtor_fn)(void *obj);
+/* "this ThrowInfo throws MSVC's std::X" (TypeDescriptor name ".?AVbad_alloc@std@@", ...): no image needed */
+int fnvnx_eh_register_msvc_std(const void *throw_info, const char *msvc_type_name);
+/* registers the decomp's two standard-exception ThrowInfos (0x01140ef8 bad_alloc, 0x01140cb0 length_error) */
+void fnvnx_eh_register_fnv_known(void);
+/* code addresses in the image's EH tables (x86 .text) -> native functions (S2 address map / S3 loader) */
+void fnvnx_eh_set_code_resolver(void *(*resolve)(uint32_t va));
+/* where ThrowInfo / CatchableType / TypeDescriptor pointers may point (the data image); default 0x10000.. */
+void fnvnx_eh_set_image_range(uint32_t lo, uint32_t hi);
+const char *fnvnx_eh_describe(const void *throw_info);
+
 #ifdef __cplusplus
 }
+#include <new>
 #include <typeinfo>
 /* RTTI bridge: the MSVC TypeDescriptor address (data image) of a class -> its GCC type_info (S2 generates the
- * table from the class names: ??_R0?AVTESForm@@@8 <-> _ZTI7TESForm). */
+ * table from the class names: ??_R0?AVTESForm@@@8 <-> _ZTI7TESForm). _CxxThrowException uses it too. */
 extern "C++" void fnvnx_rtti_register(const void *msvc_type_descriptor, const std::type_info *ti);
-/* what fnvnx_cxx_throw_exception throws for a non-null object: catch(...) sees it, typed handlers do not */
+extern "C++" const std::type_info *fnvnx_rtti_lookup(const void *msvc_type_descriptor);
+/* native-type path of _CxxThrowException: objects thrown with this ThrowInfo are GCC objects of type ti */
+extern "C" void fnvnx_eh_register_throw(const void *throw_info, const std::type_info *ti, size_t size,
+                                        fnvnx_eh_copy_fn copy, fnvnx_eh_dtor_fn dtor);
+template <class T> inline void fnvnx_eh_register_type(const void *throw_info)
+{
+    fnvnx_eh_register_throw(
+        throw_info, &typeid(T), sizeof(T), [](void *d, const void *s) { new (d) T(*(const T *)s); },
+        [](void *p) { ((T *)p)->~T(); });
+}
+/* what fnvnx_cxx_throw_exception throws when the ThrowInfo is unknown: catch (...) sees it, typed handlers do not.
+ * object points into the thrower's (unwound) frame: valid only for its address. */
 struct fnvnx_msvc_exception {
     void *object;
     void *throw_info;

@@ -57,34 +57,34 @@
 0x00ec3020	body_named	__thiscall fnv_00ec20c0::NiTMapBase<class fnv_00ec20c0::DFALL<class fnv_00ec20c0::NiTMapItem<char const *, char *>>, cha	n	1	0	needs body (decompile)
 0x00ec30b0	cpplib	std::_Xlength_error ("string too long") [_Xlen]	n	5	26	fnvnx_xlength_error
 0x00ec30e8	cpplib	std::_Xout_of_range ("invalid string position") [_Xran]	n	4	6	fnvnx_xout_of_range
-0x00ec31b3	cpplib	libcpmt void(void*) - unidentified (locale/ios helper)	u	1	2	next: MSVC C++ library internal
-0x00ec3205	cpplib	std::ios_base::_Ios_base_dtor	n	4	4	next: MSVC C++ library internal
+0x00ec31b3	cpplib	std::ios_base::_Addstd(ios_base*) [basic_ios::init with _Isstd]	i	1	2	fnvnx_ios_base_addstd
+0x00ec3205	cpplib	std::ios_base::_Ios_base_dtor	n	4	4	fnvnx_ios_base_dtor
 0x00ec3241	cpplib	std::uncaught_exception	n	1	1	libstdc++: std::uncaught_exception
-0x00ec3246	cpplib	libcpmt ctor() - unidentified (std::_Init_locks?)	u	1	1	next: MSVC C++ library internal
-0x00ec3260	cpplib	libcpmt member void() - unidentified (std::_Mutex::_Lock?)	u	1	2	next: MSVC C++ library internal
-0x00ec3277	cpplib	libcpmt member void() - unidentified (std::_Mutex::_Unlock?)	u	1	2	next: MSVC C++ library internal
-0x00ec3280	cpplib	libcpmt member void() - unidentified	u	1	2	next: MSVC C++ library internal
-0x00ec3289	cpplib	libcpmt ctor() - unidentified (std::_Mutex::_Mutex?)	u	1	3	next: MSVC C++ library internal
-0x00ec32ba	cpplib	libcpmt dtor - unidentified (std::_Mutex::~_Mutex?)	u	1	3	next: MSVC C++ library internal
+0x00ec3246	cpplib	std::_Mutex::_Mutex() [basic_streambuf::_Mylock]	i	1	1	fnvnx_mutex_ctor
+0x00ec3260	cpplib	std::_Mutex::~_Mutex() [~basic_streambuf, member at +4]	i	1	2	fnvnx_mutex_dtor
+0x00ec3277	cpplib	std::_Mutex::_Lock() [_Sentry_base ctor: rdbuf()->_Lock()]	i	1	2	fnvnx_mutex_lock
+0x00ec3280	cpplib	std::_Mutex::_Unlock() [_Sentry_base dtor]	i	1	2	fnvnx_mutex_unlock
+0x00ec3289	cpplib	std::_Init_locks::_Init_locks() [3 static libcpmt objects]	i	1	3	fnvnx_init_locks_ctor
+0x00ec32ba	cpplib	std::_Init_locks::~_Init_locks()	i	1	3	fnvnx_init_locks_dtor
 0x00ec32e3	cpplib	std::_Lockit::_Lockit(int)	n	2	3	fnvnx_lockit_ctor
 0x00ec330b	cpplib	std::_Lockit::~_Lockit()	n	2	2	fnvnx_lockit_dtor
-0x00ec33da	cpplib	std::_Fiopen(const char*, openmode, int)	i	1	1	next: MSVC C++ library internal
-0x00ec34d4	cpplib	libcpmt int() - unidentified (locale::_Init/_Getgloballocale)	u	2	2	next: MSVC C++ library internal
-0x00ec3599	cpplib	std::locale::facet::_Facet_Register	n	1	1	next: MSVC C++ library internal
-0x00ec35d7	cpplib	libcpmt void(void*) - unidentified (_Locinfo_dtor?)	u	1	2	next: MSVC C++ library internal
-0x00ec36a6	cpplib	libcpmt int() - unidentified (locale::_Getgloballocale?)	u	2	2	next: MSVC C++ library internal
-0x00ec3740	cpplib	std::_Locinfo::_Locinfo_ctor(_Locinfo*, const char*)	i	1	2	next: MSVC C++ library internal
-0x00ec379c	cpplib	_Tolower(int, const _Ctypevec*)	i	1	2	next: MSVC C++ library internal
-0x00ec38a9	cpplib	_Getctype()	i	1	1	next: MSVC C++ library internal
-0x00ec3909	cpplib	_Toupper(int, const _Ctypevec*)	i	1	2	next: MSVC C++ library internal
-0x00ec3a75	cpplib	libcpmt ctor(const char*, int, int) - unidentified	u	1	5	next: MSVC C++ library internal
-0x00ec3bad	cpplib	libcpmt int(int) - unidentified	u	3	4	next: MSVC C++ library internal
-0x00ec3bda	cpplib	libcpmt short(short) - unidentified (_Getwctype/towlower?)	u	2	2	next: MSVC C++ library internal
-0x00ec3bf0	crt	__int64(__int64) - unidentified (_abs64?)	u	1	1	identify from the exe
+0x00ec33da	cpplib	std::_Fiopen(const char*, openmode, int)	i	1	1	fnvnx_fiopen
+0x00ec34d4	cpplib	std::locale::_Getgloballocale() [locale::_Getfacet fallback, locale() _Incref]	i	2	2	fnvnx_locale_getgloballocale
+0x00ec3599	cpplib	std::locale::facet::_Facet_Register	n	1	1	fnvnx_facet_register
+0x00ec35d7	cpplib	std::_Locinfo::_Locinfo_dtor(_Locinfo*) [~_Locinfo]	i	1	2	fnvnx_locinfo_dtor
+0x00ec36a6	cpplib	std::locale::_Init() [locale::locale()]	i	2	2	fnvnx_locale_init
+0x00ec3740	cpplib	std::_Locinfo::_Locinfo_ctor(_Locinfo*, const char*)	i	1	2	fnvnx_locinfo_ctor
+0x00ec379c	cpplib	_Tolower(int, const _Ctypevec*)	i	1	2	fnvnx_tolower_ctype
+0x00ec38a9	cpplib	_Getctype()	i	1	1	fnvnx_getctype
+0x00ec3909	cpplib	_Toupper(int, const _Ctypevec*)	i	1	2	fnvnx_toupper_ctype
+0x00ec3a75	cpplib	std::basic_ostream<char>::basic_ostream(streambuf*, bool) + vbase flag [libcpmt standard ostream at 0x0126fc10, filebuf at 0x0126fbc0; dtor 0x00ace2d0]	i	1	5	fnvnx_ostream_ctor
+0x00ec3bad	crt	_byteswap_ulong [BSEndian 4-byte swaps]	i	3	4	fnvnx_byteswap_ulong
+0x00ec3bda	crt	_byteswap_ushort [BSEndian 2-byte swaps]	i	2	2	fnvnx_byteswap_ushort
+0x00ec3bf0	crt	_byteswap_uint64 [8-byte BSEndian swap]	i	1	1	fnvnx_byteswap_uint64
 0x00ec3d33	helper	__CxxFrameHandler3	n	4	0	implicit: GCC EH
 0x00ec408c	helper	__security_check_cookie	n	534	12	fnvnx_security_check_cookie
 0x00ec43fb	helper	__RTDynamicCast	n	393	132	fnvnx_rt_dynamic_cast
-0x00ec44d0	crt	memcpy / memmove	n	98	263	libc: memcpy
+0x00ec44d0	crt	memcpy / memmove	n	98	263	libc: memmove (VC9's memcpy is overlap-safe)
 0x00ec4835	crt	memcmp	n	62	79	libc: memcmp
 0x00ec5ec0	helper	_alloca_probe / _alloca_probe_16 (_chkstk)	n	126	3	implicit: GCC
 0x00ec5fce	helper	`eh vector destructor iterator'	n	87	28	fnvnx_eh_vector_dtor
@@ -110,7 +110,7 @@
 0x00ec6e30	crt	strrchr	n	19	26	libc: strrchr
 0x00ec6f20	crt	qsort	n	9	9	libc: qsort
 0x00ec716d	crt	bsearch	n	2	7	libc: bsearch
-0x00ec7230	crt	void*(void*, const void*, size_t) - unidentified (memmove/_memccpy?)	u	21	35	identify from the exe
+0x00ec7230	crt	memcpy (VC9's memcpy is overlap-safe: a unit shifts an overlapping range up with it; hkString::memCpy)	i	21	35	libc: memmove
 0x00ec7595	crt	_finite	n	11	13	platform/crt: _finite
 0x00ec75b1	crt	_isnan	n	10	13	platform/crt: _isnan
 0x00ec7690	crt	strchr	n	12	26	libc: strchr
@@ -119,11 +119,11 @@
 0x00ec7810	helper	_allshl	n	11	0	implicit: GCC
 0x00ec782f	helper	`eh vector constructor iterator'	n	91	3	fnvnx_eh_vector_ctor
 0x00ec7894	helper	_CxxThrowException	n	31	18	fnvnx_cxx_throw_exception
-0x00ec78e0	cpplib	std::exception::exception()	n	4	42	next: MSVC C++ library internal
-0x00ec78f1	cpplib	std::exception::exception(const char* const&)	n	11	491	next: MSVC C++ library internal
-0x00ec7944	cpplib	std::exception::exception(const exception&)	i	2	2	next: MSVC C++ library internal
-0x00ec79a1	cpplib	std::exception::~exception()	i	6	9	next: MSVC C++ library internal
-0x00ec79c4	cpplib	std::bad_cast::bad_cast(const char*)	n	1	1	next: MSVC C++ library internal
+0x00ec78e0	cpplib	std::exception::exception()	n	4	42	fnvnx_exception_ctor
+0x00ec78f1	cpplib	std::exception::exception(const char* const&)	n	11	491	fnvnx_exception_ctor_str
+0x00ec7944	cpplib	std::exception::exception(const exception&)	i	2	2	fnvnx_exception_copy_ctor
+0x00ec79a1	cpplib	std::exception::~exception()	i	6	9	fnvnx_exception_dtor
+0x00ec79c4	cpplib	std::bad_cast::bad_cast(const char*)	n	1	1	fnvnx_bad_cast_ctor
 0x00ec7c56	crt	_invalid_parameter_noinfo	n	38	42	platform/crt: _invalid_parameter_noinfo
 0x00ec7c66	crt	memcpy_s	n	6	16	platform/crt: memcpy_s
 0x00ec7ce3	crt	memmove_s	n	13	24	platform/crt: memmove_s
@@ -133,7 +133,7 @@
 0x00ec7f1e	crt	_splitpath_s	n	6	8	platform/crt: _splitpath_s
 0x00ec8244	crt	_mbscmp	i	1	1	platform/crt: _mbscmp
 0x00ec825b	crt	_makepath_s	n	3	5	platform/crt: _makepath_s
-0x00ec858a	crt	int(const char*, const char*) string compare - unidentified (_mbsicmp/_stricoll?)	u	2	3	identify from the exe
+0x00ec858a	crt	_mbsicmp (_tcsicmp under _MBCS; or the _strcmpi entry): window class "Button", file extensions	i	2	3	platform/crt: _mbsicmp
 0x00ec85e3	crt	_errno	i	3	4	platform/crt: _errno
 0x00ec862c	crt	rename	i	3	3	fnvnx_rename
 0x00ec8660	helper	_chkstk (second probe entry)	n	45	1	implicit: GCC
@@ -154,13 +154,13 @@
 0x00ec9610	crt	asin	i	2	2	libc: asin
 0x00ec9650	helper	_CIasin	n	3	0	implicit: libm call (explicit arg-less calls need a rule)
 0x00ec9760	crt	atan2	n	4	5	libc: atan2
-0x00ec9774	crt	fprintf	i	1	1	libc: fprintf
-0x00ec9907	crt	fclose	n	10	15	libc: fclose
-0x00ec9a47	crt	fopen	n	8	12	fnvnx_fopen
-0x00ec9a5e	crt	fopen_s	n	3	4	fnvnx_fopen_s
+0x00ec9774	crt	fprintf	i	1	1	fnvnx_iob_fprintf
+0x00ec9907	crt	fclose	n	10	15	fnvnx_iob_fclose
+0x00ec9a47	crt	fopen	n	8	12	fnvnx_iob_fopen
+0x00ec9a5e	crt	fopen_s	n	3	4	fnvnx_iob_fopen_s
 0x00ec9ac0	crt	pow	n	5	19	libc: pow
 0x00ec9b00	helper	_CIpow	n	10	0	implicit: libm call (explicit arg-less calls need a rule)
-0x00ec9d4a	crt	printf	i	1	4	libc: printf
+0x00ec9d4a	crt	printf	i	1	4	fnvnx_iob_printf
 0x00ec9e10	crt	ceil	n	7	10	libc: ceil
 0x00ec9f30	crt	cos	n	9	58	libc: cos
 0x00ec9f70	helper	_CIcos	n	20	0	implicit: libm call (explicit arg-less calls need a rule)
@@ -177,9 +177,9 @@
 0x00eca6bd	crt	atol	n	3	5	libc: atol
 0x00eca6d3	crt	atoi	n	15	23	libc: atoi
 0x00eca7f4	crt	toupper	n	8	10	libc: toupper
-0x00eca903	crt	void(void*, void*, void*) - unidentified	u	1	1	identify from the exe
-0x00eca920	crt	double(double) - unidentified (log/log10?)	u	2	3	identify from the exe
-0x00ecacb2	crt	char*(char*, const char*, size_t) - unidentified (strncat?)	u	1	1	identify from the exe
+0x00eca903	crt	_mbsnbcpy / _mbsncpy (_tcsncpy under _MBCS): (dst, src, buffer size)	i	1	1	platform/crt: _mbsnbcpy
+0x00eca920	crt	log [Box-Muller: sqrt(-2 log(s) / s); next to the float wrapper of logf]	i	2	3	libc: log
+0x00ecacb2	crt	_mbsncpy / _mbsnbcpy (the other of the pair at 0x00eca903): name into an uninitialized buffer	i	1	1	platform/crt: _mbsncpy
 0x00ecad86	crt	wcstombs_s	i	1	1	platform/crt: wcstombs_s
 0x00ecada6	crt	srand	n	4	5	fnvnx_srand
 0x00ecadb8	crt	rand	n	30	36	fnvnx_rand
@@ -187,48 +187,48 @@
 0x00ecae30	crt	exp	n	2	9	libc: exp
 0x00ecae6c	helper	_CIexp	n	4	0	implicit: libm call (explicit arg-less calls need a rule)
 0x00ecaebb	helper	`eh vector copy constructor iterator'	i	1	2	fnvnx_eh_vector_copy_ctor
-0x00ecb086	crt	fwrite	n	5	7	libc: fwrite
-0x00ecb3a8	crt	fread	n	4	5	libc: fread
-0x00ecb562	crt	ftell	n	4	5	libc: ftell
-0x00ecb65a	crt	fseek	n	8	12	libc: fseek
-0x00ecb849	crt	void(int, int, int) - unidentified (_ltoa/_ultoa?)	u	1	1	identify from the exe
-0x00ecba8e	crt	void(int, int, int) - unidentified (_ltoa/_ultoa?)	u	1	1	identify from the exe
+0x00ecb086	crt	fwrite	n	5	7	fnvnx_iob_fwrite
+0x00ecb3a8	crt	fread	n	4	5	fnvnx_iob_fread
+0x00ecb562	crt	ftell	n	4	5	fnvnx_iob_ftell
+0x00ecb65a	crt	fseek	n	8	12	fnvnx_iob_fseek
+0x00ecb849	crt	_mbsnbcmp (_tcsncmp under _MBCS): console command prefixes; pairing with 0x00ecba8e from code size, unconfirmed	i	1	1	platform/crt: _mbsnbcmp
+0x00ecba8e	crt	_mbsnbicmp (_tcsnicmp under _MBCS): console command prefixes (see 0x00ecb849)	i	1	1	platform/crt: _mbsnbicmp
 0x00ecbc5b	crt	_strupr_s	i	2	2	platform/crt: _strupr_s
-0x00ecbc80	crt	double(double) - unidentified (log/log10?)	u	3	4	identify from the exe
-0x00ecbe60	crt	vprintf	i	1	1	libc: vprintf
+0x00ecbc80	crt	log10 [volume attenuation in hundredths of dB]	i	3	4	libc: log10
+0x00ecbe60	crt	vprintf	i	1	1	fnvnx_iob_vprintf
 0x00ecbf05	crt	_access	n	8	11	fnvnx_access
 0x00ecbf20	crt	strpbrk	n	3	3	libc: strpbrk
-0x00ecc071	crt	int(...) - unidentified (string compare used on a command-line option)	u	1	1	identify from the exe
-0x00ecc104	crt	fgets	n	2	2	libc: fgets
+0x00ecc071	crt	_wcsicmp: CommandLineToArgvW option after '-' against a wide literal	i	1	1	fnvnx_wcsicmp16
+0x00ecc104	crt	fgets	n	2	2	fnvnx_iob_fgets
 0x00ecc250	helper	_alldiv	n	3	0	implicit: libgcc
 0x00ecc300	helper	_allmul	n	6	0	implicit: GCC
 0x00ecc5f8	crt	strtok_s	n	5	6	platform/crt: strtok_s
 0x00ecc6e6	crt	strtok	n	1	1	libc: strtok
 0x00ecc7b0	crt	strncpy	n	4	5	libc: strncpy
 0x00ecc8e0	helper	_except_handler4	n	2	0	none: SEH not reproduced
-0x00eccbdc	crt	int(int, int) - unidentified (_controlfp?)	u	1	1	identify from the exe
+0x00eccbdc	crt	_getcwd(char*, int): NiPath current directory, buffer 260, result tested != NULL	i	1	1	fnvnx_getcwd
 0x00eccd99	crt	doexit	n	1	1	fnvnx_doexit
 0x00eccec5	crt	exit	n	3	27	libc: exit
 0x00eccf5d	crt	realloc	n	2	2	libc: realloc
 0x00ecd1c7	crt	malloc	n	2	65	libc: malloc
 0x00ecd291	crt	free	n	3	183	libc: free
 0x00ecd31f	crt	_msize	n	1	2	platform/crt: _msize
-0x00ecd3c2	crt	fputc	n	1	1	libc: fputc
-0x00ecd5bf	crt	ungetc	n	1	1	libc: ungetc
-0x00ecd631	crt	fgetc	n	1	1	libc: fgetc
-0x00ecd735	crt	fgetpos	i	1	1	libc: fgetpos
-0x00ecd7a3	crt	fsetpos	i	1	1	libc: fsetpos
-0x00ecd7e8	crt	_fseeki64	i	1	2	_fseeki64
-0x00ecda70	crt	fflush	i	3	4	libc: fflush
-0x00ecdacc	crt	feof	n	1	1	libc: feof
+0x00ecd3c2	crt	fputc	n	1	1	fnvnx_iob_fputc
+0x00ecd5bf	crt	ungetc	n	1	1	fnvnx_iob_ungetc
+0x00ecd631	crt	fgetc	n	1	1	fnvnx_iob_fgetc
+0x00ecd735	crt	fgetpos	i	1	1	fnvnx_iob_fgetpos
+0x00ecd7a3	crt	fsetpos	i	1	1	fnvnx_iob_fsetpos
+0x00ecd7e8	crt	_fseeki64	i	1	2	fnvnx_iob_fseeki64
+0x00ecda70	crt	fflush	i	3	4	fnvnx_iob_fflush
+0x00ecdacc	crt	feof	n	1	1	fnvnx_iob_feof
 0x00ecdb00	crt	wcslen	n	3	4	fnvnx_wcslen16
 0x00ecdb42	crt	strerror	i	1	2	libc: strerror
 0x00ecdd16	crt	_gcvt	n	3	3	platform/crt: _gcvt
 0x00ecddf1	crt	_vsnprintf	i	2	3	platform/crt: _vsnprintf
 0x00ecdf2d	crt	strtod	i	2	4	libc: strtod
-0x00ecdf44	crt	__iob_func	i	1	1	NONE: needs a rule (MSVC FILE array layout)
+0x00ecdf44	crt	__iob_func	i	1	1	__iob_func (fnvnx_iob[3], MSVC _iobuf layout)
 0x00ece104	helper	_except_handler3	n	1	0	none: SEH not reproduced
-0x00ece23e	crt	char*(char*, const char*) - unidentified (_mbstok?)	u	1	1	identify from the exe
+0x00ece23e	crt	_mbstok (_tcstok under _MBCS): movie list tokenizer	i	1	1	fnvnx_mbstok
 0x00ee6d44	thunk	ws2_32 closesocket	i	1	2	fnvnx_ws2_* (see imports.tsv)
 0x00ee6d4a	thunk	ws2_32 socket	i	1	2	fnvnx_ws2_* (see imports.tsv)
 0x00ee6d50	thunk	ws2_32 WSAGetLastError	i	1	2	fnvnx_ws2_* (see imports.tsv)

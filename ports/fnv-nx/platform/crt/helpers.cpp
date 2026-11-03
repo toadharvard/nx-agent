@@ -1,6 +1,6 @@
 /* helpers.cpp - MSVC compiler helpers that the decomp source calls by name (see docs/RUNTIME.md):
- * security cookie check, `eh vector constructor/destructor/copy constructor iterator', __RTDynamicCast,
- * _CxxThrowException, and the MSVC C++ library internals std::_Lockit, std::_Xlen, std::_Xran.
+ * security cookie check, `eh vector constructor/destructor/copy constructor iterator', __RTDynamicCast (whose
+ * TypeDescriptor table _CxxThrowException in eh.cpp shares), and std::_Lockit, std::_Xlen, std::_Xran.
  * Helpers the compiler emits implicitly (_ftol2 on casts, _allmul, _alloca_probe, _CIsin, EH handlers, ...)
  * have no counterpart here: GCC generates its own code for those. */
 #include "fnvnx_msvcrt.h"
@@ -120,17 +120,9 @@ extern "C" void *fnvnx_rt_dynamic_cast(void *inptr, long vfdelta, void *src_type
     return r;
 }
 
-/* ---- _CxxThrowException(obj, ThrowInfo): obj == NULL is "throw;" */
-extern "C" void fnvnx_cxx_throw_exception(void *obj, void *throw_info)
-{
-    if (!obj) {
-        std::exception_ptr p = std::current_exception();
-        if (p)
-            std::rethrow_exception(p);
-        std::terminate();
-    }
-    throw fnvnx_msvc_exception{ obj, throw_info };
-}
+const std::type_info *fnvnx_rtti_lookup(const void *td) { return rtti_lookup(td); }
+
+/* _CxxThrowException: crt/eh.cpp */
 
 /* ---- std::_Lockit: the MSVC library's global recursive locks, indexed by kind (0..7 in VC9) */
 namespace {

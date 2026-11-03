@@ -641,3 +641,49 @@ int _snprintf_s(char *buf, size_t n, size_t count, const char *fmt, ...)
     va_end(ap);
     return r;
 }
+
+/* ---- S4b: functions identified from the decomp's calls (crt_symbols.tsv) */
+unsigned long fnvnx_byteswap_ulong(unsigned long v) { return __builtin_bswap32((uint32_t)v); }
+unsigned short fnvnx_byteswap_ushort(unsigned short v) { return __builtin_bswap16(v); }
+unsigned long long fnvnx_byteswap_uint64(unsigned long long v) { return __builtin_bswap64(v); }
+
+/* _mbstok keeps its own position (MSVC: _tiddata._mtoken, separate from strtok's) */
+char *fnvnx_mbstok(char *s, const char *delim)
+{
+    static __thread char *pos;
+    return strtok_s(s, delim, &pos);
+}
+
+/* the _mbs functions of the single-byte "C" code page: no lead bytes */
+unsigned char *_mbsnbcpy(unsigned char *d, const unsigned char *s, size_t n)
+{
+    return (unsigned char *)strncpy((char *)d, (const char *)s, n);
+}
+unsigned char *_mbsncpy(unsigned char *d, const unsigned char *s, size_t n) { return _mbsnbcpy(d, s, n); }
+int _mbsnbcmp(const unsigned char *a, const unsigned char *b, size_t n)
+{
+    int r = strncmp((const char *)a, (const char *)b, n);
+    return r < 0 ? -1 : r > 0;
+}
+int _mbsnbicmp(const unsigned char *a, const unsigned char *b, size_t n)
+{
+    int r = _strnicmp((const char *)a, (const char *)b, n);
+    return r < 0 ? -1 : r > 0;
+}
+
+/* _wcsicmp / wcscmp on the game's 16-bit wchar_t; the "C" locale folds A-Z only, as MSVC's fast path */
+int fnvnx_wcsicmp16(const unsigned short *a, const unsigned short *b)
+{
+    for (;; a++, b++) {
+        int x = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a, y = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;
+        if (x != y || !x)
+            return x - y;
+    }
+}
+
+int fnvnx_wcscmp16(const unsigned short *a, const unsigned short *b)
+{
+    for (; *a && *a == *b; a++, b++)
+        ;
+    return *a < *b ? -1 : *a > *b;
+}
