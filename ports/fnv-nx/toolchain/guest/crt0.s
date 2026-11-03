@@ -1,8 +1,10 @@
 // fnv-nx ILP32 guest module header and entry (assembled with -mabi=ilp32).
 //
-// The host (LP64, libnx) maps the module at its link address (+16) and calls the module base as
-//   uint64_t entry(uint64_t api)   (AAPCS64), see include/fnvnx/hostapi.h. Everything after the branch is
-// data, so the module base is never executed past +0.
+// The host (LP64, libnx) maps the module (at its link address +16 if fixed, anywhere if relocatable, +24 bit 0)
+// and calls the module base as   uint64_t entry(uint64_t api)   (AAPCS64), see include/fnvnx/hostapi.h.
+// Everything after the branch is data, so the module base is never executed past +0.
+// +16/+20/+24 are written by elf2nso.py from the ELF (a PIE cannot hold its link address in .text: an absolute
+// word there would need a text relocation).
 
 	.section .crt0, "ax", %progbits
 	.global __fnvnx_guest_start
@@ -13,8 +15,10 @@ __fnvnx_guest_start:
 	.word   __fnvnx_mod0 - __fnvnx_guest_start  // +4  MOD0 offset, as every Horizon module
 	.word   0x47584e46                          // +8  "FNXG"
 	.word   3                                   // +12 FNVNX_HOSTAPI_VERSION this guest was built for
-	.word   __fnvnx_guest_base                  // +16 link address: the host maps the module exactly here
-	.word   __fnvnx_guest_size                  // +20 bytes to map (text..bss, page aligned)
+	.word   0                                   // +16 link address of the first segment (elf2nso)
+	.word   0                                   // +20 bytes to map, text..bss, page aligned (elf2nso)
+	.word   0                                   // +24 flags: bit 0 relocatable (ET_DYN: R_AARCH64_P32_RELATIVE)
+	.word   0                                   // +28 reserved
 	.size   __fnvnx_guest_start, . - __fnvnx_guest_start
 
 	.align  2

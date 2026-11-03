@@ -197,7 +197,10 @@ static u64 h_input_poll(u64 out, u64 cap) {
 }
 
 static u64 h_map_fixed(u64 addr, u64 size, u64 src) {
-    if ((addr | size | src) & 0xFFF) return MAKERESULT(Module_Libnx, LibnxError_BadInput);
+    /* inside a range S10 claimed at startup (the data window): zero it, nothing to map */
+    if (fnvnx_reserve_map_fixed && fnvnx_reserve_contains && fnvnx_reserve_contains(addr, size))
+        return fnvnx_reserve_map_fixed(addr, size) == 0 ? 0 : MAKERESULT(Module_Libnx, LibnxError_BadInput);
+    if (!src || ((addr | size | src) & 0xFFF)) return MAKERESULT(Module_Libnx, LibnxError_BadInput);
     MemoryInfo mi; u32 pi;
     if (R_FAILED(svcQueryMemory(&mi, &pi, addr)) || mi.type != MemType_Unmapped || mi.addr + mi.size < addr + size)
         return MAKERESULT(Module_Libnx, LibnxError_AlreadyInitialized);   /* occupied (random ASLR placement) */

@@ -196,11 +196,17 @@ class NsoTest(unittest.TestCase):
     def test_elf32_fixed_address(self):
         self.check(tiny_elf(False, base=0x10000000))   # ET_EXEC guest: offsets relative to its base
 
-    def test_rejects_pie_not_at_zero(self):
-        b = bytearray(tiny_elf(False, base=0x10000000))
-        struct.pack_into("<H", b, 16, 3)                 # ET_DYN at a non-zero address
-        with self.assertRaises(nxelf.ElfError):
-            elf2nso.build_nso(nxelf.Elf(bytes(b)))
+    def test_guest_header_patch(self):
+        # an fnv-nx guest (FNXG at text+8) gets link base, page-aligned size and the relocatable flag at +16..+24
+        for etype, reloc in ((2, 0), (3, 1)):
+            b = bytearray(tiny_elf(False, base=0x30000000))
+            struct.pack_into("<H", b, 16, etype)
+            text_off = struct.unpack_from("<I", b, 52 + 4)[0]
+            struct.pack_into("<I", b, text_off + 8, elf2nso.GUEST_MAGIC)
+            info = elf2nso.parse_nso(elf2nso.build_nso(nxelf.Elf(bytes(b))))
+            self.assertTrue(all(s["hash_ok"] for s in info["segments"]))
+            base, size, flags = struct.unpack_from("<III", info["segments"][0]["bytes"], 16)
+            self.assertEqual((base, size, flags), (0x30000000, 0x3000, reloc))
 
     def test_rejects_bad_layout(self):
         b = bytearray(tiny_elf(False))

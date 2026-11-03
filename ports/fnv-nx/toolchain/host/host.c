@@ -15,6 +15,29 @@
 #include <switch.h>
 
 #include "fnvnx/hostapi.h"
+#include "../../startup/host/fnvnx_reserve.h"   /* S10: window reservation + relaunch (relative: callers need no -I) */
+
+/* S10's reserve.c + reserve_nx.c are linked into the game host; referenced weakly so a host built without
+ * them (an older render/nine test build) still links and runs, only without the reservation. */
+#pragma weak fnvnx_reserve_early
+#pragma weak fnvnx_reserve_late
+#pragma weak fnvnx_reserve_map_fixed
+#pragma weak fnvnx_reserve_contains
+#pragma weak fnvnx_reserve_remap_code
+#pragma weak fnvnx_reserve_address_space
+
+/* Guest placement (docs/TOOLCHAIN.md section 9). Default: the guest is relocatable and placed after the
+ * reservation, so only the data window is a required range (modelled relaunch rate ~6 %). A host for a
+ * fixed-address guest is built with -DFNVNX_GUEST_RESERVE=<bytes> [-DFNVNX_GUEST_LINK_BASE=0x...]: that range is
+ * claimed in __libnx_initheap too (adjacent to the data window by default: ~18 %). */
+#ifndef FNVNX_GUEST_RESERVE
+#define FNVNX_GUEST_RESERVE 0
+#endif
+#ifndef FNVNX_GUEST_LINK_BASE
+#define FNVNX_GUEST_LINK_BASE 0x02100000
+#endif
+uint64_t fnvnx_guest_reserve_size = FNVNX_GUEST_RESERVE;   /* overrides reserve_nx.c's weak 64 MiB default */
+uint64_t fnvnx_guest_link_base = FNVNX_GUEST_LINK_BASE;
 
 /* Original FalloutNV.exe image: headers + .text range (S2: native code must not be here) and the data
  * window 0x00fdf000..0x02100000 (S3 maps the player's .rdata/.data there). */
@@ -59,6 +82,10 @@ void __libnx_initheap(void) {
     fake_heap_end = (char *)addr + fnvnx_host_heap_size;
     g_guest_heap_base = (u64)addr + fnvnx_host_heap_size;
     g_guest_heap_size = size - fnvnx_host_heap_size;
+    /* S10: claim the fixed windows before anything else can be placed there; the backing comes off the top of
+     * the guest heap. */
+    if (fnvnx_reserve_early)
+        g_guest_heap_size -= fnvnx_reserve_early(g_guest_heap_base, g_guest_heap_base + g_guest_heap_size);
 }
 
 /* ---- logging ------------------------------------------------------------------------------------------- */
@@ -90,6 +117,8 @@ static void logf_(const char *fmt, ...) {
     consoleUpdate(NULL);
 }
 
+static void log_line(const char *line) { logf_("%s\n", line); }
+
 /* ---- host API implementations (LP64; every parameter and result is u64) -------------------------------- */
 static u64 h_output_debug_string(u64 str, u64 len) { return svcOutputDebugString((const char *)str, len); }
 static u64 h_sleep_ns(u64 ns) { svcSleepThread((s64)ns); return 0; }
@@ -110,13 +139,17 @@ static u64 h_system_tick_freq(void) { return armGetSystemTickFreq(); }
 #include "host_v3.inc"
 
 /* ---- process layout ------------------------------------------------------------------------------------ */
+/* In 32-bit spaces Mesosphere reports the ASLR region as [0x00200000, 4 GiB) (alias code region = small +
+ * large map), so the type is told from the stack region (= the small map there), as S10's
+ * fnvnx_resv_address_space_name does. */
 static const char *as_name(void) {
-    u64 aslr = 0, aslr_size = 0, alias = 0;
-    svcGetInfo(&aslr, InfoType_AslrRegionAddress, CUR_PROCESS_HANDLE, 0);
-    svcGetInfo(&aslr_size, InfoType_AslrRegionSize, CUR_PROCESS_HANDLE, 0);
+    if (fnvnx_reserve_address_space) return fnvnx_reserve_address_space();
+    u64 st = 0, st_size = 0, alias = 0;
+    svcGetInfo(&st, InfoType_StackRegionAddress, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&st_size, InfoType_StackRegionSize, CUR_PROCESS_HANDLE, 0);
     svcGetInfo(&alias, InfoType_AliasRegionSize, CUR_PROCESS_HANDLE, 0);
-    if (aslr + aslr_size <= FNVNX_SMALL_MAP_END) return alias ? "32Bit" : "32BitNoReserved";
-    if (aslr + aslr_size <= 0x80000000ull) return "64Bit36";
+    if (st + st_size <= FNVNX_SMALL_MAP_END) return alias ? "32Bit" : "32BitNoReserved";
+    if (st + st_size <= 0x80000000ull) return "64Bit36";
     return "64Bit39";
 }
 
@@ -211,6 +244,19 @@ static bool lz4_block(const u8 *src, size_t n, u8 *dst, size_t out_size) {
 
 typedef struct { u32 file_off, dst, size, extra; } NsoSeg;
 
+/* Relocatable guest: first free gap of the small map above the data window (after S10's reservation, so the
+ * windows read as mapped and are skipped). Single-threaded here. */
+static u64 pick_guest_base(u64 size) {
+    u64 a = FNVNX_RESERVED_END;
+    while (a + size <= FNVNX_SMALL_MAP_END) {
+        MemoryInfo mi; u32 pi;
+        if (R_FAILED(svcQueryMemory(&mi, &pi, a))) return 0;
+        if (mi.type == MemType_Unmapped && mi.addr + mi.size >= a + size) return a;
+        a = (mi.addr + mi.size + 0xFFF) & ~0xFFFull;
+    }
+    return 0;
+}
+
 #define FAIL(...) do { logf_("fnvnx host: guest load failed: " __VA_ARGS__); goto fail; } while (0)
 
 /* Reads an NSO, decompresses and hash-checks it into page-aligned heap memory, then maps that memory as
@@ -237,7 +283,10 @@ static bool load_guest(const char *path, u64 *out_base, u64 *out_size) {
     u64 img_size = ((u64)seg[2].dst + seg[2].size + seg[2].extra + 0xFFF) & ~0xFFFull;
     if (seg[0].dst != 0 || seg[0].dst + seg[0].size > seg[1].dst || seg[1].dst + seg[1].size > seg[2].dst)
         FAIL("bad segment layout\n");
-    if (!(img = memalign(0x1000, img_size))) FAIL("out of memory (%#lx bytes)\n", img_size);
+    /* backing of the guest image: off the top of the guest heap (the host heap is small) */
+    if (img_size > g_guest_heap_size) FAIL("guest image %#lx larger than the guest heap\n", img_size);
+    g_guest_heap_size -= img_size;
+    img = (u8 *)(g_guest_heap_base + g_guest_heap_size);
     memset(img, 0, img_size);
     for (int i = 0; i < 3; i++) {
         if ((u64)seg[i].file_off + comp[i] > (u64)fsz) FAIL("segment %d outside file\n", i);
@@ -259,22 +308,33 @@ static bool load_guest(const char *path, u64 *out_base, u64 *out_size) {
 
     const u32 *w = (const u32 *)img;
     if (w[2] != FNVNX_GUEST_MAGIC || w[3] != FNVNX_HOSTAPI_VERSION) FAIL("not an fnv-nx guest (ABI %u)\n", w[3]);
-    u64 base = w[4];
     if (w[5] != img_size) FAIL("guest header size %#x != image %#lx\n", w[5], img_size);
+    bool relocatable = w[6] & 1;
+    u64 base = relocatable ? pick_guest_base(img_size) : w[4];
+    if (!base) FAIL("no free %#lx bytes in the small map for the relocatable guest\n", img_size);
     if (base & 0xFFF || base < 0x200000 || base + img_size > FNVNX_SMALL_MAP_END ||
         (base < FNVNX_RESERVED_END && base + img_size > FNVNX_RESERVED_START))
-        FAIL("link address %#lx..%#lx not allowed\n", base, base + img_size);
-    MemoryInfo mi;
-    if (!range_free(base, base + img_size, &mi))
-        FAIL("link range %#lx..%#lx is occupied (region %#lx type %u); relaunch\n", base, base + img_size,
-             mi.addr, mi.type);
+        FAIL("guest address %#lx..%#lx not allowed\n", base, base + img_size);
 
     Result rc = get_own_process_handle();
     if (R_FAILED(rc)) FAIL("own process handle: %#x\n", rc);
-    armDCacheFlush(img, img_size);
-    rc = svcMapProcessCodeMemory(g_own_process, base, (u64)img, img_size);
-    if (R_FAILED(rc)) FAIL("svcMapProcessCodeMemory: %#x\n", rc);
-    img = NULL; /* now backs the mapping, its heap alias is inaccessible: never free or reuse it */
+    if (!relocatable && fnvnx_reserve_contains && fnvnx_reserve_contains(base, img_size)) {
+        /* fixed guest inside its claimed range (S10): copy there, convert the same heap pages to code */
+        memcpy((void *)base, img, img_size);
+        g_guest_heap_size += img_size;   /* the staging copy goes back to the guest heap */
+        img = NULL;
+        rc = fnvnx_reserve_remap_code("guest", g_own_process, img_size);
+        if (R_FAILED(rc)) FAIL("fnvnx_reserve_remap_code: %#x\n", rc);
+    } else {
+        MemoryInfo mi;
+        if (!range_free(base, base + img_size, &mi))
+            FAIL("guest range %#lx..%#lx is occupied (region %#lx type %u); relaunch\n", base, base + img_size,
+                 mi.addr, mi.type);
+        armDCacheFlush(img, img_size);
+        rc = svcMapProcessCodeMemory(g_own_process, base, (u64)img, img_size);
+        if (R_FAILED(rc)) FAIL("svcMapProcessCodeMemory: %#x\n", rc);
+        img = NULL; /* now backs the mapping, its heap alias is inaccessible: never reuse it */
+    }
     u64 text_end = ((u64)seg[0].size + 0xFFF) & ~0xFFFull, ro_end = ((u64)seg[1].dst + seg[1].size + 0xFFF) & ~0xFFFull;
     rc = svcSetProcessMemoryPermission(g_own_process, base, text_end, Perm_Rx);
     if (R_SUCCEEDED(rc) && ro_end > seg[1].dst)
@@ -287,7 +347,6 @@ static bool load_guest(const char *path, u64 *out_base, u64 *out_size) {
     return true;
 fail:
     free(file);
-    free(img);
     return false;
 }
 
@@ -299,6 +358,14 @@ int main(int argc, char **argv) {
     mkdir(FNVNX_LOG_DIR, 0777);
     g_log = fopen(FNVNX_LOG_PATH, "w");
 
+    if (fnvnx_reserve_late && fnvnx_reserve_late(log_line) != 0) {   /* relaunches by itself on a collision */
+        logf_("fnvnx host: STOP: the fixed address windows are unusable (see above)\n");
+        svcSleepThread(5000000000ll);
+        if (g_log) fclose(g_log);
+        consoleExit(NULL);
+        return 1;
+    }
+    if (!fnvnx_reserve_late) logf_("fnvnx host: built without startup/host/reserve*.c: windows NOT reserved\n");
     report_layout();
 
     u64 gbase = 0, gsize = 0, rc;

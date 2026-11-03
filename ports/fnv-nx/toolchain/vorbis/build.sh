@@ -23,7 +23,7 @@ get ogg https://github.com/xiph/ogg.git $OGG_TAG $OGG_COMMIT
 get vorbis https://github.com/xiph/vorbis.git $VORBIS_TAG $VORBIS_COMMIT
 
 CC=aarch64-none-elf-gcc
-CFLAGS="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-pie -O2 -ffunction-sections -fdata-sections -w"
+CFLAGS="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -O2 -ffunction-sections -fdata-sections -w"   # PIC: the game guest is a PIE
 mkdir -p "$P/include/ogg" "$P/include/vorbis" "$P/lib" "$W/obj"
 # ogg/config_types.h for ILP32 (what configure would generate)
 cat > "$P/include/ogg/config_types.h" <<'EOF'

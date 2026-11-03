@@ -24,6 +24,7 @@ PHDRS
 	code   PT_LOAD FLAGS(5) /* Read | Execute */;
 	rodata PT_LOAD FLAGS(4) /* Read */;
 	data   PT_LOAD FLAGS(6) /* Read | Write */;
+	dyn    PT_DYNAMIC;   /* needed for ld to emit an ET_DYN (relocatable guest); empty in a fixed link */
 	tls    PT_TLS;
 }
 
@@ -111,7 +112,7 @@ SECTIONS
 		. = ALIGN(8);
 	} :data
 
-	.dynamic : { *(.dynamic) } :data
+	.dynamic : { *(.dynamic) } :data :dyn
 
 	.got     : { *(.got) *(.igot) } :data
 	.got.plt : { *(.got.plt)  *(.igot.plt) } :data

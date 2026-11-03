@@ -18,6 +18,7 @@
 #include "fnvnx_loader.h"
 #include "../../platform/os/os.h"
 #include "../../tools/link/fnvnx_addrmap.h"
+#include "../../startup/guest/fnvnx_xc.h"
 
 extern "C" {
 void fnvnx_guest_platform_init(void);
@@ -63,6 +64,12 @@ static int os_read(void *, uint32_t off, void *dst, uint32_t size) {
     return os_file_pread(g_fd, dst, size, off) == (int64_t)size ? 0 : -1;
 }
 static int os_map_fixed(void *, uintptr_t addr, uint32_t size, unsigned) {
+    /* normally inside a window the host claimed at startup (S10 fnvnx_reserve_map_fixed: zeroed, no memory
+     * needed); only an unreserved range needs a guest heap block to map from */
+    if (fnvnx_hcall3(fnvnx_host->map_fixed, addr, size, 0) == 0) {
+        memset((void *)addr, 0, size);
+        return 0;
+    }
     void *src = memalign(0x1000, size);
     if (!src) return -1;
     memset(src, 0, size);
@@ -81,6 +88,42 @@ static uint32_t resolve_import(void *, const char *dll, const char *name, uint32
     return (uint32_t)(uintptr_t)fnvnx_win32_lookup_export(dll, name);
 }
 
+/* ---- S10 IMAGE mode: the image's own __xc table, captured from .rdata before S3 rewrites code pointers */
+extern "C" {
+const uint32_t *fnvnx_xc_image_slots;   /* read by toolchain/guest/runtime.c */
+uint32_t fnvnx_xc_image_nslots;
+volatile uint32_t g_fnvnx_xc_current;   /* original address of the initializer running now (crash traces) */
+}
+static void xc_before(void *, uint32_t orig, uint32_t seq) {
+    g_fnvnx_xc_current = orig;
+    if (seq % 2000 == 0) printf("fnvnx boot: initializer #%" PRIu32 " (orig %#010" PRIx32 ")\n", seq, orig);
+}
+extern "C" const fnvnx_xc_hooks fnvnx_guest_xc_hooks = {nullptr, xc_before, nullptr};
+
+static void capture_xc(const fnvnx_pe *pe, const fnvnx_image *img) {
+    for (unsigned i = 0; i < pe->nsections; i++) {
+        const fnvnx_section &sec = pe->sec[i];
+        if (strcmp(sec.name, ".rdata") != 0) continue;
+        uint32_t va = pe->image_base + sec.rva, n = sec.vsize / 4;
+        const uint32_t *mem = (const uint32_t *)fnvnx_image_ptr(img, va, n * 4);
+        uint32_t b = 0, e = 0, hits = 0;
+        if (!mem || fnvnx_xc_locate(mem, va, n, pe->image_base + pe->text_lo_rva, pe->image_base + pe->text_hi_rva,
+                                    0x00F34EB0u, 0x00FC7A70u, 64, &b, &e, &hits) != FNVNX_XC_OK) {
+            printf("fnvnx boot: image __xc table not found in .rdata: ADDRESS order\n");
+            return;
+        }
+        uint32_t ns = (e - b) / 4;
+        uint32_t *slots = (uint32_t *)malloc(ns * 4);
+        if (!slots) return;
+        memcpy(slots, mem + (b - va) / 4, ns * 4);
+        fnvnx_xc_image_slots = slots;
+        fnvnx_xc_image_nslots = ns;
+        printf("fnvnx boot: image __xc %#010" PRIx32 "..%#010" PRIx32 ": %" PRIu32 " slots, %" PRIu32
+               " in the initializer group: IMAGE order\n", b, e, ns, hits);
+        return;
+    }
+}
+
 static int load_image(void) {
     static const fnvnx_os os = {nullptr, os_read, os_map_fixed, os_protect, os_alloc, os_free, os_log};
     g_fd = os_file_open(k_exe, OS_O_READ);
@@ -88,7 +131,9 @@ static int load_image(void) {
         /* No game data: map the whole original-image window zero-filled so engine init can be traced as far as it
          * goes (every image global reads as 0). Real runs need the player's exe here. */
         printf("fnvnx boot: %s missing (%d): mapping an EMPTY data image 0x00400000..0x02100000 (trace mode)\n", k_exe, g_fd);
-        return os_map_fixed(nullptr, 0x00400000u, 0x02100000u - 0x00400000u, 3) ? -1 : 0;
+        /* two pieces: S10 claims header+.text and the data window as separate ranges */
+        return os_map_fixed(nullptr, 0x00400000u, 0x00fdf000u - 0x00400000u, 3) ||
+               os_map_fixed(nullptr, 0x00fdf000u, 0x02100000u - 0x00fdf000u, 3) ? -1 : 0;
     }
     os_stat_t st;
     os_file_fstat(g_fd, &st);
@@ -101,6 +146,7 @@ static int load_image(void) {
     rc = fnvnx_image_map(&img, &pe, &os, pe.image_base, 0, 0x00400000u, 0x02100000u, 0);
     if (rc) { printf("fnvnx boot: STOP: image_map: %s\n", fnvnx_strerror(rc)); return -1; }
     fnvnx_image_load_relocs(&img, &os);
+    capture_xc(&pe, &img);
     fnvnx_import_stats is = {};
     fnvnx_imports_bind(&img, resolve_import, nullptr, fnvnx_trap_value(nullptr, 0), &is);
     printf("fnvnx boot: imports: %u slots, %u resolved, %u unresolved\n", is.slots, is.resolved, is.unresolved);
@@ -150,5 +196,5 @@ __attribute__((constructor(101))) static void boot_banner(void) {
         fflush(stdout);
         exit(2);
     }
-    printf("fnvnx boot: running static initialisers of the game image\n");
+    printf("fnvnx boot: running GCC initialisers, then the game's in original order (S10 xc)\n");
 }

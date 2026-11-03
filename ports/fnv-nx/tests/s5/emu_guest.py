@@ -73,21 +73,25 @@ class Thread:
 
 
 class Emu:
-    def __init__(self, nso_path, root, verbose=False):
+    def __init__(self, nso_path, root, verbose=False, load_base=None):
         with open(nso_path, "rb") as f:
             info = elf2nso.parse_nso(f.read())
         for s in info["segments"]:
             if not s["hash_ok"]:
                 raise SystemExit(f"{nso_path}: {s['name']} hash mismatch")
         text, ro, data = info["segments"]
-        magic, _abi, base, size = struct.unpack_from("<IIII", text["bytes"], 8)
+        magic, _abi, link_base, size, gflags = struct.unpack_from("<IIIII", text["bytes"], 8)
         if magic != 0x47584E46:
             raise SystemExit("not an fnv-nx guest (no FNXG magic at +8)")
         if size != align(data["dst"] + data["size"] + data["bss"]):
             raise SystemExit(f"guest header size {size:#x} does not match the NSO")
+        self.relocatable, self.link_base = bool(gflags & 1), link_base
+        # a relocatable guest goes where the host finds room (here: deliberately not its link base)
+        base = (load_base or 0x05000000) if self.relocatable else link_base
         if base < 0x200000 or base + size > 0x40000000 or (base < 0x02100000 and base + size > 0x00400000):
             raise SystemExit(f"guest link range {base:#x}..{base + size:#x} not allowed")
         self.base, self.size, self.root, self.verbose = base, size, root, verbose
+        self.text_bytes = text["bytes"]
         uc = self.uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)   # FP/SIMD on
 
@@ -450,8 +454,11 @@ class Emu:
         import subprocess
         out = subprocess.run(["aarch64-linux-gnu-nm", "-n", "--defined-only", elf], capture_output=True, text=True).stdout
         by_addr = {}
+        self.data_syms = {}
         for line in out.splitlines():
             f = line.split()
+            if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current",):
+                self.data_syms[f[2]] = int(f[0], 16)
             if len(f) == 3 and f[1] in "tTwW":
                 a = int(f[0], 16)
                 by_addr.setdefault(a, []).append(f[2])
@@ -459,13 +466,50 @@ class Emu:
         self.sym_names = [by_addr[a] for a in self.sym_addrs]
         self._bisect = bisect.bisect_right
 
+    # -- guarded initializer calls (--skip-faulting-init): every indirect call (blr) made by the initializer
+    # runners is a checkpoint; a fault below one restores the registers of the call and returns 0 from it, so a
+    # boot without game data can be traced past initializers that fault on the empty image.
+    GUARD_FUNCS = ("__libc_init_array", "call", "fnvnx_xc_run_address_order", "fnvnx_xc_run_image_order")
+
+    def install_guards(self):
+        import bisect
+        self.guard = {}
+        self.skipped = []
+        sites = []
+        names_at = {a: ns for a, ns in zip(self.sym_addrs, self.sym_names)}
+        for i, a in enumerate(self.sym_addrs):
+            if not any(n in self.GUARD_FUNCS for n in self.sym_names[i]):
+                continue
+            end = self.sym_addrs[i + 1] if i + 1 < len(self.sym_addrs) else a + 0x400
+            for off in range(a - self.link_base, min(end, a + 0x2000) - self.link_base, 4):
+                if 0 <= off < len(self.text_bytes) - 4:
+                    (w,) = struct.unpack_from("<I", self.text_bytes, off)
+                    if w & 0xFFFFFC1F == 0xD63F0000:   # blr xN
+                        sites.append((off + self.base, (w >> 5) & 31))
+        for addr, reg in sites:
+            self.uc.hook_add(UC_HOOK_CODE, self.on_guard_call, user_data=reg, begin=addr, end=addr)
+            self.uc.hook_add(UC_HOOK_CODE, self.on_guard_return, begin=addr + 4, end=addr + 4)
+        print(f"   guarding {len(sites)} indirect call sites of the initializer runners")
+
+    def on_guard_call(self, uc, addr, size, reg):
+        from unicorn.arm64_const import UC_ARM64_REG_X0 as X0
+        target = uc.reg_read(X0 + reg) if reg <= 28 else 0
+        self.guard[self.cur.tid] = (uc.context_save(), addr + 4, target)
+
+    def on_guard_return(self, uc, addr, size, _):
+        self.guard.pop(self.cur.tid, None)
+
     def sym(self, a):
         if not getattr(self, "sym_addrs", None):
             return f"{a:#x}"
+        if self.base <= a < self.base + self.size:   # runtime -> link address (relocatable guest)
+            a = a - self.base + self.link_base
         i = self._bisect(self.sym_addrs, a) - 1
         if i < 0:
             return f"{a:#x}"
         names = self.sym_names[i]
+        if a - self.sym_addrs[i] > 0x100000:
+            return f"{a:#x}"
         orig = [n for n in names if n.startswith("__fnv_") and len(n) >= 14]
         native = [n for n in names if not n.startswith("__fnv_")]
         label = (native[0] if native else names[0])
@@ -477,6 +521,12 @@ class Emu:
         uc = self.uc
         pc, lr, fp = uc.reg_read(UC_ARM64_REG_PC), uc.reg_read(UC_ARM64_REG_LR), uc.reg_read(UC_ARM64_REG_X29)
         print(f"== trace ({why}), thread {self.cur.tid if self.cur else '?'}")
+        xa = getattr(self, "data_syms", {}).get("g_fnvnx_xc_current")
+        if xa is not None:
+            xa = xa - self.link_base + self.base if self.relocatable else xa
+            (cur,) = struct.unpack("<I", uc.mem_read(xa, 4))
+            if cur:
+                print(f"   S10 initializer running: orig {cur:#010x}")
         print(f"   pc  {self.sym(pc)}")
         print(f"   lr  {self.sym(lr)}")
         for i in range(40):
@@ -540,6 +590,17 @@ class Emu:
             try:
                 uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
             except UcError as e:
+                g = getattr(self, "guard", {}).pop(t.tid, None)
+                if g is not None and len(self.skipped) < getattr(self, "max_skips", 100000):
+                    pc = uc.reg_read(UC_ARM64_REG_PC)
+                    self.skipped.append((g[2], pc))
+                    if len(self.skipped) <= 30:
+                        print(f"   skipped initializer {self.sym(g[2])}: {e} at {self.sym(pc)}")
+                    uc.context_restore(g[0])
+                    uc.reg_write(UC_ARM64_REG_X0, 0)
+                    t.ctx, t.resume_pc, t.result, t.state = uc.context_save(), g[1], 0, "ready"
+                    self.cur = None
+                    continue
                 self.trace(f"fault: {e}")
                 raise SystemExit(f"emulation fault at pc={uc.reg_read(UC_ARM64_REG_PC):#x} thread {t.tid}: {e}")
             if self.exit_code is not None:
@@ -562,6 +623,9 @@ def main(argv):
     ap.add_argument("--root", help="host directory for sdmc:/ (default: a fresh temp dir)")
     ap.add_argument("--file", action="append", default=[], help="NAME=PATH: copy PATH to sdmc:/NAME first")
     ap.add_argument("--elf", help="guest ELF for symbolized crash traces")
+    ap.add_argument("--load-base", type=lambda v: int(v, 0), help="where to map a relocatable guest")
+    ap.add_argument("--skip-faulting-init", action="store_true",
+                    help="trace mode: return 0 from an initializer that faults (needs --elf)")
     ap.add_argument("--budget", type=int, default=400_000_000, help="instructions per scheduling slice")
     a = ap.parse_args(argv)
     root = a.root or tempfile.mkdtemp(prefix="fnvnx-emu-")
@@ -570,22 +634,28 @@ def main(argv):
         dst = os.path.join(root, name.lstrip("/"))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
-    emu = Emu(a.nso, root)
+    emu = Emu(a.nso, root, load_base=a.load_base)
     emu.budget = a.budget
     if a.elf:
         emu.load_symbols(a.elf)
+        if a.skip_faulting_init:
+            emu.install_guards()
     try:
         rc = emu.run()
     except SystemExit as e:
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
+        if getattr(emu, "skipped", None) is not None:
+            print(f"   initializers skipped after a fault: {len(emu.skipped)}")
         print(f"STOPPED: {e}")
         return 1
     out = emu.console.decode(errors="replace")
     tp_ok = getattr(emu, "tp_after", None) == 0xDEAD0000
-    print(f"== guest at {emu.base:#010x}: rc={rc:#x} host_calls={emu.calls} threads={len(emu.threads)} "
+    print(f"== guest at {emu.base:#010x} (link base {emu.link_base:#x}, {'relocatable' if emu.relocatable else 'fixed'}): rc={rc:#x} host_calls={emu.calls} threads={len(emu.threads)} "
           f"switches={emu.ctx_switches} blocking_waits={emu.addr_waits} tpidr_el0 restored={tp_ok}")
     for line in emu.debug:
         print(f"   [debug] {line}")
+    if getattr(emu, "skipped", None) is not None:
+        print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
     ok = rc == 0 and a.expect in out and tp_ok
     print("PASS" if ok else "FAIL")

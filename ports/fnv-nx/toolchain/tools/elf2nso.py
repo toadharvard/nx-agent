@@ -30,16 +30,36 @@ FLAG_TEXT_COMPRESS, FLAG_RO_COMPRESS, FLAG_DATA_COMPRESS = 1, 2, 4
 FLAG_TEXT_HASH, FLAG_RO_HASH, FLAG_DATA_HASH = 8, 16, 32
 
 
+GUEST_MAGIC = 0x47584E46   # "FNXG" at text + 8 (toolchain/guest/crt0.s)
+
+
+def patch_guest_header(text: bytes, base: int, span: int, relocatable: bool) -> bytes:
+    """fnv-nx guest: fill crt0's +16 link base, +20 page-aligned size, +24 flags (bit 0 relocatable)."""
+    if len(text) < 32 or struct.unpack_from("<I", text, 8)[0] != GUEST_MAGIC:
+        return text
+    b = bytearray(text)
+    struct.pack_into("<III", b, 16, base, (span + PAGE - 1) & ~(PAGE - 1), 1 if relocatable else 0)
+    return bytes(b)
+
+
+def is_pie(elf: nxelf.Elf) -> bool:
+    """ET_DYN, or a PIE linked at a non-zero base: bfd writes e_type ET_EXEC for those but keeps DF_1_PIE."""
+    if elf.type == nxelf.ET_DYN:
+        return True
+    return bool(elf.dynamic().get(0x6FFFFFFB, 0) & 0x08000000)   # DT_FLAGS_1 & DF_1_PIE
+
+
 def build_nso(elf: nxelf.Elf, compress: bool = True) -> bytes:
     loads = elf.loads()
     if len(loads) != 3:
         raise nxelf.ElfError(f"expected exactly 3 PT_LOAD segments (text, rodata, data), found {len(loads)}")
     text, ro, data = loads
-    # NSO offsets are relative to the module base. A PIE starts at 0; a fixed-address image (the fnv-nx
-    # guest, ET_EXEC) is stored relative to its first segment and mapped back there by whoever loads it.
+    # NSO offsets are relative to the module base (the first segment). Horizon's loader maps PIEs linked at 0;
+    # the fnv-nx guest is either fixed (ET_EXEC, mapped back at its link address) or a PIE linked at a non-zero
+    # base (ET_DYN) that the host maps anywhere and that relocates itself (toolchain/guest/runtime.c).
     base = text.vaddr
-    if base and elf.type != nxelf.ET_EXEC:
-        raise nxelf.ElfError(f"position-independent image must start at 0 (got {base:#x})")
+    if base and elf.type not in (nxelf.ET_EXEC, nxelf.ET_DYN):
+        raise nxelf.ElfError(f"unsupported ELF type {elf.type}")
     for name, p in (("text", text), ("rodata", ro), ("data", data)):
         if p.vaddr % PAGE:
             raise nxelf.ElfError(f"{name} segment vaddr {p.vaddr:#x} is not page aligned")
@@ -58,6 +78,8 @@ def build_nso(elf: nxelf.Elf, compress: bool = True) -> bytes:
     file_off = NSO_HEADER_SIZE
     for i, p in enumerate((text, ro, data)):
         raw = elf.segment_bytes(p)
+        if i == 0:
+            raw = patch_guest_header(raw, base, data.vaddr + data.memsz - base, is_pie(elf))
         hashes.append(hashlib.sha256(raw).digest())
         blob = lz4block.compress(raw) if compress else raw
         blobs.append(blob)

@@ -1,0 +1,7 @@
+%rename link                old_link
+
+*link:
+%(old_link) --defsym=FNVNX_GUEST_BASE=0x30000000 -T %:getenv(FNVNX_TOOLCHAIN /guest/guest.ld) -pie --no-dynamic-linker -z text -z now -z pack-relative-relocs --gc-sections -z max-page-size=0x1000 --build-id=sha1 --require-defined=__fnvnx_guest_start --require-defined=main
+
+*startfile:
+crti%O%s crtbegin%O%s

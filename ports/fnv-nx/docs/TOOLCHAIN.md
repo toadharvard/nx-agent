@@ -12,7 +12,7 @@ buildscripts `master` (2026-11-03); file references are relative to those trees.
 | Process | One 64-bit process (AArch64 instructions) with a 32-bit address space, NPDM `AddressSpace32BitNoReserved` |
 | Packaging | Host NSO in an exefs override `/atmosphere/contents/<program id>/exefs.nsp` (`main` + `main.npdm`); no NRO |
 | libnx | Stays LP64 and unmodified. The game is a separate ILP32 module; they talk through a 64-bit-clean table (`FnvnxHostApi`) |
-| Guest | ILP32 ELF32 **static executable linked at a fixed address** (default `0x10000000`), packed as `guest.nso`, mapped by the host at its link address |
+| Guest | ILP32 ELF32, **relocatable** (PIE linked at `0x30000000`, self-relocating, placed by the host after the S10 reservation; section 9) or fixed (`guest.specs`, claimed by S10), packed as `guest.nso` |
 | Reserved | `0x00400000..0x02100000`: original image (S2: no native code/data there) incl. the data window `0x00fdf000..0x02100000` (S3) |
 | Compiler | `fnvnx-a64`: devkitA64's binutils/gcc/newlib + devkitPro patches, plus ILP32 multilibs, built from source |
 | Packers | Python: `elf2nso.py` (ELF32 and ELF64), `npdmtool.py`, `build_pfs0.py`, `bin2s` |
@@ -22,7 +22,7 @@ buildscripts `master` (2026-11-03); file references are relative to those trees.
  0x00000000  null guard (2 MiB)
  0x00200000  small map, 1 GiB: loader-placed host NSO, thread stacks, TLS pages (all ASLR-randomized)
              |- 0x00400000..0x02100000  original FNV image range, reserved (S2 symbols, S3 data window)
-             |- 0x10000000..            guest (ILP32 game), mapped by the host at its link address
+             |- 0x02100000..            guest (ILP32 game): first free gap after the window (relocatable guest)
  0x40000000  large map, 3 GiB: heap region (2 GiB with NoReserved: host heap + guest heap), no alias region
  0xFFFFFFFF
 ```
@@ -176,11 +176,10 @@ are used unchanged for the host.
 
 ### Guest module ABI
 
-* Compile `-mabi=ilp32 -fno-pie -ftls-model=local-exec`; link through `guest.specs`: `guest.ld`, `-static
-  -no-pie`, default base `0x10000000` (`-Wl,--defsym=FNVNX_GUEST_BASE=0x...` to move it). Output: ELF32
-  `ET_EXEC`, three PT_LOADs, no dynamic relocations. Fixed, not PIE, because S2 resolves references to the
-  original image as **absolute** symbols (`__fnv_<addr>` in its `aliases.ld`, added to this link), and so that
-  native addresses are known at link time.
+* Compile `-mabi=ilp32 -fPIE -ftls-model=local-exec`. Relocatable (default, section 9): `guest_pie.specs`,
+  `-pie -z text -z pack-relative-relocs`, link base `0x30000000`. Fixed: `guest.specs`, `-static -no-pie`,
+  `FNVNX_GUEST_BASE` (default `0x10000000`, the game build uses `0x02100000`). Round 1 chose fixed because S2
+  binds image data as **absolute** symbols; section 9 shows how a PIE handles them.
 * `guest.ld` refuses to link a guest that overlaps `0x00400000..0x02100000`, leaves the small map, or is not
   page aligned. `elf2nso.py` stores a fixed-address image relative to its first segment; the host maps it at
   the address in the header (+16) and checks the size (+20), range rules and that the range is free.
@@ -193,8 +192,10 @@ are used unchanged for the host.
 * newlib: libsysbase hooks `__syscall_exit`, `__syscall_nanosleep`, `__syscall_clock_gettime` (monotonic),
   `devoptab_list[STD_OUT/ERR]` -> host console, `fake_heap_start/end` = guest heap block from the host. Locks
   and `__getreent` use the single-thread defaults; threads, files, real time are S4's.
-* Relocations, for a PIE variant only: `R_AARCH64_P32_RELATIVE` is type **183** in ELF32 (LP64 uses 1027);
-  `runtime.c` applies RELA and RELR forms when `_DYNAMIC` exists.
+* Relocations (relocatable guest): `R_AARCH64_P32_RELATIVE` is type **183** in ELF32 (LP64 uses 1027);
+  `runtime.c` applies the RELA and RELR forms for the slide, finding `.dynamic` through MOD0 (section 9).
+* Header words +16/+20/+24 (link base, size, flags bit 0 = relocatable) are written by `elf2nso.py`, not by the
+  assembler: an absolute word in a PIE's text would need a text relocation.
 
 ## 5. Address space rules (for S2/S3/S4)
 
@@ -305,10 +306,8 @@ bind each to a generated trap stub (`mktraps.py`) that logs its name and returns
 `-DFNVNX_TRAPS_FATAL`). Output `fnvnx.elf` (text 7.3 MB, data 0.4 MB, bss 1.1 MB) -> `guest.nso` (4.1 MB); the host
 NSO and NPDM are the hello world's (the host loads `sdmc:/fnvnx/guest.nso`).
 
-* `platform_adapt.sh`: S1's current shim declares `Interlocked*` with C++ linkage and adds `void*` overloads of the
-  critical-section/QueryPerformance functions, which breaks S4's `sync.cpp` and `exports.cpp` (and S4/S7's host test
-  builds). The game build compiles patched copies; the upstream fix is described in the script. `w32_c_aliases.c`
-  adds C-linkage Interlocked* for units that still use the C names.
+* (Round 2 needed `platform_adapt.sh` / `w32_c_aliases.c` for a shim/platform linkage conflict; S1 fixed the shim
+  in 5f1c7e0 and removed them.)
 * `null_d3d9.cpp` is generated (`gen_null_d3d9.py`) from `shim/include/d3d9.h`: 20 interfaces, 434 methods; every call
   succeeds, out-interfaces get null objects carrying their Create* sizes/format, Lock* return scratch memory, caps
   describe a 1280x720 X8R8G8B8 SM3 device.
@@ -347,6 +346,75 @@ What blocks a boot, in order: (1) the player's `FalloutNV.exe` in `sdmc:/fnvnx/g
 had none); (2) the 7,300 + 984 + 53 address references without native code, among them whatever the static
 initialisers call; (3) WinMain's unit; (4) S4's CRT start running the image's `__xi`/`__xc` tables (not done:
 `boot.cpp` TODO); (5) D3DX9 and the vtables/typeinfo of uncompiled classes.
+
+## 9. Round 3: S10 startup integration, relocatable guest (J-0021, J-0027 follow-up)
+
+### Decision: relocatable guest
+
+S10 measured that every required fixed window costs relaunches (`docs/STARTUP.md` section 1). Applied to the real
+guest with S10's own model (`tests/s5/relaunch_model.c` includes `tests/s10/test_reserve.c`; 200,000 launches, 2 MiB
+host NSO, 1 MiB main stack):
+
+| guest | relocatable (window only) | fixed at `0x02100000` | fixed at `0x10000000` |
+|---:|---:|---:|---:|
+| 10 MiB (today's link: 8.98 MiB incl. bss) | **5.3 %** | 8.2 % | 8.3 % |
+| 40 MiB (a fuller game) | **5.3 %** | 16.3 % | 16.4 % |
+
+A relocatable guest takes the rate down to the data window alone (5.3 %, ~1.06 launches) whatever its size; a fixed
+one grows with the image. It is also cheap, but needs three facts found on the way:
+
+* **Absolute image symbols through the GOT.** All 50,224 references of S2's objects to `aliases.ld`'s 31,068
+  absolute symbols go through the GOT (`R_AARCH64_P32_ADR_GOT_PAGE` + `LD32_GOT_LO12_NC`; the Ubuntu cross gcc that
+  built them defaults to `-fPIE`), plus 66 `P32_ABS32` data words; none is PC-relative (`abs_relocs` scan over the
+  2,592 objects). A PIE therefore never needs the link address of an absolute symbol in its code.
+* **binutils bug:** in an ILP32 PIE, ld 2.45.1 emits `R_AARCH64_P32_RELATIVE` with the absolute value as addend for
+  GOT entries (and data words) of absolute symbols (probe: `__fnv_011c9520 = 0x011c9520` -> RELATIVE addend
+  0x11c9520). Applied as "add base" that would corrupt every image data reference. The guest's relocator only
+  moves values inside its own link range `[0x30000000, +size)`; the link base is chosen far from the image window,
+  so the two ranges cannot overlap and absolute values stay as they are.
+* **bfd writes `e_type = ET_EXEC` for a PIE linked at a non-zero base** (still `DF_1_PIE`, `.relr.dyn`, PT_DYNAMIC;
+  the PT_DYNAMIC program header must be declared in `guest.ld`, without it the output is a plain executable).
+  `elf2nso.py` treats `DF_1_PIE` as relocatable. The runtime finds `.dynamic` through MOD0's PC-relative offset:
+  the `_DYNAMIC` symbol's own GOT entry would need relocating first.
+
+The host places a relocatable guest after the reservation in the first free gap of the small map above the data
+window (`pick_guest_base`), from a staging buffer at the top of the guest heap (the host heap is 64 MiB), with
+`svcMapProcessCodeMemory` + segment permissions as before. `vorbis` and the guest runtime are now built `-fPIC`
+(non-PIC objects put pointer tables in `.rodata`: "read-only segment has dynamic relocations").
+
+A fixed guest stays supported: `GUEST=fixed` in the game build (`FNVNX_GUEST_BASE`, default `0x02100000`) and a host
+built with `-DFNVNX_GUEST_RESERVE=<size>` [`-DFNVNX_GUEST_LINK_BASE`]: S10 claims the range in `__libnx_initheap`, the
+loader decompresses into the claimed range and converts it with `fnvnx_reserve_remap_code("guest", ...)`.
+
+### S10 integration
+
+| Where | What |
+|---|---|
+| `host.c` `__libnx_initheap` | `fnvnx_reserve_early(guest heap)` after `svcSetHeapSize`; the guest heap shrinks by the backing. `fnvnx_guest_reserve_size` = 0 (relocatable default) or `FNVNX_GUEST_RESERVE`. |
+| `host.c` `main` | `fnvnx_reserve_late(log)` after console/log, before the guest (relaunches on a collision). S10 objects are referenced weakly (`#pragma weak`): a host built without `reserve*.c` (render/nine's test build) links and logs "windows NOT reserved". The header is included by relative path. |
+| `host.c` `as_name()` | stack region (32-bit spaces report the ASLR region as `[0x00200000, 4 GiB)`), or `fnvnx_reserve_address_space()` when linked. |
+| `host_v3.inc` `map_fixed` | inside a claimed range: `fnvnx_reserve_map_fixed` (zeroes, no memory needed); else the old svcMapMemory path. |
+| `boot.cpp` (S3 loader driver) | `map_fixed` goes to the host with no source block first; after mapping and before code-pointer fixups `fnvnx_xc_locate` over `.rdata` captures the image's `__xc` slots (IMAGE mode); trace mode maps the text range and the window as the two ranges S10 claims. |
+| `runtime.c` | after `__libc_init_array`: `fnvnx_xc_run_initializers(slots or NULL, ...)` + report; after `main`: `fnvnx_xc_cexit()`. Opt-in by the game boot defining `fnvnx_guest_xc_hooks` (S10's own e2e guest drives xc.c itself and still passes). |
+| game build | `startup/tools/mkxctab.py --addrmap ... <objects>` -> `xctab.c`; `xc.c`, `onexit.c`, `xctab.c` linked as objects. |
+| `tests/s5/hello/build.sh` | host links `startup/host/reserve.c` + `reserve_nx.c`; `HOST_DEFS` passes host build switches. |
+
+### Emulated boot (`tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init`)
+
+S2 snapshot of 20:11 (2,592 objects, address map 32,053 entries, still without WinMain's unit and without S1's
+XC1 rewrite: mkxctab finds 10,926 plain natives, 0 `__fnvnx_dyninit_`). Guest: relocatable, 8.98 MiB, mapped by
+the emulator at `0x05000000` (link base `0x30000000`). `--skip-faulting-init` makes every indirect call of the
+initializer runners a checkpoint: an initializer that faults on the empty image (no exe) returns 0 and the trace goes
+on. Result:
+
+* early init, empty image mapped, GCC initializers (`__libc_init_array`): 6 faulted on the empty image (null writes
+  in `FUN_00404d00_class` ctor from `GetGameSettingCollection`, null calls), the rest ran;
+* **S10 ADDRESS mode: all 10,926 initializers called** (rc 0); 339 faulted with a write to write-protected memory
+  in `RegisterFloatKeyOps` [orig 00a26e20] / `FUN_00a28cb0`: they fill `g_apfnA26E20CurvesCopy` and similar tables
+  that a unit defines **in `.text`** (symbol type T, read-only after mapping): an S1/S2 fix (the table must be data);
+* 199 distinct unresolved symbols hit, 2,918 trap calls in total;
+* `main` reached; STOP: WinMain (0x0086a850) is not in the link; then `fnvnx_xc_cexit` runs the game's exit handlers
+  and faults in one on the empty image.
 
 ## 7. Not yet done / untested
 

@@ -10,7 +10,7 @@ set -euo pipefail
 OUT=$(mkdir -p "$1" && realpath "$1")
 G=$(cd "$(dirname "$0")" && pwd)
 export PATH=$DEVKITPRO/devkitA64/bin:$PATH
-ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-pie -ftls-model=local-exec"
+ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec"   # PIC: links into fixed and relocatable guests
 CFLAGS="-O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -I$G/../include"
 aarch64-none-elf-gcc $ARCH -c "$G/crt0.s" -o "$OUT/crt0.o"
 for f in runtime threads fs; do

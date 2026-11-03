@@ -22,9 +22,14 @@ GUEST_ARCH="-mabi=ilp32 $CPU -fno-pie -ftls-model=local-exec"
 CFLAGS="-O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -I$TC/include"
 
 cd "$OUT"
-# host: LP64, libnx, linked by libnx's own switch.specs/switch.ld
-$CC $HOST_ARCH $CFLAGS -D__SWITCH__ -I"$DEVKITPRO/libnx/include" -c "$TC/host/host.c" -o host.o
-$CC -specs="$DEVKITPRO/libnx/switch.specs" $HOST_ARCH host.o -L"$DEVKITPRO/libnx/lib" -lnx \
+# host: LP64, libnx, linked by libnx's own switch.specs/switch.ld; S10's window reservation (startup/host).
+# HOST_DEFS: e.g. -DFNVNX_HOST_NO_CONSOLE, or -DFNVNX_GUEST_RESERVE=<bytes> for a fixed-address guest.
+ST=$(cd "$TC/../startup/host" && pwd)
+HINC="-D__SWITCH__ -I$DEVKITPRO/libnx/include -I$ST ${HOST_DEFS:-}"
+$CC $HOST_ARCH $CFLAGS $HINC -c "$TC/host/host.c" -o host.o
+$CC $HOST_ARCH $CFLAGS $HINC -c "$ST/reserve.c" -o reserve.o
+$CC $HOST_ARCH $CFLAGS $HINC -c "$ST/reserve_nx.c" -o reserve_nx.o
+$CC -specs="$DEVKITPRO/libnx/switch.specs" $HOST_ARCH host.o reserve.o reserve_nx.o -L"$DEVKITPRO/libnx/lib" -lnx \
 	-Wl,-Map,host.map -o host.elf
 
 # guest: ILP32 (ELF32) static executable at 0x10000000, ILP32 newlib/libsysbase/libgcc multilib,
