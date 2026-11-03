@@ -24,6 +24,12 @@
 #define FNVNX_EQUIV_WIN32_H
 #if defined(__cplusplus) && !defined(_WINDOWS_)
 #define FNVNX_EQUIV_WINDOWS_HERE 1
+#ifdef FNVNX_EQUIV_LEAN
+/* equiv.py build --lean (retry of units the full SDK breaks): the target shim declares a small subset, and the
+ * full <windows.h> also brings winioctl / rpc / ole names (enumerators like RequestLocation, `#define small char`)
+ * that collide with the decomp's own names. WIN32_LEAN_AND_MEAN leaves those headers out. */
+#define WIN32_LEAN_AND_MEAN
+#endif
 #define _ULARGE_INTEGER fnvnx_sdk_ULARGE_INTEGER
 #define CreateEventA fnvnx_sdk_CreateEventA
 #define CreateMutexA fnvnx_sdk_CreateMutexA
@@ -50,6 +56,10 @@
 #include "fnvnx_equiv_unaw.h"       /* generated: #undef of every SDK function-name macro */
 #undef min
 #undef max
+#ifdef FNVNX_EQUIV_LEAN
+#undef small
+#undef hyper
+#endif
 /* winnt.h includes <ctype.h>; the target shim includes no CRT header, and MSVC's _tolower / _toupper macros break
  * the decomp's own prototypes of those names. */
 #undef _tolower

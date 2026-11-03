@@ -285,14 +285,70 @@ def gen_dir():
     return d
 
 
-def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False):
+LAYOUT_LINE = re.compile(r'^\s*(\d*)\s*((?:\|\s*)+)(.*)$')
+
+
+def layout_shape(text):
+    """A layout without member type names: offsets, nesting, member names, base-class markers. Two classes with the
+    same shape put the same members at the same offsets (a member whose type was renamed keeps its shape)."""
+    out = []
+    for line in text.splitlines():
+        m = LAYOUT_LINE.match(line)
+        if not m:
+            out.append(line.strip())
+            continue
+        rest = m.group(3).strip()
+        if not rest.startswith(('+---', '<alignment', '{vfptr}', '{vbptr}')):
+            rest = rest.split()[-1] if rest else rest
+        out.append('%s %d %s' % (m.group(1), m.group(2).count('|'), rest))
+    return '\n'.join(out)
+
+
+def cmd_layouts(a):
+    """MSVC class layouts of the same units in two layout builds (--layout --objdir): classes whose size, member
+    offsets or member types differ, over all units (a class counts once, with the units it appears in)."""
+    sel = select_units(a.units, json.loads(Path(a.decomp, 'build/units.json').read_text())['units'])
+    seen, changed = {}, {}
+    for i in sel:
+        fa, fb = Path(a.a, 'u%d.layout.gz' % i), Path(a.b, 'u%d.layout.gz' % i)
+        if not (fa.exists() and fb.exists()):
+            continue
+        la, lb = layout_blocks(gzip.open(fa, 'rt').read()), layout_blocks(gzip.open(fb, 'rt').read())
+        for name in set(la) & set(lb):
+            (sa, ta), (sb, tb) = la[name], lb[name]
+            seen.setdefault(name, 0)
+            seen[name] += 1
+            if ta == tb:
+                continue
+            kind = 'size' if sa != sb else ('offsets' if layout_shape(ta) != layout_shape(tb) else 'types')
+            c = changed.setdefault(name, dict(kind=kind, units=[], sizes=(sa, sb), a=ta, b=tb))
+            c['units'].append(i)
+    kinds = Counter(c['kind'] for c in changed.values())
+    print('%d classes compared (%d class/unit pairs), %d differ: %s' % (len(seen), sum(seen.values()), len(changed),
+                                                                         dict(kinds)))
+    for name, c in sorted(changed.items(), key=lambda kv: (kv[1]['kind'], kv[0])):
+        print('%-8s %-60s size %d -> %d, %d units' % (c['kind'], name[:60], c['sizes'][0], c['sizes'][1],
+                                                     len(c['units'])))
+    if a.show:
+        import difflib
+        for name in a.show.split(','):
+            if name in changed:
+                print('==== %s' % name)
+                print('\n'.join(difflib.unified_diff(changed[name]['a'].splitlines(), changed[name]['b'].splitlines(),
+                                                     'a', 'b', lineterm='', n=1)))
+    if a.out:
+        Path(a.out).write_text(json.dumps(dict(classes=len(seen), changed={k: dict(kind=v['kind'], sizes=v['sizes'],
+                               units=v['units']) for k, v in changed.items()}), indent=0) + '\n')
+
+
+def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lean=False):
     args = [sys.executable, str(Path(decomp, 'tools/msvc.py').resolve()), '--compiler', unit['compiler'], '/c', '/nologo']
     flags = unit['flags']
     if eh_off:      # the same unit without C++ exception handling: separates EH-only differences from the rest
         flags = [f for f in flags if not f.upper().startswith('/EH')] + ['/EHs-c-']
     args += flags + ([] if plain else ['/I' + str(SHIM), '/I' + str(gen_dir()), '/FI', str(FORCE_INCLUDE)])
     if not plain and (tree / 'equiv_rules.txt').exists():      # a tree from `equiv.py prepare`
-        args += ['/FI', str(COMPAT_INCLUDE)]
+        args += ['/FI', str(COMPAT_INCLUDE)] + (['/DFNVNX_EQUIV_LEAN=1'] if lean else [])
     if layout:
         args.append('/d1reportAllClassLayout')
     args += ['/I' + str(tree / 'include'), str(tree / unit['source']), '/Fo' + str(obj)]
@@ -399,7 +455,7 @@ def cmd_build(a):
         obj = objdir / ('u%d.obj' % i)
         row = dict(unit=i, source=unit['source'], compiler=unit['compiler'])
         try:
-            ok, text = compile_unit(a.decomp, tree, unit, obj, a.layout, a.plain, a.eh_off)
+            ok, text = compile_unit(a.decomp, tree, unit, obj, a.layout, a.plain, a.eh_off, a.lean)
             if not ok:
                 row.update(status='compile-failed', error=text[-4000:])
                 obj.unlink(missing_ok=True)
@@ -865,6 +921,8 @@ def main():
     p.add_argument('--plain', action='store_true', help='the decomp recipe only: no /I tools/equiv/msvc, no /FI (control)')
     p.add_argument('--eh-off', action='store_true', help='/EHs-c- in place of the unit\'s /EH flags (both sides)')
     p.add_argument('--objdir', help='keep the objects (and layout reports) here, for refp / show')
+    p.add_argument('--lean', action='store_true', help='prepared trees: the stand-in <windows.h> with '
+                   'WIN32_LEAN_AND_MEAN (retry of units the full SDK breaks)')
     p = sub.add_parser('refp'); p.add_argument('decomp'); p.add_argument('old'); p.add_argument('objdir')
     p.add_argument('--out', required=True)
     p = sub.add_parser('compare'); p.add_argument('a'); p.add_argument('b'); p.add_argument('--out')
@@ -881,13 +939,15 @@ def main():
     p.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
     p = sub.add_parser('errors'); p.add_argument('fp')
     p = sub.add_parser('bindings'); p.add_argument('decomp')
+    p = sub.add_parser('layouts'); p.add_argument('decomp'); p.add_argument('a'); p.add_argument('b')
+    p.add_argument('--units', default='all'); p.add_argument('--show'); p.add_argument('--out')
     p = sub.add_parser('summarize'); p.add_argument('base'); p.add_argument('head')
     p.add_argument('--without', action='append', help='NAME=FP.jsonl: HEAD\'s rule set minus NAME')
     p.add_argument('--eh', nargs=2, help='BASE and HEAD built with --eh-off'); p.add_argument('--out')
     p.add_argument('--examples', type=int, default=0)
     a = ap.parse_args()
     dict(rules=cmd_rules, prepare=cmd_prepare, plan=cmd_plan, build=cmd_build, compare=cmd_compare,
-         show=cmd_show, attribute=cmd_attribute, errors=cmd_errors, refp=cmd_refp, bindings=cmd_bindings, summarize=cmd_summarize)[a.command](a)
+         show=cmd_show, attribute=cmd_attribute, errors=cmd_errors, refp=cmd_refp, bindings=cmd_bindings, summarize=cmd_summarize, layouts=cmd_layouts)[a.command](a)
 
 
 if __name__ == '__main__':
