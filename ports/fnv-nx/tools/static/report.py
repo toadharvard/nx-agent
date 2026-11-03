@@ -1,0 +1,426 @@
+#!/usr/bin/env python3
+"""report.py - aggregate the static gate's passes into <out>/report.md, <out>/sites/<class>.tsv, <out>/counts.tsv.
+
+    tools/static/report.py <prepared tree> <out dir> [baseline.tsv]
+
+Inputs (all optional, missing passes are reported as such):
+  <out>/clang/gnu/rows/*.tsv   fnvcheck AST rows                  (clang_pass.sh ... gnu)
+  <out>/clang/gnu/rows/*.err   clang diagnostics, flow-sensitive warnings
+  <out>/gcc/logs/*.log         GCC -O2 diagnostics with the real flags (gcc_warn.sh)
+  <out>/layout/diff.tsv        MSVC vs GCC/Itanium record layout differences (layout_diff.py)
+  <out>/grep.tsv               text counts (run.sh)
+A site is (class, file, line, col); a site in a header counts once however many units include it.
+With a baseline (class<TAB>count), exits 1 when a class has more sites than the baseline allows.
+"""
+import json
+import os
+import re
+import sys
+from collections import Counter, defaultdict
+
+# class -> (title, MSVC x86-32 vs GCC AArch64 ILP32, verdict, fix). Verdicts: benign / flag / header / rule /
+# per-site / runtime. The ids are the fnvcheck check names, the clang/GCC warning classes below, and LAYOUT-*.
+CLASSES = [
+    ('F2U', 'float -> unsigned integer (any width)',
+     'negative input: MSVC _ftol2 truncates to int64 and keeps the low bits (-1.0 -> 0xFF / 0xFFFFFFFF); AArch64 '
+     'fcvtzu saturates to 0. Input >= 2^w: low bits vs all-ones', 'rule',
+     'FTOI1: rewrite each listed site to (T)(long long)(x) - fcvtzs x + truncation is exactly _ftol2 below 2^63'),
+    ('F2U64', 'float -> unsigned __int64', 'MSVC helper semantics vs fcvtzu saturation for negative / >= 2^64',
+     'per-site', 'review each site; (unsigned __int64)(__int64)x where the value is known < 2^63'),
+    ('F2S', 'float -> signed integer (32/16/8 bit)',
+     'only NaN or outside int32: MSVC 0x80000000 (integer indefinite), AArch64 saturates (NaN -> 0); in-range values '
+     'identical; 8/16-bit targets truncate the int32 on both', 'runtime',
+     'none by default; FTOI2 (same site list) to fnvnx_ftol(x) = fcvtzs x + range/NaN check -> 0x80000000 where a '
+     'site can see NaN/huge values; debug builds: -fsanitize=float-cast-overflow with a logging handler'),
+    ('F2S64', 'float -> signed __int64', 'NaN / >= 2^63: 0x8000000000000000 vs saturation', 'benign',
+     'none (values that large do not occur); same FTOI2 helper if one does'),
+    ('SHIFT64-VAR', 'variable shift of a 64-bit value',
+     'count >= 64: MSVC __allshl/__allshr/__aullshr give 0 (or the sign), AArch64 lslv/asrv/lsrv use count & 63',
+     'per-site', 'review: counts that can reach 64 get an explicit (n >= 64 ? 0 : x << n)'),
+    ('SHIFT32-VAR', 'variable shift of a 32-bit value', 'x86 shl/sar/shr and AArch64 lslv/asrv/lsrv both mask the '
+     'count with 31: identical', 'benign', 'none'),
+    ('SHIFT-CONST', 'constant shift count >= width', 'UB folded at compile time; MSVC and GCC fold differently',
+     'per-site', 'write the intended value'),
+    ('DIV-VAR', 'integer division by a variable', 'x86 traps on /0 and INT_MIN/-1, AArch64 returns 0 / INT_MIN: the '
+     'original crashed where we continue, so a working original never divided by zero (no SEH filter runs either)',
+     'benign', 'none'),
+    ('ORDER-ARGS', 'call with two or more side-effecting arguments',
+     'MSVC x86 evaluates (pushes) arguments right to left, GCC AArch64 left to right (verified, tests/s12): '
+     'Use(Read(), Read()) swaps the values', 'per-site',
+     'same-callee / same-object rows: hoist the arguments into locals in MSVC order (last argument first); ORDER1 '
+     'rule from the site list, or a GCC plugin that gimplifies side-effecting scalar arguments right to left'),
+    ('ORDER-OBJECT', 'member call whose object expression and arguments both have side effects',
+     'C++17 (GCC): object expression first; MSVC 2008: arguments first, ecx last', 'per-site',
+     'hoist the object pointer or the argument as MSVC ordered them'),
+    ('ORDER-OPERATOR', 'overloaded binary operator with two side-effecting operands',
+     'C++17 orders <<, >>, =, [] left to right; MSVC 2008 evaluated the right operand (an argument) first',
+     'per-site', 'hoist'),
+    ('ORDER-BINOP', 'built-in binary operator with two side-effecting operands',
+     'unspecified on both; GCC AArch64 left first, MSVC x86 usually left first for scalars', 'benign',
+     'review only same-callee rows that read a stream'),
+    ('ORDER-ASSIGN', 'assignment with side effects on both sides', 'C++17: right side first (GCC); MSVC 2008: '
+     'unspecified', 'per-site', 'review'),
+    ('VA-STRUCT', 'class/struct passed by value through ...',
+     'x86 copies the bytes onto the stack (a 4-byte string object works as %s); AArch64: <= 16 bytes in registers '
+     'as one composite, > 16 bytes by reference', 'per-site', 'pass the member (c_str(), the pointer) explicitly'),
+    ('FMT-STRUCT', 'printf-style %s/%d given a struct', 'see VA-STRUCT', 'per-site', 'pass the member'),
+    ('FMT-MSVC', 'MSVC-only format conversion (%I64d, %I32, %S, %C, %Z, %w)',
+     'meaningful only to the MSVC CRT formatter; newlib (sprintf/vsprintf/sscanf come from libc, RUNTIME.md) '
+     'misparses them', 'runtime', 'S4: route sprintf/vsprintf/sscanf/_vsnprintf of game code to the MSVC formatter '
+     '(as fprintf/printf already are)'),
+    ('FMT-WIDE', '%ls / %lc', 'MSVC: 16-bit wchar_t; newlib expects 32-bit wchar_t', 'runtime', 'as FMT-MSVC'),
+    ('FMT-SIZE', 'format conversion and argument of different size',
+     'x86 reads 4-byte stack slots (a 64-bit value feeds two conversions), AArch64 one register per argument: '
+     'different garbage after the first mismatch', 'per-site', 'fix the format (an original bug)'),
+    ('FMT-CLASS', 'integer passed for %f or double for %d',
+     'x86 reads the stack, AArch64 reads the other register file', 'per-site', 'fix the format'),
+    ('FMT-MISSING', 'fewer arguments than conversions', 'garbage on both, different garbage', 'benign', 'none'),
+    ('VA-ADDR-PARAM', 'address of a named parameter in a variadic function',
+     'x86 idiom: walk the stack from &fmt to the variadic arguments; AArch64 passes them in registers', 'per-site',
+     'rewrite with va_list'),
+    ('VA-LDBL', 'long double through ...', '8 bytes vs 16', 'per-site', 'double'),
+    ('ATOMIC-UNALIGNED', 'Interlocked* on a misaligned or packed field',
+     'x86 lock prefix works unaligned; AArch64 ldaxr/stlxr fault on misalignment', 'per-site', 'align the field'),
+    ('ATOMIC-USE', 'fields and globals updated with Interlocked*', 'lock-free protocols: on x86 a plain store after '
+     'an Interlocked acquire releases (TSO); on AArch64 it does not', 'per-site',
+     'plain stores to these fields (ATOMIC-PLAIN-STORE) become __atomic_store_n(.., __ATOMIC_RELEASE)'),
+    ('ATOMIC-PLAIN-STORE', 'plain store to a field that is elsewhere updated with Interlocked*',
+     'x86 TSO: release; AArch64: unordered', 'per-site', '__atomic_store_n(&f, v, __ATOMIC_RELEASE) (rule ATOM1)'),
+    ('BARRIER', '_ReadWriteBarrier / _ReadBarrier / _WriteBarrier / MemoryBarrier calls',
+     'MSVC: compiler barrier, and x86 TSO orders the hardware; fnvnx_compat.h: compiler barrier only - no dmb',
+     'header', 'fnvnx_compat.h: _ReadWriteBarrier -> __atomic_thread_fence(__ATOMIC_SEQ_CST), _ReadBarrier -> '
+     '__ATOMIC_ACQUIRE, _WriteBarrier -> __ATOMIC_RELEASE (dmb ish / ishld)'),
+    ('VOLATILE-DECL', 'volatile globals and fields',
+     'MSVC (/volatile:ms, the x86 default): volatile loads acquire, stores release; GCC: no ordering at all, and it '
+     'moves plain stores across volatile ones (verified)', 'runtime',
+     'compiler support: a GCC plugin turning volatile accesses of decomp units into ldar/stlr (MSVC volatile), or a '
+     'rule wrapping these declarations in fnvnx_msvolatile<T> (acquire/release accessors, same size)'),
+    ('POLL-VOLATILE', 'loop polling a volatile', 'as VOLATILE-DECL: the data read after the loop needs acquire',
+     'runtime', 'as VOLATILE-DECL'),
+    ('POLL-PLAIN', 'loop polling plain shared memory (only waiting in the body)',
+     'x86 TSO makes the data written before the flag visible in order; AArch64 does not; GCC may also hoist the '
+     'load when the body makes no call', 'per-site', '__atomic_load_n(.., __ATOMIC_ACQUIRE) in the condition'),
+    ('TLS', '__declspec(thread) variables', 'MSVC: image .tls section through the TEB TLS index; native: __thread on '
+     'TPIDR_EL0 (S5 guest runtime)', 'runtime', 'S2: never rebind a native __thread definition to an image address; '
+     'S4/S5: no image code reads these through the image TLS index'),
+    ('P2I64', 'pointer converted to a 64-bit integer', 'GCC ILP32 sign-extends (sxtw, verified); differs from a zero '
+     'extension only for addresses >= 2 GiB', 'runtime', 'keep guest addresses below 0x80000000 (see P2I-SIGNED)'),
+    ('P2I-SIGNED', 'pointer as signed int compared / shifted / divided',
+     'FalloutNV.exe is not large-address-aware: no address >= 2 GiB ever reached this code on Windows; the guest '
+     'heap at 0x40000000 + 2 GiB (S5) does', 'runtime',
+     'S5: cap the guest heap below 0x80000000 (2 GiB address space, as the original)'),
+    ('ENUM-BITFIELD', 'enum bit-field whose top bit is used',
+     'MSVC: enums are int, so the bit-field is signed (3 in 2 bits reads back -1); GCC: unsigned underlying type, '
+     'reads back 3', 'rule', 'ENUM1: give these enums the fixed underlying type int (enum E : int) - MSVC semantics'),
+    ('ENUM-UNSIGNED', 'enum with enumerators >= 0x80000000',
+     'MSVC: int (0x80000000 is INT_MIN; promotes, compares, widens as negative); GCC: unsigned int', 'rule',
+     'ENUM1: enum E : int with (int) casts on the large enumerators'),
+    ('ENUM-64', 'enum with enumerators beyond 32 bits', 'MSVC truncates to int; GCC makes the enum 64-bit',
+     'per-site', 'enum E : int'),
+    ('MEMPTR-FIELD', 'pointer-to-member stored in a record',
+     'MSVC 4/8/12/16 bytes by inheritance model; Itanium 8', 'per-site', 'see LAYOUT rows'),
+    ('EMPTY-BASE', 'empty base after the first base', 'MSVC gives it a byte; Itanium overlaps at 0', 'per-site',
+     'see LAYOUT rows'),
+    ('VBASE', 'virtual bases', 'MSVC vbptr vs Itanium vtable offsets', 'per-site', 'see LAYOUT rows'),
+    ('WCHAR-LIB', 'C library wide-character function called from game code',
+     'game wchar_t is 16-bit (-fshort-wchar), newlib/glibc are built for 32-bit wchar_t', 'runtime',
+     'S4: 16-bit implementations (as fnvnx_wcslen16) and a DECL1 mapping of the names'),
+    ('THIS-NULL', 'this == 0 tests', 'GCC deletes them unless -fno-delete-null-pointer-checks (D10, verified kept)',
+     'benign', 'none (D10 flag)'),
+    ('LDBL', 'long double', 'MSVC 8 bytes (= double), AArch64 16 bytes (soft quad)', 'benign',
+     'none: only in two unused template specializations'),
+    ('W-UNINIT', 'read of an uninitialized local (clang -Wuninitialized/-Wsometimes-uninitialized, GCC '
+     '-W(maybe-)uninitialized)', 'MSVC read whatever the stack/register held (often stable in /Od units); GCC -O2 '
+     'picks any value (folds the path away: verified)', 'per-site',
+     'initialize to what the original read; -ftrivial-auto-var-init=zero does NOT help (GCC still optimizes as '
+     'uninitialized, verified)'),
+    ('W-RETURN', 'control reaches the end of a non-void function',
+     'MSVC returns whatever eax held; GCC -O2 treats the path as unreachable (may fall into the next function)',
+     'per-site', 'add the return MSVC effectively made; -funreachable-traps turns the fall-through into a trap'),
+    ('W-STACKADDR', 'address of a local returned or kept past its scope',
+     'MSVC: the stale slot still held the data; GCC: returns NULL for a returned local (isolate-paths, verified), '
+     'reuses slots, deletes stores to dead locals', 'per-site', 'fix; -fno-isolate-erroneous-paths-dereference keeps '
+     'the address instead of NULL'),
+    ('W-UNSEQ', 'unsequenced modification (i = i++, f(i++, i))', 'compiler-specific order', 'per-site',
+     'write the MSVC order out'),
+    ('W-LOOP-UB', 'loop iteration with undefined behaviour (-Waggressive-loop-optimizations)',
+     'GCC shortens or unbounds the loop (array past its declared end, decomp style); MSVC 2008 did not', 'flag',
+     '-fno-aggressive-loop-optimizations'),
+    ('W-ARRAY-BOUNDS', 'constant index past a declared array (-Warray-bounds)',
+     'decomp arrays declared too small (the bytes after belong to the next member); GCC may assume in-bounds',
+     'per-site', 'size the array as the original used it'),
+    ('W-VA-PROMOTE', "va_arg of float/char/short ('promoted when passed through ...')",
+     'GCC replaces the va_arg with a trap; MSVC read 4 bytes', 'per-site', 'va_arg(ap, double/int) and convert'),
+    ('W-CAST-FN', 'call through an incompatible function pointer type (-Wcast-function-type)',
+     'x86 cdecl tolerated extra/missing int args and stdcall pops; AArch64: float vs int args/returns change '
+     'registers', 'per-site', 'review float/int signature mismatches'),
+    ('W-SHIFT', 'shift count out of range (-Wshift-count-*)', 'see SHIFT-CONST', 'per-site', 'see SHIFT-CONST'),
+    ('W-FORMAT', 'printf/scanf format warnings (-Wformat)', 'see FMT-*', 'per-site', 'see FMT-*'),
+    ('W-NONPOD-VARARGS', 'non-trivial class through ... (-Wnon-pod-varargs / -Wconditionally-supported)',
+     'see VA-STRUCT', 'per-site', 'see VA-STRUCT'),
+    ('W-ENUM-BITFIELD', 'clang -Wbitfield-enum-conversion / -Wsigned-enum-bitfield', 'see ENUM-BITFIELD', 'rule',
+     'see ENUM-BITFIELD'),
+    ('W-TYPE-LIMITS', 'comparison always true/false by type range (-Wtype-limits)',
+     'signedness of the operand decides; char is signed on both now (D10)', 'per-site', 'review'),
+    ('W-NEW-DELETE', 'mismatched new/delete, free of non-heap (-Wmismatched-new-delete, -Wfree-nonheap-object)',
+     'MSVC: one heap, delete == delete[] for trivial types; native: also one heap (S4)', 'benign', 'none'),
+    ('W-PSABI', 'GCC ABI notes (-Wpsabi)', 'parameter passing changed between GCC versions', 'benign',
+     'S2 bridges see the current ABI'),
+    ('W-OTHER', 'other target-semantics warnings of the set', '-', 'per-site', 'review'),
+    ('LAYOUT-BITFIELD', 'record whose bit-fields MSVC and GCC place differently',
+     'MSVC starts a new unit whenever the declared type size changes; GCC/AAPCS64 packs across', 'rule',
+     'BF1: declare such bit-fields with one type per MSVC unit (or explicit padding) - only where a byte image '
+     '(file, save, data image) or a decomp static_assert depends on it'),
+    ('LAYOUT-PACK-ALIGN', '#pragma pack with an over-aligned member', 'MSVC: __declspec(align)/__m128 beat pack; '
+     'GCC: pack caps them', 'rule', 'PACK1: an explicit aligned(n) attribute on the member does not win in GCC; '
+     'insert explicit padding before the member'),
+    ('LAYOUT-EMPTY-BASE', 'empty base gets a byte under MSVC', 'size/offsets differ', 'per-site', 'explicit padding'),
+    ('LAYOUT-EMPTY-BASE-OFFSET', 'only an empty base at another offset', 'casts to that empty base adjust '
+     'differently; no data moves', 'benign', 'none'),
+    ('LAYOUT-VBASE', 'virtual bases', 'never byte-compatible', 'per-site', 'only matters if code reads vbase '
+     'offsets by hand'),
+    ('LAYOUT-OTHER', 'other layout difference', '-', 'per-site', 'look at the row'),
+    ('LAYOUT-MEMBER-TYPE', 'differs only through a member type', 'follows a root cause above', 'benign', '-'),
+    ('LAYOUT-BASE-TYPE', 'differs only through a base layout', 'follows a root cause above', 'benign', '-'),
+]
+CLASS = {c[0]: c for c in CLASSES}
+
+WARN_CLASS = {
+    'uninitialized': 'W-UNINIT', 'sometimes-uninitialized': 'W-UNINIT', 'maybe-uninitialized': 'W-UNINIT',
+    'conditional-uninitialized': 'W-UNINIT', 'uninitialized-const-reference': 'W-UNINIT',
+    'return-type': 'W-RETURN', 'return-stack-address': 'W-STACKADDR', 'return-local-addr': 'W-STACKADDR',
+    'dangling-pointer': 'W-STACKADDR', 'dangling': 'W-STACKADDR', 'dangling-gsl': 'W-STACKADDR',
+    'unsequenced': 'W-UNSEQ', 'sequence-point': 'W-UNSEQ', 'aggressive-loop-optimizations': 'W-LOOP-UB',
+    'array-bounds': 'W-ARRAY-BOUNDS', 'shift-count-overflow': 'W-SHIFT', 'shift-count-negative': 'W-SHIFT',
+    'format': 'W-FORMAT', 'format-overflow': 'W-FORMAT', 'format-extra-args': 'W-FORMAT', 'format-security': 'W-FORMAT',
+    'non-pod-varargs': 'W-NONPOD-VARARGS', 'conditionally-supported': 'W-NONPOD-VARARGS', 'class-varargs': 'W-NONPOD-VARARGS',
+    'bitfield-enum-conversion': 'W-ENUM-BITFIELD', 'signed-enum-bitfield': 'W-ENUM-BITFIELD',
+    'cast-function-type': 'W-CAST-FN', 'type-limits': 'W-TYPE-LIMITS', 'mismatched-new-delete': 'W-NEW-DELETE',
+    'free-nonheap-object': 'W-NEW-DELETE', 'psabi': 'W-PSABI', 'varargs': 'W-VA-PROMOTE',
+    'tautological-undefined-compare': 'THIS-NULL',
+}
+# warnings of the sets that say nothing about MSVC vs AArch64 (kept in counts.tsv, not classified)
+WARN_IGNORE = {'invalid-offsetof', 'builtin-macro-redefined', 'unused-value', 'attributes', 'ignored-attributes',
+               'return-type-c-linkage', 'fpermissive', 'narrowing', 'overflow', 'int-in-bool-context', 'bool-compare',
+               'tautological-compare', 'float-conversion', 'stringop-overflow', 'stringop-overread', 'clobbered',
+               'packed-not-aligned', 'div-by-zero', 'division-by-zero', 'null-dereference', 'float-overflow-conversion',
+               'bitfield-constant-conversion', 'constant-conversion', 'literal-conversion', 'cpp'}
+
+DIAG = re.compile(r'^(.*?):(\d+):(\d+): (warning|error): (.*?)(?: \[(-W[^\]]+)\])?$')
+
+
+class Sites:
+    def __init__(self):
+        self.rows = {}                  # (cls, path, line, col) -> [detail, units set]
+
+    def add(self, cls, path, line, col, detail, unit):
+        k = (cls, path, int(line), int(col))
+        r = self.rows.get(k)
+        if r is None:
+            self.rows[k] = [detail, {unit}]
+        else:
+            r[1].add(unit)
+
+    def by_class(self):
+        d = defaultdict(list)
+        for (cls, p, l, c), (det, units) in self.rows.items():
+            d[cls].append((p, l, c, det, len(units)))
+        for v in d.values():
+            v.sort()
+        return d
+
+
+def rel(path, tree):
+    p = os.path.normpath(path if os.path.isabs(path) else os.path.join(tree, path))
+    return p[len(tree) + 1:] if p.startswith(tree + '/') else None
+
+
+def unit_of(fname):
+    return re.sub(r'\.(tsv|err|log)$', '', fname)
+
+
+def load_units(tree):
+    try:
+        data = json.load(open(os.path.join(tree, 'build', 'units.json')))
+    except (OSError, ValueError):
+        return {}
+    flags = {}
+    for u in data.get('units', []):
+        flags[u.get('source', '').replace('/', '_').replace(' ', '_')] = ' '.join(u.get('flags', []))
+    return flags
+
+
+def main():
+    tree, out = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
+    baseline = sys.argv[3] if len(sys.argv) > 3 else None
+    S = Sites()
+    passes = {}
+    tree_errors = Counter()
+    raw_warn = Counter()
+    uflags = load_units(tree)
+
+    # ---- fnvcheck rows + clang diagnostics (gnu)
+    rows_dir = os.path.join(out, 'clang', 'gnu', 'rows')
+    if os.path.isdir(rows_dir):
+        n = 0
+        for name in sorted(os.listdir(rows_dir)):
+            path = os.path.join(rows_dir, name)
+            unit = unit_of(name)
+            if name.endswith('.tsv'):
+                n += 1
+                with open(path, encoding='utf-8', errors='replace') as f:
+                    for line in f:
+                        p = line.rstrip('\n').split('\t')
+                        if len(p) < 4 or p[0] == 'L':
+                            continue
+                        cls = p[0]
+                        S.add(cls, p[1], p[2], p[3], '\t'.join(p[4:]), unit)
+            elif name.endswith('.err'):
+                for line in open(path, encoding='utf-8', errors='replace'):
+                    m = DIAG.match(line.rstrip('\n'))
+                    if not m:
+                        continue
+                    r = rel(m.group(1), tree)
+                    if r is None:
+                        continue
+                    if m.group(4) == 'error':
+                        tree_errors['clang:' + unit] += 1
+                        continue
+                    flag = (m.group(6) or '-W?')[2:]
+                    raw_warn['clang ' + flag] += 1
+                    if flag in WARN_IGNORE:
+                        continue
+                    S.add(WARN_CLASS.get(flag, 'W-OTHER'), r, m.group(2), m.group(3),
+                          'clang -W%s: %s' % (flag, m.group(5)[:160]), unit)
+        passes['clang gnu (AST + warnings)'] = n
+
+    # ---- GCC diagnostics
+    gcc_dir = os.path.join(out, 'gcc', 'logs')
+    gcc_ok = gcc_fail = 0
+    if os.path.isdir(gcc_dir):
+        for name in sorted(os.listdir(gcc_dir)):
+            if not name.endswith('.log'):
+                continue
+            unit = unit_of(name)
+            lines = open(os.path.join(gcc_dir, name), encoding='utf-8', errors='replace').read().splitlines()
+            if lines and lines[-1] == 'rc=0':
+                gcc_ok += 1
+            else:
+                gcc_fail += 1
+            for line in lines:
+                m = DIAG.match(line)
+                if not m or m.group(4) != 'warning':
+                    continue
+                r = rel(m.group(1), tree)
+                if r is None:
+                    continue
+                msg, flag = m.group(5), (m.group(6) or '')[2:]
+                if 'promoted to' in msg and 'passed through' in msg:
+                    flag = 'varargs'
+                raw_warn['gcc ' + (flag or '?')] += 1
+                if not flag or flag in WARN_IGNORE:
+                    continue
+                S.add(WARN_CLASS.get(flag, 'W-OTHER'), r, m.group(2), m.group(3),
+                      'gcc -W%s: %s' % (flag, msg[:160]), unit)
+        passes['gcc -O2 warnings'] = gcc_ok + gcc_fail
+
+    # ---- layout differences
+    lay = os.path.join(out, 'layout', 'diff.tsv')
+    lay_summary = {}
+    if os.path.exists(lay):
+        for line in open(lay).read().splitlines()[1:]:
+            cause, key, unit, diff = line.split('\t')
+            path, l, c = key.split('|')[0].rsplit(':', 2)
+            S.add('LAYOUT-' + cause.upper(), path, l, c, key.split('|', 1)[1] + '\t' + diff, unit)
+        for line in open(os.path.join(out, 'layout', 'summary.tsv')).read().splitlines():
+            k, v = line.split('\t')
+            lay_summary[k] = int(v)
+
+    grep = {}
+    if os.path.exists(os.path.join(out, 'grep.tsv')):
+        for line in open(os.path.join(out, 'grep.tsv')).read().splitlines():
+            k, v = line.split('\t')
+            grep[k] = v
+
+    # ---- write
+    by = S.by_class()
+    os.makedirs(os.path.join(out, 'sites'), exist_ok=True)
+    counts = {}
+    for cls, rows in by.items():
+        counts[cls] = len(rows)
+        with open(os.path.join(out, 'sites', cls + '.tsv'), 'w') as f:
+            f.write('file\tline\tcol\tunits\tdetail\n')
+            for p, l, c, det, nu in rows:
+                f.write('%s\t%d\t%d\t%d\t%s\n' % (p, l, c, nu, det))
+    with open(os.path.join(out, 'counts.tsv'), 'w') as f:
+        for cls in sorted(counts):
+            f.write('%s\t%d\n' % (cls, counts[cls]))
+        for k in sorted(raw_warn):
+            f.write('raw %s\t%d\n' % (k, raw_warn[k]))
+
+    md = ['# Static gate report (MSVC x86-32 vs GCC AArch64 ILP32)', '',
+          'Generated by `tools/static/run.sh`; method and classes: `docs/STATIC_CHECKS.md`. A site is one '
+          'file:line:col of the prepared tree (a header site counts once). Full per-site lists: `sites/<class>.tsv`.',
+          '', '## Coverage', '']
+    for k, v in passes.items():
+        md.append('* %s: %d units' % (k, v))
+    if gcc_ok + gcc_fail:
+        md.append('* GCC -O2 compiled %d units, %d failed (no middle-end warnings for those)' % (gcc_ok, gcc_fail))
+    cerr = sum(1 for k in tree_errors if k.startswith('clang:'))
+    md.append('* clang gnu: %d units with errors inside the tree (findings still collected up to them)' % cerr)
+    if lay_summary:
+        md.append('* layouts: %d records (msvc), %d (gnu), %d compared' % (
+            lay_summary.get('records_msvc', 0), lay_summary.get('records_gnu', 0), lay_summary.get('records_compared', 0)))
+    for k, v in sorted(grep.items()):
+        md.append('* %s: %s' % (k, v))
+    md += ['', '## Summary', '', '| class | sites | verdict | what differs | fix |', '|---|---:|---|---|---|']
+    order = [c[0] for c in CLASSES]
+    for cls in order + sorted(set(counts) - set(order)):
+        if cls not in counts and cls not in CLASS:
+            continue
+        t = CLASS.get(cls, (cls, cls, '-', '?', '-'))
+        md.append('| `%s` %s | %d | %s | %s | %s |' % (cls, t[1], counts.get(cls, 0), t[3], t[2], t[4]))
+    order_strength = Counter(r[3].split('\t')[0] for r in by.get('ORDER-ARGS', []))
+    md += ['', 'ORDER-ARGS by strength: ' + ', '.join('%s %d' % kv for kv in order_strength.most_common()), '']
+    f2 = Counter(r[3].split('\t')[1] for r in by.get('F2U', []) if '\t' in r[3])
+    md += ['F2U by conversion: ' + ', '.join('%s %d' % kv for kv in f2.most_common(12)), '']
+    od = sum(1 for (cls, _, _, _), (_, units) in S.rows.items()
+             if cls == 'W-UNINIT' and any('/Od' in uflags.get(u, '') for u in units))
+    md += ['W-UNINIT sites in units the original built with /Od (stack contents decided what was read): %d of %d'
+           % (od, counts.get('W-UNINIT', 0)), '']
+    md += ['## Per-site lists', '']
+    cap = int(os.environ.get('REPORT_CAP', '60'))
+    for cls in order + sorted(set(counts) - set(order)):
+        rows = by.get(cls, [])
+        if not rows:
+            continue
+        t = CLASS.get(cls, (cls, cls, '-', '?', '-'))
+        if t[3] == 'benign' and cls not in ('LDBL',):
+            md += ['### %s (%d sites, benign - list in sites/%s.tsv)' % (cls, len(rows), cls), '']
+            continue
+        if cls == 'ORDER-ARGS':
+            rows = [r for r in rows if r[3].startswith('same-')] + [r for r in rows if not r[3].startswith('same-')]
+        md += ['### %s (%d sites%s)' % (cls, len(rows), ', first %d' % cap if len(rows) > cap else ''), '',
+               '```']
+        for p, l, c, det, nu in rows[:cap]:
+            md.append('%s:%d:%d  %s%s' % (p, l, c, det.replace('\t', '  ')[:200], '  [%d units]' % nu if nu > 1 else ''))
+        md += ['```', '']
+    open(os.path.join(out, 'report.md'), 'w').write('\n'.join(md) + '\n')
+    print('report: %s (%d classes, %d sites)' % (os.path.join(out, 'report.md'), len(counts), sum(counts.values())))
+
+    if baseline and os.path.exists(baseline):
+        bad = []
+        for line in open(baseline).read().splitlines():
+            if not line or line.startswith('#'):
+                continue
+            cls, n = line.split('\t')[:2]
+            if counts.get(cls, 0) > int(n):
+                bad.append('%s %d > %s' % (cls, counts.get(cls, 0), n))
+        if bad:
+            print('gate: FAIL - ' + '; '.join(bad))
+            sys.exit(1)
+        print('gate: ok (no class above %s)' % baseline)
+
+
+if __name__ == '__main__':
+    main()

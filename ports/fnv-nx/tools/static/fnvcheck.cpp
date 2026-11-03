@@ -42,7 +42,13 @@ static llvm::cl::opt<bool> NoAst("no-ast", llvm::cl::desc("skip the AST checks")
 static llvm::cl::opt<std::string> Seen("seen", llvm::cl::desc("file of layout keys already printed"),
                                        llvm::cl::cat(Cat));
 
-static std::set<std::string> SeenKeys;
+static llvm::cl::opt<std::string> AtomicKeys("atomic-keys",
+                                             llvm::cl::desc("file of ATOMIC-USE keys: report plain stores to them"),
+                                             llvm::cl::cat(Cat));
+static llvm::cl::opt<bool> OnlyAtomic("only-atomic", llvm::cl::desc("only the ATOMIC-PLAIN-STORE check"),
+                                      llvm::cl::cat(Cat));
+
+static std::set<std::string> SeenKeys, Atomic;
 
 // name of a plain identifier declaration, empty for operators / constructors / conversions
 static llvm::StringRef idName(const clang::NamedDecl *D) {
@@ -268,6 +274,7 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
 
   // ------------------------------------------------------------------ operators
   bool VisitBinaryOperator(BinaryOperator *E) {
+    if (E->isAssignmentOp()) plainStore(E->getLHS(), E->getOperatorLoc(), "assign");
     if (NoAst) return true;
     BinaryOperatorKind O = E->getOpcode();
     if (O == BO_Shl || O == BO_Shr || O == BO_ShlAssign || O == BO_ShrAssign) {
@@ -434,6 +441,24 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
            n.starts_with("_wfopen") || n == "btowc" || n == "wctob";
   }
 
+  // "field Class::member" / "var name" of an lvalue, as ATOMIC-USE prints it
+  std::string lvalueKey(const Expr *A) {
+    A = A->IgnoreParenImpCasts();
+    if (auto *ME = dyn_cast<MemberExpr>(A)) {
+      if (auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl()))
+        return "field " + FD->getParent()->getQualifiedNameAsString() + "::" + FD->getNameAsString();
+    } else if (auto *DR = dyn_cast<DeclRefExpr>(A)) {
+      if (auto *VD = dyn_cast<VarDecl>(DR->getDecl()))
+        if (VD->hasGlobalStorage()) return "var " + VD->getQualifiedNameAsString();
+    }
+    return std::string();
+  }
+  void plainStore(const Expr *LHS, SourceLocation L, const char *how) {
+    if (Atomic.empty()) return;
+    std::string k = lvalueKey(LHS);
+    if (!k.empty() && Atomic.count(k)) emit("ATOMIC-PLAIN-STORE", L, k + "\t" + how + "\t" + fn());
+  }
+
   void atomicOperand(const Expr *A, const std::string &callee, SourceLocation L) {
     A = A->IgnoreParenImpCasts();
     if (auto *U = dyn_cast<UnaryOperator>(A))
@@ -534,6 +559,7 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
 
   // address of a named parameter in a variadic function: the x86 trick of walking the stack past it
   bool VisitUnaryOperator(UnaryOperator *U) {
+    if (U->isIncrementDecrementOp()) plainStore(U->getSubExpr(), U->getBeginLoc(), "incdec");
     if (NoAst || U->getOpcode() != UO_AddrOf || !CurFn || !CurFn->isVariadic()) return true;
     if (auto *DR = dyn_cast<DeclRefExpr>(U->getSubExpr()->IgnoreParenImpCasts()))
       if (isa<ParmVarDecl>(DR->getDecl())) emit("VA-ADDR-PARAM", U->getBeginLoc(), fn() + "\t" + text(U->getSourceRange()));
@@ -725,7 +751,9 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
     bool anyBf = false;
     for (auto *F : D->fields()) {
       uint64_t off = RL.getFieldOffset(F->getFieldIndex());
-      fields += F->getNameAsString() + ":" + std::to_string(off);
+      QualType FT = F->getType();
+      uint64_t fsz = (FT->isIncompleteType() || FT->isDependentType()) ? 0 : C.getTypeSizeInChars(FT).getQuantity();
+      fields += F->getNameAsString() + ":" + std::to_string(off) + ":" + std::to_string(fsz);
       if (F->isBitField()) {
         fields += ":" + std::to_string(F->getBitWidthValue(C)) + ":" + ty(F->getType());
         anyBf = true;
@@ -740,7 +768,9 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
           bases += "v:" + ty(B.getType()) + ";";
           flags += "vbase ";
         } else {
-          bases += ty(B.getType()) + ":" + std::to_string(RL.getBaseClassOffset(BD).getQuantity()) + ";";
+          bases += ty(B.getType()) + ":" + std::to_string(RL.getBaseClassOffset(BD).getQuantity()) + ":" +
+                   std::to_string(BD->isInvalidDecl() ? 0 : C.getASTRecordLayout(BD).getSize().getQuantity()) +
+                   (BD->isEmpty() ? ":empty" : "") + ";";
         }
       }
       if (CD->isDynamicClass()) flags += "dynamic ";
@@ -774,6 +804,13 @@ int main(int argc, const char **argv) {
   if (!Opt) {
     llvm::errs() << Opt.takeError();
     return 2;
+  }
+  if (OnlyAtomic) NoAst = true;
+  if (!AtomicKeys.empty()) {
+    std::ifstream in(AtomicKeys);
+    std::string line;
+    while (std::getline(in, line))
+      if (!line.empty()) Atomic.insert(line);
   }
   if (!Seen.empty()) {
     std::ifstream in(Seen);
