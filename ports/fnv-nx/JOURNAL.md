@@ -482,3 +482,23 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - proxy_host_cases=377 proxy_manual_bodies=21 nine_test_guest_nso_kib=87 hw_tests=0
 * **next** - hardware run (held until the host gates are green, user decision); move to S5's `ext_call` slot;
   textured draw test (VB/IB lock, shaders) through the proxy; then the game link with `D3D9=external`.
+
+### J-0024 | 2026-11-03 | stream: S6d-nine-precompile | status: wip | parent: J-0020
+
+* **did** - `render/nine/host/build_host.sh`: x86-64 build (no GPU) of Nine's shader translator + TGSI + nv50_ir /
+  `nvc0_program.c` with `-D__SWITCH__` on a fake nvc0 screen that runs nvc0's own cap queries (81 objects).
+  `render/nine/precompile/nine-precompile`: `.sdp` / raw input, ctor / common / all Nine variant sets, each shader
+  in a child process, manifest. Patch 0003: append-only nvc0 program cache in front of `nvc0_program_translate`
+  (key SHA-1 over compiler id + chipset + type + ucps + smem + TGSI; value code, header, metadata, relocations,
+  fixups by emitter index), enabled by `NVC0_SHADER_CACHE` / `nvc0_pcache_configure`. Switch build with 0001-0003:
+  561 steps, 0 failures; link test still 0 undefined. `tests/s6d/`: 9 extra SM1-3 shaders, cache harness.
+* **found** - 25/26 shaders compile; 413 variant compiles -> 326 distinct programs (230 KB code, 251 KB cache);
+  cached == fresh compile for 100/100 variants (614 checks, 0 failures). Nine 20.1 subroutines (`call`/`label`)
+  emit broken TGSI that segfaults nv50_ir (would crash on the console at CreateVertexShader). Switch
+  libdrm_nouveau reports chipset 0x120 (0x12b gives identical code). Nine's ps variant key overlaps itself
+  (fog table mode bits reach the centroid bit; harmless because the cache keys on TGSI).
+* **decided** - Cache keyed at the TGSI level, so a variant the tool missed is compiled and appended, never served
+  wrong; default chipset 0x120; compute / stream-output programs not cached.
+* **metrics** - shaders=26 shaders_ok=25 variant_compiles=413 programs=326 cache_identical=100/100 checks=614
+* **next** - patch 0004 for Nine's CALL/LABEL TGSI; real `.sdp` files when available + a first-run record cache;
+  wire `nvc0_pcache_configure` into the host module; on hardware: hit rate and create-time savings.
