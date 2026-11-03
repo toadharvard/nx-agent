@@ -33,27 +33,8 @@ $CXX $GUEST_ARCH -specs="$TC/guest/guest.specs" rt/crt0.o nine_proxy_rt.o nine_p
 $PY "$TC/tools/elf2nso.py" guest.elf guest.nso
 [ -z "${GUEST_ONLY:-}" ] || { echo "built $OUT/guest.nso"; exit 0; }
 
-# host: LP64, libnx, S5's host.c (no text console: Nine owns the window), Mesa headers (Nine's D3D9 C headers),
-# the static Nine/nouveau libraries. nine_host_call.c registers NINE_EXT_MODULE with S5's ext_call table.
-M=$NINE/src/mesa; L=$NINE/out
-HINC="-I$TC/include -I$R/host -I$R -I$M/include -I$M/include/D3D9 -I$M/src -I$M/src/gallium/include \
-	-I$M/src/gallium/auxiliary -I$M/src/gallium/state_trackers/nine -I$M/src/gallium/winsys/nouveau/switch \
-	-I$M/src/gallium/drivers -I$M/src/gallium/winsys \
-	-I$DEVKITPRO/libnx/include -I$L/include"
-HFLAGS="$HOST_ARCH -O2 -g -ffunction-sections -fdata-sections -D__SWITCH__ -DHAVE_TIMESPEC_GET -DHAVE_SWITCH_PLATFORM"
-$CC $HFLAGS -DFNVNX_HOST_NO_CONSOLE -I"$TC/include" -I"$DEVKITPRO/libnx/include" -c "$TC/host/host.c" -o host_host.o
-for s in "$R/host/nine_host_call.c" "$R/host/nine_d3d9.c" "$R/host/nine_present.c" "$R/host/nine_adapter.c" \
-         "$R/host/nine_guid.c" gen/nine_proxy_host.c; do
-	$CC $HFLAGS $HINC -c "$s" -o "host_$(basename "${s%.c}").o"
-done
-$CXX -specs="$DEVKITPRO/libnx/switch.specs" $HOST_ARCH host_*.o -L"$L/lib" \
-	-Wl,--start-group -lnine_st -lnouveau -lnouveauwinsys -lgallium -lnir -lcompiler -lmesa_util -lmesa_format \
-	-lgalliumvl_stub -ldrm_nouveau -lsoftpipe -lwsw -Wl,--end-group -L"$DEVKITPRO/libnx/lib" -lnx \
-	-Wl,-Map,host.map -o host.elf
-
-$PY "$TC/tools/elf2nso.py" host.elf main
-$PY "$TC/tools/npdmtool.py" "$TC/npdm/fnvnx-app.json" main.npdm
-$PY "$TC/tools/build_pfs0.py" exefs.nsp main=main main.npdm=main.npdm
+# host: the Nine host module (render/nine/switch_host.sh)
+"$R/switch_host.sh" "$OUT"
 mkdir -p "sd/atmosphere/contents/$TID" sd/fnvnx
 cp exefs.nsp "sd/atmosphere/contents/$TID/exefs.nsp"
 cp guest.nso sd/fnvnx/guest.nso

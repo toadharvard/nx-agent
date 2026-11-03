@@ -23,6 +23,7 @@ extern "C" {
 void fnvnx_guest_platform_init(void);
 void fnvnx_set_command_line(int argc, char **argv);
 void fnvnx_audio_input_register(void);
+void fnvnx_d3d9_register(void) __attribute__((weak));   /* D3D9=external: d3d9.dll module (render/nine) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
 int __fnv_0086a850(unsigned, unsigned, unsigned, unsigned) __attribute__((weak));   /* WinMain */
 }
@@ -144,6 +145,7 @@ __attribute__((constructor(101))) static void boot_banner(void) {
     fnvnx_trap_report = report_trap;
     fnvnx_guest_platform_init();
     fnvnx_audio_input_register();
+    if (fnvnx_d3d9_register) fnvnx_d3d9_register();   /* before load_image: the IAT has a d3d9.dll slot */
     if (load_image() != 0) {
         fflush(stdout);
         exit(2);

@@ -2,6 +2,7 @@
 """gate.py - host end-to-end gate of the D3D9 proxy path (stream S6c-nine).
 
     python3 -I render/nine/test/gate.py --guest <guest.nso> --lib <libnine_gate.so> --out <dir> [--elf guest.elf]
+    python3 -I render/nine/test/gate.py --game --guest <game guest.nso> --elf <fnvnx.elf> --lib ... --out <dir>
 
 Runs the ILP32 test guest (test/nine_test.cpp, built with GUEST_ONLY=1 test/build.sh) under S5's Unicorn harness
 (tests/s5/emu_guest.py) and serves its ext_call(NINE_EXT_MODULE, ...) from the real host-side Nine code, built for
@@ -15,6 +16,12 @@ Checks (PASS when all hold): the guest returns 0 and prints "fnvnx nine test: OK
 colour and bar; draw frames match the reference (grey frame, centre rectangle split into red/green/blue/white
 quadrants), ignoring 2-pixel bands at the rectangle and quadrant edges. Writes frame_NNN.png, ref_draw.png and, on
 mismatch, diff_NNN.png into --out.
+
+--game: the guest is the game image (game/build.sh). It boots as far as it goes (without FalloutNV.exe the image
+is empty and static init stops, J-0021), then the gate calls into it the way the engine does: LoadLibraryA("d3d9.dll"),
+GetProcAddress("Direct3DCreate9") (must be the proxy), Direct3DCreate9 -> Nine, GetAdapterCount, GetAdapterIdentifier,
+Release, plus the IAT lookup of d3d9!D3DPERF_SetOptions. The original-image window is emulator-only memory in this
+mode (this python occupies it in the host process).
 """
 import argparse
 import ctypes
@@ -31,6 +38,7 @@ EXT_NO_MODULE = 0xFFFFFFFFFFFFFF01
 CLEAR_FRAMES = 240                       # test/nine_test.cpp
 DRAW_FRAMES = 4
 W, H = 1280, 720
+IMAGE_BASE, IMAGE_END = 0x00400000, 0x02100000   # FalloutNV.exe image window (TOOLCHAIN.md §5)
 
 
 def ensure_no_aslr():
@@ -58,13 +66,128 @@ def write_png(path, rgb):
                 + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
 
 
+def elf_symbols(elf):
+    import subprocess
+    nm = os.environ.get("NM", "aarch64-linux-gnu-nm")
+    out = subprocess.run([nm, "--defined-only", elf], capture_output=True, text=True, check=True).stdout
+    syms = {}
+    for line in out.splitlines():
+        f = line.split()
+        if len(f) == 3:
+            syms.setdefault(f[2], int(f[0], 16))
+    return syms
+
+
+def map_object_of(map_path, section):
+    """Input object that provided the output section `section` (GNU ld map: section line, then address line)."""
+    try:
+        lines = open(map_path, errors="replace").read().splitlines()
+    except OSError:
+        return None
+    for i, l in enumerate(lines):
+        if l.strip().split(" ")[0] == section:
+            for cand in (l, lines[i + 1] if i + 1 < len(lines) else ""):
+                parts = cand.split()
+                if parts and parts[-1].endswith(".o"):
+                    return parts[-1]
+    return None
+
+
+def game_probe(emu, a, lib, emu_guest):
+    """Boot the game image as far as it goes (trace mode without FalloutNV.exe: static init stops, J-0021), then call
+    into the guest the way the engine does: LoadLibraryA("d3d9.dll") -> GetProcAddress("Direct3DCreate9") -> call
+    it -> IDirect3D9::GetAdapterCount / GetAdapterIdentifier / Release through the proxy vtable, served by Nine."""
+    from unicorn.arm64_const import (UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, UC_ARM64_REG_X0,
+                                     UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3)
+    syms = elf_symbols(a.elf)
+    need = ["LoadLibraryA", "GetProcAddress", "fnvnx_win32_lookup_export", "Direct3DCreate9", "D3DPERF_SetOptions",
+            "fnvnx_d3d9_register"]
+    missing = [n for n in need if n not in syms]
+    if missing:
+        print(f"gate: FAIL: symbols missing from the game image: {missing}")
+        return 1
+    mp = os.path.splitext(a.elf)[0] + ".map"
+    for n in ("Direct3DCreate9", "fnvnx_d3d9_register"):
+        if n in syms:
+            print(f"   {n} = {syms[n]:#x} from {map_object_of(mp, '.text.' + n)}")
+    try:
+        rc = emu.run()
+        print(f"== game guest returned {rc:#x}")
+    except SystemExit as e:
+        print(f"== game boot stopped (expected without the exe): {e}")
+    print(f"   host calls {emu.calls}, ext calls during boot {emu.ext_calls}")
+
+    uc = emu.uc
+    scratch = emu_guest.HOST_PAGE + 0x400           # unused part of the host page
+    sp = emu.stack_for(emu_guest.MAX_THREADS)        # a stack slot no guest thread uses
+    buf = sp - 0x8000
+
+    def put(addr, s):
+        uc.mem_write(addr, s.encode() + b"\0")
+        return addr
+
+    def call(fn, *args):
+        regs = (UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3)
+        for r, v in zip(regs, args):
+            uc.reg_write(r, v)
+        uc.reg_write(UC_ARM64_REG_SP, sp)
+        uc.reg_write(UC_ARM64_REG_LR, emu_guest.RETURN_ADDR)
+        emu.cur = emu.threads[1]
+        emu.cur.state = "running"
+        uc.emu_start(fn, emu_guest.RETURN_ADDR, count=200_000_000)
+        if uc.reg_read(UC_ARM64_REG_PC) != emu_guest.RETURN_ADDR:
+            raise SystemExit(f"probe call {fn:#x} did not return (pc {uc.reg_read(UC_ARM64_REG_PC):#x})")
+        return uc.reg_read(UC_ARM64_REG_X0)
+
+    def rd32(addr):
+        return struct.unpack("<I", uc.mem_read(addr, 4))[0]
+
+    checks = []
+    try:
+        dll = put(scratch, "d3d9.dll")
+        name = put(scratch + 0x20, "Direct3DCreate9")
+        perf = put(scratch + 0x40, "D3DPERF_SetOptions")
+        h = call(syms["LoadLibraryA"], dll) & 0xFFFFFFFF
+        checks.append(("LoadLibraryA(\"d3d9.dll\") != NULL", h != 0, f"{h:#x}"))
+        p = call(syms["GetProcAddress"], h, name) & 0xFFFFFFFF
+        checks.append(("GetProcAddress(d3d9, \"Direct3DCreate9\") == proxy Direct3DCreate9", p == syms["Direct3DCreate9"],
+                       f"{p:#x}"))
+        q = call(syms["fnvnx_win32_lookup_export"], dll, perf) & 0xFFFFFFFF
+        checks.append(("IAT lookup d3d9!D3DPERF_SetOptions resolves (S3 binding path)", q == syms["D3DPERF_SetOptions"],
+                       f"{q:#x}"))
+        ext0 = emu.ext_calls
+        d3d = call(p, 32) & 0xFFFFFFFF
+        checks.append(("Direct3DCreate9(D3D_SDK_VERSION) through ext_call -> Nine", d3d != 0 and emu.ext_calls > ext0,
+                       f"{d3d:#x}, {emu.ext_calls - ext0} ext call(s)"))
+        if d3d:
+            vt = rd32(d3d)
+            n = call(rd32(vt + 4 * 4), d3d) & 0xFFFFFFFF                     # IDirect3D9::GetAdapterCount
+            checks.append(("IDirect3D9::GetAdapterCount() == 1", n == 1, str(n)))
+            hr = call(rd32(vt + 5 * 4), d3d, 0, 0, buf) & 0xFFFFFFFF         # GetAdapterIdentifier(0, 0, &id)
+            desc = bytes(uc.mem_read(buf + 512, 512)).split(b"\0")[0].decode(errors="replace")
+            checks.append(("IDirect3D9::GetAdapterIdentifier", hr == 0 and "Nine" in desc, f"hr={hr:#x} '{desc}'"))
+            r = call(rd32(vt + 2 * 4), d3d) & 0xFFFFFFFF                     # Release
+            checks.append(("IDirect3D9::Release() == 0", r == 0, str(r)))
+    except SystemExit as e:
+        checks.append(("probe", False, str(e)))
+    ok = all(c[1] for c in checks)
+    for what, good, detail in checks:
+        print(f"   {'ok  ' if good else 'FAIL'} {what}: {detail}")
+    print("PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--guest", required=True)
     ap.add_argument("--lib", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--elf", help="guest ELF for symbolized crash traces")
+    ap.add_argument("--elf", help="guest ELF for symbolized crash traces (required with --game)")
+    ap.add_argument("--game", action="store_true", help="the guest is the game image (render/nine/game/build.sh): "
+                    "boot it as far as it goes, then probe d3d9.dll -> Direct3DCreate9 -> Nine")
     a = ap.parse_args(argv)
+    if a.game and not a.elf:
+        ap.error("--game needs --elf (symbol addresses)")
     ensure_no_aslr()
     import numpy as np
     sys.path.insert(0, os.path.join(ROOT, "tests", "s5"))
@@ -76,16 +199,27 @@ def main(argv):
     libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
     MAP_PRIVATE, MAP_ANONYMOUS, MAP_FIXED_NOREPLACE = 0x02, 0x20, 0x100000
 
+    unshared = []
+
     def low_va_uc(arch, mode):
         """Unicorn whose mem_map backs every guest mapping with host memory at the same virtual address."""
         uc = Uc(arch, mode)   # Unicorn 2's Uc is a factory (returns the arch class): patch the instance
 
         def mem_map(address, size, perms=7):
             p = libc.mmap(address, size, 3, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0)
-            if p != address:
-                raise SystemExit(f"gate: cannot map {address:#x}+{size:#x} at the same host address "
-                                 f"(errno {ctypes.get_errno()})")
-            uc.mem_map_ptr(address, size, perms, address)
+            if p == address:
+                uc.mem_map_ptr(address, size, perms, address)
+                return
+            if address < IMAGE_END and address + size > IMAGE_BASE:
+                # The original-image window (S3's data image, map_fixed) collides with this (non-PIE) python's own
+                # image: emulator-only memory there. Host code must not dereference image addresses in this mode.
+                print(f"gate: note: {address:#x}+{size:#x} (original-image window) is emulator-only memory "
+                      f"(the host process occupies it)")
+                type(uc).mem_map(uc, address, size, perms)
+                unshared.append((address, size))
+                return
+            raise SystemExit(f"gate: cannot map {address:#x}+{size:#x} at the same host address "
+                             f"(errno {ctypes.get_errno()})")
         uc.mem_map = mem_map
         return uc
     emu_guest.Uc = low_va_uc
@@ -135,6 +269,8 @@ def main(argv):
     emu.budget = 2_000_000_000
     if a.elf:
         emu.load_symbols(a.elf)
+    if a.game:
+        return game_probe(emu, a, lib, emu_guest)
     try:
         rc = emu.run()
     except SystemExit as e:                 # the guest console was already printed live (h_console_write)
