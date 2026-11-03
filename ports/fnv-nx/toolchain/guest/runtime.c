@@ -118,7 +118,14 @@ int __syscall_nanosleep(const struct timespec *req, struct timespec *rem) {
 }
 
 int __syscall_clock_gettime(clockid_t clock_id, struct timespec *tp) {
-    if (clock_id != CLOCK_MONOTONIC || !tp) { errno = EINVAL; return -1; }
+    if (!tp) { errno = EINVAL; return -1; }
+    if (clock_id == CLOCK_REALTIME) {
+        int64_t us = (int64_t)fnvnx_hcall0(fnvnx_host->wall_time_us);
+        tp->tv_sec = (time_t)(us / 1000000);
+        tp->tv_nsec = (long)(us % 1000000) * 1000;
+        return 0;
+    }
+    if (clock_id != CLOCK_MONOTONIC) { errno = EINVAL; return -1; }
     uint64_t t = fnvnx_hcall0(fnvnx_host->system_tick), f = fnvnx_hcall0(fnvnx_host->system_tick_freq);
     tp->tv_sec = (time_t)(t / f);
     tp->tv_nsec = (long)((t % f) * 1000000000ull / f);
@@ -158,6 +165,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     devoptab_list[STD_OUT] = &dotab_hostcon;
     devoptab_list[STD_ERR] = &dotab_hostcon;
     setvbuf(stdout, NULL, _IONBF, 0);
+    extern void fnvnx_guest_fs_init(void);
+    fnvnx_guest_fs_init();
 
     __libc_init_array();
     static char arg0[] = "fnvnx-guest";

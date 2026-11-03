@@ -96,6 +96,8 @@ static u64 h_buttons_down(void) { padUpdate(&g_pad); return padGetButtonsDown(&g
 static u64 h_system_tick(void) { return armGetSystemTick(); }
 static u64 h_system_tick_freq(void) { return armGetSystemTickFreq(); }
 
+#include "host_v2.inc"
+
 /* ---- process layout ------------------------------------------------------------------------------------ */
 static const char *as_name(void) {
     u64 aslr = 0, aslr_size = 0, alias = 0;
@@ -301,6 +303,7 @@ int main(int argc, char **argv) {
             .exit = (u64)h_exit, .console_write = (u64)h_console_write, .console_flush = (u64)h_console_flush,
             .main_loop = (u64)h_main_loop, .buttons_down = (u64)h_buttons_down,
             .system_tick = (u64)h_system_tick, .system_tick_freq = (u64)h_system_tick_freq,
+            FNVNX_HOSTAPI_V2_SLOTS
         };
         u64 (*entry)(u64) = (u64 (*)(u64))gbase;
         rc = entry((u64)&g_api);

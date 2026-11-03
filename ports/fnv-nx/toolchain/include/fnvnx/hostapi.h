@@ -21,7 +21,7 @@
 
 #define FNVNX_HOSTAPI_MAGIC   0x48584e46u /* "FNXH" */
 #define FNVNX_GUEST_MAGIC     0x47584e46u /* "FNXG", at guest text + 8 */
-#define FNVNX_HOSTAPI_VERSION 1u
+#define FNVNX_HOSTAPI_VERSION 2u
 
 /* Function slots: host addresses of LP64 functions with the signature given in the comment
  * (all parameters uint64_t, result uint64_t). */
@@ -45,12 +45,72 @@ typedef struct FnvnxHostApi {
     uint64_t buttons_down;         /* () -> HidNpadButton bits newly pressed on the default pad */
     uint64_t system_tick;          /* () -> armGetSystemTick() */
     uint64_t system_tick_freq;     /* () -> armGetSystemTickFreq() */
+
+    /* ---- version 2: threads, address wait/wake, time, files ---- */
+    uint64_t thread_create;        /* (entry, arg, stack_size, prio, cpu) -> host thread id (!= 0) or 0.
+                                      The new thread calls the guest function entry(arg) (u64 arg) and ends
+                                      when it returns. prio: Win32 scale -15..15; cpu: -1 any. Not started. */
+    uint64_t thread_start;         /* (id) -> 0 or Result */
+    uint64_t thread_join;          /* (id) -> 0 when the thread has ended */
+    uint64_t thread_free;          /* (id) -> 0; after join, or detaches a running thread */
+    uint64_t thread_exit;          /* () -> does not return; ends the calling host-created thread */
+    uint64_t thread_yield;         /* () -> 0 */
+    uint64_t thread_set_priority;  /* (id or 0 = self, prio) -> 0 or Result */
+    uint64_t thread_set_cpu;       /* (id or 0 = self, cpu) -> 0 or Result */
+    uint64_t wait_on_address;      /* (addr, expected u32, timeout_ns) -> 0 woken, 1 timed out, 2 value != expected
+                                      (svcWaitForAddress WaitIfEqual; addr 4-aligned) */
+    uint64_t wake_address;         /* (addr, count; count = UINT64_MAX: all) -> 0 (svcSignalToAddress) */
+    uint64_t wall_time_us;         /* () -> microseconds since 1970 UTC */
+    uint64_t tz_offset_minutes;    /* () -> local = UTC + offset (int64 as u64) */
+    uint64_t random64;             /* () -> random u64 */
+    uint64_t memory_info;          /* (FnvnxMemInfo *) -> 0 */
+    uint64_t cpu_count;            /* () -> cores the game may use */
+    uint64_t fs_open;              /* (path, OS_O_* flags) -> fd >= 0, or -errno (int64 as u64) */
+    uint64_t fs_read;              /* (fd, buf, n) -> bytes or -errno */
+    uint64_t fs_write;             /* (fd, buf, n) -> bytes or -errno */
+    uint64_t fs_pread;             /* (fd, buf, n, off) -> bytes or -errno */
+    uint64_t fs_pwrite;            /* (fd, buf, n, off) -> bytes or -errno */
+    uint64_t fs_seek;              /* (fd, off, whence) -> new position or -errno */
+    uint64_t fs_truncate;          /* (fd, size) -> 0 or -errno */
+    uint64_t fs_sync;              /* (fd) -> 0 or -errno */
+    uint64_t fs_fstat;             /* (fd, FnvnxStat *) -> 0 or -errno */
+    uint64_t fs_close;             /* (fd) -> 0 or -errno */
+    uint64_t fs_stat;              /* (path, FnvnxStat *) -> 0 or -errno */
+    uint64_t fs_mkdir;             /* (path) -> 0 or -errno */
+    uint64_t fs_rmdir;             /* (path) -> 0 or -errno */
+    uint64_t fs_remove;            /* (path) -> 0 or -errno */
+    uint64_t fs_rename;            /* (from, to) -> 0 or -errno */
+    uint64_t fs_dir_open;          /* (path) -> dir id (!= 0) or 0 */
+    uint64_t fs_dir_next;          /* (dir, buf, cap) -> name length (without NUL), 0 at end; skips . and .. */
+    uint64_t fs_dir_close;         /* (dir) -> 0 */
 } FnvnxHostApi;
 
+/* fs_open flags and fs_seek whence (same values as platform/os/os.h OS_O_* / OS_SEEK_*). Errors are negated
+ * errno values as in os.h (OS_ENOENT 2, ...). */
+#define FNVNX_O_READ   0x01
+#define FNVNX_O_WRITE  0x02
+#define FNVNX_O_CREATE 0x04
+#define FNVNX_O_EXCL   0x08
+#define FNVNX_O_TRUNC  0x10
+#define FNVNX_O_APPEND 0x20
+
+/* Shared structs (identical layout in LP64 and ILP32). */
+typedef struct FnvnxStat {
+    uint32_t is_dir, read_only;
+    uint64_t size;
+    int64_t mtime_us, atime_us, ctime_us;
+} FnvnxStat;
+
+typedef struct FnvnxMemInfo {
+    uint64_t total_phys, avail_phys;
+} FnvnxMemInfo;
+
 #if defined(__cplusplus)
-static_assert(sizeof(FnvnxHostApi) == 0x78, "FnvnxHostApi layout");
+static_assert(sizeof(FnvnxHostApi) == 0x180, "FnvnxHostApi layout");
+static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16, "shared struct layout");
 #else
-_Static_assert(sizeof(FnvnxHostApi) == 0x78, "FnvnxHostApi layout");
+_Static_assert(sizeof(FnvnxHostApi) == 0x180, "FnvnxHostApi layout");
+_Static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16, "shared struct layout");
 #endif
 
 /* Guest entry: the host calls the guest module base as   uint64_t entry(uint64_t api)   where api is the
@@ -65,11 +125,19 @@ typedef uint64_t (*fnvnx_hfn0)(void);
 typedef uint64_t (*fnvnx_hfn1)(uint64_t);
 typedef uint64_t (*fnvnx_hfn2)(uint64_t, uint64_t);
 typedef uint64_t (*fnvnx_hfn3)(uint64_t, uint64_t, uint64_t);
+typedef uint64_t (*fnvnx_hfn4)(uint64_t, uint64_t, uint64_t, uint64_t);
+typedef uint64_t (*fnvnx_hfn5)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 static inline uint64_t fnvnx_hcall0(uint64_t fn) { return ((fnvnx_hfn0)(uintptr_t)fn)(); }
 static inline uint64_t fnvnx_hcall1(uint64_t fn, uint64_t a) { return ((fnvnx_hfn1)(uintptr_t)fn)(a); }
 static inline uint64_t fnvnx_hcall2(uint64_t fn, uint64_t a, uint64_t b) { return ((fnvnx_hfn2)(uintptr_t)fn)(a, b); }
 static inline uint64_t fnvnx_hcall3(uint64_t fn, uint64_t a, uint64_t b, uint64_t c) {
     return ((fnvnx_hfn3)(uintptr_t)fn)(a, b, c);
+}
+static inline uint64_t fnvnx_hcall4(uint64_t fn, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
+    return ((fnvnx_hfn4)(uintptr_t)fn)(a, b, c, d);
+}
+static inline uint64_t fnvnx_hcall5(uint64_t fn, uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e) {
+    return ((fnvnx_hfn5)(uintptr_t)fn)(a, b, c, d, e);
 }
 
 /* Set by the guest runtime before main() runs. */
