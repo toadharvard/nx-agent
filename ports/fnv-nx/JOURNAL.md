@@ -612,3 +612,24 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   link_deldtor_pairs=41 link_trial_undefined=14406
 * **next** - emit inline virtuals / implicit destructors of synthesized classes; S3 loader: V rows as VTABLE, G
   adapter on `fnvnx_addrmap_deldtors`.
+
+### J-0030 | 2026-11-03 | stream: S4b-crt | status: wip | parent: J-0009,J-0027
+
+* **did** - `platform/crt`: the 25 libcpmt internals with MSVC object layouts (`std::exception` family as
+  `exc<std::X>`: 12 bytes, MSVC copy/free semantics, catchable as `std::exception&`; `_Mutex`, `_Init_locks`, "C"
+  `_Locimp`, facet register, `_Locinfo`, ctype C table, `_Addstd`/`_Ios_base_dtor`, ostream ctor, `_Fiopen`); MSVC
+  stdio/lowio on the runtime's 32-byte `_iobuf` (`fnvnx_iobuf.h` for S1's DECL1, `__iob_func` with the 0x20 stride),
+  text mode CRLF/Ctrl-Z, `_setmode`/`_fmode`/`_fdopen`; `_CxxThrowException` -> `__cxa_throw` with a real type
+  (registration for native types now; image ThrowInfo + `fnvnx_rtti_register` later; MSVC std names -> libstdc++
+  types); the 12 unknown libcmt entries identified (5 high, 5 medium, 2 low confidence); atexit / `_onexit` /
+  doexit / exit forward weakly to S10's `fnvnx_xc_*`. tests/s4: 67 tests / 1,949 checks (ASan+UBSan, TSan clean).
+* **found** - ThrowInfos: 0x01140ef8 bad_alloc, 0x01140cb0 length_error, 0x01170384 SpeedTree exception (placeholder
+  class names differ per unit). Decomp bugs for S1: `FUN_00ec78f1_t` is 8 bytes but its ctor writes 12 (stack
+  overrun); 6 sites pass `DAT_01140ef8` by value. VC9 memcpy is overlap-safe and the game relies on it (both memcpy
+  addresses -> memmove). Movie code is `_MBCS`.
+* **decided** - The game's FILE is the runtime's `_iobuf` (no exposed buffer, so `basic_filebuf::_Init` always calls
+  fgetc/fputc); MSVC std exceptions are thrown as libstdc++ types.
+* **metrics** - rt_cpplib_provided=28/28 rt_crt_unknown=0 s4_tests=67 s4_checks=1949
+* **next** - S2: bind E entries to their providers, V entries for hand-written image vftables (0x010176f8,
+  0x010173dc, 0x010a2f9c/a2fa4, 0x010a318c); S1: the decomp fixes above + SpeedTree class unification + drop the
+  decomp's own `struct _iobuf`; exe: confirm medium/low identifications and ThrowInfo names.
