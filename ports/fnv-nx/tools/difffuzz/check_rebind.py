@@ -55,6 +55,61 @@ def scan(path):
     return hits
 
 
+_FN_CACHE = {}
+
+
+def bypassing_functions(path):
+    """{original address of a function: [variable address symbols]} for code in `path` that reaches a rebound image
+    variable's native copy through a section-relative relocation."""
+    if path in _FN_CACHE:
+        return _FN_CACHE[path]
+    out = collections.defaultdict(set)
+    with open(path, 'rb') as f:
+        e = ELFFile(f)
+        st = e.get_section_by_name('.symtab')
+        if st is None:
+            _FN_CACHE[path] = {}
+            return {}
+        syms = list(st.iter_symbols())
+        ranges = collections.defaultdict(list)
+        funcs = collections.defaultdict(list)     # section -> [(lo, hi, orig addr)]
+        for s in syms:
+            if not isinstance(s['st_shndx'], int):
+                continue
+            if s.name.startswith('__fnv_') and s['st_info']['bind'] == 'STB_WEAK' and \
+                    s['st_info']['type'] == 'STT_OBJECT':
+                ranges[s['st_shndx']].append((s['st_value'], s['st_value'] + max(1, s['st_size']), s.name))
+        sizes = {}
+        for s in syms:
+            if s['st_info']['type'] == 'STT_FUNC' and isinstance(s['st_shndx'], int) and s['st_size']:
+                sizes[(s['st_shndx'], s['st_value'])] = max(sizes.get((s['st_shndx'], s['st_value']), 0),
+                                                           s['st_size'])
+        for s in syms:
+            m = s.name[6:14] if s.name.startswith('__fnv_') and len(s.name) == 14 else None
+            if m and s['st_info']['type'] == 'STT_FUNC' and isinstance(s['st_shndx'], int):
+                size = sizes.get((s['st_shndx'], s['st_value']), 0)
+                funcs[s['st_shndx']].append((s['st_value'], s['st_value'] + size, int(m, 16)))
+        if ranges:
+            for sec in e.iter_sections():
+                if not isinstance(sec, RelocationSection):
+                    continue
+                tgt_idx = sec['sh_info']
+                for r in sec.iter_relocations():
+                    s = syms[r['r_info_sym']]
+                    if s['st_info']['type'] != 'STT_SECTION':
+                        continue
+                    add = r['r_addend'] if r.is_RELA() else 0
+                    hit = next((n for lo, hi, n in ranges.get(s['st_shndx'], ()) if lo <= add < hi), None)
+                    if hit is None:
+                        continue
+                    for lo, hi, orig in funcs.get(tgt_idx, ()):
+                        if lo <= r['r_offset'] < hi:
+                            out[orig].add(hit)
+    res = {k: sorted(v) for k, v in out.items()}
+    _FN_CACHE[path] = res
+    return res
+
+
 def main():
     d = sys.argv[1]
     total = collections.Counter()

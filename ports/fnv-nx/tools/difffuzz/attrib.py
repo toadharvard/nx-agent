@@ -27,8 +27,10 @@ FAMILIES = [
     ('CTOR1', re.compile(r'(?:->|\.) (\w+) :: \1 \(')),
     ('STR1', re.compile(r'& str_[0-9a-f]{8}')),
     ('CALL1', re.compile(r'\( (?:LP|LPC|P)[A-Z]\w* \)')),
-    ('RCAST1', re.compile(r'\( \w+ & \)')),
-    ('FNVNX', re.compile(r'\bfnvnx_\w+|\bFNVNX_\w+')),
+    ('RCAST1', re.compile(r'\( \w+ & \)|\bfnvnx_lvalue\b')),
+    ('XC1', re.compile(r'__fnvnx_dyn(?:init|exit)_|\bfnvnx_xc_atexit\b|\bfnvnx_dyn_tag\b')),
+    ('VCALL', re.compile(r'\bFNVNX_MSVC_VCALL\b')),
+    ('FNVNX', re.compile(r'\bfnvnx_(?!lvalue|xc_atexit|dyn_tag|asm|rdtsc)\w+|\bFNVNX_(?!MSVC_VCALL|KEEP)\w+')),
 ]
 
 

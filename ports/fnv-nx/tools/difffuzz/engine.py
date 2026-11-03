@@ -134,8 +134,10 @@ class UnitCache:
             for a, f in xu.funcs.items():
                 if not f['unresolved']:
                     code[a] = f['code']
-        return runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
-                             statics)
+        t = runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
+                          statics)
+        t.source = source
+        return t
 
     def pinned(self, source, orig_addr):
         xu = self.x86_unit(source, orig_addr)

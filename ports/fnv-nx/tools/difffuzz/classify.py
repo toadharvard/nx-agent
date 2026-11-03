@@ -1,6 +1,10 @@
 """classify.py - root-cause hints for one minimised divergence (probes + the oracle's instruction mix).
 
 Causes (first that applies):
+  split-global    the native function reaches its unit's own copy of an image variable (S2 rebinding bypassed by a
+                  section-relative relocation) while the oracle uses the image copy
+  vptr-store      only x86 stores an image vftable address (dead vptr store GCC drops in a destructor; D7 objects
+                  hold Itanium vptrs anyway)
   division        x86 raised #DE (div by zero / INT_MIN/-1) where AArch64 sdiv/udiv returns 0 or wraps
   ilp32-pointer   AArch64 touched an address >= 4 GiB (a 32-bit pointer used with garbage upper bits)
   uninit-x86      the oracle's own result depends on garbage (stack/registers): undefined behaviour MSVC got away with
@@ -17,6 +21,8 @@ Causes (first that applies):
 """
 import capstone
 
+import check_rebind
+import config
 import world
 
 CS = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
@@ -30,12 +36,40 @@ def _outcome(r):
     return (r.error, r.ret, tuple(c.target for c in r.calls), tuple(sorted(r.writes.items())))
 
 
+_VFT = None
+
+
+def image_vftables():
+    """Original addresses of image vftables (address map kind V)."""
+    global _VFT
+    if _VFT is None:
+        _VFT = set()
+        p = config.WORK.parent / 'link/out/addrmap.tsv'
+        if p.exists():
+            for line in open(p):
+                f = line.split('\t')
+                if len(f) > 1 and f[1] == 'V':
+                    _VFT.add(int(f[0], 16))
+    return _VFT
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
     k = div['kind']
     if k == 'local-static':
         h['cause'] = 'local-static'; return h
+    src = getattr(target, 'source', None)
+    if src and k in ('return', 'mem-write', 'call-args', 'error'):
+        obj = config.WORK.parent / 'link/fixed' / config.obj_name(src)
+        if obj.exists():
+            hits = check_rebind.bypassing_functions(str(obj)).get(target.orig_addr)
+            if hits:
+                h['cause'] = 'split-global'; h['vars'] = hits; return h
+    if k == 'mem-write' and div.get('only_x86') == div.get('ndiff') and div.get('ndiff', 0) <= 4:
+        w = int.from_bytes(bytes.fromhex(div['x86'])[:4], 'little')
+        if w in image_vftables():
+            h['cause'] = 'vptr-store'; return h
     if k == 'error':
         if div.get('x86') == 'div0':
             h['cause'] = 'division'; return h
