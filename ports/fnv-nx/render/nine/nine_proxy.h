@@ -13,14 +13,15 @@ static inline uint64_t nx_call(uint64_t remote, uint32_t method, uint64_t args) 
 }
 
 struct NxProxy {
-    uint64_t remote;
-    explicit NxProxy(uint64_t r) : remote(r) {}
+    uint32_t remote;        // LP64 object address: below 4 GiB (32-bit address space), so 32 bits hold it
+    explicit NxProxy(uint64_t r) : remote((uint32_t)r) {}
+    virtual ~NxProxy() {}   // Px layout: interface vptr +0, NxProxy vptr +4, remote +8 (all 4-aligned)
 };
 // Interface in: proxy -> remote (0 for NULL). Every proxy is (interface vptr, NxProxy) with single
 // inheritance, so 'remote' sits at the same offset (8: vptr 4 + alignment) in every proxy class; a base-interface
 // pointer (IDirect3DBaseTexture9* to a cube texture proxy) unwraps the same way. Checked in nine_proxy_rt.cpp.
 static inline uint64_t nx_unwrap(const void* p) {
-    return p ? *(const uint64_t*)((const char*)p + 8) : 0;
+    return p ? *(const uint32_t*)((const char*)p + 8) : 0;
 }
 // Implemented in nine_proxy_rt.cpp: per-interface remote -> unique proxy map (identity for COM equality and
 // the engine's pointer comparisons), created on first sight, removed when Release reaches 0.
@@ -31,7 +32,7 @@ NX_WRAP_DECL(IDirect3DVolumeTexture9) NX_WRAP_DECL(IDirect3DBaseTexture9) NX_WRA
 NX_WRAP_DECL(IDirect3DIndexBuffer9) NX_WRAP_DECL(IDirect3DVertexDeclaration9) NX_WRAP_DECL(IDirect3DVertexShader9)
 NX_WRAP_DECL(IDirect3DPixelShader9) NX_WRAP_DECL(IDirect3DStateBlock9) NX_WRAP_DECL(IDirect3DQuery9)
 NX_WRAP_DECL(IDirect3DResource9) NX_WRAP_DECL(IDirect3D9Ex) NX_WRAP_DECL(IDirect3DDevice9Ex)
-NX_WRAP_DECL(IDirect3DSwapChain9Ex) NX_WRAP_DECL(IUnknown)
+NX_WRAP_DECL(IDirect3DSwapChain9Ex)
 
 // Wide (LP64-layout) copies of the structs with pointer members, and their converters.
 struct NxW_D3DLOCKED_RECT { int32_t Pitch; uint32_t pad; uint64_t pBits; };

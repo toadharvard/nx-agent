@@ -44,22 +44,37 @@ DEVKITPRO=<S5 dkp tree> render/nine/build.sh <work dir> [jobs]
   `nouveau_switch_screen_create()` and an adapter with `NineAdapter9_new`. A test `main` + nine + nouveau + libnx
   links into an 8.0 MB ELF64 with **0 undefined symbols**. Nothing has run on hardware.
 
-## 2. What is still missing (blockers and work, in order)
+## 2. Status: hardware test built, not yet run
 
-1. **IDirect3D9 itself.** st/nine implements `ID3DAdapter9` and the device and everything below it. The
-   `IDirect3D9` object (adapter enumeration, `CheckDevice*`, `GetDeviceCaps`, `CreateDevice` on
-   `ID3DAdapter9_CreateDevice`) lives in the Wine side (wine-nine-standalone, LGPL), not in Mesa. We write our own:
-   about 20 methods, one adapter, and fixed 1280x720/1920x1080 modes.
-2. **ID3DPresent / ID3DPresentGroup** (`include/d3dadapter/present.h`, 21 + 5 methods) over nwindow (§4).
-3. **Host build integration.** A host module = S5's host + `nine_*` LP64 code + these libraries, plus a host-API
-   slot for the proxy call (request to S5: one generic extension slot `ext_call(a, b, c)` in `FnvnxHostApi`).
-4. **Runtime risks** (unknown until hardware):
-   * nouveau's codegen runs at shader-create time on the A57. Nine translates every SM1-3 shader to TGSI and then
-     nv50_ir, which costs load hitches; nine has no disk cache on this path.
-   * The nvdrv winsys is exercised by devkitPro's GL samples, not by a D3D9 workload.
-   * Mesa 20.1 is an old, frozen base: nine was removed upstream in 25.2, so we own the fork.
-   * The process heap must hold nine's per-resource system-memory copies for `MANAGED` resources (the engine
-     uses `MANAGED` heavily); memory budget to be measured.
+All four pieces now exist and compile, and the test packages as an exefs.nsp (`test/build.sh`):
+
+* **IDirect3D9** (`host/nine_d3d9.c`, our code; Wine's d3d9-nine is not used):
+  * one adapter; modes 1280x720 and 1920x1080 at 60 Hz in X8R8G8B8/A8R8G8B8;
+  * the caps and `Check*` methods forward to nine's `ID3DAdapter9`;
+  * `CreateDevice` passes our present group.
+* **ID3DPresent / ID3DPresentGroup** over nwindow (`host/nine_present.c`, §4).
+* **Proxies** (`gen_proxy.py`, `nine_proxy.h`, `nine_proxy_rt.cpp`):
+  * guest side compiled ILP32, host side compiled LP64; 0 warnings outside header macro redefinitions;
+  * the manual methods are 21 generic `nx_m_*` bodies covering the 27 methods plus IUnknown;
+  * LP64 layout `_Static_assert`s for the structs passed by address (`host/nine_host_call.c`) all hold.
+* **Test** (`test/clear.cpp`): `Direct3DCreate9` -> `CreateDevice` -> `Clear` (colour cycling + moving bar) ->
+  `Present` in a loop.
+  * Logs adapter, caps and ms/frame to `sdmc:/fnvnx/host.log`; exits on `+` or after 20 s.
+  * Build: `SSE2NEON=... DEVKITPRO=... NINE=<build.sh work dir> test/build.sh <out> <program id>`.
+  * Output: `main` 2.2 MB NSO, `guest.nso` 89 KB; install exactly like `tests/s5/hello` (docs/TOOLCHAIN.md §6).
+  * Under S5's Unicorn emulator the guest starts and stops at "no host slot", as expected: the fake host has no
+    Nine.
+* Host API: until S5's generic ext-call slot lands, `host/nine_nx_host.c` includes S5's `host.c` with `main`
+  renamed and no text console, and appends `FnvnxNineHostApi` (`include_nine_api.h`) after `FnvnxHostApi`.
+
+Runtime risks, unknown until hardware:
+
+* nouveau's TGSI -> nv50_ir compile cost at shader-create time on the A57.
+* The nvdrv winsys has not run a D3D9 workload before.
+* We own a Mesa 20.1 fork (nine was removed upstream in 25.2).
+* Memory for `MANAGED` system copies.
+* Whether nine's buffer rotation and nwindow's dequeue order agree. `hold_slot` dequeues until the wanted slot
+  is ours, so a mismatch is not fatal as long as every configured slot comes back.
 
 ## 3. ILP32 -> LP64 COM proxy (`gen_proxy.py`)
 
@@ -139,4 +154,6 @@ and blit into the dequeued nwindow buffer. Nine already has this copy path for w
 * `patches/`: patches 0001 and 0002 (§1).
 * `host/nine_adapter.c`: the adapter on nouveau_switch.
 * `gen_proxy.py`: the proxy generator (§3); run it with `--report` for the per-method classification.
-* `nine_proxy.h`: the guest runtime for the proxies.
+* `nine_proxy.h`, `nine_proxy_rt.cpp`: the guest runtime for the proxies (identity map, wrap, manual bodies, `Direct3DCreate9`).
+* `host/`: IDirect3D9, present, adapter, host-call entry and host module.
+* `test/`: the hardware test and its build script.
