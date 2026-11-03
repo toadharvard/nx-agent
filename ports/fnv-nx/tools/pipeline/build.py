@@ -1504,7 +1504,9 @@ def execute(b, targets):
             b.say('%-9s cached   %s' % (st.name, prev.get('summary', '')))
             continue
         open(r['log'], 'w').close()
-        r.update(status='ok', fingerprint=fp, started=now_iso(), ran=True, run_id=b.run_id)
+        r.update(status='running', fingerprint=None, started=now_iso(), ran=True, run_id=b.run_id)
+        b.save(r)          # visible to `make status`; an interrupted stage is not mistaken for a finished one
+        r.update(status='ok', fingerprint=fp)
         t0 = time.time()
         b.say('%-9s running' % st.name)
         try:
