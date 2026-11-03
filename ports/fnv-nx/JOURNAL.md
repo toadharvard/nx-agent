@@ -571,3 +571,21 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - integration: S5 host.c (reserve early/late, remap_code, guest placement right after the window to cut
   relaunches), xc runner after `__libc_init_array`; S1 XC1 rule; S2 map `__fnvnx_dyninit_/dynexit_` + rename
   `__cxa_atexit` in game objects; S4 atexit/doexit forwarding; S3 `__xc` capture before fixups.
+
+### J-0028 | 2026-11-03 | stream: S6d-nine-precompile | status: wip | parent: J-0024,J-0026
+
+* **did** - Patch 0006 (`nine_shader.c`): D3D `call`/`callnz` inlined at the call site instead of Mesa 20.1's
+  broken TGSI subroutine path (depth limit 8; recursion, early `ret` in a callee's flow control, missing label and
+  predicated call -> `D3DERR_INVALIDCALL` instead of a crash); predicate `!` modifier fixed. 0005 (cache) regenerated
+  against the pristine devkitPro tree; 0001-0006 apply in order without fuzz. `render/nine/host/nine_shader_cache.[ch]`:
+  `nx_nine_shader_cache_init` (`sdmc:/fnvnx/shaders.nvc0cache`, read-write) + stats. `tests/s6d`: 4 call shaders + 2
+  expected rejections.
+* **found** - `!p0` read as `p0` in Nine 20.1: predicated `(!p0)` instructions were silently inverted (S6b's
+  `vs30_full` was miscompiled). Host: 32 shaders, 30 compile, 2 rejected as expected, 486 variant compiles, 0
+  crashes, 391 programs; 120/120 cache hits byte-identical (744 checks). Switch build 563 steps, 0 failures; link 0
+  undefined.
+* **decided** - Always inline subroutines (D3D9 forbids recursion, nesting <= 4). TGSI-level Nine changes need no
+  cache-id bump (keys change with the TGSI); codegen changes do.
+* **metrics** - shaders=32 compiled=30 variant_compiles=486 programs=391 cache_identical=120/120 checks=744
+  switch_build_steps=563
+* **next** - S6c wires `nx_nine_shader_cache_init(NULL)` into host init; on hardware: hit rate, create-time savings.
