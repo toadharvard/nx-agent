@@ -66,12 +66,15 @@ declarations differ in a way x86 tolerated and AArch64 does not (e.g. `__fastcal
 The decomp copies MSVC's `__m128` union into ~400 files; prepare removes those copies and the global `sse2neon` type
 is used everywhere; union member access (`v.m128_f32[i]`) becomes typed pointer access.
 
-### D6. Rendering: own D3D9 front end over deko3d, shaders translated offline (J-0006)
+### D6. Rendering: native renderer on deko3d, no D3D9 emulation (J-0015, supersedes J-0006)
 
-The engine calls D3D9 through vtable slots (mostly via its own stand-in classes), so the front end is ILP32 C++ with
-SDK-order vtables implementing all Device9 slots. Shader bytecode (SM1.1-3.0 from `shaderpackage*.sdp`) is translated
-at install time: MojoShader (GLSL 4.5 profile for deko3d) -> uam -> DKSH, keyed by bytecode hash. Details:
-[`RENDER.md`](RENDER.md).
+The engine reaches D3D9 only through `NiRenderer`, `NiDX9RenderState` and the `NiD3DShader`/`BSShader` protocol, and
+draws only inside the renderer. We replace NiDX9Renderer + NiD3D* + bsshader render-time code (~1,000-1,300
+functions) with a native deko3d renderer wired in by address overrides (S2) and a NATIVE1 prepare rule; pass
+selection, culling and scene graph stay. Prebuilt state blocks, sorted 64-bit draw keys, persistent rings, bindless
+32-bit texture handles, render thread one frame behind. Shaders are hand-written GLSL per family (uam -> DKSH, our
+own code); the game's translated `.sdp` shaders (S6b) are only the parity reference. Details:
+[`RENDER_NATIVE.md`](RENDER_NATIVE.md); the earlier D3D9-emulation design stays in [`RENDER.md`](RENDER.md).
 
 ## Legal
 
