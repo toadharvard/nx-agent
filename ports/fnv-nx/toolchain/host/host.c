@@ -1,0 +1,322 @@
+/* fnv-nx LP64 host module (NSO "main"): libnx process runtime that loads the ILP32 guest module
+ * (guest.nso, linked at a fixed address) at its link address, hands it the host API table and runs it.
+ * See include/fnvnx/hostapi.h and docs/TOOLCHAIN.md.
+ *
+ * It also reports the process layout (address space type, regions, where our own image is, whether the
+ * reserved original-image range 0x00400000..0x02100000 is free) on the console and in sdmc:/fnvnx/host.log,
+ * which is what the hardware test reads back.
+ */
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <malloc.h>
+#include <sys/stat.h>
+#include <switch.h>
+
+#include "fnvnx/hostapi.h"
+
+/* Original FalloutNV.exe image: headers + .text range (S2: native code must not be here) and the data
+ * window 0x00fdf000..0x02100000 (S3 maps the player's .rdata/.data there). */
+#define FNVNX_RESERVED_START 0x00400000ull
+#define FNVNX_RESERVED_END   0x02100000ull
+#define FNVNX_WINDOW_START   0x00fdf000ull
+#define FNVNX_SMALL_MAP_END  0x40000000ull
+#define FNVNX_LOG_DIR        "sdmc:/fnvnx"
+#define FNVNX_LOG_PATH       FNVNX_LOG_DIR "/host.log"
+
+/* Host heap for libnx/newlib (services, console, file buffers, the guest file while loading); the rest of
+ * the heap region goes to the guest. Weak so a host build can change the split. Multiple of 2 MiB. */
+__attribute__((weak)) size_t fnvnx_host_heap_size = 64ull << 20;
+/* Seconds the host waits for + after the guest returns before it exits on its own (automated tests). */
+__attribute__((weak)) unsigned fnvnx_host_linger_s = 30;
+/* Where the guest module is read from. */
+__attribute__((weak)) const char *fnvnx_guest_path = "sdmc:/fnvnx/guest.nso";
+
+static u64 g_guest_heap_base, g_guest_heap_size;
+static FILE *g_log;
+static FnvnxHostApi g_api;
+static PadState g_pad;
+static Handle g_own_process = INVALID_HANDLE;
+
+/* ---- heap ---------------------------------------------------------------------------------------------
+ * libnx's default asks for all remaining application memory (~3.2 GiB on retail), which svcSetHeapSize
+ * refuses in a 32-bit address space (heap region: 1 GiB for 32Bit, 2 GiB for 32BitNoReserved). Cap it at the
+ * heap region and split it host/guest. */
+void __libnx_initheap(void) {
+    extern char *fake_heap_start, *fake_heap_end;
+    u64 avail = 0, used = 0, region = 0;
+    svcGetInfo(&avail, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&region, InfoType_HeapRegionSize, CUR_PROCESS_HANDLE, 0);
+    u64 size = avail > used + 0x200000 ? (avail - used - 0x200000) & ~0x1FFFFFull : 0;
+    if (size > region) size = region & ~0x1FFFFFull;
+    if (size < fnvnx_host_heap_size) size = fnvnx_host_heap_size;
+    void *addr = NULL;
+    if (R_FAILED(svcSetHeapSize(&addr, size)))
+        diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_HeapAllocFailed));
+    fake_heap_start = (char *)addr;
+    fake_heap_end = (char *)addr + fnvnx_host_heap_size;
+    g_guest_heap_base = (u64)addr + fnvnx_host_heap_size;
+    g_guest_heap_size = size - fnvnx_host_heap_size;
+}
+
+/* ---- logging ------------------------------------------------------------------------------------------- */
+static void out(const char *buf, size_t len) {
+    fwrite(buf, 1, len, stdout);
+    if (g_log) { fwrite(buf, 1, len, g_log); fflush(g_log); }
+}
+
+static void logf_(const char *fmt, ...) {
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if ((size_t)n >= sizeof buf) n = sizeof buf - 1;
+    out(buf, (size_t)n);
+    svcOutputDebugString(buf, (u64)n);
+    consoleUpdate(NULL);
+}
+
+/* ---- host API implementations (LP64; every parameter and result is u64) -------------------------------- */
+static u64 h_output_debug_string(u64 str, u64 len) { return svcOutputDebugString((const char *)str, len); }
+static u64 h_sleep_ns(u64 ns) { svcSleepThread((s64)ns); return 0; }
+static u64 h_exit(u64 code) {
+    logf_("fnvnx host: guest called exit(%d)\n", (int)code);
+    if (g_log) fclose(g_log);
+    consoleExit(NULL);
+    exit((int)code);
+}
+static u64 h_console_write(u64 buf, u64 len) { out((const char *)buf, len); return len; }
+static u64 h_console_flush(void) { consoleUpdate(NULL); return 0; }
+static u64 h_main_loop(void) { return appletMainLoop() ? 1 : 0; }
+static u64 h_buttons_down(void) { padUpdate(&g_pad); return padGetButtonsDown(&g_pad); }
+static u64 h_system_tick(void) { return armGetSystemTick(); }
+static u64 h_system_tick_freq(void) { return armGetSystemTickFreq(); }
+
+/* ---- process layout ------------------------------------------------------------------------------------ */
+static const char *as_name(void) {
+    u64 aslr = 0, aslr_size = 0, alias = 0;
+    svcGetInfo(&aslr, InfoType_AslrRegionAddress, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&aslr_size, InfoType_AslrRegionSize, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&alias, InfoType_AliasRegionSize, CUR_PROCESS_HANDLE, 0);
+    if (aslr + aslr_size <= FNVNX_SMALL_MAP_END) return alias ? "32Bit" : "32BitNoReserved";
+    if (aslr + aslr_size <= 0x80000000ull) return "64Bit36";
+    return "64Bit39";
+}
+
+/* True iff [start, end) is one unmapped region. */
+static bool range_free(u64 start, u64 end, MemoryInfo *mi) {
+    u32 pi;
+    return R_SUCCEEDED(svcQueryMemory(mi, &pi, start)) && mi->type == MemType_Unmapped &&
+           mi->addr + mi->size >= end;
+}
+
+static void report_layout(void) {
+    static const struct { u32 id; const char *name; } regions[] = {
+        { InfoType_AslrRegionAddress, "aslr" }, { InfoType_HeapRegionAddress, "heap" },
+        { InfoType_AliasRegionAddress, "alias" }, { InfoType_StackRegionAddress, "stack" },
+    };
+    extern char __start__[] __attribute__((visibility("hidden")));
+    extern char __end__[] __attribute__((visibility("hidden")));
+    logf_("fnvnx host: LP64 sizeof(void*)=%zu, address space %s, host image %p..%p\n", sizeof(void *),
+          as_name(), (void *)__start__, (void *)__end__);
+    for (size_t i = 0; i < sizeof regions / sizeof regions[0]; i++) {
+        u64 a = 0, s = 0;
+        svcGetInfo(&a, regions[i].id, CUR_PROCESS_HANDLE, 0);
+        svcGetInfo(&s, regions[i].id + 1, CUR_PROCESS_HANDLE, 0);
+        logf_("  region %-5s %#010lx..%#010lx (%lu MiB)\n", regions[i].name, a, a + s, s >> 20);
+    }
+    u64 total = 0, used = 0;
+    svcGetInfo(&total, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
+    logf_("  memory total %lu MiB, used %lu MiB, guest heap %#010lx (%lu MiB)\n", total >> 20, used >> 20,
+          g_guest_heap_base, g_guest_heap_size >> 20);
+    MemoryInfo mi;
+    bool free_ = range_free(FNVNX_RESERVED_START, FNVNX_RESERVED_END, &mi);
+    logf_("  original image range %#010llx..%#010llx (data window from %#010llx): %s"
+          " (region at %#010lx type %u size %#lx)\n", FNVNX_RESERVED_START, FNVNX_RESERVED_END,
+          FNVNX_WINDOW_START, free_ ? "free" : "OCCUPIED", mi.addr, mi.type, mi.size);
+}
+
+/* ---- own process handle (same technique as nx-hbloader): send CUR_PROCESS_HANDLE as a copy handle to
+ * ourselves over a session, receiving it in a helper thread turns the pseudo-handle into a real one. ---- */
+static void own_handle_thread(void *arg) {
+    Handle session = (Handle)(uintptr_t)arg;
+    s32 idx = 0;
+    void *tls = armGetTls();
+    hipcMakeRequestInline(tls);
+    if (R_SUCCEEDED(svcReplyAndReceive(&idx, &session, 1, INVALID_HANDLE, UINT64_MAX))) {
+        HipcParsedRequest r = hipcParseRequest(tls);
+        if (r.meta.num_copy_handles == 1) g_own_process = r.data.copy_handles[0];
+    }
+    svcCloseHandle(session);
+}
+
+static Result get_own_process_handle(void) {
+    Handle server, client;
+    Result rc = svcCreateSession(&server, &client, 0, 0);
+    if (R_FAILED(rc)) return rc;
+    Thread t;
+    rc = threadCreate(&t, own_handle_thread, (void *)(uintptr_t)server, NULL, 0x1000, 0x20, -2);
+    if (R_SUCCEEDED(rc)) rc = threadStart(&t);
+    if (R_FAILED(rc)) { svcCloseHandle(server); svcCloseHandle(client); return rc; }
+    hipcMakeRequestInline(armGetTls(), .num_copy_handles = 1).copy_handles[0] = CUR_PROCESS_HANDLE;
+    svcSendSyncRequest(client);
+    svcCloseHandle(client);
+    threadWaitForExit(&t);
+    threadClose(&t);
+    return g_own_process != INVALID_HANDLE ? 0 : MAKERESULT(Module_Libnx, LibnxError_NotFound);
+}
+
+/* ---- guest loader -------------------------------------------------------------------------------------- */
+static bool lz4_block(const u8 *src, size_t n, u8 *dst, size_t out_size) {
+    size_t i = 0, o = 0;
+    while (i < n) {
+        u8 tok = src[i++];
+        size_t ll = tok >> 4;
+        if (ll == 15) { u8 b; do { if (i >= n) return false; b = src[i++]; ll += b; } while (b == 255); }
+        if (i + ll > n || o + ll > out_size) return false;
+        memcpy(dst + o, src + i, ll);
+        i += ll; o += ll;
+        if (i >= n) break;
+        if (i + 2 > n) return false;
+        size_t off = src[i] | ((size_t)src[i + 1] << 8);
+        i += 2;
+        if (off == 0 || off > o) return false;
+        size_t ml = tok & 15;
+        if (ml == 15) { u8 b; do { if (i >= n) return false; b = src[i++]; ml += b; } while (b == 255); }
+        ml += 4;
+        if (o + ml > out_size) return false;
+        for (size_t k = 0; k < ml; k++) dst[o + k] = dst[o - off + k];
+        o += ml;
+    }
+    return o == out_size;
+}
+
+typedef struct { u32 file_off, dst, size, extra; } NsoSeg;
+
+#define FAIL(...) do { logf_("fnvnx host: guest load failed: " __VA_ARGS__); goto fail; } while (0)
+
+/* Reads an NSO, decompresses and hash-checks it into page-aligned heap memory, then maps that memory as
+ * code at the address stored in the guest header (+16) with per-segment permissions, like ldr/hbloader. */
+static bool load_guest(const char *path, u64 *out_base, u64 *out_size) {
+    u8 *file = NULL, *img = NULL;
+    FILE *f = fopen(path, "rb");
+    if (!f) FAIL("cannot open %s\n", path);
+    fseek(f, 0, SEEK_END);
+    long fsz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (fsz < 0x100 || !(file = malloc(fsz)) || fread(file, 1, fsz, f) != (size_t)fsz) {
+        fclose(f);
+        FAIL("cannot read %s\n", path);
+    }
+    fclose(f);
+    if (memcmp(file, "NSO0", 4) != 0) FAIL("%s is not an NSO\n", path);
+    u32 flags;
+    NsoSeg seg[3];
+    u32 comp[3];
+    memcpy(&flags, file + 0xC, 4);
+    memcpy(seg, file + 0x10, sizeof seg);
+    memcpy(comp, file + 0x60, sizeof comp);
+    u64 img_size = ((u64)seg[2].dst + seg[2].size + seg[2].extra + 0xFFF) & ~0xFFFull;
+    if (seg[0].dst != 0 || seg[0].dst + seg[0].size > seg[1].dst || seg[1].dst + seg[1].size > seg[2].dst)
+        FAIL("bad segment layout\n");
+    if (!(img = memalign(0x1000, img_size))) FAIL("out of memory (%#lx bytes)\n", img_size);
+    memset(img, 0, img_size);
+    for (int i = 0; i < 3; i++) {
+        if ((u64)seg[i].file_off + comp[i] > (u64)fsz) FAIL("segment %d outside file\n", i);
+        if (flags & (1u << i)) {
+            if (!lz4_block(file + seg[i].file_off, comp[i], img + seg[i].dst, seg[i].size))
+                FAIL("segment %d: bad LZ4 data\n", i);
+        } else {
+            if (comp[i] != seg[i].size) FAIL("segment %d: size mismatch\n", i);
+            memcpy(img + seg[i].dst, file + seg[i].file_off, seg[i].size);
+        }
+        if (flags & (8u << i)) {
+            u8 h[SHA256_HASH_SIZE];
+            sha256CalculateHash(h, img + seg[i].dst, seg[i].size);
+            if (memcmp(h, file + 0xA0 + 0x20 * i, sizeof h) != 0) FAIL("segment %d: SHA-256 mismatch\n", i);
+        }
+    }
+    free(file);
+    file = NULL;
+
+    const u32 *w = (const u32 *)img;
+    if (w[2] != FNVNX_GUEST_MAGIC || w[3] != FNVNX_HOSTAPI_VERSION) FAIL("not an fnv-nx guest (ABI %u)\n", w[3]);
+    u64 base = w[4];
+    if (w[5] != img_size) FAIL("guest header size %#x != image %#lx\n", w[5], img_size);
+    if (base & 0xFFF || base < 0x200000 || base + img_size > FNVNX_SMALL_MAP_END ||
+        (base < FNVNX_RESERVED_END && base + img_size > FNVNX_RESERVED_START))
+        FAIL("link address %#lx..%#lx not allowed\n", base, base + img_size);
+    MemoryInfo mi;
+    if (!range_free(base, base + img_size, &mi))
+        FAIL("link range %#lx..%#lx is occupied (region %#lx type %u); relaunch\n", base, base + img_size,
+             mi.addr, mi.type);
+
+    Result rc = get_own_process_handle();
+    if (R_FAILED(rc)) FAIL("own process handle: %#x\n", rc);
+    armDCacheFlush(img, img_size);
+    rc = svcMapProcessCodeMemory(g_own_process, base, (u64)img, img_size);
+    if (R_FAILED(rc)) FAIL("svcMapProcessCodeMemory: %#x\n", rc);
+    img = NULL; /* now backs the mapping, its heap alias is inaccessible: never free or reuse it */
+    u64 text_end = ((u64)seg[0].size + 0xFFF) & ~0xFFFull, ro_end = ((u64)seg[1].dst + seg[1].size + 0xFFF) & ~0xFFFull;
+    rc = svcSetProcessMemoryPermission(g_own_process, base, text_end, Perm_Rx);
+    if (R_SUCCEEDED(rc) && ro_end > seg[1].dst)
+        rc = svcSetProcessMemoryPermission(g_own_process, base + seg[1].dst, ro_end - seg[1].dst, Perm_R);
+    if (R_SUCCEEDED(rc))
+        rc = svcSetProcessMemoryPermission(g_own_process, base + seg[2].dst, img_size - seg[2].dst, Perm_Rw);
+    if (R_FAILED(rc)) FAIL("svcSetProcessMemoryPermission: %#x\n", rc);
+    *out_base = base;
+    *out_size = img_size;
+    return true;
+fail:
+    free(file);
+    free(img);
+    return false;
+}
+
+int main(int argc, char **argv) {
+    (void)argc; (void)argv;
+    consoleInit(NULL);
+    padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+    padInitializeDefault(&g_pad);
+    mkdir(FNVNX_LOG_DIR, 0777);
+    g_log = fopen(FNVNX_LOG_PATH, "w");
+
+    report_layout();
+
+    u64 gbase = 0, gsize = 0, rc;
+    if (!load_guest(fnvnx_guest_path, &gbase, &gsize)) {
+        rc = 0xF00000FFu;
+    } else {
+        logf_("fnvnx host: guest %s mapped at %#010lx, %#lx bytes\n", fnvnx_guest_path, gbase, gsize);
+        g_api = (FnvnxHostApi){
+            .magic = FNVNX_HOSTAPI_MAGIC, .version = FNVNX_HOSTAPI_VERSION, .size = sizeof(FnvnxHostApi),
+            .guest_base = gbase, .guest_size = gsize,
+            .heap_base = g_guest_heap_base, .heap_size = g_guest_heap_size,
+            .output_debug_string = (u64)h_output_debug_string, .sleep_ns = (u64)h_sleep_ns,
+            .exit = (u64)h_exit, .console_write = (u64)h_console_write, .console_flush = (u64)h_console_flush,
+            .main_loop = (u64)h_main_loop, .buttons_down = (u64)h_buttons_down,
+            .system_tick = (u64)h_system_tick, .system_tick_freq = (u64)h_system_tick_freq,
+        };
+        u64 (*entry)(u64) = (u64 (*)(u64))gbase;
+        rc = entry((u64)&g_api);
+        logf_("fnvnx host: guest returned %#lx\n", rc);
+    }
+
+    logf_("fnvnx host: press + to exit (auto exit in %u s)\n", fnvnx_host_linger_s);
+    u64 deadline = armGetSystemTick() + (u64)fnvnx_host_linger_s * armGetSystemTickFreq();
+    while (appletMainLoop() && armGetSystemTick() < deadline) {
+        padUpdate(&g_pad);
+        if (padGetButtonsDown(&g_pad) & HidNpadButton_Plus) break;
+        consoleUpdate(NULL);
+        svcSleepThread(16000000);
+    }
+    logf_("fnvnx host: exit\n");
+    if (g_log) fclose(g_log);
+    consoleExit(NULL);
+    return (int)(rc & 0xFF);
+}
