@@ -53,7 +53,10 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
 `out/` and `fixed/` of one run belong together (`aliases.ld`, `bridges.S`, `addrmap.c` and the rewritten objects
 name each other's symbols): never pair files of different runs. Write each run to a new directory (seed its
 caches by copying `out/cache`, `out/layouts.tsv`, `out/vtables` of the previous one) and switch a `latest` symlink
-atomically (`ln -sfn run-N latest.tmp && mv -T latest.tmp latest`) once `check` has passed.
+atomically (`ln -sfn run-N latest.tmp && mv -T latest.tmp latest`) once `check` has passed. Every step can be
+rerun after an interruption: `compile.sh` keeps up-to-date objects, the probe keeps its per-unit compiles
+(`probe/*.done.json`) and saves `cache.json` after each round, `apply` rewrites `fixed/` object by object; a driver
+only needs to remember which steps finished.
 
 ## Symbols and files
 
@@ -375,9 +378,9 @@ virtuals; all `vslot-unresolved`, like the slots of GCC's own vtables) and 126 `
 
 ### Fourth round (slot functions, traps, providers, TLS, hand-written vptrs; S2c)
 
-Same objects. Of the compiled objects' 107,294 references: `provider` 526 (of the 892 `extern-text`; 366 stay),
-`import` 130 (bound by IAT slot where S4 implements the api), `tls` 24 (plus 5 in emitted host code: S5's 29
-initial-exec references), `vslot-unresolved` 6,098 now trap stubs. For the synthesized vtables compiled objects use,
+2,590 objects (of 3,501 units: that day's S1 tree with its variants). Of their 147,688 references: `provider` 657
+(489 `extern-text` stay), `import` 145 (114 bound by IAT slot where S4 implements the api), `tls` 29 (S5's
+initial-exec references), `vslot-unresolved` 11,445, bound to trap stubs. For the synthesized vtables compiled objects use,
 2,327 slot functions no object defines: 338 emitted from 229 host units (`-O2 -fkeep-inline-functions`), the rest
 (defined nowhere, or classes only the address map uses) trap; 4,650 trap stubs for 11,445 slot references in all.
 Thread-locals: 14 image `.tls` addresses (one outside the template page), 18 native definitions folded into the
