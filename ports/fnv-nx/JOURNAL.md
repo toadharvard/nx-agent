@@ -350,3 +350,18 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   thread) as a standalone test (3-4 weeks); N1 native main menu (5-7 weeks; needs engine boot: S2, S3, S4, S5).
 * **fork** - S2: `--override` table with precedence over decomp definitions at the same address (+ vtable / image
   pointer rewrite, shadow report). S1: NATIVE1 rule dropping `render/native/drop_units.txt`. S6b: CTAB dump mode.
+
+### J-0016 | 2026-11-03 | stream: S1-compile | status: wip | parent: J-0013
+
+* **did** - GOTO1 (`tools/rules/s1_compile.py`): in functions that use goto, `T x = e;` with a built-in or pointer T
+  becomes `T x; x = e;` on the same line (217 files / 2,979 edits); class types untouched. NATIVE1
+  (`tools/prepare.py`): units listed in `render/native/drop_units.txt` are removed from the prepared
+  `build/units.json`, so census and link skip them (not exercised yet: the list is empty).
+* **found** - GOTO1 cleaned 17 of 28 `jump to label` units. NiCriticalSection still open: the decomp's 28-byte
+  `_RTL_CRITICAL_SECTION` (Xbox 360 shape) puts `m_ulThreadOwner` at 0x1C, the 24-byte PC layout at 0x18; needs the
+  offsets read from the PC exe's NiCriticalSection methods (blocked on the player's exe).
+* **metrics** - census_units=2978 census_clean=2694 census_errors=1790
+* **next** - complete per-unit class views from other units' definitions where layout is provably unchanged
+  (largest bucket: Animation 34, NiAVObject 29, NiD3DPass 25); `_iobuf` -> FILE; float overload ambiguities;
+  force-include `fnvnx_asm.h` for the 10 `fnv_FloatToInt` units; include S4's platform declarations and merge
+  `fnvnx_win32_ext.h` into the shim.
