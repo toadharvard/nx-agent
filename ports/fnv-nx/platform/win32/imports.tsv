@@ -160,6 +160,7 @@
 0x00fdf424	d3dx9_38	D3DXMatrixMultiply	1	-	S6
 0x00fdf42c	d3dx9_38	D3DXMatrixTranspose	1	-	S6
 0x00fdf430	d3dx9_38	D3DXPlaneNormalize	1	-	S6
+0x00fdf438	vorbisfile	ov_open_callbacks	1	FUN_00fdf438	S7 (libvorbisfile)
 0x00fdf43c	vorbisfile	ov_clear	1	-	S7 (libvorbisfile)
 0x00fdf440	vorbisfile	ov_pcm_total	1	-	S7 (libvorbisfile)
 0x00fdf444	vorbisfile	ov_seekable	1	-	S7 (libvorbisfile)

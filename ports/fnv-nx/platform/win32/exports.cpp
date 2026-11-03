@@ -115,6 +115,8 @@ int dll_eq(const char *a, const char *b)
 }
 } // namespace
 
+extern "C" void *fnvnx_registered_module_export(const char *dll, const char *proc);   // module.cpp
+
 extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
 {
     if (!name)
@@ -122,5 +124,6 @@ extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
     for (const exp &e : g_exports)
         if (!strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
             return e.fn;
-    return NULL;
+    /* not an S4 export: modules registered at run time (S7's dsound/dinput8/xinput/vorbisfile) */
+    return dll ? fnvnx_registered_module_export(dll, name) : NULL;
 }

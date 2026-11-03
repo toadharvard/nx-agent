@@ -29,10 +29,10 @@ $CC -specs="$DEVKITPRO/libnx/switch.specs" $HOST_ARCH host.o -L"$DEVKITPRO/libnx
 
 # guest: ILP32 (ELF32) static executable at 0x10000000, ILP32 newlib/libsysbase/libgcc multilib,
 # guest.ld via guest.specs
-$CC $GUEST_ARCH -c "$TC/guest/crt0.s" -o crt0.o
-$CC $GUEST_ARCH $CFLAGS -c "$TC/guest/runtime.c" -o runtime.o
+"$TC/guest/build.sh" "$OUT/rt" >/dev/null
 $CC $GUEST_ARCH $CFLAGS -c "$HERE/hello.c" -o hello.o
-$CC $GUEST_ARCH -specs="$TC/guest/guest.specs" crt0.o runtime.o hello.o -Wl,-Map,guest.map -o guest.elf
+$CC $GUEST_ARCH -specs="$TC/guest/guest.specs" rt/crt0.o hello.o -Lrt -Wl,--whole-archive -lfnvnx-guest \
+	-Wl,--no-whole-archive -Wl,-Map,guest.map -o guest.elf
 
 $PY "$TC/tools/elf2nso.py" host.elf main
 $PY "$TC/tools/elf2nso.py" guest.elf guest.nso

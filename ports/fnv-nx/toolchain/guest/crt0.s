@@ -12,7 +12,7 @@ __fnvnx_guest_start:
 	b       __fnvnx_guest_entry                 // +0  entry, C (runtime.c)
 	.word   __fnvnx_mod0 - __fnvnx_guest_start  // +4  MOD0 offset, as every Horizon module
 	.word   0x47584e46                          // +8  "FNXG"
-	.word   2                                   // +12 FNVNX_HOSTAPI_VERSION this guest was built for
+	.word   3                                   // +12 FNVNX_HOSTAPI_VERSION this guest was built for
 	.word   __fnvnx_guest_base                  // +16 link address: the host maps the module exactly here
 	.word   __fnvnx_guest_size                  // +20 bytes to map (text..bss, page aligned)
 	.size   __fnvnx_guest_start, . - __fnvnx_guest_start

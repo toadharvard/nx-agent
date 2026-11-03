@@ -44,6 +44,18 @@ extern "C" void fnvnx_register_module(const char *dll, fnvnx_module_resolver res
     os_unlock(&g_mod_lock);
 }
 
+/* Resolver of a module registered with fnvnx_register_module (S7 audio/input, ...), for export lookups. */
+extern "C" void *fnvnx_registered_module_export(const char *dll, const char *proc)
+{
+    fnvnx_module_resolver r = NULL;
+    os_lock(&g_mod_lock);
+    for (int i = 0; i < g_nmodules && !r; i++)
+        if (!dll || same_module(dll, g_modules[i].name))
+            r = g_modules[i].resolve;
+    os_unlock(&g_mod_lock);
+    return r ? (void *)r(proc) : NULL;
+}
+
 static HMODULE module_handle(const char *name)
 {
     os_lock(&g_mod_lock);

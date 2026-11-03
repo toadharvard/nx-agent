@@ -252,11 +252,109 @@ Failure signs: back to HOME / error at launch = NSO or NPDM rejected by ldr (che
 (`occupied` = random collision, relaunch); a crash report in `/atmosphere/crash_reports/` with PC near
 `0x10000000` is guest startup.
 
+## 8. Round 2: guest runtime, platform glue, full game link (J-0012 follow-up)
+
+### Host API v3 (`toolchain/include/fnvnx/hostapi.h`, host side `host/host_v2.inc`, `host/host_v3.inc`)
+
+| Group | Slots |
+|---|---|
+| v1 | debug string, sleep, exit, console, main loop, buttons, ticks |
+| threads | `thread_create/start/join/free/exit/yield/set_priority/set_cpu` (libnx threads running a guest entry) |
+| blocking | `wait_on_address`, `wake_address` (svcWaitForAddress / svcSignalToAddress) |
+| time, misc | `wall_time_us`, `tz_offset_minutes` (0, TODO), `random64`, `memory_info`, `cpu_count` |
+| files | `fs_open/read/write/pread/pwrite/seek/truncate/sync/fstat/close/stat/mkdir/rmdir/remove/rename/dir_*` (host newlib over fsdev, paths `sdmc:/...`, results `-errno`) |
+| audio, input | `audio_open/submit/close` (audren voice, submit blocks = pacing), `pad_read`, `pad_vibrate`, `input_poll` (HID usage key events, mouse, touch) |
+| memory | `map_fixed(addr, size, src)`: svcMapMemory of a guest heap block at a fixed address (the S3 data image) |
+| extension | `ext_call(module, fn, args, nargs)`; host modules register with `fnvnx_host_register_ext()` (render/nine's D3D9 proxy) |
+
+`-DFNVNX_HOST_NO_CONSOLE` builds the host without the libnx text console (graphics owns the display); output then
+goes to `sdmc:/fnvnx/host.log` and svcOutputDebugString only.
+
+### Guest runtime (`toolchain/guest/`, `toolchain/guest/build.sh` -> `crt0.o`, `libfnvnx-guest.a`)
+
+* `threads.c`: guest threads = host threads with their own static TLS block (TPIDR_EL0) and newlib reent; futex
+  locks (normal + recursive) and sequence condvars on `wait_on_address`; all devkitPro libsysbase hooks
+  (`__syscall_lock_*`, `cond_*`, `thread_*`, `tls_*`, `getreent`) and a real `sched_yield`, so newlib, pthreads and
+  libstdc++ (std::thread, std::mutex, condition_variable, thread-safe statics) work.
+* `fs.c`: devoptab "sdmc" (also the default device) over the host fs slots: fopen/fstream/stat/opendir/rename...
+* `os_guest.c`: `platform/os/os.h` on the above (replaces os_horizon.c in the guest build; vm_* carve from the
+  guest heap, no fixed hint).
+* `platform_glue.cpp`: S7's Horizon glue for the guest: `fnvnx_audio_backend_audren` (guest thread renders,
+  host audren plays), `fnvnx_pad_horizon_source()`, `fnvnx_input_pump()`; `backend.cpp` is built with `-D__SWITCH__`,
+  `input_horizon.cpp` and `backend_audren.c` are left out (their libnx part is host_v3.inc).
+
+Proved under Unicorn (`tests/s5/rt/build.sh`, `tests/s5/emu_guest.py`, cooperative scheduler, virtual time, files
+in a temp dir): 4 pthreads x 2000 contended increments (312 blocking waits), per-thread `thread_local`, local static
+initialised once across threads, std::thread + std::mutex, bounded-queue condvar (500 items) and a timed wait that
+times out, recursive pthread mutex, stdio/fstream/stat/readdir/rename/remove, C++ exceptions through 5 frames,
+`std::out_of_range` from `vector::at`, RTTI (`dynamic_cast`, `typeid`), global constructors: **PASS**.
+
+### Ogg Vorbis (`toolchain/vorbis/build.sh`)
+
+libogg 1.3.5 and libvorbis 1.3.7 (BSD-3-Clause) from the xiph GitHub tags (downloads.xiph.org fails TLS from the
+container): ogg `e1774cd7`, SHA-256 of `git archive` 8ecebc1f247ef0da4d9913e41c5e217fad5e3b311cc74a09469194356cc22d30;
+vorbis `0657aee6`, f58777e598c5ef1c9f21698e581f6e62729f3d343ec4aa270051fb304a56fe26. Built for ILP32 directly (no
+autotools); the game link uses `-DFNVNX_HAVE_VORBIS -lvorbisfile -lvorbis -logg`.
+
+### Full game link (`toolchain/game/build.sh`)
+
+Inputs: S2's fixed objects (2,069, already with `zz_bridges.o`, `zz_addrmap.o`) + `aliases.ld`, platform/ (win32,
+crt, audio, input) on the guest backend, S3's loader, the null D3D9 device (`D3D9=null`, default; `D3D9=external`
+leaves Direct3DCreate9 to render/nine via `EXTRA_OBJS`), `boot.cpp`. Two passes: collect undefined symbols, then
+bind each to a generated trap stub (`mktraps.py`) that logs its name and returns 0 (or stops,
+`-DFNVNX_TRAPS_FATAL`). Output `fnvnx.elf` (text 7.3 MB, data 0.4 MB, bss 1.1 MB) -> `guest.nso` (4.1 MB); the host
+NSO and NPDM are the hello world's (the host loads `sdmc:/fnvnx/guest.nso`).
+
+* `platform_adapt.sh`: S1's current shim declares `Interlocked*` with C++ linkage and adds `void*` overloads of the
+  critical-section/QueryPerformance functions, which breaks S4's `sync.cpp` and `exports.cpp` (and S4/S7's host test
+  builds). The game build compiles patched copies; the upstream fix is described in the script. `w32_c_aliases.c`
+  adds C-linkage Interlocked* for units that still use the C names.
+* `null_d3d9.cpp` is generated (`gen_null_d3d9.py`) from `shim/include/d3d9.h`: 20 interfaces, 434 methods; every call
+  succeeds, out-interfaces get null objects carrying their Create* sizes/format, Lock* return scratch memory, caps
+  describe a 1280x720 X8R8G8B8 SM3 device.
+
+Undefined after the link (`undefined_report.txt`, `undef_report.py`): **11,419** symbols
+
+| count | category | owner |
+|---:|---|---|
+| 7,300 | `__fnv_<addr>` of image .text addresses with no native definition (units not compiled or not matched) | S1/S2 |
+| 2,331 | C++ functions/variables declared but never defined (header inlines/templates the decomp leaves out, e.g. `NiPointer<QueuedFile>::NiPointer`, `BaseFormComponent::Init`) | S1/S2 |
+| 984 | Ghidra `FUN_xxxxxxxx` placeholder functions (should resolve by address) | S2 |
+| 610 | vtables/typeinfo whose key function is not compiled | S1 |
+| 93 | other C names (`FNV_DynamicCast`, `__RTDynamicCast`, `__CxxThrowException`, `_ReadWriteBarrier`, MemSet*...) | S4/S8 |
+| 53 | Ghidra `DAT_`/`PTR_` data placeholders | S2 |
+| 20 | D3DX9 functions | S6 |
+| 18 | C runtime / MSVC helpers | S4 |
+| 6 | MSVC std:: internals (`basic_string::_Xlen`, `_Copy`) | S4 |
+| 2+1+1 | Win32 by plain name (`GetSharedBuffer`, `WSAStartup`), Steam, SSE builtin | S4/S8 |
+
+WinMain (`0x0086a850`, `src/fallout/misc/main.cpp`) is **not in the link**: that unit does not compile (only its
+`_o2`/`_rtm` variants), so `boot.cpp` stops before calling it in any case.
+
+### Host-side boot gate (`tests/s5/emu_guest.py guest.nso --elf fnvnx.elf`)
+
+The fully linked guest runs under Unicorn with the Python host (files from a local dir, cooperative threads, null
+D3D9). `boot.cpp` does platform init and the S3 loader in a priority-101 constructor, **before** the game's static
+initialisers (they read and write the data image). Without the player's exe it maps an empty (zero) image window
+`0x00400000..0x02100000` (trace mode). Result: early init OK, the empty image is mapped, the game's static
+initialisers start and run through **188 distinct unresolved-symbol traps** (each logged, returning 0), then fault
+writing through a null pointer in `FUN_00404d00_class::FUN_00404d00_class` [orig 00404d00] <- `FUN_00404b90(int)`
+[00404b90] <- `FUN_00404b10_class::Initialize` [00404b10] <- `EnsureSpawnedObj` [00404a80] <-
+`GetGameSettingCollection` [00404a70] <- `FUN_0040c150(int,int)` [0040c150] <- a static initialiser. The null comes
+from the empty image (a global the real exe provides) or a trapped allocator returning 0. Not reached: WinMain.
+
+What blocks a boot, in order: (1) the player's `FalloutNV.exe` in `sdmc:/fnvnx/game/` (data image; the emulator run
+had none); (2) the 7,300 + 984 + 53 address references without native code, among them whatever the static
+initialisers call; (3) WinMain's unit; (4) S4's CRT start running the image's `__xi`/`__xc` tables (not done:
+`boot.cpp` TODO); (5) D3DX9 and the vtables/typeinfo of uncompiled classes.
+
 ## 7. Not yet done / untested
 
 * Nothing has run on hardware. Untested: ldr accepting the 64-bit + `32BitNoReserved` NPDM as an application
   exefs override, libnx console/services in a 32-bit space, the heap cap, the own-process-handle trick and
   `svcMapProcessCodeMemory` at a fixed address in this process type.
 * The guest has only run under Unicorn with a Python host.
-* Guest threads, locks, file I/O, C++ (libstdc++ ILP32 is built but not yet linked by anything), exceptions,
-  debugger symbols for the ELF32 module; claiming the reserved range and restart on collision.
+* Debugger symbols for the ELF32 module; claiming the reserved range and restart on collision.
+* The host v2/v3 implementations (threads, wait/wake, files, audren, hid, map_fixed, ext_call) compile but have
+  not run; the emulator's Python host stands in for them.
+* S4/S7 test suites have not been run inside the guest (dropped for the full-link priority).

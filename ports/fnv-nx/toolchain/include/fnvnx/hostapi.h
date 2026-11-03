@@ -21,7 +21,7 @@
 
 #define FNVNX_HOSTAPI_MAGIC   0x48584e46u /* "FNXH" */
 #define FNVNX_GUEST_MAGIC     0x47584e46u /* "FNXG", at guest text + 8 */
-#define FNVNX_HOSTAPI_VERSION 2u
+#define FNVNX_HOSTAPI_VERSION 3u
 
 /* Function slots: host addresses of LP64 functions with the signature given in the comment
  * (all parameters uint64_t, result uint64_t). */
@@ -83,7 +83,38 @@ typedef struct FnvnxHostApi {
     uint64_t fs_dir_open;          /* (path) -> dir id (!= 0) or 0 */
     uint64_t fs_dir_next;          /* (dir, buf, cap) -> name length (without NUL), 0 at end; skips . and .. */
     uint64_t fs_dir_close;         /* (dir) -> 0 */
+
+    /* ---- version 3: audio out and input (platform/audio, platform/input via toolchain/guest/platform_glue) */
+    uint64_t audio_open;           /* (rate = 48000, period frames) -> 0 or negative; stereo PCM16 */
+    uint64_t audio_submit;         /* (pcm, frames = period) -> 0; blocks until the device takes it */
+    uint64_t audio_close;          /* () -> 0 */
+    uint64_t pad_read;             /* (index 0..3, fnvnx_pad_raw *) -> 1 connected, 0 not */
+    uint64_t pad_vibrate;          /* (index, float bits low, float bits high) -> 0; amplitudes 0..1 */
+    uint64_t input_poll;           /* (FnvnxInputEvent *, cap) -> events since the last poll */
+    uint64_t map_fixed;            /* (addr, size, src) -> 0 or Result: makes [addr, addr+size) RW memory at exactly
+                                      addr by svcMapMemory from src, a page-aligned guest heap block of the same
+                                      size (it becomes inaccessible); addr in the small map, page aligned */
+    uint64_t ext_call;             /* (module, fn, const uint64_t *args, nargs) -> handler result, or
+                                      FNVNX_EXT_NO_MODULE. Generic extension point: host-side modules (e.g. the
+                                      D3D9 proxy of render/nine) register with fnvnx_host_register_ext() */
 } FnvnxHostApi;
+
+#define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
+/* Host side (LP64) only: register a handler for one module id (< 64); returns 0, or -1 if taken/out of range. */
+typedef uint64_t (*fnvnx_ext_handler)(uint32_t fn, const uint64_t *args, uint32_t nargs);
+int fnvnx_host_register_ext(uint32_t module, fnvnx_ext_handler handler);
+
+/* input_poll events */
+#define FNVNX_EV_KEY          1    /* code = USB HID usage, a = down */
+#define FNVNX_EV_MOUSE_MOVE   2    /* a = dx, b = dy, c = wheel */
+#define FNVNX_EV_MOUSE_BUTTON 3    /* code = button 0.., a = down */
+#define FNVNX_EV_TOUCH        4    /* code = finger id, a = x, b = y (one per finger of the current frame) */
+#define FNVNX_EV_TOUCH_END    5    /* code = finger count: end of a touch frame */
+typedef struct FnvnxInputEvent {
+    uint32_t type, code;
+    int32_t a, b, c;
+    uint32_t reserved;
+} FnvnxInputEvent;
 
 /* fs_open flags and fs_seek whence (same values as platform/os/os.h OS_O_* / OS_SEEK_*). Errors are negated
  * errno values as in os.h (OS_ENOENT 2, ...). */
@@ -106,11 +137,13 @@ typedef struct FnvnxMemInfo {
 } FnvnxMemInfo;
 
 #if defined(__cplusplus)
-static_assert(sizeof(FnvnxHostApi) == 0x180, "FnvnxHostApi layout");
-static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16, "shared struct layout");
+static_assert(sizeof(FnvnxHostApi) == 0x1C0, "FnvnxHostApi layout");
+static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(FnvnxInputEvent) == 24,
+               "shared struct layout");
 #else
-_Static_assert(sizeof(FnvnxHostApi) == 0x180, "FnvnxHostApi layout");
-_Static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16, "shared struct layout");
+_Static_assert(sizeof(FnvnxHostApi) == 0x1C0, "FnvnxHostApi layout");
+_Static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(FnvnxInputEvent) == 24,
+               "shared struct layout");
 #endif
 
 /* Guest entry: the host calls the guest module base as   uint64_t entry(uint64_t api)   where api is the

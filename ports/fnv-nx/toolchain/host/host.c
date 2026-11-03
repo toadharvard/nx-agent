@@ -62,8 +62,18 @@ void __libnx_initheap(void) {
 }
 
 /* ---- logging ------------------------------------------------------------------------------------------- */
+/* Build with -DFNVNX_HOST_NO_CONSOLE when graphics owns the display (render/nine): no libnx text console;
+ * output goes to sdmc:/fnvnx/host.log and svcOutputDebugString only. */
+#ifdef FNVNX_HOST_NO_CONSOLE
+#define consoleInit(x) ((void)0)
+#define consoleUpdate(x) ((void)0)
+#define consoleExit(x) ((void)0)
+#endif
+
 static void out(const char *buf, size_t len) {
+#ifndef FNVNX_HOST_NO_CONSOLE
     fwrite(buf, 1, len, stdout);
+#endif
     if (g_log) { fwrite(buf, 1, len, g_log); fflush(g_log); }
 }
 
@@ -97,6 +107,7 @@ static u64 h_system_tick(void) { return armGetSystemTick(); }
 static u64 h_system_tick_freq(void) { return armGetSystemTickFreq(); }
 
 #include "host_v2.inc"
+#include "host_v3.inc"
 
 /* ---- process layout ------------------------------------------------------------------------------------ */
 static const char *as_name(void) {
@@ -303,7 +314,7 @@ int main(int argc, char **argv) {
             .exit = (u64)h_exit, .console_write = (u64)h_console_write, .console_flush = (u64)h_console_flush,
             .main_loop = (u64)h_main_loop, .buttons_down = (u64)h_buttons_down,
             .system_tick = (u64)h_system_tick, .system_tick_freq = (u64)h_system_tick_freq,
-            FNVNX_HOSTAPI_V2_SLOTS
+            FNVNX_HOSTAPI_V2_SLOTS FNVNX_HOSTAPI_V3_SLOTS
         };
         u64 (*entry)(u64) = (u64 (*)(u64))gbase;
         rc = entry((u64)&g_api);

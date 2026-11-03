@@ -32,7 +32,7 @@ from unicorn import UC_ARCH_ARM64, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_MODE_AR
     UC_PROT_READ, UC_PROT_WRITE, Uc, UcError  # noqa: E402
 from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, \
-    UC_ARM64_REG_X4  # noqa: E402
+    UC_ARM64_REG_X4, UC_ARM64_REG_X29  # noqa: E402
 
 PAGE = 0x1000
 HOST_PAGE = 0x3F000000          # host API table + stubs (below 4 GiB, as every address in a 32-bit AS)
@@ -48,7 +48,9 @@ SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_fl
          "tz_offset_minutes", "random64", "memory_info", "cpu_count",
          "fs_open", "fs_read", "fs_write", "fs_pread", "fs_pwrite", "fs_seek", "fs_truncate", "fs_sync",
          "fs_fstat", "fs_close", "fs_stat", "fs_mkdir", "fs_rmdir", "fs_remove", "fs_rename", "fs_dir_open",
-         "fs_dir_next", "fs_dir_close"]
+         "fs_dir_next", "fs_dir_close",
+         "audio_open", "audio_submit", "audio_close", "pad_read", "pad_vibrate", "input_poll", "map_fixed",
+         "ext_call"]
 API_SIZE = 0x30 + 8 * len(SLOTS)
 U64 = (1 << 64) - 1
 
@@ -102,7 +104,7 @@ class Emu:
         uc.mem_map(HEAP_BASE, HEAP_SIZE, UC_PROT_READ | UC_PROT_WRITE)
         uc.mem_map(HOST_PAGE, PAGE, UC_PROT_ALL)
         self.stubs = {HOST_PAGE + 0x800 + 4 * i: name for i, name in enumerate(SLOTS)}
-        api = struct.pack("<IIII", 0x48584E46, 2, API_SIZE, 0)
+        api = struct.pack("<IIII", 0x48584E46, 3, API_SIZE, 0)
         api += struct.pack("<QQQQ", base, size, HEAP_BASE, HEAP_SIZE)
         api += b"".join(struct.pack("<Q", a) for a in self.stubs)
         assert len(api) == API_SIZE
@@ -408,6 +410,87 @@ class Emu:
         self.dirs.pop(d, None)
         return 0
 
+    # v3 audio / input / memory / extensions
+    def h_audio_open(self, rate, period, *_):
+        self.audio_period = period
+        return 0 if rate == 48000 else U64
+
+    def h_audio_submit(self, pcm, frames, *_):
+        self.audio_frames = getattr(self, "audio_frames", 0) + frames
+        return (("sleep", self.now_ns() + frames * 1_000_000_000 // 48000), 0)
+
+    def h_audio_close(self, *_):
+        return 0
+
+    def h_pad_read(self, i, out, *_):
+        self.uc.mem_write(out, bytes(32))
+        return 0
+
+    def h_pad_vibrate(self, *_):
+        return 0
+
+    def h_input_poll(self, *_):
+        return 0
+
+    def h_map_fixed(self, addr, size, src, *_):
+        try:
+            self.uc.mem_map(addr, size, UC_PROT_READ | UC_PROT_WRITE)
+        except UcError:
+            return 1
+        self.mapped_fixed = getattr(self, "mapped_fixed", []) + [(addr, size)]
+        return 0
+
+    def h_ext_call(self, *_):
+        return 0xFFFFFFFFFFFFFF01
+
+    # -- crash trace: PC/LR and the frame-record chain (x29), symbolized with --elf (S2's __fnv_<addr> aliases
+    # give the original FalloutNV.exe address of each native function)
+    def load_symbols(self, elf):
+        import bisect
+        import subprocess
+        out = subprocess.run(["aarch64-linux-gnu-nm", "-n", "--defined-only", elf], capture_output=True, text=True).stdout
+        by_addr = {}
+        for line in out.splitlines():
+            f = line.split()
+            if len(f) == 3 and f[1] in "tTwW":
+                a = int(f[0], 16)
+                by_addr.setdefault(a, []).append(f[2])
+        self.sym_addrs = sorted(by_addr)
+        self.sym_names = [by_addr[a] for a in self.sym_addrs]
+        self._bisect = bisect.bisect_right
+
+    def sym(self, a):
+        if not getattr(self, "sym_addrs", None):
+            return f"{a:#x}"
+        i = self._bisect(self.sym_addrs, a) - 1
+        if i < 0:
+            return f"{a:#x}"
+        names = self.sym_names[i]
+        orig = [n for n in names if n.startswith("__fnv_") and len(n) >= 14]
+        native = [n for n in names if not n.startswith("__fnv_")]
+        label = (native[0] if native else names[0])
+        if orig:
+            label += f" [orig {orig[0][6:14]}]"
+        return f"{a:#x} {label}+{a - self.sym_addrs[i]:#x}"
+
+    def trace(self, why):
+        uc = self.uc
+        pc, lr, fp = uc.reg_read(UC_ARM64_REG_PC), uc.reg_read(UC_ARM64_REG_LR), uc.reg_read(UC_ARM64_REG_X29)
+        print(f"== trace ({why}), thread {self.cur.tid if self.cur else '?'}")
+        print(f"   pc  {self.sym(pc)}")
+        print(f"   lr  {self.sym(lr)}")
+        for i in range(40):
+            if not fp or fp & 7:
+                break
+            try:
+                nfp, ret = struct.unpack("<QQ", uc.mem_read(fp, 16))
+            except UcError:
+                break
+            print(f"   #{i:<2} {self.sym(ret)}")
+            if nfp <= fp:
+                break
+            fp = nfp
+
     # -- scheduler
     def pick(self):
         live = [self.threads[t] for t in self.order]
@@ -440,7 +523,7 @@ class Emu:
         uc.reg_write(UC_ARM64_REG_LR, RETURN_ADDR)
         uc.reg_write(UC_ARM64_REG_TPIDR_EL0, 0xDEAD0000)
         main.ctx, main.resume_pc, main.state, main.result = uc.context_save(), self.base, "ready", HOST_PAGE
-        budget = 400_000_000
+        budget = getattr(self, "budget", 400_000_000)
         while self.exit_code is None:
             t = self.pick()
             if t is None:
@@ -457,12 +540,17 @@ class Emu:
             try:
                 uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
             except UcError as e:
+                self.trace(f"fault: {e}")
                 raise SystemExit(f"emulation fault at pc={uc.reg_read(UC_ARM64_REG_PC):#x} thread {t.tid}: {e}")
+            if self.exit_code is not None:
+                self.tp_after = 0xDEAD0000 if t.tid != 1 else uc.reg_read(UC_ARM64_REG_TPIDR_EL0)
+                break
             if self.cur is t:      # stopped by reaching RETURN_ADDR (main returned) or the budget
                 if uc.reg_read(UC_ARM64_REG_PC) == RETURN_ADDR and t.tid == 1:
                     self.exit_code = uc.reg_read(UC_ARM64_REG_X0)
                     self.tp_after = uc.reg_read(UC_ARM64_REG_TPIDR_EL0)
                     break
+                self.trace("instruction budget exhausted")
                 raise SystemExit(f"thread {t.tid} ran out of instruction budget at {uc.reg_read(UC_ARM64_REG_PC):#x}")
         return self.exit_code
 
@@ -473,6 +561,8 @@ def main(argv):
     ap.add_argument("--expect", default="fnvnx guest: OK")
     ap.add_argument("--root", help="host directory for sdmc:/ (default: a fresh temp dir)")
     ap.add_argument("--file", action="append", default=[], help="NAME=PATH: copy PATH to sdmc:/NAME first")
+    ap.add_argument("--elf", help="guest ELF for symbolized crash traces")
+    ap.add_argument("--budget", type=int, default=400_000_000, help="instructions per scheduling slice")
     a = ap.parse_args(argv)
     root = a.root or tempfile.mkdtemp(prefix="fnvnx-emu-")
     for spec in a.file:
@@ -481,7 +571,15 @@ def main(argv):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
     emu = Emu(a.nso, root)
-    rc = emu.run()
+    emu.budget = a.budget
+    if a.elf:
+        emu.load_symbols(a.elf)
+    try:
+        rc = emu.run()
+    except SystemExit as e:
+        print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
+        print(f"STOPPED: {e}")
+        return 1
     out = emu.console.decode(errors="replace")
     tp_ok = getattr(emu, "tp_after", None) == 0xDEAD0000
     print(f"== guest at {emu.base:#010x}: rc={rc:#x} host_calls={emu.calls} threads={len(emu.threads)} "

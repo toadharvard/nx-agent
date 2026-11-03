@@ -171,7 +171,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     __libc_init_array();
     static char arg0[] = "fnvnx-guest";
     static char *argv[] = { arg0, NULL };
-    int rc = main(1, argv);
+    extern int fnvnx_guest_main(int, char **) __attribute__((weak));
+    int rc = fnvnx_guest_main ? fnvnx_guest_main(1, argv) : main(1, argv);
     fflush(stdout);
 
     __asm__ volatile("msr tpidr_el0, %0" :: "r"(saved_tp) : "memory");
