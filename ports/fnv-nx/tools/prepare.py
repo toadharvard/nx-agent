@@ -242,7 +242,8 @@ CRT_HEADERS = {
     '<math.h>': 'fabs fabsf sqrt sqrtf sin sinf cos cosf tan tanf asin asinf acos acosf atan atanf atan2 atan2f exp '
                 'expf log logf log10 log10f pow powf floor floorf ceil ceilf fmod fmodf modf frexp ldexp',
     '<ctype.h>': 'toupper tolower isspace isdigit isalpha isalnum isupper islower',
-    '': '_alloca _ReadWriteBarrier _ReadBarrier _WriteBarrier',   # in the force-included fnvnx_compat.h
+    '': '_alloca _ReadWriteBarrier _ReadBarrier _WriteBarrier _CxxThrowException operator_delete_sized '
+          '_operator_delete_sized',   # in the force-included fnvnx_compat.h
 }
 CRT_NAMES = [n for v in CRT_HEADERS.values() for n in v.split()]
 MACRO_NAMES = {'_alloca'}     # macros on the target (fnvnx_compat.h): no using-declaration possible

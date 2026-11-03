@@ -126,4 +126,17 @@ template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribu
 #define __fnvnx_ds_property(...)
 #define __fnvnx_ds_uuid(...)
 
+/* Compiler-runtime helpers the decomp calls without declaring them in every unit (prepare.py DECL1 drops its own
+ * unsigned-int prototypes of operator_delete_sized). */
+#ifdef __cplusplus
+struct _ThrowInfo;
+extern "C" void _CxxThrowException(void *, _ThrowInfo *);
+extern "C" void operator_delete_sized(void *, __SIZE_TYPE__);
+extern "C" void _operator_delete_sized(void *, __SIZE_TYPE__);
+#endif
+
+/* x87 helper names (fnv_FloatToInt, fnv_SinCos, ...) for units that call them without the decomp's helper header */
+#define FNVNX_ASM_FNV_HELPERS
+#include "fnvnx_asm.h"
+
 #endif
