@@ -722,3 +722,16 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   intercepted by original address; compare return values, memory writes and call traces (user's idea).
 * **did** - Opened S12-static-checks and S13-difffuzz (S13 reuses S11's MSVC setup).
 * **next** - S13 campaign on leaf functions, then functions with intercepted calls.
+
+### J-0036 | 2026-11-03 | stream: S0-arch | status: done | parent: J-0035
+
+* **decided** - D12: the pristine decomp built with MSVC 2008 is the exe's **code** (byte-identical by the decomp's
+  guarantee), so every task that needed "the original code" no longer waits for the player's exe: S1b per-site ABI
+  patches (read the x86 code at each of the 74 inconsistent declarations / 37 arg-less `_ftol2`/`_CIsqrt` sites),
+  the NiCriticalSection 24-vs-28-byte question (field offsets in the methods' code), S2b vtable slots (MSVC emits the
+  vftables `??_7` from the class declarations; check slot offsets against the virtual calls in matched code), a
+  lockstep differential boot (x86 units under Unicorn x86 vs our AArch64 build, same data world, compare call
+  traces by original address), a near-real synthetic image for S3's code-pointer scanner. Still needs the exe: the
+  initial values of global data (`.data`/`.rdata` beyond what objects emit), the 56 functions with no body, game
+  assets.
+* **next** - start S1b, S2b and the lockstep boot once S11 reports a working MSVC 2008 (user's observation).
