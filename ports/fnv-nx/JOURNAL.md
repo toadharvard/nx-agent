@@ -677,3 +677,23 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   boot_reached=main game_undefined=11678 hw_tests=0
 * **next** - WinMain's unit (compiles since J-0025) into the object set; XC1 objects; `.text`-defined tables (S1/S2);
   TLSIE on absolute symbols (S2); traced boot with the player's exe.
+
+### J-0033 | 2026-11-03 | stream: S6c-nine | status: wip | parent: J-0031
+
+* **did** - D3DX9 for the guest (`render/nine/d3dx/`): the 22 D3DX symbols the game links (math,
+  `D3DXVec3TransformNormal`, ID3DXBuffer, CTAB constant tables with lookups and setters, profiles, compile/assemble
+  returning an error buffer, DDS 2D/cube/volume loaders copying levels straight into LockRect/LockBox with DXT kept
+  compressed, LoadSurfaceFromMemory/FromSurface). Nine patch 0007: MANAGED textures and VB/IB created as DEFAULT
+  resources without the system-memory copy (still reported MANAGED; `NINE_MANAGED_SYSMEM=1` restores the copy).
+  Gate launcher (`render/nine/gate/launcher.c`, PIE embedding python) so the game gate shares the image window at
+  identical addresses in host and emulator. `HEAPLOG_S=<s>` periodic guest/host heap lines in host.log.
+* **found** - Game link: 0 D3DX undefined (8,925 undefined in total on S2c's 21:06 snapshot). 0007: a 2048x2048
+  ARGB MANAGED texture costs +16.0 MiB instead of +32.0 MiB. Test gate PASS with D3DX checks, lock-after-draw,
+  Reset + EvictManagedResources (244 frames, 75.8 MiB arena peak); game gate PASS through the launcher with the
+  image window checked both ways. For S2: thunk `FUN_00ee6df2` is compiled as `void(void)` and clobbers x0 (bind
+  `__fnv_00ee6df2` directly to `D3DXVec3TransformNormal`); `FUN_00ee6e04` declares float angles as unsigned.
+* **decided** - Heap split candidate C (host 768 / guest 1280 MiB) becomes the default target now that MANAGED
+  copies are gone; confirm with hardware heap logs.
+* **metrics** - d3dx_undefined=0 game_undefined=8925 managed_tex_2k_mib=16.0 test_gate=pass game_gate=pass
+  gate_arena_peak_mib=75.8
+* **next** - hardware run of test + game with `HEAPLOG_S=60`.
