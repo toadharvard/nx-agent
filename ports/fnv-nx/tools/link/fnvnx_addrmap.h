@@ -17,9 +17,23 @@ struct fnvnx_addrmap_entry {
 
 extern const struct fnvnx_addrmap_entry fnvnx_addrmap[];
 extern const unsigned fnvnx_addrmap_count;
-/* kind of entry i: F function, C ctor (C1), X dtor (D1), G MSVC deleting dtor (-> D0), V image vftable (native =
- * Itanium vtable address point of the same class), E referenced .text address without definition (native = 0). */
+/* kind of entry i: F function, C ctor (C1), X dtor (D1), G MSVC deleting dtor (-> D0), V image vftable, primary or
+ * secondary (native = Itanium vtable address point of the same class / base-class subobject), E referenced .text
+ * address without definition (native = 0). */
 extern const char fnvnx_addrmap_kinds[];
+
+/* One per G entry of fnvnx_addrmap, sorted by orig: the two Itanium destructors behind an MSVC scalar/vector deleting
+ * destructor void *??_G(void *this, unsigned flags). d0 (== the entry's native) destroys and deletes, d1 destroys
+ * only (NULL if the native build has no D1 for it). flags bit 0 set -> d0(this), clear -> d1(this); bit 1 (vector
+ * delete) has no Itanium counterpart. */
+struct fnvnx_addrmap_deldtor {
+    unsigned int orig;
+    void *d1;
+    void *d0;
+};
+
+extern const struct fnvnx_addrmap_deldtor fnvnx_addrmap_deldtors[];
+extern const unsigned fnvnx_addrmap_deldtor_count;
 
 #ifdef __cplusplus
 }

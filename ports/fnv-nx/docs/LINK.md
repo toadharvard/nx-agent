@@ -18,7 +18,10 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
      canonical parameter types (MSVC `__int64` -> `long long`, top-level cv dropped, blanks normalized), cv of the
      method, calling convention, member/static, return type.
    * **Definitions**: each unit's `functions` are matched against the symbols its object defines (same keys);
-     ctor/dtor variants are kept (`??0` -> C1/C2, `??1` -> D1/D2, `??_G`/`??_E` -> D0).
+     ctor/dtor variants are kept (`??0` -> C1/C2, `??1` -> D1/D2, `??_G`/`??_E` -> D0). The MSVC-only dynamic
+     initializers and atexit destructors (`??__E`, `??__F`) that prepare rule XC1 turns into `extern "C"`
+     `__fnvnx_dyninit_<addr>` / `__fnvnx_dynexit_<addr>` (docs/STARTUP.md) are bound to their address by that name
+     (kind `F`; S3 then rewrites the image's `__xc` slots and `??__F` references to them).
    * **References**: each undefined symbol of an object is looked up, strict to loose, in that unit's names
      (`symbols` and `functions`): `exact` (name, params, cv) -> `l1` (`long` == `int`, `wchar_t` ==
      `unsigned short`: the ILP32 `size_t` / MSVC typedef differences) -> `l2` (cv ignored) -> `arity` -> `name`;
@@ -32,9 +35,14 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
 3. **apply** - `fnvlink.py apply out/ fixed/`: per object, objcopy adds the address symbols of its definitions,
    localizes duplicate strong names and turns natively defined variables into weak address symbols; then the
    undefined symbols are renamed (`elfsyms.rename_undefined`: objcopy `--redefine-syms` refuses several old names
-   for one new name, which is the normal case here). Assembles `bridges.S`, compiles `addrmap.c`.
+   for one new name, which is the normal case here). In game objects (units and their synthesized vtables, not
+   override/platform objects) `__cxa_atexit` becomes `fnvnx_xc_cxa_atexit`, so GCC's static destructors go into
+   the game's onexit table (STARTUP.md). Assembles `bridges.S`, compiles `addrmap.c`.
    Between two resolve runs, **probe** - `fnvlink.py probe out/ tree/` - measures the aggregates the ABI verdicts
-   need (`probe_requests.tsv` -> `layouts.tsv`, section "Layouts"); the second resolve decides on bytes.
+   need (`probe_requests.tsv` -> `layouts.tsv`, section "Layouts"); the second resolve decides on bytes. The same
+   step synthesizes the vtables and typeinfo no compiled object emits (`vtable_requests.tsv` -> `vtables/`, section
+   "Vtables"), which the second resolve links as extra objects; `fnvlink.py vtables out/ tree/` runs only that part,
+   `FNVNX_NO_VTABLES=1` leaves it out of `probe`.
 4. **check** - `fnvlink.py check out/ fixed/`: trial link of everything with `aliases.ld`; counts what is still
    undefined and any multiple definitions.
 
@@ -54,6 +62,8 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
 | `out/extern_text.tsv` | `.text` addresses referenced but defined by no unit (CRT, thunks; stream S4), with the names used. |
 | `out/data_defs.tsv` | Variables a unit defines natively at a data-image address. |
 | `out/addrmap.tsv`, `out/addrmap.c` | The address map (next section). |
+| `out/vtable_requests.tsv`, `out/rtti_defined.txt` | What resolve asks the vtable synthesis for (class, C++ spelling, why, host units), and the vtable/typeinfo/thunk names compiled objects define (never synthesized). Both from the compiled objects only, so a rerun asks the same. |
+| `out/vtables/` | `synth.tsv` (host unit, synthesized object, classes), `classes.tsv` (result per requested class), `stats.txt`, `<unit>.vt.S` + `zz_vt_<unit>.o`, the probe sources and objects, `cache.json` (probe results per host unit and source mtime). |
 | `out/stats.txt` | The numbers below. |
 
 Natively defined variables at data-image addresses (global objects with constructors, mostly the generated
@@ -63,26 +73,40 @@ the image copy, and the native static initializer constructs the object in place
 ## Address map (for the data-image loader, S3)
 
 `addrmap.tsv`, format version 1: UTF-8, `\t`-separated, `#` comment lines, sorted by address, one line per
-original code address the native build defines:
+original address (never two lines for one address):
 
     # fnvnx-addrmap 1
-    # address	kind	link_symbol	native_symbol	object	note
+    # address	kind	link_symbol	native_symbol	object	note	offset	d1_symbol	d1_native
     00a7fc00	F	__fnv_00a7fc00	_ZN17NiRenderedTexture6CreateE...	src_NiRenderedTexture.cpp.o
 
 * `address` - 8 lower-case hex digits, address in FalloutNV.exe 1.4.0.525.
 * `kind` - `F` function, `C` constructor (complete-object variant), `X` destructor (complete-object variant),
   `G` MSVC deleting destructor (`??_G`/`??_E`, takes a flags argument) mapped to the Itanium deleting destructor
   (D0, no flags, always deletes): a code pointer to it in the image is only safe where the flags are 1;
-  `V` image vftable (`??_7Class@@6B@` named by some unit): native = Itanium vtable address point of the class of
-  the same name (`_ZTV<Class>` + 8 on ILP32; primary vftables only, classes whose `_ZTV` is emitted somewhere);
+  its complete-object destructor D1 is in `d1_symbol` and `fnvnx_addrmap_deldtors` (below);
+  `V` image vftable named by some unit, primary (`??_7C@@6B@`) or secondary (`??_7C@@6B<B>@@@`,
+  ``C::`vftable'{for `B'}``): native = `link_symbol` + `offset`, the Itanium address point of C's own vtable or of
+  the vtable of its base-class subobject B, compiled or synthesized (section "Vtables");
   `E` referenced `.text` address that no unit defines (CRT, thunks): native = 0, the loader traps it.
 * `link_symbol` - the symbol to take the address of (`__fnv_<addr>`, `_ZTV...` for `V`, empty for `E`).
-* `native_symbol`, `object` - for people; `note` - free text (`static in its unit`, the `G` caveat).
+* `native_symbol`, `object` - for people; `note` - free text (`static in its unit`, the `G` caveat, which base a
+  secondary `V` stands for, `synthesized`).
+* `offset` (`V` only) - byte offset of the address point from `link_symbol`: 8 for a primary vftable (ILP32: after
+  offset-to-top and typeinfo, the rule before this column existed), more for a secondary one.
+* `d1_symbol`, `d1_native` (`G` only) - link symbol (`__fnv_<addr>_D1`, or `_D2`, identical without virtual bases)
+  and Itanium name of the same class's complete-object destructor; empty when the native build has none.
+
+Columns 7-9 were added after the first readers: they are empty where they do not apply, and readers that use the
+first six columns see the same rows as before (plus more `V` rows).
 
 The runtime form is `addrmap.c` (`fnvnx_addrmap_entry {unsigned orig; void *native;}`, sorted by `orig`,
 `fnvnx_addrmap_count` entries, `fnvnx_addrmap_kinds[i]` the kind letter of entry *i*; header
 `tools/link/fnvnx_addrmap.h`), linked into the program so the loader can
 binary-search it when it rewrites code pointers in `.rdata`/`.data` (vtables of the image, callback tables).
+`fnvnx_addrmap_deldtors[]` (`{unsigned orig; void *d1; void *d0;}`, `fnvnx_addrmap_deldtor_count`, sorted, one per
+`G` entry, `d0` == the entry's native) gives both destructors behind an MSVC `??_G(this, flags)`: bit 0 set -> `d0`,
+clear -> `d1`, so the kind-`G` adapter needs no vtable search (which cannot work for abstract classes: GCC stores 0
+in both destructor slots of their vtables).
 Addresses absent from the map are either not compiled yet, CRT/thunks (`extern_text.tsv`), or mid-function; the
 loader should point them at a trap that reports the address. Bridges never appear in the map: a pointer taken
 from the image is called with the convention of the definition.
@@ -162,6 +186,52 @@ temporaries (x86 saw a bitwise copy too); ownership stays with the caller. `test
 register-result conversion, pointer vs non-trivial holder, fastcall edx dummy with stack arguments) under
 qemu-aarch64 against C++ definitions, with layouts from the real probe.
 
+## Vtables (`vtables.py`, kind `V`, D7)
+
+Objects only ever hold Itanium vptrs (DATAIMAGE.md D7); an image vftable address stands for the Itanium address
+point of the same class, which the address map gives S3.
+
+**Image vftable -> address point.** units.json names vftables as `??_7C@@6B@` (``C::`vftable'``) or, for a class
+with several vftables, `??_7C@@6B<B>@@@` (``C::`vftable'{for `B'}``, B the base whose subobject holds that vfptr;
+the first one is the primary vftable). One decorated name can stand for different addresses in different units
+(local reconstructions), so the pairs are (name, address). The native side is the vtable group `_ZTV<C>` the linker
+keeps (the first definition in link order: GCC emits vtables weak/COMDAT), read with its relocations: each vtable of
+the group follows an (offset-to-top, typeinfo) pair. B's offset in C comes from the typeinfo base lists
+(`__si_class_type_info` / `__vmi_class_type_info`), those of the object whose vtable is used first (units do not
+always agree on a class), searched breadth-first along non-virtual paths, the shallowest match; the address point is
+the vtable of the group whose offset-to-top is minus that offset (the primary one for offset 0). Where several decomp
+classes name one vftable (`FUN_...` shells beside the real class), the vtable with more slots at that address point
+wins (a call through a rewritten image vptr must find its slot), then a compiled one over a synthesized one, then a
+name other than `FUN_...`.
+
+**Synthesized vtables and typeinfo.** Resolve asks (`vtable_requests.tsv`) for the classes that have an image vftable
+but no `_ZTV` in any compiled object, and for every `_ZTV`/`_ZTI` a compiled object references and none defines (key
+function not compiled or never defined, inline-only classes never constructed), each with the units that can name it
+(units referencing it first). For each class a probe translation unit on such a host unit (greedy cover, up to three
+hosts per class) includes the unit and declares
+
+    namespace __fnvnx_vt { struct V<k> : C { virtual void __fnvnx_key(); }; void V<k>::__fnvnx_key() {} }
+
+so that GCC emits V<k>'s vtable group: C's group plus the key slot at the end of the primary vtable, with V<k>'s
+typeinfo and implicit destructors (D1/D0 and their thunks) where C's stand. Dropping the slot and renaming those gives
+the group GCC emits for C, word for word (`test_vtables.py` compares with GCC's own output; abstract and key-function
+classes alike, C need not be constructible). The typeinfo is built from `std::tr2::direct_bases<C>` (GCC's
+`__direct_bases`): per base its `type_info` symbol (`typeid`), offset (the folded constant `(B *)(C *)4096`, minus
+4096) and public-ness (`std::is_convertible<C *, B *>`); repeated bases in `std::tr2::bases<C>` set
+`__non_diamond_repeat_mask`; GCC's choice of `__class` / `__si` (one public non-virtual base at offset 0) / `__vmi`.
+A base typeinfo no object defines is probed in the next round. Classes with virtual bases (no constant offset; VTT,
+construction vtables, virtual thunks) and anonymous-namespace classes are not synthesized. Errors in the probe drop
+only the items GCC names (or the class), and the class moves to its next host.
+
+Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the compiled objects): weak `_ZTV`, `_ZTI`,
+`_ZTS` for names no compiled object defines, and the non-virtual thunks (`_ZTh[n]<k>_f`: `sub`/`add w0`, tail call
+`b f`) no object defines (GCC emits a thunk next to each out-of-line definition, so few are needed). The second
+resolve links each as an extra object of its host unit, resolved with the host's names: slot functions bind by
+address like everywhere else. Because all GCC vtables are weak too, a compiled copy wins as soon as its unit
+compiles. Limits: inline virtual functions and implicit destructors of a class that no unit constructs or destroys
+are emitted nowhere (GCC emits them with the vtable) and stay undefined slots, like those of GCC's own vtables
+(`vslot-unresolved`); GCC stores 0 in both destructor slots of an abstract class, genuine and synthesized alike.
+
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
 2,029 objects compiled (of 2,978 units; S1 census flags, `-O2`). 106,043 undefined (object, symbol) references:
@@ -206,17 +276,44 @@ units, all named (G1 165, IND 134, H3x4 125, H4x4 21, G2 16, H1x16 15, H1x4 4, H
 x86-inconsistent refs became bridges. Now: 384 bridges (417 refs), 68 x86-inconsistent (66 `this-not-passed`,
 2 `result-pointer-not-passed`), 15 manual (varargs). Address map: F 24,817, C 895, X 496, G 41, V 446, E 138.
 
+### Third round (vtables, S2c)
+
+Same 2,067 objects (`--extern-text` with S4's list). Synthesis: 1,344 classes requested (584 for an image vftable,
+1,217 for an undefined `_ZTV`/`_ZTI`, overlapping), 1,324 named by a host unit, 20 by none; the typeinfo closure
+added 621 base classes in five more rounds. Out of 1,945 probed classes: 1,933 vtables and 1,865 typeinfos (with
+`_ZTS`) synthesized, 265 non-virtual thunks generated, in 523 objects (one per host unit); left out: 1 vtable
+(the derived probe class does not compile), 1 typeinfo (bases not nameable); none had virtual bases. The probe takes
+about 45 minutes on 4 busy cores, 9 seconds from its cache.
+
+Address map: `V` 446 -> 1,182 vftable addresses, primary 688 (413 with a compiled vtable, 275 synthesized) and
+secondary 494 (395 compiled, 99 synthesized), every one checked in the trial-linked image (native = `_ZTV` +
+offset, with the class's typeinfo and offset-to-top = -(base offset) before it). Of the 4,090 (name, address) pairs
+not mapped: 1,796 primary and 428 secondary of classes without any vtable (no compiled unit sees the class), 37
+secondary whose base is not on the typeinfo chain, 2 whose base has no vptr of its own in the GCC layout. `G`: all 41
+with D1 and D0 in `fnvnx_addrmap_deldtors`. References: `special-unresolved:vtable-for` 661 -> 11, `typeinfo-for`
+812 -> 13. Trial link: 0 multiple definitions; undefined `_ZTV` 588 -> 14, `_ZTI` 653 -> 13, but the slots of the
+synthesized vtables add 2,662 undefined C++ names (1,464 implicit-destructor D0/D1, 1,198 inline or never-defined
+virtuals; all `vslot-unresolved`, like the slots of GCC's own vtables) and 126 `__fnv_` of uncompiled units:
+12,832 -> 14,406 undefined names.
+
 ## Open problems
 
-* **Virtual functions behind native vtables** (6,088 refs, plus 643 undefined vtables): GCC emits vtables whose
-  slots name the decomp's `Unk_xx` virtuals; units.json has no address for them because MSVC vtables live in
-  `.rdata`. Resolution: slot *k* of `_ZTV<Class>` -> the MSVC `??_7<Class>@@6B@` address (when some unit names
+* **Virtual functions behind native vtables** (6,088 refs before the synthesized vtables, 11,668 with them): GCC
+  emits vtables whose slots name the decomp's `Unk_xx` virtuals; units.json has no address for them because MSVC
+  vtables live in `.rdata`. Resolution: slot *k* of `_ZTV<Class>` -> the MSVC `??_7<Class>@@6B@` address (when some unit names
   it) -> dword *k'* read from the player's `FalloutNV.exe` (D3: allowed locally, never stored) -> code address ->
   `__fnv_`. Needs the image reader of S3 and the Itanium/MSVC slot correspondence (two destructor slots vs one,
   RTTI/offset-to-top header).
-* **Varargs** pairs (15) stay manual. **Address map gaps**: `V` covers primary vftables of classes whose `_ZTV`
-  is emitted; secondary (`{for ...}`) vftables, synthesized vtables for classes without one, the `??_G` split into
-  D1/D0 entries and mid-function addresses are not emitted yet; `E` lists only the addresses compiled units
+* **Slots of synthesized vtables**: inline virtuals and implicit destructors of classes no unit constructs or
+  destroys are emitted nowhere (2,662 names, 1,464 of them D0/D1). Either emit them from the probe (the probe object
+  holds them as COMDAT groups, but they may reference unit-local symbols) or bind them through the image vftable
+  slots with the rest (previous item; D7: the `??_G` slot gives D1 = `??_G(this, 0)`, D0 = `??_G(this, 1)`).
+  `FNVNX_NO_VTABLES=1` leaves the synthesis out of `probe`.
+* **Hand-written vftable references** (`kVtbl_*` and other data names at a vftable address) still bind to the image
+  address (`data`), not to the native address point that D7 point 2 asks for; with the `V` entries, `aliases.ld` can
+  define such `__fnv_<vftable>` as `_ZTV<C> + offset` once S1's raw-index calls go through `FNVNX_MSVC_VCALL`.
+* **Varargs** pairs (15) stay manual. **Address map gaps**: `V` covers the 1,182 vftable addresses whose class some
+  compiled unit sees; mid-function addresses are not emitted; `E` lists only the addresses compiled units
   reference (138); with `--extern-text` S4's 4,618 are included (4,622 E entries on the round-2 objects).
 * **x86-inconsistent** pairs (74) are source bugs that MSVC got away with (ecx coincidence); hand to S1 as a list.
 * **Code placement**: the trial link puts native code at the default 0x400000, inside the original image range

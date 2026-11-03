@@ -3,8 +3,10 @@
 
     fnvlink.py resolve <units.json> <objects.tsv> <out dir> [--override <tsv>] [--extern-text <list>]
                                                               # mapping, address map, ABI report, bridges
-    fnvlink.py probe   <out dir> <prepared tree> [jobs]        # layouts of the aggregates resolve asked for;
-                                                              # then resolve again to use them
+    fnvlink.py probe   <out dir> <prepared tree> [jobs]        # layouts of the aggregates resolve asked for, and
+                                                              # the synthesized vtables/typeinfo (vtables.py;
+                                                              # FNVNX_NO_VTABLES=1 skips them); then resolve again
+    fnvlink.py vtables <out dir> <prepared tree> [jobs]        # only the vtable/typeinfo synthesis
     fnvlink.py apply   <out dir> <fixed dir>                   # objcopy every object with its generated args
     fnvlink.py check   <out dir> <fixed dir>                   # trial link: what is still undefined / duplicated
 
@@ -27,6 +29,7 @@ import abi2     # noqa: E402
 import elfsyms  # noqa: E402
 import layout   # noqa: E402
 import sigs     # noqa: E402
+import vtables  # noqa: E402
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
 DATA_END = 0x0200c612
@@ -45,6 +48,9 @@ RUNTIME = re.compile(r'^(?:__cxa_\w+|_Unwind_\w+|__gxx_personality_v0|__stack_ch
                      r'_ZTI[PKa-z]\w*|_ZTS[PKa-z]\w*|__cxa_pure_virtual|__fnvnx_\w+|__sse2neon\w*|__dynamic_cast|'
                      r'__\w+_chk|__isoc\d+_\w+|__errno_location|__assert_fail)$')
 ADDR_SYM = '__fnv_%08x'
+DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
+# renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
+GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit'}
 ADDR_IN_NAME = re.compile(r'^(?:DAT|FUN|g|UNK|PTR)_([0-9a-f]{8})$')
 
 
@@ -109,10 +115,11 @@ class DemangleCache:
 # ---------------------------------------------------------------------------------------------------- units
 
 class Unit:
-    __slots__ = ('source', 'defs', 'refs', 'obj')
+    """host: for the synthesized-vtable object of a unit (vtables.py), the unit whose names it is resolved with."""
+    __slots__ = ('source', 'defs', 'refs', 'obj', 'host')
 
     def __init__(self, source):
-        self.source, self.defs, self.refs, self.obj = source, [], {}, None
+        self.source, self.defs, self.refs, self.obj, self.host = source, [], {}, None, None
 
 
 def load_units(path):
@@ -195,6 +202,21 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
         for n, a in u.refs.items():
             gref.add(msvc(n), a)
 
+    # synthesized vtables/typeinfo (vtables.py, written by `probe`): one extra object per host unit, its references
+    # resolved with the host unit's names
+    real = list(have)
+    for host, path in vtables.load_synth(out):
+        if host in units:
+            su = Unit(host + '#vtables')
+            su.host, su.obj = host, path
+            su.refs = dict(units[host].refs)
+            for a, n in units[host].defs:
+                su.refs.setdefault(n, a)
+            units[su.source] = su
+            have.append(su)
+    if len(have) > len(real):
+        log('synthesized vtable objects: %d' % (len(have) - len(real)))
+
     # Itanium side
     objsyms, itnames = {}, set()
     for u in have:
@@ -267,6 +289,18 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
                 pick = groups[names[0]][0]
             native[a] = dict(unit=u.source, sym=pick, variants=variants, tier=tier, msvc=n)
             def_stats['matched-' + tier] += 1
+
+    # ---- startup natives (docs/STARTUP.md, prepare rule XC1): extern "C" __fnvnx_dyninit_<addr> / _dynexit_<addr>
+    # stand for the ??__E / ??__F at <addr>, which MSVC names only as specials
+    for u in sorted(real, key=lambda x: x.source):
+        for s in objsyms[u.source]:
+            m = DYN_SYM.match(s.name)
+            if m and s.shndx and s.bind != 'local' and s.type == 'func':
+                a = int(m.group(2), 16)
+                if a not in native:
+                    native[a] = dict(unit=u.source, sym=s, variants={}, tier='startup',
+                                     msvc=def_at[a][1] if a in def_at else '')
+                    def_stats['startup-' + m.group(1)] += 1
 
     # ---- overrides: a native implementation replaces the decomp definition at an address (docs/LINK.md)
     shadowed = {}
@@ -392,6 +426,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
                 cls = 'special-unresolved:' + (note or '?').replace(' ', '-')
             if un in vslots:
                 stats['vslot_refs'] += 1
+            if cls == 'runtime' and un in GAME_RENAMES:
+                target = GAME_RENAMES[un]
             if target and target != un:
                 renames[un] = target
             byclass[cls] += 1
@@ -440,8 +476,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
                 alias_lines.append('%s = %s;' % (sy.name, osym))
         copies = sorted(src for src, names in comdat_defs.items() for sy in syms if sy.name in names
                         and src != old['unit'])
-        inl = sorted(src for src, uu in units.items() if uu.obj and src != old['unit'] and a in set(uu.refs.values())
-                     and a not in bound[src])
+        inl = sorted(src for src, uu in units.items() if uu.obj and not uu.host and src != old['unit']
+                     and a in set(uu.refs.values()) and a not in bound[src])
         shadow_rows.append(('%08x' % a, old['msvc'], old['sym'].name, old['unit'], osym, native[a]['override'],
                             ' '.join(copies), ' '.join(inl), '; '.join(notes)))
     with open(os.path.join(out, 'shadowed.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
@@ -513,26 +549,23 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
             f.write('%s\t%s\n' % (unit, t))
 
     # ---- address map
-    # image vftables -> Itanium vtable address point of the class of the same name (single-inheritance
-    # vftables only; '{for ...}' secondary vftables and classes without an emitted _ZTV are left out)
-    ztv = {}
-    for u in have:
-        for sym in objsyms[u.source]:
-            if sym.name.startswith('_ZTV') and sym.shndx and sym.bind != 'local':
-                isg = itanium(sym.name)
-                if isg.special == 'vtable for':
-                    ztv.setdefault(isg.name, (sym.name, os.path.basename(u.obj)))
-    vtables = {}
-    for u in units.values():
-        for n, a in u.refs.items():
-            d = ms[n] if n.startswith('??_7') else None
-            if d and d.endswith("::`vftable'") and '{for' not in d:
-                cls = '::'.join(sigs.canon_qual(sigs.split_qual(d[:-len("::`vftable'")].replace('const ', '', 1))))
-                if cls in ztv:
-                    vtables.setdefault(a, ztv[cls])
+    # image vftables (primary `vftable' and secondary `vftable'{for `B'}) -> address point of the Itanium vtable of
+    # the class of the same name, emitted by a compiled object or synthesized (vtables.py, docs/LINK.md "Vtables")
+    def canon_msvc(text):
+        return '::'.join(sigs.canon_qual(sigs.split_qual(text)))
+
+    def canon_it(name):
+        return itanium(name).name
+    vnames = vtables.vftable_names(units, ms, canon_msvc)
+    rtti = vtables.RttiIndex()
+    for u in sorted(have, key=lambda x: os.path.basename(x.obj)):   # link order (synthesized zz_vt_* last)
+        if any(s.shndx and s.bind != 'local' and s.name.startswith(('_ZTV', '_ZTI')) for s in objsyms[u.source]):
+            rtti.add(vtables.Obj(u.obj), u.host is not None)
+    vmap, vstats = vtables.vftable_map(vnames, rtti, canon_it)
+    write_vtable_requests(out, real, objsyms, vnames, it, itanium)
     for a, names in load_extern_list(extern_list).items():
         extern_text.setdefault(a, set()).update(names)
-    amap_kinds = write_addrmap(out, native, def_at, units, vtables, extern_text)
+    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text)
 
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
@@ -553,7 +586,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
     lines += ['', 'overrides: %d, shadowing a compiled decomp definition: %d (with possibly inlined callers in other '
               'units: %d; shadowed.tsv)' % (stats['overrides'], stats['shadowed'], stats['shadow_inlined_units'])]
     lines += ['', 'variables defined natively at a data-image address: %d' % len(data_defs),
-              'address map entries by kind: %s' % ' '.join('%s=%d' % kv for kv in sorted(amap_kinds.items()))]
+              'address map entries by kind: %s' % ' '.join('%s=%d' % kv for kv in sorted(amap_kinds.items())),
+              'deleting destructors (G) with both D1 and D0: %d of %d' % (n_deldtor, amap_kinds.get('G', 0)),
+              'synthesized vtable objects linked: %d' % (len(have) - len(real)),
+              'image vftable names (%d (name, address) pairs, %d secondary) -> native address points, by outcome:'
+              % (len(vnames), sum(1 for v in vnames.values() if v[1]))]
+    lines += ['  %-40s %d' % kv for kv in sorted(vstats.items())]
     lines += ['', 'definitions matched to native symbols:']
     lines += ['  %-18s %d' % (c, n) for c, n in sorted(def_stats.items())]
     lines += ['', 'duplicate strong names localized: %d' % stats['duplicate_strong_names'],
@@ -567,6 +605,47 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None):
     lines += ['  %-6d %s' % (n, c) for c, n in pair_classes.most_common()]
     open(os.path.join(out, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
+
+
+NOT_SYNTH = ('std::', '__gnu_cxx::', '__cxxabiv1::')   # the C++ runtime defines its own
+
+
+def write_vtable_requests(out, real, objsyms, vnames, it, itanium):
+    """What the synthesis step (vtables.run, `probe`) is asked for, from the compiled objects only (so a rerun after
+    the second resolve asks for the same): vtable_requests.tsv - classes with an image vftable whose vtable no
+    compiled object emits, and every _ZTV/_ZTI a compiled object references but none defines, each with the units
+    that can name the class (referencing units first); rtti_defined.txt - the vtable/typeinfo/thunk names compiled
+    objects define (never synthesized again)."""
+    rdefs = set()
+    for u in real:
+        for s in objsyms[u.source]:
+            if s.shndx and s.bind != 'local' and s.name.startswith(vtables.SPECIAL_PREFIXES):
+                rdefs.add(s.name)
+    reqs = {}
+
+    def want(cls, text, why, host):
+        if cls.startswith(NOT_SYNTH) or '{anon}' in cls:
+            return
+        e = reqs.setdefault(cls, [None, set(), []])
+        e[0] = e[0] or vtables.spelling(text, sigs.canon_type, sigs.split_qual)
+        e[1].add(why)
+        if host not in e[2]:
+            e[2].append(host)
+    for u in sorted(real, key=lambda x: x.source):
+        for s in objsyms[u.source]:
+            if s.shndx == 0 and s.name.startswith(('_ZTV', '_ZTI')) and s.name not in rdefs and not RUNTIME.match(s.name):
+                isg = itanium(s.name)
+                if isg.special in ('vtable for', 'typeinfo for') and it[s.name]:
+                    want(isg.name, it[s.name][len(isg.special) + 1:], isg.special.split()[0] + '-ref', u.source)
+    have_ztv = {itanium(n).name for n in rdefs if n.startswith('_ZTV')}
+    for u in sorted(real, key=lambda x: x.source):
+        for n, a in sorted(u.refs.items()):
+            v = vnames.get((n, a))
+            if v and v[0] not in have_ztv:
+                want(v[0], v[2], 'vftable', u.source)
+    vtables.write_requests(os.path.join(out, 'vtable_requests.tsv'), {c: tuple(e) for c, e in reqs.items()})
+    with open(os.path.join(out, 'rtti_defined.txt'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('\n'.join(sorted(rdefs)) + '\n')
 
 
 def load_overrides(path):
@@ -669,15 +748,23 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc):
 
 def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None):
     """addrmap.tsv / addrmap.c (docs/LINK.md, 'Address map'): code addresses the native build defines (F C X G),
-    image vftables (V: the Itanium vtable address point of the same class) and referenced .text addresses no unit
-    defines (E: native NULL, the loader traps them)."""
-    rows = []
+    image vftables (V: the Itanium vtable address point of the same class, primary or secondary, compiled or
+    synthesized), referenced .text addresses no unit defines (E: native NULL, the loader traps them), and per G
+    entry its D1/D0 pair (fnvnx_addrmap_deldtors). vtables: {address: (vtable symbol, address-point offset, object
+    path, note)}. -> (Counter of kinds, number of G entries with a D1)."""
+    rows = []   # address, kind, link_symbol, native_symbol, object, note, offset, d1_symbol, d1_native
     for a in sorted(native):
         nd = native[a]
         v = nd['msvc']
-        kind, note = 'F', ''
+        kind, note, d1l, d1n = 'F', '', '', ''
         if '??_G' in v or '??_E' in v:
-            kind, note = 'G', 'msvc deleting dtor (takes flags) -> Itanium D0 (always deletes)'
+            kind, note = 'G', 'msvc deleting dtor (takes flags) -> Itanium D0 (always deletes); D1 (destroys only)'
+            for var in ('D1', 'D2'):   # D2 == D1 without virtual bases
+                if nd['variants'].get(var) is not None:
+                    d1l, d1n = (ADDR_SYM % a) + '_' + var, nd['variants'][var].name
+                    break
+            else:
+                note += ' not emitted'
         elif v.startswith('??0'):
             kind = 'C'
         elif v.startswith('??1'):
@@ -685,35 +772,44 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None):
         elif nd['sym'].bind == 'local':
             note = 'static in its unit'
         if nd['unit'] is None:
-            kind, note = 'F', 'override of ' + (nd['msvc'] or '?')
+            kind, note, d1l, d1n = 'F', 'override of ' + (nd['msvc'] or '?'), '', ''
             obj = os.path.basename(nd['override'])
         else:
             obj = os.path.basename(units[nd['unit']].obj)
-        rows.append((a, kind, ADDR_SYM % a, nd['sym'].name, obj, note))
-    for a, (zname, obj) in sorted((vtables or {}).items()):
+        rows.append((a, kind, ADDR_SYM % a, nd['sym'].name, obj, note, '', d1l, d1n))
+    for a, (zname, off, obj, note) in sorted((vtables or {}).items()):
         if a not in native:
-            rows.append((a, 'V', zname, zname, obj, 'address point = symbol + 8 (ILP32)'))
+            rows.append((a, 'V', zname, zname, os.path.basename(obj), note, str(off), '', ''))
     for a in sorted(extern_text or {}):
         if a not in native:
-            rows.append((a, 'E', '', '', '', 'no native definition (CRT/thunk, S4)'))
+            rows.append((a, 'E', '', '', '', 'no native definition (CRT/thunk, S4)', '', '', ''))
     rows.sort()
     with open(os.path.join(out, 'addrmap.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('# fnvnx-addrmap 1\n# address\tkind\tlink_symbol\tnative_symbol\tobject\tnote\n')
+        f.write('# fnvnx-addrmap 1\n# address\tkind\tlink_symbol\tnative_symbol\tobject\tnote\toffset\td1_symbol\t'
+                'd1_native\n')
         for r in rows:
-            f.write('%08x\t%s\t%s\t%s\t%s\t%s\n' % r)
+            f.write('%08x\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' % r)
+    dd = [(r[0], r[7], r[2]) for r in rows if r[1] == 'G']
     with open(os.path.join(out, 'addrmap.c'), 'w') as f:
         f.write('/* fnv-nx address map table (generated by tools/link/fnvlink.py; local output). */\n'
                 '#include "fnvnx_addrmap.h"\n\n')
-        for r in rows:
-            if r[2]:
-                f.write('extern char %s[];\n' % r[2])
+        for name in sorted({r[2] for r in rows if r[2]} | {r[7] for r in rows if r[7]}):
+            f.write('extern char %s[];\n' % name)
         f.write('\nconst struct fnvnx_addrmap_entry fnvnx_addrmap[] = {\n')
-        for a, kind, link, *_ in rows:
-            ptr = '0' if not link else ('%s + 8' % link if kind == 'V' else link)
+        for a, kind, link, *rest in rows:
+            ptr = '0' if not link else ('%s + %s' % (link, rest[3]) if kind == 'V' else link)
             f.write('    {0x%08xu, %s},\n' % (a, ptr))
+        if not rows:
+            f.write('    {0u, 0},\n')
         f.write('};\nconst char fnvnx_addrmap_kinds[] = "%s";\n' % ''.join(r[1] for r in rows))
         f.write('const unsigned fnvnx_addrmap_count = %d;\n' % len(rows))
-    return collections.Counter(r[1] for r in rows)
+        f.write('\nconst struct fnvnx_addrmap_deldtor fnvnx_addrmap_deldtors[] = {\n')
+        for a, d1, d0 in dd:
+            f.write('    {0x%08xu, %s, %s},\n' % (a, d1 or '0', d0))
+        if not dd:
+            f.write('    {0u, 0, 0},\n')
+        f.write('};\nconst unsigned fnvnx_addrmap_deldtor_count = %d;\n' % len(dd))
+    return collections.Counter(r[1] for r in rows), sum(1 for _, d1, _ in dd if d1)
 
 
 # ---------------------------------------------------------------------------------------------------- apply / check
@@ -807,8 +903,13 @@ def main():
         with open(os.path.join(argv[2], 'overrides.list'), 'w') as f:
             for _, _, obj in load_overrides(opts.get('override')):
                 f.write(obj + '\n')
-    elif cmd == 'probe':
-        layout.run(sys.argv[2], sys.argv[3], int(sys.argv[4]) if len(sys.argv) > 4 else os.cpu_count())
+    elif cmd in ('probe', 'vtables'):
+        jobs = int(sys.argv[4]) if len(sys.argv) > 4 else os.cpu_count()
+        if cmd == 'probe':
+            layout.run(sys.argv[2], sys.argv[3], jobs)
+        if os.path.exists(os.path.join(sys.argv[2], 'vtable_requests.tsv')) and \
+                (cmd == 'vtables' or not os.environ.get('FNVNX_NO_VTABLES')):
+            vtables.run(sys.argv[2], sys.argv[3], jobs)
     elif cmd == 'apply':
         apply(*sys.argv[2:4])
     elif cmd == 'check':
