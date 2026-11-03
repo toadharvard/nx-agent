@@ -49,8 +49,15 @@ def cmd_repro(a):
     d = json.load(open(a.file))
     case = world.Case.from_json(d['case'])
     pair, t = uc.pair(d['source'], int(d['address'], 16))
+    if a.trace:
+        import trace
+        trace.attach(pair, t)
     rx, ra, div = pair.run(case)
     print('conv:', t.conv.describe())
+    for side, r in (('x86', rx), ('arm', ra)):
+        print(side + ':', 'ret=%s' % (r.ret.hex() if r.ret else None), 'err=%s' % r.error,
+              'calls=%s' % ['%08x' % (c.target & 0xffffffff) for c in r.calls],
+              'writes=%s' % {('%08x' % k): v for k, v in sorted(r.writes.items())[:16]})
     print('divergence:', json.dumps(div, indent=1) if div else 'NONE (no longer reproduces)')
 
 
@@ -68,7 +75,8 @@ def main():
     p.add_argument('--iters', type=int, default=200); p.add_argument('--jobs', type=int, default=1)
     p.add_argument('--max-steps', type=int, default=200000); p.add_argument('--time', type=float, default=0)
     p.add_argument('--resume', action='store_true'); p.add_argument('--tag', default='run'); p.set_defaults(fn=cmd_fuzz)
-    p = sub.add_parser('repro'); p.add_argument('file'); p.set_defaults(fn=cmd_repro)
+    p = sub.add_parser('repro'); p.add_argument('file'); p.add_argument('--trace', action='store_true')
+    p.set_defaults(fn=cmd_repro)
     p = sub.add_parser('lockstep'); p.add_argument('addr'); p.add_argument('--source', default=None)
     p.add_argument('--bg', default='zero'); p.add_argument('--out', default=str(config.WORK / 'lockstep'))
     p.add_argument('--max-steps', type=int, default=2000000); p.add_argument('--depth', type=int, default=64)

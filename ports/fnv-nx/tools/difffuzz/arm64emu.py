@@ -51,8 +51,11 @@ class Arm64Engine:
         self.image = image
         self.stub_orig = stub_orig
         self.mapped = set()
+        self.dynamic = set()
         uc = self.uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
         uc.reg_write(A.UC_ARM64_REG_CPACR_EL1, 3 << 20)    # FP/SIMD on
+        uc.mem_map(world.STACK[0], world.STACK[1] - world.STACK[0], UC_PROT_READ | UC_PROT_WRITE)
+        self.mapped.update(range(world.STACK[0], world.STACK[1], PAGE))
         for base, data in image.segments:
             for p in range(world.page_of(base), base + len(data), PAGE):
                 if p not in self.mapped:
@@ -69,13 +72,25 @@ class Arm64Engine:
         self.uc.mem_map(page, PAGE, prot)
         self.uc.mem_write(page, self.world.page(page))
         self.mapped.add(page)
+        self.dynamic.add(page)
+
+    def reset(self, world_obj):
+        """Forget the previous case's world pages and restore the image's writable data."""
+        for p in self.dynamic:
+            self.uc.mem_unmap(p, PAGE)
+            self.mapped.discard(p)
+        self.dynamic = set()
+        self.world = world_obj
+        for base, data in self.image.segments:
+            if base >= self.image.data_start:
+                self.uc.mem_write(base, data)
 
     def _ensure(self, addr, size=1):
         for p in range(world.page_of(addr), addr + size, PAGE):
             self._map(p)
 
     def _on_unmapped(self, uc, access, address, size, value, data):
-        if STUB_LO <= address < STUB_HI:
+        if STUB_LO <= address < STUB_HI and access == 21:     # UC_MEM_FETCH_UNMAPPED: a call into a stub
             p = world.page_of(address)
             uc.mem_map(p, PAGE, UC_PROT_ALL)
             uc.mem_write(p, BRK * (PAGE // 4))
@@ -103,9 +118,8 @@ class Arm64Engine:
         if native is None:
             r.error = 'no-native-entry'
             return r
-        for p in range(world.STACK[0], world.STACK[1], PAGE):
-            self._map(p, UC_PROT_READ | UC_PROT_WRITE)
-        uc.mem_write(world.SP0 - 0x1000, world.stack_fill(case.seed ^ 0xa5, 0x1000))
+        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + world.stack_fill(case.seed ^ 0xa5, 0x1000))
+        uc.mem_write(world.SP0, bytes(world.STACK[1] - world.SP0))
         for i in range(31):
             uc.reg_write(XR[i], world.garbage32(case.seed, 200 + i) | (world.garbage32(case.seed, 300 + i) << 32))
         for i in range(32):

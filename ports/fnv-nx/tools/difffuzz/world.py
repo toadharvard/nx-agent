@@ -47,13 +47,13 @@ COMPARED = ((NULL_END, STACK[0]), (STACK[1], A64_PRIV[0]))
 
 
 def mappable(a, side):
-    """May page a be mapped on first touch on this machine ('x86' / 'a64')? The null region never is, nor the other
-    machine's private range, nor (AArch64) anything at or above 4 GiB: an ILP32 address with its upper half set."""
+    """May page a be mapped on first touch on this machine ('x86' / 'a64')? Not the null region, not the private
+    ranges, and (AArch64) nothing at or above 4 GiB: an ILP32 address with its upper half set."""
     if a < NULL_END or a >= MAX:
         return False
-    if side == 'x86' and A64_PRIV[0] <= a < A64_PRIV[1]:
-        return False
-    if side == 'a64' and X86_PRIV[0] <= a < X86_PRIV[1]:
+    # private ranges are never world memory on either machine (what a machine owns there is mapped up front), so a
+    # wild pointer into them faults on both sides alike
+    if A64_PRIV[0] <= a < A64_PRIV[1] or X86_PRIV[0] <= a < X86_PRIV[1]:
         return False
     return True
 

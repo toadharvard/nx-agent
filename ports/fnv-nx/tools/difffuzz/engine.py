@@ -16,27 +16,32 @@ import conv as convmod
 import runner
 
 STUB_ADDR = re.compile(r'^__fnv(?:nx_br)?_([0-9a-f]{8})')
+LOCAL_STATIC = re.compile(r'^\?(?:[^@?]+@\?\d+\?\?|\$S\d+@|\$TSS\d+@)')   # ?x@?1??f@@..., ?$S1@..., ?$TSS0@...
 
 
 class UnitCache:
     def __init__(self, linkdir, workdir):
         self.linkdir, self.workdir = linkdir, workdir
         self.units = json.load(open(config.DECOMP / 'build/units.json'))['units']
-        self.by_source = {}
+        self.by_source = {}             # source -> [(index, unit)] (a source can be listed with two flag sets)
         self.def_at = {}
         for i, u in enumerate(self.units):
-            self.by_source.setdefault(u['source'], (i, u))
+            self.by_source.setdefault(u['source'], []).append((i, u))
             for f in u['functions']:
                 self.def_at.setdefault(int(f['address'], 16), (u['source'], f['symbol']))
         self._x86, self._img, self._pin, self._callee = {}, {}, {}, {}
 
-    def x86_unit(self, source):
-        if source not in self._x86:
-            i, u = self.by_source[source]
+    def x86_unit(self, source, addr=None):
+        """The oracle unit of `source` that defines `addr` (the first listing when addr is None)."""
+        entries = self.by_source[source]
+        if addr is not None:
+            entries = [e for e in entries if any(int(f['address'], 16) == addr for f in e[1]['functions'])] or entries
+        i, u = entries[0]
+        if i not in self._x86:
             img = coffobj.UnitImage(coffobj.Coff(config.X86OBJ / ('u%d.obj' % i)), u)
-            self._x86[source] = img
-            self._pin[source] = img.literal_bytes()
-        return self._x86[source]
+            self._x86[i] = img
+            self._pin[i] = img.literal_bytes()
+        return self._x86[i]
 
     def arm_image(self, source):
         if source not in self._img:
@@ -53,9 +58,9 @@ class UnitCache:
 
     def callee_info_for(self, source):
         refs = {}
-        _, u = self.by_source[source]
-        for n, a in u['symbols'].items():
-            refs.setdefault(int(a, 16), n)
+        for _, u in self.by_source[source]:
+            for n, a in u['symbols'].items():
+                refs.setdefault(int(a, 16), n)
 
         def info(addr):
             key = (source, addr)
@@ -79,7 +84,7 @@ class UnitCache:
         return info
 
     def target(self, source, orig_addr):
-        xu = self.x86_unit(source)
+        xu = self.x86_unit(source, orig_addr)
         if orig_addr not in xu.funcs:
             raise KeyError('no x86 function at %08x in %s' % (orig_addr, source))
         fn = xu.funcs[orig_addr]
@@ -89,8 +94,18 @@ class UnitCache:
         img = self.arm_image(source)
         if not any(o == orig_addr for o in img.entries.values()):
             raise KeyError('no native entry for %08x' % orig_addr)
-        return runner.Target(cv, orig_addr, fn['code'], img, self.stub_addrmap(img), self.callee_info_for(source))
+        statics = set()
+        for _, u in self.by_source[source]:
+            for n, a in u['symbols'].items():
+                if LOCAL_STATIC.match(n):
+                    statics.update(range(int(a, 16), int(a, 16) + 16))
+        return runner.Target(cv, orig_addr, fn['code'], img, self.stub_addrmap(img), self.callee_info_for(source),
+                             statics)
+
+    def pinned(self, source, orig_addr):
+        xu = self.x86_unit(source, orig_addr)
+        return next(self._pin[i] for i, x in self._x86.items() if x is xu)
 
     def pair(self, source, orig_addr):
         t = self.target(source, orig_addr)
-        return runner.Pair(t, dict(self._pin[source])), t
+        return runner.Pair(t, dict(self.pinned(source, orig_addr))), t

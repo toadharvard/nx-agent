@@ -63,10 +63,13 @@ class X86Engine:
         self.callee_info = callee_info or (lambda a: None)
         self.ranges = [(a, a + len(c)) for a, c in text_funcs.items()]
         self.mapped = set()
+        self.dynamic = set()
         uc = self.uc = Uc(UC_ARCH_X86, UC_MODE_32)
         for base in (GDT, TEB, STUBS, FRET, RESULT_BUF, FLD_STUB):
             uc.mem_map(base, PAGE, UC_PROT_ALL)
             self.mapped.add(base)
+        uc.mem_map(world.STACK[0], world.STACK[1] - world.STACK[0], UC_PROT_READ | UC_PROT_WRITE)
+        self.mapped.update(range(world.STACK[0], world.STACK[1], PAGE))
         gdt = b'\0' * 8 + _desc(0, 0xfffff, 0x9a) + _desc(0, 0xfffff, 0x92) + _desc(TEB, 0xfff, 0x92, 0x4)
         uc.mem_write(GDT, gdt)
         uc.reg_write(UC_X86_REG_GDTR, (0, GDT, len(gdt) - 1, 0))
@@ -87,6 +90,15 @@ class X86Engine:
         self.uc.mem_map(page, PAGE, prot)
         self.uc.mem_write(page, self.world.page(page))
         self.mapped.add(page)
+        self.dynamic.add(page)
+
+    def reset(self, world_obj):
+        """Forget the previous case's world pages (the engine is reused across runs of one function)."""
+        for p in self.dynamic:
+            self.uc.mem_unmap(p, PAGE)
+            self.mapped.discard(p)
+        self.dynamic = set()
+        self.world = world_obj
 
     def _ensure(self, addr, size=1):
         for p in range(world.page_of(addr), addr + size, PAGE):
@@ -115,9 +127,8 @@ class X86Engine:
         for a, code in self.text_funcs.items():
             self._ensure(a, len(code))
             uc.mem_write(a, code)
-        for p in range(world.STACK[0], world.STACK[1], PAGE):
-            self._map(p, UC_PROT_READ | UC_PROT_WRITE)
-        uc.mem_write(world.SP0 - 0x1000, world.stack_fill(case.seed, 0x1000))
+        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + world.stack_fill(case.seed, 0x1000))
+        uc.mem_write(world.SP0, bytes(world.STACK[1] - world.SP0))
         # float epilogue: fld st0; fstp dword/qword [FRET+16] (the caller's rounding); fstp tbyte [FRET]; jmp SENTINEL
         st = b'\xd9\xc0' + (b'\xd9\x1d' if conv.ret is not None and conv.ret.size == 4 else b'\xdd\x1d') + \
             struct.pack('<I', FRET + 16) + b'\xdb\x3d' + struct.pack('<I', FRET)

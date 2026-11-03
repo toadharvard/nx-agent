@@ -28,6 +28,7 @@ A64_BASE = 0x0A000000
 CODE_STUB = 0x08000000        # + original code address (0x00400000..0x00fdf000)
 NAMED_STUB = 0x09000000       # + 16 * k
 NAMED_STUB_MAX = 0x00800000 // 16
+LINK_VERSION = 3              # bump when the stub/alias rules change (invalidates cached unit images)
 ADDR_SYM = re.compile(r'^__fnv_([0-9a-f]{8})(?:_(C[0-9]|D[0-9]))?$')
 LAYOUT = """
 SECTIONS {
@@ -79,6 +80,9 @@ class Image:
             if m and not m.group(2) and a >= A64_BASE:
                 self.entries.setdefault(a, int(m.group(1), 16))
         self.end = max(a + len(b) for a, b in self.segments) if self.segments else A64_BASE
+        # everything after the code (.rodata onwards) is restored between runs; .text never changes
+        text = [a + len(b) for a, b in self.segments if a == A64_BASE]
+        self.data_start = text[0] if text else A64_BASE
 
     def _read(self):
         d = open(self.elf, 'rb').read()
@@ -108,9 +112,10 @@ def build(source, linkdir, workdir):
     if os.path.exists(elf) and os.path.exists(meta) and all(os.path.getmtime(elf) >= os.path.getmtime(s)
                                                             for s in srcs if os.path.exists(s)):
         m = json.load(open(meta))
-        return Image(elf, {int(k): v for k, v in m['stubs'].items()}, m['info'])
+        if m.get('version') == LINK_VERSION:
+            return Image(elf, {int(k): v for k, v in m['stubs'].items()}, m['info'])
     objs = [obj] + ([bridges] if os.path.exists(bridges) else [])
-    defined, undef = set(), set()
+    defined, undef, weak = set(), set(), set()
     for o in objs:
         for s in elfsyms.symbols(o):
             if not s.name or s.type in ('section', 'file'):
@@ -119,8 +124,15 @@ def build(source, linkdir, workdir):
                 undef.add(s.name)
             elif s.bind != 'local':
                 defined.add(s.name)
+                if s.bind == 'weak':
+                    weak.add(s.name)
     absolute, alias = load_aliases(os.path.join(linkdir, 'out', 'aliases.ld'))
     lines = []
+    # natively defined image variables are weak address symbols; the game link's aliases.ld puts them at their
+    # original address (the image copy), so do the same here
+    for n in sorted(weak):
+        if n in absolute:
+            lines.append('%s = 0x%08x;' % (n, absolute[n]))
     for n in sorted(undef - defined):
         if n in absolute:
             lines.append('%s = 0x%08x;' % (n, absolute[n]))
@@ -150,10 +162,10 @@ def build(source, linkdir, workdir):
     with open(base + '.layout.ld', 'w') as f:
         f.write(LAYOUT % A64_BASE)
     r = subprocess.run([LD, '-m', 'aarch64linux32', '--no-demangle', '-static', '--noinhibit-exec',
-                        '--defsym=__dso_handle=0', '-e', '0', '-T', base + '.layout.ld', '-o', elf, *objs, base + '.stubs.ld'],
+                        '--defsym=__dso_handle=0', '-e', '0', '-T', base + '.layout.ld', '-o', elf, base + '.stubs.ld', *objs],
                        capture_output=True, text=True, errors='surrogateescape')
     open(base + '.ld.log', 'w').write(r.stderr)
     if not os.path.exists(elf):
         raise RuntimeError('link failed: %s' % r.stderr[:2000])
-    json.dump(dict(stubs={str(a): n for a, n in stubs.items()}, info=info), open(meta, 'w'))
+    json.dump(dict(stubs={str(a): n for a, n in stubs.items()}, info=info, version=LINK_VERSION), open(meta, 'w'))
     return Image(elf, stubs, info)

@@ -22,7 +22,8 @@ import arm64emu
 
 
 class Target:
-    def __init__(self, conv, orig_addr, x86_code, image, stub_orig, callee_info=None):
+    def __init__(self, conv, orig_addr, x86_code, image, stub_orig, callee_info=None, local_statics=()):
+        self.local_statics = set(local_statics)   # byte addresses of the unit's function-local statics
         self.conv = conv
         self.orig_addr = orig_addr
         self.x86_code = {orig_addr: x86_code}
@@ -71,7 +72,7 @@ def _hex(t):
     return '%08x' % (t & 0xffffffff) if t >= 0 else '-%x' % -t
 
 
-def compare(conv, rx, ra, w):
+def compare(conv, rx, ra, w, sret=None, local_statics=()):
     ex, ea = rx.error, ra.error
     if ex == 'timeout' or ea == 'timeout':
         return None
@@ -98,9 +99,18 @@ def compare(conv, rx, ra, w):
                 return None
         return d
     wx, wa = world.effective(rx.writes, w), world.effective(ra.writes, w)
+    if sret is not None and conv.ret is not None:
+        # the hidden result buffer is the result channel (compared as the return value), not a side effect
+        for d_ in (wx, wa):
+            for k_ in range(sret, sret + conv.ret.size):
+                d_.pop(k_, None)
     if wx != wa:
         keys = sorted(set(wx) | set(wa))
         diff = [k for k in keys if wx.get(k) != wa.get(k)]
+        if local_statics and all(k in local_statics and k not in wa for k in diff):
+            # MSVC keeps a function-local static (and its guard) in the image; GCC keeps its own copy in the unit's
+            # .bss (not compared). Not a divergence of the function itself; reported for the static-state audit.
+            return dict(kind='local-static', soft=True, addr='%08x' % diff[0], ndiff=len(diff))
         first = diff[0]
         d = dict(kind='mem-write', addr='%08x' % first, ndiff=len(diff),
                  x86=bytes(wx.get(k, 0) for k in range(first & ~3, (first & ~3) + 8)).hex(),
@@ -120,15 +130,22 @@ def compare(conv, rx, ra, w):
 
 
 class Pair:
+    """Both engines for one function, reused across cases (world pages are dropped between runs)."""
+
     def __init__(self, target, pinned):
         self.target = target
         self.pinned = pinned
+        self.xe = self.ae = None
 
     def run(self, case, max_steps=200000):
         w = world.World(case, self.target.x86_code, self.pinned)
         placement = self.target.placement()
-        xe = x86emu.X86Engine(w, self.target.x86_code, self.target.callee_info)
-        rx = xe.run(self.target.conv, case, placement, max_steps=max_steps)
-        ae = arm64emu.Arm64Engine(w, self.target.image, self.target.stub_orig)
-        ra = ae.run(self.target.conv, case, placement, self.target.orig_addr, max_steps=max_steps)
-        return rx, ra, compare(self.target.conv, rx, ra, w)
+        if self.xe is None:
+            self.xe = x86emu.X86Engine(w, self.target.x86_code, self.target.callee_info)
+            self.ae = arm64emu.Arm64Engine(w, self.target.image, self.target.stub_orig)
+        else:
+            self.xe.reset(w)
+            self.ae.reset(w)
+        rx = self.xe.run(self.target.conv, case, placement, max_steps=max_steps)
+        ra = self.ae.run(self.target.conv, case, placement, self.target.orig_addr, max_steps=max_steps)
+        return rx, ra, compare(self.target.conv, rx, ra, w, placement.get('sret'), self.target.local_statics)
