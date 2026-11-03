@@ -33,7 +33,7 @@ def reclassify(rec):
         return cause
     try:
         import check_rebind
-        obj = config.WORK.parent / 'link/fixed' / config.obj_name(rec['source'])
+        obj = config.LINK / 'fixed' / config.obj_name(rec['source'])
         if obj.exists() and int(rec['address'], 16) in check_rebind.bypassing_functions(str(obj)):
             return 'split-global'
     except Exception:  # noqa: BLE001

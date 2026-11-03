@@ -7,7 +7,8 @@ Environment variables (defaults are the developer VM's scratch layout):
                    equivalence build); with FNVNX_ORACLE=clang the stand-in objects made by `difffuzz.py oracle-clang`
   FNVNX_TREE       prepared tree (tools/prepare.py output) the AArch64 objects were compiled from
   FNVNX_A64OBJ     ':'-separated directories of AArch64 ILP32 objects (tools/link/compile.sh layout), first hit wins
-  FNVNX_DFWORK     work directory (link step, per-unit images, corpora, results)
+  FNVNX_DFWORK     work directory (per-unit images, corpora, results)
+  FNVNX_DFLINK     link directory of the candidate objects (a64prep.py link: out/, fixed/), default WORK/../link
 """
 import os
 from pathlib import Path
@@ -23,6 +24,8 @@ TREE = Path(os.environ.get('FNVNX_TREE', SCR / 's2c/fresh/tree'))
 A64OBJ = [Path(p) for p in os.environ.get('FNVNX_A64OBJ', '%s:%s' % (SCR / 's13/obj', SCR / 's2c/fresh/obj2')).split(':')
           if p]
 WORK = Path(os.environ.get('FNVNX_DFWORK', SCR / 's13/work'))
+LINK = Path(os.environ.get('FNVNX_DFLINK', WORK.parent / 'link'))     # a64prep.py link output (out/, fixed/)
+A64WORK = Path(os.environ.get('FNVNX_DFA64', WORK / ('a64' if LINK.name == 'link' else 'a64_' + LINK.name)))
 SSE2NEON = Path(os.environ.get('SSE2NEON', SCR / 'ext/sse2neon'))
 LINKTOOLS = PORT / 'tools' / 'link'
 

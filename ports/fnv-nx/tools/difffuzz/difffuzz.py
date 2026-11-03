@@ -22,7 +22,7 @@ import world
 
 
 def _cache():
-    return engine.UnitCache(str(config.WORK.parent / 'link'), str(config.WORK / 'a64'))
+    return engine.UnitCache(str(config.LINK), str(config.A64WORK))
 
 
 def cmd_one(a):

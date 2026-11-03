@@ -33,7 +33,7 @@ def demangler():
     if _dem is None:
         p = config.WORK / 'cache'
         p.mkdir(parents=True, exist_ok=True)
-        src = config.WORK.parent / 'link/out/cache/msvc.tsv'
+        src = config.LINK / 'out/cache/msvc.tsv'
         dst = p / 'msvc.tsv'
         if not dst.exists() and src.exists():
             dst.write_bytes(src.read_bytes())
@@ -44,7 +44,7 @@ def demangler():
 def layouts():
     global _layouts
     if _layouts is None:
-        path = os.environ.get('FNVNX_LAYOUTS', str(config.WORK.parent / 'link/out/layouts.tsv'))
+        path = os.environ.get('FNVNX_LAYOUTS', str(config.LINK / 'out/layouts.tsv'))
         _layouts = {k: v for k, v in layout.load(path).items() if v is not None}
     return _layouts
 

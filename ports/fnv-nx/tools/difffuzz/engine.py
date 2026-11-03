@@ -81,7 +81,7 @@ class UnitCache:
         without a definition, imports)."""
         if self._refmap is None:
             self._refmap = {}
-            path = config.WORK.parent / 'link/out/refs.tsv'
+            path = config.LINK / 'out/refs.tsv'
             for line in open(path, encoding='utf-8', errors='replace'):
                 if line.startswith('#'):
                     continue
@@ -171,7 +171,7 @@ class UnitCache:
         unit image defines or stubs (a constructor stores the Itanium address point where MSVC stored the vftable)."""
         if self._vrows is None:
             self._vrows = []
-            p = config.WORK.parent / 'link/out/addrmap.tsv'
+            p = config.LINK / 'out/addrmap.tsv'
             if p.exists():
                 for line in open(p, encoding='utf-8', errors='replace'):
                     f = line.rstrip('\n').split('\t')

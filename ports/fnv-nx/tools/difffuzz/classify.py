@@ -61,7 +61,7 @@ def image_vftables():
     global _VFT
     if _VFT is None:
         _VFT = set()
-        p = config.WORK.parent / 'link/out/addrmap.tsv'
+        p = config.LINK / 'out/addrmap.tsv'
         if p.exists():
             for line in open(p):
                 f = line.split('\t')
@@ -78,7 +78,7 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'local-static'; return h
     src = getattr(target, 'source', None)
     if src and k in ('return', 'mem-write', 'call-args', 'error'):
-        obj = config.WORK.parent / 'link/fixed' / config.obj_name(src)
+        obj = config.LINK / 'fixed' / config.obj_name(src)
         if obj.exists():
             hits = check_rebind.bypassing_functions(str(obj)).get(target.orig_addr)
             if hits:

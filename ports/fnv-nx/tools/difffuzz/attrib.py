@@ -122,7 +122,7 @@ def cmd_rules(out):
 
 
 def cmd_bridges(out):
-    refs = config.WORK.parent / 'link/out/refs.tsv'
+    refs = config.LINK / 'out/refs.tsv'
     per = collections.defaultdict(collections.Counter)
     for line in open(refs, encoding='utf-8', errors='replace'):
         if line.startswith('#'):

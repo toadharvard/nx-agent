@@ -207,7 +207,7 @@ def unit_cache():
     global _UC
     if _UC is None:
         import engine
-        _UC = engine.UnitCache(str(config.WORK.parent / 'link'), str(config.WORK / 'a64'))
+        _UC = engine.UnitCache(str(config.LINK), str(config.A64WORK))
     return _UC
 
 
