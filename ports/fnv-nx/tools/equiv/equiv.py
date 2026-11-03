@@ -242,19 +242,28 @@ class Resolver:
 CLASS_HEAD = re.compile(r'^class (.+?)\tsize\((\d+)\):$')
 
 
+# cl writes its diagnostics into the same stream as the layout report, sometimes in the middle of a report line
+DIAGNOSTIC = re.compile(r'[A-Za-z]:\\[^\n]*?\(\d+\) ?: (?:warning|error|fatal error|note)[^\n]*\n|'
+                        r'[ \t]+[A-Za-z]:\\[^\n]*\n|'                    # "see declaration of ..." lines
+                        r'[ \t]+(?:with|\[|\]|[A-Za-z_]\w*=[^\n]*)\n')    # template argument context
+
+
 def layout_blocks(text):
     """/d1reportAllClassLayout output -> {class name: (size, layout text)} (vftable listings left out)."""
     out, cur, lines = {}, None, []
+    text = DIAGNOSTIC.sub('', text.replace('\r', ''))
     for line in text.splitlines():
         line = line.rstrip()
         m = CLASS_HEAD.match(line)
+        if not m:   # whitespace is not layout (and diagnostics removed above may have taken some of it)
+            line = re.sub(r'\s*\|\s*', '|', re.sub(r'[ \t]+', ' ', line)).strip()
         if m:
             cur, lines = (m.group(1), int(m.group(2))), []
             continue
         if cur is None:
             continue
         lines.append(line)
-        if line.strip() == '+---' and len(lines) > 1 and line.startswith('\t+'):
+        if line == '+---' and len(lines) > 1:
             out[cur[0]] = (cur[1], '\n'.join(lines))
             cur = None
     return out
@@ -285,7 +294,7 @@ def gen_dir():
     return d
 
 
-LAYOUT_LINE = re.compile(r'^\s*(\d*)\s*((?:\|\s*)+)(.*)$')
+LAYOUT_LINE = re.compile(r'^\s*(\d*)\s*((?:\|\s*)+)(.*)$')   # on normalized lines: '20|name', '|+--- (base class X)'
 
 
 def layout_shape(text):
@@ -349,8 +358,8 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
     args += flags + ([] if plain else ['/I' + str(SHIM), '/I' + str(gen_dir()), '/FI', str(FORCE_INCLUDE)])
     if not plain and (tree / 'equiv_rules.txt').exists():      # a tree from `equiv.py prepare`
         args += ['/FI', str(COMPAT_INCLUDE)] + (['/DFNVNX_EQUIV_LEAN=1'] if lean else [])
-    if layout:
-        args.append('/d1reportAllClassLayout')
+    if layout:      # /w: no diagnostics interleaved with the report (no effect on code)
+        args += ['/d1reportAllClassLayout', '/w']
     args += ['/I' + str(tree / 'include'), str(tree / unit['source']), '/Fo' + str(obj)]
     r = subprocess.run(args, cwd=tree, capture_output=True, text=True, errors='replace')
     ok = r.returncode == 0 and obj.exists()
