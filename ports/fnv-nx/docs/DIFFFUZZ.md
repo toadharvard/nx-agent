@@ -45,6 +45,11 @@ real semantics and are not traced (`libcalls.py`: mem*/str*, `_ftol2` as x87 cod
 `__security_check_cookie`, `_chkstk`, `_allmul/_alldiv/_allshl/_allshr`); runtime names map to the MSVC function
 with the same role (`_Znw*`/`_Zdl*` -> 0x00401000/0x00401030, `__dynamic_cast` -> `__RTDynamicCast` 0x00ec43fb).
 
+**Inlined callees.** An oracle callee outside the unit that the native object never names (GCC inlined a header
+inline function MSVC called out of line) is preloaded from its defining unit's MSVC object and runs for real, so both
+sides do the same work (`engine.preload`). **Vtables (D7).** A native store of an Itanium address point is compared as
+the image vftable it stands for (S2 kind-V rows, else `??_7C@@6B@` paired with `_ZTV<C>`+8 by class name).
+
 ## Comparison (`runner.compare`, first difference wins)
 
 `error` (one side faults: div0, unmapped, ILP32 high address, stack protector), `call-target` / `call-count`
@@ -66,8 +71,26 @@ garbage: stack fill, non-argument registers), `float->int`, `x87-precision`/`flo
 replays it with both instruction traces. Results are one line per function in `<campaign>/results.jsonl`, written when
 the function is done: `--resume` continues after a restart.
 
-Static checks found through divergences: `check_rebind.py` (references that bypass S2's image-variable rebinding),
-`check_falloff.py` (native functions that run off their end).
+Static checks found through divergences: `check_rebind.py` (references that bypass S2's image-variable rebinding:
+GAS resolves a reference to a global of the same object to `.bss+off`, so the defining unit keeps a native copy),
+`check_statics.py` (unit-local variables the oracle keeps at an image address), `check_falloff.py` (native functions
+that run off their end: a non-void function without `return`, GCC drops the epilogue).
+
+## Lockstep (`lockstep.py`, D14)
+
+`difffuzz.py lockstep <addr> [--depth N]` runs a call tree once on both machines: the units of the functions reachable
+from the root through direct oracle calls (at most N, each with an MSVC and a native object) are all loaded (x86: every
+function at its address; AArch64: one image of all their rewritten objects), calls leaving them are intercepted, the
+world starts all zero. Both function-entry traces (original addresses) are aligned tolerating inlining (an entry one
+side never makes is skipped); the first position where both enter known functions but different ones is reported,
+then the usual result comparison. Output `<out>/<addr>.json`.
+
+## Verdicts (`report.py`)
+
+Per stream: S0-compile (body unchanged by prepare), S1-rules:<family> / S1-sse / S8-asm (`attrib.py rules`: the
+function's body differs between pristine and prepared source, family from the changed tokens), S2-link (bridged
+callers, link causes). Hard vs soft causes; `difffuzz.py recheck <dir>` first replays every saved divergence on the
+current engine and the report drops those that no longer reproduce (harness limits fixed since).
 
 ## Usage
 
