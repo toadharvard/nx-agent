@@ -633,3 +633,24 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - S2: bind E entries to their providers, V entries for hand-written image vftables (0x010176f8,
   0x010173dc, 0x010a2f9c/a2fa4, 0x010a318c); S1: the decomp fixes above + SpeedTree class unification + drop the
   decomp's own `struct _iobuf`; exe: confirm medium/low identifications and ThrowInfo names.
+
+### J-0031 | 2026-11-03 | stream: S6c-nine | status: wip | parent: J-0026,J-0028
+
+* **did** - Game integration: `render/nine/game/build.sh` (S5 game build with `D3D9=external` + proxy guest objects +
+  `nine_register.cpp`, a `d3d9.dll` module with `Direct3DCreate9` and no-op `D3DPERF_*`) -> game exefs.nsp +
+  guest.nso; `toolchain/game/boot.cpp` weak hook `fnvnx_d3d9_register` before import binding.
+  `render/nine/switch_host.sh`: shared host-module build (S5 host.c with `FNVNX_HOST_NO_CONSOLE` + Nine + S6d's shader
+  cache, initialised at the first `Direct3DCreate9`, stats to host.log at exit), `HOST_HEAP_MIB` knob.
+  `test/gate.py --game`: boots the game guest and probes the engine's D3D9 path. README §6 heap split, §7 game build.
+* **found** - The game links with Nine; undefined set identical to the null-device link (11,424; 20 D3DX remain);
+  exefs.nsp 2.47 MB, game guest.nso 4.19 MB. Game gate PASS: LoadLibraryA(d3d9.dll) -> GetProcAddress(Direct3DCreate9)
+  = proxy -> Nine/softpipe -> 1 adapter, "Gallium Nine on softpipe", Release 0; the IAT slot d3d9!D3DPERF_SetOptions
+  resolves. Memory: libdrm_nouveau allocates every buffer object from the host heap and Nine keeps a RAM copy of each
+  MANAGED texture (textures twice); guest image and guest thread stacks are host heap too.
+* **decided** - Proposed heap split: host 512 / guest 1536 MiB now; 1024/1024 for exteriors with Nine as is; target
+  768/1280 after dropping MANAGED RAM copies on unified memory; decide from hardware heap logs.
+* **metrics** - game_undefined=11424 game_nine_exefs_kib=2413 game_guest_nso_kib=4091 game_gate_probe=pass
+  test_gate=pass host_heap_mib_default=512
+* **next** - Nine patch: MANAGED textures without the RAM copy; gate launcher that keeps 0x00400000-0x02100000 free;
+  D3DX9 (20 symbols); hardware run.
+* **fork** - S5/S10: host/guest heap logging into host.log.
