@@ -144,7 +144,7 @@ SDK_TAGS = ('tagRECT tagPOINT tagSIZE _FILETIME _SYSTEMTIME _GUID _RTL_CRITICAL_
             'tagBITMAPINFOHEADER').split()
 SDK_TYPEDEFS = {n: '"fnvnx_win32.h"' for n in 'DWORD BOOL BYTE WORD LONG UINT HANDLE HRESULT LPVOID ULONG_PTR DWORD_PTR'.split()}
 SDK_TYPEDEFS.update({'size_t': '<stddef.h>', 'ptrdiff_t': '<stddef.h>', 'va_list': '<stdarg.h>'})
-SDK_STRUCT = re.compile(r'^[ \t]*(typedef\s+)?struct\s+(%s)\s*\{' % '|'.join(SDK_TAGS), re.M)
+SDK_STRUCT = re.compile(r'^[ \t]*(typedef\s+)?(?:struct|class|union)\s+(%s)\s*\{' % '|'.join(SDK_TAGS), re.M)
 SDK_TYPEDEF = re.compile(r'^[ \t]*typedef\s+[\w \t\*]+?[\s\*](%s)\s*;[ \t]*$' % '|'.join(SDK_TYPEDEFS), re.M)
 SDK_DECLARATORS = re.compile(r'^[\s\w\*,]*$')
 
@@ -152,7 +152,7 @@ def r_sdk_types(path, text, stats):
     """DECL2: drop the decomp's own copies of Windows SDK / CRT types at file scope (struct tagRECT {...};,
     typedef unsigned int size_t;, typedef unsigned int DWORD;); the platform header that defines them with the
     SDK's members and the target's types takes the place of the first one (or goes on top of the file)."""
-    if 'typedef' not in text and 'struct' not in text: return text
+    if not any(k in text for k in ('typedef', 'struct', 'class', 'union')): return text
     found = []
     for m in SDK_STRUCT.finditer(text):
         end = prepare.match_brace(text, m.end() - 1)
@@ -400,6 +400,200 @@ def r_interlocked_fallbacks(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- CALL1
+#
+# DECL1 drops the decomp's prototypes of Win32 functions, which spelled the parameters with the decomp's own types
+# (SystemInfo86*, Rect86*, int for a HANDLE, a local copy of _RTL_CRITICAL_SECTION...). Under MSVC each call passed
+# that value to the same import; with the SDK prototypes GCC refuses the conversions. CALL1 casts every argument
+# passed to a pointer parameter of a Win32 function to the SDK parameter type, which is what the decomp's own
+# prototype did implicitly (same bits; ILP32 pointers and ints are both 32-bit).
+
+_W32_SIGS = None
+
+def _w32_signatures():
+    """name -> list of parameter types (None for a non-pointer parameter), from shim/include/fnvnx_win32.h."""
+    global _W32_SIGS
+    if _W32_SIGS is not None: return _W32_SIGS
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shim', 'include', 'fnvnx_win32.h')
+    src = COMMENT.sub(' ', open(here).read())
+    ptr = set(re.findall(r'FNVNX_DECLARE_HANDLE\((\w+)\)', src))
+    for td in re.findall(r'\btypedef\b[^;{}]*;', src):
+        ptr.update(re.findall(r'\*\s*(\w+)\s*[,;)]', td))
+    for td in re.findall(r'\}([^;{}]*);', src):      # } RECT, *PRECT, *LPRECT;
+        ptr.update(re.findall(r'\*\s*(\w+)\s*(?:,|$)', td.strip()))
+    changed = True
+    while changed:                                   # typedef HINSTANCE HMODULE;
+        changed = False
+        for a, b in re.findall(r'\btypedef\s+(\w+)\s+(\w+)\s*;', src):
+            if a in ptr and b not in ptr: ptr.add(b); changed = True
+    sigs, seen = {}, {}
+    for m in re.finditer(r'^[A-Za-z_][\w \t\*]*?\b([A-Za-z_]\w*)\(([^()]*)\)\s*(?:__attribute__\(\([^()]*\)\))?\s*;', src, re.M):
+        name, params = m.group(1), m.group(2).strip()
+        seen[name] = seen.get(name, 0) + 1
+        if params in ('', 'void') or '...' in params: continue
+        types = []
+        for p in params.split(','):
+            p = p.strip()
+            words = re.findall(r'\w+', p)
+            is_ptr = '*' in p or any(w in ptr for w in words)
+            types.append(p if is_ptr else None)
+        sigs[name] = types
+    for n, c in seen.items():                        # overloaded in the shim: leave to overload resolution
+        if c > 1: sigs.pop(n, None)
+    for n in re.findall(r'^\s*inline\b[^(]*\b(\w+)\s*\(', src, re.M): sigs.pop(n, None)
+    _W32_SIGS = sigs
+    return sigs
+
+def _split_args(s):
+    out, depth, cur, q = [], 0, '', None
+    for c in s:
+        if q:
+            cur += c
+            if c == q and not cur.endswith('\\' + q): q = None
+            continue
+        if c in '"\'': q = c
+        elif c in '([{': depth += 1
+        elif c in ')]}': depth -= 1
+        if c == ',' and depth == 0: out.append(cur); cur = ''
+        else: cur += c
+    out.append(cur)
+    return out
+
+W32_VISIBLE = re.compile(r'#\s*include\s*[<"](?:windows\.h|fnvnx_win32\.h|d3d9\.h|wingdi\.h|commctrl\.h|intrin\.h)[>"]')
+
+def r_win32_call_args(path, text, stats):
+    """CALL1: cast pointer arguments of Win32 calls to the SDK parameter types (see above)."""
+    if not W32_VISIBLE.search(text): return text
+    sigs = _w32_signatures()
+    names = [n for n in sigs if n in text]
+    if not names: return text
+    # names the file still declares itself (C++ prototypes kept in a namespace) resolve to those: leave them
+    names = [n for n in names if not re.search(r'[\w\*&>]\s+%s\s*\([^;{}]*\)\s*;' % n, text)]
+    if not names: return text
+    call = re.compile(r'(?<![\w.>:~])(%s)\s*\(' % '|'.join(sorted(names, key=len, reverse=True)))
+    bodies = []                                      # outermost function bodies, in order
+    for o, c, k, _ in prepare.scope_spans(text):
+        if k == 'function' and not (bodies and o < bodies[-1][1]): bodies.append((o, c))
+    if not bodies: return text
+    out, pos, bi = [], 0, 0
+    for m in call.finditer(text):
+        if m.start() < pos: continue
+        while bi < len(bodies) and bodies[bi][1] < m.start(): bi += 1
+        if bi == len(bodies) or not bodies[bi][0] < m.start(): continue
+        before = text[max(0, m.start() - 40):m.start()].rstrip()
+        prev = re.search(r'(\w+)$', before)
+        if prev and prev.group(1) not in ('return', 'case', 'else', 'do'): continue   # a declaration
+        close = _call_end(text, m.end() - 1)
+        args = _split_args(text[m.end():close - 1])
+        types = sigs[m.group(1)]
+        if len(args) != len(types): continue
+        new = []
+        for a, t in zip(args, types):
+            if t is None or not a.strip(): new.append(a); continue
+            new.append(' (%s)(%s)' % (t, a.strip()) if new else '(%s)(%s)' % (t, a.strip()))
+        out.append(text[pos:m.end()]); out.append(','.join(new)); out.append(')'); pos = close
+        stats['CALL1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- RCAST1
+
+REF_CAST_CALL = re.compile(r'\(\s*((?:const\s+)?(?:volatile\s+)?(?:::)?[A-Za-z_][\w:<>, \t\*]*?&)\s*\)\s*'
+                           r'(?=(?:::)?[A-Za-z_][\w:]*\s*\()')
+
+def r_ref_cast_temporaries(path, text, stats):
+    """RCAST1: `(T&)f(args)` where f(args) is a temporary (a functional cast or a call returning by value) ->
+    `(T&)fnvnx_lvalue(f(args))`. MSVC binds a C-style reference cast to a temporary, which lives to the end of the
+    full expression; fnvnx_lvalue (fnvnx_compat.h) returns the same object as an lvalue for that same lifetime.
+    A call that already returns an lvalue is returned unchanged."""
+    if '&)' not in text: return text
+    out, pos = [], 0
+    for m in REF_CAST_CALL.finditer(text):
+        if m.start() < pos: continue
+        open_at = text.index('(', m.end())
+        close = _call_end(text, open_at)
+        if re.match(r'\s*(?:\.|->|\[|\()', text[close:]): continue   # the cast applies to a longer postfix
+        out.append(text[pos:m.end()]); out.append('fnvnx_lvalue(' + text[m.end():close] + ')'); pos = close
+        stats['RCAST1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- CS28
+#
+# The decomp's generated layout headers spell the critical section of engine classes as `_RTL_CRITICAL_SECTION`
+# with a 28-byte layout (include/_RTL_CRITICAL_SECTION.h: 16-byte Synchronization.RawEvent[4], LockCount,
+# RecursionCount, OwningThread - the Xbox 360 type), and every offset after it is asserted on that basis
+# (RecursiveLock::m_uiFirstValue == 0x1C, BSThread 0x40, AbstractHeap, IO_Thread, NiCriticalSection ...). The
+# byte-matching code of those units was compiled against that layout, so the PC image has 28 bytes there too; the
+# PC CRITICAL_SECTION is 24. FNVNX_CS28 (fnvnx_win32.h) is the PC CRITICAL_SECTION followed by 4 unidentified bytes:
+# the API works on the first 24 bytes (CALL1 casts &x to LPCRITICAL_SECTION), every decomp offset stays true.
+
+CS28_FILE = re.compile(r'#\s*include\s*"(?:[^"]*/)?_RTL_CRITICAL_SECTION\.h"|'
+                       r'\b(?:class|struct)\s+_RTL_CRITICAL_SECTION\s*\{[^}]*\bSynchronization\b', re.S)
+CS28_MEMBER = re.compile(r'^([ \t]*)_RTL_CRITICAL_SECTION([ \t]+\w+[ \t]*;)', re.M)
+
+def r_cs28_members(path, text, stats):
+    """CS28: `_RTL_CRITICAL_SECTION m;` class members in files that use the decomp's 28-byte layout of it ->
+    `FNVNX_CS28 m;` (see above)."""
+    if '_RTL_CRITICAL_SECTION' not in text or not CS28_FILE.search(text): return text
+    spans, out, pos = prepare.scope_spans(text), [], 0
+    for m in CS28_MEMBER.finditer(text):
+        chain = prepare.scope_chain(spans, m.start())
+        if not chain or chain[-1][0] != 'class': continue
+        out.append(text[pos:m.start()]); out.append(m.group(1) + 'FNVNX_CS28' + m.group(2)); pos = m.end()
+        stats['CS28'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- NEW3
+
+GLOBAL_DELETE = re.compile(r'^([ \t]*(?:static\s+)?(?:inline\s+|__forceinline\s+)?void\s+(?:__cdecl\s+)?operator\s+delete\s*'
+                           r'(?:\[\s*\])?\s*\([^;{}()]*\))(\s*)(?=[{;])', re.M)
+
+def r_global_delete_noexcept(path, text, stats):
+    """NEW3: the decomp's file-scope replacements of the global operator delete get `noexcept`, the specification
+    every deallocation function has implicitly (libstdc++'s <new> spells it, GCC then rejects the unspelled one)."""
+    if 'operator delete' not in text: return text
+    spans, out, pos = None, [], 0
+    for m in GLOBAL_DELETE.finditer(text):
+        if spans is None: spans = prepare.scope_spans(text)
+        if prepare.scope_chain(spans, m.start()): continue
+        out.append(text[pos:m.end(1)]); out.append(' noexcept'); pos = m.end(1)
+        stats['NEW3'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- TYPEID1
+
+def r_typeid_include(path, text, stats):
+    """TYPEID1: MSVC accepts typeid without <typeinfo>; GCC does not. <typeinfo> on top of files that use typeid
+    (not in files that carry their own copy of MSVC's std::type_info / std::exception)."""
+    if 'typeid' not in text or not re.search(r'\btypeid\s*\(', text) or prepare.OWN_STD.search(text): return text
+    stats['TYPEID1'] += 1
+    return '#include <typeinfo> /* fnv-nx TYPEID1 */\n' + text
+
+# ---------------------------------------------------------------------------------------------------------- UNIT1
+#
+# Targeted renames for single files (pragmatic fixes on the boot path; every entry says why).
+
+UNIT_RENAMES = {
+    # tesdatahandler: a local `struct FILETIME {low, high}` / `struct WIN32_FIND_DATAA` with its own member names,
+    # in a header that also needs the SDK's file functions; the local types keep their layout under new names.
+    'fallout_shared/tesdatahandler_files.h': [(r'\bFILETIME\b', 'TesFileTime'), (r'\bWIN32_FIND_DATAA\b', 'TesFindData')],
+    'fallout_shared/tesdatahandler_decls.h': [(r'\bFILETIME\b', 'TesFileTime'), (r'\bWIN32_FIND_DATAA\b', 'TesFindData')],
+    'fallout_shared/tesdatahandler.cpp': [(r'\bFILETIME\b', 'TesFileTime'), (r'\bWIN32_FIND_DATAA\b', 'TesFindData')],
+}
+
+def r_unit_renames(path, text, stats):
+    """UNIT1: targeted per-file renames (UNIT_RENAMES)."""
+    p = path.replace(os.sep, '/')
+    for key, subs in UNIT_RENAMES.items():
+        if p.endswith('/src/' + key):
+            for pat, rep in subs:
+                text, n = re.subn(pat, rep, text)
+                stats['UNIT1'] += n
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -419,5 +613,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks,
+RULES = [r_unit_renames, r_keep_definitions, r_if_exists, r_sal_attributes, r_cs28_members, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include,
          r_msvc_base_layout]

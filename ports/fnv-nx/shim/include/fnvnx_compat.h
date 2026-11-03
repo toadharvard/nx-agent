@@ -77,6 +77,12 @@ inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volat
  * (tools/link) binds references to it by address (prepare.py rule KEEP1). */
 #define FNVNX_KEEP __attribute__((used))
 
+/* MSVC binds a C-style cast to a non-const reference to a temporary ((T&)Make(x)); prepare.py RCAST1 wraps the
+ * temporary in fnvnx_lvalue, which hands back the same object (alive to the end of the full expression). */
+#ifdef __cplusplus
+template <class T> inline T &fnvnx_lvalue(T &&t) { return t; }
+#endif
+
 /* MSVC class layout: derived members start at sizeof(base), never in its tail padding (prepare.py rule TAIL1
  * puts FNVNX_MSVC_BASE_END(last base) first in every derived class body). A zero-width bit-field of an integer
  * type with the base's alignment moves the next member to roundup(dsize(base), alignof(base)) == sizeof(base). */
