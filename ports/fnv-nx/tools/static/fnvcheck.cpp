@@ -235,7 +235,7 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
       // >= 2^w; signed targets - only values outside the target's range or NaN (x86 0x80000000.., AArch64 saturates)
       std::string cls = sgn ? (w == 64 ? "F2S64" : "F2S") : (w == 64 ? "F2U64" : "F2U");
       emit(cls.c_str(), E->getBeginLoc(),
-           std::string(isa<ExplicitCastExpr>(E) ? "explicit" : "implicit") + "\t" + ty(Sub->getType()) + "->" +
+           std::string(isa<ExplicitCastExpr>(E) || (isa<ImplicitCastExpr>(E) && cast<ImplicitCastExpr>(E)->isPartOfExplicitCast()) ? "explicit" : "implicit") + "\t" + ty(Sub->getType()) + "->" +
                ty(E->getType()) + (kind.empty() ? "" : " " + kind) + "\t" + fn() + "\t" + text(E->getSourceRange()));
     } else if (K == CK_PointerToIntegral) {
       QualType T = E->getType().getCanonicalType();

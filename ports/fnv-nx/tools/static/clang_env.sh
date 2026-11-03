@@ -25,6 +25,7 @@ clang_env_setup() {
   # the real force-include minus its target guards; __int128 does not exist on i686 (same alignment, 16)
   sed -e '/^#error/d' \
       -e 's/typedef unsigned __int128 type;/typedef unsigned int type __attribute__((aligned(16)));/' \
+      -E -e 's/^inline __attribute__\(\(always_inline\)\) void (_ReadWriteBarrier|_ReadBarrier|_WriteBarrier)\(void\) \{.*\}$/void \1(void); \/* clang: MS builtin *\//' \
       "$here/shim/include/fnvnx_compat.h" > "$out/clang/gnu/fnvnx_compat.h"
   CLANG_COMMON=(-std=gnu++17 -fsyntax-only -ferror-limit=0 -fno-color-diagnostics -fno-caret-diagnostics
                 -fshort-wchar -fsigned-char -I"$out/clang/inc" -I"$here/shim/include")
@@ -32,6 +33,12 @@ clang_env_setup() {
               -fno-delayed-template-parsing -include "$here/tools/static/prelude_msvc.h" "${CLANG_COMMON[@]}"
               -isystem /usr/include/c++/13 -isystem /usr/include/x86_64-linux-gnu/c++/13/32
               -isystem /usr/include/x86_64-linux-gnu -isystem /usr/include -fgnuc-version=4.2.1)
+  # clang's flow-sensitive warnings work at -fsyntax-only (GCC needs -O2 for its counterparts, gcc_warn.sh)
+  CLANG_WARN=(-Wuninitialized -Wsometimes-uninitialized -Wreturn-type -Wreturn-stack-address -Wdangling
+              -Wdangling-gsl -Wunsequenced -Wshift-count-overflow -Wshift-count-negative -Wvarargs -Wformat
+              -Wnon-pod-varargs -Wtautological-undefined-compare -Wbitfield-enum-conversion -Wsigned-enum-bitfield
+              -Wfloat-overflow-conversion -Wbitfield-constant-conversion -Wcast-function-type -Wdivision-by-zero
+              -Wuninitialized-const-reference -Wnull-dereference)
   CLANG_GNU=(--target=i686-linux-gnu -malign-double -fms-extensions -frounding-math
              -include "$out/clang/gnu/fnvnx_compat.h" "${CLANG_COMMON[@]}")
 }
