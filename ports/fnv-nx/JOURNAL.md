@@ -654,3 +654,26 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - Nine patch: MANAGED textures without the RAM copy; gate launcher that keeps 0x00400000-0x02100000 free;
   D3DX9 (20 symbols); hardware run.
 * **fork** - S5/S10: host/guest heap logging into host.log.
+
+### J-0032 | 2026-11-03 | stream: S5-toolchain | status: wip | parent: J-0021,J-0027
+
+* **did** - Integrated S10: `fnvnx_reserve_early` in `__libnx_initheap` (guest heap shrinks), `fnvnx_reserve_late`
+  in main, `map_fixed` through `fnvnx_reserve_map_fixed`, `as_name()` from the stack region; guest runtime runs
+  `fnvnx_xc_run_initializers` after `__libc_init_array` and `fnvnx_xc_cexit` after main; boot captures the image
+  `__xc` slots before fixups; game link runs `mkxctab.py` and links xc/onexit/xctab. Guest made relocatable
+  (`guest_pie.specs`, link base 0x30000000, self-relocation via MOD0, header words from elf2nso); the host places it
+  in the first free gap above 0x02100000. Emulator: relocatable load, `--skip-faulting-init`.
+* **found** - All 31,068 absolute image symbols are reached through the GOT (50,224 refs, 0 PC-relative), so a PIE
+  guest is cheap. binutils 2.45.1 turns GOT entries of absolute symbols into RELATIVE relocs in an ILP32 PIE
+  (worked around: the relocator only moves values in its own link range). Relaunch model: relocatable 5.3 % for any
+  size vs fixed 8.2 % (10 MiB) / 16.3 % (40 MiB). Traced boot (no exe): GCC initializers ran (6 fault on the empty
+  image), all 10,926 S10 address-order initializers called (339 fault writing tables some unit defines inside
+  `.text`, e.g. `g_apfnA26E20CurvesCopy` via RegisterFloatKeyOps), 199 distinct traps, **`main` reached**; stops
+  because WinMain (0x0086a850) is not in S2's object set yet. 29 TLS initial-exec references to absolute `__fnv_`
+  symbols are wrong in any link.
+* **decided** - D9: the guest is relocatable by default (only the data window is a required range); fixed placement
+  stays available (`GUEST=fixed`).
+* **metrics** - guest_mib=8.98 relaunch_reloc_pct=5.3 xc_called=10926 init_faults=345 boot_traps_distinct=199
+  boot_reached=main game_undefined=11678 hw_tests=0
+* **next** - WinMain's unit (compiles since J-0025) into the object set; XC1 objects; `.text`-defined tables (S1/S2);
+  TLSIE on absolute symbols (S2); traced boot with the player's exe.
