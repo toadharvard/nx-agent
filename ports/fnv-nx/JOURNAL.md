@@ -307,3 +307,24 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   initialization, float overload ambiguities.
 * **fork** - S1b-patches: per-site hunks in `patches/` for the 74 x86-inconsistent declarations and the ~37
   `_ftol2`/`_CIsqrt` sites, checked against the original binary; needs J-0008, J-0009, J-0013.
+
+### J-0014 | 2026-11-03 | stream: S7-audio-input | status: wip | parent: J-0009
+
+* **did** - Inventoried DirectSound8 / DirectInput8 / XInput / vorbisfile use (`docs/AUDIO_INPUT.md`); SDK-order
+  shims `dsound.h`, `dinput.h`, `xinput.h` (32-bit layouts static_asserted); `platform/audio` (software mixer: direct
+  buffer reads, linear resampling to 48 kHz, cursors, looping, notifications; DS 3D math with rolloff/cones/doppler/
+  deferred commit; host null/wav and Horizon audren backends; boxed vorbisfile glue) and `platform/input` (XInput
+  over libnx hid with rumble, DirectInput keyboard/mouse, USB HID -> DIK, touch-as-mouse, registration through S4's
+  hooks). `tests/s7`: 16 host tests / 304 checks pass + ILP32 syntax check.
+* **found** - The engine calls DSound/DInput through stand-in classes with placeholder names: slot index is the
+  contract (31 stand-ins, 88 named calls in 14 files). 9 imports; vorbisfile is a DLL import (6 `ov_*`,
+  `ov_open_callbacks` at IAT 0x00fdf438 missing from `imports.tsv`); the engine embeds 0x2D0 bytes for
+  `OggVorbis_File`. No XInputSetState import (no rumble on PC). Streaming polls the play cursor. libnx C++ headers
+  are not ILP32-clean (Horizon glue sits on the LP64 side behind fixed-width C interfaces).
+* **decided** - DirectInput = system keyboard + mouse only, gamepad through XInput; face buttons by label by default;
+  software-only DSound, FX parameters stored without DSP for now; libogg 1.3.5 / libvorbis 1.3.7 pinned.
+* **metrics** - s7_standin_structs=31 s7_named_calls=88 s7_imports=9 s7_tests=16 s7_checks=304
+* **next** - Horizon build of audren/hid backends; vorbis build; reverb DSP; swkbd text entry; WM_CHAR feed; Bink
+  audio through our IDirectSound8.
+* **fork** - S4: registered-module fallback in `fnvnx_win32_lookup_export` + slot 0x00fdf438. S5: libogg/libvorbis
+  build. S6: `BinkOpenDirectSound` routing. S3: verify the exe's GUID copies.
