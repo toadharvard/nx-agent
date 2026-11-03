@@ -735,3 +735,26 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   initial values of global data (`.data`/`.rdata` beyond what objects emit), the 56 functions with no body, game
   assets.
 * **next** - start S1b, S2b and the lockstep boot once S11 reports a working MSVC 2008 (user's observation).
+
+### J-0037 | 2026-11-03 | stream: S11-equivalence | status: wip | parent: J-0025,J-0036
+
+* **did** - MSVC 2008 Express SP1 (cl 15.00.30729.01) and RTM (cl 15.00.21022.08) from Microsoft's own ISOs on
+  download.microsoft.com (SHA-256 + Authenticode recorded in `tools/equiv/README.md`), unpacked as the decomp README
+  describes, run under Wine 9.0. `tools/equiv/equiv.py` builds pristine vs prepared trees per unit and fingerprints
+  every function (code bytes + relocation targets); every rule classified in `docs/EQUIVALENCE.md` (x86-neutral /
+  layout-affecting / platform-specific; `tests/s11` fails on an unclassified rule).
+* **found** - Pristine decomp: 2,987/2,988 units compile (the single VC 2005 unit lacks its compiler); all 68,456
+  recipe functions present at exactly the recipe size. Neutral rules vs pristine (first 1,899 units): 1,523 units
+  identical, 308 differ (563 functions), 68 no longer compile under MSVC. **DECL1 changes callees (real semantic
+  bugs):** the decomp's own prototypes sometimes name *game* functions with Win32/CRT names - e.g. `GetCurrentThreadId`
+  in falloutaudiomedia.cpp is game function 0x00830470 (14 callers now call kernel32), `Sleep` in bsspinlock_console is
+  a spin-lock acquire, `EnterCriticalSection`/`LeaveCriticalSection` in memorymanager.cpp are the Interlocked import
+  slots, `GetFileSize` is `FileSizeInfo::GetFileSize`; 27 such names found statically. Benign: CRT wrappers that only
+  forward. EXC1 changes only exceptional paths; NEW2/CTOR1 add a null check from `throw()` placement new. DECL1 misses
+  `operator new(unsigned, void*)` (4 units).
+* **decided** - D13: a prepare rule may only drop or retarget a declaration when units.json binds that decorated
+  name to an import slot or to the CRT function of the same name; otherwise the declaration keeps its address
+  binding (renamed if it collides). Every x86-neutral rule must pass the S11 equivalence gate.
+* **metrics** - msvc_units_compiled=2987 recipe_functions_present=68456 equiv_units_identical=1523
+  equiv_units_differ=308 equiv_functions_differ=563 decl1_rebound_names=27
+* **next** - S1 fixes DECL1 per D13; S11 finishes the full neutral run, attribution, layout runs.
