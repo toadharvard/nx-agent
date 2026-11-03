@@ -36,13 +36,12 @@ compile() {   # src obj extra-flags...
 }
 export -f compile; export COMMON PINC ARCH
 
-"$HERE/platform_adapt.sh" "$P" "$OUT/adapt"
-SRCS=("$OUT/adapt/sync.cpp" "$OUT/adapt/exports.cpp")
+SRCS=()
 for f in "$P"/win32/*.cpp "$P"/crt/*.c "$P"/crt/*.cpp "$P"/audio/*.cpp "$P"/input/*.cpp; do
-	case "$f" in */input_horizon.cpp|*/win32/sync.cpp|*/win32/exports.cpp) continue ;; esac   # its libnx part is on the host (host_v3.inc)
+	case "$f" in */input_horizon.cpp) continue ;; esac   # its libnx part is on the host (host_v3.inc)
 	SRCS+=("$f")
 done
-SRCS+=("$TC/guest/os_guest.c" "$TC/guest/platform_glue.cpp" "$TC/game/boot.cpp" "$TC/game/w32_c_aliases.c")
+SRCS+=("$TC/guest/os_guest.c" "$TC/guest/platform_glue.cpp" "$TC/game/boot.cpp")
 # D3D9=null (default): headless null device (null_d3d9.cpp, generated); D3D9=external: none here, the
 # renderer (render/nine's guest-side proxy) provides Direct3DCreate9 and is added with EXTRA_OBJS.
 case "${D3D9:-null}" in

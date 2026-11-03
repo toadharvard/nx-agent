@@ -158,11 +158,8 @@ void EnterCriticalSection(LPCRITICAL_SECTION);
 BOOL TryEnterCriticalSection(LPCRITICAL_SECTION);
 void LeaveCriticalSection(LPCRITICAL_SECTION);
 void DeleteCriticalSection(LPCRITICAL_SECTION);
-/* Interlocked*: compiler intrinsics on MSVC (linkage never mattered); declared with C++ linkage because the
- * decomp's non-MSVC fallback (include/layout_support.h) defines InterlockedIncrement/Decrement as C++ inlines. */
-#ifdef __cplusplus
-}
-#endif
+/* Interlocked*: C linkage as in the SDK (the platform layer defines them); prepare.py INTL1 drops the decomp's own
+ * C++ inline fallbacks (include/layout_support.h, non-MSVC branch). */
 LONG InterlockedIncrement(volatile LONG *);
 LONG InterlockedDecrement(volatile LONG *);
 LONG InterlockedExchange(volatile LONG *, LONG);
@@ -170,9 +167,6 @@ LONG InterlockedExchangeAdd(volatile LONG *, LONG);
 LONG InterlockedCompareExchange(volatile LONG *, LONG, LONG);
 PVOID InterlockedCompareExchangePointer(PVOID volatile *, PVOID, PVOID);
 PVOID InterlockedExchangePointer(PVOID volatile *, PVOID);
-#ifdef __cplusplus
-extern "C" {
-#endif
 HANDLE CreateEventA(void *, BOOL, BOOL, LPCSTR);
 HANDLE CreateMutexA(void *, BOOL, LPCSTR);
 HANDLE CreateSemaphoreA(void *, LONG, LONG, LPCSTR);
@@ -390,6 +384,9 @@ typedef struct tagBITMAPINFOHEADER {
 #define E_INVALIDARG ((HRESULT)0x80070057L)
 #ifdef __cplusplus
 #define FNVNX_IUNKNOWN_DEFINED
+#ifndef STDMETHODCALLTYPE   /* fnvnx_compat.h defines it for the game; platform/ builds without it */
+#define STDMETHODCALLTYPE
+#endif
 struct IUnknown
 {
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppvObject) = 0;
@@ -399,7 +396,7 @@ struct IUnknown
 typedef IUnknown *LPUNKNOWN;
 #endif
 
-#ifdef __cplusplus
+#if defined(__cplusplus) && defined(FNVNX_COMPAT_H)   /* game units only: platform/ takes these addresses */
 /* The decomp declares the critical-section functions with its own parameter types (int*, char*, local copies of
  * _RTL_CRITICAL_SECTION) and passes those; DECL1 drops those prototypes, these take their place (same function). */
 inline void InitializeCriticalSection(void *p) { InitializeCriticalSection((LPCRITICAL_SECTION)p); }
@@ -413,7 +410,9 @@ inline BOOL QueryPerformanceCounter(unsigned long long *p) { return QueryPerform
 inline BOOL QueryPerformanceFrequency(long long *p) { return QueryPerformanceFrequency((LARGE_INTEGER *)p); }
 inline BOOL QueryPerformanceFrequency(unsigned long long *p) { return QueryPerformanceFrequency((LARGE_INTEGER *)p); }
 
+#if defined(__ILP32__) || defined(_WIN32)   /* the SDK sizes hold for 32-bit targets (host tests run LP64) */
 static_assert(sizeof(BITMAPFILEHEADER) == 14 && sizeof(BITMAPINFOHEADER) == 40 && sizeof(LUID) == 8, "SDK layout");
 static_assert(sizeof(CRITICAL_SECTION) == 24 && sizeof(LARGE_INTEGER) == 8 && sizeof(SYSTEM_INFO) == 36, "SDK layout");
+#endif
 #endif
 #endif

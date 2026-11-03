@@ -376,6 +376,30 @@ def r_string_array_address(path, text, stats):
         return m.group(1)
     return STR_ADDR.sub(sub, text)
 
+# ---------------------------------------------------------------------------------------------------------- INTL1
+
+INTERLOCKED_DEF = re.compile(r'^[ \t]*(?:FNV_FORCEINLINE|__forceinline|static\s+inline|inline)\s+[\w \t\*]*?\b'
+                             r'(Interlocked\w+)\s*\([^;{}]*\)\s*\{', re.M)
+
+def r_interlocked_fallbacks(path, text, stats):
+    """INTL1: drop the decomp's own inline definitions of the Win32 Interlocked* functions at file scope (the
+    non-MSVC branch of its layout_support headers); the shim declares them like the SDK, with C linkage, and the
+    platform layer defines them (same semantics: full-barrier atomics). The shim takes the place of the first one."""
+    if 'Interlocked' not in text: return text
+    spans, out, pos, have = None, [], 0, False
+    for m in INTERLOCKED_DEF.finditer(text):
+        if m.start() < pos: continue
+        if spans is None: spans = prepare.scope_spans(text)
+        if prepare.scope_chain(spans, m.start()): continue
+        end = prepare.match_brace(text, m.end() - 1)
+        nl = '\n' * text.count('\n', m.start(), end)
+        out.append(text[pos:m.start()])
+        out.append(('/* fnv-nx INTL1 */' if have else '#include "fnvnx_win32.h" /* fnv-nx INTL1 */') + nl)
+        have, pos = True, end
+        stats['INTL1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -395,5 +419,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address,
+RULES = [r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks,
          r_msvc_base_layout]
