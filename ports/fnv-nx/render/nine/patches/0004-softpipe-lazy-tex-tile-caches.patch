@@ -1,0 +1,56 @@
+--- a/src/gallium/drivers/softpipe/sp_context.c
++++ b/src/gallium/drivers/softpipe/sp_context.c
+@@ -254,14 +254,7 @@
+       softpipe->cbuf_cache[i] = sp_create_tile_cache( &softpipe->pipe );
+    softpipe->zsbuf_cache = sp_create_tile_cache( &softpipe->pipe );
+ 
+-   /* Allocate texture caches */
+-   for (sh = 0; sh < ARRAY_SIZE(softpipe->tex_cache); sh++) {
+-      for (i = 0; i < ARRAY_SIZE(softpipe->tex_cache[0]); i++) {
+-         softpipe->tex_cache[sh][i] = sp_create_tex_tile_cache(&softpipe->pipe);
+-         if (!softpipe->tex_cache[sh][i])
+-            goto fail;
+-      }
+-   }
++   /* Texture caches are created on first bind (softpipe_set_sampler_views, fnv-nx) */
+ 
+    softpipe->fs_machine = tgsi_exec_machine_create(PIPE_SHADER_FRAGMENT);
+ 
+--- a/src/gallium/drivers/softpipe/sp_state_sampler.c
++++ b/src/gallium/drivers/softpipe/sp_state_sampler.c
+@@ -117,8 +117,11 @@
+          &softpipe->tgsi.sampler[shader]->sp_sview[start + i];
+       struct pipe_sampler_view **pview = &softpipe->sampler_views[shader][start + i];
+       pipe_sampler_view_reference(pview, views[i]);
+-      sp_tex_tile_cache_set_sampler_view(softpipe->tex_cache[shader][start + i],
+-                                         views[i]);
++      if (!softpipe->tex_cache[shader][start + i] && views[i])
++         softpipe->tex_cache[shader][start + i] = sp_create_tex_tile_cache(pipe);
++      if (softpipe->tex_cache[shader][start + i])
++         sp_tex_tile_cache_set_sampler_view(softpipe->tex_cache[shader][start + i],
++                                            views[i]);
+       /*
+        * We don't really have variants, however some bits are different per shader,
+        * so just copy?
+--- a/src/gallium/drivers/softpipe/sp_flush.c
++++ b/src/gallium/drivers/softpipe/sp_flush.c
+@@ -58,7 +58,8 @@
+ 
+       for (sh = 0; sh < ARRAY_SIZE(softpipe->tex_cache); sh++) {
+          for (i = 0; i < softpipe->num_sampler_views[sh]; i++) {
+-            sp_flush_tex_tile_cache(softpipe->tex_cache[sh][i]);
++            if (softpipe->tex_cache[sh][i])
++               sp_flush_tex_tile_cache(softpipe->tex_cache[sh][i]);
+          }
+       }
+    }
+@@ -176,7 +177,8 @@
+ 
+    for (sh = 0; sh < ARRAY_SIZE(softpipe->tex_cache); sh++) {
+       for (i = 0; i < softpipe->num_sampler_views[sh]; i++) {
+-         sp_flush_tex_tile_cache(softpipe->tex_cache[sh][i]);
++         if (softpipe->tex_cache[sh][i])
++            sp_flush_tex_tile_cache(softpipe->tex_cache[sh][i]);
+       }
+    }
+ 

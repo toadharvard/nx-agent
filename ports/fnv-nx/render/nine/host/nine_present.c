@@ -1,13 +1,22 @@
-/* fnv-nx: ID3DPresent / ID3DPresentGroup over libnx nwindow (stream S6c-nine, README §4). LP64 host side.
+/* fnv-nx: ID3DPresent / ID3DPresentGroup (stream S6c-nine, README §4). LP64 host side.
  *
- * Window buffers are nouveau pipe_resources (patch 0002 passes the pipe_resource* as the "dma-buf fd"); each is
- * attached to an nwindow slot with nwindowConfigureBuffer. A slot is "released" (usable by nine) while we hold it
- * dequeued; PresentBuffer queues it with the resource's syncpoint fence, so the compositor waits on the GPU.
- * Dequeue order of the BufferQueue does not matter: WaitBufferReleased dequeues until the wanted slot is ours. */
+ * Switch: window buffers are nouveau pipe_resources (patch 0002 passes the pipe_resource* as the "dma-buf fd");
+ * each is attached to an nwindow slot with nwindowConfigureBuffer. A slot is "released" (usable by nine) while we
+ * hold it dequeued; PresentBuffer queues it with the resource's syncpoint fence, so the compositor waits on the
+ * GPU. Dequeue order of the BufferQueue does not matter: WaitBufferReleased dequeues until the wanted slot is ours.
+ *
+ * Host gate (x86-64 Linux, softpipe): the same COM objects; the backend captures each presented buffer as an
+ * offscreen frame (gate/gate_winsys.c) instead of queueing it to a window. Rendering is complete when
+ * PresentBuffer runs (nine's present() flushes the context it acquired from the CSMT worker; softpipe renders at
+ * flush). */
 #include <stdlib.h>
 #include <string.h>
 #include "nine_host.h"
+#ifdef __SWITCH__
 #include "nouveau_switch_public.h"
+#else
+#include <pthread.h>
+#endif
 
 #define NX_MAX_SLOTS 8
 
@@ -16,7 +25,9 @@ struct D3DWindowBuffer { struct pipe_resource* res; int slot; };
 typedef struct NxPresent {
     ID3DPresent iface;
     LONG refs;
+#ifdef __SWITCH__
     NWindow* nw;
+#endif
     int nSlots;
     bool held[NX_MAX_SLOTS];        /* dequeued by us, not yet queued */
     UINT interval;
@@ -30,12 +41,82 @@ typedef struct NxPresentGroup {
 
 static NxPresent* P(ID3DPresent* p) { return (NxPresent*)p; }
 
+/* ---- backend ------------------------------------------------------------------------------------------- */
+#ifdef __SWITCH__
 void nx_present_screen_size(int* w, int* h) {
     u32 ww = 1280, hh = 720;
     NWindow* nw = nwindowGetDefault();
     if (nw && nwindowIsValid(nw)) nwindowGetDimensions(nw, &ww, &hh);
     *w = (int)ww; *h = (int)hh;
 }
+static bool be_open(NxPresent* p) { p->nw = nwindowGetDefault(); return p->nw && nwindowIsValid(p->nw); }
+static void be_close(NxPresent* p) {
+    for (int i = 0; i < p->nSlots; i++) if (p->held[i]) nwindowCancelBuffer(p->nw, i, NULL);
+    nwindowReleaseBuffers(p->nw);
+}
+static void be_interval(NxPresent* p) { nwindowSetSwapInterval(p->nw, p->interval); }
+static bool be_configure(NxPresent* p, int slot, struct pipe_resource* res) {
+    NvGraphicBuffer gb;
+    if (nouveau_switch_resource_get_buffer(res, &gb) != 0) return false;
+    return R_SUCCEEDED(nwindowConfigureBuffer(p->nw, slot, &gb));
+}
+static int be_dequeue(NxPresent* p) {
+    s32 s = -1;
+    if (R_FAILED(nwindowDequeueBuffer(p->nw, &s, NULL)) || s < 0 || s >= NX_MAX_SLOTS) return -1;
+    return s;
+}
+static bool be_queue(NxPresent* p, struct D3DWindowBuffer* b) {
+    NvMultiFence mf; memset(&mf, 0, sizeof mf);
+    NvFence f;
+    f.id = (u32)nouveau_switch_resource_get_syncpoint(b->res, &f.value);
+    if ((int)f.id >= 0) nvMultiFenceCreate(&mf, &f);
+    return R_SUCCEEDED(nwindowQueueBuffer(p->nw, b->slot, &mf));
+}
+typedef struct { void (WINAPI *fn)(void*); void* arg; Thread t; } NxThr;
+static void thr_entry(void* a) { NxThr* t = a; t->fn(t->arg); }
+static void* be_thread_create(void* fn, void* arg) {
+    NxThr* t = calloc(1, sizeof *t);
+    if (!t) return NULL;
+    t->fn = (void (WINAPI *)(void*))fn;   /* nine passes a Windows-ABI thread function */
+    t->arg = arg;
+    if (R_FAILED(threadCreate(&t->t, thr_entry, t, NULL, 0x40000, 0x2C, -2))) { free(t); return NULL; }
+    threadStart(&t->t);
+    return t;
+}
+static bool be_thread_join(void* h) {
+    NxThr* t = h;
+    if (!t) return false;
+    threadWaitForExit(&t->t); threadClose(&t->t); free(t);
+    return true;
+}
+#else  /* host gate */
+void nx_present_screen_size(int* w, int* h) { *w = 1280; *h = 720; }
+static bool be_open(NxPresent* p) { (void)p; return true; }
+static void be_close(NxPresent* p) { (void)p; }
+static void be_interval(NxPresent* p) { (void)p; }
+static bool be_configure(NxPresent* p, int slot, struct pipe_resource* res) { (void)p; (void)slot; (void)res; return true; }
+static int be_dequeue(NxPresent* p) {   /* an offscreen frame is free again as soon as it was captured */
+    for (int i = 0; i < p->nSlots; i++) if (!p->held[i]) return i;
+    return -1;
+}
+static bool be_queue(NxPresent* p, struct D3DWindowBuffer* b) { (void)p; nx_gate_capture(b->res, (unsigned)b->slot); return true; }
+typedef struct { void (WINAPI *fn)(void*); void* arg; pthread_t t; } NxThr;
+static void* thr_entry(void* a) { NxThr* t = a; t->fn(t->arg); return NULL; }
+static void* be_thread_create(void* fn, void* arg) {
+    NxThr* t = calloc(1, sizeof *t);
+    if (!t) return NULL;
+    t->fn = (void (WINAPI *)(void*))fn;   /* nine passes a Windows-ABI thread function */
+    t->arg = arg;
+    if (pthread_create(&t->t, NULL, thr_entry, t)) { free(t); return NULL; }
+    return t;
+}
+static bool be_thread_join(void* h) {
+    NxThr* t = h;
+    if (!t) return false;
+    pthread_join(t->t, NULL); free(t);
+    return true;
+}
+#endif
 
 /* ---- ID3DPresent ----------------------------------------------------------------------------------------- */
 static HRESULT WINAPI p_QueryInterface(ID3DPresent* This, REFIID riid, void** ppv) {
@@ -48,12 +129,7 @@ static HRESULT WINAPI p_QueryInterface(ID3DPresent* This, REFIID riid, void** pp
 static ULONG WINAPI p_AddRef(ID3DPresent* This) { return (ULONG)__atomic_add_fetch(&P(This)->refs, 1, __ATOMIC_SEQ_CST); }
 static ULONG WINAPI p_Release(ID3DPresent* This) {
     LONG r = __atomic_sub_fetch(&P(This)->refs, 1, __ATOMIC_SEQ_CST);
-    if (!r) {
-        NxPresent* p = P(This);
-        for (int i = 0; i < p->nSlots; i++) if (p->held[i]) nwindowCancelBuffer(p->nw, i, NULL);
-        nwindowReleaseBuffers(p->nw);
-        free(p);
-    }
+    if (!r) { be_close(P(This)); free(P(This)); }
     return (ULONG)r;
 }
 static HRESULT WINAPI p_SetPresentParameters(ID3DPresent* This, D3DPRESENT_PARAMETERS* pp, D3DDISPLAYMODEEX* mode) {
@@ -66,7 +142,7 @@ static HRESULT WINAPI p_SetPresentParameters(ID3DPresent* This, D3DPRESENT_PARAM
     if (pp->BackBufferFormat == D3DFMT_UNKNOWN) pp->BackBufferFormat = D3DFMT_X8R8G8B8;
     p->interval = pp->PresentationInterval == D3DPRESENT_INTERVAL_IMMEDIATE ? 0
                 : pp->PresentationInterval == D3DPRESENT_INTERVAL_TWO ? 2 : 1;
-    nwindowSetSwapInterval(p->nw, p->interval);
+    be_interval(p);
     return D3D_OK;
 }
 static HRESULT WINAPI p_NewD3DWindowBufferFromDmaBuf(ID3DPresent* This, int fd, int width, int height, int stride,
@@ -74,11 +150,9 @@ static HRESULT WINAPI p_NewD3DWindowBufferFromDmaBuf(ID3DPresent* This, int fd, 
     (void)width; (void)height; (void)stride; (void)depth; (void)bpp;
     NxPresent* p = P(This);
     if (p->nSlots >= NX_MAX_SLOTS) return D3DERR_OUTOFVIDEOMEMORY;
-    struct pipe_resource* res = (struct pipe_resource*)(uintptr_t)(unsigned)fd;
-    NvGraphicBuffer gb;
-    if (nouveau_switch_resource_get_buffer(res, &gb) != 0) return D3DERR_DRIVERINTERNALERROR;
+    struct pipe_resource* res = (struct pipe_resource*)(uintptr_t)(unsigned)fd;   /* patch 0002 */
     int slot = p->nSlots;
-    if (R_FAILED(nwindowConfigureBuffer(p->nw, slot, &gb))) return D3DERR_DRIVERINTERNALERROR;
+    if (!be_configure(p, slot, res)) return D3DERR_DRIVERINTERNALERROR;
     p->nSlots++;
     D3DWindowBuffer* b = calloc(1, sizeof *b);
     if (!b) return E_OUTOFMEMORY;
@@ -88,13 +162,13 @@ static HRESULT WINAPI p_NewD3DWindowBufferFromDmaBuf(ID3DPresent* This, int fd, 
 }
 static HRESULT WINAPI p_DestroyD3DWindowBuffer(ID3DPresent* This, D3DWindowBuffer* b) {
     (void)This;
-    free(b);   /* slots are returned all at once by nwindowReleaseBuffers when the present object dies */
+    free(b);   /* slots are returned all at once (nwindowReleaseBuffers) when the present object dies */
     return D3D_OK;
 }
 static void hold_slot(NxPresent* p, int slot) {
     while (!p->held[slot]) {
-        s32 s = -1;
-        if (R_FAILED(nwindowDequeueBuffer(p->nw, &s, NULL)) || s < 0 || s >= NX_MAX_SLOTS) return;
+        int s = be_dequeue(p);
+        if (s < 0) return;
         p->held[s] = true;
     }
 }
@@ -103,16 +177,16 @@ static HRESULT WINAPI p_WaitBufferReleased(ID3DPresent* This, D3DWindowBuffer* b
     return D3D_OK;
 }
 static BOOL WINAPI p_IsBufferReleased(ID3DPresent* This, D3DWindowBuffer* b) {
-    /* Non-blocking: with a 2-3 buffer queue a dequeue returns once the compositor freed a buffer; nine only asks
-     * about buffers it presented earlier, which is when blocking is acceptable. */
+    /* Blocking on Switch: with a 2-3 buffer queue a dequeue returns once the compositor freed a buffer; nine only
+     * asks about buffers it presented earlier, which is when blocking is acceptable. */
     if (!b) return TRUE;
     hold_slot(P(This), b->slot);
     return P(This)->held[b->slot];
 }
 static HRESULT WINAPI p_WaitBufferReleaseEvent(ID3DPresent* This) {
     NxPresent* p = P(This);
-    s32 s = -1;
-    if (R_SUCCEEDED(nwindowDequeueBuffer(p->nw, &s, NULL)) && s >= 0 && s < NX_MAX_SLOTS) p->held[s] = true;
+    int s = be_dequeue(p);
+    if (s >= 0) p->held[s] = true;
     return D3D_OK;
 }
 static HRESULT WINAPI p_FrontBufferCopy(ID3DPresent* This, D3DWindowBuffer* b) { (void)This; (void)b; return D3DERR_INVALIDCALL; }
@@ -122,11 +196,7 @@ static HRESULT WINAPI p_PresentBuffer(ID3DPresent* This, D3DWindowBuffer* b, HWN
     NxPresent* p = P(This);
     if (!b) return D3DERR_INVALIDCALL;
     hold_slot(p, b->slot);
-    NvMultiFence mf; memset(&mf, 0, sizeof mf);
-    NvFence f;
-    f.id = (u32)nouveau_switch_resource_get_syncpoint(b->res, &f.value);
-    if ((int)f.id >= 0) nvMultiFenceCreate(&mf, &f);
-    if (R_FAILED(nwindowQueueBuffer(p->nw, b->slot, &mf))) return D3DERR_DRIVERINTERNALERROR;
+    if (!be_queue(p, b)) return D3DERR_DRIVERINTERNALERROR;
     p->held[b->slot] = false;
     return D3D_OK;
 }
@@ -150,30 +220,15 @@ static HRESULT WINAPI p_SetGammaRamp(ID3DPresent* This, const D3DGAMMARAMP* r, H
 static HRESULT WINAPI p_GetWindowInfo(ID3DPresent* This, HWND hwnd, int* w, int* h, int* depth) {
     (void)This; (void)hwnd;
     int ww, hh; nx_present_screen_size(&ww, &hh);
-    if (w) *w = ww; if (h) *h = hh; if (depth) *depth = 24;
+    if (w) *w = ww;
+    if (h) *h = hh;
+    if (depth) *depth = 24;
     return D3D_OK;
 }
 static BOOL WINAPI p_GetWindowOccluded(ID3DPresent* This) { (void)This; return FALSE; }
 static BOOL WINAPI p_ResolutionMismatch(ID3DPresent* This) { (void)This; return FALSE; }
-
-typedef struct { void (*fn)(void*); void* arg; Thread t; } NxThr;
-static void thr_entry(void* a) { NxThr* t = a; t->fn(t->arg); }
-static HANDLE WINAPI p_CreateThread(ID3DPresent* This, void* fn, void* arg) {
-    (void)This;
-    NxThr* t = calloc(1, sizeof *t);
-    if (!t) return NULL;
-    t->fn = (void (*)(void*))fn; t->arg = arg;
-    if (R_FAILED(threadCreate(&t->t, thr_entry, t, NULL, 0x40000, 0x2C, -2))) { free(t); return NULL; }
-    threadStart(&t->t);
-    return (HANDLE)t;
-}
-static BOOL WINAPI p_WaitForThread(ID3DPresent* This, HANDLE h) {
-    (void)This;
-    NxThr* t = (NxThr*)h;
-    if (!t) return FALSE;
-    threadWaitForExit(&t->t); threadClose(&t->t); free(t);
-    return TRUE;
-}
+static HANDLE WINAPI p_CreateThread(ID3DPresent* This, void* fn, void* arg) { (void)This; return (HANDLE)be_thread_create(fn, arg); }
+static BOOL WINAPI p_WaitForThread(ID3DPresent* This, HANDLE h) { (void)This; return be_thread_join(h) ? TRUE : FALSE; }
 static HRESULT WINAPI p_SetPresentParameters2(ID3DPresent* This, D3DPRESENT_PARAMETERS2* pp2) { (void)This; (void)pp2; return D3D_OK; }
 
 static ID3DPresentVtbl g_pvtbl = {
@@ -188,8 +243,7 @@ static HRESULT present_create(D3DPRESENT_PARAMETERS* pp, ID3DPresent** out) {
     NxPresent* p = calloc(1, sizeof *p);
     if (!p) return E_OUTOFMEMORY;
     p->iface.lpVtbl = &g_pvtbl; p->refs = 1;
-    p->nw = nwindowGetDefault();
-    if (!p->nw || !nwindowIsValid(p->nw)) { free(p); return D3DERR_NOTAVAILABLE; }
+    if (!be_open(p)) { free(p); return D3DERR_NOTAVAILABLE; }
     HRESULT hr = p_SetPresentParameters(&p->iface, pp, NULL);
     if (FAILED(hr)) { free(p); return hr; }
     *out = &p->iface;

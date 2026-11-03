@@ -3,10 +3,9 @@
 #include <d3d9.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include "nine_proxy.h"
 #include "nine_proxy_ids.h"
-
-uint64_t g_nine_call;
 
 static_assert(sizeof(void*) == 4, "guest is ILP32");
 
@@ -39,14 +38,16 @@ void insert(const Entry& e) {
     while (g_map[k].remote) k = (k + 1) & (g_cap - 1);
     g_map[k] = e; g_count++;
 }
-void erase(NxProxy* p) {   // backward-shift deletion
-    for (uint32_t k = 0; k < g_cap; k++) {
-        if (g_map[k].proxy != p) continue;
-        g_map[k] = Entry{}; g_count--;
-        for (uint32_t j = (k + 1) & (g_cap - 1); g_map[j].remote; j = (j + 1) & (g_cap - 1)) {
-            Entry e = g_map[j]; g_map[j] = Entry{}; g_count--; insert(e);
-        }
-        return;
+void erase_at(uint32_t k) {   // backward-shift deletion: re-insert the rest of the probe run
+    g_map[k] = Entry{}; g_count--;
+    for (uint32_t j = (k + 1) & (g_cap - 1); g_map[j].remote; j = (j + 1) & (g_cap - 1)) {
+        Entry e = g_map[j]; g_map[j] = Entry{}; g_count--; insert(e);
+    }
+}
+void erase(NxProxy* p) {     // a proxy is keyed by (remote, interface index); try each interface index
+    for (uint32_t i = 0; i < 64; i++) {
+        Entry* e = find(p->remote, i);
+        if (e && e->proxy == p) { erase_at((uint32_t)(e - g_map)); return; }
     }
 }
 
@@ -217,10 +218,13 @@ HRESULT nx_m_CreateAdditionalSwapChain(NxProxy* self, uint32_t mid, D3DPRESENT_P
 }
 
 // ---- entry point: the engine resolves Direct3DCreate9 through GetProcAddress (S4 maps the name here) ----------
-#define NINE_CREATE9 0xFFFFu
 extern "C" IDirect3D9* WINAPI Direct3DCreate9(UINT sdk) {
-    if (!g_nine_call) return nullptr;
+    // needs host API v3 (ext_call) and a host that registered NINE_EXT_MODULE
+    if (!fnvnx_host || fnvnx_host->version < 3 ||
+        fnvnx_host->size < offsetof(FnvnxHostApi, ext_call) + sizeof(uint64_t) || !fnvnx_host->ext_call)
+        return nullptr;
     uint64_t a[1] = {sdk};
-    uint64_t r = nx_call(0, NINE_CREATE9, A(a));
+    uint64_t r = nx_call(0, NINE_FN_CREATE9, A(a));
+    if (r == FNVNX_EXT_NO_MODULE) return nullptr;
     return nx_wrap_IDirect3D9(r);
 }

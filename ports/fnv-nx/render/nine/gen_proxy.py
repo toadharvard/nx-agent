@@ -6,15 +6,17 @@
 
 Model. The game (ILP32 guest) holds pointers to *proxy* objects: ILP32 C++ classes deriving from our SDK-order
 interfaces in shim/include/d3d9.h, so the engine's vtable-slot calls land on them unchanged. Every proxy method
-packs its arguments into a uint64_t block and makes ONE host call, nine.call(remote, method id, block); the LP64
-host (S5 host module, Mesa Gallium Nine + nouveau) unpacks the block and calls the real Nine object through its C
+packs its arguments into a uint64_t block and makes ONE host call through S5's ext_call slot (nine_proxy.h:
+ext_call(NINE_EXT_MODULE, method id, {remote, block}, 2)); the LP64 host (S5 host module, Mesa Gallium Nine +
+nouveau; or the x86-64 host gate on softpipe) unpacks the block and calls the real Nine object through its C
 vtable (Mesa include/D3D9/d3d9.h, lpVtbl). Both modules share one 32-bit address space, so:
 
   * scalars travel widened (floats as their bits);
   * pointers to plain-data structs whose layout is identical in ILP32 and LP64 travel as addresses (no copy);
   * interface pointers in are unwrapped (proxy -> remote), out-interfaces are wrapped (remote -> unique proxy);
   * structs containing pointers or HANDLEs are converted (generated converters, below);
-  * the rest is marked MANUAL and gets a hand-written body (render/nine/manual_*.{cpp,c}; list via --report).
+  * the rest is marked MANUAL: the proxy calls a hand-written nx_m_<Method> (nine_proxy_rt.cpp), which packs the
+    same per-argument layout, so the host side is generated for every method (list via --report).
 """
 import os, re, sys
 

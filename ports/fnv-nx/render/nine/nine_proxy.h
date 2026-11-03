@@ -5,11 +5,13 @@
 #include <stdint.h>
 #include "fnvnx/hostapi.h"
 
-// Host call: (remote LP64 object, method id = interface index << 8 | vtable slot, address of uint64_t args[]).
-// The slot lives in an extension of FnvnxHostApi (request to S5: one generic 'ext call' slot).
-extern uint64_t g_nine_call;
+#include "nine_ext.h"
+
+// Host call through S5's generic extension slot (host API v3): ext_call(NINE_EXT_MODULE, method id,
+// {remote LP64 object, address of uint64_t args[]}, 2). Method id = interface index << 8 | vtable slot.
 static inline uint64_t nx_call(uint64_t remote, uint32_t method, uint64_t args) {
-    return fnvnx_hcall3(g_nine_call, remote, method, args);
+    uint64_t blk[2] = {remote, args};
+    return fnvnx_hcall4(fnvnx_host->ext_call, NINE_EXT_MODULE, method, FNVNX_ADDR(blk), 2);
 }
 
 struct NxProxy {

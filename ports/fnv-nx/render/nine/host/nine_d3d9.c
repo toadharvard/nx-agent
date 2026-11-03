@@ -87,7 +87,9 @@ static HRESULT WINAPI d_CreateDevice(IDirect3D9* This, UINT a, D3DDEVTYPE t, HWN
     HRESULT hr = nx_present_group_create(pp, &group);
     if (FAILED(hr)) return hr;
     hr = ID3DAdapter9_CreateDevice(self(This)->adapter, 0, t, focus, flags, pp, This, group, out);
-    ID3DPresentGroup_Release(group);
+    /* On success the device owns our reference: NineDevice9_ctor takes and drops one of its own, and its dtor
+     * releases the group once (the Wine-side d3d9 hands the reference over the same way). Found by the gate. */
+    if (FAILED(hr)) ID3DPresentGroup_Release(group);
     return hr;
 }
 

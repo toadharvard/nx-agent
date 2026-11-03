@@ -1,0 +1,52 @@
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -137,6 +137,12 @@
+   description : 'build gallium "nine" Direct3D 9.x state tracker.',
+ )
+ option(
++  'nine-nx',
++  type : 'boolean',
++  value : false,
++  description : 'fnv-nx: st/nine without the DRM/dri3 d3dadapter9 target (own adapter and present)',
++)
++option(
+   'gallium-opencl',
+   type : 'combo',
+   choices : ['icd', 'standalone', 'disabled'],
+--- a/meson.build
++++ b/meson.build
+@@ -669,15 +669,19 @@
+ endif
+ 
+ with_gallium_st_nine =  get_option('gallium-nine')
++with_nine_nx = get_option('nine-nx')
++if with_nine_nx
++  pre_args += '-DNINE_NX'
++endif
+ if with_gallium_st_nine
+   if not with_gallium_softpipe
+     error('The nine state tracker requires gallium softpipe/llvmpipe.')
+   elif not (with_gallium_radeonsi or with_gallium_nouveau or with_gallium_r600
+             or with_gallium_r300 or with_gallium_svga or with_gallium_i915
+-            or with_gallium_iris)
++            or with_gallium_iris or with_nine_nx)
+     error('The nine state tracker requires at least one non-swrast gallium driver.')
+   endif
+-  if not with_dri3
++  if not with_dri3 and not with_nine_nx
+     error('Using nine with wine requires dri3')
+   endif
+ endif
+--- a/src/gallium/meson.build
++++ b/src/gallium/meson.build
+@@ -214,7 +214,9 @@
+ endif
+ if with_gallium_st_nine
+   subdir('state_trackers/nine')
+-  subdir('targets/d3dadapter9')
++  if not with_nine_nx  # fnv-nx: own adapter/present (render/nine)
++    subdir('targets/d3dadapter9')
++  endif
+ endif
+ if with_platform_windows
+   subdir('state_trackers/wgl')
