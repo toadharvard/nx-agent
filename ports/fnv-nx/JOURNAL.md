@@ -788,3 +788,26 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **decided** - At most 5 agents at a time, each with at most one heavy job (2 parallel compiles); every long run
   checkpoints to disk and skips finished work on rerun. Active now: S1 (D13 GAME1 first), S11, S13, S9, S2c. Queued
   (state kept on disk, resume when a slot frees): S1b, S2b, S12, S14, V1.
+
+### J-0041 | 2026-11-03 | stream: S0-arch | status: wip | parent: J-0040
+
+* **found** - Third container restart in ~70 min, now with 5 agents: the session's resource allowance is exhausted;
+  further runs on this machine are lost at random.
+* **did** - Salvaged every committed agent step into the branch (47 commits, unverified, all streams stay `wip`):
+  S1 SPEC1 / VA1 / VIEW1 (measured, kept out of RULES) / **GAME1 (D13 fix: Win32 names a unit binds to game code
+  keep their binding as `fnvnx_game_<name>`)** / XC1 hook / `_iobuf` via S4b / `FUN_00ec78f1_t` 12 bytes / placement
+  new spelling; S1b XINC1 (all 68 x86-inconsistent declarations) / FTOL1 / DBUG1 per-site patch rules with MSVC and
+  GCC checks; S2c round 2 (emitted slot functions and traps, S4 providers and imports, native TLS, hand-written vptrs,
+  import thunks, S3 loader on V + D1/D0, narrow-argument extension bridges after J-0034, resumable probe cache); S2b
+  vslots (i386 COFF reader of MSVC vftables, GCC slot pairing, resolve hook `--msvc-objs`; wip); S9 one-entry
+  pipeline (`Makefile` -> `tools/pipeline/build.py`, stage records, checkpoints, disk hygiene); S11 whole-tree
+  attribution, MSVC class-layout comparison, literals bound by content; S13 difffuzz engine (oracle/candidate
+  loaders, shared world, x86 + AArch64 engines, coverage-guided loop, minimiser, root-cause probes, rule attribution,
+  self-test with a planted char-signedness bug); S12 static gate (GCC/clang passes, AST checker, layout diff vs real
+  GCC, `docs/STATIC_CHECKS.md`); S14 synthetic data image (ranked merge of MSVC objects, `$SG` numbering, boot
+  comparison harness); V1 link verification harness (qemu ILP32 runner, bridge harness, MSVC convention oracle,
+  BUG-1 reproducer). Resolved one conflict (fnvlink.py usage text, S2b vs S2c).
+* **next** - continue in a new session on a fresh machine from this branch + the transcripts: rebuild scratch state
+  with `tools/fetch.sh`, `toolchain/gcc/build.sh` (or the S9 pipeline), `tools/equiv/README.md` (MSVC), then resume
+  streams with verification per D14; first: merge-verify GAME1 with S11 and S13, finish S2c/S2b link on J-0034
+  objects, S9 cold run.
