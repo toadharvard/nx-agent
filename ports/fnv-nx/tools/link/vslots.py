@@ -163,3 +163,176 @@ class Coff:
 
 Vft = collections.namedtuple('Vft', 'name slots col')
 Col = collections.namedtuple('Col', 'offset cdoffset td chd')
+
+
+def adjustor_target(coff, name):
+    """Adjustor thunk (`?f@C@@W<n>AE...`, ``[thunk]: ... `adjustor{n}'``: `sub ecx, n` / `add ecx, -n`, then
+    `jmp f`) defined in the object -> (target symbol, this adjustment) or None."""
+    i = coff.defs.get(name)
+    if i is None:
+        return None
+    s = coff.syms[i]
+    code = coff.section_bytes(s.secnum)[s.value:s.value + 16]
+    rel = coff.relocs(s.secnum)
+    adj, k = 0, 0
+    if code[:2] == b'\x83\xe9':
+        adj, k = code[2], 3
+    elif code[:2] == b'\x81\xe9':
+        adj, k = struct.unpack_from('<I', code, 2)[0], 6
+    elif code[:2] == b'\x83\xc1':
+        adj, k = -struct.unpack_from('<b', code, 2)[0], 3
+    elif code[:2] == b'\x81\xc1':
+        adj, k = -struct.unpack_from('<i', code, 2)[0], 6
+    else:
+        return None
+    if code[k:k + 1] != b'\xe9':
+        return None
+    r = rel.get(s.value + k + 1)
+    return (r[0], adj) if r and r[1] == IMAGE_REL_I386_REL32 else None
+
+
+# ---------------------------------------------------------------------------------------------------- MSVC index
+
+PURE = '__purecall'
+# Ghidra-style names that carry the function's address (fnvlink.ADDR_IN_NAME), as the identifier of an MSVC name
+MS_ADDR_NAME = re.compile(r'^\?(?:FUN|UNK|thunk_FUN)_([0-9a-f]{8})@')
+VFT_TEXT = re.compile(r"^const (.*)::`vftable'(?:\{for `(.*)'\})?$")
+TIERS = ('def', 'ref', 'name-addr', 'gdef', 'gref')     # strongest first
+View = collections.namedtuple('View', 'unit name slots col cls base targets')
+# targets: per slot (address or None, how, resolved MSVC name, adjustment)
+Slot = collections.namedtuple('Slot', 'addr how name adj')
+
+
+class MsvcIndex:
+    """The vftables of every pristine MSVC object, each slot resolved through units.json, joined by image address.
+
+    units: units.json 'units' (list, the object of entry i is objdir/u<i>.obj); demangle(names) -> {name: text}
+    (llvm-undname). views: [View]; by_addr: {image vftable address: [view index]}; by_unit: {unit index: [view
+    index]}."""
+
+    def __init__(self, units, objdir, demangle=None):
+        self.units = units
+        self.defs = [{} for _ in units]
+        self.refs = [{} for _ in units]
+        self.gdef = collections.defaultdict(set)
+        self.gref = collections.defaultdict(set)
+        for i, u in enumerate(units):
+            for f in u['functions']:
+                a = int(f['address'], 16)
+                for n in [f['symbol']] + list(f.get('fold_aliases', [])):
+                    self.defs[i][n] = a
+                    self.gdef[n].add(a)
+            for n, a in u['symbols'].items():
+                self.refs[i][n] = int(a, 16)
+                self.gref[n].add(int(a, 16))
+        self.views, self.by_unit, self.by_addr, self.view_addr = [], collections.defaultdict(list), \
+            collections.defaultdict(list), {}
+        self.objects = 0
+        raw = []
+        for i in range(len(units)):
+            p = os.path.join(objdir, 'u%d.obj' % i)
+            if not os.path.exists(p):
+                continue
+            self.objects += 1
+            c = Coff(p)
+            for name, v in sorted(c.vftables().items()):
+                tg = []
+                for s in v.slots:
+                    t, adj = s, 0
+                    if t in c.weak:            # ??_E (vector deleting dtor) -> its default, ??_G
+                        t = c.weak[t]
+                    th = adjustor_target(c, t) if t else None
+                    if th:
+                        t, adj = th
+                        if t in c.weak:
+                            t = c.weak[t]
+                    tg.append((t, adj))
+                td = c.syms[c.defs[v.col.td]].name if v.col and v.col.td in c.defs else (v.col.td if v.col else None)
+                raw.append((i, name, v.slots, v.col, td, tg))
+        self.text = demangle(sorted({n for r in raw for n in [r[1]] + [t for t, _ in r[5] if t]}
+                                    | {n for r in raw for n in r[2] if n})) if demangle else {}
+        for i, name, slots, col, td, tg in raw:
+            m = VFT_TEXT.match(self.text.get(name) or '')
+            cls, base = (m.group(1), m.group(2)) if m else (None, None)
+            targets = [Slot(*self.resolve(i, t), t, adj) if t else Slot(None, 'none', None, 0) for t, adj in tg]
+            k = len(self.views)
+            self.views.append(View(i, name, slots, col, cls, base, targets))
+            self.by_unit[i].append(k)
+            a, how = self.vftable_address(i, name)
+            if a is not None:
+                self.view_addr[k] = (a, how)
+                self.by_addr[a].append(k)
+        self._tables = {}
+
+    def resolve(self, i, name):
+        """MSVC function name as unit i sees it -> (original address or None, how)."""
+        if name == PURE:
+            return None, 'pure'
+        if name in self.defs[i]:
+            return self.defs[i][name], 'def'
+        if name in self.refs[i]:
+            return self.refs[i][name], 'ref'
+        m = MS_ADDR_NAME.match(name)
+        if m:
+            return int(m.group(1), 16), 'name-addr'
+        for g, how in ((self.gdef, 'gdef'), (self.gref, 'gref')):
+            if len(g.get(name, ())) == 1:
+                return next(iter(g[name])), how
+            if g.get(name):
+                return None, how + '-ambiguous'
+        return None, 'unbound'
+
+    def vftable_address(self, i, name):
+        if name in self.refs[i]:
+            return self.refs[i][name], 'unit'
+        if len(self.gref.get(name, ())) == 1:
+            return next(iter(self.gref[name])), 'global'
+        return None, ('ambiguous' if self.gref.get(name) else 'unbound')
+
+    def table(self, a):
+        """Image vftable at address a, joined over its views: [(address or None, [(view, Slot)] supporting it,
+        {address: [(view, Slot)]} of all candidates)] per slot. A slot's address is the best-ranked candidate:
+        a function of the view's own class (an override declared by the class) before an inherited one, then by
+        tier (TIERS), then by the number of views naming it; candidates of equal rank that disagree leave it
+        None (a disagreement)."""
+        if a in self._tables:
+            return self._tables[a]
+        vs = self.by_addr.get(a, [])
+        n = max((len(self.views[k].slots) for k in vs), default=0)
+        out = []
+        for j in range(n):
+            cand = collections.defaultdict(list)
+            for k in vs:
+                v = self.views[k]
+                if j < len(v.targets) and v.targets[j].addr is not None:
+                    cand[v.targets[j].addr].append((k, v.targets[j]))
+            best = None
+            if cand:
+                def rank(x):
+                    sup = cand[x]
+                    own = any(self.owns(k, s.name) for k, s in sup)
+                    tier = min(TIERS.index(s.how) for _, s in sup)
+                    return (not own, tier, -len(sup))
+                ranked = sorted(cand, key=rank)
+                if len(ranked) == 1 or rank(ranked[0])[:2] != rank(ranked[1])[:2]:
+                    best = ranked[0]
+            out.append((best, cand[best] if best is not None else [], dict(cand)))
+        self._tables[a] = out
+        return out
+
+    def owns(self, k, name):
+        """The function `name` in slot of view k is declared by the view's class itself (an override), judged from
+        the demangled qualified name."""
+        v = self.views[k]
+        return bool(v.cls) and re.search(r'(?:^|[\s*&,<(])%s::[^:]*$' % re.escape(v.cls),
+                                         (self.text.get(name) or '').split('(')[0]) is not None
+
+    def disagreements(self):
+        """[(address, slot, {address: [(unit, MSVC name, how)]})] over all joined vftables."""
+        out = []
+        for a in sorted(self.by_addr):
+            for j, (best, _, cand) in enumerate(self.table(a)):
+                if best is None and len(cand) > 1:
+                    out.append((a, j, {x: [(self.views[k].unit, s.name, s.how) for k, s in sup]
+                                       for x, sup in cand.items()}))
+        return out
