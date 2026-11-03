@@ -963,9 +963,10 @@ def run(out, tree, jobs=4):
         if not want or not classes:
             return h, None, want, set(), None
         src = os.path.join(tree, h)
-        key = hashlib.sha1(('emit4|%s|%s|%s|%s' % (h, os.path.getmtime(src) if os.path.exists(src) else 0,
-                                             ' '.join(sorted(want)), '|'.join(sp for _, sp, _ in classes))).encode()
-                           ).hexdigest()
+        key = hashlib.sha1(('emit4|%s|%s|%s|%s|%s' % (' '.join(layout.flags(tree)), h,
+                                                os.path.getmtime(src) if os.path.exists(src) else 0,
+                                                ' '.join(sorted(want)), '|'.join(sp for _, sp, _ in classes))
+                            ).encode()).hexdigest()
         got = xcache.get(key)
         if got and (got[0] is None or os.path.exists(got[0])):
             return h, got[0], want, set(got[1]), key
