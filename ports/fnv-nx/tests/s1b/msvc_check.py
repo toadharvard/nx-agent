@@ -36,6 +36,7 @@ import equiv  # noqa: E402
 import s1b_patches  # noqa: E402
 
 CHECK_FI = HERE / 'msvc' / 's1b_check_fi.h'
+HELPER = re.compile(r'^__(?:ftol2(?:_sse)?|CI\w+)$')
 
 
 def overlay(decomp, work, files):
@@ -121,7 +122,8 @@ def check_unit(fpr, Coff, i, unit, pristine_obj, new_obj, want):
             if nn in new_defs:      # a definition of this unit (renamed): already a function of the recipe
                 continue
             mod['symbols'][nn] = '0x%08x' % a
-            renames.append((unit['source'], 'ref', '0x%08x' % a, on, nn))
+            if not HELPER.match(nn):    # compiler helpers MSVC calls by itself: no GCC symbol to bind
+                renames.append((unit['source'], 'ref', '0x%08x' % a, on, nn))
     fa = fpr.cb.fingerprint(str(pristine_obj), unit, fpr.names)
     fb = fpr.cb.fingerprint(str(new_obj), mod, fpr.names)
     res = {}
