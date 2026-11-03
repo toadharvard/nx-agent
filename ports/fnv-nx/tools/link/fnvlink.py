@@ -36,8 +36,10 @@ CC = os.environ.get('CC', 'aarch64-linux-gnu-gcc')
 # names the toolchain / C++ runtime provides; never matched against the decomp
 RUNTIME = re.compile(r'^(?:__cxa_\w+|_Unwind_\w+|__gxx_personality_v0|__stack_chk_\w+|__aarch64_\w+|__dso_handle|'
                      r'_GLOBAL_OFFSET_TABLE_|__tls_get_addr|_Zn[wa]\w*|_Zd[la]\w*|_ZSt\w+|_ZNSt\w+|_ZTVN10__cxxabiv\w+|'
-                     r'_ZTI[PKa-z]\w*|_ZTS[PKa-z]\w*|__cxa_pure_virtual|__fnvnx_\w+|__sse2neon\w*)$')
+                     r'_ZTI[PKa-z]\w*|_ZTS[PKa-z]\w*|__cxa_pure_virtual|__fnvnx_\w+|__sse2neon\w*|__dynamic_cast|'
+                     r'__\w+_chk|__isoc\d+_\w+|__errno_location|__assert_fail)$')
 ADDR_SYM = '__fnv_%08x'
+ADDR_IN_NAME = re.compile(r'^(?:DAT|FUN|g|UNK|PTR)_([0-9a-f]{8})$')
 
 
 def log(*a):
@@ -56,10 +58,17 @@ def batch_demangle(tool, names, args=()):
     out = p.stdout.split('\n')
     res = {}
     if tool.endswith(('undname', 'undname-18')) or 'undname' in os.path.basename(tool):
-        # llvm-undname echoes each input line, then the result (or 'error: ...'), then a blank line
-        for i in range(0, min(len(out), 3 * len(names)) - 1, 3):
-            m, d = out[i], out[i + 1]
+        # llvm-undname echoes each input line, then the result (or 'error: ...'), then a blank line; a result can
+        # itself span lines (string literals), so resynchronize on the echo of each input name
+        pos = 0
+        for m in names:
+            j = next((k for k in range(pos, min(pos + 64, len(out) - 1)) if out[k] == m), None)
+            if j is None:
+                res[m] = None
+                continue
+            d = out[j + 1]
             res[m] = None if d.startswith('error: Invalid mangled name') else d
+            pos = j + 2
     else:
         for m, d in zip(names, out):
             res[m] = d
@@ -293,6 +302,8 @@ def resolve(units_json, objects_tsv, out):
                         if vs is not nd['sym']:
                             target = (ADDR_SYM % addr) + '_' + isig.variant
                     used_addr.add(addr)
+                    natname = (nd['variants'].get(isig.variant) or nd['sym']).name if isig.variant else nd['sym'].name
+                    stats['code_same_name' if natname == un else 'code_other_name'] += 1
                     # ABI: reference declaration vs definition
                     refdecl = note  # msvc name of the matched reference declaration
                     defdecl = nd['msvc']
@@ -308,7 +319,7 @@ def resolve(units_json, objects_tsv, out):
                                 abi_rows.append((u.source, un, '%08x' % addr, refdecl, defdecl, v.kind,
                                                  ','.join(v.classes), '; '.join(v.moves and
                                                  ['%s<-%s' % (d, s) for d, s, _, _ in v.moves] or []),
-                                                 '; '.join(v.notes)))
+                                                 '; '.join(v.notes), ms[refdecl] or '', ms[defdecl] or ''))
                                 if v.kind == 'bridge':
                                     bn = abi.bridge_name(addr, refdecl)
                                     bridges.setdefault(bn, (target, v, ms[refdecl] or refdecl, ms[defdecl] or defdecl))
@@ -330,6 +341,8 @@ def resolve(units_json, objects_tsv, out):
                     cls = 'other-addr'; target = None
             if cls == 'unresolved' and un in vslots:
                 cls = 'vslot-unresolved'
+            elif cls == 'unresolved' and isig.variant:
+                cls = 'unresolved-ctor-dtor'
             elif cls == 'special-unresolved':
                 cls = 'special-unresolved:' + (note or '?').replace(' ', '-')
             if un in vslots:
@@ -349,6 +362,11 @@ def resolve(units_json, objects_tsv, out):
             for s in sorted(srcs)[1:]:
                 localize[s].append(name)
     stats['duplicate_strong_names'] = sum(1 for s in strong.values() if len(s) > 1)
+    data_def_names = collections.defaultdict(dict)
+    for a, name, src in data_defs:
+        if a not in data_def_names[src].values():  # objcopy allows one old name per new name
+            data_def_names[src][name] = a
+            used_addr.add(a)
     defs_by_unit = collections.defaultdict(list)
     for a, nd in native.items():
         defs_by_unit[nd['unit']].append(a)
@@ -370,8 +388,16 @@ def resolve(units_json, objects_tsv, out):
                     alias_lines.append('%s = %s;' % (alias, s.name))   # whichever copy the linker keeps
                 else:
                     args.append('--add-symbol=%s=%s:0x%x,global,function' % (alias, s.section, s.value))
+        dd = data_def_names.get(u.source, {})
         for name in localize.get(u.source, []):
-            args.append('--localize-symbol=' + name)
+            if name not in dd:
+                args.append('--localize-symbol=' + name)
+        for name, a in sorted(dd.items()):
+            # a variable this unit defines lives in the data image: the definition becomes weak and is renamed to
+            # the address symbol, which aliases.ld defines at the original address (the native static
+            # initializer then constructs the object in place, as the original CRT init did)
+            args.append('--redefine-sym=%s=%s' % (name, ADDR_SYM % a))
+            args.append('--weaken-symbol=' + ADDR_SYM % a)  # objcopy weakens after renaming
         with open(os.path.join(out, 'objcopy', base + '.args'), 'w', encoding='utf-8', errors='surrogateescape') as f:
             f.write('\n'.join(args) + '\n')
         with open(os.path.join(out, 'objcopy', base + '.src'), 'w') as f:
@@ -392,7 +418,7 @@ def resolve(units_json, objects_tsv, out):
             target, v, rtext, dtext = bridges[bn]
             f.write(abi.emit_bridge(bn, target, v, 'ref: %s | def: %s' % (rtext, dtext)))
     with open(os.path.join(out, 'abi.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('#object\tundefined\taddress\tref_msvc\tdef_msvc\tverdict\tclasses\tmoves\tnotes\n')
+        f.write('#object\tundefined\taddress\tref_msvc\tdef_msvc\tverdict\tclasses\tmoves\tnotes\tref\tdef\n')
         for r in abi_rows:
             f.write('\t'.join(r) + '\n')
 
@@ -408,7 +434,9 @@ def resolve(units_json, objects_tsv, out):
     lines = ['objects: %d (of %d units)' % (len(have), len(units)),
              'undefined references (object, symbol): %d' % stats['refs'],
              'resolved by address: %d' % resolved,
-             'referenced from vtable slots: %d' % stats['vslot_refs'], '']
+             'referenced from vtable slots: %d' % stats['vslot_refs'],
+             'code refs bound to a native definition: same Itanium name %d, other name %d (the plain linker would '
+             'miss or mis-bind these)' % (stats['code_same_name'], stats['code_other_name']), '']
     lines += ['%-18s %d' % (c, n) for c, n in byclass.most_common()]
     with open(os.path.join(out, 'data_defs.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a, name, src in sorted(data_defs):
@@ -466,7 +494,12 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc):
                 tier, hit, scope = t, h, name
                 break
     if not hit:
-        return ('native' if un in anydef else 'unresolved'), None, None, None, None
+        if un in anydef:
+            return 'native', None, None, None, None
+        m = ADDR_IN_NAME.match(isig.qual[-1]) if isig.qual else None
+        if m:  # Ghidra-style name carrying its address: right for 99.6 % of the names units.json binds (LINK.md)
+            return 'addr', 'name-addr', int(m.group(1), 16), None, None
+        return 'unresolved', None, None, None, None
     addrs = sorted(hit)
     if len(addrs) > 1 and isig.params is not None:  # disambiguate by arity, then by const
         want = len(isig.params)

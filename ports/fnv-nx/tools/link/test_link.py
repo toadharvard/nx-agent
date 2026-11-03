@@ -56,7 +56,7 @@ def main():
 
     # ABI: definition __fastcall f(Foo*, int edx_dummy, int), reference __thiscall Foo::f(int)
     names = ['?f@@YIHPAVFoo@@HH@Z', '?f@Foo@@QAEHH@Z', '?g@@YAXHM@Z', '?g@@YAXHH@Z', '?h@Foo@@QAEHXZ',
-             '?h@@YIHPAVFoo@@@Z', '?k@@YAXPAVFoo@@@Z']
+             '?h@@YIHPAVFoo@@@Z', '?k@@YAXPAVFoo@@@Z', '?s@Foo@@QAE?AUVec@@M@Z', '?s@Foo@@QAEPAUVec@@PAU2@M@Z']
     d = fnvlink.batch_demangle(fnvlink.UNDNAME, names)
     S = {n: sigs.parse_msvc(n, d[n]) for n in names}
     v = abi.compare(S['?f@Foo@@QAEHH@Z'], S['?f@@YIHPAVFoo@@HH@Z'])
@@ -71,6 +71,10 @@ def main():
     check(v.kind == 'bridge' and v.moves == [(('x', 1), ('v', 0), 'I32', 'F32')], 'float -> int: %s' % v.moves)
     v = abi.compare(S['?k@@YAXPAVFoo@@@Z'], S['?h@Foo@@QAEHXZ'])
     check(v.kind == 'x86-inconsistent', 'cdecl k(Foo*) vs thiscall: %s' % v.kind)
+
+    v = abi.compare(S['?s@Foo@@QAE?AUVec@@M@Z'], S['?s@Foo@@QAEPAUVec@@PAU2@M@Z'])
+    check(v.kind == 'manual' and 'sret-explicit' in v.classes, 'hidden vs explicit return buffer: %s %s'
+          % (v.kind, v.classes))
 
     # bridges assemble
     with tempfile.TemporaryDirectory() as tmp:

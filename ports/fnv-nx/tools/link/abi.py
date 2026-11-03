@@ -62,6 +62,15 @@ def params_of(sig):
     return out
 
 
+def params_x86(sig):
+    """params_of plus MSVC's hidden return-buffer pointer for aggregate results: after this for members, first for
+    free functions (assumed: the aggregate is not a <= 8-byte POD returned in eax:edx; sizes are not known)."""
+    out = params_of(sig)
+    if ret_class(sig).startswith(('AGG:', '?:')):
+        out.insert(1 if sig.member else 0, ('sret', 'P'))
+    return out
+
+
 def ret_class(sig):
     if sig.variant in ('ctor', 'dtor'):
         return 'VOID'
@@ -81,7 +90,7 @@ def x86_locations(sig):
     """[(label, class, location)]; location 'ecx' / 'edx' / ('stk', offset)."""
     out, off, regs = [], (0, ()), []
     cc = sig.cc or 'cdecl'
-    for label, cls in params_of(sig):
+    for label, cls in params_x86(sig):
         if cls == 'VARARGS':
             out.append((label, cls, ('stk', off))); break
         if cc == 'thiscall' and label == 'this':
@@ -170,10 +179,19 @@ def compare(ref, dfn):
             v.kind = 'manual'; v.classes.append('varargs')
         return v
     by_loc = {loc: (lab, cls) for lab, cls, loc in rx}
-    ra, da = {lab: (cls, loc) for lab, cls, loc in a64_locations(ref)}, a64_locations(dfn)
-    x86_ok = True
-    for (lab, cls, loc), (_, _, aloc) in zip(dx, da):
+    ra = {lab: (cls, loc) for lab, cls, loc in a64_locations(ref)}
+    da = {lab: (cls, loc) for lab, cls, loc in a64_locations(dfn)}
+    x86_ok, sret_explicit = True, False
+    for lab, cls, loc in dx:
         src = by_loc.get(loc)
+        if src is not None and (lab == 'sret') != (src[0] == 'sret'):
+            # one side returns an aggregate through the hidden pointer, the other passes that pointer explicitly:
+            # AArch64 puts the hidden one in x8 (or returns small aggregates in registers)
+            sret_explicit = True
+            continue
+        if lab == 'sret':
+            continue
+        aloc = da[lab][1]
         if src is None:
             if lab == 'this':
                 x86_ok = False
@@ -204,8 +222,13 @@ def compare(ref, dfn):
                 v.notes.append('%s narrower in the reference (%s -> %s)' % (lab, scls_a, cls))
             continue
         v.moves.append((aloc, sloc, cls, scls_a))
+        tag = 'int-float-param' if _bucket(scls_a) != _bucket(cls) else 'reg-shift'
+        if tag not in v.classes:
+            v.classes.append(tag)
     rr, dr = ret_a64(ret_class(ref)), ret_a64(ret_class(dfn))
-    if rr != 'none' and rr != dr:
+    if sret_explicit:
+        v.classes.append('sret-explicit'); v.kind = 'manual'
+    elif rr != 'none' and rr != dr:
         if dr == 'none':
             v.notes.append('reference reads a result the definition does not produce')
         elif {rr, dr} == {'x0', 'v0'}:
