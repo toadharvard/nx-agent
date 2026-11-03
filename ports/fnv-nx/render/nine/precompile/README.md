@@ -7,23 +7,37 @@ causes hitches. This stream does three things:
 
 * `nine-precompile` runs the same compile on a PC, ahead of time, for the shaders and variants the game
   will use;
-* patch 0003 makes nvc0 look up a cache file before it compiles;
+* patch 0005 makes nvc0 look up a cache file before it compiles;
 * a host test checks that a cached program is byte-identical to a fresh compile.
 
 ## Pieces
 
 | path | what |
 |---|---|
-| `render/nine/host/build_host.sh` | host build (x86-64 Linux, no GPU, no libdrm, no meson): st/nine's shader translator, TGSI, nv50_ir and `nvc0_program.c` with patch 0003, and the tools |
+| `render/nine/host/build_host.sh` | host build (x86-64 Linux, no GPU, no libdrm, no meson): st/nine's shader translator, TGSI, nv50_ir and `nvc0_program.c` from the tree with all of `patches/` (0001-0006) applied, and the tools |
 | `render/nine/host/nvc0_fake_screen.c` | fake nvc0 `pipe_screen`. It `#include`s `nvc0_screen.c`, so the cap queries are nvc0's own functions, run on a zeroed screen that holds only chipset, VRAM size and `class_3d` |
 | `render/nine/host/host_stubs.c` | two NIR entry points that Nine references but never reaches (the TGSI path is preferred) |
 | `nine_host_compile.[ch]` | one compile = Nine `nine_translate_shader` + a pipe_context whose `create_vs/fs_state` does what `nvc0_sp_state_create` does; plus the program comparison |
 | `nine_precompile.c` | the CLI |
-| `patches/0003-nvc0-precompiled-cache.patch` | the runtime cache (`nvc0/nvc0_program_cache.[ch]`, a wrapper around `nvc0_program_translate`, fixup/relocation (de)serialisers in codegen) |
+| `patches/0005-nvc0-precompiled-cache.patch` | the runtime cache (`nvc0/nvc0_program_cache.[ch]`, a wrapper around `nvc0_program_translate`, fixup/relocation (de)serialisers in codegen) |
+| `patches/0006-nine-inline-subroutines.patch` | st/nine: D3D `call`/`callnz` inlined at the call site (Mesa 20.1's TGSI subroutines crashed nv50_ir), predicate `!p` fixed |
+| `render/nine/host/nine_shader_cache.[ch]` | `nx_nine_shader_cache_init()`: the host module's startup call that turns the cache on (`sdmc:/fnvnx/shaders.nvc0cache`, read-write) |
 | `tests/s6d/` | extra SM1-3 corpus, the cache test harness, and the runner |
 
 The nouveau sources are built on the host with `-D__SWITCH__`, as on the console, so the code paths
 are the same: devkitPro's tree compiles out NIR and the Fermi emitter on Switch.
+
+How 0005 and 0006 are made:
+
+* both are plain `diff -ruN` against the pristine devkitPro `switch-20.1.0-rc3` tree, with no timestamps;
+* they apply after S6c's 0001-0004, which `patches/make_patches.py` generates. They touch no file
+  that 0001-0004 touch (nouveau and `nine_shader.c` only);
+* 0005 adds two new files, which `make_patches.py`'s search/replace pairs cannot express;
+* checked 2026-11-03: `make_patches.py` on that tree reproduces 0001-0004 byte for byte, and 0001-0006
+  apply in order with no fuzz and no rejects.
+* Switch build (`render/nine/build.sh`, clean, on that tree): 563 steps, 0 failures.
+* Link check (S6c's host-side Nine sources + `nine_shader_cache.c` + the static libraries + libnx):
+  0 undefined symbols.
 
 ## Build and use
 
@@ -40,14 +54,18 @@ python3 tests/s6d/run.py --host <work>/out --asm <S6b build>/s6b_asm
 * `--chipset`: what libdrm_nouveau reports on the console. The default is **0x120**: devkitPro's
   libdrm_nouveau sets `chipset = nvgpu arch` (`NVGPU_GPU_ARCH_GM200`) without the implementation bits,
   so GM20B shows up as 0x120, not 0x12b. The chipset is part of the key. The test checks that 0x12b
-  generates identical code (25/25 shaders).
+  generates identical code (30/30 shaders).
 * The manifest has one row per compile: bytecode SHA-1, name, model, variant, Nine's own 64-bit variant
   key, status (`stored` / `cached` = a duplicate of an earlier TGSI / `nine-fail` / `nvc0-fail` /
   `crash`), TGSI tokens, code bytes, GPRs, cache key.
-* On the console: put the file on the SD card and set `NVC0_SHADER_CACHE=<path>`, or call
-  `nvc0_pcache_configure(path, flags)` from the host module before creating the device.
-  `NVC0_SHADER_CACHE_READONLY=1` (or `NVC0_PCACHE_READONLY`) stops misses from being appended. Without
-  a path the cache is off and nvc0 behaves exactly as before.
+* On the console: the host module calls `nx_nine_shader_cache_init(NULL)` once at startup, before the
+  first Nine device creates shaders (`render/nine/host/nine_shader_cache.h`). It uses
+  `$NVC0_SHADER_CACHE` if that is set, else `sdmc:/fnvnx/shaders.nvc0cache`. It creates `sdmc:/fnvnx/` if
+  needed and opens the cache read-write: shipped entries hit, misses are compiled and appended.
+  `nx_nine_shader_cache_stats()` returns the entry, hit, miss and store counters for the log. Lower
+  level: `nvc0_pcache_configure(path, flags)`, where `NVC0_PCACHE_READONLY` (env
+  `NVC0_SHADER_CACHE_READONLY=1`) stops appends. Without a path the cache is off and nvc0 behaves
+  exactly as before.
 
 ## Cache key and value
 
@@ -59,14 +77,17 @@ That is everything `nvc0_program_translate` reads from the program, plus the com
 (bytecode, Nine variant) pair is one step upstream. Nine turns it into TGSI deterministically, so:
 
 * a key computed from TGSI equals "hash(bytecode) + variant key";
-* Nine variants that generate the same TGSI share one entry (413 variant compiles -> 326 programs on
+* Nine variants that generate the same TGSI share one entry (484 variant compiles -> 391 programs on
   the test corpus);
 * a variant the tool did not enumerate simply misses, compiles and is appended, and is never wrong;
 * bytecode hash and Nine key are kept in the tool's manifest for diagnosis.
 
-`compiler_id` = SHA-1 of `"nvc0-pcache/1 mesa-20.1.0-rc3 fnvnx-0003-r1 optLevel=3"` plus the size of
+`compiler_id` = SHA-1 of `"nvc0-pcache/1 mesa-20.1.0-rc3 fnvnx-0005-r1 optLevel=3"` plus the size of
 the metadata record. A file with another id is discarded (and rewritten when writable). **Bump the
-`r1` in `PCACHE_ID_STRING` whenever codegen, TGSI or Nine's translator changes.** Programs with stream
+`r1` in `PCACHE_ID_STRING` whenever nv50_ir or `nvc0_program.c` changes**: the same TGSI would then
+compile to different code. A change in Nine's translator or in TGSI encoding (such as patch 0006) needs
+no bump: it changes the TGSI, so the keys change and old entries are simply never hit again. Regenerate
+the shipped file anyway, so it is not full of dead entries. Programs with stream
 output (Nine's swvp `ProcessVertices` path) and compute programs are never cached. Debug builds skip the
 cache when `NV50_PROG_*` overrides are set.
 
@@ -143,14 +164,23 @@ whatever the enumeration misses.
 
 ## Gate (`tests/s6d/run.py`, measured 2026-11-03 on the host)
 
-Corpus: the 17 S6b test shaders + 9 written for S6d (`tests/s6d/shaders.s6d`): skinning through a0,
-normal map + projected shadow, texkill/lrp/pow, oPts, ps_1_4 phases + cnd, ps_1_1 four-stage, vs_3_0
-texldl + loop aL + bool if, ps_3_0 vFace/vPos/dsx/dsy/texldd/rep/break, vs_2_0 if b / rep i.
+Corpus: the 17 S6b test shaders + 15 written for S6d (`tests/s6d/shaders.s6d`):
 
-* `nine-precompile --variants all`: 26 shaders, 25 compile, 413 variant compiles, 0 Nine failures,
-  0 nvc0 failures, 326 distinct programs, 230 KB of code, 251 KB cache file (`common`: 99 compiles,
-  72 programs, 52 KB; `ctor`: 25 programs, 17 KB). Host time: 0.23 s for `all`.
-* `s6d_cache_test`: 100 shader variants (ctor, fog, fog-linear/centroid for ps, 1 and 6 clip planes for
+* skinning through a0, normal map + projected shadow, texkill/lrp/pow, oPts, ps_1_4 phases + cnd,
+  ps_1_1 four-stage, vs_3_0 texldl + loop aL + bool if, ps_3_0 vFace/vPos/dsx/dsy/texldd/rep/break,
+  vs_2_0 if b / rep i;
+* subroutines (patch 0006): nested `call` + `callnz b0`, a subroutine holding `rep` called twice,
+  `call` inside `loop aL` with the callee indexing `c[aL + n]`, ps_3_0 `callnz p0` / `callnz !p0` with
+  an `if` inside the callee;
+* two shaders that must be rejected (`_xfail`): recursion, and `ret` inside an `if` of a subroutine.
+
+Results:
+
+* `nine-precompile --variants all`: 32 shaders, 30 compile, 2 rejected as expected, 0 crashes. 486
+  variant compiles, 0 nvc0 failures, 391 distinct programs, 275 KB of code, 304 KB cache file.
+  `common`: 121 compiles, 87 programs, 61 KB. `ctor`: 30 programs, 20 KB. Host time: 0.39 s for `all`,
+  with one child process per shader.
+* `s6d_cache_test`: 120 shader variants (ctor, fog, fog-linear/centroid for ps, 1 and 6 clip planes for
   vs), each compiled three ways (cache off / miss + store / hit after re-reading the file read-only).
   The cached program is **byte-identical** to the fresh compile in every case:
   * every field;
@@ -158,16 +188,44 @@ texldl + loop aL + bool if, ps_3_0 vFace/vPos/dsx/dsy/texldd/rep/break, vs_2_0 i
   * relocation and fixup tables;
   * code after relocation + fixups for all four (`force_persample_interp`, `flatshade`) combinations.
 
-  64 programs carry fixups; none of the corpus produces relocations, so the relocation serialiser is
-  covered by a round-trip unit check. Robustness checks: corrupt payload, truncated tail, foreign
-  compiler id, duplicate record, cache off. In total 614 checks, 0 failures.
-* **Found: `vs20_call` (SM2 `call`/`label`/`ret`) crashes the stock compiler** (SIGSEGV in nv50_ir
-  `BindArgumentsPass`). The fault is in Nine 20.1's TGSI. `CALL` before `LABEL` uses a label slot that
-  does not exist yet: `inst_labels` is reallocated one element short and `num_inst_labels` is never
-  updated. No `BGNSUB`/`ENDSUB` is emitted. The subroutine's final `ret` is dropped as "last
-  instruction". The same crash happens on the console, at `CreateVertexShader`. Fix candidates: inline
-  subroutines in Nine (`tx->inline_subroutines`), or fix CALL/LABEL. fxc rarely emits `call` for SM2/3
-  game shaders, but it is a hard crash.
+  68 programs carry fixups; none of the corpus produces relocations, so the relocation serialiser is
+  covered by a round-trip unit check. Other checks:
+  * the 5 call shaders' TGSI has no `CAL`/`BGNSUB`/`ENDSUB`;
+  * 0x12b == 0x120 for 30/30 shaders;
+  * robustness: corrupt payload, truncated tail, foreign compiler id, duplicate record, cache off;
+  * the startup hook: directory created, store, reload, hit.
+
+  In total 744 checks, 0 failures.
+
+### Patch 0006: Nine 20.1 subroutines and the predicate NOT
+
+Before 0006, `vs20_call` crashed the stock compiler (SIGSEGV in nv50_ir `BindArgumentsPass`), at
+`CreateVertexShader` on the console too. Nine's TGSI for D3D subroutines was wrong in four ways:
+
+* a `CALL` before its `LABEL` used a label slot that did not exist;
+* `inst_labels` was grown one element short, and `num_inst_labels` was never set;
+* no `BGNSUB`/`ENDSUB` was emitted;
+* the subroutine's final `ret` was dropped as "last instruction".
+
+Fixing that in place would also need main's epilogue (fog, position fix-ups, which Nine emits after the
+whole token stream) moved in front of the subroutine bodies. So 0006 **inlines** instead:
+
+* `call l` / `callnz l, b|p` translate the body of `label l` at the call site (callnz inside the
+  IF/ENDIF it already emitted);
+* main ends at its top-level `ret` or at the first `label`; label bodies are skipped, and `byte_size`
+  still covers the whole stream (Nine keeps the bytecode for later variants);
+* the translator state of the call (current instruction, parse pointers, scratch count) is saved and
+  restored around the body.
+
+D3D9 forbids recursion and limits call nesting (4 in 3.0). The inliner stops at depth 8, and rejects
+recursion, an early `ret` inside the callee's flow control, a missing label, and a predicated call
+with `D3DERR_INVALIDCALL` instead of crashing. The TGSI is now straight-line code with ordinary
+IF/LOOP. `aL` inside a callee refers to the caller's loop, as in D3D.
+
+The `callnz !p0` test also exposed a second Nine bug: the source modifier `NOT` on a predicate fell
+through into `COMP` (`1 - x`), so `!p0` read as `p0`. The same applies to predicated instructions
+`(!p0) op`. 0006 adds the missing `break`. S6b's `vs30_full` has `(!p0) mov`, so its nvc0 code changed
+(656 -> 640 bytes): it is now the correct program.
 
 ## Limits
 

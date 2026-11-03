@@ -174,3 +174,113 @@ add r0, r0, c5
 endrep
 m4x4 oPos, v0, c0
 mov oD0, r0
+
+=== vs20_callnz_nested
+// SM2.0 VS: call, callnz on a bool constant, a subroutine calling another (nesting 2), labels after main
+vs_2_0
+def c90, 1.0, 0.5, 0.0, 2.0
+dcl_position v0
+dcl_normal v1
+mov r0, c90.z
+call l0
+callnz l1, b0
+m4x4 oPos, v0, c0
+mov oD0, r0
+ret
+label l0
+dp3 r0.x, v1, c4
+call l2
+ret
+label l1
+mul r0, r0, c90.y
+ret
+label l2
+max r0.x, r0.x, c90.z
+mov r0.w, c90.x
+ret
+
+=== vs20_call_rep
+// SM2.0 VS: the subroutine holds a rep loop on an integer constant; called twice
+vs_2_0
+defi i1, 3, 0, 0, 0
+def c90, 0.0, 1.0, 0.0, 0.0
+dcl_position v0
+mov r0, c90.x
+call l3
+call l3
+m4x4 oPos, v0, c0
+mov oD0, r0
+ret
+label l3
+rep i1
+add r0, r0, c5
+endrep
+ret
+
+=== vs30_loop_call
+// SM3.0 VS: call inside loop aL; the subroutine indexes constants with the caller's aL
+vs_3_0
+defi i0, 4, 0, 1, 0
+def c90, 0.0, 1.0, 0.25, 0.0
+dcl_position v0
+dcl_position o0
+dcl_color o1
+mov r1, c90.x
+loop aL, i0
+call l0
+endloop
+m4x4 o0, v0, c0
+mov o1, r1
+ret
+label l0
+add r1, r1, c[aL + 20]
+ret
+
+=== ps30_callnz_pred
+// SM3.0 PS: callnz on the predicate (and its negation); a subroutine with an if inside
+ps_3_0
+def c10, 0.5, 1.0, 0.0, 0.0
+dcl_texcoord0 v0.xy
+dcl_2d s0
+texld r0, v0, s0
+setp_gt p0.x, r0.x, c10.x
+callnz l0, p0
+callnz l1, !p0
+mov oC0, r0
+ret
+label l0
+mul r0, r0, c1
+ret
+label l1
+if_gt r0.y, c10.x
+add r0, r0, c2
+endif
+ret
+
+=== vs20_call_recursive_xfail
+// expected rejection: recursion is illegal in D3D9; the inliner stops at depth 8 with D3DERR_INVALIDCALL
+// (names ending in _xfail must be rejected by Nine, not crash)
+vs_2_0
+dcl_position v0
+call l0
+m4x4 oPos, v0, c0
+ret
+label l0
+call l0
+ret
+
+=== vs20_call_earlyret_xfail
+// expected rejection: ret inside flow control of a subroutine has no inline form
+vs_2_0
+dcl_position v0
+mov r0, c4
+call l0
+m4x4 oPos, v0, c0
+mov oD0, r0
+ret
+label l0
+if b0
+ret
+endif
+mul r0, r0, c5
+ret

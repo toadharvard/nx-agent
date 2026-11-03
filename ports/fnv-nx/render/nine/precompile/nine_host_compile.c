@@ -323,3 +323,46 @@ nhc_program_diff(const struct nvc0_program *a, const struct nvc0_program *b)
       return "tfb";
    return NULL;
 }
+
+unsigned
+nhc_tgsi_count_subroutine_ops(const struct nvc0_program *prog)
+{
+   struct tgsi_parse_context ctx;
+   unsigned n = 0;
+   if (!prog || tgsi_parse_init(&ctx, prog->pipe.tokens) != TGSI_PARSE_OK)
+      return ~0u;
+   while (!tgsi_parse_end_of_tokens(&ctx)) {
+      tgsi_parse_token(&ctx);
+      if (ctx.FullToken.Token.Type != TGSI_TOKEN_TYPE_INSTRUCTION)
+         continue;
+      switch (ctx.FullToken.FullInstruction.Instruction.Opcode) {
+      case TGSI_OPCODE_CAL:
+      case TGSI_OPCODE_BGNSUB:
+      case TGSI_OPCODE_ENDSUB:
+         n++;
+         break;
+      default:
+         break;
+      }
+   }
+   tgsi_parse_free(&ctx);
+   return n;
+}
+
+bool
+nhc_bytecode_has_call(const uint32_t *tok, size_t ndw)
+{
+   if (ndw < 2 || ((tok[0] >> 8) & 0xff) < 2)
+      return false;
+   for (size_t i = 1; i < ndw && tok[i] != 0x0000ffff;) {
+      uint32_t op = tok[i] & 0xffff;
+      if (op == 0xfffe) { /* comment */
+         i += 1 + ((tok[i] >> 16) & 0x7fff);
+         continue;
+      }
+      if (op == 25 || op == 26) /* D3DSIO_CALL, D3DSIO_CALLNZ */
+         return true;
+      i += 1 + ((tok[i] >> 24) & 0xf);
+   }
+   return false;
+}

@@ -5,7 +5,7 @@
  *
  * INPUT: a shader package (.sdp, S6b reader) or a raw D3D9 token stream (any other file).
  * For every shader and every variant of the selected set it runs Nine's D3D9 -> TGSI translation
- * and nvc0_program_translate() on a fake nvc0 screen; patch 0003's cache (configured on CACHE)
+ * and nvc0_program_translate() on a fake nvc0 screen; patch 0005's cache (configured on CACHE)
  * appends each new program. CACHE is the file the console reads (NVC0_SHADER_CACHE).
  * Variant sets: render/nine/precompile/README.md, "Variant keys". Exit status: 0 if every ctor compile
  * succeeded, 1 otherwise, 2 on usage/IO errors. */

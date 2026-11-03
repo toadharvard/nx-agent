@@ -1,13 +1,13 @@
 #!/bin/bash
 # Host (x86-64 Linux, no GPU) build of the Switch Mesa tree's shader path (stream S6d-nine-precompile):
 # st/nine's D3D9 -> TGSI translator, TGSI, and nouveau's nvc0 compiler (nv50_ir + nvc0_program.c with
-# patch 0003's program cache), on a fake nvc0 screen (host/nvc0_fake_screen.c). No libdrm, no
+# patch 0005's program cache, and patch 0006's st/nine subroutine inlining), on a fake nvc0 screen (host/nvc0_fake_screen.c). No libdrm, no
 # winsys, no meson: the nouveau sources are compiled with -D__SWITCH__ exactly as on the console, so
 # codegen is the same code that runs there (NIR and the Fermi emitter compiled out).
 #
 #   render/nine/host/build_host.sh <work dir> [jobs]
 #
-# Mesa source: $MESA_SRC if set (a tree with patches/0001..0003 applied, e.g. render/nine/build.sh's
+# Mesa source: $MESA_SRC if set (a tree with patches/0001..0006 applied, e.g. render/nine/build.sh's
 # <work>/src/mesa), else <work>/src/mesa cloned + patched here. libdrm_nouveau headers: $DRM_NOUVEAU_INC,
 # else <work>/src/libdrm_nouveau (header use only).
 # Output: <work>/out/libnine_host.a (+ objects), <work>/out/gen (generated headers), <work>/out/flags
@@ -20,14 +20,15 @@ SRC=$WORK/src; OUT=$WORK/out; mkdir -p "$SRC" "$OUT/obj" "$OUT/gen" "$OUT/bin"
 if [ -z "${MESA_SRC:-}" ]; then
 	MESA_SRC=$SRC/mesa
 	[ -d "$MESA_SRC" ] || git clone --depth 1 -b switch-20.1.0-rc3 https://github.com/devkitPro/mesa "$MESA_SRC"
-	[ -e "$MESA_SRC/.fnvnx-nine-patched" ] && touch "$MESA_SRC/.fnvnx-0001" "$MESA_SRC/.fnvnx-0002"
 	for p in "$NINE"/patches/*.patch; do   # same per-patch markers as render/nine/build.sh
 		m=$MESA_SRC/.fnvnx-$(basename "$p" | cut -c1-4)
 		[ -e "$m" ] || { patch -d "$MESA_SRC" -p1 < "$p"; touch "$m"; }
 	done
 fi
 [ -e "$MESA_SRC/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c" ] || {
-	echo "error: $MESA_SRC lacks patch 0003 (nvc0_program_cache.c)" >&2; exit 1; }
+	echo "error: $MESA_SRC lacks patch 0005 (nvc0_program_cache.c)" >&2; exit 1; }
+grep -q tx_inline_call "$MESA_SRC/src/gallium/state_trackers/nine/nine_shader.c" || {
+	echo "error: $MESA_SRC lacks patch 0006 (nine subroutine inlining)" >&2; exit 1; }
 if [ -z "${DRM_NOUVEAU_INC:-}" ]; then
 	[ -d "$SRC/libdrm_nouveau" ] || git clone --depth 1 https://github.com/devkitPro/libdrm_nouveau "$SRC/libdrm_nouveau"
 	DRM_NOUVEAU_INC=$SRC/libdrm_nouveau/include
@@ -112,6 +113,8 @@ LINK="-Wl,--gc-sections $OUT/libnine_host.a -lstdc++ -lm -lpthread -ldl"
 g++ -o "$OUT/bin/nine-precompile" "$OUT/obj/nine_precompile.o" "$OUT/obj/nine_host_compile.o" "$OUT/obj/sdp.o" $LINK
 if [ -e "$NINE/../../tests/s6d/s6d_cache_test.c" ]; then
 	gcc $TOOLCF -I"$NINE/precompile" -c "$NINE/../../tests/s6d/s6d_cache_test.c" -o "$OUT/obj/s6d_cache_test.o"
-	g++ -o "$OUT/bin/s6d_cache_test" "$OUT/obj/s6d_cache_test.o" "$OUT/obj/nine_host_compile.o" "$OUT/obj/sdp.o" $LINK
+	gcc $TOOLCF -c "$HERE/nine_shader_cache.c" -o "$OUT/obj/nine_shader_cache.o"
+	g++ -o "$OUT/bin/s6d_cache_test" "$OUT/obj/s6d_cache_test.o" "$OUT/obj/nine_host_compile.o" "$OUT/obj/sdp.o" \
+		"$OUT/obj/nine_shader_cache.o" $LINK
 fi
 echo "host tools: $OUT/bin"

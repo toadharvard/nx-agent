@@ -1,6 +1,6 @@
 /* fnv-nx S6d: run Gallium Nine's D3D9 -> TGSI -> nvc0 compile on the host (shared by nine-precompile
  * and tests/s6d). One context = fake nvc0 screen + a pipe_context whose create_vs/fs_state does what
- * nvc0_sp_state_create does (tgsi_dup_tokens + nvc0_program_translate, i.e. through patch 0003's
+ * nvc0_sp_state_create does (tgsi_dup_tokens + nvc0_program_translate, i.e. through patch 0005's
  * cache when one is configured). */
 #ifndef NINE_HOST_COMPILE_H
 #define NINE_HOST_COMPILE_H
@@ -34,7 +34,7 @@ struct nhc_result {
    bool point_size;
    struct nvc0_program *prog; /* NULL if nine failed; prog->translated tells nvc0's result */
    unsigned tgsi_tokens;
-   uint8_t key[20];         /* patch 0003 cache key */
+   uint8_t key[20];         /* patch 0005 cache key */
    bool cacheable;
 };
 
@@ -51,5 +51,10 @@ bool nhc_peek(const uint32_t *tokens, size_t ndw, unsigned *type, uint8_t *versi
 /* byte-level comparison of two translated programs: every field translate writes, code, relocation
  * and fixup tables. Returns NULL if identical, else a static description of the first difference. */
 const char *nhc_program_diff(const struct nvc0_program *a, const struct nvc0_program *b);
+
+/* TGSI CAL/BGNSUB/ENDSUB in the program (0 since patch 0006 inlines D3D subroutines) */
+unsigned nhc_tgsi_count_subroutine_ops(const struct nvc0_program *prog);
+/* SM2+ bytecode uses call/callnz */
+bool nhc_bytecode_has_call(const uint32_t *tokens, size_t ndw);
 
 #endif

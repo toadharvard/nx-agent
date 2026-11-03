@@ -1,16 +1,16 @@
 diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h b/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h
---- a/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h	2026-11-03 19:20:20.173478025 +0000
-+++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h	2026-11-03 19:40:00.187486824 +0000
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h
 @@ -212,6 +212,16 @@
                       bool force_per_sample, bool flatshade,
                       uint8_t alphatest);
  
-+/* fnv-nx 0003: fixup table <-> 2 words per entry (function id, packed data).
++/* fnv-nx 0005: fixup table <-> 2 words per entry (function id, packed data).
 + * serialize returns the entry count, or -1 (unknown function or more than max entries). */
 +extern int nv50_ir_fixups_serialize(const void *fixupData, uint32_t *out, uint32_t max);
 +extern void *nv50_ir_fixups_deserialize(const uint32_t *in, uint32_t count);
 +
-+/* fnv-nx 0003: relocation table <-> 5 words per entry (data, mask, offset, bitPos, type). */
++/* fnv-nx 0005: relocation table <-> 5 words per entry (data, mask, offset, bitPos, type). */
 +extern uint32_t nv50_ir_relocs_count(const void *relocData);
 +extern void nv50_ir_relocs_serialize(const void *relocData, uint32_t *out);
 +extern void *nv50_ir_relocs_deserialize(const uint32_t *in, uint32_t count);
@@ -19,13 +19,13 @@ diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h b/src/gallium/d
  extern void nv50_ir_get_target_library(uint32_t chipset,
                                         const uint32_t **code, uint32_t *size);
 diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp
---- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp	2026-11-03 19:20:20.173959070 +0000
-+++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp	2026-11-03 19:40:00.188627096 +0000
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp
 @@ -2802,4 +2802,15 @@
     return emit;
  }
  
-+// fnv-nx 0003: fixup functions by index, so cached programs can store fixups (nvc0_program_cache.c)
++// fnv-nx 0005: fixup functions by index, so cached programs can store fixups (nvc0_program_cache.c)
 +FixupApply
 +getFixupApplyGK110(unsigned int i)
 +{
@@ -38,13 +38,13 @@ diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp b/src/gal
 +
  } // namespace nv50_ir
 diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp
---- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp	2026-11-03 19:20:20.174274471 +0000
-+++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp	2026-11-03 19:40:00.189207849 +0000
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp
 @@ -4610,4 +4610,15 @@
     return emit;
  }
  
-+// fnv-nx 0003: fixup functions by index, so cached programs can store fixups (nvc0_program_cache.c)
++// fnv-nx 0005: fixup functions by index, so cached programs can store fixups (nvc0_program_cache.c)
 +FixupApply
 +getFixupApplyGM107(unsigned int i)
 +{
@@ -57,14 +57,14 @@ diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp b/src/gal
 +
  } // namespace nv50_ir
 diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp
---- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp	2026-11-03 19:20:20.174705485 +0000
-+++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp	2026-11-03 19:40:00.189956425 +0000
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp
 @@ -3539,4 +3539,17 @@
  
  #endif
  
 +#ifndef __SWITCH__
-+// fnv-nx 0003: fixup functions by index, so cached programs can store fixups (nvc0_program_cache.c)
++// fnv-nx 0005: fixup functions by index, so cached programs can store fixups (nvc0_program_cache.c)
 +FixupApply
 +getFixupApplyNVC0(unsigned int i)
 +{
@@ -78,13 +78,13 @@ diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp b/src/gall
 +
  } // namespace nv50_ir
 diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp
---- a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp	2026-11-03 19:20:20.172634518 +0000
-+++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp	2026-11-03 19:40:00.185790792 +0000
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp
 @@ -525,6 +525,118 @@
        info->entry[i].apply(&info->entry[i], code, data);
  }
  
-+/* fnv-nx 0003: (de)serialisation of fixup tables for the program cache.
++/* fnv-nx 0005: (de)serialisation of fixup tables for the program cache.
 + * A fixup entry is (apply function, packed ipa/reg/loc); the function is stored as
 + * (emitter family << 8 | index), stable across processes and hosts. */
 +typedef nv50_ir::FixupApply (*FixupTableFn)(unsigned int);
@@ -148,7 +148,7 @@ diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp b/src/gallium
 +   return info;
 +}
 +
-+/* fnv-nx 0003: relocation table <-> 5 words per entry (data, mask, offset, bitPos, type).
++/* fnv-nx 0005: relocation table <-> 5 words per entry (data, mask, offset, bitPos, type).
 + * codePos/libPos/dataPos are written by nv50_ir_relocate_code at upload, so they are not stored. */
 +uint32_t
 +nv50_ir_relocs_count(const void *relocData)
@@ -200,13 +200,13 @@ diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp b/src/gallium
  nv50_ir_get_target_library(uint32_t chipset,
                             const uint32_t **code, uint32_t *size)
 diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h
---- a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h	2026-11-03 19:20:20.173115229 +0000
-+++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h	2026-11-03 19:40:00.186636976 +0000
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h
 @@ -91,6 +91,13 @@
     FixupEntry entry[0];
  };
  
-+// fnv-nx 0003: index -> fixup function of each emitter (NULL past the end)
++// fnv-nx 0005: index -> fixup function of each emitter (NULL past the end)
 +FixupApply getFixupApplyGM107(unsigned int);
 +FixupApply getFixupApplyGK110(unsigned int);
 +#ifndef __SWITCH__
@@ -217,8 +217,8 @@ diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h b/src/gallium/d
  {
  public:
 diff -ruN a/src/gallium/drivers/nouveau/meson.build b/src/gallium/drivers/nouveau/meson.build
---- a/src/gallium/drivers/nouveau/meson.build	2026-11-03 19:20:20.169330384 +0000
-+++ b/src/gallium/drivers/nouveau/meson.build	2026-11-03 19:40:00.175370087 +0000
+--- a/src/gallium/drivers/nouveau/meson.build
++++ b/src/gallium/drivers/nouveau/meson.build
 @@ -173,6 +173,8 @@
    'nvc0/nvc0_miptree.c',
    'nvc0/nvc0_program.c',
@@ -229,8 +229,8 @@ diff -ruN a/src/gallium/drivers/nouveau/meson.build b/src/gallium/drivers/nouvea
    'nvc0/nvc0_query.h',
    'nvc0/nvc0_query_hw.c',
 diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program.c b/src/gallium/drivers/nouveau/nvc0/nvc0_program.c
---- a/src/gallium/drivers/nouveau/nvc0/nvc0_program.c	2026-11-03 19:20:20.167376543 +0000
-+++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program.c	2026-11-03 19:40:00.167412608 +0000
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_program.c
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program.c
 @@ -29,6 +29,7 @@
  
  #include "codegen/nv50_ir_driver.h"
@@ -256,7 +256,7 @@ diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program.c b/src/gallium/driver
     /* no need for a memory barrier, will be emitted with first program */
  }
  
-+/* fnv-nx 0003: precompiled program cache in front of the compiler (nvc0_program_cache.c).
++/* fnv-nx 0005: precompiled program cache in front of the compiler (nvc0_program_cache.c).
 + * Key = SHA-1(compiler id, chipset, type, num_ucps, smem_size, TGSI tokens); a hit restores
 + * exactly what nvc0_program_translate_compile leaves in prog; a miss compiles and appends. */
 +bool
@@ -279,10 +279,10 @@ diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program.c b/src/gallium/driver
  nvc0_program_destroy(struct nvc0_context *nvc0, struct nvc0_program *prog)
  {
 diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c
---- a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c	2026-11-03 19:40:00.173931528 +0000
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c
 @@ -0,0 +1,590 @@
-+/* fnv-nx 0003: precompiled nvc0 program cache. See nvc0_program_cache.h and render/nine/precompile/README.md.
++/* fnv-nx 0005: precompiled nvc0 program cache. See nvc0_program_cache.h and render/nine/precompile/README.md.
 + *
 + * File: header, then records, appended in any order (first record of a key wins).
 + *   header (32 bytes): "NVC0PCC\0", u32 format version (1), u32 header size (32), u8 compiler_id[16]
@@ -303,7 +303,7 @@ diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c b/src/gallium/
 +#include "nvc0/nvc0_program.h"
 +#include "nvc0/nvc0_program_cache.h"
 +
-+#define PCACHE_ID_STRING "nvc0-pcache/1 mesa-" PACKAGE_VERSION " fnvnx-0003-r1 optLevel=3"
++#define PCACHE_ID_STRING "nvc0-pcache/1 mesa-" PACKAGE_VERSION " fnvnx-0005-r1 optLevel=3"
 +#define PCACHE_MAGIC "NVC0PCC"
 +#define PCACHE_HEADER_SIZE 32
 +#define PCACHE_REC_MAGIC 0x43455250u /* 'PREC' */
@@ -873,10 +873,10 @@ diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c b/src/gallium/
 +   pc_unlock();
 +}
 diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h
---- a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h	2026-11-03 19:40:00.173839214 +0000
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h
 @@ -0,0 +1,60 @@
-+/* fnv-nx 0003: precompiled nvc0 program cache (render/nine/precompile/README.md).
++/* fnv-nx 0005: precompiled nvc0 program cache (render/nine/precompile/README.md).
 + *
 + * nvc0_program_translate() asks the cache before it runs nv50_ir. The key covers everything the
 + * compiler reads from the program (TGSI tokens, type, num_ucps, smem_size) plus the chipset and the

@@ -93,21 +93,25 @@ def main():
 
     t = subprocess.run([test, a.out] + sdps, capture_output=True, text=True)
     ident = collections.defaultdict(lambda: [0, 0])
+    crashed, rejected = set(), set()
     for l in t.stdout.splitlines()[1:]:
         f = l.split("\t")
         if len(f) >= 3 and "identical=" in l:
             ident[f[0].rsplit(".", 1)[0]][0] += 1
             ident[f[0].rsplit(".", 1)[0]][1] += l.endswith("identical=yes")
         elif len(f) >= 3 and "crash" in f[2]:
-            ident[f[0].rsplit(".", 1)[0]] = None
+            crashed.add(f[0].rsplit(".", 1)[0])
+        elif len(f) >= 3 and f[2] == "rejected (expected)":
+            rejected.add(f[0].rsplit(".", 1)[0])
     fails = [l for l in t.stdout.splitlines() if l.startswith("FAIL")]
 
     print("| shader | from | model | ctor compile | variants ok | distinct programs | ctor code B | ctor GPRs | cache hit == fresh |")
     print("|---|---|---|---|---|---|---|---|---|")
     origin = {x["name"]: x["origin"] for x in tests}
     for name, d in per.items():
-        idv = ident.get(name)
-        idc = "crash (stock compiler)" if idv is None else "%d/%d" % (idv[1], idv[0])
+        idv = ident.get(name, [0, 0])
+        idc = ("crash (stock compiler)" if name in crashed else
+               "rejected by Nine (expected)" if name in rejected else "%d/%d" % (idv[1], idv[0]))
         print("| %s | %s | %s | %s | %d/%d | %d | %d | %d | %s |" % (name, origin.get(name, "?"), d["model"], d["ctor"],
               d["ok"], d["n"], len(d["keys"]), d["code"], d["gprs"], idc))
     for n, e in asm_fail:

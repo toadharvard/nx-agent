@@ -1,4 +1,4 @@
-/* tests/s6d: host harness for patch 0003 (nvc0 precompiled program cache).
+/* tests/s6d: host harness for patch 0005 (nvc0 precompiled program cache).
  *
  *   s6d_cache_test WORKDIR INPUT(.sdp|raw)...
  *
@@ -25,6 +25,7 @@
 
 #include "fnvnx_sdp.h"
 #include "nine_host_compile.h"
+#include "nine_shader_cache.h"
 
 static unsigned checks, failures;
 static char cache_path[1024];
@@ -58,7 +59,8 @@ uploaded_equal(const struct nvc0_program *a, const struct nvc0_program *b)
 }
 
 struct counts {
-   unsigned checks, failures, variants, hits, fixup_progs, reloc_progs, crashed, gm20b_same, gm20b_n;
+   unsigned checks, failures, variants, hits, fixup_progs, reloc_progs, crashed, gm20b_same, gm20b_n,
+      call_shaders, xfail;
 };
 
 static void
@@ -91,6 +93,15 @@ test_shader(const char *name, const uint8_t *data, uint32_t size, struct counts 
       /* A: no cache */
       nvc0_pcache_configure(NULL, 0);
       bool ok = nhc_compile(c, (const uint32_t *)data, size / 4, &vars[i], &a);
+      if (strstr(name, "_xfail")) {
+         /* must be rejected by Nine (HRESULT), never reach nvc0 or crash */
+         printf("%s\t%s\t%s\n", name, vnames[i], ok ? "ACCEPTED" : "rejected (expected)");
+         CHECK(!ok, "%s: expected Nine to reject it", name);
+         out->xfail++;
+         if (ok)
+            nhc_result_free(&a);
+         break;
+      }
       if (!ok || !a.prog->translated) {
          printf("%s\t%s\tcompile-fail\n", name, vnames[i]);
          CHECK(0, "%s %s: fresh compile failed", name, vnames[i]);
@@ -120,6 +131,10 @@ test_shader(const char *name, const uint8_t *data, uint32_t size, struct counts 
       printf("%s\t%s\tcode=%u\tgprs=%u\trelocs=%u\tfixups=%u\thit=%u\tidentical=%s\n", name, vnames[i],
              a.prog->code_size, a.prog->num_gprs, nv50_ir_relocs_count(a.prog->relocs),
              a.prog->fixups ? *(uint32_t *)a.prog->fixups : 0, st1.hits, (!d && up) ? "yes" : "NO");
+      if (vars[i].ctor && nhc_bytecode_has_call((const uint32_t *)data, size / 4)) {
+         out->call_shaders++;
+         CHECK(nhc_tgsi_count_subroutine_ops(a.prog) == 0, "%s: TGSI still has CAL/BGNSUB/ENDSUB", name);
+      }
       if (vars[i].ctor) {
          /* GM20B with impl bits (0x12b) vs what devkitPro's libdrm_nouveau reports (0x120) */
          struct nhc_ctx *c2 = nhc_create(0x12b);
@@ -179,6 +194,8 @@ run_isolated(const char *name, const uint8_t *data, uint32_t size, struct counts
       tot->reloc_progs += cs.reloc_progs;
       tot->gm20b_n += cs.gm20b_n;
       tot->gm20b_same += cs.gm20b_same;
+      tot->call_shaders += cs.call_shaders;
+      tot->xfail += cs.xfail;
    } else {
       /* a compiler crash is the compiler's problem, reported, not a cache failure */
       printf("%s\t-\tcrash (signal %d) in the stock compiler\n", name,
@@ -292,6 +309,30 @@ robustness(const uint8_t *data, uint32_t size)
          st.entries, st.hits);
    nhc_result_free(&r);
 
+   /* startup hook (render/nine/host/nine_shader_cache.c): creates the directory, read-write */
+   {
+      char dir[1100], path[1200];
+      snprintf(dir, sizeof(dir), "%.1000s.d", cache_path);
+      snprintf(path, sizeof(path), "%s/fnvnx/shaders.nvc0cache", dir);
+      remove(path);
+      CHECK(nx_nine_shader_cache_init(path) == 0, "startup hook: init failed");
+      nhc_compile(c, (const uint32_t *)data, size / 4, &v, &r);
+      unsigned entries, hits, misses, stores;
+      nx_nine_shader_cache_stats(&entries, &hits, &misses, &stores);
+      CHECK(stores == 1 && file_size(path) == one, "startup hook: store (stores=%u size=%ld)", stores,
+            file_size(path));
+      nhc_result_free(&r);
+      nx_nine_shader_cache_init(path);
+      nhc_compile(c, (const uint32_t *)data, size / 4, &v, &r);
+      nx_nine_shader_cache_stats(&entries, &hits, &misses, &stores);
+      CHECK(hits == 1 && entries == 1, "startup hook: reload (hits=%u entries=%u)", hits, entries);
+      nhc_result_free(&r);
+      remove(path);
+      snprintf(path, sizeof(path), "%s/fnvnx", dir);
+      rmdir(path);
+      rmdir(dir);
+   }
+
    /* cache off: nothing is read or written */
    remove(cache_path);
    nvc0_pcache_configure(NULL, 0);
@@ -399,8 +440,8 @@ main(int argc, char **argv)
    reloc_fixup_roundtrip();
    remove(cache_path);
    printf("s6d_cache_test: shaders=%u crashed=%u variants=%u cache_hits=%u progs_with_relocs=%u "
-          "progs_with_fixups=%u chipset_12b_eq_120=%u/%u checks=%u failures=%u\n", shaders, tot.crashed,
-          tot.variants, tot.hits, tot.reloc_progs, tot.fixup_progs, tot.gm20b_same, tot.gm20b_n, checks,
-          failures);
+          "progs_with_fixups=%u chipset_12b_eq_120=%u/%u call_shaders_inlined=%u rejected_as_expected=%u checks=%u failures=%u\n",
+          shaders, tot.crashed, tot.variants, tot.hits, tot.reloc_progs, tot.fixup_progs, tot.gm20b_same,
+          tot.gm20b_n, tot.call_shaders, tot.xfail, checks, failures);
    return failures ? 1 : 0;
 }
