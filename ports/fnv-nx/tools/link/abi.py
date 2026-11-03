@@ -219,8 +219,15 @@ def compare(ref, dfn):
             continue
         scls_a, sloc = ra[slab]
         if sloc == aloc and _bucket(scls_a) == _bucket(cls):
-            if scls_a != cls and cls in ('I32', 'I64', 'P') and scls_a in ('I8', 'I16'):
+            if scls_a != cls and cls in ('I32', 'I64', 'P') and scls_a in ('I8', 'I16') and sloc[0] == 'x':
+                # the definition reads 32/64 bits the AArch64 caller leaves unspecified above the narrow value; the
+                # MSVC caller pushed it extended: extend in place, as the reference's type says (char is signed)
                 v.notes.append('%s narrower in the reference (%s -> %s)' % (lab, scls_a, cls))
+                raw = ref.raw_params[int(slab[1:])] if slab.startswith('p') and ref.raw_params else ''
+                v.moves.append((aloc, sloc, cls, ('s' if narrow_signed(raw) else 'u') +
+                                ('xtb' if scls_a == 'I8' else 'xth')))
+                if 'narrow-extend' not in v.classes:
+                    v.classes.append('narrow-extend')
             continue
         v.moves.append((aloc, sloc, cls, scls_a))
         tag = 'int-float-param' if _bucket(scls_a) != _bucket(cls) else 'reg-shift'
@@ -307,7 +314,20 @@ def _reg(loc, cls):
     return '[sp, #%d]' % loc[1]
 
 
+EXTEND = ('sxtb', 'uxtb', 'sxth', 'uxth')
+
+
+def narrow_signed(t):
+    """MSVC narrow integer type text -> signed? (char and short are; bool, unsigned ones and wchar_t are not)."""
+    t = ' '.join(re.sub(r'\b(?:const|volatile)\b', ' ', t).split())
+    return t in ('char', 'signed char', 'short', 'signed short')
+
+
 def _move(dst, src, cd, cs):
+    if cs in EXTEND:   # in-place extension of a narrow argument (dst == src)
+        if cd == 'I64' and cs[0] == 's':
+            return '%s x%d, w%d' % (cs, dst[1], src[1])
+        return '%s w%d, w%d' % (cs, dst[1], src[1])
     if src[0] == 'stk':
         return 'ldr %s, %s' % (_reg(dst, cd), _reg(src, cs))
     if dst[0] == 'x' and src[0] == 'x':

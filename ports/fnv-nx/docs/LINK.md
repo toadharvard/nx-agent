@@ -25,9 +25,9 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
    * **References**: each undefined symbol of an object is looked up, strict to loose, in that unit's names
      (`symbols` and `functions`): `exact` (name, params, cv) -> `l1` (`long` == `int`, `wchar_t` ==
      `unsigned short`: the ILP32 `size_t` / MSVC typedef differences) -> `l2` (cv ignored) -> `arity` -> `name`;
-     undecorated names (`_f`, `_f@N`, `@f@N`, unmangled C++ variables) by plain name (`cname`). If the unit has
-     no match, all definitions (`gdef`) then all references (`gref`) of every unit are tried (exact/l1/name, and
-     only when one address answers). Last resort: a Ghidra-style name that carries its address (`DAT_`, `FUN_`,
+     undecorated names (`_f`, `_f@N`, `@f@N`, unmangled C++ variables, function-pointer variables
+     `R (cc *name)(...)` too) by plain name (`cname`). If the unit has no match, all definitions (`gdef`) then
+     all references (`gref`) of every unit are tried (exact/l1/name, and only when one address answers). Last resort: a Ghidra-style name that carries its address (`DAT_`, `FUN_`,
      `g_`, `UNK_`, `PTR_` + 8 hex digits); across units.json such names agree with the recorded address in 99.6 %
      of the cases. Several addresses -> arity, then cv, else `ambiguous`.
    * The reference declaration and the definition at the address are compared for AArch64 argument passing
@@ -148,6 +148,11 @@ class/struct/union/enum tags, which Itanium names do not.
   everywhere -> no bridge; register moves only -> generated bridge (parallel moves sequentialized through
   x16/v16, then a tail call `b`; a result in the wrong register file -> call, `fmov`, return); anything needing an
   aggregate's size or a stack destination -> `manual`.
+* A narrow integer the reference passes (`char`, `bool`, `short`, ...) where the definition reads a 32/64-bit value
+  or a pointer in the same register: the AArch64 caller leaves the upper bits unspecified, MSVC's caller pushed the
+  value extended, so the bridge extends it in place by the reference's type (`sxtb`/`sxth` for `char`/`short`,
+  signed on MSVC and now in GCC too with J-0034's `-fsigned-char`; `uxtb`/`uxth` for `bool`, unsigned types,
+  `wchar_t`), class `narrow-extend`. The byte-level re-decision (below) keeps these bridges.
 
 Classes in the report: `edx-dummy`, `reg-shift` (same register file, other index), `int-float-param`
 (x86 tolerated an int/float swap in a 4-byte slot), `ret-regfile`, `sret-explicit` (one side returns an aggregate,

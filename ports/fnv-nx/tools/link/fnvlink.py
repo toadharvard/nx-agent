@@ -408,7 +408,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                             probe_req.add((unit, abi2.agg_name(c)))
                                 p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.source: layouts.get((x, t)),
                                                   lambda t, x=nd['unit']: layouts.get((x, t)))
-                                if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge'):
+                                if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
+                                        not (v.kind == 'bridge' and 'narrow-extend' in v.classes):
                                     stats['abi2_' + v.kind + '->' + p2.kind] += 1
                                     v = abi.Verdict()
                                     v.kind, v.classes, v.notes, v.plan = p2.kind, p2.classes, p2.notes, p2

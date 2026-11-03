@@ -79,6 +79,22 @@ def main():
     check(v.kind == 'manual' and 'sret-explicit' in v.classes, 'hidden vs explicit return buffer: %s %s'
           % (v.kind, v.classes))
 
+    # narrow arguments the definition reads as int/pointer: extended in place by the reference's signedness
+    nn = ['?n1@@YAXD@Z', '?n1@@YAXH@Z', '?n2@@YAX_N@Z', '?n3@@YAXG@Z', '?n4@@YAXF@Z', '?n5@@YAXPAX@Z']
+    dn = fnvlink.batch_demangle(fnvlink.UNDNAME, nn)
+    N = {n: sigs.parse_msvc(n, dn[n]) for n in nn}
+    ext = {}
+    for ref, want in (('?n1@@YAXD@Z', 'sxtb w0, w0'), ('?n2@@YAX_N@Z', 'uxtb w0, w0'), ('?n3@@YAXG@Z', 'uxth w0, w0'),
+                      ('?n4@@YAXF@Z', 'sxth w0, w0')):
+        v = abi.compare(N[ref], N['?n1@@YAXH@Z'])
+        code = abi.emit_bridge('nb_' + ref[1:3] + str(len(ext)), 'tgt', v, 'narrow') if v.kind == 'bridge' else ''
+        check(v.kind == 'bridge' and 'narrow-extend' in v.classes and want in code, '%s -> int: %s %s'
+              % (ref, v.kind, code))
+        ext[ref] = code
+    v = abi.compare(N['?n2@@YAX_N@Z'], N['?n5@@YAXPAX@Z'])
+    check(v.kind == 'bridge' and v.moves[0][3] == 'uxtb', 'bool -> pointer: %s %s' % (v.kind, v.moves))
+    check(abi.compare(N['?n1@@YAXH@Z'], N['?n1@@YAXD@Z']).kind == 'same', 'int -> char needs nothing')
+
     # bridges assemble
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, 'b.S')
@@ -86,7 +102,7 @@ def main():
         vc = abi.Verdict(); vc.moves = [(('x', 1), ('x', 2), 'I32', 'I32'), (('x', 2), ('x', 1), 'P', 'P'),
                                         (('v', 0), ('x', 3), 'F32', 'I32'), (('x', 3), ('stk', 0), 'I32', 'I32')]
         open(src, 'w').write('    .text\n' + abi.emit_bridge('b1', 't1', vb, 'test') +
-                             abi.emit_bridge('b2', 't2', vc, 'cycle'))
+                             abi.emit_bridge('b2', 't2', vc, 'cycle') + ''.join(ext.values()))
         r = subprocess.run([fnvlink.AS, '-mabi=ilp32', src, '-o', os.path.join(tmp, 'b.o')], capture_output=True,
                            text=True)
         check(r.returncode == 0, 'bridges assemble: ' + r.stderr)
