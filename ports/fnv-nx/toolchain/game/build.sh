@@ -21,7 +21,7 @@ TC=$FNVNX_TOOLCHAIN; ROOT=$(cd "$TC/.." && pwd); P=$ROOT/platform
 export PATH=$DEVKITPRO/devkitA64/bin:$PATH
 JOBS=${JOBS:-$(nproc)}
 SSE2NEON=${SSE2NEON:-$ROOT/ext/sse2neon}
-ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec"
+ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec -fsigned-char"
 case "${GUEST:-pie}" in
 	pie) SPECS="$TC/guest/guest_pie.specs"; BASEFLAG="" ;;
 	fixed) SPECS="$TC/guest/guest.specs"; BASEFLAG="-Wl,--defsym=FNVNX_GUEST_BASE=${FNVNX_GUEST_BASE:-0x02100000}" ;;

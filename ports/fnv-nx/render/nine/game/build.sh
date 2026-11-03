@@ -21,7 +21,7 @@ export PATH=$DEVKITPRO/devkitA64/bin:$PATH SSE2NEON
 # (render/nine/heaplog.c, started by nine_register.cpp) into sdmc:/fnvnx/host.log; off by default.
 G=$OUT/nine-guest; mkdir -p "$G"
 python3 -I "$R/gen_proxy.py" "$ROOT/shim/include/d3d9.h" "$G/gen" >/dev/null
-ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec"
+ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec -fsigned-char"
 HEAPLOG=""
 [ -z "${HEAPLOG_S:-}" ] || HEAPLOG="-DFNVNX_HEAPLOG_S=$HEAPLOG_S"
 GXX="$ARCH -O2 -g -ffunction-sections -fdata-sections -fshort-wchar -Wall -fno-exceptions -fno-rtti \

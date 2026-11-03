@@ -697,3 +697,15 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - d3dx_undefined=0 game_undefined=8925 managed_tex_2k_mib=16.0 test_gate=pass game_gate=pass
   gate_arena_peak_mib=75.8
 * **next** - hardware run of test + game with `HEAPLOG_S=60`.
+
+### J-0034 | 2026-11-03 | stream: S0-arch | status: done | parent: J-0002,J-0005
+
+* **found** - Silent semantic mismatch in all builds so far: plain `char` is signed on MSVC x86 but unsigned by
+  default on AArch64, and no build used `-fsigned-char`; every decomp comparison / widening of a plain `char` could
+  change meaning without a diagnostic. GCC -O2 also assumes things MSVC 2008 never exploited (strict aliasing, signed
+  overflow, null-check deletion) and contracts a*b+c into FMA (S8, J-0005).
+* **decided** - D10: decomp code is compiled with MSVC-like semantics: `-fsigned-char -fno-strict-aliasing -fwrapv
+  -fno-delete-null-pointer-checks -ffp-contract=off` (census, `tools/link/compile.sh`; `-fsigned-char` also in the game
+  and Nine game builds); `fnvnx_compat.h` refuses to compile with an unsigned plain char. All objects compiled before
+  this entry are stale and must be rebuilt (S2c / S9).
+* **next** - static correctness checks beyond layout asserts, ABI verdicts and S11 equivalence: see J-0035.

@@ -11,6 +11,13 @@
 #error "fnv-nx builds the decomp for AArch64 ILP32 only (-mabi=ilp32)"
 #endif
 
+/* MSVC semantics the decomp relies on (J-0034): plain char is signed on MSVC x86 but unsigned by default on
+ * AArch64. Build with -fsigned-char; also -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks
+ * -ffp-contract=off (see tools/link/compile.sh). */
+#ifdef __CHAR_UNSIGNED__
+#error "fnv-nx: plain char must be signed like MSVC (-fsigned-char)"
+#endif
+
 /* SSE: one global vector type for every unit (prepare.py rules SSE1-3 remove the decomp's local copies).
  * Included before the keyword macros below so sse2neon sees a clean environment. */
 #ifdef __cplusplus
