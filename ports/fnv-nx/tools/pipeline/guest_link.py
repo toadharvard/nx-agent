@@ -29,7 +29,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..', '..'))
 TCDIR = os.path.join(ROOT, 'toolchain')
-ARCH = ['-mabi=ilp32', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-fno-pie', '-ftls-model=local-exec']
+ARCH = ['-mabi=ilp32', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-fno-pie', '-ftls-model=local-exec',
+        '-fsigned-char']   # D10 (J-0034): MSVC-like plain char, as toolchain/game/build.sh
 COMMON = ARCH + ['-O2', '-g', '-ffunction-sections', '-fdata-sections', '-frounding-math', '-fshort-wchar', '-w']
 P = os.path.join(ROOT, 'platform')
 PINC = ['-I' + os.path.join(P, 'include'), '-iquote', os.path.join(ROOT, 'shim', 'include'),

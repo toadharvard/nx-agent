@@ -187,6 +187,9 @@ def render(b, stages, snap, prev):
     if rows:
         L += table(['', 'units', 'clean / object', 'failing', ''], rows, ['---', '--:', '--:', '--:', '---'])
         L.append('')
+    if co.get('flags'):
+        L.append('Compile flags (`tools/link/compile.sh`, part of the cache key): `%s`' % co['flags'])
+        L.append('')
     if ce.get('top_errors'):
         L.append('Top census error kinds (`build/census/summary.txt`):')
         L.append('')
@@ -231,10 +234,14 @@ def render(b, stages, snap, prev):
             L.append('')
     # ---- guest
     gu = R('guest')
-    L.append('## Guest link (ILP32, guest.ld at 0x10000000)')
+    L.append('## Guest link (ILP32 game module)')
     L.append('')
+    ad = gu.get('adapter') or {}
     if gu.get('method'):
-        ad = gu.get('adapter') or {}
+        if not ad:
+            L.append('Method: %s.%s' % (gu['method'], (' ' + gu['layout'] + '.') if gu.get('layout') else ''))
+            L.append('')
+    if ad:
         L.append('Method: %s. %s game objects, %s platform/loader objects, %s link passes, gc-sections %s, '
                  'D3D9 %s.' % (gu['method'], fmt(ad.get('game_objects')), fmt(ad.get('platform_units')),
                                fmt(ad.get('link_passes')), 'on' if ad.get('gc_sections') else 'off',
@@ -269,9 +276,7 @@ def render(b, stages, snap, prev):
     L.append('## Host module, Nine, package')
     L.append('')
     if ho.get('method'):
-        L.append('Host: %s.' % ho['method'] + (' Nine link: %s objects, %s failed, %s undefined.' % (
-            len(ho['nine_link'].get('objects', [])), len(ho['nine_link'].get('failed', [])),
-            len(ho['nine_link'].get('undefined', []))) if ho.get('nine_link') else ''))
+        L.append('Host: %s.' % ho['method'])
         L.append('')
     if ni.get('status') not in (None, 'disabled', 'never'):
         L.append('Nine: %s' % (ni.get('summary') or ni.get('error')))
