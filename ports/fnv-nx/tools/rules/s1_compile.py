@@ -695,11 +695,13 @@ VA_PLATFORM_LAST = {'vsprintf', 'vsnprintf', 'vprintf', 'vfprintf', 'vsscanf', '
 NOT_CALLS = {'if', 'while', 'for', 'switch', 'return', 'sizeof', 'decltype', 'alignof', '__alignof__'}
 
 def _va_positions(text):
-    """{function: index of its va_list parameter} for the functions this file declares with one."""
+    """{function: (index of its va_list parameter, where that declaration is)} for the functions this file
+    declares with one (a call only counts declarations before it)."""
     pos = {}
     for m in re.finditer(r'(?<!\w)([A-Za-z_]\w*)\s*\(([^;{}()]*\bva_list\b[^;{}()]*)\)', text):
         for i, p in enumerate(_split_args(m.group(2))):
-            if re.match(r'^\s*(?:const\s+)?va_list\b', p) and len(p.split()) <= 3: pos.setdefault(m.group(1), i)
+            if re.match(r'^\s*(?:const\s+)?va_list\b', p) and len(p.split()) <= 3:
+                pos.setdefault(m.group(1), (i, m.start()))
     return pos
 
 def r_va_list(path, text, stats):
@@ -723,7 +725,8 @@ def r_va_list(path, text, stats):
             if word and not (kw and kw.group(1) in ('return', 'case', 'else', 'do', 'throw', 'new')): continue
         close = _call_end(text, m.end() - 1)
         args = _split_args(text[m.end():close - 1])
-        at = len(args) - 1 if name in VA_PLATFORM_LAST else targets.get(name)
+        at = len(args) - 1 if name in VA_PLATFORM_LAST else (
+            targets[name][0] if name in targets and targets[name][1] < m.start() else None)
         changed = False
         for i, a in enumerate(args):
             ident = re.match(r'^(\s*)([A-Za-z_]\w*)(\s*)$', a)
