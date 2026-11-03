@@ -1,0 +1,30 @@
+diff -ru qa/src/gallium/state_trackers/nine/swapchain9.c qb/src/gallium/state_trackers/nine/swapchain9.c
+--- a/src/gallium/state_trackers/nine/swapchain9.c	2026-11-03 19:06:36.353882257 +0000
++++ b/src/gallium/state_trackers/nine/swapchain9.c	2026-11-03 19:06:36.370475308 +0000
+@@ -102,6 +102,16 @@
+     HRESULT hr;
+ 
+     memset(&whandle, 0, sizeof(whandle));
++#ifdef HAVE_SWITCH_PLATFORM
++    /* fnv-nx: no dma-buf on Horizon. The process has a 32-bit address space, so the pipe_resource pointer
++     * itself is the 'fd'; the present backend (render/nine) turns it into an NvGraphicBuffer with
++     * nouveau_switch_resource_get_buffer() and attaches it to the nwindow. */
++    (void)pipe; (void)for_frontbuffer_reading;
++    nine_context_get_pipe_release(This->base.device);
++    stride = 0;
++    dmaBufFd = (int)(uintptr_t)resource;
++    goto have_handle;
++#endif
+     whandle.type = WINSYS_HANDLE_TYPE_FD;
+     This->screen->resource_get_handle(This->screen, pipe, resource,
+                                       &whandle,
+@@ -111,6 +121,9 @@
+     nine_context_get_pipe_release(This->base.device);
+     stride = whandle.stride;
+     dmaBufFd = whandle.handle;
++#ifdef HAVE_SWITCH_PLATFORM
++have_handle:
++#endif
+     hr = ID3DPresent_NewD3DWindowBufferFromDmaBuf(This->present,
+                                                   dmaBufFd,
+                                                   resource->width0,
