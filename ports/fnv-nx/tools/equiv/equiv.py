@@ -206,6 +206,18 @@ class Resolver:
         bytes and offset, compare_builds' fallback) instead."""
         syms = {k: v for k, v in unit.get('symbols', {}).items() if not SG_LITERAL.match(k)}
         how = Counter()
+        # a literal is its bytes: bind $SGnnnn to a digest of them (up to the next symbol of its section), so a
+        # reference to the same literal matches wherever the literal sits in the unit's data section
+        starts = {}
+        for x in coff.symbols.values():
+            if x['section'] > 0:
+                starts.setdefault(x['section'], set()).add(x['value'])
+        for x in coff.symbols.values():
+            if x['section'] > 0 and SG_LITERAL.match(x['name']):
+                data = coff.sections[x['section']]['data']
+                end = min([v for v in starts[x['section']] if v > x['value']] or [len(data)])
+                syms[x['name']] = hex(0x100000000 | int(hashlib.sha1(data[x['value']:end]).hexdigest()[:8], 16))
+                how['literal'] += 1
         defined = {}
         for s in coff.symbols.values():
             if s['section'] > 0 and s['name'].startswith('?'):
