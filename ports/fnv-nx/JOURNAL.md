@@ -780,3 +780,11 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   every finished step.
 * **decided** - No backup branches for agent work-in-progress (user); recovery from transcripts. Scratch output dirs
   must be versioned and pruned by their owners.
+
+### J-0040 | 2026-11-03 | stream: S0-arch | status: done | parent: J-0039
+
+* **found** - A second container restart ~40 min after the first, again with 10 agents running builds, Wine and
+  emulators on 4 cores: most likely the session's resource allowance, not a crash in our tools.
+* **decided** - At most 5 agents at a time, each with at most one heavy job (2 parallel compiles); every long run
+  checkpoints to disk and skips finished work on rerun. Active now: S1 (D13 GAME1 first), S11, S13, S9, S2c. Queued
+  (state kept on disk, resume when a slot frees): S1b, S2b, S12, S14, V1.
