@@ -262,6 +262,8 @@ def layout_blocks(text):
             continue
         if cur is None:
             continue
+        if '|' not in line and '+---' not in line:
+            continue        # not a layout line: what is left of a diagnostic
         lines.append(line)
         if line == '+---' and len(lines) > 1:
             out[cur[0]] = (cur[1], '\n'.join(lines))
