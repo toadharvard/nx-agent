@@ -394,3 +394,16 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - S6c spike: does Nine + nouveau build for Switch; S5 headless boot; the player's exe (data image, vtable
   slots, ABI patches) and a hardware loop (Remote Control on the machine with the console + nx-agent) are the two
   external accelerators.
+
+### J-0019 | 2026-11-03 | stream: S6b-shaders | status: done | parent: J-0006,J-0018
+
+* **did** - `render/shaders/`: `libfnvnx_shaders` (C API: translate -> DKSH + reflection JSON + stats, CTAB query,
+  FNV-1a-64 cache key, DKSH validation), thin CLI `sdp2dksh` (`--ctab` dump, `--list`, `--pack`), `.sdp`
+  reader/writer (`SDP.md`), MojoShader `glsldk` profile (`mojoshader.patch`), uam as a library (`uam.patch`), pinned
+  `build.sh`; backend seam `src/backend.h` for a future optimiser; binding contract `include/fnvnx_dk_layout.h`.
+* **found** - Upstream MojoShader GLSL had no predication and read the predicate token in the wrong place, no ps_1_4
+  texld/texcrd, no float->int for vs_1_1 `mov a0` (fixed in our patch). uam allows 16 vertex attributes; ps_1_x
+  sampler types are not in the bytecode. `.sdp` format taken from Oblivion-era docs, unverified on FNV files.
+* **metrics** - shaders_tests=17 shaders_pass=17 unit_checks=27 (compile + text checks only, not run on a GPU)
+* **next** - off the critical path (J-0018). If resumed: real `.sdp` files, ps_1_x sampler map, 4 missing ps_1_2/1_3
+  opcodes, clip planes.
