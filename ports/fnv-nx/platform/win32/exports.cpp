@@ -1,0 +1,126 @@
+/* exports.cpp - DLL!name -> implementation, for import slots resolved by name.
+ *
+ * The authoritative name of every IAT slot of FalloutNV.exe is in the exe's own import directory (the decomp
+ * names some slots inconsistently, docs/RUNTIME.md). The loader/link step reads that directory and asks
+ * fnvnx_win32_lookup_export(dll, name) for each slot; NULL means "not provided by S4" (D3D9/D3DX/Bink -> S6,
+ * DirectInput/DirectSound/XInput/vorbisfile -> S7). */
+#include "w32.h"
+
+extern "C" {
+int fnvnx_ws2_WSAStartup(WORD, void *);
+int fnvnx_ws2_WSACleanup(void);
+int fnvnx_ws2_WSAGetLastError(void);
+UINT_PTR fnvnx_ws2_socket(int, int, int);
+int fnvnx_ws2_closesocket(UINT_PTR);
+int fnvnx_ws2_fail(void);
+unsigned short fnvnx_ws2_htons(unsigned short);
+unsigned short fnvnx_ws2_ntohs(unsigned short);
+unsigned long fnvnx_ws2_inet_addr(const char *);
+char *fnvnx_ws2_inet_ntoa(unsigned long);
+void *fnvnx_ws2_gethostbyname(const char *);
+int fnvnx_ws2_gethostname(char *, int);
+bool SteamAPI_Init(void);
+bool SteamAPI_IsSteamRunning(void);
+void SteamAPI_Shutdown(void);
+void SteamAPI_RunCallbacks(void);
+void SteamAPI_RegisterCallback(void *, int);
+void SteamAPI_UnregisterCallback(void *);
+void *SteamUser(void);
+void *SteamFriends(void);
+void *SteamUtils(void);
+void *SteamApps(void);
+void *SteamUserStats(void);
+}
+
+namespace {
+struct exp { const char *dll, *name; void *fn; };
+#define E(dll, f) { dll, #f, (void *)&f }
+#define K(f) E("kernel32", f)
+#define U(f) E("user32", f)
+const exp g_exports[] = {
+    /* kernel32 */
+    K(CloseHandle), K(CompareFileTime), K(CopyFileA), K(CreateDirectoryA), K(CreateEventA), K(CreateFileA),
+    K(CreateMutexA), K(CreateSemaphoreA), K(CreateThread), K(DebugBreak), K(DeleteCriticalSection),
+    K(DeleteFileA), K(EnterCriticalSection), K(ExitProcess), K(ExitThread), K(FileTimeToLocalFileTime),
+    K(FileTimeToSystemTime), K(FindClose), K(FindFirstFileA), K(FindNextFileA), K(FlushFileBuffers),
+    K(FormatMessageA), K(FreeLibrary), K(GetCommandLineA), K(GetCommandLineW), K(GetComputerNameA),
+    K(GetCurrentDirectoryA), K(GetCurrentProcess), K(GetCurrentProcessId), K(GetCurrentThread),
+    K(GetCurrentThreadId), K(GetEnvironmentVariableA), K(GetExitCodeThread), K(GetFileAttributesA),
+    K(GetFileSize), K(GetFileSizeEx), K(GetFileTime), K(GetFullPathNameA), K(GetLastError), K(GetLocalTime),
+    K(GetModuleFileNameA), K(GetModuleHandleA), K(GetPrivateProfileIntA), K(GetPrivateProfileSectionA),
+    K(GetPrivateProfileSectionNamesA), K(GetPrivateProfileStringA), K(GetProcAddress), K(GetProcessHeap),
+    K(GetSystemInfo), K(GetSystemTime), K(GetSystemTimeAsFileTime), K(GetThreadPriority), K(GetTickCount),
+    K(GlobalMemoryStatus), K(GlobalMemoryStatusEx), K(HeapAlloc), K(HeapCreate), K(HeapDestroy), K(HeapFree),
+    K(HeapReAlloc), K(HeapSize), K(InitializeCriticalSection), K(InitializeCriticalSectionAndSpinCount),
+    K(InterlockedCompareExchange), K(InterlockedDecrement), K(InterlockedExchange), K(InterlockedExchangeAdd),
+    K(InterlockedIncrement), K(IsBadCodePtr), K(IsBadReadPtr), K(IsBadWritePtr), K(IsDebuggerPresent),
+    K(LeaveCriticalSection), K(LoadLibraryA), K(LocalAlloc), K(LocalFree), K(MoveFileA), K(OutputDebugStringA),
+    K(QueryPerformanceCounter), K(QueryPerformanceFrequency), K(RaiseException), K(ReadFile), K(ReleaseMutex),
+    K(ReleaseSemaphore), K(RemoveDirectoryA), K(ResetEvent), K(ResumeThread), K(RtlUnwind),
+    K(SetCurrentDirectoryA), K(SetEndOfFile), K(SetEvent), K(SetFilePointer), K(SetFilePointerEx),
+    K(SetLastError), K(SetThreadAffinityMask), K(SetThreadIdealProcessor), K(SetThreadPriority),
+    K(SetThreadPriorityBoost), K(Sleep), K(SleepEx), K(SuspendThread), K(SwitchToThread),
+    K(SystemTimeToFileTime), K(SystemTimeToTzSpecificLocalTime), K(TlsAlloc), K(TlsFree), K(TlsGetValue),
+    K(TlsSetValue), K(TryEnterCriticalSection), K(VirtualAlloc), K(VirtualFree), K(VirtualQuery),
+    K(WaitForMultipleObjects), K(WaitForSingleObject), K(WriteFile), K(WritePrivateProfileSectionA),
+    K(WritePrivateProfileStringA), K(lstrcatA), K(lstrcmpiA), K(lstrcpyA), K(lstrlenA),
+    { "kernel32", "lstrcpy", (void *)&lstrcpyA },
+    /* user32 */
+    U(AdjustWindowRect), U(AdjustWindowRectEx), U(CallNextHookEx), U(ClientToScreen), U(ClipCursor),
+    U(CreateWindowExA), U(DefWindowProcA), U(DestroyWindow), U(DispatchMessageA), U(EnumChildWindows),
+    U(FindWindowA), U(GetActiveWindow), U(GetAsyncKeyState), U(GetClientRect), U(GetCursorPos),
+    U(GetDoubleClickTime), U(GetFocus), U(GetForegroundWindow), U(GetKeyState), U(GetSystemMetrics),
+    U(GetWindow), U(GetWindowLongA), U(GetWindowRect), U(IsIconic), U(IsWindow), U(LoadCursorA), U(LoadIconA),
+    U(MessageBoxA), U(PeekMessageA), U(PostMessageA), U(PostQuitMessage), U(RegisterClassA), U(ReleaseCapture),
+    U(ScreenToClient), U(SendInput), U(SendMessageA), U(SetCapture), U(SetCursorPos), U(SetFocus),
+    U(SetForegroundWindow), U(SetWindowLongA), U(SetWindowPos), U(SetWindowTextA), U(SetWindowsHookExA),
+    U(ShowCursor), U(ShowWindow), U(SwapMouseButton), U(TranslateMessage), U(UnhookWindowsHookEx),
+    U(UpdateWindow),
+    E("gdi32", GetStockObject), E("gdi32", DeleteObject),
+    E("advapi32", RegCloseKey), E("advapi32", RegCreateKeyExA), E("advapi32", RegOpenKeyExA),
+    E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA),
+    E("shell32", CommandLineToArgvW), E("shell32", ShellExecuteA), E("shell32", SHGetFolderPathA),
+    E("ole32", CoCreateGuid), E("ole32", CoCreateInstance), E("ole32", CoFreeUnusedLibraries),
+    E("ole32", CoInitialize), E("ole32", CoInitializeEx), E("ole32", CoTaskMemAlloc), E("ole32", CoTaskMemFree),
+    E("ole32", CoUninitialize),
+    E("winmm", timeGetTime), E("winmm", timeBeginPeriod), E("winmm", timeEndPeriod),
+    { "ws2_32", "WSAStartup", (void *)&fnvnx_ws2_WSAStartup }, { "ws2_32", "WSACleanup", (void *)&fnvnx_ws2_WSACleanup },
+    { "ws2_32", "WSAGetLastError", (void *)&fnvnx_ws2_WSAGetLastError }, { "ws2_32", "socket", (void *)&fnvnx_ws2_socket },
+    { "ws2_32", "closesocket", (void *)&fnvnx_ws2_closesocket }, { "ws2_32", "htons", (void *)&fnvnx_ws2_htons },
+    { "ws2_32", "ntohs", (void *)&fnvnx_ws2_ntohs }, { "ws2_32", "inet_addr", (void *)&fnvnx_ws2_inet_addr },
+    { "ws2_32", "inet_ntoa", (void *)&fnvnx_ws2_inet_ntoa }, { "ws2_32", "gethostbyname", (void *)&fnvnx_ws2_gethostbyname },
+    { "ws2_32", "gethostname", (void *)&fnvnx_ws2_gethostname }, { "ws2_32", "bind", (void *)&fnvnx_ws2_fail },
+    { "ws2_32", "listen", (void *)&fnvnx_ws2_fail }, { "ws2_32", "accept", (void *)&fnvnx_ws2_fail },
+    { "ws2_32", "connect", (void *)&fnvnx_ws2_fail }, { "ws2_32", "send", (void *)&fnvnx_ws2_fail },
+    { "ws2_32", "recv", (void *)&fnvnx_ws2_fail }, { "ws2_32", "setsockopt", (void *)&fnvnx_ws2_fail },
+    { "ws2_32", "ioctlsocket", (void *)&fnvnx_ws2_fail }, { "ws2_32", "WSAAsyncSelect", (void *)&fnvnx_ws2_fail },
+    E("steam_api", SteamAPI_Init), E("steam_api", SteamAPI_IsSteamRunning), E("steam_api", SteamAPI_Shutdown),
+    E("steam_api", SteamAPI_RunCallbacks), E("steam_api", SteamAPI_RegisterCallback),
+    E("steam_api", SteamAPI_UnregisterCallback), E("steam_api", SteamUser), E("steam_api", SteamFriends),
+    E("steam_api", SteamUtils), E("steam_api", SteamApps), E("steam_api", SteamUserStats),
+};
+#undef E
+#undef K
+#undef U
+
+/* "KERNEL32.dll" == "kernel32" */
+int dll_eq(const char *a, const char *b)
+{
+    size_t la = strlen(a), lb = strlen(b);
+    if (la > 4 && !w32_stricmp(a + la - 4, ".dll"))
+        la -= 4;
+    if (lb > 4 && !w32_stricmp(b + lb - 4, ".dll"))
+        lb -= 4;
+    return la == lb && !w32_strnicmp(a, b, la);
+}
+} // namespace
+
+extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
+{
+    if (!name)
+        return NULL;
+    for (const exp &e : g_exports)
+        if (!strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
+            return e.fn;
+    return NULL;
+}
