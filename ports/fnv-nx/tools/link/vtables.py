@@ -871,6 +871,8 @@ def run(out, tree, jobs=4):
                     if r is not None and r.get('enc'):
                         results.setdefault(c, (h, r))
         todo = {c: v for c, v in todo.items() if c not in results}
+        json.dump({**cache, **newcache}, open(cache_path + '.tmp', 'w'))   # an interrupted run resumes from here
+        os.replace(cache_path + '.tmp', cache_path)
         # base typeinfos no object defines: probe them too, on the host unit that named them
         have_enc = {r['enc'] for _, r in results.values()}
         want = {(b[0], h) for h, r in results.values() for b in r.get('bases') or []
@@ -883,7 +885,8 @@ def run(out, tree, jobs=4):
                 cname = 'base:' + n
                 if sp and cname not in results and cname not in todo:
                     todo[cname] = (sp, [h])
-    json.dump(newcache, open(cache_path, 'w'))
+    json.dump(newcache, open(cache_path + '.tmp', 'w'))
+    os.replace(cache_path + '.tmp', cache_path)
 
     # ---- emit, per host unit
     per_host = collections.defaultdict(list)
@@ -995,7 +998,8 @@ def run(out, tree, jobs=4):
                 continue
             print('vtables: ld -r failed for %s: %s' % (h, r.stderr[:500]), flush=True)
         shutil.copyfile(vt_o, o_path)
-    json.dump(newx, open(xcache_path, 'w'))
+    json.dump(newx, open(xcache_path + '.tmp', 'w'))
+    os.replace(xcache_path + '.tmp', xcache_path)
     stats['slot functions no object defines'] = len(wanted_all)
     stats['slot functions emitted from the host units'] = len(emitted_all & wanted_all)
     with open(os.path.join(vdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
