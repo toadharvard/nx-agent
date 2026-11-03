@@ -27,11 +27,18 @@ cp -r "$SRC/libdrm_nouveau/include/." "$OUT/include/"
 mkdir -p "$OUT/lib/pkgconfig"
 sed -e "s,^prefix=.*,prefix=$OUT," "$SRC/libdrm_nouveau/libdrm_nouveau.pc" > "$OUT/lib/pkgconfig/libdrm_nouveau.pc"
 
-# 2. our patches on top of devkitPro's tree (idempotent: applied once, marker file)
-if [ ! -e "$SRC/mesa/.fnvnx-nine-patched" ]; then
-	for p in "$HERE"/patches/*.patch; do patch -d "$SRC/mesa" -p1 < "$p"; done
-	touch "$SRC/mesa/.fnvnx-nine-patched"
+# 2. our patches on top of devkitPro's tree (idempotent: one marker per patch; the old single
+#    marker .fnvnx-nine-patched means 0001 + 0002). 0003 = nvc0 precompiled shader cache (S6d).
+if [ -e "$SRC/mesa/.fnvnx-nine-patched" ]; then
+	touch "$SRC/mesa/.fnvnx-0001" "$SRC/mesa/.fnvnx-0002"
 fi
+for p in "$HERE"/patches/*.patch; do
+	m=$SRC/mesa/.fnvnx-$(basename "$p" | cut -c1-4)
+	[ -e "$m" ] && continue
+	patch -d "$SRC/mesa" -p1 < "$p"
+	touch "$m"
+done
+touch "$SRC/mesa/.fnvnx-nine-patched"
 
 # 3. meson cross file for the fnvnx-a64 LP64 host side (devkitPro's meson-cross.sh equivalent)
 LIBNX=$DEVKITPRO/libnx

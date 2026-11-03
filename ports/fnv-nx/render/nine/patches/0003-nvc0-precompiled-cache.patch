@@ -1,0 +1,938 @@
+diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h b/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h	2026-11-03 19:20:20.173478025 +0000
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_driver.h	2026-11-03 19:40:00.187486824 +0000
+@@ -212,6 +212,16 @@
+                      bool force_per_sample, bool flatshade,
+                      uint8_t alphatest);
+ 
++/* fnv-nx 0003: fixup table <-> 2 words per entry (function id, packed data).
++ * serialize returns the entry count, or -1 (unknown function or more than max entries). */
++extern int nv50_ir_fixups_serialize(const void *fixupData, uint32_t *out, uint32_t max);
++extern void *nv50_ir_fixups_deserialize(const uint32_t *in, uint32_t count);
++
++/* fnv-nx 0003: relocation table <-> 5 words per entry (data, mask, offset, bitPos, type). */
++extern uint32_t nv50_ir_relocs_count(const void *relocData);
++extern void nv50_ir_relocs_serialize(const void *relocData, uint32_t *out);
++extern void *nv50_ir_relocs_deserialize(const uint32_t *in, uint32_t count);
++
+ /* obtain code that will be shared among programs */
+ extern void nv50_ir_get_target_library(uint32_t chipset,
+                                        const uint32_t **code, uint32_t *size);
+diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp	2026-11-03 19:20:20.173959070 +0000
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gk110.cpp	2026-11-03 19:40:00.188627096 +0000
+@@ -2802,4 +2802,15 @@
+    return emit;
+ }
+ 
++// fnv-nx 0003: fixup functions by index, so cached programs can store fixups (nvc0_program_cache.c)
++FixupApply
++getFixupApplyGK110(unsigned int i)
++{
++   switch (i) {
++   case 0: return selpFlip;
++   case 1: return interpApply;
++   default: return NULL;
++   }
++}
++
+ } // namespace nv50_ir
+diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp	2026-11-03 19:20:20.174274471 +0000
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_gm107.cpp	2026-11-03 19:40:00.189207849 +0000
+@@ -4610,4 +4610,15 @@
+    return emit;
+ }
+ 
++// fnv-nx 0003: fixup functions by index, so cached programs can store fixups (nvc0_program_cache.c)
++FixupApply
++getFixupApplyGM107(unsigned int i)
++{
++   switch (i) {
++   case 0: return selpFlip;
++   case 1: return interpApply;
++   default: return NULL;
++   }
++}
++
+ } // namespace nv50_ir
+diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp	2026-11-03 19:20:20.174705485 +0000
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_emit_nvc0.cpp	2026-11-03 19:40:00.189956425 +0000
+@@ -3539,4 +3539,17 @@
+ 
+ #endif
+ 
++#ifndef __SWITCH__
++// fnv-nx 0003: fixup functions by index, so cached programs can store fixups (nvc0_program_cache.c)
++FixupApply
++getFixupApplyNVC0(unsigned int i)
++{
++   switch (i) {
++   case 0: return selpFlip;
++   case 1: return interpApply;
++   default: return NULL;
++   }
++}
++#endif
++
+ } // namespace nv50_ir
+diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp	2026-11-03 19:20:20.172634518 +0000
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.cpp	2026-11-03 19:40:00.185790792 +0000
+@@ -525,6 +525,118 @@
+       info->entry[i].apply(&info->entry[i], code, data);
+ }
+ 
++/* fnv-nx 0003: (de)serialisation of fixup tables for the program cache.
++ * A fixup entry is (apply function, packed ipa/reg/loc); the function is stored as
++ * (emitter family << 8 | index), stable across processes and hosts. */
++typedef nv50_ir::FixupApply (*FixupTableFn)(unsigned int);
++static const FixupTableFn fixupTables[] = {
++   NULL,
++   nv50_ir::getFixupApplyGM107,
++   nv50_ir::getFixupApplyGK110,
++#ifndef __SWITCH__
++   nv50_ir::getFixupApplyNVC0,
++#endif
++};
++#define NUM_FIXUP_TABLES (sizeof(fixupTables) / sizeof(fixupTables[0]))
++
++int
++nv50_ir_fixups_serialize(const void *fixupData, uint32_t *out, uint32_t max)
++{
++   const nv50_ir::FixupInfo *info =
++      reinterpret_cast<const nv50_ir::FixupInfo *>(fixupData);
++   if (!info)
++      return 0;
++   if (info->count > max)
++      return -1;
++   for (unsigned i = 0; i < info->count; ++i) {
++      int id = -1;
++      for (unsigned t = 1; t < NUM_FIXUP_TABLES && id < 0; ++t) {
++         nv50_ir::FixupApply f;
++         for (unsigned k = 0; (f = fixupTables[t](k)); ++k)
++            if (f == info->entry[i].apply) {
++               id = (t << 8) | k;
++               break;
++            }
++      }
++      if (id < 0)
++         return -1;
++      out[2 * i + 0] = id;
++      out[2 * i + 1] = info->entry[i].val;
++   }
++   return info->count;
++}
++
++void *
++nv50_ir_fixups_deserialize(const uint32_t *in, uint32_t count)
++{
++   nv50_ir::FixupInfo *info = reinterpret_cast<nv50_ir::FixupInfo *>(
++      MALLOC(sizeof(nv50_ir::FixupInfo) + count * sizeof(nv50_ir::FixupEntry)));
++   if (!info)
++      return NULL;
++   info->count = count;
++   for (unsigned i = 0; i < count; ++i) {
++      unsigned t = in[2 * i] >> 8, k = in[2 * i] & 0xff;
++      nv50_ir::FixupApply f = NULL;
++      if (t >= 1 && t < NUM_FIXUP_TABLES)
++         f = fixupTables[t](k);
++      if (!f) {
++         FREE(info);
++         return NULL;
++      }
++      info->entry[i] = nv50_ir::FixupEntry(f, 0, 0, 0);
++      info->entry[i].val = in[2 * i + 1];
++   }
++   return info;
++}
++
++/* fnv-nx 0003: relocation table <-> 5 words per entry (data, mask, offset, bitPos, type).
++ * codePos/libPos/dataPos are written by nv50_ir_relocate_code at upload, so they are not stored. */
++uint32_t
++nv50_ir_relocs_count(const void *relocData)
++{
++   const nv50_ir::RelocInfo *info =
++      reinterpret_cast<const nv50_ir::RelocInfo *>(relocData);
++   return info ? info->count : 0;
++}
++
++void
++nv50_ir_relocs_serialize(const void *relocData, uint32_t *out)
++{
++   const nv50_ir::RelocInfo *info =
++      reinterpret_cast<const nv50_ir::RelocInfo *>(relocData);
++   for (unsigned i = 0; info && i < info->count; ++i) {
++      const nv50_ir::RelocEntry *e = &info->entry[i];
++      out[5 * i + 0] = e->data;
++      out[5 * i + 1] = e->mask;
++      out[5 * i + 2] = e->offset;
++      out[5 * i + 3] = (uint32_t)(int32_t)e->bitPos;
++      out[5 * i + 4] = (uint32_t)e->type;
++   }
++}
++
++void *
++nv50_ir_relocs_deserialize(const uint32_t *in, uint32_t count)
++{
++   nv50_ir::RelocInfo *info = reinterpret_cast<nv50_ir::RelocInfo *>(
++      CALLOC(1, sizeof(nv50_ir::RelocInfo) + count * sizeof(nv50_ir::RelocEntry)));
++   if (!info)
++      return NULL;
++   info->count = count;
++   for (unsigned i = 0; i < count; ++i) {
++      nv50_ir::RelocEntry *e = &info->entry[i];
++      if (in[5 * i + 4] > nv50_ir::RelocEntry::TYPE_DATA) {
++         FREE(info);
++         return NULL;
++      }
++      e->data = in[5 * i + 0];
++      e->mask = in[5 * i + 1];
++      e->offset = in[5 * i + 2];
++      e->bitPos = (int8_t)(int32_t)in[5 * i + 3];
++      e->type = (nv50_ir::RelocEntry::Type)in[5 * i + 4];
++   }
++   return info;
++}
++
+ void
+ nv50_ir_get_target_library(uint32_t chipset,
+                            const uint32_t **code, uint32_t *size)
+diff -ruN a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h
+--- a/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h	2026-11-03 19:20:20.173115229 +0000
++++ b/src/gallium/drivers/nouveau/codegen/nv50_ir_target.h	2026-11-03 19:40:00.186636976 +0000
+@@ -91,6 +91,13 @@
+    FixupEntry entry[0];
+ };
+ 
++// fnv-nx 0003: index -> fixup function of each emitter (NULL past the end)
++FixupApply getFixupApplyGM107(unsigned int);
++FixupApply getFixupApplyGK110(unsigned int);
++#ifndef __SWITCH__
++FixupApply getFixupApplyNVC0(unsigned int);
++#endif
++
+ class CodeEmitter
+ {
+ public:
+diff -ruN a/src/gallium/drivers/nouveau/meson.build b/src/gallium/drivers/nouveau/meson.build
+--- a/src/gallium/drivers/nouveau/meson.build	2026-11-03 19:20:20.169330384 +0000
++++ b/src/gallium/drivers/nouveau/meson.build	2026-11-03 19:40:00.175370087 +0000
+@@ -173,6 +173,8 @@
+   'nvc0/nvc0_miptree.c',
+   'nvc0/nvc0_program.c',
+   'nvc0/nvc0_program.h',
++  'nvc0/nvc0_program_cache.c',
++  'nvc0/nvc0_program_cache.h',
+   'nvc0/nvc0_query.c',
+   'nvc0/nvc0_query.h',
+   'nvc0/nvc0_query_hw.c',
+diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program.c b/src/gallium/drivers/nouveau/nvc0/nvc0_program.c
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_program.c	2026-11-03 19:20:20.167376543 +0000
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program.c	2026-11-03 19:40:00.167412608 +0000
+@@ -29,6 +29,7 @@
+ 
+ #include "codegen/nv50_ir_driver.h"
+ #include "nvc0/nve4_compute.h"
++#include "nvc0/nvc0_program_cache.h"
+ 
+ /* NOTE: Using a[0x270] in FP may cause an error even if we're using less than
+  * 124 scalar varying values.
+@@ -568,9 +569,9 @@
+ }
+ #endif
+ 
+-bool
+-nvc0_program_translate(struct nvc0_program *prog, uint16_t chipset,
+-                       struct pipe_debug_callback *debug)
++static bool
++nvc0_program_translate_compile(struct nvc0_program *prog, uint16_t chipset,
++                               struct pipe_debug_callback *debug)
+ {
+    struct nv50_ir_prog_info *info;
+    int ret;
+@@ -924,6 +925,25 @@
+    /* no need for a memory barrier, will be emitted with first program */
+ }
+ 
++/* fnv-nx 0003: precompiled program cache in front of the compiler (nvc0_program_cache.c).
++ * Key = SHA-1(compiler id, chipset, type, num_ucps, smem_size, TGSI tokens); a hit restores
++ * exactly what nvc0_program_translate_compile leaves in prog; a miss compiles and appends. */
++bool
++nvc0_program_translate(struct nvc0_program *prog, uint16_t chipset,
++                       struct pipe_debug_callback *debug)
++{
++   uint8_t key[NVC0_PCACHE_KEY_SIZE];
++   const bool cacheable = nvc0_pcache_key(prog, chipset, key);
++   bool ok;
++
++   if (cacheable && nvc0_pcache_lookup(prog, chipset, key))
++      return true;
++   ok = nvc0_program_translate_compile(prog, chipset, debug);
++   if (ok && cacheable)
++      nvc0_pcache_store(prog, chipset, key);
++   return ok;
++}
++
+ void
+ nvc0_program_destroy(struct nvc0_context *nvc0, struct nvc0_program *prog)
+ {
+diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c	1970-01-01 00:00:00.000000000 +0000
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.c	2026-11-03 19:40:00.173931528 +0000
+@@ -0,0 +1,590 @@
++/* fnv-nx 0003: precompiled nvc0 program cache. See nvc0_program_cache.h and render/nine/precompile/README.md.
++ *
++ * File: header, then records, appended in any order (first record of a key wins).
++ *   header (32 bytes): "NVC0PCC\0", u32 format version (1), u32 header size (32), u8 compiler_id[16]
++ *   record:            u32 'PREC', u32 payload size, u8 key[20], u32 FNV-1a-32 of payload, payload
++ *   payload:           struct nvc0_pcache_meta, code (code_size bytes),
++ *                      relocs (reloc_count x 5 u32), fixups (fixup_count x 2 u32)
++ * All integers little-endian (both the x86-64 host tool and the Switch are). */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "pipe/p_defines.h"
++#include "tgsi/tgsi_parse.h"
++#include "util/mesa-sha1.h"
++#include "c11/threads.h"
++#include "util/u_memory.h"
++#include "codegen/nv50_ir_driver.h"
++#include "nvc0/nvc0_program.h"
++#include "nvc0/nvc0_program_cache.h"
++
++#define PCACHE_ID_STRING "nvc0-pcache/1 mesa-" PACKAGE_VERSION " fnvnx-0003-r1 optLevel=3"
++#define PCACHE_MAGIC "NVC0PCC"
++#define PCACHE_HEADER_SIZE 32
++#define PCACHE_REC_MAGIC 0x43455250u /* 'PREC' */
++#define PCACHE_REC_HEAD (4 + 4 + NVC0_PCACHE_KEY_SIZE + 4)
++#define PCACHE_MAX_PAYLOAD (4u << 20)
++
++#define META_HAS_CODE   0x1
++#define META_HAS_RELOCS 0x2
++#define META_HAS_FIXUPS 0x4
++
++struct nvc0_pcache_meta {
++   uint16_t chipset;
++   uint8_t type;
++   uint8_t present; /* META_HAS_* */
++   uint8_t num_gprs;
++   uint8_t need_tls;
++   uint8_t num_barriers;
++   uint8_t vp_clip_enable;
++   uint8_t vp_cull_enable;
++   uint8_t vp_num_ucps;
++   uint8_t vp_edgeflag;
++   uint8_t vp_need_vertex_id;
++   uint8_t vp_need_draw_parameters;
++   uint8_t vp_layer_viewport_relative;
++   uint8_t fp_early_z;
++   uint8_t fp_colors;
++   uint8_t fp_color_interp[2];
++   uint8_t fp_sample_mask_in;
++   uint8_t fp_force_persample_interp;
++   uint8_t fp_flatshade;
++   uint8_t fp_reads_framebuffer;
++   uint8_t fp_post_depth_coverage;
++   uint8_t pad[3];
++   uint32_t vp_clip_mode;
++   uint32_t tp_tess_mode;
++   uint32_t cp_lmem_size;
++   uint32_t cp_smem_size;
++   uint32_t parm_size;
++   uint32_t hdr[20];
++   uint32_t flags[2];
++   uint32_t code_size;
++   uint32_t reloc_count;
++   uint32_t fixup_count;
++};
++
++struct pcache_entry {
++   uint8_t key[NVC0_PCACHE_KEY_SIZE];
++   const uint8_t *payload; /* into file_buf, or own allocation (owned) */
++   uint32_t size;
++   bool owned;
++};
++
++static struct {
++   mtx_t mtx;
++   bool configured, loaded, enabled;
++   unsigned flags;
++   char *path;
++   uint8_t *file_buf;
++   FILE *append;
++   struct pcache_entry *entries;
++   unsigned num_entries, cap_entries;
++   int32_t *table; /* open addressing, index into entries or -1 */
++   unsigned table_size;
++   struct nvc0_pcache_stats stats;
++} pc;
++
++/* C11 once + mutex: no static mutex initialiser exists in newlib's <threads.h> (Switch) */
++static once_flag pc_once = ONCE_FLAG_INIT;
++
++static void
++pc_init_once(void)
++{
++   mtx_init(&pc.mtx, mtx_plain);
++}
++
++static void
++pc_lock(void)
++{
++   call_once(&pc_once, pc_init_once);
++   mtx_lock(&pc.mtx);
++}
++
++static void
++pc_unlock(void)
++{
++   mtx_unlock(&pc.mtx);
++}
++
++static uint8_t compiler_id[20];
++static bool compiler_id_done;
++
++const uint8_t *
++nvc0_pcache_compiler_id(const char **str)
++{
++   if (!compiler_id_done) {
++      struct nvc0_pcache_meta m;
++      struct mesa_sha1 ctx;
++      uint32_t sz = sizeof(m);
++      _mesa_sha1_init(&ctx);
++      _mesa_sha1_update(&ctx, PCACHE_ID_STRING, strlen(PCACHE_ID_STRING));
++      _mesa_sha1_update(&ctx, &sz, sizeof(sz));
++      (void)m;
++      _mesa_sha1_final(&ctx, compiler_id);
++      compiler_id_done = true;
++   }
++   if (str)
++      *str = PCACHE_ID_STRING;
++   return compiler_id;
++}
++
++static uint32_t
++fnv1a32(const uint8_t *p, uint32_t n)
++{
++   uint32_t h = 0x811c9dc5u;
++   while (n--)
++      h = (h ^ *p++) * 0x01000193u;
++   return h;
++}
++
++/* ---- in-memory index ---- */
++
++static uint32_t
++key_hash(const uint8_t *key)
++{
++   uint32_t h;
++   memcpy(&h, key, 4);
++   return h;
++}
++
++static int
++index_find(const uint8_t *key)
++{
++   if (!pc.table_size)
++      return -1;
++   for (uint32_t i = key_hash(key) & (pc.table_size - 1);; i = (i + 1) & (pc.table_size - 1)) {
++      int32_t e = pc.table[i];
++      if (e < 0)
++         return -1;
++      if (!memcmp(pc.entries[e].key, key, NVC0_PCACHE_KEY_SIZE))
++         return e;
++   }
++}
++
++static void
++index_rehash(unsigned size)
++{
++   int32_t *t = MALLOC(size * sizeof(*t));
++   if (!t)
++      return;
++   memset(t, 0xff, size * sizeof(*t));
++   for (unsigned e = 0; e < pc.num_entries; ++e) {
++      uint32_t i = key_hash(pc.entries[e].key) & (size - 1);
++      while (t[i] >= 0)
++         i = (i + 1) & (size - 1);
++      t[i] = e;
++   }
++   FREE(pc.table);
++   pc.table = t;
++   pc.table_size = size;
++}
++
++static bool
++index_add(const uint8_t *key, const uint8_t *payload, uint32_t size, bool owned)
++{
++   if (index_find(key) >= 0)
++      return false; /* first record wins */
++   if (pc.num_entries == pc.cap_entries) {
++      unsigned cap = pc.cap_entries ? pc.cap_entries * 2 : 256;
++      struct pcache_entry *n = REALLOC(pc.entries, pc.cap_entries * sizeof(*n), cap * sizeof(*n));
++      if (!n)
++         return false;
++      pc.entries = n;
++      pc.cap_entries = cap;
++   }
++   struct pcache_entry *e = &pc.entries[pc.num_entries++];
++   memcpy(e->key, key, NVC0_PCACHE_KEY_SIZE);
++   e->payload = payload;
++   e->size = size;
++   e->owned = owned;
++   if (pc.num_entries * 2 > pc.table_size)
++      index_rehash(pc.table_size ? pc.table_size * 2 : 1024);
++   else {
++      uint32_t i = key_hash(key) & (pc.table_size - 1);
++      while (pc.table[i] >= 0)
++         i = (i + 1) & (pc.table_size - 1);
++      pc.table[i] = pc.num_entries - 1;
++   }
++   pc.stats.entries = pc.num_entries;
++   return true;
++}
++
++static void
++index_clear(void)
++{
++   for (unsigned e = 0; e < pc.num_entries; ++e)
++      if (pc.entries[e].owned)
++         FREE((void *)pc.entries[e].payload);
++   FREE(pc.entries);
++   FREE(pc.table);
++   FREE(pc.file_buf);
++   if (pc.append)
++      fclose(pc.append);
++   pc.entries = NULL;
++   pc.table = NULL;
++   pc.file_buf = NULL;
++   pc.append = NULL;
++   pc.num_entries = pc.cap_entries = pc.table_size = 0;
++   pc.stats.entries = 0;
++}
++
++/* ---- file ---- */
++
++static void
++write_header(FILE *f)
++{
++   uint8_t h[PCACHE_HEADER_SIZE] = { 0 };
++   uint32_t v = NVC0_PCACHE_FORMAT_VERSION, hs = PCACHE_HEADER_SIZE;
++   memcpy(h, PCACHE_MAGIC, 8);
++   memcpy(h + 8, &v, 4);
++   memcpy(h + 12, &hs, 4);
++   memcpy(h + 16, nvc0_pcache_compiler_id(NULL), 16);
++   fwrite(h, 1, sizeof(h), f);
++}
++
++/* rewrite the file as header + the first good_len bytes of records (drops a bad tail or a
++ * file of another compiler id) */
++static void
++rewrite_file(const uint8_t *records, size_t len)
++{
++   FILE *f = fopen(pc.path, "wb");
++   if (!f)
++      return;
++   write_header(f);
++   if (len)
++      fwrite(records, 1, len, f);
++   fclose(f);
++}
++
++static void
++pcache_load_locked(void)
++{
++   pc.loaded = true;
++   if (!pc.configured) {
++      const char *p = getenv("NVC0_SHADER_CACHE");
++      const char *ro = getenv("NVC0_SHADER_CACHE_READONLY");
++      pc.configured = true;
++      pc.path = p && *p ? strdup(p) : NULL;
++      pc.flags = (ro && *ro && *ro != '0') ? NVC0_PCACHE_READONLY : 0;
++   }
++   pc.enabled = pc.path != NULL;
++   if (!pc.enabled)
++      return;
++
++   uint8_t *buf = NULL;
++   long len = 0;
++   FILE *f = fopen(pc.path, "rb");
++   if (f) {
++      if (!fseek(f, 0, SEEK_END) && (len = ftell(f)) > 0 && !fseek(f, 0, SEEK_SET)) {
++         buf = MALLOC(len);
++         if (buf && fread(buf, 1, len, f) != (size_t)len) {
++            FREE(buf);
++            buf = NULL;
++         }
++      }
++      fclose(f);
++   }
++   size_t good = 0;
++   bool header_ok = buf && len >= PCACHE_HEADER_SIZE && !memcmp(buf, PCACHE_MAGIC, 8) &&
++                    *(uint32_t *)(buf + 8) == NVC0_PCACHE_FORMAT_VERSION &&
++                    !memcmp(buf + 16, nvc0_pcache_compiler_id(NULL), 16);
++   if (header_ok) {
++      size_t off = PCACHE_HEADER_SIZE;
++      while (off + PCACHE_REC_HEAD <= (size_t)len) {
++         uint32_t magic, size, sum;
++         memcpy(&magic, buf + off, 4);
++         memcpy(&size, buf + off + 4, 4);
++         memcpy(&sum, buf + off + 8 + NVC0_PCACHE_KEY_SIZE, 4);
++         if (magic != PCACHE_REC_MAGIC || size > PCACHE_MAX_PAYLOAD ||
++             off + PCACHE_REC_HEAD + size > (size_t)len)
++            break;
++         const uint8_t *payload = buf + off + PCACHE_REC_HEAD;
++         if (fnv1a32(payload, size) != sum) {
++            pc.stats.rejected++;
++            break;
++         }
++         index_add(buf + off + 8, payload, size, false);
++         off += PCACHE_REC_HEAD + size;
++      }
++      good = off - PCACHE_HEADER_SIZE;
++      pc.file_buf = buf;
++   }
++   if (pc.flags & NVC0_PCACHE_READONLY) {
++      if (!header_ok)
++         FREE(buf);
++      return;
++   }
++   if (!header_ok || PCACHE_HEADER_SIZE + good != (size_t)len)
++      rewrite_file(header_ok ? buf + PCACHE_HEADER_SIZE : NULL, good);
++   if (!header_ok)
++      FREE(buf);
++   pc.append = fopen(pc.path, "ab");
++}
++
++static bool
++pcache_ready(void)
++{
++   if (!pc.loaded)
++      pcache_load_locked();
++   return pc.enabled;
++}
++
++void
++nvc0_pcache_configure(const char *path, unsigned flags)
++{
++   pc_lock();
++   index_clear();
++   free(pc.path);
++   pc.path = path ? strdup(path) : NULL;
++   pc.flags = flags;
++   pc.configured = true;
++   pc.loaded = false;
++   pc.enabled = false;
++   memset(&pc.stats, 0, sizeof(pc.stats));
++   pc_unlock();
++}
++
++void
++nvc0_pcache_get_stats(struct nvc0_pcache_stats *stats)
++{
++   pc_lock();
++   pcache_ready();
++   *stats = pc.stats;
++   pc_unlock();
++}
++
++/* ---- key ---- */
++
++bool
++nvc0_pcache_key(const struct nvc0_program *prog, uint16_t chipset,
++                uint8_t key[NVC0_PCACHE_KEY_SIZE])
++{
++   if (prog->pipe.type != PIPE_SHADER_IR_TGSI || !prog->pipe.tokens ||
++       prog->type == PIPE_SHADER_COMPUTE || prog->pipe.stream_output.num_outputs)
++      return false;
++#ifndef NDEBUG
++   if (getenv("NV50_PROG_CHIPSET") || getenv("NV50_PROG_OPTIMIZE") || getenv("NV50_PROG_DEBUG"))
++      return false;
++#endif
++   pc_lock();
++   bool on = pcache_ready();
++   pc_unlock();
++   if (!on)
++      return false;
++
++   struct mesa_sha1 ctx;
++   uint8_t in[8] = { chipset & 0xff, chipset >> 8, prog->type, prog->vp.num_ucps, 0, 0, 0, 0 };
++   uint32_t smem = prog->cp.smem_size;
++   unsigned ntok = tgsi_num_tokens(prog->pipe.tokens);
++   _mesa_sha1_init(&ctx);
++   _mesa_sha1_update(&ctx, nvc0_pcache_compiler_id(NULL), 16);
++   _mesa_sha1_update(&ctx, in, sizeof(in));
++   _mesa_sha1_update(&ctx, &smem, sizeof(smem));
++   _mesa_sha1_update(&ctx, prog->pipe.tokens, ntok * sizeof(struct tgsi_token));
++   _mesa_sha1_final(&ctx, key);
++   return true;
++}
++
++/* ---- payload ---- */
++
++void *
++nvc0_pcache_serialize(const struct nvc0_program *prog, uint16_t chipset, uint32_t *size)
++{
++   struct nvc0_pcache_meta m;
++   memset(&m, 0, sizeof(m));
++   m.chipset = chipset;
++   m.type = prog->type;
++   m.present = (prog->code ? META_HAS_CODE : 0) | (prog->relocs ? META_HAS_RELOCS : 0) |
++               (prog->fixups ? META_HAS_FIXUPS : 0);
++   m.num_gprs = prog->num_gprs;
++   m.need_tls = prog->need_tls;
++   m.num_barriers = prog->num_barriers;
++   m.vp_clip_enable = prog->vp.clip_enable;
++   m.vp_cull_enable = prog->vp.cull_enable;
++   m.vp_num_ucps = prog->vp.num_ucps;
++   m.vp_edgeflag = prog->vp.edgeflag;
++   m.vp_need_vertex_id = prog->vp.need_vertex_id;
++   m.vp_need_draw_parameters = prog->vp.need_draw_parameters;
++   m.vp_layer_viewport_relative = prog->vp.layer_viewport_relative;
++   m.fp_early_z = prog->fp.early_z;
++   m.fp_colors = prog->fp.colors;
++   m.fp_color_interp[0] = prog->fp.color_interp[0];
++   m.fp_color_interp[1] = prog->fp.color_interp[1];
++   m.fp_sample_mask_in = prog->fp.sample_mask_in;
++   m.fp_force_persample_interp = prog->fp.force_persample_interp;
++   m.fp_flatshade = prog->fp.flatshade;
++   m.fp_reads_framebuffer = prog->fp.reads_framebuffer;
++   m.fp_post_depth_coverage = prog->fp.post_depth_coverage;
++   m.vp_clip_mode = prog->vp.clip_mode;
++   m.tp_tess_mode = prog->tp.tess_mode;
++   m.cp_lmem_size = prog->cp.lmem_size;
++   m.cp_smem_size = prog->cp.smem_size;
++   m.parm_size = prog->parm_size;
++   memcpy(m.hdr, prog->hdr, sizeof(m.hdr));
++   memcpy(m.flags, prog->flags, sizeof(m.flags));
++   m.code_size = prog->code ? prog->code_size : 0;
++   m.reloc_count = nv50_ir_relocs_count(prog->relocs);
++   m.fixup_count = prog->fixups ? *(const uint32_t *)prog->fixups : 0; /* FixupInfo::count */
++   if (prog->tfb || (m.code_size & 3))
++      return NULL;
++
++   uint32_t n = sizeof(m) + m.code_size + m.reloc_count * 20 + m.fixup_count * 8;
++   uint8_t *out = MALLOC(n);
++   if (!out)
++      return NULL;
++   uint8_t *p = out + sizeof(m);
++   memcpy(p, prog->code, m.code_size);
++   p += m.code_size;
++   nv50_ir_relocs_serialize(prog->relocs, (uint32_t *)p);
++   p += m.reloc_count * 20;
++   if (m.fixup_count &&
++       nv50_ir_fixups_serialize(prog->fixups, (uint32_t *)p, m.fixup_count) != (int)m.fixup_count) {
++      FREE(out);
++      return NULL;
++   }
++   memcpy(out, &m, sizeof(m));
++   *size = n;
++   return out;
++}
++
++bool
++nvc0_pcache_deserialize(struct nvc0_program *prog, uint16_t chipset,
++                        const void *data, uint32_t size)
++{
++   struct nvc0_pcache_meta m;
++   if (size < sizeof(m))
++      return false;
++   memcpy(&m, data, sizeof(m));
++   if (m.chipset != chipset || m.type != prog->type || (m.code_size & 3) ||
++       (uint64_t)sizeof(m) + m.code_size + (uint64_t)m.reloc_count * 20 +
++       (uint64_t)m.fixup_count * 8 != size)
++      return false;
++   const uint8_t *p = (const uint8_t *)data + sizeof(m);
++   uint32_t *code = NULL;
++   void *relocs = NULL, *fixups = NULL;
++   if (m.present & META_HAS_CODE) {
++      code = MALLOC(m.code_size ? m.code_size : 4);
++      if (!code)
++         goto fail;
++      memcpy(code, p, m.code_size);
++   }
++   p += m.code_size;
++   if (m.present & META_HAS_RELOCS) {
++      uint32_t *tmp = MALLOC(m.reloc_count * 20 + 4);
++      if (!tmp)
++         goto fail;
++      memcpy(tmp, p, m.reloc_count * 20);
++      relocs = nv50_ir_relocs_deserialize(tmp, m.reloc_count);
++      FREE(tmp);
++      if (!relocs)
++         goto fail;
++   }
++   p += m.reloc_count * 20;
++   if (m.present & META_HAS_FIXUPS) {
++      uint32_t *tmp = MALLOC(m.fixup_count * 8 + 4);
++      if (!tmp)
++         goto fail;
++      memcpy(tmp, p, m.fixup_count * 8);
++      fixups = nv50_ir_fixups_deserialize(tmp, m.fixup_count);
++      FREE(tmp);
++      if (!fixups)
++         goto fail;
++   }
++
++   prog->code = code;
++   prog->code_size = m.code_size;
++   prog->relocs = relocs;
++   prog->fixups = fixups;
++   prog->num_gprs = m.num_gprs;
++   prog->need_tls = m.need_tls;
++   prog->num_barriers = m.num_barriers;
++   prog->vp.clip_enable = m.vp_clip_enable;
++   prog->vp.cull_enable = m.vp_cull_enable;
++   prog->vp.num_ucps = m.vp_num_ucps;
++   prog->vp.edgeflag = m.vp_edgeflag;
++   prog->vp.need_vertex_id = m.vp_need_vertex_id;
++   prog->vp.need_draw_parameters = m.vp_need_draw_parameters;
++   prog->vp.layer_viewport_relative = m.vp_layer_viewport_relative;
++   prog->fp.early_z = m.fp_early_z;
++   prog->fp.colors = m.fp_colors;
++   prog->fp.color_interp[0] = m.fp_color_interp[0];
++   prog->fp.color_interp[1] = m.fp_color_interp[1];
++   prog->fp.sample_mask_in = m.fp_sample_mask_in;
++   prog->fp.force_persample_interp = m.fp_force_persample_interp;
++   prog->fp.flatshade = m.fp_flatshade;
++   prog->fp.reads_framebuffer = m.fp_reads_framebuffer;
++   prog->fp.post_depth_coverage = m.fp_post_depth_coverage;
++   prog->vp.clip_mode = m.vp_clip_mode;
++   prog->tp.tess_mode = m.tp_tess_mode;
++   prog->cp.lmem_size = m.cp_lmem_size;
++   prog->cp.smem_size = m.cp_smem_size;
++   prog->parm_size = m.parm_size;
++   memcpy(prog->hdr, m.hdr, sizeof(m.hdr));
++   memcpy(prog->flags, m.flags, sizeof(m.flags));
++   return true;
++fail:
++   FREE(code);
++   FREE(relocs);
++   FREE(fixups);
++   return false;
++}
++
++/* ---- lookup / store ---- */
++
++bool
++nvc0_pcache_lookup(struct nvc0_program *prog, uint16_t chipset,
++                   const uint8_t key[NVC0_PCACHE_KEY_SIZE])
++{
++   bool hit = false;
++   pc_lock();
++   if (pcache_ready() && !(pc.flags & NVC0_PCACHE_NOLOOKUP)) {
++      int e = index_find(key);
++      if (e >= 0) {
++         hit = nvc0_pcache_deserialize(prog, chipset, pc.entries[e].payload, pc.entries[e].size);
++         if (!hit)
++            pc.stats.rejected++;
++      }
++      if (hit)
++         pc.stats.hits++;
++      else
++         pc.stats.misses++;
++   }
++   pc_unlock();
++   return hit;
++}
++
++void
++nvc0_pcache_store(const struct nvc0_program *prog, uint16_t chipset,
++                  const uint8_t key[NVC0_PCACHE_KEY_SIZE])
++{
++   pc_lock();
++   if (!pcache_ready() || index_find(key) >= 0) {
++      pc_unlock();
++      return;
++   }
++   uint32_t size = 0;
++   uint8_t *payload = nvc0_pcache_serialize(prog, chipset, &size);
++   if (!payload) {
++      pc.stats.rejected++;
++      pc_unlock();
++      return;
++   }
++   if (!index_add(key, payload, size, true)) {
++      FREE(payload);
++      pc_unlock();
++      return;
++   }
++   if (pc.append) {
++      uint32_t head[2] = { PCACHE_REC_MAGIC, size };
++      uint32_t sum = fnv1a32(payload, size);
++      fwrite(head, 1, sizeof(head), pc.append);
++      fwrite(key, 1, NVC0_PCACHE_KEY_SIZE, pc.append);
++      fwrite(&sum, 1, sizeof(sum), pc.append);
++      fwrite(payload, 1, size, pc.append);
++      fflush(pc.append);
++      pc.stats.stores++;
++   }
++   pc_unlock();
++}
+diff -ruN a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h	1970-01-01 00:00:00.000000000 +0000
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_program_cache.h	2026-11-03 19:40:00.173839214 +0000
+@@ -0,0 +1,60 @@
++/* fnv-nx 0003: precompiled nvc0 program cache (render/nine/precompile/README.md).
++ *
++ * nvc0_program_translate() asks the cache before it runs nv50_ir. The key covers everything the
++ * compiler reads from the program (TGSI tokens, type, num_ucps, smem_size) plus the chipset and the
++ * compiler id; the value is everything translate leaves in struct nvc0_program (code, header,
++ * relocations, fixups and the vp/fp/tp/cp metadata). Programs with stream output and compute
++ * programs are never cached.
++ *
++ * The cache is one append-only file. It is configured by nvc0_pcache_configure() or, if that was
++ * never called, by the environment: NVC0_SHADER_CACHE=<path>, NVC0_SHADER_CACHE_READONLY=1.
++ * Without a path the cache is off and nvc0 behaves exactly as before. */
++#ifndef __NVC0_PROGRAM_CACHE_H__
++#define __NVC0_PROGRAM_CACHE_H__
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct nvc0_program;
++
++#define NVC0_PCACHE_KEY_SIZE 20
++#define NVC0_PCACHE_FORMAT_VERSION 1
++
++#define NVC0_PCACHE_READONLY 0x1 /* never append misses */
++#define NVC0_PCACHE_NOLOOKUP 0x2 /* compile always; still append (tooling) */
++
++struct nvc0_pcache_stats {
++   unsigned entries;  /* records in the in-memory index */
++   unsigned hits;
++   unsigned misses;
++   unsigned stores;   /* records appended by this process */
++   unsigned rejected; /* corrupt/undecodable records, failed serialisations */
++};
++
++/* path NULL turns the cache off. Drops the in-memory index; the file is (re)read on next use. */
++void nvc0_pcache_configure(const char *path, unsigned flags);
++void nvc0_pcache_get_stats(struct nvc0_pcache_stats *stats);
++/* 16-byte compiler id: SHA-1 prefix of the id string; a file with another id is discarded */
++const uint8_t *nvc0_pcache_compiler_id(const char **str);
++
++bool nvc0_pcache_key(const struct nvc0_program *prog, uint16_t chipset,
++                     uint8_t key[NVC0_PCACHE_KEY_SIZE]);
++bool nvc0_pcache_lookup(struct nvc0_program *prog, uint16_t chipset,
++                        const uint8_t key[NVC0_PCACHE_KEY_SIZE]);
++void nvc0_pcache_store(const struct nvc0_program *prog, uint16_t chipset,
++                       const uint8_t key[NVC0_PCACHE_KEY_SIZE]);
++
++/* the record payload (also used by the precompile tool and the host tests) */
++void *nvc0_pcache_serialize(const struct nvc0_program *prog, uint16_t chipset, uint32_t *size);
++bool nvc0_pcache_deserialize(struct nvc0_program *prog, uint16_t chipset,
++                             const void *data, uint32_t size);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
