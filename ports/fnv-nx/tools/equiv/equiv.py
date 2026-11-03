@@ -1,0 +1,826 @@
+#!/usr/bin/env python3
+"""equiv.py - S11: do the prepare rules keep program semantics? Build with MSVC 2008 x86 and compare per function.
+
+The decomp is byte-matching MSVC 2008 x86-32 code. A prepare rule that claims to be x86-neutral (it only rewrites
+spelling, never meaning) must leave every function compiling to the same code under that same compiler: same bytes,
+same padding, every relocation resolving to the same original address. This tool builds the pristine decomp and a
+prepared tree with a chosen set of rules under MSVC 2008 (through the decomp's own tools/msvc.py, Wine on Linux) and
+compares them with the decomp's compare_builds.py fingerprint (its code is imported from the decomp checkout at run
+time, nothing of it is copied here). See docs/EQUIVALENCE.md.
+
+  equiv.py rules                                   every prepare rule: id, function, class (neutral/layout/platform)
+  equiv.py prepare DECOMP OUT --rules SPEC         prepare.py with an allow-list (SPEC: ids and class names,
+                                                   comma-separated, '-ID' removes: 'neutral', 'neutral,-EXC1', 'TAIL1')
+  equiv.py plan DECOMP TREE --out units.json       units whose include closure changed (compare_builds.plan)
+  equiv.py build DECOMP TREE --out FP.jsonl [--units all|FILE|i,j] [--jobs N] [--layout]
+                                                   compile under MSVC, fingerprint every function (resumable JSONL)
+  equiv.py compare A.jsonl B.jsonl [--out R.json]  per-unit / per-function differences
+
+Builds use the same flags as the decomp's recipe plus `/I tools/equiv/msvc` (MSVC stand-ins for the fnv-nx shim
+headers the rules include: the real SDK / CRT) and `/FI fnvnx_equiv_fi.h` (MSVC meaning of the macros rules insert),
+on both sides. Object files go to a temporary folder and are deleted; results hold addresses and digests only.
+"""
+import argparse
+import gzip
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+
+HERE = Path(__file__).resolve().parent
+PORT = HERE.parent.parent
+SHIM = HERE / 'msvc'
+FORCE_INCLUDE = SHIM / 'fnvnx_equiv_fi.h'          # both sides
+COMPAT_INCLUDE = SHIM / 'fnvnx_equiv_compat.h'  # prepared trees only (stands in for fnvnx_compat.h)
+
+# ---------------------------------------------------------------------------------------------------------- rules
+
+# neutral   x86-neutral: claims to change spelling only; under MSVC x86 every function must stay identical.
+# layout    changes a class / struct layout on purpose (or swaps in another definition of an SDK type); MSVC layouts
+#           and code are compared before/after, a difference is expected where the layout really changes.
+# platform  replaces x86/MSVC-only constructs by target ones (sse2neon, portable asm helpers, native renderer); no
+#           x86 meaning to compare against, or the edited code is not compiled by MSVC at all.
+CLASSES = {
+    'SSE1': 'platform', 'SSE2': 'platform', 'SSE3': 'platform', 'SSE4': 'platform',
+    'DECL1': 'neutral', 'NEW1': 'neutral',
+    'UNIT1': 'neutral', 'KEEP1': 'neutral', 'IFX1': 'neutral', 'SAL1': 'neutral', 'CS28': 'layout',
+    'DECL2': 'neutral', 'EXC1': 'neutral', 'NEW2': 'neutral', 'CTOR1': 'neutral', 'LINK1': 'neutral',
+    'GOTO1': 'neutral', 'SDK1': 'layout', 'STR1': 'neutral', 'INTL1': 'platform', 'CALL1': 'neutral',
+    'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout',
+    'ASM1': 'platform', 'ASM2': 'platform', 'ASM4': 'platform',
+    'NATIVE1': 'platform',      # drop_native_units in prepare.py (not a text rule)
+}
+PSEUDO = {'NATIVE1': 'drop_native_units'}
+RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+)\b')
+
+
+def load_prepare():
+    sys.path.insert(0, str(PORT / 'tools'))
+    import prepare
+    return prepare
+
+
+def rule_table():
+    """[(id, function name, module, class, first docstring line)] in prepare's order, plus NATIVE1."""
+    prepare = load_prepare()
+    out = []
+    for fn in prepare.RULES + prepare.load_stream_rules():
+        doc = (fn.__doc__ or '').strip()
+        m = RULE_ID.match(doc)
+        rid = m.group(1) if m else '?' + fn.__name__
+        out.append((rid, fn.__name__, fn.__module__.replace('fnvnx_rules_', 'rules/'), CLASSES.get(rid, '?'),
+                    doc.split('\n')[0]))
+    out.append(('NATIVE1', PSEUDO['NATIVE1'], 'prepare', CLASSES['NATIVE1'], 'units in render/native/drop_units.txt '
+                'leave build/units.json'))
+    return out
+
+
+def resolve_spec(spec):
+    """'neutral,-EXC1,TAIL1' -> set of rule ids."""
+    ids = {r[0] for r in rule_table()}
+    allow = set()
+    for part in filter(None, (p.strip() for p in spec.split(','))):
+        neg = part.startswith('-')
+        part = part.lstrip('-')
+        if part in ('neutral', 'layout', 'platform', 'all'):
+            sel = {i for i in ids if part == 'all' or CLASSES.get(i) == part}
+        elif part in ids or part == 'none':
+            sel = {part} if part != 'none' else set()
+        else:
+            raise SystemExit('equiv.py: unknown rule or class %r (known: %s)' % (part, ', '.join(sorted(ids))))
+        allow = allow - sel if neg else allow | sel
+    return allow
+
+
+def cmd_rules(a):
+    for rid, name, mod, cls, doc in rule_table():
+        print('%-8s %-9s %-28s %-16s %s' % (rid, cls, name, mod, doc[:90]))
+
+
+def cmd_prepare(a):
+    """prepare.py with only the allowed rules (FNVNX_PREPARE_SKIP = every other rule function)."""
+    allow = resolve_spec(a.rules)
+    table = rule_table()
+    skip = [name for rid, name, *_ in table if rid not in allow and rid not in PSEUDO]
+    prepare = load_prepare()
+    if 'NATIVE1' not in allow:
+        prepare.drop_native_units = lambda *args, **kw: None
+    os.environ['FNVNX_PREPARE_SKIP'] = ','.join(skip)
+    out = Path(a.out)
+    if out.exists():
+        shutil.rmtree(out)
+    sys.argv = ['prepare.py', a.decomp, str(out)]
+    prepare.main()
+    # prepare copies src/, include/, build/ only; units also build from third_party/ (never rewritten)
+    for d in sorted(Path(a.decomp).iterdir()):
+        if d.is_dir() and not (out / d.name).exists() and not d.name.startswith('.'):
+            shutil.copytree(d, out / d.name, symlinks=True)
+    (out / 'equiv_rules.txt').write_text(','.join(sorted(allow)) + '\n')
+    stats = (out / 'prepare_stats.tsv').read_text().split('\n')
+    edited = {l.split('\t')[0] for l in stats if l.strip() and not l.split('\t')[2].startswith('0 ')}
+    stray = sorted(edited - allow - {'ASM3', 'ASM-LEFT'})
+    if stray:
+        raise SystemExit('equiv.py: rules outside the allow-list edited the tree: %s' % ', '.join(stray))
+
+
+# ---------------------------------------------------------------------------------------------------------- decomp tools
+
+def decomp_tools(decomp):
+    """compare_builds (fingerprint, plan), compare.Coff and build_and_match.recipe_names, from the decomp checkout."""
+    sys.dont_write_bytecode = True          # the decomp checkout stays untouched (no __pycache__)
+    sys.path.insert(0, str(Path(decomp, 'tools').resolve()))
+    import compare_builds
+    return compare_builds
+
+
+def cmd_plan(a):
+    cb = decomp_tools(a.decomp)
+    data = cb.plan(a.decomp, a.tree, 10 ** 6, 1)
+    out = dict(units=data['units'], code_changed=data['code_changed'], comment_only=data['comment_only'])
+    Path(a.out).write_text(json.dumps(out, indent=0) + '\n')
+    print('%d files with code changes, %d comment-only, %d units affected' % (
+        len(data['code_changed']), len(data['comment_only']), len(data['units'])))
+
+
+# ---------------------------------------------------------------------------------------------------------- build
+
+# A data symbol with C linkage (_DAT_x) and the same variable with C++ linkage at global scope (?DAT_x@@3...) are one
+# symbol under the Itanium ABI (LINK1) and resolve to the same address in the link-by-address step (D4).
+CXX_GLOBAL_VAR = re.compile(r'^\?([A-Za-z_$][\w$]*)@@3')
+C_NAME = re.compile(r'^_([A-Za-z_$][\w$]*)$')
+
+
+def var_key(name):
+    m = CXX_GLOBAL_VAR.match(name) or C_NAME.match(name)
+    return m.group(1) if m else None
+
+
+# An import slot by its function name: __imp__CreateFileA@28 (the SDK's C declaration) and __imp_?CreateFileA@@YG...
+# (a C++ overload of the same import, tools/equiv/msvc/fnvnx_win32.h) are the same IAT entry.
+IMP_C = re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$')
+IMP_CXX = re.compile(r'^__imp_\?([A-Za-z_]\w*)@@Y')
+
+
+def import_key(name):
+    m = IMP_CXX.match(name) or IMP_C.match(name)
+    return ('imp', m.group(1)) if m else None
+
+
+# MSVC decorates a class type with the key of its definition (U struct, V class, T union); the Itanium ABI does not
+# (D1 target). The decomp's own `class _FILETIME` and the SDK's `struct _FILETIME` are the same type for the target.
+CLASS_KEY = re.compile(r'(?<=[@A-DP-S0-9$])[UVT](?=[\w?$]+@)')
+
+
+def key_free(name):
+    return CLASS_KEY.sub('V', name)
+
+
+SG_LITERAL = re.compile(r'^\$SG\d+$')
+
+
+class Resolver:
+    """Binds the undefined names an object refers to: the unit's own recipe names first (compare_builds), then any
+    name the whole recipe binds to one address, then the other linkage of a global variable (var_key), another
+    decoration of the same import (import_key), the same name up to class keys (key_free)."""
+
+    def __init__(self, units, names):
+        self.names = names
+        self.by_key = {}
+        for n, addr in names.items():
+            for k in (var_key(n), import_key(n), ('key', key_free(n))):
+                if k:
+                    self.by_key.setdefault(k, set()).add(addr)
+
+    def extend(self, coff, unit):
+        """(unit with extra symbol bindings and function symbols found up to class keys, Counter of how). String
+        literals ($SGnnnn) lose their recipe binding: MSVC numbers them with a counter that every literal parsed
+        before them advances, including those of headers a rule adds, so they are compared by content (section
+        bytes and offset, compare_builds' fallback) instead."""
+        syms = {k: v for k, v in unit.get('symbols', {}).items() if not SG_LITERAL.match(k)}
+        how = Counter()
+        defined = {}
+        for s in coff.symbols.values():
+            if s['section'] > 0 and s['name'].startswith('?'):
+                defined.setdefault(key_free(s['name']), set()).add(s['name'])
+        fns = []
+        for fn in unit['functions']:
+            if fn['symbol'] not in coff.by_name or not any(x['section'] > 0 for x in coff.by_name[fn['symbol']]):
+                alt = defined.get(key_free(fn['symbol']), set())
+                if len(alt) == 1:
+                    fn = dict(fn, symbol=next(iter(alt))); how['rekeyed'] += 1
+            fns.append(fn)
+        own = set(syms)
+        for fn in fns:
+            own.update([fn['symbol']] + fn.get('fold_aliases', []))
+        for sec in coff.sections[1:]:
+            for _, ix, _ in sec['relocs']:
+                s = coff.symbols[ix]
+                n = s['name']
+                if s['section'] != 0 or n in own or n in syms:
+                    continue
+                if n in self.names and not SG_LITERAL.match(n):
+                    syms[n] = hex(self.names[n]); how['recipe'] += 1
+                    continue
+                for k, what in ((var_key(n), 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
+                    if k and len(self.by_key.get(k, ())) == 1:
+                        syms[n] = hex(next(iter(self.by_key[k]))); how[what] += 1
+                        break
+        ext = dict(unit)
+        ext['symbols'] = syms
+        ext['functions'] = fns
+        return ext, how
+
+
+CLASS_HEAD = re.compile(r'^class (.+?)\tsize\((\d+)\):$')
+
+
+def layout_blocks(text):
+    """/d1reportAllClassLayout output -> {class name: (size, layout text)} (vftable listings left out)."""
+    out, cur, lines = {}, None, []
+    for line in text.splitlines():
+        line = line.rstrip()
+        m = CLASS_HEAD.match(line)
+        if m:
+            cur, lines = (m.group(1), int(m.group(2))), []
+            continue
+        if cur is None:
+            continue
+        lines.append(line)
+        if line.strip() == '+---' and len(lines) > 1 and line.startswith('\t+'):
+            out[cur[0]] = (cur[1], '\n'.join(lines))
+            cur = None
+    return out
+
+
+def parse_layouts(text):
+    """{class name: [size, digest of its layout]}"""
+    return {k: [v[0], hashlib.sha256(v[1].encode()).hexdigest()[:16]] for k, v in layout_blocks(text).items()}
+
+
+SDK_AW_MACRO = re.compile(r'^\s*#\s*define\s+([A-Za-z_]\w*)\s+\1[AW]\b', re.M)
+
+
+def gen_dir():
+    """Headers generated from the SDK in use (never committed: they list SDK names): fnvnx_equiv_unaw.h."""
+    root = os.environ.get('FNV_MSVC9_ROOT')
+    d = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'fnvnx-equiv'
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / 'fnvnx_equiv_unaw.h'
+    if root and not f.exists():
+        names = set()
+        for h in sorted(Path(root, 'SDK/Include').iterdir()):
+            if h.suffix.lower() == '.h':
+                names.update(SDK_AW_MACRO.findall(h.read_text(errors='replace')))
+        body = ''.join('#undef %s\n' % n for n in sorted(names))
+        f.write_text('/* generated by tools/equiv/equiv.py from %s/SDK/Include: the SDK\'s A/W function-name macros */\n'
+                     % root + body)
+    return d
+
+
+def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False):
+    args = [sys.executable, str(Path(decomp, 'tools/msvc.py').resolve()), '--compiler', unit['compiler'], '/c', '/nologo']
+    flags = unit['flags']
+    if eh_off:      # the same unit without C++ exception handling: separates EH-only differences from the rest
+        flags = [f for f in flags if not f.upper().startswith('/EH')] + ['/EHs-c-']
+    args += flags + ([] if plain else ['/I' + str(SHIM), '/I' + str(gen_dir()), '/FI', str(FORCE_INCLUDE)])
+    if not plain and (tree / 'equiv_rules.txt').exists():      # a tree from `equiv.py prepare`
+        args += ['/FI', str(COMPAT_INCLUDE)]
+    if layout:
+        args.append('/d1reportAllClassLayout')
+    args += ['/I' + str(tree / 'include'), str(tree / unit['source']), '/Fo' + str(obj)]
+    r = subprocess.run(args, cwd=tree, capture_output=True, text=True, errors='replace')
+    ok = r.returncode == 0 and obj.exists()
+    return ok, r.stdout + r.stderr
+
+
+def select_units(spec, units, only=None):
+    if spec == 'all':
+        sel = list(range(len(units)))
+    elif os.path.exists(spec):
+        data = json.loads(Path(spec).read_text())
+        sel = data['units'] if isinstance(data, dict) else data
+    else:
+        sel = [int(x) for x in spec.split(',')]
+    return [i for i in sel if not only or only in units[i]['source']]
+
+
+class Fingerprinter:
+    """compare_builds.fingerprint with the decomp's names (strict) and with Resolver's extra bindings."""
+
+    def __init__(self, decomp):
+        self.cb = decomp_tools(decomp)
+        from compare import Coff
+        from build_and_match import recipe_names
+        self.Coff = Coff
+        self.units = json.loads(Path(decomp, 'build/units.json').read_text())['units']   # pristine recipe, both sides
+        self.names = recipe_names(self.units)
+        self.resolver = Resolver(self.units, self.names)
+        self.names_nolit = {k: v for k, v in self.names.items() if not SG_LITERAL.match(k)}
+
+    def row(self, i, obj):
+        unit = self.units[i]
+        coff = self.Coff(obj)
+        ext, how = self.resolver.extend(coff, unit)
+        strict = self.cb.fingerprint(obj, unit, self.names)
+        fp = self.cb.fingerprint(obj, ext, self.names_nolit)
+        fns = {}
+        for k, v in fp.items():
+            if k != 'eh':
+                fns[k] = [v[0][:24], v[1][:24] if v[1] else None, v[2], strict[k][0][:24]]
+        targets = self.targets(coff, ext)
+        for k, t in targets.items():
+            if k in fns:
+                fns[k].append(t)
+        return dict(status='ok', functions=fns, eh=fp.get('eh', '')[:24], eh_strict=strict.get('eh', '')[:24],
+                    resolved=dict(how))
+
+    @staticmethod
+    def targets(coff, ext):
+        """address -> [[offset, symbol name, bound address or None]] for every relocation to an undefined symbol in
+        the function (what a call or data reference reaches; for reports, the digests decide)."""
+        out = {}
+        syms = ext.get('symbols', {})
+        for fn in ext['functions']:
+            try:
+                s = coff.named(fn['symbol'])
+            except ValueError:
+                continue
+            sec = coff.sections[s['section']]
+            start = s['value']
+            later = [x['value'] for x in coff.symbols.values() if x['section'] == s['section'] and x['type'] & 0x20
+                     and x['value'] > start and not x['name'].startswith('__catch$')]
+            end = min(later) if later else len(sec['data'])
+            rows = []
+            for o, ix, _ in sec['relocs']:
+                if start <= o < end and coff.symbols[ix]['section'] == 0:
+                    n = coff.symbols[ix]['name']
+                    rows.append([o - start, n, syms.get(n)])
+            out[fn['address']] = rows
+        return out
+
+
+def append_rows(out, rows_iter, total):
+    lock, count = threading.Lock(), Counter()
+
+    def put(row):
+        with lock:
+            count[row['status']] += 1
+            with open(out, 'a') as f:
+                f.write(json.dumps(row) + '\n')
+            n = sum(count.values())
+            if n % 50 == 0 or n == total:
+                print('%d/%d %s' % (n, total, dict(count)), flush=True)
+    return put
+
+
+def cmd_build(a):
+    fpr = Fingerprinter(a.decomp)
+    units = fpr.units
+    tree = Path(a.tree).resolve()
+    sel = select_units(a.units, units, a.only)
+    out = Path(a.out)
+    done = set(load_rows(out)) if out.exists() else set()
+    todo = [i for i in sel if i not in done]
+    print('%d units selected, %d already done, %d to build' % (len(sel), len(sel) - len(todo), len(todo)), flush=True)
+    objdir = Path(a.objdir).resolve() if a.objdir else Path(tempfile.mkdtemp(prefix='fnvnx-equiv-'))
+    objdir.mkdir(parents=True, exist_ok=True)
+    put = append_rows(out, None, len(todo))
+
+    def one(i):
+        unit = units[i]
+        obj = objdir / ('u%d.obj' % i)
+        row = dict(unit=i, source=unit['source'], compiler=unit['compiler'])
+        try:
+            ok, text = compile_unit(a.decomp, tree, unit, obj, a.layout, a.plain, a.eh_off)
+            if not ok:
+                row.update(status='compile-failed', error=text[-4000:])
+                obj.unlink(missing_ok=True)
+            else:
+                row.update(fpr.row(i, obj))
+                if a.layout:
+                    row['layouts'] = parse_layouts(text)
+                    if a.objdir:
+                        with gzip.open(objdir / ('u%d.layout.gz' % i), 'wt') as f:
+                            f.write(text)
+        except Exception as e:
+            row.update(status='tool-error', error='%s: %s' % (type(e).__name__, e))
+        finally:
+            if not a.objdir:
+                obj.unlink(missing_ok=True)
+        put(row)
+
+    try:
+        with ThreadPoolExecutor(a.jobs) as pool:
+            list(pool.map(one, todo))
+    finally:
+        if not a.objdir:
+            shutil.rmtree(objdir, ignore_errors=True)
+
+
+def cmd_refp(a):
+    """Fingerprint again from the objects a build kept (--objdir), e.g. after a change to Resolver: rows of units that
+    did not compile are copied over."""
+    fpr = Fingerprinter(a.decomp)
+    old = load_rows(a.old)
+    out = Path(a.out)
+    out.unlink(missing_ok=True)
+    put = append_rows(out, None, len(old))
+    for i, r in sorted(old.items()):
+        obj = Path(a.objdir, 'u%d.obj' % i)
+        if r['status'] == 'ok' and obj.exists():
+            new = dict(unit=i, source=r['source'], compiler=r['compiler'])
+            try:
+                new.update(fpr.row(i, obj))
+            except Exception as e:
+                new.update(status='tool-error', error='%s: %s' % (type(e).__name__, e))
+            if 'layouts' in r:
+                new['layouts'] = r['layouts']
+            r = new
+        put(r)
+
+
+# ---------------------------------------------------------------------------------------------------------- compare
+
+def load_rows(path):
+    rows = {}
+    for line in Path(path).read_text().splitlines():
+        if line.strip():
+            r = json.loads(line)
+            rows[r['unit']] = r
+    return rows
+
+
+def compare_rows(ra, rb):
+    """One unit: dict(status, differ=[addresses], same_bytes=[...], strict_only=[...], eh, layouts)."""
+    if ra['status'] != 'ok':
+        return dict(status='base-failed')
+    if rb['status'] != 'ok':
+        return dict(status='does-not-compile', error=rb.get('error', '')[-1500:])
+    fa, fb = ra['functions'], rb['functions']
+    keys = sorted(set(fa) | set(fb))
+    differ = [k for k in keys if fa.get(k, [None])[0] != fb.get(k, [None])[0]]
+    strict = [k for k in keys if fa.get(k, [0, 0, 0, None])[3] != fb.get(k, [0, 0, 0, None])[3]]
+    out = dict(status='identical' if not differ and ra.get('eh') == rb.get('eh') else 'differs', differ=differ,
+               functions=len(keys),
+               missing=[k for k in differ if fb.get(k, [None])[0] == 'missing' or k not in fb],
+               same_bytes=[k for k in differ if fa.get(k, [0, 1])[1] == fb.get(k, [0, 2])[1]],
+               strict_only=[k for k in strict if k not in differ],
+               eh_differs=ra.get('eh') != rb.get('eh'),
+               unbound=sorted({n for k in differ for n in fb.get(k, [0, 0, []])[2]})[:20])
+    # same code bytes, other callee / data: which relocations reach another address
+    retargets = {}
+    num = lambda v: int(v, 16) if isinstance(v, str) else v
+    for k in out['same_bytes']:
+        ta = {o: (n, num(v)) for o, n, v in (fa[k][4] if len(fa[k]) > 4 else [])}
+        tb = {o: (n, num(v)) for o, n, v in (fb[k][4] if len(fb[k]) > 4 else [])}
+        hexa = lambda v: '0x%08x' % v if isinstance(v, int) else v
+        rt = []
+        for o in sorted(set(ta) | set(tb)):
+            (na, va), (nb, vb) = ta.get(o, (None, None)), tb.get(o, (None, None))
+            if va != vb or (va is None and na != nb):
+                rt.append([o, na, hexa(va), nb, hexa(vb)])
+        if rt:
+            retargets[k] = rt
+    out['retargets'] = retargets
+    la, lb = ra.get('layouts'), rb.get('layouts')
+    if la is not None and lb is not None:
+        changed = sorted(c for c in set(la) & set(lb) if la[c][1] != lb[c][1])
+        out['layouts'] = dict(classes=len(set(la) & set(lb)), changed=changed,
+                              size_changed=[c for c in changed if la[c][0] != lb[c][0]],
+                              only_a=len(set(la) - set(lb)), only_b=len(set(lb) - set(la)))
+    return out
+
+
+def cmd_compare(a):
+    A, B = load_rows(a.a), load_rows(a.b)
+    common = sorted(set(A) & set(B))
+    res = {}
+    st = Counter()
+    fcount = Counter()
+    for i in common:
+        c = compare_rows(A[i], B[i])
+        c['source'] = A[i]['source']
+        res[i] = c
+        st[c['status']] += 1
+        if c['status'] in ('identical', 'differs'):
+            fcount['functions'] += c['functions']
+            fcount['differ'] += len(c['differ'])
+            fcount['same_bytes'] += len(c['same_bytes'])
+            fcount['missing'] += len(c['missing'])
+            fcount['strict_only'] += len(c['strict_only'])
+            fcount['eh_differs'] += c['eh_differs']
+            if 'layouts' in c:
+                fcount['classes'] += c['layouts']['classes']
+                fcount['classes_changed'] += len(c['layouts']['changed'])
+    summary = dict(units=len(common), status=dict(st), **fcount)
+    if a.out:
+        Path(a.out).write_text(json.dumps(dict(summary=summary, units=res), indent=0) + '\n')
+    print(json.dumps(summary))
+    for i in common:
+        c = res[i]
+        if c['status'] == 'differs':
+            print('differs  %-70s %d/%d fn%s%s' % (c['source'], len(c['differ']), c['functions'],
+                  ' eh' if c['eh_differs'] else '', (' layouts %d' % len(c['layouts']['changed'])) if c.get('layouts')
+                  and c['layouts']['changed'] else ''))
+        elif c['status'] not in ('identical',):
+            print('%-8s %s' % (c['status'], c['source']))
+
+
+# ---------------------------------------------------------------------------------------------------------- attribute
+
+_ALL_RULES = []
+
+
+def rule_functions(allow):
+    """prepare's rule functions in prepare's order, only the allowed ids (stream modules loaded once)."""
+    if not _ALL_RULES:
+        prepare = load_prepare()
+        table = {name: rid for rid, name, *_ in rule_table()}
+        _ALL_RULES.extend((table.get(fn.__name__), fn) for fn in prepare.RULES + prepare.load_stream_rules())
+    return [fn for rid, fn in _ALL_RULES if rid in allow]
+
+
+def prepared_text(decomp, rel, rules):
+    """The file `rel` of the decomp as prepare.py writes it with `rules` (rules are per file: fn(path, text))."""
+    src = Path(decomp, rel)
+    with open(src, encoding='utf-8', errors='surrogateescape') as f:
+        text = f.read()
+    stats = Counter()
+    for rule in rules:
+        text = rule(str(src), text, stats)
+    return text
+
+
+def overlay_tree(base, out, decomp, files, rules):
+    """A copy of tree `base` (hard links) where `files` are re-prepared from the decomp with `rules`."""
+    if out.exists():
+        shutil.rmtree(out)
+    subprocess.run(['cp', '-al', str(base), str(out)], check=True)
+    changed = 0
+    for rel in files:
+        if not rel.endswith(('.cpp', '.h', '.hpp', '.inl', '.c')) or not rel.startswith(('src/', 'include/')):
+            continue
+        text = prepared_text(decomp, rel, rules)
+        dst = out / rel
+        old = dst.read_text(encoding='utf-8', errors='surrogateescape')
+        if old != text:
+            dst.unlink()                          # never write through a hard link into `base`
+            with open(dst, 'w', encoding='utf-8', errors='surrogateescape') as f:
+                f.write(text)
+            changed += 1
+    return changed
+
+
+def cmd_attribute(a):
+    """For every unit that differs between A (pristine) and B (prepared with SPEC), and with --failed every unit that
+    B does not compile: rebuild it with SPEC minus one rule (and minus each --group), for each rule that edits a file
+    in the unit's include closure. A differing function that becomes identical to A when rule R is left out is
+    attributed to R; a unit that compiles without R did not compile because of R."""
+    fpr = Fingerprinter(a.decomp)
+    cb, units = fpr.cb, fpr.units
+    A, B = load_rows(a.a), load_rows(a.b)
+    allow = resolve_spec(a.rules)
+    full = rule_functions(allow)
+    files = cb.tree_files(a.decomp)
+    graph = cb.include_graph(a.decomp, files)
+    todo = []
+    for i in sorted(set(A) & set(B)):
+        c = compare_rows(A[i], B[i])
+        if (c['status'] == 'differs' or (a.failed and c['status'] == 'does-not-compile')) \
+                and (not a.only or a.only in units[i]['source']):
+            todo.append((i, c))
+    if a.limit:
+        todo = todo[:a.limit]
+    cands = [(rid, {rid}) for rid in sorted(allow)]
+    for g in a.group or []:
+        gname, _, ids = g.partition('=')
+        cands.append((gname, set(ids.split(',')) & allow))
+    base = Path(a.tree).resolve()
+    work = Path(tempfile.mkdtemp(prefix='fnvnx-equiv-attr-', dir=a.workdir))
+    out = Path(a.out)
+    done = set(load_rows(out)) if out.exists() else set()
+    todo = [(i, c) for i, c in todo if i not in done]
+    print('%d units to attribute' % len(todo), flush=True)
+    lock = threading.Lock()
+    edits = {}            # (file, candidate) -> path of the file prepared without the candidate, or None if the same
+
+    def reduced(f, rid, ids):
+        key = (f, rid)
+        with lock:
+            if key in edits:
+                return edits[key]
+        drop = {fn.__name__ for fn in rule_functions(ids)}
+        rules = [fn for fn in full if fn.__name__ not in drop]
+        text = prepared_text(a.decomp, f, rules)
+        path = None
+        if text != (base / f).read_text(encoding='utf-8', errors='surrogateescape'):
+            path = work / 'cache' / rid / f
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'w', encoding='utf-8', errors='surrogateescape') as h:
+                h.write(text)
+        with lock:
+            edits[key] = path
+        return path
+
+    def one(item):
+        i, c = item
+        unit = units[i]
+        closure = [f for f in sorted(cb.closure(graph, unit['source']))
+                   if f.endswith(('.cpp', '.h', '.hpp', '.inl', '.c')) and f.startswith(('src/', 'include/'))]
+        row = dict(unit=i, source=unit['source'], status=c['status'], differ=c.get('differ', []),
+                   eh_differs=c.get('eh_differs', False), by_rule={})
+        mine = work / ('u%d' % i)
+        try:
+            for rid, ids in cands:
+                if not ids:
+                    continue
+                touched = {f: reduced(f, rid, ids) for f in closure}
+                touched = {f: p for f, p in touched.items() if p}
+                if not touched:
+                    continue
+                tree = mine / 'tree'
+                if tree.exists():
+                    shutil.rmtree(tree)
+                mine.mkdir(parents=True, exist_ok=True)
+                subprocess.run(['cp', '-al', str(base), str(tree)], check=True)
+                for f, p in touched.items():
+                    (tree / f).unlink()
+                    shutil.copyfile(p, tree / f)
+                obj = mine / 'u.obj'
+                ok, text = compile_unit(a.decomp, tree, unit, obj, False)
+                if not ok:
+                    row['by_rule'][rid] = dict(compiles=False, files=len(touched),
+                                               error='%s %s: %s' % first_error(text))
+                    continue
+                fp = fpr.row(i, obj)
+                obj.unlink()
+                fa = A[i]['functions']
+                same = [k for k in fa if fp['functions'].get(k, [None])[0] == fa[k][0]]
+                fixed = [k for k in row['differ'] if k in same]
+                row['by_rule'][rid] = dict(compiles=True, files=len(touched), fixed=fixed,
+                                           identical=len(same) == len(fa) and fp['eh'] == A[i].get('eh'),
+                                           eh_fixed=bool(row['eh_differs'] and fp['eh'] == A[i].get('eh')))
+        finally:
+            shutil.rmtree(mine, ignore_errors=True)
+        with lock:
+            with open(out, 'a') as f:
+                f.write(json.dumps(row) + '\n')
+            print('%s %s: %s' % (c['status'], unit['source'], {r: (len(v['fixed']) if v['compiles'] else 'x')
+                                                               for r, v in row['by_rule'].items()}), flush=True)
+
+    try:
+        with ThreadPoolExecutor(a.jobs) as pool:
+            list(pool.map(one, todo))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+DECORATED_FN = [re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$'), re.compile(r'^__imp_\?([A-Za-z_]\w*)@@Y'),
+                re.compile(r'^\?([A-Za-z_]\w*)@@Y'), re.compile(r'^@([A-Za-z_]\w*)@\d+$'),
+                re.compile(r'^_([A-Za-z_]\w*?)(?:@\d+)?$')]
+
+
+def cmd_bindings(a):
+    """Static check behind DECL1 (no compiler): the decomp declares CRT / Win32 functions itself, and the recipe binds
+    each decorated name to an address. DECL1 replaces those declarations by the platform's, which binds the call by
+    name. Where the recipe binds a decomp spelling of a platform function to another address than the function's
+    own import slot / CRT entry, the decomp's name is wrong for that call site and DECL1 changes the callee."""
+    prepare = load_prepare()
+    platform = prepare.platform_names()
+    units = json.loads(Path(a.decomp, 'build/units.json').read_text())['units']
+    by_name = {}
+    for u in units:
+        for k, v in u.get('symbols', {}).items():
+            for rx in DECORATED_FN:
+                m = rx.match(k)
+                if m:
+                    if m.group(1) in platform:
+                        by_name.setdefault(m.group(1), {}).setdefault(int(v, 16), Counter())[k] += 1
+                    break
+    bad = 0
+    for name in sorted(by_name):
+        addrs = by_name[name]
+        canon = [ad for ad, ks in addrs.items() if any(IMP_C.match(k) or re.match(r'^_%s$' % name, k) for k in ks)]
+        if len(addrs) < 2 and canon:
+            continue
+        if len(canon) == 1:
+            others = {ad: ks for ad, ks in addrs.items() if ad != canon[0]}
+        else:
+            others = addrs
+        if not others:
+            continue
+        bad += 1
+        print('%s (%s): canonical %s' % (name, platform[name] or 'compat', ', '.join('0x%08x' % c for c in canon) or '-'))
+        for ad, ks in sorted(others.items()):
+            print('    0x%08x  %s' % (ad, ', '.join('%s x%d' % kv for kv in ks.most_common(3))))
+    print('%d platform names bound to more than their own address' % bad)
+
+
+MSVC_ERROR = re.compile(r'^(.*?)\((\d+)\) : (?:fatal )?error (C\d+): (.*)$')
+
+
+def first_error(text):
+    """(file, code, message with names kept and numbers dropped) of the first compiler error in `text`."""
+    for line in text.splitlines():
+        m = MSVC_ERROR.match(line.strip())
+        if m:
+            f = m.group(1).replace('\\', '/')
+            f = re.sub(r'^.*?/(src|include|SDK/Include|VC/include|msvc)/', r'\1/', f)
+            return f, m.group(3), re.sub(r'\d+', 'N', m.group(4))[:120]
+    return None, None, text.strip().splitlines()[-1][:120] if text.strip() else ''
+
+
+def cmd_errors(a):
+    """Units that did not compile, grouped by their first error."""
+    groups = {}
+    for r in load_rows(a.fp).values():
+        if r['status'] == 'ok':
+            continue
+        key = first_error(r.get('error', ''))
+        groups.setdefault(key, []).append(r['source'])
+    for key, srcs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        print('%5d  %s %s: %s   e.g. %s' % (len(srcs), key[1], key[0], key[2], srcs[0]))
+
+
+def disassemble(obj, coff, symbol):
+    """objdump -d -r of the COMDAT section that holds `symbol` (Intel syntax), offsets relative to the function."""
+    s = coff.named(symbol)
+    sec = coff.sections[s['section']]
+    r = subprocess.run(['objdump', '-d', '-r', '-M', 'intel', '--no-show-raw-insn', '-j', sec['name'],
+                        '--disassemble=' + symbol, str(obj)], capture_output=True, text=True, errors='replace')
+    lines = [l for l in r.stdout.splitlines() if re.match(r'\s+[0-9a-f]+:', l)]
+    return [re.sub(r'^\s*[0-9a-f]+:\s*', '', l).rstrip() for l in lines]
+
+
+def cmd_show(a):
+    """Compile one unit in two trees and print the disassembly diff of the given functions (never committed: the
+    output is derived from the decomp)."""
+    import difflib
+    decomp_tools(a.decomp)
+    from compare import Coff
+    recipe = json.loads(Path(a.decomp, 'build/units.json').read_text())
+    unit = recipe['units'][a.unit]
+    want = set(a.fn.split(',')) if a.fn else None
+    scratch = Path(tempfile.mkdtemp(prefix='fnvnx-equiv-show-'))
+    try:
+        objs = []
+        for k, tree in enumerate((a.tree_a, a.tree_b)):
+            obj = scratch / ('%d.obj' % k)
+            ok, text = compile_unit(a.decomp, Path(tree).resolve(), unit, obj, False)
+            if not ok:
+                print(text[-3000:]); return
+            objs.append((obj, Coff(obj)))
+        for fn in unit['functions']:
+            if want and fn['address'] not in want:
+                continue
+            da = disassemble(objs[0][0], objs[0][1], fn['symbol'])
+            db = disassemble(objs[1][0], objs[1][1], fn['symbol'])
+            if da == db and want is None:
+                continue
+            print('==== %s %s' % (fn['address'], fn['symbol']))
+            print('\n'.join(difflib.unified_diff(da, db, 'a', 'b', n=a.context, lineterm='')))
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest='command', required=True)
+    sub.add_parser('rules')
+    p = sub.add_parser('prepare'); p.add_argument('decomp'); p.add_argument('out'); p.add_argument('--rules', required=True)
+    p = sub.add_parser('plan'); p.add_argument('decomp'); p.add_argument('tree'); p.add_argument('--out', required=True)
+    p = sub.add_parser('build'); p.add_argument('decomp'); p.add_argument('tree'); p.add_argument('--out', required=True)
+    p.add_argument('--units', default='all'); p.add_argument('--only'); p.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
+    p.add_argument('--layout', action='store_true', help='also record /d1reportAllClassLayout per unit')
+    p.add_argument('--plain', action='store_true', help='the decomp recipe only: no /I tools/equiv/msvc, no /FI (control)')
+    p.add_argument('--eh-off', action='store_true', help='/EHs-c- in place of the unit\'s /EH flags (both sides)')
+    p.add_argument('--objdir', help='keep the objects (and layout reports) here, for refp / show')
+    p = sub.add_parser('refp'); p.add_argument('decomp'); p.add_argument('old'); p.add_argument('objdir')
+    p.add_argument('--out', required=True)
+    p = sub.add_parser('compare'); p.add_argument('a'); p.add_argument('b'); p.add_argument('--out')
+    p = sub.add_parser('show'); p.add_argument('decomp'); p.add_argument('tree_a'); p.add_argument('tree_b')
+    p.add_argument('--unit', type=int, required=True); p.add_argument('--fn', help='addresses, comma-separated')
+    p.add_argument('--context', type=int, default=3)
+    p = sub.add_parser('attribute'); p.add_argument('decomp'); p.add_argument('tree'); p.add_argument('a'); p.add_argument('b')
+    p.add_argument('--rules', required=True, help='the rule set tree B was prepared with'); p.add_argument('--out', required=True)
+    p.add_argument('--only'); p.add_argument('--limit', type=int); p.add_argument('--workdir')
+    p.add_argument('--group', action='append', help='NAME=ID,ID: also leave these rules out together')
+    p.add_argument('--failed', action='store_true', help='also units B does not compile')
+    p.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
+    p = sub.add_parser('errors'); p.add_argument('fp')
+    p = sub.add_parser('bindings'); p.add_argument('decomp')
+    a = ap.parse_args()
+    dict(rules=cmd_rules, prepare=cmd_prepare, plan=cmd_plan, build=cmd_build, compare=cmd_compare,
+         show=cmd_show, attribute=cmd_attribute, errors=cmd_errors, refp=cmd_refp, bindings=cmd_bindings)[a.command](a)
+
+
+if __name__ == '__main__':
+    main()
