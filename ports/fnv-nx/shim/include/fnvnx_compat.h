@@ -19,7 +19,9 @@
 #endif
 
 /* SSE: one global vector type for every unit (prepare.py rules SSE1-3 remove the decomp's local copies).
- * Included before the keyword macros below so sse2neon sees a clean environment. */
+ * Included before the keyword macros below so sse2neon sees a clean environment - except __int64, which sse2neon
+ * defines itself (as int64_t on AArch64) unless it is already defined: ours comes first, with MSVC's spelling. */
+#define __int64 long long
 #ifdef __cplusplus
 #include <sse2neon.h>
 #endif
@@ -45,7 +47,7 @@
 #define __int8 char
 #define __int16 short
 #define __int32 int
-#define __int64 long long
+/* __int64: defined before sse2neon, above */
 #define __w64
 #define __ptr32
 #define __ptr64
