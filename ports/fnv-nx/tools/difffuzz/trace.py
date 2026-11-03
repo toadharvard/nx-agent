@@ -40,7 +40,7 @@ def attach(pair, target):
     def run(case, max_steps=200000):
         w = world.World(case, target.x86_code, pair.pinned)
         pair.xe = x86emu.X86Engine(w, target.x86_code, target.callee_info)
-        pair.ae = arm64emu.Arm64Engine(w, target.image, target.stub_orig)
+        pair.ae = arm64emu.Arm64Engine(w, target.image, target.stub_orig, getattr(target, 'vtables', None))
         pair.xe.uc.hook_add(UC_HOOK_CODE, _x86_hook, user_data=[0])
         pair.ae.uc.hook_add(UC_HOOK_CODE, _a64_hook, user_data=[0])
         pair.run = orig_run

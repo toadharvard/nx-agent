@@ -44,10 +44,12 @@ class Result:
         self.error = None
         self.blocks = set()
         self.saved_ok = True
+        self.vptr_stores = 0
 
 
 class Arm64Engine:
-    def __init__(self, world_obj, image, stub_orig):
+    def __init__(self, world_obj, image, stub_orig, vtables=None):
+        self.vtables = vtables or {}
         self.world = world_obj
         self.image = image
         self.stub_orig = stub_orig
@@ -202,6 +204,13 @@ class Arm64Engine:
         uc.reg_write(A.UC_ARM64_REG_SP, sp)
 
     def _on_write(self, uc, access, address, size, value, r):
+        vt = self.vtables
+        if vt and size in (4, 8):
+            # a native vtable address point stored into an object stands for the image vftable (D7)
+            lo, hi = value & 0xffffffff, (value >> 32) & 0xffffffff
+            if lo in vt or (size == 8 and hi in vt):
+                value = vt.get(lo, lo) | (vt.get(hi, hi) << 32 if size == 8 else 0)
+                r.vptr_stores += 1
         for i in range(size):
             r.writes[address + i] = (value >> (8 * i)) & 0xff
 

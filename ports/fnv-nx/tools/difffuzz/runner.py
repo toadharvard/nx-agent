@@ -221,7 +221,8 @@ class Pair:
         placement = self.target.placement()
         if self.xe is None:
             self.xe = x86emu.X86Engine(w, self.target.x86_code, self.target.callee_info)
-            self.ae = arm64emu.Arm64Engine(w, self.target.image, self.target.stub_orig)
+            self.ae = arm64emu.Arm64Engine(w, self.target.image, self.target.stub_orig,
+                                           getattr(self.target, 'vtables', None))
         else:
             self.xe.reset(w)
             self.ae.reset(w)

@@ -17,6 +17,30 @@ import runner
 import libcalls
 
 STUB_ADDR = re.compile(r'^__fnv(?:nx_br)?_([0-9a-f]{8})')
+MSVC_VFT = re.compile(r'^\?\?_7((?:[A-Za-z_]\w*@)+)@6B@$')
+
+
+def itanium_class(m):
+    """'12FUN_00404920' -> 'FUN_00404920', 'N3Foo3BarE' -> 'Foo::Bar' (plain names only, else None)."""
+    parts, i = [], 0
+    nested = m.startswith('N')
+    if nested:
+        i = 1
+    while i < len(m) and m[i].isdigit():
+        j = i
+        while m[j].isdigit():
+            j += 1
+        n = int(m[i:j])
+        parts.append(m[j:j + n])
+        i = j + n
+        if not nested:
+            break
+    rest = m[i:]
+    if not parts or (nested and rest != 'E') or (not nested and rest):
+        return None
+    return '::'.join(parts)
+
+
 LOCAL_STATIC = re.compile(r'^\?(?:[^@?]+@\?\d+\?\?|\$S\d+@|\$TSS\d+@)')   # ?x@?1??f@@..., ?$S1@..., ?$TSS0@...
 
 
@@ -32,6 +56,8 @@ class UnitCache:
                 self.def_at.setdefault(int(f['address'], 16), (u['source'], f['symbol']))
         self._x86, self._img, self._pin, self._callee = {}, {}, {}, {}
         self._refmap = None
+        self._vrows = None
+        self._vft_by_class = None
 
     def x86_unit(self, source, addr=None):
         """The oracle unit of `source` that defines `addr` (the first listing when addr is None)."""
@@ -137,7 +163,44 @@ class UnitCache:
         t = runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
                           statics)
         t.source = source
+        t.vtables = self.vtable_map(img)
         return t
+
+    def vtable_map(self, image):
+        """{native address point: image vftable address} for S2's kind-V address map rows whose vtable symbol the
+        unit image defines or stubs (a constructor stores the Itanium address point where MSVC stored the vftable)."""
+        if self._vrows is None:
+            self._vrows = []
+            p = config.WORK.parent / 'link/out/addrmap.tsv'
+            if p.exists():
+                for line in open(p, encoding='utf-8', errors='replace'):
+                    f = line.rstrip('\n').split('\t')
+                    if len(f) > 6 and f[1] == 'V' and f[2]:
+                        self._vrows.append((int(f[0], 16), f[2], int(f[6] or 8)))
+        by_name = {n: a for a, n in image.stubs.items()}
+        out = {}
+        for orig, sym, off in self._vrows:
+            base = image.syms.get(sym, by_name.get(sym))
+            if base is not None:
+                out[(base + off) & 0xffffffff] = orig
+        # classes without a V row (no vtable synthesis in this link): primary vftable ??_7<C>@@6B@ <-> _ZTV<C> + 8,
+        # paired by the (non-template) class name
+        if self._vft_by_class is None:
+            self._vft_by_class = {}
+            for u in self.units:
+                for n, a in u['symbols'].items():
+                    m = MSVC_VFT.match(n)
+                    if m:
+                        self._vft_by_class.setdefault('::'.join(reversed([p for p in m.group(1).split('@') if p])),
+                                                      int(a, 16))
+        for name, a in list(image.syms.items()) + [(n, a) for a, n in image.stubs.items()]:
+            if not name.startswith('_ZTV'):
+                continue
+            cls = itanium_class(name[4:])
+            orig = self._vft_by_class.get(cls) if cls else None
+            if orig is not None:
+                out.setdefault((a + 8) & 0xffffffff, orig)
+        return out
 
     def pinned(self, source, orig_addr):
         xu = self.x86_unit(source, orig_addr)
