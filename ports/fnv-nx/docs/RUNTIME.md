@@ -744,3 +744,182 @@ os_horizon.c against the libnx headers (with a stand-in for newlib's `sys/lock.h
   handlers do not (needs the ThrowInfo -> GCC type mapping from S2).
 * Horizon backend untested (no toolchain yet); SuspendThread of running threads unsupported on the host.
 * Directory-listing cache for the case-insensitive scan on case-sensitive hosts (only matters on the host).
+
+## S4b-crt: the C++ library, MSVC stdio, typed `_CxxThrowException`
+
+Follow-up stream to S4 (journal parent J-0009); the first three "Not done yet" items above are done here.
+`crt_symbols.tsv` is updated in place and supersedes the table rows above for the addresses below; every `crt` /
+`cpplib` / `helper` row now has a provider (none says `next:` / `identify` / `NONE` any more). Reclassified:
+`0x00ec3bad`, `0x00ec3bda` cpplib -> crt (byteswaps), so cpplib 28, crt 119. Code: `platform/crt/cpplib.cpp`,
+`eh.cpp`, `iob.c` (+ `fnvnx_iobuf.h`, `fnvnx_msvc_cpp.h`).
+
+### The libcpmt internals (25) and the 12 unknown libcmt entries
+
+Identified from the decomp's call sites (arguments, the code around the call, object offsets the callers use)
+and VC9's library layout. `conf.`: h high, m medium, l low.
+
+| address | function | evidence (call sites) | conf. | provider |
+|---|---|---|---|---|
+| `0x00ec31b3` | `ios_base::_Addstd(ios_base*)` | `basic_ios::init(sb, isstd)` calls it when `isstd` | h | `fnvnx_ios_base_addstd` |
+| `0x00ec3205` | `ios_base::_Ios_base_dtor` | (named) | h | `fnvnx_ios_base_dtor` |
+| `0x00ec3246` | `_Mutex::_Mutex()` | member at +4 of `basic_streambuf` (`_Mylock`), constructed in its ctor | h | `fnvnx_mutex_ctor` |
+| `0x00ec3260` | `_Mutex::~_Mutex()` | called on `this+4` at the end of `~basic_streambuf` | h | `fnvnx_mutex_dtor` |
+| `0x00ec3277` | `_Mutex::_Lock()` | on `rdbuf()+4` in the ostream sentry constructor | h | `fnvnx_mutex_lock` |
+| `0x00ec3280` | `_Mutex::_Unlock()` | on `rdbuf()+4` in the sentry destructor | h | `fnvnx_mutex_unlock` |
+| `0x00ec3289` / `0x00ec32ba` | `_Init_locks::_Init_locks()` / `~_Init_locks()` | ctor/dtor of 3 libcpmt statics (0x0126fb90, 0x0126fc49, 0x0126fc94) | h | `fnvnx_init_locks_ctor` / `_dtor` |
+| `0x00ec33da` | `_Fiopen(name, openmode, prot)` | `basic_filebuf::open` | h | `fnvnx_fiopen` |
+| `0x00ec34d4` | `locale::_Getgloballocale()` | fallback of the inline `_Getfacet` when `_Xparent`; `_Incref` in `locale()` | h | `fnvnx_locale_getgloballocale` |
+| `0x00ec3599` | `locale::facet::_Facet_Register` | (named) | h | `fnvnx_facet_register` |
+| `0x00ec35d7` | `_Locinfo::_Locinfo_dtor(_Locinfo*)` | body of `~_Locinfo` before the 4 string members | h | `fnvnx_locinfo_dtor` |
+| `0x00ec36a6` | `locale::_Init()` | `locale()`: `_Ptr = _Init()` in `ios_base::_Init` | h | `fnvnx_locale_init` |
+| `0x00ec3740` | `_Locinfo::_Locinfo_ctor` | (inferred by S4) | h | `fnvnx_locinfo_ctor` |
+| `0x00ec379c` / `0x00ec3909` | `_Tolower` / `_Toupper(int, const _Ctypevec*)` | `ctype<char>::do_tolower/upper` with `this+8` | h | `fnvnx_tolower_ctype` / `fnvnx_toupper_ctype` |
+| `0x00ec38a9` | `_Getctype()` | returns a 16-byte `_Ctypevec` by value | h | `fnvnx_getctype` |
+| `0x00ec3a75` | `basic_ostream<char>(streambuf*, bool)` + MSVC's vbase flag | the libcpmt standard ostream at 0x0126fc10 (filebuf at 0x0126fbc0, 0x50 bytes before), args (sb, 0, 1); its dtor 0x00ace2d0 reads the vbptr | m | `fnvnx_ostream_ctor` |
+| `0x00ec3bad` | `_byteswap_ulong` | `*p = f(*p)` in the 4-byte `BSEndian` helpers | h | `fnvnx_byteswap_ulong` |
+| `0x00ec3bda` | `_byteswap_ushort` | the 2-byte `BSEndian` helper | h | `fnvnx_byteswap_ushort` |
+| `0x00ec78e0` .. `0x00ec79a1` | `std::exception` ctor, ctor(`const char* const&`), copy ctor, dtor | (named / inferred) | h | `fnvnx_exception_ctor`, `_ctor_str`, `_copy_ctor`, `_dtor` |
+| `0x00ec79c4` | `bad_cast::bad_cast(const char*)` | (named) | h | `fnvnx_bad_cast_ctor` |
+| `0x00ec3bf0` | `_byteswap_uint64` | 8-byte `*p = f(*p)` in `tesfile.cpp` | h | `fnvnx_byteswap_uint64` |
+| `0x00ec7230` | `memcpy` (the second copy next to `memmove` 0x00ec44d0) | `hkString::memCpy`; one caller shifts an overlapping range up | h | libc `memmove` (VC9's `memcpy` is overlap-safe; also for 0x00ec44d0) |
+| `0x00ec858a` | `_mbsicmp` (`_tcsicmp` under `_MBCS`; or the `_strcmpi` entry) | compares a window class with "Button", file extensions | m | `_mbsicmp` |
+| `0x00eca903` | `_mbsnbcpy` / `_mbsncpy` | (dst, src, buffer size) | m | `_mbsnbcpy` |
+| `0x00eca920` | `log` | Box-Muller `sqrt(-2 log s / s)`; float wrapper next to `logf` | h | libc `log` |
+| `0x00ecacb2` | `_mbsncpy` / `_mbsnbcpy` (the other one) | name into an uninitialized buffer, size = buffer | m | `_mbsncpy` |
+| `0x00ecb849` / `0x00ecba8e` | `_mbsnbcmp` / `_mbsnbicmp` | console command prefixes (`"reload "`, 7); which is which from code size | l | `_mbsnbcmp` / `_mbsnbicmp` |
+| `0x00ecbc80` | `log10` | volume attenuation in hundredths of dB | h | libc `log10` |
+| `0x00ecc071` | `_wcsicmp` | `CommandLineToArgvW` option after `-` against a wide literal | m | `fnvnx_wcsicmp16` |
+| `0x00eccbdc` | `_getcwd(char*, int)` | NiPath: buffer of 260, result tested non-NULL | h | `fnvnx_getcwd` |
+| `0x00ece23e` | `_mbstok` | movie list tokenizer (with the `_mbsicmp` above: the movie code is `_MBCS`) | m | `fnvnx_mbstok` (own position) |
+
+All MBCS functions behave as their single-byte counterparts (the "C" code page has no lead bytes). The image
+settles the `m`/`l` rows (a byte comparison with VC9 SP1 `libcmt.lib`).
+
+### Object layouts (ILP32, static_asserted in the ILP32 check)
+
+`std::exception` = vptr, `const char *_m_what`, `int _m_doFree` (12); `logic_error` family = exception + VC9
+`string _Str` (40); `string` = `_Alval` (4), `_Bx` (16: buffer, or pointer when `_Myres >= 16`), `_Mysize`,
+`_Myres` (28); `locale::facet` = vptr, `_Refs` (`(size_t)-1` immortal); `_Locimp` = facet, `_Facetvec` 8,
+`_Facetcount` 0xc, `_Catmask` 0x10, `_Xparent` 0x14, `string _Name` 0x18 (0x34); `ios_base` (0x28, `_Ploc` at
+0x24), `basic_ios` (0x34), `basic_ostream` (vbptr + basic_ios, 0x38); `_Locinfo` = `_Lockit` + 4 strings
+(0x74); `_Mutex` = `void *_Mtx`; `_Ctypevec` (16, returned in x0:x1); MSVC `FILE` 32 bytes.
+
+The exception constructors placement-construct `fnvnx::msvc::exc<std::exception>` (or `<std::bad_cast>`):
+MSVC's fields after a vptr of this runtime whose class derives from the libstdc++ standard class, so `what()`
+(MSVC semantics: `_m_what` or "Unknown exception") and typed `catch (std::exception&)` work; derived game classes
+overwrite the vptr in their own constructors. The destructor frees an owned string and works on any object of
+that layout. The locale is one immortal "C" `_Locimp` with no facets: the game's inline `use_facet` creates
+facets on first use and registers them (`fnvnx_cpplib_facet_tidy` would release them; nothing calls it at exit,
+game static destructors may still use facets). `_Getctype` returns MSVC's C-locale table (`_Delfl` 0: static,
+`ctype<char>::_Tidy` frees nothing); `_Tolower`/`_Toupper` use the low byte only (the decomp declares them
+`char(char, char*)`). `_Locinfo` always reports "C" (or "*" for any other name). `_Mutex` is recursive and
+created on first use when only zero-filled. `_Ios_base_dtor` runs the `erase_event` callbacks, frees the
+iword/pword and callback lists, and deletes `_Ploc` with `::operator delete` (the game's global operator delete
+at the final link).
+
+### MSVC stdio and lowio (`fnvnx_iobuf.h`, `iob.c`)
+
+**Decision: the game's `FILE` is the runtime's `struct _iobuf`** with MSVC's 32-byte layout; every CRT function
+that takes or returns a `FILE*` is `fnvnx_iob_*` (providers updated: `fopen`, `fopen_s`, `fclose`, `fread`,
+`fwrite`, `fseek`, `ftell`, `_fseeki64`, `fgets`, `fgetc`, `fputc`, `ungetc`, `feof`, `fflush`, `fgetpos`,
+`fsetpos`, `fprintf`, `printf`, `vprintf`), and `__iob_func` returns `fnvnx_iob[3]` (stdin, stdout, stderr at a
+0x20 stride: the Havok writer computes `__iob_func() + 0x20/0x40`). `_ptr`/`_base` stay NULL and `_cnt` 0, so
+the decomp's copy of `basic_filebuf::_Init` (which points the streambuf at `&_File->_base/_ptr/_cnt`) always
+falls through to `fgetc`/`fputc`/`ungetc`; `_flag` mirrors `_IOREAD/_IOWRT/_IORW/_IOEOF/_IOERR`, `_file` is the
+descriptor. `fnvnx_fopen` (host `FILE*`, binary) stays for runtime-internal use.
+
+Text mode as MSVC: a descriptor opened without `b` (`fopen`), or without `_O_BINARY` (`fnvnx_open`; default
+`_fmode` = `_O_TEXT`, `fnvnx_set_fmode`) reads CR LF as LF (also across buffer boundaries; a lone CR stays) and
+stops at Ctrl-Z (until a seek or `clearerr`), and writes LF as CR LF; `fnvnx_setmode` switches a descriptor and
+a stream on it at once; `_fdopen` follows the descriptor's mode ('t'/'b' only checked, as MSVC). `ftell` /
+`fgetpos` / `fseek` are raw file offsets; `a` / `_O_APPEND` writes at the end; read/write switches on `+`
+streams flush or drop the buffer themselves; `ungetc` keeps up to 8 characters; `D` deletes on close; `,ccs=`
+opens a plain text stream. fprintf/printf use the MSVC formatter (`%I64d`). The standard streams report text
+mode but pass bytes to the host's stdout/stderr unchanged; stdin is at end of file. Lowio:
+`fnvnx_open/sopen/close/read/write/lseek(i64)/tell/filelength/eof/commit/setmode` (newlib owns `_open`,
+`_read`, ...). Deviation: `fflush` on an input stream keeps the logical position (VC9 dropped buffered input).
+
+For **S1**: include `fnvnx_iobuf.h` where DECL1 drops the decomp's `_iobuf` stdio prototypes, and drop the
+decomp's own `struct _iobuf` definitions (one unit has the same fields). In C++ it includes `<cstdio>` first
+and adds C++ overloads of the standard names taking `_iobuf*` (they coexist with libc's `FILE*` functions);
+`fopen` cannot be overloaded: `-DFNVNX_IOBUF_FOPEN` maps it (macro), or call `fnvnx_iob_fopen`. A literal
+`fflush(NULL)` would be ambiguous (none in the decomp). For **S2**: E entries must bind to the `provider`
+column; a libc fallback by name now hands libc a runtime `_iobuf` (the runtime rejects foreign pointers with
+EINVAL, libc would not).
+
+### `_CxxThrowException(obj, ThrowInfo)` with typed handlers (`eh.cpp`)
+
+GCC unwinds the thrower's frame before the handler runs, so the object is copied into
+`__cxa_allocate_exception` storage and thrown with an Itanium `type_info`, found in this order:
+
+1. a registration by ThrowInfo address: `fnvnx_eh_register_throw(ti, &typeid(T), size, copy, dtor)` /
+   `fnvnx_eh_register_type<T>(ti)` (native GCC type - available now), or
+   `fnvnx_eh_register_msvc_std(ti, ".?AVlength_error@std@@")` (an MSVC standard exception object);
+2. the ThrowInfo in the image (x86 layout, 32-bit absolute addresses: ThrowInfo -> CatchableTypeArray ->
+   CatchableType -> TypeDescriptor): the most-derived CatchableType whose TypeDescriptor S2 registered with
+   `fnvnx_rtti_register` (the `??_R0` -> `_ZTI` table of `__RTDynamicCast`) is thrown as that type with size
+   `sizeOrOffset`, its copy constructor (`properties & 1`: bitwise) and the ThrowInfo's `pmfnUnwind` as
+   destructor; code addresses inside the x86 `.text` go through `fnvnx_eh_set_code_resolver` (S2's address
+   map). Otherwise the first TypeDescriptor named like an MSVC standard exception is translated;
+3. otherwise `fnvnx_msvc_exception{object, throw_info}` (catch (...) only), as before.
+
+Translation of MSVC standard exceptions: `exception`, `bad_alloc`, `bad_cast`, `bad_typeid`, `bad_exception`
+-> `exc<std::X>` (MSVC `what()` with the copied `_m_what`); `logic_error`, `domain_error`, `invalid_argument`,
+`length_error`, `out_of_range`, `runtime_error`, `range_error`, `overflow_error`, `underflow_error`,
+`ios_base::failure` -> the libstdc++ class constructed from the MSVC `_Str`. `obj == NULL` is `throw;` (the
+handled exception object itself is rethrown). Pointers are only followed inside `fnvnx_eh_set_image_range`
+(the loader sets the data image's range; default 0x10000..), so a ThrowInfo of 0 falls back safely.
+
+**What needs the image**: the TypeDescriptor names and CatchableTypeArrays (`.rdata`). Without it, the
+decomp's three ThrowInfos are typed from the code around the calls: 0x01140ef8 = `std::bad_alloc` (exception
+built from a null message, vftable 0x010176f8, the allocators' overflow paths; h), 0x01140cb0 =
+`std::length_error` (a `logic_error(const string&)` object, vftable 0x010173dc; m) - both registered by
+`fnvnx_eh_register_fnv_known()` - and 0x01170384 = SpeedTree's exception class (string, int), which needs a
+native type: S1 must first give its per-unit placeholder names (`CIdvException`, `ExceptionB07`,
+`IdvException`, `ExcQ`, `Exc59`) one class, then `fnvnx_eh_register_type<That>(0x01170384)`.
+
+### Termination (S10)
+
+`fnvnx_atexit` (`atexit`), `_onexit`, `fnvnx_doexit` (`doexit`), `fnvnx_exit` (`exit`, provider updated),
+`fnvnx_cexit` (`_cexit`), `fnvnx_c_exit` (`_c_exit`) forward to S10's game onexit table (`fnvnx_xc_atexit`,
+`fnvnx_xc_onexit`, `fnvnx_xc_doexit`, `startup/guest/onexit.c`) through weak references; without startup/ (the
+host tests) libc's `atexit`/`exit` stand in. `ExitProcess` (platform/win32) is unchanged: on Windows it does
+not run the exe's CRT onexit table either.
+
+### Found in the decomp (for S1 / S2)
+
+* `frondengine.cpp` and `frondengine_ob1_variant.cpp` declare the `bad_alloc` stand-in (`FUN_00ec78f1_t`) with
+  2 ints (8 bytes); the exception constructor writes 12: a stack overrun on GCC. Needs a third field.
+* Six call sites pass the ThrowInfo's first word (`DAT_01140ef8` by value) instead of its address
+  (`blk_00ac0000_od` x2, `blk_00b00000_od` x3, `blk_00b40000_od` x1): they reach the catch (...) fallback only.
+* Objects get MSVC image vftables written into their vptr by hand (0x010176f8 bad_alloc, 0x010173dc
+  length_error, 0x010a2f9c / 0x010a2fa4 ios_base / basic_ios, 0x010a318c ostream vbase): the runtime never
+  calls through them (it translates by ThrowInfo), but a virtual call from game code would; these unnamed
+  `DAT_` vftables need S2's V entries too.
+* Many units carry their own `namespace std { class exception ... }` (MSVC layout): its vtable, `what()` and
+  `~exception` resolve to libstdc++'s unless bound by address; `_ZTISt9exception` is shared, so typed handlers
+  catch the runtime's exceptions, but only the virtual `what()` is safe on them (not `e._m_what`).
+* One unit defines `_Mutex::_Mutex` (`FUN_00ec3246`) as an empty body: the runtime creates the lock on first
+  use instead.
+
+### Tests
+
+`make -C tests/s4`: 67 tests, 1,949 checks (S4's 46 + 21): exception layout/semantics (deep/shallow copy,
+`what()` through the vtable, `bad_cast` RTTI), `_Mutex` recursion and contention, `_Init_locks`, the global
+`_Locimp` as the inline `_Getfacet` reads it, facet register/tidy, `_Locinfo`, the ctype table, `_Addstd` /
+`_Ios_base_dtor` (callbacks, lists, double-opened standard streams), the ostream object and its destructor
+path, `_Fiopen` modes; MSVC FILE layout and standard streams, text reads (CR LF, lone CR, Ctrl-Z, buffer
+boundaries, ftell), text writes, seek/tell/ungetc, update and append modes, `_setmode`, error cases, `D`, lowio
+(text, Ctrl-Z, CR LF split by a 1-byte read, `_O_EXCL`, `_O_APPEND`), `_fdopen`, the C++ overloads;
+`_CxxThrowException` with a registered native type (base-class handler, copy and destructor counts), MSVC
+`bad_alloc` / `length_error` / `runtime_error` / `bad_cast` objects, ThrowInfo tables built below 4 GiB as in
+the image (std translation, registered TypeDescriptor with resolved copy constructor and `pmfnUnwind`, a simple
+type, unknown-type and NULL fallbacks), `throw;`; byteswaps, `_mbstok`, `_mbsn*`, `_wcsicmp`; exit forwarding.
+Clean under ASan+UBSan and TSan; all platform sources parse under ILP32 with the layout asserts.
+
+### Not done yet (S4b)
+
+* Image-dependent: confirm the `m`/`l` identifications and the three ThrowInfo types from the exe;
+  virtual-base copy constructors (`properties & 4`) are called without MSVC's extra flag.
+* `iword`/`pword`/`register_callback`, `locale(const char*)`, `_Locimp::_Addfac` and the other libcpmt entry
+  points the game does not reference; `cout`/`cerr` are constructed but not usable (no native vftables).
