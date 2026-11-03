@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..', '..'))
 
 OWNER = {'fetch': 'S9-build (environment)', 'toolchain': 'S5-toolchain', 'prepare': 'S1-compile',
-         'census': 'S1-compile', 'compile': 'S1-compile', 'link': 'S2-link', 'guest': 'S5-toolchain',
+         'census': 'S1-compile', 'compile': 'S1-compile', 'link': 'S2-link', 'guest': 'S5-toolchain (link); S2/S4 as noted',
          'nine': 'S6c-nine', 'host': 'S5-toolchain', 'package': 'S5-toolchain', 'tests': 'per suite'}
 SUITE_OWNER = {'s2-link': 'S2-link', 's3': 'S3-dataimage', 's4': 'S4-runtime', 's5-tools': 'S5-toolchain',
                's5-emu-hello': 'S5-toolchain', 's5-rt': 'S5-toolchain', 's6b': 'S6b-shaders', 's7': 'S7-audio-input',
@@ -196,7 +196,7 @@ def render(b, stages, snap, prev):
         L.append('')
     if co.get('failed_by_dir'):
         L.append('Units without an object, by directory (full list with the first error: `build/compile/failed.tsv`; '
-                 'they are excluded from the link): ' + ', '.join('`%s` %d' % kv for kv in co['failed_by_dir'][:12])
+                 'they are excluded from the link): ' + ', '.join('`%s` %d' % tuple(kv) for kv in co['failed_by_dir'][:12])
                  + '.')
         L.append('')
     # ---- link
@@ -244,6 +244,12 @@ def render(b, stages, snap, prev):
             L.append('Platform / loader / runtime sources that do not compile for the guest (excluded):')
             L.append('')
             L += table(['source', 'first error'], ad['platform_failed'])
+            L.append('')
+        if ad.get('link_excluded'):
+            L.append('Game objects the linker refuses as input, left out of the guest (the trial link with the '
+                     'host binutils accepted them):')
+            L.append('')
+            L += table(['object', 'reason'], [('`%s`' % o, w) for o, w in ad['link_excluded']])
             L.append('')
         if ad.get('multidef_count'):
             L.append('%d symbols defined more than once (linked with --allow-multiple-definition): %s' % (

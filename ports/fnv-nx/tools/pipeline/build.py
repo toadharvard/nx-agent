@@ -734,7 +734,7 @@ class Compile(Stage):
     soft = ('toolchain',)
 
     def fingerprint(self, b):
-        return ['compile-v1', file_hash(os.path.join(ROOT, 'tools', 'link', 'compile.sh')), up_id(b, 'prepare'),
+        return ['compile-v2', file_hash(os.path.join(ROOT, 'tools', 'link', 'compile.sh')), up_id(b, 'prepare'),
                 game_cxx_id(b), b.cfg['OPT'], tree_hash('shim/include'),
                 b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
 
@@ -768,7 +768,13 @@ class Compile(Stage):
                     mt[p] = None
             return mt[p]
 
-        stale = kept = 0
+        # failed units are retried when one of their dependencies (from the .d GCC still writes when the error
+        # comes after preprocessing) is newer than their log, when they have no .d, or when files were added to or
+        # removed from the tree (a missing header may have appeared)
+        listing = sha(sorted(os.path.relpath(os.path.join(dp, n), tree) for dp, _, fn in os.walk(tree) for n in fn))
+        lf = os.path.join(d, 'tree_files.id')
+        files_changed = not os.path.isfile(lf) or open(lf).read().strip() != listing
+        stale = kept = known_fail = 0
         rebuild = []
         for src in units:
             base = unit_base(obj, src)
@@ -782,13 +788,21 @@ class Compile(Stage):
                 else:
                     kept += 1
                     continue
+            elif not files_changed and os.path.isfile(base + '.log'):
+                deps = parse_depfile(base + '.o.d')
+                lt = os.stat(base + '.log').st_mtime_ns
+                if deps and all(mtime(p) is not None and mtime(p) <= lt for p in deps + [src]):
+                    known_fail += 1
+                    continue
             rebuild.append(src)
+        open(lf, 'w').write(listing + '\n')
         lst = os.path.join(d, 'rebuild.list')
         with open(lst, 'w', errors='surrogateescape') as f:
             f.write(''.join(s + '\n' for s in rebuild))
         t0 = time.time()
         if rebuild:
-            b.say('compile: %d units to build (%d up to date, %d stale by header)' % (len(rebuild), kept, stale))
+            b.say('compile: %d units to build (%d up to date, %d stale by header, %d failures with unchanged '
+                  'inputs not retried)' % (len(rebuild), kept, stale, known_fail))
             b.sh(['bash', os.path.join(ROOT, 'tools', 'link', 'compile.sh'), tree, obj, lst, b.jobs], r['log'],
                  env=b.env({'CXX': cxx + ' -MD', 'OPT': b.cfg['OPT']}), check=True)
         ok, failed = [], []
@@ -823,6 +837,7 @@ class Compile(Stage):
         r.metric('compile_failed', len(failed))
         r.metric('compile_built_now', len(rebuild))
         r.metric('compile_reused', kept)
+        r.metric('compile_failures_not_retried', known_fail)
         r.metric('compile_obj_mib', round(sum(os.path.getsize(unit_base(obj, s) + '.o') for s in ok) / 2**20, 1))
         r.artifact('objects', os.path.join(d, 'objects.tsv'))
         r.artifact('failed', os.path.join(d, 'failed.tsv'))
@@ -1042,7 +1057,7 @@ class Guest(Stage):
         if os.path.isfile(sj):
             s = json.load(open(sj))
             r['adapter'] = s
-            for k in ('platform_units', 'platform_failed', 'multidef', 'game_objects'):
+            for k in ('platform_units', 'platform_failed', 'multidef', 'game_objects', 'link_excluded'):
                 if k in s:
                     r.metric('guest_' + k, s[k] if not isinstance(s[k], list) else len(s[k]))
         for n in ('fnvnx.elf', 'guest.nso'):
@@ -1050,6 +1065,15 @@ class Guest(Stage):
             if os.path.isfile(p):
                 r.artifact(n, p)
                 r.metric('guest_%s_bytes' % n.replace('.', '_'), os.path.getsize(p))
+        ex = (r.get('adapter') or {}).get('link_excluded') or []
+        if ex:
+            r.note('%d objects refused by ld and left out (S2-link: TLS-model references bound to absolute image '
+                   'addresses, misaligned cross-unit variables): %s' % (len(ex), ', '.join(
+                       os.path.basename(o) for o, _ in ex[:6])))
+        pf = (r.get('adapter') or {}).get('platform_failed') or []
+        if pf:
+            r.note('%d platform sources do not compile for the guest (S4/S1 shim): %s' % (
+                len(pf), ', '.join(f for f, _ in pf[:6])))
         nso = os.path.join(d, 'guest.nso')
         if rc or not os.path.isfile(nso):
             raise StageError('guest link failed (exit %d), see %s: %s' % (rc, b.rel(r['log']),
@@ -1270,19 +1294,24 @@ class Suite:
 
 
 def summarize_output(text):
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    pats = [r'^Ran \d+ tests?', r'^(OK|FAILED)\b.*', r'\d+ tests?, \d+ checks', r'\bPASS\b', r'\bFAIL\b',
-            r'passed|failed', r': ok\b', r'^ok\b']
+    """One line for the report: the runner's own result lines (unittest, key=value metrics, PASS/ok lines)."""
+    lines = [l.strip() for l in text.splitlines() if l.strip() and not l.lstrip().startswith(('|', '$ ', '[exit'))]
+    pats = [r'^Ran \d+ tests?', r'^(OK|FAILED)\b', r'^\w+=\S+(\s+\w+=\S+)+$', r'\d+ tests?, \d+ checks',
+            r'\bPASS\b', r'\b(passed|failed)\b', r': ok\b', r'^ok\b']
     found = []
     for rx in pats:
-        for l in reversed(lines):
-            if re.search(rx, l, re.I) and not l.startswith('$ ') and not l.startswith('[exit'):
-                if l not in found:
-                    found.append(l)
-                break
+        hit = next((l for l in reversed(lines) if re.search(rx, l, re.I)), None)
+        if hit and hit not in found:
+            found.append(hit)
         if len(found) >= 2:
             break
-    return ' / '.join(found[:2])[:200]
+    return clean_msg(' / '.join(found))[:200]
+
+
+def clean_msg(s):
+    """Shorter messages: paths relative to ports/fnv-nx, the cross tools by name."""
+    s = s.replace(ROOT + '/', '')
+    return re.sub(r'\S*/bin/(?:\.\./)*(?:[\w.-]+/)*(ld|aarch64-none-elf-[\w+-]+|collect2)\b', r'\1', s)
 
 
 def suites(b):
@@ -1369,9 +1398,11 @@ class Tests(Stage):
                 continue
             fp = sha(tree_hash(*su.inputs), up_id(b, 'toolchain'), up_id(b, 'fetch'), su.cmds, su.fixed_inputs(b))
             p = prev.get(su.name)
-            if p and p.get('fingerprint') == fp and p.get('status') in ('pass', 'fail') and not force:
+            if p and p.get('fingerprint') == fp and p.get('status') == 'pass' and not force:   # failures rerun
                 p['cached'] = True
                 p.pop('not_selected', None)
+                if os.path.isfile(p.get('log', '')):      # summary rules may have improved since
+                    p['summary'] = summarize_output(open(p['log'], errors='replace').read()) or p.get('summary')
                 results[su.name] = p
                 continue
             miss = [n for n in su.needs if not (have.get(n) if n in have else shutil.which(n))]
@@ -1399,7 +1430,7 @@ class Tests(Stage):
                 first = next((l for l in lines if re.search(r'error:|\bFAIL|Traceback|Error:|STOPPED|mismatch', l)
                               and not re.search(r'\*\*\* \[|Error \d+$', l)), None)
                 if first:
-                    res['summary'] = re.sub(r'^' + re.escape(ROOT) + '/', '', first)[:220]
+                    res['summary'] = clean_msg(first)[:220]
             results[su.name] = res
         for k, v in prev.items():     # suites not selected this run keep their last result
             if k not in results:
@@ -1480,7 +1511,7 @@ def execute(b, targets):
             st.run(b, r)
         except StageError as ex:
             r['status'] = 'fail'
-            r['error'] = str(ex)
+            r['error'] = clean_msg(str(ex))
         except Exception as ex:   # a bug in a stage must not stop the others
             import traceback
             r['status'] = 'fail'
@@ -1551,8 +1582,15 @@ def main(argv):
     b.say('fnv-nx pipeline run %s: %s (NINE=%s PROGRAM_ID=%s JOBS=%d)' % (b.run_id, ' '.join(targets), cfg['NINE'],
                                                                          cfg['PROGRAM_ID'], b.jobs))
     failed = execute(b, stages) if stages else False
-    path = reportmod.write(b, STAGES)
-    b.say('report: %s' % path)
+    try:
+        path = reportmod.write(b, STAGES)
+        b.say('report: %s' % path)
+    except Exception as ex:      # a report bug must not hide the stage results (build/<stage>/stage.json)
+        import traceback
+        traceback.print_exc()
+        b.say('report: FAILED to render (%s: %s); stage records are in %s/<stage>/stage.json' % (
+            type(ex).__name__, ex, b.out))
+        return 1
     return 1 if failed else 0
 
 

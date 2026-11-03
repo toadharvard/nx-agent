@@ -133,20 +133,57 @@ def main(argv):
     rt = sorted(o for o in built if o.startswith(rtd) and o != crt0)
     game = sorted(os.path.join(fixed, n) for n in os.listdir(fixed) if n.endswith('.o'))
     rsp = os.path.join(out, 'game_objects.rsp')
-    with open(rsp, 'w') as f:
-        f.write(''.join('"%s"\n' % o.replace('\\', '\\\\').replace('"', '\\"') for o in game))
     extra = shlex.split(os.environ.get('EXTRA_OBJS', ''))
     aliases = os.path.join(s2out, 'aliases.ld')
     elf = os.path.join(out, 'fnvnx.elf')
+    excluded = []        # (object, reason): objects the linker refuses as input ("error adding symbols")
+
+    nm = os.path.join(tc, 'bin', 'aarch64-none-elf-nm')
+
+    def references(o, sym):
+        p = run([nm, '-u', o])
+        return any(l.split()[-1] == sym for l in p.stdout.splitlines() if l.strip())
+
+    def culprits(text):
+        """Input objects ld refuses: 'error adding symbols' (whole object) and relocation errors against a
+        *defined* symbol (TLS-model reference to an absolute image address, misaligned cross-unit variable),
+        mapped from the source name ld prints to the object that references the symbol."""
+        found = {}
+        for o, why in re.findall(r'(\S+\.o): error adding symbols: (.*)', text):
+            ctx = [l.split(': ', 1)[-1] for l in text.splitlines()
+                   if os.path.basename(o) in l and 'error adding symbols' not in l]
+            found.setdefault(o, (ctx[0] if ctx else why).replace(ROOT + '/', ''))
+        for src, rel_, sym, where in re.findall(r"([^/\s:]+):\([^)]*\): relocation truncated to fit: "
+                                               r"(\S+) against symbol `([^']+)' defined in (\S+)", text):
+            base = src if src.endswith('.o') else src + '.o'
+            cand = [o for o in game + plat if os.path.basename(o) == base or os.path.basename(o).endswith('_' + base)]
+            if len(cand) > 1:
+                cand = [o for o in cand if references(o, sym)]
+            for o in cand[:1]:
+                found.setdefault(o, '%s against `%s` (%s)' % (rel_, sym, 'absolute image address: TLS-model '
+                                                                 'reference' if where == '*ABS*' and 'TLS' in rel_
+                                                                 else 'defined in ' + os.path.basename(where)))
+        return found
 
     def link(extra_objs, logname, more=()):
-        argv = [gxx] + ARCH + ['-specs=' + os.path.join(g, 'guest.specs'), crt0, '@' + rsp] + plat + rt + extra + \
-            list(extra_objs) + [aliases, '-lm', '-Wl,--no-gc-sections', '-Wl,--no-demangle',
-                                '-Wl,-Map,' + os.path.join(out, 'fnvnx.map'), '-o', elf] + list(more)
-        lf = os.path.join(out, logname)
-        open(lf, 'w').close()
-        p = run(argv, lf)
-        return p.returncode, p.stdout + p.stderr
+        """Link; input objects ld refuses are dropped (listed in summary.json) and the link retried."""
+        while True:
+            with open(rsp, 'w') as f:
+                f.write(''.join('"%s"\n' % o.replace('\\', '\\\\').replace('"', '\\"') for o in game))
+            argv = [gxx] + ARCH + ['-specs=' + os.path.join(g, 'guest.specs'), crt0, '@' + rsp] + plat + rt + \
+                extra + list(extra_objs) + [aliases, '-lm', '-Wl,--no-gc-sections', '-Wl,--no-demangle',
+                                            '-Wl,-Map,' + os.path.join(out, 'fnvnx.map'), '-o', elf] + list(more)
+            lf = os.path.join(out, logname)
+            open(lf, 'w').close()
+            p = run(argv, lf)
+            text = p.stdout + p.stderr
+            bad = {o: w for o, w in culprits(text).items() if o in game or o in plat} if p.returncode else {}
+            if not bad or len(excluded) >= 200:
+                return p.returncode, text
+            for o, why in sorted(bad.items()):
+                excluded.append((os.path.relpath(o, ROOT) if o.startswith(ROOT) else o, why[:300]))
+                log('  ld refuses %s (%s): left out' % (os.path.basename(o), why[:160]))
+                (game if o in game else plat).remove(o)
 
     log('guest link pass 1: %d game objects, %d platform/loader objects (%d failed), runtime %d' %
         (len(game), len(plat), len(failed), len(rt) + 1))
@@ -178,13 +215,14 @@ def main(argv):
         more = ['-Wl,--allow-multiple-definition'] if multi else []
         rc, text = link([os.path.join(out, 'traps.o')], 'link2.log', more)
         new = set(re.findall(r"undefined reference to `([^']+)'", text)) - set(names)
-        if rc == 0 or not new or passes > 3:
+        if rc == 0 or not new or passes > 8:
             break
         names = sorted(set(names) | new)
     summary = {'method': 'pipeline adapter (tools/pipeline/guest_link.py)', 'game_objects': len(game),
                'platform_units': len(plat), 'platform_failed': failed, 'runtime_objects': len(rt) + 1,
                'undefined': len(names), 'multidef': multi[:200], 'multidef_count': len(multi), 'link_passes': passes,
-               'link_rc': rc, 'gc_sections': False, 'd3d9': os.environ.get('D3D9', 'null'), 'extra_objs': extra}
+               'link_rc': rc, 'gc_sections': False, 'd3d9': os.environ.get('D3D9', 'null'), 'extra_objs': extra,
+               'link_excluded': excluded}
     if rc:
         summary['link_error'] = [l for l in text.splitlines() if 'error' in l.lower()][:20]
         json.dump(summary, open(os.path.join(out, 'summary.json'), 'w'), indent=1)

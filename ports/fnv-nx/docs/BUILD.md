@@ -55,16 +55,32 @@ progress lines of all runs.
 
 * `ok`, `warn` (it produced its output, but something is incomplete, e.g. failed units, undefined symbols or a
   placeholder PROGRAM_ID), `fail`, `skipped` (a stage it needs failed), `disabled` (by configuration).
-* A stage runs again only when its fingerprint changes. The fingerprint hashes the owning tools' files, the
-  variables and the output ids of the stages it reads. A stage also reruns when its last status was not ok/warn,
-  when its output is missing, or when it is listed in `FORCE=` (`FORCE=all` reruns everything). Inside a stage,
-  the tools' own rules apply too: compile.sh keeps up-to-date objects, and fnvlink keeps its demangle and layout
-  caches in `build/link/out/`.
+* A stage runs again only when its fingerprint changes. The fingerprint hashes:
+  * the owning tools' files;
+  * the variables;
+  * the output ids of the stages it reads;
+  * a version tag of the stage's own logic in build.py (`compile-v2`, ...).
+
+  A stage also reruns when its last status was not ok/warn, when its output is missing, or when it is listed in
+  `FORCE=` (`FORCE=all` reruns everything). Output ids are content-based. A stage that reran but produced the same
+  output (for example identical objects) leaves the stages after it cached.
+* Inside a stage, the tools' own rules apply too:
+  * compile.sh keeps up-to-date objects; the pipeline adds header dependencies.
+  * A unit that failed is retried only if its source or a dependency in its `.o.d` is newer than its log (GCC
+    writes the `.d` when the error comes after preprocessing), if it has no `.d`, or if files were added to or
+    removed from the prepared tree.
+  * fnvlink keeps its demangle and layout caches in `build/link/out/`.
+  * Test suites are cached only when they passed; a failing suite runs again on every run.
 * The pipeline never stops at a failing stage. Stages that need it are skipped, and the independent ones run,
   including the tests. The exit code is 1 when any stage failed, including a failing test suite. Warnings do not
   set it.
-* Measured: a full run from an empty `build/` takes about 1-1.5 h on 4 cores (prepare 1.5 min, compile about
-  25 min, link about 30 min). A second run with nothing changed takes a few seconds.
+* Measured on 4 shared cores, decomp `87eb9373`, port `e4d2abb`:
+  * full run from an empty `build/`: 60 min, of which census 25 min, compile 19 min, link 6 min, guest link
+    50 s and tests 8 min (s3 3 min; s6b 5 min, including cloning and building MojoShader and uam);
+  * nothing changed: 1 s;
+  * one header of 4 units touched: 4 min (compile 22 s, then link 2 min and guest 1.5 min, which redo the whole
+    image);
+  * NINE=1 adds the Mesa build: 16 min the first time, 40 s when nothing changed.
 
 ## Variables
 
@@ -148,10 +164,29 @@ Undefined-symbol categories (`tools/pipeline/undef.py`, owners in brackets):
 
 | adapter | stands in for | goes away when |
 |---|---|---|
-| `tools/pipeline/guest_link.py` + `guest_stub.c` | The full guest link of S2 objects + platform + loader + runtime (S5). It compiles the guest runtime, `platform/` (without the libnx-side files) and `loader/src` with fnvnx-a64. Sources that fail are listed and left out. It links the whole image (`--no-gc-sections`, since there is no boot code), binds every undefined symbol to a trap stub that reports it, and packs `guest.nso`. Its numbers count every compiled object; S5's script links from its boot code with gc. | S5's `toolchain/game/build.sh` is in the tree; `GUEST_LINK=auto` picks it automatically |
+| `tools/pipeline/guest_link.py` + `guest_stub.c` | The full guest link of S2 objects + platform + loader + runtime (S5). It compiles the guest runtime, `platform/` (without the libnx-side files) and `loader/src` with fnvnx-a64. Sources that fail are listed and left out. It links the whole image (`--no-gc-sections`, since there is no boot code). Objects that binutils 2.45 refuses are left out and listed with the reason (`error adding symbols`; a relocation against a *defined* symbol that does not fit, mapped to the referencing object with nm), and the link is retried. Every undefined symbol is bound to a trap stub that reports it, and the result is packed as `guest.nso`. Its numbers count every compiled object; S5's script links from its boot code with gc. | S5's `toolchain/game/build.sh` is in the tree; `GUEST_LINK=auto` picks it automatically |
 | `tools/pipeline/host_nine.py` | The host-module build with Nine (render/nine README, "Host build integration"). It compiles `host.c`, `render/nine/host/*.c` and the generated `nine_proxy_host.c` against the Mesa tree, and links them with the Nine/nouveau libraries and libnx. Nine's entry points are forced into the link; whatever is still undefined is reported. | render/nine has its own host build script |
 | `build.py` link stage | Removes `build/link/out/objcopy/` before each `fnvlink.py resolve`. resolve writes one `.args`/`.redefine`/`.src` per object but never removes old ones, so `apply` would rewrite objects of units that no longer compile. | S2's resolve clears its per-object outputs |
 | `build.py` compile stage | Header dependencies: `-MD` in `CXX`, and objects deleted when a header changed. compile.sh compares the object with the unit's source only. | compile.sh tracks dependencies |
+
+## Findings of the first runs (2026-11-03)
+
+These are interface problems the pipeline found, recorded here for their owners:
+
+* **S2**: TLS-model references bound to absolute image addresses. `src/fallout_shared/tesscript.cpp` and
+  `tesconditionfunctions.cpp` declare `__declspec(thread)` variables at image data addresses (`0x0126fd98`,
+  which other units name `_tls_index`, and `0x01272000`/`0x01272268`). resolve binds those references to the
+  absolute `__fnv_<addr>` like any data reference. The host binutils' trial link (`fnvlink check`) accepts this;
+  fnvnx-a64's ld 2.45 refuses it ("TLS reference ... mismatches non-TLS reference", "TLSLE relocation against
+  *ABS*"). The same happens with S5's guest script ("used with TLS symbol"). Also: `g_out` is defined by one
+  Havok unit and referenced with a larger alignment by another (a name shared by two units).
+* **S1/S4**: `platform/win32/exports.cpp` and `sync.cpp` do not compile against the current shim. The errors are
+  an overloaded address in `K(...)` and `Interlocked*` declared with C linkage. The same shim breaks the host
+  tests `tests/s4` and `tests/s7`: `STDMETHODCALLTYPE` is not defined outside the game flags, and the LP64
+  `static_assert(sizeof(CRITICAL_SECTION) == 24 ...)` fails.
+* **S6c**: with NINE=1, `nine_proxy_host.c` includes the missing `nine_proxy_host.h`, and
+  `nine_proxy_guest.cpp` needs declarations of the `nx_manual_*` bodies. The Mesa libraries and
+  `nine_adapter.c` link into the host with 0 undefined symbols; the host NSO is 2.1 MiB.
 
 ## Notes
 
