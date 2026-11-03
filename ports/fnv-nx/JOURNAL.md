@@ -769,3 +769,14 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **did** - Opened S14-dataimage-synth (how much of the data image can be rebuilt without the exe) and V1-link
   (independent verification of link-by-address, ABI bridges, overrides, vtables).
 * **next** - verifiers for S8, S10, S3, S4/S4b, S6c, TAIL1/CS28 as capacity allows; S13 adds a lockstep boot mode.
+
+### J-0039 | 2026-11-03 | stream: S0-arch | status: done | parent: J-0038
+
+* **found** - Container restart killed all running agents and their background runs (S1, S1b, S2b, S2c, S9, S11, S12,
+  S13, S14, V1); files on disk survived. Disk was at 95 % (2.1 GB free).
+* **did** - Freed ~13 GB of reproducible intermediates (toolchain build/src trees - the installed prefix stays; the
+  MSVC ISOs and their extraction dir - hashes are in tools/equiv/README.md; stale pre-J-0034 object sets and old
+  prepared trees). Resumed all ten agents with their context; each reruns its interrupted step and commits after
+  every finished step.
+* **decided** - No backup branches for agent work-in-progress (user); recovery from transcripts. Scratch output dirs
+  must be versioned and pruned by their owners.
