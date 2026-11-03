@@ -594,6 +594,169 @@ def r_unit_renames(path, text, stats):
                 stats['UNIT1'] += n
     return text
 
+# ---------------------------------------------------------------------------------------------------------- SPEC1
+#
+# The decomp defines members of class template specializations (`T<A>::m(...) { ... }`, often without the
+# `template <>`) after the unit has already used T<A>::m. MSVC takes the later definition as the one; C++ calls it an
+# explicit specialization after implicit instantiation. The primary template only declares those members, so an
+# early declaration `template <> R T<A>::m(P);` gives exactly MSVC's meaning: SPEC1 puts one right after the primary
+# template's definition (when it is in the same file) or after the file's last #include before the definition, with
+# typedef names of the template arguments that are declared later in the file expanded.
+
+SPEC_DEF = re.compile(r'^([ \t]*)(template\s*<\s*>\s*)?((?:FNVNX_KEEP\s+)?(?:(?:inline|static|virtual)\s+)*)'
+                      r'((?:[\w:<>,\*& \t]+?[\s\*&])?)'                    # return type (none for constructors)
+                      r'(\b[A-Za-z_]\w*)\s*<([^<>;{}()]*(?:<[^<>;{}()]*>[^<>;{}()]*)*)>\s*::\s*(~?\w+)\s*'
+                      r'\(([^;{}]*)\)\s*(const\s*)?(?=[{;:])', re.M)
+TEMPLATE_PARAM_LIKE = re.compile(r'^\s*(?:class|typename)\b|^\s*[A-Z]\s*$')
+
+def _primary_template_end(text, name):
+    m = re.search(r'\btemplate\s*<[^{};]*>\s*(?:class|struct)\s+%s\s*(?::[^;{}]*)?\{' % re.escape(name), text)
+    if not m: return None
+    end = prepare.match_brace(text, m.end() - 1)
+    semi = text.find(';', end - 1)
+    return semi + 1 if semi >= 0 else end
+
+def r_specialization_decls(path, text, stats):
+    """SPEC1: declare explicit specializations of class template members before their first use (see above)."""
+    if '>::' not in text: return text
+    spans, edits = None, []
+    for m in SPEC_DEF.finditer(text):
+        tmpl, args, member = m.group(5), m.group(6).strip(), m.group(7)
+        if tmpl in ('static_cast', 'reinterpret_cast', 'const_cast', 'dynamic_cast'): continue
+        if not args or any(TEMPLATE_PARAM_LIKE.match(a) for a in args.split(',')): continue
+        if re.search(r'\btemplate\s*<\s*>\s*(?:class|struct)\s+%s\s*<' % re.escape(tmpl), text): continue
+        if spans is None: spans = prepare.scope_spans(text)
+        if any(k != 'namespace' for k, _ in prepare.scope_chain(spans, m.start())): continue
+        if prepare.scope_chain(spans, m.start()): continue          # file scope only
+        last = text[max(0, m.start() - 200):m.start()].rstrip()
+        if last.endswith('>') and re.search(r'\btemplate\s*<[^\n]*>$', last): continue   # template <class U> ...
+        p0 = _primary_template_end(text[:m.start()], tmpl)
+        if p0 is None:
+            incs = [i.end() for i in re.finditer(r'^[ \t]*#[ \t]*include[^\n]*', text[:m.start()], re.M)]
+            if not incs: continue
+            p0 = incs[-1]
+        # typedef names in the arguments that the file declares after p0: use what they stand for
+        for _ in range(4):
+            changed = False
+            for name in set(re.findall(r'\b[A-Za-z_]\w*\b', args)):
+                td = re.search(r'^[ \t]*typedef\s+([^;{}()]+?)\s+%s\s*;' % re.escape(name), text[p0:m.start()], re.M)
+                if td: args = re.sub(r'\b%s\b' % re.escape(name), td.group(1).strip(), args); changed = True
+            if not changed: break
+        ret = re.sub(r'\b(?:FNVNX_KEEP|inline|static|virtual)\b', '', m.group(4) or '').strip()
+        params = re.sub(r'=\s*[^,]+', '', m.group(8))                # default arguments stay on the definition
+        keep = 'FNVNX_KEEP' in (m.group(3) or '')
+        # GCC takes no attribute between `template <>` and the declarator: `used` goes on the early declaration
+        decl = 'template <> %s%s<%s>::%s(%s)%s%s;' % (ret + ' ' if ret else '', tmpl, args, member, params,
+                                                     ' const' if m.group(9) else '', ' FNVNX_KEEP' if keep else '')
+        nl = text.find('\n', p0)
+        if nl < 0 or nl >= m.start(): continue
+        edits.append((nl + 1, nl + 1, decl + ' /* fnv-nx SPEC1 */ '))
+        spec = (m.group(3) or '').replace('FNVNX_KEEP', '').lstrip()
+        before = re.sub(r'(?://[^\n]*\n|/\*.*?\*/|\s)+$', '', text[max(0, m.start() - 400):m.start()], flags=re.S)
+        prefixed = bool(m.group(2)) or bool(re.search(r'\btemplate\s*<\s*>$', before))   # `template<>` // @fnv ...
+        edits.append((m.start(2) if m.group(2) else m.start(3), m.end(3), ('' if prefixed and not m.group(2) else
+                                                                         'template <> ') + spec))
+        stats['SPEC1'] += 1
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in sorted(edits, key=lambda x: (x[0], x[1])):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(r); pos = b
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- VA1
+#
+# MSVC's va_list is a char*, and the decomp spells it that way: parameters that receive a va_list are declared
+# `char* args`, and variadic functions build one by hand (`char* args = (char*)(&format + 1);`). On AArch64 va_list
+# is a structure. VA1 rewrites the hand-built ones to va_start, finds every (function, parameter) that receives a
+# va_list anywhere in the decomp (transitively: such a parameter passed on is a va_list too) and retypes those
+# `char*` parameters to va_list in every declaration and definition. The platform's vprintf family takes va_list.
+
+VA_HANDMADE = re.compile(r'\bchar\s*\*\s*(\w+)\s*=\s*\(\s*char\s*\*\s*\)\s*\(?\s*&\s*(\w+)\s*\+\s*1\s*\)?\s*;')
+VA_VAR = re.compile(r'\bva_list\s+(\w+)\s*;')
+VA_CRT = {'vsprintf', 'vsprintf_s', '_vsprintf_s', 'vsnprintf', '_vsnprintf', '_vsnprintf_s', 'vprintf', 'vfprintf',
+          'vsscanf', '_vscprintf', 'va_start', 'va_end', 'va_arg', 'va_copy'}
+_VA_PARAMS = None
+
+def _va_calls(body, names):
+    """(callee, argument index) for every call in body that passes one of names as a whole argument."""
+    out = set()
+    for m in re.finditer(r'(?<![\w.>:])([A-Za-z_]\w*)\s*\(', body):
+        if m.group(1) in VA_CRT or m.group(1) in ('if', 'while', 'for', 'switch', 'return', 'sizeof'): continue
+        close = _call_end(body, m.end() - 1)
+        for i, a in enumerate(_split_args(body[m.end():close - 1])):
+            if a.strip() in names: out.add((m.group(1), i))
+    return out
+
+def _definitions(text, name):
+    """(param list, body) of every definition of a function called name in text."""
+    for m in re.finditer(r'(?<![\w.>])%s\s*\(' % re.escape(name), text):
+        close = _call_end(text, m.end() - 1)
+        tail = re.match(r'\s*(?:const\s*)?\{', text[close:])
+        if not tail: continue
+        end = prepare.match_brace(text, close + tail.end() - 1)
+        yield text[m.end():close - 1], text[close + tail.end():end - 1]
+
+def _va_params(path):
+    """{(function name, parameter index)} that receive a va_list anywhere in the decomp (see above)."""
+    global _VA_PARAMS
+    if _VA_PARAMS is not None: return _VA_PARAMS
+    root = _roots(path)
+    texts = []
+    for top in ('src', 'include'):
+        for dp, _, files in os.walk(os.path.join(root, top)):
+            for f in files:
+                if not f.endswith(('.cpp', '.h', '.inl', '.hpp', '.c')): continue
+                with open(os.path.join(dp, f), encoding='utf-8', errors='surrogateescape') as h: t = h.read()
+                if 'va_list' in t or '...' in t: texts.append(COMMENT.sub(' ', t))
+    work = set()
+    for t in texts:
+        names = set(VA_VAR.findall(t)) | {m.group(1) for m in VA_HANDMADE.finditer(t)}
+        if names: work |= _va_calls(t, names)
+    done = set()
+    while work:
+        fn, i = work.pop()
+        if (fn, i) in done: continue
+        done.add((fn, i))
+        for t in texts:
+            if fn not in t: continue
+            for params, body in _definitions(t, fn):
+                ps = _split_args(params)
+                if i >= len(ps): continue
+                pm = re.match(r'^\s*char\s*\*\s*(\w+)\s*$', ps[i])
+                if pm: work |= _va_calls(body, {pm.group(1)}) - done
+    _VA_PARAMS = done
+    return done
+
+def r_va_list(path, text, stats):
+    """VA1: MSVC's char* va_list -> va_list (see above)."""
+    if 'char' not in text: return text
+    def handmade(m):
+        stats['VA1'] += 1
+        return 'va_list %s; va_start(%s, %s);' % (m.group(1), m.group(1), m.group(2))
+    text = VA_HANDMADE.sub(handmade, text)
+    wanted = _va_params(path)
+    names = {fn for fn, _ in wanted if fn in text}
+    if not names: return text
+    out, pos = [], 0
+    for m in re.finditer(r'(?<![\w.>])(%s)\s*\(' % '|'.join(sorted(map(re.escape, names), key=len, reverse=True)), text):
+        if m.start() < pos: continue
+        close = _call_end(text, m.end() - 1)
+        ps = _split_args(text[m.end():close - 1])
+        changed = False
+        for i, p in enumerate(ps):
+            if (m.group(1), i) in wanted:
+                pm = re.match(r'^(\s*)char\s*\*\s*(\w*)(\s*)$', p)
+                if pm:
+                    ps[i] = '%sva_list%s%s%s' % (pm.group(1), ' ' if pm.group(2) else '', pm.group(2), pm.group(3))
+                    changed = True
+        if not changed: continue
+        out.append(text[pos:m.end()]); out.append(','.join(ps)); out.append(')'); pos = close
+        stats['VA1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -613,5 +776,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_keep_definitions, r_if_exists, r_sal_attributes, r_cs28_members, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include,
+RULES = [r_unit_renames, r_keep_definitions, r_if_exists, r_sal_attributes, r_cs28_members, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list,
          r_msvc_base_layout]
