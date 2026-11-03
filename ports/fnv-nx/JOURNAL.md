@@ -709,3 +709,16 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   and Nine game builds); `fnvnx_compat.h` refuses to compile with an unsigned plain char. All objects compiled before
   this entry are stale and must be rebuilt (S2c / S9).
 * **next** - static correctness checks beyond layout asserts, ABI verdicts and S11 equivalence: see J-0035.
+
+### J-0035 | 2026-11-03 | stream: S0-arch | status: done | parent: J-0034
+
+* **decided** - D11 (correctness gates without hardware), layered: (1) layout - the decomp's 3,171 static_asserts +
+  TAIL1/CS28; (2) ABI - S2's byte-level verdicts and bridges on every reference/definition pair; (3) rewrite rules -
+  S11 compiles pristine vs prepared trees with MSVC 2008 and compares per function; (4) target semantics - S12 static
+  hazard scan (bitfields, long double, shifts, division, float->int, memory ordering, uninitialised reads, ...);
+  (5) behaviour - S13 per-function **differential fuzzing**: the oracle is the pristine decomp compiled by MSVC 2008
+  (byte-identical to the exe by the decomp's guarantee, so no exe needed), run under Unicorn x86 at original
+  addresses; the candidate is our AArch64 ILP32 code under Unicorn AArch64; same memory world, outgoing calls
+  intercepted by original address; compare return values, memory writes and call traces (user's idea).
+* **did** - Opened S12-static-checks and S13-difffuzz (S13 reuses S11's MSVC setup).
+* **next** - S13 campaign on leaf functions, then functions with intercepted calls.
