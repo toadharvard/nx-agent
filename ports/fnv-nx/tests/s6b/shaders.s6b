@@ -393,7 +393,10 @@ mul oC0, r0, r1.x
 // ctab: WorldViewProj float 0 4 matrix_rows float 4 4
 // ctab: InstanceData float 18 2 vector float 1 4
 // expect: vs_dk_relc(20 + vs_a0.x)
-// expect: if (i == 21) return uintBitsToFloat(uvec4(0x3f800000u, 0x00000000u, 0x40000000u, 0xbf800000u));
+// def values: listed for the runtime's overlay of UBO 0 (fnvnx_dk_layout.h), no per-read check (S16 R1)
+// expect: // fnvnx-def 21 0x3f800000 0x00000000 0x40000000 0xbf800000
+// expect: // fnvnx-def 16 0x00000000 0x3f000000 0x3f800000 0x40400000
+// expect-not: if (i ==
 // expect: return (uint(i) < 256u) ? vs_uniforms_vec4[i] : vec4(0.0);
 // expect: vs_uniforms_vec4[ARRAYBASE_18 + vs_a0.x]
 vs_2_0
@@ -555,3 +558,17 @@ def c4, 1e-30, 1.2345678e-5, -3.0, 0.5
 dcl_position v0
 mov oPos, v0
 mul oT0, v0, c4
+
+=== ps20_pow_zero
+// V6n ps_pow_zero: D3D9 pow = powf(|x|, y): pow(0, 0) = 1, pow(0, y < 0) = +inf (GLSL pow undefined there),
+// branch-free selects; scalar and vector (replicated) destinations
+// expect: r0.x = ps_dk_pow(ps_c7.x, ps_c7.y);
+// expect: r0.yz = ps_dk_pow(ps_c7.xx, ps_c7.zz);
+// expect: return (a != 0.0) ? pow(a, y) : ((y == 0.0) ? 1.0 : ((y < 0.0) ? ps_dk_inf : 0.0));
+// expect: const float ps_dk_inf = uintBitsToFloat(0x7f800000u);
+// expect-not: pow(abs(
+ps_2_0
+pow r0.x, c7.x, c7.y
+pow r0.yz, c7.x, c7.z
+mov r0.w, c7.w
+mov oC0, r0

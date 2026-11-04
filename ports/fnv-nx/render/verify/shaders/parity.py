@@ -133,7 +133,7 @@ def main():
         stats['ps' if is_ps else 'vs'] += 1
         if status != 'ok':
             stats['translate_fail'] += 1
-            print('%-24s %-8s TRANSLATE-FAIL %s' % (name, model, rest[-1][:90] if rest else '')); continue
+            print('%-24s %-8s TRANSLATE-FAIL %s' % (name, model, rest[5][:90] if len(rest) > 5 else '')); continue
         if not is_ps or stats['ps'] > maxn:
             continue
         j = json.load(open(os.path.join(tr, h + '.json')))

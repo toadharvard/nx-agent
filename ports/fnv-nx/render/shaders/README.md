@@ -43,7 +43,8 @@ bytecode --> front end (frontend.c) --> reflection JSON / CTAB    <- stable
   here by emitting GLSL against the same layout contract; front end, reflection format, front-end
   D3D9 code and the DKSH stage stay untouched. Not built (and, after J-0015, not planned).
 * **Layout contract** (`fnvnx_dk_layout.h`, mirrored in the patch):
-  UBO 0 = float constants `vec4 c[256]` by register; UBO 1 = `ivec4 i[16]` + `bool b[16]` (std140,
+  UBO 0 = float constants `vec4 c[256]` by register, the program's float defs written over it by the runtime at
+  bind when the GLSL lists them (`// fnvnx-def REG X Y Z W`, `fnvnx_dk_overlay_defs`); UBO 1 = `ivec4 i[16]` + `bool b[16]` (std140,
   bools at byte 256 + 16n); UBO 2 = driver constants; sampler binding = sampler register; vertex
   attribute location by usage/index; VS->PS varying location by usage/index (fog at 18).
 * **D3D9 conventions** in the `glsldk` profile: VS epilogue `gl_Position.xy += posfix.xy * w` (half-pixel,
@@ -85,13 +86,27 @@ All in the `glsldk` profile (other MojoShader profiles unchanged); unit + execut
   centroid input read through `v[aL]`, and the VS output locations of the same usages); they fail on the patch
   from before the fix (3/23) and pass after.
 * **Relative addressing** (P5): `c[a0 + n]` outside every CTAB array, or without a CTAB, reads the constant UBO by
-  register through `vs_dk_relc(i)` (def'd values overlaid, as Nine/wined3d load them into the constant file;
-  out of range -> 0). vs_3_0 `v[a0/aL + n]` and ps_3_0 `v[aL + n]` read a copied input array (undeclared ->
+  register through `vs_dk_relc(i)` (out of range -> 0). vs_3_0 `v[a0/aL + n]` and ps_3_0 `v[aL + n]` read a copied input array (undeclared ->
   (0,0,0,1) as Nine's `v_consecutive`); vs_3_0 `o[a0/aL + n]` writes `vs_o_arr`, copied to the outputs in the
   epilogue (Nine 20.1 itself ignores the index on outputs: not executable against the oracle). The front end
   (bytecode profile) accepts the same.
+* **Def'd constants under relative reads** (S16 R1, V6n `vs_reladdr_def`): D3D9 does not bound `c[a0 + n]` to the
+  CTAB array, so a0 can carry it onto a def'd register on either side (the engine's instance arrays are declared
+  1-2 registers long and read further; a0 may be negative), and a def overrides its register for the program
+  (Nine's lconstf, wined3d's uniform upload). The GLSL of a program with relative constant reads lists its float
+  defs as `// fnvnx-def` lines and every relative read is a plain indexed UBO load; the runtime (V6n's `v6n_gl` /
+  `v6n_s6ngl`, nx_render's D3D9 path; the console runtime the same from the reflection's `literals`) writes the
+  defs over UBO 0 when it binds the program. Shader cost: none (real019 handheld 720p 32.60 ms, as before the
+  fix; the per-read in-shader overlay tried first cost 32.60 -> 42.08 ms: SLS and SKIN VS doubled). Tests:
+  `tests/s6b/s6b_relc.c` (handwritten tokens, vs_1_1 and vs_2_0, CTAB array with defs past its end and before
+  it, no def: the GLSL and the overlay) and V6n's `tests/v6n/run.sh vs_reladdr_def`.
 * **Colour saturation** (P2): vs < 3.0 `oD0`/`oD1` (and `oFog`) clamped to [0, 1] in the epilogue, written
   components only (the registers are write-only, so this equals clamping each write).
+* **pow at 0** (V6n `ps_pow_zero`, 653 programs / 129 unique in the package fuzz): D3D9 `pow` is powf(|x|, y)
+  (Nine; wined3d: exp(y log x) with log(0) = -FLT_MAX): pow(0, 0) = 1, pow(0, y < 0) = +inf, pow(0, y > 0) = 0,
+  where GLSL pow() is undefined (llvmpipe and Maxwell give 0 or NaN). `vs_dk_pow` / `ps_dk_pow` (float..vec4)
+  select on x == 0, branch-free. Cost on real019 (class averages, Maxwell instructions): SLS pso +0.6 %, SM pso
+  (SM3 lighting) +1.3 %, SM3LL +1.0 %, WATER +7.8 %; handheld 720p 32.60 -> 32.69 ms.
 * **Numerics** (P3, P4), as Nine gives them on a driver without `TGSI_MUL_ZERO_WINS` (softpipe):
   `log`/`logp` = max(-FLT_MAX, log2|x|), `rcp` clamped to +-FLT_MAX/2 (rcp(+-0) = +-FLT_MAX/2), `rsq` =
   min(FLT_MAX, 1/sqrt|x|), `nrm` = v * min(FLT_MAX, rsq(dot3(v))) (3-component length also for a .w write mask;

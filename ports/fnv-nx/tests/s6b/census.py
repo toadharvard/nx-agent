@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """S6b translation census: every program of the given .sdp packages through sdp2dksh, failures classified by cause.
 
-  python3 -I tests/s6b/census.py PKG.sdp... [--build DIR] [--work DIR] [--jobs N] [--examples]
+  python3 -I tests/s6b/census.py PKG.sdp... [--build DIR] [--work DIR] [--jobs N] [--examples] [--determinism N]
 
 Identical bytecode is translated once (the unique blobs are packed into shards under --work, which therefore holds
 game-derived data and must stay out of git), and counts are reported per program and per unique blob. uam's GLSL
 diagnostics (stderr only) are attached to the failure that follows them. Prints only counts (safe for the docs);
 --examples adds the first offending GLSL line per cause, which is game-derived: do not commit it.
+--determinism N: also translate the first N unique programs (0 = all) each in its own process and count the DKSH
+files (with the epilogue variants) that differ from the shard run's: must be 0 (uam once read uninitialised
+scheduling data, so a program's code depended on what the process had compiled before).
 """
 import argparse, collections, os, re, struct, subprocess, sys
 
@@ -69,6 +72,7 @@ def main():
     ap.add_argument("--work", default=os.path.join(ROOT, "render/shaders/build/census"))
     ap.add_argument("--jobs", type=int, default=2)
     ap.add_argument("--examples", action="store_true")
+    ap.add_argument("--determinism", type=int, default=None)
     a = ap.parse_args()
     tool = os.path.join(a.build, "sdp2dksh")
     os.makedirs(a.work, exist_ok=True)
@@ -127,6 +131,21 @@ def main():
                                          ", ".join("%s %d" % kv for kv in sorted(models[c].items()))))
     if a.examples:
         for c, ex in examples.items(): print("example [%s]: %s" % (c, ex))
+    if a.determinism is not None:
+        import glob, shutil
+        ks = keys if a.determinism == 0 else keys[:a.determinism]
+        shard_of = {k: i for i, s in enumerate(shards) for k in s}
+        alone = os.path.join(a.work, "alone"); nd = nf = 0
+        for k in ks:
+            h = "%016x" % k; od = os.path.join(alone, h); shutil.rmtree(od, ignore_errors=True); os.makedirs(od)
+            b = os.path.join(od, h); open(b, "wb").write(uniq[k][1])
+            subprocess.run(["nice", tool, "-o", od, "--blob", b], capture_output=True)
+            for f in glob.glob(os.path.join(a.work, "out%d" % shard_of[k], h + "*.dksh")):
+                nf += 1; g = os.path.join(od, os.path.basename(f))
+                nd += not os.path.exists(g) or open(f, "rb").read() != open(g, "rb").read()
+            shutil.rmtree(od)
+        print("determinism: %d of %d DKSH differ between the shard run and one process per program (%d programs)" % (nd, nf, len(ks)))
+        return 1 if nd else 0
     return 0
 
 if __name__ == "__main__":

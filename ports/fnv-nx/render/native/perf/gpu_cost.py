@@ -196,7 +196,7 @@ REAL_MAP = {
 def real_table(sdir):
     """class -> averaged stats from sdp2dksh's index.tsv + reflection JSON (only programs that translated)"""
     import collections
-    acc = collections.defaultdict(lambda: [0, 0.0, 0.0, 0.0])
+    acc = collections.defaultdict(lambda: [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])   # n, instr, gprs, tex, e0, ea, ef
     for line in open(os.path.join(sdir, "index.tsv")):
         f = line.rstrip("\n").split("\t")
         if f[0] == "hash" or len(f) < 9 or f[4] != "ok":
@@ -210,14 +210,30 @@ def real_table(sdir):
         keys = [base + " " + ext]
         if ext == "pso" and name.startswith("IS"):
             keys.append("IS pso")
+        # S6b's compile-time epilogue variants (index columns dk_instr_e0/_ea/_ef; "-" or absent: the runtime one)
+        var = [int(f[11 + v]) if len(f) > 11 + v and f[11 + v].isdigit() else int(f[7]) for v in range(3)]
         for k in keys:
             a = acc[k]; a[0] += 1; a[1] += int(f[7]); a[2] += int(f[8]); a[3] += tex
+            a[4] += var[0]; a[5] += var[1]; a[6] += var[2]
     tab = {}
-    for k, (n, ins, gprs, tex) in acc.items():
+    for k, (n, ins, gprs, tex, e0, ea, ef) in acc.items():
         d = ins / n
         tab["real:" + k] = {"programs": n, "maxwell_static": round(d, 1), "maxwell_dyn": round(d, 1), "alu_slots": round(d, 1),
-                            "fp16_dyn": 0, "gprs": round(gprs / n, 1), "tex": round(tex / n, 2)}
+                            "fp16_dyn": 0, "gprs": round(gprs / n, 1), "tex": round(tex / n, 2),
+                            "variants": {"e0": round(e0 / n, 1), "ea": round(ea / n, 1), "ef": round(ef / n, 1), "full": round(d, 1)}}
     return tab
+
+
+def real_mix(st, mix):
+    """a translated pixel class bound by the draw's (alpha test, fog) state: __e0 / __ea / __ef / runtime, weighted"""
+    v = st.get("variants")
+    if not v or not mix:
+        return st
+    tot = max(1, sum(mix.values()))
+    a = sum(n * v[{(0, 0): "e0", (1, 0): "ea", (0, 1): "ef", (1, 1): "full"}[(1 if at else 0, 1 if fg else 0)]]
+            for (at, fg), n in mix.items()) / tot
+    o = dict(st); o["alu_slots"] = o["maxwell_dyn"] = round(a, 1)
+    return o
 
 
 NOP, BRA0, BRA1 = 0x50b0000000070f00, 0xe2400fffff07000f, 0xe2400fffff87000f
@@ -337,7 +353,7 @@ def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
         draws = mix_draws.get(fam, m.get("draws", (0, 0))[1])
         bound = None
         if shader_map:
-            vs, ps = tab["real:" + shader_map[fam][0]], tab["real:" + shader_map[fam][1]]
+            vs, ps = tab["real:" + shader_map[fam][0]], real_mix(tab["real:" + shader_map[fam][1]], epi.get(fam, {}))
         else:
             bound = bound_shaders(tab, m, epi.get(fam, {}))
             vs, ps = tab[m["vs"]], mix_stats(tab, bound)

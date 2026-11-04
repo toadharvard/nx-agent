@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "v6n_target.h"
+#include "../../shaders/include/fnvnx_dk_layout.h"   /* the def overlay of UBO 0 (fnvnx_dk_overlay_defs) */
 #include "d3d9_state.h"
 #include "nx/gpu_abi.h"
 #include "nxgl.h"
@@ -365,7 +366,8 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     if (vsid) {   /* S6b VS: vertex UBO 0 = c#, UBO 2 = driver posfix (0, 0, 1): no half-pixel shift (the +0.5 viewport
                      does it), D3D y (S6n's shim negates gl_Position.y) */
         float drv[16] = {0, 0, 1.0f, 0};
-        o = put(t, t->vsc, sizeof t->vsc); { uint32_t a[5] = {1, 0, t->mem, o, sizeof t->vsc}; emit(t, NxOp_BindUbo, a, 5); }
+        static float vc[256][4]; memcpy(vc, t->vsc, sizeof vc); fnvnx_dk_overlay_defs(t->vs_glsl, vc);   /* defs over c# */
+        o = put(t, vc, sizeof vc); { uint32_t a[5] = {1, 0, t->mem, o, sizeof vc}; emit(t, NxOp_BindUbo, a, 5); }
         o = put(t, drv, sizeof drv); { uint32_t a[5] = {1, 2, t->mem, o, sizeof drv}; emit(t, NxOp_BindUbo, a, 5); }
     } else { o = put(t, &vu, sizeof vu); uint32_t a[5] = {1, 0, t->mem, o, sizeof vu}; emit(t, NxOp_BindUbo, a, 5); }
     o = put(t, &fu, sizeof fu); { uint32_t a[5] = {2, 0, t->mem, o, sizeof fu}; emit(t, NxOp_BindUbo, a, 5); }
@@ -378,7 +380,8 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
         memcpy(&drv.fog[1], &t->rs[36], 4); memcpy(&drv.fog[2], &t->rs[37], 4); memcpy(&drv.fog[3], &t->rs[38], 4);
         drv.alpha[0] = ((sb >> NXSB_ALPHATEST) & 1) ? (int)((sb >> NXSB_ALPHAFUNC) & 7) + 1 : 0;
         drv.alpharef[0] = dyn.alphaRef;
-        o = put(t, t->psc, sizeof t->psc); { uint32_t a[5] = {2, 0, t->mem, o, sizeof t->psc}; emit(t, NxOp_BindUbo, a, 5); }
+        static float pc[256][4]; memcpy(pc, t->psc, sizeof pc); fnvnx_dk_overlay_defs(t->ps_glsl, pc);   /* defs over c# */
+        o = put(t, pc, sizeof pc); { uint32_t a[5] = {2, 0, t->mem, o, sizeof pc}; emit(t, NxOp_BindUbo, a, 5); }
         o = put(t, &drv, sizeof drv); { uint32_t a[5] = {2, 2, t->mem, o, sizeof drv}; emit(t, NxOp_BindUbo, a, 5); }
     }
     uint32_t nup = g_idx ? (uint32_t)nv : n;

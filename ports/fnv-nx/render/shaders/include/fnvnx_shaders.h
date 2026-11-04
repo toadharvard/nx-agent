@@ -26,8 +26,19 @@ typedef enum fnvnx_shader_stage {
 
 enum {
     FNVNX_SHADER_KEEP_GLSL = 1u << 0,  /* return the intermediate GLSL in result.glsl */
-    FNVNX_SHADER_NO_DKSH   = 1u << 1   /* stop after GLSL (no uam) */
+    FNVNX_SHADER_NO_DKSH   = 1u << 1,  /* stop after GLSL (no uam) */
+    FNVNX_SHADER_NO_VARIANTS = 1u << 2 /* pixel programs: only the runtime-epilogue DKSH, no __e0/__ea/__ef */
 };
+
+/* Compile-time epilogue variants of a pixel program with a D3D9 epilogue (alpha test + ps < 3.0 fog from the driver
+ * UBO): the runtime binds the one matching the draw's state, all precompiled (no runtime compile). The main DKSH
+ * (result.dksh) is the runtime one (both, driver-selected); the GLSL is shared, a variant defines DK_NO_ALPHA and/or
+ * DK_NO_FOG after #version. */
+enum { FNVNX_EPI_E0 = 0,   /* "__e0": no alpha test, no fog */
+       FNVNX_EPI_EA,       /* "__ea": alpha test only */
+       FNVNX_EPI_EF,       /* "__ef": fog only (the same code as __e0 for ps_3_0: no fixed-function fog) */
+       FNVNX_EPI_COUNT };
+extern const char *const fnvnx_epi_suffix[FNVNX_EPI_COUNT];   /* "__e0", "__ea", "__ef" */
 
 typedef struct fnvnx_shader_opts {
     uint32_t flags;
@@ -54,6 +65,8 @@ typedef struct fnvnx_shader_result {
     char *glsl;                        /* malloc'd, with KEEP_GLSL */
     char *reflection_json;             /* malloc'd, always when the front end succeeded */
     fnvnx_shader_stats stats;
+    int num_variants;                  /* FNVNX_EPI_COUNT for a pixel program with an epilogue, else 0 */
+    struct { uint8_t *dksh; size_t dksh_size; fnvnx_shader_stats stats; } variants[FNVNX_EPI_COUNT];  /* malloc'd */
 } fnvnx_shader_result;
 
 /* Cache key: FNV-1a 64 of the bytecode. */
