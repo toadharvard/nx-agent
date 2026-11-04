@@ -432,6 +432,31 @@ class ReadyTest(unittest.TestCase):
         self.world.edit_json('link/%s/meta.json' % C, lambda d: d.update(boot_image='patched exe'))
         self.assertEqual(self.gate(self.world.run(), 'boot.real_exe')['status'], 'no-data')
 
+    def test_scorecard_one_number_per_stage(self):
+        card = self.world.run()
+        rows = {(r['stage'], r['what'].split(' (')[0]): r for r in card['scorecard']}
+        self.assertEqual([r['stage'] for r in card['scorecard']],
+                         ['compile', 'link', 'link', 'ABI', 'fuzz', 'equivalence', 'boot', 'render parity',
+                          'frame budget', 'frame budget'])
+        for r in card['scorecard'][:8]:
+            self.assertEqual((r['gap'], r['status']), (0, 'done'), r)
+            self.assertTrue(r['sources'], r)
+        # the frame rows are judged against the orchestrator's 60 fps at 1.02 GHz, not J-0132's gate levels
+        fb = card['scorecard'][8]
+        self.assertEqual((fb['target'], fb['unit'], fb['status']), (16.7, 'ms', 'open'))
+        self.assertAlmostEqual(fb['gap'], fb['value'] - 16.7, places=1)
+        self.assertEqual(card['verdict'], 'READY')
+        # a census with errors, an S11 diff, a missing S16 file
+        self.world.sub('reports/farm1/%s-census.md' % C, 'errors total: 0', 'errors total: 3')
+        self.world.remove('reports/s16/%s-frames.json' % C)
+        card = self.world.run()
+        sc = {r['stage']: r for r in card['scorecard']}
+        self.assertEqual((sc['compile']['value'], sc['compile']['gap'], sc['compile']['status']), (3, 3, 'open'))
+        self.assertEqual((sc['render parity']['gap'], sc['render parity']['status']), (None, 'no-data'))
+        md = readf(os.path.join(self.world.tmp, 'card.md'))
+        self.assertIn('## Scorecard', md)
+        self.assertIn('| compile | census errors | 3 | 0 | 3 | **open** |', md)
+
     def test_try_farms_never_count(self):
         """frames, frameprof and the frame budget of a try farm (unmerged wip heads) are not evidence (V1 R14)"""
         self.world.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'][0].update({'pass': False}))

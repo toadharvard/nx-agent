@@ -140,5 +140,11 @@
     ]
    }
   ]
+ },
+ "scorecard": {
+  "_doc": "the honest scorecard's frame rows (ready.py scorecard()): the orchestrator's target for the whole project, 60 fps at 720p handheld at the 1.02 GHz retail clock. The gates keep J-0132's levels (perf.fps); these rows show the gap to this target",
+  "frame_fps": 60,
+  "frame_clock": "stock",
+  "gpu_config": "handheld_720p"
  }
 }

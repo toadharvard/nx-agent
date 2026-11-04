@@ -696,7 +696,8 @@ class Card:
             d, s = c['farm1']
             self.gate('compile.census', 'Compile', 'census: units that compile clean', '%d/%d' % (d['clean'], d['units']),
                       '%d/%d' % (units, units), PASS if d['clean'] == d['units'] == units else FAIL, s,
-                      '%d failing, %s errors' % (d['failing'], d['errors']), rank=12)
+                      '%d failing, %s errors' % (d['failing'], d['errors']), rank=12, errors=d['errors'],
+                      failing=d['failing'])
         else:
             self.nodata('compile.census', 'Compile', 'census: units that compile clean', '%d/%d' % (units, units),
                         'no census report on reports/farm1', rank=12)
@@ -1068,7 +1069,8 @@ class Card:
             note += '; shards not covered: %s' % ','.join(map(str, nocov))
         st = FAIL if hard_fn else PASS if not nocov else NODATA
         self.gate('fuzz.hard', 'Fuzz', 'S13: functions with a real-bug or triage divergence (S13b causes)', hard_fn,
-                  '0', st, srcs, note, rank=11, by_class={c: by[c]['functions'] for c in by}, owners=owners)
+                  '0', st, srcs, note, rank=11, by_class={c: by[c]['functions'] for c in by}, owners=owners,
+                  divergences=hard_div)
         art = by.get('artifact', dict(functions=0, divergences=0, causes={}))
         self.gate('fuzz.artifacts', 'Fuzz', 'S13: functions whose worst divergence is a harness artifact (S13 fixes)',
                   art['functions'], '0', PASS if not art['functions'] else FAIL, srcs, 'not the port (causes.py POLICY); '
@@ -1292,7 +1294,8 @@ class Card:
             note.append('%d malformed scene entries' % (len(g['scenes']) - len(sc)))
         note += ['%s %s' % (name(x), x.get('status', '')) if 'status' in x else name(x) for x in sc if not passed(x)]
         self.gate('frames.compare', 'Frame and scene comparison', title, '%d/%d' % (ok, len(g['scenes'])),
-                  'all scenes', PASS if good else FAIL, self.src(br, path, commit, t), ', '.join(note), rank=5)
+                  'all scenes', PASS if good else FAIL, self.src(br, path, commit, t), ', '.join(note), rank=5,
+                  scenes_ok=ok, scenes=len(g['scenes']))
 
     def perf_gates(self):
         p = self.th['perf']
@@ -1499,7 +1502,7 @@ class Card:
                       'report: %s' % (self.fps_note(lv, lname), ', '.join(
                           '%s fps %s' % (k, next((dct(tg.get(k))[a] for a in [name] + cfg.get('aliases', [])
                                                  if a in dct(tg.get(k))), '?')) for k in sorted(tg))), rank=22,
-                      required=req, levels=dict(lv, level=lname))
+                      required=req, levels=dict(lv, level=lname), ms=dict(lo=lo, hi=hi))
 
     def budget_gate(self):
         """S15's whole-frame CPU budget (tools/perf/frame_budget.py, fnvnx-frame-budget/1): the newest
@@ -1563,7 +1566,8 @@ class Card:
                         'B1 on hardware)' if v != 'pass' else 'model only, needs a measurement') + '; ' + note)
             self.gate(gid, 'Performance', title, 'worst frame %s ms mid (%s - %s)' % (
                 wf.get('mid', '?'), wf.get('lo', '?'), wf.get('hi', '?')), thr, st, src, note, rank=22, required=req,
-                      level=res.get('level'), verdicts=res.get('verdicts'))
+                      level=res.get('level'), verdicts=res.get('verdicts'), worst_frame_ms=wf,
+                      measured='+'.join(measured) or None)
 
     def package_gates(self):
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
@@ -1674,13 +1678,108 @@ def missing(gates):
                   key=lambda g: (g['rank'], g['id']))
 
 
-def markdown(head, gates, risks, generated):
+def scorecard(gates, th):
+    """the honest scorecard: one number per stage, the gap still to close, taken from the gates (so from the farm
+    reports they cite). Rows: [{stage, what, value, target, gap, unit, status: done|open|no-data, stale, gates,
+    sources, note}]; gap is how far the value is from its target (0 = done), None when nobody measures it"""
+    G = {g['id']: g for g in gates}
+    sc = th.get('scorecard', {})
+    fps = sc.get('frame_fps', 60)
+    clocks = {c['name']: c for c in th['perf']['clocks']}
+    clk = clocks.get(sc.get('frame_clock', 'stock')) or list(clocks.values())[0]
+    target_ms = round(1000.0 / fps, 1)
+    rows = []
+
+    def row(stage, what, ids, value, target, gap, unit='', note=''):
+        gs = [G[i] for i in ids if i in G]
+        srcs = list({(s['branch'], s['path']): s for g in gs for s in g['sources']}.values())
+        st = 'no-data' if gap is None else 'done' if gap <= 0 else 'open'
+        rows.append(dict(stage=stage, what=what, value=value, target=target, gap=gap, unit=unit, status=st,
+                         stale=any(s['stale'] for s in srcs), gates=[g['id'] for g in gs], sources=srcs, note=note))
+
+    def val(i, key='value'):
+        g = G.get(i)
+        if not g or g['status'] == NODATA:
+            return None
+        v = g.get(key)
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    e = val('compile.census', 'errors')
+    row('compile', 'census errors', ['compile.census'], e, 0, e,
+        note='%s failing units' % G['compile.census'].get('failing', '?') if 'compile.census' in G else '')
+    u = val('link.undefined')
+    row('link', 'trial-link undefined names', ['link.undefined'], u, 0, u)
+    tr = val('link.traps')
+    row('link', 'guest functions bound to trap stubs', ['link.traps'], tr, 0, tr)
+    x, m = val('abi.x86_inconsistent'), val('abi.manual')
+    row('ABI', 'ABI rows open (x86-inconsistent not explained + manual)', ['abi.x86_inconsistent', 'abi.manual'],
+        None if x is None or m is None else x + m, 0, None if x is None or m is None else x + m,
+        note='x86-inconsistent %s, manual %s' % (x, m))
+    fd, ff = val('fuzz.hard', 'divergences'), val('fuzz.hard')
+    fz = fd if fd is not None else ff
+    row('fuzz', 'hard divergences (real-bug + triage)' if fd is not None else 'functions with a hard divergence',
+        ['fuzz.hard', 'fuzz.coverage'], fz, 0, fz,
+        note='%s functions; coverage %s' % (ff, G['fuzz.coverage']['value'] if 'fuzz.coverage' in G else '-'))
+    ec, en = val('equiv.code'), val('equiv.nobuild')
+    eq = None if ec is None or en is None else ec + en
+    row('equivalence', 'S11 diffs not by design (functions + units)', ['equiv.code', 'equiv.nobuild'], eq, 0, eq,
+        note='functions %s, units %s' % (ec, en))
+    names = th['boot_milestones']
+    bg = [G.get('boot.' + n) for n in names]
+    known = [g for g in bg if g and g['status'] != NODATA]
+    reached = sum(1 for g in bg if g and g['status'] == PASS)
+    real = G.get('boot.real_exe', {}).get('status')
+    row('boot', 'milestones reached on the real exe', ['boot.real_exe'] + ['boot.' + n for n in names],
+        '%d/%d' % (reached, len(names)), '%d/%d' % (len(names), len(names)),
+        (len(names) - reached) if known or real == FAIL else None, 'milestones',
+        note='real exe: %s; %s' % (real or '-', ', '.join('%s %s' % (n, g['status'] if g else '-')
+                                                          for n, g in zip(names, bg))))
+    fr = G.get('frames.compare')
+    ok, n = (fr.get('scenes_ok'), fr.get('scenes')) if fr and fr['status'] != NODATA else (None, None)
+    row('render parity', 'S16 scenes matching the reference', ['frames.compare'],
+        None if n is None else '%d/%d' % (ok, n), 'all', None if n is None else (n - ok) if n else None, 'scenes',
+        note=fr['note'] if fr else '')
+    bgid = 'perf.budget.' + clk['name']
+    b = G.get(bgid)
+    wf = dct(b.get('worst_frame_ms')) if b else {}
+    mid = wf.get('mid') if posnum(wf.get('mid')) else None      # S15's headline number; lo / hi in the note
+    row('frame budget', 'worst frame at %.2f GHz (S15, mid case), target %d fps' % (clk['hz'] / 1e9, fps), [bgid],
+        mid, target_ms, None if mid is None else round(max(0.0, mid - target_ms), 1), 'ms',
+        note='lo %s, hi %s; %s' % (wf.get('lo', '?'), wf.get('hi', '?'),
+                                     'measured: ' + b['measured'] if b and b.get('measured') else
+                                     'model only [E], not measured'))
+    cfg = sc.get('gpu_config', 'handheld_720p')
+    gg = G.get('perf.gpu.' + cfg)
+    gh = dct(gg.get('ms')).get('hi') if gg else None
+    row('frame budget', 'GPU frame, %s (render model, efficiency 0.6)' % cfg.replace('_', ' '), ['perf.gpu.' + cfg],
+        gh, target_ms, None if not posnum(gh) else round(max(0.0, gh - target_ms), 1), 'ms',
+        note='model, not measured (RENDER_PERF.md section 9)')
+    return rows
+
+
+def scorecard_md(rows):
+    L = ['## Scorecard', '', 'One number per stage and the gap still to close (0 = done); sources are the farm reports '
+         'the gates cite (docs/READINESS.md, "Scorecard").', '',
+         '| stage | what | value | target | gap | status | source | note |', '|---|---|---|---|---|---|---|---|']
+    fmt = lambda v: '-' if v is None else '{:,}'.format(v) if isinstance(v, int) else str(v)
+    for r in rows:
+        L.append('| %s | %s | %s | %s | %s | **%s%s** | %s | %s |' % (
+            r['stage'], r['what'], fmt(r['value']), fmt(r['target']),
+            fmt(r['gap']) + (' ' + r['unit'] if r['unit'] and r['gap'] is not None else ''), r['status'],
+            ' (stale)' if r['stale'] and r['status'] == 'done' else '', fmt_src(r['sources']),
+            str(r['note']).replace('|', '/')))
+    return L + ['']
+
+
+def markdown(head, gates, risks, generated, rows=None):
     v, c = verdict(gates)
     L = ['# fnv-nx first-launch readiness %s' % (head or '?')[:12], '',
          '- integration head: `%s`; generated %s' % (head or '?', generated),
          '- verdict: **%s**: %d pass, %d fail, %d no-data, %d stale passes, of %d gates; %d more informative' % (
              v, c[PASS], c[FAIL], c[NODATA], c['stale'], len(gates) - c['informative'], c['informative']),
          '- thresholds: tools/gates/thresholds.json; gates and why: docs/READINESS.md', '']
+    if rows:
+        L += scorecard_md(rows)
     for grp in ORDER:
         gs = [g for g in gates if g['group'] == grp]
         if not gs:
@@ -1764,7 +1863,8 @@ def main(argv):
     card = Card(store, hist, th, port=a.port, render=render, abiclass_dir=a.abiclass).run()
     risks = json.loads(readf(a.risks)) if os.path.isfile(a.risks) else []
     gen = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-    md = markdown(hist.head, card.gates, risks, gen)
+    rows = scorecard(card.gates, th)
+    md = markdown(hist.head, card.gates, risks, gen, rows)
     v, c = verdict(card.gates)
     if a.md:
         writef(a.md, md)
@@ -1773,7 +1873,8 @@ def main(argv):
     if a.json:
         writef(a.json, json.dumps(dict(head=hist.head, generated=gen, verdict=v, counts=c, max_commits_behind=card.maxb,
                        gates=card.gates, blockers=[g['id'] for g in blockers(card.gates)],
-                       missing=[g['id'] for g in missing(card.gates)], hardware_risks=risks), indent=1) + '\n')
+                       missing=[g['id'] for g in missing(card.gates)], scorecard=rows, hardware_risks=risks),
+                                  indent=1) + '\n')
     return 0
 
 

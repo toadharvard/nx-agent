@@ -80,6 +80,31 @@ text, no game data. It can be published next to the other reports.
   by rank, five at most. The rank is the order in which the work unblocks the first launch: boot first, then
   what the boot runs into, then correctness at scale, then the tail. Missing evidence is listed separately.
 
+## Scorecard
+
+The scorecard is the single number per stage of how far the port is from done. `ready.py` derives it from the
+gates, so every row cites the farm reports its gates read; the md report shows it right under the verdict, the JSON
+under `scorecard` (`[{stage, what, value, target, gap, unit, status, stale, gates, sources, note}]`). The gates
+job publishes it per integration head (`reports/gates1/<c12>-gates.md` / `.json`).
+
+| stage | number | from gate(s) | target |
+|---|---|---|---|
+| compile | census errors (`errors total`) | compile.census | 0 |
+| link | trial-link undefined names | link.undefined | 0 |
+| link | guest functions bound to trap stubs | link.traps | 0 |
+| ABI | x86-inconsistent pairs not explained + manual pairs | abi.x86_inconsistent, abi.manual | 0 |
+| fuzz | hard divergences (real-bug + triage causes); functions in the note | fuzz.hard | 0 |
+| equivalence | S11 functions + units that differ, not by design | equiv.code, equiv.nobuild | 0 |
+| boot | milestones reached on the real exe | boot.* | 5/5 |
+| render parity | S16 scenes matching the reference | frames.compare | all |
+| frame budget | S15 worst frame, mid case (lo, hi in the note), at the `scorecard.frame_clock` | perf.budget.<clock> | 1000 / `frame_fps` ms |
+| frame budget | GPU frame of the render model, efficiency-0.6 bound, `scorecard.gpu_config` | perf.gpu.<config> | 1000 / `frame_fps` ms |
+
+- **gap** is how far the value is from its target (0 = done); `-` means no farm measures it yet (no-data).
+- **Frame target.** The frame rows use `thresholds.json` `scorecard`: 60 fps at 720p handheld at the 1.02 GHz retail
+  clock, the orchestrator's target for the project. The frame *gates* keep the owner's J-0132 levels (45 fps
+  target on the boost clock), so the fixture world can be READY while its frame rows are open.
+
 ## The gates
 
 | id | what | source | threshold | why that threshold |
