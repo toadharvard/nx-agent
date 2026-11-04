@@ -18,6 +18,7 @@ import collections
 import glob
 import json
 import os
+import re
 
 import config
 
@@ -85,6 +86,40 @@ def _call_count_cause(rec, d):
     return None
 
 
+BOOL_RESULT = re.compile(r'@@(?:Y[AGI]|[A-Z][A-Z0-9][AEGI]?)_N')     # MSVC decorated name returning bool
+
+
+def _signedness_by_design(rec):
+    """The top-bit probe (`signedness`: clearing a top bit of an input byte removes the divergence) also fires on
+    shapes whose cause is by design, the top bit being a float sign, a bool byte, INT_MIN or the top of the address
+    space: a float argument within the x87 tolerance (x87-precision / nan-bits), a bool result with the oracle's
+    truth value in another byte (bool-repr), x86 #DE where AArch64 divides (division), a native access that
+    crosses 4 GiB where the x86 address wraps (ilp32-pointer). None otherwise: the probe's cause stands."""
+    d = rec.get('_now') or rec.get('divergence') or {}
+    k = d.get('kind')
+    if k == 'call-args' and d.get('cls') in ('F32', 'F64') and _causes is not None:
+        got = _causes._rule_call_args(d)
+        if got in ('x87-precision', 'nan-bits'):
+            return got
+    if k == 'return' and BOOL_RESULT.search(rec.get('symbol') or ''):
+        try:
+            bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+        except ValueError:
+            bx = ba = b''
+        if len(bx) == 1 and len(ba) == 1 and bx[0] in (0, 1) and ba[0] not in (0, 1) and bx[0] == 1:
+            return 'bool-repr'
+    if k == 'error' and d.get('x86') in ('div0', 'exc:0') and not d.get('arm'):
+        return 'division'
+    if k == 'error' and not d.get('x86') and str(d.get('arm') or '').startswith(('fault:r:', 'fault:w:')):
+        try:
+            a = int(str(d['arm']).split(':')[2], 16)
+        except (ValueError, IndexError):
+            a = 0
+        if a >= 0xfffffff0:
+            return 'ilp32-pointer'
+    return None
+
+
 def reclassify(rec):
     """Static re-classification of a saved divergence (causes added after the record was written)."""
     global _UC
@@ -92,6 +127,10 @@ def reclassify(rec):
     cause = hint.get('cause')
     if cause != 'local-static' and _custom_cc(rec):
         return 'x86-custom-cc'
+    if cause == 'signedness':
+        got = _signedness_by_design(rec)
+        if got:
+            return got
     if cause not in (None, 'unclassified', 'call-flow', 'signedness?'):
         return cause
     try:

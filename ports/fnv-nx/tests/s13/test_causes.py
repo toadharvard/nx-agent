@@ -242,6 +242,18 @@ def test_policy():
     check(report.reclassify(n) == 'after-native-undefined', 'oracle no calls, a later native call is a named stub')
     n = rec(dict(kind='call-count', x86=0, arm=1, x86_trace=[], arm_trace=['00559450']), 'call-flow')
     check(report.reclassify(n) == 'falloff?', 'oracle no calls, native calls an address: falloff?')
+    a = rec(dict(kind='call-args', arg='p0', cls='F32', x86=f32(0.88138), arm=w(struct.unpack('<I', struct.pack(
+        '<f', 0.88138))[0] + 1)), 'signedness')
+    check(report.reclassify(a) == 'x87-precision', 'signedness probe on a 1-ulp float argument: x87-precision')
+    b = rec(dict(kind='return', x86='01', arm='80'), 'signedness')
+    b['symbol'] = '?f@@YA_NXZ'
+    check(report.reclassify(b) == 'bool-repr', 'signedness probe on a bool result byte 0x80: bool-repr')
+    b['symbol'] = '?f@@YAEXZ'
+    check(report.reclassify(b) == 'signedness', 'an unsigned char result 01 vs 80 stays signedness')
+    e = rec(dict(kind='error', x86=None, arm='fault:r:fffffffe'), 'signedness')
+    check(report.reclassify(e) == 'ilp32-pointer', 'signedness probe on a native access across 4 GiB')
+    e = rec(dict(kind='error', x86=None, arm='fault:r:00000010'), 'signedness')
+    check(report.reclassify(e) == 'signedness', 'a native near-null read keeps the probe cause')
 
 
 def test_summary():
