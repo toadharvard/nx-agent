@@ -997,9 +997,12 @@ The frame's hand-off structure comes from the decomp (S15-threads; `STRUCT` in t
 * the two AI linear threads stagger each other (SetEvent / WaitForSingleObject), so their halves run one after the
   other;
 * `threaded_anim`'s work queues behind the AI and comes back at the same join;
-* Rendering Task Thread 2 (`mt_cull`): the water records 1-16 are signalled and waited at once, so main waits for
-  them; the shadow records 17-20 and the main-scene record 21 overlap main and are joined at FUN_00b9f780 (in the
-  accumulation). The overlapping share, 0.7, is an estimate [E] until the records are counted;
+* Rendering Task Thread 2 (`mt_cull`) as MT1 ships it (S15-threads, `patches/mt1_cull.s1b`, 6.8): every record but
+  21 runs inline on main (water 1-16, shadow lights 17-20 and the interface record 23 cannot overlap main safely on
+  the PC code), so the worker passes their stages at once. The lever's moved work is record 21, the main-scene
+  split: main signals stage 21, culls its own lists and joins at FUN_00ba3130(1,21) at the end of its own share.
+  All of the moved share overlaps. (The stock PC path, where main waited at the water/shadow joins, is what MT1
+  removes.)
 * Havok MT: main processes jobs too, then waits for the pool (fork / join around the phase);
 * a forked worker starts after a wake latency (15 us [E]) and runs at the model's parallel efficiency. The render
   worker is pipelined and never joined. Frame = max(main's critical path, every core's busy time).
@@ -1009,23 +1012,24 @@ accumulation: steady CPI in the lo case, one-call CPI in the hi case); other ite
 Checks (tests/s15/test_a57model.py): with everything at 1/0.8 and no hand-offs, "placed" gives frame_budget's
 25.2 ms; a plan's critical path is never shorter than the water-fill; a fork/join case to the microsecond.
 
-| scenario | 1020 MHz frame lo / mid / hi (ms) | frame_budget mid | main waits (mid) | 1785 MHz mid |
-|---|---|---:|---:|---:|
-| placed | 12.4 / 28.5 / 50.0 | 25.2 | 0 | 16.3 |
-| plan45 | 9.7 / 22.4 / 40.0 | 17.2 | 2.6 | 12.8 |
-| plan45b | 8.4 / 20.0 / 36.2 | 15.4 | 3.2 | 11.5 |
-| plan60 | 7.3 / 18.0 / 35.2 | 14.7 | 1.9 | 10.3 |
+With MT1 and S15-threads' resized mt_cull lever (15-35 % of cull and of accumulation, budget_model.json at
+claude/fnv-s15-threads 4e80c8e):
 
-Sensitivity (plan45b, 1020 MHz mid): AI halves in parallel 18.7 ms; mt_cull overlap 1.0 20.2 ms; both 18.1 ms.
+| scenario | 1020 MHz frame lo / mid / hi (ms) | main waits (mid) | 1785 MHz mid |
+|---|---|---:|---:|
+| placed | 12.4 / 28.5 / 50.0 | 0 | 16.3 |
+| plan45 | 9.2 / 24.0 / 45.3 | 0 | 13.7 |
+| plan45b | 7.9 / 21.1 / 41.5 | 0 | 12.1 |
+| plan60 | 7.5 / 20.1 / 40.2 | 0 | 11.5 |
 
 What the model says about the plan:
-* main's waits are all at mt_cull's joins. The water records cost main their full time plus the wake: 1.5 ms at the
-  cull and 1.7 ms at the accumulation in plan45b. Only the overlapping records gain. Moving the water records onto
-  the overlapping side, or keeping them on main, is worth about as much as the whole lever claims.
-* the staggered AI runs 6.8 ms serially on one AI thread, with threaded_anim's queue after it. In that time the
-  mt_cull workers and the Havok pool compete for the same two cores, so the moved work runs late.
-* the A57 prices raise main's phases: scene graph and animation run at CPI 0.9-2.0, against 1.25.
-* plan45b's mid frame at 1.02 GHz is 20.0 ms. With the model's worst-frame factor of 1.25 that is 25.0 ms, above the
-  22.2 ms of 45 fps stable. At 1.785 GHz the mid frame is 11.5 ms, which holds 60 fps.
+* under MT1, main does not wait: record 21's worker share (about 45 % of the main-scene pass) is smaller than main's
+  own share, so the join is free and the frame is main-bound. With the old lever size (70-90 % moved) and the stock
+  path, main waited 3.2 ms at the water and shadow joins; that is the cost MT1 removes;
+* the staggered AI runs serially on one AI thread for ~6.8 ms with threaded_anim's queue after it, off main's path
+  (joined at the frame's end);
+* the A57 prices raise main's phases (scene graph and animation at CPI 0.9-2.0 against 1.25);
+* plan45b's mid frame at 1.02 GHz is 21.1 ms, x1.25 worst 26.4 ms: above the 22.2 ms of 45 fps stable. 60 fps at
+  1.785 GHz holds at the mid case (12.1 ms), not at the hi case;
 * the levers that shorten main's path without a join on it (render F2-F4, relaxed barriers, NEON math, overrides)
   gain their full value.
