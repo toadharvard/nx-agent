@@ -316,6 +316,30 @@ class FaultTableTest(unittest.TestCase):
                              ([("InitHolder", "return0"), ("0x00aa1070", "use-malloc:x0")], [("0x00a8a5f0", 16)]))
 
 
+class NullD3d9Test(unittest.TestCase):
+    """toolchain/game/null_d3d9.cpp is what gen_null_d3d9.py makes of shim/include/d3d9.h, and it registers
+    d3d9.dll: the engine reaches Direct3DCreate9 only through LoadLibraryA("D3D9.DLL") + GetProcAddress, so a
+    null-device guest without the module stops at "Failed to initialize renderer." (the first boot on the real exe)."""
+
+    def test_generated_and_registers_module(self):
+        game = os.path.join(TC, "game")
+        with tempfile.TemporaryDirectory() as t:
+            out = os.path.join(t, "null_d3d9.cpp")
+            subprocess.run([sys.executable, "-I", os.path.join(game, "gen_null_d3d9.py"),
+                            os.path.join(TC, "..", "shim", "include", "d3d9.h"), out], check=True,
+                           capture_output=True)
+            gen = _read(out)
+        committed = _read(os.path.join(game, "null_d3d9.cpp"))
+        self.assertEqual(gen, committed, "null_d3d9.cpp is stale: rerun gen_null_d3d9.py")
+        src = committed.decode()
+        self.assertIn('extern "C" void fnvnx_d3d9_register(void) {', src)   # boot.cpp's weak hook
+        self.assertIn('fnvnx_register_module("d3d9.dll", null_d3d9_export);', src)
+        exports = src.split("null_d3d9_export(const char *proc) {", 1)[1].split("};", 1)[0]
+        self.assertIn('{"Direct3DCreate9", (FARPROC)Direct3DCreate9}', exports)
+        self.assertIn('{"D3DPERF_SetOptions", (FARPROC)D3DPERF_SetOptions}', exports)   # the exe's one IAT import
+        self.assertNotIn("Direct3DCreate9Ex", exports)   # as Nine: the engine takes its Direct3DCreate9 path
+
+
 class InitOrderTest(unittest.TestCase):
     """toolchain/game/init_order.py: no game unit's static constructor before the platform's, the runtime libraries'
     or the boot's (the order toolchain/guest/guest.ld and platform/os/os.h FNVNX_INIT_* give)."""
