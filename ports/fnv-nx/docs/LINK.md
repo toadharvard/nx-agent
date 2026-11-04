@@ -654,7 +654,8 @@ its native vtable, the pairing before and the outcome. Classes with no native vt
 a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's
 vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the address map has one.
 * The native vtable (group, address point) stands for the exe vftables the address map pairs with it and those of
-  its own RTTI class at that offset. Image vftables the units name that have no RTTI in the exe (no COL before
+  its own RTTI class at that offset; where both exist, the RTTI class's own vftable decides (a unit's decomp name
+  can pair a second, unrelated vftable with the same native vtable). Image vftables the units name that have no RTTI in the exe (no COL before
   them: 213 on link 31971038913d, many of the shader classes) are read at their address too
   (`exevft.plain_vftables`), bounded by the next known vftable start; with no COL between two of them their real
   end is unknown, so they fill only slots the native vtable has and are never used to extend one.
@@ -672,6 +673,8 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   (`abi.compare` of a thiscall member with the slot's parameters against the definition, `slot_msvc_sig`): same ->
   direct, register moves -> an ABI bridge (`__fnvnx_br_<a>_<hash>`; a pop mismatch alone is accepted as resolve
   accepts it: the decomp's cdecl / stdcall stand-in for MSVC's thiscall code), anything else stays a gap. A
+  placeholder slot declaring fewer parameters than the definition is compared as passing the definition's
+  (its callers pass them through their own declarations). A
   destructor slot binds to a
   destructor variant at the address; where the decomp defines the exe's `??_G` as a plain function taking the
   flags (`FUN_00c2a090(unsigned int)`), GCC's D0 / D1 go through `__fnvnx_vflag_<a>_1` / `_0` (w1 = flags, then

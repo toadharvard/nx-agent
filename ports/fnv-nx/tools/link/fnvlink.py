@@ -1696,11 +1696,14 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     for v, e in vmap.items():
         if v in exev:
             zmap[(e[0], e[1])].add(v)
+    own = collections.defaultdict(set)    # the same from the exe's RTTI: the class's own vftable at that offset
     for v, (cls, _, off, _) in exe_cls.items():
         for z in by_cls.get(cls, []):
             for p, ott in vtables.address_points(rtti.ents(z) or []):
                 if ott == -off:
-                    zmap[(z, p)].add(v)
+                    own[(z, p)].add(v)
+    for k_, vs_ in own.items():   # a vtable the units also pair with another vftable: its own class's decides
+        zmap[k_] = set(vs_)
     trap_set = set(traps)
     rows, gaps, changed = [], [], {}
     addr_of = {}   # (source, symbol) -> the exe address it was bound to (refs.tsv)
@@ -1750,7 +1753,15 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             # the x86 model: the slot is a thiscall member with the slot's parameters; a decomp stand-in that MSVC
             # reached the same way (`FUN_00a89af0(int)` for a LinkObject(NiStream &) slot: the int is the stack
             # argument) gets a bridge with the register moves
-            v = abi.compare(slot_msvc_sig(isig, ds), ds)
+            ss = slot_msvc_sig(isig, ds)
+            dps = [p_ for p_ in ds.raw_params if p_ != 'void']
+            if len(ss.raw_params) < len(dps):
+                # a placeholder slot (`virtual void v33();`): its callers pass the definition's arguments through
+                # their own declarations, as the x86 code reads them (a free cdecl `FUN_00a89af0(int)` reads the
+                # first stack argument, which a thiscall caller passes after this)
+                ss.raw_params = ss.raw_params + dps[len(ss.raw_params):]
+                ss.params = list(ss.raw_params)
+            v = abi.compare(ss, ds)
             if v.kind == 'same':   # the link's ABI model passes them alike (as for every other reference)
                 return ADDR_SYM % a, 'abi model: same (%s)' % ','.join(v.classes or ['-'])
             # as resolve does for every reference: a pop mismatch alone (the decomp's cdecl / stdcall stand-in for
