@@ -25,6 +25,15 @@ that does not show what the gate claims, or when a producer's real output can ne
                                                              boot.first_cell must not pass
   R12 boot/summary.txt says "fnvnx milestone: first_cell", milestones.json says first_cell false
                                                              boot.first_cell must not pass
+Round 2 (V1, J-0147 follow-up) and R0's own additions:
+  R13  no hash; meta.json "synthesized", milestones.json "player exe"     boot.real_exe must not pass
+  R13b no hash; milestones.json "player exe", the full report's data image synth.exe (R0)
+  R14  a try farm's all-pass S16 file, newer than S16's                  frames.compare must not pass
+  R14b, R14c the same for frameprof and the frame budget (R0)           perf.frame.boost / perf.budget.boost
+  R15  the checksum file names FalloutNV.exe twice, another exe first   boot.real_exe must not pass
+  R16  (V1) frame budget at the stock clock with a typical frame of 12-16 ms, a worst frame of 18-25 ms, and verdicts
+       that say pass for 60 fps (stretch_60 as the J-0132 model judged it, on the typical frame; target_60)
+                                                             perf.budget.stock must not pass (J-0150: worst frame)
 """
 import io
 import json
@@ -105,7 +114,7 @@ def render(w, fm):
 
 # R4, R5
 case('R4 render frame_ms negative', lambda w: render(w, {'main': -1.0, 'render': -1.0}),
-     must_not_pass('perf.render.boost'))
+     must_not_pass('perf.render.stock', 'perf.render.boost'))     # J-0150: the stock clock counts
 case('R5 render frame_ms 0', lambda w: render(w, {'main': 0, 'render': 0}), lambda g: '')
 
 # R6
@@ -170,4 +179,86 @@ def r12(w):
 
 
 case('R12 summary.txt overrides milestones.json', r12, must_not_pass('boot.first_cell'))
+
+
+# Round 2 (after R0's fix of R1-R12): contradicting evidence, unmerged work
+# R13: no image hash; meta.json says the boot ran on the synthesized image, milestones.json says "player exe"
+def r13(w):
+    w.edit_json('link/%s/meta.json' % C, lambda d: (d.pop('boot_image_sha256'), d.__setitem__('boot_image', 'synthesized')))
+
+
+case('R13 image labels disagree, no hash', r13, must_not_pass('boot.real_exe'))
+
+
+# R14: a try farm (an agent's unmerged head, tools/farm/push_wip.sh) publishes an all-pass S16 gate file, newer than
+# the s16 farm's: ready.py's other gates skip reports/try<k>of<N> ("try farms run unmerged work")
+def r14(w):
+    frames(w, {'commit': C, 'scenes': [{'name': 'main_menu', 'metric': 'ssim', 'value': 0.2, 'threshold': 0.98,
+                                        'pass': False}]})
+    w.write('reports/try1of4/%s-frames.json' % C, {'commit': C, 'scenes': [
+        {'name': 'main_menu', 'metric': 'ssim', 'value': 0.99, 'threshold': 0.98, 'pass': True}]},
+        published=1900000000)
+
+
+case('R14 all-pass frames from a try farm (unmerged work)', r14, must_not_pass('frames.compare'))
+
+
+# R15: two lines for FalloutNV.exe in the checksum file, another exe's first (the pinned hash second)
+def r15(w):
+    w.write('gamedata/exe/FalloutNV.exe.sha256', 'cd' * 32 + '  FalloutNV.exe\n' + 'ab' * 32 + '  FalloutNV.exe\n')
+    w.edit_json('link/%s/meta.json' % C, lambda d: d.__setitem__('boot_image_sha256', 'ab' * 32))
+
+
+case('R15 checksum file names FalloutNV.exe twice, differently', r15, must_not_pass('boot.real_exe'))
+
+# R13b (R0): the report's data image contradicts S5's label
+def r13b(w):
+    w.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_image_sha256'))
+    w.sub(F, "- data image: the owner's FalloutNV.exe", '- data image: build/boot/synth.exe')
+
+
+case('R13b no hash, milestones.json "player exe", report data image synth.exe', r13b, must_not_pass('boot.real_exe'))
+
+
+# R14b, R14c (R0): try farms for frameprof and the frame budget
+def r14b(w):
+    w.write('reports/prof1/%s-frameprof.json' % C, [{'label': 'boot until WinMain', 'instructions': 800000000},
+                                                   {'label': 'frame 1', 'instructions': 90000000}])
+    w.write('reports/try2of4/aaaaaaaaaaaa-frameprof.json', [{'label': 'boot until WinMain', 'instructions': 800000000},
+                                                           {'label': 'frame 1', 'instructions': 1000000}],
+            published=w.latest() + 60)
+
+
+def r14c(w):
+    b = json.loads(w.read('reports/prof1/%s-frame-budget.json' % C))
+    good = json.dumps(b)
+    for s in b.get('scenarios', []):
+        for r in (s.get('results') or {}).values():
+            if isinstance(r, dict) and isinstance(r.get('verdicts'), dict):
+                r['verdicts'] = {k: 'fail' for k in r['verdicts']}
+                r['worst_frame_ms'] = {'lo': 30.0, 'mid': 40.0, 'hi': 50.0}
+    w.write('reports/prof1/%s-frame-budget.json' % C, b)
+    w.write('reports/try3of4/aaaaaaaaaaaa-frame-budget.json', good, published=w.latest() + 60)
+
+
+case('R14b try farm frameprof newer than the merged one', r14b,
+     must_not_pass('perf.frame.stock', 'perf.frame.boost'))
+case('R14c try farm frame budget newer than the merged one', r14c,
+     must_not_pass('perf.budget.stock', 'perf.budget.boost'))
+
+
+# R16: a budget result whose verdicts all say pass for 60 fps (as the J-0132 model wrote them: stretch_60 judged on
+# the typical frame) while its own worst frame is 18-25 ms. The gate must judge the worst frame itself (J-0150),
+# whatever the producer's verdict names say.
+def r16(w):
+    frame, worst = {'lo': 12.0, 'mid': 14.0, 'hi': 16.0}, {'lo': 18.0, 'mid': 22.0, 'hi': 25.0}
+    verdicts = {'fail_below_30': 'pass', 'pass_45': 'uncertain', 'stretch_60': 'pass', 'target_60': 'pass'}
+
+    def edit(d):
+        d['scenarios'][0]['results']['1020'].update(frame_ms=frame, worst_frame_ms=worst, verdicts=verdicts,
+                                                    level='target_60')
+    w.edit_json('reports/prof1/%s-frame-budget.json' % C, edit)
+
+
+case('R16 60 fps budget judged on the typical frame, worst frame 25 ms', r16, must_not_pass('perf.budget.stock'))
 sys.exit(FAIL)

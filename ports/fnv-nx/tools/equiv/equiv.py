@@ -55,7 +55,7 @@ CLASSES = {
     'UNIT1': 'neutral', 'KEEP1': 'neutral', 'IFX1': 'neutral', 'SAL1': 'neutral', 'CSX1': 'neutral',
     'DECL2': 'neutral', 'EXC1': 'neutral', 'NEW2': 'neutral', 'CTOR1': 'neutral', 'LINK1': 'neutral',
     'GOTO1': 'neutral', 'SDK1': 'layout', 'STR1': 'neutral', 'INTL1': 'platform', 'CALL1': 'neutral',
-    'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout',
+    'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout', 'EBO1': 'layout',
     'ASM1': 'platform', 'ASM2': 'platform', 'ASM4': 'platform',
     'NATIVE1': 'platform',      # drop_native_units in prepare.py (not a text rule)
     # classified by the orchestrator (J-0051) from each rule's docstring; the S11 gate confirms or refutes:
@@ -73,6 +73,11 @@ CLASSES = {
     'RREF1': 'neutral',         # fnvnx_lvalue around temporaries passed to non-const reference parameters
     'TPL1': 'neutral',          # this-> for members of dependent bases used by plain name (MSVC had no two-phase lookup)
     'TPL2': 'neutral',          # forward declarations of a namespace's function templates (MSVC's lookup)
+    'TPL3': 'neutral',          # forward declarations of templates called qualified / with template args before definition
+    'TYPN1': 'neutral',         # `typename` before a dependent library type member (MSVC took it as a type)
+    'INST1': 'neutral',         # `unsigned int` -> C<..>::size_type in an explicit member instantiation (same member)
+    'COPY1': 'neutral',         # B(o) -> B(static_cast<const B&>(o)) in a copy ctor: the copy ctor MSVC chose
+    'DECL3': 'neutral',         # a unit's own `typedef _iobuf FILE` / `typedef __int64 fpos_t`: the MSVC types themselves
     'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
     'DTOR1': 'neutral',         # declares NiPointer<T>::~NiPointer() specializations for pointees the unit never completes
     'VTBL1': 'platform',        # full MSVC-order virtual interface for listed stand-ins (BSNiAllocator), slots forward
@@ -82,6 +87,8 @@ CLASSES = {
     'VLIT1': 'platform',       # a vptr store printed as a string literal -> the vftable address the recipe binds it to
     'CSX2': 'neutral',          # the decomp's 28-byte critical sections keep their 28 bytes (D15 reopened, J-0067)
     'STAND1': 'platform',       # drops untagged stand-ins bound to a tagged definition's address (one function per address)
+    'STAND2': 'platform',       # STAND1 for an address another unit defines, in units MSVC compiled without auto-inlining
+    'STAND3': 'platform',       # STAND2 for in-class / inline stand-ins, in /Od units without /Ob1 (MSVC inlines nothing)
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
     'INC1': 'neutral',          # quoted include spelled as the including directory's file (MSVC: no case)
     'ANON2': 'platform',        # raw storage for members with special functions in an anonymous struct of a union
@@ -89,6 +96,7 @@ CLASSES = {
     'ENUM1': 'neutral',         # enum X; -> enum X : int; (+ its definitions): MSVC's underlying type spelled out
     'ANON1': 'platform',        # names an unnamed struct defined in a return type (MSVC decorates the name)
     'STL1': 'platform',        # fnvnx_msvcstl.h: MSVC <xutility> internals (_SCL_SECURE_VALIDATE, _Ptr_cat) for libstdc++
+    'STL2': 'platform',        # fnvnx_vc9.h: VC9's containers in their x86 layout for units using real <string>/<vector>/<map>
     'SPEC3': 'neutral',         # namespace qualification of names in specializations written inside a namespace
     'LEX1': 'neutral',          # MSVC token spellings (i64 suffixes, 0xae-0x34, "C"enum) -> standard ones
     'STD1': 'platform',         # a decomp `struct std { static float abs(float); }` -> <cmath>'s std::abs
@@ -106,26 +114,31 @@ CLASSES = {
     'RREF2': 'neutral',         # fnvnx_lvalue around T(args) passed to a member operator taking a non-const T&
     'ADDR1': 'neutral',         # &_mm_f(args) -> &fnvnx_lvalue(_mm_f(args)): the temporary MSVC took the address of
     'LANE1': 'platform',        # &((T*)&(v)) (SSE1 lane array, address taken) -> ((T(*)[n])&(v))
+    'STD2': 'neutral',          # file-scope `R std::f(..)` definition -> fnvnx_std_f (+ its recipe symbol, POST hook)
+    'COND1': 'neutral',         # `c ? false : f()` with f returning a bool gate class -> `c ? G(false) : f()`
+    'RSTR1': 'neutral',         # restrict local passed to a const X& parameter -> fnvnx_unrestrict(v) ((v) under MSVC)
+    'NEW5': 'neutral',          # FNVNX_GLOBAL_DELETE in a class whose only scalar delete is the placement form (MSVC: empty)
+    'NSCALL1': 'neutral',       # unqualified call of N's own CRT-named prototype (bound only in N) -> N::name(
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
 # POST hooks (prepare.STREAM_POST, by function name) -> the rule (or 's1b': S1b's units.json renames, which belong to
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
-POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b'}
+POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
 # Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
 # group; a group that explains a difference is split into its rules. KEEP1 is inert under MSVC (FNVNX_KEEP is empty)
 # and is not tried. A rule of the gated set in no group is tried as a group of its own.
 DEFAULT_GROUPS = {
-    'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1',
-    'newdel': 'NEW1 NEW2 NEW3 NEW4 CTOR1',
+    'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1 STD2 NSCALL1',
+    'newdel': 'NEW1 NEW2 NEW3 NEW4 NEW5 CTOR1',
     'EXC1': 'EXC1',
     'link': 'LINK1 STATIC1 BIND1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
     'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
-    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
+    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 COND1 RSTR1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
     'plat': 'STL1 STD1 ANON1 ANON2 ANON3',
 }
 RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+)\b')

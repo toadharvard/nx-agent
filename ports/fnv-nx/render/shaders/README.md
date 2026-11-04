@@ -78,6 +78,12 @@ All in the `glsldk` profile (other MojoShader profiles unchanged); unit + execut
   with `interpolateAtCentroid()`: the same sampling as a `centroid in` declaration, which Mesa 25's GL linker (the
   V6n parity target) rejects for some explicit-location inputs ("no matching output"). VS outputs need no
   qualifier (GLSL >= 4.30, and deko3d compiles the stages separately).
+  On deko3d both forms compile to the same IPA with the centroid bit (Maxwell `0xe053...` vs plain `0xe043...`,
+  checked on uam's raw output for one input: same code length and SPH, one more GPR for the
+  `interpolateAtCentroid` form). Token-level tests in `tests/s6b/s6b_centroid.c` (handwritten bytecode: ps_3_0
+  `dcl_<usage>_centroid` incl. partial mask + `_pp`, ps_2_x `dcl_centroid t#/v#`, an unread centroid `t#`, a
+  centroid input read through `v[aL]`, and the VS output locations of the same usages); they fail on the patch
+  from before the fix (3/23) and pass after.
 * **Relative addressing** (P5): `c[a0 + n]` outside every CTAB array, or without a CTAB, reads the constant UBO by
   register through `vs_dk_relc(i)` (def'd values overlaid, as Nine/wined3d load them into the constant file;
   out of range -> 0). vs_3_0 `v[a0/aL + n]` and ps_3_0 `v[aL + n]` read a copied input array (undeclared ->
@@ -99,6 +105,23 @@ All in the `glsldk` profile (other MojoShader profiles unchanged); unit + execut
   oracle, does not have it, so matching hardware would move away from the oracle; on deko3d it would need
   nouveau's `dnz` multiply flag through uam, not expressible in GLSL). GLSL compilers may reassociate
   (`a*M + a*M` -> `a*(M+M)`), which the bytecode does not: visible only with FLT_MAX-sized values.
+
+## Census of the game's packages (`tests/s6b/census.py`)
+
+`python3 -I tests/s6b/census.py shaderpackage*.sdp [--build DIR] [--work DIR] [--jobs 2]` translates every program
+(identical bytecode once), classifies the failures (uam's stderr diagnostics included) and counts `_centroid`
+use from the tokens. It prints counts only; `--work` holds game-derived shards and stays out of git.
+The player's 16 packages: 15,791 programs, 1,809 unique blobs; 4,614 programs (965 unique; 4,164 ps_2_x,
+450 ps_3_0) declare a `_centroid` input, none uses `_centroid` on another instruction.
+
+| cause | before 8975dc6 (programs / unique) | at 8975dc6 and later |
+|---|---|---|
+| `centroid unsupported in glsl profile` | 4,614 / 965 (ps_2_x 4,164, ps_3_0 450) | 0 |
+| relative addressing of an indeterminate array | 16 / 1 (vs_2_0) | 0 |
+| **total failing** | **4,630 / 966** | **0 of 15,791** (all 1,809 unique give a valid DKSH) |
+
+The 4,614 of V6n's whole-package fuzz (RENDER_VERIFY P5) were measured on the patch before 8975dc6. A census
+run takes about 3 minutes on 2 cores. Translating is not parity: the fuzz has to be re-run on these programs.
 
 ## fp16 (Maxwell HADD2/HMUL2/HFMA2) through uam: investigated, not implemented
 

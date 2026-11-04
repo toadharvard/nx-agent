@@ -6,7 +6,7 @@
 BUILD_FLAGS=(-mabi=ilp32 -std=gnu++17 -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing
              -fwrapv -fno-delete-null-pointer-checks -ffp-contract=off -fPIC -fpermissive -Werror=return-type
              -Wno-narrowing -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection
-             -mno-outline-atomics)
+             -mno-outline-atomics -U_FORTIFY_SOURCE)
 # flags of BUILD_FLAGS that a -fsyntax-only run (tools/census.sh) does not need (code generation only)
 SYNTAX_ONLY_EXEMPT=(-fPIC -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection
                     -mno-outline-atomics)
