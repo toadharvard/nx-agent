@@ -73,9 +73,10 @@ tests/v6n/run.sh
 ## Defects filed (tests/v6n/DEFECTS.md)
 - `border_swizzle`: fixed by S6n, verified.
 - `y_fill_bias`: fixed by S6n, verified.
-- `screen_space_halfpixel`: open.
-- `camera_port_rounding`: open.
-- `clear_srgb`: open (low).
+- `screen_space_halfpixel`, `camera_port_rounding`, `clear_srgb`: fixed by S6n b3f776e (C74-C76), verified by V6n
+  (defect tests pass; 105/105 scenes and 2/2 VS scenes match Nine on `v6n_s6ngl`; n1 45 checks).
+- No open defects. Note: b3f776e also edited V6n's `render/verify/target/s6ngl_target.c` (one line: NxClear_Srgb from
+  SRGBWRITEENABLE); the change is correct and kept, but that file is V6n's per MACHINES.md.
 
 ## Next
 - capture/replay (RENDER_VERIFY.md §6) once S6n's N1 capture is wired to the Nine path; shader draws with VS in
