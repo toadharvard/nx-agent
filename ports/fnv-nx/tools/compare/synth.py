@@ -36,6 +36,38 @@ def fbits(x):
 
 # ---- shaders (D3D9 assembly; authored here) -------------------------------------------------------------------------
 SHADERS = {
+    'vs11_rel': """vs_1_1
+dcl_position v0
+def c21, 0.0, 1.0, 0.0, 1.0
+mov oPos, v0
+mov a0.x, c4.x
+mov oD0, c20[a0.x]
+""",
+    'vs20_rel': """vs_2_0
+dcl_position v0
+def c21, 0.0, 1.0, 0.0, 1.0
+mov oPos, v0
+mova a0.x, c4.x
+mov oD0, c20[a0.x]
+""",
+    'vs20_def': """vs_2_0
+dcl_position v0
+def c21, 0.0, 1.0, 0.0, 1.0
+mov oPos, v0
+mov oD0, c21
+""",
+    'vs20_rel_arr': """vs_2_0
+dcl_position v0
+def c21, 0.0, 1.0, 0.0, 1.0
+mov oPos, v0
+mova a0.x, c4.x
+add r0, c20[a0.x], c19[a0.x]
+mul oD0, r0, c20.x
+""",
+    'ps20_vcolor': """ps_2_0
+dcl v0
+mov oC0, v0
+""",
     'vs3_ct': """vs_3_0
 dcl_position v0
 dcl_color v1
@@ -605,8 +637,31 @@ def sc_srgb(s):
     s.present()
 
 
+def sc_reldef(s):
+    """relative constant reads (a0) that land on def'd and app-set registers, vs_1_1 and vs_2_0 (S16 perm finding)"""
+    # quads 1-3: c[20 + a0.x] (c21 def'd green in the shader and set red by the app; c22 app-set blue), quad 3 c21
+    # directly, quad 4 (c[20 + a0] + c[19 + a0]) * c20.x. Wine and nx_render agree: def'd registers win for relative reads
+    s.decl(2, [(0, 0, 2, 0, 0, 0)])                      # FLOAT3 POSITION only
+    q = b''
+    for k in range(4):
+        x0 = -1 + 0.5 * k
+        for (x, y) in ((x0, 1), (x0 + 0.5, 1), (x0 + 0.5, -1), (x0, -1)):
+            q += struct.pack('<3f', x, y, 0.5)
+    s.vb(2, q); s.ib(2, quad_ib(4))
+    s.w.u32('SDCL', 2); s.w.u32('STRM', 0, 2, 0, 12); s.w.u32('SIDX', 2)
+    s.rs(CULLMODE=1, ZENABLE=0, ZWRITEENABLE=0)
+    s.cf('vs', 20, [(0.5, 0.5, 0.5, 1), (1, 0, 0, 1), (0, 0, 1, 1)])
+    for frame, a0 in enumerate((1.0, 2.0)):
+        s.clear(1, 0xFF202020)
+        s.cf('vs', 4, [(a0, 0, 0, 0)])
+        for k, vs in enumerate(('vs11_rel', 'vs20_rel', 'vs20_def', 'vs20_rel_arr')):
+            s.use(vs, 'ps20_vcolor')
+            s.drwi(4 * k, 4, 0, 2)
+        s.present()
+
+
 SCENES = {'vcolor': sc_vcolor, 'texture': sc_texture, 'blend': sc_blend, 'stencil': sc_stencil, 'rtt': sc_rtt,
-          'lit': sc_lit, 'sm2fog': sc_sm2fog, 'srgb': sc_srgb}
+          'lit': sc_lit, 'sm2fog': sc_sm2fog, 'srgb': sc_srgb, 'reldef': sc_reldef}
 
 
 def build(asm_tool, sdp_tool, out, only=None):

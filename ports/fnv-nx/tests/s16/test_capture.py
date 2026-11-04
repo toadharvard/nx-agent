@@ -122,8 +122,42 @@ class Synth(unittest.TestCase):
         p = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'synth.py'), 'list'], capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         names = [l.split('\t')[0] for l in p.stdout.splitlines()]
-        for n in ('vcolor', 'texture', 'blend', 'stencil', 'rtt', 'lit', 'sm2fog', 'srgb'):
+        for n in ('vcolor', 'texture', 'blend', 'stencil', 'rtt', 'lit', 'sm2fog', 'srgb', 'reldef'):
             self.assertIn(n, names)
+
+
+@unittest.skipUnless(os.environ.get('S16_E2E'), 'S16_E2E=<bin dir> (s6b_asm, sdp2dksh) builds a package')
+class Perm(unittest.TestCase):
+    def test_own_package(self):
+        """perm.py on a package of our own programs (synth.py's shaders): one frame per unique program, the
+        manifest names each, and --perturb changes the float inputs only"""
+        import synth
+        b = os.environ['S16_E2E']
+        with tempfile.TemporaryDirectory() as t:
+            names = ['vs3_ct', 'ps3_tex', 'ps3_vcolor', 'vs20_rel', 'ps20_vcolor']
+            args = []
+            for n in names:
+                open(f'{t}/{n}.asm', 'w').write(synth.SHADERS[n])
+                r = subprocess.run([f'{b}/s6b_asm', f'{t}/{n}.asm', f'{t}/{n}.bin'], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                args.append(f"{n}.{'vso' if n.startswith('vs') else 'pso'}={t}/{n}.bin")
+            r = subprocess.run([f'{b}/sdp2dksh', '--pack', f'{t}/own.sdp'] + args, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            for out, eps in (('a', '0'), ('b', '0'), ('p', '1e-5')):
+                r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'perm.py'), 'build', '--sdp', f'{t}/own.sdp',
+                                    '--asm', f'{b}/s6b_asm', '--sdp2dksh', f'{b}/sdp2dksh', '--out', f'{t}/{out}',
+                                    '--per-capture', '3', '--perturb', eps], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            m = json.load(open(f'{t}/a/manifest.json'))
+            self.assertEqual(m['format'], 'fnvnx-perm/1')
+            got = sorted(e['name'] for v in m['captures'].values() for e in v)
+            self.assertEqual(got, sorted(a.split('=')[0] for a in args))
+            self.assertEqual(len(m['captures']), 2)
+            for c in m['captures']:
+                self.assertEqual(open(f'{t}/a/{c}.nxd9', 'rb').read(), open(f'{t}/b/{c}.nxd9', 'rb').read())
+                s = nxd9io.stat(f'{t}/a/{c}.nxd9')
+                self.assertEqual(s['frames'], len(m['captures'][c]))
+                self.assertNotEqual(open(f'{t}/a/{c}.nxd9', 'rb').read(), open(f'{t}/p/{c}.nxd9', 'rb').read())
 
 
 @unittest.skipUnless(os.environ.get('S16_E2E'), 'S16_E2E=<bin dir> runs the Wine loop')

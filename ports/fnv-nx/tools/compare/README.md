@@ -82,3 +82,22 @@ For a cube `TEX` (flags 2), each level's bytes hold the six faces one after anot
 * **From the game's data** (the shader packages in `gamedata/shaders`, frames recorded from the owner's exe): these
   are derived from game files, so they and their images stay in the private repository `fnv-nx-build`. Only the
   generators and the numbers come here.
+* **Permutations** (`perm.py`): one frame per unique program of a package (shaderpackage019, the one the engine
+  loads: 815 unique of 1,007). Every program runs through the whole pipeline: declaration, constants, samplers,
+  states, and the GLSL nx_render embeds.
+  - A pixel program gets V6n's driver VS.
+  - A vertex program gets a generated PS that sums its outputs, and a declaration with the engine's element
+    types.
+  - Relative addressing is kept inside the arrays it indexes. Bone indices are D3DCOLOR x 765.01 within the CTAB
+    palette, as Gamebryo's skin VS expect. With UBYTE4 indices, 37 of 39 first-run differences were reads far
+    outside c0..c255, where D3D9 is undefined.
+
+  `--programs <list>` restricts the set, for example to the permutations a recorded frame used.
+
+## Conditioning floor (permutation captures)
+
+`perm.py --perturb 1e-5` writes the same captures with every float input scaled by 1 + 1e-5 u. The reference
+rendered from them, compared with the unperturbed reference, shows which frames are ill-conditioned: frames whose
+image moves when the inputs move by float rounding (V6n's SENS idea). A candidate difference on such a frame is not
+evidence of a defect. On shaderpackage019, one frame (SM3016) is ill-conditioned, and the candidate matches the
+reference exactly there.
