@@ -18,8 +18,11 @@ Checks: MSVC's slot order (overloads grouped in reverse declaration order inside
 destructor slot) against GCC's (declaration order, D1 + D0), and pair_slots pairing every GCC slot with the MSVC slot
 of the same function; the joined table (overrides beat inherited slots and FUN_ names, the disagreement reported);
 resolve --msvc-objs binds unit a's undefined slot symbols to the addresses unit b defines (D0 / D1 of U to the
-`??_G` address, plain and _D1 variant), c's destructor slots to Ov's `??_G`, leaves the disagreeing slot to the
-other views, and without --msvc-objs they stay vslot-unresolved; the trial link has none of them undefined.
+`??_G` address, plain and _D1 variant), c's destructor slots to Ov's `??_G`, the disputed slot and A::a2 (its own
+vtable's slot is unknown statically) to stubs through the image vftable slot, and without --msvc-objs none of them
+reaches its target (the loose 'arity' tier even binds OvD::k(char *) to k(int)); the trial link has none of them
+undefined. The image-slot stubs run under qemu-aarch64: a native target, D0 / D1 through a `(this, flags)` adapter,
+a word still in the image's .text going to fnvnx_vslot_trap.
 """
 import json
 import os
@@ -126,8 +129,11 @@ UNITS = {'units': [
 for _u in UNITS['units']:
     _u['symbols'] = {n: '0x%08x' % a for n, a in _u['symbols'].items()}
 # unit a's slot symbols defined nowhere under their name -> the address unit b's view defines (resolve)
-EXPECT = {'_ZN2Ov1fEPc': '__fnv_00402040', '_ZN2Ov1hEv': '__fnv_00402050', '_ZN3OvD1gEv': '__fnv_00402120',
-          '_ZN3OvD1kEPc': '__fnv_00402150', '_ZN3OvD1hEi': '__fnv_00402160', '_ZN1A2a2Ev': '__fnv_00403020',
+# Ov::h(): the slot of Ov's own vftable is disputed (b and c), so the loaded image decides (stub through slot 5)
+EXPECT = {'_ZN2Ov1fEPc': '__fnv_00402040', '_ZN2Ov1hEv': '__fnvnx_vslot_01000100_5', '_ZN3OvD1gEv': '__fnv_00402120',
+          '_ZN3OvD1kEPc': '__fnv_00402150', '_ZN3OvD1hEi': '__fnv_00402160',
+          # A::a2: a slot of A's vtable (target unknown statically) and of M's (known): A's image slot decides
+          '_ZN1A2a2Ev': '__fnvnx_vslot_01000300_2',
           '_ZN1B2b1Ev': '__fnv_00403110', '_ZN1U6Unk_01Ev': '__fnv_00404010', '_ZN1U6Unk_02Ei': '__fnv_00404020',
           '_ZN1UD0Ev': '__fnv_00404040', '_ZN1UD1Ev': '__fnv_00404040_D1'}
 EXPECT_C = {'_ZN15FUN_00402900_OvD0Ev': '__fnv_00402070', '_ZN15FUN_00402900_OvD1Ev': '__fnv_00402070_D1'}
@@ -301,9 +307,60 @@ def main():
         undef = set(re.findall(r"undefined reference to `([^']+)'", open(os.path.join(out, 'trial_link.log')).read()))
         left = undef & (set(EXPECT.values()) | set(EXPECT_C.values()) | set(EXPECT) | set(EXPECT_C))
         check(not left, 'bound slot symbols defined in the trial link: still undefined %s' % sorted(left))
+
+        # 4. image-slot stubs executed
+        n = run_stubs(t)
+        check(n == 0, 'image-slot stubs under qemu-aarch64: %d checks failed' % n)
     print('test_vslots: %s' % ('ok' if ok else 'FAILED'))
     if not ok:
         sys.exit(1)
+
+
+STUB_PROGRAM = r'''
+extern "C" int main_();
+asm(".globl _start\n_start:\n adrp x9, stack_top\n add x9, x9, :lo12:stack_top\n mov sp, x9\n bl main_\n"
+    " mov x8, #93\n svc #0\n");
+struct Obj { int v; };
+extern "C" int fn_plain(Obj *o, int x) { return o->v + x; }                  // a rewritten slot: native function
+extern "C" int deldtor(Obj *o, unsigned flags) { return 100 + (int)flags; }   // kind G adapter: (this, flags)
+extern "C" int fnvnx_vslot_trap(Obj *o, const char *text) { return o->v == 40 && text[0] == 'v' ? -7 : -8; }
+extern "C" int stub_plain(Obj *, int), stub_d0(Obj *), stub_d1(Obj *), stub_x86(Obj *);
+extern "C" { __attribute__((section(".slots"), used)) const void *slots[4] =
+    {(const void *)fn_plain, (const void *)deldtor, (const void *)deldtor, (const void *)0x00401234}; }
+extern "C" int main_() { Obj o = {40}; int bad = 0;
+    bad += stub_plain(&o, 2) != 42; bad += stub_d0(&o) != 101; bad += stub_d1(&o) != 100; bad += stub_x86(&o) != -7;
+    return bad; }
+extern "C" { __attribute__((aligned(16))) char stack[65536]; }
+asm(".globl stack_top\n.set stack_top, stack + 65536\n");
+'''
+SLOTS_VA, CODE_VA = 0x02300000, 0x02200000   # outside the image's .text, like native code and the mapped image
+
+
+def run_stubs(t):
+    """Execute image-slot stubs under qemu-aarch64 (freestanding ILP32 program wrapped into an ELF64 container at the
+    same addresses, as test_bridges.py does): a slot holding a native function, D0 / D1 through the deleting-dtor
+    adapter (flags in w1), a slot still holding an x86 .text address (-> fnvnx_vslot_trap). -> failed checks."""
+    src, s = os.path.join(t, 'stubs.cpp'), os.path.join(t, 'stubs.S')
+    open(src, 'w').write(STUB_PROGRAM)
+    open(s, 'w').write(''.join(vslots.emit_image_stub(n, SLOTS_VA + 4 * k, fl, 'vtable slot test %d' % k)
+                               for n, k, fl in (('stub_plain', 0, None), ('stub_d0', 1, 1), ('stub_d1', 2, 0),
+                                                ('stub_x86', 3, None))))
+    run([CXX, '-mabi=ilp32', '-O1', '-ffreestanding', '-fno-exceptions', '-fno-rtti', '-fno-builtin', '-c', src, '-o',
+         src + '.o'])
+    run([fnvlink.AS, '-mabi=ilp32', s, '-o', s + '.o'])
+    exe32, flat = os.path.join(t, 'stubs32'), os.path.join(t, 'stubs.bin')
+    run([fnvlink.LD, '-m', 'aarch64linux32', '-N', '-static', '--build-id=none', '-Ttext=0x%x' % CODE_VA,
+         '--section-start=.slots=0x%x' % SLOTS_VA, '-e', '_start', src + '.o', s + '.o', '-o', exe32])
+    run([fnvlink.OBJCOPY, '-O', 'binary', '--remove-section=.comment', exe32, flat])
+    entry = int(next(line.split()[0] for line in run(['aarch64-linux-gnu-nm', exe32]).splitlines()
+                     if line.endswith(' _start')), 16)
+    open(os.path.join(t, 'w.S'), 'w').write('    .section .img, "awx"\n    .incbin "%s"\n    .space 0x40000\n' % flat)
+    run([fnvlink.AS, os.path.join(t, 'w.S'), '-o', os.path.join(t, 'w.o')])
+    exe64 = os.path.join(t, 'stubs64')
+    run([fnvlink.LD, '-m', 'aarch64linux', '-static', '-z', 'max-page-size=4096', '--section-start=.img=0x%x' % CODE_VA,
+         '-e', '0x%x' % entry, os.path.join(t, 'w.o'), '-o', exe64])
+    r = subprocess.run(['qemu-aarch64', exe64], capture_output=True, text=True)
+    return r.returncode
 
 
 def _variant_only(sig):

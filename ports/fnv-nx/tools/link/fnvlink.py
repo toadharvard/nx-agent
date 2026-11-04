@@ -588,6 +588,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     refs_out.close()
     if vsb is not None:
         vsb.write(out)
+        bridges.update(vsb.stubs)   # slots through image vftable words (vslots.emit_image_stub)
 
     # ---- per object objcopy args: renames, address symbols for the definitions it holds, localize duplicates
     alias_lines, localize = [], collections.defaultdict(list)
