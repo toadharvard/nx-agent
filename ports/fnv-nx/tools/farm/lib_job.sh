@@ -197,6 +197,8 @@ EOF
 		for f in aliases.ld refs.tsv abi.tsv addrmap.tsv layouts.tsv; do cp "$bd/link/out/$f" out/; done
 		# apply's typeinfo pairs (fnvlink pair_typeinfo, in check's link order: sorted object names)
 		[ -f "$bd/link/out/typeinfo_pairs.tsv" ] && cp "$bd/link/out/typeinfo_pairs.tsv" out/
+		# S2c's slot fill from the player's exe: what was bound, and the gaps (trap slots left, with the reason)
+		for f in slot_fill.tsv slot_gaps.tsv; do [ -f "$bd/link/out/$f" ] && cp "$bd/link/out/$f" out/; done
 		cp "$bd/link/out/cache/msvc.tsv" out/cache/
 		rsync -a --exclude probe/ "$bd/link/out/vtables/" out/vtables/   # the synthesized vtables, not the probe work dir
 		cp "$bd"/link/fixed/*.o fixed/

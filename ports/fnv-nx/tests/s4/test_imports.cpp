@@ -38,3 +38,27 @@ TEST(imports_galaxywrp_is_steam_api)
     }
     CHECK(fnvnx_win32_lookup_export("galaxywrp", "CreateFileA") == NULL);
 }
+
+TEST(imports_offline_and_steam_policy)
+{
+    /* Winsock: offline, WSAENETDOWN everywhere */
+    typedef int (*startup_fn)(WORD, void *);
+    typedef int (*i_fn)(void);
+    typedef int (*hn_fn)(char *, int);
+    typedef int (*cs_fn)(UINT_PTR);
+    char wsa[512];
+    CHECK_EQ(((startup_fn)fnvnx_win32_lookup_import("WSOCK32.dll", NULL, 115))(0x0101, wsa), 10050);
+    CHECK_EQ(((i_fn)fnvnx_win32_lookup_import("WSOCK32.dll", NULL, 111))(), 10050);
+    char host[64] = "x";
+    CHECK_EQ(((hn_fn)fnvnx_win32_lookup_import("WSOCK32.dll", NULL, 57))(host, sizeof host), -1);
+    CHECK_EQ(host[0], 0);
+    CHECK_EQ(((cs_fn)fnvnx_win32_lookup_import("WSOCK32.dll", NULL, 3))(5), -1);
+    /* Steam / Galaxy: no-op success, every interface NULL (the exe null-checks each) */
+    typedef bool (*b_fn)(void);
+    typedef void *(*p_fn)(void);
+    CHECK(((b_fn)fnvnx_win32_lookup_export("GalaxyWrp.dll", "SteamAPI_Init"))());
+    CHECK(((b_fn)fnvnx_win32_lookup_export("GalaxyWrp.dll", "SteamAPI_IsSteamRunning"))());
+    const char *ifaces[] = {"SteamUser", "SteamFriends", "SteamUtils", "SteamApps", "SteamUserStats"};
+    for (const char *n : ifaces)
+        CHECK(((p_fn)fnvnx_win32_lookup_export("GalaxyWrp.dll", n))() == NULL);
+}

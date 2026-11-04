@@ -7,19 +7,19 @@ advapi32	RegCreateKeyExA	logic	platform/win32/services.cpp	in-process registry w
 advapi32	RegOpenKeyExA	logic	platform/win32/services.cpp	in-process registry with the install keys	
 advapi32	RegQueryValueExA	logic	platform/win32/services.cpp	in-process registry with the install keys	
 advapi32	RegSetValueExA	logic	platform/win32/services.cpp	in-process registry with the install keys	
-binkw32	_BinkClose@4	policy	platform/win32/bink.cpp	skip movies	s4-001 decision: BinkOpen NULL, the game logs and goes on
-binkw32	_BinkCopyToBufferRect@44	policy	platform/win32/bink.cpp	skip movies	s4-001 decision: BinkOpen NULL, the game logs and goes on
-binkw32	_BinkDoFrame@4	policy	platform/win32/bink.cpp	skip movies	s4-001 decision: BinkOpen NULL, the game logs and goes on
-binkw32	_BinkNextFrame@4	policy	platform/win32/bink.cpp	skip movies	s4-001 decision: BinkOpen NULL, the game logs and goes on
-binkw32	_BinkOpen@8	policy	platform/win32/bink.cpp	skip movies	s4-001 decision: BinkOpen NULL, the game logs and goes on
-binkw32	_BinkOpenDirectSound@4	policy	platform/win32/bink.cpp	skip movies	s4-001 decision: BinkOpen NULL, the game logs and goes on
-binkw32	_BinkPause@8	policy	platform/win32/bink.cpp	skip movies	s4-001 decision: BinkOpen NULL, the game logs and goes on
-binkw32	_BinkSetSoundSystem@8	policy	platform/win32/bink.cpp	skip movies	s4-001 decision: BinkOpen NULL, the game logs and goes on
-binkw32	_BinkWait@4	policy	platform/win32/bink.cpp	skip movies	s4-001 decision: BinkOpen NULL, the game logs and goes on
+binkw32	_BinkClose@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
+binkw32	_BinkCopyToBufferRect@44	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
+binkw32	_BinkDoFrame@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
+binkw32	_BinkNextFrame@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
+binkw32	_BinkOpen@8	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
+binkw32	_BinkOpenDirectSound@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
+binkw32	_BinkPause@8	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
+binkw32	_BinkSetSoundSystem@8	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
+binkw32	_BinkWait@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
 comctl32	ImageList_Destroy	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 comctl32	ImageList_LoadImageA	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 comctl32	InitCommonControlsEx	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
-d3d9	D3DPERF_SetOptions	policy	toolchain/game/null_d3d9.cpp	PIX markers: no-op	no profiler on the device
+d3d9	D3DPERF_SetOptions	policy	toolchain/game/null_d3d9.cpp	PIX markers: no-op	policy (orchestrator): PIX markers are no-ops on the device
 d3dx9_38	D3DXAssembleShader	logic	render/nine/d3dx/d3dx_shader.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
 d3dx9_38	D3DXAssembleShaderFromFileA	logic	render/nine/d3dx/d3dx_shader.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
 d3dx9_38	D3DXCompileShader	logic	render/nine/d3dx/d3dx_shader.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
@@ -47,17 +47,17 @@ d3dx9_38	D3DXVec3TransformNormal	logic	render/nine/d3dx/d3dx_math.cpp	render/nin
 d3dx9_38	D3DXVec4Transform	logic	render/nine/d3dx/d3dx_math.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
 dinput8	DirectInput8Create	device	platform/input/dinput.cpp	host HID keyboard/mouse/pads	
 dsound	#11 DirectSoundCreate8	device	platform/audio/dsound.cpp	guest mixer -> host audren voice (audio_submit)	
-galaxywrp	SteamAPI_Init	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamAPI_IsSteamRunning	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamAPI_RegisterCallback	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamAPI_RunCallbacks	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamAPI_Shutdown	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamAPI_UnregisterCallback	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamApps	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamFriends	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamUser	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamUserStats	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
-galaxywrp	SteamUtils	policy	platform/win32/services.cpp	no Steam on Switch	SteamAPI_Init fails; the game runs without it
+galaxywrp	SteamAPI_Init	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamAPI_IsSteamRunning	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamAPI_RegisterCallback	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamAPI_RunCallbacks	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamAPI_Shutdown	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamAPI_UnregisterCallback	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamApps	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamFriends	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamUser	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamUserStats	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
+galaxywrp	SteamUtils	policy	platform/win32/services.cpp	no-op success	policy (orchestrator): SteamAPI_Init/IsSteamRunning succeed, interfaces NULL; the exe null-checks each, achievements and overlay off
 gdi32	GetStockObject	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 kernel32	CloseHandle	device	platform/win32/handles.cpp	in-process tables; output to the host log	
 kernel32	CompareFileTime	device	platform/win32/time.cpp	host system_tick (CNTPCT), wall_time, tz	
@@ -212,7 +212,7 @@ ole32	CoTaskMemFree	logic	platform/win32/services.cpp	COM class table (S7 dsound
 ole32	CoUninitialize	logic	platform/win32/services.cpp	COM class table (S7 dsound/dinput)	
 shell32	CommandLineToArgvW	device	platform/win32/module.cpp	in-process tables; output to the host log	
 shell32	SHGetFolderPathA	device	platform/win32/services.cpp	path mapper: C:/Users/Player -> sdmc user/	
-shell32	ShellExecuteA	policy	platform/win32/services.cpp	no shell	returns failure (SE_ERR_NOASSOC); readme/URL opening
+shell32	ShellExecuteA	policy	platform/win32/services.cpp	no shell	policy (orchestrator): no browser on the device; returns SE_ERR_NOASSOC (a failure)
 user32	AdjustWindowRect	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 user32	AdjustWindowRectEx	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 user32	CallNextHookEx	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
@@ -258,31 +258,31 @@ winmm	mmioGetInfo	device	platform/win32/mmio.cpp	host fs (fs_* host calls, sdmc:
 winmm	mmioOpenA	device	platform/win32/mmio.cpp	host fs (fs_* host calls, sdmc:)	
 winmm	mmioRead	device	platform/win32/mmio.cpp	host fs (fs_* host calls, sdmc:)	
 winmm	timeGetTime	device	platform/win32/time.cpp	host system_tick (CNTPCT), wall_time, tz	
-wsock32	#1 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#10 inet_addr	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#101 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#11 inet_ntoa	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#111 WSAGetLastError	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#115 WSAStartup	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#12 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#13 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#15 ntohs	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#151 fdisset	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#16 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#18 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#19 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#2 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#21 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#23 socket	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#3 closesocket	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#4 fail	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#52 gethostbyname	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#57 gethostname	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
-wsock32	#9 htons	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
+wsock32	#1 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#10 inet_addr	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#101 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#11 inet_ntoa	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#111 WSAGetLastError	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#115 WSAStartup	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#12 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#13 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#15 ntohs	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#151 fdisset	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#16 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#18 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#19 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#2 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#21 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#23 socket	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#3 closesocket	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#4 fail	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#52 gethostbyname	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#57 gethostname	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
+wsock32	#9 htons	policy	platform/win32/services.cpp	offline	policy (orchestrator): every network call fails with WSAENETDOWN (WSAStartup 10050); byte-order/address helpers are plain
 xinput1_3	#2 XInputGetState	device	platform/input/xinput.cpp	host HID pads (host_v3.inc padUpdate/vibration)	
 xinput1_3	#3 XInputSetState	device	platform/input/xinput.cpp	host HID pads (host_v3.inc padUpdate/vibration)	
 dsound	IDirectSoundBuffer8::SetFX / IDirectSoundFXI3DL2Reverb	device	platform/audio/dsound.cpp	I3DL2 reverb DSP in the mixer per voice (platform/audio/reverb.cpp), presets for SetPreset	the game cycles SetPreset (0x00af194f); tests: s7 test_reverb.cpp (decay, HF ratio, reflections, bounds, DirectSound path)
 dsound	IDirectSoundBuffer8 (Play/Stop/Lock/Unlock/SetVolume/SetPan/SetFrequency/GetCurrentPosition)	device	platform/audio/dsound.cpp	guest mixer -> host audren	
 dsound	IDirectSound3DBuffer / IDirectSound3DListener	device	platform/audio/ds3d.cpp	distance, cone, doppler in the mixer	
 dinput8	IDirectInputDevice8 (keyboard, mouse: GetDeviceState/GetDeviceData/Acquire)	device	platform/input/dinput.cpp	host HID keyboard/mouse/touch	
-dinput8	IDirectInputDevice8 force feedback / action maps	policy	platform/input/dinput.cpp	DIERR_UNSUPPORTED	as for a PC keyboard and mouse; rumble goes through XInputSetState
+dinput8	IDirectInputDevice8 force feedback / action maps	policy	platform/input/dinput.cpp	DIERR_UNSUPPORTED	policy (orchestrator, S4 decision): no-op. DirectInput effects exist only for DirectInput game controllers, and on Switch every pad is served through XInput (XInputSetState -> HID vibration), which carries the game's rumble
