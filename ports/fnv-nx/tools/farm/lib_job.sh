@@ -129,6 +129,11 @@ stage_ok() {     # stage_ok <build dir> <stage>: the stage ended ok or warn
 		| grep -qx 'ok\|warn'
 }
 
+stage_after() {  # stage_after <build dir> <stage> <earlier stage>: <stage> ended ok or warn and ran after <earlier stage>
+	# (its record is not older): a guest or boot left in the build directory by an earlier job is not this link's
+	stage_ok "$1" "$2" && [ -f "$1/$3/stage.json" ] && ! [ "$1/$2/stage.json" -ot "$1/$3/stage.json" ]
+}
+
 publish_link() { # publish_link <build dir>: link/<commit12> + the rolling branch link-head, for the fuzz farms
 	local bd=$1 wt=$FARM_HOME/link-wt rb=link-head ok
 	local pub=${FARM_PUBLISH:-auto}
@@ -173,8 +178,10 @@ EOF
 		rsync -a --exclude probe/ "$bd/link/out/vtables/" out/vtables/   # the synthesized vtables, not the probe work dir
 		cp "$bd"/link/fixed/*.o fixed/
 		cp "$bd/link/summary.txt" summary.txt
-		if [ -f "$bd/guest/fnvnx.elf" ] && stage_ok "$bd" guest; then mkdir -p guest; cp "$bd/guest/fnvnx.elf" guest/; fi
-		if stage_ok "$bd" boot; then
+		# the guest and the boots only when they were built on this link (full_job.sh publishes twice: link_job.sh's
+		# publish runs before `make BOOT=1`, while the build directory still holds the previous commit's guest)
+		if [ -f "$bd/guest/fnvnx.elf" ] && stage_after "$bd" guest link; then mkdir -p guest; cp "$bd/guest/fnvnx.elf" guest/; fi
+		if stage_after "$bd" guest link && stage_after "$bd" boot guest; then
 			mkdir -p boot
 			for f in summary.txt frontier.txt frontier.tsv emu.log; do [ -f "$bd/boot/$f" ] && cp "$bd/boot/$f" boot/; done
 			# the data image the boots ran on (S14's synthesized image) and S5's stub-fault boot (full_job.sh 4b)

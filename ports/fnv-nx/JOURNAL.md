@@ -2744,3 +2744,28 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - A fresh S1 agent (the third ran out of context): STL1 per this decision; blk_00ac0000_od_ob1 (18); the
   census tail, with the 114 TAIL1 units checked on the farm census of 446464b; then S13's FALL1 falloff, uninit and
   split-global classes.
+
+### J-0125 | 2026-11-04 | stream: farms,S5-boot | status: wip | parent: J-0124
+
+* **found** - The guest and boot in `link/fa883870e756` are the previous commit's, not this link's.
+  - `guest/fnvnx.elf` is byte-identical to the one published with 9844d8d's link.
+  - The cause: full_job.sh runs link_job.sh, and link_job.sh publishes as soon as the link ends. At that point the
+    build directory still holds the last job's guest and boot, which `stage_ok` accepts. full_job.sh's second publish,
+    after `make BOOT=1`, replaces them, so the stale copy lives for 20-40 min. Anyone reading the branch meanwhile
+    (fuzz farms, this orchestrator) sees the old boot.
+* **found** - The boot fault after WinMain on that guest is a vtable too short for its call site.
+  - The call: MemoryManager FUN_00aa3e40 +0xac calls slot 2 of a per-thread heap of class `FUN_00aa7400`
+    (a `HeapBlockBase`).
+  - The guest's `_ZTV12FUN_00aa7400` has one slot, a vtrap. Slot 2 therefore reads `_ZTI12FUN_00aa7400`+4, the type
+    name string 0x3135dec9, hence the fetch fault.
+  - fa88387's link synthesizes that vtable with 14 slots (zz_vt of blk_00aa0000_od_ob1_variant, S2c J-0108), so the
+    first boot on a guest of this link should pass this point.
+* **did** - lib_job.sh `stage_after`: publish_link copies the guest only when its stage record is not older than the
+  link's, and the boot only when it is not older than the guest's. Cached stages rewrite their record, so a guest
+  cached on the same link still qualifies. Test: tests/farm/test_stage_after.sh (ok).
+* **found** - S15's multicore prototype (interrupted by the owner, no commits) is left uncommitted in its worktree.
+  - Contents: tests/s15/mtqemu, a QEMU host and an ILP32 guest with a happens-before race checker over the real
+    platform/win32 layer, plus tools/link/overrides/spinlock_0040fba0.c, a release-store RecursiveSpinLock::Unlock.
+  - It builds, but under qemu-aarch64 it prints nothing in 300 s, and PERF.md 6.5/6.6 and the overrides.tsv row were
+    never written. Not merged.
+* **next** - full1's boot on fa88387's own guest (due ~11:30). The fuzz farms take FTOI2 objects with the next link.
