@@ -132,6 +132,13 @@ def address_points(ents):
     return pts
 
 
+def slots_at(ents, ap):
+    """Number of slots of the vtable at address point ap (byte offset in the group): up to the next vtable's
+    (offset-to-top, typeinfo) pair or the group's end."""
+    nxt = [p for p, _ in address_points(ents) if p > ap]
+    return ((nxt[0] - 8) if nxt else 4 * len(ents)) // 4 - ap // 4
+
+
 _slot_cache = {}
 
 
