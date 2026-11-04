@@ -1,4 +1,4 @@
-### J-XXXX | 2026-11-04 | stream: V6n-render | status: wip | parent: J-XXXX(render-005)
+### J-XXXX | 2026-11-04 | stream: V6n-render | status: wip | parent: render-005
 
 * **did** - V6n checked C77 (`NxOp_Marker`) on its own (`c60677b`):
   - Property test `tests/v6n/claims/c77_markers.cpp`: 3000 random frames (51,316 draws, 27,002 markers, 3,099
