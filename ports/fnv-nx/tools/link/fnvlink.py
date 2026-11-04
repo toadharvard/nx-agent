@@ -2110,6 +2110,12 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     for v, zs in (alt or {}).items():
         for z, ap, path, kind in zs:
             if v in exev and exev[v].td and kind == 'primary' and ap == 8 and v not in want.get((z, path), []):
+                # only when it agrees with the exe vftables the group already stands for (one a prefix of the
+                # other): a disagreeing displaced one must not stop the group's own extension
+                have_ = want.get((z, path), [])
+                if any(not (exev[w].slots[:len(exev[v].slots)] == exev[v].slots[:len(exev[w].slots)]) for w in have_):
+                    st['displaced-vtables-disagree'] += 1
+                    continue
                 want[(z, path)].append(v)
                 st['displaced-vtables'] += 1
     over = collections.defaultdict(dict)    # (z, kept path) -> {word index: target}
