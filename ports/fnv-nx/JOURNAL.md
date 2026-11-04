@@ -1155,3 +1155,12 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - link_trial_undefined=7842 link_trial_multidef=0 link_x86_inconsistent_refs=419 link_ecx_not_passed=13
 * **next** - S2c: cast resolve rule, logger override, XINC1 patches for the 15 sites; fresh f13 after S1's WinMain
   fixes; S13 recheck on f13.
+
+### J-0060 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0057,J-0058
+
+* **did** - WinMain's two compile blockers (J-0057): blk_009e0000_o2 (CBaseList::GetHeadPositionI 0x009fd0f0) is
+  already clean with DECL1 from 9b09435 (prototypes with several `__declspec`); blk_00c20000_od_ob1_variant
+  (0x00c3c460) fixed by MATH1 dropping an untagged `inline float fabs(float)` copy in a namespace that takes the C
+  function. Both checked by syntax-only compiles; orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+* **next** - S2c fresh full run f13 from this head; S5 boot on f13; S1: census c19, extradatalist, playercharacter,
+  actor.
