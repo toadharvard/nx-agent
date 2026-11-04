@@ -121,6 +121,8 @@ POLICY = {
     'falloff?':       ('real-bug', 'S1', True, 'the native runs off a function end (FALL1)'),
     'native-trap':    ('real-bug', 'S1', True, 'the native executes a trap (FALL1 __builtin_trap or GCC '
                                                'unreachable) on a path where the exe returns'),
+    'layout-offset':  ('real-bug', 'S1', True, 'a pointer into the same object at another offset (a few words): a '
+                                               'base subobject or member placed differently (layout)'),
     'stack-protector': ('real-bug', 'S1', True, 'the native overruns a local buffer that MSVC\'s frame tolerated'),
     'native-null-read': ('real-bug', 'S1', True, 'the native dereferences a near-null address the oracle never '
                                                  'touches (a field read at another offset, or a hoisted load)'),
@@ -260,6 +262,9 @@ def _rule_call_args(d):
         objs = (BUFS, HEAP)
         if (_in(vx, STACK) and any(_in(va, o) for o in objs)) or (_in(va, STACK) and any(_in(vx, o) for o in objs)):
             return 'arg-stack-vs-object'
+        for reg in (BUFS, HEAP, WINDOW):
+            if _in(vx, reg) and _in(va, reg) and 0 < abs(vx - va) <= 0x100 and (vx - va) % 4 == 0:
+                return 'layout-offset'      # the same object, another member offset (base or field placement)
         if _in(vx, BUFS) and _in(va, BUFS):
             return 'arg-other-buffer'
     return None
