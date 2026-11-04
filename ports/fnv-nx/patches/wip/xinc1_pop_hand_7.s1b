@@ -1,0 +1,419 @@
+# XINC1 pop-mismatch, read by hand (group 7): callers popgen.py lists as manual (docs/PATCHES.md, "Pop-mismatch
+# families"). Each callee's `ret N` in the byte-exact MSVC objects says which call pops which pushed words.
+
+@@ XINC1 src/fallout/misc/main.cpp 0x00871290
+# x86 0x00871290 (/Od), three times (+0x50, 0xce, 0x15c): `push 0|limit; call 0x0043c4b0` (plain `ret`, reads no
+# stack word: the renderer getter), `push eax; call 0x004a0ea0` (plain `ret`, reads no stack word: a getter),
+# `mov ecx,eax; call 0x00b6ee70` (`ret 8`): the renderer and the count are 0x00b6ee70's two arguments. The getter
+# 0x004a0ea0 is a static member: a file-scope no-argument declaration of it returns another type; 0x0043c4b0's
+# file-scope no-argument declaration is used as it is.
+# +0x6cc, +0x73c, +0x74e: `push i; push 0|1; call 0x004ea970` (plain `ret`, reads no stack word: a getter),
+# `mov ecx,eax; call 0x00ba30f0 / 0x00ba3130` (each `ret 8`): the two words are the second call's arguments.
+<<<
+struct ShadowRenderer
+{
+    void ResizeActivePool();
+};
+struct ShadowTarget
+{
+    void FUN_00ba30f0();
+    void FUN_00ba3130();
+};
+===
+struct ShadowRenderer
+{
+    void ResizeActivePool(); void ResizeActivePool(void*, int); /* fnv-nx XINC1 pop: ret 8 */
+    static ShadowRenderer* __stdcall FUN_004a0ea0(); /* fnv-nx XINC1 pop: the getter 0x004a0ea0, a member: a file-scope no-argument declaration of it returns another type */
+};
+struct ShadowTarget
+{
+    void FUN_00ba30f0(); void FUN_00ba30f0(int, int); /* fnv-nx XINC1 pop: ret 8 */
+    void FUN_00ba3130(); void FUN_00ba3130(int, int); /* fnv-nx XINC1 pop: ret 8 */
+};
+>>>
+<<<
+ShadowTarget* __stdcall FUN_004ea970(int, int);
+===
+ShadowTarget* __stdcall FUN_004ea970(int, int); ShadowTarget* __cdecl FUN_004ea970(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+        FUN_004a0ea0(FUN_0043c4b0(0))->ResizeActivePool();
+===
+        ShadowRenderer::FUN_004a0ea0()->ResizeActivePool(FUN_0043c4b0(), 0);
+>>>
+<<<
+        int limit = DAT_011dea10->FUN_005f36f0() ? *DAT_011c72d8.FUN_0043d4d0() : *DAT_011c72e4.FUN_0043d4d0();
+        FUN_004a0ea0(FUN_0043c4b0(limit))->ResizeActivePool();
+    }
+===
+        int limit = DAT_011dea10->FUN_005f36f0() ? *DAT_011c72d8.FUN_0043d4d0() : *DAT_011c72e4.FUN_0043d4d0();
+        ShadowRenderer::FUN_004a0ea0()->ResizeActivePool(FUN_0043c4b0(), limit);
+    }
+>>>
+<<<
+        FUN_004a0ea0(FUN_0043c4b0(limit))->ResizeActivePool();
+        if (!limit)
+===
+        ShadowRenderer::FUN_004a0ea0()->ResizeActivePool(FUN_0043c4b0(), limit);
+        if (!limit)
+>>>
+<<<
+                    FUN_004ea970(0, rendered62 + 17)->FUN_00ba30f0();
+===
+                    FUN_004ea970()->FUN_00ba30f0(0, rendered62 + 17);
+>>>
+<<<
+            FUN_004ea970(0, i)->FUN_00ba30f0();
+            FUN_004ea970(1, i)->FUN_00ba3130();
+===
+            FUN_004ea970()->FUN_00ba30f0(0, i);
+            FUN_004ea970()->FUN_00ba3130(1, i);
+>>>
+
+@@ XINC1 src/fallout/interface/interfacemanager.cpp 0x00710ad0
+# x86 0x00710ad0+0x38 and +0xd07 (/Od): `call 0x0043d4d0; mov eax,[eax]; sub eax,1; push eax; call 0x005bd5b0`
+# (plain `ret`, reads no stack word: the font manager getter), `mov ecx,eax; call 0x005bd5c0` (`ret 4`, reads the
+# word): the index is 0x005bd5c0's argument.
+<<<
+void* __stdcall FUN_005bd5b0(int);
+===
+void* __stdcall FUN_005bd5b0(int); void* __cdecl FUN_005bd5b0(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    FontObj* FUN_005bd5c0();
+===
+    FontObj* FUN_005bd5c0(); FontObj* FUN_005bd5c0(int); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+    savedY = (int)((FontMgr*)FUN_005bd5b0(*DAT_011f33c8.FUN_0043d4d0() - 1))->FUN_005bd5c0()->FUN_005bd580() + 3;
+===
+    savedY = (int)((FontMgr*)FUN_005bd5b0())->FUN_005bd5c0(*DAT_011f33c8.FUN_0043d4d0() - 1)->FUN_005bd580() + 3;
+>>>
+<<<
+        elseBase = (int)((FontMgr*)FUN_005bd5b0(*DAT_011f33c8.FUN_0043d4d0() - 1))->FUN_005bd5c0()->FUN_005bd580() + 3;
+===
+        elseBase = (int)((FontMgr*)FUN_005bd5b0())->FUN_005bd5c0(*DAT_011f33c8.FUN_0043d4d0() - 1)->FUN_005bd580() + 3;
+>>>
+
+@@ XINC1 src/fallout/interface/interfacemanager.cpp 0x007126c0
+# x86 0x007126c0+0x3ef (/Od): `push 0xfaa; mov ecx,tile; call 0x00a03c90` (plain `ret`, reads no stack word: the
+# parent getter), `mov ecx,eax; call 0x00726070` (plain `ret`), `mov ecx,eax; call 0x00a011b0` (`ret 4`, reads the
+# word): 0xfaa is 0x00a011b0's trait.
+<<<
+    float FUN_00a011b0();
+===
+    float FUN_00a011b0(); float FUN_00a011b0(int); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+    PickValueNode* FUN_00a03c90(int m_iValueId);
+===
+    PickValueNode* FUN_00a03c90(int m_iValueId); PickValueNode* FUN_00a03c90(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+                    bool bScaled = pkTileTmp->FUN_00a03c90(0xfaa)->FUN_00726070()->FUN_00a011b0() == 112.0f ? 1 : 0;
+===
+                    bool bScaled = pkTileTmp->FUN_00a03c90()->FUN_00726070()->FUN_00a011b0(0xfaa) == 112.0f ? 1 : 0;
+>>>
+
+@@ XINC1 src/fallout/interface/fovatseffectmanager_od_variant.cpp 0x00801ad0
+# x86 0x00801ad0+0x29 (/Od): `lea eax,tmp; push eax; push 1; call 0x00718b60` (plain `ret`, reads no stack word: a
+# getter), `mov ecx,eax; call 0x00719060` (`ret 8`, reads both words): 1 and the vector are 0x00719060's arguments.
+# +0xb9: `push 1; push 0xb; call 0x004e3270` (plain `ret`: a getter), `mov ecx,eax; call 0x004ebbc0` (`ret 4`, reads
+# the last pushed word, 0xb), `mov ecx,eax; call 0x004f15a0` (`ret 4`, reads the first pushed word, 1). 0x004e3270 is
+# a static member: a file-scope no-argument declaration of it returns another type. The declarations also serve
+# 0x00801bb0.
+<<<
+struct Obj719_00801ad0
+{
+    void FUN_00719060();
+};
+===
+struct Obj719_00801ad0
+{
+    void FUN_00719060(); void FUN_00719060(int, Vec4Tmp_00801ad0*); /* fnv-nx XINC1 pop: ret 8 */
+};
+>>>
+<<<
+struct S5_00801ad0
+{
+    void FUN_004f15a0();
+};
+
+struct Mgr_00801ad0
+{
+    S5_00801ad0* FUN_004ebbc0();
+};
+===
+struct S5_00801ad0
+{
+    void FUN_004f15a0(); void FUN_004f15a0(int); /* fnv-nx XINC1 pop: ret 4 */
+};
+
+struct Mgr_00801ad0
+{
+    S5_00801ad0* FUN_004ebbc0(); S5_00801ad0* FUN_004ebbc0(int); /* fnv-nx XINC1 pop: ret 4 */
+    static Mgr_00801ad0* __stdcall FUN_004e3270(); /* fnv-nx XINC1 pop: the getter 0x004e3270, a member: a file-scope no-argument declaration of it returns another type */
+};
+>>>
+<<<
+Obj719_00801ad0* __stdcall FUN_00718b60(int, Vec4Tmp_00801ad0*);
+===
+Obj719_00801ad0* __stdcall FUN_00718b60(int, Vec4Tmp_00801ad0*); Obj719_00801ad0* __cdecl FUN_00718b60(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    FUN_00718b60(1, &tmp)->FUN_00719060();
+===
+    FUN_00718b60()->FUN_00719060(1, &tmp);
+>>>
+<<<
+    FUN_004e3270(0xb, 1)->FUN_004ebbc0()->FUN_004f15a0();
+===
+    Mgr_00801ad0::FUN_004e3270()->FUN_004ebbc0(0xb)->FUN_004f15a0(1);
+>>>
+
+@@ XINC1 src/fallout/interface/fovatseffectmanager_od_variant.cpp 0x00801bb0
+# x86 0x00801bb0+0x29 (/Od): `lea eax,vector; push eax; push 1; call 0x00718b60` (plain `ret`: a getter),
+# `mov ecx,eax; call 0x00719060` (`ret 8`, reads both words). +0x45: `push 1; push 0xa; call 0x004e3270` (plain
+# `ret`: a getter), `call 0x004ebbc0` (`ret 4`: 0xa), `call 0x004f15a0` (`ret 4`: 1). Declarations at 0x00801ad0.
+<<<
+    FUN_00718b60(1, &vector)->FUN_00719060();
+===
+    FUN_00718b60()->FUN_00719060(1, &vector);
+>>>
+<<<
+    FUN_004e3270(10, 1)->FUN_004ebbc0()->FUN_004f15a0();
+===
+    Mgr_00801ad0::FUN_004e3270()->FUN_004ebbc0(10)->FUN_004f15a0(1);
+>>>
+
+@@ XINC1 src/fallout/ai/playercharacter_o2_variant_od_oy_noo2_variant.cpp 0x0095f930
+# x86 0x0095f930+0xa14 (/Od): `lea edx,localPosition; push edx; mov ecx,body; call 0x004b4f00` (plain `ret`, reads
+# no stack word: a getter), `mov ecx,eax; call 0x006815c0` (plain `ret`), `push eax`, `push &localRotation;
+# call 0x004b4d10` (`ret 4`), `mov ecx,eax; call 0x004b4ab0` (`ret 8`, reads both words): the vector reference and
+# the local position are 0x004b4ab0's two arguments.
+<<<
+    void FUN_004b4ab0(const GrabVector*);
+===
+    void FUN_004b4ab0(const GrabVector*); void FUN_004b4ab0(const GrabVector*, const GrabVector*); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+    GrabVector* FUN_004b4f00(const GrabVector*);
+===
+    GrabVector* FUN_004b4f00(const GrabVector*); GrabVector* FUN_004b4f00(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+                ->FUN_004b4ab0(&body->FUN_004b4f00(&localPosition)->FUN_006815c0());
+===
+                ->FUN_004b4ab0(&body->FUN_004b4f00()->FUN_006815c0(), &localPosition);
+>>>
+
+@@ XINC1 src/fallout_shared/facegen/bsfacegenmanager.cpp 0x0060b370
+# x86 0x0060b370 (/Od): `push [this+0x1c]; push 0; mov ecx,this; call 0x006578b0` (`ret 4`, reads one word: the 0),
+# the row address computed from eax, `push edx; mov ecx,result; call 0x004b0680` (`ret 8`, reads both words): the
+# column count pushed first is the constructor's second argument.
+<<<
+    Struct_004b0680(float* p);
+===
+    Struct_004b0680(float* p); Struct_004b0680(float* p, unsigned int); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+    float* FUN_006578b0(unsigned int, unsigned int) const;
+===
+    float* FUN_006578b0(unsigned int, unsigned int) const; float* FUN_006578b0(unsigned int) const; /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+    return Struct_004b0680(FUN_006578b0(0, cols) + aiRow * cols);
+===
+    return Struct_004b0680(FUN_006578b0(0) + aiRow * cols, cols);
+>>>
+
+@@ XINC1 src/fallout_shared/tesobjectrefr.cpp 0x0056f700
+# x86 0x0056f700+0xe8 (/Od): `push 1; push 0; mov ecx,this; call 0x008d6f30` (plain `ret`, reads no stack word: a
+# getter), `push eax; mov ecx,[0x011dea10]; call 0x00458be0` (`ret 8`, reads the getter's result and the 0),
+# `push eax; push this; mov ecx,[0x011c3b3c]; call 0x00444850` (`ret 0xc`, reads all three): the 1 pushed first is
+# 0x00444850's third argument (its definition's bool).
+<<<
+    void FUN_00444850(Ref*, void*);
+===
+    void FUN_00444850(Ref*, void*); void FUN_00444850(Ref*, void*, bool); /* fnv-nx XINC1 pop: ret 0xc */
+>>>
+<<<
+    void* FUN_00458be0(void*);
+===
+    void* FUN_00458be0(void*); void* FUN_00458be0(void*, int); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+    void* GetTarget(int, int);
+===
+    void* GetTarget(int, int); void* GetTarget(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+                    ->FUN_00444850(this, ((Obj011dea10*)*(void**)&DAT_011dea10)->FUN_00458be0(GetTarget(0, 1)));
+===
+                    ->FUN_00444850(this, ((Obj011dea10*)*(void**)&DAT_011dea10)->FUN_00458be0(GetTarget(), 0), true);
+>>>
+
+@@ XINC1 src/fallout/ai/combat/combatutilities_o2_variant_od_oy_noo2_variant.cpp 0x009a6e90
+# x86 0x009a6e90+0x173 and +0x4ab (/Od): `lea edx,obj410; push edx; mov ecx,[ebx+8]; call 0x008d6f30` (plain `ret`,
+# reads no stack word: the parent cell getter), `mov ecx,eax; call 0x00553ee0` (`ret 4`, reads the word): the object
+# is 0x00553ee0's argument. The deeper-indented call goes first: its text contains the other's.
+<<<
+    TESObjectCELL* __thiscall GetTarget(void* query);
+===
+    TESObjectCELL* __thiscall GetTarget(void* query); TESObjectCELL* __thiscall GetTarget(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    int __thiscall FUN_00553ee0();
+===
+    int __thiscall FUN_00553ee0(); int __thiscall FUN_00553ee0(void*); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+            v30 = ((FUN_00553ee0_shell*)((TESObjectREFR*)a0)->GetTarget(&obj410))->FUN_00553ee0();
+===
+            v30 = ((FUN_00553ee0_shell*)((TESObjectREFR*)a0)->GetTarget())->FUN_00553ee0(&obj410);
+>>>
+<<<
+        v30 = ((FUN_00553ee0_shell*)((TESObjectREFR*)a0)->GetTarget(&obj410))->FUN_00553ee0();
+===
+        v30 = ((FUN_00553ee0_shell*)((TESObjectREFR*)a0)->GetTarget())->FUN_00553ee0(&obj410);
+>>>
+
+@@ XINC1 src/unmapped/threadsafestructures.cpp 0x0044b8d0
+# x86 0x0044b8d0+0x4e and +0x7e (/Od): `push extra; push &it->value; push it->index; mov ecx,this; call 0x00449f80`
+# (plain `ret`, reads no stack word: a getter), `mov ecx,eax; call 0x0044e550 / 0x0044e680` (each `ret 0xc`, reads
+# all three): the words are the second call's. +0x108: `push *puiResult; call 0x00449f80` (the getter),
+# `mov ecx,eax; call 0x00528bb0` (`ret 4`, reads the word).
+<<<
+    bool FUN_0044e550();
+    bool FindEntry();
+    bool FUN_00528bb0();
+===
+    bool FUN_0044e550(); bool FUN_0044e550(unsigned int, unsigned int*, unsigned int); /* fnv-nx XINC1 pop: ret 0xc */
+    bool FindEntry(); bool FindEntry(unsigned int, unsigned int*, unsigned int); /* fnv-nx XINC1 pop: ret 0xc */
+    bool FUN_00528bb0(); bool FUN_00528bb0(unsigned int); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+    Item* FUN_00449f80(unsigned int);
+===
+    Item* FUN_00449f80(unsigned int); Item* FUN_00449f80(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+                success = FUN_00449f80(pIteration->index, &pIteration->value, extra)->FUN_0044e550();
+===
+                success = FUN_00449f80()->FUN_0044e550(pIteration->index, &pIteration->value, extra);
+>>>
+<<<
+                success = FUN_00449f80(pIteration->index, &pIteration->value, extra)->FindEntry();
+===
+                success = FUN_00449f80()->FindEntry(pIteration->index, &pIteration->value, extra);
+>>>
+<<<
+        success = FUN_00449f80(*puiResult)->FUN_00528bb0();
+===
+        success = FUN_00449f80()->FUN_00528bb0(*puiResult);
+>>>
+
+@@ XINC1 src/fallout_shared/animation.cpp 0x00491180
+# x86 0x00491180 (/Od), nine times (+0x965, 0x9b5, 0xa02, 0xa52, 0xaa2, 0x1244, 0x132d, 0x1661, 0x1959):
+# `push 0; mov ecx,sequence; call 0x00493770` (plain `ret`, reads no stack word), the new time computed in ST0,
+# `push ecx; fstp [esp]; mov ecx,sequence; call 0x00a328b0` (`ret 8`, reads both words): the 0 pushed first is
+# 0x00a328b0's second argument (its definition's bool).
+<<<
+    float GetLastTime(int aiUnused);
+    void SetTime(float afTime);
+===
+    float GetLastTime(int aiUnused); float GetLastTime(); /* fnv-nx XINC1 pop: plain ret */
+    void SetTime(float afTime); void SetTime(float afTime, bool); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+            pSequence->SetTime(pSequence->GetLastTime(0) - fTimeStep);
+===
+            pSequence->SetTime(pSequence->GetLastTime() - fTimeStep, false);
+>>>
+<<<
+                pSequence->SetTime(pSequence->GetLastTime(0) + (fTimeStep * m_fMovementRate - fTimeStep));
+===
+                pSequence->SetTime(pSequence->GetLastTime() + (fTimeStep * m_fMovementRate - fTimeStep), false);
+>>>
+<<<
+                pSequence->SetTime(pSequence->GetLastTime(0) + (fTimeStep * m_fAnimationTimeScale - fTimeStep));
+===
+                pSequence->SetTime(pSequence->GetLastTime() + (fTimeStep * m_fAnimationTimeScale - fTimeStep), false);
+>>>
+<<<
+                pSequence->SetTime(pSequence->GetLastTime(0) + (fTimeStep * m_fCombatAnimationRate - fTimeStep));
+===
+                pSequence->SetTime(pSequence->GetLastTime() + (fTimeStep * m_fCombatAnimationRate - fTimeStep), false);
+>>>
+<<<
+                pSequence->SetTime(pSequence->GetLastTime(0) + (fTimeStep * m_fReloadAnimationRate - fTimeStep));
+===
+                pSequence->SetTime(pSequence->GetLastTime() + (fTimeStep * m_fReloadAnimationRate - fTimeStep), false);
+>>>
+<<<
+                        pSequence->SetTime(pSequence->GetLastTime(0) - fLoopTime);
+                        afPrevTimes[i] = afPrevTimes[i] - fLoopTime;
+===
+                        pSequence->SetTime(pSequence->GetLastTime() - fLoopTime, false);
+                        afPrevTimes[i] = afPrevTimes[i] - fLoopTime;
+>>>
+<<<
+                    pSequence->SetTime(pSequence->GetLastTime(0) + fLoopTime);
+===
+                    pSequence->SetTime(pSequence->GetLastTime() + fLoopTime, false);
+>>>
+<<<
+                    pSequence->SetTime(pSequence->GetLastTime(0) - fLoopTime);
+                    afPrevTimes[i] = afPrevTimes[i] - fLoopTime;
+===
+                    pSequence->SetTime(pSequence->GetLastTime() - fLoopTime, false);
+                    afPrevTimes[i] = afPrevTimes[i] - fLoopTime;
+>>>
+<<<
+                        pSequence->SetTime(pSequence->GetLastTime(0) - fLoopTime);
+                        if (m_acTargetName[i] != -1)
+===
+                        pSequence->SetTime(pSequence->GetLastTime() - fLoopTime, false);
+                        if (m_acTargetName[i] != -1)
+>>>
+
+@@ XINC1 src/havok/common/visualize/hkvisualdebugger.cpp 0x00cd12e0
+# x86 0x00cd12e0 (/O2): `push esi` .. `pop esi; jmp 0x00cb0c10` with ecx the new element: the tail jump hands the
+# function's own first stack word to 0x00cb0c10 (`ret 4`, reads it: the string), so this function takes that word
+# (its caller 0x00cd1780 pushes one: the process name) and passes it on.
+<<<
+struct FUN_00cd12e0_element
+{
+    unsigned int value;
+    void FUN_00cb0a60();
+    void FUN_00cb0c10();
+};
+===
+struct FUN_00cd12e0_element
+{
+    unsigned int value;
+    void FUN_00cb0a60();
+    void FUN_00cb0c10(); void FUN_00cb0c10(const char*); /* fnv-nx XINC1 pop: ret 4 */
+};
+>>>
+<<<
+struct FUN_00cd12e0_owner
+{
+    void FUN_00cd12e0();
+};
+===
+struct FUN_00cd12e0_owner
+{
+    void FUN_00cd12e0(const char* name); /* fnv-nx XINC1 pop: the tail call pops this word */
+};
+>>>
+<<<
+void FUN_00cd12e0_owner::FUN_00cd12e0()
+===
+void FUN_00cd12e0_owner::FUN_00cd12e0(const char* name)
+>>>
+<<<
+    item->FUN_00cb0c10();
+===
+    item->FUN_00cb0c10(name);
+>>>

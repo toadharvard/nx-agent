@@ -1,0 +1,455 @@
+# XINC1 pop-mismatch, read by hand (group 5): callers popgen.py lists as manual (docs/PATCHES.md, "Pop-mismatch
+# families"). Each callee's `ret N` in the byte-exact MSVC objects says which call pops which pushed words; the decomp
+# gave them to a getter (or a virtual getter) whose result the next call uses. Applies after xinc1_pop_hand_4.s1b.
+
+@@ XINC1 src/fallout/ai/actor.cpp 0x00894940
+# x86 0x00894940 (/Od), four times (+0x5f, 0x230, 0x29f, 0x36f): `push flag` (the result of 0x00894d60 or the byte
+# at this+0xf0), `mov ecx,this; call 0x008a0330` (plain `ret`, reads no stack word: a getter), `mov ecx,eax;
+# call 0x009818e0` (`ret 4`, reads the word): the flag is 0x009818e0's argument. MSVC evaluates the argument before
+# the receiver, as the x86 code does.
+<<<
+struct S2_8
+{
+    void FUN_009818e0();
+};
+===
+struct S2_8
+{
+    void FUN_009818e0(); void FUN_009818e0(bool); /* fnv-nx XINC1 pop: ret 4 */
+};
+>>>
+<<<
+    S2_8* CallInnerVFunc139(bool b);
+===
+    S2_8* CallInnerVFunc139(bool b); S2_8* CallInnerVFunc139(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+            CallInnerVFunc139(FUN_00894d60())->FUN_009818e0();
+===
+            CallInnerVFunc139()->FUN_009818e0(FUN_00894d60());
+>>>
+<<<
+                    CallInnerVFunc139(unkF0)->FUN_009818e0();
+                }
+            }
+            else
+===
+                    CallInnerVFunc139()->FUN_009818e0(unkF0);
+                }
+            }
+            else
+>>>
+<<<
+                    CallInnerVFunc139(unkF0)->FUN_009818e0();
+                }
+            }
+        }
+===
+                    CallInnerVFunc139()->FUN_009818e0(unkF0);
+                }
+            }
+        }
+>>>
+<<<
+            CallInnerVFunc139(unkF0)->FUN_009818e0();
+        }
+    }
+===
+            CallInnerVFunc139()->FUN_009818e0(unkF0);
+        }
+    }
+>>>
+
+@@ XINC1 src/fallout/ai/actor.cpp 0x0088c830
+# x86 0x0088c830+0x448 and +0x470 (/Od): `push 1; push 0x120|0x102; push 0; mov ecx,form; call 0x0084e3a0` (plain
+# `ret`, reads no stack word: a getter), `push eax; lea edx,tmp; push edx; mov ecx,this; call 0x00933150` (`ret 0x14`,
+# reads the result buffer and four words, defined (form id, bool, id, bool)): 0, the id and 1 are 0x00933150's.
+# +0x63e: `push count; push 2; mov ecx,item; call 0x004bda70` (`ret 4`, one word), `movzx eax,al; push eax;
+# mov ecx,weapon; call 0x004fe160` (`ret 4`, reads the byte), `push eax; call 0x004a8f20; add esp,8`: the effect
+# flag is 0x004fe160's argument and the count the minimum's second.
+<<<
+    int FUN_0084e3a0(int a, int b, int c);
+===
+    int FUN_0084e3a0(int a, int b, int c); int FUN_0084e3a0(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    unsigned char HasEffect(int a, int b);
+===
+    unsigned char HasEffect(int a, int b); unsigned char HasEffect(int a); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+    int GetFlaggedValue();
+===
+    int GetFlaggedValue(); int GetFlaggedValue(unsigned char); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+    OutS PlaySoundByFormID(int a);
+===
+    OutS PlaySoundByFormID(int a); OutS PlaySoundByFormID(int a, bool, unsigned int, bool); /* fnv-nx XINC1 pop: ret 0x14 */
+>>>
+<<<
+                    this->PlaySoundByFormID(((DHForm*)t30)->FUN_0084e3a0(0, 0x120, 1));
+===
+                    this->PlaySoundByFormID(((DHForm*)t30)->FUN_0084e3a0(), false, 0x120, true);
+>>>
+<<<
+                    this->PlaySoundByFormID(((DHForm*)t30)->FUN_0084e3a0(0, 0x102, 1));
+===
+                    this->PlaySoundByFormID(((DHForm*)t30)->FUN_0084e3a0(), false, 0x102, true);
+>>>
+<<<
+                aiCount = MinInt(a1cTmp->GetFlaggedValue(), action44->HasEffect(2, aiCount));
+===
+                aiCount = MinInt(a1cTmp->GetFlaggedValue(action44->HasEffect(2)), aiCount);
+>>>
+
+@@ XINC1 src/fallout/ai/actor.cpp 0x008b0520
+# x86 0x008b0520+0x11d (/Od): `push ecx; fld 0.8f; fstp [esp]; call 0x00524c90` (plain `ret`, reads no stack word,
+# the stack is not adjusted after it: a cdecl getter), `push eax; mov ecx,node; call 0x00b4e030` (`ret 8`, reads both
+# words, defined (camera, float)): the float is 0x00b4e030's second argument.
+<<<
+BSFaceGenAnimationData* __stdcall FUN_00524c90(float);
+===
+BSFaceGenAnimationData* __stdcall FUN_00524c90(float); BSFaceGenAnimationData* __cdecl FUN_00524c90(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    bool IsWithinFadeDistance(BSFaceGenAnimationData*);
+===
+    bool IsWithinFadeDistance(BSFaceGenAnimationData*); bool IsWithinFadeDistance(BSFaceGenAnimationData*, float); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+            if (p3D && p3D->v4() && !p3D->IsWithinFadeDistance(FUN_00524c90(0.8f)))
+===
+            if (p3D && p3D->v4() && !p3D->IsWithinFadeDistance(FUN_00524c90(), 0.8f))
+>>>
+
+@@ XINC1 src/fallout/ai/actor.cpp 0x008bc9d0
+# x86 0x008bc9d0+0x6c (/Od): `mov [entry],target; lea edx,entry; push edx; mov ecx,table; call 0x00500940` (plain
+# `ret`, reads only ecx: a getter), `mov ecx,eax; call 0x005f65d0` (`ret 4`, reads ecx and [ebp+8]; defined as a
+# thiscall member taking the entry's address): the address is 0x005f65d0's argument and the getter's result its
+# object (the decomp's fastcall passes the result in ecx only).
+<<<
+struct LookupResult
+{
+};
+struct LookupTable
+{
+    LookupResult* FUN_00500940(TargetObject**);
+===
+struct LookupResult
+{
+    bool FUN_005f65d0(TargetObject**); /* fnv-nx XINC1 pop: thiscall, ret 4 */
+};
+struct LookupTable
+{
+    LookupResult* FUN_00500940(TargetObject**); LookupResult* FUN_00500940(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+        if (!pLookupTable || !FUN_005f65d0(pLookupTable->FUN_00500940(&(entry = target))))
+===
+        if (!pLookupTable || !pLookupTable->FUN_00500940()->FUN_005f65d0(&(entry = target)))
+>>>
+
+@@ XINC1 src/fallout/ai/actor.cpp 0x008a6ce0
+# x86 0x008a6ce0 (/Od), twice (+0x12d, 0x18f): `push this; push 0x0090d570|0x0090d480; push ecx / fld [setting] /
+# fstp [esp]`, `call [vtable(this)+0x1f4]` (no push of its own after the float: the slot takes no stack word, the
+# stack is not adjusted after it), `push eax`, the float again, the slot again, `push eax`, `call 0x008d6f30;
+# push eax; mov ecx,[0x011c3f2c]; call 0x0046f280` (`ret 0x1c`, reads all seven words): the floats are
+# 0x0046f280's third and fifth arguments.
+<<<
+    virtual void* Get3D(float);
+===
+    virtual void* Get3D(); /* fnv-nx XINC1 pop: the slot pops no stack word */
+>>>
+<<<
+    void FUN_0046f280(void*, void*, void*, void (*)(void*), void*);
+===
+    void FUN_0046f280(void*, void*, void*, void (*)(void*), void*); void FUN_0046f280(void*, void*, float, void*, float, void (*)(void*), void*); /* fnv-nx XINC1 pop: ret 0x1c */
+>>>
+<<<
+                    g_dataHandler->FUN_0046f280(FUN_008d6f30(), ((ActorVT*)this)->Get3D(runtimeFloatSettingDefault247),
+                                                ((ActorVT*)this)->Get3D(runtimeFloatSettingDefault247), FUN_0090d570,
+                                                this);
+===
+                    g_dataHandler->FUN_0046f280(FUN_008d6f30(), ((ActorVT*)this)->Get3D(), runtimeFloatSettingDefault247,
+                                                ((ActorVT*)this)->Get3D(), runtimeFloatSettingDefault247, FUN_0090d570,
+                                                this);
+>>>
+<<<
+                    g_dataHandler->FUN_0046f280(FUN_008d6f30(), ((ActorVT*)this)->Get3D(runtimeFloatSettingDefault247),
+                                                ((ActorVT*)this)->Get3D(runtimeFloatSettingDefault247), FUN_0090d480,
+                                                this);
+===
+                    g_dataHandler->FUN_0046f280(FUN_008d6f30(), ((ActorVT*)this)->Get3D(), runtimeFloatSettingDefault247,
+                                                ((ActorVT*)this)->Get3D(), runtimeFloatSettingDefault247, FUN_0090d480,
+                                                this);
+>>>
+
+@@ XINC1 src/fallout/ai/actor.cpp 0x008b0ac0
+# x86 0x008b0ac0 (/Od): `movzx ecx,byte [this+0xf1]; push ecx`, `call [vtable(this)+0x1e4]` (the stack is not
+# adjusted and the word stays for the next call: the slot takes none; other callers call it with nothing pushed),
+# `mov ecx,eax; call 0x00499240` (`ret 4`, reads the byte; defined with a bool): the flag is 0x00499240's argument.
+# The overload takes the field's byte type, so the byte is pushed as it is (a bool parameter would add a compare).
+<<<
+struct H00499240
+{
+    void FUN_00499240();
+};
+===
+struct H00499240
+{
+    void FUN_00499240(); void FUN_00499240(unsigned char); /* fnv-nx XINC1 pop: ret 4 */
+};
+>>>
+<<<
+    virtual H00499240* v121(int);
+===
+    virtual H00499240* v121(); /* fnv-nx XINC1 pop: the slot pops no stack word */
+>>>
+<<<
+    v121(m_flag)->FUN_00499240();
+===
+    v121()->FUN_00499240(m_flag);
+>>>
+
+@@ XINC1 src/fallout/ai/actor.cpp 0x00930700
+# x86 0x00930700+0xa3 (/Od): `push 0`, `call [vtable(this)+0x1f4]` (the stack is not adjusted and the word stays for
+# the next call: the position slot takes none), `push eax; mov ecx,[0x011dea10]; call 0x0045cbc0` (`ret 8`, reads
+# both words, defined (position, cell)): the 0 is 0x0045cbc0's cell.
+<<<
+    float GetCellHeightAtPosition(void* pvPosition);
+===
+    float GetCellHeightAtPosition(void* pvPosition); float GetCellHeightAtPosition(void* pvPosition, void* pvCell); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+    virtual void* GetPosition(int iUnused);
+===
+    virtual void* GetPosition(); /* fnv-nx XINC1 pop: the slot pops no stack word */
+>>>
+<<<
+                m_pkWaterData->m_fOriginZ = g_pkB930700TES->GetCellHeightAtPosition(GetPosition(0));
+===
+                m_pkWaterData->m_fOriginZ = g_pkB930700TES->GetCellHeightAtPosition(GetPosition(), 0);
+>>>
+
+@@ XINC1 src/fallout_shared/sky/precipitation_decls.h file
+# x86 0x00636c40 (precipitation.cpp, /Od)+0x1f0: `movzx edx,byte [snow]; push edx; mov ecx,[this+0xc];
+# call 0x00461130` (plain `ret`, reads no stack word: a getter), `push eax; push shader; mov ecx,this;
+# call 0x00637890` (`ret 0xc`, reads the first and third words, defined (shader, int, byte)): the snow flag is
+# 0x00637890's third argument. The overloads are new; the decomp's declarations stay for the other unit.
+<<<
+    NiAVObject* FUN_00461130(bool flag);
+===
+    NiAVObject* FUN_00461130(bool flag); NiAVObject* FUN_00461130(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    NiAVObject* CreateParticleShape(SkyShaderProperty* property, NiAVObject* object);
+===
+    NiAVObject* CreateParticleShape(SkyShaderProperty* property, NiAVObject* object); NiAVObject* CreateParticleShape(SkyShaderProperty* property, NiAVObject* object, bool flag); /* fnv-nx XINC1 pop: ret 0xc */
+>>>
+
+@@ XINC1 src/fallout_shared/sky/precipitation.cpp 0x00636c40
+# x86 0x00636c40+0x1f0 (/Od): the snow flag pushed before the getter 0x00461130 (plain `ret`) is the third word of
+# 0x00637890 (`ret 0xc`); the declarations are in precipitation_decls.h (patched above).
+<<<
+                NiAVObject* precipParticle = CreateParticleShape(pShaderProperty, pParent->FUN_00461130(bIsSnow));
+===
+                NiAVObject* precipParticle = CreateParticleShape(pShaderProperty, pParent->FUN_00461130(), bIsSnow);
+>>>
+
+@@ XINC1 src/fallout_shared/sky/precipitation.cpp 0x00636bd0
+# x86 0x00636bd0+0x2a (/Od): six `push 0`, `call [vtable(object)+0x14]` (the stack is not adjusted and the words stay
+# for the next call: the slot takes none), `push eax; mov ecx,[0x011c3b3c]; call 0x00444040` (`ret 0x1c`, reads all
+# seven words, defined (int, int, int, int, bool, bool, bool)): the zeros are 0x00444040's last six arguments.
+<<<
+    virtual void* vfn_0014(int a0, int a1, int a2, int a3, int a4, int a5);
+===
+    virtual void* vfn_0014(); /* fnv-nx XINC1 pop: the slot pops no stack word */
+>>>
+<<<
+    void FUN_00444040(void* object);
+===
+    void FUN_00444040(void* object); void FUN_00444040(void* object, int, int, int, bool, bool, bool); /* fnv-nx XINC1 pop: ret 0x1c */
+>>>
+<<<
+        DAT_011c3b3c->FUN_00444040(object->vfn_0014(0, 0, 0, 0, 0, 0));
+===
+        DAT_011c3b3c->FUN_00444040(object->vfn_0014(), 0, 0, 0, false, false, false);
+>>>
+
+@@ XINC1 src/fallout/interface/menus/lockpickmenu.cpp 0x0078e7c0
+# x86 0x0078e7c0+0x38 (/Od): `push 4; push 0; call 0x0043c4b0` (stdcall, plain `ret`, reads no stack word: a getter),
+# `mov ecx,eax; call 0x007148c0` (`ret 8`, reads both words): 0 and 4 are 0x007148c0's arguments.
+<<<
+    void FUN_007148c0();
+===
+    void FUN_007148c0(); void FUN_007148c0(int, int); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+void* __stdcall FUN_0043c4b0(int, int);
+===
+void* __stdcall FUN_0043c4b0(int, int); void* __stdcall FUN_0043c4b0(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    reinterpret_cast<ProcBase*>(FUN_0043c4b0(0, 4))->FUN_007148c0();
+===
+    reinterpret_cast<ProcBase*>(FUN_0043c4b0())->FUN_007148c0(0, 4);
+>>>
+
+@@ XINC1 src/fallout_shared/pathfinding/pathfind.cpp 0x006d8a40
+# x86 0x006d8a40+0x210 (/Od): `push y; push x; mov ecx,cell; call 0x0054ddd0` (plain `ret`, reads no stack word: the
+# parent worldspace getter), `mov ecx,eax; call 0x005875a0` (`ret 8`, reads both words, defined (x, y)): the grid
+# coordinates are 0x005875a0's arguments. The unit's arg-less overload of the getter returns an integer, so the
+# getter is declared on a shell of the cell.
+<<<
+struct GridCellMesh
+{
+    void* FUN_005875a0();
+};
+===
+struct GridCellMesh
+{
+    void* FUN_005875a0(); void* FUN_005875a0(int x, int y); /* fnv-nx XINC1 pop: ret 8 */
+};
+struct SearchCell_0054ddd0 { void* FUN_0054ddd0(); }; /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+                        void* mesh = ((GridCellMesh*)centralCell->FUN_0054ddd0(x, y))->FUN_005875a0();
+===
+                        void* mesh = ((GridCellMesh*)((SearchCell_0054ddd0*)centralCell)->FUN_0054ddd0())->FUN_005875a0(x, y);
+>>>
+
+@@ XINC1 src/staging/blk_00940000_od.cpp 0x0095de30
+# x86 0x0095de30+0xda (/Od): `push 0x011ad840; call 0x0045c670` (plain `ret`, the stack is not adjusted: the cdecl
+# getter the unit also declares without arguments), `mov ecx,eax; call 0x006629f0` (plain `ret`), `mov ecx,eax;
+# call 0x00712e60` (`ret 4`, reads [ebp+8], defined taking the rectangle by reference): the global's address is
+# 0x00712e60's argument. +0x2dc: `call 0x006815c0; push eax; lea eax,g; push eax; mov ecx,[0x011e07d0];
+# call 0x0045bb80` (plain `ret`, reads no stack word: returns ecx+0x8c), `mov ecx,eax; call 0x00439ef0` (`ret 8`,
+# reads both words, defined (out point, point)): both words are 0x00439ef0's. The moved getters only read their
+# object, so the order of the calls does not matter.
+<<<
+    Vec97& FUN_00439ef0();
+===
+    Vec97& FUN_00439ef0(); Vec97& FUN_00439ef0(Vec97*, void*); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+    Vec97* FUN_0045bb80(Vec97*, void*);
+===
+    Vec97* FUN_0045bb80(Vec97*, void*); Vec97* FUN_0045bb80(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    void FUN_00712e60();
+===
+    void FUN_00712e60(); void FUN_00712e60(int*); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+        FUN_0045c670(&DAT_011ad840)->FUN_006629f0()->FUN_00712e60();
+===
+        FUN_0045c670()->FUN_006629f0()->FUN_00712e60(&DAT_011ad840);
+>>>
+<<<
+                                            DAT_011e07d0->FUN_0045bb80(&g, a->FUN_006815c0())->FUN_00439ef0();
+===
+                                            DAT_011e07d0->FUN_0045bb80()->FUN_00439ef0(&g, a->FUN_006815c0());
+>>>
+
+@@ XINC1 src/fallout/dialogue/menutopic_decls.h file
+# x86 0x0083e620 (menutopic.cpp, /Od)+0x152: `push ecx; fld 2147483648.0f; fstp [esp]; mov ecx,topic;
+# call 0x0045cd60` (plain `ret`, reads no stack word: a getter), `mov ecx,eax; call 0x00965250` (`ret 4`, reads the
+# float): the float is 0x00965250's argument.
+<<<
+class MenuTopicText
+{
+  public:
+    void FUN_00965250();
+};
+===
+class MenuTopicText
+{
+  public:
+    void FUN_00965250(); void FUN_00965250(float); /* fnv-nx XINC1 pop: ret 4 */
+};
+>>>
+
+@@ XINC1 src/fallout/dialogue/menutopic_types_MenuTopic.h file
+# x86 0x0083e620 (menutopic.cpp, /Od)+0x15f: 0x0045cd60 returns with a plain `ret` and reads no stack word (a getter);
+# the float pushed before it is the argument of the next call (menutopic_decls.h, patched above).
+<<<
+    MenuTopicText* FUN_0045cd60(float);
+===
+    MenuTopicText* FUN_0045cd60(float); class MenuTopicText* FUN_0045cd60(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+
+@@ XINC1 src/fallout/dialogue/menutopic.cpp 0x0083e620
+# x86 0x0083e620+0x152 (/Od): the float pushed before the getter 0x0045cd60 (plain `ret`) is read by 0x00965250
+# (`ret 4`); the declarations are in the unit's headers (patched above).
+<<<
+            locals.menuTopic->FUN_0045cd60(2147483648.0f)->FUN_00965250();
+===
+            locals.menuTopic->FUN_0045cd60()->FUN_00965250(2147483648.0f);
+>>>
+
+@@ XINC1 src/staging/blk_00680000_od.cpp 0x0068aa50
+# x86 0x0068aa50+0x95 (/Od): `lea eax,a; push eax; mov ecx,node; call 0x009611e0` (plain `ret`, reads no stack word:
+# a getter), `mov ecx,eax; call 0x00461130` (plain `ret`), `mov ecx,eax; call 0x004b45b0` (`ret 4`, reads [ebp+8],
+# defined taking the matrix): the matrix's address is 0x004b45b0's argument.
+<<<
+    void FUN_004b45b0();
+===
+    void FUN_004b45b0(); void FUN_004b45b0(NiMatrix3_0068aa50*); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+    NavMeshChain_0068aa50* FUN_009611e0(NiMatrix3_0068aa50*);
+===
+    NavMeshChain_0068aa50* FUN_009611e0(NiMatrix3_0068aa50*); NavMeshChain_0068aa50* FUN_009611e0(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+                node->FUN_009611e0(&a)->FUN_00461130()->FUN_004b45b0();
+===
+                node->FUN_009611e0()->FUN_00461130()->FUN_004b45b0(&a);
+>>>
+
+@@ XINC1 src/bsshader/shadowscenenode.cpp 0x00b5c360
+# x86 0x00b5c360+0x42 (/O2): `push size; push capacity; mov ecx,array; call 0x00cb9ce0` (`ret 8`, reads ecx and both
+# words; defined as a thiscall member taking two ints): the decomp declares the callee as a one-argument fastcall
+# and calls it through a cast to a three-argument thiscall pointer. Declared as the member it is, on a shell of the
+# array; the call pushes the same words.
+<<<
+struct ArrayLike
+{
+    virtual ~ArrayLike();
+===
+struct ArrayLike_00cb9ce0 { void FUN_00cb9ce0(unsigned int, unsigned int); }; /* fnv-nx XINC1 pop: thiscall, ret 8 */
+struct ArrayLike
+{
+    virtual ~ArrayLike();
+>>>
+<<<
+        ((void(__thiscall*)(ArrayLike*, unsigned int, unsigned int))FUN_00cb9ce0)(this, a, b);
+===
+        ((ArrayLike_00cb9ce0*)this)->FUN_00cb9ce0(a, b);
+>>>
+
+@@ XINC1 src/fallout/interface/menus/racesexmenu.cpp 0x007b3bb0
+# x86 0x007b3bb0+0x7f (/Od): `push 0`, the float getter 0x00a011b0 and its conversion, `push eax; push 0x01075b10;
+# lea ecx,text; call 0x00559450` (plain `ret`, reads no stack word: the string's buffer getter), `push eax;
+# mov ecx,this; call 0x007b4650` (`ret 0x10`, reads all four words, defined (text, template, kind, position)): the
+# format, the value and the 0 are 0x007b4650's second to fourth arguments. The moved getters only read their
+# objects.
+<<<
+    const char* FUN_00559450(const char* format, unsigned int value);
+===
+    const char* FUN_00559450(const char* format, unsigned int value); const char* FUN_00559450(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    int CreateEntry(const char* text, int flags);
+    int AddFloatOption(const char* input, SelectedOption_007b3bb0* selected);
+===
+    int CreateEntry(const char* text, int flags); int CreateEntry(const char* text, const char* templ, unsigned int kind, void* pos); /* fnv-nx XINC1 pop: ret 0x10 */
+    int AddFloatOption(const char* input, SelectedOption_007b3bb0* selected);
+>>>
+<<<
+    return CreateEntry(text.FUN_00559450(DAT_01075b10, (unsigned int)selected->pTGF->GetFloat(0x1004)), 0);
+===
+    return CreateEntry(text.FUN_00559450(), DAT_01075b10, (unsigned int)selected->pTGF->GetFloat(0x1004), 0);
+>>>

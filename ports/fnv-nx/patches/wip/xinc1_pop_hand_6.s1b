@@ -1,0 +1,430 @@
+# XINC1 pop-mismatch, read by hand (group 6): callers popgen.py lists as manual (docs/PATCHES.md, "Pop-mismatch
+# families"). Each callee's `ret N` in the byte-exact MSVC objects says which call pops which pushed words.
+
+@@ XINC1 src/fallout_shared/modelloader.cpp 0x00445430
+# x86 0x00445430+0x5b (/Od): `push 0; lea ecx,guard; call 0x00559450` (plain `ret`, reads no stack word: a getter of
+# ecx), `push eax; mov ecx,[0x01202d98]; call 0x0044ac40` (`ret 8`, reads both words): the 0 is 0x0044ac40's second
+# argument.
+<<<
+    int FUN_00559450(int a1);
+    ~LoadScopeGuard();
+};
+
+struct FUN_00445430_cls
+===
+    int FUN_00559450(int a1); int FUN_00559450(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+    ~LoadScopeGuard();
+};
+
+struct FUN_00445430_cls
+>>>
+<<<
+struct FUN_0044ac40_s
+{
+    void FUN_0044ac40(int a1);
+};
+
+LoadScopeGuard::~LoadScopeGuard()
+{
+    FUN_0044cbf0((void**)this);
+}
+
+// @fnv 0x00445430
+===
+struct FUN_0044ac40_s
+{
+    void FUN_0044ac40(int a1); void FUN_0044ac40(int a1, int a2); /* fnv-nx XINC1 pop: ret 8 */
+};
+
+LoadScopeGuard::~LoadScopeGuard()
+{
+    FUN_0044cbf0((void**)this);
+}
+
+// @fnv 0x00445430
+>>>
+<<<
+        ((FUN_0044ac40_s*)DAT_01202d98)->FUN_0044ac40(guard.FUN_00559450(0));
+===
+        ((FUN_0044ac40_s*)DAT_01202d98)->FUN_0044ac40(guard.FUN_00559450(), 0);
+>>>
+
+@@ XINC1 src/fallout_shared/modelloader.cpp 0x00445570
+# x86 0x00445570+0x5b and +0xbc (/Od): `push 0; lea ecx,guardA|guardB; call 0x00559450` (plain `ret`, reads no stack
+# word: a getter of ecx), `push eax; mov ecx,[0x01202d98]; call 0x0044ac40` (`ret 8`, reads both words): the 0 is
+# 0x0044ac40's second argument.
+<<<
+    int FUN_00559450(int a1);
+===
+    int FUN_00559450(int a1); int FUN_00559450(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    void FUN_0044ac40(int a1);
+===
+    void FUN_0044ac40(int a1); void FUN_0044ac40(int a1, int a2); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+        ((FUN_0044ac40_s*)DAT_01202d98)->FUN_0044ac40(guardA.FUN_00559450(0));
+===
+        ((FUN_0044ac40_s*)DAT_01202d98)->FUN_0044ac40(guardA.FUN_00559450(), 0);
+>>>
+<<<
+        ((FUN_0044ac40_s*)DAT_01202d98)->FUN_0044ac40(guardB.FUN_00559450(0));
+===
+        ((FUN_0044ac40_s*)DAT_01202d98)->FUN_0044ac40(guardB.FUN_00559450(), 0);
+>>>
+
+@@ XINC1 src/fallout_shared/modelloader.cpp 0x00449280
+# x86 0x00449280+0x16 (/Od): `push [ebp+8]; mov ecx,this; call 0x00449f80` (plain `ret`, reads no stack word: a
+# getter), `mov ecx,eax; call 0x0044cec0` (`ret 4`, reads the word): the argument is 0x0044cec0's.
+<<<
+    R449* FUN_00449f80(void*);
+    bool FUN_00449280(void*);
+===
+    R449* FUN_00449f80(void*); R449* FUN_00449f80(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+    bool FUN_00449280(void*);
+>>>
+<<<
+struct R449
+{
+    bool Pop();
+};
+===
+struct R449
+{
+    bool Pop(); bool Pop(void*); /* fnv-nx XINC1 pop: ret 4 */
+};
+>>>
+<<<
+    bool bResult = FUN_00449f80(arData)->Pop();
+===
+    bool bResult = FUN_00449f80()->Pop(arData);
+>>>
+
+@@ XINC1 src/fallout_shared/modelloader.cpp 0x00626c50
+# x86 0x00626c50 (/Od): `lea eax,local; push eax; lea ecx,[this+0x3a0]; call 0x00559450` (plain `ret`, reads no stack
+# word: a getter of ecx), `mov ecx,eax; call 0x0043b4f0` (`ret 4`: its only word is the hidden result pointer, it
+# constructs a 4-byte class with a constructor there and returns it in eax): local is 0x0043b4f0's result. Then
+# `push [ebp-4]; lea ecx,[this+0x3a0]; call 0x00559450` (plain `ret`), `mov ecx,eax; call 0x00626cb0` (`ret 4`, its
+# 4-byte class by value): local is 0x00626cb0's argument.
+<<<
+struct Z_00626c50
+{
+    void FUN_0043b4f0();
+};
+
+struct Y_00626c50
+{
+    void FUN_00626cb0();
+};
+
+struct Mgr_00626c50
+{
+    unsigned int unk00;
+    unsigned int unk04;
+    void* FUN_00559450(unsigned int key);
+};
+
+struct Local_00626c50
+{
+    unsigned int v;
+    void FUN_0059ce80(unsigned int a);
+};
+===
+struct Local_00626c50
+{
+    unsigned int v;
+    void FUN_0059ce80(unsigned int a); Local_00626c50(unsigned int); /* fnv-nx XINC1 pop: a constructor: returned by a hidden pointer */
+};
+
+struct Z_00626c50
+{
+    Local_00626c50 FUN_0043b4f0(); /* fnv-nx XINC1 pop: ret 4 pops only the hidden result pointer */
+};
+
+struct Y_00626c50
+{
+    void FUN_00626cb0(); void FUN_00626cb0(Local_00626c50); /* fnv-nx XINC1 pop: ret 4, by value */
+};
+
+struct Mgr_00626c50
+{
+    unsigned int unk00;
+    unsigned int unk04;
+    void* FUN_00559450(unsigned int key); void* FUN_00559450(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+};
+>>>
+<<<
+    Local_00626c50 local;
+    reinterpret_cast<Z_00626c50*>(m_3a0.FUN_00559450((unsigned int)&local))->FUN_0043b4f0();
+===
+    Local_00626c50 local =
+        reinterpret_cast<Z_00626c50*>(m_3a0.FUN_00559450())->FUN_0043b4f0();
+>>>
+<<<
+    reinterpret_cast<Y_00626c50*>(m_3a0.FUN_00559450(local.v))->FUN_00626cb0();
+===
+    reinterpret_cast<Y_00626c50*>(m_3a0.FUN_00559450())->FUN_00626cb0(local);
+>>>
+
+@@ XINC1 src/fallout/ai/playercharacter.cpp 0x00950c20
+# x86 0x00950c20+0x7cf and +0x8ca (/Od): `push -1; push 0; push 0; lea ecx,path; push ecx; call 0x0050f6e0` (plain
+# `ret`, reads no stack word: a getter of a global, the stack is not adjusted after it), `mov ecx,eax; call
+# 0x00afe0d0` (`ret 0x10`, reads all four words): the path and the three words are 0x00afe0d0's arguments.
+<<<
+    int Fafe0d0();
+};
+xFileCheck* __stdcall x50f6e0(const char*, int, int, int);
+===
+    int Fafe0d0(); int Fafe0d0(const char*, int, int, int); /* fnv-nx XINC1 pop: ret 0x10 */
+};
+xFileCheck* __stdcall x50f6e0(const char*, int, int, int); xFileCheck* __cdecl x50f6e0(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+            xSprintf(qxWmVch, 0x104, "Data\\%s\\%s\\%sIdle.KF", xg_Meshes, qGfbX, xg_IdleNames[qXGDO]);
+            if (x50f6e0(qxWmVch, 0, 0, -1)->Fafe0d0())
+===
+            xSprintf(qxWmVch, 0x104, "Data\\%s\\%s\\%sIdle.KF", xg_Meshes, qGfbX, xg_IdleNames[qXGDO]);
+            if (x50f6e0()->Fafe0d0(qxWmVch, 0, 0, -1))
+>>>
+<<<
+            xSprintf(qxWmVch, 0x104, "Data\\%s\\%s\\%sTorchIdle.KF", xg_Meshes, qGfbX, xg_IdleNames[qXGDO]);
+            if (x50f6e0(qxWmVch, 0, 0, -1)->Fafe0d0())
+===
+            xSprintf(qxWmVch, 0x104, "Data\\%s\\%s\\%sTorchIdle.KF", xg_Meshes, qGfbX, xg_IdleNames[qXGDO]);
+            if (x50f6e0()->Fafe0d0(qxWmVch, 0, 0, -1))
+>>>
+
+@@ XINC1 src/fallout/ai/playercharacter.cpp 0x0094ae40
+# x86 0x0094ae40+0x3dc (/Od): `push 0; push 0; mov ecx,this; call 0x00950b00` (`ret 4`, reads the word pushed last),
+# `mov ecx,eax; call 0x004ab230` (`ret 4`, reads the word pushed first), `push eax`, `call [vtable(proc)+0x1b8]` (no
+# push of its own: the slot takes no stack word), `mov ecx,eax; call 0x00496550` (`ret 4`, reads the pushed result):
+# the two zeros are the getters' arguments and their result is 0x00496550's.
+<<<
+    virtual Obj117* v1b8(Obj117*, int, int);
+===
+    virtual Obj117* v1b8(); /* fnv-nx XINC1 pop: the slot pops no stack word */
+>>>
+<<<
+    Obj117* FUN_00950b00();
+    Obj117* FUN_004ab230();
+    float GetMinBlendValue();
+===
+    Obj117* FUN_00950b00(); Obj117* FUN_00950b00(int); /* fnv-nx XINC1 pop: ret 4 */
+    Obj117* FUN_004ab230(); Obj117* FUN_004ab230(int); /* fnv-nx XINC1 pop: ret 4 */
+    float GetMinBlendValue(); float GetMinBlendValue(Obj117*); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+        float blend7 = proc15->v1b8(FUN_00950b00()->FUN_004ab230(), 0, 0)->GetMinBlendValue();
+===
+        float blend7 = proc15->v1b8()->GetMinBlendValue(FUN_00950b00(0)->FUN_004ab230(0));
+>>>
+
+@@ XINC1 src/fallout_shared/tesimagespacemodifier.cpp 0x004b3ae0
+# x86 0x004b3ae0+0x30 (/Od): three products stored as floats and pushed (`push ecx; fstp [esp]`, the last row first),
+# then `mov ecx,[ebp+8]` (pOut) and `call 0x00416870` (`ret 0xc`, a thiscall setter of three floats that returns its
+# this): pOut is the callee's ecx, the three floats its stack words. The decomp reached it through a cast of a static
+# member's address; it is declared as the member it is.
+<<<
+    static struct blob12 ComponentProduct(void*, void*);
+===
+    static struct blob12 ComponentProduct(void*, void*); NiPoint3* FUN_00416870(float, float, float); /* fnv-nx XINC1 pop: thiscall, ret 0xc */
+>>>
+<<<
+    ((void(__thiscall*)(NiPoint3*, float, float, float))(&NiPoint3::ComponentProduct))(
+        pOut, pt.x * mat[0] + pt.y * mat[3] + pt.z * mat[6], pt.x * mat[1] + pt.y * mat[4] + pt.z * mat[7],
+        pt.x * mat[2] + pt.y * mat[5] + pt.z * mat[8]);
+===
+    pOut->FUN_00416870(
+        pt.x * mat[0] + pt.y * mat[3] + pt.z * mat[6], pt.x * mat[1] + pt.y * mat[4] + pt.z * mat[7],
+        pt.x * mat[2] + pt.y * mat[5] + pt.z * mat[8]);
+>>>
+
+@@ XINC1 src/fallout/ai/combat/flameprojectile.cpp 0x009bd780
+# x86 0x009bd780+0x25 and +0x3d (/Od): `push 0|i; mov ecx,0x011e0e80; call 0x00717e50` (plain `ret`, reads no stack
+# word: a getter), `mov ecx,eax; call 0x005be5c0|0x00968670` (`ret 4`, each reads the word): 0 and i are the
+# receivers' arguments.
+<<<
+    unsigned int FUN_005be5c0();
+    ProjObj* FUN_00968670();
+};
+struct FUN_00717e50_shell
+{
+    ProjMgr* FUN_00717e50(unsigned int index);
+};
+===
+    unsigned int FUN_005be5c0(); unsigned int FUN_005be5c0(unsigned int index); /* fnv-nx XINC1 pop: ret 4 */
+    ProjObj* FUN_00968670(); ProjObj* FUN_00968670(unsigned int index); /* fnv-nx XINC1 pop: ret 4 */
+};
+struct FUN_00717e50_shell
+{
+    ProjMgr* FUN_00717e50(unsigned int index); ProjMgr* FUN_00717e50(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+};
+>>>
+<<<
+DAT_011e0e80.FUN_00717e50(0)->FUN_005be5c0(); ++i)
+===
+DAT_011e0e80.FUN_00717e50()->FUN_005be5c0(0); ++i)
+>>>
+<<<
+        ProjObj* pObj = DAT_011e0e80.FUN_00717e50(i)->FUN_00968670();
+===
+        ProjObj* pObj = DAT_011e0e80.FUN_00717e50()->FUN_00968670(i);
+>>>
+
+@@ XINC1 src/fallout/magic/magiccaster_o2_variant_od_noo2_variant.cpp 0x00817b90
+# x86 0x00817b90+0x19d (/Od): `push 0; call 0x005dbe10` (plain `ret`, reads no stack word: a getter of a global, the
+# stack is not adjusted after it), `push eax; push 0x29; lea ecx,obj; call 0x00622290` (`ret 0xc`, reads all three
+# words): the 0 is 0x00622290's third argument, after the getter's result.
+<<<
+extern void* __stdcall FUN_005dbe10(int which);
+===
+extern void* __stdcall FUN_005dbe10(int which); extern void* __cdecl FUN_005dbe10(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    FormRef* FUN_00622290(int type, void* context);
+===
+    FormRef* FUN_00622290(int type, void* context); FormRef* FUN_00622290(int type, void* context, int which); /* fnv-nx XINC1 pop: ret 0xc */
+>>>
+<<<
+            space.field00 = obj.FUN_00622290(0x29, FUN_005dbe10(0))->FUN_00559450();
+===
+            space.field00 = obj.FUN_00622290(0x29, FUN_005dbe10(), 0)->FUN_00559450();
+>>>
+
+@@ XINC1 src/fallout_shared/tesform_calls.h file
+# the declarations of 0x00484da0 (tesform.cpp): 0x00428110 takes only its hidden result buffer (`ret 4`), 0x004280f0
+# tests the mask against one stack word (`ret 4`); declared next to the decomp's (xinc1_pop_changeflags.s1b).
+<<<
+    operator bool() const;
+};
+===
+    operator bool() const; bool FUN_004280f0(unsigned int) const; /* fnv-nx XINC1 pop: 0x004280f0 tests the mask */
+};
+>>>
+<<<
+    FormChangeMask GetChangeFlags(unsigned int flags);
+===
+    FormChangeMask GetChangeFlags(unsigned int flags); FormChangeMask GetChangeFlags(); /* fnv-nx XINC1 pop: ret 4, the result buffer */
+>>>
+
+@@ XINC1 src/fallout_shared/tesform.cpp 0x00484da0
+# x86 0x00484da0+0x9 (/Od): `push 1; lea eax,tmp; push eax; mov ecx,buffer; call 0x00428110` (`ret 4`: its only word
+# is the hidden result buffer), `mov ecx,eax; call 0x004280f0` (`ret 4`, reads the flag): GetChangeFlags() tested
+# against 1.
+<<<
+    if (static_cast<BGSLoadFormBuffer*>(apLoadBuffer)->GetChangeFlags(1))
+===
+    if (static_cast<BGSLoadFormBuffer*>(apLoadBuffer)->GetChangeFlags().FUN_004280f0(1))
+>>>
+
+@@ XINC1 src/fallout/ai/combat/combatstate.cpp 0x009a0c50
+# x86 0x009a0c50+0x69 (/Od): `push f` (as float), the setting getter 0x00403e20, `push f*setting`, `push 3`,
+# `lea ecx,local; push ecx; mov ecx,ref; call 0x00575650` (`ret 4`, reads only the buffer pointer it fills and
+# returns), `push eax; mov ecx,this; call 0x009a0910` (`ret 0x10`, reads all four words): 3 and the two floats are
+# 0x009a0910's arguments after the buffer. MSVC evaluates them right to left before the inner call either way, the
+# order of the setting read is unchanged.
+<<<
+    int FUN_00575650(void*, int, float, float);
+===
+    int FUN_00575650(void*, int, float, float); int FUN_00575650(void*); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+    void FUN_009a0910(int);
+    void UpdateModifierState(bool arg_8);
+===
+    void FUN_009a0910(int); void FUN_009a0910(int, int, float, float); /* fnv-nx XINC1 pop: ret 0x10 */
+    void UpdateModifierState(bool arg_8);
+>>>
+<<<
+            FUN_009a0910(pRef->FUN_00575650(&localData, 3, f * *originalRuntimeFloatSetting429.Float(), f));
+===
+            FUN_009a0910(pRef->FUN_00575650(&localData), 3, f * *originalRuntimeFloatSetting429.Float(), f);
+>>>
+
+@@ XINC1 src/fallout/interface/interface.cpp 0x00707010
+# x86 0x00707010 (/Od): `push afArg2; push afArg1` (as floats), `push aiArg; call 0x004b7210` (plain `ret`, reads no
+# stack word: a getter of a global, the stack is not adjusted after it), `mov ecx,eax; call 0x00712450` (`ret 0xc`,
+# reads all three words): the three arguments are 0x00712450's.
+<<<
+    int SetNodeAlpha();
+};
+Dummy00712450* __stdcall _FUN_004b7210(int, float, float);
+===
+    int SetNodeAlpha(); int SetNodeAlpha(int, float, float); /* fnv-nx XINC1 pop: ret 0xc */ static Dummy00712450* __stdcall _FUN_004b7210(); /* fnv-nx XINC1 pop: the getter 0x004b7210, a member: a file-scope no-argument declaration of it returns another type */
+};
+Dummy00712450* __stdcall _FUN_004b7210(int, float, float);
+>>>
+<<<
+    return _FUN_004b7210(aiArg, afArg1, afArg2)->SetNodeAlpha();
+===
+    return Dummy00712450::_FUN_004b7210()->SetNodeAlpha(aiArg, afArg1, afArg2);
+>>>
+
+@@ XINC1 src/staging/blk_00700000_od.cpp 0x00709b50
+# x86 0x00709b50 (/Od): `push aiParam; push afParam2; push afParam1` (floats), `push a; call 0x004b7210` (plain `ret`,
+# reads no stack word: a getter of a global, the stack is not adjusted after it), `mov ecx,eax; call 0x00709b80`
+# (`ret 0x10`, reads all four words): the four arguments are 0x00709b80's.
+<<<
+    void __thiscall SetParams();
+};
+S00709b80* __stdcall _FUN_004b7210(unsigned char, float, float, int);
+===
+    void __thiscall SetParams(); void __thiscall SetParams(unsigned char, float, float, int); /* fnv-nx XINC1 pop: ret 0x10 */
+};
+S00709b80* __stdcall _FUN_004b7210(unsigned char, float, float, int); S00709b80* __cdecl _FUN_004b7210(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    _FUN_004b7210(a, afParam1, afParam2, aiParam)->SetParams();
+===
+    _FUN_004b7210()->SetParams(a, afParam1, afParam2, aiParam);
+>>>
+
+@@ XINC1 src/fallout/interface/menus/hudmainmenu.cpp 0x0077f2f0
+# x86 0x0077f2f0+0x4d (/Od): `push 1; push 0; push 0; push 0; push 1; push 0`, `call [vtable(pObject)+0x14]` (no
+# stack word), `push eax; mov ecx,[0x011c3b3c]; call 0x00447080` (`ret 0x18`: the slot's result and the five words
+# pushed last), `push eax; call [vtable(vt)+0xdc]` (the node's attach-child slot 55: the loaded node and the first
+# pushed 1, no other push is left): 0x00447080 takes six words, slot 55 two.
+<<<
+    virtual void v55(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8);
+===
+    virtual void v55(int a1, int a2); /* fnv-nx XINC1 pop: the slot takes the node and one flag */
+>>>
+<<<
+    int GetB();
+};
+===
+    int GetB(); int GetB(int, int, int, int, int, int); /* fnv-nx XINC1 pop: ret 0x18 */
+};
+>>>
+<<<
+                    vt->v55(((FUN_0077f2f0_mgr*)DAT_011c3b3c)->GetB(), pObject->v5(), 0, 1, 0, 0, 0, 1);
+===
+                    vt->v55(((FUN_0077f2f0_mgr*)DAT_011c3b3c)->GetB(pObject->v5(), 0, 1, 0, 0, 0), 1);
+>>>
+
+@@ XINC1 src/havok/physics/dynamics/world/hkpworld.cpp 0x00c91160
+# x86 0x00c91160 (/O2): `mov ecx,[ecx+0x88]; jmp 0x00cf7690`, a tail call: 0x00cf7690 (`ret 4`, reads [esp+0x10]
+# after three pushes: its one stack word, the operation it copies into the queue) pops the word pushed for
+# 0x00c91160 itself. The function takes that pointer and forwards it (its callers push it: link rows of 0x00c91160).
+<<<
+    void __thiscall FUN_00cf7690();
+===
+    void __thiscall FUN_00cf7690(); void __thiscall FUN_00cf7690(const void* op); /* fnv-nx XINC1 pop: ret 4 */
+>>>
+<<<
+    void __thiscall FUN_00c91160();
+};
+===
+    void __thiscall FUN_00c91160(const void* op); /* fnv-nx XINC1 pop: the caller's own stack word, forwarded */
+};
+>>>
+<<<
+void __thiscall WorldWithPending::FUN_00c91160()
+{
+    ((PendingOperations*)m_pPendingOperations)->FUN_00cf7690();
+===
+void __thiscall WorldWithPending::FUN_00c91160(const void* op)
+{
+    ((PendingOperations*)m_pPendingOperations)->FUN_00cf7690(op);
+>>>
