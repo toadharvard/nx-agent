@@ -16,8 +16,10 @@ extern "C" {
 const NxGpuApi* nxgl_create(uint32_t width, uint32_t height, char* err, size_t errlen);
 void nxgl_destroy(void);
 
-/* The GLSL shim: rewrites "#version 460..." to "#version 450 core" and every "binding = n" to
- * "binding = stage * 16 + n". Returns the output length (0 if cap is too small); out is NUL-terminated. */
+/* The GLSL shim: rewrites "#version 460..." to "#version 450 core", every "binding = n" to
+ * "binding = stage * 16 + n", and appends _nxvs / _nxfs to uniform block names (a block of the same name in both
+ * stages would otherwise be one GL block with one binding). Returns the output length (0 if cap is too small);
+ * out is NUL-terminated. */
 size_t nxgl_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size_t cap);
 
 /* Last GL/compile error text (empty if none). */

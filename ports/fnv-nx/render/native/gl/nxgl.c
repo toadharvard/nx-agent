@@ -174,6 +174,25 @@ size_t nxgl_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size
                 }
             }
         }
+        /* "uniform Name {": a block of that name in two stages is one GL block and must have one binding; the
+         * stages bind their own buffers (binding = stage * 16 + n), so each stage gets its own block name */
+        if (n - i >= 8 && !memcmp(src + i, "uniform", 7) && (src[i + 7] == ' ' || src[i + 7] == '\t') &&
+            (i == 0 || src[i - 1] == ' ' || src[i - 1] == '\t' || src[i - 1] == ')' || src[i - 1] == '\n')) {
+            size_t j = i + 7;
+            while (j < n && (src[j] == ' ' || src[j] == '\t')) j++;
+            size_t id0 = j;
+            while (j < n && (src[j] == '_' || (src[j] >= 'a' && src[j] <= 'z') || (src[j] >= 'A' && src[j] <= 'Z') ||
+                             (src[j] >= '0' && src[j] <= '9'))) j++;
+            size_t id1 = j;
+            while (j < n && (src[j] == ' ' || src[j] == '\t' || src[j] == '\n')) j++;
+            if (id1 > id0 && j < n && src[j] == '{') {
+                for (size_t q = i; q < id1; q++) PUT(src[q]);
+                const char* sfx = stage ? "_nxfs" : "_nxvs";
+                for (const char* q = sfx; *q; q++) PUT(*q);
+                i = id1;
+                continue;
+            }
+        }
         PUT(src[i]);
         i++;
     }

@@ -3,6 +3,7 @@
 #include "scenes.h"
 #include "d3d9_state.h"
 #include "nx_shaders.h"
+#include "nx/families.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -737,12 +738,83 @@ void S_border(Ctx& c, Checks& k) {
     EndFrame(c);
 }
 
+// ---- scene: tile (the menu family) -----------------------------------------------------------------------------------
+struct TileVtx { float x, y, z, u, v; uint32_t rgba; };
+void DrawTile(Ctx& c, const uint32_t* rs, int vs, int ps, float x, float y, float w, float h, const float tint[4],
+              const float scroll[2], uint32_t vc, uint32_t tex, uint8_t layer) {
+    NxDynamicState dyn;
+    uint32_t sb;
+    uint16_t st = StateFor(c, rs, c.vsTile[vs], c.psTile[ps], c.layTile, &dyn, &sb);
+    uint32_t off;
+    TileVtx* v = (TileVtx*)c.vb->Alloc(4 * sizeof(TileVtx), 16, &off);
+    nx::Packet* p = c.frame->Emit();
+    if (!v || !p) return;
+    const float q[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
+    for (int i = 0; i < 4; i++) {
+        v[i].x = x + q[i][0] * w; v[i].y = y + q[i][1] * h; v[i].z = 0.5f; v[i].u = q[i][0]; v[i].v = q[i][1];
+        v[i].rgba = vc;
+    }
+    uint32_t tb = c.frame->AddTextures(&tex, 1);
+    p->key = nx::SortKey(0, layer, st, (uint16_t)tb, 0);
+    p->state = st; p->texCount = 1; p->texBlock = (uint16_t)tb;
+    p->vtxBlock = c.vb->block(); p->vtxOffset = off; p->vtxSize = 4 * sizeof(TileVtx);
+    p->prim = NxPrim_TriStrip; p->count = 4; p->instances = 1;
+    NxTileDraw* u = (NxTileDraw*)c.frame->Constants(&p->uboOffset);
+    if (!u) return;
+    memset(u, 0, sizeof *u);
+    // pixels (y down) -> D3D clip space, column-major
+    u->wvp[0] = 2.0f / W; u->wvp[5] = -2.0f / H; u->wvp[10] = 1.0f; u->wvp[12] = -1.0f; u->wvp[13] = 1.0f; u->wvp[15] = 1.0f;
+    if (scroll) { u->texScroll[0] = scroll[0]; u->texScroll[1] = scroll[1]; }
+    memcpy(u->tint, tint, 16);
+    Finish(c, p, dyn, sb, -1);
+}
+void S_tile(Ctx& c, Checks& k) {
+    static uint32_t img = 0;
+    static uint32_t texels[16];
+    if (!img) {
+        for (int i = 0; i < 16; i++) texels[i] = (uint32_t)(0x40 + 0x0C * i) << 24 | (uint32_t)(0xF0 - 8 * i) << 16 | (uint32_t)(0x20 + 12 * i) << 8 | 0x80;
+        img = MakeTex(c, FMT_A8R8G8B8, 4, 4, 1, texels, sizeof texels);
+    }
+    BeginFrame(c);
+    Pass(c, 1, RGBA(10, 20, 30, 255));
+    D3D a;
+    Samp s;   // POINT, WRAP
+    uint32_t h = Handle(c, img, FMT_A8R8G8B8, s);
+    const float tint[4] = {1.0f, 0.5f, 0.25f, 0.75f};
+    const float scroll[2] = {0.25f, 0.5f};
+    DrawTile(c, a.rs, 0, 0, 4, 4, 32, 32, tint, nullptr, 0, h, 0);                     // tile
+    DrawTile(c, a.rs, 1, 0, 40, 4, 32, 32, tint, scroll, 0, h, 0);                     // tile_scroll vs
+    DrawTile(c, a.rs, 2, 2, 76, 4, 32, 32, tint, nullptr, RGBA(255, 128, 64, 128), h, 0);   // tile_vc
+    DrawTile(c, a.rs, 0, 1, 112, 4, 32, 32, tint, nullptr, 0, h, 0);                   // tile_alphamap
+    // alpha blended over the background (menus: SRCALPHA/INVSRCALPHA)
+    D3D b; b.rs[ALPHABLENDENABLE] = 1; b.rs[SRCBLEND] = B_SRCALPHA; b.rs[DESTBLEND] = B_INVSRCALPHA;
+    DrawTile(c, b.rs, 0, 0, 4, 44, 32, 32, tint, nullptr, 0, h, 1);
+    for (int ty = 0; ty < 4; ty++)
+        for (int tx = 0; tx < 4; tx++) {
+            int px = tx * 8 + 4, py = ty * 8 + 4;
+            uint32_t t = texels[ty * 4 + tx];
+            float tr = (t >> 16 & 255) / 255.f, tg = (t >> 8 & 255) / 255.f, tbl = (t & 255) / 255.f, ta = (t >> 24) / 255.f;
+            k.Add("tile: texture x tint", 4 + px, 4 + py, u8(tr * tint[0]), u8(tg * tint[1]), u8(tbl * tint[2]), u8(ta * tint[3]));
+            uint32_t s2 = texels[((ty + 2) & 3) * 4 + ((tx + 1) & 3)];   // scrolled by (1, 2) texels, WRAP
+            k.Add("tile_scroll: uv + TexScroll", 40 + px, 4 + py, u8((s2 >> 16 & 255) / 255.f * tint[0]),
+                  u8((s2 >> 8 & 255) / 255.f * tint[1]), u8((s2 & 255) / 255.f * tint[2]), u8((s2 >> 24) / 255.f * tint[3]));
+            k.Add("tile_vc: texture x vertex colour x tint", 76 + px, 4 + py, u8(tr * 1.0f * tint[0]),
+                  u8(tg * (128 / 255.f) * tint[1]), u8(tbl * (64 / 255.f) * tint[2]), u8(ta * (128 / 255.f) * tint[3]));
+            k.Add("tile_alphamap: tint rgb, tint.a x texture.a", 112 + px, 4 + py, u8(tint[0]), u8(tint[1]), u8(tint[2]),
+                  u8(tint[3] * ta));
+            float a = ta * tint[3];
+            k.Add("tile: SRCALPHA blend over the background", 4 + px, 44 + py, u8(tr * tint[0] * a + 10 / 255.f * (1 - a)),
+                  u8(tg * tint[1] * a + 20 / 255.f * (1 - a)), u8(tbl * tint[2] * a + 30 / 255.f * (1 - a)), 0, 1, 7);
+        }
+    EndFrame(c);
+}
+
 } // namespace
 
 const Scene kScenes[] = {
     {"textured", S_textured}, {"sorted", S_sorted}, {"instanced", S_instanced}, {"cull", S_cull},
     {"blend", S_blend}, {"stencil", S_stencil}, {"sampler", S_sampler}, {"format", S_format},
-    {"epilogue", S_epilogue}, {"border", S_border},
+    {"epilogue", S_epilogue}, {"border", S_border}, {"tile", S_tile},
 };
 const int kSceneCount = sizeof kScenes / sizeof kScenes[0];
 
@@ -768,6 +840,19 @@ bool Init(Ctx& c, nx::Backend* be, char* err, uint32_t errlen) {
     c.vsQuad = Shader(c, "quad", 0); c.vsTri = Shader(c, "tri", 0);
     c.psSolid = Shader(c, "solid", 1); c.psTex = Shader(c, "tex", 1); c.psText = Shader(c, "text", 1);
     if (!c.vsQuad || !c.vsTri || !c.psSolid || !c.psTex || !c.psText) FAIL_("shader creation");
+    static const char* tv[3] = {"tile", "tile_scroll", "tile_vc"};
+    static const char* tp[3] = {"tile", "tile_alphamap", "tile_vc"};
+    for (int i = 0; i < 3; i++) {
+        c.vsTile[i] = Shader(c, tv[i], 0); c.psTile[i] = Shader(c, tp[i], 1);
+        if (!c.vsTile[i] || !c.psTile[i]) FAIL_("tile shader creation");
+    }
+    NxVtxLayout ll;
+    memset(&ll, 0, sizeof ll);
+    ll.count = 3; ll.stride = 24;
+    ll.attr[0].offset = 0; ll.attr[0].type = NxAttr_Float32; ll.attr[0].components = 3;
+    ll.attr[1].offset = 12; ll.attr[1].type = NxAttr_Float32; ll.attr[1].components = 2;
+    ll.attr[2].offset = 20; ll.attr[2].type = NxAttr_Unorm8; ll.attr[2].components = 4;
+    c.layTile = sc.Layout(ll);
     NxVtxLayout lq;
     memset(&lq, 0, sizeof lq);
     lq.count = 2; lq.stride = 16;

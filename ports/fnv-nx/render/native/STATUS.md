@@ -20,11 +20,11 @@ binutils 2.45.1, newlib 4.6.0, multilibs lp64/pic/ilp32/ilp32-pic), libnx (ext/l
 | D3D9 state translator | `front/d3d9_state.{h,c}`, `include/nx/state.h` | `make -C tests/s6n` | 527 checks, 0 failed |
 | front end v2 | `include/nx/front.h`, `front/front.cpp`, `include/nx/gpu_abi.h`, `front/gpu_dispatch.c` | scenes | - |
 | GL 4.5 reference backend | `gl/nxgl.{h,c}` | scenes | all scenes pass |
-| shader package | `shaders/*.glsl`, `shaders/build.py` (uam -> DKSH + GLSL in one C table) | build | 5 shaders, DKSH built |
-| N0 scenes | `n0/scenes.{h,cpp}`, `n0/run_gl.cpp`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | `make -C tests/s6n scenes` | 10 scenes, 700 conformance checks, 0 failed; 10/10 goldens bit-exact |
+| shader package | `shaders/*.glsl` (N0 + tile + nolight families), `shaders/build.py` (variants; uam -> DKSH + GLSL in one C table) | build | 18 shaders, all compile with uam and on GL |
+| N0 scenes | `n0/scenes.{h,cpp}`, `n0/run_gl.cpp`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | `make -C tests/s6n scenes` | 11 scenes, 780 conformance checks, 0 failed; 11/11 goldens bit-exact |
 | deko3d backend v2 | `host/nxgpu.{h,c}`, `host/nxgpu_host.c` (ext module 10) | compiles + links | not run on hardware |
 | N0 for the Switch | `n0/guest_main.cpp`, `switch/build.sh` | builds exefs.nsp + guest.nso | not run on hardware |
-| ILP32 guest under emulation | `tests/s6n/emu_n0.py` (S5 emu host + ext module 10 -> GL backend) | `make -C tests/s6n emu GUEST=...` | 700 checks pass, 10/10 images bit-identical to the goldens |
+| ILP32 guest under emulation | `tests/s6n/emu_n0.py` (S5 emu host + ext module 10 -> GL backend) | `make -C tests/s6n emu GUEST=...` | 780 checks pass, 11/11 images bit-identical to the goldens |
 | environment | `env.sh` | rebuilt here | ok |
 
 Commands:

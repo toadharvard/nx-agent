@@ -32,7 +32,8 @@ struct Ctx {
     nx::Frame* frame = nullptr;
     nx::StaticBuffer* vb = nullptr;
     uint16_t vsQuad = 0, vsTri = 0, psSolid = 0, psTex = 0, psText = 0;
-    uint16_t layQuad = 0, layTri = 0;
+    uint16_t layQuad = 0, layTri = 0, layTile = 0;
+    uint16_t vsTile[3] = {0, 0, 0}, psTile[3] = {0, 0, 0};   // tile family: (-, scroll, vc) / (-, alphamap, vc)
     uint32_t quadOff = 0;            // unit quad, triangle strip, in vb
     uint32_t rt = 0, depth = 0;      // 160x120 RGBA8 target, Z24S8
     uint32_t frameNo = 0;
