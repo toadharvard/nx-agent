@@ -231,6 +231,26 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual(self.gate(card, 'boot.main_menu')['status'], 'fail')
         self.assertEqual(card['blockers'][0], 'boot.real_exe')
 
+    def test_synthesized_image_named_in_the_report(self):
+        # no link/<c12> kept, so no hash: the report's data image line decides
+        self.world.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_image_sha256'))
+        self.assertEqual(self.gate(self.world.run(), 'boot.real_exe')['status'], 'no-data')
+        self.world.sub('reports/full1/%s-full.md' % C, "data image: the owner's FalloutNV.exe",
+                       'data image: $FARM_HOME/full/build/boot/synth/synth.exe')
+        g = self.gate(self.world.run(), 'boot.real_exe')
+        self.assertEqual((g['status'], g['value']), ('fail', 'no (synthesized image)'))
+
+    def test_v1_audits_from_the_newest_report_that_ran_them(self):
+        self.world.edit_json('_commits.json', lambda d: d.__setitem__('c0ffee000002', 0))
+        t = self.world.read('reports/full1/%s-full.md' % C)
+        t = t[:t.index('## V1 audits')] + '- V1-link audits: not run (no link outputs)\n'
+        self.world.write('reports/full1/c0ffee000002-full.md', t.replace(C, 'c0ffee000002'),
+                         published=self.world.latest() + 60)
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'link.traps')['sources'][0]['commit'], 'c0ffee000002')
+        g = self.gate(card, 'link.v1')
+        self.assertEqual((g['status'], g['sources'][0]['commit']), ('pass', C))
+
     def test_milestones_from_meta_keys(self):
         self.world.remove('link/%s/boot/milestones.json' % C)
         self.world.edit_json('link/%s/meta.json' % C, lambda d: d.update(boot_main_menu=1, boot_first_frame=0))

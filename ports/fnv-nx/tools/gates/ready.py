@@ -534,7 +534,7 @@ class Card:
             sg = (L.get('split_objects'), L.get('split_relocs'))
             self.gate('link.split_global', 'Link', 'split-global check (objects / relocations)', '%s / %s' % sg,
                       '0 / 0', PASS if sg == (0, 0) else NODATA if None in sg else FAIL, s,
-                      'apply failures %s' % L.get('apply_failures'), rank=9)
+                      '' if L.get('apply_failures') is None else 'apply failures %s' % L['apply_failures'], rank=9)
         # traps and audits come from the newest full build (its guest)
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
         if fb and fb[0][0].get('guest_undefined') is not None:
@@ -545,8 +545,11 @@ class Card:
                       'boot trap hits: %s keys, %s hits' % (d.get('trap_keys'), d.get('trap_hits')), rank=5)
         else:
             self.nodata('link.traps', 'Link', 'guest symbols bound to trap stubs', '0', 'no full build report', rank=5)
-        if fb and fb[0][0].get('v1'):
-            d, fs = fb[0]
+        # the newest full report that ran the audits (a full build without link outputs skips them)
+        fv = sorted(self.newest('full', r'-full\.md$', parse_full, lambda d: bool(d.get('v1'))).values(),
+                    key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
+        if fv:
+            d, fs = fv[0]
             bad = sorted(k for k, v in d['v1'].items() if v)
             self.gate('link.v1', 'Link', 'V1-link audits failing (D14)', '%d of %d' % (len(bad), len(d['v1'])), '0',
                       PASS if not bad else FAIL, fs, ', '.join(bad), rank=20)
@@ -725,6 +728,12 @@ class Card:
             self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes' if real else
                       'no (%s)' % ('synthesized image' if 'synth' in (d.get('image') or '') else 'another image'), 'yes',
                       PASS if real else FAIL, s, 'image sha256 %s.., exe %s..' % (got[:8], want[:8]), rank=1)
+        elif 'synth' in (d.get('image') or ''):
+            # no hash to compare (link/<c12> not kept), but the report names the synthesized image
+            real = False
+            self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'no (synthesized image)',
+                      'yes', FAIL, s, 'data image %s; no image hash (link/%s not kept)' % (
+                          os.path.basename(d['image']), (d['_text_commit'] or '')[:12]), rank=1)
         else:
             real = None
             self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
