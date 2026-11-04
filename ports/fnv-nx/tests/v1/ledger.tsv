@@ -1,0 +1,23 @@
+# V1 ledger (D14): one row per claim checked, or per refutation case. Read by tools/verify/v1_metric.py.
+# verdict: confirmed | refuted | partial | fixed | unverified
+#   refuted / partial = an open refutation (the test still fails on the owner's newest head)
+#   fixed             = the owner's fix was re-verified with the same test (closed)
+# merged: the integration commit that carries the claim, or - when it is not merged
+# fix: the commit that fixed a refutation (re-verified), or -
+id	stream	commit	merged	verdict	fix	test	claim
+S1B-POP-BOOT	S1b	afb2d2d	20af359	confirmed	-	test_s1b_pop_boot.py	xinc1_pop_boot: 0x00448420 / 0x0086c010 donor words (read from the exe: rets, reads, push order)
+S2C-POD2	S2c	ab73364	ad93b38	confirmed	-	test_fastcall_nonpod.py	layout.py MSVC 2008 POD predicate: 0 of 24 kinds differ
+S1REFS	S1-refs	c1039e7	c1039e7	confirmed	-	test_s1refs.py	RREF1-CLASS, RREF2, ADDR1 neutral and LANE1 platform: same meaning as MSVC (L1-L3, A1-A2, P1, C1)
+S13B-C1	S13b	0111901	f636994	refuted	-	test_s13b_callee_store.py	oracle-callee-store is an artifact: native-inlined callee classed artifact
+S13B-C2	S13b	0111901	f636994	refuted	-	test_s13b_callee_store.py	oracle-callee-store is an artifact: native-early-exit classed artifact
+S13B-C3	S13b	0111901	f636994	refuted	-	test_s13b_callee_store.py	oracle-callee-store is an artifact: x86-only-store classed artifact
+UBO-U3	render	a16a489	6d305cd	partial	-	test_nxgpu_ubo_cache.py	nxgpu UBO bind cache: slot & 3 aliases slots 4-15 onto 0-3
+SORT-T1	render	f280eb4	1b0665e	partial	-	test_sort_radix.py	SortPackets radix: function-level static hist is not reentrant (two-thread recording)
+S5-W2	S5	-	-	partial	-	test_s5_milestone_store.py	store watch: 64-bit str at want-4
+S5-W6	S5	-	-	partial	-	test_s5_milestone_store.py	store watch: the pointer at A as the upper word
+S5-W7	S5	-	-	partial	-	test_s5_milestone_store.py	store watch: a store to the old object after the pointer moved
+R0-R13	R0	58d1dfb	-	refuted	-	test_ready_adversarial.py	ready.py: boot.real_exe passes on contradicting image labels with no hash (also at bcbbf03)
+R0-R14	R0	58d1dfb	-	refuted	-	test_ready_adversarial.py	ready.py: frames_gate reads try-farm reports (unmerged heads) (also at bcbbf03)
+NXR-BOUNDS	render	44adf6c	-	partial	-	test_nx_render_robust.py	nx_render survives malformed .nxd9/.nxcap (D1-D7, C1-C6, mutations)
+FTOI2-EN	S1-STL	-	-	partial	-	test_ftoi_fuzz.py	FTOI2 float->int matches x86 for enums (7,970 conversions differ: enums take the unsigned path)
+FTOI2-CVTSS	S1-STL	-	-	partial	-	test_ftoi_fuzz.py	sse2neon _mm_cvtss_si32 out of range gives 0x7fffffff, x86 gives INT_MIN (2,333 inputs)
