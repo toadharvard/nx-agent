@@ -252,7 +252,11 @@ def main():
     cases = [('c%05d' % k, gen_scene(r, target)) for k in range(n)]
     if sens:
         sys.path.insert(0, os.path.dirname(HERE))
-        muts = [l.split('"')[1] for l in open(os.path.join(os.path.dirname(HERE), 'target/gl_target.c')) if l.strip().startswith('"') and l.strip().endswith(',') and '/*' in l and 'static' not in l][:64]
+        src = open(os.path.join(os.path.dirname(HERE), 'target/gl_target.c')).read()
+        arr = src[src.index('static const char* MUTANTS[] = {'):]
+        arr = arr[:arr.index('0};')]
+        import re
+        muts = re.findall(r'^\s*"(\w+)",', arr, re.M)
         base = {}
         for k in range(0, n, batch): base.update(run_batch(work, cases[k:k + batch], target))
         clean = [c for c in cases if base[c[0]][0] == 'MATCH']
