@@ -4,7 +4,8 @@
 # v6n_nine) and S6b's GLSL on a GL target (v6n_gl = V6n's executor of the layout contract, or v6n_s6ngl = S6n's
 # backend through its shim; vertex programs need v6n_gl). Inputs are random per seed:
 #   pixel programs : a driver VS (tests/v6n/shaders/drv2|drv3.vsa) feeds COLOR0/1 (random vertex colours) and
-#                    TEXCOORD0..7 (uv and random affine maps of it); 8 random 2D textures (point sampled); random
+#                    TEXCOORD0..7 (uv and random affine maps of it); 8 random textures (point sampled; 2D, or 8x8 cube
+#                    where the translation declares samplerCube); random
 #                    c0..c63; 16x16 A8R8G8B8 target.
 #   vertex programs: random FLOAT4 vertex elements for every declared input (vdecl / vg, D3DDECLUSAGE + index; the
 #                    position transform's CTAB matrix (name containing "Proj") near identity so the output covers the
@@ -15,6 +16,9 @@
 # so it stays in build/ or the scratch directory. Aggregate counts only go to the docs.
 #
 #   python3 -I render/verify/shaders/sdpfuzz.py PKG.sdp... [--target gl|s6ngl] [--seeds K] [--work DIR] [--jobs 2 (oracle + target processes)]
+#           [--translated DIR]  translations shared by several runs (made once with --no-dksh, then reused)
+#           [--shard K/N]   only the unique bytecode with int(hash) % N == K (one work dir per shard: D17 ten-minute chunks)
+#   python3 -I render/verify/shaders/sdpfuzz.py --merge OUT.json WORK1 WORK2 ...   join the shards' results.json
 import os, sys, subprocess, random, json, struct, hashlib, time, collections, shutil
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, HERE)
 import numpy as np
@@ -212,25 +216,66 @@ def run_batches(exe, outdir, scenes, jobs):
         while len([p for p in procs if p.poll() is None]) >= jobs: time.sleep(0.2)
     for p in procs: p.wait()
 
+def summarize(programs):
+    """-> totals, per package counts, unique-bytecode counts (the first program of each hash speaks for it)"""
+    tot = collections.Counter(); per = collections.defaultdict(collections.Counter); uniq = collections.Counter(); seen = set()
+    for e in programs:
+        k = e['status']; tot[k] += 1; tot['programs'] += 1; tot[e['stage']] += 1; tot['%s_%s' % (e['stage'], k)] += 1
+        per[e['package']][k] += 1; per[e['package']]['programs'] += 1
+        per[e['package']]['parsed'] += e['parsed']; per[e['package']]['translated'] += e['translated']
+        if k == 'fail':   # attribution of a failure (see RENDER_VERIFY.md §3.7)
+            tot['fail_' + e['cause']] += 1; per[e['package']]['fail_' + e['cause']] += 1
+        if e['translated'] and e['hash'] not in seen:
+            seen.add(e['hash']); uniq[k] += 1
+            if k == 'fail': uniq['fail_' + e['cause']] += 1
+    return tot, per, uniq
+
+def merge(out, works):
+    rs = [json.load(open(os.path.join(w, 'results.json'))) for w in works]
+    progs = []
+    for i, e in enumerate(rs[0]['programs']):
+        cands = [r['programs'][i] for r in rs if r['programs'][i]['status'] != 'other_shard']
+        assert all(c['hash'] == e['hash'] for c in cands), 'shards of different package sets'
+        progs.append(cands[0] if cands else e)
+    tot, per, uniq = summarize(progs)
+    m = dict(rs[0]); m['shards'] = [r.get('shard') for r in rs]; m.pop('shard', None)
+    m['packages'] = [{**{k: v for k, v in p.items() if k in ('file', 'sha256')}, **per[p['file']]} for p in rs[0]['packages']]
+    m['totals'] = dict(tot); m['unique_bytecode'] = dict(uniq); m['programs'] = progs
+    json.dump(m, open(out, 'w'), indent=1)
+    print('merged %d shards: %s' % (len(rs), out)); print('totals: %s' % json.dumps(dict(tot), sort_keys=True))
+    print('unique bytecode: %s' % json.dumps(dict(uniq), sort_keys=True))
+    return 0
+
 def main():
     a = sys.argv[1:]
+    if a and a[0] == '--merge': return merge(a[1], a[2:])
     tools = os.environ.get('FNVNX_SHADERS_BUILD', os.path.join(ROOT, 'render/shaders/build/host'))
     bindir = os.path.join(ROOT, 'build/v6n/bin'); work = os.path.join(ROOT, 'build/v6n/sdpfuzz')
-    target = 'gl'; seeds = 4; jobs = 2; pk = []; i = 0; compare_only = False
+    target = 'gl'; seeds = 4; jobs = 2; pk = []; i = 0; compare_only = False; shard = None; translated = None
     while i < len(a):
         if a[i] == '--target': target = a[i + 1]; i += 2
         elif a[i] == '--seeds': seeds = int(a[i + 1]); i += 2
         elif a[i] == '--work': work = a[i + 1]; i += 2
         elif a[i] == '--jobs': jobs = int(a[i + 1]); i += 2
         elif a[i] == '--tools': tools = a[i + 1]; i += 2
+        elif a[i] == '--bin': bindir = os.path.abspath(a[i + 1]); i += 2
         elif a[i] == '--compare-only': compare_only = True; i += 1   # reuse the images of a previous run
+        elif a[i] == '--shard': shard = tuple(int(x) for x in a[i + 1].split('/')); i += 2
+        elif a[i] == '--translated': translated = os.path.abspath(a[i + 1]); i += 2
         else: pk.append(os.path.abspath(a[i])); i += 1
     if not pk: sys.exit(__doc__)
     asm, sdp2 = os.path.join(tools, 's6b_asm'), os.path.join(tools, 'sdp2dksh')
     work = os.path.abspath(work); os.makedirs(work, exist_ok=True)
-    tr = os.path.join(work, 'translated'); os.makedirs(tr, exist_ok=True)
-    r = subprocess.run([sdp2, '-o', tr, '--glsl'] + pk, capture_output=True, text=True)
-    tline = r.stdout.strip().split('\n')[-1] if r.stdout.strip() else r.stderr.strip()[:200]
+    if translated:   # shared by shards: translated once (GLSL only; DKSH compilation is S6b's census), then reused
+        tr = translated; os.makedirs(tr, exist_ok=True); tl = os.path.join(tr, 'translator.txt')
+        if not os.path.exists(os.path.join(tr, 'index.tsv')):
+            r = subprocess.run([sdp2, '-o', tr, '--glsl', '--no-dksh'] + pk, capture_output=True, text=True)
+            open(tl, 'w').write(r.stdout.strip().split('\n')[-1] if r.stdout.strip() else r.stderr.strip()[:200])
+        tline = open(tl).read().strip() if os.path.exists(tl) else ''
+    else:
+        tr = os.path.join(work, 'translated'); os.makedirs(tr, exist_ok=True)
+        r = subprocess.run([sdp2, '-o', tr, '--glsl'] + pk, capture_output=True, text=True)
+        tline = r.stdout.strip().split('\n')[-1] if r.stdout.strip() else r.stderr.strip()[:200]
     rows = [l.rstrip('\n').split('\t') for l in open(os.path.join(tr, 'index.tsv'))][1:]
     blobs = {p: extract(p) for p in pk}
     dvs = P.driver_vs(asm, sdp2, work)
@@ -246,6 +291,8 @@ def main():
         programs.append(e)
         if status != 'ok':
             e['status'] = 'translate_fail'; e['detail'] = (rest[-1] if rest else '')[:200]; continue
+        if shard and int(h, 16) % shard[1] != shard[0]:
+            e['status'] = 'other_shard'; continue
         if h in byhash: continue
         byhash[h] = []
         binp = os.path.join(work, h + '.bin')
@@ -256,7 +303,6 @@ def main():
             und = [x['name'] for x in j.get('inputs', []) if not ((x['usage'] == 'TEXCOORD' and x['index'] < 8) or
                    (x['usage'] == 'COLOR' and x['index'] < 2) or x['usage'] in ('POSITION', 'FOG') or x['name'] in ('vPos', 'vFace'))]
             gs = open(g).read()
-            if 'uniform samplerCube' in gs: und.append('samplerCube')
             if 'uniform sampler3D' in gs: und.append('sampler3D')
             for sd in range(seeds):
                 sc = os.path.join(sw, '%s_p%d.scene' % (h, sd))
@@ -278,7 +324,7 @@ def main():
                 open(nsc, 'w').write(open(sc).read().replace(' %s\n' % g, ' %s\n' % gn))
                 numscenes.append(nsc)
                 psc_ = sc[:-6] + 'q.scene'
-                open(psc_, 'w').write(perturb(open(sc).read(), random.Random(sc)))
+                open(psc_, 'w').write(perturb(open(sc).read(), random.Random(os.path.basename(sc))))   # by name: the same in every work dir
                 probescenes.append(psc_)
         scenes += byhash[h] or []
     print('%s; %d programs, %d unique translated, %d scenes' % (tline, len(programs), len(byhash), len(scenes)), flush=True)
@@ -320,20 +366,10 @@ def main():
                                'oracle_nan' if onan else 'open')
     for e in programs:
         if e['status'] is None: e.update(res[e['hash']])
-    tot = collections.Counter(); per = collections.defaultdict(collections.Counter)
-    for e in programs:
-        k = e['status']; tot[k] += 1; tot['programs'] += 1; tot[e['stage']] += 1; tot['%s_%s' % (e['stage'], k)] += 1
-        per[e['package']][k] += 1; per[e['package']]['programs'] += 1
-        per[e['package']]['parsed'] += e['parsed']; per[e['package']]['translated'] += e['translated']
-    uniq = collections.Counter()
-    for h, x in res.items():
-        uniq[x['status']] += 1
-        if x['status'] == 'fail': uniq['fail_' + x['cause']] += 1
-    for e in programs:   # attribution of a failure (see RENDER_VERIFY.md §3.7)
-        if e['status'] == 'fail': tot['fail_' + e['cause']] += 1
+    tot, per, uniq = summarize(programs)
     out = {'schema': 'v6n-sdpfuzz/1', 'target': 'v6n_' + target, 'oracle': 'v6n_nine (Gallium Nine, softpipe + V6n O3/O5 fixes)',
            'seeds': seeds, 'thresholds': {'color_8bit': C.COLOR_TOL_8, 'float_rel': C.FLOAT_REL, 'depth_lsb': C.DEPTH_TOL},
-           'translator': tline,
+           'translator': tline, 'shard': '%d/%d' % shard if shard else None,
            'packages': [{'file': os.path.basename(p), 'sha256': hashlib.sha256(open(p, 'rb').read()).hexdigest(), **per[os.path.basename(p)]} for p in pk],
            'totals': dict(tot), 'unique_bytecode': dict(uniq), 'programs': programs}
     jp = os.path.join(work, 'results.json'); json.dump(out, open(jp, 'w'), indent=1)
