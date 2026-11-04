@@ -173,6 +173,18 @@ def pipeline(scratch):
                                                                       counts.get('LAYOUT-ALIGN-IGNORED'), r.stderr[-200:]))
 
 
+def build_flags():
+    """BUILD_FLAGS is exactly compile.sh's flag set; census.sh has all of it but the syntax-only exemptions"""
+    def script(name):
+        return subprocess.run(['bash', '-c', '. "%s/flags.sh"; script_flags "%s"' % (STATIC, os.path.join(PORT, name))],
+                              capture_output=True, text=True, check=True).stdout.split()
+    want = set(bash_array('BUILD_FLAGS'))
+    check(want == set(script('tools/link/compile.sh')), 'flags.sh BUILD_FLAGS == compile.sh flags (%s)' % sorted(
+        want ^ set(script('tools/link/compile.sh'))))
+    missing = want - set(bash_array('SYNTAX_ONLY_EXEMPT')) - set(script('tools/census.sh'))
+    check(not missing, 'census.sh has every build flag but -fPIC (%s)' % sorted(missing))
+
+
 def crosscheck():
     """crosscheck.py: a site belongs to the function whose tagged, brace-matched body contains it"""
     sys.path.insert(0, STATIC)
@@ -190,6 +202,7 @@ def main():
     os.makedirs(scratch, exist_ok=True)
     r = subprocess.run(['bash', os.path.join(STATIC, 'build.sh'), scratch], capture_output=True, text=True)
     check(r.returncode == 0, 'fnvcheck builds (%s)' % r.stderr.strip()[-300:])
+    build_flags()
     facts(scratch)
     crosscheck()
     if r.returncode == 0:

@@ -112,10 +112,11 @@ CLASSES = [
      'S5: cap the guest heap below 0x80000000 (2 GiB address space, as the original)'),
     ('ENUM-BITFIELD', 'enum bit-field whose top bit is used',
      'MSVC: enums are int, so the bit-field is signed (3 in 2 bits reads back -1); GCC: unsigned underlying type, '
-     'reads back 3', 'rule', 'ENUM1: give these enums the fixed underlying type int (enum E : int) - MSVC semantics'),
+     'reads back 3', 'rule', 'ENUM2 (S1; ENUM1 covers only opaque-declared enums): give these enums the fixed '
+     'underlying type int (enum E : int) - MSVC semantics'),
     ('ENUM-UNSIGNED', 'enum with enumerators >= 0x80000000',
      'MSVC: int (0x80000000 is INT_MIN; promotes, compares, widens as negative); GCC: unsigned int', 'rule',
-     'ENUM1: enum E : int with (int) casts on the large enumerators'),
+     'ENUM2: enum E : int with (int) casts on the large enumerators (S1 ENUM1 leaves these out)'),
     ('ENUM-64', 'enum with enumerators beyond 32 bits', 'MSVC truncates to int; GCC makes the enum 64-bit',
      'per-site', 'enum E : int'),
     ('MEMPTR-FIELD', 'pointer-to-member stored in a record',
