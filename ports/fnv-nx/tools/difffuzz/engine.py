@@ -561,13 +561,26 @@ class UnitCache:
                 for line in open(p, encoding='utf-8', errors='replace'):
                     f = line.rstrip('\n').split('\t')
                     if len(f) > 6 and f[1] == 'V' and f[2]:
-                        self._vrows.append((int(f[0], 16), f[2], int(f[6] or 8)))
+                        self._vrows.append((int(f[0], 16), f[2], int(f[6] or 8), False))
+            # S2c-vt: the other native vtables that stand for an image vftable (a decomp class whose vtable lost the V
+            # row, or one the exe's RTTI pairing displaced): their constructors store them (0x00402820 stores
+            # _ZTV12FUN_00402820 + 24 for AlchemyItem's {for Part30} vftable 0x0101191c, whose V row is FUN_00402d50's)
+            pa = config.LINK / 'out/vftable_alts.tsv'
+            if pa.exists():
+                for line in open(pa, encoding='utf-8', errors='replace'):
+                    f = line.rstrip('\n').split('\t')
+                    if not line.startswith('#') and len(f) >= 3:
+                        self._vrows.append((int(f[0], 16), f[1], int(f[2]), True))
         by_name = {n: a for a, n in image.stubs.items()}
         out = {}
-        for orig, sym, off in self._vrows:
+        for orig, sym, off, alt in self._vrows:
             base = image.syms.get(sym, by_name.get(sym))
-            if base is not None:
+            if base is not None and not alt:
                 out[(base + off) & 0xffffffff] = orig
+        for orig, sym, off, alt in self._vrows:   # the alternates never override a V row
+            base = image.syms.get(sym, by_name.get(sym))
+            if base is not None and alt:
+                out.setdefault((base + off) & 0xffffffff, orig)
         # classes without a V row (no vtable synthesis in this link): primary vftable ??_7<C>@@6B@ <-> _ZTV<C> + 8,
         # paired by the (non-template) class name
         if self._vft_by_class is None:

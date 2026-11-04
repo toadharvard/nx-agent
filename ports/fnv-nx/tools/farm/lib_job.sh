@@ -198,7 +198,7 @@ EOF
 		# apply's typeinfo pairs (fnvlink pair_typeinfo, in check's link order: sorted object names)
 		[ -f "$bd/link/out/typeinfo_pairs.tsv" ] && cp "$bd/link/out/typeinfo_pairs.tsv" out/
 		# S2c's slot fill from the player's exe: what was bound, and the gaps (trap slots left, with the reason)
-		for f in slot_fill.tsv slot_gaps.tsv; do [ -f "$bd/link/out/$f" ] && cp "$bd/link/out/$f" out/; done
+		for f in slot_fill.tsv slot_gaps.tsv vftable_alts.tsv; do [ -f "$bd/link/out/$f" ] && cp "$bd/link/out/$f" out/; done
 		cp "$bd/link/out/cache/msvc.tsv" out/cache/
 		rsync -a --exclude probe/ "$bd/link/out/vtables/" out/vtables/   # the synthesized vtables, not the probe work dir
 		# S2d's tables (bodies.tsv: every trapped name's class and evidence; bind.tsv, synth.tsv, stats.txt), so a relink

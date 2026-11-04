@@ -1154,7 +1154,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     for u in sorted(have, key=lambda x: os.path.basename(x.obj)):   # link order (synthesized zz_vt_* last)
         if any(s.shndx and s.bind != 'local' and s.name.startswith(('_ZTV', '_ZTI')) for s in objsyms[u.source]):
             rtti.add(vtables.Obj(u.obj), u.host is not None)
-    vmap, vstats = vtables.vftable_map(vnames, rtti, canon_it)
+    vlosers = {}   # image vftable -> native vtables of the other decomp classes naming it (vtables.vftable_map)
+    vmap, vstats = vtables.vftable_map(vnames, rtti, canon_it, vlosers)
     hand = hand_vptr_stores(os.path.dirname(os.path.dirname(os.path.abspath(units_json))), real, vnames, msvc,
                             canon_msvc)
     # the class constructed (or destroyed) at a storing function's address, by every name units.json gives it
@@ -1267,6 +1268,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         # replaces a pairing by decomp names or hand-stored vptrs with another class (shells with fewer slots,
         # another real class), and maps vftables no unit names (exe_vftables.tsv)
         exe_alt = collections.defaultdict(list)   # exe vftable -> the native vtables the pairing displaced
+        for a_, zs_ in vlosers.items():               # and those another decomp class's vtable won over
+            for z_, ap_, path_, note_ in zs_:
+                exe_alt[a_].append((z_, ap_, path_, 'primary' if note_.startswith('primary') else 'secondary'))
         exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, exe_alt)
         for a in rebind:
             rebind[a] = vmap[a][:2]
@@ -1289,6 +1293,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 exe_path, providers, exe_alt)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
+        # every other native vtable that stands for an image vftable (decomp names that lost, vtables exe_pair
+        # displaced): their constructors store them, so S13's harness pairs them with the vftable too (engine.py)
+        with open(os.path.join(out, 'vftable_alts.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+            f.write('#address\tnative vtable\taddress point\tobject\tkind\n')
+            for a_ in sorted(exe_alt):
+                for z_, ap_, path_, kind_ in exe_alt[a_]:
+                    if vmap.get(a_, (None, None))[:2] != (z_, ap_):
+                        f.write('%08x\t%s\t%d\t%s\t%s\n' % (a_, z_, ap_, os.path.basename(path_), kind_))
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
     # FUN_00404950's, ...): the map can give one native vtable; every class's own is listed, so a native vptr store
     # can be traced back to its image vftable (S13's vtable-store comparison)

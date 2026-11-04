@@ -279,7 +279,7 @@ class RttiIndex:
         return collections.ChainMap(self._local[obj.path], self._global)
 
 
-def vftable_map(vnames, rtti, canon_it):
+def vftable_map(vnames, rtti, canon_it, losers=None):
     """Bind image vftables to native address points (docs/LINK.md, kind V).
 
     vnames: vftable_names(); rtti: RttiIndex of all objects; canon_it(mangled): canonical class name of a _ZTV/_ZTI
@@ -326,6 +326,10 @@ def vftable_map(vnames, rtti, canon_it):
         cs.sort()
         _, z, ap, path, note, sec = cs[0]
         out[addr] = (z, ap, path, note)
+        if losers is not None:   # the other decomp classes' native vtables: their constructors still store them
+            for _, z2, ap2, path2, note2, _ in cs[1:]:
+                if z2 != z and (z2, ap2) not in [(x[0], x[1]) for x in losers.get(addr, [])]:
+                    losers.setdefault(addr, []).append((z2, ap2, path2, note2))
         stats['mapped-%s-%s' % ('secondary' if sec else 'primary', 'synth' if 'synthesized' in note else 'real')] += 1
     return out, stats
 

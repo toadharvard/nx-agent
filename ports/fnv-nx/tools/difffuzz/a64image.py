@@ -31,7 +31,7 @@ CODE_STUB = 0x08000000        # + original code address (0x00400000..0x00fdf000)
 NAMED_STUB = 0x09000000       # + 16 * k
 NAMED_STUB_MAX = 0x00800000 // 16
 STACK_GUARD = 0x0b800000      # page holding the stack protector canary (mapped by the AArch64 engine)
-LINK_VERSION = 5              # bump when the stub/alias rules change (invalidates cached unit images)
+LINK_VERSION = 6              # bump when the stub/alias rules change (invalidates cached unit images)
 ADDR_SYM = re.compile(r'^__fnv_([0-9a-f]{8})(?:_(C[0-9]|D[0-9]))?$')
 LAYOUT = """
 SECTIONS {
@@ -55,16 +55,18 @@ SECTIONS {
 def load_aliases(path):
     """aliases.ld -> (absolute {name: value}, aliases {name: target name})."""
     absolute, alias = {}, {}
-    rx = re.compile(r'^\s*([\w.$]+)\s*=\s*([\w.$]+)\s*;')
+    # `name = 0x...;`, `name = target;` and `name = target + n;` (an image vftable's alias: the native vtable's
+    # address point, S2c); the last two are aliases, with the offset kept in the target text
+    rx = re.compile(r'^\s*([\w.$]+)\s*=\s*([\w.$]+)\s*(?:\+\s*(\d+)\s*)?;')
     if os.path.exists(path):
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
             m = rx.match(line)
             if not m:
                 continue
-            if m.group(2).startswith('0x'):
+            if m.group(2).startswith('0x') and not m.group(3):
                 absolute[m.group(1)] = int(m.group(2), 16)
-            else:
-                alias[m.group(1)] = m.group(2)
+            elif not m.group(2).startswith('0x'):
+                alias[m.group(1)] = m.group(2) + (' + %s' % m.group(3) if m.group(3) else '')
     return absolute, alias
 
 
@@ -155,6 +157,11 @@ def _build_many(sources, linkdir, workdir, name):
         if not os.path.exists(obj):
             raise FileNotFoundError(obj)
         units.append(obj)
+        # the unit's synthesized vtables and typeinfo (fnvlink vtables: zz_vt_<unit>.o, linked after it in the
+        # game): without them its constructors store a stub address as the vptr (S13b native-stub-data)
+        vt = os.path.join(fixed, 'zz_vt_' + config.obj_name(source))
+        if os.path.exists(vt):
+            units.append(vt)
     bridges = os.path.join(fixed, 'zz_bridges.o')
     os.makedirs(workdir, exist_ok=True)
     base = os.path.join(workdir, name)
@@ -188,7 +195,7 @@ def _build_many(sources, linkdir, workdir, name):
         if n in absolute:
             lines.append('%s = 0x%08x;' % (n, absolute[n]))
             defined.add(n)
-        elif n in alias and alias[n] in defined:
+        elif n in alias and alias[n].split(' + ')[0] in defined:
             lines.append('%s = %s;' % (n, alias[n]))
             defined.add(n)
     stubs, k = {}, 0
