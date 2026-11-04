@@ -6,12 +6,16 @@ V6n is the independent verifier (D14) of the native renderer. Method and results
 1. True pass numbering (`render/verify/enum/pass_names.py`): 759 ids, anchored on the binary's pass-name function
    (742 cases) + 6 code anchors. The header enum is wrong for FNV (RENDER_VERIFY.md §1).
 
+2. Pass-space enumerator (`render/verify/enum/pass_space.py`): 758 declared, 742 named, 637 configured,
+   439 emitted, 753 in an accumulator render group, **395 reachable** (per class: RENDER_VERIFY.md §2).
+
 ## In progress
-- pass-space enumerator, Nine oracle host build.
+- Nine oracle host tool.
 
 ## Rebuild
 ```sh
 python3 -I render/verify/enum/pass_names.py ext/fnv_decomp build/v6n     # -> build/v6n/pass_names.tsv
+python3 -I render/verify/enum/pass_space.py ext/fnv_decomp build/v6n     # -> build/v6n/pass_space.tsv (+ counts)
 ```
 
 ## S6n claims checked

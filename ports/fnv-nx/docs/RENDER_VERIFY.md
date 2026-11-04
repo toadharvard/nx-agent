@@ -41,6 +41,9 @@ numbering has **759** ids (0 = disabled, 1..758), and family blocks sit at diffe
    * Blood splatter emits `flag + 0x2f0` = 752/753 = true `BLOOD_SPLATTER_FLARE`/`BLOOD_SPLATTER` (header 666/667).
    * The batch renderer excludes alpha passes `0x238..0x23e` (568..574) from depth sorting: true SKYBASEPRE..
      SKY_CLOUDS_UNDERWATER. Under the header, 568 would be WATER_STENCIL. So `FIRST_ALPHA_PASS` = **568**, not 494.
+   * Accumulator render groups (`RenderPassGroup(first, last, ..)` literals in `bsshaderaccumulator.cpp` and
+     staging): 1-567, 568-603, 604-647, 648-649, 650-683, 684-718, 719-727, 728-751 and the whole frame 1-753
+     (0x2F1). The last group ends exactly at the true BLOOD_SPLATTER (753); under the header 753 is "unused".
    * Emitter-family agreement: every literal pass id passed to `ShaderPassList::Add` (FUN_00ba9ee0) was looked up
      in both numberings. Under the true numbering every emitter emits ids of its own family (the 1x texture-pass
      file emits 330..338 = TEXTURE*, water emits WATER*, sky emits SKY*, grass shadows 644..647 = GRASS_SHADOW*);
@@ -54,3 +57,50 @@ numbering has **759** ids (0 = disabled, 1..758), and family blocks sit at diffe
 "WATER* 568-638", "WATER_DEPTH* 642-665", "GRASS_* 20-59, 524-567", "NOLIGHTING* 66-87". All of these come from the
 header and are wrong for FNV (only the 0-offset blocks, ZONLY..DEPTHMAP 1..19 and NOLIGHTING 65..87, survive).
 Anything in S6n's code that keys on header pass ids is suspect (checked in `render/verify/STATUS.md`).
+
+## 2. The pass space ("all situations")
+
+`render/verify/enum/pass_space.py <decomp> build/v6n` joins, per true pass id, what the engine **emits** with how
+it is **configured**, and writes `build/v6n/pass_space.tsv` (columns: id, name, class, in accumulator group, emit
+sites and kind, how configured, VS binary + HLSL source + defines, PS binary + source + defines, static render
+states, sampler-stage setup, the four SLS per-pass int arrays, skin and vertex-colour flags) plus
+`emit_sites.tsv` and `overrides.tsv` (render-time state overrides). Method, per source:
+
+* **emitted**: all 347 eight-argument calls of `ShaderPassList::Add` (FUN_00ba9ee0). Literal ids, or expressions
+  resolved locally (C ternaries and `+`, free boolean terms enumerated over {0,1}, local `v = ..; v += ..;`
+  substitution): 346 resolved, 1 unresolved (the id is a parameter of a forwarding helper).
+* **configured**: ShadowLightShader by its global pass array (`DAT_011fdff8[759]`, setters for VS/PS/render
+  states/stages and the per-pass int arrays; VS/PS references resolved to `SLS1/SLS1S/SLS2%03i.vso` and
+  `SLS1/SLS2%03i.pso` and joined with the developer tables: 156 VS entries, 203 PS entries); Lighting30 by its
+  `pass - 376` index map; Water by its 74-entry member array (base 648, inferred from the accumulator group);
+  other classes by the ids their own files dispatch on (`case`, `==`, range checks); classes with one or two passes
+  and no dispatch are marked "single-pass (inferred)".
+* **in group**: the id lies in one of the accumulator's render groups. **reachable** = emitted and configured
+  and in a group.
+
+Counts (2026-11-04, decomp 87eb937):
+
+| class | declared | named | configured | emitted | in group | reachable |
+|---|---|---|---|---|---|---|
+| ShadowLight | 403 | 401 | 338 | 227 | 403 | 212 |
+| Lighting30 | 120 | 114 | 118 | 36 | 120 | 34 |
+| TallGrass | 84 | 84 | 44 | 44 | 84 | 20 |
+| Water | 73 | 72 | 71 | 71 | 73 | 69 |
+| NoLighting | 22 | 22 | 22 | 22 | 22 | 22 |
+| Sky | 13 | 13 | 10 | 10 | 13 | 10 |
+| SLS water depth / NoLighting water depth | 8 / 8 | 8 / 8 | 8 / 8 | 8 / 8 | 8 / 8 | 8 / 8 |
+| VolumetricFog | 5 | 0 | 0 | 0 | 5 | 0 |
+| DistantLOD | 3 | 3 | 2 | 3 | 3 | 2 |
+| ShadowVolume | 3 | 3 | 0 | 0 | 0 | 0 |
+| SpeedTree leaf / frond, DistantTree | 2 / 1 / 2 | 2 / 1 / 1 | 2 / 1 / 2 | 2 / 0 / 2 | 2 / 1 / 2 | 2 / 0 / 2 |
+| Particle, GeometryDecal, BloodSplatter | 2 / 2 / 2 | 2 / 2 / 2 | 2 / 2 / 2 | 0 / 2 / 2 | 2 / 2 / 2 | 0 / 2 / 2 |
+| Bolt, Beam, Precipitation, Tile, ImageSpace | 1 each | 1 / 1 / 1 / 1 / 0 | 1 each | 1 / 0 / 1 / 0 / 0 | 1 / 1 / 1 / 0 / 0 | 1 / 0 / 1 / 0 / 0 |
+| **total** | **758** | **742** | **637** | **439** | **753** | **395** |
+
+Reading the numbers: **395 pass ids are statically reachable** (emitted by a pass-list builder, configured by
+their class, and inside a render group). The 439 emitted ids are the lower bound of "situations" the native
+renderer must reproduce; ids with no static emitter (particles, beam, tile, image space, volumetric fog) are
+selected through non-`Add` paths (their own render calls) and are covered by the scene-level capture of §6.
+Static VS/PS bindings were found for 69 SLS passes (the remaining SLS passes take their shaders from setup
+helpers that the line scanner does not follow; the pass-space table marks them, the capture/replay of §6 closes
+the gap at run time).
