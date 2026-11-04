@@ -58,6 +58,25 @@ install (tests/s5/synth_install.py) and the stub table. Each boot takes 25-60 s 
        stop at InsertOrUpdate+0x30.
   5. OSGlobals hands WinMain's renderer init a garbage window size (0x4007d340 x 0x400000): its constructor
      faults and is return-this stubbed. It is not used for the device size.
+* **verified (the native path inside the game guest, forced)** - With `before-winmain fnvnx_d3d9_device_created 0`
+  and then the engine stubs Do_BeginFrame/Do_EndFrame in an experimental table, on the same boot:
+  - "fnvnx native renderer: up, 1280x720, back buffer image 1, depth image 3, backend 2" (GL);
+  - milestones renderer-init (nx::Renderer::Init) and first-frame (nx::Renderer::Do_EndFrame) fire;
+  - one GL submit with present, then a back-buffer readback to frame_0001.png (black: nothing drew).
+  So device bring-up, submit, present and readback work end to end on the emulator's host path. What is missing
+  is the engine's own path to CreateDevice (item 4).
+* **fix proposed for item 4 (S1 rule or S2c)**
+  - Exe vftable 0x010eec54: [dtor(flags), KeyToHashIndex 0x00a63840, IsKeysEqual 0x00e92590, SetValue 0x00e8b490,
+    ClearValue 0x00a89af0, purecall, purecall].
+  - The object's native vtable `_ZTV14BE7B040MapBaseIjP12BE7B040ValueE` is [D2, D0, KeyToHashIndex]: GCC order,
+    and short.
+  - The caller's class HashTableBase (nivbset.cpp) declares a placeholder `Reserved0` where the exe has the
+    destructor.
+  - Rule: when a class's first declared virtual is a placeholder and its paired exe vftable's slot 0 is a deleting
+    destructor, declare `virtual ~C()` there instead. GCC's layout then follows the minus-one slot rule.
+  - With S2c's extension of short vtables, this fixes InsertOrUpdate and NiTStringTemplateMap::SetAt.
+* **found (farm)** - full1's report for 097cdd1504c8 has the link stage "cached": the tree was adopted from
+  06857911f5. No guest has S2c's vtable work (09524da) yet, and no link/097cdd1504c8 was published.
 * **next**
   1. Boot the next full1 link (S2c's vtable extension is in integration since 09524da) with FARM_NATIVE_RENDER, and
      a link with LINK_OVERRIDES=render as soon as one exists.
