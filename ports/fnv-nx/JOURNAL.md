@@ -2575,3 +2575,12 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   against the native unit's copy, now compare equal (50 + 17 call-args divergences at 40b2cb5).
 * **next** - S13 difffuzz-10 (HARNESS bump): `_byteswap_ulong` builtins, dynamic_cast as an untraced builtin, and
   stack arguments beyond what the x86 caller pushed are not compared (FUN_005accb0).
+
+### J-0117 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0116
+
+* **did** - S13 `difffuzz-10` (HARNESS bump; with the restart path it costs at most one chunk per shard):
+  - `_byteswap_ulong` is a builtin on both machines.
+  - `__RTDynamicCast` is a builtin that returns the object pointer, as GCC's folded cast does. 00591ca0 is gone.
+  - Stack parameters the x86 caller did not push are no longer compared. The count comes from the caller's cleanup or
+    the callee's `ret N`. FUN_005accb0's callers 005c78f0 and 005d4c60 are gone, which confirms S1b's diagnosis.
+  - Self-test: 0 failures.
