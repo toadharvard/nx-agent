@@ -981,6 +981,17 @@ def r_falloff_traps(path, text, stats):
                      r'__inline|__forceinline)\b', ' ', ret)
         ret = re.sub(r'\s+', ' ', ret).strip()
         if re.fullmatch(r'(?:const\s+|volatile\s+)*void', ret) or 'operator' in name and not ret: continue
+        # the head window can start inside a long parameter list: then the first "declarator" is a base or member in
+        # a constructor's mem-initializer list, or a name inside the parameters, and `ret` is parameter text (S1b:
+        # FUN_00a7b630::FUN_00a7b630, ImageSpaceModifierInstanceDRB ctor). Constructors return nothing; a real
+        # return type has no `)` and no `,` outside template brackets.
+        if re.search(r'\)\s*:(?!:)', head[:m.end()]): continue
+        flat = ret
+        while True:
+            nflat = re.sub(r'<[^<>]*>', '', flat)
+            if nflat == flat: break
+            flat = nflat
+        if re.search(r'[),]', flat): continue
         if re.search(r'[=,(]$', ret) or ret.endswith(('return', 'new', 'delete')): continue   # an expression
         if not re.search(r'[A-Za-z_]', ret): continue
         if re.search(r'\\[ \t]*\n', text[o:c]): continue          # inside a #define (continued lines)
