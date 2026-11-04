@@ -58,6 +58,7 @@ RUNTIME = re.compile(r'^(?:__cxa_\w+|_Unwind_\w+|__gxx_personality_v0|__stack_ch
 ADDR_SYM = '__fnv_%08x'
 TRAP_SYM = '__fnvnx_vtrap_%08x'   # slot of a virtual function defined nowhere -> fnvnx_vslot_trap(this, text)
 TLS_SYM = '__fnvnx_tls_%08x'      # thread-local variable at an image .tls address: slot of the native TLS block
+XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
 # renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
 GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit'}
@@ -445,6 +446,35 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         del native[a]
     stats['import_thunks'] = len(thunks)
     bound = collections.defaultdict(set)  # unit -> addresses its object references by address
+    # destructors GCC calls where MSVC did not (MSVC destroys through a deleting destructor ??_G/??_E at an address;
+    # its identical-code folding gives classes with the same destructor one ??_G): a class sharing a deleting
+    # destructor address with a class whose destructor a compiled object defines uses that destructor
+    nat_dtor = collections.defaultdict(dict)   # class qual -> {D1/D2: native name}
+    for u_ in have:
+        for sy in objsyms[u_.source]:
+            if sy.shndx and sy.bind in ('global', 'weak') and sy.type == 'func' and re.search(r'D[12]Ev$', sy.name):
+                g_ = itanium(sy.name)
+                if g_.variant in ('D1', 'D2'):
+                    nat_dtor[tuple(g_.qual[:-1])].setdefault(g_.variant, sy.name)
+    ddtor_cls = collections.defaultdict(set)   # deleting destructor address -> class quals naming it
+    for u_ in units.values():
+        for n_, a_ in list(u_.refs.items()) + [(n_, a_) for a_, n_ in u_.defs]:
+            if n_.startswith(('??_G', '??_E')):
+                m_ = msvc(n_)
+                if m_.variant in ('sdd', 'vdd'):
+                    ddtor_cls[a_].add(tuple(m_.qual[:-1]))
+    ddtor_of = collections.defaultdict(set)
+    for a_, cs in ddtor_cls.items():
+        for c_ in cs:
+            ddtor_of[c_].add(a_)
+
+    def dtor_alias(sig):
+        q = tuple(sig.qual[:-1])
+        got = {nat_dtor[c_][sig.variant] for a_ in ddtor_of.get(q, ()) for c_ in ddtor_cls[a_] - {q}
+               if sig.variant in nat_dtor.get(c_, {})}
+        return got.pop() if len(got) == 1 else None
+    xtraps = {}      # trap stub -> (ctor/dtor defined nowhere, why)
+    unwind_cache = {}
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
     vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
     for u in have:
@@ -568,6 +598,18 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls = 'vslot-unresolved'
             elif cls == 'unresolved' and isig.variant:
                 cls = 'unresolved-ctor-dtor'
+                alias = dtor_alias(isig) if isig.variant in ('D1', 'D2') else None
+                if alias:
+                    cls, target = 'ctor-dtor-alias', alias
+                else:
+                    if u.host is None and u.source not in unwind_cache:
+                        unwind_cache[u.source] = unwind_only(u.obj, {n_ for n_ in undefs if itanium(n_).variant})
+                    why = 'called by an emitted slot function' if u.host is not None else (
+                        'reached by exception unwinding' if unwind_cache[u.source].get(un) else None)
+                    if why:
+                        cls = 'ctor-dtor-trap'
+                        target = XTRAP_SYM % int(hashlib.sha1(un.encode('utf-8', 'surrogateescape')).hexdigest()[:8], 16)
+                        xtraps.setdefault(target, (un, why))
             elif cls == 'special-unresolved':
                 cls = 'special-unresolved:' + (note or '?').replace(' ', '-')
             if un in vslots:
@@ -755,6 +797,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             target, v, rtext, dtext = bridges[bn]
             f.write(abi.emit_bridge(bn, target, v, 'ref: %s | def: %s' % (rtext, dtext)))
         f.write(emit_traps(traps))
+        f.write(emit_xtraps(xtraps))
         f.write(emit_tls(tls_addrs))
     with open(os.path.join(out, 'abi.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#object\tundefined\taddress\tref_msvc\tdef_msvc\tverdict\tclasses\tmoves\tnotes\tref\tdef\n')
@@ -806,6 +849,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'bridges generated: %d' % len(bridges),
               'trap stubs for virtual functions defined nowhere: %d (%d slot references)'
               % (len(traps), byclass['vslot-unresolved']),
+              'ctors/dtors GCC needs where MSVC did not: %d references bound to the destructor of a class sharing '
+              'the deleting destructor, %d to %d trap stubs (only exception cleanups or emitted slot functions reach '
+              'them: %d / %d), %d left (normal code)'
+              % (byclass['ctor-dtor-alias'], byclass['ctor-dtor-trap'], len(xtraps),
+                 sum(1 for w in xtraps.values() if w[1].startswith('reached')),
+                 sum(1 for w in xtraps.values() if w[1].startswith('called')), byclass['unresolved-ctor-dtor']),
               'CRT/library addresses with a provider (crt_symbols.tsv): %d, references bound to it: %d'
               % (len(providers), byclass['provider']),
               'import references bound by IAT slot (imports.tsv + exports.cpp): %d of %d'
@@ -1194,6 +1243,60 @@ def emit_tls(addrs):
     for a in sorted(addrs):
         n = TLS_SYM % a
         out += ['    .globl %s' % n, '    .type %s, %%tls_object' % n, '    .set %s, __fnvnx_tls_image + %d' % (n, a - base)]
+    return '\n'.join(out) + '\n'
+
+
+def unwind_only(path, names):
+    """{name: True when every reference of the object to it is a call in an exception cleanup}: scanning forward from
+    the call, `bl _Unwind_Resume` comes before any `ret` / `b` / `br` (GCC's landing pads destroy what a throwing
+    constructor or scope had built, then resume unwinding; MSVC's code for the same functions has no such cleanup).
+    References from data or other code count as normal."""
+    o = vtables.Obj(path)
+    out = {}
+    resume = {i for i, sy in enumerate(o.syms) if sy[0] == '_Unwind_Resume' and not sy[5]}
+    want = {i for i, sy in enumerate(o.syms) if sy[0] in names and not sy[5]}
+    for i in range(len(o.secs)):
+        if not o.secs[i][2] & 2:
+            continue
+        rel = o.rel(i)
+        hits = [(off, si) for off, (si, _, _) in rel.items() if si in want]
+        if not hits:
+            continue
+        stops = {off for off, (si, _, _) in rel.items() if si in resume}
+        code = o.secs[i][2] & 4 and o.secs[i][1] != 8
+        data = o.data[o.secs[i][4]:o.secs[i][4] + o.secs[i][5]] if code else b''
+        for off, si in hits:
+            eh = False
+            pos = off + 4
+            while code and pos + 4 <= len(data) and pos - off <= 1024:
+                if pos in stops:
+                    eh = True
+                    break
+                w = int.from_bytes(data[pos:pos + 4], 'little')
+                if w == 0xd65f03c0 or w >> 26 == 0b000101 or (w & 0xfffffc1f) == 0xd61f0000:   # ret, b, br
+                    break
+                pos += 4
+            name = o.syms[si][0]
+            out[name] = out.get(name, True) and eh
+    return out
+
+
+def emit_xtraps(xtraps):
+    """Trap stubs for constructors / destructors defined nowhere (bridges.S): x1 = what it was, then
+    fnvnx_special_trap(this, text); weak default: brk."""
+    if not xtraps:
+        return ''
+    out = ['// constructors / destructors defined nowhere, reached only by exception cleanups or emitted slot functions',
+           '    .text', '    .p2align 2', '    .weak fnvnx_special_trap', '    .type fnvnx_special_trap, %function',
+           'fnvnx_special_trap:', '    brk #0xf6', '    .size fnvnx_special_trap, .-fnvnx_special_trap']
+    for name in sorted(xtraps):
+        sym, why = xtraps[name]
+        text = ('constructor/destructor defined nowhere: %s (%s)' % (sym, why)).replace('\\', '\\\\').replace('"', '\\"')
+        out += ['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
+                '    adrp x1, .L%s' % name, '    add x1, x1, :lo12:.L%s' % name, '    b fnvnx_special_trap',
+                '    .size %s, .-%s' % (name, name), '    .section .rodata.%s,"a"' % name, '.L%s:' % name,
+                '    .asciz "%s"' % text]
     return '\n'.join(out) + '\n'
 
 

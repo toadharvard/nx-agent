@@ -17,7 +17,10 @@
   functions, its static initializer and a pointer in its data reach the rebound symbol, not `.data + off`;
 * GAME1 (fnvnx_game_<name>): looked up by the unit's own name (a game function, another import's slot);
 * GCC's global operator new/delete -> the game's, by the MSVC names the units bind (sized delete: the sized one);
-* S1b units_renames.tsv: applied to a unit whose source carries the patch, not to an unpatched one.
+* S1b units_renames.tsv: applied to a unit whose source carries the patch, not to an unpatched one;
+* destructors defined nowhere that GCC calls where MSVC did not: one reached only by a constructor's exception
+  cleanup -> trap stub; one at the end of a scope (normal code) stays undefined; one of a class sharing its deleting
+  destructor (??_G address) with a class whose destructor is compiled -> that destructor.
 """
 import collections
 import json
@@ -91,6 +94,11 @@ SRC = {
                  'void FUN_00403000_s1b::FUN_00403000(int) {}\n'
                  'void call_x(FUN_00403000_s1b *p) { p->FUN_00403000(1); }\n',
     'src/z.cpp': 'void FUN_00404000(int) {}\n',                                   # not patched: keeps its name
+    'src/e.cpp': 'struct BaseX { BaseX(); ~BaseX(); int a; };\nstruct Mem { Mem(); ~Mem(); };\n'   # defined nowhere
+                 'struct DerX : BaseX { Mem m; DerX(); };\nDerX::DerX() : BaseX(), m() {}\n'   # cleanup: ~BaseX
+                 'void scope_user() { Mem m2; }\n'                                            # normal: ~Mem
+                 'struct Shell1 { ~Shell1(); int x; };\nvoid del_shell(Shell1 *p) { delete p; }\n'
+                 'struct Real1 { ~Real1(); int x; };\nReal1::~Real1() { x = 0; }\n',
     'src/l.cpp': 'extern "C" void LeaveCriticalSection(void *);\nvoid plain_leave(void *p) { LeaveCriticalSection(p); }\n',
 }
 RENAMES = ('# source\tkind\taddress\told MSVC name\tnew MSVC name\n'
@@ -143,6 +151,11 @@ UNITS = {'units': [
      'symbols': {}},
     {'source': 'src/z.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x404000, '?FUN_00404000@@YAXH@Z')],
      'symbols': {}},
+    {'source': 'src/e.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x401700, '??0DerX@@QAE@XZ'), F(0x401710, '?scope_user@@YAXXZ'), F(0x401720, '?del_shell@@YAXPAUShell1@@@Z'),
+        F(0x401730, '??1Real1@@QAE@XZ')],
+     'symbols': {'??0BaseX@@QAE@XZ': '0x00401740', '??0Mem@@QAE@XZ': '0x00401750',
+                 '??_GShell1@@QAEPAXI@Z': '0x00401760', '??_GReal1@@QAEPAXI@Z': '0x00401760'}},
 ]}
 
 ok = True
@@ -253,6 +266,15 @@ def main():
               'S1b-renamed reference: %s' % refs.get(('src/x.cpp', '_ZN16FUN_00403000_s1b12FUN_00403000Ei')))
         check(rows.get(0x404000, [''] * 4)[1:4] == ['F', '__fnv_00404000', '_Z12FUN_00404000i'],
               'unpatched unit keeps its name: %s' % rows.get(0x404000))
+        e_ = 'src/e.cpp'
+        r_ = refs.get((e_, '_ZN5BaseXD2Ev'), [''] * 6)
+        check(r_[2] == 'ctor-dtor-trap' and r_[5].startswith('__fnvnx_xtrap_'), 'cleanup-only dtor -> trap: %s' % r_)
+        r_ = refs.get((e_, '_ZN3MemD1Ev'), [''] * 6)
+        check(r_[2] == 'unresolved-ctor-dtor' and not r_[5], 'normal-path dtor stays undefined: %s' % r_)
+        r_ = refs.get((e_, '_ZN6Shell1D1Ev'), [''] * 6)
+        check(r_[2] == 'ctor-dtor-alias' and r_[5] == '_ZN5Real1D1Ev', 'dtor sharing a ??_G -> its native dtor: %s' % r_)
+        check('constructor/destructor defined nowhere: _ZN5BaseXD2Ev (reached by exception unwinding)'
+              in open(os.path.join(out, 'bridges.S')).read(), 'trap stub text')
         dd = {l.split('\t')[1] for l in open(os.path.join(out, 'data_defs.tsv'))}
         check({'ms_kRTTI', 'g_count', 'g_pcount'} <= dd, 'split-global variables are data defs: %s' % sorted(dd))
         run([sys.executable, FNVLINK, 'apply', out, fixed])
