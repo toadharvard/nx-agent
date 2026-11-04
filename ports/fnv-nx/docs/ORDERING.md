@@ -238,8 +238,12 @@ not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B
 
 ## Open, not closed by this
 
-* **ORDER-OBJECT** (`get()->f(a())`): GCC evaluates the object expression first (C++17), MSVC 2008 probably last. Not
-  confirmed against MSVC here, so the plugin keeps GCC's order; S11's MSVC builds can decide it.
+* **ORDER-OBJECT** (`get()->f(a())`): GCC evaluates the object expression first (C++17), MSVC 2008 last.
+  **compile.sh builds with `object=last`** (`ORDER_OBJECT=first` for A/B). Evidence: MSVC's thiscall pushes the
+  arguments and loads ecx last, and the byte-matched decomp has a call whose object pointer is assigned inside its
+  own argument list (`obj->f(..., obj = X, ...)`), which only works with the object last (GCC: an uninitialized
+  read, gone with object=last). Measured on 131 units: 27 objects change, -0.06 % instructions, no compiler error.
+  S11's MSVC run of evalorder.cpp confirms it; if it disagrees, the default goes back.
 * **ORDER-OPERATOR** (C++17 fixes `<<`, `>>`, `[]`, `->*` left to right and `=`, `@=` right to left for overloaded
   operators; MSVC 2008 evaluates an overloaded operator like any call): the plugin leaves `CALL_EXPR_ORDERED_ARGS`
   calls alone. `-fstrong-eval-order=some` is the candidate flag; it needs S11's gate.
