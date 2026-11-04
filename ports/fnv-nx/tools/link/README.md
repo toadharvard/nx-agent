@@ -12,7 +12,8 @@ Design, formats and measurements: [`../../docs/LINK.md`](../../docs/LINK.md).
 | `abi2.py` | Byte-level verdict with layouts and the general (frame-based) bridge generator. |
 | `vtables.py` | Image vftables (primary and `{for B}`) -> Itanium address points; synthesized vtables/typeinfo for classes no object emits. |
 | `vslots.py` | GCC vtable slots bound through the MSVC 2008 vftables of the pristine decomp (`--msvc-objs`): static targets or stubs through the image slot; `validate` against the x86 code. |
-| `test_override.py` | End-to-end `--override` test (three hand-written units). |
+| `test_override.py` | End-to-end `--override` test (hand-written units; a variadic replacement with its own signature). |
+| `overrides/` | The port's native replacements (`overrides.tsv`, sources, `build.sh <out>` -> the `--override` table). |
 | `test_bridges.py` | Runs generated bridges under qemu-aarch64 (hand-written declarations). |
 | `test_bindings.py` | CRT/library providers, IAT slots by api, thread-local variables, hand-written vptr stores. |
 | `test_startup.py` | `__fnvnx_dyninit_`/`_dynexit_` address entries and the game-only `__cxa_atexit` rename. |

@@ -231,7 +231,8 @@ Two bridge divergences are not ABI-model errors:
 * **The variadic logger 0x00703c00** (S13: 00700350): referenced as `int __cdecl (const char *, ...)`, defined as
   `void __cdecl (const char *text, const char *context)` that passes `&context` on as the argument list - an x86
   stack walk: on AArch64 `&context` is a spilled register, and float arguments travel in v registers. `manual`
-  (varargs) is the right verdict; the fix is a native variadic replacement (`resolve --override`, or S1's VA1). The
+  (varargs) is the right verdict; the fix is the native variadic replacement in `tools/link/overrides/` (Overrides,
+  below). The
   first-fault difference in that function (x86 0, AArch64 0x18) is argument evaluation order.
 
 ## Overrides (`resolve --override <tsv>`, for native replacements, J-0015)
@@ -245,8 +246,18 @@ precedence over the decomp definition at that address:
   override, so the defining object's own calls and every GCC vtable slot naming it reach the override too (a
   linker-script definition wins over the weak copy; COMDAT copies in other objects follow the same way). Static
   (local) decomp definitions and names that also stand for other addresses are left alone and reported;
-* `apply` copies the override objects next to the rewritten ones; the ABI check still compares each reference with
-  the *decomp* declaration, so the override must have the decomp definition's signature.
+* `apply` copies the override objects next to the rewritten ones; the ABI check compares each reference with the
+  *decomp* definition, so the override must have its signature - unless the table's optional 4th column gives the
+  override's own MSVC-decorated signature, which the references are then compared with (a replacement whose
+  signature differs on purpose).
+
+The port's own replacements live in `tools/link/overrides/`: `overrides.tsv` (address, symbol, source, signature)
+and `build.sh <out dir>`, which compiles them for the game target and writes the table `--override` reads. First
+entry: **0x00703c00, the console logger** - the decomp defines it as `void (const char *text, const char *context)`
+handing `&context` on as x86 stack varargs; `fnvnx_log_00703c00(const char *fmt, ...)` formats with `vsnprintf`
+under the original's conditions (UI root and key flag, then an active console or `FUN_005b6f70`) and prints through
+the console (`ConsoleManager::Print`, 0x0071d0a0) with `%` doubled and no argument list. Its 4th column
+(`int __cdecl (const char *, ...)`) makes the variadic and the double-taking references bind to it directly.
 
 `shadowed.tsv` reports, per shadowed definition: the decomp declaration, native name and unit, the override, units
 that hold an inline (COMDAT) copy, and units that name the address in units.json but whose object no longer
