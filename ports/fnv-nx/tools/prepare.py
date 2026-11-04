@@ -78,9 +78,11 @@ def r_sse_local_types(path, text, stats):
     return text
 
 # one prototype; several may share a line (`extern"C"__m128 _mm_load_ss(float const*_A);extern"C"void ...`)
+# (the return type may be the decomp's own name for __m128: `hkQuadReal _mm_load_ps(const float*);`)
 MM_PROTO = re.compile(r'(?:^|(?<=[;{}]))[ \t]*(?:extern\s*(?:"C"\s*)?)?(?:static\s+)?(?:inline\s+)?(?:const\s+)?(?:::)?(?:\w+::)*'
-                      r'(?:__m128[id]?|__m64|float|double|int|unsigned\s+int|void)\s+(?:__cdecl\s+)?'
-                      r'_mm_\w+\s*\([^;{)]*\)\s*;[ \t]*', re.M)
+                      r'(?:__m128[id]?|__m64|float|double|int|unsigned\s+int|void|'
+                      r'(?!(?:return|else|case|throw|goto|delete|new|typedef|using|operator|sizeof)\b)[A-Za-z_]\w*)\s+'
+                      r'(?:__cdecl\s+)?_mm_\w+\s*\([^;{)]*\)\s*;[ \t]*', re.M)
 EXTERN_C_BLOCK = re.compile(r'extern\s+"C"\s*\{')
 
 def r_sse_local_protos(path, text, stats):

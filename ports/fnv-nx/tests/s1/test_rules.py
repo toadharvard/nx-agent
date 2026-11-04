@@ -585,6 +585,13 @@ s1._VLIT = _saved
 check('VLIT1 stores the vftable address the unit binds the misread literal to; ambiguous sites are listed', got + got2 + ' %d' % _st['VLIT1-LIST'],
       ['m_p = (char*)0x0101212c /* fnv-nx VLIT1: "@K@" */;', 'void f() { m_p = "@K@"; g("text"); }', ' 1'])
 
+# ---- SSE2 with the decomp's own name for __m128
+got = prepare.r_sse_local_protos('/x/src/a.cpp', 'typedef __m128 ClosestPointQuad;\nClosestPointQuad _mm_shuffle_ps(ClosestPointQuad, ClosestPointQuad, unsigned int);\n'
+                                 'extern "C" ::hkQuadReal __cdecl _mm_load_ps(const float*);\n'
+                                 'ClosestPointQuad f(ClosestPointQuad a) {\n    return _mm_add_ps(a, a);\n}\n', Counter())
+check('SSE2 drops intrinsic prototypes with a typedef return type, keeps statements', got,
+      ['typedef __m128 ClosestPointQuad;\n', '    return _mm_add_ps(a, a);'], ['_mm_shuffle_ps', '_mm_load_ps'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
