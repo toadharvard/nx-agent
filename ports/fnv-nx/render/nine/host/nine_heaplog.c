@@ -17,7 +17,7 @@ extern size_t fnvnx_host_heap_size;   /* nine_host_call.c (overrides host.c's we
 
 void nx_host_log(const char* line) {   /* host.c's log handle is private to it: append to the same file */
     svcOutputDebugString(line, strlen(line));
-    FILE* f = fopen("sdmc:/fnvnx/host.log", "a");
+    FILE* f = fopen("sdmc:/switch/fnv/host.log", "a")   /* = FNVNX_SD_HOST_LOG */;
     if (f) { fputs(line, f); fclose(f); }
 }
 #else
