@@ -24,12 +24,13 @@ model (levers applied) and each clock it gives per-core and frame times as lo/mi
   fail       even the lo case does not fit
   uncertain  in between: needs a measurement (frameprof on a frame, B1/B2 on hardware)
 
-Targets (J-0132): fail below 30 fps (worst frame 33.3 ms), 45 fps stable (worst frame 22.2 ms), 60 fps stretch (mean
-frame 16.7 ms). 'level' is the highest target the mid case meets. Output schema fnvnx-frame-budget/1, keys:
+Targets (J-0150; every target is judged on the worst frame): fail below 30 fps (33.3 ms), 45 fps (22.2 ms,
+informational), 60 fps stable (target_60: the worst frame at or under 16.7 ms, the owner's target at 1.02 GHz).
+'level' (fail, pass_30, pass_45, target_60) is the highest target the mid worst frame meets. Output schema fnvnx-frame-budget/1, keys:
 
   schema, inputs{...}, assumptions[{id,value,range,unit,basis,note}], targets[...], clocks_mhz[...],
   budget_minsn{clock: {target: M instructions per core in the target's frame time at the assumed IPC}},
-  budget_mean_minsn{clock: {target: the same for the mean frame, worst frame factor applied for floor/goal targets}},
+  budget_mean_minsn{clock: {target: the same for the mean frame that keeps the worst frame inside it}},
   placement{role: {ideal, mask}}, items[{id, role, minsn[lo,hi], basis, ...}],
   measured{frameprof, render}, scenarios[{id, name, levers, core3, cores{core: {lo, mid, hi M instructions,
   items{item: mid M}}}, main_minsn{lo,mid,hi}, results{clock: {core_ms{core: {lo,mid,hi}}, cpu_ms{lo,mid,hi},
@@ -286,9 +287,9 @@ def build(model, profs=None, render=None):
     }
     for clk in clocks:   # M instructions one core runs in the target's frame time at the assumed IPC
         out['budget_minsn'][str(clk)] = {t['id']: round(t['ms'] * clk * 1e3 * ipc['value'] / 1e6, 2) for t in targets}
-        # the mean frame that keeps the worst frame inside a floor/goal target (worst_frame_factor)
+        # the mean frame that keeps the worst frame inside the target (worst_frame_factor)
         out['budget_mean_minsn'][str(clk)] = {
-            t['id']: round(t['ms'] / (wff['value'] if t['kind'] != 'stretch' else 1.0) * clk * 1e3 * ipc['value'] / 1e6, 2)
+            t['id']: round(t['ms'] / wff['value'] * clk * 1e3 * ipc['value'] / 1e6, 2)
             for t in targets}
     for sc in model['scenarios']:
         work, core3 = scenario_work(items, levers, sc)
@@ -314,15 +315,14 @@ def build(model, profs=None, render=None):
                          'hi': max(cpu['hi'], gpu['hi'])}
             worst = {n: round(frame[n] * wffs[k], 2) for k, n in enumerate(('lo', 'mid', 'hi'))}
             verdicts, level = {}, 'fail'
-            for t in targets:
-                f = frame if t['kind'] == 'stretch' else worst
-                verdicts[t['id']] = verdict(f['lo'], f['hi'], t['ms'])
+            for t in targets:   # J-0150: every target on the worst frame (60 fps stable, not a mean)
+                verdicts[t['id']] = verdict(worst['lo'], worst['hi'], t['ms'])
             if worst['mid'] <= 33.3:
                 level = 'pass_30'
             if worst['mid'] <= 22.2:
                 level = 'pass_45'
-            if level == 'pass_45' and frame['mid'] <= 16.7:
-                level = 'stretch_60'
+            if worst['mid'] <= 16.7:
+                level = 'target_60'
             rs['results'][str(clk)] = {'core_ms': core_ms, 'cpu_ms': cpu, 'gpu_ms': gpu, 'frame_ms': frame,
                                        'worst_frame_ms': worst, 'critical_core': int(crit), 'verdicts': verdicts,
                                        'level': level}
