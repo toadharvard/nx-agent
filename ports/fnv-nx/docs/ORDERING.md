@@ -66,8 +66,10 @@ A plain store in unit B to a field that unit A hands to InterlockedCompareExchan
 * **Record copies.** A load or store of a whole record (or array of records) that contains a keyed field, such as
   `*p = *n` over a polled flag, keeps its plain access with fences (`dmb ish` before the store, `dmb ishld` after
   the load), like a packed field.
-* **Not covered:** a store through a pointer alias (`int *q = &w->done; *q = 1`) and a poll without a loop
-  condition (`for (;;) { if (g) break; Sleep(0); }`); V1's K8 / K9 notes.
+* **Pointer aliases.** A local pointer set from the address of a field or variable (`int *q = &w->done;`, also
+  copied to another local) carries it: a store or load through it (`*q = 1`) is ordered when its target is keyed.
+* **Break-test polls.** An endless loop (`for (;;)`, `while (1)`, `do ... while (1)`) whose body is only
+  `if (flag) break;` tests and waits is a plain poll like `while (!flag) Sleep(0);`.
 * **Cost of the pass:** about 0.6 CPU seconds per unit, a census of the tree without code generation.
 
 Modes for A/B measurements only (compile.sh `ORDER_MODE=off|tso`, `ORDER_ARGS=ltr`); `off` also selects the

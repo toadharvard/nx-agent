@@ -154,6 +154,16 @@ static std::string record_name(tree field) {
 
 static void resolve_forwarders();
 static void write_discovered();
+static bool field_keyed(tree f);
+// local pointers set from the address of a field or variable (`int *q = &w->done;`), for every function of the unit:
+// a store or load through such a pointer (`*q = 1`) is an access to its target (V1's K8)
+static std::map<tree, std::vector<tree>> alias_targets;
+
+static bool target_keyed(tree d) {
+  if (TREE_CODE(d) == FIELD_DECL) return field_keyed(d);
+  return interlocked_decls.count(d) || poll_decls.count(d) ||
+         (DECL_NAME(d) && key_vars.count(IDENTIFIER_POINTER(DECL_NAME(d))));
+}
 
 static bool keyed(tree t) {
   if (!forwarders_resolved) resolve_forwarders();
@@ -167,6 +177,13 @@ static bool keyed(tree t) {
     if (TREE_CODE(r) == VAR_DECL && (interlocked_decls.count(r) || poll_decls.count(r) ||
                                      (DECL_NAME(r) && key_vars.count(IDENTIFIER_POINTER(DECL_NAME(r))))))
       return true;
+    if ((TREE_CODE(r) == MEM_REF || TREE_CODE(r) == INDIRECT_REF) && !alias_targets.empty()) {
+      tree p = TREE_OPERAND(r, 0);
+      auto it = alias_targets.find(p);
+      if (it != alias_targets.end())
+        for (tree d : it->second)
+          if (target_keyed(d)) return true;
+    }
     if (!handled_component_p(r)) break;
   }
   return false;
@@ -587,10 +604,10 @@ static void note_local_set(tree lhs, tree rhs) {
   if (!local_pointer(lhs) || !rhs) return;
   int parm;
   tree d = operand_of(rhs, &parm);
-  if (d) local_addr[lhs].push_back(d);
+  if (d) { local_addr[lhs].push_back(d); alias_targets[lhs].push_back(d); }
   else if (parm >= 0) local_parm[lhs] = parm;
   else if (operand_local && operand_local != lhs) {   // p = q: q's targets
-    for (tree x : local_addr[operand_local]) local_addr[lhs].push_back(x);
+    for (tree x : local_addr[operand_local]) { local_addr[lhs].push_back(x); alias_targets[lhs].push_back(x); }
     auto it = local_parm.find(operand_local);
     if (it != local_parm.end()) local_parm[lhs] = it->second;
   }
@@ -686,8 +703,18 @@ static tree poll_cond_walk(tree *tp, int *walk_subtrees, void *data) {
   return poll_body_walk(tp, walk_subtrees, data);
 }
 
+// `if (flag) break;` as a statement of an endless loop's body: the break's condition
+static tree break_cond(tree t) {
+  if (TREE_CODE(t) != IF_STMT || ELSE_CLAUSE(t)) return NULL_TREE;
+  tree th = THEN_CLAUSE(t);
+  while (th && TREE_CODE(th) == STATEMENT_LIST && tsi_one_before_end_p(tsi_start(th))) th = tsi_stmt(tsi_start(th));
+  return th && TREE_CODE(th) == BREAK_STMT ? IF_COND(t) : NULL_TREE;
+}
+
+static void poll_endless(tree loop, tree body);
+
 static void poll_loop(tree loop, tree cond, tree body) {
-  if (!cond) return;
+  if (!cond || (TREE_CODE(cond) == INTEGER_CST && !integer_zerop(cond))) { poll_endless(loop, body); return; }
   poll_scan c = {false, false, false, {}};
   walk_tree_without_duplicates(&cond, poll_cond_walk, &c);
   if (c.other || c.waited || c.vol || c.shared.empty()) return;   // a scan, a call, or a POLL-VOLATILE (ordered already)
@@ -699,6 +726,38 @@ static void poll_loop(tree loop, tree cond, tree body) {
   if (verbose_sites)
     inform(EXPR_LOCATION(loop) != UNKNOWN_LOCATION ? EXPR_LOCATION(loop) : DECL_SOURCE_LOCATION(current_fn),
            "%<fnvnx_order%>: plain poll (%s): %qD ordered", b.waited ? "wait" : "spin", c.shared[0]);
+}
+
+// `for (;;) { if (flag) break; Sleep(0); }`: the same poll with its test inside an endless loop. Every statement of
+// the body is either such a break test or a wait; the break conditions are judged like a loop condition.
+static void poll_endless(tree loop, tree body) {
+  if (!body) return;
+  while (TREE_CODE(body) == BIND_EXPR) body = BIND_EXPR_BODY(body);
+  std::vector<tree> conds, rest;
+  if (TREE_CODE(body) == STATEMENT_LIST) {
+    for (tree_stmt_iterator i = tsi_start(body); !tsi_end_p(i); tsi_next(&i)) {
+      tree st = tsi_stmt(i);
+      if (TREE_CODE(st) == CLEANUP_POINT_EXPR) st = TREE_OPERAND(st, 0);
+      tree c = break_cond(st);
+      if (c) conds.push_back(c); else rest.push_back(st);
+    }
+  } else {
+    tree c = break_cond(body);
+    if (!c) return;
+    conds.push_back(c);
+  }
+  if (conds.empty()) return;
+  poll_scan c = {false, false, false, {}};
+  for (tree &x : conds) walk_tree_without_duplicates(&x, poll_cond_walk, &c);
+  if (c.other || c.waited || c.vol || c.shared.empty()) return;
+  poll_scan b = {false, false, false, {}};
+  for (tree &x : rest) walk_tree_without_duplicates(&x, poll_body_walk, &b);
+  if (b.other) return;
+  for (tree d : c.shared) poll_decls.insert(d);
+  polls_plain++;
+  if (verbose_sites)
+    inform(EXPR_LOCATION(loop) != UNKNOWN_LOCATION ? EXPR_LOCATION(loop) : DECL_SOURCE_LOCATION(current_fn),
+           "%<fnvnx_order%>: plain poll (%s, break test): %qD ordered", b.waited ? "wait" : "spin", c.shared[0]);
 }
 
 static void poll_contexts(tree t) {
