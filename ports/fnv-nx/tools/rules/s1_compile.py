@@ -2607,6 +2607,14 @@ VTBL1_SITES = [
     ('gamebryo2.2/corelibs/nisystem/nistandardallocator.cpp',
      re.compile(r'^([ \t]*)virtual ~StdAllocator\(\);', re.M),
      r'\1virtual void* Destroy(unsigned int flags);   /* fnv-nx VTBL1: MSVC slot 0, the scalar deleting destructor */'),
+    # the second heap MemoryManager::InitializeHeaps creates (constructor 0x00aa7400): the decomp declares one
+    # virtual, MemoryManager::Allocate+0xa8 calls its slot 2 (S5 J-0102: 4,327 of 4,343 initializer skips); it is an
+    # AbstractHeap, whose 14 slots the same unit declares (v0 .. v13): the native vtable gets them all
+    ('staging/blk_00aa0000_od_ob1_variant.cpp',
+     re.compile(r'(\n[ \t]*HeapBlockLink m_20;\s*FUN_00aa7400\(unsigned int a, unsigned int b\);\s*virtual void v00\(\);)(\s*\};)'),
+     r'\1 /* fnv-nx VTBL1: the AbstractHeap slots 1-13 */ virtual void v1(); virtual void v2(); virtual void v3(); '
+     r'virtual void v4(); virtual void v5(); virtual void v6(); virtual void v7(); virtual void v8(); virtual void v9(); '
+     r'virtual void v10(); virtual void v11(); virtual void v12(); virtual void v13(void* value);\2'),
     ('staging/blk_00aa0000_o2.cpp',
         re.compile(r'^struct FUN_00aa2230_BSNiAllocator\s*\{\s*virtual void m_virtual0\(\);\s*'
                    r'FUN_00aa2230_BSNiAllocator\(\);\s*\};', re.M),

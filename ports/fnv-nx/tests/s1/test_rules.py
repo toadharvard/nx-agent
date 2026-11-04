@@ -477,6 +477,13 @@ got = run(s1.r_stand_in_interfaces, 'struct StdAllocator\n{\n    virtual ~StdAll
 check('VTBL1 StdAllocator: the destructor is MSVC slot 0, one plain slot', got,
       ['    virtual void* Destroy(unsigned int flags);   /* fnv-nx VTBL1', '    virtual void* Allocate();'], ['~StdAllocator'])
 
+got = run(s1.r_stand_in_interfaces, 'struct FUN_00aa7400 : HeapBlockBase\n{\n    int m_1c;\n    HeapBlockLink m_20;\n'
+          '    FUN_00aa7400(unsigned int a, unsigned int b);\n    virtual void v00();\n};\nint z;\n',
+          '/x/src/staging/blk_00aa0000_od_ob1_variant.cpp')
+check('VTBL1 the FUN_00aa7400 heap gets the AbstractHeap slots, same line count', got,
+      ['virtual void v00(); /* fnv-nx VTBL1', 'virtual void v2();', 'virtual void v13(void* value); };', '\nint z;'])
+check('VTBL1 FUN_00aa7400 keeps the line count', str(got.count('\n')), ['8'])
+
 # ---- ALIGN1
 got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
           '__declspec(align(16))class H:public C\n{\n};\n__declspec(align(16))struct TAU32;\n'
