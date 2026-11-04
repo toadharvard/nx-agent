@@ -3129,3 +3129,21 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   uninit-arm, callee-saved and 0x00b61220.
   - To S13: the `def` rows of units_renames.
   - To R0: accept abiclass's `patched` and `benign` verdicts as explained.
+
+### J-0142 | 2026-11-04 | stream: S1-compile (m128/goto) | status: wip | parent: J-0135
+
+* **did** - The Havok units with `__m128`-as-union and goto-across-initialization errors: 15 units, 33 errors -> 0,
+  with rules only (`586334e`, `559155f`, `4dbdc14`).
+  - GOTO2 (new) fixes a goto that skips an initialization in three provably equivalent ways:
+    - a const scalar reference to a by-value result becomes a copy;
+    - the skipped declarations get a block that closes before the label;
+    - the label's short return tail is copied into each goto.
+  - SSE1 gets direct lane access. Two SSE2/SSE3 bugs are fixed (every second prototype on a line was kept; `m128_f32`
+    was cut at `[`).
+  - QUAD1 (new) adds the cast where MSVC chained two conversions.
+  - ANON3 (new) turns a local anonymous union holding an anonymous struct into a local struct.
+  - MSCV1 (new) replaces `_MSC_FULL_VER`/`_MSC_VER` used in code with the value for the unit's compiler.
+  - tests/s1: 0 failed (18 new cases). tests/s11: ok. GOTO2/QUAD1/MSCV1 are classified neutral, ANON3 platform.
+* **merged** - Also S1b `5b94e1a` (J-0141).
+* **next** - The farm census confirms the whole tree: the full GOTO2 sweep did not fit in 10 minutes (D17). The S11
+  MSVC gate checks the GOTO2/QUAD1 sites.
