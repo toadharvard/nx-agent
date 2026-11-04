@@ -124,6 +124,16 @@ def cpu_ms(instr):
     return instr / (IPC[0] * CLOCKS_GHZ[0] * 1e9) * 1e3
 
 
+# front-end functions that run on the render thread (Frame::Finish and what it calls, RENDER_NATIVE.md §3.6);
+# every other front function runs on the main thread (packet build: StateTracker, Renderer::Render, ...)
+RENDER_THREAD_FRONT = ("nx::Frame::Finish", "nx::SortPackets", "nx::Encoder::", "nx::StateCache::FlushDefines",
+                       "nx::DefaultDyn")
+
+
+def front_thread(fn):
+    return "render" if fn.startswith(RENDER_THREAD_FRONT) else "main"
+
+
 def build_hotspots(raw, prof, dk, gpu):
     """ranked rows per scene: CPU by function / family, GPU by pass / shader program (docked + handheld 720p).
     ms: CPU at IPC 0.6, 1.02 GHz (instructions of one measured mix_hi frame); GPU at issue efficiency 0.6."""
@@ -137,9 +147,9 @@ def build_hotspots(raw, prof, dk, gpu):
     for fn, n in (prof.get("profile") or {}).items():
         if fn == "main":
             continue    # native_drv's stream decoder (harness), not renderer code
-        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread="main+render (front)", module="render/native front"))
+        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread=front_thread(fn), module="render/native front"))
     for fn, n in ((dk or {}).get("streams", {}).get("mix_hi", {}).get("profile_last_frame") or {}).items():
-        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread="render (backend)", module="nxgpu.c + libdeko3d"))
+        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread="render", module="nxgpu.c + libdeko3d (backend)"))
     cpu_fn.sort(key=lambda r: -r["ms"])
     cpu_fam = []
     for f in fam_names:
