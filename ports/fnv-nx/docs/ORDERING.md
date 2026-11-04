@@ -220,9 +220,24 @@ Hot units only (40): the build is -0.02 % (12 ldar, 14 stlr, 4 dmb), and full TS
 
 * **ORDER-OBJECT** (`get()->f(a())`): GCC evaluates the object expression first (C++17), MSVC 2008 probably last. Not
   confirmed against MSVC here, so the plugin keeps GCC's order; S11's MSVC builds can decide it.
-* **ORDER-OPERATOR** (C++17 fixes `<<`, `>>`, `=`, `[]` left to right for overloaded operators; MSVC 2008 did right
-  to left): the plugin leaves `CALL_EXPR_ORDERED_ARGS` calls alone. `-fstrong-eval-order=some` is the candidate
-  flag; it needs S11's gate.
+* **ORDER-OPERATOR** (C++17 fixes `<<`, `>>`, `[]`, `->*` left to right and `=`, `@=` right to left for overloaded
+  operators; MSVC 2008 evaluates an overloaded operator like any call): the plugin leaves `CALL_EXPR_ORDERED_ARGS`
+  calls alone. `-fstrong-eval-order=some` is the candidate flag; it needs S11's gate.
+
+Both are switchable now, with defaults that keep the order above (the objects are byte-identical with and without
+the two arguments; run.py checks it on evalorder.cpp and units.cpp). `-fplugin-arg-fnvnx_order-object=last` (default
+`first`) evaluates a member call's arguments right to left, then its object, then the callee, where the object and
+an argument can see each other: a direct call's `this` becomes the last element of the argument chain (the call
+stays direct), a virtual call gets the chain in front of its `OBJ_TYPE_REF` object, so the vtable load comes after
+the arguments too. Constructors, destructors and calls through a pointer to member keep the object first.
+`-fplugin-arg-fnvnx_order-operator=rtl` (default `cpp17`) clears `CALL_EXPR_ORDERED_ARGS` and orders those calls
+like any other (a free operator's left operand included, a member operator's object as `object=` says);
+`=` and `@=` stay as they are, right operand first, which is MSVC's push order too. `tests/s12/order/evalorder.cpp`
+(11 cases: direct and virtual member calls, a slot return, `<<` / `>>` chains, `[]`, `=`, `+=`, `-=`) is plain
+C++03 and builds with `cl /O2 /EHsc evalorder.cpp`. `evalorder.gcc.expect` is the defaults' output,
+`evalorder.msvc-guess.expect` that of `object=last operator=rtl`; run.py checks both and that they differ. The
+defaults stay until S11 runs evalorder.cpp under MSVC 2008 x86: its output becomes `evalorder.msvc.expect` (run.py
+then says which of the two it matches), and the build (compile.sh) follows that.
 * **POLL-PLAIN** beyond the wait-only loop shape (closed above): a flag tested inside a loop that does other work, or
   a pointer published with a plain store and read without a poll, is still a data race the A57 can break; such a
   site needs its field made volatile or keyed (a `field Class::member` line in a key file passed as ORDER_KEYS).

@@ -7,6 +7,10 @@
    build's flags (tools/link/compile.sh), in the modes volatile (the build), keys, tso and off.
 2. args.cpp: call arguments are evaluated right to left, as MSVC x86 does (args=rtl), ILP32 under qemu; the expected
    order (args.expect) is checked against GCC x86-32, which pushes too, when the host has gcc -m32.
+   evalorder.cpp: the object of a member call and the operands of overloaded operators (ORDER-OBJECT and
+   ORDER-OPERATOR, still open): the defaults give evalorder.gcc.expect, object=last operator=rtl give
+   evalorder.msvc-guess.expect, and the two differ. With the defaults the objects of evalorder.cpp and units.cpp are
+   byte-identical to those without the two arguments, and object=last keeps the non-virtual calls direct.
 3. litmus.cpp: multicore message-passing litmus tests with volatile flags (a reused result slot, a polled queue, a
    spin lock), freestanding ILP32 under qemu-aarch64 with 4 host threads. With the plugin no test may show a bad
    outcome; without it mp2 must (the test bites).
@@ -294,6 +298,79 @@ def args_order(scratch, plugin):
             check(out != expect, 'args ILP32 with args=ltr: GCC\'s own order differs (the test bites)')
 
 
+MSVC_GUESS = ['-fplugin-arg-fnvnx_order-object=last', '-fplugin-arg-fnvnx_order-operator=rtl']
+DEFAULTS = ['-fplugin-arg-fnvnx_order-object=first', '-fplugin-arg-fnvnx_order-operator=cpp17']
+NONVIRTUAL = ('case_member', 'case_member2', 'case_retslot', 'case_shl', 'case_shr', 'case_index', 'case_assign',
+              'case_addeq', 'case_subeq')
+
+
+def eval_codegen(scratch, plugin):
+    """object= / operator= at their defaults give the same objects as without them; object=last keeps direct calls"""
+    sse = os.environ.get('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
+    units = (['-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
+              '-I' + os.path.join(PORT, 'shim', 'include'), '-I' + sse])
+    for name, pre in (('evalorder', ['-DFNVNX_FREESTANDING']), ('units', units)):
+        src = os.path.join(HERE, name + '.cpp')
+        objs = []
+        for tag, extra in (('plain', []), ('defaults', DEFAULTS)):
+            o = os.path.join(scratch, '%s_%s.o' % (name, tag))
+            r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + pre + ['-fplugin=' + plugin] + extra +
+                               ['-w', '-c', '-o', o, src], capture_output=True, text=True)
+            check(r.returncode == 0, 'evalorder codegen: %s.cpp compiles (%s) (%s)' % (name, tag, r.stderr.strip()[-300:]))
+            objs.append(open(o, 'rb').read() if r.returncode == 0 else None)
+        check(objs[0] is not None and objs[0] == objs[1],
+              'evalorder codegen: %s.o with object=first operator=cpp17 is byte-identical to without them' % name)
+    asm = os.path.join(scratch, 'evalorder_msvc-guess.s')
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + ['-DFNVNX_FREESTANDING', '-fplugin=' + plugin] + MSVC_GUESS +
+                       ['-w', '-S', '-o', asm, os.path.join(HERE, 'evalorder.cpp')], capture_output=True, text=True)
+    check(r.returncode == 0, 'evalorder codegen: compiles with object=last operator=rtl (%s)' % r.stderr.strip()[-300:])
+    if r.returncode:
+        return
+    funcs = functions(open(asm).read())
+    for fn in NONVIRTUAL + ('case_virtual', 'case_virtual2'):
+        body = body_of(funcs, fn)
+        if body is None:
+            check(False, 'evalorder codegen: %s not found' % fn)
+        elif fn in NONVIRTUAL:
+            check(not re.search(r'\tbl?r\t', body), 'evalorder object=last: %s keeps direct calls (no blr/br)' % fn)
+        else:
+            check(re.search(r'\tbl?r\t', body) is not None, 'evalorder object=last: %s still calls through the vtable' % fn)
+
+
+def eval_order(scratch, plugin):
+    """evalorder.cpp under qemu: the defaults give GCC's C++17 order, object=last operator=rtl the MSVC guess"""
+    if not shutil.which('qemu-aarch64'):
+        print('skip evalorder: needs qemu-aarch64')
+        return
+    import qemu_ilp32 as q
+    base = list(q.CXXFLAGS)
+    outs = {}
+    for tag, extra, exp in (('default', [], 'evalorder.gcc.expect'), ('msvc-guess', MSVC_GUESS, 'evalorder.msvc-guess.expect')):
+        expect = open(os.path.join(HERE, exp)).read()
+        q.CXXFLAGS = base + ['-fms-extensions', '-fno-strict-aliasing', '-fwrapv', '-mno-outline-atomics',
+                             '-DFNVNX_FREESTANDING', '-fplugin=' + plugin] + extra
+        try:
+            exe = q.build([os.path.join(HERE, 'evalorder.cpp')], os.path.join(scratch, 'evalorder_' + tag))
+        except RuntimeError as e:
+            check(False, 'evalorder %s builds (%s)' % (tag, str(e)[-300:]))
+            continue
+        finally:
+            q.CXXFLAGS = base
+        rc, out = q.run(exe)
+        outs[tag] = out
+        bad = [l for l, e in zip(out.splitlines(), expect.splitlines()) if l != e]
+        check(rc == 0 and out == expect, 'evalorder ILP32 %s: %s in all %d cases (%s)'
+              % (tag, exp, len(expect.splitlines()), bad[:3] or out[-200:] if out != expect else ''))
+    if len(outs) == 2:
+        check(outs['default'] != outs['msvc-guess'], 'evalorder: object=last operator=rtl changes the order (the options bite)')
+    msvc = os.path.join(HERE, 'evalorder.msvc.expect')
+    if os.path.isfile(msvc) and 'default' in outs:
+        # S11's MSVC 2008 x86 output: which of the two the build has to follow (informational until it decides)
+        m = open(msvc).read()
+        print('     evalorder: MSVC 2008 matches %s' % ('the defaults' if m == outs['default'] else
+              'object=last operator=rtl' if m == outs.get('msvc-guess') else 'neither'))
+
+
 def litmus(scratch, plugin):
     if not shutil.which('qemu-aarch64'):
         print('skip litmus: needs qemu-aarch64')
@@ -348,6 +425,8 @@ def main():
     wholeprog(scratch, plugin)
     compile_sh_keys(scratch)
     args_order(scratch, plugin)
+    eval_codegen(scratch, plugin)
+    eval_order(scratch, plugin)
     litmus(scratch, plugin)
     print('%d failed' % len(FAIL))
     return 1 if FAIL else 0

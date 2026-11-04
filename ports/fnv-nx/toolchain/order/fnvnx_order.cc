@@ -2,7 +2,8 @@
 // docs/ORDERING.md).
 //
 //   g++ ... -fplugin=<dir>/fnvnx_order.so [-fplugin-arg-fnvnx_order-verbose]
-//           [-fplugin-arg-fnvnx_order-mode=volatile|tso|off] [-fplugin-arg-fnvnx_order-keys=<file>] unit.cpp
+//           [-fplugin-arg-fnvnx_order-mode=volatile|tso|off] [-fplugin-arg-fnvnx_order-keys=<file>]
+//           [-fplugin-arg-fnvnx_order-object=first|last] [-fplugin-arg-fnvnx_order-operator=cpp17|rtl] unit.cpp
 //
 // MSVC 2008 compiles for x86 with /volatile:ms (the only behaviour it has): a volatile read has acquire semantics,
 // a volatile write release semantics, and the x86 hardware (TSO) keeps that order. GCC gives volatile no ordering
@@ -46,6 +47,18 @@
 // (s_n, ..., s_2, s_1): GCC evaluates the first argument first, so all of them are evaluated last to first, while the
 // call itself (and so return slots and constructor calls) stays as it was. `this` and the callee stay first, as now
 // (ORDER-OBJECT is a separate class). A call with a side-effecting argument of class type is left alone.
+//
+// object=first (default) | last (ORDER-OBJECT, open until S11's MSVC 2008 run of tests/s12/order/evalorder.cpp):
+// MSVC's thiscall pushes the arguments and probably computes the object (ecx) last. With object=last (and args=rtl)
+// a member call whose object and an argument can see each other (one has side effects, the other is not invariant)
+// evaluates the arguments right to left, then the object, then the callee: for a direct call `this` joins the chain
+// as its last element (the callee stays an ADDR_EXPR, so the call stays direct); for a virtual call the chain goes
+// in front of the OBJ_TYPE_REF's object, which GCC gimplifies before the vtable load. Constructors, destructors and
+// calls through pointers to members keep the object first.
+// operator=cpp17 (default) | rtl (ORDER-OPERATOR, open the same way): C++17 evaluates overloaded `<<`, `>>`, `[]`,
+// `->*` left to right (CALL_EXPR_ORDERED_ARGS), which the pass leaves alone. With operator=rtl they lose the flag
+// and are ordered like any call (a free operator's left operand included; a member operator's object as object=
+// says). `=` and `@=` (CALL_EXPR_REVERSE_ARGS) already evaluate the right operand first, as MSVC does: left alone.
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "context.h"
@@ -97,6 +110,9 @@ struct counts { unsigned long ldar, stlr, fence_ld, fence_st; };
 static counts unit_total;
 static bool args_rtl = true;
 static unsigned long calls_reordered, calls_skipped;
+static bool object_last = false;                         // object=first (default) | last: ORDER-OBJECT
+static bool operator_rtl = false;                        // operator=cpp17 (default) | rtl: ORDER-OPERATOR
+static unsigned long calls_object_last, calls_operator;
 static bool refcount_weak = true;
 static tree refcount_inc_fn, refcount_dec_fn;            // fnvnx_win32.h helpers, seen at their PRE_GENERICIZE
 static unsigned long ilk_inc_weak, ilk_dec_weak, ilk_full;
@@ -306,6 +322,9 @@ static void finish(void *, void *) {
            unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st, calls_reordered, calls_skipped,
            ilk_inc_weak, ilk_dec_weak, ilk_full, (unsigned long)interlocked_decls.size(),
            (unsigned long)forwarders.size(), polls_plain);
+  if (verbose && (object_last || operator_rtl))
+    inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu calls with the object after the arguments, "
+           "%lu overloaded operators right to left", calls_object_last, calls_operator);
 }
 
 // ---- argument order (args=rtl)
@@ -323,20 +342,47 @@ static tree *arg_slot(tree t, int i) {
   return TREE_CODE(t) == CALL_EXPR ? &CALL_EXPR_ARG(t, i) : &AGGR_INIT_EXPR_ARG(t, i);
 }
 
+// object=last: how the object of a member call can move after its arguments. 1: a direct call; the object is
+// argument 0 and joins the argument chain as its last element. 2: a virtual call; the chain goes in front of the
+// OBJ_TYPE_REF's object, so the arguments run before the object and its vtable load. 0: neither (object=first, a
+// constructor or destructor, a call through a pointer to member or another computed callee). The callee itself is
+// never replaced: a COMPOUND_EXPR there would make a direct call indirect.
+static int object_kind(tree call, tree fn) {
+  if (!object_last || !fn || arg_count(call) < 1) return 0;
+  if (TREE_CODE(call) == AGGR_INIT_EXPR && AGGR_INIT_VIA_CTOR_P(call)) return 0;
+  if (TREE_CODE(fn) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(fn, 0)) == FUNCTION_DECL) {
+    tree d = TREE_OPERAND(fn, 0);
+    return DECL_CONSTRUCTOR_P(d) || DECL_DESTRUCTOR_P(d) ? 0 : 1;
+  }
+  return TREE_CODE(fn) == OBJ_TYPE_REF ? 2 : 0;
+}
+
+// an object no argument can change: a constant, or the address of a declaration
+static bool invariant_object(tree t) {
+  while (CONVERT_EXPR_P(t) || TREE_CODE(t) == NON_LVALUE_EXPR) t = TREE_OPERAND(t, 0);
+  return TREE_CONSTANT(t) || (TREE_CODE(t) == ADDR_EXPR && DECL_P(TREE_OPERAND(t, 0)));
+}
+
 static void reorder_call(tree call) {
   int n = arg_count(call);
   int first = 0;
-  // `this` (first argument of a method call, and the object of a constructor call) stays first
+  // `this` (first argument of a method call, and the object of a constructor call) stays first, unless object=last
   tree fntype = NULL_TREE;
+  tree fn = TREE_CODE(call) == CALL_EXPR ? CALL_EXPR_FN(call) : AGGR_INIT_EXPR_FN(call);
+  if (fn && POINTER_TYPE_P(TREE_TYPE(fn))) fntype = TREE_TYPE(TREE_TYPE(fn));
+  bool op = false;
   if (TREE_CODE(call) == CALL_EXPR) {
-    tree fn = CALL_EXPR_FN(call);
-    if (fn && POINTER_TYPE_P(TREE_TYPE(fn))) fntype = TREE_TYPE(TREE_TYPE(fn));
-    if (CALL_EXPR_ORDERED_ARGS(call) || CALL_EXPR_REVERSE_ARGS(call)) return;   // C++17 fixes this order
-  } else {
-    tree fn = AGGR_INIT_EXPR_FN(call);
-    if (fn && POINTER_TYPE_P(TREE_TYPE(fn))) fntype = TREE_TYPE(TREE_TYPE(fn));
+    // `=` and `@=` (CALL_EXPR_REVERSE_ARGS): C++17 evaluates the right operand, then the left one (a member
+    // operator's object). That is MSVC's push order too, with either object= setting: left as it is.
+    if (CALL_EXPR_REVERSE_ARGS(call)) return;
+    // `<<`, `>>`, `[]`, `->*` (CALL_EXPR_ORDERED_ARGS): C++17 left to right; operator=rtl orders them as any call
+    if (CALL_EXPR_ORDERED_ARGS(call)) {
+      if (!operator_rtl) return;
+      op = true;
+    }
   }
   if (fntype && TREE_CODE(fntype) == METHOD_TYPE) first = 1;
+  int okind = first ? object_kind(call, fn) : 0;
   int effects = 0, live = 0;
   for (int i = first; i < n; i++) {
     tree a = *arg_slot(call, i);
@@ -352,9 +398,14 @@ static void reorder_call(tree call) {
     }
     if (!TREE_CONSTANT(a)) live++;
   }
-  if (!effects || live < 2) return;
+  if (okind) {
+    // the object moves only where it and an argument can see each other: one has side effects, the other is live
+    tree obj = *arg_slot(call, 0);
+    if (!scalar_arg(obj) || !((TREE_SIDE_EFFECTS(obj) && live) || (!invariant_object(obj) && effects))) okind = 0;
+  }
+  if (!okind && (!effects || live < 2)) return;
   int lead = -1;
-  for (int i = first; i < n; i++) {
+  for (int i = okind == 1 ? 0 : first; i < n; i++) {
     tree *slot = arg_slot(call, i);
     if (TREE_CONSTANT(*slot) || !scalar_arg(*slot)) continue;
     *slot = save_expr(*slot);
@@ -367,7 +418,19 @@ static void reorder_call(tree call) {
     tree a = *arg_slot(call, i);
     if (TREE_CODE(a) == SAVE_EXPR) chain = build2(COMPOUND_EXPR, TREE_TYPE(chain), a, chain);
   }
-  *ls = chain;
+  if (okind == 2) {
+    // GCC gimplifies the callee before the arguments, and an OBJ_TYPE_REF's object before its vtable load: with
+    // the chain in front of that object, the arguments, the object and the vtable load run in this order
+    tree &o = OBJ_TYPE_REF_OBJECT(fn);
+    o = build2(COMPOUND_EXPR, TREE_TYPE(o), chain, o);
+  } else {
+    *ls = chain;
+  }
+  if (op) {
+    CALL_EXPR_ORDERED_ARGS(call) = 0;   // gimplified as a plain call now: the chain decides the order
+    calls_operator++;
+  }
+  if (okind) calls_object_last++;
   calls_reordered++;
 }
 
@@ -694,6 +757,14 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
       if (!strcmp(v, "rtl")) args_rtl = true;
       else if (!strcmp(v, "ltr")) args_rtl = false;
       else { error("%<fnvnx_order%>: unknown argument order %s", v); return 1; }
+    } else if (!strcmp(k, "object") && v) {
+      if (!strcmp(v, "first")) object_last = false;
+      else if (!strcmp(v, "last")) object_last = true;
+      else { error("%<fnvnx_order%>: unknown object order %s", v); return 1; }
+    } else if (!strcmp(k, "operator") && v) {
+      if (!strcmp(v, "cpp17")) operator_rtl = false;
+      else if (!strcmp(v, "rtl")) operator_rtl = true;
+      else { error("%<fnvnx_order%>: unknown operator order %s", v); return 1; }
     }
     else { error("%<fnvnx_order%>: unknown argument %s", k); return 1; }
   }
