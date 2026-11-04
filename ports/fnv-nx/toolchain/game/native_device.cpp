@@ -71,7 +71,7 @@ void LoadTranslatedPack(nx::Renderer* r) {
         if (ok && g_store->Load(data, (uint32_t)size)) {
             g_pack = data;
             r->SetTranslatedStore(g_store);
-            printf("fnvnx native renderer: %s, %u translated programs\n", path, g_store->count());
+            printf("fnvnx native renderer: %s, %u translated programs\n", path, (unsigned)g_store->count());
             return;
         }
         free(data);
@@ -102,17 +102,18 @@ extern "C" int32_t fnvnx_d3d9_device_created(const void* present_params, void* d
     ds.format = NxFmt_Z24S8; ds.flags = NxImg_RenderTarget | NxImg_Depth;
     uint32_t back = be->ImageCreate(rt), depth = be->ImageCreate(ds);
     if (!back || !depth) {
-        printf("fnvnx native renderer: %ux%u targets failed (back %u, depth %u)\n", w, h, back, depth);
+        printf("fnvnx native renderer: %ux%u targets failed (back %u, depth %u)\n", (unsigned)w, (unsigned)h, (unsigned)back,
+               (unsigned)depth);
         return kD3DERR_NOTAVAILABLE;
     }
     nx::Renderer* r = new (g_storage) nx::Renderer();
     if (!r->Init(be, w, h, back, depth)) {
-        printf("fnvnx native renderer: Renderer::Init failed (%ux%u)\n", w, h);
+        printf("fnvnx native renderer: Renderer::Init failed (%ux%u)\n", (unsigned)w, (unsigned)h);
         return kD3DERR_NOTAVAILABLE;
     }
     g_back = back; g_depth = depth; g_w = w; g_h = h;
-    printf("fnvnx native renderer: up, %ux%u, back buffer image %u, depth image %u, backend %u\n", w, h, back, depth,
-           be->Info().backend);
+    printf("fnvnx native renderer: up, %ux%u, back buffer image %u, depth image %u, backend %u\n", (unsigned)w,
+           (unsigned)h, (unsigned)back, (unsigned)depth, (unsigned)be->Info().backend);
     nx::engine::BindImagePassGlobals();
     bool hooked = device && nx::engine::HookD3DDevice(device);
     printf("fnvnx native renderer: pass globals bound, device %s\n", hooked ? "hooked" : "NOT hooked");
