@@ -171,6 +171,9 @@ template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribu
  * delete, so a throwing constructor frees nothing (MSVC 2008, C4291), while the deleting destructor uses the above */
 struct fnvnx_new_tag {};
 #define FNVNX_NEW5_TAG , fnvnx_new_tag = fnvnx_new_tag()
+/* EBO2: first in an empty base whose derived class introduces a vfptr: not empty (MSVC puts it after the vfptr),
+ * still 0 bytes */
+#define FNVNX_EBO2 char fnvnx_ebo2[0];
 #endif
 
 /* SAL annotations (sal.h) used without an include in pasted CRT prototypes */
@@ -225,5 +228,8 @@ extern "C" void _operator_delete_sized(void *, __SIZE_TYPE__);
 
 #define FNVNX_ASM_FNV_HELPERS
 #include "fnvnx_asm.h"
+
+/* patch class MT1: the gate of the multithreaded-culling changes (docs/PATCHES.md) */
+#include "fnvnx_mt1.h"
 
 #endif

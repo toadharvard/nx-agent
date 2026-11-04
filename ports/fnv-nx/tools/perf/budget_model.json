@@ -106,12 +106,13 @@
    "name": "culling (NiCullingProcess, multibounds, occlusion; main, shadow and reflection passes)",
    "role": "main",
    "minsn": [
-    2,
-    4.5
+    3.54,
+    11.36
    ],
-   "basis": "E",
+   "basis": "E+M",
    "phase": "render",
-   "subsystem": "cull"
+   "subsystem": "cull",
+   "note": "reconciled with the fn_cull_test row (S15-simd, J-0150 follow-up): the earlier 2-4.5 M assumed 0.3-1.8 M for the per-object plane tests (50-90 instructions x 6,000-20,000 objects); V1 measured the decomp's per-object test at 306-433 instructions [M], so the item is the rest of the cull (traversal, multibounds, occlusion: 2-4.5 minus 0.3-1.8 = 1.7-2.7 M [E]) plus 306-433 x 6,000-20,000 (1.84-8.66 M, calls [E]). The measured per-call cost wins over the old item total; the call count stays the open estimate"
   },
   {
    "id": "render_accumulation",
@@ -242,21 +243,21 @@
  "levers": [
   {
    "id": "mt_cull",
-   "name": "cull and accumulation on cores 1-2 (the 360's Rendering Task Thread 2 path: 23 stage records a frame)",
+   "name": "cull and accumulation of the main-scene split on Rendering Task Thread 2 (MT1: record 21, the worker culls leftList2 while main culls the rest)",
    "moves": {
     "cull": [
-     0.7,
-     0.9
+     0.15,
+     0.35
     ],
     "render_accumulation": [
-     0.5,
-     0.7
+     0.15,
+     0.35
     ]
    },
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "bMTRendering:Display (0x011c710c) is unsafe on the PC code: accumulators are built with one batch renderer, the worker indexes a NULL second one and shares main's; current-accumulator globals shared (PERF.md 6.8). Needs port code; TLS fix done (S5 31cdca3), stage protocol modelled (mtqemu stages)"
+   "status": "MT1 patches/mt1_cull.s1b (main accumulator with 2 batch renderers, only record 21 on the worker; PERF.md 6.8), off by default (bMTRendering=0); moves: half of the main-scene pass, which is part of the cull (shadow, water and interface passes stay on main); needs the S1b MT1 class, mtqemu on the real objects past WinMain, the race checker and frame equivalence"
   },
   {
    "id": "havok_workers",
@@ -428,7 +429,14 @@
     11.5,
     59.6
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     13,
+     100
+    ],
+    "note": "decomp: copy paths 12-14 [M]; compose 23 + operator* (> 100 counted from the parts, the link leaves it unresolved) [M, lower bound]"
+   }
   },
   {
    "id": "fn_nibound_update",
@@ -489,12 +497,19 @@
     20000
    ],
    "calls_note": "object tests over the main, 3 shadow and the reflection passes [E]",
-   "per_call_note": "before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]",
+   "per_call_note": "before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]; V1 (S15-simd PL1 notes): the classification override is 19 behind the plane, 21 in front or straddling (inside 49-67); the decomp before is 306-433 at 4-6 active planes, not 224-330 (understated)",
    "per_call_cycles": [
     52.4,
     148.0
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     306,
+     433
+    ],
+    "note": "decomp: worker 0x00a694e0 + 4-6 active planes x (getter + classification + loop), V1 tests/v1/test_s15simd_decomp.py [M]"
+   }
   },
   {
    "id": "fn_slerp",
@@ -516,7 +531,14 @@
     180.6,
     233.6
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     134,
+     134
+    ],
+    "note": "decomp: Slerp + weight 0x00a6dc30 + normalisation 0x00a4ff00, override_ab.py on link 0bd144db1464 [M]"
+   }
   },
   {
    "id": "fn_quat_from_matrix",
@@ -524,7 +546,7 @@
    "subsystem": "animation",
    "role": "main",
    "per_call_insn": [
-    77,
+    34,
     77
    ],
    "per_call_basis": "M",
@@ -533,12 +555,19 @@
     3000
    ],
    "calls_note": "[E]",
-   "per_call_note": "override fnvnx_quat_from_matrix_00a6df40 (S15-simd: no frame, no volatile reload, no pointer array): 89 -> 77 A64 instructions per call (override_ab.py, link 0bd144db1464, 13 cases, agreement 13 -> 13); 103 was an older link",
+   "per_call_note": "override fnvnx_quat_from_matrix_00a6df40 (S15-simd): per path, 34 (trace > 0) to 77 (largest-diagonal path) A64 instructions (V1, tests/v1/test_s15simd_decomp.py); the harness median 89 -> 77 is the slow path; 103 was an older link",
    "per_call_cycles": [
-    59.5,
+    26.3,
     99.7
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "funcmodel.py on the override: lo = 34 x 0.773 (steady), hi = 77 x 1.295 (one call)",
+   "before": {
+    "per_call_insn": [
+     39,
+     89
+    ],
+    "note": "decomp: trace > 0 path ~39 (static path count of the link object), largest-diagonal path 89 (dyncount) [M]"
+   }
   },
   {
    "id": "fn_pass_bucket",
@@ -582,7 +611,14 @@
     635.6,
     826.5
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     579,
+     579
+    ],
+    "note": "decomp with sse2neon unchanged: 292 + 119 + 73 + 95 (dyncount, link 0bd144db1464) [M]"
+   }
   },
   {
    "id": "fn_interlocked",
@@ -609,10 +645,10 @@
  ],
  "fixes": {
   "cull": {
-   "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
+   "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
-    1.4,
-    4.05
+    0.3,
+    1.575
    ],
    "owner": "S15/S5",
    "needs_hardware": true
@@ -627,10 +663,10 @@
    "needs_hardware": false
   },
   "render accumulation": {
-   "fix": "mt_cull moves 50-70 % with the cull; instancing -10-20 %",
+   "fix": "moves with mt_cull (MT1: the worker registers its half into the main accumulator's second batch renderer); instancing",
    "gain_main_minsn": [
-    0.75,
-    2.8
+    0.225,
+    1.4
    ],
    "owner": "S6n/S15",
    "needs_hardware": true
@@ -716,6 +752,71 @@
    ],
    "owner": "S3",
    "needs_hardware": false
+  }
+ },
+ "content": {
+  "note": "content lever (S15-simd, PERF.md 11.7; tools/perf/content_presets.py): Switch INI presets of existing settings only. base = FalloutNV.exe 1.4.0.525's own defaults, read from the settings' static initializers [M]; the work items are taken to describe a frame at base [E: to verify with frameprof per preset]. Shares and the scaling rules are estimates [E].",
+  "shares": {
+   "visible": {
+    "objects": 0.7,
+    "items": 0.1,
+    "actors": 0.1,
+    "grass": 0.1
+   },
+   "shadow_of_draws": 0.15,
+   "grass_shadow_actor_equiv": 2.0,
+   "cull_traversal": 0.3,
+   "scene_loaded": 0.5
+  },
+  "presets": {
+   "base": {
+    "uGridsToLoad": 5,
+    "fLODFadeOutMultObjects": 5.0,
+    "fLODFadeOutMultItems": 3.0,
+    "fLODFadeOutMultActors": 2.5,
+    "iActorShadowCountExt": 2,
+    "iActorShadowCountInt": 4,
+    "bShadowsOnGrass": 0,
+    "iMinGrassSize": 80,
+    "fGrassMaxStartFadeDistance": 7000.0,
+    "iMaxDecalsPerFrame": 10,
+    "iMaxSkinDecalsPerFrame": 3
+   },
+   "switch_a": {
+    "fLODFadeOutMultObjects": 4.0,
+    "fLODFadeOutMultItems": 2.0,
+    "fLODFadeOutMultActors": 2.0,
+    "iActorShadowCountExt": 1,
+    "iActorShadowCountInt": 2,
+    "iMinGrassSize": 120,
+    "fGrassMaxStartFadeDistance": 4000.0,
+    "iMaxDecalsPerFrame": 5,
+    "iMaxSkinDecalsPerFrame": 2
+   },
+   "switch_b": {
+    "fLODFadeOutMultObjects": 3.0,
+    "fLODFadeOutMultItems": 1.5,
+    "fLODFadeOutMultActors": 1.5,
+    "iActorShadowCountExt": 0,
+    "iActorShadowCountInt": 1,
+    "iMinGrassSize": 160,
+    "fGrassMaxStartFadeDistance": 2500.0,
+    "iMaxDecalsPerFrame": 3,
+    "iMaxSkinDecalsPerFrame": 1
+   },
+   "switch_b_g3": {
+    "uGridsToLoad": 3,
+    "fLODFadeOutMultObjects": 3.0,
+    "fLODFadeOutMultItems": 1.5,
+    "fLODFadeOutMultActors": 1.5,
+    "iActorShadowCountExt": 0,
+    "iActorShadowCountInt": 1,
+    "iMinGrassSize": 160,
+    "fGrassMaxStartFadeDistance": 2500.0,
+    "iMaxDecalsPerFrame": 3,
+    "iMaxSkinDecalsPerFrame": 1,
+    "risk": "uGridsToLoad below 5 is known to break scripted events and AI packages that expect loaded cells; listed to show the bound, not as a proposal"
+   }
   }
  }
 }

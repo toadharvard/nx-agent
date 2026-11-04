@@ -16,8 +16,9 @@
 
 /* RCAST1: (T&)fnvnx_lvalue(f(x)) - fnvnx_lvalue hands back the temporary itself (fnvnx_compat.h); MSVC binds the
  * C-style reference cast to the temporary directly, so the identity is the MSVC meaning. A wrong extent of the
- * wrapped expression changes the parse and shows up as a difference. */
-#define fnvnx_lvalue(x) (x)
+ * wrapped expression changes the parse and shows up as a difference. Variadic: on the target fnvnx_lvalue is a function,
+ * so an argument with a template comma (`reinterpret_cast<A<B, C>*>(p)`) is one argument there. */
+#define fnvnx_lvalue(...) (__VA_ARGS__)
 /* RSTR1: fnvnx_unrestrict(v) is the restrict-qualified local v itself (fnvnx_compat.h); MSVC bound the reference to v */
 #define fnvnx_unrestrict(x) (x)
 
@@ -37,6 +38,7 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
  * global one from the deleting destructor of a class whose only scalar operator delete is the placement form. */
 #define FNVNX_GLOBAL_DELETE
 #define FNVNX_NEW5_TAG
+#define FNVNX_EBO2
 
 /* FTOL1 (S1b): fnvnx_ftol2(x) is the x87 _ftol2_sse of x; under MSVC the cast compiles to exactly that call */
 #ifndef fnvnx_ftol2

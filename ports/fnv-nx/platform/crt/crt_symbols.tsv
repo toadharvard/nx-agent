@@ -90,6 +90,7 @@
 0x00ec5fce	helper	`eh vector destructor iterator'	n	87	28	fnvnx_eh_vector_dtor
 0x00ec6040	helper	_CIsqrt	n	99	8	implicit: libm call (explicit arg-less calls need a rule)
 0x00ec6054	crt	sqrt	n	6	117	libc: sqrt
+0x00ec60fa	crt	_purecall (the pure virtual slot of 670 exe vftable slots; no unit references it)	n	0	0	platform/crt: _purecall
 0x00ec6130	crt	strlen	n	64	155	libc: strlen
 0x00ec61c0	crt	memset	n	144	414	libc: memset
 0x00ec623a	crt	sprintf	n	47	64	libc: sprintf

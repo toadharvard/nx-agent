@@ -51,6 +51,47 @@ PIC = ['-fPIC']   # compile.sh's GOT addressing of defined variables: emitted co
 POD_RULE = 'pod2'   # layouts.tsv column 10: the POD predicate the row was probed with (pod2: V1's, J-0147)
 
 
+_GAME_FLAGS = {}
+_GAME_FLAGS_LOCK = __import__('threading').Lock()   # the emitters call it from worker threads: one plugin build
+
+
+def game_flags(tree, workdir):
+    """compile.sh's own flags (`compile.sh --print-flags`: semantics, code generation, -fPIC, FTOI2 and the S12
+    order plugin, built in <workdir>) for code that is linked into the game: vtables.py's emitted slot functions,
+    bodies.py's synthesized bodies. One source, no fallback (objects with and without a plugin must never mix):
+    a failure stops the step. -fmax-errors is raised so a probe can drop all its failing lines in one round."""
+    key = (os.path.abspath(tree), os.path.abspath(workdir), os.environ.get('CXX', ''),
+           tuple(os.environ.get(k, '') for k in ('ORDER_MODE', 'ORDER_ARGS', 'ORDER_REFCOUNT', 'ORDER_KEYS', 'OPT',
+                                                 'SSE2NEON')))
+    with _GAME_FLAGS_LOCK:
+        return list(_game_flags(key, tree, workdir))
+
+
+def _game_flags(key, tree, workdir):
+    if key not in _GAME_FLAGS:
+        r = subprocess.run(['bash', os.path.join(PORT, 'tools', 'link', 'compile.sh'), '--print-flags', tree, workdir],
+                           capture_output=True, text=True)
+        fl = r.stdout.split('\n')[:-1] if r.returncode == 0 else []
+        if not fl or '-c' not in fl:
+            raise SystemExit('compile.sh --print-flags failed (%s)' % (r.stderr.strip().splitlines() or ['?'])[-1])
+        _GAME_FLAGS[key] = ['-fmax-errors=200' if f.startswith('-fmax-errors=') else f for f in fl]
+    return _GAME_FLAGS[key]
+
+
+def game_flags_id(tree, workdir):
+    """game_flags for a cache key: the tree and work dir spelled out, plus the plugins' sources (their .so paths
+    stay the same when they are rebuilt)."""
+    h = hashlib.sha1()
+    for d in ('ftoi', 'order'):
+        p = os.path.join(PORT, 'toolchain', d)
+        for n in sorted(os.listdir(p)) if os.path.isdir(p) else ():
+            if n.endswith(('.cc', '.c', '.h', '.sh')):
+                h.update(n.encode() + open(os.path.join(p, n), 'rb').read())
+    t, w = os.path.abspath(tree), os.path.abspath(workdir)
+    return ' '.join(game_flags(tree, workdir)).replace(t, '<tree>').replace(w, '<work>').replace(PORT, '<port>') + \
+        ' plugins:' + h.hexdigest()[:16]
+
+
 def flags(tree):
     sse = os.environ.get('SSE2NEON') or os.path.join(PORT, 'ext', 'sse2neon')
     return ['-mabi=ilp32', '-std=gnu++17', '-c', '-O2', '-fms-extensions', '-fshort-wchar', *SEMANTICS,

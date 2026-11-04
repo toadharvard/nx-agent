@@ -287,16 +287,28 @@ The current-accumulator globals are shared too:
 Shadow records re-cull scene objects that main culls too, so the fade-node and object-flag updates race there as
 well.
 
-**Verdict: not an ini switch.** `mt_cull` needs port code:
-1. accumulators with two batch renderers while MT is on (the ctor's count argument at the construction sites above);
-2. per-thread current-accumulator globals (`DAT_011f95ec`, `DAT_011f4748`), or the worker's culler carrying them;
-3. fade-node registration through the culler's accumulator;
-4. the shadow-light / main overlap checked for the light-map edits main makes meanwhile (`FUN_00b5d300`,
-   shadowscenenode.cpp ~10835).
+**Verdict: not an ini switch; MT1 makes it one** (docs/PATCHES.md "Patch class MT1", `patches/mt1_cull.s1b`).
+Only the main-scene split runs concurrently:
+* Records 1-20 and 23 take 0x00ba3390's own inline path, so the shadow lights and the interface record no longer
+  overlap main's rewrites of the current-accumulator globals.
+* For record 21 both threads set those globals to `m_88`, which main points them at just before; both setters skip
+  an unchanged value (`FUN_00b54ac0`, NiPointer assignment in `FUN_004dc540`).
+* `m_88` gets a second batch renderer (`fnvnx_mt1_batches()`, shim/include/fnvnx_mt1.h). It reads the INI setting
+  object, because WinMain builds the accumulators before the renderer copies the setting.
+* Fade nodes register through the same accumulator with the worker's TLS index, i.e. into renderer 1.
+* With `bMTRendering=0` both hunks do what the PC code does.
 
-Then mtqemu on the real culling units (not the `stages` model) and a race checker run. The lever stays out of the
-as-built scenario, and its moves (cull 70-90 %) are too high for what the split does (the main scene is halved; the
-shadow lights move whole).
+What moves off main: half of the main-scene pass, so the lever is 15-35 % of cull and of accumulation (it was
+70-90 % and 50-70 % when the whole 360 path was assumed).
+
+Still needed before it is on by default:
+* S1b's MT1 class in the tooling;
+* mtqemu on the real objects past WinMain (linhost boots the game image to WinMain, `boot_game.sh`; the boot
+  stops at the memory manager after that);
+* the race checker;
+* frame equivalence of m_88 with MT1 on and off.
+
+GCC census of both patched prepared units: 0 errors before and after.
 
 ### 6.9 Threaded effects and Havok MT (S15-threads, read from the decomp)
 
@@ -637,15 +649,16 @@ lo-hi range; every plan includes the built levers (`placed`'s); level by the mid
 
 | scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
 |---|---:|---|---|---|---|
-| placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.2 | **fail** | 16.1 (7.3-31.0) / 20.1 | pass_45 |
-| plan45 (mt_cull, havok_workers, threaded_anim; + built barrier_relax) | 16.4 (8.4-25.7) | 20.1 (8.2-42.0) / 25.1 | pass_30 | 11.5 (7.1-24.0) / 14.3 | target_60 |
-| plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | pass_45 | 9.9 (7.1-22.0) / 12.4 | target_60 |
-| plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | pass_45 | 9.8 (7.1-20.6) / 12.3 | target_60 |
+| placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.1 | fail | 16.1 (7.3-31.0) / 20.1 | pass_45 |
+| plan45 (mt_cull, havok_workers, threaded_anim) | 19.1 (10.0-29.6) | 23.5 (9.8-48.3) / 29.3 | pass_30 | 13.4 (7.1-27.6) / 16.8 | pass_45 |
+| plan45b (plan45 + render_f2f4, neon_math) | 16.9 (8.3-27.4) | 20.7 (8.1-44.8) / 25.9 | pass_30 | 11.8 (7.1-25.6) / 14.8 | target_60 |
+| plan60 (plan45b + instancing, core 3) | 15.5 (7.4-25.8) | 19.1 (7.3-42.1) / 23.8 | pass_30 | 10.9 (7.1-24.1) / 13.6 | target_60 |
 
 Reading it (owner's target J-0150: 60 fps stable, worst frame <= 16.7 ms at 1.02 GHz): **that needs the main thread
 under ~10.9 M mean** (`budget_mean_minsn.1020.target_60`, at the 1.25 worst-frame factor and IPC 0.8). No plan
-reaches it yet: plan60 (12.9 M) lands at a 19.8 ms worst frame, about 3 M short. The as-built mid case (22.9 M)
-misses even 30 fps at 1020 MHz. At 1785 MHz plan45 already meets the target. Every verdict is still `uncertain`
+reaches it: with mt_cull at its MT1 size (half the main-scene pass) plan60 (15.5 M) lands at a 23.8 ms worst frame,
+about 4.6 M short, and every plan is pass_30 at 1020 MHz. The as-built mid case (22.9 M) misses even 30 fps there.
+At 1785 MHz plan45b meets the target. Every verdict is still `uncertain`
 (2.6x spread of work, 1.7x of IPC).
 The two measurements that close it stay frameprof on a real frame and B1 (IPC) on hardware.
 
@@ -763,12 +776,12 @@ override:
 | NiQuaternion::Slerp 0x00a6e330 (+ 0x00a6dc30, 0x00a4ff00 inlined) | `slerp_00a6e330.c` | 134 -> 88 | 9/16 -> 9/16 | 7.745 -> 7.430 |
 | NiBound::Update 0x00a7fdd0 | `nibound_update_00a7fdd0.c` (one `ld3` gives the rotation's columns) | 46 -> 19 | 15/16 -> 15/16 | 7.430 -> 6.660 (both rows) |
 | NiMatrix3 transpose product 0x00a588a0 (in UpdateWorldData's row) | `mat3_tmul_00a588a0.c` | 64 -> 39 | 13/16 -> 13/16 | |
-| NiQuaternion::FromRotationMatrix 0x00a6df40 | `quat_from_matrix_00a6df40.c` (no frame, volatile reload or pointer array; errno of a negative root set after the stores) | 89 -> 77 (model: 103, older link) | 13/13 -> 13/13 | 6.660 -> 6.603 |
-| Havok GSK 0x00da8fb0, 0x00da8390, 0x00da8500, 0x00da8820 | `shim/include/fnvnx_sse_fast.h`: two-source `_mm_shuffle_ps` 0x00/0x55/0xaa/0xff/0xc4/0xd4 as 2-instruction asm sequences instead of tbl + literal | 579 -> 571 (model: 600, older link) | 16+11+9+0 -> same | 6.603 -> 6.563 |
-| sphere/plane classification 0x004b6100 (per active plane of the cull) | `sphere_plane_004b6100.c` | 38 -> 19 | 16/16 -> 16/16 | (with the next row) |
+| NiQuaternion::FromRotationMatrix 0x00a6df40 | `quat_from_matrix_00a6df40.c` (no frame, volatile reload or pointer array; errno of a negative root set after the stores) | 89 -> 77 on the harness (the largest-diagonal path); 34 on the trace > 0 path (V1) (model: 103, older link) | 13/13 -> 13/13 | 6.660 -> 6.603 |
+| Havok GSK 0x00da8fb0, 0x00da8390, 0x00da8500, 0x00da8820 | `shim/include/fnvnx_sse_fast.h`: two-source `_mm_shuffle_ps` 0x00/0x55/0xaa/0xff/0xc4/0xd4 as 2-instruction asm sequences instead of tbl + literal (0xc4 is 3 when a non-inlined function returns it, from the early-clobber pair, V1 SH1; split into two asm statements it measured worse inlined, GSK 539 -> 541, so it stays) | 579 -> 571 (model: 600, older link) | 16+11+9+0 -> same | 6.603 -> 6.563 |
+| sphere/plane classification 0x004b6100 (per active plane of the cull) | `sphere_plane_004b6100.c` | 38 -> 19 behind the plane, 21 in front or straddling (V1 PL1) | 16/16 -> 16/16 | (with the next row) |
 | culling worker 0x00a694e0 (+ bound getter 0x0043d450, 0x004b6100, 0x004b6160, 0x004b6190 inlined) | `cull_worker_00a694e0.c`: two `ld4` give the six planes as lanes, behind/front masks by lane | per object with 4-6 active planes 224-330 -> 49-67 (static paths; harness: early exit only, 12 -> 10) | 8/8 -> 8/8 | 6.563 -> 9.927 (row re-measured) -> 6.368 |
 | NiAVObject::UpdateWorldLoc 0x00a68bf0 (+ NiTransform compose 0x0062c250 and its four helpers inlined) | `update_world_loc_00a68bf0.c` | copy paths 13 -> 14; compose 23 + an unresolved operator* (> 100) -> 47 | 11/16 -> 12/16 | 6.368 -> 6.088 |
-| Havok GSK (same four) | `fnvnx_sse_fast.h`: `_mm_rsqrt_ss` on lane 0 only (15 -> 10), `_mm_add_ss` as fadd s + ins (3 -> 2; lanes 1-3 now a's bits as on x86, sse2neon added 0.0), `_mm_set_ss` / `_mm_load_ss` as `fmov s` / `ldr s` (2 -> 1) | 571 -> 539 | same | 6.088 -> 6.044 |
+| Havok GSK (same four) | `fnvnx_sse_fast.h`: `_mm_rsqrt_ss` on lane 0 only (15 -> 10; the same bits except the NaN of a negative input, which can be -qNaN as on x86 where sse2neon gives +qNaN, V1 SS2), `_mm_add_ss` as fadd s + ins (3 -> 2; lanes 1-3 now a's bits as on x86, sse2neon added 0.0), `_mm_set_ss` / `_mm_load_ss` as `fmov s` / `ldr s` (2 -> 1) | 571 -> 539 | same | 6.088 -> 6.044 |
 | BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | 15/15, 8/8 | 6.044 -> 5.913 (model row re-measured 82 -> 54, no code) |
 
 Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no
@@ -1033,3 +1046,63 @@ What the model says about the plan:
   1.785 GHz holds at the mid case (12.1 ms), not at the hi case;
 * the levers that shorten main's path without a join on it (render F2-F4, relaxed barriers, NEON math, overrides)
   gain their full value.
+
+**Worst frame (frame_budget.py).** Overrides now feed the frame model. A hotspot row with a `before` (the decomp's
+measured instructions per call) adds an item `simd_<row>`: (after - before) x calls, on the row's thread and
+subsystem (`apply_overrides`). The items estimate the decomp's code; with --perf, apply_perf prices the after side
+in A57 cycles on top. **Cull reconciled:** the cull item's 2-4.5 M assumed 0.3-1.8 M for the per-object plane
+tests. V1 measured the decomp's test at 306-433 instructions, which is 1.84-8.66 M at 6,000-20,000 objects. The
+measured per-call cost wins. The item is now the rest of the cull (1.7-2.7 M [E]) plus that, 3.54-11.36 M (E+M). The
+number of objects tested per frame stays the open estimate; frameprof on a real frame settles it.
+Worst frame, placed, mid, at 1.02 GHz (--render report.json, --perf perf1 004d29413190): 34.9 ms before; 41.3 ms
+with the cull reconciled and no override counted; 34.3 ms with the overrides (-7.0 ms, most of it the culling
+worker). Corrections move with the item they correct (`follows`). A lever that moves part of the cull to another core
+(mt_cull: MT1's 15-35 %, PERF.md 6.8) moves the same share of the override's saving, and so does an A57 price. With
+that, plan45b is 30.4 ms without the overrides and 25.2 ms with them. Earlier figures (16.0, then 20.6 ms) came
+from a version that left the corrections on main, and then from the old 70-90 % mt_cull.
+
+### 11.7 The content lever: Switch INI presets (stream S15-simd)
+
+Threading alone reaches 17.15 ms at best (S15-threads), above the 16.7 ms worst-frame target. The 360/PS3 versions
+cut content: fade distances, shadows, grass. `tools/perf/content_presets.py` models that with the game's own settings
+only (no code). The presets live in budget_model.json `content`. Each key is a static setting object of the exe
+(`setting_names.py`). The `base` values are the exe's own defaults, read from the settings' initializers [M]:
+uGridsToLoad 5, fLODFadeOutMultObjects 5.0, Items 3.0, Actors 2.5, iActorShadowCountExt 2 / Int 4, bShadowsOnGrass
+0, iMinGrassSize 80, fGrassMaxStartFadeDistance 7000, iMaxDecalsPerFrame 10 / Skin 3.
+
+| preset | changes from base |
+|---|---|
+| switch_a | fade x Objects 4 / Items 2 / Actors 2; actor shadows 1 ext / 2 int; iMinGrassSize 120; grass fade 4000; decals 5 / 2 |
+| switch_b | fade x 3 / 1.5 / 1.5; actor shadows 0 / 1; iMinGrassSize 160; grass fade 2500; decals 3 / 1 |
+| switch_b_g3 | switch_b with uGridsToLoad 3. It breaks scripted events and AI packages that expect loaded cells, so it is shown as the bound only, not proposed |
+
+**Scaling [E].**
+- Visible references of a class grow with the square of its fade multiplier, capped by the loaded area
+  ((uGridsToLoad'/5)^2).
+- Grass grows with (80 / iMinGrassSize)^2 x (fade'/7000)^2.
+- V weights the classes: objects 0.70, items 0.10, actors 0.10, grass 0.10.
+- Each shadowed actor is a shadow pass: 15 % of draws at base.
+- cull = 0.30 x loaded + 0.70 x V; accumulation and both renderer sides = draws; scene update = 0.5 x loaded +
+  0.5 x V.
+- Animation, AI and Havok are unchanged: high process is set by distance to the player, not by fade.
+- S15-simd's override corrections scale with their item.
+
+| preset | scale cull / accumulation + renderer / scene update | worst frame, ms at 1.02 GHz, mid (lo-hi): placed | plan45b | plan60 |
+|---|---|---|---|---|
+| base | 1.00 / 1.00 / 1.00 | 34.3 (6.1-97.4) | 25.2 (6.1-80.7) | 23.4 (6.1-77.1) |
+| switch_a | 0.70 / 0.53 / 0.79 | 27.3 (6.1-76.7) | 20.1 (6.1-63.6) | 19.1 (6.1-61.7) |
+| switch_b | 0.52 / 0.27 / 0.66 | 23.3 (6.1-64.9) | 17.2 (6.1-53.8) | 16.7 (6.1-52.8) |
+| switch_b_g3 | 0.33 / 0.27 / 0.34 | 20.9 (6.1-56.5) | 15.2 (6.1-46.4) | 14.8 (6.1-45.5) |
+
+(--render render/native/perf/report.json, --perf perf1 004d29413190; the lo end is the docked 720p GPU estimate.)
+
+**Reading it** (mt_cull at MT1's 15-35 %). switch_b just meets 60 fps stable at plan60 (16.7 ms) and misses it at
+plan45b (17.2 ms). switch_a does not meet it (19.1 ms). Only switch_b_g3 is clearly under (14.8 / 15.2 ms), and it
+gives up uGridsToLoad 5. A preset between switch_b and switch_b_g3 is needed, or more threading. Every figure is the
+model's mid case. The hi end stays far above the target until frameprof measures a frame.
+
+**Open.**
+- The work items are taken to describe a frame at the base settings, i.e. the exe's defaults. A PC player's ini
+  (High/Ultra) has longer fades, so if the items were estimated for those, the presets save more.
+- The shares and the square law are estimates. frameprof per preset on one scene replaces them.
+- Applying a preset is ini.cpp's `port_default` table (S15-threads / S4): no game code.

@@ -8,7 +8,8 @@
  *
  * 3D: each 3D buffer keeps current and deferred parameters; the listener too. DS3D_IMMEDIATE writes both and
  * recomputes; DS3D_DEFERRED writes the deferred copy and CommitDeferredSettings applies everything.
- * FX: SetFX/GetObjectInPath accept effects and keep their parameters; no DSP runs yet (open item).
+ * FX: SetFX/GetObjectInPath; the I3DL2 reverb (SetAllParameters, SetPreset) runs in the mixer (reverb.h) on the
+ * buffer's voice. The Waves reverb keeps its parameters only (the game does not use it).
  */
 #include <dsound.h>
 #include "fnvnx_win32_ext.h"
@@ -16,6 +17,7 @@
 #include "backend.h"
 #include "ds3d.h"
 #include "mixer.h"
+#include "reverb.h"
 #include "../os/os.h"
 
 #include <math.h>
@@ -46,7 +48,43 @@ struct Shared {
 struct Device;
 struct Buffer;
 
-/* ---- FX parameter objects (no DSP yet) */
+/* ---- FX parameter objects. The I3DL2 reverb drives the voice's DSP (mixer_voice_set_reverb). */
+/* DSFX_I3DL2_ENVIRONMENT_PRESET_DEFAULT .. _PLATE: the DirectX SDK's I3DL2_ENVIRONMENT_PRESET_* values (dsound.h).
+ * The game cycles them with SetPreset (0x00af194f). */
+static const DSFXI3DL2Reverb k_i3dl2_presets[] = {
+    {-1000, -100, 0.0f, 1.49f, 0.83f, -2602, 0.007f, 200, 0.011f, 100.0f, 100.0f, 5000.0f},    /* DEFAULT */
+    {-1000, -100, 0.0f, 1.49f, 0.83f, -2602, 0.007f, 200, 0.011f, 100.0f, 100.0f, 5000.0f},    /* GENERIC */
+    {-1000, -6000, 0.0f, 0.17f, 0.10f, -1204, 0.001f, 207, 0.002f, 100.0f, 100.0f, 5000.0f},   /* PADDEDCELL */
+    {-1000, -454, 0.0f, 0.40f, 0.83f, -1646, 0.002f, 53, 0.003f, 100.0f, 100.0f, 5000.0f},     /* ROOM */
+    {-1000, -1200, 0.0f, 1.49f, 0.54f, -370, 0.007f, 1030, 0.011f, 100.0f, 60.0f, 5000.0f},    /* BATHROOM */
+    {-1000, -6000, 0.0f, 0.50f, 0.10f, -1376, 0.003f, -1104, 0.004f, 100.0f, 100.0f, 5000.0f}, /* LIVINGROOM */
+    {-1000, -300, 0.0f, 2.31f, 0.64f, -711, 0.012f, 83, 0.017f, 100.0f, 100.0f, 5000.0f},      /* STONEROOM */
+    {-1000, -476, 0.0f, 4.32f, 0.59f, -789, 0.020f, -289, 0.030f, 100.0f, 100.0f, 5000.0f},    /* AUDITORIUM */
+    {-1000, -500, 0.0f, 3.92f, 0.70f, -1230, 0.020f, -2, 0.029f, 100.0f, 100.0f, 5000.0f},     /* CONCERTHALL */
+    {-1000, 0, 0.0f, 2.91f, 1.30f, -602, 0.015f, -302, 0.022f, 100.0f, 100.0f, 5000.0f},       /* CAVE */
+    {-1000, -698, 0.0f, 7.24f, 0.33f, -1166, 0.020f, 16, 0.030f, 100.0f, 100.0f, 5000.0f},     /* ARENA */
+    {-1000, -1000, 0.0f, 10.05f, 0.23f, -602, 0.020f, 198, 0.030f, 100.0f, 100.0f, 5000.0f},   /* HANGAR */
+    {-1000, -4000, 0.0f, 0.30f, 0.10f, -1831, 0.002f, -1630, 0.030f, 100.0f, 100.0f, 5000.0f}, /* CARPETEDHALLWAY */
+    {-1000, -300, 0.0f, 1.49f, 0.59f, -1219, 0.007f, 441, 0.011f, 100.0f, 100.0f, 5000.0f},    /* HALLWAY */
+    {-1000, -237, 0.0f, 2.70f, 0.79f, -1214, 0.013f, 395, 0.020f, 100.0f, 100.0f, 5000.0f},    /* STONECORRIDOR */
+    {-1000, -270, 0.0f, 1.49f, 0.86f, -1204, 0.007f, -4, 0.011f, 100.0f, 100.0f, 5000.0f},     /* ALLEY */
+    {-1000, -3300, 0.0f, 1.49f, 0.54f, -2560, 0.162f, -613, 0.088f, 79.0f, 100.0f, 5000.0f},   /* FOREST */
+    {-1000, -800, 0.0f, 1.49f, 0.67f, -2273, 0.007f, -2217, 0.011f, 50.0f, 100.0f, 5000.0f},   /* CITY */
+    {-1000, -2500, 0.0f, 1.49f, 0.21f, -2780, 0.300f, -2014, 0.100f, 27.0f, 100.0f, 5000.0f},  /* MOUNTAINS */
+    {-1000, -1000, 0.0f, 1.49f, 0.83f, -10000, 0.061f, 500, 0.025f, 100.0f, 100.0f, 5000.0f},  /* QUARRY */
+    {-1000, -2000, 0.0f, 1.49f, 0.50f, -2466, 0.179f, -2514, 0.100f, 21.0f, 100.0f, 5000.0f},  /* PLAIN */
+    {-1000, 0, 0.0f, 1.65f, 1.50f, -1363, 0.008f, -1153, 0.012f, 100.0f, 100.0f, 5000.0f},     /* PARKINGLOT */
+    {-1000, -1000, 0.0f, 2.81f, 0.14f, 429, 0.014f, 648, 0.021f, 80.0f, 60.0f, 5000.0f},       /* SEWERPIPE */
+    {-1000, -4000, 0.0f, 1.49f, 0.10f, -449, 0.007f, 1700, 0.011f, 100.0f, 100.0f, 5000.0f},   /* UNDERWATER */
+    {-1000, -600, 0.0f, 1.10f, 0.83f, -400, 0.005f, 500, 0.010f, 100.0f, 100.0f, 5000.0f},     /* SMALLROOM */
+    {-1000, -600, 0.0f, 1.30f, 0.83f, -1000, 0.010f, -200, 0.020f, 100.0f, 100.0f, 5000.0f},   /* MEDIUMROOM */
+    {-1000, -600, 0.0f, 1.50f, 0.83f, -1600, 0.020f, -1000, 0.040f, 100.0f, 100.0f, 5000.0f},  /* LARGEROOM */
+    {-1000, -600, 0.0f, 1.80f, 0.70f, -1300, 0.015f, -800, 0.030f, 100.0f, 100.0f, 5000.0f},   /* MEDIUMHALL */
+    {-1000, -600, 0.0f, 1.80f, 0.70f, -2000, 0.030f, -1400, 0.060f, 100.0f, 100.0f, 5000.0f},  /* LARGEHALL */
+    {-1000, -200, 0.0f, 1.30f, 0.90f, 0, 0.002f, 0, 0.010f, 100.0f, 75.0f, 5000.0f},           /* PLATE */
+};
+static void apply_i3dl2(Buffer *b, const DSFXI3DL2Reverb &p);   /* after Buffer */
+
 struct I3DL2 final : IDirectSoundFXI3DL2Reverb8 {
     Buffer *owner;
     DSFXI3DL2Reverb p;
@@ -55,9 +93,22 @@ struct I3DL2 final : IDirectSoundFXI3DL2Reverb8 {
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void **) override;
     ULONG STDMETHODCALLTYPE AddRef() override;
     ULONG STDMETHODCALLTYPE Release() override;
-    HRESULT STDMETHODCALLTYPE SetAllParameters(LPCDSFXI3DL2Reverb in) override { if (!in) return E_POINTER; p = *in; return DS_OK; }
+    HRESULT STDMETHODCALLTYPE SetAllParameters(LPCDSFXI3DL2Reverb in) override
+    {
+        if (!in) return E_POINTER;
+        p = *in;
+        apply_i3dl2(owner, p);
+        return DS_OK;
+    }
     HRESULT STDMETHODCALLTYPE GetAllParameters(LPDSFXI3DL2Reverb out) override { if (!out) return E_POINTER; *out = p; return DS_OK; }
-    HRESULT STDMETHODCALLTYPE SetPreset(DWORD d) override { preset = d; return DS_OK; }
+    HRESULT STDMETHODCALLTYPE SetPreset(DWORD d) override
+    {
+        if (DW(d) >= sizeof k_i3dl2_presets / sizeof k_i3dl2_presets[0]) return DSERR_INVALIDPARAM;
+        preset = DW(d);
+        p = k_i3dl2_presets[preset];
+        apply_i3dl2(owner, p);
+        return DS_OK;
+    }
     HRESULT STDMETHODCALLTYPE GetPreset(LPDWORD d) override { if (!d) return E_POINTER; *d = preset; return DS_OK; }
     HRESULT STDMETHODCALLTYPE SetQuality(LONG q) override { quality = q; return DS_OK; }
     HRESULT STDMETHODCALLTYPE GetQuality(LONG *q) override { if (!q) return E_POINTER; *q = quality; return DS_OK; }
@@ -557,16 +608,28 @@ Buffer::Buffer(Device *d, DWORD fl, bool prim) : dev(d), flags(fl), primary(prim
 
 Buffer::~Buffer()
 {
+    clear_fx();   /* first: it detaches the reverb from the voice */
     if (voice) mixer_voice_destroy(voice);
+    voice = nullptr;
     if (data && --data->refs == 0) {
         free(data->bytes);
         free(data);
     }
-    clear_fx();
+}
+
+static void apply_i3dl2(Buffer *b, const DSFXI3DL2Reverb &p)
+{
+    fnvnx_i3dl2 q = {(int32_t)p.lRoom, (int32_t)p.lRoomHF, p.flRoomRolloffFactor, p.flDecayTime, p.flDecayHFRatio,
+                     (int32_t)p.lReflections, p.flReflectionsDelay, (int32_t)p.lReverb, p.flReverbDelay, p.flDiffusion,
+                     p.flDensity, p.flHFReference};
+    if (b && b->voice)
+        mixer_voice_set_reverb(b->voice, &q);
 }
 
 void Buffer::clear_fx()
 {
+    if (voice)
+        mixer_voice_set_reverb(voice, nullptr);
     for (uint32_t i = 0; i < nfx; i++) {
         delete fx[i].i3dl2;
         delete fx[i].waves;
@@ -674,7 +737,8 @@ HRESULT Buffer::SetFX(DWORD n, LPDSEFFECTDESC d, LPDWORD results)
             fx[i].i3dl2 = new (std::nothrow) I3DL2();
             if (fx[i].i3dl2) {
                 fx[i].i3dl2->owner = this;
-                fx[i].i3dl2->p = {-1000, -100, 0.0f, 1.49f, 0.83f, -2602, 0.007f, 200, 0.011f, 100.0f, 100.0f, 5000.0f};
+                fx[i].i3dl2->p = k_i3dl2_presets[0];
+                apply_i3dl2(this, fx[i].i3dl2->p);
             }
         } else if (guid_eq(fx[i].cls, GUID_DSFX_WAVES_REVERB)) {
             fx[i].waves = new (std::nothrow) Waves();
