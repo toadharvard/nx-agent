@@ -4203,7 +4203,92 @@ def r_namespace_crt_calls(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- FINL1
+#
+# A `__forceinline` declaration without a body (`__forceinline ~ReleaseValue();`, `__forceinline hkVector4&
+# getColumn(int i);`) of a function the unit never defines: its body is in another unit. MSVC compiled the call as an
+# ordinary call (it cannot inline what it has not seen). The shim's `__forceinline` is `inline
+# __attribute__((always_inline))`, and GCC refuses to compile such a call when it optimizes ("inlining failed in call
+# to 'always_inline' ...: function body not available": tile_ob1_variant, three Havok _rtm_variant agents,
+# blk_00ae0000_od_ob1; only the real compile fails, the -fsyntax-only census does not see it). FINL1 drops the
+# keyword from that declaration: the same external call. Only in .cpp files, only declarations ending in `;` at file
+# scope or in a class C, and only where the unit (the file and its headers) has no body of that name with the same
+# parameter types and const qualification: `C::name(...) {` or a body inside C's braces for a member, any body for a free function (calls
+# after `.`, `->`, `:` and `,` - member accesses, initializer lists - are not bodies).
+
+FINL1_DECL = re.compile(r'\b__forceinline\s+((?:[\w:<>,*&~\s]|\[\])*?)(~?[A-Za-z_]\w*)\s*\(')
+FINL1_TAIL = r'\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?(?:noexcept\s*)?'
+
+def _finl1_sig(params):
+    """Parameter types without names and defaults: `const T& a, int n = 0` -> ('const T&', 'int')."""
+    params = params.strip()
+    if not params or params == 'void': return ()
+    out, depth, cur = [], 0, ''
+    for ch in params + ',':
+        if ch in '(<[': depth += 1
+        elif ch in ')>]': depth -= 1
+        if ch == ',' and depth == 0:
+            p = re.sub(r'\s*=.*$', '', cur, flags=re.S).strip()
+            q = re.sub(r'(?<=[*&>\s])[A-Za-z_]\w*\s*(\[[^\]]*\])?$', '', p).strip()
+            if q and q not in ('const', 'unsigned', 'signed', 'struct', 'class') and not q.endswith('::'): p = q
+            out.append(re.sub(r'\s+', '', p))
+            cur = ''
+        else: cur += ch
+    return tuple(out)
+
+def _finl1_defined(unit, name, sig, cls, cls_body):
+    """A body of name(sig) in the unit: `cls::name(...) {` (or `: init {`), or inside cls_body; for a free function
+    (cls None) any `name(...) {` that is not a member access or an initializer call."""
+    spots = []
+    if cls:
+        spots += [(unit, m) for m in re.finditer(r'\b%s\s*(?:<[^<>;{}()]*>)?\s*::\s*%s\s*\(' % (re.escape(cls),
+                  re.escape(name)), unit)]
+        spots += [(cls_body, m) for m in re.finditer(r'(?<![\w~.:>,])%s\s*\(' % re.escape(name), cls_body)]
+    else:
+        spots += [(unit, m) for m in re.finditer(r'(?<![\w~.:>,])%s\s*\(' % re.escape(name), unit)]
+    for t, m in spots:
+        e = _call_end(t, m.end() - 1)
+        if _finl1_sig(t[m.end():e - 1]) + (('const',) if re.match(r'\s*const\b', t[e:]) else ()) != sig: continue
+        if re.match(FINL1_TAIL + r'(?:\{|:(?!:))', t[e:]): return True
+    return False
+
+def r_forceinline_declarations(path, text, stats):
+    """FINL1: `__forceinline` on a body-less declaration of a function the unit does not define -> dropped (the
+    ordinary call MSVC made; see above)."""
+    if '__forceinline' not in text or not path.endswith('.cpp'): return text
+    unit, spans = None, None
+    edits = []
+    for m in FINL1_DECL.finditer(text):
+        close = _call_end(text, m.end() - 1)
+        tail = re.match(FINL1_TAIL + r'(=\s*0\s*)?;', text[close:])
+        if not tail or tail.group(1): continue                       # a definition, or a pure virtual
+        name = m.group(2)
+        sig = _finl1_sig(text[m.end():close - 1]) + (('const',) if re.match(r'\s*const\b', text[close:]) else ())
+        if unit is None:
+            unit = '\n'.join(t for _, t in _closure(path, text)) if '#include' in text else COMMENT.sub(' ', text)
+            spans = prepare.scope_spans(text)
+        inner = None
+        for sp in spans:
+            if sp[0] > m.start(): break
+            if sp[0] < m.start() < sp[1]: inner = sp
+        cls, body = None, ''
+        if inner is not None:
+            if inner[2] != 'class': continue                         # a declaration inside a function or namespace
+            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', inner[3] or '')
+            if not hm: continue
+            cls, body = hm.group(1), text[inner[0]:inner[1]]
+            if name.lstrip('~') != name and name[1:] != cls: continue
+        if _finl1_defined(unit, name, sig, cls, body): continue
+        edits.append((m.start(), m.start(1)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b in edits:
+        out.append(text[pos:a]); out.append('/* fnv-nx FINL1: __forceinline */ '); pos = b
+        stats['FINL1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
-              r_namespace_crt_calls]
+              r_namespace_crt_calls, r_forceinline_declarations]
 RULES += REFS_RULES

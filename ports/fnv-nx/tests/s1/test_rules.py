@@ -1175,6 +1175,26 @@ check('DUPINT1-RET a narrower integer parameter: untouched',
 s1._UNIT_SYMBOLS = _saved
 _shutil.rmtree(_s3, ignore_errors=True)
 
+# ---- S1-refs: FINL1 (`__forceinline` on a declaration whose body the unit does not have)
+_F = ('struct A {\n    __forceinline ~A();\n    __forceinline int get(int i);\n    __forceinline int get(int i) const;\n'
+      '    __forceinline int put(int i);\n    __forceinline int one();\n};\n'
+      'struct B { int one() { return 1; } };\n'
+      'struct T { template<class X> static __forceinline void d(X* x, int n, Pod); '
+      'template<class X> static __forceinline void d(X* x, int n, Cls); };\n'
+      'template<class X> __forceinline void T::d(X* x, int n, Pod) {}\n'
+      'struct H : A { H() : A() {} };\n'
+      'int A::get(int i) const { return i; }\n__forceinline int A::put(int i) { return i; }\n')
+_o = run(s1.r_forceinline_declarations, _F)
+check('FINL1 body-less declarations of functions the unit does not define lose __forceinline',
+      _o, ['/* fnv-nx FINL1: __forceinline */ ~A();', '/* fnv-nx FINL1: __forceinline */ int get(int i);',
+           '/* fnv-nx FINL1: __forceinline */ int one();',
+           '/* fnv-nx FINL1: __forceinline */ void d(X* x, int n, Cls);'])
+check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overload)',
+      _o, ['__forceinline int get(int i) const;', '__forceinline int put(int i);',
+           'static __forceinline void d(X* x, int n, Pod);'])
+check('FINL1 headers are left alone',
+      run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''
