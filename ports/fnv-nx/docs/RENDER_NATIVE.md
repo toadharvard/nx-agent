@@ -444,8 +444,9 @@ verifier: [`render/native/CLAIMS.md`](../render/native/CLAIMS.md).
 | front | `render/native/include/nx/front.h`, `front/front.cpp` | rings, state cache (16-bit ids), radix-sorted packets, frame/pass encoding with redundant-bind elimination, dynamic records (viewport, scissor, blend constant, depth bias, stencil ref), DDS |
 | GL reference backend | `render/native/gl/nxgl.{h,c}` | desktop GL 4.5 core over EGL surfaceless (Mesa llvmpipe), host only |
 | deko3d backend | `render/native/host/nxgpu.{h,c}`, `host/nxgpu_host.c` | LP64 in the Switch host module; captured state blocks, render thread |
-| shaders | `render/native/shaders/*.glsl`, `build.py` | one GLSL 4.60 source per shader -> DKSH (uam) + GL text in one generated C table; `d3d9_epilogue.glsl` (fog, alpha test) |
-| N0 scenes | `render/native/n0/`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | 10 scenes with CPU-computed conformance checks; host runner and ILP32 Switch guest |
+| shaders | `render/native/shaders/*.glsl`, `build.py` | one GLSL 4.60 source per shader (`// nx-variants:` builds define sets) -> DKSH (uam) + GL text in one generated C table; `d3d9_epilogue.glsl` (fog, alpha test); N1 families `tile` and `nolight` (blocks in `include/nx/families.h`) |
+| N0 scenes | `render/native/n0/`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | 13 scenes with CPU-computed conformance checks (incl. exact D3D9 coverage); host runner, ILP32 Switch guest, the same guest under Unicorn (`tests/s6n/emu_n0.py`) |
+| N1 plan | `render/native/N1_PLAN.md`, `overrides.tsv`, `REQUESTS.md` | renderer entry points with slot evidence, override rows, linker/prepare requests with failing tests |
 | environment | `render/native/env.sh`, `render/native/switch/build.sh` | rebuild toolchain/libnx/deko3d/uam; build the Switch package |
 
 ### 7.2 The backend split
@@ -472,8 +473,10 @@ backend replays it. Both backends take the same stream and the same `NxGpuApi` c
 
 * Translator: one unit test per state (`make -C tests/s6n`, 527 checks).
 * Scenes on GL: every scene evaluates checks whose expected values are computed on the CPU from the D3D9 rules
-  (blend equation, stencil arithmetic, wrap modes, mip selection, channel rules, fog formulas), 700 checks, and is
-  compared bit-exactly with its golden PNG (`make -C tests/s6n scenes`).
+  (blend equation, stencil arithmetic, wrap modes, mip selection, channel rules, fog formulas, exact coverage),
+  31500 checks, and is compared bit-exactly with its golden PNG (`make -C tests/s6n scenes`).
+* The ILP32 guest build of the same scenes runs under Unicorn with nxgpu forwarded to the GL backend and matches
+  the goldens bit-exactly (`make -C tests/s6n emu GUEST=...`).
 * The same scene code builds as the ILP32 Switch guest (`switch/build.sh`); on the console it writes the readbacks
   to `sdmc:/fnvnx/n0/out/`, which `tests/s6n/scenes.py --compare <dir> --tol N` checks against the GL goldens.
 * V6n's oracle (Nine on softpipe, `render/verify/`) drives the translator API (§7.5) directly.
