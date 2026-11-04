@@ -2149,3 +2149,35 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **did** - S13's `b509170` (dd85d4d): the preflight loads the harness of the job's own checkout and all its modules.
   A re-run on the same head re-fuzzes crashes, the report flags HARNESS BROKEN when crashes are at least half, and the
   run, link and tree dirs are pruned to the newest two.
+
+### J-0102 | 2026-11-04 | stream: S2c-vtables,S5-toolchain,S13-difffuzz | status: wip | parent: J-0092,J-0099
+
+* **did** - S2c closed V1 round 3 (`704f3ca`, `f524877`).
+  - `pair_typeinfo` compares views, so link order no longer changes the kept copy (t2b). An object whose view of a base
+    differs keeps a local `_ZTI<B>.fnvnx_view`, and its base pointers are retargeted to it (t4). Every synthesized
+    vtable carries its own typeinfo (t5).
+  - On link/9a0243c7eabe: t2b 115 -> 0, t4 64 -> 0. The c4 audit stays at 0, and the trial link is unchanged.
+  - An FP result read through an integer-declared result travels as float bits (chain_x87 now matches x86; 3 double
+    pairs were wrong byte copies). F1-8 is a new x86-inconsistent class, `result-buffer-not-written`.
+* **did** - S5 (`c75b2a6`, `a19d318`):
+  - `emu_guest.py --stub-faults tests/s5/known_faults.txt` runs past known boot faults (return0, malloc, use-malloc,
+    return-this, before-winmain).
+  - `tests/s5/farm_boot.sh <commit>` boots a farm `link/<c12>` in about 30 s without a relink.
+  - A classifier error is fixed: a vptr register overwritten by `ldr wN,[xN,#8]` was reported as "loaded from pc+8".
+* **found** - The WinMain fault on link/9a0243c7eabe is not a memory-manager layout problem.
+  - `MemoryManager::Allocate`+0xa8 calls slot 2 of the `FUN_00aa7400` heap, whose native vtable has only one slot:
+    the decomp declares one virtual. The same fault inside the constructor causes 4,327 of the 4,343 skips.
+  - With the stub table, NiInit completes and the boot stops at WinMain+0x3f8, where image vtable 0x010472d0 is
+    stored as a vptr by hand.
+  - The next-largest skip cause: the GameSettingCollection vptr is the string literal `"@K@"` (bytes 0x00404b40 that
+    the decompiler read as text), which accounts for 3,454 setting initializers.
+* **did** - S13 difffuzz-6 (`513ce73`, HARNESS bump; the 26-shard caches start empty anyway):
+  - The oracle intercepts its unit's functions that the native defines elsewhere, which fixes 00740980.
+  - A new soft cause, `call-order`, covers adjacent call swaps whose order C++ leaves open.
+  - 00ddf370 is a harness artefact (a canned null result) and is left unclassified.
+* **verified** - The link suites pass on the merged head: bindings, bridges, link, override, startup, vslots and vtables
+  (with SSE2NEON set). `tests/s5/test_tools.py` passes (19 OK, 4 skipped).
+* **next** - S1: FUN_00aa7400 heap virtuals, the NiMainSDM initializer, A660A0Map virtuals, the `"@K@"` vptr,
+  BSNiAllocator::Slot7, and the va_arg-of-enum rule. S1/S2: hand-stored image vptrs (750 listed in f13
+  hand_vptrs.tsv, plus `&DAT_` stores). V1: `tool_bridge` with POD layouts and pop-mismatch bridges. S13: oracle
+  `___sse2_available` = 1.
