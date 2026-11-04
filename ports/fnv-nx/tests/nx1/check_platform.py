@@ -14,6 +14,11 @@
            start; svcExitProcess only in the crash handler. The process then returns to the HOME menu: hbmenu
            lives in hbloader's process, which the game process replaced (docs/NRO.md);
   crash    __libnx_exception_handler writes FNVNX_FS_CRASH_LOG through fsFs with its own stack;
+  s4       S4's device backends (s4-003): platform_ext answers every FNVNX_PLAT_* code (thread activity, error-applet
+           message, VM reserve/commit/decommit/release); SuspendThread never targets the caller; VirtualAlloc
+           reservations are stack-region address space outside the image window, commits svcMapMemory heap blocks;
+           tests/s4/backends/run_qemu.sh (an 8 MiB reserve maps nothing until committed, the message composer, the
+           activity call) passes;
   run      tests/nx1/host_device_test.c, built as a static AArch64 Linux program against libnx's headers with the
            libnx calls stubbed and run under qemu-aarch64: override removal, refusals, the crash log's content and
            deletes, the exit request path.
@@ -21,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -33,6 +39,8 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 from check_fs import strip_comments  # noqa: E402
 from check_nro import Checks  # noqa: E402
+
+APP_MEMORY_BLOCKS = 20000   # Mesosphere kern_kernel.hpp ApplicationMemoryBlockSlabHeapSize
 
 
 def src(rel):
@@ -93,7 +101,50 @@ def check(run: bool) -> Checks:
     c.ok("crash.stack", m is not None and int(m.group(1), 0) >= 0x2000, "exception stack missing or < 8 KiB")
     c.ok("crash.armed", "crash_handler_arm(gbase, gsize)" in mainf, "the crash handler does not know the guest range")
 
+    # S4's device backends (journal/inbox/s4-003.md): every platform ext code the guest may send is answered on the
+    # device, never FNVNX_EXT_NO_MODULE
+    hostapi = src("toolchain/include/fnvnx/hostapi.h")
+    codes = re.findall(r'#define\s+(FNVNX_PLAT_\w+)\s+\d+u', hostapi)
+    pext = body(host, "platform_ext")
+    missing = [k for k in codes if not re.search(r'fn\s*==\s*' + k + r'\b', pext)]
+    c.ok("s4.ext_answered", codes and not missing, f"platform_ext does not answer {missing}")
+    ta = src("toolchain/host/host_thread_activity.inc")
+    c.ok("s4.suspend_other", "svcSetThreadActivity" in ta and re.search(r'if\s*\(\s*self\s*\)\s*return', ta) is not None,
+         "SuspendThread: the kernel refuses to pause the calling thread; host_thread_activity must refuse self")
+    vm = src("toolchain/host/host_vm.inc")
+    lo = re.search(r'#define\s+FNVNX_VM_NO_GO_LO\s+(0x[0-9a-fA-F]+)', vm)
+    hi = re.search(r'#define\s+FNVNX_VM_NO_GO_HI\s+(0x[0-9a-fA-F]+)', vm)
+    c.ok("s4.vm_window", lo and hi and int(lo.group(1), 16) <= 0x00400000 and int(hi.group(1), 16) >= 0x02100000,
+         "VirtualAlloc's no-go range does not cover the image and data window 0x00400000..0x02100000")
+    c.ok("s4.vm_stack_region", "virtmemFindStack" in vm and "svcMapMemory" in vm,
+         "reservations must be stack-region address space with svcMapMemory commits (the 32-bit space's map target)")
+    # kernel memory blocks: a 32-bit process has no private system resource (ldr: system_resource_size needs a 39-bit
+    # space), so every mapping draws on Mesosphere's shared application slab (20,000 blocks)
+    ext = re.search(r'#define\s+FNVNX_VM_EXTENTS\s+(\d+)', vm)
+    npdm = json.load(open(os.path.join(ROOT, "toolchain", "npdm", "fnvnx-app.json")))
+    srs = int(str(npdm.get("system_resource_size", "0")), 0)
+    worst = (int(ext.group(1)) if ext else 1 << 30) * 4 + 4000
+    c.ok("s4.vm_blocks", srs > 0 or worst <= APP_MEMORY_BLOCKS,
+         f"VirtualAlloc extents up to {worst} kernel memory blocks (4 per extent + 4,000) > the application slab's "
+         f"{APP_MEMORY_BLOCKS}: lower FNVNX_VM_EXTENTS or merge commits")
+    msg = src("toolchain/host/host_message.inc")
+    c.ok("s4.message_applet", "errorApplicationCreate" in msg and "errorApplicationShow" in msg,
+         "MessageBoxA does not go through the error applet")
+
     if run:
+        rq = os.path.join(ROOT, "tests", "s4", "backends", "run_qemu.sh")
+        if c.ok("run.s4_backends_present", os.path.isfile(rq), "tests/s4/backends/run_qemu.sh missing"):
+            import tempfile as _t
+            with _t.TemporaryDirectory() as t:
+                env = dict(os.environ)
+                if not shutil.which("qemu-aarch64") and shutil.which("qemu-aarch64-static"):   # run_qemu.sh calls qemu-aarch64
+                    os.makedirs(os.path.join(t, "bin"))
+                    os.symlink(shutil.which("qemu-aarch64-static"), os.path.join(t, "bin", "qemu-aarch64"))
+                    env["PATH"] = os.path.join(t, "bin") + os.pathsep + env["PATH"]
+                r = subprocess.run(["bash", rq, os.path.join(t, "out")], capture_output=True, text=True, errors="replace",
+                                   timeout=600, env=env)
+                c.ok("run.s4_backends", r.returncode == 0,
+                     "; ".join(l for l in (r.stdout + r.stderr).splitlines() if "FAIL" in l)[:300] or f"rc {r.returncode}")
         cc, qemu = shutil.which("aarch64-linux-gnu-gcc"), shutil.which("qemu-aarch64-static") or shutil.which("qemu-aarch64")
         libnx = os.path.join(ROOT, "ext", "libnx", "nx", "include")
         if c.ok("run.tools", cc and qemu and os.path.isdir(libnx),
