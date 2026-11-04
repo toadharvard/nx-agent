@@ -977,3 +977,13 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   `src/generated/` (XC1 6,265 + XC1x 4,253 unchanged).
 * **metrics** - fall1_files=363 fall1_edits=885 fall1_generated=0
 * **next** - S1 adds a regression test; S1b replaces traps where MSVC's code shows a returned value.
+
+### J-0050 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0049
+
+* **found** - (S1b) second FALL1 false-positive class: constructors whose 300-character head window starts inside a
+  long parameter list - the first "declarator" was a base in the mem-initializer list (e.g.
+  ImageSpaceModifierInstanceDRB 0x0052a590, FUN_00a7b630::FUN_00a7b630, FUN_00a92340::FUN_00a92340).
+* **did** - 8d695b0: heads with `) :` are constructors and skipped; a "return type" containing `)` or `,` outside
+  template brackets is rejected. Full prepare: FALL1 354 files / 875 edits (was 885), 0 in the reported constructors,
+  0 in `src/generated/`.
+* **metrics** - fall1_files=354 fall1_edits=875 fall1_generated=0
