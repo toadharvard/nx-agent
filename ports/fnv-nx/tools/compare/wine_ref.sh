@@ -17,7 +17,14 @@
 #      S16_SETTLE_S (seconds after a scene script before capture, default 60), S16_DISPLAY (default :77).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-SCN=${S16_SCENES:-$HERE/scenes.json}   # the scene list (the sweep passes its own: cells.py scene)
+SCN=${S16_SCENES:-$HERE/scenes.json}
+# the adapter description WineD3D reports for the pinned PCI id: FalloutPrefs.ini's sD3DDevice must equal it, or the
+# game resets its INIs, starts FalloutNVLauncher.exe and exits (seen with 00000193 and the GTX 470 name)
+case "${S16_PCI_DEVICE:-000006cd}" in
+	000006cd) D3DDEV='"NVIDIA GeForce GTX 470"' ;;
+	00000193) D3DDEV='"NVIDIA GeForce 8800 GTS"' ;;   # as Wine 9.0 reports it (GetAdapterIdentifier, checked)
+	*) D3DDEV=${S16_D3D_DEVICE:?S16_D3D_DEVICE: the adapter description for S16_PCI_DEVICE=$S16_PCI_DEVICE} ;;
+esac   # the scene list (the sweep passes its own: cells.py scene)
 W=${S16_W:-1280}; H=${S16_H:-720}
 DISP=${S16_DISPLAY:-:77}
 
@@ -92,12 +99,19 @@ EOF
 	local ad="$work/pfx/drive_c/users/$(id -un)/AppData/Local/FalloutNV"; mkdir -p "$ad"
 	python3 -I -c 'import json,sys; print("\r\n".join(json.load(open(sys.argv[1]))["plugins"]), end="\r\n")' \
 		"$SCN" >"$ad/plugins.txt"
-	python3 -I "$HERE/ref_ini.py" "$game/Fallout_default.ini" "$(docs_dir "$work")" --width "$W" --height "$H"
+	python3 -I "$HERE/ref_ini.py" "$game/Fallout_default.ini" "$(docs_dir "$work")" --width "$W" --height "$H" --d3d-device "$D3DDEV"
 	echo "setup: $work ($(du -sh "$work/pfx" | cut -f1))"
 }
 
 shot() {  # shot <png>: the X root window (the game runs windowed at exactly the screen size)
 	xwd -root -silent -display "$DISP" | convert xwd:- -alpha off "png24:$1"
+}
+
+gfocus() {  # the game's window gets the keyboard focus again (a cell load can leave it elsewhere; no window manager)
+	local w; w=$(xdotool search --onlyvisible --name 'Fallout' 2>/dev/null | tail -1)
+	[ -n "$w" ] && { xdotool windowactivate "$w" 2>/dev/null; xdotool windowfocus --sync "$w" 2>/dev/null
+		xdotool mousemove --window "$w" 4 4 click 1 2>/dev/null; sleep 0.3; }   # DirectInput re-acquires on a click
+	return 0
 }
 
 console() {  # console <text>: open the console, type one line, close it
@@ -116,7 +130,7 @@ cmd_run() {
 	rm -f "$g"/s16_"$scene"_*.txt "$g"/s16_console_*.txt
 	local plan; plan=$(python3 -I "$HERE/scenes.py" chunks "$SCN" "$scene" "$g" "s16_$scene") || return 2
 	python3 -I "$HERE/scenes.py" state "$SCN" "$scene" "$g" "s16_$scene"
-	python3 -I "$HERE/ref_ini.py" "$g/Fallout_default.ini" "$(docs_dir "$work")" --width "$W" --height "$H" >"$out/ini.txt"
+	python3 -I "$HERE/ref_ini.py" "$g/Fallout_default.ini" "$(docs_dir "$work")" --width "$W" --height "$H" --d3d-device "$D3DDEV" >"$out/ini.txt"
 	local frames; frames=$(python3 -I "$HERE/scenes.py" get "$SCN" "$scene" frames)
 	local menu; menu=$(python3 -I "$HERE/scenes.py" get "$SCN" "$scene" menu)
 	if [ -n "${S16_D9CAP:-}" ]; then cp -f "$S16_D9CAP" "$g/d3d9.dll"; else rm -f "$g/d3d9.dll"; fi
@@ -127,9 +141,16 @@ cmd_run() {
 	sleep "$boot"
 	shot "$out/boot.png"
 	if [ "$menu" != 1 ]; then
-		console "scof s16_console_$scene.txt"
+		# the console is opened once and closed once: a coc's cell load swallows a closing keypress, after which
+		# every later toggle would be inverted (seen: the console left open over the frames, the later chunks not run).
+		# It stays open through a load, so each chunk is typed into the open console.
+		gfocus; xdotool key --delay 200 grave; sleep 1
 		local k w
-		while read -r k w; do console "bat s16_${scene}_$k"; sleep "$w"; done <<<"$plan"
+		for k in "scof s16_console_$scene.txt"; do xdotool type --delay 60 "$k"; sleep 0.5; xdotool key Return; sleep 1; done
+		while read -r k w; do
+			gfocus; xdotool type --delay 60 "bat s16_${scene}_$k"; sleep 0.5; xdotool key Return; sleep "$w"
+		done <<<"$plan"
+		gfocus; xdotool key --delay 200 grave; sleep 1
 		sleep "$settle"
 	fi
 	local i

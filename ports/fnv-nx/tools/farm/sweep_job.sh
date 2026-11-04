@@ -146,10 +146,11 @@ sys.path.insert(0, os.path.dirname(sys.argv[1]))
 import cells
 base = json.load(open(sys.argv[1])); sid, kind, cell = sys.argv[3:6]
 base['scenes'] = [cells.scene(cell, kind, sid.endswith('_night'))]
+base['common_post'] = []   # no `tm`: run in the open console it leaves the console layer on screen (the HUD stays: both sides draw it)
 json.dump(base, open(sys.argv[2], 'w'))
 EOF
 	local t0=$(date +%s)
-	S16_SCENES=$c/scenes.json S16_D9CAP=$BIN/d3d9.dll S16_STOP_AFTER_FRAMES=1 S16_CAPTURE='Z:'"${c//\//\\}"'\journal.nxd9' \
+	S16_PCI_DEVICE=00000193 S16_SCENES=$c/scenes.json S16_D9CAP=$BIN/d3d9.dll S16_STOP_AFTER_FRAMES=1 S16_CAPTURE='Z:'"${c//\//\\}"'\journal.nxd9' \
 	S16_CAPTURE_FRAMES=0- S16_CAPTURE_MAX_MB=${SWEEP_JOURNAL_MB:-6000} S16_SETTLE_S=${S16_SETTLE_S:-30} \
 		timeout -k 30 "${SWEEP_CELL_TIMEOUT_S:-1200}" bash "$CMP/wine_ref.sh" run "$CELLW" "$id" "$c/run" >"$c/run.log" 2>&1
 	st=$?

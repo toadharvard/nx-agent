@@ -47,7 +47,8 @@ def cells(paths):
 
 def scene(cell, kind, night=False):
     hour = 23 if night else (12 if kind == 'exterior' else 9)
-    cmds = [f'coc {cell}', 'wait:20', 'tai', 'tcai', f'set gamehour to {hour}', 'player.setangle x 0',
+    cmds = [f'coc {cell}', 'wait:60',   # d9cap journaling slows the cell load: 20 s was not enough (input lost)
+            'tai', 'tcai', f'set gamehour to {hour}', 'player.setangle x 0',
             'player.setangle z 90', 'wait:5']
     return {'id': cell + ('_night' if night else ''), 'title': f'{kind} {cell}' + (' night' if night else ''),
             'cell': cell, 'frames': 3, 'class': 'deterministic', 'cmds': cmds}
