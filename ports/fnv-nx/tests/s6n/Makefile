@@ -22,7 +22,7 @@ $(OUT)/test_front: test_front.cpp $(NATIVE)/front/front.cpp $(NATIVE)/front/d3d9
 	$(CC) -std=c11 -O1 -c $(CPPFLAGS) $(NATIVE)/gl/nxgl.c -o $(OUT)/tf_nxgl.o
 	$(CC) -std=c11 -O1 -c $(CPPFLAGS) $(NATIVE)/front/gpu_dispatch.c -o $(OUT)/tf_dispatch.o
 	$(CXX) -std=c++17 -O1 -Wall -Wextra -Werror -fno-exceptions -fno-rtti $(CPPFLAGS) -o $@ test_front.cpp $(NATIVE)/front/front.cpp \
-		$(OUT)/tf_d3d9_state.o $(OUT)/tf_nxgl.o $(OUT)/tf_dispatch.o -lEGL
+		$(OUT)/tf_d3d9_state.o $(OUT)/tf_nxgl.o $(OUT)/tf_dispatch.o -lEGL -pthread
 
 $(OUT)/test_d3d9_state: test_d3d9_state.c $(NATIVE)/front/d3d9_state.c $(NATIVE)/front/d3d9_state.h $(NATIVE)/include/nx/state.h
 	@mkdir -p $(OUT)
