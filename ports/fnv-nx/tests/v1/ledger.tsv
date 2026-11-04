@@ -38,7 +38,7 @@ S13-VTPAIRS	S13	61fd136	61fd136	confirmed	-	test_s13_tools.py	kind-V pair short 
 S13-RENAMES-R1	S13	545e0c5	545e0c5	refuted	-	test_s13_tools.py	a def row of unit A changes the callee convention (tree_def) every caller unit uses; only A's keys refresh, callers keep stale verdicts
 S13-FZTREE-F1	S13	a01a297	a01a297	refuted	-	test_s13_tools.py	fuzz_job: t/<L12> whose hash differs from the link's recorded tree is rejected, then taken by the fallback wait unchecked
 S6B-CENSUS	S6b	283fe49	283fe49	confirmed	-	test_s13_tools.py	census counts sum (translated + failed, cause table, unique); s6b_centroid 23/23 (K1; K2 note: malformed package counted)
-NXR-H1	render	2686fc6	fc7713a	refuted	-	test_nx_render_robust.py	nx_render bounds every size of .nxcap: a SUBM Draw with 0x7fffffff instances is not bounded (hangs > 120 s; .nxd9 skips draws over 4 M vertices)
+NXR-H1	render	2686fc6	fc7713a	fixed	e0485fc	test_nx_render_robust.py	nx_render bounds every size of .nxcap: a SUBM Draw with 0x7fffffff instances is not bounded (hangs > 120 s; .nxd9 skips draws over 4 M vertices)
 R0-GATES	R0	450c5d6	450c5d6	confirmed	-	test_ready_adversarial.py	resolved gates tree: R1-R15 all ok on the integration head (R13, R14 fixed)
 R0-R16	R0	a506770	a506770	fixed	2bce418	test_ready_adversarial.py	perf.budget gates 60 fps on stretch_60, which frame_budget.py judges on the typical frame: a 25 ms worst frame passes (J-0150 wants the worst frame)
 S13B-UNLOADED-U1	S13b	a93f5e6	a93f5e6	fixed	97f8af8	test_s13b_callee_unloaded.py	oracle-callee-unloaded (artifact) on static evidence only: a native that returned before a unit-local X with no traced call gets the artifact label
@@ -92,3 +92,4 @@ S15S-METRIC	S15-simd	b7a4022	b7a4022	confirmed	-	test_slerp_decomp.py	hotspot me
 GATES-FZ-R16a	gates	82805db	82805db	refuted	-	test_ready_fuzz_shards.py	fnvnx-fuzz-summary per shard: shard 1 at 18/10 masks shard 2 at 0/10, fuzz.coverage passes 90 % (text and summary)
 NX1-NRO-N2	NX1	5256786	5256786	refuted	-	test_nx1_nro.py	check_nro passes a RELATIVE relocation into rodata, which hbloader maps read-only (header offsets ok, N1)
 S15-MTQEMU-B1	S15-threads	79481ab	79481ab	refuted	-	test_weak_interlocked.py	tests/s15/mtqemu/build.sh no longer links after S4 79481ab: handles.cpp needs w32_is_std_handle from crt_kernel32.cpp, not in build.sh
+NXR-H1-FIX	render	e0485fc	e0485fc	confirmed	-	test_nx_render_robust.py	.nxcap draws bounded by vertices x instances: H1 exit 1 (ASan build of the head), D1-D7/C1-C6 and 1,000 t.nxd9 mutations clean
