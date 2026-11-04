@@ -65,6 +65,8 @@ def reclassify(rec):
     d = rec['divergence']
     if rec.get('_now') is not None:
         d = rec['_now']
+        if d.get('arm_local_static'):
+            return 'local-static'
         if d.get('arm_private_reads'):
             return 'split-global'
     if d.get('bool_repr'):

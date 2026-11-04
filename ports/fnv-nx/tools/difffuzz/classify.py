@@ -176,6 +176,8 @@ def hint(pair, target, case, div, fn, max_steps):
             hits = check_rebind.bypassing_functions(str(obj)).get(target.orig_addr)
             if hits:
                 h['cause'] = 'split-global'; h['vars'] = hits; return h
+    if div.get('arm_local_static'):
+        h['cause'] = 'local-static'; return h
     if div.get('arm_private_reads') and k in ('return', 'mem-write', 'call-args', 'error', 'call-target'):
         h['cause'] = 'split-global'; h['note'] = 'native code read its unit-local data'; return h
     if k in ('mem-write', 'return'):

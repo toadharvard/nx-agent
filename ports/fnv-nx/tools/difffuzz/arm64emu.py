@@ -48,6 +48,7 @@ class Result:
         self.saved_ok = True
         self.vptr_stores = 0
         self.private_reads = 0
+        self.private_addrs = set()
 
 
 class Arm64Engine:
@@ -283,6 +284,8 @@ class Arm64Engine:
 
     def _on_private_read(self, uc, access, address, size, value, r):
         r.private_reads += 1
+        if len(r.private_addrs) < 32:
+            r.private_addrs.add(address)
 
     def _on_cov(self, uc, address, size, r):
         r.blocks.add(address)

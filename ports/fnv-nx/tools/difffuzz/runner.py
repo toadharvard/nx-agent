@@ -316,6 +316,22 @@ class Pair:
             self.xe = None              # rebuilt with the larger code set
         return rx, ra, d
 
+    def _private_names(self, addrs):
+        """Names of the native image's data symbols that hold these addresses."""
+        import bisect
+        if getattr(self, '_priv_syms', None) is None:
+            img = self.target.image
+            lo_hi = getattr(img, 'private', ())
+            self._priv_syms = sorted((a, n) for n, a in img.syms.items()
+                                     if any(lo <= a < hi for lo, hi in lo_hi))
+            self._priv_keys = [a for a, _ in self._priv_syms]
+        out = set()
+        for a in addrs:
+            i = bisect.bisect_right(self._priv_keys, a) - 1
+            if i >= 0:
+                out.add(self._priv_syms[i][1])
+        return out
+
     def _run(self, case, max_steps):
         w = world.World(case, self.target.x86_code, self.pinned)
         placement = self.target.placement()
@@ -342,4 +358,11 @@ class Pair:
                                 self.ae._codeptr)
         if d is not None and ra.private_reads:
             d['arm_private_reads'] = ra.private_reads
+            names = self._private_names(ra.private_addrs)
+            if names:
+                d['arm_private_syms'] = sorted(names)[:6]
+                # only function-local statics and their guards (_ZZ.. / _ZGVZ..): MSVC keeps them in the image, GCC
+                # in the unit's .bss - the local-static case, not a split global
+                if all(n.startswith(('_ZZ', '_ZGVZ')) for n in names):
+                    d['arm_local_static'] = True
         return rx, ra, d
