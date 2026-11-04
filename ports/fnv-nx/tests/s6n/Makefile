@@ -45,3 +45,15 @@ scenes: $(OUT)/run_gl
 	python3 scenes.py --bin $(OUT)/run_gl --out $(OUT)/scenes
 
 .PHONY: scenes
+
+# ---- the ILP32 Switch guest under Unicorn, nxgpu calls forwarded to the GL backend (tests/s6n/emu_n0.py) ----
+$(OUT)/libnxgl.so: $(NATIVE)/gl/nxgl.c $(NATIVE)/front/gpu_dispatch.c $(SCENE_DEPS)
+	@mkdir -p $(OUT)
+	$(CC) -std=c11 -O1 -g -fPIC -shared $(CPPFLAGS) -o $@ $(NATIVE)/gl/nxgl.c $(NATIVE)/front/gpu_dispatch.c -lEGL
+
+# needs: pip install unicorn; GUEST=<switch/build.sh out>/guest/guest.nso
+emu: $(OUT)/libnxgl.so
+	python3 emu_n0.py $(GUEST) $(OUT)/libnxgl.so $(OUT)/emu
+	python3 scenes.py --compare $(OUT)/emu/fnvnx/n0/out
+
+.PHONY: emu

@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 
 int main() {
+    mkdir("sdmc:/fnvnx", 0777);
     mkdir("sdmc:/fnvnx/n0", 0777);
     mkdir("sdmc:/fnvnx/n0/out", 0777);
     FILE* res = fopen("sdmc:/fnvnx/n0/out/results.txt", "w");

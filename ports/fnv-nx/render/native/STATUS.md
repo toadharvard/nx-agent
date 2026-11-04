@@ -24,6 +24,7 @@ binutils 2.45.1, newlib 4.6.0, multilibs lp64/pic/ilp32/ilp32-pic), libnx (ext/l
 | N0 scenes | `n0/scenes.{h,cpp}`, `n0/run_gl.cpp`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | `make -C tests/s6n scenes` | 10 scenes, 700 conformance checks, 0 failed; 10/10 goldens bit-exact |
 | deko3d backend v2 | `host/nxgpu.{h,c}`, `host/nxgpu_host.c` (ext module 10) | compiles + links | not run on hardware |
 | N0 for the Switch | `n0/guest_main.cpp`, `switch/build.sh` | builds exefs.nsp + guest.nso | not run on hardware |
+| ILP32 guest under emulation | `tests/s6n/emu_n0.py` (S5 emu host + ext module 10 -> GL backend) | `make -C tests/s6n emu GUEST=...` | 700 checks pass, 10/10 images bit-identical to the goldens |
 | environment | `env.sh` | rebuilt here | ok |
 
 Commands:
@@ -50,5 +51,5 @@ python3 ports/fnv-nx/tests/s6n/scenes.py --compare <copied out dir> --tol 2
   Each is covered by an N0 scene check (cull, textured, format, sampler BORDER on A8R8G8B8): run the Switch package.
 * The GL backend ignores the raster flat-shading bit (GLSL needs `flat` qualifiers: families declare them).
 * Point size / point sprites are encoded but no N0 scene draws points.
-* The ILP32 guest build of front + scenes is compiled, not executed. An emulator run with a GL-backed ext_call
-  stand-in (tests/s5/emu_guest.py's approach) is the next step for it.
+* Scene inputs are computed in float: the guest is built with -ffp-contract=off (GCC fuses a*b+c on AArch64
+  otherwise and the sorted scene then differs from the x86 goldens by 1 LSB).

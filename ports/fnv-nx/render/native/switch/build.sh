@@ -20,7 +20,7 @@ python3 "$N/shaders/build.py" "$OUT/shaders" --uam "$UAM" >/dev/null
 # guest (ILP32, relocatable)
 "$TC/guest/build.sh" "$OUT/rt" >/dev/null
 GA="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec"
-GF="-O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -I$TC/include -I$N/include -I$N/front -I$OUT/shaders"
+GF="-O2 -g -Wall -Wextra -ffp-contract=off -ffunction-sections -fdata-sections -I$TC/include -I$N/include -I$N/front -I$OUT/shaders"
 GXX="$GF -std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics"
 $CXX $GA $GXX -c "$N/front/front.cpp" -o "$OUT/guest/front.o"
 $CXX $GA $GXX -c "$N/n0/scenes.cpp" -o "$OUT/guest/scenes.o"
