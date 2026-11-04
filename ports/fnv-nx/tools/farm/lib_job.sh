@@ -5,6 +5,11 @@
 
 log() { echo "$(date -u +%FT%TZ) $(basename "$0"): $*"; }
 
+# A farm session runs its job as root and must not need an env-var prefix (its allow rule is the bare command), so
+# root installs what is missing unless FARM_APT=0 is set.
+if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
+export FARM_APT
+
 NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson"
 host_check() {   # commands (py:<module> for python modules) -> installed with apt-get / pip when FARM_APT=1
 	local missing="" c

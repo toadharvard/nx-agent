@@ -2063,3 +2063,17 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   of the 5 reproducers, and on-device conformance (RENDER_VERIFY §8). S6n corrects RENDER_NATIVE.md §1.3 (render
   machine file) next round. Orchestrator: decide whether `render/verify/` and `tests/v6n/` go into MACHINES.md's ownership table for the
   render machine.
+
+### J-0098 | 2026-11-04 | stream: farms | status: wip | parent: J-0094
+
+* **did** - 32 differential fuzzing farms `fz1`..`fz32` started (`farm/start.sh fz<k> fuzz <k> 32`). Each one fuzzes
+  its crc32 shard of the functions incrementally, against the newest `link/<commit12>` on the head or an ancestor
+  (S13, `955b607`). With them, 57 farm machines run, plus the render machine.
+* **found** - `link1` and `full1` failed at every head since they started: `host_check` stopped at `py:elftools`.
+  The jobs install missing packages only with `FARM_APT=1`, and a farm cannot set it, because its allow rule is the bare
+  `start.sh` command. So no `link/<commit12>` exists yet, and the fuzz farms wait on it.
+* **did** - `lib_job.sh`: `FARM_APT` now defaults to 1 for root and 0 otherwise, and is exported (link_job's capstone
+  line reads it too). The farms run the job scripts from the integration head, so the next head brings the fix to
+  them; no farm restart is needed.
+* **next** - The first `link/<commit12>` from link1, then the full1 boot, then the first fuzz verdicts from the 32
+  shards.
