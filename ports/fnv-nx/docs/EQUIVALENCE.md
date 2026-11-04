@@ -50,6 +50,17 @@ are unexplained**.
 | MSVC-OPAQUE-ENUM | | 7 | ENUM1 |
 | unexplained | 32 | 28 | |
 
+Code differences that no rule-wide class covers were read one by one (the whole MSVC diff, with `/EHs-c-` on both
+sides where EH code mixes in, and the raw bytes where objdump restarts at a `$LN` label inside an instruction); each
+row of explained.tsv names its unit and address. Classes: CRT-BINDING, CRT-INTRINSIC (a constant-size memcpy becomes
+`rep movsd`), INLINE-DECISION, STL-CHECK-MACRO, PLACEMENT-NULLCHECK, PTR1-UNSIGNED-ZERO, BLOCK-ORDER, X87-SCHEDULE /
+SSE-SCHEDULE (commuted multiplies and adds, exact float round trips), and X87-EXCESS-PRECISION: MSVC 2008 keeps a
+`float` in an x87 register without rounding on one side only (a GOTO1 split `float x; x = e;` in
+hkpcontinuousgsk 0x00db60c0 and hkpcollidecapsuleutil 0x00cd58b0). AArch64 has no excess precision (FLT_EVAL_METHOD
+0), so the target rounds where the exe did; the class is limited to rows where both sides' source type is `float`.
+After the fixes of this round (GOTO1-CONST, PTR1-DEREF, literal padding) and these rows, the local gate of every
+unit with an unexplained difference at `0685791` has 0 unexplained functions; the eq farms confirm at the next head.
+
 Retargets are explained by evidence: shard reports list, per retarget, each relocation that moved as `pristine
 binding>prepared binding` (`## Retargets`), and a retarget is explained only when every pair is a `wrapper` row of
 explained.tsv (CRT-WRAPPER: the game's forwarding wrappers 0x00403d30 memset, 0x00406d30 / 0x00404d80 strcpy_s,
