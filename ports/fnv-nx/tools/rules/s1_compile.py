@@ -2097,16 +2097,24 @@ def r_function_named_classes(path, text, stats):
 # ANON2 declares the member as raw storage of the same size and alignment
 # (`alignas(String) unsigned char activationText[sizeof(String)];`) and every use of it in the file as the object
 # that storage holds (`(*(String*)(slot->activationText)).FUN_004048e0()`): same bytes, same calls, and, as before,
-# no implicit construction or destruction. Only a member whose name the file declares nowhere else is handled.
+# no implicit construction or destruction. The uses are converted in the file that declares the member and in every
+# file that includes it (NiPoint3Interpolator is declared in nipoint3interpolator_unit.h and used in the .cpp).
+# Where another class of the file or its headers has a member of that name (the .cpp's A499A0PointInterpolator has
+# its own m_kValue) or the file declares the name otherwise, a use is converted only where it is the member's:
+# unqualified or this-> in a member function of the class or of a class derived from it, or x->name / x.name with x a
+# parameter or local of such a class type.
 
 ANON_UNION = re.compile(r'\bunion\s*\{')
 ANON_MEMBER = re.compile(r'^([ \t]*)([A-Za-z_][\w:]*(?:\s*<[^<>;{}]*>)?)\s+([A-Za-z_]\w*)\s*;', re.M)
+ANY_CLASS_DEF = re.compile(r'\b(?:class|struct)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)\s*'
+                           r'(?:final\s*)?(?::\s*([^;{}]*))?\{')
+_ANON2_NAMES = None
+NOT_TYPES = {'return', 'case', 'else', 'do', 'throw', 'delete', 'new', 'sizeof', 'goto', 'and', 'or', 'not'}
 
-def r_anonymous_aggregate_members(path, text, stats):
-    """ANON2: raw storage for class members with special functions in an anonymous struct of an anonymous union."""
-    if 'union' not in text or not ANON_UNION.search(text): return text
-    spans = None
-    edits = []                                             # (start, end, replacement)
+def _anon2_members(text):
+    """[(owner, type, name, start, end)] of the members ANON2 handles in text: text[start:end] is the declaration,
+    owner the class that holds the union ('' when there is none)."""
+    found, spans = [], None
     for u in ANON_UNION.finditer(text):
         uo = u.end() - 1
         uc = prepare.match_brace(text, uo)
@@ -2127,24 +2135,131 @@ def r_anonymous_aggregate_members(path, text, stats):
                     if re.search(r'~\s*%s\s*\(|\boperator\s*=\s*\(|(?<![\w~:])%s\s*\(' % (re.escape(base), re.escape(base)), body):
                         special = True
                 if not special: continue
-                decls = re.findall(r'[\w>\*&]\s+\**%s\s*(?:\[[^\]]*\])?\s*[;=,)]' % re.escape(name), COMMENT.sub(' ', text))
-                if len(decls) != 1: continue               # the name means something else elsewhere in the file
                 dm = re.search(r'\b%s\s+%s\s*;' % (re.escape(ty).replace(r'\ ', r'\s*'), re.escape(name)), text[so:sc])
                 if not dm: continue
-                at = so + dm.start()
-                edits.append((at, so + dm.end(), 'alignas(%s) unsigned char %s[sizeof(%s)]; /* fnv-nx ANON2 */' % (ty, name, ty)))
-                for use in re.finditer(r'(?<![\w~])%s\b' % re.escape(name), text):
-                    if at <= use.start() < so + dm.end(): continue
-                    before = text[max(0, use.start() - 2):use.start()]
-                    if before.endswith('::'): continue
-                    if before.endswith('.') or before.endswith('->'):
-                        dot = use.start() - (1 if before.endswith('.') else 2)
-                        start = prepare.operand_start(text, dot)
-                        if start >= dot: continue
-                        edits.append((start, use.end(), '(*(%s*)(%s))' % (ty, text[start:use.end()])))
-                    else:
-                        edits.append((use.start(), use.end(), '(*(%s*)(%s))' % (ty, name)))
-                stats['ANON2'] += 1
+                owner = ''
+                for o, c, k, h in spans:                   # the innermost class around the union
+                    if o >= uo: break
+                    if c > uo and k == 'class':
+                        hm = re.search(r'\b(?:class|struct)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*'
+                                       r'([A-Za-z_]\w*)', h)
+                        if hm: owner = hm.group(1)
+                found.append((owner, ty, name, so + dm.start(), so + dm.end()))
+    return found
+
+def _anon2_names(path):
+    """names of the members ANON2 handles anywhere in the tree (a file that names none needs no closure)"""
+    global _ANON2_NAMES
+    if _ANON2_NAMES is not None: return _ANON2_NAMES
+    names = set()
+    for d in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(_roots(path), d)):
+            for f in fs:
+                if not f.endswith(('.h', '.cpp', '.inl', '.hpp')): continue
+                with open(os.path.join(dp, f), encoding='utf-8', errors='surrogateescape') as h: t = h.read()
+                if 'union' in t and ANON_UNION.search(t): names.update(n for _, _, n, _, _ in _anon2_members(t))
+    _ANON2_NAMES = names
+    return names
+
+def _anon2_uses(text, owner, ty, name, skip, files):
+    """(start, end, replacement) edits that make each use of `owner`'s member `name` in text the object its storage
+    holds. When no other class in `files` [(file, text)] has a member of that name and text declares it nowhere else,
+    every use is one; otherwise a use counts when it is unqualified (or this->) in a member function of `owner` or of
+    a class derived from it, or `x->name` / `x.name` with x a parameter or local of such a class type."""
+    bare = COMMENT.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)        # same offsets, no comments
+    decl = re.compile(r'[\w>\*&]\s+\**%s\s*(?:\[[^\]]*\])?\s*[;=,)]' % re.escape(name))
+    bases, own = {}, {}
+    for _, t in files:
+        for m in ANY_CLASS_DEF.finditer(t):
+            bases.setdefault(m.group(1), set()).update(b for b, _ in _base_specs(m.group(2) or ''))
+            o = m.end() - 1
+            if decl.search(_flat_body(t, o, prepare.match_brace(t, o))): own.setdefault(m.group(1), True)
+    def derives(cls, depth=0):
+        if cls == owner: return True
+        if depth > 8 or cls in own: return False           # a class with its own member of that name
+        return any(derives(b, depth + 1) for b in bases.get(cls, ()))
+    others = {c for c in own if c != owner}
+    count = len(decl.findall(bare)) - (1 if skip else 0)
+    simple = not others and count == 0
+    spans = None if simple else prepare.scope_spans(text)
+    def context(pos):
+        """the class whose member function holds pos, and that function's (head, body) text"""
+        cls, fn = None, None
+        for o, c, k, h in spans:
+            if o > pos: break
+            if not o < pos < c: continue
+            if k == 'class' and fn is None:
+                hm = re.search(r'\b(?:class|struct)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)', h)
+                cls = hm.group(1) if hm else None
+            elif k == 'function' and fn is None:
+                fn = (h, o, c)
+                q = re.search(r'([A-Za-z_]\w*)\s*::\s*~?[A-Za-z_]\w*\s*\([^()]*(?:\([^()]*\)[^()]*)*\)[^()]*$', h)
+                if q: cls = q.group(1)
+        return cls, fn
+    def var_type(var, fn, pos):
+        if fn is None: return None
+        h, o, _ = fn
+        hit = None
+        for m in re.finditer(r'\b([A-Za-z_]\w*)\s*(?:const\s*)?[\*&]?\s*(?:const\s*)?\b%s\s*[,)=;\[]' % re.escape(var),
+                             h + bare[o:pos]):
+            if m.group(1) not in CXX_KEYWORDS: hit = m.group(1)
+        return hit
+    edits = []
+    for use in re.finditer(r'(?<![\w~])%s\b' % re.escape(name), bare):
+        if skip and skip[0] <= use.start() < skip[1]: continue
+        before = bare[max(0, use.start() - 2):use.start()]
+        if before.endswith('::'): continue
+        if before.endswith('.') or before.endswith('->'):
+            dot = use.start() - (1 if before.endswith('.') else 2)
+            start = prepare.operand_start(text, dot)
+            if start >= dot: continue
+            obj = text[start:dot].strip()
+            if not simple:
+                cls, fn = context(use.start())
+                if obj == 'this':
+                    if not (cls and derives(cls)): continue
+                elif re.fullmatch(r'[A-Za-z_]\w*', obj):
+                    vt = var_type(obj, fn, start)
+                    if not (vt and derives(vt)): continue
+                elif others:
+                    continue
+            edits.append((start, use.end(), '(*(%s*)(%s))' % (ty, text[start:use.end()])))
+        else:
+            if not simple:
+                pm = re.search(r'(\w+|>)\s*[\*&]*\s*$', bare[max(0, use.start() - 80):use.start()])
+                if (pm and pm.group(1) not in NOT_TYPES and not pm.group(1)[0].isdigit()
+                        and re.match(r'\s*(?:\[[^\]]*\])?\s*[;=,)]', bare[use.end():])):
+                    continue                                  # a declaration of that name
+                cls, fn = context(use.start())
+                if not (cls and derives(cls)): continue
+                if fn is not None and decl.search(fn[0] + bare[fn[1]:use.start()]): continue   # a local of that name
+            edits.append((use.start(), use.end(), '(*(%s*)(%s))' % (ty, name)))
+    return edits
+
+def r_anonymous_aggregate_members(path, text, stats):
+    """ANON2: raw storage for class members with special functions in an anonymous struct of an anonymous union, and
+    their uses as the object, in the file and in the files that include it (see above)."""
+    found = _anon2_members(text) if 'union' in text and ANON_UNION.search(text) else []
+    inherited = []
+    names = _anon2_names(path)
+    if '#include' in text and any(re.search(r'\b%s\b' % re.escape(n), text) for n in names):
+        files = _closure(path, text)
+        for f, t in files[1:]:
+            if 'union' in t and ANON_UNION.search(t):
+                inherited += [(o, ty, n) for o, ty, n, _, _ in _anon2_members(t) if n in text]
+    else:
+        files = None
+    if not found and not inherited: return text
+    if files is None: files = _closure(path, text)
+    edits = []                                             # (start, end, replacement)
+    for owner, ty, name, at, end in found:
+        edits.append((at, end, 'alignas(%s) unsigned char %s[sizeof(%s)]; /* fnv-nx ANON2 */' % (ty, name, ty)))
+        edits += _anon2_uses(text, owner, ty, name, (at, end), files)
+        stats['ANON2'] += 1
+    for owner, ty, name in inherited:
+        uses = _anon2_uses(text, owner, ty, name, None, files)
+        edits += uses
+        if uses: stats['ANON2'] += 1
     if not edits: return text
     out, pos = [], 0
     for a, b, r in sorted(edits):

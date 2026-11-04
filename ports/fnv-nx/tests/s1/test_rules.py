@@ -345,6 +345,27 @@ check('ANON2 raw storage for a member with a destructor in an anonymous struct o
       ['alignas(String) unsigned char activationText[sizeof(String)]; /* fnv-nx ANON2 */',
        'if ((*(String*)(slot->activationText)).Len())', 'int value;'])
 
+# the member declared in a header, used in the unit; another class of the unit has its own member of that name
+_a = tempfile.mkdtemp()
+os.makedirs(os.path.join(_a, 'src', 'anim'))
+open(os.path.join(_a, 'src', 'anim', 'interp_unit.h'), 'w').write(
+    'class NiPoint3\n{\n  public:\n    float x;\n    NiPoint3& operator=(const NiPoint3& o);\n};\n'
+    'class NiPoint3Interpolator\n{\n  public:\n    union\n    {\n        struct\n        {\n            NiPoint3 m_kValue;\n'
+    '            int m_uiLast;\n        };\n        int state;\n    };\n    bool Update(NiPoint3& value);\n};\n')
+_unit = os.path.join(_a, 'src', 'anim', 'interp.cpp')
+_saved, s1._ANON2_NAMES = s1._ANON2_NAMES, None
+got = run(s1.r_anonymous_aggregate_members,
+          '#include "interp_unit.h"\n// fills m_kValue\nbool NiPoint3Interpolator::Update(NiPoint3& value)\n{\n'
+          '    value = m_kValue;\n    return m_kValue.x != 0;\n}\nstruct Shell : public NiPoint3Interpolator\n{\n'
+          '    bool Eq(NiPoint3Interpolator* other) { return &m_kValue == &other->m_kValue; }\n};\n'
+          'class Other\n{\n  public:\n    NiPoint3 m_kValue;\n    void CloneTo(Other* pkDest);\n};\n'
+          'void Other::CloneTo(Other* pkDest)\n{\n    pkDest->m_kValue = m_kValue;\n}\n', _unit)
+s1._ANON2_NAMES = _saved
+check('ANON2 converts the uses in a file that includes the member, only where they are that member', got,
+      ['// fills m_kValue\n', 'value = (*(NiPoint3*)(m_kValue));', 'return (*(NiPoint3*)(m_kValue)).x != 0;',
+       'return &(*(NiPoint3*)(m_kValue)) == &(*(NiPoint3*)(other->m_kValue));', '    NiPoint3 m_kValue;\n',
+       'pkDest->m_kValue = m_kValue;'])
+
 # ---- INC1
 _i = tempfile.mkdtemp()
 os.makedirs(os.path.join(_i, 'src', 'ai'))
