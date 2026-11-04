@@ -81,6 +81,7 @@
 #include "diagnostic-core.h"
 #include "cfghooks.h"
 #include "tree-cfg.h"
+#include "ssa.h"
 #include <set>
 #include <string>
 #include <vector>
@@ -302,6 +303,55 @@ struct order_pass : gimple_opt_pass {
              c.ldar, c.stlr, c.fence_ld, c.fence_st);
     return 0;
   }
+};
+
+// ---- uninit=zero (default) | keep: W-UNINIT (docs/ORDERING.md "Uninitialized locals")
+//
+// The decomp reads locals it never wrote (matching devices: `unsigned char qq; f(qq);`, a struct copied from an
+// unwritten one, a flag passed through). MSVC passed whatever the register or stack slot held. GCC treats the value
+// as undefined and folds through it: `int x; if (c) x = 5; return x == 5;` becomes `return 1`. Right after SSA is
+// built, every use of the default definition of a local scalar (a read before any write on some path) gets the
+// constant 0 instead: one fixed value, which is a valid stand-in for the junk, and no undefined value left for the
+// optimizers. Parameters, the result and memory (addressable) locals are not affected.
+static bool uninit_zero = true;
+static unsigned long uninit_zeroed;
+
+struct uninit_pass : gimple_opt_pass {
+  uninit_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
+  unsigned int execute(function *fun) final override {
+    if (!uninit_zero) return 0;
+    unsigned i;
+    tree name;
+    unsigned long c = 0;
+    FOR_EACH_SSA_NAME(i, name, fun) {
+      if (!SSA_NAME_IS_DEFAULT_DEF(name) || virtual_operand_p(name) || has_zero_uses(name)) continue;
+      tree var = SSA_NAME_VAR(name);
+      if (!var || TREE_CODE(var) != VAR_DECL || DECL_HARD_REGISTER(var)) continue;
+      if (SSA_NAME_OCCURS_IN_ABNORMAL_PHI(name) || !is_gimple_reg_type(TREE_TYPE(name))) continue;
+      imm_use_iterator it;
+      gimple *use;
+      use_operand_p up;
+      // an asm operand (the "+r" scratch register of an inline Interlocked loop) must stay a register
+      bool in_asm = false;
+      FOR_EACH_IMM_USE_FAST(up, it, name)
+        if (gimple_code(USE_STMT(up)) == GIMPLE_ASM) in_asm = true;
+      if (in_asm) continue;
+      tree zero = build_zero_cst(TREE_TYPE(name));
+      FOR_EACH_IMM_USE_STMT(use, it, name) {
+        FOR_EACH_IMM_USE_ON_STMT(up, it) SET_USE(up, zero);
+        if (gimple_code(use) != GIMPLE_PHI) update_stmt(use);
+      }
+      c++;
+    }
+    uninit_zeroed += c;
+    if (verbose && c)
+      inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu uninitialized locals read as 0", c);
+    return 0;
+  }
+};
+
+static const pass_data uninit_data = {
+    GIMPLE_PASS, "fnvnx_uninit", OPTGROUP_NONE, TV_NONE, PROP_ssa | PROP_cfg, 0, 0, 0, TODO_update_ssa | TODO_cleanup_cfg,
 };
 
 static const pass_data order_data = {
@@ -749,6 +799,11 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
       else { error("%<fnvnx_order%>: unknown mode %s", v); return 1; }
     } else if (!strcmp(k, "keys") && v) read_keys(v);
     else if (!strcmp(k, "discover") && v) discover_path = xstrdup(v);
+    else if (!strcmp(k, "uninit") && v) {
+      if (!strcmp(v, "zero")) uninit_zero = true;
+      else if (!strcmp(v, "keep")) uninit_zero = false;
+      else { error("%<fnvnx_order%>: unknown uninit mode %s", v); return 1; }
+    }
     else if (!strcmp(k, "refcount") && v) {
       if (!strcmp(v, "weak")) refcount_weak = true;
       else if (!strcmp(v, "full")) refcount_weak = false;
@@ -774,6 +829,12 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
   pass.ref_pass_instance_number = 1;
   pass.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pass);
+  struct register_pass_info upass;
+  upass.pass = new uninit_pass(g, uninit_data);
+  upass.reference_pass_name = "early_uninit";   // SSA is complete; GCC's own uninit warning and every optimizer come later
+  upass.ref_pass_instance_number = 1;
+  upass.pos_op = PASS_POS_INSERT_BEFORE;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &upass);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish, NULL);
   register_callback(info->base_name, PLUGIN_FINISH, finish_all, NULL);
   register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize, NULL);

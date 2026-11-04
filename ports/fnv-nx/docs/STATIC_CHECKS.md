@@ -302,7 +302,7 @@ coverage. The classes added in this round have no earlier count.
 | W-RETURN | 91 | 3 -> 0 | 0 | closed: FALL1 + `-Werror=return-type`; 8 reachable traps tree-wide go to RET1 |
 | THIS-NULL | 286 | 208 -> 208 | 400 | closed: `-fno-delete-null-pointer-checks` (fact: compare kept) |
 | (char signedness, signed overflow, aliasing, FP contraction) | - | - | - | closed: `-fsigned-char` `-fwrapv` `-fno-strict-aliasing` `-ffp-contract=off` (facts; 0 fused ops in 436 f8 objects) |
-| W-UNINIT | 8 | 4 -> 0 | 3 | open (per-site); the 4 (an `int&` out-parameter local, 3 temporaries) went away with the source changes, not with D16 (checked with and without `-fPIC`) |
+| W-UNINIT | 8 | 4 -> 0 | 3 | closed for scalars: fnvnx_order `uninit=zero` reads an unwritten local as 0 (ORDERING.md); 11 -> 0 warnings on shard 3's sites |
 | W-ARRAY-BOUNDS | 194 | 96 -> 91 | 125 | open (per-site) |
 | W-LOOP-UB | 1 | 1 -> 2 | 2 | open: `-fno-aggressive-loop-optimizations` not adopted |
 | F2U | 135 | 75 -> 75 | 152 | open: the fnvnx_ftoi plugin closes it once compile.sh loads it; never fuzzed |

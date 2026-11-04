@@ -216,6 +216,26 @@ Hot units only (40): the build is -0.02 % (12 ldar, 14 stlr, 4 dmb), and full TS
 * `-ftrivial-auto-var-init=zero` is not adopted: it costs +1.2 % (memsets of local buffers on every call) and does not
   change the W-UNINIT folding.
 
+## Uninitialized locals (W-UNINIT): `uninit=zero`
+
+The decomp reads locals it never wrote: matching devices such as `unsigned char qq; f(qq);`, a struct copied from an
+unwritten one, a flag passed through. MSVC passed whatever the register or stack slot held. GCC treats the value as
+undefined and folds through it (`int x; if (c) x = 5; return x == 5;` becomes `return 1`).
+
+A second pass of fnvnx_order, `fnvnx_uninit`, runs right after SSA is built (before GCC's own early uninit
+warning and before every optimizer). It replaces each use of the default definition of a local scalar (a read
+before any write on some path) with the constant 0: one fixed value, a valid stand-in for the junk, and no
+undefined value left. Parameters, the result, memory (addressable) locals, virtual operands and asm operands are
+not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B only).
+
+* tests/s12/order uninit.cpp: the fold above is gone with the pass and present with `keep` (the test bites); no
+  `-Wuninitialized` warning is left.
+* On the 11 W-UNINIT sites of the newest static report (shard 3), GCC's own warnings go from 11 to 0. The static
+  gate loads the same plugin (gcc_warn.sh), so its W-UNINIT count follows.
+* One of them is a member call whose object pointer is assigned inside its own argument list
+  (`obj->f(..., obj = X, ...)`): the decomp compiles to the original only if MSVC evaluates the object after the
+  arguments. With `object=last` the read is initialized. That is evidence for ORDER-OBJECT (below), for S11.
+
 ## Open, not closed by this
 
 * **ORDER-OBJECT** (`get()->f(a())`): GCC evaluates the object expression first (C++17), MSVC 2008 probably last. Not
@@ -241,5 +261,5 @@ then says which of the two it matches), and the build (compile.sh) follows that.
 * **POLL-PLAIN** beyond the wait-only loop shape (closed above): a flag tested inside a loop that does other work, or
   a pointer published with a plain store and read without a poll, is still a data race the A57 can break; such a
   site needs its field made volatile or keyed (a `field Class::member` line in a key file passed as ORDER_KEYS).
-* **W-UNINIT**: per site. GCC 13's `-ftrivial-auto-var-init=zero` does not stop it from folding an uninitialized
-  scalar path away (re-checked here), and it memsets every large local buffer on every call.
+* **W-UNINIT** in memory: an addressable local or an aggregate read before it is written keeps whatever the stack
+  held; GCC does not fold such a load as undefined, so it is left alone (scalars: closed by `uninit=zero`, above).
