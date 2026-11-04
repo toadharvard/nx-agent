@@ -112,7 +112,9 @@ struct counts { unsigned long ldar, stlr, fence_ld, fence_st; };
 static counts unit_total;
 static bool args_rtl = true;
 static unsigned long calls_reordered, calls_skipped;
-static bool object_last = false;                         // object=first (default) | last: ORDER-OBJECT
+static bool object_last = false;                         // object=first (default) | last | msvc: ORDER-OBJECT
+static bool object_msvc = false;                         // object=msvc: MSVC 2008's table (tests/s11/order/order.msvc)
+static bool assign_msvc = false;                         // assign=cpp17 (default) | msvc: built-in compound assignment
 static bool operator_rtl = false;                        // operator=cpp17 (default) | rtl: ORDER-OPERATOR
 static unsigned long calls_object_last, calls_operator;
 static bool refcount_weak = true;
@@ -154,6 +156,16 @@ static std::string record_name(tree field) {
 
 static void resolve_forwarders();
 static void write_discovered();
+static bool field_keyed(tree f);
+// local pointers set from the address of a field or variable (`int *q = &w->done;`), for every function of the unit:
+// a store or load through such a pointer (`*q = 1`) is an access to its target (V1's K8)
+static std::map<tree, std::vector<tree>> alias_targets;
+
+static bool target_keyed(tree d) {
+  if (TREE_CODE(d) == FIELD_DECL) return field_keyed(d);
+  return interlocked_decls.count(d) || poll_decls.count(d) ||
+         (DECL_NAME(d) && key_vars.count(IDENTIFIER_POINTER(DECL_NAME(d))));
+}
 
 static bool keyed(tree t) {
   if (!forwarders_resolved) resolve_forwarders();
@@ -167,6 +179,13 @@ static bool keyed(tree t) {
     if (TREE_CODE(r) == VAR_DECL && (interlocked_decls.count(r) || poll_decls.count(r) ||
                                      (DECL_NAME(r) && key_vars.count(IDENTIFIER_POINTER(DECL_NAME(r))))))
       return true;
+    if ((TREE_CODE(r) == MEM_REF || TREE_CODE(r) == INDIRECT_REF) && !alias_targets.empty()) {
+      tree p = TREE_OPERAND(r, 0);
+      auto it = alias_targets.find(p);
+      if (it != alias_targets.end())
+        for (tree d : it->second)
+          if (target_keyed(d)) return true;
+    }
     if (!handled_component_p(r)) break;
   }
   return false;
@@ -249,10 +268,13 @@ static tree to_bits(tree v, tree ity, gimple_seq *seq) {
   return gimplify_to(e, seq);
 }
 
+static void zero_memory_locals(function *fun);
+
 struct order_pass : gimple_opt_pass {
   order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
 
   unsigned int execute(function *fun) final override {
+    zero_memory_locals(fun);
     if (mode == MODE_OFF) return 0;
     counts c = {0, 0, 0, 0};
     basic_block bb;
@@ -375,6 +397,84 @@ struct uninit_pass : gimple_opt_pass {
   }
 };
 
+// Memory locals (an aggregate, an address-taken scalar, a small array) are not SSA values yet when the SSA pass
+// above runs: SRA and the promotion of address-taken locals make them registers later, with the same undefined value
+// (V1's U1-U3: `S s; if (c) s.a = 5; return s.a == 5;` folds to `return 1`). Before SSA, every such local of at most
+// 64 bytes that the function reads gets `x = {}` at its entry; dead-store elimination removes it where every read is
+// preceded by a write. Its end-of-scope clobbers go too, so a loop-body local keeps its value from one iteration to
+// the next, as MSVC's stack slot does (V1's U5). Larger buffers keep their junk: GCC does not scalarize them.
+static unsigned long uninit_mem_zeroed;
+
+static tree mem_local_read(tree *tp, int *walk_subtrees, void *data) {
+  if (TYPE_P(*tp)) { *walk_subtrees = 0; return NULL_TREE; }
+  if (TREE_CODE(*tp) == ADDR_EXPR) { *walk_subtrees = 0; return NULL_TREE; }   // &x is not a read of x
+  if (VAR_P(*tp)) ((std::set<tree> *)data)->insert(*tp);
+  return NULL_TREE;
+}
+
+static bool zero_candidate(function *fun, tree v) {
+  if (!VAR_P(v) || TREE_STATIC(v) || DECL_EXTERNAL(v) || DECL_HARD_REGISTER(v) || DECL_CONTEXT(v) != fun->decl) return false;
+  if (TREE_THIS_VOLATILE(v) || DECL_THREAD_LOCAL_P(v)) return false;
+  tree ty = TREE_TYPE(v);
+  if (!(TREE_ADDRESSABLE(v) || AGGREGATE_TYPE_P(ty))) return false;   // registers: the SSA pass
+  if (!TYPE_SIZE_UNIT(ty) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(ty))) return false;
+  unsigned HOST_WIDE_INT sz = tree_to_uhwi(TYPE_SIZE_UNIT(ty));
+  return sz > 0 && sz <= 64;
+}
+
+static void zero_memory_locals(function *fun) {
+  if (!uninit_zero) return;
+  std::set<tree> read;
+  basic_block bb;
+  FOR_EACH_BB_FN(bb, fun) {
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+      gimple *st = gsi_stmt(gsi);
+      if (gimple_clobber_p(st)) continue;
+      if (is_gimple_assign(st)) {
+        for (unsigned i = 1; i < gimple_num_ops(st); i++) {
+          tree op = gimple_op(st, i);
+          if (op) walk_tree(&op, mem_local_read, &read, NULL);
+        }
+        tree lhs = gimple_assign_lhs(st);   // a store into part of x through x.f[i] reads nothing of x
+        if (lhs && handled_component_p(lhs))
+          for (tree r = lhs; handled_component_p(r); r = TREE_OPERAND(r, 0))
+            for (int k = 1; k < TREE_OPERAND_LENGTH(r); k++)
+              if (TREE_OPERAND(r, k)) walk_tree(&TREE_OPERAND(r, k), mem_local_read, &read, NULL);
+      } else {
+        for (unsigned i = 0; i < gimple_num_ops(st); i++) {
+          tree op = gimple_op(st, i);
+          if (!op) continue;
+          if (is_gimple_call(st) && op == gimple_call_lhs(st)) continue;
+          walk_tree(&op, mem_local_read, &read, NULL);
+        }
+      }
+    }
+  }
+  std::vector<tree> zero;
+  for (tree v : read)
+    if (zero_candidate(fun, v)) zero.push_back(v);
+  if (zero.empty()) return;
+  std::set<tree> zs(zero.begin(), zero.end());
+  FOR_EACH_BB_FN(bb, fun) {
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi);) {
+      gimple *st = gsi_stmt(gsi);
+      if (gimple_clobber_p(st) && zs.count(gimple_assign_lhs(st))) gsi_remove(&gsi, true);
+      else gsi_next(&gsi);
+    }
+  }
+  basic_block entry = single_succ(ENTRY_BLOCK_PTR_FOR_FN(fun));
+  if (!single_pred_p(entry))   // the first block is also a loop header: zero once, on the way in
+    entry = split_edge(single_succ_edge(ENTRY_BLOCK_PTR_FOR_FN(fun)));
+  gimple_stmt_iterator gsi = gsi_after_labels(entry);
+  for (tree v : zero) {
+    tree ty = TREE_TYPE(v);
+    tree init = AGGREGATE_TYPE_P(ty) ? build_constructor(ty, NULL) : build_zero_cst(ty);
+    gimple *g = gimple_build_assign(v, init);
+    gsi_insert_before(&gsi, g, GSI_SAME_STMT);
+  }
+  uninit_mem_zeroed += zero.size();
+}
+
 static const pass_data uninit_data = {
     GIMPLE_PASS, "fnvnx_uninit", OPTGROUP_NONE, TV_NONE, PROP_ssa | PROP_cfg, 0, 0, 0, TODO_update_ssa | TODO_cleanup_cfg,
 };
@@ -422,14 +522,19 @@ static tree *arg_slot(tree t, int i) {
 // OBJ_TYPE_REF's object, so the arguments run before the object and its vtable load. 0: neither (object=first, a
 // constructor or destructor, a call through a pointer to member or another computed callee). The callee itself is
 // never replaced: a COMPOUND_EXPR there would make a direct call indirect.
+// object=msvc follows MSVC 2008 as recorded in all five configurations (S11, tests/s11/order/order.msvc): a direct
+// member call (member operators included) evaluates its arguments, then the object (1); a virtual call evaluates the
+// object first (0: GCC's order); a call through a pointer to member evaluates its arguments, then object and member
+// pointer (3: the chain goes in front of the computed callee, which is an indirect call anyway).
 static int object_kind(tree call, tree fn) {
-  if (!object_last || !fn || arg_count(call) < 1) return 0;
+  if (!(object_last || object_msvc) || !fn || arg_count(call) < 1) return 0;
   if (TREE_CODE(call) == AGGR_INIT_EXPR && AGGR_INIT_VIA_CTOR_P(call)) return 0;
   if (TREE_CODE(fn) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(fn, 0)) == FUNCTION_DECL) {
     tree d = TREE_OPERAND(fn, 0);
     return DECL_CONSTRUCTOR_P(d) || DECL_DESTRUCTOR_P(d) ? 0 : 1;
   }
-  return TREE_CODE(fn) == OBJ_TYPE_REF ? 2 : 0;
+  if (TREE_CODE(fn) == OBJ_TYPE_REF) return object_msvc ? 0 : 2;
+  return object_msvc && TREE_CODE(call) == CALL_EXPR ? 3 : 0;
 }
 
 // an object no argument can change: a constant, or the address of a declaration
@@ -473,7 +578,10 @@ static void reorder_call(tree call) {
     }
     if (!TREE_CONSTANT(a)) live++;
   }
-  if (okind) {
+  if (okind == 3) {
+    // pointer to member: the callee holds the object and the member pointer; the arguments go in front of it
+    if (!TREE_SIDE_EFFECTS(fn) && !effects) okind = 0;
+  } else if (okind) {
     // the object moves only where it and an argument can see each other: one has side effects, the other is live
     tree obj = *arg_slot(call, 0);
     if (!scalar_arg(obj) || !((TREE_SIDE_EFFECTS(obj) && live) || (!invariant_object(obj) && effects))) okind = 0;
@@ -493,7 +601,9 @@ static void reorder_call(tree call) {
     tree a = *arg_slot(call, i);
     if (TREE_CODE(a) == SAVE_EXPR) chain = build2(COMPOUND_EXPR, TREE_TYPE(chain), a, chain);
   }
-  if (okind == 2) {
+  if (okind == 3) {
+    CALL_EXPR_FN(call) = build2(COMPOUND_EXPR, TREE_TYPE(fn), chain, fn);
+  } else if (okind == 2) {
     // GCC gimplifies the callee before the arguments, and an OBJ_TYPE_REF's object before its vtable load: with
     // the chain in front of that object, the arguments, the object and the vtable load run in this order
     tree &o = OBJ_TYPE_REF_OBJECT(fn);
@@ -587,10 +697,10 @@ static void note_local_set(tree lhs, tree rhs) {
   if (!local_pointer(lhs) || !rhs) return;
   int parm;
   tree d = operand_of(rhs, &parm);
-  if (d) local_addr[lhs].push_back(d);
+  if (d) { local_addr[lhs].push_back(d); alias_targets[lhs].push_back(d); }
   else if (parm >= 0) local_parm[lhs] = parm;
   else if (operand_local && operand_local != lhs) {   // p = q: q's targets
-    for (tree x : local_addr[operand_local]) local_addr[lhs].push_back(x);
+    for (tree x : local_addr[operand_local]) { local_addr[lhs].push_back(x); alias_targets[lhs].push_back(x); }
     auto it = local_parm.find(operand_local);
     if (it != local_parm.end()) local_parm[lhs] = it->second;
   }
@@ -686,8 +796,18 @@ static tree poll_cond_walk(tree *tp, int *walk_subtrees, void *data) {
   return poll_body_walk(tp, walk_subtrees, data);
 }
 
+// `if (flag) break;` as a statement of an endless loop's body: the break's condition
+static tree break_cond(tree t) {
+  if (TREE_CODE(t) != IF_STMT || ELSE_CLAUSE(t)) return NULL_TREE;
+  tree th = THEN_CLAUSE(t);
+  while (th && TREE_CODE(th) == STATEMENT_LIST && tsi_one_before_end_p(tsi_start(th))) th = tsi_stmt(tsi_start(th));
+  return th && TREE_CODE(th) == BREAK_STMT ? IF_COND(t) : NULL_TREE;
+}
+
+static void poll_endless(tree loop, tree body);
+
 static void poll_loop(tree loop, tree cond, tree body) {
-  if (!cond) return;
+  if (!cond || (TREE_CODE(cond) == INTEGER_CST && !integer_zerop(cond))) { poll_endless(loop, body); return; }
   poll_scan c = {false, false, false, {}};
   walk_tree_without_duplicates(&cond, poll_cond_walk, &c);
   if (c.other || c.waited || c.vol || c.shared.empty()) return;   // a scan, a call, or a POLL-VOLATILE (ordered already)
@@ -699,6 +819,38 @@ static void poll_loop(tree loop, tree cond, tree body) {
   if (verbose_sites)
     inform(EXPR_LOCATION(loop) != UNKNOWN_LOCATION ? EXPR_LOCATION(loop) : DECL_SOURCE_LOCATION(current_fn),
            "%<fnvnx_order%>: plain poll (%s): %qD ordered", b.waited ? "wait" : "spin", c.shared[0]);
+}
+
+// `for (;;) { if (flag) break; Sleep(0); }`: the same poll with its test inside an endless loop. Every statement of
+// the body is either such a break test or a wait; the break conditions are judged like a loop condition.
+static void poll_endless(tree loop, tree body) {
+  if (!body) return;
+  while (TREE_CODE(body) == BIND_EXPR) body = BIND_EXPR_BODY(body);
+  std::vector<tree> conds, rest;
+  if (TREE_CODE(body) == STATEMENT_LIST) {
+    for (tree_stmt_iterator i = tsi_start(body); !tsi_end_p(i); tsi_next(&i)) {
+      tree st = tsi_stmt(i);
+      if (TREE_CODE(st) == CLEANUP_POINT_EXPR) st = TREE_OPERAND(st, 0);
+      tree c = break_cond(st);
+      if (c) conds.push_back(c); else rest.push_back(st);
+    }
+  } else {
+    tree c = break_cond(body);
+    if (!c) return;
+    conds.push_back(c);
+  }
+  if (conds.empty()) return;
+  poll_scan c = {false, false, false, {}};
+  for (tree &x : conds) walk_tree_without_duplicates(&x, poll_cond_walk, &c);
+  if (c.other || c.waited || c.vol || c.shared.empty()) return;
+  poll_scan b = {false, false, false, {}};
+  for (tree &x : rest) walk_tree_without_duplicates(&x, poll_body_walk, &b);
+  if (b.other) return;
+  for (tree d : c.shared) poll_decls.insert(d);
+  polls_plain++;
+  if (verbose_sites)
+    inform(EXPR_LOCATION(loop) != UNKNOWN_LOCATION ? EXPR_LOCATION(loop) : DECL_SOURCE_LOCATION(current_fn),
+           "%<fnvnx_order%>: plain poll (%s, break test): %qD ordered", b.waited ? "wait" : "spin", c.shared[0]);
 }
 
 static void poll_contexts(tree t) {
@@ -833,7 +985,42 @@ static void refcount_contexts(tree t) {
   }
 }
 
+// assign=msvc: a built-in compound assignment `*p() += a()` evaluates its left operand first under MSVC 2008 (all five
+// recorded configurations: "pa"); C++17 makes GCC evaluate the right one first. The front end has already put the
+// left operand's side effects into SAVE_EXPRs that the right side shares (the `lhs = lhs + rhs` form): they are
+// evaluated in front of the assignment. A plain `=` is left alone: MSVC's own order differs between /O2 and /Od.
+static std::set<tree> assigns_done;
+static unsigned long assigns_reordered;
+
+static tree collect_saves(tree *tp, int *walk_subtrees, void *data) {
+  if (TYPE_P(*tp)) { *walk_subtrees = 0; return NULL_TREE; }
+  if (TREE_CODE(*tp) == SAVE_EXPR) {
+    if (TREE_SIDE_EFFECTS(TREE_OPERAND(*tp, 0))) ((std::vector<tree> *)data)->push_back(*tp);
+    *walk_subtrees = 0;
+  }
+  return NULL_TREE;
+}
+static tree find_tree(tree *tp, int *, void *data) { return *tp == (tree)data ? *tp : NULL_TREE; }
+
+static void compound_assign(tree *tp) {
+  tree t = *tp;
+  if (!assign_msvc || TREE_CODE(t) != MODIFY_EXPR || assigns_done.count(t)) return;
+  tree lhs = TREE_OPERAND(t, 0), rhs = TREE_OPERAND(t, 1);
+  if (!TREE_SIDE_EFFECTS(lhs) || !TREE_SIDE_EFFECTS(rhs) || !scalar_arg(lhs)) return;
+  std::vector<tree> saves;
+  walk_tree_without_duplicates(&lhs, collect_saves, &saves);
+  tree chain = NULL_TREE;
+  for (tree sv : saves)
+    if (walk_tree_without_duplicates(&rhs, find_tree, sv))   // shared by both sides: the compound form
+      chain = chain ? build2(COMPOUND_EXPR, void_type_node, chain, sv) : sv;
+  if (!chain) return;
+  assigns_done.insert(t);
+  *tp = build2(COMPOUND_EXPR, TREE_TYPE(t), chain, t);
+  assigns_reordered++;
+}
+
 static tree order_args_walk(tree *tp, int *, void *) {
+  compound_assign(tp);
   refcount_contexts(*tp);
   poll_contexts(*tp);
   if (TREE_CODE(*tp) == MODIFY_EXPR || TREE_CODE(*tp) == INIT_EXPR) note_local_set(TREE_OPERAND(*tp, 0), TREE_OPERAND(*tp, 1));
@@ -912,13 +1099,18 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
       else if (!strcmp(v, "ltr")) args_rtl = false;
       else { error("%<fnvnx_order%>: unknown argument order %s", v); return 1; }
     } else if (!strcmp(k, "object") && v) {
-      if (!strcmp(v, "first")) object_last = false;
-      else if (!strcmp(v, "last")) object_last = true;
+      if (!strcmp(v, "first")) object_last = object_msvc = false;
+      else if (!strcmp(v, "last")) { object_last = true; object_msvc = false; }
+      else if (!strcmp(v, "msvc")) { object_msvc = true; object_last = false; }
       else { error("%<fnvnx_order%>: unknown object order %s", v); return 1; }
     } else if (!strcmp(k, "operator") && v) {
       if (!strcmp(v, "cpp17")) operator_rtl = false;
       else if (!strcmp(v, "rtl")) operator_rtl = true;
       else { error("%<fnvnx_order%>: unknown operator order %s", v); return 1; }
+    } else if (!strcmp(k, "assign") && v) {
+      if (!strcmp(v, "cpp17")) assign_msvc = false;
+      else if (!strcmp(v, "msvc")) assign_msvc = true;
+      else { error("%<fnvnx_order%>: unknown assignment order %s", v); return 1; }
     }
     else { error("%<fnvnx_order%>: unknown argument %s", k); return 1; }
   }

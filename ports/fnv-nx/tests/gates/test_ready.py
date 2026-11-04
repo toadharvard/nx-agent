@@ -500,6 +500,17 @@ class ReadyTest(unittest.TestCase):
         g = card.gates[-1]
         self.assertEqual((g['id'], g['value'], g['terms']['not_fuzzable']), ('fuzz.s13_metric', 1, 1), g['note'])
 
+    def test_fuzz_coverage_per_shard(self):
+        g = self.gate(self.world.run(), 'fuzz.coverage')
+        self.assertEqual(g['status'], 'pass')
+        self.assertEqual(set(g['per_shard']), {'1', '2'})
+        # shard 2 at 8 of 10: 90 % in total would pass, but shard 2 alone is below 90 %
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'cumulative (verdicts valid for this head): 10 functions',
+                       'cumulative (verdicts valid for this head): 8 functions')
+        g = self.gate(self.world.run(), 'fuzz.coverage')
+        self.assertEqual(g['status'], 'fail')
+        self.assertIn('shards below 90 %: 2', g['note'])
+
     def test_try_farms_never_count(self):
         """frames, frameprof and the frame budget of a try farm (unmerged wip heads) are not evidence (V1 R14)"""
         self.world.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'][0].update({'pass': False}))

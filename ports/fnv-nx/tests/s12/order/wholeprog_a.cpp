@@ -7,6 +7,7 @@
 // discover: field Obj::m_alias
 // discover: field P::flag
 // discover: field Obj::m_xcount
+// discover: var g_brk
 #include "wholeprog.h"
 #define USED __attribute__((used))
 // unit A sees only its own facts about m_xcount: AtomicIncX is a forwarder; unit C calls it (keys_merge.py)
@@ -43,3 +44,9 @@ void USED alias(Obj *o) { LONG *p = &o->m_alias; InterlockedCompareExchange(p, 1
 // POLL-PLAIN on P::flag; unit B copies the whole record over it
 // expect: ldar\tw
 void wait_p(P *p) { while (!p->flag) Sleep(0); }
+// POLL-PLAIN with the test inside an endless loop (V1's K9)
+// expect: ldar\tw
+void brk_wait() { for (;;) { if (g_brk) break; Sleep(0); } }
+// not a poll: the endless loop does work besides the test
+// reject: ldar
+int brk_work() { int n = 0; for (;;) { if (g_brk2) break; n++; } return n; }
