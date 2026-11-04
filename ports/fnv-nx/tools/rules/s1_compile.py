@@ -394,13 +394,41 @@ SCALAR_INIT = re.compile(r'^([ \t]*)((?:const\s+)?(?:(?:unsigned|signed|volatile
                          r'float|double|unsigned|__m128[id]?|__m64|hkQuadReal|hkReal|[\w:]+(?:\s+const)?\s*\*+))\s+'
                          r'(\**\s*\w+)\s*=\s*([^;{}=][^;{}]*);', re.M)
 
+INT_LITERAL_EXPR = re.compile(r'^[\s()+\-~!*/%<>&|^]*(?:(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*[\s()+\-~!*/%<>&|^]*)+$')
+
+def _goto_crosses(text, o, c, pos):
+    """A forward goto in the function body text[o:c] jumps past the declaration at pos into its scope: the goto is
+    before pos, its label after pos and inside the innermost block that holds pos."""
+    depth, start = 0, pos
+    while start > o:                                   # the innermost '{' that holds pos
+        start -= 1
+        ch = text[start]
+        if ch == '}': depth += 1
+        elif ch == '{':
+            if depth == 0: break
+            depth -= 1
+    end, depth = pos, 0
+    while end < c:                                     # its matching '}'
+        ch = text[end]
+        if ch == '{': depth += 1
+        elif ch == '}':
+            if depth == 0: break
+            depth -= 1
+        end += 1
+    labels = {m.group(1) for m in re.finditer(r'(?<![:\w])(\w+)\s*:(?!:)', text[pos:end])
+              if m.group(1) not in ('default', 'public', 'private', 'protected')}
+    return any(m.group(1) in labels for m in re.finditer(r'\bgoto\s+(\w+)\s*;', text[o:pos]))
+
 def r_goto_scalar_inits(path, text, stats):
     """GOTO1: in functions that use goto, `T x = e;` (scalar, SSE vector or pointer T) -> `T x; x = e;` on the same
     line. MSVC lets a goto jump past such an initialization; C++ (and GCC even with -fpermissive) does not, but
     jumping past a declaration without initializer is allowed, and for a scalar the split changes nothing. A const
     scalar loses the const it cannot keep without its initializer (`const int n = e;` -> `int n; n = e;`; a pointer
     to const keeps it). A declarator list is split declarator by declarator, `T a = e1, b = e2;` ->
-    `T a, b; a = e1; b = e2;` (the initializers keep their order)."""
+    `T a, b; a = e1; b = e2;` (the initializers keep their order). A const integer scalar whose initializer is an
+    integer literal expression (`const int n = 4;`, perhaps an array bound) stays as written unless a forward goto
+    jumps past it into its scope; then it becomes `static const int n = 4;`: still a constant expression, and no
+    automatic variable for the goto to cross (GOTO1-CONST)."""
     if 'goto' not in text: return text
     spans = [sp for sp in prepare.scope_spans(text) if sp[2] == 'function']
     edits = []
@@ -410,6 +438,12 @@ def r_goto_scalar_inits(path, text, stats):
         for m in SCALAR_INIT.finditer(text, o, c):
             t = m.group(2)
             if re.match(r'(?:return|else|case|goto|delete|throw|typedef|using)\b', t): continue
+            if (t.startswith('const') and '*' not in t and not re.search(r'\b(?:float|double|__m|hk)', t)
+                    and ',' not in m.group(4) and INT_LITERAL_EXPR.match(m.group(4))):
+                if _goto_crosses(text, o, c, m.start()):
+                    edits.append((m.start(), m.end(), '%sstatic %s %s = %s;' % (m.group(1), m.group(2), m.group(3),
+                                                                               m.group(4).strip())))
+                continue                                    # not crossed: as written (MSVC's code stays the same)
             if t.startswith('const') and '*' not in t: t = t[5:].lstrip()          # the scalar's own const
             # a declarator list `float a = f(x), b = g(y);` -> `float a, b; a = f(x); b = g(y);` (same order)
             parts = [re.match(r'^\s*(\**\s*[A-Za-z_]\w*)\s*(?:=\s*(\S.*?))?\s*$', d, re.S)
