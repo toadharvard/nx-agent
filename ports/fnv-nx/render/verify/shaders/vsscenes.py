@@ -3,11 +3,12 @@
 # tests/v6n/vs/<name>.vsa / .psa with S6b's s6b_asm, translates them with sdp2dksh --glsl, writes the scenes with
 # the real paths to <work> and runs pixdiff on them (unmutated must MATCH; with --mutant M they must MISMATCH).
 #   python3 -I render/verify/shaders/vsscenes.py [--tools DIR] [--work DIR] [--mutant NAME] [--target gl|s6ngl]
+#           [--src DIR] [--only NAME]   other shader/scene directory (tests/v6n/defects/shaders), one scene NAME.scene.in
 import os, sys, glob, subprocess, shutil
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 a = sys.argv[1:]
 tools = os.environ.get('FNVNX_SHADERS_BUILD', os.path.join(ROOT, 'render/shaders/build/host'))
-work = os.path.join(ROOT, 'build/v6n/vs'); mutant = None; target = 'gl'; src_sub = ''
+work = os.path.join(ROOT, 'build/v6n/vs'); mutant = None; target = 'gl'; src_sub = ''; src_dir = None; only = None
 i = 0
 while i < len(a):
     if a[i] == '--tools': tools = a[i + 1]; i += 2
@@ -15,8 +16,10 @@ while i < len(a):
     elif a[i] == '--mutant': mutant = a[i + 1]; i += 2
     elif a[i] == '--target': target = a[i + 1]; i += 2
     elif a[i] == '--findings': src_sub = 'findings'; i += 1   # tests/v6n/vs/findings: S6b findings, expected to differ
+    elif a[i] == '--src': src_dir = os.path.abspath(a[i + 1]); i += 2
+    elif a[i] == '--only': only = a[i + 1]; i += 2
     else: sys.exit('unknown ' + a[i])
-src = os.path.join(ROOT, 'tests/v6n/vs', src_sub)
+src = src_dir or os.path.join(ROOT, 'tests/v6n/vs', src_sub)
 os.makedirs(work, exist_ok=True)
 paths = {}
 for f in sorted(glob.glob(os.path.join(src, '*.vsa')) + glob.glob(os.path.join(src, '*.psa'))):
@@ -29,7 +32,7 @@ for f in sorted(glob.glob(os.path.join(src, '*.vsa')) + glob.glob(os.path.join(s
     g = glob.glob(os.path.join(od, '*.glsl'))[0]
     paths[n] = (b, g)
 scenes = []
-for f in sorted(glob.glob(os.path.join(src, '*.scene.in'))):
+for f in sorted(glob.glob(os.path.join(src, (only or '*') + '.scene.in'))):
     t = open(f).read()
     for n, (b, g) in paths.items():
         t = t.replace('@' + n, '%s %s' % (b, g))

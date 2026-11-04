@@ -1,0 +1,14 @@
+# V6n defect ps_texkill_w (S6b translator): expected (Nine) the clear colour 0xff203040 everywhere (all pixels killed)
+size 4 4
+rt A8R8G8B8
+ds NONE
+clear 1 0xff203040 1.0 0
+rs CULLMODE CULL_NONE
+ps @ps_texkill_w
+psc 7 0.5 0.5 0.5 -1
+mode rhw
+v 0 0 0.5 1 0xffffffff 0 0 0
+v 4 0 0.5 1 0xffffffff 0 1 0
+v 0 4 0.5 1 0xffffffff 0 0 1
+v 4 4 0.5 1 0xffffffff 0 1 1
+draw TRIANGLESTRIP 2
