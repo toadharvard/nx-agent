@@ -467,6 +467,13 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual((g['status'], g['terms']['artifacts']), ('fail', 7))
         self.assertEqual(card['verdict'], 'READY')          # informative: fuzz.hard decides
         self.assertEqual([r['gap'] for r in card['scorecard'] if r['gates'] == ['fuzz.s13_metric']], [9])
+        self.world.edit_json('thresholds.json', lambda d: d['fuzz_s13_metric'].update(trusted=False), port=True)
+        card = self.world.run()
+        g = self.gate(card, 'fuzz.s13_metric')
+        self.assertEqual((g['status'], g['value']), ('no-data', 9))
+        self.assertIn('not trusted: V1 refuted', g['note'])
+        r = [r for r in card['scorecard'] if r['gates'] == ['fuzz.s13_metric']][0]
+        self.assertEqual((r['value'], r['gap'], r['status']), (9, None, 'no-data'))
         self.world.remove('_s13_metric.json')
         self.assertEqual(self.gate(self.world.run(), 'fuzz.s13_metric')['status'], 'no-data')
 

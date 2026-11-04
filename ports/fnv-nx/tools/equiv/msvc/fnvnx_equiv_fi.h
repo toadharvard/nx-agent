@@ -18,6 +18,8 @@
  * C-style reference cast to the temporary directly, so the identity is the MSVC meaning. A wrong extent of the
  * wrapped expression changes the parse and shows up as a difference. */
 #define fnvnx_lvalue(x) (x)
+/* RSTR1: fnvnx_unrestrict(v) is the restrict-qualified local v itself (fnvnx_compat.h); MSVC bound the reference to v */
+#define fnvnx_unrestrict(x) (x)
 
 /* TAIL1 (layout rule, only in layout runs): a zero-width bit-field of an integer type aligned like the last base,
  * as in fnvnx_compat.h. MSVC never reuses tail padding, so under MSVC it must change no layout. */

@@ -25,11 +25,12 @@ that does not show what the gate claims, or when a producer's real output can ne
                                                              boot.first_cell must not pass
   R12 boot/summary.txt says "fnvnx milestone: first_cell", milestones.json says first_cell false
                                                              boot.first_cell must not pass
-  R13 no image hash; S5's milestones.json says "player exe", but the full report's data image is synth.exe
-      (R13b: meta.json boot_image says "synthesized")       boot.real_exe must not pass (labels contradict)
-  R14 a try farm (unmerged wip head) publishes a newer S16 gate file, frameprof run or frame budget that passes,
-      the merged producer's file fails                       frames.compare / perf.frame.boost / perf.budget.boost
-                                                             must not pass (R14, R14b, R14c)
+Round 2 (V1, J-0147 follow-up) and R0's own additions:
+  R13  no hash; meta.json "synthesized", milestones.json "player exe"     boot.real_exe must not pass
+  R13b no hash; milestones.json "player exe", the full report's data image synth.exe (R0)
+  R14  a try farm's all-pass S16 file, newer than S16's                  frames.compare must not pass
+  R14b, R14c the same for frameprof and the frame budget (R0)           perf.frame.boost / perf.budget.boost
+  R15  the checksum file names FalloutNV.exe twice, another exe first   boot.real_exe must not pass
 """
 import io
 import json
@@ -176,32 +177,50 @@ def r12(w):
 
 case('R12 summary.txt overrides milestones.json', r12, must_not_pass('boot.first_cell'))
 
-# R13
+
+# Round 2 (after R0's fix of R1-R12): contradicting evidence, unmerged work
+# R13: no image hash; meta.json says the boot ran on the synthesized image, milestones.json says "player exe"
 def r13(w):
+    w.edit_json('link/%s/meta.json' % C, lambda d: (d.pop('boot_image_sha256'), d.__setitem__('boot_image', 'synthesized')))
+
+
+case('R13 image labels disagree, no hash', r13, must_not_pass('boot.real_exe'))
+
+
+# R14: a try farm (an agent's unmerged head, tools/farm/push_wip.sh) publishes an all-pass S16 gate file, newer than
+# the s16 farm's: ready.py's other gates skip reports/try<k>of<N> ("try farms run unmerged work")
+def r14(w):
+    frames(w, {'commit': C, 'scenes': [{'name': 'main_menu', 'metric': 'ssim', 'value': 0.2, 'threshold': 0.98,
+                                        'pass': False}]})
+    w.write('reports/try1of4/%s-frames.json' % C, {'commit': C, 'scenes': [
+        {'name': 'main_menu', 'metric': 'ssim', 'value': 0.99, 'threshold': 0.98, 'pass': True}]},
+        published=1900000000)
+
+
+case('R14 all-pass frames from a try farm (unmerged work)', r14, must_not_pass('frames.compare'))
+
+
+# R15: two lines for FalloutNV.exe in the checksum file, another exe's first (the pinned hash second)
+def r15(w):
+    w.write('gamedata/exe/FalloutNV.exe.sha256', 'cd' * 32 + '  FalloutNV.exe\n' + 'ab' * 32 + '  FalloutNV.exe\n')
+    w.edit_json('link/%s/meta.json' % C, lambda d: d.__setitem__('boot_image_sha256', 'ab' * 32))
+
+
+case('R15 checksum file names FalloutNV.exe twice, differently', r15, must_not_pass('boot.real_exe'))
+
+# R13b (R0): the report's data image contradicts S5's label
+def r13b(w):
     w.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_image_sha256'))
     w.sub(F, "- data image: the owner's FalloutNV.exe", '- data image: build/boot/synth.exe')
 
 
-def r13b(w):
-    w.edit_json('link/%s/meta.json' % C, lambda d: (d.pop('boot_image_sha256'), d.__setitem__('boot_image',
-                                                                                           'synthesized')))
+case('R13b no hash, milestones.json "player exe", report data image synth.exe', r13b, must_not_pass('boot.real_exe'))
 
 
-case('R13 no hash, milestones.json "player exe", report data image synth.exe', r13, must_not_pass('boot.real_exe'))
-case('R13b no hash, milestones.json "player exe", meta.json "synthesized"', r13b, must_not_pass('boot.real_exe'))
-
-
-# R14
-def r14(w):
-    w.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'][0].__setitem__('pass', False))
-    w.write('reports/try1of4/aaaaaaaaaaaa-frames.json', {'commit': 'aaaaaaaaaaaa', 'scenes': [
-        {'name': 'main_menu', 'metric': 'ssim', 'value': 0.99, 'threshold': 0.98, 'pass': True}]},
-        published=w.latest() + 60)
-
-
+# R14b, R14c (R0): try farms for frameprof and the frame budget
 def r14b(w):
-    slow = [{'label': 'boot until WinMain', 'instructions': 800000000}, {'label': 'frame 1', 'instructions': 90000000}]
-    w.write('reports/prof1/%s-frameprof.json' % C, slow)
+    w.write('reports/prof1/%s-frameprof.json' % C, [{'label': 'boot until WinMain', 'instructions': 800000000},
+                                                   {'label': 'frame 1', 'instructions': 90000000}])
     w.write('reports/try2of4/aaaaaaaaaaaa-frameprof.json', [{'label': 'boot until WinMain', 'instructions': 800000000},
                                                            {'label': 'frame 1', 'instructions': 1000000}],
             published=w.latest() + 60)
@@ -218,7 +237,6 @@ def r14c(w):
     w.write('reports/try3of4/aaaaaaaaaaaa-frame-budget.json', good, published=w.latest() + 60)
 
 
-case('R14 try farm frames.json newer than S16\'s', r14, must_not_pass('frames.compare'))
 case('R14b try farm frameprof newer than the merged one', r14b, must_not_pass('perf.frame.boost'))
 case('R14c try farm frame budget newer than the merged one', r14c, must_not_pass('perf.budget.boost'))
 sys.exit(FAIL)

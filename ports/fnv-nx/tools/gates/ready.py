@@ -1014,7 +1014,12 @@ class Card:
             tot.get('artifacts'), tot.get('not_fuzzable'), tot.get('coverage'), tot.get('unpublished'),
             ' (%s)' % ','.join(bad) if bad else '',
             ', '.join('%s %s' % kv for kv in list(dct(m.get('artifact_causes')).items())[:6]) or '-')
-        self.gate('fuzz.s13_metric', 'Fuzz', title, tot['metric'], '0', PASS if tot['metric'] == 0 else FAIL, srcs,
+        tr = dct(self.th.get('fuzz_s13_metric'))
+        st = PASS if tot['metric'] == 0 else FAIL
+        if tr.get('trusted') is False:
+            # the value is shown, but a refuted tool decides nothing until its stream fixes it
+            st, note = NODATA, 'not trusted: %s; %s' % (tr.get('why') or 'refuted', note)
+        self.gate('fuzz.s13_metric', 'Fuzz', title, tot['metric'], '0', st, srcs,
                   note, rank=19, required=False, terms={k: tot.get(k) for k in ('artifacts', 'not_fuzzable',
                                                                                  'unpublished', 'coverage')})
 
@@ -1761,9 +1766,9 @@ def scorecard(gates, th):
         ['fuzz.hard', 'fuzz.coverage'], fz, 0, fz,
         note='%s functions; coverage %s' % (ff, G['fuzz.coverage']['value'] if 'fuzz.coverage' in G else '-'))
     sm = G.get('fuzz.s13_metric')
-    s13 = sm['value'] if sm and sm['status'] != NODATA else None
+    s13 = sm['value'] if sm and isinstance(sm.get('value'), int) else None
     row('fuzz', 'S13 metric: artifacts + not fuzzable + unpublished shards (difffuzz/metric.py)',
-        ['fuzz.s13_metric'], s13, 0, s13, note=sm['note'] if sm else '')
+        ['fuzz.s13_metric'], s13, 0, s13 if sm and sm['status'] != NODATA else None, note=sm['note'] if sm else '')
     ec, en = val('equiv.code'), val('equiv.nobuild')
     eq = None if ec is None or en is None else ec + en
     row('equivalence', 'S11 diffs not by design (functions + units)', ['equiv.code', 'equiv.nobuild'], eq, 0, eq,
