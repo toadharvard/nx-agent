@@ -3147,3 +3147,45 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **merged** - Also S1b `5b94e1a` (J-0141).
 * **next** - The farm census confirms the whole tree: the full GOTO2 sweep did not fit in 10 minutes (D17). The S11
   MSVC gate checks the GOTO2/QUAD1 sites.
+
+### J-0143 | 2026-11-04 | stream: orchestration (HANDOFF) | status: wip | parent: J-0142
+
+The owner moves the work to another session or account (quota). Resume with docs/HANDOFF.md, then this entry.
+
+* **state at 41cc427**
+  - Census: 2,935/2,978 at bd37e22; ~28 failing expected after the m128/goto merge (J-0142).
+  - Link 979cb1d: 4,427 undefined. S2d bodies (J-0137/J-0138) and S2c's vftables pending.
+  - Boot: WinMain on the synthesized image; no boot on the real exe yet. It waits for a full1 guest built at a head
+    >= 8b24dc6. Every compile shard rebuilds once because of the S12 plugin hash.
+  - Fuzz: hard functions 3,375 -> 2,715, unclassified 2,066 -> 546 (S13b). Lists are on the private branch
+    `fuzz/causes/ea77051c97c7`.
+  - Readiness (R0): NOT READY.
+  - Perf: renderer CPU is measured; engine side not yet. Targets: 45 fps stable at 720p handheld, no resolution cuts,
+    profile first (J-0140).
+* **streams and their next items** (local worktree agents lose uncommitted work when this container ends)
+  | stream | where | next |
+  |---|---|---|
+  | S1-STL | local | blk_00ac0000 (28), `_std` variants, speedtree, tesobject; V1's TAIL1 failures (tests/v1/test_tail1_typename.py); the 0x13/0x14 alloc size at 00c61510 |
+  | S1-refs | local | references to temporaries, overloads, singles (~15 units) |
+  | S1-crt | local | `fopen`, `FindFirstFileA`, `_RTL_CRITICAL_SECTION_DEBUG` |
+  | S1 fuzz queue | private `handoffs_S1.tsv` | falloff 147, null-read 111, signedness 26, trap 7, float 18 |
+  | S1b | local, next round | boot-distance callers 0x00448420/0x0086c010, then 420 manual callers, then uninit-arm/callee-saved |
+  | S2c | local | vftable slots from the exe (PLAYER_EXE), LINK_OVERRIDES=render, the bodies step in the link stage, vtables.py with compile.sh flags, `handoffs_S2c.tsv`, 20 vptr mispairings |
+  | S2d | cloud, branch claude/fnv-s2d-bodies | 397 MSVC-direct calls from the exe's rel32, template special members |
+  | S4 | local | D3DX math/textures/shaders, mmio, Bink, CRT (603 names, 40 imports) |
+  | S5 | local | boot on the real exe as soon as a new guest exists; milestones |
+  | S11 | local | ~70 + ~70 unexplained equivalence differences |
+  | S12 | cloud, branch claude/fnv-s12-ordering | refcount Interlocked weakening (relaxed incref, release/acquire decref), inline Interlocked |
+  | S13 | local | vcalls through exe vftables (coverage >= 90 %), non-null allocators, fz1 fix, units_renames `def` rows |
+  | S13b | cloud, branch claude/fnv-s13b-causes | 546 unclassified, native-inlined 400, oracle-fault 342 |
+  | S15 | local | Interlocked dmb cost, mtqemu + litmus, thread placement, engine hotspot table |
+  | S16 | local | Wine reference (noise floor), NXD9 capture, coverage-guided scenes, compare_job.sh |
+  | R0 | local | gates_job.sh, new gate sources; accept abiclass patched/benign |
+  | V1 | local | re-verify J-0135 fixes, S5 milestones, S15 override, ready.py, nx_render, FTOI2 |
+  | render machine | cloud, branch claude/port-nsw-render | profile-first hotspots[], CPU fixes, fp16/single-pass lighting/merged image space, S6b centroid translator |
+* **owner decisions in force** - Listed below. Farms: st1-st4 paused (triggers disabled, sessions archived); 26 fuzz
+  shards.
+  - Commits end with the Co-Authored-By trailer only; no session ids in files.
+  - Game data is agent-only, on the private `gamedata/*` branches. The GOG token in `gamedata/gog` may be stale; the
+    owner logs in again when needed.
+  - `.claude/settings.json` allows add_repo.
