@@ -523,6 +523,50 @@ def r_goto_crossed_scopes(path, text, stats):
         text = new
     return text
 
+# ---------------------------------------------------------------------------------------------------------- QUAD1
+#
+# A decomp class of four floats that converts to __m128 (`operator __m128() const`), returned by a function whose
+# return type is constructible from __m128 only: `return m_q;`. MSVC chains the two user-defined conversions (the
+# conversion to its __m128 union, then the constructor); C++ allows one, so the first is written out:
+# `return (__m128)m_q;`.
+
+QUAD_CONV = re.compile(r'\boperator\s+__m128\s*\(\s*\)\s*const\b')
+QUAD_HEAD = re.compile(r'\b(?:struct|class)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)')
+
+def r_quad_returns(path, text, stats):
+    """QUAD1: `return q;` -> `return (__m128)q;` where q is declared only with a class that converts to __m128 and
+    the function returns a class constructible from __m128 but not from q's class."""
+    if 'operator __m128' not in text and not re.search(r'operator\s+__m128', text): return text
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    spans = prepare.scope_spans(masked)
+    classes = {}
+    for o, c, k, h in spans:
+        hm = QUAD_HEAD.search(h) if k == 'class' else None
+        if hm: classes.setdefault(hm.group(1), []).append(masked[o:c])
+    conv = sorted(n for n, bodies in classes.items() if any(QUAD_CONV.search(b) for b in bodies))
+    if not conv: return text
+    names = set()
+    for m in re.finditer(r'\b(?:%s)\s+([A-Za-z_]\w*)\s*;' % '|'.join(conv), masked):
+        others = {t for t in re.findall(r'\b([A-Za-z_]\w*)[\s\*&]+%s\s*[;,=)\[]' % m.group(1), masked)
+                  if t not in GOTO_KW}
+        if others <= set(conv): names.add(m.group(1))
+    rets = sorted(n for n, bodies in classes.items()
+                  if any(re.search(r'\b%s\s*\(\s*(?:const\s+)?__m128\s*&?\s*\w*\s*\)' % n, b) for b in bodies)
+                  and not any(re.search(r'\b%s\s*\(\s*(?:const\s+)?(?:%s)\b' % (n, '|'.join(conv)), b) for b in bodies))
+    if not names or not rets: return text
+    head = re.compile(r'(?:^|\s)(?:%s)\s+(?:\w+::)*\w+\s*\([^()]*\)\s*(?:const\s*)?$' % '|'.join(rets))
+    ret = re.compile(r'\breturn\s+((?:this\s*->\s*)?(?:%s))\s*;' % '|'.join(sorted(names)))
+    edits = []
+    for o, c, k, h in spans:
+        if k == 'function' and head.search(h):
+            edits += [(m.start(1), m.group(1)) for m in ret.finditer(masked, o, c)]
+    out, pos = [], 0
+    for s, name in sorted(set(edits)):
+        out.append(text[pos:s]); out.append('(__m128)' + name); pos = s + len(name)
+        stats['QUAD1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- SDK1
 
 SDK_GUARD = re.compile(r'^([ \t]*#[ \t]*ifndef[ \t]+_WIN(?:DEF|NT|BASE)_\b)', re.M)
@@ -3201,5 +3245,5 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]

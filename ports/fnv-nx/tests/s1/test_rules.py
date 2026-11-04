@@ -380,6 +380,24 @@ check('SSE1 named lane struct of a removed local __m128: v.lanes.x -> element ac
 got = prepare.r_sse_local_types('x.cpp', 'union __declspec(intrin_type) __m128\n{\n    struct { float x, y, z, w; } lanes;\n};\n'
                                 'struct Q { int lanes; };\nfloat f(__m128 v) { return v.lanes.x; }\n', Counter())
 check('SSE1 lane struct: left alone when the unit declares another member of that name', got, ['v.lanes.x'])
+got = prepare.r_sse_local_types('x.cpp', 'struct __declspec(intrin_type) __declspec(align(16)) __m128 { float x, y, z, w; };\n'
+                                'typedef __m128 Quad;\nstruct V { Quad q; float& at(int i) { return (&q.x)[i]; } };\n'
+                                'struct B { __m128 a, lim, c; };\nstruct P { float x; } pt;\n'
+                                'float f(const B* b, V v, __m128 r) { return b->lim.y + v.q.z + r.w + pt.x; }\n', Counter())
+check('SSE1 lanes that were members of a removed struct __m128: q.x -> element access', got,
+      ['(&((float*)&(q))[0])[i]', '((float*)&(b->lim))[1] + ((float*)&(v.q))[2] + ((float*)&(r))[3] + pt.x'])
+got = prepare.r_sse_local_types('x.cpp', 'union __declspec(intrin_type) __m128\n{\n    struct\n    {\n        float x, y, z, w;\n'
+                                '    };\n};\nstruct A { __m128 q; };\nstruct C { Pt q; };\n'
+                                'float f(A a, C c) { return a.q.x + c.q.x; }\n', Counter())
+check('SSE1 anonymous lane struct: left alone for a name also declared with another type', got,
+      ['a.q.x + c.q.x'])
+check('SSE3 element access behind a subscripted parenthesized operand',
+      prepare.r_sse_members('x.cpp', 'float& at(int r, int c) { return (&c0)[c].q.m128_f32[r]; }\n', Counter()),
+      ['return ((float*)&((&c0)[c].q))[r];'])
+check('SSE2 drops each of several prototypes in one extern "C" block on one line',
+      prepare.r_sse_local_protos('x.cpp', 'extern "C" { __m128 _mm_set_ps(float,float,float,float); __m128 '
+                                 '_mm_setr_ps(float,float,float,float); __m128 _mm_load_ss(const float*); }\nint a;\n',
+                                 Counter()), ['int a;'], ['_mm_', 'extern'])
 check('SSE2 drops `T(_mm_x)(...)` prototypes (no space before the parenthesized name)',
       prepare.r_sse_local_protos('x.cpp', 'namespace P {\nextern "C"\n{\n    ::__m128(_mm_load_ss)(const float* p);\n'
                                  '    ::__m128(_mm_sub_ps)(::__m128 a, ::__m128 b);\n}\n}\n', Counter()),
@@ -469,6 +487,17 @@ check('GOTO2 (c) does not clone a tail that names a local', got, ['goto reject;'
 got = run(s1.r_goto_crossed_scopes, 'int f(int n)\n{\n    Obj o(n);\n    if (n) goto out;\n    o.run();\nout:\n'
           '    return n;\n}\n')
 check('GOTO2 leaves declarations before the goto alone', got, ['    Obj o(n);\n    if (n) goto out;'], ['{ '])
+
+# ---- QUAD1
+_q = ('struct __declspec(align(16)) PQ { float x, y, z, w; operator __m128() const { return *(const __m128*)this; } };\n'
+      'class SR { public: SR(const __m128& v) { m = v; } SR(float f); private: PQ m; };\n'
+      'struct V4 { PQ m_q; SR at(int i) const { switch (i) { case 0: return m_q; default: return _mm_set1_ps(i); } }\n'
+      '  PQ raw() const { return m_q; } };\n')
+got = run(s1.r_quad_returns, _q)
+check('QUAD1 writes out the conversion to __m128 for a class built from __m128', got,
+      ['case 0: return (__m128)m_q;', 'PQ raw() const { return m_q; }'])
+check('QUAD1 leaves a return type that is constructible from the class itself',
+      run(s1.r_quad_returns, _q.replace('SR(float f);', 'SR(const PQ& q);')), ['case 0: return m_q;'])
 
 # ---- TAIL1
 check('TAIL1 writes typename in front of a qualified (possibly dependent) base',
