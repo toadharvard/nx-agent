@@ -80,7 +80,7 @@ if [ ${#missing[@]} -gt 0 ]; then
   check_req
   if [ ${#missing[@]} -gt 0 ]; then
     { echo "- missing after apt (file:package): ${missing[*]}"; echo "- installed: ${new[*]:-nothing}; reinstalled: ${again[*]:-nothing}"
-      echo; echo '```'; grep -iE "remov|conflict|error|unable|^E:" "$WORK/apt.log" | tail -15; echo '```'; } > "$WORK/fail.md"
+      echo; echo '```'; { grep -iE "remov|conflict|error|unable|^E:" "$WORK/apt.log" || true; } | tail -15; echo '```'; } > "$WORK/fail.md"
     fail 2 "$WORK/fail.md"
   fi
 fi
@@ -134,7 +134,7 @@ SHIM_DIR=${SHIM:-$P/shim/include}
 printf 'int fnvnx_static_probe;\n' > "$WORK/probe.cpp"
 if aarch64-linux-gnu-g++ "${BUILD_FLAGS[@]}" -c -O2 -o /dev/null -include "$SHIM_DIR/fnvnx_compat.h" -I"$SHIM_DIR" \
      -I"$EXT/sse2neon" -I"$TREE/include" "$WORK/probe.cpp" > "$WORK/probe.log" 2>&1; then TC=ok
-else TC="FAILED: $(grep -m1 -E 'error|fatal' "$WORK/probe.log" | san | cut -c1-200)"; fi
+else TC="FAILED: $( { grep -m1 -E 'error|fatal' "$WORK/probe.log" || tail -1 "$WORK/probe.log"; } | san | cut -c1-200)"; fi
 
 # 6. fnvcheck (the clang passes' checker), built before the gate so a failure is named, not counted as 0 sites.
 OUT=$WORK/out-$K-of-$N
