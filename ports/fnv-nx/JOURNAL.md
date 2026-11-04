@@ -1705,3 +1705,97 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **did** - Started four static-gate farms st1-4 (`static_job.sh`, shards of 4) next to prep, farm1 (census),
   farm2-5 (compile), eq1-6 (MSVC gate). Link (S9 link_job), fuzz (S13 fuzz_job, needs link outputs) and full boot
   follow.
+
+### J-0083 | 2026-11-04 | stream: S14-dataimage-synth | status: wip | parent: J-0071,J-0076
+
+* **did** - Took over S3's code-pointer scan (`loader/src/codeptr.c`). Each call now builds:
+  - an eligibility bitmap per mapping;
+  - a page index over the code map and the vftable starts;
+  - a running vftable cursor.
+
+  It also skips zero blocks and finds the COLs in one pass instead of two. The plain searches remain as a fallback
+  (`FNVNX_SCAN_NO_INDEX`). New: `loader/bench/` (an ILP32 bench guest) and COL-less vftable hints
+  (`synth_image.py --hints-out`, `loader/tools/check_hints.py`). Orchestrator re-ran tests/s3 and tests/s14: OK.
+* **found** - Scan cost per call drops from 367.1 M to 17.4 M instructions, and the boot's two calls from 734.3 M
+  to 34.8 M, about 43 ms on the device. The fixups are byte-identical in every configuration; in the ILP32 guest
+  the checksum is e6c2c786 before and after. 45 COL-less vftable names sit at 40 addresses and need the exe to
+  confirm.
+* **metrics** - s3_scan_insns_call=17.4M s3_scan_insns_boot=34.8M colless_hints=40
+
+### J-0084 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0080
+
+* **did** - Boot path from f13:
+  - **BIND1** (POST hook on the prepared units.json) binds `MemoryManagerAA3880::Allocate` -> 0x00aa3e40 and
+    `g_kMemoryAA3880` -> 0x011f6238. The evidence: the inline TableBaseAA3880 constructor, which the unit binds to
+    0x00aa47e0, allocates through g_memoryManager.Allocate = 0x00aa3e40.
+  - **VTBL1** gives NiStandardAllocator (vftable 0x010a24fc) its 10 slots:
+    - slots 1-6: the nistandardallocator.cpp functions in slot order;
+    - slot 7: Initialize 0x00aa3430;
+    - slot 8: Shutdown 0x00aa3460;
+    - slots 0 and 9: not in the decomp.
+
+    The commit also fixes StdAllocator's virtual-destructor slot shift.
+  - PATCHES.md lists the vftable slots that need the exe.
+
+  Orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+
+### J-0085 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0081
+
+* **did** - ecx-not-passed and this-not-passed are now judged on the definition's own x86 code
+  (`resolve --msvc-code`):
+  - a callee that never reads the incoming ecx gets an ordinary bridge;
+  - the reader follows the function's switch jump tables;
+  - on V1's c3 pairs it agrees with c3_ecx on 224 of 225 addresses.
+
+  The layout probe records the C++03 POD bit (layouts.tsv column 9). MSVC returns small aggregates in eax:edx only
+  for PODs, which covers V1 adversarial cases A1/A2. Orchestrator re-ran the link tests: ok.
+* **found** - Of V1's 12 c3 "false positives", 9 are now bridged. 0x00e3dfb0 does read ecx (c3 had not followed its
+  switch). The 4 S1b-patched pairs are flagged on purpose.
+
+### J-0086 | 2026-11-04 | stream: S11-equivalence | status: wip | parent: J-0077,J-0082
+
+* **did**
+  - equiv_job now reads a pristine branch that holds only `obj/` and `meta.json`: it fingerprints the shard's rows
+    from the objects (`equiv.py refp - --units shard:K/N`). This fixes the eq farms' first runs.
+  - `tools/equiv/merge_reports.py` merges reports/eq1..6 into one summary.
+  - Orchestrator re-ran tests/s11: ok.
+* **found**
+  - **D15 is fixed by CSX2.** 5 of the 8 critical-section units are identical to the MSVC build, including
+    GraphicsRenderer::BeginUsingRenderTargetGroup at +0x200. The other 3 differ only in EH code.
+  - **INC1:** GCC now opens exactly MSVC's headers in all 68 units it touches. Without INC1, 32 units differ.
+  - **ENUM1:** opaque `enum X : int;` is a parse limit of MSVC 2008 in 7 units, so they are marked by design.
+
+### J-0087 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0070
+
+* **did**
+  - Incremental `fuzz_job.sh` with per-function keys (fnkeys.py: oracle code, native code and relocations, harness
+    version) and a verdict cache on `fuzz/cache/<k>of<N>`, sharded by unit.
+  - Harness difffuzz-5:
+    - canned bool results are 0/1;
+    - hidden-result callees get the same bytes on both machines, with eax = the buffer;
+    - MSVC constructors return `this`;
+    - native sincos runs as a builtin;
+    - pointer-to-literal returns are compared by pointee;
+    - code pointers are compared as original addresses;
+    - bool truth value and NaN arguments are soft;
+    - jumps to memory without code are intercepted.
+  - Orchestrator re-ran the self-test: 0 failures.
+* **found**
+  - Of the 45 "same reads, different result" divergences: 18 gone, 5 soft, 22 still. The 22 are:
+    - ABI pairs, owned by S1b/S2;
+    - FTOL1 out-of-range: MSVC `_ftol2` returns the low 32 bits of the int64 conversion, while the native
+      conversion saturates (00a1b450, 00691260);
+    - a possible Havok layout difference, 00df56a0;
+    - soft cases;
+    - harness limits.
+  - First full pass measured at about 35-60 CPU-hours.
+* **next** - 32 fuzz farms once the first `link/<commit12>` exists.
+
+### J-0088 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0082
+
+* **did** - Try farms try1of4..try4of4 run the full census on unmerged agent work. The orchestrator's
+  `tools/farm/push_wip.sh 120` loop pushes each agent worktree head that has commits without a patch-equivalent on
+  the integration branch to `wip/<agent>` in the artifacts repository; worktrees that are fully merged are retired.
+  The farms skip retired branches and publish to `reports/try<k>of4`. Farms running now: prep, farm1 (census),
+  farm2-5 (compile), eq1-6 (MSVC gate), st1-4 (static gate), try1-4 (try). Next: link, then 32 fuzz farms, then
+  full boot.
