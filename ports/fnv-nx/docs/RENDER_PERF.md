@@ -11,32 +11,35 @@ render/native/perf/run.sh [work dir]     # default /home/user/work/p6n; needs en
 Numbers below are from the run of 2026-11-04 (commit in `report.json` `summary.commit`). All inputs are synthetic
 (§2); the real game's D3D9 streams plug into the same tools (§7).
 
-## 0. Hotspots: what eats the 45 fps frame (top 10, kept current)
+## 0. Hotspots: what eats the 60 fps frame (top 10, kept current)
 
-The gate reads `summary.targets_budget_fraction` (§5). Owner's targets: 720p, dynamic resolution off, docked and
-handheld; **45 fps stable at 720p handheld** is the target. Current verdict at 45 fps (22.2 ms): docked 720p frame
-0.56 of the budget (pass); **handheld 720p 1.05 (fail), GPU-bound** (GPU model 23.3 ms; CPU renderer 10.0 ms).
+The gate reads `summary.targets_budget_fraction` (§5). Owner's target (updated 2026-11-04): **60 fps, 16.7 ms for the
+whole frame at 720p handheld**, dynamic resolution off (`summary.frame_budget`). Current verdict at 60 fps: docked
+720p frame 0.75 of the budget (pass); **handheld 720p 1.40 (fail), GPU-bound** (GPU model 23.3 ms). CPU renderer
+10.0 ms (0.60); with the engine code that stays on the native path (BSBatchRenderer + BSShader prepare/update,
+measured in §13) the main thread is 11.1 ms (0.66). The CPU side uses the instruction counts below until the
+P0-perfmodel A57 cycle model (branch `claude/fnv-p0-perf`) publishes; it has not yet.
 
 Input (until S16's NXD9 captures of the real game exist): the synthetic mix_hi frame (3,710 draws, §2); GPU with
 S6n's native shaders. Real-like cross-check: the same pass mix with the game's own shaderpackage019 programs
 (translated by S6b's sdp2dksh, class averages): 16.8 ms docked, 27.2 ms handheld. CPU ms: IPC 0.6 at 1.02 GHz
 (the CPU clock is the same docked and handheld); GPU ms: handheld 720p (384 MHz), issue efficiency 0.6. CPU threads
 and the GPU run in parallel, so shares of different resources do not add up to one frame; each says how much of
-the 22.2 ms that resource spends there. Full lists: `report.json` `hotspots` (CPU by function, by family/pass; GPU
+the 16.7 ms that resource spends there. Full lists: `report.json` `hotspots` (CPU by function, by family/pass; GPU
 by pass and by shader program, docked and handheld, native and real019 shaders).
 
-| # | where | what | resource | ms | share of 22.2 ms | why / fix |
+| # | where | what | resource | ms | share of 16.7 ms | why / fix |
 |---|---|---|---|---|---|---|
-| 1 | GPU pass | lit (static objects, 1,600 draws) | GPU handheld | 7.27 | 32.7 % | ALU: lit_spec.frag ~411 instr/px (light loop x 3 + runtime D3D9 epilogue) on 0.9 Mpx; static fog/alpha permutations, fp16 lighting math, fewer lights per pixel |
-| 2 | GPU pass | image space + UI (3.5 full-screen equivalents) | GPU handheld | 7.05 | 31.8 % | ALU: the stand-in tex.frag is ~120 epilogue instructions of 129; image-space shaders need no fog/alpha test (epilogue-free permutation), then fp16 ROP/bandwidth bound |
-| 3 | CPU function | `nx::SortPackets` | CPU main+render (front) | 3.74 | 16.9 % | 65,536-entry radix tables x 4 digits, fixed ~1.9 M instr/frame; 8/11-bit digits or sort the 36 key bits that matter (F2) |
-| 4 | GPU pass | trees | GPU handheld | 1.99 | 9.0 % | ALU (lit.frag on alpha-tested leaves, overdraw 2.5) |
-| 5 | CPU function | `record` (nxgpu.c) | CPU render (backend) | 1.63 | 7.4 % | stream decode + per-op dispatch ~270 instr/draw; plus dkCmdBufBindUniformBuffers 0.84 ms below the top 10: bind per-draw slice + epilogue for 2 stages each draw |
-| 6 | GPU pass | grass | GPU handheld | 1.54 | 7.0 % | ALU + overdraw 3.0 (nolight_tex.frag, epilogue) |
-| 7 | CPU function | `nx::Frame::Finish` | CPU render (front) | 1.46 | 6.6 % | encode loop with per-draw memcmp of dyn records |
-| 8 | GPU pass | land | GPU handheld | 1.34 | 6.0 % | ALU (4 layers) |
-| 9 | CPU function | `nx::Renderer::Render` | CPU main | 1.08 | 4.9 % | fixed 512 B slice memset/copy + 256 B epilogue per draw (F3) |
-| 10 | CPU function | `nx_d3d9_sampler` | CPU main | 1.01 | 4.5 % | every stage's sampler translated on every draw (F4) |
+| 1 | GPU pass | lit (static objects, 1,600 draws) | GPU handheld | 7.27 | 43.5 % | ALU: lit_spec.frag ~411 instr/px (light loop x 3 + runtime D3D9 epilogue) on 0.9 Mpx; static fog/alpha permutations, fp16 lighting math, fewer lights per pixel |
+| 2 | GPU pass | image space + UI (3.5 full-screen equivalents) | GPU handheld | 7.05 | 42.2 % | ALU: the stand-in tex.frag is ~120 epilogue instructions of 129; image-space shaders need no fog/alpha test (epilogue-free permutation), then fp16 ROP/bandwidth bound |
+| 3 | CPU function | `nx::SortPackets` | CPU main+render (front) | 3.74 | 22.4 % | 65,536-entry radix tables x 4 digits, fixed ~1.9 M instr/frame; 8/11-bit digits or sort the 36 key bits that matter (F2) |
+| 4 | GPU pass | trees | GPU handheld | 1.99 | 11.9 % | ALU (lit.frag on alpha-tested leaves, overdraw 2.5) |
+| 5 | CPU function | `record` (nxgpu.c) | CPU render (backend) | 1.63 | 9.8 % | stream decode + per-op dispatch ~270 instr/draw; plus dkCmdBufBindUniformBuffers 0.84 ms below the top 10: bind per-draw slice + epilogue for 2 stages each draw |
+| 6 | GPU pass | grass | GPU handheld | 1.54 | 9.2 % | ALU + overdraw 3.0 (nolight_tex.frag, epilogue) |
+| 7 | CPU function | `nx::Frame::Finish` | CPU render (front) | 1.46 | 8.7 % | encode loop with per-draw memcmp of dyn records |
+| 8 | GPU pass | land | GPU handheld | 1.34 | 8.0 % | ALU (4 layers) |
+| 9 | CPU function | `nx::Renderer::Render` | CPU main | 1.08 | 6.5 % | fixed 512 B slice memset/copy + 256 B epilogue per draw (F3) |
+| 10 | CPU function | `nx_d3d9_sampler` | CPU main | 1.01 | 6.0 % | every stage's sampler translated on every draw (F4) |
 
 S6n takes the rows in order, one commit each; every commit is re-profiled and recorded in `report.json`
 `optimizations[]` (§5) by
@@ -54,7 +57,7 @@ render 3.38 M + 2.04 M instructions; GPU 12.44 / 23.22 ms docked / handheld at e
 ## 1. What is counted
 
 ```
- engine (NOT counted: update, cull, accumulation, NiDX9RenderState callers, constant-map walk, family constant fill)
+ engine (NOT counted here: update, cull, accumulation; its own D3D9 draw path is measured separately, §13)
    |  D3D9-level calls: SetRenderState / SetSamplerState / SetTexture / shaders / constants / DrawIndexedPrimitive
    v
  native path (ILP32 guest, AArch64, counted under Unicorn)        D3D9 -> Nine path (x86-64, counted by callgrind)
@@ -73,7 +76,7 @@ render 3.38 M + 2.04 M instructions; GPU 12.44 / 23.22 ms docked / handheld at e
 
 * **Main thread** = everything up to the packet (StateTracker + `Renderer::Render`); **render thread** = `Frame::Finish`
   + the deko3d recording (RENDER_NATIVE.md §3.6). Both are what N1/N2 code does today (`render/native/n1`, `front`).
-* Not counted anywhere: engine code; the families' own work to fill per-draw constants (the stream hands ready
+* Not counted here: engine code (its D3D9 draw path, NiDX9Renderer to the device calls, is counted in §13); the families' own work to fill per-draw constants (the stream hands ready
   64-256 B blocks); skinning palettes; dynamic vertex data (particles, UI text); kernel time of real nvdrv ioctls
   (the deko3d harness stubs libnx, `perf/dk/stubs.c`).
 
@@ -167,7 +170,7 @@ CPU per draw over a whole frame (fixed costs included): native **1.67 - 6.25 µs
 mix_hi at 1.02 GHz IPC 0.6: 4.9 µs). The §3.7 estimate for the native path (~1-2 µs/draw on each thread at 1.02 GHz)
 holds only at IPC 1.0 and the high draw count.
 
-### 4.3 Frame-rate targets (owner: 45 fps main, 60 stretch, < 30 fail; 720p, dynres off)
+### 4.3 Frame-rate targets (owner, updated: 60 fps = 16.7 ms whole frame at 720p handheld is the target; 720p, dynres off)
 
 Gate field (`targets_budget_fraction`), mix_hi, conservative values (CPU IPC 0.6 at 1.02 GHz; GPU efficiency 0.6):
 
@@ -222,7 +225,9 @@ Detailed sections:
 
 | key | content |
 |---|---|
-| `hotspots` | `top10` (ranked rows {kind, name, ms, share_of_22_2ms, ...}), `cpu_by_function` (front + deko3d backend symbols, mix_hi frame), `cpu_by_family_pass` (leave-one-out marginals incl. backend), `gpu_by_pass/<scene>/<cfg>`, `gpu_by_program/<scene>/<cfg>`, `gpu_frame_ms/<scene>/<cfg>` for scenes mix_hi (native shaders) and real019_mix_hi, cfg docked_720p / handheld_720p at efficiency 0.6; `input` |
+| `engine_d3d9_path` | §13: `source` (MEASURED, replaces the 1-3 k / 10-20 µs assumption in `replaced_assumption`), `per_draw_instr` {lo, exp, hi, path_min, path_max}, `per_draw_us`, `parts_per_draw_exp` (D3D9 path vs kept engine code), `by_function_per_draw_exp`, `d3d_calls_per_draw_exp`, `frame.<mix>` {instr, ms_gate}, `coverage`, `limits` |
+| `summary.frame_budget` | owner's target: 60 fps, 16.7 ms, handheld_720p; `targets_budget_fraction.<t>` adds `1.02_with_engine_kept` and `d3d9_path_main_1.02` |
+| `hotspots` | `top10` (ranked rows {kind, name, ms, share_of_16_7ms, ...}), `engine_d3d9_path_by_function` (§13), `cpu_by_function` (front + deko3d backend symbols, mix_hi frame), `cpu_by_family_pass` (leave-one-out marginals incl. backend), `gpu_by_pass/<scene>/<cfg>`, `gpu_by_program/<scene>/<cfg>`, `gpu_frame_ms/<scene>/<cfg>` for scenes mix_hi (native shaders) and real019_mix_hi, cfg docked_720p / handheld_720p at efficiency 0.6; `input` |
 | `optimizations[]` | one entry per S6n optimisation commit: {commit, name, cpu_instr_delta_main, cpu_instr_delta_render, gpu_ms_docked_720p, gpu_ms_handheld_720p, before, after} (before/after: the summary numbers of the two measured trees); source `render/native/perf/optimizations.json` |
 | `families.<f>` | `draws {lo, hi}`; `instr_per_draw {main, render, total (front), backend_record, total_with_backend}` (AArch64, marginal in mix_hi); `x64 {native_per_draw, nine_per_draw, nine_over_native}`; `isolated` (family alone); `params` (the mix row) |
 | `frame.mix_lo` / `frame.mix_hi` | `draws`; `instr {main, render_front, render_backend, render}`; `ms.<clock> {main, render} {lo, hi}`; `memory_term_ms`; `x64 {native, nine, ratio_nine_over_native, nine_driver_excluded}` |
@@ -254,10 +259,10 @@ not cover, and where a 3-5x would have to come from:
    side (state validation, constant-buffer upload through the push buffer, texture/sampler descriptor updates,
    pushbuf flushes) is not: nvc0 needs a GPU. It is excluded wholesale (`nine.driver_entries_mix_hi` lists what
    softpipe stood in for). With CSMT on (as on the Switch) Nine also pays the queue's record + replay.
-2. **The engine side.** On the D3D9 path the engine's own per-draw work stays (constant-map walk with per-entry
-   dispatch, NiDX9RenderState checks, 20-60 virtual calls into the device): §3.7's 10-20 µs/draw estimate was mostly
-   that, and the native families are to replace it. Neither side of it is in these streams (the stream hands ready
-   constant blocks).
+2. **The engine side.** On the D3D9 path the engine's own per-draw work stays. It is now measured (§13): 2.3 k
+   AArch64 instructions per draw (3.8 µs at the gate), 8.5 M per mix_hi frame, not §3.7's 10-20 µs. With it the
+   D3D9 path is 16.9 M instructions per mix_hi frame against 11.7 M for native + the engine code it keeps:
+   **1.44x per frame** (1.16x mix_lo), before nouveau.
 3. The native front is not yet optimised (F2-F4).
 
 ### 6.2 Method notes
@@ -365,8 +370,8 @@ no measured anchor yet: the first console run's `NxFrameStats.gpu_us` replaces i
   them through §7; `passes.py` then gives real per-pass counts.
 * Instruction counts, not cycles: IPC 0.6-1.0 is an assumption; caches only through the store term; no
   contention with the other cores (L2 is shared by the 4 A57s).
-* Engine side (both paths) and the nouveau driver (Nine path) are not measured; the Nine ratio is therefore for the
-  layer between the engine's D3D9 calls and the driver.
+* The engine's D3D9 draw path is a static count (§13), not an execution trace; the rest of the engine and the nouveau
+  driver (Nine path) are not measured.
 * The deko3d count stubs libnx: no ioctl/kernel time, no GPU back-pressure (command memory never waits).
 * GPU numbers are a model with assumed coverage/overdraw; shader cost uses S6n's current N2 families as stand-ins
   for LOD, trees, actors, particles and image space (no dedicated shaders yet).
@@ -399,5 +404,74 @@ no measured anchor yet: the first console run's `NxFrameStats.gpu_us` replaces i
 > about 2.5-3 M instructions per high frame). The D3D9 -> Nine state tracker measured on the same streams costs
 > 0.7-1.6x the native front per draw (0.69-0.92x per frame): the advantage of the native path is not in this
 > layer but in the driver (nouveau validation vs deko3d recording, 460-970 instructions per draw, not measured on
-> the Nine side) and in the engine-side work the families remove (not yet measured). GPU (model): 7-12 ms docked
+> the Nine side) and in the engine-side work the families remove (measured: 2.1 k of the engine's 2.3 k instructions
+> per draw are its D3D9 path, which the native renderer replaces). GPU (model): 7-12 ms docked
 > 720p, 15-25 ms handheld 720p, 8-15 ms handheld 540p.
+
+## 13. The engine's own D3D9 path (measured on the prepared objects)
+
+Until 2026-11-04 the CPU estimate assumed this side: "the engine's own per-draw work before the device: 1-3 k
+instructions [E]" (PERF.md §5), "10-20 µs/draw" (RENDER_NATIVE.md §3.7). It is now counted on the AArch64 build
+of the game: the prepared ILP32 objects of `c/b6585b87bb73` (gcc 13.3 -O2, decomp 87eb9373a0bb), resolved through
+a link's address tables (`link-head`, same decomp). Result: `report.json` `engine_d3d9_path`. Source: **measured
+(static path count)**; the assumption is replaced.
+
+```sh
+python3 -I render/native/perf/engine_path.py <obj dir> <link out dir> <spec.json> <out.json>   # seconds, 1 core
+python3 -I render/native/perf/engine_fold.py render/native/perf/report.json <out.json> --lo <lo.json> --hi <hi.json>
+```
+
+(`run.sh` runs both when `ENGINE_OBJ`, `ENGINE_LINK` and `ENGINE_SPEC[_LO,_HI]` are set; `report.py` folds
+`<work>/out/engine_path*.json`.) The spec is local: it names engine addresses and carries vtables read from the
+user's exe (`render/native/tools/exe_vftables.py`: NiDX9Renderer, NiDX9RenderState, NiD3DShader, NiD3DPass,
+NiD3DShaderConstantMap, NiD3DVertexShader, the lit BSShader class, and IDirect3DDevice9's method order). Never commit
+it.
+
+**What is on the path.** Per draw the world path enters through BSBatchRenderer's per-geometry pass (the shader's
+Prepare/Update/Finish virtuals), then the Gamebryo draw: Do_RenderShape -> the render-mesh pass loop -> the
+shader pipeline (PreProcess, UpdatePipeline, FirstPass/NextPass, SetupRenderingPass with the pass's texture
+stages, SetupTransformations, PrepareGeometryForRendering, SetupShaderPrograms with the constant-map walk,
+PostProcess) -> NiDX9RenderState (property state, render-state groups, the value filter in front of every
+SetRenderState / stage state / SetTexture) -> the device. Device calls end at our D3D9 front (§1 counts that side).
+
+**Method.** `engine_path.py` disassembles each function on the path (llvm-objdump), builds its blocks, follows
+direct calls through the link's refs/addrmap tables, and resolves virtual calls by a register type flow (this,
+fields, globals -> vptr -> slot) against the exe's vtables. Per invocation it reports the shortest path, the
+longest path and the static expectation (the return heuristic for early exits; spec branch rules where they are
+known: the trishape/indexed/unskinned common path, the value filters at mix_hi rates; loop trips from the mix:
+2.4 texture stages, 8 hardware stages for the texcoord states, 2.5 predefined + 1 other constant-map entries per
+map, 2 state-group entries per pass). Range: redundancy 90 % / 60 % and 1 / 4 group entries.
+
+| per draw (AArch64 instructions, mix_hi) | value |
+|---|---|
+| **expectation (gate)** | **2,303** (range 2,280 - 2,355), 3.76 µs at IPC 0.6 / 1.02 GHz, 1.28 µs at IPC 1.0 / 1.785 GHz |
+| shortest / longest path (bounds only) | 192 / 8,207 |
+| D3D9 path (replaced by the native renderer) | 2,131 |
+| kept on the native path (BSBatchRenderer + BSShader Prepare/Update/Finish) | 172 |
+| device calls per draw (after the engine's filter) | DrawIndexedPrimitive 1.0, SetRenderState 3.8 (2.0-8.4), SetTransform 0.6, SetTextureStageState 0.6, constants 0.16 (the rest of the constants come from the BSShader class) |
+
+Hot functions, instructions per draw (expectation): NiDX9RenderState::SetRenderState 399 (about 20 calls per draw,
+~20 instructions each, most filtered); the render-mesh pass loop 164; NiD3DPass::SetupShaderPrograms 127 (8
+texcoord stage states every pass); NiDX9RenderState property application (stencil 93, alpha 71, helpers 114,
+UpdateRenderState 39); PrepareGeometryForRendering 99; SetupRenderingPass / texture stages 94; the BSShader lit
+class's Prepare/Update/Finish 86; constant-map walk 82 + predefined switch 39 + SetShaderConstant 21; Do_RenderShape
+78; NiD3DDefaultShader pass setup 78; SetupTransformations 75 + skin 31; BSBatchRenderer pass 74. Full list:
+`report.json` `hotspots.engine_d3d9_path_by_function` (ms per mix_hi frame at the gate).
+
+| per frame (gate: IPC 0.6, 1.02 GHz) | mix_lo (1,490 draws) | mix_hi (3,710 draws) |
+|---|---|---|
+| engine D3D9 path + kept part | 3.4 M instr, 5.6 ms | 8.5 M instr, **14.0 ms** (14.3 hi) |
+| of which kept on the native path | 0.26 M, 0.4 ms | 0.64 M, **1.0 ms** |
+
+**Effect on the frame estimate.** Native path: the D3D9 path is replaced; the kept part adds 1.0 ms to the main
+thread: 10.0 -> 11.1 ms, 0.60 -> 0.66 of the 16.7 ms budget (`1.02_with_engine_kept`). The frame verdict does not
+change (handheld is GPU-bound at 1.40). D3D9 (Nine) fallback: the engine path (14.0 ms) plus st/nine (13.6 ms,
+scaled) puts its main thread at 1.65 of the 60 fps budget before nouveau (`d3d9_path_main_1.02`), so on the D3D9
+path the engine side alone is 0.84 of the budget. That settles the value of the native renderer on the CPU side:
+it removes 12.9 ms per mix_hi frame of engine code, not only the driver.
+
+**Limits.** A static count, not a trace: branch probabilities are rules, and 69 indirect calls stay unresolved
+(geometry/skin getters, the strip path), counting only their call; the BSShader virtuals use the lit class;
+per-frame engine work (BeginFrame/EndFrame, target groups, the batch sort) is not in it; the class code that fills
+most shader constants is counted only for the lit class. The decomp's slot-48 NiDX9RenderState function (overrides
+row "SetSamplerState") calls the device's SetTextureStageState slot, not SetSamplerState: S6n should check that row.
