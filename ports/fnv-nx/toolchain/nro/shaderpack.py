@@ -75,11 +75,16 @@ def collect(out_dir: str) -> list[tuple[str, int, bytes]]:
 
 def build_pack(shaders) -> tuple[bytes, bytes]:
     fams = families()
-    idx_off, n = 32, len(shaders)
+    return pack_rows([(name, *split(name, fams), stage, blob) for name, stage, blob in shaders])
+
+
+def pack_rows(rows) -> tuple[bytes, bytes]:
+    """NXSP v1 of [(name, family, variant, stage, blob)] in the given order -> (pack, pack id). Also the format of
+    the game's translated.nxsp (render/native/tools/nxsp_pack.py)."""
+    idx_off, n = 32, len(rows)
     data_off = (idx_off + n * ENTRY + 255) & ~255
     index, data = bytearray(), bytearray()
-    for name, stage, blob in shaders:
-        fam, var = split(name, fams)
+    for name, fam, var, stage, blob in rows:
         off = data_off + len(data)
         index += struct.pack("<48s24s16sIIII", name.encode(), fam.encode(), var.encode(), stage, off, len(blob),
                              zlib.crc32(blob))

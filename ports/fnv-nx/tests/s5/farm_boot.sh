@@ -38,10 +38,18 @@
 #                   farm boots it)
 #   PY              the Python with unicorn (default python3)
 #   VORBIS          the libvorbis prefix for build.sh; JOBS, SSE2NEON, DEVKITPRO passed to build.sh
+#   FARM_GAME       a game install (FalloutNV.exe, Data/, Fallout_default.ini), mounted in place at the guest's
+#                   sdmc:/switch/fnv (emu_guest.py --game, tests/s5/datapath.py); its FalloutNV.exe is the default image.
+#                   Without it the image alone is copied to sdmc:/switch/fnv. Never inside the repository.
 #   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 6000000000)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
 set -euo pipefail
 COMMIT=${1:?commit}; OUT=${2:?out dir}; IMAGE=${3:-${FNVNX_IMAGE:-}}
+GAME=${FARM_GAME:-}
+if [ -n "$GAME" ]; then
+  GAME=$(cd "$GAME" && pwd)
+  [ -n "$IMAGE" ] || IMAGE=$GAME/FalloutNV.exe
+fi
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PY=${PY:-python3}
@@ -55,6 +63,20 @@ BOOTS=${FARM_BOOTS:-raw slots stub}
 EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-6000000000}
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
+# The real install by default (orchestrator: every farm boots on the real Data/): when no FARM_GAME is given and the
+# image is none or the owner's exe, tools/gamedata_fetch.sh assembles it from the private repository into
+# FARM_GAMEDATA_DIR (default $FARM_HOME/gamedata; cached: nothing is fetched while the branches stay put).
+# FARM_GAMEDATA=0 turns it off; a failed fetch leaves the boot as it was (image only).
+OWNER_EXE_SHA=${FNVNX_EXE_SHA256:-89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe}
+if [ -z "$GAME" ] && [ "${FARM_GAMEDATA:-1}" != 0 ] &&
+   { [ -z "$IMAGE" ] || [ "$(sha256sum "$IMAGE" | cut -c1-64)" = "$OWNER_EXE_SHA" ]; }; then
+  GD=${FARM_GAMEDATA_DIR:-${FARM_HOME:-$HOME/fnvnx-farm}/gamedata}
+  if bash "$ROOT/tools/gamedata_fetch.sh" "$GD" > "$OUT/gamedata_fetch.log" 2>&1; then
+    GAME=$GD; IMAGE=$GD/FalloutNV.exe
+  else
+    echo "farm_boot: no real install (tools/gamedata_fetch.sh failed, see $OUT/gamedata_fetch.log): image only" >&2
+  fi
+fi
 if TOP=$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null); then
   case "$OUT/" in "$TOP"/*) echo "farm_boot: $OUT is inside the repository; the outputs are decomp-derived" >&2; exit 1 ;; esac
 fi
@@ -128,6 +150,13 @@ fi
 # --- boots ----------------------------------------------------------------------------------------------------------
 ADDRMAP=""
 [ -f "$LINK/out/addrmap.tsv" ] && ADDRMAP=$LINK/out/addrmap.tsv
+IMGARG=()
+if [ -n "$GAME" ]; then
+  IMGARG=(--game "$GAME")
+  [ "$IMAGE" -ef "$GAME/FalloutNV.exe" ] || { echo "farm_boot: FARM_GAME has its own FalloutNV.exe; give no image" >&2; exit 1; }
+elif [ -n "$IMAGE" ]; then
+  IMGARG=(--file "switch/fnv/FalloutNV.exe=$IMAGE")
+fi
 INJECT=()
 if command -v aarch64-linux-gnu-gcc > /dev/null \
     && aarch64-linux-gnu-gcc -mabi=ilp32 -O2 -fno-asynchronous-unwind-tables -c "$ROOT/toolchain/game/heap_standin.c" \
@@ -140,7 +169,7 @@ fi
 # game copies Fallout_default.ini to My Games/FalloutNV/FALLOUT.INI and stops in WinMain without it). They go where
 # the exe goes. Nothing is placed for the synthesized image.
 GAMEFILES=()
-if [ -n "$IMAGE" ]; then
+if [ -n "$IMAGE" ] && [ -z "$GAME" ]; then   # with FARM_GAME the install's own inis are mounted with it
   for f in "$(dirname "$IMAGE")"/*.ini; do
     [ -f "$f" ] || continue
     b=$(basename "$f")
@@ -153,7 +182,7 @@ boot() {   # boot <tag> [extra emu_guest.py args]
   local rc=0 root=$OUT/sdmc-$tag
   rm -rf "$root"; mkdir -p "$root"
   timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE" --file "fnvnx/game/FalloutNV.exe=$IMAGE"} "${GAMEFILES[@]}" \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" "${IMGARG[@]}" "${GAMEFILES[@]}" \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"
@@ -182,6 +211,9 @@ done
   else
     echo "- image: none (the empty image)"
   fi
+  if [ -n "$GAME" ]; then
+    echo "- game install: $GAME$( [ -f "$GAME/SYNTHETIC" ] && echo ' (synthetic install, tests/s5/synth_install.py: not the game data)')"
+  fi
   echo "- undefined symbols: $UNDEF"
   [ -f "$LINK/boot/summary.txt" ] && echo "- the farm's raw boot: $(grep -h '^STOPPED' "$LINK/boot/summary.txt" | head -1)"
   for tag in $BOOTS; do
@@ -195,6 +227,8 @@ done
     grep -h "^STOPPED\|^deadlock" "$L" || echo "(no stop line: timeout or normal end, see emu_$tag.log)"
     grep -h "^   \[fnvnx\] \(MessageBox\|ExitProcess\)" "$L" | sort -u | head -5 || true
     grep -h "^milestone	" "$L" | cut -f2-4 | tr '\t' ' ' | sed 's/^/game milestone /' || true
+    grep -h "^data-counts	" "$L" | tr '\t' ' ' || true
+    grep -h "^file-fault	" "$L" | head -10 | tr '\t' ' ' || true
     if [ -f "$OUT/frontier_$tag.txt" ]; then echo; echo "### frontier ($tag boot)"; head -12 "$OUT/frontier_$tag.txt"; fi
   done
 } > "$SUM"

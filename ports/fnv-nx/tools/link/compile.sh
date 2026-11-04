@@ -74,6 +74,10 @@ FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugi
         -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
         -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR" -fplugin-arg-fnvnx_order-assign="$ORDER_ASSIGN")
 if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
+# AB_FLAGS: extra flags appended after all of the above, so they win (e.g. -fstrict-aliasing against the parity set).
+# For A/B measurements only (tools/perf/unit_ab.sh, docs/PERF.md 11.8), never for a build that runs; unset = no
+# change.
+if [ -n "${AB_FLAGS:-}" ]; then read -r -a _ab <<< "$AB_FLAGS"; FLAGS+=("${_ab[@]}"); fi
 # ORDER_KEYS: the whole program's key list (docs/ORDERING.md "Whole-program keys"): every field and global that some
 # unit hands to Interlocked* (directly or through a forwarder) or polls in a wait-only loop. Their plain accesses are
 # ordered in every unit, not only in the unit that calls Interlocked on them (ATOMIC-PLAIN-STORE, the writer side of
@@ -127,7 +131,9 @@ if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
   python3 "$HERE/toolchain/order/keys_merge.py" --list "$OUT/.keys/files.list" > "$OUT/order.keys.tmp"
   # replaced only when it changes: its mtime decides which objects are stale (compile_one)
   if cmp -s "$OUT/order.keys.tmp" "$OUT/order.keys"; then rm "$OUT/order.keys.tmp"; else mv "$OUT/order.keys.tmp" "$OUT/order.keys"; fi
-  echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)"
+  # stderr under --print-flags: stdout is the flag list there (layout.game_flags parses it)
+  if [ "$PRINT_FLAGS" = 1 ]; then echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)" >&2
+  else echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)"; fi
 elif [ "$ORDER_KEYS" != unit ] && [ ! -f "$ORDER_KEYS" ]; then
   echo "compile.sh: ORDER_KEYS=$ORDER_KEYS does not exist (unset it to compute the list, or use tools/farm/keys_job.sh)" >&2
   exit 2

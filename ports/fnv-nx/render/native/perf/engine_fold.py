@@ -92,8 +92,7 @@ def fold(rep, base, lo=None, hi=None, meta=None):
                                 "native = front + deko3d recording + the kept engine part; nouveau still excluded")
     s = rep["summary"]
     s["frame_budget"] = {"target_fps": 60, "ms": FRAME_BUDGET_MS, "config": "handheld_720p",
-                         "rule": "owner: 60 fps for the whole frame at 720p handheld; the gate reads "
-                                 "targets_budget_fraction['60']"}
+                         "rule": "owner: 60 fps for the whole frame at 720p handheld. The whole-frame gate is perf.budget (tools/gates/ready.py budget_gate): docs/PERF_budget.json, scenario placed, verdict target_60 on the worst frame (S15's frame model, which reads this report for the renderer rows). targets_budget_fraction is the renderer's share only; perf.render judges it against its share of the frame (render_perf.max_budget_fraction)"}
     d_hi, d_lo = rep["frame"]["mix_hi"]["draws"], rep["frame"]["mix_lo"]["draws"]
     pdu = s["per_draw_us"]
     nine_hi = nine["with_engine_a64_instr"]["mix_hi"] / d_hi; nine_lo = nine["with_engine_a64_instr"]["mix_lo"] / d_lo

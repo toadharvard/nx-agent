@@ -96,12 +96,12 @@ def known_s6b(glsl, model=''):
     if model.startswith(('ps_2', 'ps_3')):
         g = re.sub(r'any\(lessThan\(([\w.]+?)\.xyz, vec3\(0\.0\)\)\)', r'any(lessThan(\1, vec4(0.0)))', g)
     rel = ''
-    if re.search(r'\w+_uniforms_vec4\[ARRAYBASE_\d+ ', g):
+    if re.search(r'\w+_uniforms_vec4\[\(?ARRAYBASE_\d+', g):
         t = 'vs' if model.startswith('vs') else 'ps'
         defs = re.findall(r'^const vec4 %s_c(\d+) = vec4' % t, g, flags=re.M)
         rel = 'vec4 v6n_relc(int i)\n{\n' + ''.join('\tif (i == %s) return %s_c%s;\n' % (k, t, k) for k in defs) + \
               '\treturn (uint(i) < 256u) ? %s_uniforms_vec4[i] : vec4(0.0);\n}\n' % t
-        g = re.sub(r'\w+_uniforms_vec4\[(ARRAYBASE_\d+ [^\]]*)\]', r'v6n_relc(\1)', g)
+        g = re.sub(r'\w+_uniforms_vec4\[(\(?ARRAYBASE_\d+[^\]]*)\]', r'v6n_relc(\1)', g)
     j = g.find('void main()')
     return g[:j] + KNOWN_HELPERS + rel + g[j:] if j > 0 else g
 
@@ -113,7 +113,10 @@ def vs_scene(j, vbin, vglsl, combo, seed):
         if c.get('set') == 'float' and 'proj' in c['name'].lower() and c.get('rows', 4) >= 4:
             proj.update(range(c['reg'], c['reg'] + 4)); break
     L = ['size 16 16', 'rt A32B32G32R32F', 'ds D24S8', 'clear 7 0xff000000 1.0 0', 'rs CULLMODE CULL_NONE',
-         'rs ZENABLE 1', 'rs ZFUNC CMP_ALWAYS', 'vs %s %s' % (vbin, vglsl), 'ps %s %s' % (combo[0], combo[1])]
+         'rs ZENABLE 1', 'rs ZFUNC CMP_ALWAYS', 'vs %s %s' % (vbin, vglsl), 'ps %s %s' % (combo[0], combo[1]),
+         # coverage is marked in stencil (1 where drawn): depth cannot tell, a VS may pin z to the far plane (z = w,
+         # depth 1.0 = the clear value: SKYSTARS)
+         'rs STENCILENABLE 1', 'rs STENCILFUNC CMP_ALWAYS', 'rs STENCILPASS STENCILOP_REPLACE', 'rs STENCILREF 1']
     base = min(proj) if proj else None
     for c in range(256):
         if base is not None and c in proj:
@@ -156,6 +159,10 @@ COV_TIE = 2   # differing pixels tolerated per vertex-program seed (centres on a
 EXTRA_PROBES = 2   # further perturbation patterns for a program that fails under the first (see main)
 SENS = 0.1    # a pixel may differ by SENS x the oracle's own change under the 1e-5 input perturbation (float32 rounding
               # is ~1e-7 relative, so a correct translation stays well inside; an ill-conditioned input is not a defect)
+def covered(x):
+    """pixels a vertex-program scene drew: stencil 1 (vs_scene marks coverage), else depth below the clear value"""
+    return x['s'] != 0 if x.get('s') is not None else x['d'] != 16777215
+
 def maxerr(a, b, q=None, f=None):
     """-> (ok, colour max |d| (8-bit steps or float units), depth max LSB, px over tolerance, first finding, oracle NaN px).
     Colour tolerance as cmp.py (2/255, or 1e-3 relative on float targets), depth 8 LSB (D24), each widened per pixel by
@@ -182,9 +189,9 @@ def maxerr(a, b, q=None, f=None):
         sq = np.where(np.isnan(ca) ^ np.isnan(cq), np.inf, sq)
         tol = tol + SENS * sq
         dtol = dtol + SENS * np.abs(da - q['d'].astype(np.int64))
-        if a['isf']: unstable_cov = (da != 16777215) != (q['d'] != 16777215)
+        if a['isf']: unstable_cov = covered(a) != covered(q)
     if a['isf']:
-        cova, covb = da != 16777215, db != 16777215
+        cova, covb = covered(a), covered(b)
         # O9: D3D9 pixel centres of row 0 / column 0 lie on the x = -w / y = w clip planes; softpipe's clipper drops them
         # for clipped triangles when w varies (llvmpipe's guard band keeps them, as D3D9 hardware does): not compared
         edge = np.zeros(dd.shape, bool); edge[0, :] = True; edge[:, 0] = True

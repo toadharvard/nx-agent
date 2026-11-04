@@ -314,6 +314,32 @@ extern "C" int fnvnx_mt1_on(void)
     return *(volatile const uint8_t *)(uintptr_t)(0x011c710cu + 4u) != 0;
 }
 
+/* MT1 cull sync (docs/PERF.md 6.11, patches/mt1_cull_sync.s1b): main waits, before the world render's cull, until AI
+ * linear thread 2 has finished this frame's cell update (TES::FUN_00453550: the Havok step and the cell downward
+ * pass, which write the transforms and bounds the cull reads). That thread signals its event 6 right after it
+ * (ailineartaskthreadmanager.cpp:806); the 12 + 8 manual-reset events are reset by FUN_008c78c0 when main starts the
+ * AI threads, so the event means "this frame's cell update is done", or, in a frame without AI work, stays set from
+ * the last one. The manager is g_011dfa50 (FUN_00713d80): apThreads[3] at +0, ppEvents[2] at +0x8c. With one AI
+ * thread (iNumHWThreads 2) apThreads[1] is null, nothing signals event 6 and the cell update runs before that
+ * thread's own signal, so there is nothing to wait for. A bounded wait (FNVNX_MT1_SYNC_MS): if the event never
+ * comes, main goes on as the PC code does and the frame is counted. */
+#ifndef FNVNX_MT1_SYNC_MS
+#define FNVNX_MT1_SYNC_MS 100
+#endif
+extern "C" unsigned long WaitForSingleObject(void *, unsigned long);
+extern "C" unsigned int fnvnx_mt1_sync_timeouts;
+unsigned int fnvnx_mt1_sync_timeouts;
+extern "C" void fnvnx_mt1_wait_cell_update(void)
+{
+    const volatile uint32_t *mgr = (const volatile uint32_t *)(uintptr_t)0x011dfa50u;
+    if (!mgr[1]) return;                                   /* apThreads[1]: no second AI linear thread */
+    uint32_t events = mgr[0x90 / 4];                       /* ppEvents[1]: thread 2's 8 events */
+    if (!events) return;
+    void *ev = (void *)(uintptr_t)((const volatile uint32_t *)(uintptr_t)events)[6];
+    if (ev && WaitForSingleObject(ev, FNVNX_MT1_SYNC_MS) != 0)
+        fnvnx_mt1_sync_timeouts++;
+}
+
 /* The memory manager's globals, to compare with x86 (S14): after the constructor, InitializeGlobal 0x00866690 has
  * set the options 0x011f6118 (new FUN_00aa21d0(new BSNiAllocator)) and run InitHolder once (holder 0x011f6080), the
  * run-once flag 0x011f6229 is still 0; WinMain's FUN_00aa20b0(0) then keeps those options (0x011f610d stays 0, the
