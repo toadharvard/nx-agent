@@ -24,10 +24,16 @@ that does not show what the gate claims, or when a producer's real output can ne
   R11 S5's real milestones.json: raw boot reached winmain only, the stub boot reached first_cell
                                                              boot.first_cell must not pass
   R12 boot/summary.txt says "fnvnx milestone: first_cell", milestones.json says first_cell false
-  R16 frame budget at the stock clock with a typical frame of 12-16 ms, a worst frame of 18-25 ms, and verdicts
-      that say pass for 60 fps (stretch_60 as the J-0132 model judged it, on the typical frame; target_60)                                              perf.budget.stock must not pass (J-0150: 60 fps on the
-                                                             worst frame)
                                                              boot.first_cell must not pass
+Round 2 (V1, J-0147 follow-up) and R0's own additions:
+  R13  no hash; meta.json "synthesized", milestones.json "player exe"     boot.real_exe must not pass
+  R13b no hash; milestones.json "player exe", the full report's data image synth.exe (R0)
+  R14  a try farm's all-pass S16 file, newer than S16's                  frames.compare must not pass
+  R14b, R14c the same for frameprof and the frame budget (R0)           perf.frame.boost / perf.budget.boost
+  R15  the checksum file names FalloutNV.exe twice, another exe first   boot.real_exe must not pass
+  R16  (V1) frame budget at the stock clock with a typical frame of 12-16 ms, a worst frame of 18-25 ms, and verdicts
+       that say pass for 60 fps (stretch_60 as the J-0132 model judged it, on the typical frame; target_60)
+                                                             perf.budget.stock must not pass (J-0150: worst frame)
 """
 import io
 import json
@@ -108,7 +114,7 @@ def render(w, fm):
 
 # R4, R5
 case('R4 render frame_ms negative', lambda w: render(w, {'main': -1.0, 'render': -1.0}),
-     must_not_pass('perf.render.boost'))
+     must_not_pass('perf.render.stock', 'perf.render.boost'))     # J-0150: the stock clock counts
 case('R5 render frame_ms 0', lambda w: render(w, {'main': 0, 'render': 0}), lambda g: '')
 
 # R6
@@ -204,6 +210,41 @@ def r15(w):
 
 
 case('R15 checksum file names FalloutNV.exe twice, differently', r15, must_not_pass('boot.real_exe'))
+
+# R13b (R0): the report's data image contradicts S5's label
+def r13b(w):
+    w.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_image_sha256'))
+    w.sub(F, "- data image: the owner's FalloutNV.exe", '- data image: build/boot/synth.exe')
+
+
+case('R13b no hash, milestones.json "player exe", report data image synth.exe', r13b, must_not_pass('boot.real_exe'))
+
+
+# R14b, R14c (R0): try farms for frameprof and the frame budget
+def r14b(w):
+    w.write('reports/prof1/%s-frameprof.json' % C, [{'label': 'boot until WinMain', 'instructions': 800000000},
+                                                   {'label': 'frame 1', 'instructions': 90000000}])
+    w.write('reports/try2of4/aaaaaaaaaaaa-frameprof.json', [{'label': 'boot until WinMain', 'instructions': 800000000},
+                                                           {'label': 'frame 1', 'instructions': 1000000}],
+            published=w.latest() + 60)
+
+
+def r14c(w):
+    b = json.loads(w.read('reports/prof1/%s-frame-budget.json' % C))
+    good = json.dumps(b)
+    for s in b.get('scenarios', []):
+        for r in (s.get('results') or {}).values():
+            if isinstance(r, dict) and isinstance(r.get('verdicts'), dict):
+                r['verdicts'] = {k: 'fail' for k in r['verdicts']}
+                r['worst_frame_ms'] = {'lo': 30.0, 'mid': 40.0, 'hi': 50.0}
+    w.write('reports/prof1/%s-frame-budget.json' % C, b)
+    w.write('reports/try3of4/aaaaaaaaaaaa-frame-budget.json', good, published=w.latest() + 60)
+
+
+case('R14b try farm frameprof newer than the merged one', r14b,
+     must_not_pass('perf.frame.stock', 'perf.frame.boost'))
+case('R14c try farm frame budget newer than the merged one', r14c,
+     must_not_pass('perf.budget.stock', 'perf.budget.boost'))
 
 
 # R16: a budget result whose verdicts all say pass for 60 fps (as the J-0132 model wrote them: stretch_60 judged on

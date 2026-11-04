@@ -709,6 +709,14 @@ model's cycles per call (`per_call_cycles`, P0-perfmodel) once one exists. The c
 profiles frames, so the metric moves with the per-call cost, which is what this stream changes. Every commit states
 `metric: <before> -> <after>`.
 
+**Shim changes** (sse2neon replacements in `shim/include/fnvnx_sse_fast.h`) are measured with
+`tools/perf/unit_ab.sh`: the unit compiled by the checkout, relinked alone by S2's resolve + apply
+(`a64prep.py link`), on the harness. The one-unit relink reproduces the farm link's counts and agreement for the
+unit's own functions. `_mm_shuffle_ps`: GCC 13 emits one permute or tbl with a literal mask. The literal is often
+shared and the register copy is not always needed, so a tbl costs about 2.3 instructions in hkpgsk. Replacing
+the single-source 0xc9 / 0xd2 by asm made GSK worse (585 / 591), because the asm blocks GCC's merging of
+neighbouring permutes. Only the two-source forms pay.
+
 **Method.** A hot function is replaced at its address by a native override (`tools/link/overrides/`, a row of
 `overrides.tsv`, bound by `fnvlink.py resolve --override` like the spin lock's). The override does the decomp's
 arithmetic operation by operation, in the same order and precision (float stays float, double stays double, sums in
@@ -727,7 +735,30 @@ override:
 | function | override | A64 per call before -> after [M] | oracle agreement | metric (M cycles/frame) |
 |---|---|---|---|---|
 | NiQuaternion::Slerp 0x00a6e330 (+ 0x00a6dc30, 0x00a4ff00 inlined) | `slerp_00a6e330.c` | 134 -> 88 | 9/16 -> 9/16 | 7.745 -> 7.430 |
+| NiBound::Update 0x00a7fdd0 | `nibound_update_00a7fdd0.c` (one `ld3` gives the rotation's columns) | 46 -> 19 | 15/16 -> 15/16 | 7.430 -> 6.660 (both rows) |
+| NiMatrix3 transpose product 0x00a588a0 (in UpdateWorldData's row) | `mat3_tmul_00a588a0.c` | 64 -> 39 | 13/16 -> 13/16 | |
+| NiQuaternion::FromRotationMatrix 0x00a6df40 | `quat_from_matrix_00a6df40.c` (no frame, volatile reload or pointer array; errno of a negative root set after the stores) | 89 -> 77 (model: 103, older link) | 13/13 -> 13/13 | 6.660 -> 6.603 |
+| Havok GSK 0x00da8fb0, 0x00da8390, 0x00da8500, 0x00da8820 | `shim/include/fnvnx_sse_fast.h`: two-source `_mm_shuffle_ps` 0x00/0x55/0xaa/0xff/0xc4/0xd4 as 2-instruction asm sequences instead of tbl + literal | 579 -> 571 (model: 600, older link) | 16+11+9+0 -> same | 6.603 -> 6.563 |
+| sphere/plane classification 0x004b6100 (per active plane of the cull) | `sphere_plane_004b6100.c` | 38 -> 19 | 16/16 -> 16/16 | (with the next row) |
+| culling worker 0x00a694e0 (+ bound getter 0x0043d450, 0x004b6100, 0x004b6160, 0x004b6190 inlined) | `cull_worker_00a694e0.c`: two `ld4` give the six planes as lanes, behind/front masks by lane | per object with 4-6 active planes 224-330 -> 49-67 (static paths; harness: early exit only, 12 -> 10) | 8/8 -> 8/8 | 6.563 -> 9.927 (row re-measured) -> 6.368 |
+| NiAVObject::UpdateWorldLoc 0x00a68bf0 (+ NiTransform compose 0x0062c250 and its four helpers inlined) | `update_world_loc_00a68bf0.c` | copy paths 13 -> 14; compose 23 + an unresolved operator* (> 100) -> 47 | 11/16 -> 12/16 | 6.368 -> 6.088 |
+| BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | | - |
 
-(Link 0bd144db1464, tree t/0bd144db1464, oracle msvc/pristine/87eb9373a0bb, 8 seeds x zero/random background.
+Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no
+outline atomics); the A/B numbers above are with them. (Link 0bd144db1464, tree t/0bd144db1464, oracle msvc/pristine/87eb9373a0bb, 8 seeds x zero/random background.
 The agreement count is the same before and after; the per-case outputs are checked bit for bit by run.py.)
 The override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch of either must update it too.
+The NiBound::Update row's MSVC signature is the one four pristine objects reference; one object (u2763) declares
+`?Update@NiBound@@QAEXABU1@ABUNiTransformDummy@@@Z` (struct spellings): if the link's ABI check rejects that
+reference, it needs a bridge-free second spelling (inbox note).
+The culling worker override calls the object's culling callback through native vtable slot 53 (+212), which the
+decomp's object computes from the class: `tests/s15/simd/check_native.py <link>` checks that a link's native worker
+still uses that slot (ok on links 0bd144db1464 and c0d6c71516f6). Its plane loop is checked only by
+`cull_worker_test.c`; no harness case passes the null-bound and zero-radius checks. The pristine objects also
+reference 0x004b6100 and 0x00a694e0 under other class spellings (`CallerObj_b3918`, `Sphere`, `TreeVector`;
+`HostV`): the link's ABI check decides whether they bind.
+**Bug found (S2c/S1):** the native compose path of 0x00a68bf0 calls NiTransform::operator* (nimatrix3_h_unit),
+which calls ThreeByThreeMatrix::operator*(matrix) and operator*(point). The link leaves both names undefined
+(`out/refs.tsv`; 0x0062c250 is `code-defmissing`). The override no longer calls them. Other callers of operator*
+still do. The NiMatrix3 transpose product 0x00a588a0 (override above) is not on this path: the 25 instructions it
+saves were counted in fn_world_transform until this row was re-measured.

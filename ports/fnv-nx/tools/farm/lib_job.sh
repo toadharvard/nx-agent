@@ -259,7 +259,11 @@ print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
                   'boot_stub_winmain': int(any('fnvnx boot: calling WinMain' in l for l in stub_lines)) if stub_lines else None,
                   'boot_image': ('player exe' if os.environ.get('BOOT_EXE') else 'synthesized') if booted else None,
                   'boot_milestone': milestone('boot_summary.json'),
-                  'boot_stub_milestone': milestone(os.path.join('stub', 'boot_summary_stub.json'))},
+                  'boot_stub_milestone': milestone(os.path.join('stub', 'boot_summary_stub.json')),
+                  # NX1: the package checks (tests/s5/check_package.py, tests/nx1/run.py) of the package stage
+                  'check_package_rc': rec('package').get('check_package_rc'),
+                  'nx1_open': rec('package').get('metrics', {}).get('nx1_open'),
+                  'nx1_checks': rec('package').get('nx1')},
                  indent=1, sort_keys=True))
 EOF
 		git add -f -A .
@@ -278,4 +282,45 @@ EOF
 	set -e
 	if [ $prc -eq 0 ]; then NOTE_PUB="published: branch link/$C12 (history on link-head)"
 	else NOTE_PUB="publishing link/$C12 FAILED"; fi
+}
+
+publish_nro() { # publish_nro <build dir>: the device package (NX1) on the private branch nro/<commit12>, one orphan
+	# commit per head: sd/ (switch/fnv: fnv.nro, fnv-exefs.nsp, guest.nso, README.txt), nro/fnv.elf + map (symbols of
+	# the launcher), host/host.elf + map, nx1.json, MANIFEST.txt. It holds game-derived code (the guest), so it goes to
+	# the private artifacts repository only, never to nx-agent. The guest ELF is on link/<commit12> already.
+	local bd=$1 wt=$FARM_HOME/nro-wt br=nro/$C12
+	[ "${FARM_PUBLISH:-auto}" = 0 ] && { NOTE_NRO="not published (FARM_PUBLISH=0)"; return 0; }
+	[ -f "$bd/package/sd/switch/fnv/fnv.nro" ] || { NOTE_NRO="not published: no fnv.nro in the package"; return 0; }
+	local prc
+	set +e
+	(
+		set -e
+		git -C "$ARTIFACTS" worktree prune
+		rm -rf "$wt"
+		git -C "$ARTIFACTS" worktree add -q -f --orphan -b "nro-wt-$C12" "$wt" 2>/dev/null \
+			|| git -C "$ARTIFACTS" worktree add -q -f --detach "$wt"
+		cd "$wt" || exit 1
+		[ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ] || exit 1
+		git rm -rqf --cached . >/dev/null 2>&1 || true
+		find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+		cp -r "$bd/package/sd" sd
+		mkdir -p nro host
+		cp "$bd/package/nro/fnv.elf" "$bd/package/nro/fnv.map" "$bd/package/nro/check_nro.json" nro/ 2>/dev/null || true
+		cp "$bd/host/host.elf" host/ 2>/dev/null || true
+		[ -f "$bd/package/nx1.json" ] && cp "$bd/package/nx1.json" .
+		(cd sd && find . -type f | sort | while read -r f; do
+			printf '%s\t%s\t%s\n' "${f#./}" "$(stat -c %s "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"; done) > MANIFEST.txt
+		git add -f -A .
+		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 device package (NX1)"
+		for i in 1 2 3; do
+			git push -q -f origin "HEAD:refs/heads/$br" 2>/dev/null && break
+			sleep $((i * 5))
+		done
+		git ls-remote origin "refs/heads/$br" | grep -q .
+	)
+	prc=$?
+	set -e
+	git -C "$ARTIFACTS" worktree remove -f "$wt" >/dev/null 2>&1 || true
+	git -C "$ARTIFACTS" branch -D "nro-wt-$C12" >/dev/null 2>&1 || true
+	if [ $prc -eq 0 ]; then NOTE_NRO="published: branch $br"; else NOTE_NRO="publishing $br FAILED"; fi
 }

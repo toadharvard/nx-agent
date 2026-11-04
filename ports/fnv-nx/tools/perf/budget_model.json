@@ -408,12 +408,12 @@
  "hotspot_functions": [
   {
    "id": "fn_world_transform",
-   "name": "NiAVObject::UpdateWorldData 0x00a68c60 + the NiMatrix3 product 0x00a588a0 it composes with",
+   "name": "NiAVObject::UpdateWorldData 0x00a68c60 + the transform compose UpdateWorldLoc 0x00a68bf0 it tail-calls",
    "subsystem": "scene-graph update",
    "role": "main",
    "per_call_insn": [
-    70,
-    100
+    14,
+    50
    ],
    "per_call_basis": "M",
    "calls": [
@@ -421,7 +421,7 @@
     12000
    ],
    "calls_note": "objects whose world transform is recomputed per exterior frame [E]",
-   "per_call_note": "6 + 63 A64 instructions exclusive (dyncount, PERF.md 7) + 10-30 for translation and scale (not measured)"
+   "per_call_note": "with the override fnvnx_update_world_loc_00a68bf0 (S15-simd; NiTransform compose 0x0062c250, products 0x0043f8d0 / 0x004b4500 / 0x004a3760 / 0x00439e90 inlined): 13-14 on the copy paths, 47 + ~3 for a full compose [M] (override_ab.py, link 0bd144db1464, agreement 11 -> 12 of 16). Before: copy paths 12-14, the compose path 23 + a call to an operator* the link leaves unresolved (>100 counted from the parts); the earlier 45-75 also wrongly took the NiMatrix3 transpose product 0x00a588a0 as part of it"
   },
   {
    "id": "fn_nibound_update",
@@ -429,15 +429,16 @@
    "subsystem": "scene-graph update",
    "role": "main",
    "per_call_insn": [
-    45,
-    45
+    19,
+    19
    ],
    "per_call_basis": "M",
    "calls": [
     8000,
     24000
    ],
-   "calls_note": "two per updated object [E]"
+   "calls_note": "two per updated object [E]",
+   "per_call_note": "NEON override fnvnx_nibound_update_00a7fdd0 (S15-simd): 46 -> 19 A64 instructions per call (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 15 -> 15)"
   },
   {
    "id": "fn_node_update",
@@ -462,8 +463,8 @@
    "subsystem": "cull",
    "role": "main",
    "per_call_insn": [
-    50,
-    90
+    49,
+    67
    ],
    "per_call_basis": "E",
    "calls": [
@@ -471,7 +472,7 @@
     20000
    ],
    "calls_note": "object tests over the main, 3 shadow and the reflection passes [E]",
-   "per_call_note": "12 exclusive for 0x00a694e0 [M] + 4-6 plane tests (40-80, not measured)"
+   "per_call_note": "before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]"
   },
   {
    "id": "fn_slerp",
@@ -496,15 +497,16 @@
    "subsystem": "animation",
    "role": "main",
    "per_call_insn": [
-    103,
-    103
+    77,
+    77
    ],
    "per_call_basis": "M",
    "calls": [
     500,
     3000
    ],
-   "calls_note": "[E]"
+   "calls_note": "[E]",
+   "per_call_note": "override fnvnx_quat_from_matrix_00a6df40 (S15-simd: no frame, no volatile reload, no pointer array): 89 -> 77 A64 instructions per call (override_ab.py, link 0bd144db1464, 13 cases, agreement 13 -> 13); 103 was an older link"
   },
   {
    "id": "fn_pass_bucket",
@@ -529,8 +531,8 @@
    "subsystem": "havok",
    "role": "main",
    "per_call_insn": [
-    600,
-    600
+    571,
+    571
    ],
    "per_call_basis": "M",
    "calls": [
@@ -538,7 +540,7 @@
     2000
    ],
    "calls_note": "convex pair queries per step: character controller casts, contact points [E]",
-   "per_call_note": "303 + 119 + 72 + 109 A64 instructions exclusive [M]"
+   "per_call_note": "292 + 119 + 73 + 95 = 579 A64 instructions exclusive on link 0bd144db1464 [M] (600 on an older link); 571 with fnvnx_sse_fast.h's two-source _mm_shuffle_ps sequences (S15-simd, unit_ab.sh: 290 + 119 + 70 + 92, oracle agreement unchanged)"
   },
   {
    "id": "fn_interlocked",
