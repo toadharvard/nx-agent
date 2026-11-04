@@ -95,7 +95,7 @@ def x86_locations(sig):
             out.append((label, cls, ('stk', off))); break
         if cc == 'thiscall' and label == 'this':
             out.append((label, cls, 'ecx')); continue
-        if cc == 'fastcall' and len(regs) < 2 and cls in ('I8', 'I16', 'I32', 'P'):
+        if cc == 'fastcall' and len(regs) < 2 and cls in ('I8', 'I16', 'I32', 'P') and label != 'sret':   # buffer: stack
             r = ('ecx', 'edx')[len(regs)]; regs.append(r)
             out.append((label, cls, r)); continue
         out.append((label, cls, ('stk', off)))

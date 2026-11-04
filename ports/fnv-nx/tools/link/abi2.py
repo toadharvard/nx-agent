@@ -75,7 +75,9 @@ def x86(sig, vals, ret):
     for v in order:
         if cc == 'thiscall' and v.label == 'this':
             out.append((v.label, 'ecx', 0, 4)); continue
-        if cc == 'fastcall' and regs < 2 and v.cls in ('I8', 'I16', 'I32', 'P'):
+        # MSVC __fastcall with a hidden result: the buffer is the first stack word, ecx/edx stay for the arguments
+        # (V1 defect 1: 0x0056fa00 wrote its result over *this)
+        if cc == 'fastcall' and regs < 2 and v.cls in ('I8', 'I16', 'I32', 'P') and v.label != 'sret':
             out.append((v.label, ('ecx', 'edx')[regs], 0, v.size)); regs += 1; continue
         out.append((v.label, 'stk', off, v.size))
         off += (v.size + 3) // 4 * 4

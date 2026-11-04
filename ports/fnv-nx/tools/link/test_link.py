@@ -10,6 +10,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import abi      # noqa: E402
+import abi2     # noqa: E402
 import fnvlink  # noqa: E402
 import layout   # noqa: E402
 import sigs     # noqa: E402
@@ -83,6 +84,19 @@ def main():
     check(v.kind == 'x86-inconsistent' and 'ecx-not-passed' in v.classes and v.moves == [(('x', 2), ('x', 0), 'P', 'P')],
           'stdcall f(void*) -> fastcall(ecx, edx, X): %s %s %s (the passed argument still moves)' % (v.kind, v.classes,
                                                                                                    v.moves))
+    # V1 defect 1 (adversarial_abi B1/B2): __fastcall with a hidden result - MSVC passes the buffer as the first stack
+    # word and keeps ecx/edx for the arguments, so the reference's explicit third argument is the buffer
+    fb = ['?g@@YIXHHPAUP12@@@Z', '?g@@YI?AUP12@@HH@Z']
+    db = fnvlink.batch_demangle(fnvlink.UNDNAME, fb)
+    rb, dfb = sigs.parse_msvc(fb[0], db[fb[0]]), sigs.parse_msvc(fb[1], db[fb[1]])
+    p12 = lambda t: layout.Layout(12, 4, 1, 0, 'G2') if t == 'P12' else None   # noqa: E731
+    pb = abi2.compare(rb, dfb, p12, p12)
+    check(pb is not None and pb.kind == 'bridge' and pb.def_sret_from == 'p2',
+          'fastcall hidden result <- the reference\'s third argument: %s' % ((pb and (pb.kind, pb.def_sret_from)),))
+    pb2 = abi2.compare(dfb, rb, p12, p12)
+    check(pb2 is not None and pb2.kind == 'bridge' and any(src == ('refsret',) for ps in pb2.pieces.values()
+                                                           for _, src, _, _ in ps),
+          'explicit buffer <- the reference\'s hidden one (first stack word): %s' % (pb2 and pb2.kind))
     # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
     # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
     src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'
