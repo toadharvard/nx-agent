@@ -18,6 +18,7 @@ binutils 2.45.1, newlib 4.6.0, multilibs lp64/pic/ilp32/ilp32-pic), libnx (ext/l
 | piece | files | test | result |
 |---|---|---|---|
 | D3D9 state translator | `front/d3d9_state.{h,c}`, `include/nx/state.h` | `make -C tests/s6n` | 527 checks, 0 failed |
+| front + GL shim unit tests | `tests/s6n/test_front.cpp` | `make -C tests/s6n` | 33 checks, 0 failed |
 | front end v2 | `include/nx/front.h`, `front/front.cpp`, `include/nx/gpu_abi.h`, `front/gpu_dispatch.c` | scenes | - |
 | GL 4.5 reference backend | `gl/nxgl.{h,c}` | scenes | all scenes pass |
 | shader package | `shaders/*.glsl` (N0 + tile + nolight families), `shaders/build.py` (variants; uam -> DKSH + GLSL in one C table) | build | 18 shaders, all compile with uam and on GL |

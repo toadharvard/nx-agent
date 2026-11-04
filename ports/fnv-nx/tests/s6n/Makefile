@@ -6,8 +6,17 @@ CC ?= gcc
 CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Werror -pedantic
 CPPFLAGS += -I$(NATIVE)/include -I$(NATIVE)/front
 
-all: $(OUT)/test_d3d9_state $(OUT)/test_d3d9_state_cxxcheck
+all: $(OUT)/test_d3d9_state $(OUT)/test_d3d9_state_cxxcheck $(OUT)/test_front
 	$(OUT)/test_d3d9_state
+	$(OUT)/test_front
+
+$(OUT)/test_front: test_front.cpp $(NATIVE)/front/front.cpp $(NATIVE)/front/d3d9_state.c $(NATIVE)/gl/nxgl.c $(NATIVE)/include/nx/front.h
+	@mkdir -p $(OUT)
+	$(CC) -std=c11 -O1 -c $(CPPFLAGS) $(NATIVE)/front/d3d9_state.c -o $(OUT)/tf_d3d9_state.o
+	$(CC) -std=c11 -O1 -c $(CPPFLAGS) $(NATIVE)/gl/nxgl.c -o $(OUT)/tf_nxgl.o
+	$(CC) -std=c11 -O1 -c $(CPPFLAGS) $(NATIVE)/front/gpu_dispatch.c -o $(OUT)/tf_dispatch.o
+	$(CXX) -std=c++17 -O1 -Wall -Wextra -Werror -fno-exceptions -fno-rtti $(CPPFLAGS) -o $@ test_front.cpp $(NATIVE)/front/front.cpp \
+		$(OUT)/tf_d3d9_state.o $(OUT)/tf_nxgl.o $(OUT)/tf_dispatch.o -lEGL
 
 $(OUT)/test_d3d9_state: test_d3d9_state.c $(NATIVE)/front/d3d9_state.c $(NATIVE)/front/d3d9_state.h $(NATIVE)/include/nx/state.h
 	@mkdir -p $(OUT)
