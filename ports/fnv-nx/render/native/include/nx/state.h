@@ -198,12 +198,15 @@ enum NxSwizzle { NxSwz_R = 0, NxSwz_G = 1, NxSwz_B = 2, NxSwz_A = 3, NxSwz_0 = 4
 #define NXFMT_STENCIL    0x04
 #define NXFMT_SRGB       0x08  /* an sRGB view exists on both backends */
 #define NXFMT_RENDER     0x10  /* usable as a colour render target */
+#define NXFMT_CONVERT    0x20  /* the D3D texel data must go through nx_d3d9_convert() before the upload: the format
+                                  is stored expanded so that no view swizzle has to move or invent a channel (a view
+                                  swizzle also applies to the BORDER colour; Nine's formats have no such swizzle) */
 typedef struct NxFormatInfo {
     uint8_t format;            /* NxFormat, NxFmt_None when unsupported */
     uint8_t swizzle[4];        /* NxSwizzle for the sampled r,g,b,a, applied to the format's own channels */
     uint8_t flags;             /* NXFMT_* */
-    uint8_t bytes;             /* bytes per pixel, or per 4x4 block when compressed */
-    uint8_t pad;
+    uint8_t bytes;             /* native bytes per pixel, or per 4x4 block when compressed */
+    uint8_t srcBytes;          /* D3D bytes per pixel (per 4x4 block when compressed) of the source data */
 } NxFormatInfo;
 
 /* The D3D9 pixel epilogue's uniform block (shaders/d3d9_epilogue.glsl, fragment UBO slot 2, std140, 48 bytes). */

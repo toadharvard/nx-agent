@@ -42,8 +42,31 @@ Run: `make -C ports/fnv-nx/tests/s6n` (host gcc; prints `d3d9_state: N checks, 0
 | C29 | ADDRESS WRAP/MIRROR/CLAMP/BORDER/MIRRORONCE -> Repeat/Mirror/Clamp/Border/MirrorOnce, other -> Clamp; cube textures get Clamp on all three axes. | test_samp_address |
 | C30 | border = BORDERCOLOR ARGB repacked to RGBA8 (R in bits 0-7). | test_samp_border |
 | C31 | SRGB sampler flag = SRGBTEXTURE != 0 and the texture format has NXFMT_SRGB (BGRA8, BGRX8, RGBA8, RGBX8, BC1-3). | test_samp_srgb |
-| C32 | Formats: A8R8G8B8 BGRA8; X8R8G8B8 BGRX8 (RGB1); R5G6B5 R5G6B5; A1R5G5B5/X1R5G5B5; A4R4G4B4 (X4: RGB1); L8 R8 RRR1; A8 R8 000R; A8L8 RG8 RRRG; V8U8 RG8S RG11; A2R10G10B10 RGB10A2 BGRA; R16F R111; DXT1 BC1; DXT2/3 BC2; DXT4/5 BC3; ATI1 BC4 R001; ATI2 BC5 GR11 (X/Y swapped as basetexture9.c); D32, P8, R8G8B8 unsupported. | test_formats |
+| C32 | Formats: A8R8G8B8 BGRA8; X8R8G8B8 BGRX8 (RGB1); R5G6B5 R5G6B5; A1R5G5B5/X1R5G5B5; A4R4G4B4 (X4: RGB1); V8U8 RG8S RG11; R16F R111; DXT1 BC1; DXT2/3 BC2; DXT4/5 BC3; ATI2 BC5 GR11 (X/Y swapped as basetexture9.c); converted (C34): L8 RGBA8 RGB1, A8 RGBA8, A8L8 RGBA8, L16 RGBA16 RGB1, A2R10G10B10 RGB10A2, ATI1 RGBA8; D32, P8, R8G8B8 unsupported. Apart from ATI2's X/Y swap, no view swizzle duplicates, moves or zeroes a channel; the only constant is 1 for a channel the D3D format lacks. | test_formats |
+| C34 | `nx_d3d9_convert()` expands NXFMT_CONVERT texels (all mips, faces): A8 -> (0,0,0,A), L8 -> (L,L,L,255), A8L8 -> (L,L,L,A), L16 -> 16-bit (L,L,L,65535), A2R10G10B10 -> R/B swapped, ATI1 -> decoded (Mesa rgtc integer formula) to (R,0,0,255); returns 0 for other formats, a short source or a small destination. | test_convert |
+| C35 | BORDER addressing returns the border colour as Nine does on A8, L8 (alpha 1), A2R10G10B10 and ATI1 (fix for V6n defect border_swizzle). | scene `border` (tests/s6n/scenes.py) |
 | C33 | `nx_d3d9_default_rs()` / `nx_d3d9_default_samp()` reproduce Nine's state defaults (ZENABLE FALSE, CULL CCW, ZFUNC LEQUAL, masks 0xF, BLENDFACTOR 0xFFFFFFFF, sampler WRAP/POINT/NONE, MAXANISOTROPY 1). | test_defaults, test_samp_defaults |
 | C40 | Deviation D1: depth-bias units are D3D9's (x 2^24 for D24), not Nine-on-softpipe's effective ~half. | test_depthbias |
-| C41 | Deviation D2: no sRGB view for L8/A8L8/L16. | test_samp_srgb |
+| C41 | (withdrawn with C34: L8 and A8L8 have sRGB views; L16 and V8U8 have none, as in Nine.) | test_samp_srgb |
 | C42 | Deviation D3: D3DFMT_D32 has no native format. | test_formats |
+
+## Front end, backends and scenes
+
+Run: `make -C ports/fnv-nx/tests/s6n scenes` (builds `run_gl` with the GL backend and the shader package, runs every
+scene, evaluates its conformance checks and compares with `tests/s6n/golden/*.png`; prints `scenes: N checks, 0
+failed` and `golden comparison: 10 scenes match`). One scene: `python3 tests/s6n/scenes.py --bin <run_gl> --out <dir> cull`.
+
+| id | claim | backed by |
+|---|---|---|
+| C50 | Every N0 scene image on the GL backend (llvmpipe, Mesa 25.2) matches its golden PNG bit-exactly. | scenes.py (tol 0) |
+| C51 | cull: with CULLMODE NONE both an on-screen CW and an on-screen CCW triangle are drawn; CULLMODE CW removes the CW one only; CULLMODE CCW removes the CCW one only (CW on screen survives D3DCULL_CCW). | scene `cull`, 6 checks |
+| C52 | blend: 12 blend configurations (incl. MIN/MAX, REVSUBTRACT, BOTHSRCALPHA, BLENDFACTOR, separate alpha, COLORWRITEENABLE R\|A, DESTALPHA) match the D3D9 blend equation computed on the CPU within 1/255. | scene `blend` |
+| C53 | stencil: REPLACE, INCRSAT, EQUAL with three refs on one state id (NxOp_StencilRef), and two-sided stencil (CW = front ops, CCW = CCW_* ops) give the expected stencil values. | scene `stencil` |
+| C54 | sampler: WRAP, MIRROR, CLAMP, BORDER, MIRRORONCE with point filtering sample the expected texel at 450+ pixel centres away from texel edges; mip selection: MIPFILTER NONE uses level 0, POINT uses level 1 when 2x minified, MAXMIPLEVEL 1 forces level 1 when magnified and is ignored with MIPFILTER NONE. | scene `sampler` |
+| C55 | format: 16 D3D formats (A8R8G8B8, X8R8G8B8, A8B8G8R8, R5G6B5, A1R5G5B5, X1R5G5B5, A4R4G4B4, L8, A8, A8L8, V8U8, A2R10G10B10, G16R16, R16F, DXT1, ATI2) sample to the D3D9/Nine channel values within 1/255 (DXT1 3/255). | scene `format` |
+| C56 | epilogue: linear/exp/exp2 table fog, vertex fog and alpha test (GREATER/LESS/EQUAL at ALPHAREF 127/128 against alpha 0.5) match the Nine formulas within 2/255. | scene `epilogue` |
+| C57 | sorted: opaque packets are grouped by state id (3 BindState ops for 28 packets in 3 states); alpha packets keyed back-to-front composite in depth order although submitted scrambled. | scene `sorted` |
+| C58 | instanced: one draw with 16 instances places and tints each instance from the per-draw UBO. | scene `instanced` |
+| C59 | D3D9 rasterization: a quad whose edges lie on pixel centres covers exactly the D3D9 pixels (top-left rule, integer centres; GL backend: viewport +0.5 and a 1/256 px upward bias). | scene `textured` mip checks at the quad's top row |
+| C60 | `nxgl_shim_glsl()` rewrites `#version 460` to `#version 450 core` and `binding = n` to `binding = 16*stage + n`. | gl/nxgl.c; exercised by every scene |
+| C61 | The deko3d backend (`host/nxgpu.c`), host module (`host/nxgpu_host.c`) and the ILP32 N0 guest compile and link with fnvnx-a64 + libdeko3d 373bfd4 (`render/native/switch/build.sh`). Not yet run on hardware. | switch/build.sh |

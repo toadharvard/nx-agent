@@ -401,7 +401,9 @@ static void test_samp_srgb(void) {
     NxD3D9Texture argb = {21, 0, 0, 0, 0}, l8 = {50, 0, 0, 0, 0}, dxt5 = {NXD3D_FOURCC('D', 'X', 'T', '5'), 0, 0, 0, 0};
     nx_d3d9_sampler(ss, &argb, &o); CHECK(o.filter & NXSMP_SRGB);
     nx_d3d9_sampler(ss, &dxt5, &o); CHECK(o.filter & NXSMP_SRGB);
-    nx_d3d9_sampler(ss, &l8, &o); CHECK(!(o.filter & NXSMP_SRGB));   /* deviation D2 */
+    nx_d3d9_sampler(ss, &l8, &o); CHECK(o.filter & NXSMP_SRGB);      /* L8 is stored as RGBA8 (border_swizzle fix) */
+    NxD3D9Texture v8 = {60, 0, 0, 0, 0};
+    nx_d3d9_sampler(ss, &v8, &o); CHECK(!(o.filter & NXSMP_SRGB));
     ss[SRGBTEXTURE] = 0; nx_d3d9_sampler(ss, &argb, &o); CHECK(!(o.filter & NXSMP_SRGB));
 }
 
@@ -419,18 +421,55 @@ static void test_formats(void) {
     fmt(21, NxFmt_BGRA8, "RGBA"); fmt(22, NxFmt_BGRX8, "RGB1"); fmt(32, NxFmt_RGBA8, "RGBA");
     fmt(23, NxFmt_R5G6B5, "RGB1"); fmt(25, NxFmt_A1R5G5B5, "RGBA"); fmt(24, NxFmt_X1R5G5B5, "RGB1");
     fmt(26, NxFmt_A4R4G4B4, "RGBA"); fmt(30, NxFmt_A4R4G4B4, "RGB1");
-    fmt(50, NxFmt_R8, "RRR1"); fmt(28, NxFmt_R8, "000R"); fmt(51, NxFmt_RG8, "RRRG"); fmt(60, NxFmt_RG8S, "RG11");
-    fmt(35, NxFmt_RGB10A2, "BGRA"); fmt(31, NxFmt_RGB10A2, "RGBA");
+    fmt(50, NxFmt_RGBA8, "RGB1"); fmt(28, NxFmt_RGBA8, "RGBA"); fmt(51, NxFmt_RGBA8, "RGBA"); fmt(60, NxFmt_RG8S, "RG11");
+    fmt(81, NxFmt_RGBA16, "RGB1"); fmt(35, NxFmt_RGB10A2, "RGBA"); fmt(31, NxFmt_RGB10A2, "RGBA");
     fmt(111, NxFmt_R16F, "R111"); fmt(113, NxFmt_RGBA16F, "RGBA"); fmt(114, NxFmt_R32F, "R111");
     fmt(NXD3D_FOURCC('D', 'X', 'T', '1'), NxFmt_BC1, "RGBA");
     fmt(NXD3D_FOURCC('D', 'X', 'T', '2'), NxFmt_BC2, 0); fmt(NXD3D_FOURCC('D', 'X', 'T', '3'), NxFmt_BC2, 0);
     fmt(NXD3D_FOURCC('D', 'X', 'T', '4'), NxFmt_BC3, 0); fmt(NXD3D_FOURCC('D', 'X', 'T', '5'), NxFmt_BC3, 0);
-    fmt(NXD3D_FOURCC('A', 'T', 'I', '1'), NxFmt_BC4, "R001"); fmt(NXD3D_FOURCC('A', 'T', 'I', '2'), NxFmt_BC5, "GR11");
+    fmt(NXD3D_FOURCC('A', 'T', 'I', '1'), NxFmt_RGBA8, "RGBA"); fmt(NXD3D_FOURCC('A', 'T', 'I', '2'), NxFmt_BC5, "GR11");
     fmt(75, NxFmt_Z24S8, 0); fmt(77, NxFmt_Z24X8, 0); fmt(80, NxFmt_Z16, 0); fmt(82, NxFmt_Z32F, 0);
     fmt(71, NxFmt_None, 0); fmt(41, NxFmt_None, 0); fmt(20, NxFmt_None, 0);
     CHECK(nx_d3d9_format(NXD3D_FOURCC('D', 'X', 'T', '1')).flags & NXFMT_COMPRESSED);
     CHECKEQ(nx_d3d9_format(NXD3D_FOURCC('D', 'X', 'T', '1')).bytes, 8);
     CHECK(nx_d3d9_format(75).flags & NXFMT_STENCIL);
+    /* swizzles never duplicate or invent a channel except the 'missing channel reads 1' of Nine (border_swizzle) */
+    static const uint32_t all[] = {21, 22, 32, 33, 23, 24, 25, 26, 30, 31, 35, 34, 36, 28, 50, 51, 81, 60, 63, 64, 110,
+        111, 112, 113, 114, 115, 116, NXD3D_FOURCC('D', 'X', 'T', '1'), NXD3D_FOURCC('A', 'T', 'I', '1')};
+    for (unsigned i = 0; i < sizeof all / sizeof all[0]; i++) {
+        NxFormatInfo f = nx_d3d9_format(all[i]);
+        for (int c = 0; c < 4; c++) { g_checks++; if (f.swizzle[c] != c && f.swizzle[c] != NxSwz_1) { g_fail++; printf("FAIL format %u swizzle[%d] = %d\n", all[i], c, f.swizzle[c]); } }
+    }
+}
+
+static void test_convert(void) {
+    uint8_t out[64];
+    const uint8_t l8[4] = {0, 85, 170, 255}, a8[2] = {7, 200}, al[4] = {10, 20, 30, 40};
+    CHECKEQ(nx_d3d9_converted_size(50, 2, 2, 1, 1), 16);
+    CHECKEQ(nx_d3d9_convert(50, 2, 2, 1, 1, l8, 4, out, sizeof out), 16);
+    CHECK(out[4] == 85 && out[5] == 85 && out[6] == 85 && out[7] == 255);
+    CHECKEQ(nx_d3d9_convert(28, 2, 1, 1, 1, a8, 2, out, sizeof out), 8);
+    CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0 && out[3] == 7 && out[7] == 200);
+    CHECKEQ(nx_d3d9_convert(51, 2, 1, 1, 1, al, 4, out, sizeof out), 8);
+    CHECK(out[0] == 10 && out[2] == 10 && out[3] == 20 && out[4] == 30 && out[7] == 40);
+    const uint8_t l16[2] = {0x34, 0x12};
+    CHECKEQ(nx_d3d9_convert(81, 1, 1, 1, 1, l16, 2, out, sizeof out), 8);
+    CHECK(out[0] == 0x34 && out[1] == 0x12 && out[4] == 0x34 && out[5] == 0x12 && out[6] == 255 && out[7] == 255);
+    uint32_t a2 = 3u << 30 | 1023u << 20 | 5u << 10 | 1u, a2o;   /* A=3 R=1023 G=5 B=1 */
+    CHECKEQ(nx_d3d9_convert(35, 1, 1, 1, 1, &a2, 4, &a2o, 4), 4);
+    CHECKEQ(a2o, 3u << 30 | 1u << 20 | 5u << 10 | 1023u);         /* RGB10A2: R low */
+    /* ATI1: one block e0 = 200 > e1 = 100, texel 0 code 0, texel 1 code 1, texel 2 code 2, texel 3 code 7 */
+    uint8_t bc4[8] = {200, 100, 0, 0, 0, 0, 0, 0};
+    uint64_t bits = 0ull | 1ull << 3 | 2ull << 6 | 7ull << 9;
+    for (int i = 0; i < 6; i++) bc4[2 + i] = (uint8_t)(bits >> (8 * i));
+    CHECKEQ(nx_d3d9_converted_size(NXD3D_FOURCC('A', 'T', 'I', '1'), 4, 4, 1, 1), 64);
+    CHECKEQ(nx_d3d9_convert(NXD3D_FOURCC('A', 'T', 'I', '1'), 4, 4, 1, 1, bc4, 8, out, sizeof out), 64);
+    CHECK(out[0] == 200 && out[4] == 100 && out[8] == (6 * 200 + 1 * 100) / 7 && out[12] == (1 * 200 + 6 * 100) / 7);
+    CHECK(out[1] == 0 && out[2] == 0 && out[3] == 255);
+    CHECKEQ(nx_d3d9_convert(21, 1, 1, 1, 1, l8, 4, out, sizeof out), 0);      /* no conversion needed */
+    CHECKEQ(nx_d3d9_convert(50, 2, 2, 1, 1, l8, 3, out, sizeof out), 0);      /* short source */
+    CHECKEQ(nx_d3d9_convert(50, 2, 2, 1, 1, l8, 4, out, 15), 0);              /* small destination */
+    CHECKEQ(nx_d3d9_converted_size(50, 4, 4, 3, 6), (16 + 4 + 1) * 4 * 6);    /* mips and faces */
 }
 
 int main(void) {
@@ -442,7 +481,7 @@ int main(void) {
     test_viewport();
     test_samp_defaults(); test_samp_address(); test_samp_minmag(); test_samp_mipfilter();
     test_samp_maxmiplevel_managed(); test_samp_anisotropy(); test_samp_border(); test_samp_srgb();
-    test_formats();
+    test_formats(); test_convert();
     printf("d3d9_state: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail != 0;
 }

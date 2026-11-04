@@ -61,14 +61,16 @@
  *          Clamp; cube textures: Clamp on all axes. border = BORDERCOLOR ARGB -> RGBA8. SRGB flag =
  *          SRGBTEXTURE != 0 and the format has an sRGB view. SHADOW flag = shadow texture.
  * Format:  nx_d3d9_format(): see the table in d3d9_state.c (one line per D3DFORMAT, with the view swizzle Nine
- *          builds: unused channels read 1, except A8 (0,0,0,A), ATI1 (R,0,0,1), ATI2 (G,R,1,1)).
+ *          builds: unused channels read 1, except A8 (0,0,0,A), ATI1 (R,0,0,1), ATI2 (G,R,1,1)). Formats whose
+ *          Nine format has channels our view swizzle would have to duplicate or invent (A8, L8, A8L8, L16, ATI1)
+ *          or move (A2R10G10B10) are NXFMT_CONVERT: the texels are expanded by nx_d3d9_convert() so BORDER
+ *          sampling returns Nine's border colour (V6n defect border_swizzle).
  *
  * ---- Deviations from Nine-on-softpipe (the verifier's oracle) -------------------------------------------------
  *  D1 depth bias: softpipe lacks POLYGON_OFFSET_UNITS_UNSCALED, so Nine there passes DEPTHBIAS x 2^23 and the draw
  *     module multiplies by 1/(2^24 - 1) for D24: an effective bias of ~DEPTHBIAS/2 depth units. We produce D3D9's
  *     DEPTHBIAS depth units (x 2^24 in GL/deko3d r units for D24).
- *  D2 sRGB sampling of L8/A8L8/L16: Nine has L8_SRGB on softpipe; we do not (deko3d has no R8 sRGB view), so the
- *     SRGB flag is dropped for them.
+ *  D2 (withdrawn): L8 and A8L8 are stored as RGBA8 since the border_swizzle fix and so have sRGB views like Nine.
  *  D3 D3DFMT_D32 (Z32 unorm) and other formats Nine maps but deko3d lacks are NxFmt_None.
  */
 #ifndef FNVNX_NX_D3D9_STATE_H
@@ -128,6 +130,16 @@ void nx_d3d9_sampler(const uint32_t* samp, const NxD3D9Texture* tex, NxSamplerSt
 
 /* D3DFORMAT -> native format and view swizzle; format = NxFmt_None when unsupported. */
 NxFormatInfo nx_d3d9_format(uint32_t d3dfmt);
+
+/* Formats with NXFMT_CONVERT (A8, L8, A8L8, L16, A2R10G10B10, ATI1) are stored expanded so the view swizzle
+ * never has to duplicate, invent or move a channel (it also applies to the BORDER colour, which Nine returns
+ * unswizzled): A8 -> RGBA8 (0,0,0,A); L8 -> RGBA8 (L,L,L,255) read as RGB1; A8L8 -> RGBA8 (L,L,L,A); L16 -> RGBA16
+ * (L,L,L,1) read as RGB1; A2R10G10B10 -> R/B swapped into RGB10A2; ATI1 (BC4) -> decoded to RGBA8 (R,0,0,255).
+ * Source = all mips (and faces, face-major) tightly packed as D3D lays them out. Returns the bytes written to dst,
+ * 0 if the format needs no conversion, the source is short or dstCap is too small. */
+uint32_t nx_d3d9_converted_size(uint32_t d3dfmt, uint32_t width, uint32_t height, uint32_t mips, uint32_t faces);
+uint32_t nx_d3d9_convert(uint32_t d3dfmt, uint32_t width, uint32_t height, uint32_t mips, uint32_t faces,
+                         const void* src, uint32_t srcSize, void* dst, uint32_t dstCap);
 
 /* D3D9 defaults (IDirect3DDevice9 after Reset), as Nine's nine_render_state_defaults / sampler defaults. */
 void nx_d3d9_default_rs(uint32_t rs[NXD3D_RS_COUNT]);

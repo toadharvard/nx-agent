@@ -141,9 +141,15 @@ void DrawTris(Ctx& c, const uint32_t* rs, const Vtx* v, uint32_t n, uint8_t pass
     Finish(c, p, dyn, sb, stencilRef);
 }
 
+uint8_t g_convBuf[64 * 1024];
 uint32_t MakeTex(Ctx& c, uint32_t d3dfmt, int w, int h, int mips, const void* data, uint32_t size) {
     NxFormatInfo fi = nx_d3d9_format(d3dfmt);
     if (fi.format == NxFmt_None) return 0;
+    if (fi.flags & NXFMT_CONVERT) {   // stored expanded (nx_d3d9_convert): no channel-moving view swizzles
+        size = nx_d3d9_convert(d3dfmt, (uint32_t)w, (uint32_t)h, (uint32_t)mips, 1, data, size, g_convBuf, sizeof g_convBuf);
+        if (!size) return 0;
+        data = g_convBuf;
+    }
     NxImageDesc d;
     memset(&d, 0, sizeof d);
     d.width = (uint16_t)w; d.height = (uint16_t)h; d.format = fi.format; d.mips = (uint8_t)mips;
@@ -690,12 +696,53 @@ void S_epilogue(Ctx& c, Checks& k) {
     EndFrame(c);
 }
 
+// ---- scene: border ---------------------------------------------------------------------------------------------------
+// BORDER addressing on formats whose D3D channels are not the native ones (V6n defect border_swizzle): the border
+// colour comes back as Nine returns it, with only the 'missing channel reads 1' rule (L8 alpha = 1).
+void S_border(Ctx& c, Checks& k) {
+    static uint32_t imgs[4];
+    static const uint32_t fmts[4] = {FMT_A8, FMT_L8, FMT_A2R10G10B10, FOURCC_('A', 'T', 'I', '1')};
+    static uint8_t a8[16], l8[16], bc4[8];
+    static uint32_t a2[16];
+    if (!imgs[0]) {
+        for (int i = 0; i < 16; i++) { a8[i] = (uint8_t)(i * 16); l8[i] = (uint8_t)(255 - i * 16); a2[i] = 3u << 30 | 1023u << 20 | (uint32_t)(i * 60) << 10; }
+        bc4[0] = 255; bc4[1] = 0;   // all codes 0 -> 255
+        imgs[0] = MakeTex(c, fmts[0], 4, 4, 1, a8, 16);
+        imgs[1] = MakeTex(c, fmts[1], 4, 4, 1, l8, 16);
+        imgs[2] = MakeTex(c, fmts[2], 4, 4, 1, a2, 64);
+        imgs[3] = MakeTex(c, fmts[3], 4, 4, 1, bc4, 8);
+    }
+    BeginFrame(c);
+    uint8_t pass = Pass(c, 1, RGBA(0, 0, 0, 255));
+    D3D a;
+    static const char* names[4] = {"border A8", "border L8", "border A2R10G10B10", "border ATI1"};
+    for (int i = 0; i < 4; i++) {
+        Samp s; s.s[S_ADDRESSU] = s.s[S_ADDRESSV] = 4; s.s[S_BORDERCOLOR] = 0x80FF4020u;
+        uint32_t h = Handle(c, imgs[i], fmts[i], s);
+        Draw d; d.rs = a.rs; d.ps = c.psTex; d.pass = pass; d.x = 4.0f + i * 39; d.y = 4; d.w = 36; d.h = 36;
+        d.uv[0] = -1; d.uv[1] = -1; d.uv[2] = 3; d.uv[3] = 3; d.tex = &h; d.ntex = 1;
+        DrawQuad(c, d);
+        k.Add(names[i], (int)d.x + 2, 6, 255, 64, 32, i == 1 ? 255 : 128, 0);
+        // inside: texel (1, 1) at u = v = 1.5/4 -> pixel offset (1.5/4 + 1) / 3 * 36 = 16.5
+        int px = (int)d.x + 16, py = 4 + 16;
+        uint8_t e[4];
+        switch (i) {
+        case 0: e[0] = 0; e[1] = 0; e[2] = 0; e[3] = a8[5]; break;
+        case 1: e[0] = e[1] = e[2] = l8[5]; e[3] = 255; break;
+        case 2: e[0] = 255; e[1] = u8((5 * 60) / 1023.0f); e[2] = 0; e[3] = 255; break;
+        default: e[0] = 255; e[1] = 0; e[2] = 0; e[3] = 255; break;
+        }
+        k.Add(names[i], px, py, e[0], e[1], e[2], e[3], 1);
+    }
+    EndFrame(c);
+}
+
 } // namespace
 
 const Scene kScenes[] = {
     {"textured", S_textured}, {"sorted", S_sorted}, {"instanced", S_instanced}, {"cull", S_cull},
     {"blend", S_blend}, {"stencil", S_stencil}, {"sampler", S_sampler}, {"format", S_format},
-    {"epilogue", S_epilogue},
+    {"epilogue", S_epilogue}, {"border", S_border},
 };
 const int kSceneCount = sizeof kScenes / sizeof kScenes[0];
 

@@ -271,7 +271,9 @@ void nx_d3d9_sampler(const uint32_t* s, const NxD3D9Texture* tex, NxSamplerState
 
 /* ---- formats ---------------------------------------------------------------------------------------------------- */
 #define S_(r, g, b, a) {NxSwz_##r, NxSwz_##g, NxSwz_##b, NxSwz_##a}
-#define F_(fmt, sw, flags, bytes) do { NxFormatInfo r_ = {fmt, sw, flags, bytes, 0}; return r_; } while (0)
+#define F_(fmt, sw, flags, bytes) do { NxFormatInfo r_ = {fmt, sw, flags, bytes, bytes}; return r_; } while (0)
+#define FC_(fmt, sw, flags, bytes, src) do { NxFormatInfo r_ = {fmt, sw, (uint8_t)((flags) | NXFMT_CONVERT), bytes, src}; \
+                                             return r_; } while (0)
 
 NxFormatInfo nx_d3d9_format(uint32_t d) {
     const uint8_t C = NXFMT_COMPRESSED, Z = NXFMT_DEPTH, ZS = NXFMT_DEPTH | NXFMT_STENCIL, SR = NXFMT_SRGB,
@@ -287,13 +289,13 @@ NxFormatInfo nx_d3d9_format(uint32_t d) {
     case 26: F_(NxFmt_A4R4G4B4, S_(R, G, B, A), 0, 2);              /* A4R4G4B4 */
     case 30: F_(NxFmt_A4R4G4B4, S_(R, G, B, 1), 0, 2);              /* X4R4G4B4 */
     case 31: F_(NxFmt_RGB10A2, S_(R, G, B, A), RT, 4);              /* A2B10G10R10 */
-    case 35: F_(NxFmt_RGB10A2, S_(B, G, R, A), 0, 4);               /* A2R10G10B10: R is in the high bits */
+    case 35: FC_(NxFmt_RGB10A2, S_(R, G, B, A), 0, 4, 4);           /* A2R10G10B10: R and B swapped on upload */
     case 34: F_(NxFmt_RG16, S_(R, G, 1, 1), RT, 4);                 /* G16R16 */
     case 36: F_(NxFmt_RGBA16, S_(R, G, B, A), RT, 8);               /* A16B16G16R16 */
-    case 28: F_(NxFmt_R8, S_(0, 0, 0, R), RT, 1);                   /* A8 */
-    case 50: F_(NxFmt_R8, S_(R, R, R, 1), 0, 1);                    /* L8 */
-    case 51: F_(NxFmt_RG8, S_(R, R, R, G), 0, 2);                   /* A8L8 */
-    case 81: F_(NxFmt_R16, S_(R, R, R, 1), 0, 2);                   /* L16 */
+    case 28: FC_(NxFmt_RGBA8, S_(R, G, B, A), 0, 4, 1);             /* A8 -> (0, 0, 0, A) */
+    case 50: FC_(NxFmt_RGBA8, S_(R, G, B, 1), SR, 4, 1);            /* L8 -> (L, L, L, 1) */
+    case 51: FC_(NxFmt_RGBA8, S_(R, G, B, A), SR, 4, 2);            /* A8L8 -> (L, L, L, A) */
+    case 81: FC_(NxFmt_RGBA16, S_(R, G, B, 1), 0, 8, 2);            /* L16 -> (L, L, L, 1) */
     case 60: F_(NxFmt_RG8S, S_(R, G, 1, 1), 0, 2);                  /* V8U8 */
     case 63: F_(NxFmt_RGBA8S, S_(R, G, B, A), 0, 4);                /* Q8W8V8U8 */
     case 64: F_(NxFmt_RG16S, S_(R, G, 1, 1), 0, 4);                 /* V16U16 */
@@ -309,7 +311,7 @@ NxFormatInfo nx_d3d9_format(uint32_t d) {
     case NXD3D_FOURCC('D', 'X', 'T', '3'): F_(NxFmt_BC2, S_(R, G, B, A), C | SR, 16);
     case NXD3D_FOURCC('D', 'X', 'T', '4'):
     case NXD3D_FOURCC('D', 'X', 'T', '5'): F_(NxFmt_BC3, S_(R, G, B, A), C | SR, 16);
-    case NXD3D_FOURCC('A', 'T', 'I', '1'): F_(NxFmt_BC4, S_(R, 0, 0, 1), C, 8);
+    case NXD3D_FOURCC('A', 'T', 'I', '1'): FC_(NxFmt_RGBA8, S_(R, G, B, A), 0, 4, 8);   /* decoded -> (R, 0, 0, 1) */
     case NXD3D_FOURCC('A', 'T', 'I', '2'): F_(NxFmt_BC5, S_(G, R, 1, 1), C, 16);  /* basetexture9.c: Y,X,1,1 */
     case 70: case 80: F_(NxFmt_Z16, S_(R, R, R, R), Z, 2);          /* D16_LOCKABLE, D16 */
     case 75: F_(NxFmt_Z24S8, S_(R, R, R, R), ZS, 4);                /* D24S8 */
@@ -353,4 +355,94 @@ void nx_d3d9_default_samp(uint32_t s[NXD3D_SAMP_COUNT]) {
     memset(s, 0, NXD3D_SAMP_COUNT * sizeof *s);
     s[SAMP_ADDRESSU] = 1; s[SAMP_ADDRESSV] = 1; s[SAMP_ADDRESSW] = 1;
     s[SAMP_MAGFILTER] = 1; s[SAMP_MINFILTER] = 1; s[SAMP_MIPFILTER] = 0; s[SAMP_MAXANISOTROPY] = 1;
+}
+
+/* ---- texel conversion for NXFMT_CONVERT formats ---------------------------------------------------------------- */
+static uint32_t mip_pixels(uint32_t w, uint32_t h, uint32_t mips, int blocks) {
+    uint32_t n = 0;
+    for (uint32_t m = 0; m < mips; m++) {
+        n += blocks ? ((w + 3) / 4) * ((h + 3) / 4) : w * h;
+        w = w > 1 ? w / 2 : 1;
+        h = h > 1 ? h / 2 : 1;
+    }
+    return n;
+}
+
+uint32_t nx_d3d9_converted_size(uint32_t d3dfmt, uint32_t w, uint32_t h, uint32_t mips, uint32_t faces) {
+    NxFormatInfo f = nx_d3d9_format(d3dfmt);
+    if (f.format == NxFmt_None || !w || !h) return 0;
+    if (!mips) mips = 1;
+    if (!faces) faces = 1;
+    if (d3dfmt == NXD3D_FOURCC('A', 'T', 'I', '1')) {   /* blocks in, pixels out (block-padded mips stay exact) */
+        uint32_t n = 0;
+        for (uint32_t m = 0, mw = w, mh = h; m < mips; m++, mw = mw > 1 ? mw / 2 : 1, mh = mh > 1 ? mh / 2 : 1) n += mw * mh;
+        return n * 4 * faces;
+    }
+    int blocks = (f.flags & NXFMT_COMPRESSED) != 0;
+    return mip_pixels(w, h, mips, blocks) * f.bytes * faces;
+}
+
+/* BC4 unorm block, decoded as Mesa's util_format_rgtc (the softpipe oracle): integer division, truncating. */
+static void bc4_block(const uint8_t* b, uint8_t out[16]) {
+    uint8_t e[8];
+    e[0] = b[0]; e[1] = b[1];
+    if (e[0] > e[1]) for (int c = 2; c < 8; c++) e[c] = (uint8_t)(((8 - c) * e[0] + (c - 1) * e[1]) / 7);
+    else { for (int c = 2; c < 6; c++) e[c] = (uint8_t)(((6 - c) * e[0] + (c - 1) * e[1]) / 5); e[6] = 0; e[7] = 255; }
+    uint64_t bits = 0;
+    for (int i = 0; i < 6; i++) bits |= (uint64_t)b[2 + i] << (8 * i);
+    for (int t = 0; t < 16; t++) out[t] = e[(bits >> (3 * t)) & 7];
+}
+
+uint32_t nx_d3d9_convert(uint32_t d3dfmt, uint32_t w, uint32_t h, uint32_t mips, uint32_t faces, const void* src,
+                         uint32_t srcSize, void* dst, uint32_t dstCap) {
+    NxFormatInfo f = nx_d3d9_format(d3dfmt);
+    if (!(f.flags & NXFMT_CONVERT) || !src || !dst) return 0;
+    uint32_t need = nx_d3d9_converted_size(d3dfmt, w, h, mips, faces);
+    if (!need || need > dstCap) return 0;
+    if (!mips) mips = 1;
+    if (!faces) faces = 1;
+    const uint8_t* s = (const uint8_t*)src;
+    uint8_t* d = (uint8_t*)dst;
+    if (d3dfmt == NXD3D_FOURCC('A', 'T', 'I', '1')) {
+        uint32_t in = mip_pixels(w, h, mips, 1) * 8 * faces;
+        if (srcSize < in) return 0;
+        for (uint32_t face = 0; face < faces; face++)
+            for (uint32_t m = 0, mw = w, mh = h; m < mips; m++, mw = mw > 1 ? mw / 2 : 1, mh = mh > 1 ? mh / 2 : 1) {
+                uint32_t bw = (mw + 3) / 4, bh = (mh + 3) / 4;
+                for (uint32_t by = 0; by < bh; by++)
+                    for (uint32_t bx = 0; bx < bw; bx++, s += 8) {
+                        uint8_t t[16];
+                        bc4_block(s, t);
+                        for (uint32_t y = 0; y < 4; y++)
+                            for (uint32_t x = 0; x < 4; x++) {
+                                uint32_t px = bx * 4 + x, py = by * 4 + y;
+                                if (px >= mw || py >= mh) continue;
+                                uint8_t* o = d + (py * mw + px) * 4;
+                                o[0] = t[y * 4 + x]; o[1] = 0; o[2] = 0; o[3] = 255;
+                            }
+                    }
+                d += mw * mh * 4;
+            }
+        return need;
+    }
+    uint32_t n = mip_pixels(w, h, mips, 0) * faces;
+    if (srcSize < n * f.srcBytes) return 0;
+    for (uint32_t i = 0; i < n; i++) {
+        switch (d3dfmt) {
+        case 28: d[0] = 0; d[1] = 0; d[2] = 0; d[3] = s[0]; s += 1; d += 4; break;                  /* A8 */
+        case 50: d[0] = d[1] = d[2] = s[0]; d[3] = 255; s += 1; d += 4; break;                       /* L8 */
+        case 51: d[0] = d[1] = d[2] = s[0]; d[3] = s[1]; s += 2; d += 4; break;                      /* A8L8 */
+        case 81:                                                                                      /* L16 */
+            d[0] = d[2] = d[4] = s[0]; d[1] = d[3] = d[5] = s[1]; d[6] = d[7] = 255; s += 2; d += 8; break;
+        case 35: {                                                                                    /* A2R10G10B10 */
+            uint32_t v = (uint32_t)s[0] | (uint32_t)s[1] << 8 | (uint32_t)s[2] << 16 | (uint32_t)s[3] << 24;
+            v = (v & 0xC00FFC00u) | (v >> 20 & 0x3FF) | (v & 0x3FF) << 20;
+            d[0] = (uint8_t)v; d[1] = (uint8_t)(v >> 8); d[2] = (uint8_t)(v >> 16); d[3] = (uint8_t)(v >> 24);
+            s += 4; d += 4;
+            break;
+        }
+        default: return 0;
+        }
+    }
+    return need;
 }
