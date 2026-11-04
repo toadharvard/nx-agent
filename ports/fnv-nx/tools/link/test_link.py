@@ -209,6 +209,17 @@ def main():
                       lambda t: l8 if t == 'P8' else None, lambda t: l8 if t == 'P8' else None)
     check(p8 is not None and p8.kind == 'x86-inconsistent' and 'result-buffer-not-written' in p8.classes,
           'result buffer into an int parameter: %s' % ((p8 and (p8.kind, p8.classes)),))
+    # S1b J-0112 (0x006eac70), checked with MSVC 2008 cl /O2: a non-POD's hidden result buffer of a __fastcall call
+    # is ecx (the arguments move one place); a POD's stays the first stack word (B1/B2 above)
+    nnp = ['?f@@YI?AUNP@@XZ', '?f@@YIPAHPAH@Z', '?h@@YI?AUNP@@HH@Z', '?h@@YIPAHPAHHH@Z']
+    dnp = fnvlink.batch_demangle(fnvlink.UNDNAME, nnp)
+    NPs = {n: sigs.parse_msvc(n, dnp[n]) for n in nnp}
+    lnp = layout.Layout(8, 4, 0, 0, 'IND', 0)
+    for r_, d_ in ((nnp[0], nnp[1]), (nnp[2], nnp[3])):
+        pn = abi2.compare(NPs[r_], NPs[d_], lambda t: lnp if t == 'NP' else None, lambda t: lnp if t == 'NP' else None)
+        check(pn is not None and pn.kind in ('bridge', 'same') and 'ecx-not-passed' not in pn.classes and
+              'pop-mismatch' not in pn.classes, 'non-POD fastcall result buffer in ecx: %s -> %s: %s' % (
+                  dnp[r_], dnp[d_], pn and (pn.kind, pn.classes)))
     # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
     # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
     src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'

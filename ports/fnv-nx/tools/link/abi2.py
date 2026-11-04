@@ -78,12 +78,15 @@ def x86(sig, vals, ret):
         order.insert(1 if sig.member else 0, Val('sret', 'P', 4, 'gpr'))
     out, off, regs = [], 0, 0
     cc = sig.cc or 'cdecl'
+    # MSVC 2008 __fastcall with a hidden result (checked with cl /O2): a C++03 POD's buffer is the first stack word
+    # and ecx/edx stay for the arguments (V1 defect 1: 0x0056fa00 wrote its result over *this); a non-POD's buffer
+    # is the first register argument, ecx, and the arguments move one place (S1b J-0112: 0x006eac70's 8-byte
+    # struct with a destructor)
+    non_pod = ret is not None and (ret.pod == 0 or (ret.pod is None and not ret.trivial))
     for v in order:
         if cc == 'thiscall' and v.label == 'this':
             out.append((v.label, 'ecx', 0, 4)); continue
-        # MSVC __fastcall with a hidden result: the buffer is the first stack word, ecx/edx stay for the arguments
-        # (V1 defect 1: 0x0056fa00 wrote its result over *this)
-        if cc == 'fastcall' and regs < 2 and v.cls in ('I8', 'I16', 'I32', 'P') and v.label != 'sret':
+        if cc == 'fastcall' and regs < 2 and v.cls in ('I8', 'I16', 'I32', 'P') and (v.label != 'sret' or non_pod):
             out.append((v.label, ('ecx', 'edx')[regs], 0, v.size)); regs += 1; continue
         out.append((v.label, 'stk', off, v.size))
         off += (v.size + 3) // 4 * 4
