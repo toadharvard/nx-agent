@@ -773,3 +773,21 @@ alike), so the port's NaN signs already differ from the exe wherever a NaN is cr
 visible only through a bit-level read (an integer view, signbit, copysign), never through arithmetic or
 comparisons. Whether any caller of these three functions does such a read on a NaN has not been checked. The
 quat_from_matrix, xform, cull and sphere_plane tests compare exact bits or integer results.
+
+**Cycles (P0-perfmodel's A57 model, PERF.md 12).** From here on the metric reads `per_call_cycles`: the measured
+instructions per call x [steady CPI, one-call CPI] of the code that runs (llvm-mca -mcpu=cortex-a57 over the
+function; static, L1-resident, callees excluded). On the same code it is 7.877 M cycles per frame, against 5.913
+at IPC 0.8. Pricing the decomp's objects the same way shows that fewer instructions is not always fewer cycles.
+Dense NEON code has a higher CPI than the scalar code GCC spreads over both FP pipes.
+
+| function | decomp cycles per call (steady / one call) | override | mid | decision |
+|---|---|---|---|---|
+| Slerp (+ weight, normalisation) | ~130 / ~302 (47 x 0.90 + 29 x 1.59 + 58 x 0.73; 2.10 / 2.86 / 2.07) | 181 / 234 (CPI 2.05 / 2.66: the decomp's serial float/double chain, now without the parallel loads and call) | 216 -> 207 | kept |
+| NiBound::Update | 18 / 42 (46 x 0.393 / 0.913) | 16 / 49 (19 x 0.848 / 2.579: ld3 and lane multiplies in one chain) | 30 -> 32.5 | **dropped** |
+| NiMatrix3 transpose product | 25 / 39 (64 x 0.391 / 0.609) | 25 / 42 (39 x 0.642 / 1.077) | 32 -> 33.5 | **dropped** |
+| FromRotationMatrix | 78 / 87 (89 x 0.877 / 0.975) | 60 / 100 (77 x 0.773 / 1.295) | 82.5 -> 80 | kept |
+| culling worker + classification | 224-330 instructions at CPI ~1.05 (worker 1.04, classification 1.05) | 52 / 148 | ~290 -> 100 | kept |
+| UpdateWorldLoc | compose > 100 instructions at CPI 1.35 | 12 / 60 | | kept |
+
+Dropped overrides keep their sources and tests (for an A57-aware rewrite), but lose their overrides.tsv rows. From
+here on an override is kept only if its mid cycles drop, as well as its instructions.
