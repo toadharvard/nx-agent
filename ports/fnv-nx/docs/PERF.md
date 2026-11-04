@@ -1177,3 +1177,30 @@ default settings instead. What these settings do not touch (distant LOD, trees, 
   (High/Ultra) has longer fades, so if the items were estimated for those, the presets save more.
 - The shares and the square law are estimates. frameprof per preset on one scene replaces them.
 - Applying a preset is ini.cpp's `port_default` table (S15-threads / S4): no game code.
+
+### 11.8 Port-overhead audit (stream S15-simd; owner rule D21: coverage first, then fixes, largest class first)
+
+**Tools.**
+- `tools/perf/overhead_audit.py`: per function, x86 vs A64 instructions per call on S13's harness, the A64
+  instructions executed inside ABI bridges, and A57 cycles from P0's funcmodel.
+- `tools/farm/audit_job.sh <commit> <k> <N>`: the same over shard k of N of every unit, on a farm. It prepares its
+  inputs through `fuzz_job.sh` with `FUZZ_SETUP_ONLY`.
+- `tools/perf/objcensus.py --disasm`: the static classes, now including acquire/release.
+
+**Static classes, link defb010a2a1b** (all 4,324 objects, 4.74 M instructions):
+
+| class | count | share of instructions |
+|---|---|---|
+| GOT loads (127,624 of them image data) | 168,610 | 3.56 % |
+| ABI bridge call sites (5,843 units, 1,446 zz_vt) | 7,289 | - |
+| ILP32 re-zero-extension (`mov wN, wN`) | 44,397 | 0.9 % |
+| exclusives / barriers / acquire-release (ordering) | 11,942 / 9,575 / 4,193 | 0.3 / 0.2 / 0.1 % |
+| zz_vt_* synthesized objects (vtables.py) | 1.38 M | 29 % |
+| stack protector / outline atomics: only in zz_vt_* | 4,584 checks / 3,447 calls | - |
+
+**Dynamic, hot units** (link 0bd144db1464; 161 clean functions of ninode, nimatrix3*, nibound*, niquaternion,
+nicullingprocess, nitransform*, bsbatchrenderer, hkpgsk, nitransforminterpolator):
+- A64 runs 0.81x the x86 instructions, at 1.25 A57 cycles per x86 instruction.
+- Bridges are 6.0 % of the A64 instructions executed (497 of 8,222 per call). Four float/matrix callers account for
+  nearly all of it: 0x00a6dd50 264 of 437, 0x004b4880 78 of 117, 0x00a59540 / 0x00a59660 74 of 159-160 (sent to S2c-abi).
+- The other classes are priced per frame once audit_job.sh has covered every unit.
