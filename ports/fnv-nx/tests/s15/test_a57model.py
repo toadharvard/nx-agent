@@ -22,6 +22,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = os.path.join(HERE, '..', '..', 'tools', 'perf', 'a57model')
 sys.path.insert(0, MODEL)
+sys.path.insert(0, os.path.join(MODEL, '..'))
 LIMIT_CHECK = 6.0  # % mean absolute error over the check points; lower it as the model improves
 LIMIT_FIT = 2.0
 
@@ -136,6 +137,31 @@ def test_funcmodel(out):
     check(by['find']['blocks'] >= 3 and by['dot3']['blocks'] == 1, f"blocks: find {by['find']['blocks']}, dot3 {by['dot3']['blocks']}")
 
 
+def test_mtmodel():
+    try:
+        import mtmodel
+        import frame_budget
+    except Exception as e:  # noqa: BLE001
+        print(f'skip mtmodel: {e}')
+        return
+    with open(os.path.join(MODEL, '..', 'budget_model.json')) as f:
+        model = json.load(f)
+    flat = mtmodel.run(model, None, ['placed', 'plan45'], [1020], 15.0, True)
+    fb = frame_budget.build(model)
+    fbs = {s['id']: s for s in fb['scenarios']}
+    by = {s['id']: s for s in flat['scenarios']}
+    p_mt = by['placed']['results']['1020']['mid']['frame_ms']
+    p_fb = fbs['placed']['results']['1020']['frame_ms']['mid']
+    check(abs(p_mt - p_fb) <= 0.02 * p_fb, f'flat, no hand-offs: mtmodel {p_mt} ms = frame_budget {p_fb} ms')
+    q_mt = by['plan45']['results']['1020']['mid']['frame_ms']
+    q_fb = fbs['plan45']['results']['1020']['frame_ms']['mid']
+    check(q_mt >= q_fb, f'plan45: critical path {q_mt} ms >= water-fill {q_fb} ms')
+    t = [mtmodel.Thread('main', [0], 0), mtmodel.Thread('w', [1, 2], 2)]
+    t[0].ops = [('fork', 'k', 'w', 3000, 'x'), ('run', 1000, 'a'), ('join', 'k')]
+    end, _b, cores, wait, _t = mtmodel.simulate(t, 1000, 10)
+    check(abs(end - 13) <= 1 and abs(wait - 12) <= 1, f'fork/join: main ends at {end} us (13), waits {wait} us (12)')
+
+
 def test_calibration(out):
     for t in ('qemu-system-aarch64', 'aarch64-linux-gnu-gcc', 'llvm-mca', 'pkg-config'):
         if not shutil.which(t):
@@ -166,6 +192,7 @@ def main():
         test_dataflow()
         test_sim(out)
         test_funcmodel(out)
+        test_mtmodel()
         test_calibration(out)
     finally:
         if not keep:

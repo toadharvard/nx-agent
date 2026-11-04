@@ -905,3 +905,40 @@ With link 06857911f5ab's guest and the overrides at 304901c, mid values [model]:
 The metric with these prices: **7.88 M cycles per frame (7.72 ms at 1.02 GHz)**, against 6.09 M at IPC 0.8. The
 rows that override math with long-latency operations (Slerp) or with multi-register loads (`ld3`) save fewer cycles
 than instructions; A/B rows should be compared in cycles from now on.
+
+### 12.7 The 3-core frame model (`mtmodel.py`, fnvnx-mtframe/1)
+
+frame_budget.py (11.1) puts each core's share of the work side by side: frame = the busiest core. `mtmodel.py`
+schedules the same work (budget_model.json, its scenarios and levers, frame_budget's `scenario_work`) in time, in
+1 us steps on the application cores with placement.h's masks and priorities (main core 0; render worker core 1; AI
+linear and workers on 0b110; background lowest):
+* main runs its phases in the main loop's order (game logic, Havok, animation, scene graph, cull, accumulation,
+  renderer, barriers, then the model's sync overhead);
+* work a lever moves off main is forked to two workers at its phase's start. A forked worker starts after a wake
+  latency (--wake-us, 15 us [E]) and runs at the model's parallel efficiency. Main joins it at the phase's end and
+  waits if it is late;
+* the AI linear threads run from the frame's start and are joined before culling. `threaded_anim` queues its work
+  behind the AI on them;
+* the render worker is pipelined (never joined) and background work fills idle time;
+* frame = max(main's critical path, every core's busy time).
+
+The work is priced with the A57 CPI of 12.6's rows for the items they cover (scene graph, cull, animation, Havok,
+accumulation: steady CPI in the lo case, one-call CPI in the hi case); other items stay at 1/0.8 and are listed.
+Check (tests/s15/test_a57model.py): with everything at 1/0.8 and no hand-offs, "placed" gives frame_budget's
+25.2 ms.
+
+| scenario | 1020 MHz frame lo / mid / hi (ms) | frame_budget mid | main waits | 1785 MHz mid |
+|---|---|---:|---:|---:|
+| placed | 12.4 / 28.5 / 50.0 | 25.2 | 0 | 16.3 |
+| plan45 | 9.2 / 21.6 / 39.1 | 17.2 | 1.8 | 12.4 |
+| plan45b | 7.8 / 18.7 / 35.4 | 15.4 | 1.8 | 10.7 |
+| plan60 | 7.0 / 17.6 / 34.3 | 14.7 | 1.5 | 10.1 |
+
+Two results for the plan. First, the hand-offs cost: at 1/0.8 alone, plan45's critical path is 19.7 ms against the
+water-filled 17.2. Main waits 1.5 ms at the joins of the moved cull, accumulation and Havok work, which runs slower
+on the workers (efficiency, wake) than main's share of the same phase. Second, the A57 prices raise main's phases
+(scene graph and animation at CPI 0.9-2.0 against 1.25). So plan45b's mid frame at 1.02 GHz is 18.7 ms, and with the
+model's worst-frame factor 1.25 that is 23.3 ms, just above the 22.2 ms of 45 fps stable. At 1.785 GHz, plan45b holds
+60 fps at the mid case (10.7 ms). The levers that shorten main's path without a join on it (render F2-F4, relaxed
+barriers, NEON math, overrides) gain their full value. A moved phase gains only when its worker finishes before
+main's share does: split the moved part so that the worker side is the smaller one.

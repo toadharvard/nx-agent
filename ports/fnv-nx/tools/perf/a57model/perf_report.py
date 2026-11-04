@@ -44,6 +44,7 @@ def main(argv=None):
     ap.add_argument('--mca-cache')
     ap.add_argument('--region')
     ap.add_argument('--funcs', help="funcmodel.py's JSON: the per-frame function rows (frame_hotspots[])")
+    ap.add_argument('--mt', help="mtmodel.py's JSON: the 3-core frame model (frame_model)")
     a = ap.parse_args(argv)
     params = cost.load_params(a.params)
     mca = cost.MCA(a.mca_cache)
@@ -141,6 +142,20 @@ def main(argv=None):
                   '| row | M insns/frame | CPI (steady-once) | cycles/call | ms 1.02 |', '|---|---:|---|---|---|']
         for r in out['frame_hotspots']:
             lines.append(f"| {r['id']} | {r['minsn_frame']} | {r['cpi'][0]}-{r['cpi'][1]} | {r['cycles_per_call']} | {r['ms_1020']} |")
+    if a.mt and os.path.exists(a.mt):
+        with open(a.mt) as f:
+            mt = json.load(f)
+        out['frame_model'] = {'schema': mt['schema'], 'cpi': mt['cpi'], 'unpriced_items': mt['unpriced_items'],
+                              'wake_us': mt['wake_us'],
+                              'scenarios': [{'id': s['id'], 'results': s['results']} for s in mt['scenarios']]}
+        lines += ['', f"3-core frame model (mtmodel.py; A57 CPI for {', '.join(mt['cpi'])}; 1/IPC 0.8 for the rest):", '',
+                  '| scenario | MHz | frame ms lo / mid / hi | main path | main waits | cores (mid) | critical |',
+                  '|---|---:|---|---:|---:|---|---|']
+        for s in mt['scenarios']:
+            for clk, r in s['results'].items():
+                m = r['mid']
+                lines.append(f"| {s['id']} | {clk} | {r['lo']['frame_ms']} / {m['frame_ms']} / {r['hi']['frame_ms']} | "
+                             f"{m['main_path_ms']} | {m['main_wait_ms']} | {m['core_ms']} | {m['critical']} |")
     if out.get('per_call_cycles'):
         lines += ['', 'per_call_cycles for budget_model.json hotspot_functions (static A57 model; overrides on their own code):', '',
                   '| id | per_call_insn | CPI | per_call_cycles |', '|---|---|---|---|']
