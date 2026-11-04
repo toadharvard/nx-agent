@@ -220,7 +220,13 @@ class/struct/union/enum tags, which Itanium names do not.
   * fixed reference, variadic definition (0x005accb0's extractor, 0x005e58f0 ApplyPerkModifiers): the reference's
     parameters behind the definition's named ones must be integers, pointers or doubles (a fixed float is 4 bytes,
     a variadic caller would have promoted it), start at the definition's anonymous x86 offset and leave the same
-    AArch64 register counts. A `char`/`short`/`bool` there is extended in place (`narrow-extend`);
+    AArch64 register counts. A `char`/`short`/`bool` there is extended in place (`narrow-extend`). The widths the
+    body reads with va_arg are in neither signature (V2 VA2-VA4), so the plugin also records every variadic
+    definition (`VADEF`): `none` (no va_start), `escape` (its va_list goes to another function, vsnprintf-like:
+    the format decides) or the va_arg classes. The tail must share one width class (4-byte words, 8-byte integers,
+    doubles) with every va_arg the body reads, or the body must never call va_start. Without a record, `escape`
+    or mixed widths, the pair is `manual`. On link/c0d6c71516f6 this sends the 0x00703c00 override's fixed-tail
+    callers and 0x00406d00's to `manual` (both format through vsnprintf);
   * both variadic: the named parts are compared like fixed ones and the anonymous parts must start at the same
     place;
   * definition parameters in the reference's anonymous part are decided **by the call sites** (`vacall.py`). Resolve 1
@@ -232,7 +238,7 @@ class/struct/union/enum tags, which Itanium names do not.
     aggregates by value and units not recorded yet stay `manual`. For a variadic definition only the words its
     named parameters read must agree; 0x00406d00's snprintf-like callers pass any number of arguments. Test:
     `test_vacall.py` covers V1's shapes end to end (plugin, decision, qemu run). On link/c0d6c71516f6, replayed with
-    its tree: 13 units recorded in 26 s, bridge-gap pairs 70 -> 35.
+    its tree: 32 units recorded, bridge-gap pairs 70 -> 35, then 75 once V2's va_arg widths are checked.
   * without the call sites, such pairs are `manual`. Their x86 words come from the call site's
     argument types. A long long or a double is two words on x86 and one register on AArch64. A struct by value is
     several words, or a pointer. A struct { float } goes in an s register. V1 refuted (VA-U1..U4) an earlier rule

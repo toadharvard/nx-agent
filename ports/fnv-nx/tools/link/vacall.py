@@ -93,8 +93,27 @@ def load(out, unit, _cache={}):
             got = collections.defaultdict(set)
             for line in open(p, encoding='utf-8', errors='surrogateescape'):
                 f = line.rstrip('\n').split('\t')
+                if f[0] == 'VADEF':
+                    continue
                 if len(f) >= 3:
                     got[f[0]].add(tuple(f[3 + int(f[2]):]))
+            _cache[p] = got
+    return _cache[p]
+
+
+def load_defs(out, unit, _cache={}):
+    """{assembler name: va_reads} of the variadic functions one unit defines (abi.va_reads_check's form: ('none',),
+    ('escape',) or ('reads', classes)), None when the unit was not recorded."""
+    p = unit_file(out, unit)
+    if p not in _cache:
+        if not os.path.exists(p):
+            _cache[p] = None
+        else:
+            got = {}
+            for line in open(p, encoding='utf-8', errors='surrogateescape'):
+                f = line.rstrip('\n').split('\t')
+                if f[0] == 'VADEF' and len(f) >= 3:
+                    got[f[1]] = (f[2], tuple(f[3:])) if f[2] == 'reads' else (f[2],)
             _cache[p] = got
     return _cache[p]
 
@@ -121,7 +140,7 @@ def needs(v):
         any('anonymous argument of the reference' in n for n in v.notes)
 
 
-def decide(rs, ds, seqs):
+def decide(rs, ds, seqs, va_reads=None):
     """(verdict, fixed reference Sig, call-site classes, stat) for a variadic reference rs to the definition ds whose
     calls in the unit pass `seqs` (set of class tuples, None when unrecorded); verdict None when undecided."""
     import abi
@@ -139,7 +158,7 @@ def decide(rs, ds, seqs):
         return None, None, None, 'vacall_sites_disagree'
     seq = next(iter(seqs))
     fs = sig_for(rs, seq)
-    v = abi.compare(fs, ds) if fs is not None else None
+    v = abi.compare(fs, ds, va_reads=va_reads) if fs is not None else None
     if v is not None and v.kind not in ('same', 'bridge'):
         # words regrouped (a double or long long read as two ints, V1 VA-U1/U2): decide on bytes; scalars need no
         # layouts, an aggregate makes abi2 give up
