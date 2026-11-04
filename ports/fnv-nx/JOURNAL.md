@@ -1138,3 +1138,20 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   Orchestrator re-ran `tests/s1/test_rules.py` (0 failed) and `tests/s11/run.sh` (ok) on the merged head.
 * **metrics** - census_c18_clean=2869 census_c18_failing=109 census_c18_errors=875
 * **next** - S1: the five frontier units (J-0057); S11 gates the new rules; S2 fresh run from this head.
+
+### J-0059 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0055,J-0056
+
+* **did** - S13's bridge findings (J-0055): a definition's ecx parameter the reference does not pass is now
+  x86-inconsistent (`ecx-not-passed`, abi.py + abi2.py, test_link case), no bridge; re-linked as f12 on f11's
+  objects (tree from 0c630cf). Orchestrator re-ran all 7 link tests on the merged head: ok.
+* **found** - 13 ecx-not-passed callees (14 pairs; LINK.md lists them); x86-inconsistent references 402 -> 419. The
+  two this-not-passed pairs (0x00ba95e0, 0x00c0abd0) were already listed - they need only S1b patches. The
+  fastcall->thiscall divergence (00a1c9b0 -> 00a0c900) is a call through a cast to another convention: the bridge
+  is built from the declaration, x86 follows the cast (~100 such casts in 48 units). The varargs divergence is the
+  logger 0x00703c00 handing `&context` on as an x86 stack va_list.
+* **decided** - A missing edx stays the edx-dummy bridge (the decomp's `__fastcall f(T*, int edx_dummy, ...)` member
+  form; reclassifying it would turn correct bridges into false alarms). Casts: a resolve rule that takes the cast's
+  convention; logger: native variadic override.
+* **metrics** - link_trial_undefined=7842 link_trial_multidef=0 link_x86_inconsistent_refs=419 link_ecx_not_passed=13
+* **next** - S2c: cast resolve rule, logger override, XINC1 patches for the 15 sites; fresh f13 after S1's WinMain
+  fixes; S13 recheck on f13.
