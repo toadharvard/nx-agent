@@ -632,6 +632,43 @@ atexit registrations, not the objects. The rest: 1,675 in `FUN_00aa1070` (the un
 section 11), 767 calls through a null function pointer (first `__fnvnx_dyninit_00f37f30`), 337
 `RegisterFloatKeyOps` writes into `.text` (S1/S2), and about 100 constructors reading through null.
 
+## 13. Round 7: S2c's f11 (tree from 0c630cf: S1 round 7, FALL1 fix)
+
+Input: `s2c/latest` = run f11 (tree and objects `s2c/fresh8`: 2,748 units ok, 230 failed). The build takes about 40 s.
+**7,307 undefined**: 4,440 image `.text` addresses, 2,125 C++ declared-only, 441 `FUN_`, 129 C, 47 `DAT_`, 41 std::,
+39 vtable/typeinfo, 23 D3DX9, 9 Bink, 9 CRT, 4 Win32. The guest is relocatable: 0 PC-relative references to
+absolute symbols. `GAME_NEW=runtime` weakens nothing any more, because the unannotated global new/delete are gone from
+the units. Frontier against fresh8's compile logs and S1's census c18 (2,869 clean).
+
+* **No trapping dyninit/dynexit.** No `brk` group is left in the skip summary. A static scan of the linked ELF finds
+  0 of 6,265 `__fnvnx_dyninit_*` and 0 of 4,692 `__fnvnx_dynexit_*` functions containing a `brk` (`tests/s5/dynbrk.py`).
+* **Skipped initializers: 2,889** (S14 image), 2,890 (empty image):
+
+  | skips | fault |
+  |---:|---|
+  | 1,679 | `FUN_00aa1070` reads through the memory-manager pointer 0x011f6080 |
+  | 767 | call through a null function pointer (first `__fnvnx_dyninit_00f37f30`, `generated/global_object_initializers.cpp`) |
+  | 337 + 1 | `RegisterFloatKeyOps` 00a26e20 / `FUN_00a28cb0` write into `.text` |
+  | 105 | constructors reading through null (`FUN_00633000` 46, `FUN_004a4a40` 21, `FUN_004de2f0` 15, ...) |
+
+* **WinMain gets past +0x1c8**: 0x00af3020 is defined now. The next call, at **+0x1d0**, is `FUN_00aa20b0` ->
+  `FUN_00aa3050`. That is a once-only Gamebryo memory initialisation (flag byte, then `InitHolder` 0x00aa2020,
+  `FUN_00aa1920`, 0x00aa7eb0). `InitHolder` allocates the holder (0x00aa3e40, the heap stand-in) and stores it at
+  0x011f6080. It then asks the source list at 0x011f6118 for its head (`CBaseList::GetHeadPositionI` 0x009fd0f0,
+  **untranslated**: `blk_009e0000_o2.cpp`, which still fails in c18 with `conflicting declaration of C function 'void*
+  VirtualAlloc(...)'`). The trap returns 0, and the tail call through `(*holder)->vtbl[7]` reads address 0. **That is
+  the first fault: InitHolder [00aa2020]+0x54.** Before it, inside WinMain: 0x00c3c460 (`blk_00c20000_od_ob1_variant`,
+  c18: `fabs` conflicts with a previous declaration) and `StandardLibrarySingletonObject`'s constructor.
+* So 0x011f6080 is also set from WinMain's path, through 0x00aa3050's guard. The static initializers that need it
+  earlier (`FUN_00aa1070`) still point to the constructor section 11 describes. S1's census c18 has the constructor's
+  unit `blk_00aa0000_od_ob1_variant.cpp` and FormHeap_Allocate's `middlehighprocess.cpp` clean, so the next S2 run
+  should let `construct_memory_manager()` run for real.
+* Frontier: S14 image **122 keys, 3,300 hits** (119 init, 3 WinMain), 35 units, 29 of them failed in fresh8. **24 of
+  those 29 are clean in c18**, and 109 of the 122 keys are in such units. The ones still failing in c18: `actor.cpp`
+  (200 errors), `playercharacter.cpp` (40), `extradatalist.cpp` (1), `blk_009e0000_o2.cpp` (1) and
+  `blk_00c20000_od_ob1_variant.cpp` (1). Empty image: 116 keys, 3,291 hits, 32 units (27 failed, 23 clean in c18).
+  It stops at WinMain's first IAT call, as before.
+
 ## 7. Not yet done / untested
 
 * Nothing has run on hardware. Untested: ldr accepting the 64-bit + `32BitNoReserved` NPDM as an application
