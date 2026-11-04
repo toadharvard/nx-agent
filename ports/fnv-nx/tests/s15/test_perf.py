@@ -113,6 +113,14 @@ def test_budget(tmp):
     check([r['id'] for r in a57['rows']] == ['fn_slerp'] and abs(a57['delta_minsn_mid'] - want) < 1e-3 and
           abs(d_main - want) < 2e-3 and bp['inputs']['a57'],
           'budget: --perf prices a row on its thread (slerp at CPI 2: +%.3f M main), interlocked skipped' % d_main)
+    # V1 45e8724 T1: in every case the priced row costs its cycles at the clock, not cycles x 0.8 / that case's IPC
+    ipc = next(a for a in model['assumptions'] if a['id'] == 'ipc')
+    cyc_hi = sl['per_call_insn'][1] * 2 * sl['calls'][1]
+    ins_hi = sl['per_call_insn'][1] * sl['calls'][1]
+    want_ms = (cyc_hi - ins_hi / ipc['range'][0]) / (1020 * 1e3)
+    got_ms = bp['scenarios'][0]['results']['1020']['core_ms']['0']['hi'] - b['scenarios'][0]['results']['1020']['core_ms']['0']['hi']
+    check(abs(got_ms - want_ms) < 0.02, 'budget: --perf hi case = the row\'s cycles at 1020 MHz (+%.2f ms, want +%.2f)'
+          % (got_ms, want_ms))
     check(abs(b['budget_minsn']['1020']['pass_45'] - 18.1) < 0.1 and abs(b['budget_minsn']['1785']['pass_45'] - 31.7) < 0.1,
           'budget: 45 fps per-core budget 18.1 M at 1020 MHz, 31.7 M at 1785 MHz (IPC 0.8)')
     want = {'%s@%d' % (s['id'], c) for s in model['scenarios'] for c in (1020, 1785)}

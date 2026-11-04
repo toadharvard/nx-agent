@@ -124,7 +124,7 @@
    "target_fps": 60,
    "ms": 16.7,
    "config": "handheld_720p",
-   "rule": "owner: 60 fps for the whole frame at 720p handheld; the gate reads targets_budget_fraction['60']"
+   "rule": "owner: 60 fps for the whole frame at 720p handheld. The whole-frame gate is perf.budget (tools/gates/ready.py budget_gate): docs/PERF_budget.json, scenario placed, verdict target_60 on the worst frame (S15's frame model, which reads this report for the renderer rows). targets_budget_fraction is the renderer's share only; perf.render judges it against its share of the frame (render_perf.max_budget_fraction)"
   },
   "engine_d3d9_path_source": "MEASURED (static path count) on the AArch64 ILP32 prepared objects, render/native/perf/engine_path.py; replaces the assumption of PERF.md \u00a75 / RENDER_PERF.md \u00a73.7"
  },
