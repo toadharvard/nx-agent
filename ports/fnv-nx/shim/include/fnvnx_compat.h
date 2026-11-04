@@ -174,6 +174,10 @@ struct fnvnx_new_tag {};
 /* EBO2: first in an empty base whose derived class introduces a vfptr: not empty (MSVC puts it after the vfptr),
  * still 0 bytes */
 #define FNVNX_EBO2 char fnvnx_ebo2[0];
+/* D22: a listed class's slot-0 placeholder virtual becomes its virtual destructor (GCC's D1/D0 where MSVC's ??_G
+ * is, the link's minus-one rule); a derived class's re-declaration of that placeholder goes */
+#define FNVNX_D22(C, ...) virtual ~C();
+#define FNVNX_D22_DROP(...)
 #endif
 
 /* SAL annotations (sal.h) used without an include in pasted CRT prototypes */

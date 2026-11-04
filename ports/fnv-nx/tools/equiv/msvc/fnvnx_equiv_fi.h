@@ -39,6 +39,9 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_GLOBAL_DELETE
 #define FNVNX_NEW5_TAG
 #define FNVNX_EBO2
+/* D22: MSVC keeps the original declaration */
+#define FNVNX_D22(C, ...) __VA_ARGS__
+#define FNVNX_D22_DROP(...) __VA_ARGS__
 
 /* FTOL1 (S1b): fnvnx_ftol2(x) is the x87 _ftol2_sse of x; under MSVC the cast compiles to exactly that call */
 #ifndef fnvnx_ftol2

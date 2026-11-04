@@ -125,6 +125,7 @@ CLASSES = {
     'REC1': 'neutral',         # D20: reconstructed bodies from fnv-nx-build recon/ appended (new functions; nothing else changes)
     'HUNIT1': 'neutral',       # explicit instantiations of the template members a header unit's recipe lists (MSVC emitted them)
     'XC2': 'platform',         # XC1's extern + __fnvnx_dyninit_<addr> form for a hand-written dynamic initializer (site table)
+    'D22': 'neutral',          # FNVNX_D22 / FNVNX_D22_DROP: GCC declares the slot-0 virtual destructor, MSVC keeps the original declaration
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}

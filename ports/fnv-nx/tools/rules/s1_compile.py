@@ -4933,8 +4933,186 @@ def r_handwritten_dyninit(path, text, stats):
             stats['XC2'] += 1
     return text
 
+# ---------------------------------------------------------------------------------------------------------- D22
+#
+# D22 (docs/ARCHITECTURE.md): MSVC gives a virtual destructor one vftable slot (??_G(flags)); GCC gives it two (D1, D0),
+# and the link maps them by the minus-one rule. The decomp often declares a class's first virtual as a placeholder
+# (`virtual void v0();`, `virtual void Unk_00();`) where the exe's vftable has the deleting destructor in slot 0: under
+# GCC every later slot of that class (and of every caller declaring the same hierarchy) is then one off. D22 declares
+# `virtual ~C();` instead of the placeholder, under GCC only: FNVNX_D22(C, <the original declaration>) expands to the
+# original declaration under MSVC (tools/equiv/msvc/fnvnx_equiv_fi.h), so MSVC's objects are unchanged.
+# Which classes: the exe's vftables are needed (slot 0 is read from the image), so the list is exe-derived and
+# private: tools/rules/_d22_classes.py writes d22.json (fnvnx-d22/1) into fnv-nx-build branch recon/d22_vtable_dtor,
+# which tools/farm/recon.sh fetches into FNVNX_RECON with the recon bodies. Without it D22 does nothing.
+# A class is listed by its qualified name with the placeholder's member name; the rule rewrites, in every file, a
+# class of that qualified name whose first declared virtual is that member, has no base with virtual functions
+# (no base at all; so its first declared virtual is slot 0), declares no destructor, and whose placeholder is not
+# defined outside the class nor called by that name in the file (D22-CALLED / D22-DEFINED are counted, not
+# rewritten).
+
+D22_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)', re.S)
+D22_CLASS_HEAD = re.compile(r'\b(class|struct)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)'
+                            r'\s*(?:final\s*)?(:[^;{}]*)?$', re.S)
+D22_VIRTUAL = re.compile(r'\bvirtual\b')
+D22_TEMPLATE = re.compile(r'\btemplate\s*<[^;{}]*>\s*$', re.S)
+
+def d22_mask(text):
+    """text with comments and string / character literals blanked (same length, line breaks kept)"""
+    return D22_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+
+def d22_classes(text, masked=None):
+    """Every class / struct definition of text: dict(qual=[outer..., name], open, close, bases, template, dtor,
+    first=(start, end, member, decl) of the first declared virtual at the class's own depth, or None)."""
+    masked = masked if masked is not None else d22_mask(text)
+    spans = prepare.scope_spans(masked)
+    out = []
+    for i, (o, c, kind, head) in enumerate(spans):
+        if kind != 'class': continue
+        m = D22_CLASS_HEAD.search(masked[max(0, o - 600):o].rstrip())
+        if not m: continue
+        hs = max(0, o - 600) + m.start()
+        qual, own = [], []
+        for o2, c2, k2, h2 in spans:
+            if o2 >= o: break
+            if o2 < o < c2:
+                if k2 == 'namespace':
+                    nm = re.match(r'(?:inline\s+)?namespace\s+(\w+)', h2 or '')
+                    qual.append(nm.group(1) if nm else '{anon}')
+                elif k2 == 'class':
+                    hm = D22_CLASS_HEAD.search(masked[max(0, o2 - 600):o2].rstrip())
+                    qual.append(hm.group(2) if hm else '{?}')
+                elif k2 != 'extern':
+                    qual.append('{local}')
+        # the class's own depth: positions inside the body not inside a nested brace pair
+        nested = [(o2, c2) for o2, c2, _, _ in spans if o < o2 < c]
+        def own_depth(pos):
+            return not any(o2 < pos < c2 for o2, c2 in nested)
+        virtuals, dtor = [], False
+        name = m.group(2)
+        for dm in re.finditer(r'~\s*%s\s*\(' % re.escape(name), masked[o:c]):
+            if own_depth(o + dm.start()): dtor = True; break
+        skip_to = o + 1
+        for vm in D22_VIRTUAL.finditer(masked, o + 1, c):
+            if vm.start() < skip_to or not own_depth(vm.start()): continue
+            # the declaration runs to `;` at the class's depth, or to the end of its inline body
+            j, end = vm.end(), None
+            while j < c:
+                ch = masked[j]
+                if ch == ';': end = j + 1; break
+                if ch == '{':
+                    end = prepare.match_brace(masked, j); break
+                j += 1
+            if end is None: break
+            decl = masked[vm.start():end]
+            mm = re.search(r'(~?\s*[A-Za-z_]\w*|operator\s*[^\s(]+)\s*\(', decl)
+            ls = masked.rfind('\n', 0, vm.start()) + 1
+            pre = masked[ls:vm.start()]
+            start = vm.start()
+            if re.match(r'^\s*[A-Z_][A-Z0-9_]*(?:\s+[A-Z_][A-Z0-9_]*)*\s*$', pre) and pre.strip():
+                start = ls + len(pre) - len(pre.lstrip())                    # FNVNX_KEEP virtual ...
+            virtuals.append((start, end, re.sub(r'\s+', '', mm.group(1)) if mm else None, text[start:end]))
+            skip_to = end
+        out.append(dict(qual=qual + [name], open=o, close=c, head=hs, bases=(m.group(3) or '')[1:].strip(),
+                        template=bool(D22_TEMPLATE.search(masked[max(0, hs - 300):hs])), dtor=dtor,
+                        first=virtuals[0] if virtuals else None, virtuals=virtuals, kind=m.group(1)))
+    return out
+
+def d22_placeholder(masked, cls, decl, ignore=()):
+    """the virtual declaration decl = (start, end, member, text) of class cls is a placeholder in this file: no
+    definition outside the class, an inline body of one statement at most, and no other use of its name followed by
+    `(` (a call or another declaration)"""
+    start, end, member, src = decl
+    if not member or member.startswith(('~', 'operator')) or '"' in src or "'" in src: return False
+    body = masked[start:end]
+    if '{' in body:
+        inner = body[body.find('{') + 1:body.rfind('}')]
+        if len([s for s in inner.split(';') if s.strip()]) > 1 or '{' in inner: return False
+    rest = masked[:start] + ' ' * (end - start) + masked[end:]
+    for a, b in ignore:                         # other classes' virtual declarations of the same name
+        if (a, b) != (start, end): rest = rest[:a] + ' ' * (b - a) + rest[b:]
+    if re.search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), rest): return False
+    if re.search(r'(?<![\w~])%s\s*\(' % re.escape(member), rest): return False
+    return True
+
+def _d22_list():
+    """{class key: set(members)} from every d22.json under FNVNX_RECON (or the file FNVNX_D22); cached on prepare
+    (equiv.py loads the stream modules twice)"""
+    st = prepare.__dict__.get('_fnvnx_d22')
+    if st is not None: return st
+    files = []
+    if os.environ.get('FNVNX_D22') and os.path.isfile(os.environ['FNVNX_D22']): files.append(os.environ['FNVNX_D22'])
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'd22.json') for dp, _, ns in os.walk(top) if 'd22.json' in ns)
+    st = collections.defaultdict(set)
+    import json
+    for f in files:
+        try: d = json.load(open(f))
+        except (OSError, ValueError): continue
+        if d.get('format') != 'fnvnx-d22/1': continue
+        for c in d.get('classes', ()):
+            st[c['class']].update(c.get('members', ()))
+    prepare.__dict__['_fnvnx_d22'] = st
+    return st
+
+def _d22_bases(bases):
+    out = []
+    for b in _split_bases(bases) if bases else ():
+        b = re.sub(r'^(?:(?:public|protected|private|virtual)\s+)+', '', b.strip())
+        out.append(re.sub(r'\s*<.*', '<>', b).split('::')[-1].strip())
+    return out
+
+def r_vtable_dtor_slot(path, text, stats):
+    """D22: `virtual ~C();` for a listed class's slot-0 placeholder under GCC (above); a derived class's
+    re-declaration of that placeholder is dropped under GCC (it would append a slot)."""
+    lst = _d22_list()
+    if not lst or 'virtual' not in text: return text
+    masked = d22_mask(text)
+    classes = d22_classes(text, masked)
+    edits, done = [], {}                        # done: simple class name (or T<>) -> placeholder member
+    vdecls = collections.defaultdict(list)      # member -> spans of every virtual declaration of that name
+    for c in classes:
+        for v in c['virtuals']:
+            if v[2]: vdecls[v[2]].append((v[0], v[1]))
+    for c in classes:
+        key = c['qual'][-1] + '<>' if c['template'] else '::'.join(c['qual'])
+        if key not in lst or not c['first']: continue
+        if c['bases'] or c['dtor'] or c['first'][2] not in lst[key]: continue
+        if not d22_placeholder(masked, c['qual'][-1], c['first'], vdecls[c['first'][2]]):
+            stats['D22-USED'] += 1; continue
+        edits.append((c['first'][0], c['first'][1], 'FNVNX_D22(%s, %s)' % (c['qual'][-1], c['first'][3])))
+        done[c['qual'][-1] + ('<>' if c['template'] else '')] = c['first'][2]
+        stats['D22'] += 1
+    here = {c['qual'][-1] + ('<>' if c['template'] else '') for c in classes}
+    for k, ms in lst.items():                   # listed classes defined in another file (a header)
+        sk = k.split('::')[-1]
+        if sk not in done and len(ms) == 1 and sk not in here: done.setdefault(sk, next(iter(ms)))
+    changed = True
+    while changed:                              # derived classes, through chains of derivation in the file
+        changed = False
+        for c in classes:
+            if not c['bases'] or not c['virtuals']: continue
+            mine = c['qual'][-1] + ('<>' if c['template'] else '')
+            for b in _d22_bases(c['bases']):
+                mem = done.get(b)
+                if not mem: continue
+                for v in c['virtuals']:
+                    if v[2] != mem or any(e[0] == v[0] for e in edits): continue
+                    if not d22_placeholder(masked, c['qual'][-1], v, vdecls[v[2]]):
+                        stats['D22-USED'] += 1; continue
+                    edits.append((v[0], v[1], 'FNVNX_D22_DROP(%s)' % v[3]))
+                    stats['D22-DERIVED'] += 1
+                    if mine not in done: done[mine] = mem; changed = True
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, rep in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(rep + ' /* fnv-nx D22 */'); pos = b
+    out.append(text[pos:])
+    return ''.join(out)
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
-              r_header_unit_instantiations, r_handwritten_dyninit]
+              r_header_unit_instantiations, r_handwritten_dyninit, r_vtable_dtor_slot]
 RULES += REFS_RULES
