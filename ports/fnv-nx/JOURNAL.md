@@ -2963,3 +2963,41 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   | S12-ordering | claude/fnv-s12-ordering | x86 ordering on AArch64: volatile acquire/release, `_ReadWriteBarrier`, TLS unification; litmus tests under qemu |
   | S2d-bodies | claude/fnv-s2d-bodies | 2,035 declared-only C++ functions and 912 ctors/dtors: bind by address, synthesize, or report |
   | S13b-causes | claude/fnv-s13b-causes | classify the unclassified bucket, separate artifacts from real bugs, fix bool-repr/signedness/division/nan-bits |
+
+### J-0135 | 2026-11-04 | stream: orchestration,V1,farms | status: wip | parent: J-0134
+
+* **found** - The owner's stop interrupted every local agent: S1 x4, S5, S1b, S11, S15, R0, V1, S16, S13, S2c.
+  - Still running: the cloud streams S12, S2d and S13b (S4 queued), the render machine and the farms.
+  - The owner then asked for the best option: merge, then restart all.
+* **did** - Merged the finished work.
+  - Render machine `claude/port-nsw-render` up to 8fa17b3, as `66c96ad`:
+    - nx_render (the S16 entry point);
+    - the NXD9/.nxcap capture specs (RENDER_NATIVE.md section 8);
+    - R2 vftables from the player's exe;
+    - N1 geometry;
+    - dynamic resolution.
+  - S5 (7 commits):
+    - the null D3D9 device registers d3d9.dll;
+    - boot milestones plus `boot/milestones.json` (the R0 format);
+    - known_faults for the boot on the player's exe;
+    - TOOLCHAIN.md section 21.
+  - S15 (2): the multicore check under QEMU, the RecursiveSpinLock release override, the whole-frame budget
+    `fnvnx-frame-budget/1` and the 45/60 fps plan.
+  - R0 (6): `tools/gates/ready.py`, tests/gates (32 tests) and docs/READINESS.md.
+  - V1 (4): reproducers against J-0123, J-0125, J-0127 and J-0128.
+* **V1 verdicts**
+  - J-0127 loader SizeOfImage: see tests/v1/test_loader_soi.py.
+  - J-0128 `job_gamedata`: **refuted** (G1-G3).
+    - G1: a checksum file that names another file passes the exe unchecked.
+    - G2: any exe with its own checksum passes.
+    - G3: a symlink out of the directory passes.
+    - Fixed here. The exe must be a regular file with the pinned sha256 of GOG 1.4.0.525(a) (89e70204...),
+      checked on every use; `FARM_EXE_SHA256` pins another copy. tests/v1/test_gamedata.sh: G1-G3 refused, L1 ok.
+  - J-0125 `stage_after`: **refuted**.
+    - Old boot fields reach meta.json.
+    - A half-failed boot leaves frontier.tsv behind.
+    - A clock step defeats the mtime order.
+    - Fixed here: link_job.sh deletes build/guest and build/boot before every link, so a publish can only carry
+      this job's guest and boot, at the cost of a guest rebuild (~95 s) per full job.
+    - tests/v1/test_publish_stale.sh mocks publish_link without link_job.sh, so V1 must retarget it.
+  - J-0123 TAIL1 typename: **open**. tests/v1/test_tail1_typename.py fails 7 cases; this goes to S1.

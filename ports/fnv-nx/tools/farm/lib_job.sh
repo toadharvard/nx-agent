@@ -133,12 +133,16 @@ job_gamedata() { # the owner's FalloutNV.exe (private branch gamedata/exe, fetch
 	if [ ! -f "$gd/.done" ] && git -C "$ARTIFACTS" fetch -q origin \
 			"+refs/heads/gamedata/exe:refs/remotes/origin/gamedata/exe" 2>/dev/null; then
 		rm -rf "$gd"; mkdir -p "$gd"
-		if git -C "$ARTIFACTS" archive refs/remotes/origin/gamedata/exe | tar -x -C "$gd" \
-				&& (cd "$gd" && sha256sum -c --quiet FalloutNV.exe.sha256); then
-			touch "$gd/.done"
-		fi
+		git -C "$ARTIFACTS" archive refs/remotes/origin/gamedata/exe | tar -x -C "$gd" && touch "$gd/.done"
 	fi
-	[ -f "$gd/.done" ] && { GAME_EXE=$gd/FalloutNV.exe; NOTE_EXE="the player's FalloutNV.exe (gamedata/exe)"; }
+	# V1 (G1-G3): the exe itself must be a regular file with the pinned hash of GOG 1.4.0.525(a), checked on every use;
+	# the branch's own checksum file is not trusted. FARM_EXE_SHA256 pins another copy.
+	local want=${FARM_EXE_SHA256:-89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe} f=$gd/FalloutNV.exe
+	if [ -f "$gd/.done" ] && [ -f "$f" ] && [ ! -L "$f" ] && [ "$(sha256sum "$f" | cut -d' ' -f1)" = "$want" ]; then
+		GAME_EXE=$f; NOTE_EXE="the player's FalloutNV.exe (gamedata/exe, sha256 ${want:0:12})"
+	elif [ -f "$gd/.done" ]; then
+		NOTE_EXE="player exe refused: not a regular file with sha256 ${want:0:12} (S14's synthesized image)"
+	fi
 	return 0
 }
 

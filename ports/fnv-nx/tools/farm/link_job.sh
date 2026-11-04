@@ -73,6 +73,9 @@ rc=0
 if [ -z "$TREE" ] || [ -z "$OBJS" ]; then
 	rc=2; NOTE_FAIL="no tree or no objects from the farms: nothing linked"
 else
+	# A guest or boot of an earlier job must never be published with this link (V1 against J-0125: mtime order fails
+	# on a clock step, and a stage that fails half-way leaves old files): drop them; full_job.sh's make BOOT=1 rebuilds
+	rm -rf "$LB/guest" "$LB/boot"
 	# shellcheck disable=SC2086
 	make -C "$P" link BUILD_DIR="$LB" EXT="$EXT" JOBS="$JOBS" "${ARGS[@]}" ${FARM_MAKE_ARGS:-} \
 		> "$(dirname "$LB")/make-link-$C12.log" 2>&1 || rc=$?
