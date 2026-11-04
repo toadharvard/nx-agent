@@ -3,7 +3,8 @@
 
     python3 -I tests/s5/check_package.py <sd dir> [--program-id <16 hex>] [--elf <guest ELF>] [--emulate]
 
-<sd dir> is the SD card tree: atmosphere/contents/<program id>/exefs.nsp and fnvnx/guest.nso. Checks:
+<sd dir> is the SD card tree: switch/fnv/{fnv.nro,fnv-exefs.nsp,guest.nso} (NX1 launcher layout, fnvnx/sdlayout.h), or
+the older atmosphere/contents/<program id>/exefs.nsp + fnvnx/guest.nso. Checks:
   exefs.nsp   PFS0 with exactly main + main.npdm;
   main.npdm   META/ACID/ACI0; is_64_bit, 32BitNoReserved; program id = the folder's and inside the ACID range;
               kernel capabilities decoded: thread priorities and cores cover the main thread's, every SVC the host
@@ -207,24 +208,34 @@ def main(argv):
     ap.add_argument("--elf")
     ap.add_argument("--emulate", action="store_true")
     a = ap.parse_args(argv)
-    contents = os.path.join(a.sd, "atmosphere", "contents")
-    tids = sorted(os.listdir(contents)) if os.path.isdir(contents) else []
-    check(len(tids) == 1, f"sd: one exefs override under atmosphere/contents ({', '.join(tids) or 'none'})")
-    if not tids:
-        return 1
-    tid = tids[0]
-    check(re.fullmatch(r"[0-9a-f]{16}", tid) is not None, f"sd: program id folder {tid} is 16 lower-case hex digits")
-    if a.program_id:
-        check(tid == f"{int(a.program_id, 16):016x}", f"sd: folder = requested program id {a.program_id}")
-    nsp = open(os.path.join(contents, tid, "exefs.nsp"), "rb").read()
+    launcher = os.path.join(a.sd, "switch", "fnv", "fnv-exefs.nsp")
+    if os.path.isfile(launcher):
+        # NX1 layout (toolchain/include/fnvnx/sdlayout.h): the launcher fnv.nro installs the exefs for the title it
+        # was started from, and ldr rewrites the NPDM's program id to that title's, so no folder fixes the id.
+        tid = None
+        check(not os.path.isdir(os.path.join(a.sd, "atmosphere")), "sd: no atmosphere/ in the package (the launcher installs the override)")
+        check(os.path.isfile(os.path.join(a.sd, "switch", "fnv", "fnv.nro")), "sd: switch/fnv/fnv.nro")
+        nsp = open(launcher, "rb").read()
+        gpath = os.path.join(a.sd, "switch", "fnv", "guest.nso")
+    else:
+        contents = os.path.join(a.sd, "atmosphere", "contents")
+        tids = sorted(os.listdir(contents)) if os.path.isdir(contents) else []
+        check(len(tids) == 1, f"sd: one exefs override under atmosphere/contents ({', '.join(tids) or 'none'})")
+        if not tids:
+            return 1
+        tid = tids[0]
+        check(re.fullmatch(r"[0-9a-f]{16}", tid) is not None, f"sd: program id folder {tid} is 16 lower-case hex digits")
+        if a.program_id:
+            check(tid == f"{int(a.program_id, 16):016x}", f"sd: folder = requested program id {a.program_id}")
+        nsp = open(os.path.join(contents, tid, "exefs.nsp"), "rb").read()
+        gpath = os.path.join(a.sd, "fnvnx", "guest.nso")
     files = {n: nsp[o:o + s] for n, o, s in build_pfs0.parse_pfs0(nsp)}
     check(sorted(files) == ["main", "main.npdm"], f"exefs.nsp: {sorted(files)}")
     if "main.npdm" in files:
-        check_npdm(files["main.npdm"], int(tid, 16), files.get("main"))
+        check_npdm(files["main.npdm"], int(tid, 16) if tid else None, files.get("main"))
     if "main" in files:
         check_host_nso(files["main"])
-    gpath = os.path.join(a.sd, "fnvnx", "guest.nso")
-    if check(os.path.isfile(gpath), "sd: fnvnx/guest.nso"):
+    if check(os.path.isfile(gpath), f"sd: {os.path.relpath(gpath, a.sd)}"):
         info, base, size = check_guest_nso(open(gpath, "rb").read())
         if a.elf:
             check_guest_elf(a.elf, info, base, size)
