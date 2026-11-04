@@ -101,6 +101,45 @@ def run(cmd, **kw):
     return r
 
 
+def execute(tree, types, defs, checks, calls, asm):
+    """Compile the definitions and checks, assemble the bridges, link freestanding ILP32 and run under qemu-aarch64:
+    -> number of failures (0 or 1)."""
+    if not calls:
+        return 0
+    fails = 0
+    src = os.path.join(tree, 't.cpp')
+    open(src, 'w').write(types + RUNTIME + '\n'.join(defs) + '\n' + '\n'.join(checks) +
+                         '\nextern "C" int main_() { int bad = 0; %s return bad; }\n'
+                         % ''.join('bad += %s != 0;' % c for c in calls) +
+                         'extern "C" { __attribute__((aligned(16))) char stack[65536]; }\n'
+                         'asm(".globl stack_top\\n.set stack_top, stack + 65536\\n");\n')
+    open(os.path.join(tree, 'b.S'), 'w').write('\n'.join(asm))
+    cxx = [layout.CXX, '-mabi=ilp32', '-O1', '-ffreestanding', '-fno-exceptions', '-fno-rtti', '-fno-builtin',
+           '-c']
+    run(cxx + [src, '-o', os.path.join(tree, 't.o')])
+    run([fnvlink.AS, '-mabi=ilp32', os.path.join(tree, 'b.S'), '-o', os.path.join(tree, 'b.o')])
+    exe32 = os.path.join(tree, 't32')
+    run([fnvlink.LD, '-m', 'aarch64linux32', '-N', '-static', '--build-id=none', '-Ttext=0x400000', '-e', '_start',
+         os.path.join(tree, 't.o'), os.path.join(tree, 'b.o'), '-o', exe32])
+    flat = os.path.join(tree, 'flat.bin')
+    run([fnvlink.OBJCOPY, '-O', 'binary', '--remove-section=.comment', exe32, flat])
+    entry = int(next(l.split()[0] for l in run(['aarch64-linux-gnu-nm', exe32]).stdout.splitlines()
+                     if l.endswith(' _start')), 16)
+    open(os.path.join(tree, 'w.S'), 'w').write(
+        '    .section .img, "awx"\n    .incbin "%s"\n    .space 0x40000\n' % flat)
+    run([fnvlink.AS, os.path.join(tree, 'w.S'), '-o', os.path.join(tree, 'w.o')])
+    exe64 = os.path.join(tree, 't64')
+    run([fnvlink.LD, '-m', 'aarch64linux', '-static', '-z', 'max-page-size=4096', '--section-start=.img=0x400000',
+         '-e', '0x%x' % entry, os.path.join(tree, 'w.o'), '-o', exe64])
+    r = subprocess.run(['qemu-aarch64', exe64], capture_output=True, text=True)
+    if r.returncode:
+        print('FAIL: %d bridge execution checks failed (exit %d) %s' % (r.returncode, r.returncode, r.stderr))
+        fails += 1
+    else:
+        print('bridges executed: %d' % len(calls))
+    return fails
+
+
 def main():
     fails = 0
     names = [c[1] for c in CASES] + [c[2] for c in CASES]
@@ -128,36 +167,7 @@ def main():
             if code is None:
                 print('FAIL %s: no bridge' % name); fails += 1; continue
             asm.append(code); defs.append(cdef); checks.append(ccheck); calls.append('t_%s()' % name)
-        src = os.path.join(tree, 't.cpp')
-        open(src, 'w').write(TYPES + RUNTIME + '\n'.join(defs) + '\n' + '\n'.join(checks) +
-                             '\nextern "C" int main_() { int bad = 0; %s return bad; }\n'
-                             % ''.join('bad += %s != 0;' % c for c in calls) +
-                             'extern "C" { __attribute__((aligned(16))) char stack[65536]; }\n'
-                             'asm(".globl stack_top\\n.set stack_top, stack + 65536\\n");\n')
-        open(os.path.join(tree, 'b.S'), 'w').write('\n'.join(asm))
-        cxx = [layout.CXX, '-mabi=ilp32', '-O1', '-ffreestanding', '-fno-exceptions', '-fno-rtti', '-fno-builtin',
-               '-c']
-        run(cxx + [src, '-o', os.path.join(tree, 't.o')])
-        run([fnvlink.AS, '-mabi=ilp32', os.path.join(tree, 'b.S'), '-o', os.path.join(tree, 'b.o')])
-        exe32 = os.path.join(tree, 't32')
-        run([fnvlink.LD, '-m', 'aarch64linux32', '-N', '-static', '--build-id=none', '-Ttext=0x400000', '-e', '_start',
-             os.path.join(tree, 't.o'), os.path.join(tree, 'b.o'), '-o', exe32])
-        flat = os.path.join(tree, 'flat.bin')
-        run([fnvlink.OBJCOPY, '-O', 'binary', '--remove-section=.comment', exe32, flat])
-        entry = int(next(l.split()[0] for l in run(['aarch64-linux-gnu-nm', exe32]).stdout.splitlines()
-                         if l.endswith(' _start')), 16)
-        open(os.path.join(tree, 'w.S'), 'w').write(
-            '    .section .img, "awx"\n    .incbin "%s"\n    .space 0x40000\n' % flat)
-        run([fnvlink.AS, os.path.join(tree, 'w.S'), '-o', os.path.join(tree, 'w.o')])
-        exe64 = os.path.join(tree, 't64')
-        run([fnvlink.LD, '-m', 'aarch64linux', '-static', '-z', 'max-page-size=4096', '--section-start=.img=0x400000',
-             '-e', '0x%x' % entry, os.path.join(tree, 'w.o'), '-o', exe64])
-        r = subprocess.run(['qemu-aarch64', exe64], capture_output=True, text=True)
-        if r.returncode:
-            print('FAIL: %d bridge execution checks failed (exit %d) %s' % (r.returncode, r.returncode, r.stderr))
-            fails += 1
-        else:
-            print('bridges executed: %d' % len(calls))
+        fails += execute(tree, TYPES, defs, checks, calls, asm)
     print('ok' if not fails else 'FAILED')
     sys.exit(1 if fails else 0)
 
