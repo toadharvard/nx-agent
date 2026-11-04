@@ -134,7 +134,7 @@ job publishes it per integration head (`reports/gates1/<c12>-gates.md` / `.json`
 | perf.cores | core placement | `toolchain/host/placement.h`, `toolchain/npdm/fnvnx-app.json` in the checkout | main on core 0, workers on 1-2, core 3 opt-in and off | PERF.md placement table |
 | perf.render.stock / perf.render.boost | render machine: the renderer's worst thread as a share of each target's frame | `render/native/perf/report.json`, summary `targets_budget_fraction` (hi bound) | <= 20 % of the frame at the target | RENDER_NATIVE.md 9.4: render thread 4.5 of 22.2 ms, packet build 4.0 ms |
 | perf.gpu.docked_720p / handheld_720p / handheld_540p | GPU frame time of the render machine's model | same report, `gpu.summary_ms.mix_hi` | three levels, informative | a model with no measured anchor (RENDER_PERF.md section 9) |
-| perf.budget.stock / perf.budget.boost | S15 whole-frame CPU budget, scenario `placed` | `reports/<farm>/<c12>-frame-budget.json`, else `docs/PERF_budget.json` | `target_60` verdict pass on a measured frame (mid worst frame <= 16.7 ms) | PERF.md section 11; a model-only or uncertain verdict is no-data |
+| perf.budget.stock / perf.budget.boost | S15 whole-frame CPU budget, scenario `placed` | `reports/<farm>/<c12>-frame-budget.json`, else `docs/PERF_budget.json` | worst frame, hi case, <= 16.7 ms on a measured frame (S15's verdicts are not used) | PERF.md section 11; a model-only or uncertain verdict is no-data |
 | package.exefs | exefs = main + main.npdm, guest.nso on the SD tree | full report | yes | Atmosphere's exefs override layout |
 | package.program_id | program id of an installed title | full report | not 0100000000000000 | the override needs a title that is installed |
 | package.pic | guest PC-relative absolute references | full report | 0 | the guest must be relocatable (D9) |
@@ -173,8 +173,10 @@ at the 1.02 GHz retail clock and 720p handheld**. Below 30 fps is a fail. 45 fps
   It is informative (`render_perf.gpu[].required`) until a console run measures the GPU.
 - **Whole frame (S15).** `perf.budget.<clock>` takes the scenario as the build is placed today (`perf.budget`), not a
   plan.
-  - Its `target_60` verdict (the mid worst frame within 16.7 ms) passes only when the budget's inputs hold a
-    measurement (frameprof or the render report).
+  - The gate judges the scenario's `worst_frame_ms` itself against the target's frame (16.7 ms): pass when the hi
+    case fits, fail when even the lo case misses, otherwise uncertain. S15's own `verdicts` are shown but not used:
+    frame_budget.py judges a `stretch` target on the typical frame (V1 R16).
+  - A pass counts only when the budget's inputs hold a measurement (frameprof or the render report).
   - `uncertain` and a model-only pass are no-data; `fail` fails.
 - **Which clock counts.** The stock clock, 1.02 GHz (`required: true`). The boost clock is reported as informative
   (`required: false`).
