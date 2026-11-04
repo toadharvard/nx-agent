@@ -80,7 +80,7 @@ section used the header).
 | `DistantLODShader` | `DISTLOD1/2%03i` 2+2 | `landlod` | ADT_OptLOD, LANDLO_A, LANDO_Am | distant land and object LOD |
 | `SkyShader` | `SKY*.vso/pso` 21 named binaries | `sky\sky[_quad]` | SKYBASEPRE, SKY, SKY_STARS/TEXTURE/CLOUDS/MOON_STARS_MASK (568-574, the first alpha passes), SKY_SUNGLARE | |
 | `WaterShader` | `WATER%03i.pso` 38, `WATER000-002.vso` | `water\2_ab\*` (water, waterhmap, displace, waterlighting) | WATER* 648-718 (accumulator group base 648: wading, interior, no-reflection/refraction/depth, Vc; 705 = WATER_NO_REFLECTIONS_Vc), WATER_LOD, WATER_DEPTH* 728-747 | |
-| `ParticleShader`, `PrecipitationShader` | `PAR2%03i` 20 VS, `PARTICLE.*`, `PRECIP%03i` 4+2 | `particle`, `precipitation` | PARTICLE, PARTICLE_PREPASS, PRECIPITATION_RAIN | GPU-side particle expansion |
+| `ParticleShader`, `PrecipitationShader` | `PARTICLE.*` (BSParticleShader), `NOLIGHTING_PSYS*`, `PRECIP%03i` 4+2 (`PAR2%03i` is ShadowLightShader's parallax set, not particles; render-veg) | `particle`, `precipitation` | PARTICLE, PARTICLE_PREPASS, PRECIPITATION_RAIN | GPU-side particle expansion |
 | `GeometryDecalShader` | `GDECAL[S].vso`, `GDECAL.pso` | `decal` | GEOMDECAL[_S] | skinned decals |
 | `BSShaderBloodSplatter` | `BS.*`, `BSF.*` | `BloodSplatter` | BLOOD_SPLATTER[_FLARE] | screen-space splats |
 | `BoltShader`, `BeamShader` | `BOLT.*`, `BEAM.*` | `bolt`, `beam` | BOLT, BEAM | |
@@ -123,7 +123,7 @@ colour, plus image-space `EFFECT_WATER_FFT` (8 shader steps: spectrum, butterfli
   `BSTreeNode`/`BSTreeModel`; three draws per tree (branch, frond, leaf) with per-tree wind/rotation constants;
   `BSDistantTreeShader` draws far trees as billboards.
 * **Particles**: `niparticle` simulates on the CPU, `NiParticles` geometry is uploaded each frame (dynamic group) and
-  expanded by `PAR2` VS (20 variants); `NOLIGHTING_PSYS*` for simple systems. `BSTempEffect*` (170 references)
+  expanded by `PARTICLE.vso` (BSParticleShader; `PAR2xxx` are ShadowLightShader PARALLAX programs, corrected by render-veg); `NOLIGHTING_PSYS*` for simple systems. `BSTempEffect*` (170 references)
   manages impact/temporary effects.
 * **Decals**: geometry decals (`GeometryDecalShader`, skinned and static) and `BSShaderBloodSplatter` (screen).
 
