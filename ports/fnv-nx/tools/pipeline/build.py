@@ -96,6 +96,8 @@ CONFIG = [
     ('PROGRAM_ID', '0100000000000000', 'title whose exefs is overridden (SD path atmosphere/contents/<id>/)'),
     ('TESTS', 'all', 'comma list of test suites to run (names in docs/BUILD.md), all, or none'),
     ('EMU_TIMEOUT', '3000', 'seconds for the emulated boot of the game guest (boot stage)'),
+    ('EMU_BUDGET', '6000000000', 'instructions per scheduling slice of the emulated boot (S5\'s value for game boots: '
+                                 'the loader\'s code pointer scan of a real data image needs billions)'),
     ('FORCE', '', 'comma list of stages to rerun even when cached (all = every stage)'),
     ('CLEAN_WORK', '1', '1: remove re-creatable work trees (clones, third-party build dirs) once their stage or test '
                         'suite succeeded; 0: keep them for faster reruns'),
@@ -1948,7 +1950,7 @@ class Boot(Stage):
                                      'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
                 up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
                 synth_inputs_id(b) if img == 'auto' else '',
-                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT']]
+                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], b.cfg['EMU_BUDGET']]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'boot', 'emu.log'))
@@ -1965,7 +1967,7 @@ class Boot(Stage):
         shutil.rmtree(root, ignore_errors=True)
         os.makedirs(root)
         argv = [PY, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_guest.py'), nso, '--elf', elf, '--skip-faulting-init',
-                '--expect', 'fnvnx boot: calling WinMain', '--root', root]
+                '--expect', 'fnvnx boot: calling WinMain', '--root', root, '--budget', b.cfg['EMU_BUDGET']]
         image = boot_image(b, r, d)
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'
         if image:
@@ -1976,7 +1978,7 @@ class Boot(Stage):
         b.say('boot: emulated boot of the game guest (tests/s5/emu_guest.py, at most %d s)' % tmo)
         rc = b.sh(argv, elog, cwd=ROOT, timeout=tmo)
         shutil.rmtree(root, ignore_errors=True)
-        lines = open(elog, errors='replace').read().splitlines()
+        lines = [l for l in open(elog, errors='replace').read().splitlines() if not l.startswith('$ ')]
         winmain = any('fnvnx boot: calling WinMain' in l for l in lines)
         stop = next((l.strip() for l in reversed(lines) if l.startswith('STOPPED:')), None)
         skipped = next((int(m.group(1)) for l in reversed(lines)
@@ -1990,7 +1992,7 @@ class Boot(Stage):
         r['stop'] = stop
         # the fault that stopped the boot (the last trace block: pc, lr, call frames) and the skipped initializers
         # grouped by fault (tests/s5/emu_guest.py skip-summary lines)
-        starts = [i for i, l in enumerate(lines) if l.startswith('== trace (fault')]
+        starts = [i for i, l in enumerate(lines) if l.startswith('== trace (')]
         fault = []
         if starts:
             fault = [lines[starts[-1]].strip()]
@@ -2000,8 +2002,8 @@ class Boot(Stage):
                 fault.append(l.strip())
         r['fault'] = fault
         r['skip_summary'] = [l.split('\t')[1:] for l in lines if l.startswith('skip-summary\t')][:30]
-        r['milestones'] = list(dict.fromkeys(l.strip() for l in lines if not l.startswith('$ ') and re.search(
-            r'fnvnx boot: (?!trap|initializer #|import )', l)))[:40]
+        r['milestones'] = list(dict.fromkeys(l.strip() for l in lines if re.search(
+            r'fnvnx boot: (?!trap|initializer #|import )', l)))[:80]
         if rc == 124:
             r.note('the emulator ran into EMU_TIMEOUT=%d s' % tmo)
         if any(l.startswith('Traceback') for l in lines) and stop is None:
@@ -2028,10 +2030,10 @@ class Boot(Stage):
         open(flog, 'w').close()
         frc = b.sh(fargs, flog, cwd=ROOT, timeout=1800)
         ftext = open(flog, errors='replace').read()
-        mm = re.search(r'(\d+) untranslated keys hit, (\d+) hits', ftext)
+        mm = re.search(r'(\d+) untranslated keys hit(?:, (\d+) hits)?', ftext)
         if mm:
             r.metric('frontier_keys', int(mm.group(1)))
-            r.metric('frontier_hits', int(mm.group(2)))
+            r.metric('frontier_hits', int(mm.group(2) or 0))
         fu = os.path.join(d, 'frontier_units.tsv')
         if os.path.isfile(fu):
             r.metric('frontier_units', sum(1 for l in open(fu, errors='replace') if l.strip() and not l.startswith(('#', 'rank', 'unit'))))

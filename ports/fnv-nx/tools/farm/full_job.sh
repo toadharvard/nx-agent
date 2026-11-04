@@ -16,7 +16,8 @@
 # check: numbers, unit names and short diagnostics only (tools/farm/full_report.py). The job exits 0 once the
 # report is written; the report states make's exit code.
 #
-# Needs (Ubuntu 24.04): git python3 make curl jq dpkg-deb gcc g++ llvm-18 (llvm-undname) qemu-user (tests),
+# Needs (Ubuntu 24.04): git python3 make curl jq dpkg-deb gcc g++ llvm-18 (llvm-undname); qemu-user, cmake, meson,
+# ninja-build for some test suites (skipped without them),
 # for fnvnx-a64: libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex; python: unicorn pyelftools.
 # FARM_APT=1 installs the missing ones with apt-get / pip (as root). The AArch64 cross compiler needs no package.
 #
@@ -36,7 +37,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 t0=$(date +%s)
 
 # 0. Host packages (the toolchain build's own only when it has to build fnvnx-a64, see step 3).
-NEED_APT="git python3 python3-pip make curl jq dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex"
+NEED_APT="git python3 python3-pip make curl jq dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson"
 host_check() {   # commands (py:<module> for python modules) -> installed with apt-get / pip when FARM_APT=1
 	local missing="" c
 	for c in "$@"; do
@@ -104,7 +105,9 @@ t1=$(date +%s)
 
 # 5. Report.
 python3 -I "$P/tools/farm/full_report.py" "$B/build" "$REPORT" --commit "$COMMIT" --make-rc "$rc" \
-	--seconds $((t1 - t0)) --hide FARM_HOME="$FARM_HOME" SRC="$SRC" > /dev/null
+	--seconds $((t1 - t0)) --hide FARM_HOME="$FARM_HOME" SRC="$SRC" EXT="$EXT" TOOLCHAIN="$TCB" \
+	${FNVNX_TC:+FNVNX_TC="$FNVNX_TC"} ${DEVKITPRO:+DEVKITPRO="$DEVKITPRO"} ${PRISTINE_OBJS:+PRISTINE_OBJS="$PRISTINE_OBJS"} \
+	HOME="$HOME" > /dev/null
 
 # 6. Keep the FARM_KEEP newest builds.
 ls -1dt "$FARM_HOME"/full-* 2>/dev/null | tail -n +$((${FARM_KEEP:-2} + 1)) | while read -r old; do
