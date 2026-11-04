@@ -130,7 +130,7 @@ struct Packet {                  // 64 bytes
 };
 static_assert(sizeof(Packet) == 64, "Packet");
 
-// LSD radix sort of (key, index) pairs, 16 bits per pass, skips passes whose digit is constant. Stable.
+// LSD radix sort of (key, index) pairs, 8 bits per pass (one histogram pass), skips constant digits. Stable.
 void SortPackets(const Packet* p, uint32_t n, uint32_t* order, uint32_t* tmp, uint64_t* keys, uint64_t* ktmp);
 
 // ---- frame graph ------------------------------------------------------------------------------------------------

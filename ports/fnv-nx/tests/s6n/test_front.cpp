@@ -5,6 +5,7 @@
 #include "nx/skin.h"
 #include "../../render/native/gl/nxgl.h"
 #include <stdio.h>
+#include <algorithm>
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -189,7 +190,28 @@ static void test_ubo_ring_capacity() {
     be.info.frames_in_flight = 2;
 }
 
+static void test_sort_property() {
+    // stable and equal to std::stable_sort on random 64-bit keys with many ties (C65's property, 8-bit digits)
+    static nx::Packet pk[4000];
+    static uint32_t order[4000], tmp[4000], ref[4000];
+    static uint64_t keys[4000], ktmp[4000];
+    uint64_t rng = 12345;
+    auto rnd = [&]() { rng = rng * 6364136223846793005ull + 1442695040888963407ull; return rng >> 11; };
+    int bad = 0;
+    for (int set = 0; set < 200; set++) {
+        uint32_t n = 1 + (uint32_t)(rnd() % 4000);
+        uint64_t mask = rnd() | rnd() << 32;   // which key bits vary in this set
+        for (uint32_t i = 0; i < n; i++) { pk[i].key = (rnd() % 7 == 0 ? (rnd() | rnd() << 40) : (rnd() % 16) * 0x0101010101010101ull) & mask; ref[i] = i; }
+        nx::SortPackets(pk, n, order, tmp, keys, ktmp);
+        std::stable_sort(ref, ref + n, [&](uint32_t a, uint32_t b) { return pk[a].key < pk[b].key; });
+        if (memcmp(order, ref, n * 4)) bad++;
+        for (uint32_t i = 0; i < n; i++) if (keys[i] != pk[order[i]].key) { bad++; break; }
+    }
+    CHECK(bad == 0);
+}
+
 int main() {
+    test_sort_property();
     test_ubo_ring_capacity();
     test_skin_palette();
     test_dynres();

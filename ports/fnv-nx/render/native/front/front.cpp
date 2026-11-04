@@ -166,22 +166,36 @@ uint32_t* Encoder::Op(uint32_t op, uint32_t argc) {
 
 // ---- sorter ---------------------------------------------------------------------------------------------------
 void SortPackets(const Packet* p, uint32_t n, uint32_t* order, uint32_t* tmp, uint64_t* keys, uint64_t* ktmp) {
+    // LSD radix over the full 64-bit key in 8-bit digits: all 8 histograms in one pass over the keys (8 KiB, L1
+    // resident), digits identical in every key skipped, ping-pong buffers. Stable. (P6n F2: the former 16-bit
+    // digits cleared and prefix-summed a 256 KiB table per digit: ~1.9 M fixed instructions per frame.)
+    static uint32_t hist[8][256];
+    memset(hist, 0, sizeof hist);
+    if (!n) return;
+    const uint64_t k0 = p[0].key;
     uint64_t diff = 0;
-    for (uint32_t i = 0; i < n; i++) { order[i] = i; keys[i] = p[i].key; diff |= keys[i] ^ keys[0]; }
-    static uint32_t count[65536];
-    for (int shift = 0; shift < 64; shift += 16) {
-        if (!((diff >> shift) & 0xFFFF)) continue;  // digit identical everywhere: nothing to do
-        memset(count, 0, sizeof count);
-        for (uint32_t i = 0; i < n; i++) count[(keys[i] >> shift) & 0xFFFF]++;
-        uint32_t sum = 0;
-        for (uint32_t d = 0; d < 65536; d++) { uint32_t c = count[d]; count[d] = sum; sum += c; }
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t pos = count[(keys[i] >> shift) & 0xFFFF]++;
-            tmp[pos] = order[i]; ktmp[pos] = keys[i];
-        }
-        memcpy(order, tmp, n * sizeof *order);
-        memcpy(keys, ktmp, n * sizeof *keys);
+    for (uint32_t i = 0; i < n; i++) {
+        const uint64_t k = p[i].key;
+        order[i] = i; keys[i] = k; diff |= k ^ k0;
+        hist[0][k & 255]++; hist[1][(k >> 8) & 255]++; hist[2][(k >> 16) & 255]++; hist[3][(k >> 24) & 255]++;
+        hist[4][(k >> 32) & 255]++; hist[5][(k >> 40) & 255]++; hist[6][(k >> 48) & 255]++; hist[7][k >> 56]++;
     }
+    uint32_t *o = order, *ot = tmp;
+    uint64_t *k = keys, *kt = ktmp;
+    for (int d = 0; d < 8; d++) {
+        const int sh = 8 * d;
+        if (!((diff >> sh) & 255)) continue;   // digit identical everywhere: nothing to do
+        uint32_t* c = hist[d];
+        uint32_t sum = 0;
+        for (int b = 0; b < 256; b++) { uint32_t t = c[b]; c[b] = sum; sum += t; }
+        for (uint32_t i = 0; i < n; i++) {
+            const uint32_t pos = c[(k[i] >> sh) & 255]++;
+            ot[pos] = o[i]; kt[pos] = k[i];
+        }
+        uint32_t* t1 = o; o = ot; ot = t1;
+        uint64_t* t2 = k; k = kt; kt = t2;
+    }
+    if (o != order) { memcpy(order, o, n * sizeof *order); memcpy(keys, k, n * sizeof *keys); }
 }
 
 // ---- dynamic records ----------------------------------------------------------------------------------------------
