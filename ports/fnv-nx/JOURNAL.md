@@ -2641,3 +2641,36 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - R4-3: designed, not implemented. resolve asks the probe for "base typeinfo as unit U sees it", vtables.py
     synthesizes it, and apply retargets to it. It needs probe changes, so it can only be measured on the farm.
 * **verified** - All 7 link suites pass.
+
+### J-0120 | 2026-11-04 | stream: S1-compile,S13-difffuzz | status: wip | parent: J-0107,J-0117,J-0119
+
+* **did** - S1 (second agent):
+  - `329c125` VTBL1 A660A0Map (loader map 0x011f4784, vftable 0x0109bf4c): the NiTMapBase slots 1-6 are declared in
+    MSVC order. All six stay vslot traps, because the decomp has none of their functions.
+  - `c3875ba` FRIEND1 (new, neutral): forward-declares a class that a `friend class X;` makes visible in MSVC.
+  - `a8f2a99` INIT1 (new, platform): one static NiMainSDM in blk_00a80000_o2.cpp, run by `.init_array` after
+    boot_banner. known_faults drops its `before-winmain` entry.
+  - `1563cb8`: SSE1 lane access, SSE2 `T(_mm_x)(...)` prototypes and local intrinsic definitions, `_CRT_ALIGN` as a
+    class-head decoration, and tree-view types in commctrl.h.
+  - `80ddb66`: CTOR1's gate differences are marked by design.
+* **measured** - S1 local minimal trees: 15 units to 0 errors, hkgpmesh 7 -> 3, 175 errors fewer, none worse. The next
+  census is expected near 50 failing (was 70).
+* **found** - No slot functions exist in the decomp for any of the 7 boot-hit image vtables (INISettingCollection and
+  derived, BSSimpleArray, IOFreeQueue).
+  - GameSettingCollection 0x0101212c has slots 5, 7 and 10 in the decomp. Slot 1 (Add) has only an interface-position
+    candidate, 0x00404de0, and stays a trap.
+  - With the player's exe, these faults should largely go away: the image vftables then hold real x86 slot addresses,
+    and S3's code-pointer pass rewrites the ones it can validate to native code. The synthesized image has zeros there.
+    The exe is therefore the main lever for the S1:virtuals class.
+* **found** - Two full prepares of the same tree differed in one GAME1 edit (activeeffect_local.h, 31 vs 32 edits).
+  This may be a hash-order dependence; prepare runs without a fixed PYTHONHASHSEED. Unproven, for S1.
+* **did** - S13 `2a77e23` difffuzz-11 (HARNESS bump).
+  - CRT provider addresses that are harness builtins run as builtins on the oracle too.
+  - Adaptive follow answers call-count divergences.
+  - New causes: `native-undefined` (hard, S1/S2c: the native calls a name the link binds to nothing, e.g.
+    `NiPoint3_helper::operator*`, declared-only destructors) and `vptr-unpaired` (soft, S2c).
+  - Of the 16-sample triage per bucket, most were harness gaps. The real port classes have gone to S1b (this differs,
+    uninitialised arguments, an out-pointer, libcall length) and S1 (a layout case in 00600700).
+* **found** - The owner's game-data download (`curl ... | bash`) failed with `Recv failure: Connection reset by peer`
+  at the TLS handshake, so nothing was downloaded. Freed 6 GB of retired scratch to make room (9.5 GB free; GOG FNV is
+  about 10 GB).
