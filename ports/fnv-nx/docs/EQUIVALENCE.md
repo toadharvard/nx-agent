@@ -341,7 +341,8 @@ its recipe compiler and flags; objects are kept and fingerprinted again whenever
 whose include closure did not change between two rule sets reuse the earlier objects (compare_builds' closure test).
 
 What the rules include is given its MSVC meaning (`tools/equiv/msvc/`): `fnvnx_win32.h` = the real `<windows.h>`
-(SDK v6.0A) adjusted where the target shim deliberately differs (no A/W name macros, no `min`/`max`, the shim's
+(SDK v6.0A) adjusted where the target shim deliberately differs (no A/W name macros, no `min`/`max`, no object-like
+SDK macros the decomp uses as its own names: winerror.h's `ERROR_*`, `small`, `hyper`, `Yield`, `_FILETIME_`, the shim's
 looser parameter types and `void *` overloads as dllimport declarations of the same imports, `_ULARGE_INTEGER` with
 the forward-declared class key), `fnvnx_crt.h` / `fnvnx_iobuf.h` = MSVC's CRT headers, `fnvnx_new.h` = MSVC's
 placement forms, and for prepared trees only `fnvnx_equiv_compat.h` = what `fnvnx_compat.h` declares for DECL1
