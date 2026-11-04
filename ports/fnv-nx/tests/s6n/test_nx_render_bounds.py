@@ -62,6 +62,11 @@ CASES = [
      {1}, 'CLR rect count'),
     ('B14 VSCF start 0xFFFFFFFF count 2', 'd3d9', D9 + DEV + rec('VSCF', 0xFFFFFFFF, 2, raw=b'\0' * 32), {0}, None),
     ('B15 DRAW 0xFFFFFFFF triangles', 'd3d9', D9 + DEV + rec('DRAW', 4, 0, 0xFFFFFFFF), {3}, None),
+    ('B17 TEXC bytes past the record', 'd3d9', D9 + DEV + rec('TEX', 1, 21, 1, 1, 1, 2, 24, raw=b'\0' * 24) + rec('TEXC', 1, 0, 0, 0xFFFFFFF0), {1}, 'TEXC'),
+    ('B18 TEXC face 9 (ignored)', 'd3d9', D9 + DEV + rec('TEX', 1, 21, 1, 1, 1, 2, 24, raw=b'\0' * 24) + rec('TEXC', 1, 9, 0, 4, raw=b'\0' * 4), {0}, None),
+    ('B19 TEXC face bytes != level / 6', 'd3d9', D9 + DEV + rec('TEX', 1, 21, 1, 1, 1, 2, 24, raw=b'\0' * 24) + rec('TEXC', 1, 0, 0, 8, raw=b'\0' * 8), {1}, 'face bytes'),
+    ('B19b cube level bytes not six faces', 'd3d9', D9 + DEV + rec('TEX', 1, 21, 1, 1, 1, 2, 20, raw=b'\0' * 20), {1}, 'six faces'),
+    ('B19c cube not square', 'd3d9', D9 + DEV + rec('TEX', 1, 21, 2, 1, 1, 2, 48, raw=b'\0' * 48), {1}, 'square'),
     ('B16 record length 0xFFFFFFFF', 'd3d9', D9 + struct.pack('<II', tag('RS'), 0xFFFFFFFF), {1}, 'truncated'),
     # NXCAP
     ('B20 MEMC 0 bytes', 'nxcap', CAP + rec('MEMC', 1, 0, 0), {1}, 'memory block'),

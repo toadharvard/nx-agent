@@ -25,6 +25,7 @@ TREE=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd)
 LIST=${3:-}; JOBS=${4:-$(nproc)}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
 CXX=${CXX:-aarch64-linux-gnu-g++}
+CC=${CC:-aarch64-linux-gnu-gcc}
 SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
 OPT=${OPT:--O2}
 FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -ffp-contract=off -fPIC -fpermissive -Werror=return-type -Wno-narrowing -fmax-errors=20
@@ -49,17 +50,19 @@ ORDER_ARGS=${ORDER_ARGS:-rtl}
 # ORDER_REFCOUNT=weak: refcount sites of InterlockedIncrement/Decrement relaxed / release (docs/ORDERING.md
 # "Refcounts"); full keeps x86 lock semantics everywhere (A/B, or a suspected refcount ordering bug).
 ORDER_REFCOUNT=${ORDER_REFCOUNT:-weak}
-# ORDER_OBJECT=first|last (ORDER-OBJECT: a member call's object before or after its arguments) and
-# ORDER_OPERATOR=cpp17|rtl (ORDER-OPERATOR: overloaded <<, >>, [], ->* left to right as C++17, or like any MSVC call);
-# docs/ORDERING.md, tests/s12/order/evalorder.cpp. ORDER_OBJECT=last is the build: MSVC's thiscall pushes the arguments
-# and loads ecx last, and the decomp (byte-matched against MSVC) has calls that work only that way. ORDER_OPERATOR=rtl:
-# MSVC 2008 predates C++17 and compiles an overloaded operator as a plain call (arguments pushed right to left).
-# S11's MSVC run of evalorder.cpp confirms both; first / cpp17 are GCC's own order, for A/B.
-ORDER_OBJECT=${ORDER_OBJECT:-first}   # reverted to first pending S12+S11: V1 C2v (virtual calls: MSVC object first, 5 of 5)
-ORDER_OPERATOR=${ORDER_OPERATOR:-cpp17}   # reverted to cpp17 pending S12+S11: V1 C2a (addassign-builtin: MSVC pa)
+# ORDER_OBJECT / ORDER_OPERATOR / ORDER_ASSIGN: evaluation order as MSVC 2008 x86, per shape, from S11's recorded
+# MSVC runs (tests/s11/order/order.msvc, all five configurations; docs/ORDERING.md "Evaluation order"):
+#   ORDER_OBJECT=msvc    a direct member call (member operators too) evaluates its arguments, then the object; a
+#                        virtual call the object first; a call through a pointer to member the arguments first
+#   ORDER_OPERATOR=rtl   an overloaded <<, >>, [], ->* is a plain call: operands right to left (C++17: left to right)
+#   ORDER_ASSIGN=msvc    a built-in compound assignment evaluates its left operand first (C++17: the right one)
+# first / cpp17 / cpp17 are GCC's own order, for A/B only.
+ORDER_OBJECT=${ORDER_OBJECT:-msvc}
+ORDER_OPERATOR=${ORDER_OPERATOR:-rtl}
+ORDER_ASSIGN=${ORDER_ASSIGN:-msvc}
 FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS"
         -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
-        -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR")
+        -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR" -fplugin-arg-fnvnx_order-assign="$ORDER_ASSIGN")
 if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
 # ORDER_KEYS: the whole program's key list (docs/ORDERING.md "Whole-program keys"): every field and global that some
 # unit hands to Interlocked* (directly or through a forwarder) or polls in a wait-only loop. Their plain accesses are
@@ -76,11 +79,14 @@ export CXX TREE OUT FLAGS_STR="${FLAGS[*]}" ORDER_KEYS
 if [ -z "$LIST" ]; then LIST="$OUT/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
 
 # ---- whole-program keys: discover=<unit>.keys under -fsyntax-only (no code generation), merged and sorted
+keys_key() { printf '%s' "$1" | sha256sum | cut -c1-24; }   # src/a_b.cpp and src_a/b.cpp must not share a file
 keys_one() {
-  local src=$1 k dep stale=0
-  k="$OUT/.keys/$(echo "$1" | tr / _).keys"
-  # up to date only when newer than the unit and than every header it includes (its .d from the last discovery)
-  if [ -f "$k" ] && [ -f "$k.d" ] && [ "$k" -nt "$TREE/$src" ]; then
+  local src=$1 k dep stale=0 h
+  k="$OUT/.keys/$(keys_key "$1").keys"
+  h=$(sha256sum < "$TREE/$src" | cut -c1-16)
+  # up to date only when the unit's content is the same (a copy with an older mtime is still a change) and no header
+  # it includes (its .d from the last discovery) is newer
+  if [ -f "$k" ] && [ -f "$k.d" ] && [ "$(cat "$k.src" 2>/dev/null)" = "$h" ]; then
     for dep in $(sed -e 's/\\$//' -e 's/^[^:]*://' "$k.d"); do
       case $dep in /*) ;; *) dep=$TREE/$dep ;; esac
       if [ ! -e "$dep" ] || [ "$dep" -nt "$k" ]; then stale=1; break; fi
@@ -92,6 +98,7 @@ keys_one() {
      -fplugin-arg-fnvnx_order-discover="$k.tmp" "$src") > /dev/null 2>&1 || true   # a unit that does not compile still contributes what it parsed
   if [ -f "$k.tmp" ]; then mv "$k.tmp" "$k"; else : > "$k"; fi
   if [ -f "$k.d.tmp" ]; then mv "$k.d.tmp" "$k.d"; else echo "x: $src" > "$k.d"; fi
+  echo "$h" > "$k.src"
 }
 if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
   KEYFLAGS_STR=$(printf '%s\n' "${KEYFLAGS[@]}" | grep -vxF -- -c | tr '\n' ' ')
@@ -100,11 +107,11 @@ if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
           sha256sum | cut -c1-16)
   if [ "$(cat "$OUT/.keys/.stamp" 2>/dev/null)" != "$stamp" ]; then rm -rf "$OUT/.keys"; fi
   mkdir -p "$OUT/.keys"; echo "$stamp" > "$OUT/.keys/.stamp"
-  export KEYFLAGS_STR; export -f keys_one
+  export KEYFLAGS_STR; export -f keys_one keys_key
   jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$OUT/.keys/units.list"
   xargs -a "$OUT/.keys/units.list" -P "$JOBS" -I{} bash -c 'keys_one "$@"' _ {}
   # forwarders defined in one unit and called in another are resolved over all units (keys_merge.py)
-  while read -r src; do echo "$OUT/.keys/$(echo "$src" | tr / _).keys"; done < "$OUT/.keys/units.list" > "$OUT/.keys/files.list"
+  while read -r src; do echo "$OUT/.keys/$(keys_key "$src").keys"; done < "$OUT/.keys/units.list" > "$OUT/.keys/files.list"
   python3 "$HERE/toolchain/order/keys_merge.py" --list "$OUT/.keys/files.list" > "$OUT/order.keys.tmp"
   # replaced only when it changes: its mtime decides which objects are stale (compile_one)
   if cmp -s "$OUT/order.keys.tmp" "$OUT/order.keys"; then rm "$OUT/order.keys.tmp"; else mv "$OUT/order.keys.tmp" "$OUT/order.keys"; fi
@@ -115,6 +122,24 @@ elif [ "$ORDER_KEYS" != unit ] && [ ! -f "$ORDER_KEYS" ]; then
 fi
 if [ "${KEYS_ONLY:-0}" = 1 ]; then exit 0; fi
 
+# C units (third_party/zlib-1.2.1/*.c; MSVC compiled them as C: K&R definitions, C names such as `_adler32`) build
+# with the C compiler (tools/census.sh does the same): the same flags with C's -std, without the C++-only ones and
+# without the plugins (fnvnx_order is built against the C++ front end). The plugins have nothing to do there: the
+# zlib sources have no volatile access, no Interlocked call and no floating-point type, and their portable C does not
+# depend on argument evaluation order. Every unit gets its units.json /D defines (only zlib has any).
+CFLAGS=()
+for f in "${FLAGS[@]}"; do
+  case $f in -std=gnu++17) CFLAGS+=(-std=gnu99) ;; -fpermissive|-Wno-narrowing|-fplugin=*|-fplugin-arg-*) ;; *) CFLAGS+=("$f") ;; esac
+done
+export CC CFLAGS_STR="${CFLAGS[*]}"
+jq -r '.units[] | [.source, ([.flags[]? | select(startswith("/D")) | "-D" + .[2:]] | join(" "))] | @tsv' \
+  "$TREE/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
+# Objects are kept only while the flags (the order options included), the plugins and the shim headers stay the
+# same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
+objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
+            xargs -0 cat) | sha256sum | cut -c1-16)
+if [ "$(cat "$OUT/.objstamp" 2>/dev/null)" != "$objstamp" ]; then rm -f "$OUT"/*.o; echo "$objstamp" > "$OUT/.objstamp"; fi
+
 compile_one() {
   local src=$1 base
   base="$OUT/$(echo "$1" | tr / _)"
@@ -122,7 +147,11 @@ compile_one() {
     return
   fi
   # shellcheck disable=SC2086
-  if (cd "$TREE" && timeout 900 $CXX $FLAGS_STR "$src" -o "$base.o.tmp") > "$base.log" 2>&1; then
+  local cc=$CXX flags=$FLAGS_STR defs
+  case $src in *.c) cc=$CC; flags=$CFLAGS_STR ;; esac
+  defs=$(awk -F'\t' -v s="$src" '$1 == s {print $2; exit}' "$OUT/defines.tsv")
+  # shellcheck disable=SC2086
+  if (cd "$TREE" && timeout 900 $cc $flags $defs "$src" -o "$base.o.tmp") > "$base.log" 2>&1; then
     mv "$base.o.tmp" "$base.o"
   else
     rm -f "$base.o.tmp" "$base.o"

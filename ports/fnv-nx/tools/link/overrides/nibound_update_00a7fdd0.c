@@ -6,7 +6,10 @@
  * 0-2 (lane 3 holds the translation and is not used), so the three row dot products run as three lanes:
  * (m[i][0] c0 + m[i][1] c1) + m[i][2] c2, the decomp's order, each product and sum a float operation, no fused
  * multiply-add (build.sh: -ffp-contract=off). Then x scale and + translation per lane, and radius x scale in lane 3.
- * Bit-identical lane by lane (tests/s15/simd/nibound_test.c).
+ * Bit-identical lane by lane for every non-NaN result (tests/s15/simd/nibound_test.c).
+ * A NaN result is a NaN, but its sign and payload may differ from the decomp's compiled code: when two NaN
+ * operands meet, AArch64 returns the first one, and GCC commutes operands freely in either build (V1, SL1).
+ * The tests accept any NaN for any NaN; PERF.md 11.6 says why no new difference arises.
  *
  * Layouts (ILP32 and x86 alike): NiBound {center x, y, z; radius} 16 bytes; NiTransform {rotation 3x3 row-major at
  * 0, translation at 36, scale at 48} 52 bytes. The 16-byte load at +36 reads the translation and the scale, inside

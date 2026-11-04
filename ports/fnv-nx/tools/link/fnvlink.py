@@ -46,6 +46,7 @@ import vtables  # noqa: E402
 import vslots as msvc_vslots  # noqa: E402  (`vslots` is a local name in resolve)
 import bodies   # noqa: E402  (S2d: declared-only functions)
 import thisadj  # noqa: E402  (S2c-abi: MSVC entries of secondary-base overrides)
+import vacall   # noqa: E402  (S2c-abi: call-site argument types of variadic references)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
 DATA_END = 0x0200c612
@@ -451,6 +452,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
     shadowed = {}
     osigs = load_override_sigs(override)   # optional 4th column: the override's own MSVC-decorated signature
+    ova = load_override_va(override)       # optional 5th column: va=none|escape of a variadic override
     ms.need(osigs.values())
     pending = override_pending(override)
     stats_ov = collections.Counter()
@@ -506,6 +508,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     # ---- references
     layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
     probe_req = set()
+    vacall_req = set()   # (unit, undefined symbol) of variadic references whose call sites decide (vacall.py)
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
     stats = collections.Counter(pre_stats)
@@ -704,6 +707,15 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     stats['code_same_name' if natname == un else 'code_other_name'] += 1
                     # ABI: reference declaration vs definition
                     refdecl = note  # msvc name of the matched reference declaration
+                    if nd.get('msvc_entry') and refdecl and not isig.variant:
+                        # MSVC enters it with this at a secondary base (thisadj.py). A reference through another class
+                        # (a decomp shell declared at that subobject: 0x008d4870 calls 0x008805f0 with this at +0xa4)
+                        # passes the subobject, as the x86 caller did: it binds to the thunk (V2 T1)
+                        rq_, dq_ = msvc(refdecl), msvc(nd['msvc'] or '')
+                        if rq_.kind == 'func' and dq_.kind == 'func' and rq_.member and \
+                                rq_.qual[:-1] != dq_.qual[:-1]:
+                            target = MSVC_ENTRY_SYM % addr
+                            stats['msvc_entry_refs'] += 1
                     defdecl = nd['msvc']
                     cast = None
                     if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
@@ -751,7 +763,40 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 refdecl_key = '%s|cast %s(__%s*)(%s)' % (refdecl, ret_, cc_, params_)
                                 stats['cast_refs'] += 1
                         if rs.kind == 'func' and ds.kind == 'func':
-                            v = abi.compare(rs, ds)
+                            va_r = None   # what a variadic definition's body reads with va_arg (vacall VADEF, V2)
+                            if nd['unit'] is None and addr in ova:
+                                va_r = ova[addr]
+                                vacall_req.add((u.host or u.source, un))   # format literals of its callers
+                            elif nd['unit'] is not None and any(p_.strip() == '...' for p_ in ds.raw_params or ()):
+                                vacall_req.add((nd['unit'], nd['sym'].name))
+                                vacall_req.add((u.host or u.source, un))   # its format literals, in the same probe
+                                defs_ = vacall.load_defs(out, nd['unit'])
+                                va_r = defs_.get(nd['sym'].name) if defs_ else None
+                            v = abi.compare(rs, ds, va_reads=va_r)
+                            va_key = None
+                            if va_r == ('escape',) and v.kind == 'manual' and 'varargs' in v.classes:
+                                # the definition hands its va_list to vsnprintf: the call sites' format literals
+                                # decide what it reads (vacall.decide_format)
+                                fhost = u.host or u.source
+                                vacall_req.add((fhost, un))
+                                fm_ = vacall.load_fmts(out, fhost)
+                                v3_, suf_, st_ = vacall.decide_format(rs, ds, fm_.get(un) if fm_ else None)
+                                stats[st_] += 1
+                                if v3_ is not None:
+                                    v = v3_
+                                    if suf_:
+                                        va_key = refdecl + suf_
+                            if vacall.needs(v):
+                                # the definition reads the reference's anonymous arguments: the call sites' own
+                                # argument types decide (vacall.py, V1 VA-U1..U4)
+                                vhost = u.host or u.source
+                                vacall_req.add((vhost, un))
+                                calls_ = vacall.load(out, vhost)
+                                v2_, vs_, seq_, st_ = vacall.decide(rs, ds, calls_.get(un) if calls_ else None, va_r)
+                                stats[st_] += 1
+                                if v2_ is not None:
+                                    v, rs = v2_, vs_
+                                    va_key = '%s|va %s' % (refdecl, ','.join(seq_))
                             ecx_dead = False
                             if v.kind == 'x86-inconsistent' and ecx_use is not None and (
                                     'ecx-not-passed' in v.classes or 'this not passed by the reference' in v.notes):
@@ -795,6 +840,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                                  ['%s<-%s' % (d, s) for d, s, _, _ in v.moves] or []),
                                                  '; '.join(v.notes), ms[refdecl] or '', ms[defdecl] or ''))
                                 bkey = refdecl_key if cast and not cast_note else refdecl
+                                if va_key:   # one bridge per call-site signature (vacall)
+                                    bkey = va_key
                                 # an x86-inconsistent ecx-not-passed or pop-mismatch pair still gets the moves of the
                                 # arguments the reference does pass (the definition's ecx parameter is often unused:
                                 # 0x00bbbe30, 0x00a75ec0; a callee popping other stack bytes than the caller pushed
@@ -1185,6 +1232,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for r in abi_rows:
             f.write('\t'.join(r) + '\n')
 
+    with open(os.path.join(out, 'vacall_requests.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        for unit_, un_ in sorted(vacall_req):
+            f.write('%s\t%s\n' % (unit_, un_))
     with open(os.path.join(out, 'probe_requests.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for unit, t in sorted(probe_req):
             f.write('%s\t%s\n' % (unit, t))
@@ -1219,9 +1269,18 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'units: %d; shadowed.tsv)' % (stats['overrides'], stats['shadowed'], stats['shadow_inlined_units'])]
     if stats_ov:
         lines += ['override rows: ' + ', '.join('%s %d' % kv for kv in sorted(stats_ov.items()))]
+    lines += ['', 'variadic references decided by their call sites (vacall.py): %d decided, %d not bridgeable, %d call '
+              'sites disagree, %d units not recorded yet (vacall_requests.tsv: %d)' % (
+                  stats['vacall_decided'], stats['vacall_not_bridgeable'], stats['vacall_sites_disagree'],
+                  stats['vacall_unrecorded'], len(vacall_req))]
+    lines += ['', 'calls into vsnprintf-forwarding definitions decided by their format literals: %d exact, %d bridged, '
+              '%d non-literal or not modelled, %d sites disagree, %d not bridgeable' % (
+                  stats['format_exact'], stats['format_bridged'], stats['format_unknown'],
+                  stats['format_sites_disagree'], stats['format_not_bridgeable'])]
     lines += ['', 'MSVC entries at a secondary base (exe vftables, thisadj.py): %d addresses; the map names the '
-              '_ZThn thunk for %d, %d without a thunk' % (stats['msvc_entry_exe'], stats['msvc_entry_thunks'],
-                                                         stats['msvc_entry_no_thunk'])]
+              '_ZThn thunk for %d, %d without a thunk; references through another class bound to the thunk: %d'
+              % (stats['msvc_entry_exe'], stats['msvc_entry_thunks'], stats['msvc_entry_no_thunk'],
+                 stats['msvc_entry_refs'])]
     lines += ['', 'variables defined natively at a data-image address: %d (%d copies in objects whose unit does not '
               'name the address: STATIC1 header variables; %d second definitions of an address in one object)'
               % (len(data_defs), stats['rebound_copies'], stats['data_defs_same_address']),
@@ -1722,6 +1781,18 @@ def load_override_sigs(path):
             f = line.rstrip('\n').split('\t')
             if not line.startswith('#') and len(f) >= 4 and re.match(r'^[?@_][^\s]*$', f[3]):
                 out[override_key(f[0])] = f[3]
+    return out
+
+
+def load_override_va(path):
+    """Override table rows with a 5th column `va=<none|escape>`: {address: va_reads} of a variadic override (what
+    its body does with the anonymous arguments, abi.va_reads_check; the plugin does not read the C sources)."""
+    out = {}
+    if path:
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 5 and f[4].startswith('va='):
+                out[override_key(f[0])] = (f[4][3:],)
     return out
 
 
@@ -2572,6 +2643,7 @@ def main():
         jobs = int(sys.argv[4]) if len(sys.argv) > 4 else os.cpu_count()
         if cmd == 'probe':
             layout.run(sys.argv[2], sys.argv[3], jobs)
+            vacall.run(sys.argv[2], sys.argv[3], jobs)
         if os.path.exists(os.path.join(sys.argv[2], 'vtable_requests.tsv')) and \
                 (cmd == 'vtables' or not os.environ.get('FNVNX_NO_VTABLES')):
             vtables.run(sys.argv[2], sys.argv[3], jobs)

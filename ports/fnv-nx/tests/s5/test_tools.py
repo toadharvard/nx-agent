@@ -81,7 +81,7 @@ class NpdmTest(unittest.TestCase):
         self.assertTrue(d["is_64_bit"])
         self.assertEqual(d["address_space"], "32BitNoReserved")
         self.assertEqual(d["mmu_flags"], 0b101)
-        self.assertEqual(d["main_thread_stack_size"], 0x100000)
+        self.assertEqual(d["main_thread_stack_size"], 0x400000)   # NX1: 4x the PC exe's 1 MiB reserve, AArch64 frames are larger
         # 8 syscall descriptors (0xC0 SVCs / 24 per descriptor) + 6 others
         self.assertEqual(len(d["kernel_caps"]), 14)
         app_type = [c for c in d["kernel_caps"] if c & 0x3FFF == 0x1FFF]

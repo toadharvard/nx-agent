@@ -1652,8 +1652,9 @@ def r_falloff_traps(path, text, stats):
 # `char* NiSprintf(char*, unsigned int, const char*, ...)`, both bound to 0x00a305b0) when no call of that name in
 # the unit uses the returned value: every mention of the name outside its prototypes is a call that is a whole
 # expression statement (after `;`, `{`, `}`, `else` or the `)` of an if / while / for), and the parameters that differ
-# are 32-bit integers on both sides (int / unsigned int / size_t / long ...). The callee and the argument bits are the
-# same, and the return register is ignored either way (DUPINT1-RET).
+# are 32-bit integers on both sides (int / unsigned int / size_t / long ...), and both return types are void, an
+# integer or a pointer (a class returned by value passes a hidden result pointer, which would shift the arguments).
+# The callee and the argument bits are the same, and the return register is ignored either way (DUPINT1-RET).
 
 INT_TYPES = re.compile(r'^(?:(?:const|volatile|signed|unsigned|short|long|int|char|__int8|__int16|__int32|__int64|'
                        r'size_t|DWORD|UINT|INT|LONG|ULONG|WORD|BYTE|BOOL)\s*)+$')
@@ -1752,6 +1753,10 @@ def r_duplicate_int_overloads(path, text, stats):
         if len(addrs) != 1: continue
         if sigs[0][1] != sigs[1][1]:
             if a == b or not _results_unused(text, name): continue
+            # both results in a register (void, integer, pointer): a class returned by value has a hidden result
+            # pointer, which would shift the arguments (V1 D2)
+            if not all(r == 'void' or INT_TYPES.match(r) or re.search(r'[*]\s*(?:const\s*)?$', r) for r in (sigs[0][1], sigs[1][1])):
+                continue
             if not all(x == y or (INT32_TYPES.match(x) and INT32_TYPES.match(y)) for x, y in zip(a, b)): continue
             stats['DUPINT1-RET'] += 1
         drops += [m for types, ret, m in decls if types == b]
@@ -1841,6 +1846,7 @@ def r_namespace_template_decls(path, text, stats):
             if not m.group(2).strip(): continue        # `template <>`: an explicit specialization needs its primary first
             name = m.group(5)
             if not re.search(r'(?<![\w.>:~])%s\s*\(' % re.escape(name), block[:m.start()]): continue
+            if not m.group(2).strip(): continue          # `template <>`: an explicit specialization needs its primary first
             tparams = set(re.findall(r'(?:class|typename)\s+(\w+)', m.group(2)))
             words = set(re.findall(r'[A-Za-z_]\w*', m.group(4) + ' ' + m.group(6)))
             params = _split_args(m.group(6))
@@ -3316,6 +3322,11 @@ def r_pointer_zero_compares(path, text, stats):
         declared_other = re.search(r'\b(?:int|unsigned|short|char|long|float|double|bool|__int64|DWORD|UINT|size_t)\s+%s\b'
                                    % re.escape(name), local)
         if declared_other: continue
+        # `*p > 0` with `T* p` compares the pointee, a scalar (signed for `int* p`: `<= 0` is not `== 0`); the
+        # compare is the pointer's only through `**` (PTR1-DEREF)
+        if is_ptr and re.search(r'(?<![\w)\]])\*\s*$', text[max(0, m.start() - 4):m.start()]) \
+                and is_ptr.group(0).count('*') == 1:
+            continue
         if not is_ptr and not (name in funcs and not re.search(r'[\w\*&>]\s+%s\s*[=;,\[]' % re.escape(name), local)):
             continue
         out.append(text[pos:m.start(2)]); out.append('!=' if m.group(2) == '>' else '=='); pos = m.end(2)
@@ -4278,7 +4289,8 @@ POST.append(rename_std_definitions)
 # `c ? G(false) : x.f(a)`. Only where the other operand is the literal `true` / `false`, the G operand ends in a
 # call of a name the unit declares returning G with as many parameters as the call has arguments, and every
 # declaration of that name with that many parameters returns a class with an `operator bool()`, exactly one of them
-# with a bool constructor (hkgpmesh.cpp: GateE10, and S_e1ce10_Bool without one).
+# with a non-explicit bool constructor (hkgpmesh.cpp: GateE10, and S_e1ce10_Bool without one; with an explicit one
+# the conditional is bool), and the G operand is a postfix expression ending in that call (`!x.f(a)` is bool).
 
 COND1_CLASS = re.compile(r'\b(?:struct|class)\s+([A-Za-z_]\w*)\s*(?::[^{;]*)?\{')
 COND1_LIT = re.compile(r'\?\s*(false|true)\s*:(?!:)')
@@ -4317,7 +4329,8 @@ def r_conditional_bool_gates(path, text, stats):
         body = unit[m.end() - 1:prepare.match_brace(unit, m.end() - 1)]
         if re.search(r'\boperator\s+bool\s*\(\s*\)', body):
             booly.add(g)
-            if re.search(r'\b%s\s*\(\s*bool\b' % g, body): gates.add(g)
+            if re.search(r'(?<!explicit )(?<!explicit)\b%s\s*\(\s*bool\b' % g, re.sub(r'\bexplicit\s+', 'explicit ', body)):
+                gates.add(g)                       # an explicit G(bool) makes the conditional bool (V1 C2)
     if not gates: return text
     rets = {}                                      # (name, arity) -> {return type}
     for m in re.finditer(r'(?:^|[;{}\s])((?:const\s+)?[A-Za-z_]\w*[\s*&]*?)\s*\b([A-Za-z_]\w*)\s*\(([^()]*)\)\s*'
@@ -4334,6 +4347,11 @@ def r_conditional_bool_gates(path, text, stats):
         for cm in re.finditer(r'\b([A-Za-z_]\w*)\s*\(', x):
             if _call_end(x, cm.end() - 1) == len(x): call = cm; break
         if call is None: continue
+        # the operand is a postfix expression ending in the call (`x.f(a)`, `p->q.f(a)`, `f(a)`), not `!x.f(a)` or
+        # `a + x.f(a)`, whose type is not G (V1 C3)
+        if not re.match(r'^(?:::)?(?:[A-Za-z_]\w*(?:<[^<>;{}()]*>)?\s*(?:\[[^\[\]]*\]\s*)*(?:\.|->|::)\s*)*$',
+                        x[:call.start()]):
+            continue
         args = x[call.end():len(x) - 1]
         r = rets.get((call.group(1), _cond1_arity(args)), set())
         if len(r & gates) != 1 or not r <= booly: continue
@@ -4432,6 +4450,7 @@ def r_restrict_reference_args(path, text, stats):
 
 NEW5_DELETE = re.compile(r'\boperator\s+delete\s*(\[\s*\])?\s*\(([^;{}()]*)\)')
 NEW5_PLACEMENT = re.compile(r'^\s*void\s*\*\s*\w*\s*,\s*void\s*\*\s*\w*\s*$')
+NEW5_NEW = re.compile(r'\boperator\s+new\s*\(\s*(?:std::)?(?:size_t|unsigned(?:\s+int)?)(?:\s+[A-Za-z_]\w*)?\s*\)')
 NEW5_HEAD = re.compile(r'^(class|struct)\s+(?:\w+\s+)*?([A-Za-z_]\w*)\s*(:(?!:).*)?$', re.S)
 
 def r_placement_only_delete(path, text, stats):
@@ -4455,12 +4474,23 @@ def r_placement_only_delete(path, text, stats):
         hm = NEW5_HEAD.match(head)
         if not hm or hm.group(3): continue                                   # no base classes
         if not re.search(r'\bvirtual\s+~\s*%s\s*\(' % re.escape(hm.group(2)), text[o:c]): continue
+        # the class's own non-placement operator new (TexMap's from g_memoryManager): MSVC found no matching delete
+        # for it (C4291), so a throwing constructor frees nothing; with FNVNX_GLOBAL_DELETE GCC would free through it
+        # (V1 N2). FNVNX_NEW5_TAG makes that operator new a placement form under GCC (a defaulted tag parameter; empty
+        # under MSVC), which has no matching delete: nothing is freed, as on MSVC. Only an inline one (its decorated
+        # name is bound nowhere); a class whose operator new has no body here is left as it is.
+        tags, ok = [], True
+        for nm in NEW5_NEW.finditer(text, o, c):
+            if not re.match(r'\s*\{', text[nm.end():]): ok = False; break
+            tags.append((nm.end() - 1, ' FNVNX_NEW5_TAG'))
+        if not ok: continue
+        inserts += tags
         inserts.append((o + 1, ' public: FNVNX_GLOBAL_DELETE private:' if hm.group(1) == 'class'
                         else ' FNVNX_GLOBAL_DELETE'))
     if not inserts: return text
     out, pos = [], 0
     for at, s in sorted(inserts):
-        out.append(text[pos:at]); out.append(s + ' /* fnv-nx NEW5 */'); pos = at
+        out.append(text[pos:at]); out.append(s + ('' if s == ' FNVNX_NEW5_TAG' else ' /* fnv-nx NEW5 */')); pos = at
         stats['NEW5'] += 1
     out.append(text[pos:])
     return ''.join(out)
@@ -4536,7 +4566,92 @@ def r_namespace_crt_calls(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- FINL1
+#
+# A `__forceinline` declaration without a body (`__forceinline ~ReleaseValue();`, `__forceinline hkVector4&
+# getColumn(int i);`) of a function the unit never defines: its body is in another unit. MSVC compiled the call as an
+# ordinary call (it cannot inline what it has not seen). The shim's `__forceinline` is `inline
+# __attribute__((always_inline))`, and GCC refuses to compile such a call when it optimizes ("inlining failed in call
+# to 'always_inline' ...: function body not available": tile_ob1_variant, three Havok _rtm_variant agents,
+# blk_00ae0000_od_ob1; only the real compile fails, the -fsyntax-only census does not see it). FINL1 drops the
+# keyword from that declaration: the same external call. Only in .cpp files, only declarations ending in `;` at file
+# scope or in a class C, and only where the unit (the file and its headers) has no body of that name with the same
+# parameter types and const qualification: `C::name(...) {` or a body inside C's braces for a member, any body for a free function (calls
+# after `.`, `->`, `:` and `,` - member accesses, initializer lists - are not bodies).
+
+FINL1_DECL = re.compile(r'\b__forceinline\s+((?:[\w:<>,*&~\s]|\[\])*?)(~?[A-Za-z_]\w*)\s*\(')
+FINL1_TAIL = r'\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?(?:noexcept\s*)?'
+
+def _finl1_sig(params):
+    """Parameter types without names and defaults: `const T& a, int n = 0` -> ('const T&', 'int')."""
+    params = params.strip()
+    if not params or params == 'void': return ()
+    out, depth, cur = [], 0, ''
+    for ch in params + ',':
+        if ch in '(<[': depth += 1
+        elif ch in ')>]': depth -= 1
+        if ch == ',' and depth == 0:
+            p = re.sub(r'\s*=.*$', '', cur, flags=re.S).strip()
+            q = re.sub(r'(?<=[*&>\s])[A-Za-z_]\w*\s*(\[[^\]]*\])?$', '', p).strip()
+            if q and q not in ('const', 'unsigned', 'signed', 'struct', 'class') and not q.endswith('::'): p = q
+            out.append(re.sub(r'\s+', '', p))
+            cur = ''
+        else: cur += ch
+    return tuple(out)
+
+def _finl1_defined(unit, name, sig, cls, cls_body):
+    """A body of name(sig) in the unit: `cls::name(...) {` (or `: init {`), or inside cls_body; for a free function
+    (cls None) any `name(...) {` that is not a member access or an initializer call."""
+    spots = []
+    if cls:
+        spots += [(unit, m) for m in re.finditer(r'\b%s\s*(?:<[^<>;{}()]*>)?\s*::\s*%s\s*\(' % (re.escape(cls),
+                  re.escape(name)), unit)]
+        spots += [(cls_body, m) for m in re.finditer(r'(?<![\w~.:>,])%s\s*\(' % re.escape(name), cls_body)]
+    else:
+        spots += [(unit, m) for m in re.finditer(r'(?<![\w~.:>,])%s\s*\(' % re.escape(name), unit)]
+    for t, m in spots:
+        e = _call_end(t, m.end() - 1)
+        if _finl1_sig(t[m.end():e - 1]) + (('const',) if re.match(r'\s*const\b', t[e:]) else ()) != sig: continue
+        if re.match(FINL1_TAIL + r'(?:\{|:(?!:))', t[e:]): return True
+    return False
+
+def r_forceinline_declarations(path, text, stats):
+    """FINL1: `__forceinline` on a body-less declaration of a function the unit does not define -> dropped (the
+    ordinary call MSVC made; see above)."""
+    if '__forceinline' not in text or not path.endswith('.cpp'): return text
+    unit, spans = None, None
+    edits = []
+    for m in FINL1_DECL.finditer(text):
+        close = _call_end(text, m.end() - 1)
+        tail = re.match(FINL1_TAIL + r'(=\s*0\s*)?;', text[close:])
+        if not tail or tail.group(1): continue                       # a definition, or a pure virtual
+        name = m.group(2)
+        sig = _finl1_sig(text[m.end():close - 1]) + (('const',) if re.match(r'\s*const\b', text[close:]) else ())
+        if unit is None:
+            unit = '\n'.join(t for _, t in _closure(path, text)) if '#include' in text else COMMENT.sub(' ', text)
+            spans = prepare.scope_spans(text)
+        inner = None
+        for sp in spans:
+            if sp[0] > m.start(): break
+            if sp[0] < m.start() < sp[1]: inner = sp
+        cls, body = None, ''
+        if inner is not None:
+            if inner[2] != 'class': continue                         # a declaration inside a function or namespace
+            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', inner[3] or '')
+            if not hm: continue
+            cls, body = hm.group(1), text[inner[0]:inner[1]]
+            if name.lstrip('~') != name and name[1:] != cls: continue
+        if _finl1_defined(unit, name, sig, cls, body): continue
+        edits.append((m.start(), m.start(1)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b in edits:
+        out.append(text[pos:a]); out.append('/* fnv-nx FINL1: __forceinline */ '); pos = b
+        stats['FINL1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
-              r_namespace_crt_calls]
+              r_namespace_crt_calls, r_forceinline_declarations]
 RULES += REFS_RULES

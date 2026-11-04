@@ -155,7 +155,7 @@ int os_vm_decommit(void *addr, size_t size);
 int os_vm_release(void *addr, size_t size);
 
 /* ---- host directories the path mapper mounts (see docs/RUNTIME.md "Paths") */
-const char *os_default_root(void);          /* e.g. "sdmc:/fnv-nx" ; host: $FNVNX_ROOT or "./fnvnx-root" */
+const char *os_default_root(void);          /* "sdmc:/switch/fnv" (sdlayout.h); host: $FNVNX_ROOT or "./fnvnx-root" */
 
 #ifdef __cplusplus
 }

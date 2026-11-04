@@ -254,7 +254,7 @@ threads and the loading screen stay on cores 0-2.
 | AI linear task threads (`iNumHWThreads` > 1, two at > 2) | **likely safe**: the default on every PC (the engine forces >= 2) | `iNumHWThreads=3` (what GetSystemInfo gives; two linear threads), **after** the placement fix; until then 2 |
 | AI task threads (inferred `bUseThreadedAI`) | **known-crashy on PC (hearsay)**: community guides report instability with `bUseThreadedAI=1` in FO3/FNV; off on PC, on on 360 | `bUseThreadedAI=0`; revisit with hardware traces |
 | Rendering Task Thread 2 (`bMTRendering:Display`, 0x011c710c, named from the owner's exe) | **unsafe on the PC code, needs port work (6.8)**: every accumulator is built with one batch renderer, so the worker shares main's and indexes a NULL second one | 0 (ini.cpp leaves it out of the Switch defaults) |
-| Havok workers (`iNumThreads:HAVOK`, `iSimType:HAVOK` 0x011cc2e8) | **needs work (6.9)**: the multithreaded step is in the code (`bhkWorld::StepSimulation` 0x00c6ae70 -> stepMultithreaded over hkJobQueue + hkCpuJobThreadPool) and is selected by **`iSimType=4`** (FUN_00c661d0 maps 0/1/4 -> discrete/continuous/multithreaded, anything else, 3 included, -> continuous); the pool is created in the unreconstructed EnsureObjectsCreated | iSimType 1 (engine default, continuous) |
+| Havok workers (`iNumThreads:HAVOK`, `iSimType:HAVOK` 0x011cc2e8) | **needs work (6.9)**: the multithreaded step is in the code (`bhkWorld::StepSimulation` 0x00c6ae70 -> stepMultithreaded over hkJobQueue + hkCpuJobThreadPool) and is selected by **`iSimType=4`** (FUN_00c661d0 maps 0/1/4 -> discrete/continuous/multithreaded, anything else, 3 included, -> continuous); the pool is created by EnsureObjectsCreated 0x00cbf6b0 (staging), all linked natively | iSimType 1 (engine default, continuous) |
 | threaded morpher / particles / temp effects (`bUseThreadedMorpher` 0x011ded20, `bUseThreadedParticleSystem` 0x011deaec, `bUseThreadedTempEffects` 0x011decbc; named from the exe) | **unverified (6.9)**: PC defaults on, but their readers are not reconstructed and the AI-linear hand-off reads plain cross-thread fields | 1 (ini.cpp port default, = the PC default ini); not counted in the as-built scenario |
 | tasklets, background loading | **likely safe**: PC defaults | engine/ini defaults |
 | `bUseMultibounds` (hearsay name; culling) | likely safe, saves render work | 1 |
@@ -321,10 +321,27 @@ global_object_initializers.cpp:8621-8627). The parts of the hand-off that are re
 * The job queue uses critical sections and semaphores (hkjobqueue.cpp), which are ordered.
 * The world's type comes from `iSimType:HAVOK` through `FUN_00c661d0`, which maps **4** to 3. A plain 3 gives
   continuous.
-* The pool is created in `EnsureObjectsCreated` (not reconstructed; nothing calls the ctor 0x00d2d110 in the
-  decomp).
+* The pool and the job queue are created in `EnsureObjectsCreated` (0x00cbf6b0, staging blk_00ca0000_o2.cpp) ->
+  `CreateObjects` (0x00cbf540).
 
-Next: confirm that path builds and links in the port, then run it under mtqemu with `iSimType=4`.
+**Linked in the port** (link-head 06857911f5ab, `out/addrmap.tsv` and `out/refs.tsv`; `tools/perf/vtcover.py` for the
+vtables): every function of the chain has native code.
+* The chain: `FUN_00624bf0` -> `FUN_00c661d0` (the iSimType map), `bhkWorld::StepSimulation` 0x00c6ae70, the MT
+  step 0x00c93ae0, `EnsureObjectsCreated` 0x00cbf6b0 -> `CreateObjects` 0x00cbf540, the hkCpuJobThreadPool ctor
+  0x00d2d110, the dispatcher 0x00d051b0, `InitHookTable` 0x00d2cca0.
+* The handlers registered: dynamics through `DispatchNodeByKind` 0x00d01e50 and the hooks 0x00d96600-0x00d969e0;
+  the collision-query tables of 0x00da3400 (type 2, 7 functions) and 0x00da3480 (type 3, 8 functions).
+* `hkpMultiThreadedSimulation`'s vftable (0x010ccbc4, 21 slots) and `hkCpuJobThreadPool`'s (0x010ce774, 10 slots):
+  0 slots without native code.
+
+`CreateObjects` keys the pool and the job queue on `GetCurrentThreadId` and rebuilds them when another thread
+steps the world. What is left in these units:
+* placeholder names in staging units (`d10e90_stub`, `getVector_db0e50`, ...);
+* vslot traps in the collision-query jobs (`hkpcpuworldgetclosestpointsjob`, linear cast) and one in the MT
+  simulation unit (`SimBase::onEvent`).
+
+The run needs a booted frame (the boot stops before WinMain's loop today). Then: `[HAVOK] iSimType=4`,
+`iNumThreads=2` in Fallout.ini, under mtqemu and the race checker.
 
 ### 6.5 Memory ordering: what x86 gave for free
 
@@ -515,6 +532,7 @@ run natively there (no qemu):
 | `tso_scan.py <decomp> [--tsv]` | spin-lock releases by plain store (inline copies of 0x0040fba0) and references to the override (6.5) |
 | `tests/s15/test_mtqemu.py` | builds and runs the QEMU multicore check (6.6) |
 | `frame_budget.py [--frameprof J] [--render J] --out J` | the whole-frame budget per core, clock and target for the gates (section 11), from `budget_model.json`; `hotspots[]` and `queue[]` (11.4); `--render` takes render/native/perf/report.json as it is |
+| `a57model/` (section 12, self-test `tests/s15/test_a57model.py`) | the Cortex-A57 cycle model: `calibrate.py` (its error), `uctrace.py` + `perf_report.py` (fnvnx-perf/1 of a guest), `funcmodel.py` (static price of named functions), farm job `tools/farm/perf_job.sh` |
 
 All of them print counts and names only; their outputs over decomp-derived objects stay in local scratch space.
 
@@ -615,12 +633,12 @@ measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked 
 | - | clock 1785 MHz | x1.75 on every core | owner's console setting | no |
 
 **Result** (`docs/PERF_budget.json`; frame = critical core, here always core 0, or the GPU if larger; mid with the
-lo-hi range; level by the mid **worst** frame, J-0150: `target_60` = worst frame <= 16.7 ms, `pass_45` informational):
+lo-hi range; every plan includes the built levers (`placed`'s); level by the mid **worst** frame, J-0150: `target_60` = worst frame <= 16.7 ms, `pass_45` informational):
 
 | scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
 |---|---:|---|---|---|---|
 | placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.2 | **fail** | 16.1 (7.3-31.0) / 20.1 | pass_45 |
-| plan45 (mt_cull, havok_workers, threaded_anim) | 17.2 (8.5-27.0) | 21.1 (8.4-44.1) / 26.4 | pass_30 | 12.1 (7.1-25.2) / 15.1 | target_60 |
+| plan45 (mt_cull, havok_workers, threaded_anim; + built barrier_relax) | 16.4 (8.4-25.7) | 20.1 (8.2-42.0) / 25.1 | pass_30 | 11.5 (7.1-24.0) / 14.3 | target_60 |
 | plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | pass_45 | 9.9 (7.1-22.0) / 12.4 | target_60 |
 | plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | pass_45 | 9.8 (7.1-20.6) / 12.3 | target_60 |
 
@@ -630,6 +648,14 @@ reaches it yet: plan60 (12.9 M) lands at a 19.8 ms worst frame, about 3 M short.
 misses even 30 fps at 1020 MHz. At 1785 MHz plan45 already meets the target. Every verdict is still `uncertain`
 (2.6x spread of work, 1.7x of IPC).
 The two measurements that close it stay frameprof on a real frame and B1 (IPC) on hardware.
+
+**A57 prices (`--perf`, P0-perfmodel's fnvnx-perf/1, section 12).**
+* Each `hotspot_functions` row with a `per_call_cycles` price adds an item on its thread: cycles x the mid IPC minus
+  its instructions, per frame. The unpriced work stays at the assumed IPC; `fn_interlocked` is left out, because its
+  price lacks the dmb drain that `interlocked_barriers` models.
+* With P0's 12.6 prices the as-built worst frame at 1020 MHz goes from 35.15 to about 36.5 ms (+0.88 M main;
+  Slerp +0.47 M and the per-object cull +0.29 M are latency-bound).
+* The committed budget takes `--perf` once a farm publishes `<head12>-perf.json`.
 
 ### 11.4 Hotspots (`hotspots[]` in `fnvnx-frame-budget/1`)
 
@@ -726,7 +752,7 @@ by lane. In-unit callees are inlined into the override, so the frame, the call a
 override:
 
 * `tests/s15/simd/run.py`: the override against a scalar reference in the decomp's order, bit for bit (any NaN
-  matches any NaN: with two NaN operands the payload depends on operand order, which GCC commutes freely), on
+  matches any NaN: with two NaN operands the payload and sign depend on operand order, which GCC commutes freely), on
   random, unit-length and edge inputs, aliasing included, under qemu-aarch64; and the ILP32 object builds;
 * `tools/perf/override_ab.py <source>:<addr> --override <c> --native <sym>`: the same fuzzed cases of S13's harness
   on the link and on a copy whose unit object binds the function to the override: A64 instructions per call, and
@@ -742,12 +768,13 @@ override:
 | sphere/plane classification 0x004b6100 (per active plane of the cull) | `sphere_plane_004b6100.c` | 38 -> 19 | 16/16 -> 16/16 | (with the next row) |
 | culling worker 0x00a694e0 (+ bound getter 0x0043d450, 0x004b6100, 0x004b6160, 0x004b6190 inlined) | `cull_worker_00a694e0.c`: two `ld4` give the six planes as lanes, behind/front masks by lane | per object with 4-6 active planes 224-330 -> 49-67 (static paths; harness: early exit only, 12 -> 10) | 8/8 -> 8/8 | 6.563 -> 9.927 (row re-measured) -> 6.368 |
 | NiAVObject::UpdateWorldLoc 0x00a68bf0 (+ NiTransform compose 0x0062c250 and its four helpers inlined) | `update_world_loc_00a68bf0.c` | copy paths 13 -> 14; compose 23 + an unresolved operator* (> 100) -> 47 | 11/16 -> 12/16 | 6.368 -> 6.088 |
-| BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | | - |
+| Havok GSK (same four) | `fnvnx_sse_fast.h`: `_mm_rsqrt_ss` on lane 0 only (15 -> 10), `_mm_add_ss` as fadd s + ins (3 -> 2; lanes 1-3 now a's bits as on x86, sse2neon added 0.0), `_mm_set_ss` / `_mm_load_ss` as `fmov s` / `ldr s` (2 -> 1) | 571 -> 539 | same | 6.088 -> 6.044 |
+| BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | 15/15, 8/8 | 6.044 -> 5.913 (model row re-measured 82 -> 54, no code) |
 
 Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no
 outline atomics); the A/B numbers above are with them. (Link 0bd144db1464, tree t/0bd144db1464, oracle msvc/pristine/87eb9373a0bb, 8 seeds x zero/random background.
 The agreement count is the same before and after; the per-case outputs are checked bit for bit by run.py.)
-The override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch of either must update it too.
+The Slerp override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch of either must update it too.
 The NiBound::Update row's MSVC signature is the one four pristine objects reference; one object (u2763) declares
 `?Update@NiBound@@QAEXABU1@ABUNiTransformDummy@@@Z` (struct spellings): if the link's ABI check rejects that
 reference, it needs a bridge-free second spelling (inbox note).
@@ -762,3 +789,232 @@ which calls ThreeByThreeMatrix::operator*(matrix) and operator*(point). The link
 (`out/refs.tsv`; 0x0062c250 is `code-defmissing`). The override no longer calls them. Other callers of operator*
 still do. The NiMatrix3 transpose product 0x00a588a0 (override above) is not on this path: the 25 instructions it
 saves were counted in fn_world_transform until this row was re-measured.
+**NaN results (V1 SL1).** "Bit-identical" in the Slerp, NiBound and matrix-product overrides covers every non-NaN
+result. A NaN result is a NaN, but its sign and payload can differ from the decomp's compiled code: V1 found 199
+of 144,000 Slerp cases with NaN inputs that return a NaN of the other sign. When two NaN operands meet, AArch64
+returns the first, and GCC commutes the operands of a commutative operation in either build, so the decomp's own
+code has no stable rule to match. No new kind of difference from x86 arises. Every NaN that GCC's code for the
+decomp creates is AArch64's default NaN (+qNaN 0x7fc00000), where x86 creates -qNaN (0xffc00000, x87 and SSE
+alike), so the port's NaN signs already differ from the exe wherever a NaN is created. A NaN's sign or payload is
+visible only through a bit-level read (an integer view, signbit, copysign), never through arithmetic or
+comparisons. Whether any caller of these three functions does such a read on a NaN has not been checked. The
+quat_from_matrix, xform, cull and sphere_plane tests compare exact bits or integer results.
+
+**Cycles (P0-perfmodel's A57 model, PERF.md 12).** From here on the metric reads `per_call_cycles`: the measured
+instructions per call x [steady CPI, one-call CPI] of the code that runs (llvm-mca -mcpu=cortex-a57 over the
+function; static, L1-resident, callees excluded). On the same code it is 7.877 M cycles per frame, against 5.913
+at IPC 0.8. Pricing the decomp's objects the same way shows that fewer instructions is not always fewer cycles.
+Dense NEON code has a higher CPI than the scalar code GCC spreads over both FP pipes.
+
+| function | decomp cycles per call (steady / one call) | override | mid | decision |
+|---|---|---|---|---|
+| Slerp (+ weight, normalisation) | ~130 / ~302 (47 x 0.90 + 29 x 1.59 + 58 x 0.73; 2.10 / 2.86 / 2.07) | 181 / 234 (CPI 2.05 / 2.66: the decomp's serial float/double chain, now without the parallel loads and call) | 216 -> 207 | kept |
+| NiBound::Update | 18 / 42 (46 x 0.393 / 0.913) | 16 / 49 (19 x 0.848 / 2.579: ld3 and lane multiplies in one chain) | 30 -> 32.5 | **dropped** |
+| NiMatrix3 transpose product | 25 / 39 (64 x 0.391 / 0.609) | 25 / 42 (39 x 0.642 / 1.077) | 32 -> 33.5 | **dropped** |
+| FromRotationMatrix | 78 / 87 (89 x 0.877 / 0.975) | 60 / 100 (77 x 0.773 / 1.295) | 82.5 -> 80 | kept |
+| culling worker + classification | 224-330 instructions at CPI ~1.05 (worker 1.04, classification 1.05) | 52 / 148 | ~290 -> 100 | kept |
+| UpdateWorldLoc | compose > 100 instructions at CPI 1.35 | 12 / 60 | | kept |
+
+The model's error bar is at least 5.7 % (V1 P0-E1/E2). Each before/after above prices both sides with the same
+model, so a shared bias cancels. Still, Slerp (-4 %) and FromRotationMatrix (-3 %) are within that bar: they count as
+ties, kept because they run fewer instructions and are not worse in cycles. The real cycle gains are the cull
+(~290 -> 100) and UpdateWorldLoc. Dropped overrides keep their sources and tests (for an A57-aware rewrite), but lose their overrides.tsv rows. From
+here on an override is kept only if its mid cycles drop, as well as its instructions.
+
+## 12. The A57 cycle model (`tools/perf/a57model`, stream P0-perfmodel)
+
+Until now every millisecond in this file was instructions divided by an assumed IPC of 0.8. The model replaces that
+assumption with a per-block, per-function price for the Tegra X1's Cortex-A57, computed without the device, with a
+measured error bar. Every optimization stream reads its output (fnvnx-perf/1, 12.4).
+
+### 12.1 Method
+
+* **Trace.** The same simulator (`a57sim.c`) is driven by two front ends of QEMU's TCG: a TCG plugin
+  (`a57trace.so`, `qemu-system-aarch64 -M virt -cpu cortex-a57 -plugin`, Ubuntu's 8.2) for the bare-metal
+  calibration kernels, and Unicorn hooks (`uctrace.py`, a subclass of S5's `emu_guest.Emu`) for the game guest.
+  Per translation block it counts executions; per memory instruction its accesses.
+* **Simulator** (parameters and sources: `params.json`). L1I 48 KB 3-way, L1D 32 KB 2-way, L2 2 MB 16-way, 64-byte
+  lines, LRU (Chips and Cheese, measured on a Switch; the brief's "32 KB I" is the A53's). DTLB 32, ITLB 48,
+  L2 TLB 1024 4-way, 4 KB pages. L1D stride prefetcher per load PC (line granularity), L2 next-8-lines prefetcher
+  inside the page after two nearby misses, write streaming, a 12-entry store buffer. Global-history direction
+  predictor, 512 indirect targets, 32-entry return stack, 64-entry L1 BTB and 4K L2 BTB. It counts events; it does
+  not keep time.
+* **Prices** (`cost.py`). Each block: `llvm-mca -mcpu=cortex-a57` over the block as a loop body (steady-state cycles
+  per iteration), at least ceil(n/3), with the r1p0 ASIMD multiply latencies (12.2). Front end: 17.5 cycles per mispredict, +1 for a target from the L2 BTB, +4 for a
+  BTB miss, 11 per L1I miss. Loads: a load whose address depends on a loaded value (static dataflow over its block,
+  loop-carried) pays each miss in full (L2 22 cycles, DRAM 60 cycles + 90 ns, L2 TLB +20, walk +30); any other pays
+  once per miss group (the misses within 60 instructions, up to 6). Store-to-load forwarding 7 cycles. Stores pay
+  bandwidth only. Bandwidth: 8 B/cycle from L2, DRAM lines at 14.45 in flight over the DRAM latency (Little's law).
+  A function costs max(core + front end + latency, bandwidth).
+
+### 12.2 Calibration: the error bar (`calibrate.py`, `calib/truth.json`, result in `calib/last.json`)
+
+20 published Cortex-A57 numbers, reproduced by kernels in `calib/bench.c` (bare metal, inline assembly where the
+sequence matters) at the clock of the publication. 7 are **fit**: a parameter or rule was set from them, or the model's
+value echoes a parameter set from the same published number (V1 P0-E1/E2: `l2_latency` is `cost.l2_lat`,
+`taken_l2btb` is 1 + `btb_l2_bubble`; `tests/v1/test_a57_calib_circular.py`). 13 are **check**: independent of every
+parameter. The METRIC is the mean absolute error over the check points. Before: the flat IPC 0.8 on the same points.
+
+| point | role | published | model | error % | flat IPC 0.8 |
+|---|---|---:|---:|---:|---:|
+| L1 load-to-use (chase 4 KB), cycles | check | 4 | 4.00 | 0.0 | 1.56 |
+| L1 load-to-use, indexed (`ldr x0, [x2, x0]`) | check | 5 | **4.00** | **19.9** | 1.88 |
+| L2 load-to-use (chase 96 KB, 24 pages) | fit | 22 | 22.00 | 0.0 | 1.56 |
+| L2 with L2-TLB misses (chase 1.5 MB), "over 50", tol. 15 % | check | 52 | 40.4 | 7.3 | 1.56 |
+| DRAM (chase 64 MB) at 1.785 GHz | fit | 250 | 250.0 | 0.0 | 1.56 |
+| add / mul64 / fmla / vadd latency | check | 1 / 5 / 10 / 3 | 1 / 5 / 10 / 3 | 0-0.2 | 1.56 |
+| fmla .4s throughput, cycles each | check | 1 | 1.00 | 0.5 | 1.56 |
+| mul .4s latency | check | 4 | **5.00** | **25.0** | 1.56 |
+| mul .4s throughput | check | 2 | 2.01 | 0.3 | 1.56 |
+| store-to-load forwarding chain | fit | 7 | 7.00 | 0.0 | 2.81 |
+| L1D read, B/cycle | check | 15.69 | 15.65 | 0.2 | 14.54 |
+| L2 read, B/cycle | fit | 8 | 8.00 | 0.0 | 14.63 |
+| memcpy 8 MB, MB/s, Jetson Nano 1.43 GHz | fit | 3504 | 3504 | 0.0 | 9152 |
+| memcpy 8 MB, MB/s, Jetson TX1 1.73 GHz | check | 3862 | 3708 | 4.0 | 11072 |
+| mispredict penalty (random - zero branches) | fit | 17.5 | 17.5 | 0.1 | 1.26 |
+| taken branch, L1 BTB | check | 1 | 1.05 | 4.8 | 1.33 |
+| taken branch, L2 BTB | fit | 2 | 2.01 | 0.7 | 1.25 |
+
+**Error: 4.8 % mean over the 13 independent check points (RMS 9.3 %, max 25 %), against 63.7 % for the flat IPC
+0.8 (max 187 %).** The hotspot rows carry the RMS as their bar (cycles_lo/hi). History: 4.9 % over 14 points
+(6e0a34b) counted two circular points (V1 P0-E1/E2; over the honest 12 that was at least 5.7 %); the r1p0 multiply
+latencies below took it to 3.5 % over those 12; the new indexed-load check adds a real 20 % miss: 4.8 % over 13.
+The two large misses:
+* `mul .4s`: 5 cycles in the model, 4 measured. llvm-mca's A57 model has the r0pX latencies (Q-form 6, D-form 5);
+  ARM's Cortex-A57 Software Optimization Guide (UAN 0015B, 3.14 note 4) gives 5 and 4 from r1p0 on, and the Tegra
+  X1's A57 is r1p1. llvm-mca takes no latency overrides, so cost.py corrects a block whose loop-carried chain is the
+  bound: it recomputes the chain with the r1p0 latencies (register dataflow, `r1_latency`) and subtracts the
+  difference, never below ceil(n/3).
+* the indexed load: Chips and Cheese measured 5 cycles; llvm-mca and ARM's guide (AArch64 register-offset loads) say
+  4. Not corrected: the two sources disagree and only one measured.
+
+Divides and square roots (V1: "no point covers divides") are iterative and data-dependent: ARM's guide gives
+`sdiv`/`udiv` W 4-20, X 4-36, `fdiv`/`fsqrt` S 7-17, D 7-32 (ASIMD .4s 14-34, .2d 14-64), and llvm-mca prices the top of
+each range. No published measurement narrows them, so a latency-bound chain is priced at the middle (fdiv s 12,
+fdiv d 19.5, sdiv w 12 cycles; `calibrate.py` lists them as predictions) and the half range is carried as
+`div_band` into cycles_lo/hi. Not covered by any check: a direction-predictor accuracy test (the mispredict penalty
+is a fit, and no published A57 number gives pattern capacity), and mixed code (12.2 below).
+
+What the error bar covers and what it does not:
+* It covers the parts one at a time: latencies, throughputs, bandwidths, prediction, the miss model. It does not yet
+  cover their composition in compiled game code (llvm-mca's block-as-a-loop over code that is not a loop, overlap
+  between blocks, the guessed predictor). That needs a mixed benchmark with a published A57 number (CoreMark,
+  SPEC-like kernels) or the device; until then, read a game-code estimate as **+-5 % on the parts, likely +-20-30 %
+  on the whole**.
+* Not priced: the `dmb ish` drain of the store buffer (the inlined InterlockedIncrement prices at 13 cycles with or
+  without a store in flight; section 6.7 expects 15-40 more), contention between cores, the L2 shared with other
+  cores, power states (the clock is constant).
+
+### 12.3 The guest: boot to WinMain (`uctrace.py`, `perf_report.py`)
+
+Link `fa883870e756`'s guest on its synthesized image (`boot/synth.exe`; this link's loader refuses the owner's GOG
+exe with "not a well-formed PE32", link `06857911f5ab`'s accepts it), main thread, from the first guest instruction
+to WinMain [M, model]:
+
+| | instructions | cycles at 1.02 GHz | IPC | ms at 1.02 / 1.785 GHz |
+|---|---:|---:|---:|---:|
+| boot to WinMain | 62.2 M | 45.7 M | 1.36 | 44.8 / 26.2 (flat IPC 0.8: 76.2 / 43.6) |
+
+Cycles split: core 35.8 M, mispredicts and BTB 6.4 M, instruction fetch 1.1 M, memory latency 2.1 M. Top functions:
+`fnvnx_scan_codeptrs` 32 % (IPC 1.34; 162,772 mispredicts, 2.8 M cycles, 19 % of its time), `kx_build` 10 % (IPC 0.92),
+`early_zero` 9 % (byte stores, IPC 2.5), `kx_find` 7 %, `classify` 7 %. 100 % of the traced instructions were priced
+by llvm-mca. Tracing takes ~0.5 M instructions/s with the cache model (120 s here).
+
+### 12.4 fnvnx-perf/1 (`<head12>-perf.json`, farm job `perf_job.sh`)
+
+`tools/farm/perf_job.sh` (runner job `perf`) takes the newest `link/<L12>` with a guest on the head or an ancestor,
+runs the calibration, traces the boot to `$PERF_STOP` (WinMain; any two symbols once frames run), prices the
+per-frame function rows (12.5), and writes `<head12>-perf.md` and the sidecar `<head12>-perf.json`:
+`totals` (instructions, cycles, IPC, ms at both clocks, coverage, breakdown), `hotspots[]` (function, original
+address, instructions, cycles with the calibration's error bar, ms at 1.02 and 1.785 GHz, L1D / L2 / L1I misses,
+mispredicts, IPC, % of the workload, % of a 16.7 ms frame, bound: core / memory / frontend / bandwidth),
+`frame_hotspots[]` and `frame_coverage` (12.5), and `model` (error, method). S15-threads, S15-simd and the render
+machine read `hotspots[]` and `frame_hotspots[]`.
+
+### 12.5 The frame's hot functions, priced statically (`funcmodel.py`, `hot_rows.json`)
+
+No frame runs yet, so section 11.4's function rows (instructions per call measured by dyncount [M], calls per frame
+[E]) had no cycle price. `funcmodel.py` prices each function of the linked guest statically: llvm-mca over its whole
+body as one straight-line pass, back to back (steady state, low) and alone (one call, iterations=1, high). Limits:
+data in L1, branches predicted, callees excluded.
+
+| row (11.4) | M insns / frame | CPI steady - one call | cycles per call | ms at 1.02 GHz |
+|---|---:|---|---|---|
+| Interlocked refcounts (calibration kernel ilk_inline) | 1.8 | 1.63 | 13 | 2.88 |
+| culling per object 0x00a694e0 + classification 0x004b6100 | 0.91 | 1.04 - 3.43 | 52 - 308 | 0.93 - 3.06 |
+| NiQuaternion::Slerp 0x00a6e330 | 0.78 | 0.90 - 2.10 | 116 - 273 | 0.69 - 1.60 |
+| NiBound::Update 0x00a7fdd0 | 0.72 | 0.39 - 0.91 | 18 - 41 | 0.28 - 0.64 |
+| UpdateWorldData 0x00a68c60 + UpdateWorldLoc 0x00a68bf0 | 0.68 | 1.36 - 2.78 | 95 - 278 | 0.90 - 1.86 |
+| Havok GSK (0x00da8fb0, 8390, 8500, 8820) | 0.66 | 1.11 - 1.45 | 668 - 869 | 0.72 - 0.94 |
+| FindPassBucket + FindBucketIndex | 0.31 | 0.83 - 2.02 | 68 - 166 | 0.25 - 0.61 |
+| FromRotationMatrix 0x00a6df40 | 0.18 | 0.88 - 0.98 | 90 - 100 | 0.15 - 0.17 |
+| NiNode UpdateTransformAndBounds / UpdateDownwardPass | 0.16 | 0.99 - 1.46 | 19 - 88 | 0.16 - 0.23 |
+
+Coverage of the main thread's 23.8 M instructions per frame (J-0148) with an A57 price: **0 % -> 26 % (6.2 M)**,
+7.0-11.9 ms at 1.02 GHz for those rows against 7.6 ms at IPC 0.8 (rows' functions as S15-simd corrected them). The math leaves (NiBound::Update, the matrix
+product) run at IPC 1.1-2.6, above 0.8; the refcount operations and the branchy per-object cull run below it.
+The rest of the frame's main thread gets its price when frameprof's frames run under `uctrace.py`.
+
+
+### 12.6 per_call_cycles for S15-simd's metric (11.6)
+
+`funcmodel.py --budget-model tools/perf/budget_model.json --override-elf <ov.elf>` prices each `hotspot_functions`
+row: the functions are the addresses in its name; one with an override in `tools/link/overrides` is priced on the
+override's code (the objects of `build.sh`, linked into one ELF), since that is what its `per_call_insn` counts.
+`per_call_cycles` = [per_call_insn lo x steady CPI, per_call_insn hi x one-call CPI]. perf_job.sh publishes them as
+`per_call_cycles[]` in fnvnx-perf/1; `hotspot_metric.py` uses a row's `per_call_cycles` when the row has one.
+
+With link 06857911f5ab's guest and the overrides at 304901c, mid values [model]:
+
+| row | insn / call | cycles / call | CPI | note |
+|---|---:|---:|---|---|
+| fn_interlocked | 30 | 49 | 1.63 | calibration kernel; the dmb drain is not priced (12.2) |
+| fn_cull_test (override) | 58 | 100 | 1.07 - 2.21 | |
+| fn_slerp (override) | 88 | 207 | 2.05 - 2.66 | latency-bound: the decomp's serial float/double chain (S15-simd) |
+| fn_gsk | 571 | 731 | 1.11 - 1.45 | |
+| fn_nibound_update (override) | 19 | 33 | 0.85 - 2.58 | the `ld3` is slow; the decomp's 52 instructions price 20-39 |
+| fn_pass_bucket | 82 | 116 | 0.83 - 2.01 | |
+| fn_world_transform (override) | 32 | 36 | 0.82 - 1.19 | |
+| fn_node_update | 39.5 | 53 | 0.99 - 1.46 | |
+| fn_quat_from_matrix (override) | 77 | 80 | 0.77 - 1.30 | |
+
+The metric with these prices: **7.88 M cycles per frame (7.72 ms at 1.02 GHz)**, against 6.09 M at IPC 0.8. The
+rows whose code is one serial floating-point chain (Slerp) or uses multi-register loads (`ld3`) save fewer cycles than
+instructions. S15-simd now compares A/B rows in cycles (11.6) and dropped the NiBound and matrix-product overrides.
+
+### 12.7 The 3-core frame model (`mtmodel.py`, fnvnx-mtframe/1)
+
+frame_budget.py (11.1) puts each core's share of the work side by side: frame = the busiest core. `mtmodel.py`
+schedules the same work (budget_model.json, its scenarios and levers, frame_budget's `scenario_work`) in time, in
+1 us steps on the application cores with placement.h's masks and priorities (main core 0; render worker core 1; AI
+linear and workers on 0b110; background lowest):
+* main runs its phases in the main loop's order (game logic, Havok, animation, scene graph, cull, accumulation,
+  renderer, barriers, then the model's sync overhead);
+* work a lever moves off main is forked to two workers at its phase's start. A forked worker starts after a wake
+  latency (--wake-us, 15 us [E]) and runs at the model's parallel efficiency. Main joins it at the phase's end and
+  waits if it is late;
+* the AI linear threads run from the frame's start and are joined before culling. `threaded_anim` queues its work
+  behind the AI on them;
+* the render worker is pipelined (never joined) and background work fills idle time;
+* frame = max(main's critical path, every core's busy time).
+
+The work is priced with the A57 CPI of 12.6's rows for the items they cover (scene graph, cull, animation, Havok,
+accumulation: steady CPI in the lo case, one-call CPI in the hi case); other items stay at 1/0.8 and are listed.
+Check (tests/s15/test_a57model.py): with everything at 1/0.8 and no hand-offs, "placed" gives frame_budget's
+25.2 ms.
+
+| scenario | 1020 MHz frame lo / mid / hi (ms) | frame_budget mid | main waits | 1785 MHz mid |
+|---|---|---:|---:|---:|
+| placed | 12.4 / 28.5 / 50.0 | 25.2 | 0 | 16.3 |
+| plan45 | 9.2 / 21.6 / 39.1 | 17.2 | 1.8 | 12.4 |
+| plan45b | 7.8 / 18.7 / 35.4 | 15.4 | 1.8 | 10.7 |
+| plan60 | 7.0 / 17.6 / 34.3 | 14.7 | 1.5 | 10.1 |
+
+Two results for the plan. First, the hand-offs cost: at 1/0.8 alone, plan45's critical path is 19.7 ms against the
+water-filled 17.2. Main waits 1.5 ms at the joins of the moved cull, accumulation and Havok work, which runs slower
+on the workers (efficiency, wake) than main's share of the same phase. Second, the A57 prices raise main's phases
+(scene graph and animation at CPI 0.9-2.0 against 1.25). So plan45b's mid frame at 1.02 GHz is 18.7 ms, and with the
+model's worst-frame factor 1.25 that is 23.3 ms, just above the 22.2 ms of 45 fps stable. At 1.785 GHz, plan45b holds
+60 fps at the mid case (10.7 ms). The levers that shorten main's path without a join on it (render F2-F4, relaxed
+barriers, NEON math, overrides) gain their full value. A moved phase gains only when its worker finishes before
+main's share does: split the moved part so that the worker side is the smaller one.

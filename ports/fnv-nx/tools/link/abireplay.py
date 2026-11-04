@@ -57,9 +57,13 @@ def fnvlink_demangle(name, _cache={}):
 
 
 TREE, DECLS = None, {}
+OVER_VA = {}   # override address -> va_reads (overrides.tsv column 5)
+DEF_SYM = {}   # MSVC name of a definition -> its native (Itanium) symbol, from the link's addrmap.tsv
+VACALL_OUT, VACALL_REQ = None, set()   # --vacall: work dir of the recorded calls; (unit, undefined) requested
+import vacall  # noqa: E402
 
 
-def replay(ref_m, def_m, ref_d, def_d, src, dunit, lay):
+def replay(ref_m, def_m, ref_d, def_d, src, dunit, lay, un=None, over_va=None):
     rs, ds = sigs.parse_msvc(ref_m, ref_d or None), sigs.parse_msvc(def_m, def_d or None)
     if TREE:   # undecorated C names: their declarations in the prepared tree, as resolve reads them
         import fnvlink
@@ -75,7 +79,29 @@ def replay(ref_m, def_m, ref_d, def_d, src, dunit, lay):
             ds = fnvlink.c_name_standin(ds, rs) or ds
     if rs.kind != 'func' or ds.kind != 'func':
         return None
-    v = abi.compare(rs, ds)
+    va_r = over_va
+    if VACALL_OUT and over_va:
+        VACALL_REQ.add((src, un))
+    if VACALL_OUT and dunit and any(p.strip() == '...' for p in ds.raw_params or ()):
+        dsym = DEF_SYM.get(def_m)
+        if dsym:
+            VACALL_REQ.add((dunit, dsym))
+            VACALL_REQ.add((src, un))
+            defs = vacall.load_defs(VACALL_OUT, dunit)
+            va_r = defs.get(dsym) if defs else None
+    v = abi.compare(rs, ds, va_reads=va_r)
+    if VACALL_OUT and va_r == ('escape',) and v.kind == 'manual' and 'varargs' in v.classes:
+        VACALL_REQ.add((src, un))
+        fm = vacall.load_fmts(VACALL_OUT, src)
+        v3, _, _ = vacall.decide_format(rs, ds, fm.get(un) if fm and un else None)
+        if v3 is not None:
+            v = v3
+    if VACALL_OUT and vacall.needs(v):
+        VACALL_REQ.add((src, un))
+        calls = vacall.load(VACALL_OUT, src)
+        v2, fs, _, _ = vacall.decide(rs, ds, calls.get(un) if calls and un else None, va_r)
+        if v2 is not None:
+            v, rs = v2, fs
     if v.kind != 'same' and dunit is not None:
         p2 = abi2.compare(rs, ds, lambda t: lay.get((src, t)), lambda t: lay.get((dunit, t)))
         if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
@@ -92,9 +118,11 @@ def main():
     ap.add_argument('--old', action='store_true')
     ap.add_argument('--override')
     ap.add_argument('--tree', help='the prepared tree the link used: undecorated C names are replayed too')
+    ap.add_argument('--vacall', help='a work dir: record the variadic calls of the units that need them (needs --tree)')
     a = ap.parse_args()
-    global TREE
+    global TREE, VACALL_OUT
     TREE = a.tree
+    VACALL_OUT = a.vacall
     units = json.load(open(a.units))['units']
     def_unit = {}
     for u in units:
@@ -107,32 +135,58 @@ def main():
             if line.startswith('#') or len(f) < 4 or not f[3]:
                 continue
             over[int(f[0], 16)] = f[3]
-    lay = {k: v for k, v in layout.load(os.path.join(a.out, 'layouts.tsv')).items() if v is not None}
-    old, new, out = [], [], []
+            if len(f) >= 5 and f[4].startswith('va='):
+                OVER_VA[int(f[0], 16)] = (f[4][3:],)
+    am = os.path.join(a.out, 'addrmap.tsv')
+    by_addr_sym = {}
+    if os.path.exists(am):
+        for line in open(am, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if len(f) > 3 and not line.startswith('#'):
+                by_addr_sym[f[0]] = f[3]
     for line in open(os.path.join(a.out, 'abi.tsv'), encoding='utf-8', errors='surrogateescape'):
-        if line.startswith('#'):
-            continue
         f = line.rstrip('\n').split('\t')
-        if len(f) < 11:
-            f += [''] * (11 - len(f))
-        src = f[0].split('#')[0]   # <host>#vtables, <host>#bodiesN (V1 RPL-B1)
-        key = (src, f[2], f[3])
-        old.append(key + (f[5], f[6]))
-        r = None
-        if not (classes_of(f[6]) & REPLAYED_NOT):
-            try:
-                ad = int(f[2], 16)
-                if ad in over:   # the override's own signature; no unit, so no layouts (resolve: nd['unit'] None)
-                    dm = over[ad]
-                    dd = fnvlink_demangle(dm)
-                    r = replay(f[3], dm, f[9], dd, src, None, lay)
-                else:
-                    r = replay(f[3], f[4], f[9], f[10], src, def_unit.get(ad), lay)
-            except Exception as e:   # a declaration the parser rejects: keep the link's verdict
-                print('replay failed: %s %s: %s' % (f[2], f[3], e), file=sys.stderr)
-        kind, cl = r if r is not None else (f[5], f[6])
-        new.append(key + (kind, cl))
-        out.append((f[0], f[2], f[3], f[5], f[6], kind, cl))
+        if len(f) > 4 and f[2] in by_addr_sym:
+            DEF_SYM[f[4]] = by_addr_sym[f[2]]
+    lay = {k: v for k, v in layout.load(os.path.join(a.out, 'layouts.tsv')).items() if v is not None}
+    def passes():
+        old, new, out = [], [], []
+        for line in open(os.path.join(a.out, 'abi.tsv'), encoding='utf-8', errors='surrogateescape'):
+            if line.startswith('#'):
+                continue
+            f = line.rstrip('\n').split('\t')
+            if len(f) < 11:
+                f += [''] * (11 - len(f))
+            src = f[0].split('#')[0]   # <host>#vtables, <host>#bodiesN (V1 RPL-B1)
+            key = (src, f[2], f[3])
+            old.append(key + (f[5], f[6]))
+            r = None
+            if not (classes_of(f[6]) & REPLAYED_NOT):
+                try:
+                    ad = int(f[2], 16)
+                    if ad in over:   # the override's own signature; no unit, so no layouts (resolve: nd['unit'] None)
+                        dm = over[ad]
+                        dd = fnvlink_demangle(dm)
+                        r = replay(f[3], dm, f[9], dd, src, None, lay, f[1], OVER_VA.get(ad))
+                    else:
+                        r = replay(f[3], f[4], f[9], f[10], src, def_unit.get(ad), lay, f[1])
+                except Exception as e:   # a declaration the parser rejects: keep the link's verdict
+                    print('replay failed: %s %s: %s' % (f[2], f[3], e), file=sys.stderr)
+            kind, cl = r if r is not None else (f[5], f[6])
+            new.append(key + (kind, cl))
+            out.append((f[0], f[2], f[3], f[5], f[6], kind, cl))
+        return old, new, out
+
+    old, new, out = passes()
+    if VACALL_OUT and VACALL_REQ:   # record the requested units' calls, then decide again with them
+        os.makedirs(VACALL_OUT, exist_ok=True)
+        with open(os.path.join(VACALL_OUT, 'vacall_requests.tsv'), 'w') as fo:
+            fo.write(''.join('%s\t%s\n' % r for r in sorted(VACALL_REQ)))
+        vacall.run(VACALL_OUT, TREE)
+        vacall.load.__defaults__[0].clear()
+        vacall.load_defs.__defaults__[0].clear()
+        vacall.load_fmts.__defaults__[0].clear()
+        old, new, out = passes()
     for name, rows in (('old', old), ('new', new)) if a.old else (('new', new),):
         n, cl = metric(rows)
         print('%s: bridge-gap pairs %d; %s' % (name, n, ', '.join('%s %d' % kv for kv in cl.most_common())))
