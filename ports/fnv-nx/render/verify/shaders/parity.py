@@ -14,7 +14,7 @@
 # Inputs the harness does not drive (t1..t7, v1 beyond specular, VS-specific semantics) are reported per shader.
 # Vertex shaders are translated and validated (DKSH header) only. Output: one line per shader + summary;
 # decomp/game-derived results stay in --work (default build/v6n/parity), never in git.
-import os, sys, subprocess, random, json, struct
+import os, sys, subprocess, random, json, struct, shutil
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
 import cmp as C
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
@@ -48,6 +48,37 @@ def scene_text(name, bin_, glsl, seed, opts):
     L.append('draw TRIANGLESTRIP 2')
     return '\n'.join(L) + '\n'
 
+def drive_scene(bin_, glsl, seed, vs, model):
+    """packages: a VS (tests/v6n/shaders/drv2|drv3.vsa) drives COLOR0/1 and TEXCOORD0..7 (TEXCOORD0 = uv, 1..7 random
+    affine in uv), 8 point-sampled 2D textures, random c0..c63"""
+    r = random.Random(seed)
+    L = ['size 16 16', 'rt A8R8G8B8', 'ds D24S8', 'clear 7 0xff203040 1.0 0', 'rs CULLMODE CULL_NONE']
+    for s_ in range(8):
+        L += ['tex %d A8R8G8B8 8 8 1 hash %d' % (s_, seed * 7 + 1 + s_ * 101), 'samp %d MINFILTER TEXF_POINT' % s_,
+              'samp %d MAGFILTER TEXF_POINT' % s_, 'samp %d MIPFILTER TEXF_NONE' % s_]
+    vb, vg = vs['vs_3_0' if model.startswith('ps_3') else 'vs_2_0']
+    L += ['vs %s %s' % (vb, vg), 'ps %s %s' % (bin_, glsl)]
+    for c in range(1, 16):
+        L.append('vsc %d %s' % (c, ' '.join('%.4f' % r.uniform(-1.5, 1.5) for _ in range(4))))
+    for c in range(64):
+        L.append('psc %d %s' % (c, ' '.join('%.4f' % r.uniform(-1, 1.5) for _ in range(4))))
+    L.append('mode xyz')
+    for (x, y, u, v) in [(-1, 1, 0.0117, 0.0117), (1, 1, 1.0117, 0.0117), (-1, -1, 0.0117, 1.0117), (1, -1, 1.0117, 1.0117)]:
+        L.append('v %g %g 0.5 1 0xff%06x 0x%08x %g %g' % (x, y, r.getrandbits(24), r.getrandbits(32), u, v))
+    L.append('draw TRIANGLESTRIP 2')
+    return '\n'.join(L) + '\n'
+
+def driver_vs(asm, sdp2, work):
+    out = {}
+    for n, model in (('drv2', 'vs_2_0'), ('drv3', 'vs_3_0')):
+        b = os.path.join(work, n + '.bin'); sdp = os.path.join(work, n + '.sdp'); od = os.path.join(work, n + '_t')
+        subprocess.run([asm, os.path.join(ROOT, 'tests/v6n/shaders', n + '.vsa'), b], check=True)
+        subprocess.run([sdp2, '--pack', sdp, n + '.vso=' + b], check=True, capture_output=True)
+        shutil.rmtree(od, ignore_errors=True); os.makedirs(od)
+        subprocess.run([sdp2, '-o', od, '--glsl', '--no-dksh', sdp], check=True, capture_output=True)
+        out[model] = (b, [os.path.join(od, f) for f in os.listdir(od) if f.endswith('.glsl')][0])
+    return out
+
 def main():
     a = sys.argv[1:]
     tools = os.environ.get('FNVNX_SHADERS_BUILD', os.path.join(ROOT, 'render/shaders/build/host'))
@@ -64,7 +95,7 @@ def main():
         elif a[i] == '--target': target = a[i + 1]; i += 2   # gl (V6n's executor) or s6ngl (S6n's backend + shim)
         else: pk.append(os.path.abspath(a[i])); i += 1
     asm, sdp2 = os.path.join(tools, 's6b_asm'), os.path.join(tools, 'sdp2dksh')
-    for t in (sdp2,) + ((asm,) if selftest else ()):
+    for t in (sdp2, asm):
         if not os.path.exists(t):
             sys.exit('missing %s: run render/shaders/build.sh --tests (FNVNX_SHADERS_BUILD=...)' % t)
     os.makedirs(work, exist_ok=True)
@@ -84,6 +115,7 @@ def main():
     if not pk:
         sys.exit(__doc__ if __doc__ else 'give .sdp paths or --selftest')
     tr = os.path.join(work, 'translated'); os.makedirs(tr, exist_ok=True)
+    dvs = driver_vs(asm, sdp2, work) if not selftest else None
     r = subprocess.run([sdp2, '-o', tr, '--glsl'] + pk, capture_output=True, text=True)
     print(r.stdout.strip().split('\n')[-1] if r.stdout.strip() else r.stderr.strip()[:200])
     rows = [l.rstrip('\n').split('\t') for l in open(os.path.join(tr, 'index.tsv'))][1:]
@@ -98,8 +130,14 @@ def main():
         if not is_ps or stats['ps'] > maxn:
             continue
         j = json.load(open(os.path.join(tr, h + '.json')))
-        undriven = [x['name'] for x in j.get('inputs', []) if not ((x['usage'] == 'TEXCOORD' and x['index'] == 0) or
-                    (x['usage'] == 'COLOR' and x['index'] < 2) or x['usage'] in ('POSITION', 'FOG') or x['name'] == 'vPos')]
+        if selftest:
+            undriven = [x['name'] for x in j.get('inputs', []) if not ((x['usage'] == 'TEXCOORD' and x['index'] == 0) or
+                        (x['usage'] == 'COLOR' and x['index'] < 2) or x['usage'] in ('POSITION', 'FOG') or x['name'] == 'vPos')]
+        else:   # the driver VS feeds COLOR0/1 and TEXCOORD0..7; 2D textures only
+            undriven = [x['name'] for x in j.get('inputs', []) if not ((x['usage'] == 'TEXCOORD' and x['index'] < 8) or
+                        (x['usage'] == 'COLOR' and x['index'] < 2) or x['usage'] in ('POSITION', 'FOG') or x['name'] in ('vPos', 'vFace'))]
+            g = open(os.path.join(tr, h + '.glsl')).read()
+            undriven += ['samplerCube' for _ in range(g.count('uniform samplerCube'))][:1] + ['sampler3D' for _ in range(g.count('uniform sampler3D'))][:1]
         stats['undriven'] += bool(undriven)
         for sd in range(seeds):
             sc = os.path.join(work, '%s_%s_%d.scene' % (os.path.basename(pkg)[:-4], name.replace('.', '_'), sd))
@@ -111,7 +149,8 @@ def main():
                     nm = data[off:off + 256].split(b'\0')[0].decode('latin1'); sz = struct.unpack_from('<I', data, off + 256)[0]
                     if nm == name: open(binp, 'wb').write(data[off + 260:off + 260 + sz]); break
                     off += 260 + sz
-            open(sc, 'w').write(scene_text(name, binp, os.path.join(tr, h + '.glsl'), sd + 1, opts.get(name, [])))
+            open(sc, 'w').write(scene_text(name, binp, os.path.join(tr, h + '.glsl'), sd + 1, opts.get(name, [])) if selftest
+                                else drive_scene(binp, os.path.join(tr, h + '.glsl'), sd + 1, dvs, model))
             scenes.append(sc); meta[sc] = (name, model, undriven)
     if scenes:
         nd, gd = os.path.join(work, 'nine'), os.path.join(work, target)

@@ -1,0 +1,18 @@
+# V6n finding for S6b's translator (reported, not an S6n defect): see docs/RENDER_VERIFY.md §7
+size 4 4
+rt A32B32G32R32F
+ds D24S8
+clear 7 0xff000000 1.0 0
+rs CULLMODE CULL_NONE
+vs @p3_log_abs
+ps @tc
+vsc 0 -4 2 0 0
+vsc 1 0.5 0.25 0.75 1
+vdecl 0:0
+vg -1 1 0.5 1
+vg 1 1 0.5 1
+vg -1 -1 0.5 1
+vg 1 1 0.5 1
+vg 1 -1 0.5 1
+vg -1 -1 0.5 1
+drawg TRIANGLELIST 2

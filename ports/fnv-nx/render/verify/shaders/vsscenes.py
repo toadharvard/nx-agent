@@ -7,15 +7,16 @@ import os, sys, glob, subprocess, shutil
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 a = sys.argv[1:]
 tools = os.environ.get('FNVNX_SHADERS_BUILD', os.path.join(ROOT, 'render/shaders/build/host'))
-work = os.path.join(ROOT, 'build/v6n/vs'); mutant = None; target = 'gl'
+work = os.path.join(ROOT, 'build/v6n/vs'); mutant = None; target = 'gl'; src_sub = ''
 i = 0
 while i < len(a):
     if a[i] == '--tools': tools = a[i + 1]; i += 2
     elif a[i] == '--work': work = a[i + 1]; i += 2
     elif a[i] == '--mutant': mutant = a[i + 1]; i += 2
     elif a[i] == '--target': target = a[i + 1]; i += 2
+    elif a[i] == '--findings': src_sub = 'findings'; i += 1   # tests/v6n/vs/findings: S6b findings, expected to differ
     else: sys.exit('unknown ' + a[i])
-src = os.path.join(ROOT, 'tests/v6n/vs')
+src = os.path.join(ROOT, 'tests/v6n/vs', src_sub)
 os.makedirs(work, exist_ok=True)
 paths = {}
 for f in sorted(glob.glob(os.path.join(src, '*.vsa')) + glob.glob(os.path.join(src, '*.psa'))):
@@ -37,4 +38,5 @@ cmd = [sys.executable, '-I', os.path.join(ROOT, 'render/verify/pixdiff.py')] + (
 r = subprocess.run(cmd, capture_output=True, text=True)
 print(r.stdout.strip())
 ok = (r.returncode == 0) if not mutant else ('0 match' in r.stdout)
+if src_sub: ok = True   # findings are reported, not required
 sys.exit(0 if ok else 1)

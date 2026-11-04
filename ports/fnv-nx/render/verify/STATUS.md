@@ -32,6 +32,10 @@ Defects: `tests/v6n/DEFECTS.md`. One command: `tests/v6n/run.sh` (needs the host
   common to both targets, classified (O8 oracle D16 depth, sub-precision edge, alpha-test threshold, MODULATE4X).
 - shader parity self-test: 6/7 match; finding P1 for S6b (fog depth).
 
+- whole-package fuzz (sdpfuzz.py, 16 packages, 4 seeds): 15,791 programs, 11,161 translated (P5: 4,614 centroid),
+  8,386 pass, 2,775 fail (2,257 D3D9 numerics P2-P4, 128 cube samplers, 154 oracle NaN, 236 open);
+  results.json in build/v6n/sdpfuzz (schema RENDER_VERIFY.md §3.7).
+
 ## Rebuild
 ```sh
 render/nine/build.sh /home/user/work/v6n/nine 2 host
@@ -61,7 +65,7 @@ tests/v6n/run.sh
 | C65 radix sort / SortKey | PASS (property test, 4000 random sets) |
 | C66 capture/replay | PASS: LP64 host capture and the ILP32 guest capture (Unicorn) both replay with 0 differing read-backs, and 5/5 corruption kinds are flagged on each |
 | C68 N1 camera | view/projection agree with the engine (0x00e6c780); **FAIL** -> defects `screen_space_halfpixel`, `camera_port_rounding` |
-| C69 N2 families | provisional semantics; not falsifiable without the SLS/SM3 shaders (parity harness ready, pass_space.tsv names the binaries per pass) |
+| C63 / C69 families | **FAIL** against the originals (c69_families.py, FNVNX_SDP): 5 cases match (tile, tile scroll offset, nolight tex / texvc / vc), 7 defects filed (tile_texscroll_scale, tile_alphamap, tile_vc, nolight_falloff_curve, sky_vertex_weights, land_light, depth_alphatest); lit not checked |
 | C41, C42 (sRGB views; D3 no native D32) | consistent with Nine's tables (L8/A8L8 sRGB, L16/V8U8 none) and exercised by the conformance + fuzz sRGB restriction A2; D3 is a declared deviation, not falsified |
 | C70 ABI v3 read-back formats | PASS in use: `v6n_s6ngl` reads RGBA32F for float targets and Depth32F/Stencil8 for depth-stencil; 104/104 committed scenes and 380/400 fuzz cases match Nine (the rest classified, none a read-back error) |
 | C71 NxOp_Clear rectangles | PASS in use (V6n clears viewport ∩ scissor through it, as D3D9 Clear requires; trap `clear_ignores_scissor` matches); its sRGB rule differs from Nine -> defect `clear_srgb` |
@@ -76,7 +80,8 @@ tests/v6n/run.sh
 - `y_fill_bias`: fixed by S6n, verified.
 - `screen_space_halfpixel`, `camera_port_rounding`, `clear_srgb`: fixed by S6n b3f776e (C74-C76), verified by V6n
   (defect tests pass; 105/105 scenes and 2/2 VS scenes match Nine on `v6n_s6ngl`; n1 45 checks).
-- No open defects. Note: b3f776e also edited V6n's `render/verify/target/s6ngl_target.c` (one line: NxClear_Srgb from
+- Open: tile_texscroll_scale, tile_alphamap, tile_vc, nolight_falloff_curve, sky_vertex_weights, land_light,
+  depth_alphatest (C63/C69 families vs the originals; need FNVNX_SDP). Note: b3f776e also edited V6n's `render/verify/target/s6ngl_target.c` (one line: NxClear_Srgb from
   SRGBWRITEENABLE); the change is correct and kept, but that file is V6n's per MACHINES.md.
 
 ## Next

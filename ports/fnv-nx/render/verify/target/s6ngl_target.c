@@ -117,9 +117,9 @@ struct V6nTarget {
     uint32_t colorImg, depthImg, vs, fs, mem, nextState;
     uint8_t* block; uint32_t used;
     uint32_t cmd[MAXW]; uint32_t nw;
-    uint32_t rs[NXD3D_RS_COUNT]; uint32_t samp[2][NXD3D_SAMP_COUNT]; uint32_t tss[2][33];
-    uint32_t tex[2];      /* image id (0 = none) */
-    uint32_t texfmt[2];
+    uint32_t rs[NXD3D_RS_COUNT]; uint32_t samp[8][NXD3D_SAMP_COUNT]; uint32_t tss[2][33];
+    uint32_t tex[8];      /* image id (0 = none); 8 stages for pixel shaders, the FF model uses 2 */
+    uint32_t texfmt[8];
     NxD3D9Viewport vp; NxD3D9Rect sc; float proj[16];
     int err; uint32_t white;
     uint32_t vs_ps, ps, ps_version; float psc[256][4];   /* programmable PS: S6b's GLSL through S6n's shim */
@@ -211,6 +211,7 @@ static V6nTarget* s_begin2(int w, int h, uint32_t rtf, uint32_t dsf, char* err, 
         t->tss[s][4] = s == 0 ? 2 : 1; t->tss[s][5] = 2; t->tss[s][6] = 1;
         t->tss[s][26] = 1; t->tss[s][27] = 1; t->tss[s][11] = s;
     }
+    for (int s = 2; s < 8; s++) nx_d3d9_default_samp(t->samp[s]);
     t->vp = (NxD3D9Viewport){0, 0, (uint32_t)w, (uint32_t)h, 0.0f, 1.0f};
     t->sc = (NxD3D9Rect){0, 0, w, h};
     for (int i = 0; i < 16; i++) t->proj[i] = (i % 5 == 0) ? 1.0f : 0.0f;
@@ -241,11 +242,11 @@ static void s_clear(V6nTarget* t, uint32_t flags, uint32_t color, float z, uint3
     emit(t, NxOp_Clear, a, 8);
 }
 static void s_rs(V6nTarget* t, uint32_t st, uint32_t v) { if (st < NXD3D_RS_COUNT) t->rs[st] = v; }
-static void s_samp(V6nTarget* t, uint32_t s, uint32_t ty, uint32_t v) { if (s < 2 && ty < NXD3D_SAMP_COUNT) t->samp[s][ty] = v; }
+static void s_samp(V6nTarget* t, uint32_t s, uint32_t ty, uint32_t v) { if (s < 8 && ty < NXD3D_SAMP_COUNT) t->samp[s][ty] = v; }
 static void s_tss(V6nTarget* t, uint32_t s, uint32_t ty, uint32_t v) { if (s < 2 && ty < 33) t->tss[s][ty] = v; }
 int v6n_level_bytes(uint32_t fmt, int w, int h);
 static int s_tex(V6nTarget* t, uint32_t stage, uint32_t fmt, int w, int h, int levels, const uint8_t* const* data) {
-    if (stage > 1) return 0;
+    if (stage > 7) return 0;
     NxFormatInfo fi = nx_d3d9_format(fmt);
     if (!fi.format) return 0;
     size_t total = 0;
@@ -269,7 +270,7 @@ static int s_tex(V6nTarget* t, uint32_t stage, uint32_t fmt, int w, int h, int l
     free(buf);
     return t->tex[stage] != 0;
 }
-static void s_notex(V6nTarget* t, uint32_t stage) { if (stage < 2) t->tex[stage] = 0; }
+static void s_notex(V6nTarget* t, uint32_t stage) { if (stage < 8) t->tex[stage] = 0; }
 static void s_vp(V6nTarget* t, uint32_t x, uint32_t y, uint32_t w, uint32_t h, float mn, float mx) { t->vp = (NxD3D9Viewport){x, y, w, h, mn, mx}; }
 static void s_scissor(V6nTarget* t, int32_t l, int32_t tp, int32_t r, int32_t b) { t->sc = (NxD3D9Rect){l, tp, r, b}; }
 static void s_proj(V6nTarget* t, const float m[16]) { memcpy(t->proj, m, sizeof t->proj); }
@@ -283,16 +284,13 @@ static uint32_t vcount(uint32_t p, uint32_t n) {
 static uint32_t fnv1a(const char* s) { uint32_t h = 2166136261u; while (*s) h = (h ^ (uint8_t)*s++) * 16777619u; return h; }
 /* D3D9 lets a PS read a varying the VS does not write; GL refuses to link. Add the missing VS outputs, written as 0
  * (same reconciliation as v6n_gl, RENDER_VERIFY §7 V1). */
-static uint32_t vs_for(V6nTarget* t) {
-    uint32_t vh = fnv1a(t->vs_glsl), ph = fnv1a(t->ps_glsl);
-    for (int i = 0; i < t->nvsp; i++) if (t->vsp[i].vh == vh && t->vsp[i].ph == ph) return t->vsp[i].id;
-    const char* vsrc = t->vs_glsl;
-    char decl[2048] = "", init[2048] = "";
-    for (const char* q = t->ps_glsl; (q = strstr(q, "layout(location = ")); q++) {
+static char* stub_vs(const char* vsrc, const char* ps) {   /* malloc'd VS + vec4(0) outputs for what the PS reads */
+    char decl[4096] = "", init[4096] = "";
+    for (const char* q = ps; (q = strstr(q, "layout(location = ")); q++) {
         int loc = atoi(q + 18); const char* e = strchr(q, ';'); if (!e) break;
         if (!strstr(q, ") in ") || strstr(q, ") in ") > e) continue;
-        char pat[64]; snprintf(pat, sizeof pat, "layout(location = %d) out", loc);
-        if (strstr(vsrc, pat)) continue;
+        char pat[64], pat2[64]; snprintf(pat, sizeof pat, "layout(location = %d) out", loc); snprintf(pat2, sizeof pat2, "layout(location=%d) out", loc);
+        if (strstr(vsrc, pat) || strstr(vsrc, pat2)) continue;
         snprintf(decl + strlen(decl), sizeof decl - strlen(decl), "layout(location = %d) out highp vec4 v6n_stub_%d;\n", loc, loc);
         snprintf(init + strlen(init), sizeof init - strlen(init), "v6n_stub_%d = vec4(0.0);\n", loc);
     }
@@ -302,6 +300,13 @@ static uint32_t vs_for(V6nTarget* t) {
     if (brace && nl && nl < brace)
         snprintf(full, n, "%.*s%s%.*s%s%s", (int)(nl - vsrc + 1), vsrc, decl, (int)(brace - nl), nl + 1, init, brace + 1);
     else snprintf(full, n, "%s", vsrc);
+    return full;
+}
+/* D3D9 lets a PS read a varying the VS does not write; GL refuses to link (same reconciliation as v6n_gl, §7 V1) */
+static uint32_t vs_for(V6nTarget* t) {
+    uint32_t vh = fnv1a(t->vs_glsl), ph = fnv1a(t->ps_glsl);
+    for (int i = 0; i < t->nvsp; i++) if (t->vsp[i].vh == vh && t->vsp[i].ph == ph) return t->vsp[i].id;
+    char* full = stub_vs(t->vs_glsl, t->ps_glsl);
     uint32_t id = shader(t->api, NxStage_Vertex, full); free(full);
     if (!id) { fprintf(stderr, "s6n-gl: vs: %s\n", nxgl_last_error()); return 0; }
     if (t->nvsp < 64) { t->vsp[t->nvsp].vh = vh; t->vsp[t->nvsp].ph = ph; t->vsp[t->nvsp].id = id; t->nvsp++; }
@@ -386,8 +391,9 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
         }
     }
     if (g_idx) { o = put(t, g_idx, n * 2); uint32_t a[4] = {t->mem, o, n * 2, 0}; emit(t, NxOp_BindIdx, a, 4); }
-    uint32_t th[5] = {NxStage_Fragment, 0, 2, 0, 0};
-    for (int s = 0; s < 2; s++) {
+    int nst = t->ps ? 8 : 2;   /* ps_sN: slot N */
+    uint32_t th[11] = {NxStage_Fragment, 0, (uint32_t)nst};
+    for (int s = 0; s < nst; s++) {
         uint32_t img = t->tex[s] ? t->tex[s] : t->white;
         NxD3D9Texture ti = {t->tex[s] ? t->texfmt[s] : 0, 0, 0, 0, 0};
         NxSamplerState ss; nx_d3d9_sampler(t->samp[s], &ti, &ss);
@@ -395,7 +401,7 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
         uint32_t smp = (uint32_t)CALL1(t->api->sampler_create, &ss);
         th[3 + s] = NX_TEX_HANDLE(img, smp);
     }
-    emit(t, NxOp_BindTextures, th, 5);
+    emit(t, NxOp_BindTextures, th, 3 + nst);
     if (g_idx) { uint32_t dr[6] = {nxprim(prim), n, 1, 0, 0, 0}; emit(t, NxOp_DrawIndexed, dr, 6); }
     else { uint32_t dr[5] = {nxprim(prim), n, 1, 0, 0}; emit(t, NxOp_Draw, dr, 5); }
     return !t->err;
@@ -449,7 +455,7 @@ static int s_readback(V6nTarget* t, V6nReadback* out) {
 static int s_psh(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
     if (!bc) { t->ps = 0; return 1; }
     if (!glsl || n < 1) return 0;
-    if (!t->vs_ps) t->vs_ps = shader(t->api, NxStage_Vertex, VS_PS);
+    { char* v = stub_vs(VS_PS, glsl); t->vs_ps = shader(t->api, NxStage_Vertex, v); free(v); }   /* t1..t7: 0 */
     t->ps = shader(t->api, NxStage_Fragment, glsl);   /* nxgl_shim_glsl: version, bindings, block names */
     t->ps_version = bc[0] & 0xFFFF;
     free(t->ps_glsl); t->ps_glsl = strdup(glsl);

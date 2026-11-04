@@ -192,6 +192,38 @@ textured quad, plus a perspective table-fog scene. Inputs the harness does not d
 Vertex shaders are translated and validated only. Self-test: 7 shaders (ps_1_1, ps_2_0 arithmetic/exp/log/pow/nrm/
 texkill, ps_3_0 vPos): **6 match pixel-exactly, 1 mismatch** = finding P1 (§7).
 
+### 3.7 Whole-package shader fuzzing (`render/verify/shaders/sdpfuzz.py`)
+
+Every program of the given packages: translated with S6b's `sdp2dksh --glsl`, then per seed (default 4) the original
+bytecode runs on the oracle (`v6n_nine`) and the translation on a GL target (`v6n_gl`; `--target s6ngl` for pixel
+programs on S6n's backend). Identical bytecode is run once (by hash) and the result shared by every package that
+holds it. Inputs are random per seed:
+
+* pixel programs: a synthetic driver VS (`tests/v6n/shaders/drv2.vsa`, `drv3.vsa` for ps_3_0) feeds COLOR0/1
+  (random vertex colours) and TEXCOORD0..7 (uv, and random affine maps of it), 8 random point-sampled 2D textures,
+  random c0..c63; 16x16 A8R8G8B8 target.
+* vertex programs: random FLOAT4 vertex elements for every declared input (scene commands `vdecl` / `vg` / `drawg`,
+  new: D3D9 vertex declarations on Nine, `fnvnx_dk_attrib_location` on GL); every float constant random except the
+  CTAB matrix whose name contains "Proj" (near identity, so the 3x3 grid of 8 triangles stays inside the target); a
+  generated PS writes a random linear combination of every COLOR / TEXCOORD output (only the components the VS
+  writes; vs < 3.0 colours saturated in the PS) to an A32B32G32R32F target; D24S8 depth checks oPos.z.
+
+Verdict per seed, against cmp.py's thresholds (2/255; float 1e-3 relative; depth 8 LSB), widened per pixel by 0.1 x
+the oracle's own change when every input is perturbed by 1e-5 (a stability probe: float32 rounding is ~1e-7, so a
+correct translation stays inside; an ill-conditioned random input is not a defect). Vertex scenes compare where both
+images are covered, tolerate 2 pixels per seed (pixel centres on a shared edge) and skip row 0 / column 0 (O9). A
+program passes when every seed passes. Failures are attributed: `d3d9_numerics` (passes once the translation is
+given Nine's D3D9 numerics: log = log2|x|, log(0) and rcp(0) = +-2^127, nrm(0) = 0, vs < 3.0 colours saturated per
+vertex - findings P2-P4), `undriven_input` (cube / volume samplers, no 2D-only harness input), `oracle_nan` (the
+oracle itself produced NaN on that input), else `open`.
+
+Output (game-derived, stays in `build/v6n/sdpfuzz/`): `results.json`, schema `v6n-sdpfuzz/1`:
+`{schema, target, oracle, seeds, thresholds, translator, packages: [{file, sha256, programs, parsed, translated, pass,
+fail, translate_fail, ...}], totals: {...}, unique_bytecode: {...}, programs: [{package, name, model, stage, hash,
+bytes, parsed, translated, status: pass|fail|translate_fail|not_run|oracle_error|target_error, cause, max_err_color,
+max_err_depth_lsb, bad_px, seeds, undriven, status_d3d9_numerics, oracle_nan, detail}]}`. `max_err_color` is the
+largest |difference| over compared pixels (8-bit steps for pixel programs, float units for vertex programs).
+
 ## 4. Results (2026-11-04)
 
 | check | result |
@@ -209,10 +241,35 @@ texkill, ps_3_0 vPos): **6 match pixel-exactly, 1 mismatch** = finding P1 (§7).
 | fuzzer sensitivity (`--sensitivity`, 120 random cases, all matching unmutated) | 26 of 33 GL-target mutants killed by random cases alone (cull winding 66, upper-left origin 73, half-pixel 44, half-z 14, colour-mask order 12, two-sided stencil 9 ... down to 1). Not killed: d24_bias_scale, x8_dst_alpha, no_texture_black (excluded from fuzzing by design, covered analytically / by trap scenes), ati2_swizzle, a4r4g4b4_order, a8_swizzle (1 format in 21, rare at this sample size), clear_ignores_scissor (mid-scene scissored clears are rare). Every mutant is killed by its trap scene. |
 | shader parity self-test | 6/7 match on `v6n_gl` and on `v6n_s6ngl` (S6b GLSL through S6n's shim; ps_3_0 vPos matches under its y negation), 1 finding (P1) |
 | VS + PS + indexed draw (`vsscenes.py`, 2 scenes: affine + tint, perspective w + COLOR0/COLOR1 + two indexed draws under ZFUNC GREATER) | both match Nine on `v6n_gl` and on `v6n_s6ngl` (S6b VS GLSL through S6n's shim, layout 2 = S6b attribute locations, D3DCOLOR uploaded as RGBA bytes, NxOp_BindIdx/DrawIndexed; removing the colour swap is caught by both scenes); trap `vs_posfix_halfpixel` (S6b's posfix half-pixel shift on top of the +0.5 viewport) caught, 174 px |
+| whole-package fuzz, the player's 16 packages (§3.7, 4 seeds, `v6n_gl`) | 15,791 programs (8,160 PS, 7,631 VS), all parsed; 11,161 translated, 4,630 translation failures (4,614 `centroid unsupported in glsl profile`, 16 relative addressing of an indeterminate array: P5). Of the translated: **8,386 pass, 2,775 fail** = 2,257 attributed to D3D9 numerics (P2-P4), 128 undriven cube samplers, 154 oracle NaN, 236 open. By unique bytecode (843 translated): 621 pass, 170 numerics, 10 undriven, 16 oracle NaN, 26 open (GRASS wind VS 20, SM3 VS, STB/SLS cube PS, SKYSTARS). Per package below. |
+| C63 / C69 families vs the originals (`tests/v6n/claims/c69_families.py`, FNVNX_SDP) | 12 cases: tile, tile scroll offset, nolight tex / texvc / vc match; **7 differ, filed as defects**: tile_texscroll_scale, tile_alphamap, tile_vc, nolight_falloff_curve, sky_vertex_weights, land_light, depth_alphatest. lit not checked (the SM3 lighting PS do not translate and their LightData layout needs the decomp's Lighting30 setup) |
 | C54 MAXMIPLEVEL / mip selection (`tests/v6n/claims/c54_*`) | 8/8 scenes match Nine on both targets |
 | C65 radix sort (`tests/v6n/claims/c65_sort.cpp`) | 4000 random packet sets identical to std::stable_sort, SortKey packing exact: PASS |
 | C66 capture/replay (`render/verify/capture/nxcap.py mutate`) | S6n's `replay_gl` reproduced (17 frames, 0 differ) and flags all 5 corruption kinds (vertex, UBO, state word, texel, recorded read-back) ; the same holds for the ILP32 guest's capture under Unicorn (C62 reproduced: 17/17 scenes equal to the goldens; `tests/v6n/run.sh` with GUEST=...) |
 | N1 camera vs the engine (decomp 0x00e6c780, 0x00e6cf40) | projection and view agree; **defects** `screen_space_halfpixel` (half-pixel and z/9999 missing) and `camera_port_rounding` (rounding vs truncation) |
+
+### 4.0 Whole-package fuzz per package (aggregate counts; the per-program JSON stays in build/)
+
+Pairs 010/011, 012/013, 014/015, 016/017, 018/019 are byte-identical files. "checked" = translated and run (4 seeds).
+
+| package | programs (PS / VS) | parsed | translated | checked | pass | fail: numerics / undriven / oracle NaN / open |
+|---|---|---|---|---|---|---|
+| shaderpackage002 | 830 (420 / 410) | 830 | 610 | 610 | 464 | 146: 124 / 8 / 4 / 10 |
+| shaderpackage003 | 983 (516 / 467) | 983 | 689 | 689 | 525 | 164: 137 / 8 / 9 / 10 |
+| shaderpackage004 | 1007 (516 / 491) | 1007 | 713 | 713 | 537 | 176: 149 / 8 / 9 / 10 |
+| shaderpackage006 | 983 (516 / 467) | 983 | 689 | 689 | 529 | 160: 133 / 8 / 9 / 10 |
+| shaderpackage007 | 1007 (516 / 491) | 1007 | 713 | 713 | 541 | 172: 145 / 8 / 9 / 10 |
+| shaderpackage009 | 1007 (516 / 491) | 1007 | 713 | 713 | 548 | 165: 137 / 8 / 10 / 10 |
+| shaderpackage010 | 983 (516 / 467) | 983 | 689 | 689 | 516 | 173: 139 / 8 / 9 / 17 |
+| shaderpackage011 | 983 (516 / 467) | 983 | 689 | 689 | 516 | 173: 139 / 8 / 9 / 17 |
+| shaderpackage012 | 1007 (516 / 491) | 1007 | 713 | 713 | 525 | 188: 151 / 8 / 11 / 18 |
+| shaderpackage013 | 1007 (516 / 491) | 1007 | 713 | 713 | 525 | 188: 151 / 8 / 11 / 18 |
+| shaderpackage014 | 983 (516 / 467) | 983 | 689 | 689 | 517 | 172: 138 / 8 / 9 / 17 |
+| shaderpackage015 | 983 (516 / 467) | 983 | 689 | 689 | 517 | 172: 138 / 8 / 9 / 17 |
+| shaderpackage016 | 1007 (516 / 491) | 1007 | 713 | 713 | 526 | 187: 150 / 8 / 11 / 18 |
+| shaderpackage017 | 1007 (516 / 491) | 1007 | 713 | 713 | 526 | 187: 150 / 8 / 11 / 18 |
+| shaderpackage018 | 1007 (516 / 491) | 1007 | 713 | 713 | 537 | 176: 138 / 8 / 12 / 18 |
+| shaderpackage019 | 1007 (516 / 491) | 1007 | 713 | 713 | 537 | 176: 138 / 8 / 12 / 18 |
 
 ### 4.1 Rasterization finding
 
@@ -298,6 +355,12 @@ Blocked, with what unblocks it:
 | P1 | S6b (shader translation, parity reference) | MojoShader `glsldk` PS epilogue computes table-fog depth as `gl_FragCoord.z`; Nine (`nine_shader.c` shader_add_ps_fog_stage) and S6n's `d3d9_epilogue.glsl` use z * w (z / gl_FragCoord.w). They differ on any perspective geometry: corpus shader `fog_linear`, 247 px, up to 75/255. |
 | V1 | S6n / S6b (any GL path pairing translated shaders) | D3D9 lets a pixel shader read a varying its vertex shader does not write (Nine writes oFog = 0 for vs < 3, the rest is undefined); GL refuses to link (`fragment shader input ... has no matching output`). V6n's executor adds the missing VS outputs written as 0. deko3d/uam compile stages separately and are not affected. |
 | N1 | S6n (N1 camera) | besides the two defects, the engine's `Do_SetCameraData` has a camera-relative mode (view translation 0 and the camera position kept in a global when two flags are set) and rewrites the projection's third column for an oblique near clip plane under a global flag (reflections); `nx::CameraView` / `CameraProjection` have neither. Not filed as defects: they belong to later N-milestones, listed so they are not lost. |
+| P2 | S6b | vs < 3.0 `oD0` / `oD1` are not saturated (D3D9 and Nine clamp them to [0, 1] per vertex): `tests/v6n/vs/findings/p2_color_sat` (c0 = (2, -1, .5, 1.5) reads (1, 0, .5, 1) on Nine, unchanged on GL) |
+| P3 | S6b | `log` / `logp` translate to log2(x); D3D9 is log2(abs(x)) (and Nine gives -2^127 for 0, GL -inf): `p3_log_abs` (log(-4) = 2 vs NaN). Reached by every pow-style log/exp pair with a non-positive input |
+| P4 | S6b | `nrm` of a zero vector: GLSL normalize -> NaN, Nine 0 (`p4_nrm_zero`); rcp(0) / rsq(0) = 1e38 vs Nine's 2^127. D3D9 leaves both implementation-defined; listed because they dominate the random-input fuzz |
+| P5 | S6b | 4,614 of 15,791 programs (4,164 ps_2_x, 450 ps_3_0; 966 unique) do not translate: MojoShader glsldk rejects the `centroid` modifier (`centroid unsupported in glsl profile`); 16 vs_2_0 fail on relative addressing of an indeterminate array. None of these can run on the native path today |
+| O8/O9 | oracle | O9: softpipe's clipper drops pixel centres on the x = -w / y = w clip planes (D3D9 row 0 / column 0) for clipped triangles whose w varies; llvmpipe (guard band) and D3D9 hardware keep them. Vertex-program fuzz skips row 0 / column 0 |
+| E1 | exe | the ShadowLight pass array `DAT_011fdff8[759]` (and the Lighting30 shader table `DAT_01200c48`, TileShader constants at `DAT_01202198`) lie in the zero-filled tail of the 1.4.0.525 executable's .data (raw size 0x40200 of 0xeea9c): filled at run time, so the static configured-vs-emitted question of §2 cannot be settled from the file; it needs a run (capture of §6) |
 | O3 | S6c (host gate) | stock softpipe is not a D3D9-exact rasterizer (O3), so gate images with slanted edges are off by up to a pixel per edge |
 
 ## 8. On-device conformance plan and how to rerun
