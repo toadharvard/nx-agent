@@ -2,8 +2,8 @@
 the host, and how far the game got through its data (S5-data's milestones).
 
 Mounts. The guest sees one SD card ("sdmc:/"), which emu_guest maps to --root. --game DIR mounts the game install
-(C:\\FalloutNV: FalloutNV.exe, Data/, Fallout_default.ini) at the guest's sdmc:/switch/fnv (os_guest.c os_game_dir)
-and at sdmc:/fnvnx/game (the layout of guests built before os_game_dir), so a full Data/ is used where it lies, never
+(C:\\FalloutNV: FalloutNV.exe, Data/, Fallout_default.ini) at the guest's sdmc:/switch/fnv (the root itself, NX1's
+sdlayout.h) and at sdmc:/fnvnx/game (the layout of guests built before it), so a full Data/ is used where it lies, never
 copied. Without --game both prefixes are <root>/fnvnx/game, so "--file fnvnx/game/FalloutNV.exe=..." serves old and
 new guests alike. The SD card's FAT/exFAT folds case, and the guest relies on it (os_fs_case_insensitive() = 1, path.cpp skips
 its directory scan), so each component is matched case-insensitively here (exact spelling first). Components that do

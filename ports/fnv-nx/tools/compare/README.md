@@ -75,6 +75,56 @@ show up as a mismatch.
 
 For a cube `TEX` (flags 2), each level's bytes hold the six faces one after another, in D3DCUBEMAP_FACES order.
 
+## d9cap: the capture layer
+
+`d3d9/d9cap.c` (built by `d3d9/build.sh` as `d3d9.dll`) is a proxy d3d9. It loads the real one (by default
+`<system directory>\d3d9.dll`, which is Wine's builtin), forwards every call to it, and journals the D3D9 call stream
+as plain NXD9. nxd9play and nx_render read the journal as it is.
+
+To capture, put `d3d9.dll` beside the exe and run the exe under Wine with the native override:
+
+```sh
+cp $BIN/d3d9.dll "$GAME/"
+WINEDLLOVERRIDES='d3d9=n,b' S16_CAPTURE='Z:\tmp\run.nxd9' S16_CAPTURE_FRAMES=100-102 wine "$GAME/FalloutNV.exe"
+wine $BIN/nxd9play.exe 'Z:\tmp\run.nxd9' -o 'Z:\tmp\run'       # the journal replays like any capture
+```
+
+| env | meaning |
+|---|---|
+| `S16_CAPTURE` | Journal path, as a Windows path. Default `d9cap.nxd9` in the current directory. |
+| `S16_CAPTURE_FRAMES` | `first-last` (frames are numbered by Present, from 0; `N` means `N-N`, `first-` has no end). State and resources carry across frames, so everything is journaled from the start. Before `first`, the records that only produce pixels are dropped (DRAW, DRWI, CLR, STRC, CFIL, UP draws). The file closes after frame `last`'s PRES. A frame that builds on an earlier frame's pixels (a render target cleared only in part) differs from the real run. |
+| `S16_CAPTURE_MAX_MB` | Size cap in MiB (fractions allowed). The journal stops before the record that would pass the cap, so it holds only whole records. |
+| `S16_REAL_D3D9` | Path of the real d3d9, for when the system path resolves back to the proxy. d9cap checks for that case and says so on stderr. |
+
+When the journal closes, d9cap prints one line on stderr: frames, records, bytes, `unjournaled` and the reason it
+stopped. `unjournaled` counts calls that changed GPU contents or state in a way NXD9 cannot carry:
+* FVF draws (there is no SetFVF record);
+* ProcessVertices;
+* a partial UpdateSurface;
+* a lock of a render-target texture;
+* state blocks (Set* calls inside Begin/EndStateBlock are not journaled, and Apply is not seen);
+* Reset's return to the default state;
+* objects first seen through a Get* call.
+
+Mapping:
+* Creation calls become TEX, SURF, VB, IB, DECL, VSH and PSH. Shaders carry the bytecode and its FNV-1a 64 hash, with
+  no GLSL.
+* Unlocks become VBU/IBU (the locked range) and TEXU/TEXC (the whole level or face, read back after a partial lock).
+* UpdateTexture becomes TEXU/TEXC from the system-memory source. System-memory textures get no records of their own.
+* UP draws go through a scratch VB/IB of d9cap's own, then stream 0 and the indices are unset, as D3D9 leaves them.
+* The back buffer is surface 0 and the auto depth-stencil is 0xFFFFFFFF, so neither gets a SURF record.
+
+Wrappers keep COM identity: GetDevice, GetTexture, GetSurfaceLevel, GetContainer, QueryInterface and the other
+getters return the same wrappers. A resource wrapper lives exactly as long as its resource, because the runtime
+releases a sentinel attached with `SetPrivateData(D3DSPD_IUNKNOWN)` when it destroys the resource. These are not
+wrapped and pass through as the runtime's objects: volume textures, state blocks, queries, and the `*Ex` interfaces
+(QueryInterface refuses them, and `Direct3DCreate9Ex` returns E_NOTIMPL). `d9cap_stats` (an extra export) reports
+live wrappers and journal counters for tests.
+
+`tests/s16/test_d9cap.py` runs the round trip under Wine. Every synthetic capture plus an extension-record capture is
+replayed through nxd9play with the proxy, and the resulting journal through plain nxd9play must be pixel-identical.
+`tests/s16/d9cap_probe.c` checks forwarding, identity, lifetime, UP draws and the different ways of filling a texture.
+
 ## Captures
 
 * **Synthetic** (`synth.py`): our own shaders (D3D9 assembly), geometry and textures. The generator is committed;

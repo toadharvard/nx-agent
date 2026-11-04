@@ -32,28 +32,28 @@ static void mkdir_host(const char *sub)
 
 TEST(path_mapping_rules)
 {
-    CHECK_STR(rel("Data\\Meshes\\x.nif"), "/game/Data/Meshes/x.nif");                 /* relative to cwd */
-    CHECK_STR(rel("C:\\FalloutNV\\FalloutNV.exe"), "/game/FalloutNV.exe");
-    CHECK_STR(rel("c:/falloutnv//Data/./a.txt"), "/game/Data/a.txt");                  /* '/' '//' '.' */
-    CHECK_STR(rel("\\FalloutNV\\Data\\b"), "/game/Data/b");                             /* drive-rooted */
-    CHECK_STR(rel("Data\\..\\..\\..\\FalloutNV\\c"), "/game/c");                        /* '..' stops at C:\ */
+    CHECK_STR(rel("Data\\Meshes\\x.nif"), "/Data/Meshes/x.nif");                 /* relative to cwd */
+    CHECK_STR(rel("C:\\FalloutNV\\FalloutNV.exe"), "/FalloutNV.exe");
+    CHECK_STR(rel("c:/falloutnv//Data/./a.txt"), "/Data/a.txt");                  /* '/' '//' '.' */
+    CHECK_STR(rel("\\FalloutNV\\Data\\b"), "/Data/b");                             /* drive-rooted */
+    CHECK_STR(rel("Data\\..\\..\\..\\FalloutNV\\c"), "/c");                        /* '..' stops at C:\ */
     CHECK_STR(rel("C:\\FalloutNV\\..\\Windows\\win.ini"), "/drive_c/Windows/win.ini");  /* outside the mounts */
     CHECK_STR(rel("D:\\Other\\f"), "/drive_d/Other/f");
-    CHECK_STR(rel("Data\\name.txt. "), "/game/Data/name.txt");                         /* trailing dot/space */
+    CHECK_STR(rel("Data\\name.txt. "), "/Data/name.txt");                         /* trailing dot/space */
     CHECK_STR(rel("C:\\Users\\Player\\Documents\\My Games\\FalloutNV\\Fallout.ini"),
               "/user/Documents/My Games/FalloutNV/Fallout.ini");
-    CHECK_STR(rel("\\\\?\\C:\\FalloutNV\\x"), "/game/x");
+    CHECK_STR(rel("\\\\?\\C:\\FalloutNV\\x"), "/x");
     char b[64];
     CHECK_EQ(fnvnx_path_map("\\\\server\\share\\x", b, sizeof b), ERROR_PATH_NOT_FOUND);
 }
 
 TEST(path_case_insensitive_resolution)
 {
-    mkdir_host("game/Data/Textures/Interface");
+    mkdir_host("Data/Textures/Interface");
     s4_write_file("Data\\Textures\\Interface\\Loading.DDS", "x");
     /* existing components resolve to the host spelling, new ones keep the game's */
-    CHECK_STR(rel("DATA\\textures\\INTERFACE\\loading.dds"), "/game/Data/Textures/Interface/Loading.DDS");
-    CHECK_STR(rel("data\\TEXTURES\\NewDir\\New.dds"), "/game/Data/Textures/NewDir/New.dds");
+    CHECK_STR(rel("DATA\\textures\\INTERFACE\\loading.dds"), "/Data/Textures/Interface/Loading.DDS");
+    CHECK_STR(rel("data\\TEXTURES\\NewDir\\New.dds"), "/Data/Textures/NewDir/New.dds");
     HANDLE h = CreateFileA("data\\textures\\interface\\LOADING.dds", GENERIC_READ, FILE_SHARE_READ, NULL,
                            OPEN_EXISTING, 0, NULL);
     CHECK(h != INVALID_HANDLE_VALUE);
@@ -66,11 +66,11 @@ TEST(cwd_and_full_path)
     CHECK_EQ(GetCurrentDirectoryA(sizeof b, b), strlen("C:\\FalloutNV"));
     CHECK_STR(b, "C:\\FalloutNV");
     CHECK_EQ(GetCurrentDirectoryA(4, b), strlen("C:\\FalloutNV") + 1); /* too small: size needed */
-    mkdir_host("game/Data");
+    mkdir_host("Data");
     CHECK(SetCurrentDirectoryA("data"));
     GetCurrentDirectoryA(sizeof b, b);
     CHECK_STR(b, "C:\\FalloutNV\\data");
-    CHECK_STR(rel("Sound\\fx.wav"), "/game/Data/Sound/fx.wav");
+    CHECK_STR(rel("Sound\\fx.wav"), "/Data/Sound/fx.wav");
     CHECK(!SetCurrentDirectoryA("NoSuchDir"));
     CHECK_EQ(GetLastError(), ERROR_PATH_NOT_FOUND);
     CHECK(SetCurrentDirectoryA("C:\\FalloutNV"));
@@ -166,7 +166,7 @@ TEST(file_read_write_seek)
 
 TEST(find_first_file)
 {
-    mkdir_host("game/Data/Find");
+    mkdir_host("Data/Find");
     s4_write_file("Data\\Find\\b.esp", "1");
     s4_write_file("Data\\Find\\A.esm", "22");
     s4_write_file("Data\\Find\\c.ESP", "333");
@@ -286,27 +286,72 @@ TEST(crt_file_wrappers)
     CHECK_STR(fnvnx_getcwd(cwd, sizeof cwd), "C:\\FalloutNV");
 }
 
-TEST(game_dir_outside_root)
+/* NX1 check 5: the SD layout as the player copies it (sdmc:/switch/fnv = <root>: FalloutNV.exe and Data/ from a PC
+ * install, any case), the game's own spellings of its files, and the profile directories it writes. */
+static void touch_host(const char *sub)
 {
-    /* the SD layout: the install (C:\FalloutNV, Data\) lives in os_game_dir() (the guest's sdmc:/switch/fnv,
-     * $FNVNX_GAME_DIR here), apart from the port's root; only the default root (fnvnx_path_reset(NULL)) takes it */
-    char game[1100], root[1100];
-    snprintf(game, sizeof game, "%s/sd/switch/fnv", s4_root());
-    snprintf(root, sizeof root, "%s/sd/fnvnx", s4_root());
-    mkdir_host("sd/switch/fnv/Data");
-    mkdir_host("sd/fnvnx");
-    setenv("FNVNX_ROOT", root, 1);
-    setenv("FNVNX_GAME_DIR", game, 1);
-    fnvnx_path_reset(NULL);
-    char want[1200];
-    snprintf(want, sizeof want, "%s/Data/FalloutNV.esm", game);
-    CHECK_STR(host("C:\\FalloutNV\\Data\\FalloutNV.esm"), want);
-    snprintf(want, sizeof want, "%s/Data/falloutnv.esm", game);         /* cwd is the install; Data folded, the */
-    CHECK_STR(host("data\\falloutnv.esm"), want);                        /* missing file keeps its spelling */
-    snprintf(want, sizeof want, "%s/user/Documents/My Games/FalloutNV/Fallout.ini", root);
-    CHECK_STR(host("C:\\Users\\Player\\Documents\\My Games\\FalloutNV\\Fallout.ini"), want);
-    fnvnx_path_reset(s4_root());                                         /* an explicit root keeps <root>/game */
-    CHECK_STR(rel("C:\\FalloutNV\\Data\\FalloutNV.esm"), "/game/Data/FalloutNV.esm");
-    unsetenv("FNVNX_GAME_DIR");
-    unsetenv("FNVNX_ROOT");
+    char p[1100];
+    snprintf(p, sizeof p, "%s/%s", s4_root(), sub);
+    FILE *f = fopen(p, "wb");
+    CHECK(f != NULL);
+    if (f)
+        fclose(f);
+}
+
+extern "C" void fnvnx_path_reset(const char *root);
+
+static void nx1_root(const char *sub)   /* a root of its own: the other tests' Data/ must not meet this DATA/ */
+{
+    char p[1100];
+    snprintf(p, sizeof p, "%s/%s", s4_root(), sub);
+    fnvnx_path_reset(p);
+}
+
+TEST(nx1_sd_layout_game_paths)
+{
+    nx1_root("nx1a");
+    mkdir_host("nx1a/DATA/Sound/Voice/FALLOUTNV.ESM");    /* a directory named like the plugin, to trip a lazy lookup */
+    mkdir_host("nx1a/DATA/music/Explore");
+    touch_host("nx1a/FALLOUTNV.EXE");
+    touch_host("nx1a/DATA/falloutnv.esm");
+    touch_host("nx1a/DATA/fallout - meshes.BSA");
+    touch_host("nx1a/DATA/Fallout - Textures.bsa");
+    static const struct { const char *win, *want; } cases[] = {
+        { "C:\\FalloutNV\\FalloutNV.exe", "/nx1a/FALLOUTNV.EXE" },
+        { "Data\\FalloutNV.esm", "/nx1a/DATA/falloutnv.esm" },
+        { "Data\\Fallout - Meshes.bsa", "/nx1a/DATA/fallout - meshes.BSA" },
+        { "data\\fallout - textures.BSA", "/nx1a/DATA/Fallout - Textures.bsa" },
+        { "Data\\Music\\Explore\\x.mp3", "/nx1a/DATA/music/Explore/x.mp3" },
+        { "Data\\Sound\\Voice\\FalloutNV.esm\\a.ogg", "/nx1a/DATA/Sound/Voice/FALLOUTNV.ESM/a.ogg" },
+    };
+    for (const auto &c : cases)
+        CHECK_STR(rel(c.win), c.want);
+    HANDLE h = CreateFileA("Data\\Fallout - Meshes.bsa", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    CHECK(h != INVALID_HANDLE_VALUE);
+    CloseHandle(h);
+    fnvnx_path_reset(s4_root());
+}
+
+TEST(nx1_profile_writable)
+{
+    nx1_root("nx1b");
+    /* path_reset made the profile folders; the game creates Saves\ itself and writes its INIs */
+    const char *docs = "C:\\Users\\Player\\Documents\\My Games\\FalloutNV";
+    char p[300];
+    snprintf(p, sizeof p, "%s\\Saves", docs);
+    CHECK(CreateDirectoryA(p, NULL) || GetLastError() == ERROR_ALREADY_EXISTS);
+    snprintf(p, sizeof p, "%s\\Saves\\Save 1.fos", docs);
+    HANDLE h = CreateFileA(p, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    CHECK(h != INVALID_HANDLE_VALUE);
+    DWORD n = 0;
+    CHECK(WriteFile(h, "FO3SAVEGAME", 11, &n, NULL) && n == 11);
+    CloseHandle(h);
+    CHECK_STR(rel(p), "/nx1b/user/Documents/My Games/FalloutNV/Saves/Save 1.fos");
+    snprintf(p, sizeof p, "%s\\FalloutPrefs.ini", docs);
+    CHECK(WritePrivateProfileStringA("Display", "iSize W", "1280", p));
+    char v[16] = "";
+    GetPrivateProfileStringA("Display", "iSize W", "", v, sizeof v, p);
+    CHECK_STR(v, "1280");
+    CHECK_STR(rel("C:\\Users\\Player\\AppData\\Local\\FalloutNV\\plugins.txt"), "/nx1b/user/AppData/Local/FalloutNV/plugins.txt");
+    fnvnx_path_reset(s4_root());
 }

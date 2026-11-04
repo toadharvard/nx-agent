@@ -524,6 +524,7 @@
    "id": "plan45",
    "name": "45 fps plan: cull/accumulation and Havok off the main thread, threaded animation",
    "levers": [
+    "barrier_relax",
     "mt_cull",
     "havok_workers",
     "threaded_anim"
@@ -531,15 +532,15 @@
    "core3": false,
    "cores": {
     "0": {
-     "lo": 8.543,
-     "mid": 17.216,
-     "hi": 26.989,
+     "lo": 8.405,
+     "mid": 16.397,
+     "hi": 25.709,
      "items": {
       "animation": 2.1,
       "cull": 0.65,
       "game_logic": 2.0,
       "havok": 2.1,
-      "interlocked_barriers": 1.725,
+      "interlocked_barriers": 0.906,
       "render_accumulation": 1.1,
       "renderer_main": 3.991,
       "scene_update": 3.25,
@@ -578,9 +579,9 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 8.38,
-       "mid": 21.1,
-       "hi": 44.1
+       "lo": 8.24,
+       "mid": 20.09,
+       "hi": 42.01
       },
       "1": {
        "lo": 5.99,
@@ -594,9 +595,9 @@
       }
      },
      "cpu_ms": {
-      "lo": 8.38,
-      "mid": 21.1,
-      "hi": 44.1
+      "lo": 8.24,
+      "mid": 20.09,
+      "hi": 42.01
      },
      "gpu_ms": {
       "case": "docked_720p",
@@ -604,14 +605,14 @@
       "hi": 12.49
      },
      "frame_ms": {
-      "lo": 8.38,
-      "mid": 21.1,
-      "hi": 44.1
+      "lo": 8.24,
+      "mid": 20.09,
+      "hi": 42.01
      },
      "worst_frame_ms": {
-      "lo": 9.22,
-      "mid": 26.38,
-      "hi": 66.15
+      "lo": 9.06,
+      "mid": 25.11,
+      "hi": 63.02
      },
      "critical_core": 0,
      "verdicts": {
@@ -624,9 +625,9 @@
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 4.79,
-       "mid": 12.06,
-       "hi": 25.2
+       "lo": 4.71,
+       "mid": 11.48,
+       "hi": 24.0
       },
       "1": {
        "lo": 3.42,
@@ -640,9 +641,9 @@
       }
      },
      "cpu_ms": {
-      "lo": 4.79,
-      "mid": 12.06,
-      "hi": 25.2
+      "lo": 4.71,
+      "mid": 11.48,
+      "hi": 24.0
      },
      "gpu_ms": {
       "case": "docked_720p",
@@ -651,13 +652,13 @@
      },
      "frame_ms": {
       "lo": 7.11,
-      "mid": 12.06,
-      "hi": 25.2
+      "mid": 11.48,
+      "hi": 24.0
      },
      "worst_frame_ms": {
       "lo": 7.82,
-      "mid": 15.08,
-      "hi": 37.8
+      "mid": 14.35,
+      "hi": 36.0
      },
      "critical_core": 0,
      "verdicts": {
@@ -669,20 +670,20 @@
     }
    },
    "main_minsn": {
-    "lo": 8.543,
-    "mid": 17.216,
-    "hi": 26.989
+    "lo": 8.405,
+    "mid": 16.397,
+    "hi": 25.709
    }
   },
   {
    "id": "plan45b",
    "name": "plan45 + the next three queue rows: render F2-F4, refcount barriers relaxed, NEON math",
    "levers": [
+    "barrier_relax",
     "mt_cull",
     "havok_workers",
     "threaded_anim",
     "render_f2f4",
-    "barrier_relax",
     "neon_math"
    ],
    "core3": false,
@@ -835,11 +836,11 @@
    "id": "plan60",
    "name": "60 fps plan: plan45b + instancing + core 3",
    "levers": [
+    "barrier_relax",
     "mt_cull",
     "havok_workers",
     "threaded_anim",
     "render_f2f4",
-    "barrier_relax",
     "neon_math",
     "instancing",
     "core3"
@@ -1025,7 +1026,7 @@
   "thread placement and migration under Horizon (B2), hand-off latencies (B3)",
   "GPU time per frame (B7) and the native renderer per-draw cost on device (render machine)",
   "lever mt_cull: bMTRendering:Display (0x011c710c) is unsafe on the PC code: accumulators are built with one batch renderer, the worker indexes a NULL second one and shares main's; current-accumulator globals shared (PERF.md 6.8). Needs port code; TLS fix done (S5 31cdca3), stage protocol modelled (mtqemu stages)",
-  "lever havok_workers: MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the pool is made in the unreconstructed EnsureObjectsCreated (PERF.md 6.9)",
+  "lever havok_workers: MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the whole chain (EnsureObjectsCreated 0x00cbf6b0, CreateObjects, pool ctor 0x00d2d110, dispatcher, InitHookTable and its handlers) has native code at link 06857911f5ab, both vtables complete; the run waits for a booted frame (PERF.md 6.9)",
   "lever core3: S5 33c0b1b, off by default; the system's own use of core 3 is unmeasured",
   "lever barrier_relax: in the build: S12 52cb478 ORDER_REFCOUNT=weak is compile.sh's default (ORDERING.md Refcounts; sample 110 increments relaxed, 220 decrements release, 201 sites full); race-checked by mtqemu litmus-order ref; B9 on an A57 confirms the stall saving"
  ],
@@ -1549,25 +1550,25 @@
    "critical": true,
    "basis": "E",
    "minsn": {
-    "lo": 0.3,
-    "mid": 0.91,
-    "hi": 1.8
+    "lo": 0.294,
+    "mid": 0.754,
+    "hi": 1.34
    },
    "ms": {
     "1020": {
-     "lo": 0.294,
-     "mid": 1.115,
-     "hi": 2.941
+     "lo": 0.288,
+     "mid": 0.924,
+     "hi": 2.19
     },
     "1785": {
-     "lo": 0.168,
-     "mid": 0.637,
-     "hi": 1.681
+     "lo": 0.165,
+     "mid": 0.528,
+     "hi": 1.251
     }
    },
    "share_45": {
-    "1020": 0.05,
-    "1785": 0.029
+    "1020": 0.042,
+    "1785": 0.024
    },
    "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
    "gain_main_minsn": [
@@ -1576,86 +1577,8 @@
    ],
    "owner": "S15/S5",
    "needs_hardware": true,
-   "detail": "50-90 A64 instructions per call [E] x 6000-20000 calls per frame [E]: object tests over the main, 3 shadow and the reflection passes [E]; 12 exclusive for 0x00a694e0 [M] + 4-6 plane tests (40-80, not measured)",
+   "detail": "49-67 A64 instructions per call [E] x 6000-20000 calls per frame [E]: object tests over the main, 3 shadow and the reflection passes [E]; before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]",
    "rank": 2
-  },
-  {
-   "kind": "function",
-   "id": "fn_nibound_update",
-   "name": "NiBound::Update 0x00a7fdd0 (an object's world bound, merged into its parent's)",
-   "subsystem": "scene-graph update",
-   "role": "main",
-   "critical": true,
-   "basis": "E",
-   "minsn": {
-    "lo": 0.36,
-    "mid": 0.72,
-    "hi": 1.08
-   },
-   "ms": {
-    "1020": {
-     "lo": 0.353,
-     "mid": 0.882,
-     "hi": 1.765
-    },
-    "1785": {
-     "lo": 0.202,
-     "mid": 0.504,
-     "hi": 1.008
-    }
-   },
-   "share_45": {
-    "1020": 0.04,
-    "1785": 0.023
-   },
-   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
-   "gain_main_minsn": [
-    0.3,
-    0.9
-   ],
-   "owner": "S15/S2",
-   "needs_hardware": false,
-   "detail": "45-45 A64 instructions per call [M] x 8000-24000 calls per frame [E]: two per updated object [E]",
-   "rank": 3
-  },
-  {
-   "kind": "function",
-   "id": "fn_world_transform",
-   "name": "NiAVObject::UpdateWorldData 0x00a68c60 + the NiMatrix3 product 0x00a588a0 it composes with",
-   "subsystem": "scene-graph update",
-   "role": "main",
-   "critical": true,
-   "basis": "E",
-   "minsn": {
-    "lo": 0.28,
-    "mid": 0.68,
-    "hi": 1.2
-   },
-   "ms": {
-    "1020": {
-     "lo": 0.275,
-     "mid": 0.833,
-     "hi": 1.961
-    },
-    "1785": {
-     "lo": 0.157,
-     "mid": 0.476,
-     "hi": 1.12
-    }
-   },
-   "share_45": {
-    "1020": 0.038,
-    "1785": 0.021
-   },
-   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
-   "gain_main_minsn": [
-    0.3,
-    0.9
-   ],
-   "owner": "S15/S2",
-   "needs_hardware": false,
-   "detail": "70-100 A64 instructions per call [M] x 4000-12000 calls per frame [E]: objects whose world transform is recomputed per exterior frame [E]; 6 + 63 A64 instructions exclusive (dyncount, PERF.md 7) + 10-30 for translation and scale (not measured)",
-   "rank": 4
   },
   {
    "kind": "function",
@@ -1666,25 +1589,25 @@
    "critical": true,
    "basis": "E",
    "minsn": {
-    "lo": 0.12,
-    "mid": 0.66,
-    "hi": 1.2
+    "lo": 0.114,
+    "mid": 0.628,
+    "hi": 1.142
    },
    "ms": {
     "1020": {
-     "lo": 0.118,
-     "mid": 0.809,
-     "hi": 1.961
+     "lo": 0.112,
+     "mid": 0.77,
+     "hi": 1.866
     },
     "1785": {
-     "lo": 0.067,
-     "mid": 0.462,
-     "hi": 1.12
+     "lo": 0.064,
+     "mid": 0.44,
+     "hi": 1.066
     }
    },
    "share_45": {
-    "1020": 0.036,
-    "1785": 0.021
+    "1020": 0.035,
+    "1785": 0.02
    },
    "fix": "havok_workers: Havok's multithreaded simulation on the worker pool (trace bhkWorld first)",
    "gain_main_minsn": [
@@ -1693,8 +1616,8 @@
    ],
    "owner": "S15",
    "needs_hardware": true,
-   "detail": "600-600 A64 instructions per call [M] x 200-2000 calls per frame [E]: convex pair queries per step: character controller casts, contact points [E]; 303 + 119 + 72 + 109 A64 instructions exclusive [M]",
-   "rank": 5
+   "detail": "571-571 A64 instructions per call [M] x 200-2000 calls per frame [E]: convex pair queries per step: character controller casts, contact points [E]; 292 + 119 + 73 + 95 = 579 A64 instructions exclusive on link 0bd144db1464 [M] (600 on an older link); 571 with fnvnx_sse_fast.h's two-source _mm_shuffle_ps sequences (S15-simd, unit_ab.sh: 290 + 119 + 70 + 92, oracle agreement unchanged)",
+   "rank": 3
   },
   {
    "kind": "function",
@@ -1733,7 +1656,7 @@
    "owner": "S15",
    "needs_hardware": false,
    "detail": "88-88 A64 instructions per call [M] x 2000-10000 calls per frame [E]: 10-40 animated actors x 60-80 bones x 1-3 sequences [E]; NEON override fnvnx_slerp_00a6e330 (tools/link/overrides, S15-simd): 134 -> 88 A64 instructions per call incl. the weight 0x00a6dc30 and the normalisation 0x00a4ff00 (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 9 -> 9)",
-   "rank": 6
+   "rank": 4
   },
   {
    "kind": "function",
@@ -1772,46 +1695,85 @@
    "owner": "S6n/S15",
    "needs_hardware": true,
    "detail": "82-82 A64 instructions per call [M] x 2500-5000 calls per frame [E]: geometry passes registered per frame (1.2-1.6 per draw) [E]; 70 + 12 A64 instructions (1.84x and 0.48x the x86 counts)",
-   "rank": 7
+   "rank": 5
   },
   {
    "kind": "function",
-   "id": "fn_quat_from_matrix",
-   "name": "NiQuaternion::FromRotationMatrix 0x00a6df40",
-   "subsystem": "animation",
+   "id": "fn_nibound_update",
+   "name": "NiBound::Update 0x00a7fdd0 (an object's world bound, merged into its parent's)",
+   "subsystem": "scene-graph update",
    "role": "main",
    "critical": true,
    "basis": "E",
    "minsn": {
-    "lo": 0.051,
-    "mid": 0.18,
-    "hi": 0.309
+    "lo": 0.152,
+    "mid": 0.304,
+    "hi": 0.456
    },
    "ms": {
     "1020": {
-     "lo": 0.05,
-     "mid": 0.221,
-     "hi": 0.505
+     "lo": 0.149,
+     "mid": 0.373,
+     "hi": 0.745
     },
     "1785": {
-     "lo": 0.029,
-     "mid": 0.126,
-     "hi": 0.289
+     "lo": 0.085,
+     "mid": 0.213,
+     "hi": 0.426
     }
    },
    "share_45": {
-    "1020": 0.01,
-    "1785": 0.006
+    "1020": 0.017,
+    "1785": 0.01
    },
-   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
    "gain_main_minsn": [
-    0.5,
-    1.8
+    0.3,
+    0.9
    ],
-   "owner": "S15",
+   "owner": "S15/S2",
    "needs_hardware": false,
-   "detail": "103-103 A64 instructions per call [M] x 500-3000 calls per frame [E]: [E]",
-   "rank": 8
+   "detail": "19-19 A64 instructions per call [M] x 8000-24000 calls per frame [E]: two per updated object [E]; NEON override fnvnx_nibound_update_00a7fdd0 (S15-simd): 46 -> 19 A64 instructions per call (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 15 -> 15)",
+   "rank": 6
+  },
+  {
+   "kind": "function",
+   "id": "fn_world_transform",
+   "name": "NiAVObject::UpdateWorldData 0x00a68c60 + the transform compose UpdateWorldLoc 0x00a68bf0 it tail-calls",
+   "subsystem": "scene-graph update",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.056,
+    "mid": 0.256,
+    "hi": 0.6
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.055,
+     "mid": 0.314,
+     "hi": 0.98
+    },
+    "1785": {
+     "lo": 0.031,
+     "mid": 0.179,
+     "hi": 0.56
+    }
+   },
+   "share_45": {
+    "1020": 0.014,
+    "1785": 0.008
+   },
+   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
+   "gain_main_minsn": [
+    0.3,
+    0.9
+   ],
+   "owner": "S15/S2",
+   "needs_hardware": false,
+   "detail": "14-50 A64 instructions per call [M] x 4000-12000 calls per frame [E]: objects whose world transform is recomputed per exterior frame [E]; with the override fnvnx_update_world_loc_00a68bf0 (S15-simd; NiTransform compose 0x0062c250, products 0x0043f8d0 / 0x004b4500 / 0x004a3760 / 0x00439e90 inlined): 13-14 on the copy paths, 47 + ~3 for a full compose [M] (override_ab.py, link 0bd144db1464, agreement 11 -> 12 of 16). Before: copy paths 12-14, the compose path 23 + a call to an operator* the link leaves unresolved (>100 counted from the parts); the earlier 45-75 also wrongly took the NiMatrix3 transpose product 0x00a588a0 as part of it",
+   "rank": 7
   },
   {
    "kind": "function",
@@ -1850,6 +1812,45 @@
    "owner": "S15/S2",
    "needs_hardware": false,
    "detail": "19-60 A64 instructions per call [M] x 2000-6000 calls per frame [E]: nodes updated per frame [E]; 19 exclusive for 0x00a5e0b0 [M]; 0x00a5dd70 had no clean case, its loop is estimated",
+   "rank": 8
+  },
+  {
+   "kind": "function",
+   "id": "fn_quat_from_matrix",
+   "name": "NiQuaternion::FromRotationMatrix 0x00a6df40",
+   "subsystem": "animation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.038,
+    "mid": 0.135,
+    "hi": 0.231
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.038,
+     "mid": 0.165,
+     "hi": 0.377
+    },
+    "1785": {
+     "lo": 0.022,
+     "mid": 0.094,
+     "hi": 0.216
+    }
+   },
+   "share_45": {
+    "1020": 0.007,
+    "1785": 0.004
+   },
+   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "gain_main_minsn": [
+    0.5,
+    1.8
+   ],
+   "owner": "S15",
+   "needs_hardware": false,
+   "detail": "77-77 A64 instructions per call [M] x 500-3000 calls per frame [E]: [E]; override fnvnx_quat_from_matrix_00a6df40 (S15-simd: no frame, no volatile reload, no pointer array): 89 -> 77 A64 instructions per call (override_ab.py, link 0bd144db1464, 13 cases, agreement 13 -> 13); 103 was an older link",
    "rank": 9
   },
   {

@@ -225,6 +225,18 @@ is that import, as on x86.
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
 
+**Float results of untyped calls and CRT math (S1-fuzzB, after difffuzz-13).** An intercepted call whose callee
+nothing types (a wild or unplanted indirect call, a CRT name with only a C spelling in the unit's symbols) always
+leaves the canned bytes in v0 natively; the oracle now gets the same value in ST0 when the code the call returns to
+consumes ST0 (`x86emu.x87_result_use`: fst/fstp m32 -> f32, m64 -> f64, x87 arithmetic; the caller's cleanup and
+epilogue are stepped over, and a `ret` takes the fuzzed function's own result kind). Before, the oracle read an
+empty x87 stack (0.0) and the native the canned bytes: 12 of the 21 actor.cpp float divergences. A unit's symbols
+prefer a decorated spelling for an address (`?FUN_00eca920@@YANN@Z` over `_FUN_00eca920`). The CRT's double
+functions the link gives libm providers (log, log10, exp, pow, atan2, tan, atan, asin, acos, fmod, floor, ceil,
+sin, cos: `libcalls.CRT_MATH`) run as builtins on both machines with C99 results at the domain edges (log(0) =
+-inf, log(-1) = NaN, pow poles and overflow, signed zeros of floor/ceil); the x87 `fyl2x` stub for log10 gave 0.0
+for log10(0) under Unicorn. Replayed on link c0d6c71516f6: float records 51 -> 20 still diverging (2 gone before).
+
 ## Cause refinement and verdict policy (`causes.py`, S13b)
 
 `report.reclassify` hands what the probes left at `unclassified`, `call-flow` or `signedness?` to `causes.refine`,
@@ -246,6 +258,10 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | pointer to a pinned-pool literal (0x02f00000) vs the native .rodata copy: argument / result / store | `literal-arg` / `literal-ret` / `literal-store` | artifact |
 | both sides store image vftables (link `out/addrmap.tsv` kind V, or `FNVNX_CAUSES_ADDRMAP`), different ones: in a destructor / elsewhere | `vptr-store` / `vptr-differs` | by-design / triage S2c |
 | result of a `??_G` / `??_E` deleting destructor (MSVC returns this, Itanium D0 is void) | `deleting-dtor-ret` | by-design |
+| call-count of a `??_G` fuzzed with flags bit 0 clear: the native makes the oracle's calls plus deallocator calls only (D0 always frees) | `dtor-flags` | artifact (S13: fuzz `??_G` with flags & 1, or pair flags 0 with D1) |
+| call-count, the oracle makes no call, the native's first / a later call is a named stub | `native-undefined` / `after-native-undefined` | real-bug S2c/S2d (was `falloff?`) |
+| call-count, the oracle makes no call, the native calls addresses only | `falloff?` | real-bug S1 |
+| probe `signedness` on a by-design shape (the top bit is a float sign, a bool byte, INT_MIN, the top of the address space): float argument within tolerance / bool result 1 vs another nonzero byte / x86 #DE / native access across 4 GiB | `x87-precision` / `bool-repr` / `division` / `ilp32-pointer` | by-design |
 | pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
 | `no-native-entry` | `no-native-entry` | artifact |
@@ -264,12 +280,12 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | call-target: the native function never names the oracle's callee (from its object) | `native-inlined` | triage |
 | one side's store covers bytes the other leaves | `store-width` / `x86-only-store` / `native-only-store` | triage |
 | native calls a prefix of the oracle's calls / the oracle's calls and more | `native-early-exit` / `native-extra-calls` | triage |
-| only for records that would stay `unclassified`: one side has the block a game allocator returned (`world.alloc_result(j)`), the other the canned result of a later call `m > j` (argument, result or stored word) | `ctor-this` | artifact (the constructor run on the block returns this; its canned result is random) |
-| pointer argument: the oracle's is the canned eax of an earlier intercepted call, the native's is in its own stack frame | `canned-this` | artifact (a callee returning its result/this pointer: MSVC aggregate return, `operator=`; canned eax is random) |
+| only for records that would stay `unclassified`: one side has the block a game allocator returned (`world.alloc_result(j)`), the other the canned result of a later call `m > j` (argument, result or stored word) | `ctor-this` | triage S13b (harness artefact when the later call is the constructor on the block, real bug when the native drops a factory/Init result: the record names neither; V1 A2) |
+| pointer argument: the oracle's is the canned eax of an earlier intercepted call, the native's is in its own stack frame | `canned-this` | triage S13b (a callee returning its result pointer, or a by-value declaration in the native: the record lacks the earlier call's arguments; V1 A3) |
 | `this`/pointer argument `d` bytes below the first buffer on the oracle side (pinned-pool range) and the buffer on the native side, the native object has a `_ZThn<d>_` thunk for the function or a direct callee | `thunk-binding` | real-bug S2c (`__fnv_<addr>` bound to the GCC primary entry, not the secondary-base thunk the MSVC entry corresponds to); without the thunk `layout-offset` |
 | call argument (I32/F32/F64) the native passes equal to the canned result of the call just before, the oracle another value | `native-stale-result` | real-bug S1b (an argument the native caller never set: its declaration of the callee differs) |
-| native `fault:x` in the AArch64 private range, oracle fine, case background `rand` | `native-wild-private` | artifact (a random code pointer: x86 intercepts it as a wild call, AArch64 executes its private range) |
-| first differing store: only bytes where the oracle has `0x08` and the native `0x00` | `stub-normalized` | artifact (arm64emu `_codeptr` rewrites any stored word in `0x08000000..0x09000000`, data included) |
+| native `fault:x` in the AArch64 private range, oracle fine, case background `rand` | `native-wild-private` | triage S13b (a random code pointer, or a wrong vtable slot: indistinguishable in the record; V1 A4) |
+| first differing store: every differing byte in a 4-byte window where the oracle word w is in [0x08000000, 0x09000000) and the native word is exactly w - 0x08000000 (`causes._stub_rewrite`) | `stub-normalized` | artifact (arm64emu `_codeptr` rewrites any such stored word, data included; a 0x08 flag byte elsewhere stays open, V1 A1) |
 | stored / returned word that is one of the planted garbage words (`world.garbage_words`): both / native / oracle | `uninit-both` / `uninit-arm` / `uninit-x86` | artifact / real-bug S1b / by-design |
 | native 0 where the oracle has a value; the native function or a direct callee in its unit is `mov w0, #0; ret` | `native-zero-stub` | real-bug S1 (a placeholder body) |
 | call flow, the native function's own body is `ret` / return-a-constant (or it calls such a decomp-local `..FUN_<X>..` stand-in for an original X another object defines) and the oracle makes calls | `native-empty-body` | real-bug S1 |
@@ -301,7 +317,7 @@ five example reproducers, plus `functions_by_class` (each diverging function by 
 for R0. `causes.py merge <reports/fz<k> .md | causes.json>... --out all.json` adds the shards up
 (classes from this checkout's policy). Input layout (any campaign or `fuzz/cache/<k>of<N>` checkout): `results.jsonl`
 (address, source, status; only `ok` rows count), `div/<addr>-<n>.json` (divergence, hint, case), optional
-`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. `causes.py handoffs <dirs> --out-dir d [--effects e.jsonl]` writes the owners' lists, one row per counted divergence (owner, cause, address, unit, reproducer `fuzz/cache/<k>of<N>:div/<file>`, first effect): `handoffs_<owner>.tsv` (real-bug), `triage_<owner>.tsv`, `harness_<owner>.tsv` (artifacts with an owner) and `index.tsv`; they go to the private repository, never here. The object rules need pyelftools: without it the summary's `native_objects.reader` is `unavailable` and a warning is printed. Test: `tests/s13/test_causes.py`.
+`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. `causes.py handoffs <dirs> --out-dir d [--effects e.jsonl]` writes the owners' lists, one row per counted divergence (owner, cause, address, unit, reproducer `fuzz/cache/<k>of<N>:div/<file>`, first effect): `handoffs_<owner>.tsv` (real-bug), `triage_<owner>.tsv`, `harness_<owner>.tsv` (artifacts with an owner) and `index.tsv`. With `--ref-by-head` the reproducer is `fuzz/<head12>/<k>of<N>:div/<file>`, the branch of the head that fuzzed the function (results `commit`), which the farms never rewrite (the rolling `fuzz/cache/` branches are force-updated on every re-fuzz); they go to the private repository, never here. The object rules need pyelftools: without it the summary's `native_objects.reader` is `unavailable` and a warning is printed. Test: `tests/s13/test_causes.py`.
 
 ## Lockstep (`lockstep.py`, D14)
 

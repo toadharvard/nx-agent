@@ -18,6 +18,7 @@
 #include <switch/kernel/svc.h>
 #include <switch/kernel/thread.h>
 #include <switch/services/applet.h>
+#include <switch/applets/error.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -216,6 +217,16 @@ void os_cpu_boost(int fast_load) {
     appletSetCpuBoostMode(fast_load ? ApmCpuBoostMode_FastLoad : ApmCpuBoostMode_Normal);
 }
 
+void os_show_message(const char *caption, const char *text)
+{
+    char dlg[512], full[2048];
+    snprintf(dlg, sizeof dlg, "%s\n%.*s", caption ? caption : "", (int)strcspn(text ? text : "", "\r\n"), text ? text : "");
+    snprintf(full, sizeof full, "%s\n\n%s", caption ? caption : "", text ? text : "");
+    ErrorApplicationConfig c;
+    if (R_SUCCEEDED(errorApplicationCreate(&c, dlg, full)))
+        errorApplicationShow(&c);
+}
+
 void os_yield(void) { svcSleepThread(0); } /* 0 = yield to threads of the same priority */
 
 void os_sleep_ns(uint64_t ns) { svcSleepThread(ns ? (s64)ns : 0); }
@@ -228,7 +239,7 @@ void os_tls_set(void *p)
     threadTlsSet(g_tls_slot, p);
 }
 
-/* ---- time: the ARM generic timer (CNTVCT_EL0 / CNTFRQ_EL0, 19.2 MHz). QueryPerformanceCounter, __rdtsc
+/* ---- time: the ARM generic timer (CNTPCT_EL0 / CNTFRQ_EL0, 19.2 MHz; CNTVCT_EL0 traps at EL0 on Horizon). QueryPerformanceCounter, __rdtsc
  * (shim/include/fnvnx_asm.h) and os_cycle_counter all read the same counter so calibrations line up. */
 uint64_t os_ticks(void) { return armGetSystemTick(); }
 uint64_t os_tick_freq(void) { return armGetSystemTickFreq(); }
@@ -499,5 +510,4 @@ int os_vm_release(void *addr, size_t size)
     return r;
 }
 
-const char *os_default_root(void) { return "sdmc:/fnv-nx"; }
-const char *os_game_dir(void) { return NULL; }
+const char *os_default_root(void) { return "sdmc:/switch/fnv"; }   /* = FNVNX_SD_DIR (toolchain/include/fnvnx/sdlayout.h) */

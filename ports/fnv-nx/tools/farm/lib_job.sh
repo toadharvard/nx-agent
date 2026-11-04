@@ -10,7 +10,7 @@ log() { echo "$(date -u +%FT%TZ) $(basename "$0"): $*"; }
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
 export FARM_APT
 
-NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu"
+NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu liblz4-dev libnewlib-dev"
 host_check() {   # commands (py:<module> for python modules) -> installed with apt-get / pip when FARM_APT=1
 	local missing="" c
 	for c in "$@"; do
@@ -197,6 +197,8 @@ EOF
 		for f in aliases.ld refs.tsv abi.tsv addrmap.tsv layouts.tsv; do cp "$bd/link/out/$f" out/; done
 		# apply's typeinfo pairs (fnvlink pair_typeinfo, in check's link order: sorted object names)
 		[ -f "$bd/link/out/typeinfo_pairs.tsv" ] && cp "$bd/link/out/typeinfo_pairs.tsv" out/
+		# S2c's slot fill from the player's exe: what was bound, and the gaps (trap slots left, with the reason)
+		for f in slot_fill.tsv slot_gaps.tsv; do [ -f "$bd/link/out/$f" ] && cp "$bd/link/out/$f" out/; done
 		cp "$bd/link/out/cache/msvc.tsv" out/cache/
 		rsync -a --exclude probe/ "$bd/link/out/vtables/" out/vtables/   # the synthesized vtables, not the probe work dir
 		cp "$bd"/link/fixed/*.o fixed/
@@ -291,6 +293,13 @@ publish_nro() { # publish_nro <build dir>: the device package (NX1) on the priva
 	local bd=$1 wt=$FARM_HOME/nro-wt br=nro/$C12
 	[ "${FARM_PUBLISH:-auto}" = 0 ] && { NOTE_NRO="not published (FARM_PUBLISH=0)"; return 0; }
 	[ -f "$bd/package/sd/switch/fnv/fnv.nro" ] || { NOTE_NRO="not published: no fnv.nro in the package"; return 0; }
+	# provenance (V1 NX1 P1): the build directory is reused across jobs, so a package left by an earlier commit must
+	# not be labelled with this one. The package stage must have ended ok/warn after the host stage of this job, its
+	# record must name this commit (port_commit), and a real NRO's NACP version must be this commit12.
+	stage_after "$bd" package host || { NOTE_NRO="not published: the package stage did not run after this job's host stage"; return 1; }
+	local why
+	why=$(python3 -I "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/tests/nx1/nro_provenance.py" "$bd" "${COMMIT:-}" "$C12")
+	[ -z "$why" ] || { NOTE_NRO="not published: $why"; return 1; }
 	local prc
 	set +e
 	(
@@ -311,16 +320,23 @@ publish_nro() { # publish_nro <build dir>: the device package (NX1) on the priva
 		(cd sd && find . -type f | sort | while read -r f; do
 			printf '%s\t%s\t%s\n' "${f#./}" "$(stat -c %s "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"; done) > MANIFEST.txt
 		git add -f -A .
+		printf '{"commit": "%s", "schema": "fnvnx-nro-build/1"}\n' "${COMMIT:-$C12}" > build.json
+		git add -f build.json
 		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 device package (NX1)"
+		local want got
+		want=$(git rev-parse HEAD)
 		for i in 1 2 3; do
 			git push -q -f origin "HEAD:refs/heads/$br" 2>/dev/null && break
 			sleep $((i * 5))
 		done
-		git ls-remote origin "refs/heads/$br" | grep -q .
+		# published means the remote branch is this commit now, not that the branch exists (V1 NX1 P2)
+		got=$(git ls-remote origin "refs/heads/$br" | cut -f1)
+		[ "$got" = "$want" ]
 	)
 	prc=$?
 	set -e
 	git -C "$ARTIFACTS" worktree remove -f "$wt" >/dev/null 2>&1 || true
 	git -C "$ARTIFACTS" branch -D "nro-wt-$C12" >/dev/null 2>&1 || true
-	if [ $prc -eq 0 ]; then NOTE_NRO="published: branch $br"; else NOTE_NRO="publishing $br FAILED"; fi
+	# 1: refused (not this commit's package; the report says why), 2: the push did not land (a job failure)
+	if [ $prc -eq 0 ]; then NOTE_NRO="published: branch $br"; else NOTE_NRO="publishing $br FAILED: the remote branch is not this package's commit"; return 2; fi
 }

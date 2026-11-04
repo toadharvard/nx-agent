@@ -37,7 +37,7 @@
 #   VORBIS          the libvorbis prefix for build.sh; JOBS, SSE2NEON, DEVKITPRO passed to build.sh
 #   FARM_GAME       a game install (FalloutNV.exe, Data/, Fallout_default.ini), mounted in place at the guest's
 #                   sdmc:/switch/fnv (emu_guest.py --game, tests/s5/datapath.py); its FalloutNV.exe is the default image.
-#                   Without it the image alone is copied to sdmc:/fnvnx/game. Never inside the repository.
+#                   Without it the image alone is copied to sdmc:/switch/fnv. Never inside the repository.
 #   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 6000000000)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
 set -euo pipefail
@@ -138,7 +138,7 @@ if [ -n "$GAME" ]; then
   IMGARG=(--game "$GAME")
   [ "$IMAGE" -ef "$GAME/FalloutNV.exe" ] || { echo "farm_boot: FARM_GAME has its own FalloutNV.exe; give no image" >&2; exit 1; }
 elif [ -n "$IMAGE" ]; then
-  IMGARG=(--file "fnvnx/game/FalloutNV.exe=$IMAGE")
+  IMGARG=(--file "switch/fnv/FalloutNV.exe=$IMAGE")
 fi
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift

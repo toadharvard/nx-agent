@@ -254,6 +254,38 @@ def test_policy():
           'report.reclassify applies the record rules')
     check(report.reclassify(rec(dict(kind='return', x86=w(1), arm=w(2)), 'bool-repr')) == 'bool-repr',
           'report.reclassify keeps a probe cause')
+    g = rec(dict(kind='call-count', x86=0, arm=1, x86_trace=[], arm_trace=['00aa1460']), 'call-flow')
+    g['symbol'] = '??_GFoo@@UAEPAXI@Z'
+    g['case'] = {'args': {'p0': '00000000'}}
+    check(report.reclassify(g) == 'deleting-dtor-flags', '??_G with flags 0: the native D0 frees, the oracle does not')
+    g['case'] = {'args': {'p0': '01000000'}}
+    check(report.reclassify(g) == 'falloff?', '??_G with flags 1 that frees only natively stays falloff?')
+    g = rec(dict(kind='call-count', x86=1, arm=3, x86_trace=['00401234'], arm_trace=['00401234', '00401030',
+                                                                                       '00555555']), 'call-flow')
+    g['symbol'] = '??_GFoo@@UAEPAXI@Z'
+    check(report.reclassify(g) != 'deleting-dtor-flags', '??_G: an extra call that is not a deallocator is not dtor-flags')
+    n = rec(dict(kind='call-count', x86=0, arm=2, x86_trace=[], arm_trace=['name:_ZNK3FooIcEcvPKcEv', '0043b4a0']),
+            'call-flow')
+    check(report.reclassify(n) == 'native-undefined', 'oracle no calls, native first calls a named stub')
+    n = rec(dict(kind='call-count', x86=0, arm=2, x86_trace=[], arm_trace=['00559450', 'name:_ZNK3FooIcEcvPKcEv']),
+            'call-flow')
+    check(report.reclassify(n) == 'after-native-undefined', 'oracle no calls, a later native call is a named stub')
+    n = rec(dict(kind='call-count', x86=0, arm=1, x86_trace=[], arm_trace=['00559450']), 'call-flow')
+    check(report.reclassify(n) == 'falloff?', 'oracle no calls, native calls an address: falloff?')
+    a = rec(dict(kind='call-args', arg='p0', cls='F32', x86=f32(0.88138), arm=w(struct.unpack('<I', struct.pack(
+        '<f', 0.88138))[0] + 1)), 'signedness')
+    check(report.reclassify(a) == 'x87-precision', 'signedness probe on a 1-ulp float argument: x87-precision')
+    b = rec(dict(kind='return', x86='01', arm='80'), 'signedness')
+    b['symbol'] = '?f@@YA_NXZ'
+    check(report.reclassify(b) == 'bool-repr', 'signedness probe on a bool result byte 0x80: bool-repr')
+    b['symbol'] = '?f@@YAEXZ'
+    check(report.reclassify(b) == 'signedness', 'an unsigned char result 01 vs 80 stays signedness')
+    e = rec(dict(kind='error', x86=None, arm='fault:r:fffffffe'), 'signedness')
+    check(report.reclassify(e) == 'ilp32-pointer', 'signedness probe on a native access across 4 GiB')
+    c = rec(dict(kind='call-target', index=1, x86='00aa3e40', arm='name:_ZN3Foo3BarEv'), 'signedness')
+    check(report.reclassify(c) == 'native-undefined', 'signedness probe on a call of a named stub: native-undefined')
+    e = rec(dict(kind='error', x86=None, arm='fault:r:00000010'), 'signedness')
+    check(report.reclassify(e) == 'signedness', 'a native near-null read keeps the probe cause')
 
 
 def test_summary():
@@ -366,6 +398,17 @@ def test_handoffs():
               'row: owner, cause, address, unit, reproducer (setup function skipped)')
         tr = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'triage_S13b.tsv'))]
         check(tr[1][1] == 'unclassified' and tr[1][5] == 'value', 'triage row carries the first effect')
+        hd = os.path.join(root, 'hd')
+        rows_c = json.loads(open(os.path.join(d, 'results.jsonl')).readline())
+        lines = open(os.path.join(d, 'results.jsonl')).read().splitlines()
+        lines[0] = json.dumps(dict(rows_c, commit='0123456789abcdef0123'))
+        open(os.path.join(d, 'results.jsonl'), 'w').write('\n'.join(lines) + '\n')
+        causes.main(['handoffs', d, '--out-dir', hd, '--ref-by-head'])
+        s1h = [l.rstrip('\n').split('\t') for l in open(os.path.join(hd, 'handoffs_S1.tsv'))]
+        check(s1h[1][4] == 'fuzz/0123456789ab/7of26:div/00401000-0.json',
+              'by head: the reproducer names the stable per-head branch (%s)' % s1h[1][4])
+        tr2 = [l.rstrip('\n').split('\t') for l in open(os.path.join(hd, 'triage_S13b.tsv'))]
+        check(tr2[1][4] == 'fuzz/cache/7of26:div/00402000-0.json', 'by head: a row without commit keeps the cache ref')
         ix = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'index.tsv'))]
         check(['harness_S13.tsv', 'artifact', 'S13', '1', '1', 'local-static 1'] in ix, 'index row per file')
 
@@ -528,6 +571,15 @@ def test_unclassified_shapes():
     # a probe's cause is never overridden, and only what would stay unclassified is taken
     check(r(dict(kind='call-args', arg='p0', cls='P', x86=w(0x772a1f5e), arm=w(blk), index=2), case, 'call-flow') ==
           'call-flow', 'the bucket rules leave call-flow alone')
+    # stub-normalized only for exactly arm64emu's rewrite (V1 A1): a 0x08 byte that is not a stub word's top byte
+    st = causes._stub_rewrite
+    check(st(bytes.fromhex('1122330800'), bytes.fromhex('1122330000'), [3]), 'stub word w -> w - 0x08000000')
+    check(not st(bytes.fromhex('01080000'), bytes.fromhex('01000000'), [1]), 'flag bit 0x800 is not a stub rewrite')
+    check(not st(bytes.fromhex('11223308'), bytes.fromhex('11223301'), [3]), 'other native top byte: not the rewrite')
+    check(not st(bytes.fromhex('1122330899'), bytes.fromhex('1122330098'), [3, 4]),
+          'a difference outside the rewritten window: not only the rewrite')
+    for c in ('ctor-this', 'canned-this', 'native-wild-private'):
+        check(causes.policy(c)[0] == 'triage', '%s is triage: the record cannot tell harness from bug (V1)' % c)
     for c in ('ctor-this', 'canned-this', 'native-wild-private', 'stub-normalized', 'thunk-binding',
               'native-stale-result', 'native-zero-stub'):
         check(c in causes.POLICY, 'policy row for %s' % c)
