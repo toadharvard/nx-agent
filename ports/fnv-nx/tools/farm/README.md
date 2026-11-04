@@ -31,6 +31,7 @@ Headers, flags or the compiler changing rebuilds the shard. The session git prox
 deletions, so artifacts live on branches.
 
 | prepared tree for a commit | `prepare_job.sh <commit> [report.md]` | the artifacts repository with push | branch `t/<commit12>` (tree, meta.json); reused when no prepare input changed |
+| whole-program ordering keys | `keys_job.sh <commit> [report.md]` (runner job `keys`) | the prepare farm's tree (fetch_tree.sh, prepare as fallback), `g++-aarch64-linux-gnu`, gcc-13-plugin-dev-aarch64-linux-gnu, g++, jq, rsync; the artifacts repository with push | branch `k/<commit12>` and rolling `keys` (order.keys, meta.json with tree and inputs hash); compile_job.sh waits for it (`KEYS_WAIT`) and computes the same list itself when it does not come (docs/ORDERING.md "Whole-program keys") |
 
 **Running a farm machine.** `tools/farm/runner.sh <name> <job> [args]` is the whole loop in one process:
 - it watches the public integration branch (read-only, no credentials);

@@ -43,6 +43,8 @@ methods are named after their callee's address (`FUN_<addr>`), so S2's name-addr
 | `xinc1/xinc_enum.py`, `analyze.py`, `gen.py` | round-2 pipeline: x86-inconsistent references of a link run -> callers in the pristine objects -> ecx at each reference (`ecxflow.py`) -> candidate XINC1 patches for shapes A/B/C, the rest listed for reading by hand; `preserves.py ADDR`: does a function keep ecx / edx at every return |
 | `pop/popscan.py ABI OUT` | every `pop-mismatch` pair of a link run read against the pristine objects: per call site the callee's real words (`ret N`), the words its code reads, and for a callee that takes more than its declaration pushes, the earlier call of the same caller that the missing words were pushed for (stack simulated with every direct callee's real pop count); families `more`, `conv-only`, `fewer-unread`, `fewer-donor`, `fewer-other`, `nocaller` |
 | `pop/popgen.py POP ABI OUTDIR [--exclude SRC,..]` | candidate patches for the `fewer-donor` chains `D(.., x).R(..)` -> `D(..).R(.., x)` with overloads declared next to the decomp's; everything not mechanical goes to `OUTDIR/manual.tsv` with the reason |
+| `pop/popdis.py ADDR.. [--pop POP]` | a caller's x86 code from the pristine objects with every relocation resolved, each call's real pop count and the stack words the callee reads, and popscan's rows for it: what a hand-written pop patch is read from |
+| `pop/fuzztriage.py HANDOFFS ABI POP OUT` | S1b's rows of S13b's fuzz hand-off list (`uninit-arm`, `native-garbage-arg`, `callee-saved`) classified by the link's ABI rows and popscan: patched, pop-caller, pop-callee, bridge-callee / bridge-self (S2c's bridge gaps), xinc-callee, other |
 | `pop/abiclass.py ABI POP OUT` | S1b verdict for every unexplained x86-inconsistent and manual pair of a link run, with the call distance of the calling function from the boot roots (WinMain 0x0086a850 and the dynamic initializers) |
 | `test_ftol.py` | FTOL1's inline `fnvnx_ftol2_sse` equals `cvttsd2si` on 48 values (qemu-aarch64 against the host's SSE2), stays inline, compiles for ILP32 |
 | `gcc_check.py DECOMP BASE_TREE WORK` | patched files prepared with all rules into an overlay of a prepared tree, compiled with the census flags before/after; reports new errors and errors on patched lines |
@@ -233,6 +235,13 @@ braces.
 
 - `xinc1_pop_gen.s1b`: 173 callers, 292 calls, 97 files. MSVC: all 191 site functions identical; GCC census: no
   new errors.
+- Nested spelling `R(.., D(a.., x..), ..)` -> `R(.., D(a..), x.., ..)`: D's call is a whole argument of R, and the
+  words pushed for D follow D's result on R's stack (the boot callers 0x00448420 / 0x0086c010 by hand had this shape).
+  Regenerated `xinc1_pop_gen.s1b` (`popgen.py --exclude <the three> --skip-patched patches`): caller sites 169 -> 222,
+  files 97 -> 123 (39 files touched). MSVC: all 4,990 functions of the 39 units identical; GCC census 0 -> 0;
+  units_renames +116. abiclass at link/31971038913d: fix-donor 471 -> 408 pairs, fix-other 352 -> 348, patched 233 ->
+  301. A moved parameter named like one of the receiver's keeps its type only; a moved class-template parameter
+  declared after the receiver's class is left manual.
   `flameprojectile.cpp`, `highprocess.cpp` and `tesrace.cpp` are left out: their hunks overlap other patches.
 - `xinc1_pop_boot.s1b` (by hand): WinMain's per-frame body 0x0086ff70 (distance 2 from WinMain; four getter/receiver
   pairs and the nested `0x00874b90(0x004e3270(core, 0x004dc310(), 0))`, which is
@@ -265,8 +274,10 @@ are `pop-mismatch,ref-passes-fewer`, the same calls as popscan's `fewer` familie
 
 By boot distance (direct calls and the tables a function refers to, from WinMain and the 6,266 dynamic initializers;
 29,034 functions reached): of the open callers, `fix-donor` 53 and `fix-other` 17 are within 4 calls, and the three
-main.cpp callers among them are patched in `xinc1_pop_boot.s1b`. The two at distance 1 are open: 0x00448420 (three
-chains of 0x00559450 / 0x0044ac40 spelled through a local) and 0x0086c010 (one push shared by two calls).
+main.cpp callers among them are patched in `xinc1_pop_boot.s1b`. The two at distance 1 are patched there too:
+0x00448420 (three `D(item.FUN_00559450(0))` calls: 0x00559450 is a plain-`ret` getter, the 0 is 0x0044ac40's second
+word, `ret 8`) and 0x0086c010 (`push value; push 0xc` before the image-space manager getter 0x004e3270: 0xc is
+0x004ebbc0's index, value is 0x005b9f80's float, each `ret 4`); MSVC identical (both units, 417 functions).
 
 ## By-design MSVC differences (S11 gate)
 

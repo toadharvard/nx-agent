@@ -10,7 +10,7 @@ import json, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import gen_stream, emu_count, cg_split  # noqa: E402
+import gen_stream, emu_count, cg_split, engine_fold  # noqa: E402
 
 IPC = (0.6, 1.0)            # A57 instructions per cycle for this code: lo bound (branchy, dependent loads) / hi bound
 CLOCKS_GHZ = (1.02, 1.785)  # Switch CPU: 1020 MHz (retail default, docked and handheld), 1785 MHz (boost profile)
@@ -18,7 +18,7 @@ FIF = 2                     # frames in flight for the measurement (3 overflows 
 STORE_GBS = 4.0             # effective A57 streaming-store bandwidth for the memory term (GB/s), hi estimate only
 TARGETS_MS = {"30": 33.3, "45": 22.2, "60": 16.7}
 GATE_CONFIGS = ("docked_720p", "handheld_720p")   # owner: 720p, dynres off; 45 fps stable handheld is the target
-FRAME_MS = 22.2                                   # hotspot shares are of the 45 fps frame
+FRAME_MS = 16.7                                   # owner: 60 fps whole frame at 720p handheld; shares are of it
 # bytes the front writes per draw that miss the caches: 512 B UBO slice + 256 B epilogue (ring), 64 B packet,
 # ~32 B encoded words; per frame the 65536-entry radix count table (256 KiB) per sort digit actually used
 BYTES_PER_DRAW = 512 + 256 + 64 + 32
@@ -128,7 +128,7 @@ def build_hotspots(raw, prof, dk, gpu):
     """ranked rows per scene: CPU by function / family, GPU by pass / shader program (docked + handheld 720p).
     ms: CPU at IPC 0.6, 1.02 GHz (instructions of one measured mix_hi frame); GPU at issue efficiency 0.6."""
     def row(kind, name, ms, **kw):
-        d = {"kind": kind, "name": name, "ms": round(ms, 3), "share_of_22_2ms": round(ms / FRAME_MS, 4)}
+        d = {"kind": kind, "name": name, "ms": round(ms, 3), "share_of_16_7ms": round(ms / FRAME_MS, 4)}
         d.update(kw)
         return d
     out = {}
@@ -171,7 +171,7 @@ def build_hotspots(raw, prof, dk, gpu):
             out["gpu_by_program/" + key] = sorted((row("gpu_program", "%s %s" % k, ms) for k, ms in prog.items() if ms > 0),
                                                   key=lambda r: -r["ms"])
             out["gpu_frame_ms/" + key] = s["frame_ms"]
-    # the top 10 of what eats the 45 fps frame: CPU functions (each thread's work) and GPU passes at handheld 720p
+    # the top 10 of what eats the 60 fps frame: CPU functions (each thread's work) and GPU passes at handheld 720p
     # (the owner's target), native shaders; ranked by ms
     top = cpu_fn[:20] + [dict(r, config="handheld_720p") for r in out.get("gpu_by_pass/mix_hi/handheld_720p", [])]
     top.sort(key=lambda r: -r["ms"])
@@ -348,6 +348,14 @@ def build_report(spec, raw, prof, ovf, dk, work):
                                        "ready blocks), skinning palettes, dynamic vertex data" +
                                        ("" if dk else ", the deko3d backend's recording (host/nxgpu.c + libdeko3d)")},
     }
+    # the engine's own D3D9 path (engine_path.py on the prepared objects; RENDER_PERF.md §13), when it was counted
+    ep = os.path.join(work, "out", "engine_path.json")
+    if os.path.exists(ep):
+        opt = lambda n: json.load(open(n)) if os.path.exists(n) else None
+        engine_fold.fold(rep, json.load(open(ep)), opt(ep.replace(".json", "_lo.json")),
+                         opt(ep.replace(".json", "_hi.json")), opt(ep.replace(".json", "_meta.json")))
+    else:
+        engine_fold.rehotspot(rep)
     return rep
 
 

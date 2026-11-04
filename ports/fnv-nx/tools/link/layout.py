@@ -16,11 +16,16 @@ nothing else in that function touches SIMD registers. A type that does not compi
 recompiled without it.
 
 layouts.tsv: unit, type, size, align, trivial, empty, class (G1/G2: general registers, H<n>x<w>: n SIMD elements of
-w bytes, IND: by reference), unit content key, MSVC C++03 POD; one line per probed (unit, type); a size of -1 marks a
-type the probe could not name. The POD bit decides how MSVC returns a free function's 1/2/4/8-byte aggregate (in
-eax:edx only for a C++03 POD: no user constructor, destructor or copy assignment, no base class, no virtual function,
-no private or protected data member - __is_pod and __is_aggregate and no direct base); Itanium's trivial-for-calls
-does not tell (V1 A1/A2: a trivially copyable struct with a user constructor comes back through a hidden buffer).
+w bytes, IND: by reference), unit content key, MSVC C++03 POD, POD rule; one line per probed (unit, type); a size of
+-1 marks a type the probe could not name. The POD bit decides how MSVC returns a free function's 1/2/4/8-byte
+aggregate (in eax:edx only for what MSVC 2008 treats as a POD) and where a __fastcall non-POD's hidden buffer goes
+(ecx); Itanium's trivial-for-calls does not tell (V1 A1/A2: a trivially copyable struct with a user constructor comes
+back through a hidden buffer). The predicate is MSVC 2008's as V1 measured it on 24 kinds (J-0147,
+tests/v1/test_fastcall_nonpod.py): an aggregate (no user constructor, no private / protected data member, no
+virtual function), no base class, a trivial destructor and a trivial copy assignment (own or a member's; a reference
+member deletes it). A member with a user constructor or copy constructor does not make the class non-POD for MSVC:
+the earlier `__is_pod && __is_aggregate && no base` called three such kinds non-POD. Rows of another POD rule (column
+10, POD_RULE) are probed again.
 """
 import collections
 import concurrent.futures
@@ -43,6 +48,7 @@ Layout = collections.namedtuple('Layout', 'size align trivial empty cls pod', de
 SEMANTICS = ['-frounding-math', '-fsigned-char', '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks',
              '-ffp-contract=off']   # compile.sh's MSVC-like semantics (J-0034): probes and emitted host code too
 PIC = ['-fPIC']   # compile.sh's GOT addressing of defined variables: emitted code
+POD_RULE = 'pod2'   # layouts.tsv column 10: the POD predicate the row was probed with (pod2: V1's, J-0147)
 
 
 def flags(tree):
@@ -60,7 +66,8 @@ def probe_source(unit_path, types):
              'namespace __fnvnx_probe { template <class T> constexpr unsigned triv() '
              '{ return __is_trivially_copyable(T) && __has_trivial_destructor(T); } '
              'template <class T> constexpr unsigned pod() '
-             '{ return __is_pod(T) && __is_aggregate(T) && std::tr2::direct_bases<T>::type::empty::value; } }']
+             '{ return __is_aggregate(T) && std::tr2::direct_bases<T>::type::empty::value && '
+             '__has_trivial_destructor(T) && __is_trivially_assignable(T &, const T &); } }']
     first = len(lines) + 1
     for i, t in enumerate(types):
         q = '::' + t
@@ -200,7 +207,7 @@ def unit_key(tree, unit):
 
 def load(path, tree=None):
     """layouts.tsv -> {(unit, type): Layout or None}; with tree, rows whose unit content key differs (or that have
-    none, or no POD column: older files) are left out."""
+    none, or no POD column or another POD rule: older files) are left out; without, their POD bit is unknown."""
     lay = {}
     if os.path.exists(path):
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
@@ -209,9 +216,9 @@ def load(path, tree=None):
             f = line.rstrip('\n').split('\t')
             if len(f) < 7:
                 continue
-            if tree is not None and (len(f) < 9 or f[7] != unit_key(tree, f[0])):
+            if tree is not None and (len(f) < 10 or f[7] != unit_key(tree, f[0]) or f[9] != POD_RULE):
                 continue
-            pod = int(f[8]) if len(f) > 8 and f[8] in ('0', '1') else None
+            pod = int(f[8]) if len(f) > 9 and f[8] in ('0', '1') and f[9] == POD_RULE else None
             lay[(f[0], f[1])] = None if f[2] == '-1' else Layout(int(f[2]), int(f[3]), int(f[4]), int(f[5]), f[6], pod)
     return lay
 
@@ -236,13 +243,13 @@ def run(out, tree, jobs=4):
             for t, l in f.result().items():
                 lay[(futs[f], t)] = l
     with open(path, 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('#unit\ttype\tsize\talign\ttrivial\tempty\tclass\tunit content key\tmsvc pod\n')
+        f.write('#unit\ttype\tsize\talign\ttrivial\tempty\tclass\tunit content key\tmsvc pod\tpod rule\n')
         for (u, t), l in sorted(lay.items()):
             if l is None:
-                f.write('%s\t%s\t-1\t0\t0\t0\t?\t%s\t?\n' % (u, t, unit_key(tree, u)))
+                f.write('%s\t%s\t-1\t0\t0\t0\t?\t%s\t?\t%s\n' % (u, t, unit_key(tree, u), POD_RULE))
             else:
-                f.write('%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\n' % (u, t, *l[:5], unit_key(tree, u),
-                                                                 '?' if l.pod is None else l.pod))
+                f.write('%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n' % (u, t, *l[:5], unit_key(tree, u),
+                                                                     '?' if l.pod is None else l.pod, POD_RULE))
     got = sum(1 for l in lay.values() if l)
     print('layouts: %d known, %d not nameable' % (got, len(lay) - got))
     print('classes:', dict(collections.Counter(l.cls for l in lay.values() if l)))

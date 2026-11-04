@@ -166,22 +166,36 @@ uint32_t* Encoder::Op(uint32_t op, uint32_t argc) {
 
 // ---- sorter ---------------------------------------------------------------------------------------------------
 void SortPackets(const Packet* p, uint32_t n, uint32_t* order, uint32_t* tmp, uint64_t* keys, uint64_t* ktmp) {
+    // LSD radix over the full 64-bit key in 8-bit digits: all 8 histograms in one pass over the keys (8 KiB, L1
+    // resident), digits identical in every key skipped, ping-pong buffers. Stable. (P6n F2: the former 16-bit
+    // digits cleared and prefix-summed a 256 KiB table per digit: ~1.9 M fixed instructions per frame.)
+    uint32_t hist[8][256];   // per call (8 KiB of stack): two threads sort their own frames at once (V1 T1)
+    memset(hist, 0, sizeof hist);
+    if (!n) return;
+    const uint64_t k0 = p[0].key;
     uint64_t diff = 0;
-    for (uint32_t i = 0; i < n; i++) { order[i] = i; keys[i] = p[i].key; diff |= keys[i] ^ keys[0]; }
-    static uint32_t count[65536];
-    for (int shift = 0; shift < 64; shift += 16) {
-        if (!((diff >> shift) & 0xFFFF)) continue;  // digit identical everywhere: nothing to do
-        memset(count, 0, sizeof count);
-        for (uint32_t i = 0; i < n; i++) count[(keys[i] >> shift) & 0xFFFF]++;
-        uint32_t sum = 0;
-        for (uint32_t d = 0; d < 65536; d++) { uint32_t c = count[d]; count[d] = sum; sum += c; }
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t pos = count[(keys[i] >> shift) & 0xFFFF]++;
-            tmp[pos] = order[i]; ktmp[pos] = keys[i];
-        }
-        memcpy(order, tmp, n * sizeof *order);
-        memcpy(keys, ktmp, n * sizeof *keys);
+    for (uint32_t i = 0; i < n; i++) {
+        const uint64_t k = p[i].key;
+        order[i] = i; keys[i] = k; diff |= k ^ k0;
+        hist[0][k & 255]++; hist[1][(k >> 8) & 255]++; hist[2][(k >> 16) & 255]++; hist[3][(k >> 24) & 255]++;
+        hist[4][(k >> 32) & 255]++; hist[5][(k >> 40) & 255]++; hist[6][(k >> 48) & 255]++; hist[7][k >> 56]++;
     }
+    uint32_t *o = order, *ot = tmp;
+    uint64_t *k = keys, *kt = ktmp;
+    for (int d = 0; d < 8; d++) {
+        const int sh = 8 * d;
+        if (!((diff >> sh) & 255)) continue;   // digit identical everywhere: nothing to do
+        uint32_t* c = hist[d];
+        uint32_t sum = 0;
+        for (int b = 0; b < 256; b++) { uint32_t t = c[b]; c[b] = sum; sum += t; }
+        for (uint32_t i = 0; i < n; i++) {
+            const uint32_t pos = c[(k[i] >> sh) & 255]++;
+            ot[pos] = o[i]; kt[pos] = k[i];
+        }
+        uint32_t* t1 = o; o = ot; ot = t1;
+        uint64_t* t2 = k; k = kt; kt = t2;
+    }
+    if (o != order) { memcpy(order, o, n * sizeof *order); memcpy(keys, k, n * sizeof *keys); }
 }
 
 // ---- dynamic records ----------------------------------------------------------------------------------------------
@@ -220,6 +234,7 @@ bool Frame::Init(Backend* be, uint32_t uboBytes, uint32_t uboSize) {
 }
 
 void Frame::Begin(uint32_t frame) {
+    lastEpi_ = 0;
     dropped_ = 0;
     frame_ = frame;
     nPasses_ = nPackets_ = nTex_ = nDyn_ = 0;
@@ -284,6 +299,14 @@ bool Frame::Clear(uint8_t pass, uint8_t layer, uint16_t depthKey, uint32_t flags
 void Frame::Tag(const Packet* p, uint16_t enginePass, uint16_t family) {
     uint32_t i = (uint32_t)(p - packets_);
     if (i < nPackets_) tags_[i] = family ? ((uint32_t)enginePass | (uint32_t)family << 16) : 0;
+}
+
+void Frame::SetEpilogue(Packet* p, const NxEpilogue& e) {
+    if (lastEpi_ && !memcmp(ubo_.cpu() + lastEpi_ - 1, &e, sizeof e)) { p->epi = lastEpi_; return; }
+    NxEpilogue* d = Epilogue(p);
+    if (!d) return;
+    *d = e;
+    lastEpi_ = p->epi;
 }
 
 NxEpilogue* Frame::Epilogue(Packet* p) {
@@ -373,7 +396,9 @@ void Frame::Finish(StateCache& sc, NxFrameStats* stats, bool present) {
                 a = enc_.Op(NxOp_BindIdx, 4); a[0] = p.idxBlock; a[1] = p.idxOffset; a[2] = p.idxSize; a[3] = p.idxType;
                 curIdxB = p.idxBlock; curIdxO = p.idxOffset;
             }
-            if (p.epi && p.epi != curEpi) {
+            // bind the epilogue block on a change of contents (blocks of equal contents are interchangeable)
+            if (p.epi && p.epi != curEpi &&
+                (!curEpi || memcmp(ubo_.cpu() + p.epi - 1, ubo_.cpu() + curEpi - 1, sizeof(NxEpilogue)))) {
                 a = enc_.Op(NxOp_BindUbo, 5);
                 a[0] = 2; a[1] = 2; a[2] = ubo_.block(); a[3] = p.epi - 1; a[4] = 256;
                 curEpi = p.epi;

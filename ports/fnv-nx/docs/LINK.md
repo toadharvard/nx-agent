@@ -210,6 +210,31 @@ class/struct/union/enum tags, which Itanium names do not.
   signed on MSVC and now in GCC too with J-0034's `-fsigned-char`; `uxtb`/`uxth` for `bool`, unsigned types,
   `wchar_t`), class `narrow-extend`. The byte-level re-decision (below) keeps these bridges.
 
+* **Variadic pairs** (`abi.varargs_check`, S2c-abi). AArch64 Linux passes anonymous arguments in the next registers
+  and stack slots exactly like named ones (AAPCS64; Apple's variant differs), and va_arg walks them in that order, so
+  most pairs with a `...` side need no bridge:
+  * variadic reference, fixed definition: fine when the definition reads only what the reference names. That is the
+    bulk of the class: the retail exe compiled its debug loggers to `return 0` (0x005b5e40 `Warning`, 0x0040fbe0,
+    0x00a29680, 0x00c3c220), defined `f(void)`. A definition parameter in the reference's anonymous part has a type
+    only the call site knows: `manual` (a native variadic replacement in `tools/link/overrides/`, like 0x00703c00);
+  * fixed reference, variadic definition (0x005accb0's extractor, 0x005e58f0 ApplyPerkModifiers): the reference's
+    parameters behind the definition's named ones must be integers, pointers or doubles (a fixed float is 4 bytes,
+    a variadic caller would have promoted it), start at the definition's anonymous x86 offset and leave the same
+    AArch64 register counts. A `char`/`short`/`bool` there is extended in place (`narrow-extend`);
+  * both variadic: the named parts are compared like fixed ones and the anonymous parts must start at the same
+    place;
+  * definition parameters in the reference's anonymous part, when the reference names nothing (`int f(...)`, the
+    decomp's unprototyped declaration) or the definition is variadic too (0x00406d00 `(char *, ...)` against
+    `(char *, int, const char *, ...)`): 32-bit integers and pointers only. x86 worked, so the call site pushed a
+    4-byte word there, which is never a float (a variadic caller promotes it to double); its integer or pointer
+    takes the register the definition reads. A fixed definition behind named reference parameters is a decompiled
+    stack walk (0x00703c00): `manual`;
+  * a callee-pop side (stdcall/thiscall/fastcall) with stack arguments against a variadic (cdecl) one moved esp on
+    x86: `manual`.
+  Pairs decided this way carry the class `varargs-tail`. Test: `test_varargs.py` (verdicts, and the `same` and
+  bridged pairs executed under qemu-aarch64). On link/c0d6c71516f6 (replayed with `abireplay.py`) 1,011 of 1,310
+  varargs rows are bound directly (1,005) or bridged (6); 210 of the 298 left are the logger 0x00703c00 (override).
+
 **Callee-pop bytes** (V1 round 3): a cdecl caller removes what it pushed, any other caller leaves that to the
 callee, and a stdcall / thiscall / fastcall callee pops its own stack arguments (MSVC's hidden result pointer
 included). When the bytes the definition pops differ from the bytes the reference's caller expects it to pop, x86
@@ -308,6 +333,23 @@ Two bridge divergences are not ABI-model errors:
   below). The
   first-fault difference in that function (x86 0, AArch64 0x18) is argument evaluation order.
 
+### MSVC entries at a secondary base (`thisadj.py`, S2c-abi)
+
+MSVC 2008 compiles an override of a virtual function that a non-primary base introduces with `this` pointing at
+that base subobject. Callers that hold the full object reach it through an adjustor thunk. GCC compiles the same
+function for the full object and emits a `_ZThn<d>_` thunk for the secondary vtable. The exe's vftables tell the
+two apart. Such a function's address is a slot only of vftables whose complete object locator has offset d > 0,
+never of a primary one. The player's exe has 823 of them (`FNVNX_EXE` / `PLAYER_EXE`; `FNVNX_SECONDARY_ENTRIES`, a
+tsv `address<TAB>d`, stands in for tests).
+
+For each one whose native object defines the thunk, the address map's entry names `__fnvnx_msvc_<addr>`. aliases.ld
+defines that symbol as the thunk, so image code pointers rewritten through the map (vftable words, function tables)
+pass through the thunk, as do x86-convention callers. `__fnv_<addr>` stays the primary entry, because the units' own
+references pass the full object. On link/c0d6c71516f6 79 addresses have a thunk. 461 have none: the decomp defines
+them on a shell class that is the subobject itself, so `this` already agrees. 283 have no native definition.
+S13b's `thunk-binding` rows (11 on link/0bd144db1464, `this` off by 24, 60, 136, 164, 168) are this case. The
+harness has to enter through the map's link symbol to see the fix.
+
 ## Overrides (`resolve --override <tsv>`, for native replacements, J-0015)
 
 The table (tab-separated, `#` comments) lists `address`, `native symbol`, then the object or archive that defines it
@@ -336,7 +378,7 @@ over the decomp definition at that address. For S6n's `render/native/overrides.t
   signature differs on purpose).
 
 The port's own replacements live in `tools/link/overrides/`: `overrides.tsv` (address, symbol, source, signature)
-and `build.sh <out dir>`, which compiles them for the game target and writes the table `--override` reads. First
+and `build.sh <out dir>`, which compiles them for the game target and writes the table `--override` reads. The pipeline's link stage does that by default (`OVERRIDE=auto`, S2c-abi); before, farm links ran without them and the 0x00703c00 references stayed `manual` (219 rows on link/c0d6c71516f6). First
 entry: **0x00703c00, the console logger** - the decomp defines it as `void (const char *text, const char *context)`
 handing `&context` on as x86 stack varargs; `fnvnx_log_00703c00(const char *fmt, ...)` formats with `vsnprintf`
 under the original's conditions (UI root and key flag, then an active console or `FUN_005b6f70`) and prints through
@@ -356,11 +398,16 @@ render table's free text, library, pending, refused and vslot rows).
 
 For every pair that the class-level model above cannot settle, the aggregates passed or returned by value are
 measured in the unit that declares them: a probe translation unit includes the unit's source and, per type, emits
-`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible), `__is_empty` and MSVC's C++03 POD bit
-(`__is_pod`, `__is_aggregate` and no direct base: no user constructor, destructor or copy assignment, no private
-member, no virtual function) as constants (read back from the object), and a function taking the type by value
-whose spills show the SIMD registers it arrives in. `layouts.tsv` rows carry the unit content key (column 8) and
-the POD bit (column 9); a row without either is probed again.
+`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible), `__is_empty` and MSVC 2008's POD bit
+as constants (read back from the object), and a function taking the type by value whose spills show the SIMD
+registers it arrives in. The POD bit is V1's predicate, checked against MSVC 2008 on 24 kinds (J-0147,
+`tests/v1/test_fastcall_nonpod.py`): `__is_aggregate` (no user constructor, no private or protected data member, no
+virtual function), no direct base, a trivial destructor and a trivial copy assignment (`__is_trivially_assignable(T &,
+const T &)`; a reference member deletes it). A member's own user constructor or copy constructor does not count:
+MSVC returns such 8-byte structs in eax:edx, and the earlier `__is_pod && __is_aggregate && no base` called them
+non-POD (3 of the 24 kinds wrong, among them the fastcall buffer in ecx). `layouts.tsv` rows carry the unit content
+key (column 8), the POD bit (column 9) and the POD rule (column 10, `pod2`); a row without them, or of another rule,
+is probed again.
 Class: `G1`/`G2` (one/two general registers), `H<n>x<w>` (HFA/HVA: n SIMD registers of w bytes), `IND` (by
 reference: over 16 bytes or not trivial for calls). Types the probe cannot name are dropped and stay `manual`.
 
@@ -597,6 +644,14 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   exactly one address carries it (tier `gref/ident`; several addresses: `ambiguous`, not guessed). On the
   ninth-round objects: (1)+(2) bind 52 names (101 references), (3) 7 names (12 references), 1 identifier stays
   ambiguous.
+* **Variables at a .text address nothing defines** (`text-addr`, S2c-abi): an array (`@@3Q`) or a char label
+  (`@@3D`, the `&FUN_00a00000` idiom) the decomp places at a .text address that is no function start. The code uses
+  only its address, and on x86 that address is the value. The generated initializers pass immediates this way
+  (`g_011c5a4c_arg1` at 0x00a00000, `g_011d3450_arg1` at 0x006e6e6e). The reference binds to the absolute symbol
+  `__fnvnx_textaddr_<addr> = 0x<addr>;` (aliases.ld), so the native code passes the same number. Before, these were
+  `extern-text` and reached a named stub (S13b native-stub-data: GlobalObject2 0x0045cfe0's second argument). On
+  link/c0d6c71516f6 this applies to 11 references in units, plus their copies in the vtable objects. Other variables
+  at such addresses (an `int` at 0x00000065) stay `extern-text`.
 * **Calls of an IAT slot's address**: a decomp `__declspec(dllimport)` function named after its slot
   (`FUN_00fdf1c0(void *)`) is called directly by GCC (`bl`); when its name binds to an IAT slot as data, a call of it
   binds to the slot's api (S4's implementation or the api name), never into the image's IAT words.

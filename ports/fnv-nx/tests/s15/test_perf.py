@@ -91,12 +91,12 @@ def test_budget(tmp):
     check(abs(b['budget_minsn']['1020']['pass_45'] - 18.1) < 0.1 and abs(b['budget_minsn']['1785']['pass_45'] - 31.7) < 0.1,
           'budget: 45 fps per-core budget 18.1 M at 1020 MHz, 31.7 M at 1785 MHz (IPC 0.8)')
     want = {'%s@%d' % (s['id'], c) for s in model['scenarios'] for c in (1020, 1785)}
-    check(set(b['gates']) == want and all(v in ('fail', 'pass_30', 'pass_45', 'stretch_60') for v in b['gates'].values()),
+    check(set(b['gates']) == want and all(v in ('fail', 'pass_30', 'pass_45', 'target_60') for v in b['gates'].values()),
           'budget: a level per scenario and clock (%d)' % len(b['gates']))
     placed = {s['id']: s for s in b['scenarios']}
     main_items = set(placed['placed']['cores']['0']['items'])
     check('renderer_worker' in placed['placed']['cores']['1']['items'] and 'renderer_worker' not in main_items
-          and 'ai_process_lists' not in main_items and 'scene_update_cull' in main_items,
+          and 'ai_process_lists' not in main_items and 'cull' in main_items and 'scene_update' in main_items,
           'budget: render worker on core 1, AI off core 0, cull on core 0 without levers')
     check('3' not in placed['placed']['cores'] and '3' in placed['plan60']['cores'], 'budget: core 3 only with the opt-in')
     check(placed['plan45']['main_minsn']['mid'] < placed['placed']['main_minsn']['mid'], 'budget: plan45 moves work off main')
@@ -113,7 +113,7 @@ def test_budget(tmp):
     fp = bm['measured']['frameprof']
     check(fp['used'] and fp['frames'] == 3 and len(fp['boot']) == 1, 'budget: frameprof frames used, boot interval listed')
     items0 = sc['cores']['0']['items']
-    check(abs(items0.get('measured_main', 0) - 11.0) < 1e-6 and 'scene_update_cull' not in items0,
+    check(abs(items0.get('measured_main', 0) - 11.0) < 1e-6 and 'cull' not in items0,
           'budget: measured main median 11.0 M replaces the modeled main items')
     rep = {'schema': 'fnvnx-render-cost/1', 'draws': 1000, 'per_draw_insn': {'main': [100, 100], 'worker': [2000, 2000]},
            'gpu_ms': {'720p_docked': [30, 40]}, 'basis': 'M'}
@@ -122,6 +122,42 @@ def test_budget(tmp):
     check(abs(scr['cores']['0']['items']['renderer_main'] - 0.1) < 1e-6 and scr['results']['1785']['frame_ms']['lo'] >= 30,
           'budget: render report replaces the renderer items, GPU time bounds the frame')
     check(scr['results']['1785']['verdicts']['pass_45'] == 'fail', 'budget: a 30-40 ms GPU fails 45 fps')
+    # hotspots: the model's subsystems and function proxies, ranked; the queue by main-thread gain
+    hs = b['hotspots']
+    subs = [h for h in hs if h['kind'] == 'subsystem']
+    fns = [h for h in hs if h['kind'] == 'function']
+    check({'cull', 'scene-graph update', 'animation', 'havok', 'render accumulation', 'ai'} <= {h['subsystem'] for h in subs},
+          'hotspots: one row per subsystem of the model')
+    check([h['rank'] for h in subs] == list(range(1, len(subs) + 1)) and
+          all(subs[i]['minsn']['mid'] >= subs[i + 1]['minsn']['mid'] for i in range(len(subs) - 1)),
+          'hotspots: subsystem rows ranked by mid instructions')
+    cu = next(h for h in subs if h['subsystem'] == 'cull')
+    want = 3.25 / (0.8 * 1020) * 1e3 / 22.2
+    check(cu['critical'] and abs(cu['share_45']['1020'] - want) < 2e-3 and cu['fix'] and cu['basis'] == 'E',
+          'hotspots: share of 22.2 ms at the assumed IPC, fix attached (cull %.3f)' % cu['share_45']['1020'])
+    sl = next(h for h in fns if h['id'] == 'fn_slerp')
+    hs = next(h for h in model['hotspot_functions'] if h['id'] == 'fn_slerp')   # per call [M] x calls [E]
+    check(abs(sl['minsn']['lo'] - hs['per_call_insn'][0] * hs['calls'][0] / 1e6) < 1e-6 and
+          abs(sl['minsn']['hi'] - hs['per_call_insn'][1] * hs['calls'][1] / 1e6) < 1e-6 and sl['basis'] == 'E',
+          'hotspots: function proxy = per-call A64 count x calls per frame')
+    q = b['queue']
+    check(q and q[0]['rank'] == 1 and all(q[i]['gain_main_minsn']['mid'] >= q[i + 1]['gain_main_minsn']['mid']
+                                          for i in range(len(q) - 1)), 'hotspots: queue ranked by main-thread gain')
+    hm = {h['id'] for h in bm['hotspots'] if h['kind'] == 'subsystem'}
+    check('sub_havok' in hm and all(h['basis'] == 'M' for h in bm['hotspots'] if h['kind'] == 'subsystem'),
+          'hotspots: measured frames give [M] subsystem rows')
+    boot = [h for h in frame_budget.build(model, [[{'label': 'until main', 'instructions': 3e6, 'subsystems': {},
+            'top': [['fnvnx_scan', 2e6], ['x', 1e6]], 'threads': {}}]])['hotspots'] if h['kind'] == 'boot']
+    check([h['name'] for h in boot] == ['fnvnx_scan', 'x'] and 'share_45' not in boot[0], 'hotspots: boot rows [M]')
+    # the render machine's own report (fnv-nx P6n report v1)
+    p6 = {'schema': 'fnv-nx P6n report v1 (docs/RENDER_PERF.md §5)', 'summary': {'commit': 'abc'},
+          'frame': {'mix_lo': {'draws': 1490, 'instr': {'main': 2.0e6, 'render': 3.0e6}},
+                    'mix_hi': {'draws': 3710, 'instr': {'main': 5.0e6, 'render': 6.0e6}}},
+          'gpu': {'summary_ms': {'mix_lo': {'docked_720p': {'eff_1.0': 7.0}}, 'mix_hi': {'docked_720p': {'eff_0.6': 12.0}}}}}
+    b6 = frame_budget.build(model, None, p6)
+    it6 = {i['id']: i for i in b6['items']}
+    check(it6['renderer_main']['minsn'] == [2.0, 5.0] and it6['renderer_worker']['minsn'] == [3.0, 6.0] and
+          b6['measured']['render']['gpu_ms'] == {'docked_720p': [7.0, 12.0]}, 'budget: P6n report.json read as fnvnx-render-cost/1')
 
     class E:
         threads = {}

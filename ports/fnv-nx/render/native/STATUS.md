@@ -65,5 +65,6 @@ python3 ports/fnv-nx/tests/s6n/scenes.py --compare <copied out dir> --tol 2
   otherwise and the sorted scene then differs from the x86 goldens by 1 LSB).
 
 | nx_render (S16-compare) | `capture/nx_render.cpp`, `capture/d3d9_exec.{h,cpp}`, `capture/d3d9cap.h` (NXD9), `capture/png.h`; `tests/s6n/nxd9.py` writer; docs §8 | `make -C tests/s6n nx_render` | 42 checks, 0 failed |
+| nx_render input limits (J-0147 V1) | `capture/d3d9_exec.cpp`, `capture/replay.cpp`, `gl/nxgl.c` readback; docs §8.4 | `make -C tests/s6n nx_render_robust` (ASan/UBSan) | bounds 35/35, V1 13/13, 600 mutations 0 crashes |
 | dynamic resolution | `front/dynres.h` controller, scene `dynres` (scaled scene + upscale + native UI); docs §9 (frame graph, controller, presets, budgets) | `make -C tests/s6n`, `make -C tests/s6n scenes` | test_dynres OK; 19 scenes match |
 | N2 skinning (started) | `include/nx/skin.h`, `lit_skin` / `depth_skin` VS variants, scene `skin`; docs §4.1 | `make -C tests/s6n`, `make -C tests/s6n scenes` | test_skin_palette OK; scene skin 7/7 |

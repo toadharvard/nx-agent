@@ -134,3 +134,67 @@ extern RenderTextureSource* __stdcall FUN_004a0ea0(void*, int, int, int, int); e
 ===
             DAT_011dec64.FUN_0066b0d0(FUN_004a0ea0()->FUN_00b6e110(FUN_0043c4b0(), 45, 0, 0, 0));
 >>>
+
+@@ XINC1 src/staging/blk_00440000_od.cpp 0x00448420
+# x86 0x00448420 (/Od, distance 1 from the boot roots), three times: `push 0; lea ecx,item; call 0x00559450`
+# (0x00559450 reads ecx only and ends in a plain `ret`: a getter), `push eax; mov ecx,[DAT_01202d98]; call 0x0044ac40`
+# (`ret 8`, reads [ebp+8] and [ebp+0xc]): the 0 is 0x0044ac40's second argument.
+<<<
+    void* FUN_00559450(int);
+===
+    void* FUN_00559450(int); void* FUN_00559450(); /* fnv-nx XINC1 pop: a getter (plain ret) */
+>>>
+<<<
+    void FUN_0044ac40(void*);
+===
+    void FUN_0044ac40(void*); void FUN_0044ac40(void*, int); /* fnv-nx XINC1 pop: ret 8 */
+>>>
+<<<
+            DAT_01202d98->FUN_0044ac40(firstItem3.FUN_00559450(0));
+===
+            DAT_01202d98->FUN_0044ac40(firstItem3.FUN_00559450(), 0);
+>>>
+<<<
+            DAT_01202d98->FUN_0044ac40(secondItem.FUN_00559450(0));
+===
+            DAT_01202d98->FUN_0044ac40(secondItem.FUN_00559450(), 0);
+>>>
+<<<
+            DAT_01202d98->FUN_0044ac40(thirdItem6.FUN_00559450(0));
+===
+            DAT_01202d98->FUN_0044ac40(thirdItem6.FUN_00559450(), 0);
+>>>
+
+@@ XINC1 src/staging/blk_00860000_od.cpp 0x0086c010
+# x86 0x0086c010 (/Od, distance 1 from the boot roots): `push value; push 0xc; call 0x004e3270` (a getter of the
+# image-space manager global, plain `ret`), `mov ecx,eax; call 0x004ebbc0` (`ret 4`: the effect at index 0xc),
+# `mov ecx,eax; call 0x005b9f80` (`ret 4`: stores the float at +0x58): each pushed word belongs to a later call.
+<<<
+struct ChainLeaf_005b9f80
+{
+    void Run();
+};
+struct ChainNode_004ebbc0
+{
+    ChainLeaf_005b9f80* Next();
+};
+===
+struct ChainLeaf_005b9f80
+{
+    void Run(); void Run(float value); /* fnv-nx XINC1 pop: ret 4 */
+};
+struct ChainNode_004ebbc0
+{
+    ChainLeaf_005b9f80* Next(); ChainLeaf_005b9f80* Next(int kind); /* fnv-nx XINC1 pop: ret 4 */
+};
+>>>
+<<<
+ChainNode_004ebbc0* __stdcall Factory_004e3270(int kind, float value);
+===
+ChainNode_004ebbc0* __stdcall Factory_004e3270(int kind, float value); ChainNode_004ebbc0* __stdcall Factory_004e3270(); /* fnv-nx XINC1 pop: a getter */
+>>>
+<<<
+    Factory_004e3270(12, value)->Next()->Run();
+===
+    Factory_004e3270()->Next(12)->Run(value);
+>>>
