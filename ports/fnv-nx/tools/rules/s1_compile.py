@@ -313,6 +313,9 @@ def r_msvc_base_layout(path, text, stats):
         if not bases or any(re.search(r'\bvirtual\b', b) for b in bases): continue
         last = re.sub(r'^(?:(?:public|protected|private)\s+)+', '', bases[-1]).strip()
         if not last: continue
+        # a qualified base (`List<VERTEX, BASE>::Item`) may be a dependent name: inside alignof it needs typename
+        # (C++11 allows it before any qualified name, in a template or not)
+        if '::' in re.sub(r'<.*>', '<>', last) and not last.startswith('typename'): last = 'typename ' + last
         out.append(text[pos:o + 1]); out.append(' FNVNX_MSVC_BASE_END(%s)' % last); pos = o + 1
         stats['TAIL1'] += 1
     out.append(text[pos:])
@@ -2601,6 +2604,26 @@ void* NiStandardAllocator::Allocate(unsigned int& size, unsigned int& alignment,
 VTBL1_NISTD_RX = re.compile(r'^struct NiStandardAllocator\s*\{\s*static void\* __cdecl operator new\((?:unsigned int|size_t)\);\s*'
                             r'virtual void func\(\);\s*\};', re.M)
 
+# A660A0Map (gamebryo2.2/corelibs/nimain/nistream.cpp, namespace fnv_00a660a0) is the NiStream loader map
+# DAT_011f4784 (Gamebryo's NiStream::ms_pkLoaders, a NiTStringPointerMap<CreateFunction>) that FUN_00a660a0 creates
+# with `new A660A0Map`, vftable 0x0109bf4c (units.json `??_7A660A0Map@fnv_00a660a0@@6B@`). The decomp declares only its
+# destructor, so the native vtable has D1/D0 and nothing else, while RegisterObjectLoader 0x00a64900 calls
+# NiTStringTemplateMap<...>::SetAt 0x00a642a0, which calls KeyToHashIndex, IsKeysEqual and SetValue through it
+# (Itanium slots 2-4 of nitstringmap_decls.h's NiTStringTemplateMap: D1, D0, then those three). The interface is
+# Gamebryo's NiTMapBase in MSVC order: 0 destructor, 1 KeyToHashIndex, 2 IsKeysEqual, 3 SetValue, 4 ClearValue,
+# 5 NewItem, 6 DeleteItem. No slot has a function in the decomp: 0x0109bf4c is bound by nistream.cpp only (and only
+# with that destructor), its base chain 0x0109bcc4 / 0x0109bca4 / 0x0109bc84 is written only by the destructors
+# 0x00a63850 / 0x00a63a20 of other maps, and the decomp's string-map slot definitions belong to other vftables
+# (NiTStringTemplateMap<.., int>::SetValue 0x00a1e770, Tile__MenuStringMap's case-insensitive 0x00a0d180 / 0x00a0d1b0,
+# NiTStringPointerMap<ShaderBufferRecord*> at 0x010af6cc). Folding by MSVC would make some of them the same code, but
+# that is analogy, not evidence: all six are declared only (vslot traps, unresolved until the exe's vftable gives
+# their addresses). The native vtable then has the slots SetAt calls, at the same Itanium positions as SetAt's
+# declaration. A660A0MapBase (0x0109bc84) keeps its one virtual: only construction and destruction use its vptr.
+A660A0_SLOTS = ('virtual unsigned int KeyToHashIndex(const char* key) const; '
+                'virtual bool IsKeysEqual(const char* key1, const char* key2) const; '
+                'virtual void SetValue(void* item, const char* key, void* value); virtual void ClearValue(void* item); '
+                'virtual void* NewItem(); virtual void DeleteItem(void* item);')
+
 VTBL1_SITES = [
     ('gamebryo2.2/corelibs/nimain/nigpuprogramcache.cpp', VTBL1_NISTD_RX, VTBL1_NISTD),
     ('gamebryo2.2/corelibs/nimain/nigpuprogramcache_rtm_variant.cpp', VTBL1_NISTD_RX, VTBL1_NISTD),
@@ -2615,6 +2638,13 @@ VTBL1_SITES = [
      r'\1 /* fnv-nx VTBL1: the AbstractHeap slots 1-13 */ virtual void v1(); virtual void v2(); virtual void v3(); '
      r'virtual void v4(); virtual void v5(); virtual void v6(); virtual void v7(); virtual void v8(); virtual void v9(); '
      r'virtual void v10(); virtual void v11(); virtual void v12(); virtual void v13(void* value);\2'),
+    # the NiStream loader map (DAT_011f4784, vftable 0x0109bf4c) FUN_00a660a0 creates: the decomp declares only the
+    # destructor, NiTStringTemplateMap::SetAt 0x00a642a0 (nitstringmap.inl) calls KeyToHashIndex, IsKeysEqual and
+    # SetValue through it (see A660A0_SLOTS above)
+    ('gamebryo2.2/corelibs/nimain/nistream.cpp',
+     re.compile(r'(\bclass A660A0Map : public A660A0MapBase\s*\{[^{}]*\{\s*\}\s*virtual ~A660A0Map\(\);)(\s*\};)'),
+     r'\1 /* fnv-nx VTBL1: NiTMapBase slots 1-6 in MSVC order, none in the decomp (vslot traps) */ ' + A660A0_SLOTS
+     + r'\2'),
     ('staging/blk_00aa0000_o2.cpp',
         re.compile(r'^struct FUN_00aa2230_BSNiAllocator\s*\{\s*virtual void m_virtual0\(\);\s*'
                    r'FUN_00aa2230_BSNiAllocator\(\);\s*\};', re.M),
@@ -2719,6 +2749,8 @@ def r_class_alignment(path, text, stats):
 #   its unit binds to 0x00aa3e40 (MemoryManager::Allocate, defined in this unit as MemoryManagerStandIn::FUN_00aa3e40)
 #   on 0x011f6238 (the memory manager, ?DAT_011f6238@@3UMemoryManager@@A here too).
 
+# VLIT1's `DAT_<addr>` names, bound in their unit (the C name `_DAT_<addr>`), filled while the tree is prepared
+VLIT1_BINDS = set()
 BIND1_REFS = [
     # (unit source, MSVC decorated name, address)
     ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?Allocate@MemoryManagerAA3880@@QAEPAXI@Z', '0x00aa3e40'),
@@ -2744,7 +2776,7 @@ def bind_stand_in_names(out_root, stats, files=None):
     if not os.path.exists(p): return
     data = json.load(open(p))
     before = stats['BIND1']
-    bind_units_data(data, stats)
+    bind_units_data(data, stats, BIND1_REFS + sorted(VLIT1_BINDS))
     if stats['BIND1'] != before:
         json.dump(data, open(p, 'w'))
         if files is not None: files['BIND1'] += 1
@@ -2791,7 +2823,11 @@ def r_va_enum_args(path, text, stats):
 # instruction stores an image address whose bytes it read as text: "@K@\0" is 0x00404b40, slot 0 (the scalar
 # deleting destructor, S00404b40::DestroyIfFlagged) of the vftable at that address (S5 J-0102: the
 # GameSettingCollection vptr, 3,454 setting initializers). The unit's recipe binds the literal (MSVC `$SG2541`)
-# to that vftable address, 0x0101212c. VLIT1 stores the address: `m_p = (char*)0x0101212c;`. Only where a literal
+# to that vftable address, 0x0101212c. VLIT1 stores the address through the image symbol the link maps image
+# vftables by: `m_p = (char*)&DAT_0101212c;`, with `extern "C" char DAT_0101212c;` declared at namespace scope in
+# front of the storing function (S2c 1aeaa9b: an unbound DAT_<hex> right side counts as that image address, so the
+# store can be mapped to a native vtable; a raw constant could not be). The comment goes behind the `;`, outside the
+# statement the link reads. Only where a literal
 # of at most 3 characters stored with `=` reads as the address of a function the recipe defines, and the unit's
 # `$SG` binding can only be that literal (the unit binds one `$SG` address and the file has one string literal);
 # the other sites (45 in the tree) are counted as VLIT1-LIST and left as they are until the exe says which.
@@ -2834,7 +2870,18 @@ def r_vptr_literals(path, text, stats):
         return text
     m, _ = hits[0]
     stats['VLIT1'] += 1
-    return text[:m.start()] + '%s(char*)0x%08x /* fnv-nx VLIT1: "%s" */%s' % (m.group(1), next(iter(addrs)), m.group(2).replace('*/', '* /'), m.group(3)) + text[m.end():]
+    name = 'DAT_%08x' % next(iter(addrs))
+    root, _ = prepare._units_json(path)
+    if root: VLIT1_BINDS.add((os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/'), '_' + name,
+                              '0x%08x' % next(iter(addrs))))
+    text = (text[:m.start()] + '%s(char*)&%s%s /* fnv-nx VLIT1: "%s" */' % (m.group(1), name, m.group(3),
+                                                                             m.group(2).replace('*/', '* /'))
+            + text[m.end():])
+    # the declaration, at namespace scope in front of the outermost function or class around the store (same line)
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    outer = [sp for sp in prepare.scope_map(masked) if sp[0] < m.start() < sp[1] and sp[2] not in ('namespace', 'extern')]
+    at = _decl_start(masked, outer[0][0]) if outer else 0
+    return text[:at] + 'extern "C" char %s; /* fnv-nx VLIT1 */ ' % name + text[at:]
 
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
@@ -2860,5 +2907,109 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
-         r_msvc_base_layout, r_class_alignment]
+# ---------------------------------------------------------------------------------------------------------- INIT1
+#
+# A static object whose dynamic initializer the exe has and the decomp does not. Gamebryo gives every unit that
+# includes NiMain.h a `static NiMainSDM` object; its constructor (0x00a8a5f0, `FUN_00a8a5f0_class::FUN_00a8a5f0` in
+# staging/blk_00a80000_o2.cpp) counts the objects in DAT_011f5b84 and the first one registers NiMain's init and
+# shutdown (InitializeGameSystems 0x00a89cc0, FUN_00a8a280) with NiStaticDataManager (FUN_00aa2060: 0x011f6110 /
+# 0x011f6114), which NiInit 0x00aa20b0 runs. The exe calls it from many dynamic initializers; nothing in the decomp
+# calls it, so on the target 0x011f6110 stays 0, NiInit skips NiMain's init and the NiStream loader map, its
+# post-process array and the global string table stay NULL (S5 J-0106, known_faults `before-winmain 0x00a8a5f0`).
+# INIT1 adds one such static to the constructor's own unit. S5 (J-0109, TOOLCHAIN.md section 19): a native static's
+# .init_array entry runs after boot_banner (data image mapped, memory manager constructed), before every game
+# initializer and before WinMain. Game statics run before the platform's constructors, so the constructor may not
+# use the clock, the profile strings or exceptions: 0x00a8a5f0 and FUN_00aa2060 only write image variables. Same
+# line count: the static joins the line of the constructor's closing brace.
+
+INIT1_SITES = [
+    ('staging/blk_00a80000_o2.cpp',
+     re.compile(r'(// @fnv 0x00a8a5f0\s*\nvoid\* FUN_00a8a5f0_class::FUN_00a8a5f0\(\)\s*\{(?:[^{}]|\{[^{}]*\})*\})'),
+     r"\1 /* fnv-nx INIT1: the exe's static NiMainSDM objects (none in the decomp) */ "
+     r'static FUN_00a8a5f0_class fnvnx_init1_NiMainSDM; '
+     r'static void* const fnvnx_init1_NiMainSDM_ctor = fnvnx_init1_NiMainSDM.FUN_00a8a5f0();'),
+]
+
+def r_static_initializers(path, text, stats):
+    """INIT1: static objects whose dynamic initializers the exe has and the decomp lacks (INIT1_SITES, see above)."""
+    rel = path.replace(os.sep, '/')
+    for unit, rx, repl in INIT1_SITES:
+        if not rel.endswith('/src/' + unit): continue
+        text, n = rx.subn(repl, text, count=1)
+        stats['INIT1'] += n
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- FRIEND1
+#
+# `friend class hkpWorld;` in a class body, with hkpWorld declared nowhere before it: MSVC 2008 makes the friend's
+# name visible to ordinary lookup in the enclosing namespace from there on, so the class goes on to use it
+# (`hkpWorld* m_pOwningWorld;`, `virtual void WorldAddedCallback(hkpWorld* world);`) and the class itself is defined
+# further down. C++ (GCC) does not: the friend declaration names the class but does not make it visible, so every
+# later use is "'hkpWorld' does not name a type" (the Havok viewers, hkpContinuousSimulation, hkpCdBody's
+# `friend class hkpCollidable;`). FRIEND1 forward-declares the class in front of the outermost class around the
+# friend declaration, in the same namespace (where the friend declaration puts it), when the name is declared
+# nowhere before: not in the unit's text in front of it, not in the local headers it includes. The class key is
+# that of the class's definition in the unit (a later `union X {..}` takes `union X;`), else the friend's. Only at
+# namespace scope (not in a local class), and not for a name the unit also uses as a typedef or a template, or a
+# template parameter of the enclosing class. Same line count: the declaration joins the line where the class's
+# declaration starts.
+
+FRIEND_CLASS = re.compile(r'(?<![\w>])friend\s+(class|struct|union)\s+([A-Za-z_]\w*)\s*;')
+FRIEND_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)|^[ \t]*#[^\n]*', re.S | re.M)
+DECOR = r'(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*|alignas\s*\([^()]*\)\s*)*'
+
+def _decl_start(masked, brace):
+    """Where the declaration whose body opens at `brace` begins: the first character after the previous `;`, `{` or
+    `}` that is not blank in `masked` (comments, literals and preprocessor lines blanked), so text inserted there
+    stays off a preprocessor line and out of a comment."""
+    at = max(masked.rfind(c, 0, brace) for c in ';{}') + 1
+    return at + len(masked[at:brace]) - len(masked[at:brace].lstrip())
+
+def _friend_declared(view, name):
+    """`name` is declared as a type (or anything else) in `view`, a name view of _visible."""
+    n = re.escape(name)
+    return re.search(r'(?<!friend )\b(?:class|struct|union|enum)\s+%s%s\b(?!\s*<)|\btypedef\b[^;]*\b%s\s*(?:\[[^\]]*\]\s*)?;|'
+                     r'\busing\s+%s\s*=|\bnamespace\s+%s\b' % (DECOR, n, n, n, n), view) is not None
+
+def r_friend_class_visibility(path, text, stats):
+    """FRIEND1: forward-declare a class that a friend declaration names before it is declared (see above)."""
+    if 'friend' not in text: return text
+    found = list(FRIEND_CLASS.finditer(text))
+    if not found: return text
+    masked = FRIEND_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+    spans = prepare.scope_spans(masked)
+    header_views, prefix_views, adds, done = None, {}, {}, set()
+    for m in found:
+        if masked[m.start():m.end()] != m.group(): continue          # in a comment or a string
+        key, name = m.group(1), m.group(2)
+        enclosing = [sp for sp in spans if sp[0] < m.start() < sp[1]]
+        if not enclosing or enclosing[-1][2] != 'class': continue
+        if any(sp[2] not in ('class', 'namespace', 'extern') for sp in enclosing): continue
+        outer = next(sp for sp in enclosing if sp[2] == 'class')
+        at = _decl_start(masked, outer[0])                              # where the outer class's declaration starts
+        if (at, name) in done: continue
+        n = re.escape(name)
+        if re.search(r'\btypedef\b[^;{}]*\b%s\s*;|\btemplate\s*<(?:[^<>]|<[^<>]*>)*>\s*(?:class|struct|union)\s+%s%s\b|'
+                     r'\busing\s+%s\s*=' % (n, DECOR, n, n), masked):
+            continue                                                  # a typedef or a template of that name
+        if re.search(r'\b(?:class|typename)\s+%s\s*[,>=]' % n, masked[at:m.start()]): continue   # template parameter
+        if at not in prefix_views: prefix_views[at] = _strip_closed(masked[:at], NAME_KEEP)
+        if _friend_declared(prefix_views[at], name): continue
+        if header_views is None:
+            parts = []
+            _visible('\n'.join(l for l in text.split('\n') if INCLUDE.match(l)), path, _roots(path), set(), parts, set())
+            header_views = [nv for _, nv in parts[:-1]]
+        if any(_friend_declared(v, name) for v in header_views): continue
+        d = re.search(r'\b(class|struct|union)\s+%s%s\s*(?:final\s*)?(?::[^;{}]*)?\{' % (DECOR, n), masked)
+        adds.setdefault(at, []).append('%s %s;' % (d.group(1) if d else key, name))
+        done.add((at, name))
+    if not adds: return text
+    out, pos = [], 0
+    for at in sorted(adds):
+        out.append(text[pos:at]); out.append(' %s /* fnv-nx FRIEND1 */ ' % ' '.join(adds[at])); pos = at
+        stats['FRIEND1'] += len(adds[at])
+    out.append(text[pos:])
+    return ''.join(out)
+
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+         r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]

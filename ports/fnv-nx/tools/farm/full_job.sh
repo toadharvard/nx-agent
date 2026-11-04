@@ -79,7 +79,11 @@ CROSS_BIN="$(art cross_bin)" LINK_BUILD=$F/build FARM_SRC=$SRC FARM_EXT=$EXT \
 # 3. Pristine MSVC objects for the synthesized boot image (link_job.sh took them for resolve --msvc-code too).
 job_pristine
 [ -n "$PR" ] && ARGS+=(PRISTINE_OBJS="$PR" MSVC_CODE="$PR")
-log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR"
+# 3b. The player's exe, when the owner's copy is on the private branch gamedata/exe: the boots run on it instead of
+# S14's synthesized image (J-0128)
+job_gamedata
+[ -n "$GAME_EXE" ] && { ARGS+=(BOOT_IMAGE="$GAME_EXE"); rm -rf "$F/build/boot/synth"; }   # no stale synth.exe in the publish
+log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; boot image: $NOTE_EXE"
 
 # 4. Guest, emulated boot, host, package on that link (the link stage stays cached: same inputs).
 rc=0
@@ -99,7 +103,7 @@ STUB=$F/build/boot/stub
 rm -rf "$STUB"
 if [ $rc -ne 2 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" ]; then
 	log "stub-fault boot (tests/s5/farm_boot.sh)"
-	IMG=$F/build/boot/synth/synth.exe; [ -f "$IMG" ] || IMG=""
+	IMG=${GAME_EXE:-$F/build/boot/synth/synth.exe}; [ -f "$IMG" ] || IMG=""
 	FARM_LINK_DIR=$F/build/link FARM_GUEST_DIR=$F/build/guest FARM_BOOTS=stub \
 		FARM_UNITS="${TREE:+$TREE/build/units.json}" PY="${PY:-python3}" EMU_TIMEOUT="${EMU_TIMEOUT:-3000}" \
 		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB" $IMG > "$F/stub_boot-$C12.log" 2>&1 \

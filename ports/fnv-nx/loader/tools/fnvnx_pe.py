@@ -83,7 +83,10 @@ class PE:
         fa = self.file_align
         if fa < 0x200 or fa > 0x10000 or fa & (fa - 1) or self.image_base & 0xffff:
             raise PEError('FORMAT', 'alignment/base')
-        if not self.size_of_image or self.size_of_image & 0xfff or self.image_base + self.size_of_image > 1 << 32:
+        # Windows rounds SizeOfImage up to the section alignment (the GOG FalloutNV.exe declares 0x010089e4)
+        if self.size_of_image:
+            self.size_of_image = (self.size_of_image + 0xfff) & ~0xfff
+        if not self.size_of_image or self.image_base + self.size_of_image > 1 << 32:
             raise PEError('FORMAT', 'size of image')
         ndirs = min(u32(opt, 92), 16, (optsize - 96) // 8)
         self.dirs = [(0, 0)] * 16

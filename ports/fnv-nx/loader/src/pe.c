@@ -73,8 +73,11 @@ int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size) {
     if (pe->file_align < 0x200 || pe->file_align > 0x10000 || (pe->file_align & (pe->file_align - 1)))
         return FNVNX_E_FORMAT;
     if (pe->image_base & 0xffff) return FNVNX_E_FORMAT;
-    if (pe->size_of_image == 0 || (pe->size_of_image & 0xfff) ||
-        (uint64_t)pe->image_base + pe->size_of_image > 0x100000000ull)
+    /* Windows rounds SizeOfImage up to the section alignment; the player's FalloutNV.exe (GOG 1.4.0.525) declares
+     * 0x010089e4, its .reloc ending mid-page */
+    if (pe->size_of_image == 0 || pe->size_of_image > 0xfffff000u) return FNVNX_E_FORMAT;
+    pe->size_of_image = (pe->size_of_image + 0xfffu) & ~0xfffu;
+    if ((uint64_t)pe->image_base + pe->size_of_image > 0x100000000ull)
         return FNVNX_E_FORMAT;
     pe->ndirs = nrva;
     if (pe->ndirs > 16) pe->ndirs = 16;

@@ -2641,3 +2641,224 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - R4-3: designed, not implemented. resolve asks the probe for "base typeinfo as unit U sees it", vtables.py
     synthesizes it, and apply retargets to it. It needs probe changes, so it can only be measured on the farm.
 * **verified** - All 7 link suites pass.
+
+### J-0120 | 2026-11-04 | stream: S1-compile,S13-difffuzz | status: wip | parent: J-0107,J-0117,J-0119
+
+* **did** - S1 (second agent):
+  - `329c125` VTBL1 A660A0Map (loader map 0x011f4784, vftable 0x0109bf4c): the NiTMapBase slots 1-6 are declared in
+    MSVC order. All six stay vslot traps, because the decomp has none of their functions.
+  - `c3875ba` FRIEND1 (new, neutral): forward-declares a class that a `friend class X;` makes visible in MSVC.
+  - `a8f2a99` INIT1 (new, platform): one static NiMainSDM in blk_00a80000_o2.cpp, run by `.init_array` after
+    boot_banner. known_faults drops its `before-winmain` entry.
+  - `1563cb8`: SSE1 lane access, SSE2 `T(_mm_x)(...)` prototypes and local intrinsic definitions, `_CRT_ALIGN` as a
+    class-head decoration, and tree-view types in commctrl.h.
+  - `80ddb66`: CTOR1's gate differences are marked by design.
+* **measured** - S1 local minimal trees: 15 units to 0 errors, hkgpmesh 7 -> 3, 175 errors fewer, none worse. The next
+  census is expected near 50 failing (was 70).
+* **found** - No slot functions exist in the decomp for any of the 7 boot-hit image vtables (INISettingCollection and
+  derived, BSSimpleArray, IOFreeQueue).
+  - GameSettingCollection 0x0101212c has slots 5, 7 and 10 in the decomp. Slot 1 (Add) has only an interface-position
+    candidate, 0x00404de0, and stays a trap.
+  - With the player's exe, these faults should largely go away: the image vftables then hold real x86 slot addresses,
+    and S3's code-pointer pass rewrites the ones it can validate to native code. The synthesized image has zeros there.
+    The exe is therefore the main lever for the S1:virtuals class.
+* **found** - Two full prepares of the same tree differed in one GAME1 edit (activeeffect_local.h, 31 vs 32 edits).
+  This may be a hash-order dependence; prepare runs without a fixed PYTHONHASHSEED. Unproven, for S1.
+* **did** - S13 `2a77e23` difffuzz-11 (HARNESS bump).
+  - CRT provider addresses that are harness builtins run as builtins on the oracle too.
+  - Adaptive follow answers call-count divergences.
+  - New causes: `native-undefined` (hard, S1/S2c: the native calls a name the link binds to nothing, e.g.
+    `NiPoint3_helper::operator*`, declared-only destructors) and `vptr-unpaired` (soft, S2c).
+  - Of the 16-sample triage per bucket, most were harness gaps. The real port classes have gone to S1b (this differs,
+    uninitialised arguments, an out-pointer, libcall length) and S1 (a layout case in 00600700).
+* **found** - The owner's game-data download (`curl ... | bash`) failed with `Recv failure: Connection reset by peer`
+  at the TLS handshake, so nothing was downloaded. Freed 6 GB of retired scratch to make room (9.5 GB free; GOG FNV is
+  about 10 GB).
+
+### J-0121 | 2026-11-04 | stream: farms | status: wip | parent: J-0101
+
+* **measured** - Census at b152bec (farm1, and try1of4 on S13's wip): 2,917 of 2,978 units clean, 61 failing (was
+  2,908/70).
+* **found** - The hourly farm check-in can never see a dead runner. Its command, `pgrep -f tools/farm/runner.sh`,
+  always matches the agent's own `bash -c` wrapper, whose command line contains the pattern.
+  - link1 (Opus) noticed this at 10:28 and restarted its runner, which had stopped.
+  - The Haiku farms are likely to read the self-match as "alive" and do nothing. That defeats exactly the rate-limit
+    recovery the check-ins were made for.
+  - The fix is a self-safe pattern, `pgrep -f '[t]ools/farm/runner.sh'`.
+  - A routine's prompt can be changed only from the session it posts into, so this session cannot edit the 48 check-ins.
+    Deleting and recreating them needs the owner's explicit request.
+* **next** - The owner decides: recreate the 48 check-ins with the fixed command, or another remedy.
+
+### J-0122 | 2026-11-04 | stream: farms | status: wip | parent: J-0121
+
+* **did** - The owner asked to recreate the 48 hourly farm check-ins. They now run
+  `pgrep -f '[t]ools/farm/runner.sh'`; the brackets keep pgrep from matching the agent's own shell. The old 48 are
+  deleted.
+* **measured** - First farm link with today's fixes, `link/fa883870e756` (objects of b152bec, FTOI2):
+  - trial link: 3,824 objects, **4,468 undefined** (was 5,080), 0 multiple definitions;
+  - C++ by name: 3,172 (was 3,762);
+  - census at fa88387: 2,917/2,978 clean, 312 errors (was 385).
+* **did** - Freed disk for the owner's game data.
+  - Deleted the scratch of retired streams and of the agents the owner stopped (S11, S2c, S1b, V1, S5). That included
+    three separate Wine prefixes.
+  - S1's hand-vptr work lists are kept in scratchpad/keep/.
+  - Free space is now 22 GB (was 3.6 GB).
+
+### J-0123 | 2026-11-04 | stream: S1-compile,farms | status: wip | parent: J-0120,J-0122
+
+* **did** - S1 `a2b3999` VLIT1 now stores the image symbol `&DAT_0101212c` instead of a raw constant.
+  - It adds `extern "C" char DAT_0101212c;` in front of the storing function and binds `_DAT_0101212c` through the BIND1
+    hook.
+  - FRIEND1 and VLIT1 declarations now start at the declaration's first non-blank character, never in front of an
+    `#include` on the same line.
+  - New test: every rule under PYTHONHASHSEED 1, 2 and 3.
+* **found** - prepare is deterministic: two full prepares under PYTHONHASHSEED=1/2 give identical trees and stats. The
+  31-vs-32 GAME1 count came from a baseline copy without `platform/crt/crt_symbols.tsv`. A missing file means no GAME1
+  float edits, silently.
+* **did** - S1 `56ae24d` TAIL1 writes `typename` before a qualified last base. hkgpconvexhull and both hkgpmesh_ehsc
+  variants go to 0, hkgpmesh 3 -> 1. 17 of the 131 affected units were checked locally; the try farm checks the rest.
+  The next census is expected near 2,920/2,978. tests/s1: 0 failed. tests/s11: ok.
+* **found** - The owner's backup-server probe also fails, and the cause is this environment's egress, not the server.
+  - Every tunnel to a non-443 port is closed after 2-7 s, with 517 B sent and 39 B received. That holds for
+    31-77-127-46.sslip.io:8443, portquiz.net:8443 and portquiz.net:8080 alike.
+  - Port 443 passes. On 31-77-127-46.sslip.io port 443 answers in plain HTTP, without TLS.
+  - Fix: serve over HTTPS on 443, or widen the environment's network access.
+* **next** - S2c (stopped by the owner): recognise VLIT1's `m_p = &DAT_0101212c` store as a vptr store and map it to
+  `_ZTV21GameSettingCollection`. S1: STL1 `_Container_base_aux_alloc_real` (blk_00b20000_od_ob1_rtm, 16),
+  blk_00ac0000_od_ob1 (18), the rest of the census tail, then S13's FALL1/uninit/split-global classes.
+
+### J-0124 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0123
+
+* **measured** - Census at ea77051 (farm1, and try2of4 on S1's wip): **2,932 of 2,978 clean, 46 failing** (was 2,917/61).
+  TAIL1 typename (56ae24d) is not in it yet.
+* **found** - blk_00b20000_od_ob1_rtm (16 errors) is MSVC `vector<void*>`'s copy constructor (0x00b355d0), written
+  against `<vector>` internals.
+  - `_SECURE_SCL` = 1, by the unit's own hand-written vector copy (AsContainer/AsVector/AsIterBase):
+    `_Myownedaux`, `_Alaux`, then `_Alval`/`_Myfirst`/`_Mylast`/`_Myend`, and iterators carrying `_Myaux`.
+  - The unit needs `_Container_base_aux_alloc_real<A>` (with `_Container_base_aux`, `_Aux_cont`), `_Destroy_range`
+    and `stdext::unchecked_uninitialized_copy`. It also needs a two-argument vector const_iterator, which libstdc++
+    cannot give.
+* **decided** - Option (a): STL1 gets a checked-iterator shim type modelled on MSVC's `_Vector_const_iterator`
+  (`_Myaux`, `_Myptr`, two-argument constructor). It is used only in units that derive from
+  `_Container_base_aux_alloc_real`, and its layout is the one the unit's own copy proves.
+* **next** - A fresh S1 agent (the third ran out of context): STL1 per this decision; blk_00ac0000_od_ob1 (18); the
+  census tail, with the 114 TAIL1 units checked on the farm census of 446464b; then S13's FALL1 falloff, uninit and
+  split-global classes.
+
+### J-0125 | 2026-11-04 | stream: farms,S5-boot | status: wip | parent: J-0124
+
+* **found** - The guest and boot in `link/fa883870e756` are the previous commit's, not this link's.
+  - `guest/fnvnx.elf` is byte-identical to the one published with 9844d8d's link.
+  - The cause: full_job.sh runs link_job.sh, and link_job.sh publishes as soon as the link ends. At that point the
+    build directory still holds the last job's guest and boot, which `stage_ok` accepts. full_job.sh's second publish,
+    after `make BOOT=1`, replaces them, so the stale copy lives for 20-40 min. Anyone reading the branch meanwhile
+    (fuzz farms, this orchestrator) sees the old boot.
+* **found** - The boot fault after WinMain on that guest is a vtable too short for its call site.
+  - The call: MemoryManager FUN_00aa3e40 +0xac calls slot 2 of a per-thread heap of class `FUN_00aa7400`
+    (a `HeapBlockBase`).
+  - The guest's `_ZTV12FUN_00aa7400` has one slot, a vtrap. Slot 2 therefore reads `_ZTI12FUN_00aa7400`+4, the type
+    name string 0x3135dec9, hence the fetch fault.
+  - fa88387's link synthesizes that vtable with 14 slots (zz_vt of blk_00aa0000_od_ob1_variant, S2c J-0108), so the
+    first boot on a guest of this link should pass this point.
+* **did** - lib_job.sh `stage_after`: publish_link copies the guest only when its stage record is not older than the
+  link's, and the boot only when it is not older than the guest's. Cached stages rewrite their record, so a guest
+  cached on the same link still qualifies. Test: tests/farm/test_stage_after.sh (ok).
+* **found** - S15's multicore prototype (interrupted by the owner, no commits) is left uncommitted in its worktree.
+  - Contents: tests/s15/mtqemu, a QEMU host and an ILP32 guest with a happens-before race checker over the real
+    platform/win32 layer, plus tools/link/overrides/spinlock_0040fba0.c, a release-store RecursiveSpinLock::Unlock.
+  - It builds, but under qemu-aarch64 it prints nothing in 300 s, and PERF.md 6.5/6.6 and the overrides.tsv row were
+    never written. Not merged.
+* **next** - full1's boot on fa88387's own guest (due ~11:30). The fuzz farms take FTOI2 objects with the next link.
+
+### J-0126 | 2026-11-04 | stream: S5-boot,S1-compile | status: wip | parent: J-0125
+
+* **measured** - Census at ff0fd85 (farm1): **2,935 of 2,978 clean, 43 failing, 144 errors** (was 2,932/46, 312
+  errors).
+* **measured** - full1 on fa88387, its own guest (3,811 undefined symbols bound to traps, was 4,423), boot on S14's
+  synthesized image.
+  - WinMain is entered. The old fetch fault in MemoryManager FUN_00aa3e40 is gone: the call now reaches a clean trap,
+    "virtual function defined nowhere: `_ZN12FUN_00aa74002v2Ev` (slot 2 of `_ZTV12FUN_00aa7400`)".
+  - The stub-fault boot (known faults stubbed, the memory manager on malloc) runs further into WinMain. Its path is
+    0x0086a850+0x3f8, then PathList FUN_00afdda0, then `BSSimpleArray<NavMeshInfo*>::Add`, then
+    `FUN_00761540_cls::FUN_00761540`. There, slot 1 of image vtable 0x010472d0 is 0.
+* **found** - Both stops are image vftable slots that only the player's FalloutNV.exe can fill.
+  - The decomp declares `FUN_00aa7400 : HeapBlockBase` with the single virtual `v00`. The 14-slot vftable shape comes
+    from the image, but the slot targets beyond the declared ones are not in the MSVC build of the pristine decomp.
+  - The same holds for 0x010472d0. Per the J-0118 decision, these stay traps: binding them by analogy is not
+    evidence.
+  - The boot frontier on the synthesized image is now at the real executable (D3/S3, D12's "still needs the exe").
+* **next** - The owner's game data. The download needs HTTPS on 443 or wider network access for this environment
+  (J-0123).
+  - Meanwhile, S1 on the compile tail (43 units).
+  - Then a boot that also stubs image-vtable slots without a target, to see the frontier past them (S5's
+    known_faults path).
+
+### J-0127 | 2026-11-04 | stream: S3-loader,S5-boot,data | status: wip | parent: J-0126
+
+* **correction** - J-0126 cites "the J-0118 decision" on binding vftable slots by analogy. That decision is J-0105.
+* **did** - The owner's game data is on the orchestrator's machine only, never committed.
+  - Source: the owner's GOG copy, via a browser login with lgogdownloader built from source. Ubuntu's 3.12 has no
+    `--browser-login`.
+  - Fallout: New Vegas Ultimate Edition 1.4.0.525(a), offline installer, unpacked with innoextract: 9.5 GB.
+  - `FalloutNV.exe` is 16,084,808 bytes, sha256 89e70204...d11dd0fe.
+* **measured** - The exe's layout is the one the decomp assumes.
+  - ImageBase 0x400000. `.text` 0x401000, `.rdata` 0x00fdf000, `.data` 0x01183000, `.tls` 0x01272000, then CONST,
+    `.rsrc`, `.reloc`. No `.bind` section, so no SteamStub.
+  - WinMain 0x0086a850 opens with `push ebp; mov ebp,esp; sub esp,0x378`, then the security cookie.
+* **found** - S3's loader refused the exe as "not a well-formed PE32": SizeOfImage is 0x010089e4, because .reloc ends
+  mid-page.
+* **did** - `8b24dc6`: loader/src/pe.c and loader/tools/fnvnx_pe.py round SizeOfImage up, as Windows does. Test:
+  tests/s3 test_unaligned_size_of_image (22 ok).
+* **next** - The first guest built at >= 8b24dc6 (full1), then the emulated boot on the real exe on this machine.
+  - Game data cannot reach the farms through git. The owner chooses agent-only storage: their HTTPS server on 443,
+    a private bucket with a read-only key in the environment, or the exe alone in the private artifacts repository.
+
+### J-0128 | 2026-11-04 | stream: farms,data | status: wip | parent: J-0127
+
+* **decided (owner)** - The owner's game copy and their GOG login may be shared with the agents. Speed matters more
+  here than keeping the login on one machine.
+* **did** - Two agent-only branches in the private artifacts repository. Neither is ever copied into this public
+  repository, a published link branch or a report.
+  - `gamedata/exe`: the owner's FalloutNV.exe plus a sha256 file.
+  - `gamedata/gog`: lgogdownloader's galaxy_tokens.json. A farm that needs `Data/` (9.4 GB) downloads it from GOG
+    itself instead of passing it through git.
+* **did** - lib_job.sh `job_gamedata`: fetches gamedata/exe once and checks its sha256. full_job.sh then boots on
+  `BOOT_IMAGE=<the exe>`, for both the raw and the stub-fault boot, instead of S14's synthesized image.
+  - No synth.exe is published beside such a boot.
+  - FARM_REAL_EXE=0 keeps the synthesized image.
+  - Test: tests/farm/test_job_gamedata.sh (ok).
+* **next** - full1's first job at a head with this and the J-0127 loader fix: the first emulated boot on the real exe.
+  It shows the frontier past the image-vftable traps of J-0126.
+
+### J-0129 | 2026-11-04 | stream: orchestration | status: wip | parent: J-0128
+
+* **decided (owner)** - All streams run at once. The target is a first console launch that our own metrics call a
+  near-certain success, and fast: a native renderer, plus scene and frame comparison against the real game.
+* **did** - Streams running now. Each is a worktree agent that reports back; the orchestrator merges.
+  | stream | owns | first goal |
+  |---|---|---|
+  | S1-compile | prepare rules | STL1, blk_00ac0000, the 43 failing units, then S13's FALL1/uninit/split-global |
+  | S2c-link | fnvlink, vtables | image vftable slots from the player's exe; undefined 4,468 -> boot-relevant 0 |
+  | S5-boot | emulated boot | boot on the real exe; milestones WinMain / menu / first frame / first cell |
+  | S1b-patches | per-site ABI | pop-mismatch families, S1b fuzz divergences, ABI manual/x86-inconsistent |
+  | S11-equivalence | MSVC gate | 1,067 differing functions -> fixed or by design, 0 unexplained |
+  | S15-perf | threads, frame cost | mtqemu race checker, core placement, per-frame budget on real data |
+  | S6n-native-render | deko3d renderer | backend seam (deko3d console, Vulkan/lavapipe host), menu and first cell |
+  | S16-compare (new) | reference vs port | real exe under Wine for reference frames and scene state; PSNR/SSIM/FLIP gates |
+  | R0-gates (new) | readiness scorecard | tools/gates/ready.py over every farm report; docs/READINESS.md |
+  | V1 | verification (D14) | TAIL1, stage_after, loader SizeOfImage, job_gamedata, FTOI2, fastcall non-POD |
+  - The farms (census, compile, link, full, static, eq, fuzz x26) keep running on the head as before.
+* **next** - Each stream's own entry, with `parent: J-0129`.
+
+### J-0130 | 2026-11-04 | stream: orchestration,S6n-native-render | status: wip | parent: J-0129
+
+* **correction** - S6n-native-render is the separate render machine, not a local agent. It works on branch
+  `claude/port-nsw-render`; its last report is render-006, selfcheck PASS.
+  - It was blocked on three things: R2 vftable addresses from FalloutNV.exe, the `shaderpackage*.sdp` files, and a
+    console run.
+  - The local duplicate started in J-0129 was stopped before it committed anything.
+* **did** - The owner's 16 `Data/Shaders/shaderpackage*.sdp` files and a SHA256SUMS file are on the private branch
+  `gamedata/shaders`, next to `gamedata/exe` and `gamedata/gog`. The render machine has these branches, and it is
+  asked for a "render a captured frame or scene to PNG" host entry point for S16-compare.
+* **next** - Render machine: R2 from the exe, the shader packages, then that entry point. The console run waits for
+  a solid build.

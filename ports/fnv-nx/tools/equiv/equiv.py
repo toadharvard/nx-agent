@@ -96,6 +96,8 @@ CLASSES = {
     'ALLOC1': 'platform',       # drops untagged TU-local replacements of the global operator new/delete
     'FTOL1': 'platform',        # fnvnx_ftol2(expr): neutral with #define fnvnx_ftol2(x) ((__int64)(x)) under MSVC
     'BIND1': 'neutral',         # POST hook: units.json binds a stand-in member the unit uses to the exe's address
+    'FRIEND1': 'neutral',       # `class X;` in front of a class whose `friend class X;` MSVC made visible
+    'INIT1': 'platform',        # a static object whose initializer the exe has and the decomp lacks (NiMainSDM)
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}

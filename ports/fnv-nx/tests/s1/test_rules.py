@@ -354,6 +354,33 @@ check('DECL1 drops a CRT prototype that ends in a // comment',
 check('SSE1 elaborated __m128 references',
       prepare.r_sse_local_types('x.cpp', 'typedef union __m128 hkQuadReal;\nvoid f(struct __m128* p);\n', Counter()),
       ['typedef __m128 hkQuadReal;', 'void f(__m128* p);'])
+got = prepare.r_sse_local_types('x.cpp', 'union __declspec(intrin_type) __declspec(align(16)) __m128\n{\n    struct\n    {\n'
+                                '        float x, y, z, w;\n    } lanes;\n};\nfloat f(__m128 v, __m128* p) { return v.lanes.x '
+                                '+ p->lanes . w + g(v).lanes.y; }\n', Counter())
+check('SSE1 named lane struct of a removed local __m128: v.lanes.x -> element access', got,
+      ['((float*)&(v))[0] + ((float*)(p))[3] + ((float*)&(g(v)))[1]; }'], ['lanes'])
+got = prepare.r_sse_local_types('x.cpp', 'union __declspec(intrin_type) __m128\n{\n    struct { float x, y, z, w; } lanes;\n};\n'
+                                'struct Q { int lanes; };\nfloat f(__m128 v) { return v.lanes.x; }\n', Counter())
+check('SSE1 lane struct: left alone when the unit declares another member of that name', got, ['v.lanes.x'])
+check('SSE2 drops `T(_mm_x)(...)` prototypes (no space before the parenthesized name)',
+      prepare.r_sse_local_protos('x.cpp', 'namespace P {\nextern "C"\n{\n    ::__m128(_mm_load_ss)(const float* p);\n'
+                                 '    ::__m128(_mm_sub_ps)(::__m128 a, ::__m128 b);\n}\n}\n', Counter()),
+      ['namespace P {\n\n}'], ['_mm_load_ss', 'extern'])
+got = prepare.r_sse_local_protos('x.cpp', 'int a;\nstatic __m128 _mm_set1_ps(const float& f) {__m128 a=_mm_load_ss(&f);\n'
+                                  'return _mm_shuffle_ps(a,a,0);}\nstruct S { __m128 _mm_x(int) { return 0; } };\nint b;\n',
+                                  Counter())
+check('SSE2 drops a local intrinsic definition at namespace scope, same line count', got,
+      ['int a;\n/* fnv-nx SSE2: local intrinsic definition removed */\n\nstruct S { __m128 _mm_x(int) { return 0; } };'],
+      ['_mm_set1_ps'])
+check('SSE4 (_mm_x)( after a name keeps them apart',
+      prepare.r_sse_qualified('x.cpp', 'T(_mm_load_ss)(p); f((_mm_add_ps)(a, b));\n', Counter()),
+      ['T _mm_load_ss(p); f(_mm_add_ps(a, b));'])
+check('FALL1 _CRT_ALIGN(16) in a union head is a class head, not a function',
+      run(s1.r_falloff_traps, 'typedef union __declspec(intrin_type) _CRT_ALIGN(16) Q\n{\n    float f[4];\n} Q;\n'), (), [TRAP])
+check('SSE1 qualified elaborated __m128 references (`union ::__m128`)',
+      prepare.r_sse_local_types('x.cpp', 'typedef union ::__m128 hkQuadReal;\nunion :: __m128;\nvoid f(struct N::__m128i* p);\n'
+                                'union __m128_like { int a; };\n', Counter()),
+      ['typedef __m128 hkQuadReal;\n\nvoid f(__m128i* p);', 'union __m128_like { int a; };'], ['::'])
 
 check('DECL1 drops a prototype whose head is on the line above',
       prepare.r_platform_protos('/x/src/a.cpp', 'int a;\nextern "C" __declspec(dllimport) HANDLE\n    __stdcall CreateThread(void*, '
@@ -394,6 +421,11 @@ check('GOTO1 also splits SSE vectors, const scalars (dropping their const) and p
        'static const int k = 3;'])
 
 # ---- TAIL1
+check('TAIL1 writes typename in front of a qualified (possibly dependent) base',
+      run(s1.r_msvc_base_layout, 'template <class V, class B> struct T : public List<V, B>::Item\n{\n    int a;\n};\n'
+          'struct U : N::Base\n{\n};\nstruct W : Base<N::X>\n{\n};\n'),
+      ['FNVNX_MSVC_BASE_END(typename List<V, B>::Item)', 'FNVNX_MSVC_BASE_END(typename N::Base)',
+       'FNVNX_MSVC_BASE_END(Base<N::X>)'])
 check('TAIL1 names the last base without its access specifier',
       run(s1.r_msvc_base_layout, 'class D : public NiMemObject\n{\n  public:\n    int x;\n};\n'
           'struct E : B, public T<int, char>\n{\n    int y;\n};\n'),
@@ -499,6 +531,45 @@ check('VTBL1 the FUN_00aa7400 heap gets the AbstractHeap slots, same line count'
       ['virtual void v00(); /* fnv-nx VTBL1', 'virtual void v2();', 'virtual void v13(void* value); };', '\nint z;'])
 check('VTBL1 FUN_00aa7400 keeps the line count', str(got.count('\n')), ['8'])
 
+got = run(s1.r_stand_in_interfaces, 'class M : public MB\n{\n};\nclass A660A0Map : public A660A0MapBase\n{\n  public:\n'
+          '    __forceinline A660A0Map() throw() : A660A0MapBase(59)\n    {}\n    virtual ~A660A0Map();\n};\nint z;\n',
+          '/x/src/gamebryo2.2/corelibs/nimain/nistream.cpp')
+check('VTBL1 A660A0Map: NiTMapBase slots 1-6 after the destructor, declared only', got,
+      ['virtual ~A660A0Map(); /* fnv-nx VTBL1', 'virtual unsigned int KeyToHashIndex(const char* key) const; '
+       'virtual bool IsKeysEqual(const char* key1, const char* key2) const; virtual void SetValue(',
+       'virtual void ClearValue(void* item); virtual void* NewItem(); virtual void DeleteItem(void* item); };',
+       '\nint z;'], ['{ return', 'FUN_'])
+check('VTBL1 A660A0Map keeps the line count', str(got.count('\n')), ['11'])
+got = run(s1.r_stand_in_interfaces, 'class A660A0Map : public A660A0MapBase\n{\n    virtual ~A660A0Map();\n};\n',
+          '/x/src/gamebryo2.2/corelibs/nimain/nistream_rtm_variant.cpp')
+check('VTBL1 A660A0Map: only in nistream.cpp', got, [], ['VTBL1'])
+
+# ---- FRIEND1
+src = ('namespace N {\nint a;\nclass A : public B\n{\n    friend class W;\n    W* m_w;\n};\nclass W { int x; };\n}\n'
+       'struct T;\nclass D { friend struct T; };\ntypedef int Q;\nclass E { friend class Q; };\n'
+       'void f() { class L { friend class M; }; }\n// class X { friend class Z; };\n'
+       'class G { friend class H; class I { friend class H; }; };\nunion H { int a; };\n'
+       'template <class P> class K { friend class P; };\ntemplate <class T2> class R;\nclass S { friend class R; };\n')
+got = run(s1.r_friend_class_visibility, src, '/nonexistent/src/f.cpp')
+check('FRIEND1 forward-declares a friend class declared nowhere before', got,
+      ['int a;\n class W; /* fnv-nx FRIEND1 */ class A : public B', '}; }\n// class X { friend class Z; };\n union H; /* fnv-nx FRIEND1 */ class G {'],
+      ['class T; /*', 'class Q; /*', 'class M; /*', 'class Z; /*', 'class P; /*', 'class R; /*', 'union H; union H;'])
+check('FRIEND1 two declarations only (not T, Q, M, Z, P, R)', str(got.count('fnv-nx FRIEND1')), ['2'])
+check('FRIEND1 keeps the line count', str(got.count('\n')), [str(src.count('\n'))])
+got = run(s1.r_friend_class_visibility, '#include "a.h"\nclass A\n{\n    friend class W;\n    W* m_w;\n};\n', '/nonexistent/src/f.cpp')
+check('FRIEND1 at the start of a file stays off the #include line', got,
+      ['#include "a.h"\n class W; /* fnv-nx FRIEND1 */ class A\n'])
+
+# ---- INIT1
+got = run(s1.r_static_initializers, 'int a;\n// @fnv 0x00a8a5f0\nvoid* FUN_00a8a5f0_class::FUN_00a8a5f0()\n{\n'
+          '    void* old = (void*)DAT_011f5b84;\n    if (!old)\n    {\n        g();\n    }\n    return this;\n}\nint b;\n',
+          '/x/src/staging/blk_00a80000_o2.cpp')
+check('INIT1 one static NiMainSDM after its constructor, same line count', got,
+      ['    return this;\n} /* fnv-nx INIT1', 'static FUN_00a8a5f0_class fnvnx_init1_NiMainSDM; static void* const '
+       'fnvnx_init1_NiMainSDM_ctor = fnvnx_init1_NiMainSDM.FUN_00a8a5f0();\nint b;\n'], ["\\'"])
+check('INIT1 only in the constructor\'s unit', run(s1.r_static_initializers, '// @fnv 0x00a8a5f0\nvoid* '
+      'FUN_00a8a5f0_class::FUN_00a8a5f0()\n{\n}\n', '/x/src/staging/blk_00a80000_o2_noehsc_variant.cpp'), [], ['INIT1'])
+
 # ---- ALIGN1
 got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
           '__declspec(align(16))class H:public C\n{\n};\n__declspec(align(16))struct TAU32;\n'
@@ -598,7 +669,12 @@ got = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), '#include "x.h"\nvoid
 got2 = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), 'void f() { m_p = "@K@"; g("text"); }\n', _st)
 s1._VLIT = _saved
 check('VLIT1 stores the vftable address the unit binds the misread literal to; ambiguous sites are listed', got + got2 + ' %d' % _st['VLIT1-LIST'],
-      ['m_p = (char*)0x0101212c /* fnv-nx VLIT1: "@K@" */;', 'void f() { m_p = "@K@"; g("text"); }', ' 1'])
+      ['#include "x.h"\nextern "C" char DAT_0101212c; /* fnv-nx VLIT1 */ void* F::Init()\n',
+       'm_p = (char*)&DAT_0101212c; /* fnv-nx VLIT1: "@K@" */\n', 'void f() { m_p = "@K@"; g("text"); }', ' 1'])
+check('VLIT1 keeps the line count', str(got.count('\n')), ['6'])
+check('VLIT1 binds its DAT name in the unit (BIND1 hook)', repr(sorted(s1.VLIT1_BINDS)),
+      ["('src/n.cpp', '_DAT_0101212c', '0x0101212c')"])
+s1.VLIT1_BINDS.clear()
 
 # ---- SSE2 with the decomp's own name for __m128
 got = prepare.r_sse_local_protos('/x/src/a.cpp', 'typedef __m128 ClosestPointQuad;\nClosestPointQuad _mm_shuffle_ps(ClosestPointQuad, ClosestPointQuad, unsigned int);\n'
@@ -616,6 +692,39 @@ check('SSE2 drops (_mm_x)(...) prototypes, SSE4 unqualified using-declarations o
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
+
+# ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
+# reach the output: tree hashes and incremental compiles depend on it)
+_DET = r'''
+import hashlib, os, sys
+from collections import Counter
+sys.path.insert(0, sys.argv[1])
+import prepare
+rules = prepare.RULES + prepare.load_stream_rules()
+src = open(sys.argv[2]).read()
+h = hashlib.sha256()
+for rule in rules:
+    st = Counter()
+    out = rule('/nonexistent/src/staging/blk_00aa0000_o2.cpp', src, st)
+    h.update(rule.__name__.encode() + b'\0' + out.encode('utf-8', 'surrogateescape') + repr(sorted(st.items())).encode())
+print(h.hexdigest())
+'''
+_dd = tempfile.mkdtemp()
+_snip = os.path.join(_dd, 'snippet.cpp')
+open(_snip, 'w').write(
+    'namespace N {\nclass A { friend class W; friend class V; W* w; V* v; };\nclass W {}; class V {};\n}\n'
+    'typedef union ::__m128 Q;\nextern "C" ::__m128(_mm_load_ss)(const float* p);\nunion __declspec(intrin_type) __m128 '
+    '{ struct { float x, y, z, w; } lanes; };\nfloat f(__m128 v) { return v.lanes.x + v.m128_f32[1]; }\n'
+    'struct S { int* vtbl; S() { vtbl = 0; } virtual ~S(); };\nint g(int a) { if (a) return 1; }\n'
+    'enum E { E_A = 0x80000000 };\nvoid h(va_list ap) { int i = va_arg(ap, int); }\n')
+_hashes = set()
+for _seed in ('1', '2', '3'):
+    _r = _subprocess.run([sys.executable, '-I', '-c', _DET, TOOLS, _snip], capture_output=True, text=True,
+                         env=dict(os.environ, PYTHONHASHSEED=_seed))
+    _hashes.add(_r.stdout.strip() or 'error: ' + _r.stderr[-300:])
+check('determinism: all rules give the same output under PYTHONHASHSEED 1, 2, 3', ' | '.join(sorted(_hashes)),
+      [], ['error', ' | '])
+_shutil.rmtree(_dd, ignore_errors=True)
 
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

@@ -84,7 +84,7 @@ DECL1-MATHNS, which is newer than these heads. Per rule, ranked by code function
 
 | rule | code | retarget | eh | no-build | owner |
 |---|---:|---:|---:|---:|---|
-| `CTOR1` | 58 | | 31 | | S1 |
+| `CTOR1` | 58 | | 31 | | by design (S1: the placement form's null check, see the rule table) |
 | `STATIC1` | 23 | | | | S1 (link semantics: reloads of an external variable) |
 | `DECL1` | 9 | 155 | 4 | 36 | S1; retargets: CRT wrappers the link binds by address (S2) |
 | `XINC1` | 8 | | | | S1b |
@@ -147,7 +147,7 @@ above (round 8).
 | `EXC1` | neutral (claim) | MSVC 2008 never enforced `throw()`; but it is an optimizer hint there | as is |
 | `NEW2` | neutral | `<new>` defines the placement forms identically | real `<new>` |
 | `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
-| `CTOR1` | neutral | explicit constructor call = placement new of the same class at the same address | real `<new>` |
+| `CTOR1` | neutral (by design: the code differences are the placement form's) | explicit constructor call = placement new of the same class at the same address. `<new>`'s placement `operator new` is `throw()`, so MSVC null-checks the pointer before the constructor, and at `/Od` calls the placement function instead of inlining it (the gate's 58 code + 31 EH functions, e.g. 0x009cff10, 0x0092eb50, 0x007f9840). Standard C++ has no other way to construct in place, and for a non-null `this` (every decomp site constructs into an object it holds) the behaviour is the same | real `<new>` |
 | `LINK1` | neutral | C and C++ linkage of a global variable name the same symbol under Itanium | data names bound by variable name |
 | `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables; a namespace static bound by its plain name (`_s_fSpinTime`) gets C linkage in place, an uninitialised scalar / pointer one declared only (the image's variable) | variable bound by the recipe's address |
 | `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars | as is |
@@ -163,12 +163,14 @@ above (round 8).
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
 | `DTOR1` | neutral | declares `template <> NiPointer<T>::~NiPointer();` after a unit's includes for member pointees T it never completes (with DecRefCount): GCC's key-function vtable would instantiate it | MSVC never instantiated it in those units |
-| `VTBL1` | platform | the listed stand-in polymorphic classes get their full virtual interface in MSVC slot order, slots forwarding to the decomp's functions for them (BSNiAllocator 7 of 10 known, NiStandardAllocator 8 of 10; StdAllocator's destructor is the plain slot 0 it is in MSVC's vftable; docs/PATCHES.md lists the slots that need the exe) | the native vtable has the slots the game calls; MSVC's vftable of the stand-in grows |
+| `VTBL1` | platform | the listed stand-in polymorphic classes get their full virtual interface in MSVC slot order, slots forwarding to the decomp's functions for them (BSNiAllocator 7 of 10 known, NiStandardAllocator 8 of 10, the FUN_00aa7400 heap's AbstractHeap slots and the NiStream loader map A660A0Map's NiTMapBase slots declared only; StdAllocator's destructor is the plain slot 0 it is in MSVC's vftable; docs/PATCHES.md lists the slots that need the exe) | the native vtable has the slots the game calls; MSVC's vftable of the stand-in grows |
 | `ALIGN1` | neutral | `__declspec(align(n)) struct S` -> `struct __declspec(align(n)) S` in front of a class definition or forward declaration; MSVC aligns the type in both positions, GCC only behind the class key | same type alignment and layout as MSVC (S12 f8 ALIGN-IGNORED) |
 | `ENUM2` | neutral | an enum with an enumerator literal in [2^31, 2^32) gets MSVC's underlying type written out, `enum E : int {`, and `(int)` on those literals | MSVC's type and values (0x80000000 is INT_MIN there); GCC chose unsigned int (S12 f8 ENUM-UNSIGNED) |
 | `BIND1` | neutral | prepared build/units.json: a stand-in member / variable the unit uses but does not bind gets the address the decomp shows it has (MemoryManagerAA3880::Allocate -> 0x00aa3e40 on 0x011f6238, via the unit's TableBaseAA3880 -> 0x00aa47e0) | no source change (a POST hook of s1_compile.py, like S1b's units.json fix, so not in the rule table); the link binds the name as the exe's code does |
 | `VA2` | neutral | `va_arg(ap, E)` with an enum E -> `(E)va_arg(ap, int)`: the promoted int the caller passed, read as MSVC read it (GCC traps on the enum form) | same value |
-| `VLIT1` | platform | a 1-3 character string literal stored with `=` whose bytes are a defined function's address (a vftable slot 0 read as text) -> the vftable address the unit's only `$SG` binding gives (nitmapbase.cpp `"@K@"` -> 0x0101212c) | MSVC stored that address; the pristine build stored a string |
+| `VLIT1` | platform | a 1-3 character string literal stored with `=` whose bytes are a defined function's address (a vftable slot 0 read as text) -> the vftable address the unit's only `$SG` binding gives (nitmapbase.cpp `"@K@"` -> 0x0101212c), stored as `&DAT_<addr>` with a C declaration of that image symbol in front of the function and its `_DAT_<addr>` bound in the unit (BIND1 hook), so the link can map it like any hand-stored vptr | MSVC stored that address; the pristine build stored a string |
+| `FRIEND1` | neutral | `class X;` in front of the outermost class around a `friend class X;` when X is declared nowhere before (MSVC 2008 made the friend's name visible in the enclosing namespace; GCC does not) | same class, same names |
+| `INIT1` | platform | a static object whose dynamic initializer the exe has and the decomp lacks: one `static` NiMainSDM (constructor 0x00a8a5f0) in staging/blk_00a80000_o2.cpp | the unit gets a dynamic initializer MSVC's object of the decomp has not; the functions are unchanged |
 | `CSX2` | neutral | 4 bytes behind a generated-layout `_RTL_CRITICAL_SECTION` member whose class asserts it as 28 bytes (NiCriticalSection, RecursiveLock and their holders) | the offsets the pristine MSVC build and the byte-matched code have (J-0067) |
 | `STAND1` | platform | removes an untagged definition whose MSVC name the unit binds to the address of a tagged definition in the same unit (a free function keeps its declaration) | the call reaches the tagged function, as in the binary; an optimizing MSVC build may have inlined the stand-in |
 | `PTR1` | neutral | `f > 0` / `p > 0` -> `!= 0` and `<= 0` -> `== 0` for a function name or a local pointer | MSVC's unsigned compare of the address gives the same result |

@@ -22,7 +22,7 @@ import os
 import config
 
 SOFT_CAUSES = {'local-static', 'vptr-store', 'bool-repr', 'ilp32-pointer', 'division', 'uninit-x86', 'nan-bits',
-               'call-order', 'array-new-check'}
+               'call-order', 'array-new-check', 'vptr-unpaired'}
 HARNESS_CAUSES = {'x86-custom-cc', 'msvc-inlined', 'runtime-equiv', 'oracle-vcall', 'stack-arg', 'literal-arg'}     # oracle-model gaps: neither hard nor soft, reported apart
 LINK_CAUSES = {'split-global', 'call-args', 'callee-saved'}
 
@@ -49,6 +49,7 @@ def _custom_cc(rec):
 
 def reclassify(rec):
     """Static re-classification of a saved divergence (causes added after the record was written)."""
+    global _UC
     hint = rec.get('hint') or {}
     cause = hint.get('cause')
     if cause != 'local-static' and _custom_cc(rec):
@@ -88,6 +89,23 @@ def reclassify(rec):
                 return 'vptr-store'
         except Exception:  # noqa: BLE001
             pass
+    if d['kind'] == 'mem-write' and d.get('x86') and d.get('arm'):
+        try:
+            if _UC is None:
+                import engine
+                _UC = engine.UnitCache(str(config.LINK), str(config.A64WORK))
+            vx = int.from_bytes(bytes.fromhex(d['x86'])[:4], 'little')
+            va = int.from_bytes(bytes.fromhex(d['arm'])[:4], 'little')
+            _UC.vtable_map(type('I', (), {'stubs': {}, 'syms': {}})())     # loads the vftable-by-class table
+            vfts = set(_UC._vft_by_class.values())
+            import classify
+            vfts |= classify.image_vftables()
+            if vx in vfts and (0x09000000 <= va < 0x0a000000 or 0x0a000000 <= va < 0x0b800000):
+                # the oracle stores an image vftable, the native its own vtable address point that the link pairs
+                # with none (no kind-V row, decomp-local class name): a vptr pairing gap (S2c), soft for behaviour
+                return 'vptr-unpaired'
+        except Exception:  # noqa: BLE001
+            pass
     if d['kind'] == 'call-count' and d.get('x86') == 0:
         return 'falloff?'
     if d['kind'] == 'call-args' and d.get('cls') in ('I32', 'P'):
@@ -101,11 +119,22 @@ def reclassify(rec):
                 return 'literal-arg'     # a literal at its image address vs the native unit's copy (harness)
         except ValueError:
             pass
+    if d['kind'] == 'call-target' and str(d.get('arm', '')).startswith('name:') and \
+            d.get('arm') != 'name:__cxa_throw_bad_array_new_length':
+        try:
+            if _UC is None:
+                import engine
+                _UC = engine.UnitCache(str(config.LINK), str(config.A64WORK))
+            import libcalls
+            nm = d['arm'][5:]
+            if nm not in _UC.providers() and nm not in libcalls.EQUIV and nm not in libcalls.A64:
+                return 'native-undefined'    # the native code calls a name the link binds to nothing (S1 / S2c)
+        except Exception:  # noqa: BLE001
+            pass
     if d['kind'] == 'call-target' and d.get('arm') == 'name:__cxa_throw_bad_array_new_length':
         return 'array-new-check'  # GCC checks new[]'s count for overflow, MSVC 2008 does not (only huge counts)
     if d['kind'] == 'call-target':
         try:
-            global _UC
             if _UC is None:
                 import engine
                 _UC = engine.UnitCache(str(config.LINK), str(config.A64WORK))

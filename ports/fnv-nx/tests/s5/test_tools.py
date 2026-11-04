@@ -294,7 +294,7 @@ class FaultTableTest(unittest.TestCase):
         import emu_guest
         stubs, pre = emu_guest.parse_fault_table(os.path.join(HERE, "known_faults.txt"))
         self.assertIn(("0x00aa3e40", "use-malloc:x1"), stubs)
-        self.assertIn(("0x00a8a5f0", 0), pre)
+        self.assertNotIn("0x00a8a5f0", [f for f, _ in pre])   # NiMainSDM: S1's INIT1 static calls it now
         names = [n for n, _ in stubs]
         self.assertEqual(len(names), len(set(names)), "a function listed twice")
         for n in names:

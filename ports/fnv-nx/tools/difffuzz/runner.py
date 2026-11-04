@@ -303,9 +303,18 @@ class Pair:
         missed it because the unit calls X elsewhere): X joins the oracle code and the case runs again."""
         for _ in range(5):
             rx, ra, d = self._run(case, max_steps)
-            if not d or d['kind'] != 'call-target' or self.adapted >= 16:
+            if not d or d['kind'] not in ('call-target', 'call-count') or self.adapted >= 16:
                 return rx, ra, d
-            x = int(d['x86'], 16) if not d['x86'].startswith(('name:', 'imp:')) else None
+            if d['kind'] == 'call-count':
+                # the oracle makes calls the native code does not: the first callee the native never calls in this
+                # run was inlined natively (GCC inlined it, MSVC called it out of line)
+                na = {c.target for c in ra.calls}
+                x = next((c.target for c in rx.calls if c.target >= 0 and c.target not in na), None)
+                if x is None:
+                    return rx, ra, d
+                d = dict(d, index=0)
+            else:
+                x = int(d['x86'], 16) if not d['x86'].startswith(('name:', 'imp:')) else None
             if x is not None and x in [c.target for c in ra.calls][d['index']:]:
                 return rx, ra, d        # the native makes that call later: the calls differ in order (00740980)
             get = getattr(self.target, 'oracle_code', None)
