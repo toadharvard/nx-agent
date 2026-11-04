@@ -163,8 +163,9 @@ class/struct/union/enum tags, which Itanium names do not.
 
 * **x86 slots** - thiscall: `this` in ecx, the rest on the stack; fastcall: the first two integer/pointer
   parameters of at most 4 bytes in ecx, edx, the rest on the stack; cdecl/stdcall: stack. Aggregate results add
-  MSVC's hidden return-buffer pointer (after `this` for members, first for free functions). Stack offsets are
-  sums of 4/8-byte words with by-value aggregates of unknown size kept symbolically.
+  MSVC's hidden return-buffer pointer (after `this` for members, first for free functions; for `__fastcall` the
+  first stack word, ecx and edx stay for the arguments - V1 defect 1: 0x0056fa00's bridge wrote the result over
+  `*this`). Stack offsets are sums of 4/8-byte words with by-value aggregates of unknown size kept symbolically.
 * **AArch64 slots** - AAPCS64: `this` and integers/pointers/enums in x0-x7, float/double in v0-v7, then 8-byte stack
   slots; the hidden result pointer is x8, not an argument; a by-value aggregate of unknown size makes later slots
   symbolic.
@@ -175,6 +176,14 @@ class/struct/union/enum tags, which Itanium names do not.
   everywhere -> no bridge; register moves only -> generated bridge (parallel moves sequentialized through
   x16/v16, then a tail call `b`; a result in the wrong register file -> call, `fmov`, return); anything needing an
   aggregate's size or a stack destination -> `manual`.
+* A `float` result where the other side declares `double` (or the reverse): x86 hands either over exactly in st(0),
+  AArch64 would read d0 where the callee wrote s0. The bridge calls and converts (`fcvt d0, s0` / `fcvt s0, d0`),
+  class `ret-float-width` (V1 defect 2: 130 pairs were `same`); `long double` (binary128 here) is `manual`.
+* An undecorated C name (`@f@N` fastcall, `_f@N` stdcall, `_f` cdecl) carries no parameter types. Resolve reads
+  them from the declaration or definition in the unit's prepared source (the one whose x86 argument bytes equal N;
+  without one, N/4 four-byte integers), so these pairs are compared like decorated ones (V1 defect 3: 0x00ba3130's
+  missing edx got no `edx-dummy` bridge; 76 pairs left ecx or `this` unpassed unseen). A cdecl name nobody declares
+  stays uncompared.
 * A narrow integer the reference passes (`char`, `bool`, `short`, ...) where the definition reads a 32/64-bit value
   or a pointer in the same register: the AArch64 caller leaves the upper bits unspecified, MSVC's caller pushed the
   value extended, so the bridge extends it in place by the reference's type (`sxtb`/`sxth` for `char`/`short`,
@@ -198,6 +207,24 @@ in ecx, usually its own `this`. `abi.compare` / `abi2` classify it `x86-inconsis
 bridge moves (the ecx parameter is often unused - a decompiler artefact: 0x00a75ec0, a stream factory, and
 0x00bbbe30 never read ecx - and a direct call would leave them in the wrong registers). A missing **edx** stays the `edx-dummy`
 bridge (the decomp's `__fastcall f(T*, int edx_dummy, ...)` for a member function: edx is the x86 caller's scratch).
+**The definition's register reads** (`resolve --msvc-code <dir>`, or with `--msvc-objs`; V1's `c3_ecx.py`): for an
+`ecx-not-passed` or `this-not-passed` pair resolve reads the definition's x86 code in S11's pristine MSVC object
+(`<dir>/u<index>.obj`, `vslots.Code.entry_use`). Every path from the entry is followed until ecx is written: an
+operand, address or sub-register read is `read`; a call or tail jump to a callee that takes ecx (its declaration),
+an indirect call or a jump it cannot follow is `pass`; a switch through the function's own jump table goes to every
+label of the function. Only `push ecx` (MSVC reserves a stack word that way) or no use at all: the x86 callee
+never looked at ecx, so the pair is compared again with that parameter dead (`ecx-unused`) and gets an ordinary
+bridge, or none. A definition S1b's patches renamed (`units_renames.tsv`) has no pristine code under its new name:
+the patch gave it the `this` the pristine code never declared, and its pairs stay flagged. On V1's c3 pairs
+(f12) the reader agrees with `c3_ecx.py` on 224 of 225 addresses. The exception is 0x00e3dfb0: c3 saw `jmp [eax*4 + table]`
+as a call, and every case of that switch reads `[ecx+n]`, so it stays flagged. Of V1's three FP-dead and eleven
+TP-this-dead addresses, these are bridged now:
+0x00a75ec0, 0x00bbbe30, 0x00e89ad0 (`push`), 0x00a5d450 (`push`), 0x00a8f730, 0x00b80e70, 0x00bc10e0, 0x00bc59b0,
+0x00e92e60. Still flagged: the four S1b-renamed ones (0x00a43330, 0x00a50b10, 0x00a8a9a0, 0x00a98eb0) and 0x00e3dfb0.
+On the 22 units that reference or define those addresses (f13's objects), resolve reports 13 pairs `ecx unused,
+bridged`, 10 `used, flagged` and 1 without code. Without the objects, nothing changes. The edx side keeps
+`edx-dummy`: c3 found no definition that reads an edx it was not passed; two pass it on (0x00a62130).
+
 Sites on the ninth-round objects (callee address: referencing units):
 
 | Callee | Referencing units |
@@ -339,6 +366,18 @@ Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the com
 resolve links each as an extra object of its host unit, resolved with the host's names: slot functions bind by
 address like everywhere else. Because all GCC vtables are weak too, a compiled copy wins as soon as its unit
 compiles. GCC stores 0 in both destructor slots of an abstract class, genuine and synthesized alike.
+
+**Typeinfo kept with its vtable** (V1 defect 4). `_ZTV<C>` and `_ZTI<C>` are separate weak COMDAT groups, and the
+linker keeps the first copy of each independently. When units reconstruct C with different bases, the kept vtable's
+offset-to-top words could name a base the kept typeinfo lacks, and `__dynamic_cast` to it fails. apply's last pass
+(`pair_typeinfo`) takes `check`'s link order (sorted names) and finds every class whose first typeinfo copy comes
+from another object than the kept vtable, when the vtable's object has one of its own. The typeinfo definitions
+of the objects linking before it become references (`elfsyms.undefine_symbols`, which also clears `GRP_COMDAT` on
+the group they signed: an emptied group would still win its signature and drop the real copy). Every `typeid` and
+every derived class's base list then reaches the vtable object's typeinfo (`typeinfo_pairs.tsv`). On f13's objects
+137 classes change (299 definitions) and V1's `c4_definers.py --audit` goes from 36 disagreeing classes (33 by size,
+3 by bases) to 0; trial-link counts are unchanged. The pass assumes `check`'s order: a link that orders the objects
+otherwise keeps another vtable and needs the pass run for that order.
 
 **Slot functions no object defines.** Inline virtual functions and implicit destructors of a class that no unit
 constructs or destroys are emitted nowhere (GCC emits them with the vtable). For the synthesized vtables a compiled
