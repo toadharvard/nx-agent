@@ -146,6 +146,36 @@ def codegen(scratch, plugin):
             check(hit == (kind == 'expect'), 'codegen %s: %s %s /%s/' % (mode, fn, kind, rx))
 
 
+def uninit_codegen(scratch, plugin):
+    """uninit.cpp: uninitialized locals read as 0 (uninit=zero, the default); uninit=keep shows GCC folding them"""
+    src = os.path.join(HERE, 'uninit.cpp')
+    exp = expectations(src)
+    check(len(exp) >= 6, 'uninit: %d expectations read from uninit.cpp' % len(exp))
+    for mode, extra in (('volatile', []), ('keep', ['-fplugin-arg-fnvnx_order-uninit=keep'])):
+        asm = os.path.join(scratch, 'uninit_%s.s' % mode)
+        r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + ['-fplugin=' + plugin] + extra + ['-w', '-S', '-o', asm, src],
+                           capture_output=True, text=True)
+        check(r.returncode == 0, 'uninit %s: uninit.cpp compiles (%s)' % (mode, r.stderr.strip()[-300:]))
+        if r.returncode:
+            continue
+        funcs = functions(open(asm).read())
+        for fn, m, kind, rx in exp:
+            if m != mode:
+                continue
+            body = body_of(funcs, fn)
+            if body is None:
+                check(False, 'uninit %s: %s not found' % (mode, fn))
+                continue
+            check((re.search(rx, body) is not None) == (kind == 'expect'), 'uninit %s: %s %s /%s/' % (mode, fn, kind, rx))
+    # the pass leaves no undefined value: GCC's own -Wuninitialized has nothing left to report
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + ['-fplugin=' + plugin, '-Wuninitialized', '-Wmaybe-uninitialized',
+                        '-S', '-o', os.devnull, src], capture_output=True, text=True)
+    check('uninitialized' not in r.stderr, 'uninit: no -Wuninitialized warning left (%s)' % r.stderr.strip()[-200:])
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + ['-fplugin=' + plugin, '-fplugin-arg-fnvnx_order-uninit=keep',
+                        '-Wuninitialized', '-S', '-o', os.devnull, src], capture_output=True, text=True)
+    check('uninitialized' in r.stderr, 'uninit keep: GCC warns (the test bites)')
+
+
 def wholeprog(scratch, plugin):
     """wholeprog_a.cpp / wholeprog_b.cpp: the whole-program key list (keys.sh, discover=). Unit A's syntax-only
     discovery finds its Interlocked operands (also through forwarders) and plain polls; unit B, which does neither,
@@ -422,6 +452,7 @@ def main():
     plugin = r.stdout.strip()
     codegen(scratch, plugin)
     refcount_codegen(scratch, plugin)
+    uninit_codegen(scratch, plugin)
     wholeprog(scratch, plugin)
     compile_sh_keys(scratch)
     args_order(scratch, plugin)

@@ -11,7 +11,8 @@ whose classes include a shape the link has no automatic bridge for (S1b abiclass
 (source, address, reference) pairs, with the class breakdown. --old prints the same figures for the verdicts in the
 file, --rows writes every replayed row (old verdict, new verdict, classes). --override (the table
 tools/link/overrides/overrides.tsv): references to an overridden address are compared with the override's MSVC
-signature (4th column), as resolve does.
+signature (4th column), as resolve does. --tree: undecorated C names get their declarations from the prepared tree
+(fnvlink.c_name_sig / c_name_standin), so those rows are replayed too.
 
 Everything read and written is decomp-derived: scratch only, never committed. Takes seconds, not a link (D17).
 """
@@ -55,8 +56,23 @@ def fnvlink_demangle(name, _cache={}):
     return _cache[name]
 
 
+TREE, DECLS = None, {}
+
+
 def replay(ref_m, def_m, ref_d, def_d, src, dunit, lay):
     rs, ds = sigs.parse_msvc(ref_m, ref_d or None), sigs.parse_msvc(def_m, def_d or None)
+    if TREE:   # undecorated C names: their declarations in the prepared tree, as resolve reads them
+        import fnvlink
+        rc_ = rs.kind == 'cname' and rs.special is None
+        dc_ = ds.kind == 'cname' and ds.special is None and dunit
+        if rc_:
+            rs = fnvlink.c_name_sig(rs, fnvlink.unit_c_decls(TREE, src, DECLS)) or rs
+        if dc_:
+            ds = fnvlink.c_name_sig(ds, fnvlink.unit_c_decls(TREE, dunit, DECLS)) or ds
+        if rc_ and rs.kind != 'func':
+            rs = fnvlink.c_name_standin(rs, ds) or rs
+        if dc_ and ds.kind != 'func':
+            ds = fnvlink.c_name_standin(ds, rs) or ds
     if rs.kind != 'func' or ds.kind != 'func':
         return None
     v = abi.compare(rs, ds)
@@ -75,7 +91,10 @@ def main():
     ap.add_argument('--rows')
     ap.add_argument('--old', action='store_true')
     ap.add_argument('--override')
+    ap.add_argument('--tree', help='the prepared tree the link used: undecorated C names are replayed too')
     a = ap.parse_args()
+    global TREE
+    TREE = a.tree
     units = json.load(open(a.units))['units']
     def_unit = {}
     for u in units:

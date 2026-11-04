@@ -135,7 +135,9 @@ def test_rules():
     check(refined(dict(kind='call-target', index=0, x86='00406d30', arm='name:_ZNK10NiFixedStrcvPKcEv'),
                   'call-flow') == 'native-undefined', 'native calls an unbound C++ name')
     check(refined(dict(kind='call-target', index=0, x86='imp:VirtualFree', arm='00fdf10c'), 'call-flow') ==
-          'import-slot-called', 'native jumps to the IAT slot')
+          'runtime-equiv', 'native calls the same import, traced at its IAT slot')
+    check(refined(dict(kind='call-target', index=0, x86='imp:VirtualFree', arm='00fdf114'), 'call-flow') ==
+          'import-slot-called', 'native reaches another import\'s IAT slot')
     real = causes.native_callees
     try:
         causes.native_callees = lambda src, a: {'__fnv_00401200'}
@@ -389,12 +391,238 @@ def test_cli_effects():
         check('field-width' in c and 'unclassified' not in c, 'CLI summary applies --effects (%s)' % sorted(c))
 
 
+def test_vcall_split():
+    """oracle-vcall (the runner's vcall='unplanted' tag, classify's fault probe) and oracle-fault split by the record."""
+    def vc(x, a, vptrs=None, trace=None):
+        r = rec(dict(kind='call-target', index=0, x86=x, arm=a, x86_trace=[x], arm_trace=trace or [a],
+                     vcall='unplanted'), 'oracle-vcall')
+        if vptrs:
+            r['case'] = dict(vptrs=vptrs)
+        return causes.refine(r, 'oracle-vcall')
+
+    check(vc('c3a10b55', '5e0f7a21') == 'vcall-garbage', 'both call garbage words: vcall-garbage')
+    check(vc('03000a10', 'd1e2f3a4') == 'vcall-garbage', 'a buffer address and a wild word: vcall-garbage')
+    check(vc('c3a10b55', '00456780') == 'oracle-vcall', 'native calls an exe text address: kept')
+    check(vc('08c41233', '00c41233') == 'vcall-stub-alias', 'garbage word in the code-stub range: stub alias')
+    check(vc('093a5b17', 'name:93a5b17') == 'vcall-stub-alias', 'garbage word in the named-stub range: stub alias')
+    check(vc('093a5b17', 'name:93a5b18') == 'oracle-vcall', 'another named stub is not an alias')
+    check(vc('c3a10b55', 'name:__s13_vtpad_01012340_7', {'03000000': '01012340'}) == 'vptr-unpaired',
+          'a call through a vtable padding slot: vptr-unpaired')
+    check(vc('c3a10b55', '00456780', trace=['name:__s13_vtpad_01012340_7', '00456780']) == 'vptr-unpaired',
+          'a padding slot earlier in the native trace: vptr-unpaired')
+    check(vc('c3a10b55', 'name:_ZN3Foo3BarEv') == 'native-undefined', 'an unbound C++ name, no vptr: undefined')
+    check(vc('c3a10b55', 'name:_ZN3Foo3BarEv', {'03000000': '01012340'}) == 'oracle-vcall',
+          'a C++ name reached with a planted vptr (a vtable slot) is kept')
+
+    def err(x, cause='oracle-vcall', addr='00401000'):
+        return causes.refine(rec(dict(kind='error', x86=x, arm=None), cause, addr), cause)
+
+    check(err('fault:r:0e0a1b2c') == 'oracle-private-address', 'oracle reads its own private range')
+    check(err('fault:x:0e0a1b2c') == 'oracle-private-address', 'oracle executes its own private range')
+    check(err('fault:w:0e0a1b20', 'unclassified') == 'oracle-private-address', 'oracle-fault in the private range')
+    check(err('fault:r:fffffffe', 'unclassified') == 'ilp32-pointer', 'dword read across 4 GiB: ilp32-pointer')
+    check(err('fault:r:00000010', 'unclassified') == 'oracle-fault', 'near-null oracle read stays oracle-fault')
+    check(err('fault:x:00000000') == 'oracle-vcall', 'oracle executes at null: kept')
+    check(causes.refine(rec(dict(kind='error', x86='fault:r:0e0a1b2c', arm='fault:r:00000004'), 'oracle-vcall'),
+                        'oracle-vcall') == 'oracle-vcall', 'both machines fault: no oracle-only rule')
+    import report
+    r = rec(dict(kind='call-target', index=0, x86='c3a10b55', arm='5e0f7a21', vcall='unplanted'), 'oracle-vcall')
+    check(report.reclassify(r) == 'vcall-garbage', 'report.reclassify hands oracle-vcall to the split')
+    check(report.reclassify(rec(dict(kind='return', x86=w(1), arm=w(2)), 'uninit-both')) == 'uninit-both',
+          'report.reclassify still keeps other probe causes')
+
+    # objects: an empty local callee (a bare ret) and a C++ name the object defines
+    saved_cache, saved_env = dict(causes._OBJ_CACHE), os.environ.get('FNVNX_CAUSES_OBJ')
+    saved_map = (causes._VFT, causes._LINKSYM, set(causes._BOUND))
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            os.environ['FNVNX_CAUSES_OBJ'] = d
+            path = os.path.join(d, 'src_t.cpp.o')
+            causes._OBJ_CACHE[path] = {0x00401000: {'_ZN4Stub3RunEv', '__fnv_00402000'},
+                                       0x00403000: {'__fnv_00402000', '_ZN3Foo3BarEv'},
+                                       '_defined': {'_ZN4Stub3RunEv', '_ZN3Foo3BarEv', '__fnv_00401000'},
+                                       '_empty': {'_ZN4Stub3RunEv'}}
+            causes._VFT, causes._LINKSYM = set(), {0x00402000: '__fnv_00402000'}
+            check(causes.empty_callees('src/t.cpp', 0x00401000) == ['_ZN4Stub3RunEv'], 'empty callee found')
+            check(err('fault:r:00000010', 'unclassified') == 'native-empty-callee',
+                  'oracle-fault where the native calls an empty stub: native-empty-callee')
+            check(err('fault:x:00000000') == 'native-empty-callee', 'oracle-vcall fault likewise')
+            check(err('fault:r:00000010', 'unclassified', '00403000') == 'oracle-fault', 'no empty callee: kept')
+            r = rec(dict(kind='call-target', index=0, x86='c3a10b55', arm='name:_ZN3Foo3BarEv', vcall='unplanted'),
+                    'oracle-vcall', '00403000')
+            check(causes.refine(r, 'oracle-vcall') == 'oracle-vcall', 'a name the object defines is not undefined')
+            r['divergence']['arm'] = 'name:_ZN3Foo3BazEv'
+            check(causes.refine(r, 'oracle-vcall') == 'native-undefined', 'a name nothing defines or binds')
+    finally:
+        causes._OBJ_CACHE.clear(); causes._OBJ_CACHE.update(saved_cache)
+        causes._VFT, causes._LINKSYM = saved_map[0], saved_map[1]
+        causes._BOUND.clear(); causes._BOUND.update(saved_map[2])
+        if saved_env is None:
+            os.environ.pop('FNVNX_CAUSES_OBJ', None)
+        else:
+            os.environ['FNVNX_CAUSES_OBJ'] = saved_env
+    for c in ('vcall-garbage', 'vcall-stub-alias', 'oracle-private-address', 'native-empty-callee'):
+        check(c in causes.POLICY, 'policy has %s' % c)
+    check(causes.policy('native-empty-callee')[:2] == ('real-bug', 'S1') and
+          causes.policy('vcall-garbage')[:2] == ('artifact', 'S13'), 'vcall split classes')
+
+
+def test_unclassified_shapes():
+    """The bucket rules for records no other rule took: canned results, thunks, wild calls, garbage, stubs."""
+    def r(div, case, cause='unclassified'):
+        x = rec(div, cause)
+        x['case'] = case
+        return causes.refine(x, cause)
+    canned = '5e1f2a77' + '00' * 12            # call 1 returns 0x772a1f5e (made up)
+    case = dict(seed=12345, bg='zero', rets=['00' * 16, canned])
+    blk = causes._alloc_result(0)              # the block call 0 (an allocator) returned
+    check(r(dict(kind='call-args', arg='p0', cls='P', x86=w(0x772a1f5e), arm=w(blk), index=2), case) == 'ctor-this',
+          'oracle passes the constructor\'s canned result, native the allocator block: ctor-this')
+    check(r(dict(kind='return', x86=w(blk), arm=w(0x772a1f5e)), case) == 'ctor-this',
+          'returns the allocator block vs the constructor\'s canned result: ctor-this')
+    check(r(dict(kind='mem-write', addr='03000010', ndiff=4, x86=w(0x772a1f5e, 0), arm=w(blk, 0), only_x86=0,
+                 only_arm=0), case) == 'ctor-this', 'stores the constructor result vs the block: ctor-this')
+    check(r(dict(kind='call-args', arg='p0', cls='P', x86=w(0x772a1f5e), arm=w(blk), index=1), case) ==
+          'unclassified', 'the canned result of a later call does not count')
+    check(r(dict(kind='call-args', arg='this', cls='P', x86=w(0x772a1f5e), arm=w(0x06effff0), index=2), case) ==
+          'canned-this', 'oracle uses an earlier canned eax as this, native its frame temporary: canned-this')
+    check(r(dict(kind='call-args', arg='this', cls='P', x86=w(0x772a1f5f), arm=w(0x06effff0), index=2), case) ==
+          'unclassified', 'a pointer that is no canned result stays open')
+    check(r(dict(kind='call-args', arg='p1', cls='F32', x86=f32(0.5), arm=w(0x772a1f5e), index=2), case) ==
+          'native-stale-result', 'native passes the previous call\'s result register: native-stale-result')
+    check(r(dict(kind='call-args', arg='p1', cls='F32', x86=f32(0.5), arm=w(0x772a1f5e), index=3), case) ==
+          'unclassified', 'a result of an older call is not the stale register')
+    # wild jumps into the AArch64 private range on the random background
+    check(r(dict(kind='error', x86=None, arm='fault:x:0a123457'), dict(seed=1, bg='rand')) ==
+          'native-wild-private', 'random background: native jumps into its private range: native-wild-private')
+    check(r(dict(kind='error', x86=None, arm='fault:x:0a123457'), dict(seed=1, bg='zero')) == 'unclassified',
+          'the same on the zero background stays open')
+    # a stored word with top byte 0x08 normalised as a code stub pointer
+    check(r(dict(kind='mem-write', addr='03000013', ndiff=1, x86='11223308aabbccdd', arm='11223300aabbccdd',
+                 only_x86=0, only_arm=0), case) == 'stub-normalized', 'only a 0x08 byte cleared: stub-normalized')
+    check(r(dict(kind='mem-write', addr='03000013', ndiff=1, x86='11223309aabbccdd', arm='11223300aabbccdd',
+                 only_x86=0, only_arm=0), case) == 'unclassified', 'another byte value stays open')
+    # planted garbage stored / returned
+    gx = sorted(causes._garbage_words(777, 'x86'))[5]
+    ga = sorted(causes._garbage_words(777, 'a64'))[5]
+    gcase = dict(seed=777, bg='zero')
+    check(r(dict(kind='mem-write', addr='03000020', ndiff=4, x86=w(gx, 0), arm=w(ga, 0), only_x86=0, only_arm=0),
+            gcase) == 'uninit-both', 'both store their own garbage: uninit-both')
+    check(r(dict(kind='return', x86=w(0x1234), arm=w(ga)), gcase) == 'uninit-arm', 'native returns garbage: uninit-arm')
+    check(r(dict(kind='return', x86=w(gx), arm=w(0x1234)), gcase) == 'uninit-x86', 'oracle returns garbage: uninit-x86')
+    # native object facts (stubbed): this-adjusting thunks and placeholder bodies
+    facts, callees = causes._object_facts, causes.native_callees
+    try:
+        causes._object_facts = lambda src: ({'__fnv_00401000': {0x38}}, {'_ZN1T4zeroEv'})
+        causes.native_callees = lambda src, a: {'_ZN1T4zeroEv'}
+        check(r(dict(kind='call-args', arg='this', cls='P', x86=w(0x02ffffc8), arm=w(0x03000000), index=0), case) ==
+              'thunk-binding', 'this - 0x38 where the native has a _ZThn56_ thunk: thunk-binding')
+        check(r(dict(kind='call-args', arg='this', cls='P', x86=w(0x02fffff0), arm=w(0x03000000), index=0), case) ==
+              'layout-offset', 'this - 0x10 without such a thunk: layout-offset')
+        check(r(dict(kind='return', x86=w(5), arm=w(0)), case) == 'native-zero-stub',
+              'native returns 0 and calls a `mov w0, #0; ret` body: native-zero-stub')
+        causes._object_facts = lambda src: ({}, set())
+        check(r(dict(kind='return', x86=w(5), arm=w(0)), case) == 'unclassified', 'no placeholder body: open')
+    finally:
+        causes._object_facts, causes.native_callees = facts, callees
+    # a probe's cause is never overridden, and only what would stay unclassified is taken
+    check(r(dict(kind='call-args', arg='p0', cls='P', x86=w(0x772a1f5e), arm=w(blk), index=2), case, 'call-flow') ==
+          'call-flow', 'the bucket rules leave call-flow alone')
+    for c in ('ctor-this', 'canned-this', 'native-wild-private', 'stub-normalized', 'thunk-binding',
+              'native-stale-result', 'native-zero-stub'):
+        check(c in causes.POLICY, 'policy row for %s' % c)
+
+
+def test_callflow():
+    """Call-flow sub-shapes (_rule_callflow) with the native object facts faked."""
+    RET = bytes.fromhex('c0035fd6')                    # ret
+    MOV0_RET = bytes.fromhex('00008052') + RET           # mov w0, #0; ret
+    BL_RET = bytes.fromhex('00000094') + RET             # bl ...; ret
+
+    def cf(div, symbol='?f@@YAXXZ', conv='this:P/4 -> void', args=None, cause='call-flow'):
+        r = dict(source='src/t.cpp', address='00401000', symbol=symbol, conv=conv, divergence=div,
+                 hint=dict(cause=cause), case=dict(args=args or {}))
+        return causes.refine(r, cause)
+
+    def early(tx, ta):
+        return dict(kind='call-count', x86=len(tx), arm=len(ta), x86_trace=tx, arm_trace=ta)
+
+    names = ('native_body', 'native_defines', 'native_callees', 'native_reaches', 'crt_entries', 'unbound_callees')
+    saved = {n: getattr(causes, n) for n in names}
+    bodies = {}
+    try:
+        causes.native_body = lambda src, n: bodies.get(n)
+        causes.native_defines = lambda src, n: n in bodies
+        causes.native_callees = lambda src, a: {'__fnv_00401100'}
+        causes.native_reaches = lambda src, n: {'__fnv_00401100'}
+        causes.crt_entries = lambda: {0x00ec9650}
+        causes.unbound_callees = lambda src, a: []
+        causes._VFT, causes._LINKSYM = set(), {0x00ec623a: 'sprintf', 0x00ecd291: 'free',
+                                               0x00402000: '__fnv_00402000'}
+        # the function itself is an empty body
+        bodies['__fnv_00401000'] = (MOV0_RET, {'__fnv_00401000'})
+        check(cf(early(['00401100'], [])) == 'native-empty-body', 'empty native body, oracle calls: native-empty-body')
+        bodies['__fnv_00401000'] = (BL_RET, {'__fnv_00401000'})
+        check(cf(early(['00401100'], [])) == 'native-early-exit', 'a body with a call: stays native-early-exit')
+        # ... or a decomp-local empty stand-in for an original defined elsewhere
+        bodies['_ZN3Foo12FUN_00402000Ev'] = (RET, {'_ZN3Foo12FUN_00402000Ev'})
+        causes.native_callees = lambda src, a: {'_ZN3Foo12FUN_00402000Ev'}
+        check(cf(early(['00ecd291'], [])) == 'native-empty-body', 'empty local stand-in: native-empty-body')
+        bodies['_ZN3Foo12FUN_00402000Ev'] = (RET, {'_ZN3Foo12FUN_00402000Ev', '__fnv_00402000'})
+        check(cf(early(['00401100'], [])) == 'native-early-exit', 'the real (empty) definition: no stand-in')
+        del bodies['_ZN3Foo12FUN_00402000Ev']
+        causes.native_callees = lambda src, a: {'__fnv_00401100'}
+        # dynamic initializer without the exit registration
+        check(cf(early(['00401100', '00ec658f'], ['00401100']), symbol='??__Eg_x@@YAXXZ') == 'dyninit-no-atexit',
+              'oracle registers a destructor, native initializer does not: dyninit-no-atexit')
+        causes.native_callees = lambda src, a: {'__fnv_00401100', 'fnvnx_xc_atexit'}
+        check(cf(early(['00401100', '00ec658f'], ['00401100']), symbol='??__Eg_x@@YAXXZ') == 'native-early-exit',
+              'native initializer registers it: stays native-early-exit')
+        causes.native_callees = lambda src, a: {'__fnv_00401100'}
+        # deleting destructor called with flags 0
+        dd = dict(kind='call-count', x86=1, arm=2, x86_trace=['00401100'], arm_trace=['00401100', '00aa1460'])
+        check(cf(dd, symbol='??_GFoo@@UAEPAXI@Z', args={'p0': '00000000'}) == 'deleting-dtor-flags',
+              'D0 frees where ??_G got flags 0: deleting-dtor-flags')
+        check(cf(dd, symbol='??_GFoo@@UAEPAXI@Z', args={'p0': '01000000'}) == 'native-extra-calls',
+              'flags bit 0 set: stays native-extra-calls')
+        # a by-value class argument freed by the MSVC callee
+        check(cf(early(['00401100', '00ecd291'], ['00401100']), conv='this:P/4, p0:AGG:Str/8 -> void') ==
+              'byvalue-arg-dtor', 'oracle frees a by-value argument: byvalue-arg-dtor')
+        # the native skips a free
+        ct = dict(kind='call-target', index=0, x86='00ecd291', arm='00401300', x86_next='00401300')
+        causes.native_reaches = lambda src, n: {'__fnv_00401300'}
+        check(cf(ct) == 'native-missing-free', 'oracle frees, native reaches no deallocator: native-missing-free')
+        causes.native_reaches = lambda src, n: {'__fnv_00401300', '__fnv_00401030'}
+        check(cf(ct) != 'native-missing-free', 'native reaches operator delete: not native-missing-free')
+        causes.native_reaches = lambda src, n: {'__fnv_00401100'}
+        # call-target shapes
+        tgt = lambda x, a: dict(kind='call-target', index=0, x86=x, arm=a)  # noqa: E731
+        check(cf(tgt('00401200', '01268238')) == 'native-calls-data', 'native jumps to a data address')
+        check(cf(tgt('00ec9650', 'name:asinf')) == 'libc-variant', 'x87 intrinsic vs libm float: libc-variant')
+        check(cf(tgt('00ec623a', 'name:__sprintf_chk')) == 'libc-variant', 'sprintf vs __sprintf_chk')
+        check(cf(tgt('00ec623a', 'name:__strcpy_chk')) != 'libc-variant', 'sprintf vs __strcpy_chk: not a variant')
+        check(cf(tgt('00401200', '9e684216')) == 'native-vcall-oracle-direct', 'native wild call, oracle direct')
+        bodies['__fnv_00401100'] = (BL_RET, {'__fnv_00401100'})
+        check(cf(tgt('00401100', '00401300')) == 'oracle-callee-unloaded',
+              'oracle intercepts a callee the native object runs: oracle-callee-unloaded')
+        causes.unbound_callees = lambda src, a: ['_ZN3Bar3getEv']
+        check(cf(tgt('00401100', '00401300')) == 'after-native-undefined',
+              'an artifact shape never hides an unbound C++ name')
+    finally:
+        for n, f in saved.items():
+            setattr(causes, n, f)
+        causes._VFT = causes._LINKSYM = None
+
+
 if __name__ == '__main__':
     test_rules()
+    test_vcall_split()
+    test_callflow()
     test_policy()
     test_summary()
     test_object_reader()
     test_handoffs()
     test_cli_effects()
+    test_unclassified_shapes()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)

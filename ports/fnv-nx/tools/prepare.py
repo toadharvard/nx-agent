@@ -639,11 +639,14 @@ def r_platform_protos(path, text, stats):
 NEWDEL_PARAMS = re.compile(r'(\boperator\s+(?:new|delete)(?:\s*\[\s*\])?\s*\()([^;{}()]*)(\))')
 
 def r_newdel_size(path, text, stats):
-    """NEW1: operator new/delete size parameters spelled 'unsigned int' (MSVC x86 size_t) -> size_t. A parameter
-    passed by reference or pointer (`unsigned int& total`, an out parameter of a class operator new) is the caller's
-    unsigned int and keeps its type."""
+    """NEW1: operator new/delete size parameters spelled 'unsigned int' or plain 'unsigned' (MSVC x86 size_t) ->
+    size_t. A parameter passed by reference or pointer (`unsigned int& total`, an out parameter of a class operator
+    new) is the caller's unsigned int and keeps its type. (Plain `unsigned`: a class `operator delete[](void*,
+    unsigned)` is MSVC's usual sized deallocation function; spelled unsigned int on the target it is a placement form
+    and `delete[]` on the class finds no usual one.)"""
     def sub(m):
-        params = re.sub(r'\bunsigned\s+int\b(?!\s*[&*])', 'size_t', m.group(2))
+        params = re.sub(r'\bunsigned(?:\s+int)?\b(?!\s*(?:[&*]|(?:int|long|short|char|__int\d+)\b))', 'size_t',
+                        m.group(2))
         if params != m.group(2): stats['NEW1'] += 1
         return m.group(1) + params + m.group(3)
     return NEWDEL_PARAMS.sub(sub, text)

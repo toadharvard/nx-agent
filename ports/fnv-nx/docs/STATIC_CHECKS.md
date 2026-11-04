@@ -140,7 +140,7 @@ The authoritative table with counts is `report.md` of a run; the classes are def
   or `same-object` come first; getters with a visible side-effect-free body are not counted. Fix: hoist the
   arguments into locals in MSVC order. **Closed by the fnvnx_order plugin (`args=rtl`, S12-ordering,
   [ORDERING.md](ORDERING.md)):** every call's scalar arguments are evaluated right to left; tests/s12/order args.cpp
-  matches GCC x86-32 on 9 call shapes. ORDER-OBJECT and ORDER-OPERATOR stay open. ORDER-BINOP (both operands of a built-in operator) is
+  matches GCC x86-32 on 9 call shapes. ORDER-OBJECT and ORDER-OPERATOR are closed by `object=last` and `operator=rtl` (S11 confirms). ORDER-BINOP (both operands of a built-in operator) is
   unspecified on both compilers; it is listed, not judged.
 * **volatile and memory ordering (VOLATILE-DECL, POLL-VOLATILE, POLL-PLAIN, ATOMIC-*, BARRIER)**. MSVC's volatile
   accesses are acquire/release and x86 is TSO; on AArch64 GCC gives neither. **Closed by S12-ordering**
@@ -302,12 +302,12 @@ coverage. The classes added in this round have no earlier count.
 | W-RETURN | 91 | 3 -> 0 | 0 | closed: FALL1 + `-Werror=return-type`; 8 reachable traps tree-wide go to RET1 |
 | THIS-NULL | 286 | 208 -> 208 | 400 | closed: `-fno-delete-null-pointer-checks` (fact: compare kept) |
 | (char signedness, signed overflow, aliasing, FP contraction) | - | - | - | closed: `-fsigned-char` `-fwrapv` `-fno-strict-aliasing` `-ffp-contract=off` (facts; 0 fused ops in 436 f8 objects) |
-| W-UNINIT | 8 | 4 -> 0 | 3 | open (per-site); the 4 (an `int&` out-parameter local, 3 temporaries) went away with the source changes, not with D16 (checked with and without `-fPIC`) |
+| W-UNINIT | 8 | 4 -> 0 | 3 | closed for scalars: fnvnx_order `uninit=zero` reads an unwritten local as 0 (ORDERING.md); 11 -> 0 warnings on shard 3's sites |
 | W-ARRAY-BOUNDS | 194 | 96 -> 91 | 125 | open (per-site) |
 | W-LOOP-UB | 1 | 1 -> 2 | 2 | open: `-fno-aggressive-loop-optimizations` not adopted |
 | F2U | 135 | 75 -> 75 | 152 | open: the fnvnx_ftoi plugin closes it once compile.sh loads it; never fuzzed |
 | F2S | 792 | 432 -> 432 | 536 | open: NaN / out of int32 give 0x80000000 on x86 (S13 0x00a1b450); the fnvnx_ftoi plugin closes it once compile.sh loads it |
-| ORDER-ARGS / -OBJECT / -OPERATOR | 1,018 / 578 / 53 | 441 / 270 / 24, unchanged | 897 / 490 / 47 | ORDER-ARGS closed: fnvnx_order args=rtl (ORDERING.md); -OBJECT / -OPERATOR open |
+| ORDER-ARGS / -OBJECT / -OPERATOR | 1,018 / 578 / 53 | 441 / 270 / 24, unchanged | 897 / 490 / 47 | ORDER-ARGS closed: fnvnx_order args=rtl; -OBJECT / -OPERATOR closed: object=last, operator=rtl (ORDERING.md; S11 confirms) |
 | ORDER-BINOP / -ASSIGN | 1,046 / 17 | 470 / 4, unchanged | 831 / 51 | listed (unspecified on both) |
 | VOLATILE-DECL / BARRIER / POLL-* | 146 / 15 / 5 | 41 / 5 / 3, unchanged | 928 / 197 / 5 | closed: fnvnx_order + barrier header (ORDERING.md); POLL-PLAIN: plain-poll rule + whole-program keys |
 | ATOMIC-USE / ATOMIC-PLAIN-STORE | 148 / - | 42 / 0 -> 1 | 165 / 3 | ATOMIC-USE closed (fully ordered Interlocked, in-unit operands and forwarders); PLAIN-STORE closed: compile.sh's whole-program ORDER_KEYS (default) |
