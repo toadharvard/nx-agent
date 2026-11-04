@@ -644,6 +644,33 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   (0x01012120: `FUN_00404920`, `FUN_00404950`, `FUN_0045cfb0`, `SettingBase_01012120`); the map names one native
   vtable, `vftable_aliases.tsv` every class's own.
 
+  **Image vtables without a named class** (S5 J-0102: on f13, 750 hand-stored image vtables had no native vtable,
+  and `*(int*)this = (int)&DAT_x` stores were not seen; the first boot stop is 0x010472d0 in `bgsragdoll.cpp`):
+
+  * A store through a single-pointer cast to a 4-byte integer or pointer at offset 0 (`*(int *)this = ...`,
+    `((unsigned *)p)[0] = ...`) also counts, when the address lies within 64 KiB of the named vftables.
+  * A decomp shell storing an image vtable is usually the constructor (or destructor) of the class that owns it,
+    and another unit often names that address properly. The storing function's address is its `// @fnv`
+    annotation, used only when the function stores a single vtable. Every name units.json gives that address
+    (`??0X`, `??1X`, `??_GX`, `??_EX`, in any unit) is a candidate class. Among candidates with a native vtable
+    (compiled or synthesized), the one with the most vtable words wins, and the image vtable maps to its primary
+    address point (`class constructed at the storing address`).
+  * Candidates that have no vtable yet go into `vtable_requests.tsv` (why `hand-vptr`, host units: the storing unit
+    and the units naming the address). The probe synthesizes those that are polymorphic in a host unit, so the
+    second resolve can map them (`requested for synthesis: ...` in `hand_vptrs.tsv`).
+
+  Resolving f13's objects with the new rules gives:
+
+  | Result | Image vtable addresses |
+  |---|---|
+  | stored by hand | 1,779 (was 1,705) |
+  | bound to a native address point | 1,100 (was 954): 911 by a named vftable, 31 by the storing function's class, 158 by the class constructed at the storing address |
+  | candidate class requested for synthesis | 363, among them 0x010472d0 |
+  | no candidate | 316 |
+
+  The synthesized share is measured on the farm, where the probe runs. A class whose slot order differs from the
+  callers' declarations (an MSVC deleting-destructor slot against Itanium's two) still needs S1's class shapes.
+
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
 2,029 objects compiled (of 2,978 units; S1 census flags, `-O2`). 106,043 undefined (object, symbol) references:

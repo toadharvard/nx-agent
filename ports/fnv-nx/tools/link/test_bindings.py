@@ -114,6 +114,15 @@ SRC = {
                  'struct Shell1 { ~Shell1(); int x; };\nvoid del_shell(Shell1 *p) { delete p; }\n'
                  'struct Real1 { ~Real1(); int x; };\nReal1::~Real1() { x = 0; }\n',
     'src/l.cpp': 'extern "C" void LeaveCriticalSection(void *);\nvoid plain_leave(void *p) { LeaveCriticalSection(p); }\n',
+    # S5 J-0102: decomp shells storing image vtables with `*(int*)this = (int)&DAT_x`; another unit names the
+    # shells' addresses as the constructors of Real2 (compiled vtable) and Lazy (polymorphic, no vtable anywhere)
+    'src/v.cpp': 'struct ShellV { void FUN_00406000(); void FUN_00406010(); };\n'
+                 'extern int DAT_01000820;\nextern int DAT_01000830;\n'
+                 '// @fnv 0x00406000\nvoid ShellV::FUN_00406000() { *(int*)this = (int)&DAT_01000820; }\n'
+                 '// @fnv 0x00406010\nvoid ShellV::FUN_00406010() { *(int*)this = (int)&DAT_01000830; }\n',
+    'src/w.cpp': 'struct Real2 { virtual int r(); virtual int s(); Real2(); };\nint Real2::r() { return 4; }\n'
+                 'int Real2::s() { return 5; }\nstruct Lazy { virtual int z(); Lazy(); };\n'
+                 'Lazy *mk_lazy() { return new Lazy; }\n',
 }
 RENAMES = ('# source\tkind\taddress\told MSVC name\tnew MSVC name\n'
            'src/x.cpp\tdef\t0x00403000\t?FUN_00403000@@YGXH@Z\t?FUN_00403000@FUN_00403000_s1b@@QAEXH@Z\n'
@@ -176,6 +185,12 @@ UNITS = {'units': [
      'symbols': {'?g_hdr@@3HA': '0x01000b00'}},
     {'source': 'src/s2.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401810, '?get_hdr2@@YAHXZ')],
      'symbols': {}},
+    {'source': 'src/v.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x406000, '?FUN_00406000@ShellV@@QAEXXZ'), F(0x406010, '?FUN_00406010@ShellV@@QAEXXZ')],
+     'symbols': {'?DAT_01000820@@3HA': '0x01000820', '?DAT_01000830@@3HA': '0x01000830'}},
+    {'source': 'src/w.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x406100, '?r@Real2@@UAEHXZ'), F(0x406110, '?s@Real2@@UAEHXZ'), F(0x406120, '?mk_lazy@@YAPAULazy@@XZ')],
+     'symbols': {'??0Real2@@QAE@XZ': '0x00406000', '??0Lazy@@QAE@XZ': '0x00406010'}},
     {'source': 'src/e.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x401700, '??0DerX@@QAE@XZ'), F(0x401710, '?scope_user@@YAXXZ'), F(0x401720, '?del_shell@@YAXPAUShell1@@@Z'),
         F(0x401730, '??1Real1@@QAE@XZ')],
@@ -269,6 +284,15 @@ def main():
               % rows.get(0x01000600))
         check(rows.get(0x01000700, [''] * 3)[1:3] == ['V', '_ZTV5Named'], 'hand-written vptr, named vftable')
         check(0x01000800 not in rows and 0x01000810 not in rows, 'a function storing two vftables maps neither')
+        check(rows.get(0x01000820, [''] * 3)[1:3] == ['V', '_ZTV5Real2'],
+              '`*(int*)this = (int)&DAT_x` in a shell -> the class constructed at its address: %s' % rows.get(0x01000820))
+        hv = {r[0]: r for r in (l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'hand_vptrs.tsv'))
+                                if not l.startswith('#'))}
+        req = open(os.path.join(out, 'vtable_requests.tsv')).read()
+        check(hv.get('01000830', [''] * 2)[1] == 'requested for synthesis: Lazy' and 'Lazy' in req and
+              'hand-vptr' in req and 0x01000830 not in rows,
+              'no vtable yet: Lazy requested for synthesis: %s / %s' % (hv.get('01000830'),
+                                                                        [l for l in req.splitlines() if 'Lazy' in l]))
         for a_, sym in ((0xee6e04, 'D3DXMatrixRotationYawPitchRoll'), (0xee6df2, 'D3DXVec3TransformNormal')):
             check(rows.get(a_, [''] * 4)[1:4] == ['F', sym, sym], 'import thunk %x -> %s: %s' % (a_, sym, rows.get(a_)))
         check(refs.get(('src/b.cpp', 'FUN_00ee6df2'), [''] * 6)[5] == 'D3DXVec3TransformNormal',
