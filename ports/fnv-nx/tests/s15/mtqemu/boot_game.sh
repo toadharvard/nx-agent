@@ -14,7 +14,9 @@ ELF=$(readlink -f "$1")
 EXE=$(readlink -f "$2")
 WORK=$(mkdir -p "$3" && cd "$3" && pwd)
 TIMEOUT=${TIMEOUT:-300}
-EXPECT=${EXPECT:-fnvnx boot: calling WinMain}
+COLLECT=${COLLECT:-0}   # 1: collect-all boot (linhost --collect-traps): vslot/ctor traps return to their caller and are
+                        # listed; no stop at WinMain unless EXPECT is set; tests/s5/collect_traps.py makes the TSV
+if [ "$COLLECT" = 1 ]; then EXPECT=${EXPECT-}; else EXPECT=${EXPECT:-fnvnx boot: calling WinMain}; fi
 QEMU=${QEMU-qemu-aarch64}
 HEAP_MIB=${HEAP_MIB:-64}
 
@@ -23,13 +25,20 @@ mkdir -p "$WORK/sdmc/fnvnx/game"
 ln -sfn "$EXE" "$WORK/sdmc/fnvnx/game/FalloutNV.exe"
 mkdir -p "$WORK/sdmc/switch/fnv"
 ln -sfn "$EXE" "$WORK/sdmc/switch/fnv/FalloutNV.exe"   # NX1's SD layout; guests linked before NX1 read fnvnx/game
+if [ -d "$(dirname "$EXE")/Data" ]; then   # the game install's Data/ (tools/gamedata_fetch.sh), linked in place
+  ln -sfn "$(readlink -f "$(dirname "$EXE")/Data")" "$WORK/sdmc/fnvnx/game/Data"
+  ln -sfn "$(readlink -f "$(dirname "$EXE")/Data")" "$WORK/sdmc/switch/fnv/Data"
+fi
 for f in "$(dirname "$EXE")"/*.ini; do   # the exe's inis (Fallout_default.ini: WinMain stops without it)
   [ -f "$f" ] || continue
   ln -sfn "$(readlink -f "$f")" "$WORK/sdmc/fnvnx/game/$(basename "$f")"
   ln -sfn "$(readlink -f "$f")" "$WORK/sdmc/switch/fnv/$(basename "$f")"
 done
 
-run=("$WORK/build/linhost" --root "$WORK/sdmc" --skip-faulting-init --heap "$HEAP_MIB" --expect "$EXPECT" "$ELF")
+run=("$WORK/build/linhost" --root "$WORK/sdmc" --skip-faulting-init --heap "$HEAP_MIB")
+[ -n "$EXPECT" ] && run+=(--expect "$EXPECT")
+[ "$COLLECT" = 1 ] && run+=(--collect-traps)
+run+=("$ELF")
 [ -n "$QEMU" ] && run=("$QEMU" -R 0xC0000000 "${run[@]}")
 echo "boot_game: ${run[*]}"
 t0=$(date +%s.%N)
