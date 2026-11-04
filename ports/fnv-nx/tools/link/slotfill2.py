@@ -19,13 +19,22 @@ import os
 import re
 
 
+def slot_sig(itanium, un, var=None):
+    """The slot's Itanium signature; var (exe_slot_fill's destructor variant from the RTTI base) overrides it."""
+    s = itanium(un)
+    if var:
+        s = copy.copy(s)
+        s.variant = var
+    return s
+
+
 def secondary_entry(target_for, native, addr_sym, entry_sym, stats=None):
     """Wrap exe_slot_fill's target_for(un, a, otts, depth): a direct binding `__fnv_<a>` of an address MSVC enters
     at a secondary base d becomes `__fnvnx_msvc_<a>` when the native vtables naming the slot sit at that base
     (every offset-to-top is -d). Other results are returned unchanged."""
 
-    def wrapped(un, a, otts=None, depth=0):
-        tgt, why = target_for(un, a, otts, depth)
+    def wrapped(un, a, otts=None, depth=0, var=None):
+        tgt, why = target_for(un, a, otts, depth, var)
         nd = native.get(a) if tgt == addr_sym % a else None
         me = nd.get('msvc_entry') if nd else None
         if me and otts and all(-o == me[1] for o in otts):
@@ -60,12 +69,12 @@ def fastcall_dtor(target_for, native, itanium, msvc, classify, stubs, addr_sym, 
     destructor `f(this, int, flags)` (DestroyNiTriShape, NiMaterialProperty_Destructor) goes through a stub that
     passes the flags in the third argument register: 1 for D0 (delete), 0 for D1 / D2."""
 
-    def wrapped(un, a, otts=None, depth=0):
-        tgt, why = target_for(un, a, otts, depth)
+    def wrapped(un, a, otts=None, depth=0, var=None):
+        tgt, why = target_for(un, a, otts, depth, var)
         if tgt is not None or not why.startswith('kind differs (function at the exe slot, D'):
             return tgt, why
         nd = native.get(a)
-        isig = itanium(un)
+        isig = slot_sig(itanium, un, var)
         ds = msvc(nd['msvc']) if nd and nd.get('msvc') else None
         if not (isig.variant or '').startswith('D') or not fastcall_flags_param(ds, classify):
             return tgt, why
@@ -135,15 +144,15 @@ def slot_ctor(target_for, native, itanium, msvc, classify, slot_abi, stubs, addr
     finds the arguments where the definition reads them."""
     ints = ('I8', 'I16', 'I32')
 
-    def wrapped(un, a, otts=None, depth=0):
-        tgt, why = target_for(un, a, otts, depth)
+    def wrapped(un, a, otts=None, depth=0, var=None):
+        tgt, why = target_for(un, a, otts, depth, var)
         if tgt is not None or not why.startswith('kind differs (C1 at the exe slot'):
             return tgt, why
         nd = native.get(a)
         ds = msvc(nd['msvc']) if nd and nd.get('msvc') else None
         if ds is None or ds.kind != 'func' or not ds.member or ds.static or ds.raw_params is None:
             return tgt, why
-        isig = itanium(un)
+        isig = slot_sig(itanium, un, var)
         ps = [classify(p) for p in ds.raw_params if p != 'void']
         if (isig.variant or '').startswith('D'):
             if len(ps) != 1 or ps[0] not in ints:

@@ -24,7 +24,7 @@ def check(cond, what):
 def main():
     native = {0x401000: {'msvc_entry': ('_ZThn8_N1M1fEv', 8)}, 0x402000: {}, 0x403000: {'msvc_entry': ('t', 12)}}
 
-    def base(un, a, otts=None, depth=0):
+    def base(un, a, otts=None, depth=0, var=None):
         return (ADDR % a, 'same') if a != 0x403000 or un != 'bridged' else ('__fnvnx_br_x', 'bridge')
     st = collections.Counter()
     tf = slotfill2.secondary_entry(base, native, ADDR, ENTRY, st)
@@ -43,7 +43,7 @@ def main():
             '?C@@YAPAXPAXHI@Z': 'void * __cdecl C(void *, int, unsigned int)'}
     native2 = {0x404000: {'msvc': '?D@@YIPAXPAXHI@Z'}, 0x405000: {'msvc': '?C@@YAPAXPAXHI@Z'}}
 
-    def base2(un, a, otts=None, depth=0):
+    def base2(un, a, otts=None, depth=0, var=None):
         return None, 'kind differs (function at the exe slot, %s in the vtable)' % sigs.itanium_variant(un)
     stubs = {}
     dem = {'_ZN1XD0Ev': 'X::~X()', '_ZN1XD1Ev': 'X::~X()'}
@@ -69,7 +69,7 @@ def main():
     dem4 = {'_ZN1YD0Ev': 'Y::~Y()', '_ZN1YD1Ev': 'Y::~Y()', '_ZN1Y2m0Eb': 'Y::m0(bool)', '_ZN1Y2m1Ev': 'Y::m1()',
             '_ZN1Y2m2Ef': 'Y::m2(float)'}
 
-    def base4(un, a, otts=None, depth=0):
+    def base4(un, a, otts=None, depth=0, var=None):
         return None, 'kind differs (C1 at the exe slot, %s in the vtable)' % (sigs.itanium_variant(un) or 'function')
     stubs4 = {}
     tf4 = slotfill2.slot_ctor(base4, native4, lambda n: sigs.parse_itanium(n, dem4[n]),
