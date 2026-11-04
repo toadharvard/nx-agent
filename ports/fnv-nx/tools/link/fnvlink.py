@@ -334,6 +334,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     # ---- definitions: original address -> native symbol in the defining object
     native = {}      # addr -> dict(unit, sym (elf Sym), variants {variant: Sym}, how)
     def_stats = collections.Counter()
+    # GCC's -fno-semantic-interposition aliases (`f.localalias`): a unit's calls of its own functions go to them,
+    # past every by-address binding (overrides, import thunks); compile.sh must not use that flag
+    stats_localalias = sum(1 for u in have for s in objsyms[u.source] if s.name.endswith('.localalias'))
+    if stats_localalias:
+        log('WARNING: %d .localalias symbols (-fno-semantic-interposition): same-unit calls bypass the link'
+            % stats_localalias)
     for u in have:
         idx = KeyIndex()
         funcs = [s for s in objsyms[u.source] if s.shndx != 0 and s.type == 'func']
@@ -860,7 +866,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'image vftable names (%d (name, address) pairs, %d secondary) -> native address points, by outcome:'
               % (len(vnames), sum(1 for v in vnames.values() if v[1]))]
     lines += ['  %-40s %d' % kv for kv in sorted(vstats.items())]
-    lines += ['', 'definitions matched to native symbols:']
+    lines += ['', 'definitions matched to native symbols (.localalias symbols, want 0: %d):' % stats_localalias]
     lines += ['  %-18s %d' % (c, n) for c, n in sorted(def_stats.items())]
     lines += ['', 'duplicate strong names localized: %d' % stats['duplicate_strong_names'],
               'bridges generated: %d' % len(bridges),

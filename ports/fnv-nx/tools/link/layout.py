@@ -36,7 +36,7 @@ Layout = collections.namedtuple('Layout', 'size align trivial empty cls')
 
 SEMANTICS = ['-frounding-math', '-fsigned-char', '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks',
              '-ffp-contract=off']   # compile.sh's MSVC-like semantics (J-0034): probes and emitted host code too
-PIC = ['-fPIC', '-fno-semantic-interposition']   # compile.sh's GOT addressing of defined variables: emitted code
+PIC = ['-fPIC']   # compile.sh's GOT addressing of defined variables: emitted code
 
 
 def flags(tree):

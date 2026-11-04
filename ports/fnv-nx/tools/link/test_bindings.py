@@ -14,7 +14,7 @@
 * image vftable addresses stored into vptrs by hand: V entries (named vftable; class of the storing constructor) and
   the data symbol bound to the native address point;
 * split globals (S13): a variable defined at an image address by the unit itself - compiled like compile.sh
-  (-O2 -fPIC: through the GOT by symbol; plain -O2 uses section anchors, the control), its functions, its static
+  (all units here: -O2 -fPIC, through the GOT by symbol; plain -O2 uses section anchors, the control), its functions, its static
   initializer and a pointer in its data reach the rebound symbol, and no PC-relative relocation names an absolute
   image symbol (S5's relocatable guest);
 * GAME1 (fnvnx_game_<name>): looked up by the unit's own name (a game function, another import's slot);
@@ -40,7 +40,7 @@ import vtables  # noqa: E402
 FNVLINK = os.path.join(HERE, 'fnvlink.py')
 CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
 READELF = os.environ.get('READELF', 'aarch64-linux-gnu-readelf')
-PIC = ['-O2', '-fPIC', '-fno-semantic-interposition']   # compile.sh's addressing of the variables a unit defines
+PIC = ['-O2', '-fPIC']   # compile.sh's addressing of the variables a unit defines
 
 CRT = ('# address\tclass\tidentification\thow\tunits\tsrc_files\tprovider\n'
        '0x00ec1000\tcrt\tstrcpy_s\tn\t1\t1\tplatform/crt: strcpy_s\n'
@@ -217,7 +217,7 @@ def main():
             os.makedirs(os.path.dirname(p), exist_ok=True)
             open(p, 'w').write(text)
             objs[rel] = os.path.join(t, rel.replace('/', '_') + '.o')
-            opt = PIC if rel in ('src/r.cpp', 'src/s1.cpp', 'src/s2.cpp') else ['-O1']
+            opt = PIC   # like compile.sh
             run([CXX, '-mabi=ilp32', *opt, '-c', p, '-o', objs[rel]])
         units = os.path.join(tree, 'build', 'units.json')
         json.dump(UNITS, open(units, 'w'))
