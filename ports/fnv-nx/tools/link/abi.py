@@ -36,7 +36,7 @@ FPR_CLASSES = ('F32', 'F64', 'F80')
 def classify(t):
     """Class of one MSVC type: I8/I16/I32/I64/P/F32/F64/F80/VOID/VARARGS/MP or AGG:<name> / ?:<text>."""
     t = ' '.join(re.sub(r'\b(?:__ptr64|__ptr32|__restrict|__unaligned)\b', ' ', t).split())
-    if t.endswith(('*', '&')) or re.search(r'\*\s*(?:const|volatile)?\s*$', t):
+    if t.endswith(('*', '&')) or re.search(r'\*(?:\s*(?:const|volatile))*\s*$', t):
         return 'P'
     if re.search(r'\(\s*(?:__\w+\s+)?[\w:<>, ]*::\*\s*\)\s*\(', t):
         return 'MP'  # pointer to member function: 2 words in Itanium
@@ -412,12 +412,11 @@ def varargs_check(ref, dfn, rx, dx, rvar, dvar):
     * both variadic: the named parts are compared like fixed ones, the anonymous parts start at the same x86 offset
       and the same AArch64 register counts. Named parameters of the reference beyond the definition's are checked
       like a fixed reference's tail.
-    * definition parameters in the reference's anonymous part: only when the reference names nothing (`int f(...)`,
-      the decomp's unprototyped declaration) or the definition is variadic too (0x00406d00 `(char *, ...)` ->
-      `(char *, int, const char *, ...)`), and only 32-bit integers and pointers: x86 worked, so the call site pushed
-      a 4-byte word there, which is never a float (promoted to double); the call site's integer or pointer then
-      takes the AArch64 register the definition reads. A fixed definition behind named reference parameters is a
-      decompiled stack walk (0x00703c00): manual.
+    * definition parameters in the reference's anonymous part: manual. Their x86 words come from the call site's
+      argument types, which the declarations do not carry (a long long or double is two words on x86 and one
+      register on AArch64, a struct by value several words or a pointer, a struct { float } an s register: V1 VA-U1..
+      U4 refuted the earlier rule for `int f(...)`). A fixed definition behind named reference parameters is often a
+      decompiled stack walk (0x00703c00).
     Who pops: a variadic function is cdecl; a callee-pop other side with stack arguments moved esp on x86.
     -> (why not or None, labels of definition parameters the anonymous arguments supply)"""
     for s, xs in ((ref, rx), (dfn, dx)):
@@ -432,10 +431,10 @@ def varargs_check(ref, dfn, rx, dx, rvar, dvar):
     if rvar is not None:
         for lab, cls, loc in dnamed:
             if lab != 'sret' and loc not in rlocs and _at_or_after(loc, rvar):
-                if not ((not [x for x in params_of(ref) if x[1] != 'VARARGS'] or dvar is not None)
-                        and cls in ('I8', 'I16', 'I32', 'P')):
-                    return '%s of the definition is an anonymous argument of the reference' % lab, ()
-                anon.append(lab)
+                # the call site's anonymous argument types decide: a long long or double covers two definition words
+                # on x86 and one register on AArch64, a struct by value several words or a pointer, a struct { float }
+                # an s register (V1 VA-U1..U4): not bridgeable from the declarations
+                return '%s of the definition is an anonymous argument of the reference' % lab, ()
             elif lab != 'sret' and loc not in rlocs and _words(loc) is None and isinstance(loc, tuple):
                 return '%s of the definition: offset behind an aggregate' % lab, ()
         if anon:

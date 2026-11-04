@@ -1541,6 +1541,15 @@ def link_tool_inputs(b):
             b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
 
 
+def override_id(b):
+    """OVERRIDE in the Link fingerprint: auto and off are values (their sources are in link_tool_inputs), a table is
+    its content (V1 OVR-F1: file_hash of `auto` and `none` was None for both, so switching never relinked)."""
+    v = b.cfg['OVERRIDE']
+    if v in ('auto', 'none', ''):
+        return 'override:' + (v or 'none')
+    return file_hash(os.path.abspath(v))
+
+
 def extern_text_id(b):
     et = b.cfg['EXTERN_TEXT']
     if et == 'auto':
@@ -1604,7 +1613,7 @@ class Link(Stage):
 
     def fingerprint(self, b):
         return ['link-v3', link_tool_inputs(b), up_id(b, 'compile'), up_id(b, 'prepare'),
-                file_hash(b.cfg['OVERRIDE']), extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
+                override_id(b), extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
                 game_cxx_id(b), 'exe:%s' % file_hash(link_exe(b))]
 
     def outputs_present(self, b):
@@ -2704,6 +2713,8 @@ def parse_args(argv):
     cfg = {k: os.environ.get(k, d) or d for k, d, _ in CONFIG}
     for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'NINE_SRC', 'FORCE'):
         cfg[k] = os.environ.get(k, '')
+    if 'OVERRIDE' in os.environ:   # an empty OVERRIDE turns the overrides off, as documented (V1 OVR-E1)
+        cfg['OVERRIDE'] = os.environ['OVERRIDE']
     targets = []
     for a in argv:
         if '=' in a and re.match(r'^[A-Z_][A-Z0-9_]*=', a):
