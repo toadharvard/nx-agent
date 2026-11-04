@@ -196,6 +196,13 @@ def exe_inputs(path, fails):
             pairs(v(ms.group(2))), min(u32(v(ms.group(1))), 16))
 
 
+def n1_sources(n1):
+    # the N1 library sources, as the Makefile lists them (N1SRC)
+    mk = open(os.path.join(HERE, 'Makefile')).read()
+    m = re.search(r'^N1SRC := (.*)$', mk, re.M)
+    return [os.path.join(n1, f) for f in re.findall(r'\$\(N1\)/(\S+)', m.group(1))]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', required=True)
@@ -217,8 +224,7 @@ def main():
         n1 = os.path.join(NATIVE, 'n1')
         r = subprocess.run(['g++', '-std=c++17', '-O1', '-fno-exceptions', '-fno-rtti', '-w', '-I' + os.path.join(NATIVE, 'include'),
                             '-I' + os.path.join(NATIVE, 'front'), '-I' + os.path.join(out, 'shaders'), '-I' + n1, '-o', exe, drv,
-                            os.path.join(n1, 'renderer.cpp'), os.path.join(n1, 'engine_stubs.cpp'), os.path.join(n1, 'engine_textures.cpp'),
-                            os.path.join(out, 'front.o')] +
+                            os.path.join(out, 'front.o')] + n1_sources(n1) +
                            [os.path.join(out, x) for x in ('nxgl.o', 'gpu_dispatch.o', 'd3d9_state_s.o', 'nx_shaders.o')] +
                            ['-lEGL', '-lm'], capture_output=True, text=True)
         if r.returncode:

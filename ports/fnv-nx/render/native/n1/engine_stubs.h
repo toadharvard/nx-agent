@@ -165,6 +165,37 @@ void SetGuestBase(uintptr_t base);
 uintptr_t GuestBase();
 uint32_t GuestAddress(const void* p);   // p - GuestBase() (the 32-bit value an engine pointer field holds)
 uint32_t SkippedGeometry();         // skinned / unreadable geometry the stub did not draw
+// The engine's current render pass (see engine_stubs.cpp): pointers to the 32-bit pass id and RenderPass* globals.
+// The native build binds the data image's (BindImagePassGlobals: 0x011f91e4 / 0x011f91e0); tests bind their own.
+// Unbound, every draw has pass 0 (routed as the N1 menu path did: tile family).
+void BindPassGlobals(const uint32_t* passId, const uint32_t* renderPass);
+void BindImagePassGlobals();
+// The RenderPass of the draw of `geometry` (0 when none is current or it names another geometry) and its pass id.
+const uint8_t* CurrentRenderPass(const void* geometry, uint16_t* passId);
+// The family dispatch table (engine_stubs.cpp): one row per PassRoute; native rows draw with their family, the
+// others with the translated originals. Defaults: tile and image space (menuBG) native, every world family translated.
+struct FamilyRow { PassRoute route; const char* family; bool native; };
+const FamilyRow* FamilyRows();                      // Route_Count rows, indexed by PassRoute
+void SetFamilyNative(PassRoute r, bool native);
+// ---- the translated path (engine_device.cpp, engine_stubs.cpp) ----
+// The engine's D3D9 device as the sink of program creation and direct constant writes (method-table hook; calls go
+// on to the device behind). The native boot calls HookRendererDevice(NiDX9Renderer*) (device at +0x28C) before the
+// renderer creates its shaders, or HookD3DDevice(device) right after CreateDevice.
+bool HookD3DDevice(void* device);
+bool HookRendererDevice(const void* niDX9Renderer);
+void* HookedD3DDevice();
+TranslatedConstants& DeviceConstants();                          // the register files the engine wrote so far
+void RegisterShaderObject(const void* d3dShader, uint64_t hash);  // what the hooked CreateVertex/PixelShader record
+bool ShaderObjectHash(const void* d3dShader, uint64_t* hash);
+// The translated programs of the geometry's current engine pass: its shader (NiGeometry +0xC0, a BSShader) ->
+// current NiD3DPass (+0x5C) -> VS object (+0x5C) / PS object (+0x44) -> the D3D shader the hooked device created
+// (found by scanning the program object), else the program's name (+0x0C). Returns the skip reason, 0 when found.
+DrawSkip TranslatedPrograms(const void* geometry, int* vs, int* ps, const uint8_t** pass);
+// The constant registers of a translated draw: the device's register files, then the pass's constant maps (VS map
+// NiD3DPass +0x48, PS map +0x34; entries in NiTArray +0x0C; entry key +0x0C, register +0x1C, count +0x20, data size
+// +0x28, data +0x30): data-backed entries copied, predefined matrices / eye position computed. Returns the number of
+// entries that could not be evaluated (0: complete).
+uint32_t TranslatedConstantsFor(const void* geometry, const uint8_t* pass, const Renderer::GeomView& g, TranslatedConstants* c);
 
 } // namespace engine
 } // namespace nx

@@ -5,6 +5,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <new>
 
 namespace nx {
@@ -304,6 +305,7 @@ bool Renderer::Do_BeginFrame() {
     frame_.Begin(frameNo_);
     geomRing_.BeginFrame(frameNo_);
     inFrame_ = true;
+    memset(&stats_, 0, sizeof stats_);
     cur_ = nullptr; passOpen_ = false; pass_ = -1;
     return true;
 }
@@ -312,6 +314,7 @@ bool Renderer::Do_EndFrame() {
     if (!inFrame_) return false;
     frame_.Finish(sc_, nullptr, true);
     lastBinds_ = frame_.stateBindsEncoded();
+    lastStats_ = stats_;
     frameNo_++;
     inFrame_ = false; passOpen_ = false;
     return true;
@@ -348,6 +351,7 @@ void Renderer::Do_ClearBuffer(const NiRectF* rect, uint32_t mode) {
 void Renderer::Do_SetCameraData(const NiPoint3f& loc, const NiPoint3f& dir, const NiPoint3f& up, const NiPoint3f& right,
                                 const NiFrustumF& f, const NiRectF& port) {
     CameraView(loc, dir, up, right, view_);
+    eye_[0] = loc.x; eye_[1] = loc.y; eye_[2] = loc.z;
     CameraProjection(f, proj_);
     const Group* g = cur_ ? cur_ : &groups_[0];
     vp_ = PortViewport(port, g->w, g->h);
@@ -357,6 +361,7 @@ void Renderer::Do_SetScreenSpaceCameraData(const NiRectF* port) {
     const Group* g = cur_ ? cur_ : &groups_[0];
     ident(view_);
     ScreenSpaceProjection(proj_, g->w, g->h);
+    eye_[0] = 0.5f; eye_[1] = 0.5f; eye_[2] = -1.0f;
     if (port) vp_ = PortViewport(*port, g->w, g->h);
     else vp_ = {0, 0, g->w, g->h, 0.0f, 1.0f};
 }
@@ -387,11 +392,11 @@ bool Renderer::Render(const Draw& d) {
     const StateTracker::Resolved& r = state_.Resolve(vp_, sc, g->depth ? 75 : 0);
     // compile-time epilogue permutation for this draw's alpha test / fog
     uint16_t ps = d.ps;
-    bool needEpi = true;
-    if (d.ps) EpiIndex(d.ps);   // learns litBase_ on a shader's first use
+    bool needEpi = !d.translated;   // a translated program has its own fog / alpha test (driver UBO)
+    if (d.ps && !d.translated) EpiIndex(d.ps);   // learns litBase_ on a shader's first use
     // lit family: static light permutation (directional first, points padded to 1/2/4/8 with zero-colour lights)
     int litDir = -1, litPoints = 0, litPad = 0;
-    if (permutations_ && d.ps && d.ubo && d.uboSize >= sizeof(NxLitDraw) && (d.ps == litBase_[0] || d.ps == litBase_[1])) {
+    if (permutations_ && !d.translated && d.ps && d.ubo && d.uboSize >= sizeof(NxLitDraw) && (d.ps == litBase_[0] || d.ps == litBase_[1])) {
         const NxLitDraw* L = (const NxLitDraw*)d.ubo;
         const uint32_t n = L->lightCount < 8 ? L->lightCount : 8;
         int dirs = 0;
@@ -406,7 +411,7 @@ bool Renderer::Render(const Draw& d) {
         }
     }
     const uint16_t epiBase = ps;
-    const int ei = epiBase ? EpiIndex(epiBase) : -1;
+    const int ei = epiBase && !d.translated ? EpiIndex(epiBase) : -1;
     if (ei >= 0) {
         const EpiSet& es = epi_[ei];
         const bool at = (r.shaderBits >> NXSB_ALPHATEST) & 1, fog = ((r.shaderBits >> NXSB_FOG) & 7) != 0;
@@ -493,6 +498,7 @@ bool Renderer::Render(const Draw& d) {
         lastEpiResolve_ = state_.resolves(); lastEpiFrame_ = frameNo_;
         if (!needEpi) lastEpiBlock_ = 0;
     }
+    if (d.translated) frame_.SetTranslated(p, d.transBlock, d.transOffset);
     if (d.family) frame_.Tag(p, d.enginePass, d.family);
     else if (curFamily_) frame_.Tag(p, curPass_, curFamily_);
     return true;
@@ -594,44 +600,22 @@ inline void Mul(const float* a, const float* b, float* o) {   // column-major o 
 }
 }  // namespace
 
-bool Renderer::RenderGeometry(const GeomView& g) {
-    if (!inFrame_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
-    if (!geomVs_) {
-        geomVs_ = BlobShader(be_, "tile_vc", NxStage_Vertex);
-        geomVsScroll_ = BlobShader(be_, "tile_vc_scroll", NxStage_Vertex);
-        geomPs_ = FragmentShader("tile_vc");
-        geomVsPlain_ = BlobShader(be_, "tile", NxStage_Vertex);
-        geomVsPlainScroll_ = BlobShader(be_, "tile_scroll", NxStage_Vertex);
-        geomPsPlain_ = FragmentShader("tile");
-        geomPsAlphaMap_ = FragmentShader("tile_alphamap");
-        NxVtxLayout ll;
-        memset(&ll, 0, sizeof ll);
-        ll.count = 3; ll.stride = sizeof(GeomVtx);
-        ll.attr[0].offset = 0; ll.attr[0].type = NxAttr_Float32; ll.attr[0].components = 3;
-        ll.attr[1].offset = 12; ll.attr[1].type = NxAttr_Float32; ll.attr[1].components = 2;
-        ll.attr[2].offset = 20; ll.attr[2].type = NxAttr_Unorm8; ll.attr[2].components = 4;
-        geomLayout_ = sc_.Layout(ll);
-        static const uint32_t kWhite = 0xFFFFFFFFu;
-        NxImageDesc td;
-        memset(&td, 0, sizeof td);
-        td.width = 1; td.height = 1; td.format = NxFmt_BGRA8; td.data = FNVNX_ADDR_(&kWhite); td.data_size = 4;
-        white_ = be_->ImageCreate(td);
-        if (!geomVs_ || !geomPs_ || !geomLayout_ || !white_) return false;
-    }
-    // triangle list (strips: alternate winding, degenerate triangles dropped)
+// triangle list into the geometry ring (strips: alternate winding, degenerate triangles dropped), GeomVtx vertices
+bool Renderer::UploadGeometry(const GeomView& g, uint32_t* vOff, uint32_t* iOff, uint32_t* nOut) {
     uint32_t nIdx = g.indices ? g.indexCount - g.indexCount % 3 : 0;
     if (!g.indices && g.strips && g.stripLengths)
         for (uint32_t s = 0; s < g.stripCount; s++) nIdx += g.stripLengths[s] > 2 ? 3u * (g.stripLengths[s] - 2u) : 0u;
     if (!nIdx) return false;
-    uint32_t vOff, iOff;
-    GeomVtx* v = (GeomVtx*)geomRing_.Alloc(g.vertices * sizeof(GeomVtx), 16, &vOff);
-    uint16_t* ix = (uint16_t*)geomRing_.Alloc(nIdx * 2, 16, &iOff);
-    if (!v || !ix) return false;
+    const uint32_t stride = sizeof(GeomVtx);
+    uint8_t* vb = (uint8_t*)geomRing_.Alloc(g.vertices * stride, 16, vOff);
+    uint16_t* ix = (uint16_t*)geomRing_.Alloc(nIdx * 2, 16, iOff);
+    if (!vb || !ix) return false;
     static const float kOne[4] = {1, 1, 1, 1};
     for (uint32_t i = 0; i < g.vertices; i++) {
-        v[i].x = g.pos[3 * i]; v[i].y = g.pos[3 * i + 1]; v[i].z = g.pos[3 * i + 2];
-        v[i].u = g.uv ? g.uv[2 * i] : 0; v[i].v = g.uv ? g.uv[2 * i + 1] : 0;
-        v[i].rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
+        GeomVtx& v = ((GeomVtx*)vb)[i];
+        v.x = g.pos[3 * i]; v.y = g.pos[3 * i + 1]; v.z = g.pos[3 * i + 2];
+        v.u = g.uv ? g.uv[2 * i] : 0; v.v = g.uv ? g.uv[2 * i + 1] : 0;
+        v.rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
     }
     uint32_t n = 0;
     if (g.indices) {
@@ -645,45 +629,28 @@ bool Renderer::RenderGeometry(const GeomView& g) {
                 if (t & 1) { uint16_t x = a; a = b; b = x; }
                 ix[n++] = a; ix[n++] = b; ix[n++] = c;
             }
-        if (!n) return false;
     }
-    float world[16];
-    memset(world, 0, sizeof world);
-    for (int r = 0; r < 3; r++) {
-        for (int c = 0; c < 3; c++) world[c * 4 + r] = g.rot[r * 3 + c] * g.scale;
-        world[12 + r] = g.trans[r];
-    }
-    world[15] = 1;
-    NxTileDraw u;
-    memset(&u, 0, sizeof u);
-    float vp[16];
-    Mul(proj_, view_, vp);
-    Mul(vp, world, u.wvp);
-    memcpy(u.tint, g.tint, 16);
-    if (g.hasScroll || g.alphaMap) memcpy(u.texScroll, g.scroll, 16);
-    else { u.texScroll[2] = u.texScroll[3] = 1.0f; }
-    // texture: the geometry's own (tile property), else the tracker's stage 0, else a white texel
-    static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};   // D3DFMT_A8R8G8B8 2D
-    const uint32_t prevTex = state_.Texture(0);
-    const NxD3D9Texture prevKind = state_.TextureKind(0);
-    const bool swapTex = g.image || prevTex == 0;
-    if (g.image) { NxD3D9Texture k = {g.d3dfmt, 0, 0, 0, 0}; state_.SetTexture(0, g.image, k); }
-    else if (!prevTex) state_.SetTexture(0, white_, kWhiteKind);
-    const uint32_t prevTex1 = state_.Texture(1);
-    const NxD3D9Texture prevKind1 = state_.TextureKind(1);
-    if (g.alphaMap) { NxD3D9Texture k = {g.alphaMapFmt, 0, 0, 0, 0}; state_.SetTexture(1, g.alphaMap, k); }
-    // NiAlphaProperty -> D3D9 blend and alpha-test states for this draw (the engine pipeline that would set them is
-    // replaced); NiAlphaProperty::AlphaFunction -> D3DBLEND, TestFunction -> D3DCMPFUNC
+    *nOut = n;
+    return n != 0;
+}
+
+// NiAlphaProperty -> D3D9 blend and alpha-test states for this draw (the engine pipeline that would set them is
+// replaced); NiAlphaProperty::AlphaFunction -> D3DBLEND, TestFunction -> D3DCMPFUNC. Plus the scissor test and the
+// stencil states (NiStencilProperty); all restored after the draw.
+static const uint8_t kSavedRs[17] = {15, 19, 20, 24, 25, 27, 174, 52, 53, 54, 55, 56, 57, 58, 59, 14, 168};
+struct Renderer::SavedDrawState {
+    uint32_t rs[17];
+    bool hadScissor;
+    NxD3D9Rect scissor;
+};
+
+void Renderer::ApplyGeomStates(const GeomView& g, SavedDrawState& sv) {
     static const uint8_t kBlend[16] = {2, 1, 3, 4, 9, 10, 5, 6, 7, 8, 11, 2, 2, 2, 2, 2};
     static const uint8_t kCmp[8] = {8, 2, 3, 4, 5, 6, 7, 1};
     enum { RS_ALPHATEST = 15, RS_SRC = 19, RS_DST = 20, RS_REF = 24, RS_FUNC = 25, RS_BLEND = 27 };
-    // + scissor test and the stencil states (NiStencilProperty), all restored after the draw
-    static const uint8_t kSaved[15] = {RS_ALPHATEST, RS_SRC, RS_DST, RS_REF, RS_FUNC, RS_BLEND, 174,
-                                       52, 53, 54, 55, 56, 57, 58, 59};
-    uint32_t saved[15];
-    for (int i = 0; i < 15; i++) saved[i] = state_.GetRenderState(kSaved[i]);
-    const bool hadScissor = scissorSet_;
-    const NxD3D9Rect prevScissor = scissor_;
+    for (int i = 0; i < 17; i++) sv.rs[i] = state_.GetRenderState(kSavedRs[i]);
+    sv.hadScissor = scissorSet_;
+    sv.scissor = scissor_;
     if (g.hasScissor) { state_.SetRenderState(174, 1); SetScissorRect(&g.scissor); }
     if (g.hasStencil && (g.stencilFlags & 1)) {   // NiStencilProperty::Action / TestFunction -> D3DSTENCILOP / D3DCMPFUNC
         static const uint8_t kOp[8] = {1, 2, 3, 4, 5, 6, 1, 1};
@@ -702,6 +669,76 @@ bool Renderer::RenderGeometry(const GeomView& g) {
         state_.SetRenderState(RS_FUNC, kCmp[(f >> 10) & 7]);
         state_.SetRenderState(RS_REF, g.alphaRef);
     }
+}
+
+void Renderer::RestoreGeomStates(const GeomView& g, const SavedDrawState& sv) {
+    for (int i = 0; i < 17; i++)
+        if (state_.GetRenderState(kSavedRs[i]) != sv.rs[i]) state_.SetRenderState(kSavedRs[i], sv.rs[i]);
+    if (g.hasScissor) SetScissorRect(sv.hadScissor ? &sv.scissor : nullptr);
+}
+
+void Renderer::WorldMatrix(const GeomView& g, float world[16]) {
+    memset(world, 0, 64);
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) world[c * 4 + r] = g.rot[r * 3 + c] * g.scale;
+        world[12 + r] = g.trans[r];
+    }
+    world[15] = 1;
+}
+
+bool Renderer::EnsureWhite() {
+    if (white_) return true;
+    static const uint32_t kWhite = 0xFFFFFFFFu;
+    NxImageDesc td;
+    memset(&td, 0, sizeof td);
+    td.width = 1; td.height = 1; td.format = NxFmt_BGRA8; td.data = FNVNX_ADDR_(&kWhite); td.data_size = 4;
+    white_ = be_->ImageCreate(td);
+    return white_ != 0;
+}
+
+bool Renderer::RenderGeometry(const GeomView& g) {
+    if (!inFrame_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
+    if (!geomVs_) {
+        geomVs_ = BlobShader(be_, "tile_vc", NxStage_Vertex);
+        geomVsScroll_ = BlobShader(be_, "tile_vc_scroll", NxStage_Vertex);
+        geomPs_ = FragmentShader("tile_vc");
+        geomVsPlain_ = BlobShader(be_, "tile", NxStage_Vertex);
+        geomVsPlainScroll_ = BlobShader(be_, "tile_scroll", NxStage_Vertex);
+        geomPsPlain_ = FragmentShader("tile");
+        geomPsAlphaMap_ = FragmentShader("tile_alphamap");
+        NxVtxLayout ll;
+        memset(&ll, 0, sizeof ll);
+        ll.count = 3; ll.stride = sizeof(GeomVtx);
+        ll.attr[0].offset = 0; ll.attr[0].type = NxAttr_Float32; ll.attr[0].components = 3;
+        ll.attr[1].offset = 12; ll.attr[1].type = NxAttr_Float32; ll.attr[1].components = 2;
+        ll.attr[2].offset = 20; ll.attr[2].type = NxAttr_Unorm8; ll.attr[2].components = 4;
+        geomLayout_ = sc_.Layout(ll);
+        if (!geomVs_ || !geomPs_ || !geomLayout_ || !EnsureWhite()) return false;
+    }
+    uint32_t vOff, iOff, n;
+    if (!UploadGeometry(g, &vOff, &iOff, &n)) return false;
+    float world[16];
+    WorldMatrix(g, world);
+    NxTileDraw u;
+    memset(&u, 0, sizeof u);
+    float vp[16];
+    Mul(proj_, view_, vp);
+    Mul(vp, world, u.wvp);
+    memcpy(u.tint, g.tint, 16);
+    if (g.hasScroll || g.alphaMap) memcpy(u.texScroll, g.scroll, 16);
+    else { u.texScroll[2] = u.texScroll[3] = 1.0f; }
+    // texture: the geometry's own (tile property), else the tracker's stage 0, else a white texel
+    static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};   // D3DFMT_A8R8G8B8 2D
+    const uint32_t prevTex = state_.Texture(0);
+    const NxD3D9Texture prevKind = state_.TextureKind(0);
+    const bool swapTex = g.image || prevTex == 0;
+    if (g.image) { NxD3D9Texture k = {g.d3dfmt, 0, 0, 0, 0}; state_.SetTexture(0, g.image, k); }
+    else if (!prevTex) state_.SetTexture(0, white_, kWhiteKind);
+    const uint32_t prevTex1 = state_.Texture(1);
+    const NxD3D9Texture prevKind1 = state_.TextureKind(1);
+    if (g.alphaMap) { NxD3D9Texture k = {g.alphaMapFmt, 0, 0, 0, 0}; state_.SetTexture(1, g.alphaMap, k); }
+    SavedDrawState sv;
+    ApplyGeomStates(g, sv);
     Draw d;
     memset(&d, 0, sizeof d);
     // the engine's TileShader choice: TILE1002 (VC) for geometry with vertex colours, TILE1001 (scroll VS, ALPHAMAP PS)
@@ -716,8 +753,7 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     bool ok = Render(d);
     if (swapTex) state_.SetTexture(0, prevTex, prevKind);
     if (g.alphaMap) state_.SetTexture(1, prevTex1, prevKind1);
-    for (int i = 0; i < 15; i++) if (state_.GetRenderState(kSaved[i]) != saved[i]) state_.SetRenderState(kSaved[i], saved[i]);
-    if (g.hasScissor) SetScissorRect(hadScissor ? &prevScissor : nullptr);
+    RestoreGeomStates(g, sv);
     if (ok) geomDraws_++;
     return ok;
 }
@@ -754,6 +790,206 @@ bool Renderer::RenderMenuBackground(uint32_t scene, uint32_t sceneFmt, uint32_t 
     bool ok = Render(d);
     state_.SetTexture(0, t0, k0); state_.SetTexture(1, t1, k1);
     for (int st = 0; st < 2; st++) for (int i = 0; i < 4; i++) state_.SetSamplerState(st, kTypes[i], s[st][i]);
+    return ok;
+}
+
+
+// ---- the translated path (translated.h): the game's own programs on the native renderer ---------------------------
+void Renderer::SetTranslatedStore(const TranslatedStore* s) {
+    store_ = s;
+    delete[] transShader_;
+    transShader_ = nullptr;
+    nTransPairs_ = 0;
+    if (s && s->count()) {
+        transShader_ = new (std::nothrow) uint16_t[s->count()];
+        if (transShader_) memset(transShader_, 0, 2 * s->count());
+    }
+}
+
+// GL only: a fragment input the vertex program does not write must still exist as a VS output for the link (the
+// DKSH stages are separate and need nothing). Appends `layout(location = N) out <type> nx_padN;` and zero writes.
+static uint32_t PadVertexGlsl(const char* vs, const char* ps, char* out, uint32_t cap) {
+    char decl[2048], init[1024];
+    uint32_t nd = 0, ni = 0;
+    decl[0] = init[0] = 0;
+    for (const char* p = ps; (p = strstr(p, "layout(location = ")); p++) {
+        const int loc = atoi(p + 18);
+        const char* r = strchr(p, ')');
+        const char* e = strchr(p, ';');
+        if (!r || !e || r > e) continue;
+        const char* q = r + 1;
+        while (*q == ' ') q++;
+        if (strncmp(q, "in ", 3)) continue;
+        q += 3;
+        // type: the token before the name (skip qualifiers such as highp / centroid)
+        const char* nameStart = e;
+        while (nameStart > q && nameStart[-1] != ' ') nameStart--;
+        const char* typeEnd = nameStart - 1, *typeStart = typeEnd;
+        while (typeStart > q && typeStart[-1] != ' ') typeStart--;
+        char want[48];
+        snprintf(want, sizeof want, "layout(location = %d) out", loc);
+        if (strstr(vs, want) || typeEnd <= typeStart || typeEnd - typeStart > 16) continue;
+        char type[20];
+        memcpy(type, typeStart, (size_t)(typeEnd - typeStart)); type[typeEnd - typeStart] = 0;
+        if (nd < sizeof decl - 96) nd += (uint32_t)snprintf(decl + nd, sizeof decl - nd, "layout(location = %d) out %s nx_pad%d;\n", loc, type, loc);
+        if (ni < sizeof init - 64) ni += (uint32_t)snprintf(init + ni, sizeof init - ni, "\tnx_pad%d = %s(0.0);\n", loc, type);
+    }
+    const uint32_t n = (uint32_t)strlen(vs);
+    if (!nd) { if (n + 1 > cap) return 0; memcpy(out, vs, n + 1); return n; }
+    const char* m = strstr(vs, "void main()");
+    const char* brace = m ? strchr(m, '{') : nullptr;
+    if (!m || !brace || n + nd + ni + 1 > cap) return 0;
+    uint32_t o = 0;
+    memcpy(out, vs, (size_t)(m - vs)); o = (uint32_t)(m - vs);
+    memcpy(out + o, decl, nd); o += nd;
+    memcpy(out + o, m, (size_t)(brace + 1 - m)); o += (uint32_t)(brace + 1 - m);
+    out[o++] = '\n';
+    memcpy(out + o, init, ni); o += ni;
+    const uint32_t rest = (uint32_t)(n - (brace + 1 - vs));
+    memcpy(out + o, brace + 1, rest); o += rest;
+    out[o] = 0;
+    return o;
+}
+
+uint16_t Renderer::TranslatedShader(int prog, int psForPad) {
+    if (!store_ || prog < 0 || (uint32_t)prog >= store_->count() || !transShader_) return 0;
+    const TranslatedProgram& p = store_->program(prog);
+    // never a compile on the console: deko3d takes the pack's DKSH or nothing; the GL reference backend compiles
+    // GLSL (counted: a program without DKSH would be a compile on the console)
+    const bool gl = be_->Info().backend == 2;
+    if (!p.dksh && (!gl || !p.glsl)) { transNoDksh_++; return 0; }
+    if (p.stage == 1 || psForPad < 0) {
+        uint16_t& id = transShader_[prog];
+        if (!id) {
+            NxShaderDesc d;
+            memset(&d, 0, sizeof d);
+            d.stage = p.stage ? NxStage_Fragment : NxStage_Vertex;
+            d.dksh = FNVNX_ADDR_(p.dksh); d.dksh_size = p.dkshSize;
+            d.glsl = FNVNX_ADDR_(p.glsl); d.glsl_size = p.glslSize;
+            id = (uint16_t)be_->ShaderCreate(d);
+            transLoads_++;
+            if (!p.dksh) { transCompiles_++; stats_.runtimeCompiles++; }
+        }
+        return id;
+    }
+    // vertex program for a fragment program: the GLSL padded for that pair (the DKSH is the same)
+    for (uint32_t i = 0; i < nTransPairs_; i++)
+        if (transPairs_[i].vs == prog && transPairs_[i].ps == psForPad) return transPairs_[i].id;
+    static char buf[256 * 1024];
+    const char* pg = store_->program(psForPad).glsl;
+    const uint32_t n = p.glsl && pg ? PadVertexGlsl(p.glsl, pg, buf, sizeof buf) : 0;
+    NxShaderDesc d;
+    memset(&d, 0, sizeof d);
+    d.stage = NxStage_Vertex;
+    d.dksh = FNVNX_ADDR_(p.dksh); d.dksh_size = p.dkshSize;
+    d.glsl = n ? FNVNX_ADDR_(buf) : 0; d.glsl_size = n;
+    const uint16_t id = n || p.dksh ? (uint16_t)be_->ShaderCreate(d) : 0;
+    transLoads_++;
+    if (!p.dksh) { transCompiles_++; stats_.runtimeCompiles++; }
+    if (id && nTransPairs_ < kTransPairs) transPairs_[nTransPairs_++] = {prog, psForPad, id};
+    return id;
+}
+
+bool Renderer::RenderTranslated(const GeomView& g, int vsProg, int psProg, const TranslatedConstants& c, uint16_t pass) {
+    if (!inFrame_ || !store_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
+    if (vsProg < 0 || psProg < 0 || store_->program(vsProg).stage != 0 || store_->program(psProg).stage != 1) return false;
+    if (!transRing_.block() && !transRing_.Init(be_, 16u << 20)) return false;
+    if (transFrame_ != frameNo_) { transRing_.BeginFrame(frameNo_); transFrame_ = frameNo_; }
+    const uint16_t vs = TranslatedShader(vsProg, psProg), ps = TranslatedShader(psProg, -1);
+    if (!vs || !ps) return false;
+    // vertex layout: one float4 per input location the VS reads (POSITION 0, NORMAL 3, COLOR0 4, TEXCOORD0 6,
+    // TANGENT 14, BINORMAL 15 from the geometry; any other input reads (0, 0, 0, 1))
+    const uint16_t mask = store_->program(vsProg).inputMask ? store_->program(vsProg).inputMask : 1;
+    uint8_t locs[8], na = 0;
+    for (uint8_t l = 0; l < 16 && na < 8; l++) if (mask >> l & 1) locs[na++] = l;
+    uint16_t layout = 0;
+    for (uint32_t i = 0; i < nTransLayouts_; i++) if (transLayoutMask_[i] == mask) layout = transLayout_[i];
+    if (!layout) {
+        NxVtxLayout ll;
+        memset(&ll, 0, sizeof ll);
+        ll.count = na; ll.stride = (uint8_t)(16 * na);
+        for (uint8_t i = 0; i < na; i++) {
+            ll.attr[i].offset = (uint8_t)(16 * i); ll.attr[i].type = NxAttr_Float32; ll.attr[i].components = 4;
+            ll.attr[i].location = (uint8_t)(locs[i] + 1);
+        }
+        layout = sc_.Layout(ll);
+        if (!layout) return false;
+        if (nTransLayouts_ < kTransLayouts) { transLayoutMask_[nTransLayouts_] = mask; transLayout_[nTransLayouts_++] = layout; }
+    }
+    uint32_t nIdx = g.indices ? g.indexCount - g.indexCount % 3 : 0;
+    if (!g.indices && g.strips && g.stripLengths)
+        for (uint32_t s = 0; s < g.stripCount; s++) nIdx += g.stripLengths[s] > 2 ? 3u * (g.stripLengths[s] - 2u) : 0u;
+    if (!nIdx) return false;
+    uint32_t vOff, iOff, bOff;
+    float* vb = (float*)transRing_.Alloc(g.vertices * 16u * na, 16, &vOff);
+    uint16_t* ix = (uint16_t*)transRing_.Alloc(nIdx * 2, 16, &iOff);
+    uint8_t* bundle = (uint8_t*)transRing_.Alloc(Frame::kTransBytes, 256, &bOff);
+    if (!vb || !ix || !bundle) return false;
+    for (uint32_t v = 0; v < g.vertices; v++)
+        for (uint8_t a = 0; a < na; a++) {
+            float* o = vb + (v * na + a) * 4;
+            o[0] = o[1] = o[2] = 0; o[3] = 1;
+            switch (locs[a]) {
+            case 0: memcpy(o, g.pos + 3 * v, 12); break;
+            case 3: if (g.normal) { memcpy(o, g.normal + 3 * v, 12); o[3] = 0; } break;
+            case 4: if (g.color) memcpy(o, g.color + 4 * v, 16); else o[0] = o[1] = o[2] = 1; break;
+            case 6: if (g.uv) { o[0] = g.uv[2 * v]; o[1] = g.uv[2 * v + 1]; } break;
+            case 14: if (g.tangent) { memcpy(o, g.tangent + 3 * v, 12); o[3] = 0; } break;
+            case 15: if (g.binormal) { memcpy(o, g.binormal + 3 * v, 12); o[3] = 0; } break;
+            default: break;
+            }
+        }
+    uint32_t n = 0;
+    if (g.indices) {
+        for (uint32_t i = 0; i < nIdx; i++) ix[n++] = g.indices[i] < g.vertices ? g.indices[i] : 0;
+    } else {
+        const uint16_t* s = g.strips;
+        for (uint32_t k = 0; k < g.stripCount; s += g.stripLengths[k], k++)
+            for (uint32_t t = 0; t + 2 < g.stripLengths[k]; t++) {
+                uint16_t a = s[t], b = s[t + 1], cc = s[t + 2];
+                if (a == b || b == cc || a == cc || a >= g.vertices || b >= g.vertices || cc >= g.vertices) continue;
+                if (t & 1) { uint16_t x = a; a = b; b = x; }
+                ix[n++] = a; ix[n++] = b; ix[n++] = cc;
+            }
+    }
+    if (!n) return false;
+    // the constant bundle (fnvnx_dk_layout.h)
+    memset(bundle, 0, Frame::kTransBytes);
+    memcpy(bundle + Frame::kTransVsC, c.vsc, 4096);
+    memcpy(bundle + Frame::kTransPsC, c.psc, 4096);
+    memcpy(bundle + Frame::kTransVsIB, c.vsi, 256);
+    memcpy(bundle + Frame::kTransPsIB, c.psi, 256);
+    for (int k = 0; k < 16; k++) {
+        memcpy(bundle + Frame::kTransVsIB + 256 + 16 * k, &c.vsb[k], 4);
+        memcpy(bundle + Frame::kTransPsIB + 256 + 16 * k, &c.psb[k], 4);
+    }
+    float* vd = (float*)(bundle + Frame::kTransVsDrv);
+    vd[2] = 1.0f;   // posfix (0, 0, 1): the native viewport carries D3D9's half pixel; y as is (nx_render's rule)
+    float* pd = (float*)(bundle + Frame::kTransPsDrv);
+    const uint32_t* rs = state_.rs();
+    const TranslatedProgram& pp = store_->program(psProg);
+    nx_d3d9_color(rs[34], pd);                                  // FOGCOLOR
+    float mode = 0;
+    if (rs[28] && pp.major < 3) mode = rs[35] == 1 ? 2.0f : rs[35] == 2 ? 3.0f : rs[35] == 3 ? 4.0f : 1.0f;
+    pd[4] = mode; memcpy(&pd[5], &rs[36], 4); memcpy(&pd[6], &rs[37], 4); memcpy(&pd[7], &rs[38], 4);
+    const int32_t af = rs[15] ? (int32_t)rs[25] : 0;
+    memcpy(&pd[8], &af, 4);
+    pd[12] = (float)(rs[24] & 0xFF) / 255.0f;
+    // draw: the tracked render state, the 16 texture stages
+    state_.SetPixelShaderVersion((uint32_t)pp.major << 8 | pp.minor);
+    SavedDrawState sv;
+    ApplyGeomStates(g, sv);
+    Draw d;
+    memset(&d, 0, sizeof d);
+    d.vs = vs; d.ps = ps; d.layout = layout; d.prim = NxPrim_Triangles;
+    d.vtxBlock = transRing_.block(); d.vtxOffset = vOff; d.vtxSize = g.vertices * 16u * na;
+    d.idxBlock = transRing_.block(); d.idxOffset = iOff; d.idxSize = n * 2; d.idxType = 0;
+    d.count = n; d.textures = StateTracker::kStages;
+    d.translated = true; d.transBlock = transRing_.block(); d.transOffset = bOff;
+    d.enginePass = pass; d.family = NxFam_Translated;
+    const bool ok = Render(d);
+    RestoreGeomStates(g, sv);
+    state_.SetPixelShaderVersion(0x0200);
     return ok;
 }
 
