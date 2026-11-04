@@ -45,8 +45,17 @@ ORDER_ARGS=${ORDER_ARGS:-rtl}
 # ORDER_REFCOUNT=weak: refcount sites of InterlockedIncrement/Decrement relaxed / release (docs/ORDERING.md
 # "Refcounts"); full keeps x86 lock semantics everywhere (A/B, or a suspected refcount ordering bug).
 ORDER_REFCOUNT=${ORDER_REFCOUNT:-weak}
+# ORDER_OBJECT=first|last (ORDER-OBJECT: a member call's object before or after its arguments) and
+# ORDER_OPERATOR=cpp17|rtl (ORDER-OPERATOR: overloaded <<, >>, [], ->* left to right as C++17, or like any MSVC call);
+# docs/ORDERING.md, tests/s12/order/evalorder.cpp. ORDER_OBJECT=last is the build: MSVC's thiscall pushes the arguments
+# and loads ecx last, and the decomp (byte-matched against MSVC) has calls that work only that way. ORDER_OPERATOR=rtl:
+# MSVC 2008 predates C++17 and compiles an overloaded operator as a plain call (arguments pushed right to left).
+# S11's MSVC run of evalorder.cpp confirms both; first / cpp17 are GCC's own order, for A/B.
+ORDER_OBJECT=${ORDER_OBJECT:-last}
+ORDER_OPERATOR=${ORDER_OPERATOR:-rtl}
 FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS"
-        -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT")
+        -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
+        -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR")
 if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
 # ORDER_KEYS: the whole program's key list (docs/ORDERING.md "Whole-program keys"): every field and global that some
 # unit hands to Interlocked* (directly or through a forwarder) or polls in a wait-only loop. Their plain accesses are
@@ -64,13 +73,21 @@ if [ -z "$LIST" ]; then LIST="$OUT/units.list"; jq -r '.units[].source' "$TREE/b
 
 # ---- whole-program keys: discover=<unit>.keys under -fsyntax-only (no code generation), merged and sorted
 keys_one() {
-  local src=$1 k
+  local src=$1 k dep stale=0
   k="$OUT/.keys/$(echo "$1" | tr / _).keys"
-  if [ -f "$k" ] && [ "$k" -nt "$TREE/$src" ]; then return; fi
+  # up to date only when newer than the unit and than every header it includes (its .d from the last discovery)
+  if [ -f "$k" ] && [ -f "$k.d" ] && [ "$k" -nt "$TREE/$src" ]; then
+    for dep in $(sed -e 's/\\$//' -e 's/^[^:]*://' "$k.d"); do
+      case $dep in /*) ;; *) dep=$TREE/$dep ;; esac
+      if [ ! -e "$dep" ] || [ "$dep" -nt "$k" ]; then stale=1; break; fi
+    done
+    [ $stale = 0 ] && return
+  fi
   # shellcheck disable=SC2086
-  (cd "$TREE" && timeout 900 $CXX $KEYFLAGS_STR -fsyntax-only -fplugin-arg-fnvnx_order-discover="$k.tmp" "$src") \
-    > /dev/null 2>&1 || true   # a unit that does not compile still contributes what it parsed
+  (cd "$TREE" && timeout 900 $CXX $KEYFLAGS_STR -fsyntax-only -MMD -MF "$k.d.tmp" -MT x \
+     -fplugin-arg-fnvnx_order-discover="$k.tmp" "$src") > /dev/null 2>&1 || true   # a unit that does not compile still contributes what it parsed
   if [ -f "$k.tmp" ]; then mv "$k.tmp" "$k"; else : > "$k"; fi
+  if [ -f "$k.d.tmp" ]; then mv "$k.d.tmp" "$k.d"; else echo "x: $src" > "$k.d"; fi
 }
 if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
   KEYFLAGS_STR=$(printf '%s\n' "${KEYFLAGS[@]}" | grep -vxF -- -c | tr '\n' ' ')
@@ -82,8 +99,9 @@ if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
   export KEYFLAGS_STR; export -f keys_one
   jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$OUT/.keys/units.list"
   xargs -a "$OUT/.keys/units.list" -P "$JOBS" -I{} bash -c 'keys_one "$@"' _ {}
-  while read -r src; do cat "$OUT/.keys/$(echo "$src" | tr / _).keys"; done < "$OUT/.keys/units.list" |
-    LC_ALL=C sort -u > "$OUT/order.keys.tmp"
+  # forwarders defined in one unit and called in another are resolved over all units (keys_merge.py)
+  while read -r src; do echo "$OUT/.keys/$(echo "$src" | tr / _).keys"; done < "$OUT/.keys/units.list" > "$OUT/.keys/files.list"
+  python3 "$HERE/toolchain/order/keys_merge.py" --list "$OUT/.keys/files.list" > "$OUT/order.keys.tmp"
   # replaced only when it changes: its mtime decides which objects are stale (compile_one)
   if cmp -s "$OUT/order.keys.tmp" "$OUT/order.keys"; then rm "$OUT/order.keys.tmp"; else mv "$OUT/order.keys.tmp" "$OUT/order.keys"; fi
   echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)"

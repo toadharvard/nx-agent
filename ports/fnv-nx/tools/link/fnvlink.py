@@ -65,6 +65,7 @@ RUNTIME = re.compile(r'^(?:__cxa_\w+|_Unwind_\w+|__gxx_personality_v0|__stack_ch
 ADDR_SYM = '__fnv_%08x'
 TRAP_SYM = '__fnvnx_vtrap_%08x'   # slot of a virtual function defined nowhere -> fnvnx_vslot_trap(this, text)
 TLS_SYM = '__fnvnx_tls_%08x'      # thread-local variable at an image .tls address: slot of the native TLS block
+TEXTADDR_SYM = '__fnvnx_textaddr_%08x'   # a variable at a .text address nothing defines: absolute, the x86 value
 XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
 # renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
@@ -512,6 +513,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     per_obj = {}
     used_addr = set()
     data_defs, tls_defs, tls_addrs = [], [], set()
+    text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
     exports = load_exports(EXPORTS if imports is None else (os.path.join(os.path.dirname(imports), 'exports.cpp')
                                                              if imports != 'none' else None))
     providers, crt_classes = load_providers(CRT_SYMBOLS if crt_symbols is None else
@@ -570,22 +572,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     decl_cache = {}
 
     def c_decls(src_):
-        """CDecls of a unit and the local headers it includes (\"...\" from the including file's directory, then
-        <tree>/include): the unit's own declarations first."""
-        src_ = src_.split('#')[0]
-        if src_ not in decl_cache:
-            texts, seen, todo = [], set(), [os.path.join(tree, src_)]
-            while todo and len(seen) < 200:
-                f_ = os.path.normpath(todo.pop(0))
-                if f_ in seen or not os.path.isfile(f_):
-                    continue
-                seen.add(f_)
-                t_ = open(f_, encoding='utf-8', errors='surrogateescape').read()
-                texts.append(t_)
-                for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', t_, re.M):
-                    todo += [os.path.join(os.path.dirname(f_), inc), os.path.join(tree, 'include', inc)]
-            decl_cache[src_] = CDecls('\n;\n'.join(texts))
-        return decl_cache[src_]
+        return unit_c_decls(tree, src_, decl_cache)
 
     def casts_of(u_):
         if u_.source not in cast_cache:
@@ -766,11 +753,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 pair_classes[c] += 1
                             if v.kind != 'same':
                                 # aggregates by value: ask the layout probe, then decide on bytes (abi2)
-                                for sg, unit in ((rs, u.source), (ds, nd['unit'])):
+                                # synthesized vtable / body objects (`<host>#vtables`) have the host unit's types
+                                for sg, unit in ((rs, u.host or u.source), (ds, nd['unit'])):
                                     for c in [c for _, c in abi.params_of(sg)] + [abi.ret_class(sg)]:
                                         if c.startswith('AGG:') and '{anon}' not in c:
                                             probe_req.add((unit, abi2.agg_name(c)))
-                                p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.source: layouts.get((x, t)),
+                                p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.host or u.source: layouts.get((x, t)),
                                                   lambda t, x=nd['unit']: layouts.get((x, t)), ecx_unused=ecx_dead)
                                 if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
                                         not (v.kind == 'bridge' and 'narrow-extend' in v.classes) and \
@@ -823,6 +811,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     cls = 'code-pending' if not du.obj else 'code-defmissing'
                     target = ADDR_SYM % addr
                     used_addr.add(addr)
+                elif ak == 'text' and note and re.search(r'@@3[QD]', note) and msvc(note).kind == 'data' and \
+                        un not in called_syms(u):
+                    # a variable the decomp places at a .text address nothing defines (the generated initializers'
+                    # `extern const char g_011c5a4c_arg1[]` at 0x00a00000: an immediate the generator took for an
+                    # address): the code uses its address, which on x86 is that number - an absolute symbol there
+                    # gives the native code the same value (S2c-abi, S13b native-stub-data). Only arrays (`@@3Q`)
+                    # and char labels (`@@3D`, `&FUN_00a00000`), whose address is all the code uses; an `int` at
+                    # 0x00000065 stays extern-text
+                    cls = 'text-addr'; target = TEXTADDR_SYM % addr
+                    text_addrs.add(addr)
                 elif ak == 'text':
                     cls = 'extern-text'; target = None
                     extern_text[addr].add(un)
@@ -889,6 +887,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- per object objcopy args: renames, address symbols for the definitions it holds, localize duplicates
     alias_lines, localize = [], collections.defaultdict(list)
+    alias_lines += ['%s = 0x%08x;' % (TEXTADDR_SYM % a, a) for a in sorted(text_addrs)]
     for name, srcs in strong.items():
         if len(srcs) > 1:
             for s in sorted(srcs)[1:]:
@@ -896,9 +895,20 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     stats['duplicate_strong_names'] = sum(1 for s in strong.values() if len(s) > 1)
     data_def_names = collections.defaultdict(dict)   # source -> {native name: address symbol it becomes}
     for a, name, src in data_defs:
+        if name in data_def_names[src]:
+            continue
         if ADDR_SYM % a not in data_def_names[src].values():  # objcopy allows one old name per new name
             data_def_names[src][name] = ADDR_SYM % a
             used_addr.add(a)
+        else:
+            # a second native definition of the same image variable in this object (tesform.cpp: `DAT_011c54cc`
+            # and `fnv_00485a70::DAT_011c54cc`, S13b split-global): it becomes its own weak symbol, which aliases.ld
+            # defines as the address symbol, so neither copy stays private (S2c-abi)
+            k = sum(1 for v in data_def_names[src].values() if v.startswith(ADDR_SYM % a + '_d')) + 1
+            dup = '%s_d%d' % (ADDR_SYM % a, k)
+            data_def_names[src][name] = dup
+            alias_lines.append('%s = %s;' % (dup, ADDR_SYM % a))
+            stats['data_defs_same_address'] += 1
     for a, name, src in tls_defs:   # thread-local definitions at an image .tls address: the native block's slot
         if TLS_SYM % a not in data_def_names[src].values():
             data_def_names[src][name] = TLS_SYM % a
@@ -1168,7 +1178,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
-                                         'code-defmissing', 'extern-text', 'import', 'provider', 'tls'))
+                                         'code-defmissing', 'extern-text', 'text-addr', 'import', 'provider', 'tls'))
     with open(os.path.join(out, 'extern_text.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a in sorted(extern_text):
             f.write('%08x\t%s\n' % (a, ' '.join(sorted(extern_text[a]))))
@@ -1187,7 +1197,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     if stats_ov:
         lines += ['override rows: ' + ', '.join('%s %d' % kv for kv in sorted(stats_ov.items()))]
     lines += ['', 'variables defined natively at a data-image address: %d (%d copies in objects whose unit does not '
-              'name the address: STATIC1 header variables)' % (len(data_defs), stats['rebound_copies']),
+              'name the address: STATIC1 header variables; %d second definitions of an address in one object)'
+              % (len(data_defs), stats['rebound_copies'], stats['data_defs_same_address']),
               'address map entries by kind: %s' % ' '.join('%s=%d' % kv for kv in sorted(amap_kinds.items())),
               'deleting destructors (G) with both D1 and D0: %d of %d' % (n_deldtor, amap_kinds.get('G', 0)),
               'synthesized vtable objects linked: %d' % (len(have) - len(real)),
@@ -1897,6 +1908,25 @@ def int_words(t):
         return u + base + ' '
     return ' '.join(re.sub(r'\b(?:(?:unsigned|signed|short|long|int|char|__int8|__int16|__int32|__int64)\b\s*)+',
                            canon, t).split())
+
+
+def unit_c_decls(tree, src_, cache):
+    """CDecls of a unit and the local headers it includes (\"...\" from the including file's directory, then
+    <tree>/include): the unit's own declarations first."""
+    src_ = src_.split('#')[0]
+    if src_ not in cache:
+        texts, seen, todo = [], set(), [os.path.join(tree, src_)]
+        while todo and len(seen) < 200:
+            f_ = os.path.normpath(todo.pop(0))
+            if f_ in seen or not os.path.isfile(f_):
+                continue
+            seen.add(f_)
+            t_ = open(f_, encoding='utf-8', errors='surrogateescape').read()
+            texts.append(t_)
+            for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', t_, re.M):
+                todo += [os.path.join(os.path.dirname(f_), inc), os.path.join(tree, 'include', inc)]
+        cache[src_] = CDecls('\n;\n'.join(texts))
+    return cache[src_]
 
 
 class CDecls:

@@ -248,6 +248,7 @@ extern "C" unsigned long fnvnx_ws2_inet_addr(const char *s) { W32_UNUSED(s); ret
 extern "C" char *fnvnx_ws2_inet_ntoa(unsigned long a) { W32_UNUSED(a); static char b[] = "0.0.0.0"; return b; }
 extern "C" void *fnvnx_ws2_gethostbyname(const char *n) { W32_UNUSED(n); return NULL; }
 extern "C" int fnvnx_ws2_gethostname(char *b, int n) { if (n < 7) return -1; memcpy(b, "switch", 7); return 0; }
+extern "C" int fnvnx_ws2_fdisset(UINT_PTR s, void *set) { W32_UNUSED(s); W32_UNUSED(set); return 0; }   /* __WSAFDIsSet: select never succeeds */
 
 /* ---- steam_api: Steam is not running */
 extern "C" bool SteamAPI_Init(void) { return false; }

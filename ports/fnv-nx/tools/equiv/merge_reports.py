@@ -33,7 +33,7 @@ KINDS = ('eh', 'retarget', 'code', 'no-build')
 def parse(text, name='?'):
     """{commit, shard, of, failed, tail, units, functions, table, differing, nobuild, run} of one shard report."""
     r = dict(name=name, commit=None, shard=None, of=None, failed=False, tail='', units=Counter(), functions=Counter(),
-             table={}, differing=[], nobuild=[], run=[])
+             table={}, differing=[], nobuild=[], retargets=[], run=[])
     lines = text.splitlines()
     block, section = None, None
     for ln in lines:
@@ -54,6 +54,8 @@ def parse(text, name='?'):
         if block:
             if block.startswith('Differing'):
                 r['differing'].append(ln)
+            elif block.startswith('Retargets'):
+                r['retargets'].append(ln)
             elif block.startswith('Units the prepared'):
                 r['nobuild'].append(ln)
             elif r['failed'] and ln.strip():
@@ -134,12 +136,12 @@ def merge(reports, commit=None):
     commit = commit or (ok[0]['commit'] if ok else (reports[0].get('commit') if reports else '?'))
     of = Counter(r['of'] for r in ok if r['of']).most_common(1)
     n = of[0][0] if of else len(reports)
-    units, funcs, table, differing, nobuild = Counter(), Counter(), {}, [], []
+    units, funcs, table, differing, nobuild, rts = Counter(), Counter(), {}, [], [], []
     for r in ok:
         units.update(r['units']); funcs.update(r['functions'])
         for rule, t in r['table'].items():
             table.setdefault(rule, Counter()).update(t)
-        differing += r['differing']; nobuild += r['nobuild']
+        differing += r['differing']; nobuild += r['nobuild']; rts += r['retargets']
     done = sorted(r['shard'] for r in ok if r['shard'])
     missing = [k for k in range(1, n + 1) if k not in done]
     out = ['# MSVC equivalence gate - %s (%d of %d shards)' % (commit, len(done), n), '']
@@ -167,6 +169,9 @@ def merge(reports, commit=None):
     out += ['', '## Differing functions (unit, address, kind, rule)', '', '```'] + sorted(differing) + ['```', '']
     out += ['## Units the prepared side does not compile (unit, rule, first error)', '', '```'] + sorted(nobuild) + \
         ['```', '']
+    if rts:
+        out += ['## Retargets (unit, address, pristine binding>prepared binding of each relocation that moved)', '',
+                '```'] + sorted(rts) + ['```', '']
     return '\n'.join(out) + '\n'
 
 
