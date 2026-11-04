@@ -315,6 +315,7 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     if (!inFrame_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
     if (!geomVs_) {
         geomVs_ = BlobShader(be_, "tile_vc", NxStage_Vertex);
+        geomVsScroll_ = BlobShader(be_, "tile_vc_scroll", NxStage_Vertex);
         geomPs_ = BlobShader(be_, "tile_vc", NxStage_Fragment);
         NxVtxLayout ll;
         memset(&ll, 0, sizeof ll);
@@ -372,6 +373,7 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     Mul(proj_, view_, vp);
     Mul(vp, world, u.wvp);
     memcpy(u.tint, g.tint, 16);
+    if (g.hasScroll) { u.texScroll[0] = g.scroll[0]; u.texScroll[1] = g.scroll[1]; }
     // texture: the geometry's own (tile property), else the tracker's stage 0, else a white texel
     static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};   // D3DFMT_A8R8G8B8 2D
     const uint32_t prevTex = state_.Texture(0);
@@ -384,9 +386,22 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     static const uint8_t kBlend[16] = {2, 1, 3, 4, 9, 10, 5, 6, 7, 8, 11, 2, 2, 2, 2, 2};
     static const uint8_t kCmp[8] = {8, 2, 3, 4, 5, 6, 7, 1};
     enum { RS_ALPHATEST = 15, RS_SRC = 19, RS_DST = 20, RS_REF = 24, RS_FUNC = 25, RS_BLEND = 27 };
-    static const uint8_t kSaved[6] = {RS_ALPHATEST, RS_SRC, RS_DST, RS_REF, RS_FUNC, RS_BLEND};
-    uint32_t saved[6];
-    for (int i = 0; i < 6; i++) saved[i] = state_.GetRenderState(kSaved[i]);
+    // + scissor test and the stencil states (NiStencilProperty), all restored after the draw
+    static const uint8_t kSaved[15] = {RS_ALPHATEST, RS_SRC, RS_DST, RS_REF, RS_FUNC, RS_BLEND, 174,
+                                       52, 53, 54, 55, 56, 57, 58, 59};
+    uint32_t saved[15];
+    for (int i = 0; i < 15; i++) saved[i] = state_.GetRenderState(kSaved[i]);
+    const bool hadScissor = scissorSet_;
+    const NxD3D9Rect prevScissor = scissor_;
+    if (g.hasScissor) { state_.SetRenderState(174, 1); SetScissorRect(&g.scissor); }
+    if (g.hasStencil && (g.stencilFlags & 1)) {   // NiStencilProperty::Action / TestFunction -> D3DSTENCILOP / D3DCMPFUNC
+        static const uint8_t kOp[8] = {1, 2, 3, 4, 5, 6, 1, 1};
+        const uint32_t f = g.stencilFlags;
+        state_.SetRenderState(52, 1);
+        state_.SetRenderState(53, kOp[(f >> 1) & 7]); state_.SetRenderState(54, kOp[(f >> 4) & 7]);
+        state_.SetRenderState(55, kOp[(f >> 7) & 7]); state_.SetRenderState(56, ((f >> 12) & 7) + 1);
+        state_.SetRenderState(57, g.stencilRef & 0xFF); state_.SetRenderState(58, g.stencilMask);
+    }
     if (g.hasAlpha) {
         const uint32_t f = g.alphaFlags;
         state_.SetRenderState(RS_BLEND, f & 1);
@@ -398,13 +413,14 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     }
     Draw d;
     memset(&d, 0, sizeof d);
-    d.vs = geomVs_; d.ps = geomPs_; d.layout = geomLayout_; d.prim = NxPrim_Triangles;
+    d.vs = g.hasScroll && geomVsScroll_ ? geomVsScroll_ : geomVs_; d.ps = geomPs_; d.layout = geomLayout_; d.prim = NxPrim_Triangles;
     d.vtxBlock = geomRing_.block(); d.vtxOffset = vOff; d.vtxSize = g.vertices * sizeof(GeomVtx);
     d.idxBlock = geomRing_.block(); d.idxOffset = iOff; d.idxSize = n * 2; d.idxType = 0;
     d.count = n; d.textures = 1; d.ubo = &u; d.uboSize = sizeof u;
     bool ok = Render(d);
     if (swapTex) state_.SetTexture(0, prevTex, prevKind);
-    if (g.hasAlpha) for (int i = 0; i < 6; i++) state_.SetRenderState(kSaved[i], saved[i]);
+    for (int i = 0; i < 15; i++) if (state_.GetRenderState(kSaved[i]) != saved[i]) state_.SetRenderState(kSaved[i], saved[i]);
+    if (g.hasScissor) SetScissorRect(hadScissor ? &prevScissor : nullptr);
     if (ok) geomDraws_++;
     return ok;
 }

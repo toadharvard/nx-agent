@@ -211,5 +211,17 @@ static int n_drawidx(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const
     }
     return SUCCEEDED(hr);
 }
+static int n_drawg(V6nTarget* t, uint32_t prim, uint32_t count, int ne, const uint8_t* us, const uint8_t* ix, const float* d, int nv) {
+    (void)nv;
+    D3DVERTEXELEMENT9 el[17];
+    for (int i = 0; i < ne; i++) el[i] = (D3DVERTEXELEMENT9){0, (WORD)(16 * i), D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, us[i], ix[i]};
+    el[ne] = (D3DVERTEXELEMENT9)D3DDECL_END();
+    IDirect3DVertexDeclaration9* decl = NULL;
+    if (FAILED(IDirect3DDevice9_CreateVertexDeclaration(t->dev, el, &decl))) return 0;
+    IDirect3DDevice9_SetVertexDeclaration(t->dev, decl);
+    HRESULT hr = IDirect3DDevice9_DrawPrimitiveUP(t->dev, (D3DPRIMITIVETYPE)prim, count, d, 16 * ne);
+    IDirect3DVertexDeclaration9_Release(decl);
+    return SUCCEEDED(hr);
+}
 const V6nOps v6n_target_ops = {"nine-softpipe", n_begin, n_end, n_clear, n_rs, n_samp, n_tss, n_tex, n_notex, n_vp,
-                               n_scissor, n_proj, n_draw, n_readback, n_ps, n_psc, n_vsh, n_vsc, n_drawidx};
+                               n_scissor, n_proj, n_draw, n_readback, n_ps, n_psc, n_vsh, n_vsc, n_drawidx, n_drawg};

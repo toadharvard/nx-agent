@@ -30,6 +30,7 @@ selfcheck() {
 		py "$V/shaders/vsscenes.py" --target s6ngl || bad=1
 		py "$V/shaders/vsscenes.py" --mutant vs_posfix_halfpixel > /dev/null || { echo "vs_posfix_halfpixel survived"; bad=1; }
 		py "$V/shaders/parity.py" --selftest | tail -1
+		py "$V/shaders/vsscenes.py" --findings | tail -1 | sed 's/^/  (S6b findings P2-P4, expected to differ) /'
 	else echo "== shader paths skipped: build S6b's tools (render/shaders/build.sh --tests, FNVNX_SHADERS_BUILD)"; fi
 	echo "== capture/replay mutation (C66): every corrupted capture must be flagged by S6n's replay_gl"
 	if [ -n "${S6N_TESTS:-}" ] && [ -f "$S6N_TESTS/cap/n0.nxcap" ]; then
@@ -91,6 +92,11 @@ defect() {   # name -> 0 when the defect is fixed (test passes)
 			"$N/n1/renderer.cpp" "$S/front.o" "$S/nxgl.o" "$S/gpu_dispatch.o" "$S/d3d9_state_s.o" "$S/nx_shaders.o" -lEGL -lm || return 2
 		"$S/v6n_cpr" ;;
 	clear_srgb) py "$V/pixdiff.py" --target s6ngl "$T/defects/clear_srgb.scene" ;;
+	tile_texscroll_scale|tile_alphamap|tile_vc|nolight_falloff_curve|sky_vertex_weights|land_light|depth_alphatest)
+		# C63 / C69: S6n's family vs the engine's original program (needs the player's packages: FNVNX_SDP)
+		[ -n "${FNVNX_SDP:-}" ] || { echo "skipped: set FNVNX_SDP to the player's shaderpackage002.sdp or its directory"; return 3; }
+		local c=$1; case $1 in tile_texscroll_scale) c=tile_scroll_scale ;; nolight_falloff_curve) c=nolight_texfalloff ;; esac
+		py "$T/claims/c69_families.py" "$c" ;;
 	*) echo "unknown defect $1"; return 2 ;;
 	esac
 }
@@ -98,9 +104,9 @@ DEFECTS=$(sed -n 's/^| `\([a-z0-9_]*\)` |.*/\1/p' "$T/DEFECTS.md")
 build
 case "${1:-all}" in
 selfcheck) selfcheck ;;
-defects) rc=0; for d in $DEFECTS; do echo "== defect $d"; defect "$d" || rc=1; done; exit $rc ;;
+defects) rc=0; for d in $DEFECTS; do echo "== defect $d"; r=0; defect "$d" || r=$?; [ $r = 0 ] || [ $r = 3 ] || rc=1; done; exit $rc ;;
 fuzz) py "$V/fuzz/fuzz.py" -n "${2:-300}" ;;
-all) selfcheck; s=$?; rc=0; for d in $DEFECTS; do echo "== defect $d"; defect "$d" || rc=1; done
+all) selfcheck; s=$?; rc=0; for d in $DEFECTS; do echo "== defect $d"; r=0; defect "$d" || r=$?; [ $r = 0 ] || [ $r = 3 ] || rc=1; done
 	echo "== summary: selfcheck $([ $s = 0 ] && echo PASS || echo FAIL), open defects: $([ $rc = 0 ] && echo none || echo yes)"
 	exit $(( s | rc )) ;;
 *) defect "$1" ;;

@@ -91,6 +91,13 @@ public:
     void SetScissorRect(const NxD3D9Rect* r) { scissorSet_ = r != nullptr; if (r) scissor_ = *r; }
     // Native description of an engine NiRenderTargetGroup (0 = the default group: back buffer + depth).
     bool RegisterTargetGroup(const void* group, uint32_t color, uint32_t depth, uint32_t width, uint32_t height);
+    // The colour image and size of a registered group (engine render targets: BSRenderedTexture / target groups).
+    bool GroupColor(const void* group, uint32_t* image, uint32_t* w, uint32_t* h) const {
+        const Group* g = FindGroup(group);
+        if (!g) return false;
+        *image = g->color; *w = g->w; *h = g->h;
+        return true;
+    }
 
     // Family entry: one draw with the recorded state. ubo: per-draw block (copied, <= the frame's slice size).
     struct Draw {
@@ -130,6 +137,13 @@ public:
         bool hasAlpha = false;           // NiAlphaProperty present: blend / alpha test from alphaFlags / alphaRef
         uint16_t alphaFlags = 0;
         uint8_t alphaRef = 0;
+        bool hasScroll = false;          // TileShaderProperty TexScroll: uv += scroll
+        float scroll[2] = {0, 0};
+        bool hasScissor = false;         // the tile's scissor rectangle (target pixels)
+        NxD3D9Rect scissor = {0, 0, 0, 0};
+        bool hasStencil = false;         // NiStencilProperty: flags (enable, fail/zfail/pass actions, func), ref, mask
+        uint16_t stencilFlags = 0;
+        uint32_t stencilRef = 0, stencilMask = 0xFFFFFFFFu;
     };
     bool RenderGeometry(const GeomView& g);
     // Menu background image-space effect (menubg family): the scene image toned through a lookup texture, drawn over
@@ -158,6 +172,7 @@ private:
     uint16_t curPass_ = 0, curFamily_ = 0;
     Ring geomRing_;
     uint32_t white_ = 0, geomDraws_ = 0;
+    uint16_t geomVsScroll_ = 0;
     uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0, bgVs_ = 0, bgPs_ = 0, bgLayout_ = 0;
     StateCache sc_;
     Frame frame_;

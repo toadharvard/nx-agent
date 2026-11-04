@@ -3,6 +3,7 @@
 #include "scenes.h"
 #include "d3d9_state.h"
 #include "nx_shaders.h"
+#include "nx/skin.h"
 #include "nx/families.h"
 #include <math.h>
 #include <stdio.h>
@@ -72,6 +73,7 @@ struct Draw {
 };
 
 struct DrawUbo { float rect[4], color[4], uv[4], rot[4], inst[16][4]; };
+enum { kDrawUboSize = 2048 };   // per-draw UBO slice: the largest block (NxLitSkinDraw, 2000 bytes)
 
 uint16_t StateFor(Ctx& c, const uint32_t* rs, uint16_t vs, uint16_t ps, uint16_t lay, NxDynamicState* dyn,
                   uint32_t* sb, uint32_t vw = W, uint32_t vh = H) {
@@ -882,7 +884,30 @@ void DrawN2(Ctx& c, const uint32_t* rs, uint16_t vs, uint16_t ps, const V36* v, 
     void* u = c.frame->Constants(&p->uboOffset);
     if (!u) return;
     memset(u, 0, 512);
-    memcpy(u, ubo, uboSize > 512 ? 512 : uboSize);
+    memcpy(u, ubo, uboSize > (uint32_t)kDrawUboSize ? (uint32_t)kDrawUboSize : uboSize);
+    Finish(c, p, dyn, sb, -1);
+}
+// skinned N2 vertices: V36 + 4 bone weights and 4 palette indices (unorm8)
+struct V44 { float x, y, z, u, v; uint32_t rgba; float nx, ny, nz; uint8_t w[4], idx[4]; };
+static_assert(sizeof(V44) == 44, "V44");
+void DrawSkin(Ctx& c, const uint32_t* rs, uint16_t vs, uint16_t ps, const V44* v, uint32_t n, const void* ubo,
+              uint32_t uboSize, const uint32_t* tex, uint32_t ntex, uint8_t pass, uint8_t layer) {
+    NxDynamicState dyn;
+    uint32_t sb;
+    uint16_t st = StateFor(c, rs, vs, ps, c.layN2Skin, &dyn, &sb);
+    uint32_t off;
+    V44* dst = (V44*)c.vb->Alloc(n * sizeof(V44), 16, &off);
+    nx::Packet* p = c.frame->Emit();
+    if (!dst || !p) return;
+    memcpy(dst, v, n * sizeof(V44));
+    uint32_t tb = ntex ? c.frame->AddTextures(tex, ntex) : 0;
+    p->key = nx::SortKey(pass, layer, st, (uint16_t)tb, 0);
+    p->state = st; p->texCount = (uint16_t)ntex; p->texBlock = (uint16_t)tb;
+    p->vtxBlock = c.vb->block(); p->vtxOffset = off; p->vtxSize = n * sizeof(V44);
+    p->prim = NxPrim_Triangles; p->count = n; p->instances = 1;
+    void* u = c.frame->Constants(&p->uboOffset);
+    if (!u) return;
+    memcpy(u, ubo, uboSize > (uint32_t)kDrawUboSize ? (uint32_t)kDrawUboSize : uboSize);
     Finish(c, p, dyn, sb, -1);
 }
 // pixel coordinates (y down) and z in [-100, 100] -> D3D clip space (z 0..1), column-major
@@ -1062,6 +1087,74 @@ void S_sky(Ctx& c, Checks& k) {
 
 } // namespace
 
+// ---- scene: skin (N2 skinning: bone palettes, lit_skin and depth_skin) ------------------------------------------------
+// A limb along x bends at x = 80 by bone 1 (-90 degrees about z through (80, 60): the far part points up); a quad
+// whose bone turns 180 degrees about y keeps its outline but its normal faces away from the light; a quad whose bone
+// moves it +50 in z is drawn by depth_skin (depth_out) at depth 0.75 instead of 0.5. Bind pose = identity.
+void S_skin(Ctx& c, Checks& k) {
+    BeginFrame(c);
+    uint8_t pass = Pass(c, 1 | 2, RGBA(0, 0, 0, 255), true, 1.0f);
+    D3D a;
+    Samp s;
+    uint32_t h = Handle(c, WhiteTex(c), FMT_A8R8G8B8, s);
+    NxBoneXform world[4], bind[4];
+    for (int i = 0; i < 4; i++) {
+        memset(&world[i], 0, sizeof world[i]); world[i].rot[0] = world[i].rot[4] = world[i].rot[8] = 1; world[i].scale = 1;
+        bind[i] = world[i];
+    }
+    const float r1[9] = {0, 1, 0, -1, 0, 0, 0, 0, 1};       // (x, y) -> (y, -x)
+    memcpy(world[1].rot, r1, 36); world[1].trans[0] = 20; world[1].trans[1] = 140;   // pivot (80, 60)
+    const float r2[9] = {-1, 0, 0, 0, 1, 0, 0, 0, -1};      // 180 degrees about y
+    memcpy(world[2].rot, r2, 36); world[2].trans[0] = 50;   // pivot x = 25
+    world[3].trans[2] = 50;
+    static NxLitSkinDraw u;
+    memset(&u, 0, sizeof u);
+    PixelOrtho(u.lit.wvp); Ident(u.lit.world);
+    u.lit.ambient[0] = u.lit.ambient[1] = u.lit.ambient[2] = 0.2f;
+    u.lit.diffuse[0] = u.lit.diffuse[1] = u.lit.diffuse[2] = u.lit.diffuse[3] = 1.0f;
+    u.lit.lightCount = 1;
+    const float L[4] = {0, 0, 1, 0}, C[4] = {0, 0.5f, 0.75f, 1};   // directional, travelling +z (towards the quads)
+    memcpy(u.lit.lights[0].posRange, L, 16); memcpy(u.lit.lights[0].color, C, 16);
+    const uint16_t palette[4] = {0, 1, 2, 3};
+    nx_skin_palette(world, bind, palette, 4, u.bones);
+    // the limb: columns at x = 20, 50, 70, 90, 110, 140; weights of bone 1 = 0, 0, .25, .75, 1, 1
+    static const float xs[6] = {20, 50, 70, 90, 110, 140}, w1[6] = {0, 0, 0.25f, 0.75f, 1, 1};
+    V44 v[64];
+    uint32_t n = 0;
+    auto vert = [&](float x, float y, float z, float wb, uint8_t b0, uint8_t b1) {
+        V44& o = v[n++];
+        memset(&o, 0, sizeof o);
+        o.x = x; o.y = y; o.z = z; o.rgba = RGBA(255, 255, 255, 255); o.nz = -1;
+        o.w[0] = (uint8_t)(255.0f * (1.0f - wb) + 0.5f); o.w[1] = (uint8_t)(255 - o.w[0]); o.idx[0] = b0; o.idx[1] = b1;
+    };
+    for (int i = 0; i < 5; i++) {
+        float x0 = xs[i], x1 = xs[i + 1];
+        vert(x0, 52, 0, w1[i], 0, 1); vert(x1, 52, 0, w1[i + 1], 0, 1); vert(x0, 68, 0, w1[i], 0, 1);
+        vert(x0, 68, 0, w1[i], 0, 1); vert(x1, 52, 0, w1[i + 1], 0, 1); vert(x1, 68, 0, w1[i + 1], 0, 1);
+    }
+    // the flipped quad (bone 2), x 10..40, y 90..115
+    vert(10, 90, 0, 1, 0, 2); vert(40, 90, 0, 1, 0, 2); vert(10, 115, 0, 1, 0, 2);
+    vert(10, 115, 0, 1, 0, 2); vert(40, 90, 0, 1, 0, 2); vert(40, 115, 0, 1, 0, 2);
+    DrawSkin(c, a.rs, c.vsLitSkin, c.psLit, v, n, &u, sizeof u, &h, 1, pass, 0);
+    // depth_skin: x 120..150, y 90..115 at z 0, moved +50 by bone 3
+    static NxDepthSkinDraw du;
+    memcpy(du.wvp, u.lit.wvp, 64); memcpy(du.bones, u.bones, sizeof du.bones);
+    n = 0;
+    vert(120, 90, 0, 1, 0, 3); vert(150, 90, 0, 1, 0, 3); vert(120, 115, 0, 1, 0, 3);
+    vert(120, 115, 0, 1, 0, 3); vert(150, 90, 0, 1, 0, 3); vert(150, 115, 0, 1, 0, 3);
+    D3D z; z.rs[ZENABLE] = 1; z.rs[ZFUNC] = CMP_LESS;
+    DrawSkin(c, z.rs, c.vsDepthSkin, c.psDepthOut, v, n, &du, sizeof du, nullptr, 0, pass, 1);
+    EndFrame(c);
+    const uint8_t lit[3] = {u8(0.2f), u8(0.7f), u8(0.95f)};
+    k.Add("skin: bone 0 part of the limb", 30, 60, lit[0], lit[1], lit[2], 255, 1);
+    k.Add("skin: bone 1 part bent upwards", 80, 10, lit[0], lit[1], lit[2], 255, 1);
+    k.Add("skin: nothing where the unbent limb would be", 125, 60, 0, 0, 0, 255, 0);
+    k.Add("skin: nothing left of the bent part", 60, 10, 0, 0, 0, 255, 0);
+    k.Add("skin: normal turned away by bone 2 (ambient only)", 25, 100, u8(0.2f), u8(0.2f), u8(0.2f), 255, 1);
+    k.Add("skin: depth_skin moved +50 in z (depth 0.75)", 135, 100, u8(0.75f), u8(0.75f), u8(0.75f), u8(0.75f), 1);
+    k.Add("skin: depth_skin outline unchanged", 118, 100, 0, 0, 0, 255, 0);
+}
+
 // ---- scene: dynres (dynamic resolution frame graph, RENDER_NATIVE.md §9) ------------------------------------------
 // The 3D scene renders into a target at 0.75 x 0.75 of native (120x90), is upscaled bilinearly onto the native
 // target (texel centres meet pixel centres: the full-screen quad sits at -0.5 px, D3D9 convention), and the UI is
@@ -1124,7 +1217,7 @@ const Scene kScenes[] = {
     {"blend", S_blend}, {"stencil", S_stencil}, {"sampler", S_sampler}, {"format", S_format},
     {"epilogue", S_epilogue}, {"border", S_border}, {"tile", S_tile},
     {"raster_a", S_raster_a}, {"raster_b", S_raster_b},
-    {"lit", S_lit}, {"depth", S_depth}, {"land", S_land}, {"sky", S_sky}, {"dynres", S_dynres},
+    {"lit", S_lit}, {"depth", S_depth}, {"land", S_land}, {"sky", S_sky}, {"dynres", S_dynres}, {"skin", S_skin},
 };
 const int kSceneCount = sizeof kScenes / sizeof kScenes[0];
 
@@ -1145,7 +1238,7 @@ bool Init(Ctx& c, nx::Backend* be, char* err, uint32_t errlen) {
     static nx::StaticBuffer vb;
     c.be = be; c.sc = &sc; c.frame = &frame; c.vb = &vb;
 #define FAIL_(m) do { snprintf(err, errlen, "%s", m); return false; } while (0)
-    if (!frame.Init(be, 4u << 20, sizeof(DrawUbo))) FAIL_("frame init");
+    if (!frame.Init(be, 4u << 20, kDrawUboSize)) FAIL_("frame init");
     if (!vb.Init(be, 1u << 20)) FAIL_("vertex buffer");
     c.vsQuad = Shader(c, "quad", 0); c.vsTri = Shader(c, "tri", 0);
     c.psSolid = Shader(c, "solid", 1); c.psTex = Shader(c, "tex", 1); c.psText = Shader(c, "text", 1);
@@ -1177,6 +1270,12 @@ bool Init(Ctx& c, nx::Backend* be, char* err, uint32_t errlen) {
     ln.attr[2].offset = 20; ln.attr[2].type = NxAttr_Unorm8; ln.attr[2].components = 4;
     ln.attr[3].offset = 24; ln.attr[3].type = NxAttr_Float32; ln.attr[3].components = 3;
     c.layN2 = sc.Layout(ln);
+    ln.count = 6; ln.stride = 44;
+    ln.attr[4].offset = 36; ln.attr[4].type = NxAttr_Unorm8; ln.attr[4].components = 4;
+    ln.attr[5].offset = 40; ln.attr[5].type = NxAttr_Unorm8; ln.attr[5].components = 4;
+    c.layN2Skin = sc.Layout(ln);
+    c.vsLitSkin = Shader(c, "lit_skin", 0); c.vsDepthSkin = Shader(c, "depth_skin", 0);
+    if (!c.vsLitSkin || !c.vsDepthSkin) FAIL_("skin shaders");
     NxVtxLayout lq;
     memset(&lq, 0, sizeof lq);
     lq.count = 2; lq.stride = 16;

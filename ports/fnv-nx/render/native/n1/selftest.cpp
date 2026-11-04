@@ -418,6 +418,87 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
         t.Check(abs(p[0] - 132) <= 2 && abs(p[1] - 114) <= 2 && abs(p[2] - 121) <= 2, "menubg: scene x tone mix", p[0], p[2]);
         p = px(40, 60);  // the menu's opaque red quad: (255, 0, 0) -> (228, 50, 25)
         t.Check(abs(p[0] - 228) <= 2 && abs(p[1] - 50) <= 2 && abs(p[2] - 25) <= 2, "menubg: second sample", p[0], p[1]);
+
+        // ---- frame 5: the image-space dispatch (ImageSpaceManager::RenderEffect) for EFFECT_MENUBG, with its tone
+        // texture made through the lockable CreateSurf path and filled like the engine's copy (GetSurfaceLevel,
+        // GetDesc, LockRect, UnlockRect through the method tables)
+        const uint32_t kMgr = 3456, kList = 3472, kFx = 3536, kIst = 3632, kNiTex = 3648, kSrcData = 3712, kPix = 3840, kDims = 3952;
+        memset(eng3 + kMgr, 0, 4096 - kMgr);
+        w32(kDims, 1); w32(kDims + 4, 1);
+        w32(kPix + 0x54, ga(eng3 + kDims)); w32(kPix + 0x58, ga(eng3 + kDims + 4)); w32(kPix + 0x60, 1);
+        w32(kSrcData + 0x20, 21);   // renderer pixel format hint: D3DFMT_A8R8G8B8
+        engine::NiDX9SourceTextureData* sd = (engine::NiDX9SourceTextureData*)(void*)(eng3 + kSrcData);
+        t.Check(sd->CreateSurf(eng3 + kPix), "CreateSurf -> lockable NativeTexture");
+        uint32_t tAddr; memcpy(&tAddr, eng3 + kSrcData + 0x64, 4);
+        void* lt = (void*)(engine::GuestBase() + tAddr);
+        engine::NativeTexture* ltn = engine::NativeTextureFromPointer(lt);
+        typedef int32_t (*FnSurf)(void*, uint32_t, void**);
+        typedef int32_t (*FnDesc1)(void*, uint32_t*);
+        typedef int32_t (*FnLock)(void*, uint32_t*, const void*, uint32_t);
+        typedef int32_t (*FnUnlock)(void*);
+        void* surf = nullptr;
+        uint32_t sdesc[8] = {}, locked[2] = {};
+        bool filled = ltn && ((FnSurf)ltn->vtbl[18])(lt, 0, &surf) == 0 && surf;
+        if (filled) {
+            const uintptr_t* sv = *(const uintptr_t* const*)surf;
+            filled = ((FnDesc1)sv[12])(surf, sdesc) == 0 && sdesc[0] == 21 && sdesc[6] == 1 &&
+                     ((FnLock)sv[13])(surf, locked, nullptr, 0) == 0 && locked[0] == 4;
+            if (filled) {
+                static const uint8_t bgra[4] = {50, 100, 200, 255};
+                memcpy((void*)(engine::GuestBase() + locked[1]), bgra, 4);
+                filled = ((FnUnlock)sv[14])(surf) == 0 && ltn->dirty;
+            }
+            ((Fn0)sv[2])(surf);
+        }
+        t.Check(filled, "lockable texture: GetSurfaceLevel, GetDesc, LockRect, UnlockRect");
+        w32(kNiTex + 0x24, ga(eng3 + kSrcData));          // NiTexture -> renderer data (texture at +0x64)
+        w32(kIst + 4, ga(eng3 + kNiTex));                  // ImageSpaceTexture -> NiTexture
+        w32(kFx + 0x58, ga(eng3 + kIst)); const float half = 0.5f; wf(kFx + 0x5C, &half, 1);
+        w32(kList + 4 * 15, ga(eng3 + kFx)); w32(kList + 4 * 3, ga(eng3 + kFx));
+        w32(kMgr + 0x08, ga(eng3 + kList));
+        static const int kSceneKey = 0;   // stands for the BSRenderedTexture holding the scene
+        r.RegisterTargetGroup(&kSceneKey, menu, 0, W, H);
+        engine::ImageSpaceManager* ism = (engine::ImageSpaceManager*)(void*)(eng3 + kMgr);
+        const uint32_t nat0 = engine::ImageSpaceEffectsNative(), skip0 = engine::ImageSpaceEffectsSkipped();
+        t.Check(eng->Do_BeginFrame() && eng->Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "frame 5: begin");
+        ism->RenderEffect(15, nullptr, (void*)&kSceneKey, nullptr, nullptr, false);
+        ism->RenderEffect(3, nullptr, (void*)&kSceneKey, nullptr, nullptr, false);    // not native yet: skipped
+        t.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame(), "frame 5: end");
+        t.Check(engine::ImageSpaceEffectsNative() == nat0 + 1 && engine::ImageSpaceEffectsSkipped() == skip0 + 1,
+                "RenderEffect: MENUBG native, others counted");
+        t.Check(be->Readback(rb), "frame 5: readback");
+        p = px(4, 90);
+        t.Check(abs(p[0] - 132) <= 2 && abs(p[1] - 114) <= 2 && abs(p[2] - 121) <= 2 && !ltn->dirty,
+                "RenderEffect(MENUBG) == the menubg mix, tone from the locked texture", p[0], p[2]);
+
+        // ---- frame 6: stencil (NiStencilProperty), texture scroll and the tile scissor rectangle
+        memset(eng3, 0, 3200);
+        const float red[4] = {1, 0, 0, 1};
+        tile(0, 256, 384, 0.0f, 0.0f, 0.5f, 1.0f, 512, 0, white, 0, 1, 0, 0, 0);          // stencil writer, left half
+        w32(0 + 0xAC, ga(eng3 + 700)); w16(700 + 0x18, (uint16_t)(1 | 2 << 7 | 7 << 12)); w32(700 + 0x1C, 1); w32(700 + 0x20, 0xFF);
+        tile(768, 1024, 1152, 0.0f, 0.0f, 1.0f, 1.0f, 1280, 0, green, 0, 1, 0, 0, 0);     // green where stencil == 1
+        w32(768 + 0xAC, ga(eng3 + 1468)); w16(1468 + 0x18, (uint16_t)(1 | 2 << 12)); w32(1468 + 0x1C, 1); w32(1468 + 0x20, 0xFF);
+        tile(1536, 1792, 1920, 0.5f, 0.0f, 1.0f, 0.5f, 2048, kTex0, white, 0, 1, 0, 0, 0); // checker scrolled by u + 0.5
+        eng3[2048 + 0x91] = 1; const float sc2[2] = {0.5f, 0.0f}; wf(2048 + 0x7C, sc2, 2);
+        tile(2304, 2560, 2688, 0.0f, 0.0f, 1.0f, 1.0f, 2816, 0, red, 0, 1, 0, 0, 0);      // red, scissored
+        eng3[2816 + 0xAC] = 1; const int32_t rect[4] = {100, 60, 110, 70}; memcpy(eng3 + 2816 + 0x9C, rect, 16);
+        t.Check(eng->Do_BeginFrame() && eng->Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "frame 6: begin");
+        eng->Do_SetScreenSpaceCameraData(nullptr);
+        r.SetBackgroundColor(0, 0, 0, 1);
+        eng->Do_RenderGeometry(eng3 + 0);
+        eng->Do_RenderGeometry(eng3 + 768);
+        eng->Do_RenderGeometry(eng3 + 1536);
+        eng->Do_RenderGeometry(eng3 + 2304);
+        t.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame(), "frame 6: end");
+        t.Check(be->Readback(rb), "frame 6: readback");
+        p = px(20, 80); q = px(100, 80);
+        t.Check(p[1] == 255 && p[0] == 0 && q[1] == 0, "stencil: REPLACE then EQUAL keeps green to the left half", p[1], q[1]);
+        p = px(70, 10); q = px(120, 10);
+        t.Check(p[2] == 255 && p[0] == 0 && q[2] == 255, "texture scroll: u + 0.5 shows texel column 1", p[2], q[2]);
+        p = px(105, 65); q = px(99, 65);
+        const uint8_t* q3 = px(110, 65);
+        t.Check(p[0] == 255 && p[1] == 0 && q[0] == 0 && q3[0] == 0, "tile scissor: only (100, 60)-(110, 70)", p[0], q[0]);
+        t.Check(r.state().GetRenderState(52) == 0 && r.state().GetRenderState(174) == 0, "stencil and scissor restored");
     }
     *checks = t.checks;
     return t.fails;

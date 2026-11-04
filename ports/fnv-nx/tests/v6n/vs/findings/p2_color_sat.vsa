@@ -1,0 +1,5 @@
+vs_2_0
+dcl_position v0
+mov oPos, v0
+mov oD0, c0
+mov oT0, c0

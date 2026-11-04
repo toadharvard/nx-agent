@@ -55,9 +55,13 @@ typedef struct NxLitDraw {
     NxLight lights[8];
 } NxLitDraw;
 
+/* SKIN variants (lit_skin, depth_skin VS): the draw block followed by the bone palette (nx/skin.h). */
+typedef struct NxLitSkinDraw { NxLitDraw lit; float bones[96][4]; } NxLitSkinDraw;
+
 /* depth (ZONLY, DEPTHMAP, shadow casters): VS depth; PS depth (no colour: use COLORWRITEENABLE 0) / depth_out
  * (DEPTHMAP: writes the post-projection depth z/w to all four channels). */
 typedef struct NxDepthDraw { float wvp[16]; } NxDepthDraw;
+typedef struct NxDepthSkinDraw { float wvp[16]; float bones[96][4]; } NxDepthSkinDraw;
 
 /* land (LAND passes): a base texture plus up to 3 layers blended by per-vertex weights (attribute 3, xyz); the
  * vertex colour (attribute 2) modulates the result. Textures: slot 0 base, 1-3 layers. */

@@ -227,10 +227,10 @@ struct V6nTarget {
     int w, h; uint32_t rtf, dsf;
     GLuint fbo, rt, rt_srgb, ds; GLenum rt_ifmt; int rt_has_srgb;
     uint32_t rs[NXD3D_RS_COUNT];
-    uint32_t samp[2][NXD3D_SAMP_COUNT];
+    uint32_t samp[8][NXD3D_SAMP_COUNT];   /* 8 sampler stages for pixel shaders; the FF model uses 2 */
     uint32_t tss[2][33];
-    Tex tex[2]; int has_tex[2];
-    GLuint sampler[2];
+    Tex tex[8]; int has_tex[8];
+    GLuint sampler[8];
     NxD3D9Viewport vp; NxD3D9Rect sc;
     float proj[16];
     V6nReadback rb;
@@ -253,6 +253,25 @@ static char* rebind_vs(const char* src) {
     return out;
 }
 
+/* Add to a VS every output location the PS reads and the VS does not write, written as vec4(0) (Nine's value for a
+ * texture coordinate set an RHW / FF vertex does not carry, and for D3D9's unwritten varyings; RENDER_VERIFY §7 V1) */
+static void stub_vs(const char* vsrc, const char* ps, char* vfull, size_t cap) {
+    char decl[4096] = "", init[4096] = "";
+    for (const char* q = ps; (q = strstr(q, "layout(location = ")); q++) {
+        int loc = atoi(q + 18); const char* e = strchr(q, ';'); if (!e) break;
+        if (!strstr(q, ") in ") || strstr(q, ") in ") > e) continue;
+        char pat[64], pat2[64]; snprintf(pat, sizeof pat, "layout(location = %d) out", loc); snprintf(pat2, sizeof pat2, "layout(location=%d) out", loc);
+        if (strstr(vsrc, pat) || strstr(vsrc, pat2)) continue;
+        snprintf(decl + strlen(decl), sizeof decl - strlen(decl), "layout(location = %d) out highp vec4 v6n_stub_%d;\n", loc, loc);
+        snprintf(init + strlen(init), sizeof init - strlen(init), "v6n_stub_%d = vec4(0.0);\n", loc);
+    }
+    const char* mainp = strstr(vsrc, "void main()");
+    const char* brace = mainp ? strchr(mainp, '{') : NULL;
+    const char* nl = strchr(vsrc, '\n');   /* after the #version line */
+    if (brace && nl && nl < brace)
+        snprintf(vfull, cap, "%.*s%s%.*s%s%s", (int)(nl - vsrc + 1), vsrc, decl, (int)(brace - nl), nl + 1, init, brace + 1);
+    else snprintf(vfull, cap, "%s", vsrc);
+}
 static GLenum gl_cmp(uint32_t c) { return GL_NEVER + c; }   /* NxCompare = GL order */
 static GLenum gl_sop(uint32_t o) {
     static const GLenum t[8] = {GL_KEEP, GL_ZERO, GL_REPLACE, GL_INCR, GL_DECR, GL_INVERT, GL_INCR_WRAP, GL_DECR_WRAP};
@@ -324,8 +343,8 @@ static V6nTarget* g_begin(int w, int h, uint32_t rtf, uint32_t dsf, char* err, i
         t->tss[s][1] = s == 0 ? 4 : 1; t->tss[s][2] = 2; t->tss[s][3] = 1;      /* COLOROP MODULATE / DISABLE */
         t->tss[s][4] = s == 0 ? 2 : 1; t->tss[s][5] = 2; t->tss[s][6] = 1;      /* ALPHAOP SELECTARG1 / DISABLE */
         t->tss[s][26] = 1; t->tss[s][27] = 1; t->tss[s][11] = s;
-        glGenSamplers(1, &t->sampler[s]);
     }
+    for (int s = 0; s < 8; s++) { if (s >= 2) nx_d3d9_default_samp(t->samp[s]); glGenSamplers(1, &t->sampler[s]); }
     t->vp = (NxD3D9Viewport){0, 0, (uint32_t)w, (uint32_t)h, 0.0f, 1.0f};
     t->sc = (NxD3D9Rect){0, 0, w, h};
     for (int i = 0; i < 16; i++) t->proj[i] = (i % 5 == 0) ? 1.0f : 0.0f;
@@ -355,7 +374,7 @@ static V6nTarget* g_begin(int w, int h, uint32_t rtf, uint32_t dsf, char* err, i
     return t;
 }
 static void g_end(V6nTarget* t) {
-    for (int s = 0; s < 2; s++) { if (t->has_tex[s]) { glDeleteTextures(1, &t->tex[s].tex); if (t->tex[s].view_srgb) glDeleteTextures(1, &t->tex[s].view_srgb); } glDeleteSamplers(1, &t->sampler[s]); }
+    for (int s = 0; s < 8; s++) { if (t->has_tex[s]) { glDeleteTextures(1, &t->tex[s].tex); if (t->tex[s].view_srgb) glDeleteTextures(1, &t->tex[s].view_srgb); } glDeleteSamplers(1, &t->sampler[s]); }
     glDeleteFramebuffers(1, &t->fbo); glDeleteTextures(1, &t->rt); if (t->rt_srgb) glDeleteTextures(1, &t->rt_srgb);
     if (t->ds) glDeleteRenderbuffers(1, &t->ds);
     free(t->rb.color); free(t->rb.depth); free(t->rb.stencil); free(t);
@@ -399,12 +418,12 @@ static void g_clear(V6nTarget* t, uint32_t flags, uint32_t color, float z, uint3
     glDisable(GL_SCISSOR_TEST);
 }
 static void g_rs(V6nTarget* t, uint32_t st, uint32_t v) { if (st < NXD3D_RS_COUNT) t->rs[st] = v; }
-static void g_samp(V6nTarget* t, uint32_t s, uint32_t ty, uint32_t v) { if (s < 2 && ty < NXD3D_SAMP_COUNT) t->samp[s][ty] = v; }
+static void g_samp(V6nTarget* t, uint32_t s, uint32_t ty, uint32_t v) { if (s < 8 && ty < NXD3D_SAMP_COUNT) t->samp[s][ty] = v; }
 static void g_tss(V6nTarget* t, uint32_t s, uint32_t ty, uint32_t v) { if (s < 2 && ty < 33) t->tss[s][ty] = v; }
 int v6n_level_bytes(uint32_t fmt, int w, int h);
 
 static int g_tex(V6nTarget* t, uint32_t stage, uint32_t fmt, int w, int h, int levels, const uint8_t* const* data) {
-    if (stage > 1) return 0;
+    if (stage > 7) return 0;
     Tex* x = &t->tex[stage];
     if (t->has_tex[stage]) { glDeleteTextures(1, &x->tex); if (x->view_srgb) glDeleteTextures(1, &x->view_srgb); }
     memset(x, 0, sizeof *x);
@@ -458,7 +477,7 @@ static int g_tex(V6nTarget* t, uint32_t stage, uint32_t fmt, int w, int h, int l
     return glGetError() == GL_NO_ERROR;
 }
 static void g_notex(V6nTarget* t, uint32_t stage) {
-    if (stage > 1 || !t->has_tex[stage]) return;
+    if (stage > 7 || !t->has_tex[stage]) return;
     glDeleteTextures(1, &t->tex[stage].tex); if (t->tex[stage].view_srgb) glDeleteTextures(1, &t->tex[stage].view_srgb);
     t->has_tex[stage] = 0;
 }
@@ -508,9 +527,18 @@ static GLuint g_cur;
 #define U(n) glGetUniformLocation(g_cur, n)
 
 static const uint16_t* g_idx;   /* set by g_drawidx around g_draw */
+static struct { int ne, nv; const uint8_t* us; const uint8_t* ix; const float* data; } g_gen;   /* g_drawg */
+static int dk_attrib_location(int usage, int index) {   /* = fnvnx_dk_attrib_location (render/shaders/include) */
+    switch (usage) {
+    case 0: return index == 0 ? 0 : -1;  case 1: return index == 0 ? 1 : -1;  case 2: return index == 0 ? 2 : -1;
+    case 3: return index == 0 ? 3 : -1;  case 10: return index < 2 ? 4 + index : -1; case 5: return index < 8 ? 6 + index : -1;
+    case 6: return index == 0 ? 14 : -1; case 7: return index == 0 ? 15 : -1;
+    }
+    return -1;
+}
 static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6nVertex* v, int nv) {
     uint32_t nvert = vcount(prim, count);
-    if (!g_idx && (int)nvert > nv) return 0;
+    if (!g_idx && (int)nvert > nv && !(g_gen.ne && (int)nvert <= g_gen.nv)) return 0;
     if (t->vs && rhw) { fprintf(stderr, "v6n_gl: vertex shaders take XYZ vertices\n"); return 0; }
     NxD3D9Input in; memset(&in, 0, sizeof in);
     in.rs = t->rs; in.ps_version = t->ps ? t->ps_version : 0; in.depth_format = t->dsf; in.viewport = t->vp; in.scissor = t->sc;
@@ -526,24 +554,7 @@ static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
         if (!prog) {
             /* D3D9 lets a PS read a varying the VS does not write (Nine writes oFog = 0 for vs < 3 and leaves the
              * rest undefined); GL refuses to link. Add the missing VS outputs, written as 0. */
-            static char vsrc[1 << 17]; snprintf(vsrc, sizeof vsrc, "%s", rebind_vs(t->vs_glsl));
-            char decl[2048] = "", init[2048] = "";
-            for (const char* q = t->ps_glsl; (q = strstr(q, "layout(location = ")); q++) {
-                int loc = atoi(q + 18); const char* e = strchr(q, ';'); if (!e) break;
-                if (!strstr(q, ") in ") || strstr(q, ") in ") > e) continue;
-                char pat[64]; snprintf(pat, sizeof pat, "layout(location = %d) out", loc);
-                if (strstr(vsrc, pat)) continue;
-                snprintf(decl + strlen(decl), sizeof decl - strlen(decl), "layout(location = %d) out highp vec4 v6n_stub_%d;\n", loc, loc);
-                snprintf(init + strlen(init), sizeof init - strlen(init), "v6n_stub_%d = vec4(0.0);\n", loc);
-            }
-            char* mainp = strstr(vsrc, "void main()");
-            char* brace = mainp ? strchr(mainp, '{') : NULL;
-            static char vfull[1 << 17];
-            if (brace) {
-                char* nl = strchr(vsrc, '\n');   /* after the #version line */
-                snprintf(vfull, sizeof vfull, "%.*s%s%.*s%s%s", (int)(nl - vsrc + 1), vsrc, decl,
-                         (int)(brace - nl), nl + 1, init, brace + 1);
-            } else snprintf(vfull, sizeof vfull, "%s", vsrc);
+            static char vfull[1 << 17]; stub_vs(rebind_vs(t->vs_glsl), t->ps_glsl, vfull, sizeof vfull);
             GLuint vs = compile(GL_VERTEX_SHADER, vfull), fs = compile(GL_FRAGMENT_SHADER, t->ps_glsl);
             prog = glCreateProgram(); glAttachShader(prog, vs); glAttachShader(prog, fs); glLinkProgram(prog);
             GLint ok; glGetProgramiv(prog, GL_LINK_STATUS, &ok);
@@ -569,8 +580,19 @@ static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
         glBindBufferBase(GL_UNIFORM_BUFFER, 10, g_ubo2[1]);
     }
     glUseProgram(prog); g_cur = prog;
+    if (g_gen.ne) {   /* generic FLOAT4 elements at fnvnx_dk_attrib_location(usage, index) */
+        static GLuint vao3; if (!vao3) glGenVertexArrays(1, &vao3);
+        glBindVertexArray(vao3); glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
+        glBufferData(GL_ARRAY_BUFFER, 16 * g_gen.ne * (size_t)g_gen.nv, g_gen.data, GL_STREAM_DRAW);
+        for (int l = 0; l < 16; l++) glDisableVertexAttribArray(l);
+        for (int i = 0; i < g_gen.ne; i++) {
+            int l = dk_attrib_location(g_gen.us[i], g_gen.ix[i]); if (l < 0) continue;
+            glVertexAttribPointer(l, 4, GL_FLOAT, GL_FALSE, 16 * g_gen.ne, (void*)(uintptr_t)(16 * i)); glEnableVertexAttribArray(l);
+        }
+    } else {
     glBindVertexArray(t->vs ? g_vao2 : g_vao); glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(V6nVertex) * (g_idx ? (uint32_t)nv : nvert), v, GL_STREAM_DRAW);
+    }
     /* viewport + depth range */
     NxViewport vp = dyn.viewport;
     if (M("no_half_pixel")) { vp.x -= 0.5f; vp.y -= 0.5f; }
@@ -662,6 +684,7 @@ static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
         nx_d3d9_color(t->tss[s][32], cst[s]);
         apply_sampler(t, s);
     }
+    if (t->ps) for (int s = 2; s < 8; s++) apply_sampler(t, s);   /* ps_sN: binding N */
     glUniform4iv(U("uStage"), 2, &stage[0][0]); glUniform4iv(U("uStageB"), 2, &stageb[0][0]);
     glUniform4fv(U("uConst"), 2, &cst[0][0]);
     glUniform1i(U("uTex0"), 0); glUniform1i(U("uTex1"), 1);
@@ -749,9 +772,10 @@ static int g_psh(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
     uint32_t h = fnv1a(glsl);
     { static char keep[1 << 17]; snprintf(keep, sizeof keep, "%s", glsl); t->ps_glsl = keep; }
     for (int i = 0; i < g_nps; i++) if (g_ps[i].hash == h) { t->ps = g_ps[i].prog; return 1; }
-    if (!g_vs2) g_vs2 = compile(GL_VERTEX_SHADER, VS2);
+    static char vfull[1 << 16]; stub_vs(VS2, glsl, vfull, sizeof vfull);   /* t1..t7 etc. the RHW vertex lacks: 0 */
+    GLuint vs2 = compile(GL_VERTEX_SHADER, vfull);
     GLuint fs = compile(GL_FRAGMENT_SHADER, glsl);
-    GLuint p = glCreateProgram(); glAttachShader(p, g_vs2); glAttachShader(p, fs); glLinkProgram(p);
+    GLuint p = glCreateProgram(); glAttachShader(p, vs2); glAttachShader(p, fs); glLinkProgram(p);
     GLint ok; glGetProgramiv(p, GL_LINK_STATUS, &ok);
     if (!ok) { char log[2048]; glGetProgramInfoLog(p, sizeof log, NULL, log); fprintf(stderr, "link: %s\n", log); return 0; }
     if (g_nps < 64) { g_ps[g_nps].prog = p; g_ps[g_nps].hash = h; g_nps++; }
@@ -773,6 +797,13 @@ static int g_drawidx(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const
     g_idx = idx; int r = g_draw(t, prim, count, rhw, v, nv); g_idx = NULL;
     return r;
 }
+static int g_drawg(V6nTarget* t, uint32_t prim, uint32_t count, int ne, const uint8_t* us, const uint8_t* ix, const float* d, int nv) {
+    if (!t->vs) return 0;
+    g_gen.ne = ne; g_gen.nv = nv; g_gen.us = us; g_gen.ix = ix; g_gen.data = d;
+    int r = g_draw(t, prim, count, 0, NULL, 0);
+    g_gen.ne = 0;
+    return r;
+}
 const V6nOps v6n_target_ops = {"gl45-llvmpipe+s6n", g_begin, g_end, g_clear, g_rs, g_samp, g_tss, g_tex, g_notex, g_vp,
-                               g_scissor, g_proj, g_draw, g_readback, g_psh, g_psc, g_vsh, g_vsc, g_drawidx};
+                               g_scissor, g_proj, g_draw, g_readback, g_psh, g_psc, g_vsh, g_vsc, g_drawidx, g_drawg};
 const char* const* v6n_gl_mutants(void) { return MUTANTS; }

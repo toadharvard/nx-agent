@@ -101,6 +101,7 @@ static int run_scene(const V6nOps* ops, const char* path, const char* outdir, in
     int w = 32, h = 32; uint32_t rt = 21 /* A8R8G8B8 */, ds = 75 /* D24S8 */;
     V6nTarget* t = NULL;
     static V6nVertex verts[MAXV]; int nv = 0, rhw = 1;
+    static float gdata[MAXV * 64]; static uint8_t gus[16], gix[16]; int gne = 0, gnv = 0;   /* vdecl / vg */
     char line[4096], err[256] = "";
     int lineno = 0, ok = 1;
 #define BEGIN() do { if (!t) { t = ops->begin(w, h, rt, ds, err, sizeof err); if (!t) { fprintf(stderr, "%s: begin: %s\n", path, err); ok = 0; goto done; } ops->render_state(t, 137 /* LIGHTING */, 0); } } while (0)
@@ -179,6 +180,22 @@ static int run_scene(const V6nOps* ops, const char* path, const char* outdir, in
             nv = 0;
         }
         else if (!strcmp(a[0], "mode") && n == 2) rhw = !strcmp(a[1], "rhw");
+        else if (!strcmp(a[0], "vdecl") && n >= 2 && n <= 17) {
+            /* vdecl USAGE:INDEX ... (D3DDECLUSAGE numbers, FLOAT4 each) for vg / drawg (vertex-shader parity) */
+            gne = n - 1; gnv = 0;
+            for (int k = 0; k < gne; k++) { gus[k] = (uint8_t)atoi(a[1 + k]); const char* c = strchr(a[1 + k], ':'); gix[k] = c ? (uint8_t)atoi(c + 1) : 0; }
+        } else if (!strcmp(a[0], "vg") && gne && n == 1 + 4 * gne) {
+            if (gnv == MAXV) FAIL("too many vertices");
+            for (int k = 0; k < 4 * gne; k++) gdata[gnv * 64 + k] = strtof(a[1 + k], NULL);
+            gnv++;
+        } else if (!strcmp(a[0], "drawg") && n == 3) {
+            BEGIN(); if (!lookup(V6N_PRIM, a[1], &x)) FAIL("unknown primitive %s", a[1]);
+            /* repack to stride 16 * gne */
+            static float pk[MAXV * 64];
+            for (int i = 0; i < gnv; i++) memcpy(pk + i * 4 * gne, gdata + i * 64, 16 * gne);
+            if (!ops->draw_generic || !ops->draw_generic(t, x, (uint32_t)atoi(a[2]), gne, gus, gix, pk, gnv)) FAIL("drawg failed on %s", ops->name);
+            gnv = 0;
+        }
         else if (!strcmp(a[0], "v") && n == 9) {
             if (nv == MAXV) FAIL("too many vertices");
             V6nVertex* v = &verts[nv++];

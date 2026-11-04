@@ -35,6 +35,7 @@
 # ---- engine textures: the D3DX calls of NiDX9SourceTextureData::LoadFromFilename (0x00e68a80) -> NativeTexture ----
 00ee6e22	_ZN2nx6engine32D3DXGetImageInfoFromFileInMemoryEPKvmPm	stdcall(data, size, D3DXIMAGE_INFO*) -> HRESULT: from the DDS header (ParseDDS)
 00ee6e1c	_ZN2nx6engine33D3DXCreateTextureFromFileInMemoryEPvPKvmPS1_	stdcall(device, data, size, IDirect3DTexture9**) -> HRESULT: native image + NativeTexture (n1/engine_textures.cpp)
+00e68010	_ZN2nx6engine22NiDX9SourceTextureData10CreateSurfEPKv	thiscall(NiDX9SourceTextureData*, NiPixelData*) -> bool: a lockable NativeTexture (fonts, NiPixelData textures) the engine fills by LockRect
 # ---- TileShader / BSShaderNoLighting: no HLSL compile or constant maps natively (Do_RenderGeometry draws the tile family) ----
 00bca0d0	_ZN2nx6engine10TileShader19CreateVertexShadersEv	thiscall: no-op; vft=TileShader:80
 00bca240	_ZN2nx6engine10TileShader18CreatePixelShadersEv	thiscall: no-op; vft=TileShader:81
@@ -44,5 +45,6 @@
 00bca760	_ZN2nx10TileFamily14ApplyToRendererEPv	thiscall(PassShader*, RenderPassArg*); vft=TileShader:30; N1-pending (unreached)
 00bca980	_ZN2nx10TileFamily12UpdateMaterialEPKv	thiscall(TileShaderS*, const NiPropertyState*); vft=TileShader:31; N1-pending (unreached)
 00bc9a50	_ZN2nx13NoLightFamily17PrepareShaderPassEPKv	thiscall(BSShaderNoLighting*, const NiPropertyState*); N1-pending (unreached)
-# ---- image space: menu background (needs the image-space path, N1b) ----
-00c04730	_ZN2nx9ImageSpace12MenuBgSetupEPvS1_	thiscall(ImageSpaceEffectMenuBackground*, ImageSpaceManager*, ImageSpaceEffectParam*); the native effect is Renderer::RenderMenuBackground (menubg family); N1-pending until the image-space manager's effect dispatch is overridden
+# ---- image space: the effect dispatch (menu effects native; ImageSpaceEffectMenuBackground::Setup at 0x00c04730 stays
+# the engine's: it only builds engine data and loads sepia.dds through the D3DX overrides above) ----
+00b97550	_ZN2nx6engine17ImageSpaceManager12RenderEffectElPvS2_S2_S2_b	thiscall(ImageSpaceManager*, int effect, NiRenderer*, BSRenderedTexture* src, BSRenderedTexture* dst, param, bool): EFFECT_MENUBG -> Renderer::RenderMenuBackground; other effects counted and skipped
