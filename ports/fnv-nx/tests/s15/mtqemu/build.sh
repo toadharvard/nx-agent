@@ -31,11 +31,31 @@ cc "$HERE/gstart.c"
 cc "$HERE/hb.c"
 cc "$ROOT/tools/link/overrides/spinlock_0040fba0.c" "${TSAN[@]}"
 cxx "$HERE/mt_test.cpp" "${TSAN[@]}"
+# the inlined Interlocked* of fnvnx_win32.h, as game units get them (ilk-count, ilk-refs)
+cxx "$HERE/ilk_mt.cpp" "${TSAN[@]}" -Wno-tsan
+# B9: the cost of one Interlocked operation (ilk-cost), uninstrumented
+cxx "$HERE/ilk_cost.cpp"
+# and without the sanitizer (TSan turns atomics into calls), only for test_mtqemu.py's code check: not linked
+$CXX "${GXX[@]}" "${G[@]}" -c "$HERE/ilk_mt.cpp" -o "$OUT/ilk_mt_codegen.o"
+# S12's litmus test (tests/s12/order/litmus.cpp) twice: with the fnvnx_order plugin (the build's semantics) and
+# without it. The plugin needs gcc-13-plugin-dev-aarch64-linux-gnu; without it the litmus cases report "skip".
+cc "$HERE/litmus_glue.c"
+LITMUS_ROUNDS=${LITMUS_ROUNDS:-2000}
+LIT=(-fms-extensions -fno-strict-aliasing -fwrapv -mtune=cortex-a57 -DLITMUS_ROUNDS=$LITMUS_ROUNDS "${TSAN[@]}" -Wno-tsan)
+if ORDER_SO=$(CXX=$CXX bash "$ROOT/toolchain/order/build.sh" "$OUT/.order" 2>/dev/null); then
+  $CXX "${GXX[@]}" "${G[@]}" "${LIT[@]}" -fplugin="$ORDER_SO" -DLITMUS_NS=lit_order -DLITMUS_MAIN=litmus_main_order \
+    -c "$HERE/litmus_mt.cpp" -o "$OUT/litmus_order.o"
+  $CXX "${GXX[@]}" "${G[@]}" "${LIT[@]}" -DLITMUS_NS=lit_plain -DLITMUS_MAIN=litmus_main_plain \
+    -c "$HERE/litmus_mt.cpp" -o "$OUT/litmus_plain.o"
+  objs+=("$OUT/litmus_order.o" "$OUT/litmus_plain.o")
+else
+  cc "$HERE/litmus_none.c"
+fi
 
 wraps=()
 for s in EnterCriticalSection LeaveCriticalSection TryEnterCriticalSection SetEvent ReleaseSemaphore \
          WaitForSingleObject WaitForMultipleObjects InterlockedIncrement InterlockedDecrement InterlockedExchange \
-         InterlockedExchangeAdd InterlockedCompareExchange CreateThread; do
+         InterlockedExchangeAdd InterlockedCompareExchange fnvnx_interlocked_slow CreateThread; do
   wraps+=("--wrap=$s")
 done
 # --wrap applies to every object's undefined references; the platform objects define these names and call each other

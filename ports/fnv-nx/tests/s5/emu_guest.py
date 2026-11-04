@@ -874,12 +874,14 @@ class Emu:
             else:
                 m = re.fullmatch(r"(\*?)(0x[0-9a-fA-F]+)(?:\+(0x[0-9a-fA-F]+|\d+))?", target)
                 addr, off = int(m.group(2), 16), int(m.group(3) or "0", 0)
+                # The hook range starts STORE_REACH bytes below the word: a wider store (str x at want-4, a q store
+                # Unicorn splits into 8-byte pieces) covers it from below; stored_word keeps only full covers.
                 if m.group(1):
                     self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_base, user_data=(name, target, addr, off),
-                                     begin=addr, end=addr + 3)
+                                     begin=addr - self.STORE_REACH, end=addr + 3)
                 else:
                     self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(name, target, addr),
-                                     begin=addr, end=addr + 3)
+                                     begin=addr - self.STORE_REACH, end=addr + 3)
         print(f"   milestones: {', '.join(self.mile_order)}")
 
     def mile_hit(self, name, how, at=None):
@@ -901,11 +903,24 @@ class Emu:
         if name not in self.miles and self.stored_word(addr, size, value, want):
             self.mile_hit(name, f"store {target}")
 
+    STORE_REACH = 12   # a 16-byte store at want-12 still covers the word at want
+
     def on_mile_base(self, uc, access, addr, size, value, data):
-        """a store to A of 'store *A+N': watch (the new pointer)+N, which may hold its value already"""
+        """a store to A of 'store *A+N': watch (the new pointer)+N, which may hold its value already. The object the
+        old pointer named is no longer watched (freed and reused memory must not count)."""
         name, target, base, off = data
+        if name in self.miles or not (addr <= base < addr + size):
+            return
         p = self.stored_word(addr, size, value, base, nonzero=False)
-        if name in self.miles or not p:
+        if p is None:   # a store that covers only part of A: not a pointer store
+            return
+        held = getattr(self, "mile_obj", {}).get(name)
+        if held and held[0] == p:
+            return
+        if held:
+            uc.hook_del(held[1])
+            self.mile_obj.pop(name)
+        if not p:
             return
         try:
             (cur,) = struct.unpack("<I", uc.mem_read(p + off, 4))
@@ -914,8 +929,9 @@ class Emu:
         if cur:
             self.mile_hit(name, f"store {target} (already set when the pointer was stored)")
         else:
-            uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(name, target, p + off),
-                        begin=p + off, end=p + off + 3)
+            h = uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(name, target, p + off),
+                            begin=p + off - self.STORE_REACH, end=p + off + 3)
+            self.__dict__.setdefault("mile_obj", {})[name] = (p, h)
 
     @staticmethod
     def stored_word(addr, size, value, want, nonzero=True):

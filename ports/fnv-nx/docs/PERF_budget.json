@@ -366,32 +366,34 @@
    },
    "gpu_ms": {
     "docked_720p": [
-     7.05,
-     12.38
+     7.11,
+     12.49
     ]
    },
    "basis": "M",
    "gpu_basis": "E",
-   "source_commit": "e02c871a80ea1b970ae9c30bd279c4a4797adae4"
+   "source_commit": "2910d8d51206e94cc9f8f90b355294a525d32f5d"
   }
  },
  "scenarios": [
   {
    "id": "placed",
-   "name": "placement as implemented, no lever",
-   "levers": [],
+   "name": "as built: the placement plus the levers that are in the build (barrier_relax)",
+   "levers": [
+    "barrier_relax"
+   ],
    "core3": false,
    "cores": {
     "0": {
-     "lo": 13.193,
-     "mid": 23.766,
-     "hi": 34.439,
+     "lo": 13.055,
+     "mid": 22.947,
+     "hi": 33.159,
      "items": {
       "animation": 3.0,
       "cull": 3.25,
       "game_logic": 2.0,
       "havok": 3.5,
-      "interlocked_barriers": 1.725,
+      "interlocked_barriers": 0.906,
       "render_accumulation": 2.75,
       "renderer_main": 3.991,
       "scene_update": 3.25,
@@ -422,9 +424,9 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 12.93,
-       "mid": 29.12,
-       "hi": 56.27
+       "lo": 12.8,
+       "mid": 28.12,
+       "hi": 54.18
       },
       "1": {
        "lo": 3.59,
@@ -438,24 +440,24 @@
       }
      },
      "cpu_ms": {
-      "lo": 12.93,
-      "mid": 29.12,
-      "hi": 56.27
+      "lo": 12.8,
+      "mid": 28.12,
+      "hi": 54.18
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.05,
-      "hi": 12.38
+      "lo": 7.11,
+      "hi": 12.49
      },
      "frame_ms": {
-      "lo": 12.93,
-      "mid": 29.12,
-      "hi": 56.27
+      "lo": 12.8,
+      "mid": 28.12,
+      "hi": 54.18
      },
      "worst_frame_ms": {
-      "lo": 14.22,
-      "mid": 36.4,
-      "hi": 84.41
+      "lo": 14.08,
+      "mid": 35.15,
+      "hi": 81.27
      },
      "critical_core": 0,
      "verdicts": {
@@ -468,9 +470,9 @@
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 7.39,
-       "mid": 16.64,
-       "hi": 32.16
+       "lo": 7.31,
+       "mid": 16.07,
+       "hi": 30.96
       },
       "1": {
        "lo": 2.05,
@@ -484,24 +486,24 @@
       }
      },
      "cpu_ms": {
-      "lo": 7.39,
-      "mid": 16.64,
-      "hi": 32.16
+      "lo": 7.31,
+      "mid": 16.07,
+      "hi": 30.96
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.05,
-      "hi": 12.38
+      "lo": 7.11,
+      "hi": 12.49
      },
      "frame_ms": {
-      "lo": 7.39,
-      "mid": 16.64,
-      "hi": 32.16
+      "lo": 7.31,
+      "mid": 16.07,
+      "hi": 30.96
      },
      "worst_frame_ms": {
-      "lo": 8.13,
-      "mid": 20.8,
-      "hi": 48.24
+      "lo": 8.04,
+      "mid": 20.09,
+      "hi": 46.44
      },
      "critical_core": 0,
      "verdicts": {
@@ -513,9 +515,9 @@
     }
    },
    "main_minsn": {
-    "lo": 13.193,
-    "mid": 23.766,
-    "hi": 34.439
+    "lo": 13.055,
+    "mid": 22.947,
+    "hi": 33.159
    }
   },
   {
@@ -598,8 +600,8 @@
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.05,
-      "hi": 12.38
+      "lo": 7.11,
+      "hi": 12.49
      },
      "frame_ms": {
       "lo": 8.38,
@@ -644,16 +646,16 @@
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.05,
-      "hi": 12.38
+      "lo": 7.11,
+      "hi": 12.49
      },
      "frame_ms": {
-      "lo": 7.05,
+      "lo": 7.11,
       "mid": 12.06,
       "hi": 25.2
      },
      "worst_frame_ms": {
-      "lo": 7.76,
+      "lo": 7.82,
       "mid": 15.08,
       "hi": 37.8
      },
@@ -755,16 +757,16 @@
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.05,
-      "hi": 12.38
+      "lo": 7.11,
+      "hi": 12.49
      },
      "frame_ms": {
-      "lo": 7.05,
+      "lo": 7.11,
       "mid": 17.33,
       "hi": 38.45
      },
      "worst_frame_ms": {
-      "lo": 7.76,
+      "lo": 7.82,
       "mid": 21.66,
       "hi": 57.68
      },
@@ -801,16 +803,16 @@
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.05,
-      "hi": 12.38
+      "lo": 7.11,
+      "hi": 12.49
      },
      "frame_ms": {
-      "lo": 7.05,
+      "lo": 7.11,
       "mid": 9.91,
       "hi": 21.97
      },
      "worst_frame_ms": {
-      "lo": 7.76,
+      "lo": 7.82,
       "mid": 12.39,
       "hi": 32.95
      },
@@ -928,16 +930,16 @@
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.05,
-      "hi": 12.38
+      "lo": 7.11,
+      "hi": 12.49
      },
      "frame_ms": {
-      "lo": 7.05,
+      "lo": 7.11,
       "mid": 15.86,
       "hi": 36.05
      },
      "worst_frame_ms": {
-      "lo": 7.76,
+      "lo": 7.82,
       "mid": 19.82,
       "hi": 54.07
      },
@@ -979,17 +981,17 @@
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.05,
-      "hi": 12.38
+      "lo": 7.11,
+      "hi": 12.49
      },
      "frame_ms": {
-      "lo": 7.05,
-      "mid": 9.715,
+      "lo": 7.11,
+      "mid": 9.8,
       "hi": 20.6
      },
      "worst_frame_ms": {
-      "lo": 7.76,
-      "mid": 12.14,
+      "lo": 7.82,
+      "mid": 12.25,
       "hi": 30.9
      },
      "critical_core": 0,
@@ -1022,10 +1024,13 @@
   "IPC of this code on the A57 (B1): every ms figure scales with it",
   "thread placement and migration under Horizon (B2), hand-off latencies (B3)",
   "GPU time per frame (B7) and the native renderer per-draw cost on device (render machine)",
-  "lever mt_cull: off on PC; needs the fs:[0x2c] TLS fix (done, S5 31cdca3) and the stage protocol (mtqemu 'stages' ok); setting 0x011c710c (PERF.md 6.4)",
-  "lever havok_workers: not traced whether bhkWorld uses the MT simulation (PERF.md 6.4)",
+  "lever mt_cull: bMTRendering:Display (0x011c710c) is unsafe on the PC code: accumulators are built with one batch renderer, the worker indexes a NULL second one and shares main's; current-accumulator globals shared (PERF.md 6.8). Needs port code; TLS fix done (S5 31cdca3), stage protocol modelled (mtqemu stages)",
+  "lever havok_workers: MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the pool is made in the unreconstructed EnsureObjectsCreated (PERF.md 6.9)",
   "lever core3: S5 33c0b1b, off by default; the system's own use of core 3 is unmeasured",
-  "lever barrier_relax: needs S12's per-site argument and the B9 measurement"
+  "lever barrier_relax: in the build: S12 52cb478 ORDER_REFCOUNT=weak is compile.sh's default (ORDERING.md Refcounts; sample 110 increments relaxed, 220 decrements release, 201 sites full); race-checked by mtqemu litmus-order ref; B9 on an A57 confirms the stall saving"
+ ],
+ "built_levers": [
+  "barrier_relax"
  ],
  "hotspots": [
   {
@@ -1427,27 +1432,27 @@
    "critical": true,
    "basis": "E",
    "minsn": {
-    "lo": 0.25,
-    "mid": 1.725,
-    "hi": 3.2
+    "lo": 0.113,
+    "mid": 0.906,
+    "hi": 1.92
    },
    "ms": {
     "1020": {
-     "lo": 0.245,
-     "mid": 2.114,
-     "hi": 5.229
+     "lo": 0.11,
+     "mid": 1.11,
+     "hi": 3.137
     },
     "1785": {
-     "lo": 0.14,
-     "mid": 1.208,
-     "hi": 2.988
+     "lo": 0.063,
+     "mid": 0.634,
+     "hi": 1.793
     }
    },
    "share_45": {
-    "1020": 0.095,
-    "1785": 0.054
+    "1020": 0.05,
+    "1785": 0.029
    },
-   "fix": "inlined (done, fnvnx_win32.h); next: a per-site argument to drop the barrier of refcount increments (an increment publishes nothing), about half of the stalls",
+   "fix": "inlined and refcounts relaxed (done: S12 52cb478, ORDER_REFCOUNT=weak, lever barrier_relax in the build); the 201 sites kept full stay x86-ordered",
    "gain_main_minsn": [
     0.1,
     1.6
@@ -1525,7 +1530,7 @@
     "1020": 0.099,
     "1785": 0.057
    },
-   "fix": "inlined (done, fnvnx_win32.h); next: a per-site argument to drop the barrier of refcount increments (an increment publishes nothing), about half of the stalls",
+   "fix": "inlined and refcounts relaxed (done: S12 52cb478, ORDER_REFCOUNT=weak, lever barrier_relax in the build); the 201 sites kept full stay x86-ordered",
    "gain_main_minsn": [
     0.1,
     1.6
@@ -1576,45 +1581,6 @@
   },
   {
    "kind": "function",
-   "id": "fn_slerp",
-   "name": "NiQuaternion::Slerp 0x00a6e330 (keyframe blending)",
-   "subsystem": "animation",
-   "role": "main",
-   "critical": true,
-   "basis": "E",
-   "minsn": {
-    "lo": 0.26,
-    "mid": 0.78,
-    "hi": 1.3
-   },
-   "ms": {
-    "1020": {
-     "lo": 0.255,
-     "mid": 0.956,
-     "hi": 2.124
-    },
-    "1785": {
-     "lo": 0.146,
-     "mid": 0.546,
-     "hi": 1.214
-    }
-   },
-   "share_45": {
-    "1020": 0.043,
-    "1785": 0.025
-   },
-   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
-   "gain_main_minsn": [
-    0.5,
-    1.8
-   ],
-   "owner": "S15",
-   "needs_hardware": false,
-   "detail": "130-130 A64 instructions per call [M] x 2000-10000 calls per frame [E]: 10-40 animated actors x 60-80 bones x 1-3 sequences [E]",
-   "rank": 3
-  },
-  {
-   "kind": "function",
    "id": "fn_nibound_update",
    "name": "NiBound::Update 0x00a7fdd0 (an object's world bound, merged into its parent's)",
    "subsystem": "scene-graph update",
@@ -1650,7 +1616,7 @@
    "owner": "S15/S2",
    "needs_hardware": false,
    "detail": "45-45 A64 instructions per call [M] x 8000-24000 calls per frame [E]: two per updated object [E]",
-   "rank": 4
+   "rank": 3
   },
   {
    "kind": "function",
@@ -1689,7 +1655,7 @@
    "owner": "S15/S2",
    "needs_hardware": false,
    "detail": "70-100 A64 instructions per call [M] x 4000-12000 calls per frame [E]: objects whose world transform is recomputed per exterior frame [E]; 6 + 63 A64 instructions exclusive (dyncount, PERF.md 7) + 10-30 for translation and scale (not measured)",
-   "rank": 5
+   "rank": 4
   },
   {
    "kind": "function",
@@ -1728,6 +1694,45 @@
    "owner": "S15",
    "needs_hardware": true,
    "detail": "600-600 A64 instructions per call [M] x 200-2000 calls per frame [E]: convex pair queries per step: character controller casts, contact points [E]; 303 + 119 + 72 + 109 A64 instructions exclusive [M]",
+   "rank": 5
+  },
+  {
+   "kind": "function",
+   "id": "fn_slerp",
+   "name": "NiQuaternion::Slerp 0x00a6e330 (keyframe blending)",
+   "subsystem": "animation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.176,
+    "mid": 0.528,
+    "hi": 0.88
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.173,
+     "mid": 0.647,
+     "hi": 1.438
+    },
+    "1785": {
+     "lo": 0.099,
+     "mid": 0.37,
+     "hi": 0.822
+    }
+   },
+   "share_45": {
+    "1020": 0.029,
+    "1785": 0.017
+   },
+   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "gain_main_minsn": [
+    0.5,
+    1.8
+   ],
+   "owner": "S15",
+   "needs_hardware": false,
+   "detail": "88-88 A64 instructions per call [M] x 2000-10000 calls per frame [E]: 10-40 animated actors x 60-80 bones x 1-3 sequences [E]; NEON override fnvnx_slerp_00a6e330 (tools/link/overrides, S15-simd): 134 -> 88 A64 instructions per call incl. the weight 0x00a6dc30 and the normalisation 0x00a4ff00 (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 9 -> 9)",
    "rank": 6
   },
   {
@@ -1864,7 +1869,7 @@
     "1020": {
      "lo": 76.108,
      "mid": 95.135,
-     "hi": 126.847
+     "hi": 126.846
     },
     "1785": {
      "lo": 43.49,
@@ -2004,7 +2009,7 @@
     "1020": {
      "lo": 13.617,
      "mid": 17.021,
-     "hi": 22.695
+     "hi": 22.694
     },
     "1785": {
      "lo": 7.781,
@@ -2037,13 +2042,13 @@
    },
    "ms": {
     "1020": {
-     "lo": 13.594,
-     "mid": 16.992,
-     "hi": 22.656
+     "lo": 13.593,
+     "mid": 16.991,
+     "hi": 22.655
     },
     "1785": {
      "lo": 7.768,
-     "mid": 9.71,
+     "mid": 9.709,
      "hi": 12.946
     }
    },
@@ -2108,7 +2113,7 @@
    "ms": {
     "1020": {
      "lo": 9.685,
-     "mid": 12.106,
+     "mid": 12.107,
      "hi": 16.142
     },
     "1785": {
@@ -2182,7 +2187,7 @@
      "hi": 10.528
     },
     "1785": {
-     "lo": 3.609,
+     "lo": 3.61,
      "mid": 4.512,
      "hi": 6.016
     }
@@ -2280,22 +2285,6 @@
    "rank": 5
   },
   {
-   "subsystem": "interlocked barriers",
-   "fix": "inlined (done, fnvnx_win32.h); next: a per-site argument to drop the barrier of refcount increments (an increment publishes nothing), about half of the stalls",
-   "owner": "S12/S15",
-   "needs_hardware": true,
-   "gain_main_minsn": {
-    "lo": 0.1,
-    "mid": 0.85,
-    "hi": 1.6
-   },
-   "gain_ms_45": {
-    "1020": 1.04,
-    "1785": 0.59
-   },
-   "rank": 6
-  },
-  {
    "subsystem": "scene-graph update",
    "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
    "owner": "S15/S2",
@@ -2309,7 +2298,7 @@
     "1020": 0.73,
     "1785": 0.42
    },
-   "rank": 7
+   "rank": 6
   }
  ]
 }

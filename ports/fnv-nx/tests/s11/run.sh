@@ -11,7 +11,13 @@ EQ="$ROOT/tools/equiv/equiv.py"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 
 python3 "$HERE/test_equiv.py" "$EQ" "$OUT"
+python3 "$HERE/test_explain.py"
 mkdir -p "$OUT/dl"; python3 "$HERE/test_download.py" "$ROOT/tools/equiv/setup_msvc.sh" "$OUT/dl"
+# evaluation order (S12 ORDER-OBJECT / ORDER-OPERATOR): recorded MSVC results; the GCC side when the host can build it
+GCC_ORDER=
+if command -v qemu-aarch64 >/dev/null && command -v aarch64-linux-gnu-g++ >/dev/null \
+    && [ -f "$(aarch64-linux-gnu-g++ -print-file-name=plugin)/include/gcc-plugin.h" ]; then GCC_ORDER=--gcc; fi
+python3 "$HERE/test_order.py" "$OUT" $GCC_ORDER
 
 if [ -n "${DECOMP:-}" ] && [ -n "${FNV_MSVC9_ROOT:-}" ]; then
     # src/bgsimpactdataset.cpp (unit 3) and src/fallout/ai/actor_magic.cpp (unit 255): KEEP1, DECL1 (SDK injected,
