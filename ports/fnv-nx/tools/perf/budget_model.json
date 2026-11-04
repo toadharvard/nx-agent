@@ -91,15 +91,29 @@
  "items": [
   {
    "id": "scene_update",
-   "name": "scene graph update (NiNode downward pass: world transforms, bounds, controllers)",
+   "name": "scene graph update on main: the sky (TES::FUN_004537c0 -> Sky::Update, then TES+0x18), effect roots (FUN_00c50610, one child per particle system), temp effects (ProcessLists::FUN_009746c0, with the task pool), the camera nodes (PlayerCharacter::UpdateCamera), and the queued attaches drained before and after the join (FUN_00552570 -> UpdateSceneGraph 0x005526f0)",
    "role": "main",
    "minsn": [
-    2,
-    4.5
+    0.3,
+    1.6
    ],
    "basis": "E",
    "phase": "scene graph",
-   "subsystem": "scene-graph update"
+   "subsystem": "scene-graph update",
+   "note": "PERF.md 6.12: with iNumHWThreads > 1 the cells' per-reference downward passes (TESObjectCELL::FUN_00551890, every loaded cell through UpdateCellGrid 0x004ba9a0, interior directly) run on AI linear thread 1 inside TES::FUN_00453550, not on main; main keeps 15-35 % of the 2-4.5 M scene update [E] (sky and effect trees, temp effects, camera, queued attaches: hundreds of nodes against thousands in the cells). The deferred controller work (task 6, UpdateControllersRecursive) is in the animation item."
+  },
+  {
+   "id": "scene_update_ai",
+   "name": "the cells' per-reference downward passes on AI linear thread 1 (TES::FUN_00453550 -> UpdateCellGrid 0x004ba9a0 / TESObjectCELL::FUN_00551890 -> NiNode::UpdateDownwardPass per actor / reference 3D, threaded NiUpdateData: controllers and particles queued for main)",
+   "role": "ai-linear",
+   "minsn": [
+    1.7,
+    2.9
+   ],
+   "basis": "E",
+   "phase": "scene graph",
+   "subsystem": "scene-graph update",
+   "note": "PERF.md 6.12: 65-85 % of the 2-4.5 M scene update [E]; serial after the Havok step on the same thread (6.11)"
   },
   {
    "id": "cull",
@@ -190,7 +204,7 @@
   },
   {
    "id": "animation_ai",
-   "name": "NPC animation and the cell downward pass on the AI linear threads (FUN_0096cda0, TESObjectCELL::FUN_00551890)",
+   "name": "NPC animation on AI linear thread 0 (ProcessLists::FUN_0096cda0 -> AnimData::UpdateAnimationForRef, tasklets); the cell downward pass is scene_update_ai",
    "role": "ai-linear",
    "minsn": [
     1.5,
@@ -378,6 +392,10 @@
     "animation": [
      0.75,
      0.9
+    ],
+    "scene_update_ai": [
+     0.8,
+     0.9
     ]
    },
    "basis": "E",
@@ -457,7 +475,12 @@
      100
     ],
     "note": "decomp: copy paths 12-14 [M]; compose 23 + operator* (> 100 counted from the parts, the link leaves it unresolved) [M, lower bound]"
-   }
+   },
+   "split": {
+    "main": 0.25,
+    "ai-linear": 0.75
+   },
+   "split_note": "PERF.md 6.12: a quarter of the updated nodes are main's (the scene_update / scene_update_ai items' mid split)"
   },
   {
    "id": "fn_nibound_update",
@@ -479,7 +502,12 @@
     18.1,
     42.0
    ],
-   "per_call_cycles_note": "decomp object, funcmodel.py: 46 x 0.393 (steady) / 0.913 (one call)"
+   "per_call_cycles_note": "decomp object, funcmodel.py: 46 x 0.393 (steady) / 0.913 (one call)",
+   "split": {
+    "main": 0.25,
+    "ai-linear": 0.75
+   },
+   "split_note": "PERF.md 6.12: a quarter of the updated nodes are main's (the scene_update / scene_update_ai items' mid split)"
   },
   {
    "id": "fn_node_update",
@@ -501,7 +529,12 @@
     18.7,
     87.6
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "split": {
+    "main": 0.25,
+    "ai-linear": 0.75
+   },
+   "split_note": "PERF.md 6.12: a quarter of the updated nodes are main's (the scene_update / scene_update_ai items' mid split)"
   },
   {
    "id": "fn_cull_test",
@@ -678,11 +711,12 @@
   "scene-graph update": {
    "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
    "gain_main_minsn": [
-    0.3,
-    0.9
+    0.03,
+    0.32
    ],
    "owner": "S15/S2",
-   "needs_hardware": false
+   "needs_hardware": false,
+   "gain_note": "neon_math scales the main item by 0.8-0.9: lo 0.3 x 0.1, hi 1.6 x 0.2 (the cell passes are on AI thread 1, PERF.md 6.12)"
   },
   "render accumulation": {
    "fix": "moves with mt_cull (MT1: the worker registers its half into the main accumulator's second batch renderer); instancing",

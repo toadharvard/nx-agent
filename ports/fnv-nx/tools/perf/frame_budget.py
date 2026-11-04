@@ -231,6 +231,11 @@ def place_work(work, placement, core3, eff):
                 else:
                     flexible.append((w[0], cores, a))
         for iid, cores, a in flexible:   # water-fill: the scheduler moves threads to the idle core of their mask
+            if a < 0:   # a correction (a saving): off the mask's cores evenly (round(a / CHUNK) < 0 dropped it)
+                for c in cores:
+                    load[c] += a / len(cores)
+                    per[c][iid] = per[c].get(iid, 0) + a / len(cores)
+                continue
             n = int(round(a / CHUNK))
             for i in range(n):
                 c = min(cores, key=lambda x: (load[x], x))
@@ -265,7 +270,7 @@ def apply_perf(items, model, perf, ipc_mid):
         items.append({'id': 'a57_' + h['id'], 'name': 'A57 price of %s (cycles vs instructions)' % h['name'],
                       'role': h.get('role', 'main'), 'subsystem': h.get('subsystem'),
                       'minsn': [min(d[0], d[2]), max(d[0], d[2])], 'mid': d[1], 'basis': 'model',
-                      'follows': follows_item(model, h.get('subsystem'))})
+                      'follows': follows_item(model, h.get('subsystem')), 'split': h.get('split')})
         used.append({'id': h['id'], 'cycles_per_frame_mid': round(cyc[1]), 'insns_per_frame_mid': round(ins[1]),
                      'delta_minsn_mid': round(d[1], 3)})
     return items, {'source': perf.get('head') or perf.get('schema'), 'rows': used,
@@ -293,7 +298,7 @@ def apply_overrides(items, model):
         items.append({'id': 'simd_' + h['id'], 'name': 'S15-simd override of %s (after - before)' % h['name'],
                       'role': h.get('role', 'main'), 'subsystem': h.get('subsystem'),
                       'minsn': [min(d[0], d[2]), max(d[0], d[2])], 'mid': d[1], 'basis': 'M',
-                      'follows': follows_item(model, h.get('subsystem'))})
+                      'follows': follows_item(model, h.get('subsystem')), 'split': h.get('split')})
         used.append({'id': h['id'], 'delta_minsn_mid': round(d[1], 3)})
     return items, {'rows': used, 'delta_minsn_mid': round(sum(u['delta_minsn_mid'] for u in used), 3)}
 

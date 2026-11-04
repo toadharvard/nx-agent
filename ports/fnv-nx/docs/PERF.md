@@ -415,6 +415,90 @@ can see a transform half-written (an NiTransform is 13 floats).
   pathing `FUN_006ebc50` (about 10-25 % of main).
 * This costs main time: the wait the race hid. The serial cull-after-step order is the real code limit (6.10).
 
+### 6.12 The scene-graph update: where it runs and what it shares (S15-scene, D21 map first)
+
+All at the exe's default settings (D20). [E] unless marked; addresses from the decomp and the owner's exe.
+
+**Where it runs** (iNumHWThreads > 1, the default; with 6.11):
+* **AI linear thread 1** runs the cells' downward passes inside `TES::FUN_00453550`, after wind and the Havok
+  step. Exterior: `UpdateCellGrid` 0x004ba9a0 calls `TESObjectCELL::FUN_00551890` for every loaded cell. Edge cells
+  alternate on a checkerboard that flips each frame (`DAT_011c642c`). Interior: the cell directly.
+  * Per cell, with flag false (interior, and the cells updated this frame): the dynamic node, then each actor's
+    3D. Each gets its own `NiUpdateData(t, false, threaded)` and `UpdateDownwardPass(data, 0)`.
+  * With flag true: every reference in the cell's `kRefs`.
+  * After each node's pass, still in order: `FUN_0087aad0` (task 4: the node goes to the pool's re-update list
+    `DAT_011df1c4`); with +6 set, `RunWithLock` 0x005524f0 queues the node into `g_011ca174` (particles, for main);
+    with +7 set, `FUN_0087abb0` posts packed task 6 (morph/controller update, for main); with +8 set,
+    `ShadowSceneNode::FUN_00b5d9f0(node, 1)`.
+  * The threaded flag is `NiUpdateData`+5 (`m_bParallelUpdate`, from `FUN_008c7aa0`). With it set, mesh particle
+    systems (0x00c21910 / 0x00c21a80) set +6 and return, and `UpdateDownwardPassIfSelective` 0x00a59fd0 skips its
+    pass. The heavy controller and particle work is deferred to main.
+* **Main** keeps (the scene_update item, 15-35 % of the 2-4.5 M):
+  * the sky: `TES::FUN_004537c0` -> `Sky::Update` 0x0063ac70, then the `TES+0x18` root;
+  * the effect roots: `FUN_00c50610` on `DAT_011ded58`, one child per particle system;
+  * temp effects: `ProcessLists::FUN_009746c0`, which also uses the task pool;
+  * the camera nodes: `PlayerCharacter::UpdateCamera` 0x0094ae40;
+  * the queued attaches / particles, drained before and after the join (`FUN_00552570` -> `UpdateSceneGraph`
+    0x005526f0).
+
+  The packed task-6 drain (`FUN_0087a790`: `UpdateControllersRecursive` 0x00552790) is in the animation item.
+* **Model correction** (budget_model.json `scene_update` 0.3-1.6 M on main, `scene_update_ai` 1.7-2.9 M on
+  ai-linear). The scene-graph hotspot rows and their S15-simd corrections split 25 / 75 the same way.
+  frame_budget.py's water-fill had dropped negative corrections on a multi-core mask; it now spreads them.
+  plan60 at 1020 MHz: worst frame 19.39 -> 16.57 ms, main 12.65 -> 10.82 M. This is a correction of the model,
+  not a code change.
+
+**Two races the PC code has here** (x86 TSO made them benign enough; the A57 does not):
+* main's cull (`FUN_0086ff70` / `MainView` 0x00873200) reads transforms and bounds while thread 1 writes them in
+  this pass (6.11; S15-threads' "downward pass done" event fixes it);
+* AI thread 0 runs `FUN_009784c0`, `FUN_0096bcd0`, `ProcessPlayerCellActors`, `RunActorUpdates` 0x0096c7c0 and the
+  task-queue call `FUN_0087a6d0` while thread 1 runs `FUN_00453550`. It waits for thread 1 only at event 7
+  (`FUN_008c7da0`). Actor movement there writes the local transforms that thread 1's pass reads.
+
+**Cost of the race fix, and the lever.** With the "downward pass done" event, main waits at the cull for thread
+1's chain: thread 0's events 1-4, then wind, the Havok step and the cell passes (about 6 M against main's 3-4 M
+before the cull [E]). Splitting the cell passes over the cores that wait shortens that chain. At that point thread
+0 is busy until `RunActorUpdates`; core 3 (opt-in) or main itself, while it waits at the event, are the idle ones.
+The split is therefore a lever on the race fix's wait, not on today's main thread.
+
+**The map** (`tools/perf/scene_deps.py`, schema fnvnx-scenedeps/1; output local, exe-derived). From the roots, it
+walks the exe's x86 code: direct calls, tail jumps, jump tables, and virtual calls by C++ dispatch. A vcall
+resolves to the receiver's static class and every class deriving from it, from MSVC RTTI; receivers are typed
+through `this` and the scene graph's pointer fields. The output is every global read or written, with atomic,
+array and address-taken forms, every import, and the conflicts between groups.
+* Run (`down` = every `UpdateDownwardPass` override reachable on an NiAVObject, slot 41):
+  `scene_deps.py FalloutNV.exe --starts ext/fnv_decomp/src --group down=slot41@NiAVObject --stop 0x00aa3e40=alloc
+  --stop 0x00aa4060=free --stop-range 0x00ec6000-0x00ee6d80=crt`.
+  Result: 2,548 functions, 140,883 instructions, 621 globals, 487 of them written non-atomically. 68 untyped vcall
+  sites are not walked. Boundaries: CRT x559, alloc x54, free x58. Locks reached: EnterCriticalSection x24,
+  Interlocked inc/dec 130 / 148, TLS x12.
+* Classes of the written globals, by the writer's unit (the work list for the split, in order):
+  1. **Function-local statics with an init guard** (most of the shader-unit rows: watershader 85, skyshader 28,
+     speedtreeleafshader 16, lighting30shader 9, tileshader 8, ...). MSVC 2008 does not make these thread-safe:
+     two first calls at once both initialise. They are written once per process, so a pre-warm on the first
+     frame, before any split, covers the class.
+  2. **Per-frame scratch singletons** (nioldscreenspace, combatstate, impactmixer, the BSRandom state
+     `bsrandom.inl`): written on every call. These are real races for a split and need per-thread copies or a
+     serial tail.
+  3. **Pools and locks** (`g_011c5f80` the NiTList node pool lock, nirefobject's counters, MemoryManager): already
+     locked or atomic; checked by the race checker.
+  4. **Cold paths** (facegen regeneration through `BSFaceGenNiNode` -> bsfacegenmanager, model loading,
+     particle-manager construction): reached statically. A run must show whether a frame takes them.
+* Limits:
+  * the typing heuristic: an untyped receiver takes its function's receiver class;
+  * 68 untyped sites;
+  * `ProcessPlayerCellActors` is not reconstructed;
+  * the game-code groups (`cell`, `main`, `ai0`) reach about 13,000 functions, because game objects are untyped.
+    Their cross-thread conflicts are object-level (node transforms, bounds, flags), not globals.
+
+  The race checker on the real split (D19 check 3) is the complete check; this map is its work list.
+
+**Next:**
+* classify the 487 written globals by access pattern (guard / scratch / pool), mechanically in scene_deps.py;
+* the split itself: MT1, phase 1 the per-node passes in parallel, phase 2 the per-node tails in the original
+  order, so the side effects keep their sequence;
+* the race-fix lever in the model.
+
 ### 6.5 Memory ordering: what x86 gave for free
 
 x86 is TSO: every store is a release and every load an acquire. AArch64 is not, so engine code that synchronises
