@@ -186,6 +186,50 @@ names, sizes unknown), `varargs`, `ref-passes-fewer`, plus the declaration shape
 declared, e.g. `void __cdecl f(void)` calling `T::f()` - the caller relied on ecx already holding `this`; on AArch64
 x0 is not preserved, so the declaration has to be fixed in the source (S1 rule or patch).
 
+### Register parameters the reference does not pass (S13 bridge campaign)
+
+A definition parameter in **ecx** that the reference does not pass (`__fastcall f(p0, edx, p2)` defined,
+`__stdcall f(void *)` referenced from a member function) is not junk: the x86 callee reads whatever the caller left
+in ecx, usually its own `this`. `abi.compare` / `abi2` classify it `x86-inconsistent` (`ecx-not-passed`, like
+`this-not-passed`): no bridge, listed in `abi.tsv` for S1b's XINC1 patches. A missing **edx** stays the `edx-dummy`
+bridge (the decomp's `__fastcall f(T*, int edx_dummy, ...)` for a member function: edx is the x86 caller's scratch).
+Sites on the ninth-round objects (callee address: referencing units):
+
+| Callee | Referencing units |
+|---|---|
+| 0x00a36f80 | `nianimation/bsblendtreadtransfinterpolator.cpp` |
+| 0x00a36fd0 | `nianimation/bsblendtreadtransfinterpolator.cpp`, `nianimation/niblendcolorinterpolator.cpp` (S13: 00a564a0) |
+| 0x00a4fbd0 | `niparticle/nipsysairfieldairfrictionctlr.cpp` |
+| 0x00a5c5b0 | `staging/blk_00a40000_o2.cpp` |
+| 0x00a5e5b0 | `nimain/nibspnode.cpp` |
+| 0x00a62130 | `nimain/nialphaproperty.cpp` |
+| 0x00a6cc80, 0x00a6d0f0 | `niparticle/nipsysresetonloopctlr.cpp` |
+| 0x00a75ec0 | `nimain/nimainsdm.cpp` |
+| 0x00b4df30 | `staging/blk_00b40000_o2.cpp` |
+| 0x00bbbe30 | `bsshader/lighting30shader.cpp` |
+| 0x00cac410 | `staging/blk_00ca0000_o2.cpp` |
+| 0x00e89ad0 | `niconsolerenderer/nid3dhlslvertexshader.cpp` |
+
+(Gamebryo paths under `src/gamebryo2.2/corelibs/`.) The two `this-not-passed` pairs S13 found unpatched
+(0x00ba95e0 from `bsshader/bsshaderbloodsplatterproperty.cpp`, 0x00c0abd0 from `bsshader/lighting30shader.cpp`) are
+in `abi.tsv` as `x86-inconsistent`; they need the S1b patch only.
+
+Two bridge divergences are not ABI-model errors:
+
+* **Calls through a cast to another convention** (S13: 00a1c9b0 -> 00a0c900): GetOrLoadXML calls
+  `((void (__thiscall *)(void *, const char *, MenuValueDescriptor *)) &FUN_00a0c900)(&map, name, xml)`; the unit
+  declares `__fastcall FUN_00a0c900(void *, const char *, MenuValueDescriptor *)`, the definition is the thiscall
+  member `(const char *, int)`. On x86 the cast decides (ecx = map, stack = name, xml: the definition gets name), so
+  the bridge built from the declaration (third argument -> p0) is wrong; natively the cast call already matches the
+  definition (x0, x1, x2). The reference name carries only the declaration, so the link cannot see the cast; about
+  100 such casts sit in 48 units. Fix in the source (declare the function as it is called, S1b), or a resolve rule that
+  takes the cast's convention for a unit that only calls the name through such a cast.
+* **The variadic logger 0x00703c00** (S13: 00700350): referenced as `int __cdecl (const char *, ...)`, defined as
+  `void __cdecl (const char *text, const char *context)` that passes `&context` on as the argument list - an x86
+  stack walk: on AArch64 `&context` is a spilled register, and float arguments travel in v registers. `manual`
+  (varargs) is the right verdict; the fix is a native variadic replacement (`resolve --override`, or S1's VA1). The
+  first-fault difference in that function (x86 0, AArch64 0x18) is argument evaluation order.
+
 ## Overrides (`resolve --override <tsv>`, for native replacements, J-0015)
 
 The table (tab-separated, `#` comments) lists `address`, `native symbol`, `object or archive`. An override takes
