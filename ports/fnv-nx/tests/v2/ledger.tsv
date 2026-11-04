@@ -1,0 +1,7 @@
+# V2 ledger (D14): one row per claim checked, or per refutation case. Read by tools/verify/v2_metric.py (the format of tests/v1/ledger.tsv; merged may list several hashes, comma-separated).
+# verdict: confirmed | refuted | partial | fixed | unverified
+#   refuted / partial = an open refutation (the test still fails on the owner's newest head)
+#   fixed             = the owner's fix was re-verified with the same test (closed)
+# merged: the integration commit that carries the claim, or - when it is not merged
+# fix: the commit that fixed a refutation (re-verified), or -
+id	stream	commit	merged	verdict	fix	test	claim
