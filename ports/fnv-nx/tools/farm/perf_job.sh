@@ -16,7 +16,8 @@
 # Workload: from the first guest instruction to the first entry of $PERF_STOP (default WinMain, __fnv_0086a850);
 # PERF_START / PERF_STOP name any two symbols (e.g. one frame of the main loop once the boot reaches it).
 # Also: the per-frame function rows of PERF.md 11.4 (tools/perf/a57model/hot_rows.json) priced statically on that
-# guest (funcmodel.py) -> frame_hotspots[] and frame_coverage.
+# guest (funcmodel.py) -> frame_hotspots[] and frame_coverage; and the hotspot_functions rows of
+# tools/perf/budget_model.json (S15-simd's metric), overrides priced on tools/link/overrides' code -> per_call_cycles[].
 # Outputs: <report.md> (numbers and function names only) and <report>.json = fnvnx-perf/1 (hotspots[]), which
 # runner.sh publishes next to it as <head12>-perf.json on reports/<farm>. About 10 minutes (the emulated boot with
 # the cache model, ~0.7 M instructions/s). Exit 0 once the report is written; 3 when no guest link exists.
@@ -108,7 +109,13 @@ timeout "${PERF_TIMEOUT:-3000}" nice python3 -I "$M/uctrace.py" "$W/guest-$L12.n
 	${IMAGE:+--file "fnvnx/game/FalloutNV.exe=$IMAGE"} > "$W/uctrace.log" 2>&1 || log "uctrace exited $?"
 rm -rf "$ROOT"
 [ -f "$W/stats-$C12.txt" ] || fail_report 1 "uctrace wrote no statistics: $(tail -1 "$W/uctrace.log")"
+OVA=()   # S15-simd's overrides as one ELF, so their rows are priced on the override's code
+if bash "$P/tools/link/overrides/build.sh" "$W/ov" > /dev/null 2>&1 && \
+		aarch64-linux-gnu-ld -m aarch64linux32 -e 0 --unresolved-symbols=ignore-all -o "$W/ov/ov.elf" "$W"/ov/*.o 2>/dev/null; then
+	OVA=(--override-elf "$W/ov/ov.elf")
+fi
 python3 -I "$M/funcmodel.py" --elf "$L/guest/fnvnx.elf" --rows "$M/hot_rows.json" --calib "$CAL" \
+	--budget-model "$P/tools/perf/budget_model.json" "${OVA[@]}" \
 	--json "$W/funcs-$C12.json" --mca-cache "$W/mca-cache.json" > "$W/funcmodel.log" 2>&1 || log "funcmodel exited $?"
 python3 -I "$M/perf_report.py" "$W/stats-$C12.txt" --elf "$L/guest/fnvnx.elf" --out "$JSON" --md "$W/body.md" \
 	--funcs "$W/funcs-$C12.json" \

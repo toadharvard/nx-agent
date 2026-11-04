@@ -137,6 +137,11 @@ def main(argv=None):
     ap.add_argument('--json')
     ap.add_argument('--mca-cache')
     ap.add_argument('--calib', help='calib.json: its ilk_inline prediction prices the Interlocked row')
+    ap.add_argument('--budget-model', help="tools/perf/budget_model.json: price its hotspot_functions rows (the "
+                    "addresses in each row's name), as per_call_cycles proposals for S15's hotspot_metric.py")
+    ap.add_argument('--override-elf', help="an ELF of tools/link/overrides' objects (build.sh, then ld): a budget row "
+                    "whose address has an override (fnvnx_*_<addr>) is priced on the override's code, which is what "
+                    "its per_call_insn measures")
     ap.add_argument('--main-minsn', type=float, default=23.8,
                     help='main-thread M instructions per exterior frame (PERF.md 11, J-0148: 23.8)')
     a = ap.parse_args(argv)
@@ -148,12 +153,41 @@ def main(argv=None):
             rows = json.load(f)
         specs = [s for r in rows for s in r['funcs']]
     else:
-        rows, specs = [], a.funcs
+        rows, specs = [], list(a.funcs)
+    budget = []
+    if a.budget_model:
+        import re
+        with open(a.budget_model) as f:
+            bm = json.load(f)
+        syms0 = cost.Symbols([a.elf])
+        have = set(syms0.orig)
+        ov = {}
+        if a.override_elf:
+            osy = cost.Symbols([a.override_elf])
+            for n in osy.names:
+                m = re.match(r'^fnvnx_\w+_([0-9a-f]{8})$', n)
+                if m:
+                    ov['0x' + m.group(1)] = n
+        for h in bm.get('hotspot_functions', []):
+            fs = [x for x in re.findall(r'0x00[0-9a-f]{6}', h.get('name', '')) if x in have or x in ov]
+            budget.append((h, fs))
+        ovspecs = sorted({ov[x] for _h, fs in budget for x in fs if x in ov})
+        specs += [x for _h, fs in budget for x in fs if x not in ov and x not in specs]
+    specs = list(dict.fromkeys(specs))
     mca1 = cost.MCA(a.mca_cache, iterations=1)
     fr = price_funcs(a.elf, specs, mca, mca1)
+    if a.budget_model and a.override_elf and ovspecs:
+        ofr = price_funcs(a.override_elf, ovspecs, mca, mca1)
+        for r in ofr:
+            r['override'] = True
+        fr += ofr
     mca.save()
     out['functions'] = fr
     by = {r['func']: r for r in fr}
+    if a.budget_model and a.override_elf:
+        for x, n in ov.items():
+            if n in by:
+                by[x] = by[n]
     for r in rows:
         fs = [by[s] for s in r['funcs'] if by[s]['cpi']]
         w = sum(x['static_insns'] for x in fs) or 1
@@ -181,6 +215,29 @@ def main(argv=None):
                                    'cpi': round(cpi, 3), 'cpi_once': round(cpi, 3),
                                    'cycles_per_call': [round(p['cycles'], 1)] * 2,
                                    'mcycles_frame': [round(1.8 * cpi, 3)] * 2, 'ms_1020': [round(1.8 * cpi / 1.02, 3)] * 2})
+    ilk_cpi = None
+    if a.calib and os.path.exists(a.calib):
+        with open(a.calib) as f:
+            p = {q['name']: q for q in json.load(f).get('predictions', [])}.get('ilk_inline')
+        ilk_cpi = p['cycles'] / 8 if p else None
+    out['budget_rows'] = []
+    for h, fs in budget:
+        lo, hi = h['per_call_insn'] if isinstance(h['per_call_insn'], list) else (h['per_call_insn'],) * 2
+        priced = [by[x] for x in fs if by[x]['cpi']]
+        if h['id'] == 'fn_interlocked' and ilk_cpi:
+            cpi = cpi1 = ilk_cpi
+            basis = 'calibrate.py ilk_inline (13 cycles per 8-instruction operation) x per_call_insn'
+        elif priced:
+            w = sum(x['static_insns'] for x in priced)
+            cpi = sum(x['cpi'] * x['static_insns'] for x in priced) / w
+            cpi1 = sum((x['cpi_once'] or x['cpi']) * x['static_insns'] for x in priced) / w
+            basis = 'funcmodel.py static A57 CPI of ' + ', '.join(
+                (x + ' (override)') if by[x].get('override') else x for x in fs) + ' x per_call_insn'
+        else:
+            out['budget_rows'].append({'id': h['id'], 'per_call_cycles': None, 'why': 'no function of the row in this ELF'})
+            continue
+        out['budget_rows'].append({'id': h['id'], 'per_call_insn': [lo, hi], 'cpi': [round(cpi, 3), round(cpi1, 3)],
+                                   'per_call_cycles': [round(lo * cpi, 1), round(hi * cpi1, 1)], 'basis': basis})
     covered = sum(r['minsn_frame'] for r in out['rows'] if r.get('mcycles_frame'))
     out['coverage'] = {'main_minsn_frame': a.main_minsn, 'covered_minsn': round(covered, 3),
                        'covered_pct': round(100 * covered / a.main_minsn, 2),
@@ -191,6 +248,8 @@ def main(argv=None):
         print(f"{x['func']:12} {x['symbol'][:56]:56} insns {x['static_insns']:5} blocks {x['blocks']:3} "
               f"calls {x['calls']:2} CPI {x['cpi']} once {x['cpi_once']} (blocks {x['cpi_lo']}-{x['cpi_hi']})")
     print(f"coverage: {out['coverage']}") if out.get('coverage') else None
+    for r in out['budget_rows']:
+        print(f"budget {r['id']}: per_call_cycles {r.get('per_call_cycles')} (CPI {r.get('cpi')})")
     for r in out['rows']:
         print(f"row {r['id']}: CPI {r['cpi']}-{r['cpi_once']}, cycles per call {r.get('cycles_per_call')}")
     if a.json:

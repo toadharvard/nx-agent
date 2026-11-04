@@ -114,6 +114,8 @@ def main(argv=None):
                                   'basis': 'static A57 model (funcmodel.py) x instructions of PERF.md 11.4', 'src': r.get('src')}
                                  for r in fm.get('rows', [])]
         out['frame_coverage'] = fm.get('coverage')
+        # per_call_cycles proposals for budget_model.json's hotspot_functions (tools/perf/hotspot_metric.py reads them)
+        out['per_call_cycles'] = [r for r in fm.get('budget_rows', []) if r.get('per_call_cycles')]
     with open(a.out, 'w') as f:
         json.dump(out, f, indent=1)
     T = out['totals']
@@ -139,6 +141,11 @@ def main(argv=None):
                   '| row | M insns/frame | CPI (steady-once) | cycles/call | ms 1.02 |', '|---|---:|---|---|---|']
         for r in out['frame_hotspots']:
             lines.append(f"| {r['id']} | {r['minsn_frame']} | {r['cpi'][0]}-{r['cpi'][1]} | {r['cycles_per_call']} | {r['ms_1020']} |")
+    if out.get('per_call_cycles'):
+        lines += ['', 'per_call_cycles for budget_model.json hotspot_functions (static A57 model; overrides on their own code):', '',
+                  '| id | per_call_insn | CPI | per_call_cycles |', '|---|---|---|---|']
+        for r in out['per_call_cycles']:
+            lines.append(f"| {r['id']} | {r['per_call_insn']} | {r['cpi']} | {r['per_call_cycles']} |")
     text = '\n'.join(lines) + '\n'
     if a.md:
         with open(a.md, 'w') as f:

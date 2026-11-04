@@ -879,3 +879,29 @@ Coverage of the main thread's 23.8 M instructions per frame (J-0148) with an A57
 product) run at IPC 1.1-2.6, above 0.8; the refcount operations and the branchy per-object cull run below it.
 The rest of the frame's main thread gets its price when frameprof's frames run under `uctrace.py`.
 
+
+### 12.6 per_call_cycles for S15-simd's metric (11.6)
+
+`funcmodel.py --budget-model tools/perf/budget_model.json --override-elf <ov.elf>` prices each `hotspot_functions`
+row: the functions are the addresses in its name; one with an override in `tools/link/overrides` is priced on the
+override's code (the objects of `build.sh`, linked into one ELF), since that is what its `per_call_insn` counts.
+`per_call_cycles` = [per_call_insn lo x steady CPI, per_call_insn hi x one-call CPI]. perf_job.sh publishes them as
+`per_call_cycles[]` in fnvnx-perf/1; `hotspot_metric.py` uses a row's `per_call_cycles` when the row has one.
+
+With link 06857911f5ab's guest and the overrides at 304901c, mid values [model]:
+
+| row | insn / call | cycles / call | CPI | note |
+|---|---:|---:|---|---|
+| fn_interlocked | 30 | 49 | 1.63 | calibration kernel; the dmb drain is not priced (12.2) |
+| fn_cull_test (override) | 58 | 100 | 1.07 - 2.21 | |
+| fn_slerp (override) | 88 | 207 | 2.05 - 2.66 | inlined sqrt and divide: latency-bound |
+| fn_gsk | 571 | 731 | 1.11 - 1.45 | |
+| fn_nibound_update (override) | 19 | 33 | 0.85 - 2.58 | the `ld3` is slow; the decomp's 52 instructions price 20-39 |
+| fn_pass_bucket | 82 | 116 | 0.83 - 2.01 | |
+| fn_world_transform (override) | 32 | 36 | 0.82 - 1.19 | |
+| fn_node_update | 39.5 | 53 | 0.99 - 1.46 | |
+| fn_quat_from_matrix (override) | 77 | 80 | 0.77 - 1.30 | |
+
+The metric with these prices: **7.88 M cycles per frame (7.72 ms at 1.02 GHz)**, against 6.09 M at IPC 0.8. The
+rows that override math with long-latency operations (Slerp) or with multi-register loads (`ld3`) save fewer cycles
+than instructions; A/B rows should be compared in cycles from now on.
