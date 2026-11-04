@@ -317,6 +317,10 @@ bool Renderer::RenderGeometry(const GeomView& g) {
         geomVs_ = BlobShader(be_, "tile_vc", NxStage_Vertex);
         geomVsScroll_ = BlobShader(be_, "tile_vc_scroll", NxStage_Vertex);
         geomPs_ = BlobShader(be_, "tile_vc", NxStage_Fragment);
+        geomVsPlain_ = BlobShader(be_, "tile", NxStage_Vertex);
+        geomVsPlainScroll_ = BlobShader(be_, "tile_scroll", NxStage_Vertex);
+        geomPsPlain_ = BlobShader(be_, "tile", NxStage_Fragment);
+        geomPsAlphaMap_ = BlobShader(be_, "tile_alphamap", NxStage_Fragment);
         NxVtxLayout ll;
         memset(&ll, 0, sizeof ll);
         ll.count = 3; ll.stride = sizeof(GeomVtx);
@@ -373,7 +377,8 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     Mul(proj_, view_, vp);
     Mul(vp, world, u.wvp);
     memcpy(u.tint, g.tint, 16);
-    if (g.hasScroll) { u.texScroll[0] = g.scroll[0]; u.texScroll[1] = g.scroll[1]; }
+    if (g.hasScroll || g.alphaMap) memcpy(u.texScroll, g.scroll, 16);
+    else { u.texScroll[2] = u.texScroll[3] = 1.0f; }
     // texture: the geometry's own (tile property), else the tracker's stage 0, else a white texel
     static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};   // D3DFMT_A8R8G8B8 2D
     const uint32_t prevTex = state_.Texture(0);
@@ -381,6 +386,9 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     const bool swapTex = g.image || prevTex == 0;
     if (g.image) { NxD3D9Texture k = {g.d3dfmt, 0, 0, 0, 0}; state_.SetTexture(0, g.image, k); }
     else if (!prevTex) state_.SetTexture(0, white_, kWhiteKind);
+    const uint32_t prevTex1 = state_.Texture(1);
+    const NxD3D9Texture prevKind1 = state_.TextureKind(1);
+    if (g.alphaMap) { NxD3D9Texture k = {g.alphaMapFmt, 0, 0, 0, 0}; state_.SetTexture(1, g.alphaMap, k); }
     // NiAlphaProperty -> D3D9 blend and alpha-test states for this draw (the engine pipeline that would set them is
     // replaced); NiAlphaProperty::AlphaFunction -> D3DBLEND, TestFunction -> D3DCMPFUNC
     static const uint8_t kBlend[16] = {2, 1, 3, 4, 9, 10, 5, 6, 7, 8, 11, 2, 2, 2, 2, 2};
@@ -413,12 +421,18 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     }
     Draw d;
     memset(&d, 0, sizeof d);
-    d.vs = g.hasScroll && geomVsScroll_ ? geomVsScroll_ : geomVs_; d.ps = geomPs_; d.layout = geomLayout_; d.prim = NxPrim_Triangles;
+    // the engine's TileShader choice: TILE1002 (VC) for geometry with vertex colours, TILE1001 (scroll VS, ALPHAMAP PS)
+    // with an alpha map, else TILE1000
+    if (g.alphaMap) { d.vs = geomVsPlainScroll_; d.ps = geomPsAlphaMap_; }
+    else if (g.color) { d.vs = g.hasScroll ? geomVsScroll_ : geomVs_; d.ps = geomPs_; }
+    else { d.vs = g.hasScroll ? geomVsPlainScroll_ : geomVsPlain_; d.ps = geomPsPlain_; }
+    d.layout = geomLayout_; d.prim = NxPrim_Triangles;
     d.vtxBlock = geomRing_.block(); d.vtxOffset = vOff; d.vtxSize = g.vertices * sizeof(GeomVtx);
     d.idxBlock = geomRing_.block(); d.idxOffset = iOff; d.idxSize = n * 2; d.idxType = 0;
-    d.count = n; d.textures = 1; d.ubo = &u; d.uboSize = sizeof u;
+    d.count = n; d.textures = g.alphaMap ? 2 : 1; d.ubo = &u; d.uboSize = sizeof u;
     bool ok = Render(d);
     if (swapTex) state_.SetTexture(0, prevTex, prevKind);
+    if (g.alphaMap) state_.SetTexture(1, prevTex1, prevKind1);
     for (int i = 0; i < 15; i++) if (state_.GetRenderState(kSaved[i]) != saved[i]) state_.SetRenderState(kSaved[i], saved[i]);
     if (g.hasScissor) SetScissorRect(hadScissor ? &prevScissor : nullptr);
     if (ok) geomDraws_++;

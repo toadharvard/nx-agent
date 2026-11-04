@@ -134,11 +134,12 @@ public:
         uint32_t stripCount;
         float tint[4];
         uint32_t image = 0, d3dfmt = 0;  // texture (0: the state tracker's stage 0, else a white texel)
+        uint32_t alphaMap = 0, alphaMapFmt = 0;   // TileShaderProperty's second texture: TILE1001 ALPHAMAP
         bool hasAlpha = false;           // NiAlphaProperty present: blend / alpha test from alphaFlags / alphaRef
         uint16_t alphaFlags = 0;
         uint8_t alphaRef = 0;
         bool hasScroll = false;          // TileShaderProperty TexScroll: uv += scroll
-        float scroll[2] = {0, 0};
+        float scroll[4] = {0, 0, 1, 1};
         bool hasScissor = false;         // the tile's scissor rectangle (target pixels)
         NxD3D9Rect scissor = {0, 0, 0, 0};
         bool hasStencil = false;         // NiStencilProperty: flags (enable, fail/zfail/pass actions, func), ref, mask
@@ -172,7 +173,7 @@ private:
     uint16_t curPass_ = 0, curFamily_ = 0;
     Ring geomRing_;
     uint32_t white_ = 0, geomDraws_ = 0;
-    uint16_t geomVsScroll_ = 0;
+    uint16_t geomVsScroll_ = 0, geomVsPlain_ = 0, geomVsPlainScroll_ = 0, geomPsPlain_ = 0, geomPsAlphaMap_ = 0;
     uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0, bgVs_ = 0, bgPs_ = 0, bgLayout_ = 0;
     StateCache sc_;
     Frame frame_;

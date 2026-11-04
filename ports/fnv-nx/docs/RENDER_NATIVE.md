@@ -447,6 +447,26 @@ reference, never shipped in place of our shaders unless as a temporary fallback)
 4. The translated original remains a selectable per-family fallback (`nx::Family::Translated`), which also lets
    world rendering come up before every family is hand-written.
 
+### 4.2 Family semantics against the originals (V6n's c69 harness)
+
+V6n compares each family with the game's original program for the same pass (`tests/v6n/claims/c69_families.py`,
+the originals from the player's shader package, never in the repo). The families now follow the originals:
+
+| family / variant | original | semantics | inputs the family needs |
+|---|---|---|---|
+| `tile_scroll` VS | TILE1001.vso | uv = uv x TexScroll.zw + TexScroll.xy (texture 0); texture 1 at the plain uv | NxTileDraw.texScroll all four (zw = 1 without scaling) |
+| `tile_alphamap` PS | TILE1001.pso | rgb = Src0.rgb x tint.rgb, a = Src0.a x tint.a x AlphaMap.r | **two textures**: slot 0 Src0, slot 1 the alpha map |
+| `tile_vc` PS | TILE1002.pso | rgb = tex.rgb x tint.rgb, a = tex.a x vertex alpha | vertex colour (alpha) |
+| `nolight_texfall` VS | NOLIGHT004.vso | opacity mix by smoothstep(t), t from \|N.V\| between the falloff angles | as before |
+| `sky` VS + PS | SKY.vso / .pso | rgb = B0 x vc.r + B1 x vc.g + B2 x vc.b, a = vc.a x B0.a, z = params.x x w (far plane) | **vertex colour at location 2**; NxSkyDraw = {wvp, blend0, blend1, blend2, params (far z/w, cloud alpha, uv scroll)} |
+| `land_lit` VS + PS | SLS1025.vso / SLS1040.pso (LANDAD) | base x vc x clamp(clamp(N.Lt) x lightColor + ambient), N = 2 x normalMap - 1, Lt = (T.L, B.L, N.L) | **normal, tangent, binormal at locations 4-6; normal map at slot 4**; NxLandDraw += lightDir, lightColor, ambient |
+| `depth_at` VS + PS | SLS1000 (ZONLY_At) | alpha = diffuse.a through the D3D9 alpha test (epilogue), depth only | **uv at location 1, diffuse at slot 0**, the epilogue's alpha test |
+
+The first three plus the falloff pass V6n's cases as filed. For the other four the cases still feed the families'
+old interfaces (one texture for the alpha map, no vertex colour for the sky, `land` instead of `land_lit`, `depth`
+without uv); with the inputs in the last column all 12 cases match (run locally from a copy of the harness with
+those inputs; nothing of it is in the repo). Request to V6n: update those four cases' family inputs accordingly.
+
 ### 4.1 N2 skinning (started)
 
 Gamebryo skins on the GPU per NiSkinPartition: each partition has its bone list (the palette), up to 4 weights and
