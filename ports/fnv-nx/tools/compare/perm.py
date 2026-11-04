@@ -23,11 +23,11 @@ Driving (V6n's choices, render/verify/shaders/sdpfuzz.py, so a difference here c
   linear filtering, wrap; every float constant uniform in [0, 1].
 * vertex program: a vertex declaration from its inputs with the engine's element types (POSITION/NORMAL/TANGENT/
   BINORMAL/TEXCOORD FLOAT4, COLOR and BLENDINDICES D3DCOLOR, BLENDWEIGHT FLOAT4) on a 3x3 vertex grid; every
-  CTAB matrix identity (z scaled by 0.5), every other register c0..c255 uniform in [-1, 1]. Relative addressing stays
+  CTAB matrix identity (z scaled by 0.5), every CTAB bone palette identity rows with a small translation, every other register c0..c255 uniform in [-1, 1]. Relative addressing stays
   inside the arrays it reads (bone indices inside the CTAB palette, texcoords in [0, 1) when the VS uses a0): D3D9
   leaves reads outside [0, 255] undefined, so differences there are no evidence. A generated PS sums every
   COLOR/TEXCOORD output the VS writes (sdpfuzz.combo_ps).
-Seeded by the program hash: the same package gives the same captures.
+Seeded by the program hash (plus its salt from --salts): the same package and salts give the same captures.
 """
 import argparse, json, os, random, shutil, struct, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -216,10 +216,16 @@ def vs_job(j, r, glsl=''):
                 k = e % rows
                 if k < 4:
                     vsc[c['reg'] + e] = [0.5 if (k == 2 and i == 2) else (1.0 if i == k else 0.0) for i in range(4)]
+        elif c.get('set') == 'float' and c['name'].lower().startswith('bone') and c.get('count', 0) % 3 == 0:
+            # Gamebryo's bone palette: 3 rows (3x4, translation in .w) per bone, as vectors in the CTAB: identity
+            # rotation, a small translation, so skinned vertices stay on the target
+            for e in range(c['count']):
+                k = e % 3
+                vsc[c['reg'] + e] = [1.0 if i == k else 0.0 for i in range(3)] + [r.uniform(-0.1, 0.1)]
     return elems, off, verts, idx, vsc
 
 
-def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0):
+def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=None):
     PERTURB['eps'], PERTURB['rng'] = perturb, random.Random(0x5160)
     os.makedirs(out, exist_ok=True)
     tex = make_textures()
@@ -247,7 +253,7 @@ def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0):
             jobs.append((name, h, bc, json.load(open(jp)), open(gp).read()))
         cache, cap, k, nf = {}, None, 0, 0
         for name, h, bc, j, glsl in jobs:
-            rnd = random.Random(int(h, 16))
+            rnd = random.Random(int(h, 16) + (salts or {}).get(h, 0) * 0x9E3779B97F4A7C15)
             if j['stage'] == 'pixel':
                 vbc, vgl = drv['drv3' if j['model'].startswith('ps_3') else 'drv2']
                 elems, stride, verts, idx, vsc, psc, samp = ps_job(j, rnd)
@@ -273,7 +279,7 @@ def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0):
             d = cap.decl(elems)
             cap.buffers(verts, stride, idx)
             cap.frame(vs, ps, d, nv, nt, vsc, psc, samp)
-            man['captures'][cname].append({'frame': '%05d' % nf, 'name': name, 'hash': h, 'stage': j['stage'],
+            man['captures'][cname].append({'frame': '%05d' % nf, 'name': name, 'hash': h, 'salt': (salts or {}).get(h, 0), 'stage': j['stage'],
                                            'model': j['model'], 'samplers': [s['type'] for s in j.get('samplers', [])]})
             nf += 1
         if cap: cap.close()
@@ -289,12 +295,14 @@ def main():
     ap.add_argument('--sdp2dksh', required=True); ap.add_argument('--out', required=True)
     ap.add_argument('--per-capture', type=int, default=64); ap.add_argument('--size', type=int, default=96)
     ap.add_argument('--only'); ap.add_argument('--programs')
+    ap.add_argument('--salts', help='JSON {hash: salt}: another seed for those programs (permcover.py)')
     ap.add_argument('--perturb', type=float, default=0.0, help='scale every float input by 1 + eps * u (conditioning run)')
     a = ap.parse_args()
     only = set(a.only.split(',')) if a.only else None
     if a.programs:
         only = (only or set()) | {l.strip() for l in open(a.programs) if l.strip() and not l.startswith('#')}
-    m = build(a.sdp, a.asm, a.sdp2dksh, a.out, a.per_capture, a.size, only, a.perturb)
+    m = build(a.sdp, a.asm, a.sdp2dksh, a.out, a.per_capture, a.size, only, a.perturb,
+              json.load(open(a.salts)) if a.salts else None)
     print(f"perm: {m['programs']} programs in {len(m['captures'])} captures, {len(m['skipped'])} skipped")
     return 0
 
