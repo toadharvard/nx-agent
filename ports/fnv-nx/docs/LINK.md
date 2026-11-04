@@ -355,7 +355,7 @@ over the decomp definition at that address. For S6n's `render/native/overrides.t
   signature differs on purpose).
 
 The port's own replacements live in `tools/link/overrides/`: `overrides.tsv` (address, symbol, source, signature)
-and `build.sh <out dir>`, which compiles them for the game target and writes the table `--override` reads. First
+and `build.sh <out dir>`, which compiles them for the game target and writes the table `--override` reads. The pipeline's link stage does that by default (`OVERRIDE=auto`, S2c-abi); before, farm links ran without them and the 0x00703c00 references stayed `manual` (219 rows on link/c0d6c71516f6). First
 entry: **0x00703c00, the console logger** - the decomp defines it as `void (const char *text, const char *context)`
 handing `&context` on as x86 stack varargs; `fnvnx_log_00703c00(const char *fmt, ...)` formats with `vsnprintf`
 under the original's conditions (UI root and key flag, then an active console or `FUN_005b6f70`) and prints through

@@ -71,7 +71,8 @@ CONFIG = [
     ('PORT_COMMIT', '', 'commit (40 hex digits) of ports/fnv-nx when it is a copy without git metadata (a git '
                         'archive snapshot); in a checkout it must equal HEAD'),
     ('CENSUS', '1', '0: skip the -fsyntax-only census'),
-    ('OVERRIDE', '', 'fnvlink resolve --override table (native replacements)'),
+    ('OVERRIDE', 'auto', 'fnvlink resolve --override table (native replacements): auto = the port\'s own, built by '
+                         'tools/link/overrides/build.sh in the link stage; none = off; or a table'),
     ('EXTERN_TEXT', 'auto', 'fnvlink resolve --extern-text list: auto = made from the tree\'s units.json by '
                             'tools/pipeline/extern_text.py (S4\'s addr_ids.txt), none = off, or a file'),
     ('MSVC_OBJS', '', 'fnvlink resolve --msvc-objs: pristine MSVC 2008 objects (S11) for S2b\'s vtable slots'),
@@ -1622,7 +1623,16 @@ class Link(Stage):
         else:
             r.note('EXTERN_TEXT=none: the referenced .text addresses without a definition get no E entries (the '
                    'hand flow passes S4\'s addr_ids.txt)')
-        for opt, key in (('--override', 'OVERRIDE'), ('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
+        if b.cfg['OVERRIDE'] == 'auto':
+            # the port's native replacements (tools/link/overrides: the variadic logger 0x00703c00, ...); their
+            # sources are in link_tool_inputs (tools/link)
+            ovd = os.path.join(d, 'overrides')
+            b.sh(['bash', os.path.join(ROOT, 'tools', 'link', 'overrides', 'build.sh'), ovd], r['log'],
+                 env=b.env(), check=True)
+            args += ['--override', os.path.join(ovd, 'override.tsv')]
+        elif b.cfg['OVERRIDE'] not in ('', 'none'):
+            args += ['--override', os.path.abspath(b.cfg['OVERRIDE'])]
+        for opt, key in (('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
                          ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:
                 args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
@@ -2644,7 +2654,7 @@ def execute(b, targets):
 
 def parse_args(argv):
     cfg = {k: os.environ.get(k, d) or d for k, d, _ in CONFIG}
-    for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'OVERRIDE', 'NINE_SRC', 'FORCE'):
+    for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'NINE_SRC', 'FORCE'):
         cfg[k] = os.environ.get(k, '')
     targets = []
     for a in argv:
