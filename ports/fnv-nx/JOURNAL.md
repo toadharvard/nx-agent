@@ -3040,3 +3040,31 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - Triage still open: oracle-fault 404, call-flow 965.
 * **next** - Publish the full hand-off lists to the private repo. Make allocators return non-null in the harness
   (S13). The owners take their lists.
+
+### J-0138 | 2026-11-04 | stream: S12-ordering,S13b-causes | status: wip | parent: J-0137
+
+* **decided (S12)** - x86 ordering semantics come from one GCC plugin, `toolchain/order/fnvnx_order.cc`. compile.sh
+  loads it for every decomp unit, with no fallback (docs/ORDERING.md).
+  - volatile follows /volatile:ms: ldar/stlr for aligned scalars, fences for the rest.
+  - Operands passed to Interlocked* are ordered like volatiles.
+  - Call arguments are evaluated right to left, as MSVC does.
+  - `_ReadWriteBarrier` is `dmb ish` (ishld/ishst for the read/write forms). Every Interlocked* ends with `dmb ish`,
+    and a split lock handles misaligned operands.
+  - Full TSO emulation was rejected on cost.
+* **measured (S12)** - Statically on 280 units: +0.12 % instructions; on hot units: -0.02 %.
+  - Litmus test, 4 threads under qemu: without the plugin, GCC deletes a store that is dead across a volatile release
+    (mp1: 79 bad of 20,000), and it reuses a load across an acquire poll (mp2: 20,000 of 20,000). With the plugin, 0.
+  - Limit: qemu on an x86 host is TSO, so the hardware half rests on the ldar/stlr/dmb code-generation checks.
+  - The dynamic cost of the Interlocked dmb needs the device (S15 B1).
+* **closed (S12)** - S12 classes VOLATILE-DECL, POLL-VOLATILE, BARRIER, ORDER-ARGS, ATOMIC-USE, ATOMIC-UNALIGNED.
+  ATOMIC-PLAIN-STORE closes once compile.sh gets ORDER_KEYS. Still open: ORDER-OBJECT/OPERATOR (need S11) and
+  POLL-PLAIN. W-UNINIT stays per site.
+* **measured (S13b)** - call-flow 1,276 -> 216, split into:
+  - native-undefined 291 (real bug, S1/S2c: unbound C++ names such as `NiPointer<T>::operator T*`);
+  - import-slot-called 11 (S2c: the native jumps to the IAT slot itself);
+  - native-inlined 447 (triage).
+  - The 1,208 real-bug rows, with reproducer paths, are on the private branch `reports/s13b-causes`. They went to S1,
+    S1b and S2c.
+* **found** - The shared sse2neon checkout was gone from the scratch area; it is restored at the pin 2272251c.
+* **checked** - tests/s12/order: 0 failed. tests/s1: 0 failed. tests/s11: ok. Every compile shard rebuilds once
+  (the plugin source is in FLAGS_HASH).
