@@ -84,7 +84,7 @@ DECL1-MATHNS, which is newer than these heads. Per rule, ranked by code function
 
 | rule | code | retarget | eh | no-build | owner |
 |---|---:|---:|---:|---:|---|
-| `CTOR1` | 58 | | 31 | | S1 |
+| `CTOR1` | 58 | | 31 | | by design (S1: the placement form's null check, see the rule table) |
 | `STATIC1` | 23 | | | | S1 (link semantics: reloads of an external variable) |
 | `DECL1` | 9 | 155 | 4 | 36 | S1; retargets: CRT wrappers the link binds by address (S2) |
 | `XINC1` | 8 | | | | S1b |
@@ -147,7 +147,7 @@ above (round 8).
 | `EXC1` | neutral (claim) | MSVC 2008 never enforced `throw()`; but it is an optimizer hint there | as is |
 | `NEW2` | neutral | `<new>` defines the placement forms identically | real `<new>` |
 | `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
-| `CTOR1` | neutral | explicit constructor call = placement new of the same class at the same address | real `<new>` |
+| `CTOR1` | neutral (by design: the code differences are the placement form's) | explicit constructor call = placement new of the same class at the same address. `<new>`'s placement `operator new` is `throw()`, so MSVC null-checks the pointer before the constructor, and at `/Od` calls the placement function instead of inlining it (the gate's 58 code + 31 EH functions, e.g. 0x009cff10, 0x0092eb50, 0x007f9840). Standard C++ has no other way to construct in place, and for a non-null `this` (every decomp site constructs into an object it holds) the behaviour is the same | real `<new>` |
 | `LINK1` | neutral | C and C++ linkage of a global variable name the same symbol under Itanium | data names bound by variable name |
 | `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables; a namespace static bound by its plain name (`_s_fSpinTime`) gets C linkage in place, an uninitialised scalar / pointer one declared only (the image's variable) | variable bound by the recipe's address |
 | `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars | as is |
