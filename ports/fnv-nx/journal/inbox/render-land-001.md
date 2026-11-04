@@ -31,3 +31,32 @@
   derived from game data (MACHINES.md), so the hash -> GLSL directory is laid out locally from the player's packages.
 * **open** - The captures hold no terrain, sky, water or shadow-map draws (an interior and the menu). Those families
   need an exterior capture (Goodsprings, day and night, with water): request to S16 / S5-data.
+
+### J-XXXX | 2026-11-04 | stream: render-land | status: wip | parent: J-XXXX (render-land-001 above)
+
+* **decided (orchestrator, D21)** - Coverage first: every program of the render-land families draws correctly
+  through the general (Translated) path, bugs fixed as classes; then all their draws in the captures pass; only then
+  hand-written GLSL and speed. Metric: draws passing / all draws of the families in the captures, against S16's
+  Wine reference (nxd9play, WineD3D on llvmpipe).
+* **measured (before)** - docmitchell_13000, frames 0-2, per draw against the reference: render-land draws passing
+  **0 / 27** (all 27 image-space draws downstream of S16's R4 divergence; max error 97, the frame black). S16 gate on
+  both captures: 3/6 frames over.
+* **found** - R4 is not in the lit shaders: the base map and normal map of the first lit draws sampled as
+  (0, 0, 0, 1). Bisected by replacing the translated PS on the candidate side with variants that output single
+  terms (`nx_render --native`), after a capture rewrite showed the light colours had no effect on the candidate.
+  - Cause, a class bug in `render/native/capture/d3d9_exec.cpp`: every TEXU (and TEXC) made a new image, and
+    NxGpuApi images are immutable and never freed. d9cap fills each managed texture level by level, so the 563
+    textures of docmitchell made more than `NX_MAX_IMAGES` (4096) images; `MakeImage` then returned 0 silently and
+    every later texture sampled as none. The menu capture is small enough to stay under the limit.
+  - S16's report named PS `344e476fb76d0fcd`; the program the draws bind is `e2788f0c707cc669` (same names,
+    SLS2034/SLS2036.pso, different package).
+* **did** - Images of sampled textures are made when a draw binds the texture after a change (TEX, TEXU, TEXC set a
+  dirty flag): one image per change a draw sees. A texture whose image cannot be made now skips the draw with a
+  reason, instead of sampling black. Test: `test_nx_render.py` texu case (4 textures x 1,100 TEXU, and a TEXU between
+  two draws); it fails on the old code with exactly the black texel (0, 0, 0, 255).
+* **measured (after)** - render-land draws passing **27 / 27** (frames 0-2, every per-draw target within 1/255 of the
+  reference), on the Translated path and with the native post shaders (`--native`, 27 native draws). All 57 draws
+  of docmitchell pass. S16 gate (capcompare, both captures, noise floor 0): **3/6 -> 0/6 frames over**, mean 0.00015,
+  max 2. Tests: s6n all, scenes, nx_render (55, 3 new), capture, n1, nx_render_robust pass.
+* **open** - The captures still hold no terrain, sky, water or shadow-map draws: the next coverage step for those
+  families is S16's permutation set (shaderpackage019) restricted to them, until an exterior capture exists.

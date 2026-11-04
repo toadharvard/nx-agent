@@ -21,6 +21,7 @@ float F(const uint8_t* p, uint32_t i) { float v; memcpy(&v, p + 4 * i, 4); retur
 uint32_t FB(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 
 struct Tex { uint32_t image = 0, format = 0, w = 0, h = 0, levels = 1, flags = 0; bool cube = false;
+             bool dirty = false;   // contents changed since image was made: a new image at the next draw that binds it
              vector<vector<uint8_t>> data; };   // cube: each level holds its six faces (D3DCUBEMAP_FACES order)
 struct Surf { uint32_t kind = 0, format = 0, w = 0, h = 0, tex = 0, image = 0; };
 struct Buf { vector<uint8_t> data; uint32_t format = 0; };
@@ -295,6 +296,15 @@ public:
         if (vi->second.native && pi->second.native) st->nativeDraws++;
         auto bi = vb.find(strmVB);
         if (bi == vb.end() || !strmStride) { Skip("no stream 0"); return true; }
+        // textures whose contents changed since their image was made get a new image now (TEXU / TEXC are lazy)
+        for (int s = 0; s < 16; s++) {
+            auto ti = stex[s] ? tex.find(stex[s]) : tex.end();
+            if (ti == tex.end() || !ti->second.dirty) continue;
+            Tex& t = ti->second;
+            t.dirty = false;
+            t.image = MakeImage(t.format, t.w, t.h, t.levels, 0, &t.data, t.cube);
+            if (!t.image) { Skip("texture image not created (format, or NX_MAX_IMAGES reached)"); return true; }
+        }
         // attributes: stream-0 elements with a fnvnx_dk location, up to 8, all converted to 4 floats
         vector<const Elem*> el;
         vector<int> locToAttr(16, -1);
@@ -503,7 +513,9 @@ public:
                 if (t.w != t.h) return Fail("TEX: cube texture not square");
                 for (auto& l : t.data) if (l.size() % 6) return Fail("TEX: cube level bytes not six faces");
             }
-            t.image = MakeImage(t.format, t.w, t.h, rt ? 1 : t.levels, rt ? NxImg_RenderTarget : 0, rt ? nullptr : &t.data, t.cube);
+            // render targets now; sampled textures when a draw first binds them (their TEXU/TEXC usually follow)
+            if (rt) t.image = MakeImage(t.format, t.w, t.h, 1, NxImg_RenderTarget, nullptr, t.cube);
+            else t.dirty = true;
             st->textures++;
             tex[U(p, 0)] = t;
             break;
@@ -517,8 +529,10 @@ public:
             if (!Charge(b)) return Fail("TEXU: input exceeds the resident limit");
             if (it->second.cube && b % 6) return Fail("TEXU: cube level bytes not six faces");
             it->second.data[U(p, 1)].assign(p + 12, p + 12 + b);
-            // images are immutable in NxGpuApi: a new image with the new contents
-            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data, it->second.cube);
+            // images are immutable in NxGpuApi and never freed (NX_MAX_IMAGES): the new image is made when a draw binds
+            // the texture, so a texture filled level by level (d9cap: TEX with empty levels, then one TEXU per level)
+            // costs one image, not one per level (Prepare)
+            it->second.dirty = true;
             break;
         }
         case kD9TexCube: {   // one face of one level of a cube texture (LockRect on a cube face)
@@ -536,7 +550,7 @@ public:
                 l.assign(6 * (size_t)b, 0);
             }
             memcpy(l.data() + face * (size_t)b, p + 16, b);
-            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data, true);
+            it->second.dirty = true;   // as TEXU: the image is made when a draw binds it
             break;
         }
         case kD9Surface: {

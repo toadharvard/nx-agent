@@ -850,6 +850,12 @@ FOGCOLOR, alpha test = ALPHAFUNC when ALPHATESTENABLE, ALPHAREF / 255); all rend
 `nx_d3d9_translate` (blend, depth, stencil, raster, sRGB write, bias, scissor); sampler states through
 `nx_d3d9_sampler` (sRGB view when SRGBTEXTURE); render-target textures and surfaces, the auto depth surface.
 
+Sampled textures get their image when a draw binds them after a TEX, TEXU or TEXC (one image per change seen by a
+draw, not per record): NxGpuApi images are immutable and never freed, and d9cap's captures fill managed textures
+level by level, so making an image per TEXU ran past `NX_MAX_IMAGES` (4096) on docmitchell_13000 and the textures
+made after that sampled as none (S16 R4: the black frame; render-land). A texture whose image cannot be made skips
+the draw (`texture image not created`).
+
 Skipped and counted (exit code 3): fixed-function draws (no VS or no PS), FVF draws (no declaration), POSITIONT,
 streams other than 0 (instancing), cube render targets (sampled as none; cube textures with contents are sampled since S16 R2), vertex textures. Varyings the VS writes beyond
 the PS are fine. A converter should still emit everything; nx_render reports what it skipped.
