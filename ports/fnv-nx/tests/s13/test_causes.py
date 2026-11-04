@@ -438,6 +438,15 @@ def test_handoffs():
               'by head: the reproducer names the stable per-head branch (%s)' % s1h[1][4])
         tr2 = [l.rstrip('\n').split('\t') for l in open(os.path.join(hd, 'triage_S13b.tsv'))]
         check(tr2[1][4] == 'fuzz/cache/7of26:div/00402000-0.json', 'by head: a row without commit keeps the cache ref')
+        # a row seeded from another shard's cache keeps the branch its head published it on (V1 RH-2)
+        lines = open(os.path.join(d, 'results.jsonl')).read().splitlines()
+        lines[0] = json.dumps(dict(json.loads(lines[0]), shard='3of13'))
+        open(os.path.join(d, 'results.jsonl'), 'w').write('\n'.join(lines) + '\n')
+        hd2 = os.path.join(root, 'hd2')
+        causes.main(['handoffs', d, '--out-dir', hd2, '--ref-by-head'])
+        s1s = [l.rstrip('\n').split('\t') for l in open(os.path.join(hd2, 'handoffs_S1.tsv'))]
+        check(s1s[1][4] == 'fuzz/0123456789ab/3of13:div/00401000-0.json',
+              'by head: a seeded row names its source shard (%s)' % s1s[1][4])
         ix = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'index.tsv'))]
         check(['harness_S13.tsv', 'artifact', 'S13', '1', '1', 'local-static 1'] in ix, 'index row per file')
 

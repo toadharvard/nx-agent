@@ -1807,7 +1807,8 @@ def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/', by_head=False):
                 continue
             e = EFFECTS.get(rec['_file']) or {}
             head = str((results.get(rec['address']) or {}).get('commit') or '')[:12]
-            ref = ('fuzz/%s/%s:div/%s' % (head, name, rec['_file']) if by_head and head else
+            shard = (results.get(rec['address']) or {}).get('shard') or name   # a seeded row keeps its source
+            ref = ('fuzz/%s/%s:div/%s' % (head, shard, rec['_file']) if by_head and head else
                    '%s%s:div/%s' % (ref_prefix, name, rec['_file']))
             out[(prefix[cls], owner)].append((owner, rec['_cause'], rec['address'], rec.get('source') or '', ref,
                                               e.get('first') or '', FIX_CLASS_OF.get(rec['_cause'], '')))
