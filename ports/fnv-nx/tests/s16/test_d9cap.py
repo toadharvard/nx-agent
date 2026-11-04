@@ -147,6 +147,7 @@ class D9Cap(unittest.TestCase):
         for n in ('vs3_ct', 'ps3_vcolor', 'ps3_tex'):
             open(f'{t}/{n}.bin', 'wb').write(sh[n][0])
         pfx = os.environ.get('S16_PREFIX') or ('/tmp/claude-0/s16/pfx' if os.path.isfile('/tmp/claude-0/s16/pfx/system.reg') else f'{t}/pfx')
+        cls.lock = replay.prefix_lock(pfx)
         cls.x = replay.Xvfb()
         cls.env = replay.wine_env(pfx, cls.x.display)
         if not os.path.isfile(os.path.join(pfx, 'system.reg')):
@@ -162,6 +163,7 @@ class D9Cap(unittest.TestCase):
     def tearDownClass(cls):
         subprocess.run(['wineserver', '-k'], env=cls.env, capture_output=True)
         cls.x.close()
+        cls.lock.close()
         if not os.environ.get('S16_KEEP'):
             shutil.rmtree(cls.t, ignore_errors=True)
 
