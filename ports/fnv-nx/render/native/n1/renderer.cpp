@@ -357,15 +357,32 @@ bool Renderer::Render(const Draw& d) {
         }
         (void)litPoints;
     }
+    // epilogue block and dynamic record depend only on the resolved state: while the tracker has not re-translated
+    // in this frame, the previous draw's block and record are this draw's
+    const bool sameResolve = state_.resolves() == lastEpiResolve_ && frameNo_ == lastEpiFrame_;
     if (needEpi) {
-        NxEpilogue e;
-        memset(&e, 0, sizeof e);
-        nx_epilogue_fill(&e, &r.dyn, r.shaderBits);
-        frame_.SetEpilogue(p, e);
+        if (sameResolve && lastEpiBlock_) {
+            p->epi = lastEpiBlock_;
+        } else {
+            NxEpilogue e;
+            memset(&e, 0, sizeof e);
+            nx_epilogue_fill(&e, &r.dyn, r.shaderBits);
+            frame_.SetEpilogue(p, e);
+            lastEpiBlock_ = p->epi;
+        }
     }
-    DynRec dr;
-    DynFromD3D9(&dr, r.dyn);
-    p->dyn = frame_.AddDyn(dr);
+    if (sameResolve && lastDynId_) {
+        p->dyn = lastDynId_;
+    } else {
+        DynRec dr;
+        DynFromD3D9(&dr, r.dyn);
+        p->dyn = frame_.AddDyn(dr);
+        lastDynId_ = p->dyn;
+    }
+    if (!sameResolve) {
+        lastEpiResolve_ = state_.resolves(); lastEpiFrame_ = frameNo_;
+        if (!needEpi) lastEpiBlock_ = 0;
+    }
     if (d.family) frame_.Tag(p, d.enginePass, d.family);
     else if (curFamily_) frame_.Tag(p, curPass_, curFamily_);
     return true;
