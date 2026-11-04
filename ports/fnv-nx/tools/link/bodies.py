@@ -498,11 +498,25 @@ class Pe:
         nsec, = struct.unpack_from('<H', d, pe + 6)
         opt, = struct.unpack_from('<H', d, pe + 20)
         self.base, = struct.unpack_from('<I', d, pe + 24 + 28)
-        self.secs = []
+        self.secs, self.code = [], []
         for k in range(nsec):
             o = pe + 24 + opt + 40 * k
             vsize, va, rsize, roff = struct.unpack_from('<IIII', d, o + 8)
+            flags, = struct.unpack_from('<I', d, o + 36)
             self.secs.append((self.base + va, max(vsize, rsize), roff, rsize))
+            if flags & IMAGE_SCN_CNT_CODE:
+                self.code.append((self.base + va, roff, rsize))
+
+    def find_unique(self, body, masked):
+        """The one address in a code section whose bytes equal body outside the offsets in masked, else None."""
+        pat = re.compile(b''.join(b'.' if j in masked else re.escape(body[j:j + 1]) for j in range(len(body))), re.S)
+        hits = []
+        for va, roff, rsize in self.code:
+            for m in pat.finditer(self.data, roff, roff + rsize):
+                hits.append(va + m.start() - roff)
+                if len(hits) > 1:
+                    return None
+        return hits[0] if hits else None
 
     def read(self, va, n):
         for start, size, roff, rsize in self.secs:
@@ -511,13 +525,19 @@ class Pe:
         return None
 
 
-def exe_call_targets(objdir, i, unit, wanted, exe):
+SEARCH_MIN = 16   # bytes: shorter bodies (a jmp thunk, `mov eax, [ecx]; ret`) occur too often to place by content
+
+
+def exe_call_targets(objdir, i, unit, wanted, exe, search=False):
     """Original addresses the pristine object of unit i calls the MSVC names in wanted at. Functions are placed
     by units.json, then by following REL32 calls from placed functions (a COMDAT units.json does not list, such as
     `NiPointer<T>::operator=`, at the address the exe's call reaches); a function counts as placed only where its
     x86 bytes equal the exe's outside relocations. At each REL32 relocation naming a wanted name in a placed
     function, the exe's displacement gives the target; at a DIR32 one (the address taken, `push offset f`), the
-    exe's word does. -> {msvc name: {target address: number of sites}}."""
+    exe's word does. search: a function that references a wanted name and was not placed (inlined into its callers
+    in the exe, or reached at an address holding other code) is placed where its bytes, relocations masked, occur
+    exactly once in the exe's code (at least SEARCH_MIN bytes: a standalone copy units.json does not list).
+    -> {msvc name: {target address: number of sites}}."""
     import struct
     import vslots
     p = os.path.join(objdir, 'u%d.obj' % i)
@@ -534,7 +554,21 @@ def exe_call_targets(objdir, i, unit, wanted, exe):
     todo = [(f['symbol'], int(f['address'], 16)) for f in unit['functions'] if f['symbol'] in funcs]
     placed = {}
     out = collections.defaultdict(collections.Counter)
-    while todo:
+    searched = set()
+    while True:
+        if not todo and search:   # standalone copies of the unplaced functions that reference a wanted name
+            for fname, (sec, start, body) in sorted(funcs.items()):
+                if fname in placed or fname in searched or len(body) < SEARCH_MIN:
+                    continue
+                rel = {off - start: v for off, v in c.relocs(sec).items() if 0 <= off - start < len(body)}
+                if not any(sn in wanted and typ in (0x06, 0x14) for sn, typ in rel.values()):
+                    continue
+                searched.add(fname)
+                a = exe.find_unique(body, {j for k in rel for j in range(k, min(k + 4, len(body)))})
+                if a is not None:
+                    todo.append((fname, a))
+        if not todo:
+            break
         fname, a = todo.pop()
         if fname in placed:
             continue
@@ -657,7 +691,7 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
     # every pristine object: the referencing unit's own call is often in a COMDAT the exe dropped (MSVC inlined it
     # into callers, maybe in other units, whose calls of the same name the exe keeps)
     for i_ in range(len(udata)):
-        for m_, tg in exe_call_targets(msvc_objs, i_, udata[i_], set(by_m), exe).items():
+        for m_, tg in exe_call_targets(msvc_objs, i_, udata[i_], set(by_m), exe, search=True).items():
             for n in by_m[m_]:
                 seen[n].update(tg)
                 via.setdefault(n, m_)

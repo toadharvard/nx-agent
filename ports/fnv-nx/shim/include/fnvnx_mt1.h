@@ -15,4 +15,10 @@ FNVNX_MT1_INLINE unsigned int fnvnx_mt1_batches(void)
     return fnvnx_mt1_setting_bMTRendering[4] ? 2u : 1u;
 }
 
+/* The gate the .s1b tooling emits for `=== wrap` hunks: bMTRendering set. In the game build fnvnx_compat.h defines it
+ * first (S1b: fnvnx_mt1_on(), toolchain/game/boot.cpp, which reads this same setting); alone, this header does. */
+#ifndef FNVNX_MT1_ON
+#define FNVNX_MT1_ON (fnvnx_mt1_setting_bMTRendering[4] != 0)
+#endif
+
 #endif

@@ -39,14 +39,18 @@ MSVC_RULES = ('XINC1', 'FTOL1', 'DBUG1', 'RET1')
 # Gated classes: deliberate Switch-only behaviour changes, exempt from the MSVC byte check, applied by prepare only
 # (the Switch build), every hunk behind the runtime gate (docs/PATCHES.md, "Patch class MT1").
 GATED = ('MT1',)
-MT1_GUARD = 'FNVNX_MT1_ON'          # fnvnx_compat.h: fnvnx_mt1_on() != 0; the engine's copy of bMTRendering, off by default
-MT1_MODES = ('guarded', 'inert')    # `=== guarded`: the new text tests the gate itself; `=== inert`: adds text only
+MT1_GUARD = 'FNVNX_MT1_ON'          # shim/include/fnvnx_mt1.h (S15-threads): bMTRendering set, off by default
+# What a hunk that gates itself must name: the gate macro, the gate header's helpers, or the engine's bMTRendering
+# copy (the decomp's own test of it).
+MT1_GATES = (MT1_GUARD, 'fnvnx_mt1_', 'DAT_011f94b4')
+MT1_MODES = ('wrap', 'inert')       # `=== wrap`: statements, gated by the tooling; `=== inert`: adds text only
 
 
 def mt1_emit(old, new, mode):
-    """The text an MT1 hunk puts in place of the matched old text: a statement hunk (no mode) becomes
-    `if (FNVNX_MT1_ON) { new } else { old }`, so with the gate off the code is the decomp's."""
-    if mode:
+    """The text an MT1 hunk puts in place of the matched old text. Default: the new text as written (it gates
+    itself, checked at parse time). `wrap`: whole statements, emitted as `if (FNVNX_MT1_ON) { new } else { old }`, so
+    with the gate off the code is the decomp's. `inert`: as written (a pure addition)."""
+    if mode != 'wrap':
         return new
     return 'if (%s) { /* fnv-nx MT1 */\n%s\n} else {\n%s\n}' % (MT1_GUARD, new, old)
 
@@ -84,8 +88,9 @@ def parse_patch_file(fname):
         if mode == 'new':
             if body == '>>>':
                 o, nw = ''.join(old).rstrip('\n'), ''.join(new).rstrip('\n')
-                if hmode == 'guarded' and MT1_GUARD not in nw:
-                    raise ValueError('%s: a guarded MT1 hunk must test %s itself' % (where, MT1_GUARD))
+                if cur.rule in GATED and not hmode and not any(g in nw for g in MT1_GATES):
+                    raise ValueError('%s: an MT1 hunk must gate itself (name one of %s) or be `=== wrap` / '
+                                     '`=== inert`' % (where, ', '.join(MT1_GATES)))
                 if hmode == 'inert' and o not in nw:
                     raise ValueError('%s: an inert MT1 hunk only adds text: its new text must contain the old' % where)
                 cur.hunks.append((o, nw))
@@ -236,7 +241,7 @@ def r_ret1(path, text, stats):
 def r_mt1(path, text, stats):
     """MT1: gated Switch behaviour changes (patches/mt1_*.s1b, S15-threads: multithreaded culling). Not MSVC byte
     parity: exempt from msvc_check.py, applied in the Switch build only (class `platform`), every hunk behind
-    FNVNX_MT1_ON (the engine's copy of bMTRendering, off by default), so with the gate off the code is the decomp's."""
+    the bMTRendering gate (off by default), so with the gate off the code is the decomp's."""
     return apply_sites(path, text, stats, 'MT1')
 
 

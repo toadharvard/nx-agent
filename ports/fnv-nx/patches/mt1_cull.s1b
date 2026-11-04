@@ -15,26 +15,23 @@
 # The main scene's accumulator (m_88, record 21's): two batch renderers when MT culling is on. The ctor
 # (bsshaderaccumulator.cpp 0x00b660d0) builds the second one only for count 2; RenderBound picks one by
 # tls[0x2bc] % count and AccumulateRenderPasses indexes m_apkRenderers[tls 0x2bc] unchecked, so with count 1 the
-# worker would index a NULL renderer. A statement hunk: with FNVNX_MT1_ON off the decomp's count 1 stays. The gate
-# reads the INI setting object (fnvnx_mt1_on(), toolchain/game/boot.cpp), since WinMain builds the accumulators
-# (here) before the renderer init copies the setting into DAT_011f94b4.
+# worker would index a NULL renderer. fnvnx_mt1_batches(): shim/include/fnvnx_mt1.h (1 with bMTRendering=0).
 <<<
     acc88.FUN_0066b0d0(new BSShaderAccumulator(99, 1, 759));
 ===
-    acc88.FUN_0066b0d0(new BSShaderAccumulator(99, 2, 759));
+    acc88.FUN_0066b0d0(new BSShaderAccumulator(99, fnvnx_mt1_batches(), 759));
 >>>
 
 @@ MT1 src/bsshader/mtrenderingsystem_o2_variant.cpp 0x00ba3390
 # Only record 21 is handed to Rendering Task Thread 2; every other record takes the function's own inline path
 # (the bMTRendering=0 branch: a BSCullingProcess on the caller's thread). Its record stays empty, so the worker
-# (0x00ba3190) skips it and still signals its stage: 0x00ba30f0 / 0x00ba3130 work unchanged. Guarded: with
-# FNVNX_MT1_ON off the condition is the decomp's.
+# (0x00ba3190) skips it and still signals its stage: 0x00ba30f0 / 0x00ba3130 work unchanged.
 <<<
     if (::DAT_011f94b4)
     {
         self->GetTask(a8).sp00 = a1;
-=== guarded
-    if (::DAT_011f94b4 && (!FNVNX_MT1_ON || a8 == 21))
+===
+    if (::DAT_011f94b4 && a8 == 21)
     {
         self->GetTask(a8).sp00 = a1;
 >>>

@@ -237,6 +237,8 @@ int fnvnx_mt1_on(void) __attribute__((weak));
 extern "C"
 #endif
 void fnvnx_mt1_wait_cell_update(void);
+/* fnvnx_mt1_batches(): the main accumulator's batch-renderer count for patches/mt1_cull.s1b */
+#include "fnvnx_mt1.h"
 
 #define FNVNX_ASM_FNV_HELPERS
 #include "fnvnx_asm.h"
