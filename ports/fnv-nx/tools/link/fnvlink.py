@@ -410,7 +410,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                          tier='override', msvc=msv, override=oobj)
 
     # ---- references
-    layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv')).items() if v is not None}
+    layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
     probe_req = set()
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')

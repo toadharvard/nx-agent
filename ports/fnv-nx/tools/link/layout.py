@@ -19,6 +19,7 @@ w bytes, IND: by reference), one line per probed (unit, type); a size of -1 mark
 """
 import collections
 import concurrent.futures
+import hashlib
 import os
 import re
 import struct
@@ -148,7 +149,50 @@ def probe_unit(tree, workdir, unit, types):
     return res
 
 
-def load(path):
+_INC = re.compile(r'^[ \t]*#[ \t]*include[ \t]*([<"])([^>"]+)[>"]', re.M)
+_FILE_SHA, _KEYS = {}, {}
+
+
+def unit_key(tree, unit):
+    """Content key of a unit for every probe cache (layouts, vtables, emitted slot functions): its prepared source
+    and every local header it reaches (#include resolved like the compiler: the including file's directory, then
+    shim/include, SSE2NEON, <tree>/include; the forced fnvnx_compat.h first), and the probe flags with the tree and
+    port paths taken out - a row measured on another tree with the same text keeps its key, any header change
+    drops it (S9: seeded caches carried layouts from before a CRITICAL_SECTION change)."""
+    k = (tree, unit)
+    if k in _KEYS:
+        return _KEYS[k]
+    sse = os.environ.get('SSE2NEON') or os.path.join(PORT, 'ext', 'sse2neon')
+    dirs = [os.path.join(PORT, 'shim', 'include'), sse, os.path.join(tree, 'include')]
+    h = hashlib.sha1(' '.join(flags(tree)).replace(tree, '<tree>').replace(PORT, '<port>').replace(sse, '<sse>')
+                     .encode())
+    todo = [os.path.join(tree, unit), os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h')]
+    seen = set()
+    while todo:
+        f = os.path.normpath(todo.pop())
+        if f in seen or not os.path.isfile(f):
+            continue
+        seen.add(f)
+        if f not in _FILE_SHA:
+            data = open(f, 'rb').read()
+            incs = [(kind, name) for kind, name in _INC.findall(data.decode('utf-8', 'surrogateescape'))]
+            _FILE_SHA[f] = (hashlib.sha1(data).hexdigest(), incs)
+        sha, incs = _FILE_SHA[f]
+        rel = f.replace(tree, '<tree>').replace(PORT, '<port>').replace(sse, '<sse>')
+        h.update(('%s %s\n' % (rel, sha)).encode('utf-8', 'surrogateescape'))
+        for kind, name in incs:
+            for d in ([os.path.dirname(f)] if kind == '"' else []) + dirs:
+                g = os.path.join(d, name)
+                if os.path.isfile(g):
+                    todo.append(g)
+                    break
+    _KEYS[k] = h.hexdigest()[:20]
+    return _KEYS[k]
+
+
+def load(path, tree=None):
+    """layouts.tsv -> {(unit, type): Layout or None}; with tree, rows whose unit content key differs (or that have
+    none: older files) are left out."""
     lay = {}
     if os.path.exists(path):
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
@@ -156,6 +200,8 @@ def load(path):
                 continue
             f = line.rstrip('\n').split('\t')
             if len(f) < 7:
+                continue
+            if tree is not None and (len(f) < 8 or f[7] != unit_key(tree, f[0])):
                 continue
             lay[(f[0], f[1])] = None if f[2] == '-1' else Layout(int(f[2]), int(f[3]), int(f[4]), int(f[5]), f[6])
     return lay
@@ -167,7 +213,9 @@ def run(out, tree, jobs=4):
         u, t = line.rstrip('\n').split('\t')
         req[u].add(t)
     path = os.path.join(out, 'layouts.tsv')
-    lay = load(path)
+    before = len(load(path))
+    lay = load(path, tree)   # rows of another content (a seed from an older tree) are probed again
+    print('probe: %d cached rows, %d dropped (unit content changed)' % (len(lay), before - len(lay)), flush=True)
     todo = {u: sorted(t for t in ts if (u, t) not in lay) for u, ts in req.items()}
     todo = {u: ts for u, ts in todo.items() if ts}
     workdir = os.path.join(out, 'probe')
@@ -179,12 +227,12 @@ def run(out, tree, jobs=4):
             for t, l in f.result().items():
                 lay[(futs[f], t)] = l
     with open(path, 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('#unit\ttype\tsize\talign\ttrivial\tempty\tclass\n')
+        f.write('#unit\ttype\tsize\talign\ttrivial\tempty\tclass\tunit content key\n')
         for (u, t), l in sorted(lay.items()):
             if l is None:
-                f.write('%s\t%s\t-1\t0\t0\t0\t?\n' % (u, t))
+                f.write('%s\t%s\t-1\t0\t0\t0\t?\t%s\n' % (u, t, unit_key(tree, u)))
             else:
-                f.write('%s\t%s\t%d\t%d\t%d\t%d\t%s\n' % (u, t, *l))
+                f.write('%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n' % (u, t, *l, unit_key(tree, u)))
     got = sum(1 for l in lay.values() if l)
     print('layouts: %d known, %d not nameable' % (got, len(lay) - got))
     print('classes:', dict(collections.Counter(l.cls for l in lay.values() if l)))

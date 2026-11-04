@@ -427,7 +427,7 @@ def compile_probe(tree, workdir, unit, items, tag, extra=()):
     head = HEAD + '#include "%s"\n' % os.path.join(tree, unit)
     first = head.count('\n') + 1
     srcfile = os.path.join(tree, unit)
-    key = hashlib.sha1(('%s|%s|%s' % (' '.join(fl), os.path.getmtime(srcfile) if os.path.exists(srcfile) else 0,
+    key = hashlib.sha1(('%s|%s|%s' % (' '.join(fl).replace(tree, '<tree>'), layout.unit_key(tree, unit),
                                       '\n'.join(line for _, _, line in alive))).encode()).hexdigest()
     done = os.path.join(workdir, base + '.done.json')
     try:
@@ -830,7 +830,7 @@ def run(out, tree, jobs=4):
 
     def one(h, cls):
         src = os.path.join(tree, h)
-        key = hashlib.sha1(('%s|%s|%s' % (h, os.path.getmtime(src) if os.path.exists(src) else 0,
+        key = hashlib.sha1(('%s|%s|%s' % (h, layout.unit_key(tree, h),
                                           '|'.join(sp for _, sp, _ in cls))).encode()).hexdigest()
         if key in cache:
             got = cache[key]
@@ -966,8 +966,8 @@ def run(out, tree, jobs=4):
         if not want or not classes:
             return h, None, want, set(), None
         src = os.path.join(tree, h)
-        key = hashlib.sha1(('emit4|%s|%s|%s|%s|%s' % (' '.join(layout.flags(tree) + list(EMIT_FLAGS)), h,
-                                                os.path.getmtime(src) if os.path.exists(src) else 0,
+        key = hashlib.sha1(('emit4|%s|%s|%s|%s|%s' % (' '.join(layout.flags(tree) + list(EMIT_FLAGS)).replace(tree, '<tree>'), h,
+                                                layout.unit_key(tree, h),
                                                 ' '.join(sorted(want)), '|'.join(sp for _, sp, _ in classes))
                             ).encode()).hexdigest()
         got = xcache.get(key)

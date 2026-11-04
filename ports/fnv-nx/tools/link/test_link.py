@@ -102,6 +102,18 @@ def main():
     check(v.kind == 'same', 'through the __thiscall cast the call matches the definition: %s %s' % (v.kind, v.moves))
     uc2 = fnvlink.unit_casts(src + 'void g() { FUN_00a0c900(0, \"s\", 0); }\n')
     check(uc2['FUN_00a0c900'][1] == 1, 'a direct call next to the cast is counted: %s' % (uc2['FUN_00a0c900'],))
+    # S9: probe caches keyed on unit content - the unit and every local header it includes, not mtimes or paths
+    with tempfile.TemporaryDirectory() as t:
+        for d in ('a', 'b'):
+            os.makedirs(os.path.join(t, d, 'src'))
+            os.makedirs(os.path.join(t, d, 'include'))
+            open(os.path.join(t, d, 'src', 'u.cpp'), 'w').write('#include "h.h"\nint f(S *s) { return s->x; }\n')
+            open(os.path.join(t, d, 'include', 'h.h'), 'w').write('struct S { int x; };\n')
+        ka, kb = layout.unit_key(os.path.join(t, 'a'), 'src/u.cpp'), layout.unit_key(os.path.join(t, 'b'), 'src/u.cpp')
+        check(ka == kb, 'same content in another tree: same key')
+        open(os.path.join(t, 'b', 'include', 'h.h'), 'w').write('struct S { int pad, x; };\n')
+        layout._KEYS.clear(); layout._FILE_SHA.clear()
+        check(layout.unit_key(os.path.join(t, 'b'), 'src/u.cpp') != ka, 'an included header changed: another key')
     # S5: data names. A pointer to a function pointer, and a type whose name ends in '_' (llvm-undname drops the
     # space: 'class Setting_x'): the name comes from the decoration
     dn2 = ['?g_apfnA@@3PAP6AXPAX@ZA', '?bKeep@@3VSettingT_Coll_@@A', '?v@fnv_00123456@@3HA']
