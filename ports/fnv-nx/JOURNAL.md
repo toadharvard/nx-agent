@@ -2223,3 +2223,26 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - The `using ::fabs;` case: in units that include `<math.h>`, it pulls in the `float fabs(float)` overload that the
     namespace's own C declaration hid, so `fabs(f)` rounds through float. This is for S1: keep the namespace's C
     declaration.
+
+### J-0105 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0052,J-0102
+
+* **did** - S1 `d414a1c`..`d63ab36`:
+  - `fnvnx_win32.h` sets its own `pack(push, 8)`. The 16 includes DECL1/DECL2 placed inside the decomp's
+    `pack(push, 4)` had made LARGE_INTEGER, ULARGE_INTEGER and MEMORYSTATUSEX 4-aligned.
+  - STATIC1 covers namespace statics: 134 in 44 files get C linkage where they stand, and uninitialised ones become the
+    image's variable.
+  - GOTO1 also splits `__m128`/hkQuadReal variables, const scalars and pointers to const. That fixes 3 units.
+  - VTBL1 gives the FUN_00aa7400 heap the AbstractHeap slots v1..v13 (boot item 1: 4,327 of 4,343 initializer skips).
+  - New rule VA2: `va_arg(ap, Enum)` becomes `(Enum)va_arg(ap, int)` (RegisterActorValue 0066efe0).
+  - tests/s1: 0 failed. tests/s11: ok.
+* **found** - Boot item 2 is not a string at all. `"@K@"` is the decompiler's text of the bytes stored at a vftable:
+  slot 0 is 0x00404b40. The unit binds the literal `$SG2541` to 0x0101212c, which is the vftable address to store.
+  There are 45 such 3-character-literal vptr stores tree-wide, mostly in `staging/blk_*_od.cpp`.
+* **found** - Two more boot items:
+  - A660A0Map's SetAt calls slot 2, which is IsKeysEqual in Gamebryo's NiTMapBase layout. VTBL1 needs that interface.
+  - BSNiAllocator slot 7 is Initialize by analogy with NiStandardAllocator. The decomp has no function for it.
+* **decided** - BSNiAllocator slot 7 stays unresolved (a vslot trap, stubbed in the emulator's known_faults) until the
+  exe's vftable 0x010a2528 can be read. Binding by analogy is not evidence.
+* **measured** - farm1 census at 23e0f0a: 2,908/2,978 clean, 70 failing, 385 errors. The next census should be about
+  2,911. The largest class left is decomp `_mm_*` prototypes whose return type is a typedef (about 15 Havok units,
+  about 100 errors).
