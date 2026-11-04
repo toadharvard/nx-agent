@@ -40,6 +40,7 @@ methods are named after their callee's address (`FUN_<addr>`), so S2's name-addr
 |---|---|
 | `test_patches.py DECOMP` | every site parses, has evidence, applies exactly once to the pristine and to the rule-prepared text; renames well-formed |
 | `msvc_check.py DECOMP WORK [--all-functions] [--patches DIR]` | patches on the pristine text, each unit compiled with its recipe compiler/flags (S11 setup), every function fingerprinted against `$S11/obj/pristine` with S11's bindings (literals by content); renamed definitions and references followed; `--renames` writes `units_renames.tsv` |
+| `xinc1/xinc_enum.py`, `analyze.py`, `gen.py` | round-2 pipeline: x86-inconsistent references of a link run -> callers in the pristine objects -> ecx at each reference (`ecxflow.py`) -> candidate XINC1 patches for shapes A/B/C, the rest listed for reading by hand; `preserves.py ADDR`: does a function keep ecx / edx at every return |
 | `gcc_check.py DECOMP BASE_TREE WORK` | patched files prepared with all rules into an overlay of a prepared tree, compiled with the census flags before/after; reports new errors and errors on patched lines |
 
 `msvc/s1b_check_fi.h` gives `fnvnx_ftol2(x)` its MSVC meaning for the check only: the compiler's own
@@ -50,8 +51,10 @@ float -> `__int64` conversion, i.e. a call of `_ftol2_sse` with x in ST0.
 | Rule | Sites | MSVC check | Notes |
 |---|---:|---|---|
 | XINC1 | all 68 x86-inconsistent pairs of S2's latest run (a 69th of an earlier run is bridged by S2 now): 66 functions, 49 files | 62 identical, 4 differ by design | see below |
+| XINC1 round 2 | S2c run f12: 295 x86-inconsistent references, 295 callers in 174 files; 264 callers patched in 152 files (`xinc1_r2_*.s1b`) | 259 identical, 5 differ by design | 26 need no patch, 4 open, 1 patched in round 1 (see "Round 2") |
 | FTOL1 | 17 arg-less helper calls in 10 units (+1 dead copy) | all identical; whole units identical (1,535 functions) | the "~37" of J-0009 counted 20 declarations nobody calls |
 | RET1 | 11 functions | identical (whole units, 1,395 functions) | 6 trailing statements, 5 with the callee's return type restored |
+| RET1 round 2 | 6 functions S12 found trapping (`ret1_fall1_r2.s1b`) | 4 identical, 2 differ by design | 3 made void, 1 callee return restored, 2 return the x86 eax |
 | DBUG1 | 0 | - | the S4b items were merged by S1 (`FUN_00ec78f1_t` 12 bytes, J-0041) |
 
 **XINC1 patterns.** (a) `jmp <callee>` forwarders declared `void f()`: they hand ecx and the caller's stack
@@ -70,6 +73,48 @@ was right, the definition (0x00a928b0, only statics) is made static.
 must reload ecx (`mov ecx,esi`, 2 bytes): bssegmentedtrishape 0x00a87120 / 0x00a87130, nivbset 0x00e94490,
 hkpprojectilegun 0x00e44f30. Not expressible in C++ without that knowledge; the patched calls are the semantics.
 
+**Round 2 (S2c run f12, 2026-11-04).** f12 compiled many units the first round never saw: 295 x86-inconsistent
+references (419 rows; the `#vtables` copy of an object folds into it), 295 calling functions in 174 files. For
+each caller the pristine MSVC object gives the instruction at the reference and, by a must/may data flow of the
+incoming ecx through moves and calls, whether ecx still holds the caller's own ecx there. Three shapes are mechanical and were
+generated (`tests/s1b/xinc1/gen.py`; the shell names the callee by address as in round 1, the caller keeps its own
+identifier so `msvc_check.py` follows the rename):
+
+* (A) 89 free functions whose whole code is one `jmp callee` (5 bytes) with ecx untouched: thiscall shells with the
+  definition's parameters in portable types (pointers and references `void*`, scalars kept) and its result; the
+  decomp's own parameters of these forwarders are ignored (often wrong: `(int, int)` for one `NiStream*`).
+* (B) 39 free functions (stdcall / cdecl) that never write ecx before the call or tail jump: shell members with the
+  same parameters, calls on this - mostly the debug-string overrides that call the base version first, and the Havok
+  shape forwarders that store a constant into their second stack slot and jump.
+* (C) 125 members, constructors and destructors calling with ecx = this: `((S*)this)->FUN_<callee>(..)` with the
+  reference's own parameter types, so the pushes stay the same.
+
+11 more read by hand (`xinc1_r2_manual.s1b`): ecx holds another object (0x00d54f90 `&kOutput.m_vHitNormal`, also the
+second argument; 0x00dcc130 the argument `value`; 0x00b7c190 the slot element), ecx survives a callee that never
+writes it (0x00a712f0 after UpdateWorldFrustum, 0x00e385e0 after 0x00e376e0, 0x00a30c80 after IsNotInChain,
+which also keeps edx = arg - the decomp's `__int64` high-half trick is garbage on the target and goes), a block-scope
+`extern` that would hide the shell (0x00b86db0), a pointer the decomp typed `char` (0x00a51210), a spurious second
+parameter of the callee (0x00a4d1d0: 0x00a57c10 jumps to IsCompatibleWith, `ret 4`), and hidden result buffers
+(0x00cb2d70 returns the one-byte CD4AF0Bool of 0x00cd4af0; 0x00e3e8e0 returns the hkRefPtr by value).
+
+MSVC: 259 identical, 5 differ by design - 0x00a712f0, 0x00e385e0, 0x00a30c80 reload ecx / keep arg in a saved
+register (the whole-program allocation above; 0x00a712f0's shell keeps the callee's no-throw hint as
+`__declspec(nothrow)`, or MSVC adds an EH frame), 0x00c315b0 and 0x00d9be50 allocate one register / schedule one push
+differently after the member call (same values).
+
+No patch for 26 callers: the callee never reads ecx (the three CreateShader of 0x00b55560: `push ecx` only reserves
+the EH slot; 0x00bbbe30 and 0x00a75ec0, V1's false positives: ecx written first; Release 0x00a8f730 and
+InitializePoint3 0x00e92e60), calls through a cast to a thiscall pointer (12: `((void(__thiscall*)(void*))f)(p)`
+passes p in ecx on x86 and in x0 on the target, as the definition wants; S2 sees only the declaration), and
+addresses taken, not called (9: vector constructor / destructor iterators - the native ones call the element
+function with the object first -, stored callbacks, Havok's pair callback called as `callback(this, ...)`). V1's
+register-use buckets miss ecx passed by `push ecx` as an argument (0x00e89ad0, 0x00a5d450), behind a jump table
+(0x00e3dfb0) and through `jmp` forwarders declared free (0x00a43330, 0x00a50b10, 0x00a98eb0, 0x00a8a9a0): those are
+real and patched. Open: 4 result-pointer callers (pattern (d): 0x005762b0, 0x009ab390, 0x008133f0, 0x00c90030) whose
+pushes the decomp attributed to the wrong calls (0x005762b0 computes `*out = *vf_1f4() + (vf_1d8() + vf_1dc()) / c`
+through NiPoint3 operator+ 0x00439e90 and operator/ 0x0053d280): they need a rewrite of the function. Not in abi.tsv:
+the 76 C-named pairs V1 found unflagged (resolve does not compare C names yet, V1 defect 3).
+
 **FTOL1.** The decomp reaches the bytes by declaring the function that leaves the float in ST0 as void and calling
 the helper with no operand. Sites name that function from the code and its definition: Tile::GetFloat (0x00a011b0,
 6 sites), GetDistanceToReference (0x005723b0, 2), floor (0x00406cc0), FloatValueProvider::FUN_008be7a0, the two
@@ -82,11 +127,27 @@ argument-attribution pattern as XINC1 (d), which S2's `ref-passes-fewer` verdict
 trap, fine), about 220 end in a switch / loop / if without else / try (the x86 return value is not evident from the
 statement; left trapped), 177 have no `// @fnv` address (inline header copies), 75 are empty bodies. Candidates
 (trailing expression statement on every fall-through path -> `return stmt;`) were generated automatically and kept
-only where MSVC compiles them to identical code. Not done: `HasValidTriangle` 0x004ff7e0 (S13's example) ends with
-`__assume(0)` while its x86 code returns eax = this after storing a vtable pointer (a destructor-like body under a
-bool name; needs a look at its callers), bsfacegenmanager 0x00aaef90 (returns a local, not the trailing call),
-blk_00ac0000 0x00ac5540 / 0x00acc9f0, tesdatahandler 0x009938d0, blk_00440000 0x00458440 (callee result types
-need more than the declaration change).
+only where MSVC compiles them to identical code. Not done: bsfacegenmanager 0x00aaef90 (returns a local, not the
+trailing call), blk_00ac0000 0x00ac5540 / 0x00acc9f0, blk_00440000 0x00458440 (callee result types need more than
+the declaration change). HasValidTriangle 0x004ff7e0 and tesdatahandler 0x009938d0: round 2 below.
+
+**RET1 round 2** (S12's reachable FALL1 traps, `ret1_fall1_r2.s1b`). FALL1 runs before S1b, so each fixed path ends
+in a return in front of its trap. Read from the MSVC objects, eax at the fall-off:
+
+| Function | x86 at the fall-off | Fix | MSVC |
+|---|---|---|---|
+| 0x004ff7e0 `HasValidTriangle` | stores the base vptr; eax = this only as the store's address. All 95 references are destructors (`??1..@@QAE@XZ`); HasValidTriangle proper is 0x006dd6a0 | void (declaration in pathinglocation_decls.h too), `return;` for the `__assume(0)` | identical |
+| 0x009938d0 `AddAtFirstFreeSlot` | eax = result of 0x00470000 (NiTArray::SetAtGrow, returns the index) | callee `unsigned int`, `return SetAt(..)` | identical |
+| 0x00c25f40 `PopRecord` | unrelated values on the two late paths (a call's eax, last * 32); `return p` is the decrement's address register; no unit names the address | void | identical |
+| 0x00cf6f10 (border-listener pair callback) | al = a node type over the entry eax, or a v24 result; the last path tail-jumps to v24 | void (tail jump kept) | identical |
+| 0x00af28f0 | eax = 0 (the null SteamFriends / SteamUtils just tested) | `return 0;` | differs by design: /Od adds `xor eax,eax` |
+| 0x00bb62b0 | default pass: eax = a - 0x237 (switch arithmetic), returned as the reference | `return *(T*)(a - 0x237)` (the same value) | differs by design: `lea eax,[edx-0x237]` |
+
+The other 5 functions of S12's list have no FALL1 trap: InitWinsock 0x00da2ff0, 0x00dd1f30 and 0x00e66290 keep a
+`brk` only after `bl __stack_chk_fail` (noreturn, unreachable). ActorValue::RegisterActorValue 0x0066efe0 traps
+whenever `count > 0`: GCC replaces `va_arg(args, Index)` (an enum, promoted through `...`) by a trap - for S1 (VA:
+`(Index)va_arg(args, int)`). QuadRenderer::UploadQuads 0x00e723a0 has a reachable `brk` (`cbnz w1` falls into it)
+of another origin - for S12 / S1.
 
 ## CRITICAL_SECTION on PC (the CS28 question)
 
