@@ -278,7 +278,8 @@
    ],
    "basis": "E",
    "phase": "scene graph",
-   "subsystem": "animation"
+   "subsystem": "animation",
+   "ai2_path": 1.0
   },
   {
    "id": "havok_ai",
@@ -290,7 +291,8 @@
    ],
    "basis": "E",
    "phase": "havok",
-   "subsystem": "havok"
+   "subsystem": "havok",
+   "ai2_path": 1.0
   },
   {
    "id": "game_logic",
@@ -318,7 +320,8 @@
     "ai-linear-1": 0.5,
     "ai-linear-2": 0.5
    },
-   "subsystem": "ai"
+   "subsystem": "ai",
+   "ai2_path": 0.5
   },
   {
    "id": "background",
@@ -465,7 +468,7 @@
    },
    "basis": "M",
    "gpu_basis": "E",
-   "source_commit": "ec265a05cc5effe76f16370fde931f68a3a88a98"
+   "source_commit": "82e694f78fa19ef099d89a8239e02c633f928301"
   },
   "overrides": {
    "rows": [
@@ -644,6 +647,11 @@
     "lo": 2.584,
     "mid": 17.57,
     "hi": 31.901
+   },
+   "ai2_critical_minsn": {
+    "lo": 4.7,
+    "mid": 7.2,
+    "hi": 9.7
    }
   },
   {
@@ -653,7 +661,8 @@
     "barrier_relax",
     "mt_cull",
     "havok_workers",
-    "threaded_anim"
+    "threaded_anim",
+    "havok_mt"
    ],
    "core3": false,
    "cores": {
@@ -679,30 +688,32 @@
      }
     },
     "1": {
-     "lo": 5.448,
-     "mid": 9.11,
-     "hi": 12.292,
+     "lo": 5.494,
+     "mid": 9.166,
+     "hi": 12.541,
      "items": {
       "ai_process_lists": 2.75,
       "animation>threaded_anim": 0.338,
       "background": 1.0,
       "cull>mt_cull": 1.096,
-      "havok_ai": 0.95,
+      "havok_ai": 0.457,
+      "havok_ai>havok_mt": 0.549,
       "render_accumulation>mt_cull": 0.404,
       "renderer_worker": 2.572
      }
     },
     "2": {
-     "lo": 5.461,
-     "mid": 9.088,
-     "hi": 12.334,
+     "lo": 5.456,
+     "mid": 9.205,
+     "hi": 12.536,
      "items": {
       "ai_process_lists": 2.75,
       "animation>threaded_anim": 0.338,
       "animation_ai": 1.85,
       "background": 1.0,
       "cull>mt_cull": 1.096,
-      "havok_ai": 1.65,
+      "havok_ai": 1.168,
+      "havok_ai>havok_mt": 0.598,
       "render_accumulation>mt_cull": 0.404
      }
     }
@@ -716,18 +727,18 @@
        "hi": 47.62
       },
       "1": {
-       "lo": 5.34,
-       "mid": 11.16,
-       "hi": 20.09
+       "lo": 5.39,
+       "mid": 11.23,
+       "hi": 20.49
       },
       "2": {
        "lo": 5.35,
-       "mid": 11.14,
-       "hi": 20.15
+       "mid": 11.28,
+       "hi": 20.48
       }
      },
      "cpu_ms": {
-      "lo": 5.35,
+      "lo": 5.39,
       "mid": 19.12,
       "hi": 47.62
      },
@@ -737,12 +748,12 @@
       "hi": 5.49
      },
      "frame_ms": {
-      "lo": 5.35,
+      "lo": 5.39,
       "mid": 19.12,
       "hi": 47.62
      },
      "worst_frame_ms": {
-      "lo": 5.88,
+      "lo": 5.93,
       "mid": 23.9,
       "hi": 71.43
      },
@@ -762,18 +773,18 @@
        "hi": 27.21
       },
       "1": {
-       "lo": 3.05,
-       "mid": 6.38,
-       "hi": 11.48
+       "lo": 3.08,
+       "mid": 6.42,
+       "hi": 11.71
       },
       "2": {
        "lo": 3.06,
-       "mid": 6.36,
-       "hi": 11.52
+       "mid": 6.45,
+       "hi": 11.7
       }
      },
      "cpu_ms": {
-      "lo": 3.06,
+      "lo": 3.08,
       "mid": 10.93,
       "hi": 27.21
      },
@@ -805,6 +816,11 @@
     "lo": 3.38,
     "mid": 15.602,
     "hi": 29.146
+   },
+   "ai2_critical_minsn": {
+    "lo": 3.935,
+    "mid": 6.225,
+    "hi": 8.65
    }
   },
   {
@@ -816,7 +832,8 @@
     "havok_workers",
     "threaded_anim",
     "render_f2f4",
-    "neon_math"
+    "neon_math",
+    "havok_mt"
    ],
    "core3": false,
    "cores": {
@@ -842,30 +859,32 @@
      }
     },
     "1": {
-     "lo": 5.133,
-     "mid": 8.69,
-     "hi": 11.969,
+     "lo": 5.179,
+     "mid": 8.801,
+     "hi": 12.171,
      "items": {
       "ai_process_lists": 2.75,
       "animation>threaded_anim": 0.29,
       "background": 1.0,
       "cull>mt_cull": 1.145,
-      "havok_ai": 1.3,
+      "havok_ai": 0.812,
+      "havok_ai>havok_mt": 0.598,
       "render_accumulation>mt_cull": 0.404,
       "renderer_worker": 1.8
      }
     },
     "2": {
-     "lo": 5.161,
-     "mid": 8.737,
-     "hi": 11.936,
+     "lo": 5.156,
+     "mid": 8.798,
+     "hi": 12.184,
      "items": {
       "ai_process_lists": 2.75,
       "animation>threaded_anim": 0.387,
       "animation_ai": 1.85,
       "background": 1.0,
       "cull>mt_cull": 1.046,
-      "havok_ai": 1.3,
+      "havok_ai": 0.812,
+      "havok_ai>havok_mt": 0.549,
       "render_accumulation>mt_cull": 0.404
      }
     }
@@ -879,18 +898,18 @@
        "hi": 44.73
       },
       "1": {
-       "lo": 5.03,
-       "mid": 10.65,
-       "hi": 19.56
+       "lo": 5.08,
+       "mid": 10.79,
+       "hi": 19.89
       },
       "2": {
-       "lo": 5.06,
-       "mid": 10.71,
-       "hi": 19.5
+       "lo": 5.05,
+       "mid": 10.78,
+       "hi": 19.91
       }
      },
      "cpu_ms": {
-      "lo": 5.06,
+      "lo": 5.08,
       "mid": 16.99,
       "hi": 44.73
      },
@@ -900,12 +919,12 @@
       "hi": 5.49
      },
      "frame_ms": {
-      "lo": 5.06,
+      "lo": 5.08,
       "mid": 16.99,
       "hi": 44.73
      },
      "worst_frame_ms": {
-      "lo": 5.57,
+      "lo": 5.59,
       "mid": 21.24,
       "hi": 67.09
      },
@@ -925,18 +944,18 @@
        "hi": 25.56
       },
       "1": {
-       "lo": 2.88,
-       "mid": 6.09,
-       "hi": 11.18
+       "lo": 2.9,
+       "mid": 6.16,
+       "hi": 11.36
       },
       "2": {
        "lo": 2.89,
-       "mid": 6.12,
-       "hi": 11.14
+       "mid": 6.16,
+       "hi": 11.38
       }
      },
      "cpu_ms": {
-      "lo": 2.89,
+      "lo": 2.9,
       "mid": 9.71,
       "hi": 25.56
      },
@@ -968,6 +987,11 @@
     "lo": 2.187,
     "mid": 13.864,
     "hi": 27.378
+   },
+   "ai2_critical_minsn": {
+    "lo": 3.935,
+    "mid": 6.225,
+    "hi": 8.65
    }
   },
   {
@@ -981,7 +1005,8 @@
     "render_f2f4",
     "neon_math",
     "instancing",
-    "core3"
+    "core3",
+    "havok_mt"
    ],
    "core3": true,
    "cores": {
@@ -1007,35 +1032,38 @@
      }
     },
     "1": {
-     "lo": 3.469,
-     "mid": 5.868,
-     "hi": 8.359,
+     "lo": 3.262,
+     "mid": 5.63,
+     "hi": 7.858,
      "items": {
       "ai_process_lists": 2.75,
       "animation>threaded_anim": 0.338,
       "animation_ai": 0.4,
-      "havok_ai": 1.3,
+      "havok_ai": 0.812,
+      "havok_ai>havok_mt": 0.249,
       "renderer_worker": 1.08
      }
     },
     "2": {
-     "lo": 3.508,
-     "mid": 5.838,
-     "hi": 8.389,
+     "lo": 3.302,
+     "mid": 5.6,
+     "hi": 7.84,
      "items": {
       "ai_process_lists": 2.75,
       "animation>threaded_anim": 0.338,
       "animation_ai": 1.45,
-      "havok_ai": 1.3
+      "havok_ai": 0.812,
+      "havok_ai>havok_mt": 0.249
      }
     },
     "3": {
-     "lo": 2.857,
-     "mid": 5.0,
-     "hi": 6.291,
+     "lo": 3.31,
+     "mid": 5.648,
+     "hi": 7.791,
      "items": {
       "background": 2.0,
       "cull>mt_cull": 2.191,
+      "havok_ai>havok_mt": 0.648,
       "render_accumulation>mt_cull": 0.809
      }
     }
@@ -1049,23 +1077,23 @@
        "hi": 42.39
       },
       "1": {
-       "lo": 3.4,
-       "mid": 7.19,
-       "hi": 13.66
+       "lo": 3.2,
+       "mid": 6.9,
+       "hi": 12.84
       },
       "2": {
-       "lo": 3.44,
-       "mid": 7.15,
-       "hi": 13.71
+       "lo": 3.24,
+       "mid": 6.86,
+       "hi": 12.81
       },
       "3": {
-       "lo": 2.8,
-       "mid": 6.13,
-       "hi": 10.28
+       "lo": 3.24,
+       "mid": 6.92,
+       "hi": 12.73
       }
      },
      "cpu_ms": {
-      "lo": 3.44,
+      "lo": 3.24,
       "mid": 15.51,
       "hi": 42.39
      },
@@ -1100,23 +1128,23 @@
        "hi": 24.22
       },
       "1": {
-       "lo": 1.94,
-       "mid": 4.11,
-       "hi": 7.81
+       "lo": 1.83,
+       "mid": 3.94,
+       "hi": 7.34
       },
       "2": {
-       "lo": 1.97,
-       "mid": 4.09,
-       "hi": 7.83
+       "lo": 1.85,
+       "mid": 3.92,
+       "hi": 7.32
       },
       "3": {
-       "lo": 1.6,
-       "mid": 3.5,
-       "hi": 5.87
+       "lo": 1.85,
+       "mid": 3.96,
+       "hi": 7.27
       }
      },
      "cpu_ms": {
-      "lo": 1.97,
+      "lo": 1.85,
       "mid": 8.86,
       "hi": 24.22
      },
@@ -1148,6 +1176,11 @@
     "lo": 1.434,
     "mid": 12.659,
     "hi": 25.944
+   },
+   "ai2_critical_minsn": {
+    "lo": 3.935,
+    "mid": 6.225,
+    "hi": 8.65
    }
   }
  ],
@@ -1168,7 +1201,8 @@
   "lever mt_cull: MT1 patches/mt1_cull.s1b (main accumulator with 2 batch renderers, only record 21 on the worker; PERF.md 6.8), off by default (bMTRendering=0); moves: half of the main-scene pass, which is part of the cull (shadow, water and interface passes stay on main); needs the S1b MT1 class, mtqemu on the real objects past WinMain, the race checker and frame equivalence",
   "lever havok_workers: with iNumHWThreads > 1 the step already runs on AI linear thread 1 (PERF.md 6.11); the MT simulation (iSimType=4, linked natively, 6.9) spreads it over the pool, which relieves that thread's core, not main: no main lever (P0 mtmodel's per-core schedule shows the effect)",
   "lever core3: S5 33c0b1b, off by default; the system's own use of core 3 is unmeasured",
-  "lever barrier_relax: in the build: S12 52cb478 ORDER_REFCOUNT=weak is compile.sh's default (ORDERING.md Refcounts; sample 110 increments relaxed, 220 decrements release, 201 sites full); race-checked by mtqemu litmus-order ref; B9 on an A57 confirms the stall saving"
+  "lever barrier_relax: in the build: S12 52cb478 ORDER_REFCOUNT=weak is compile.sh's default (ORDERING.md Refcounts; sample 110 increments relaxed, 220 decrements release, 201 sites full); race-checked by mtqemu litmus-order ref; B9 on an A57 confirms the stall saving",
+  "lever havok_mt: linked natively (PERF.md 6.9); iSimType=4 selects it (FUN_00c661d0); the step must stay on one thread (CreateObjects keys the pool on the stepping thread id, 6.10); off until mtqemu past WinMain"
  ],
  "built_levers": [
   "barrier_relax"

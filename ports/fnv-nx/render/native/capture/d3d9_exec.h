@@ -11,6 +11,8 @@
 struct NxD9Stats {
     uint32_t frames, draws, skipped, clears, shaders, textures;
     char firstSkip[160];        // why the first skipped draw was skipped
+    uint32_t nativeShaders;     // shaders taken from the native dir (nx_d3d9_native_dir)
+    uint32_t nativeDraws;       // draws (executed or skipped after the shader lookup) whose VS and PS are both native
 };
 
 // onPresent(user, frame, backbufferImage) runs after each PRES record's frame was submitted and completed.
@@ -18,5 +20,9 @@ struct NxD9Stats {
 int nx_d3d9_run(const NxGpuApi* api, const uint8_t* data, size_t size, const char* shaderDir,
                 void (*onPresent)(void* user, uint32_t frame, uint32_t image), void* user, NxD9Stats* stats,
                 char* err, size_t errlen);
+
+// Directory of hand-written replacements, <hash %016llx>.glsl (fnvnx_shader_hash of the original's bytecode); they
+// take precedence over the record's GLSL and --shaders. NULL (default) = translated originals only.
+void nx_d3d9_native_dir(const char* dir);
 
 #endif

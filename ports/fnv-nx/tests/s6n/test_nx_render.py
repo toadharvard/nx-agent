@@ -203,6 +203,59 @@ def main():
         check(f1.getpixel((48, 24))[:3] == (30, 20, 10), "TEXC updates one face %s" % (f1.getpixel((48, 24)),))
     else:
         check(False, "cube frames written")
+    # --native (render-land): <hash>.glsl in the native dir replaces the shader of that bytecode hash; the summary
+    # counts native shaders and the draws whose VS and PS are both native
+    nd = os.path.join(o.out, "native")
+    os.makedirs(nd)
+    vs_bc, ps_bc = struct.pack("<2I", 0xFFFE0300, 0x0000FFFF), struct.pack("<2I", 0xFFFF0200, 0x0000FFFF)
+    open(os.path.join(nd, "%016x.glsl" % nxd9.fnv1a64(vs_bc)), "w").write(VS)
+    open(os.path.join(nd, "%016x.glsl" % nxd9.fnv1a64(ps_bc)), "w").write(PS.replace(
+        "_gl_FragData_0 = io_10_0 * ps_uniforms_vec4[0] + io_5_0;", "_gl_FragData_0 = vec4(0.0, 0.0, 1.0, io_10_0.a);"))
+    d8 = os.path.join(o.out, "d3d9_native")
+    os.makedirs(d8)
+    check(run([o.bin, "d3d9", nx, "-o", d8, "--native", nd], 3), "d3d9 --native: rendered (exit 3, the fixed-function draw)")
+    s = open(os.path.join(d8, "summary.txt")).read() if os.path.exists(os.path.join(d8, "summary.txt")) else ""
+    check("native shaders 2, native draws 3" in s, "--native summary: " + s.strip())
+    if os.path.exists(os.path.join(d8, "f00000.png")):
+        f0 = png(os.path.join(d8, "f00000.png"))
+        check(f0.getpixel((8, 24))[:3] == (0, 0, 255), "--native shader replaces the record's %s" % (f0.getpixel((8, 24)),))
+        check(f0.getpixel((48, 36))[:3] == (0x20, 0x20, 0x20), "--native keeps the alpha test %s" % (f0.getpixel((48, 36)),))
+    else:
+        check(False, "--native f00000.png written")
+    s = open(os.path.join(d5, "summary.txt")).read() if os.path.exists(os.path.join(d5, "summary.txt")) else ""
+    check("native" not in s, "no --native: summary unchanged")
+    # lazy texture images (render-land, R4): a texture filled by many TEXU records costs one image when a draw binds
+    # it. Before, every TEXU made a new image; past NX_MAX_IMAGES (4096) textures sampled as none (black).
+    tx = os.path.join(o.out, "texu.nxd9")
+    w = nxd9.Nxd9Writer(tx)
+    w.device(64, 48, 21, 0)
+    w.shader("vs", 1, struct.pack("<2I", 0xFFFE0300, 0x0000FFFF), VS)
+    w.shader("ps", 4, struct.pack("<3I", 0xFFFF0200, 1, 0x0000FFFF), PS_CUBE.replace("samplerCube", "sampler2D").replace(
+        "ps_uniforms_vec4[0].xyz", "vec2(0.5)"))
+    w.decl(1, [(0, 0, 2, 0, 0, 0), (0, 12, 4, 0, 10, 0)])
+    w.vb(1, b"".join(quad(-1, -1, 0, 1, 0xFFFFFFFF) + quad(0, -1, 1, 1, 0xFFFFFFFF)))
+    w.u32("SDCL", 1); w.u32("STRM", 0, 1, 0, 16); w.u32("SVS", 1); w.u32("SPS", 4)
+    w.const_f("vs", 0, [(1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)])
+    w.rs(7, 0); w.rs(22, 1)
+    w.clear(1, 0xFF000000)
+    for t in range(1, 5):                                           # 4 textures x 1100 updates = 4400 > NX_MAX_IMAGES
+        w.texture(10 + t, 21, 1, 1, [b"\0\0\0\0"])
+        for k in range(1100):
+            w.rec("TEXU", struct.pack("<3I", 10 + t, 0, 4) + struct.pack("4B", k & 0xFF, t * 40, 7, 255))
+    w.u32("STEX", 0, 14); w.draw(4, 0, 2)                           # left: texture 14's last update (B 1099&255, G 160, R 7)
+    w.rec("TEXU", struct.pack("<3I", 14, 0, 4) + struct.pack("4B", 1, 2, 3, 255))
+    w.draw(4, 6, 2)                                                 # right: the update between the draws is seen
+    w.present()
+    w.close()
+    d9 = os.path.join(o.out, "texu")
+    os.makedirs(d9)
+    check(run([o.bin, "d3d9", tx, "-o", d9], 0), "texu: 4,401 texture updates rendered, nothing skipped")
+    if os.path.exists(os.path.join(d9, "f00000.png")):
+        f0 = png(os.path.join(d9, "f00000.png"))
+        check(f0.getpixel((8, 24))[:3] == (7, 160, 1099 & 0xFF), "texture after 1,100 TEXU: last contents %s" % (f0.getpixel((8, 24)),))
+        check(f0.getpixel((48, 24))[:3] == (3, 2, 1), "TEXU between two draws is seen by the second %s" % (f0.getpixel((48, 24)),))
+    else:
+        check(False, "texu f00000.png written")
     check(run([o.bin, "d3d9", os.path.join(o.out, "missing.nxd9"), "-o", d6], 2), "missing input: exit 2")
     open(os.path.join(o.out, "bad.nxd9"), "wb").write(b"NOPE")
     check(run([o.bin, "d3d9", os.path.join(o.out, "bad.nxd9"), "-o", d6], 1), "malformed input: exit 1")

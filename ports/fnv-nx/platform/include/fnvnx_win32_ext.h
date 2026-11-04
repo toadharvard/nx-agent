@@ -53,10 +53,10 @@ void fnvnx_path_reset(const char *root);        /* default mounts under root (NU
  * Win32 error code (ERROR_PATH_NOT_FOUND when a directory component is missing and !for_create...). */
 DWORD fnvnx_path_map(const char *win_path, char *host, size_t host_size);
 void fnvnx_set_command_line(int argc, char **argv);
-/* the first run's profile files the PC launcher writes (platform/win32/profile.cpp); a mask of what it made */
-#define FNVNX_PROFILE_INI 1u      /* My Games\FalloutNV\Fallout.ini from Fallout_default.ini */
-#define FNVNX_PROFILE_PREFS 2u    /* My Games\FalloutNV\FalloutPrefs.ini: a preset + the Switch's display */
-#define FNVNX_PROFILE_PLUGINS 4u  /* AppData\Local\FalloutNV\plugins.txt: the masters Data\ holds */
+/* the first run's profile files, as the PC launcher writes them (platform/win32/profile.cpp); a mask of what it made */
+#define FNVNX_PROFILE_INI 1u      /* My Games\FalloutNV\Fallout.ini: a copy of Fallout_default.ini */
+#define FNVNX_PROFILE_PREFS 2u    /* My Games\FalloutNV\FalloutPrefs.ini: Fallout_default.ini + [Display] sD3DDevice */
+#define FNVNX_PROFILE_PLUGINS 4u  /* AppData\Local\FalloutNV\plugins.txt: empty, as the launcher leaves it */
 unsigned fnvnx_first_run_profile(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
 void fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
