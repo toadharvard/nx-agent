@@ -182,7 +182,20 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'msvc-inlined'; return h
     regs = entry_register_reads(fn, target.conv)
     if regs:
-        h['cause'] = 'x86-custom-cc'; h['regs'] = regs; return h
+        # the modelled custom convention (Conv.with_registers) passed fuzz.py's garbage gate for the function; this
+        # case is an oracle gap only when its own oracle outcome still depends on the planted garbage (difffuzz-19:
+        # every divergence of such a function was x86-custom-cc, 206 records, real causes among them)
+        h['regs'] = regs
+        dep = True
+        if case is not None and pair is not None and case.bg == 'zero':
+            b0 = case.copy(); b0.rets = [case.ret_bytes(i) for i in range(max(8, len(case.rets)))]
+            b1 = b0.copy(); b1.seed = case.seed ^ 0x2468ace1
+            r0, _, _ = pair.run(b0, max_steps)
+            r1, _, _ = pair.run(b1, max_steps)
+            h['_runs'] += 2
+            dep = _outcome(r0) != _outcome(r1)
+        if dep:
+            h['cause'] = 'x86-custom-cc'; return h
     src = getattr(target, 'source', None)
     if src and k in ('return', 'mem-write', 'call-args', 'error'):
         obj = config.LINK / 'fixed' / config.obj_name(src)
