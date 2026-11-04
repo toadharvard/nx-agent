@@ -16,6 +16,7 @@ void StateTracker::Reset() {
     memset(srgbClass_, 0, sizeof srgbClass_);   // format 0: no sRGB
     memcpy(sampSaved_, samp_, sizeof samp_);
     memset(stageSmp_, 0, sizeof stageSmp_);
+    texGen_++;
     psVersion_ = 0x0200;
     dirty_ = true;
 }
@@ -31,7 +32,7 @@ void StateTracker::RestoreRenderState(uint32_t state) {
 void StateTracker::SetSamplerState(uint32_t stage, uint32_t type, uint32_t value, bool save) {
     if (stage >= kStages || type >= NXD3D_SAMP_COUNT) return;
     if (save) sampSaved_[stage][type] = samp_[stage][type];
-    if (samp_[stage][type] != value) { samp_[stage][type] = value; stageSmp_[stage] = 0; }
+    if (samp_[stage][type] != value) { samp_[stage][type] = value; stageSmp_[stage] = 0; texGen_++; }
 }
 uint32_t StateTracker::GetSamplerState(uint32_t stage, uint32_t type) const {
     return stage < kStages && type < NXD3D_SAMP_COUNT ? samp_[stage][type] : 0;
@@ -41,13 +42,13 @@ void StateTracker::RestoreSamplerState(uint32_t stage, uint32_t type) {
 }
 void StateTracker::SetTexture(uint32_t stage, uint32_t image, const NxD3D9Texture& kind) {
     if (stage >= kStages) return;
-    image_[stage] = image;
+    if (image_[stage] != image) { image_[stage] = image; texGen_++; }
     NxD3D9Texture& k = kind_[stage];
-    if (k.cube != kind.cube || k.shadow != kind.shadow || k.managed_lod != kind.managed_lod) stageSmp_[stage] = 0;
+    if (k.cube != kind.cube || k.shadow != kind.shadow || k.managed_lod != kind.managed_lod) { stageSmp_[stage] = 0; texGen_++; }
     if (k.format != kind.format) {   // the format matters to the sampler only through its sRGB capability
         const NxFormatInfo fi = nx_d3d9_format(kind.format);
         const uint8_t c = (uint8_t)((fi.flags & NXFMT_SRGB ? 1 : 0) | (nx_format_has_srgb(fi.format) ? 2 : 0));
-        if (c != srgbClass_[stage]) { srgbClass_[stage] = c; stageSmp_[stage] = 0; }
+        if (c != srgbClass_[stage]) { srgbClass_[stage] = c; stageSmp_[stage] = 0; texGen_++; }
     }
     k = kind;
 }
@@ -66,6 +67,7 @@ const StateTracker::Resolved& StateTracker::Resolve(const NxD3D9Viewport& vp, co
 
 uint32_t StateTracker::Handles(Backend* be, uint32_t* out, uint32_t n) {
     if (n > kStages) n = kStages;
+    handlesComplete_ = true;
     for (uint32_t s = 0; s < n; s++) {
         uint32_t id = stageSmp_[s];
         if (!id) {   // sampler states or texture kind changed since the last translation of this stage
@@ -78,6 +80,7 @@ uint32_t StateTracker::Handles(Backend* be, uint32_t* out, uint32_t n) {
                 if (nSmp_ < kSamplerCache) { smpKey_[nSmp_] = ss; smpId_[nSmp_++] = id; }
             }
             stageSmp_[s] = id;   // a failed create (0) is retried on the next draw
+            if (!id) handlesComplete_ = false;
             stageSrgb_[s] = (ss.filter & NXSMP_SRGB) && nx_format_has_srgb(nx_d3d9_format(kind_[s].format).format);
         }
         out[s] = image_[s] ? NX_TEX_HANDLE(image_[s] + (stageSrgb_[s] ? 1 : 0), id) : NX_TEX_HANDLE(0, id);
@@ -300,11 +303,27 @@ bool Renderer::Render(const Draw& d) {
         if (v) { ps = v; needEpi = at || fog; }
     }
     lastPs_ = ps;
-    uint16_t st = sc_.State(d.vs, ps, d.layout, r.rs);
+    // the same shaders, layout and translated state as the previous draw: the same state id
+    uint16_t st;
+    if (state_.resolves() == lastResolve_ && d.vs == lastVs_ && ps == lastPsSt_ && d.layout == lastLayout_ && lastSt_) {
+        st = lastSt_;
+    } else {
+        st = sc_.State(d.vs, ps, d.layout, r.rs);
+        lastResolve_ = state_.resolves(); lastVs_ = d.vs; lastPsSt_ = ps; lastLayout_ = d.layout; lastSt_ = st;
+    }
     Packet* p = frame_.Emit();
     if (!st || !p) return false;
-    uint32_t h[StateTracker::kStages], n = d.textures ? state_.Handles(be_, h, d.textures) : 0;
-    uint32_t tb = n ? frame_.AddTextures(h, n) : 0;
+    // texture handles: the previous draw's block while no stage changed in this frame
+    uint32_t n = d.textures > StateTracker::kStages ? (uint32_t)StateTracker::kStages : d.textures, tb = 0;
+    if (n && n == lastTexN_ && state_.textureGeneration() == lastTexGen_ && frameNo_ == lastTexFrame_) {
+        tb = lastTb_;
+    } else if (n) {
+        uint32_t h[StateTracker::kStages];
+        n = state_.Handles(be_, h, n);
+        tb = frame_.AddTextures(h, n);
+        const bool ok = state_.lastHandlesComplete() && (tb || frame_.textureWords() == n);   // complete, no overflow (0)
+        lastTexN_ = ok ? n : 0; lastTexGen_ = state_.textureGeneration(); lastTexFrame_ = frameNo_; lastTb_ = tb;
+    }
     p->key = SortKey((uint8_t)pass_, d.layer, st, (uint16_t)tb, d.depthKey);
     p->state = st; p->texCount = (uint16_t)n; p->texBlock = (uint16_t)tb;
     p->vtxBlock = d.vtxBlock; p->vtxOffset = d.vtxOffset; p->vtxSize = d.vtxSize;

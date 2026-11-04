@@ -115,6 +115,14 @@ void test_sampler_cache(T& t, Backend* be, StateTracker& st) {
     st.SetSamplerState(1, 1, 1);
     st.Handles(be, h2, 2);
     t.Check(h2[1] == h[1], "sampler cache: back to the first states, the first sampler");
+    // texture generation (Render reuses the previous texture block while it is unchanged)
+    const uint32_t g0 = st.textureGeneration();
+    st.SetTexture(0, 8, k); st.SetSamplerState(1, 1, 1);
+    t.Check(st.textureGeneration() == g0, "texture generation: redundant sets keep it");
+    st.SetTexture(0, 9, k);
+    const uint32_t g1 = st.textureGeneration();
+    st.SetSamplerState(1, 2, 3);
+    t.Check(g1 != g0 && st.textureGeneration() != g1, "texture generation: a new image or sampler state changes it");
 }
 
 uint16_t shader(Backend* be, const char* name, uint32_t stage) {

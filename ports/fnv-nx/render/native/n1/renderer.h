@@ -47,6 +47,9 @@ public:
     uint32_t Handles(Backend* be, uint32_t* out, uint32_t n);
     uint32_t resolves() const { return resolves_; }
     uint32_t samplerTranslations() const { return smpTranslations_; }   // nx_d3d9_sampler calls so far
+    // changes whenever a stage's image, texture kind or sampler states change (Handles' result may differ)
+    uint32_t textureGeneration() const { return texGen_; }
+    bool lastHandlesComplete() const { return handlesComplete_; }       // every sampler of the last Handles exists
     const uint32_t* rs() const { return rs_; }
 private:
     uint32_t rs_[NXD3D_RS_COUNT], rsSaved_[NXD3D_RS_COUNT];
@@ -68,6 +71,8 @@ private:
     bool stageSrgb_[kStages] = {};
     uint8_t srgbClass_[kStages] = {};      // of kind_[s].format: 1 sRGB-capable D3D format, 2 has an sRGB view
     uint32_t smpTranslations_ = 0;
+    uint32_t texGen_ = 1;
+    bool handlesComplete_ = false;
 };
 
 // ---- the renderer ----------------------------------------------------------------------------------------------
@@ -215,6 +220,10 @@ private:
     bool inFrame_ = false, passOpen_ = false;
     uint32_t pendingClear_ = 0;
     uint32_t frameNo_ = 0, lastBinds_ = 0;
+    // reuse of the previous draw's state id and texture block while nothing they depend on changed (P6n: Render)
+    uint32_t lastResolve_ = ~0u, lastStFrameKey_ = 0;
+    uint16_t lastVs_ = 0, lastPsSt_ = 0, lastLayout_ = 0, lastSt_ = 0;
+    uint32_t lastTexGen_ = 0, lastTexN_ = 0, lastTexFrame_ = ~0u, lastTb_ = 0, lastTexCount_ = 0;
     float bg_[4] = {0, 0, 0, 1};
     float clearDepth_ = 1.0f;
     uint32_t clearStencil_ = 0;
