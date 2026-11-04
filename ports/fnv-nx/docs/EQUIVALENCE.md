@@ -333,6 +333,14 @@ evalorder.cpp evalorder.msvc.expect`); it matches neither of S12's expectations:
 `shl`, `shr`, `index` are those of `object=last operator=rtl`, while `virtual` / `virtual2` (`ga:`, `gyx:`: the object
 first) are those of the defaults.
 
+**The build's own order** (V1 C1/T1/T2 fixed): the `build` variant is now the plugin with every `ORDER_*` default of
+`tools/link/compile.sh`, read from that file (environment overrides as there). `--strict` needs `--gcc`, and a case
+that some MSVC configuration did not log (`no-msvc`, `msvc-incomplete`) fails it. At the integration head with S12's
+per-shape switches (`object=msvc operator=rtl assign=msvc`): **0 of the 24 agreed cases differ**; the three
+`msvc-varies` shapes (`(obj->*pmf())(a())`, `*p() = a()`, `arr()[i()] = b()`) match one MSVC configuration each (`aom`,
+`ap`, `bpa`). `object=last` (all member calls) still gets `obj-virtual` wrong: MSVC evaluates a virtual call's object
+first.
+
 ## Class layouts (238 units, `/d1reportAllClassLayout`)
 
 | Trees (pristine vs) | classes | differ | what differs |

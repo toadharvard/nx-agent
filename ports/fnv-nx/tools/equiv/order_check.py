@@ -15,9 +15,10 @@ order the port has. Each case is equivalent when GCC's order is MSVC's.
                  (tests/s11/order/order.msvc: our own program's output, no compiler needed on S12's machines).
   --record F     write the MSVC results there (with --msvc).
   --gcc          build and run the GCC side (aarch64-linux-gnu-g++, gcc-13-plugin-dev-aarch64-linux-gnu, qemu-aarch64);
-                 variants: `build` (the plugin as compile.sh loads it) plus each --gcc-extra NAME=FLAGS (default:
+                 variants: `build` (the plugin with every ORDER_* default of tools/link/compile.sh, read from that
+                 file, environment overrides as there) plus each --gcc-extra NAME=FLAGS (default:
                  -fstrong-eval-order=some and =none, the candidates ORDERING.md names).
-  --strict       exit 1 when a case of the build variant (or --strict-variant NAME, e.g. a --gcc-extra candidate)
+  --strict       needs --gcc (exit 2 without). Exit 1 when a case of the build variant (or --strict-variant NAME, e.g. a --gcc-extra candidate)
                  differs from an MSVC order that every MSVC configuration agrees on.
   --msvc-stdout  build another order program (plain C++03, prints its own log) in every MSVC configuration, run it
                  under Wine, and write its stdout to OUT when all configurations print the same; otherwise exit 1 and
@@ -115,6 +116,27 @@ def agreed_stdout(outputs):
     return None, varies
 
 
+COMPILE_SH = PORT / 'tools/link/compile.sh'
+ORDER_KEYS = (('ORDER_MODE', 'mode'), ('ORDER_ARGS', 'args'), ('ORDER_REFCOUNT', 'refcount'),
+              ('ORDER_OBJECT', 'object'), ('ORDER_OPERATOR', 'operator'), ('ORDER_ASSIGN', 'assign'))
+
+
+def compile_sh_order_args(text=None, need=()):
+    """the fnvnx_order plugin arguments compile.sh passes by default (`ORDER_X=${ORDER_X:-v}` lines whose variable it
+    hands to `-fplugin-arg-fnvnx_order-<key>`); the environment overrides them as it does for compile.sh"""
+    text = COMPILE_SH.read_text() if text is None else text
+    out = []
+    for var, key in ORDER_KEYS:
+        m = re.search(r'^%s=\$\{%s:-([^}]*)\}' % (var, var), text, re.M)
+        if m and ('fnvnx_order-%s=' % key) in text:
+            out.append('-fplugin-arg-fnvnx_order-%s=%s' % (key, os.environ.get(var, m.group(1))))
+    for key in ('mode=',) + tuple(need):
+        if not any(a.startswith('-fplugin-arg-fnvnx_order-' + key) for a in out):
+            raise SystemExit('order_check: compile.sh passes no fnvnx_order %s switch (%s)' % (key.rstrip('='),
+                                                                                              COMPILE_SH))
+    return out
+
+
 def run_gcc(scratch, extra_variants):
     sys.path.insert(0, str(PORT / 'tools/verify/v1_link'))
     import qemu_ilp32 as q
@@ -123,8 +145,8 @@ def run_gcc(scratch, extra_variants):
     if r.returncode:
         raise SystemExit('order_check: the fnvnx_order plugin does not build: %s' % r.stderr[-500:])
     plugin = r.stdout.strip()
-    build = ['-fplugin=' + plugin, '-fplugin-arg-fnvnx_order-mode=volatile', '-fplugin-arg-fnvnx_order-args=rtl',
-             '-fplugin-arg-fnvnx_order-refcount=weak']
+    # the plugin exactly as compile.sh loads it; each named switch must be one compile.sh passes
+    build = ['-fplugin=' + plugin, *compile_sh_order_args(need=('mode=', 'args=', 'refcount=', 'object=', 'operator='))]
     variants = dict(build=build)
     for name, flags in extra_variants.items():
         variants[name] = build + flags
@@ -137,7 +159,7 @@ def run_gcc(scratch, extra_variants):
         finally:
             q.CXXFLAGS = base
         rc, text = q.run(exe)
-        res[name] = dict(flags=' '.join(flags[4:]) or '(compile.sh)', rc=rc, results=parse(text))
+        res[name] = dict(flags=' '.join(flags[1:]), rc=rc, results=parse(text))
     return res
 
 
@@ -148,24 +170,33 @@ def compare(case_list, msvc, gcc):
         orders = sorted({o for o in mo.values() if o is not None})
         go = {var: v['results'].get(name) for var, v in gcc.items()}
         b = go.get('build')
-        verdicts = {var: verdict_of(orders, o) for var, o in go.items()}
-        rows.append(dict(case=name, cls=cls, msvc=mo, gcc=go, verdict=verdict_of(orders, b), verdicts=verdicts,
+        complete = bool(mo) and all(o is not None for o in mo.values())
+        verdicts = {var: verdict_of(orders, o, complete) for var, o in go.items()}
+        rows.append(dict(case=name, cls=cls, msvc=mo, gcc=go, verdict=verdict_of(orders, b, complete), verdicts=verdicts,
                          gcc_matches=[cfg for cfg, o in mo.items() if o == b]))
     return rows
 
 
-def verdict_of(orders, got):
+def verdict_of(orders, got, complete=True):
+    """same / differs / msvc-varies; no-msvc when no configuration logged the case, msvc-incomplete when some did
+    not (neither counts as agreement)"""
     if not orders:
         return 'no-msvc'
+    if not complete:
+        return 'msvc-incomplete'
     if len(orders) > 1:
         return 'msvc-varies'
     return 'same' if got == orders[0] else 'differs'
 
 
+STRICT_BAD = ('differs', 'no-msvc', 'msvc-incomplete')
+
+
 def strict_failures(rows, variant='build'):
-    """cases where the variant differs from an order every MSVC configuration agrees on (msvc-varies is allowed)"""
+    """cases where the variant differs from an order every MSVC configuration agrees on, or where the MSVC record is
+    missing in some configuration (no evidence is not agreement); msvc-varies is allowed"""
     return [r['case'] for r in rows if r.get('verdicts', {}).get(variant, r['verdict'] if variant == 'build' else None)
-            == 'differs']
+            in STRICT_BAD]
 
 
 def summary(rows):
@@ -214,6 +245,8 @@ def main():
     a = ap.parse_args()
     scratch = Path(a.scratch).resolve()
     scratch.mkdir(parents=True, exist_ok=True)
+    if a.strict and not a.gcc:
+        ap.error('--strict needs --gcc (no GCC evidence to check)')
     decomp = os.environ.get('DECOMP') or str(PORT / 'ext/fnv_decomp')
     if a.msvc_stdout:
         text, varies = agreed_stdout(msvc_outputs(scratch, decomp, Path(a.msvc_stdout[0]).resolve()))
@@ -234,7 +267,7 @@ def main():
         msvc = json.loads(Path(a.msvc_results).read_text())['msvc']
     extra = dict(GCC_VARIANTS)
     if '"object"' in (PORT / 'toolchain/order/fnvnx_order.cc').read_text():
-        extra.update(S12_VARIANTS)
+        extra.update(S12_VARIANTS)      # A/B against the build (compile.sh's own switches)
     if a.gcc_extra:
         extra = {k: v.split() for k, _, v in (g.partition('=') for g in a.gcc_extra)}
     gcc = run_gcc(scratch, extra) if a.gcc else {}
@@ -246,7 +279,10 @@ def main():
     if a.md:
         Path(a.md).write_text(md)
     print(md)
-    if a.strict and gcc:
+    if a.strict:
+        if not gcc:
+            print('order_check: --strict needs --gcc (no GCC evidence)', file=sys.stderr)
+            sys.exit(2)
         if a.strict_variant not in gcc:
             raise SystemExit('order_check: no GCC variant %s (have %s)' % (a.strict_variant, ', '.join(gcc)))
         if strict_failures(rows, a.strict_variant):
