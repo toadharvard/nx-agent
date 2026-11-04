@@ -23,11 +23,32 @@ from __future__ import annotations
 
 import errno as E
 import os
+import re
 
 GAME_MOUNTS = ("switch/fnv", "fnvnx/game")
-# the port's own entries of sdmc:/switch/fnv (NX1's fnvnx/sdlayout.h): they stay on the card (--root), never in --game
-PORT_NAMES = {"user", "drive_c", "fnvnx.ini", "guest.nso", "fnv.nro", "fnv-exefs.nsp", "host.log", "crash.log",
-              "launcher.log", "override.txt", "readme.txt"}
+# the port's own entries of sdmc:/switch/fnv: they stay on the card (--root), never in --game. The list is NX1's
+# FNVNX_SD_PORT_NAMES (toolchain/include/fnvnx/sdlayout.h); the copy below is used only while that header is absent.
+SDLAYOUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "toolchain", "include", "fnvnx",
+                        "sdlayout.h")
+_PORT_NAMES_FALLBACK = ("fnv.nro fnv-exefs.nsp guest.nso fnvnx.ini user drive_* host.log crash.log launcher.log "
+                        "override.txt README.txt shaders.nvc0cache nxgpu.log")
+
+
+def port_names(path=SDLAYOUT):
+    """(exact names, prefixes of 'x*' entries), lower-case, from sdlayout.h's FNVNX_SD_PORT_NAMES"""
+    text = _PORT_NAMES_FALLBACK
+    try:
+        with open(path) as f:
+            m = re.search(r'#define\s+FNVNX_SD_PORT_NAMES\s+((?:"[^"]*"\s*(?:\\\n\s*)?)+)', f.read())
+        if m:
+            text = " ".join(re.findall(r'"([^"]*)"', m.group(1)))
+    except OSError:
+        pass
+    names = text.lower().split()
+    return {n for n in names if not n.endswith("*")}, tuple(n[:-1] for n in names if n.endswith("*"))
+
+
+PORT_NAMES, PORT_PREFIXES = port_names()
 DATA_MILESTONES = ("ini-read", "archive-list", "bsa-opened", "esm-header", "masters-loaded")
 INI_NAMES = {"fallout_default.ini", "fallout.ini", "falloutprefs.ini"}
 # the profile: sdmc:/switch/fnv/user (the layout), sdmc:/fnvnx/user (guests built before it)
@@ -88,7 +109,7 @@ class DataPath:
             mp = m.split("/")
             if low[:len(mp)] == mp:
                 rest = low[len(mp):]
-                if m == "switch/fnv" and rest and (rest[0] in PORT_NAMES or rest[0].startswith("drive_")):
+                if m == "switch/fnv" and rest and (rest[0] in PORT_NAMES or rest[0].startswith(PORT_PREFIXES)):
                     break
                 return self.game, parts[len(mp):]
         return self.root, parts

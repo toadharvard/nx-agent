@@ -163,6 +163,22 @@ class SynthInstallTest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class PortNamesTest(unittest.TestCase):
+    def test_from_sdlayout(self):
+        tmp = tempfile.mkdtemp(prefix="s5-sdl-")
+        try:
+            h = os.path.join(tmp, "sdlayout.h")
+            put(h, b'#define FNVNX_SD_PORT_NAMES "fnv.nro guest.nso user drive_* " \\\n    "Shaders.nvc0cache"\n')
+            names, pre = datapath.port_names(h)
+            self.assertEqual(names, {"fnv.nro", "guest.nso", "user", "shaders.nvc0cache"})
+            self.assertEqual(pre, ("drive_",))
+            names, pre = datapath.port_names(os.path.join(tmp, "absent.h"))   # the fallback copy
+            self.assertIn("nxgpu.log", names)
+            self.assertEqual(pre, ("drive_",))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class MilestoneTableTest(unittest.TestCase):
     def test_table_parses(self):
         import emu_guest
