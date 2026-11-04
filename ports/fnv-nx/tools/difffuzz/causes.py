@@ -51,6 +51,7 @@ STACK = (0x06e00000, 0x06f10000)
 A64_STUBS = (0x08000000, 0x0a000000)       # __fnv_<X> code stubs and named stubs (brk #0)
 A64_IMAGE = (0x0a000000, 0x0b800000)       # the native unit image (.text/.rodata/.data/.bss)
 A64_PRIV = (0x08000000, 0x0c000000)
+LIT_POOL = (0x02f00000, 0x03000000)        # literals units.json does not name (engine's pinned pool)
 X86_PRIV = (0x0e000000, 0x0e100000)
 
 # cause -> (verdict class, owner, hard?, why). `hard` mirrors report.py's split (False = soft or oracle gap).
@@ -65,8 +66,12 @@ POLICY = {
                                                 'unrounded x87 value'),
     'division':       ('by-design', '-', False, 'x86 raises #DE (x/0, INT_MIN/-1) where sdiv/udiv give 0 / wrap: '
                                                 'the exe would crash on that input'),
+    'deleting-dtor-ret': ('by-design', '-', False, 'MSVC\'s scalar/vector deleting destructor returns this, the '
+                                                   'Itanium deleting destructor (D0) is void: no native caller reads '
+                                                   'the result'),
     'call-order':     ('by-design', '-', False, 'two adjacent calls swapped: C++ leaves operand evaluation order open'),
-    'vptr-store':     ('by-design', '-', False, 'a dead vptr store GCC drops (D7: objects hold Itanium vptrs)'),
+    'vptr-store':     ('by-design', '-', False, 'a dead vptr store GCC drops (D7: objects hold Itanium vptrs); in a '
+                                                'destructor MSVC resets the vptr to the base vftable, GCC does not'),
     'array-new-check': ('by-design', '-', False, 'GCC checks new[]\'s count for overflow, MSVC 2008 does not'),
     'ilp32-pointer':  ('by-design', '-', False, 'an address computed past 4 GiB (wraparound on x86): needs a pointer '
                                                 'the exe never holds'),
@@ -97,6 +102,8 @@ POLICY = {
     'oracle-native-address': ('artifact', 'S13', False, 'the oracle dereferences an address in the AArch64 '
                                                           'private range (stubs/native image): a native address '
                                                           'leaked to the x86 machine through the harness'),
+    'literal-store':  ('artifact', 'S13', False, 'a pointer to a literal stored: the oracle\'s pinned-pool copy vs '
+                                                 'the native unit\'s .rodata copy (stores do not compare pointees)'),
     'no-native-entry': ('artifact', 'S13', False, 'the native image has no entry for the function (link subset)'),
     # --- real bugs -----------------------------------------------------------------------------------------------
     'uninit-arm':     ('real-bug', 'S1b', True, 'the native result depends on garbage: an argument slot the caller '
@@ -147,6 +154,9 @@ POLICY = {
     'native-inlined': ('triage', 'S13b', True, 'the oracle calls X, the native function never names X: GCC inlined '
                                                'it (an oracle body the adaptive follow could not load) or the '
                                                'native source does not make that call'),
+    'vptr-differs':   ('triage', 'S2c', True, 'both sides store an image vftable, different ones, outside a '
+                                              'destructor: a vtable paired with the wrong vftable (kind-V row) or a '
+                                              'constructor order difference'),
     'unclassified':   ('triage', 'S13b', True, 'no rule matched'),
 }
 
@@ -234,8 +244,15 @@ def _rule_call_args(d):
             return 'nan-bits'
         if tol:
             return 'x87-precision'
+    if d.get('cls') == 'I32' and len(bx) == 4 and len(ba) == 4:
+        vx, va = _word(d['x86']), _word(d['arm'])
+        ex, ea = (vx >> 23) & 0xff, (va >> 23) & 0xff
+        if ex == ea and 0 < ex < 0xff and (vx >> 31) == (va >> 31) and abs((vx & 0x7fffff) - (va & 0x7fffff)) <= 256:
+            return 'x87-precision'          # float bits through an int parameter, a few ulp apart
     if d.get('cls') in ('I32', 'P') and len(bx) >= 4 and len(ba) >= 4:
         vx, va = _word(d['x86']), _word(d['arm'])
+        if _in(vx, LIT_POOL) and _in(va, A64_IMAGE):
+            return 'literal-arg'
         if _in(vx, WINDOW) and _in(va, A64_IMAGE):
             return 'native-address'
         if _in(va, A64_STUBS) and not _in(vx, A64_STUBS):
@@ -248,7 +265,9 @@ def _rule_call_args(d):
     return None
 
 
-def _rule_return(d, conv):
+def _rule_return(d, conv, sym=None):
+    if str(sym or '').startswith(('??_G', '??_E')):
+        return 'deleting-dtor-ret'
     if 'pointee_x86' in d and (not d.get('pointee_x86') or not d.get('pointee_arm')):
         return 'literal-ret'
     fl = d.get('float') or {}
@@ -259,12 +278,14 @@ def _rule_return(d, conv):
         except (TypeError, ValueError):
             pass
     vx, va = _word(d.get('x86')), _word(d.get('arm'))
+    if vx is not None and va is not None and _in(vx, LIT_POOL) and _in(va, A64_IMAGE):
+        return 'literal-ret'
     if vx is not None and va is not None and _in(vx, WINDOW) and _in(va, A64_IMAGE):
         return 'native-address'
     return None
 
 
-def _rule_mem_write(d):
+def _rule_mem_write(d, rec=None):
     fw = d.get('float_word') or {}
     if fw.get('tolerant'):
         return 'x87-precision'
@@ -275,6 +296,11 @@ def _rule_mem_write(d):
         if nan:
             return 'nan-bits'
         vx, va = _word(d['x86']), _word(d['arm'])
+        if _in(vx, LIT_POOL) and _in(va, A64_IMAGE):
+            return 'literal-store'
+        vft = image_vftables()
+        if vx in vft and va in vft and vx != va:
+            return 'vptr-store' if _is_dtor((rec or {}).get('symbol')) else 'vptr-differs'
         if _in(vx, WINDOW) and _in(va, A64_IMAGE):
             return 'native-address'
         if _in(va, A64_STUBS) and not _in(vx, A64_STUBS):
@@ -314,7 +340,12 @@ def _rule_calls(d, rec=None):
                 pass
         if rec is not None and not x.startswith(('imp:', 'name:')):
             cs = native_callees(rec.get('source'), int(rec.get('address') or '0', 16))
-            if cs is not None and '__fnv_' + x not in cs and not any(n.startswith('__fnv_' + x) for n in cs):
+            try:
+                ls = link_symbol(int(x, 16))
+            except ValueError:
+                ls = None
+            if cs is not None and '__fnv_' + x not in cs and not any(n.startswith('__fnv_' + x) for n in cs) \
+                    and ls not in cs:
                 return 'native-inlined'
     return _rule_count(d, tx, ta)
 
@@ -412,6 +443,53 @@ def _scan_object(path):
     return out
 
 
+_VFT = None
+_LINKSYM = None
+
+
+def image_vftables():
+    """Original addresses of image vftables (address map kind V of the link), empty without the map."""
+    _load_addrmap()
+    return _VFT
+
+
+def link_symbol(addr):
+    """The name the link binds original address `addr` to (address map link_symbol: `free`, `memmove_s`,
+    `__fnv_<addr>`), or None."""
+    _load_addrmap()
+    return _LINKSYM.get(addr)
+
+
+def _load_addrmap():
+    global _VFT, _LINKSYM
+    if _VFT is None or _LINKSYM is None:
+        _VFT, _LINKSYM = set(), {}
+        p = os.environ.get('FNVNX_CAUSES_ADDRMAP')
+        if not p:
+            try:
+                import config
+                p = str(config.LINK / 'out' / 'addrmap.tsv')
+            except Exception:  # noqa: BLE001
+                p = None
+        if p and os.path.exists(p):
+            for line in open(p):
+                f = line.split('\t', 3)
+                if len(f) < 3 or line.startswith('#'):
+                    continue
+                try:
+                    a = int(f[0], 16)
+                except ValueError:
+                    continue
+                if f[1] == 'V':
+                    _VFT.add(a)
+                elif f[2]:
+                    _LINKSYM[a] = f[2]
+
+
+def _is_dtor(sym):
+    return str(sym or '').startswith(('??1', '??_G', '??_E'))
+
+
 def _calls_allocator(rec):
     try:
         cs = native_callees(rec.get('source'), int(rec.get('address') or '0', 16))
@@ -438,9 +516,9 @@ def refine(rec, cause=None):
     elif k == 'call-args':
         got = _rule_call_args(d)
     elif k == 'return':
-        got = _rule_return(d, rec.get('conv'))
+        got = _rule_return(d, rec.get('conv'), rec.get('symbol'))
     elif k == 'mem-write':
-        got = _rule_mem_write(d)
+        got = _rule_mem_write(d, rec)
     elif k in ('call-count', 'call-target'):
         got = _rule_calls(d, rec)
     if got is None:

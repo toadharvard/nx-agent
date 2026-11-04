@@ -79,6 +79,10 @@ def test_rules():
           'arg-stack-vs-object', 'stack temporary vs the object')
     check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x03002000), arm=w(0x03001000))) ==
           'arg-other-buffer', 'another argument buffer')
+    check(refined(dict(kind='call-args', arg='p1', cls='I32', x86=w(0x9cf46a07), arm=w(0x9cf46a27))) ==
+          'x87-precision', 'float bits through an int parameter, 32 ulp apart')
+    check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(0x14), arm=w(0x13))) == 'unclassified',
+          'small ints are not float bits')
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(5), arm=w(7))) == 'unclassified',
           'plain int argument difference stays open')
     # return values
@@ -90,6 +94,9 @@ def test_rules():
                        float=dict(tolerant=False, x86='0.30000000000000004', arm='0.3', x87='0.3')))
           == 'x87-precision', 'native equals the unrounded x87 value')
     check(refined(dict(kind='return', x86=w(1), arm=w(2))) == 'unclassified', 'int return stays open')
+    check(causes.refine(dict(rec(dict(kind='return', x86=w(0x03000000), arm=w(0x1553bc3b))),
+                             symbol='??_GFUN_00ba8e20@@UAEPAXI@Z'), 'unclassified') == 'deleting-dtor-ret',
+          'scalar deleting destructor result')
     # memory writes
     check(refined(dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=0, x86=w(0xffc00000, 0),
                        arm=w(0x7fc00000, 0))) == 'nan-bits', 'NaN store: nan-bits')
@@ -100,6 +107,20 @@ def test_rules():
     check(refined(dict(kind='mem-write', addr='03000011', ndiff=3, only_x86=3, only_arm=0, x86=w(0x00000001, 0),
                        arm=w(0x00000001, 0)[:2] + '000000' + w(0)) ) in ('store-width', 'x86-only-store'),
           'oracle-only bytes are a store difference')
+    check(refined(dict(kind='mem-write', addr='03000000', ndiff=4, only_x86=0, only_arm=0, x86=w(0x02f018f0, 0),
+                       arm=w(0x0a076000, 0))) == 'literal-store', 'pinned literal vs native .rodata literal stored')
+    check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x02f00010), arm=w(0x0a076000))) == 'literal-arg',
+          'pinned literal argument')
+    causes._VFT, causes._LINKSYM = {0x0102e388, 0x010d7f44}, {}
+    try:
+        vw = dict(kind='mem-write', addr='03000000', ndiff=4, only_x86=0, only_arm=0, x86=w(0x0102e388, 0),
+                  arm=w(0x010d7f44, 0))
+        check(causes.refine(dict(rec(vw), symbol='??1FUN_00ddcc60@@UAE@XZ'), 'unclassified') == 'vptr-store',
+              'base vftable reset in a destructor: vptr-store')
+        check(causes.refine(dict(rec(vw), symbol='??0FUN_00590210@@QAE@XZ'), 'unclassified') == 'vptr-differs',
+              'different vftables in a constructor: vptr-differs')
+    finally:
+        causes._VFT = causes._LINKSYM = None
     check(causes._narrower(bytes.fromhex(w(0x01020304)), bytes.fromhex('04000000')), 'narrower: byte vs dword')
     check(not causes._narrower(bytes.fromhex(w(0x01020304)), bytes.fromhex('05000000')), 'narrower: other value')
     check(refined(dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=4, x86=w(0, 0),
@@ -120,6 +141,11 @@ def test_rules():
               'native-inlined', 'oracle callee the native never names: native-inlined')
         check(refined(dict(kind='call-target', index=0, x86='00401200', arm='00401300'), 'call-flow') == 'call-flow',
               'oracle callee the native names: stays call-flow')
+        causes._VFT, causes._LINKSYM = set(), {0x00ecd291: 'free'}
+        causes.native_callees = lambda src, a: {'free'}
+        check(refined(dict(kind='call-target', index=0, x86='00ecd291', arm='00401300'), 'call-flow') == 'call-flow',
+              'oracle CRT callee the native calls by its link name: stays call-flow')
+        causes._VFT = causes._LINKSYM = None
     finally:
         causes.native_callees = real
     check(refined(dict(kind='call-target', index=0, x86='00401100', arm='00401200'), 'call-flow') == 'call-flow',

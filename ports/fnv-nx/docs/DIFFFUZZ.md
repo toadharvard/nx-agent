@@ -190,6 +190,9 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 | `sret` argument differs | `sret-mismatch` | real-bug S1b |
 | float argument within tolerance / NaN on both | `x87-precision` / `nan-bits` | by-design |
 | float result equal to the oracle's unrounded x87 value | `x87-precision` | by-design |
+| pointer to a pinned-pool literal (0x02f00000) vs the native .rodata copy: argument / result / store | `literal-arg` / `literal-ret` / `literal-store` | artifact |
+| both sides store image vftables (link `out/addrmap.tsv` kind V, or `FNVNX_CAUSES_ADDRMAP`), different ones: in a destructor / elsewhere | `vptr-store` / `vptr-differs` | by-design / triage S2c |
+| result of a `??_G` / `??_E` deleting destructor (MSVC returns this, Itanium D0 is void) | `deleting-dtor-ret` | by-design |
 | pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
 | `no-native-entry` | `no-native-entry` | artifact |
