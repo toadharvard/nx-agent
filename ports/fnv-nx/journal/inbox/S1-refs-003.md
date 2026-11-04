@@ -51,3 +51,10 @@
     (e.g. FNVNX_CXXRT_DEFS, from `nm` in the full/link job).
   - Not the host's LP64 libstdc++: its size_t mangles as `m`, not `j`, so the real STL calls the units' recipes also
     bind (MSVC's inline basic_string members) would be matched by address. That would be wrong: a different layout.
+* **hand-off (S11)** - MSVC 2008 cannot build
+  src/havok/physics/collide/query/multithreaded/collisionquery/cpu/hkpcpuworldgetclosestpointsjob_gs_ehsc_nogs_noehsc_variant.cpp
+  under the gate's rules (`neutral,FTOL1,STL1,STD1,ANON1,ANON2`). Both sides, with and without FINL1, fail with
+  `C2371 'PBATTERY_REPORTING_SCALE' : redefinition; different basic types`: the unit's own declaration of that SDK
+  name collides with the real SDK v6.0A header that tools/equiv/msvc/fnvnx_win32.h includes. This is like the
+  "Not comparable under MSVC" SDK names in docs/EQUIVALENCE.md (RequestLocation, _MEMORYSTATUS ...). The fix is in
+  the equiv stand-ins, or a DECL2-style drop of the unit's copy.
