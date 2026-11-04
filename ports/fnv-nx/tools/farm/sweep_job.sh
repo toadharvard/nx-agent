@@ -24,8 +24,9 @@
 # Needs: root for the first setup (as compare_job.sh, plus xdotool, x11-apps, imagemagick, xz-utils); ARTIFACTS (a
 # clone of fnv-nx-build with push). Env: SWEEP_VARIANTS, SWEEP_CELLS=0 (programs only), SWEEP_PROGRAMS=0 (cells only),
 # SWEEP_CELL_TIMEOUT_S, SWEEP_MAX_CELLS (per pass), SWEEP_CELL_LIST (a cells.tsv instead of the shard's), SWEEP_GAME
-# (an existing install instead of $FARM_HOME/game), COMPARE_CAND_REF (candidate nx_render, default the render
-# machine's head). Exit 0 with any verdict; 1 when setup failed.
+# (an existing install instead of $FARM_HOME/game), COMPARE_CAND_REF (candidate nx_render; default HEAD, the nx_render
+# of this commit). The cells need the exe's DLLs in the install (GalaxyWrp, binkw32, libvorbisfile and theirs); without
+# them each cell ends "no-start". Exit 0 with any verdict; 1 when setup failed.
 set -uo pipefail
 COMMIT=${1:?commit}; K=${2:?k}; N=${3:?N}; REPORT=${4:?report.md}
 P=$(cd "$(dirname "$0")/../.." && pwd)
@@ -66,7 +67,7 @@ setup() {
 	k=$(key_of "$CMP/d3d9/build.sh" "$CMP"/d3d9/*.c "$CMP"/d3d9/*.def)
 	BIN=$W/nxd9play-$k
 	[ -f "$BIN/nxd9play.exe" ] && [ -f "$BIN/d3d9.dll" ] || bash "$CMP/d3d9/build.sh" "$BIN" >"$W/nxd9play.log" 2>&1 || fail "d3d9/build.sh"
-	local ref=${COMPARE_CAND_REF:-origin/claude/port-nsw-render}
+	local ref=${COMPARE_CAND_REF:-HEAD}   # the port at this integration head (its render code, --families included)
 	if [ "$ref" = HEAD ]; then CAND=$COMMIT; else
 		git -C "$P" fetch -q origin claude/port-nsw-render 2>/dev/null
 		CAND=$(git -C "$P" rev-parse --verify -q "$ref^{commit}") || fail "candidate $ref"
@@ -91,6 +92,7 @@ setup() {
 	CELLW=$FARM_HOME/sweep/wine
 	S16_PCI_DEVICE=00000193 bash "$CMP/wine_ref.sh" setup "$GAME" "$CELLW" >"$S/wine_setup.log" 2>&1 || fail "wine_ref.sh setup"
 	PFX=$W/pfx
+	FAMILIES=1; "$NXR/nx_render" 2>&1 | grep -q -- '--families' || { FAMILIES=0; NOTES+=("this nx_render has no --families: that column is not measured"); }
 	NOTES+=("candidate nx_render at ${CAND:0:12}; reference nxd9play $(basename "$BIN"); shaders $(basename "$SHD")")
 }
 
@@ -107,11 +109,11 @@ programs() {
 			--variant "$v" --shard "$K/$N" >"$o/perm.log" 2>&1 || { NOTES+=("programs $v: perm.py failed"); continue; }
 		python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$o/ref" "$W/sweep-caps"/*.nxd9 >"$o/ref.log" 2>&1
 		python3 -I "$CMP/replay.py" cand --bin "$NXR/nx_render" --out "$o/cand" "$W/sweep-caps"/*.nxd9 >"$o/cand.log" 2>&1
-		python3 -I "$CMP/replay.py" cand --bin "$NXR/nx_render" --out "$o/fam" "$W/sweep-caps"/*.nxd9 -- --families all >"$o/fam.log" 2>&1
+		[ "$FAMILIES" = 1 ] && python3 -I "$CMP/replay.py" cand --bin "$NXR/nx_render" --out "$o/fam" "$W/sweep-caps"/*.nxd9 -- --families all >"$o/fam.log" 2>&1
 		python3 -I "$CMP/capcompare.py" --ref "$o/ref" --cand "$o/cand" --out "$o/gate" >/dev/null 2>&1
-		python3 -I "$CMP/capcompare.py" --ref "$o/ref" --cand "$o/fam" --out "$o/gate_fam" >/dev/null 2>&1
+		[ "$FAMILIES" = 1 ] && python3 -I "$CMP/capcompare.py" --ref "$o/ref" --cand "$o/fam" --out "$o/gate_fam" >/dev/null 2>&1
 		python3 -I "$CMP/permreport.py" --manifest "$W/sweep-caps/manifest.json" --gate "$o/gate/capgate.json" --ref "$o/ref" --out "$o/rep" >/dev/null 2>&1
-		python3 -I "$CMP/permreport.py" --manifest "$W/sweep-caps/manifest.json" --gate "$o/gate_fam/capgate.json" --ref "$o/ref" --out "$o/rep_fam" >/dev/null 2>&1
+		[ "$FAMILIES" = 1 ] && python3 -I "$CMP/permreport.py" --manifest "$W/sweep-caps/manifest.json" --gate "$o/gate_fam/capgate.json" --ref "$o/ref" --out "$o/rep_fam" >/dev/null 2>&1
 		cp "$W/sweep-caps/manifest.json" "$o/manifest.json"
 		rm -rf "$o/ref" "$o/cand" "$o/fam" "$W/sweep-caps"       # images: not kept
 	done
@@ -152,7 +154,8 @@ EOF
 	(WINEPREFIX=$CELLW/pfx wineserver -k 2>/dev/null) || true
 	if [ "$st" = 124 ] || [ "$st" = 137 ]; then echo -e "$id\ttimeout\t$(( $(date +%s) - t0 ))" >>"$S/done.tsv"; rm -rf "$c"; return; fi
 	if ! python3 -I "$CMP/nxd9trim.py" "$c/journal.nxd9" "$c/trim.nxd9" --frames 3 >"$c/trim.log" 2>&1; then
-		echo -e "$id\tno-capture\t$(( $(date +%s) - t0 ))" >>"$S/done.tsv"; rm -rf "$c"; return
+		local why=no-capture; [ -f "$c/journal.nxd9" ] || why=no-start   # no journal: the game never created a device
+		echo -e "$id\t$why\t$(( $(date +%s) - t0 ))" >>"$S/done.tsv"; rm -rf "$c"; return
 	fi
 	rm -f "$c/journal.nxd9"
 	python3 -I "$CMP/nxd9norm.py" "$c/trim.nxd9" "$c/$id.nxd9" >/dev/null 2>&1 || cp "$c/trim.nxd9" "$c/$id.nxd9"
@@ -198,7 +201,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" &&
 
 setup
 [ "${SWEEP_PROGRAMS:-1}" = 0 ] || programs
-[ "${SWEEP_CELLS:-1}" = 0 ] || cells
+game_ok() {   # the exe's own DLLs next to it (the published install may hold only the exe, the INIs and Data/)
+	local d missing=""
+	for d in GalaxyWrp.dll binkw32.dll libvorbisfile.dll; do [ -e "$GAME/$d" ] || missing="$missing $d"; done
+	[ -z "$missing" ] && return 0
+	NOTES+=("cells not run: the install lacks$missing (publish the exe's DLLs to gamedata/exe)"); return 1
+}
+[ "${SWEEP_CELLS:-1}" = 0 ] || { game_ok && cells; }
 summary
 publish
 summary
