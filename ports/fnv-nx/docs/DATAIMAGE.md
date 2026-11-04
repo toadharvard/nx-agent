@@ -448,6 +448,24 @@ vftable `0x010a2528` only its COL word and slot 0 (unknown: the decomp's stand-i
 `m_virtual0`, without an address); the next vftable's COL word at `0x010a2550` bounds the original to 10 slots,
 not 14 as the decomp's comment says, and NiStandardAllocator's at `0x010a24fc` also has 10.
 
+**Vftable dump for one class** (`loader/synth/vftable_dump.py CLASS... --units ... --objdir ... [--synth DIR]`,
+default output `render/native/vftables.tsv`, git-ignored because it is decomp-derived). One row per slot: class,
+vftable, vftable address, slot, target address, slot symbol, its demangled form, source, `known`/`needs-exe`, note.
+Sources, best first:
+* `msvc-object`: an object emits the vftable, so the slot symbols and their order are MSVC's.
+* `decomp declaration`: no object emits it, so the slots are taken from the declaration with the most virtuals,
+  primary base first.
+* `unknown`: words the synthetic image leaves free after the known slots, up to the next claimed byte (an upper
+  bound).
+
+For the render machine's four classes (decomp `87eb937`), every target but one needs the exe:
+
+| Class | What the decomp gives |
+|---|---|
+| BSShaderNoLighting | 72 slots from u134's vftable at `0x010bb230`; one target known (`NiRefObject::DeleteThis`); room for 7 more |
+| NiDX9Renderer | 143 declared slots (`src/NiRenderedTexture.h`, base `NiRenderer` first); no vftable address |
+| NiDX9RenderState, TileShader | no vftable in any object, no declaration with virtual functions |
+
 **Tests** (`tests/s14/`, hand-made COFF objects, no decomp content): `test_synth.py` (placement, relocations,
 ranks, `$SG` shift, sections, PE shell and imports; the C loader with `FNVNX_LOADCHECK`), `test_checks.py` (every
 check with planted violations, the COL-less hints and `check_hints.py`'s verdicts; with `FNVNX_S14_RUN=<output dir>`

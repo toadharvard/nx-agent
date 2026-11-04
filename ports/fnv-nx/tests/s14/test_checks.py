@@ -290,6 +290,39 @@ class ChecksTest(unittest.TestCase):
         # without the map "xyz\0" (0x0078797a) looks like a .text address: why --s2-addrmap is recommended
         self.assertEqual(check_hints.verdicts(img, [LIT_VA])[0][1], 'colless')
 
+    def test_vftable_dump(self):
+        """loader/synth/vftable_dump.py: object vftables (slots, targets), room after them, declarations"""
+        import vftable_dump
+        d = os.path.join(self.tmp, 'decomp')
+        os.makedirs(os.path.join(d, 'src'), exist_ok=True)
+        with open(os.path.join(d, 'src', 'baz.h'), 'w') as f:
+            f.write('class Bar { public: virtual void a(int); virtual void b(int); };\n'
+                    'class Baz : public Bar {\n public:\n  virtual void b(int);  // override\n'
+                    '  virtual ~Baz() {}\n  int m;\n  virtual void z() { if (m) { m = 0; } }\n};\n')
+        with open(os.path.join(self.tmp, 'units.json')) as f:
+            units = json.load(f)['units']
+        rows = vftable_dump.dump(['Bar', 'Baz', 'Nope'], units, os.path.join(self.tmp, 'obj'), d, self.state)
+        bar = [r for r in rows if r[0] == 'Bar' and r[7] == 'msvc-object']
+        self.assertEqual([(r[3], r[4], r[5], r[8]) for r in bar],
+                         [(0, FA, '?a@Bar@@UAEXH@Z', True), (1, FB, '?b@Bar@@UAEXH@Z', True),
+                          (2, FC, '?c@Bar@@UAEXHH@Z', True), (3, FD, '?d@Bar@@UAEXXZ', True),
+                          (4, FA + 4, '?e@Bar@@UAEXXZ', True)])
+        self.assertEqual({r[2] for r in bar}, {VT_BAR})
+        room = [r for r in rows if r[0] == 'Bar' and r[7] == 'unknown']
+        self.assertEqual(len(room), (VT_QUX - 8 - (VT_BAR + 20)) // 4)    # up to the literal before Qux
+        self.assertTrue(all(not r[8] and r[4] is None for r in room))
+        baz = [(r[3], r[5], r[7], r[8]) for r in rows if r[0] == 'Baz']
+        self.assertEqual(baz, [(0, 'a', 'decomp declaration', False), (1, 'b', 'decomp declaration', False),
+                               (2, '~Baz', 'decomp declaration', False), (3, 'z', 'decomp declaration', False)])
+        self.assertEqual([(r[7], r[8]) for r in rows if r[0] == 'Nope'], [('unknown', False)])
+        out = os.path.join(self.tmp, 'vftables.tsv')
+        vftable_dump.write(out, rows, 'fixture')
+        with open(out) as f:
+            lines = [x.rstrip('\n').split('\t') for x in f if not x.startswith('#')]
+        self.assertEqual(tuple(lines[0]), vftable_dump.COLS)
+        self.assertTrue(all(len(x) == len(vftable_dump.COLS) for x in lines))
+        self.assertIn('needs-exe', {x[8] for x in lines[1:]})
+
     def test_kinds_table(self):
         for k, (viol, owner, meaning) in synth_checks.KINDS.items():
             self.assertTrue(meaning)
