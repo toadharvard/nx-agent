@@ -21,3 +21,6 @@
   - tests/s12's fnvcheck MSVC configuration needs `libc6-dev-i386 lib32stdc++-13-dev`. Without them FMT-MSVC / FMT-CLASS / WCHAR-LIB / OUTARG-UNINIT and the ALIGN report fail (5 failures, on the integration branch too).
   - Do not install g++-multilib: it removes g++-aarch64-linux-gnu.
   - The render report.json (e02c871) predates S6n's F2 (1b0665e) and bind work (6d305cd). The render machine's next report moves renderer_main.
+* **decision (orchestrator, approved)** - patch class **MT1** for mt_cull: gated Switch behaviour changes (docs/PATCHES.md "Patch class MT1"). Switch build only, behind bMTRendering, off by default; byte-identical output with bMTRendering=0. Checked by GCC census, mtqemu on the real culling/accumulator objects, the race checker and a frame-equivalence test, instead of the MSVC byte check.
+  - **Ask for S1b**: add an "exempt from the MSVC byte check, gated" class to tools/rules/s1b_patches.py and tests/s1b (msvc_check.py skips it; test_patches.py still checks it parses and applies exactly once).
+* **also done** - Havok MT linked natively end to end (`5ac6928`, PERF.md 6.9, tools/perf/vtcover.py). V1 B2: every plan includes the built levers. V1 S15-MTQEMU-B1: mtqemu links again (`752dc02`). 60 fps stable is a worst-frame target, target_60 (`cace295`).
