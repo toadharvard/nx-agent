@@ -162,7 +162,10 @@ above (round 8).
 | `TYPEID1` | neutral | adds `<typeinfo>` only | real `<typeinfo>` |
 | `SPEC1` | neutral | early `template<>` declarations of member specializations | declarations only |
 | `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address | as is |
-| `RREF1` | neutral | `fnvnx_lvalue(...)` around an argument passed to a non-const reference parameter (every declaration the unit sees) that is not a plain lvalue | the temporary MSVC bound, same lifetime |
+| `RREF1` | neutral | `fnvnx_lvalue(...)` around an argument passed to a non-const reference parameter (every declaration the unit sees; for an unqualified call in a member function, the declarations of the nearest class that declares the name, RREF1-CLASS) that is not a plain lvalue | the temporary MSVC bound, same lifetime |
+| `RREF2` | neutral | `fnvnx_lvalue(T(args))` as the operand of a member operator whose every declaration with a T parameter takes a non-const `T&` (S1-refs) | the temporary MSVC bound, same lifetime |
+| `ADDR1` | neutral | `&_mm_f(args)` -> `&fnvnx_lvalue(_mm_f(args))` as the operand of a unary `&` (MSVC's address of a class rvalue, C4238) | the same temporary's address, same lifetime |
+| `LANE1` | platform | `&((T*)&(v))`, SSE1's lane array with its address taken (`(&v.m128_f32)[0]`), -> `((T(*)[sizeof(v) / sizeof(T)])&(v))` | MSVC's `&v.m128_f32`: same address and array type; SSE1 is target only |
 | `TPL1` | neutral | `this->` in front of the members of a dependent base that a class template's member functions use by plain name | the members MSVC's (one-phase) lookup found |
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
