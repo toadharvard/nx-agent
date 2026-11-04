@@ -2362,3 +2362,36 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   statics run before the platform constructors (clock, profile strings, exceptions). Raise the platform constructors'
   priority if a game static ever needs them.
 * **verified** - `tests/s5/test_tools.py`: OK (4 skipped).
+
+### J-0110 | 2026-11-04 | stream: S12-static,orchestrator | status: wip | parent: J-0100,J-0103
+
+* **found** - S12 established MSVC 2008 SP1's real code for each float -> integer target, by test compiles at /Od and
+  /O2 and a scan of all 2,987 pristine objects:
+
+  | target | MSVC code | sites | NaN or out of range gives |
+  |---|---|---:|---|
+  | int, long, short, signed char, implicit, `i += f` | `call __ftol2_sse` (cvttsd2si) | 1,253 | 0x80000000 (then its low bits) |
+  | unsigned short, unsigned char | inline `fistp DWORD` | 445 | 0x80000000, so 0 |
+  | unsigned int, unsigned long | inline `fistp QWORD`, low dword | 267 | int64 indefinite, so 0 |
+  | __int64, unsigned __int64 | `call __ftol2` | 10 | 0x8000000000000000 |
+
+  FTOI1's `(T)(long long)x` was right only for unsigned int, and only in range. A source rule can't reach implicit
+  conversions, compound assignments, macros or templates.
+* **did** - S12 `c722375`: FTOI2 as a GCC plugin (`toolchain/ftoi/fnvnx_ftoi.cc`). It rewrites every GIMPLE
+  float -> integer conversion into MSVC's computation for its target type; the int32 path is S1b's
+  `fnvnx_ftol2_sse`. In tests/s12, 810 of 810 conversions match the host's cvttsd2si/fisttp under qemu, against 240
+  differing without the plugin.
+* **did** - S12 `cb78c46`, `63ea827`: the static gate loads the plugin when compile.sh does. Clang's copy of the
+  force-include leaves out the NEON-written `fnvnx_mmx.h` and declares `_rotl`/`_rotr`/`__debugbreak`/`_exception_code`.
+  Before, clang reported "0 clean" on every shard, and those errors switched off its flow warnings. The st farms now
+  build fnvcheck and report 8,043-8,564 sites per shard.
+* **found** - UploadQuads 00e723a0's trap is benign: GCC's isolated `byteCount / 0` path, where x86 raises #DE at the
+  same point. `-fno-isolate-erroneous-paths-dereference` stays off, because AArch64's `udiv` by 0 returns 0 and the
+  game would run on where x86 crashes.
+* **did** - Orchestrator: compile.sh loads the plugin (`-fplugin=`), with no silent fallback, so objects with and
+  without it never mix.
+  - compile_job installs `gcc-13-plugin-dev-aarch64-linux-gnu` and `g++` as root, and hashes the plugin source into
+    FLAGS_HASH. Every compile shard rebuilds once.
+  - lib_job's package list carries the plugin headers.
+  - Checked on a 2-function unit: the int conversion yields 0x80000000 outside the int32 range.
+  - tests/s12: 0 failures.

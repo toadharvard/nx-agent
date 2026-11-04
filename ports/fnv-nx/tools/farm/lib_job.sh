@@ -10,7 +10,7 @@ log() { echo "$(date -u +%FT%TZ) $(basename "$0"): $*"; }
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
 export FARM_APT
 
-NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson"
+NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu"
 host_check() {   # commands (py:<module> for python modules) -> installed with apt-get / pip when FARM_APT=1
 	local missing="" c
 	for c in "$@"; do
