@@ -73,10 +73,14 @@ CONFIG = [
     ('CENSUS', '1', '0: skip the -fsyntax-only census'),
     ('OVERRIDE', 'auto', 'fnvlink resolve --override table (native replacements): auto = the port\'s own, built by '
                          'tools/link/overrides/build.sh in the link stage; none = off; or a table'),
-    ('LINK_OVERRIDES', '', 'native replacements by name, added to OVERRIDE\'s: render = render/native/overrides.tsv '
-                           'with --override-lib libnxrender.a (RENDER_LIB; the guest links the archive); empty: none'),
+    ('LINK_OVERRIDES', 'auto', 'native replacements by name, added to OVERRIDE\'s: render = render/native/overrides.tsv '
+                               'with --override-lib libnxrender.a (RENDER_LIB; the guest links the archive, the engine\'s '
+                               'D3D9 entry points go to the native renderer); auto = render when the toolchain stage '
+                               'has DEVKITPRO and fnvnx-a64 (a build that links a guest: the full build), else none; '
+                               'none = the pristine path (fuzz, equivalence, the link farm)'),
     ('RENDER_LIB', '', 'libnxrender.a for LINK_OVERRIDES=render; empty: built by render/native/n1/build.sh in the link '
-                       'stage (needs the toolchain stage\'s DEVKITPRO and fnvnx-a64, and UAM in the environment)'),
+                       'stage with the toolchain stage\'s DEVKITPRO and fnvnx-a64 and UAM (the environment\'s, else '
+                       'toolchain/uam/build.sh, cached next to the link stage)'),
     ('EXTERN_TEXT', 'auto', 'fnvlink resolve --extern-text list: auto = made from the tree\'s units.json by '
                             'tools/pipeline/extern_text.py (S4\'s addr_ids.txt), none = off, or a file'),
     ('MSVC_OBJS', '', 'fnvlink resolve --msvc-objs: pristine MSVC 2008 objects (S11) for S2b\'s vtable slots'),
@@ -1584,12 +1588,22 @@ RENDER_LIB_SOURCES = ('render/native/front', 'render/native/capture', 'render/na
                       'render/native/shaders', 'toolchain/include', 'toolchain/guest')
 
 
+def link_overrides_mode(b):
+    """LINK_OVERRIDES resolved: render or none. auto: render when the toolchain stage provides DEVKITPRO and
+    fnvnx-a64 (the full build: its guest needs the native renderer, the boot stops at renderer init without it),
+    none otherwise (TC_DL=none: the link farm, fuzz and equivalence take the pristine path)."""
+    lo = b.cfg['LINK_OVERRIDES'] or 'none'
+    if lo == 'auto':
+        return 'render' if b.art('toolchain', 'devkitpro') and b.art('toolchain', 'prefix') else 'none'
+    return lo
+
+
 def link_overrides(b):
     """(table, archive, id for the fingerprint) of LINK_OVERRIDES: render -> S6n's render/native/overrides.tsv and
     libnxrender.a (RENDER_LIB, else '' = built by the stage from RENDER_LIB_SOURCES); empty -> ('', '', ...). They
     are added to OVERRIDE's rows (override_id)."""
-    lo = b.cfg['LINK_OVERRIDES']
-    if lo in ('', 'none'):
+    lo = link_overrides_mode(b)
+    if lo == 'none':
         return ('', '', 'link-overrides:none')
     if lo != 'render':
         raise StageError('LINK_OVERRIDES=%s: only render (or empty) is known' % lo)
@@ -1603,9 +1617,19 @@ def build_render_lib(b, r, d):
     """libnxrender.a for LINK_OVERRIDES=render without RENDER_LIB: render/native/n1/build.sh <d>/render-n1 with the
     toolchain stage's DEVKITPRO and fnvnx-a64 and the environment's UAM (render/native/env.sh --print)."""
     dkp, prefix, uam = b.art('toolchain', 'devkitpro'), b.art('toolchain', 'prefix'), os.environ.get('UAM', '')
-    if not dkp or not prefix or not uam or not os.access(uam, os.X_OK):
+    if not dkp or not prefix:
         raise StageError('LINK_OVERRIDES=render needs RENDER_LIB=<libnxrender.a>, or the toolchain stage\'s DEVKITPRO '
-                         'and fnvnx-a64 plus UAM=<uam> (render/native/env.sh) to build it')
+                         'and fnvnx-a64 to build it (LINK_OVERRIDES=none: the pristine path)')
+    if not uam or not os.access(uam, os.X_OK):
+        # no render machine environment (the farms): build uam at its pin once per container, in a cache every build
+        # directory of the container shares ($FNVNX_TOOL_CACHE, default ~/.cache/fnvnx; toolchain/uam/build.sh stamps
+        # the pin); only a failed build is an error
+        up = os.path.join(os.environ.get('FNVNX_TOOL_CACHE') or os.path.join(os.path.expanduser('~'), '.cache', 'fnvnx'),
+                          'uam')
+        b.say('link: uam (toolchain/uam/build.sh, once per container)')
+        if b.sh(['bash', os.path.join(ROOT, 'toolchain', 'uam', 'build.sh'), up], r['log'], timeout=3600):
+            raise StageError('LINK_OVERRIDES=render: building uam failed (toolchain/uam/build.sh, see %s)' % b.rel(r['log']))
+        uam = os.path.join(up, 'bin', 'uam')
     out = os.path.join(d, 'render-n1')
     b.say('link: libnxrender.a (render/native/n1/build.sh)')
     path = os.pathsep.join([os.path.join(dkp, 'tools', 'bin'), os.path.join(prefix, 'bin'), os.environ.get('PATH', '')])
@@ -1724,7 +1748,7 @@ class Link(Stage):
             args += ['--override', both, '--override-lib', rv_lib]
         elif ov_tsv:
             args += ['--override', ov_tsv]
-        r['link_overrides'] = (b.cfg['OVERRIDE'] or 'none') + ('+' + b.cfg['LINK_OVERRIDES'] if rv_tsv else '')
+        r['link_overrides'] = (b.cfg['OVERRIDE'] or 'none') + ('+render' if rv_tsv else '')
         for opt, key in (('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
                          ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:

@@ -9,8 +9,23 @@
  *
  * No libc means no TLS of our own: TPIDR_EL0 belongs to the guest, as on the Switch (hostapi.h). Threads are
  * clone()d with CLONE_CHILD_CLEARTID for join; wait/wake are futexes; the placement table of toolchain/host/
- * placement.h is applied with sched_setaffinity (Switch cores 0-3 -> host CPUs 0-3). Slots the prototype does not
- * need (files, audio, input) return -ENOSYS. docs/PERF.md section 6.6. */
+ * placement.h is applied with sched_setaffinity (Switch cores 0-3 -> host CPUs 0-3). docs/PERF.md section 6.6.
+ *
+ * The game guest (fnvnx.elf of the link, tests/s15/mtqemu/boot_game.sh) runs too:
+ *
+ *   qemu-aarch64 -R 0xC0000000 linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--heap MiB] fnvnx.elf
+ *
+ *   - the ELF is loaded at its link address, and the crt0 header words elf2nso writes into the NSO (+16 link base,
+ *     +20 size, +24 relocatable) are filled in memory, so the guest's self-relocation runs with a zero slide;
+ *   - a guest heap (heap_base/heap_size, default 64 MiB like tests/s5/emu_guest.py), map_fixed (mremap of the heap
+ *     block, as svcMapMemory leaves the source inaccessible), the fs_* slots under --root as sdmc:/ (without
+ *     --root they return -ENOSYS), wall time, audio/input stubs and ext_call (platform CPU boost: on);
+ *   - --skip-faulting-init: emu_guest.py's guard of the initializer runners. Each blr of __libc_init_array, call,
+ *     fnvnx_xc_run_address_order and fnvnx_xc_run_image_order (found in .symtab) is patched into a bl to a
+ *     trampoline that records the callee-saved registers; a SIGSEGV/SIGBUS/SIGILL/SIGTRAP/SIGFPE below it resumes
+ *     after the call with 0, as the emulator does. A fault with no guard prints pc, lr and the frame chain;
+ *   - --expect: the process ends (exit 0) once the guest's console or debug output contains TEXT, and says after
+ *     how long; a guest that returns first exits 3. */
 #include <stdint.h>
 #include <stddef.h>
 
@@ -26,9 +41,12 @@ static long sc(long n, long a, long b, long c, long d, long e, long f) {
     __asm__ volatile("svc #0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5) : "memory");
     return x0;
 }
-enum { SYS_openat = 56, SYS_close = 57, SYS_read = 63, SYS_write = 64, SYS_pread64 = 67, SYS_exit = 93,
-       SYS_exit_group = 94, SYS_futex = 98, SYS_nanosleep = 101, SYS_clock_gettime = 113,
-       SYS_sched_setaffinity = 122, SYS_sched_yield = 124, SYS_gettid = 178, SYS_mmap = 222 };
+enum { SYS_mkdirat = 34, SYS_unlinkat = 35, SYS_ftruncate = 46, SYS_openat = 56, SYS_close = 57,
+       SYS_getdents64 = 61, SYS_lseek = 62, SYS_read = 63, SYS_write = 64, SYS_pread64 = 67, SYS_pwrite64 = 68,
+       SYS_newfstatat = 79, SYS_fstat = 80, SYS_fsync = 82, SYS_exit = 93, SYS_exit_group = 94, SYS_futex = 98,
+       SYS_nanosleep = 101, SYS_clock_gettime = 113, SYS_sched_setaffinity = 122, SYS_sched_yield = 124,
+       SYS_rt_sigaction = 134, SYS_gettid = 178, SYS_munmap = 215, SYS_mremap = 216, SYS_mmap = 222,
+       SYS_renameat2 = 276 };
 #define FUTEX_WAIT 0
 #define FUTEX_WAIT_PRIVATE 128
 #define FUTEX_WAKE_PRIVATE 129
@@ -152,6 +170,7 @@ static u64 h_thread_exit(void) { sc(SYS_exit, 0, 0, 0, 0, 0, 0); return 0; }
 static u64 h_thread_yield(void) { sc(SYS_sched_yield, 0, 0, 0, 0, 0, 0); return 0; }
 static u64 h_thread_set_priority(u64 id, u64 prio) { (void)id; (void)prio; return 0; }   /* CFS: advisory */
 static u64 h_thread_set_cpu(u64 id, u64 spec) {
+    if ((spec >> 40) & 0x7FFFFFull) return 0;   /* -1 and other negative values: nothing to do (host_v2.inc) */
     HThread *h = (HThread *)(uintptr_t)id;
     int ideal = h ? h->ideal : 0;
     uint32_t mask = h ? h->mask : 0xF;
@@ -173,67 +192,497 @@ static u64 h_wake_address(u64 addr, u64 count) {
     return 0;
 }
 
-/* ---- the rest */
-static u64 h_output_debug_string(u64 s, u64 n) { sc(SYS_write, 2, (long)s, (long)n, 0, 0, 0); return 0; }
-static u64 h_console_write(u64 s, u64 n) { return (u64)sc(SYS_write, 1, (long)s, (long)n, 0, 0, 0); }
+/* ---- --expect: end the run when the guest's output contains a text */
+static const char *g_expect;
+static size_t g_expect_len;
+static char g_win[512];
+static size_t g_win_len;
+static int g_out_lock;
+static u64 g_t0, g_t_entry;
+static volatile u64 g_skipped;
+
+static void put_dec(int fd, u64 v) {
+    char b[24];
+    int i = 23;
+    b[i] = 0;
+    do b[--i] = (char)('0' + v % 10); while ((v /= 10) && i);
+    puts_(fd, b + i);
+}
+static void expect_feed(const char *s, u64 n) {
+    if (!g_expect) return;
+    while (__atomic_exchange_n(&g_out_lock, 1, __ATOMIC_ACQUIRE)) sc(SYS_sched_yield, 0, 0, 0, 0, 0, 0);
+    for (u64 k = 0; k < n; k++) {
+        if (g_win_len == sizeof g_win) {   /* keep the last g_expect_len - 1 bytes */
+            memcpy(g_win, g_win + g_win_len - (g_expect_len - 1), g_expect_len - 1);
+            g_win_len = g_expect_len - 1;
+        }
+        g_win[g_win_len++] = s[k];
+        if (g_win_len >= g_expect_len) {
+            const char *t = g_win + g_win_len - g_expect_len;
+            size_t i = 0;
+            while (i < g_expect_len && t[i] == g_expect[i]) i++;
+            if (i == g_expect_len) {
+                u64 t1 = now_ns();
+                puts_(2, "\nlinhost: reached \""); puts_(2, g_expect); puts_(2, "\" after ");
+                put_dec(2, (t1 - g_t0) / 1000000); puts_(2, " ms (guest entry after ");
+                put_dec(2, (t1 - g_t_entry) / 1000000); puts_(2, " ms), initializers skipped after a fault: ");
+                put_dec(2, g_skipped); puts_(2, "\n");
+                sc(SYS_exit_group, 0, 0, 0, 0, 0, 0);
+            }
+        }
+    }
+    __atomic_store_n(&g_out_lock, 0, __ATOMIC_RELEASE);
+}
+
+/* ---- console, time, misc */
+static u64 h_output_debug_string(u64 s, u64 n) {
+    sc(SYS_write, 2, (long)s, (long)n, 0, 0, 0);
+    expect_feed((const char *)(uintptr_t)s, n);
+    return 0;
+}
+static u64 h_console_write(u64 s, u64 n) {
+    u64 r = (u64)sc(SYS_write, 1, (long)s, (long)n, 0, 0, 0);
+    expect_feed((const char *)(uintptr_t)s, n);
+    return r;
+}
 static u64 h_exit(u64 code) { sc(SYS_exit_group, (long)code, 0, 0, 0, 0, 0); return 0; }
 static u64 h_sleep_ns(u64 ns) { struct ts t = { (long)(ns / 1000000000ull), (long)(ns % 1000000000ull) }; sc(SYS_nanosleep, (long)&t, 0, 0, 0, 0, 0); return 0; }
 static u64 h_zero(void) { return 0; }
+static u64 h_one(void) { return 1; }
 static u64 h_tick(void) { return now_ns(); }
 static u64 h_tick_freq(void) { return 1000000000ull; }
 static u64 h_cpu_count(void) { return 3; }
 static u64 h_random(void) { static u64 x = 0x9E3779B97F4A7C15ull; u64 v = __atomic_load_n(&x, __ATOMIC_RELAXED); v ^= v << 13; v ^= v >> 7; v ^= v << 17; __atomic_store_n(&x, v, __ATOMIC_RELAXED); return v; }
 static u64 h_meminfo(u64 p) { FnvnxMemInfo *m = (FnvnxMemInfo *)(uintptr_t)p; m->total_phys = 4ull << 30; m->avail_phys = 3ull << 30; return 0; }
 static u64 h_enosys(void) { return (u64)-ENOSYS; }
+static u64 h_wall_time_us(void) { struct ts t; sc(SYS_clock_gettime, 0 /* REALTIME */, (long)&t, 0, 0, 0, 0); return (u64)t.s * 1000000ull + (u64)t.ns / 1000; }
+static u64 h_audio_open(u64 rate, u64 period) { (void)period; return rate == 48000 ? 0 : (u64)-1; }
+static u64 h_audio_submit(u64 pcm, u64 frames) { (void)pcm; return h_sleep_ns(frames * 1000000000ull / 48000); }
+static u64 h_ext_call(u64 module, u64 fn, u64 args, u64 nargs) {
+    (void)args; (void)nargs;
+    if (module == FNVNX_EXT_PLATFORM && fn == FNVNX_PLAT_CPU_BOOST) return 0;   /* boost on (nothing to do here) */
+    return FNVNX_EXT_NO_MODULE;
+}
+
+/* ---- memory: the guest heap and map_fixed */
+#define PROT_RW 3
+#define MAP_PRIVATE_ANON 0x22
+#define MAP_FIXED 0x10
+#define MAP_FIXED_NOREPLACE 0x100000
+static u64 map_at(u64 addr, u64 size, int prot) {   /* exactly at addr, never over an existing mapping; 0 or -1 */
+    long m = sc(SYS_mmap, (long)addr, (long)size, prot, MAP_PRIVATE_ANON | MAP_FIXED_NOREPLACE, -1, 0);
+    if (m == (long)addr) return 0;
+    if (m > 0) sc(SYS_munmap, m, (long)size, 0, 0, 0, 0);   /* a kernel that took it as a hint */
+    return (u64)-1;
+}
+/* the original image's data window, which the Switch host claims at startup (startup/host/reserve_nx.c, S10):
+ * map_fixed inside it needs no source block (host_v3.inc) */
+#define WINDOW_LO 0x00400000ull
+#define WINDOW_HI 0x02100000ull
+static u64 h_map_fixed(u64 addr, u64 size, u64 src) {
+    if ((addr | size) & 0xFFF || !size) return 1;
+    if (addr >= WINDOW_LO && addr + size <= WINDOW_HI) {   /* zeroed RW memory, nothing to map from */
+        if (map_at(addr, size, PROT_RW)) memset((void *)(uintptr_t)addr, 0, size);   /* mapped before: zero it */
+        return 0;
+    }
+    if (!src || src & 0xFFF) return 1;
+    if (map_at(addr, size, PROT_RW)) return 2;   /* occupied */
+    /* svcMapMemory: addr gets src's pages, src becomes inaccessible */
+    long m = sc(SYS_mremap, (long)src, (long)size, (long)size, 3 /* MAYMOVE | FIXED */, (long)addr, 0);
+    if (m != (long)addr) memcpy((void *)(uintptr_t)addr, (const void *)(uintptr_t)src, size);   /* no mremap: a copy */
+    return 0;
+}
+
+/* ---- files: sdmc:/ is --root */
+static const char *g_root;
+#define AT_FDCWD -100
+#define O_DIRECTORY 040000
+#define O_CLOEXEC 02000000
+static int fs_path(char *out, size_t cap, u64 gp) {
+    const char *p = (const char *)(uintptr_t)gp;
+    if (p[0] == 's' && p[1] == 'd' && p[2] == 'm' && p[3] == 'c' && p[4] == ':') p += 5;
+    while (*p == '/') p++;
+    size_t n = slen(g_root), m = slen(p);
+    if (n + 1 + m + 1 > cap) return -36;   /* ENAMETOOLONG */
+    memcpy(out, g_root, n);
+    out[n] = '/';
+    memcpy(out + n + 1, p, m + 1);
+    return 0;
+}
+#define PATH(buf, gp) char buf[1024]; { int e_ = fs_path(buf, sizeof buf, gp); if (e_) return (u64)(long)e_; }
+static u64 h_fs_open(u64 gp, u64 flags) {
+    PATH(path, gp);
+    long fl = (flags & 3) == 3 ? 2 : (flags & 2) ? 1 : 0;
+    if (flags & FNVNX_O_CREATE) fl |= 0100;
+    if (flags & FNVNX_O_EXCL) fl |= 0200;
+    if (flags & FNVNX_O_TRUNC) fl |= 01000;
+    if (flags & FNVNX_O_APPEND) fl |= 02000;
+    return (u64)sc(SYS_openat, AT_FDCWD, (long)path, fl | O_CLOEXEC, 0666, 0, 0);
+}
+static u64 h_fs_read(u64 fd, u64 b, u64 n) { return (u64)sc(SYS_read, (long)fd, (long)b, (long)n, 0, 0, 0); }
+static u64 h_fs_write(u64 fd, u64 b, u64 n) { return (u64)sc(SYS_write, (long)fd, (long)b, (long)n, 0, 0, 0); }
+static u64 h_fs_pread(u64 fd, u64 b, u64 n, u64 off) { return (u64)sc(SYS_pread64, (long)fd, (long)b, (long)n, (long)off, 0, 0); }
+static u64 h_fs_pwrite(u64 fd, u64 b, u64 n, u64 off) { return (u64)sc(SYS_pwrite64, (long)fd, (long)b, (long)n, (long)off, 0, 0); }
+static u64 h_fs_seek(u64 fd, u64 off, u64 whence) { return (u64)sc(SYS_lseek, (long)fd, (long)off, (long)whence, 0, 0, 0); }
+static u64 h_fs_truncate(u64 fd, u64 size) { return (u64)sc(SYS_ftruncate, (long)fd, (long)size, 0, 0, 0, 0); }
+static u64 h_fs_sync(u64 fd) { return (u64)sc(SYS_fsync, (long)fd, 0, 0, 0, 0, 0); }
+static u64 h_fs_close(u64 fd) { return (u64)sc(SYS_close, (long)fd, 0, 0, 0, 0, 0); }
+typedef struct LStat {   /* struct stat of aarch64 Linux (asm-generic) */
+    u64 dev, ino; uint32_t mode, nlink, uid, gid; u64 rdev, pad1; int64_t size; int32_t blksize, pad2;
+    int64_t blocks, atime, atime_ns, mtime, mtime_ns, ctime, ctime_ns; uint32_t unused[2];
+} LStat;
+_Static_assert(sizeof(LStat) == 128, "struct stat");
+static u64 put_stat(long r, const LStat *st, u64 out) {
+    if (r < 0) return (u64)r;
+    FnvnxStat *f = (FnvnxStat *)(uintptr_t)out;
+    f->is_dir = (st->mode & 0170000) == 0040000;
+    f->read_only = !(st->mode & 0200);
+    f->size = (u64)st->size;
+    f->mtime_us = st->mtime * 1000000 + st->mtime_ns / 1000;
+    f->atime_us = st->atime * 1000000 + st->atime_ns / 1000;
+    f->ctime_us = st->ctime * 1000000 + st->ctime_ns / 1000;
+    return 0;
+}
+static u64 h_fs_fstat(u64 fd, u64 out) { LStat st; return put_stat(sc(SYS_fstat, (long)fd, (long)&st, 0, 0, 0, 0), &st, out); }
+static u64 h_fs_stat(u64 gp, u64 out) {
+    PATH(path, gp);
+    LStat st;
+    return put_stat(sc(SYS_newfstatat, AT_FDCWD, (long)path, (long)&st, 0, 0, 0), &st, out);
+}
+static u64 h_fs_mkdir(u64 gp) { PATH(path, gp); return (u64)sc(SYS_mkdirat, AT_FDCWD, (long)path, 0777, 0, 0, 0); }
+static u64 h_fs_rmdir(u64 gp) { PATH(path, gp); return (u64)sc(SYS_unlinkat, AT_FDCWD, (long)path, 0x200 /* AT_REMOVEDIR */, 0, 0, 0); }
+static u64 h_fs_remove(u64 gp) { PATH(path, gp); return (u64)sc(SYS_unlinkat, AT_FDCWD, (long)path, 0, 0, 0, 0); }
+static u64 h_fs_rename(u64 ga, u64 gb) {
+    PATH(a, ga);
+    PATH(b, gb);
+    return (u64)sc(SYS_renameat2, AT_FDCWD, (long)a, AT_FDCWD, (long)b, 0, 0);
+}
+#define MAXD 16
+static struct HDir { int used, fd, pos, len; char buf[4096]; } g_dirs[MAXD];
+static u64 h_fs_dir_open(u64 gp) {
+    PATH(path, gp);
+    long fd = sc(SYS_openat, AT_FDCWD, (long)path, O_DIRECTORY | O_CLOEXEC, 0, 0, 0);
+    if (fd < 0) return 0;
+    for (int i = 0; i < MAXD; i++)
+        if (!__atomic_exchange_n(&g_dirs[i].used, 1, __ATOMIC_ACQ_REL)) {
+            g_dirs[i].fd = (int)fd; g_dirs[i].pos = g_dirs[i].len = 0;
+            return (u64)i + 1;
+        }
+    sc(SYS_close, fd, 0, 0, 0, 0, 0);
+    return 0;
+}
+static u64 h_fs_dir_next(u64 id, u64 buf, u64 cap) {
+    if (!id || id > MAXD || !cap) return 0;
+    struct HDir *d = &g_dirs[id - 1];
+    for (;;) {
+        if (d->pos >= d->len) {
+            long n = sc(SYS_getdents64, d->fd, (long)d->buf, sizeof d->buf, 0, 0, 0);
+            if (n <= 0) return 0;
+            d->len = (int)n; d->pos = 0;
+        }
+        const char *e = d->buf + d->pos;
+        d->pos += *(const uint16_t *)(e + 16);
+        const char *name = e + 19;
+        if (name[0] == '.' && (!name[1] || (name[1] == '.' && !name[2]))) continue;
+        size_t n = slen(name);
+        if (n > cap - 1) n = cap - 1;
+        memcpy((char *)(uintptr_t)buf, name, n);
+        ((char *)(uintptr_t)buf)[n] = 0;
+        return n;
+    }
+}
+static u64 h_fs_dir_close(u64 id) {
+    if (!id || id > MAXD) return 0;
+    sc(SYS_close, g_dirs[id - 1].fd, 0, 0, 0, 0, 0);
+    __atomic_store_n(&g_dirs[id - 1].used, 0, __ATOMIC_RELEASE);
+    return 0;
+}
 
 static FnvnxHostApi g_api;
+
+/* ---- --skip-faulting-init: guarded calls of the initializer runners (tests/s5/emu_guest.py install_guards)
+ * A patched site  blr xN  becomes  bl T  with T: mov x16, xN; ldr x17, =guard_enter; br x17. guard_enter saves a
+ * GuardRec on the guest stack (argument registers, the callee-saved x19-x30 and d8-d15), links it into the calling
+ * thread's guard list, calls x16 and unlinks it. A fault below it makes the signal handler unlink it and resume at
+ * guard_resume with sp = the record: the callee-saved registers come back and the call returns 0. */
+typedef struct GuardRec {
+    u64 a[8], target, x8, cs[12], d[8];
+    struct GuardRec *prev;
+    u64 pad;
+} GuardRec;
+_Static_assert(sizeof(GuardRec) == 256, "GuardRec is guard_enter's frame");
+#define MAXG (MAXT + 8)
+static struct { int tid; GuardRec *top; } g_guard[MAXG];
+static u64 g_trap_vslot, g_trap_special;
+
+static int gettid_(void) { return (int)sc(SYS_gettid, 0, 0, 0, 0, 0, 0); }
+static int guard_slot(int tid, int claim) {
+    for (int i = 0; i < MAXG; i++)
+        if (__atomic_load_n(&g_guard[i].tid, __ATOMIC_ACQUIRE) == tid) return i;
+    if (!claim) return -1;
+    for (int i = 0; i < MAXG; i++) {
+        int z = 0;
+        if (__atomic_compare_exchange_n(&g_guard[i].tid, &z, tid, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return i;
+    }
+    die("guard table full");
+    return -1;
+}
+__attribute__((used)) void linhost_guard_push(GuardRec *r) {
+    int i = guard_slot(gettid_(), 1);
+    r->prev = g_guard[i].top;
+    g_guard[i].top = r;
+}
+__attribute__((used)) void linhost_guard_pop(GuardRec *r) {
+    int i = guard_slot(gettid_(), 0);
+    if (i >= 0) g_guard[i].top = r->prev;
+}
+void linhost_guard_enter(void);
+void linhost_guard_resume(void);
+__asm__(".text\n.global linhost_guard_enter\nlinhost_guard_enter:\n"
+        "  sub sp, sp, #256\n"
+        "  stp x0, x1, [sp, #0]\n  stp x2, x3, [sp, #16]\n  stp x4, x5, [sp, #32]\n  stp x6, x7, [sp, #48]\n"
+        "  stp x16, x8, [sp, #64]\n"
+        "  stp x19, x20, [sp, #80]\n  stp x21, x22, [sp, #96]\n  stp x23, x24, [sp, #112]\n"
+        "  stp x25, x26, [sp, #128]\n  stp x27, x28, [sp, #144]\n  stp x29, x30, [sp, #160]\n"
+        "  stp d8, d9, [sp, #176]\n  stp d10, d11, [sp, #192]\n  stp d12, d13, [sp, #208]\n  stp d14, d15, [sp, #224]\n"
+        "  mov x0, sp\n  bl linhost_guard_push\n"
+        "  ldp x0, x1, [sp, #0]\n  ldp x2, x3, [sp, #16]\n  ldp x4, x5, [sp, #32]\n  ldp x6, x7, [sp, #48]\n"
+        "  ldp x16, x8, [sp, #64]\n  ldp x29, x30, [sp, #160]\n"
+        "  blr x16\n"
+        "  stp x0, x1, [sp, #0]\n"
+        "  mov x0, sp\n  bl linhost_guard_pop\n"
+        "  ldp x0, x1, [sp, #0]\n"
+        "  b 1f\n"
+        ".global linhost_guard_resume\nlinhost_guard_resume:\n"
+        "  mov x0, #0\n  mov x1, #0\n"
+        "1:\n"
+        "  ldp x19, x20, [sp, #80]\n  ldp x21, x22, [sp, #96]\n  ldp x23, x24, [sp, #112]\n"
+        "  ldp x25, x26, [sp, #128]\n  ldp x27, x28, [sp, #144]\n  ldp x29, x30, [sp, #160]\n"
+        "  ldp d8, d9, [sp, #176]\n  ldp d10, d11, [sp, #192]\n  ldp d12, d13, [sp, #208]\n  ldp d14, d15, [sp, #224]\n"
+        "  add sp, sp, #256\n  ret\n");
+void linhost_sigreturn(void);
+__asm__(".text\n.global linhost_sigreturn\nlinhost_sigreturn:\n  mov x8, #139\n  svc #0\n");
+
+static int readable(u64 a) { return a >= 0x10000 && a < 0xC0000000ull; }   /* no probing: only the range check */
+static void on_fault(int sig, void *info, void *ucv) {
+    (void)info;
+    unsigned char *uc = ucv;            /* struct ucontext: uc_mcontext (struct sigcontext) at 176 */
+    u64 fault = *(u64 *)(uc + 176), *x = (u64 *)(uc + 184), *sp = (u64 *)(uc + 432), *pc = (u64 *)(uc + 440);
+    int i = guard_slot(gettid_(), 0);
+    GuardRec *r = i >= 0 ? g_guard[i].top : 0;
+    int trap = *pc == g_trap_vslot || *pc == g_trap_special;
+    if (r) {
+        g_guard[i].top = r->prev;
+        u64 n = __atomic_add_fetch(&g_skipped, 1, __ATOMIC_RELAXED);
+        if (n <= 30) {
+            puts_(2, "linhost: skipped initializer "); put_hex(2, r->target); puts_(2, ": signal "); put_dec(2, (u64)sig);
+            puts_(2, " at pc "); put_hex(2, *pc);
+            if (trap && readable(x[1])) { puts_(2, ": "); puts_(2, (const char *)(uintptr_t)x[1]); }
+            puts_(2, "\n");
+        }
+        *sp = (u64)(uintptr_t)r;
+        *pc = (u64)(uintptr_t)linhost_guard_resume;
+        return;
+    }
+    puts_(2, "\nlinhost: fault: signal "); put_dec(2, (u64)sig); puts_(2, " thread "); put_dec(2, (u64)gettid_());
+    puts_(2, " pc "); put_hex(2, *pc); puts_(2, " lr "); put_hex(2, x[30]); puts_(2, " addr "); put_hex(2, fault);
+    puts_(2, " sp "); put_hex(2, *sp);
+    if (trap && readable(x[1])) { puts_(2, "\nlinhost: trap: "); puts_(2, (const char *)(uintptr_t)x[1]); }
+    puts_(2, "\nlinhost: frames");
+    u64 fp = x[29];
+    for (int k = 0; k < 16 && readable(fp) && !(fp & 7); k++) {
+        u64 *f = (u64 *)(uintptr_t)fp;
+        puts_(2, " "); put_hex(2, f[1]);
+        if (f[0] <= fp) break;
+        fp = f[0];
+    }
+    puts_(2, "\nlinhost: initializers skipped after a fault: "); put_dec(2, g_skipped); puts_(2, "\n");
+    sc(SYS_exit_group, 128 + sig, 0, 0, 0, 0, 0);
+}
+static void install_fault_handler(void) {
+    struct { u64 handler, flags, restorer, mask; } sa = {
+        (u64)(uintptr_t)on_fault, 4 /* SA_SIGINFO */ | 0x04000000 /* SA_RESTORER */, (u64)(uintptr_t)linhost_sigreturn, 0 };
+    static const int sigs[] = { 4 /* ILL */, 5 /* TRAP */, 7 /* BUS */, 8 /* FPE */, 11 /* SEGV */ };
+    for (unsigned k = 0; k < sizeof sigs / sizeof sigs[0]; k++)
+        sc(SYS_rt_sigaction, sigs[k], (long)&sa, 0, 8, 0, 0);
+}
 
 /* ---- ELF32 loader */
 typedef struct { unsigned char id[16]; uint16_t type, machine; uint32_t version, entry, phoff, shoff, flags;
                  uint16_t ehsize, phentsize, phnum, shentsize, shnum, shstrndx; } E32;
 typedef struct { uint32_t type, offset, vaddr, paddr, filesz, memsz, flags, align; } P32;
+typedef struct { uint32_t name, type, flags, addr, offset, size, link, info, addralign, entsize; } S32;
+typedef struct { uint32_t name, value, size; unsigned char info, other; uint16_t shndx; } Y32;
 
-static u64 load(const char *path) {
-    long fd = sc(SYS_openat, -100, (long)path, 0, 0, 0, 0);
+static u64 g_lo = ~0ull, g_hi;   /* the guest's mapped range */
+
+static u64 load(const char *path, long *fdp) {
+    long fd = sc(SYS_openat, AT_FDCWD, (long)path, 0, 0, 0, 0);
     if (fd < 0) die("cannot open the guest");
     E32 e;
     if (sc(SYS_pread64, fd, (long)&e, sizeof e, 0, 0, 0) != sizeof e || e.id[4] != 1 || e.machine != 183)
         die("not an ELF32 AArch64 guest");
+    int dynamic = 0;
     for (unsigned i = 0; i < e.phnum; i++) {
         P32 p;
         sc(SYS_pread64, fd, (long)&p, sizeof p, e.phoff + i * e.phentsize, 0, 0);
+        if (p.type == 2) dynamic = 1;
         if (p.type != 1 || !p.memsz) continue;
         u64 lo = p.vaddr & ~0xFFFull, hi = ((u64)p.vaddr + p.memsz + 0xFFF) & ~0xFFFull;
         long m = sc(SYS_mmap, (long)lo, (long)(hi - lo), 7, 0x32 /* PRIVATE|ANON|FIXED: the range is ours (linked below it) */, -1, 0);
         if (m != (long)lo) die("cannot map a guest segment at its address");
-        if (sc(SYS_pread64, fd, (long)p.vaddr, p.filesz, p.offset, 0, 0) != (long)p.filesz) die("short read");
+        for (u64 done = 0; done < p.filesz;) {   /* a read may stop short of a large segment */
+            long r = sc(SYS_pread64, fd, (long)(p.vaddr + done), (long)(p.filesz - done), (long)(p.offset + done), 0, 0);
+            if (r <= 0) die("short read");
+            done += (u64)r;
+        }
+        if (lo < g_lo) g_lo = lo;
+        if (hi > g_hi) g_hi = hi;
     }
-    sc(SYS_close, fd, 0, 0, 0, 0, 0);
+    /* an fnv-nx game module (crt0.s): fill the header words elf2nso.py writes into the NSO */
+    uint32_t *hdr = (uint32_t *)(uintptr_t)e.entry;
+    if (e.entry == g_lo && hdr[2] == FNVNX_GUEST_MAGIC) {
+        hdr[4] = (uint32_t)g_lo;
+        hdr[5] = (uint32_t)(g_hi - g_lo);
+        hdr[6] = dynamic ? 1u : 0u;   /* loaded at the link base: the self-relocation's slide is 0 */
+        puts_(2, "linhost: fnv-nx guest module "); put_hex(2, g_lo); puts_(2, ".."); put_hex(2, g_hi); puts_(2, "\n");
+    }
+    *fdp = fd;
     return e.entry;
 }
+
+static void *anon(u64 size) {
+    long m = sc(SYS_mmap, 0, (long)size, PROT_RW, MAP_PRIVATE_ANON, -1, 0);
+    if (m < 0) die("out of memory");
+    return (void *)m;
+}
+static int streq(const char *a, const char *b) { while (*a && *a == *b) a++, b++; return *a == *b; }
+
+/* patch every blr of the initializer runners (by name, .symtab) into a guarded call */
+static void install_guards(long fd) {
+    static const char *const runners[] = { "__libc_init_array", "call", "fnvnx_xc_run_address_order",
+                                           "fnvnx_xc_run_image_order" };
+    E32 e;
+    sc(SYS_pread64, fd, (long)&e, sizeof e, 0, 0, 0);
+    S32 *sh = anon((u64)e.shnum * sizeof(S32));
+    sc(SYS_pread64, fd, (long)sh, (long)e.shnum * sizeof(S32), e.shoff, 0, 0);
+    S32 *symtab = 0;
+    for (unsigned i = 0; i < e.shnum; i++) if (sh[i].type == 2) symtab = &sh[i];
+    if (!symtab) die("--skip-faulting-init: the guest has no .symtab");
+    S32 *strtab = &sh[symtab->link];
+    Y32 *sym = anon(symtab->size);
+    char *str = anon(strtab->size + 1);
+    if (sc(SYS_pread64, fd, (long)sym, symtab->size, symtab->offset, 0, 0) != (long)symtab->size ||
+        sc(SYS_pread64, fd, (long)str, strtab->size, strtab->offset, 0, 0) != (long)strtab->size)
+        die("--skip-faulting-init: cannot read .symtab");
+    /* the trampolines: one page right above the guest (bl reaches +-128 MiB) */
+    u64 tramp = (g_hi + 0xFFFF) & ~0xFFFFull;
+    if (map_at(tramp, 0x10000, 7)) die("--skip-faulting-init: no room for the trampolines");
+    uint32_t *t = (uint32_t *)(uintptr_t)tramp;
+    unsigned sites = 0, nsym = symtab->size / sizeof(Y32);
+    for (unsigned k = 0; k < nsym; k++) {
+        const char *name = str + sym[k].name;
+        if ((sym[k].info & 0xF) != 2 /* STT_FUNC */ || !sym[k].shndx) continue;
+        if (streq(name, "fnvnx_vslot_trap")) g_trap_vslot = sym[k].value;
+        if (streq(name, "fnvnx_special_trap")) g_trap_special = sym[k].value;
+        int hit = 0;
+        for (unsigned r = 0; r < sizeof runners / sizeof runners[0]; r++) hit |= streq(name, runners[r]);
+        if (!hit) continue;
+        u64 a = sym[k].value & ~3ull, end = a + (sym[k].size ? sym[k].size : 0x400);
+        if (end > a + 0x2000) end = a + 0x2000;
+        for (; a < end && a + 4 <= g_hi; a += 4) {
+            uint32_t *w = (uint32_t *)(uintptr_t)a;
+            if ((*w & 0xFFFFFC1Fu) != 0xD63F0000u) continue;   /* blr xN */
+            if (sites == 0x10000 / 24) die("--skip-faulting-init: too many sites");
+            uint32_t n = (*w >> 5) & 31;
+            uint32_t *tk = t + sites * 6;   /* 24 bytes, the literal 8-aligned */
+            tk[0] = 0xAA0003F0u | (n << 16);   /* mov x16, xN */
+            tk[1] = 0x58000071u;               /* ldr x17, tk+16 */
+            tk[2] = 0xD61F0220u;               /* br x17 */
+            tk[3] = 0xD503201Fu;               /* nop */
+            *(u64 *)(tk + 4) = (u64)(uintptr_t)linhost_guard_enter;
+            long d = ((long)(uintptr_t)tk - (long)a) / 4;
+            if (d >= (1 << 25) || d < -(1 << 25)) die("--skip-faulting-init: trampoline out of bl range");
+            *w = 0x94000000u | ((uint32_t)d & 0x3FFFFFFu);   /* bl tk */
+            sites++;
+        }
+    }
+    sc(SYS_munmap, (long)sym, symtab->size, 0, 0, 0, 0);
+    sc(SYS_munmap, (long)str, strtab->size + 1, 0, 0, 0, 0);
+    sc(SYS_munmap, (long)sh, (long)e.shnum * sizeof(S32), 0, 0, 0, 0);
+    puts_(2, "linhost: guarding "); put_dec(2, sites); puts_(2, " indirect call sites of the initializer runners\n");
+}
+
+static u64 parse_u(const char *s) { u64 v = 0; while (*s >= '0' && *s <= '9') v = v * 10 + (u64)(*s++ - '0'); return v; }
 
 __attribute__((used)) long hmain(long *sp);
 __attribute__((used)) long hmain(long *sp) {
     long argc = sp[0];
     char **argv = (char **)(sp + 1);
-    if (argc < 2) die("usage: linhost guest.elf");
+    g_t0 = now_ns();
+    const char *guest = 0;
+    int skip_init = 0;
+    u64 heap_mib = 64;
+    for (long i = 1; i < argc; i++) {
+        if (streq(argv[i], "--root") && i + 1 < argc) g_root = argv[++i];
+        else if (streq(argv[i], "--expect") && i + 1 < argc) g_expect = argv[++i];
+        else if (streq(argv[i], "--heap") && i + 1 < argc) heap_mib = parse_u(argv[++i]);
+        else if (streq(argv[i], "--skip-faulting-init")) skip_init = 1;
+        else if (!guest && argv[i][0] != '-') guest = argv[i];
+        else die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--heap MiB] guest.elf");
+    }
+    if (!guest) die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--heap MiB] guest.elf");
+    if (g_expect) {
+        g_expect_len = slen(g_expect);
+        if (!g_expect_len || g_expect_len >= sizeof g_win / 2) die("--expect: 1..255 bytes");
+    }
     if ((uintptr_t)&g_api >> 32 || (uintptr_t)hmain >> 32) die("host is not below 4 GiB");
     g_api.magic = FNVNX_HOSTAPI_MAGIC; g_api.version = FNVNX_HOSTAPI_VERSION; g_api.size = sizeof g_api;
 #define F(slot, fn) g_api.slot = (u64)(uintptr_t)(fn)
     F(output_debug_string, h_output_debug_string); F(sleep_ns, h_sleep_ns); F(exit, h_exit);
-    F(console_write, h_console_write); F(console_flush, h_zero); F(main_loop, h_zero); F(buttons_down, h_zero);
+    F(console_write, h_console_write); F(console_flush, h_zero); F(main_loop, h_one); F(buttons_down, h_zero);
     F(system_tick, h_tick); F(system_tick_freq, h_tick_freq);
     F(thread_create, h_thread_create); F(thread_start, h_thread_start); F(thread_join, h_thread_join);
     F(thread_free, h_thread_free); F(thread_exit, h_thread_exit); F(thread_yield, h_thread_yield);
     F(thread_set_priority, h_thread_set_priority); F(thread_set_cpu, h_thread_set_cpu);
     F(wait_on_address, h_wait_on_address); F(wake_address, h_wake_address);
-    F(wall_time_us, h_zero); F(tz_offset_minutes, h_zero); F(random64, h_random); F(memory_info, h_meminfo);
+    F(wall_time_us, h_wall_time_us); F(tz_offset_minutes, h_zero); F(random64, h_random); F(memory_info, h_meminfo);
     F(cpu_count, h_cpu_count);
     u64 *slot = &g_api.fs_open;
     for (; slot <= &g_api.ext_call; slot++) *slot = (u64)(uintptr_t)h_enosys;
-    u64 entry = load(argv[1]);
+    if (g_root) {
+        F(fs_open, h_fs_open); F(fs_read, h_fs_read); F(fs_write, h_fs_write); F(fs_pread, h_fs_pread);
+        F(fs_pwrite, h_fs_pwrite); F(fs_seek, h_fs_seek); F(fs_truncate, h_fs_truncate); F(fs_sync, h_fs_sync);
+        F(fs_fstat, h_fs_fstat); F(fs_close, h_fs_close); F(fs_stat, h_fs_stat); F(fs_mkdir, h_fs_mkdir);
+        F(fs_rmdir, h_fs_rmdir); F(fs_remove, h_fs_remove); F(fs_rename, h_fs_rename); F(fs_dir_open, h_fs_dir_open);
+        F(fs_dir_next, h_fs_dir_next); F(fs_dir_close, h_fs_dir_close);
+    }
+    F(audio_open, h_audio_open); F(audio_submit, h_audio_submit); F(audio_close, h_zero); F(pad_read, h_zero);
+    F(pad_vibrate, h_zero); F(input_poll, h_zero); F(map_fixed, h_map_fixed); F(ext_call, h_ext_call);
+    long fd;
+    u64 entry = load(guest, &fd);
+    g_api.guest_base = g_lo;
+    g_api.guest_size = g_hi - g_lo;
+    if (heap_mib) {   /* the guest heap: the first free 64 MiB-aligned range above the guest (and its trampolines) */
+        u64 size = heap_mib << 20, base = (g_hi + 0x10000 + 0x3FFFFFFull) & ~0x3FFFFFFull;
+        for (; base + size <= 0xC0000000ull; base += 0x4000000ull)
+            if (!map_at(base, size, PROT_RW)) break;
+        if (base + size > 0xC0000000ull) die("no room for the guest heap");
+        g_api.heap_base = base;
+        g_api.heap_size = size;
+        puts_(2, "linhost: guest heap "); put_hex(2, base); puts_(2, " ("); put_dec(2, heap_mib); puts_(2, " MiB)\n");
+    }
+    if (skip_init) install_guards(fd);
+    sc(SYS_close, fd, 0, 0, 0, 0, 0);
+    install_fault_handler();
     set_affinity(0, 0x1);   /* the main thread: placement row "main", core 0 */
+    g_t_entry = now_ns();
     u64 r = ((u64 (*)(u64))(uintptr_t)entry)((u64)(uintptr_t)&g_api);
+    if (g_expect) {
+        puts_(2, "\nlinhost: the guest returned "); put_hex(2, r); puts_(2, " before \""); puts_(2, g_expect);
+        puts_(2, "\"\n");
+        sc(SYS_exit_group, 3, 0, 0, 0, 0, 0);
+    }
     sc(SYS_exit_group, (long)r, 0, 0, 0, 0, 0);
     return 0;
 }

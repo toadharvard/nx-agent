@@ -76,9 +76,11 @@ POLICY = {
                                                 'unrounded x87 value'),
     'division':       ('by-design', '-', False, 'x86 raises #DE (x/0, INT_MIN/-1) where sdiv/udiv give 0 / wrap: '
                                                 'the exe would crash on that input'),
-    'deleting-dtor-ret': ('by-design', '-', False, 'MSVC\'s scalar/vector deleting destructor returns this, the '
-                                                   'Itanium deleting destructor (D0) is void: no native caller reads '
-                                                   'the result'),
+    'deleting-dtor-ret': ('triage', 'S13', True, 'MSVC\'s scalar/vector deleting destructor returns this, the '
+                                                 'Itanium D0 is void (the difference is by design), but '
+                                                 'runner.compare stops there and never compares the destructor '
+                                                 'body: a real bug in it gets this label too. Triage until the '
+                                                 'harness skips the return of ??_G/??_E (S13b audit)'),
     'call-order':     ('by-design', '-', False, 'two adjacent calls swapped: C++ leaves operand evaluation order open'),
     'vptr-store':     ('by-design', '-', False, 'a dead vptr store GCC drops (D7: objects hold Itanium vptrs); in a '
                                                 'destructor MSVC resets the vptr to the base vftable, GCC does not'),
@@ -100,7 +102,9 @@ POLICY = {
     'msvc-inlined':   ('artifact', 'S13', False, 'MSVC inlined a callee the native calls out of line'),
     'runtime-equiv':  ('artifact', 'S13', False, 'the same runtime function under two addresses (before difffuzz-8)'),
     'stack-arg':      ('artifact', 'S13', False, 'each machine\'s own stack address through an int (fixed since)'),
-    'literal-arg':    ('artifact', 'S13', False, 'a literal at its image address vs the unit copy (fixed since)'),
+    'literal-arg':    ('triage', 'S13b', True, 'a literal at its image address vs the native unit\'s copy; the runner '
+                                              'drops pointers whose strings are equal, so a remaining record has '
+                                              'different strings (a wrong literal is a real bug) (S13b audit)'),
     'literal-ret':    ('artifact', 'S13', False, 'a pointer result into the native unit\'s .rodata whose oracle '
                                                  'pointee the harness could not read (literal not pinned)'),
     'oracle-trap':    ('artifact', 'S13', False, 'the oracle executed int3/0xCC .text filler: code the harness did '
@@ -109,26 +113,28 @@ POLICY = {
                                                  'returned (GCC drops the null test after a throwing operator new, '
                                                  'MSVC 2008 keeps it); the game\'s allocators never return null: '
                                                  'canned allocator results should be heap addresses'),
-    'oracle-native-address': ('artifact', 'S13', False, 'the oracle dereferences an address in the AArch64 '
-                                                          'private range (stubs/native image): a native address '
-                                                          'leaked to the x86 machine through the harness'),
-    'literal-store':  ('artifact', 'S13', False, 'a pointer to a literal stored: the oracle\'s pinned-pool copy vs '
-                                                 'the native unit\'s .rodata copy (stores do not compare pointees)'),
+    'oracle-native-address': ('triage', 'S13b', True, 'only the oracle faults on a native private address: the '
+                                                      'native may never have made the access (a field at another '
+                                                      'offset), the same ambiguity as oracle-fault (S13b audit)'),
+    'literal-store':  ('triage', 'S13b', True, 'a stored literal address, image vs native copy: stores never compare '
+                                               'the pointees, so a wrong literal looks the same; triage until the '
+                                               'runner compares stored pointees (S13b audit)'),
     'oracle-callee-store': ('artifact', 'S13', False, 'the first differing store is made by a callee the oracle '
                                                       'runs (preloaded or followed) while the native calls it out of '
                                                       'line and the harness intercepts it: no side effects natively'),
     'no-native-entry': ('artifact', 'S13', False, 'the native image has no entry for the function (link subset)'),
-    'vcall-garbage':  ('artifact', 'S13', False, 'both machines call a word of memory the case did not plant (no '
-                                                 'code there on either side): an object without a vftable, each '
-                                                 'machine reading its own slot of garbage (Itanium has one destructor '
-                                                 'slot more); invalid input for the exe'),
-    'vcall-stub-alias': ('artifact', 'S13', False, 'the same garbage call target on both machines: a word in the '
-                                                   'AArch64 stub range that the native trace names as the code stub\'s '
-                                                   'original address (word - 0x08000000) or name:<hex>, the oracle as '
-                                                   'the word itself (runner.compare should not count it)'),
-    'oracle-private-address': ('artifact', 'S13', False, 'the oracle faults on a garbage address in its own private '
-                                                          'range (0x0e000000: GDT/TEB/stubs) that the native machine '
-                                                          'maps as background'),
+    'vcall-garbage':  ('triage', 'S13b', True, 'both machines call a word of memory the case did not plant: an '
+                                               'unplanted object (native slot = x86 slot + 1, Itanium\'s extra '
+                                               'destructor) or a wrong native slot / vptr word (real bug); only a '
+                                               'slot rebuilt from the case background separates them (S13b audit)'),
+    'vcall-stub-alias': ('triage', 'S13', True, 'the same garbage call target on both machines (a stub-range word '
+                                                'the native trace names as its original address): the harness\'s '
+                                                'doing, but runner.compare stops at this call and compares nothing '
+                                                'after it; triage until the runner treats both as one target (S13b audit)'),
+    'oracle-private-address': ('triage', 'S13b', True, 'only the oracle faults in its own private range '
+                                                       '(0x0e000000): the native may never have made the access; '
+                                                       'for fault:x, a native that ran background bytes would have '
+                                                       'trapped, so it never made that call (S13b audit)'),
     'ctor-this':      ('triage', 'S13b', True, 'one side uses the block a game allocator returned, the other the '
                                                'canned result of a later intercepted call. A harness artefact '
                                                'when that call is the constructor on the block (it returns this), '
@@ -226,13 +232,15 @@ POLICY = {
                                               'constructor order difference'),
     'unclassified':   ('triage', 'S13b', True, 'no rule matched'),
     # --- call-flow sub-shapes (_rule_callflow) -----------------------------------------------------------------------
-    'deleting-dtor-flags': ('by-design', '-', False, 'MSVC\'s deleting destructor (??_G/??_E) frees only when flags '
-                                                     'bit 0 is set (an explicit destructor call passes 0); the '
-                                                     'Itanium D0 at that address always frees: such a call reaches '
-                                                     'D1 natively'),
-    'byvalue-arg-dtor': ('by-design', '-', False, 'the function takes a class by value: MSVC destroys such an '
-                                                   'argument in the callee (the oracle\'s last calls free its '
-                                                   'buffer), the Itanium ABI in the caller'),
+    'deleting-dtor-flags': ('triage', 'S13', True, '??_G/??_E fuzzed with flags bit 0 clear: MSVC does not free, '
+                                                   'the Itanium D0 always frees (by design), and the call-count '
+                                                   'difference hides the destructor body. Triage until the harness '
+                                                   'runs the native D1 for flags 0 (S13b audit)'),
+    'byvalue-arg-dtor': ('triage', 'S13', True, 'the function takes a class by value: MSVC destroys it in the '
+                                                'callee, Itanium in the caller (by design only for a non-trivial '
+                                                'native destructor, unchecked), and the call-count difference at '
+                                                'the free hides the return value and writes. Triage until the '
+                                                'harness drops the oracle\'s trailing argument frees (S13b audit)'),
     'libc-variant':   ('artifact', 'S13', False, 'the same C library function under another entry: an MSVC x87 '
                                                  'intrinsic (_CIacos ...) or the double function vs libc or its '
                                                  'float variant, sprintf vs GCC\'s fortified __sprintf_chk, atof vs '
@@ -289,9 +297,43 @@ def _float_close(bx, ba):
         return True, True
     if math.isnan(fx) or math.isnan(fa) or math.isinf(fx) or math.isinf(fa):
         return False, False
+    tiny = 1.1754943508222875e-38 if len(bx) == 4 else 2.2250738585072014e-308
+    if abs(fx) < tiny or abs(fa) < tiny or math.copysign(1, fx) != math.copysign(1, fa):
+        return False, False         # zero, denormal or a sign flip is not x87 precision (S13b audit)
     ulp = abs(struct.unpack(fmt[1], bx)[0] - struct.unpack(fmt[1], ba)[0])
     rel = abs(fx - fa) / max(abs(fx), abs(fa), 1e-300)
     return ulp <= 4 or rel <= fmt[2], False
+
+
+GEN_NAN = {4: (0xffc00000, 0x7fc00000), 8: (0xfff8000000000000, 0x7ff8000000000000)}   # x87 indefinite, A64 default
+
+
+def _nan_generated(bx, ba):
+    """Both NaN and one side is that machine's generated NaN (x87 real indefinite / AArch64 default NaN): the
+    payloads differ because a machine made the NaN, not because the native computed something else."""
+    tol, nan = _float_close(bx, ba)
+    if not nan:
+        return False
+    n = len(bx)
+    gx, ga = GEN_NAN[n]
+    return int.from_bytes(bx, 'little') == gx or int.from_bytes(ba, 'little') == ga
+
+
+def _window_words(d):
+    """[(x86 word bytes, native word bytes)] of every differing aligned word of a mem-write record when all its
+    differences lie in the record's 8-byte window and both machines wrote them; None otherwise (differences the
+    record does not show, or a store only one machine made)."""
+    try:
+        first = int(d.get('addr') or '', 16)
+        addrs = [int(a, 16) for a in d.get('addrs') or ()]
+    except ValueError:
+        return None
+    bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+    w = first & ~3
+    if (not addrs or len(addrs) != d.get('ndiff') or d.get('only_x86') or d.get('only_arm') or len(bx) != 8
+            or len(ba) != 8 or not all(w <= a < w + 8 for a in addrs)):
+        return None
+    return [(bx[i:i + 4], ba[i:i + 4]) for i in (0, 4) if bx[i:i + 4] != ba[i:i + 4]]
 
 
 def _fault_addr(err):
@@ -305,7 +347,7 @@ def _fault_addr(err):
     return None
 
 
-def _rule_error(d):
+def _rule_error(d, rec=None):
     x, a = d.get('x86'), d.get('arm')
     if x is None and isinstance(a, str):
         if a.startswith('exc:'):
@@ -313,7 +355,7 @@ def _rule_error(d):
         if a == 'stack-protector':
             return 'stack-protector'
         if a == 'no-native-entry':
-            return 'no-native-entry'
+            return 'no-native-entry' if _defined_elsewhere(rec) else 'native-undefined'
         fa = _fault_addr(a)
         if fa:
             if _in(fa[1], A64_PRIV) and fa[0] in ('r', 'w'):
@@ -321,7 +363,7 @@ def _rule_error(d):
             if fa[1] < NULL_END:
                 return 'native-null-read'
     if a is None and isinstance(x, str):
-        if x.startswith('exc:3') or x == 'exc:3':
+        if x == 'exc:3':
             return 'oracle-trap'
         fx = _fault_addr(x)
         if fx and fx[0] in ('r', 'w') and _in(fx[1], A64_PRIV):
@@ -339,15 +381,10 @@ def _rule_call_args(d):
     bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
     if d.get('cls') in ('F32', 'F64'):
         tol, nan = _float_close(bx, ba)
-        if nan:
+        if nan and _nan_generated(bx, ba):
             return 'nan-bits'
         if tol:
             return 'x87-precision'
-    if d.get('cls') == 'I32' and len(bx) == 4 and len(ba) == 4:
-        vx, va = _word(d['x86']), _word(d['arm'])
-        ex, ea = (vx >> 23) & 0xff, (va >> 23) & 0xff
-        if ex == ea and 0 < ex < 0xff and (vx >> 31) == (va >> 31) and abs((vx & 0x7fffff) - (va & 0x7fffff)) <= 256:
-            return 'x87-precision'          # float bits through an int parameter, a few ulp apart
     if d.get('cls') in ('I32', 'P') and len(bx) >= 4 and len(ba) >= 4:
         vx, va = _word(d['x86']), _word(d['arm'])
         if _in(vx, LIT_POOL) and _in(va, A64_IMAGE):
@@ -370,12 +407,17 @@ def _rule_call_args(d):
 def _rule_return(d, conv, sym=None):
     if str(sym or '').startswith(('??_G', '??_E')):
         return 'deleting-dtor-ret'
-    if 'pointee_x86' in d and (not d.get('pointee_x86') or not d.get('pointee_arm')):
+    rx, ra = _word(d.get('x86')), _word(d.get('arm'))
+    if rx is not None and ra is not None and _in(ra, A64_STUBS) and not _in(rx, A64_STUBS) and not _in(rx, TEXT):
+        return 'native-stub-data'           # the native returns a stub address (a data symbol the link left unbound)
+    if ('pointee_x86' in d and (not d.get('pointee_x86') or not d.get('pointee_arm')) and rx is not None
+            and ra is not None and _in(rx, LIT_POOL) and _in(ra, A64_IMAGE)):
         return 'literal-ret'
     fl = d.get('float') or {}
     if fl and not fl.get('tolerant'):
         try:
-            if fl.get('x87') is not None and float(fl['x87']) == float(fl.get('arm')):
+            if (fl.get('x87') is not None and float(fl['x87']) == float(fl.get('arm'))
+                    and float(fl['x87']) != float(fl.get('x86'))):
                 return 'x87-precision'      # the native value is the oracle's unrounded x87 value
         except (TypeError, ValueError):
             pass
@@ -389,20 +431,20 @@ def _rule_return(d, conv, sym=None):
 
 def _rule_mem_write(d, rec=None):
     fw = d.get('float_word') or {}
-    if fw.get('tolerant'):
+    ww = _window_words(d)
+    if fw.get('tolerant') and ww and all(_float_close(x, a) == (True, False) for x, a in ww):
         return 'x87-precision'
     n, ox, oa = d.get('ndiff', 0), d.get('only_x86', 0), d.get('only_arm', 0)
     bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
     if len(bx) >= 4 and len(ba) >= 4:
-        tol, nan = _float_close(bx[:4], ba[:4])
-        if nan:
+        if ww and all(_nan_generated(x, a) for x, a in ww):
             return 'nan-bits'
         vx, va = _word(d['x86']), _word(d['arm'])
         if _in(vx, LIT_POOL) and _in(va, A64_IMAGE):
             return 'literal-store'
         vft = image_vftables()
         if vx in vft and va in vft and vx != va:
-            return 'vptr-store' if _is_dtor((rec or {}).get('symbol')) else 'vptr-differs'
+            return 'vptr-differs'       # in a destructor too: a class-chain check needs the exe's RTTI (audit)
         if _in(vx, WINDOW) and _in(va, A64_IMAGE):
             return 'native-address'
         if _in(va, A64_STUBS) and not _in(vx, A64_STUBS):
@@ -561,8 +603,6 @@ def _rule_oracle_fault(d, rec):
     fx = _fault_addr(d.get('x86'))
     if fx and _in(fx[1], X86_PRIV):
         return 'oracle-private-address'
-    if fx and fx[0] in ('r', 'w') and fx[1] >= 0xfffffffd:
-        return 'ilp32-pointer'         # a dword access at a near-null pointer minus a few bytes, wrapped past 4 GiB
     try:
         em = empty_callees(rec.get('source'), int(rec.get('address') or '0', 16))
     except (TypeError, ValueError):
@@ -717,6 +757,7 @@ def unbound_callees(source, addr):
 
 _VFT = None
 _LINKSYM = None
+_OBJOF = {}              # original address -> the link object that defines it (address map `object` column)
 _STARTS = []             # sorted original start addresses of every code entry in the address map (extents by bisect)
 _BOUND = set()           # every link_symbol / native_symbol the address map names
 
@@ -739,6 +780,7 @@ def _load_addrmap():
     if _VFT is None or _LINKSYM is None:
         _VFT, _LINKSYM = set(), {}
         del _STARTS[:]
+        _OBJOF.clear()
         p = os.environ.get('FNVNX_CAUSES_ADDRMAP')
         if not p:
             try:
@@ -763,12 +805,40 @@ def _load_addrmap():
                     _LINKSYM[a] = f[2]
                 _BOUND.add(f[2])
                 if len(f) > 3:
-                    _BOUND.add(f[3].split('\t', 1)[0])
+                    rest = f[3].rstrip('\n').split('\t')
+                    _BOUND.add(rest[0])
+                    if len(rest) > 1 and rest[1]:
+                        _OBJOF[a] = rest[1]
             _STARTS.sort()
 
 
 def _is_dtor(sym):
     return str(sym or '').startswith(('??1', '??_G', '??_E'))
+
+
+def _defined_elsewhere(rec):
+    """True when the address map names an object that defines the function: the link has it in another unit and
+    the harness's image subset left it out (no-native-entry is then the harness's doing). Otherwise the port
+    defines it nowhere (native-undefined)."""
+    try:
+        a = int((rec or {}).get('address') or '', 16)
+    except ValueError:
+        return False
+    _load_addrmap()
+    o = _OBJOF.get(a)
+    return bool(o) and o != ((rec or {}).get('source') or '').replace('/', '_') + '.o'
+
+
+def _canned_null(rec):
+    """True when the case holds a canned call result below 0x10000. Not evidence of new-null on difffuzz-12 and
+    later (allocators return heap blocks; a canned 0 belongs to another call); kept for reading old caches."""
+    for r in ((rec.get('case') or {}).get('rets') or ()):
+        try:
+            if int.from_bytes(bytes.fromhex(str(r))[:4], 'little') < NULL_END:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _calls_allocator(rec):
@@ -985,6 +1055,10 @@ def _target_name(t):
     return link_symbol(a) if a is not None else None
 
 
+CI_ENTRIES = {0x00eca1d0: 'acos', 0x00ec9650: 'asin', 0x00ec9050: 'atan', 0x00ec913a: 'fmod', 0x00ecae6c: 'exp',
+              0x00ec9b00: 'pow'}     # the exe's unnamed x87 _CI* entries and their C functions
+
+
 def _libc_variant(x, a):
     xa = _hex(x)
     if xa is None:
@@ -995,8 +1069,10 @@ def _libc_variant(x, a):
     base = n[2:-4] if n.startswith('__') and n.endswith('_chk') else None
     m = link_symbol(xa)
     if m is None:
-        # an unnamed CRT entry next to the C library (the x87 intrinsics _CIacos/_CIasin/...): GCC calls libm
-        return xa in crt_entries() and (n in MATH or (n.endswith('f') and n[:-1] in MATH))
+        # an unnamed CRT x87 intrinsic (_CIacos/_CIasin/...): GCC calls the same libm function or its float form;
+        # any other math name is a different function (audit: _CIacos vs cos)
+        m = CI_ENTRIES.get(xa)
+        return m is not None and n in (m, m + 'f')
     if base is not None and base == m:
         return True                                     # sprintf vs __sprintf_chk (_FORTIFY_SOURCE)
     if m in MATH and n == m + 'f':
@@ -1077,7 +1153,12 @@ def _rule_callflow(d, rec):
         start = d.get('index') if isinstance(d.get('index'), int) else \
             next((i for i, (p, q) in enumerate(zip(tx, ta)) if p != q), min(len(tx), len(ta)))
         seen = list(ta[start:]) + ([a] if a else [])      # the native's calls from the divergence on
-        if '__fnv_%08x' % xa in cs and native_ran(src, '__fnv_%08x' % xa, seen, exclude=cs):
+        others = set()
+        for n in cs - {'__fnv_%08x' % xa}:
+            if native_defines(src, n):
+                others |= native_reaches(src, n) or set()   # what another unit-local callee could have called
+        if (k == 'call-target' and '__fnv_%08x' % xa in cs
+                and native_ran(src, '__fnv_%08x' % xa, seen, exclude=cs | others)):
             return 'oracle-callee-unloaded'
     # a decomp-local stand-in for an original function defined elsewhere, with an empty body: tied to the divergence
     # when the oracle calls that original where the native diverges, or when the native stops early
@@ -1158,6 +1239,19 @@ def intercepted_callee(rec, pc):
     return callee if any(n in cs and n not in defined for n in names) else None
 
 
+def _native_calls_more(rec, callee):
+    """The record shows the native made calls to `callee` the oracle did not trace: a call-count / call-target
+    record whose native trace holds it more often. The oracle runs that callee's code untraced and calls are
+    compared before writes, so any other record kind means the native never made the call (S13b audit C5)."""
+    if callee is None:
+        return False
+    d = (rec or {}).get('_now') or (rec or {}).get('divergence') or {}
+    if d.get('kind') not in ('call-count', 'call-target'):
+        return False
+    t = '%08x' % callee
+    return list(d.get('arm_trace') or ()).count(t) > list(d.get('x86_trace') or ()).count(t)
+
+
 def _rule_effects(e, rec=None, cause=None):
     f = e.get('first')
     if f == 'width':
@@ -1170,7 +1264,7 @@ def _rule_effects(e, rec=None, cause=None):
         except (TypeError, ValueError):
             a = n = pc = 0
         if (n and pc and not st.get('arm') and not a <= pc < a + n and cause not in NOT_INTERCEPTED
-                and intercepted_callee(rec, pc) is not None):
+                and _native_calls_more(rec, intercepted_callee(rec, pc))):
             return 'oracle-callee-store'      # the store is made by a callee the oracle runs, the native intercepts
         w = st.get('word') or {}
         x, a = str(w.get('x86') or ''), str(w.get('arm') or '')
@@ -1411,9 +1505,10 @@ def refine(rec, cause=None):
     k = d.get('kind')
     got = None
     if k == 'error':
-        got = _rule_error(d)
+        got = _rule_error(d, rec)
         if got == 'native-null-read' and _calls_allocator(rec):
-            got = 'new-null'
+            pass        # new-null retired (S13b audit): since difffuzz-12 the allocators return heap blocks, so a
+                        # canned 0 comes from another call, a valid input: the native null access stays a real bug
         elif got == 'oracle-fault':
             got = _rule_oracle_fault(d, rec) or got
     elif k == 'call-args':
