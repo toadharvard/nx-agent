@@ -11,6 +11,8 @@
                        [--msvc-objs <dir>]                    # vtable slots via the MSVC vftables (vslots.py)
                        [--msvc-code <dir>]                    # only the definitions' register reads (ecx-not-
                                                               # passed verdicts) from those objects
+                       [--exe <FalloutNV.exe|none>]           # the player's exe (default FNVNX_EXE, PLAYER_EXE):
+                                                              # image vftables paired by its RTTI class
     fnvlink.py probe   <out dir> <prepared tree> [jobs]        # layouts of the aggregates resolve asked for, and
                                                               # the synthesized vtables/typeinfo (vtables.py;
                                                               # FNVNX_NO_VTABLES=1 skips them); then resolve again
@@ -45,6 +47,7 @@ import sigs     # noqa: E402
 import vtables  # noqa: E402
 import vslots as msvc_vslots  # noqa: E402  (`vslots` is a local name in resolve)
 import bodies   # noqa: E402  (S2d: declared-only functions)
+import exevft   # noqa: E402  (S2c: the player's exe vftables)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
 DATA_END = 0x0200c612
@@ -271,9 +274,10 @@ def kind_of_addr(a):
 
 
 def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None, override_lib=None,
-            units_renames=None):
+            units_renames=None, exe=None):
     """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
-    this tree, 'none': not used)."""
+    this tree, 'none': not used). exe: the player's FalloutNV.exe (None: FNVNX_EXE / PLAYER_EXE, 'none': not used):
+    its RTTI pairs each image vftable with its own class's native vtable (exevft.py)."""
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
     os.makedirs(os.path.join(out, 'objcopy'), exist_ok=True)
     pre_stats = collections.Counter()
@@ -1042,7 +1046,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 for h_ in [unit] + hosts:
                     if h_ not in e[1]:
                         e[1].append(h_)
-    write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req)
+    # ---- S2c: the player's exe (RTTI): every image vftable with its class and offset (exevft.py)
+    exe_path = exevft.exe_path(None if exe in (None, '') else exe) if exe != 'none' else None
+    exe_cls = exe_vftable_classes(exevft.load(exe_path, os.path.join(out, 'cache', 'exe_vftables.json')), ms,
+                                  canon_msvc) if exe_path else {}
+    have_cls = {canon_it(n) for n in rtti.where if n.startswith('_ZTV')}
+    exe_req = exe_requests(exe_cls, have_cls, units, msvc, canon_msvc, compiled_) if exe_cls else {}
+    write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req, exe_req)
     # hand-written vptr stores of image vftable addresses (`obj.vtbl = &DAT_010176f8;`): the address stands for the
     # native vtable of the class constructed there - the one of the same name when some unit names that vftable,
     # else the class whose member function stores it, else the class constructed or destroyed at the storing
@@ -1103,6 +1113,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for r in hand_rows:
             f.write('\t'.join(r) + '\n')
     stats['hand_vptr_addrs'], stats['hand_vptr_rebound'] = len(hand), len(rebind)
+    if exe_cls:
+        # the exe's RTTI decides the class of each image vftable: its own class's native vtable at the COL offset
+        # replaces a pairing by decomp names or hand-stored vptrs with another class (shells with fewer slots,
+        # another real class), and maps vftables no unit names (exe_vftables.tsv)
+        exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out)
+        for a in rebind:
+            rebind[a] = vmap[a][:2]
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
     # FUN_00404950's, ...): the map can give one native vtable; every class's own is listed, so a native vptr store
     # can be traced back to its image vftable (S13's vtable-store comparison)
@@ -1365,7 +1382,101 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
 NOT_SYNTH = ('std::', '__gnu_cxx::', '__cxxabiv1::')   # the C++ runtime defines its own
 
 
-def write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req=None):
+# ---- S2c: image vftables by the player's exe (RTTI; exevft.py, docs/LINK.md "Vftables from the player's exe")
+
+def exe_vftable_classes(exev, ms, canon_msvc):
+    """{vftable address: (canonical class, class text, COL offset, MSVC slot count)} of the exe's vftables whose
+    TypeDescriptor names a class (llvm-undname spells templates too)."""
+    names = {v: exevft.msvc_name(e.td) for v, e in exev.items()}
+    ms.need(set(names.values()))
+    out = {}
+    for v, e in exev.items():
+        m = vtables.VFT.match(ms[names[v]] or '')
+        if m and not m.group(2):
+            out[v] = (canon_msvc(m.group(1)), m.group(1), e.off, len(e.slots))
+    return out
+
+
+def exe_requests(exe_cls, have_cls, units, msvc, canon_msvc, compiled):
+    """Classes the exe gives an image vftable that have no native vtable: {class: (text, host units)} for the
+    synthesis step (why `exe-rtti`). Hosts: compiled units naming the vftable's address, then those naming a member
+    of the class (they declare it), at most 8."""
+    want = {}
+    for v, (cls, text, _, _) in exe_cls.items():
+        if cls not in have_cls and not cls.startswith(NOT_SYNTH) and '{anon}' not in cls:
+            want.setdefault(cls, (text, set()))[1].add(v)
+    if not want:
+        return {}
+    by_addr, by_cls = collections.defaultdict(set), collections.defaultdict(set)
+    addrs = {v for _, vs in want.values() for v in vs}
+    for u in units.values():
+        if u.source not in compiled:
+            continue
+        for n, a in u.refs.items():
+            if a in addrs:
+                by_addr[a].add(u.source)
+        for n in list(u.refs) + [n for _, n in u.defs]:
+            if not n.startswith('?') or n.startswith('??_7'):
+                continue
+            sg = msvc(n)
+            if sg.kind == 'func' and sg.qual and len(sg.qual) >= 2:
+                c = canon_msvc('::'.join(sg.qual[:-1]))
+                if c in want:
+                    by_cls[c].add(u.source)
+    out = {}
+    for cls, (text, vs) in want.items():
+        hosts = sorted(set().union(*(by_addr[v] for v in vs)))
+        hosts += sorted(by_cls[cls] - set(hosts))
+        if hosts:
+            out[cls] = (text, hosts[:8])
+    return out
+
+
+def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out):
+    """Pair each image vftable of the exe with its own class's native vtable (the address point whose
+    offset-to-top is minus the COL offset). It replaces the pairing by decomp names or hand-stored vptrs when that
+    names another class, unless the own vtable is shorter than both the current one and the exe's slot count (a
+    unit's partial declaration of the class: the longer one keeps the slots). Adds the vftables no unit names.
+    exe_vftables.tsv: per exe vftable the class, its native vtable, what was paired before and the outcome."""
+    rows = []
+    for v in sorted(exe_cls):
+        cls, text, off, ne = exe_cls[v]
+        cur = vmap.get(v)
+        curn = vtables.slots_at(rtti.ents(cur[0]) or [], cur[1]) if cur else None
+        zs = sorted(by_cls.get(cls, []))
+        own = None
+        if zs:
+            ents = rtti.ents(zs[0]) or []
+            hit = [p for p, ott in vtables.address_points(ents) if ott == -off]
+            if hit:
+                own = (zs[0], hit[0], vtables.slots_at(ents, hit[0]))
+        kind = 'primary' if not off else 'secondary'
+        if own is None:
+            how = 'no native vtable of the class' if not zs else 'no native vtable at offset %d' % off
+        elif cur and (cur[0], cur[1]) == own[:2]:
+            how = 'same'
+        elif cur and own[2] < curn and own[2] < ne:
+            how = 'kept: the class\'s own vtable is shorter'
+        else:
+            how = 'added' if cur is None else 'replaced'
+            vmap[v] = (own[0], own[1], rtti.where[own[0]][0].path, '%s, the exe\'s RTTI class %s%s%s' % (
+                kind, text, ' at +%d' % off if off else '', ', synthesized' if rtti.where[own[0]][1] else ''))
+        vstats['exe-%s-%s' % (kind, how.split(':')[0].replace(' ', '-').replace('\'', ''))] += 1
+        nat = vmap.get(v)
+        natn = vtables.slots_at(rtti.ents(nat[0]) or [], nat[1]) if nat else None
+        if nat is not None and natn < ne:
+            vstats['exe-%s-native-shorter-than-exe' % kind] += 1
+        rows.append(('%08x' % v, text, str(off), str(ne), own[0] if own else '', str(own[2]) if own else '',
+                     cur[0] if cur else '', '' if curn is None else str(curn), how,
+                     '' if natn is None else str(natn)))
+    with open(os.path.join(out, 'exe_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#vftable\texe class\tCOL offset\texe slots\town native vtable\tits slots\tpaired before\tits '
+                'slots\toutcome\tnative slots now\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+
+
+def write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req=None, exe_req=None):
     """What the synthesis step (vtables.run, `probe`) is asked for, from the compiled objects only (so a rerun after
     the second resolve asks for the same): vtable_requests.tsv - classes with an image vftable whose vtable no
     compiled object emits, and every _ZTV/_ZTI a compiled object references but none defines, each with the units
@@ -1402,6 +1513,10 @@ def write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req=None
         if cls not in have_ztv:
             for h in hosts:
                 want(cls, text, 'hand-vptr', h)
+    for cls, (text, hosts) in sorted((exe_req or {}).items()):    # the class the exe's RTTI gives an image vftable
+        if cls not in have_ztv:
+            for h in hosts:
+                want(cls, text, 'exe-rtti', h)
     vtables.write_requests(os.path.join(out, 'vtable_requests.tsv'), {c: tuple(e) for c, e in reqs.items()})
     with open(os.path.join(out, 'rtti_defined.txt'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('\n'.join(sorted(rdefs)) + '\n')
@@ -2499,13 +2614,14 @@ def main():
         argv, opts = [], {}
         it_ = iter(sys.argv[2:])
         for x in it_:
-            if x in ('--override', '--override-lib', '--extern-text', '--crt-symbols', '--imports', '--units-renames'):
+            if x in ('--override', '--override-lib', '--extern-text', '--crt-symbols', '--imports', '--units-renames',
+                     '--exe'):
                 opts[x[2:].replace('-', '_')] = next(it_)
             else:
                 argv.append(x)
         resolve(*argv[:3], override=opts.get('override'), extern_list=opts.get('extern_text'),
                 crt_symbols=opts.get('crt_symbols'), imports=opts.get('imports'),
-                units_renames=opts.get('units_renames'), override_lib=opts.get('override_lib'))
+                units_renames=opts.get('units_renames'), override_lib=opts.get('override_lib'), exe=opts.get('exe'))
     elif cmd in ('probe', 'vtables'):
         jobs = int(sys.argv[4]) if len(sys.argv) > 4 else os.cpu_count()
         if cmd == 'probe':
