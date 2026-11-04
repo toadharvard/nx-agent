@@ -2,6 +2,7 @@
 #include "nx/front.h"
 #include "d3d9_state.h"
 #include <stdlib.h>
+#include <malloc.h>
 #include <string.h>
 #include <new>
 #if defined(__ILP32__)
@@ -54,11 +55,7 @@ Backend* GpuBackend(const NxGpuApi* api) {
     return be;
 }
 
-static void* aligned_alloc_(uint32_t align, uint32_t size) {
-    void* p = nullptr;
-    if (posix_memalign(&p, align, size)) return nullptr;
-    return p;
-}
+static void* aligned_alloc_(uint32_t align, uint32_t size) { return memalign(align, size); }   // newlib + glibc
 
 // ---- ring / static buffer ------------------------------------------------------------------------------------
 bool Ring::Init(Backend* be, uint32_t bytes, uint32_t kind) {
