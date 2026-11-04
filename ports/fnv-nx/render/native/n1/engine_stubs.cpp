@@ -46,6 +46,33 @@ void NiDX9RenderState::SetBlendFunc(uint32_t src, uint32_t dst, uint32_t, uint32
 void NiDX9RenderState::SetAlphaBlendEnable(uint32_t e, uint32_t, uint32_t) {
     if (R()) R()->state().SetRenderState(27, e);                                                // ALPHABLENDENABLE
 }
+// Texture stage states: only the fixed-function pipeline reads them, which the native families do not have; they
+// are recorded so GetTextureStageState answers like the engine's own cache (D3D9 defaults before the first set).
+enum { kTssStages = 16, kTssTypes = 33 };
+static uint32_t g_tss[kTssStages][kTssTypes];
+static bool g_tssInit;
+static void TssDefaults() {
+    for (uint32_t s = 0; s < kTssStages; s++) {
+        uint32_t* t = g_tss[s];
+        t[1] = s ? 1 : 4;          // COLOROP: MODULATE on stage 0, DISABLE after
+        t[2] = 2; t[3] = 1;        // COLORARG1 TEXTURE, COLORARG2 CURRENT
+        t[4] = s ? 1 : 2;          // ALPHAOP: SELECTARG1 on stage 0, DISABLE after
+        t[5] = 2; t[6] = 1;        // ALPHAARG1 TEXTURE, ALPHAARG2 CURRENT
+        t[11] = s;                 // TEXCOORDINDEX
+        t[26] = 1;                 // RESULTARG CURRENT
+    }
+    g_tssInit = true;
+}
+void NiDX9RenderState::SetTextureStageState(uint32_t st, uint32_t t, uint32_t v, uint32_t) {
+    if (st >= kTssStages || t >= kTssTypes) return;
+    if (!g_tssInit) TssDefaults();
+    g_tss[st][t] = v;
+}
+uint32_t NiDX9RenderState::GetTextureStageState(uint32_t st, uint32_t t) {
+    if (st >= kTssStages || t >= kTssTypes) return 0;
+    if (!g_tssInit) TssDefaults();
+    return g_tss[st][t];
+}
 void NiDX9RenderState::SetSamplerState(uint32_t st, uint32_t t, uint32_t v, uint32_t) {
     if (R()) R()->state().SetSamplerState(st, t, v);
 }

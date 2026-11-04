@@ -48,6 +48,8 @@ import vtables  # noqa: E402
 import vslots as msvc_vslots  # noqa: E402  (`vslots` is a local name in resolve)
 import bodies   # noqa: E402  (S2d: declared-only functions)
 import exevft   # noqa: E402  (S2c: the player's exe vftables)
+import thisadj  # noqa: E402  (S2c-abi: MSVC entries of secondary-base overrides)
+import vacall   # noqa: E402  (S2c-abi: call-site argument types of variadic references)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
 DATA_END = 0x0200c612
@@ -68,6 +70,8 @@ RUNTIME = re.compile(r'^(?:__cxa_\w+|_Unwind_\w+|__gxx_personality_v0|__stack_ch
 ADDR_SYM = '__fnv_%08x'
 TRAP_SYM = '__fnvnx_vtrap_%08x'   # slot of a virtual function defined nowhere -> fnvnx_vslot_trap(this, text)
 TLS_SYM = '__fnvnx_tls_%08x'      # thread-local variable at an image .tls address: slot of the native TLS block
+MSVC_ENTRY_SYM = '__fnvnx_msvc_%08x'   # MSVC's entry of an override that takes `this` at a secondary base: the thunk
+TEXTADDR_SYM = '__fnvnx_textaddr_%08x'   # a variable at a .text address nothing defines: absolute, the x86 value
 XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
 # renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
@@ -452,6 +456,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
     shadowed = {}
     osigs = load_override_sigs(override)   # optional 4th column: the override's own MSVC-decorated signature
+    ova = load_override_va(override)       # optional 5th column: va=none|escape of a variadic override
     ms.need(osigs.values())
     pending = override_pending(override)
     stats_ov = collections.Counter()
@@ -485,9 +490,29 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         native[a] = dict(unit=None, sym=elfsyms.Sym(osym, 0, 0, 'func', 'global', 1, '', False), variants={},
                          tier='override', msvc=msv, override=oobj)
 
+    # ---- S2c-abi: overrides of a secondary base's virtual, which MSVC enters with `this` at that base (thisadj.py):
+    # image code pointers to the address reach GCC's _ZThn<d>_ thunk, the units' own references the primary entry
+    sec_entries = thisadj.from_env()
+    syms_by_obj = {}
+    for a, d in sorted(sec_entries.items()):
+        nd = native.get(a)
+        if nd is None or nd['unit'] is None:
+            continue
+        tn = thisadj.thunk_name(nd['sym'].name, d)
+        if nd['unit'] not in syms_by_obj:
+            syms_by_obj[nd['unit']] = {x.name: x for x in objsyms.get(nd['unit'], ()) if x.shndx != 0}
+        th = syms_by_obj[nd['unit']].get(tn) if tn else None
+        if th is not None and th.bind != 'local':
+            nd['msvc_entry'] = (th.name, d)
+            pre_stats['msvc_entry_thunks'] += 1
+        else:
+            pre_stats['msvc_entry_no_thunk'] += 1
+    pre_stats['msvc_entry_exe'] = len(sec_entries)
+
     # ---- references
     layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
     probe_req = set()
+    vacall_req = set()   # (unit, undefined symbol) of variadic references whose call sites decide (vacall.py)
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
     stats = collections.Counter(pre_stats)
@@ -516,6 +541,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     per_obj = {}
     used_addr = set()
     data_defs, tls_defs, tls_addrs = [], [], set()
+    text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
     exports = load_exports(EXPORTS if imports is None else (os.path.join(os.path.dirname(imports), 'exports.cpp')
                                                              if imports != 'none' else None))
     providers, crt_classes = load_providers(CRT_SYMBOLS if crt_symbols is None else
@@ -574,22 +600,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     decl_cache = {}
 
     def c_decls(src_):
-        """CDecls of a unit and the local headers it includes (\"...\" from the including file's directory, then
-        <tree>/include): the unit's own declarations first."""
-        src_ = src_.split('#')[0]
-        if src_ not in decl_cache:
-            texts, seen, todo = [], set(), [os.path.join(tree, src_)]
-            while todo and len(seen) < 200:
-                f_ = os.path.normpath(todo.pop(0))
-                if f_ in seen or not os.path.isfile(f_):
-                    continue
-                seen.add(f_)
-                t_ = open(f_, encoding='utf-8', errors='surrogateescape').read()
-                texts.append(t_)
-                for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', t_, re.M):
-                    todo += [os.path.join(os.path.dirname(f_), inc), os.path.join(tree, 'include', inc)]
-            decl_cache[src_] = CDecls('\n;\n'.join(texts))
-        return decl_cache[src_]
+        return unit_c_decls(tree, src_, decl_cache)
 
     def casts_of(u_):
         if u_.source not in cast_cache:
@@ -700,6 +711,15 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     stats['code_same_name' if natname == un else 'code_other_name'] += 1
                     # ABI: reference declaration vs definition
                     refdecl = note  # msvc name of the matched reference declaration
+                    if nd.get('msvc_entry') and refdecl and not isig.variant:
+                        # MSVC enters it with this at a secondary base (thisadj.py). A reference through another class
+                        # (a decomp shell declared at that subobject: 0x008d4870 calls 0x008805f0 with this at +0xa4)
+                        # passes the subobject, as the x86 caller did: it binds to the thunk (V2 T1)
+                        rq_, dq_ = msvc(refdecl), msvc(nd['msvc'] or '')
+                        if rq_.kind == 'func' and dq_.kind == 'func' and rq_.member and \
+                                rq_.qual[:-1] != dq_.qual[:-1]:
+                            target = MSVC_ENTRY_SYM % addr
+                            stats['msvc_entry_refs'] += 1
                     defdecl = nd['msvc']
                     cast = None
                     if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
@@ -747,7 +767,40 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 refdecl_key = '%s|cast %s(__%s*)(%s)' % (refdecl, ret_, cc_, params_)
                                 stats['cast_refs'] += 1
                         if rs.kind == 'func' and ds.kind == 'func':
-                            v = abi.compare(rs, ds)
+                            va_r = None   # what a variadic definition's body reads with va_arg (vacall VADEF, V2)
+                            if nd['unit'] is None and addr in ova:
+                                va_r = ova[addr]
+                                vacall_req.add((u.host or u.source, un))   # format literals of its callers
+                            elif nd['unit'] is not None and any(p_.strip() == '...' for p_ in ds.raw_params or ()):
+                                vacall_req.add((nd['unit'], nd['sym'].name))
+                                vacall_req.add((u.host or u.source, un))   # its format literals, in the same probe
+                                defs_ = vacall.load_defs(out, nd['unit'])
+                                va_r = defs_.get(nd['sym'].name) if defs_ else None
+                            v = abi.compare(rs, ds, va_reads=va_r)
+                            va_key = None
+                            if va_r == ('escape',) and v.kind == 'manual' and 'varargs' in v.classes:
+                                # the definition hands its va_list to vsnprintf: the call sites' format literals
+                                # decide what it reads (vacall.decide_format)
+                                fhost = u.host or u.source
+                                vacall_req.add((fhost, un))
+                                fm_ = vacall.load_fmts(out, fhost)
+                                v3_, suf_, st_ = vacall.decide_format(rs, ds, fm_.get(un) if fm_ else None)
+                                stats[st_] += 1
+                                if v3_ is not None:
+                                    v = v3_
+                                    if suf_:
+                                        va_key = refdecl + suf_
+                            if vacall.needs(v):
+                                # the definition reads the reference's anonymous arguments: the call sites' own
+                                # argument types decide (vacall.py, V1 VA-U1..U4)
+                                vhost = u.host or u.source
+                                vacall_req.add((vhost, un))
+                                calls_ = vacall.load(out, vhost)
+                                v2_, vs_, seq_, st_ = vacall.decide(rs, ds, calls_.get(un) if calls_ else None, va_r)
+                                stats[st_] += 1
+                                if v2_ is not None:
+                                    v, rs = v2_, vs_
+                                    va_key = '%s|va %s' % (refdecl, ','.join(seq_))
                             ecx_dead = False
                             if v.kind == 'x86-inconsistent' and ecx_use is not None and (
                                     'ecx-not-passed' in v.classes or 'this not passed by the reference' in v.notes):
@@ -770,11 +823,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 pair_classes[c] += 1
                             if v.kind != 'same':
                                 # aggregates by value: ask the layout probe, then decide on bytes (abi2)
-                                for sg, unit in ((rs, u.source), (ds, nd['unit'])):
+                                # synthesized vtable / body objects (`<host>#vtables`) have the host unit's types
+                                for sg, unit in ((rs, u.host or u.source), (ds, nd['unit'])):
                                     for c in [c for _, c in abi.params_of(sg)] + [abi.ret_class(sg)]:
                                         if c.startswith('AGG:') and '{anon}' not in c:
                                             probe_req.add((unit, abi2.agg_name(c)))
-                                p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.source: layouts.get((x, t)),
+                                p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.host or u.source: layouts.get((x, t)),
                                                   lambda t, x=nd['unit']: layouts.get((x, t)), ecx_unused=ecx_dead)
                                 if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
                                         not (v.kind == 'bridge' and 'narrow-extend' in v.classes) and \
@@ -790,6 +844,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                                  ['%s<-%s' % (d, s) for d, s, _, _ in v.moves] or []),
                                                  '; '.join(v.notes), ms[refdecl] or '', ms[defdecl] or ''))
                                 bkey = refdecl_key if cast and not cast_note else refdecl
+                                if va_key:   # one bridge per call-site signature (vacall)
+                                    bkey = va_key
                                 # an x86-inconsistent ecx-not-passed or pop-mismatch pair still gets the moves of the
                                 # arguments the reference does pass (the definition's ecx parameter is often unused:
                                 # 0x00bbbe30, 0x00a75ec0; a callee popping other stack bytes than the caller pushed
@@ -827,6 +883,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     cls = 'code-pending' if not du.obj else 'code-defmissing'
                     target = ADDR_SYM % addr
                     used_addr.add(addr)
+                elif ak == 'text' and note and re.search(r'@@3[QD]', note) and msvc(note).kind == 'data' and \
+                        un not in called_syms(u):
+                    # a variable the decomp places at a .text address nothing defines (the generated initializers'
+                    # `extern const char g_011c5a4c_arg1[]` at 0x00a00000: an immediate the generator took for an
+                    # address): the code uses its address, which on x86 is that number - an absolute symbol there
+                    # gives the native code the same value (S2c-abi, S13b native-stub-data). Only arrays (`@@3Q`)
+                    # and char labels (`@@3D`, `&FUN_00a00000`), whose address is all the code uses; an `int` at
+                    # 0x00000065 stays extern-text
+                    cls = 'text-addr'; target = TEXTADDR_SYM % addr
+                    text_addrs.add(addr)
                 elif ak == 'text':
                     cls = 'extern-text'; target = None
                     extern_text[addr].add(un)
@@ -893,6 +959,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- per object objcopy args: renames, address symbols for the definitions it holds, localize duplicates
     alias_lines, localize = [], collections.defaultdict(list)
+    alias_lines += ['%s = 0x%08x;' % (TEXTADDR_SYM % a, a) for a in sorted(text_addrs)]
     for name, srcs in strong.items():
         if len(srcs) > 1:
             for s in sorted(srcs)[1:]:
@@ -900,15 +967,28 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     stats['duplicate_strong_names'] = sum(1 for s in strong.values() if len(s) > 1)
     data_def_names = collections.defaultdict(dict)   # source -> {native name: address symbol it becomes}
     for a, name, src in data_defs:
+        if name in data_def_names[src]:
+            continue
         if ADDR_SYM % a not in data_def_names[src].values():  # objcopy allows one old name per new name
             data_def_names[src][name] = ADDR_SYM % a
             used_addr.add(a)
+        else:
+            # a second native definition of the same image variable in this object (tesform.cpp: `DAT_011c54cc`
+            # and `fnv_00485a70::DAT_011c54cc`, S13b split-global): it becomes its own weak symbol, which aliases.ld
+            # defines as the address symbol, so neither copy stays private (S2c-abi)
+            k = sum(1 for v in data_def_names[src].values() if v.startswith(ADDR_SYM % a + '_d')) + 1
+            dup = '%s_d%d' % (ADDR_SYM % a, k)
+            data_def_names[src][name] = dup
+            alias_lines.append('%s = %s;' % (dup, ADDR_SYM % a))
+            stats['data_defs_same_address'] += 1
     for a, name, src in tls_defs:   # thread-local definitions at an image .tls address: the native block's slot
         if TLS_SYM % a not in data_def_names[src].values():
             data_def_names[src][name] = TLS_SYM % a
             tls_addrs.add(a)
     defs_by_unit = collections.defaultdict(list)
     for a, nd in native.items():
+        if nd.get('msvc_entry'):
+            alias_lines.append('%s = %s;' % (MSVC_ENTRY_SYM % a, nd['msvc_entry'][0]))
         if nd['unit'] is None:
             alias_lines.append('%s = %s;' % (ADDR_SYM % a, nd['sym'].name))
         else:
@@ -1188,6 +1268,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for r in abi_rows:
             f.write('\t'.join(r) + '\n')
 
+    with open(os.path.join(out, 'vacall_requests.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        for unit_, un_ in sorted(vacall_req):
+            f.write('%s\t%s\n' % (unit_, un_))
     with open(os.path.join(out, 'probe_requests.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for unit, t in sorted(probe_req):
             f.write('%s\t%s\n' % (unit, t))
@@ -1204,7 +1287,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
-                                         'code-defmissing', 'extern-text', 'import', 'provider', 'tls'))
+                                         'code-defmissing', 'extern-text', 'text-addr', 'import', 'provider', 'tls'))
     with open(os.path.join(out, 'extern_text.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a in sorted(extern_text):
             f.write('%08x\t%s\n' % (a, ' '.join(sorted(extern_text[a]))))
@@ -1222,8 +1305,21 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'units: %d; shadowed.tsv)' % (stats['overrides'], stats['shadowed'], stats['shadow_inlined_units'])]
     if stats_ov:
         lines += ['override rows: ' + ', '.join('%s %d' % kv for kv in sorted(stats_ov.items()))]
+    lines += ['', 'variadic references decided by their call sites (vacall.py): %d decided, %d not bridgeable, %d call '
+              'sites disagree, %d units not recorded yet (vacall_requests.tsv: %d)' % (
+                  stats['vacall_decided'], stats['vacall_not_bridgeable'], stats['vacall_sites_disagree'],
+                  stats['vacall_unrecorded'], len(vacall_req))]
+    lines += ['', 'calls into vsnprintf-forwarding definitions decided by their format literals: %d exact, %d bridged, '
+              '%d non-literal or not modelled, %d sites disagree, %d not bridgeable' % (
+                  stats['format_exact'], stats['format_bridged'], stats['format_unknown'],
+                  stats['format_sites_disagree'], stats['format_not_bridgeable'])]
+    lines += ['', 'MSVC entries at a secondary base (exe vftables, thisadj.py): %d addresses; the map names the '
+              '_ZThn thunk for %d, %d without a thunk; references through another class bound to the thunk: %d'
+              % (stats['msvc_entry_exe'], stats['msvc_entry_thunks'], stats['msvc_entry_no_thunk'],
+                 stats['msvc_entry_refs'])]
     lines += ['', 'variables defined natively at a data-image address: %d (%d copies in objects whose unit does not '
-              'name the address: STATIC1 header variables)' % (len(data_defs), stats['rebound_copies']),
+              'name the address: STATIC1 header variables; %d second definitions of an address in one object)'
+              % (len(data_defs), stats['rebound_copies'], stats['data_defs_same_address']),
               'address map entries by kind: %s' % ' '.join('%s=%d' % kv for kv in sorted(amap_kinds.items())),
               'deleting destructors (G) with both D1 and D0: %d of %d' % (n_deldtor, amap_kinds.get('G', 0)),
               'synthesized vtable objects linked: %d' % (len(have) - len(real)),
@@ -2254,6 +2350,18 @@ def load_override_sigs(path):
     return out
 
 
+def load_override_va(path):
+    """Override table rows with a 5th column `va=<none|escape>`: {address: va_reads} of a variadic override (what
+    its body does with the anonymous arguments, abi.va_reads_check; the plugin does not read the C sources)."""
+    out = {}
+    if path:
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 5 and f[4].startswith('va='):
+                out[override_key(f[0])] = (f[4][3:],)
+    return out
+
+
 def load_extern_list(path):
     """Extern-text list (S4 addr_ids.txt: '0x<addr> name...' per line) -> {address: names}."""
     out = {}
@@ -2463,6 +2571,25 @@ def int_words(t):
         return u + base + ' '
     return ' '.join(re.sub(r'\b(?:(?:unsigned|signed|short|long|int|char|__int8|__int16|__int32|__int64)\b\s*)+',
                            canon, t).split())
+
+
+def unit_c_decls(tree, src_, cache):
+    """CDecls of a unit and the local headers it includes (\"...\" from the including file's directory, then
+    <tree>/include): the unit's own declarations first."""
+    src_ = src_.split('#')[0]
+    if src_ not in cache:
+        texts, seen, todo = [], set(), [os.path.join(tree, src_)]
+        while todo and len(seen) < 200:
+            f_ = os.path.normpath(todo.pop(0))
+            if f_ in seen or not os.path.isfile(f_):
+                continue
+            seen.add(f_)
+            t_ = open(f_, encoding='utf-8', errors='surrogateescape').read()
+            texts.append(t_)
+            for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', t_, re.M):
+                todo += [os.path.join(os.path.dirname(f_), inc), os.path.join(tree, 'include', inc)]
+        cache[src_] = CDecls('\n;\n'.join(texts))
+    return cache[src_]
 
 
 class CDecls:
@@ -2733,6 +2860,12 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, pr
             obj = os.path.basename(nd['override'])
         else:
             obj = os.path.basename(units[nd['unit']].obj)
+        if nd.get('msvc_entry'):
+            # MSVC enters it with this at the base subobject d (thisadj.py): the map names the thunk's alias
+            th, d = nd['msvc_entry']
+            rows.append((a, kind, MSVC_ENTRY_SYM % a, th, obj, (note + '; ' if note else '') +
+                         'msvc this = base subobject +%d: the _ZThn thunk' % d, str(d), d1l, d1n))
+            continue
         rows.append((a, kind, ADDR_SYM % a, nd['sym'].name, obj, note, '', d1l, d1n))
     for a, (zname, off, obj, note) in sorted((vtables or {}).items()):
         if a not in native:
@@ -3086,6 +3219,7 @@ def main():
         jobs = int(sys.argv[4]) if len(sys.argv) > 4 else os.cpu_count()
         if cmd == 'probe':
             layout.run(sys.argv[2], sys.argv[3], jobs)
+            vacall.run(sys.argv[2], sys.argv[3], jobs)
         if os.path.exists(os.path.join(sys.argv[2], 'vtable_requests.tsv')) and \
                 (cmd == 'vtables' or not os.environ.get('FNVNX_NO_VTABLES')):
             vtables.run(sys.argv[2], sys.argv[3], jobs)

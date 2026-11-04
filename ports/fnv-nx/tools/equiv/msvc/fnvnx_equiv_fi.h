@@ -18,6 +18,8 @@
  * C-style reference cast to the temporary directly, so the identity is the MSVC meaning. A wrong extent of the
  * wrapped expression changes the parse and shows up as a difference. */
 #define fnvnx_lvalue(x) (x)
+/* RSTR1: fnvnx_unrestrict(v) is the restrict-qualified local v itself (fnvnx_compat.h); MSVC bound the reference to v */
+#define fnvnx_unrestrict(x) (x)
 
 /* TAIL1 (layout rule, only in layout runs): a zero-width bit-field of an integer type aligned like the last base,
  * as in fnvnx_compat.h. MSVC never reuses tail padding, so under MSVC it must change no layout. */
@@ -30,6 +32,11 @@ template <> struct fnvnx_int_of_align<8> { typedef unsigned __int64 type; };
 template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_MSVC_BASE_END(...) fnvnx_int_of_align<__alignof(__VA_ARGS__)>::type : 0;
 #endif
+
+/* NEW5: under GCC a class-scope operator delete(void*) forwarding to ::operator delete; MSVC 2008 already called the
+ * global one from the deleting destructor of a class whose only scalar operator delete is the placement form. */
+#define FNVNX_GLOBAL_DELETE
+#define FNVNX_NEW5_TAG
 
 /* FTOL1 (S1b): fnvnx_ftol2(x) is the x87 _ftol2_sse of x; under MSVC the cast compiles to exactly that call */
 #ifndef fnvnx_ftol2

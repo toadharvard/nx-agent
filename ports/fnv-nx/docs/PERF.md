@@ -52,7 +52,7 @@ at 720p **[E]**; section 9 lists the tests.
 
 ## 2. The budget
 
-(The 30 fps target of this section is superseded by 45 fps stable / 60 fps stretch, J-0132: section 11.)
+(The 30 fps target of this section is superseded by 60 fps stable, J-0150: section 11.)
 
 * Cortex-A57 at 1.02 GHz: 34.0 M cycles per 33.3 ms frame per core; games get cores 0-2 (core 3 is the system's;
   `os_horizon.c` returns 3 from `os_cpu_count`).
@@ -253,11 +253,95 @@ threads and the loading screen stay on cores 0-2.
 |---|---|---|
 | AI linear task threads (`iNumHWThreads` > 1, two at > 2) | **likely safe**: the default on every PC (the engine forces >= 2) | `iNumHWThreads=3` (what GetSystemInfo gives; two linear threads), **after** the placement fix; until then 2 |
 | AI task threads (inferred `bUseThreadedAI`) | **known-crashy on PC (hearsay)**: community guides report instability with `bUseThreadedAI=1` in FO3/FNV; off on PC, on on 360 | `bUseThreadedAI=0`; revisit with hardware traces |
-| Rendering Task Thread 2 (MT render setting) | **needs work**: 360 path, off on PC (untested there), and needs the `fs:[0x2c]` TLS fix | 0 |
-| Havok workers (`iNumThreads:HAVOK`) | **needs work**: verify whether the pool is used and how many threads it starts on 3 cores | 1 (engine default) |
-| threaded morpher / particles / blood / temp effects (names hearsay) | **likely safe**: PC defaults on | 1 |
+| Rendering Task Thread 2 (`bMTRendering:Display`, 0x011c710c, named from the owner's exe) | **unsafe on the PC code, needs port work (6.8)**: every accumulator is built with one batch renderer, so the worker shares main's and indexes a NULL second one | 0 (ini.cpp leaves it out of the Switch defaults) |
+| Havok workers (`iNumThreads:HAVOK`, `iSimType:HAVOK` 0x011cc2e8) | **needs work (6.9)**: the multithreaded step is in the code (`bhkWorld::StepSimulation` 0x00c6ae70 -> stepMultithreaded over hkJobQueue + hkCpuJobThreadPool) and is selected by **`iSimType=4`** (FUN_00c661d0 maps 0/1/4 -> discrete/continuous/multithreaded, anything else, 3 included, -> continuous); the pool is created by EnsureObjectsCreated 0x00cbf6b0 (staging), all linked natively | iSimType 1 (engine default, continuous) |
+| threaded morpher / particles / temp effects (`bUseThreadedMorpher` 0x011ded20, `bUseThreadedParticleSystem` 0x011deaec, `bUseThreadedTempEffects` 0x011decbc; named from the exe) | **unverified (6.9)**: PC defaults on, but their readers are not reconstructed and the AI-linear hand-off reads plain cross-thread fields | 1 (ini.cpp port default, = the PC default ini); not counted in the as-built scenario |
 | tasklets, background loading | **likely safe**: PC defaults | engine/ini defaults |
 | `bUseMultibounds` (hearsay name; culling) | likely safe, saves render work | 1 |
+
+### 6.8 `bMTRendering` on the PC code (S15-threads, read from the decomp)
+
+With the setting on, `TaskThreadManager::StartRenderingTaskThread` (0x00ba3720) starts the worker 0x00ba3190. It takes
+records 1..23 (`DAT_012000e4`, filled by 0x00ba3390, stage semaphores 0x00ba30f0 / 0x00ba3130):
+* water reflections (1-16): signalled and waited at once, so they do not overlap other work;
+* the shadow lights (17-20): culled while main goes on to the main scene;
+* half of the main scene (21, `leftList2`): culled while main culls `rightList4` and `commonList3` into the **same**
+  accumulator (main.cpp ~12531-12780).
+
+The accumulator is designed for two writers. `RenderBound` and `AccumulateRenderPasses` pick the batch renderer
+from the TLS slot `0x2bc`, which the worker sets to the record's index. On PC, though, every accumulator is built
+with count 1: main's `(99, 1, 759)` at `FUN_0086c160` (staging blk_00860000_od.cpp:4212), the shadow pool at
+bsshadermanager.cpp:4321, and water at teswater.cpp:9026 / 11475. The ctor (bsshaderaccumulator.cpp:4277) then
+makes no second renderer. So with the setting on:
+* `AccumulateRenderPasses` (0x00b63f90) indexes `m_apkRenderers[1]` without a modulo, which is NULL: the worker
+  crashes;
+* `RenderBound` (`% 1`) sends both threads into batch renderer 0. Its group lists, pass map, active-pass list and
+  bucket free lists are unlocked (bsbatchrenderer.cpp ~1786-1862, 2791-2896; only the node pool takes `g_011c5f80`).
+
+The current-accumulator globals are shared too:
+* `DAT_011f95ec` is swapped with a non-atomic compare/DecRef/store/IncRef (bsshadermanager.cpp:359), so two threads
+  can free a live accumulator;
+* `DAT_011f4748+8` is written from both threads (bsshaderutil.cpp:205);
+* BSFadeNode culling registers through that global, not through its culler (bsfadenode.cpp:1028-1060).
+
+Shadow records re-cull scene objects that main culls too, so the fade-node and object-flag updates race there as
+well.
+
+**Verdict: not an ini switch.** `mt_cull` needs port code:
+1. accumulators with two batch renderers while MT is on (the ctor's count argument at the construction sites above);
+2. per-thread current-accumulator globals (`DAT_011f95ec`, `DAT_011f4748`), or the worker's culler carrying them;
+3. fade-node registration through the culler's accumulator;
+4. the shadow-light / main overlap checked for the light-map edits main makes meanwhile (`FUN_00b5d300`,
+   shadowscenenode.cpp ~10835).
+
+Then mtqemu on the real culling units (not the `stages` model) and a race checker run. The lever stays out of the
+as-built scenario, and its moves (cull 70-90 %) are too high for what the split does (the main scene is halved; the
+shadow lights move whole).
+
+### 6.9 Threaded effects and Havok MT (S15-threads, read from the decomp)
+
+**Threaded effects.** No reader of the three settings is reconstructed (only the initializers,
+global_object_initializers.cpp:8621-8627). The parts of the hand-off that are reconstructed:
+* The cell scene-graph pass (`TES::FUN_00453550`) runs on the AI linear threads (`FUN_008c7bd0` / `FUN_008c7f50`,
+  only when `iNumHWThreads` > 1). It queues controller updates (task 6, `UpdateControllersRecursive`).
+* Main joins with `0x008c7990` (a counting-semaphore wait) and then drains the packed queue itself (main.cpp
+  ~9077-9082). So the queued controller updates come **back to main**; what leaves main is the downward pass.
+* The ordering goes through semaphores and events (ordered in our build). Several cross-thread fields are plain,
+  though, and are ordered on ARM only by those waits:
+  - `aiCurrent[]` (ailineartaskthreadmanager.cpp:449 / 263-298);
+  - `m_uiTaskFlags` and `m_pTaskQueueProcessor` (taskqueueinterface.cpp:294-299);
+  - the bools `DAT_011dfa18/19`;
+  - the queue's `m_uiLockState` (body not reconstructed).
+
+  A litmus/mtqemu case of this protocol comes before the lever counts.
+
+**Havok.** The multithreaded simulation is present:
+* `bhkWorld::StepSimulation` (0x00c6ae70, hkpworld.cpp ~1377-1405) runs the stepMultithreaded shape on the world's
+  hkJobQueue and hkCpuJobThreadPool when the world's type is 3.
+* The job queue uses critical sections and semaphores (hkjobqueue.cpp), which are ordered.
+* The world's type comes from `iSimType:HAVOK` through `FUN_00c661d0`, which maps **4** to 3. A plain 3 gives
+  continuous.
+* The pool and the job queue are created in `EnsureObjectsCreated` (0x00cbf6b0, staging blk_00ca0000_o2.cpp) ->
+  `CreateObjects` (0x00cbf540).
+
+**Linked in the port** (link-head 06857911f5ab, `out/addrmap.tsv` and `out/refs.tsv`; `tools/perf/vtcover.py` for the
+vtables): every function of the chain has native code.
+* The chain: `FUN_00624bf0` -> `FUN_00c661d0` (the iSimType map), `bhkWorld::StepSimulation` 0x00c6ae70, the MT
+  step 0x00c93ae0, `EnsureObjectsCreated` 0x00cbf6b0 -> `CreateObjects` 0x00cbf540, the hkCpuJobThreadPool ctor
+  0x00d2d110, the dispatcher 0x00d051b0, `InitHookTable` 0x00d2cca0.
+* The handlers registered: dynamics through `DispatchNodeByKind` 0x00d01e50 and the hooks 0x00d96600-0x00d969e0;
+  the collision-query tables of 0x00da3400 (type 2, 7 functions) and 0x00da3480 (type 3, 8 functions).
+* `hkpMultiThreadedSimulation`'s vftable (0x010ccbc4, 21 slots) and `hkCpuJobThreadPool`'s (0x010ce774, 10 slots):
+  0 slots without native code.
+
+`CreateObjects` keys the pool and the job queue on `GetCurrentThreadId` and rebuilds them when another thread
+steps the world. What is left in these units:
+* placeholder names in staging units (`d10e90_stub`, `getVector_db0e50`, ...);
+* vslot traps in the collision-query jobs (`hkpcpuworldgetclosestpointsjob`, linear cast) and one in the MT
+  simulation unit (`SimBase::onEvent`).
+
+The run needs a booted frame (the boot stops before WinMain's loop today). Then: `[HAVOK] iSimType=4`,
+`iNumThreads=2` in Fallout.ini, under mtqemu and the race checker.
 
 ### 6.5 Memory ordering: what x86 gave for free
 
@@ -402,7 +486,7 @@ Instruction mix of fresh8 (2.43 M static instructions) **[M]**: loads 22.2 %, st
 | `fs:[0x2c]` TLS unification | correctness first, enables MT rendering | **done** (S5 `31cdca3`) | S4 |
 | release stores for the RecursiveSpinLock (6.5) | correctness on AArch64 | out-of-line Unlock **done** (override); 43 inline sites need an S1 rule | S15, S1 |
 | inline Interlocked* in game units (6.7) | the call/return and 1-2 instructions per operation; +8.8 static instructions per site | **done** (fnvnx_win32.h) | S15 |
-| no barrier on refcount increments (6.7) | about half of the 0.25-3.2 M barrier stalls on main **[E]** | per-site argument | S12, S15 |
+| no barrier on refcount increments (6.7) | about half of the 0.25-3.2 M barrier stalls on main **[E]** | **done** (S12 `52cb478`, `ORDER_REFCOUNT=weak` by default; mtqemu litmus `ref` race-checks it); B9 confirms on an A57 | S12, S15 |
 
 ## 9. What needs hardware, and the first on-device benchmark set
 
@@ -453,8 +537,9 @@ All of them print counts and names only; their outputs over decomp-derived objec
 
 ## 11. 45 / 60 fps: the frame budget and the plan
 
-Targets (owner, J-0132; they supersede the 30 fps of section 2): **45 fps stable** (worst frame 22.2 ms) is the
-goal, **60 fps** (16.7 ms, may be unstable) the stretch, **below 30 fps** (33.3 ms) a fail. Both CPU clocks count:
+Targets (owner, J-0150; they supersede J-0132's 45 fps goal and 60 fps stretch): **60 fps stable** (`target_60`:
+the worst frame at or under 16.7 ms at the 1.02 GHz stock clock) is the target, 45 fps (22.2 ms) is informational,
+**below 30 fps** (33.3 ms) a fail. Both CPU clocks count:
 1020 MHz stock and 1785 MHz, which the owner can set on their console.
 
 ### 11.1 The budget file (`tools/perf/frame_budget.py` -> `fnvnx-frame-budget/1`)
@@ -468,7 +553,7 @@ docked 720p GPU [E]) and frameprof of the boot on the owner's exe (section 4; bo
 tools/perf/frame_budget.py --frameprof boot-prof.json --render render/native/perf/report.json --out docs/PERF_budget.json
 ```
 
-`gates` holds one level per scenario and clock (`fail`, `pass_30`, `pass_45`, `stretch_60`); each scenario's
+`gates` holds one level per scenario and clock (`fail`, `pass_30`, `pass_45`, `target_60`; all on the worst frame, J-0150); each scenario's
 `results.<clock>.verdicts` says per target `pass` (even the pessimistic case fits), `fail` (even the optimistic
 case does not) or `uncertain`. Schema in the tool's docstring.
 
@@ -487,7 +572,7 @@ case does not) or `uncertain`. Schema in the tool's docstring.
   as the scheduler balances inside a mask. Core 3 only in scenarios with the `core3` lever.
 * **Frame time** = the largest core's time (the main thread waits for the AI linear threads at 0x008c7990, so the
   slowest core is the critical path), or the GPU's if larger. The worst frame is the mean times
-  `worst_frame_factor`; floor and goal targets are checked on the worst frame, the stretch on the mean.
+  `worst_frame_factor`; every target is checked on the worst frame.
 
 **Assumptions** (all explicit in the JSON, each with a range; lo case = least work, highest IPC):
 
@@ -506,8 +591,8 @@ inside the target at the 1.25 factor):
 | target | frame | 1020 MHz | 1785 MHz |
 |---|---|---:|---:|
 | 30 fps (floor) | 33.3 ms | 27.2 M (21.7) | 47.5 M (38.0) |
-| 45 fps (goal) | 22.2 ms | 18.1 M (14.5) | 31.7 M (25.4) |
-| 60 fps (stretch) | 16.7 ms | 13.6 M | 23.9 M |
+| 45 fps (informational) | 22.2 ms | 18.1 M (14.5) | 31.7 M (25.4) |
+| 60 fps stable (`target_60`, worst frame) | 16.7 ms | 13.6 M (10.9 M mean) | 23.9 M (19.1 M mean) |
 
 ### 11.2 Where the main thread's work goes
 
@@ -528,7 +613,7 @@ Model items (M instructions per frame, exterior, native renderer; [E] unless mar
 | renderer submission worker (P6n: Frame::Finish + deko3d recording) | render worker (core 1) | **3.36-5.43 [M]** | `render_f2f4`, `instancing` |
 | tasklets, IO, audio | mask 0b110 (0b1110 with core 3) | 1-3 | `core3` |
 
-Main thread total **23.8 M (13.2-34.4)** as placed today. It was 19.7 M (11.3-28.1) before the render machine's
+Main thread total **22.9 M (13.1-33.2)** as built today (placement + `barrier_relax`; 23.8 M before S12's refcount rule was counted). It was 19.7 M (11.3-28.1) before the render machine's
 measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked barrier item.
 
 ### 11.3 The plan, ranked by main-thread time moved
@@ -540,29 +625,36 @@ measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked 
 | 3 | render machine F2-F4 (`render_f2f4`) | 1.4 M | proposed (RENDER_PERF.md 10) | no |
 | 4 | Havok worker pool (`havok_workers`) | 1.4 M | not traced whether bhkWorld uses the MT simulation | yes |
 | 5 | threaded morpher/particles/blood (`threaded_anim`) | 0.9 M | PC defaults on (hearsay names) | no (PC path) |
-| 6 | no barrier on refcount increments (`barrier_relax`) | 0.8 M | per-site argument (S12) | B9 |
+| 6 | no barrier on refcount increments (`barrier_relax`) | 0.8 M | **in the build** (S12 `52cb478`, ORDER_REFCOUNT=weak) | B9 |
 | 7 | NEON per-object math (`neon_math`) | 0.9 M | proposed (S15) | no |
 | 8 | instancing / sorted packets in the native renderer | 1.0 M main, 1.3 M worker | S6n plan | no (the render machine measures) |
 | 9 | core 3 for background roles | frees 1-3 M on cores 1-2 | S5 opt-in, off by default | yes: what the system runs on core 3 |
 | - | clock 1785 MHz | x1.75 on every core | owner's console setting | no |
 
 **Result** (`docs/PERF_budget.json`; frame = critical core, here always core 0, or the GPU if larger; mid with the
-lo-hi range; level by the mid case):
+lo-hi range; every plan includes the built levers (`placed`'s); level by the mid **worst** frame, J-0150: `target_60` = worst frame <= 16.7 ms, `pass_45` informational):
 
 | scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
 |---|---:|---|---|---|---|
-| placed (no lever) | 23.8 (13.2-34.4) | 29.1 (12.9-56.3) / 36.4 | **fail** | 16.6 (7.4-32.2) / 20.8 | stretch_60 |
-| plan45 (mt_cull, havok_workers, threaded_anim) | 17.2 (8.5-27.0) | 21.1 (8.4-44.1) / 26.4 | pass_30 | 12.1 (7.1-25.2) / 15.1 | stretch_60 |
-| plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | **pass_45** | 9.9 (7.1-22.0) / 12.4 | stretch_60 |
-| plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | stretch_60 | 9.7 (7.1-20.6) / 12.1 | stretch_60 |
+| placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.2 | **fail** | 16.1 (7.3-31.0) / 20.1 | pass_45 |
+| plan45 (mt_cull, havok_workers, threaded_anim; + built barrier_relax) | 16.4 (8.4-25.7) | 20.1 (8.2-42.0) / 25.1 | pass_30 | 11.5 (7.1-24.0) / 14.3 | target_60 |
+| plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | pass_45 | 9.9 (7.1-22.0) / 12.4 | target_60 |
+| plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | pass_45 | 9.8 (7.1-20.6) / 12.3 | target_60 |
 
-Reading it: **45 fps at stock clock needs the main thread under ~14.5 M mean** (worst frame 22.2 ms at the 1.25
-factor). With the measured renderer, the placed mid case (23.8 M) misses even 30 fps on its worst frame at
-1020 MHz, and the earlier plan45 now only reaches 30 fps there. 45 fps at 1020 MHz needs plan45b: the three
-threading levers plus the next three rows of the queue (11.5), 14.1 M mid, worst frame 21.7 ms. At 1785 MHz the mid
-case meets 60 fps from plan45 on (placed: 45 fps). Every verdict is still `uncertain` (2.6x spread of work, 1.7x of
-IPC); the lo end of the 1785 MHz cases is the docked 720p GPU estimate (7.05 ms) now that the render report gives it.
+Reading it (owner's target J-0150: 60 fps stable, worst frame <= 16.7 ms at 1.02 GHz): **that needs the main thread
+under ~10.9 M mean** (`budget_mean_minsn.1020.target_60`, at the 1.25 worst-frame factor and IPC 0.8). No plan
+reaches it yet: plan60 (12.9 M) lands at a 19.8 ms worst frame, about 3 M short. The as-built mid case (22.9 M)
+misses even 30 fps at 1020 MHz. At 1785 MHz plan45 already meets the target. Every verdict is still `uncertain`
+(2.6x spread of work, 1.7x of IPC).
 The two measurements that close it stay frameprof on a real frame and B1 (IPC) on hardware.
+
+**A57 prices (`--perf`, P0-perfmodel's fnvnx-perf/1, section 12).**
+* Each `hotspot_functions` row with a `per_call_cycles` price adds an item on its thread: cycles x the mid IPC minus
+  its instructions, per frame. The unpriced work stays at the assumed IPC; `fn_interlocked` is left out, because its
+  price lacks the dmb drain that `interlocked_barriers` models.
+* With P0's 12.6 prices the as-built worst frame at 1020 MHz goes from 35.15 to about 36.5 ms (+0.88 M main;
+  Slerp +0.47 M and the per-object cull +0.29 M are latency-bound).
+* The committed budget takes `--perf` once a farm publishes `<head12>-perf.json`.
 
 ### 11.4 Hotspots (`hotspots[]` in `fnvnx-frame-budget/1`)
 
@@ -626,10 +718,104 @@ stock clock (plan45b):
 | 3 | renderer, main side | render machine F2-F4 (sort fixed cost, bind elimination) | 1.75 (1.0-2.5) | 2.1 / 1.2 | S6n, P6n | no |
 | 4 | Havok | Havok's multithreaded simulation on the worker pool (trace bhkWorld first) | 1.55 (0.6-2.5) | 1.9 / 1.1 | S15 | yes |
 | 5 | animation | `threaded_anim` (PC defaults) + NEON Slerp / FromRotationMatrix | 1.15 (0.5-1.8) | 1.4 / 0.8 | S15 | no |
-| 6 | Interlocked barriers | inlined (done); next: no barrier on refcount increments | 0.85 (0.1-1.6) | 1.0 / 0.6 | S12, S15 | B9 |
+| - | Interlocked barriers | inlined and refcounts relaxed (**done**, `barrier_relax` is in the build: `built_levers`, the queue leaves it out) | 0.85 (0.1-1.6) | 1.0 / 0.6 | S12, S15 | B9 |
 | 7 | scene graph update | NEON overrides of NiMatrix3 product, NiBound::Update, transform compose; GOT movz/movk pass | 0.6 (0.3-0.9) | 0.7 / 0.4 | S15, S2 | no |
 | - | boot | an index for S3's code-pointer scan (212 M of 243 M) | boot only | 0.26 s / 0.15 s | S3 | no |
 
 Next for S15, in queue order among what needs no hardware: rows 5 and 7 (NEON overrides of the per-object math,
 first Slerp, NiBound::Update and the matrix product: override rows like `spinlock_0040fba0.c`, checked by S13's
 harness against the oracle) and row 6's per-site argument with S12.
+
+### 11.6 Per-instruction cost of the hot functions (stream S15-simd)
+
+**Metric** (`tools/perf/hotspot_metric.py`): cycles per frame of the top-20 rows of `hotspot_functions` in
+`budget_model.json` at 1.02 GHz: A64 instructions per call (dyncount [M]) x calls per frame [E] / IPC 0.8, or an A57
+model's cycles per call (`per_call_cycles`, P0-perfmodel) once one exists. The calls stay estimates until frameprof
+profiles frames, so the metric moves with the per-call cost, which is what this stream changes. Every commit states
+`metric: <before> -> <after>`.
+
+**Shim changes** (sse2neon replacements in `shim/include/fnvnx_sse_fast.h`) are measured with
+`tools/perf/unit_ab.sh`: the unit compiled by the checkout, relinked alone by S2's resolve + apply
+(`a64prep.py link`), on the harness. The one-unit relink reproduces the farm link's counts and agreement for the
+unit's own functions. `_mm_shuffle_ps`: GCC 13 emits one permute or tbl with a literal mask. The literal is often
+shared and the register copy is not always needed, so a tbl costs about 2.3 instructions in hkpgsk. Replacing
+the single-source 0xc9 / 0xd2 by asm made GSK worse (585 / 591), because the asm blocks GCC's merging of
+neighbouring permutes. Only the two-source forms pay.
+
+**Method.** A hot function is replaced at its address by a native override (`tools/link/overrides/`, a row of
+`overrides.tsv`, bound by `fnvlink.py resolve --override` like the spin lock's). The override does the decomp's
+arithmetic operation by operation, in the same order and precision (float stays float, double stays double, sums in
+the decomp's order, no fused multiply-add: `build.sh` compiles overrides with `-ffp-contract=off -frounding-math`
+like compile.sh). Only independent per-component operations share a NEON instruction, which is bit-identical lane
+by lane. In-unit callees are inlined into the override, so the frame, the call and the reloads go too. Two checks per
+override:
+
+* `tests/s15/simd/run.py`: the override against a scalar reference in the decomp's order, bit for bit (any NaN
+  matches any NaN: with two NaN operands the payload and sign depend on operand order, which GCC commutes freely), on
+  random, unit-length and edge inputs, aliasing included, under qemu-aarch64; and the ILP32 object builds;
+* `tools/perf/override_ab.py <source>:<addr> --override <c> --native <sym>`: the same fuzzed cases of S13's harness
+  on the link and on a copy whose unit object binds the function to the override: A64 instructions per call, and
+  agreement with the MSVC oracle, which must not drop.
+
+| function | override | A64 per call before -> after [M] | oracle agreement | metric (M cycles/frame) |
+|---|---|---|---|---|
+| NiQuaternion::Slerp 0x00a6e330 (+ 0x00a6dc30, 0x00a4ff00 inlined) | `slerp_00a6e330.c` | 134 -> 88 | 9/16 -> 9/16 | 7.745 -> 7.430 |
+| NiBound::Update 0x00a7fdd0 | `nibound_update_00a7fdd0.c` (one `ld3` gives the rotation's columns) | 46 -> 19 | 15/16 -> 15/16 | 7.430 -> 6.660 (both rows) |
+| NiMatrix3 transpose product 0x00a588a0 (in UpdateWorldData's row) | `mat3_tmul_00a588a0.c` | 64 -> 39 | 13/16 -> 13/16 | |
+| NiQuaternion::FromRotationMatrix 0x00a6df40 | `quat_from_matrix_00a6df40.c` (no frame, volatile reload or pointer array; errno of a negative root set after the stores) | 89 -> 77 (model: 103, older link) | 13/13 -> 13/13 | 6.660 -> 6.603 |
+| Havok GSK 0x00da8fb0, 0x00da8390, 0x00da8500, 0x00da8820 | `shim/include/fnvnx_sse_fast.h`: two-source `_mm_shuffle_ps` 0x00/0x55/0xaa/0xff/0xc4/0xd4 as 2-instruction asm sequences instead of tbl + literal | 579 -> 571 (model: 600, older link) | 16+11+9+0 -> same | 6.603 -> 6.563 |
+| sphere/plane classification 0x004b6100 (per active plane of the cull) | `sphere_plane_004b6100.c` | 38 -> 19 | 16/16 -> 16/16 | (with the next row) |
+| culling worker 0x00a694e0 (+ bound getter 0x0043d450, 0x004b6100, 0x004b6160, 0x004b6190 inlined) | `cull_worker_00a694e0.c`: two `ld4` give the six planes as lanes, behind/front masks by lane | per object with 4-6 active planes 224-330 -> 49-67 (static paths; harness: early exit only, 12 -> 10) | 8/8 -> 8/8 | 6.563 -> 9.927 (row re-measured) -> 6.368 |
+| NiAVObject::UpdateWorldLoc 0x00a68bf0 (+ NiTransform compose 0x0062c250 and its four helpers inlined) | `update_world_loc_00a68bf0.c` | copy paths 13 -> 14; compose 23 + an unresolved operator* (> 100) -> 47 | 11/16 -> 12/16 | 6.368 -> 6.088 |
+| Havok GSK (same four) | `fnvnx_sse_fast.h`: `_mm_rsqrt_ss` on lane 0 only (15 -> 10), `_mm_add_ss` as fadd s + ins (3 -> 2; lanes 1-3 now a's bits as on x86, sse2neon added 0.0), `_mm_set_ss` / `_mm_load_ss` as `fmov s` / `ldr s` (2 -> 1) | 571 -> 539 | same | 6.088 -> 6.044 |
+| BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | 15/15, 8/8 | 6.044 -> 5.913 (model row re-measured 82 -> 54, no code) |
+
+Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no
+outline atomics); the A/B numbers above are with them. (Link 0bd144db1464, tree t/0bd144db1464, oracle msvc/pristine/87eb9373a0bb, 8 seeds x zero/random background.
+The agreement count is the same before and after; the per-case outputs are checked bit for bit by run.py.)
+The Slerp override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch of either must update it too.
+The NiBound::Update row's MSVC signature is the one four pristine objects reference; one object (u2763) declares
+`?Update@NiBound@@QAEXABU1@ABUNiTransformDummy@@@Z` (struct spellings): if the link's ABI check rejects that
+reference, it needs a bridge-free second spelling (inbox note).
+The culling worker override calls the object's culling callback through native vtable slot 53 (+212), which the
+decomp's object computes from the class: `tests/s15/simd/check_native.py <link>` checks that a link's native worker
+still uses that slot (ok on links 0bd144db1464 and c0d6c71516f6). Its plane loop is checked only by
+`cull_worker_test.c`; no harness case passes the null-bound and zero-radius checks. The pristine objects also
+reference 0x004b6100 and 0x00a694e0 under other class spellings (`CallerObj_b3918`, `Sphere`, `TreeVector`;
+`HostV`): the link's ABI check decides whether they bind.
+**Bug found (S2c/S1):** the native compose path of 0x00a68bf0 calls NiTransform::operator* (nimatrix3_h_unit),
+which calls ThreeByThreeMatrix::operator*(matrix) and operator*(point). The link leaves both names undefined
+(`out/refs.tsv`; 0x0062c250 is `code-defmissing`). The override no longer calls them. Other callers of operator*
+still do. The NiMatrix3 transpose product 0x00a588a0 (override above) is not on this path: the 25 instructions it
+saves were counted in fn_world_transform until this row was re-measured.
+**NaN results (V1 SL1).** "Bit-identical" in the Slerp, NiBound and matrix-product overrides covers every non-NaN
+result. A NaN result is a NaN, but its sign and payload can differ from the decomp's compiled code: V1 found 199
+of 144,000 Slerp cases with NaN inputs that return a NaN of the other sign. When two NaN operands meet, AArch64
+returns the first, and GCC commutes the operands of a commutative operation in either build, so the decomp's own
+code has no stable rule to match. No new kind of difference from x86 arises. Every NaN that GCC's code for the
+decomp creates is AArch64's default NaN (+qNaN 0x7fc00000), where x86 creates -qNaN (0xffc00000, x87 and SSE
+alike), so the port's NaN signs already differ from the exe wherever a NaN is created. A NaN's sign or payload is
+visible only through a bit-level read (an integer view, signbit, copysign), never through arithmetic or
+comparisons. Whether any caller of these three functions does such a read on a NaN has not been checked. The
+quat_from_matrix, xform, cull and sphere_plane tests compare exact bits or integer results.
+
+**Cycles (P0-perfmodel's A57 model, PERF.md 12).** From here on the metric reads `per_call_cycles`: the measured
+instructions per call x [steady CPI, one-call CPI] of the code that runs (llvm-mca -mcpu=cortex-a57 over the
+function; static, L1-resident, callees excluded). On the same code it is 7.877 M cycles per frame, against 5.913
+at IPC 0.8. Pricing the decomp's objects the same way shows that fewer instructions is not always fewer cycles.
+Dense NEON code has a higher CPI than the scalar code GCC spreads over both FP pipes.
+
+| function | decomp cycles per call (steady / one call) | override | mid | decision |
+|---|---|---|---|---|
+| Slerp (+ weight, normalisation) | ~130 / ~302 (47 x 0.90 + 29 x 1.59 + 58 x 0.73; 2.10 / 2.86 / 2.07) | 181 / 234 (CPI 2.05 / 2.66: the decomp's serial float/double chain, now without the parallel loads and call) | 216 -> 207 | kept |
+| NiBound::Update | 18 / 42 (46 x 0.393 / 0.913) | 16 / 49 (19 x 0.848 / 2.579: ld3 and lane multiplies in one chain) | 30 -> 32.5 | **dropped** |
+| NiMatrix3 transpose product | 25 / 39 (64 x 0.391 / 0.609) | 25 / 42 (39 x 0.642 / 1.077) | 32 -> 33.5 | **dropped** |
+| FromRotationMatrix | 78 / 87 (89 x 0.877 / 0.975) | 60 / 100 (77 x 0.773 / 1.295) | 82.5 -> 80 | kept |
+| culling worker + classification | 224-330 instructions at CPI ~1.05 (worker 1.04, classification 1.05) | 52 / 148 | ~290 -> 100 | kept |
+| UpdateWorldLoc | compose > 100 instructions at CPI 1.35 | 12 / 60 | | kept |
+
+The model's error bar is at least 5.7 % (V1 P0-E1/E2). Each before/after above prices both sides with the same
+model, so a shared bias cancels. Still, Slerp (-4 %) and FromRotationMatrix (-3 %) are within that bar: they count as
+ties, kept because they run fewer instructions and are not worse in cycles. The real cycle gains are the cull
+(~290 -> 100) and UpdateWorldLoc. Dropped overrides keep their sources and tests (for an A57-aware rewrite), but lose their overrides.tsv rows. From
+here on an override is kept only if its mid cycles drop, as well as its instructions.

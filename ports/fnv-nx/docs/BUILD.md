@@ -64,7 +64,7 @@ the variables, `make clean` removes `build/`, and `make clean-<stage>` removes o
 | `boot` | `build/boot/{emu.log,summary.txt,frontier.txt,frontier.tsv,frontier_units.tsv}` | Optional: with `BOOT=1` or `make boot`. S5's emulated boot of the game guest: `tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init --expect "fnvnx boot: calling WinMain"` (Unicorn, at most `EMU_TIMEOUT` s; `BOOT_IMAGE` goes to `sdmc:/fnvnx/game/FalloutNV.exe`, e.g. S14's synthesized exe), `tests/s5/emu_summary.py`, then the boot frontier `tests/s5/frontier.py` (every untranslated address hit, its units, their status in this link and in the census: this build's, or `BOOT_CENSUS`). Informational: `ok` when WinMain is entered, `warn` when not; it fails only when the emulator itself breaks. | guest (census optional) |
 | `nine` | `build/nine/{work/,proxy/}` | NINE=1 only. `render/nine/build.sh` (Mesa st/nine + nouveau for Switch, LP64). `render/nine/gen_proxy.py` supplies the proxy method statistics. | toolchain |
 | `host` | `build/host/{host.elf,main,main.npdm}` | The LP64 host module. NINE=0: S5's `tests/s5/hello/build.sh` recipe (`host.c` + libnx + S10's window reservation). NINE=1: S6c's `render/nine/switch_host.sh` (host.c without console + `render/nine/host` + Mesa + libnx). Then elf2nso (`main`) and npdmtool (`main.npdm`). | toolchain (nine) |
-| `package` | `build/package/{exefs.nsp,sd/}` | `build_pfs0.py` makes `exefs.nsp` (main + main.npdm). The SD tree holds `atmosphere/contents/<PROGRAM_ID>/exefs.nsp` and `fnvnx/guest.nso`. | host (guest optional) |
+| `package` | `build/package/{exefs.nsp,sd/,nro/,nx1.json}` | `build_pfs0.py` makes `exefs.nsp` (main + main.npdm); `toolchain/nro/build.sh` the launcher `fnv.nro`. The SD tree is `switch/fnv/{fnv.nro,fnv-exefs.nsp,guest.nso,README.txt}` (`fnvnx/sdlayout.h`, docs/NRO.md); no program id is needed, the launcher installs the override for the title it runs under. Then `tests/s5/check_package.py` (`check_package_rc`) and the NX1 device-readiness checks `tests/nx1/run.py` (`nx1_open`, `nx1.json`); full_job.sh publishes the package to the private branch `nro/<commit12>`. | host (guest optional) |
 | `tests` | `build/tests/<suite>.log`, `results.json` | All host gates (below). Each suite is cached on a hash of its own inputs. | - |
 | `report` | `build/report.md`, `report.json`, `history/<run>.json` | Every run, at the end. | - |
 
@@ -272,8 +272,8 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `FORCE_STALE` | 0 | 1: consume inputs prepared from another commit than the head (recorded, `warn`). |
 | `PORT_COMMIT` | | The commit of a ports/fnv-nx copy without git metadata. In a checkout it must equal HEAD. |
 | `CENSUS` | 1 | 0 skips the census. |
-| `OVERRIDE` | | fnvlink resolve `--override` file. |
-| `LINK_OVERRIDES` | | `render`: S6n's `render/native/overrides.tsv` with `--override-lib` libnxrender.a, which the guest stage then links (`EXTRA_OBJS`); empty: `OVERRIDE` only. |
+| `OVERRIDE` | `auto` | fnvlink resolve `--override` file. `auto`: the port's own replacements (`tools/link/overrides/`, built by its `build.sh` into `build/link/overrides/`); `none` or empty: off. |
+| `LINK_OVERRIDES` | | `render`: S6n's `render/native/overrides.tsv` with `--override-lib` libnxrender.a, added to `OVERRIDE`'s rows (one table, `build/link/overrides_all.tsv`); the guest stage then links the archive (`EXTRA_OBJS`); empty: none. |
 | `RENDER_LIB` | | libnxrender.a for `LINK_OVERRIDES=render`; empty: the link stage builds it with `render/native/n1/build.sh` (needs the toolchain stage's DEVKITPRO and fnvnx-a64 and `UAM`). |
 | `EXTERN_TEXT` | auto | fnvlink resolve `--extern-text`: `auto` = made from the tree's `units.json` (`tools/pipeline/extern_text.py`, S4's `addr_ids.txt`), `none` = off, or a file. |
 | `MSVC_OBJS` | | fnvlink resolve `--msvc-objs` (S11's pristine MSVC objects, S2b's vtable slots). Not used by f11/f12. |
@@ -288,6 +288,7 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `PRISTINE_OBJS` | | S11's MSVC 2008 objects of the pristine decomp (`u<index>.obj`) for the synthesized image. |
 | `BOOT_CENSUS` | | Census `units.tsv` the frontier takes the current compile status from (default: this build's census). |
 | `NINE` | 0 | 0: no D3D9 backend in the host. The guest links D3D9 as `null` (S5's null device when its script is used; the adapter links none). 1: the `nine` stage, the Nine host link and the guest proxy (`D3D9=external`). |
+| `HOST_BACKEND` | native | The host module: `native` = host.c with `-DFNVNX_HOST_NO_CONSOLE` + the native deko3d renderer (`render/native/host`, `toolchain/host/build_native.sh`, libdeko3d pinned by `toolchain/deko3d/build.sh`; owner decision, NX1); `plain` = host.c with its text console (opt-in). `NINE=1` overrides both. |
 | `NINE_SRC` | | Directory with `mesa/` and `libdrm_nouveau/` checkouts. They are copied instead of cloned. |
 | `PROGRAM_ID` | 0100000000000000 | Title id for the SD path. The placeholder makes `package` a warning. |
 | `TESTS` | all | Comma list of suite names, `all` or `none`. |

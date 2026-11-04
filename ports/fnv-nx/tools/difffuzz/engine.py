@@ -53,6 +53,22 @@ def dyninit_conv(symbol, source):
     return None
 
 
+def apply_renames(tree_def, rows):
+    """S1b's units_renames rows (J-0141) on top of the tree's definitions {address: MSVC name}, for a tree whose
+    units.json prepare did not rewrite (a tree prepared before the POST hook, a local FNVNX_TREE): a `def` row gives
+    the patched definition its new name (0x00eacd00 `bool __stdcall f(void*)` -> a member: ecx = this on the oracle
+    too), unless the tree names another one. Returns {(source, address): new name} of the `ref` rows: the patched
+    caller's own declaration of a callee (caller_conv). Idempotent on a rewritten units.json."""
+    tree_ref = {}
+    for src, kind, a, old, new in rows:
+        a = int(a, 16)
+        if kind == 'def' and tree_def.get(a, old) in (old, new):
+            tree_def[a] = new
+        elif kind == 'ref':
+            tree_ref.setdefault((src, a), new)
+    return tree_ref
+
+
 class UnitCache:
     def __init__(self, linkdir, workdir, unit_closed=True):
         self.linkdir, self.workdir, self.unit_closed = linkdir, workdir, unit_closed
@@ -72,6 +88,7 @@ class UnitCache:
             for u in json.load(open(tj))['units']:
                 for f in u['functions']:
                     self.tree_def.setdefault(int(f['address'], 16), f['symbol'])
+        self.tree_ref = apply_renames(self.tree_def, config.units_renames())
         self._x86, self._img, self._pin, self._callee = {}, {}, {}, {}
         self._refmap = None
         self._imports = self._iat = None
@@ -201,7 +218,14 @@ class UnitCache:
         refs = {}
         for _, u in self.by_source[source]:
             for n, a in u['symbols'].items():
-                refs.setdefault(int(a, 16), n)
+                # a decorated spelling first: it carries the type (`_FUN_00eca920` next to ?FUN_00eca920@@YANN@Z
+                # left the double result of CRT log unknown, so the oracle got no ST0)
+                cur = refs.get(int(a, 16))
+                if cur is None or (n.startswith('?') and not cur.startswith('?')):
+                    refs[int(a, 16)] = n
+        for (src, a), n in self.tree_ref.items():     # the patched unit's own declaration (S1b `ref` rows)
+            if src == source:
+                refs[a] = n
 
         def conv_of(addr):
             key = (source, addr)
@@ -510,7 +534,8 @@ class UnitCache:
 
     def crt_builtins(self):
         """CRT addresses the link gives a native provider whose name is a harness builtin (memmove at 0x00ec7230,
-        ...): the oracle runs them as that builtin too, untraced, as the native code does. Added to libcalls.X86."""
+        the libm functions log, pow, exp, ... of libcalls.CRT_MATH): the oracle runs them as that builtin too,
+        untraced, as the native code does. Added to libcalls.X86."""
         if not getattr(self, '_crt_done', False):
             self._crt_done = True
             int_names = {'memcpy', 'memmove', 'memset', 'memcmp', 'strlen', 'wcslen', 'strcmp', 'stricmp', 'strncmp',
@@ -519,7 +544,7 @@ class UnitCache:
             self.providers()
             for name, addr in self._prov_rows:       # every address of a name (memmove: 0x00ec44d0, 0x00ec7230)
                 b = libcalls.A64.get(name)
-                if b in int_names and addr not in libcalls.X86:
+                if (b in int_names or b in libcalls.CRT_MATH and not b.endswith('f')) and addr not in libcalls.X86:
                     libcalls.X86[addr] = b
 
     def pair(self, source, orig_addr):

@@ -17,7 +17,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CASES = ('parallel', 'cs', 'stages', 'spin-decomp', 'spin-override', 'unsync', 'detach')
+CASES = ('parallel', 'cs', 'stages', 'spin-decomp', 'spin-override', 'unsync', 'detach', 'placement', 'ilk-count', 'ilk-refs', 'ilk-cost',
+         'litmus-order', 'litmus-plain')
+OPTIONAL = ('litmus-order', 'litmus-plain')   # skipped where the fnvnx_order plugin does not build
 RUNS = 3
 TIMEOUT = 120
 
@@ -34,8 +36,9 @@ def run_once(out):
 
 def parse(text):
     res = {}
-    for m in re.finditer(r'^mtq: (\S+) (ok|FAIL) (.*)$', text, re.M):
-        res[m.group(1)] = (m.group(2) == 'ok', m.group(3))
+    for m in re.finditer(r'^mtq: (\S+) (ok|FAIL|skip) (.*)$', text, re.M):
+        res[m.group(1)] = (m.group(2) != 'FAIL', m.group(3)) if m.group(2) != 'skip' or m.group(1) in OPTIONAL \
+            else (False, 'skipped')
     return res
 
 
@@ -53,6 +56,19 @@ def main():
             print(b.stdout + b.stderr)
             print('FAIL build')
             return 1
+        # the inlined Interlocked*: ldaxr/stlxr + dmb ish in ilk_mt's code for the 4 operations on the aligned counter;
+        # the misaligned counter's address is known to be misaligned, so its 4 go straight to sync.cpp's split lock
+        dis = subprocess.run(['aarch64-linux-gnu-objdump', '-d', os.path.join(out, 'ilk_mt_codegen.o')],
+                             capture_output=True, text=True).stdout
+        calls = re.findall(r'\tbl?\s+[0-9a-f]+ <(Interlocked\w+|fnvnx_interlocked_slow)>', dis)
+        body = re.search(r'<_ZL12count_threadPv>:\n(.*?)\n\n', dis, re.S)
+        body = body.group(1) if body else ''
+        n_ldaxr, n_dmb = len(re.findall(r'\tldaxr\t', body)), len(re.findall(r'\tdmb\tish\n', body + '\n'))
+        ok = n_ldaxr >= 4 and n_dmb >= 4 and len(calls) >= 4
+        print(f'inline Interlocked: count_thread has {n_ldaxr} ldaxr, {n_dmb} dmb ish; '
+              f'{len(calls)} branches to an Interlocked function (misaligned paths)')
+        if not ok:
+            fails.append('ilk_mt.o: the Interlocked calls are not inlined (ldaxr %d, dmb %d)' % (n_ldaxr, n_dmb))
         parallel_ok = False
         for i in range(RUNS):
             rc, text = run_once(out)

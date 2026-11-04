@@ -1,8 +1,8 @@
 /* boot.cpp - guest main() of the full game image: platform init, S3 data image, then the engine's WinMain.
  *
- * Steps (each logged to the host console / sdmc:/fnvnx/host.log):
+ * Steps (each logged to the host console / sdmc:/switch/fnv/host.log):
  *   1. platform: pad source, command line, audio/input modules (S4, S7)
- *   2. S3 loader: open sdmc:/fnvnx/game/FalloutNV.exe, map .rdata/.data/.bss at their original addresses
+ *   2. S3 loader: open sdmc:/switch/fnv/FalloutNV.exe, map .rdata/.data/.bss at their original addresses
  *      (host map_fixed), bind the IAT through S4's export table, rewrite code pointers through S2's address map,
  *      finalize
  *   3. WinMain (0x0086a850) if the link has it
@@ -15,6 +15,7 @@
 #include <malloc.h>
 
 #include "fnvnx/hostapi.h"
+#include "fnvnx/sdlayout.h"
 #include "fnvnx_loader.h"
 #include "../../platform/os/os.h"
 #include "../../tools/link/fnvnx_addrmap.h"
@@ -23,13 +24,17 @@
 extern "C" {
 void fnvnx_guest_platform_init(void);
 void fnvnx_set_command_line(int argc, char **argv);
+unsigned fnvnx_first_run_profile(void);
 void fnvnx_audio_input_register(void);
 void fnvnx_d3d9_register(void) __attribute__((weak));   /* D3D9=external: d3d9.dll module (render/nine) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
+void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordinal);
 int __fnv_0086a850(unsigned, unsigned, unsigned, unsigned) __attribute__((weak));   /* WinMain */
 }
 
-static const char *k_exe = "sdmc:/fnvnx/game/FalloutNV.exe";   /* = os_default_root() + /game, i.e. C:\FalloutNV */
+static_assert(FNVNX_BY_NAME == 0xffffffffu, "platform/include/fnvnx_win32_ext.h FNVNX_IMPORT_BY_NAME");
+
+static const char *k_exe = FNVNX_SD_EXE;   /* = os_default_root() + /FalloutNV.exe, i.e. C:\FalloutNV\FalloutNV.exe */
 
 /* Trap statistics, one record per distinct trapped symbol (key = its name string) or image code pointer / IAT slot
  * (key = the original address): hits, global order of the first hit, the caller of the first hit and whether it
@@ -124,7 +129,9 @@ static void os_log(void *, const char *m) { printf("  loader: %s\n", m); }
 
 static unsigned g_unresolved_imports;
 static uint32_t resolve_import(void *, const char *dll, const char *name, uint32_t ordinal, unsigned) {
-    uint32_t v = ordinal == FNVNX_BY_NAME && name ? (uint32_t)(uintptr_t)fnvnx_win32_lookup_export(dll, name) : 0;
+    /* by name or by ordinal (platform/win32/exports.cpp: WSOCK32, XINPUT1_3, DSOUND ordinal tables) */
+    uint32_t v = ordinal == FNVNX_BY_NAME && !name ? 0
+               : (uint32_t)(uintptr_t)fnvnx_win32_lookup_import(dll, name, ordinal);
     if (!v && ++g_unresolved_imports <= 64) {
         if (name) printf("fnvnx boot: import %s!%s: no export\n", dll, name);
         else printf("fnvnx boot: import %s!#%" PRIu32 ": no export\n", dll, ordinal);
@@ -255,6 +262,7 @@ extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers 
         return 3;
     }
     memory_manager_state("before WinMain");
+    printf("fnvnx boot: first-run profile: mask %u\n", fnvnx_first_run_profile());   /* the launcher's files */
     printf("fnvnx boot: calling WinMain\n");
     g_trap_phase = 1;
     int r = __fnv_0086a850(0x00400000u, 0, (unsigned)(uintptr_t)"", 1 /* SW_SHOWNORMAL */);

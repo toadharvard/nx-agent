@@ -81,7 +81,7 @@ class NpdmTest(unittest.TestCase):
         self.assertTrue(d["is_64_bit"])
         self.assertEqual(d["address_space"], "32BitNoReserved")
         self.assertEqual(d["mmu_flags"], 0b101)
-        self.assertEqual(d["main_thread_stack_size"], 0x100000)
+        self.assertEqual(d["main_thread_stack_size"], 0x400000)   # NX1: 4x the PC exe's 1 MiB reserve, AArch64 frames are larger
         # 8 syscall descriptors (0xC0 SVCs / 24 per descriptor) + 6 others
         self.assertEqual(len(d["kernel_caps"]), 14)
         app_type = [c for c in d["kernel_caps"] if c & 0x3FFF == 0x1FFF]
@@ -315,6 +315,71 @@ class FaultTableTest(unittest.TestCase):
                 f.write("# c\nInitHolder  # why\n0x00aa1070 use-malloc:x0\nbefore-winmain 0x00a8a5f0 0x10\n")
             self.assertEqual(emu_guest.parse_fault_table(p),
                              ([("InitHolder", "return0"), ("0x00aa1070", "use-malloc:x0")], [("0x00a8a5f0", 16)]))
+
+
+class ExeSlotPlanTest(unittest.TestCase):
+    """emu_guest.exe_slot_plan, the exe-vtables stand-in for S2c's link-time slot fill: which trap slots of a native
+    vtable take the native of the exe vftable's slot."""
+
+    @staticmethod
+    def plan(slots, exe, natives):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        return emu_guest.exe_slot_plan(slots, exe, natives)
+
+    # exe functions 0x401000 + 0x10 * i; their natives 0x7000 + 0x10 * i
+    NAT = {0x401000 + 0x10 * i: 0x7000 + 0x10 * i for i in range(12)}
+
+    def exe(self, *i):
+        return [0x401000 + 0x10 * k for k in i]
+
+    def nat(self, i):
+        return ("native", f"_ZN1A2f{i}Ev", 0x7000 + 0x10 * i)
+
+    def trap(self, i):
+        return ("trap", f"_ZN1A2v{i}Ev", 0x9000 + 4 * i)
+
+    def test_plain(self):
+        slots = [self.nat(0), self.trap(1), self.nat(2), self.trap(3)]
+        self.assertEqual(self.plan(slots, self.exe(0, 1, 2, 3), self.NAT), ([(1, 0x7010), (3, 0x7030)], "ok"))
+
+    def test_trap_without_native_stays(self):
+        slots = [self.nat(0), self.trap(1)]
+        exe = self.exe(0) + [0x00500000]   # no F row for the exe's slot 1
+        self.assertEqual(self.plan(slots, exe, self.NAT), ([], "ok"))
+
+    def test_past_exe_end_stays(self):
+        self.assertEqual(self.plan([self.nat(0), self.trap(1)], self.exe(0), self.NAT), ([], "ok"))
+
+    def test_destructor_pair(self):
+        # GCC: f0, D2, D0, then native k = exe k - 1; MSVC: f0, scalar deleting dtor, f2, f3
+        slots = [self.nat(0), ("native", "_ZN1AD2Ev", 0x8000), ("native", "_ZN1AD0Ev", 0x8010),
+                 self.nat(2), self.trap(4)]
+        fills, status = self.plan(slots, self.exe(0, 1, 2, 3), self.NAT)
+        self.assertEqual((fills, status), ([(4, 0x7030)], "dtor"))
+        # the pair itself is never filled, even as traps
+        slots = [self.nat(0), ("trap", "_ZN1AD1Ev", 0x9100), ("trap", "_ZN1AD0Ev", 0x9104), self.trap(3)]
+        self.assertEqual(self.plan(slots, self.exe(0, 1, 2), self.NAT), ([(3, 0x7020)], "dtor"))
+
+    def test_shifted_is_misaligned(self):
+        # every native sits one exe slot later than its own index: the mapping is off, nothing is filled
+        slots = [self.nat(1), self.nat(2), self.trap(9), self.nat(4)]
+        self.assertEqual(self.plan(slots, self.exe(0, 1, 2, 3, 4), self.NAT), ([], "misaligned"))
+
+    def test_folded_exe_function_is_ok(self):
+        # the exe folds one empty body into many slots: a different function in a native's own slot is no evidence
+        empty = 0x401000 + 0x10 * 11
+        slots = [self.nat(0), ("native", "_ZN1A5emptyEv", 0x8000), self.trap(2), self.nat(3)]
+        exe = [self.exe(0)[0], empty, self.exe(2)[0], self.exe(3)[0]]
+        self.assertEqual(self.plan(slots, exe, self.NAT), ([(2, 0x7020)], "ok"))
+        # ... nor is the folded function in a nearby slot, when the natives agree more often than not
+        exe = [self.exe(0)[0], empty, empty, self.exe(3)[0]]
+        self.assertEqual(self.plan(slots, exe, self.NAT), ([(2, 0x70b0)], "ok"))
+
+    def test_known_faults_switches_it_on(self):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        self.assertIn("exe-vtables", emu_guest.fault_table_options(os.path.join(HERE, "known_faults.txt")))
 
 
 class MilestoneTest(unittest.TestCase):

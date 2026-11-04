@@ -24,7 +24,10 @@
 # apart). The extern-text list is made from the tree (tools/pipeline/extern_text.py). S11's pristine MSVC objects
 # (branch msvc/pristine/<decomp12>, fetched once; PRISTINE_OBJS=<dir> instead) go to both resolves as
 # --msvc-code (S2c: ecx-not-passed / this-not-passed judged on the definitions' code; needs python capstone);
-# without them the verdicts are as before.
+# without them the verdicts are as before. The player's FalloutNV.exe (private branch gamedata/exe, sha256 pinned,
+# lib_job.sh job_gamedata; FARM_REAL_EXE=0 leaves it out) goes to fnvlink bodies as FNVNX_EXE: S2d's exe-addr class
+# binds the calls the pristine objects make to the addresses the exe's rel32 reaches (J-0144). It is read only and
+# never copied into the published link or the report; the link stage's fingerprint holds its sha256.
 #
 # Published when the link is complete and prepared from <commit> (FARM_PUBLISH=always also publishes a UNITS
 # subset, for tests against a local ARTIFACTS remote; 0 never), as branch link/<commit12> of the private artifacts
@@ -62,11 +65,22 @@ job_sources "$REPO"
 LB=${LINK_BUILD:-$FARM_HOME/link/build}
 job_inputs "$(dirname "$LB")"
 job_pristine
-# S2c: the player's exe (private branch gamedata/exe, sha256 checked; agent-only, never published): resolve pairs the
-# image vftables by its RTTI class and fills trapped vtable slots from it, bodies binds exe-addr calls (S2d)
+# the player's exe (private branch gamedata/exe, sha256 checked; agent-only, never published): S2c's resolve pairs
+# the image vftables by its RTTI class and fills trapped vtable slots from it; S2d's bodies binds exe-addr calls
 job_gamedata
 if [ -n "$GAME_EXE" ]; then export FNVNX_EXE=$GAME_EXE; else unset FNVNX_EXE; fi
-log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; exe: $NOTE_EXE"
+# the whole-program ordering keys keys_job.sh published for this commit (k/<commit12>), when they match this tree and
+# these inputs: the link's emitted code compiles with the objects' list; otherwise build.py computes it (cached)
+unset ORDER_KEYS; NOTE_KEYS="ordering keys: computed by the link stage"
+if [ -n "$TREE" ] && git -C "$ARTIFACTS" fetch -q origin "+refs/heads/k/$C12:refs/remotes/origin/k/$C12" 2>/dev/null; then
+	kmeta=$(git -C "$ARTIFACTS" show "origin/k/$C12:meta.json" 2>/dev/null || true)
+	if [ "$(jq -r .tree_hash <<<"$kmeta" 2>/dev/null)" = "$(bash "$P/tools/farm/tree_hash.sh" "$TREE")" ] &&
+			[ "$(jq -r .inputs_hash <<<"$kmeta" 2>/dev/null)" = "$(bash "$P/tools/farm/keys_inputs.sh" "$P")" ]; then
+		git -C "$ARTIFACTS" show "origin/k/$C12:order.keys" > "$(dirname "$LB")/order-$C12.keys"
+		export ORDER_KEYS=$(dirname "$LB")/order-$C12.keys; NOTE_KEYS="ordering keys: k/$C12"
+	fi
+fi
+log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; exe: $NOTE_EXE; $NOTE_KEYS"
 printf 'TREE=%q\nOBJS=%q\nOBJ_COMMIT=%q\nNOTE_TREE=%q\nNOTE_OBJS=%q\n' "$TREE" "$OBJS" "$OBJ_COMMIT" "$NOTE_TREE" "$NOTE_OBJS" \
 	> "$(dirname "$LB")/inputs-$C12.env"     # for full_job.sh, which builds on this link
 ARGS=(TC_DL=none VORBIS=none)          # the link needs only the cross tools, not fnvnx-a64
@@ -90,7 +104,8 @@ fi
 t1=$(date +%s)
 
 # Report: the summary numbers.
-python3 -I - "$LB" "$COMMIT" "$rc" $((t1 - t0)) "$NOTE_TREE" "$NOTE_OBJS" "$NOTE_FAIL" "$NOTE_PR" "$NOTE_EXE" > "$REPORT" <<'EOF'
+python3 -I - "$LB" "$COMMIT" "$rc" $((t1 - t0)) "$NOTE_TREE" "$NOTE_OBJS" "$NOTE_FAIL" "$NOTE_PR" "$NOTE_EXE" \
+	> "$REPORT" <<'EOF'
 import json, os, sys
 bd, commit, rc, secs, tree, objs, fail, pristine, exe = sys.argv[1:10]
 def rec(s):
@@ -99,7 +114,7 @@ def rec(s):
     except (OSError, ValueError):
         return {}
 L = ['# link %s' % commit[:12], '', '- commit: `%s`; make exit %s; %.0f min' % (commit, rc, int(secs) / 60.0),
-     '- tree: ' + tree, '- objects: ' + objs, '- resolve --msvc-code: ' + pristine, '- resolve --exe: ' + exe]
+     '- tree: ' + tree, '- objects: ' + objs, '- resolve --msvc-code: ' + pristine, '- resolve / bodies --exe: ' + exe]
 if fail:
     L.append('- ' + fail)
 pf = rec('prepare').get('prepared_from') or {}
@@ -131,6 +146,9 @@ if m:
     if cc:
         L += ['', '| trial link: undefined names by class | names |', '|---|---|']
         L += ['| %s | %s |' % (k, v) for k, v in sorted(cc.items(), key=lambda x: -x[1])]
+bm = [(k[len('link_bodies_'):], v) for k, v in sorted(m.items()) if k.startswith('link_bodies_') and k != 'link_bodies_s']
+if bm:
+    L += ['', '- bodies (S2d, %s s): ' % m.get('link_bodies_s') + ', '.join('%s %s' % kv for kv in bm)]
 print('\n'.join(L))
 EOF
 if [ $rc -ne 2 ]; then publish_link "$LB"; else NOTE_PUB="not published"; fi

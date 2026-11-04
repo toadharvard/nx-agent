@@ -12,7 +12,8 @@ in this order (first that applies):
    defines (`addrmap.tsv` F/C/X; never a G: a deleting destructor is not a D1). Bound to `__fnv_<addr>`.
 1b. `exe-addr` (`--exe`, the player's FalloutNV.exe) - the referencing unit's pristine object calls the MSVC name:
    every pristine object's calls of it (REL32 in functions placed by units.json, or at the address a placed
-   function's call reaches, bytes checked against the exe) give one native address of the right kind and shape
+   function's call reaches, bytes checked against the exe; a DIR32 there, the address taken, counts the same)
+   give one native address of the right kind and shape
    (`exe_pass`). Checked before the synthesized classes: an address beats `= default`.
 2. `msvc-empty` - a pristine MSVC object (`<dir>/u<index>.obj`, S11) defines the function (COMDAT code) and its x86
    body is only `ret` / `ret N` / `mov eax, ecx; ret[ N]` (a constructor returning this): an AArch64 `ret` stub
@@ -346,7 +347,8 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
         items.append((0, 'anchor', 'extern "C" void __fnvnx_bd_anchor() {}'))
     # emitted bodies are game code: compile.sh's own flags (layout.game_flags: code generation, FTOI2, S12 order)
     flags = ('-ffunction-sections', '-fdata-sections') + (('-fkeep-inline-functions',) if inline else ())
-    obj, alive = vtables.compile_probe(tree, work, host, items, 'bdi' if inline else 'bd', flags, game=True)
+    obj, alive = vtables.compile_probe(tree, work, host, items, 'bdi' if inline else 'bd', flags, prelude='',
+                                       game=True)
     if obj is None:
         return None, set(), {n: 'synth-failed (host does not compile)' for n in want}
     base = os.path.join(work, host.replace('/', '_') + ('.bdi' if inline else '.bd'))
@@ -422,7 +424,7 @@ def probe_vcalls(tree, work, host, names, itanium):
         with open(head + '.tmp', 'w') as f:
             f.write('#pragma once\n' + VCALL_HEAD + '\n')
         os.replace(head + '.tmp', head)
-    obj, alive = vtables.compile_probe(tree, work, host, items, 'bdvc', ('-include', head))
+    obj, alive = vtables.compile_probe(tree, work, host, items, 'bdvc', ('-include', head), prelude='')
     got, why = {}, {}
     alive_k = {k for k, _, _ in alive}
     for k, n in num.items():
@@ -466,14 +468,22 @@ def emit_vcalls(stubs):
     return '\n'.join(out) + '\n'
 
 
-def pristine_externs(objdir, i):
-    """MSVC names the pristine object of unit i references (undefined externals)."""
+def pristine_externs(objdir, i, code_only=False):
+    """MSVC names the pristine object of unit i references (undefined externals); code_only: only those a code
+    section's relocation names (a call or an address taken in code), not a vftable slot or another data word."""
     import vslots
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p):
         return set()
     c = vslots.Coff(p)
-    return {s.name for s in c.syms.values() if s.secnum == 0 and s.storage == 2 and s.name.startswith('?')}
+    ext = {s.name for s in c.syms.values() if s.secnum == 0 and s.storage == 2 and s.name.startswith('?')}
+    if not code_only:
+        return ext
+    code = set()
+    for k in range(1, len(c.secs)):
+        if c.secs[k].flags & IMAGE_SCN_CNT_CODE:
+            code |= {sn for sn, _ in c.relocs(k).values() if sn in ext}
+    return code
 
 
 # ---------------------------------------------------------------------------------------------------- exe calls
@@ -506,7 +516,8 @@ def exe_call_targets(objdir, i, unit, wanted, exe):
     by units.json, then by following REL32 calls from placed functions (a COMDAT units.json does not list, such as
     `NiPointer<T>::operator=`, at the address the exe's call reaches); a function counts as placed only where its
     x86 bytes equal the exe's outside relocations. At each REL32 relocation naming a wanted name in a placed
-    function, the exe's displacement gives the target. -> {msvc name: {target address: number of sites}}."""
+    function, the exe's displacement gives the target; at a DIR32 one (the address taken, `push offset f`), the
+    exe's word does. -> {msvc name: {target address: number of sites}}."""
     import struct
     import vslots
     p = os.path.join(objdir, 'u%d.obj' % i)
@@ -540,7 +551,15 @@ def exe_call_targets(objdir, i, unit, wanted, exe):
             continue   # not the exe's code byte for byte here: none of its sites is trusted
         placed[fname] = a
         for k, (sn, typ) in rel.items():
-            if typ != 0x14 or k > len(body) - 4:   # IMAGE_REL_I386_REL32
+            if k > len(body) - 4:
+                continue
+            if typ == 0x06:   # IMAGE_REL_I386_DIR32 in code: the function's address taken (push offset f)
+                if sn in wanted:
+                    word, = struct.unpack_from('<I', img, k)
+                    addend, = struct.unpack_from('<I', body, k)
+                    out[sn][(word - addend) & 0xffffffff] += 1
+                continue
+            if typ != 0x14:   # IMAGE_REL_I386_REL32
                 continue
             disp, = struct.unpack_from('<i', img, k)
             addend, = struct.unpack_from('<i', body, k)
@@ -741,12 +760,13 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         # virtual functions GCC calls directly (an object member, `a->m.f()`) where MSVC called through the vptr
         cand = {r.name: r for r in rows if r.cls == 'missing' and r.note == 'no definition, address or body'
                 and r.units and vcall_line(0, itanium(r.name))}
-        if msvc_objs and cand:   # a direct reference in the pristine object is a real non-virtual call (B::f())
+        if msvc_objs and cand:   # a direct reference in the pristine object's code is a real non-virtual call
+            # (B::f()); a vftable slot of the same name is not (MSVC called it through the vptr)
             idx_of = collections.defaultdict(list)
             for i_, n_ in enumerate(unit_names):
                 idx_of[n_].append(i_)
             need = {i_ for r in cand.values() for u_ in r.units.split(',') for i_ in idx_of.get(u_, ())}
-            ext = {i_: pristine_externs(msvc_objs, i_) for i_ in need}
+            ext = {i_: pristine_externs(msvc_objs, i_, code_only=True) for i_ in need}
             ms.need({n_ for e_ in ext.values() for n_ in e_})
             for n, r in list(cand.items()):
                 keys = {k for _, k in relaxed_keys(itanium(n))}

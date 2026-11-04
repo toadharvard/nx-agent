@@ -428,7 +428,7 @@ def probe_items(k, t, phase, nd=0, na=0):
     return items
 
 
-def compile_probe(tree, workdir, unit, items, tag, extra=(), game=False):
+def compile_probe(tree, workdir, unit, items, tag, extra=(), prelude=None, game=False):
     """items: [(class k, item name, line)]. Drops the items GCC reports errors in (probe lines named by an error
     or by its 'required from' notes; an 'info' failure drops the whole class) and recompiles. game: the object is
     linked into the game (emitted slot functions, synthesized bodies), so it compiles with compile.sh's own flags
@@ -439,11 +439,14 @@ def compile_probe(tree, workdir, unit, items, tag, extra=(), game=False):
     alive = list(items)
     fl = (layout.game_flags(tree, workdir) if game else
           [f if f != '-O2' else '-O0' for f in layout.flags(tree)]) + list(extra)
-    head = HEAD + '#include "%s"\n' % os.path.join(tree, unit)
+    # prelude: what goes before the unit (default HEAD; bodies.py passes '': <typeinfo> before a unit that defines
+    # its own std::exception does not compile)
+    head = (HEAD if prelude is None else prelude) + '#include "%s"\n' % os.path.join(tree, unit)
     first = head.count('\n') + 1
     srcfile = os.path.join(tree, unit)
     key = hashlib.sha1(('%s|%s|%s' % (' '.join(fl).replace(tree, '<tree>'), layout.unit_key(tree, unit),
-                                      '\n'.join(line for _, _, line in alive))).encode()).hexdigest()
+                                      '\n'.join(line for _, _, line in alive))
+                       + ('' if prelude is None else '|prelude:' + prelude)).encode()).hexdigest()
     done = os.path.join(workdir, base + '.done.json')
     try:
         d = json.load(open(done))

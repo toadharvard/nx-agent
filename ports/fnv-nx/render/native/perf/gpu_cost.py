@@ -5,9 +5,11 @@
 
 Per DKSH: registers (DkshProgramHeader.num_gprs), Maxwell instructions (code words that are not scheduling words,
 not uam's NOP / "BRA $" padding), and from uam's TGSI (-t): static instruction count, texture instructions, and a
-dynamic estimate (the light loop of lit*.frag run LIGHTS times; every other TGSI loop is a compiled switch and runs
-once; both arms of every IF are counted, so branchy epilogues are upper bounds). maxwell_dyn = maxwell_static x
-tgsi_dyn / tgsi_static.
+dynamic estimate (the dynamic light loop of lit*.frag run LIGHTS times: the for-loops with a non-literal bound
+after the preprocessor; every other TGSI loop is a compiled switch and runs once; both arms of every IF are counted,
+so branchy epilogues are upper bounds). maxwell_dyn = maxwell_static x tgsi_dyn / tgsi_static. Each family is
+costed with the fragment shaders nx::Renderer binds for it (bound_shaders: static light and epilogue permutations,
+weighted by the stream's alpha-test / fog mix), not the runtime base shader.
 
 Scene model (MODEL below, every number is copied into the JSON): per family, covered pixels = target pixels x
 coverage x overdraw; fragment time = pixels x max(ALU: maxwell_dyn / 256 lanes, TEX: tex x TEX_COST / 16 TMUs,
@@ -56,6 +58,73 @@ MODEL = {
     "particles":    dict(vs="nolight_texvc.vert", ps="nolight_tex.frag", target="main", coverage=0.10, overdraw=4.0, verts=200, depth=1, blend=True),
     "imagespace_ui": dict(vs="quad.vert", ps="tex.frag", target="imagespace", coverage=3.5, overdraw=1.0, verts=4, depth=0),
 }
+# The fragment shader nx::Renderer::Render binds for a family's draw (RENDER_NATIVE.md §4.3-4.4): the package base
+# shader in MODEL, then (a) lit / lit_spec: the static light permutation for LIGHTS = 1 directional + 2 point lights
+# (lit[_spec]_d1p2), then (b) the compile-time epilogue permutation for the draw's D3D9 alpha test / fog state:
+# __e0 (neither), __ea (alpha test), __ef (fog), the runtime epilogue when both. The (alpha test, fog) mix of each
+# family is read from the synthetic stream's measured frame (epilogue_mix), so the model binds what the renderer
+# binds for the same D3D9 state; a permutation missing from the package falls back to the shader without it.
+# PERMUTATIONS = False models the runtime shaders only (the model before the permutations existed).
+PERMUTATIONS = True
+LIT_PERMUTATION = {"lit.frag": "lit_d1p2.frag", "lit_spec.frag": "lit_spec_d1p2.frag"}
+RS_ALPHATESTENABLE, RS_FOGENABLE = 15, 28
+
+
+def epilogue_mix(level=1):
+    """family -> {(alpha test, fog): draws} in the last frame of the gen_stream mix (D3D9 defaults: both off).
+    Fog as nx_d3d9_shader_bits: FOGENABLE with a pixel shader below 3.0 (the native path's default 0x200)."""
+    import gen_stream
+    data, _ = gen_stream.gen(gen_stream.FAMILIES, level)
+    w = struct.unpack_from("<%dI" % ((len(data) - 8) // 4), data, 8)
+    rs = {RS_ALPHATESTENABLE: 0, RS_FOGENABLE: 0}
+    fam, out, i = None, {}, 0
+    while i < len(w):
+        op, argc = w[i] & 0xFFFF, w[i] >> 16
+        a = w[i + 1:i + 1 + argc]
+        i += 1 + argc
+        if op == 0:
+            break
+        if op == 10:
+            out = {}
+        elif op == 13:
+            fam = gen_stream.FAMILIES[a[0] - 900]["name"] if 900 <= a[0] < 900 + len(gen_stream.FAMILIES) else None
+        elif op == 14 and a[0] in rs:
+            rs[a[0]] = a[1]
+        elif op == 20 and fam:
+            k = (1 if rs[RS_ALPHATESTENABLE] else 0, 1 if rs[RS_FOGENABLE] else 0)
+            out.setdefault(fam, {}).setdefault(k, 0)
+            out[fam][k] += 1
+    return out
+
+
+def bound_shaders(tab, m, mix):
+    """[(fragment shader name, share of the family's draws)] the renderer binds"""
+    base = m["ps"]
+    if not PERMUTATIONS:
+        return [(base, 1.0)]
+    base = LIT_PERMUTATION.get(base, base) if LIT_PERMUTATION.get(base) in tab else base
+    stem = base[:-len(".frag")]
+    mix = mix or {(0, 0): 1}
+    tot = sum(mix.values())
+    out = {}
+    for (at, fog), n in mix.items():
+        tag = "__e0" if not at and not fog else "__ea" if at and not fog else "__ef" if fog and not at else ""
+        name = stem + tag + ".frag"
+        if name not in tab:
+            name = base
+        out[name] = out.get(name, 0) + n / tot
+    return sorted(out.items(), key=lambda x: -x[1])
+
+
+def mix_stats(tab, shaders):
+    """draw-weighted average of the bound shaders' costs"""
+    acc = {"alu_slots": 0.0, "tex": 0.0, "maxwell_dyn": 0.0}
+    for name, share in shaders:
+        for k in acc:
+            acc[k] += tab[name][k] * share
+    return acc
+
+
 # Real-like shader costs: the game's own programs (shaderpackage019.sdp, the SM3 package) translated by S6b's
 # sdp2dksh (MojoShader glsldk -> uam), averaged per shader class over the programs that translate. Used as the
 # D3D9-translation reference scene ("real019_"); family -> (vertex class, pixel class). Classes are name prefixes.
@@ -144,6 +213,21 @@ def tgsi_stats(uam, glsl, stage, tmp, loop_iters):
     return {"tgsi_static": static, "tgsi_dyn": dyn, "tex": tex}
 
 
+def light_loops(glsl):
+    """GLSL for-loops that stay loops in TGSI: after the preprocessor (the variant's #defines), loops whose bound is
+    not a literal (the dynamic light loop over count.x). Constant-bound loops (lit[_spec]_d<D>p<P>) are unrolled by
+    uam; every other TGSI loop is a compiled switch (the epilogue's alpha compare) that runs once."""
+    text = "".join(l for l in open(glsl) if not l.lstrip().startswith(("#version", "#extension")))
+    r = subprocess.run(["cpp", "-P", "-undef", "-nostdinc", "-x", "c"], input=text, capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit("cpp failed on %s: %s" % (glsl, r.stderr[-500:]))
+    n = 0
+    for m in re.finditer(r"\bfor\s*\(([^;]*);([^;]*);", r.stdout):
+        if not re.fullmatch(r"\s*\w+\s*<=?\s*[0-9]+u?\s*", m.group(2)):
+            n += 1
+    return n
+
+
 def shader_table(sdir, uam, tmp):
     os.makedirs(tmp, exist_ok=True)
     tab = {}
@@ -153,7 +237,7 @@ def shader_table(sdir, uam, tmp):
         name = f[:-5]
         stage = name.rsplit(".", 1)[1]
         glsl = os.path.join(sdir, name + ".glsl")
-        loops = len(re.findall(r"\bfor\s*\(", open(glsl).read()))
+        loops = light_loops(glsl)
         s = dksh_stats(os.path.join(sdir, f))
         s.update(tgsi_stats(uam, glsl, stage, tmp, loops))
         s["light_loops"] = loops
@@ -186,17 +270,20 @@ def bytes_per_px(m, fmts):
     return colour + depth
 
 
-def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None):
+def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
     p = PRESETS[name]
+    epi = epi or {}
     fmts = fmts or TARGET_FORMATS
     hz = GPU["clocks_mhz"][p["clock"]] * 1e6
     fams, total_s, dram = {}, 0.0, 0.0
     for fam, m in MODEL.items():
         draws = mix_draws.get(fam, m.get("draws", (0, 0))[1])
+        bound = None
         if shader_map:
             vs, ps = tab["real:" + shader_map[fam][0]], tab["real:" + shader_map[fam][1]]
         else:
-            vs, ps = tab[m["vs"]], tab[m["ps"]]
+            bound = bound_shaders(tab, m, epi.get(fam, {}))
+            vs, ps = tab[m["vs"]], mix_stats(tab, bound)
         px = target_px(m, p) * m["coverage"] * m["overdraw"]
         alu = ps["alu_slots"] / GPU["lanes"] / eff
         texc = ps["tex"] * TEX_COST / GPU["tmu"] / eff
@@ -210,7 +297,9 @@ def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None):
         fams[fam] = {"draws": draws, "pixels": round(px), "bound": ["alu", "tex", "rop"][[alu, texc, rop].index(max(alu, texc, rop))],
                      "frag_ms": round(frag_cyc / hz * 1e3, 3), "vertex_ms": round(vtx_cyc / hz * 1e3, 3), "ms": round(t * 1e3, 3),
                      "dram_mb": round(b / 1e6, 2), "vs": vs.get("name", m["vs"]) if not shader_map else shader_map[fam][0],
-                     "ps": m["ps"] if not shader_map else shader_map[fam][1], "target_format": None if m.get("depth_only") else fmts[m["target"]]}
+                     "ps": (bound[0][0] if bound else m["ps"]) if not shader_map else shader_map[fam][1],
+                     "ps_mix": [[n, round(f, 3)] for n, f in bound] if bound else None, "ps_alu_slots": round(ps["alu_slots"], 1),
+                     "target_format": None if m.get("depth_only") else fmts[m["target"]]}
         total_s += t; dram += b
     bw_s = dram / (GPU["dram_gbs"] * 1e9 * GPU["dram_eff"])
     frame = max(total_s, bw_s)
@@ -232,10 +321,11 @@ def main():
     over = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gpu_targets.json")
     if os.path.exists(over):
         fmts.update(json.load(open(over)).get("formats", {}))
-    scenes = {}
+    scenes, epis = {}, {}
     for lvl, key in ((0, "lo"), (1, "hi")):
         draws = {f["name"]: f["draws"][lvl] for f in gen_stream.FAMILIES}
-        scenes["mix_" + key] = [scene(tab, draws, c, e, fmts) for c in PRESETS for e in EFF]
+        epis[key] = epilogue_mix(lvl)
+        scenes["mix_" + key] = [scene(tab, draws, c, e, fmts, epi=epis[key]) for c in PRESETS for e in EFF]
     real_tab = {}
     if real and os.path.exists(os.path.join(real, "index.tsv")):
         real_tab = real_table(real)
@@ -244,7 +334,9 @@ def main():
         scenes["real019_mix_hi"] = [scene(tab, draws, c, e, fmts, REAL_MAP) for c in PRESETS for e in EFF]
     res = {"method": __doc__.strip().split("\n\n", 2)[2], "assumptions": {"lights": LIGHTS, "tex_cost": TEX_COST, "efficiency": EFF, "gpu": GPU,
            "presets": PRESETS, "target_formats": fmts, "format_bytes": FORMAT_BYTES, "z_compress": Z_COMPRESS,
-           "tex_bytes": TEX_BYTES, "fp16_rate": FP16_RATE, "families": MODEL,
+           "tex_bytes": TEX_BYTES, "fp16_rate": FP16_RATE, "families": MODEL, "permutations": PERMUTATIONS,
+           "lit_permutation": LIT_PERMUTATION,
+           "epilogue_mix_hi": {f: {"at%d_fog%d" % k: n for k, n in v.items()} for f, v in epis["hi"].items()},
            "real_map": REAL_MAP if real_tab else None}, "shaders": tab, "scenes": scenes}
     json.dump(res, open(out, "w"), indent=1)
     for k, v in scenes.items():

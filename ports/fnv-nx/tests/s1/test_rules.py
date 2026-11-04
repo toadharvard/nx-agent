@@ -94,6 +94,86 @@ got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> clas
 check('TPL2 forward-declares a namespace function template used earlier', got,
       ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'])
 
+# ---- S1-STL (blk_00ac0000): TPL2 specializations, TPL3, TYPN1, INST1, COPY1, DECL3
+got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> class A\n{\n  public:\n    void d(T* p)\n'
+          '    {\n        D(p);\n    }\n};\ntemplate <> inline void D<int>(int* p)\n{\n}\n'
+          'template <class T> inline void D(T* p)\n{\n    p->~T();\n}\n}\n')
+check('TPL2 declares the primary, not the explicit specialization', got,
+      ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'], ['void D<int>(int* p); /* fnv-nx TPL2'])
+got = run(s1.r_forward_template_calls, 'namespace N {\nstruct S { void m(int* a) { ::N::cp(a, a); } };\n'
+          'template <class T> inline T* cp(T* a, T* b) { return a; }\n}\n')
+check('TPL3 (B) declares a namespace template called qualified before its definition', got,
+      ['namespace N { template <class T> inline T* cp(T* a, T* b); } /* fnv-nx TPL3 */ namespace N {'])
+got = run(s1.r_forward_template_calls, 'namespace N {\nstruct S { void m(int* a) { ::N::cp(a, Later()); } };\n'
+          'struct Later {};\ntemplate <class T> inline T* cp(T* a, Later b) { return a; }\n}\n')
+check('TPL3 (B) leaves a signature that names a type not seen yet', got, (), ['fnv-nx TPL3'])
+got = run(s1.r_dependent_typenames, 'namespace N {\ntemplate <class _Iter> void f(_Iter a)\n'
+          '{ g(a, _Iter_cat<iterator_traits<_Iter>::iterator_category>()); }\n}\n')
+check('TYPN1 adds typename before a dependent library type member in a template argument', got,
+      ['_Iter_cat<typename iterator_traits<_Iter>::iterator_category>()'])
+got = run(s1.r_dependent_typenames, 'template <class _Iter> void f(_Iter a) { g(h<iterator_traits<int>::value_type>()); }\n')
+check('TYPN1 leaves a non-dependent qualified name', got, (), ['typename'])
+_inst = ('namespace other {\ntemplate <class T> class vector { public: void ins(const T* w, unsigned int n, const T& v); };\n}\n'
+         'namespace rstd {\ntemplate <class T> class vector\n{\n  public:\n    typedef unsigned int size_type;\n'
+         '    void ins(const T* w, size_type n, const T& v);\n};\n}\n')
+got = run(s1.r_instantiation_size_types, _inst + 'template void rstd::vector<int>::ins(const int*, unsigned int,\n'
+          '                                     const int&);\n')
+check('INST1 size_type from the class template of the qualifier\'s namespace (not the first `vector`)', got,
+      ['template void rstd::vector<int>::ins(const int*, rstd::vector<int>::size_type, const int&);'])
+got = run(s1.r_instantiation_size_types, _inst + 'template void other::vector<int>::ins(const int*, unsigned int, const int&);\n')
+check('INST1 leaves a member declared with unsigned int', got,
+      ['template void other::vector<int>::ins(const int*, unsigned int, const int&);'], ['::size_type, const int&'])
+got = run(s1.r_copy_ctor_base_casts, 'struct A { int a; };\nstruct B : A { B(const B& o); B(A a); };\n'
+          'struct X : B { X(const X& o); };\nX::X(const X& o) : B(o) {}\n')
+check('COPY1 casts to the base whose constructor also takes its own base by value', got,
+      ['X::X(const X& o) : B(static_cast<const B&>(o)) {}'])
+got = run(s1.r_copy_ctor_base_casts, 'struct A { int a; };\nstruct B : A { B(const B& o); };\n'
+          'struct X : B { X(const X& o); };\nX::X(const X& o) : B(o) {}\n')
+check('COPY1 leaves a base with only its copy constructor', got, ['X::X(const X& o) : B(o) {}'])
+got = run(prepare.r_crt_typedefs, 'typedef _iobuf FILE;\ntypedef __int64 fpos_t;\nFILE* f; fpos_t p; const char* s = "FILE";\n')
+check('DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched', got,
+      ['_iobuf* f; fnvnx_msvc_fpos_t p;', 'typedef __int64 fnvnx_msvc_fpos_t;', '"FILE"'], ['typedef _iobuf FILE'])
+
+got = prepare.r_platform_protos('/x/src/w.cpp', 'extern "C" size_t __cdecl wcslen(const wchar_t* s);\nint g();\n', Counter())
+check('DECL1 a <wchar.h> prototype becomes the header', got, ['#include <wchar.h> /* fnv-nx DECL1 */\nint g();'], ['wcslen'])
+
+# ---- STL2: units with the real container headers use the VC9-layout shim
+_stl2 = ('// std::string in a comment\n#include <string>\n#include <vector>\nnamespace std {\ntemplate <> class allocator<E>\n'
+         '{ typedef size_t size_type; };\n}\nstruct S { std::string s; ::std::vector<int> v; };\n'
+         'const char* n = "std::string";\nvoid f() { stdext::unchecked_copy(a, b, c); x::std::y z; }\n')
+got = run(s1.r_vc9_containers, _stl2)
+check('STL2 includes fnvnx_vc9.h in place of the container headers, line count kept', got,
+      ['#include "fnvnx_vc9.h" /* fnv-nx STL2 */\n/* fnv-nx STL2: #include <vector> */\n'], ['#include <string>'])
+check('STL2 spells std / ::std / stdext as fnvnx_vc9 in code, not in comments, strings or nested names', got,
+      ['struct S { fnvnx_vc9::string s; ::fnvnx_vc9::vector<int> v; };', 'fnvnx_vc9::stdext::unchecked_copy(',
+       '// std::string in a comment', '"std::string"', 'x::std::y z;', 'namespace fnvnx_vc9 {'])
+check('STL2 size_t in the unit\'s own namespace std is MSVC\'s (unsigned int)', got, ['typedef _Sizet size_type;'])
+check('STL2 line count kept', str(got.count('\n') == _stl2.count('\n')), ['True'])
+check('STL2 leaves a unit without the real container headers', run(s1.r_vc9_containers,
+      '#include "rstd.h"\nstd::string s;\n'), ['std::string s;'], ['fnvnx_vc9'])
+got = s1.r_specialization_decls('/x/src/speedtree/projectedshadow_ob1_variant.cpp',
+      'void a();\n#include "h.h"\n#include <memory>\ntemplate <class T> struct B;\nvoid g() {}\n'
+      'template <> X<char>::X(int);\n', Counter())
+check('SPEC1 never prefixes a preprocessor line: after the directives that follow its anchor', got,
+      ['#include <memory>\ntemplate <> X<char>::X(int); /* fnv-nx SPEC1 */ template <class T> struct B;'])
+
+got = run(s1.r_dependent_base_members, 'template <class T> struct V\n{\n    struct A {};\n    struct CI\n    {\n'
+          '        A* aux;\n        T* ptr;\n    };\n    struct I : CI\n    {\n'
+          '        I& operator+=(int n) { if (!aux) f(); ptr += n; return *this; }\n        void g(int ptr) { ptr = 1; }\n'
+          '    };\n};\nstruct P { int q; };\nstruct O : P { void h() { q = 1; } };\n')
+check('TPL1-NESTED this-> for members of a sibling member class used as base in a class template', got,
+      ['if (!this->aux) f(); this->ptr += n;', 'void g(int ptr) { ptr = 1; }', 'void h() { q = 1; }'])
+
+# ---- EBO1: MSVC gives the empty base optimization to the first of two empty bases only
+_ebo = ('struct A\n{\n    void f();\n};\nstruct B\n{\n    static void* operator new(unsigned int);\n};\n'
+        'namespace n { struct B { int x; }; }\nstruct D : A, B\n{ FNVNX_MSVC_BASE_END(B)\n    unsigned char m[19];\n    D();\n};\n'
+        'struct E : A, B\n{\n    E();\n};\nstruct V { virtual ~V(); };\nstruct F : A, V\n{\n    int x;\n};\n')
+got = run(s1.r_msvc_empty_bases, _ebo)
+check('EBO1 a class with two empty bases starts its members at 1 (the base in another namespace ignored)', got,
+      ['struct D : A, B\n{ char fnvnx_msvc_ebo; /* fnv-nx EBO1 */ FNVNX_MSVC_BASE_END(B)'])
+check('EBO1 leaves a class without data and one with a non-empty base', got,
+      ['struct E : A, B\n{\n    E();', 'struct F : A, V\n{\n    int x;'])
+
 # ---- MATH1
 check('MATH1 drops a decomp copy of float sqrt(float)',
       run(s1.r_math_overloads, 'inline float __cdecl sqrt(float _X)\n{\n    return sqrtf(_X);\n}\n'), ['#include <math.h>'],
@@ -204,7 +284,12 @@ _d = tempfile.mkdtemp()
 os.makedirs(os.path.join(_d, 'src'))
 with open(os.path.join(_d, 'src', 'b.h'), 'w') as _h: _h.write(DTOR1_HEAD)
 _unit = os.path.join(_d, 'src', 'b.cpp')
-check('DTOR1 needs code after the includes', run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n', _unit), (), ['DTOR1'])
+check('DTOR1 an include-only unit (a header unit): the declarations after its includes',
+      run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n// end', _unit),
+      ['// end\ntemplate <> NiPointer<Qa>::~NiPointer(); /* fnv-nx DTOR1 */'], ['NiPointer<Ra>::~'])
+check('DTOR1 an include-only unit with nothing to declare: unchanged',
+      run(s1.r_incomplete_pointee_dtors, '#include "none.h"', os.path.join(_d, 'src', 'e.cpp')) == '#include "none.h"' and 'x' or '',
+      ['x'])
 got = run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n// k\nvoid B::k() {}\n', _unit)
 check('DTOR1 declares the destructor for a pointee never completed at file scope', got,
       ['template <> NiPointer<Qa>::~NiPointer(); /* fnv-nx DTOR1 */'], ['NiPointer<Ra>::~', 'NiPointer<Sa>::~'])
@@ -455,6 +540,16 @@ got = run(s1.r_goto_scalar_inits, 'int g(const H* h, int e)\n{\n    if (e) goto 
 check('GOTO1 also splits SSE vectors, const scalars (dropping their const) and pointers to const', got,
       ['int n; n = h->n;', '__m128 ang; ang = _mm_load_ss(&h->f);', 'const ns::Hdr* hd; hd = h->hd;',
        'static const int k = 3;'])
+got = run(s1.r_goto_scalar_inits, 'int g(H* h, int e)\n{\n    const int slots = 4;\n    const unsigned m = (1u << 3) - 1;\n'
+          '    const int n = h->n;\n    const float f = 4;\n    int a[slots];\n    if (e) goto out;\n    a[0] = n & m;\n'
+          '    return a[0] + (int)f;\nout:\n    return 0;\n}\n')
+check('GOTO1-CONST leaves a const integer literal no goto crosses, splits the rest', got,
+      ['    const int slots = 4;', '    const unsigned m = (1u << 3) - 1;', 'int n; n = h->n;', 'float f; f = 4;'],
+      ['static const'])
+got = run(s1.r_goto_scalar_inits, 'int g(H* h, int e)\n{\n    if (e) goto out;\n    const int slots = 4;\n'
+          '    { const int k = 2; h->n = k; }\n    int a[slots];\n    a[0] = h->n;\nout:\n    return e ? 0 : slots;\n}\n')
+check('GOTO1-CONST: a crossed const integer literal becomes static const (still a constant)', got,
+      ['    static const int slots = 4;', '{ const int k = 2; h->n = k; }'])
 
 # ---- GOTO2
 got = run(s1.r_goto_crossed_scopes, 'int f(const P* p, int n)\n{\n    if (n < 2) goto out;\n    Cmp cmp = {0};\n'
@@ -611,6 +706,90 @@ check('STAND1 drops the stand-ins of tagged addresses', got,
        'int Helper(); /* fnv-nx STAND1 */', '((int*)this)[0] = 1;', 'void f() { new FUN_00632ec0; Helper(); }',
        'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b); /* fnv-nx STAND1 */', '/* fnv-nx STAND1: V::Make is'],
       ['__declspec(noinline) V*\n/*', 'FUN_00632ec0::FUN_00632ec0()\n{}'])
+
+# ---- STAND2 (an address another unit defines; only units without auto-inlining, only non-inline, non-virtual)
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_od, _o2 = ['/MT', '/Od', '/Oy-', '/GS'], ['/MT', '/O2', '/GS']
+_syms = {'?Clear@G@@QAEX_N@Z': '0x00845000', '?Reset@G@@QAEXXZ': '0x00644000', '?Free@@YAHH@Z': '0x00845100',
+         '?Keep@@YAHH@Z': '0x00845100', '?Loc@@YAHH@Z': '0x00845100', '?Vir@G@@UAEXXZ': '0x00845200',
+         '?Mine@G@@QAEXXZ': '0x00644100', '?Two@G@@QAEXH@Z': '0x00845000', '?Two@G@@QAEXM@Z': '0x00644100'}
+_json.dump({'units': [
+    {'source': 'src/staging/u.cpp', 'flags': _od, 'symbols': _syms,
+     'functions': [{'address': '0x00644000'}, {'address': '0x00644100'}]},
+    {'source': 'src/staging/o2.cpp', 'flags': _o2, 'symbols': _syms, 'functions': []},
+    {'source': 'src/staging/other.cpp', 'flags': _od, 'symbols': {},
+     'functions': [{'address': '0x00845000'}, {'address': '0x00845100'}, {'address': '0x00845200'}]}]},
+    open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_STAND2_SRC = ('struct G\n{\n    int* p;\n    void Clear(bool);\n    void Reset();\n    virtual void Vir();\n    void Mine();\n'
+               '    void Two(int);\n    void Two(float);\n};\nvoid G::Clear(bool b)\n{\n    delete[] p;\n}\n'
+               'int Free(int a)\n{\n    return a;\n}\ninline int Keep(int a)\n{\n    return a;\n}\n'
+               'static int Loc(int a)\n{\n    return a;\n}\nvoid G::Vir()\n{\n}\nvoid G::Mine()\n{\n}\n'
+               'void G::Two(int)\n{\n}\n// @fnv 0x00644000\nvoid G::Reset()\n{\n    p = 0;\n    Clear(true);\n}\n')
+_saved = s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+got = run(s1.r_stand_in_definitions_elsewhere, _STAND2_SRC, os.path.join(_s, 'src', 'staging', 'u.cpp'))
+got_o2 = run(s1.r_stand_in_definitions_elsewhere, _STAND2_SRC, os.path.join(_s, 'src', 'staging', 'o2.cpp'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+check('STAND2 drops a stand-in of an address another unit defines (/Od)', got,
+      ['/* fnv-nx STAND2: G::Clear is the function at the tagged address */\n', 'int Free(int a); /* fnv-nx STAND2 */',
+       'inline int Keep(int a)\n{', 'static int Loc(int a)\n{', 'void G::Vir()\n{', 'void G::Mine()\n{',
+       'void G::Two(int)\n{', 'void G::Reset()\n{\n    p = 0;\n    Clear(true);'],
+      ['delete[] p'])
+check('STAND2 leaves units MSVC compiled with auto-inlining', got_o2, ['delete[] p', 'int Free(int a)\n{'], ['STAND2'])
+check('STAND2 keeps the line count', 'lines %d' % got.count('\n'), ['lines %d' % _STAND2_SRC.count('\n')])
+
+# ---- STAND3 (a units.json of its own: an /Od unit, an /O2 unit and the decompiled addresses of a third)
+_s3 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s3, 'src')); os.makedirs(os.path.join(_s3, 'build'))
+_STAND3_SYMS = {'??1Mem@@QAE@XZ': '0x0040c110', '??0Guard@@QAE@PAH@Z': '0x00528cb0', '?Helper@@YAHXZ': '0x00401230',
+                '?Get@Box@@QAEHXZ': '0x00401240', '?Put@Box@@QAEHXZ': '0x00401240', '??1Mem@ns@@QAE@XZ': '0x00500000', '?Two@@YAHH@Z': '0x00401230',
+                '?Two@@YAHM@Z': '0x00401240', '?Virt@Box@@UAEHXZ': '0x00401240', '??1Der@@QAE@XZ': '0x0040c110',
+                '?Tagged@@YAHXZ': '0x00401230'}
+_json.dump({'units': [
+    {'source': 'src/od.cpp', 'flags': ['/MT', '/Od', '/Oy-', '/GS', '/EHsc', '/Gy'], 'symbols': _STAND3_SYMS,
+     'functions': []},
+    {'source': 'src/o2.cpp', 'flags': ['/MT', '/O2', '/GS', '/EHsc', '/Gy'], 'symbols': _STAND3_SYMS, 'functions': []},
+    {'source': 'src/ob1.cpp', 'flags': ['/MT', '/Od', '/Oy-', '/GS', '/EHsc', '/Gy', '/Ob1'], 'symbols': _STAND3_SYMS,
+     'functions': []},
+    {'source': 'src/other.cpp', 'flags': ['/MT', '/Od'], 'symbols': {},
+     'functions': [{'address': a, 'symbol': '?f@@YAXXZ', 'size': 4}
+                   for a in ('0x0040c110', '0x00528cb0', '0x00401230', '0x00401240')]}]},
+           open(os.path.join(_s3, 'build', 'units.json'), 'w'))
+_STAND3_SRC = ('struct Mem\n{\n    int a;\n    ~Mem()\n    {\n        Free(this);\n    }\n};\n'
+               'struct Guard\n{\n    int* p;\n    Guard(int* q) : p(q)\n    {\n        Lock(q);\n    }\n};\n'
+               'inline int Helper()\n{\n    return 0;\n}\n'
+               'struct Box\n{\n    int Get();\n    int Put();\n    virtual int Virt()\n    {\n        return 1;\n    }\n};\n'
+               'inline int Box::Get()\n{\n    return 2;\n}\nint Box::Put()\n{\n    return 5;\n}\n'
+               'namespace ns {\nstruct Mem\n{\n    ~Mem()\n    {\n        Free(this);\n    }\n};\n}\n'
+               'int Two(int)\n{\n    return 3;\n}\n'
+               'struct Base\n{\n    virtual ~Base();\n};\nstruct Der : Base\n{\n    ~Der()\n    {\n        Free(this);\n    }\n};\n'
+               '// @fnv 0x00401230\nint Tagged()\n{\n    return 4;\n}\n'
+               'template <class T> struct Tm\n{\n    ~Tm()\n    {\n        Free(this);\n    }\n};\n'
+               'void use() { Mem m; Guard g(0); Helper(); }\n')
+_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+got = run(s1.r_inline_stand_ins, _STAND3_SRC, os.path.join(_s3, 'src', 'od.cpp'))
+got_o2 = run(s1.r_inline_stand_ins, _STAND3_SRC, os.path.join(_s3, 'src', 'o2.cpp'))
+got_ob1 = run(s1.r_inline_stand_ins, _STAND3_SRC, os.path.join(_s3, 'src', 'ob1.cpp'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+check('STAND3 in-class destructor bound to a decompiled address of another unit becomes a declaration', got,
+      ['    ~Mem(); /* fnv-nx STAND3 0x0040c110 */\n\n\n\n};'], ['        Free(this);\n    }\n};\nstruct Guard'])
+check('STAND3 constructor: declaration without its initializer list', got,
+      ['    Guard(int* q); /* fnv-nx STAND3 0x00528cb0 */'], ['p(q)'])
+check('STAND3 free inline function keeps a plain declaration', got,
+      ['int Helper(); /* fnv-nx STAND3 0x00401230 */'], ['inline int Helper'])
+check('STAND3 inline out-of-class member definition goes, a non-inline one is STAND2\'s', got,
+      ['/* fnv-nx STAND3: Box::Get is the function at 0x00401240 */', 'int Box::Put()\n{\n    return 5;'], ['return 2;'])
+check('STAND3 keeps: virtual, address no unit decompiles, two overloads at two addresses, tagged, template, '
+      'destructor of a derived class', got,
+      ['virtual int Virt()\n    {\n        return 1;', 'namespace ns {\nstruct Mem\n{\n    ~Mem()\n    {', 'int Two(int)\n{',
+       '// @fnv 0x00401230\nint Tagged()\n{', 'template <class T> struct Tm\n{\n    ~Tm()\n    {',
+       'struct Der : Base\n{\n    ~Der()\n    {'])
+check('STAND3 line count unchanged', got, [], []) if got.count('\n') == _STAND3_SRC.count('\n') else \
+    check('STAND3 line count unchanged', 'lines %d != %d' % (got.count('\n'), _STAND3_SRC.count('\n')), ['never'])
+check('STAND3 leaves an /O2 unit alone (MSVC may inline there)', got_o2, [_STAND3_SRC], [])
+check('STAND3 leaves an /Od /Ob1 unit alone (/Ob1 inlines in-class and inline definitions)', got_ob1, [_STAND3_SRC], [])
 
 # ---- STR1 uses the declaration in scope
 got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(&str_01082ab8); }\nnamespace N {\n'
@@ -908,6 +1087,206 @@ check('LANE1 address of the lane array',
       ['((float(*)[sizeof(s.v) / sizeof(float)])&(s.v))'], ['&((float*)&(s.v))'])
 check('LANE1 a lane\'s address stays',
       run(s1.r_lane_array_address, 'void f(S s) { g(&((float*)&(s.v))[1]); }\n'), ['&((float*)&(s.v))[1]'], ['(*)['])
+
+# ---- S1-refs: STD2 (a unit's own `std::` definition renamed, with its recipe symbol)
+import json as _json
+_s2 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s2, 'build')); os.makedirs(os.path.join(_s2, 'src'))
+_json.dump({'units': [{'source': 'src/g.cpp', 'functions': [
+    {'address': '0x00401000', 'symbol': '?abs@std@@YANM@Z', 'size': 20},
+    {'address': '0x00401020', 'symbol': '?f@@YAHH@Z', 'size': 8}], 'symbols': {}},
+    {'source': 'src/h.cpp', 'functions': [{'address': '0x00401040', 'symbol': '?g@@YAHH@Z', 'size': 8}],
+     'symbols': {'?abs@std@@YANM@Z': '0x00401000'}}]}, open(os.path.join(_s2, 'build', 'units.json'), 'w'))
+s1._STD2_FNS = None; s1.STD2_RENAMES.clear()
+_g = ('// @fnv 0x00401000\nFNVNX_KEEP double std::abs(float value)\n{\n    return value < 0 ? -value : value;\n}\n'
+      '// @fnv 0x00401020\nint f(int x) { return (int)std::abs((float)x); }\n')
+_o = run(s1.r_std_definitions, _g, os.path.join(_s2, 'src', 'g.cpp'))
+check('STD2 file-scope std:: definition the recipe decorates in std -> fnvnx_std_',
+      _o, ['FNVNX_KEEP double fnvnx_std_abs(float value)', 'return (int)std::abs((float)x);'], ['double std::abs'])
+check('STD2 a unit whose recipe has no std:: definition is untouched',
+      run(s1.r_std_definitions, _g.replace('0x00401000', '0x00401060'), os.path.join(_s2, 'src', 'h.cpp')),
+      ['double std::abs(float value)'], ['fnvnx_std_'])
+check('STD2 a member definition in a class scope is not at file scope',
+      run(s1.r_std_definitions, 'struct S {\n// @fnv 0x00401000\ndouble std::abs(float v) { return v; }\n};\n',
+          os.path.join(_s2, 'src', 'g.cpp')), [], ['fnvnx_std_'])
+s1.rename_std_definitions(_s2, Counter())
+_u = _json.load(open(os.path.join(_s2, 'build', 'units.json')))['units']
+check('STD2 POST hook renames the definition\'s recipe symbol only', _json.dumps(_u),
+      ['"?fnvnx_std_abs@@YANM@Z"', '"?f@@YAHH@Z"', '"?abs@std@@YANM@Z": "0x00401000"'])
+_shutil.rmtree(_s2, ignore_errors=True)
+
+# ---- S1-refs: COND1 (`c ? false : f()` with f returning a class convertible both ways with bool), RSTR1
+_G = ('struct Gate { char v; Gate() {} Gate(bool b) : v(b) {} operator bool() const { return v != 0; } };\n'
+      'struct Only { char v; operator bool() const { return v != 0; } };\n'
+      'struct N { Gate test(float e) const; int other(float e) const; Only probe(float e) const; };\n')
+check('COND1 the literal of `? false :` becomes the gate class (MSVC\'s conversion)',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->test(0.5f)) g(); }\n'),
+      ['!n ? Gate(false) : n->test(0.5f)) g();'])
+check('COND1 a call returning int stays',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->other(0.5f)) g(); }\n'),
+      [], ['Gate(false)', 'Gate(true)'])
+check('COND1 a class without a bool constructor (no ambiguity) stays',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->probe(0.5f)) g(); }\n'),
+      [], ['Gate(false)', 'Gate(true)'])
+check('COND1 an operand that does not end in the call stays',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { int x = !n ? false : n->test(0.5f) + 1; }\n'),
+      [], ['Gate(false)', 'Gate(true)'])
+_R = ('template <class T> struct Arr { void AddBack(const T& v); void Set(int i, T* p); };\n'
+      'struct S { int a; };\n')
+check('RSTR1 restrict local passed to a const T& parameter',
+      run(s1.r_restrict_reference_args, _R + 'void f(Arr<S*>* o) {\n    S* __restrict c = new S();\n'
+          '    o->AddBack(c);\n    o->Set(0, c);\n}\n'),
+      ['o->AddBack(fnvnx_unrestrict(c));', 'o->Set(0, c);'])
+check('RSTR1 a plain local stays',
+      run(s1.r_restrict_reference_args, _R + 'void f(Arr<S*>* o) {\n    S* __restrict d = 0;\n    S* c = 0;\n'
+          '    o->AddBack(c);\n}\n'), [], ['fnvnx_unrestrict'])
+check('RSTR1 a use outside the declaring function stays',
+      run(s1.r_restrict_reference_args, _R + 'void f() { S* __restrict c = 0; }\nvoid h(Arr<S*>* o, S* c) '
+          '{ o->AddBack(c); }\n'), [], ['fnvnx_unrestrict'])
+# ---- S1-refs: NEW1 plain `unsigned`, NEW5 (placement-only operator delete)
+check('NEW1 plain unsigned size parameter -> size_t, unsigned long / short kept',
+      prepare.r_newdel_size('x.cpp', 'static void operator delete[](void* p, unsigned);\n'
+                            'static void* operator new(unsigned n);\nvoid* operator new(unsigned long n, unsigned short k);\n'
+                            'void* operator new(unsigned n, unsigned& total);\n', Counter()),
+      ['operator delete[](void* p, size_t)', 'operator new(size_t n)', 'operator new(unsigned long n, unsigned short k)',
+       'operator new(size_t n, unsigned& total)'])
+_n5 = ('struct Pm\n{\n    virtual ~Pm();\n    int m;\n    static void operator delete(void*, void*);\n'
+       '    static void* operator new(size_t n) { return ::operator new(n); }\n};\nstruct Pd : Pm\n{\n    int k;\n};\n'
+       'class Pc\n{\n    int h;\npublic:\n    virtual ~Pc() {}\n    static void* operator new(size_t, void* p) { return p; }\n'
+       '    static void operator delete(void*, void*) {}\n};\n')
+_o5 = run(s1.r_placement_only_delete, _n5)
+check('NEW5 placement-only delete + virtual dtor: global delete member',
+      _o5, ['struct Pm\n{ FNVNX_GLOBAL_DELETE /* fnv-nx NEW5 */\n',
+            'class Pc\n{ public: FNVNX_GLOBAL_DELETE private: /* fnv-nx NEW5 */\n    int h;'], ['struct Pd : Pm\n{ F'])
+check('NEW5 the class\'s own inline operator new gets the tag (no delete on a throwing constructor, V1 N2)',
+      _o5, ['static void* operator new(size_t n FNVNX_NEW5_TAG) { return ::operator new(n); }'])
+check('NEW5 a class whose operator new has no body here: unchanged',
+      run(s1.r_placement_only_delete, _n5.replace('static void* operator new(size_t n) { return ::operator new(n); }',
+                                                  'static void* operator new(size_t n);')),
+      ['class Pc\n{ public: FNVNX_GLOBAL_DELETE'], ['struct Pm\n{ FNVNX'])
+check('NEW5 keeps the line count', str(_o5.count('\n') == _n5.count('\n')), ['True'])
+check('NEW5 a usual delete next to the placement form: unchanged',
+      run(s1.r_placement_only_delete, _n5.replace('static void operator delete(void*, void*);',
+                                                  'static void operator delete(void*, void*);\n    static void operator delete(void* p);')
+          .replace('class Pc', 'class Pc2 : Pm')), [], ['FNVNX_GLOBAL_DELETE'])
+check('NEW5 no virtual destructor, or a base class: unchanged',
+      run(s1.r_placement_only_delete, 'struct Q\n{\n    ~Q();\n    static void operator delete(void*, void*);\n};\n'
+          'struct R : B\n{\n    virtual ~R();\n    static void operator delete(void*, void*);\n};\n'), [], ['FNVNX_GLOBAL_DELETE'])
+check('NEW5 a placement form with another second parameter: unchanged',
+      run(s1.r_placement_only_delete, 'struct Q\n{\n    virtual ~Q();\n    static void operator delete(void*, int, int);\n};\n'),
+      [], ['FNVNX_GLOBAL_DELETE'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _c5 = os.path.join(tempfile.mkdtemp(), 'n5.cpp')
+    _m5 = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith(('#define FNVNX_GLOBAL_DELETE ', '#define FNVNX_NEW5_TAG ', 'struct fnvnx_new_tag'))]  # the shim's own
+    open(_c5, 'w').write('#include <stddef.h>\n#include <new>\n' + ''.join(_m5) + _o5 +
+                         'Pm::~Pm() {}\nvoid f(Pd* d, Pc* c) { delete d; delete c; }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror', _c5],
+                         capture_output=True, text=True)
+    check('NEW5 output compiles (derived class too)', _r.stderr or 'ok', ['ok'])
+# ---- S1-refs agent C: TPL1 out-of-class members of a header's class template, SPEC1 through a typedef name,
+# RCAST1 in comments
+_c = tempfile.mkdtemp()
+os.makedirs(os.path.join(_c, 'src'))
+with open(os.path.join(_c, 'src', 'pb.h'), 'w') as _h:
+    _h.write('template <class A, class T> class LBase\n{\n  public:\n    T* m_pFirst;\n    unsigned int m_uiCount;\n};\n'
+             'template <class A, class T> class PList : public LBase<A, T>\n{\n  public:\n    int m_iOwn;\n'
+             '    T Pop();\n};\n')
+got = run(s1.r_dependent_base_members, '#include "pb.h"\ntemplate <class A, class T>\n// note\nKEEPX T PList<A, T>::Pop()\n'
+          '{\n    T* m_uiCount2 = m_pFirst;\n    m_iOwn = 0;\n    --m_uiCount;\n    return *m_uiCount2;\n}\n',
+          os.path.join(_c, 'src', 'pl.h'))
+check('TPL1 out-of-class member of a class template from an included header', got,
+      ['T* m_uiCount2 = this->m_pFirst;', '    --this->m_uiCount;', '    m_iOwn = 0;'], ['this->m_iOwn'])
+check('TPL1 out-of-class explicit specialization of a header\'s template: untouched',
+      run(s1.r_dependent_base_members, '#include "pb.h"\ntemplate <>\nint PList<char, int>::Pop()\n{\n    --m_uiCount;\n'
+          '    return 0;\n}\n', os.path.join(_c, 'src', 'pm.h')), (), ['this->'])
+check('TPL1 out-of-class member, the template\'s own parameter shadows nothing: params untouched',
+      run(s1.r_dependent_base_members, '#include "pb.h"\ntemplate <class A, class m_pFirst>\nint PList<A, m_pFirst>::Pop()\n'
+          '{\n    return m_uiCount + sizeof(m_pFirst);\n}\n', os.path.join(_c, 'src', 'pn.h')),
+      ['return this->m_uiCount + sizeof(m_pFirst);'], ['this->m_pFirst'])
+_sp = os.path.join(_c, 'src', 'gamebryo2.2', 'corelibs', 'nimain', 'nitset.inl')
+got = run(s1.r_specialization_decls, 'class Item;\ntemplate <class T> class Ref\n{\n};\n'
+          'template <class T> class Alloc\n{\n};\ntemplate <class T, class B>\nclass Bag\n{\npublic:\n    void Put(const T& v);\n'
+          '    void Grow(unsigned int n);\n};\n\ntypedef Bag<Ref<Item>,\n            Alloc<Ref<Item> > >\n    ItemBag;\n\n'
+          'template <>\n// @x\nFNVNX_KEEP void ItemBag::Put(const Ref<Item>& v)\n{\n    Grow(2);\n}\n\n'
+          'void ItemBag::Grow(unsigned int n)\n{\n}\n', _sp)
+check('SPEC1 a member defined through a typedef name of the specialization', got,
+      ['};\ntemplate <> void Bag<Ref<Item>, Alloc<Ref<Item> >>::Put(const Ref<Item>& v) FNVNX_KEEP; /* fnv-nx SPEC1 */ '
+       'template <> void Bag<Ref<Item>, Alloc<Ref<Item> >>::Grow(unsigned int n); /* fnv-nx SPEC1 */'])
+check('SPEC1 a typedef of a template the file does not define: nothing',
+      run(s1.r_specialization_decls, '#include <x.h>\ntypedef Bag<int, int> IB;\nvoid IB::Grow(unsigned int n)\n{\n}\n', _sp),
+      (), ['SPEC1'])
+check('RCAST1 a reference cast spelled in a comment: untouched',
+      run(s1.r_ref_cast_temporaries, 'class P\n{\n    // bool __cdecl P::*(const P&)\n    P();\n    /* (Q&)\n    f(); */\n};\n'),
+      ['    P();\n', '    f(); */'], ['fnvnx_lvalue'])
+check('RCAST1 `//` inside a string literal does not hide the cast after it',
+      run(s1.r_ref_cast_temporaries, 'g("a//b", (const M&)h(n));\n'), ['(const M&)fnvnx_lvalue(h(n))'])
+_shutil.rmtree(_c, ignore_errors=True)
+# ---- S1-refs: NSCALL1 (a namespace's own prototype of a CRT name, called unqualified) and DUPINT1-RET (units.json)
+_s3 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s3, 'build')); os.makedirs(os.path.join(_s3, 'src'))
+_json.dump({'units': [
+    {'source': 'src/n.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00401100'}},
+    {'source': 'src/g.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00401100',
+                                        '?strcpy_s@@YAHPADIPBD@Z': '0x00401100'}},
+    {'source': 'src/d.cpp', 'symbols': {'_Fmt': '0x00401200', '?Fmt@@YAPADPADIPBDZZ': '0x00401200',
+                                        '_Pick': '0x00401300', '?Pick@@YAHPAXE@Z': '0x00401300'}}]},
+           open(os.path.join(_s3, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+_n = ('namespace ns1 {\nint strcpy_s(char* d, unsigned int n, const char* s);\n'
+      'struct Name { operator const char*() const; };\n'
+      'void f(char* b, const Name& k)\n{\n    strcpy_s(b, 260, k);\n    if (!strcpy_s(b, 4, "abc")) return;\n'
+      '    // strcpy_s(b, 1, k) in a comment\n}\n}\n')
+check('NSCALL1 unqualified calls of N\'s own CRT prototype -> N::name',
+      run(s1.r_namespace_crt_calls, _n, os.path.join(_s3, 'src', 'n.cpp')),
+      ['ns1::strcpy_s(b, 260, k);', '!ns1::strcpy_s(b, 4, "abc")', 'int strcpy_s(char* d',
+       '// strcpy_s(b, 1, k) in a comment'], ['ns1::ns1::'])
+check('NSCALL1 the unit also binds the global spelling: untouched',
+      run(s1.r_namespace_crt_calls, _n, os.path.join(_s3, 'src', 'g.cpp')), [], ['ns1::strcpy_s'])
+check('NSCALL1 a class member of that name: untouched',
+      run(s1.r_namespace_crt_calls, _n.replace('struct Name {', 'struct Name { int strcpy_s(char*, int);'),
+          os.path.join(_s3, 'src', 'n.cpp')), [], ['ns1::strcpy_s'])
+_d = ('extern "C" int __cdecl Fmt(char* b, int n, const char* f, ...);\n'
+      'char* __cdecl Fmt(char* d, unsigned int n, const char* f, ...);\n'
+      'void g(char* b, size_t n)\n{\n    Fmt(b, n + 1, "%d", 1);\n    if (n) Fmt(b, n, "x"); else Fmt(b, 2, "y");\n}\n')
+check('DUPINT1-RET other return type, results unused: later prototype dropped',
+      run(s1.r_duplicate_int_overloads, _d, os.path.join(_s3, 'src', 'd.cpp')),
+      ['extern "C" int __cdecl Fmt(char* b, int n', '/* fnv-nx DUPINT1 */'], ['char* __cdecl Fmt'])
+check('DUPINT1-RET a call uses the result: untouched',
+      run(s1.r_duplicate_int_overloads, _d.replace('    Fmt(b, n + 1', '    char* p = Fmt(b, n + 1'),
+          os.path.join(_s3, 'src', 'd.cpp')), ['char* __cdecl Fmt'], ['fnv-nx DUPINT1'])
+check('DUPINT1-RET a narrower integer parameter: untouched',
+      run(s1.r_duplicate_int_overloads, 'extern "C" void Pick(void* p, int n);\nint Pick(void* p, unsigned char n);\n'
+          'void h(void* p) { Pick(p, 1); }\n', os.path.join(_s3, 'src', 'd.cpp')), ['int Pick('], ['fnv-nx DUPINT1'])
+s1._UNIT_SYMBOLS = _saved
+_shutil.rmtree(_s3, ignore_errors=True)
+
+check('COND1 an explicit G(bool): the conditional is bool, untouched (V1 C2)',
+      run(s1.r_conditional_bool_gates, _G.replace('Gate(bool b)', 'explicit Gate(bool b)') +
+          'void f(N* n) { if (!n ? false : n->test(0.5f)) g(); }\n'), [], ['Gate(false)'])
+check('COND1 `!x.f(a)` is bool already: untouched (V1 C3)',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { bool r = !n ? false : !n->test(0.5f); }\n'),
+      [], ['Gate(false)'])
+
+# ---- S1-refs: FINL1 (`__forceinline` on a declaration whose body the unit does not have)
+_F = ('struct A {\n    __forceinline ~A();\n    __forceinline int get(int i);\n    __forceinline int get(int i) const;\n'
+      '    __forceinline int put(int i);\n    __forceinline int one();\n};\n'
+      'struct B { int one() { return 1; } };\n'
+      'struct T { template<class X> static __forceinline void d(X* x, int n, Pod); '
+      'template<class X> static __forceinline void d(X* x, int n, Cls); };\n'
+      'template<class X> __forceinline void T::d(X* x, int n, Pod) {}\n'
+      'struct H : A { H() : A() {} };\n'
+      'int A::get(int i) const { return i; }\n__forceinline int A::put(int i) { return i; }\n')
+_o = run(s1.r_forceinline_declarations, _F)
+check('FINL1 body-less declarations of functions the unit does not define lose __forceinline',
+      _o, ['/* fnv-nx FINL1: __forceinline */ ~A();', '/* fnv-nx FINL1: __forceinline */ int get(int i);',
+           '/* fnv-nx FINL1: __forceinline */ int one();',
+           '/* fnv-nx FINL1: __forceinline */ void d(X* x, int n, Cls);'])
+check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overload)',
+      _o, ['__forceinline int get(int i) const;', '__forceinline int put(int i);',
+           'static __forceinline void d(X* x, int n, Pod);'])
+check('FINL1 headers are left alone',
+      run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)

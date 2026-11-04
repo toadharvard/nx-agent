@@ -169,7 +169,7 @@ void SortPackets(const Packet* p, uint32_t n, uint32_t* order, uint32_t* tmp, ui
     // LSD radix over the full 64-bit key in 8-bit digits: all 8 histograms in one pass over the keys (8 KiB, L1
     // resident), digits identical in every key skipped, ping-pong buffers. Stable. (P6n F2: the former 16-bit
     // digits cleared and prefix-summed a 256 KiB table per digit: ~1.9 M fixed instructions per frame.)
-    static uint32_t hist[8][256];
+    uint32_t hist[8][256];   // per call (8 KiB of stack): two threads sort their own frames at once (V1 T1)
     memset(hist, 0, sizeof hist);
     if (!n) return;
     const uint64_t k0 = p[0].key;
@@ -340,7 +340,7 @@ void Frame::Finish(StateCache& sc, NxFrameStats* stats, bool present) {
         cur = def;
         // Redundant-bind elimination: every bind is compared with the last value encoded in this pass.
         uint32_t curState = 0, curTex = ~0u, curTexN = 0, curVtxB = 0, curVtxO = ~0u, curIdxB = 0, curIdxO = ~0u;
-        uint32_t curEpi = 0, curTag = 0;
+        uint32_t curEpi = 0, curTag = 0, curDyn = ~0u;   // curDyn: dyn record id whose values `cur` holds
         for (; i < nPackets_ && (keys_[i] >> 56) == pass; i++) {
             const Packet& p = packets_[order_[i]];
             if (p.prim != kClearPrim && tags_[order_[i]] != curTag) {
@@ -360,19 +360,24 @@ void Frame::Finish(StateCache& sc, NxFrameStats* stats, bool present) {
                 a = enc_.Op(NxOp_BindState, 1); a[0] = p.state; curState = p.state; stateBinds_++;
                 rebound = true;
             }
-            if (memcmp(&d.viewport, &cur.viewport, sizeof d.viewport)) {
-                a = enc_.Op(NxOp_Viewport, 6); memcpy(a, &d.viewport, 24); cur.viewport = d.viewport;
-            }
-            if (memcmp(&d.scissor, &cur.scissor, sizeof d.scissor)) {
-                a = enc_.Op(NxOp_Scissor, 4); memcpy(a, &d.scissor, 16); cur.scissor = d.scissor;
-            }
-            if (memcmp(d.blendConstant, cur.blendConstant, sizeof d.blendConstant)) {
-                a = enc_.Op(NxOp_BlendConst, 4); memcpy(a, d.blendConstant, 16);
-                memcpy(cur.blendConstant, d.blendConstant, 16);
-            }
-            if (d.biasUnits != cur.biasUnits || d.biasSlope != cur.biasSlope) {
-                a = enc_.Op(NxOp_DepthBias, 3); a[0] = fbits(d.biasUnits); a[1] = fbits(d.biasSlope); a[2] = 0;
-                cur.biasUnits = d.biasUnits; cur.biasSlope = d.biasSlope;
+            // the same record as the previous draw (AddDyn shares runs of equal records): its values are encoded
+            const uint32_t dynId = p.dyn && p.dyn <= nDyn_ ? p.dyn : 0;
+            if (dynId != curDyn) {
+                curDyn = dynId;
+                if (memcmp(&d.viewport, &cur.viewport, sizeof d.viewport)) {
+                    a = enc_.Op(NxOp_Viewport, 6); memcpy(a, &d.viewport, 24); cur.viewport = d.viewport;
+                }
+                if (memcmp(&d.scissor, &cur.scissor, sizeof d.scissor)) {
+                    a = enc_.Op(NxOp_Scissor, 4); memcpy(a, &d.scissor, 16); cur.scissor = d.scissor;
+                }
+                if (memcmp(d.blendConstant, cur.blendConstant, sizeof d.blendConstant)) {
+                    a = enc_.Op(NxOp_BlendConst, 4); memcpy(a, d.blendConstant, 16);
+                    memcpy(cur.blendConstant, d.blendConstant, 16);
+                }
+                if (d.biasUnits != cur.biasUnits || d.biasSlope != cur.biasSlope) {
+                    a = enc_.Op(NxOp_DepthBias, 3); a[0] = fbits(d.biasUnits); a[1] = fbits(d.biasSlope); a[2] = 0;
+                    cur.biasUnits = d.biasUnits; cur.biasSlope = d.biasSlope;
+                }
             }
             if (d.stencilRef != DynRec::kStateRef && (rebound || d.stencilRef != cur.stencilRef)) {
                 a = enc_.Op(NxOp_StencilRef, 1); a[0] = d.stencilRef; cur.stencilRef = d.stencilRef;
