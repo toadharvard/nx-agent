@@ -17,13 +17,13 @@ import s1b_patches as sp  # noqa: E402
 decomp = sys.argv[1]
 fails = []
 sites = sp.load_sites()
-rules_ids = ('XINC1', 'FTOL1', 'DBUG1', 'RET1')
+rules_ids = sp.MSVC_RULES + sp.GATED
 for s in sites:
     if s.rule not in rules_ids:
         fails.append('%s: unknown rule %s' % (s.origin, s.rule))
     if not any(w.strip() for w in s.why):
         fails.append('%s: no evidence' % s.origin)
-own = {'r_xinc1', 'r_ftol1', 'r_dbug1', 'r_ret1'}
+own = {'r_xinc1', 'r_ftol1', 'r_dbug1', 'r_ret1', 'r_mt1'}
 all_rules = prepare.RULES + prepare.load_stream_rules()
 before = [r for r in all_rules if r.__name__ not in own]
 files = sorted({s.path for s in sites})

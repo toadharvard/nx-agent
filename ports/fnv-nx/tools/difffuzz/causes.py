@@ -194,6 +194,9 @@ POLICY = {
                                                     'reads memory, is skipped natively'),
     'native-trap':    ('real-bug', 'S1', True, 'the native executes a trap (FALL1 __builtin_trap or GCC '
                                                'unreachable) on a path where the exe returns'),
+    'vslot-trap':     ('real-bug', 'S2c', True, 'the native calls a vtable slot the link filled with '
+                                              'fnvnx_vslot_trap / fnvnx_special_trap (brk #0xf5 / #0xf6: a virtual '
+                                              'defined nowhere) where the exe vftable has a function'),
     'layout-offset':  ('real-bug', 'S1', True, 'a pointer into the same object at another offset (a few words): a '
                                                'base subobject or member placed differently (layout)'),
     'field-width':    ('real-bug', 'S1', True, 'the machines read one field with another width or signedness '
@@ -302,7 +305,7 @@ FIX_CLASSES = {
                       ('native-stub-data', 'native-address', 'split-global', 'import-slot-called', 'call-args')),
     'vtables':       ('S2c', 'every image vftable pairs with a full native vtable of the static class (no short '
                              'vtables, overrides bound to their this-adjusting thunks)',
-                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding')),
+                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap')),
 }
 FIX_CLASS_OF = {c: k for k, v in FIX_CLASSES.items() for c in v[2]}
 
@@ -422,6 +425,53 @@ def _rule_error(d, rec=None):
         if fx and fx[0] in ('r', 'w'):
             return 'oracle-fault'
     return None
+
+
+# The link's trap stubs (tools/link/fnvlink.py): fnvnx_vslot_trap `brk #0xf5`, fnvnx_special_trap `brk #0xf6`. Every unit
+# image holds one copy of each, so all functions of a unit that reach it fault at the same pc (S1-fuzzA-001).
+LINK_TRAPS = {0xd4201ea0: 'vslot-trap', 0xd4201ec0: 'vslot-trap'}
+_IMAGE_WORDS = {}
+
+
+def _image_word(source, pc):
+    """The 32-bit word at `pc` of the unit image difffuzz linked for `source` (FNVNX_CAUSES_A64 or config.A64WORK,
+    `<object>.elf`), None when the image is not there. An image linked from other objects than the record's may
+    have moved; callers only act on words that cannot be anything else."""
+    d = os.environ.get('FNVNX_CAUSES_A64')
+    if not d:
+        try:
+            import config
+            d = str(config.A64WORK)
+        except Exception:  # noqa: BLE001
+            return None
+    path = os.path.join(d, (source or '').replace('/', '_') + '.o.elf')
+    if path not in _IMAGE_WORDS:
+        segs = []
+        try:
+            from elftools.elf.elffile import ELFFile
+            with open(path, 'rb') as f:
+                for seg in ELFFile(f).iter_segments():
+                    if seg['p_type'] == 'PT_LOAD' and seg['p_filesz']:
+                        segs.append((seg['p_vaddr'], seg.data()))
+        except Exception:  # noqa: BLE001 - no image, or not an ELF: no answer
+            segs = None
+        _IMAGE_WORDS[path] = segs
+    for base, data in _IMAGE_WORDS[path] or ():
+        if base <= pc and pc + 4 <= base + len(data):
+            return struct.unpack_from('<I', data, pc - base)[0]
+    return None
+
+
+def _rule_trap(d, rec):
+    """native `exc:N@pc` whose instruction is one of the link's trap stubs -> vslot-trap (S2c), else None."""
+    a = d.get('arm') or ''
+    if '@' not in a:
+        return None
+    try:
+        pc = int(a.split('@', 1)[1], 16)
+    except ValueError:
+        return None
+    return LINK_TRAPS.get(_image_word((rec or {}).get('source'), pc))
 
 
 def _rule_call_args(d):
@@ -1581,6 +1631,8 @@ def refine(rec, cause=None):
     got = None
     if k == 'error':
         got = _rule_error(d, rec)
+        if got == 'native-trap':
+            got = _rule_trap(d, rec) or got
         if got == 'native-null-read' and _calls_allocator(rec):
             pass        # new-null retired (S13b audit): since difffuzz-12 the allocators return heap blocks, so a
                         # canned 0 comes from another call, a valid input: the native null access stays a real bug

@@ -190,7 +190,131 @@ its functions' keys (`fnkeys.py`), so only those units are fuzzed again: 9,669 o
 on that tree, no HARNESS bump; a later change of a unit's rows refreshes that unit only. 0x00eacd00 and 0x00a89b00
 (S1b's two XINC1 call-args artefacts) are ok on link c0d6c71516f6. Test: `tests/s13/test_renames.py`.
 
-**difffuzz-12 (J-0138).** The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
+**difffuzz-14: scoped harness changes (fnkeys.CHANGES, SCOPED = d14; HARNESS stays difffuzz-13).** A harness
+change whose effect is confined to identifiable functions no longer bumps HARNESS (a full refresh of all 66,141
+keyed functions). It is a `CHANGES` row that says in words what it invalidates and decides it with `selects` (static
+facts: the target's MSVC name, the original addresses its oracle code calls through the same-unit functions it runs
+for real, the names and absolute addresses its native code and what it reaches in its object refer to: the key of
+a selected function gets the change's tag) and `recheck` (a saved divergence it explains differently: fuzzcache.py
+`todo` sends that verdict back once; rows record the `changes` they were fuzzed under). `fnkeys.py explain
+<targets> <catalog> [<cache>...]` counts them; the farms stop for a newer HARNESS or SCOPED on the integration head.
+On link c0d6c71516f6 (all 26 caches):
+| change | what it does | invalidates |
+|---|---|---|
+| d14-dtor | an MSVC deleting destructor target `??_G` / `??_E` (this, flags) runs with flags = 1 only (`runner.deleting_flags`: the Itanium D0 it stands for always deletes; flags 0 has no native counterpart), and its return value (this vs void) is not compared, so the stores are (S1-fuzzq: 41 `falloff?` records "x86 0 calls, native 1") | 103 keys |
+| d14-noreturn | `_CxxThrowException` 0x00ec7894, `std::_Xlen` 0x00ec30b0, `exit`, and the imports ExitProcess/ExitThread/RaiseException... on the oracle; `__cxa_throw`, `__cxa_rethrow`, `fnvnx_cxx_throw_exception`, `__cxa_throw_bad_array_new_length`, `std::__throw_*`, `__cxa_pure_virtual`, `abort`, `exit`... natively (or a code stub of a listed CRT address): the call is traced, then the run ends on that machine (`Result.noreturn`; result and callee-saved registers not compared, earlier stores are). The native throws map to 0x00ec7894 (compared by target only); `__cxa_allocate_exception` is a builtin returning a private block (MSVC builds the object in its stack frame; neither is compared). Before, the canned return ran into GCC's udf after the call (exc:1: 00b43490, 00a63ae0, 00e89460) | 555 keys |
+| d14-math | the CRT math as builtins with C99 / IEEE results on both machines is S1-fuzzB's `libcalls.CRT_MATH` / `crt_math` (37b1157: log10 no longer through `fyl2x`, which Unicorn leaves undone for x <= 0, so log10(0) gave 0.0: S1-fuzzq 0082ffd0); this change adds the CRT addresses of docs/RUNTIME.md beside the link's provider rows and the `_CIpow/_CIfmod/_CIexp/_CIatan/_CIasin/_CIacos/_CItan` x87-stack forms, run through a stub that spills ST1/ST0 into a cdecl call of the same builtin. Of the 54 cached records whose traces touch these, 36 no longer reproduce, 18 diverge later | 317 keys |
+| d14-vslot | a native call of a vtable slot the link filled with its trap (`fnvnx_vslot_trap` brk #0xf5, `fnvnx_special_trap` #0xf6, via `__fnvnx_vtrap_<X>`, which loads x1 = "virtual function defined nowhere: <name> (slot k of <_ZTV>)") is the error `trap:<stub>:<text>` and the cause `native-undefined` (classify.py), not S1's native-trap: S1-fuzzq's "exc:7 at shared PCs" (0x0a069914 in 54 functions of highprocess.cpp) are each unit's trap stub | 175 cached records rechecked |
+
+**difffuzz-15 (d15-vcall, SCOPED = d15).** The largest artifact class, `oracle-vcall` (2,439 divergences in 2,195
+functions over the 26 caches), had two harness causes. (1) An intercepted x86 callee of unknown convention (a call
+through a pointer the case filled: no oracle code, no declaration) popped 0 bytes; where the MSVC caller does not
+clean up (stdcall/thiscall callee), esp stayed off by the arguments and the oracle returned to an argument word
+(`fault:x:00000000`; e.g. 00cf75f0: `allocator->vtbl[4](p, n)` twice). `Pair._learn_pop` now searches, for up to 3
+such call sites jointly, the pushes before each site (most first, then 0) for a clean run: no fault, a balanced
+stack at the target's return (`Result.esp_ok`), every intercepted call returning into loaded oracle code (a wrong
+count returns to an argument word, which then reads as a wild call); the counts are kept per call site for later
+cases. (2) An oracle call through memory the case did not plant (neither a direct target of the oracle code nor a
+planted vftable slot) ended the comparison; its callee is unknown and each machine reads its own slot layout from
+the fuzz bytes, so it now matches whatever the native calls at that index (both get the same canned result) and the
+later calls and the rest are compared. A planted slot or a direct target is compared as before. On a random sample
+of 120 cached oracle-vcall records (link c0d6c71516f6): 65 no longer reproduce (5 before), 31 still end on the oracle
+(15 reads, 11 executes, 5 unplanted call-targets after an oracle fault), 24 now reach an ordinary comparison
+(call-target 9, mem-write 6, call-count 5, ...). d15-vcall selects the functions whose oracle closure makes an
+indirect call: 14,448 of 66,141 keys. Test: `tests/s13/test_d15.py` (9 checks).
+
+**difffuzz-16 (thread-local variables; catalog version 2).** The 835 functions with a native object the harness
+did not fuzz on link c0d6c71516f6 (coverage 98.76 %) all had SECREL relocations, 1,994 of them to 32 MSVC
+`__declspec(thread)` variables (memory contexts, allocator tags, per-thread script data). units.json gives those
+variables image addresses in the exe's .tls template, which starts at 0x01272000 (`?__tls_index@@3PAEA`), so a SECREL
+is the variable's offset from there (`coffobj.TLS_IMAGE_START`). On the oracle, fs:[0x2c] (`__tls_array`) points to a
+slot array in the TEB page whose slot 0 is a zeroed private block (`x86emu.TLS_*`, not compared, like the native
+`tpidr_el0` block), and `__tls_index` (0x0126fd98) is pinned to 0. Catalog rows carry `cv`; fuzz_job rebuilds a
+cached catalog of an older version (about a minute). 40 such functions fuzzed locally: all 40 get a verdict, 18
+without a divergence; the divergences are ordinary causes (TlsGetValue/TlsAlloc call shapes among them), none in the
+TLS block. A function whose closure reaches one of them gets a new oracle hash (it runs that callee for real now), so
+keys refresh without a CHANGES row. Test: `tests/s13/test_d16.py`.
+
+**difffuzz-17 (d17-statics, SCOPED = d17).** `local-static` (599 artifact divergences, 298 functions) came from
+comparing a function-local static only on the oracle: MSVC keeps it at an image address with a guard bit word, GCC as
+`_ZZ<function>E<len><name>` in the unit's .bss with a guard byte, never compared, and with a random background the
+oracle's guard was often already set while the native one was not. `engine.static_pairs` pairs a static by its
+function (the native names at the function's entry; the function's address from units.json `functions`) and its
+name; the oracle's value and its MSVC guard word are pinned to 0 (GCC's .bss starts zero), the native stores into
+the pair count as stores at the oracle address (`Arm64Engine._on_static_write`), its reads are no longer private
+reads, and the guards (an implementation detail on both sides) are not compared (`compare(ignore=...)`). Unpaired
+statics keep the soft `local-static`. Random sample of 60 cached local-static records: 41 gone, 3 still
+local-static, 16 reach a later comparison (several are initialisation differences: the oracle's static has a
+constant initialiser where GCC runs a guarded one and registers an atexit destructor). d17-statics selects the
+functions whose oracle closure refers to a local static or guard, or whose native code names one: 3,713 keys.
+Test: `tests/s13/test_d17.py`.
+
+**difffuzz-18 (d18-uninit, SCOPED = d18).** `uninit-both` (578 artifact divergences) is the probe's verdict that
+both machines' results change with the planted garbage: both read uninitialised state (the decomp's own reads MSVC
+also makes), but each from its own frame layout, so the two read different garbage. The probe now runs the case once
+more with `world.UNIFORM`: every planted garbage word is 0 on both machines (stack fill, non-argument and clobbered
+registers). `uniform: agree` means nothing else differs: fuzz.py keeps no record of it (`uninit_dropped` counts them;
+after 3 of one kind that kind is not probed again for the function) and goes on fuzzing; otherwise `uniform` names
+the divergence that remains and the record stays uninit-both. Random sample of 40 cached records (triage on link
+c0d6c71516f6): 17 agree, 18 still differ, 4 gone, 1 call-flow; 8 of the agreeing functions fuzzed again: all 8 with no
+divergence. d18-uninit rechecks every cached uninit-both verdict once. Test: `tests/s13/test_d18.py`.
+
+**difffuzz-19: a full refresh (HARNESS = difffuzz-19, orchestrator-approved in S1-fuzzB-002).** S1-fuzzB's untyped
+float results (`x86emu.x87_result_use`), its CRT_MATH builtins and engine's preference for a decorated spelling
+change verdicts that no key reflects, so every key changes once; the scoped rows d14..d18 are folded into it (their
+`changes` tags still go into the rows, so later partial refreshes keep working). It also carries three changes:
+- a call nothing describes (neither the definition nor the calling unit's declaration: wild and unplanted indirect
+  calls) gets a canned result whose low byte is 0/1 on both machines (`world.canned_kind` -> `untyped`): the call
+  site may test it as a bool, MSVC `al`, GCC bit 0 (S1-fuzzA: 17 native-null-read records; S13b's hypothesis for
+  the 413 native-early-exit records at indirect calls through fuzzed memory);
+- the native entry of an override of a secondary base's virtual is the link's `__fnvnx_msvc_<addr>` (GCC's
+  `_ZThn<d>_` thunk; S2c thisadj, 79 addresses on link c0d6c71516f6), where MSVC enters it with `this` at that base;
+- a call through a `__s13_vtpad_` slot is `vptr-unpaired` before the `unplanted` test makes it `oracle-vcall`
+  (S13b);
+- an intercepted constructor `??0`, or a member function returning a pointer or reference to its own class,
+  returns `this` on both machines (`world.returns_this`; before, only the oracle's constructors did, and the
+  native got a canned word: S13b ctor-this 79, canned-this 32). Random sample of 40 of those 119 cached records:
+  26 gone; most of the rest are results through a hidden pointer of callees no declaration describes;
+- the parts of each machine's private range it never uses are plain background there, as on the other machine,
+  and a jump there is a wild call (`world.A64_HOLES` / `X86_HOLES`, and per unit image `Arm64Engine.holes`: code
+  stubs outside .text, named stubs above the last one assigned, the space after the image). The same garbage
+  address faulted on one machine only (S13b native-wild-private 52, oracle-private-address 6; S1-fuzzB
+  native-private-address 5). Of S1-fuzzB's 7 records, 5 are gone. Used stub pages still fault as data, so
+  native-stub-data (S2c) stays visible;
+- a fault on one machine is compared after the calls both made before it: a differing call in the common prefix is
+  reported first (`runner.compare`). A native call through a vtpad slot where the oracle called the exe's slot and
+  then faulted on the canned result was an oracle-side error (oracle-vcall), and is now the call-target that
+  classify files as vptr-unpaired (S2c). A fresh vtable-copy stub for a slot function another object defines is
+  that function's original address (`vtmodel.native_addrs`, the link's addrmap F rows), not an anonymous stub.
+  120-record oracle-vcall sample with all of difffuzz-19: 70 gone, oracle-side errors 26 -> 17, 5 vtpad
+  call-targets.
+**Probe-cause audit (S13b s13b-002, V2 L1; difffuzz-19).** A probe-assigned artifact or by-design cause rests on
+evidence in the record or a replay, else the record goes on to the other probes:
+- `local-static` only for a mem-write whose differing bytes are all oracle-only stores to the unit's local statics,
+  or one extra native call followed by the oracle's call (the native's guarded initializer; not when the oracle's
+  next call is the native's: two calls swapped) - the runner's own `local-static` kind covers the rest; the native's
+  local-static read flag alone filed 344 call/error records (V2 L1: 0x00837550's swapped call pair; C1 the
+  initializer control, tests/v2/test_s2c_local_static.py: both ok);
+- `float->int` only when an aligned x86 word is 0x80000000 and the native word differs (was a substring test);
+- `vptr-store` only in a destructor (`classify.is_dtor_name`), elsewhere `vptr-differs` (triage, S2c);
+- `x86-custom-cc`: the case's own garbage probe (above); report.py's static entry-register override is gone;
+- compare no longer stops at by-design differences: trailing oracle-only frees of a function taking an aggregate by
+  value (MSVC destroys it in the callee: `byvalue-arg-dtor`), and a call where both machines branched to the same
+  garbage word that lies in the native's stub range (`vcall-stub-alias`, `arm64emu.Call.addr`). The deleting
+  destructor shapes (flags, return) stopped compare before d14; they no longer do.
+- `call-order`, `bool-repr`, `uninit-*` and `array-new-check` rest on the record (two adjacent calls swapped in
+  both traces; a replay; the native's own overflow throw), `msvc-inlined` on the oracle code (adaptive follow loads
+  the callee whenever its oracle code exists; what stays is the case without it).
+Dynamic evidence for causes.py: every divergence carries `arm_entered`, the original addresses of the unit's
+functions whose native entry the run executed (up to 64; S13b's oracle-callee-unloaded can rest on it instead of a
+traced call the callee makes).
+Test: `tests/s13/test_audit.py`.
+
+Test: `tests/s13/test_d19.py`.
+
+Test: `tests/s13/test_d14.py` (30 checks). Metric: `tools/difffuzz/metric.py` (artifact-class divergences + functions not fuzzable + unpublished shards, from reports/fz<k>, the newest layout only).
+
+**difffuzz-12 (J-0138). The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
 names libcalls.EQUIV maps to them) return a fresh heap block (`world.alloc_result`, HEAP + 2 MiB + 4 KiB k), never
 the canned 0: GCC drops the null test after a throwing new that MSVC keeps (S13b `new-null`, 178 farm records). A
 machine's own private range faults when unmapped; the other machine's is plain background, so a garbage pointer
@@ -225,7 +349,7 @@ is that import, as on x86.
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
 
-**Float results of untyped calls and CRT math (S1-fuzzB, after difffuzz-13).** An intercepted call whose callee
+**Float results of untyped calls and CRT math (S1-fuzzB, after difffuzz-13; verdicts refreshed by difffuzz-19).** An intercepted call whose callee
 nothing types (a wild or unplanted indirect call, a CRT name with only a C spelling in the unit's symbols) always
 leaves the canned bytes in v0 natively; the oracle now gets the same value in ST0 when the code the call returns to
 consumes ST0 (`x86emu.x87_result_use`: fst/fstp m32 -> f32, m64 -> f64, x87 arithmetic; the caller's cleanup and
@@ -246,6 +370,7 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | record shape | cause | class |
 |---|---|---|
 | native `exc:N` (brk/udf), oracle returns | `native-trap` | real-bug S1 (FALL1 trap / GCC unreachable on a path the exe takes) |
+| ... and the instruction at that pc of the unit image (`FNVNX_CAUSES_A64`, default the run's a64 directory) is the link's `fnvnx_vslot_trap` / `fnvnx_special_trap` (`brk #0xf5` / `#0xf6`) | `vslot-trap` | real-bug S2c (a virtual defined nowhere; the exe vftable has a function in that slot) |
 | native `stack-protector` | `stack-protector` | real-bug S1 |
 | native data fault below 64 KiB, oracle fine | `native-null-read` | real-bug S1 |
 | ... and the native function calls a game allocator (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0; from `fixed/<unit>.o` or `FNVNX_CAUSES_OBJ`) and the case holds a canned result below 0x10000 (an allocator null; since difffuzz-12 allocators return heap blocks) | `new-null` | retired (S13b audit): since difffuzz-12 the allocators return heap blocks, so a canned 0 is another call's valid result and the native null access is `native-null-read` (real bug S1) |
@@ -334,7 +459,7 @@ Every real-bug cause belongs to exactly one fix class (`causes.FIX_CLASSES`). A 
 | `static-init` | S10 | `dyninit-no-atexit` | every dynamic initializer registers its destructor as the exe does (atexit) |
 | `call-abi` | S1b | `uninit-arm`, `native-garbage-arg`, `native-stale-result`, `callee-saved`, `sret-mismatch` | every call passes and preserves registers by the callee's MSVC convention (argument slots written, results not reused, callee-saved kept, sret as MSVC) |
 | `data-binding` | S2c | `native-stub-data`, `native-address`, `split-global`, `import-slot-called`, `call-args` | every data symbol and import binds to the exe object (no stub as data, no unit copy, no native address where the exe has an image address, bridges deliver the bytes) |
-| `vtables` | S2c | `vptr-unpaired`, `native-calls-data`, `thunk-binding` | every image vftable pairs with a full native vtable of the static class (no short vtables, overrides bound to their this-adjusting thunks) |
+| `vtables` | S2c | `vptr-unpaired`, `native-calls-data`, `thunk-binding`, `vslot-trap` | every image vftable pairs with a full native vtable of the static class (no short vtables, overrides bound to their this-adjusting thunks) |
 
 ## Lockstep (`lockstep.py`, D14)
 
@@ -395,5 +520,5 @@ pointee (the native literal has another address): reported under `unclassified`.
 ## Limits
 
 Indirect calls (vtable calls through fuzzed objects) are not modelled yet (functions with indirect calls are left
-out); TLS (`SECREL`) relocations leave a function unresolved; callee side effects through pointer arguments are not
-modelled (canned results only); x87 transcendental helpers beyond sin/cos/sqrt are intercepted, not executed.
+out); callee side effects through pointer arguments are not
+modelled (canned results only); x87 transcendental helpers beyond the d14-math set are intercepted, not executed.

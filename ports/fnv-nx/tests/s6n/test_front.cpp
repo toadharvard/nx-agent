@@ -77,6 +77,16 @@ static void test_sort_stable() {
     for (int i = 0; i < 6; i++) CHECK(order[i] == want[i]);
 }
 
+// opaque draws (layer 0): coarse depth bucket first (front to back), state inside the bucket; other layers ignore it
+static void test_sort_depth_buckets() {
+    const uint16_t near = 0x1000, far = 0xF000;       // buckets 0 and 3 of 4
+    CHECK(nx::SortKey(0, 0, 9, 0, near) < nx::SortKey(0, 0, 1, 0, far));      // nearer bucket first, any state
+    CHECK(nx::SortKey(0, 0, 1, 0, near + 0x100) < nx::SortKey(0, 0, 9, 0, near));   // same bucket: state first
+    CHECK(nx::SortKey(0, 1, 1, 0, far) < nx::SortKey(0, 1, 9, 0, near));      // layer 1: state before depth
+    CHECK(nx::SortKey(0, 0, 0xFFF, 0xFFFF, 0xFFFF) < nx::SortKey(0, 1, 0, 0, 0));   // bucket never spills into the layer
+    CHECK(nx::SortKey(0, 15, 0xFFF, 0xFFFF, 0xFFFF) < nx::SortKey(1, 0, 0, 0, 0));
+}
+
 static void test_frame_encoding() {
     static RecBe be;
     static nx::StateCache sc;
@@ -281,7 +291,7 @@ int main() {
     test_ubo_ring_capacity();
     test_skin_palette();
     test_dynres();
-    test_state_cache(); test_encoder_overflow(); test_sort_stable(); test_frame_encoding(); test_dds(); test_glsl_shim();
+    test_state_cache(); test_encoder_overflow(); test_sort_stable(); test_sort_depth_buckets(); test_frame_encoding(); test_dds(); test_glsl_shim();
     printf("front: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail != 0;
 }

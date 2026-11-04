@@ -16,7 +16,9 @@ aarch64-none-elf-gcc -specs="$DEVKITPRO/libnx/switch.specs" $ARCH -Wl,-Map,"$OUT
 	-L"$DEVKITPRO/libnx/lib" -lnx -o "$OUT/fnv.elf"
 python3 -I "$TC/tools/elf2nro.py" --nacp-create "$OUT/control.nacp" --name "fnv-nx" \
 	--author "fnv-nx (bring your own game)" --version "${VER:0:15}"
-python3 -I "$TC/tools/elf2nro.py" "$OUT/fnv.elf" "$OUT/fnv.nro" --icon "$HERE/icon.jpg" --nacp "$OUT/control.nacp"
+# NRO_ROMFS=<image>: the RomFS (toolchain/tools/romfs.py) with the precompiled shader pack, mounted by the host
+python3 -I "$TC/tools/elf2nro.py" "$OUT/fnv.elf" "$OUT/fnv.nro" --icon "$HERE/icon.jpg" --nacp "$OUT/control.nacp" \
+	${NRO_ROMFS:+--romfs "$NRO_ROMFS"}
 REF=()
 [ -n "${NX1_REF_BIN:-}" ] && REF=(--ref-elf2nro "$NX1_REF_BIN/elf2nro" --ref-nacptool "$NX1_REF_BIN/nacptool")
 python3 -I "$P/tests/nx1/check_nro.py" "$OUT/fnv.nro" --elf "$OUT/fnv.elf" --require-assets "${REF[@]}" \

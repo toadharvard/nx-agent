@@ -97,6 +97,10 @@ defect() {   # name -> 0 when the defect is fixed (test passes)
 		[ -n "${FNVNX_SDP:-}" ] || { echo "skipped: set FNVNX_SDP to the player's shaderpackage002.sdp or its directory"; return 3; }
 		local c=$1; case $1 in tile_texscroll_scale) c=tile_scroll_scale ;; nolight_falloff_curve) c=nolight_texfalloff ;; esac
 		py "$T/claims/c69_families.py" "$c" ;;
+	ps_pow_zero|ps_texkill_w|vs_reladdr_def)
+		# S6b translator: S6b's GLSL of a synthetic shader (tests/v6n/defects/shaders) on v6n_gl vs the bytecode on Nine
+		[ -x "${FNVNX_SHADERS_BUILD:-$ROOT/render/shaders/build/host}/s6b_asm" ] || { echo "skipped: build S6b's tools (render/shaders/build.sh --tests, FNVNX_SHADERS_BUILD)"; return 3; }
+		py "$V/shaders/vsscenes.py" --src "$T/defects/shaders" --only "$1" --work "$ROOT/build/v6n/defects" ;;
 	*) echo "unknown defect $1"; return 2 ;;
 	esac
 }

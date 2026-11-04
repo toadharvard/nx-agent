@@ -34,6 +34,32 @@ static void remove_launcher_override(void) {
           r2 ? "FAILED" : "ok");
 }
 
+/* ---- the precompiled shader pack ------------------------------------------------------------------------- */
+/* fnv.nro's RomFS holds shaders.nxsp, the native renderer's DKSH (toolchain/nro/shaderpack.py); the guest's shader
+ * table reads it as fnvshd:/shaders.nxsp through the host file calls. Nothing is compiled on the console: without
+ * the pack the renderer has no shaders (NX1 check 9). Returns 0 when mounted. */
+static int mount_shader_pack(void) {
+    FILE *f = fopen(FNVNX_SD_NRO, "rb");
+    unsigned char h[0x80], a[0x38];
+    u32 size = 0;
+    u64 off = 0, len = 0;
+    int ok = f && fread(h, 1, sizeof h, f) == sizeof h && !memcmp(h + 0x10, "NRO0", 4);
+    if (ok) {
+        memcpy(&size, h + 0x18, 4);
+        ok = !fseek(f, size, SEEK_SET) && fread(a, 1, sizeof a, f) == sizeof a && !memcmp(a, "ASET", 4);
+    }
+    if (ok) {
+        memcpy(&off, a + 8 + 32, 8);   /* AssetSection romfs {offset, size} after icon and nacp */
+        memcpy(&len, a + 8 + 40, 8);
+        ok = len != 0;
+    }
+    if (f) fclose(f);
+    Result rc = ok ? romfsMountFromFsdev(FNVNX_SD_NRO, (u64)size + off, "fnvshd") : MAKERESULT(Module_Libnx, LibnxError_NotFound);
+    logf_("fnvnx host: shader pack: %s %s\n", FNVNX_SD_NRO, R_SUCCEEDED(rc) ? "RomFS mounted as fnvshd:" :
+          "has no RomFS: the renderer gets no shaders (nothing is compiled on the console)");
+    return R_SUCCEEDED(rc) ? 0 : 1;
+}
+
 /* ---- start refusals ------------------------------------------------------------------------------------- */
 /* 0 when the process may run the game; otherwise the reason was logged. */
 static int device_preflight(void) {
@@ -57,7 +83,7 @@ static int device_preflight(void) {
 }
 
 /* ---- applet message pump -------------------------------------------------------------------------------- */
-static volatile int g_pump_run, g_pump_alive = 1, g_exiting;
+static volatile int g_pump_run, g_pump_alive = 1, g_exiting, g_exit_locked;
 static volatile int g_operation_mode = -1, g_focus = -1;   /* AppletOperationMode, AppletFocusState */
 static Thread g_pump_thread;
 static AppletHookCookie g_hook;
@@ -110,6 +136,10 @@ static void pump_main(void *arg) {
 }
 
 static void pump_start(void) {
+    /* Without appletLockExit, AM force-terminates the process on "Close software" and no ExitRequest ever reaches the
+     * pump: cleanup_for_exit (boost, override, logs) would not run (V1 NX1-EXIT-P1). With it AM sends the request and
+     * waits up to 15 s; cleanup_for_exit unlocks before the process ends (libnx applet.h). */
+    g_exit_locked = R_SUCCEEDED(appletLockExit());
     g_operation_mode = appletGetOperationMode();
     g_focus = appletGetFocusState();
     appletHook(&g_hook, applet_hook, NULL);
@@ -117,9 +147,16 @@ static void pump_start(void) {
     /* core 0 next to the main thread, priority 0x2C like it: it wakes rarely and only does IPC */
     Result rc = threadCreate(&g_pump_thread, pump_main, NULL, NULL, 0x4000, 0x2C, 0);
     if (R_SUCCEEDED(rc)) rc = threadStart(&g_pump_thread);
-    logf_("fnvnx host: applet pump %s; operation mode %s\n", R_SUCCEEDED(rc) ? "started" : "FAILED",
-          g_operation_mode == AppletOperationMode_Console ? "docked" : "handheld");
-    if (R_FAILED(rc)) g_pump_run = 0;
+    logf_("fnvnx host: applet pump %s; operation mode %s; exit %s\n", R_SUCCEEDED(rc) ? "started" : "FAILED",
+          g_operation_mode == AppletOperationMode_Console ? "docked" : "handheld",
+          g_exit_locked ? "locked (cleanup on Close software)" : "NOT locked");
+    if (R_FAILED(rc)) {
+        g_pump_run = 0;
+        if (g_exit_locked) {   /* nobody would answer the exit request: let AM terminate us instead of waiting 15 s */
+            g_exit_locked = 0;
+            appletUnlockExit();
+        }
+    }
 }
 
 static void pump_stop(void) {
@@ -235,4 +272,8 @@ static void cleanup_for_exit(const char *why) {
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);   /* never leave the console boosted */
     remove_launcher_override();   /* normally gone already; after a relaunch-only run it is still there */
     if (g_log) fflush(g_log);
+    if (g_exit_locked) {          /* libnx: appletUnlockExit before the process ends */
+        g_exit_locked = 0;
+        appletUnlockExit();
+    }
 }
