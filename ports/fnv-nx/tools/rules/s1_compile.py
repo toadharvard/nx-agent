@@ -1638,6 +1638,7 @@ def r_namespace_template_decls(path, text, stats):
             # top level of this namespace only
             inner = [sp for sp in spans if o < sp[0] < o + 1 + m.start() < sp[1]]
             if inner: continue
+            if not m.group(2).strip(): continue        # `template <>`: an explicit specialization needs its primary first
             name = m.group(5)
             if not re.search(r'(?<![\w.>:~])%s\s*\(' % re.escape(name), block[:m.start()]): continue
             tparams = set(re.findall(r'(?:class|typename)\s+(\w+)', m.group(2)))
@@ -1656,6 +1657,199 @@ def r_namespace_template_decls(path, text, stats):
     out, pos = [], 0
     for at, s in sorted(inserts):
         out.append(text[pos:at]); out.append(s); pos = at
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- TPL3
+#
+# The same lookup difference for function templates that are called before their namespace defines them, in the two
+# forms TPL2 does not cover: a qualified call (`::N::f(x)` - a qualified name is looked up only at the definition, ADL
+# never adds to it) and an unqualified call with explicit template arguments (`f<T>(a, b, tag)` reaching an overload
+# of f defined further down, whose arguments live in another namespace than f). MSVC 2008 looked both up at the
+# instantiation and found every overload of the file. TPL3 declares each such overload, inside its own namespaces,
+# just in front of the file-scope declaration that holds the first call: `namespace N { template <class A> R f(A); }`.
+# Only declarations whose names are all seen before that point are moved forward; default arguments stay on the
+# definition. A redeclaration changes nothing in the code.
+
+TPL3_DEF = re.compile(r'^[ \t]*template\s*<((?:[^<>{};]|<[^<>{};]*>)+)>\s*((?:(?:inline|static|__forceinline)\s+)*)'
+                      r'((?:__declspec\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)\s*)*)'
+                      r'([\w \t\*&:<>,]*?[\s\*&])((?:__cdecl\s+)?)([A-Za-z_]\w*)\s*'
+                      r'\(((?:[^;{}()]|\([^;{}()]*\))*)\)\s*\{', re.M)
+TPL3_WORDS = set('''template typename class const volatile unsigned signed int char short long float
+    double bool void inline static __cdecl __forceinline size_t wchar_t struct enum'''.split())
+
+def _ns_path(chain):
+    """The namespace names of a scope chain, or None when it holds a non-namespace scope or an anonymous one."""
+    path = []
+    for k, h in chain:
+        if k != 'namespace': return None
+        m = re.match(r'namespace\s+([A-Za-z_]\w*)$', re.sub(r'\s+', ' ', h.strip()))
+        if not m: return None
+        path.append(m.group(1))
+    return path
+
+def _strip_defaults(params):
+    """`class A = B, int n = 3` -> `class A, int n` (top-level `= ...` of each comma-separated item)."""
+    return ', '.join(re.sub(r'\s*=.*$', '', p, flags=re.S).strip() for p in _split_args(params) if p.strip())
+
+def r_forward_template_calls(path, text, stats):
+    """TPL3: declare a namespace's function templates in front of the first qualified / explicit-argument call that
+    comes before their definition (see above)."""
+    if 'template' not in text or 'namespace' not in text: return text
+    masked = FRIEND_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+    spans = prepare.scope_spans(masked)
+    inserts = {}
+    for m in TPL3_DEF.finditer(masked):
+        tparams, name = m.group(1), m.group(6)
+        if not tparams.strip(): continue
+        nspath = _ns_path(prepare.scope_chain(spans, m.start()))
+        if not nspath: continue
+        before = masked[:m.start()]
+        home = [sp for sp in spans if sp[0] < m.start() < sp[1]][-1]       # the innermost namespace block of the def
+        tnames = set(re.findall(r'(?:class|typename)\s+(\w+)', tparams))
+        params = _strip_defaults(m.group(7))
+        pnames = {re.findall(r'[A-Za-z_]\w*', p)[-1] for p in _split_args(params)
+                  if len(re.findall(r'[A-Za-z_]\w*', p)) > 1 and not p.rstrip().endswith(('*', '&'))}
+        words = set(re.findall(r'(?<![\w:])[A-Za-z_]\w*', tparams + ' ' + m.group(4) + ' ' + params))
+        words -= TPL3_WORDS | tnames | pnames | CXX_WORDS
+        decl = re.sub(r'\s+', ' ', 'template <%s> %s%s%s%s(%s);' % (_strip_defaults(tparams), m.group(2),
+                                                                    m.group(4).strip() + ' ', m.group(5), name, params))
+        at = None
+        # A: f<..>(...) in a function of the same namespace block: declared in front of that function, in the block
+        for u in re.finditer(r'(?<![\w.>:~])%s\s*<[^;{}()]*>\s*\(' % re.escape(name), before):
+            if u.start() < home[0]: continue                                 # (u is before the def: inside home)
+            below = [sp for sp in spans if home[0] < sp[0] < u.start() < sp[1]]
+            if not below or below[0][2] == 'namespace': continue             # in a function of home itself
+            pos = _decl_start(masked, below[0][0])
+            if pos <= home[0] or any(not re.search(r'\b%s\b' % re.escape(w), masked[:pos]) for w in words): continue
+            at = pos
+            break
+        if at is None:
+            # B: ::N::f(...) spelled with the whole namespace path: declared at file scope, wrapped in its namespaces,
+            # when it names nothing but its template parameters and built-in types
+            q = r'(?<![\w:])(?:::\s*)?' + r'\s*::\s*'.join(map(re.escape, nspath + [name])) + r'\s*[<(]'
+            u = re.search(q, before)
+            if not u or words: continue
+            chain_spans = [sp for sp in spans if sp[0] < u.start() < sp[1]]
+            at = _decl_start(masked, chain_spans[0][0]) if chain_spans else u.start()
+            if at > u.start(): continue
+            for n in reversed(nspath): decl = 'namespace %s { %s }' % (n, decl)
+        lst = inserts.setdefault(at, [])
+        if decl not in lst: lst.append(decl); stats['TPL3'] += 1
+    if not inserts: return text
+    out, pos = [], 0
+    for at in sorted(inserts):
+        out.append(text[pos:at]); out.append(' '.join(inserts[at]) + ' /* fnv-nx TPL3 */ '); pos = at
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- TYPN1
+#
+# MSVC 2008 takes `iterator_traits<_Iter>::iterator_category` as a type in a template argument list without the
+# `typename` that standard C++ requires for a name that depends on a template parameter. GCC reads it as a value
+# ("type/value mismatch"). TYPN1 adds `typename` in front of such a qualified name in a template argument position
+# (after `<` or `,`, before `,` or `>`), inside the declaration a `template <...>` head introduces, when its template
+# arguments name one of that head's parameters and the member is one of the library's type members.
+
+TYPN1_MEMBERS = set('''iterator_category value_type difference_type distance_type pointer reference size_type
+    const_pointer const_reference char_type int_type pos_type off_type allocator_type key_type mapped_type key_compare
+    value_compare iterator const_iterator other _Checked_iterator_category _Inner_type _Secure_char_traits _Ptr_cat
+    _Iter_random_cat _Move_cat _Iter_cat'''.split())
+TYPN1_HEAD = re.compile(r'\btemplate\s*<((?:[^<>{};]|<[^<>{};]*>)+)>')
+TYPN1_DEP = re.compile(r'([<,]\s*)((?:::\s*)?(?:[A-Za-z_]\w*\s*::\s*)*[A-Za-z_]\w*\s*<((?:[^<>;{}()]|<[^<>;{}()]*>)*)>'
+                       r'\s*::\s*([A-Za-z_]\w*))(?=\s*[,>])')
+
+def r_dependent_typenames(path, text, stats):
+    """TYPN1: `typename` in front of a dependent library type member in a template argument list (see above)."""
+    if 'template' not in text or '>::' not in text: return text
+    masked = FRIEND_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+    at = set()
+    for h in TYPN1_HEAD.finditer(masked):
+        names = re.findall(r'(?:class|typename)\s+([A-Za-z_]\w*)', h.group(1))
+        if not names: continue
+        semi, brace = masked.find(';', h.end()), masked.find('{', h.end())
+        if brace < 0 and semi < 0: continue
+        end = semi + 1 if brace < 0 or 0 <= semi < brace else prepare.match_brace(masked, brace)
+        word = re.compile(r'\b(?:%s)\b' % '|'.join(map(re.escape, names)))
+        for m in TYPN1_DEP.finditer(masked, h.end(), end):
+            if m.group(4) in TYPN1_MEMBERS and word.search(m.group(3)): at.add(m.start(2))
+    if not at: return text
+    out, pos = [], 0
+    for a in sorted(at):
+        out.append(text[pos:a]); out.append('typename '); pos = a
+    out.append(text[pos:])
+    stats['TYPN1'] += len(at)
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- INST1
+#
+# An explicit instantiation of a class template member spells a `size_type` parameter as `unsigned int`, the type
+# size_type has under MSVC x86. On AArch64 ILP32 size_t is unsigned long, so the directive names no member. INST1
+# writes `<class>::size_type` at those positions, where the member's declaration in the file's class template says
+# size_type: the member MSVC instantiated.
+
+INST1_DIR = re.compile(r'^([ \t]*template\s+(?!<)[\w \t\*&:<>,]*?[\s\*&])((?:::\s*)?(?:[A-Za-z_]\w*\s*::\s*)*'
+                       r'([A-Za-z_]\w*)\s*<[^;{}()]*>)\s*::\s*([A-Za-z_]\w*)\s*\(([^;{}]*)\)\s*;', re.M)
+
+def r_instantiation_size_types(path, text, stats):
+    """INST1: `unsigned int` -> `C<..>::size_type` in an explicit member instantiation (see above)."""
+    if 'template' not in text or 'unsigned' not in text: return text
+    out, pos = [], 0
+    for m in INST1_DIR.finditer(text):
+        ps = _split_args(m.group(5))
+        if not any(re.sub(r'\s+', ' ', p.strip()) == 'unsigned int' for p in ps): continue
+        cls = re.search(r'\btemplate\s*<[^{};]*>\s*(?:class|struct)\s+%s\b[^;{]*\{' % re.escape(m.group(3)), text)
+        if not cls: continue
+        body = text[cls.end():prepare.match_brace(text, cls.end() - 1)]
+        decl = re.search(r'\b%s\s*\(([^;{}()]*)\)' % re.escape(m.group(4)), body)
+        if not decl: continue
+        dps = _split_args(decl.group(1))
+        if len(dps) != len(ps): continue
+        new = []
+        for p, d in zip(ps, dps):
+            if re.sub(r'\s+', ' ', p.strip()) == 'unsigned int' and re.match(r'\s*size_type\b', d):
+                new.append('%s::size_type' % re.sub(r'\s+', ' ', m.group(2).strip())); stats['INST1'] += 1
+            else:
+                new.append(p.strip())
+        out.append(text[pos:m.start(5)]); out.append(', '.join(new)); pos = m.end(5)
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- COPY1
+#
+# `X::X(const X& o) : B(o)` where B, a direct base of X, has besides its copy constructor a constructor that takes
+# one of B's own bases A by value (`B(A a)`): both are reached from `const X&` by a derived-to-base conversion, which
+# standard C++ ranks the same, so GCC calls it ambiguous. MSVC 2008 took B's copy constructor (binding to the more
+# derived base). COPY1 writes `B(static_cast<const B&>(o))`, which only that constructor matches exactly. Left alone
+# when B declares anything that takes an X.
+
+COPY1_CTOR = re.compile(r'\b([A-Za-z_]\w*)\s*::\s*\1\s*\(\s*const\s+\1\s*&\s*([A-Za-z_]\w*)\s*\)\s*:')
+
+def r_copy_ctor_base_casts(path, text, stats):
+    """COPY1: cast the copied object to the base in a copy constructor's base initializer (see above)."""
+    if '::' not in text or 'const' not in text: return text
+    masked = FRIEND_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+    edits = []
+    for m in COPY1_CTOR.finditer(masked):
+        cls, arg = m.group(1), m.group(2)
+        bodies = _class_bodies(masked, cls)
+        if not bodies: continue
+        for base in bodies[0][1]:
+            bb = _class_bodies(masked, base)
+            if not bb or re.search(r'\b%s\b' % re.escape(cls), bb[0][0]): continue
+            if not any(re.search(r'\b%s\s*\(\s*%s\s+\w*\s*\)' % (re.escape(base), re.escape(a)), bb[0][0])
+                       for a in bb[0][1] if a): continue
+            brace = masked.find('{', m.end())
+            init = re.search(r'\b%s\s*\(\s*%s\s*\)' % (re.escape(base), re.escape(arg)), masked[m.end():brace])
+            if not init: continue
+            a = m.end() + init.start()
+            edits.append((a, m.end() + init.end(), '%s(static_cast<const %s&>(%s))' % (base, base, arg)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(r); pos = b
+        stats['COPY1'] += 1
     out.append(text[pos:])
     return ''.join(out)
 
@@ -3416,7 +3610,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
