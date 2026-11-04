@@ -37,6 +37,23 @@ LINK = Path(os.environ.get('FNVNX_DFLINK', WORK.parent / 'link'))     # a64prep.
 A64WORK = Path(os.environ.get('FNVNX_DFA64', WORK / ('a64' if LINK.name == 'link' else 'a64_' + LINK.name)))
 SSE2NEON = Path(os.environ.get('SSE2NEON', SCR / 'ext/sse2neon'))
 LINKTOOLS = PORT / 'tools' / 'link'
+# S1b's patches/units_renames.tsv (J-0141): the MSVC names a patch gives a definition (`def`) or a reference (`ref`);
+# FNVNX_UNITS_RENAMES=<tsv> another table, `none` off
+RENAMES = os.environ.get('FNVNX_UNITS_RENAMES', str(PORT / 'patches' / 'units_renames.tsv'))
+_RENAMES = None
+
+
+def units_renames():
+    """[(source, kind, address, old, new)] of RENAMES for the units whose prepared source under TREE carries the S1b
+    patch (fnvlink.load_renames: a unit compiled without the patch keeps its pristine names)."""
+    global _RENAMES
+    if _RENAMES is None:
+        import sys
+        if str(LINKTOOLS) not in sys.path:
+            sys.path.insert(0, str(LINKTOOLS))
+        from fnvlink import load_renames
+        _RENAMES = load_renames(RENAMES, str(TREE)) if TREE.exists() else []
+    return _RENAMES
 
 
 def obj_name(source):

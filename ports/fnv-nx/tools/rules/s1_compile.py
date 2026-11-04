@@ -394,13 +394,41 @@ SCALAR_INIT = re.compile(r'^([ \t]*)((?:const\s+)?(?:(?:unsigned|signed|volatile
                          r'float|double|unsigned|__m128[id]?|__m64|hkQuadReal|hkReal|[\w:]+(?:\s+const)?\s*\*+))\s+'
                          r'(\**\s*\w+)\s*=\s*([^;{}=][^;{}]*);', re.M)
 
+INT_LITERAL_EXPR = re.compile(r'^[\s()+\-~!*/%<>&|^]*(?:(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*[\s()+\-~!*/%<>&|^]*)+$')
+
+def _goto_crosses(text, o, c, pos):
+    """A forward goto in the function body text[o:c] jumps past the declaration at pos into its scope: the goto is
+    before pos, its label after pos and inside the innermost block that holds pos."""
+    depth, start = 0, pos
+    while start > o:                                   # the innermost '{' that holds pos
+        start -= 1
+        ch = text[start]
+        if ch == '}': depth += 1
+        elif ch == '{':
+            if depth == 0: break
+            depth -= 1
+    end, depth = pos, 0
+    while end < c:                                     # its matching '}'
+        ch = text[end]
+        if ch == '{': depth += 1
+        elif ch == '}':
+            if depth == 0: break
+            depth -= 1
+        end += 1
+    labels = {m.group(1) for m in re.finditer(r'(?<![:\w])(\w+)\s*:(?!:)', text[pos:end])
+              if m.group(1) not in ('default', 'public', 'private', 'protected')}
+    return any(m.group(1) in labels for m in re.finditer(r'\bgoto\s+(\w+)\s*;', text[o:pos]))
+
 def r_goto_scalar_inits(path, text, stats):
     """GOTO1: in functions that use goto, `T x = e;` (scalar, SSE vector or pointer T) -> `T x; x = e;` on the same
     line. MSVC lets a goto jump past such an initialization; C++ (and GCC even with -fpermissive) does not, but
     jumping past a declaration without initializer is allowed, and for a scalar the split changes nothing. A const
     scalar loses the const it cannot keep without its initializer (`const int n = e;` -> `int n; n = e;`; a pointer
     to const keeps it). A declarator list is split declarator by declarator, `T a = e1, b = e2;` ->
-    `T a, b; a = e1; b = e2;` (the initializers keep their order)."""
+    `T a, b; a = e1; b = e2;` (the initializers keep their order). A const integer scalar whose initializer is an
+    integer literal expression (`const int n = 4;`, perhaps an array bound) stays as written unless a forward goto
+    jumps past it into its scope; then it becomes `static const int n = 4;`: still a constant expression, and no
+    automatic variable for the goto to cross (GOTO1-CONST)."""
     if 'goto' not in text: return text
     spans = [sp for sp in prepare.scope_spans(text) if sp[2] == 'function']
     edits = []
@@ -410,6 +438,12 @@ def r_goto_scalar_inits(path, text, stats):
         for m in SCALAR_INIT.finditer(text, o, c):
             t = m.group(2)
             if re.match(r'(?:return|else|case|goto|delete|throw|typedef|using)\b', t): continue
+            if (t.startswith('const') and '*' not in t and not re.search(r'\b(?:float|double|__m|hk)', t)
+                    and ',' not in m.group(4) and INT_LITERAL_EXPR.match(m.group(4))):
+                if _goto_crosses(text, o, c, m.start()):
+                    edits.append((m.start(), m.end(), '%sstatic %s %s = %s;' % (m.group(1), m.group(2), m.group(3),
+                                                                               m.group(4).strip())))
+                continue                                    # not crossed: as written (MSVC's code stays the same)
             if t.startswith('const') and '*' not in t: t = t[5:].lstrip()          # the scalar's own const
             # a declarator list `float a = f(x), b = g(y);` -> `float a, b; a = f(x); b = g(y);` (same order)
             parts = [re.match(r'^\s*(\**\s*[A-Za-z_]\w*)\s*(?:=\s*(\S.*?))?\s*$', d, re.S)
@@ -2967,18 +3001,67 @@ def r_pointer_zero_compares(path, text, stats):
 # 60 null reads). STAND1 removes an untagged out-of-class or free definition whose MSVC name the unit's units.json
 # symbols bind to an address that a tagged definition in the same unit provides: the calls stay calls of that name,
 # which the link binds to the tagged function's address. A free function keeps its declaration.
+#
+# STAND2 widens this to an address tagged in ANOTHER unit (units.json `functions` of some other unit): blk_00640000_od
+# defines `GlobalObject_00869f00::Clear` (delete[] p) untagged, and its symbols bind ?Clear@GlobalObject_00869f00@@QAEX_N@Z
+# to 0x008454f0, the tagged FUN_008454f0::Clear of bssimplearray.cpp. MSVC's /Od code calls the name and the exe runs
+# 0x008454f0; GCC inlines the local body into the tagged ResetPointer 0x006442e0 (fuzz: the native calls delete, the
+# oracle the function). Only where MSVC can never have inlined the stand-in, so the oracle never ran its body: a
+# non-inline, non-static out-of-class or free definition in a unit compiled without /O1, /O2, /Ox or /Ob2 (/Ob1
+# inlines only `inline` functions), and only when every spelling of the name in the unit's symbols binds an address
+# that another unit defines and this unit does not. A name the unit declares virtual is left alone (the native
+# vtable and its kind-V pairing stay as they are).
 
 STAND_DEF = re.compile(r'^[ \t]*((?:[\w:<>,\*&]+[ \t\*&]+)*?)((?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*)\s*'
                        r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?(?::[^;{}]*)?\{', re.M)
 FNV_TAG_ADDR = re.compile(r'//[ \t]*@fnv[ \t]+0x([0-9a-fA-F]+)')
 NOT_FUNCTIONS = set('if for while switch return sizeof catch do else'.split())
 
+STAND2_INLINING_FLAGS = {'/O1', '/O2', '/Ox', '/Ob2'}
+_UNIT_INFO = None
+
+def _unit_info(path):
+    """(flags, {function addresses}) of the unit `path` from build/units.json, or None."""
+    global _UNIT_INFO
+    if _UNIT_INFO is None:
+        import json
+        _UNIT_INFO = {}
+        root, uj = prepare._units_json(path)
+        if uj:
+            for u in json.load(open(uj))['units']:
+                _UNIT_INFO[os.path.normpath(os.path.join(root, u['source']))] = (
+                    tuple(u.get('flags') or ()), {int(f['address'], 16) for f in u.get('functions') or ()})
+    return _UNIT_INFO.get(os.path.normpath(os.path.abspath(path)))
+
+_ALL_FUNCTIONS = None
+
+def _all_unit_functions(path):
+    """Every address some unit of build/units.json defines (its `functions`)."""
+    global _ALL_FUNCTIONS
+    if _ALL_FUNCTIONS is None:
+        _unit_info(path)
+        _ALL_FUNCTIONS = set().union(*(fs for _, fs in _UNIT_INFO.values())) if _UNIT_INFO else set()
+    return _ALL_FUNCTIONS
+
 def r_stand_in_definitions(path, text, stats):
     """STAND1: drop untagged definitions bound to the address of a tagged definition in the same unit (see above)."""
+    return _stand_ins(path, text, stats, 'STAND1')
+
+def r_stand_in_definitions_elsewhere(path, text, stats):
+    """STAND2: drop untagged definitions bound to an address another unit defines, where MSVC cannot have inlined
+    them: non-inline, non-static, non-virtual, in a unit without /O1, /O2, /Ox, /Ob2 (see above)."""
+    return _stand_ins(path, text, stats, 'STAND2')
+
+def _stand_ins(path, text, stats, which):
     if not path.endswith('.cpp') or '@fnv' not in text: return text
     syms = _unit_symbols(path)
     if not syms: return text
     tagged = {int(a, 16) for a in FNV_TAG_ADDR.findall(text)}
+    elsewhere = set()
+    if which == 'STAND2':
+        info = _unit_info(path)
+        if info is None or set(info[0]) & STAND2_INLINING_FLAGS: return text
+        elsewhere = _all_unit_functions(path) - info[1]
     spans, edits = None, []
     for m in STAND_DEF.finditer(text):
         q = re.sub(r'\s+', '', m.group(2))
@@ -2996,7 +3079,15 @@ def r_stand_in_definitions(path, text, stats):
         if len(parts) >= 2 and name == parts[-2]: prefix = '??0' + '@'.join(scope) + '@@'
         elif name.startswith('~'): prefix = '??1' + '@'.join(scope) + '@@'
         else: prefix = '?' + '@'.join([name] + scope) + '@@'
-        if not any(k.startswith(prefix) and int(a, 16) in tagged for k, a in syms.items()): continue
+        if which == 'STAND1':
+            if not any(k.startswith(prefix) and int(a, 16) in tagged for k, a in syms.items()): continue
+        else:
+            bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix)]
+            if not (bound and all(a in elsewhere and a not in tagged for a in bound)): continue
+            if re.search(r'\b(?:inline|__inline|__forceinline|static)\b', m.group(1) or ''): continue
+            if re.search(r'\b(?:inline|__inline|__forceinline|static)\s+$', text[max(0, m.start() - 200):m.start()]):
+                continue
+            if re.search(r'\bvirtual\b[^;{}]*[\s\*&]%s\s*\(' % re.escape(name), text): continue   # vtable: S2c
         o = m.end() - 1
         c = prepare.match_brace(text, o)
         start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
@@ -3010,15 +3101,126 @@ def r_stand_in_definitions(path, text, stats):
             if re.search(r'\bstatic\b', m.group(1) or ''): continue     # internal: the link cannot rebind it
             head = text[start:o].rstrip()
             head = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', head)
-            edits.append((start, c, head + '; /* fnv-nx STAND1 */' + nl[head.count('\n'):]))
+            edits.append((start, c, head + '; /* fnv-nx %s */' % which + nl[head.count('\n'):]))
         else:
-            edits.append((start, c, '/* fnv-nx STAND1: %s is the function at the tagged address */%s' % (q, nl)))
+            edits.append((start, c, '/* fnv-nx %s: %s is the function at the tagged address */%s' % (which, q, nl)))
     if not edits: return text
     out, pos = [], 0
     for a, b, r in sorted(edits):
         if a < pos: continue
         out.append(text[pos:a]); out.append(r); pos = b
-        stats['STAND1'] += 1
+        stats[which] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- STAND3
+#
+# STAND2 for inline stand-ins (S1-fuzzA). The decomp writes small helpers as in-class bodies (modelloader.cpp
+# `struct _Mem_00441d20 { int a; ~_Mem_00441d20() { FUN_0044b160(this); } };`), and the recipe binds their MSVC names
+# to the exe function the call went to (`??1_Mem_00441d20@@QAE@XZ` -> 0x0040c110, FUN_0040c110 of magicitem.cpp).
+# STAND2 leaves in-class and `inline` definitions alone, because /Ob1 inlines exactly those. In an /Od unit without
+# /Ob1, /Ob2, /O1, /O2 or /Ox MSVC inlines nothing, so the exe calls that address at every site and the local body
+# never runs; GCC inlines it (fuzz: 9 native-null-read functions in modelloader, the native running FUN_0044b160's
+# lock loop where the exe calls 0x0040c110). STAND3 drops such a body and keeps the declaration (a constructor's
+# without its initializer list), so each call stays a call of that name and the link binds it to the exe's address
+# (units.json symbols, tier unit/exact). Only: a .cpp of such a unit; an untagged in-class definition, or an
+# untagged out-of-class or free one marked inline, at namespace or class scope (no local class, no template, not
+# virtual, static, constexpr or forceinline, no operator); every units.json spelling of the name in the unit bound
+# to one address that some unit decompiles; not a destructor of a class with a base or virtual members (any class of
+# that name in the unit), not a name the unit declares virtual (an implicit override's vtable slot stays as it is).
+
+STAND3_INLINING_FLAGS = ('/Ob1', '/Ob2', '/O1', '/O2', '/Ox')
+
+STAND3_CLASS = re.compile(r'^(?:typedef\s+)?(?:class|struct|union)\s+(?:__declspec\s*\([^()]*\)\s*)?([A-Za-z_]\w*)\s*(?::|$)')
+
+def _stand3_maybe_virtual(text, cls, name):
+    """True when member `name` of class `cls` may be virtual without saying so: a destructor of a class that has a
+    base or virtual members (any class of that name in the unit), or a name the unit declares virtual anywhere."""
+    if name.startswith('~'):
+        for m in re.finditer(r'\b(?:class|struct)\s+(?:__declspec\s*\([^()]*\)\s*)?%s\b\s*([^;{()]*)\{' % re.escape(cls), text):
+            if ':' in m.group(1).replace('::', ''): return True
+            c = prepare.match_brace(text, m.end() - 1)
+            if re.search(r'\bvirtual\b', text[m.end():c]): return True
+        return False
+    return bool(re.search(r'\bvirtual\b[^;{}()]*\b%s\s*\(' % re.escape(name), text))
+
+def r_inline_stand_ins(path, text, stats):
+    """STAND3: drop untagged inline bodies of an /Od unit without inlining flags whose MSVC name binds the address of
+    a decompiled function (see above): in-class definitions become declarations, out-of-class ones go, free ones keep
+    their declaration."""
+    if not path.endswith('.cpp') or '@fnv' not in text: return text
+    info = _unit_info(path)
+    if info is None or '/Od' not in info[0] or set(info[0]) & set(STAND3_INLINING_FLAGS): return text
+    decompiled = _all_unit_functions(path)
+    syms = _unit_symbols(path)
+    if not syms: return text
+    spans, edits = None, []
+    for m in STAND_DEF.finditer(text):
+        q = re.sub(r'\s+', '', m.group(2))
+        parts = q.split('::')
+        if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS or 'operator' in parts[-1]: continue
+        lead = m.group(1) or ''
+        if re.match(r'\s*(?:return|else|case|new|delete|throw|goto)\b', lead): continue
+        if re.search(r'\b(?:virtual|static|template|__forceinline|FNV_FORCEINLINE|constexpr)\b', lead): continue
+        before = text[max(0, m.start() - 400):m.start()]
+        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
+        if spans is None: spans = prepare.scope_spans(text)
+        chain = prepare.scope_chain(spans, m.start())
+        if any(k not in ('namespace', 'class') for k, _ in chain): continue
+        scope_names, ok = [], True
+        for k, h in chain:
+            if k == 'namespace':
+                n = h.split()[-1]
+                if n != 'namespace': scope_names.append(n)
+            else:
+                if 'template' in h: ok = False; break
+                cm = STAND3_CLASS.match(h.strip())
+                if not cm: ok = False; break
+                scope_names.append(cm.group(1))
+        if not ok: continue
+        in_class = bool(chain) and chain[-1][0] == 'class'
+        if in_class and len(parts) > 1: continue
+        if not in_class and not (re.search(r'\b(?:inline|__inline)\b', lead) or
+                                 re.search(r'\b(?:inline|__inline)\s+$', text[max(0, m.start() - 200):m.start()])):
+            continue                                       # a non-inline definition is STAND2's
+        if not in_class and any(k == 'class' for k, _ in chain): continue
+        scope = list(reversed(parts[:-1])) + list(reversed(scope_names))
+        name = parts[-1]
+        cls = parts[-2] if len(parts) >= 2 else (scope_names[-1] if in_class and scope_names else None)
+        if cls and name == cls: prefix = '??0' + '@'.join(scope) + '@@'
+        elif name.startswith('~'):
+            if not cls or name[1:] != cls: continue
+            prefix = '??1' + '@'.join(scope) + '@@'
+        else: prefix = '?' + '@'.join([name] + scope) + '@@'
+        addrs = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
+        if len(addrs) != 1 or not addrs <= decompiled: continue
+        if cls and _stand3_maybe_virtual(text, cls, name): continue
+        o = m.end() - 1
+        c = prepare.match_brace(text, o)
+        start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
+        for _ in range(3):                                 # the head may begin on the lines above
+            ls = text.rfind('\n', 0, start - 1) + 1 if start > 0 else 0
+            prev = text[ls:start].strip()
+            if not prev or prev.startswith(('#', '//')) or prev.endswith((';', '}', '{', '*/', ':', ')')): break
+            if in_class and re.match(r'(?:public|private|protected)\s*:$', prev): break
+            start = ls
+        nl = '\n' * text.count('\n', start, c)
+        x = '%08x' % next(iter(addrs))
+        if in_class or len(parts) == 1:                    # keep the declaration (without an initializer list)
+            after = text[m.end(3) + 1:o]
+            cv = re.match(r'\s*(?:const\b\s*)?(?:throw\s*\([^)]*\)\s*)?', after).group(0).rstrip()
+            head = (text[start:m.end(3) + 1] + cv).rstrip()
+            head = re.sub(r'\b(?:inline|__inline)\s+', '', head)
+            edits.append((start, c, head + '; /* fnv-nx STAND3 0x%s */' % x + nl[head.count('\n'):]))
+        else:
+            edits.append((start, c, '/* fnv-nx STAND3: %s is the function at 0x%s */%s' % (q, x, nl)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(r); pos = b
+        stats['STAND3'] += 1
     out.append(text[pos:])
     return ''.join(out)
 
@@ -3557,7 +3759,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs

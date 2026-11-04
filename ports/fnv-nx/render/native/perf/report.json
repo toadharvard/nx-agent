@@ -14,6 +14,16 @@
     "lo": 1.257,
     "hi": 3.839,
     "gate": 3.839
+   },
+   "nine_with_engine": {
+    "lo": 2.548,
+    "hi": 7.602,
+    "gate": 7.602
+   },
+   "engine_d3d9_path": {
+    "lo": 1.277,
+    "hi": 3.763,
+    "gate": 3.763
    }
   },
   "frame_ms": {
@@ -26,6 +36,11 @@
     "lo": 1.882,
     "hi": 8.864,
     "gate": 8.864
+   },
+   "main_with_engine_kept": {
+    "gate": 11.06,
+    "kept_ms": 1.044,
+    "rule": "main gate + the kept engine part (BSBatchRenderer + BSShader prepare/update per draw, mix_hi, IPC 0.6 at 1.02 GHz)"
    }
   },
   "per_draw_us_rule": "CPU per draw over a whole frame (fixed per-frame costs included), mix_lo and mix_hi: lo = IPC 1.0 at 1.785 GHz, hi = gate = IPC 0.6 at 1.02 GHz. native = front (StateTracker, translator, packet build, sort, encode) + deko3d recording (nxgpu.c record + libdeko3d); nine = st/nine without any pipe driver (nouveau's validation and push-buffer work is NOT in it), x86-64 count scaled to AArch64",
@@ -48,7 +63,9 @@
     "gpu_docked_720p": 0.375,
     "frame_docked_720p": 0.375,
     "gpu_handheld_720p": 0.7,
-    "frame_handheld_720p": 0.7
+    "frame_handheld_720p": 0.7,
+    "1.02_with_engine_kept": 0.332,
+    "d3d9_path_main_1.02": 0.828
    },
    "45": {
     "1.02": 0.451,
@@ -56,7 +73,9 @@
     "gpu_docked_720p": 0.563,
     "frame_docked_720p": 0.563,
     "gpu_handheld_720p": 1.05,
-    "frame_handheld_720p": 1.05
+    "frame_handheld_720p": 1.05,
+    "1.02_with_engine_kept": 0.498,
+    "d3d9_path_main_1.02": 1.242
    },
    "60": {
     "1.02": 0.6,
@@ -64,10 +83,12 @@
     "gpu_docked_720p": 0.748,
     "frame_docked_720p": 0.748,
     "gpu_handheld_720p": 1.396,
-    "frame_handheld_720p": 1.396
+    "frame_handheld_720p": 1.396,
+    "1.02_with_engine_kept": 0.662,
+    "d3d9_path_main_1.02": 1.651
    }
   },
-  "targets_budget_fraction_rule": "THE GATE FIELD. Per target (30/45/60 fps = 33.3/22.2/16.7 ms): '1.02'/'1.785' = worst CPU renderer thread (mix_hi, IPC 0.6, store term) / budget; 'gpu_<cfg>' = GPU model (mix_hi, issue efficiency 0.6) / budget; 'frame_<cfg>' = max(CPU at 1.02 GHz, GPU) / budget for the gate configs docked_720p and handheld_720p (dynamic resolution off). <= 1.0 passes. CPU covers the renderer only (engine not counted)",
+  "targets_budget_fraction_rule": "THE GATE FIELD. Per target (30/45/60 fps = 33.3/22.2/16.7 ms): '1.02'/'1.785' = worst CPU renderer thread (mix_hi, IPC 0.6, store term) / budget; 'gpu_<cfg>' = GPU model (mix_hi, issue efficiency 0.6) / budget; 'frame_<cfg>' = max(CPU at 1.02 GHz, GPU) / budget for the gate configs docked_720p and handheld_720p (dynamic resolution off). <= 1.0 passes. CPU covers the renderer only (engine not counted); '1.02_with_engine_kept' = the worst CPU thread with the kept engine part on main; 'd3d9_path_main_1.02' = the D3D9 fallback's main thread (engine path + st/nine, no driver) / budget, for comparison",
   "targets": {
    "30": {
     "1.02": "pass",
@@ -89,7 +110,14 @@
    }
   },
   "targets_rule": "CPU verdict: max(main hi, render hi) of mix_hi at IPC 0.6 (the low IPC bound decides) <= 33.3/22.2/16.7 ms; covers the renderer only (engine update/cull/accumulation not measured); GPU time is a separate estimate (gpu.targets)",
-  "render_backend_counted": true
+  "render_backend_counted": true,
+  "frame_budget": {
+   "target_fps": 60,
+   "ms": 16.7,
+   "config": "handheld_720p",
+   "rule": "owner: 60 fps for the whole frame at 720p handheld; the gate reads targets_budget_fraction['60']"
+  },
+  "engine_d3d9_path_source": "MEASURED (static path count) on the AArch64 ILP32 prepared objects, render/native/perf/engine_path.py; replaces the assumption of PERF.md \u00a75 / RENDER_PERF.md \u00a73.7"
  },
  "hotspots": {
   "cpu_by_function": [
@@ -97,271 +125,273 @@
     "kind": "cpu_function",
     "name": "nx::SortPackets(nx::Packet const*, unsigned long, unsigned long*, unsigned long*, unsigned long long*, unsigned long long*)",
     "ms": 3.744,
-    "share_of_22_2ms": 0.1687,
     "instr": 2291497,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.2242
    },
    {
     "kind": "cpu_function",
     "name": "record",
     "ms": 1.633,
-    "share_of_22_2ms": 0.0736,
     "instr": 999610,
     "thread": "render (backend)",
-    "module": "nxgpu.c + libdeko3d"
+    "module": "nxgpu.c + libdeko3d",
+    "share_of_16_7ms": 0.0978
    },
    {
     "kind": "cpu_function",
     "name": "nx::Frame::Finish(nx::StateCache&, NxFrameStats*, bool)",
     "ms": 1.459,
-    "share_of_22_2ms": 0.0657,
     "instr": 892912,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0874
    },
    {
     "kind": "cpu_function",
     "name": "nx::Renderer::Render(nx::Renderer::Draw const&)",
     "ms": 1.081,
-    "share_of_22_2ms": 0.0487,
     "instr": 661825,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0647
    },
    {
     "kind": "cpu_function",
     "name": "nx_d3d9_sampler",
     "ms": 1.01,
-    "share_of_22_2ms": 0.0455,
     "instr": 618170,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0605
    },
    {
     "kind": "cpu_function",
     "name": "nx::StateTracker::SetSamplerState(unsigned long, unsigned long, unsigned long, bool)",
     "ms": 0.938,
-    "share_of_22_2ms": 0.0422,
     "instr": 574015,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0562
    },
    {
     "kind": "cpu_function",
     "name": "dkCmdBufBindUniformBuffers",
     "ms": 0.839,
-    "share_of_22_2ms": 0.0378,
     "instr": 513360,
     "thread": "render (backend)",
-    "module": "nxgpu.c + libdeko3d"
+    "module": "nxgpu.c + libdeko3d",
+    "share_of_16_7ms": 0.0502
    },
    {
     "kind": "cpu_function",
     "name": "nx::StateTracker::SetRenderState(unsigned long, unsigned long, bool)",
     "ms": 0.787,
-    "share_of_22_2ms": 0.0355,
     "instr": 481694,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0471
    },
    {
     "kind": "cpu_function",
     "name": "nx::StateTracker::Handles(nx::Backend*, unsigned long*, unsigned long)",
     "ms": 0.707,
-    "share_of_22_2ms": 0.0319,
     "instr": 432766,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0423
    },
    {
     "kind": "cpu_function",
     "name": "nx::StateCache::State(unsigned short, unsigned short, unsigned short, NxRenderState const&)",
     "ms": 0.521,
-    "share_of_22_2ms": 0.0235,
     "instr": 318985,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0312
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "BSShader lit Prepare/Update/Finish (kept engine code)",
+    "ms": 0.521,
+    "share_of_16_7ms": 0.0312,
+    "instr_per_draw": 85.9,
+    "thread": "main (engine)",
+    "path": "kept on the native path",
+    "source": "measured (engine_path.py, static)"
    },
    {
     "kind": "cpu_function",
     "name": "memcmp",
     "ms": 0.457,
-    "share_of_22_2ms": 0.0206,
     "instr": 279816,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0274
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "BSBatchRenderer draw-geometry-pass (kept engine code)",
+    "ms": 0.452,
+    "share_of_16_7ms": 0.027,
+    "instr_per_draw": 74.5,
+    "thread": "main (engine)",
+    "path": "kept on the native path",
+    "source": "measured (engine_path.py, static)"
    },
    {
     "kind": "cpu_function",
     "name": "memmove",
     "ms": 0.449,
-    "share_of_22_2ms": 0.0202,
     "instr": 274983,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0269
    },
    {
     "kind": "cpu_function",
     "name": "memset",
     "ms": 0.41,
-    "share_of_22_2ms": 0.0185,
     "instr": 251108,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0246
    },
    {
     "kind": "cpu_function",
     "name": "dkCmdBufBindVtxBuffers",
     "ms": 0.279,
-    "share_of_22_2ms": 0.0126,
     "instr": 170569,
     "thread": "render (backend)",
-    "module": "nxgpu.c + libdeko3d"
+    "module": "nxgpu.c + libdeko3d",
+    "share_of_16_7ms": 0.0167
    },
    {
     "kind": "cpu_function",
     "name": "nx::StateTracker::Resolve(NxD3D9Viewport const&, NxD3D9Rect const&, unsigned long)",
     "ms": 0.253,
-    "share_of_22_2ms": 0.0114,
     "instr": 154973,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0151
    },
    {
     "kind": "cpu_function",
     "name": "nx::StateTracker::SetTexture(unsigned long, unsigned long, NxD3D9Texture const&)",
     "ms": 0.188,
-    "share_of_22_2ms": 0.0084,
     "instr": 114803,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0113
    },
    {
     "kind": "cpu_function",
     "name": "dkCmdBufBindTextures",
     "ms": 0.186,
-    "share_of_22_2ms": 0.0084,
     "instr": 114004,
     "thread": "render (backend)",
-    "module": "nxgpu.c + libdeko3d"
+    "module": "nxgpu.c + libdeko3d",
+    "share_of_16_7ms": 0.0111
    },
    {
     "kind": "cpu_function",
     "name": "nx::Frame::AddTextures(unsigned long const*, unsigned long)",
     "ms": 0.176,
-    "share_of_22_2ms": 0.0079,
     "instr": 107473,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0105
    },
    {
     "kind": "cpu_function",
     "name": "nx::Frame::AddDyn(nx::DynRec const&)",
     "ms": 0.14,
-    "share_of_22_2ms": 0.0063,
     "instr": 85456,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0084
    },
    {
     "kind": "cpu_function",
     "name": "dkCmdBufBindIdxBuffer",
     "ms": 0.114,
-    "share_of_22_2ms": 0.0051,
     "instr": 69620,
     "thread": "render (backend)",
-    "module": "nxgpu.c + libdeko3d"
+    "module": "nxgpu.c + libdeko3d",
+    "share_of_16_7ms": 0.0068
    },
    {
     "kind": "cpu_function",
     "name": "nx_d3d9_translate",
     "ms": 0.109,
-    "share_of_22_2ms": 0.0049,
     "instr": 66960,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0065
    },
    {
     "kind": "cpu_function",
     "name": "nx::Frame::Epilogue(nx::Packet*)",
     "ms": 0.109,
-    "share_of_22_2ms": 0.0049,
     "instr": 66780,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0065
    },
    {
     "kind": "cpu_function",
     "name": "nx::Frame::Emit()",
     "ms": 0.103,
-    "share_of_22_2ms": 0.0046,
     "instr": 63070,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0062
    },
    {
     "kind": "cpu_function",
     "name": "nx::Frame::Constants(unsigned long*)",
     "ms": 0.103,
-    "share_of_22_2ms": 0.0046,
     "instr": 63070,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0062
    },
    {
     "kind": "cpu_function",
     "name": "dkCmdBufDrawIndexed",
     "ms": 0.103,
-    "share_of_22_2ms": 0.0046,
     "instr": 63070,
     "thread": "render (backend)",
-    "module": "nxgpu.c + libdeko3d"
+    "module": "nxgpu.c + libdeko3d",
+    "share_of_16_7ms": 0.0062
    },
    {
     "kind": "cpu_function",
     "name": "nx::Frame::Tag(nx::Packet const*, unsigned short, unsigned short)",
     "ms": 0.097,
-    "share_of_22_2ms": 0.0044,
     "instr": 59360,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0058
    },
    {
     "kind": "cpu_function",
     "name": "nx::Encoder::Op(unsigned long, unsigned long)",
     "ms": 0.093,
-    "share_of_22_2ms": 0.0042,
     "instr": 57002,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0056
    },
    {
     "kind": "cpu_function",
     "name": "nx::DynFromD3D9(nx::DynRec*, NxDynamicState const&)",
     "ms": 0.091,
-    "share_of_22_2ms": 0.0041,
     "instr": 55650,
     "thread": "main+render (front)",
-    "module": "render/native front"
-   },
-   {
-    "kind": "cpu_function",
-    "name": "memmove",
-    "ms": 0.089,
-    "share_of_22_2ms": 0.004,
-    "instr": 54383,
-    "thread": "render (backend)",
-    "module": "nxgpu.c + libdeko3d"
-   },
-   {
-    "kind": "cpu_function",
-    "name": "dkMemBlockGetGpuAddr",
-    "ms": 0.047,
-    "share_of_22_2ms": 0.0021,
-    "instr": 28800,
-    "thread": "render (backend)",
-    "module": "nxgpu.c + libdeko3d"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0054
    }
   ],
   "cpu_by_family_pass": [
@@ -369,111 +399,111 @@
     "kind": "cpu_family",
     "name": "lit",
     "ms": 7.099,
-    "share_of_22_2ms": 0.3198,
     "instr": {
      "main": 2785893,
      "render_front": 659624,
      "render_backend": 899078
-    }
+    },
+    "share_of_16_7ms": 0.4251
    },
    {
     "kind": "cpu_family",
     "name": "trees",
     "ms": 1.697,
-    "share_of_22_2ms": 0.0764,
     "instr": {
      "main": 635461,
      "render_front": 174412,
      "render_backend": 228535
-    }
+    },
+    "share_of_16_7ms": 0.1016
    },
    {
     "kind": "cpu_family",
     "name": "water_refl",
     "ms": 1.189,
-    "share_of_22_2ms": 0.0536,
     "instr": {
      "main": 431610,
      "render_front": 123047,
      "render_backend": 172982
-    }
+    },
+    "share_of_16_7ms": 0.0712
    },
    {
     "kind": "cpu_family",
     "name": "grass",
     "ms": 0.918,
-    "share_of_22_2ms": 0.0413,
     "instr": {
      "main": 316051,
      "render_front": 106871,
      "render_backend": 138854
-    }
+    },
+    "share_of_16_7ms": 0.055
    },
    {
     "kind": "cpu_family",
     "name": "actors",
     "ms": 0.888,
-    "share_of_22_2ms": 0.04,
     "instr": {
      "main": 346780,
      "render_front": 81889,
      "render_backend": 114521
-    }
+    },
+    "share_of_16_7ms": 0.0532
    },
    {
     "kind": "cpu_family",
     "name": "land",
     "ms": 0.817,
-    "share_of_22_2ms": 0.0368,
     "instr": {
      "main": 350849,
      "render_front": 62914,
      "render_backend": 86115
-    }
+    },
+    "share_of_16_7ms": 0.0489
    },
    {
     "kind": "cpu_family",
     "name": "shadow",
     "ms": 0.805,
-    "share_of_22_2ms": 0.0362,
     "instr": {
      "main": 227298,
      "render_front": 107812,
      "render_backend": 157318
-    }
+    },
+    "share_of_16_7ms": 0.0482
    },
    {
     "kind": "cpu_family",
     "name": "lod",
     "ms": 0.731,
-    "share_of_22_2ms": 0.0329,
     "instr": {
      "main": 263707,
      "render_front": 78125,
      "render_backend": 105305
-    }
+    },
+    "share_of_16_7ms": 0.0438
    },
    {
     "kind": "cpu_family",
     "name": "particles",
     "ms": 0.532,
-    "share_of_22_2ms": 0.024,
     "instr": {
      "main": 182140,
      "render_front": 59788,
      "render_backend": 83662
-    }
+    },
+    "share_of_16_7ms": 0.0319
    },
    {
     "kind": "cpu_family",
     "name": "imagespace_ui",
     "ms": 0.292,
-    "share_of_22_2ms": 0.0132,
     "instr": {
      "main": 93970,
      "render_front": 26910,
      "render_backend": 58078
-    }
+    },
+    "share_of_16_7ms": 0.0175
    }
   ],
   "gpu_by_pass/mix_hi/docked_720p": [
@@ -481,133 +511,133 @@
     "kind": "gpu_pass",
     "name": "lit",
     "ms": 3.633,
-    "share_of_22_2ms": 0.1636,
     "bound": "alu",
     "pixels": 912384,
     "frag_ms": 3.177,
     "vertex_ms": 0.456,
     "dram_mb": 11.4,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.2175
    },
    {
     "kind": "gpu_pass",
     "name": "imagespace_ui",
     "ms": 3.525,
-    "share_of_22_2ms": 0.1588,
     "bound": "alu",
     "pixels": 3225600,
     "frag_ms": 3.525,
     "vertex_ms": 0.0,
     "dram_mb": 27.42,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.2111
    },
    {
     "kind": "gpu_pass",
     "name": "trees",
     "ms": 0.995,
-    "share_of_22_2ms": 0.0448,
     "bound": "alu",
     "pixels": 345600,
     "frag_ms": 0.93,
     "vertex_ms": 0.064,
     "dram_mb": 4.32,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0596
    },
    {
     "kind": "gpu_pass",
     "name": "water_refl",
     "ms": 0.904,
-    "share_of_22_2ms": 0.0407,
     "bound": "alu",
     "pixels": 314573,
     "frag_ms": 0.847,
     "vertex_ms": 0.057,
     "dram_mb": 3.93,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0541
    },
    {
     "kind": "gpu_pass",
     "name": "grass",
     "ms": 0.772,
-    "share_of_22_2ms": 0.0348,
     "bound": "alu",
     "pixels": 552960,
     "frag_ms": 0.604,
     "vertex_ms": 0.168,
     "dram_mb": 6.91,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0462
    },
    {
     "kind": "gpu_pass",
     "name": "land",
     "ms": 0.672,
-    "share_of_22_2ms": 0.0303,
     "bound": "alu",
     "pixels": 497664,
     "frag_ms": 0.628,
     "vertex_ms": 0.044,
     "dram_mb": 6.97,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0402
    },
    {
     "kind": "gpu_pass",
     "name": "lod",
     "ms": 0.485,
-    "share_of_22_2ms": 0.0218,
     "bound": "alu",
     "pixels": 165888,
     "frag_ms": 0.447,
     "vertex_ms": 0.038,
     "dram_mb": 2.07,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.029
    },
    {
     "kind": "gpu_pass",
     "name": "sky",
     "ms": 0.413,
-    "share_of_22_2ms": 0.0186,
     "bound": "alu",
     "pixels": 322560,
     "frag_ms": 0.413,
     "vertex_ms": 0.001,
     "dram_mb": 3.39,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0247
    },
    {
     "kind": "gpu_pass",
     "name": "particles",
     "ms": 0.411,
-    "share_of_22_2ms": 0.0185,
     "bound": "alu",
     "pixels": 368640,
     "frag_ms": 0.403,
     "vertex_ms": 0.009,
     "dram_mb": 6.82,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0246
    },
    {
     "kind": "gpu_pass",
     "name": "actors",
     "ms": 0.359,
-    "share_of_22_2ms": 0.0162,
     "bound": "alu",
     "pixels": 59904,
     "frag_ms": 0.209,
     "vertex_ms": 0.15,
     "dram_mb": 0.75,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0215
    },
    {
     "kind": "gpu_pass",
     "name": "shadow",
     "ms": 0.317,
-    "share_of_22_2ms": 0.0143,
     "bound": "alu",
     "pixels": 2831155,
     "frag_ms": 0.264,
     "vertex_ms": 0.053,
     "dram_mb": 11.32,
-    "target_format": null
+    "target_format": null,
+    "share_of_16_7ms": 0.019
    }
   ],
   "gpu_by_program/mix_hi/docked_720p": [
@@ -615,85 +645,85 @@
     "kind": "gpu_program",
     "name": "ps tex.frag",
     "ms": 3.525,
-    "share_of_22_2ms": 0.1588
+    "share_of_16_7ms": 0.2111
    },
    {
     "kind": "gpu_program",
     "name": "ps lit_spec.frag",
     "ms": 3.386,
-    "share_of_22_2ms": 0.1525
+    "share_of_16_7ms": 0.2028
    },
    {
     "kind": "gpu_program",
     "name": "ps lit.frag",
     "ms": 2.224,
-    "share_of_22_2ms": 0.1002
+    "share_of_16_7ms": 0.1332
    },
    {
     "kind": "gpu_program",
     "name": "ps nolight_tex.frag",
     "ms": 1.007,
-    "share_of_22_2ms": 0.0454
+    "share_of_16_7ms": 0.0603
    },
    {
     "kind": "gpu_program",
     "name": "ps land.frag",
     "ms": 0.628,
-    "share_of_22_2ms": 0.0283
+    "share_of_16_7ms": 0.0376
    },
    {
     "kind": "gpu_program",
     "name": "vs lit.vert",
     "ms": 0.615,
-    "share_of_22_2ms": 0.0277
+    "share_of_16_7ms": 0.0368
    },
    {
     "kind": "gpu_program",
     "name": "ps sky_clouds.frag",
     "ms": 0.413,
-    "share_of_22_2ms": 0.0186
+    "share_of_16_7ms": 0.0247
    },
    {
     "kind": "gpu_program",
     "name": "ps depth.frag",
     "ms": 0.264,
-    "share_of_22_2ms": 0.0119
+    "share_of_16_7ms": 0.0158
    },
    {
     "kind": "gpu_program",
     "name": "vs nolight_tex.vert",
     "ms": 0.168,
-    "share_of_22_2ms": 0.0076
+    "share_of_16_7ms": 0.0101
    },
    {
     "kind": "gpu_program",
     "name": "vs lit_vc.vert",
     "ms": 0.15,
-    "share_of_22_2ms": 0.0068
+    "share_of_16_7ms": 0.009
    },
    {
     "kind": "gpu_program",
     "name": "vs depth.vert",
     "ms": 0.053,
-    "share_of_22_2ms": 0.0024
+    "share_of_16_7ms": 0.0032
    },
    {
     "kind": "gpu_program",
     "name": "vs land.vert",
     "ms": 0.044,
-    "share_of_22_2ms": 0.002
+    "share_of_16_7ms": 0.0026
    },
    {
     "kind": "gpu_program",
     "name": "vs nolight_texvc.vert",
     "ms": 0.009,
-    "share_of_22_2ms": 0.0004
+    "share_of_16_7ms": 0.0005
    },
    {
     "kind": "gpu_program",
     "name": "vs sky.vert",
     "ms": 0.001,
-    "share_of_22_2ms": 0.0
+    "share_of_16_7ms": 0.0001
    }
   ],
   "gpu_frame_ms/mix_hi/docked_720p": 12.49,
@@ -702,133 +732,133 @@
     "kind": "gpu_pass",
     "name": "lit",
     "ms": 7.266,
-    "share_of_22_2ms": 0.3273,
     "bound": "alu",
     "pixels": 912384,
     "frag_ms": 6.355,
     "vertex_ms": 0.911,
     "dram_mb": 11.4,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.4351
    },
    {
     "kind": "gpu_pass",
     "name": "imagespace_ui",
     "ms": 7.049,
-    "share_of_22_2ms": 0.3175,
     "bound": "alu",
     "pixels": 3225600,
     "frag_ms": 7.049,
     "vertex_ms": 0.0,
     "dram_mb": 27.42,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.4221
    },
    {
     "kind": "gpu_pass",
     "name": "trees",
     "ms": 1.989,
-    "share_of_22_2ms": 0.0896,
     "bound": "alu",
     "pixels": 345600,
     "frag_ms": 1.861,
     "vertex_ms": 0.128,
     "dram_mb": 4.32,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.1191
    },
    {
     "kind": "gpu_pass",
     "name": "grass",
     "ms": 1.544,
-    "share_of_22_2ms": 0.0695,
     "bound": "alu",
     "pixels": 552960,
     "frag_ms": 1.208,
     "vertex_ms": 0.336,
     "dram_mb": 6.91,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0925
    },
    {
     "kind": "gpu_pass",
     "name": "land",
     "ms": 1.344,
-    "share_of_22_2ms": 0.0605,
     "bound": "alu",
     "pixels": 497664,
     "frag_ms": 1.256,
     "vertex_ms": 0.089,
     "dram_mb": 6.97,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0805
    },
    {
     "kind": "gpu_pass",
     "name": "lod",
     "ms": 0.969,
-    "share_of_22_2ms": 0.0436,
     "bound": "alu",
     "pixels": 165888,
     "frag_ms": 0.893,
     "vertex_ms": 0.076,
     "dram_mb": 2.07,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.058
    },
    {
     "kind": "gpu_pass",
     "name": "sky",
     "ms": 0.827,
-    "share_of_22_2ms": 0.0373,
     "bound": "alu",
     "pixels": 322560,
     "frag_ms": 0.825,
     "vertex_ms": 0.002,
     "dram_mb": 3.39,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0495
    },
    {
     "kind": "gpu_pass",
     "name": "particles",
     "ms": 0.823,
-    "share_of_22_2ms": 0.0371,
     "bound": "alu",
     "pixels": 368640,
     "frag_ms": 0.806,
     "vertex_ms": 0.017,
     "dram_mb": 6.82,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0493
    },
    {
     "kind": "gpu_pass",
     "name": "actors",
     "ms": 0.717,
-    "share_of_22_2ms": 0.0323,
     "bound": "alu",
     "pixels": 59904,
     "frag_ms": 0.417,
     "vertex_ms": 0.3,
     "dram_mb": 0.75,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0429
    },
    {
     "kind": "gpu_pass",
     "name": "water_refl",
     "ms": 0.537,
-    "share_of_22_2ms": 0.0242,
     "bound": "alu",
     "pixels": 78643,
     "frag_ms": 0.423,
     "vertex_ms": 0.114,
     "dram_mb": 0.98,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0322
    },
    {
     "kind": "gpu_pass",
     "name": "shadow",
     "ms": 0.239,
-    "share_of_22_2ms": 0.0108,
     "bound": "alu",
     "pixels": 707789,
     "frag_ms": 0.132,
     "vertex_ms": 0.107,
     "dram_mb": 2.83,
-    "target_format": null
+    "target_format": null,
+    "share_of_16_7ms": 0.0143
    }
   ],
   "gpu_by_program/mix_hi/handheld_720p": [
@@ -836,85 +866,85 @@
     "kind": "gpu_program",
     "name": "ps tex.frag",
     "ms": 7.049,
-    "share_of_22_2ms": 0.3175
+    "share_of_16_7ms": 0.4221
    },
    {
     "kind": "gpu_program",
     "name": "ps lit_spec.frag",
     "ms": 6.772,
-    "share_of_22_2ms": 0.305
+    "share_of_16_7ms": 0.4055
    },
    {
     "kind": "gpu_program",
     "name": "ps lit.frag",
     "ms": 3.177,
-    "share_of_22_2ms": 0.1431
+    "share_of_16_7ms": 0.1902
    },
    {
     "kind": "gpu_program",
     "name": "ps nolight_tex.frag",
     "ms": 2.014,
-    "share_of_22_2ms": 0.0907
+    "share_of_16_7ms": 0.1206
    },
    {
     "kind": "gpu_program",
     "name": "ps land.frag",
     "ms": 1.256,
-    "share_of_22_2ms": 0.0566
+    "share_of_16_7ms": 0.0752
    },
    {
     "kind": "gpu_program",
     "name": "vs lit.vert",
     "ms": 1.229,
-    "share_of_22_2ms": 0.0554
+    "share_of_16_7ms": 0.0736
    },
    {
     "kind": "gpu_program",
     "name": "ps sky_clouds.frag",
     "ms": 0.825,
-    "share_of_22_2ms": 0.0372
+    "share_of_16_7ms": 0.0494
    },
    {
     "kind": "gpu_program",
     "name": "vs nolight_tex.vert",
     "ms": 0.336,
-    "share_of_22_2ms": 0.0151
+    "share_of_16_7ms": 0.0201
    },
    {
     "kind": "gpu_program",
     "name": "vs lit_vc.vert",
     "ms": 0.3,
-    "share_of_22_2ms": 0.0135
+    "share_of_16_7ms": 0.018
    },
    {
     "kind": "gpu_program",
     "name": "ps depth.frag",
     "ms": 0.132,
-    "share_of_22_2ms": 0.0059
+    "share_of_16_7ms": 0.0079
    },
    {
     "kind": "gpu_program",
     "name": "vs depth.vert",
     "ms": 0.107,
-    "share_of_22_2ms": 0.0048
+    "share_of_16_7ms": 0.0064
    },
    {
     "kind": "gpu_program",
     "name": "vs land.vert",
     "ms": 0.089,
-    "share_of_22_2ms": 0.004
+    "share_of_16_7ms": 0.0053
    },
    {
     "kind": "gpu_program",
     "name": "vs nolight_texvc.vert",
     "ms": 0.017,
-    "share_of_22_2ms": 0.0008
+    "share_of_16_7ms": 0.001
    },
    {
     "kind": "gpu_program",
     "name": "vs sky.vert",
     "ms": 0.002,
-    "share_of_22_2ms": 0.0001
+    "share_of_16_7ms": 0.0001
    }
   ],
   "gpu_frame_ms/mix_hi/handheld_720p": 23.31,
@@ -923,133 +953,133 @@
     "kind": "gpu_pass",
     "name": "imagespace_ui",
     "ms": 4.43,
-    "share_of_22_2ms": 0.1995,
     "bound": "alu",
     "pixels": 3225600,
     "frag_ms": 4.43,
     "vertex_ms": 0.0,
     "dram_mb": 28.18,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.2653
    },
    {
     "kind": "gpu_pass",
     "name": "shadow",
     "ms": 4.137,
-    "share_of_22_2ms": 0.1864,
     "bound": "alu",
     "pixels": 2831155,
     "frag_ms": 3.869,
     "vertex_ms": 0.269,
     "dram_mb": 13.83,
-    "target_format": null
+    "target_format": null,
+    "share_of_16_7ms": 0.2477
    },
    {
     "kind": "gpu_pass",
     "name": "lit",
     "ms": 2.679,
-    "share_of_22_2ms": 0.1207,
     "bound": "alu",
     "pixels": 912384,
     "frag_ms": 1.247,
     "vertex_ms": 1.432,
     "dram_mb": 11.76,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.1604
    },
    {
     "kind": "gpu_pass",
     "name": "grass",
     "ms": 1.616,
-    "share_of_22_2ms": 0.0728,
     "bound": "alu",
     "pixels": 552960,
     "frag_ms": 0.551,
     "vertex_ms": 1.066,
     "dram_mb": 6.91,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0968
    },
    {
     "kind": "gpu_pass",
     "name": "actors",
     "ms": 1.075,
-    "share_of_22_2ms": 0.0484,
     "bound": "alu",
     "pixels": 59904,
     "frag_ms": 0.211,
     "vertex_ms": 0.863,
     "dram_mb": 0.84,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0644
    },
    {
     "kind": "gpu_pass",
     "name": "land",
     "ms": 0.924,
-    "share_of_22_2ms": 0.0416,
     "bound": "alu",
     "pixels": 497664,
     "frag_ms": 0.68,
     "vertex_ms": 0.244,
     "dram_mb": 6.41,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0553
    },
    {
     "kind": "gpu_pass",
     "name": "water_refl",
     "ms": 0.609,
-    "share_of_22_2ms": 0.0274,
     "bound": "alu",
     "pixels": 314573,
     "frag_ms": 0.43,
     "vertex_ms": 0.179,
     "dram_mb": 4.05,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0365
    },
    {
     "kind": "gpu_pass",
     "name": "trees",
     "ms": 0.58,
-    "share_of_22_2ms": 0.0261,
     "bound": "alu",
     "pixels": 345600,
     "frag_ms": 0.394,
     "vertex_ms": 0.186,
     "dram_mb": 4.49,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0347
    },
    {
     "kind": "gpu_pass",
     "name": "particles",
     "ms": 0.397,
-    "share_of_22_2ms": 0.0179,
     "bound": "alu",
     "pixels": 368640,
     "frag_ms": 0.356,
     "vertex_ms": 0.041,
     "dram_mb": 6.82,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0238
    },
    {
     "kind": "gpu_pass",
     "name": "lod",
     "ms": 0.199,
-    "share_of_22_2ms": 0.009,
     "bound": "alu",
     "pixels": 165888,
     "frag_ms": 0.103,
     "vertex_ms": 0.096,
     "dram_mb": 2.04,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0119
    },
    {
     "kind": "gpu_pass",
     "name": "sky",
     "ms": 0.189,
-    "share_of_22_2ms": 0.0085,
     "bound": "alu",
     "pixels": 322560,
     "frag_ms": 0.189,
     "vertex_ms": 0.001,
     "dram_mb": 3.23,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0113
    }
   ],
   "gpu_by_program/real019_mix_hi/docked_720p": [
@@ -1057,91 +1087,91 @@
     "kind": "gpu_program",
     "name": "ps SLS pso",
     "ms": 6.226,
-    "share_of_22_2ms": 0.2805
+    "share_of_16_7ms": 0.3728
    },
    {
     "kind": "gpu_program",
     "name": "ps IS pso",
     "ms": 4.43,
-    "share_of_22_2ms": 0.1995
+    "share_of_16_7ms": 0.2653
    },
    {
     "kind": "gpu_program",
     "name": "vs SLS vso",
     "ms": 2.124,
-    "share_of_22_2ms": 0.0957
+    "share_of_16_7ms": 0.1272
    },
    {
     "kind": "gpu_program",
     "name": "vs GRASS vso",
     "ms": 1.066,
-    "share_of_22_2ms": 0.048
+    "share_of_16_7ms": 0.0638
    },
    {
     "kind": "gpu_program",
     "name": "vs SKIN vso",
     "ms": 0.863,
-    "share_of_22_2ms": 0.0389
+    "share_of_16_7ms": 0.0517
    },
    {
     "kind": "gpu_program",
     "name": "ps STLEAF pso",
     "ms": 0.551,
-    "share_of_22_2ms": 0.0248
+    "share_of_16_7ms": 0.033
    },
    {
     "kind": "gpu_program",
     "name": "ps STB pso",
     "ms": 0.394,
-    "share_of_22_2ms": 0.0177
+    "share_of_16_7ms": 0.0236
    },
    {
     "kind": "gpu_program",
     "name": "ps PARTICLE pso",
     "ms": 0.356,
-    "share_of_22_2ms": 0.016
+    "share_of_16_7ms": 0.0213
    },
    {
     "kind": "gpu_program",
     "name": "ps SKIN pso",
     "ms": 0.211,
-    "share_of_22_2ms": 0.0095
+    "share_of_16_7ms": 0.0126
    },
    {
     "kind": "gpu_program",
     "name": "ps SKY pso",
     "ms": 0.189,
-    "share_of_22_2ms": 0.0085
+    "share_of_16_7ms": 0.0113
    },
    {
     "kind": "gpu_program",
     "name": "vs STB vso",
     "ms": 0.186,
-    "share_of_22_2ms": 0.0084
+    "share_of_16_7ms": 0.0111
    },
    {
     "kind": "gpu_program",
     "name": "ps SM pso",
     "ms": 0.103,
-    "share_of_22_2ms": 0.0046
+    "share_of_16_7ms": 0.0062
    },
    {
     "kind": "gpu_program",
     "name": "vs DISTLOD vso",
     "ms": 0.096,
-    "share_of_22_2ms": 0.0043
+    "share_of_16_7ms": 0.0057
    },
    {
     "kind": "gpu_program",
     "name": "vs PAR vso",
     "ms": 0.041,
-    "share_of_22_2ms": 0.0018
+    "share_of_16_7ms": 0.0025
    },
    {
     "kind": "gpu_program",
     "name": "vs SKY vso",
     "ms": 0.001,
-    "share_of_22_2ms": 0.0
+    "share_of_16_7ms": 0.0001
    }
   ],
   "gpu_frame_ms/real019_mix_hi/docked_720p": 16.84,
@@ -1150,133 +1180,133 @@
     "kind": "gpu_pass",
     "name": "imagespace_ui",
     "ms": 8.859,
-    "share_of_22_2ms": 0.3991,
     "bound": "alu",
     "pixels": 3225600,
     "frag_ms": 8.859,
     "vertex_ms": 0.0,
     "dram_mb": 28.18,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.5305
    },
    {
     "kind": "gpu_pass",
     "name": "lit",
     "ms": 5.358,
-    "share_of_22_2ms": 0.2414,
     "bound": "alu",
     "pixels": 912384,
     "frag_ms": 2.494,
     "vertex_ms": 2.865,
     "dram_mb": 11.76,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.3208
    },
    {
     "kind": "gpu_pass",
     "name": "grass",
     "ms": 3.233,
-    "share_of_22_2ms": 0.1456,
     "bound": "alu",
     "pixels": 552960,
     "frag_ms": 1.102,
     "vertex_ms": 2.131,
     "dram_mb": 6.91,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.1936
    },
    {
     "kind": "gpu_pass",
     "name": "shadow",
     "ms": 2.472,
-    "share_of_22_2ms": 0.1114,
     "bound": "alu",
     "pixels": 707789,
     "frag_ms": 1.934,
     "vertex_ms": 0.537,
     "dram_mb": 3.46,
-    "target_format": null
+    "target_format": null,
+    "share_of_16_7ms": 0.148
    },
    {
     "kind": "gpu_pass",
     "name": "actors",
     "ms": 2.149,
-    "share_of_22_2ms": 0.0968,
     "bound": "alu",
     "pixels": 59904,
     "frag_ms": 0.423,
     "vertex_ms": 1.727,
     "dram_mb": 0.84,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.1287
    },
    {
     "kind": "gpu_pass",
     "name": "land",
     "ms": 1.848,
-    "share_of_22_2ms": 0.0832,
     "bound": "alu",
     "pixels": 497664,
     "frag_ms": 1.36,
     "vertex_ms": 0.487,
     "dram_mb": 6.41,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.1107
    },
    {
     "kind": "gpu_pass",
     "name": "trees",
     "ms": 1.16,
-    "share_of_22_2ms": 0.0523,
     "bound": "alu",
     "pixels": 345600,
     "frag_ms": 0.789,
     "vertex_ms": 0.372,
     "dram_mb": 4.49,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0695
    },
    {
     "kind": "gpu_pass",
     "name": "particles",
     "ms": 0.795,
-    "share_of_22_2ms": 0.0358,
     "bound": "alu",
     "pixels": 368640,
     "frag_ms": 0.713,
     "vertex_ms": 0.082,
     "dram_mb": 6.82,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0476
    },
    {
     "kind": "gpu_pass",
     "name": "water_refl",
     "ms": 0.573,
-    "share_of_22_2ms": 0.0258,
     "bound": "alu",
     "pixels": 78643,
     "frag_ms": 0.215,
     "vertex_ms": 0.358,
     "dram_mb": 1.01,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0343
    },
    {
     "kind": "gpu_pass",
     "name": "lod",
     "ms": 0.398,
-    "share_of_22_2ms": 0.0179,
     "bound": "alu",
     "pixels": 165888,
     "frag_ms": 0.206,
     "vertex_ms": 0.192,
     "dram_mb": 2.04,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0238
    },
    {
     "kind": "gpu_pass",
     "name": "sky",
     "ms": 0.379,
-    "share_of_22_2ms": 0.0171,
     "bound": "alu",
     "pixels": 322560,
     "frag_ms": 0.377,
     "vertex_ms": 0.002,
     "dram_mb": 3.23,
-    "target_format": "RGBA16F"
+    "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0227
    }
   ],
   "gpu_by_program/real019_mix_hi/handheld_720p": [
@@ -1284,91 +1314,91 @@
     "kind": "gpu_program",
     "name": "ps IS pso",
     "ms": 8.859,
-    "share_of_22_2ms": 0.3991
+    "share_of_16_7ms": 0.5305
    },
    {
     "kind": "gpu_program",
     "name": "ps SLS pso",
     "ms": 6.003,
-    "share_of_22_2ms": 0.2704
+    "share_of_16_7ms": 0.3595
    },
    {
     "kind": "gpu_program",
     "name": "vs SLS vso",
     "ms": 4.247,
-    "share_of_22_2ms": 0.1913
+    "share_of_16_7ms": 0.2543
    },
    {
     "kind": "gpu_program",
     "name": "vs GRASS vso",
     "ms": 2.131,
-    "share_of_22_2ms": 0.096
+    "share_of_16_7ms": 0.1276
    },
    {
     "kind": "gpu_program",
     "name": "vs SKIN vso",
     "ms": 1.727,
-    "share_of_22_2ms": 0.0778
+    "share_of_16_7ms": 0.1034
    },
    {
     "kind": "gpu_program",
     "name": "ps STLEAF pso",
     "ms": 1.102,
-    "share_of_22_2ms": 0.0496
+    "share_of_16_7ms": 0.066
    },
    {
     "kind": "gpu_program",
     "name": "ps STB pso",
     "ms": 0.789,
-    "share_of_22_2ms": 0.0355
+    "share_of_16_7ms": 0.0472
    },
    {
     "kind": "gpu_program",
     "name": "ps PARTICLE pso",
     "ms": 0.713,
-    "share_of_22_2ms": 0.0321
+    "share_of_16_7ms": 0.0427
    },
    {
     "kind": "gpu_program",
     "name": "ps SKIN pso",
     "ms": 0.423,
-    "share_of_22_2ms": 0.0191
+    "share_of_16_7ms": 0.0253
    },
    {
     "kind": "gpu_program",
     "name": "ps SKY pso",
     "ms": 0.377,
-    "share_of_22_2ms": 0.017
+    "share_of_16_7ms": 0.0226
    },
    {
     "kind": "gpu_program",
     "name": "vs STB vso",
     "ms": 0.372,
-    "share_of_22_2ms": 0.0168
+    "share_of_16_7ms": 0.0223
    },
    {
     "kind": "gpu_program",
     "name": "ps SM pso",
     "ms": 0.206,
-    "share_of_22_2ms": 0.0093
+    "share_of_16_7ms": 0.0123
    },
    {
     "kind": "gpu_program",
     "name": "vs DISTLOD vso",
     "ms": 0.192,
-    "share_of_22_2ms": 0.0086
+    "share_of_16_7ms": 0.0115
    },
    {
     "kind": "gpu_program",
     "name": "vs PAR vso",
     "ms": 0.082,
-    "share_of_22_2ms": 0.0037
+    "share_of_16_7ms": 0.0049
    },
    {
     "kind": "gpu_program",
     "name": "vs SKY vso",
     "ms": 0.002,
-    "share_of_22_2ms": 0.0001
+    "share_of_16_7ms": 0.0001
    }
   ],
   "gpu_frame_ms/real019_mix_hi/handheld_720p": 27.22,
@@ -1377,114 +1407,407 @@
     "kind": "gpu_pass",
     "name": "lit",
     "ms": 7.266,
-    "share_of_22_2ms": 0.3273,
     "bound": "alu",
     "pixels": 912384,
     "frag_ms": 6.355,
     "vertex_ms": 0.911,
     "dram_mb": 11.4,
     "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.4351,
     "config": "handheld_720p"
    },
    {
     "kind": "gpu_pass",
     "name": "imagespace_ui",
     "ms": 7.049,
-    "share_of_22_2ms": 0.3175,
     "bound": "alu",
     "pixels": 3225600,
     "frag_ms": 7.049,
     "vertex_ms": 0.0,
     "dram_mb": 27.42,
     "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.4221,
     "config": "handheld_720p"
    },
    {
     "kind": "cpu_function",
     "name": "nx::SortPackets(nx::Packet const*, unsigned long, unsigned long*, unsigned long*, unsigned long long*, unsigned long long*)",
     "ms": 3.744,
-    "share_of_22_2ms": 0.1687,
     "instr": 2291497,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.2242
    },
    {
     "kind": "gpu_pass",
     "name": "trees",
     "ms": 1.989,
-    "share_of_22_2ms": 0.0896,
     "bound": "alu",
     "pixels": 345600,
     "frag_ms": 1.861,
     "vertex_ms": 0.128,
     "dram_mb": 4.32,
     "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.1191,
     "config": "handheld_720p"
    },
    {
     "kind": "cpu_function",
     "name": "record",
     "ms": 1.633,
-    "share_of_22_2ms": 0.0736,
     "instr": 999610,
     "thread": "render (backend)",
-    "module": "nxgpu.c + libdeko3d"
+    "module": "nxgpu.c + libdeko3d",
+    "share_of_16_7ms": 0.0978
    },
    {
     "kind": "gpu_pass",
     "name": "grass",
     "ms": 1.544,
-    "share_of_22_2ms": 0.0695,
     "bound": "alu",
     "pixels": 552960,
     "frag_ms": 1.208,
     "vertex_ms": 0.336,
     "dram_mb": 6.91,
     "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0925,
     "config": "handheld_720p"
    },
    {
     "kind": "cpu_function",
     "name": "nx::Frame::Finish(nx::StateCache&, NxFrameStats*, bool)",
     "ms": 1.459,
-    "share_of_22_2ms": 0.0657,
     "instr": 892912,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0874
    },
    {
     "kind": "gpu_pass",
     "name": "land",
     "ms": 1.344,
-    "share_of_22_2ms": 0.0605,
     "bound": "alu",
     "pixels": 497664,
     "frag_ms": 1.256,
     "vertex_ms": 0.089,
     "dram_mb": 6.97,
     "target_format": "RGBA16F",
+    "share_of_16_7ms": 0.0805,
     "config": "handheld_720p"
    },
    {
     "kind": "cpu_function",
     "name": "nx::Renderer::Render(nx::Renderer::Draw const&)",
     "ms": 1.081,
-    "share_of_22_2ms": 0.0487,
     "instr": 661825,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0647
    },
    {
     "kind": "cpu_function",
     "name": "nx_d3d9_sampler",
     "ms": 1.01,
-    "share_of_22_2ms": 0.0455,
     "instr": 618170,
     "thread": "main+render (front)",
-    "module": "render/native front"
+    "module": "render/native front",
+    "share_of_16_7ms": 0.0605
    }
   ],
-  "input": "synthetic mix_hi (docs/RENDER_PERF.md \u00a72; S16's NXD9 captures of the real game replace it); GPU: S6n's native shaders, and real019_ = the game's shaderpackage019 programs translated by sdp2dksh (class averages) on the same pass mix"
+  "input": "synthetic mix_hi (docs/RENDER_PERF.md \u00a72; S16's NXD9 captures of the real game replace it); GPU: S6n's native shaders, and real019_ = the game's shaderpackage019 programs translated by sdp2dksh (class averages) on the same pass mix",
+  "engine_d3d9_path_by_function": [
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiDX9RenderState::SetRenderState (filter + device call)",
+    "ms": 2.42,
+    "share_of_16_7ms": 0.1449,
+    "instr_per_draw": 399.2,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiDX9Renderer render-mesh pass loop",
+    "ms": 0.993,
+    "share_of_16_7ms": 0.0595,
+    "instr_per_draw": 163.8,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DPass::SetupShaderPrograms (shaders + per-stage texcoord states)",
+    "ms": 0.767,
+    "share_of_16_7ms": 0.046,
+    "instr_per_draw": 126.6,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiDX9RenderState property helpers",
+    "ms": 0.688,
+    "share_of_16_7ms": 0.0412,
+    "instr_per_draw": 113.5,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "other (unlabelled)",
+    "ms": 0.606,
+    "share_of_16_7ms": 0.0363,
+    "instr_per_draw": 100.0,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DShader::PrepareGeometryForRendering",
+    "ms": 0.598,
+    "share_of_16_7ms": 0.0358,
+    "instr_per_draw": 98.6,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DPass::SetupRenderingPass (texture stages)",
+    "ms": 0.571,
+    "share_of_16_7ms": 0.0342,
+    "instr_per_draw": 94.2,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiDX9RenderState stencil property",
+    "ms": 0.564,
+    "share_of_16_7ms": 0.0338,
+    "instr_per_draw": 93.1,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "BSShader lit Prepare/Update/Finish (kept engine code)",
+    "ms": 0.521,
+    "share_of_16_7ms": 0.0312,
+    "instr_per_draw": 85.9,
+    "thread": "main (engine)",
+    "path": "kept on the native path",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DShaderConstantMap::SetShaderConstants (entry walk)",
+    "ms": 0.495,
+    "share_of_16_7ms": 0.0296,
+    "instr_per_draw": 81.6,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiDX9Renderer::Do_RenderShape/Do_RenderTristrips",
+    "ms": 0.475,
+    "share_of_16_7ms": 0.0284,
+    "instr_per_draw": 78.3,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DDefaultShader::UpdatePipeline (pass setup)",
+    "ms": 0.471,
+    "share_of_16_7ms": 0.0282,
+    "instr_per_draw": 77.7,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DShader::SetupTransformations",
+    "ms": 0.455,
+    "share_of_16_7ms": 0.0273,
+    "instr_per_draw": 75.1,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "BSBatchRenderer draw-geometry-pass (kept engine code)",
+    "ms": 0.452,
+    "share_of_16_7ms": 0.027,
+    "instr_per_draw": 74.5,
+    "thread": "main (engine)",
+    "path": "kept on the native path",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "BSShader::PreProcessPipeline",
+    "ms": 0.439,
+    "share_of_16_7ms": 0.0263,
+    "instr_per_draw": 72.4,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiDX9RenderState slot 48 (stage state filter + device call)",
+    "ms": 0.436,
+    "share_of_16_7ms": 0.0261,
+    "instr_per_draw": 72.0,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiDX9RenderState alpha property",
+    "ms": 0.429,
+    "share_of_16_7ms": 0.0257,
+    "instr_per_draw": 70.7,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DShader::SetupShaderPrograms",
+    "ms": 0.401,
+    "share_of_16_7ms": 0.024,
+    "instr_per_draw": 66.2,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DRenderStateGroup set/restore",
+    "ms": 0.371,
+    "share_of_16_7ms": 0.0222,
+    "instr_per_draw": 61.2,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "render-mode application (z/cull/fill per draw)",
+    "ms": 0.347,
+    "share_of_16_7ms": 0.0208,
+    "instr_per_draw": 57.2,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiDX9RenderState::UpdateRenderState (property state)",
+    "ms": 0.238,
+    "share_of_16_7ms": 0.0142,
+    "instr_per_draw": 39.2,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DShaderConstantMap predefined-entry switch",
+    "ms": 0.235,
+    "share_of_16_7ms": 0.014,
+    "instr_per_draw": 38.7,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "BSShader::PostProcessPipeline",
+    "ms": 0.218,
+    "share_of_16_7ms": 0.0131,
+    "instr_per_draw": 36.0,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "BSShader::UpdatePipeline",
+    "ms": 0.194,
+    "share_of_16_7ms": 0.0116,
+    "instr_per_draw": 32.0,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DShader::SetupTransformations (skin)",
+    "ms": 0.189,
+    "share_of_16_7ms": 0.0113,
+    "instr_per_draw": 31.1,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DShader::FirstPass/NextPass",
+    "ms": 0.153,
+    "share_of_16_7ms": 0.0091,
+    "instr_per_draw": 25.2,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DShaderProgram::SetShaderConstant",
+    "ms": 0.127,
+    "share_of_16_7ms": 0.0076,
+    "instr_per_draw": 20.9,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "BSBatchRenderer shader-pass change (kept engine code)",
+    "ms": 0.072,
+    "share_of_16_7ms": 0.0043,
+    "instr_per_draw": 11.8,
+    "thread": "main (engine)",
+    "path": "kept on the native path",
+    "source": "measured (engine_path.py, static)"
+   },
+   {
+    "kind": "cpu_engine_function",
+    "name": "NiD3DShaderConstantMap entry kinds",
+    "ms": 0.038,
+    "share_of_16_7ms": 0.0023,
+    "instr_per_draw": 6.2,
+    "thread": "main (engine)",
+    "path": "D3D9 path (replaced by the native renderer)",
+    "source": "measured (engine_path.py, static)"
+   }
+  ],
+  "frame_budget_ms": 16.7
  },
  "optimizations": [
   {
@@ -2999,7 +3322,16 @@
     "softpipe_transfer_unmap",
     217932
    ]
-  ]
+  ],
+  "with_engine_a64_instr": {
+   "mix_lo": 6932447,
+   "mix_hi": 16871551
+  },
+  "with_engine_over_native_with_kept": {
+   "mix_lo": 1.16,
+   "mix_hi": 1.44
+  },
+  "with_engine_rule": "D3D9 path per frame = engine_d3d9_path total (d3d9 path + kept) + st/nine A64 estimate; native = front + deko3d recording + the kept engine part; nouveau still excluded"
  },
  "gpu": {
   "model": "Per DKSH: registers (DkshProgramHeader.num_gprs), Maxwell instructions (code words that are not scheduling words,\nnot uam's NOP / \"BRA $\" padding), and from uam's TGSI (-t): static instruction count, texture instructions, and a\ndynamic estimate (the light loop of lit*.frag run LIGHTS times; every other TGSI loop is a compiled switch and runs\nonce; both arms of every IF are counted, so branchy epilogues are upper bounds). maxwell_dyn = maxwell_static x\ntgsi_dyn / tgsi_static.\n\nScene model (MODEL below, every number is copied into the JSON): per family, covered pixels = target pixels x\ncoverage x overdraw; fragment time = pixels x max(ALU: maxwell_dyn / 256 lanes, TEX: tex x TEX_COST / 16 TMUs,\nROP: 1 / 16, depth-only 1 / 32, 64-bit colour 1 / 8) / clock, ALU and TEX divided by an issue efficiency (EFF: 1.0 and\n0.6 give the lo/hi estimate); ALU slots count fp16x2 instructions at half cost (FP16_RATE); DRAM bytes per pixel\nfrom the family's render-target format (TARGET_FORMATS, colour x2 when blending), depth traffic x Z_COMPRESS and\nTEX_BYTES per texture fetch; presets (PRESETS) give target size, shadow map and reflection size per config; vertex time = draws x vertices x vs maxwell_dyn / 256 / clock; frame\ntime = max(sum over families, DRAM traffic / (25.6 GB/s x efficiency)). No caches, no early-z rejection benefit\nbeyond the overdraw factor, no cross-family overlap, no CPU/GPU sync stalls.",
@@ -11344,6 +11676,187 @@
   ],
   "cache_misses": "not modelled by the counter; the IPC range is meant to cover L1 misses of the front's tables, the hi estimate of the main thread adds a streaming-store term (bytes_per_draw_memory_term / store_gbs)",
   "a64_counter": "Unicorn UC_HOOK_BLOCK, size/4 per basic block; ILP32 guest -O2 -mtune=cortex-a57; stream decoder subtracted (dry run)",
-  "not_counted": "engine code (update, cull, accumulation, NiDX9RenderState callers, constant-map walk), the family code that would fill per-draw constants (the stream hands ready blocks), skinning palettes, dynamic vertex data"
+  "not_counted": "engine update, cull, accumulation; skinning palettes; dynamic vertex data. The engine's own D3D9 draw path is now measured: engine_d3d9_path (it was assumed 1-3 k instructions per draw)",
+  "engine_d3d9_path": "MEASURED (static path count) on the AArch64 ILP32 prepared objects, render/native/perf/engine_path.py; replaces the assumption of PERF.md \u00a75 / RENDER_PERF.md \u00a73.7",
+  "frame_budget_ms": 16.7
+ },
+ "engine_d3d9_path": {
+  "source": "MEASURED (static path count) on the AArch64 ILP32 prepared objects, render/native/perf/engine_path.py; replaces the assumption of PERF.md \u00a75 / RENDER_PERF.md \u00a73.7",
+  "replaced_assumption": {
+   "per_draw_instr": [
+    1000,
+    3000
+   ],
+   "per_draw_us": [
+    10,
+    20
+   ],
+   "text": "engine's own per-draw work before the device: 1-3 k instructions [E] (PERF.md \u00a75); 10-20 us/draw (RENDER_PERF.md \u00a73.7, mostly this side)"
+  },
+  "inputs": {
+   "objects": "c/b6585b87bb73",
+   "decomp": "87eb9373a0bb",
+   "link_tables": "link-head",
+   "compiler": "aarch64-linux-gnu-g++ 13.3 -O2 ILP32",
+   "mix": "mix_hi"
+  },
+  "per_draw_instr": {
+   "lo": 2280,
+   "exp": 2303,
+   "hi": 2355,
+   "path_min": 192,
+   "path_max": 8207
+  },
+  "per_draw_instr_rule": "exp = static expectation over the hot path (branch rules and loop trips of the spec: mix_hi draw-weighted RS / stage / constant counts, 81 % of render states redundant); lo / hi = the same with the spec's low / high sensitivity (redundancy 90 % / 60 %, 1 / 4 state-group entries per pass); path_min / path_max = shortest / longest path, bounds only",
+  "per_draw_us": {
+   "gate": 3.763,
+   "hi": 3.848,
+   "best": 1.277
+  },
+  "parts_per_draw_exp": {
+   "d3d9_path (replaced by the native renderer)": 2130.8,
+   "kept (BSBatchRenderer + BSShader Prepare/Update/Finish, stays until the families replace it)": 172.2,
+   "range_lo": {
+    "d3d9_path": 2107.8,
+    "kept": 172.2
+   },
+   "range_hi": {
+    "d3d9_path": 2182.8,
+    "kept": 172.2
+   }
+  },
+  "by_function_per_draw_exp": {
+   "NiDX9RenderState::SetRenderState (filter + device call)": 399.2,
+   "NiDX9Renderer render-mesh pass loop": 163.8,
+   "NiD3DPass::SetupShaderPrograms (shaders + per-stage texcoord states)": 126.6,
+   "NiDX9RenderState property helpers": 113.5,
+   "other (unlabelled)": 100.0,
+   "NiD3DShader::PrepareGeometryForRendering": 98.6,
+   "NiD3DPass::SetupRenderingPass (texture stages)": 94.2,
+   "NiDX9RenderState stencil property": 93.1,
+   "BSShader lit Prepare/Update/Finish (kept engine code)": 85.9,
+   "NiD3DShaderConstantMap::SetShaderConstants (entry walk)": 81.6,
+   "NiDX9Renderer::Do_RenderShape/Do_RenderTristrips": 78.3,
+   "NiD3DDefaultShader::UpdatePipeline (pass setup)": 77.7,
+   "NiD3DShader::SetupTransformations": 75.1,
+   "BSBatchRenderer draw-geometry-pass (kept engine code)": 74.5,
+   "BSShader::PreProcessPipeline": 72.4,
+   "NiDX9RenderState slot 48 (stage state filter + device call)": 72.0,
+   "NiDX9RenderState alpha property": 70.7,
+   "NiD3DShader::SetupShaderPrograms": 66.2,
+   "NiD3DRenderStateGroup set/restore": 61.2,
+   "render-mode application (z/cull/fill per draw)": 57.2,
+   "NiDX9RenderState::UpdateRenderState (property state)": 39.2,
+   "NiD3DShaderConstantMap predefined-entry switch": 38.7,
+   "BSShader::PostProcessPipeline": 36.0,
+   "BSShader::UpdatePipeline": 32.0,
+   "NiD3DShader::SetupTransformations (skin)": 31.1,
+   "NiD3DShader::FirstPass/NextPass": 25.2,
+   "NiD3DShaderProgram::SetShaderConstant": 20.9,
+   "BSBatchRenderer shader-pass change (kept engine code)": 11.8,
+   "NiD3DShaderConstantMap entry kinds": 6.2
+  },
+  "d3d_calls_per_draw_exp": {
+   "DrawIndexedPrimitive": 1.0,
+   "DrawPrimitive": 0.0,
+   "SetPixelShaderConstantF": 0.05,
+   "SetRenderState": 3.78,
+   "SetTextureStageState": 0.6,
+   "SetTransform": 0.59,
+   "SetVertexShaderConstantF": 0.11
+  },
+  "roles_per_invocation": {
+   "render_geometry": {
+    "min": 9,
+    "exp": 1700.0,
+    "max": 4983.2
+   },
+   "set_render_state": {
+    "min": 6,
+    "exp": 19.9,
+    "max": 24
+   },
+   "set_sampler_state": {
+    "min": 7,
+    "exp": 18.0,
+    "max": 24
+   },
+   "set_texture": {
+    "min": 8,
+    "exp": 11.2,
+    "max": 13
+   },
+   "pass_shader_programs": {
+    "min": 72,
+    "exp": 379.4,
+    "max": 2427.0
+   },
+   "batch_draw": {
+    "min": 101,
+    "exp": 212.0,
+    "max": 782
+   },
+   "pass_change": {
+    "min": 45,
+    "exp": 50.5,
+    "max": 62
+   }
+  },
+  "frame": {
+   "mix_lo": {
+    "draws": 1490,
+    "instr": {
+     "d3d9_path": 3174892,
+     "kept": 256578,
+     "total": 3431470,
+     "total_lo": 3397200,
+     "total_hi": 3508950
+    },
+    "ms_gate": {
+     "d3d9_path": 5.188,
+     "kept": 0.419,
+     "total": 5.607,
+     "total_hi": 5.734
+    },
+    "ms_best": {
+     "total": 1.922
+    }
+   },
+   "mix_hi": {
+    "draws": 3710,
+    "instr": {
+     "d3d9_path": 7905268,
+     "kept": 638862,
+     "total": 8544130,
+     "total_lo": 8458800,
+     "total_hi": 8737050
+    },
+    "ms_gate": {
+     "d3d9_path": 12.917,
+     "kept": 1.044,
+     "total": 13.961,
+     "total_hi": 14.276
+    },
+    "ms_best": {
+     "total": 4.787
+    }
+   }
+  },
+  "coverage": {
+   "functions_counted": 71,
+   "words_static": 7019,
+   "functions_missing": 0,
+   "vcalls_unresolved": 69,
+   "vcalls_resolved": 132,
+   "calls_external": {
+    "cut": 169,
+    "runtime": 1,
+    "nodef": 2,
+    "unresolved": 10,
+    "import": 3,
+    "provider": 13
+   }
+  },
+  "limits": "static count (no execution): branch probabilities are rules, not measurements; 69 indirect calls stay unresolved (mostly geometry/skin getters and the strip path) and count their call only; the shader class is the lit one (shadow-light) for the BSShader virtuals; device calls end at our D3D9 front (counted in \u00a71); per-frame fixed engine work (BeginFrame/EndFrame, target groups) is not in it"
  }
 }

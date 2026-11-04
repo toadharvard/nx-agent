@@ -7,6 +7,10 @@
    build's flags (tools/link/compile.sh), in the modes volatile (the build), keys, tso and off.
 2. args.cpp: call arguments are evaluated right to left, as MSVC x86 does (args=rtl), ILP32 under qemu; the expected
    order (args.expect) is checked against GCC x86-32, which pushes too, when the host has gcc -m32.
+   evalorder.cpp: the object of a member call and the operands of overloaded operators (ORDER-OBJECT and
+   ORDER-OPERATOR, still open): the defaults give evalorder.gcc.expect, object=last operator=rtl give
+   evalorder.msvc-guess.expect, and the two differ. With the defaults the objects of evalorder.cpp and units.cpp are
+   byte-identical to those without the two arguments, and object=last keeps the non-virtual calls direct.
 3. litmus.cpp: multicore message-passing litmus tests with volatile flags (a reused result slot, a polled queue, a
    spin lock), freestanding ILP32 under qemu-aarch64 with 4 host threads. With the plugin no test may show a bad
    outcome; without it mp2 must (the test bites).
@@ -22,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
@@ -142,6 +147,157 @@ def codegen(scratch, plugin):
             check(hit == (kind == 'expect'), 'codegen %s: %s %s /%s/' % (mode, fn, kind, rx))
 
 
+def uninit_codegen(scratch, plugin):
+    """uninit.cpp: uninitialized locals read as 0 (uninit=zero, the default); uninit=keep shows GCC folding them"""
+    src = os.path.join(HERE, 'uninit.cpp')
+    exp = expectations(src)
+    check(len(exp) >= 6, 'uninit: %d expectations read from uninit.cpp' % len(exp))
+    for mode, extra in (('volatile', []), ('keep', ['-fplugin-arg-fnvnx_order-uninit=keep'])):
+        asm = os.path.join(scratch, 'uninit_%s.s' % mode)
+        r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + ['-fplugin=' + plugin] + extra + ['-w', '-S', '-o', asm, src],
+                           capture_output=True, text=True)
+        check(r.returncode == 0, 'uninit %s: uninit.cpp compiles (%s)' % (mode, r.stderr.strip()[-300:]))
+        if r.returncode:
+            continue
+        funcs = functions(open(asm).read())
+        for fn, m, kind, rx in exp:
+            if m != mode:
+                continue
+            body = body_of(funcs, fn)
+            if body is None:
+                check(False, 'uninit %s: %s not found' % (mode, fn))
+                continue
+            check((re.search(rx, body) is not None) == (kind == 'expect'), 'uninit %s: %s %s /%s/' % (mode, fn, kind, rx))
+    # the pass leaves no undefined value: GCC's own -Wuninitialized has nothing left to report
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + ['-fplugin=' + plugin, '-Wuninitialized', '-Wmaybe-uninitialized',
+                        '-S', '-o', os.devnull, src], capture_output=True, text=True)
+    check('uninitialized' not in r.stderr, 'uninit: no -Wuninitialized warning left (%s)' % r.stderr.strip()[-200:])
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + ['-fplugin=' + plugin, '-fplugin-arg-fnvnx_order-uninit=keep',
+                        '-Wuninitialized', '-S', '-o', os.devnull, src], capture_output=True, text=True)
+    check('uninitialized' in r.stderr, 'uninit keep: GCC warns (the test bites)')
+
+
+def wholeprog(scratch, plugin):
+    """wholeprog_a.cpp / wholeprog_b.cpp: the whole-program key list (keys.sh, discover=). Unit A's syntax-only
+    discovery finds its Interlocked operands (also through forwarders) and plain polls; unit B, which does neither,
+    gets ordered stores of them only from that list (ATOMIC-PLAIN-STORE, the writer side of POLL-PLAIN)"""
+    sse = os.environ.get('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
+    inc = ['-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'), '-I' + os.path.join(PORT, 'shim', 'include'),
+           '-I' + sse, '-I' + HERE, '-fplugin=' + plugin, '-w']
+    a, b = os.path.join(HERE, 'wholeprog_a.cpp'), os.path.join(HERE, 'wholeprog_b.cpp')
+    keys = os.path.join(scratch, 'wholeprog.keys')
+    parts = []
+    for u in (a, os.path.join(HERE, 'wholeprog_c.cpp')):
+        k = os.path.join(scratch, os.path.basename(u) + '.keys')
+        if os.path.exists(k):
+            os.unlink(k)
+        r = subprocess.run(['aarch64-linux-gnu-g++'] + [f for f in BUILD if f != '-O2'] + inc +
+                           ['-fsyntax-only', '-fplugin-arg-fnvnx_order-discover=' + k, u], capture_output=True, text=True)
+        check(r.returncode == 0 and os.path.exists(k), 'wholeprog: syntax-only discovery of %s (%s)'
+              % (os.path.basename(u), r.stderr[-300:]))
+        if r.returncode or not os.path.exists(k):
+            return
+        parts.append(k)
+    # the merge compile.sh runs: a forwarder in A, its call in C
+    r = subprocess.run([sys.executable, os.path.join(PORT, 'toolchain', 'order', 'keys_merge.py')] + parts,
+                       capture_output=True, text=True)
+    open(keys, 'w').write(r.stdout)
+    union = sorted({l for p in parts for l in open(p).read().splitlines() if l.startswith(('field ', 'var '))})
+    check('field Obj::m_xcount' not in union, 'wholeprog: no single unit knows Obj::m_xcount (the merge bites)')
+    got = open(keys).read().splitlines()
+    want = sorted(l.split('discover:', 1)[1].strip() for l in open(a) if '// discover:' in l)
+    check(got == want, 'wholeprog: discovered keys of unit A = %s (want %s)' % (got, want))
+    a_asm = os.path.join(scratch, 'wholeprog_a.s')
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + inc + ['-S', '-o', a_asm, a], capture_output=True, text=True)
+    check(r.returncode == 0, 'wholeprog: unit A compiles (%s)' % r.stderr[-300:])
+    jobs = [('volatile', a, a_asm)]
+    for mode, extra in (('keys', ['-fplugin-arg-fnvnx_order-keys=' + keys]), ('nokeys', [])):
+        asm = os.path.join(scratch, 'wholeprog_b_%s.s' % mode)
+        r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + inc + extra + ['-S', '-o', asm, b], capture_output=True,
+                           text=True)
+        check(r.returncode == 0, 'wholeprog: unit B compiles, %s (%s)' % (mode, r.stderr[-300:]))
+        jobs.append((mode, b, asm))
+    for mode, src, asm in jobs:
+        if not os.path.exists(asm):
+            continue
+        funcs = functions(open(asm).read())
+        exp = [e for e in expectations(src) if e[1] == mode]
+        check(len(exp) >= 4, 'wholeprog %s: %d expectations in %s' % (mode, len(exp), os.path.basename(src)))
+        for fn, _, kind, rx in exp:
+            body = body_of(funcs, fn)
+            if body is None:
+                check(False, 'wholeprog %s: %s not found' % (mode, fn))
+                continue
+            check((re.search(rx, body) is not None) == (kind == 'expect'), 'wholeprog %s: %s %s /%s/' % (mode, fn, kind, rx))
+
+
+def compile_sh_keys(scratch):
+    """tools/link/compile.sh keeps the whole-program key list itself: a two-unit tree, compiled as a one-unit shard
+    (only unit B), still gives B the keys of unit A; ORDER_KEYS=unit does not; a second run rebuilds nothing"""
+    if not shutil.which('jq'):
+        print('skip compile.sh keys: needs jq')
+        return
+    import json
+    tree = os.path.join(scratch, 'cs_tree')
+    out = os.path.join(scratch, 'cs_obj')
+    shutil.rmtree(tree, ignore_errors=True)
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(os.path.join(tree, 'build'))
+    os.makedirs(os.path.join(tree, 'include'))
+    for f in ('wholeprog_a.cpp', 'wholeprog_b.cpp', 'wholeprog_c.cpp'):
+        shutil.copy(os.path.join(HERE, f), os.path.join(tree, f))
+    shutil.copy(os.path.join(HERE, 'wholeprog.h'), os.path.join(tree, 'include', 'wholeprog.h'))
+    json.dump({'units': [{'source': 'wholeprog_a.cpp'}, {'source': 'wholeprog_b.cpp'}, {'source': 'wholeprog_c.cpp'}]},
+              open(os.path.join(tree, 'build', 'units.json'), 'w'))
+    shard = os.path.join(scratch, 'cs_shard.list')
+    open(shard, 'w').write('wholeprog_b.cpp\n')
+    env = dict(os.environ)
+    env.setdefault('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
+    env.pop('ORDER_KEYS', None)
+    cs = os.path.join(PORT, 'tools', 'link', 'compile.sh')
+
+    def run(o, extra=None):
+        e = dict(env, **(extra or {}))
+        return subprocess.run(['bash', cs, tree, o, shard, '2'], capture_output=True, text=True, env=e)
+
+    def disasm(o):
+        obj = os.path.join(o, 'wholeprog_b.cpp.o')
+        if not os.path.exists(obj):
+            return ''
+        return subprocess.run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', obj], capture_output=True,
+                              text=True).stdout
+
+    r = run(out)
+    check(r.returncode == 0 and '1 ok, 0 failed' in r.stdout, 'compile.sh keys: shard of unit B compiles (%s)'
+          % (r.stdout + r.stderr)[-300:])
+    keys = os.path.join(out, 'order.keys')
+    want = sorted(l.split('discover:', 1)[1].strip() for l in open(os.path.join(HERE, 'wholeprog_a.cpp'))
+                  if '// discover:' in l)
+    got = open(keys).read().splitlines() if os.path.exists(keys) else None
+    check(got == want, 'compile.sh keys: <obj dir>/order.keys covers the whole tree, not the shard (%s)' % got)
+    d = disasm(out)
+    m = re.search(r'<_Z6unlockP3Obj>:\n(.*?)\n\n', d, re.S)
+    check(bool(m) and '\tstlr\t' in m.group(1), 'compile.sh keys: unit B\'s unlock() stores with stlr')
+    mt = os.path.getmtime(os.path.join(out, 'wholeprog_b.cpp.o'))
+    r = run(out)
+    check(r.returncode == 0 and os.path.getmtime(os.path.join(out, 'wholeprog_b.cpp.o')) == mt and
+          os.path.getmtime(keys) <= mt, 'compile.sh keys: a second run keeps the object and the key list')
+    # a header the units include changes (no unit source does): the per-unit cache must notice (its .d files)
+    time.sleep(1.1)
+    with open(os.path.join(tree, 'include', 'wholeprog.h'), 'a') as f:
+        f.write('inline void hdr_lock(Worker *w) { InterlockedIncrement((volatile LONG *)&w->m_result); }\n')
+    r = run(out, {'KEYS_ONLY': '1'})
+    got = open(keys).read().splitlines() if os.path.exists(keys) else []
+    check(r.returncode == 0 and 'field Worker::m_result' in got,
+          'compile.sh keys: a changed header refreshes the cached discovery (Worker::m_result in order.keys)')
+    r = run(out + '_unit', {'ORDER_KEYS': 'unit'})
+    m = re.search(r'<_Z6unlockP3Obj>:\n(.*?)\n\n', disasm(out + '_unit'), re.S)
+    check(r.returncode == 0 and bool(m) and '\tstlr\t' not in m.group(1),
+          'compile.sh keys: ORDER_KEYS=unit leaves unlock() plain (the default bites)')
+    r = run(out + '_missing', {'ORDER_KEYS': os.path.join(scratch, 'no-such.keys')})
+    check(r.returncode == 2, 'compile.sh keys: a missing ORDER_KEYS file is an error, not a silent fallback')
+
+
 X86_RT = r'''
 void v1_puts(const char *s) { int n = 0; while (s[n]) n++; int r;
     __asm__ volatile("int $0x80" : "=a"(r) : "a"(4), "b"(1), "c"(s), "d"(n) : "memory"); }
@@ -190,6 +346,79 @@ def args_order(scratch, plugin):
                   % (len(expect.splitlines()), bad[:3]))
         else:
             check(out != expect, 'args ILP32 with args=ltr: GCC\'s own order differs (the test bites)')
+
+
+MSVC_GUESS = ['-fplugin-arg-fnvnx_order-object=last', '-fplugin-arg-fnvnx_order-operator=rtl']
+DEFAULTS = ['-fplugin-arg-fnvnx_order-object=first', '-fplugin-arg-fnvnx_order-operator=cpp17']
+NONVIRTUAL = ('case_member', 'case_member2', 'case_retslot', 'case_shl', 'case_shr', 'case_index', 'case_assign',
+              'case_addeq', 'case_subeq')
+
+
+def eval_codegen(scratch, plugin):
+    """object= / operator= at their defaults give the same objects as without them; object=last keeps direct calls"""
+    sse = os.environ.get('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
+    units = (['-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
+              '-I' + os.path.join(PORT, 'shim', 'include'), '-I' + sse])
+    for name, pre in (('evalorder', ['-DFNVNX_FREESTANDING']), ('units', units)):
+        src = os.path.join(HERE, name + '.cpp')
+        objs = []
+        for tag, extra in (('plain', []), ('defaults', DEFAULTS)):
+            o = os.path.join(scratch, '%s_%s.o' % (name, tag))
+            r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + pre + ['-fplugin=' + plugin] + extra +
+                               ['-w', '-c', '-o', o, src], capture_output=True, text=True)
+            check(r.returncode == 0, 'evalorder codegen: %s.cpp compiles (%s) (%s)' % (name, tag, r.stderr.strip()[-300:]))
+            objs.append(open(o, 'rb').read() if r.returncode == 0 else None)
+        check(objs[0] is not None and objs[0] == objs[1],
+              'evalorder codegen: %s.o with object=first operator=cpp17 is byte-identical to without them' % name)
+    asm = os.path.join(scratch, 'evalorder_msvc-guess.s')
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + ['-DFNVNX_FREESTANDING', '-fplugin=' + plugin] + MSVC_GUESS +
+                       ['-w', '-S', '-o', asm, os.path.join(HERE, 'evalorder.cpp')], capture_output=True, text=True)
+    check(r.returncode == 0, 'evalorder codegen: compiles with object=last operator=rtl (%s)' % r.stderr.strip()[-300:])
+    if r.returncode:
+        return
+    funcs = functions(open(asm).read())
+    for fn in NONVIRTUAL + ('case_virtual', 'case_virtual2'):
+        body = body_of(funcs, fn)
+        if body is None:
+            check(False, 'evalorder codegen: %s not found' % fn)
+        elif fn in NONVIRTUAL:
+            check(not re.search(r'\tbl?r\t', body), 'evalorder object=last: %s keeps direct calls (no blr/br)' % fn)
+        else:
+            check(re.search(r'\tbl?r\t', body) is not None, 'evalorder object=last: %s still calls through the vtable' % fn)
+
+
+def eval_order(scratch, plugin):
+    """evalorder.cpp under qemu: the defaults give GCC's C++17 order, object=last operator=rtl the MSVC guess"""
+    if not shutil.which('qemu-aarch64'):
+        print('skip evalorder: needs qemu-aarch64')
+        return
+    import qemu_ilp32 as q
+    base = list(q.CXXFLAGS)
+    outs = {}
+    for tag, extra, exp in (('default', [], 'evalorder.gcc.expect'), ('msvc-guess', MSVC_GUESS, 'evalorder.msvc-guess.expect')):
+        expect = open(os.path.join(HERE, exp)).read()
+        q.CXXFLAGS = base + ['-fms-extensions', '-fno-strict-aliasing', '-fwrapv', '-mno-outline-atomics',
+                             '-DFNVNX_FREESTANDING', '-fplugin=' + plugin] + extra
+        try:
+            exe = q.build([os.path.join(HERE, 'evalorder.cpp')], os.path.join(scratch, 'evalorder_' + tag))
+        except RuntimeError as e:
+            check(False, 'evalorder %s builds (%s)' % (tag, str(e)[-300:]))
+            continue
+        finally:
+            q.CXXFLAGS = base
+        rc, out = q.run(exe)
+        outs[tag] = out
+        bad = [l for l, e in zip(out.splitlines(), expect.splitlines()) if l != e]
+        check(rc == 0 and out == expect, 'evalorder ILP32 %s: %s in all %d cases (%s)'
+              % (tag, exp, len(expect.splitlines()), bad[:3] or out[-200:] if out != expect else ''))
+    if len(outs) == 2:
+        check(outs['default'] != outs['msvc-guess'], 'evalorder: object=last operator=rtl changes the order (the options bite)')
+    msvc = os.path.join(HERE, 'evalorder.msvc.expect')
+    if os.path.isfile(msvc) and 'default' in outs:
+        # S11's MSVC 2008 x86 output: which of the two the build has to follow (informational until it decides)
+        m = open(msvc).read()
+        print('     evalorder: MSVC 2008 matches %s' % ('the defaults' if m == outs['default'] else
+              'object=last operator=rtl' if m == outs.get('msvc-guess') else 'neither'))
 
 
 def litmus(scratch, plugin):
@@ -243,7 +472,12 @@ def main():
     plugin = r.stdout.strip()
     codegen(scratch, plugin)
     refcount_codegen(scratch, plugin)
+    uninit_codegen(scratch, plugin)
+    wholeprog(scratch, plugin)
+    compile_sh_keys(scratch)
     args_order(scratch, plugin)
+    eval_codegen(scratch, plugin)
+    eval_order(scratch, plugin)
     litmus(scratch, plugin)
     print('%d failed' % len(FAIL))
     return 1 if FAIL else 0

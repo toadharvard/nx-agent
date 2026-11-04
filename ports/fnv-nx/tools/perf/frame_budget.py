@@ -11,8 +11,9 @@ replaces items by measurements when given:
     ("threads": {tid: {"role", "ideal", "mask", "instructions"}}) replace the model's CPU items by the measured
     per-role counts (median frame as mid, the largest as hi, the smallest as lo). Without frame intervals (a boot that
     has not reached the main loop yet) the model stays and the profile's intervals are listed under measured.boot;
-  * --render: the render machine's cost report (schema fnvnx-render-cost/1, see RENDER_SCHEMA below) replaces the
-    renderer items and adds its GPU time;
+  * --render: the render machine's cost report replaces the renderer items and adds its GPU time: schema
+    fnvnx-render-cost/1 (RENDER_SCHEMA below), or the render machine's own render/native/perf/report.json ("fnv-nx
+    P6n report v1", RENDER_PERF.md 5), read through p6n_to_cost (mix_lo..mix_hi frames, docked 720p GPU);
 
 then places the work on the cores with toolchain/host/placement.h (main core 0, render worker core 1, AI linear
 ideal 2/1 mask 0b110, the rest 0b110; 0b1110 with the core 3 opt-in): fixed-core work first, then each role's work
@@ -23,17 +24,30 @@ model (levers applied) and each clock it gives per-core and frame times as lo/mi
   fail       even the lo case does not fit
   uncertain  in between: needs a measurement (frameprof on a frame, B1/B2 on hardware)
 
-Targets (J-0132): fail below 30 fps (worst frame 33.3 ms), 45 fps stable (worst frame 22.2 ms), 60 fps stretch (mean
-frame 16.7 ms). 'level' is the highest target the mid case meets. Output schema fnvnx-frame-budget/1, keys:
+Targets (J-0150; every target is judged on the worst frame): fail below 30 fps (33.3 ms), 45 fps (22.2 ms,
+informational), 60 fps stable (target_60: the worst frame at or under 16.7 ms, the owner's target at 1.02 GHz).
+'level' (fail, pass_30, pass_45, target_60) is the highest target the mid worst frame meets. Output schema fnvnx-frame-budget/1, keys:
 
   schema, inputs{...}, assumptions[{id,value,range,unit,basis,note}], targets[...], clocks_mhz[...],
   budget_minsn{clock: {target: M instructions per core in the target's frame time at the assumed IPC}},
-  budget_mean_minsn{clock: {target: the same for the mean frame, worst frame factor applied for floor/goal targets}},
+  budget_mean_minsn{clock: {target: the same for the mean frame that keeps the worst frame inside it}},
   placement{role: {ideal, mask}}, items[{id, role, minsn[lo,hi], basis, ...}],
   measured{frameprof, render}, scenarios[{id, name, levers, core3, cores{core: {lo, mid, hi M instructions,
   items{item: mid M}}}, main_minsn{lo,mid,hi}, results{clock: {core_ms{core: {lo,mid,hi}}, cpu_ms{lo,mid,hi},
   gpu_ms, frame_ms{lo,mid,hi}, worst_frame_ms{lo,mid,hi}, critical_core, verdicts{target: pass|fail|uncertain},
-  level}}}], needs_hardware[...], gates{"<scenario>@<clock>": level}
+  level}}}], needs_hardware[...], gates{"<scenario>@<clock>": level},
+  hotspots[{rank, kind: subsystem|function|boot, id, name, subsystem, role, critical (runs on the main thread),
+  basis (M|E), minsn{lo,mid,hi} (per frame; per boot for kind boot), ms{clock: {lo,mid,hi}} (IPC hi/mid/lo),
+  share_45{clock: mid ms / 22.2 ms}, fix, gain_main_minsn[lo,hi], owner, needs_hardware, detail}],
+  built_levers[...] (the 'placed' scenario's levers: in the build; hotspots and queue are after them, a fix marked
+  done leaves the queue), queue[{rank, subsystem, fix, gain_main_minsn{lo,mid,hi}, gain_ms_45{clock: mid ms}, owner, needs_hardware}]
+
+Hotspots (docs/PERF.md 11.4): subsystem rows are the frame's items by subsystem and thread role (frameprof's
+per-subsystem median of measured frames when there are any, else the model: [E] unless every item is measured);
+function rows are frameprof's top functions of measured frames, else the model's hotspot_functions (A64
+instructions per call from dyncount [M] x calls per frame [E] = [E]); boot rows are the top functions of the
+profiled intervals before the main loop [M], with their device time instead of a frame share. Rows rank by mid
+instructions within their kind; the queue ranks the fixes by main-thread instructions saved (mid).
 """
 import argparse
 import json
@@ -125,7 +139,29 @@ def per_role(iv):
     return out
 
 
+def p6n_to_cost(rep):
+    """the render machine's report.json (fnv-nx P6n report v1, RENDER_PERF.md 5) -> fnvnx-render-cost/1: CPU per
+    frame from its measured frames (mix_lo .. mix_hi: main = packet build, worker = Frame::Finish + deko3d
+    recording, [M]), GPU from its docked 720p model (mix_lo at efficiency 1.0 .. mix_hi at 0.6, [E])"""
+    fr = rep['frame']
+    lo, hi = fr['mix_lo'], fr['mix_hi']
+    out = {'schema': 'fnvnx-render-cost/1', 'scene': 'P6n synthetic mix (mix_lo %d .. mix_hi %d draws)' % (
+        lo['draws'], hi['draws']), 'draws': hi['draws'], 'basis': 'M',
+        'frame_minsn': {'main': [lo['instr']['main'] / 1e6, hi['instr']['main'] / 1e6],
+                        'worker': [lo['instr']['render'] / 1e6, hi['instr']['render'] / 1e6]},
+        'source_commit': (rep.get('summary') or {}).get('commit')}
+    g = (rep.get('gpu') or {}).get('summary_ms') or {}
+    try:
+        out['gpu_ms'] = {'docked_720p': [g['mix_lo']['docked_720p']['eff_1.0'], g['mix_hi']['docked_720p']['eff_0.6']]}
+        out['gpu_basis'] = 'E'
+    except KeyError:
+        pass
+    return out
+
+
 def apply_render(items, rep):
+    if str(rep.get('schema', '')).startswith('fnv-nx P6n report'):
+        rep = p6n_to_cost(rep)
     if rep.get('schema') != 'fnvnx-render-cost/1':
         raise SystemExit('render report: schema %r, want fnvnx-render-cost/1' % rep.get('schema'))
     out = []
@@ -222,8 +258,11 @@ def build(model, profs=None, render=None):
     if profs:
         items, measured['frameprof'] = apply_frameprof(model, profs)
     if render:
+        if str(render.get('schema', '')).startswith('fnv-nx P6n report'):
+            render = p6n_to_cost(render)
         items = apply_render(items, render)
-        measured['render'] = {k: render.get(k) for k in ('scene', 'draws', 'per_draw_insn', 'frame_minsn', 'gpu_ms', 'basis')}
+        measured['render'] = {k: render.get(k) for k in ('scene', 'draws', 'per_draw_insn', 'frame_minsn', 'gpu_ms',
+                                                         'basis', 'gpu_basis', 'source_commit') if k in render}
     if not measured.get('frameprof', {}).get('used'):   # a measured main thread already contains its hand-offs
         items.append({'id': 'sync', 'name': 'per-frame hand-offs on main', 'role': 'main',
                       'minsn': [syncs[0], syncs[2]], 'mid': syncs[1], 'basis': sync['basis']})
@@ -248,9 +287,9 @@ def build(model, profs=None, render=None):
     }
     for clk in clocks:   # M instructions one core runs in the target's frame time at the assumed IPC
         out['budget_minsn'][str(clk)] = {t['id']: round(t['ms'] * clk * 1e3 * ipc['value'] / 1e6, 2) for t in targets}
-        # the mean frame that keeps the worst frame inside a floor/goal target (worst_frame_factor)
+        # the mean frame that keeps the worst frame inside the target (worst_frame_factor)
         out['budget_mean_minsn'][str(clk)] = {
-            t['id']: round(t['ms'] / (wff['value'] if t['kind'] != 'stretch' else 1.0) * clk * 1e3 * ipc['value'] / 1e6, 2)
+            t['id']: round(t['ms'] / wff['value'] * clk * 1e3 * ipc['value'] / 1e6, 2)
             for t in targets}
     for sc in model['scenarios']:
         work, core3 = scenario_work(items, levers, sc)
@@ -276,21 +315,126 @@ def build(model, profs=None, render=None):
                          'hi': max(cpu['hi'], gpu['hi'])}
             worst = {n: round(frame[n] * wffs[k], 2) for k, n in enumerate(('lo', 'mid', 'hi'))}
             verdicts, level = {}, 'fail'
-            for t in targets:
-                f = frame if t['kind'] == 'stretch' else worst
-                verdicts[t['id']] = verdict(f['lo'], f['hi'], t['ms'])
+            for t in targets:   # J-0150: every target on the worst frame (60 fps stable, not a mean)
+                verdicts[t['id']] = verdict(worst['lo'], worst['hi'], t['ms'])
             if worst['mid'] <= 33.3:
                 level = 'pass_30'
             if worst['mid'] <= 22.2:
                 level = 'pass_45'
-            if level == 'pass_45' and frame['mid'] <= 16.7:
-                level = 'stretch_60'
+            if worst['mid'] <= 16.7:
+                level = 'target_60'
             rs['results'][str(clk)] = {'core_ms': core_ms, 'cpu_ms': cpu, 'gpu_ms': gpu, 'frame_ms': frame,
                                        'worst_frame_ms': worst, 'critical_core': int(crit), 'verdicts': verdicts,
                                        'level': level}
             out['gates']['%s@%d' % (sc['id'], clk)] = level
         out['scenarios'].append(rs)
+    # hotspots and the queue describe the build as it is: the items after the levers that are in it (the 'placed'
+    # scenario's), and no queue row for a fix that is done
+    built = next((sc for sc in model['scenarios'] if sc['id'] == 'placed'), {'levers': []})
+    hot_items = []
+    for it in items:
+        it = dict(it)
+        for lid in built['levers']:
+            if it['id'] in levers[lid].get('scales', {}):
+                flo, fhi = levers[lid]['scales'][it['id']]
+                md = it.get('mid', mid(it['minsn']))
+                it['minsn'] = [it['minsn'][0] * flo, it['minsn'][1] * fhi]
+                it['mid'] = md * mid((flo, fhi))
+        hot_items.append(it)
+    out['built_levers'] = list(built['levers'])
+    out['hotspots'], out['queue'] = hotspots(model, hot_items, profs or [], clocks, (ipcs[2], ipc['value'], ipcs[0]))
     return out
+
+
+GOAL_MS = 22.2
+
+
+def _ms(minsn, clk, ipcs):
+    """M instructions (lo, mid, hi) -> ms at clk MHz; ipcs = (lo, mid, hi) IPC: the lo case runs at the highest"""
+    return {n: round(minsn[k] * 1e6 / (ipcs[2 - k] * clk * 1e6) * 1e3, 3) for k, n in enumerate(('lo', 'mid', 'hi'))}
+
+
+def hotspots(model, items, profs, clocks, ipcs):
+    """ranked hotspot rows (subsystem, function, boot) and the optimization queue"""
+    fixes = model.get('fixes', {})
+    frames = [f for p in profs for f in frame_intervals(p)]
+    rows = []
+
+    def row(kind, rid, name, sub, role, basis, mm, detail=''):
+        r = {'kind': kind, 'id': rid, 'name': name, 'subsystem': sub, 'role': role, 'critical': role == 'main',
+             'basis': basis, 'minsn': {'lo': round(mm[0], 3), 'mid': round(mm[1], 3), 'hi': round(mm[2], 3)},
+             'ms': {str(c): _ms(mm, c, ipcs) for c in clocks}}
+        if kind != 'boot':
+            r['share_45'] = {str(c): round(r['ms'][str(c)]['mid'] / GOAL_MS, 3) for c in clocks}
+        fx = fixes.get(sub if kind != 'boot' else 'boot', {})
+        r.update({'fix': fx.get('fix', ''), 'gain_main_minsn': fx.get('gain_main_minsn', [0, 0]),
+                  'owner': fx.get('owner', ''), 'needs_hardware': fx.get('needs_hardware', False)})
+        if detail:
+            r['detail'] = detail
+        rows.append(r)
+
+    if frames:   # measured frames: frameprof's subsystems and top functions [M]
+        subs = sorted({s_ for f in frames for s_ in f.get('subsystems', {})})
+        for s_ in subs:
+            v = sorted(f.get('subsystems', {}).get(s_, 0) / 1e6 for f in frames)
+            row('subsystem', 'sub_' + s_, s_, s_, 'all threads', 'M', (v[0], statistics.median(v), v[-1]),
+                '%d frames' % len(frames))
+        fn = {}
+        for f in frames:
+            for name, n in f.get('top', []):
+                fn.setdefault(name, []).append(n / 1e6)
+        for name, v in fn.items():
+            v = sorted(v + [0.0] * (len(frames) - len(v)))
+            row('function', 'fn_' + name, name, '', 'all threads', 'M', (v[0], statistics.median(v), v[-1]),
+                'top functions of %d frames' % len(frames))
+    else:        # the model: items by subsystem, and the function proxies
+        by = {}
+        for it in items:
+            sub = it.get('subsystem') or it['id']
+            lo, hi = it['minsn']
+            md = it.get('mid', mid(it['minsn']))
+            b = by.setdefault((sub, it['role']), {'mm': [0.0, 0.0, 0.0], 'basis': set(), 'ids': []})
+            for k, v in enumerate((lo, md, hi)):
+                b['mm'][k] += v
+            b['basis'].add(it.get('basis', 'E'))
+            b['ids'].append(it['id'])
+        for (sub, role), b in by.items():
+            row('subsystem', 'sub_' + sub, sub, sub, role, 'M' if b['basis'] == {'M'} else 'E', b['mm'],
+                'items: ' + ', '.join(b['ids']))
+        for h in model.get('hotspot_functions', []):
+            pc, ca = h['per_call_insn'], h['calls']
+            mm = (pc[0] * ca[0] / 1e6, mid(pc) * mid(ca) / 1e6, pc[1] * ca[1] / 1e6)
+            row('function', h['id'], h['name'], h['subsystem'], h.get('role', 'main'), 'E', mm,
+                '%s-%s A64 instructions per call [%s] x %s-%s calls per frame [E]: %s%s' % (
+                    pc[0], pc[1], h.get('per_call_basis', 'E'), ca[0], ca[1], h.get('calls_note', ''),
+                    ('; ' + h['per_call_note']) if h.get('per_call_note') else ''))
+    for p in profs:   # the profiled intervals before any frame [M]
+        for iv in p:
+            if str(iv.get('label', '')).startswith('frame ') or iv.get('instructions', 0) < 1e6:
+                continue
+            for name, n in iv.get('top', [])[:10]:
+                v = n / 1e6
+                row('boot', 'boot_' + name, name, 'boot', 'main', 'M', (v, v, v), 'interval: %s' % iv.get('label'))
+    order = {'subsystem': 0, 'function': 1, 'boot': 2}
+    rows.sort(key=lambda r: (order[r['kind']], -r['minsn']['mid'], r['id']))
+    rank = {}
+    for r in rows:
+        rank[r['kind']] = rank.get(r['kind'], 0) + 1
+        r['rank'] = rank[r['kind']]
+    queue = []
+    for sub, fx in fixes.items():
+        g = fx.get('gain_main_minsn') or [0, 0]
+        if max(g) <= 0 or fx.get('done'):
+            continue
+        gm = (g[0], mid(g), g[1])
+        queue.append({'subsystem': sub, 'fix': fx.get('fix', ''), 'owner': fx.get('owner', ''),
+                      'needs_hardware': fx.get('needs_hardware', False),
+                      'gain_main_minsn': {'lo': g[0], 'mid': round(mid(g), 3), 'hi': g[1]},
+                      'gain_ms_45': {str(c): round(_ms(gm, c, ipcs)['mid'], 2) for c in clocks}})
+    queue.sort(key=lambda q: -q['gain_main_minsn']['mid'])
+    for i, q in enumerate(queue):
+        q['rank'] = i + 1
+    return rows, queue
 
 
 def summary(b):
@@ -309,6 +453,18 @@ def summary(b):
                 clk, r['frame_ms']['mid'], r['frame_ms']['lo'], r['frame_ms']['hi'], r['worst_frame_ms']['mid'],
                 r['worst_frame_ms']['lo'], r['worst_frame_ms']['hi'], r['critical_core'], r['level'],
                 ' '.join('%s=%s' % kv for kv in r['verdicts'].items())))
+    hs = [h for h in b.get('hotspots', []) if h['kind'] != 'boot']
+    if hs:
+        clks = [str(c) for c in b['clocks_mhz']]
+        lines.append('  hotspots per frame (mid M instructions; share of 22.2 ms at %s MHz):' % ' / '.join(clks))
+        for h in hs:
+            lines.append('    %-9s %2d %-40s %-13s %6.2f M  %s  [%s]' % (
+                h['kind'], h['rank'], h['name'][:40], h['role'][:13], h['minsn']['mid'],
+                ' / '.join('%4.1f %%' % (100 * h['share_45'][c]) for c in clks), h['basis']))
+    for q in b.get('queue', []):
+        lines.append('  queue %d: %s: -%.2f M on main (%s ms) - %s' % (
+            q['rank'], q['subsystem'], q['gain_main_minsn']['mid'],
+            ' / '.join('%.2f' % v for v in q['gain_ms_45'].values()), q['fix'][:70]))
     return '\n'.join(lines)
 
 
