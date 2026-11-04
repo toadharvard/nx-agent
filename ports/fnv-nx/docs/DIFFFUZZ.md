@@ -288,6 +288,25 @@ change verdicts that no key reflects, so every key changes once; the scoped rows
   that function's original address (`vtmodel.native_addrs`, the link's addrmap F rows), not an anonymous stub.
   120-record oracle-vcall sample with all of difffuzz-19: 70 gone, oracle-side errors 26 -> 17, 5 vtpad
   call-targets.
+**Probe-cause audit (S13b s13b-002, V2 L1; difffuzz-19).** A probe-assigned artifact or by-design cause rests on
+evidence in the record or a replay, else the record goes on to the other probes:
+- `local-static` only for a mem-write whose differing bytes are all oracle-only stores to the unit's local statics,
+  or one extra native call followed by the oracle's call (the native's guarded initializer; not when the oracle's
+  next call is the native's: two calls swapped) - the runner's own `local-static` kind covers the rest; the native's
+  local-static read flag alone filed 344 call/error records (V2 L1: 0x00837550's swapped call pair; C1 the
+  initializer control, tests/v2/test_s2c_local_static.py: both ok);
+- `float->int` only when an aligned x86 word is 0x80000000 and the native word differs (was a substring test);
+- `vptr-store` only in a destructor (`classify.is_dtor_name`), elsewhere `vptr-differs` (triage, S2c);
+- `x86-custom-cc`: the case's own garbage probe (above); report.py's static entry-register override is gone;
+- compare no longer stops at by-design differences: trailing oracle-only frees of a function taking an aggregate by
+  value (MSVC destroys it in the callee: `byvalue-arg-dtor`), and a call where both machines branched to the same
+  garbage word that lies in the native's stub range (`vcall-stub-alias`, `arm64emu.Call.addr`). The deleting
+  destructor shapes (flags, return) stopped compare before d14; they no longer do.
+- `call-order`, `bool-repr`, `uninit-*` and `array-new-check` rest on the record (two adjacent calls swapped in
+  both traces; a replay; the native's own overflow throw), `msvc-inlined` on the oracle code (adaptive follow loads
+  the callee whenever its oracle code exists; what stays is the case without it).
+Test: `tests/s13/test_audit.py`.
+
 Test: `tests/s13/test_d19.py`.
 
 Test: `tests/s13/test_d14.py` (30 checks). Metric: `tools/difffuzz/metric.py` (artifact-class divergences + functions not fuzzable + unpublished shards, from reports/fz<k>, the newest layout only).
