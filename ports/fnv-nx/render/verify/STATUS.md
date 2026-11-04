@@ -24,9 +24,12 @@ Defects: `tests/v6n/DEFECTS.md`. One command: `tests/v6n/run.sh` (needs the host
 - pixel trap mutants 31/31 killed (unmutated 31/31 match); analytic mutants 2/2.
 - conformance: 62/62 format scenes match on `v6n_gl`.
 - coverage vs exact D3D9 rule (240 triangles): `v6n_gl` 0 px, oracle 3 px, S6n backend 0 px after its fix (204 before).
-- fuzzing `v6n_gl`: final generator 600 cases, 595 match, 5 unclassified (committed). `v6n_s6ngl` (after the
+- fuzzing `v6n_gl`: final generator 600 cases, 595 match; the 5 since classified (1 fixed model gap kept as
+  regression test, 4 implementation-defined). `v6n_s6ngl` (after the
   y_fill_bias fix): 300 cases, 287 match; 8 differ only in FF table fog (S6n's epilogue implements Nine's
-  programmable-PS fog depth, out of S6n's scope), 5 are the unclassified class seen on `v6n_gl` too.
+  programmable-PS fog depth, out of S6n's scope), 5 are the class seen on `v6n_gl` too.
+- fuzzing `v6n_s6ngl` on ABI v3: 400 cases, 380 match; 14 FF table fog, 2 `clear_srgb` (rediscovered), 4
+  common to both targets, classified (O8 oracle D16 depth, sub-precision edge, alpha-test threshold, MODULATE4X).
 - shader parity self-test: 6/7 match; finding P1 for S6b (fog depth).
 
 ## Rebuild

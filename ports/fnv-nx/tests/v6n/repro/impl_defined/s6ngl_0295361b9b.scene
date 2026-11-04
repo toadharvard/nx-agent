@@ -1,0 +1,17 @@
+# classified by V6n 2026-11-04: impl_defined
+# MODULATE4X of TEXTURE_COMPLEMENT: Nine's values are multiples of 4 (144 252 88), i.e. the operand is quantised to 8 bits before the x4 scale; the GL targets scale in float and reach 255 where Nine gives 252 (7 px, |d| = 3). x4 amplifies operand rounding beyond the 2/255 tolerance; D3D9 leaves intermediate precision to the implementation. A x4 tolerance for MODULATE4X would accept it.
+# fuzz.py reproducer: target s6ngl, seed 11, case c00180
+# colour: 7 px over tolerance (max |d| 3), first (5,15) ref [144.0, 252.0, 88.0, 255.0] test [144.0, 255.0, 88.0, 255.0]
+size 16 16
+rt A8R8G8B8
+ds D24X8
+tex 1 A8R8G8B8 4 4 1 hash 407
+tex 0 DXT1 4 4 1 hash 559
+tss 0 COLOROP TOP_MODULATE4X
+tss 0 COLORARG1 TA_TEXTURE_COMPLEMENT
+mode rhw
+v 5 10 0.5 0.5 0xffffffff 0x00000000 0.01171875 0.01171875
+v 18 10 0.5 0.5 0xffffffff 0x00000000 0.01171875 0.01171875
+v 5 20 0.5 0.5 0xffffffff 0x00000000 1.01172 0.01171875
+v 18 20 0.5 0.5 0xffffffff 0x00000000 0.01171875 0.01171875
+draw TRIANGLESTRIP 2

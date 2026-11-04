@@ -137,7 +137,7 @@ def geometry(r, w, h):
     return L
 
 def gen_scene(r, target):
-    rts = ['A8R8G8B8'] * 6 + ['X8R8G8B8'] + (['A16B16G16R16F', 'A32B32G32R32F'] if target == 'gl' else [])
+    rts = ['A8R8G8B8'] * 6 + ['X8R8G8B8'] + ['A16B16G16R16F', 'A32B32G32R32F']   # s6ngl reads floats back since ABI v3
     rt = r.choice(rts); ds = r.choice(['D24S8'] * 5 + ['D24X8', 'D16', 'NONE'])
     w = h = 16
     L = ['size %d %d' % (w, h), 'rt ' + rt, 'ds ' + ds,
@@ -153,7 +153,7 @@ def gen_scene(r, target):
         if r.random() < 0.15:
             x, y = r.randrange(0, 8), r.randrange(0, 8)
             L.append('vp %d %d %d %d %g %g' % (x, y, r.randrange(4, 16 - x + 1), r.randrange(4, 16 - y + 1), r.choice([0.0, 0.25]), r.choice([0.75, 1.0])))
-        if r.random() < 0.08 and target == 'gl':   # mid-scene clear (inside the viewport / scissor)
+        if r.random() < 0.08:   # mid-scene clear (inside the viewport / scissor; s6ngl: NxOp_Clear since ABI v3)
             L.append('clear %d %s %g 0x%02x' % (r.choice([1, 2, 4, 7]), col(r), r.choice([1.0, 0.5]), r.randrange(256)))
         if r.random() < 0.05: L.append('rs DEPTHBIAS f:0')
         L += geometry(r, w, h)
