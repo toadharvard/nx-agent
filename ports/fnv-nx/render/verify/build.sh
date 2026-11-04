@@ -33,12 +33,43 @@ for s in "$R/host/nine_d3d9.c" "$R/host/nine_present.c" "$R/host/nine_adapter.c"
 done
 $CC $CF $NINE_DEFS $NINC -I"$HERE" -c "$HERE/oracle/nine_target.c" -o "$OUT/nine_target.o"
 $CC $CF -I"$HERE" -I"$HERE/scene" -c "$HERE/scene/scene.c" -o "$OUT/scene.o"
-$CC -o "$OUT/v6n_nine" "$OUT/scene.o" "$OUT/nine_target.o" "${OBJ[@]}" -L"$L" \
-	-Wl,--start-group -lnine_st -lsoftpipe -lgallium -lnir -lcompiler -lmesa_util -lmesa_format -lgalliumvl_stub -lwsw \
-	-Wl,--end-group -lz -lpthread -ldl -lm -lstdc++
-echo "built $OUT/v6n_nine"
+NINELIBS=(-L"$L" -Wl,--start-group -lnine_st -lsoftpipe -lgallium -lnir -lcompiler -lmesa_util -lmesa_format \
+	-lgalliumvl_stub -lwsw -Wl,--end-group -lz -lpthread -ldl -lm -lstdc++)
+# v6n_nine_stock: S6c's Nine + softpipe exactly as built (softpipe's span setup is wrong for D3D9 centres, see below)
+$CC -o "$OUT/v6n_nine_stock" "$OUT/scene.o" "$OUT/nine_target.o" "${OBJ[@]}" "${NINELIBS[@]}"
+# v6n_nine (the oracle): the same, with V6n's fix of softpipe's span setup for half_pixel_center = 0 (D3D9 pixel
+# centres). Stock sp_setup.c covers x >= (int)edge_x (truncation); the D3D9 rule is x >= ceil(edge_x) on the left
+# (left edges included on ties) and x < ceil(edge_x) on the right. A patched copy of sp_setup.c is linked ahead of
+# libsoftpipe.a, so the archive's sp_setup.o is not pulled in. Checked against raster_ref.py (rastercheck.py).
+python3 -I - "$M/src/gallium/drivers/softpipe/sp_setup.c" "$OUT/sp_setup_d3d9.c" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+old = """      int left = (int)(eleft->sx + y * eleft->dxdy);
+      int right = (int)(eright->sx + y * eright->dxdy);"""
+new = """      /* V6n: D3D9 centres (pixel_offset 0) need ceil; stock truncation is GL's round-to-nearest only with +0.5 */
+      int left = setup->pixel_offset != 0.0f ? (int)(eleft->sx + y * eleft->dxdy) : (int)ceilf(eleft->sx + y * eleft->dxdy);
+      int right = setup->pixel_offset != 0.0f ? (int)(eright->sx + y * eright->dxdy) : (int)ceilf(eright->sx + y * eright->dxdy);"""
+assert old in s, 'sp_setup.c changed: update the V6n span fix'
+open(sys.argv[2], 'w').write('#line 1 "sp_setup.c"\n' + s.replace(old, new))
+PY
+$CC $CF $NINE_DEFS $MESA_INC -I"$M/src/gallium/drivers/softpipe" -c "$OUT/sp_setup_d3d9.c" -o "$OUT/sp_setup_d3d9.o"
+$CC -o "$OUT/v6n_nine" "$OUT/scene.o" "$OUT/nine_target.o" "${OBJ[@]}" "$OUT/sp_setup_d3d9.o" "${NINELIBS[@]}"
+echo "built $OUT/v6n_nine $OUT/v6n_nine_stock"
 
 # v6n_gl: scene runner on GL 4.5 (llvmpipe, EGL surfaceless) driven by S6n's translator
 $CC $CF -std=gnu99 -I"$HERE" $S6N -c "$HERE/target/gl_target.c" -o "$OUT/gl_target.o"
 $CC -o "$OUT/v6n_gl" "$OUT/scene.o" "$OUT/gl_target.o" "$OUT/s6n_d3d9_state.o" -lEGL -lGL -lm
 echo "built $OUT/v6n_gl"
+
+# v6n_s6ngl: scene runner on S6n's own GL backend (render/native/gl/nxgl.c, NxGpuApi + command stream)
+if [ -f "$ROOT/render/native/gl/nxgl.c" ]; then
+	python3 -I - "$ROOT/render/native/shaders/d3d9_epilogue.glsl" "$OUT/s6n_epilogue.h" <<'PY'
+import sys
+src = open(sys.argv[1]).read()
+open(sys.argv[2], 'w').write('static const char S6N_EPILOGUE[] =\n' + ''.join('    "%s\\n"\n' % l.replace('\\', '\\\\').replace('"', '\\"') for l in src.split('\n')) + ';\n')
+PY
+	$CC $CF -std=gnu99 $S6N -I"$ROOT/render/native/gl" -c "$ROOT/render/native/gl/nxgl.c" -o "$OUT/s6n_nxgl.o"
+	$CC $CF -std=gnu99 -I"$HERE" -I"$OUT" $S6N -I"$ROOT/render/native/gl" -c "$HERE/target/s6ngl_target.c" -o "$OUT/s6ngl_target.o"
+	$CC -o "$OUT/v6n_s6ngl" "$OUT/scene.o" "$OUT/s6ngl_target.o" "$OUT/s6n_nxgl.o" "$OUT/s6n_d3d9_state.o" -lEGL -lGL -lm
+	echo "built $OUT/v6n_s6ngl"
+fi

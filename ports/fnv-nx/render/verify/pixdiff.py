@@ -3,6 +3,8 @@
 # trap mutant) and compares the read-backs with cmp.py's thresholds.
 #
 #   python3 -I render/verify/pixdiff.py [--bin DIR] [--work DIR] [--mutant NAME] [--traps] [-v] SCENE|DIR ...
+#     --target gl|s6ngl  the target executable: v6n_gl (V6n's executor of the nx/state.h contract, default) or
+#               v6n_s6ngl (S6n's own GL backend render/native/gl/nxgl.c); both use S6n's translator
 #     --traps   trap mode: each scene tests/v6n/traps/<m>.scene must MATCH unmutated and MISMATCH with V6N_MUTANT=<m>
 # Exit 0 when every expectation holds.
 import os, sys, subprocess, glob
@@ -31,6 +33,8 @@ def dump(outdir, scene):
     b = os.path.basename(scene)
     return os.path.join(outdir, (b[:-6] if b.endswith('.scene') else b) + '.v6nd')
 
+TARGET = 'v6n_gl'
+
 def diff(bindir, work, scenes, mutant=None, tag='gl'):
     nd, gd = os.path.join(work, 'nine'), os.path.join(work, tag)
     for d in (nd, gd):
@@ -39,7 +43,7 @@ def diff(bindir, work, scenes, mutant=None, tag='gl'):
             if os.path.exists(p):
                 os.remove(p)
     ne = run(os.path.join(bindir, 'v6n_nine'), scenes, nd)
-    ge = run(os.path.join(bindir, 'v6n_gl'), scenes, gd, {'V6N_MUTANT': mutant} if mutant else None)
+    ge = run(os.path.join(bindir, TARGET), scenes, gd, {'V6N_MUTANT': mutant} if mutant else None)
     res = {}
     for s in scenes:
         a, b = dump(nd, s), dump(gd, s)
@@ -61,6 +65,9 @@ def main():
         elif a[i] == '--work': work = a[i + 1]; i += 2
         elif a[i] == '--mutant': mutant = a[i + 1]; i += 2
         elif a[i] == '--traps': traps = True; i += 1
+        elif a[i] == '--target':
+            global TARGET
+            TARGET = 'v6n_' + a[i + 1]; i += 2
         elif a[i] == '-v': verbose = True; i += 1
         else: rest.append(a[i]); i += 1
     scenes = scenes_of(rest)
