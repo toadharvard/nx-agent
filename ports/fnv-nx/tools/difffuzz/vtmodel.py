@@ -301,6 +301,27 @@ class Model:
             _, self._alias = a64image.load_aliases(os.path.join(self.linkdir, 'out', 'aliases.ld'))
         return self._alias
 
+    def native_addrs(self):
+        """{native symbol: original address} of the link's function rows (out/addrmap.tsv kind F, and the D1 column):
+        a vtable slot whose function this unit image does not name still stands for that original function."""
+        if getattr(self, '_naddr', None) is None:
+            self._naddr = {}
+            p = os.path.join(self.linkdir, 'out', 'addrmap.tsv')
+            if os.path.exists(p):
+                for line in open(p, encoding='utf-8', errors='replace'):
+                    if line.startswith('#'):
+                        continue
+                    f = line.rstrip('\n').split('\t')
+                    if len(f) >= 4 and f[1] == 'F':
+                        try:
+                            a = int(f[0], 16)
+                        except ValueError:
+                            continue
+                        for n in [f[3]] + ([f[8]] if len(f) > 8 else []):
+                            if n:
+                                self._naddr.setdefault(n, a)
+        return self._naddr
+
     def native(self, vs, image, stub_orig):
         """Native address points of the vftables `vs` in this unit image -> (ap {V: native address},
         memory {address: bytes} of the synthesized groups, extra named stubs {address: name}); stub_orig gets the
@@ -333,6 +354,10 @@ class Model:
             m = ADDR_ANY.match(name)
             if m:
                 st['orig'][a] = int(m.group(1), 16)
+            elif name in self.native_addrs():
+                # defined in another object: the slot's function at its original address (difffuzz-19; it traced as
+                # an anonymous named stub, never equal to the oracle's slot target: S13b vcall-stub-alias)
+                st['orig'][a] = self.native_addrs()[name]
             return a
 
         for v in vs:

@@ -57,7 +57,7 @@ static int device_preflight(void) {
 }
 
 /* ---- applet message pump -------------------------------------------------------------------------------- */
-static volatile int g_pump_run, g_pump_alive = 1, g_exiting;
+static volatile int g_pump_run, g_pump_alive = 1, g_exiting, g_exit_locked;
 static volatile int g_operation_mode = -1, g_focus = -1;   /* AppletOperationMode, AppletFocusState */
 static Thread g_pump_thread;
 static AppletHookCookie g_hook;
@@ -97,13 +97,23 @@ static void pump_main(void *arg) {
         if (!appletMainLoop()) {   /* "Close software" from HOME, or a system shutdown */
             g_pump_alive = 0;
             cleanup_for_exit("the system asked the application to exit");
-            svcExitProcess();
+            if (g_log) {
+                fclose(g_log);
+                g_log = NULL;
+            }
+            /* exit(), not svcExitProcess: libnx's exit path ends with ISelfController::Exit for an NSO
+             * application (applet.c _appletExitProcess), the orderly exit AM expects after an ExitRequest */
+            exit(0);
         }
         svcSleepThread(16000000);   /* ~60 Hz; appletMainLoop returns at once when no message is pending */
     }
 }
 
 static void pump_start(void) {
+    /* Without appletLockExit, AM force-terminates the process on "Close software" and no ExitRequest ever reaches the
+     * pump: cleanup_for_exit (boost, override, logs) would not run (V1 NX1-EXIT-P1). With it AM sends the request and
+     * waits up to 15 s; cleanup_for_exit unlocks before the process ends (libnx applet.h). */
+    g_exit_locked = R_SUCCEEDED(appletLockExit());
     g_operation_mode = appletGetOperationMode();
     g_focus = appletGetFocusState();
     appletHook(&g_hook, applet_hook, NULL);
@@ -111,9 +121,16 @@ static void pump_start(void) {
     /* core 0 next to the main thread, priority 0x2C like it: it wakes rarely and only does IPC */
     Result rc = threadCreate(&g_pump_thread, pump_main, NULL, NULL, 0x4000, 0x2C, 0);
     if (R_SUCCEEDED(rc)) rc = threadStart(&g_pump_thread);
-    logf_("fnvnx host: applet pump %s; operation mode %s\n", R_SUCCEEDED(rc) ? "started" : "FAILED",
-          g_operation_mode == AppletOperationMode_Console ? "docked" : "handheld");
-    if (R_FAILED(rc)) g_pump_run = 0;
+    logf_("fnvnx host: applet pump %s; operation mode %s; exit %s\n", R_SUCCEEDED(rc) ? "started" : "FAILED",
+          g_operation_mode == AppletOperationMode_Console ? "docked" : "handheld",
+          g_exit_locked ? "locked (cleanup on Close software)" : "NOT locked");
+    if (R_FAILED(rc)) {
+        g_pump_run = 0;
+        if (g_exit_locked) {   /* nobody would answer the exit request: let AM terminate us instead of waiting 15 s */
+            g_exit_locked = 0;
+            appletUnlockExit();
+        }
+    }
 }
 
 static void pump_stop(void) {
@@ -229,4 +246,8 @@ static void cleanup_for_exit(const char *why) {
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);   /* never leave the console boosted */
     remove_launcher_override();   /* normally gone already; after a relaunch-only run it is still there */
     if (g_log) fflush(g_log);
+    if (g_exit_locked) {          /* libnx: appletUnlockExit before the process ends */
+        g_exit_locked = 0;
+        appletUnlockExit();
+    }
 }

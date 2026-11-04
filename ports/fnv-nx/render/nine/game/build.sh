@@ -7,8 +7,8 @@
 #   GUEST_ONLY=1 ...: only the game guest (what test/gate.py --game runs); NINE is not needed then.
 #
 # Output: <out>/game/fnvnx.elf + guest.nso (+ undefined*.txt, map), <out>/host/exefs.nsp, and the SD tree
-# <out>/sd/{atmosphere/contents/<program id>/exefs.nsp, fnvnx/guest.nso}. The player's FalloutNV.exe goes to
-# sdmc:/fnvnx/game/ (without it the guest boots in trace mode with an empty data image, J-0021).
+# <out>/sd/{atmosphere/contents/<program id>/exefs.nsp, switch/fnv/guest.nso}. The player's FalloutNV.exe goes to
+# sdmc:/switch/fnv/ (without it the guest boots in trace mode with an empty data image, J-0021).
 set -euo pipefail
 : "${DEVKITPRO:?set DEVKITPRO}"; : "${SSE2NEON:?set SSE2NEON}"
 [ -n "${GUEST_ONLY:-}" ] || : "${NINE:?set NINE to the work dir of render/nine/build.sh}"
@@ -18,7 +18,7 @@ export PATH=$DEVKITPRO/devkitA64/bin:$PATH SSE2NEON
 
 # guest side of the proxy and D3DX (render/nine/d3dx), compiled like the game's C++ (toolchain/game/build.sh:
 # -fshort-wchar, ILP32, PIE code for the relocatable guest). HEAPLOG_S=<seconds>: periodic heap statistics
-# (render/nine/heaplog.c, started by nine_register.cpp) into sdmc:/fnvnx/host.log; off by default.
+# (render/nine/heaplog.c, started by nine_register.cpp) into sdmc:/switch/fnv/host.log; off by default.
 G=$OUT/nine-guest; mkdir -p "$G"
 python3 -I "$R/gen_proxy.py" "$ROOT/shim/include/d3d9.h" "$G/gen" >/dev/null
 ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec -fsigned-char"
@@ -42,7 +42,7 @@ D3D9=external EXTRA_OBJS="$OBJS" "$TC/game/build.sh" "$S2" "$FIXED" "$OUT/game" 
 [ -z "${GUEST_ONLY:-}" ] || { echo "built $OUT/game/guest.nso (game guest with the Nine proxy)"; exit 0; }
 
 "$R/switch_host.sh" "$OUT/host"
-mkdir -p "$OUT/sd/atmosphere/contents/$TID" "$OUT/sd/fnvnx"
+mkdir -p "$OUT/sd/atmosphere/contents/$TID" "$OUT/sd/switch/fnv"
 cp "$OUT/host/exefs.nsp" "$OUT/sd/atmosphere/contents/$TID/exefs.nsp"
-cp "$OUT/game/guest.nso" "$OUT/sd/fnvnx/guest.nso"
-echo "built $OUT/sd: atmosphere/contents/$TID/exefs.nsp (Nine host), fnvnx/guest.nso (game)"
+cp "$OUT/game/guest.nso" "$OUT/sd/switch/fnv/guest.nso"
+echo "built $OUT/sd: atmosphere/contents/$TID/exefs.nsp (Nine host), switch/fnv/guest.nso (game)"

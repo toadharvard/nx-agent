@@ -42,7 +42,15 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 . "$HERE/lib_job.sh"
 t0=$(date +%s)
 
-host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools
+host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools py:mako meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native); mako: uam (LINK_OVERRIDES=render)
+# NX1's package checks (tests/nx1): switch-tools elf2nro needs lz4.h, the host device test qemu-user, the libnx
+# syntax check newlib's headers. Libraries are not commands, so host_check cannot see them.
+# uam (toolchain/uam/build.sh, LINK_OVERRIDES=render without RENDER_LIB) needs the system python's mako.
+if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/include/newlib ] || ! command -v qemu-aarch64 >/dev/null \
+		|| ! /usr/bin/python3 -c 'import mako' 2>/dev/null; }; then
+	apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends liblz4-dev libnewlib-dev qemu-user python3-mako \
+		|| echo "full_job.sh: NX1 packages not installed; checks 1 and 7 report incomplete"
+fi
 job_sources "$REPO"
 F=$FARM_HOME/full; mkdir -p "$F"
 
@@ -79,6 +87,10 @@ CROSS_BIN="$(art cross_bin)" LINK_BUILD=$F/build FARM_SRC=$SRC FARM_EXT=$EXT \
 # 3. Pristine MSVC objects for the synthesized boot image (link_job.sh took them for resolve --msvc-code too).
 job_pristine
 [ -n "$PR" ] && ARGS+=(PRISTINE_OBJS="$PR" MSVC_CODE="$PR")
+# the guest links the native renderer (S6n's overrides + libnxrender.a, built with this toolchain; RENDER_LIB=<a>
+# takes a prebuilt one): without it the engine's D3D9 entry points have no device and the boot stops at renderer init
+ARGS+=(LINK_OVERRIDES="${LINK_OVERRIDES:-render}")
+[ -n "${RENDER_LIB:-}" ] && ARGS+=(RENDER_LIB="$RENDER_LIB")
 # 3b. The player's exe, when the owner's copy is on the private branch gamedata/exe: the boots run on it instead of
 # S14's synthesized image (J-0128)
 job_gamedata
@@ -162,6 +174,11 @@ python3 -I "$P/tools/farm/full_report.py" "$F/build" "$REPORT" --commit "$COMMIT
 if [ $INPUTS = 1 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
 echo "- link outputs: $NOTE_PUB" >> "$REPORT"
 # 6. The device package (NX1): fnv.nro + the SD tree on the private branch nro/<commit12>.
-if [ $INPUTS = 1 ]; then publish_nro "$F/build"; else NOTE_NRO="not published (no tree or no objects)"; fi
+# A refused publish (an earlier commit's package left in the build directory, V1 NX1 P1) is reported; a push that
+# did not land (P2) fails the job, after the report and the log say so.
+NRO_RC=0
+if [ $INPUTS = 1 ]; then publish_nro "$F/build" || NRO_RC=$?; else NOTE_NRO="not published (no tree or no objects)"; fi
 echo "- device package: $NOTE_NRO" >> "$REPORT"
+log "device package: $NOTE_NRO"
 echo "$REPORT"
+[ "$NRO_RC" -ne 2 ] || { echo "full_job.sh: publishing nro/$C12 failed" >&2; exit 3; }

@@ -11,7 +11,8 @@ This parser is written from the switchbrew pages (NRO, NACP_Format, NSO MOD0) an
   MOD0     magic, the dynamic table inside rodata/data, bss_start/bss_end inside data+bss, the libnx LNY0/LNY1
            extensions when present (homebrew crt0 conventions);
   dynamic  DT_NULL-terminated, no DT_NEEDED (hbloader has no dynamic linker), RELA/RELR inside the image, every
-           RELA entry R_AARCH64_NONE or R_AARCH64_RELATIVE (libnx's __nx_dynamic aborts on any other type);
+           RELA entry R_AARCH64_NONE or R_AARCH64_RELATIVE (libnx's __nx_dynamic aborts on any other type), every
+           RELA/RELR target inside the RW segment (hbloader maps text R-X and rodata R-- before libnx relocates);
   assets   ASET version 0 inside the file; the icon is a baseline JPEG of 256x256 (hbmenu's decoder); the NACP is
            0x4000 bytes with a NUL-terminated UTF-8 name, author and version in language slot 0;
   ELF      (with --elf) the text segment is R-X, rodata R--, data RW-, and the image bytes match the ELF segments;
@@ -155,10 +156,26 @@ def check(path: str, elf: str | None, ref_elf2nro: str | None, ref_nacptool: str
                     bad = sorted({t for t in bad if t not in (R_NONE, R_RELATIVE)})
                     c.ok("dyn.rela_types", not bad, f"relocation types {bad}: libnx __nx_dynamic aborts (LibnxError_BadReloc)")
                     tgt = [struct.unpack_from("<Q", buf, ra + k)[0] for k in range(0, rs, 24)]
-                    c.ok("dyn.rela_targets", all(rw[0] <= t < rw[1] - 7 or ro[0] <= t < ro[1] - 7 for t in tgt),
-                         "a relocation writes outside rodata/data (text is mapped R-X)")
+                    bad_t = [t for t in tgt if not rw[0] <= t <= rw[1] - 8]
+                    # hbloader maps text R-X and rodata R-- before it enters the NRO, and libnx's __nx_dynamic then
+                    # applies the relocations: a target outside data+bss faults at load (V1 NX1-NRO-N2)
+                    c.ok("dyn.rela_targets", not bad_t, f"{len(bad_t)} RELA targets outside the RW segment, first "
+                         f"{bad_t[0]:#x}" if bad_t else "")
             if DT_RELR in tags:
-                c.ok("dyn.relr_bounds", tags[DT_RELR] + tags.get(DT_RELRSZ, 0) <= size, "RELR outside the image")
+                ra, rs = tags[DT_RELR], tags.get(DT_RELRSZ, 0)
+                if c.ok("dyn.relr_bounds", ra + rs <= size and rs % 8 == 0, "RELR outside the image"):
+                    tgt, where = [], 0
+                    for k in range(0, rs, 8):
+                        e = struct.unpack_from("<Q", buf, ra + k)[0]
+                        if not e & 1:
+                            tgt.append(e)
+                            where = e + 8
+                        else:
+                            tgt += [where + 8 * i for i in range(63) if e >> (i + 1) & 1]
+                            where += 63 * 8
+                    bad_t = [t for t in tgt if not rw[0] <= t <= rw[1] - 8]
+                    c.ok("dyn.relr_targets", not bad_t, f"{len(bad_t)} RELR targets outside the RW segment, first "
+                         f"{bad_t[0]:#x}" if bad_t else "")
 
     # assets
     have_aset = len(buf) >= size + 0x38 and buf[size:size + 4] == b"ASET"

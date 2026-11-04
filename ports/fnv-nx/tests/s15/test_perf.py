@@ -88,6 +88,19 @@ def test_budget(tmp):
     model = json.load(open(os.path.join(HERE, '..', '..', 'tools', 'perf', 'budget_model.json')))
     b = frame_budget.build(model)
     check(b['schema'] == 'fnvnx-frame-budget/1', 'budget: schema')
+    # --perf (P0's fnvnx-perf/1): a priced row adds cycles x IPC - instructions on its thread; fn_interlocked is skipped
+    sl = next(h for h in model['hotspot_functions'] if h['id'] == 'fn_slerp')
+    perf = {'schema': 'fnvnx-perf/1', 'per_call_cycles': [
+        {'id': 'fn_slerp', 'per_call_cycles': [sl['per_call_insn'][0] * 2, sl['per_call_insn'][1] * 2]},
+        {'id': 'fn_interlocked', 'per_call_cycles': [100, 100]}]}
+    bp = frame_budget.build(model, perf=perf)
+    want = (frame_budget.mid(sl['per_call_insn']) * 2 * 0.8 - frame_budget.mid(sl['per_call_insn'])) * \
+        frame_budget.mid(sl['calls']) / 1e6
+    a57 = bp['measured']['a57']
+    d_main = bp['scenarios'][0]['main_minsn']['mid'] - b['scenarios'][0]['main_minsn']['mid']
+    check([r['id'] for r in a57['rows']] == ['fn_slerp'] and abs(a57['delta_minsn_mid'] - want) < 1e-3 and
+          abs(d_main - want) < 2e-3 and bp['inputs']['a57'],
+          'budget: --perf prices a row on its thread (slerp at CPI 2: +%.3f M main), interlocked skipped' % d_main)
     check(abs(b['budget_minsn']['1020']['pass_45'] - 18.1) < 0.1 and abs(b['budget_minsn']['1785']['pass_45'] - 31.7) < 0.1,
           'budget: 45 fps per-core budget 18.1 M at 1020 MHz, 31.7 M at 1785 MHz (IPC 0.8)')
     want = {'%s@%d' % (s['id'], c) for s in model['scenarios'] for c in (1020, 1785)}
@@ -132,7 +145,11 @@ def test_budget(tmp):
           all(subs[i]['minsn']['mid'] >= subs[i + 1]['minsn']['mid'] for i in range(len(subs) - 1)),
           'hotspots: subsystem rows ranked by mid instructions')
     cu = next(h for h in subs if h['subsystem'] == 'cull')
-    want = 3.25 / (0.8 * 1020) * 1e3 / 22.2
+    cm = sum((i['minsn'][0] + i['minsn'][1]) / 2 for i in model['items'] if i.get('subsystem') == 'cull') + sum(
+        ((h['per_call_insn'][0] + h['per_call_insn'][1]) / 2 - (h['before']['per_call_insn'][0] + h['before']['per_call_insn'][1]) / 2)
+        * (h['calls'][0] + h['calls'][1]) / 2 / 1e6 for h in model['hotspot_functions']
+        if h.get('before') and h.get('subsystem') == 'cull')   # the item plus S15-simd's override correction
+    want = cm / (0.8 * 1020) * 1e3 / 22.2
     check(cu['critical'] and abs(cu['share_45']['1020'] - want) < 2e-3 and cu['fix'] and cu['basis'] == 'E',
           'hotspots: share of 22.2 ms at the assumed IPC, fix attached (cull %.3f)' % cu['share_45']['1020'])
     sl = next(h for h in fns if h['id'] == 'fn_slerp')
@@ -140,6 +157,20 @@ def test_budget(tmp):
     check(abs(sl['minsn']['lo'] - hs['per_call_insn'][0] * hs['calls'][0] / 1e6) < 1e-6 and
           abs(sl['minsn']['hi'] - hs['per_call_insn'][1] * hs['calls'][1] / 1e6) < 1e-6 and sl['basis'] == 'E',
           'hotspots: function proxy = per-call A64 count x calls per frame')
+    # S15-simd overrides: a row with `before` becomes an item of (after - before) x calls on its subsystem
+    mo = json.loads(json.dumps(model))
+    mo['hotspot_functions'] = [{'id': 'fn_t', 'name': 't', 'subsystem': 'cull', 'role': 'main', 'per_call_insn': [10, 10],
+                                'calls': [1000, 3000], 'before': {'per_call_insn': [30, 50]}}]
+    bo = frame_budget.build(mo, None)
+    ov = bo['measured']['overrides']
+    check(ov['rows'] and abs(ov['rows'][0]['delta_minsn_mid'] - (10 - 40) * 2000 / 1e6) < 1e-6,
+          'budget: an override row corrects its subsystem by (after - before) x calls')
+    # content presets: the base preset scales nothing; a smaller fade multiplier scales the cull down
+    import content_presets
+    fbase, _ = content_presets.factors(model['content'], 'base')
+    fa, _ = content_presets.factors(model['content'], 'switch_a')
+    check(all(abs(v - 1) < 1e-9 for v in fbase.values()) and fa['cull'] < 1 and fa['render_accumulation'] < 1,
+          'content: base preset is the model, switch_a scales cull and accumulation down')
     q = b['queue']
     check(q and q[0]['rank'] == 1 and all(q[i]['gain_main_minsn']['mid'] >= q[i + 1]['gain_main_minsn']['mid']
                                           for i in range(len(q) - 1)), 'hotspots: queue ranked by main-thread gain')
