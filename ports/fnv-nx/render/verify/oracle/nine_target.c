@@ -16,7 +16,7 @@
 
 struct V6nTarget {
     IDirect3D9* d3d; IDirect3DDevice9* dev; IDirect3DSurface9* rt; IDirect3DSurface9* ds;
-    IDirect3DTexture9* tex[8];
+    IDirect3DBaseTexture9* tex[8];
     int w, h; uint32_t rtf, dsf;
     V6nReadback rb;
 };
@@ -48,7 +48,7 @@ static V6nTarget* n_begin(int w, int h, uint32_t rtf, uint32_t dsf, char* err, i
 }
 static void n_end(V6nTarget* t) {
     IDirect3DDevice9_EndScene(t->dev);
-    for (int i = 0; i < 8; i++) if (t->tex[i]) IDirect3DTexture9_Release(t->tex[i]);
+    for (int i = 0; i < 8; i++) if (t->tex[i]) IDirect3DBaseTexture9_Release(t->tex[i]);
     if (t->ds) IDirect3DSurface9_Release(t->ds);
     if (t->rt) IDirect3DSurface9_Release(t->rt);
     IDirect3DDevice9_Release(t->dev);
@@ -78,8 +78,23 @@ static int n_tex(V6nTarget* t, uint32_t stage, uint32_t fmt, int w, int h, int l
         for (int r = 0; r < rows; r++) memcpy((uint8_t*)lr.pBits + (size_t)r * lr.Pitch, data[l] + (size_t)r * rowbytes, rowbytes);
         IDirect3DTexture9_UnlockRect(tex, l);
     }
-    if (t->tex[stage & 7]) IDirect3DTexture9_Release(t->tex[stage & 7]);
-    t->tex[stage & 7] = tex;
+    if (t->tex[stage & 7]) IDirect3DBaseTexture9_Release(t->tex[stage & 7]);
+    t->tex[stage & 7] = (IDirect3DBaseTexture9*)tex;
+    IDirect3DDevice9_SetTexture(t->dev, stage, (IDirect3DBaseTexture9*)tex);
+    return 1;
+}
+static int n_texcube(V6nTarget* t, uint32_t stage, uint32_t fmt, int size, const uint8_t* const* faces) {
+    IDirect3DCubeTexture9* tex = NULL;
+    if (FAILED(IDirect3DDevice9_CreateCubeTexture(t->dev, size, 1, 0, (D3DFORMAT)fmt, D3DPOOL_MANAGED, &tex, NULL))) return 0;
+    int bytes = v6n_level_bytes(fmt, size, size), rows = is_block(fmt) ? (size + 3) / 4 : size, rowbytes = bytes / rows;
+    for (int f = 0; f < 6; f++) {
+        D3DLOCKED_RECT lr;
+        if (FAILED(IDirect3DCubeTexture9_LockRect(tex, (D3DCUBEMAP_FACES)f, 0, &lr, NULL, 0))) { IDirect3DCubeTexture9_Release(tex); return 0; }
+        for (int r = 0; r < rows; r++) memcpy((uint8_t*)lr.pBits + (size_t)r * lr.Pitch, faces[f] + (size_t)r * rowbytes, rowbytes);
+        IDirect3DCubeTexture9_UnlockRect(tex, (D3DCUBEMAP_FACES)f, 0);
+    }
+    if (t->tex[stage & 7]) IDirect3DBaseTexture9_Release(t->tex[stage & 7]);
+    t->tex[stage & 7] = (IDirect3DBaseTexture9*)tex;
     IDirect3DDevice9_SetTexture(t->dev, stage, (IDirect3DBaseTexture9*)tex);
     return 1;
 }
@@ -224,4 +239,4 @@ static int n_drawg(V6nTarget* t, uint32_t prim, uint32_t count, int ne, const ui
     return SUCCEEDED(hr);
 }
 const V6nOps v6n_target_ops = {"nine-softpipe", n_begin, n_end, n_clear, n_rs, n_samp, n_tss, n_tex, n_notex, n_vp,
-                               n_scissor, n_proj, n_draw, n_readback, n_ps, n_psc, n_vsh, n_vsc, n_drawidx, n_drawg};
+                               n_scissor, n_proj, n_draw, n_readback, n_ps, n_psc, n_vsh, n_vsc, n_drawidx, n_drawg, n_texcube};

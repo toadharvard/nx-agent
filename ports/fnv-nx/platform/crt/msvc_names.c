@@ -9,6 +9,7 @@
  *                                     glibc headers (S9) call them; newlib has only the plain functions
  *   __emul, __movsd, __debugbreak     MSVC intrinsics declared as functions by Havok units (out-of-line calls)
  *   xmemcpy                           SpeedTree's memcpy wrapper (TreeModelX, bstreemodel)
+ *   __fnv_00401050                    the vector constructor iterator (no EH), reached by the boot
  *   FUN_00401460, FUN_00406d50        CopyMemoryBlock / AppendPreview (crt_symbols.tsv "needs body"): cdecl
  *                                     forwarders in the exe to 0x00ec44d0 memcpy (VC9's, overlap-safe: memmove)
  *                                     and 0x00ec6bd2 strcat_s, with the arguments in order
@@ -64,6 +65,19 @@ WEAK void __movsb(unsigned char *d, const unsigned char *s, size_t n)
 WEAK void *xmemcpy(void *d, const void *s, size_t n) { return memcpy(d, s, n); }
 WEAK void *FUN_00401460(void *d, const void *s, unsigned n) { return memmove(d, s, n); }   /* CopyMemoryBlock */
 WEAK int FUN_00406d50(char *d, unsigned n, const char *s) { return (int)strcat_s(d, n, s); }   /* AppendPreview */
+/* main.cpp (0x0086a850) declares it `FUN_00406d50(...)` with C++ linkage: the same function under that name. All
+ * arguments are variadic there, which AAPCS64 passes in x0.. like named ones. */
+WEAK int fnvnx_appendpreview_v(char *d, unsigned n, const char *s) __asm__("_Z12FUN_00406d50z");
+int fnvnx_appendpreview_v(char *d, unsigned n, const char *s) { return (int)strcat_s(d, n, s); }
+
+/* 0x00401050: MSVC's `vector constructor iterator` without EH (__stdcall, ret 0x10): calls the thiscall
+ * constructor on each of `count` elements of `size` bytes. No unit defines the address (crt_symbols.tsv had no
+ * row); the boot reaches it from 0x00a61ad0. Native: the constructor takes the element in x0. */
+WEAK void __fnv_00401050(void *ptr, unsigned size, int count, void (*ctor)(void *))
+{
+    for (char *p = (char *)ptr; count-- > 0; p += size)
+        ctor(p);
+}
 /* int 3 in the original: Havok's assertion path (hkgpConvexHull). Without a debugger Windows raises an exception
  * the game's top-level filter turns into a crash. Here it is logged and execution goes on, like the trap stub it
  * replaces: a failed geometry assertion should not end the game. */

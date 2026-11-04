@@ -163,12 +163,16 @@ def rehotspot(rep):
         h["cpu_by_function"] = sorted([r for r in h["cpu_by_function"] if r.get("kind") != "cpu_engine_function"]
                                       + kept_rows, key=lambda r: -r["ms"])[:30]
     cpu = [r for r in h["cpu_by_function"]][:20]
-    gpu = [dict(r, config="handheld_720p") for r in h.get("gpu_by_pass/mix_hi/handheld_720p", [])]
+    # GPU rows: real019 (the game's own programs, translated) is the metric; the native mix_hi row is a lower bound
+    # with stand-in shaders and ranks only when real019 was not built
+    gkey = "gpu_by_pass/real019_mix_hi/handheld_720p" if "gpu_by_pass/real019_mix_hi/handheld_720p" in h else \
+        "gpu_by_pass/mix_hi/handheld_720p"
+    gpu = [dict(r, config="handheld_720p", scene=gkey.split("/")[1]) for r in h.get(gkey, [])]
     top = sorted(cpu + gpu, key=lambda r: -r["ms"])
     h["top10"] = top[:10]
     h["frame_budget_ms"] = FRAME_BUDGET_MS
     h["rows_rule"] = ("every row: thread = the resource it runs on (main, render: CPU threads at IPC 0.6, 1.02 GHz; "
-                      "GPU: model at handheld 720p, efficiency 0.6); share_of_16_7ms = ms / 16.7 (the 60 fps frame). "
+                      "GPU: model at handheld 720p, efficiency 0.6, ranked on real019 = the game's programs translated; stand_in marks native rows costed with a stand-in shader); share_of_16_7ms = ms / 16.7 (the 60 fps frame). "
                       "Threads and the GPU run in parallel: shares of different threads do not add up. "
                       "engine_d3d9_path_by_function rows marked 'Nine fallback only' are not on the native path; "
                       "on the native path only the kept engine part runs, on main")

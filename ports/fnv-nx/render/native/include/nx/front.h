@@ -97,10 +97,17 @@ private:
 
 // ---- draw packets and the sorter ----------------------------------------------------------------------------
 // Sort key, high to low: pass(8) | layer(4) | state id(16) | texture block(16) | depth(16) | spare(4).
+// Opaque draws (layer 0) of a pass are ordered by a coarse depth bucket first (the top kDepthBucketBits of the depth
+// key, front to back), then by state and textures inside the bucket: early-z then rejects most hidden fragments
+// (P6n GPU model: shaded layers per pixel H(k) in state order -> near 1 with 4 buckets) while state changes stay
+// grouped inside a bucket. Other layers keep (state, textures, depth). State ids fit 12 bits (StateCache::kMaxStates).
+enum { kDepthBucketBits = 2 };
 inline uint64_t SortKey(uint8_t pass, uint8_t layer, uint16_t state, uint16_t tex, uint16_t depth) {
-    return ((uint64_t)pass << 56) | ((uint64_t)(layer & 15) << 52) | ((uint64_t)state << 36) |
+    const uint64_t bucket = (layer & 15) == 0 ? (uint64_t)(depth >> (16 - kDepthBucketBits)) : 0;
+    return ((uint64_t)pass << 56) | ((uint64_t)(layer & 15) << 52) | (bucket << 48) | ((uint64_t)(state & 0xFFF) << 36) |
            ((uint64_t)tex << 20) | ((uint64_t)depth << 4);
 }
+static_assert(StateCache::kMaxStates < 4096, "state ids must fit the sort key's 12 bits");
 
 // Dynamic values a draw may need beyond its state id. Packet.dyn = 0 means the pass defaults (NxOp_BeginPass).
 struct DynRec {

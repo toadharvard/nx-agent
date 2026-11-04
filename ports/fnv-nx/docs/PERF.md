@@ -999,38 +999,53 @@ instructions. S15-simd now compares A/B rows in cycles (11.6) and dropped the Ni
 
 frame_budget.py (11.1) puts each core's share of the work side by side: frame = the busiest core. `mtmodel.py`
 schedules the same work (budget_model.json, its scenarios and levers, frame_budget's `scenario_work`) in time, in
-1 us steps on the application cores with placement.h's masks and priorities (main core 0; render worker core 1; AI
-linear and workers on 0b110; background lowest):
-* main runs its phases in the main loop's order (game logic, Havok, animation, scene graph, cull, accumulation,
-  renderer, barriers, then the model's sync overhead);
-* work a lever moves off main is forked to two workers at its phase's start. A forked worker starts after a wake
-  latency (--wake-us, 15 us [E]) and runs at the model's parallel efficiency. Main joins it at the phase's end and
-  waits if it is late;
-* the AI linear threads run from the frame's start and are joined before culling. `threaded_anim` queues its work
-  behind the AI on them;
-* the render worker is pipelined (never joined) and background work fills idle time;
-* frame = max(main's critical path, every core's busy time).
+1 us steps on the application cores with placement.h's masks and priorities. Main is on core 0. The render worker
+is on core 1 at Horizon priority 43, above the default 44. The AI linear threads and the workers share 0b110, and
+background work runs lowest. Equal priorities are not time-sliced, as on Horizon.
+
+The frame's hand-off structure comes from the decomp (S15-threads; `STRUCT` in the script):
+* main signals the AI linear threads (FUN_008c78c0) before the per-frame body 0x0086ff70 (scene graph, cull,
+  render). It joins them (0x008c7990, a counting semaphore) after that body, then drains the packed task queue
+  (FUN_00870610);
+* the two AI linear threads stagger each other (SetEvent / WaitForSingleObject), so their halves run one after the
+  other;
+* `threaded_anim`'s work queues behind the AI and comes back at the same join;
+* Rendering Task Thread 2 (`mt_cull`) as MT1 ships it (S15-threads, `patches/mt1_cull.s1b`, 6.8): every record but
+  21 runs inline on main (water 1-16, shadow lights 17-20 and the interface record 23 cannot overlap main safely on
+  the PC code), so the worker passes their stages at once. The lever's moved work is record 21, the main-scene
+  split: main signals stage 21, culls its own lists and joins at FUN_00ba3130(1,21) at the end of its own share.
+  All of the moved share overlaps. (The stock PC path, where main waited at the water/shadow joins, is what MT1
+  removes.)
+* Havok MT: main processes jobs too, then waits for the pool (fork / join around the phase);
+* a forked worker starts after a wake latency (15 us [E]) and runs at the model's parallel efficiency. The render
+  worker is pipelined and never joined. Frame = max(main's critical path, every core's busy time).
 
 The work is priced with the A57 CPI of 12.6's rows for the items they cover (scene graph, cull, animation, Havok,
 accumulation: steady CPI in the lo case, one-call CPI in the hi case); other items stay at 1/0.8 and are listed.
-Check (tests/s15/test_a57model.py): with everything at 1/0.8 and no hand-offs, "placed" gives frame_budget's
-25.2 ms.
+Checks (tests/s15/test_a57model.py): with everything at 1/0.8 and no hand-offs, "placed" gives frame_budget's
+25.2 ms; a plan's critical path is never shorter than the water-fill; a fork/join case to the microsecond.
 
-| scenario | 1020 MHz frame lo / mid / hi (ms) | frame_budget mid | main waits | 1785 MHz mid |
-|---|---|---:|---:|---:|
-| placed | 12.4 / 28.5 / 50.0 | 25.2 | 0 | 16.3 |
-| plan45 | 9.2 / 21.6 / 39.1 | 17.2 | 1.8 | 12.4 |
-| plan45b | 7.8 / 18.7 / 35.4 | 15.4 | 1.8 | 10.7 |
-| plan60 | 7.0 / 17.6 / 34.3 | 14.7 | 1.5 | 10.1 |
+With MT1 and S15-threads' resized mt_cull lever (15-35 % of cull and of accumulation, budget_model.json at
+claude/fnv-s15-threads 4e80c8e):
 
-Two results for the plan. First, the hand-offs cost: at 1/0.8 alone, plan45's critical path is 19.7 ms against the
-water-filled 17.2. Main waits 1.5 ms at the joins of the moved cull, accumulation and Havok work, which runs slower
-on the workers (efficiency, wake) than main's share of the same phase. Second, the A57 prices raise main's phases
-(scene graph and animation at CPI 0.9-2.0 against 1.25). So plan45b's mid frame at 1.02 GHz is 18.7 ms, and with the
-model's worst-frame factor 1.25 that is 23.3 ms, just above the 22.2 ms of 45 fps stable. At 1.785 GHz, plan45b holds
-60 fps at the mid case (10.7 ms). The levers that shorten main's path without a join on it (render F2-F4, relaxed
-barriers, NEON math, overrides) gain their full value. A moved phase gains only when its worker finishes before
-main's share does: split the moved part so that the worker side is the smaller one.
+| scenario | 1020 MHz frame lo / mid / hi (ms) | main waits (mid) | 1785 MHz mid |
+|---|---|---:|---:|
+| placed | 12.4 / 28.5 / 50.0 | 0 | 16.3 |
+| plan45 | 9.2 / 24.0 / 45.3 | 0 | 13.7 |
+| plan45b | 7.9 / 21.1 / 41.5 | 0 | 12.1 |
+| plan60 | 7.5 / 20.1 / 40.2 | 0 | 11.5 |
+
+What the model says about the plan:
+* under MT1, main does not wait: record 21's worker share (about 45 % of the main-scene pass) is smaller than main's
+  own share, so the join is free and the frame is main-bound. With the old lever size (70-90 % moved) and the stock
+  path, main waited 3.2 ms at the water and shadow joins; that is the cost MT1 removes;
+* the staggered AI runs serially on one AI thread for ~6.8 ms with threaded_anim's queue after it, off main's path
+  (joined at the frame's end);
+* the A57 prices raise main's phases (scene graph and animation at CPI 0.9-2.0 against 1.25);
+* plan45b's mid frame at 1.02 GHz is 21.1 ms, x1.25 worst 26.4 ms: above the 22.2 ms of 45 fps stable. 60 fps at
+  1.785 GHz holds at the mid case (12.1 ms), not at the hi case;
+* the levers that shorten main's path without a join on it (render F2-F4, relaxed barriers, NEON math, overrides)
+  gain their full value.
 
 **Worst frame (frame_budget.py).** Overrides now feed the frame model. A hotspot row with a `before` (the decomp's
 measured instructions per call) adds an item `simd_<row>`: (after - before) x calls, on the row's thread and
