@@ -10,7 +10,8 @@
 # Output: <out>/sd/atmosphere/contents/<program id>/exefs.nsp and <out>/sd/fnvnx/guest.nso (copy sd/ to the card's
 # root), <out>/host/ (host.elf, main, main.npdm), <out>/MANIFEST.txt (sizes and SHA-256 of what goes on the card),
 # then tests/s5/check_package.py checks the tree (and the guest ELF when given). The game files go to
-# sdmc:/fnvnx/game/ (FalloutNV.exe, Data/); without the exe the guest boots in trace mode.
+# sdmc:/switch/fnv/ (FalloutNV.exe, Data/, the INIs; `game_dir=` in sdmc:/fnvnx/fnvnx.ini moves it); without the exe
+# the guest boots in trace mode.
 set -euo pipefail
 : "${DEVKITPRO:?set DEVKITPRO}"
 GUEST=$(realpath "$1"); OUT=$(mkdir -p "$2" && realpath "$2"); TID=$3; GELF=${4:-}
@@ -45,12 +46,12 @@ $PY "$TC/tools/npdmtool.py" --program-id "0x$TID" "$TC/npdm/fnvnx-app.json" "$H/
 $PY "$TC/tools/build_pfs0.py" "$H/exefs.nsp" main="$H/main" main.npdm="$H/main.npdm" >/dev/null
 
 rm -rf "$OUT/sd"
-mkdir -p "$OUT/sd/atmosphere/contents/$TID" "$OUT/sd/fnvnx/game"
+mkdir -p "$OUT/sd/atmosphere/contents/$TID" "$OUT/sd/fnvnx" "$OUT/sd/switch/fnv"
 cp "$H/exefs.nsp" "$OUT/sd/atmosphere/contents/$TID/exefs.nsp"
 cp "$GUEST" "$OUT/sd/fnvnx/guest.nso"
 {
 	echo "# fnv-nx Switch package: HOST=${HOST:-plain}, program id $TID, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-	echo "# copy sd/ to the root of the SD card; the game files go to sdmc:/fnvnx/game/ (FalloutNV.exe, Data/)"
+	echo "# copy sd/ to the root of the SD card; the game files go to sdmc:/switch/fnv/ (FalloutNV.exe, Data/)"
 	(cd "$OUT/sd" && find . -type f | sort | while read -r f; do
 		printf '%s\t%s\t%s\n' "${f#./}" "$(stat -c %s "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
 	done)

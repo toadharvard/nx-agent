@@ -285,3 +285,28 @@ TEST(crt_file_wrappers)
     char cwd[64];
     CHECK_STR(fnvnx_getcwd(cwd, sizeof cwd), "C:\\FalloutNV");
 }
+
+TEST(game_dir_outside_root)
+{
+    /* the SD layout: the install (C:\FalloutNV, Data\) lives in os_game_dir() (the guest's sdmc:/switch/fnv,
+     * $FNVNX_GAME_DIR here), apart from the port's root; only the default root (fnvnx_path_reset(NULL)) takes it */
+    char game[1100], root[1100];
+    snprintf(game, sizeof game, "%s/sd/switch/fnv", s4_root());
+    snprintf(root, sizeof root, "%s/sd/fnvnx", s4_root());
+    mkdir_host("sd/switch/fnv/Data");
+    mkdir_host("sd/fnvnx");
+    setenv("FNVNX_ROOT", root, 1);
+    setenv("FNVNX_GAME_DIR", game, 1);
+    fnvnx_path_reset(NULL);
+    char want[1200];
+    snprintf(want, sizeof want, "%s/Data/FalloutNV.esm", game);
+    CHECK_STR(host("C:\\FalloutNV\\Data\\FalloutNV.esm"), want);
+    snprintf(want, sizeof want, "%s/Data/falloutnv.esm", game);         /* cwd is the install; Data folded, the */
+    CHECK_STR(host("data\\falloutnv.esm"), want);                        /* missing file keeps its spelling */
+    snprintf(want, sizeof want, "%s/user/Documents/My Games/FalloutNV/Fallout.ini", root);
+    CHECK_STR(host("C:\\Users\\Player\\Documents\\My Games\\FalloutNV\\Fallout.ini"), want);
+    fnvnx_path_reset(s4_root());                                         /* an explicit root keeps <root>/game */
+    CHECK_STR(rel("C:\\FalloutNV\\Data\\FalloutNV.esm"), "/game/Data/FalloutNV.esm");
+    unsetenv("FNVNX_GAME_DIR");
+    unsetenv("FNVNX_ROOT");
+}

@@ -493,6 +493,12 @@ int os_vm_decommit(void *addr, size_t size)
 
 int os_vm_release(void *addr, size_t size) { return munmap(addr, size) ? -OS_EINVAL : 0; }
 
+const char *os_game_dir(void)
+{
+    const char *g = getenv("FNVNX_GAME_DIR");
+    return g && *g ? g : NULL;
+}
+
 const char *os_default_root(void)
 {
     const char *r = getenv("FNVNX_ROOT");

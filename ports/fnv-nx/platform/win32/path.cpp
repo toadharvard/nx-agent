@@ -7,7 +7,9 @@
  *     any other X:\...                    <root>/drive_x/... (sandboxed, nothing escapes the root)
  * mounted on the host as
  *     <root>/game  <root>/user  <root>/drive_<x>
- * with <root> = sdmc:/fnv-nx on the Switch and $FNVNX_ROOT (default ./fnvnx-root) on the host.
+ * with <root> = sdmc:/fnv-nx on the Switch and $FNVNX_ROOT (default ./fnvnx-root) on the host. The game install
+ * C:\FalloutNV is os_game_dir() when that is set (the guest: sdmc:/switch/fnv, fnvnx.ini game_dir=; the host:
+ * $FNVNX_GAME_DIR) and the default root is used, else <root>/game.
  *
  * Normalisation follows Win32: '/' and '\' both separate, "." and ".." are resolved lexically (".." stops at the
  * drive root), empty components collapse, trailing dots/spaces of a component are dropped, relative and
@@ -193,7 +195,11 @@ extern "C" void fnvnx_path_reset(const char *root)
     strcpy(g_cwd, GAME_DIR);
     os_unlock(&g_path_lock);
     char h[W32_PATH_MAX + 64];
-    snprintf(h, sizeof h, "%s/game", g_root);
+    const char *game = root ? NULL : os_game_dir();
+    if (game)
+        snprintf(h, sizeof h, "%s", game);
+    else
+        snprintf(h, sizeof h, "%s/game", g_root);
     mkdirs(h);
     fnvnx_path_mount(GAME_DIR, h);
     snprintf(h, sizeof h, "%s/user", g_root);

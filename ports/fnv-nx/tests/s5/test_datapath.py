@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""test_datapath.py - tests/s5/datapath.py (the emulated boot's SD mounts and data milestones) on synthetic files we
+make here: a tiny INI, two empty-shaped archives and ESM-shaped files with a TES4 tag. No game data.
+
+    python3 -I tests/s5/test_datapath.py
+"""
+from __future__ import annotations
+
+import errno
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import datapath  # noqa: E402
+
+
+def put(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+class DataPathTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="s5-datapath-")
+        self.root = os.path.join(self.tmp, "sd")
+        self.game = os.path.join(self.tmp, "game")
+        os.makedirs(self.root)
+        put(os.path.join(self.game, "Fallout_default.ini"),
+            b"[General]\r\nsLanguage=ENGLISH\r\n[Archive]\r\nSArchiveList=Synth - One.bsa, Synth - Two.bsa\r\n")
+        put(os.path.join(self.game, "Data", "Synth - One.bsa"), b"BSA\0" + bytes(60))
+        put(os.path.join(self.game, "Data", "Synth - Two.bsa"), b"BSA\0" + bytes(60))
+        put(os.path.join(self.game, "Data", "Synth - Unlisted.bsa"), b"BSA\0")
+        self.esm = b"TES4" + bytes(20) + b"GRUP" + bytes(100)
+        put(os.path.join(self.game, "Data", "FalloutNV.esm"), self.esm)
+        put(os.path.join(self.game, "Data", "Extra.esm"), b"TES4" + bytes(40))
+        put(os.path.join(self.root, datapath.PLUGINS), b"# synthetic\r\nFalloutNV.esm\r\nExtra.esm\r\nMissing.esm\r\n")
+        self.dp = datapath.DataPath(self.root, self.game)
+        self.hits = []
+        self.dp.notify = lambda n, how: self.hits.append(n)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_mounts_and_case(self):
+        dp = self.dp
+        want = os.path.join(self.game, "Data", "FalloutNV.esm")
+        self.assertEqual(dp.resolve("sdmc:/switch/fnv/Data/FalloutNV.esm"), want)
+        self.assertEqual(dp.resolve("sdmc:/SWITCH/FNV/data/falloutnv.ESM"), want)       # FAT folds case
+        self.assertEqual(dp.resolve("sdmc:/fnvnx/game/DATA/FalloutNV.esm"), want)       # guests before os_game_dir
+        self.assertEqual(dp.resolve("sdmc:/fnvnx/game/Data/New File.txt"),
+                         os.path.join(self.game, "Data", "New File.txt"))               # new files keep their name
+        self.assertEqual(dp.resolve("sdmc:/fnvnx/fnvnx.ini"), os.path.join(self.root, "fnvnx", "fnvnx.ini"))
+        self.assertEqual(dp.resolve("sdmc:/../../etc/passwd"), os.path.join(self.root, "etc", "passwd"))
+        self.assertEqual(dp.resolve("sdmc:/switch/fnv/../../../x"), os.path.join(self.root, "x"))
+
+    def test_no_game_mount(self):
+        dp = datapath.DataPath(self.root)   # both prefixes are <root>/fnvnx/game: old and new guests find one exe
+        want = os.path.join(self.root, "fnvnx", "game", "FalloutNV.exe")
+        self.assertEqual(dp.resolve("sdmc:/switch/fnv/FalloutNV.exe"), want)
+        self.assertEqual(dp.resolve("sdmc:/fnvnx/game/FalloutNV.exe"), want)
+
+    def test_targets(self):
+        bsas, masters = self.dp.targets()
+        self.assertEqual([os.path.basename(b) for b in bsas], ["Synth - One.bsa", "Synth - Two.bsa"])
+        self.assertEqual([os.path.basename(m) for m in masters], ["FalloutNV.esm", "Extra.esm"])   # Missing.esm: none
+
+    def test_user_ini_overrides(self):
+        put(os.path.join(self.root, datapath.USER_INI), b"[Archive]\nSArchiveList=Synth - Two.bsa\n")
+        bsas, _ = datapath.DataPath(self.root, self.game).targets()
+        self.assertEqual([os.path.basename(b) for b in bsas], ["Synth - Two.bsa"])
+
+    def test_no_ini_takes_all_archives(self):
+        os.remove(os.path.join(self.game, "Fallout_default.ini"))
+        bsas, _ = datapath.DataPath(self.root, self.game).targets()
+        self.assertEqual(len(bsas), 3)
+
+    def open_read(self, fd, sd, chunks):
+        host = self.dp.resolve(sd)
+        self.dp.on_open(fd, sd, host)
+        with open(host, "rb") as f:
+            data = f.read()
+        off = 0
+        for n in chunks:
+            self.dp.on_read(fd, off, data[off:off + n])
+            off += n
+        self.dp.on_close(fd)
+
+    def test_milestones_in_order(self):
+        dp = self.dp
+        self.open_read(3, "sdmc:/switch/fnv/fallout_default.ini", [4096])
+        self.assertEqual(self.hits, ["ini-read"])
+        self.open_read(4, "sdmc:/switch/fnv/Data/synth - one.bsa", [16])
+        self.assertEqual(self.hits, ["ini-read", "archive-list"])
+        self.open_read(5, "sdmc:/switch/fnv/Data/Synth - Unlisted.bsa", [4])
+        self.assertNotIn("bsa-opened", self.hits)
+        self.open_read(6, "sdmc:/switch/fnv/Data/Synth - Two.bsa", [16])
+        self.assertIn("bsa-opened", self.hits)
+        self.open_read(7, "sdmc:/switch/fnv/Data/FalloutNV.esm", [24, 24])
+        self.assertIn("esm-header", self.hits)
+        self.assertNotIn("masters-loaded", self.hits)                  # read only part of it
+        self.open_read(8, "sdmc:/switch/fnv/Data/FalloutNV.esm", [24, 24, 1000])
+        self.assertNotIn("masters-loaded", self.hits)                  # Extra.esm not read yet
+        self.open_read(9, "sdmc:/switch/fnv/Data/Extra.esm", [100])
+        self.assertEqual(self.hits, list(datapath.DATA_MILESTONES))
+        c = dp.counts()
+        self.assertEqual((c["bsa_opened"], c["bsa_listed"], c["masters_read"], c["masters"]), (2, 2, 2, 2))
+
+    def test_esm_header_needs_offset0_tag(self):
+        host = self.dp.resolve("sdmc:/switch/fnv/Data/FalloutNV.esm")
+        self.dp.on_open(3, "x", host)
+        self.dp.on_read(3, 24, b"TES4")                                # not at offset 0
+        self.dp.on_read(3, 0, b"GRUP")                                 # not the tag
+        self.assertNotIn("esm-header", self.hits)
+
+    def test_faults(self):
+        self.dp.fault("open", "sdmc:/switch/fnv/Data/Nope.bsa", errno.ENOENT)
+        self.dp.fault("open", "sdmc:/switch/fnv/Data/Nope.bsa", errno.ENOENT)
+        self.dp.fault("read", "x", errno.EIO)
+        c = self.dp.counts()
+        self.assertEqual((c["file_faults"], c["file_faults_distinct"], c["file_faults_enoent"]), (3, 2, 2))
+        self.assertTrue(self.dp.lines()[1].startswith("file-fault\t2\topen\tENOENT\t"))
+
+
+class MilestoneTableTest(unittest.TestCase):
+    def test_table_parses(self):
+        import emu_guest
+        rows = emu_guest.parse_milestones(os.path.join(HERE, "milestones.txt"))
+        data = [t for _, k, t in rows if k == "data"]
+        self.assertEqual(data, list(datapath.DATA_MILESTONES))
+
+
+if __name__ == "__main__":
+    unittest.main()

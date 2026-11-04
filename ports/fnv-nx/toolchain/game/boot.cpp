@@ -2,7 +2,7 @@
  *
  * Steps (each logged to the host console / sdmc:/fnvnx/host.log):
  *   1. platform: pad source, command line, audio/input modules (S4, S7)
- *   2. S3 loader: open sdmc:/fnvnx/game/FalloutNV.exe, map .rdata/.data/.bss at their original addresses
+ *   2. S3 loader: open os_game_dir()/FalloutNV.exe (sdmc:/switch/fnv), map .rdata/.data/.bss at their original addresses
  *      (host map_fixed), bind the IAT through S4's export table, rewrite code pointers through S2's address map,
  *      finalize
  *   3. WinMain (0x0086a850) if the link has it
@@ -29,7 +29,7 @@ void *fnvnx_win32_lookup_export(const char *dll, const char *name);
 int __fnv_0086a850(unsigned, unsigned, unsigned, unsigned) __attribute__((weak));   /* WinMain */
 }
 
-static const char *k_exe = "sdmc:/fnvnx/game/FalloutNV.exe";   /* = os_default_root() + /game, i.e. C:\FalloutNV */
+static char k_exe[300];   /* os_game_dir() + /FalloutNV.exe (C:\FalloutNV\FalloutNV.exe), set by load_image */
 
 /* Trap statistics, one record per distinct trapped symbol (key = its name string) or image code pointer / IAT slot
  * (key = the original address): hits, global order of the first hit, the caller of the first hit and whether it
@@ -185,6 +185,7 @@ void fnvnx_guest_thread_tls_hook(void) {
 
 static int load_image(void) {
     static const fnvnx_os os = {nullptr, os_read, os_map_fixed, os_protect, os_alloc, os_free, os_log};
+    snprintf(k_exe, sizeof k_exe, "%s/FalloutNV.exe", os_game_dir() ? os_game_dir() : "sdmc:/fnvnx/game");
     g_fd = os_file_open(k_exe, OS_O_READ);
     if (g_fd < 0) {
         /* No game data: map the whole original-image window zero-filled so engine init can be traced as far as it

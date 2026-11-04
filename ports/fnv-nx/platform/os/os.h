@@ -153,6 +153,9 @@ int os_vm_release(void *addr, size_t size);
 
 /* ---- host directories the path mapper mounts (see docs/RUNTIME.md "Paths") */
 const char *os_default_root(void);          /* e.g. "sdmc:/fnv-nx" ; host: $FNVNX_ROOT or "./fnvnx-root" */
+/* The game install, C:\FalloutNV (FalloutNV.exe, Data/, Fallout_default.ini), when it lives outside the root:
+ * the guest's sdmc:/switch/fnv or fnvnx.ini's game_dir=; host: $FNVNX_GAME_DIR. NULL: <root>/game. */
+const char *os_game_dir(void);
 
 #ifdef __cplusplus
 }

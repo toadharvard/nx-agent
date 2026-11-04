@@ -235,6 +235,42 @@ int os_vm_commit(void *addr, size_t size) { (void)addr; (void)size; return 0; }
 int os_vm_decommit(void *addr, size_t size) { memset(addr, 0, size); return 0; }
 int os_vm_release(void *addr, size_t size) { (void)size; free(addr); return 0; }
 
-/* One SD directory for everything of the port: guest.nso and host.log (host.c), game/ (FalloutNV.exe and Data/;
- * the game's C:/FalloutNV, read by boot.cpp too), user/ (C:/Users/Player: My Games/FalloutNV, saves). */
+/* The port's SD directory: guest.nso, host.log and fnvnx.ini (host.c), user/ (C:/Users/Player: My Games/FalloutNV,
+ * saves), drive_<x>/. The game install (C:/FalloutNV: FalloutNV.exe, Data/, the INIs) is os_game_dir(). */
 const char *os_default_root(void) { return "sdmc:/fnvnx"; }
+
+/* The game install on the SD card: sdmc:/switch/fnv (Data/ at sdmc:/switch/fnv/Data), or `game_dir=` in
+ * sdmc:/fnvnx/fnvnx.ini (a path without "sdmc:" is taken on the SD card). Read once; the first caller is boot.cpp,
+ * before any thread exists. */
+#define FNVNX_GAME_DIR_DEFAULT "sdmc:/switch/fnv"
+const char *os_game_dir(void) {
+    static char dir[256];
+    if (dir[0]) return dir;
+    snprintf(dir, sizeof dir, "%s", FNVNX_GAME_DIR_DEFAULT);
+    int fd = os_file_open("sdmc:/fnvnx/fnvnx.ini", OS_O_READ);
+    if (fd < 0) return dir;
+    char buf[2048];
+    int64_t n = os_file_read(fd, buf, sizeof buf - 1);
+    os_file_close(fd);
+    buf[n > 0 ? n : 0] = 0;
+    for (char *line = buf; line && *line;) {
+        char *next = strchr(line, '\n');
+        if (next) *next++ = 0;
+        char *c = strpbrk(line, "#;\r");
+        if (c) *c = 0;
+        while (*line == ' ' || *line == '\t') line++;
+        if (!strncmp(line, "game_dir", 8)) {
+            char *v = line + 8;
+            while (*v == ' ' || *v == '\t') v++;
+            if (*v++ == '=') {
+                while (*v == ' ' || *v == '\t') v++;
+                size_t l = strlen(v);
+                while (l && (v[l - 1] == ' ' || v[l - 1] == '\t' || v[l - 1] == '/')) v[--l] = 0;
+                if (l)
+                    snprintf(dir, sizeof dir, "%s%s", strncmp(v, "sdmc:", 5) ? (*v == '/' ? "sdmc:" : "sdmc:/") : "", v);
+            }
+        }
+        line = next;
+    }
+    return dir;
+}

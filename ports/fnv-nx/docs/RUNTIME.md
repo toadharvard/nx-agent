@@ -204,11 +204,12 @@ The game sees a virtual Windows file system; `platform/win32/path.cpp` maps it o
 
 | Windows path | host (Switch SD) | contents |
 |---|---|---|
-| `C:\FalloutNV\` (cwd at start, `GetModuleFileName`) | `sdmc:/fnv-nx/game/` | the player's install: `Data\`, `Fallout_default.ini`, `FalloutNV.exe` (for S3) |
-| `C:\Users\Player\` | `sdmc:/fnv-nx/user/` | `Documents\My Games\FalloutNV\` (Fallout.ini, FalloutPrefs.ini, Saves\), `AppData\Local\FalloutNV\` (plugins.txt) |
-| any other `X:\...` | `sdmc:/fnv-nx/drive_x/...` | sandbox (e.g. `C:\Windows\` for bare INI names) |
+| `C:\FalloutNV\` (cwd at start, `GetModuleFileName`) | `os_game_dir()`: `sdmc:/switch/fnv/` in the game guest (`game_dir=` in fnvnx.ini), `$FNVNX_GAME_DIR` on the host; else `<root>/game/` | the player's install: `Data\`, `Fallout_default.ini`, `FalloutNV.exe` (for S3) |
+| `C:\Users\Player\` | `<root>/user/` (`sdmc:/fnvnx/user/` in the game guest) | `Documents\My Games\FalloutNV\` (Fallout.ini, FalloutPrefs.ini, Saves\), `AppData\Local\FalloutNV\` (plugins.txt) |
+| any other `X:\...` | `<root>/drive_x/...` | sandbox (e.g. `C:\Windows\` for bare INI names) |
 
-The root is `sdmc:/fnv-nx` on the Switch and `$FNVNX_ROOT` (default `./fnvnx-root`) on the host; more mounts can be
+The root is `sdmc:/fnvnx` in the game guest (`toolchain/guest/os_guest.c`), `sdmc:/fnv-nx` in a native
+Horizon build (`os_horizon.c`), and `$FNVNX_ROOT` (default `./fnvnx-root`) on the host; more mounts can be
 added with `fnvnx_path_mount`. Normalisation as Win32: `\` and `/` both separate, `.`/`..` resolved lexically
 (`..` stops at the drive root), repeated separators collapse, trailing dots and spaces of a component are dropped,
 `\\?\` prefixes are accepted, UNC paths fail, relative and drive-rooted paths use the virtual cwd. Each existing

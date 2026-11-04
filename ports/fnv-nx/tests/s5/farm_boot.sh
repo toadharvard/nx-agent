@@ -35,10 +35,18 @@
 #                   farm boots it)
 #   PY              the Python with unicorn (default python3)
 #   VORBIS          the libvorbis prefix for build.sh; JOBS, SSE2NEON, DEVKITPRO passed to build.sh
+#   FARM_GAME       a game install (FalloutNV.exe, Data/, Fallout_default.ini), mounted in place at the guest's
+#                   sdmc:/switch/fnv (emu_guest.py --game, tests/s5/datapath.py); its FalloutNV.exe is the default image.
+#                   Without it the image alone is copied to sdmc:/fnvnx/game. Never inside the repository.
 #   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 6000000000)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
 set -euo pipefail
 COMMIT=${1:?commit}; OUT=${2:?out dir}; IMAGE=${3:-${FNVNX_IMAGE:-}}
+GAME=${FARM_GAME:-}
+if [ -n "$GAME" ]; then
+  GAME=$(cd "$GAME" && pwd)
+  [ -n "$IMAGE" ] || IMAGE=$GAME/FalloutNV.exe
+fi
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PY=${PY:-python3}
@@ -125,13 +133,20 @@ fi
 # --- boots ----------------------------------------------------------------------------------------------------------
 ADDRMAP=""
 [ -f "$LINK/out/addrmap.tsv" ] && ADDRMAP=$LINK/out/addrmap.tsv
+IMGARG=()
+if [ -n "$GAME" ]; then
+  IMGARG=(--game "$GAME")
+  [ "$IMAGE" -ef "$GAME/FalloutNV.exe" ] || { echo "farm_boot: FARM_GAME has its own FalloutNV.exe; give no image" >&2; exit 1; }
+elif [ -n "$IMAGE" ]; then
+  IMGARG=(--file "fnvnx/game/FalloutNV.exe=$IMAGE")
+fi
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift
   log "boot $tag"
   local rc=0 root=$OUT/sdmc-$tag
   rm -rf "$root"; mkdir -p "$root"
   timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "fnvnx/game/FalloutNV.exe=$IMAGE"} \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" "${IMGARG[@]}" \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"
@@ -173,6 +188,8 @@ done
     grep -h "^STOPPED\|^deadlock" "$L" || echo "(no stop line: timeout or normal end, see emu_$tag.log)"
     grep -h "^   \[fnvnx\] \(MessageBox\|ExitProcess\)" "$L" | sort -u | head -5 || true
     grep -h "^milestone	" "$L" | cut -f2-4 | tr '\t' ' ' | sed 's/^/game milestone /' || true
+    grep -h "^data-counts	" "$L" | tr '\t' ' ' || true
+    grep -h "^file-fault	" "$L" | head -10 | tr '\t' ' ' || true
     if [ -f "$OUT/frontier_$tag.txt" ]; then echo; echo "### frontier ($tag boot)"; head -12 "$OUT/frontier_$tag.txt"; fi
   done
 } > "$SUM"
