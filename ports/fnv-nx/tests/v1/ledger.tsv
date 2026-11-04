@@ -162,3 +162,13 @@ P0-ADOPT	P0-perfmodel	004d294	004d294	confirmed	-	test_adopt_lossless.py	adopt o
 NX1-P12-MERGED	NX1	8e2c191	9dc4871	confirmed	-	test_nx1_publish_nro.sh	the integration copy of 8e2c191: K1, P1, P2 ok (re-run on the integration head after the merge)
 S5-ADOPT3	S5	fed86ee	fed86ee	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 1d8d273f lossless (5 stream files)
 NX1-ADOPT3	NX1	cd1e0eb	cd1e0eb	confirmed	-	test_adopt_lossless.py	adopt of fnv-nx1-nro 7bc3c97a lossless (6 stream files)
+S16-LK1	S16	1cb88ec	1cb88ec	confirmed	-	test_s16_nx1_s13b_batch.py	prefix_lock serialises a Wine prefix: a second process waits, no stale lock after SIGKILL, symlinked prefix shares it, d9cap cannot deadlock (NFS not tested)
+S16-GC1	S16	5a9828d	5a9828d	refuted	-	test_s16_nx1_s13b_batch.py	compare_job: $W/run persists, so a run without captures reports the earlier run's "game" set
+S16-GC2	S16	5a9828d	5a9828d	refuted	-	test_s16_nx1_s13b_batch.py	no gamedata/captures: no game entry and no note, the gate passes on synthetic + perm alone without saying so
+S16-GC3	S16	5a9828d	5a9828d	refuted	-	test_s16_nx1_s13b_batch.py	captures with the same basename (menu/f.nxd9, cell/f.nxd9) collapse into one flat directory: 1 of 2 measured
+S16-SK2	S16	b663ae8	b663ae8	refuted	-	test_s16_nx1_s13b_batch.py	every reference replay failing gives permcover exit 0 with all programs unreached, and that file is cached for good
+S16-SK3	S16	b663ae8	b663ae8	refuted	-	test_s16_nx1_s13b_batch.py	the salts cache key omits s6b_asm, sdp2dksh and nxd9play: seeds chosen by old tools are reused
+S16-PB1	S16	ef9bb69	ef9bb69	confirmed	-	test_s16_nx1_s13b_batch.py	identity bone palettes (|t| <= 0.1), salt 0 = the old seed, permcover keeps the first salt that draws
+NX1-VM2	NX1	86e77a6	86e77a6	refuted	-	test_s16_nx1_s13b_batch.py	#define FNVNX_VM_EXTENTS 0x2000 (8192) passes s4.vm_blocks: the pattern reads "0"
+NX1-VM3	NX1	86e77a6	86e77a6	refuted	-	test_s16_nx1_s13b_batch.py	system_resource_size in a 32-bit NPDM lets 8192 extents pass (the 32-bit space has no system resource)
+S13B-RH2	S13b	716b6b0	716b6b0	refuted	-	test_s16_nx1_s13b_batch.py	handoffs --ref-by-head: a row seeded from the 3of13 cache names fuzz/<head>/7of26, published on fuzz/<head>/3of13

@@ -1561,7 +1561,7 @@ def r_image_statics(path, text, stats):
 
 FALL_SKIP_RET = re.compile(r'^(?:extern\s*"C\+?\+?"\s*|(?:FNVNX_KEEP|inline|static|virtual|explicit|extern|constexpr|'
                            r'__forceinline|__inline|friend)\s+|template\s*<[^{};]*>\s*)+')
-FALL_DECLARATOR = re.compile(r'((?:::)?(?:[A-Za-z_]\w*(?:\s*<[^<>;{}()]*(?:<[^<>;{}()]*>)?[^<>;{}()]*>)?\s*::\s*)*'
+FALL_DECLARATOR = re.compile(r'((?:::)?(?:[A-Za-z_]\w*(?:\s*<(?:[^<>;{}()]|<(?:[^<>;{}()]|<[^<>;{}()]*>)*>)*>)?\s*::\s*)*'
                              r'(?:~?[A-Za-z_]\w*|operator\s*(?:\(\)|[^\s(]+)))\s*\(')
 FALL_END = re.compile(r'(?:\breturn\b[^;]*;|\bthrow\b[^;]*;|__builtin_trap\s*\(\s*\)\s*;|__builtin_unreachable\s*\(\s*\)\s*;|'
                       r'\b(?:abort|exit|_exit|ExitProcess|ExitThread|terminate|_CxxThrowException|__CxxThrowException|'
@@ -4804,7 +4804,66 @@ def add_recon_definitions(out_root, stats, files=None):
 
 POST.append(add_recon_definitions)
 
+# ---------------------------------------------------------------------------------------------------------- HUNIT1
+#
+# A header unit (nitarray_h_unit.cpp) exists only to make MSVC emit the COMDATs of class-template members its recipe
+# lists (NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*>>::SetAt 0x0096ae90, SetAtGrow 0x00470000,
+# SetSize 0x0096ad30): it calls them through a null pointer in NiTArray_UnitReference. MSVC /Od emitted each one. GCC
+# at -O2 inlines the calls, so SetAt and SetAtGrow were emitted nowhere and their addresses had no native definition
+# (S5-boot collect-all: 0x0096ae90, 1,238 trap hits from FUN_0096a850's constructor). An `used` attribute cannot
+# help: the unit instantiates the class (a sizeof check) before the members' definitions, and GCC does not attach a
+# later definition's attributes to it. HUNIT1 appends explicit instantiation definitions of exactly those members,
+# which emits them (weak) as MSVC did. Neutral: under MSVC an explicit instantiation of members the unit already
+# emits changes nothing (S11 gate). Sites: HUNIT1_SITES.
+
+HUNIT1_SITES = [
+    ('gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp',
+     'template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAt(unsigned int, '
+     'ActorCombatGroup*&);\n'
+     'template unsigned int NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAtGrow(unsigned int, '
+     'ActorCombatGroup*&);\n'
+     'template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetSize(unsigned int);\n'),
+]
+
+def r_header_unit_instantiations(path, text, stats):
+    """HUNIT1: explicit instantiations of the class-template members a header unit's recipe lists (see above)."""
+    rel = path.replace(os.sep, '/')
+    for unit, inst in HUNIT1_SITES:
+        if rel.endswith('/' + unit) and 'fnv-nx HUNIT1' not in text:
+            text = text.rstrip('\n') + '\n\n/* fnv-nx HUNIT1: the members the recipe lists, emitted as MSVC did */\n' + inst
+            stats['HUNIT1'] += inst.count('template ')
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- XC2
+#
+# XC1 (S10, startup/tools/dyninit_rewrite.py) gives every ??__E dynamic initializer of the generated units its own
+# extern "C" __fnvnx_dyninit_<addr>, which the link maps to the address and the startup runner calls in the image's
+# order. A hand-written unit can spell one as a plain copy-initialization, which XC1 does not see (it rewrites
+# generated/ only): nipoint3_console.cpp's `NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;` is
+# ??__EgNiPoint3StartupDst@@YAXXZ at 0x00a62110 (the 17-dword copy; the decomp's tag sits on the line above), which
+# InitializeGameSystems calls directly (S5-boot collect-all: "decomp body exists, not in the link"). GCC made it an
+# anonymous local static initializer, so the address had no native definition. XC2 writes XC1's form for the sites
+# of XC2_SITES: the object becomes `extern` (the recipe binds it to its image address, 0x011f4600) and the copy
+# becomes __fnvnx_dyninit_<addr>. Same line. Platform, like XC1.
+
+XC2_SITES = [
+    ('gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp',
+     'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;',
+     'extern NiPoint3StartupTable gNiPoint3StartupDst; extern "C" void __fnvnx_dyninit_00a62110(void) '
+     '{ gNiPoint3StartupDst = gNiPoint3StartupSrc; } /* fnv-nx XC2: ??__EgNiPoint3StartupDst 0x00a62110 */'),
+]
+
+def r_handwritten_dyninit(path, text, stats):
+    """XC2: XC1's extern + __fnvnx_dyninit_<addr> form for hand-written dynamic initializers (XC2_SITES, above)."""
+    rel = path.replace(os.sep, '/')
+    for unit, old, new in XC2_SITES:
+        if rel.endswith('/' + unit) and text.count(old) == 1:
+            text = text.replace(old, new)
+            stats['XC2'] += 1
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
-              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies]
+              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
+              r_header_unit_instantiations, r_handwritten_dyninit]
 RULES += REFS_RULES

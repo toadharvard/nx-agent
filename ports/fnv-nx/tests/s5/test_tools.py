@@ -403,7 +403,8 @@ class MilestoneTest(unittest.TestCase):
         import emu_guest
         rows = emu_guest.parse_milestones(emu_guest.MILESTONES)
         names = list(dict.fromkeys(n for n, _, _ in rows))
-        self.assertEqual(names, ["winmain", "renderer-init", "main-menu", "first-frame", "first-cell"])
+        self.assertEqual(names, ["winmain", "ini-read", "renderer-init", "archive-list", "bsa-opened", "esm-header",
+                                 "masters-loaded", "main-menu", "first-frame", "first-cell"])
         self.assertIn(("winmain", "call", "0x0086a850"), rows)
         self.assertIn(("first-cell", "store", "*0x011dea3c+0x40"), rows)
         rx = dict((n, re.compile(t[3:])) for n, k, t in rows if t.startswith("re:"))
