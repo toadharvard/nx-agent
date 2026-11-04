@@ -160,3 +160,5 @@ NX1-ADOPT2	NX1	43900fb	43900fb	confirmed	-	test_adopt_lossless.py	adopt of fnv-n
 S5-ADOPT2	S5	1d02521	1d02521	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 60f4d234 lossless (7 stream files)
 P0-ADOPT	P0-perfmodel	004d294	004d294	confirmed	-	test_adopt_lossless.py	adopt of fnv-p0-perf 2e8547ef lossless (13 stream files; the content is P0's own, verified separately)
 NX1-P12-MERGED	NX1	8e2c191	9dc4871	confirmed	-	test_nx1_publish_nro.sh	the integration copy of 8e2c191: K1, P1, P2 ok (re-run on the integration head after the merge)
+S5-ADOPT3	S5	fed86ee	fed86ee	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 1d8d273f lossless (5 stream files)
+NX1-ADOPT3	NX1	cd1e0eb	cd1e0eb	confirmed	-	test_adopt_lossless.py	adopt of fnv-nx1-nro 7bc3c97a lossless (6 stream files)
