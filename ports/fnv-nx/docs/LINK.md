@@ -97,8 +97,9 @@ PC-relative reference to an absolute `__fnv_` symbol only works at the guest's l
 relocations in 87 objects). `compile.sh` therefore compiles with `-fPIC`: a defined variable is reached through the
 GOT by its own symbol, like the extern ones already were, so renaming rebinds every reference and the GOT slot holds
 the image address. Not `-fno-semantic-interposition`: GCC then calls a unit's own functions through local aliases
-(`f.localalias`, no relocation), past overrides, import-thunk rebinding and every other by-address binding (and
-definition matching sees two candidates; resolve warns and counts them). `apply` then only rewrites absolute data
+(`f.localalias`, no relocation), past overrides, import-thunk rebinding and every other by-address binding. Plain
+`-fPIC` still makes such aliases for some virtual functions defined with their vtable (423 symbols in 178 objects of
+the full set, none branched to); resolve never takes them as definitions. `apply` then only rewrites absolute data
 relocations (ABS32/ABS16: pointers in the object's data) that reach a rebound variable through a local symbol
 (`elfsyms.retarget_local_relocs`, list in `objcopy/<obj>.rebind`) and reports code references through a local
 symbol, which should be none (objects compiled without `-fPIC` keep their private copies there). The same holds for
