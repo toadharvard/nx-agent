@@ -2,6 +2,7 @@
 #include "renderer.h"
 #include "nx/families.h"
 #include "nx_shaders.h"
+#include <math.h>
 #include <string.h>
 #include <stdio.h>
 #include <new>
@@ -342,6 +343,18 @@ bool Renderer::Render(const Draw& d) {
         for (uint32_t i = 0; i < n; i++) if (L->lights[i].color[3] > 0.5f) lu->lights[o++] = L->lights[i];
         for (uint32_t i = 0; i < n; i++) if (!(L->lights[i].color[3] > 0.5f)) lu->lights[o++] = L->lights[i];
         for (; o < (uint32_t)(litDir + litPad) && o < 8; o++) { memset(&lu->lights[o], 0, sizeof lu->lights[o]); lu->lights[o].posRange[3] = 1.0f; }
+        // per-draw values the permutations read prepared (lit.frag): the directional light as the unit vector
+        // towards it, each point light's 1 / range^2 (padding: range 1 -> 1)
+        if (litDir) {
+            float* p = lu->lights[0].posRange;
+            const float l2 = p[0] * p[0] + p[1] * p[1] + p[2] * p[2];
+            const float k = l2 > 0.0f ? -1.0f / sqrtf(l2) : 0.0f;
+            p[0] *= k; p[1] *= k; p[2] *= k;
+        }
+        for (uint32_t i = (uint32_t)litDir; i < o; i++) {
+            const float r = lu->lights[i].posRange[3];
+            lu->lights[i].posRange[3] = 1.0f / (r * r);
+        }
         (void)litPoints;
     }
     if (needEpi) {
