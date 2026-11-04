@@ -412,8 +412,8 @@
    "subsystem": "scene-graph update",
    "role": "main",
    "per_call_insn": [
-    70,
-    100
+    45,
+    75
    ],
    "per_call_basis": "M",
    "calls": [
@@ -421,7 +421,7 @@
     12000
    ],
    "calls_note": "objects whose world transform is recomputed per exterior frame [E]",
-   "per_call_note": "6 + 63 A64 instructions exclusive (dyncount, PERF.md 7) + 10-30 for translation and scale (not measured)"
+   "per_call_note": "6 + 63 A64 instructions exclusive (dyncount, PERF.md 7) + 10-30 for translation and scale (not measured); the NiMatrix3 transpose product 0x00a588a0 is a NEON override since S15-simd: 64 -> 39 (override_ab.py, link 0bd144db1464, agreement 13 -> 13), -25 per call"
   },
   {
    "id": "fn_nibound_update",
@@ -429,15 +429,16 @@
    "subsystem": "scene-graph update",
    "role": "main",
    "per_call_insn": [
-    45,
-    45
+    19,
+    19
    ],
    "per_call_basis": "M",
    "calls": [
     8000,
     24000
    ],
-   "calls_note": "two per updated object [E]"
+   "calls_note": "two per updated object [E]",
+   "per_call_note": "NEON override fnvnx_nibound_update_00a7fdd0 (S15-simd): 46 -> 19 A64 instructions per call (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 15 -> 15)"
   },
   {
    "id": "fn_node_update",
