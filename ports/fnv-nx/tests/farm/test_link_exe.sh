@@ -7,7 +7,8 @@
 #   1  the gamedata branch has the pinned exe: make link sees FNVNX_EXE = the fetched exe, the report names it
 #   2  FARM_REAL_EXE=0: FNVNX_EXE is empty, the report says so
 #   3  an exe with another sha256: refused, FNVNX_EXE is empty
-#   4  the publish (FARM_PUBLISH=always, local artifacts remote) and the report hold no byte run of the exe
+#   4  the publish (FARM_PUBLISH=always, local artifacts remote) and the report hold no byte run of the exe; the
+#      publish has S2d's tables out/bodies/{bodies,bind,synth}.tsv + stats.txt, not its work dir or objects
 #   5  build.py's link stage: link_exe() picks FNVNX_EXE, else a BOOT_IMAGE file, and the stage fingerprint changes
 #      with the exe's content (a cached link made without the exe is redone with it)
 #   bash tests/farm/test_link_exe.sh   -> "link_exe: ok", exit 1 on any failure
@@ -39,6 +40,8 @@ def w(rel, text):
 for f in ('aliases.ld', 'refs.tsv', 'abi.tsv', 'addrmap.tsv', 'layouts.tsv', 'cache/msvc.tsv', 'vtables/a.vt.S'):
     w('link/out/' + f, 'x\n')
 w('link/fixed/zz_bridges.o', 'x\n'); w('link/summary.txt', 'x\n')
+for f in ('bodies.tsv', 'bind.tsv', 'synth.tsv', 'stats.txt', 'work/u.bd.cpp', 'zz_bd_u.o'):
+    w('link/out/bodies/' + f, 'x\n')
 for s, r in (('compile', {}), ('link', {'prepared_from': {'port_commit': commit},
                                         'metrics': {'link_bodies_s': 1.0, 'link_bodies_exe_addr': 7}})):
     os.makedirs(os.path.join(bd, s), exist_ok=True)
@@ -75,6 +78,10 @@ check "$(cat "$T/seen" 2>/dev/null)" "" "3: another sha256"
 mkdir -p "$T/pub"
 git -C "$T/origin.git" archive "refs/heads/link/${COMMIT:0:12}" | tar -x -C "$T/pub" \
 	|| { echo "FAIL: 4: nothing published"; fail=1; }
+for f in bodies.tsv bind.tsv synth.tsv stats.txt; do
+	[ -f "$T/pub/out/bodies/$f" ] || { echo "FAIL: 4: out/bodies/$f not published"; fail=1; }
+done
+[ -e "$T/pub/out/bodies/work" ] || [ -e "$T/pub/out/bodies/zz_bd_u.o" ] && { echo "FAIL: 4: bodies work dir or objects published"; fail=1; }
 cp "$T/h1.md" "$T/pub/report-h1.md"
 python3 -I "$PORT/tests/v1/scan_gamedata_leak.py" "$T/fake.exe" "$T/pub" >/dev/null || { echo "FAIL: 4: exe bytes"; fail=1; }
 
