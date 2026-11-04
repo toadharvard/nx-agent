@@ -863,6 +863,80 @@ def r_complete_views(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- STATIC1
+#
+# MSVC placed a file-static variable (and a namespace-scope const, internal in C++) in the image like any other, and
+# units.json binds its name to that address. GCC keeps such a variable local to the object, and the link step can
+# only rebind global symbols, so the unit would use a private copy while everything else sees the image's (S13:
+# fadermanager's s_faders at 0x011d8828). STATIC1 gives those variables external linkage: `static` is dropped, a
+# namespace-scope `const` definition gets `extern`. Only names that a unit including the file binds to an image data
+# address (`?name@@3...` / `_name` in its units.json symbols) at file scope are touched.
+
+STATIC_DEF = re.compile(r'^([ \t]*)static\s+(?!inline\b)((?:const\s+|volatile\s+)*[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)'
+                        r'\s*(?:\[[^\]]*\]\s*)*(?:=|;|\(|\{))', re.M)
+CONST_DEF = re.compile(r'^([ \t]*)(const\s+[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)\s*(?:\[[^\]]*\]\s*)*=)', re.M)
+DATA_NAME = re.compile(r'^\?(\w+)@@3')
+_IMAGE_NAMES = None
+
+def _image_bound_names(path):
+    """{absolute file: {name}} of global variables bound to image data addresses by a unit that includes it."""
+    global _IMAGE_NAMES
+    if _IMAGE_NAMES is not None: return _IMAGE_NAMES
+    import json
+    _IMAGE_NAMES = {}
+    root, uj = prepare._units_json(path)
+    if not uj: return _IMAGE_NAMES
+    inc = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
+    texts = {}
+    def text(f):
+        if f not in texts:
+            with open(f, encoding='utf-8', errors='surrogateescape') as h: texts[f] = h.read()
+        return texts[f]
+    for u in json.load(open(uj))['units']:
+        names = set()
+        for n, a in u.get('symbols', {}).items():
+            if not 0x00fdf000 <= int(a, 16) < 0x02100000: continue
+            m = DATA_NAME.match(n)
+            if m: names.add(m.group(1))
+            elif n.startswith('_') and n[1:].isidentifier(): names.add(n[1:])
+        if not names: continue
+        todo, seen = [os.path.normpath(os.path.join(root, u['source']))], set()
+        while todo:
+            f = todo.pop()
+            if f in seen or not os.path.isfile(f): continue
+            seen.add(f)
+            t = text(f)
+            if 'static' in t or 'const' in t:
+                _IMAGE_NAMES.setdefault(f, set()).update(names)
+            for i in inc.findall(t):
+                for base in (os.path.dirname(f), os.path.join(root, 'include')):
+                    g = os.path.normpath(os.path.join(base, i))
+                    if os.path.isfile(g): todo.append(g); break
+    return _IMAGE_NAMES
+
+def r_image_statics(path, text, stats):
+    """STATIC1: file-static / internal const variables bound to image addresses get external linkage (see above)."""
+    if 'static' not in text and 'const' not in text: return text
+    names = _image_bound_names(path).get(os.path.normpath(os.path.abspath(path)))
+    if not names: return text
+    spans, edits = None, []
+    for rx, kind in ((STATIC_DEF, 'static'), (CONST_DEF, 'const')):
+        for m in rx.finditer(text):
+            if m.group(3) not in names: continue
+            if kind == 'const' and re.search(r'\bextern\b', text[text.rfind('\n', 0, m.start()) + 1:m.start()]): continue
+            if spans is None: spans = prepare.scope_spans(text)
+            if any(k != 'extern' for k, _ in prepare.scope_chain(spans, m.start())): continue
+            new = m.group(1) + ('' if kind == 'static' else 'extern ') + m.group(2)
+            edits.append((m.start(), m.end(), new))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(r); pos = b
+        stats['STATIC1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -882,5 +956,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_keep_definitions, r_if_exists, r_sal_attributes, r_cs28_members, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list,
+RULES = [r_unit_renames, r_keep_definitions, r_if_exists, r_sal_attributes, r_cs28_members, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list, r_image_statics,
          r_msvc_base_layout]

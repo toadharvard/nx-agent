@@ -436,7 +436,12 @@ def load_stream_rules():
         spec = importlib.util.spec_from_file_location('fnvnx_rules_' + name[:-3], os.path.join(here, 'rules', name))
         mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
         rules += list(getattr(mod, 'RULES', []))
+        STREAM_POST.extend(getattr(mod, 'POST', []))
     return rules
+
+# post-copy hooks of the stream modules (`POST = [fn(out_root, stats, files)]`, e.g. S1b's units.json renames): run
+# after the tree and build/ are written
+STREAM_POST = []
 
 def drop_native_units(out_root, stats, files):
     """NATIVE1: units listed in render/native/drop_units.txt (one source path per line; D6, the native renderer
@@ -482,6 +487,8 @@ def main():
                     f.write(text)
     shutil.copytree(os.path.join(src_root, 'build'), os.path.join(out_root, 'build'), dirs_exist_ok=True)
     drop_native_units(out_root, stats, files)
+    for hook in STREAM_POST:
+        hook(out_root, stats, files)
     with open(os.path.join(out_root, 'prepare_stats.tsv'), 'w') as f:
         for k in sorted(stats):
             f.write('%s\t%d files\t%d edits\n' % (k, files[k], stats[k]))
