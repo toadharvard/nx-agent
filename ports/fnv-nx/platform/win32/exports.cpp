@@ -6,6 +6,7 @@
  * DirectInput/DirectSound/XInput/vorbisfile -> S7's registered modules). D3DX (render/nine/d3dx) is listed here by
  * weak reference. */
 #include "w32.h"
+#include "fnvnx_mmio.h"
 
 extern "C" {
 int fnvnx_ws2_WSAStartup(WORD, void *);
@@ -132,6 +133,10 @@ const exp g_exports[] = {
     E("ole32", CoInitialize), E("ole32", CoInitializeEx), E("ole32", CoTaskMemAlloc), E("ole32", CoTaskMemFree),
     E("ole32", CoUninitialize),
     E("winmm", timeGetTime), E("winmm", timeBeginPeriod), E("winmm", timeEndPeriod),
+    E("winmm", mmioOpenA), E("winmm", mmioClose), E("winmm", mmioRead), E("winmm", mmioWrite), E("winmm", mmioSeek),
+    E("winmm", mmioGetInfo), E("winmm", mmioSetInfo), E("winmm", mmioAdvance), E("winmm", mmioFlush),
+    E("winmm", mmioDescend), E("winmm", mmioAscend), E("winmm", mmioCreateChunk), E("winmm", mmioSendMessage),
+    E("winmm", mmioStringToFOURCCA),
     { "ws2_32", "WSAStartup", (void *)&fnvnx_ws2_WSAStartup }, { "ws2_32", "WSACleanup", (void *)&fnvnx_ws2_WSACleanup },
     { "ws2_32", "WSAGetLastError", (void *)&fnvnx_ws2_WSAGetLastError }, { "ws2_32", "socket", (void *)&fnvnx_ws2_socket },
     { "ws2_32", "closesocket", (void *)&fnvnx_ws2_closesocket }, { "ws2_32", "htons", (void *)&fnvnx_ws2_htons },
