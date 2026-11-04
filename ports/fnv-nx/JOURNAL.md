@@ -1430,3 +1430,118 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   lockstep_dyninit_agree=8/9
 * **next** - Recheck after the S1/S2c fixes. Harness: compare the pointee for pointer-to-literal returns; triage the
   45 "same reads, different result" by trace diff. Fuzz the Havok custom-cc functions now that they are modelled.
+
+### J-0071 | 2026-11-04 | stream: S14-dataimage-synth | status: wip | parent: J-0041,J-0057
+
+* **did** - Regenerated the synthetic image from S11's `obj/pristine` (2,987 objects) against f12's address map.
+  - Coverage measured per region, per kind and per referenced address.
+  - The boot globals are reported together with the functions that write them.
+  - Five self-consistency checks (`loader/synth/synth_checks.py`): pointers, vftable slot convention and arity, RTTI
+    chains, overlaps, `$SG` and literal terminators.
+  - New: tests/s14/test_checks.py and the synth section of DATAIMAGE.md.
+
+  Orchestrator re-ran tests/s14: OK (2 skipped).
+* **found**:
+  - **Two S14 bugs, fixed:** 561 `$SG` strings had their terminators left as soft padding, and 65 contested bytes
+    kept one claimant's value. Now 0 violations are S14's own.
+  - **1,463 violations with other owners:**
+    - 675 code pointers to units missing from the link (tesform.cpp 576, tes.cpp 65);
+    - 295 TypeDescriptor vptrs to the CRT's `type_info` vftable;
+    - 10 SEH labels;
+    - 1 slot bound to the wrong convention (FUN_00a8a9a0);
+    - 482 decomp inconsistencies (TypeDescriptor class/struct spellings, hierarchies declared differently, TLS
+      stand-ins, 45 vftables without an original COL).
+  - **Defined addresses:** 9,266 of the 48,664 referenced in the window are fully defined, 13,956 have no object.
+  - **Memory manager:** the four globals and the run-once flag are .bss zero, and the flag is 0 at WinMain+0x1d0, as
+    on x86. The x86 path is: constructor 0x00aa3880 -> InitializeGlobal -> InitHolder once, then WinMain's
+    FUN_00aa20b0(0) -> InitHolder again.
+  - **BSNiAllocator's vftable 0x010a2528 has 10 slots**, and the decomp's stand-in declares 1 (-> S1, J-0073).
+* **metrics** - synth_objects=2987 synth_known_bytes=246924 synth_addr_defined=9266/48664 synth_addr_missing=13956
+  synth_check_violations=1463 synth_s14_violations=0 tests_s14=20/20
+
+### J-0072 | 2026-11-04 | stream: S12-static | status: wip | parent: J-0041,J-0055
+
+* **did** - The static gate's flags are now exactly compile.sh's. It ran on f8 (0c630cf) over a 462-unit stratified
+  sample. New checks: BOOL-PUN, FLOAT-BITS, PTRDIFF-EXACT, OUTARG-UNINIT, ALIGN-IGNORED. New `crosscheck.py` against
+  S13's divergences. STATIC_CHECKS.md updated.
+
+  Orchestrator re-ran tests/s12 on the merged head. The flag-equality test failed on -ffile-prefix-map (a path-only
+  option); fixed by ignoring it. Two SHIFT32-VAR case expectations fail with the pinned sse2neon in S12's own
+  worktree too, so the test depends on the environment (-> S12).
+* **found**:
+  - The gate's GCC pass agrees with the f8 compile on 462/462 units.
+  - W-RETURN is closed by FALL1 + -Werror=return-type; 8 reachable FALL1 traps remain.
+  - The semantics flags are confirmed in the generated code.
+  - **New real layout bug:** `__declspec(align(n))` before the class key is dropped by GCC (22 roots; e.g. a 48-byte
+    record is 36 under GCC).
+  - S13 cross-check: all 38 ilp32-pointer divergences need x86 addresses >= 2 GiB (benign). OUTARG-UNINIT appears in
+    55 of 248 divergent functions (the fuzzer's stubs don't write out-parameters). F2U (152 sites) was never fuzzed.
+* **metrics** - s12_sample_units=462 s12_gcc_agree=462 s12_align_ignored=22 s12_outarg_div=55/248
+  s12_fall1_reachable=8
+* **next** - S1: ALIGN1, ENUM2, FTOI1, ATOM1. S13: out-parameter stubs, the S12 target list. S12: drop sse2neon
+  inline sites from SHIFT32-VAR, then a full run on the current head.
+
+### J-0073 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0067,J-0069,J-0071
+
+* **did** - Three fixes. Orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+  - **D15 closed by the new rule CSX2:** the 4 bytes sit behind the 24-byte PC section. NiCriticalSection hands
+    `this` to EnterCriticalSection, and m_ulThreadOwner is at 0x1C. CSX2 restores them wherever the decomp asserts
+    its generated `_RTL_CRITICAL_SECTION` as 28 bytes. Results: NiCriticalSection 128, RecursiveLock 40,
+    BSShaderAccumulator 896, BSThread 0x40, AbstractHeap 0x2100, and GraphicsRenderer reads +0x200/+0x208 again.
+    CSX1 keeps only the _FILETIME order.
+  - **STR1** decides by the declaration in scope at each use.
+  - **New rule VTBL1:** BSNiAllocator gets its 10 MSVC slots. Slots 0-6 are known from the decomp:
+    0 Destroy 0x00aa24a0, 1 Allocate 0x00aa2240, 2 Deallocate 0x00aa22b0, 3 Reallocate 0x00aa22f0, 4-6 the
+    aligned set 0x00aa2370 / 0x00aa23e0 / 0x00aa2420.
+* **found** - Slots 7-9 have no function in the decomp, and InitHolder calls slot 7. NiStandardAllocator's
+  Initialize/Shutdown exist (0x00aa3430/0x00aa3460), but BSNiAllocator does not inherit them; its base vftable
+  0x010a24d0 is the pure NiAllocator interface. They are bound only with the exe; no speculative binding.
+* **decided** - D15 (ARCHITECTURE.md) is resolved: the PC 24-byte CRITICAL_SECTION plus the 4 bytes the x86 code
+  proves behind it.
+
+### J-0074 | 2026-11-04 | stream: V1-link | status: wip | parent: J-0053,J-0059
+
+* **did** - Re-validated the salvaged harness.
+  - It fed every integer parameter 0, which hid swapped and missing moves; that is fixed, and it now has a pointer
+    arena.
+  - Independent checks of S2c's claims C1-C5 on f12:
+    - own ELF/COFF readers and name matcher;
+    - the run's own bridges executed under qemu ILP32 against the MSVC convention oracle;
+    - register-use analysis of the pristine MSVC objects.
+* **found** - C1 (binding by address), C3 (ecx-not-passed) and C5 (-fPIC rebinding) hold. C2 and C4 are broken.
+  Defects, each with a failing reproducer in tools/verify/v1_link/:
+  1. **High:** bridges for a `__fastcall` aggregate result put the hidden pointer in the wrong place (0x0056fa00,
+     25 references write the result over `*this`).
+  2. **High:** float vs double results are bound as "same" (130 pairs, 190 references; the caller reads d0, the
+     callee writes s0).
+  3. **High:** resolve never compares declarations when either side is a C name (`@f@N`, `_f@N`, `_f`). Examples:
+     0x00ba3130 is missing an edx-dummy bridge (28 references); 76 ecx/this-not-passed pairs go unflagged; about
+     2,300 C-named references are never compared.
+  4. **Medium:** for 35 classes the kept vtable and the kept typeinfo come from different units (weak symbols),
+     which affects `__dynamic_cast`.
+
+  Low severity: ecx-not-passed has 2 false positives (this-not-passed 10); 14 MSVC call sites push untruncated narrow
+  arguments. No edx-missing definition reads edx, so the edx-dummy decision holds.
+* **metrics** - v1_c1_samples=561 v1_c1_fail=0 v1_c2_bridges_run=127 v1_c2_fail=26 v1_c3_fp=2 v1_c4_ti_mixed_classes=35
+  v1_c5_bypass=0
+* **next** - S2c: defects 1-4. V1 re-runs the reproducers on the next link.
+
+### J-0075 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0066
+
+* **decided** - (user) Parallelise as far as the machines allow. The development agents stay in this session. Farm
+  runners in their own cloud sessions only run committed job scripts (tools/farm/) per integration head and publish.
+  Decomp-derived binaries go only to the private repository toadharvard/fnv-nx-build. The public nx-agent repository
+  gets text reports only.
+* **did**:
+  - **farm1:** the full census per head. First report: 2,907/2,978 clean on 67570bc, prepare 329 s, census 339 s on
+    4 CPUs.
+  - **farm2-5:** link objects, shards 1-4 of 4, via `compile_job.sh`. The job is incremental: a persistent tree
+    updated with rsync -c, a rebuild only on a header, flag or compiler change, stable crc32 shards. It publishes to
+    branch `c/<commit12>/<k>of4`; `fetch_objs.sh` collects and verifies the tree hash.
+  - **compile.sh -ffile-prefix-map:** objects no longer depend on where the tree lives.
+
+  Measured here: a shard round-trip publishes, fetches, verifies the tree hash and gives byte-identical objects. A
+  rerun with an unchanged tree recompiles nothing (1 s). The session git proxy refuses tag pushes and ref deletions,
+  so artifacts use branches.
+* **next** - S2c/S9 link from farm objects. Farm jobs for full build+boot (S9), whole-decomp fuzzing (S13) and the
+  MSVC gate (S11).
