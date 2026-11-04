@@ -248,11 +248,14 @@ def verdict(lo, hi, target):
 A57_SKIP = ('fn_interlocked',)   # its price leaves out the dmb drain; the interlocked_barriers item models that
 
 
-def apply_perf(items, model, perf, ipc_mid):
+def apply_perf(items, model, perf, ipcs):
     """P0-perfmodel's A57 prices (fnvnx-perf/1 per_call_cycles[], docs/PERF.md 12.6): for each hotspot_functions row
     with a price, the difference between its cycles and its instructions, both per frame, as an item on the row's
-    thread in IPC-equivalent instructions (cycles x the assumed mid IPC - instructions), so the frame keeps one IPC
-    for the unpriced work and the priced rows run at their own. The lo case takes the lo cycles at the lo calls."""
+    thread in IPC-equivalent instructions: per case, cycles x that case's IPC - instructions, so that the frame's
+    division by the case's IPC gives exactly the row's cycles (V1 45e8724 T1: converting at the mid IPC and dividing
+    by the lo / hi IPC scaled the cycles by 0.8 / 1.33). The unpriced work keeps the assumed IPC. ipcs = the IPC of
+    the lo, mid and hi cases (1.0, 0.8, 0.6); the lo case takes the lo cycles at the lo calls. minsn is in case order
+    (lo case first), not sorted."""
     rows = {h['id']: h for h in model.get('hotspot_functions', [])}
     used = []
     for r in perf.get('per_call_cycles') or []:
@@ -262,10 +265,10 @@ def apply_perf(items, model, perf, ipc_mid):
         pc, ca, cy = h['per_call_insn'], h['calls'], r['per_call_cycles']
         ins = (pc[0] * ca[0], mid(pc) * mid(ca), pc[1] * ca[1])
         cyc = (cy[0] * ca[0], mid(cy) * mid(ca), cy[1] * ca[1])
-        d = [(c * ipc_mid - i) / 1e6 for c, i in zip(cyc, ins)]
+        d = [(c * ipc - i) / 1e6 for c, ipc, i in zip(cyc, ipcs, ins)]
         items.append({'id': 'a57_' + h['id'], 'name': 'A57 price of %s (cycles vs instructions)' % h['name'],
                       'role': h.get('role', 'main'), 'subsystem': h.get('subsystem'),
-                      'minsn': [min(d[0], d[2]), max(d[0], d[2])], 'mid': d[1], 'basis': 'model',
+                      'minsn': [d[0], d[2]], 'mid': d[1], 'basis': 'model',
                       'follows': follows_item(model, h.get('subsystem'))})
         used.append({'id': h['id'], 'cycles_per_frame_mid': round(cyc[1]), 'insns_per_frame_mid': round(ins[1]),
                      'delta_minsn_mid': round(d[1], 3)})
@@ -322,7 +325,7 @@ def build(model, profs=None, render=None, perf=None):
     if not measured.get('frameprof', {}).get('used'):   # a measured frame already runs the overrides
         items, measured['overrides'] = apply_overrides(items, model)
     if perf and not measured.get('frameprof', {}).get('used'):   # measured frames are priced by P0 already
-        items, measured['a57'] = apply_perf(items, model, perf, ipc['value'])
+        items, measured['a57'] = apply_perf(items, model, perf, ipcs)
     if not measured.get('frameprof', {}).get('used'):   # a measured main thread already contains its hand-offs
         items.append({'id': 'sync', 'name': 'per-frame hand-offs on main', 'role': 'main',
                       'minsn': [syncs[0], syncs[2]], 'mid': syncs[1], 'basis': sync['basis']})
