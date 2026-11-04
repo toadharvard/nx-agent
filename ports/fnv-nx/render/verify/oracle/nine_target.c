@@ -187,5 +187,29 @@ static int n_ps(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
     return 1;
 }
 static void n_psc(V6nTarget* t, uint32_t reg, const float v[4]) { IDirect3DDevice9_SetPixelShaderConstantF(t->dev, reg, v, 1); }
+static int n_vsh(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
+    (void)n; (void)glsl;
+    IDirect3DVertexShader9* vs = NULL;
+    if (bc && FAILED(IDirect3DDevice9_CreateVertexShader(t->dev, (const DWORD*)bc, &vs))) return 0;
+    IDirect3DDevice9_SetVertexShader(t->dev, vs);
+    if (vs) IDirect3DVertexShader9_Release(vs);
+    return 1;
+}
+static void n_vsc(V6nTarget* t, uint32_t reg, const float v[4]) { IDirect3DDevice9_SetVertexShaderConstantF(t->dev, reg, v, 1); }
+static int n_drawidx(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6nVertex* v, int nv, const uint16_t* idx, int ni) {
+    (void)ni;
+    HRESULT hr;
+    if (rhw) {
+        IDirect3DDevice9_SetFVF(t->dev, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR | D3DFVF_TEX1);
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(t->dev, (D3DPRIMITIVETYPE)prim, 0, nv, count, idx, D3DFMT_INDEX16, v, sizeof *v);
+    } else {
+        struct { float x, y, z; uint32_t d, s; float u, v; } *p = malloc(sizeof *p * (nv ? nv : 1));
+        for (int i = 0; i < nv; i++) { p[i].x = v[i].x; p[i].y = v[i].y; p[i].z = v[i].z; p[i].d = v[i].diffuse; p[i].s = v[i].specular; p[i].u = v[i].u; p[i].v = v[i].v; }
+        IDirect3DDevice9_SetFVF(t->dev, D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR | D3DFVF_TEX1);
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(t->dev, (D3DPRIMITIVETYPE)prim, 0, nv, count, idx, D3DFMT_INDEX16, p, sizeof *p);
+        free(p);
+    }
+    return SUCCEEDED(hr);
+}
 const V6nOps v6n_target_ops = {"nine-softpipe", n_begin, n_end, n_clear, n_rs, n_samp, n_tss, n_tex, n_notex, n_vp,
-                               n_scissor, n_proj, n_draw, n_readback, n_ps, n_psc};
+                               n_scissor, n_proj, n_draw, n_readback, n_ps, n_psc, n_vsh, n_vsc, n_drawidx};

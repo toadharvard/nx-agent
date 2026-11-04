@@ -154,8 +154,16 @@ public:
     Packet* Emit();                                              // zeroed packet, 0 when full
     void* Constants(uint32_t* offset);                           // per-draw UBO slice (uboSize bytes)
     void* PassConstants(uint8_t pass, uint32_t size);            // bound at slot 0, both stages, for the pass
+    // A clear of a rectangle (pixels) of the pass's targets, ordered like a draw by (pass, layer, ..., depth key).
+    // flags: 1 colour, 2 depth, 4 stencil. Encoded as NxOp_Clear (Packet.prim = kClearPrim).
+    bool Clear(uint8_t pass, uint8_t layer, uint16_t depthKey, uint32_t flags, uint32_t rgba8, float depth,
+               uint32_t stencil, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    enum { kClearPrim = 0xFF };
     // The D3D9 epilogue block for a packet (sets p->epi); 0 when the ring is full.
     NxEpilogue* Epilogue(Packet* p);
+    // Engine pass id + family of a draw packet: encoded as NxOp_Marker (NX_MARKER_PASS) before the first draw of each
+    // run of draws with the same tag in a pass. family 0 = untagged.
+    void Tag(const Packet* p, uint16_t enginePass, uint16_t family);
     // Sorts, encodes (with redundant-bind elimination) and submits. stats may be 0.
     void Finish(StateCache& sc, NxFrameStats* stats, bool present = false);
     Ring& ubo() { return ubo_; }
@@ -174,6 +182,7 @@ private:
     uint32_t* order_ = nullptr; uint32_t* tmp_ = nullptr;
     uint64_t* keys_ = nullptr; uint64_t* ktmp_ = nullptr;
     uint32_t* tex_ = nullptr;
+    uint32_t* tags_ = nullptr;                                   // per packet: pass id | family << 16, 0 = none
     DynRec* dyn_ = nullptr;
     uint32_t* words_[2] = {nullptr, nullptr};                    // double-buffered: the backend may read N-1
     Encoder enc_;

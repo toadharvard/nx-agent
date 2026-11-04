@@ -23,6 +23,12 @@ void nxgl_destroy(void);
  * out is NUL-terminated. */
 size_t nxgl_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size_t cap);
 
+/* Tools (nx_render): hook called after every replayed draw with its index in the submit and the pass's colour image;
+ * a nonzero return skips every later draw until the hook is set again. nxgl_read_rgba8 reads a colour image (0 = the
+ * swapchain image) as RGBA8, top row first, without disturbing the replay state; safe inside the hook. */
+void nxgl_set_draw_hook(int (*hook)(void* user, uint32_t draw, uint32_t colorImage), void* user);
+int nxgl_read_rgba8(uint32_t image, uint32_t* w, uint32_t* h, uint8_t* dst, size_t cap);
+
 /* Last GL/compile error text (empty if none). */
 const char* nxgl_last_error(void);
 

@@ -6,6 +6,12 @@
 #include <string.h>
 #include <malloc.h>
 
+static void (*g_submitHook)(void*, uint32_t, uint32_t, int);
+static void* g_submitUser;
+void nx_replay_set_submit_hook(void (*hook)(void*, uint32_t, uint32_t, int), void* user) {
+    g_submitHook = hook; g_submitUser = user;
+}
+
 static uint64_t call(const NxGpuApi* api, uint32_t fn, uint64_t a) { return nxgpu_dispatch(api, fn, &a, 1); }
 static uint32_t pad4(uint32_t n) { return (n + 3) & ~3u; }
 
@@ -104,8 +110,10 @@ int nx_replay(const NxGpuApi* api, const uint8_t* d, size_t size, NxReplayStats*
             }
             NxSubmit s; memset(&s, 0, sizeof s);
             s.stream = (uint64_t)(uintptr_t)w; s.words = h[2]; s.frame = h[0]; s.present = h[1];
+            if (g_submitHook) g_submitHook(g_submitUser, h[0], h[1], 0);
             call(api, NXGPU_FN_SUBMIT, (uint64_t)(uintptr_t)&s);
             call(api, NXGPU_FN_WAIT_FRAME, h[0]);
+            if (g_submitHook) g_submitHook(g_submitUser, h[0], h[1], 1);
             free(w);
             st->frames++;
             break;
@@ -114,8 +122,9 @@ int nx_replay(const NxGpuApi* api, const uint8_t* d, size_t size, NxReplayStats*
             NxReadback r; uint32_t bytes;
             memcpy(&r, p, sizeof r); memcpy(&bytes, p + sizeof r, 4);
             r.image = r.image ? imgMap[r.image] : 0;
-            uint8_t* out = (uint8_t*)malloc((size_t)r.w * r.h * 4 + 4);
-            r.dst = (uint64_t)(uintptr_t)out; r.dst_size = r.w * r.h * 4;
+            uint32_t rbBytes = r.w * r.h * nx_readback_bpp(r.format);
+            uint8_t* out = (uint8_t*)malloc((size_t)rbBytes + 4);
+            r.dst = (uint64_t)(uintptr_t)out; r.dst_size = rbBytes;
             if (call(api, NXGPU_FN_READBACK, (uint64_t)(uintptr_t)&r) == 0) {
                 if (bytes && (bytes != r.dst_size || memcmp(out, p + sizeof r + 4, bytes))) st->readbackMismatches++;
                 if (onReadback) onReadback(user, st->readbacks, &r, out);

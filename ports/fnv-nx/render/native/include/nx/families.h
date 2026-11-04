@@ -12,6 +12,10 @@ extern "C" {
 
 /* tile (TileShader, TILE passes; menus and HUD). Variants: VS tile / tile_scroll (TEXSCROLL) / tile_vc (VC);
  * PS tile / tile_alphamap (ALPHAMAP) / tile_vc (VC) - the engine's three VS and three PS (TILE1000-1002). */
+/* Family ids (NxOp_Marker PASS tag, b). */
+enum NxFamilyId { NxFam_None = 0, NxFam_Tile = 1, NxFam_NoLight = 2, NxFam_Lit = 3, NxFam_Depth = 4, NxFam_Land = 5,
+                  NxFam_Sky = 6, NxFam_ImageSpace = 7 };
+
 typedef struct NxTileDraw {
     float wvp[16];          /* "WorldViewProjTranspose" (VS c0-c3) */
     float texScroll[4];     /* "TexScroll" (VS c4): uv offset in xy */

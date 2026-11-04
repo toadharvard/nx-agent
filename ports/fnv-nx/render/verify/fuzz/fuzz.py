@@ -96,7 +96,8 @@ def state_lines(r, rt):
         for n in ('ADDRESSU', 'ADDRESSV'):
             if r.random() < 0.6: L.append('samp 0 %s %s' % (n, r.choice(ADDR)))
         if r.random() < 0.4: L.append('samp 0 BORDERCOLOR %s' % col(r))
-        L.append('samp 0 MAGFILTER %s' % r.choice(['TEXF_POINT', 'TEXF_LINEAR'])); L.append('samp 0 MINFILTER %s' % r.choice(['TEXF_POINT', 'TEXF_LINEAR']))
+        f = r.choice(['TEXF_POINT', 'TEXF_LINEAR'])   # MIN = MAG: the min/mag switch at LOD ~ 0 is implementation-defined
+        L.append('samp 0 MAGFILTER %s' % f); L.append('samp 0 MINFILTER %s' % f)
         L.append('samp 0 MIPFILTER TEXF_NONE')   # mip selection at LOD boundaries is implementation-defined (traps cover mips)
         if r.random() < 0.3: L.append('samp 0 MAXMIPLEVEL %d' % r.randrange(4))
         if r.random() < 0.15: L.append('samp 0 SRGBTEXTURE TRUE')   # gen_scene drops it for formats without sRGB read (A2)
@@ -136,7 +137,7 @@ def geometry(r, w, h):
     return L
 
 def gen_scene(r, target):
-    rts = ['A8R8G8B8'] * 6 + ['X8R8G8B8'] + (['A16B16G16R16F', 'A32B32G32R32F'] if target == 'gl' else [])
+    rts = ['A8R8G8B8'] * 6 + ['X8R8G8B8'] + ['A16B16G16R16F', 'A32B32G32R32F']   # s6ngl reads floats back since ABI v3
     rt = r.choice(rts); ds = r.choice(['D24S8'] * 5 + ['D24X8', 'D16', 'NONE'])
     w = h = 16
     L = ['size %d %d' % (w, h), 'rt ' + rt, 'ds ' + ds,
@@ -152,7 +153,7 @@ def gen_scene(r, target):
         if r.random() < 0.15:
             x, y = r.randrange(0, 8), r.randrange(0, 8)
             L.append('vp %d %d %d %d %g %g' % (x, y, r.randrange(4, 16 - x + 1), r.randrange(4, 16 - y + 1), r.choice([0.0, 0.25]), r.choice([0.75, 1.0])))
-        if r.random() < 0.08 and target == 'gl':   # mid-scene clear (inside the viewport / scissor)
+        if r.random() < 0.08:   # mid-scene clear (inside the viewport / scissor; s6ngl: NxOp_Clear since ABI v3)
             L.append('clear %d %s %g 0x%02x' % (r.choice([1, 2, 4, 7]), col(r), r.choice([1.0, 0.5]), r.randrange(256)))
         if r.random() < 0.05: L.append('rs DEPTHBIAS f:0')
         L += geometry(r, w, h)
@@ -226,7 +227,8 @@ def minimise(work, L, target, mutant=None):
     for i, l in enumerate(list(L)):
         if l.startswith('v '):
             p = l.split()
-            for k, simple in ((5, '0xffffffff'), (6, '0x00000000'), (7, '0'), (8, '0')):
+            # texcoords simplify to an off-grid value: exactly 0 is a texel boundary (implementation-defined sampling)
+            for k, simple in ((5, '0xffffffff'), (6, '0x00000000'), (7, '0.01171875'), (8, '0.01171875')):
                 if p[k] != simple:
                     q = p[:]; q[k] = simple; cand = L[:i] + [' '.join(q)] + L[i + 1:]
                     if mismatches(work, cand, target, mutant): L = cand; p = q

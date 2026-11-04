@@ -15,4 +15,6 @@ typedef struct NxReplayStats {
 int nx_replay(const NxGpuApi* api, const uint8_t* data, size_t size, NxReplayStats* stats,
               void (*onReadback)(void* user, uint32_t index, const NxReadback* r, const uint8_t* rgba), void* user,
               char* err, size_t errlen);
+/* Tools (nx_render): called before (after = 0) and after (after = 1) every replayed SUBM record. */
+void nx_replay_set_submit_hook(void (*hook)(void* user, uint32_t frame, uint32_t present, int after), void* user);
 #endif

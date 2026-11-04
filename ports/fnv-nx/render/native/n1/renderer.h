@@ -33,6 +33,7 @@ public:
     void RestoreSamplerState(uint32_t stage, uint32_t type);
     // The texture bound to a stage: image id (0 = none), its D3DFORMAT and kind, for the sampler translation.
     void SetTexture(uint32_t stage, uint32_t image, const NxD3D9Texture& kind);
+    uint32_t Texture(uint32_t stage) const { return stage < kStages ? image_[stage] : 0; }
     void SetPixelShaderVersion(uint32_t v) { psVersion_ = v; dirty_ = true; }
     // Translates what is recorded (only when something changed). viewport/scissor in D3D9 pixels.
     struct Resolved {
@@ -101,8 +102,32 @@ public:
         uint32_t textures;          // texture stages 0..n-1 from the state tracker
         const void* ubo;
         uint32_t uboSize;
+        uint16_t enginePass;        // engine pass id (docs/RENDER_NATIVE.md §1.3) with family != 0, else the current
+        uint16_t family;            // NxFamilyId; 0: use SetEnginePass's
     };
+    // The engine pass the following draws belong to (family NxFam_None: none). Tagged into the stream as NxOp_Marker.
+    void SetEnginePass(uint16_t enginePass, uint16_t family) { curPass_ = enginePass; curFamily_ = family; }
     bool Render(const Draw& d);
+
+    // N1 geometry path (Do_RenderShape / Do_RenderTristrips): an engine NiTriShape / NiTriStrips described
+    // engine-independently (n1/engine_stubs.cpp reads the engine objects). Drawn with the tile family (tile_vc):
+    // position x world x camera, vertex colour (white without), uv set 0, the stage-0 texture of the state tracker
+    // (a white texel without), tint; strips become a triangle list. Geometry goes into a per-frame vertex ring.
+    struct GeomView {
+        float rot[9], trans[3], scale;   // NiTransform: world = rot * (scale * p) + trans (rot row-major)
+        uint32_t vertices;
+        const float* pos;                // 3 floats per vertex
+        const float* color;              // 4 floats per vertex (NiColorA) or 0
+        const float* uv;                 // 2 floats per vertex (set 0) or 0
+        const uint16_t* indices;         // triangle list (indexCount = 3 x triangles), or
+        uint32_t indexCount;
+        const uint16_t* stripLengths;    // strips: stripCount lengths, then the concatenated strip lists
+        const uint16_t* strips;
+        uint32_t stripCount;
+        float tint[4];
+    };
+    bool RenderGeometry(const GeomView& g);
+    uint32_t geometryDraws() const { return geomDraws_; }
 
     StateTracker& state() { return state_; }
     StateCache& cache() { return sc_; }
@@ -121,6 +146,10 @@ private:
     const Group* FindGroup(const void* g) const;
     void OpenPass(uint32_t clearMode);
     Backend* be_ = nullptr;
+    uint16_t curPass_ = 0, curFamily_ = 0;
+    Ring geomRing_;
+    uint32_t white_ = 0, geomDraws_ = 0;
+    uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0;
     StateCache sc_;
     Frame frame_;
     StateTracker state_;
@@ -143,7 +172,9 @@ private:
 // D3D9 matrices (column-major for GLSL) as NiDX9Renderer builds them; exposed for tests.
 void CameraView(const NiPoint3f& loc, const NiPoint3f& dir, const NiPoint3f& up, const NiPoint3f& right, float out[16]);
 void CameraProjection(const NiFrustumF& f, float out[16]);
-void ScreenSpaceProjection(float out[16]);   // x, y in [0,1] (y down), z -> z: Gamebryo screen space
+// Gamebryo screen space (x, y in [0,1], y down) of a w x h target, with the engine's D3D9 half-pixel correction and
+// z/9999 (0x00e6cf40). The defaults are the game's 1280x720 back buffer; nx::Renderer always passes its target size.
+void ScreenSpaceProjection(float out[16], uint32_t w = 1280, uint32_t h = 720);
 
 } // namespace nx
 #endif

@@ -1,4 +1,5 @@
-# UNCLASSIFIED (V6n FF model + llvmpipe vs Nine-softpipe, not an S6n claim): isolated pixels with bilinear filtering or ZB_USEW/NOTEQUAL at the clear depth; kept as fuzz corpus
+# classified by V6n 2026-11-04: expect: match
+# V6n FF model gap, FIXED: TEXCOORDINDEX naming a texcoord set the FVF lacks reads (0,0) in Nine; the model sampled set 0. Regression test.
 # fuzz.py reproducer: target gl, seed 5, case c00141
 # colour: 9 px over tolerance (max |d| 172), first (13,13) ref [58.0, 205.0, 103.0, 47.0] test [106.0, 33.0, 1.0, 47.0]
 size 16 16

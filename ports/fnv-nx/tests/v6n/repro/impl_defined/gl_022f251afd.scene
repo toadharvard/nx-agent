@@ -1,4 +1,5 @@
-# UNCLASSIFIED (V6n FF model + llvmpipe vs Nine-softpipe, not an S6n claim): isolated pixels with bilinear filtering or ZB_USEW/NOTEQUAL at the clear depth; kept as fuzz corpus
+# classified by V6n 2026-11-04: impl_defined
+# mixed MINFILTER POINT / MAGFILTER LINEAR: the min/mag switch at LOD ~ 0 is implementation-defined (MATCH with MIN = MAG, both POINT or both LINEAR).
 # fuzz.py reproducer: target gl, seed 5, case c00560
 # colour: 1 px over tolerance (max |d| 76), first (3,8) ref [33.0, 239.0, 247.0, 255.0] test [98.0, 163.0, 199.0, 255.0]
 size 16 16

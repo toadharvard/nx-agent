@@ -1,0 +1,17 @@
+# classified by V6n 2026-11-04: oracle
+# D16 depth, RHW vertices: both GL targets are within 0.5 LSB of the exact screen-linear plane z (e.g. (6,4): exact 53143.9, targets 53144, Nine 53147); Nine-on-softpipe is up to 9 LSB off. Oracle deviation O8 (softpipe depth interpolation precision on D16).
+# fuzz.py reproducer: target s6ngl, seed 11, case c00162
+# depth: 22 px differ, first (6,4) ref 53147 test 53144
+size 16 16
+rt A8R8G8B8
+ds D16
+tex 1 A8R8G8B8 4 4 1 hash 396
+tex 0 X8R8G8B8 8 8 1 hash 292
+rs CULLMODE CULL_CW
+rs ZENABLE TRUE
+rs ZFUNC CMP_GREATEREQUAL
+mode rhw
+v 12.9375 8.1875 1 2 0xffffffff 0x00000000 0.01171875 0.01171875
+v 5.4375 1.5625 0.6875 1 0xffffffff 0x00000000 0.01171875 0.01171875
+v 0.375 7.25 1 1 0xffffffff 0x00000000 0.01171875 0.01171875
+draw TRIANGLELIST 1

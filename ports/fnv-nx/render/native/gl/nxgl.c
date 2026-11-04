@@ -126,6 +126,9 @@ static struct {
     Fbo fbo[MAX_FBOS]; uint32_t nFbo;
     GLuint readFbo;
     uint32_t swapImage;    /* image id used for "colour 0" */
+    uint32_t passColor;    /* colour image of the current pass (resolved, never 0) */
+    uint32_t frameDraws;   /* draws replayed in the current submit */
+    int skipDraws;         /* the draw hook asked to stop drawing */
     char err[2048];
     /* replay state */
     uint32_t boundState, passW, passH;
@@ -134,6 +137,7 @@ static struct {
     uint32_t vtxBlock, vtxOffset, idxType;
     int vtxDirty;
     uint32_t stencilRef;
+    GLint scissor[4];      /* the dynamic scissor rectangle (restored after NxOp_Clear) */
 } g;
 
 const char* nxgl_last_error(void) { return g.err; }
@@ -553,6 +557,7 @@ static float asf(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 
 static void begin_pass(const uint32_t* a) {
     uint32_t color = a[0] ? a[0] : g.swapImage, depth = a[1];
+    g.passColor = color;
     p_glBindFramebuffer(GL_FRAMEBUFFER, fbo_for(color, depth));
     g.passW = a[6]; g.passH = a[7];
     /* clears: full target, all channels, no sRGB encoding of the clear colour */
@@ -577,8 +582,60 @@ static void begin_pass(const uint32_t* a) {
     p_glViewportIndexedf(0, 0.5f, 0.5f, (float)g.passW, (float)g.passH);
     p_glDepthRangef(0.0f, 1.0f);
     p_glScissor(0, 0, (GLsizei)g.passW, (GLsizei)g.passH);
+    g.scissor[0] = 0; g.scissor[1] = 0; g.scissor[2] = (GLint)g.passW; g.scissor[3] = (GLint)g.passH;
     p_glBlendColor(1, 1, 1, 1);
     p_glPolygonOffset(0, 0);
+}
+
+/* NxOp_Clear: a rectangle of the pass's targets, outside the bound state (scissor test does the rectangle) */
+static void clear_rect(const uint32_t* a) {
+    p_glEnable(GL_SCISSOR_TEST);
+    p_glScissor((GLint)a[4], (GLint)a[5], (GLsizei)a[6], (GLsizei)a[7]);
+    /* targets are attached through their sRGB view when they have one: GL_FRAMEBUFFER_SRGB encodes the clear */
+    if (a[0] & NxClear_Srgb) p_glEnable(GL_FRAMEBUFFER_SRGB); else p_glDisable(GL_FRAMEBUFFER_SRGB);
+    if (a[0] & 1) {
+        p_glColorMaski(0, 1, 1, 1, 1);
+        float c[4] = {(a[1] & 255) / 255.0f, (a[1] >> 8 & 255) / 255.0f, (a[1] >> 16 & 255) / 255.0f, (a[1] >> 24) / 255.0f};
+        p_glClearBufferfv(GL_COLOR, 0, c);
+    }
+    float z = asf(a[2]);
+    GLint st = (GLint)(a[3] & 0xFF);
+    if (a[0] & 6) { p_glDepthMask(GL_TRUE); p_glStencilMaskSeparate(GL_FRONT_AND_BACK, 0xFF); }
+    if ((a[0] & 6) == 6) p_glClearBufferfi(GL_DEPTH_STENCIL, 0, z, st);
+    else if (a[0] & 2) p_glClearBufferfv(GL_DEPTH, 0, &z);
+    else if (a[0] & 4) p_glClearBufferiv(GL_STENCIL, 0, &st);
+    p_glScissor(g.scissor[0], g.scissor[1], g.scissor[2], g.scissor[3]);
+    if (g.boundState) apply_state(&g.st[g.boundState].rs, 1);   /* masks, scissor enable, sRGB back */
+    else { p_glDisable(GL_SCISSOR_TEST); g.haveApplied = 0; }
+}
+
+/* ---- draw hook (tools: per-draw images) ---------------------------------------------------------------------- */
+static int (*g_drawHook)(void*, uint32_t, uint32_t);
+static void* g_drawUser;
+void nxgl_set_draw_hook(int (*hook)(void* user, uint32_t draw, uint32_t colorImage), void* user) {
+    g_drawHook = hook; g_drawUser = user; g.skipDraws = 0;
+}
+int nxgl_read_rgba8(uint32_t image, uint32_t* w, uint32_t* h, uint8_t* dst, size_t cap) {
+    uint32_t id = image ? image : g.swapImage;
+    if (!id || id > g.nImg) return -1;
+    if (g.img[id].isView) id = g.img[id].base;
+    Image* im = &g.img[id];
+    if (im->isDepth) return -1;
+    *w = im->w; *h = im->h;
+    if ((size_t)im->w * im->h * 4 > cap) return -1;
+    GLint prev = 0;
+    p_glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev);
+    if (!g.readFbo) p_glGenFramebuffers(1, &g.readFbo);
+    p_glBindFramebuffer(GL_READ_FRAMEBUFFER, g.readFbo);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, im->tex, 0);
+    p_glReadBuffer(GL_COLOR_ATTACHMENT0);
+    p_glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    p_glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    p_glReadPixels(0, 0, (GLsizei)im->w, (GLsizei)im->h, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+    p_glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev);
+    return 0;
 }
 
 /* ---- replay ------------------------------------------------------------------------------------------------- */
@@ -694,7 +751,7 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
             break;
         case NxOp_Draw:
         case NxOp_DrawIndexed: {
-            if (!g.boundState) break;
+            if (!g.boundState || g.skipDraws) break;
             if (g.vtxDirty) { bind_vertex_buffer(); g.vtxDirty = 0; }
             if (op == NxOp_Draw && argc >= 5) {
                 p_glDrawArraysInstancedBaseInstance(glprim(a[0]), (GLint)a[3], (GLsizei)a[1], (GLsizei)a[2], a[4]);
@@ -705,6 +762,8 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
                     (GLsizei)a[2], (GLint)a[4], a[5]);
             }
             stats->draws++;
+            if (g_drawHook && g_drawHook(g_drawUser, g.frameDraws, g.passColor)) g.skipDraws = 1;
+            g.frameDraws++;
             break;
         }
         case NxOp_Viewport:
@@ -714,7 +773,10 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
             }
             break;
         case NxOp_Scissor:
-            if (argc >= 4) p_glScissor((GLint)a[0], (GLint)a[1], (GLsizei)a[2], (GLsizei)a[3]);
+            if (argc >= 4) {
+                for (int q = 0; q < 4; q++) g.scissor[q] = (GLint)a[q];
+                p_glScissor(g.scissor[0], g.scissor[1], g.scissor[2], g.scissor[3]);
+            }
             break;
         case NxOp_StencilRef:
             if (argc >= 1 && g.boundState) { g.stencilRef = a[0] & 0xFF; apply_stencil_funcs(g.st[g.boundState].rs.w[1], g.stencilRef); }
@@ -725,6 +787,10 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
         case NxOp_DepthBias:
             if (argc >= 2) p_glPolygonOffset(asf(a[1]), asf(a[0]));
             break;
+        case NxOp_Clear:
+            if (argc >= 8) clear_rect(a);
+            break;
+        case NxOp_Marker: break;   /* tags for captures and tools */
         default: break;
         }
     }
@@ -738,6 +804,7 @@ static uint64_t api_submit(uint64_t a) {
     NxFrameStats st;
     memset(&st, 0, sizeof st);
     st.frame = s->frame; st.cmd_words = s->words;
+    g.frameDraws = 0;
     replay(s, &st);
     p_glFinish();
     clock_gettime(CLOCK_MONOTONIC, &t1);
@@ -752,22 +819,34 @@ static uint64_t api_wait_frame(uint64_t f) { (void)f; return 0; }   /* submit is
 
 static uint64_t api_readback(uint64_t a) {
     const NxReadback* r = (const NxReadback*)(uintptr_t)a;
-    if (!r || !r->dst) return NXGPU_BAD_CALL;
+    if (!r || !r->dst || r->format > NxRb_Stencil8) return NXGPU_BAD_CALL;
     uint32_t id = r->image ? r->image : g.swapImage;
-    if (!id || id > g.nImg || g.img[id].isDepth) return NXGPU_BAD_CALL;
+    if (!id || id > g.nImg) return NXGPU_BAD_CALL;
     if (g.img[id].isView) id = g.img[id].base;
-    if ((uint64_t)r->w * r->h * 4 > r->dst_size || r->x + r->w > g.img[id].w || r->y + r->h > g.img[id].h)
+    Image* im = &g.img[id];
+    int depthFmt = r->format == NxRb_Depth32F || r->format == NxRb_Stencil8;
+    if (depthFmt != im->isDepth || (r->format == NxRb_Stencil8 && !im->hasStencil)) return NXGPU_BAD_CALL;
+    if ((uint64_t)r->w * r->h * nx_readback_bpp(r->format) > r->dst_size || r->x + r->w > im->w || r->y + r->h > im->h)
         return NXGPU_BAD_CALL;
     if (!g.readFbo) p_glGenFramebuffers(1, &g.readFbo);
     p_glBindFramebuffer(GL_READ_FRAMEBUFFER, g.readFbo);
-    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.img[id].tex, 0);
-    p_glReadBuffer(GL_COLOR_ATTACHMENT0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, im->isDepth ? 0 : im->tex, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    if (im->isDepth)
+        p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, im->hasStencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
+                                 GL_TEXTURE_2D, im->tex, 0);
+    p_glReadBuffer(im->isDepth ? GL_NONE : GL_COLOR_ATTACHMENT0);
     p_glPixelStorei(GL_PACK_ALIGNMENT, 1);
     p_glPixelStorei(GL_PACK_ROW_LENGTH, 0);
     p_glDisable(GL_FRAMEBUFFER_SRGB);
     g.haveApplied = 0;
-    p_glReadPixels((GLint)r->x, (GLint)r->y, (GLsizei)r->w, (GLsizei)r->h, GL_RGBA, GL_UNSIGNED_BYTE,
-                   (void*)(uintptr_t)r->dst);
+    GLenum fmt = GL_RGBA, type = GL_UNSIGNED_BYTE;
+    if (r->format == NxRb_RGBA32F) type = GL_FLOAT;
+    else if (r->format == NxRb_Depth32F) { fmt = GL_DEPTH_COMPONENT; type = GL_FLOAT; }
+    else if (r->format == NxRb_Stencil8) { fmt = GL_STENCIL_INDEX; type = GL_UNSIGNED_BYTE; }
+    p_glReadPixels((GLint)r->x, (GLint)r->y, (GLsizei)r->w, (GLsizei)r->h, fmt, type, (void*)(uintptr_t)r->dst);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
     p_glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     return p_glGetError() ? NXGPU_BAD_CALL : 0;
 }

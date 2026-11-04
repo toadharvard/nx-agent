@@ -1,5 +1,7 @@
 // fnv-nx native renderer, N1: nx::Renderer and nx::StateTracker. See renderer.h.
 #include "renderer.h"
+#include "nx/families.h"
+#include "nx_shaders.h"
 #include <string.h>
 #include <new>
 
@@ -97,10 +99,23 @@ void CameraProjection(const NiFrustumF& f, float m[16]) {
     }
 }
 
-void ScreenSpaceProjection(float m[16]) {
+void ScreenSpaceProjection(float m[16], uint32_t w, uint32_t h) {
+    // The engine's screen-space camera (0x00e6cf40): view (x - 0.5, 0.5 - y, z + 1) times proj (2x - 1/W, 2y + 1/H,
+    // (z - 1)/9999), i.e. clip = (2x - 1 - 1/W, 1 - 2y + 1/H, z/9999): Gamebryo's D3D9 half-pixel correction.
+    // N1 keeps view = identity in screen space and folds both into this matrix.
     ident(m);
-    m[0] = 2; m[12] = -1;     // x [0,1] -> [-1,1]
-    m[5] = -2; m[13] = 1;     // y [0,1] (down) -> [1,-1]
+    m[0] = 2; m[12] = -1.0f - 1.0f / (float)w;     // x [0,1] -> [-1,1], half a pixel left
+    m[5] = -2; m[13] = 1.0f + 1.0f / (float)h;     // y [0,1] (down) -> [1,-1], half a pixel up
+    m[10] = 1.0f / 9999.0f; m[14] = 0;            // screen z in the 1..9999 camera range
+}
+
+// The engine's viewport from a port rectangle (0x00e6c780, 0x00e6cf40): truncation, not rounding.
+static NxD3D9Viewport PortViewport(const NiRectF& p, uint32_t w, uint32_t h) {
+    NxD3D9Viewport v;
+    v.X = (uint32_t)(p.left * (float)w); v.Y = (uint32_t)((1.0f - p.top) * (float)h);
+    v.Width = (uint32_t)((p.right - p.left) * (float)w); v.Height = (uint32_t)((p.top - p.bottom) * (float)h);
+    v.MinZ = 0.0f; v.MaxZ = 1.0f;
+    return v;
 }
 
 // ---- Renderer --------------------------------------------------------------------------------------------------
@@ -112,10 +127,11 @@ bool Renderer::Init(Backend* be, uint32_t w, uint32_t h, uint32_t backbuffer, ui
     g_renderer = this;
     be_ = be;
     if (!frame_.Init(be, 8u << 20, 512)) return false;
+    if (!geomRing_.Init(be, 8u << 20)) return false;
     state_.Reset();
     nGroups_ = 0;
     groups_[nGroups_++] = {nullptr, backbuffer, depth, w, h};
-    ident(view_); ScreenSpaceProjection(proj_);
+    ident(view_); ScreenSpaceProjection(proj_, w, h);
     vp_ = {0, 0, w, h, 0.0f, 1.0f};
     return true;
 }
@@ -157,6 +173,7 @@ void Renderer::OpenPass(uint32_t clearMode) {
 bool Renderer::Do_BeginFrame() {
     if (inFrame_) return false;
     frame_.Begin(frameNo_);
+    geomRing_.BeginFrame(frameNo_);
     inFrame_ = true;
     cur_ = nullptr; passOpen_ = false; pass_ = -1;
     return true;
@@ -174,9 +191,29 @@ bool Renderer::Do_EndFrame() {
 bool Renderer::Do_DisplayFrame() { return !inFrame_; }   // EndFrame submitted with present
 
 void Renderer::Do_ClearBuffer(const NiRectF* rect, uint32_t mode) {
-    (void)rect;   // partial clears: N1 clears the whole target (the menu path clears whole targets)
     if (!inFrame_) return;
-    OpenPass(mode);   // a new pass on the current target: clears are pass loads
+    const Group* g = cur_ ? cur_ : &groups_[0];
+    // rect: normalized like a camera port (left, right, top, bottom; top > bottom); 0 or the whole target = full clear
+    int32_t x0 = 0, y0 = 0, x1 = (int32_t)g->w, y1 = (int32_t)g->h;
+    if (rect) {
+        x0 = (int32_t)(rect->left * g->w + 0.5f); x1 = (int32_t)(rect->right * g->w + 0.5f);
+        y0 = (int32_t)((1.0f - rect->top) * g->h + 0.5f); y1 = (int32_t)((1.0f - rect->bottom) * g->h + 0.5f);
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > (int32_t)g->w) x1 = (int32_t)g->w;
+        if (y1 > (int32_t)g->h) y1 = (int32_t)g->h;
+    }
+    // D3D9 / Nine clear the colour through the sRGB view while SRGBWRITEENABLE (194) is set: always an NxOp_Clear then
+    const bool srgb = (mode & CLEAR_BACKBUFFER) && state_.GetRenderState(194) != 0;
+    if (!srgb && x0 == 0 && y0 == 0 && x1 == (int32_t)g->w && y1 == (int32_t)g->h) { OpenPass(mode); return; }   // a pass load
+    if (x1 <= x0 || y1 <= y0) return;
+    OpenPass(0);   // a new pass keeps the order against earlier draws; the clear sorts first in it (layer 0, key 0)
+    if (!passOpen_) return;
+    uint32_t flags = (mode & CLEAR_BACKBUFFER ? 1u : 0u) | (mode & CLEAR_ZBUFFER && g->depth ? 2u : 0u) |
+                     (mode & CLEAR_STENCIL && g->depth ? 4u : 0u) | (srgb ? (uint32_t)NxClear_Srgb : 0u);
+    uint32_t rgba = (uint32_t)u8_(bg_[0]) | (uint32_t)u8_(bg_[1]) << 8 | (uint32_t)u8_(bg_[2]) << 16 | (uint32_t)u8_(bg_[3]) << 24;
+    frame_.Clear((uint8_t)pass_, 0, 0, flags, rgba, clearDepth_, clearStencil_, (uint32_t)x0, (uint32_t)y0,
+                 (uint32_t)(x1 - x0), (uint32_t)(y1 - y0));
 }
 
 void Renderer::Do_SetCameraData(const NiPoint3f& loc, const NiPoint3f& dir, const NiPoint3f& up, const NiPoint3f& right,
@@ -184,20 +221,15 @@ void Renderer::Do_SetCameraData(const NiPoint3f& loc, const NiPoint3f& dir, cons
     CameraView(loc, dir, up, right, view_);
     CameraProjection(f, proj_);
     const Group* g = cur_ ? cur_ : &groups_[0];
-    vp_.X = (uint32_t)(port.left * g->w + 0.5f); vp_.Y = (uint32_t)((1.0f - port.top) * g->h + 0.5f);
-    vp_.Width = (uint32_t)((port.right - port.left) * g->w + 0.5f); vp_.Height = (uint32_t)((port.top - port.bottom) * g->h + 0.5f);
-    vp_.MinZ = 0.0f; vp_.MaxZ = 1.0f;
+    vp_ = PortViewport(port, g->w, g->h);
 }
 
 void Renderer::Do_SetScreenSpaceCameraData(const NiRectF* port) {
-    ident(view_);
-    ScreenSpaceProjection(proj_);
     const Group* g = cur_ ? cur_ : &groups_[0];
-    NiRectF full = {0, 1, 1, 0};
-    const NiRectF& p = port ? *port : full;
-    vp_.X = (uint32_t)(p.left * g->w + 0.5f); vp_.Y = (uint32_t)((1.0f - p.top) * g->h + 0.5f);
-    vp_.Width = (uint32_t)((p.right - p.left) * g->w + 0.5f); vp_.Height = (uint32_t)((p.top - p.bottom) * g->h + 0.5f);
-    vp_.MinZ = 0.0f; vp_.MaxZ = 1.0f;
+    ident(view_);
+    ScreenSpaceProjection(proj_, g->w, g->h);
+    if (port) vp_ = PortViewport(*port, g->w, g->h);
+    else vp_ = {0, 0, g->w, g->h, 0.0f, 1.0f};
 }
 
 bool Renderer::Do_BeginUsingRenderTargetGroup(const void* group, uint32_t clearMode) {
@@ -243,7 +275,117 @@ bool Renderer::Render(const Draw& d) {
     DynRec dr;
     DynFromD3D9(&dr, r.dyn);
     p->dyn = frame_.AddDyn(dr);
+    if (d.family) frame_.Tag(p, d.enginePass, d.family);
+    else if (curFamily_) frame_.Tag(p, curPass_, curFamily_);
     return true;
 }
 
+// ---- N1 geometry path ------------------------------------------------------------------------------------------
+static uint16_t BlobShader(Backend* be, const char* name, uint32_t stage) {
+    int i = nx_shader_find(name, stage);
+    if (i < 0) return 0;
+    NxShaderDesc d;
+    memset(&d, 0, sizeof d);
+    d.stage = stage; d.dksh = FNVNX_ADDR_(nx_shader_blobs[i].dksh); d.dksh_size = nx_shader_blobs[i].dksh_size;
+    d.glsl = FNVNX_ADDR_(nx_shader_blobs[i].glsl); d.glsl_size = nx_shader_blobs[i].glsl_size;
+    return (uint16_t)be->ShaderCreate(d);
+}
+
+namespace {
+struct GeomVtx { float x, y, z, u, v; uint32_t rgba; };
+inline uint32_t Rgba8(const float* c) {
+    uint32_t o = 0;
+    for (int i = 0; i < 4; i++) {
+        float v = c[i] < 0 ? 0 : c[i] > 1 ? 1 : c[i];
+        o |= (uint32_t)(v * 255.0f + 0.5f) << (8 * i);
+    }
+    return o;
+}
+inline void Mul(const float* a, const float* b, float* o) {   // column-major o = a * b
+    for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++) {
+            float s = 0;
+            for (int k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+            o[c * 4 + r] = s;
+        }
+}
+}  // namespace
+
+bool Renderer::RenderGeometry(const GeomView& g) {
+    if (!inFrame_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
+    if (!geomVs_) {
+        geomVs_ = BlobShader(be_, "tile_vc", NxStage_Vertex);
+        geomPs_ = BlobShader(be_, "tile_vc", NxStage_Fragment);
+        NxVtxLayout ll;
+        memset(&ll, 0, sizeof ll);
+        ll.count = 3; ll.stride = sizeof(GeomVtx);
+        ll.attr[0].offset = 0; ll.attr[0].type = NxAttr_Float32; ll.attr[0].components = 3;
+        ll.attr[1].offset = 12; ll.attr[1].type = NxAttr_Float32; ll.attr[1].components = 2;
+        ll.attr[2].offset = 20; ll.attr[2].type = NxAttr_Unorm8; ll.attr[2].components = 4;
+        geomLayout_ = sc_.Layout(ll);
+        static const uint32_t kWhite = 0xFFFFFFFFu;
+        NxImageDesc td;
+        memset(&td, 0, sizeof td);
+        td.width = 1; td.height = 1; td.format = NxFmt_BGRA8; td.data = FNVNX_ADDR_(&kWhite); td.data_size = 4;
+        white_ = be_->ImageCreate(td);
+        if (!geomVs_ || !geomPs_ || !geomLayout_ || !white_) return false;
+    }
+    // triangle list (strips: alternate winding, degenerate triangles dropped)
+    uint32_t nIdx = g.indices ? g.indexCount - g.indexCount % 3 : 0;
+    if (!g.indices && g.strips && g.stripLengths)
+        for (uint32_t s = 0; s < g.stripCount; s++) nIdx += g.stripLengths[s] > 2 ? 3u * (g.stripLengths[s] - 2u) : 0u;
+    if (!nIdx) return false;
+    uint32_t vOff, iOff;
+    GeomVtx* v = (GeomVtx*)geomRing_.Alloc(g.vertices * sizeof(GeomVtx), 16, &vOff);
+    uint16_t* ix = (uint16_t*)geomRing_.Alloc(nIdx * 2, 16, &iOff);
+    if (!v || !ix) return false;
+    static const float kOne[4] = {1, 1, 1, 1};
+    for (uint32_t i = 0; i < g.vertices; i++) {
+        v[i].x = g.pos[3 * i]; v[i].y = g.pos[3 * i + 1]; v[i].z = g.pos[3 * i + 2];
+        v[i].u = g.uv ? g.uv[2 * i] : 0; v[i].v = g.uv ? g.uv[2 * i + 1] : 0;
+        v[i].rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
+    }
+    uint32_t n = 0;
+    if (g.indices) {
+        for (uint32_t i = 0; i < nIdx; i++) ix[n++] = g.indices[i] < g.vertices ? g.indices[i] : 0;
+    } else {
+        const uint16_t* s = g.strips;
+        for (uint32_t k = 0; k < g.stripCount; s += g.stripLengths[k], k++)
+            for (uint32_t t = 0; t + 2 < g.stripLengths[k]; t++) {
+                uint16_t a = s[t], b = s[t + 1], c = s[t + 2];
+                if (a == b || b == c || a == c || a >= g.vertices || b >= g.vertices || c >= g.vertices) continue;
+                if (t & 1) { uint16_t x = a; a = b; b = x; }
+                ix[n++] = a; ix[n++] = b; ix[n++] = c;
+            }
+        if (!n) return false;
+    }
+    float world[16];
+    memset(world, 0, sizeof world);
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) world[c * 4 + r] = g.rot[r * 3 + c] * g.scale;
+        world[12 + r] = g.trans[r];
+    }
+    world[15] = 1;
+    NxTileDraw u;
+    memset(&u, 0, sizeof u);
+    float vp[16];
+    Mul(proj_, view_, vp);
+    Mul(vp, world, u.wvp);
+    memcpy(u.tint, g.tint, 16);
+    const bool untextured = state_.Texture(0) == 0;
+    static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};   // D3DFMT_A8R8G8B8 2D
+    if (untextured) state_.SetTexture(0, white_, kWhiteKind);
+    Draw d;
+    memset(&d, 0, sizeof d);
+    d.vs = geomVs_; d.ps = geomPs_; d.layout = geomLayout_; d.prim = NxPrim_Triangles;
+    d.vtxBlock = geomRing_.block(); d.vtxOffset = vOff; d.vtxSize = g.vertices * sizeof(GeomVtx);
+    d.idxBlock = geomRing_.block(); d.idxOffset = iOff; d.idxSize = n * 2; d.idxType = 0;
+    d.count = n; d.textures = 1; d.ubo = &u; d.uboSize = sizeof u;
+    bool ok = Render(d);
+    if (untextured) state_.SetTexture(0, 0, kWhiteKind);
+    if (ok) geomDraws_++;
+    return ok;
+}
+
 } // namespace nx
+

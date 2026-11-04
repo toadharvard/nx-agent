@@ -1,8 +1,10 @@
 // Unit tests for render/native/front (front.cpp: StateCache, Encoder, SortPackets, Frame encoding, ParseDDS) and the
 // GL shim (gl/nxgl.c nxgl_shim_glsl). Host LP64 with a recording backend; no GPU.
 #include "nx/front.h"
+#include "dynres.h"
 #include "../../render/native/gl/nxgl.h"
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -128,7 +130,29 @@ static void test_glsl_shim() {
     CHECK(nxgl_shim_glsl(src, strlen(src), 0, out, 16) == 0);   // too small
 }
 
+static void test_dynres() {
+    nx::DynResConfig cfg;   // 22.2 ms, 0.6..1.0 by 0.05, down after 3 frames over 95 %, up after 30 under 80 %
+    nx::DynResController d(cfg);
+    CHECK(d.scale() == 1.0f && d.Width(1280) == 1280 && d.Height(720) == 720);
+    for (int i = 0; i < 2; i++) d.Update(22.0f);
+    CHECK(d.scale() == 1.0f);                         // hysteresis: not yet
+    d.Update(22.0f);
+    CHECK(fabsf(d.scale() - 0.95f) < 1e-6f && d.Width(1280) == 1216 && d.Height(720) == 680);   // 684 -> 680 (x8)
+    d.Update(30.0f);                                  // panic: two steps at once
+    CHECK(fabsf(d.scale() - 0.85f) < 1e-6f);
+    for (int i = 0; i < 100; i++) d.Update(40.0f);
+    CHECK(fabsf(d.scale() - 0.6f) < 1e-6f && d.Height(720) == 432);   // clamped at minScale
+    int n = 0;
+    while (d.scale() < 0.62f && n < 100) { d.Update(10.0f); n++; }
+    CHECK(fabsf(d.scale() - 0.65f) < 1e-6f && n >= 30 && n <= 40);   // up after 30 smoothed frames under budget
+    for (int i = 0; i < 1000; i++) d.Update(19.0f);   // in the dead band (80-95 %): stays
+    CHECK(fabsf(d.scale() - 0.65f) < 1e-6f);
+    for (int i = 0; i < 2000; i++) d.Update(5.0f);
+    CHECK(d.scale() == 1.0f);                         // clamped at maxScale
+}
+
 int main() {
+    test_dynres();
     test_state_cache(); test_encoder_overflow(); test_sort_stable(); test_frame_encoding(); test_dds(); test_glsl_shim();
     printf("front: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail != 0;

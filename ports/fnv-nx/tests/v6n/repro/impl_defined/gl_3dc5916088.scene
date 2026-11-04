@@ -1,4 +1,5 @@
-# UNCLASSIFIED (V6n FF model + llvmpipe vs Nine-softpipe, not an S6n claim): isolated pixels with bilinear filtering or ZB_USEW/NOTEQUAL at the clear depth; kept as fuzz corpus
+# classified by V6n 2026-11-04: impl_defined
+# mixed MAG LINEAR / MIN POINT plus point sampling exactly at uv = 0 under WRAP (texel boundary at a vertex; the minimiser had simplified the texcoords to 0). MATCH with MIN = MAG = LINEAR.
 # fuzz.py reproducer: target gl, seed 5, case c00294
 # colour: 2 px over tolerance (max |d| 0.1873), first (11,14) ref [0.67919921875, 0.3017578125, 0.070556640625, 0.7763671875] test [0.51318359375, 0.259521484375, 0.0089569091796875, 0.615234375]
 size 16 16

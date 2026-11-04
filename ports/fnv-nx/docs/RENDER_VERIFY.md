@@ -122,8 +122,10 @@ and the fixed-function and shader paths.
 
 A scene is a text file (format in the header of `render/verify/scene/scene.c`): target size and formats, Clear,
 render/sampler/stage states by D3D9 name, textures from deterministic generators in D3D memory layout, viewport,
-scissor, projection, pixel shaders (`ps BYTECODE GLSL`, `psc`), and DrawPrimitiveUP batches of
-XYZRHW|XYZ + DIFFUSE + SPECULAR + TEX1 vertices. The scene runner calls one implementation of
+scissor, projection, pixel and vertex shaders (`ps` / `vs BYTECODE GLSL`, `psc` / `vsc`), and DrawPrimitiveUP
+(`draw`) / DrawIndexedPrimitiveUP (`drawidx`, 16-bit indices) batches of XYZRHW|XYZ + DIFFUSE + SPECULAR + TEX1
+vertices. Shader scenes keep their sources as SM1-3 assembly (`tests/v6n/vs/*.vsa|psa`) and are assembled and
+translated at test time (`render/verify/shaders/vsscenes.py`). The scene runner calls one implementation of
 `render/verify/v6n_target.h` (D3D9-level calls) and writes a `.v6nd` read-back. It forks one child per scene, so a
 driver crash costs one scene.
 
@@ -131,7 +133,7 @@ driver crash costs one scene.
 |---|---|
 | `v6n_nine` (the oracle) | `IDirect3DDevice9` on S6c's host Nine (`render/nine/host/*`, `gate/gate_winsys.c`), softpipe; colour via `GetRenderTargetData` + `LockRect`, depth/stencil from the surface's pipe resource after the CSMT queue drained and the context flushed. Two local softpipe fixes (§5, O3 and O5) are linked as override objects; `v6n_nine_stock` is the unpatched build. |
 | `v6n_gl` | S6n's translator + V6n's GL 4.5 executor of the `nx/state.h` contract (llvmpipe, EGL surfaceless) + V6n's fixed-function model of `nine_ff.c`; `V6N_MUTANT=<name>` breaks one rule (trap mutants) |
-| `v6n_s6ngl` | S6n's own GL backend `render/native/gl/nxgl.c` through `NxGpuApi` and its command stream, with S6n's translator and S6n's `d3d9_epilogue.glsl`; V6n supplies only the FF model shaders |
+| `v6n_s6ngl` | S6n's own GL backend `render/native/gl/nxgl.c` through `NxGpuApi` and its command stream, with S6n's translator and S6n's `d3d9_epilogue.glsl`; V6n supplies only the FF model shaders. Pixel shaders: S6b's GLSL through S6n's `shader_create` + `nxgl_shim_glsl`. RGBA8 read-back only until S6n's float/depth read-back lands |
 
 ### 3.3 Thresholds (`render/verify/cmp.py`)
 
@@ -201,10 +203,16 @@ texkill, ps_3_0 vPos): **6 match pixel-exactly, 1 mismatch** = finding P1 (§7).
 | S6n's GL backend (`v6n_s6ngl`) on conformance + traps | 77 match; the rest are API gaps (RGBA8-only read-back, no sub-rect Clear) or the y_fill_bias defect |
 | coverage vs exact D3D9 rule, 240 random triangles | `v6n_gl` 0 wrong px; oracle 3 px (float ties); stock softpipe 6628 px; S6n backend 204 px before its fix |
 | analytic claims | C40 D24 and D16 depth bias pass; O1 X8 destination alpha passes |
-| fuzzing, `v6n_gl` | 1,900 cases over 5 seeds during triage; final generator: 600 cases, 595 match, 5 unclassified (committed in `tests/v6n/repro/`) |
+| fuzzing, `v6n_gl` | 1,900 cases over 5 seeds during triage; final generator: 600 cases, 595 match, 5 then unclassified, since classified: 1 V6n FF-model gap (missing texcoord set reads (0,0) in Nine; fixed, kept as regression test `tests/v6n/repro/`), 4 implementation-defined (`tests/v6n/repro/impl_defined/`: mixed MIN/MAG filters x2, the same plus point sampling at uv = 0, NOTEQUAL at the clear depth). None is an S6n defect. |
 | fuzzing, `v6n_s6ngl` (after S6n's y_fill_bias fix) | 300 cases, 287 match; 8 differ only in fixed-function table fog (S6n's epilogue implements Nine's programmable-PS fog depth z*w, Nine's FF path uses window z: expected, the engine draws with shaders), 5 in the unclassified class above; before the fix the same generator gave 33 mismatches, mostly single edge pixels |
+| fuzzing, `v6n_s6ngl` on ABI v3 (float targets, sub-rect Clear, float/depth read-back enabled) | 400 cases, 380 match. 14 FF table fog (scope, above); 2 `clear_srgb` (rediscovered by the fuzzer, defect filed); 4 also differ on `v6n_gl`, classified in `tests/v6n/repro/impl_defined/s6ngl_*`: D16 depth where both targets are within 0.5 LSB of the exact plane and Nine is up to 9 LSB off (oracle deviation O8), a pixel centre 3e-4 px outside an edge after the RHW perspective divide (below sub-pixel precision), ALPHATEST against a LINEAR-filtered alpha at the reference, MODULATE4X amplifying Nine's 8-bit operand quantisation (252 vs 255). None is an S6n defect. |
 | fuzzer sensitivity (`--sensitivity`, 120 random cases, all matching unmutated) | 26 of 33 GL-target mutants killed by random cases alone (cull winding 66, upper-left origin 73, half-pixel 44, half-z 14, colour-mask order 12, two-sided stencil 9 ... down to 1). Not killed: d24_bias_scale, x8_dst_alpha, no_texture_black (excluded from fuzzing by design, covered analytically / by trap scenes), ati2_swizzle, a4r4g4b4_order, a8_swizzle (1 format in 21, rare at this sample size), clear_ignores_scissor (mid-scene scissored clears are rare). Every mutant is killed by its trap scene. |
-| shader parity self-test | 6/7 match, 1 finding (P1) |
+| shader parity self-test | 6/7 match on `v6n_gl` and on `v6n_s6ngl` (S6b GLSL through S6n's shim; ps_3_0 vPos matches under its y negation), 1 finding (P1) |
+| VS + PS + indexed draw (`vsscenes.py`, 2 scenes: affine + tint, perspective w + COLOR0/COLOR1 + two indexed draws under ZFUNC GREATER) | both match Nine on `v6n_gl` and on `v6n_s6ngl` (S6b VS GLSL through S6n's shim, layout 2 = S6b attribute locations, D3DCOLOR uploaded as RGBA bytes, NxOp_BindIdx/DrawIndexed; removing the colour swap is caught by both scenes); trap `vs_posfix_halfpixel` (S6b's posfix half-pixel shift on top of the +0.5 viewport) caught, 174 px |
+| C54 MAXMIPLEVEL / mip selection (`tests/v6n/claims/c54_*`) | 8/8 scenes match Nine on both targets |
+| C65 radix sort (`tests/v6n/claims/c65_sort.cpp`) | 4000 random packet sets identical to std::stable_sort, SortKey packing exact: PASS |
+| C66 capture/replay (`render/verify/capture/nxcap.py mutate`) | S6n's `replay_gl` reproduced (17 frames, 0 differ) and flags all 5 corruption kinds (vertex, UBO, state word, texel, recorded read-back) ; the same holds for the ILP32 guest's capture under Unicorn (C62 reproduced: 17/17 scenes equal to the goldens; `tests/v6n/run.sh` with GUEST=...) |
+| N1 camera vs the engine (decomp 0x00e6c780, 0x00e6cf40) | projection and view agree; **defects** `screen_space_halfpixel` (half-pixel and z/9999 missing) and `camera_port_rounding` (rounding vs truncation) |
 
 ### 4.1 Rasterization finding
 
@@ -228,6 +236,7 @@ deko3d's `DkDeviceFlags_OriginUpperLeft` makes the hardware use the D3D-style ru
 | O5 | softpipe applies the blend factors before MIN/MAX | **fixed in the oracle** (`sp_quad_blend.c` override): D3D9, GL and NV hardware ignore them |
 | O6 | softpipe runs the stencil test without a stencil buffer (D24X8, D16) | fuzzer enables stencil on D24S8 only (GL and D3D9: test passes) |
 | O7 | Nine's FF samples a stage texture only when an argument names TA_TEXTURE: BLENDTEXTUREALPHA without one blends with alpha 0 | fuzzer adds a TA_TEXTURE argument to those stages |
+| O8 | D16 depth with RHW vertices: softpipe's interpolated z is up to 9 LSB off the exact screen-linear plane (both GL targets within 0.5 LSB) | reproducer `tests/v6n/repro/impl_defined/s6ngl_6a56a1c012.scene`; depth checks against D16 prefer `raster_ref`-style analytic planes |
 | A1 | RHW vertices and the viewport: Nine's window-space path neither transforms nor clips them | V6n's FF model follows the oracle; D3D9 hardware behaviour should be confirmed on device (§8) |
 | A2 | SRGBTEXTURE on R5G6B5 and other formats S6n has no sRGB view for: Mesa decodes (B5G6R5_SRGB), S6n does not | caps-dependent in D3D9; fuzzer restricts sRGB read to formats with an sRGB view on both |
 
@@ -246,11 +255,49 @@ plan closes that gap with S6n's capture/replay (RENDER_NATIVE.md §7, N1):
 4. The pass-space table defines "all situations": a pass id is verified when at least one captured draw of it
    matches; unreached ids are listed per family.
 
+### 6.1 Status (2026-11-04, second session)
+
+Done: the replay side. The scene format carries what a captured D3D9 draw needs beyond fixed function (VS and PS
+bytecode with their S6b translation, constants, indexed draws), runs on the oracle and on both targets, and handles
+the VS/PS varying mismatch D3D9 tolerates (§7). `render/verify/capture/nxcap.py` reads S6n's `.nxcap` captures
+independently (records, frames, draws, states, bound ranges) and mutates them to prove the replay comparison is
+sensitive (C66).
+
+Blocked, with what unblocks it:
+* **D3D9-level capture of the game on the Nine path.** S6n's `.nxcap` is recorded after the native front end
+  (translated state words, GLSL families), so it cannot be fed to Nine. The capture point is the D3D9 boundary: one
+  host call per D3D call through S6c's generated dispatcher (`nine_dispatch`), which needs the game running on the
+  Nine path (`test/gate.py --game` reaches only the static-init stop today).
+* **Joining captured draws with the pass space**: unblocked by S6n's `NxOp_Marker` (C77, a21198c). Done as far as
+  synthetic captures allow: `nxcap.py markers FILE` attributes every draw to the PASS marker in force in its pass and
+  joins the id with `build/v6n/pass_space.tsv` (name, class, emit kind; ids > 758 are flagged and fail the command).
+  No engine-side family emits markers yet, so the game's real per-pass draw counts wait for N2 families that call
+  `Renderer::SetEnginePass`.
+
+### 6.2 C77 verification (pass markers)
+
+* `tests/v6n/claims/c77_markers.cpp`: 3000 random frames (1-4 passes, tagged / untagged / mixed passes, clears,
+  tags including pass 0 and long runs of TILE 757) encoded by `nx::Frame::Finish` through a `CaptureBackend`; the
+  stream is parsed independently. Every draw sits under its own tag (or under none / `NX_PASS_UNKNOWN` when
+  untagged), no two markers without a draw between, never the same tag twice in a row, no marker in a pass without
+  tagged draws, markers never outside a pass, and the capture holds every frame's words verbatim. PASS (51316
+  draws, 27002 markers, 3099 untagged passes). Three mutants of `front.cpp` (UNKNOWN dropped, untagged runs not
+  marked, `curTag` not reset per pass) are each caught.
+* Backends ignore the marker: `nxcap.py inject` puts a marker before each of the 160 draws of S6n's N0 capture;
+  `replay_gl` gives 0 differing read-backs against the read-backs recorded without markers. deko3d
+  (`host/nxgpu.c`) skips it by source inspection (`case NxOp_Marker: break`, argument count honoured); not run.
+* S6n's own N1 checks: 46/46 on GL and 46/46 as the ILP32 guest under Unicorn (TILE 757 then IMAGESPACE* 758).
+* True numbering: 757 = TILE and 758 = IMAGESPACE* in V6n's `pass_names.tsv` / `pass_space.tsv`, as the selftest
+  uses. Observation (not a defect, no caller does it): `Frame::Tag` / `SetEnginePass` take any uint16 and do not
+  reject ids > 758 or pass 0 (disabled); `nxcap.py markers` flags such ids.
+
 ## 7. Findings for other streams
 
 | id | stream | finding |
 |---|---|---|
 | P1 | S6b (shader translation, parity reference) | MojoShader `glsldk` PS epilogue computes table-fog depth as `gl_FragCoord.z`; Nine (`nine_shader.c` shader_add_ps_fog_stage) and S6n's `d3d9_epilogue.glsl` use z * w (z / gl_FragCoord.w). They differ on any perspective geometry: corpus shader `fog_linear`, 247 px, up to 75/255. |
+| V1 | S6n / S6b (any GL path pairing translated shaders) | D3D9 lets a pixel shader read a varying its vertex shader does not write (Nine writes oFog = 0 for vs < 3, the rest is undefined); GL refuses to link (`fragment shader input ... has no matching output`). V6n's executor adds the missing VS outputs written as 0. deko3d/uam compile stages separately and are not affected. |
+| N1 | S6n (N1 camera) | besides the two defects, the engine's `Do_SetCameraData` has a camera-relative mode (view translation 0 and the camera position kept in a global when two flags are set) and rewrites the projection's third column for an oblique near clip plane under a global flag (reflections); `nx::CameraView` / `CameraProjection` have neither. Not filed as defects: they belong to later N-milestones, listed so they are not lost. |
 | O3 | S6c (host gate) | stock softpipe is not a D3D9-exact rasterizer (O3), so gate images with slanted edges are off by up to a pixel per edge |
 
 ## 8. On-device conformance plan and how to rerun
