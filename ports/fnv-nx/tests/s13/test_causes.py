@@ -79,6 +79,10 @@ def test_rules():
           'arg-stack-vs-object', 'stack temporary vs the object')
     check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x03002000), arm=w(0x03001000))) ==
           'arg-other-buffer', 'another argument buffer')
+    check(refined(dict(kind='call-args', arg='p1', cls='I32', x86=w(0x9cf46a07), arm=w(0x9cf46a27))) ==
+          'x87-precision', 'float bits through an int parameter, 32 ulp apart')
+    check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(0x14), arm=w(0x13))) == 'unclassified',
+          'small ints are not float bits')
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(5), arm=w(7))) == 'unclassified',
           'plain int argument difference stays open')
     # return values

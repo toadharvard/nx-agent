@@ -244,6 +244,11 @@ def _rule_call_args(d):
             return 'nan-bits'
         if tol:
             return 'x87-precision'
+    if d.get('cls') == 'I32' and len(bx) == 4 and len(ba) == 4:
+        vx, va = _word(d['x86']), _word(d['arm'])
+        ex, ea = (vx >> 23) & 0xff, (va >> 23) & 0xff
+        if ex == ea and 0 < ex < 0xff and (vx >> 31) == (va >> 31) and abs((vx & 0x7fffff) - (va & 0x7fffff)) <= 256:
+            return 'x87-precision'          # float bits through an int parameter, a few ulp apart
     if d.get('cls') in ('I32', 'P') and len(bx) >= 4 and len(ba) >= 4:
         vx, va = _word(d['x86']), _word(d['arm'])
         if _in(vx, LIT_POOL) and _in(va, A64_IMAGE):
