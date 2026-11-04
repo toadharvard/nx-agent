@@ -1,11 +1,12 @@
 ### J-XXXX | 2026-11-04 | stream: S2c-abi | status: wip | parent: J-0149
 
 * **note** - Branch `claude/fnv-s2c-abi`, from the integration branch at c1039e7. The metric is measured offline with
-  the new `tools/link/abireplay.py`, which replays link/c0d6c71516f6's `abi.tsv` and layouts in 3 s. Undecorated C
-  names cannot be replayed without the tree; those rows keep the link's verdict. The next farm link confirms the
+  the new `tools/link/abireplay.py`, which replays link/c0d6c71516f6's `abi.tsv` and layouts in 3 s. With `--tree`
+  (the link's own prepared tree, private `t/7b3b20231f0d`, tree hash efb9808e) undecorated C names are replayed too;
+  2 rows differ from the link because the replay reads layouts without the tree's POD check. The next farm link confirms the
   figures. That link also re-probes every layout, because of the pod2 rule.
 * **did** - Bridge-gap pairs, measured as S1b's abiclass BRIDGE pairs (unique src/address/reference):
-  **2,221 -> 58** (replayed). The commits:
+  **2,221 -> 32** (replayed with the tree; 58 without it). The commits:
   - `c9ea866` The synthesized vtable/body objects (`<host>#vtables`) asked for layouts under their own name. 985
     probe rows failed and 1,283 manual rows were never decided on bytes. They now use the host unit. 2,221 -> 943.
   - `8a8a6c8` Variadic pairs (`abi.varargs_check`). AArch64 Linux passes anonymous arguments like named ones. A
@@ -51,7 +52,7 @@
   x86-inconsistent 3,276 (before: bridge 4,183, manual 2,632, x86-inconsistent 3,267). The 9 new x86-inconsistent
   rows are pairs that were `manual` before and are now decided on bytes.
 * **open / next**
-  - The 58 pairs left: about 35 are undecorated C names the replay cannot read. Then 0x00cd7160
+  - The 32 pairs left (with the tree): 0x00cd7160
     `Triangle::FUN(...) const` (a variadic member with a struct result: decomp junk), 0x00703e80 ShowButtonDialog,
     0x00ba8ec0's variadic ctor, Havok `hkBool` by value vs `char`, and `?:` typedef'd aggregates.
   - The next queue items are reg-shift and convention moves.
