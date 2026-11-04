@@ -91,6 +91,10 @@ SRC = {
                  'int g_count = 5;\nint *g_pcount = &g_count;\nint bump() { return ++g_count; }\n'
                  # a second definition of g_count's image address in the same object (tesform.cpp, S2c-abi)
                  'namespace fnv_00401230 { int g_count; int bump2() { return ++g_count; } }\n',
+    # S2c-abi: an override of a secondary base's virtual, entered by MSVC with this at the base (thisadj.py)
+    'src/mi.cpp': 'struct A { virtual void fa(); int a; };\nstruct B { virtual int fb(int); int b; };\n'
+                  'struct D : A, B { void fa(); int fb(int); int d; };\n'
+                  'void A::fa() {}\nint B::fb(int x) { return x; }\nvoid D::fa() {}\nint D::fb(int x) { return d + x; }\n',
     # a variable placed at a .text address nothing defines: its address is the x86 value (S2c-abi)
     'src/ta.cpp': 'extern const char g_011c5a4c_arg1[];\nconst char *ta_arg() { return g_011c5a4c_arg1; }\n',
     'src/g.cpp': 'unsigned long fnvnx_game_GetCurrentThreadId();\n'                # GAME1 spellings
@@ -179,6 +183,8 @@ UNITS = {'units': [
      'symbols': {'?ms_kRTTI@@3URTTI@@A': '0x01000a00', '?g_count@@3HA': '0x01000a10',
                  '?g_count@fnv_00401230@@3HA': '0x01000a10',
                  '?g_pcount@@3PAHA': '0x01000a20'}},
+    {'source': 'src/mi.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x401580, '?fb@D@@UAEHH@Z'), F(0x401590, '?fa@D@@UAEXXZ')], 'symbols': {}},
     {'source': 'src/ta.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401240, '?ta_arg@@YAPBDXZ')],
      'symbols': {'?g_011c5a4c_arg1@@3QBDB': '0x00a00000'}},
     {'source': 'src/g.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401400, '?game_calls@@YAHPAX@Z')],
@@ -301,6 +307,9 @@ def main():
         run([CXX, '-mabi=ilp32', '-O2', '-c', os.path.join(tree, 'src/r.cpp'), '-o', anchored])
         r_anchor = local_refs_into(anchored, ('ms_kRTTI', 'g_count', 'g_pcount'))
         out, fixed = os.path.join(t, 'out'), os.path.join(t, 'fixed')
+        sec = os.path.join(t, 'secondary.tsv')   # what thisadj reads from the exe's vftables: D::fb only in B's
+        open(sec, 'w').write('00401580\t8\n')
+        os.environ['FNVNX_SECONDARY_ENTRIES'] = sec
         run([sys.executable, FNVLINK, 'resolve', units, os.path.join(t, 'objects.tsv'), out, '--crt-symbols',
              os.path.join(plat, 'crt_symbols.tsv'), '--imports', os.path.join(plat, 'imports.tsv'),
              '--units-renames', os.path.join(plat, 'units_renames.tsv')])
@@ -437,6 +446,12 @@ def main():
               'TLS slot offset in the block')
         check(sym.get('__fnv_01000600', (0, -1))[1] == sym.get('_ZTV4Poly', (0, 0))[1] + 8, 'linked vptr value')
         check(sym.get('__fnv_01000a00', (0, -1))[1] == 0x01000a00, 'rebound variable at its image address')
+        check(rows.get(0x401580, [''] * 4)[2:4] == ['__fnvnx_msvc_00401580', '_ZThn8_N1D2fbEi'] and
+              rows.get(0x401590, [''] * 3)[2] == '__fnv_00401590' and
+              sym.get('__fnvnx_msvc_00401580', (0, -1))[1] == sym.get('_ZThn8_N1D2fbEi', (0, -2))[1] and
+              sym.get('__fnv_00401580', (0, -1))[1] == sym.get('_ZN1D2fbEi', (0, -2))[1],
+              'secondary-base override: the map names the thunk, __fnv_ stays the primary entry: %s %s' % (
+                  rows.get(0x401300), rows.get(0x401310)))
         r_ = refs.get(('src/ta.cpp', 'g_011c5a4c_arg1'), [''] * 6)
         check(r_[2] == 'text-addr' and sym.get('__fnvnx_textaddr_00a00000', (0, -1))[1] == 0x00a00000,
               'a variable at an undefined .text address -> absolute symbol there: %s %s' % (

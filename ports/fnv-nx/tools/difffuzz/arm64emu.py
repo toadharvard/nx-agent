@@ -409,7 +409,13 @@ class Arm64Engine:
             m.write(uc.reg_read(XR[1]) & 0xffffffff, struct.pack('<f' if f else '<d', c))
             uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
             return True
-        if bname in libcalls.FLOAT_NAMES:
+        if bname in libcalls.CRT_MATH:                   # libm: v0 (, v1) -> v0, double or float (`f`)
+            f = bname.endswith('f') and bname[:-1] in libcalls.CRT_MATH
+            fmt, mask = ('<f', 0xffffffff) if f else ('<d', 2 ** 64 - 1)
+            xs = [struct.unpack(fmt, (uc.reg_read(VR[i]) & mask).to_bytes(4 if f else 8, 'little'))[0]
+                  for i in range(libcalls.CRT_MATH[bname])]
+            uc.reg_write(VR[0], int.from_bytes(struct.pack(fmt, libcalls.crt_math(bname, xs)), 'little'))
+        elif bname in libcalls.FLOAT_NAMES:
             v = uc.reg_read(VR[0])
             if bname.endswith('f'):
                 x = struct.unpack('<f', (v & 0xffffffff).to_bytes(4, 'little'))[0]

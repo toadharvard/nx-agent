@@ -43,7 +43,7 @@ def metric(rows):
     pairs, cl = {}, collections.Counter()
     for src, addr, ref, kind, c in rows:
         if kind == 'manual' and classes_of(c) & BRIDGE:
-            pairs.setdefault((src, addr, ref), classes_of(c))
+            pairs.setdefault((src.split('#')[0], addr, ref), classes_of(c))
     for c in pairs.values():
         cl.update(c)
     return len(pairs), cl
@@ -115,7 +115,7 @@ def main():
         f = line.rstrip('\n').split('\t')
         if len(f) < 11:
             f += [''] * (11 - len(f))
-        src = f[0].replace('#vtables', '')
+        src = f[0].split('#')[0]   # <host>#vtables, <host>#bodiesN (V1 RPL-B1)
         key = (src, f[2], f[3])
         old.append(key + (f[5], f[6]))
         r = None
