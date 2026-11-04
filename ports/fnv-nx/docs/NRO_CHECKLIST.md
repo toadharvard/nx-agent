@@ -39,6 +39,7 @@ One page. Do the steps in order; the first two blocks are once. Takes about 15 m
 | a line says `MISSING` | copy that file again; names must be as in steps 1-3 |
 | `already exists and is not fnv-nx's` | that game has a mod of its own: use another game in step 4 |
 | back to HOME right after A, or an error code | write down the code; send `launcher.log` |
+| a system error dialog with the game's own text (its MessageBox) | take a photo, press OK; it may continue |
 | a crash screen, or HOME does nothing | hold POWER 12 s, start again; send `crash.log` and `host.log` |
 | the game you used in step 4 starts fnv-nx by itself afterwards | start fnv-nx (steps 4-5) and press **Y** (removes the leftover) |
 
