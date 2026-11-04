@@ -56,7 +56,10 @@ caches by copying `out/cache`, `out/layouts.tsv`, `out/vtables` of the previous 
 atomically (`ln -sfn run-N latest.tmp && mv -T latest.tmp latest`) once `check` has passed. Every step can be
 rerun after an interruption: `compile.sh` keeps up-to-date objects, the probe keeps its per-unit compiles
 (`probe/*.done.json`) and saves `cache.json` after each round, `apply` rewrites `fixed/` object by object; a driver
-only needs to remember which steps finished. Every run's summary states the branch commit its tree was prepared
+only needs to remember which steps finished. The probe caches (layout rows, vtable probe results, compiled probe
+units, emitted slot functions) are keyed on each unit's content - its prepared source and every local header it
+includes, with the probe flags (`layout.unit_key`) - so a seeded cache is reused only for text that did not change;
+layout rows carry the key and are probed again when it differs (S9). Every run's summary states the branch commit its tree was prepared
 from (a tree prepared before a rules change silently lacks it: f10's tree predated S1 round 7).
 
 ## Symbols and files
@@ -191,7 +194,9 @@ x0 is not preserved, so the declaration has to be fixed in the source (S1 rule o
 A definition parameter in **ecx** that the reference does not pass (`__fastcall f(p0, edx, p2)` defined,
 `__stdcall f(void *)` referenced from a member function) is not junk: the x86 callee reads whatever the caller left
 in ecx, usually its own `this`. `abi.compare` / `abi2` classify it `x86-inconsistent` (`ecx-not-passed`, like
-`this-not-passed`): no bridge, listed in `abi.tsv` for S1b's XINC1 patches. A missing **edx** stays the `edx-dummy`
+`this-not-passed`), listed in `abi.tsv` for S1b's XINC1 patches; the arguments the reference does pass still get their
+bridge moves (the ecx parameter is often unused - a decompiler artefact: 0x00a75ec0, a stream factory, and
+0x00bbbe30 never read ecx - and a direct call would leave them in the wrong registers). A missing **edx** stays the `edx-dummy`
 bridge (the decomp's `__fastcall f(T*, int edx_dummy, ...)` for a member function: edx is the x86 caller's scratch).
 Sites on the ninth-round objects (callee address: referencing units):
 
@@ -515,7 +520,13 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   class constructed there: the class of the same name when a unit names that vftable (`V` above), else the class
   of the storing member function when it has a native vtable (a new `V` entry). Its data symbol `__fnv_<addr>` is
   then the native address point (`aliases.ld: __fnv_X = _ZTV<C> + off;`), so the store installs the native vptr and
-  vptr comparisons match; addresses without a native class keep the image address (`hand_vptrs.tsv`).
+  vptr comparisons match; addresses without a native class keep the image address (`hand_vptrs.tsv`). The storing
+  function is the last function head before the store, member (`X::f(...) {`) or free (a column-0 definition): a
+  store in a free function credits no class (S13 00404920: `InitLargePrimitiveArray`'s store of 0x0104d338 had been
+  credited to the constructor of `FUN_00404920` above it, pairing that class's vtable with 0x0104d338 while the
+  constructor stores 0x01012120). MSVC folds identical vftables, so one image vftable can be several classes'
+  (0x01012120: `FUN_00404920`, `FUN_00404950`, `FUN_0045cfb0`, `SettingBase_01012120`); the map names one native
+  vtable, `vftable_aliases.tsv` every class's own.
 
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
