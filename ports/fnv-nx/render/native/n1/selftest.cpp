@@ -612,6 +612,8 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
         for (int i = 0; i < W * H * 4; i++) { int dd = abs((int)imgs[0][i] - (int)imgs[1][i]); if (dd > worst) worst = dd; }
         t.Check(used[0] != used[1] && worst <= 1, "lit_spec_d1p2__e0 (static, reordered) == dynamic lit_spec within 1/255", worst, (int)used[0]);
     }
+    // ---- the engine-path world frame (selftest_world.cpp): one draw per engine pass, the per-frame DrawStats
+    t.fails += n1_selftest_world(be, r, back, t.log, t.cap, &t.at, &t.checks);
     *checks = t.checks;
     return t.fails;
 }

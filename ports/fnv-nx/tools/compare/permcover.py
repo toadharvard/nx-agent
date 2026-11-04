@@ -6,7 +6,9 @@ built again with other seeds, and each keeps the first seed whose reference fram
                  --manifest <perm dir>/manifest.json --ref <reference run> --out <salts.json> [--tries 6]
 
 The selection looks at the reference only (does the frame draw anything), never at the candidate, so it does not
-bias the comparison. <salts.json> ({hash: salt}, plus "_unreached": hashes no seed made draw) is passed to
+bias the comparison. A failed reference replay ends it with a non-zero exit and no output file, so a broken prefix
+or a timeout is never cached as "unreached" (V1 SK-2). <salts.json> ({hash: salt}, plus "_unreached": hashes no
+seed made draw) is passed to
 `perm.py --salts`. It names the game's program hashes: keep it private with the captures.
 """
 import argparse, json, os, subprocess, sys, tempfile
@@ -47,6 +49,9 @@ def main():
             if r.returncode: sys.exit(f'permcover: perm.py: {r.stderr.strip()}')
             r = py(os.path.join(HERE, 'replay.py'), 'ref', '--exe', a.exe, '--prefix', a.prefix, '--out', run,
                    *sorted(os.path.join(caps, f) for f in os.listdir(caps) if f.endswith('.nxd9')))
+            if r.returncode:   # V1 SK-2: a failed reference run says nothing about drawing; never write salts from it
+                sys.exit(f'permcover: reference replay failed at salt {salt} (exit {r.returncode}): '
+                         f'{(r.stdout + r.stderr).strip()[-300:]}')
             still = set(vacuous(json.load(open(os.path.join(caps, 'manifest.json'))), run))
             for h in left:
                 if h not in still: salts[h] = salt
