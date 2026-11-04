@@ -4659,14 +4659,13 @@ def r_forceinline_declarations(path, text, stats):
 # offsets), empty under MSVC. Only where B is defined in the file without bases and without data or virtual
 # functions, every class of the file that derives from B has it as its only base, at least one of them introduces a
 # vfptr, and B is never used as an object (its name only as a base, in `B*` / `B&`, `B::`, or in its own body): the
-# zero size changes nothing else.
+# zero size changes nothing else. Only in .cpp files (a header's other includers are not seen).
 
 FNVNX_EBO2_USE = re.compile(r'\s*(?:[*&]|::|\))')
 
 def r_vfptr_empty_base(path, text, stats):
     """EBO2: FNVNX_EBO2 in an empty base B of a class introducing its own vfptr: B after the vptr, as MSVC (above)."""
-    if 'virtual' not in text or ':' not in text: return text
-    spans = None
+    if 'virtual' not in text or ':' not in text or not path.endswith('.cpp'): return text
     defs, derived = {}, collections.defaultdict(list)
     for m in EBO_CLASS.finditer(text):
         defs.setdefault(m.group(1), []).append(m)

@@ -1300,6 +1300,8 @@ check('EBO2 a base used as an object is left alone',
       run(s1.r_vfptr_empty_base, _E + 'Lst g_list;\n'), [], ['FNVNX_EBO2'])
 check('EBO2 no class introducing a vfptr: nothing',
       run(s1.r_vfptr_empty_base, _E.replace('virtual ~Holder();', '~Holder();')), [], ['FNVNX_EBO2'])
+check('EBO2 headers are left alone',
+      run(s1.r_vfptr_empty_base, _E, '/nonexistent/src/x.h'), [], ['FNVNX_EBO2'])
 check('EBO2 a base with data: nothing',
       run(s1.r_vfptr_empty_base, _E.replace('bool IsEmpty();', 'int head;\n    bool IsEmpty();')), [], ['FNVNX_EBO2'])
 if _shutil.which('aarch64-linux-gnu-g++'):
