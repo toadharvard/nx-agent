@@ -12,6 +12,8 @@ from fnkeys.py and `commit`, the head it was fuzzed on) and div/<addr>-<n>.json 
         the cumulative campaign of this head: cache rows whose key is the current one (reproducers linked)
     fuzzcache.py status <cache> <targets.jsonl> <keys.json> <commit> <out counts.json>
         fuzzed on this head / reused from an earlier head / pending (key changed, never fuzzed) / no key
+    fuzzcache.py dropcrash <campaign>
+        forget the campaign's harness crashes (crash:<exception> rows), so a rerun on the same head fuzzes them again
     fuzzcache.py seed  <cache> <targets.jsonl> <other cache>...
         rows of other caches (another shard count) for this shard's functions: their keys decide reuse later
 """
@@ -112,19 +114,29 @@ def cmd_status(cache, targets, keys, commit, out):
     """Where this head stands: fuzzed on this head, verdict reused from an earlier head (key unchanged), pending
     (key changed or never fuzzed), no key."""
     rows, keys = load_rows(cache), json.load(open(keys))
-    c = dict(shard=0, no_key=0, fuzzed_this_head=0, reused=0, pending_changed=0, pending_new=0)
+    c = dict(shard=0, no_key=0, fuzzed_this_head=0, reused=0, pending_changed=0, pending_new=0, crashed=0)
     for line in open(targets):
         a = json.loads(line)['address']
         c['shard'] += 1
         k, r = keys.get(a), rows.get(a)
         if k is None:
             c['no_key'] += 1
+        elif r is not None and str(r.get('status', '')).startswith('crash:'):
+            c['crashed'] += 1                     # a harness exception, fuzzed again by the next run
         elif r is not None and r.get('key') == k:
             c['fuzzed_this_head' if r.get('commit') == commit else 'reused'] += 1
         else:
             c['pending_changed' if r is not None else 'pending_new'] += 1
     json.dump(c, open(out, 'w'))
     print(c)
+
+
+def cmd_dropcrash(camp):
+    rows = load_rows(camp)
+    keep = {a: r for a, r in rows.items() if not str(r.get('status', '')).startswith('crash:')}
+    if len(keep) != len(rows):
+        save_rows(camp, keep)
+    print('dropped %d crashed functions' % (len(rows) - len(keep)))
 
 
 def cmd_seed(cache, targets, others):
@@ -153,6 +165,8 @@ if __name__ == '__main__':
         cmd_view(*args)
     elif cmd == 'status':
         cmd_status(*args)
+    elif cmd == 'dropcrash':
+        cmd_dropcrash(*args)
     elif cmd == 'seed':
         cmd_seed(args[0], args[1], args[2:])
     else:

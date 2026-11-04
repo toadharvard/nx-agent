@@ -197,7 +197,8 @@ if ! python3 -c "$PYMODS" 2>/dev/null; then
 fi
 # Preflight: every module the harness imports must load here, or each function would come back as one harness
 # exception ("crash:ModuleNotFoundError") instead of a verdict.
-if ! (cd "$P/tools/difffuzz" && $PY -c 'import fuzz, classify, check_rebind' ) > "$FARM_HOME/fuzz-preflight.log" 2>&1; then
+if ! (cd "$DF" && $PY -c 'import fuzz, classify, check_rebind, fnkeys, fuzzcache, effects' ) \
+    > "$FARM_HOME/fuzz-preflight.log" 2>&1; then
   echo "fuzz harness does not load on this host ($PY):"; tail -5 "$FARM_HOME/fuzz-preflight.log"; exit 1
 fi
 
@@ -348,6 +349,7 @@ log "cache: $(cat "$RUN/todo.json")"
 # --- campaign over the changed and new functions, in chunks (cache merged and pushed after each) ----------------
 CHUNK=${FUZZ_CHUNK:-200}; BUDGET=${FUZZ_BUDGET:-0}
 mkdir -p "$RUN/camp"; touch "$RUN/camp/results.jsonl"
+(cd "$DF" && $PY fuzzcache.py dropcrash "$RUN/camp") >> "$RUN/merge.log"
 rm -f "$RUN"/chunk.*
 split -l "$CHUNK" -d -a 4 "$RUN/todo.jsonl" "$RUN/chunk."
 for c in "$RUN"/chunk.*; do
@@ -402,10 +404,20 @@ def table(v):
 new, cum = rows('camp'), rows('cum')
 fresh = {r['address'] for r in new}
 status = collections.Counter(r.get('status', '?').split(':')[0] for r in new)
+crashes = collections.Counter(r['status'] for r in new if str(r.get('status', '')).startswith('crash:'))
+ncrash = sum(crashes.values())
+broken = len(new) >= 10 and ncrash * 2 >= len(new)
+banner = []
+if broken:
+    top, nt = crashes.most_common(1)[0]
+    msg = next((r.get('error', '') for r in new if r.get('status') == top), '').strip().splitlines()
+    banner = ['', '**HARNESS BROKEN: %d of %d functions fuzzed this head ended in a harness exception (%s); the '
+              'verdicts below are not meaningful.** Last line: `%s`' % (ncrash, len(new), ', '.join(
+                  '%s %d' % kv for kv in crashes.most_common(3)), (msg[-1] if msg else '')[:160])]
 execs = sum(r.get('execs', 0) for r in new)
 hard = [l.rstrip('\n').split('\t') for l in open(os.path.join(run, 'hard_cum.tsv'))] \
     if os.path.exists(os.path.join(run, 'hard_cum.tsv')) else []
-out = ['# fuzz %s shard %s/%s' % (commit[:12], k, n), '',
+out = ['# fuzz %s shard %s/%s%s' % (commit[:12], k, n, ' - HARNESS BROKEN' if broken else '')] + banner + ['',
        '- commit %s, decomp %s, oracle: %s MSVC 2008 objects of the pristine decomp' % (commit, d12, nx86),
        '- link: %s; tree: %s' % (note_link, note_tree),
        '- functions catalogued %d; in this shard %d: no native object %d, control flow not modelled (indirect '
@@ -413,8 +425,9 @@ out = ['# fuzz %s shard %s/%s' % (commit[:12], k, n), '',
            counts['catalogued'], counts['shard'], counts['no_native_object'], counts['not_modelled'],
            counts['targets'], st['no_key']),
        '- this head: fuzzed %d, verdict reused from an earlier head (key unchanged) %d, pending %d (key changed %d, '
-       'never fuzzed %d)' % (st['fuzzed_this_head'], st['reused'], st['pending_changed'] + st['pending_new'],
-                             st['pending_changed'], st['pending_new']),
+       'never fuzzed %d), harness exception %d (fuzzed again by the next run)' % (
+           st['fuzzed_this_head'], st['reused'], st['pending_changed'] + st['pending_new'], st['pending_changed'],
+           st['pending_new'], st.get('crashed', 0)),
        '- fuzzed this head: %s; executions %d (at most %s and %ss per function, %s jobs)' % (
            ', '.join('%s %d' % kv for kv in status.most_common()) or 'none', execs, iters, tm, jobs),
        '- cumulative (verdicts valid for this head): %d functions' % len(cum),
@@ -441,4 +454,8 @@ if [ -s "$RUN/camp/results.jsonl" ]; then
   publish "fuzz/$C12/${K}of${N}" "$PUB" "$C12 fuzz shard $K/$N" || true
   rm -rf "$PUB"
 fi
+# housekeeping: the newest two heads' run directories, links and trees stay
+for pat in "fuzz-*-${K}of${N}" "link-*" "tree-*"; do
+  ls -1dt "$FARM_HOME"/$pat 2>/dev/null | grep -v '\.done$' | tail -n +3 | while read -r d; do rm -rf "$d" "$d.done"; done
+done
 log "done: $REPORT"
