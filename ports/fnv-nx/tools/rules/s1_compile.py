@@ -1595,7 +1595,7 @@ def r_namespace_specializations(path, text, stats):
         names = {n for p, n in decls.get(key, ()) if p < m.start() and n != tmpl}
         if not names: continue
         qual = '::'.join(h.split()[-1] for h in key) + '::'
-        for t in BODY_TOKENS.finditer(text, o, c):
+        for t in BODY_TOKENS.finditer(text, end, c):     # the base clause too (`: public MoveNode454`)
             w = t.group()
             if w not in names: continue
             before = text[max(0, t.start() - 2):t.start()].rstrip()
@@ -1735,7 +1735,8 @@ PLAIN_CLASS = re.compile(r'(?<![<\w])(?:struct|class)\s+(?:__declspec\s*\((?:[^(
                          r'(?::\s*([^{};]*))?\{')
 TPL1_OUT_DEF = re.compile(r'\btemplate\s*<((?:[^<>]|<[^<>]*>)*)>\s*(?:[^;{}()]*?[\s\*&>])?([A-Za-z_]\w*)\s*<[^<>;{}]*>\s*::'
                           r'\s*~?[A-Za-z_]\w*\s*\(')
-TPL1_LOCAL = re.compile(r'\b([A-Za-z_]\w*)(?:\s*[\*&]+\s*|\s+)([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)?(?:=(?!=)|;|,|\[)')
+# a local declaration: `T name =`, `T* name;`, `A<B, C>* name = ...` (the type may end in a template argument list)
+TPL1_LOCAL = re.compile(r'(?:\b([A-Za-z_]\w*)|(>))(?:\s*[\*&]+\s*|\s+)([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)?(?:=(?!=)|;|,|\[)')
 NOT_A_TYPE = set('return else case goto delete new throw sizeof do typedef'.split())
 CXX_KEYWORDS = set('''alignas alignof and asm auto bool break case catch char class const const_cast constexpr continue
 decltype default delete do double dynamic_cast else enum explicit export extern false float for friend goto if inline int
@@ -1888,7 +1889,7 @@ def r_dependent_base_members(path, text, stats):
         body = COMMENT.sub(' ', text[fo:fc])
         params_text = head[head.find('('):] if '(' in head else ''
         declared = set(re.findall(r'([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)?(?:=[^,()]*)?\s*[,)]', params_text))
-        declared |= {v for t, v in TPL1_LOCAL.findall(body) if t not in NOT_A_TYPE}
+        declared |= {v for t, _, v in TPL1_LOCAL.findall(body) if t not in NOT_A_TYPE}
         use = names - declared
         if not use: continue
         for t in BODY_TOKENS.finditer(text, fo, fc):
@@ -2000,37 +2001,31 @@ def r_anonymous_return_types(path, text, stats):
 # MSVC accepts because every unscoped enum has the underlying type int there. Standard C++ allows an opaque enum
 # declaration only with a fixed underlying type. ENUM1 writes MSVC's type out, `enum X : int;`, and gives every
 # definition of such an enum in the decomp the same base (`enum X : int {`), so declaration and definition agree.
-# (GCC would otherwise pick unsigned int for an enum without negative values; int is what MSVC used.) An enum with an
-# enumerator outside int's range keeps its definition and its declarations unchanged.
+# (GCC would otherwise pick unsigned int for an enum without negative values; int is what MSVC used.) A definition
+# with an enumerator outside int's range keeps its form.
 
 OPAQUE_ENUM = re.compile(r'^([ \t]*(?:typedef\s+)?enum\s+([A-Za-z_]\w*))(\s*;)', re.M)
 ENUM_DEF = re.compile(r'\benum\s+([A-Za-z_]\w*)(\s*)\{')
 _OPAQUE_NAMES = None
 
 def _opaque_enum_names(path):
-    """names the decomp declares as opaque enums anywhere, minus those with a definition that int cannot hold"""
+    """names the decomp declares as opaque enums anywhere"""
     global _OPAQUE_NAMES
     if _OPAQUE_NAMES is not None: return _OPAQUE_NAMES
-    root, names, texts = _roots(path), set(), []
+    root, names = _roots(path), set()
     for d in ('src', 'include'):
         for dp, _, fs in os.walk(os.path.join(root, d)):
             for f in fs:
                 if not f.endswith(('.h', '.cpp', '.inl', '.hpp', '.c')): continue
                 with open(os.path.join(dp, f), encoding='utf-8', errors='surrogateescape') as h: t = h.read()
-                if 'enum' not in t: continue
-                found = [m.group(2) for m in OPAQUE_ENUM.finditer(t)]
-                names.update(found)
-                texts.append(t)
-    wide = set()
-    for t in texts:
-        for m in ENUM_DEF.finditer(t):
-            if m.group(1) not in names: continue
-            body = t[m.end():t.find('}', m.end())]
-            for v in re.findall(r'=\s*(-?\s*(?:0[xX][0-9a-fA-F]+|\d+))[uUlL]*', body):
-                n = int(v.replace(' ', ''), 0)
-                if not -2 ** 31 <= n < 2 ** 31: wide.add(m.group(1))
-    _OPAQUE_NAMES = names - wide
+                if 'enum' in t: names.update(m.group(2) for m in OPAQUE_ENUM.finditer(t))
+    _OPAQUE_NAMES = names
     return _OPAQUE_NAMES
+
+def _fits_int(body):
+    for v in re.findall(r'=\s*(-?\s*(?:0[xX][0-9a-fA-F]+|\d+))[uUlL]*', body):
+        if not -2 ** 31 <= int(v.replace(' ', ''), 0) < 2 ** 31: return False
+    return True
 
 def r_opaque_enums(path, text, stats):
     """ENUM1: `enum X;` -> `enum X : int;`, and `enum X {` -> `enum X : int {` for those names (see above)."""
@@ -2043,6 +2038,7 @@ def r_opaque_enums(path, text, stats):
         return m.group(1) + ' : int' + m.group(3)
     def defn(m):
         if m.group(1) not in names: return m.group(0)
+        if not _fits_int(text[m.end():text.find('}', m.end())]): return m.group(0)   # int cannot hold it: as it was
         stats['ENUM1'] += 1
         return 'enum %s : int%s{' % (m.group(1), m.group(2) or ' ')
     text = OPAQUE_ENUM.sub(decl, text)
@@ -2187,6 +2183,41 @@ def r_include_case(path, text, stats):
         return m.group(1) + os.path.join(os.path.dirname(inc), real).replace(os.sep, '/') + m.group(3)
     return INC_QUOTED.sub(sub, text)
 
+# ---------------------------------------------------------------------------------------------------------- PTR1
+#
+# The decomp compares a function's address or a pointer with 0 by order (`if (!(GetTime64 > 0))`,
+# `component > 0`), which MSVC compiled as an unsigned compare of the address: `p > 0` is `p != 0`, `p <= 0` is
+# `p == 0`. C++ rejects an ordered comparison of a pointer with the integer 0. PTR1 writes the equality the compare
+# meant for names the file declares as functions, or as pointers in the function that compares them.
+
+PTR_CMP = re.compile(r'(?<![\w.>:])([A-Za-z_]\w*)\s*(>|<=)\s*0(?![\w.])')
+
+def r_pointer_zero_compares(path, text, stats):
+    """PTR1: `f > 0` / `p > 0` -> `!= 0`, `<= 0` -> `== 0` for functions and local pointers (see above)."""
+    if '> 0' not in text and '<= 0' not in text and '>0' not in text: return text
+    funcs = set(re.findall(r'[\w\*&>]\s+(?:__\w+\s+)?([A-Za-z_]\w*)\s*\([^;{}()]*\)\s*;', COMMENT.sub(' ', text)))
+    if not funcs and '*' not in text: return text
+    spans = None
+    out, pos = [], 0
+    for m in PTR_CMP.finditer(text):
+        name = m.group(1)
+        if name in CXX_KEYWORDS or re.match(r'\s*\(', text[m.end(1):m.end(1) + 3]): continue
+        if spans is None: spans = [sp for sp in prepare.scope_spans(text) if sp[2] == 'function']
+        body = next(((o, c, h) for o, c, _, h in spans if o < m.start() < c), None)
+        if body is None: continue
+        local = body[2] + '\n' + text[body[0]:m.start()]          # parameters, then the body up to the compare
+        is_ptr = re.search(r'\b[A-Za-z_][\w:]*(?:\s*<[^<>;]*>)?\s*\*+\s*%s\s*[=;,)]' % re.escape(name), local)
+        declared_other = re.search(r'\b(?:int|unsigned|short|char|long|float|double|bool|__int64|DWORD|UINT|size_t)\s+%s\b'
+                                   % re.escape(name), local)
+        if declared_other: continue
+        if not is_ptr and not (name in funcs and not re.search(r'[\w\*&>]\s+%s\s*[=;,\[]' % re.escape(name), local)):
+            continue
+        out.append(text[pos:m.start(2)]); out.append('!=' if m.group(2) == '>' else '=='); pos = m.end(2)
+        stats['PTR1'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2211,5 +2242,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout]

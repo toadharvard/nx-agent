@@ -230,6 +230,10 @@ check('TPL1 dependent base defined in an included header',
       run(s1.r_dependent_base_members, '#include "lb.h"\ntemplate <class T> class PList : public ListBase<int, T>\n{\n'
           '  public:\n    PList()\n    {\n        m_pkHead = 0;\n    }\n};\n', os.path.join(_d, 'src', 'pl.h')),
       ['        this->m_pkHead = 0;'])
+check('TPL1 a local declared with a template type keeps its name',
+      run(s1.r_dependent_base_members, 'template <class C> struct Base { C* buffer; };\ntemplate <class C> struct Of : Base<C>\n{\n'
+          '    void f(C& fb)\n    {\n        B<C, T>* buffer = &fb;\n        buffer->open();\n    }\n};\n'),
+      ['B<C, T>* buffer = &fb;', '        buffer->open();'], ['this->buffer'])
 check('TPL1 non-dependent base: untouched',
       run(s1.r_dependent_base_members, 'struct Base { int size; };\ntemplate<class T> struct D : Base {\n'
           ' void f() { size = 0; }\n};\n'), (), ['this->'])
@@ -274,7 +278,11 @@ got = run(s1.r_opaque_enums, 'enum DIALOGUE_TYPE;\nenum DIALOGUE_TYPE\n{\n    A 
           os.path.join(_e, 'src', 'b.cpp'))
 s1._OPAQUE_NAMES = None
 check('ENUM1 opaque enum gets int as its base, and so does its definition', got,
-      ['enum DIALOGUE_TYPE : int;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE;', 'enum Other { B };'])
+      ['enum DIALOGUE_TYPE : int;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE : int;', 'enum Other { B };'])
+s1._OPAQUE_NAMES = None
+check('ENUM1 a definition int cannot hold keeps its form',
+      run(s1.r_opaque_enums, 'enum WIDE { W = 0x80000000 };\n', os.path.join(_e, 'src', 'c.cpp')), ['enum WIDE { W'])
+s1._OPAQUE_NAMES = None
 
 # ---- DECL1 with a trailing comment
 check('DECL1 drops a CRT prototype that ends in a // comment',
@@ -339,6 +347,12 @@ open(os.path.join(_i, 'src', 'ai', 'actor.h'), 'w').write('// unit header\n')
 check('INC1 spells an include as the local file is spelled',
       run(s1.r_include_case, '#include "Actor.h"\n#include "Other.h"\n#include <Windows.h>\n', os.path.join(_i, 'src', 'ai', 'actor.cpp')),
       ['#include "actor.h"', '#include "Other.h"', '#include <Windows.h>'])
+
+# ---- PTR1
+check('PTR1 ordered compares of a function / pointer with 0',
+      run(s1.r_pointer_zero_compares, '__int64 GetTime64(__int64* p);\nvoid f(Q* q)\n{\n    int n = 3;\n    Q* c = q;\n'
+          '    if (!(GetTime64 > 0)) return;\n    if (c > 0 && n > 0 && q <= 0) return;\n}\n'),
+      ['!(GetTime64 != 0)', 'c != 0 && n > 0 && q == 0'])
 
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
