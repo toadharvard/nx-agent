@@ -93,3 +93,16 @@ GATES-FZ-R16a	gates	82805db	82805db	refuted	-	test_ready_fuzz_shards.py	fnvnx-fu
 NX1-NRO-N2	NX1	5256786	5256786	refuted	-	test_nx1_nro.py	check_nro passes a RELATIVE relocation into rodata, which hbloader maps read-only (header offsets ok, N1)
 S15-MTQEMU-B1	S15-threads	79481ab	79481ab	refuted	-	test_weak_interlocked.py	tests/s15/mtqemu/build.sh no longer links after S4 79481ab: handles.cpp needs w32_is_std_handle from crt_kernel32.cpp, not in build.sh
 NXR-H1-FIX	render	e0485fc	e0485fc	confirmed	-	test_nx_render_robust.py	.nxcap draws bounded by vertices x instances: H1 exit 1 (ASan build of the head), D1-D7/C1-C6 and 1,000 mutations each of t.nxd9 and n0.nxcap clean
+P0-E1	P0-perfmodel	6e0a34b	6e0a34b	refuted	-	test_a57_calib_circular.py	calibration check point l2_latency echoes cost.l2_lat (22/30/40 in, out); truth.json calls check points independent
+P0-E2	P0-perfmodel	6e0a34b	6e0a34b	refuted	-	test_a57_calib_circular.py	check point taken_l2btb echoes 1 + btb_l2_bubble; without E1/E2 the claimed 4.9 % over 14 points is >= 5.7 % over 12
+P6N-L1	P6n	b34a429	b34a429	refuted	-	test_p6n_engine_path.py	engine_path.py undercounts nested in-function loops (4x4: 39 counted, 66 run); the 2,303 instr/draw not re-derived (objects not here)
+P6N-BUDGET	P6n	bbe6e74	bbe6e74	confirmed	-	test_p6n_engine_path.py	report.json arithmetic re-derives (8,544,130 instr, 13.96 ms, 3.763 us/draw); 60 fps judged on mix_hi at the hi end (0.662 of 16.7 ms)
+S13B-UNCL-A1	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	stub-normalized (artifact) labels a native that forgets flag 0x800 of a stored flags word
+S13B-UNCL-A2	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	ctor-this (artifact) labels a native that drops p->Init()'s result and returns p
+S13B-UNCL-A3	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	canned-this (artifact) labels a by-value declaration mismatch (native passes &tmp)
+S13B-UNCL-A4	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	native-wild-private (artifact) labels a wrong-slot vcall while x86 made the right call
+NX1-P1	NX1	ac00629	ac00629	refuted	-	test_nx1_publish_nro.sh	host stage fails, package not run: publish_nro ships the previous job's fnv.nro as nro/<new commit>
+NX1-P2	NX1	ac00629	ac00629	refuted	-	test_nx1_publish_nro.sh	a rejected push is reported published when the branch already exists
+S5DATA-PROFILE	S5-data	e601246	e601246	confirmed	-	tests/s4/test_profile.cpp	first-run profile files (tests/s4: 95 tests, 0 failed); the game also copies Fallout_default.ini itself (0x00876ad0)
+S5-ADOPT	S5	352c315	352c315	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 7bfec755 lossless: 5 stream files equal or every stream line kept
+S16-ADOPT	S16	6a5c605	6a5c605	confirmed	-	test_adopt_lossless.py	adopt of fnv-s16 ce6d1272 lossless: 12 stream files equal

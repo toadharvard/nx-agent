@@ -62,7 +62,9 @@ def ledger():
         r = dict(zip(head, c))
         if r['verdict'] not in VERDICTS:
             errs.append('%s: verdict %r' % (r['id'], r['verdict']))
-        if r['verdict'] != 'unverified' and not os.path.isfile(os.path.join(PORT, 'tests', 'v1', r['test'])):
+        # a test under tests/v1 by name, or another stream's test by its path from the port (tests/s4/...)
+        tpath = os.path.join(PORT, r['test']) if '/' in r['test'] else os.path.join(PORT, 'tests', 'v1', r['test'])
+        if r['verdict'] != 'unverified' and not os.path.isfile(tpath):
             errs.append('%s: test %s does not exist' % (r['id'], r['test']))
         if r['verdict'] == 'fixed' and r['fix'] == '-':
             errs.append('%s: fixed without a fix commit' % r['id'])
