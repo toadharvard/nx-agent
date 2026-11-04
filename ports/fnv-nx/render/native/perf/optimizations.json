@@ -3598,9 +3598,9 @@
   }
  },
  {
-  "commit": "510c048e6eeea2444ab361edfc3f0f7162526a5b",
+  "commit": "22013655e0c7e9641c3885acc9b98ff65c4f8267",
   "name": "fnv-nx S6n: perf - opaque draws ordered front to back by a coarse depth bucket, state inside it",
-  "before_commit": "dc59b02f704bbbb393e11f9a928b74151bcfacf6",
+  "before_commit": "022af1ce20f2dfe6807c0a8232cf1d1f31866bb5",
   "cpu_instr_delta_main": 22260,
   "cpu_instr_delta_render": 287659,
   "gpu_ms_docked_720p": [
@@ -3616,7 +3616,7 @@
    0
   ],
   "before": {
-   "commit": "dc59b02f704bbbb393e11f9a928b74151bcfacf6",
+   "commit": "022af1ce20f2dfe6807c0a8232cf1d1f31866bb5",
    "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99739 state_binds 283 states 326 samplers 1",
    "main": 4838952,
    "render_front": 1587743,
@@ -3735,7 +3735,7 @@
    ]
   },
   "after": {
-   "commit": "510c048e6eeea2444ab361edfc3f0f7162526a5b",
+   "commit": "22013655e0c7e9641c3885acc9b98ff65c4f8267",
    "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 105971 state_binds 811 states 326 samplers 1",
    "main": 4861212,
    "render_front": 1641261,
