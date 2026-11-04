@@ -141,6 +141,8 @@ class History:
     def __init__(self, head=None, table=None, repo=PORT):
         self.table, self.repo, self.cache = table, repo, {}
         self.head = head or (None if table is not None else self._git('rev-parse', 'HEAD'))
+        if table is None and self.head:      # a short or symbolic head: the full commit, so distances can be counted
+            self.head = self._git('rev-parse', '--verify', '-q', self.head + '^{commit}') or self.head
 
     def _git(self, *a):
         r = subprocess.run(['git', '-C', self.repo, *a], capture_output=True, text=True)
@@ -1160,7 +1162,7 @@ class Card:
         for cfg in rp.get('gpu', []):
             name, req = cfg['name'], cfg.get('required', False)
             title = 'GPU frame time, %s (model, %s)' % (name.replace('_', ' '), mix)
-            row = sm.get(name)
+            row = next((sm[k] for k in [name] + cfg.get('aliases', []) if k in sm), None)
             lo = row.get(cfg.get('lo', 'eff_1.0')) if isinstance(row, dict) else None
             hi = row.get(cfg.get('hi', 'eff_0.6')) if isinstance(row, dict) else None
             if not (isnum(lo) and isnum(hi)):
@@ -1173,7 +1175,8 @@ class Card:
             self.gate('perf.gpu.' + name, 'Performance', title, '%.1f - %.1f ms' % (lo, hi), self.fps_threshold(), st,
                       src, '%s; judged on the efficiency-0.6 bound; model, not measured (RENDER_PERF.md section 9); '
                       'report: %s' % (self.fps_note(lv, lname), ', '.join(
-                          '%s fps %s' % (k, (tg.get(k) or {}).get(name, '?')) for k in sorted(tg))), rank=22,
+                          '%s fps %s' % (k, next(((tg.get(k) or {})[a] for a in [name] + cfg.get('aliases', [])
+                                                 if a in (tg.get(k) or {})), '?')) for k in sorted(tg))), rank=22,
                       required=req, levels=dict(lv, level=lname))
 
     def budget_gate(self):

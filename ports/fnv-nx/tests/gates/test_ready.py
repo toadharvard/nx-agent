@@ -490,6 +490,13 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual((g['status'], g['sources'][0]['path']), ('no-data', 'docs/PERF_budget.json'))
         self.assertEqual(g['value'], 'worst frame 17.2 ms mid (7 - 39.4)')
 
+    def test_gpu_config_alias(self):
+        def edit(d):
+            sm = d['gpu']['summary_ms']['mix_hi']
+            sm['handheld_540p_dynres'] = sm.pop('handheld_540p')
+        self.world.edit_json('_render/report.json', edit)
+        self.assertEqual(self.gate(self.world.run(), 'perf.gpu.handheld_540p')['value'], '9.0 - 15.1 ms')
+
     def test_memory_over_budget(self):
         self.world.edit_json('link/%s/meta.json' % C, lambda d: d.__setitem__('boot_peak_heap_bytes', 1900 << 20))
         self.assertEqual(self.gate(self.world.run(), 'perf.memory')['status'], 'fail')

@@ -118,7 +118,10 @@
    },
    {
     "name": "handheld_540p",
-    "required": false
+    "required": false,
+    "aliases": [
+     "handheld_540p_dynres"
+    ]
    }
   ]
  }
