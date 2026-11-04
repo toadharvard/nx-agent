@@ -259,6 +259,12 @@ class Arm64Engine:
         uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
 
     def _builtin(self, uc, name, target, r):
+        if name and libcalls.import_name(name)[0] in libcalls.IMPORT_BUILTINS:
+            args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
+            v = libcalls.run_import(libcalls.import_name(name)[0], libcalls.Mem(uc, r.writes, self._ensure), args)
+            uc.reg_write(XR[0], v & 0xffffffff)
+            uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+            return True
         bname = libcalls.A64.get(name) if name else None
         if bname is None and target is not None and target >= 0:
             bname = libcalls.X86.get(target)

@@ -45,6 +45,14 @@ def itanium_class(m):
 LOCAL_STATIC = re.compile(r'^\?(?:[^@?]+@\?\d+\?\?|\$S\d+@|\$TSS\d+@)')   # ?x@?1??f@@..., ?$S1@..., ?$TSS0@...
 
 
+def dyninit_conv(symbol, source):
+    """`??__E...` / `??__F...` (dynamic initializer / atexit destructor; XC1's __fnvnx_dyninit_/_dynexit_):
+    void __cdecl (void)."""
+    if symbol.startswith(('??__E', '??__F', '__fnvnx_dyn')):
+        return convmod.Conv('?fnvnx_s13_init@@YAXXZ', source)
+    return None
+
+
 class UnitCache:
     def __init__(self, linkdir, workdir, unit_closed=True):
         self.linkdir, self.workdir, self.unit_closed = linkdir, workdir, unit_closed
@@ -66,6 +74,7 @@ class UnitCache:
                     self.tree_def.setdefault(int(f['address'], 16), f['symbol'])
         self._x86, self._img, self._pin, self._callee = {}, {}, {}, {}
         self._refmap = None
+        self._imports = self._iat = None
         self._abi = None
         self._statics = None
         self._vrows = None
@@ -117,6 +126,8 @@ class UnitCache:
                 out[addr] = refs[name]
             elif name in libcalls.EQUIV:
                 out[addr] = libcalls.EQUIV[name]
+            elif self._import_names().get(libcalls.import_name(name)[0]):
+                out[addr] = libcalls.import_id(libcalls.import_name(name)[0])
         return out
 
     def callee_info_for(self, source):
@@ -172,7 +183,7 @@ class UnitCache:
         try:
             cv = convmod.Conv(name, source)
         except convmod.Unsupported:
-            cv = convmod.Conv(fn['symbol'], source)
+            cv = dyninit_conv(fn['symbol'], source) or convmod.Conv(fn['symbol'], source)
         import classify
         custom = classify.entry_register_reads(fn, cv)
         if custom:
@@ -189,6 +200,7 @@ class UnitCache:
         t = runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
                           statics)
         t.source = source
+        t.imports = self.import_stubs()
         t.custom_cc = list(getattr(cv, 'custom', []) or [])
         t.vtables = self.vtable_map(img)
         t.followed = self.preload(code, img, source)
@@ -213,6 +225,37 @@ class UnitCache:
             if xu2 is not xu and any(a in code for a in xu2.funcs):
                 t.extra_pinned.update(xu2.literal_bytes())
         return t
+
+    def import_stubs(self):
+        """{stub index: (name, stdcall bytes)} for every IAT slot units.json names (one name per slot: the most
+        common); the slots are pinned to x86 import stubs (iat_pins)."""
+        if self._imports is None:
+            names = collections.defaultdict(collections.Counter)
+            for u in self.units:
+                for n, a in u['symbols'].items():
+                    if n.startswith('__imp_'):
+                        ad = int(a, 16)
+                        if 0x00fdf000 <= ad < 0x00fe0000:
+                            names[ad][libcalls.import_name(n)] += 1
+            self._iat = {}
+            self._imports = {}
+            for k, ad in enumerate(sorted(names)):
+                if k >= libcalls.IMPORT_MAX:
+                    break
+                nm = names[ad].most_common(1)[0][0]
+                self._imports[k] = nm
+                self._iat[ad] = libcalls.IMPORT_BASE + 16 * k
+                runner.IMPORTS[libcalls.import_id(nm[0])] = nm[0]
+        return self._imports
+
+    def _import_names(self):
+        self.import_stubs()
+        return {nm[0]: True for nm in self._imports.values()}
+
+    def iat_pins(self):
+        import struct
+        self.import_stubs()
+        return {ad: struct.pack('<I', stub) for ad, stub in self._iat.items()}
 
     def edx_dummies(self, source):
         """{callee address: definition labels the unit's references do not pass} from S2's abi.tsv notes
@@ -331,6 +374,7 @@ class UnitCache:
 
     def pair(self, source, orig_addr):
         t = self.target(source, orig_addr)
-        pin = dict(getattr(t, 'extra_pinned', {}))
+        pin = dict(self.iat_pins())
+        pin.update(getattr(t, 'extra_pinned', {}))
         pin.update(self.pinned(source, orig_addr))
         return runner.Pair(t, pin), t

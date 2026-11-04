@@ -205,3 +205,57 @@ def x87_stub(name, slot):
         return bytes.fromhex('558bec5657' '8b7d10' '8b450c' '0fafc7' '8b7508' '03f0' '4f' '780a' '2b750c' '8bce'
                              'ff5514' 'ebf3' '5f5e5d' 'c21000')
     return None
+
+
+# ---- Win32 imports (the oracle calls them through IAT slots of the image; S4's platform implements them natively)
+IMPORT_BASE = 0x0e010000          # x86 private: import stub k at IMPORT_BASE + 16 * k (0xCC, a block there = a call)
+IMPORT_MAX = 0x1000
+
+
+def import_id(name):
+    """Trace identity of an import (negative, never an original address), the same on both machines."""
+    import zlib
+    return -(0x10000000 + (zlib.crc32(name.encode()) & 0x0fffffff))
+
+
+def import_name(decorated):
+    """`__imp__InterlockedIncrement@4` / `_InterlockedIncrement@4` / `InterlockedIncrement` -> (name, stack bytes)."""
+    n = decorated
+    for p in ('__imp__', '__imp_', '_'):
+        if n.startswith(p):
+            n = n[len(p):]
+            break
+    pop = 0
+    if '@' in n:
+        n, _, k = n.partition('@')
+        pop = int(k) if k.isdigit() else 0
+    return n, pop
+
+
+IMPORT_BUILTINS = {'InterlockedIncrement', 'InterlockedDecrement', 'InterlockedExchange', 'InterlockedCompareExchange',
+                   'InterlockedExchangeAdd'}
+
+
+def run_import(name, m, a):
+    """The Interlocked family on a 32-bit word (single-threaded: plain read-modify-write)."""
+    p = a[0] & 0xffffffff
+    old = struct.unpack('<I', m.read(p, 4))[0]
+    if name == 'InterlockedIncrement':
+        new = (old + 1) & 0xffffffff
+        m.write(p, struct.pack('<I', new))
+        return new
+    if name == 'InterlockedDecrement':
+        new = (old - 1) & 0xffffffff
+        m.write(p, struct.pack('<I', new))
+        return new
+    if name == 'InterlockedExchange':
+        m.write(p, struct.pack('<I', a[1] & 0xffffffff))
+        return old
+    if name == 'InterlockedCompareExchange':
+        if old == (a[2] & 0xffffffff):
+            m.write(p, struct.pack('<I', a[1] & 0xffffffff))
+        return old
+    if name == 'InterlockedExchangeAdd':
+        m.write(p, struct.pack('<I', (old + a[1]) & 0xffffffff))
+        return old
+    raise KeyError(name)

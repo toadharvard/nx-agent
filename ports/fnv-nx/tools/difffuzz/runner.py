@@ -78,7 +78,12 @@ def float_verdict(cls_size, bx, ba):
 NAMES = {}      # named-stub address -> symbol (set by Pair.run for reports)
 
 
+IMPORTS = {}    # import identity -> name
+
+
 def _hex(t):
+    if t < 0 and t in IMPORTS:
+        return 'imp:' + IMPORTS[t]
     return '%08x' % (t & 0xffffffff) if t >= 0 else 'name:%s' % NAMES.get(-t, '%x' % -t)
 
 
@@ -279,7 +284,7 @@ class Pair:
         placement = self.target.placement()
         if self.xe is None:
             self.xe = x86emu.X86Engine(w, self.target.x86_code, self.target.callee_info,
-                                       getattr(self.target, 'follow', None))
+                                       getattr(self.target, 'follow', None), getattr(self.target, 'imports', None))
             self.ae = arm64emu.Arm64Engine(w, self.target.image, self.target.stub_orig,
                                            getattr(self.target, 'vtables', None))
         else:

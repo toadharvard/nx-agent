@@ -62,11 +62,12 @@ class Result:
 
 
 class X86Engine:
-    def __init__(self, world_obj, text_funcs, callee_info=None, follow=None):
+    def __init__(self, world_obj, text_funcs, callee_info=None, follow=None, imports=None):
         """text_funcs: {addr: bytes} executed for real. callee_info(addr) -> (pop_bytes, ret_kind) or None.
         follow(addr) -> oracle bytes of a function outside the unit to run for real instead of intercepting, or None."""
         self.follow = follow
         self.followed = set()
+        self.imports = imports or {}       # import stub index -> (name, stdcall bytes)
         self.world = world_obj
         self.text_funcs = text_funcs
         self.callee_info = callee_info or (lambda a: None)
@@ -75,6 +76,8 @@ class X86Engine:
         self.mapped = set()
         self.dynamic = set()
         uc = self.uc = Uc(UC_ARCH_X86, UC_MODE_32)
+        uc.mem_map(libcalls.IMPORT_BASE, (libcalls.IMPORT_MAX * 16 + PAGE - 1) & ~(PAGE - 1), UC_PROT_ALL)
+        uc.mem_write(libcalls.IMPORT_BASE, b'\xcc' * (libcalls.IMPORT_MAX * 16))
         for base in (GDT, TEB, STUBS, FRET, RESULT_BUF, FLD_STUB, BUILTIN_STUB):
             uc.mem_map(base, PAGE, UC_PROT_ALL)
             self.mapped.add(base)
@@ -158,6 +161,8 @@ class X86Engine:
         saved = [uc.reg_read(x) for x in (UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP)]
         hb = uc.hook_add(UC_HOOK_BLOCK, self._on_block, user_data=(case, r), begin=world.TEXT[0],
                          end=world.TEXT[1] - 1)
+        hb2 = uc.hook_add(UC_HOOK_BLOCK, self._on_import, user_data=(case, r), begin=libcalls.IMPORT_BASE,
+                          end=libcalls.IMPORT_BASE + libcalls.IMPORT_MAX * 16 - 1)
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
                for lo, hi in world.COMPARED]
         start = start if start is not None else next(iter(self.text_funcs))
@@ -168,6 +173,7 @@ class X86Engine:
             r.error = self._fault or 'fault:uc:%s' % e
         finally:
             uc.hook_del(hb)
+            uc.hook_del(hb2)
             for h in hws:
                 uc.hook_del(h)
         eip = uc.reg_read(UC_X86_REG_EIP)
@@ -260,6 +266,27 @@ class X86Engine:
             return
         uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
         uc.reg_write(UC_X86_REG_EIP, retaddr)
+
+    def _on_import(self, uc, address, size, user):
+        """A call through an IAT slot (pinned to import stub k): the Interlocked family runs, anything else is a
+        traced call with the import's identity, a canned result in eax and stdcall cleanup."""
+        case, r = user
+        name, pop = self.imports.get((address - libcalls.IMPORT_BASE) // 16, ('?', 0))
+        esp = uc.reg_read(UC_X86_REG_ESP)
+        ret = world.u32(uc.mem_read(esp, 4))
+        words = [world.u32(uc.mem_read(esp + 4 + 4 * i, 4)) for i in range(16)]
+        if name in libcalls.IMPORT_BUILTINS:
+            v = libcalls.run_import(name, libcalls.Mem(uc, r.writes, self._ensure), words)
+        else:
+            k = len(r.calls)
+            r.calls.append(Call(libcalls.import_id(name), [uc.reg_read(UC_X86_REG_ECX),
+                                                           uc.reg_read(UC_X86_REG_EDX)] + words, ret))
+            v = world.u32(case.ret_bytes(k), 0)
+            uc.reg_write(UC_X86_REG_EDX, world.u32(case.ret_bytes(k), 4))
+            uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
+        uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff)
+        uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
+        uc.reg_write(UC_X86_REG_EIP, ret)
 
     def _builtin(self, uc, name, esp, ret, words, r):
         """Run a CRT function or compiler helper for real (not traced). True when handled."""
