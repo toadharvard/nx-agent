@@ -12,7 +12,7 @@ OUT ?= $(HERE)/build
 CC ?= gcc
 CXX ?= g++
 FLAGS := -MMD -MP -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar -pthread \
-         -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt
+         -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
@@ -40,19 +40,19 @@ $(OUT)/s7_tests: $(OBJS)
 	$(CXX) $(CXXFLAGS_) $^ -o $@ -lm
 
 test: $(OUT)/s7_tests
-	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
+	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
 
 # the same tests built static for AArch64 and run under qemu-aarch64
 qemu:
 	$(MAKE) --no-print-directory OUT=$(OUT)-a64 CC="aarch64-linux-gnu-gcc -static" CXX="aarch64-linux-gnu-g++ -static" \
 		$(OUT)-a64/s7_tests
-	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root/game && FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s7_tests
+	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s7_tests
 
 XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
 XFLAGS := -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
-          -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt
+          -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3
 ilp32:
 	@set -e; for f in $(S7_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done
 	@echo "ilp32 (libnx) platform/audio/backend_audren.c platform/input/input_horizon.cpp"

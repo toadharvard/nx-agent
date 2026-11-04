@@ -266,7 +266,7 @@ void S_sorted(Ctx& c, Checks& k) {
         d.ps = mat == 2 ? c.psSolid : c.psTex;
         d.tex = mat == 0 ? &hA : &hB; d.ntex = mat == 2 ? 0 : 1;
         d.x = (float)rnd(80); d.y = (float)rnd(100); d.w = 12 + (float)rnd(16); d.h = 12 + (float)rnd(16);
-        d.depth = 0.1f + 0.03f * (float)((i * 7) % 24);
+        d.depth = 0.1f + 0.006f * (float)((i * 7) % 24);   // one depth bucket (nx/front.h SortKey): states group
         d.depthKey = (uint16_t)(d.depth * 65535.0f);
         d.color[0] = 0.5f + 0.02f * i; d.color[1] = 0.9f; d.color[2] = 1.0f - 0.03f * i;
         DrawQuad(c, d);

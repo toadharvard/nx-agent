@@ -288,6 +288,28 @@ change verdicts that no key reflects, so every key changes once; the scoped rows
   that function's original address (`vtmodel.native_addrs`, the link's addrmap F rows), not an anonymous stub.
   120-record oracle-vcall sample with all of difffuzz-19: 70 gone, oracle-side errors 26 -> 17, 5 vtpad
   call-targets.
+**Probe-cause audit (S13b s13b-002, V2 L1; difffuzz-19).** A probe-assigned artifact or by-design cause rests on
+evidence in the record or a replay, else the record goes on to the other probes:
+- `local-static` only for a mem-write whose differing bytes are all oracle-only stores to the unit's local statics,
+  or one extra native call followed by the oracle's call (the native's guarded initializer; not when the oracle's
+  next call is the native's: two calls swapped) - the runner's own `local-static` kind covers the rest; the native's
+  local-static read flag alone filed 344 call/error records (V2 L1: 0x00837550's swapped call pair; C1 the
+  initializer control, tests/v2/test_s2c_local_static.py: both ok);
+- `float->int` only when an aligned x86 word is 0x80000000 and the native word differs (was a substring test);
+- `vptr-store` only in a destructor (`classify.is_dtor_name`), elsewhere `vptr-differs` (triage, S2c);
+- `x86-custom-cc`: the case's own garbage probe (above); report.py's static entry-register override is gone;
+- compare no longer stops at by-design differences: trailing oracle-only frees of a function taking an aggregate by
+  value (MSVC destroys it in the callee: `byvalue-arg-dtor`), and a call where both machines branched to the same
+  garbage word that lies in the native's stub range (`vcall-stub-alias`, `arm64emu.Call.addr`). The deleting
+  destructor shapes (flags, return) stopped compare before d14; they no longer do.
+- `call-order`, `bool-repr`, `uninit-*` and `array-new-check` rest on the record (two adjacent calls swapped in
+  both traces; a replay; the native's own overflow throw), `msvc-inlined` on the oracle code (adaptive follow loads
+  the callee whenever its oracle code exists; what stays is the case without it).
+Dynamic evidence for causes.py: every divergence carries `arm_entered`, the original addresses of the unit's
+functions whose native entry the run executed (up to 64; S13b's oracle-callee-unloaded can rest on it instead of a
+traced call the callee makes).
+Test: `tests/s13/test_audit.py`.
+
 Test: `tests/s13/test_d19.py`.
 
 Test: `tests/s13/test_d14.py` (30 checks). Metric: `tools/difffuzz/metric.py` (artifact-class divergences + functions not fuzzable + unpublished shards, from reports/fz<k>, the newest layout only).
@@ -421,7 +443,23 @@ five example reproducers, plus `functions_by_class` (each diverging function by 
 for R0. `causes.py merge <reports/fz<k> .md | causes.json>... --out all.json` adds the shards up
 (classes from this checkout's policy). Input layout (any campaign or `fuzz/cache/<k>of<N>` checkout): `results.jsonl`
 (address, source, status; only `ok` rows count), `div/<addr>-<n>.json` (divergence, hint, case), optional
-`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. `causes.py handoffs <dirs> --out-dir d [--effects e.jsonl]` writes the owners' lists, one row per counted divergence (owner, cause, address, unit, reproducer `fuzz/cache/<k>of<N>:div/<file>`, first effect): `handoffs_<owner>.tsv` (real-bug), `triage_<owner>.tsv`, `harness_<owner>.tsv` (artifacts with an owner) and `index.tsv`. With `--ref-by-head` the reproducer is `fuzz/<head12>/<k>of<N>:div/<file>`, the branch of the head that fuzzed the function (results `commit`), which the farms never rewrite (the rolling `fuzz/cache/` branches are force-updated on every re-fuzz); they go to the private repository, never here. The object rules need pyelftools: without it the summary's `native_objects.reader` is `unavailable` and a warning is printed. Test: `tests/s13/test_causes.py`.
+`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. `causes.py handoffs <dirs> --out-dir d [--effects e.jsonl]` writes the owners' lists, one row per counted divergence (owner, cause, address, unit, reproducer `fuzz/cache/<k>of<N>:div/<file>`, first effect, fix class): `handoffs_<owner>.tsv` (real-bug), `triage_<owner>.tsv`, `harness_<owner>.tsv` (artifacts with an owner) and `index.tsv`. With `--ref-by-head` the reproducer is `fuzz/<head12>/<k>of<N>:div/<file>`, the branch of the head that fuzzed the function (results `commit`) in the shard it was fuzzed in (results `shard`: `fuzzcache merge` records it, `seed` keeps the source shard's, V1 RH-2), which the farms never rewrite (the rolling `fuzz/cache/` branches are force-updated on every re-fuzz); they go to the private repository, never here. The object rules need pyelftools: without it the summary's `native_objects.reader` is `unavailable` and a warning is printed. Test: `tests/s13/test_causes.py`.
+
+### Fix classes (D21)
+
+Every real-bug cause belongs to exactly one fix class (`causes.FIX_CLASSES`). A class is one general mechanism, and its owner closes it for all instances at once, not record by record. The cause's owner is the class owner. `summary` and `merge` add `fix_classes` (per class: divergences, functions, worst_of), and `causes.py classes <causes.json> [--tsv f]` prints the table, largest worst_of first. Test: `test_fix_classes`.
+
+| class | owner | causes | mechanism |
+|---|---|---|---|
+| `callee-bodies` | S1 | `native-undefined`, `after-native-undefined`, `native-empty-body`, `native-empty-callee`, `native-zero-stub` | every call from a prepared unit reaches the original function's real body: emit all inline/template/declared-only bodies, no decomp-local stand-in (empty or return-0) shadows an original function |
+| `object-layout` | S1 | `native-null-read`, `layout-offset`, `field-width`, `signedness` | every field is read at the exe's offset, width and signedness (struct layouts and member types from the exe, base subobject placement) |
+| `control-flow` | S1 | `native-trap`, `falloff?`, `stack-protector` | no path the exe takes ends in a trap, a fall-off or a stack-protector abort (no UB GCC exploits: missing returns, unreachable, out-of-bounds locals) |
+| `arithmetic` | S1 | `float`, `ilp32-wrap` | integer and float arithmetic as MSVC x86 computes it: 32-bit address wraparound (ilp32-wrap), float results beyond x87 tolerance |
+| `ownership` | S1 | `native-missing-free` | the native frees exactly what the exe frees |
+| `static-init` | S10 | `dyninit-no-atexit` | every dynamic initializer registers its destructor as the exe does (atexit) |
+| `call-abi` | S1b | `uninit-arm`, `native-garbage-arg`, `native-stale-result`, `callee-saved`, `sret-mismatch` | every call passes and preserves registers by the callee's MSVC convention (argument slots written, results not reused, callee-saved kept, sret as MSVC) |
+| `data-binding` | S2c | `native-stub-data`, `native-address`, `split-global`, `import-slot-called`, `call-args` | every data symbol and import binds to the exe object (no stub as data, no unit copy, no native address where the exe has an image address, bridges deliver the bytes) |
+| `vtables` | S2c | `vptr-unpaired`, `native-calls-data`, `thunk-binding`, `vslot-trap` | every image vftable pairs with a full native vtable of the static class (no short vtables, overrides bound to their this-adjusting thunks) |
 
 ## Lockstep (`lockstep.py`, D14)
 

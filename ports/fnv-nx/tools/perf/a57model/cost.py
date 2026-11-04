@@ -235,9 +235,13 @@ def chain_per_iteration(ins_list, lats):
 
 
 class MCA:
-    def __init__(self, cache_path=None, iterations=300):
+    def __init__(self, cache_path=None, iterations=300, metric='cycles'):
+        """metric 'cycles': Total Cycles / iterations, the block as a loop (each iteration's inputs depend on the
+        previous one's results: a chained steady state). 'rthroughput': llvm-mca's Block RThroughput, the resource
+        bound with independent iterations (calls that do not feed each other, S15-simd / V1 S2)."""
         self.cache_path = cache_path
         self.it = iterations
+        self.metric = metric
         self.cache = {}
         if cache_path and os.path.exists(cache_path):
             with open(cache_path) as f:
@@ -264,6 +268,14 @@ class MCA:
             return None, p.stderr
         out = {}
         keys = list(regions)
+        if self.metric == 'rthroughput':
+            for m in re.finditer(r'\[(\d+)\] Code Region - (\S+).*?Block RThroughput:\s+([0-9.]+)', p.stdout, re.S):
+                out[m.group(2)] = float(m.group(3))
+            if len(regions) == 1 and not out:
+                m = re.search(r'Block RThroughput:\s+([0-9.]+)', p.stdout)
+                if m:
+                    out[keys[0]] = float(m.group(1))
+            return out, ''
         for m in re.finditer(r'\[(\d+)\] Code Region - (\S+).*?Total Cycles:\s+(\d+)', p.stdout, re.S):
             out[m.group(2)] = int(m.group(3)) / self.it
         if len(regions) == 1 and not out:
@@ -290,7 +302,7 @@ class MCA:
         """blocks: {name: [lines]} -> {name: cycles per iteration}; the cache is keyed by the text (and the iteration
         count), so names are free; failing blocks are retried alone, then without the lines llvm-mca rejects
         (None if nothing is left)"""
-        sfx = '' if self.it == 300 else f'@{self.it}'
+        sfx = ('' if self.it == 300 else f'@{self.it}') + ('' if self.metric == 'cycles' else '@' + self.metric)
         hkey = {n: hashlib.sha1('\n'.join(v).encode()).hexdigest()[:20] + sfx for n, v in blocks.items()}
         todo = {}
         for n, v in blocks.items():

@@ -51,6 +51,7 @@ import exevft   # noqa: E402  (S2c: the player's exe vftables)
 import thisadj  # noqa: E402  (S2c-abi: MSVC entries of secondary-base overrides)
 import vacall   # noqa: E402  (S2c-abi: call-site argument types of variadic references)
 import xexit    # noqa: E402  (S2c-abi: native stand-ins of the exe's exit thunks)
+import slotfill2  # noqa: E402  (S2c-vt2: slot fill rules)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
 DATA_END = 0x0200c612
@@ -1855,6 +1856,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     rows, gaps, changed = [], [], {}
     addr_of = {}   # (source, symbol) -> the exe address it was bound to (refs.tsv)
     stubs = {} if stubs is None else stubs   # flag / deleting-destructor stubs -> their asm (bridges.S)
+    itanium = slotfill2.enum_params(itanium, slotfill2.msvc_enums(out), st)   # S2c-vt2
 
     def target_for(un, a, otts=None, depth=0, var=None):
         nd = native.get(a)
@@ -1939,6 +1941,10 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 return bn, 'bridge (%s)' % ','.join(v.classes or ['moves'])
             return None, 'abi: ' + how
         return ADDR_SYM % a, how
+
+    target_for = slotfill2.secondary_entry(target_for, native, ADDR_SYM, MSVC_ENTRY_SYM, st)   # S2c-vt2
+    target_for = slotfill2.fastcall_dtor(target_for, native, itanium, msvc, abi.classify, stubs, ADDR_SYM, st)
+    target_for = slotfill2.slot_ctor(target_for, native, itanium, msvc, abi.classify, slot_abi, stubs, ADDR_SYM, st)
 
     for u in have:
         ren = per_obj.get(u.source) or {}

@@ -184,6 +184,9 @@ extern __thread char __fnvnx_tls_image[] __attribute__((weak));
 extern char __fnvnx_tls_image_orig[] __attribute__((weak));   /* absolute symbols: address = value */
 extern char __fnvnx_tls_image_size[] __attribute__((weak));
 static int g_image_mapped;
+/* global_new.cpp routes operator new/delete to the game's MemoryManager once its data window (g_memoryManager at
+ * 0x011f6238) is mapped; before that, malloc/free. */
+extern "C" int fnvnx_image_is_mapped(void) { return __atomic_load_n(&g_image_mapped, __ATOMIC_ACQUIRE); }
 void fnvnx_guest_thread_tls_hook(void) {
     if (!g_image_mapped || !__fnvnx_tls_image_orig || !__fnvnx_tls_image_size) return;
     memcpy(__fnvnx_tls_image, (const void *)__fnvnx_tls_image_orig, (size_t)(uintptr_t)__fnvnx_tls_image_size);
@@ -211,7 +214,7 @@ static int load_image(void) {
     static fnvnx_image img;
     rc = fnvnx_image_map(&img, &pe, &os, pe.image_base, 0, 0x00400000u, 0x02100000u, 0);
     if (rc) { printf("fnvnx boot: STOP: image_map: %s\n", fnvnx_strerror(rc)); return -1; }
-    g_image_mapped = 1;
+    __atomic_store_n(&g_image_mapped, 1, __ATOMIC_RELEASE);
     fnvnx_image_load_relocs(&img, &os);
     capture_xc(&pe, &img);
     fnvnx_import_stats is = {};
@@ -299,6 +302,42 @@ static void construct_memory_manager(void) {
     }
     ((void (*)(void *))fn)((void *)(uintptr_t)self);
     printf("fnvnx boot: memory manager constructed at %#010" PRIx32 " (%#010" PRIx32 ")\n", self, ctor);
+}
+
+/* The gate of patch class MT1 (docs/PATCHES.md, docs/PERF.md 6.8): FNVNX_MT1_ON in fnvnx_compat.h calls this. It is
+ * bMTRendering:Display, read from the INI setting object at 0x011c710c (its value at +4, after the vtable), not
+ * from the engine's copy DAT_011f94b4: WinMain builds the accumulators (FUN_0086c160) before the renderer init
+ * (FUN_004da670) copies the setting, and the gate must say the same at both. The setting is 0 unless the player's
+ * Fallout.ini sets it (ini.cpp's Switch defaults leave it out), so MT1 stays off by default. */
+extern "C" int fnvnx_mt1_on(void)
+{
+    return *(volatile const uint8_t *)(uintptr_t)(0x011c710cu + 4u) != 0;
+}
+
+/* MT1 cull sync (docs/PERF.md 6.11, patches/mt1_cull_sync.s1b): main waits, before the world render's cull, until AI
+ * linear thread 2 has finished this frame's cell update (TES::FUN_00453550: the Havok step and the cell downward
+ * pass, which write the transforms and bounds the cull reads). That thread signals its event 6 right after it
+ * (ailineartaskthreadmanager.cpp:806); the 12 + 8 manual-reset events are reset by FUN_008c78c0 when main starts the
+ * AI threads, so the event means "this frame's cell update is done", or, in a frame without AI work, stays set from
+ * the last one. The manager is g_011dfa50 (FUN_00713d80): apThreads[3] at +0, ppEvents[2] at +0x8c. With one AI
+ * thread (iNumHWThreads 2) apThreads[1] is null, nothing signals event 6 and the cell update runs before that
+ * thread's own signal, so there is nothing to wait for. A bounded wait (FNVNX_MT1_SYNC_MS): if the event never
+ * comes, main goes on as the PC code does and the frame is counted. */
+#ifndef FNVNX_MT1_SYNC_MS
+#define FNVNX_MT1_SYNC_MS 100
+#endif
+extern "C" unsigned long WaitForSingleObject(void *, unsigned long);
+extern "C" unsigned int fnvnx_mt1_sync_timeouts;
+unsigned int fnvnx_mt1_sync_timeouts;
+extern "C" void fnvnx_mt1_wait_cell_update(void)
+{
+    const volatile uint32_t *mgr = (const volatile uint32_t *)(uintptr_t)0x011dfa50u;
+    if (!mgr[1]) return;                                   /* apThreads[1]: no second AI linear thread */
+    uint32_t events = mgr[0x90 / 4];                       /* ppEvents[1]: thread 2's 8 events */
+    if (!events) return;
+    void *ev = (void *)(uintptr_t)((const volatile uint32_t *)(uintptr_t)events)[6];
+    if (ev && WaitForSingleObject(ev, FNVNX_MT1_SYNC_MS) != 0)
+        fnvnx_mt1_sync_timeouts++;
 }
 
 /* The memory manager's globals, to compare with x86 (S14): after the constructor, InitializeGlobal 0x00866690 has
