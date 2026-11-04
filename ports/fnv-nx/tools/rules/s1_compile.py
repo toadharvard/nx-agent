@@ -2461,9 +2461,78 @@ def r_critical_section_tail(path, text, stats):
 # Reallocate 0x00aa2420; each slot forwards to that function by its decomp name (the link binds it by address).
 # Slots 7-9 (7 is InitHolder's no-argument call) have no function in the decomp: declared only, they stay
 # unresolved until the exe gives their addresses.
+#
+# NiStandardAllocator (vftable 0x010a24fc, 10 slots; nigpuprogramcache.cpp's FUN_00aa2200 creates it with one
+# virtual, and InitHolder's tail call goes through its slot 7, f13 J-0080). Its functions are the ones of
+# gamebryo2.2/corelibs/nisystem/nistandardallocator.cpp (the 360 source path of 0x00aa3090..0x00aa3560), laid out in
+# slot order like BSNiAllocator's and with the same signatures: 1 Allocate 0x00aa30c0 (prepends the size for the
+# default alignment, small blocks <= 0x100 from the small-object allocator DAT_011f622c), 2 Deallocate 0x00aa3150,
+# 3 Reallocate 0x00aa31b0 (StdAllocator::FUN_00aa31b0, which calls slots 1 and 2 itself), 4-6 the aligned set
+# 0x00aa3300 / 0x00aa3370 / 0x00aa33a0 (event 0xd / 0xe aligned blocks from MemoryManager), 7 Initialize 0x00aa3430
+# (creates the small-object allocator, Gamebryo's NiStandardAllocator::Initialize) and 8 Shutdown 0x00aa3460
+# (deletes it, NiStandardAllocator::Shutdown); `this` is unused in all of them, the decomp writes them as free
+# __stdcall / __cdecl functions. Slot 0 (scalar deleting destructor) and slot 9 have no function in the decomp and
+# stay unresolved (slot 0 is declared inline so that Allocate is the key function and the vtable is emitted).
+# StdAllocator::FUN_00aa31b0 reaches slots 1 and 2 through StdAllocator's own declaration, whose virtual destructor
+# takes two Itanium slots: there it becomes the MSVC slot-0 plain virtual, so Allocate / Deallocate are slots 1 / 2.
 
-VTBL1_UNITS = {
-    'staging/blk_00aa0000_o2.cpp': (
+VTBL1_NISTD = '''unsigned char* __stdcall FUN_00aa30c0(unsigned int* pCount, int* pType, int eType, unsigned char bFlag, int a4, int a5, int a6);
+void __stdcall FUN_00aa3150(void* pvMemory, int aiAllocationType, unsigned int stSizeInBytes);
+struct StdAllocator
+{
+    void* FUN_00aa31b0(void* pvMemory, unsigned int& stSizeInBytes, unsigned int& stAlignment, int aiAllocationType,
+                       bool bProvideAccurateSizeOnDeallocate, unsigned int stSizeCurrent, const char* pcFile, int iLine,
+                       const char* pcFunction);
+};
+void* __stdcall FUN_00aa3300(unsigned int puiSize, unsigned char* pucAlign, int iType, int iUnk, int iUnkCur, int iUnkValue, int iNewUnk);
+void __stdcall FUN_00aa3370(void* apBlock, int e, unsigned int s);
+void* __stdcall FUN_00aa33a0(void* pvMem, unsigned int* puiSize, unsigned char* pucAlign, int iType, int iUnk, int iUnkCur, int iUnkValue, int iNewUnk, int iTmpUnk);
+namespace fnv_00aa3430 { void __cdecl AllocateStandardAllocator(); }
+void __cdecl DestroySmallAllocPools();
+struct NiStandardAllocator   /* fnv-nx VTBL1: the 10 slots of the vftable at 0x010a24fc in MSVC order */
+{
+    static void* __cdecl operator new(size_t);   /* NEW1's form */
+    inline virtual void* Destroy(unsigned int flags);   /* slot 0: not in the decomp */
+    virtual void* Allocate(unsigned int& size, unsigned int& alignment, int event, bool accurate, const char* file,
+                           int line, const char* function);   /* the key function: defined below */
+    virtual void Deallocate(void* p, int event, unsigned int size) { FUN_00aa3150(p, event, size); }
+    virtual void* Reallocate(void* p, unsigned int& size, unsigned int& alignment, int event, bool accurate,
+                             unsigned int current, const char* file, int line, const char* function)
+    {
+        return ((StdAllocator*)this)->FUN_00aa31b0(p, size, alignment, event, accurate, current, file, line, function);
+    }
+    virtual void* AlignedAllocate(unsigned int& size, unsigned int& alignment, int event, bool accurate,
+                                  const char* file, int line, const char* function)
+    {
+        return FUN_00aa3300((unsigned int)&size, (unsigned char*)&alignment, event, accurate, (int)file, line,
+                            (int)function);
+    }
+    virtual void AlignedDeallocate(void* p, int event, unsigned int size) { FUN_00aa3370(p, event, size); }
+    virtual void* AlignedReallocate(void* p, unsigned int& size, unsigned int& alignment, int event, bool accurate,
+                                    unsigned int current, const char* file, int line, const char* function)
+    {
+        return FUN_00aa33a0(p, &size, (unsigned char*)&alignment, event, accurate, (int)current, (int)file, line,
+                            (int)function);
+    }
+    virtual void Initialize() { fnv_00aa3430::AllocateStandardAllocator(); }
+    virtual void Shutdown() { DestroySmallAllocPools(); }
+    virtual void Slot9();   /* not in the decomp */
+};
+void* NiStandardAllocator::Allocate(unsigned int& size, unsigned int& alignment, int event, bool accurate,
+                                    const char* file, int line, const char* function)
+{
+    return FUN_00aa30c0(&size, (int*)&alignment, event, accurate, (int)file, line, (int)function);
+}'''
+VTBL1_NISTD_RX = re.compile(r'^struct NiStandardAllocator\s*\{\s*static void\* __cdecl operator new\((?:unsigned int|size_t)\);\s*'
+                            r'virtual void func\(\);\s*\};', re.M)
+
+VTBL1_SITES = [
+    ('gamebryo2.2/corelibs/nimain/nigpuprogramcache.cpp', VTBL1_NISTD_RX, VTBL1_NISTD),
+    ('gamebryo2.2/corelibs/nimain/nigpuprogramcache_rtm_variant.cpp', VTBL1_NISTD_RX, VTBL1_NISTD),
+    ('gamebryo2.2/corelibs/nisystem/nistandardallocator.cpp',
+     re.compile(r'^([ \t]*)virtual ~StdAllocator\(\);', re.M),
+     r'\1virtual void* Destroy(unsigned int flags);   /* fnv-nx VTBL1: MSVC slot 0, the scalar deleting destructor */'),
+    ('staging/blk_00aa0000_o2.cpp',
         re.compile(r'^struct FUN_00aa2230_BSNiAllocator\s*\{\s*virtual void m_virtual0\(\);\s*'
                    r'FUN_00aa2230_BSNiAllocator\(\);\s*\};', re.M),
         '''enum NiMemEventTypeAA2 { NI_MEM_EVENT_AA2_UNKNOWN };
@@ -2510,18 +2579,18 @@ void* FUN_00aa2230_BSNiAllocator::Destroy(unsigned int flags)
 {
     return ((fnv_00aa24a0::BSNiAllocator*)this)->Destroy(flags);
 }'''),
-}
+]
 
 def r_stand_in_interfaces(path, text, stats):
-    """VTBL1: the full virtual interface, in MSVC slot order, for the stand-ins listed in VTBL1_UNITS (see above)."""
+    """VTBL1: the full virtual interface, in MSVC slot order, for the stand-ins listed in VTBL1_SITES (see above)."""
     rel = path.replace(os.sep, '/')
-    for unit, (rx, body) in VTBL1_UNITS.items():
+    for unit, rx, body in VTBL1_SITES:
         if not rel.endswith('/src/' + unit): continue
         m = rx.search(text)
         if not m: continue
         # same line count: the replacement is longer, so it goes on the stand-in's lines joined up
         nl = m.group(0).count('\n')
-        text = text[:m.start()] + body.replace('\n', ' ') + '\n' * nl + text[m.end():]
+        text = text[:m.start()] + m.expand(body).replace('\n', ' ') + '\n' * nl + text[m.end():]
         stats['VTBL1'] += 1
     return text
 

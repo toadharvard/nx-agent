@@ -417,6 +417,18 @@ check('VTBL1 BSNiAllocator gets its 10 slots, same line count', got,
       ['virtual void* Allocate(', 'virtual void Slot9();', 'AllocateZeroedMemory(size, alignment', '}\n\n\n\n\nint b;'],
       ['m_virtual0'])
 
+got = run(s1.r_stand_in_interfaces, 'int a;\nstruct NiStandardAllocator\n{\n    static void* __cdecl operator new(size_t);\n'
+          '    virtual void func();\n};\nint b;\n', '/x/src/gamebryo2.2/corelibs/nimain/nigpuprogramcache.cpp')
+check('VTBL1 NiStandardAllocator gets its 10 slots, 7 / 8 Initialize / Shutdown, same line count', got,
+      ['inline virtual void* Destroy(unsigned int flags);', 'FUN_00aa3150(p, event, size);',
+       'virtual void Initialize() { fnv_00aa3430::AllocateStandardAllocator(); }',
+       'virtual void Shutdown() { DestroySmallAllocPools(); }', 'virtual void Slot9();', '}\n\n\n\n\nint b;'],
+      ['func()'])
+got = run(s1.r_stand_in_interfaces, 'struct StdAllocator\n{\n    virtual ~StdAllocator();\n    virtual void* Allocate();\n};\n',
+          '/x/src/gamebryo2.2/corelibs/nisystem/nistandardallocator.cpp')
+check('VTBL1 StdAllocator: the destructor is MSVC slot 0, one plain slot', got,
+      ['    virtual void* Destroy(unsigned int flags);   /* fnv-nx VTBL1', '    virtual void* Allocate();'], ['~StdAllocator'])
+
 # ---- ALIGN1
 got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
           '__declspec(align(16))class H:public C\n{\n};\n__declspec(align(16))struct TAU32;\n'
