@@ -47,13 +47,18 @@ void os_cond_broadcast(os_cond_t *c);
 typedef struct os_thread os_thread;
 typedef void (*os_thread_fn)(void *arg);
 #define OS_PRIO_NORMAL 0                    /* Win32 THREAD_PRIORITY_* scale: -15..15, 0 normal */
-/* Creates a thread that does not run until os_thread_start. cpu < 0: any core. */
+/* Creates a thread that does not run until os_thread_start. cpu < 0: any core; 0..63: that core;
+ * OS_THREAD_ROLE(r): placement role r, which the backend maps to cores and a priority (the Switch guest: the
+ * host's table, toolchain/host/placement.h; other backends: any core). */
+#define OS_THREAD_ROLE(r) (0x100 | (r))
 os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int prio, int cpu);
 int os_thread_start(os_thread *t);
 int os_thread_join(os_thread *t);           /* waits for exit; does not free */
 void os_thread_free(os_thread *t);          /* after join, or to detach a running thread */
 int os_thread_set_priority(os_thread *t, int prio);   /* t == NULL: calling thread */
-int os_thread_set_cpu(os_thread *t, int cpu);         /* t == NULL: calling thread; best effort */
+int os_thread_set_cpu(os_thread *t, int cpu);         /* t == NULL: calling thread; best effort; that core only */
+/* ideal core (< 0: keep) and affinity mask over the logical processors (0: keep); t == NULL: calling thread */
+int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask);
 int os_thread_suspend(os_thread *t);        /* -1 where unsupported */
 int os_thread_resume(os_thread *t);
 void os_thread_exit(void) __attribute__((noreturn));

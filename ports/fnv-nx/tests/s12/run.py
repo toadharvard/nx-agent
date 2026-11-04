@@ -9,7 +9,9 @@ libclang-18-dev headers (fnvcheck is built into the scratch dir given as argumen
 2. cases.cpp: every fnvcheck check fires where `// expect:` says, and nowhere else.
 3. layouts.cpp: the msvc and gnu clang configurations give the expected sizes, and the gnu proxy agrees with real
    GCC AArch64 ILP32 on every record.
-4. the layout steps of run.sh (clang_pass.sh, layout_diff.py, layout_probe.py) on a one-unit tree of layouts.cpp.
+4. the layout steps of run.sh (clang_pass.sh, layout_diff.py, layout_probe.py) and report.py on a one-unit tree of
+   layouts.cpp.
+5. crosscheck.py attributes a site to the tagged function whose body contains it.
 """
 import os
 import re
@@ -37,6 +39,13 @@ def bash_array(name):
 def clang_args(scratch, cfg):
     script = ('. "%s/clang_env.sh"; clang_env_setup "%s" "%s" >/dev/null; printf "%%s\\n" "${CLANG_%s[@]}" '
               '-resource-dir "$($CLANG -print-resource-dir)"' % (STATIC, scratch, PORT, cfg.upper()))
+    return subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True).stdout.split('\n')[:-1]
+
+
+def clang_exclude(scratch):
+    """fnvcheck's --exclude options of clang_env.sh (generated headers, shim, sse2neon, clang's intrinsic headers)"""
+    script = ('. "%s/clang_env.sh"; clang_env_setup "%s" "%s" >/dev/null; printf "%%s\\n" "${CLANG_EXCLUDE[@]}"'
+              % (STATIC, scratch, PORT))
     return subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True).stdout.split('\n')[:-1]
 
 
@@ -84,17 +93,21 @@ def facts(scratch):
 
 def run_fnvcheck(scratch, cfg, src, extra):
     exe = os.path.join(scratch, 'bin', 'fnvcheck')
-    args = [exe, '--root=' + HERE] + extra + [src, '--'] + clang_args(scratch, cfg)
+    args = [exe, '--root=' + HERE] + clang_exclude(scratch) + extra + [src, '--'] + clang_args(scratch, cfg)
     r = subprocess.run(args, capture_output=True, text=True, cwd=HERE)
     return r.stdout
 
 
 def cases(scratch):
-    rows = run_fnvcheck(scratch, 'gnu', 'cases.cpp', []).splitlines()
-    got = {}
+    rows = run_fnvcheck(scratch, 'gnu', 'cases.cpp', ['--exclude=' + os.path.join(HERE, 'shimlike')]).splitlines()
+    got, elsewhere = {}, []
     for r in rows:
         p = r.split('\t')
+        if p[1] != 'cases.cpp':     # the shim / sse2neon / generated headers are never the tree's (--exclude)
+            elsewhere.append('%s %s:%s' % (p[0], p[1], p[2]))
+            continue
         got.setdefault(int(p[2]), set()).add(p[0] + ('/' + p[4] if p[0] == 'ORDER-ARGS' else ''))
+    check(not elsewhere, 'cases.cpp: no rows outside the unit (%s)' % ', '.join(elsewhere[:4]))
     want = {}
     for n, line in enumerate(open(os.path.join(HERE, 'cases.cpp')), 1):
         m = re.search(r'// expect: (.*)$', line)
@@ -157,11 +170,43 @@ def pipeline(scratch):
     rows = [l.split('\t') for l in open(os.path.join(e, 'out', 'layout', 'diff.tsv')).read().splitlines()[1:]]
     causes = {r[1].split('|')[1]: r[0] for r in rows}
     want = {'B1': 'bitfield', 'B2': 'bitfield', 'B3': 'bitfield', 'B4': 'bitfield', 'P1': 'pack-align',
-            'P2': 'pack-align', 'TwoEmpty': 'empty-base', 'VEmpty': 'empty-base-offset'}
+            'P2': 'pack-align', 'TwoEmpty': 'empty-base', 'VEmpty': 'empty-base-offset', 'AlignPre': 'align-ignored',
+            'UsesPre': 'align-ignored'}
     check(causes == want, 'layout_diff causes %s' % sorted(causes.items()))
     r = subprocess.run(['python3', os.path.join(STATIC, 'layout_probe.py'), 'tree', 'out'], cwd=e, capture_output=True, text=True)
     res = [l.split('\t') for l in open(os.path.join(e, 'out', 'probe', 'result.tsv')).read().splitlines()[1:]]
     check(len(res) >= 20 and all(x[2] == 'ok' for x in res), 'layout_probe: GCC agrees with the proxy (%s)' % r.stdout.strip())
+    # report.py: clang's "place it after" warning is the ALIGN-IGNORED root, the two records LAYOUT-ALIGN-IGNORED
+    r = subprocess.run(['python3', os.path.join(STATIC, 'report.py'), 'tree', 'out'], cwd=e, capture_output=True, text=True)
+    counts = dict(l.rsplit('\t', 1) for l in open(os.path.join(e, 'out', 'counts.tsv')).read().splitlines())
+    check(counts.get('ALIGN-IGNORED') == '1' and counts.get('LAYOUT-ALIGN-IGNORED') == '2',
+          'report: ALIGN-IGNORED %s, LAYOUT-ALIGN-IGNORED %s (%s)' % (counts.get('ALIGN-IGNORED'),
+                                                                      counts.get('LAYOUT-ALIGN-IGNORED'), r.stderr[-200:]))
+
+
+def build_flags():
+    """BUILD_FLAGS is exactly compile.sh's flag set; census.sh has all of it but the syntax-only exemptions"""
+    def script(name):  # -ffile-prefix-map only rewrites recorded paths (tools/farm/): not a semantics flag
+        return [f for f in subprocess.run(['bash', '-c', '. "%s/flags.sh"; script_flags "%s"' % (STATIC, os.path.join(PORT, name))],
+                                          capture_output=True, text=True, check=True).stdout.split()
+                if not f.startswith('-ffile-prefix-map')]
+    want = set(bash_array('BUILD_FLAGS'))
+    check(want == set(script('tools/link/compile.sh')), 'flags.sh BUILD_FLAGS == compile.sh flags (%s)' % sorted(
+        want ^ set(script('tools/link/compile.sh'))))
+    missing = want - set(bash_array('SYNTAX_ONLY_EXEMPT')) - set(script('tools/census.sh'))
+    check(not missing, 'census.sh has every build flag but -fPIC (%s)' % sorted(missing))
+
+
+def crosscheck():
+    """crosscheck.py: a site belongs to the function whose tagged, brace-matched body contains it"""
+    sys.path.insert(0, STATIC)
+    import crosscheck as cc
+    text = ('// @fnv 0x00401000\nint f(int a)\n{\n  const char *s = "}";\n  return a; // }\n}\n'
+            'struct Between { int x; };\n'
+            '// @fnv 0x00401010\nint g();\n'
+            '// @fnv 0x00401020\nvoid h() { /* { */ if (1) { } }\n')
+    spans = cc.function_spans(text)
+    check(spans == [(1, 6, 0x401000), (10, 11, 0x401020)], 'crosscheck function_spans %s' % spans)
 
 
 def main():
@@ -169,7 +214,9 @@ def main():
     os.makedirs(scratch, exist_ok=True)
     r = subprocess.run(['bash', os.path.join(STATIC, 'build.sh'), scratch], capture_output=True, text=True)
     check(r.returncode == 0, 'fnvcheck builds (%s)' % r.stderr.strip()[-300:])
+    build_flags()
     facts(scratch)
+    crosscheck()
     if r.returncode == 0:
         cases(scratch)
         layouts(scratch)

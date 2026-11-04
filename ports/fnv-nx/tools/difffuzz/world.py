@@ -38,6 +38,13 @@ SENTINEL = 0x0f000000
 MAX = 1 << 32
 
 
+# where neither machine has code: a jump there is an indirect call through a pointer the case planted (a vtable
+# slot of a fuzzed object); both machines treat it as an intercepted call of that address instead of executing the
+# world's bytes (x86: plus .text outside the loaded code, which x86emu already intercepts; AArch64: .text too)
+WILD_X86 = ((NULL_END, TEXT[0]), (TEXT[1], 0x0e000000), (0x0e100000, SENTINEL), (SENTINEL + PAGE, MAX))
+WILD_A64 = ((NULL_END, 0x08000000), (0x0c000000, SENTINEL), (SENTINEL + PAGE, MAX))
+
+
 def page_of(a):
     return a & ~(PAGE - 1)
 
@@ -157,8 +164,49 @@ def stack_fill(seed, n):
     return random.Random(seed ^ 0x5a5a5a5a).randbytes(n)
 
 
+_GARBAGE = {}
+
+
+def garbage_words(seed, side):
+    """The 32-bit words the harness plants as garbage for a case on one machine ('x86' / 'a64'): non-argument
+    registers, registers clobbered by intercepted calls, the stack fill. An argument equal to one of them came from
+    uninitialised state on that machine."""
+    key = (seed, side)
+    got = _GARBAGE.get(key)
+    if got is None:
+        g = set()
+        if side == 'x86':
+            g.update(garbage32(seed, i) for i in range(7))
+            g.update(garbage32(seed, 100 + k) for k in range(64))
+            fill = stack_fill(seed, 0x1000)
+        else:
+            g.update(garbage32(seed, 200 + i) for i in range(31))
+            g.update(garbage32(seed, 300 + i) for i in range(31))
+            g.update(garbage32(seed, 400 + i) for i in range(32))
+            g.update(garbage32(seed, 600 + i + 32 * k) for k in range(64) for i in range(1, 18))
+            fill = stack_fill(seed ^ 0xa5, 0x1000)
+        g.update(struct.unpack_from('<I', fill, o)[0] for o in range(0, len(fill) - 3))
+        g.discard(0)
+        got = _GARBAGE[key] = g
+        if len(_GARBAGE) > 64:
+            _GARBAGE.clear()
+            _GARBAGE[key] = g
+    return got
+
+
 def garbage32(seed, k):
     return random.Random((seed * 7919 + k * 104729) & 0xffffffff).getrandbits(32)
+
+
+def result_bytes(case, k, n):
+    """The canned result of the k-th intercepted call when it is returned through memory (or a register pair
+    wider than eax:edx): the case's canned bytes, extended with garbage words; the same on both machines."""
+    b = bytearray(case.ret_bytes(k))
+    i = 0
+    while len(b) < n:
+        b += garbage32(case.seed, 900 + 64 * k + i).to_bytes(4, 'little')
+        i += 1
+    return bytes(b[:n])
 
 
 def u32(b, o=0):

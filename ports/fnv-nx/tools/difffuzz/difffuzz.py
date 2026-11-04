@@ -81,6 +81,76 @@ def cmd_recheck(a):
     print('rechecked')
 
 
+def cmd_triage(a):
+    """Re-probe saved divergences on the current objects and harness: <dir>/triage_<tag>.jsonl with the current
+    divergence and cause (classify.hint); only files whose recheck_<tag> status is `still` (or all with --all)."""
+    import glob
+    import classify
+    uc = _cache()
+    for d in a.dirs:
+        rc = {}
+        rp = os.path.join(d, 'recheck_%s.jsonl' % a.tag)
+        if os.path.exists(rp):
+            for line in open(rp):
+                x = json.loads(line)
+                rc[x['file']] = x['status']
+        prev = {}
+        if a.only:
+            tp = os.path.join(d, 'triage_%s.jsonl' % a.tag)
+            if os.path.exists(tp):
+                for line in open(tp):
+                    x = json.loads(line)
+                    prev[x['file']] = (x.get('hint') or {}).get('cause')
+        out = open(os.path.join(d, 'triage_%s%s.jsonl' % (a.tag, '_' + a.only if a.only else '')), 'w')
+        for p in sorted(glob.glob(os.path.join(d, 'div', '*.json'))):
+            f = os.path.basename(p)
+            if rc and rc.get(f) != 'still' and not a.all:
+                continue
+            if a.only and prev.get(f) != a.only:
+                continue
+            rec = json.load(open(p))
+            try:
+                addr = int(rec['address'], 16)
+                pair, t = uc.pair(rec['source'], addr)
+                case = world.Case.from_json(rec['case'])
+                _, _, div = pair.run(case)
+                fn = uc.x86_unit(rec['source'], addr).funcs[addr]
+                h = classify.hint(pair, t, case, div, fn, 200000) if div else dict(cause='gone')
+                h.pop('_runs', None)
+                if div and h.get('cause') in ('unclassified', 'signedness?') and a.reads:
+                    import readset
+                    h['reads'] = readset.probe(pair, case)
+            except Exception as e:  # noqa: BLE001
+                div, h = None, dict(cause='error', error=str(e)[:200])
+            out.write(json.dumps(dict(file=f, address=rec['address'], symbol=rec['symbol'], divergence=div,
+                                      hint=h, was=(rec.get('hint') or {}).get('cause'))) + '\n')
+            out.flush()
+    print('triaged')
+
+
+def cmd_effects(a):
+    """First differing instruction-level effect of saved divergences (effects.py): one JSON line per file."""
+    import effects
+    uc = _cache()
+    files = list(a.files)
+    if a.list:
+        files += [x.strip() for x in open(a.list) if x.strip()]
+    out = open(a.out, 'w') if a.out else sys.stdout
+    for p in files:
+        rec = json.load(open(p))
+        try:
+            addr = int(rec['address'], 16)
+            pair, t = uc.pair(rec['source'], addr)
+            case = world.Case.from_json(rec['case'])
+            _, _, div = pair.run(case)
+            r = effects.analyse(pair, t, case, div)
+        except Exception as e:  # noqa: BLE001
+            r = dict(first='error', error=str(e)[:200])
+        r.update(file=p, address=rec['address'], symbol=rec['symbol'])
+        out.write(json.dumps(r) + '\n')
+        out.flush()
+
+
 def cmd_lockstep(a):
     import lockstep
     lockstep.run(a)
@@ -99,6 +169,11 @@ def main():
     p.set_defaults(fn=cmd_repro)
     p = sub.add_parser('recheck'); p.add_argument('dir'); p.add_argument('--tag', default='')
     p.set_defaults(fn=cmd_recheck)
+    p = sub.add_parser('triage'); p.add_argument('dirs', nargs='+'); p.add_argument('--tag', default='')
+    p.add_argument('--all', action='store_true'); p.add_argument('--reads', action='store_true')
+    p.add_argument('--only', default='', help='only records whose current cause is this'); p.set_defaults(fn=cmd_triage)
+    p = sub.add_parser('effects'); p.add_argument('files', nargs='*'); p.add_argument('--list', default='')
+    p.add_argument('--out', default=''); p.set_defaults(fn=cmd_effects)
     p = sub.add_parser('lockstep'); p.add_argument('addr'); p.add_argument('--source', default=None)
     p.add_argument('--bg', default='zero'); p.add_argument('--out', default=str(config.WORK / 'lockstep'))
     p.add_argument('--max-steps', type=int, default=2000000); p.add_argument('--depth', type=int, default=64)

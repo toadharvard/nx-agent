@@ -101,6 +101,7 @@ int fnvnx_thread_create(struct __pthread_t **out, void *(*fn)(void *), void *arg
     *out = t;
     return 0;
 }
+uint64_t fnvnx_thread_host_id(struct __pthread_t *t) { return t ? t->host_id : 0; }
 int fnvnx_thread_start(struct __pthread_t *t) {
     return fnvnx_hcall1(fnvnx_host->thread_start, t->host_id) ? EAGAIN : 0;
 }

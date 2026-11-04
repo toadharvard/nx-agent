@@ -1300,3 +1300,576 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - add_sites=435 add_literal_sites=320 distinct_literal_pass_ids=286 header_unused_range_ids_emitted=30
 * **next** - The render machine continues N0 (S6n) and the enumerator and oracle (V6n), starting with the real pass
   numbering.
+
+### J-0067 | 2026-11-04 | stream: S11-equivalence | status: wip | parent: J-0037,J-0051,J-0052
+
+* **did** - Ran the MSVC 2008 gate of the 8fff58b rule set (the neutral rules plus FTOL1) on all 2,988 units:
+  - attribution by leaving out groups of rules, single rules and pairs of groups;
+  - `/EHs-c-` builds of the units that differ;
+  - MSVC class layouts of 238 units.
+  The tool now binds names as the link does: prepared recipes with S1b renames, GAME1 names, STATIC1 definitions,
+  literals. New commands: `summarize`, `layouts`, `--lean`. Orchestrator re-ran tests/s11: ok.
+* **found** - 2,348 of the 2,890 units that compile on both sides are identical. 1,045 of 59,122 functions differ:
+  - **EH-only, 754:** EXC1 562, NEW2 55, CTOR1 31, combinations of rules.
+  - **Retargets, 177:** DECL1 calls the CRT directly instead of the game's forwarding wrappers (153); FTOL1
+    `_ftol2_sse` -> `_ftol2` (9).
+  - **Code, 114:**
+    - CTOR1 placement-new null checks (60);
+    - **DECL1 `<math.h>` float/double overloads (27)**, e.g. GetGameHoursPassed now passes a double to the game's
+      `_floor`;
+    - STATIC1 reloads (15), XINC1 ecx (4), NEW4 allocator (1), UNIT1 SpeedTree fix (1), joint (6).
+  - **No build under MSVC, 97:** DECL1 65 (mostly MSVC-only limits), GOTO1 3 (fixed upstream), STR1 2 (a string
+    declared as both array and scalar), other single rules 6, joint 21.
+  - **GAME1 (D13) confirmed:** the DECL1 rebinding units are identical again.
+  - **TAIL1:** 0 of 18,269 class layouts differ.
+  - **D15 refuted for NiCriticalSection:** with the 24-byte CRITICAL_SECTION, `NiCriticalSection` is 124 bytes where
+    the x86 code needs 128. GraphicsRenderer (3 of them) reads +0x1f4 where the exe reads +0x200; RecursiveLock
+    40 -> 36, BSShaderAccumulator 896 -> 888.
+  - DECL1/DECL2 insert SDK includes inside the decomp's `#pragma pack(push, 4)` (16 sites): 59 SDK structs shrink
+    under MSVC, and the shim's LARGE_INTEGER is 4-aligned in those units on the target.
+* **decided** - EH-only differences, and retargets to forwarding wrappers with the same bytes, count as equivalent.
+  D15 is reopened (ARCHITECTURE.md).
+* **metrics** - equiv_units_identical=2348 equiv_units_differ=542 equiv_functions_differ=1045 equiv_eh_only=754
+  equiv_retarget=177 equiv_code=114 equiv_no_build=97 tail1_layout_classes=18269 tail1_layout_differ=0
+* **next** - S1:
+  - NiCriticalSection +4 bytes, placed where the x86 code proves them;
+  - STR1 uses the declaration in scope;
+  - DECL1 math overloads keep the decomp's float/double;
+  - the shim's SDK headers set their own packing.
+  S11 gates S1 round 8 and re-checks D15.
+
+### J-0068 | 2026-11-04 | stream: S9-build | status: wip | parent: J-0041,J-0054
+
+* **did** - The committed pipeline now runs S2c's and S5's hand flow (`make`, tools/pipeline/build.py):
+  - **Provenance (J-0054):** `build/prepare/prepared_from.txt` and `.json` hold the port commit, the decomp commit and
+    any uncommitted changes to prepare inputs. census, compile, link, guest, boot and package carry that record, and
+    refuse inputs from another commit unless `FORCE_STALE=1`.
+  - **Link:** S2c's order resolve -> probe -> resolve -> apply -> check, then check_rebind.
+  - **New stage `boot`:** S5's emulated boot, emu_summary and frontier.
+  - **Defaults and options:** `GAME_CXX=standin` by default; new variables PREPARED, UNITS, CROSS_BIN, MSVC_OBJS,
+    UNITS_RENAMES, LINK_SEED and GAME_NEW.
+  - **Tests and tools:** tests/s9 (provenance); tools/pipeline/linkdiff.py.
+  - **Docs:** BUILD.md maps every hand step to the pipeline.
+
+  Orchestrator re-ran tests/s9: OK.
+* **found**:
+  - **Fingerprints were too narrow.** Prepare missed `patches/` and `shim/include/fnvnx_win32.h`; link missed the
+    provider tables, units_renames.tsv, the shim and sse2neon. The second resolve was skipped when only vtables
+    changed.
+  - **fnvlink's caches outlive the tree they were measured on.** The layout cache has no content key, and the vtable
+    caches ignore headers, so S2c's seeds carry layouts and vtables from older trees into later runs (sent to S2c).
+  - **Subset run** (31 units, S2c's fresh8 tree): 29/29 objects byte-identical to f11. Against f12: 0 unexplained
+    differences in refs, ABI verdicts, objcopy edits and rewritten objects. The guest is relocatable and boot enters
+    WinMain. Stale inputs are refused; a rerun leaves all stages cached.
+* **decided** - Layout and vtable caches from another tree are not reused. The emulated boot is a pipeline stage.
+* **metrics** - subset_units=31 subset_objects_identical=29/29 linkdiff_unexplained=0 rerun_cached_stages=11/11
+  provenance_refused=2
+* **next** - S9 makes `make BOOT=1` self-sufficient on a fresh machine, so a farm runner can run it:
+  - the cross tools come from the toolchain stage, not s2c/xtc;
+  - a committed generator for EXTERN_TEXT (`s4/addr_ids.txt`).
+
+### J-0069 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0062,J-0063
+
+* **did** - New rule STAND1 ("one function per address"). An untagged definition is removed when units.json binds
+  its MSVC name to the address of a tagged definition in the same unit; a free function keeps its declaration, so
+  calls go by name to the tagged one. Tree-wide that is 186 pairs in 92 units, and all 92 still compile. Example:
+  `new FUN_00632ec0` in blk_00620000 now calls the real constructor 0x00632ec0, which fixes 60 of S5's null reads.
+  Orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+* **found** - Four vftables can't be filled without the player's exe:
+  - 0x0101772c (INISettingCollection singleton);
+  - 0x0104e6ac;
+  - 0x01082ed8;
+  - FUN_004de530's.
+  The decomp knows INISettingCollection's 10-slot MSVC interface (setting_declarations.h), but no unit defines or
+  binds its slot functions. With the exe, S3 maps the slot pointers. Until then the 736 + 31 AddSetting null calls
+  stay; traps would gain nothing.
+* **next** - S1:
+  - D15 (NiCriticalSection +4 bytes);
+  - STR1;
+  - DECL1 math overloads;
+  - SDK includes inside pack regions;
+  - namespace statics (STATIC1).
+
+### J-0070 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0055,J-0056
+
+* **did** - Replayed all 529 saved divergences (405 distinct, 7 campaigns) on S2c's f11 (tree from 0c630cf).
+  Harness changes:
+  - edx-dummy and oracle-garbage argument filters;
+  - a model of MSVC custom register conventions;
+  - IAT slots as import stubs on both sides (Interlocked builtins);
+  - sized delete and atexit equivalences;
+  - code pointers stored as data are compared as original addresses;
+  - a `triage` command with a read-set probe;
+  - lockstep runs of 9 dynamic initializers;
+  - check_statics counts namespace-scope statics.
+
+  Merged d9c4bf0..828473c. Orchestrator re-ran the self-test: 0 failures.
+* **found**:
+  - **Replay of the 405 saved divergences:** 103 gone, 8 soft, 294 still. By cause: custom-cc 11/23 gone, call-flow
+    21/62, unclassified 56/155.
+  - **Verdicts on f11** (the f10 campaigns: 1,531 functions, 65,570 executions): hard 147 -> 115, soft 90 -> 86,
+    oracle gap 11 -> 7. FALL1: 3 of the 4 trapping functions gone.
+  - **Port-bug candidates:**
+    - STATIC1 misses namespace-scope statics (3 really diverge, e.g. fnv_0077da30::g_pHudMainMenuInstance folded to
+      null) -> S1;
+    - XINC1 this-not-passed 00b81330 -> 00ba95e0, 00bbe020 -> 00c0abd0 -> S2c (patches);
+    - ref-passes-fewer ecx 00a564a0 -> 00a36fd0 (verdict fixed in J-0059);
+    - varargs logger 00700350 -> 00703c00 -> S2c (override);
+    - vtable pairing: 00404920 stores vptr 0x01012120, native 0x0104d338 -> S2c;
+    - Havok layout shifts: Jacobian 00d6cc80 +48; hkpMeshShape 00dcf460 and 00e48cb0 +16 -> S1;
+    - HasValidTriangle 004ff7e0 still traps (the x86 code stores a vptr and returns `this`) -> S1 (RET1 or a
+      declaration fix).
+  - **The 106 unclassified divergences still reproducing:** 45 read the same memory but compute a different result,
+    35 read different object fields, 17 different image globals, 4 are layout shifts, 5 mixed.
+  - **Lockstep:** 8 of 9 dynamic initializers agree. 00fbe990 is soft: a vptr stored as data, where the decomp and
+    native names for the class differ.
+* **decided** - custom-cc functions get a real verdict only when the oracle outcome does not depend on planted
+  garbage. Arguments whose oracle value is garbage are not compared.
+* **metrics** - df_replayed=405 df_replay_gone=103 df_replay_soft=8 df_hard_f11=115 df_soft_f11=86
+  df_oracle_gap_f11=7 unit_local_image_vars=610 namespace_statics_image=77 namespace_statics_diverging=3
+  lockstep_dyninit_agree=8/9
+* **next** - Recheck after the S1/S2c fixes. Harness: compare the pointee for pointer-to-literal returns; triage the
+  45 "same reads, different result" by trace diff. Fuzz the Havok custom-cc functions now that they are modelled.
+
+### J-0071 | 2026-11-04 | stream: S14-dataimage-synth | status: wip | parent: J-0041,J-0057
+
+* **did** - Regenerated the synthetic image from S11's `obj/pristine` (2,987 objects) against f12's address map.
+  - Coverage measured per region, per kind and per referenced address.
+  - The boot globals are reported together with the functions that write them.
+  - Five self-consistency checks (`loader/synth/synth_checks.py`): pointers, vftable slot convention and arity, RTTI
+    chains, overlaps, `$SG` and literal terminators.
+  - New: tests/s14/test_checks.py and the synth section of DATAIMAGE.md.
+
+  Orchestrator re-ran tests/s14: OK (2 skipped).
+* **found**:
+  - **Two S14 bugs, fixed:** 561 `$SG` strings had their terminators left as soft padding, and 65 contested bytes
+    kept one claimant's value. Now 0 violations are S14's own.
+  - **1,463 violations with other owners:**
+    - 675 code pointers to units missing from the link (tesform.cpp 576, tes.cpp 65);
+    - 295 TypeDescriptor vptrs to the CRT's `type_info` vftable;
+    - 10 SEH labels;
+    - 1 slot bound to the wrong convention (FUN_00a8a9a0);
+    - 482 decomp inconsistencies (TypeDescriptor class/struct spellings, hierarchies declared differently, TLS
+      stand-ins, 45 vftables without an original COL).
+  - **Defined addresses:** 9,266 of the 48,664 referenced in the window are fully defined, 13,956 have no object.
+  - **Memory manager:** the four globals and the run-once flag are .bss zero, and the flag is 0 at WinMain+0x1d0, as
+    on x86. The x86 path is: constructor 0x00aa3880 -> InitializeGlobal -> InitHolder once, then WinMain's
+    FUN_00aa20b0(0) -> InitHolder again.
+  - **BSNiAllocator's vftable 0x010a2528 has 10 slots**, and the decomp's stand-in declares 1 (-> S1, J-0073).
+* **metrics** - synth_objects=2987 synth_known_bytes=246924 synth_addr_defined=9266/48664 synth_addr_missing=13956
+  synth_check_violations=1463 synth_s14_violations=0 tests_s14=20/20
+
+### J-0072 | 2026-11-04 | stream: S12-static | status: wip | parent: J-0041,J-0055
+
+* **did** - The static gate's flags are now exactly compile.sh's. It ran on f8 (0c630cf) over a 462-unit stratified
+  sample. New checks: BOOL-PUN, FLOAT-BITS, PTRDIFF-EXACT, OUTARG-UNINIT, ALIGN-IGNORED. New `crosscheck.py` against
+  S13's divergences. STATIC_CHECKS.md updated.
+
+  Orchestrator re-ran tests/s12 on the merged head. The flag-equality test failed on -ffile-prefix-map (a path-only
+  option); fixed by ignoring it. Two SHIFT32-VAR case expectations fail with the pinned sse2neon in S12's own
+  worktree too, so the test depends on the environment (-> S12).
+* **found**:
+  - The gate's GCC pass agrees with the f8 compile on 462/462 units.
+  - W-RETURN is closed by FALL1 + -Werror=return-type; 8 reachable FALL1 traps remain.
+  - The semantics flags are confirmed in the generated code.
+  - **New real layout bug:** `__declspec(align(n))` before the class key is dropped by GCC (22 roots; e.g. a 48-byte
+    record is 36 under GCC).
+  - S13 cross-check: all 38 ilp32-pointer divergences need x86 addresses >= 2 GiB (benign). OUTARG-UNINIT appears in
+    55 of 248 divergent functions (the fuzzer's stubs don't write out-parameters). F2U (152 sites) was never fuzzed.
+* **metrics** - s12_sample_units=462 s12_gcc_agree=462 s12_align_ignored=22 s12_outarg_div=55/248
+  s12_fall1_reachable=8
+* **next** - S1: ALIGN1, ENUM2, FTOI1, ATOM1. S13: out-parameter stubs, the S12 target list. S12: drop sse2neon
+  inline sites from SHIFT32-VAR, then a full run on the current head.
+
+### J-0073 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0067,J-0069,J-0071
+
+* **did** - Three fixes. Orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+  - **D15 closed by the new rule CSX2:** the 4 bytes sit behind the 24-byte PC section. NiCriticalSection hands
+    `this` to EnterCriticalSection, and m_ulThreadOwner is at 0x1C. CSX2 restores them wherever the decomp asserts
+    its generated `_RTL_CRITICAL_SECTION` as 28 bytes. Results: NiCriticalSection 128, RecursiveLock 40,
+    BSShaderAccumulator 896, BSThread 0x40, AbstractHeap 0x2100, and GraphicsRenderer reads +0x200/+0x208 again.
+    CSX1 keeps only the _FILETIME order.
+  - **STR1** decides by the declaration in scope at each use.
+  - **New rule VTBL1:** BSNiAllocator gets its 10 MSVC slots. Slots 0-6 are known from the decomp:
+    0 Destroy 0x00aa24a0, 1 Allocate 0x00aa2240, 2 Deallocate 0x00aa22b0, 3 Reallocate 0x00aa22f0, 4-6 the
+    aligned set 0x00aa2370 / 0x00aa23e0 / 0x00aa2420.
+* **found** - Slots 7-9 have no function in the decomp, and InitHolder calls slot 7. NiStandardAllocator's
+  Initialize/Shutdown exist (0x00aa3430/0x00aa3460), but BSNiAllocator does not inherit them; its base vftable
+  0x010a24d0 is the pure NiAllocator interface. They are bound only with the exe; no speculative binding.
+* **decided** - D15 (ARCHITECTURE.md) is resolved: the PC 24-byte CRITICAL_SECTION plus the 4 bytes the x86 code
+  proves behind it.
+
+### J-0074 | 2026-11-04 | stream: V1-link | status: wip | parent: J-0053,J-0059
+
+* **did** - Re-validated the salvaged harness.
+  - It fed every integer parameter 0, which hid swapped and missing moves; that is fixed, and it now has a pointer
+    arena.
+  - Independent checks of S2c's claims C1-C5 on f12:
+    - own ELF/COFF readers and name matcher;
+    - the run's own bridges executed under qemu ILP32 against the MSVC convention oracle;
+    - register-use analysis of the pristine MSVC objects.
+* **found** - C1 (binding by address), C3 (ecx-not-passed) and C5 (-fPIC rebinding) hold. C2 and C4 are broken.
+  Defects, each with a failing reproducer in tools/verify/v1_link/:
+  1. **High:** bridges for a `__fastcall` aggregate result put the hidden pointer in the wrong place (0x0056fa00,
+     25 references write the result over `*this`).
+  2. **High:** float vs double results are bound as "same" (130 pairs, 190 references; the caller reads d0, the
+     callee writes s0).
+  3. **High:** resolve never compares declarations when either side is a C name (`@f@N`, `_f@N`, `_f`). Examples:
+     0x00ba3130 is missing an edx-dummy bridge (28 references); 76 ecx/this-not-passed pairs go unflagged; about
+     2,300 C-named references are never compared.
+  4. **Medium:** for 35 classes the kept vtable and the kept typeinfo come from different units (weak symbols),
+     which affects `__dynamic_cast`.
+
+  Low severity: ecx-not-passed has 2 false positives (this-not-passed 10); 14 MSVC call sites push untruncated narrow
+  arguments. No edx-missing definition reads edx, so the edx-dummy decision holds.
+* **metrics** - v1_c1_samples=561 v1_c1_fail=0 v1_c2_bridges_run=127 v1_c2_fail=26 v1_c3_fp=2 v1_c4_ti_mixed_classes=35
+  v1_c5_bypass=0
+* **next** - S2c: defects 1-4. V1 re-runs the reproducers on the next link.
+
+### J-0075 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0066
+
+* **decided** - (user) Parallelise as far as the machines allow. The development agents stay in this session. Farm
+  runners in their own cloud sessions only run committed job scripts (tools/farm/) per integration head and publish.
+  Decomp-derived binaries go only to the private repository toadharvard/fnv-nx-build. The public nx-agent repository
+  gets text reports only.
+* **did**:
+  - **farm1:** the full census per head. First report: 2,907/2,978 clean on 67570bc, prepare 329 s, census 339 s on
+    4 CPUs.
+  - **farm2-5:** link objects, shards 1-4 of 4, via `compile_job.sh`. The job is incremental: a persistent tree
+    updated with rsync -c, a rebuild only on a header, flag or compiler change, stable crc32 shards. It publishes to
+    branch `c/<commit12>/<k>of4`; `fetch_objs.sh` collects and verifies the tree hash.
+  - **compile.sh -ffile-prefix-map:** objects no longer depend on where the tree lives.
+
+  Measured here: a shard round-trip publishes, fetches, verifies the tree hash and gives byte-identical objects. A
+  rerun with an unchanged tree recompiles nothing (1 s). The session git proxy refuses tag pushes and ref deletions,
+  so artifacts use branches.
+* **next** - S2c/S9 link from farm objects. Farm jobs for full build+boot (S9), whole-decomp fuzzing (S13) and the
+  MSVC gate (S11).
+
+### J-0076 | 2026-11-04 | stream: S15-perf | status: wip | parent: J-0018,J-0064
+
+* **did**:
+  - New `docs/PERF.md` and `tools/perf/`: objcensus, flagdiff, dyncount, frameprof, setting_names.
+    tests/s15 passes (orchestrator re-ran it: 0 failed).
+  - Static census of f12's 3,497 objects; 11 flag variants on 10 hot units.
+  - Dynamic counts, x86 oracle vs AArch64, on 23 hot functions through S13's harness.
+  - frameprof of the boot up to InitHolder.
+  - Console threading audit from the decomp and the platform layer.
+* **found**:
+  - **Every game thread and Nine's CSMT worker run on core 0.** CreateThread passes core -1, which becomes -2, a
+    one-core mask. The CSMT worker is a libnx pthread at priority 0x3B. So frame time is the sum of all threads,
+    not their max.
+  - SetThreadPriority and affinity on another thread's handle fail in the guest.
+  - `fs:[0x2c]` and `__fnvnx_tls_image` are separate TLS blocks, so 13 sites see two copies.
+  - Threading paths:
+    - The AI linear task threads (int 0x011c3ea4, likely `iNumHWThreads`, set from GetSystemInfo, at least 2) are
+      the PC default path.
+    - AI task threads (0x011dfb68) and Rendering Task Thread 2 (0x011c710c) are Xbox 360 paths, off on PC.
+  - **Instruction count is not where we lose time:** AArch64 code executes 0.92x the x86 instructions.
+  - **Our own overhead:**
+    - Ubuntu gcc 13's default stack protector covers 9.4 % of functions; without it, hot units have 4.73 % fewer
+      instructions.
+    - GOT loads: 4.66 per 100 instructions; ld does not relax them.
+    - Bridges: 1.1 % of call sites.
+    - sse2neon: under 1 %.
+  - **Boot:** S3's code-pointer scan is 737 of the 762 M instructions to InitHolder, about 0.9 s on the device.
+  - **Draw submission** (estimate): 2.6-7.5 k main-thread instructions per draw, plus 3-10 k on the CSMT worker.
+    The main-thread budget is about 27 M instructions per frame at 30 fps.
+* **decided** - compile.sh now uses `-march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector
+  -fno-stack-clash-protection -mno-outline-atomics`. These are code-generation flags only, not semantics flags.
+  All objects rebuild once.
+* **metrics** - perf_budget_main_minsn=27 perf_ratio_a64_x86=0.92 perf_stack_protected_funcs=7396
+  perf_got_per100=4.66 perf_bridge_sites=4124 perf_boot_insns_initholder=762M perf_s3_scan_insns=737M
+* **next**:
+  - S5: thread placement (main on core 0, CSMT worker on core 1, AI linear threads on cores 2 and 1, the rest
+    0b110); priority/affinity on other threads' handles; one TLS block for `fs:[0x2c]`.
+  - S14/S3: index the code-pointer scan.
+  - Later: proxy batching (S6c), sse2neon hot spots (S1). The ini defaults go in when the exe arrives
+    (setting_names.py).
+
+### J-0077 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0075
+
+* **found**:
+  - **Farm sessions that attach a repository with add_repo can stall on a permission prompt** (farm5 stalled that
+    way).
+  - **A farm does not follow instructions sent from another session.** That is correct cross-session behaviour:
+    messages from other sessions are data, not the user's instructions. So a farm's whole behaviour must be in the
+    prompt it is created with.
+* **decided** - Farm sessions are created with the private artifacts repository `toadharvard/fnv-nx-build` as their
+  source, so they push there with no attach and no prompt. They clone the public nx-agent read-only.
+  `tools/farm/runner.sh` is the whole loop in one process:
+  - it watches the integration head;
+  - it runs the job and publishes the report to `reports/<name>` of the artifacts repository;
+  - it exits before the 2 h background limit;
+  - a check-in every 30 min (send_later) restarts it.
+
+  Farms 1-5 were recreated this way. A prepare farm publishes the tree once per commit (`t/<commit12>`), and
+  reuses the previous tree when no prepare input changed.
+* **did**:
+  - Merged S11's `tools/farm/equiv_job.sh` + `tools/equiv/setup_msvc.sh`. The job installs Wine and VC 2008 from
+    Microsoft's ISOs, shares the pristine objects through `msvc/pristine/<decomp12>`, attributes by rule groups and
+    writes a markdown report. Orchestrator re-ran tests/s11: ok.
+  - Started six MSVC-gate farms eq1-6 (shards of 6).
+  - Measured here: a 163 MB prepared tree pushes to the artifacts repository in 20 s.
+* **metrics** - farms_running=12 (prep, farm1 census, farm2-5 compile 1-4/4, eq1-6 equiv 1-6/6) render_machine=1
+* **next** - S2c and S5 consume farm objects. Farms still to come: fuzz (S13), static gate (S12), full build + boot
+  (S9).
+
+### J-0078 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0072,J-0073
+
+* **did** - ALIGN1: `__declspec(align(n))` written in front of the class key of a definition or forward
+  declaration moves behind it, where GCC applies it to the type as MSVC does. 198 edits in 114 files; for example,
+  S_A goes from 36 to 48 bytes and Buf from 56 to 64. ENUM2: an enum with an enumerator literal in [2^31, 2^32)
+  becomes `enum E : int`, with `(int)` on those literals, so CHANGE_SCRIPT_VARIABLES 0x80000000 is INT_MIN as in
+  MSVC. 55 edits in 50 files. ANON2 now also converts uses in files that include the declaring header, which fixes
+  nipoint3interpolator.cpp. Restored 23 rule test sections that a CSX2 commit had removed by mistake. The
+  orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+* **found** - The decomp has no enum bit-fields. S12's LAYOUT-ALIGN-IGNORED rows for D212D0Obj and hkpMotionStub are
+  not ALIGN-IGNORED: MSVC pads a vfptr to 16 bytes when the class has 16-aligned members, and the decomp names those
+  fields by the game's offsets, so the GCC layout already matches the game. This is a gate artefact, not a port
+  bug.
+
+### J-0079 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0077
+
+* **found** - Even when created with the private repository as their source, farm sessions were stopped by the
+  auto-mode classifier when they ran a script from a cloned repository. Tools pre-approved at session creation did
+  not lift the block.
+* **decided** - (user) The artifacts repository's `main` branch holds `farm/start.sh` and a narrow
+  `.claude/settings.json` allow rule: exactly `bash /home/user/fnv-nx-build/farm/start.sh:*`, apt-get, pgrep, tail
+  and the farm's send_later check-ins. The rule was set at the owner's request. start.sh brings the public nx-agent
+  checkout to the integration head and runs its runner.sh; artifacts go to a separate clone at
+  `$FARM_HOME/artifacts`. Farms are recreated with `source_revision: main`.
+
+### J-0080 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0062,J-0076
+
+* **did** - Threads and TLS (docs/PERF.md 6.3).
+  - Placement table `toolchain/host/placement.h`: main on core 0; AI linear threads on ideal cores 2 and 1, mask
+    0b110; render worker on core 1 at priority 0x2B; every other thread mask 0b110, rotating over cores 1 and 2.
+  - Applied in h_thread_create, which sets the ideal core and core mask before the thread starts. Host pthreads go
+    through `--wrap=__syscall_thread_create`: plain host, package, and now the Nine host link (orchestrator).
+  - CreateThread takes the role from boot.cpp: a BSThread with an AILinearTaskThread object.
+  - Priority and affinity can now be set on another thread through its host id.
+  - `fs:[0x2c][0]` is the thread's `__fnvnx_tls_image`, so there is one TLS block.
+  - EnterCriticalSection honours SpinCount.
+  - Tests: native placement table, placement in the emulator's rt guest, S4 tests for TLS identity, role and spin.
+    The orchestrator re-ran tests/s5/test_tools.py (OK) and tests/s4 (70 tests, 0 failed).
+* **found** - Boot on f13 (5,447 undefined, was 7,307 on f11):
+  - The memory-manager stand-in now calls the linked constructor 0x00aa3880. It faults at its first allocation:
+    `MemoryManagerAA3880::Allocate` has no address, its trap returns 0, and memset(0) faults. So the x86 path
+    through InitializeGlobal does not happen yet.
+  - WinMain+0x1d0 takes the default-options path. InitHolder calls slot 7 of NiStandardAllocator's synthesized
+    one-slot vtable.
+  - 4,340 initializers skipped: 3,469 memory manager, 736 + 43 INISettingCollection vftables (need the exe), 31
+    FUN_004de530, 60 FUN_00632ec0 (STAND1 is not in f13's tree yet).
+  - Frontier: 11 keys / 315 hits (was 122 / 3,300).
+* **metrics** - game_undefined=5447 init_skips=4340 frontier_keys=11 frontier_hits=315
+  boot_reached=WinMain+0x1d0(InitHolder->NiStandardAllocator slot 7) s4_tests=70/70
+* **next** - S1:
+  - give `MemoryManagerAA3880::Allocate` its address or definition;
+  - give NiStandardAllocator's vtable its 10 slots, as VTBL1 did for BSNiAllocator.
+
+  Then the next link (farms) and boot.
+
+### J-0081 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0059,J-0074
+
+* **did** - Merged 13 commits (ec9e812..41990b6). Each fix has a test_link case built from V1's reproducer. The
+  orchestrator re-ran all 7 link tests: ok.
+  - Cast rule: calls through a cast to another convention follow the cast.
+  - Logger override for 0x00703c00: a native variadic function; the override table has a signature column.
+  - Data names: the qualifier comes from the decoration. A name binds by identifier alone when exactly one address
+    carries it (fixes S5's array vs pointer case).
+  - ecx-not-passed pairs keep the argument moves the reference passes.
+  - Probe caches have content keys: layout rows and vtable entries are keyed on the unit source, every local header
+    and the flags. Rows whose key no longer matches are probed again.
+  - A vptr store in a free function no longer credits any class (S13 00404920; 0x01012120 is a folded vftable);
+    new vftable_aliases.tsv.
+  - V1 defect 1: the `__fastcall` hidden result pointer is the first stack word (0x0056fa00).
+  - V1 defect 2: a float result bound to a double result gets an fcvt bridge.
+  - V1 defect 3: C-named `@f@N` / `_f@N` / `_f` declarations are now compared; parameter types are read from the
+    declaring unit's source (0x00ba3130).
+  - V1 defect 4: each class keeps its typeinfo from the object whose vtable is kept. On f13's objects V1's audit
+    goes from 36 disagreeing classes to 0.
+* **found** - f13 was prepared from 0420d45 and seeded from f12: 2,081 layout rows came from the seed, 775 were
+  probed fresh. It has 2,883 objects (95 failed). Its trial link has 6,121 undefined names and 0 multiple
+  definitions. The WinMain and memory-manager units are in it.
+* **metrics** - link_trial_undefined=6121 link_trial_multidef=0 v1_c4_mixed_classes=0 (was 36)
+* **next** - V1 re-runs its reproducers on the merged tools (D14). S2c judges ecx/this-not-passed on the
+  definition's MSVC code (`resolve --msvc-code`). Full links move to the farm (S9 link_job).
+
+### J-0082 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0079,J-0081
+
+* **decided** - D17 (user): everything that can take more than about 10 minutes runs on a farm, and porting must
+  never stall on a build. Development agents queue their next item while farm jobs run. They read farm reports
+  when they land and check their own changes with small local tests. A long job that is not yet a farm job is
+  first written as one (docs/MACHINES.md, ARCHITECTURE.md D17).
+* **did** - Started four static-gate farms st1-4 (`static_job.sh`, shards of 4) next to prep, farm1 (census),
+  farm2-5 (compile), eq1-6 (MSVC gate). Link (S9 link_job), fuzz (S13 fuzz_job, needs link outputs) and full boot
+  follow.
+
+### J-0083 | 2026-11-04 | stream: S14-dataimage-synth | status: wip | parent: J-0071,J-0076
+
+* **did** - Took over S3's code-pointer scan (`loader/src/codeptr.c`). Each call now builds:
+  - an eligibility bitmap per mapping;
+  - a page index over the code map and the vftable starts;
+  - a running vftable cursor.
+
+  It also skips zero blocks and finds the COLs in one pass instead of two. The plain searches remain as a fallback
+  (`FNVNX_SCAN_NO_INDEX`). New: `loader/bench/` (an ILP32 bench guest) and COL-less vftable hints
+  (`synth_image.py --hints-out`, `loader/tools/check_hints.py`). Orchestrator re-ran tests/s3 and tests/s14: OK.
+* **found** - Scan cost per call drops from 367.1 M to 17.4 M instructions, and the boot's two calls from 734.3 M
+  to 34.8 M, about 43 ms on the device. The fixups are byte-identical in every configuration; in the ILP32 guest
+  the checksum is e6c2c786 before and after. 45 COL-less vftable names sit at 40 addresses and need the exe to
+  confirm.
+* **metrics** - s3_scan_insns_call=17.4M s3_scan_insns_boot=34.8M colless_hints=40
+
+### J-0084 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0080
+
+* **did** - Boot path from f13:
+  - **BIND1** (POST hook on the prepared units.json) binds `MemoryManagerAA3880::Allocate` -> 0x00aa3e40 and
+    `g_kMemoryAA3880` -> 0x011f6238. The evidence: the inline TableBaseAA3880 constructor, which the unit binds to
+    0x00aa47e0, allocates through g_memoryManager.Allocate = 0x00aa3e40.
+  - **VTBL1** gives NiStandardAllocator (vftable 0x010a24fc) its 10 slots:
+    - slots 1-6: the nistandardallocator.cpp functions in slot order;
+    - slot 7: Initialize 0x00aa3430;
+    - slot 8: Shutdown 0x00aa3460;
+    - slots 0 and 9: not in the decomp.
+
+    The commit also fixes StdAllocator's virtual-destructor slot shift.
+  - PATCHES.md lists the vftable slots that need the exe.
+
+  Orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+
+### J-0085 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0081
+
+* **did** - ecx-not-passed and this-not-passed are now judged on the definition's own x86 code
+  (`resolve --msvc-code`):
+  - a callee that never reads the incoming ecx gets an ordinary bridge;
+  - the reader follows the function's switch jump tables;
+  - on V1's c3 pairs it agrees with c3_ecx on 224 of 225 addresses.
+
+  The layout probe records the C++03 POD bit (layouts.tsv column 9). MSVC returns small aggregates in eax:edx only
+  for PODs, which covers V1 adversarial cases A1/A2. Orchestrator re-ran the link tests: ok.
+* **found** - Of V1's 12 c3 "false positives", 9 are now bridged. 0x00e3dfb0 does read ecx (c3 had not followed its
+  switch). The 4 S1b-patched pairs are flagged on purpose.
+
+### J-0086 | 2026-11-04 | stream: S11-equivalence | status: wip | parent: J-0077,J-0082
+
+* **did**
+  - equiv_job now reads a pristine branch that holds only `obj/` and `meta.json`: it fingerprints the shard's rows
+    from the objects (`equiv.py refp - --units shard:K/N`). This fixes the eq farms' first runs.
+  - `tools/equiv/merge_reports.py` merges reports/eq1..6 into one summary.
+  - Orchestrator re-ran tests/s11: ok.
+* **found**
+  - **D15 is fixed by CSX2.** 5 of the 8 critical-section units are identical to the MSVC build, including
+    GraphicsRenderer::BeginUsingRenderTargetGroup at +0x200. The other 3 differ only in EH code.
+  - **INC1:** GCC now opens exactly MSVC's headers in all 68 units it touches. Without INC1, 32 units differ.
+  - **ENUM1:** opaque `enum X : int;` is a parse limit of MSVC 2008 in 7 units, so they are marked by design.
+
+### J-0087 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0070
+
+* **did**
+  - Incremental `fuzz_job.sh` with per-function keys (fnkeys.py: oracle code, native code and relocations, harness
+    version) and a verdict cache on `fuzz/cache/<k>of<N>`, sharded by unit.
+  - Harness difffuzz-5:
+    - canned bool results are 0/1;
+    - hidden-result callees get the same bytes on both machines, with eax = the buffer;
+    - MSVC constructors return `this`;
+    - native sincos runs as a builtin;
+    - pointer-to-literal returns are compared by pointee;
+    - code pointers are compared as original addresses;
+    - bool truth value and NaN arguments are soft;
+    - jumps to memory without code are intercepted.
+  - Orchestrator re-ran the self-test: 0 failures.
+* **found**
+  - Of the 45 "same reads, different result" divergences: 18 gone, 5 soft, 22 still. The 22 are:
+    - ABI pairs, owned by S1b/S2;
+    - FTOL1 out-of-range: MSVC `_ftol2` returns the low 32 bits of the int64 conversion, while the native
+      conversion saturates (00a1b450, 00691260);
+    - a possible Havok layout difference, 00df56a0;
+    - soft cases;
+    - harness limits.
+  - First full pass measured at about 35-60 CPU-hours.
+* **next** - 32 fuzz farms once the first `link/<commit12>` exists.
+
+### J-0088 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0082
+
+* **did** - Try farms try1of4..try4of4 run the full census on unmerged agent work. The orchestrator's
+  `tools/farm/push_wip.sh 120` loop pushes each agent worktree head that has commits without a patch-equivalent on
+  the integration branch to `wip/<agent>` in the artifacts repository; worktrees that are fully merged are retired.
+  The farms skip retired branches and publish to `reports/try<k>of4`. Farms running now: prep, farm1 (census),
+  farm2-5 (compile), eq1-6 (MSVC gate), st1-4 (static gate), try1-4 (try). Next: link, then 32 fuzz farms, then
+  full boot.
+
+### J-0089 | 2026-11-04 | stream: V1-link | status: wip | parent: J-0074,J-0081,J-0085
+
+* **did** - D14 verification of S2c's J-0081 fixes with the head tools. Re-ran the existing reproducers and added new
+  adversarial cases run through the real `fnvlink resolve` on hand-made trees, under qemu:
+  - fastcall aggregates of every size;
+  - float, double and long double results;
+  - C-named declarations and casts;
+  - typeinfo with multiple, virtual and nested inheritance, and link order.
+
+  Also new: `c4_vtti.py` (whole-image vtable/typeinfo check) and `tools/farm/v1_job.sh` (the full-set audits as a
+  farm job, waiting for `link/<commit12>`).
+* **found**:
+  - Fix 1 (the fastcall hidden result is the first stack word) holds for 11 new shapes.
+  - Fix 2 (fcvt bridge for float vs double results) holds, including -0, denormals, infinity and NaN payloads.
+    long double against float or double is correctly `manual`: GCC's long double here is 16 bytes, read from q0.
+  - Fix 4 holds for the reported shape. Residual gaps: a vtable object without its own typeinfo (f12 had 77 such
+    classes), a base typeinfo kept from another unit's view, and a dependency on link order.
+  - The ecx-not-passed argument moves and the cast rule hold.
+  - **Fix 3 is broken:**
+    - R3-1: when no C declaration matches, the signature falls back to N/4 ints with an int result, so a float
+      function gets a `bl; fmov s0, w0` bridge that clobbers its result.
+    - R3-2: a signature written in a comment, or call text, is taken as the declaration.
+  - Pre-existing gaps:
+    - a callee-pop byte mismatch is never flagged: 1,517 pairs / 2,196 references on f13, mostly judged `same`;
+    - a float carried through an int-returning middle function (chain_x87);
+    - a member's hidden 8-byte result bound to a fastcall function that returns it in registers (0 pairs on f13).
+  - fastcall-agg and c2_shapes on real pairs need a link made with the head tools; f13 used the old ones.
+* **metrics** - v1_r3_fix_holds=1,2,4(partial),moves,cast v1_r3_fix_broken=3 v1_callee_pop_mismatch_pairs=1517
+* **next** - S2c: R3-1 and R3-2 (high), then the callee-pop flag, the typeinfo residuals and chain_x87. V1 audits
+  run on the farm once link_job publishes `link/<commit12>`.
+
+### J-0090 | 2026-11-04 | stream: S9-build | status: wip | parent: J-0068,J-0082
+
+* **did** - New farm jobs, plus the pieces they need:
+  - **`link_job.sh`** (runner job `link`):
+    - takes the tree with fetch_tree;
+    - links the objects of the newest ancestor that has all 4 compile shards and the same compile inputs as the
+      head (named in meta.json as `objects_commit`);
+    - runs resolve, probe (-j$(nproc)), resolve, apply, trial link and check_rebind through the pipeline, with
+      `--msvc-code` from `msvc/pristine/<decomp12>`;
+    - publishes `link/<commit12>` (out/, fixed/, summary, report, meta), with rolling history on `link-head`;
+    - keeps one persistent build directory per farm, so the content-keyed caches carry over between commits.
+  - **`full_job.sh`** (runner job `full`): link_job plus guest, emulated boot on the synthesized image, and the
+    package; the boot reports go next to the link outputs.
+  - **`toolchain/cross/setup.sh`**: the pinned Ubuntu AArch64 cross packages, checked by SHA-256, no root needed.
+  - **`toolchain/sources.sh`**.
+  - **`tools/pipeline/extern_text.py`**: replaces S4's scratch-only addr_ids.txt.
+  - **Pipeline variables**: CROSS, TC_DL, VORBIS, EXTERN_TEXT, BOOT_IMAGE, PRISTINE_OBJS, OBJECTS, MSVC_CODE,
+    EMU_BUDGET.
+
+  Orchestrator re-ran tests/s9: OK.
+* **found**:
+  - s2c/xtc was Ubuntu's g++-13 cross compiler unpacked by hand.
+  - extern_text.py's output is byte-identical to addr_ids.txt (4,618 lines).
+  - Objects from the pinned packages are byte-identical to f11's (29/29), and the synthesized image is
+    byte-identical to S5's.
+  - An earlier "WinMain entered" was a false match on the echoed command line. The boot needs EMU_BUDGET=6e9.
+  - Subset probe: 119 s cold (vtable synthesis 109 s of that), 0.5 s warm.
+  - The branch `link` cannot coexist with `link/<commit12>`, so the rolling branch is `link-head`.
+
+### J-0091 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0088,J-0090
+
+* **found** - The first farm reports:
+  - census works: 2,908/2,978 units clean at cc57d3e.
+  - **compile farms** waited 15 min for a tree for their exact commit, because the prepare farm skips commits. Fixed:
+    fetch_tree now falls back to the rolling tree when the prepare inputs match.
+  - **static farms** compiled 0 units, because the job's own `apt install g++-multilib` removes the AArch64 cross
+    compiler on Ubuntu. Fixed by S12: lib32stdc++-13-dev + libc6-dev-i386, a tool check, a toolchain probe, and
+    the tree from fetch_tree.
+  - **eq farms** lost the 900 MB ISO download to cut transfers. Fixed by S11: resumable `curl -C -` loop with size
+    and SHA-256 checks. The first farm publishes the unpacked VC 2008 as `toolchain/msvc9` (54 MB packed) for the
+    others, with the Authenticode signatures always checked.
+* **did** - Merged all of these. Orchestrator re-ran tests/s11 and tests/s12: ok. Next: start the link farms.

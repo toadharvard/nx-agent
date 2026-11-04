@@ -24,6 +24,7 @@ case $CFG in
   *) echo "config: gnu, msvc or atomic" >&2; exit 2 ;;
 esac
 ARGS+=(-resource-dir "$($CLANG -print-resource-dir)" -I"$TREE/include")
+TOOL+=("${CLANG_EXCLUDE[@]}")
 export TREE D BIN="$OUT/bin/fnvcheck" ARGS_STR="${ARGS[*]}" TOOL_STR="${TOOL[*]}" FORCE=${FORCE:-0}
 if [ -z "$LIST" ]; then LIST="$D/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
 
@@ -34,7 +35,7 @@ one() {
   if [ "$FORCE" != 1 ] && [ -f "$base.tsv" ] && [ "$base.tsv" -nt "$TREE/$src" ]; then return 0; fi
   local rc=0
   # shellcheck disable=SC2086
-  (cd "$TREE" && timeout 900 nice "$BIN" --root="$TREE" $TOOL_STR --seen="$D/seen.keys" "$src" -- $ARGS_STR) \
+  (cd "$TREE" && timeout 900 nice -n "${NICE:-19}" "$BIN" --root="$TREE" $TOOL_STR --seen="$D/seen.keys" "$src" -- $ARGS_STR) \
     > "$base.tsv.tmp" 2> "$base.err" || rc=$?
   { flock 9; awk -F'\t' '$1=="L"{print $2}' "$base.tsv.tmp" >> "$D/seen.keys"; } 9>"$D/seen.lock"
   echo "$rc" > "$base.rc"; mv "$base.tsv.tmp" "$base.tsv"

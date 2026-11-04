@@ -34,6 +34,35 @@ extern "C" BOOL InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION cs, DWO
     return TRUE;
 }
 
+/* Before sleeping on a held section, spin up to its SpinCount (InitializeCriticalSectionAndSpinCount; capped at
+ * W32_CS_SPIN_MAX): a section another core holds for a few hundred cycles is cheaper to wait for than through
+ * svcWaitForAddress and a reschedule. Sections without a spin count, and single-core systems, do not spin. */
+#define W32_CS_SPIN_MAX 4000u
+static inline void cpu_relax(void)
+{
+#if defined(__aarch64__)
+    __asm__ volatile("yield" ::: "memory");
+#elif defined(__x86_64__) || defined(__i386__)
+    __asm__ volatile("pause" ::: "memory");
+#endif
+}
+
+static bool cs_spin_acquire(LPCRITICAL_SECTION cs)
+{
+    DWORD spin = cs->SpinCount & 0x00FFFFFF;
+    if (!spin || os_cpu_count() < 2)
+        return false;
+    if (spin > W32_CS_SPIN_MAX)
+        spin = W32_CS_SPIN_MAX;
+    os_lock_t *l = cs_lock(cs);
+    for (DWORD i = 0; i < spin; i++) {
+        if (__atomic_load_n(&l->word, __ATOMIC_RELAXED) == 0 && os_trylock(l))   /* 0: unlocked */
+            return true;
+        cpu_relax();
+    }
+    return false;
+}
+
 extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
 {
     DWORD me = w32_self()->tid;
@@ -41,7 +70,8 @@ extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
         cs->RecursionCount++;
         return;
     }
-    os_lock(cs_lock(cs));
+    if (!os_trylock(cs_lock(cs)) && !cs_spin_acquire(cs))
+        os_lock(cs_lock(cs));
     __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_RELAXED);
     cs->RecursionCount = 1;
     cs->LockCount = 0;

@@ -97,12 +97,27 @@ void os_thread_free(os_thread *t) {
     }
     free(t);
 }
+/* t: another thread (also one not started yet) through its host id; NULL: the calling thread (id 0) */
+static int host_id_of(os_thread *t, uint64_t *id) {
+    *id = t ? fnvnx_thread_host_id(t->t) : 0;
+    return t && !*id ? -1 : 0;   /* joined: its host thread is gone */
+}
 int os_thread_set_priority(os_thread *t, int prio) {
-    (void)t;   /* host ids are private to threads.c; only the calling thread is supported for now */
-    return t ? -1 : (fnvnx_hcall2(fnvnx_host->thread_set_priority, 0, (uint64_t)(int64_t)prio) ? -1 : 0);
+    uint64_t id;
+    if (host_id_of(t, &id)) return -1;
+    return fnvnx_hcall2(fnvnx_host->thread_set_priority, id, (uint64_t)(int64_t)prio) ? -1 : 0;
 }
 int os_thread_set_cpu(os_thread *t, int cpu) {
-    return t ? -1 : (fnvnx_hcall2(fnvnx_host->thread_set_cpu, 0, (uint64_t)(int64_t)cpu) ? -1 : 0);
+    uint64_t id;
+    if (host_id_of(t, &id)) return -1;
+    if (cpu < 0) return 0;
+    return fnvnx_hcall2(fnvnx_host->thread_set_cpu, id, (uint64_t)cpu) ? -1 : 0;
+}
+int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask) {
+    uint64_t id;
+    if (host_id_of(t, &id)) return -1;
+    uint64_t spec = FNVNX_CPU_SPEC(ideal < 0 ? FNVNX_CPU_KEEP : (unsigned)ideal, mask);
+    return fnvnx_hcall2(fnvnx_host->thread_set_cpu, id, spec) ? -1 : 0;
 }
 int os_thread_suspend(os_thread *t) { (void)t; return -1; }
 int os_thread_resume(os_thread *t) { (void)t; return -1; }

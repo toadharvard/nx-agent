@@ -1,0 +1,4 @@
+# Native replacements for decomp definitions (fnvlink.py resolve --override; docs/LINK.md "Overrides").
+# build.sh compiles the sources and writes the table resolve reads (object paths filled in).
+# address	native symbol	source (this directory)	MSVC signature the references are checked against
+00703c00	fnvnx_log_00703c00	log_00703c00.c	?FUN_00703c00@@YAHPBDZZ

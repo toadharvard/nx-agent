@@ -6,6 +6,7 @@ the original address behind a stub symbol when the name carries it (`__fnv_<addr
 an intercepted callee's x86 stack cleanup and result register from its definition's decorated name (any unit), else
 from the calling unit's own declaration of that address.
 """
+import collections
 import json
 import re
 
@@ -44,6 +45,14 @@ def itanium_class(m):
 LOCAL_STATIC = re.compile(r'^\?(?:[^@?]+@\?\d+\?\?|\$S\d+@|\$TSS\d+@)')   # ?x@?1??f@@..., ?$S1@..., ?$TSS0@...
 
 
+def dyninit_conv(symbol, source):
+    """`??__E...` / `??__F...` (dynamic initializer / atexit destructor; XC1's __fnvnx_dyninit_/_dynexit_):
+    void __cdecl (void)."""
+    if symbol.startswith(('??__E', '??__F', '__fnvnx_dyn')):
+        return convmod.Conv('?fnvnx_s13_init@@YAXXZ', source)
+    return None
+
+
 class UnitCache:
     def __init__(self, linkdir, workdir, unit_closed=True):
         self.linkdir, self.workdir, self.unit_closed = linkdir, workdir, unit_closed
@@ -65,6 +74,8 @@ class UnitCache:
                     self.tree_def.setdefault(int(f['address'], 16), f['symbol'])
         self._x86, self._img, self._pin, self._callee = {}, {}, {}, {}
         self._refmap = None
+        self._imports = self._iat = None
+        self._abi = None
         self._statics = None
         self._vrows = None
         self._vft_by_class = None
@@ -115,6 +126,8 @@ class UnitCache:
                 out[addr] = refs[name]
             elif name in libcalls.EQUIV:
                 out[addr] = libcalls.EQUIV[name]
+            elif self._import_names().get(libcalls.import_name(name)[0]):
+                out[addr] = libcalls.import_id(libcalls.import_name(name)[0])
         return out
 
     def callee_info_for(self, source):
@@ -134,9 +147,17 @@ class UnitCache:
                         continue
                     try:
                         got = convmod.Conv(name, src)
-                        break
                     except Exception:  # noqa: BLE001
                         continue
+                    try:                       # the callee's own custom register convention, when its code is known
+                        import classify
+                        f = self.x86_unit(dsrc, addr).funcs.get(addr) if dsrc else None
+                        regs = classify.entry_register_reads(f, got) if f else []
+                        if regs:
+                            got.with_registers(regs)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    break
                 self._callee[key] = got
             return self._callee[key]
 
@@ -162,7 +183,11 @@ class UnitCache:
         try:
             cv = convmod.Conv(name, source)
         except convmod.Unsupported:
-            cv = convmod.Conv(fn['symbol'], source)
+            cv = dyninit_conv(fn['symbol'], source) or convmod.Conv(fn['symbol'], source)
+        import classify
+        custom = classify.entry_register_reads(fn, cv)
+        if custom:
+            cv.with_registers(custom)      # MSVC custom register convention (oracle placement only)
         img = self.arm_image(source)
         if not any(o == orig_addr for o in img.entries.values()):
             raise KeyError('no native entry for %08x' % orig_addr)
@@ -175,6 +200,8 @@ class UnitCache:
         t = runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
                           statics)
         t.source = source
+        t.imports = self.import_stubs()
+        t.custom_cc = list(getattr(cv, 'custom', []) or [])
         t.vtables = self.vtable_map(img)
         t.followed = self.preload(code, img, source)
         t.x86_code = code
@@ -190,12 +217,62 @@ class UnitCache:
             f = xu2.funcs.get(addr)
             return (f['code'], xu2.literal_bytes()) if f and not f['unresolved'] else None
         t.oracle_code = oracle_code
+        dum = self.edx_dummies(source)
+        t.dummies = lambda addr: dum.get(addr, ())
         # literals of every unit that contributed preloaded code
         t.extra_pinned = {}
         for xu2 in list(self._x86.values()):
             if xu2 is not xu and any(a in code for a in xu2.funcs):
                 t.extra_pinned.update(xu2.literal_bytes())
         return t
+
+    def import_stubs(self):
+        """{stub index: (name, stdcall bytes)} for every IAT slot units.json names (one name per slot: the most
+        common); the slots are pinned to x86 import stubs (iat_pins)."""
+        if self._imports is None:
+            names = collections.defaultdict(collections.Counter)
+            for u in self.units:
+                for n, a in u['symbols'].items():
+                    if n.startswith('__imp_'):
+                        ad = int(a, 16)
+                        if 0x00fdf000 <= ad < 0x00fe0000:
+                            names[ad][libcalls.import_name(n)] += 1
+            self._iat = {}
+            self._imports = {}
+            for k, ad in enumerate(sorted(names)):
+                if k >= libcalls.IMPORT_MAX:
+                    break
+                nm = names[ad].most_common(1)[0][0]
+                self._imports[k] = nm
+                self._iat[ad] = libcalls.IMPORT_BASE + 16 * k
+                runner.IMPORTS[libcalls.import_id(nm[0])] = nm[0]
+        return self._imports
+
+    def _import_names(self):
+        self.import_stubs()
+        return {nm[0]: True for nm in self._imports.values()}
+
+    def iat_pins(self):
+        import struct
+        self.import_stubs()
+        return {ad: struct.pack('<I', stub) for ad, stub in self._iat.items()}
+
+    def edx_dummies(self, source):
+        """{callee address: definition labels the unit's references do not pass} from S2's abi.tsv notes
+        (`pN: edx dummy not passed`): an fastcall edx dummy is junk on both machines, never compared."""
+        if self._abi is None:
+            self._abi = collections.defaultdict(lambda: collections.defaultdict(set))
+            p = config.LINK / 'out/abi.tsv'
+            if p.exists():
+                for line in open(p, encoding='utf-8', errors='replace'):
+                    f = line.rstrip('\n').split('\t')
+                    if len(f) > 8 and f[2]:
+                        for m in re.finditer(r'\b(p\d+): edx dummy not passed', f[8]):
+                            try:
+                                self._abi[f[0]][int(f[2], 16)].add(m.group(1))
+                            except ValueError:
+                                pass
+        return self._abi.get(source, {})
 
     def local_statics(self):
         """Byte addresses of every function-local static and guard any unit names (image-wide: followed callees of
@@ -297,6 +374,7 @@ class UnitCache:
 
     def pair(self, source, orig_addr):
         t = self.target(source, orig_addr)
-        pin = dict(getattr(t, 'extra_pinned', {}))
+        pin = dict(self.iat_pins())
+        pin.update(getattr(t, 'extra_pinned', {}))
         pin.update(self.pinned(source, orig_addr))
         return runner.Pair(t, pin), t

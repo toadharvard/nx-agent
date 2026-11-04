@@ -133,6 +133,15 @@ result touches. Entries stay `wip` until both pass; a verifier finding reopens t
 Where the decomp carries Xbox-only size asserts, the layout proven by the x86 code wins: CRITICAL_SECTION is the
 plain 24-byte PC structure (CSX1), and those asserts are dropped by rule.
 
+**Reopened (J-0067).** The principle stands, but the conclusion is wrong for `NiCriticalSection` and the classes
+that hold it. In the MSVC build of the pristine decomp, `GraphicsRenderer::BeginUsingRenderTargetGroup` reads
+`+0x200`/`+0x208`, and with the 24-byte layout we read `+0x1f4`/`+0x1fc`. The x86 code needs 4 more bytes for each
+critical section: `NiCriticalSection` 128 instead of 124, `m_ulThreadOwner` at 0x1C.
+
+**Resolved (J-0073).** The 4 bytes sit behind the 24-byte PC section. Rule CSX2 restores them wherever the decomp
+asserts its generated `_RTL_CRITICAL_SECTION` as 28 bytes. NiCriticalSection, RecursiveLock, BSShaderAccumulator,
+BSThread, AbstractHeap and GraphicsRenderer now match the x86 code.
+
 ### D16. Decomp objects are compiled `-fPIC` (J-0053)
 
 GCC at -O2 reaches several variables a unit defines from one section anchor with immediate offsets and no
@@ -140,6 +149,11 @@ relocation of their own, so by-address rebinding of image variables cannot be do
 `-fPIC` every variable is addressed through the GOT by its own symbol; renaming rebinds every reference and the GOT
 slot holds the image address. `-fno-semantic-interposition` is not used: it routes same-unit calls through local
 aliases past the by-address binding. Cost: one GOT load per global access (performance phase).
+
+### D17. Ten-minute rule: long jobs on farms, development never waits (J-0082, user)
+
+Anything that can take more than about 10 minutes runs as a farm job (docs/MACHINES.md, tools/farm/). Development
+agents queue the next item instead of waiting, and verify their own change with small local checks.
 
 ## Legal
 

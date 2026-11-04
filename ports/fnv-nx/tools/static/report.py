@@ -11,6 +11,7 @@ Inputs (all optional, missing passes are reported as such):
   <out>/grep.tsv               text counts (run.sh)
 A site is (class, file, line, col); a site in a header counts once however many units include it.
 With a baseline (class<TAB>count), exits 1 when a class has more sites than the baseline allows.
+UNITS=<list file> (run.sh passes it on): only those units are read, and report.md says it is a sample.
 """
 import json
 import os
@@ -111,10 +112,11 @@ CLASSES = [
      'S5: cap the guest heap below 0x80000000 (2 GiB address space, as the original)'),
     ('ENUM-BITFIELD', 'enum bit-field whose top bit is used',
      'MSVC: enums are int, so the bit-field is signed (3 in 2 bits reads back -1); GCC: unsigned underlying type, '
-     'reads back 3', 'rule', 'ENUM1: give these enums the fixed underlying type int (enum E : int) - MSVC semantics'),
+     'reads back 3', 'rule', 'ENUM2 (S1; ENUM1 covers only opaque-declared enums): give these enums the fixed '
+     'underlying type int (enum E : int) - MSVC semantics'),
     ('ENUM-UNSIGNED', 'enum with enumerators >= 0x80000000',
      'MSVC: int (0x80000000 is INT_MIN; promotes, compares, widens as negative); GCC: unsigned int', 'rule',
-     'ENUM1: enum E : int with (int) casts on the large enumerators'),
+     'ENUM2: enum E : int with (int) casts on the large enumerators (S1 ENUM1 leaves these out)'),
     ('ENUM-64', 'enum with enumerators beyond 32 bits', 'MSVC truncates to int; GCC makes the enum 64-bit',
      'per-site', 'enum E : int'),
     ('MEMPTR-FIELD', 'pointer-to-member stored in a record',
@@ -129,6 +131,24 @@ CLASSES = [
      'benign', 'none (D10 flag)'),
     ('LDBL', 'long double', 'MSVC 8 bytes (= double), AArch64 16 bytes (soft quad)', 'benign',
      'none: only in two unused template specializations'),
+    ('BOOL-PUN', 'memory of another type read as bool (`*(bool*)((char*)this + 0x104)`)',
+     'MSVC tests the whole byte (test al, al) and keeps its value in integer contexts; GCC assumes 0/1: tests bit 0, '
+     '`!b` is `b ^ 1` (verified, tests/s12). A byte other than 0/1 reads differently (S13 bool-repr)', 'runtime',
+     'none while the byte holds a real bool (MSVC wrote 0/1 into the image and saves); BOOL1 (S1, from the site list): '
+     'reads become (*(unsigned char*)(p) != 0) where the byte can hold other values (flag bytes typed bool)'),
+    ('FLOAT-BITS', 'float bits seen as an integer (pointer pun, float/int union, _mm_movemask_ps of arithmetic)',
+     'the bits of a generated NaN differ: x86 default NaN 0xFFC00000 (sign set), AArch64 0x7FC00000; float '
+     'arithmetic and compares cannot tell them apart, an integer view can (S13 nan-bits)', 'per-site',
+     'review sites that test the sign bit or compare to an integer NaN pattern; no flag (FPCR.DN also gives '
+     '0x7FC00000)'),
+    ('PTRDIFF-EXACT', 'pointer difference with a non-power-of-two element size',
+     'both compilers divide with an exact-division multiply that assumes the byte difference is a multiple of the '
+     'size (pointers into one array); for unrelated pointers MSVC and GCC give different garbage (S13: 0065c700)',
+     'benign', 'none'),
+    ('OUTARG-UNINIT', 'uninitialized local whose first use passes its address to a call (`T x; f(&x); use(x);`)',
+     'none in the port (the callee writes it); the difffuzz harness runs callees as stubs that do not write through '
+     'pointer arguments, so S13 uninit-* divergences of these functions are the harness\'s', 'benign',
+     'S13: model out-parameter writes of stubbed callees, or discount uninit-* divergences that read these locals'),
     ('W-UNINIT', 'read of an uninitialized local (clang -Wuninitialized/-Wsometimes-uninitialized, GCC '
      '-W(maybe-)uninitialized)', 'MSVC read whatever the stack/register held (often stable in /Od units); GCC -O2 '
      'picks any value (folds the path away: verified)', 'per-site',
@@ -174,6 +194,17 @@ CLASSES = [
     ('LAYOUT-PACK-ALIGN', '#pragma pack with an over-aligned member', 'MSVC: __declspec(align)/__m128 beat pack; '
      'GCC: pack caps them', 'rule', 'PACK1: an explicit aligned(n) attribute on the member does not win in GCC; '
      'insert explicit padding before the member'),
+    ('ALIGN-IGNORED', '__declspec(align(n)) before the class key (`__declspec(align(16)) struct S {...};`)',
+     'MSVC aligns the type; GCC drops an attribute in that position ("attribute ignored in declaration of", '
+     '-Wattributes): the record is 4-aligned, and records holding it shrink and move their members '
+     '(LAYOUT-ALIGN-IGNORED, verified by layout_probe against real GCC)', 'rule',
+     'ALIGN1 (S1): `__declspec(align(n)) struct S` -> `struct __declspec(align(n)) S` - GCC honours the attribute '
+     'after the class key (tests/s12 layouts.cpp), MSVC means the same'),
+    ('LAYOUT-ALIGN-IGNORED', 'record MSVC aligns more than GCC (same members, no pack)', 'size, alignment and the '
+     'offsets after an aligned member differ; root cause ALIGN-IGNORED', 'rule', 'ALIGN1'),
+    ('LAYOUT-PARSE', 'the two clang configurations see different members', 'a proxy artefact (one configuration '
+     'dropped members after a parse error), not a layout difference; the gnu side is checked against GCC by the '
+     'probe', 'benign', 'none (proxy)'),
     ('LAYOUT-EMPTY-BASE', 'empty base gets a byte under MSVC', 'size/offsets differ', 'per-site', 'explicit padding'),
     ('LAYOUT-EMPTY-BASE-OFFSET', 'only an empty base at another offset', 'casts to that empty base adjust '
      'differently; no data moves', 'benign', 'none'),
@@ -197,16 +228,50 @@ WARN_CLASS = {
     'bitfield-enum-conversion': 'W-ENUM-BITFIELD', 'signed-enum-bitfield': 'W-ENUM-BITFIELD',
     'cast-function-type': 'W-CAST-FN', 'type-limits': 'W-TYPE-LIMITS', 'mismatched-new-delete': 'W-NEW-DELETE',
     'free-nonheap-object': 'W-NEW-DELETE', 'psabi': 'W-PSABI', 'varargs': 'W-VA-PROMOTE',
-    'tautological-undefined-compare': 'THIS-NULL',
+    'tautological-undefined-compare': 'THIS-NULL', 'undefined-bool-conversion': 'THIS-NULL',
+    'nonnull': 'THIS-NULL',                    # GCC: "'this' pointer is null" (a member call on a null object)
+    'cast-function-type-strict': 'W-CAST-FN', 'tautological-constant-out-of-range-compare': 'W-TYPE-LIMITS',
+    'delete-incomplete': 'W-NEW-DELETE',
 }
 # warnings of the sets that say nothing about MSVC vs AArch64 (kept in counts.tsv, not classified)
 WARN_IGNORE = {'invalid-offsetof', 'builtin-macro-redefined', 'unused-value', 'attributes', 'ignored-attributes',
                'return-type-c-linkage', 'fpermissive', 'narrowing', 'overflow', 'int-in-bool-context', 'bool-compare',
                'tautological-compare', 'float-conversion', 'stringop-overflow', 'stringop-overread', 'clobbered',
                'packed-not-aligned', 'div-by-zero', 'division-by-zero', 'null-dereference', 'float-overflow-conversion',
-               'bitfield-constant-conversion', 'constant-conversion', 'literal-conversion', 'cpp'}
+               'bitfield-constant-conversion', 'constant-conversion', 'literal-conversion', 'cpp',
+               # same meaning on both targets: unhandled enum values, multi-character constants (both pack them
+               # big-endian into an int), `register`, string literal constness, pragmas MSVC alone knows
+               'switch', 'multichar', 'register', 'writable-strings', 'write-strings', 'ignored-pragmas',
+               'unknown-pragmas', 'parentheses', 'self-assign-field', 'self-assign', 'constant-logical-operand',
+               'fortify-source', 'inaccessible-base', 'pointer-bool-conversion', 'address-of-packed-member'}
+
+
+def warn_flag(flag):
+    """-Warray-bounds= / -Wformat-overflow=1 as GCC prints them -> the warning's name"""
+    return flag.split('=')[0]
 
 DIAG = re.compile(r'^(.*?):(\d+):(\d+): (warning|error): (.*?)(?: \[(-W[^\]]+)\])?$')
+
+# what closes a class in the current build (flag, header, prepare rule); shown in report.md next to the verdict
+CLOSED = {
+    'THIS-NULL': 'flag -fno-delete-null-pointer-checks (D10)',
+    'W-RETURN': 'rule FALL1 (trap), patches RET1 (return); build -Werror=return-type',
+    'SHIFT32-VAR': 'benign (both mask by 31)',
+    'TLS': 'S5 guest runtime',
+}
+
+UNITS_ENV = os.environ.get('UNITS') or ''
+
+
+def unit_key(source):
+    return source.replace('/', '_').replace(' ', '_')
+
+
+def sample_units():
+    """unit keys of $UNITS, or None for all units"""
+    if not UNITS_ENV:
+        return None
+    return {unit_key(l.strip()) for l in open(UNITS_ENV) if l.strip()}
 
 
 class Sites:
@@ -230,8 +295,14 @@ class Sites:
         return d
 
 
+EXCLUDED = ('/shim/include/', '/sse2neon/')      # never the tree's code (as fnvcheck --exclude)
+OUT_DIR = None                                  # the gate's output: its generated headers are not the tree's
+
+
 def rel(path, tree):
     p = os.path.normpath(path if os.path.isabs(path) else os.path.join(tree, path))
+    if any(e in p for e in EXCLUDED) or (OUT_DIR and p.startswith(OUT_DIR + '/')):
+        return None
     return p[len(tree) + 1:] if p.startswith(tree + '/') else None
 
 
@@ -251,13 +322,16 @@ def load_units(tree):
 
 
 def main():
+    global OUT_DIR
     tree, out = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
+    OUT_DIR = out
     baseline = sys.argv[3] if len(sys.argv) > 3 else None
     S = Sites()
     passes = {}
     tree_errors = Counter()
     raw_warn = Counter()
     uflags = load_units(tree)
+    only = sample_units()
 
     # ---- fnvcheck rows + clang diagnostics (gnu)
     for cfg in ('gnu', 'atomic'):
@@ -269,6 +343,8 @@ def main():
             if cfg == 'atomic' and not name.endswith('.tsv'):
                 continue
             unit = unit_of(name)
+            if only is not None and unit not in only:
+                continue
             if name.endswith('.tsv'):
                 n += 1
                 with open(path, encoding='utf-8', errors='replace') as f:
@@ -289,8 +365,11 @@ def main():
                     if m.group(4) == 'error':
                         tree_errors['clang:' + unit] += 1
                         continue
-                    flag = (m.group(6) or '-W?')[2:]
+                    flag = warn_flag((m.group(6) or '-W?')[2:])
                     raw_warn['clang ' + flag] += 1
+                    if flag == 'ignored-attributes' and 'place it after' in m.group(5):
+                        S.add('ALIGN-IGNORED', r, m.group(2), 0, 'clang: %s' % m.group(5)[:160], unit)
+                        continue
                     if flag in WARN_IGNORE:
                         continue
                     S.add(WARN_CLASS.get(flag, 'W-OTHER'), r, m.group(2), m.group(3),
@@ -305,6 +384,8 @@ def main():
             if not name.endswith('.log'):
                 continue
             unit = unit_of(name)
+            if only is not None and unit not in only:
+                continue
             lines = open(os.path.join(gcc_dir, name), encoding='utf-8', errors='replace').read().splitlines()
             if lines and lines[-1] == 'rc=0':
                 gcc_ok += 1
@@ -312,15 +393,25 @@ def main():
                 gcc_fail += 1
             for line in lines:
                 m = DIAG.match(line)
-                if not m or m.group(4) != 'warning':
+                if not m:
+                    continue
+                if m.group(4) == 'error':
+                    # the build's own -Werror=return-type: a missing return the build cannot compile
+                    if m.group(6) == '-Werror=return-type' and rel(m.group(1), tree) is not None:
+                        raw_warn['gcc error return-type'] += 1
+                        S.add('W-RETURN', rel(m.group(1), tree), m.group(2), m.group(3),
+                              'gcc -Werror=return-type: %s' % m.group(5)[:160], unit)
                     continue
                 r = rel(m.group(1), tree)
                 if r is None:
                     continue
-                msg, flag = m.group(5), (m.group(6) or '')[2:]
+                msg, flag = m.group(5), warn_flag((m.group(6) or '')[2:])
                 if 'promoted to' in msg and 'passed through' in msg:
                     flag = 'varargs'
                 raw_warn['gcc ' + (flag or '?')] += 1
+                if flag == 'attributes' and 'ignored in declaration of' in msg:
+                    S.add('ALIGN-IGNORED', r, m.group(2), 0, 'gcc: %s' % msg[:160], unit)
+                    continue
                 if not flag or flag in WARN_IGNORE:
                     continue
                 S.add(WARN_CLASS.get(flag, 'W-OTHER'), r, m.group(2), m.group(3),
@@ -333,6 +424,8 @@ def main():
     if os.path.exists(lay):
         for line in open(lay).read().splitlines()[1:]:
             cause, key, unit, diff = line.split('\t')
+            if only is not None and unit not in only:
+                continue
             path, l, c = key.split('|')[0].rsplit(':', 2)
             S.add('LAYOUT-' + cause.upper(), path, l, c, key.split('|', 1)[1] + '\t' + diff, unit)
         for line in open(os.path.join(out, 'layout', 'summary.tsv')).read().splitlines():
@@ -348,6 +441,9 @@ def main():
     # ---- write
     by = S.by_class()
     os.makedirs(os.path.join(out, 'sites'), exist_ok=True)
+    for name in os.listdir(os.path.join(out, 'sites')):      # classes of an earlier report that are gone now
+        if name.endswith('.tsv'):
+            os.remove(os.path.join(out, 'sites', name))
     counts = {}
     for cls, rows in by.items():
         counts[cls] = len(rows)
@@ -365,6 +461,8 @@ def main():
           'Generated by `tools/static/run.sh`; method and classes: `docs/STATIC_CHECKS.md`. A site is one '
           'file:line:col of the prepared tree (a header site counts once). Full per-site lists: `sites/<class>.tsv`.',
           '', '## Coverage', '']
+    if only is not None:
+        md.append('* **sample**: %d units (UNITS=%s); counts are sites in these units only' % (len(only), UNITS_ENV))
     for k, v in passes.items():
         md.append('* %s: %d units' % (k, v))
     if gcc_ok + gcc_fail:
@@ -376,13 +474,15 @@ def main():
             lay_summary.get('records_msvc', 0), lay_summary.get('records_gnu', 0), lay_summary.get('records_compared', 0)))
     for k, v in sorted(grep.items()):
         md.append('* %s: %s' % (k, v))
-    md += ['', '## Summary', '', '| class | sites | verdict | what differs | fix |', '|---|---:|---|---|---|']
+    md += ['', '## Summary', '', '| class | sites | verdict | closed by | what differs | fix |',
+           '|---|---:|---|---|---|---|']
     order = [c[0] for c in CLASSES]
     for cls in order + sorted(set(counts) - set(order)):
         if cls not in counts and cls not in CLASS:
             continue
         t = CLASS.get(cls, (cls, cls, '-', '?', '-'))
-        md.append('| `%s` %s | %d | %s | %s | %s |' % (cls, t[1], counts.get(cls, 0), t[3], t[2], t[4]))
+        md.append('| `%s` %s | %d | %s | %s | %s | %s |' % (cls, t[1], counts.get(cls, 0), t[3], CLOSED.get(cls, '-'),
+                                                       t[2], t[4]))
     order_strength = Counter(r[3].split('\t')[0] for r in by.get('ORDER-ARGS', []))
     md += ['', 'ORDER-ARGS by strength: ' + ', '.join('%s %d' % kv for kv in order_strength.most_common()), '']
     f2 = Counter(r[3].split('\t')[1] for r in by.get('F2U', []) if '\t' in r[3])

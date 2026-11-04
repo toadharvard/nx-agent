@@ -5,12 +5,17 @@
     tools/pipeline/build.py [VAR=value ...] status           table of the recorded stage states
     tools/pipeline/build.py [VAR=value ...] clean [stage...] remove build/ (or the named stage directories)
 
-Stages, in order: fetch toolchain prepare census compile link guest nine host package tests; `report` runs last
-on every invocation and writes build/report.md (+ report.json, history/). Each stage owns build/<stage>/ and
+Stages, in order: fetch toolchain prepare census compile link guest boot nine host package tests; `report` runs
+last on every invocation and writes build/report.md (+ report.json, history/). Each stage owns build/<stage>/ and
 records build/<stage>/stage.json (status ok|warn|fail|skipped|disabled, fingerprint, metrics, artifacts, log). A
 stage whose input fingerprint and recorded status are unchanged is not run again (`cached`); inside compile,
 link and tests the tools' own incremental rules apply as well. A failing stage never stops the pipeline: the
 stages that need it are `skipped`, the others run; the exit code is 1 when any stage failed.
+
+Provenance (J-0054): prepare records the commit of ports/fnv-nx and of the decomp the tree was prepared from
+(build/prepare/prepared_from.txt, .json). Every stage that consumes tree-derived outputs (census, compile, link,
+guest, boot, package) carries that record in its stage.json and in the report, and refuses inputs prepared from
+another commit than the current head unless FORCE_STALE=1.
 
 Everything under build/ is derived from the decomp or the player's game: local only, never committed.
 """
@@ -21,6 +26,7 @@ import re
 import shlex
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import time
@@ -41,30 +47,73 @@ CONFIG = [
     ('ALLOW_UNPINNED', '0', '1: a checkout at another commit than tools/fetch.sh pins is a warning, not a failure'),
     ('FNVNX_TC', '', 'fnvnx-a64 prefix (toolchain/gcc/build.sh output); empty: $DEVKITPRO/devkitA64 or build it'),
     ('DEVKITPRO', '', 'DEVKITPRO tree with libnx (toolchain/devkita64/setup.sh output)'),
-    ('TC_DL', '', 'only to build the toolchain: directory with the binutils/gcc/newlib tarballs'),
+    ('TC_DL', 'auto', 'how fnvnx-a64 + DEVKITPRO are built when FNVNX_TC / DEVKITPRO are not given: auto = fetch '
+                      'the pinned sources (toolchain/sources.sh) and build them in build/toolchain; a directory = the '
+                      'binutils/gcc/newlib tarballs from there; none = never build'),
+    ('CROSS', 'auto', 'the aarch64-linux-gnu tools: auto = the system\'s when they are the pinned Ubuntu build, else '
+                      'unpack the pinned packages (toolchain/cross/setup.sh) into build/toolchain/cross; pinned = '
+                      'always those; system = whatever is on PATH'),
     ('JOBS', str(os.cpu_count() or 4), 'parallel jobs'),
-    ('GAME_CXX', 'auto', 'compiler of the game units: tc (fnvnx-a64 g++), standin (aarch64-linux-gnu-g++), a command; '
-                         'auto = tc when the toolchain is there'),
+    ('GAME_CXX', 'standin', 'compiler of the game units: standin (aarch64-linux-gnu-g++, the compiler of every '
+                            'measured link and boot so far), tc (fnvnx-a64 g++), auto (tc when the toolchain is '
+                            'there), or a command'),
+    ('CROSS_BIN', '', 'directory put first on PATH for the aarch64-linux-gnu-* cross tools (a private copy such as '
+                      'S2c\'s xtc/bin when the system packages are missing)'),
     ('OPT', '-O2', 'optimisation flags of the game units (tools/link/compile.sh $OPT)'),
+    ('UNITS', '', 'file listing the units (sources as in units.json, one per line, # comments) that census and '
+                  'compile handle, so the link and guest see only those; empty: every unit'),
+    ('PREPARED', '', 'an existing prepared tree to adopt (read only) instead of running tools/prepare.py; its '
+                     'prepared_from.txt (in the tree or next to it) gives its provenance'),
+    ('OBJECTS', '', 'objects.tsv of objects another job compiled from that tree (the compile farms: '
+                    'tools/farm/fetch_objs.sh), used in place instead of compiling'),
+    ('FORCE_STALE', '0', '1: stages consume inputs prepared from another commit than the current head (recorded as '
+                         'stale, status warn); 0: they refuse them'),
+    ('PORT_COMMIT', '', 'commit (40 hex digits) of ports/fnv-nx when it is a copy without git metadata (a git '
+                        'archive snapshot); in a checkout it must equal HEAD'),
     ('CENSUS', '1', '0: skip the -fsyntax-only census'),
     ('OVERRIDE', '', 'fnvlink resolve --override table (native replacements)'),
-    ('EXTERN_TEXT', '', 'fnvlink resolve --extern-text list (S4 addr_ids.txt)'),
+    ('EXTERN_TEXT', 'auto', 'fnvlink resolve --extern-text list: auto = made from the tree\'s units.json by '
+                            'tools/pipeline/extern_text.py (S4\'s addr_ids.txt), none = off, or a file'),
+    ('MSVC_OBJS', '', 'fnvlink resolve --msvc-objs: pristine MSVC 2008 objects (S11) for S2b\'s vtable slots'),
+    ('MSVC_CODE', '', 'fnvlink resolve --msvc-code: the same objects, only for the definitions\' register reads '
+                      '(ecx-not-passed / this-not-passed judged on the MSVC code); without it the verdicts are as '
+                      'before'),
+    ('UNITS_RENAMES', '', 'fnvlink resolve --units-renames table (empty: fnvlink\'s default, the port\'s '
+                          'patches/units_renames.tsv; none: off)'),
+    ('LINK_SEED', '', 'fnvlink out dir of an earlier run: its demangle cache (cache/) seeds build/link/out'),
     ('GUEST_LINK', 'auto', 'guest link script: auto = toolchain/game/build.sh (S5) when present, else the adapter '
                            'tools/pipeline/guest_link.py'),
-    ('VORBIS', '', 'libogg/libvorbis ILP32 prefix for the guest link (S5 script only)'),
+    ('GAME_NEW', 'runtime', 'global operator new/delete of the guest (toolchain/game/build.sh GAME_NEW): runtime '
+                            '(malloc stand-ins) or game (the game objects\' own)'),
+    ('VORBIS', 'auto', 'libogg/libvorbis ILP32 prefix for the guest link (S5 script only): auto = built by the '
+                       'toolchain stage (toolchain/vorbis/build.sh), none = without, or a prefix'),
+    ('BOOT', '0', '1: the boot stage (emulated boot of the game guest + boot frontier) runs with `all`; it also runs '
+                  'when named as a goal (make boot)'),
+    ('BOOT_IMAGE', 'auto', 'data image for the emulated boot (sdmc:/fnvnx/game/FalloutNV.exe): auto = S14\'s '
+                           'synthesized image when PRISTINE_OBJS is given, else none; none = no image (all-zero '
+                           'data); or an exe file'),
+    ('PRISTINE_OBJS', '', 'MSVC 2008 objects of the pristine decomp (S11, tools/equiv: u<index>.obj), for S14\'s '
+                          'synthesized data image (loader/synth/synth_image.py)'),
+    ('BOOT_CENSUS', '', 'census units.tsv the frontier reports the current compile status from (empty: this '
+                        'build\'s census when it ran)'),
     ('NINE', '0', '1: Gallium Nine (render/nine) in the host module; 0: no D3D9 backend in the host (null device)'),
     ('NINE_SRC', '', 'directory holding mesa/ and libdrm_nouveau/ checkouts to copy instead of cloning'),
     ('PROGRAM_ID', '0100000000000000', 'title whose exefs is overridden (SD path atmosphere/contents/<id>/)'),
-    ('TESTS', 'all', 'comma list of test suites to run (names in docs/BUILD.md), or all'),
-    ('EMU_TIMEOUT', '1800', 'seconds for the emulator run of the game guest (informational)'),
+    ('TESTS', 'all', 'comma list of test suites to run (names in docs/BUILD.md), all, or none'),
+    ('EMU_TIMEOUT', '3000', 'seconds for the emulated boot of the game guest (boot stage)'),
+    ('EMU_BUDGET', '6000000000', 'instructions per scheduling slice of the emulated boot (S5\'s value for game boots: '
+                                 'the loader\'s code pointer scan of a real data image needs billions)'),
     ('FORCE', '', 'comma list of stages to rerun even when cached (all = every stage)'),
     ('CLEAN_WORK', '1', '1: remove re-creatable work trees (clones, third-party build dirs) once their stage or test '
                         'suite succeeded; 0: keep them for faster reruns'),
     ('MIN_FREE_GB', '10', 'free disk space (GiB) below which the toolchain stage warns'),
     ('KEEP_HISTORY', '50', 'report snapshots kept in build/history'),
 ]
-STAGE_NAMES = ['fetch', 'toolchain', 'prepare', 'census', 'compile', 'link', 'guest', 'nine', 'host', 'package',
-               'tests']
+STAGE_NAMES = ['fetch', 'toolchain', 'prepare', 'census', 'compile', 'link', 'guest', 'boot', 'nine', 'host',
+               'package', 'tests']
+# the files tools/prepare.py and its rule modules read besides the decomp (the prepare fingerprint)
+PREPARE_INPUTS = ('tools/prepare.py', 'tools/rules', 'patches', 'shim/include/fnvnx_win32.h',
+                  'render/native/drop_units.txt')
 
 
 # ------------------------------------------------------------------------------------------------- hashing helpers
@@ -196,6 +245,103 @@ def read_git_head(path):
     return None
 
 
+def find_checkout(path):
+    """Top of the git checkout (or worktree) holding path, or None for a copy without git metadata."""
+    p = os.path.abspath(path)
+    while True:
+        if os.path.exists(os.path.join(p, '.git')):
+            return p
+        up = os.path.dirname(p)
+        if up == p:
+            return None
+        p = up
+
+
+def port_dirty(paths):
+    """Uncommitted changes under ports/fnv-nx `paths` (git status --porcelain lines: modified, staged, untracked),
+    or None when there is no checkout or no git."""
+    if not find_checkout(ROOT) or not shutil.which('git'):
+        return None
+    try:
+        p = subprocess.run(['git', '--no-optional-locks', '-C', ROOT, 'status', '--porcelain', '--'] + list(paths),
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return [l for l in p.stdout.splitlines() if l.strip()] if p.returncode == 0 else None
+
+
+def port_head(cfg):
+    """The commit of ports/fnv-nx this run's tools come from: the checkout's HEAD (read from the files), or
+    PORT_COMMIT for a copy without git metadata."""
+    top = find_checkout(ROOT)
+    head = read_git_head(top) if top else None
+    want = cfg.get('PORT_COMMIT', '').strip().lower()
+    if want and head and not head.startswith(want):
+        sys.exit('PORT_COMMIT=%s but the checkout %s is at %s' % (want, top, head))
+    if not head and re.fullmatch(r'[0-9a-f]{40}', want or ''):
+        head = want
+    return head
+
+
+def short(commit):
+    return commit[:10] if commit else 'unknown'
+
+
+def read_prepared_from(tree):
+    """Provenance of a prepared tree: build/prepare/prepared_from.json of a pipeline tree, else a prepared_from.txt
+    (S2c's driver: the commit on the first line, next to the tree) in the tree's directory or the tree itself.
+    -> dict (port_commit None when unknown)."""
+    for d in (os.path.dirname(os.path.abspath(tree)), os.path.abspath(tree)):
+        j = os.path.join(d, 'prepared_from.json')
+        if os.path.isfile(j):
+            try:
+                pf = json.load(open(j))
+                pf['source'] = j
+                return pf
+            except ValueError:
+                pass
+        t = os.path.join(d, 'prepared_from.txt')
+        if os.path.isfile(t):
+            lines = open(t, errors='replace').read().splitlines()
+            m = re.search(r'\b([0-9a-f]{40})\b', lines[0] if lines else '')
+            dm = next((re.search(r'\bdecomp\s+([0-9a-f]{40})\b', l) for l in lines[1:]
+                       if re.search(r'\bdecomp\s+[0-9a-f]{40}\b', l)), None)
+            return {'port_commit': m.group(1) if m else None, 'decomp_commit': dm.group(1) if dm else None,
+                    'source': t}
+    return {'port_commit': None, 'decomp_commit': None, 'source': None}
+
+
+def read_units_list(path):
+    """UNITS=<file>: unit sources, one per line; blank lines and # comments ignored."""
+    out = []
+    for line in open(path, errors='surrogateescape'):
+        s = line.split('#', 1)[0].strip()
+        if s:
+            out.append(s)
+    return out
+
+
+def object_intact(path):
+    """An object a container restart left truncated or zero-filled is not intact (header, section table and every
+    section's data inside the file, last page not all zero; S2c's objcheck)."""
+    try:
+        with open(path, 'rb') as f:
+            d = f.read()
+    except OSError:
+        return False
+    if len(d) < 52 or d[:4] != b'\x7fELF' or d[4] != 1:
+        return False
+    shoff, = struct.unpack_from('<I', d, 32)
+    shentsize, shnum = struct.unpack_from('<HH', d, 46)
+    if shnum == 0 or shoff + shentsize * shnum > len(d):
+        return False
+    for i in range(shnum):
+        _, typ, _, _, off, size = struct.unpack_from('<IIIIII', d, shoff + i * shentsize)
+        if typ != 8 and off + size > len(d):     # SHT_NOBITS has no file data
+            return False
+    return any(d[-4096:])
+
+
 def human(n):
     if n is None:
         return '-'
@@ -231,7 +377,10 @@ class Build:
         self.jobs = max(1, int(cfg['JOBS']))
         self.recs = {}
         self.ran = []
+        self.explicit = set()      # stage goals named on the command line (make boot)
+        self.cross_bin = False     # set by the toolchain stage while it runs; False: take its record
         self.run_id = time.strftime('%Y%m%d-%H%M%S', time.gmtime())
+        self.head = port_head(cfg)  # the commit every tree-derived output must be prepared from (J-0054)
         os.makedirs(self.out, exist_ok=True)
         self.plog = open(os.path.join(self.out, 'pipeline.log'), 'a')
 
@@ -245,7 +394,8 @@ class Build:
         if stage not in self.recs:
             p = os.path.join(self.out, stage, 'stage.json')
             try:
-                self.recs[stage] = Record(json.load(open(p)))
+                with open(p) as f:
+                    self.recs[stage] = Record(json.load(f))
             except (OSError, ValueError):
                 self.recs[stage] = Record(stage=stage, status='never')
         return self.recs[stage]
@@ -280,6 +430,10 @@ class Build:
         if dkp:
             e['DEVKITPRO'] = dkp
             path = os.path.join(dkp, 'tools', 'bin') + ':' + path
+        cb = self.cfg.get('CROSS_BIN') or (self.cross_bin if self.cross_bin is not False
+                                           else self.art('toolchain', 'cross_bin'))
+        if cb:
+            path = os.path.abspath(cb) + ':' + path
         e['PATH'] = path
         ext = self.art('fetch', 'ext')
         if ext:
@@ -313,6 +467,20 @@ class Build:
             raise StageError('%s exited %d (log %s): %s' % (os.path.basename(prog[0]) if prog else argv[0], rc,
                                                            self.rel(log), ' | '.join(self.tail(log, 4)[:-1])))
         return rc
+
+    def which(self, tool):
+        """shutil.which on the PATH the tools run with (CROSS_BIN, the toolchain prefix, DEVKITPRO tools)."""
+        return shutil.which(tool, path=self.env()['PATH'])
+
+    def units_filter(self):
+        """UNITS=<file> -> (set of unit sources, content id), or (None, '') for every unit."""
+        if not self.cfg.get('UNITS'):
+            return None, ''
+        p = os.path.abspath(self.cfg['UNITS'])
+        if not os.path.isfile(p):
+            raise StageError('UNITS=%s: no such file' % p)
+        lst = read_units_list(p)
+        return set(lst), sha(sorted(set(lst)))
 
     def capture(self, argv, env=None, cwd=None, timeout=60):
         try:
@@ -349,6 +517,8 @@ class Stage:
     deps = ()        # must be ok/warn, else this stage is skipped
     soft = ()        # used when available
     always = False   # cheap: run on every invocation (its output_id still decides what is downstream)
+    prov = ()        # stages whose tree-derived outputs this one consumes: their prepared_from is checked against
+                     # the current head and carried into this stage's record (J-0054)
 
     def enabled(self, b):
         return True
@@ -378,9 +548,22 @@ def parse_pins():
     return pins
 
 
+def fetch_ext(b):
+    return os.path.abspath(b.cfg['EXT'] or os.path.join(ROOT, 'ext'))
+
+
 class Fetch(Stage):
     name = 'fetch'
-    always = True
+
+    def fingerprint(self, b):
+        # the checkouts' HEADs, read from their git files: the stage itself does nothing more than this
+        ext = fetch_ext(b)
+        return ['fetch-v2', ext, bool(b.cfg['EXT']), b.cfg['ALLOW_UNPINNED'], parse_pins(),
+                [(n, read_git_head(os.path.join(ext, n))) for n in [p[0] for p in parse_pins()] +
+                 ['devkita64-rules', 'buildscripts', 'nx-hbloader']]]
+
+    def outputs_present(self, b):
+        return os.path.isfile(os.path.join(b.out, 'fetch', 'pins.tsv'))
 
     def run(self, b, r):
         log = r['log']
@@ -456,41 +639,203 @@ HOST_TOOLS = [  # tool, needed by, required for the core pipeline
 ]
 
 
+def stat_id(path):
+    try:
+        st = os.stat(path)
+        return (path, st.st_size, st.st_mtime_ns)
+    except (OSError, TypeError):
+        return (path, None)
+
+
+def cross_pins():
+    """toolchain/cross/packages.tsv -> {package: version}."""
+    pins = {}
+    for line in open(os.path.join(ROOT, 'toolchain', 'cross', 'packages.tsv')):
+        p = line.rstrip('\n').split('\t')
+        if len(p) >= 5 and not p[0].startswith('#'):
+            pins[p[0]] = p[1]
+    return pins
+
+
+def cross_pin_matches(b, path_prefix=None):
+    """Whether the aarch64-linux-gnu tools on PATH are the pinned Ubuntu builds (g++ version string, ld 2.42) ->
+    (bool, g++ version line)."""
+    gxx = shutil.which('aarch64-linux-gnu-g++', path=path_prefix) if path_prefix else b.which('aarch64-linux-gnu-g++')
+    if not gxx:
+        return False, None
+    pins = cross_pins()
+    rc, out = b.capture([gxx, '--version'])
+    first = out.splitlines()[0] if not rc and out else ''
+    want_gcc = '(Ubuntu %s)' % pins['g++-13-aarch64-linux-gnu'].split('cross')[0]
+    ld = os.path.join(os.path.dirname(gxx), 'aarch64-linux-gnu-ld')
+    rc, lout = b.capture([ld if os.path.exists(ld) else 'aarch64-linux-gnu-ld', '--version'])
+    want_ld = ' %s' % pins['binutils-aarch64-linux-gnu'].split('-')[0]
+    ok = want_gcc in first and not rc and want_ld in (lout.splitlines() or [''])[0]
+    return ok, first
+
+
+def provide_cross(b, r, d):
+    """The aarch64-linux-gnu tools (decomp compile, fnvlink): CROSS_BIN when given; CROSS=system: whatever is on
+    PATH; CROSS=pinned, or CROSS=auto when PATH has no tools of the pinned Ubuntu build: toolchain/cross/setup.sh
+    into build/toolchain/cross (the pinned packages, unpacked without root). -> the bin dir put first on PATH, or
+    None."""
+    mode = b.cfg['CROSS']
+    if b.cfg['CROSS_BIN']:
+        r['cross'] = 'CROSS_BIN'
+        return os.path.abspath(b.cfg['CROSS_BIN'])
+    if mode == 'system':
+        r['cross'] = 'system (CROSS=system)'
+        return None
+    if mode == 'auto':
+        b.cross_bin = None                          # the host's own PATH
+        ok, ver = cross_pin_matches(b)
+        if ok:
+            r['cross'] = 'system, the pinned build (%s)' % ver
+            return None
+        r.note('the aarch64-linux-gnu tools on PATH are not the pinned build (%s): unpacking the pinned packages'
+               % (ver or 'none'))
+    out = os.path.join(d, 'cross')
+    b.say('toolchain: pinned AArch64 cross tools (toolchain/cross/setup.sh)')
+    b.sh(['bash', os.path.join(ROOT, 'toolchain', 'cross', 'setup.sh'), out], r['log'], check=True, timeout=3600)
+    r['cross'] = 'pinned packages in %s' % b.rel(out)
+    return os.path.join(out, 'bin')
+
+
+def build_id(*paths, extra=()):
+    return sha(tree_hash(*paths), list(extra))
+
+
+def read_id(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def provide_fnvnx_a64(b, r, d):
+    """fnvnx-a64 and the DEVKITPRO tree: FNVNX_TC / DEVKITPRO when given (never modified); else the ones this
+    build dir holds when they were built by the current scripts; else, unless TC_DL=none, built here: the pinned
+    sources (toolchain/sources.sh, or TC_DL=<dir> with the tarballs), toolchain/gcc/build.sh (~45 min on 4 cores),
+    toolchain/devkita64/setup.sh with the pinned libnx. -> (prefix, devkitpro)."""
+    log = r['log']
+    prefix, dkp = b.cfg['FNVNX_TC'], b.cfg['DEVKITPRO']
+    if not prefix and dkp and os.path.isdir(os.path.join(dkp, 'devkitA64')):
+        prefix = os.path.realpath(os.path.join(dkp, 'devkitA64'))
+        r.note('FNVNX_TC taken from $DEVKITPRO/devkitA64')
+    own_prefix, own_dkp = os.path.join(d, 'prefix'), os.path.join(d, 'dkp')
+    src = os.path.join(d, 'src')
+    tc_id = build_id('toolchain/gcc/build.sh', 'toolchain/sources.sh')
+    ext = b.art('fetch', 'ext') or os.path.join(ROOT, 'ext')
+    dkp_id = build_id('toolchain/devkita64', 'toolchain/tools', extra=[tc_id, read_git_head(os.path.join(ext, 'libnx'))])
+
+    def built(path, want):
+        return read_id(os.path.join(path, '.fnvnx-build-id')) == want
+
+    may_build = b.cfg['TC_DL'] != 'none'
+    if not prefix and built(own_prefix, tc_id):
+        prefix = own_prefix
+    if not prefix and may_build:
+        dl = os.path.abspath(b.cfg['TC_DL']) if b.cfg['TC_DL'] not in ('', 'auto') else os.path.join(d, 'dl')
+        b.say('toolchain: fnvnx-a64 sources (toolchain/sources.sh)')
+        b.sh(['bash', os.path.join(ROOT, 'toolchain', 'sources.sh'), dl, src], log, check=True, timeout=3600)
+        work = os.path.join(d, 'work')
+        if read_id(os.path.join(work, '.fnvnx-build-id')) != tc_id:
+            # its step stamps belong to other scripts: start over; the same scripts resume after an interruption
+            shutil.rmtree(work, ignore_errors=True)
+            shutil.rmtree(own_prefix, ignore_errors=True)
+            os.makedirs(work)
+            with open(os.path.join(work, '.fnvnx-build-id'), 'w') as f:
+                f.write(tc_id + '\n')
+        b.say('toolchain: building fnvnx-a64 (toolchain/gcc/build.sh, ~45 min on 4 cores)')
+        b.sh(['bash', os.path.join(ROOT, 'toolchain', 'gcc', 'build.sh'), dl, work, own_prefix,
+              os.path.join(src, 'buildscripts')], log, check=True, timeout=6 * 3600)
+        with open(os.path.join(own_prefix, '.fnvnx-build-id'), 'w') as f:
+            f.write(tc_id + '\n')
+        remove_work(b, r, [work], 'the fnvnx-a64 build tree')
+        prefix = own_prefix
+        r.note('fnvnx-a64 built in %s' % b.rel(own_prefix))
+    if not dkp and built(own_dkp, dkp_id):
+        dkp = own_dkp
+    if not dkp and prefix and prefix != own_prefix:
+        # setup.sh copies devkitPro's make rules into the prefix: never into one we were given
+        r.note('FNVNX_TC given without DEVKITPRO: set DEVKITPRO (toolchain/devkita64/setup.sh), or give neither')
+    elif not dkp and prefix and may_build:
+        rules = os.path.join(src, 'devkita64-rules')
+        if not os.path.isdir(rules):
+            b.sh(['bash', os.path.join(ROOT, 'toolchain', 'sources.sh'), os.path.join(d, 'dl'), src], log, check=True,
+                 timeout=3600)
+        if not os.path.isdir(os.path.join(ext, 'libnx')):
+            raise StageError('the DEVKITPRO tree needs the pinned libnx checkout in %s (tools/fetch.sh)' % ext)
+        shutil.rmtree(own_dkp, ignore_errors=True)
+        b.say('toolchain: DEVKITPRO tree + libnx (toolchain/devkita64/setup.sh)')
+        b.sh(['bash', os.path.join(ROOT, 'toolchain', 'devkita64', 'setup.sh'), prefix, os.path.join(ext, 'libnx'),
+              rules, own_dkp], log, check=True, timeout=3600)
+        with open(os.path.join(own_dkp, '.fnvnx-build-id'), 'w') as f:
+            f.write(dkp_id + '\n')
+        dkp = own_dkp
+    return prefix, dkp
+
+
+def provide_vorbis(b, r, d, dkp):
+    """libogg/libvorbis for the guest (platform/audio/vorbisfile.cpp): VORBIS=<prefix> when given, none: without;
+    auto: toolchain/vorbis/build.sh into build/toolchain/vorbis (pinned git tags, a few files with fnvnx-a64)."""
+    v = b.cfg['VORBIS']
+    if v == 'none':
+        return None
+    if v and v != 'auto':
+        return os.path.abspath(v)
+    if not dkp:
+        r.note('VORBIS=auto needs DEVKITPRO: the guest links without Ogg Vorbis')
+        return None
+    out, work = os.path.join(d, 'vorbis'), os.path.join(d, 'vorbis-work')
+    vid = build_id('toolchain/vorbis', extra=[dkp])
+    f = os.path.join(out, '.fnvnx-build-id')
+    if read_id(f) == vid:
+        return out
+    shutil.rmtree(out, ignore_errors=True)
+    b.say('toolchain: Ogg Vorbis for the guest (toolchain/vorbis/build.sh)')
+    b.sh(['bash', os.path.join(ROOT, 'toolchain', 'vorbis', 'build.sh'), work, out], r['log'],
+         env=b.env({'DEVKITPRO': dkp}), check=True, timeout=3600)
+    with open(f, 'w') as fh:
+        fh.write(vid + '\n')
+    remove_work(b, r, [work], 'the Ogg Vorbis sources')
+    return out
+
+
 class Toolchain(Stage):
     name = 'toolchain'
-    always = True
+    soft = ('fetch',)       # the pinned libnx for the DEVKITPRO tree it may build
+
+    def fingerprint(self, b):
+        # every tool the stage checks, by resolved path and (size, mtime): a reinstalled or removed package reruns it
+        import importlib.util
+        prefix = b.cfg['FNVNX_TC'] or (os.path.join(b.cfg['DEVKITPRO'], 'devkitA64') if b.cfg['DEVKITPRO'] else '')
+        own = os.path.join(b.out, 'toolchain')
+        keys = [os.path.join(prefix, 'bin', 'aarch64-none-elf-gcc'), os.path.join(prefix, 'bin', 'aarch64-none-elf-g++'),
+                os.path.join(own, 'prefix', 'bin', 'aarch64-none-elf-gcc'), os.path.join(own, 'cross', '.setup-id')]
+        if b.cfg['DEVKITPRO']:
+            keys += [os.path.join(b.cfg['DEVKITPRO'], r_) for r_ in ('libnx/lib/libnx.a', 'libnx/switch.specs')]
+        saved, b.cross_bin = b.cross_bin, None      # the host's own PATH (CROSS=auto decides from it)
+        tools = [b.which(t) for t, _, _ in HOST_TOOLS] + [b.which('llvm-undname-18')]
+        b.cross_bin = saved
+        gc = b.cfg['GAME_CXX']
+        return ['toolchain-v3', [b.cfg[k] for k in ('FNVNX_TC', 'DEVKITPRO', 'TC_DL', 'GAME_CXX', 'CROSS_BIN', 'CROSS',
+                                                    'VORBIS', 'MIN_FREE_GB')],
+                tree_hash('toolchain/cross', 'toolchain/sources.sh', 'toolchain/gcc', 'toolchain/devkita64',
+                          'toolchain/vorbis'), up_id(b, 'fetch'),
+                [stat_id(os.path.realpath(k)) for k in keys], [stat_id(os.path.realpath(t)) if t else None for t in tools],
+                gc not in ('auto', 'tc', 'standin') and stat_id(b.which(shlex.split(gc)[0]) if gc else None),
+                importlib.util.find_spec('unicorn') is not None, importlib.util.find_spec('elftools') is not None]
+
+    def outputs_present(self, b):
+        return os.path.isfile(os.path.join(b.out, 'toolchain', 'toolchain.env'))
 
     def run(self, b, r):
-        log = r['log']
         d = b.sdir('toolchain')
-        prefix = b.cfg['FNVNX_TC']
-        dkp = b.cfg['DEVKITPRO']
-        if not prefix and dkp and os.path.isdir(os.path.join(dkp, 'devkitA64')):
-            prefix = os.path.realpath(os.path.join(dkp, 'devkitA64'))
-            r.note('FNVNX_TC taken from $DEVKITPRO/devkitA64')
-        own_prefix, own_dkp = os.path.join(d, 'prefix'), os.path.join(d, 'dkp')
-        if not prefix and os.path.isfile(os.path.join(own_prefix, 'bin', 'aarch64-none-elf-gcc')):
-            prefix = own_prefix
-        if not prefix and b.cfg['TC_DL']:
-            ext = b.art('fetch', 'ext') or os.path.join(ROOT, 'ext')
-            bs = os.path.join(ext, 'buildscripts')
-            if not os.path.isdir(bs):
-                raise StageError('building the toolchain needs %s (git clone '
-                                 'https://github.com/devkitPro/buildscripts)' % bs)
-            b.say('toolchain: building fnvnx-a64 (toolchain/gcc/build.sh, ~45 min)')
-            b.sh(['bash', os.path.join(ROOT, 'toolchain', 'gcc', 'build.sh'), b.cfg['TC_DL'],
-                  os.path.join(d, 'work'), own_prefix, bs], log, check=True)
-            prefix = own_prefix
-        if not dkp and os.path.isfile(os.path.join(own_dkp, 'libnx', 'lib', 'libnx.a')):
-            dkp = own_dkp
-        if not dkp and prefix:
-            ext = b.art('fetch', 'ext') or os.path.join(ROOT, 'ext')
-            rules = os.path.join(ext, 'devkita64-rules')
-            if os.path.isdir(rules) and os.path.isdir(os.path.join(ext, 'libnx')) and b.cfg['TC_DL']:
-                b.say('toolchain: DEVKITPRO tree + libnx (toolchain/devkita64/setup.sh)')
-                b.sh(['bash', os.path.join(ROOT, 'toolchain', 'devkita64', 'setup.sh'), prefix,
-                      os.path.join(ext, 'libnx'), rules, own_dkp], log, check=True)
-                dkp = own_dkp
+        b.cross_bin = cross_bin = provide_cross(b, r, d)
+        prefix, dkp = provide_fnvnx_a64(b, r, d)
+        vorbis = provide_vorbis(b, r, d, dkp)
         checks = []   # (item, value, state)
 
         def chk(item, value, good, required=True):
@@ -513,7 +858,7 @@ class Toolchain(Stage):
                 p = p.strip()
                 chk('ilp32 ' + lib, p, os.path.isabs(p) and os.path.isfile(p))
         else:
-            chk('fnvnx-a64 prefix', 'set FNVNX_TC or DEVKITPRO (or TC_DL to build it)', False)
+            chk('fnvnx-a64 prefix', 'set FNVNX_TC or DEVKITPRO (TC_DL=none stops the stage from building it)', False)
         if dkp:
             dkp = os.path.realpath(dkp)
             for rel in ('libnx/lib/libnx.a', 'libnx/switch.specs', 'libnx/include/switch.h'):
@@ -528,7 +873,7 @@ class Toolchain(Stage):
         else:
             chk('DEVKITPRO', 'set DEVKITPRO (toolchain/devkita64/setup.sh)', False)
         for tool, why, req in HOST_TOOLS:
-            p = shutil.which(tool) or (shutil.which('llvm-undname-18') if tool == 'llvm-undname' else None)
+            p = b.which(tool) or (b.which('llvm-undname-18') if tool == 'llvm-undname' else None)
             chk(tool, p or why, bool(p), required=req)
         rc, _ = b.capture([PY, '-I', '-c', 'import unicorn'])
         chk('python unicorn', 'tests/s5/emu_guest.py', rc == 0, required=False)
@@ -541,7 +886,7 @@ class Toolchain(Stage):
         if kind == 'tc':
             game_cxx = cxx
         elif kind == 'standin':
-            game_cxx = shutil.which('aarch64-linux-gnu-g++')
+            game_cxx = b.which('aarch64-linux-gnu-g++')
         else:
             game_cxx = want
             kind = 'custom'
@@ -549,6 +894,14 @@ class Toolchain(Stage):
         gver = out.splitlines()[0] if not rc and out else None
         chk('GAME_CXX (%s)' % kind, game_cxx or '-', bool(gver))
         r.metric('game_cxx', '%s: %s' % (kind, gver))
+        if kind == 'standin':
+            pinned, _ = cross_pin_matches(b)
+            r.metric('cross_pinned', int(pinned))
+            if not pinned:
+                r.note('the standin compiler is not the pinned Ubuntu build (toolchain/cross/packages.tsv): objects '
+                       'may differ from other machines\' (CROSS=auto unpacks the pinned one)')
+                r['status'] = 'warn'
+        r.metric('vorbis', 1 if vorbis else 0)
 
         free = free_bytes(b.out)
         r.metric('disk_free_gib', round(free / 2**30, 1))
@@ -566,15 +919,18 @@ class Toolchain(Stage):
                 f.write('%s=%s\n' % (k, shlex.quote(v or '')))
         r.artifact('prefix', prefix)
         r.artifact('devkitpro', dkp)
+        r.artifact('cross_bin', cross_bin)
+        r.artifact('vorbis', vorbis)
         r.artifact('game_cxx', game_cxx)
         r.artifact('game_cxx_kind', kind)
         r['game_cxx_id'] = sha(game_cxx, gver)
-        r['output_id'] = sha(prefix, dkp, game_cxx, gver, [c for c in checks])
+        r['output_id'] = sha(prefix, dkp, game_cxx, gver, [c for c in checks], vorbis)
         missing_req = [c[0] for c in checks if c[2] == 'MISSING']
         missing_opt = [c[0] for c in checks if c[2] == 'missing']
         r.metric('tc_missing_required', len(missing_req))
         r.metric('tc_missing_optional', len(missing_opt))
-        r['summary'] = 'prefix %s, DEVKITPRO %s, GAME_CXX %s' % (prefix or '-', dkp or '-', kind)
+        r['summary'] = 'prefix %s, DEVKITPRO %s, GAME_CXX %s, cross tools: %s, vorbis %s' % (
+            prefix or '-', dkp or '-', kind, r.get('cross', '-'), b.rel(vorbis) or 'none')
         if missing_opt:
             r.note('optional tools missing: ' + ', '.join(missing_opt))
         if missing_req:
@@ -585,7 +941,7 @@ class Toolchain(Stage):
 
 
 def game_cxx(b):
-    return b.art('toolchain', 'game_cxx') or shutil.which('aarch64-linux-gnu-g++') or 'aarch64-linux-gnu-g++'
+    return b.art('toolchain', 'game_cxx') or b.which('aarch64-linux-gnu-g++') or 'aarch64-linux-gnu-g++'
 
 
 def game_cxx_id(b):
@@ -632,7 +988,46 @@ def sync_tree(src, dst):
 
 
 def rules_hash():
-    return tree_hash('tools/prepare.py', 'tools/rules', 'render/native/drop_units.txt')
+    return tree_hash(*PREPARE_INPUTS)
+
+
+def tree_content_id(tree):
+    """Content id of a prepared tree, the same value sync_tree() gives (paths + SHA-1 of every file)."""
+    h = hashlib.sha256()
+    for dp, dn, fn in os.walk(tree):
+        dn.sort()
+        rel = os.path.relpath(dp, tree)
+        for n in sorted(fn):
+            r = os.path.normpath(os.path.join(rel, n))
+            with open(os.path.join(tree, r), 'rb') as f:
+                h.update(r.encode('utf-8', 'surrogateescape') + b'\0' + hashlib.sha1(f.read()).digest())
+    return h.hexdigest()[:16]
+
+
+def read_rule_stats(path):
+    rules = {}
+    if os.path.isfile(path):
+        for line in open(path):
+            p = line.rstrip('\n').split('\t')
+            if len(p) >= 3:
+                try:
+                    rules[p[0]] = (int(p[1].split()[0]), int(p[2].split()[0]))
+                except (ValueError, IndexError):
+                    pass
+    return rules
+
+
+def write_prepared_from(d, pf):
+    """build/prepare/prepared_from.txt (the commit on the first line, like S2c's driver writes next to its tree) and
+    prepared_from.json (everything)."""
+    with open(os.path.join(d, 'prepared_from.txt'), 'w') as f:
+        f.write('%s\n' % (pf.get('port_commit') or 'unknown'))
+        f.write('decomp %s\n' % (pf.get('decomp_commit') or 'unknown'))
+        f.write('mode %s %s\n' % (pf.get('mode'), pf.get('tree')))
+        for line in pf.get('port_dirty') or []:
+            f.write('uncommitted %s\n' % line)
+    with open(os.path.join(d, 'prepared_from.json'), 'w') as f:
+        json.dump(pf, f, indent=1, sort_keys=True)
 
 
 class Prepare(Stage):
@@ -640,24 +1035,33 @@ class Prepare(Stage):
     deps = ('fetch',)
 
     def fingerprint(self, b):
-        return ['prepare-v1', rules_hash(), up_id(b, 'fetch'), os.environ.get('FNVNX_PREPARE_SKIP', '')]
+        if b.cfg['PREPARED']:
+            t = os.path.abspath(b.cfg['PREPARED'])
+            uj = os.path.join(t, 'build', 'units.json')
+            st = os.stat(uj) if os.path.isfile(uj) else None
+            return ['prepare-adopt-v1', t, st and (st.st_size, st.st_mtime_ns), read_prepared_from(t)]
+        # the head is part of the key: a tree is always prepared from the commit the run's tools come from (J-0054);
+        # an unchanged tree keeps its files' mtimes (sync_tree), so the stages after it stay cached
+        return ['prepare-v2', rules_hash(), up_id(b, 'fetch'), os.environ.get('FNVNX_PREPARE_SKIP', ''), b.head]
 
     def outputs_present(self, b):
-        return os.path.isfile(os.path.join(b.out, 'prepare', 'tree', 'build', 'units.json'))
+        t = os.path.abspath(b.cfg['PREPARED']) if b.cfg['PREPARED'] else os.path.join(b.out, 'prepare', 'tree')
+        return os.path.isfile(os.path.join(t, 'build', 'units.json'))
 
     def run(self, b, r):
         d = b.sdir('prepare')
+        decomp = b.art('fetch', 'decomp')
+        if b.cfg['PREPARED']:
+            return self.adopt(b, r, d, os.path.abspath(b.cfg['PREPARED']))
         tree, staging = os.path.join(d, 'tree'), os.path.join(d, 'staging')
         shutil.rmtree(staging, ignore_errors=True)
-        b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'prepare.py'), b.art('fetch', 'decomp'), staging], r['log'],
-             check=True)
+        dirty = port_dirty(PREPARE_INPUTS)
+        pf = {'port_commit': b.head, 'port_dirty': dirty, 'decomp_commit': read_git_head(decomp), 'decomp': decomp,
+              'mode': 'prepare.py', 'tree': tree, 'at': now_iso()}
+        b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'prepare.py'), decomp, staging], r['log'], check=True)
         stats = os.path.join(staging, 'prepare_stats.tsv')
-        rules = {}
+        rules = read_rule_stats(stats)
         if os.path.isfile(stats):
-            for line in open(stats):
-                p = line.rstrip('\n').split('\t')
-                if len(p) >= 3:
-                    rules[p[0]] = (int(p[1].split()[0]), int(p[2].split()[0]))
             shutil.copyfile(stats, os.path.join(d, 'prepare_stats.tsv'))
         os.makedirs(tree, exist_ok=True)
         cid, added, changed, removed, same = sync_tree(staging, tree)
@@ -665,32 +1069,94 @@ class Prepare(Stage):
             for tag, lst in (('A', added), ('M', changed), ('D', removed)):
                 for p in lst:
                     f.write('%s\t%s\n' % (tag, p))
+        write_prepared_from(d, pf)
         units = json.load(open(os.path.join(tree, 'build', 'units.json')))['units']
         r.metric('prepare_rules', len(rules))
         r.metric('prepare_edits', sum(e for _, e in rules.values()))
         r.metric('prepare_units', len({u.get('source') for u in units}))
         r.metric('prepare_files_changed', len(added) + len(changed) + len(removed))
+        r.metric('prepare_from', short(b.head))
         r['rules'] = rules
+        r['prepared_from'] = pf
         r.artifact('tree', tree)
+        r.artifact('prepared_from', os.path.join(d, 'prepared_from.txt'))
         r['output_id'] = cid
-        r['summary'] = '%d rules, %d edits; tree: %d added, %d changed, %d removed, %d unchanged' % (
-            len(rules), sum(e for _, e in rules.values()), len(added), len(changed), len(removed), same)
+        r['summary'] = 'from %s: %d rules, %d edits; tree: %d added, %d changed, %d removed, %d unchanged' % (
+            short(b.head), len(rules), sum(e for _, e in rules.values()), len(added), len(changed), len(removed),
+            same)
+        if not b.head:
+            r['status'] = 'warn'
+            r.note('the port commit is unknown (no git metadata; set PORT_COMMIT for a snapshot copy): later stages '
+                   'refuse this tree unless FORCE_STALE=1')
+        if dirty:
+            r['status'] = 'warn'
+            r.note('prepared with uncommitted changes to its inputs (%d paths: %s): %s does not describe this tree '
+                   'alone' % (len(dirty), ', '.join(l[3:] for l in dirty[:5]), short(b.head)))
+
+    def adopt(self, b, r, d, tree):
+        """PREPARED=<tree>: use a tree another run prepared (read only), with the provenance it states."""
+        uj = os.path.join(tree, 'build', 'units.json')
+        if not os.path.isfile(uj):
+            raise StageError('PREPARED=%s is not a prepared tree (no build/units.json)' % tree)
+        pf = dict(read_prepared_from(tree))
+        pf.update(mode='adopted', tree=tree, adopted_at=now_iso())
+        write_prepared_from(d, pf)
+        units = json.load(open(uj))['units']
+        rules = read_rule_stats(os.path.join(tree, 'prepare_stats.tsv'))
+        if rules:
+            shutil.copyfile(os.path.join(tree, 'prepare_stats.tsv'), os.path.join(d, 'prepare_stats.tsv'))
+        r.metric('prepare_rules', len(rules))
+        r.metric('prepare_edits', sum(e for _, e in rules.values()))
+        r.metric('prepare_units', len({u.get('source') for u in units}))
+        r.metric('prepare_from', short(pf.get('port_commit')))
+        r['rules'] = rules
+        r['prepared_from'] = pf
+        r.artifact('tree', tree)
+        r.artifact('prepared_from', os.path.join(d, 'prepared_from.txt'))
+        b.say('prepare: hashing the adopted tree %s' % tree)
+        r['output_id'] = tree_content_id(tree)
+        r['summary'] = 'adopted %s, prepared from %s (%s)' % (tree, short(pf.get('port_commit')),
+                                                             b.rel(pf.get('source')) or 'no prepared_from record')
+        if pf.get('port_commit') != b.head:
+            r['status'] = 'warn'
+            r.note('the adopted tree was prepared from %s, the head is %s: later stages refuse it unless '
+                   'FORCE_STALE=1' % (short(pf.get('port_commit')), short(b.head)))
 
 
 # ---------------------------------------------------------------------------------------------------- 4 census
+
+def selected_units(b, tree, r):
+    """The units of the prepared tree this run handles: every unit, or those UNITS lists (the others are noted)."""
+    allu = sorted({u['source'] for u in json.load(open(os.path.join(tree, 'build', 'units.json')))['units']})
+    want, _ = b.units_filter()
+    if want is None:
+        return allu
+    sel = [u for u in allu if u in want]
+    miss = sorted(want - set(allu))
+    r.metric('units_selected', len(sel))
+    r.note('UNITS=%s: %d of %d units' % (b.cfg['UNITS'], len(sel), len(allu)) +
+           ('; not in this tree: %s' % ', '.join(miss[:8]) if miss else ''))
+    if not sel:
+        raise StageError('UNITS=%s selects none of the tree\'s units' % b.cfg['UNITS'])
+    return sel
+
 
 class Census(Stage):
     name = 'census'
     deps = ('prepare',)
     soft = ('toolchain',)
+    prov = ('prepare',)
 
     def enabled(self, b):
         return b.cfg['CENSUS'] != '0'
 
-    def fingerprint(self, b):
+    def cache_key(self, b):
         return ['census-v1', tree_hash('tools/census.sh', 'shim/include'),
                 script_flags(os.path.join(ROOT, 'tools', 'census.sh')), up_id(b, 'prepare'), game_cxx_id(b),
                 b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
+
+    def fingerprint(self, b):
+        return self.cache_key(b) + [b.units_filter()[1]]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'census', 'summary.txt'))
@@ -702,7 +1168,7 @@ class Census(Stage):
         # checkpoint: every unit's result is kept in cache/ under this stage's fingerprint, so a census that was
         # interrupted (container restart) resumes where it stopped instead of recompiling 2,978 units
         cache = os.path.join(d, 'cache')
-        fp = sha(self.fingerprint(b))
+        fp = sha(self.cache_key(b))      # without UNITS: a different subset keeps the results of the same tree
         fpf = os.path.join(cache, '.fingerprint')
         if not os.path.isfile(fpf) or open(fpf).read().strip() != fp:
             shutil.rmtree(cache, ignore_errors=True)
@@ -719,11 +1185,17 @@ class Census(Stage):
                     'cat "$c.log"; echo $rc > "$c.done"; exit $rc\n' % (
                         shlex.quote(cache), ' '.join(shlex.quote(x) for x in shlex.split(game_cxx(b)))))
         os.chmod(wrapper, 0o755)
-        b.say('census: -fsyntax-only of every unit (%s; %d results kept from an interrupted run)' % (
-            os.path.basename(game_cxx(b)), done))
+        b.say('census: -fsyntax-only of %s (%s; %d unit results already in the census cache)' % (
+            'the UNITS subset' if b.cfg['UNITS'] else 'every unit', os.path.basename(game_cxx(b)), done))
         r.metric('census_resumed_units', done)
-        b.sh(['bash', os.path.join(ROOT, 'tools', 'census.sh'), b.art('prepare', 'tree'), d, b.jobs], r['log'],
-             env=b.env({'CXX': wrapper}), check=True)
+        tree = b.art('prepare', 'tree')
+        argv = ['bash', os.path.join(ROOT, 'tools', 'census.sh'), tree, d, b.jobs]
+        if b.cfg['UNITS']:
+            lst = os.path.join(d, 'units.selected')
+            with open(lst, 'w', errors='surrogateescape') as f:
+                f.write(''.join(u + '\n' for u in selected_units(b, tree, r)))
+            argv.append(lst)
+        b.sh(argv, r['log'], env=b.env({'CXX': wrapper}), check=True)
         lines = open(os.path.join(d, 'summary.txt')).read().splitlines()
         m = re.search(r'units:\s*(\d+)\s+clean:\s*(\d+)\s+failing:\s*(\d+)', lines[0] if lines else '')
         e = re.search(r'errors total:\s*(\d+)', lines[1] if len(lines) > 1 else '')
@@ -747,7 +1219,7 @@ class Census(Stage):
         r['top_errors'] = kinds[:12]
         r.artifact('summary', os.path.join(d, 'summary.txt'))
         r.artifact('units', os.path.join(d, 'units.tsv'))
-        r['output_id'] = sha(units, clean, e.group(1) if e else None)
+        r['output_id'] = file_hash(os.path.join(d, 'units.tsv'))
         r['summary'] = '%d units, %d clean, %d failing, %s errors' % (units, clean, failing,
                                                                       e.group(1) if e else '?')
         if failing:
@@ -807,34 +1279,87 @@ class Compile(Stage):
     name = 'compile'
     deps = ('prepare',)
     soft = ('toolchain',)
+    prov = ('prepare',)
 
     def fingerprint(self, b):
-        return ['compile-v2', file_hash(os.path.join(ROOT, 'tools', 'link', 'compile.sh')),
+        if b.cfg['OBJECTS']:
+            src = os.path.abspath(b.cfg['OBJECTS'])
+            return ['compile-adopt-v1', src, file_hash(src), up_id(b, 'prepare'), b.units_filter()[1]]
+        return ['compile-v3', file_hash(os.path.join(ROOT, 'tools', 'link', 'compile.sh')),
                 script_flags(os.path.join(ROOT, 'tools', 'link', 'compile.sh')), up_id(b, 'prepare'),
                 game_cxx_id(b), b.cfg['OPT'], tree_hash('shim/include'),
-                b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
+                b.rec('fetch').get('metrics', {}).get('pin_sse2neon'), b.units_filter()[1]]
 
     def outputs_present(self, b):
-        return os.path.isfile(os.path.join(b.out, 'compile', 'objects.tsv'))
+        p = os.path.join(b.out, 'compile', 'objects.tsv')
+        return os.path.isfile(p) and all(o is None or os.path.isfile(o) for o in objects_map(p).values())
+
+    def adopt(self, b, r, d, tree, src):
+        """OBJECTS=<objects.tsv>: objects another job compiled from this tree (the compile farms:
+        tools/farm/fetch_objs.sh checks they were compiled from exactly this tree), read in place."""
+        given = objects_map(src)
+        units = selected_units(b, tree, r)
+        ok, failed = [], []
+        with open(os.path.join(d, 'objects.tsv'), 'w', errors='surrogateescape') as f:
+            for u in units:
+                o = given.get(u)
+                st = 'ok' if o and os.path.isfile(o) and object_intact(o) else 'fail'
+                (ok if st == 'ok' else failed).append(u)
+                f.write('%s\t%s\t%s\n' % (u, o or unit_base(os.path.dirname(src), u) + '.o', st))
+        with open(os.path.join(d, 'failed.tsv'), 'w', errors='surrogateescape') as f:
+            f.write('# source\terrors\tfirst error\n')
+            for u in failed:
+                log = os.path.join(os.path.dirname(src), u.replace('/', '_') + '.log')
+                errs = [l for l in open(log, errors='replace')] if os.path.isfile(log) else []
+                errs = [l for l in errs if ': error:' in l or 'fatal error:' in l]
+                first = re.sub(r'^[^:]+:\d+:\d+:\s*(fatal )?error:\s*', '', errs[0].strip())[:200] if errs else \
+                    ('(not in %s)' % b.rel(src) if u not in given else '(no error line)')
+                f.write('%s\t%d\t%s\n' % (u, len(errs), first))
+        r['adopted'] = src
+        r.metric('compile_units', len(units))
+        r.metric('compile_ok', len(ok))
+        r.metric('compile_failed', len(failed))
+        r.metric('compile_built_now', 0)
+        r.metric('compile_obj_mib', round(sum(os.path.getsize(given[u]) for u in ok) / 2**20, 1))
+        r.artifact('objects', os.path.join(d, 'objects.tsv'))
+        r.artifact('failed', os.path.join(d, 'failed.tsv'))
+        r['output_id'] = sha([(u, file_hash(given[u])) for u in ok])
+        r['summary'] = '%d/%d units -> objects adopted from %s, %d failed (listed, excluded)' % (
+            len(ok), len(units), b.rel(src), len(failed))
+        if not ok:
+            raise StageError('no object in %s' % src)
+        if failed:
+            r['status'] = 'warn'
 
     def run(self, b, r):
         d = b.sdir('compile')
+        tree = b.art('prepare', 'tree')
+        if b.cfg['OBJECTS']:
+            return self.adopt(b, r, d, tree, os.path.abspath(b.cfg['OBJECTS']))
         obj = os.path.join(d, 'obj')
         os.makedirs(obj, exist_ok=True)
-        tree = b.art('prepare', 'tree')
         cxx = game_cxx(b)
         flags = script_flags(os.path.join(ROOT, 'tools', 'link', 'compile.sh'))
         r['flags'] = flags
+        # the tree's path is part of it: objects are kept by mtime, and another tree (PREPARED) has its own mtimes
         toolset = sha(file_hash(os.path.join(ROOT, 'tools', 'link', 'compile.sh')), game_cxx_id(b), b.cfg['OPT'],
-                      flags, 'compile-v1')
+                      flags, os.path.abspath(tree), 'compile-v1')
         tsf = os.path.join(d, 'toolset.id')
         if not os.path.isfile(tsf) or open(tsf).read().strip() != toolset:
             if os.listdir(obj):
-                r.note('compiler, flags or compile.sh changed: all objects rebuilt')
+                r.note('compiler, flags, compile.sh or the tree changed: all objects rebuilt')
             shutil.rmtree(obj)
             os.makedirs(obj)
             open(tsf, 'w').write(toolset + '\n')
-        units = sorted({u['source'] for u in json.load(open(os.path.join(tree, 'build', 'units.json')))['units']})
+        units = selected_units(b, tree, r)
+        # objects a container restart left truncated or zero-filled are compiled again (S2c's objcheck)
+        broken = [s_ for s_ in units if os.path.isfile(unit_base(obj, s_) + '.o')
+                  and not object_intact(unit_base(obj, s_) + '.o')]
+        for s_ in broken:
+            os.remove(unit_base(obj, s_) + '.o')
+        if broken:
+            r.note('%d damaged objects removed and rebuilt: %s' % (len(broken), ', '.join(broken[:5])))
+        r.metric('compile_damaged_objects', len(broken))
         # objects whose headers changed (dependency files from -MD; compile.sh itself checks the source only)
         mt = {}
 
@@ -986,21 +1511,16 @@ def parse_check(text):
     return m, classes
 
 
-def probe_cxx_flags():
-    """The -f options of compile.sh's flag set (J-0034's D10 semantics among them): fnvlink's probe and vtable
-    synthesis compile with layout.flags(), which does not carry them, and fnvnx_compat.h refuses an unsigned plain
-    char, so every probe unit would fail."""
-    f = script_flags(os.path.join(ROOT, 'tools', 'link', 'compile.sh')) or ''
-    return [t for t in f.split() if t.startswith('-f') and not t.startswith('-fmax-errors')]
-
-
 def probe_cxx(b, d):
-    """Adapter: a compiler wrapper for fnvlink probe/vtables (they take one executable in $CXX) = the game
-    compiler + probe_cxx_flags(), so the probes see the same language as the objects."""
+    """fnvlink probe/vtables compile with the one executable in $CXX plus layout.flags() (which carries
+    compile.sh's J-0034 semantics flags since S2 aligned it): the game compiler, through a wrapper only when
+    GAME_CXX is a command with arguments."""
+    cxx = shlex.split(game_cxx(b))
+    if len(cxx) == 1:
+        return cxx[0]
     w = os.path.join(d, 'cxx-probe')
-    body = ('#!/bin/sh\n# generated by tools/pipeline/build.py: game compiler + compile.sh -f options for fnvlink '
-            'probe/vtables\nexec %s %s "$@"\n' % (' '.join(shlex.quote(x) for x in shlex.split(game_cxx(b))),
-                                                  ' '.join(shlex.quote(x) for x in probe_cxx_flags())))
+    body = '#!/bin/sh\n# generated by tools/pipeline/build.py: GAME_CXX for fnvlink probe/vtables\nexec %s "$@"\n' % (
+        ' '.join(shlex.quote(x) for x in cxx))
     if not os.path.isfile(w) or open(w).read() != body:
         with open(w, 'w') as f:
             f.write(body)
@@ -1008,14 +1528,76 @@ def probe_cxx(b, d):
     return w
 
 
+def link_tool_inputs(b):
+    """What fnvlink reads besides its arguments: its own code, S4's provider tables, S1b's renames (default
+    --units-renames), the shim and sse2neon (layout probes and vtable synthesis compile against them)."""
+    rn = b.cfg['UNITS_RENAMES']
+    return [tree_hash('tools/link', 'platform/crt/crt_symbols.tsv', 'platform/win32/imports.tsv',
+                      'platform/win32/exports.cpp', 'shim/include', 'tools/difffuzz/check_rebind.py'),
+            file_hash(os.path.join(ROOT, 'patches', 'units_renames.tsv')) if not rn else
+            (rn if rn == 'none' else file_hash(os.path.abspath(rn))),
+            b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
+
+
+def extern_text_id(b):
+    et = b.cfg['EXTERN_TEXT']
+    if et == 'auto':
+        return 'auto:' + (file_hash(os.path.join(HERE, 'extern_text.py')) or '')
+    return et if et in ('', 'none') else file_hash(os.path.abspath(et))
+
+
+def msvc_objs_id(b, key='MSVC_OBJS'):
+    d = b.cfg[key]
+    if not d:
+        return ''
+    d = os.path.abspath(d)
+    return sha(d, listing_id([os.path.join(d, n) for n in os.listdir(d)]) if os.path.isdir(d) else None)
+
+
+def objects_map(objects_tsv):
+    """compile.sh / fetch_objs.sh objects.tsv -> {unit: object path or None when it failed}."""
+    m = {}
+    for line in open(objects_tsv, errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if len(f) >= 3:
+            m[f[0]] = f[1] if f[2] == 'ok' else None
+    return m
+
+
+def seed_link_out(b, r, out):
+    """LINK_SEED=<fnvlink out dir of an earlier run>: what of its demangle cache (cache/), layouts.tsv and vtables/
+    (without the probe work dir) a fresh build/link/out lacks, as S2c's driver seeds a new run. fnvlink keys its
+    probe caches on each unit's content (layout.unit_key), so rows of another tree are probed again by fnvlink
+    itself; the seed only saves the probes whose units did not change."""
+    seed = b.cfg['LINK_SEED']
+    if not seed:
+        return
+    seed = os.path.abspath(seed)
+    got = []
+    for n in ('cache', 'layouts.tsv', 'vtables'):
+        src, dst = os.path.join(seed, n), os.path.join(out, n)
+        if not os.path.exists(src) or os.path.exists(dst):
+            continue
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, ignore=shutil.ignore_patterns('probe'))
+        else:
+            shutil.copyfile(src, dst)
+        got.append(n)
+    if got:
+        r.note('seeded from %s: %s' % (seed, ', '.join(got)))
+    r.metric('link_seeded', len(got))
+
+
 class Link(Stage):
     name = 'link'
     deps = ('compile',)
     soft = ('toolchain',)
+    prov = ('compile', 'prepare')
 
     def fingerprint(self, b):
-        return ['link-v2', tree_hash('tools/link'), probe_cxx_flags(), up_id(b, 'compile'), up_id(b, 'prepare'),
-                file_hash(b.cfg['OVERRIDE']), file_hash(b.cfg['EXTERN_TEXT']), game_cxx_id(b)]
+        return ['link-v3', link_tool_inputs(b), up_id(b, 'compile'), up_id(b, 'prepare'),
+                file_hash(b.cfg['OVERRIDE']), extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
+                game_cxx_id(b)]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'link', 'out', 'aliases.ld'))
@@ -1027,40 +1609,100 @@ class Link(Stage):
         tree = b.art('prepare', 'tree')
         fl = os.path.join(ROOT, 'tools', 'link', 'fnvlink.py')
         units_json = os.path.join(tree, 'build', 'units.json')
-        args = [units_json, b.art('compile', 'objects'), out]
-        for opt, key in (('--override', 'OVERRIDE'), ('--extern-text', 'EXTERN_TEXT')):
+        objects = b.art('compile', 'objects')
+        args = [units_json, objects, out]
+        et = b.cfg['EXTERN_TEXT']
+        if et == 'auto':
+            # S4's addr_ids.txt, made from the tree's units.json (identical to S4's file for the f11/f12 tree)
+            et = os.path.join(d, 'extern_text.txt')
+            b.sh([PY, '-I', os.path.join(HERE, 'extern_text.py'), units_json, et], r['log'], check=True)
+            r.metric('link_extern_text_addrs', sum(1 for _ in open(et)))
+        if et and et != 'none':
+            args += ['--extern-text', os.path.abspath(et)]
+        else:
+            r.note('EXTERN_TEXT=none: the referenced .text addresses without a definition get no E entries (the '
+                   'hand flow passes S4\'s addr_ids.txt)')
+        for opt, key in (('--override', 'OVERRIDE'), ('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
+                         ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:
-                args += [opt, os.path.abspath(b.cfg[key])]
-        # adapter: resolve writes out/objcopy/<obj>.* per object but never removes old ones; apply would then
-        # rewrite objects of units that no longer compile (S2 interface gap, reported in docs/BUILD.md)
-        shutil.rmtree(os.path.join(out, 'objcopy'), ignore_errors=True)
+                args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
+        r['resolve_options'] = [b.rel(a) for a in args[3:]]
+        seed_link_out(b, r, out)
         env = b.env({'CXX': probe_cxx(b, d)})
         log = r['log']
-        b.say('link: fnvlink resolve')
-        b.sh([PY, '-I', fl, 'resolve'] + args, log, env=env, check=True)
-        lay = os.path.join(out, 'layouts.tsv')
-        before = file_hash(lay)
-        b.say('link: fnvlink probe (aggregate layouts)')
-        rc = b.sh([PY, '-I', fl, 'probe', out, tree, b.jobs], log, env=env)
-        if rc:
-            r.note('probe exited %d; layouts as before' % rc)
-        if file_hash(lay) != before:
-            b.say('link: fnvlink resolve (with the new layouts)')
+
+        def resolve(n):
+            # resolve writes out/objcopy/<obj>.* per object but never removes old ones; apply would then rewrite
+            # objects of units that no longer compile (S2 interface gap; S2c's driver starts every run in a new dir)
             shutil.rmtree(os.path.join(out, 'objcopy'), ignore_errors=True)
+            b.say('link: fnvlink resolve %d' % n)
+            t = time.time()
             b.sh([PY, '-I', fl, 'resolve'] + args, log, env=env, check=True)
+            r.metric('link_resolve%d_s' % n, round(time.time() - t, 1))
+            shutil.copyfile(os.path.join(out, 'stats.txt'), os.path.join(d, 'resolve%d.stats.txt' % n))
+
+        # S2c's order: resolve (asks for layouts and vtables), probe (layouts + synthesized vtables/typeinfo),
+        # resolve again with both, apply, trial link
+        resolve(1)
+        # fnvlink probe = the layout probe, then the vtable synthesis; run as its two documented halves (probe with
+        # FNVNX_NO_VTABLES=1, then vtables) to time each
+        b.say('link: fnvlink probe (aggregate layouts; %d jobs)' % b.jobs)
+        t = time.time()
+        rc = b.sh([PY, '-I', fl, 'probe', out, tree, b.jobs], log, env=dict(env, FNVNX_NO_VTABLES='1'))
+        r.metric('link_probe_layouts_s', round(time.time() - t, 1))
+        if os.path.exists(os.path.join(out, 'vtable_requests.tsv')):
+            b.say('link: fnvlink vtables (synthesized vtables and typeinfo; %d jobs)' % b.jobs)
+            t2 = time.time()
+            rc = b.sh([PY, '-I', fl, 'vtables', out, tree, b.jobs], log, env=env) or rc
+            r.metric('link_probe_vtables_s', round(time.time() - t2, 1))
+        r.metric('link_probe_s', round(time.time() - t, 1))
+        r.metric('link_probe_jobs', b.jobs)
+        text = open(log, errors='replace').read()
+        mm = re.findall(r'probe: (\d+) units, (\d+) types \((\d+) cached\)', text)
+        if mm:
+            r.metric('link_probe_units', int(mm[-1][0]))
+            r.metric('link_probe_types', int(mm[-1][1]))
+            r.metric('link_probe_cached', int(mm[-1][2]))
+        mm = re.findall(r'probe: (\d+) cached rows, (\d+) dropped', text)
+        if mm:
+            r.metric('link_layouts_dropped', int(mm[-1][1]))
+        mm = re.findall(r'vtables round (\d+): (\d+) classes, (\d+) host units', text)
+        if mm:
+            r.metric('link_vtable_rounds', len(mm))
+            r.metric('link_vtable_host_probes', sum(int(x[2]) for x in mm))
+        if rc:
+            r.note('probe exited %d; resolve 2 uses the layouts and vtables it left' % rc)
+        resolve(2)
         shutil.rmtree(fixed, ignore_errors=True)
         b.say('link: fnvlink apply')
         alog = os.path.join(d, 'apply.log')
         open(alog, 'w').close()
+        t = time.time()
         b.sh([PY, '-I', fl, 'apply', out, fixed], alog, env=env, check=True)
+        r.metric('link_apply_s', round(time.time() - t, 1))
         afail = [line.strip() for line in open(alog, errors='replace')
                  if line.startswith(('objcopy failed', 'as failed', 'cc addrmap.c failed'))]
         b.say('link: fnvlink check (trial link)')
         clog = os.path.join(d, 'check.txt')
         open(clog, 'w').close()
+        t = time.time()
         b.sh([PY, '-I', fl, 'check', out, fixed], clog, env=env, check=True)
+        r.metric('link_check_s', round(time.time() - t, 1))
+        # S13's split-global check on the rewritten objects (part of S2c's run summary): want 0
+        rb = os.path.join(d, 'check_rebind.txt')
+        open(rb, 'w').close()
+        rrc = b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'difffuzz', 'check_rebind.py'), fixed], rb, env=env)
+        rbtext = open(rb, errors='replace').read()
+        mm = re.search(r'objects with bypassing references: (\d+); variables: (\d+); relocations: code (\d+), '
+                       r'data (\d+)', rbtext)
+        if mm:
+            r.metric('link_bypassing_objects', int(mm.group(1)))
+            r.metric('link_bypassing_relocs', int(mm.group(3)) + int(mm.group(4)))
+        else:
+            r.note('check_rebind.py gave no result (exit %d, %s)' % (rrc, b.rel(rb)))
         m, classes = parse_stats(os.path.join(out, 'stats.txt'))
-        cm, cclasses = parse_check(open(clog, errors='replace').read())
+        ctext = open(clog, errors='replace').read()
+        cm, cclasses = parse_check(ctext)
         for k, v in list(m.items()) + list(cm.items()):
             r.metric(k, v)
         if m.get('link_refs'):
@@ -1071,16 +1713,32 @@ class Link(Stage):
         r.metric('link_apply_failures', len(afail))
         nfixed = len([n for n in os.listdir(fixed) if n.endswith('.o')]) if os.path.isdir(fixed) else 0
         r.metric('link_fixed_objects', nfixed)
+        # the run summary, first line as S2c's driver writes it (J-0054: every link run names its tree's commit)
+        pf = b.rec('prepare').get('prepared_from') or {}
+        with open(os.path.join(d, 'summary.txt'), 'w') as f:
+            f.write('tree prepared from branch commit: %s\n' % (pf.get('port_commit') or 'unknown'))
+            f.write('decomp %s; tree %s (%s); linked with port %s\n' % (
+                pf.get('decomp_commit') or 'unknown', pf.get('tree'), pf.get('mode'), b.head or 'unknown'))
+            f.write(''.join(open(os.path.join(out, 'stats.txt')).readlines()[:3]))
+            mt = r.get('metrics', {})
+            f.write('seconds: resolve 1 %s, probe %s (layouts %s, vtables %s; %s jobs), resolve 2 %s, apply %s, trial link '
+                    '%s\n' % tuple(mt.get('link_%s' % k) for k in ('resolve1_s', 'probe_s', 'probe_layouts_s',
+                                                                  'probe_vtables_s', 'probe_jobs', 'resolve2_s',
+                                                                  'apply_s', 'check_s')))
+            f.write(''.join(l + '\n' for l in ctext.splitlines() if l.strip() and not l.startswith(('$ ', '[exit'))))
+            if mm:
+                f.write(mm.group(0) + '\n')
         for k in ('aliases.ld', 'addrmap.tsv', 'refs.tsv', 'abi.tsv', 'stats.txt', 'bridges.S'):
             r.artifact(k, os.path.join(out, k))
         r.artifact('out', out)
         r.artifact('fixed', fixed)
+        r.artifact('summary', os.path.join(d, 'summary.txt'))
         r['output_id'] = sha(file_hash(os.path.join(out, 'aliases.ld')),
                              listing_id([os.path.join(fixed, n) for n in os.listdir(fixed)]))
         r['summary'] = '%s refs, %s resolved by address (%s %%), %s bridges; trial link: %s undefined, %s multidef' % (
             m.get('link_refs'), m.get('link_resolved'), r['metrics'].get('link_resolved_pct'), m.get('link_bridges'),
             cm.get('link_check_undefined'), cm.get('link_check_multidef'))
-        if afail or cm.get('link_check_multidef'):
+        if afail or cm.get('link_check_multidef') or r['metrics'].get('link_bypassing_relocs'):
             r['status'] = 'warn'
         if afail:
             r.note('%d objects could not be rewritten by apply (see build/link/apply.log); they are left out' %
@@ -1116,16 +1774,18 @@ class Guest(Stage):
     name = 'guest'
     deps = ('link', 'toolchain')
     soft = ('nine',)
+    prov = ('link',)
 
     def fingerprint(self, b):
         scr = guest_script(b)
         own = scr.startswith(HERE)
-        return ['guest-v2', scr, tree_hash(os.path.dirname(scr)) if not own else
+        return ['guest-v3', scr, tree_hash(os.path.dirname(scr)) if not own else
                 tree_hash('tools/pipeline/guest_link.py', 'tools/pipeline/guest_stub.c'),
                 tree_hash('tools/pipeline/undef.py', 'toolchain/game', 'toolchain/guest', 'toolchain/include',
-                          'toolchain/tools', 'platform', 'loader', 'startup', 'shim/include'),
+                          'toolchain/tools', 'platform', 'loader', 'startup', 'shim/include', 'tests/s5/dynbrk.py'),
                 tree_hash('render/nine') if b.cfg['NINE'] == '1' else '',
-                up_id(b, 'link'), up_id(b, 'toolchain'), b.cfg['NINE'], b.cfg['VORBIS']]
+                up_id(b, 'link'), up_id(b, 'toolchain'), b.cfg['NINE'], b.art('toolchain', 'vorbis'), b.cfg['GAME_NEW'],
+                b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'guest', 'guest.nso'))
@@ -1139,7 +1799,11 @@ class Guest(Stage):
         for n in ('fnvnx.elf', 'guest.nso', 'undefined.txt', 'summary.json'):
             if os.path.exists(os.path.join(d, n)):
                 os.remove(os.path.join(d, n))
-        extra = {'FNVNX_TC': b.art('toolchain', 'prefix'), 'D3D9': 'external' if b.cfg['NINE'] == '1' else 'null'}
+        # S5's hand flow: D3D9=null (headless null device), GAME_NEW=runtime, GUEST=pie with PIN=auto (the script's
+        # defaults), DEVKITPRO / SSE2NEON / JOBS from the environment
+        extra = {'FNVNX_TC': b.art('toolchain', 'prefix'), 'D3D9': 'external' if b.cfg['NINE'] == '1' else 'null',
+                 'GAME_NEW': b.cfg['GAME_NEW']}
+        r['d3d9'], r['game_new'] = extra['D3D9'], extra['GAME_NEW']
         nine_game = scr == nine_game_script()
         prod = d                       # where the script leaves fnvnx.elf / guest.nso / undefined.txt
         if nine_game:
@@ -1157,11 +1821,13 @@ class Guest(Stage):
         b.say('guest: ILP32 guest link via %s' % r['method'])
         argv = ([PY, '-I', scr] if scr.endswith('.py') else ['bash', scr]) + [lout, fixed,
                                                                           os.path.join(d, 'nine') if nine_game else d]
-        if b.cfg['VORBIS'] and not scr.endswith('.py'):
+        vorbis = b.art('toolchain', 'vorbis')        # VORBIS: a prefix, built by the toolchain stage, or none
+        r['vorbis'] = vorbis
+        if vorbis and not scr.endswith('.py'):
             if nine_game:
-                extra['VORBIS'] = b.cfg['VORBIS']
+                extra['VORBIS'] = vorbis
             else:
-                argv.append(b.cfg['VORBIS'])
+                argv.append(vorbis)
         rc = b.sh(argv, r['log'], env=b.env(extra), timeout=7200)
         if prod != d:
             for n in ('fnvnx.elf', 'guest.nso', 'undefined.txt', 'fnvnx.map'):
@@ -1204,6 +1870,29 @@ class Guest(Stage):
         if rc or not os.path.isfile(nso):
             raise StageError('guest link failed (exit %d), see %s: %s' % (rc, b.rel(r['log']),
                                                                          ' | '.join(Build.tail(r['log'], 3))))
+        # S5's checks of the linked guest: PC-relative references to absolute image symbols (want 0: relocatable),
+        # static initializers / finalizers that hold a trap (want 0, tests/s5/dynbrk.py)
+        pl = os.path.join(prod, 'pcrel_abs.log')
+        if os.path.isfile(pl):
+            mm = re.search(r'absolute symbols: (\d+) in (\d+) objects', open(pl, errors='replace').read())
+            if mm:
+                r.metric('guest_pcrel_abs_refs', int(mm.group(1)))
+                r.metric('guest_pcrel_abs_objects', int(mm.group(2)))
+        nm = os.path.join(b.art('toolchain', 'prefix'), 'bin', 'aarch64-none-elf-nm')
+        rc, dyn = b.capture([PY, '-I', os.path.join(ROOT, 'tests', 's5', 'dynbrk.py'), os.path.join(d, 'fnvnx.elf'),
+                             nm], timeout=600)
+        with open(os.path.join(d, 'dynbrk.txt'), 'w') as f:
+            f.write(dyn)
+        for kind in ('dyninit', 'dynexit'):
+            mm = re.search(r'\b%s\D*?(\d+)\D+?(\d+)' % kind, dyn)
+            if mm:
+                r.metric('guest_%s_functions' % kind, int(mm.group(1)))
+                r.metric('guest_%s_brk' % kind, int(mm.group(2)))
+        if rc:
+            r.note('tests/s5/dynbrk.py exited %d (build/guest/dynbrk.txt)' % rc)
+        if r.get('metrics', {}).get('guest_dyninit_brk') or r.get('metrics', {}).get('guest_dynexit_brk'):
+            r['status'] = 'warn'
+            r.note('static initializers / finalizers with a trap: see build/guest/dynbrk.txt')
         rc, dump = b.capture([PY, '-I', os.path.join(ROOT, 'toolchain', 'tools', 'elf2nso.py'), '--dump', nso])
         r['nso_dump'] = dump.splitlines()[:12]
         if rc:
@@ -1221,7 +1910,194 @@ class Guest(Stage):
             r['status'] = 'warn'
 
 
-# ------------------------------------------------------------------------------------------------------ 8 nine
+# ------------------------------------------------------------------------------------------------------ 8 boot
+
+def synth_inputs_id(b):
+    """What S14's synthesized image depends on: the generator, S4's import names, the pristine units.json and the
+    MSVC objects (by listing)."""
+    po = b.cfg['PRISTINE_OBJS']
+    if not po:
+        return ''
+    po = os.path.abspath(po)
+    objs = sorted(os.path.join(po, n) for n in os.listdir(po) if n.endswith('.obj')) if os.path.isdir(po) else []
+    return sha(tree_hash('loader/synth', 'platform/win32/imports.tsv'), listing_id(objs),
+               file_hash(os.path.join(b.art('fetch', 'decomp') or '', 'build', 'units.json')))
+
+
+def boot_image(b, r, d):
+    """The data image of the emulated boot: BOOT_IMAGE=<exe>; auto: S14's synthesized image
+    (loader/synth/synth_image.py over S11's pristine MSVC objects, PRISTINE_OBJS) when the objects are there, else
+    none; none: no image (the boot maps an all-zero data window). -> path or None."""
+    img = b.cfg['BOOT_IMAGE']
+    if img in ('none', ''):
+        return None
+    if img != 'auto':
+        return os.path.abspath(img)
+    po = b.cfg['PRISTINE_OBJS']
+    if not po or not os.path.isdir(po):
+        r.note('BOOT_IMAGE=auto: no PRISTINE_OBJS (S11\'s MSVC 2008 objects of the pristine decomp, tools/equiv), so '
+               'no synthesized data image: the boot runs on the all-zero image')
+        return None
+    sd = os.path.join(d, 'synth')
+    os.makedirs(sd, exist_ok=True)
+    out = os.path.join(sd, 'synth.exe')
+    idf = os.path.join(sd, 'inputs.id')
+    want = synth_inputs_id(b)
+    if os.path.isfile(out) and read_id(idf) == want:
+        return out
+    for n in ('synth.exe', 'phase1.pickle', 'inputs.id'):
+        if os.path.exists(os.path.join(sd, n)):
+            os.remove(os.path.join(sd, n))
+    b.say('boot: S14 synthesized data image (loader/synth/synth_image.py)')
+    slog = os.path.join(sd, 'synth.log')
+    open(slog, 'w').close()
+    rc = b.sh([PY, '-I', os.path.join(ROOT, 'loader', 'synth', 'synth_image.py'),
+               '--units', os.path.join(b.art('fetch', 'decomp'), 'build', 'units.json'), '--objdir', os.path.abspath(po),
+               '--imports', os.path.join(ROOT, 'platform', 'win32', 'imports.tsv'), '--out', out,
+               '--summary', os.path.join(sd, 'summary.txt'), '--report', os.path.join(sd, 'report.json'),
+               '--missing', os.path.join(sd, 'missing.tsv'), '--cache', os.path.join(sd, 'phase1.pickle')],
+              slog, cwd=ROOT, timeout=7200)
+    if rc or not os.path.isfile(out):
+        r.note('synth_image.py exited %d (build/boot/synth/synth.log): the boot runs on the all-zero image' % rc)
+        r['status'] = 'warn'
+        return None
+    with open(idf, 'w') as f:
+        f.write(want + '\n')
+    m = re.search(r'objects (\d+): (\d+) items placed', open(slog, errors='replace').read())
+    if m:
+        r.metric('synth_objects', int(m.group(1)))
+        r.metric('synth_items_placed', int(m.group(2)))
+    if os.path.exists(os.path.join(sd, 'phase1.pickle')):
+        os.remove(os.path.join(sd, 'phase1.pickle'))      # the object scan cache: large, and rebuilt when needed
+    return out
+
+
+class Boot(Stage):
+    """S5's emulated boot of the game guest (tests/s5/emu_guest.py: traced boot without the player's exe, faulting
+    static initializers skipped) and the boot frontier (tests/s5/frontier.py: every untranslated address the boot
+    hit, mapped to its unit and that unit's compile status). Informational: the boot stops at a fault by design."""
+    name = 'boot'
+    deps = ('guest',)
+    soft = ('census',)
+    prov = ('guest',)
+
+    def enabled(self, b):
+        return b.cfg['BOOT'] == '1' or 'boot' in b.explicit
+
+    def fingerprint(self, b):
+        img, bc = b.cfg['BOOT_IMAGE'], b.cfg['BOOT_CENSUS']
+        return ['boot-v2', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
+                                     'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
+                up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
+                synth_inputs_id(b) if img == 'auto' else '',
+                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], b.cfg['EMU_BUDGET']]
+
+    def outputs_present(self, b):
+        return os.path.isfile(os.path.join(b.out, 'boot', 'emu.log'))
+
+    def run(self, b, r):
+        d = b.sdir('boot')
+        g = b.rec('guest')
+        if not g.get('method', '').startswith('S5'):
+            raise StageError('the emulated boot needs the boot code of S5\'s game link (toolchain/game/build.sh); '
+                             'this guest was linked by %s' % g.get('method'))
+        nso, elf = b.art('guest', 'guest.nso'), b.art('guest', 'fnvnx.elf')
+        gdir = os.path.dirname(nso)
+        root = os.path.join(d, 'sdmc')            # sdmc:/ of the emulated host, removed afterwards
+        shutil.rmtree(root, ignore_errors=True)
+        os.makedirs(root)
+        argv = [PY, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_guest.py'), nso, '--elf', elf, '--skip-faulting-init',
+                '--expect', 'fnvnx boot: calling WinMain', '--root', root, '--budget', b.cfg['EMU_BUDGET']]
+        image = boot_image(b, r, d)
+        r['image'] = b.rel(image) if image else 'none (all-zero data image)'
+        if image:
+            argv += ['--file', 'fnvnx/game/FalloutNV.exe=' + image]
+        elog = os.path.join(d, 'emu.log')
+        open(elog, 'w').close()
+        tmo = int(b.cfg['EMU_TIMEOUT'])
+        b.say('boot: emulated boot of the game guest (tests/s5/emu_guest.py, at most %d s)' % tmo)
+        rc = b.sh(argv, elog, cwd=ROOT, timeout=tmo)
+        shutil.rmtree(root, ignore_errors=True)
+        lines = [l for l in open(elog, errors='replace').read().splitlines() if not l.startswith('$ ')]
+        winmain = any('fnvnx boot: calling WinMain' in l for l in lines)
+        stop = next((l.strip() for l in reversed(lines) if l.startswith('STOPPED:')), None)
+        skipped = next((int(m.group(1)) for l in reversed(lines)
+                        for m in [re.search(r'initializers skipped after a fault: (\d+)', l)] if m), None)
+        table = [l.split('\t') for l in lines if l.startswith('trap-table\t')]
+        r.metric('boot_exit', rc)
+        r.metric('boot_winmain', int(winmain))
+        r.metric('boot_init_skips', skipped)
+        r.metric('boot_trap_keys', len(table))
+        r.metric('boot_trap_hits', sum(int(t[2]) for t in table if len(t) > 2 and t[2].isdigit()))
+        r['stop'] = stop
+        # the fault that stopped the boot (the last trace block: pc, lr, call frames) and the skipped initializers
+        # grouped by fault (tests/s5/emu_guest.py skip-summary lines)
+        starts = [i for i, l in enumerate(lines) if l.startswith('== trace (')]
+        fault = []
+        if starts:
+            fault = [lines[starts[-1]].strip()]
+            for l in lines[starts[-1] + 1:starts[-1] + 12]:
+                if not re.match(r'\s+(pc|lr|#\d+|S10 )', l):
+                    break
+                fault.append(l.strip())
+        r['fault'] = fault
+        r['skip_summary'] = [l.split('\t')[1:] for l in lines if l.startswith('skip-summary\t')][:30]
+        r['milestones'] = list(dict.fromkeys(l.strip() for l in lines if re.search(
+            r'fnvnx boot: (?!trap|initializer #|import )', l)))[:80]
+        if rc == 124:
+            r.note('the emulator ran into EMU_TIMEOUT=%d s' % tmo)
+        if any(l.startswith('Traceback') for l in lines) and stop is None:
+            raise StageError('the emulator itself failed (build/boot/emu.log): %s' % ' | '.join(Build.tail(elog, 3)))
+        # S5's summary (milestones, trap categories, skipped initializers by fault, stop reason)
+        lout = b.art('link', 'out')
+        rc2, summ = b.capture([PY, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_summary.py'), elog,
+                               os.path.join(lout, 'addrmap.tsv')], timeout=600)
+        with open(os.path.join(d, 'summary.txt'), 'w') as f:
+            f.write(summ)
+        # the boot frontier: S1's priority list
+        tree = b.art('prepare', 'tree')
+        census = os.path.abspath(b.cfg['BOOT_CENSUS']) if b.cfg['BOOT_CENSUS'] else (
+            b.art('census', 'units') if b.ok('census') else None)
+        fargs = [PY, '-I', os.path.join(ROOT, 'tests', 's5', 'frontier.py'), elog,
+                 '--addrmap', os.path.join(lout, 'addrmap.tsv'), '--units', os.path.join(tree, 'build', 'units.json'),
+                 '--objects', b.art('compile', 'objects'), '--out', os.path.join(d, 'frontier'), '--top', '25']
+        if os.path.isfile(os.path.join(gdir, 'fnvnx.map')):
+            fargs += ['--map', os.path.join(gdir, 'fnvnx.map')]
+        if census and os.path.isfile(census):
+            fargs += ['--census', census]
+            r['frontier_census'] = census
+        flog = os.path.join(d, 'frontier.txt')
+        open(flog, 'w').close()
+        frc = b.sh(fargs, flog, cwd=ROOT, timeout=1800)
+        ftext = open(flog, errors='replace').read()
+        mm = re.search(r'(\d+) untranslated keys hit(?:, (\d+) hits)?', ftext)
+        if mm:
+            r.metric('frontier_keys', int(mm.group(1)))
+            r.metric('frontier_hits', int(mm.group(2) or 0))
+        fu = os.path.join(d, 'frontier_units.tsv')
+        if os.path.isfile(fu):
+            r.metric('frontier_units', sum(1 for l in open(fu, errors='replace') if l.strip() and not l.startswith(('#', 'rank', 'unit'))))
+        if frc:
+            r['status'] = 'warn'
+            r.note('tests/s5/frontier.py exited %d (build/boot/frontier.txt)' % frc)
+        for n, p in (('emu.log', elog), ('summary', os.path.join(d, 'summary.txt')), ('frontier', flog),
+                     ('frontier.tsv', os.path.join(d, 'frontier.tsv')), ('frontier_units.tsv', fu)):
+            if os.path.isfile(p):
+                r.artifact(n, p)
+        r['output_id'] = sha(file_hash(os.path.join(d, 'frontier.tsv')), stop, skipped, len(table))
+        r['summary'] = '%s; %s initializers skipped, %d trapped keys; frontier %s keys in %s units; %s' % (
+            'WinMain entered' if winmain else 'WinMain NOT entered', fmt_n(skipped), len(table),
+            fmt_n(r['metrics'].get('frontier_keys')), fmt_n(r['metrics'].get('frontier_units')),
+            clean_msg(stop or 'no STOPPED line (exit %d)' % rc)[:140])
+        if not winmain:
+            r['status'] = 'warn'
+
+
+def fmt_n(v):
+    return '-' if v is None else '{:,}'.format(v) if isinstance(v, int) else str(v)
+
+
+# ------------------------------------------------------------------------------------------------------ 9 nine
 
 class Nine(Stage):
     name = 'nine'
@@ -1276,7 +2152,7 @@ class Nine(Stage):
             len(libs), human(r['metrics']['nine_libs_bytes']), r.get('proxy_kinds'))
 
 
-# ------------------------------------------------------------------------------------------------------ 9 host
+# ----------------------------------------------------------------------------------------------------- 10 host
 
 class Host(Stage):
     name = 'host'
@@ -1332,12 +2208,13 @@ class Host(Stage):
             human(os.path.getsize(os.path.join(d, 'main.npdm'))))
 
 
-# --------------------------------------------------------------------------------------------------- 10 package
+# -------------------------------------------------------------------------------------------------- 11 package
 
 class Package(Stage):
     name = 'package'
     deps = ('host',)
     soft = ('guest',)
+    prov = ('guest',)      # only when the guest is packaged
 
     def fingerprint(self, b):
         return ['package-v1', up_id(b, 'host'), up_id(b, 'guest'), b.cfg['PROGRAM_ID'], tree_hash('toolchain/tools')]
@@ -1387,7 +2264,7 @@ class Package(Stage):
             r['status'] = 'warn'
 
 
-# ----------------------------------------------------------------------------------------------------- 11 tests
+# ---------------------------------------------------------------------------------------------------- 12 tests
 
 class Suite:
     def __init__(self, name, inputs, cmds, needs=(), informational=False, fixed_inputs=None, after=(), work=()):
@@ -1490,25 +2367,33 @@ def suites(b):
             cmds = [[PY, '-I', rel + '/' + f] for f in sorted(os.listdir(p)) if re.match(r'test_.*\.py$', f)]
         if cmds:
             s.append(Suite(n, [rel], cmds))
-    # informational: the game guest under the emulator (traced boot without the player's exe, S5 boot code)
-    gnso, gelf = os.path.join(b.out, 'guest', 'guest.nso'), os.path.join(b.out, 'guest', 'fnvnx.elf')
-    if b.rec('guest').get('method', '').startswith('S5') and os.path.isfile(gnso):
-        s.append(Suite('emu-game', ['tests/s5/emu_guest.py'], [
-            [PY, '-I', 'tests/s5/emu_guest.py', gnso, '--elf', gelf, '--skip-faulting-init', '--expect',
-             'fnvnx boot: calling WinMain']], needs=('unicorn',),
-            informational=True, fixed_inputs=lambda b: [up_id(b, 'guest')]))
+    # the game guest under the emulator is the boot stage (S5's emulated boot + frontier), not a suite
     return s
+
+
+def suite_fp(b, su):
+    return sha(tree_hash(*su.inputs), up_id(b, 'toolchain'), up_id(b, 'fetch'), su.cmds, su.fixed_inputs(b))
 
 
 class Tests(Stage):
     name = 'tests'
-    soft = ('toolchain', 'fetch')    # the game guest's emulator run uses whatever build/guest holds
-    always = True
+    soft = ('toolchain', 'fetch')
+
+    def fingerprint(self, b):
+        # every selected suite's own fingerprint: unchanged suites that passed are cached anyway; a failing suite
+        # makes the stage `fail`, which is never cached, so it runs again
+        want = b.cfg['TESTS']
+        sel = None if want == 'all' else set(x.strip() for x in want.split(',') if x.strip() and want != 'none')
+        return ['tests-v2', want, [(su.name, suite_fp(b, su)) for su in suites(b) if sel is None or su.name in sel]]
+
+    def outputs_present(self, b):
+        return os.path.isfile(os.path.join(b.out, 'tests', 'results.json'))
 
     def run(self, b, r):
         d = b.sdir('tests')
         want = b.cfg['TESTS']
-        sel = None if want == 'all' else set(x.strip() for x in want.split(',') if x.strip())
+        sel = None if want == 'all' else set() if want == 'none' else \
+            set(x.strip() for x in want.split(',') if x.strip())
         resf = os.path.join(d, 'results.json')
         try:
             prev = json.load(open(resf))
@@ -1521,7 +2406,7 @@ class Tests(Stage):
         for su in suites(b):
             if sel is not None and su.name not in sel:
                 continue
-            fp = sha(tree_hash(*su.inputs), up_id(b, 'toolchain'), up_id(b, 'fetch'), su.cmds, su.fixed_inputs(b))
+            fp = suite_fp(b, su)
             p = prev.get(su.name)
             if p and p.get('fingerprint') == fp and p.get('status') == 'pass' and not force:   # failures rerun
                 p['cached'] = True
@@ -1530,7 +2415,7 @@ class Tests(Stage):
                     p['summary'] = summarize_output(open(p['log'], errors='replace').read()) or p.get('summary')
                 results[su.name] = p
                 continue
-            miss = [n for n in su.needs if not (have.get(n) if n in have else shutil.which(n))]
+            miss = [n for n in su.needs if not (have.get(n) if n in have else b.which(n))]
             miss += ['suite %s passing' % a for a in su.after if results.get(a, {}).get('status') != 'pass']
             log = os.path.join(d, su.name + '.log')
             open(log, 'w').close()
@@ -1542,7 +2427,7 @@ class Tests(Stage):
             b.say('tests: %s' % su.name)
             t0 = time.time()
             rc = 0
-            timeout = int(b.cfg['EMU_TIMEOUT']) if su.name == 'emu-game' else 5400
+            timeout = 5400
             for c in su.cmds:
                 rc = b.sh(c, log, cwd=ROOT, timeout=timeout)
                 if rc:
@@ -1559,19 +2444,13 @@ class Tests(Stage):
                               and not re.search(r'\*\*\* \[|Error \d+$', l)), None)
                 if first:
                     res['summary'] = clean_msg(first)[:220]
-            if su.name == 'emu-game':
-                lines = text.splitlines()
-                traps = len({re.sub(r'.*unresolved (\S+).*', r'\1', l) for l in lines if 'fnvnx boot: trap #' in l})
-                stop = [l.strip() for l in lines if re.search(r'fnvnx boot: (STOP|calling WinMain)|STOPPED|reached', l)]
-                res['summary'] = clean_msg('%d distinct unresolved symbols hit; %s' % (
-                    traps, stop[-1] if stop else (res.get('summary') or '')))[:220]
             results[su.name] = res
             ck = dict(prev)
             ck.update(results)
             json.dump(ck, open(resf + '.tmp', 'w'), indent=1, sort_keys=True)
             os.replace(resf + '.tmp', resf)       # checkpoint: a restart keeps the suites already passed
         for k, v in prev.items():     # suites not selected this run keep their last result
-            if k not in results:
+            if k not in results and k != 'emu-game':      # emu-game: now the boot stage
                 v['not_selected'] = True
                 v['cached'] = True
                 results[k] = v
@@ -1596,7 +2475,8 @@ class Tests(Stage):
             r['status'] = 'warn'
 
 
-STAGES = [Fetch(), Toolchain(), Prepare(), Census(), Compile(), Link(), Guest(), Nine(), Host(), Package(), Tests()]
+STAGES = [Fetch(), Toolchain(), Prepare(), Census(), Compile(), Link(), Guest(), Boot(), Nine(), Host(), Package(),
+          Tests()]
 BYNAME = {s.name: s for s in STAGES}
 
 
@@ -1616,6 +2496,28 @@ def closure(targets):
     return [s for s in STAGES if s.name in need]
 
 
+def provenance(b, st):
+    """-> (prepared_from record of the tree-derived outputs `st` consumes, or None; why they must not be consumed,
+    or None). The record travels with the outputs: prepare writes it, every stage in `prov` copies its inputs'."""
+    ups = [u for u in st.prov if b.ok(u)]
+    if not ups:
+        return None, None
+    pfs = [(u, b.rec(u).get('prepared_from')) for u in ups]
+    pf = pfs[0][1]
+    missing = [u for u, p in pfs if not p]
+    commits = sorted({p.get('port_commit') or 'unknown' for _, p in pfs if p})
+    if missing:
+        return pf, 'outputs of %s carry no provenance record (made by an older pipeline)' % ', '.join(missing)
+    if len(commits) > 1:
+        return pf, 'outputs prepared from different commits (%s)' % ', '.join('%s %s' % (
+            u, short(p.get('port_commit'))) for u, p in pfs)
+    if not pf.get('port_commit'):
+        return pf, 'inputs prepared from an unknown commit'
+    if pf.get('port_commit') != b.head:
+        return pf, 'inputs prepared from %s, the head is %s' % (short(pf.get('port_commit')), short(b.head))
+    return pf, None
+
+
 def execute(b, targets):
     force = set(b.cfg['FORCE'].split(',')) if b.cfg['FORCE'] else set()
     failed = False
@@ -1632,12 +2534,38 @@ def execute(b, targets):
             b.save(r)
             b.say('%-9s skipped: needs %s' % (st.name, ', '.join(missing)))
             continue
-        fp = sha(st.fingerprint(b)) if not st.always else None
+        # J-0054: tree-derived outputs are consumed only when they were prepared from the current head
+        pf, stale = provenance(b, st)
+        if stale and b.cfg['FORCE_STALE'] != '1':
+            r.update(status='fail', ran=False, run_id=b.run_id, prepared_from=pf, stale=stale, summary='refused',
+                     error='stale inputs: %s (prepare again at this head, or FORCE_STALE=1)' % stale)
+            b.save(r)
+            failed = True
+            b.say('%-9s REFUSED  %s' % (st.name, r['error']))
+            continue
+        try:
+            fp = sha(st.fingerprint(b)) if not st.always else None
+        except StageError as ex:
+            r.update(status='fail', ran=False, run_id=b.run_id, error=clean_msg(str(ex)), summary=clean_msg(str(ex)))
+            b.save(r)
+            failed = True
+            b.say('%-9s fail     %s' % (st.name, r['error']))
+            continue
         prev = b.rec(st.name)
         if (fp and prev.get('fingerprint') == fp and prev.get('status') in ('ok', 'warn') and st.outputs_present(b)
                 and st.name not in force and 'all' not in force):
             prev['ran'] = False
             prev['cached_at'] = b.run_id
+            if st.prov:
+                # same fingerprint = the same inputs by content (it holds the upstream output ids): the outputs are
+                # what this tree gives, so they take its (possibly re-prepared, identical) provenance
+                if pf is not None:
+                    prev['prepared_from'] = pf
+                base = prev.get('status_run', prev.get('status'))
+                prev['status'] = 'warn' if stale and base == 'ok' else base
+                prev.pop('stale', None)
+                if stale:
+                    prev['stale'] = stale
             b.save(prev)
             b.say('%-9s cached   %s' % (st.name, prev.get('summary', '')))
             continue
@@ -1645,6 +2573,8 @@ def execute(b, targets):
         r.update(status='running', fingerprint=None, started=now_iso(), ran=True, run_id=b.run_id)
         b.save(r)          # visible to `make status`; an interrupted stage is not mistaken for a finished one
         r.update(status='ok', fingerprint=fp)
+        if pf is not None:
+            r['prepared_from'] = pf
         t0 = time.time()
         b.say('%-9s running' % st.name)
         try:
@@ -1660,6 +2590,12 @@ def execute(b, targets):
                 f.write(traceback.format_exc())
         r['seconds'] = round(time.time() - t0, 1)
         r['disk_bytes'] = du(os.path.join(b.out, st.name))
+        r['status_run'] = r['status']
+        if stale and r['status'] != 'fail':
+            r['stale'] = stale
+            r.note('FORCE_STALE=1: consumed %s' % stale)
+            if r['status'] == 'ok':
+                r['status'] = 'warn'
         if r['status'] == 'fail':
             r['fingerprint'] = None
             r.setdefault('summary', r.get('error', ''))
@@ -1674,7 +2610,7 @@ def execute(b, targets):
 
 def parse_args(argv):
     cfg = {k: os.environ.get(k, d) or d for k, d, _ in CONFIG}
-    for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'TC_DL', 'OVERRIDE', 'EXTERN_TEXT', 'VORBIS', 'NINE_SRC', 'FORCE'):
+    for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'OVERRIDE', 'NINE_SRC', 'FORCE'):
         cfg[k] = os.environ.get(k, '')
     targets = []
     for a in argv:
@@ -1710,9 +2646,12 @@ def main(argv):
         print('freed %s' % human(remove_work(b, None, paths, 'work trees')))
         return 0
     if cmd == 'status':
+        print('head %s' % (b.head or 'unknown'))
         for st in STAGES:
             r = b.rec(st.name)
-            print('%-9s %-9s %s' % (st.name, r.get('status'), r.get('summary', '')))
+            pf = r.get('prepared_from')
+            print('%-9s %-9s %-11s %s' % (st.name, r.get('status'), short(pf.get('port_commit')) if pf else '-',
+                                          r.get('summary', '')))
         return 0
     if cmd == 'help':
         print(__doc__)
@@ -1723,13 +2662,15 @@ def main(argv):
         if t not in BYNAME and t not in ('all', 'report'):
             sys.exit('unknown stage %s (stages: %s, all, report, status, clean)' % (t, ' '.join(STAGE_NAMES)))
     stages = STAGE_NAMES if 'all' in targets else [t for t in targets if t != 'report']
+    b.explicit = {t for t in targets if t in BYNAME}
     if not stages:   # `report` alone: re-render the last run, no new history entry
         try:
             b.run_id = json.load(open(os.path.join(b.out, 'report.json')))['run_id']
         except (OSError, ValueError, KeyError):
             pass
-    b.say('fnv-nx pipeline run %s: %s (NINE=%s PROGRAM_ID=%s JOBS=%d)' % (b.run_id, ' '.join(targets), cfg['NINE'],
-                                                                         cfg['PROGRAM_ID'], b.jobs))
+    b.say('fnv-nx pipeline run %s: %s (port %s, NINE=%s PROGRAM_ID=%s JOBS=%d%s)' % (
+        b.run_id, ' '.join(targets), short(b.head), cfg['NINE'], cfg['PROGRAM_ID'], b.jobs,
+        ', UNITS=%s' % cfg['UNITS'] if cfg['UNITS'] else ''))
     failed = execute(b, stages) if stages else False
     try:
         path = reportmod.write(b, STAGES)

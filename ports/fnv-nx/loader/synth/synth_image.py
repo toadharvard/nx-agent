@@ -4,7 +4,8 @@ without the exe, and say exactly what is still missing.
 
 usage: synth_image.py --units build/units.json --objdir OBJDIR [--imports platform/win32/imports.tsv]
                       [--out synth.exe] [--report report.json] [--summary summary.txt] [--missing missing.tsv]
-                      [--conflicts conflicts.tsv] [--cache phase1.pickle] [--spill]
+                      [--conflicts conflicts.tsv] [--state-out state.bin] [--cache phase1.pickle]
+                      [--addrmap S2/out/addrmap.tsv --checks checks.json --violations violations.tsv]
 
 OBJDIR holds the MSVC 2008 objects of the pristine decomp, u<index>.obj for units.json index <index> (stream
 S11, tools/equiv). The decomp is byte-identical to the exe's code, so the objects also carry the data its units
@@ -19,8 +20,14 @@ in order of trust:
 Relocations inside placed data are resolved through the same names (vftable slots -> function addresses,
 pointer tables -> literals); the four bytes of an unresolved one stay unknown. Non-COMDAT data is placed per
 symbol (the decomp's units do not reproduce the original objects' section layout: anchors in one section
-disagree), the size from the decorated type when it fixes it, otherwise up to the next symbol with trailing
-zeros as soft padding.
+disagree), the size from the decorated type when it fixes it, a $SG literal through its terminator, otherwise up
+to the last non-zero word, with the rest up to the next symbol as soft zero padding. Overlapping claims: better
+rank, then more providing units; equal rank and support with different bytes: contested (unknown, written as 0).
+
+The report carries coverage per region and kind (coverage(): known bytes from one object / identical copies /
+several agreeing or disagreeing items, by rank; assumed, guessed and unknown bytes; the same for every address
+units.json references), the boot globals of J-0057 (explain()), and with --checks the self-consistency checks of
+synth_checks.py (pointers, vftable slots, RTTI chains, overlaps, $SG strings; violations by kind and owner).
 
 Output (all derived from the decomp: local only, never commit):
   --out       PE32 shell: .text (virtual, no bytes), .rdata, .data(+.bss), .tls at the inferred original
@@ -59,6 +66,11 @@ PAGE = 0x1000
 ST_NONE, ST_SOFT, ST_UNK, ST_HARD = 0, 1, 2, 3
 TRUST = {'unit': 0, 'global': 1, 'name': 2, 'spill': 3}
 SG_SHIFT_OK = set()          # units whose $SG numbering was matched (filled by phase 1)
+PHASE1_VERSION = 3           # bump when Item or the object scan changes: older --cache pickles are rescanned
+# addresses whose bytes the boot depends on before WinMain's own initialisation (J-0057): explained in the report
+BOOT_GLOBALS = (('g_memoryManager', 0x011f6238, 4), ('allocator holder (NiMemManager)', 0x011f6080, 4),
+                ('init options list', 0x011f6118, 4), ('BSNiAllocator COL word', 0x010a2524, 4),
+                ('BSNiAllocator vftable', 0x010a2528, 56), ('run-once flag of FUN_00aa3050', 0x011f6229, 1))
 
 
 def page_up(v):
@@ -106,8 +118,10 @@ class Names:
 
     def __init__(self, units):
         self.unit = []
+        self.sources = [u['source'] for u in units]
         glob = collections.defaultdict(set)
         self.funcs = {}
+        self.defnames = {}         # address -> every symbol a unit defines there (definitions and fold aliases)
         for i, u in enumerate(units):
             m = {}
             for n, v in u.get('symbols', {}).items():
@@ -118,6 +132,7 @@ class Names:
                 for al in f.get('fold_aliases', []):
                     m[al] = a
                 self.funcs.setdefault(a, (i, f['symbol'], f['size']))
+                self.defnames.setdefault(a, set()).update([f['symbol']] + list(f.get('fold_aliases', [])))
             self.unit.append(m)
             for n, a in m.items():
                 glob[n].add(a)
@@ -173,9 +188,10 @@ def global_ok(sym):
 # --------------------------------------------------------------------------------------------- phase 1
 
 class Item:
-    """bytes one object (or a name) says are at an original address"""
+    """bytes one object (or a name) says are at an original address. relocs: (offset, type, target name, offset
+    into the target, resolved address or None) of every relocation inside the item (the checks follow them)"""
     __slots__ = ('addr', 'data', 'unk', 'hard', 'unit', 'name', 'fam', 'kind', 'src', 'comdat', 'nrel', 'nunres',
-                 'secrel', 'spill_refs', 'copies', 'rank')
+                 'secrel', 'spill_refs', 'copies', 'rank', 'relocs', 'idx', 'units', 'soff', 'exact')
 
     def __init__(self, addr, data, unk, hard, unit, name, fam, kind, src, comdat):
         self.addr, self.data, self.unk, self.hard = addr, data, unk, hard
@@ -183,6 +199,11 @@ class Item:
         self.nrel = self.nunres = 0
         self.secrel = []
         self.spill_refs = []
+        self.relocs = []
+        self.idx = -1
+        self.copies, self.rank, self.units = 1, None, None
+        self.soff = 0            # offset of the item's own symbol (a vftable's ??_7 follows its COL word)
+        self.exact = True        # False: the hard extent is a guess (no size from the type, not COMDAT)
 
     @property
     def end(self):
@@ -191,6 +212,16 @@ class Item:
 
 def is_secsym(coff, s):
     return s.storage == coffobj.SYM_STATIC and s.naux > 0 and s.value == 0 and s.name == coff.sections[s.section].name
+
+
+def string_extent(data, last_sig):
+    """bytes a string literal ($SG) owns: up to and including its terminator, a NUL after the last character or a
+    NUL pair after the last UTF-16 unit (every odd byte zero, at least two characters)"""
+    if last_sig < 0:
+        return min(len(data), 1)
+    if last_sig >= 2 and not last_sig & 1 and not any(data[j] for j in range(1, last_sig + 1, 2)):
+        return min(len(data), last_sig + 4)
+    return min(len(data), last_sig + 2)
 
 
 def process_object(i, coff, names, cls, stats, want_code=True):
@@ -309,6 +340,28 @@ def process_object(i, coff, names, cls, stats, want_code=True):
             return sym.value, (sym.value + addend) & 0xffffffff, None
         return None, None, None
 
+    code_names = {}
+
+    def target_name(sym, addend):
+        """(symbol name, offset) a relocation refers to; a section symbol stands for the item (data) or the
+        function (code) at its offset"""
+        if sym is None:
+            return None, 0
+        if sym.section > 0 and is_secsym(coff, sym):
+            sec = secs[sym.section]
+            if sec.is_data:
+                x = local_item(sym.section, addend)
+                return (x[2].name, addend - x[0]) if x else (sec.name, addend)
+            if sec.is_code:
+                fl = code_names.get(sym.section)
+                if fl is None:
+                    fl = sorted((s.value, s.name) for s in by_sec[sym.section] if not is_secsym(coff, s))
+                    code_names[sym.section] = fl
+                k = bisect.bisect_right(fl, (addend, '￿')) - 1
+                return (fl[k][1], addend - fl[k][0]) if k >= 0 else (sec.name, addend)
+            return sec.name, addend
+        return sym.name, addend
+
     # ---- fill bytes of every item (placed or not: unplaced ones may be spilled later)
     for si, lst in placed.items():
         sec = secs[si]
@@ -332,6 +385,8 @@ def process_object(i, coff, names, cls, stats, want_code=True):
                 tsym = coff.symbols.get(symidx)
                 addend = struct.unpack_from('<I', data, o)[0]
                 base, point, sp = target(tsym, addend) if tsym else (None, None, None)
+                tn, toff = target_name(tsym, addend)
+                it.relocs.append((o, typ, tn, toff, point))
                 if point is not None and typ == coffobj.REL_DIR32:
                     struct.pack_into('<I', data, o, point)
                 elif point is not None and typ == coffobj.REL_DIR32NB:
@@ -349,18 +404,23 @@ def process_object(i, coff, names, cls, stats, want_code=True):
                 if data[j]:
                     last_sig = max(last_sig, j)
                     break
-            # hard extent
+            # hard extent; exact when the object or the name fixes it (COMDAT, sized type, string terminator),
+            # else a guess up to the last non-zero word (inexact claims yield to exact ones, see merge)
             vo = v - start
+            exact = True
             if sec.is_comdat:
                 hard = len(data)
             elif size_info and size_info[1]:
                 hard = min(len(data), vo + size_info[0])
+            elif it.name.startswith('$SG'):
+                hard = string_extent(data, last_sig)      # through the terminator (J-0062: was the last word)
             else:
                 lo = vo + (size_info[0] if size_info else 1)
                 hard = min(len(data), max(lo, (last_sig + 4) & ~3))
+                exact = False
             if sec.is_bss:
                 hard = min(len(data), vo + (size_info[0] if size_info else 1))
-            it.data, it.unk, it.hard = bytes(data), bytes(unk), hard
+            it.data, it.unk, it.hard, it.soff, it.exact = bytes(data), bytes(unk), hard, vo, exact
     for it in items:
         stats['items_' + it.src] += 1
     for it in unplaced:
@@ -446,7 +506,8 @@ def phase1(units, objdir, names, limit=None, log=print):
         if have % 500 == 0:
             log('  %d objects, %d items, %d refs (%.0f s)' % (have, len(items), len(refs), time.time() - t0))
     stats['objects'] = have
-    return dict(items=items, unplaced=unplaced, refs=refs, edges=edges, stats=stats, sg_shift=dict(names.shift))
+    return dict(items=items, unplaced=unplaced, refs=refs, edges=edges, stats=stats, sg_shift=dict(names.shift),
+                version=PHASE1_VERSION)
 
 
 # --------------------------------------------------------------------------------------------- phase 2
@@ -474,9 +535,24 @@ def name_items(units, names, have_addrs):
 
 
 class Image:
+    """the window's bytes (val), what is known about each (st: ST_*), and their provenance: how many distinct
+    items claim a known value (ncl), whether one disagreed (dis), the winning item (win) and its rank"""
+
     def __init__(self):
-        self.val = bytearray(WIN_HI - WIN_LO)
-        self.st = bytearray(WIN_HI - WIN_LO)
+        n = WIN_HI - WIN_LO
+        self.val = bytearray(n)
+        self.st = bytearray(n)
+        self.ncl = bytearray(n)
+        self.dis = bytearray(n)
+        self.win = array.array('i', [-1]) * n
+        self.rank = bytearray(b'\xff') * n
+
+    def word(self, va):
+        """the 32-bit value at va when all four bytes are known, else None"""
+        o = va - WIN_LO
+        if o < 0 or o + 4 > len(self.val) or any(s != ST_HARD for s in self.st[o:o + 4]):
+            return None
+        return struct.unpack_from('<I', self.val, o)[0]
 
 
 def name_rank(it):
@@ -513,7 +589,8 @@ def merge(items, report):
     for g in groups.values():
         g.sort(key=lambda x: (TRUST[x.src], x.unit))
         rep = g[0]
-        rep.copies = len({x.unit for x in g})
+        rep.units = sorted({x.unit for x in g})
+        rep.copies = len(rep.units)
         rep.rank = min(name_rank(x) for x in g)
         distinct.append(rep)
     report['items'] = len(items)
@@ -522,11 +599,14 @@ def merge(items, report):
     report['copies_agreeing'] = sum(len(g) - 1 for g in groups.values())
     report['items_by_rank'] = dict(collections.Counter(d.rank for d in distinct))
     # overlaps between distinct items (pairs), by rank pair
-    distinct.sort(key=lambda x: x.addr)
+    distinct.sort(key=lambda x: (x.addr, x.unit, x.name))
+    for k, it in enumerate(distinct):
+        it.idx = k
     active = []
     cons = collections.Counter()
     pairs = collections.Counter()
     conflicts = []
+    bss_conflicts = []              # a .bss item over an initialised item's non-zero bytes
     for it in distinct:
         active = [a for a in active if a.end > it.addr]
         for a in active:
@@ -543,8 +623,10 @@ def merge(items, report):
                 other = it if a.fam == 'bss' else a
                 key = 'bss-vs-' + other.fam
                 cons[key] += 1
-                if any(other.data[x - other.addr] for x in range(lo, hi) if x - other.addr < other.hard):
+                nz = sum(1 for x in range(lo, hi) if x - other.addr < other.hard and other.data[x - other.addr])
+                if nz:
                     cons[key + ':nonzero'] += 1
+                    bss_conflicts.append((a, it, hi - lo - nz, nz))
                 continue
             if a.fam == 'bss':
                 continue
@@ -569,6 +651,9 @@ def merge(items, report):
     owner = {}                      # byte offset -> (rank, copies) of its hard value, only where contested
     best = bytearray(b'\xff') * len(val)     # rank of the hard byte's provider
     sup = array.array('H', bytes(2 * len(val)))   # support (providing units) of the hard byte
+    ncl = img.ncl                   # distinct items with a known value for the byte (saturating at 255)
+    dis = img.dis                   # 1: some claimant disagreed with the value written
+    win = img.win                   # index (Item.idx) of the item whose value the byte holds, -1 none
     res = collections.Counter()
     order = sorted(distinct, key=lambda x: (x.rank, -x.copies, TRUST[x.src], 0 if x.comdat else 1, x.addr))
     for it in order:
@@ -582,12 +667,17 @@ def merge(items, report):
         for k in range(len(d)):
             p = base + k
             if k < h and not u[k]:
+                if ncl[p] < 255:
+                    ncl[p] += 1
                 s = st[p]
                 if s == ST_HARD:
                     if val[p] != d[k]:
+                        dis[p] = 1
                         if best[p] == r and sup[p] == c:
                             res['contested_bytes'] += 1
-                            st[p] = ST_UNK          # nobody wins: unknown
+                            st[p] = ST_UNK          # nobody wins: unknown, written as 0 like an unresolved
+                            val[p] = 0              # relocation (J-0062: kept the first claimant's byte)
+                            win[p] = -1
                             owner[p] = (r, c)
                         else:
                             res['lost_bytes'] += 1
@@ -598,12 +688,15 @@ def merge(items, report):
                     st[p] = ST_HARD
                     best[p] = r
                     sup[p] = c
+                    win[p] = it.idx
             elif u[k]:
                 if st[p] < ST_UNK:
                     st[p] = ST_UNK
             elif st[p] == ST_NONE:
                 st[p] = ST_SOFT
     report['conflict_resolution'] = dict(res)
+    img.rank = best
+    img.bss_conflicts = bss_conflicts
     return img, distinct, conflicts
 
 
@@ -829,7 +922,7 @@ def classify(units, names, img, sec, ph1, imports, order, phase, report, missing
                     f.write('%s\t%s\t%s\t%s\t0x%08x\t%s\t%s\t%s\t%s\n' % (
                         '0x%08x' % fa if fa else '-', phase.get(fa, '-'), order.get(fa, '-'), fname, a, cls[a][0],
                         cls[a][1], use, ','.join(sorted(ref[a][0])[:4])))
-    return cls, size_of
+    return cls, size_of, ref
 
 
 def byte_coverage(img, sec, report):
@@ -846,6 +939,169 @@ def byte_coverage(img, sec, report):
         out[name] = dict(range=['0x%08x' % lo, '0x%08x' % hi], bytes=hi - lo, hard=c[ST_HARD], unknown_reloc=c[ST_UNK],
                          soft_zero=c[ST_SOFT], none=c[ST_NONE])
     report['bytes'] = out
+
+
+PROV_NAMES = ('one-object', 'copies-agree', 'merged-agree', 'merged-disagree')
+
+
+def item_kind(it):
+    """coverage kind of an item: what the region tables call vftables, RTTI, string pools, ..."""
+    if it.fam == 'tls':
+        return 'tls-vars'
+    if it.fam == 'crt':
+        return 'crt-tables'
+    if it.kind == 'literal':
+        return 'strings-sg' if it.name.startswith('$SG') else 'strings-pool'
+    if it.kind == 'rtti' or it.fam == 'rtti':
+        return 'rtti'
+    if it.kind in ('vftable', 'vbtable', 'real', 'eh'):
+        return {'vftable': 'vftables', 'vbtable': 'vbtables', 'real': 'reals', 'eh': 'eh'}[it.kind]
+    if it.fam == 'eh':
+        return 'eh'
+    return 'vars'
+
+
+def addr_kind(names_at):
+    kinds = {sym_kind(n) for n in names_at}
+    for k, label in (('import', 'imports'), ('vftable', 'vftables'), ('rtti', 'rtti'), ('real', 'reals'),
+                     ('eh', 'eh'), ('vbtable', 'vbtables')):
+        if k in kinds:
+            return label
+    if 'literal' in kinds:
+        return 'strings-sg' if all(n.startswith('$SG') for n in names_at if sym_kind(n) == 'literal') \
+            else 'strings-pool'
+    return 'vars'
+
+
+def coverage(img, distinct, sec, iat_range, cls, size_of, ref, report):
+    """bytes and referenced addresses per region (.rdata without the IAT, IAT, .data, .bss, .tls) and per kind
+    (vftables, RTTI, string pools, ...). Known bytes by provenance: exactly one object, identical copies from
+    several objects, several distinct items agreeing, several disagreeing (decided by rank or majority); by the
+    rank of the provider (0 content names, 1 the unit's decorated name, 2 another unit's, 3 a plain per-unit name:
+    weak_name); inexact_extent: known bytes of a variable whose size neither its type nor a COMDAT fixes (owned
+    up to its last non-zero word). Assumed: soft zero padding, .bss zero, IAT words the loader binds. Guessed:
+    bytes no object states (soft zero padding, items made from a name alone). Unknown: unresolved relocation or
+    contested."""
+    import numpy as np
+    st = np.frombuffer(bytes(img.st), np.uint8)
+    ncl = np.frombuffer(bytes(img.ncl), np.uint8)
+    dis = np.frombuffer(bytes(img.dis), np.uint8)
+    rank = np.frombuffer(bytes(img.rank), np.uint8)
+    win = np.frombuffer(img.win.tobytes(), np.int32)
+    copies = np.array([it.copies for it in distinct] + [0], np.int32)
+    fromname = np.array([it.src == 'name' for it in distinct] + [False], bool)
+    inexact = np.array([not it.exact for it in distinct] + [False], bool)
+    hard = st == ST_HARD
+    w = np.where(win >= 0, win, len(distinct))
+    prov = np.full(len(st), 255, np.uint8)
+    one = hard & (win >= 0) & (ncl <= 1)
+    prov[one & (copies[w] <= 1)] = 0
+    prov[one & (copies[w] > 1)] = 1
+    prov[hard & (win >= 0) & (ncl > 1) & (dis == 0)] = 2
+    prov[hard & (win >= 0) & (ncl > 1) & (dis != 0)] = 3
+    weak = hard & (win >= 0) & (rank == 3)
+    named = hard & (win >= 0) & fromname[w]
+
+    def count(mask, total_bytes):
+        m = mask
+        out = dict(bytes=int(total_bytes), known=int((m & hard & (win >= 0)).sum()))
+        for k, n in enumerate(PROV_NAMES):
+            out[n] = int((m & (prov == k)).sum())
+        out['by_rank'] = {str(r): int((m & hard & (win >= 0) & (rank == r)).sum()) for r in range(4)}
+        out['weak_name'] = int((m & weak).sum())
+        out['name_only'] = int((m & named).sum())
+        out['inexact_extent'] = int((m & hard & (win >= 0) & inexact[w]).sum())
+        out['unknown'] = int((m & (st == ST_UNK)).sum())
+        out['soft_zero'] = int((m & (st == ST_SOFT)).sum())
+        out['loader_bound'] = int((m & hard & (win < 0)).sum())
+        out['none'] = int((m & (st == ST_NONE)).sum())
+        out['guessed'] = out['soft_zero'] + out['name_only']
+        return out
+
+    regions = [('rdata', sec['rdata'][0], sec['rdata'][1]), ('data', sec['data'][0], sec['data_raw_hi']),
+               ('data?bss', sec['data_raw_hi'], sec['bss_lo_evidence']),
+               ('bss', sec['bss_lo_evidence'], sec['data'][1])]
+    if sec['tls']:
+        regions.append(('tls', sec['tls'][0], sec['tls'][1]))
+    out = {}
+    for name, lo, hi in regions:
+        m = np.zeros(len(st), bool)
+        m[lo - WIN_LO:hi - WIN_LO] = True
+        if name == 'rdata' and iat_range:
+            m[iat_range[0] - WIN_LO:iat_range[1] - WIN_LO] = False
+        out[name] = count(m, m.sum())
+        if name == 'bss':
+            out[name]['zero_by_section'] = out[name].pop('none')
+    if iat_range:
+        m = np.zeros(len(st), bool)
+        m[iat_range[0] - WIN_LO:iat_range[1] - WIN_LO] = True
+        out['iat'] = count(m, m.sum())
+    kinds = collections.defaultdict(lambda: np.zeros(len(st), bool))
+    for it in distinct:
+        if it.fam == 'bss' or it.addr < WIN_LO or it.end > WIN_HI:
+            continue
+        kinds[item_kind(it)][it.addr - WIN_LO:it.addr - WIN_LO + it.hard] = True
+    by_kind = {k: count(m, m.sum()) for k, m in sorted(kinds.items())}
+    report['coverage_bytes'] = dict(regions=out, kinds=by_kind)
+    # referenced addresses (units.json): what the image defines there, and from how many objects
+    reg_rows = collections.defaultdict(collections.Counter)
+    kind_rows = collections.defaultdict(collections.Counter)
+    for a, (c, reg) in cls.items():
+        if iat_range and iat_range[0] <= a < iat_range[1]:
+            reg = 'iat'
+        size = size_of.get(a, 1)
+        o = a - WIN_LO
+        rows = (reg_rows[reg], kind_rows[addr_kind(ref[a][0])], reg_rows['all'])
+        if c == 'object':
+            p = prov[o:o + size]
+            p = p[p != 255]
+            if not len(p):
+                tag = 'defined:loader-bound'
+            else:
+                tag = 'defined:' + PROV_NAMES[int(p.max())]
+            sl = slice(o, o + size)
+            known = hard[sl] & (win[sl] >= 0)
+            r = int(rank[sl][known].max()) if known.any() else None
+            extra = ['defined', tag] + (['defined:rank%d' % r] if r is not None else []) + \
+                (['defined:weak-name'] if weak[sl].any() else []) + \
+                (['defined:inexact'] if (known & inexact[w[sl]]).any() else []) + \
+                (['defined:name-only'] if named[sl].any() else [])
+        else:
+            extra = [c]
+        for row in rows:
+            row['referenced'] += 1
+            for e in extra:
+                row[e] += 1
+    report['coverage_addresses'] = dict(regions={k: dict(v) for k, v in sorted(reg_rows.items())},
+                                        kinds={k: dict(v) for k, v in sorted(kind_rows.items())})
+
+
+def explain(img, distinct, sec, iat_range, ref, addrs, cls=None, refs=(), names=None):
+    """what the image holds at a few addresses (state per byte: - none, s soft zero, U unknown, K known), who put
+    it there, how classify() sees the address, and which functions use it (code relocations of the objects)"""
+    want = {a for _, a, _ in addrs}
+    users = collections.defaultdict(set)
+    for fa, base, point, use in refs:
+        if base in want:
+            users[base].add((fa, use))
+    out = []
+    for label, a, size in addrs:
+        o = a - WIN_LO
+        sts = ''.join('-sUK'[s] for s in img.st[o:o + size])
+        provs = sorted({img.win[o + k] for k in range(size) if img.win[o + k] >= 0} |
+                       {it.idx for it in distinct if it.addr < a + size and a < it.addr + len(it.data)})
+        fname = (lambda f: names.funcs[f][1] if names and f in names.funcs else '-')
+        out.append(dict(label=label, addr='0x%08x' % a, size=size, region=region_of(sec, a),
+                        state=sts, value=bytes(img.val[o:o + size]).hex(),
+                        cls=cls.get(a, ('unreferenced', '-'))[0] if cls is not None else None,
+                        users=sorted('0x%08x %s %s' % (f, use, fname(f)[:48]) for f, use in users[a])[:40],
+                        names=sorted(ref[a][0])[:8] if a in ref else [],
+                        providers=[dict(name=distinct[k].name, unit=distinct[k].unit, units=distinct[k].copies,
+                                        addr='0x%08x' % distinct[k].addr, rank=distinct[k].rank,
+                                        relocs=[(o2, t, n, off, None if p is None else '0x%08x' % p)
+                                                for o2, t, n, off, p in distinct[k].relocs][:20])
+                                   for k in provs]))
+    return out
 
 
 def check_probes(units, img, report):
@@ -1057,17 +1313,28 @@ def main(argv=None):
     ap.add_argument('--state-out', help='per-byte provenance of the window (one byte each, codes in STATE_CODES)')
     ap.add_argument('--cache', help='pickle of the object scan (reused when present)')
     ap.add_argument('--limit', type=int, help='first N units only (tests)')
+    ap.add_argument('--addrmap', help="S2's out/addrmap.tsv: code addresses the pointer and vftable checks accept "
+                                      '(default: the functions units.json defines)')
+    ap.add_argument('--checks', help='self-consistency checks (synth_checks.py) as JSON')
+    ap.add_argument('--violations', help='every check violation as TSV (check, kind, owner, where, detail)')
+    ap.add_argument('--hints-out', help='S3 vftable hints for the COL-less vftables the checks find (needs the checks)')
     a = ap.parse_args(argv)
     t0 = time.time()
     with open(a.units) as f:
         units = json.load(f)['units']
     names = Names(units)
     print('units %d, names %d, functions %d' % (len(units), len(names.glob), len(names.funcs)))
+    ph1 = None
     if a.cache and os.path.exists(a.cache):
-        with open(a.cache, 'rb') as f:
-            ph1 = pickle.load(f)
-        print('object scan from cache %s' % a.cache)
-    else:
+        try:
+            with open(a.cache, 'rb') as f:
+                ph1 = pickle.load(f)
+        except (pickle.UnpicklingError, AttributeError, TypeError, EOFError):
+            ph1 = None
+        if ph1 is not None and ph1.get('version') != PHASE1_VERSION:
+            ph1 = None
+        print('object scan from cache %s' % a.cache if ph1 else 'cache %s is stale: rescanning' % a.cache)
+    if ph1 is None:
         ph1 = phase1(units, a.objdir, names, a.limit)
         if a.cache:
             with open(a.cache, 'wb') as f:
@@ -1102,10 +1369,26 @@ def main(argv=None):
     report['startup'] = dict(initializer_roots=nroots, functions_reached=len(order),
                              reached_in_init=sum(1 for v in phase.values() if v == 'init'),
                              reached_in_winmain=sum(1 for v in phase.values() if v == 'winmain'))
-    cls, size_of = classify(units, names, img, sec, ph1, set(imports), order, phase, report, a.missing)
+    cls, size_of, ref = classify(units, names, img, sec, ph1, set(imports), order, phase, report, a.missing)
     byte_coverage(img, sec, report)
+    coverage(img, distinct, sec, iat_range, cls, size_of, ref, report)
+    report['boot_globals'] = explain(img, distinct, sec, iat_range, ref, BOOT_GLOBALS, cls, ph1['refs'], names)
     check_probes(units, img, report)
     check_vftables(distinct, names, report)
+    if a.checks or a.violations or a.hints_out:
+        import synth_checks
+        codemap = synth_checks.load_addrmap(a.addrmap) if a.addrmap else {f: 'F' for f in names.funcs}
+        checks, results = synth_checks.run_all(img, distinct, ph1['items'] + ph1['unplaced'], sec, names,
+                                               conflicts, codemap)
+        checks['addrmap'] = a.addrmap or 'units.json functions'
+        report['checks'] = {k: checks[k] for k in ('violations_by_kind', 'violations_by_owner')}
+        if a.checks:
+            with open(a.checks, 'w') as f:
+                json.dump(checks, f, indent=1)
+        if a.violations:
+            synth_checks.write_violations(a.violations, results)
+        if a.hints_out:
+            report['hints'] = synth_checks.write_hints(a.hints_out, results)
     report['conflicts'] = [dict(addr='0x%08x' % c[0].addr, a=c[0].name, a_unit=c[0].unit, a_src=c[0].src,
                                 b_addr='0x%08x' % c[1].addr, b=c[1].name, b_unit=c[1].unit, b_src=c[1].src,
                                 agree=c[2], differ=c[3]) for c in conflicts[:200]]
@@ -1159,6 +1442,31 @@ def format_summary(r):
     w('startup: %s' % r['startup'])
     w('probes: %s' % {k: v for k, v in r['probes'].items() if k != 'mismatches'})
     w('vftable slots: %s' % r['vftable_slots'])
+    if 'coverage_bytes' in r:
+        w('coverage, bytes (known = one-object + copies-agree + merged-agree + merged-disagree; rank 0 content '
+          'names, 1 unit names, 2 other units, 3 per-compile names):')
+        for group in ('regions', 'kinds'):
+            for k, v in r['coverage_bytes'][group].items():
+                w('  %-12s %9d: known %d (one %d, copies %d, agree %d, disagree %d; rank %s; weak-name %d, '
+                  'inexact %d), unknown %d, guessed %d (soft %d, name-only %d), loader %d, %s %d' % (
+                      k, v['bytes'], v['known'], v['one-object'], v['copies-agree'], v['merged-agree'],
+                      v['merged-disagree'], '/'.join(str(v['by_rank'][x]) for x in '0123'), v['weak_name'],
+                      v['inexact_extent'], v['unknown'], v['guessed'], v['soft_zero'], v['name_only'],
+                      v['loader_bound'], 'zero' if 'zero_by_section' in v else 'none',
+                      v.get('zero_by_section', v.get('none', 0))))
+        w('coverage, referenced addresses:')
+        for group in ('regions', 'kinds'):
+            for k, v in r['coverage_addresses'][group].items():
+                w('  %-12s %6d  %s' % (k, v['referenced'], ', '.join(
+                    '%s %d' % kv for kv in sorted(v.items(), key=lambda x: (-x[1], x[0])) if kv[0] != 'referenced')))
+    for g in r.get('boot_globals', []):
+        writers = [u for u in g['users'] if u.split(' ')[1] in ('store', 'rmw', 'this')]
+        w('boot global %-32s %s %-8s %-8s state %s value %s by %s; %d users, writers %s' % (
+            g['label'], g['addr'], g['region'], g['cls'], g['state'][:16], g['value'][:16] or '-',
+            ', '.join('%s u%d' % (p['name'][:40], p['unit']) for p in g['providers']) or '-', len(g['users']),
+            '; '.join(writers[:4]) or '-'))
+    if 'checks' in r:
+        w('check violations: %s' % {k: v['count'] for k, v in r['checks']['violations_by_kind'].items()})
     if 'pe' in r:
         w('pe: %s' % r['pe'])
     return '\n'.join(out) + '\n'

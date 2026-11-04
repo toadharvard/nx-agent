@@ -19,6 +19,7 @@ LD = os.environ.get('V1_LD', 'aarch64-linux-gnu-ld')
 OBJCOPY = os.environ.get('V1_OBJCOPY', 'aarch64-linux-gnu-objcopy')
 NM = os.environ.get('V1_NM', 'aarch64-linux-gnu-nm')
 BASE = 0x10000000
+POOL, POOL_SIZE = 0x20000000, 0x100000
 
 RT_S = r'''
     .text
@@ -124,11 +125,14 @@ def build(sources, out, extra_objs=()):
     image = open(flat, 'rb').read()
     memsz = syms['__v1_stack_end'] - BASE + 16 if '__v1_stack_end' in syms else len(image) + (2 << 20)
     memsz = max(memsz, len(image))
-    hdr = 64 + 56
+    hdr = 64 + 2 * 56
     off = 0x10000
     eh = struct.pack('<4sBBBBB7sHHIQQQIHHHHHH', b'\x7fELF', 2, 1, 1, 0, 0, b'\0' * 7, 2, 183, 1, syms['_start'], 64, 0,
-                     0, 64, 56, 1, 64, 0, 0)
+                     0, 64, 56, 2, 64, 0, 0)
     ph = struct.pack('<IIQQQQQQ', 1, 7, off, BASE, BASE, len(image), memsz, 0x10000)
+    # a zeroed RW arena at POOL: pointer values the harness passes point here, so a misrouted store lands in
+    # mapped memory and shows up as a wrong result instead of a crash
+    ph += struct.pack('<IIQQQQQQ', 1, 6, 0, POOL, POOL, 0, POOL_SIZE, 0x10000)
     with open(out, 'wb') as f:
         f.write(eh + ph + b'\0' * (off - hdr) + image)
     os.chmod(out, 0o755)

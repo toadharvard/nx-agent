@@ -252,5 +252,28 @@ class NsoTest(unittest.TestCase):
         self.check(e.data)
 
 
+class PlacementTest(unittest.TestCase):
+    """toolchain/host/placement.h natively (tests/s5/test_placement.c), and the emulator's copy of the table."""
+
+    @unittest.skipUnless(__import__("shutil").which("cc"), "no native C compiler")
+    def test_native(self):
+        root = os.path.join(HERE, "..", "..")
+        with tempfile.TemporaryDirectory() as t:
+            exe = os.path.join(t, "test_placement")
+            subprocess.run(["cc", "-std=gnu11", "-Wall", "-Werror", "-I", os.path.join(root, "toolchain", "include"),
+                            os.path.join(HERE, "test_placement.c"), "-o", exe], check=True)
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_emulator_table(self):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        rows = emu_guest.placement_table()
+        self.assertEqual(rows[1][1:], (0, 0x1, 0))          # main: core 0 alone
+        self.assertEqual(rows[4][1:], (1, 0x2, 0x2B))       # render worker
+        self.assertEqual(emu_guest.place(0x102, 0, 0)[1:], (2, 0x6, 0x2C))
+        self.assertEqual(emu_guest.place((1 << 64) - 1, 1, 0)[1:], (2, 0x6, 0x2C))
+
+
 if __name__ == "__main__":
     unittest.main()

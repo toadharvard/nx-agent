@@ -24,6 +24,8 @@
   cleanup -> trap stub; one at the end of a scope (normal code) stays undefined; one of a class sharing its deleting
   destructor (??_G address) with a class whose destructor is compiled -> that destructor;
 * a direct call of an IAT slot's address (a decomp dllimport function GCC calls with bl) -> the slot's api;
+* an ecx-not-passed pair (stdcall f(void*) referenced, fastcall f(p0, edx, p2) defined): listed x86-inconsistent,
+  still bridged for the argument the reference passes;
 * STATIC1 header variables: two objects define the same variable, only one unit's recipe names its address - both
   copies are rebound (none localized), the second object's own references included.
 """
@@ -102,6 +104,8 @@ SRC = {
                  'void call_x(FUN_00403000_s1b *p) { p->FUN_00403000(1); }\n',
     'src/z.cpp': 'void FUN_00404000(int) {}\n',                                   # not patched: keeps its name
     'src/c2.cpp': 'extern "C" void FUN_00fdf008(void *);\nvoid call_iat(void *p) { FUN_00fdf008(p); }\n',
+    'src/q1.cpp': 'bool FUN_00405000(void *, int, void *p2) { return p2 != 0; }\n',
+    'src/q2.cpp': 'bool FUN_00405000(void *);\nbool call_q(void *p) { return FUN_00405000(p); }\n',
     'src/s1.cpp': 'int g_hdr = 3;\nint get_hdr1() { return g_hdr; }\n',             # STATIC1 copies (-O2)
     'src/s2.cpp': 'int g_hdr = 3;\nint get_hdr2() { return g_hdr + 1; }\n',
     'src/e.cpp': 'struct BaseX { BaseX(); ~BaseX(); int a; };\nstruct Mem { Mem(); ~Mem(); };\n'   # defined nowhere
@@ -149,6 +153,10 @@ UNITS = {'units': [
                  '?FUN_00fdf008@@3P6GXPAX@ZA': '0x00fdf008'}},        # the slot as a function-pointer variable
     {'source': 'src/c2.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401900, '?call_iat@@YAXPAX@Z')],
      'symbols': {}},
+    {'source': 'src/q1.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x405000, '?FUN_00405000@@YI_NPAXH0@Z')],
+     'symbols': {}},
+    {'source': 'src/q2.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x405100, '?call_q@@YA_NPAX@Z')],
+     'symbols': {'?FUN_00405000@@YG_NPAX@Z': '0x00405000'}},
     {'source': 'src/h.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x830470, '?FUN_00830470@@YAKXZ'), F(0x401410, '?FUN_00401410@@YAXK@Z'),
         F(0x402000, '?FUN_00402000@@YAPAXI@Z'), F(0x402030, '?FUN_00402030@@YAXPAX@Z'),
@@ -287,6 +295,11 @@ def main():
               'S1b-renamed reference: %s' % refs.get(('src/x.cpp', '_ZN16FUN_00403000_s1b12FUN_00403000Ei')))
         check(rows.get(0x404000, [''] * 4)[1:4] == ['F', '__fnv_00404000', '_Z12FUN_00404000i'],
               'unpatched unit keeps its name: %s' % rows.get(0x404000))
+        r_ = refs.get(('src/q2.cpp', '_Z12FUN_00405000Pv'), [''] * 6)
+        abi_ = [l.split('\t') for l in open(os.path.join(out, 'abi.tsv')) if l.startswith('src/q2.cpp\t')]
+        check(r_[2] == 'code-bridge' and r_[5].startswith('__fnvnx_br_00405000') and abi_ and
+              abi_[0][5] == 'x86-inconsistent' and 'ecx-not-passed' in abi_[0][6],
+              'ecx-not-passed: listed x86-inconsistent, still bridged: %s %s' % (r_, abi_[:1]))
         r_ = refs.get(('src/c2.cpp', 'FUN_00fdf008'), [''] * 6)
         check(r_[2] == 'import' and r_[5] == 'InterlockedIncrement', 'call of an IAT slot address -> its api: %s' % r_)
         e_ = 'src/e.cpp'

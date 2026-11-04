@@ -109,6 +109,66 @@ implemented); compare the runtime list with the offline one (the tests require t
 and counted unresolved at apply time; elsewhere it is `unknown`. The largest group is expected to be compiler
 generated scalar/vector deleting destructors: 183 `??_G` are defined, while every polymorphic class has one.
 
+### Scan cost
+
+S15 measured the scan as 737 M of the 762 M instructions the boot runs up to InitHolder, about 0.9 s on the device
+(J-0076). It looked up each of the window's 676 k words five times in the sorted exclusion ranges (`eligible_in`, twice
+per word in each of the two COL passes, once in the main pass) and searched the 62 k-entry code map for every
+non-`.text` word (the vptr test). The scan now builds per call, with the same answers:
+
+* an **eligibility bitmap** per mapping: bounds, exclusion ranges (sorted and merged by
+  `fnvnx_collect_exclusions`, so a word is excluded exactly when a range has `lo < w + 4` and `hi > w`; checked,
+  else the binary searches answer) and, in `.reloc` mode, the relocated words; the main pass visits the set bits
+  32 at a time;
+* a **two-level index** over the code map and over the vftable starts: buckets are address pages (1 KiB for S2's
+  map, at most 64 Ki of them), each pointing at its first record, then a binary search inside the bucket;
+* a **running cursor** for the vftable holding the current word (the vftables are sorted, non-empty and disjoint;
+  checked);
+* **zero blocks**: when 0 is neither a `.text` address nor (after relocation) an image vftable in the map, a zero
+  word yields nothing, so 128 zero bytes are skipped at once in the COL search and the main pass;
+* one COL pass instead of two (the candidate list grows by doubling).
+
+Missing memory, unsorted keys or odd mappings fall back to the plain searches; `FNVNX_SCAN_NO_INDEX` (loadcheck
+`--no-index`) forces them. **Same output:** tests/s3 checks the indexed scan against the Python scanner and against
+`--no-index` on every configuration, and the S14 synth image with S2c's f12 map gives byte-identical fixup lists and
+statistics before and after (no hints; the 40 COL-less hints below; all 2,333 vftables the decomp names: 265
+vftables, 967 slots). **Measured** with `tools/perf/frameprof.py` on `loader/bench/` (S3's load sequence as an ILP32
+guest under S5's emulator, the boot's calls: scan to count, scan to fill, apply), same image and map:
+
+| | before | after |
+|---|---:|---:|
+| one `fnvnx_scan_codeptrs` call | 367.1 M (`eligible_in` 191.4 M, `fnvnx_codemap_find` 132.9 M) | 17.4 M |
+| the boot's two calls | 734.3 M (S15's boot profile: 737.4 M) | 34.8 M (about 43 ms at IPC 0.8) |
+
+A real exe has fewer zero words than the synth image (about 82 % zero), so expect more there, but the same order of
+magnitude. The boot still scans twice (count, then fill); one call with a large enough buffer would halve it (S5).
+
+### COL-less vftables
+
+Gamebryo and BSShader classes are built without C++ RTTI in the original, so their vftables have no COL at `[-1]`.
+S14's data checks show this for 45 vftable names at 40 addresses: the word before the vftable holds the end of the
+preceding literal or float (`rtti:col-word-other-item`, see the synthetic image section). S3's COL search cannot find
+these vftables. Without hints their slots are found only as `run`s (medium confidence) or `isolated` words (low,
+not applied), and a neighbouring vftable is not cut off from them.
+
+`synth_image.py ... --checks C --hints-out hints.txt` writes these addresses as S3 hints, one original VA per line
+with the evidence in `#` lines. The list is derived from the decomp, so it stays local. Hints reach the scan through
+`fnvnx_scan_opts.vtable_hints` or loadcheck `--hints`. A hint is accepted only if its first word is a `.text` address
+and eligible, so a wrong hint cannot add a fixup that would not be found anyway. **To be confirmed on the player's
+exe:** `loader/tools/check_hints.py FalloutNV.exe hints.txt --s2-addrmap out/addrmap.tsv` gives one verdict per hint:
+
+| Verdict | Meaning |
+|---|---|
+| `colless` | the hint is needed |
+| `has-col` | the class has RTTI after all |
+| `col-at-plus4` | the decomp's `??_7` is 4 too low |
+| `not-code` | not a vftable here: drop the hint |
+| `outside` | not in a mapped data section |
+
+On the synth image all 40 are `not-code`, because their slots have no address there. The boot does not pass hints yet
+(`toolchain/game/boot.cpp`: `opts = NULL`); S5 would read them from `sdmc:/fnvnx/game/vtable_hints.txt`, written next
+to the exe by the build.
+
 ## Steam executable
 
 The player's game is most likely the Steam release, whose `FalloutNV.exe` is wrapped by SteamStub: a `.bind`
@@ -276,7 +336,8 @@ the image is not accounted for) and checks:
 * the Python scanner gives exactly the list the generator built, with hints, without hints (the hint-only vftable then
   runs on in its neighbour), and with `.reloc` (exact mode);
 * the C runtime scanner writes a byte-identical fixup list and the same statistics, at the original base and moved
-  by `0x01c00000` with relocations applied;
+  by `0x01c00000` with relocations applied, and the same again with its index switched off (`--no-index`, the plain
+  searches; see "Scan cost");
 * after the whole pipeline (`loader/host/loadcheck`): every fixed word holds its native value (trap values with
   `--trap`), rejected words are untouched, IAT and delay IAT are bound, data-to-data pointers still reach their
   strings, `.bss` and the `.data` tail are zero, `.tls` holds its template, `.text` and `.reloc` are not mapped,
@@ -296,6 +357,102 @@ ext/fnv_decomp/build/image_check.json --out build/fixups.bin --report build/fixu
 --emit-addrmap-bin build/addrmap.bin --emit-hints build/hints.txt`, and
 `build/loader/loadcheck --exe FalloutNV.exe --probes build/probes.txt --addrmap build/addrmap.bin --hints
 build/hints.txt` (natives are 0 without S2, so every fixup counts as unresolved: the counts are the point).
+
+## Synthetic image without the exe (stream S14)
+
+Until a player's exe is at hand, `loader/synth/synth_image.py` rebuilds as much of the data window as the decomp
+itself defines, from S11's MSVC 2008 objects of the pristine decomp (byte-identical code, `tools/equiv/README.md`):
+each object carries the data its unit defines (literals, float constants, vftables, RTTI, EH tables, initialised
+statics), and `units.json` gives the original address of every name a unit references. The output is a PE32 shell
+the loader maps like an exe (`.rdata`, `.data`+`.bss`, `.tls` at the inferred boundaries, a synthetic import
+directory from `platform/win32/imports.tsv`), a per-byte state map for the boot comparison (`tests/s14/
+boot_compare.py`), and a report. Everything it writes is decomp-derived: local only, never committed.
+
+    python3 -I loader/synth/synth_image.py --units <fnv_decomp>/build/units.json --objdir $S11/obj/pristine \
+        --cache OUT/phase1.pickle --out OUT/synth.exe --state-out OUT/state.bin --report OUT/full.json \
+        --summary OUT/summary.txt --missing OUT/missing.tsv --conflicts OUT/conflicts.tsv \
+        --addrmap <S2 run>/out/addrmap.tsv --checks OUT/checks.json --violations OUT/violations.tsv
+
+The object scan takes about 40 s and is cached (`PHASE1_VERSION` invalidates old caches); the rest about 15 s.
+
+**How a byte is chosen.** An item is the bytes one object says are at an original address: a COMDAT section, or a
+symbol of a non-COMDAT section up to the next symbol. It owns (hard extent) the whole COMDAT, the size its decorated
+type fixes, a `$SG` literal up to and including its terminator (NUL, or NUL pair for UTF-16), otherwise up to its
+last non-zero word (*inexact*); the rest is soft zero padding. Relocations resolve through the same names; an
+unresolved one leaves its four bytes unknown. Identical items from several objects are one item with that many
+copies. Overlapping items: the better rank wins (0 a name that spells the content and agrees: `??_C@`, `__real@`,
+`__xmm@`; 1 the unit's own decorated name or a `$SG` whose per-unit numbering was matched; 2 another unit's
+decorated name; 3 a plain per-unit name: C statics, `_s_sz00`, `__TI` tables), then more copies; equal rank and
+copies with different bytes is *contested*: unknown, and 0 in the shell (J-0062: before, the first claimant's byte
+was written). `$SG` numbering: S11's objects count +43 in C++ units and +1 in C units against units.json; the shift
+is matched per unit (303 units, every name hit).
+
+**Coverage** (decomp `87eb937`, S11 `obj/pristine` 2,987 objects, S2c run f12, J-0062). *known* = bytes with a
+value, split into from exactly one object / identical copies of several objects / several distinct items agreeing /
+several disagreeing and decided by rank or majority; *rank 0/1/2/3* of the winning item; *inexact* = known bytes of
+an inexact extent; *guessed* = bytes no object states (soft padding; items made from a name alone: none);
+*unknown* = unresolved relocation or contested.
+
+| Region / kind | bytes | known | one | copies | agree | disagree | rank 0/1/2/3 | inexact | unknown | guessed | rest |
+|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|
+| `.rdata` without IAT `0x00fdf000..0x01183000` | 1,719,140 | 236,664 | 216,599 | 12,132 | 7,905 | 28 | 137,438 / 76,062 / 148 / 23,016 | 25,756 | 56,557 | 3,674 | 1,422,245 none |
+| IAT (204 named slots) | 1,180 | - | - | - | - | - | - | - | 4 | 0 | 812 loader-bound, 364 none |
+| `.data` initialised `..0x011c1341` | 254,785 | 9,547 | 4,222 | 3,054 | 2,158 | 113 | 37 / 9,410 / 0 / 100 | 168 | 27 | 43 | 245,168 none |
+| `.data`/`.bss` gap `..0x011c31fc` | 7,867 | 3 | 3 | 0 | 0 | 0 | 0 / 3 / 0 / 0 | 0 | 0 | 0 | 7,864 none |
+| `.bss` `..0x01272000` | 716,292 | 8 | 3 | 1 | 4 | 0 | 0 / 4 / 4 / 0 | 4 | 0 | 32 | 716,252 zero |
+| `.tls` `0x01272000..0x01273000` | 4,096 | 702 | 4 | 0 | 697 | 1 | 0 / 702 / 0 / 0 | 4 | 6 | 0 | 3,388 none |
+| vftables (item extents) | 64,280 | 7,822 | 6,682 | 272 | 851 | 17 | 138 / 7,532 / 148 / 4 | 8 | 56,458 | 0 | |
+| RTTI | 8,676 | 8,649 | 3,356 | 3,022 | 2,158 | 113 | 0 / 8,649 / 0 / 0 | 0 | 27 | 0 | |
+| strings `??_C@` pool | 131,922 | 131,914 | 122,052 | 6,506 | 3,352 | 4 | 131,914 / 0 / 0 / 0 | 0 | 8 | 0 | |
+| strings `$SG` | 68,912 | 68,912 | 60,487 | 2,876 | 5,549 | 0 | 2,892 / 66,020 / 0 / 0 | 15 | 0 | 0 | |
+| `__real@` constants | 4,196 | 4,193 | 2,024 | 2,131 | 23 | 15 | 4,193 / 0 / 0 / 0 | 0 | 3 | 0 | |
+| EH tables | 236 | 164 | 132 | 32 | 0 | 0 | 0 / 0 / 0 / 164 | 0 | 72 | 0 | |
+| other variables | 29,246 | 29,198 | 26,240 | 364 | 2,594 | 0 | 1,982 / 4,264 / 0 / 22,952 | 25,928 | 48 | 0 | |
+
+Data addresses units.json references in the window (48,664): 9,266 defined (every byte known: 7,875 from one
+object, 972 identical copies, 409 several agreeing, 10 several disagreeing; worst rank 0: 6,189, 1: 2,540, 2: 3,
+3: 534; 558 with an inexact extent), 2,089 partly known, 17,194 written by an initializer (`.bss` objects built by
+`??__E`), 5,940 other `.bss` (zero), 204 named IAT slots (+5 unnamed, 5 IAT addresses missing), 13,956 missing
+(no object defines them: the exe's own data, 12,803 in `.rdata`, 1,148 in `.data`), 8 `.bss?`, 2 outside. By kind:
+vftables 2,333 (265 complete, 2,061 partial: slots whose function has no address, 7 missing); RTTI 295 (all
+TypeDescriptors defined); `??_C@` 5,499 (5,493); `$SG` 1,899 (1,896); `__real@` 693 (692); EH 12 (12); vbtables 5
+(5); other variables 37,742 (608 defined, 17,194 init, 5,938 `.bss`, 13,948 missing). `--missing` lists the
+missing ones by the first function that uses them in static startup order.
+
+**Self-consistency checks** (`loader/synth/synth_checks.py`; `KINDS` names each kind's owner). There is no exe to
+compare with, so the image is checked against itself, units.json and S2's address map:
+
+| Check | Passed | Violations (owner) |
+|---|---|---|
+| pointers: every resolved pointer word the image holds targets a defined image byte or a code address the map knows | 13 data known, 2 `.bss`, 508 functions (F/C/X/G), 727 `.text` without definition (E); 16,574 words unresolved, 328 held by another item | 675 function starts units.json defines but f12 lacks (S1: 576 in `tesform.cpp`, 65 in `tes.cpp`, 13 `imagespaceshaderhdr_h_unit`, 10 zlib `deflate.c`, ...); 295 TypeDescriptor vptrs to `type_info`'s vftable `0x010f1ee0`, which no object defines (CRT data: exe/S4b); 10 `__sehtable$` entries to labels (x86 only) |
+| vftable slots: the definition at the target fits the slot's convention and arity (llvm-undname + `tools/link/sigs.py`, every definition at the address) | 499 the slot's own symbol, 672 fit, 1 free function that ignores `this` (x86-compatible, a bridge natively), 727 E targets; 13,442 slots unresolved (no address for the slot's symbol) | 1 convention: `NiTriBasedGeomData` slot 0 `LinkObject(NiStream&)` (thiscall, 1 argument) -> `0x00a8a9a0` defined as cdecl `FUN_00a8a9a0()` (decomp/S2b) |
+| RTTI: vftable -> COL -> TD/CHD -> BCA -> BCD per object, the same COL/CHD across objects, placed TDs | 2,838 chains consistent, 277 placed TDs; no COL has an address (2,793 vftables keep `[-1]` unknown) | 150 class hierarchies declared differently in different objects, 11 COLs with other offsets, 31 COLs only spelled class/struct apart; 104 placed TDs whose bytes are another unit's spelling; 45 vftables whose `[-1]` word holds the preceding literal/float (Gamebryo/BSShader classes: no COL in the original, built without C++ RTTI, or the `??_7` address is off; decomp, S3 hints) |
+| overlaps: no two items claim one byte with different contents | 631 agreeing overlaps (11,459 bytes) | 81 TD `.?AV`/`.?AU` (64 by majority, 17 contested), 13 TDs of different classes at one address, 13 vftables at one address with other slots (12 contested), 2 vftables running into the next item, 4 `__real@` with another value, 3 + 1 literals with other content or running on, 6 TLS stand-in aggregates vs variables inside them (5 contested), 10 `.bss` variables over another item's non-zero bytes (decomp) |
+| strings: `$SG` and `??_C@` hold their terminator inside their own bytes, the image holds it, no other item claims them | 1,943 + 209 shared `$SG`, 5,447 `??_C@` | 4 + 4 `??_C@` literals contested with a longer spelling at the same address (decomp); `$SG`: 0 (561 before J-0062, see below) |
+
+Fixed by these checks (J-0062): a `$SG` literal owned its bytes only up to the last word holding a character, so the
+terminator of every string whose length is a multiple of 4 was soft padding (561 literals); and contested bytes kept
+the first claimant's value in the shell (65 bytes: vftable slots, TypeDescriptor names, literals and constants
+claimed by two objects; now 0, as the state map always said).
+
+**Boot globals** (J-0057; `report['boot_globals']`): `g_memoryManager` `0x011f6238`, the allocator holder
+`0x011f6080`, the init-options pointer `0x011f6118` and the run-once flag `0x011f6229` of `FUN_00aa3050` lie in
+`.bss`: zero in the image, as on x86 at process start. `0x011f6229` is written only by `FUN_00aa3050` (sets 1) and
+`FUN_00aa3070` (clears it at shutdown), both reached only from WinMain, so it is 0 when WinMain+0x1d0 calls
+`FUN_00aa20b0` -> `FUN_00aa3050` on x86 too, and InitHolder runs. On x86 the holder is not zero by then: the
+MemoryManager constructor `0x00aa3880` (run by an initializer the decomp lacks, `toolchain/game/boot.cpp`
+`construct_memory_manager()`) calls `InitializeGlobal` `0x00866690`, which sets `0x011f6118` to
+`new FUN_00aa21d0(new BSNiAllocator)` and calls InitHolder once directly (the flag stays 0); `FUN_00aa20b0(0)` then
+takes the existing options (`0x011f610d` = 0) and InitHolder runs a second time. The image gives BSNiAllocator's
+vftable `0x010a2528` only its COL word and slot 0 (unknown: the decomp's stand-in class declares one virtual,
+`m_virtual0`, without an address); the next vftable's COL word at `0x010a2550` bounds the original to 10 slots,
+not 14 as the decomp's comment says, and NiStandardAllocator's at `0x010a24fc` also has 10.
+
+**Tests** (`tests/s14/`, hand-made COFF objects, no decomp content): `test_synth.py` (placement, relocations,
+ranks, `$SG` shift, sections, PE shell and imports; the C loader with `FNVNX_LOADCHECK`), `test_checks.py` (every
+check with planted violations, the COL-less hints and `check_hints.py`'s verdicts; with `FNVNX_S14_RUN=<output dir>`
+also a real run: no violation owned by S14),
+`boot_compare.py` (S5's emulated boot on the zero, prefilled and PE images).
 
 ## Open risks
 

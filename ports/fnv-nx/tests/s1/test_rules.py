@@ -115,12 +115,17 @@ check('CTOR1 explicit constructor call of a template class',
 check('CTOR1 a constructor definition after a comment ending in "." is not a call',
       run(s1.r_ctor_calls, '// see the matcher checks.\nA::A(int x)\n    : m(x)\n{}\n'), ['A::A(int x)'], ['::new'])
 
-# ---- CSX1
+# ---- CSX1 / CSX2
 got = run(s1.r_xbox_cs_asserts, 'FNV_STATIC_ASSERT(sizeof(RecursiveLock) == 0x28);\n'
-          'FNV_STATIC_ASSERT(offsetof(RecursiveLock, CriticalSection) == 0x0);\n'
-          'FNV_STATIC_ASSERT(offsetof(RecursiveLock, m_uiFirstValue) == 0x1C);\n')
-check('CSX1 drops the Xbox-only asserts, keeps the rest', got,
-      ['offsetof(RecursiveLock, CriticalSection) == 0x0', 'CSX1'], ['== 0x28', '== 0x1C'])
+          'FNV_STATIC_ASSERT(offsetof(_FILETIME, dwHighDateTime) == 0x0);\n')
+check('CSX1 drops only the Xbox _FILETIME order now', got, ['sizeof(RecursiveLock) == 0x28', 'CSX1'], ['dwHighDateTime) =='])
+got = run(s1.r_critical_section_tail, 'class RecursiveLock\n{\n  public:\n    _RTL_CRITICAL_SECTION CriticalSection;  // +0x0\n'
+          '    unsigned long m_uiFirstValue;  // +0x1C\n};\nFNV_STATIC_ASSERT(offsetof(RecursiveLock, CriticalSection) == 0x0);\n'
+          'FNV_STATIC_ASSERT(offsetof(RecursiveLock, m_uiFirstValue) == 0x1C);\n'
+          'struct PcLock\n{\n    _RTL_CRITICAL_SECTION cs;\n    int n;\n};\nFNV_STATIC_ASSERT(offsetof(PcLock, cs) == 0);\n'
+          'FNV_STATIC_ASSERT(offsetof(PcLock, n) == 24);\n')
+check('CSX2 gives a section the class asserts as 28 bytes its 4 bytes', got,
+      ['_RTL_CRITICAL_SECTION CriticalSection; unsigned int CriticalSection_fnvnx_tail;', '    _RTL_CRITICAL_SECTION cs;\n    int n;'])
 
 # ---- LEX1
 got = run(s1.r_msvc_tokens, 'extern"C"enum E { A };\nchar pad[0xae-0x34];\nlong long k = 0xff00ffffui64 + 5i64;\n'
@@ -340,6 +345,27 @@ check('ANON2 raw storage for a member with a destructor in an anonymous struct o
       ['alignas(String) unsigned char activationText[sizeof(String)]; /* fnv-nx ANON2 */',
        'if ((*(String*)(slot->activationText)).Len())', 'int value;'])
 
+# the member declared in a header, used in the unit; another class of the unit has its own member of that name
+_a = tempfile.mkdtemp()
+os.makedirs(os.path.join(_a, 'src', 'anim'))
+open(os.path.join(_a, 'src', 'anim', 'interp_unit.h'), 'w').write(
+    'class NiPoint3\n{\n  public:\n    float x;\n    NiPoint3& operator=(const NiPoint3& o);\n};\n'
+    'class NiPoint3Interpolator\n{\n  public:\n    union\n    {\n        struct\n        {\n            NiPoint3 m_kValue;\n'
+    '            int m_uiLast;\n        };\n        int state;\n    };\n    bool Update(NiPoint3& value);\n};\n')
+_unit = os.path.join(_a, 'src', 'anim', 'interp.cpp')
+_saved, s1._ANON2_NAMES = s1._ANON2_NAMES, None
+got = run(s1.r_anonymous_aggregate_members,
+          '#include "interp_unit.h"\n// fills m_kValue\nbool NiPoint3Interpolator::Update(NiPoint3& value)\n{\n'
+          '    value = m_kValue;\n    return m_kValue.x != 0;\n}\nstruct Shell : public NiPoint3Interpolator\n{\n'
+          '    bool Eq(NiPoint3Interpolator* other) { return &m_kValue == &other->m_kValue; }\n};\n'
+          'class Other\n{\n  public:\n    NiPoint3 m_kValue;\n    void CloneTo(Other* pkDest);\n};\n'
+          'void Other::CloneTo(Other* pkDest)\n{\n    pkDest->m_kValue = m_kValue;\n}\n', _unit)
+s1._ANON2_NAMES = _saved
+check('ANON2 converts the uses in a file that includes the member, only where they are that member', got,
+      ['// fills m_kValue\n', 'value = (*(NiPoint3*)(m_kValue));', 'return (*(NiPoint3*)(m_kValue)).x != 0;',
+       'return &(*(NiPoint3*)(m_kValue)) == &(*(NiPoint3*)(other->m_kValue));', '    NiPoint3 m_kValue;\n',
+       'pkDest->m_kValue = m_kValue;'])
+
 # ---- INC1
 _i = tempfile.mkdtemp()
 os.makedirs(os.path.join(_i, 'src', 'ai'))
@@ -353,6 +379,89 @@ check('PTR1 ordered compares of a function / pointer with 0',
       run(s1.r_pointer_zero_compares, '__int64 GetTime64(__int64* p);\nvoid f(Q* q)\n{\n    int n = 3;\n    Q* c = q;\n'
           '    if (!(GetTime64 > 0)) return;\n    if (c > 0 && n > 0 && q <= 0) return;\n}\n'),
       ['!(GetTime64 != 0)', 'c != 0 && n > 0 && q == 0'])
+
+# ---- STAND1 (needs a units.json: a small tree of its own; the symbol cache is reset around it)
+import json as _json
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {'??0FUN_00632ec0@@QAE@XZ': '0x00632ec0',
+                                                                 '?Helper@@YAHXZ': '0x00401230', '?Copy@@YAPAHU?$It@H@ns@@0@Z': '0x00401230',
+                                                                 '?Make@V@@QAEPAU1@H@Z': '0x00401230'}}]},
+           open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+got = run(s1.r_stand_in_definitions,
+          'struct FUN_00632ec0\n{\n    unsigned char m_data[0x114];\n    FUN_00632ec0();\n};\nFUN_00632ec0::FUN_00632ec0()\n{}\n'
+          'inline int Helper()\n{\n    return 0;\n}\nvoid f() { new FUN_00632ec0; Helper(); }\n'
+          'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b)\n{\n    return 0;\n}\n__declspec(noinline) V*\nV::Make(int n)\n{\n    return 0;\n}\n'
+          'namespace fnv_00632ec0 {\nstruct FUN_00632ec0 { FUN_00632ec0(); };\n// @fnv 0x00632ec0\n'
+          'FUN_00632ec0::FUN_00632ec0()\n{\n    ((int*)this)[0] = 1;\n}\n}\n// @fnv 0x00401230\nint Other()\n{\n    return 1;\n}\n',
+          os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND1 drops the stand-ins of tagged addresses', got,
+      ['/* fnv-nx STAND1: FUN_00632ec0::FUN_00632ec0 is the function at the tagged address */\n',
+       'int Helper(); /* fnv-nx STAND1 */', '((int*)this)[0] = 1;', 'void f() { new FUN_00632ec0; Helper(); }',
+       'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b); /* fnv-nx STAND1 */', '/* fnv-nx STAND1: V::Make is'],
+      ['__declspec(noinline) V*\n/*', 'FUN_00632ec0::FUN_00632ec0()\n{}'])
+
+# ---- STR1 uses the declaration in scope
+got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(&str_01082ab8); }\nnamespace N {\n'
+          'extern char str_01082ab8;\nvoid h() { g(&str_01082ab8); }\n}\nextern "C" char str_a0000000[], str_b0000000[],\n'
+          '    str_c0000000[];\nvoid k() { const char* p = str_c0000000; g(&str_c0000000); }\n')
+check('STR1 rewrites only where the array is the declaration in scope', got,
+      ['void f() { g(str_01082ab8); }', 'void h() { g(&str_01082ab8); }', 'g(str_c0000000); }'])
+
+# ---- VTBL1
+got = run(s1.r_stand_in_interfaces, 'int a;\nstruct FUN_00aa2230_BSNiAllocator\n{\n    virtual void m_virtual0();\n'
+          '    FUN_00aa2230_BSNiAllocator();\n};\nint b;\n', '/x/src/staging/blk_00aa0000_o2.cpp')
+check('VTBL1 BSNiAllocator gets its 10 slots, same line count', got,
+      ['virtual void* Allocate(', 'virtual void Slot9();', 'AllocateZeroedMemory(size, alignment', '}\n\n\n\n\nint b;'],
+      ['m_virtual0'])
+
+got = run(s1.r_stand_in_interfaces, 'int a;\nstruct NiStandardAllocator\n{\n    static void* __cdecl operator new(size_t);\n'
+          '    virtual void func();\n};\nint b;\n', '/x/src/gamebryo2.2/corelibs/nimain/nigpuprogramcache.cpp')
+check('VTBL1 NiStandardAllocator gets its 10 slots, 7 / 8 Initialize / Shutdown, same line count', got,
+      ['inline virtual void* Destroy(unsigned int flags);', 'FUN_00aa3150(p, event, size);',
+       'virtual void Initialize() { fnv_00aa3430::AllocateStandardAllocator(); }',
+       'virtual void Shutdown() { DestroySmallAllocPools(); }', 'virtual void Slot9();', '}\n\n\n\n\nint b;'],
+      ['func()'])
+got = run(s1.r_stand_in_interfaces, 'struct StdAllocator\n{\n    virtual ~StdAllocator();\n    virtual void* Allocate();\n};\n',
+          '/x/src/gamebryo2.2/corelibs/nisystem/nistandardallocator.cpp')
+check('VTBL1 StdAllocator: the destructor is MSVC slot 0, one plain slot', got,
+      ['    virtual void* Destroy(unsigned int flags);   /* fnv-nx VTBL1', '    virtual void* Allocate();'], ['~StdAllocator'])
+
+# ---- ALIGN1
+got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
+          '__declspec(align(16))class H:public C\n{\n};\n__declspec(align(16))struct TAU32;\n'
+          'void f() {\n    __declspec(align(16)) struct Buf\n    {\n        F4 a;\n    } buf;\n}\n'
+          'struct A { __declspec(align(16)) struct Atoms m_kBridgeAtoms; __declspec(align(8)) volatile int t; };\n'
+          'template <class T> __declspec(align(16)) __declspec(novtable) struct X { T a; };\n')
+check('ALIGN1 moves align behind the class key of definitions and forward declarations', got,
+      ['struct __declspec(align(16)) S_V4 { float', 'class __declspec(align(16)) H:public C\n{',
+       'struct __declspec(align(16)) TAU32;', '    struct __declspec(align(16)) Buf\n    {',
+       '__declspec(align(16)) struct Atoms m_kBridgeAtoms;', '__declspec(align(8)) volatile int t;',
+       'template <class T> __declspec(novtable) struct __declspec(align(16)) X { T a; };'])
+check('ALIGN1 keeps the line count', str(got.count('\n')), ['13'])
+
+# ---- ENUM2
+got = run(s1.r_enum_int_values, 'enum\n{\n    CHANGE_SCRIPT_VARIABLES = 0x80000000, // = 0x90000000\n    B = 4\n};\n'
+          'enum ShaderParameter { SP_NONE = 0xffffffff, SP_X = 0x80000000u, SP_Y = -1 };\n'
+          'enum Small { S0 = 1 };\nenum Expr { E0 = 0x80000000 | 1 };\nenum class Sc { Q = 0x80000000 };\n'
+          'enum Huge { H = 0x100000000 };\nenum Based : unsigned { U = 0x80000000 };\n')
+check('ENUM2 gives enums with values >= 2^31 MSVC\'s int', got,
+      ['enum : int\n{\n    CHANGE_SCRIPT_VARIABLES = (int)0x80000000, // = 0x90000000\n    B = 4\n};',
+       'enum ShaderParameter : int { SP_NONE = (int)0xffffffff, SP_X = (int)0x80000000u, SP_Y = -1 };',
+       'enum Small { S0 = 1 };', 'enum Expr { E0 = 0x80000000 | 1 };', 'enum class Sc { Q = 0x80000000 };',
+       'enum Huge { H = 0x100000000 };', 'enum Based : unsigned { U = 0x80000000 };'])
+
+# ---- BIND1 (units.json)
+_c = Counter()
+_data = {'units': [{'source': 'src/staging/blk_00aa0000_od_ob1_variant.cpp', 'symbols': {'?x@@3HA': '0x1'}},
+                   {'source': 'src/other.cpp', 'symbols': {}}]}
+s1.bind_units_data(_data, _c)
+s1.bind_units_data(_data, _c)
+check('BIND1 binds the stand-in names once, in their unit only', repr(_data) + ' %d' % _c['BIND1'],
+      ["'?Allocate@MemoryManagerAA3880@@QAEPAXI@Z': '0x00aa3e40'", "'?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A': '0x011f6238'",
+       "'symbols': {}}]} 2", "'?x@@3HA': '0x1'"])
 
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')

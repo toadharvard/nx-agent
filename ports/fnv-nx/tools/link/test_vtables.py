@@ -62,7 +62,9 @@ SRC = {
     'src/a.cpp': '#include "h.h"\nBase1::~Base1() {}\nint Base1::f1() { return 1; }\nBase2::~Base2() {}\n'
                  'int Base2::f2() { return 2; }\nMulti::~Multi() {}\nint Multi::f2() { return 3; }\n'
                  'int Multi::g2() { return 4; }\nint Multi::m() { return 5; }\n',
-    'src/b.cpp': '#include "h.h"\nKey::~Key() {}\nint Key::g2() { return 6; }\nKey *mk() { return new Key; }\n',
+    'src/b.cpp': '#include "h.h"\nKey::~Key() {}\nint Key::g2() { return 6; }\nKey *mk() { return new Key; }\n'
+                 'extern "C" char DAT_01000a80[];\n'           # S13 00404920: a free function's vptr store
+                 'void *init_free(void *self)\n{\n    *(void **)self = DAT_01000a80;\n    return self;\n}\n',
     'src/c.cpp': '#include "h.h"\nint use_inl(Inl *p) { return p->Inl::g2() + p->Inl::i(); }\nint helper_c() { return 9; }\n'
                  'static int s_init = helper_c();\nint get_init() { return s_init; }\n'
                  'int use_abs(Abs2 *p) { return p->Abs2::f2(); }\nLeaf *mk_leaf() { return new Leaf; }\n'
@@ -92,8 +94,8 @@ UNITS = {'units': [
      'symbols': {VFT[a][0]: '0x%08x' % a for a in (0x01000100, 0x01000120, 0x01000140, 0x01000150)}},
     {'source': 'src/b.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x401100, '?g2@Key@@UAEHXZ'), F(0x401110, '?mk@@YAPAUKey@@XZ'), F(0x401120, '??_GKey@@UAEPAXI@Z'),
-        F(0x401130, '??1Key@@UAE@XZ')],
-     'symbols': {VFT[a][0]: '0x%08x' % a for a in (0x01000200, 0x01000220)}},
+        F(0x401130, '??1Key@@UAE@XZ'), F(0x401140, '?init_free@@YAPAXPAX@Z')],
+     'symbols': dict({VFT[a][0]: '0x%08x' % a for a in (0x01000200, 0x01000220)}, _DAT_01000a80='0x01000a80')},
     {'source': 'src/c.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x401200, '?use_inl@@YAHPAUInl@@@Z'), F(0x401210, '?use_abs@@YAHPAUAbs2@@@Z'),
         F(0x401230, '?mk_ki@@YAPAUKeyImp@@XZ'), F(0x401240, '?mk_kd@@YAPAUKeyDel@@XZ'),
@@ -230,6 +232,8 @@ def main():
         dumpd = class_dump(dump)
         rows = {int(r[0], 16): r for r in (l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'addrmap.tsv'))
                                           if not l.startswith('#'))}
+        check(0x01000a80 not in rows, 'a free function\'s vptr store is no V entry of the class before it: %s'
+              % rows.get(0x01000a80))
         want_ap = {}
         for a, (_, c, base) in VFT.items():
             d = dumpd.get(c, {})

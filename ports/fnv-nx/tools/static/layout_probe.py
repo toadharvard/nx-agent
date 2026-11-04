@@ -81,8 +81,9 @@ def main():
         by_unit.setdefault(unit, []).append(key)
     flags = bash_array('BUILD_FLAGS')
     sse = os.environ.get('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
-    inc = ['-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'), '-I' + os.path.join(PORT, 'shim', 'include'),
-           '-I' + sse, '-I' + os.path.join(tree, 'include')]
+    shim = os.environ.get('SHIM') or os.path.join(PORT, 'shim', 'include')
+    inc = ['-include', os.path.join(shim, 'fnvnx_compat.h'), '-I' + shim, '-I' + sse, '-I' + os.path.join(tree, 'include')]
+    nice = ['nice', '-n', os.environ.get('NICE', '19')]
     results = []
     for unit, keys in sorted(by_unit.items()):
         src = src_of.get(unit)
@@ -116,7 +117,7 @@ def main():
         base = os.path.join(pdir, unit)
         with open(base + '.sa.cpp', 'w') as f:
             f.write('#include "%s"\n%s\n' % (os.path.join(tree, src), '\n'.join(sa)))
-        r = subprocess.run(['aarch64-linux-gnu-g++'] + flags + ['-fsyntax-only', '-w', '-fno-access-control', '-fmax-errors=0']
+        r = subprocess.run(nice + ['aarch64-linux-gnu-g++'] + flags + ['-fsyntax-only', '-w', '-fno-access-control', '-fmax-errors=0']
                            + inc + [base + '.sa.cpp'], capture_output=True, text=True, cwd=tree)
         failed = set(re.findall(r'static assertion failed: fnvs:(\d+:\w+)', r.stderr))
         other = [l for l in r.stderr.splitlines() if '.sa.cpp' in l and 'error:' in l and 'fnvs:' not in l]
@@ -132,7 +133,7 @@ def main():
         if bf:
             with open(base + '.bf.cpp', 'w') as f:
                 f.write('#include "%s"\n%s\n' % (os.path.join(tree, src), '\n'.join(bf)))
-            r = subprocess.run(['aarch64-linux-gnu-g++'] + flags + ['-O2', '-S', '-w', '-fno-access-control', '-o',
+            r = subprocess.run(nice + ['aarch64-linux-gnu-g++'] + flags + ['-O2', '-S', '-w', '-fno-access-control', '-o',
                                 base + '.bf.s'] + inc + [base + '.bf.cpp'], capture_output=True, text=True, cwd=tree)
             asm = open(base + '.bf.s').read() if r.returncode == 0 else ''
             for fn, (key, name, off, w) in bfs.items():

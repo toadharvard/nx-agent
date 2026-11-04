@@ -225,6 +225,12 @@ class T02Runtime(unittest.TestCase):
                     for k in ('scan_words', 'scan_textptrs', 'vtables_col', 'vtables_hint', 'vtable_slots',
                               'vptr_refs', 'fx_total'):
                         self.assertEqual(int(cst[k]), st[k], k)
+                    # the plain searches (FNVNX_SCAN_NO_INDEX) give the same list and statistics as the indexed scan
+                    out2 = out[:-4] + '_noindex.bin'
+                    r2 = loadcheck(cfg, '--fixups-out', out2, '--no-index', moved=moved)
+                    self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+                    self.assertEqual(rd(out2), rd(out))
+                    self.assertEqual(stats_of(r2.stdout), cst)
 
     def test_pipeline_expectations(self):
         for cfg in CFGS:

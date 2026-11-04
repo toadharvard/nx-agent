@@ -83,18 +83,21 @@ def run(a):
         for ad, f in xu.funcs.items():
             if not f['unresolved']:
                 code[ad] = f['code']
-    pinned = {}
+    pinned = dict(uc.iat_pins())
     for s in units:
         pinned.update(uc.pinned(s, root if s == src else next(iter(uc.x86_unit(s).funcs))))
     img = a64image.build_many(units, str(config.LINK), str(config.A64WORK), 'lockstep_%08x' % root)
     uc.preload(code, img, src)
     fn = uc.x86_unit(src, root).funcs[root]
-    cv = convmod.Conv(fn['symbol'], src)
+    try:
+        cv = convmod.Conv(uc.tree_def.get(root, fn['symbol']), src)
+    except convmod.Unsupported:
+        cv = engine.dyninit_conv(fn['symbol'], src) or convmod.Conv(fn['symbol'], src)
     case = world.Case(seed=1, bg=a.bg)
     w = world.World(case, code, pinned)
     t = runner.Target(cv, root, code, img, uc.stub_addrmap(img, src), uc.callee_info_for(src))
     t.vtables = uc.vtable_map(img)
-    xe = x86emu.X86Engine(w, code, t.callee_info)
+    xe = x86emu.X86Engine(w, code, t.callee_info, None, uc.import_stubs())
     ae = arm64emu.Arm64Engine(w, img, t.stub_orig, t.vtables)
     starts = set(code)
     tx, ta = [], []

@@ -95,7 +95,7 @@ def x86_locations(sig):
             out.append((label, cls, ('stk', off))); break
         if cc == 'thiscall' and label == 'this':
             out.append((label, cls, 'ecx')); continue
-        if cc == 'fastcall' and len(regs) < 2 and cls in ('I8', 'I16', 'I32', 'P'):
+        if cc == 'fastcall' and len(regs) < 2 and cls in ('I8', 'I16', 'I32', 'P') and label != 'sret':   # buffer: stack
             r = ('ecx', 'edx')[len(regs)]; regs.append(r)
             out.append((label, cls, r)); continue
         out.append((label, cls, ('stk', off)))
@@ -168,8 +168,10 @@ def _bucket(cls):
     return cls
 
 
-def compare(ref, dfn):
-    """Verdict for a call through declaration `ref` to the function defined as `dfn` (both MSVC Sigs)."""
+def compare(ref, dfn, ecx_unused=False):
+    """Verdict for a call through declaration `ref` to the function defined as `dfn` (both MSVC Sigs). ecx_unused:
+    the definition's x86 code never uses the incoming ecx (fnvlink reads the pristine MSVC object), so a `this` or
+    ecx parameter the reference does not pass is a dead register on x86, not an inconsistency."""
     v = Verdict()
     shape = describe_shape(ref, dfn)
     if shape:
@@ -194,7 +196,11 @@ def compare(ref, dfn):
             continue
         aloc = da[lab][1]
         if src is None:
-            if lab == 'this':
+            if ecx_unused and (lab == 'this' or loc == 'ecx'):
+                v.notes.append('%s (ecx) not passed by the reference; the definition\'s code never uses ecx' % lab)
+                if 'ecx-unused' not in v.classes:
+                    v.classes.append('ecx-unused')
+            elif lab == 'this':
                 x86_ok = False
                 v.notes.append('this not passed by the reference')
             elif loc == 'ecx':
@@ -255,6 +261,14 @@ def compare(ref, dfn):
                 v.kind = 'manual'
         else:
             v.classes.append('ret-aggregate'); v.kind = 'manual'
+    elif rr == dr == 'v0' and ret_class(ref) != ret_class(dfn):
+        # float vs double result (V1 defect 2): x86 hands the value over exactly in st(0); AArch64 would read d0 where
+        # the callee wrote s0 - convert after the call (long double is binary128 here: manual)
+        v.classes.append('ret-float-width')
+        if {ret_class(ref), ret_class(dfn)} == {'F32', 'F64'}:
+            v.ret_fix = ('fcvt', ret_class(dfn), ret_class(ref))
+        else:
+            v.kind = 'manual'
     if not x86_ok:
         v.kind = 'x86-inconsistent'
         return v
@@ -353,9 +367,13 @@ def emit_bridge(name, target, verdict, comment):
              '    .p2align 2', '    .globl %s' % name, '    .type %s, %%function' % name, '%s:' % name]
     lines += ['    ' + _move(*m) for m in sequentialize(verdict.moves)]
     if verdict.ret_fix:
-        frm, to = verdict.ret_fix
-        lines += ['    stp x29, x30, [sp, #-16]!', '    mov x29, sp', '    bl %s' % target,
-                  '    fmov s0, w0' if to == 'v0' else '    fmov w0, s0', '    ldp x29, x30, [sp], #16', '    ret']
+        if verdict.ret_fix[0] == 'fcvt':   # the definition's float width -> the reference's
+            fix = '    fcvt d0, s0' if verdict.ret_fix[1] == 'F32' else '    fcvt s0, d0'
+        else:
+            frm, to = verdict.ret_fix
+            fix = '    fmov s0, w0' if to == 'v0' else '    fmov w0, s0'
+        lines += ['    stp x29, x30, [sp, #-16]!', '    mov x29, sp', '    bl %s' % target, fix,
+                  '    ldp x29, x30, [sp], #16', '    ret']
     else:
         lines.append('    b %s' % target)
     lines.append('    .size %s, .-%s' % (name, name))

@@ -73,6 +73,11 @@ CLASSES = {
     'TPL2': 'neutral',          # forward declarations of a namespace's function templates (MSVC's lookup)
     'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
     'DTOR1': 'neutral',         # declares NiPointer<T>::~NiPointer() specializations for pointees the unit never completes
+    'VTBL1': 'platform',        # full MSVC-order virtual interface for listed stand-ins (BSNiAllocator), slots forward
+    'ALIGN1': 'neutral',       # __declspec(align(n)) moved behind the class key: the type's alignment on both compilers
+    'ENUM2': 'neutral',        # enum with enumerators >= 2^31: MSVC's int base written out, (int) on those literals
+    'CSX2': 'neutral',          # the decomp's 28-byte critical sections keep their 28 bytes (D15 reopened, J-0067)
+    'STAND1': 'platform',       # drops untagged stand-ins bound to a tagged definition's address (one function per address)
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
     'INC1': 'neutral',          # quoted include spelled as the including directory's file (MSVC: no case)
     'ANON2': 'platform',        # raw storage for members with special functions in an anonymous struct of a union
@@ -89,6 +94,20 @@ CLASSES = {
     'FTOL1': 'platform',        # fnvnx_ftol2(expr): neutral with #define fnvnx_ftol2(x) ((__int64)(x)) under MSVC
 }
 PSEUDO = {'NATIVE1': 'drop_native_units'}
+
+# Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
+# group; a group that explains a difference is split into its rules. KEEP1 is inert under MSVC (FNVNX_KEEP is empty)
+# and is not tried. A rule of the gated set in no group is tried as a group of its own.
+DEFAULT_GROUPS = {
+    'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1',
+    'newdel': 'NEW1 NEW2 NEW3 NEW4 CTOR1',
+    'EXC1': 'EXC1',
+    'link': 'LINK1 STATIC1',
+    's1b': 'XINC1 RET1 FTOL1 DBUG1',
+    'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
+    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RCAST1 GOTO1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
+    'plat': 'STL1 STD1 ANON1 ANON2',
+}
 RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+)\b')
 
 
@@ -143,6 +162,14 @@ def cmd_prepare(a):
     prepare = load_prepare()
     if 'NATIVE1' not in allow:
         prepare.drop_native_units = lambda *args, **kw: None
+    if not allow & {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}:     # S1b's units.json renames belong to its patches
+        load_stream = prepare.load_stream_rules
+
+        def no_post():
+            rules = load_stream()
+            prepare.STREAM_POST[:] = []
+            return rules
+        prepare.load_stream_rules = no_post
     os.environ['FNVNX_PREPARE_SKIP'] = ','.join(skip)
     out = Path(a.out)
     if out.exists():
@@ -156,7 +183,11 @@ def cmd_prepare(a):
     (out / 'equiv_rules.txt').write_text(','.join(sorted(allow)) + '\n')
     stats = (out / 'prepare_stats.tsv').read_text().split('\n')
     edited = {l.split('\t')[0] for l in stats if l.strip() and not l.split('\t')[2].startswith('0 ')}
-    stray = sorted(edited - allow - {'ASM3', 'ASM-LEFT'})
+    # counters that belong to a rule (ASM3 to ASM2/ASM4, <RULE>-MISS / -LEFT, S1b's units.json renames)
+    s1b = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
+    own = {k for k in edited if k.split('-')[0] in allow or k == 'ASM3' and allow & {'ASM2', 'ASM4'}
+           or k.startswith('UNITS-') and allow & s1b}
+    stray = sorted(edited - allow - own)
     if stray:
         raise SystemExit('equiv.py: rules outside the allow-list edited the tree: %s' % ', '.join(stray))
 
@@ -214,6 +245,7 @@ def key_free(name):
 
 
 SG_LITERAL = re.compile(r'^\$SG\d+$')
+GAME_PREFIX = 'fnvnx_game_'
 
 
 class Resolver:
@@ -271,10 +303,36 @@ class Resolver:
                 if n in self.names and not SG_LITERAL.match(n):
                     syms[n] = hex(self.names[n]); how['recipe'] += 1
                     continue
+                if GAME_PREFIX in n:        # GAME1: fnvnx_game_X is the decomp's X (S2 binds it by the unit's address)
+                    orig = n.replace(GAME_PREFIX, '')
+                    if orig in syms or orig in self.names:
+                        syms[n] = syms.get(orig) or hex(self.names[orig]); how['game'] += 1
+                        continue
+                    alts = {v for k, v in syms.items() if key_free(k) == key_free(orig)}   # the type's key changed
+                    if len({int(v, 16) for v in alts}) == 1:
+                        syms[n] = next(iter(alts)); how['game'] += 1
+                        continue
                 for k, what in ((var_key(n), 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
                     if k and len(self.by_key.get(k, ())) == 1:
                         syms[n] = hex(next(iter(self.by_key[k]))); how[what] += 1
                         break
+        # a variable this object defines under another linkage than the recipe's name of it (STATIC1 makes a static
+        # `_s_x` an external `?s_x@@3...`): the recipe binds the image address, both spellings are that variable
+        local = {}
+        for k, v in syms.items():
+            vk = var_key(k)
+            if vk:
+                local.setdefault(vk, set()).add(v)
+        for x in coff.symbols.values():
+            n = x['name']
+            if x['section'] <= 0 or n in own or n in syms or SG_LITERAL.match(n):
+                continue
+            vk = var_key(n)
+            if not vk:
+                continue
+            cand = local.get(vk) or {hex(a) for a in self.by_key.get(vk, ())}
+            if len({int(c, 16) for c in cand}) == 1:
+                syms[n] = next(iter(cand)); how['defined-linkage'] += 1
         ext = dict(unit)
         ext['symbols'] = syms
         ext['functions'] = fns
@@ -410,8 +468,18 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
     return ok, r.stdout + r.stderr
 
 
+def shard_of(source, n):
+    """1-based shard of a unit source among n (crc32 of the path, as tools/farm/compile_job.sh)."""
+    import zlib
+    return zlib.crc32(source.encode()) % n + 1
+
+
 def select_units(spec, units, only=None):
-    if spec == 'all':
+    """'all', a JSON file ({"units": [...]} or a list), 'i,j,k', or 'shard:K/N' (stable hash split)."""
+    if spec.startswith('shard:'):
+        k, n = (int(x) for x in spec[6:].split('/'))
+        sel = [i for i, u in enumerate(units) if shard_of(u['source'], n) == k]
+    elif spec == 'all':
         sel = list(range(len(units)))
     elif os.path.exists(spec):
         data = json.loads(Path(spec).read_text())
@@ -424,7 +492,7 @@ def select_units(spec, units, only=None):
 class Fingerprinter:
     """compare_builds.fingerprint with the decomp's names (strict) and with Resolver's extra bindings."""
 
-    def __init__(self, decomp):
+    def __init__(self, decomp, tree=None):
         self.cb = decomp_tools(decomp)
         from compare import Coff
         from build_and_match import recipe_names
@@ -433,10 +501,35 @@ class Fingerprinter:
         self.names = recipe_names(self.units)
         self.resolver = Resolver(self.units, self.names)
         self.names_nolit = {k: v for k, v in self.names.items() if not SG_LITERAL.match(k)}
+        # a prepared tree's own recipe (S1b renames decorations of patched definitions and references): same units,
+        # same addresses, other names - used where the pristine name is not in the object
+        self.alt = None
+        if tree is not None and Path(tree, 'equiv_rules.txt').exists() and Path(tree, 'build/units.json').exists():
+            alt = json.loads(Path(tree, 'build/units.json').read_text())['units']
+            if len(alt) == len(self.units) and alt != self.units:
+                self.alt = alt
+
+    def unit_for(self, i, coff):
+        """The pristine recipe entry of unit i, with the prepared recipe's names where only those are in the object."""
+        unit = self.units[i]
+        if self.alt is None or self.alt[i] == unit:
+            return unit
+        alt = self.alt[i]
+        by_addr = {f['address']: f for f in alt['functions']}
+        fns = []
+        for fn in unit['functions']:
+            other = by_addr.get(fn['address'])
+            if other and other['symbol'] != fn['symbol'] and fn['symbol'] not in coff.by_name \
+                    and other['symbol'] in coff.by_name:
+                fn = dict(fn, symbol=other['symbol'])
+            fns.append(fn)
+        syms = dict(alt.get('symbols', {}))
+        syms.update(unit.get('symbols', {}))
+        return dict(unit, functions=fns, symbols=syms)
 
     def row(self, i, obj):
-        unit = self.units[i]
         coff = self.Coff(obj)
+        unit = self.unit_for(i, coff)
         ext, how = self.resolver.extend(coff, unit)
         strict = self.cb.fingerprint(obj, unit, self.names)
         fp = self.cb.fingerprint(obj, ext, self.names_nolit)
@@ -491,7 +584,7 @@ def append_rows(out, rows_iter, total):
 
 
 def cmd_build(a):
-    fpr = Fingerprinter(a.decomp)
+    fpr = Fingerprinter(a.decomp, a.tree)
     units = fpr.units
     tree = Path(a.tree).resolve()
     sel = select_units(a.units, units, a.only)
@@ -536,9 +629,19 @@ def cmd_build(a):
 
 def cmd_refp(a):
     """Fingerprint again from the objects a build kept (--objdir), e.g. after a change to Resolver: rows of units that
-    did not compile are copied over."""
-    fpr = Fingerprinter(a.decomp)
-    old = load_rows(a.old)
+    did not compile are copied over. OLD '-' (or a missing file): the rows come from the objects alone, for --units
+    (default all): a unit without an object did not compile."""
+    fpr = Fingerprinter(a.decomp, a.tree)
+    old = load_rows(a.old) if a.old != '-' and Path(a.old).exists() else {}
+    spec = a.units or (None if old else 'all')
+    if spec:
+        keep = set(select_units(spec, fpr.units))
+        old = {i: r for i, r in old.items() if i in keep}
+        for i in sorted(keep - set(old)):
+            u = fpr.units[i]
+            ok = Path(a.objdir, 'u%d.obj' % i).exists()
+            old[i] = dict(unit=i, source=u['source'], compiler=u['compiler'], status='ok' if ok else 'compile-failed',
+                          **({} if ok else {'error': 'no object'}))
     out = Path(a.out)
     out.unlink(missing_ok=True)
     put = append_rows(out, None, len(old))
@@ -693,7 +796,7 @@ def cmd_attribute(a):
     B does not compile: rebuild it with SPEC minus one rule (and minus each --group), for each rule that edits a file
     in the unit's include closure. A differing function that becomes identical to A when rule R is left out is
     attributed to R; a unit that compiles without R did not compile because of R."""
-    fpr = Fingerprinter(a.decomp)
+    fpr = Fingerprinter(a.decomp, a.tree)
     cb, units = fpr.cb, fpr.units
     A, B = load_rows(a.a), load_rows(a.b)
     allow = resolve_spec(a.rules)
@@ -706,10 +809,20 @@ def cmd_attribute(a):
         if (c['status'] == 'differs' or (a.failed and c['status'] == 'does-not-compile')) \
                 and (not a.only or a.only in units[i]['source']):
             todo.append((i, c))
+    if a.units:
+        keep = set(select_units(a.units, units))
+        todo = [(i, c) for i, c in todo if i in keep]
     if a.limit:
         todo = todo[:a.limit]
     cands = [] if a.hier else [(rid, {rid}) for rid in sorted(allow)]
-    for g in a.group or []:
+    groups = list(a.group or [])
+    if a.default_groups:
+        grouped = set()
+        for gname, ids in DEFAULT_GROUPS.items():
+            groups.append('%s=%s' % (gname, ','.join(ids.split())))
+            grouped.update(ids.split())
+        groups += ['%s=%s' % (r, r) for r in sorted(allow - grouped - {'KEEP1', 'NATIVE1'})]
+    for g in groups:
         gname, _, ids = g.partition('=')
         cands.append((gname, set(ids.split(',')) & allow))
     base = Path(a.tree).resolve()
@@ -854,6 +967,67 @@ def cmd_summarize(a):
             examples={'%s/%s' % k: v for k, v in examples.items()}, fails=fails_by), indent=0) + '\n')
 
 
+def attributed(row, k, failed=False):
+    """The rule (or group) an attribute row names for function k (or for the unit not compiling): the first single
+    rule that explains it, else the first group, else '(interaction)'."""
+    names = []
+    for name, v in row.get('by_rule', {}).items():
+        ok = v.get('compiles') and (v.get('identical') if failed else k in v.get('fixed', []))
+        if ok:
+            names.append(name)
+    single = [n for n in names if RULE_ID.fullmatch(n)]
+    return (single or names or ['(interaction)'])[0]
+
+
+def cmd_report(a):
+    """Markdown report of a gate: BASE (pristine) vs HEAD (prepared), with --attr (equiv.py attribute rows) and --eh
+    (both sides built with --eh-off) when given. Numbers, unit names, addresses and short diagnostics only."""
+    A, B = load_rows(a.base), load_rows(a.head)
+    attr = load_rows(a.attr) if a.attr and Path(a.attr).exists() else {}
+    eha, ehb = (load_rows(a.eh[0]), load_rows(a.eh[1])) if a.eh else ({}, {})
+    st, kinds, table, lines, fails = Counter(), Counter(), {}, [], []
+    nfun = Counter()
+    for i in sorted(set(A) & set(B)):
+        c = compare_rows(A[i], B[i])
+        st[c['status']] += 1
+        if c['status'] not in ('identical', 'differs'):
+            if c['status'] == 'does-not-compile':
+                rule = attributed(attr.get(i, {}), None, failed=True) if i in attr else '-'
+                table.setdefault(rule, Counter())['no-build'] += 1
+                f, code, msg = first_error(B[i].get('error', ''))
+                fails.append('%s  %s  %s %s' % (B[i]['source'], rule, code or '', (msg or '')[:100]))
+            continue
+        nfun['compared'] += c['functions']
+        nfun['differ'] += len(c['differ'])
+        ehc = compare_rows(eha[i], ehb[i]) if i in eha and i in ehb else None
+        for k in c['differ']:
+            kind = 'retarget' if k in c['same_bytes'] else (
+                'eh' if ehc is not None and ehc['status'] in ('identical', 'differs') and k not in ehc['differ']
+                else 'code')
+            kinds[kind] += 1
+            rule = attributed(attr[i], k) if i in attr else '-'
+            table.setdefault(rule, Counter())[kind] += 1
+            lines.append('%s  %s  %s  %s' % (B[i]['source'], k, kind, rule))
+    out = ['# MSVC equivalence gate%s' % (' - ' + a.title if a.title else ''), '']
+    out.append('- units: %d compared; %d identical, %d differ, %d prepared side does not compile, %d pristine '
+               'does not compile' % (sum(st.values()), st['identical'], st['differs'], st['does-not-compile'],
+                                     st['base-failed']))
+    out.append('- functions: %d compared, %d differ (EH-only %d, retarget %d, code %d%s)' % (
+        nfun['compared'], nfun['differ'], kinds['eh'], kinds['retarget'], kinds['code'],
+        '' if a.eh else '; EH-only not measured'))
+    out += ['', '| rule | eh | retarget | code | no-build |', '|---|---:|---:|---:|---:|']
+    for rule in sorted(table, key=lambda r: (r.startswith('(') or r == '-', r)):
+        t = table[rule]
+        out.append('| %s | %d | %d | %d | %d |' % (rule, t['eh'], t['retarget'], t['code'], t['no-build']))
+    out += ['', 'Kinds: eh = identical when both sides build with /EHs-c-; retarget = same code bytes, a relocation '
+            'reaches another address; code = the rest. Rule: the single rule (or group) whose leave-out makes the '
+            'function identical (the unit compile).', '']
+    out += ['## Differing functions (unit, address, kind, rule)', '', '```'] + lines + ['```', '']
+    out += ['## Units the prepared side does not compile (unit, rule, first error)', '', '```'] + fails + ['```', '']
+    Path(a.out).write_text('\n'.join(out) + '\n')
+    print('\n'.join(out[:4 + len(table) + 4]))
+
+
 DECORATED_FN = [re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$'), re.compile(r'^__imp_\?([A-Za-z_]\w*)@@Y'),
                 re.compile(r'^\?([A-Za-z_]\w*)@@Y'), re.compile(r'^@([A-Za-z_]\w*)@\d+$'),
                 re.compile(r'^_([A-Za-z_]\w*?)(?:@\d+)?$')]
@@ -949,11 +1123,13 @@ def cmd_show(a):
             if not ok:
                 print(text[-3000:]); return
             objs.append((obj, Coff(obj)))
+        names_b = {f['address']: f['symbol']
+                   for f in Fingerprinter(a.decomp, a.tree_b).unit_for(a.unit, objs[1][1])['functions']}
         for fn in unit['functions']:
             if want and fn['address'] not in want:
                 continue
             da = disassemble(objs[0][0], objs[0][1], fn['symbol'])
-            db = disassemble(objs[1][0], objs[1][1], fn['symbol'])
+            db = disassemble(objs[1][0], objs[1][1], names_b.get(fn['address'], fn['symbol']))
             if da == db and want is None:
                 continue
             print('==== %s %s' % (fn['address'], fn['symbol']))
@@ -977,7 +1153,8 @@ def main():
     p.add_argument('--lean', action='store_true', help='prepared trees: the stand-in <windows.h> with '
                    'WIN32_LEAN_AND_MEAN (retry of units the full SDK breaks)')
     p = sub.add_parser('refp'); p.add_argument('decomp'); p.add_argument('old'); p.add_argument('objdir')
-    p.add_argument('--out', required=True)
+    p.add_argument('--out', required=True); p.add_argument('--tree', help='the prepared tree the objects come from')
+    p.add_argument('--units', help='only these units (as build --units); units without a row get one from the objects')
     p = sub.add_parser('compare'); p.add_argument('a'); p.add_argument('b'); p.add_argument('--out')
     p = sub.add_parser('show'); p.add_argument('decomp'); p.add_argument('tree_a'); p.add_argument('tree_b')
     p.add_argument('--unit', type=int, required=True); p.add_argument('--fn', help='addresses, comma-separated')
@@ -985,13 +1162,17 @@ def main():
     p = sub.add_parser('attribute'); p.add_argument('decomp'); p.add_argument('tree'); p.add_argument('a'); p.add_argument('b')
     p.add_argument('--rules', required=True, help='the rule set tree B was prepared with'); p.add_argument('--out', required=True)
     p.add_argument('--only'); p.add_argument('--limit', type=int); p.add_argument('--workdir')
+    p.add_argument('--units', help='only these units (as build --units)')
     p.add_argument('--group', action='append', help='NAME=ID,ID: also leave these rules out together')
     p.add_argument('--failed', action='store_true', help='also units B does not compile')
+    p.add_argument('--default-groups', action='store_true', help='the groups of DEFAULT_GROUPS (+ ungrouped rules)')
     p.add_argument('--hier', action='store_true', help='try only the --group sets first; split a group into its rules '
                    'when leaving it out fixes a function (or lets the unit compile)')
     p.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
     p = sub.add_parser('errors'); p.add_argument('fp')
     p = sub.add_parser('bindings'); p.add_argument('decomp')
+    p = sub.add_parser('report'); p.add_argument('base'); p.add_argument('head'); p.add_argument('--out', required=True)
+    p.add_argument('--attr'); p.add_argument('--eh', nargs=2); p.add_argument('--title')
     p = sub.add_parser('layouts'); p.add_argument('decomp'); p.add_argument('a'); p.add_argument('b')
     p.add_argument('--units', default='all'); p.add_argument('--show'); p.add_argument('--out')
     p = sub.add_parser('summarize'); p.add_argument('base'); p.add_argument('head')
@@ -1000,7 +1181,8 @@ def main():
     p.add_argument('--examples', type=int, default=0)
     a = ap.parse_args()
     dict(rules=cmd_rules, prepare=cmd_prepare, plan=cmd_plan, build=cmd_build, compare=cmd_compare,
-         show=cmd_show, attribute=cmd_attribute, errors=cmd_errors, refp=cmd_refp, bindings=cmd_bindings, summarize=cmd_summarize, layouts=cmd_layouts)[a.command](a)
+         show=cmd_show, attribute=cmd_attribute, errors=cmd_errors, refp=cmd_refp, bindings=cmd_bindings, summarize=cmd_summarize, layouts=cmd_layouts,
+         report=cmd_report)[a.command](a)
 
 
 if __name__ == '__main__':

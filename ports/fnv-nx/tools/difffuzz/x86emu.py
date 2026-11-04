@@ -33,7 +33,9 @@ FLD_STUB = 0x0e005000       # `fld qword [FLD_VAL]; ret` for float results of in
 FLD_VAL = 0x0e005800
 BUILTIN_STUB = 0x0e006000   # x87 helper code (_ftol2, _CIsqrt, ...) and its scratch slots
 BUILTIN_SLOT = 0x0e006800
-FPCW_MSVC = 0x027f          # MSVC CRT default: 53-bit precision, round to nearest, exceptions masked
+FPCW_MSVC = 0x027f
+REGS = {'eax': UC_X86_REG_EAX, 'ecx': UC_X86_REG_ECX, 'edx': UC_X86_REG_EDX, 'ebx': UC_X86_REG_EBX,
+        'esi': UC_X86_REG_ESI, 'edi': UC_X86_REG_EDI}          # MSVC CRT default: 53-bit precision, round to nearest, exceptions masked
 
 
 def _desc(base, limit, access, flags=0xC):
@@ -42,10 +44,10 @@ def _desc(base, limit, access, flags=0xC):
 
 
 class Call:
-    __slots__ = ('target', 'args', 'ret_to')
+    __slots__ = ('target', 'args', 'ret_to', 'regs')
 
-    def __init__(self, target, args, ret_to):
-        self.target, self.args, self.ret_to = target, args, ret_to
+    def __init__(self, target, args, ret_to, regs=None):
+        self.target, self.args, self.ret_to, self.regs = target, args, ret_to, regs or {}
 
 
 class Result:
@@ -60,11 +62,12 @@ class Result:
 
 
 class X86Engine:
-    def __init__(self, world_obj, text_funcs, callee_info=None, follow=None):
+    def __init__(self, world_obj, text_funcs, callee_info=None, follow=None, imports=None):
         """text_funcs: {addr: bytes} executed for real. callee_info(addr) -> (pop_bytes, ret_kind) or None.
         follow(addr) -> oracle bytes of a function outside the unit to run for real instead of intercepting, or None."""
         self.follow = follow
         self.followed = set()
+        self.imports = imports or {}       # import stub index -> (name, stdcall bytes)
         self.world = world_obj
         self.text_funcs = text_funcs
         self.callee_info = callee_info or (lambda a: None)
@@ -73,6 +76,8 @@ class X86Engine:
         self.mapped = set()
         self.dynamic = set()
         uc = self.uc = Uc(UC_ARCH_X86, UC_MODE_32)
+        uc.mem_map(libcalls.IMPORT_BASE, (libcalls.IMPORT_MAX * 16 + PAGE - 1) & ~(PAGE - 1), UC_PROT_ALL)
+        uc.mem_write(libcalls.IMPORT_BASE, b'\xcc' * (libcalls.IMPORT_MAX * 16))
         for base in (GDT, TEB, STUBS, FRET, RESULT_BUF, FLD_STUB, BUILTIN_STUB):
             uc.mem_map(base, PAGE, UC_PROT_ALL)
             self.mapped.add(base)
@@ -156,6 +161,10 @@ class X86Engine:
         saved = [uc.reg_read(x) for x in (UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP)]
         hb = uc.hook_add(UC_HOOK_BLOCK, self._on_block, user_data=(case, r), begin=world.TEXT[0],
                          end=world.TEXT[1] - 1)
+        hb2 = uc.hook_add(UC_HOOK_BLOCK, self._on_import, user_data=(case, r), begin=libcalls.IMPORT_BASE,
+                          end=libcalls.IMPORT_BASE + libcalls.IMPORT_MAX * 16 - 1)
+        hwild = [uc.hook_add(UC_HOOK_BLOCK, self._on_wild, user_data=(case, r), begin=lo, end=hi - 1)
+                 for lo, hi in world.WILD_X86]
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
                for lo, hi in world.COMPARED]
         start = start if start is not None else next(iter(self.text_funcs))
@@ -166,6 +175,9 @@ class X86Engine:
             r.error = self._fault or 'fault:uc:%s' % e
         finally:
             uc.hook_del(hb)
+            uc.hook_del(hb2)
+            for h in hwild:
+                uc.hook_del(h)
             for h in hws:
                 uc.hook_del(h)
         eip = uc.reg_read(UC_X86_REG_EIP)
@@ -195,10 +207,8 @@ class X86Engine:
                 else:   # aggregate by value: its bytes on the stack
                     data = case.args.get(lab, b'').ljust(v.size, b'\0')[:v.size]
                     data = data.ljust((len(data) + 3) // 4 * 4, b'\0')
-            if space == 'ecx':
-                uc.reg_write(UC_X86_REG_ECX, world.u32(data))
-            elif space == 'edx':
-                uc.reg_write(UC_X86_REG_EDX, world.u32(data))
+            if space in REGS:
+                uc.reg_write(REGS[space], world.u32(data.ljust(4, b'\0')))
             else:
                 stack_items.append((off, data))
         frame = bytearray(max((o + len(d) for o, d in stack_items), default=0))
@@ -238,11 +248,23 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_EIP, address)
             return
         k = len(r.calls)
-        r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr))
+        r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr,
+                            {n: uc.reg_read(REGS[n]) for n in ('eax', 'ebx', 'esi', 'edi')}))
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
         pop, kind = info if info else (0, 'int')
-        uc.reg_write(UC_X86_REG_EAX, world.u32(rb, 0))
+        eax = world.u32(rb, 0)
+        cv = self._callee_conv(address)
+        if cv is not None and cv.ret is not None and cv.ret.is_bool:
+            eax = (eax & ~0xff) | (rb[0] & 1)          # a real bool result is 0/1 (MSVC tests al, GCC bit 0)
+        if cv is not None and cv.hidden and cv.ret is not None:
+            p = self._sret_of(cv, r.calls[-1])
+            if p is not None:                          # the result in the caller's buffer, its address in eax
+                libcalls.Mem(uc, r.writes, self._ensure).write(p, world.result_bytes(case, k, cv.ret.size))
+                eax = p
+        elif cv is not None and (getattr(cv, 'name', '') or '').startswith('??0'):
+            eax = r.calls[-1].args[0]                  # an MSVC constructor returns this
+        uc.reg_write(UC_X86_REG_EAX, eax)
         uc.reg_write(UC_X86_REG_EDX, world.u32(rb, 4))
         uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
         if kind in ('f32', 'f64'):
@@ -259,6 +281,54 @@ class X86Engine:
             return
         uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
         uc.reg_write(UC_X86_REG_EIP, retaddr)
+
+    def _on_wild(self, uc, address, size, user):
+        """Execution reached memory that holds no code: an indirect call through a planted pointer."""
+        self._on_block(uc, address, size, user)
+
+    def _callee_conv(self, address):
+        f = getattr(self.callee_info, 'conv', None)
+        try:
+            return f(address) if f else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _sret_of(cv, call):
+        """The hidden result pointer the caller passed (MSVC: first stack word, or ecx/edx/another register)."""
+        for lab, space, off, size in cv.x86:
+            if lab != 'sret':
+                continue
+            if space == 'ecx':
+                return call.args[0]
+            if space == 'edx':
+                return call.args[1]
+            if space in call.regs:
+                return call.regs[space]
+            if off % 4 == 0 and 2 + off // 4 < len(call.args):
+                return call.args[2 + off // 4]
+        return None
+
+    def _on_import(self, uc, address, size, user):
+        """A call through an IAT slot (pinned to import stub k): the Interlocked family runs, anything else is a
+        traced call with the import's identity, a canned result in eax and stdcall cleanup."""
+        case, r = user
+        name, pop = self.imports.get((address - libcalls.IMPORT_BASE) // 16, ('?', 0))
+        esp = uc.reg_read(UC_X86_REG_ESP)
+        ret = world.u32(uc.mem_read(esp, 4))
+        words = [world.u32(uc.mem_read(esp + 4 + 4 * i, 4)) for i in range(16)]
+        if name in libcalls.IMPORT_BUILTINS:
+            v = libcalls.run_import(name, libcalls.Mem(uc, r.writes, self._ensure), words)
+        else:
+            k = len(r.calls)
+            r.calls.append(Call(libcalls.import_id(name), [uc.reg_read(UC_X86_REG_ECX),
+                                                           uc.reg_read(UC_X86_REG_EDX)] + words, ret))
+            v = world.u32(case.ret_bytes(k), 0)
+            uc.reg_write(UC_X86_REG_EDX, world.u32(case.ret_bytes(k), 4))
+            uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
+        uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff)
+        uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
+        uc.reg_write(UC_X86_REG_EIP, ret)
 
     def _builtin(self, uc, name, esp, ret, words, r):
         """Run a CRT function or compiler helper for real (not traced). True when handled."""

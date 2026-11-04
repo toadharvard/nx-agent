@@ -5,7 +5,7 @@ and the two declarations disagree about it. With the layouts of those aggregates
 trivial for calls, AArch64 class G1/G2/H<n>x<w>/IND), every parameter becomes a run of bytes:
 
 * x86 (MSVC): each value has a location (ecx, edx, stack offset) and a size; aggregate results use a hidden
-  buffer pointer (always for members, for free functions unless a trivial 1/2/4/8-byte aggregate, which comes back in
+  buffer pointer (always for members, for free functions unless a 1/2/4/8-byte C++03 POD, which comes back in
   eax:edx). A definition value takes its bytes from whatever reference values overlap its x86 location - one
   reference value may feed several definition values and the other way round (a 16-byte struct vs four ints).
 * AArch64 (AAPCS64, ILP32): each value is a list of chunks (value offset, container, container offset, length) with
@@ -32,10 +32,11 @@ class Unknown(Exception):
 
 
 class Val:
-    __slots__ = ('label', 'cls', 'size', 'kind', 'align', 'trivial')
+    __slots__ = ('label', 'cls', 'size', 'kind', 'align', 'trivial', 'pod')
 
-    def __init__(self, label, cls, size, kind, align=4, trivial=1):
+    def __init__(self, label, cls, size, kind, align=4, trivial=1, pod=None):
         self.label, self.cls, self.size, self.kind, self.align, self.trivial = label, cls, size, kind, align, trivial
+        self.pod = pod   # MSVC C++03 POD (layout probe), None unknown
 
 
 def agg_name(cls):
@@ -49,7 +50,7 @@ def value(label, cls, lay):
         lt = lay(agg_name(cls))
         if lt is None:
             raise Unknown(cls)
-        return Val(label, cls, lt.size, lt.cls, lt.align, lt.trivial)
+        return Val(label, cls, lt.size, lt.cls, lt.align, lt.trivial, getattr(lt, 'pod', None))
     raise Unknown(cls)  # varargs, long double, member pointers, untagged names
 
 
@@ -61,8 +62,13 @@ def values(sig, lay):
 
 
 def hidden_result(sig, ret):
-    return ret is not None and ret.cls.startswith('AGG:') and (
-        sig.member or not (ret.trivial and ret.size in (1, 2, 4, 8)))
+    """MSVC x86: an aggregate result goes through a hidden buffer for a member function always, for a free function
+    unless it is a 1/2/4/8-byte C++03 POD (V1 A1/A2: a user constructor makes it a buffer though Itanium calls it
+    trivial); Itanium triviality stands in when the probe gave no POD bit."""
+    if ret is None or not ret.cls.startswith('AGG:'):
+        return False
+    regs = ret.trivial if ret.pod is None else ret.pod
+    return sig.member or not (regs and ret.size in (1, 2, 4, 8))
 
 
 def x86(sig, vals, ret):
@@ -75,7 +81,9 @@ def x86(sig, vals, ret):
     for v in order:
         if cc == 'thiscall' and v.label == 'this':
             out.append((v.label, 'ecx', 0, 4)); continue
-        if cc == 'fastcall' and regs < 2 and v.cls in ('I8', 'I16', 'I32', 'P'):
+        # MSVC __fastcall with a hidden result: the buffer is the first stack word, ecx/edx stay for the arguments
+        # (V1 defect 1: 0x0056fa00 wrote its result over *this)
+        if cc == 'fastcall' and regs < 2 and v.cls in ('I8', 'I16', 'I32', 'P') and v.label != 'sret':
             out.append((v.label, ('ecx', 'edx')[regs], 0, v.size)); regs += 1; continue
         out.append((v.label, 'stk', off, v.size))
         off += (v.size + 3) // 4 * 4
@@ -171,10 +179,12 @@ class Plan:
         self.dret = self.rret = None
         self.def_sret_from = None   # ref label whose pointer receives the definition's hidden result
         self.ret_conv = False
+        self.ret_fcvt = None      # (definition class, reference class): float <-> double result
 
 
-def compare(ref, dfn, lay_ref, lay_def):
-    """Plan for calling definition `dfn` through declaration `ref`, or None when a layout is missing."""
+def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False):
+    """Plan for calling definition `dfn` through declaration `ref`, or None when a layout is missing. ecx_unused: as
+    abi.compare (the definition's code never uses the incoming ecx)."""
     try:
         rv, rret = values(ref, lay_ref)
         dv, dret = values(dfn, lay_def)
@@ -207,7 +217,10 @@ def compare(ref, dfn, lay_ref, lay_def):
                 p.classes.append('result-pointer-not-passed')
             continue
         if covered == 0:
-            if lab == 'this':
+            if ecx_unused and (lab == 'this' or space == 'ecx'):
+                p.notes.append('%s (ecx) not passed; the definition\'s code never uses ecx' % lab)
+                p.classes.append('ecx-unused')
+            elif lab == 'this':
                 x86_ok = False; p.notes.append('this not passed by the reference')
                 p.classes.append('this-not-passed')
             elif space == 'ecx':   # the x86 callee reads the caller's ecx (abi.compare, 'ecx-not-passed')
@@ -240,6 +253,9 @@ def compare(ref, dfn, lay_ref, lay_def):
             p.notes.append('reference reads a result the definition does not produce')
         elif hidden_result(ref, rret) and not hidden_result(dfn, dret):
             pass  # the reference's buffer feeds an explicit definition parameter (refsret piece)
+        elif rret.cls in ('F32', 'F64') and dret.cls in ('F32', 'F64') and rret.cls != dret.cls:
+            p.ret_fcvt = (dret.cls, rret.cls)   # a numeric conversion, not a byte copy (V1 defect 2)
+            p.classes.append('ret-float-width')
         else:
             for vo in range(min(rret.size, dret.size)):
                 if locate(rr, vo)[:2] != (locate(dr, vo) or (None, None, 0))[:2]:
@@ -248,7 +264,7 @@ def compare(ref, dfn, lay_ref, lay_def):
                 p.classes.append('result-moves')
     if not x86_ok:
         p.kind = 'x86-inconsistent'
-    elif not identity or p.ret_conv or p.def_sret_from is not None:
+    elif not identity or p.ret_conv or p.ret_fcvt or p.def_sret_from is not None:
         p.kind = 'bridge'
         if any(src == ('refsret',) for ps in p.pieces.values() for _, src, _, _ in ps) and rret is None:
             p.kind = 'x86-inconsistent'; p.notes.append('result buffer of a void reference')
@@ -414,7 +430,7 @@ def emit(name, target, p, comment):
     refsret = any(src == ('refsret',) for ps in p.pieces.values() for _, src, _, _ in ps)
     tail = (not any(c[0] == 'stk' or (c[0] == 'mem' and l not in passthru)
                     for l, ch in p.dch.items() if l in p.pieces for _, c, _, _ in ch)
-            and not p.ret_conv and p.def_sret_from is None and not (refsret and not ref_ind))
+            and not p.ret_conv and not p.ret_fcvt and p.def_sret_from is None and not (refsret and not ref_ind))
     if tail:
         a.addr('x10', FP); a('ldp x29, x30, [x10]'); a('add sp, sp, #%d' % frame); a('b %s' % target)
     else:
@@ -428,6 +444,8 @@ def emit(name, target, p, comment):
                 src_base(cont, co, 'x9'); a('ldr w9, [x9]'); a.addr('x10', R)
                 a.copy('x9', 'x10', p.dret.size)
             src_base(cont, co, 'x9'); a('ldr w0, [x9]')  # MSVC returns the buffer pointer
+        elif p.ret_fcvt:
+            a('fcvt d0, s0' if p.ret_fcvt[0] == 'F32' else 'fcvt s0, d0')
         elif p.ret_conv or refsret:
             if p.ret_conv and not def_ind:
                 a.addr('x10', R); _store_ret(a, a64_ret(p.dret), 'x10')

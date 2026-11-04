@@ -8,7 +8,9 @@ the same object; unit b calls f through another declaration (g_alias); unit c na
 object no longer references it (as when GCC inlines). The override table replaces f and K::v with native functions.
 Checks: shadowed.tsv lists both and names c as possibly inlined; after apply + trial link, the address symbol, the
 decomp's own name of f (so a's internal call) and K's vtable slot all point at the overrides; the address map entry
-names the override.
+names the override. A variadic replacement (unit d's fixed-argument logger 0x00401500, referenced variadically and
+with a double from unit e) carries its own MSVC signature in the table's 4th column: both references bind to it
+directly, no bridge built against the decomp definition.
 """
 import json
 import os
@@ -26,7 +28,11 @@ SRC = {
                  'int user_a(int x) { return f(x) * 2; }\n',
     'src/b.cpp': 'int g_alias(int);\nint user_b(int x) { return g_alias(x); }\n',
     'src/c.cpp': 'int user_c() { return 3; }\n',
-    'native/over.cpp': 'extern "C" int nx_f(int x) { return x + 100; }\nextern "C" int nx_v(void *) { return 7; }\n',
+    'src/d.cpp': 'void FUN_00401500(const char *t, const char *c) { (void)t; (void)c; }\n',
+    'src/e.cpp': 'int FUN_00401500(const char *, ...);\nvoid FUN_00401500(const char *, double);\n'
+                 'void log_user(double v) { FUN_00401500("a %d %d", 1, 2); FUN_00401500("b", v); }\n',
+    'native/over.cpp': 'extern "C" int nx_f(int x) { return x + 100; }\nextern "C" int nx_v(void *) { return 7; }\n'
+                       'extern "C" int nx_log(const char *, ...) { return 0; }\n',
 }
 UNITS = {'units': [
     {'source': 'src/a.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
@@ -40,6 +46,11 @@ UNITS = {'units': [
     {'source': 'src/c.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         {'address': '0x00401400', 'symbol': '?user_c@@YAHXZ', 'size': 8}],
      'symbols': {'?f@@YAHH@Z': '0x00401000'}},
+    {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        {'address': '0x00401500', 'symbol': '?FUN_00401500@@YAXPBD0@Z', 'size': 8}], 'symbols': {}},
+    {'source': 'src/e.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        {'address': '0x00401600', 'symbol': '?log_user@@YAXN@Z', 'size': 8}],
+     'symbols': {'?FUN_00401500@@YAHPBDZZ': '0x00401500', '?FUN_00401500@@YAXPBDN@Z': '0x00401500'}},
 ]}
 
 ok = True
@@ -70,17 +81,23 @@ def main():
             run([CXX, '-mabi=ilp32', '-O1', '-fno-inline', '-c', p, '-o', objs[rel]])
         json.dump(UNITS, open(os.path.join(t, 'units.json'), 'w'))
         with open(os.path.join(t, 'objects.tsv'), 'w') as f:
-            for rel in ('src/a.cpp', 'src/b.cpp', 'src/c.cpp'):
+            for rel in ('src/a.cpp', 'src/b.cpp', 'src/c.cpp', 'src/d.cpp', 'src/e.cpp'):
                 f.write('%s\t%s\tok\n' % (rel, objs[rel]))
         with open(os.path.join(t, 'override.tsv'), 'w') as f:
             f.write('# address\tsymbol\tobject\n00401000\tnx_f\t%s\n00401100\tnx_v\t%s\n'
-                    % (objs['native/over.cpp'], objs['native/over.cpp']))
+                    '00401500\tnx_log\t%s\t?FUN_00401500@@YAHPBDZZ\n'
+                    % (objs['native/over.cpp'], objs['native/over.cpp'], objs['native/over.cpp']))
         out, fixed = os.path.join(t, 'out'), os.path.join(t, 'fixed')
         run([sys.executable, FNVLINK, 'resolve', os.path.join(t, 'units.json'), os.path.join(t, 'objects.tsv'), out,
              '--override', os.path.join(t, 'override.tsv'), '--crt-symbols', 'none', '--imports', 'none'])
         rows = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'shadowed.tsv')) if not l.startswith('#')]
         byaddr = {r[0]: r for r in rows}
-        check(set(byaddr) == {'00401000', '00401100'}, 'shadowed rows: %s' % sorted(byaddr))
+        check(set(byaddr) == {'00401000', '00401100', '00401500'}, 'shadowed rows: %s' % sorted(byaddr))
+        refs = {(r[0], r[1]): r for r in (l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'refs.tsv'))
+                                          if not l.startswith('#'))}
+        for name in ('_Z12FUN_00401500PKcz', '_Z12FUN_00401500PKcd'):
+            r = refs.get(('src/e.cpp', name), [''] * 6)
+            check(r[5] == '__fnv_00401500', 'variadic override, reference %s bound directly: %s' % (name, r))
         check('src/c.cpp' in byaddr.get('00401000', [''] * 9)[7].split(), 'c listed as possibly inlined: %s' % rows)
         amap = [l.split('\t') for l in open(os.path.join(out, 'addrmap.tsv')) if not l.startswith('#')]
         check(any(r[0] == '00401000' and r[3] == 'nx_f' for r in amap), 'address map names the override')
@@ -96,6 +113,7 @@ def main():
         check(nx_f is not None and sym.get('__fnv_00401000') == nx_f, 'address symbol -> override')
         check(sym.get('_Z1fi') == nx_f, "decomp name of f -> override (a's own call)")
         check(sym.get('_ZN1K1vEv') == nx_v, 'K::v -> override')
+        check(sym.get('nx_log') is not None and sym.get('__fnv_00401500') == sym.get('nx_log'), 'logger -> nx_log')
         ztv = sym.get('_ZTV1K')
         dump = run(['aarch64-linux-gnu-objdump', '-s', '--start-address=0x%x' % (ztv + 8),
                     '--stop-address=0x%x' % (ztv + 12), elf]) if ztv else ''

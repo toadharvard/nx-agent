@@ -8,6 +8,7 @@ nothing but this git repository. This file is the protocol between them.
 | machine | branch it writes | owns | does not touch |
 |---|---|---|---|
 | orchestrator (the original session) | `claude/port-nsw-un6t9s` (integration branch) | `JOURNAL.md`, `docs/ARCHITECTURE.md`, `tools/rules/`, `tools/link/`, `tools/equiv/equiv.py` classes, everything not listed for another machine; merges every other branch after verification (D14) | - |
+| farm runners | `claude/port-nsw-farm<N>` | `ports/fnv-nx/reports/farm<N>/` (text reports of the jobs in `tools/farm/`) | everything else: runners run jobs, they do not develop |
 | render | `claude/port-nsw-render` | `render/native/`, `docs/RENDER_NATIVE.md`, `docs/RENDER_VERIFY.md`, render tests (`tests/s6n/`, `tests/v6n/`) | the integration branch, `JOURNAL.md`, rules, linker |
 
 When a machine needs a change in files it does not own (e.g. an `--override` feature in the linker, a prepare rule),
@@ -40,6 +41,16 @@ scenes, golden images of them, fuzz reproducers) is fine to commit.
 
 Commit messages end with exactly one trailer line, `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 There is no `Claude-Session` line, and no session URL or session id appears anywhere in commits or files.
+
+## Ten-minute rule (D17)
+
+Any job that can take more than about 10 minutes runs on a farm machine (`tools/farm/<job>_job.sh`), never in a
+development session. That covers full prepare, compile, census, link, probe, MSVC gate, fuzz campaigns, the static
+gate and full boots. Development agents never wait for a build:
+- while a farm job runs, they keep working on the next item of their queue;
+- they read the result when its report lands, and check their own change with a small local test (one unit,
+  minimal tree, a single relink);
+- a job that does not exist yet as a farm job is written first, then started on a farm.
 
 ## Load
 

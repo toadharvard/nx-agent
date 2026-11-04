@@ -49,14 +49,18 @@ typedef struct FnvnxHostApi {
     /* ---- version 2: threads, address wait/wake, time, files ---- */
     uint64_t thread_create;        /* (entry, arg, stack_size, prio, cpu) -> host thread id (!= 0) or 0.
                                       The new thread calls the guest function entry(arg) (u64 arg) and ends
-                                      when it returns. prio: Win32 scale -15..15; cpu: -1 any. Not started. */
+                                      when it returns. prio: Win32 scale -15..15; cpu: -1 default placement,
+                                      0..63 that core only, FNVNX_THREAD_ROLE(r) the placement role r
+                                      (toolchain/host/placement.h). Not started. */
     uint64_t thread_start;         /* (id) -> 0 or Result */
     uint64_t thread_join;          /* (id) -> 0 when the thread has ended */
     uint64_t thread_free;          /* (id) -> 0; after join, or detaches a running thread */
     uint64_t thread_exit;          /* () -> does not return; ends the calling host-created thread */
     uint64_t thread_yield;         /* () -> 0 */
     uint64_t thread_set_priority;  /* (id or 0 = self, prio) -> 0 or Result */
-    uint64_t thread_set_cpu;       /* (id or 0 = self, cpu) -> 0 or Result */
+    uint64_t thread_set_cpu;       /* (id or 0 = self, spec) -> 0 or Result. spec 0..63: that core only;
+                                      FNVNX_CPU_SPEC(ideal, mask): ideal core (FNVNX_CPU_KEEP: keep) and
+                                      affinity mask (0: keep), the ideal core joins the mask */
     uint64_t wait_on_address;      /* (addr, expected u32, timeout_ns) -> 0 woken, 1 timed out, 2 value != expected
                                       (svcWaitForAddress WaitIfEqual; addr 4-aligned) */
     uint64_t wake_address;         /* (addr, count; count = UINT64_MAX: all) -> 0 (svcSignalToAddress) */
@@ -100,6 +104,20 @@ typedef struct FnvnxHostApi {
 } FnvnxHostApi;
 
 #define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
+
+/* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
+ * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
+enum {
+    FNVNX_ROLE_DEFAULT = 0,       /* game threads without a role: tasklets, Havok, IO, audio */
+    FNVNX_ROLE_MAIN = 1,          /* the main thread */
+    FNVNX_ROLE_AI_LINEAR_1 = 2,   /* AI Linear Task Thread (1) */
+    FNVNX_ROLE_AI_LINEAR_2 = 3,   /* AI Linear Task Thread 2 */
+    FNVNX_ROLE_RENDER_WORKER = 4, /* the renderer's worker (Gallium Nine's CSMT thread, a host pthread) */
+    FNVNX_ROLE_COUNT
+};
+#define FNVNX_THREAD_ROLE(r) (0x100u | (unsigned)(r))
+#define FNVNX_CPU_KEEP 0xFFu
+#define FNVNX_CPU_SPEC(ideal, mask) ((1ull << 63) | ((uint64_t)(uint32_t)(mask) << 8) | ((uint64_t)(ideal) & 0xFFu))
 /* Host side (LP64) only: register a handler for one module id (< 64); returns 0, or -1 if taken/out of range. */
 typedef uint64_t (*fnvnx_ext_handler)(uint32_t fn, const uint64_t *args, uint32_t nargs);
 int fnvnx_host_register_ext(uint32_t module, fnvnx_ext_handler handler);

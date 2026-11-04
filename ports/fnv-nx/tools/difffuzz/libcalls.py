@@ -40,6 +40,7 @@ A64 = {n: n for n in ('memcpy', 'memmove', 'memset', 'memcmp', 'strlen', 'strcmp
 A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp', 'strncasecmp': 'strnicmp',
             '_strnicmp': 'strnicmp', 'sqrt': 'sqrt', 'sqrtf': 'sqrtf', 'sin': 'sin', 'sinf': 'sinf', 'cos': 'cos',
             'cosf': 'cosf', 'fabs': 'fabs', 'fabsf': 'fabsf', 'log10': 'log10', 'log10f': 'log10f',
+            'sincos': 'sincos', 'sincosf': 'sincosf',
             '_memcpy': 'memcpy', '_memmove': 'memmove',
             '_memset': 'memset', '_strlen': 'strlen', '_strcmp': 'strcmp',
             # GCC's thread-safe local statics (MSVC 2008: a plain guard bit, no call): single-threaded semantics
@@ -54,15 +55,17 @@ A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp'
 # for allocation type 10 only; 0x00aa1460 passes type 3). Slot 2 = 0x00aa22b0 is inferred from its signature.
 EQUIV = {'_Znwm': 0x00401000, '_Znwj': 0x00401000, '_Znam': 0x00401000, '_Znaj': 0x00401000,
          '_ZdlPv': 0x00401030, '_ZdlPvm': 0x00aa1460, '_ZdlPvj': 0x00aa1460, '_ZdaPv': 0x00401030,
-         '_ZdaPvm': 0x00aa1460, '_ZdaPvj': 0x00aa1460, '__dynamic_cast': 0x00ec43fb}
-NO_ARGS = {0x00401000, 0x00401030, 0x00aa1460, 0x00ec43fb}    # traced, compared by target only
+         '_ZdaPvm': 0x00aa1460, '_ZdaPvj': 0x00aa1460, '__dynamic_cast': 0x00ec43fb,
+         # registration of a static destructor: CRT _atexit in the oracle, XC1's onexit table natively
+         'fnvnx_xc_atexit': 0x00ec658f, 'atexit': 0x00ec658f, 'fnvnx_xc_cxa_atexit': 0x00ec658f}
+NO_ARGS = {0x00401000, 0x00401030, 0x00aa1460, 0x00ec43fb, 0x00ec658f}    # traced, compared by target only
 
 
 class Mem:
     """Memory access for builtins: reads via the engine, writes recorded as program stores."""
 
-    def __init__(self, uc, writes, ensure):
-        self.uc, self.writes, self.ensure = uc, writes, ensure
+    def __init__(self, uc, writes, ensure, norm=None):
+        self.uc, self.writes, self.ensure, self.norm = uc, writes, ensure, norm
 
     def read(self, a, n):
         if n <= 0:
@@ -75,6 +78,8 @@ class Mem:
             return
         self.ensure(a, len(b))
         self.uc.mem_write(a, b)
+        if self.norm:
+            b = self.norm(bytes(b))        # what the stored values stand for (native code pointers -> originals)
         for i, x in enumerate(b):
             if any(lo <= a + i < hi for lo, hi in world.COMPARED):   # like the machines' write hooks
                 self.writes[a + i] = x
@@ -205,3 +210,57 @@ def x87_stub(name, slot):
         return bytes.fromhex('558bec5657' '8b7d10' '8b450c' '0fafc7' '8b7508' '03f0' '4f' '780a' '2b750c' '8bce'
                              'ff5514' 'ebf3' '5f5e5d' 'c21000')
     return None
+
+
+# ---- Win32 imports (the oracle calls them through IAT slots of the image; S4's platform implements them natively)
+IMPORT_BASE = 0x0e010000          # x86 private: import stub k at IMPORT_BASE + 16 * k (0xCC, a block there = a call)
+IMPORT_MAX = 0x1000
+
+
+def import_id(name):
+    """Trace identity of an import (negative, never an original address), the same on both machines."""
+    import zlib
+    return -(0x10000000 + (zlib.crc32(name.encode()) & 0x0fffffff))
+
+
+def import_name(decorated):
+    """`__imp__InterlockedIncrement@4` / `_InterlockedIncrement@4` / `InterlockedIncrement` -> (name, stack bytes)."""
+    n = decorated
+    for p in ('__imp__', '__imp_', '_'):
+        if n.startswith(p):
+            n = n[len(p):]
+            break
+    pop = 0
+    if '@' in n:
+        n, _, k = n.partition('@')
+        pop = int(k) if k.isdigit() else 0
+    return n, pop
+
+
+IMPORT_BUILTINS = {'InterlockedIncrement', 'InterlockedDecrement', 'InterlockedExchange', 'InterlockedCompareExchange',
+                   'InterlockedExchangeAdd'}
+
+
+def run_import(name, m, a):
+    """The Interlocked family on a 32-bit word (single-threaded: plain read-modify-write)."""
+    p = a[0] & 0xffffffff
+    old = struct.unpack('<I', m.read(p, 4))[0]
+    if name == 'InterlockedIncrement':
+        new = (old + 1) & 0xffffffff
+        m.write(p, struct.pack('<I', new))
+        return new
+    if name == 'InterlockedDecrement':
+        new = (old - 1) & 0xffffffff
+        m.write(p, struct.pack('<I', new))
+        return new
+    if name == 'InterlockedExchange':
+        m.write(p, struct.pack('<I', a[1] & 0xffffffff))
+        return old
+    if name == 'InterlockedCompareExchange':
+        if old == (a[2] & 0xffffffff):
+            m.write(p, struct.pack('<I', a[1] & 0xffffffff))
+        return old
+    if name == 'InterlockedExchangeAdd':
+        m.write(p, struct.pack('<I', (old + a[1]) & 0xffffffff))
+        return old
+    raise KeyError(name)

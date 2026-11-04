@@ -52,6 +52,7 @@ class Result:
 class Arm64Engine:
     def __init__(self, world_obj, image, stub_orig, vtables=None):
         self.vtables = vtables or {}
+        self.callee_conv = None          # original address -> Conv of the callee definition (set by runner.Pair)
         self.world = world_obj
         self.image = image
         self.stub_orig = stub_orig
@@ -137,6 +138,8 @@ class Arm64Engine:
         self._ensure(world.SENTINEL, 4)
         saved = [uc.reg_read(XR[i]) for i in range(19, 30)] + [uc.reg_read(A.UC_ARM64_REG_SP)]
         hs = uc.hook_add(UC_HOOK_BLOCK, self._on_stub, user_data=(case, r), begin=STUB_LO, end=STUB_HI - 1)
+        hwild = [uc.hook_add(UC_HOOK_BLOCK, self._on_wild, user_data=(case, r), begin=lo, end=hi - 1)
+                 for lo, hi in world.WILD_A64]
         hc = uc.hook_add(UC_HOOK_BLOCK, self._on_cov, user_data=r, begin=a64image.A64_BASE,
                          end=max(self.image.end, a64image.A64_BASE + 4) - 1)
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
@@ -151,7 +154,7 @@ class Arm64Engine:
         except UcError as e:
             r.error = self._fault or 'fault:uc:%s' % e
         finally:
-            for h in [hs, hc] + hws:
+            for h in [hs, hc] + hws + hwild:
                 uc.hook_del(h)
         pc = uc.reg_read(A.UC_ARM64_REG_PC)
         if r.error is None and self._fault:
@@ -212,7 +215,45 @@ class Arm64Engine:
             uc.mem_write(sp, bytes(frame))
         uc.reg_write(A.UC_ARM64_REG_SP, sp)
 
+    def _codeptr(self, v):
+        """A native code address stored as data stands for its original address (S3 maps image code pointers to
+        native ones): a code stub (unlinked callee) or a native entry of the image."""
+        if a64image.CODE_STUB <= v < a64image.NAMED_STUB:
+            return v - a64image.CODE_STUB
+        return self.image.entries.get(v, v)
+
+    def _norm_bytes(self, b):
+        b = bytearray(b)
+        i = 0
+        while i + 4 <= len(b):
+            w = int.from_bytes(b[i:i + 4], 'little')
+            n = self._codeptr(w)
+            if n == w and self.vtables:
+                n = self.vtables.get(w, w)
+            if n != w:
+                b[i:i + 4] = n.to_bytes(4, 'little')
+                i += 4
+            else:
+                i += 1
+        return bytes(b)
+
     def _on_write(self, uc, access, address, size, value, r):
+        if size >= 4:
+            # code pointers anywhere in the stored bytes (tables of initializers are not always word aligned)
+            value &= (1 << (8 * size)) - 1
+            b = bytearray(value.to_bytes(size, 'little'))
+            i, changed = 0, False
+            while i + 4 <= size:
+                w = int.from_bytes(b[i:i + 4], 'little')
+                n = self._codeptr(w)
+                if n != w:
+                    b[i:i + 4] = n.to_bytes(4, 'little')
+                    changed = True
+                    i += 4
+                else:
+                    i += 1
+            if changed:
+                value = int.from_bytes(bytes(b), 'little')
         vt = self.vtables
         if vt and size in (4, 8):
             # a native vtable address point stored into an object stands for the image vftable (D7)
@@ -229,9 +270,16 @@ class Arm64Engine:
     def _on_cov(self, uc, address, size, r):
         r.blocks.add(address)
 
-    def _on_stub(self, uc, address, size, user):
+    def _on_wild(self, uc, address, size, user):
+        """Execution reached memory that holds no native code (an indirect call through a planted pointer, or a
+        jump to an original .text address): an intercepted call of that address, as on x86."""
+        self._on_stub(uc, address, size, user, wild=True)
+
+    def _on_stub(self, uc, address, size, user, wild=False):
         case, r = user
-        if address < a64image.NAMED_STUB:
+        if wild:
+            target, name = address, None
+        elif address < a64image.NAMED_STUB:
             target = address - a64image.CODE_STUB
             name = None
         else:
@@ -250,15 +298,43 @@ class Arm64Engine:
         r.calls.append(Call(target, [uc.reg_read(XR[i]) for i in range(8)], [uc.reg_read(VR[i]) for i in range(8)],
                             uc.reg_read(A.UC_ARM64_REG_X8), stk))
         rb = case.ret_bytes(k)
+        x8 = uc.reg_read(A.UC_ARM64_REG_X8) & 0xffffffff
         for i in list(range(1, 18)):
             uc.reg_write(XR[i], world.garbage32(case.seed, 600 + i + 32 * k))
         for i in list(range(1, 8)) + list(range(16, 32)):
             uc.reg_write(VR[i], world.garbage32(case.seed, 700 + i + 32 * k))
-        uc.reg_write(XR[0], int.from_bytes(rb[:8], 'little'))
+        x0 = int.from_bytes(rb[:8], 'little')
+        cv = None
+        if self.callee_conv is not None and target is not None and target >= 0:
+            try:
+                cv = self.callee_conv(target)
+            except Exception:  # noqa: BLE001
+                cv = None
+        if cv is not None and cv.ret is not None and cv.ret.is_bool:
+            x0 = (x0 & ~0xff) | (rb[0] & 1)            # a real bool result is 0/1
+        uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
+        if cv is not None and cv.hidden and cv.ret is not None:
+            # the MSVC side returns this value through memory: the same bytes here, wherever AAPCS64 puts them
+            res = world.result_bytes(case, k, cv.ret.size)
+            for voff, cont, coff, ln in cv.a64_ret:
+                if cont == ('mem', 'x8'):
+                    libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes).write(x8 + voff, res[voff:voff + ln])
+                elif cont[0] in ('x', 'v'):
+                    reg = XR[cont[1]] if cont[0] == 'x' else VR[cont[1]]
+                    width = 8 if cont[0] == 'x' else 16
+                    cur = bytearray((uc.reg_read(reg) & ((1 << (8 * width)) - 1)).to_bytes(width, 'little'))
+                    cur[coff:coff + ln] = res[voff:voff + ln]
+                    uc.reg_write(reg, int.from_bytes(bytes(cur), 'little'))
         uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
 
     def _builtin(self, uc, name, target, r):
+        if name and libcalls.import_name(name)[0] in libcalls.IMPORT_BUILTINS:
+            args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
+            v = libcalls.run_import(libcalls.import_name(name)[0], libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
+            uc.reg_write(XR[0], v & 0xffffffff)
+            uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+            return True
         bname = libcalls.A64.get(name) if name else None
         if bname is None and target is not None and target >= 0:
             bname = libcalls.X86.get(target)
@@ -266,6 +342,16 @@ class Arm64Engine:
                 bname = None
         if bname is None:
             return False
+        if bname in ('sincos', 'sincosf'):              # void sincos(x, double *s, double *c)
+            v = uc.reg_read(VR[0])
+            f = bname.endswith('f')
+            x = struct.unpack('<f' if f else '<d', (v & (2 ** (32 if f else 64) - 1)).to_bytes(4 if f else 8, 'little'))[0]
+            s, c = libcalls.run_float('sin', x), libcalls.run_float('cos', x)
+            m = libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes)
+            m.write(uc.reg_read(XR[0]) & 0xffffffff, struct.pack('<f' if f else '<d', s))
+            m.write(uc.reg_read(XR[1]) & 0xffffffff, struct.pack('<f' if f else '<d', c))
+            uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+            return True
         if bname in libcalls.FLOAT_NAMES:
             v = uc.reg_read(VR[0])
             if bname.endswith('f'):
@@ -278,7 +364,7 @@ class Arm64Engine:
         else:
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
             try:
-                v = libcalls.run(bname, libcalls.Mem(uc, r.writes, self._ensure), args)
+                v = libcalls.run(bname, libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
             except libcalls.TooLong:
                 self._fault = 'fault:libcall-length'; uc.emu_stop(); return True
             uc.reg_write(XR[0], v & 0xffffffff)

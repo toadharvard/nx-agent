@@ -26,6 +26,15 @@ own, it is created on first use).
 | `VS2008ExpressWithSP1ENUX1504728.iso` (784,902,144 bytes) | `6d3b5eedfa461969c5d645871b53002d162a2e238486900d2fdf71774d53fb91` |
 | `VS2008ExpressENUX1397868.iso` (938,108,928 bytes) | `632318ef0df5bad58fcb99852bd251243610e7a4d84213c45b4f693605a13ead` |
 
+On another machine `tools/equiv/setup_msvc.sh <dest>` does all of this (apt, download, checksum, unpack, signature
+check, Wine prefix) and prints the three variables. The download resumes (`curl -C -`) across cut transfers and runs
+until size and SHA-256 match (`tests/s11/test_download.py` checks this against a local server that cuts every
+response). `tools/farm/equiv_job.sh` runs the whole gate for one shard of units. It takes the unpacked compilers from
+the private artifacts repository (branch `toolchain/msvc9`, 54 MB packed) when a farm has published them, and
+otherwise publishes them after unpacking; setup_msvc.sh checks Microsoft's signatures and runs both cl.exe either
+way. The job also publishes the pristine objects (`msvc/pristine/<decomp12>`: `obj/` and `meta.json`; it
+fingerprints the objects itself, so `rows.jsonl` there is optional).
+
 ## One unit to a COFF object (the decomp's own wrapper and flags)
 
     export FNV_MSVC9_ROOT=$S11/msvc/sp1 FNV_MSVC9_RTM_ROOT=$S11/msvc/rtm FNV_MSVC9_PREFIX=$S11/wineprefix
@@ -49,13 +58,21 @@ recipe functions in them is present in its object with exactly the recipe size (
 
     equiv.py rules                                  every prepare rule with its class (neutral / layout / platform)
     equiv.py prepare DECOMP OUT --rules SPEC        prepare.py with an allow-list ('neutral', 'neutral,-EXC1', 'TAIL1')
-    equiv.py build DECOMP TREE --out FP.jsonl [--units all|i,j|FILE] [--objdir D] [--layout] [--eh-off] [--jobs N]
-    equiv.py refp DECOMP FP.jsonl OBJDIR --out NEW.jsonl      fingerprint kept objects again
+    equiv.py build DECOMP TREE --out FP.jsonl [--units all|i,j|FILE|shard:K/N] [--objdir D] [--layout] [--eh-off]
+    equiv.py refp DECOMP FP.jsonl OBJDIR --out NEW.jsonl [--tree T] [--units U]   fingerprint kept objects again
+                                                    (FP.jsonl '-': rows from the objects alone, no object = failed)
     equiv.py compare A.jsonl B.jsonl [--out R.json]          per-unit / per-function differences, retargeted calls
-    equiv.py attribute DECOMP TREE A.jsonl B.jsonl --rules SPEC --out X.jsonl [--group N=ID,ID] [--failed]
+    equiv.py attribute DECOMP TREE A.jsonl B.jsonl --rules SPEC --out X.jsonl [--hier --default-groups] [--failed]
     equiv.py show DECOMP TREE_A TREE_B --unit I [--fn ADDR]  disassembly diff of one unit (output is decomp-derived)
     equiv.py errors FP.jsonl                        units that did not compile, by first error
     equiv.py bindings DECOMP                        static: platform function names the recipe binds elsewhere
+    equiv.py summarize BASE.jsonl HEAD.jsonl --without NAME=FP.jsonl... [--eh A B]   per-rule table from leave-out runs
+    equiv.py layouts DECOMP OBJDIR_A OBJDIR_B [--show CLASS,..]    MSVC class layouts of two --layout builds
+    equiv.py report BASE.jsonl HEAD.jsonl --out R.md [--attr A.jsonl] [--eh A B]   markdown report of a gate
+    merge_reports.py R1.md R2.md ... | --git CLONE [--farms eq1,..] [--commit C12]   one summary of shard reports
 
-Prepared trees get `msvc/fnvnx_*.h` (MSVC meanings of the fnv-nx shim headers: the real SDK / CRT) and
-`/FI msvc/fnvnx_equiv_compat.h`; both sides get `/FI msvc/fnvnx_equiv_fi.h` (macros only).
+Prepared trees get `msvc/fnvnx_*.h` (MSVC meanings of the fnv-nx shim headers: the real SDK / CRT; `--lean` builds
+the stand-in `<windows.h>` with WIN32_LEAN_AND_MEAN) and `/FI msvc/fnvnx_equiv_compat.h`; both sides get
+`/FI msvc/fnvnx_equiv_fi.h` (macros only). A prepared tree's own build/units.json (S1b renames) is used where the
+pristine name of a function is not in its object. `fnvnx_equiv_unaw.h` is generated from the SDK in use into
+`~/.cache/fnvnx-equiv/` (never committed).

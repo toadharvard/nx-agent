@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "fnvnx/guest.h"
+#include "fnvnx/hostapi.h"
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { std::printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); failures++; } } while (0)
@@ -197,12 +198,29 @@ static void test_files() {
     std::printf("  files: listed %zu entries, stdio + fstream + rename + remove ok\n", names.size());
 }
 
+/* thread placement (toolchain/host/placement.h): roles at creation, priority/affinity of another thread through
+ * its host id. The emulator's host places threads with the same table and prints them; rt/build.sh checks it. */
+static void *placed_fn(void *) { return (void *)7; }
+static void test_placement() {
+    struct __pthread_t *ai1, *plain;
+    CHECK(fnvnx_thread_create(&ai1, placed_fn, nullptr, 0x10000, 0, (int)FNVNX_THREAD_ROLE(FNVNX_ROLE_AI_LINEAR_1)) == 0);
+    CHECK(fnvnx_thread_create(&plain, placed_fn, nullptr, 0x10000, 0, -1) == 0);
+    uint64_t id = fnvnx_thread_host_id(plain);
+    CHECK(id != 0);
+    CHECK(fnvnx_hcall2(fnvnx_host->thread_set_priority, id, (uint64_t)(int64_t)-1) == 0);   /* not started yet */
+    CHECK(fnvnx_hcall2(fnvnx_host->thread_set_cpu, fnvnx_thread_host_id(ai1), FNVNX_CPU_SPEC(FNVNX_CPU_KEEP, 0x5)) == 0);
+    CHECK(fnvnx_thread_start(ai1) == 0 && fnvnx_thread_start(plain) == 0);
+    CHECK(fnvnx_thread_join(ai1) == (void *)7 && fnvnx_thread_join(plain) == (void *)7);
+    std::printf("  placement: roles and other-thread priority/affinity passed to the host\n");
+}
+
 int main() {
     std::printf("fnvnx guest: runtime test (ILP32 C++%ld)\n", __cplusplus);
     test_static_rtti_exceptions();
     test_threads();
     test_condvar();
     test_files();
+    test_placement();
     std::map<std::string, int> m{{"a", 1}, {"b", 2}};
     CHECK(m["b"] == 2);
     std::printf("fnvnx guest: %s\n", failures ? "FAILED" : "OK");

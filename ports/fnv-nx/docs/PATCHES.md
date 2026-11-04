@@ -111,3 +111,15 @@ CS28's explicit 4-byte tail keeps the Xbox offsets: harmless for code that never
 object sizes (an image-resident AbstractHeap constructed in place would write 16 bytes past its PC size) and for any
 PC member after a BSThread base. Recommendation for S1: replace the CS28 model by the PC layouts above (and the PC
 NiCriticalSection of Gamebryo, CS + owner + lock count = 32 bytes, until code shows otherwise).
+
+## Stand-in vftables whose slots need the player's exe (S1)
+
+S1's VTBL1 (`tools/rules/s1_compile.py`) gives a stand-in polymorphic class its full interface in MSVC slot order
+and forwards each slot to the decomp function it is; a slot the decomp has no function for is declared only and
+stays unresolved (S2's trap) until the exe's vftable gives the address. No slot is bound on a guess.
+
+| vftable | class | slots without a function in the decomp | evidence for the bound slots |
+|---|---|---|---|
+| `0x010a2528` | BSNiAllocator (ctor 0x00aa2230) | 7 (InitHolder's no-argument call), 8, 9 | bsniallocator.cpp 0x00aa2240..0x00aa24a0, called through slots 1-6 with these signatures in nimemorydefines.cpp |
+| `0x010a24fc` | NiStandardAllocator (FUN_00aa2200) | 0 (scalar deleting destructor), 9 | nistandardallocator.cpp (360 source path of 0x00aa3090..0x00aa3560): 1-6 in slot order with BSNiAllocator's signatures, 3 calls 1 and 2 itself; 7 = 0x00aa3430 creates the small-object allocator (Initialize), 8 = 0x00aa3460 deletes it (Shutdown) |
+| `0x0101772c`, `0x0104e6ac`, `0x01082ed8`, FUN_004de530's | INISettingCollection-like setting collections | all ten (no traps added; S5) | none yet: the decomp's interface is the 10-slot INISettingCollection of `src/bsmain/setting_declarations.h`: 0 scalar deleting destructor, 1 Add, 2 Remove, 3 GetViewerStrings, 4 WriteSetting, 5 ReadSetting, 6 Open, 7 Close, 8 WriteAllSettings, 9 ReadAllSettings |

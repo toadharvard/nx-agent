@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # census.sh - compile every decomp unit for AArch64 ILP32 with -fsyntax-only and summarize the errors.
 #
-#   tools/census.sh <fnv_decomp checkout> <out dir> [jobs]
+#   tools/census.sh <fnv_decomp checkout> <out dir> [jobs] [units.list]
 #
 # Writes <out>/logs/<unit>.log, <out>/summary.txt (clean/failed counts, top error kinds, top missing names)
-# and <out>/units.tsv (unit, error count, first error). The decomp itself is never copied anywhere.
+# and <out>/units.tsv (unit, error count, first error). units.list (one source per line, as in units.json)
+# restricts the census to those units; default: every unit. The decomp itself is never copied anywhere.
 set -euo pipefail
-DECOMP=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd); JOBS=${3:-$(nproc)}
+DECOMP=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd); JOBS=${3:-$(nproc)}; LIST=${4:-}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 CXX=${CXX:-aarch64-linux-gnu-g++}
 SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
@@ -18,7 +19,8 @@ FLAGS=(-mabi=ilp32 -std=gnu++17 -fsyntax-only -fms-extensions -fshort-wchar -fpe
        -I"$HERE/shim/include" -I"$SSE2NEON" -I"$DECOMP/include")
 export FLAGS_STR="${FLAGS[*]}"
 
-jq -r '.units[].source' "$DECOMP/build/units.json" | sort -u > "$OUT/units.list"
+if [ -n "$LIST" ]; then sort -u "$LIST" > "$OUT/units.list.tmp"; mv "$OUT/units.list.tmp" "$OUT/units.list"
+else jq -r '.units[].source' "$DECOMP/build/units.json" | sort -u > "$OUT/units.list"; fi
 
 compile_one() {
   local src=$1 log="$OUT/logs/$(echo "$1" | tr / _).log"

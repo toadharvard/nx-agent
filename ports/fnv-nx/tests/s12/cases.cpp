@@ -22,6 +22,8 @@ long long p2i64(void *p) { return (long long)p; }                  // expect: P2
 bool psign(void *p, void *q) { return (int)p < (int)q; }           // expect: P2I-SIGNED
 long long sh64(long long x, int n) { return x << n; }              // expect: SHIFT64-VAR
 int sh32(int x, int n) { return x << n; }                          // expect: SHIFT32-VAR
+#include "shimlike/shiftmacro.h"
+int shm(int x, int n) { return FNVS_SHL(x, n) + fnvs_rotl(x, n); } // excluded macro and inline code: nothing
 int idiv(int a, int b) { return a / b; }                           // expect: DIV-VAR
 void order1() { Use(ReadByte(), ReadByte()); }                     // expect: ORDER-ARGS stream
 void order2(Stream *s) { Use(s->Read(), s->Read()); }              // expect: ORDER-ARGS stream
@@ -63,3 +65,31 @@ struct TwoEmpty : E1, E2 { int x; };                               // expect: EM
 size_t wl(const wchar_t *s) { return wcslen(s); }                  // expect: WCHAR-LIB
 struct Thing { bool isnull() { return this == 0; } };              // expect: THIS-NULL
 long double ld = 1.0L;                                             // expect: LDBL
+// S13 causes that had no class (bool-repr, nan-bits, uninit-* of the harness, pointer-difference garbage)
+struct Obj2 { int a; bool b; float f; };
+bool bpun(Obj2 *o) { return *(bool *)((char *)o + 4); }           // expect: BOOL-PUN
+bool bpunc(Obj2 *o) { return *(const bool *)((char *)o + 4); }    // expect: BOOL-PUN
+void bpunw(Obj2 *o) { *(bool *)((char *)o + 4) = false; }          // a store of 0/1: nothing
+bool bfield(Obj2 *o) { return o->b; }                              // typed bool: nothing
+unsigned fbits(float f) { return *(unsigned *)&f; }                // expect: FLOAT-BITS
+union FU { float f; unsigned u; };
+unsigned fbits2(FU x) { return x.u; }                              // expect: FLOAT-BITS
+float fbits3(FU x) { return x.f; }                                 // the float member: nothing
+#include <xmmintrin.h>
+int fbits4(__m128 a, __m128 b) { return _mm_movemask_ps(_mm_mul_ps(a, b)); } // expect: FLOAT-BITS
+int fbits5(__m128 a, __m128 b) { return _mm_movemask_ps(_mm_cmplt_ps(a, b)); } // a compare mask: nothing
+struct V12 { int x, y, z; };
+int pdiff(V12 *a, V12 *b) { return a - b; }                        // expect: PTRDIFF-EXACT
+int pdiff4(int *a, int *b) { return a - b; }                       // power of two: nothing
+void Fill(int *out);
+int outarg() { int v; Fill(&v); return v; }                        // expect: OUTARG-UNINIT
+int outarg2() { int v = 0; Fill(&v); return v; }                   // initialized: nothing
+int outarg3() { int v; v = 1; Fill(&v); return v; }                // written first: nothing
+struct Acc { int s; void Init(); };
+int outarg4() { Acc a; a.Init(); return a.s; }                     // expect: OUTARG-UNINIT
+void outarg5(char *dst) { char buf[16]; sprintf(buf, "%d", 1); dst[0] = buf[0]; } // expect: OUTARG-UNINIT
+int outarg6() { int v; int n = sizeof(v); Fill(&v); return v + n; } // expect: OUTARG-UNINIT
+void Range(int &lo, int &hi);
+void Show(const int &v);
+int outarg7() { int lo, hi; Range(lo, hi); return lo - hi; }       // expect: OUTARG-UNINIT
+int outarg8() { int v; Show(v); return 0; }                        // a const reference reads it: nothing

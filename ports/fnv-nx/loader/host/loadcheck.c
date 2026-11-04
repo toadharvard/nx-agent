@@ -4,7 +4,7 @@
  *   loadcheck --exe FalloutNV.exe [--probes probes.txt] [--data-probes dataprobes.txt] [--addrmap addrmap.bin]
  *             [--hints hints.txt]
  *             [--window 0x00400000:0x02100000] [--load-base 0x00400000] [--headers] [--imports imports.txt]
- *             [--fixups-in fixups.bin | --fixups-out fixups.bin] [--min-conf 1] [--no-relocs] [--trap]
+ *             [--fixups-in fixups.bin | --fixups-out fixups.bin] [--min-conf 1] [--no-relocs] [--no-index] [--trap]
  *             [--expect expect.txt] [--dump-vtable VA] [-v]
  *
  * probes.txt:  "<va> <size> <sha256 hex>" per line (loader/tools/mkprobes.py --txt): code fingerprints
@@ -197,6 +197,7 @@ int main(int argc, char **argv) {
             window_hi = (uint32_t)strtoul(colon + 1, NULL, 0);
         } else if (!strcmp(a, "--headers")) flags |= FNVNX_MAP_HEADERS;
         else if (!strcmp(a, "--no-relocs")) scan_flags |= FNVNX_SCAN_NO_RELOCS;
+        else if (!strcmp(a, "--no-index")) scan_flags |= FNVNX_SCAN_NO_INDEX;
         else if (!strcmp(a, "--trap")) use_trap = 1;
         else if (!strcmp(a, "--dump-vtable")) dump_vt = (uint32_t)strtoul(ARG(), NULL, 0);
         else if (!strcmp(a, "-v")) verbose = 1;

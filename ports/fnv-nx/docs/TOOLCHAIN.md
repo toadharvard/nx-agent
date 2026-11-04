@@ -153,6 +153,12 @@ toolchain/gcc/build.sh dl build/tc /opt/fnvnx-a64 ext/buildscripts
 toolchain/devkita64/setup.sh /opt/fnvnx-a64 ext/libnx ext/devkita64-rules /opt/fnvnx-dkp   # DEVKITPRO + libnx
 ```
 
+The pipeline does the same from pinned sources (`tools/pipeline/build.py` toolchain stage, `TC_DL=auto`):
+`toolchain/sources.sh <dl> <src>` fetches the three tarballs (SHA-256 checked) and checks out buildscripts and
+devkita64-rules at fixed commits. The AArch64 Linux cross compiler the decomp units are compiled with (GCC 13.3.0 of
+Ubuntu 24.04, `-mabi=ilp32 -c`, glibc headers) is unpacked from pinned Ubuntu packages by `toolchain/cross/setup.sh
+<prefix>` (`toolchain/cross/packages.tsv`; no root) when the host's is not that build.
+
 `setup.sh` makes a `DEVKITPRO`-shaped tree (`devkitA64/` -> the prefix, `tools/bin/` with the Python packers and
 `bin2s`) and builds stock libnx into it with its own Makefile (`-Werror`, clean), so `switch.specs`/`switch.ld`
 are used unchanged for the host.
@@ -772,6 +778,78 @@ guest PC from it into a symbol, use the base of the "mapped at" line:
   matches the installed title.
 - `guest load failed: ...` in the log: the host's loader names the step; "occupied" means relaunch.
 - no log at all: the host did not start, see the crash report.
+
+## 16. Threads: placement, other-thread priority/affinity, one TLS block, spinning sections (J-0076)
+
+docs/PERF.md 6.3 found every game thread and Nine's CSMT worker on core 0. This round fixes the runtime side.
+
+* **Placement table**, `toolchain/host/placement.h`: one row per role (`FNVNX_ROLE_*`, hostapi.h), each with an
+  ideal core, an affinity mask over cores 0-2, and a priority (0 = the thread's Win32 priority mapped).
+
+  | role | ideal core | mask | priority |
+  |---|---|---|---|
+  | main | 0 | 0b001 | mapped (0x2C) |
+  | ai-linear-1 / ai-linear-2 | 2 / 1 | 0b110 | mapped |
+  | render-worker (Nine's CSMT) | 1 | 0b010 | 0x2B, one step above the game |
+  | game (everything else) | rotates over 1, 2 | 0b110 | mapped |
+
+  `h_thread_create` creates the thread on its ideal core, sets the mask with `svcSetThreadCoreMask` before it
+  starts, and logs `fnvnx host: guest thread ...: role ..., core ..., mask ..., priority ...`. Before, libnx's -2
+  meant core 0 with a one-core mask. thread_create's `cpu` takes `FNVNX_THREAD_ROLE(r)` (-1 = default row, 0..63
+  = that core).
+* **Host pthreads**: libnx gives them priority 0x3B on the process's ideal core. A
+  `-Wl,--wrap=__syscall_thread_create` at the host link gives them the render-worker row. In the Nine host that is
+  Mesa's CSMT worker. The plain host (package, hello) links the wrap; **render/nine/switch_host.sh must add it
+  (S6c)**.
+* **Roles from the game**: `CreateThread` asks `fnvnx_thread_role_hook(start, arg)`. In boot.cpp a BSThread
+  started through `RunThreadProc` 0x00aa64d0 whose object is an `AILinearTaskThread` (image vftable 0x01085688 or
+  its native vtable) is AI linear thread 1, then 2.
+* **Another thread's priority/affinity**:
+  - `threads.c` exposes the host id; `os_guest.c` uses it, so the call also works on a thread that has not started.
+  - New `os_thread_set_affinity(t, ideal, mask)` (guest, posix, horizon), sent as thread_set_cpu
+    `FNVNX_CPU_SPEC(ideal, mask)`.
+  - `SetThreadAffinityMask` keeps the whole mask; `SetThreadIdealProcessor` changes the ideal core only.
+* **One image TLS block**: `fs:[0x2c][0]` is the calling thread's `__fnvnx_tls_image` (`fnvnx_image_tls_hook`,
+  set by boot.cpp). The 13 explicit `__readfsdword(0x2c)` sites and the `__declspec(thread)` accesses now see one
+  variable, not two copies.
+* **EnterCriticalSection** spins up to the section's SpinCount (capped at 4,000 `yield`s; never on one core) before
+  sleeping.
+* **Tests**:
+  - `tests/s5/test_placement.c`: the table and the decoders, natively (`test_tools.py PlacementTest`).
+  - The emulator's host places threads with the same table, parsed from placement.h, and prints `placement` lines.
+    `tests/s5/rt` checks a role and an other-thread priority/affinity change through them.
+  - `tests/s4`: TLS identity across threads, the role hook and other-thread placement calls on a suspended thread,
+    a contended section with a SpinCount.
+
+## 17. Round 10: S2c's f13 (tree from 0420d45), S14's corrected image
+
+* **Build**: 5,447 undefined (f11: 7,307), relocatable, 26 MiB. `GAME_NEW` weakens 0 objects; 279 data stubs. The
+  memory-manager constructor 0x00aa3880 and `MemoryManager::Allocate` 0x00aa3e40 are linked
+  (`blk_00aa0000_od_ob1_variant`), and so are 0x00401000 and `CBaseList::GetHeadPositionI` 0x009fd0f0.
+* **Boot**, S14's `r2/fix/synth.exe`: 204 IAT slots, 164 bound. Static init ends with 314 trap hits (10 distinct)
+  and 4,340 initializers skipped. Frontier: **11 keys, 315 hits**: `actor.cpp`, `extradatalist.cpp`,
+  `playercharacter.cpp` (still failing) and declared-only constructors. The empty image gives 9 keys and stops at
+  WinMain's first IAT call.
+* **The memory-manager stand-in calls the real constructor, which does not complete.**
+  - Its first statement, `TableBaseAA3880(37)` -> `g_kMemoryAA3880.Allocate(148)`, is a stand-in member
+    (`_ZN19MemoryManagerAA38808AllocateEj`). units.json gives it no address, and S2 leaves it unresolved.
+  - Its trap returns 0, so `memset(0, 0, 148)` faults. InitializeGlobal never runs, and `boot_banner`'s rest is
+    skipped.
+  - So the x86 path does not happen. Before WinMain the options 0x011f6118, holder 0x011f6080, run-once 0x011f6229
+    and default-options 0x011f610d are all 0.
+  - The initializers that allocate through 0x011f6080 fault: 3,469 skips in `FUN_00aa1070`.
+* **Next fault, WinMain+0x1d0**:
+  - `FUN_00aa20b0(0)` takes the default-options path (`FUN_00aa2200`; peeks after the stop: options
+    0x300e26d0, holder 0x300e2810, run-once 1, default-options 1, the non-x86 path), then runs `FUN_00aa3050` and
+    InitHolder.
+  - InitHolder's tail call goes through slot 7 of `_ZTV19NiStandardAllocator`, a synthesized vtable of one slot
+    (slot 0 = `__fnvnx_vtrap_f4881bd3`). It reads past the end and jumps to garbage (0x910ec421).
+  - This is the allocator slot-1 / slot-7 vtable issue S1 is fixing.
+* **Initializer skips**:
+  - 736 vslot-1 calls through the hand-stored image vftable 0x0101772c (INISettingCollection);
+  - 43 through 0x01018508, the collection the now-translated getter 0x0045d180 returns: the same class of problem;
+  - 31 through the one-slot native vtable of `FUN_004de530`;
+  - 60 reads in the `FUN_00632ec0` stand-in (section 14).
 
 ## 7. Not yet done / untested
 

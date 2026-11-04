@@ -8,6 +8,8 @@
                        [--units-renames <tsv|none>]           # S1b's patches/units_renames.tsv (default: this
                                                               # tree's; patched units only)
                        [--msvc-objs <dir>]                    # vtable slots via the MSVC vftables (vslots.py)
+                       [--msvc-code <dir>]                    # only the definitions' register reads (ecx-not-
+                                                              # passed verdicts) from those objects
     fnvlink.py probe   <out dir> <prepared tree> [jobs]        # layouts of the aggregates resolve asked for, and
                                                               # the synthesized vtables/typeinfo (vtables.py;
                                                               # FNVNX_NO_VTABLES=1 skips them); then resolve again
@@ -284,9 +286,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             def_at.setdefault(a, (u, n))
             gdef.add(msvc(n), a)
     gref = KeyIndex()
+    ident = collections.defaultdict(set)   # data identifier -> image data addresses any unit binds it to
     for u in units.values():
         for n, a in u.refs.items():
-            gref.add(msvc(n), a)
+            m_ = msvc(n)
+            gref.add(m_, a)
+            if m_.kind in ('data', 'cname') and m_.qual and m_.special is None and DATA_START <= a < DATA_END:
+                ident[m_.qual[-1]].add(a)
 
     # synthesized vtables/typeinfo (vtables.py, written by `probe`): one extra object per host unit, its references
     # resolved with the host unit's names
@@ -395,16 +401,18 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- overrides: a native implementation replaces the decomp definition at an address (docs/LINK.md)
     shadowed = {}
+    osigs = load_override_sigs(override)   # optional 4th column: the override's own MSVC-decorated signature
+    ms.need(osigs.values())
     for a, osym, oobj in load_overrides(override):
         old = native.get(a)
         if old is not None:
             shadowed[a] = old
-        msv = old['msvc'] if old else (def_at[a][1] if a in def_at else '')
+        msv = osigs.get(a) or (old['msvc'] if old else (def_at[a][1] if a in def_at else ''))
         native[a] = dict(unit=None, sym=elfsyms.Sym(osym, 0, 0, 'func', 'global', 1, '', False), variants={},
                          tier='override', msvc=msv, override=oobj)
 
     # ---- references
-    layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv')).items() if v is not None}
+    layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
     probe_req = set()
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
@@ -480,6 +488,21 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         return got.pop() if len(got) == 1 else None
     xtraps = {}      # trap stub -> (ctor/dtor defined nowhere, why)
     unwind_cache = {}
+    cast_cache = {}
+    text_cache = {}
+
+    def source_text(src_):
+        if src_ not in text_cache:
+            p_ = os.path.join(tree, src_.split('#')[0])
+            text_cache[src_] = open(p_, encoding='utf-8', errors='surrogateescape').read() if os.path.exists(p_) else ''
+        return text_cache[src_]
+
+    def casts_of(u_):
+        if u_.source not in cast_cache:
+            path_ = os.path.join(tree, u_.source)
+            cast_cache[u_.source] = unit_casts(open(path_, encoding='utf-8', errors='surrogateescape').read()) \
+                if u_.host is None and os.path.exists(path_) else {}
+        return cast_cache[u_.source]
     called_cache = {}
 
     def called_syms(u_):
@@ -491,6 +514,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         return called_cache[u_.source]
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
     vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
+    ecx_use = msvc_code_use(units_json, ms, msvc)
     for u in have:
         idx = KeyIndex()
         for n, a in u.refs.items():
@@ -521,7 +545,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls, tier, addr, target, note = 'addr', 'game/newdel', na, None, nm
                 stats['newdel_refs'] += 1
             else:
-                cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc)
+                cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident)
+                if tier == 'gref/ident':
+                    stats['ident_' + cls] += 1
             if cls != 'unresolved' and isig.qual and un.find(GAME_PREFIX) >= 0:
                 stats['game1_resolved'] += 1
             if vsb is not None and (un in vslots or (cls == 'unresolved' and isig.variant in ('D1', 'D2'))):
@@ -553,10 +579,58 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     # ABI: reference declaration vs definition
                     refdecl = note  # msvc name of the matched reference declaration
                     defdecl = nd['msvc']
-                    if refdecl and refdecl != defdecl:
+                    cast = None
+                    if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
+                        cast = casts_of(u).get(isig.qual[-1])
+                    if refdecl and (refdecl != defdecl or cast):
                         rs, ds = msvc(refdecl), msvc(defdecl)
+                        # an undecorated C name carries no parameter types: read them from its unit's source
+                        if rs.kind == 'cname' and rs.special is None:
+                            rs = c_name_sig(rs, source_text(u.host or u.source)) or rs
+                            stats['cname_ref_' + ('compared' if rs.kind == 'func' else 'unknown')] += 1
+                        if ds.kind == 'cname' and ds.special is None and nd['unit']:
+                            ds = c_name_sig(ds, source_text(nd['unit'])) or ds
+                            stats['cname_def_' + ('compared' if ds.kind == 'func' else 'unknown')] += 1
+                        cast_note = None
+                        if cast and ds.kind == 'func':
+                            # the unit calls the name through a cast to another function-pointer type: the cast's
+                            # convention is how x86 passed the arguments
+                            casts_, direct = cast
+                            vs = {}
+                            for cc_, ret_, params_ in sorted(casts_):
+                                cv = abi.compare(cast_sig(cc_, ret_, params_, isig.qual[-1]), ds)
+                                vs[(cv.kind, tuple(cv.moves))] = (cc_, ret_, params_)
+                            dv = abi.compare(rs, ds)
+                            if len(vs) > 1 or (direct and (dv.kind, tuple(dv.moves)) not in vs):
+                                cast_note = ('the unit casts the name %s and calls it %s' % (
+                                    'to %d conventions' % len(casts_) if len(vs) > 1 else 'to another convention',
+                                    'directly too' if direct else 'only through casts'))
+                                stats['cast_conflicts'] += 1
+                            else:
+                                cc_, ret_, params_ = next(iter(vs.values()))
+                                rs = cast_sig(cc_, ret_, params_, isig.qual[-1])
+                                refdecl_key = '%s|cast %s(__%s*)(%s)' % (refdecl, ret_, cc_, params_)
+                                stats['cast_refs'] += 1
                         if rs.kind == 'func' and ds.kind == 'func':
                             v = abi.compare(rs, ds)
+                            ecx_dead = False
+                            if v.kind == 'x86-inconsistent' and ecx_use is not None and (
+                                    'ecx-not-passed' in v.classes or 'this not passed by the reference' in v.notes):
+                                # does the definition's x86 code use the ecx the reference leaves behind? (V1 c3:
+                                # 0x00a75ec0, 0x00bbbe30 and ten this-not-passed pairs never read it)
+                                use_ = ecx_use(addr)
+                                ecx_dead = use_ is not None and use_['ecx'] not in ('read', 'pass')
+                                stats['ecx_code_' + ('unknown' if use_ is None else 'unused' if ecx_dead
+                                                     else 'used')] += 1
+                                if ecx_dead:
+                                    v = abi.compare(rs, ds, ecx_unused=True)
+                            if cast_note:
+                                v = abi.Verdict()
+                                v.kind, v.classes, v.notes = 'x86-inconsistent', ['cast-conflict'], [cast_note]
+                            elif cast:
+                                v.notes.append('called through a cast: %s' % refdecl_key.split('|cast ', 1)[1])
+                                if 'cast-call' not in v.classes:
+                                    v.classes.append('cast-call')
                             for c in v.classes:
                                 pair_classes[c] += 1
                             if v.kind != 'same':
@@ -566,9 +640,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                         if c.startswith('AGG:') and '{anon}' not in c:
                                             probe_req.add((unit, abi2.agg_name(c)))
                                 p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.source: layouts.get((x, t)),
-                                                  lambda t, x=nd['unit']: layouts.get((x, t)))
+                                                  lambda t, x=nd['unit']: layouts.get((x, t)), ecx_unused=ecx_dead)
                                 if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
-                                        not (v.kind == 'bridge' and 'narrow-extend' in v.classes):
+                                        not (v.kind == 'bridge' and 'narrow-extend' in v.classes) and \
+                                        'cast-conflict' not in v.classes:
                                     stats['abi2_' + v.kind + '->' + p2.kind] += 1
                                     v = abi.Verdict()
                                     v.kind, v.classes, v.notes, v.plan = p2.kind, p2.classes, p2.notes, p2
@@ -579,8 +654,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                                  ','.join(v.classes), '; '.join(v.moves and
                                                  ['%s<-%s' % (d, s) for d, s, _, _ in v.moves] or []),
                                                  '; '.join(v.notes), ms[refdecl] or '', ms[defdecl] or ''))
-                                if v.kind == 'bridge' and v.plan is not None:
-                                    bn = abi.bridge_name(addr, refdecl)
+                                bkey = refdecl_key if cast and not cast_note else refdecl
+                                # an x86-inconsistent ecx-not-passed pair still gets the moves of the arguments the
+                                # reference does pass (the definition's ecx parameter is often unused: 0x00bbbe30,
+                                # 0x00a75ec0); the pair stays listed for S1b
+                                ekind = 'bridge' if v.kind == 'x86-inconsistent' and 'ecx-not-passed' in v.classes \
+                                    and (v.moves or v.plan is not None) else v.kind
+                                if ekind == 'bridge' and v.plan is not None:
+                                    bn = abi.bridge_name(addr, bkey)
                                     code = abi2.emit(bn, target, v.plan, 'ref: %s | def: %s'
                                                      % (ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     if code is None:
@@ -589,8 +670,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                         bridges.setdefault(bn, code)
                                         target = bn
                                         cls = 'code-bridge'
-                                elif v.kind == 'bridge':
-                                    bn = abi.bridge_name(addr, refdecl)
+                                elif ekind == 'bridge':
+                                    bn = abi.bridge_name(addr, bkey)
                                     bridges.setdefault(bn, (target, v, ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     target = bn
                                     cls = 'code-bridge'
@@ -811,6 +892,22 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for r in hand_rows:
             f.write('\t'.join(r) + '\n')
     stats['hand_vptr_addrs'], stats['hand_vptr_rebound'] = len(hand), len(rebind)
+    # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
+    # FUN_00404950's, ...): the map can give one native vtable; every class's own is listed, so a native vptr store
+    # can be traced back to its image vftable (S13's vtable-store comparison)
+    named = collections.defaultdict(set)
+    for (n_, a_), (cls_, base_, _) in vnames.items():
+        if base_ is None:
+            named[a_].add(cls_)
+    with open(os.path.join(out, 'vftable_aliases.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#address\tclass\tnative vtable\taddress point\tin the address map\n')
+        for a_ in sorted(x for x in named if len(named[x]) > 1 and x in vmap):
+            for cls_ in sorted(named[a_]):
+                z = sorted(by_cls.get(cls_, []))
+                pts = vtables.address_points(rtti.ents(z[0]) or []) if z else []
+                f.write('%08x\t%s\t%s\t%s\t%s\n' % (a_, cls_, z[0] if z else '', pts[0][0] if pts else '',
+                                                    'yes' if z and vmap[a_][0] == z[0] else 'no'))
+                stats['vftable_aliases'] += 1
 
     # ---- data addresses: absolute symbols at the original address (the data image is mapped there, D3)
     with open(os.path.join(out, 'aliases.ld'), 'w') as f:
@@ -897,6 +994,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               % (stats['imports_bound'], byclass['import']),
               'import thunks bound to their import instead of the compiled decomp body: %d' % stats['import_thunks'],
               'calls of an IAT slot address bound to its import: %d' % stats['iat_calls'],
+              'data references bound by identifier only (another scope or decorated type): %d; identifiers at several '
+              'addresses (left ambiguous): %d' % (stats['ident_addr'], stats['ident_ambiguous']),
+              'ecx-not-passed / this-not-passed pairs judged on the definition\'s MSVC code (--msvc-code/-objs): ecx '
+              'unused, bridged: %d; used, flagged: %d; no code: %d' % (stats['ecx_code_unused'],
+                                                                      stats['ecx_code_used'], stats['ecx_code_unknown']),
+              'C-named declarations compared from their unit\'s source: %d references, %d definitions; without a usable '
+              'declaration: %d / %d' % (stats['cname_ref_compared'], stats['cname_def_compared'],
+                                         stats['cname_ref_unknown'], stats['cname_def_unknown']),
+              'references called through a cast to another function type (the cast decides): %d, conflicting casts '
+              'or direct calls (x86-inconsistent): %d' % (stats['cast_refs'], stats['cast_conflicts']),
               'GAME1 names (fnvnx_game_*) looked up by the unit\'s own name: %d references, %d resolved'
               % (stats['game1_refs'], stats['game1_resolved']),
               'operator new/delete references bound to the game\'s allocator: %d' % stats['newdel_refs'],
@@ -904,6 +1011,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               % (stats['units_renames_def'], stats['units_renames_ref']),
               'image vftable addresses stored into vptrs by hand: %d, bound to a native address point: %d '
               '(hand_vptrs.tsv)' % (stats['hand_vptr_addrs'], stats['hand_vptr_rebound']),
+              'classes sharing a primary image vftable (MSVC folded; vftable_aliases.tsv): %d rows'
+              % stats['vftable_aliases'],
               'thread-local references bound to the native TLS block: %d (%d image .tls addresses, %d native '
               'definitions folded in)' % (byclass['tls'], len(tls_addrs), len(tls_defs)),
               'aggregate layouts known: %d (probe_requests.tsv: %d)' % (len(layouts), len(probe_req)), '',
@@ -921,6 +1030,10 @@ VPTR_LHS = re.compile(r'(?i)(?:^|[^\w])(?:\w*_)?(?:vptr|vtbl|vtable|vftable|vfpt
 DEREF_LHS = re.compile(r'^\s*\*\s*(?:\(\s*[\w\s:]+\*\s*\*\s*\)|reinterpret_cast\s*<[^<>]*\*\s*\*\s*>)\s*\(?\s*\w+\s*\)?\s*$'
                        r'|^\s*\(\s*\(\s*[\w\s:]+\*\s*\*\s*\)\s*\w+\s*\)\s*\[\s*0\s*\]\s*$')
 FUNC_HDR = re.compile(r'^[^\n;{}#]*?\b((?:\w+\s*::\s*)*\w+)\s*::\s*~?\w+\s*\([^;{}]*\)\s*(?:const\s*)?\{', re.M)
+# a free function defined at column 0: a function head without a class (S13: a vptr store in the free function
+# InitLargePrimitiveArray after FUN_00404920's constructor was credited to FUN_00404920)
+FREE_HDR = re.compile(r'^(?![ \t]|//)(?![^\n;{}#(]*::)[^\n;{}#(]*?\b(?!(?:if|for|while|switch|catch|return)\b)\w+\s*'
+                      r'\([^;{}]*\)\s*(?:const\s*)?\{', re.M)
 
 
 def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
@@ -945,7 +1058,8 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
         if not names:
             continue
         text = open(path, encoding='utf-8', errors='surrogateescape').read()
-        heads = [(m.start(), m.group(1)) for m in FUNC_HDR.finditer(text)]
+        heads = sorted([(m.start(), m.group(1)) for m in FUNC_HDR.finditer(text)] +
+                       [(m.start(), None) for m in FREE_HDR.finditer(text)], key=lambda h: h[0])
         pos = 0
         for stmt in text.split(';'):
             start, pos = pos, pos + len(stmt) + 1
@@ -1160,7 +1274,8 @@ def find_import_thunks(native, units, iat, import_syms, gdef, gref, anydef, msvc
 
 
 def load_overrides(path):
-    """Override table: address (hex), native symbol, object or archive; '#' comments, tab-separated."""
+    """Override table: address (hex), native symbol, object or archive[, MSVC signature]; '#' comments,
+    tab-separated."""
     out = []
     if path:
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
@@ -1168,6 +1283,63 @@ def load_overrides(path):
             if line.startswith('#') or len(f) < 3:
                 continue
             out.append((int(f[0], 16), f[1], f[2]))
+    return out
+
+
+def msvc_code_use(units_json, ms, msvc):
+    """f(original address) -> how the pristine MSVC code there uses the incoming ecx / edx (vslots.Code.entry_use),
+    from FNVNX_MSVC_CODE or FNVNX_MSVC_OBJS (`--msvc-code` / `--msvc-objs`: S11's u<index>.obj); None without them.
+    A callee takes the registers its declaration puts there (abi.x86_locations); a call through a function-pointer
+    variable takes any."""
+    d = os.environ.get('FNVNX_MSVC_CODE') or os.environ.get('FNVNX_MSVC_OBJS')
+    if not d or not os.path.isdir(d):
+        return None
+    try:
+        import types
+        code = msvc_vslots.Code(types.SimpleNamespace(units=json.load(open(units_json))['units']), d)
+    except ImportError as e:
+        log('--msvc-code: %s (capstone): register reads not checked' % e)
+        return None
+
+    def takes(n, slot=False):
+        if slot:
+            if not n.startswith('__imp_'):
+                return None
+            n = n[6:]
+        if n.startswith('?'):
+            s = msvc(n)
+            return {loc for _, _, loc in abi.x86_locations(s) if loc in ('ecx', 'edx')} if s and s.kind == 'func' \
+                else None
+        m = re.match(r'^@[^@]+@(\d+)$', n)
+        if m:
+            k = int(m.group(1)) // 4
+            return {'ecx', 'edx'} if k >= 2 else {'ecx'} if k else set()
+        return set()
+
+    def need(names):
+        names = [n[6:] if n.startswith('__imp_?') else n for n in names]
+        missing = sorted({n for n in names if n.startswith('?') and n not in ms.map})
+        if missing:
+            ms.map.update(batch_demangle(UNDNAME, missing))
+    cache = {}
+
+    def use(a):
+        if a not in cache:
+            cache[a] = code.entry_use(a, takes, need)
+        return cache[a]
+    return use
+
+
+def load_override_sigs(path):
+    """Override table rows with a 4th column: {address: MSVC-decorated signature of the override}. References are
+    compared with it instead of the decomp definition's (an override whose signature differs on purpose, e.g. a
+    variadic replacement of a fixed-argument definition)."""
+    out = {}
+    if path:
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 4 and f[3]:
+                out[int(f[0], 16)] = f[3]
     return out
 
 
@@ -1208,8 +1380,11 @@ def disambiguate_defs(names, m, itanium):
     return c or names
 
 
-def classify_ref(un, isig, idx, gdef, gref, anydef, msvc):
-    """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller)."""
+def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
+    """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller).
+    ident: {data identifier: image addresses} - the last resort for a data reference (S5): the same identifier in
+    another scope (the decomp's per-function namespaces) or with another decorated type (an array declared where
+    MSVC saw a pointer, cv), bound when exactly one address carries it, 'ambiguous' otherwise."""
     if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)):
         return 'runtime', None, None, None, None
     if isig.kind == 'special':
@@ -1228,6 +1403,11 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc):
         m = ADDR_IN_NAME.match(isig.qual[-1]) if isig.qual else None
         if m:  # Ghidra-style name carrying its address: right for 99.6 % of the names units.json binds (LINK.md)
             return 'addr', 'name-addr', int(m.group(1), 16), None, None
+        if ident is not None and isig.kind in ('data', 'cname') and isig.qual and ident.get(isig.qual[-1]):
+            a_ = ident[isig.qual[-1]]
+            if len(a_) == 1:
+                return 'addr', 'gref/ident', next(iter(a_)), None, None
+            return 'ambiguous', 'gref/ident', None, None, ' '.join('%08x' % x for x in sorted(a_))
         return 'unresolved', None, None, None, None
     addrs = sorted(hit)
     if len(addrs) > 1 and isig.params is not None:  # disambiguate by arity, then by const
@@ -1281,6 +1461,114 @@ def emit_tls(addrs):
         n = TLS_SYM % a
         out += ['    .globl %s' % n, '    .type %s, %%tls_object' % n, '    .set %s, __fnvnx_tls_image + %d' % (n, a - base)]
     return '\n'.join(out) + '\n'
+
+
+# ---------------------------------------------------------------------------------------------------- casts
+
+# a named function reached through a cast to a function-pointer type: the cast's convention and parameters decide
+# how the x86 code called it, not the unit's declaration of the name (S13: GetOrLoadXML calls the fastcall-declared
+# FUN_00a0c900 through a __thiscall cast)
+_CAST_TYPE = r'(?P<ret>[A-Za-z_][\w:<>,\s\*&]*?)\s*\(\s*(?:__(?P<cc>thiscall|fastcall|stdcall|cdecl)\s*)?\*\s*\)\s*' \
+             r'\((?P<params>[^()]*)\)'
+CAST_C = re.compile(r'\(\s*' + _CAST_TYPE + r'\s*\)\s*&?\s*(?P<name>[A-Za-z_]\w*)(?=\s*[),;])')
+CAST_R = re.compile(r'reinterpret_cast\s*<\s*' + _CAST_TYPE + r'\s*>\s*\(\s*&?\s*(?P<name>[A-Za-z_]\w*)\s*\)')
+CAST_TYPEDEFS = {'UInt8': 'unsigned char', 'UInt16': 'unsigned short', 'UInt32': 'unsigned int', 'SInt8': 'char',
+                 'SInt16': 'short', 'SInt32': 'int', 'BYTE': 'unsigned char', 'WORD': 'unsigned short',
+                 'DWORD': 'unsigned long', 'BOOL': 'int', 'UINT': 'unsigned int', 'INT': 'int', 'LONG': 'long',
+                 'ULONG': 'unsigned long', 'HRESULT': 'long', 'size_t': 'unsigned int', 'uint32_t': 'unsigned int',
+                 'int32_t': 'int', 'uint16_t': 'unsigned short', 'uint8_t': 'unsigned char', 'LPVOID': 'void *',
+                 'HANDLE': 'void *', 'HWND': 'void *', 'LPCSTR': 'char const *', 'LPSTR': 'char *'}
+
+
+def split_top(text):
+    out, depth, cur = [], 0, ''
+    for ch in text:
+        if ch in '<([':
+            depth += 1
+        elif ch in '>)]':
+            depth -= 1
+        if ch == ',' and depth == 0:
+            out.append(cur); cur = ''
+        else:
+            cur += ch
+    out.append(cur)
+    return [x.strip() for x in out if x.strip()]
+
+
+def cast_sig(cc, ret, params, name):
+    """MSVC-model Sig of a call through `ret (__cc *)(params)` (a __thiscall pointer passes its first parameter in
+    ecx, like a member function's this)."""
+    def norm(t):
+        return re.sub(r'\b(%s)\b' % '|'.join(CAST_TYPEDEFS), lambda m: CAST_TYPEDEFS[m.group(1)], ' '.join(t.split()))
+    ps = split_top(params)
+    if ps == ['void']:
+        ps = []
+    sig = sigs.Sig('func', '%s __%s %s(%s)' % (ret, cc or 'cdecl', name, params))
+    sig.cc, sig.qual, sig.raw_ret, sig.static = cc or 'cdecl', [name], norm(ret), False
+    if (cc or 'cdecl') == 'thiscall' and ps:
+        sig.member, ps = True, ps[1:]
+    sig.raw_params = [norm(x) for x in ps]
+    sig.params = list(sig.raw_params)
+    return sig
+
+
+TYPE_WORDS = {'int', 'char', 'short', 'long', 'float', 'double', 'void', 'bool', 'unsigned', 'signed', 'const',
+              'volatile', 'struct', 'class', 'union', 'enum', '__int64', 'wchar_t'}
+
+
+def param_type(p):
+    """'T *self' -> 'T *', 'int a' -> 'int', 'unsigned int' -> 'unsigned int', 'char buf[8]' -> 'char *'."""
+    p = ' '.join(p.split())
+    m = re.match(r'^(.*?[\s\*&])([A-Za-z_]\w*)\s*(\[[^\]]*\])?$', p)
+    if m and m.group(2) not in TYPE_WORDS and m.group(1).strip() and m.group(1).strip() not in ('const', 'volatile'):
+        return m.group(1).strip() + (' *' if m.group(3) else '')
+    return p
+
+
+def c_name_sig(csig, text):
+    """MSVC-model Sig for an undecorated C name (@f@N fastcall, _f@N stdcall, _f cdecl; V1 defect 3: those pairs were
+    never compared) from its declaration or definition in a unit's source: the parameter types the decoration does
+    not carry. A declaration whose x86 argument bytes disagree with N is skipped; without one, N/4 four-byte
+    integers stand in for stdcall/fastcall; None when nothing is known (a cdecl name nobody declares)."""
+    name, cc, nbytes = csig.qual[-1], csig.cc or 'cdecl', csig.stack_bytes
+    rx = re.compile(r'(?P<ret>\b[A-Za-z_][\w\s\*&:]*?)\s*\b(?:__(?P<cc>cdecl|stdcall|fastcall|thiscall)\s+)?'
+                    + re.escape(name) + r'\s*\((?P<params>[^()]*)\)\s*(?:const\s*)?[;{]')
+    for m in rx.finditer(text or ''):
+        ret = ' '.join(m.group('ret').split()[-3:])
+        ret = re.sub(r'^(?:extern|static|inline|FNVNX_KEEP|__declspec\(\w+\))\s+', '', ret)
+        ps = [param_type(x) for x in split_top(m.group('params'))]
+        sig = cast_sig(cc, ret, ', '.join(ps), name)
+        if nbytes is not None:
+            got = sum(abi.X86_SIZE.get(c, 4) for _, c in abi.params_of(sig))
+            if got != nbytes:
+                continue
+        return sig
+    if nbytes is None:
+        return None
+    return cast_sig(cc, 'int', ', '.join(['int'] * (nbytes // 4)) or 'void', name)
+
+
+def unit_casts(text):
+    """{name: (set of (cc, ret, params) casts, direct calls of the name outside casts)} for one source text."""
+    hits, spans = collections.defaultdict(set), []
+    for rx in (CAST_C, CAST_R):
+        for m in rx.finditer(text):
+            hits[m.group('name')].add((m.group('cc') or 'cdecl', ' '.join(m.group('ret').split()),
+                                       ' '.join(m.group('params').split())))
+            spans.append((m.start(), m.end()))
+    out = {}
+    for name, casts in hits.items():
+        direct = 0
+        for m in re.finditer(r'\b%s\s*\(' % re.escape(name), text):
+            if any(lo <= m.start() < hi for lo, hi in spans):
+                continue
+            pre = text[max(0, m.start() - 400):m.start()].rstrip()
+            if pre.endswith(('->', '.', '::')) or not pre:
+                continue                                  # a member of that name / start of file
+            if pre[-1] in '=(,;{}?:!|+-/<>%^~[' or re.search(r'\b(?:return|else|case|do)$', pre):
+                direct += 1                               # a call (a declaration follows a type or __conv)
+        out[name] = (casts, direct)
+    return out
 
 
 def unwind_only(path, names):
@@ -1510,6 +1798,60 @@ def apply(out, fixed):
     print('own data pointers to rebound variables retargeted: %d relocations in %d objects; code references '
           'through a local symbol left (want 0, compile.sh -fPIC): %d in %d objects' % (retargeted, retarget_objs,
                                                                                       left, left_objs))
+    rows, cnt = pair_typeinfo(fixed)
+    with open(os.path.join(out, 'typeinfo_pairs.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#class\tvtable object (kept)\ttypeinfo object the linker would have kept\ttypeinfo definitions '
+                'turned into references\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    print('typeinfo kept with its vtable (V1 C4): %d classes whose first typeinfo copy came from another object than '
+          'the kept vtable, %d typeinfo definitions turned into references (typeinfo_pairs.tsv); vtable object '
+          'defines no typeinfo: %d' % (len(rows), cnt['undefined'], cnt['vtable object defines no typeinfo']))
+
+
+def kept_def(defs):
+    """GNU ld's pick among [(object, strong)] in link order: the first strong definition, else the first copy."""
+    return next((d for d in defs if d[1]), defs[0])
+
+
+def pair_typeinfo(fixed):
+    """Keep each class's typeinfo from the object whose vtable is kept (V1 defect C4). Units reconstruct one class
+    with different bases; vtable and typeinfo are separate weak COMDAT groups (_ZTV<C>, _ZTI<C>) and the linker keeps
+    the first copy of each in link order independently, so the kept vtable's offset-to-top words could name a base
+    the kept typeinfo lacks (__dynamic_cast to it fails). The typeinfo definitions of the objects that link before
+    the vtable's object become references (elfsyms.undefine_symbols, their group no longer COMDAT): every typeid and
+    every derived class's base list then reaches the vtable object's copy. Link order is `check`'s (sorted names).
+    -> ([(class, vtable object, replaced typeinfo object, objects changed)], Counter)."""
+    objs = sorted(n for n in os.listdir(fixed) if n.endswith('.o'))
+    vt, ti = collections.defaultdict(list), collections.defaultdict(list)
+    for n in objs:
+        for s in elfsyms.symbols(os.path.join(fixed, n)):
+            if s.shndx and s.bind in ('global', 'weak') and s.name.startswith(('_ZTV', '_ZTI')):
+                (vt if s.name[3] == 'V' else ti)[s.name[4:]].append((n, s.bind == 'global'))
+    order = {n: k for k, n in enumerate(objs)}
+    undef, rows, cnt = collections.defaultdict(set), [], collections.Counter()
+    for cls, vdefs in sorted(vt.items()):
+        tdefs = ti.get(cls)
+        if not tdefs:
+            continue
+        kv, kt = kept_def(vdefs), kept_def(tdefs)
+        if kv[0] == kt[0]:
+            continue
+        if not any(o == kv[0] for o, _ in tdefs):
+            cnt['vtable object defines no typeinfo'] += 1
+            continue
+        if kt[1] and not dict(tdefs)[kv[0]]:
+            cnt['a strong typeinfo elsewhere'] += 1   # a key function's unit: leave it to the linker
+            continue
+        before = sorted({o for o, _ in tdefs if order[o] < order[kv[0]]})
+        for o in before:
+            undef[o].add('_ZTI' + cls)
+        rows.append((cls, kv[0], kt[0], ' '.join(before)))
+    for o, names in sorted(undef.items()):
+        p = os.path.join(fixed, o)
+        cnt['undefined'] += elfsyms.undefine_symbols(p, p + '.ti', names)
+        os.replace(p + '.ti', p)
+    return rows, cnt
 
 
 def check(out, fixed):
@@ -1550,6 +1892,10 @@ def main():
     if cmd == 'resolve' and '--msvc-objs' in sys.argv:   # vslots.py: the pristine MSVC objects (u<index>.obj)
         k = sys.argv.index('--msvc-objs')
         os.environ['FNVNX_MSVC_OBJS'] = sys.argv[k + 1]
+        del sys.argv[k:k + 2]
+    if cmd == 'resolve' and '--msvc-code' in sys.argv:   # the same objects, for the register reads only
+        k = sys.argv.index('--msvc-code')
+        os.environ['FNVNX_MSVC_CODE'] = sys.argv[k + 1]
         del sys.argv[k:k + 2]
     if cmd == 'resolve':
         argv, opts = [], {}

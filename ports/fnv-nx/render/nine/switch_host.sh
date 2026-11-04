@@ -30,7 +30,7 @@ for s in "$R/host/nine_host_call.c" "$R/host/nine_d3d9.c" "$R/host/nine_present.
 done
 $CXX -specs="$DEVKITPRO/libnx/switch.specs" $HOST_ARCH host-obj/*.o -L"$L/lib" \
 	-Wl,--start-group -lnine_st -lnouveau -lnouveauwinsys -lgallium -lnir -lcompiler -lmesa_util -lmesa_format \
-	-lgalliumvl_stub -ldrm_nouveau -lsoftpipe -lwsw -Wl,--end-group -L"$DEVKITPRO/libnx/lib" -lnx \
+	-lgalliumvl_stub -ldrm_nouveau -lsoftpipe -lwsw -Wl,--end-group -L"$DEVKITPRO/libnx/lib" -lnx -Wl,--wrap=__syscall_thread_create \
 	-Wl,-Map,host.map -o host.elf
 $PY "$TC/tools/elf2nso.py" host.elf main
 $PY "$TC/tools/npdmtool.py" "$TC/npdm/fnvnx-app.json" main.npdm

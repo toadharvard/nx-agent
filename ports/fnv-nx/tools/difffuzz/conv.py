@@ -119,7 +119,33 @@ class Conv:
                     raise Unsupported('by-reference aggregate passed on the stack')
 
     def describe(self):
-        return '%s -> %s' % (', '.join(map(repr, self.vals)), repr(self.ret) if self.ret else 'void')
+        d = '%s -> %s' % (', '.join(map(repr, self.vals)), repr(self.ret) if self.ret else 'void')
+        return d + (' [x86 regs %s]' % ','.join(self.custom) if getattr(self, 'custom', None) else '')
+
+    def with_registers(self, regs):
+        """MSVC whole-program custom convention: the oracle also takes arguments in `regs` (registers it reads on
+        entry that the declared convention does not pass). Model: register-eligible values (integers/pointers of at
+        most 4 bytes, `this` first) take those registers in declared order, everything else keeps the stack in
+        declared order. AArch64 placement is unchanged (GCC compiled the declared signature)."""
+        regs = list(regs)
+        out, off, used = [], 0, []
+        for lab, space, o, size in self.x86:
+            v = next((x for x in self.vals if x.label == lab), None)
+            if space in ('ecx', 'edx'):
+                out.append((lab, space, 0, size))
+                continue
+            if regs and v is not None and v.kind == 'gpr' and v.size <= 4:
+                used.append(regs.pop(0))
+                out.append((lab, used[-1], 0, size))
+                continue
+            out.append((lab, 'stk', off, size))
+            off += (size + 3) // 4 * 4
+        self.x86 = out
+        self.custom = used
+        cc = self.sig.cc or 'cdecl'
+        stack = [sz for _, sp, _, sz in out if sp == 'stk']
+        self.pop = sum((x + 3) // 4 * 4 for x in stack) if cc in ('stdcall', 'thiscall', 'fastcall') else 0
+        return self
 
 
 def extend(val, data, mode):

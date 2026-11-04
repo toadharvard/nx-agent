@@ -9,13 +9,15 @@
 #         decomp) - checked against real GCC by layout_probe.py.
 #
 # Both use clang's own x86 SSE headers in place of sse2neon (same __m128 size and alignment as sse2neon on AArch64).
+# SHIM=<dir> replaces <port>/shim/include (run.sh). The gnu configuration carries the D10 semantics flags clang knows
+# (-fsigned-char -fwrapv -fno-strict-aliasing -fno-delete-null-pointer-checks -ffp-contract=off -frounding-math).
 # clang_env_setup <out dir> writes the generated headers to <out>/clang/{inc,gnu}; CLANG_MSVC / CLANG_GNU are the
-# argument arrays (append -I<tree>/include).
+# argument arrays (append -I<tree>/include), CLANG_EXCLUDE the fnvcheck --exclude options.
 # shellcheck shell=bash
 CLANG=${CLANG:-clang++-18}
 
 clang_env_setup() {
-  local out=$1 here=$2 res
+  local out=$1 here=$2 res shim=${SHIM:-$2/shim/include}
   res=$($CLANG -print-resource-dir)
   mkdir -p "$out/clang/inc" "$out/clang/gnu"
   for h in xmmintrin emmintrin; do
@@ -26,9 +28,9 @@ clang_env_setup() {
   sed -e '/^#error/d' \
       -e 's/typedef unsigned __int128 type;/typedef unsigned int type __attribute__((aligned(16)));/' \
       -E -e 's/^inline __attribute__\(\(always_inline\)\) void (_ReadWriteBarrier|_ReadBarrier|_WriteBarrier)\(void\) \{.*\}$/void \1(void); \/* clang: MS builtin *\//' \
-      "$here/shim/include/fnvnx_compat.h" > "$out/clang/gnu/fnvnx_compat.h"
+      "$shim/fnvnx_compat.h" > "$out/clang/gnu/fnvnx_compat.h"
   CLANG_COMMON=(-std=gnu++17 -fsyntax-only -ferror-limit=0 -fno-color-diagnostics -fno-caret-diagnostics
-                -fshort-wchar -fsigned-char -I"$out/clang/inc" -I"$here/shim/include")
+                -fshort-wchar -fsigned-char -I"$out/clang/inc" -I"$shim")
   CLANG_MSVC=(--target=i686-pc-windows-msvc -fms-extensions -fms-compatibility -fms-compatibility-version=19.00
               -fno-delayed-template-parsing -include "$here/tools/static/prelude_msvc.h" "${CLANG_COMMON[@]}"
               -isystem /usr/include/c++/13 -isystem /usr/include/x86_64-linux-gnu/c++/13/32
@@ -39,6 +41,11 @@ clang_env_setup() {
               -Wnon-pod-varargs -Wtautological-undefined-compare -Wbitfield-enum-conversion -Wsigned-enum-bitfield
               -Wfloat-overflow-conversion -Wbitfield-constant-conversion -Wcast-function-type -Wdivision-by-zero
               -Wuninitialized-const-reference -Wnull-dereference)
-  CLANG_GNU=(--target=i686-linux-gnu -malign-double -fms-extensions -frounding-math
+  CLANG_GNU=(--target=i686-linux-gnu -malign-double -fms-extensions -frounding-math -fwrapv -fno-strict-aliasing
+             -fno-delete-null-pointer-checks -ffp-contract=off
              -include "$out/clang/gnu/fnvnx_compat.h" "${CLANG_COMMON[@]}")
+  # fnvcheck options: code of these directories is never the tree's, even when one lies below --root (the generated
+  # headers of <out>/clang when <out> is inside the tree, the shim, sse2neon and the clang headers standing in for it)
+  CLANG_EXCLUDE=(--exclude="$out/clang" --exclude="$shim" --exclude="$res/include")
+  if [ -n "${SSE2NEON:-}" ]; then CLANG_EXCLUDE+=(--exclude="$SSE2NEON"); fi
 }

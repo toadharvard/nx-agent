@@ -16,10 +16,11 @@ ROOT = os.path.normpath(os.path.join(HERE, '..', '..'))
 
 OWNER = {'fetch': 'S9-build (environment)', 'toolchain': 'S5-toolchain', 'prepare': 'S1-compile',
          'census': 'S1-compile', 'compile': 'S1-compile', 'link': 'S2-link', 'guest': 'S5-toolchain (link); S2/S4 as noted',
+         'boot': 'S5-toolchain (emulated boot); S1 (frontier units)',
          'nine': 'S6c-nine', 'host': 'S5-toolchain', 'package': 'S5-toolchain', 'tests': 'per suite'}
 SUITE_OWNER = {'s2-link': 'S2-link', 's3': 'S3-dataimage', 's4': 'S4-runtime', 's5-tools': 'S5-toolchain',
                's5-emu-hello': 'S5-toolchain', 's5-rt': 'S5-toolchain', 's6b': 'S6b-shaders', 's7': 'S7-audio-input',
-               's8': 'S8-asm', 'emu-game': 'S5-toolchain'}
+               's8': 'S8-asm', 's9': 'S9-build'}
 
 
 def human(n):
@@ -54,14 +55,19 @@ def git_info():
 
 def snapshot(b, stages):
     snap = {'run_id': b.run_id, 'date': time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime()), 'git': git_info(),
-            'config': {k: b.cfg[k] for k in ('NINE', 'PROGRAM_ID', 'GAME_CXX', 'OPT', 'JOBS', 'EXT', 'FNVNX_TC',
-                                              'DEVKITPRO', 'GUEST_LINK', 'CENSUS', 'TESTS', 'OVERRIDE',
-                                              'EXTERN_TEXT')},
+            'config': {k: b.cfg.get(k, '') for k in (
+                'NINE', 'PROGRAM_ID', 'GAME_CXX', 'CROSS_BIN', 'OPT', 'JOBS', 'EXT', 'FNVNX_TC', 'DEVKITPRO',
+                'GUEST_LINK', 'GAME_NEW', 'CENSUS', 'TESTS', 'OVERRIDE', 'EXTERN_TEXT', 'MSVC_OBJS', 'UNITS_RENAMES',
+                'LINK_SEED', 'UNITS', 'PREPARED', 'FORCE_STALE', 'BOOT', 'BOOT_IMAGE', 'BOOT_CENSUS', 'CROSS', 'TC_DL',
+                'VORBIS', 'PRISTINE_OBJS')},
+            'head': b.head, 'prepared_from': b.rec('prepare').get('prepared_from'),
             'stages': {}, 'metrics': {}, 'tests': {}}
     for s in stages:
         r = b.rec(s.name)
+        pf = r.get('prepared_from')
         snap['stages'][s.name] = {'status': r.get('status'), 'ran': r.get('ran'), 'seconds': r.get('seconds'),
-                                  'summary': r.get('summary'), 'run_id': r.get('run_id')}
+                                  'summary': r.get('summary'), 'run_id': r.get('run_id'),
+                                  'prepared_from': pf.get('port_commit') if pf else None, 'stale': r.get('stale')}
         for k, v in r.get('metrics', {}).items():
             snap['metrics'][k] = v
     for k, v in b.rec('tests').get('suites', {}).items():
@@ -114,6 +120,10 @@ def table(head, rows, align=None):
     return out
 
 
+def clean(s):
+    return (s or '-').replace(ROOT + '/', '')[:200]
+
+
 def rel(p):
     if not p:
         return '-'
@@ -132,11 +142,37 @@ def render(b, stages, snap, prev):
                  g.get('branch') or '?'))
     L.append('')
     c = snap['config']
-    L.append('Configuration: `NINE=%s PROGRAM_ID=%s GAME_CXX=%s OPT=%s JOBS=%s GUEST_LINK=%s`; EXT `%s`; '
-             'FNVNX_TC `%s`; DEVKITPRO `%s`.' % (c['NINE'], c['PROGRAM_ID'], c['GAME_CXX'], c['OPT'], c['JOBS'],
-                                                 c['GUEST_LINK'], c['EXT'] or 'ext/ (fetch.sh)',
-                                                 R('toolchain').get('artifacts', {}).get('prefix') or '-',
-                                                 R('toolchain').get('artifacts', {}).get('devkitpro') or '-'))
+    L.append('Configuration: `NINE=%s PROGRAM_ID=%s GAME_CXX=%s OPT=%s JOBS=%s GUEST_LINK=%s GAME_NEW=%s`; EXT `%s`; '
+             'FNVNX_TC `%s`; DEVKITPRO `%s`%s.' % (
+                 c['NINE'], c['PROGRAM_ID'], c['GAME_CXX'], c['OPT'], c['JOBS'], c['GUEST_LINK'], c['GAME_NEW'],
+                 c['EXT'] or 'ext/ (fetch.sh)', R('toolchain').get('artifacts', {}).get('prefix') or '-',
+                 R('toolchain').get('artifacts', {}).get('devkitpro') or '-',
+                 ''.join('; %s `%s`' % (k, c[k]) for k in ('CROSS', 'CROSS_BIN', 'TC_DL', 'VORBIS', 'UNITS', 'PREPARED',
+                                                           'EXTERN_TEXT', 'MSVC_OBJS', 'UNITS_RENAMES', 'LINK_SEED',
+                                                           'OVERRIDE', 'BOOT_IMAGE', 'PRISTINE_OBJS') if c.get(k))
+                 + ('; **FORCE_STALE=1**' if c.get('FORCE_STALE') == '1' else '')))
+    L.append('')
+    # ---- provenance (J-0054)
+    pf = snap.get('prepared_from') or {}
+    head = snap.get('head')
+    stale = [(n, v.get('stale'), v.get('status')) for n, v in snap['stages'].items() if v.get('stale')]
+    L.append('## Provenance')
+    L.append('')
+    if pf:
+        L.append('Head `%s`. Prepared tree (`%s`, %s): ports/fnv-nx `%s`, decomp `%s`%s. %s' % (
+            head or 'unknown', rel(pf.get('tree')), pf.get('mode'), pf.get('port_commit') or 'unknown',
+            pf.get('decomp_commit') or 'unknown',
+            ' + %d uncommitted changes to prepare inputs' % len(pf['port_dirty']) if pf.get('port_dirty') else '',
+            'Every tree-derived stage below was made from it.' if pf.get('port_commit') == head and not stale else
+            '**The tree is not from the head: stages refuse it unless FORCE_STALE=1.**'
+            if pf.get('port_commit') != head else ''))
+    else:
+        L.append('Head `%s`; no prepared tree recorded yet.' % (head or 'unknown'))
+    if stale:
+        L.append('')
+    for n, why, st in stale:
+        L.append('* `%s` %s: %s' % (n, 'refused its inputs' if st == 'fail' else 'consumed stale inputs (FORCE_STALE=1)',
+                                    why))
     L.append('')
     # ---- stages
     L.append('## Stages')
@@ -147,10 +183,14 @@ def render(b, stages, snap, prev):
         st = r.get('status')
         st = 'not run' if st in (None, 'never') else st
         how ='ran' if r.get('ran') else ('cached' if st in ('ok', 'warn') else '-')
+        pfs = r.get('prepared_from')
+        prov = ('`%s`%s' % ((pfs.get('port_commit') or 'unknown')[:10], ' (stale)' if r.get('stale') else '')
+                if pfs else '')
         rows.append(('`%s`' % s.name, '**%s**' % st if st == 'fail' else st, how,
-                     ('%.0f s' % r['seconds']) if r.get('seconds') is not None and r.get('ran') else '',
+                     ('%.0f s' % r['seconds']) if r.get('seconds') is not None and r.get('ran') else '', prov,
                      (r.get('summary') or '') + (' **error:** ' + r['error'] if r.get('error') and st == 'fail' else '')))
-    L += table(['stage', 'status', 'run', 'time', 'summary'], rows, ['---', '---', '---', '--:', '---'])
+    L += table(['stage', 'status', 'run', 'time', 'prepared from', 'summary'], rows,
+               ['---', '---', '---', '--:', '---', '---'])
     L.append('')
     # ---- inputs
     f = R('fetch')
@@ -162,8 +202,9 @@ def render(b, stages, snap, prev):
         L.append('')
     t = R('toolchain')
     if t.get('metrics'):
-        L.append('Toolchain: %s; game units compiled with %s.%s' % (
-            t['metrics'].get('tc_gcc'), t['metrics'].get('game_cxx'),
+        L.append('Toolchain: %s; game units compiled with %s (cross tools: %s); Ogg Vorbis %s.%s' % (
+            t['metrics'].get('tc_gcc'), t['metrics'].get('game_cxx'), t.get('cross', '-'),
+            rel(t.get('artifacts', {}).get('vorbis')) if t.get('artifacts', {}).get('vorbis') else 'none',
             (' Notes: ' + ' '.join(t.get('notes', []))) if t.get('notes') else ''))
         L.append('')
     # ---- census / compile
@@ -171,10 +212,11 @@ def render(b, stages, snap, prev):
     L.append('## Prepare, census, compile')
     L.append('')
     if p.get('metrics'):
-        L.append('Prepare: %s rules, %s edits over %s units (`build/prepare/prepare_stats.tsv`); %s files of the '
-                 'prepared tree changed since the previous prepare.' % (
-                     fmt(m.get('prepare_rules')), fmt(m.get('prepare_edits')), fmt(m.get('prepare_units')),
-                     fmt(m.get('prepare_files_changed'))))
+        L.append('Prepare: %s rules, %s edits over %s units (`build/prepare/prepare_stats.tsv`); %s.' % (
+            fmt(m.get('prepare_rules')), fmt(m.get('prepare_edits')), fmt(m.get('prepare_units')),
+            'tree adopted from `%s` (PREPARED)' % rel(p['artifacts'].get('tree'))
+            if (p.get('prepared_from') or {}).get('mode') == 'adopted' else
+            '%s files of the prepared tree changed since the previous prepare' % fmt(m.get('prepare_files_changed'))))
         L.append('')
     rows = []
     if ce.get('metrics'):
@@ -228,6 +270,14 @@ def render(b, stages, snap, prev):
             L.append('Reference classes (`build/link/out/stats.txt`): ' + ', '.join(
                 '%s %s' % (k, fmt(v)) for k, v in sorted(rc.items(), key=lambda x: -x[1])) + '.')
             L.append('')
+        L.append('resolve options: %s; S13 split-global check (`build/link/check_rebind.txt`): %s objects / %s '
+                 'relocations bypass the rebinding (want 0); probe %s s (layouts %s s, vtables %s s, %s jobs). Run summary: '
+                 '`build/link/summary.txt` (first line: the commit the tree was prepared from).' % (
+                     ' '.join('`%s`' % a for a in lk.get('resolve_options') or []) or 'none',
+                     fmt(m.get('link_bypassing_objects')), fmt(m.get('link_bypassing_relocs')),
+                     fmt(m.get('link_probe_s')), fmt(m.get('link_probe_layouts_s')), fmt(m.get('link_probe_vtables_s')),
+                     fmt(m.get('link_probe_jobs'))))
+        L.append('')
         if lk.get('apply_failures'):
             L.append('apply could not rewrite %d objects (left out): %s' % (
                 m.get('link_apply_failures', 0), '; '.join(lk['apply_failures'][:5])))
@@ -262,6 +312,13 @@ def render(b, stages, snap, prev):
             L.append('%d symbols defined more than once (linked with --allow-multiple-definition): %s' % (
                 ad['multidef_count'], ', '.join('`%s`' % n for n in ad.get('multidef', [])[:8])))
             L.append('')
+    if gu.get('metrics'):
+        L.append('D3D9 `%s`, GAME_NEW `%s`; PC-relative references to absolute image symbols %s (want 0: relocatable); '
+                 'static initializers with a trap %s of %s, finalizers %s of %s (`build/guest/dynbrk.txt`).' % (
+                     gu.get('d3d9', '-'), gu.get('game_new', '-'), fmt(m.get('guest_pcrel_abs_refs')),
+                     fmt(m.get('guest_dyninit_brk')), fmt(m.get('guest_dyninit_functions')),
+                     fmt(m.get('guest_dynexit_brk')), fmt(m.get('guest_dynexit_functions'))))
+        L.append('')
     if gu.get('undefined'):
         L.append('**Undefined symbols after the full link: %s** (each bound to a trap stub; per symbol: '
                  '`build/guest/undefined_by_category.tsv`):' % fmt(m.get('guest_undefined')))
@@ -271,6 +328,25 @@ def render(b, stages, snap, prev):
                      '`%s`' % x['examples'][0][:60] if x.get('examples') else '') for x in gu['undefined']],
                    ['--:', '---', '---', '---', '---'])
         L.append('')
+    # ---- boot
+    bo = R('boot')
+    if bo.get('status') not in (None, 'never', 'disabled'):
+        L.append('## Emulated boot and boot frontier (S5)')
+        L.append('')
+        L.append('Data image: %s.' % bo.get('image', '-'))
+        L.append('')
+        L.append('%s. Stop: `%s`. Trapped keys %s (%s hits), initializers skipped after a fault %s. Frontier '
+                 '(`build/boot/frontier.txt`, `.tsv`, `_units.tsv`): %s untranslated keys, %s hits, %s units%s.' % (
+                     bo.get('summary') or bo.get('error'), clean(bo.get('stop')), fmt(m.get('boot_trap_keys')),
+                     fmt(m.get('boot_trap_hits')), fmt(m.get('boot_init_skips')), fmt(m.get('frontier_keys')),
+                     fmt(m.get('frontier_hits')), fmt(m.get('frontier_units')),
+                     '; compile status now from `%s`' % rel(bo['frontier_census']) if bo.get('frontier_census') else ''))
+        L.append('')
+        if bo.get('milestones'):
+            L.append('```')
+            L += bo['milestones'][:20]
+            L.append('```')
+            L.append('')
     # ---- host / nine / package
     ho, ni, pk = R('host'), R('nine'), R('package')
     L.append('## Host module, Nine, package')

@@ -56,7 +56,10 @@ caches by copying `out/cache`, `out/layouts.tsv`, `out/vtables` of the previous 
 atomically (`ln -sfn run-N latest.tmp && mv -T latest.tmp latest`) once `check` has passed. Every step can be
 rerun after an interruption: `compile.sh` keeps up-to-date objects, the probe keeps its per-unit compiles
 (`probe/*.done.json`) and saves `cache.json` after each round, `apply` rewrites `fixed/` object by object; a driver
-only needs to remember which steps finished. Every run's summary states the branch commit its tree was prepared
+only needs to remember which steps finished. The probe caches (layout rows, vtable probe results, compiled probe
+units, emitted slot functions) are keyed on each unit's content - its prepared source and every local header it
+includes, with the probe flags (`layout.unit_key`) - so a seeded cache is reused only for text that did not change;
+layout rows carry the key and are probed again when it differs (S9). Every run's summary states the branch commit its tree was prepared
 from (a tree prepared before a rules change silently lacks it: f10's tree predated S1 round 7).
 
 ## Symbols and files
@@ -160,8 +163,9 @@ class/struct/union/enum tags, which Itanium names do not.
 
 * **x86 slots** - thiscall: `this` in ecx, the rest on the stack; fastcall: the first two integer/pointer
   parameters of at most 4 bytes in ecx, edx, the rest on the stack; cdecl/stdcall: stack. Aggregate results add
-  MSVC's hidden return-buffer pointer (after `this` for members, first for free functions). Stack offsets are
-  sums of 4/8-byte words with by-value aggregates of unknown size kept symbolically.
+  MSVC's hidden return-buffer pointer (after `this` for members, first for free functions; for `__fastcall` the
+  first stack word, ecx and edx stay for the arguments - V1 defect 1: 0x0056fa00's bridge wrote the result over
+  `*this`). Stack offsets are sums of 4/8-byte words with by-value aggregates of unknown size kept symbolically.
 * **AArch64 slots** - AAPCS64: `this` and integers/pointers/enums in x0-x7, float/double in v0-v7, then 8-byte stack
   slots; the hidden result pointer is x8, not an argument; a by-value aggregate of unknown size makes later slots
   symbolic.
@@ -172,6 +176,14 @@ class/struct/union/enum tags, which Itanium names do not.
   everywhere -> no bridge; register moves only -> generated bridge (parallel moves sequentialized through
   x16/v16, then a tail call `b`; a result in the wrong register file -> call, `fmov`, return); anything needing an
   aggregate's size or a stack destination -> `manual`.
+* A `float` result where the other side declares `double` (or the reverse): x86 hands either over exactly in st(0),
+  AArch64 would read d0 where the callee wrote s0. The bridge calls and converts (`fcvt d0, s0` / `fcvt s0, d0`),
+  class `ret-float-width` (V1 defect 2: 130 pairs were `same`); `long double` (binary128 here) is `manual`.
+* An undecorated C name (`@f@N` fastcall, `_f@N` stdcall, `_f` cdecl) carries no parameter types. Resolve reads
+  them from the declaration or definition in the unit's prepared source (the one whose x86 argument bytes equal N;
+  without one, N/4 four-byte integers), so these pairs are compared like decorated ones (V1 defect 3: 0x00ba3130's
+  missing edx got no `edx-dummy` bridge; 76 pairs left ecx or `this` unpassed unseen). A cdecl name nobody declares
+  stays uncompared.
 * A narrow integer the reference passes (`char`, `bool`, `short`, ...) where the definition reads a 32/64-bit value
   or a pointer in the same register: the AArch64 caller leaves the upper bits unspecified, MSVC's caller pushed the
   value extended, so the bridge extends it in place by the reference's type (`sxtb`/`sxth` for `char`/`short`,
@@ -191,8 +203,28 @@ x0 is not preserved, so the declaration has to be fixed in the source (S1 rule o
 A definition parameter in **ecx** that the reference does not pass (`__fastcall f(p0, edx, p2)` defined,
 `__stdcall f(void *)` referenced from a member function) is not junk: the x86 callee reads whatever the caller left
 in ecx, usually its own `this`. `abi.compare` / `abi2` classify it `x86-inconsistent` (`ecx-not-passed`, like
-`this-not-passed`): no bridge, listed in `abi.tsv` for S1b's XINC1 patches. A missing **edx** stays the `edx-dummy`
+`this-not-passed`), listed in `abi.tsv` for S1b's XINC1 patches; the arguments the reference does pass still get their
+bridge moves (the ecx parameter is often unused - a decompiler artefact: 0x00a75ec0, a stream factory, and
+0x00bbbe30 never read ecx - and a direct call would leave them in the wrong registers). A missing **edx** stays the `edx-dummy`
 bridge (the decomp's `__fastcall f(T*, int edx_dummy, ...)` for a member function: edx is the x86 caller's scratch).
+**The definition's register reads** (`resolve --msvc-code <dir>`, or with `--msvc-objs`; V1's `c3_ecx.py`): for an
+`ecx-not-passed` or `this-not-passed` pair resolve reads the definition's x86 code in S11's pristine MSVC object
+(`<dir>/u<index>.obj`, `vslots.Code.entry_use`). Every path from the entry is followed until ecx is written: an
+operand, address or sub-register read is `read`; a call or tail jump to a callee that takes ecx (its declaration),
+an indirect call or a jump it cannot follow is `pass`; a switch through the function's own jump table goes to every
+label of the function. Only `push ecx` (MSVC reserves a stack word that way) or no use at all: the x86 callee
+never looked at ecx, so the pair is compared again with that parameter dead (`ecx-unused`) and gets an ordinary
+bridge, or none. A definition S1b's patches renamed (`units_renames.tsv`) has no pristine code under its new name:
+the patch gave it the `this` the pristine code never declared, and its pairs stay flagged. On V1's c3 pairs
+(f12) the reader agrees with `c3_ecx.py` on 224 of 225 addresses. The exception is 0x00e3dfb0: c3 saw `jmp [eax*4 + table]`
+as a call, and every case of that switch reads `[ecx+n]`, so it stays flagged. Of V1's three FP-dead and eleven
+TP-this-dead addresses, these are bridged now:
+0x00a75ec0, 0x00bbbe30, 0x00e89ad0 (`push`), 0x00a5d450 (`push`), 0x00a8f730, 0x00b80e70, 0x00bc10e0, 0x00bc59b0,
+0x00e92e60. Still flagged: the four S1b-renamed ones (0x00a43330, 0x00a50b10, 0x00a8a9a0, 0x00a98eb0) and 0x00e3dfb0.
+On the 22 units that reference or define those addresses (f13's objects), resolve reports 13 pairs `ecx unused,
+bridged`, 10 `used, flagged` and 1 without code. Without the objects, nothing changes. The edx side keeps
+`edx-dummy`: c3 found no definition that reads an edx it was not passed; two pass it on (0x00a62130).
+
 Sites on the ninth-round objects (callee address: referencing units):
 
 | Callee | Referencing units |
@@ -220,14 +252,19 @@ Two bridge divergences are not ABI-model errors:
   `((void (__thiscall *)(void *, const char *, MenuValueDescriptor *)) &FUN_00a0c900)(&map, name, xml)`; the unit
   declares `__fastcall FUN_00a0c900(void *, const char *, MenuValueDescriptor *)`, the definition is the thiscall
   member `(const char *, int)`. On x86 the cast decides (ecx = map, stack = name, xml: the definition gets name), so
-  the bridge built from the declaration (third argument -> p0) is wrong; natively the cast call already matches the
-  definition (x0, x1, x2). The reference name carries only the declaration, so the link cannot see the cast; about
-  100 such casts sit in 48 units. Fix in the source (declare the function as it is called, S1b), or a resolve rule that
-  takes the cast's convention for a unit that only calls the name through such a cast.
+  a bridge built from the declaration (third argument -> p0) is wrong. Resolve therefore reads each compiled unit's
+  source for casts of a named function to a function-pointer type, `((ret (__cc *)(params)) &NAME)` and
+  `reinterpret_cast<ret (__cc *)(params)>(&NAME)` (called at once, or passed on as a callback), and compares the
+  definition with the cast's convention and parameters (a `__thiscall` pointer passes its first parameter as `this`;
+  no convention is cdecl) for a reference to a free function of that name (`cast-call`; the bridge is keyed by the
+  cast). When the unit casts the name two ways that disagree, or also calls it directly with a declaration that
+  disagrees with the cast, the pair is `x86-inconsistent` (`cast-conflict`) instead of a guess. On the ninth-round
+  tree: 107 casts of 105 names in 74 compiled units; 16 of those names are called directly too, 2 are cast two ways.
 * **The variadic logger 0x00703c00** (S13: 00700350): referenced as `int __cdecl (const char *, ...)`, defined as
   `void __cdecl (const char *text, const char *context)` that passes `&context` on as the argument list - an x86
   stack walk: on AArch64 `&context` is a spilled register, and float arguments travel in v registers. `manual`
-  (varargs) is the right verdict; the fix is a native variadic replacement (`resolve --override`, or S1's VA1). The
+  (varargs) is the right verdict; the fix is the native variadic replacement in `tools/link/overrides/` (Overrides,
+  below). The
   first-fault difference in that function (x86 0, AArch64 0x18) is argument evaluation order.
 
 ## Overrides (`resolve --override <tsv>`, for native replacements, J-0015)
@@ -241,8 +278,18 @@ precedence over the decomp definition at that address:
   override, so the defining object's own calls and every GCC vtable slot naming it reach the override too (a
   linker-script definition wins over the weak copy; COMDAT copies in other objects follow the same way). Static
   (local) decomp definitions and names that also stand for other addresses are left alone and reported;
-* `apply` copies the override objects next to the rewritten ones; the ABI check still compares each reference with
-  the *decomp* declaration, so the override must have the decomp definition's signature.
+* `apply` copies the override objects next to the rewritten ones; the ABI check compares each reference with the
+  *decomp* definition, so the override must have its signature - unless the table's optional 4th column gives the
+  override's own MSVC-decorated signature, which the references are then compared with (a replacement whose
+  signature differs on purpose).
+
+The port's own replacements live in `tools/link/overrides/`: `overrides.tsv` (address, symbol, source, signature)
+and `build.sh <out dir>`, which compiles them for the game target and writes the table `--override` reads. First
+entry: **0x00703c00, the console logger** - the decomp defines it as `void (const char *text, const char *context)`
+handing `&context` on as x86 stack varargs; `fnvnx_log_00703c00(const char *fmt, ...)` formats with `vsnprintf`
+under the original's conditions (UI root and key flag, then an active console or `FUN_005b6f70`) and prints through
+the console (`ConsoleManager::Print`, 0x0071d0a0) with `%` doubled and no argument list. Its 4th column
+(`int __cdecl (const char *, ...)`) makes the variadic and the double-taking references bind to it directly.
 
 `shadowed.tsv` reports, per shadowed definition: the decomp declaration, native name and unit, the override, units
 that hold an inline (COMDAT) copy, and units that name the address in units.json but whose object no longer
@@ -256,13 +303,19 @@ those callers). Test: `test_override.py` (vtable slot, same-object call and alia
 
 For every pair that the class-level model above cannot settle, the aggregates passed or returned by value are
 measured in the unit that declares them: a probe translation unit includes the unit's source and, per type, emits
-`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible) and `__is_empty` as constants (read
-back from the object), and a function taking the type by value whose spills show the SIMD registers it arrives in.
+`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible), `__is_empty` and MSVC's C++03 POD bit
+(`__is_pod`, `__is_aggregate` and no direct base: no user constructor, destructor or copy assignment, no private
+member, no virtual function) as constants (read back from the object), and a function taking the type by value
+whose spills show the SIMD registers it arrives in. `layouts.tsv` rows carry the unit content key (column 8) and
+the POD bit (column 9); a row without either is probed again.
 Class: `G1`/`G2` (one/two general registers), `H<n>x<w>` (HFA/HVA: n SIMD registers of w bytes), `IND` (by
 reference: over 16 bytes or not trivial for calls). Types the probe cannot name are dropped and stay `manual`.
 
 `abi2` then works on bytes: MSVC x86 locations with sizes (hidden result pointer always for members, for free
-functions unless a trivial 1/2/4/8-byte aggregate), AArch64 chunks per value (x/v registers, incoming stack, memory
+functions unless a 1/2/4/8-byte C++03 POD - V1 adversarial A1/A2: `struct C4 { int a; C4() {} }` is trivial for
+Itanium but MSVC returns it through the buffer, so `C4 f()` against `void f(C4 *)` is an `sret-explicit` bridge, not
+`same`; on three large units 56 of 202 probed types are such small trivially copyable non-PODs), AArch64 chunks per
+value (x/v registers, incoming stack, memory
 behind a pointer or x8). Each definition value collects its bytes from the overlapping reference values; when every
 chunk finds its bytes in the same container at the same offset and the results agree, the pair is `same`
 (differently named but layout-identical aggregates, a 4-byte struct vs an int, an HFA vs separate floats).
@@ -319,6 +372,18 @@ Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the com
 resolve links each as an extra object of its host unit, resolved with the host's names: slot functions bind by
 address like everywhere else. Because all GCC vtables are weak too, a compiled copy wins as soon as its unit
 compiles. GCC stores 0 in both destructor slots of an abstract class, genuine and synthesized alike.
+
+**Typeinfo kept with its vtable** (V1 defect 4). `_ZTV<C>` and `_ZTI<C>` are separate weak COMDAT groups, and the
+linker keeps the first copy of each independently. When units reconstruct C with different bases, the kept vtable's
+offset-to-top words could name a base the kept typeinfo lacks, and `__dynamic_cast` to it fails. apply's last pass
+(`pair_typeinfo`) takes `check`'s link order (sorted names) and finds every class whose first typeinfo copy comes
+from another object than the kept vtable, when the vtable's object has one of its own. The typeinfo definitions
+of the objects linking before it become references (`elfsyms.undefine_symbols`, which also clears `GRP_COMDAT` on
+the group they signed: an emptied group would still win its signature and drop the real copy). Every `typeid` and
+every derived class's base list then reaches the vtable object's typeinfo (`typeinfo_pairs.tsv`). On f13's objects
+137 classes change (299 definitions) and V1's `c4_definers.py --audit` goes from 36 disagreeing classes (33 by size,
+3 by bases) to 0; trial-link counts are unchanged. The pass assumes `check`'s order: a link that orders the objects
+otherwise keeps another vtable and needs the pass run for that order.
 
 **Slot functions no object defines.** Inline virtual functions and implicit destructors of a class that no unit
 constructs or destroys are emitted nowhere (GCC emits them with the vtable). For the synthesized vtables a compiled
@@ -450,6 +515,17 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   thread-local the source places at an address below it (outside `.tls`) gets a native TLS variable of its own. The block starts zeroed in each thread: S4 should point its per-thread template copy
   at it (`&__fnvnx_tls_image` of the current thread, `__fnvnx_tls_image_orig` / `_size`) and copy the image's
   template there at thread start, so `fs:[0x2c]` code and GCC's TLS accesses agree.
+* **Data names** (S5, J-0062): a reference to a variable the image holds must bind to its address, or the guest
+  keeps a private copy the rest of the game never sees. Three gaps closed: (1) a pointer to a function pointer
+  (`void (__cdecl **g_apfnA26E20CurvesCopy)(void *)`, the handler tables `FUN_00a28cb0_aTable0..11`) is parsed as
+  a variable of that name; (2) `llvm-undname` drops the space after a type whose name ends in `_` (`class
+  SettingT_GameSettingCollection_bKeepLowDetailTerrain`), so a plain variable's qualified name is read from its
+  decoration (`?name@scope@@3...`) instead; (3) a data reference that still matches nothing is looked up by its
+  identifier among every unit's data names at image addresses - the same variable in another scope (the decomp's
+  per-function namespaces) or with another decorated type (an array where MSVC saw a pointer, cv) - and bound when
+  exactly one address carries it (tier `gref/ident`; several addresses: `ambiguous`, not guessed). On the
+  ninth-round objects: (1)+(2) bind 52 names (101 references), (3) 7 names (12 references), 1 identifier stays
+  ambiguous.
 * **Calls of an IAT slot's address**: a decomp `__declspec(dllimport)` function named after its slot
   (`FUN_00fdf1c0(void *)`) is called directly by GCC (`bl`); when its name binds to an IAT slot as data, a call of it
   binds to the slot's api (S4's implementation or the api name), never into the image's IAT words.
@@ -489,7 +565,13 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   class constructed there: the class of the same name when a unit names that vftable (`V` above), else the class
   of the storing member function when it has a native vtable (a new `V` entry). Its data symbol `__fnv_<addr>` is
   then the native address point (`aliases.ld: __fnv_X = _ZTV<C> + off;`), so the store installs the native vptr and
-  vptr comparisons match; addresses without a native class keep the image address (`hand_vptrs.tsv`).
+  vptr comparisons match; addresses without a native class keep the image address (`hand_vptrs.tsv`). The storing
+  function is the last function head before the store, member (`X::f(...) {`) or free (a column-0 definition): a
+  store in a free function credits no class (S13 00404920: `InitLargePrimitiveArray`'s store of 0x0104d338 had been
+  credited to the constructor of `FUN_00404920` above it, pairing that class's vtable with 0x0104d338 while the
+  constructor stores 0x01012120). MSVC folds identical vftables, so one image vftable can be several classes'
+  (0x01012120: `FUN_00404920`, `FUN_00404950`, `FUN_0045cfb0`, `SettingBase_01012120`); the map names one native
+  vtable, `vftable_aliases.tsv` every class's own.
 
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
