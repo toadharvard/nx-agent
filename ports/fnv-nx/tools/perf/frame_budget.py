@@ -254,7 +254,14 @@ def apply_perf(items, model, perf, ipc_mid):
     for the unpriced work and the priced rows run at their own. The lo case takes the lo cycles at the lo calls."""
     rows = {h['id']: h for h in model.get('hotspot_functions', [])}
     used = []
-    for r in perf.get('per_call_cycles') or []:
+    # a row with its own A57 CPI (PERF.md 11.9: lo = throughput bound, hi = one call) is priced from it and the
+    # model's current instructions per call, so a re-measured count re-prices it (V1 P1); the others take the
+    # report's cycles per call
+    priced = [{'id': h['id'], 'per_call_cycles': [h['per_call_insn'][0] * h['cpi']['lo'],
+                                                   h['per_call_insn'][1] * h['cpi']['hi']]}
+              for h in rows.values() if 'cpi' in h]
+    have = {r['id'] for r in priced}
+    for r in priced + [r for r in perf.get('per_call_cycles') or [] if r.get('id') not in have]:
         h = rows.get(r.get('id'))
         if not h or h['id'] in A57_SKIP or not r.get('per_call_cycles'):
             continue
@@ -296,6 +303,24 @@ def apply_overrides(items, model):
                       'follows': follows_item(model, h.get('subsystem'))})
         used.append({'id': h['id'], 'delta_minsn_mid': round(d[1], 3)})
     return items, {'rows': used, 'delta_minsn_mid': round(sum(u['delta_minsn_mid'] for u in used), 3)}
+
+def corrected_items(model):
+    """the model's items with S15-simd's override corrections (apply_overrides), the work the code that runs does:
+    the one place other models (a57model/mtmodel.py) take their items from, so the two agree"""
+    items, _ = apply_overrides([dict(it) for it in model['items']], model)
+    # fold each correction into the item it follows: a scheduler (mtmodel) cannot run negative work, and the sums
+    # (lo + lo, mid + mid, hi + hi, the pairing build's scenario_work uses) stay the same
+    by = {it['id']: it for it in items}
+    out = []
+    for it in items:
+        f = by.get(it.get('follows'))
+        if f is None or not it['id'].startswith('simd_'):
+            out.append(it)
+            continue
+        fm = f.get('mid', mid(f['minsn']))
+        f['minsn'] = [f['minsn'][0] + it['minsn'][0], f['minsn'][1] + it['minsn'][1]]
+        f['mid'] = fm + it.get('mid', mid(it['minsn']))
+    return out
 
 def build(model, profs=None, render=None, perf=None):
     placement = load_placement()
