@@ -95,12 +95,12 @@ S15-MTQEMU-B1	S15-threads	79481ab	79481ab	fixed	e04253d	test_weak_interlocked.py
 NXR-H1-FIX	render	e0485fc	e0485fc	confirmed	-	test_nx_render_robust.py	.nxcap draws bounded by vertices x instances: H1 exit 1 (ASan build of the head), D1-D7/C1-C6 and 1,000 mutations each of t.nxd9 and n0.nxcap clean
 P0-E1	P0-perfmodel	6e0a34b	6e0a34b	refuted	-	test_a57_calib_circular.py	calibration check point l2_latency echoes cost.l2_lat (22/30/40 in, out); truth.json calls check points independent
 P0-E2	P0-perfmodel	6e0a34b	6e0a34b	refuted	-	test_a57_calib_circular.py	check point taken_l2btb echoes 1 + btb_l2_bubble; without E1/E2 the claimed 4.9 % over 14 points is >= 5.7 % over 12
-P6N-L1	P6n	b34a429	b34a429	refuted	-	test_p6n_engine_path.py	engine_path.py undercounts nested in-function loops (4x4: 39 counted, 66 run); the 2,303 instr/draw not re-derived (objects not here)
+P6N-L1	P6n	b34a429	b34a429	fixed	63a57c0	test_p6n_engine_path.py	engine_path.py undercounts nested in-function loops (4x4: 39 counted, 66 run); the 2,303 instr/draw not re-derived (objects not here)
 P6N-BUDGET	P6n	bbe6e74	bbe6e74	confirmed	-	test_p6n_engine_path.py	report.json arithmetic re-derives (8,544,130 instr, 13.96 ms, 3.763 us/draw); 60 fps judged on mix_hi at the hi end (0.662 of 16.7 ms)
-S13B-UNCL-A1	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	stub-normalized (artifact) labels a native that forgets flag 0x800 of a stored flags word
-S13B-UNCL-A2	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	ctor-this (artifact) labels a native that drops p->Init()'s result and returns p
-S13B-UNCL-A3	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	canned-this (artifact) labels a by-value declaration mismatch (native passes &tmp)
-S13B-UNCL-A4	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	native-wild-private (artifact) labels a wrong-slot vcall while x86 made the right call
+S13B-UNCL-A1	S13b	524ab2e	524ab2e	fixed	e82a1dd	test_s13b_unclassified_artifacts.py	stub-normalized (artifact) labels a native that forgets flag 0x800 of a stored flags word
+S13B-UNCL-A2	S13b	524ab2e	524ab2e	fixed	e82a1dd	test_s13b_unclassified_artifacts.py	ctor-this (artifact) labels a native that drops p->Init()'s result and returns p
+S13B-UNCL-A3	S13b	524ab2e	524ab2e	fixed	e82a1dd	test_s13b_unclassified_artifacts.py	canned-this (artifact) labels a by-value declaration mismatch (native passes &tmp)
+S13B-UNCL-A4	S13b	524ab2e	524ab2e	fixed	e82a1dd	test_s13b_unclassified_artifacts.py	native-wild-private (artifact) labels a wrong-slot vcall while x86 made the right call
 NX1-P1	NX1	ac00629	ac00629	fixed	8e2c191	test_nx1_publish_nro.sh	host stage fails, package not run: publish_nro ships the previous job's fnv.nro as nro/<new commit>
 NX1-P2	NX1	ac00629	ac00629	fixed	8e2c191	test_nx1_publish_nro.sh	a rejected push is reported published when the branch already exists
 S5DATA-PROFILE	S5-data	e601246	e601246	confirmed	-	tests/s4/test_profile.cpp	first-run profile files (tests/s4: 95 tests, 0 failed); the game also copies Fallout_default.ini itself (0x00876ad0)
@@ -138,3 +138,27 @@ NX1-L1	NX1	57907a2	57907a2	confirmed	-	test_nx1_checks.py	lenient decoding: Lati
 GATES-TR	gates	e446506	e446506	confirmed	-	test_gates_trend.py	fnvnx-trend/1: rise, lost, missing head, creep, re-score and direction all detected; no false alarm
 GATES-D18	gates	21867b6	21867b6	confirmed	-	test_gates_trend.py	thresholds implement D18: 60 fps worst frame, stock 1.02 GHz, handheld_720p (note: perf.budget at 16.7 ms, perf.frame at 16.667 ms)
 S15S-PB	S15-simd	e8891c1	e8891c1	confirmed	-	test_s15_pass_bucket.py	82 -> 54 with no code change: the stack protector dropped from compile.sh (2be012c) explains 68 -> 53 static; same x86 path (~38 on both links)
+S6N-REUSE	S6n	831830a	831830a	confirmed	-	test_s6n_render_reuse.py	epilogue block / dynamic record reuse: stream and constant ring equal the uncached build (R1-R11, F1-F40; 5 wrong caches caught)
+S6N-STTEX	S6n	90fc3c2	90fc3c2	confirmed	-	test_s6n_render_reuse.py	state id / texture block reuse equals uncached; StateCache never resets, so lastSt_ cannot go stale
+S6N-FINDYN	S6n	f7b342a	f7b342a	confirmed	-	test_s6n_render_reuse.py	Frame::Finish dynamic-state skip equals uncached
+S6N-EPITAB	S6n	c94cc7d	c94cc7d	confirmed	-	test_s6n_render_reuse.py	epilogue permutation table equals the list scan; constant slice once
+S6N-SMPC	S6n	89ee4a8	89ee4a8	confirmed	-	test_s6n_render_reuse.py	per-stage sampler cache equals per-draw translation
+S6N-LITP	S6n	d80096c	d80096c	confirmed	-	test_s6n_lit_prepared.py	prepared direction and 1/range^2: static == dynamic, worst 0/255, ranges 0, inf, 1e30, 1e-20, negative
+S6N-ACMP	S6n	021fc46	021fc46	confirmed	-	test_s6n_alpha_compare.py	branch-free alpha compare == the old switch == D3D9 for every function and ref, NaN and equality
+S6N-OVR-O2	S6n	68ccc78	68ccc78	refuted	-	test_s6n_overrides_slots.py	RestoreSamplerState (slot 53) returns the D3D9 default, not the value slot 47 saved: 10 of 10 states
+S6N-OVR-O3	S6n	68ccc78	68ccc78	refuted	-	test_s6n_overrides_slots.py	texture stage state defaults: ALPHAARG0 (27) and RESULTARG (28) left 0; the value at 26 commented RESULTARG is COLORARG0; 16 differ from D3D9
+S6N-NXGI	S6n	4abbae3	4abbae3	confirmed	-	test_s6n_nxgpu_init_checks.py	each of 18 failing deko3d creates makes nxgpu_init return NULL, no NULL used (pre-fix code: 13 defects)
+S6N-CUBE	S6n	ac928fc	ac928fc	confirmed	-	test_s6n_cube_nxd9.py	cube textures and TEXC face updates C1-C5 on an ASan nx_render of the head
+P6N-OPT-D3	P6n	4463ec3	4463ec3	refuted	-	test_p6n_opt_rederive.py	optimizations[]: 9 of 21 recorded commits are not in the repository (nor on claude/port-nsw-render); two deltas re-measured exactly
+P6N-OPT-D3B	P6n	c4ebb04	c4ebb04	refuted	-	test_p6n_opt_rederive.py	the message names 19031e3, the entry records 147155ba/e564afbd: none exist in the repository
+P6N-HOT	P6n	b374619	b374619	confirmed	-	test_p6n_doc_report.py	every hotspot row names its thread and share of 16.7 ms (183 rows)
+P6N-DOC-H3	P6n	91710d3	91710d3	fixed	2f5880c	test_p6n_doc_report.py	RENDER_PERF.md at 91710d3 said 10.25/8.71/5.45 ms where report.json said 23.31/10.02/8.86; equal from 2f5880c
+S13B-A-FIX	S13b	e82a1dd	e82a1dd	confirmed	-	test_s13b_unclassified_artifacts.py	ctor-this, canned-this, native-wild-private to triage, stub-normalized only for arm64emu's rewrite: A1-A4 triage, K1 control artifact
+P6N-L1-FIX	P6n	63a57c0	63a57c0	confirmed	-	test_p6n_engine_path.py	engine_path nested loops multiply: 4x4 counts 66 of 66 (L1), single loop 14 (L2); report arithmetic re-derives (B1, B2)
+NX1-ADOPT1	NX1	097cdd1	097cdd1	confirmed	-	test_adopt_lossless.py	adopt of fnv-nx1-nro 0599176b lossless (4 stream files)
+NX1-ADOPT2	NX1	43900fb	43900fb	confirmed	-	test_adopt_lossless.py	adopt of fnv-nx1-nro 398bdb9b lossless (3 stream files)
+S5-ADOPT2	S5	1d02521	1d02521	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 60f4d234 lossless (7 stream files)
+P0-ADOPT	P0-perfmodel	004d294	004d294	confirmed	-	test_adopt_lossless.py	adopt of fnv-p0-perf 2e8547ef lossless (13 stream files; the content is P0's own, verified separately)
+NX1-P12-MERGED	NX1	8e2c191	9dc4871	confirmed	-	test_nx1_publish_nro.sh	the integration copy of 8e2c191: K1, P1, P2 ok (re-run on the integration head after the merge)
+S5-ADOPT3	S5	fed86ee	fed86ee	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 1d8d273f lossless (5 stream files)
+NX1-ADOPT3	NX1	cd1e0eb	cd1e0eb	confirmed	-	test_adopt_lossless.py	adopt of fnv-nx1-nro 7bc3c97a lossless (6 stream files)

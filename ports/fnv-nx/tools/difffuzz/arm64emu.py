@@ -33,10 +33,11 @@ BRK = struct.pack('<I', 0xd4200000)
 
 
 class Call:
-    __slots__ = ('target', 'args', 'fargs', 'x8', 'stack')
+    __slots__ = ('target', 'args', 'fargs', 'x8', 'stack', 'addr')
 
     def __init__(self, target, args, fargs, x8, stack=b''):
         self.target, self.args, self.fargs, self.x8, self.stack = target, args, fargs, x8, stack
+        self.addr = None             # the raw address the native branched to (a stub or a wild address)
 
 
 class Result:
@@ -405,6 +406,7 @@ class Arm64Engine:
             stk = b''
         r.calls.append(Call(target, [uc.reg_read(XR[i]) for i in range(8)], [uc.reg_read(VR[i]) for i in range(8)],
                             uc.reg_read(A.UC_ARM64_REG_X8), stk))
+        r.calls[-1].addr = address
         if libcalls.noreturn_a64(name) or (name is None and target in libcalls.NORETURN_X86):
             r.noreturn = name or libcalls.NORETURN_X86[target]   # never returns: the run ends here (difffuzz-14)
             uc.emu_stop()
