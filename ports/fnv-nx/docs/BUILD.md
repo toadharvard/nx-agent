@@ -172,8 +172,14 @@ Still different (by design, or left for later):
 * S5 boots twice per guest (zero image, synthesized image); the pipeline boots once per build (`BOOT_IMAGE`).
 * `JOBS` is one value for every stage (S2c compiled and probed with 2, S5 linked with 3).
 * `-MD` in the compile `CXX` (dependency files, no effect on the objects).
+* `--extern-text`: the hand flow passes `$S/s4/addr_ids.txt`, an address list S4 made with scratch scripts; no
+  committed tool produces it, so `make` needs `EXTERN_TEXT=` to match (the link stage notes when it is missing;
+  f12 had 787 `extern-text` references). Owner: S4.
 * The seeded `layouts.tsv` and `vtables/` of the hand flow are not reused: a cold probe in a new `build/` costs
   more than S2c's seeded runs, but every layout is measured on the current tree.
+* Not run in full since this alignment: the pipeline's own prepare of the whole tree, the full compile and link
+  and the boot on them (this round ran a 31-unit subset on an adopted tree only, see "Subset run"). The next
+  full run with `make` is that test; compare it with S2c's run of the same commit with `linkdiff.py`.
 
 ## Subset run
 

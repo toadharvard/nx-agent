@@ -61,8 +61,8 @@ CONFIG = [
                      'prepared_from.txt (in the tree or next to it) gives its provenance'),
     ('FORCE_STALE', '0', '1: stages consume inputs prepared from another commit than the current head (recorded as '
                          'stale, status warn); 0: they refuse them'),
-    ('PORT_COMMIT', '', 'commit of ports/fnv-nx when it is a copy without git metadata (a git archive snapshot); '
-                        'in a checkout it must equal HEAD'),
+    ('PORT_COMMIT', '', 'commit (40 hex digits) of ports/fnv-nx when it is a copy without git metadata (a git '
+                        'archive snapshot); in a checkout it must equal HEAD'),
     ('CENSUS', '1', '0: skip the -fsyntax-only census'),
     ('OVERRIDE', '', 'fnvlink resolve --override table (native replacements)'),
     ('EXTERN_TEXT', '', 'fnvlink resolve --extern-text list (S4 addr_ids.txt)'),
@@ -1445,6 +1445,9 @@ class Link(Stage):
             if b.cfg[key]:
                 args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
         r['resolve_options'] = [b.rel(a) for a in args[3:]]
+        if not b.cfg['EXTERN_TEXT']:
+            r.note('no EXTERN_TEXT: the hand flow passes S4\'s addr_ids.txt (--extern-text); without it the '
+                   'referenced .text addresses without a definition get no E entries')
         seed_link_out(b, r, out)
         obj = os.path.join(b.out, 'compile', 'obj')
         units = [l.split('\t', 1)[0] for l in open(objects, errors='surrogateescape') if l.strip()]
