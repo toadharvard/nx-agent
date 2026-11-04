@@ -160,6 +160,10 @@ POLICY = {
     'thunk-binding':  ('real-bug', 'S2c', True, 'the original address is an override\'s MSVC entry (this = the '
                                                 'secondary-base subobject); the link binds __fnv_<addr> to the GCC '
                                                 'primary entry (this = the full object), not its _ZThn<d>_ thunk'),
+    'ilp32-wrap':     ('real-bug', 'S1', True, 'the native faults at 2^32 + w where w is memory the oracle maps: the '
+                                             'exe adds a base and a 32-bit index modulo 2^32 (a negative int as '
+                                             'unsigned / as a pointer), GCC ILP32 adds it in 64 bits (uxtw); the '
+                                             'decomp type or -fwrapv-pointer must make it wrap'),
     'native-zero-stub': ('real-bug', 'S1', True, 'the native has 0 where the oracle has a value, and the native '
                                                  'function or a direct callee in its unit is a placeholder body '
                                                  '`mov w0, #0; ret` (a stand-in the port never filled in)'),
@@ -190,6 +194,9 @@ POLICY = {
                                                     'reads memory, is skipped natively'),
     'native-trap':    ('real-bug', 'S1', True, 'the native executes a trap (FALL1 __builtin_trap or GCC '
                                                'unreachable) on a path where the exe returns'),
+    'vslot-trap':     ('real-bug', 'S2c', True, 'the native calls a vtable slot the link filled with '
+                                              'fnvnx_vslot_trap / fnvnx_special_trap (brk #0xf5 / #0xf6: a virtual '
+                                              'defined nowhere) where the exe vftable has a function'),
     'layout-offset':  ('real-bug', 'S1', True, 'a pointer into the same object at another offset (a few words): a '
                                                'base subobject or member placed differently (layout)'),
     'field-width':    ('real-bug', 'S1', True, 'the machines read one field with another width or signedness '
@@ -373,6 +380,53 @@ def _rule_error(d, rec=None):
     return None
 
 
+# The link's trap stubs (tools/link/fnvlink.py): fnvnx_vslot_trap `brk #0xf5`, fnvnx_special_trap `brk #0xf6`. Every unit
+# image holds one copy of each, so all functions of a unit that reach it fault at the same pc (S1-fuzzA-001).
+LINK_TRAPS = {0xd4201ea0: 'vslot-trap', 0xd4201ec0: 'vslot-trap'}
+_IMAGE_WORDS = {}
+
+
+def _image_word(source, pc):
+    """The 32-bit word at `pc` of the unit image difffuzz linked for `source` (FNVNX_CAUSES_A64 or config.A64WORK,
+    `<object>.elf`), None when the image is not there. An image linked from other objects than the record's may
+    have moved; callers only act on words that cannot be anything else."""
+    d = os.environ.get('FNVNX_CAUSES_A64')
+    if not d:
+        try:
+            import config
+            d = str(config.A64WORK)
+        except Exception:  # noqa: BLE001
+            return None
+    path = os.path.join(d, (source or '').replace('/', '_') + '.o.elf')
+    if path not in _IMAGE_WORDS:
+        segs = []
+        try:
+            from elftools.elf.elffile import ELFFile
+            with open(path, 'rb') as f:
+                for seg in ELFFile(f).iter_segments():
+                    if seg['p_type'] == 'PT_LOAD' and seg['p_filesz']:
+                        segs.append((seg['p_vaddr'], seg.data()))
+        except Exception:  # noqa: BLE001 - no image, or not an ELF: no answer
+            segs = None
+        _IMAGE_WORDS[path] = segs
+    for base, data in _IMAGE_WORDS[path] or ():
+        if base <= pc and pc + 4 <= base + len(data):
+            return struct.unpack_from('<I', data, pc - base)[0]
+    return None
+
+
+def _rule_trap(d, rec):
+    """native `exc:N@pc` whose instruction is one of the link's trap stubs -> vslot-trap (S2c), else None."""
+    a = d.get('arm') or ''
+    if '@' not in a:
+        return None
+    try:
+        pc = int(a.split('@', 1)[1], 16)
+    except ValueError:
+        return None
+    return LINK_TRAPS.get(_image_word((rec or {}).get('source'), pc))
+
+
 def _rule_call_args(d):
     if d.get('arm_garbage'):
         return 'native-garbage-arg'
@@ -532,7 +586,7 @@ def _rule_count(d, tx, ta):
 # at an unmapped pc; causes.py's _rule_error leaves the other oracle-only data faults at oracle-fault. These rules
 # split what the record shows; what they cannot split keeps its cause.
 
-HINT_REFINABLE = {'oracle-vcall'}        # probe causes refine() still splits (report.reclassify hands them over)
+HINT_REFINABLE = {'oracle-vcall', 'ilp32-pointer'}        # probe causes refine() still splits (report.reclassify hands them over)
 
 
 def _code_target(t):
@@ -557,6 +611,28 @@ def _stub_alias(x, a):
     if not _in(vx, A64_STUBS):
         return False
     return a == 'name:%x' % vx or a == '%08x' % (vx - A64_STUBS[0])
+
+
+X86_MAPPED = (TEXT, WINDOW, LIT_POOL, BUFS, HEAP, STACK)    # what the oracle's world maps for every case
+
+
+def _rule_ilp32(rec):
+    """The probe's ilp32-pointer (the native touched an address >= 4 GiB) split by where the address lands mod 2^32.
+    In memory the oracle maps, the oracle made the same 32-bit access validly: a valid base plus an index that relies
+    on 32-bit wraparound (a negative int carried as unsigned or as a pointer), which GCC's ILP32 code adds in 64 bits
+    (`add x, base, w, uxtw`). The exe computes that address on such input, so it is not a pointer the exe never
+    holds: ilp32-wrap, a real bug. Near null or unmapped, the by-design reading stands."""
+    d = rec.get('_now') or rec.get('divergence') or {}
+    a = str(d.get('arm') or '')
+    if d.get('kind') != 'error' or 'ilp32-high' not in a or d.get('x86') is not None:
+        return None
+    try:
+        v = int(a.rsplit(':', 1)[1], 16)
+    except ValueError:
+        return None
+    if v >> 32 == 1 and any(_in(v & 0xffffffff, r) for r in X86_MAPPED):
+        return 'ilp32-wrap'
+    return None
 
 
 def _rule_vcall(rec):
@@ -1497,6 +1573,8 @@ def refine(rec, cause=None):
     """The record-level cause of a divergence the probes left at `cause` (unclassified / call-flow / signedness?),
     or `cause` itself when no rule applies. Never overrides a probe's definite cause; oracle-vcall (HINT_REFINABLE,
     the runner's vcall tag or the fault probe, not a decision) is split by _rule_vcall."""
+    if cause == 'ilp32-pointer':
+        return _rule_ilp32(rec) or cause
     if cause in HINT_REFINABLE:
         return _rule_vcall(rec) or cause
     if cause not in REFINABLE:
@@ -1506,6 +1584,8 @@ def refine(rec, cause=None):
     got = None
     if k == 'error':
         got = _rule_error(d, rec)
+        if got == 'native-trap':
+            got = _rule_trap(d, rec) or got
         if got == 'native-null-read' and _calls_allocator(rec):
             pass        # new-null retired (S13b audit): since difffuzz-12 the allocators return heap blocks, so a
                         # canned 0 comes from another call, a valid input: the native null access stays a real bug
