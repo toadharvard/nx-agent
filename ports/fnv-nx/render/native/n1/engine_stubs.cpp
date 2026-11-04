@@ -74,7 +74,15 @@ uint32_t NiDX9RenderState::GetTextureStageState(uint32_t st, uint32_t t) {
     if (!g_tssInit) TssDefaults();
     return g_tss[st][t];
 }
+// The engine's defaults pass (slot 47, not overridden) writes each sampler default into its own saved field and
+// sets it through slot 51; slot 53 later re-sets that saved value. The first set of a (stage, type) is that
+// defaults pass, so it is recorded here as the value slot 53 restores (V1 O2: restoring D3D9's default instead was
+// wrong for 10 of 10 states the engine sets differently).
+enum { kSampStages = 16, kSampTypes = 14 };
+static uint32_t g_sampSaved[kSampStages][kSampTypes];
+static bool g_sampSeen[kSampStages][kSampTypes];
 void NiDX9RenderState::SetSamplerState(uint32_t st, uint32_t t, uint32_t v, uint32_t) {
+    if (st < kSampStages && t < kSampTypes && !g_sampSeen[st][t]) { g_sampSeen[st][t] = true; g_sampSaved[st][t] = v; }
     if (R()) R()->state().SetSamplerState(st, t, v);
 }
 uint32_t NiDX9RenderState::GetSamplerState(uint32_t st, uint32_t t) { return R() ? R()->state().GetSamplerState(st, t) : 0; }
@@ -93,7 +101,11 @@ void NiDX9RenderState::ClearTextureUsage(void* texture) {
     for (uint32_t s = 0; s < 16; s++) if (g_tex[s] == texture) SetTexture(s, nullptr);
 }
 void NiDX9RenderState::RestoreRenderState(uint32_t s) { if (R()) R()->state().RestoreRenderState(s); }
-void NiDX9RenderState::RestoreSamplerState(uint32_t st, uint32_t t) { if (R()) R()->state().RestoreSamplerState(st, t); }
+void NiDX9RenderState::RestoreSamplerState(uint32_t st, uint32_t t) {
+    if (!R()) return;
+    if (st < kSampStages && t < kSampTypes && g_sampSeen[st][t]) R()->state().SetSamplerState(st, t, g_sampSaved[st][t]);
+    else R()->state().RestoreSamplerState(st, t);
+}
 
 // ---- shader construction: nothing to build natively ---------------------------------------------------------------
 void TileShader::CreateVertexShaders() {}
