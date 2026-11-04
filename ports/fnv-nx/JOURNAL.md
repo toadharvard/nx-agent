@@ -2674,3 +2674,17 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **found** - The owner's game-data download (`curl ... | bash`) failed with `Recv failure: Connection reset by peer`
   at the TLS handshake, so nothing was downloaded. Freed 6 GB of retired scratch to make room (9.5 GB free; GOG FNV is
   about 10 GB).
+
+### J-0121 | 2026-11-04 | stream: farms | status: wip | parent: J-0101
+
+* **measured** - Census at b152bec (farm1, and try1of4 on S13's wip): 2,917 of 2,978 units clean, 61 failing (was
+  2,908/70).
+* **found** - The hourly farm check-in can never see a dead runner. Its command, `pgrep -f tools/farm/runner.sh`,
+  always matches the agent's own `bash -c` wrapper, whose command line contains the pattern.
+  - link1 (Opus) noticed this at 10:28 and restarted its runner, which had stopped.
+  - The Haiku farms are likely to read the self-match as "alive" and do nothing. That defeats exactly the rate-limit
+    recovery the check-ins were made for.
+  - The fix is a self-safe pattern, `pgrep -f '[t]ools/farm/runner.sh'`.
+  - A routine's prompt can be changed only from the session it posts into, so this session cannot edit the 48 check-ins.
+    Deleting and recreating them needs the owner's explicit request.
+* **next** - The owner decides: recreate the 48 check-ins with the fixed command, or another remedy.
