@@ -424,6 +424,7 @@ def test_handoffs():
         check(s1[0] == list(causes.HANDOFF_COLUMNS) and len(s1) == 2, 'S1 list: header and one row')
         check(s1[1][:5] == ['S1', 'native-trap', '00401000', 'src/t.cpp', 'fuzz/cache/7of26:div/00401000-0.json'],
               'row: owner, cause, address, unit, reproducer (setup function skipped)')
+        check(s1[1][6] == 'control-flow', 'row: the D21 fix class of its cause')
         tr = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'triage_S13b.tsv'))]
         check(tr[1][1] == 'unclassified' and tr[1][5] == 'value', 'triage row carries the first effect')
         hd = os.path.join(root, 'hd')

@@ -1734,7 +1734,7 @@ def merge(paths):
 
 
 HANDOFF_FILES = (('real-bug', 'handoffs'), ('triage', 'triage'), ('artifact', 'harness'))
-HANDOFF_COLUMNS = ('owner', 'cause', 'address', 'unit', 'reproducer', 'first effect')
+HANDOFF_COLUMNS = ('owner', 'cause', 'address', 'unit', 'reproducer', 'first effect', 'fix class')
 
 
 def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/', by_head=False):
@@ -1758,7 +1758,7 @@ def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/', by_head=False):
             ref = ('fuzz/%s/%s:div/%s' % (head, name, rec['_file']) if by_head and head else
                    '%s%s:div/%s' % (ref_prefix, name, rec['_file']))
             out[(prefix[cls], owner)].append((owner, rec['_cause'], rec['address'], rec.get('source') or '', ref,
-                                              e.get('first') or ''))
+                                              e.get('first') or '', FIX_CLASS_OF.get(rec['_cause'], '')))
     for rows in out.values():
         rows.sort(key=lambda r: (r[1], r[2], r[4]))
     return dict(out)
