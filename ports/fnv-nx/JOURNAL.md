@@ -1873,3 +1873,35 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
     and SHA-256 checks. The first farm publishes the unpacked VC 2008 as `toolchain/msvc9` (54 MB packed) for the
     others, with the Authenticode signatures always checked.
 * **did** - Merged all of these. Orchestrator re-ran tests/s11 and tests/s12: ok. Next: start the link farms.
+
+### J-0092 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0089
+
+* **did** - V1 round-3 fixes and the render machine's R1. The orchestrator re-ran all 7 link tests (ok) and V1's
+  adversarial_cname cases (broken: 0).
+  - **C-named declarations:** read only from real declarations (comments, strings and calls are skipped; parameter
+    lists are matched with balanced parentheses; typedefs and tags are resolved; the unit's headers are searched).
+    An undeclared stdcall/fastcall name gets stand-in parameters with the other side's result type, never an
+    assumed int. Fixes R3-1, R3-2, c8 and c9.
+  - **`pop-mismatch`:** a callee that pops a different number of stack bytes than the caller expects is now
+    x86-inconsistent.
+  - **R1 overrides:** `--override` accepts a free-text column 3, `vslot:<vftable>:<slot>` rows and
+    `--override-lib <archive>`. N1-pending rows are skipped.
+
+### J-0093 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0084
+
+* **did** - DECL1 math: a dropped C math prototype is replaced by a one-function shim header
+  (`shim/include/fnvnx_cmath/<name>.h`), not by <math.h>. A unit now gets libstdc++'s float overloads only if it
+  includes <math.h> itself, which is also when MSVC had them. The decomp's own float overloads stay at 19 sites.
+  activeeffect's `extern "C" double floor(float)` gets the game function's float return. MATH1 also drops the
+  pasted x86 inline fabsf/cosf copies. 164 units checked: errors identical.
+
+  NATIVE1 (render R3): `tools/rules/native1.py` drops the units listed in render/native/drop_units.txt and reports
+  dropped addresses that no override covers. The census gets a third line. drop_units.txt counts as a prepare
+  input (7d1efb5).
+
+  Orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+* **found** - Some of S1's local checks of ALIGN1/ENUM2 had used a relative tree path, so part of them never
+  compiled. farm1's full census at cc57d3e (which includes both rules) shows no regressions: 2,908 clean, up from
+  2,907.
+* **next** - S11 puts `shim/include/fnvnx_cmath/` on the MSVC gate's include path and re-gates DECL1. S1 then does
+  the shim pack(push, 8) and the namespace statics.
