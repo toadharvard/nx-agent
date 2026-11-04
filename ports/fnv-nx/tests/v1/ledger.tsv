@@ -106,3 +106,4 @@ NX1-P2	NX1	ac00629	ac00629	refuted	-	test_nx1_publish_nro.sh	a rejected push is 
 S5DATA-PROFILE	S5-data	e601246	e601246	confirmed	-	tests/s4/test_profile.cpp	first-run profile files (tests/s4: 95 tests, 0 failed); the game also copies Fallout_default.ini itself (0x00876ad0)
 S5-ADOPT	S5	352c315	352c315	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 7bfec755 lossless: 5 stream files equal or every stream line kept
 S16-ADOPT	S16	6a5c605	6a5c605	confirmed	-	test_adopt_lossless.py	adopt of fnv-s16 ce6d1272 lossless: 12 stream files equal
+P6N-GPUPERM	P6n	5f8952b	2f5880c	confirmed	-	test_p6n_gpu_permutations.py	GPU model binds the permutations Render binds (permutations_ on by default; d1p2 for 1+2 lights; e0/ea/ef/runtime), light loop unrolled (G1, G2). 10.25 ms stays model-only: 1+4 lights 11.67, 1+8 14.13 ms (G3); no real captures
