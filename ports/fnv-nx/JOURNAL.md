@@ -2294,3 +2294,28 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
     - The `hkpWorld does not name a type` group: 4 units.
     - hkgpmesh: 7, `_mm_set1_ps` ambiguous.
   - NiMainSDM after S5's answer on the order of native initializers.
+
+### J-0108 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0102
+
+* **did** - S2c `fa7d3f8`: the `--msvc-code` ecx verdict now covers S1b's three cases, so all seven of his sites count as
+  "ecx used" and get a real bridge.
+  - It follows ecx pushed as a callee argument.
+  - It follows callees' own code through `jmp` forwarders.
+  - It judges S1b-renamed definitions by their patched declaration.
+  - A `push ecx` that only reserves a local stays dead. Still dead as before: 00a75ec0, 00bbbe30, 00a8f730, 00e92e60.
+  - All 211 of V1's TP addresses come out as expected.
+* **did** - S2c `6aea0ac`: hand-stored image vtables.
+  - `*(int*)this = (int)&DAT_x` stores within 64 KiB of the named vftables are now detected.
+  - A store is matched to the class whose constructor or destructor is named at the storing function's `@fnv`
+    address.
+  - Candidates without a native vtable go to `vtable_requests.tsv` (reason `hand-vptr`), so the probe synthesizes them.
+* **measured** - On f13's objects:
+
+  | Image vtable addresses | before | now |
+  |---|---|---|
+  | stored by hand | 1,705 | 1,779 |
+  | bound to a native vtable | 954 | 1,100 |
+  | requested for synthesis | - | 363, including the boot stop 0x010472d0 |
+  | no candidate at all | 750 had no native vtable | 316 |
+
+  INISettingCollection 0x0101772c now maps to its native vtable. All seven link suites pass.
