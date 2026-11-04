@@ -33,6 +33,7 @@ from check_nro import Checks  # noqa: E402
 
 SITES = ["toolchain/nro", "toolchain/host", "startup/host", "render/nine/host", "render/native/host", "loader/host"]
 PRIO_LO, PRIO_HI = 0x1C, 0x3B
+PC_MAIN_STACK = 0x100000   # FalloutNV.exe 1.4.0.525, optional header SizeOfStackReserve
 
 
 def num(s: str):
@@ -55,7 +56,11 @@ def check(host_elf: str | None) -> Checks:
     mp = j["main_thread_priority"]
     c.ok("npdm.main_prio", PRIO_LO <= mp <= PRIO_HI, f"main thread priority {mp:#x}")
     ms = int(j["main_thread_stack_size"], 0)
-    c.ok("npdm.main_stack", ms % 0x1000 == 0 and ms >= 0x40000, f"main stack {ms:#x}")
+    # the game's main thread runs on the host's main thread. FalloutNV.exe reserves 0x100000 for it (PE
+    # SizeOfStackReserve) on x86-32; AArch64 frames are larger (more callee-saved and NEON registers, 16-byte
+    # alignment), so at least twice that
+    c.ok("npdm.main_stack", ms % 0x1000 == 0 and ms >= 2 * PC_MAIN_STACK,
+         f"main stack {ms:#x} < twice the PC exe's {PC_MAIN_STACK:#x}")
 
     cc = shutil.which("gcc") or shutil.which("cc")
     if c.ok("placement.compiler", cc is not None, "no native C compiler"):
