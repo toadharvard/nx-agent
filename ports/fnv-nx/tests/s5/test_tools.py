@@ -355,6 +355,32 @@ class MilestoneTest(unittest.TestCase):
         self.assertIsNone(sw(0x102, 2, 0xFFFF, 0x100))                                # partial store
         self.assertIsNone(sw(0x0FC, 8, 1, 0x100 + 4))                                 # does not cover it
 
+    def test_store_watch_follows_pointer(self):
+        """'store *A+N' under Unicorn: the pointer stored at A is followed, then the store to it +N reaches it"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc
+        from unicorn.arm64_const import UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3
+        e = emu_guest.Emu.__new__(emu_guest.Emu)
+        e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        e.calls, e.cur, e.code_syms, e.miles = 0, None, {}, {}
+        uc.mem_map(0x1000, 0x1000)       # code
+        uc.mem_map(0x01100000, 0x1000)   # "data window": the pointer at 0x01100010
+        uc.mem_map(0x20000000, 0x1000)   # "heap": the object
+        code = struct.pack("<4I", 0xB9000001, 0xB9004043, 0xB9004043, 0xD503201F)   # str w1,[x0]; str w3,[x2,#64] x2
+        uc.mem_write(0x1000, code)
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "m.txt")
+            with open(p, "w") as f:
+                f.write("cell store *0x01100010+0x40\nother store 0x01100020\n")
+            e.install_milestones(p)
+        for r, v in ((UC_ARM64_REG_X0, 0x01100010), (UC_ARM64_REG_X1, 0x20000000), (UC_ARM64_REG_X2, 0x20000000),
+                     (UC_ARM64_REG_X3, 0x1234)):
+            uc.reg_write(r, v)
+        uc.emu_start(0x1000, 0x1000 + len(code))
+        self.assertEqual(list(e.miles), ["cell"])
+        self.assertEqual(e.milestone_lines()[1], "milestone\tother\t-")
+
     def test_r0_milestones_file(self):
         sys.path.insert(0, HERE)
         import boot_milestones

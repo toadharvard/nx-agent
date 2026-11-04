@@ -100,7 +100,9 @@ def parse_milestones(path):
     """--milestones table (tests/s5/milestones.txt): [(name, 'call'|'store', target)] in file order; a name may have
     several lines (any one reaches it); '#' starts a comment."""
     out = []
-    for k, line in enumerate(open(path), 1):
+    with open(path) as fh:
+        lines = fh.read().splitlines()
+    for k, line in enumerate(lines, 1):
         f = line.split("#", 1)[0].split()
         if not f:
             continue
