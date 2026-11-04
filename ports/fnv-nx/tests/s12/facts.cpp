@@ -33,7 +33,7 @@ void finite(unsigned n) { for (unsigned i = 1; i != n; i += 2) {} }
 volatile int g_flag; int g_data;
 // fact: vread  !ldar                               (volatile read: plain ldr, no acquire; MSVC: acquire)
 int vread() { while (!g_flag) {} return g_data; }
-// fact: vwrite  str\tw\d+, \[x1, #:lo12:\.LANCHOR0\].*str\tw0,  (flag stored before the data; MSVC: release)
+// fact: vwrite  !stlr|dmb                          (volatile store: plain str, no release; MSVC: release, x86 TSO)
 void vwrite(int v) { g_data = v; g_flag = 1; }
 // fact: uninit  mov\tw0, 5\n\tret                  (uninitialized path folded away)
 int uninit(int c) { int x; if (c) x = 5; return x; }
@@ -44,3 +44,31 @@ const char *dangle(int c) { const char *s; { char buf[16]; buf[0] = c; s = buf; 
 int noret(int x) { if (x) return 1; }
 // fact: noret  !brk                                (missing return: the other path is assumed unreachable)
 // fixed: noret  brk                                (-funreachable-traps: that path traps instead)
+// -- classes the D10/D16 flags close (each line: what the flag guarantees in the generated code)
+// fact: ldc  ldrsb\tw0                             (-fsigned-char: plain char loads sign-extend, as MSVC)
+int ldc(char *p) { return *p; }
+// fact: cneg  ubfx\tw0, w0, 7, 1                   (-fsigned-char: c < 0 tests the sign bit)
+int cneg(char c) { return c < 0; }
+// fact: wrapv  cmp\tw0, w1                         (-fwrapv: x + 1 > x is computed, not folded to true)
+bool wrapv(int x) { return x + 1 > x; }
+// fact: contract  fmul.*fadd                       (-ffp-contract=off: no fused multiply-add)
+// fact: contract  !fmadd
+float contract(float a, float b, float c) { return a * b + c; }
+// fact: alias  str\twzr.*ldr\tw0, \[x0\]           (-fno-strict-aliasing: reloaded after the float store)
+int alias(int *i, float *f) { *i = 1; *f = 0; return *i; }
+extern int DAT[16];
+// fact: gotref  :got:DAT                           (-fPIC, D16: a global through its own GOT slot)
+int gotref() { return DAT[0]; }
+// -- bool bytes (S13 bool-repr, BOOL-PUN): GCC assumes 0/1, MSVC tests the whole byte (test al, al)
+// fact: bnot  eor\tw0, w0, 1                       (!b is b ^ 1: 0x22 -> 0x23, MSVC -> 0)
+bool bnot(bool *p) { return !*p; }
+// fact: btest  tst\tx0, 1                          (bit 0 only: 0x22 is false, MSVC true)
+int btest(bool *p, int a, int b) { return *p ? a : b; }
+// -- ILP32 addressing (S13 ilp32-pointer): zero-extended base + sign-extended 32-bit offset, computed in 64 bits;
+// equal to x86's address mod 2^32 whenever that address is below 4 GiB, i.e. for every access x86 could make
+// fact: sidx  ldr\tw0, \[x1, w0, sxtw\]            (a negative index: base - 4n, as on x86)
+int sidx(int i) { return DAT[i]; }
+// fact: uidx  ldr\tw0, \[x1, w0, sxtw\]           (an unsigned index too: 0xfffffff0 bytes is -16, as on x86)
+int uidx(unsigned i) { return DAT[i]; }
+// fact: i2p  uxtw\tx0, w0                          (an int used as a pointer is zero-extended)
+int i2p(int a) { return *(int *)(a + 8); }

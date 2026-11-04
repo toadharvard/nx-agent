@@ -11,6 +11,7 @@ Inputs (all optional, missing passes are reported as such):
   <out>/grep.tsv               text counts (run.sh)
 A site is (class, file, line, col); a site in a header counts once however many units include it.
 With a baseline (class<TAB>count), exits 1 when a class has more sites than the baseline allows.
+UNITS=<list file> (run.sh passes it on): only those units are read, and report.md says it is a sample.
 """
 import json
 import os
@@ -129,6 +130,24 @@ CLASSES = [
      'benign', 'none (D10 flag)'),
     ('LDBL', 'long double', 'MSVC 8 bytes (= double), AArch64 16 bytes (soft quad)', 'benign',
      'none: only in two unused template specializations'),
+    ('BOOL-PUN', 'memory of another type read as bool (`*(bool*)((char*)this + 0x104)`)',
+     'MSVC tests the whole byte (test al, al) and keeps its value in integer contexts; GCC assumes 0/1: tests bit 0, '
+     '`!b` is `b ^ 1` (verified, tests/s12). A byte other than 0/1 reads differently (S13 bool-repr)', 'runtime',
+     'none while the byte holds a real bool (MSVC wrote 0/1 into the image and saves); BOOL1 (S1, from the site list): '
+     'reads become (*(unsigned char*)(p) != 0) where the byte can hold other values (flag bytes typed bool)'),
+    ('FLOAT-BITS', 'float bits seen as an integer (pointer pun, float/int union, _mm_movemask_ps of arithmetic)',
+     'the bits of a generated NaN differ: x86 default NaN 0xFFC00000 (sign set), AArch64 0x7FC00000; float '
+     'arithmetic and compares cannot tell them apart, an integer view can (S13 nan-bits)', 'per-site',
+     'review sites that test the sign bit or compare to an integer NaN pattern; no flag (FPCR.DN also gives '
+     '0x7FC00000)'),
+    ('PTRDIFF-EXACT', 'pointer difference with a non-power-of-two element size',
+     'both compilers divide with an exact-division multiply that assumes the byte difference is a multiple of the '
+     'size (pointers into one array); for unrelated pointers MSVC and GCC give different garbage (S13: 0065c700)',
+     'benign', 'none'),
+    ('OUTARG-UNINIT', 'uninitialized local whose first use passes its address to a call (`T x; f(&x); use(x);`)',
+     'none in the port (the callee writes it); the difffuzz harness runs callees as stubs that do not write through '
+     'pointer arguments, so S13 uninit-* divergences of these functions are the harness\'s', 'benign',
+     'S13: model out-parameter writes of stubbed callees, or discount uninit-* divergences that read these locals'),
     ('W-UNINIT', 'read of an uninitialized local (clang -Wuninitialized/-Wsometimes-uninitialized, GCC '
      '-W(maybe-)uninitialized)', 'MSVC read whatever the stack/register held (often stable in /Od units); GCC -O2 '
      'picks any value (folds the path away: verified)', 'per-site',
@@ -208,6 +227,27 @@ WARN_IGNORE = {'invalid-offsetof', 'builtin-macro-redefined', 'unused-value', 'a
 
 DIAG = re.compile(r'^(.*?):(\d+):(\d+): (warning|error): (.*?)(?: \[(-W[^\]]+)\])?$')
 
+# what closes a class in the current build (flag, header, prepare rule); shown in report.md next to the verdict
+CLOSED = {
+    'THIS-NULL': 'flag -fno-delete-null-pointer-checks (D10)',
+    'W-RETURN': 'rule FALL1 (trap), patches RET1 (return); build -Werror=return-type',
+    'SHIFT32-VAR': 'benign (both mask by 31)',
+    'TLS': 'S5 guest runtime',
+}
+
+UNITS_ENV = os.environ.get('UNITS') or ''
+
+
+def unit_key(source):
+    return source.replace('/', '_').replace(' ', '_')
+
+
+def sample_units():
+    """unit keys of $UNITS, or None for all units"""
+    if not UNITS_ENV:
+        return None
+    return {unit_key(l.strip()) for l in open(UNITS_ENV) if l.strip()}
+
 
 class Sites:
     def __init__(self):
@@ -258,6 +298,7 @@ def main():
     tree_errors = Counter()
     raw_warn = Counter()
     uflags = load_units(tree)
+    only = sample_units()
 
     # ---- fnvcheck rows + clang diagnostics (gnu)
     for cfg in ('gnu', 'atomic'):
@@ -269,6 +310,8 @@ def main():
             if cfg == 'atomic' and not name.endswith('.tsv'):
                 continue
             unit = unit_of(name)
+            if only is not None and unit not in only:
+                continue
             if name.endswith('.tsv'):
                 n += 1
                 with open(path, encoding='utf-8', errors='replace') as f:
@@ -305,6 +348,8 @@ def main():
             if not name.endswith('.log'):
                 continue
             unit = unit_of(name)
+            if only is not None and unit not in only:
+                continue
             lines = open(os.path.join(gcc_dir, name), encoding='utf-8', errors='replace').read().splitlines()
             if lines and lines[-1] == 'rc=0':
                 gcc_ok += 1
@@ -312,7 +357,14 @@ def main():
                 gcc_fail += 1
             for line in lines:
                 m = DIAG.match(line)
-                if not m or m.group(4) != 'warning':
+                if not m:
+                    continue
+                if m.group(4) == 'error':
+                    # the build's own -Werror=return-type: a missing return the build cannot compile
+                    if m.group(6) == '-Werror=return-type' and rel(m.group(1), tree) is not None:
+                        raw_warn['gcc error return-type'] += 1
+                        S.add('W-RETURN', rel(m.group(1), tree), m.group(2), m.group(3),
+                              'gcc -Werror=return-type: %s' % m.group(5)[:160], unit)
                     continue
                 r = rel(m.group(1), tree)
                 if r is None:
@@ -333,6 +385,8 @@ def main():
     if os.path.exists(lay):
         for line in open(lay).read().splitlines()[1:]:
             cause, key, unit, diff = line.split('\t')
+            if only is not None and unit not in only:
+                continue
             path, l, c = key.split('|')[0].rsplit(':', 2)
             S.add('LAYOUT-' + cause.upper(), path, l, c, key.split('|', 1)[1] + '\t' + diff, unit)
         for line in open(os.path.join(out, 'layout', 'summary.tsv')).read().splitlines():
@@ -365,6 +419,8 @@ def main():
           'Generated by `tools/static/run.sh`; method and classes: `docs/STATIC_CHECKS.md`. A site is one '
           'file:line:col of the prepared tree (a header site counts once). Full per-site lists: `sites/<class>.tsv`.',
           '', '## Coverage', '']
+    if only is not None:
+        md.append('* **sample**: %d units (UNITS=%s); counts are sites in these units only' % (len(only), UNITS_ENV))
     for k, v in passes.items():
         md.append('* %s: %d units' % (k, v))
     if gcc_ok + gcc_fail:
@@ -376,13 +432,15 @@ def main():
             lay_summary.get('records_msvc', 0), lay_summary.get('records_gnu', 0), lay_summary.get('records_compared', 0)))
     for k, v in sorted(grep.items()):
         md.append('* %s: %s' % (k, v))
-    md += ['', '## Summary', '', '| class | sites | verdict | what differs | fix |', '|---|---:|---|---|---|']
+    md += ['', '## Summary', '', '| class | sites | verdict | closed by | what differs | fix |',
+           '|---|---:|---|---|---|---|']
     order = [c[0] for c in CLASSES]
     for cls in order + sorted(set(counts) - set(order)):
         if cls not in counts and cls not in CLASS:
             continue
         t = CLASS.get(cls, (cls, cls, '-', '?', '-'))
-        md.append('| `%s` %s | %d | %s | %s | %s |' % (cls, t[1], counts.get(cls, 0), t[3], t[2], t[4]))
+        md.append('| `%s` %s | %d | %s | %s | %s | %s |' % (cls, t[1], counts.get(cls, 0), t[3], CLOSED.get(cls, '-'),
+                                                       t[2], t[4]))
     order_strength = Counter(r[3].split('\t')[0] for r in by.get('ORDER-ARGS', []))
     md += ['', 'ORDER-ARGS by strength: ' + ', '.join('%s %d' % kv for kv in order_strength.most_common()), '']
     f2 = Counter(r[3].split('\t')[1] for r in by.get('F2U', []) if '\t' in r[3])

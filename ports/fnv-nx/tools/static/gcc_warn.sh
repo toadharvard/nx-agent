@@ -4,6 +4,7 @@
 #
 #   tools/static/gcc_warn.sh <prepared tree> <out dir> [jobs] [units.list]
 #
+# SHIM=<dir> replaces shim/include (run.sh); NICE (default 19) is the niceness of each compiler.
 # Writes <out>/gcc/logs/<unit>.log and <out>/gcc/status.tsv (unit, rc). Logs are reused when newer than the unit
 # (FORCE=1 recompiles). -O2 is needed: -Wmaybe-uninitialized, -Waggressive-loop-optimizations, -Warray-bounds,
 # -Wdangling-pointer and "control reaches end of non-void function" come from the middle end.
@@ -15,9 +16,12 @@ HERE=$(cd "$(dirname "$0")/../.." && pwd)
 CXX=${CXX:-aarch64-linux-gnu-g++}
 SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
 OPT=${OPT:--O2}
+SHIM=${SHIM:-$HERE/shim/include}
+# the build's flags (compile.sh, minus its -fmax-errors), then the warning set; the build's own -Werror=return-type
+# stays an error, so a unit the build cannot compile fails here too
 FLAGS=("${BUILD_FLAGS[@]}" -c "$OPT" -o /dev/null "${GCC_WARN[@]}" "${GCC_DIAG[@]}"
-       -include "$HERE/shim/include/fnvnx_compat.h" -I"$HERE/shim/include" -I"$SSE2NEON" -I"$TREE/include")
-export CXX TREE OUT FLAGS_STR="${FLAGS[*]}" FORCE=${FORCE:-0}
+       -include "$SHIM/fnvnx_compat.h" -I"$SHIM" -I"$SSE2NEON" -I"$TREE/include")
+export CXX TREE OUT FLAGS_STR="${FLAGS[*]}" FORCE=${FORCE:-0} NICE=${NICE:-19}
 if [ -z "$LIST" ]; then LIST="$OUT/gcc/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
 
 one() {
@@ -26,7 +30,7 @@ one() {
   [ -f "$TREE/$src" ] || { echo "missing" > "$log"; return; }
   if [ "$FORCE" != 1 ] && [ -f "$log" ] && [ "$log" -nt "$TREE/$src" ]; then return; fi
   # shellcheck disable=SC2086
-  (cd "$TREE" && timeout 900 nice $CXX $FLAGS_STR "$src") > "$log.tmp" 2>&1
+  (cd "$TREE" && timeout 900 nice -n "$NICE" $CXX $FLAGS_STR "$src") > "$log.tmp" 2>&1
   echo "rc=$?" >> "$log.tmp"; mv "$log.tmp" "$log"
 }
 export -f one

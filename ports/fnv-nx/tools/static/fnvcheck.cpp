@@ -79,6 +79,7 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
   std::string RootDir;
   std::map<unsigned, std::pair<bool, std::string>> FileCache;  // FileID hash -> (in tree, relpath)
   const FunctionDecl *CurFn = nullptr;
+  std::set<const VarDecl *> Uninit;  // locals of the current function declared without an initializer, not used yet
 
   explicit Visitor(ASTContext &C) : C(C), SM(C.getSourceManager()) {
     RootDir = Root;
@@ -213,37 +214,152 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
   // ------------------------------------------------------------------ function context
   bool TraverseFunctionDecl(FunctionDecl *D) {
     auto *Save = CurFn;
+    auto SaveU = Uninit;
     CurFn = D;
+    Uninit.clear();
     bool r = RecursiveASTVisitor::TraverseFunctionDecl(D);
     CurFn = Save;
+    Uninit = SaveU;
     return r;
   }
   bool TraverseCXXMethodDecl(CXXMethodDecl *D) {
     auto *Save = CurFn;
+    auto SaveU = Uninit;
     CurFn = D;
+    Uninit.clear();
     bool r = RecursiveASTVisitor::TraverseCXXMethodDecl(D);
     CurFn = Save;
+    Uninit = SaveU;
     return r;
   }
   bool TraverseCXXConstructorDecl(CXXConstructorDecl *D) {
     auto *Save = CurFn;
+    auto SaveU = Uninit;
     CurFn = D;
+    Uninit.clear();
     bool r = RecursiveASTVisitor::TraverseCXXConstructorDecl(D);
     CurFn = Save;
+    Uninit = SaveU;
     return r;
   }
   bool TraverseCXXDestructorDecl(CXXDestructorDecl *D) {
     auto *Save = CurFn;
+    auto SaveU = Uninit;
     CurFn = D;
+    Uninit.clear();
     bool r = RecursiveASTVisitor::TraverseCXXDestructorDecl(D);
     CurFn = Save;
+    Uninit = SaveU;
     return r;
+  }
+
+  // ------------------------------------------------------------------ reinterpreted memory
+  // how the object reached through a pointer cast is used: walk up through parens, implicit casts, pointer
+  // arithmetic on the cast pointer, `*`, `[]` and `->`/`.` to the lvalue, then look at its parent:
+  // 'read' (lvalue-to-rvalue), 'write' (left side of a plain assignment), 'other' (address taken, bound, passed)
+  std::string useOf(const Expr *E) {
+    const Expr *Cur = E;
+    bool deref = false;
+    for (int depth = 0; depth < 8; depth++) {
+      auto Ps = C.getParents(*Cur);
+      if (Ps.empty()) break;
+      const Expr *P = Ps[0].get<Expr>();
+      if (!P) break;
+      if (isa<ParenExpr>(P) || (isa<CastExpr>(P) && cast<CastExpr>(P)->getCastKind() == CK_NoOp)) {
+        Cur = P;
+        continue;
+      }
+      if (auto *IC = dyn_cast<ImplicitCastExpr>(P)) {
+        if (IC->getCastKind() == CK_LValueToRValue) return deref ? "read" : "other";
+        if (!deref) { Cur = P; continue; }  // decay etc. of the pointer itself
+        return "other";
+      }
+      if (auto *BO = dyn_cast<BinaryOperator>(P)) {
+        if (!deref && BO->isAdditiveOp()) { Cur = P; continue; }
+        if (deref && BO->getOpcode() == BO_Assign && BO->getLHS()->IgnoreParens() == Cur) return "write";
+        if (deref && BO->isCompoundAssignmentOp() && BO->getLHS()->IgnoreParens() == Cur) return "read";
+        return deref ? "other" : "other";
+      }
+      if (auto *UO = dyn_cast<UnaryOperator>(P)) {
+        if (UO->getOpcode() == UO_Deref) { deref = true; Cur = P; continue; }
+        if (deref && UO->isIncrementDecrementOp()) return "read";
+        return "other";
+      }
+      if (auto *AS = dyn_cast<ArraySubscriptExpr>(P)) {
+        if (AS->getBase()->IgnoreParenImpCasts() == Cur->IgnoreParenImpCasts() || !deref) { deref = true; Cur = P; continue; }
+        return "other";
+      }
+      if (auto *ME = dyn_cast<MemberExpr>(P)) {
+        (void)ME;
+        deref = true;
+        Cur = P;
+        continue;
+      }
+      break;
+    }
+    return "other";
+  }
+  static bool floatType(QualType T) {
+    T = T.getCanonicalType();
+    return T->isRealFloatingType();
+  }
+  // a union that has a floating member besides the integer member `F`
+  static bool floatUnion(const FieldDecl *F) {
+    const RecordDecl *RD = F->getParent();
+    if (!RD || !RD->isUnion() || !F->getType()->isIntegerType()) return false;
+    for (auto *O : RD->fields())
+      if (O != F && floatType(O->getType())) return true;
+    return false;
+  }
+
+  bool VisitMemberExpr(MemberExpr *E) {
+    if (NoAst) return true;
+    // FLOAT-BITS: the integer member of a float/integer union read - sees the float's bits (NaN payload and sign)
+    if (auto *FD = dyn_cast<FieldDecl>(E->getMemberDecl()))
+      if (floatUnion(FD)) {
+        auto Ps = C.getParents(*E);
+        const ImplicitCastExpr *IC = Ps.empty() ? nullptr : Ps[0].get<ImplicitCastExpr>();
+        if (IC && IC->getCastKind() == CK_LValueToRValue)
+          emit("FLOAT-BITS", E->getMemberLoc(), "union\t" + FD->getParent()->getQualifiedNameAsString() + "::" +
+                                                    FD->getNameAsString() + "\t" + fn() + "\t" + text(E->getSourceRange()));
+      }
+    return true;
   }
 
   // ------------------------------------------------------------------ casts
   bool VisitCastExpr(CastExpr *E) {
     if (NoAst) return true;
     CastKind K = E->getCastKind();
+    if (K == CK_BitCast || K == CK_LValueBitCast) {
+      QualType To = E->getType(), From = E->getSubExpr()->getType();
+      QualType ToP, FromP;
+      if (K == CK_BitCast && To->isPointerType() && From->isPointerType()) {
+        ToP = To->getPointeeType();
+        FromP = From->getPointeeType();
+      } else if (K == CK_LValueBitCast) {
+        ToP = To;
+        FromP = From;
+      }
+      if (!ToP.isNull() && !FromP.isNull() && !ToP->isDependentType() && !FromP->isDependentType()) {
+        QualType TC = ToP.getCanonicalType().getUnqualifiedType(), FC = FromP.getCanonicalType().getUnqualifiedType();
+        // BOOL-PUN: memory of another type read as bool - MSVC tests the whole byte (test al, al) and keeps its value
+        // in integer contexts; GCC assumes 0/1 (tests bit 0, `!b` is `b ^ 1`): a byte other than 0/1 differs
+        if (TC->isBooleanType() && !FC->isBooleanType()) {
+          std::string use = useOf(E);
+          if (use != "write")
+            emit("BOOL-PUN", E->getBeginLoc(), use + "\t" + ty(From) + "->" + ty(To) + "\t" + fn() + "\t" +
+                                                   text(E->getSourceRange()));
+        }
+        // FLOAT-BITS: a float object read through an integer type - sees the bits, where x86 and AArch64 differ for
+        // generated NaNs (x86 default NaN 0xFFC00000, AArch64 0x7FC00000)
+        if (floatType(FC) && TC->isIntegerType()) {
+          std::string use = useOf(E);
+          if (use != "write")
+            emit("FLOAT-BITS", E->getBeginLoc(), "pun " + use + "\t" + ty(From) + "->" + ty(To) + "\t" + fn() + "\t" +
+                                                     text(E->getSourceRange()));
+        }
+      }
+    }
     if (K == CK_FloatingToIntegral) {
       QualType T = E->getType().getCanonicalType();
       const Expr *Sub = E->getSubExpr();
@@ -299,6 +415,16 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
     if (E->isAssignmentOp()) plainStore(E->getLHS(), E->getOperatorLoc(), "assign");
     if (NoAst) return true;
     BinaryOperatorKind O = E->getOpcode();
+    if (O == BO_Sub && E->getLHS()->getType()->isPointerType() && E->getRHS()->getType()->isPointerType()) {
+      // pointer difference: both compilers divide by the element size with an exact-division multiply that assumes
+      // the byte difference is a multiple of it (pointers into one array); for unrelated pointers the garbage differs
+      QualType P = E->getLHS()->getType()->getPointeeType();
+      if (!P->isDependentType() && !P->isIncompleteType() && !P->isVoidType() && !P->isFunctionType()) {
+        uint64_t sz = C.getTypeSizeInChars(P).getQuantity();
+        if (sz > 1 && (sz & (sz - 1)))
+          emit("PTRDIFF-EXACT", E->getOperatorLoc(), std::to_string(sz) + "\t" + fn() + "\t" + text(E->getSourceRange()));
+      }
+    }
     if (O == BO_Shl || O == BO_Shr || O == BO_ShlAssign || O == BO_ShrAssign) {
       QualType LT = E->getLHS()->getType();
       if (LT->isDependentType() || !LT->isIntegerType()) return true;
@@ -570,6 +696,17 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
         name == "_mm_mfence" || name == "_mm_sfence" || name == "_mm_lfence")
       emit("BARRIER", CE->getBeginLoc(), name.str() + "\t" + fn());
     if (wideFn(name) && inSystem(FD)) emit("WCHAR-LIB", CE->getBeginLoc(), name.str() + "\t" + fn());
+    // FLOAT-BITS: SSE sign masks and float->integer bit casts of arithmetic results (a compare result is a mask: same
+    // on both machines)
+    if ((name == "_mm_movemask_ps" || name == "_mm_movemask_pd" || name == "_mm_castps_si128" ||
+         name == "_mm_castpd_si128") && CE->getNumArgs() == 1) {
+      const Expr *A = CE->getArg(0)->IgnoreParenImpCasts();
+      const CallExpr *AC = dyn_cast<CallExpr>(A);
+      StringRef an = AC && AC->getDirectCallee() ? idName(AC->getDirectCallee()) : StringRef();
+      if (!an.starts_with("_mm_cmp"))
+        emit("FLOAT-BITS", CE->getBeginLoc(), "sse " + name.str() + "\t" + (an.empty() ? "-" : an.str()) + "\t" + fn() +
+                                                 "\t" + text(CE->getSourceRange()));
+    }
     if ((name.ends_with("l") && (name == "sqrtl" || name == "powl" || name == "fabsl" || name == "sinl" ||
                                   name == "cosl" || name == "expl" || name == "logl" || name == "floorl")))
       emit("LDBL", CE->getBeginLoc(), name.str() + "\t" + fn());
@@ -680,7 +817,80 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
   }
 
   // ------------------------------------------------------------------ declarations
+  // a trivially-default-initialized local: no initializer, or a trivial default constructor
+  bool uninitLocal(const VarDecl *D) {
+    if (!D->isLocalVarDecl() || D->isStaticLocal() || D->getType()->isReferenceType() ||
+        D->getType()->isDependentType() || D->isInvalidDecl())
+      return false;
+    const Expr *I = D->getInit();
+    if (!I) return true;
+    if (auto *CE = dyn_cast<CXXConstructExpr>(I->IgnoreImplicit()))
+      return CE->getNumArgs() == 0 && CE->getConstructor()->isTrivial();
+    return false;
+  }
+
+  // OUTARG-UNINIT: the first use of an uninitialized local hands its address to a call (`T x; f(&x); use(x);`, a
+  // buffer passed by decay, a member call on it). Not a port hazard - the callee writes it - but the difffuzz harness
+  // runs callees as stubs that do not write through pointer arguments (DIFFFUZZ.md, Limits): a divergence of such a
+  // function that reads `x` is the harness's (S13 uninit-* causes).
+  bool VisitDeclRefExpr(DeclRefExpr *DR) {
+    if (NoAst || Uninit.empty()) return true;
+    auto *VD = dyn_cast<VarDecl>(DR->getDecl());
+    if (!VD || !Uninit.count(VD)) return true;
+    Uninit.erase(VD);
+    const Expr *Cur = DR;
+    bool addr = false;
+    for (int depth = 0; depth < 6; depth++) {
+      auto Ps = C.getParents(*Cur);
+      if (Ps.empty()) return true;
+      const Expr *P = Ps[0].get<Expr>();
+      if (!P) return true;
+      if (isa<UnaryExprOrTypeTraitExpr>(P) || isa<CXXTypeidExpr>(P)) {
+        Uninit.insert(VD);   // sizeof(x): not a use
+        return true;
+      }
+      if (isa<ParenExpr>(P)) { Cur = P; continue; }
+      if (auto *IC = dyn_cast<ImplicitCastExpr>(P)) {
+        if (IC->getCastKind() == CK_ArrayToPointerDecay) addr = true;
+        else if (IC->getCastKind() == CK_LValueToRValue) return true;   // a read: -Wuninitialized's business
+        Cur = P;
+        continue;
+      }
+      if (auto *UO = dyn_cast<UnaryOperator>(P)) {
+        if (UO->getOpcode() != UO_AddrOf) return true;
+        addr = true;
+        Cur = P;
+        continue;
+      }
+      if (isa<ExplicitCastExpr>(P) && addr) { Cur = P; continue; }
+      if (auto *ME = dyn_cast<MemberExpr>(P)) {
+        // x.f(...) on the uninitialized object: the member function fills it
+        auto PPs = C.getParents(*ME);
+        const CXXMemberCallExpr *MC = PPs.empty() ? nullptr : PPs[0].get<CXXMemberCallExpr>();
+        if (MC && MC->getCallee()->IgnoreParens() == ME && MC->getMethodDecl() && !MC->getMethodDecl()->isConst())
+          emit("OUTARG-UNINIT", DR->getLocation(), VD->getNameAsString() + "\tthis of " +
+                                                     MC->getMethodDecl()->getNameAsString() + "\t" + fn());
+        return true;
+      }
+      if (auto *CE = dyn_cast<CallExpr>(P)) {
+        if (!addr || CE->getCallee()->IgnoreParenImpCasts() == Cur) return true;
+        const FunctionDecl *FD = CE->getDirectCallee();
+        emit("OUTARG-UNINIT", DR->getLocation(), VD->getNameAsString() + "\targ of " +
+                                                   (FD ? FD->getQualifiedNameAsString() : std::string("<indirect>")) +
+                                                   "\t" + fn());
+        return true;
+      }
+      if (isa<CXXConstructExpr>(P) && addr) {
+        emit("OUTARG-UNINIT", DR->getLocation(), VD->getNameAsString() + "\targ of constructor\t" + fn());
+        return true;
+      }
+      return true;
+    }
+    return true;
+  }
+
   bool VisitVarDecl(VarDecl *D) {
+    if (!NoAst && CurFn && uninitLocal(D)) Uninit.insert(D);
     if (NoAst || isa<ParmVarDecl>(D)) return true;
     if (D->getTLSKind() != VarDecl::TLS_None)
       emit("TLS", D->getLocation(), D->getQualifiedNameAsString() + "\t" + ty(D->getType()) + "\t" +
