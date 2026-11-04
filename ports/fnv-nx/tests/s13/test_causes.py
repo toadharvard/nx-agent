@@ -169,6 +169,8 @@ def test_rules():
         'e1.json': dict(first='width'),
         'e2.json': dict(first='store', store=dict(word=dict(x86='image address 0102e388',
                                                            arm='native image .data.rel.ro _ZTV9FirstBase+8'))),
+        'e4.json': dict(first='store', store=dict(addr='03000000', x86=dict(v='00', size=4, pc='0044deea'), arm=None,
+                                                  word=dict(x86='zero', arm='zero'))),
         'e3.json': dict(first='store', store=dict(word=dict(x86='image address 01200000', arm='native named stub 0b000010')))})
     try:
         mw = dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=0, x86=w(5, 0), arm=w(6, 0))
@@ -176,6 +178,10 @@ def test_rules():
         check(causes.refine(dict(rec(mw), _file='e2.json'), 'unclassified') == 'vptr-unpaired', 'effects: vptr-unpaired')
         check(causes.refine(dict(rec(mw), _file='e3.json'), 'unclassified') == 'native-stub-data',
               'effects: native named stub stored')
+        check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
+              'effects: store made by a callee only the oracle runs')
+        check(causes.refine(dict(rec(mw, addr='0044dee0'), _file='e4.json', _size=0x40), 'unclassified') ==
+              'unclassified', 'effects: store inside the function stays open')
         check(causes.refine(dict(rec(mw), _file='e1.json'), 'uninit-arm') == 'uninit-arm',
               'effects never override a non-triage cause')
     finally:
