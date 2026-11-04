@@ -382,8 +382,9 @@ def static_verdicts(port):
 # ------------------------------------------------------------------------------------------------- scorecard
 
 class Card:
-    def __init__(self, store, hist, th, port=PORT):
+    def __init__(self, store, hist, th, port=PORT, render=None):
         self.store, self.hist, self.th, self.port = store, hist, th, port
+        self.render = render or {}      # load_render(): text, branch, path, hist (distances on the render branch)
         self.gates = []
         self.maxb = th.get('max_commits_behind', 25)
 
@@ -517,6 +518,14 @@ class Card:
     def abi_gates(self, L, s):
         br = self.link_branch(s['commit']) if s else None
         tsv = self.store.read(br, 'out/abi.tsv') if br else None
+        if not tsv:
+            # the link report's branch was pruned or has no table: the kept link branch closest to the head that has one
+            near = sorted((self.hist.behind(x[5:]) if self.hist.behind(x[5:]) is not None else 1 << 30, x)
+                          for x in self.store.branches('link/') if self.store.exists(x, 'out/abi.tsv'))
+            if near:
+                br = near[0][1]
+                tsv = self.store.read(br, 'out/abi.tsv')
+                s = self.src(br, 'out/abi.tsv', br[5:])
         explained = set(self.th.get('abi_explained_classes', []))
         if tsv:
             rows = [l.split('\t') for l in tsv.splitlines() if l and not l.startswith('#')]
@@ -529,7 +538,7 @@ class Card:
                     if c not in explained:
                         cl[c] = cl.get(c, 0) + 1
             top = ', '.join('%s %d' % kv for kv in sorted(cl.items(), key=lambda x: -x[1])[:5])
-            asrc = dict(s, path=br + ':out/abi.tsv')
+            asrc = dict(s, branch=br, path='out/abi.tsv')
             self.gate('abi.x86_inconsistent', 'ABI', 'S2 x86-inconsistent pairs not explained',
                       len(un), '0', PASS if not un else FAIL, asrc,
                       '%d x86-inconsistent, %d explained (classes %s only); open: %s' % (
@@ -803,6 +812,43 @@ class Card:
                       'main 0, workers 1-2, core 3 opt-in', PASS if not pc['problems'] else FAIL, hs,
                       '; '.join(pc['problems']) or '%d roles checked' % pc['roles'], rank=24)
 
+    def render_gate(self):
+        """the render machine's summary block: main and render thread frame times against one frame"""
+        rp = self.th.get('render_perf', {})
+        lim = rp.get('frame_ms', 1000.0 / self.th['perf']['fps'])
+        title = 'render perf: frame time, main / render thread (S6n render machine)'
+        thr = '<= %.1f ms each' % lim
+        r = self.render
+        where = 'nx-agent:%s' % (r.get('branch') or rp.get('branch', '?'))
+        try:
+            j = json.loads(r['text']) if r.get('text') else None
+        except ValueError:
+            j = None
+        if isinstance(j, dict) and not isinstance(j.get('frame_ms'), dict) and isinstance(j.get('summary'), dict):
+            j = j['summary']
+        if not isinstance(j, dict) or not isinstance(j.get('frame_ms'), dict):
+            self.nodata('perf.render', 'Performance', title, thr,
+                        'unreadable summary block in %s' % rp.get('path') if r.get('text') else
+                        'no render perf report (%s:%s) yet' % (where, rp.get('path')), rank=22)
+            return
+        c = str(j.get('commit') or '')
+        h = r.get('hist')
+        b = h.behind(c) if h and c else None
+        src = dict(branch=where, path=r.get('path') or rp.get('path'), commit=c[:12], behind=b, published=None,
+                   stale=b is None or b > self.maxb)
+        fm = j['frame_ms']
+        vals = [fm.get('main'), fm.get('render')]
+        if any(not isinstance(v, (int, float)) for v in vals):
+            self.gate('perf.render', 'Performance', title, None, thr, NODATA, src, 'frame_ms.main/render missing',
+                      rank=22)
+            return
+        pd = j.get('per_draw_us') or {}
+        asm = j.get('assumptions') or {}
+        note = 'per draw: native %s us, Nine %s us; assumes IPC %s at %s GHz' % (
+            pd.get('native', '?'), pd.get('nine', '?'), asm.get('ipc', '?'), asm.get('clock_ghz', '?'))
+        self.gate('perf.render', 'Performance', title, '%.1f / %.1f ms' % tuple(vals), thr,
+                  PASS if max(vals) <= lim else FAIL, src, note, rank=22)
+
     def package_gates(self):
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
         if not fb:
@@ -839,6 +885,7 @@ class Card:
         self.boot_gates()
         self.frames_gate()
         self.perf_gates()
+        self.render_gate()
         self.package_gates()
         return self
 
@@ -932,6 +979,25 @@ def markdown(head, gates, risks, generated):
     return '\n'.join(L) + '\n'
 
 
+def load_render(th, port, fetch=False, fixtures=None, table=None):
+    """the render machine's perf report: from <fixtures>/_render/report.json, else from the render branch of this
+    repository (`git fetch origin <branch>` with --fetch; then refs/remotes/origin/<branch>:<path>)"""
+    rp = th.get('render_perf', {})
+    br, path = rp.get('branch', 'claude/port-nsw-render'), rp.get('path')
+    if fixtures:
+        f = os.path.join(fixtures, '_render', 'report.json')
+        return dict(text=open(f).read() if os.path.isfile(f) else None, branch=br, path=path,
+                    hist=History(head='fixture', table=table or {}))
+    g = lambda *a: subprocess.run(['git', '-C', port, *a], capture_output=True, text=True)
+    if fetch:
+        g('fetch', '-q', 'origin', br)
+    ref = 'refs/remotes/origin/' + br
+    tip = g('rev-parse', '--verify', '-q', ref).stdout.strip()
+    r = g('show', '%s:%s' % (ref, path)) if tip and path else None
+    return dict(text=r.stdout if r is not None and r.returncode == 0 else None, branch=br, path=path,
+                hist=History(head=tip, repo=port) if tip else None)
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--artifacts')
@@ -957,7 +1023,8 @@ def main(argv):
         if a.fetch:
             store.fetch()
         hist = History(head=a.head, repo=a.port)
-    card = Card(store, hist, th, port=a.port).run()
+    render = load_render(th, a.port, a.fetch, a.fixtures, hist.table)
+    card = Card(store, hist, th, port=a.port, render=render).run()
     risks = json.load(open(a.risks)) if os.path.isfile(a.risks) else []
     gen = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     md = markdown(hist.head, card.gates, risks, gen)

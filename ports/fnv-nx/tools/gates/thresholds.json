@@ -8,23 +8,54 @@
  "fuzz_shards": 26,
  "equiv_by_design": {
   "_doc": "S11 rules whose differences docs/EQUIVALENCE.md records as by design; S1b sites come from docs/PATCHES.md 'By-design MSVC differences'",
-  "code_rules": ["CTOR1"],
-  "nobuild_rules": ["ENUM1"]
+  "code_rules": [
+   "CTOR1"
+  ],
+  "nobuild_rules": [
+   "ENUM1"
+  ]
  },
- "abi_explained_classes": ["pop-mismatch"],
+ "abi_explained_classes": [
+  "pop-mismatch"
+ ],
  "static_closed": {
   "_doc": "a non-benign S12 class counts as closed only while its fix is present in this checkout (file + regex)",
-  "F2S": {"file": "tools/link/compile.sh", "regex": "fnvnx_ftoi", "why": "FTOI2 plugin in compile.sh"},
-  "F2U": {"file": "tools/link/compile.sh", "regex": "fnvnx_ftoi", "why": "FTOI2 plugin in compile.sh"},
-  "F2S64": {"file": "tools/link/compile.sh", "regex": "fnvnx_ftoi", "why": "FTOI2 plugin in compile.sh"},
-  "F2U64": {"file": "tools/link/compile.sh", "regex": "fnvnx_ftoi", "why": "FTOI2 plugin in compile.sh"},
-  "BARRIER": {"file": "shim/include/fnvnx_compat.h", "regex": "_ReadWriteBarrier\\(void\\)\\s*\\{\\s*__atomic_thread_fence", "why": "barriers are dmb fences"}
+  "F2S": {
+   "file": "tools/link/compile.sh",
+   "regex": "fnvnx_ftoi",
+   "why": "FTOI2 plugin in compile.sh"
+  },
+  "F2U": {
+   "file": "tools/link/compile.sh",
+   "regex": "fnvnx_ftoi",
+   "why": "FTOI2 plugin in compile.sh"
+  },
+  "F2S64": {
+   "file": "tools/link/compile.sh",
+   "regex": "fnvnx_ftoi",
+   "why": "FTOI2 plugin in compile.sh"
+  },
+  "F2U64": {
+   "file": "tools/link/compile.sh",
+   "regex": "fnvnx_ftoi",
+   "why": "FTOI2 plugin in compile.sh"
+  },
+  "BARRIER": {
+   "file": "shim/include/fnvnx_compat.h",
+   "regex": "_ReadWriteBarrier\\(void\\)\\s*\\{\\s*__atomic_thread_fence",
+   "why": "barriers are dmb fences"
+  }
  },
  "fuzz_by_design_causes": {
   "x87-precision": "result within tolerance of x87 80-bit intermediates; AArch64 has IEEE single/double only"
  },
  "fuzz_min_coverage": 0.9,
- "boot_milestones": ["winmain", "main_menu", "first_frame", "first_cell"],
+ "boot_milestones": [
+  "winmain",
+  "main_menu",
+  "first_frame",
+  "first_cell"
+ ],
  "perf": {
   "cpu_hz": 1020000000,
   "ipc": 0.8,
@@ -35,5 +66,11 @@
   "heap_region_bytes": 2147483648,
   "host_heap_bytes": 67108864,
   "max_use_fraction": 0.75
+ },
+ "render_perf": {
+  "_doc": "render machine summary (docs/RENDER_PERF.md on that branch): {commit, per_draw_us: {native, nine}, frame_ms: {main, render}, assumptions: {ipc, clock_ghz}}; main and render thread each within one frame at perf.fps",
+  "branch": "claude/port-nsw-render",
+  "path": "ports/fnv-nx/render/native/perf/report.json",
+  "frame_ms": 33.3
  }
 }
