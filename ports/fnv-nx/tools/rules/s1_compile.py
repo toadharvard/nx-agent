@@ -2377,6 +2377,34 @@ def r_stand_in_interfaces(path, text, stats):
         stats['VTBL1'] += 1
     return text
 
+# ---------------------------------------------------------------------------------------------------------- ALIGN1
+#
+# `__declspec(align(16)) struct S {...};`: MSVC aligns the type S (also with a declarator after the body, and on a
+# forward declaration `__declspec(align(16)) struct S;`, which aligns S where it is defined: clang's MS mode, which
+# follows MSVC, gives sizeof/alignof 64/16 for a 56-byte record in all three forms). GCC takes an attribute in front
+# of the class key as the declaration's, not the type's: with no declarator it is dropped ("attribute ignored in
+# declaration of", -Wattributes), with one it aligns only that variable, so the record is 4-aligned and the records
+# that hold it shrink and move their members (S12 f8 ALIGN-IGNORED / LAYOUT-ALIGN-IGNORED: S_A 48 -> 36, Buf 64 ->
+# 56, hkpMotionStub 240 -> 224). ALIGN1 moves the align specifier behind the class key, where both compilers apply
+# it to the type. Only in front of a class definition or a forward declaration: in `__declspec(align(16)) struct
+# Atoms m_kBridgeAtoms;` the class key starts an elaborated type and the alignment is the member's, on both.
+
+ALIGN_HEAD = re.compile(r'(__declspec\s*\(\s*align\s*\(\s*\d+\s*\)\s*\))(\s*)'
+                        r'((?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*)\b(struct|class|union)\b(?=([^;{}()]*)([;{]))')
+
+def r_class_alignment(path, text, stats):
+    """ALIGN1: `__declspec(align(n)) struct S` -> `struct __declspec(align(n)) S` in front of a class definition or a
+    forward declaration (see above). Same line count."""
+    if 'align' not in text: return text
+    def sub(m):
+        head, end = m.group(5), m.group(6)
+        if end == ';' and not re.fullmatch(r'\s*[A-Za-z_]\w*\s*', head): return m.group(0)   # elaborated type use
+        if end == '{' and re.search(r'[=,]|\boperator\b', head.split(':')[0]): return m.group(0)
+        stats['ALIGN1'] += 1
+        ws = m.group(2) if '\n' in m.group(2) else ''
+        return m.group(3) + m.group(4) + ' ' + m.group(1) + ws
+    return ALIGN_HEAD.sub(sub, text)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2402,4 +2430,4 @@ def r_keep_definitions(path, text, stats):
     return ''.join(out)
 
 RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
-         r_msvc_base_layout]
+         r_msvc_base_layout, r_class_alignment]

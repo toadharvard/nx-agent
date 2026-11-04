@@ -141,6 +141,19 @@ check('VTBL1 BSNiAllocator gets its 10 slots, same line count', got,
       ['virtual void* Allocate(', 'virtual void Slot9();', 'AllocateZeroedMemory(size, alignment', '}\n\n\n\n\nint b;'],
       ['m_virtual0'])
 
+# ---- ALIGN1
+got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
+          '__declspec(align(16))class H:public C\n{\n};\n__declspec(align(16))struct TAU32;\n'
+          'void f() {\n    __declspec(align(16)) struct Buf\n    {\n        F4 a;\n    } buf;\n}\n'
+          'struct A { __declspec(align(16)) struct Atoms m_kBridgeAtoms; __declspec(align(8)) volatile int t; };\n'
+          'template <class T> __declspec(align(16)) __declspec(novtable) struct X { T a; };\n')
+check('ALIGN1 moves align behind the class key of definitions and forward declarations', got,
+      ['struct __declspec(align(16)) S_V4 { float', 'class __declspec(align(16)) H:public C\n{',
+       'struct __declspec(align(16)) TAU32;', '    struct __declspec(align(16)) Buf\n    {',
+       '__declspec(align(16)) struct Atoms m_kBridgeAtoms;', '__declspec(align(8)) volatile int t;',
+       'template <class T> __declspec(novtable) struct __declspec(align(16)) X { T a; };'])
+check('ALIGN1 keeps the line count', str(got.count('\n')), ['13'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
