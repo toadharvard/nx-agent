@@ -174,6 +174,15 @@ static void scene_on(void) { if (!in_scene) { note(IDirect3DDevice9_BeginScene(d
 static void scene_off(void) { if (in_scene) { note(IDirect3DDevice9_EndScene(dev), "EndScene"); in_scene = 0; } }
 
 /* read a render-target surface back as RGBA8 and write it as PNG */
+static float half_to_float(uint16_t h) {
+    uint32_t sgn = (uint32_t)(h >> 15) << 31, e = h >> 10 & 31, m = h & 1023, u;
+    if (e == 0) {
+        if (m == 0) u = sgn;
+        else { e = 113; while (!(m & 1024)) { m <<= 1; e--; } u = sgn | e << 23 | (m & 1023) << 13; }
+    } else if (e == 31) u = sgn | 0x7f800000u | m << 13;
+    else u = sgn | (e + 112) << 23 | m << 13;
+    float f; memcpy(&f, &u, 4); return f;
+}
 static void dump_surface(IDirect3DSurface9 *s, const char *path) {
     D3DSURFACE_DESC d; IDirect3DSurface9 *sys = NULL; D3DLOCKED_RECT lr;
     if (!s || FAILED(IDirect3DSurface9_GetDesc(s, &d))) return;
@@ -201,6 +210,8 @@ static void dump_surface(IDirect3DSurface9 *s, const char *path) {
                     float c[4] = {0, 0, 0, 1};
                     if (d.Format == D3DFMT_A32B32G32R32F) memcpy(c, r + 16 * x, 16);
                     else if (d.Format == D3DFMT_R32F) c[0] = c[1] = c[2] = ((const float *)r)[x];
+                    else if (d.Format == D3DFMT_A16B16G16R16F) { for (int k = 0; k < 4; k++) c[k] = half_to_float(((const uint16_t *)r)[4 * x + k]); }
+                    else if (d.Format == D3DFMT_R16F) c[0] = c[1] = c[2] = half_to_float(((const uint16_t *)r)[x]);
                     for (int k = 0; k < 4; k++) { float v = c[k] < 0 ? 0 : c[k] > 1 ? 1 : c[k]; o[k] = (uint8_t)(v * 255.0f + 0.5f); }
                 }
                 }
