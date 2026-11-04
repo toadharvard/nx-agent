@@ -26,10 +26,10 @@ S6N-T1U3	render	a9374a6	a9374a6	confirmed	-	test_nxgpu_ubo_cache.py	per-call his
 S13-METRIC-M1	S13	7af7f55	441b732	refuted	-	test_s13_metric.py	metric.py: a shard whose branch is missing counts 1 and drops its artifacts and not-fuzzable counts
 S13-METRIC-M2	S13	7af7f55	441b732	refuted	-	test_s13_metric.py	metric.py: a shard whose only report is FAILED counts 1 and drops its counts
 S13-METRIC-M3	S13	7af7f55	441b732	refuted	-	test_s13_metric.py	metric.py: pending functions (deadline, changed keys) are counted in no term
-S12-KEYS-K2	S12	f241f21	f241f21	refuted	-	test_s12_keys.py	whole-program keys: a forwarder defined in one unit and called with &obj.m in another puts no key in the list (each unit sees only half), the plain store stays str
-S12-KEYS-K3	S12	f241f21	f241f21	refuted	-	test_s12_keys.py	whole-program keys: an Interlocked operand passed through a local pointer (p = &o->m; InterlockedCompareExchange(p, ..)) is never discovered, stores to o->m stay str
-S12-KEYS-K6	S12	f241f21	f241f21	refuted	-	test_s12_keys.py	POLL-PLAIN: a struct copy over a keyed (polled) field is a plain str, no stlr/dmb
-S12-KEYS-K10	S12	f241f21	f241f21	refuted	-	test_s12_keys.py	compile.sh order.keys: per-unit key cache is invalidated only by the unit source mtime, a changed tree header leaves a stale key list
+S12-KEYS-K2	S12	f241f21	f241f21	fixed	8c18138	test_s12_keys.py	whole-program keys: a forwarder defined in one unit and called with &obj.m in another puts no key in the list (each unit sees only half), the plain store stays str
+S12-KEYS-K3	S12	f241f21	f241f21	fixed	8c18138	test_s12_keys.py	whole-program keys: an Interlocked operand passed through a local pointer (p = &o->m; InterlockedCompareExchange(p, ..)) is never discovered, stores to o->m stay str
+S12-KEYS-K6	S12	f241f21	f241f21	fixed	8c18138	test_s12_keys.py	POLL-PLAIN: a struct copy over a keyed (polled) field is a plain str, no stlr/dmb
+S12-KEYS-K10	S12	f241f21	f241f21	fixed	8c18138	test_s12_keys.py	compile.sh order.keys: per-unit key cache is invalidated only by the unit source mtime, a changed tree header leaves a stale key list
 S12-OBJOP	S12	3426547	3426547	confirmed	-	test_s12_keys.py	object=first/operator=cpp17 defaults byte-identical; object=last operator=rtl give MSVC push order (direct, virtual, nested, <<, []) under qemu, direct calls stay direct
 S13B-SCRIPT	S13b	69a378e	69a378e	confirmed	-	test_s13_tools.py	causes.py as a script is one module with report.reclassify's: summary/handoffs --effects apply (E1)
 S13B-HANDOFF	S13b	ab7e255	ab7e255	confirmed	-	test_s13_tools.py	handoffs rows per owned cause equal summary divergences; index sums; by-design, non-ok and gone dropped (H1)
@@ -44,3 +44,4 @@ R0-R16	R0	a506770	a506770	refuted	-	test_ready_adversarial.py	perf.budget gates 
 S13B-UNLOADED-U1	S13b	a93f5e6	a93f5e6	refuted	-	test_s13b_callee_unloaded.py	oracle-callee-unloaded (artifact) on static evidence only: a native that returned before a unit-local X with no traced call gets the artifact label
 S13B-UNLOADED-U2	S13b	a93f5e6	a93f5e6	refuted	-	test_s13b_callee_unloaded.py	oracle-callee-unloaded although X's native body calls Y and the native trace has no Y: the native never ran X
 S13B-VSPLIT	S13b	82be13c	82be13c	confirmed	-	test_s13b_callee_unloaded.py	oracle-vcall/oracle-fault split: records move artifact -> artifact (vcall-garbage, vcall-stub-alias) or -> real-bug (native-empty-callee); triage -> artifact only for an oracle-only fault in the oracle's private range (rule read; counts not re-derived)
+S12-KEYS-FIX	S12	8c18138	8c18138	confirmed	-	test_s12_keys.py	whole-program keys fixed: K1-K7c and K10 ok through keys_merge.py (K8 pointer alias, K9 Sleep poll stay notes outside the claim)
