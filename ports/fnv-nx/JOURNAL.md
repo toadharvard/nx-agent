@@ -2703,3 +2703,26 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
     three separate Wine prefixes.
   - S1's hand-vptr work lists are kept in scratchpad/keep/.
   - Free space is now 22 GB (was 3.6 GB).
+
+### J-0123 | 2026-11-04 | stream: S1-compile,farms | status: wip | parent: J-0120,J-0122
+
+* **did** - S1 `a2b3999` VLIT1 now stores the image symbol `&DAT_0101212c` instead of a raw constant.
+  - It adds `extern "C" char DAT_0101212c;` in front of the storing function and binds `_DAT_0101212c` through the BIND1
+    hook.
+  - FRIEND1 and VLIT1 declarations now start at the declaration's first non-blank character, never in front of an
+    `#include` on the same line.
+  - New test: every rule under PYTHONHASHSEED 1, 2 and 3.
+* **found** - prepare is deterministic: two full prepares under PYTHONHASHSEED=1/2 give identical trees and stats. The
+  31-vs-32 GAME1 count came from a baseline copy without `platform/crt/crt_symbols.tsv`. A missing file means no GAME1
+  float edits, silently.
+* **did** - S1 `56ae24d` TAIL1 writes `typename` before a qualified last base. hkgpconvexhull and both hkgpmesh_ehsc
+  variants go to 0, hkgpmesh 3 -> 1. 17 of the 131 affected units were checked locally; the try farm checks the rest.
+  The next census is expected near 2,920/2,978. tests/s1: 0 failed. tests/s11: ok.
+* **found** - The owner's backup-server probe also fails, and the cause is this environment's egress, not the server.
+  - Every tunnel to a non-443 port is closed after 2-7 s, with 517 B sent and 39 B received. That holds for
+    31-77-127-46.sslip.io:8443, portquiz.net:8443 and portquiz.net:8080 alike.
+  - Port 443 passes. On 31-77-127-46.sslip.io port 443 answers in plain HTTP, without TLS.
+  - Fix: serve over HTTPS on 443, or widen the environment's network access.
+* **next** - S2c (stopped by the owner): recognise VLIT1's `m_p = &DAT_0101212c` store as a vptr store and map it to
+  `_ZTV21GameSettingCollection`. S1: STL1 `_Container_base_aux_alloc_real` (blk_00b20000_od_ob1_rtm, 16),
+  blk_00ac0000_od_ob1 (18), the rest of the census tail, then S13's FALL1/uninit/split-global classes.
