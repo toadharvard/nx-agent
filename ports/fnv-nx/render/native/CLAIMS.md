@@ -11,6 +11,20 @@ sdp2dksh on deko3d), the skip counters (skipped engine draws = 0), and the scene
 A family stream claims a row by setting `owner` and `status` on its own branch and telling the render machine. The
 render machine merges it.
 
+**Order of work (owner rule D21, ARCHITECTURE.md: coverage first, then optimisation).**
+1. Coverage (render machine). The general path draws every program correctly:
+   - Translated for every family;
+   - exact D3D9 state emulation as a class: every render, sampler and texture-stage state with its D3D9 or engine
+     default and save/restore, constants, vertex formats and render targets.
+   Metric: skipped draws = 0, and every capture scene passing (menu, docmitchell, and S5-data's new ones).
+2. Only after that, family by family: hand-written GLSL, then GPU tuning. Each step is measured against
+   Translated on the captures, at equal pixels and lower GPU time.
+Until step 1 holds, family streams (render-lit, render-land, G1-gpu) work on correctness and measurement:
+- the family's parity on the captures;
+- defects in the Translated path or the state emulation, with failing tests;
+- cost-model accuracy.
+They do not switch families to native.
+
 Rules for family streams:
 - Family code lives in your family's files: `shaders/<family>*.glsl`, a family module under `n1/`, and the
   family's scenes and tests under `tests/s6n/`.

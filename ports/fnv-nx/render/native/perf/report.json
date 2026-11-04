@@ -1,7 +1,7 @@
 {
  "schema": "fnv-nx P6n report v1 (docs/RENDER_PERF.md \u00a75)",
  "summary": {
-  "commit": "ec265a05cc5effe76f16370fde931f68a3a88a98",
+  "commit": "82e694f78fa19ef099d89a8239e02c633f928301",
   "render_native_tree": "eb81b466aa26ccfaffff2d668a1ace8c620f2f56",
   "worktree_dirty": false,
   "per_draw_us": {
@@ -3915,7 +3915,7 @@
    }
   },
   {
-   "commit": "30be7339e5b1ecc60e74c0c3b7cb6656a432e8ff",
+   "commit": "89ee4a820f8c3ab7ad84704641962d4ab66f300a",
    "name": "fnv-nx S6n: perf - per-stage sampler cache, translate only on a changed sampler state or texture kind",
    "before_commit": "5a5fcb28e3919c9dd74739e1444a7f954a65ffce",
    "cpu_instr_delta_main": -421623,
@@ -4052,7 +4052,7 @@
     ]
    },
    "after": {
-    "commit": "30be7339e5b1ecc60e74c0c3b7cb6656a432e8ff",
+    "commit": "89ee4a820f8c3ab7ad84704641962d4ab66f300a",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 6344761,
     "render_front": 1702773,
@@ -4172,9 +4172,9 @@
    }
   },
   {
-   "commit": "25a98242bf9d5967cf6d74de1e6d78d11f98e60f",
+   "commit": "c94cc7da04a07413248bda54286d3699f371f2c3",
    "name": "fnv-nx S6n: perf - Render: epilogue permutation lookup by table, constant slice written once",
-   "before_commit": "30be7339e5b1ecc60e74c0c3b7cb6656a432e8ff",
+   "before_commit": "89ee4a820f8c3ab7ad84704641962d4ab66f300a",
    "cpu_instr_delta_main": -903458,
    "cpu_instr_delta_render": 0,
    "gpu_ms_docked_720p": [
@@ -4190,7 +4190,7 @@
     0
    ],
    "before": {
-    "commit": "30be7339e5b1ecc60e74c0c3b7cb6656a432e8ff",
+    "commit": "89ee4a820f8c3ab7ad84704641962d4ab66f300a",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 6344761,
     "render_front": 1702773,
@@ -4309,7 +4309,7 @@
     ]
    },
    "after": {
-    "commit": "25a98242bf9d5967cf6d74de1e6d78d11f98e60f",
+    "commit": "c94cc7da04a07413248bda54286d3699f371f2c3",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5441303,
     "render_front": 1702773,
@@ -4429,9 +4429,9 @@
    }
   },
   {
-   "commit": "51850bc5aa5082af9286c208004f353e888c05da",
+   "commit": "f7b342afd5ac54a40184cc81245a304f8cd7a478",
    "name": "fnv-nx S6n: perf - Frame::Finish skips the dynamic-state compares for a draw with the same record",
-   "before_commit": "25a98242bf9d5967cf6d74de1e6d78d11f98e60f",
+   "before_commit": "c94cc7da04a07413248bda54286d3699f371f2c3",
    "cpu_instr_delta_main": 0,
    "cpu_instr_delta_render": -101854,
    "gpu_ms_docked_720p": [
@@ -4447,7 +4447,7 @@
     0
    ],
    "before": {
-    "commit": "25a98242bf9d5967cf6d74de1e6d78d11f98e60f",
+    "commit": "c94cc7da04a07413248bda54286d3699f371f2c3",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5441303,
     "render_front": 1702773,
@@ -4566,7 +4566,7 @@
     ]
    },
    "after": {
-    "commit": "51850bc5aa5082af9286c208004f353e888c05da",
+    "commit": "f7b342afd5ac54a40184cc81245a304f8cd7a478",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5441303,
     "render_front": 1600919,
@@ -4686,9 +4686,9 @@
    }
   },
   {
-   "commit": "41de0709ab65e46e59435fbe8788d0002f249d21",
+   "commit": "90fc3c2c3ba5db958907d03e58b539733b7a2723",
    "name": "fnv-nx S6n: perf - Render reuses the previous draw's state id and texture block while unchanged",
-   "before_commit": "6b63d8de0147c1f3b801ebd3d059d20456febb1b",
+   "before_commit": "d71bbcfce6e93e0bfbaef9698b3556c278b9f9ad",
    "cpu_instr_delta_main": -208035,
    "cpu_instr_delta_render": 0,
    "gpu_ms_docked_720p": [
@@ -4704,7 +4704,7 @@
     0
    ],
    "before": {
-    "commit": "6b63d8de0147c1f3b801ebd3d059d20456febb1b",
+    "commit": "d71bbcfce6e93e0bfbaef9698b3556c278b9f9ad",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5441303,
     "render_front": 1600919,
@@ -4823,7 +4823,7 @@
     ]
    },
    "after": {
-    "commit": "41de0709ab65e46e59435fbe8788d0002f249d21",
+    "commit": "90fc3c2c3ba5db958907d03e58b539733b7a2723",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5233268,
     "render_front": 1600919,
@@ -4943,9 +4943,9 @@
    }
   },
   {
-   "commit": "19ccebc4d893fb200b866d61c23a171cac79546a",
+   "commit": "021fc46016567f6a56eb9d99d031cdb101ce0674",
    "name": "fnv-nx S6n: perf - branch-free alpha compare in the D3D9 epilogue",
-   "before_commit": "41de0709ab65e46e59435fbe8788d0002f249d21",
+   "before_commit": "90fc3c2c3ba5db958907d03e58b539733b7a2723",
    "cpu_instr_delta_main": 0,
    "cpu_instr_delta_render": 0,
    "gpu_ms_docked_720p": [
@@ -4961,7 +4961,7 @@
     0
    ],
    "before": {
-    "commit": "41de0709ab65e46e59435fbe8788d0002f249d21",
+    "commit": "90fc3c2c3ba5db958907d03e58b539733b7a2723",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5233268,
     "render_front": 1600919,
@@ -5080,7 +5080,7 @@
     ]
    },
    "after": {
-    "commit": "19ccebc4d893fb200b866d61c23a171cac79546a",
+    "commit": "021fc46016567f6a56eb9d99d031cdb101ce0674",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5233268,
     "render_front": 1600919,
@@ -5200,9 +5200,9 @@
    }
   },
   {
-   "commit": "b250c9fbf2193a4be43ba2ce926e5328eefc6a62",
+   "commit": "d80096c638fffe217a2cd7e0bd96c0ee1eb3d3e8",
    "name": "fnv-nx S6n: perf - lit permutations read the directional vector and 1/range^2 prepared per draw",
-   "before_commit": "19ccebc4d893fb200b866d61c23a171cac79546a",
+   "before_commit": "021fc46016567f6a56eb9d99d031cdb101ce0674",
    "cpu_instr_delta_main": 0,
    "cpu_instr_delta_render": 0,
    "gpu_ms_docked_720p": [
@@ -5218,7 +5218,7 @@
     0
    ],
    "before": {
-    "commit": "19ccebc4d893fb200b866d61c23a171cac79546a",
+    "commit": "021fc46016567f6a56eb9d99d031cdb101ce0674",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5233268,
     "render_front": 1600919,
@@ -5337,7 +5337,7 @@
     ]
    },
    "after": {
-    "commit": "b250c9fbf2193a4be43ba2ce926e5328eefc6a62",
+    "commit": "d80096c638fffe217a2cd7e0bd96c0ee1eb3d3e8",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5233268,
     "render_front": 1600919,
@@ -5457,9 +5457,9 @@
    }
   },
   {
-   "commit": "147155ba8cf5ad427623290e16977e8d3c11aee3",
+   "commit": "831830a00f997981aa8a96b9d66fa7b08b555d77",
    "name": "fnv-nx S6n: perf - Render reuses the epilogue block and dynamic record while the state is unchanged",
-   "before_commit": "e564afbdc38459ed93f146bd8c5106ccc01e5481",
+   "before_commit": "4463ec3f04ede1c3028dba7930225f893cdaaf0e",
    "cpu_instr_delta_main": -390710,
    "cpu_instr_delta_render": 0,
    "gpu_ms_docked_720p": [
@@ -5475,7 +5475,7 @@
     0
    ],
    "before": {
-    "commit": "e564afbdc38459ed93f146bd8c5106ccc01e5481",
+    "commit": "4463ec3f04ede1c3028dba7930225f893cdaaf0e",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 5233268,
     "render_front": 1600919,
@@ -5594,7 +5594,7 @@
     ]
    },
    "after": {
-    "commit": "147155ba8cf5ad427623290e16977e8d3c11aee3",
+    "commit": "831830a00f997981aa8a96b9d66fa7b08b555d77",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99937 state_binds 283 states 326 samplers 1",
     "main": 4842558,
     "render_front": 1600919,
@@ -5714,9 +5714,9 @@
    }
   },
   {
-   "commit": "22013655e0c7e9641c3885acc9b98ff65c4f8267",
+   "commit": "52902d408a26581c7c74a4636ed98e0ee093c2dd",
    "name": "fnv-nx S6n: perf - opaque draws ordered front to back by a coarse depth bucket, state inside it",
-   "before_commit": "022af1ce20f2dfe6807c0a8232cf1d1f31866bb5",
+   "before_commit": "3de8e9c657784781c2c40a9cb620e82de8bfe57a",
    "cpu_instr_delta_main": 22260,
    "cpu_instr_delta_render": 287659,
    "gpu_ms_docked_720p": [
@@ -5732,7 +5732,7 @@
     0
    ],
    "before": {
-    "commit": "022af1ce20f2dfe6807c0a8232cf1d1f31866bb5",
+    "commit": "3de8e9c657784781c2c40a9cb620e82de8bfe57a",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99739 state_binds 283 states 326 samplers 1",
     "main": 4838952,
     "render_front": 1587743,
@@ -5851,7 +5851,7 @@
     ]
    },
    "after": {
-    "commit": "22013655e0c7e9641c3885acc9b98ff65c4f8267",
+    "commit": "52902d408a26581c7c74a4636ed98e0ee093c2dd",
     "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 105971 state_binds 811 states 326 samplers 1",
     "main": 4861212,
     "render_front": 1641261,
