@@ -21,6 +21,8 @@ TC=$FNVNX_TOOLCHAIN; ROOT=$(cd "$TC/.." && pwd); P=$ROOT/platform
 export PATH=$DEVKITPRO/devkitA64/bin:$PATH
 JOBS=${JOBS:-$(nproc)}
 SSE2NEON=${SSE2NEON:-$ROOT/ext/sse2neon}
+# the pinned checkouts live next to each other (tools/fetch.sh: $EXT on the farms, ext/ in a checkout)
+MINIMP3=${MINIMP3:-$(dirname "$SSE2NEON")/minimp3}
 ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec -fsigned-char"
 case "${GUEST:-pie}" in
 	pie) SPECS="$TC/guest/guest_pie.specs"; BASEFLAG="" ;;
@@ -28,7 +30,7 @@ case "${GUEST:-pie}" in
 	*) echo "GUEST must be pie or fixed"; exit 1 ;;
 esac
 COMMON="$ARCH -O2 -g -ffunction-sections -fdata-sections -frounding-math -fshort-wchar -w"
-PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/startup/guest -I$ROOT/ext/minimp3"   # minimp3: platform/audio/dshow.cpp (tools/fetch.sh)
+PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/startup/guest -I$MINIMP3"   # minimp3: platform/audio/dshow.cpp (tools/fetch.sh)
 VFLAGS=""
 if [ -n "$VORBIS" ]; then VFLAGS="-DFNVNX_HAVE_VORBIS -I$VORBIS/include"; fi
 rm -rf "$OUT/obj"; mkdir -p "$OUT/obj"
