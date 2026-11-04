@@ -241,18 +241,18 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | native image address where the oracle has an image-window one (arg, result, store) | `native-address` | real-bug S2c (unrebound variable/table; check the pointee for literals) |
 | call argument the runner marked `arm_garbage` | `native-garbage-arg` | real-bug S1b |
 | `sret` argument differs | `sret-mismatch` | real-bug S1b |
-| float argument within tolerance / NaN on both | `x87-precision` / `nan-bits` | by-design |
-| float result equal to the oracle's unrounded x87 value | `x87-precision` | by-design |
+| float argument within tolerance (both values normal, same sign) / NaN on both with one side the machine's generated NaN (x87 0xffc00000, AArch64 0x7fc00000) | `x87-precision` / `nan-bits` | by-design (0.0 vs a denormal, +0 vs -0, NaN-shaped ints stay open: S13b audit) |
+| float result equal to the oracle's unrounded x87 value, which differs from its rounded one | `x87-precision` | by-design |
 | pointer to a pinned-pool literal (0x02f00000) vs the native .rodata copy: argument / result / store | `literal-arg` / `literal-ret` / `literal-store` | artifact |
-| both sides store image vftables (link `out/addrmap.tsv` kind V, or `FNVNX_CAUSES_ADDRMAP`), different ones: in a destructor / elsewhere | `vptr-store` / `vptr-differs` | by-design / triage S2c |
-| result of a `??_G` / `??_E` deleting destructor (MSVC returns this, Itanium D0 is void) | `deleting-dtor-ret` | by-design |
+| both sides store image vftables (link `out/addrmap.tsv` kind V, or `FNVNX_CAUSES_ADDRMAP`), different ones | `vptr-differs` | triage S2c (in a destructor too: that the two vftables share the class chain needs the exe's RTTI, S13b audit) |
+| result of a `??_G` / `??_E` deleting destructor (MSVC returns this, Itanium D0 is void) | `deleting-dtor-ret` | triage S13 (the difference is by design, but runner.compare stops there and never compares the destructor body; until the harness skips that return) |
 | pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
 | `no-native-entry` | `no-native-entry` | artifact |
 | oracle-only data fault in the AArch64 private range | `oracle-native-address` | artifact (a native address leaked to the x86 machine) |
 | oracle-only data fault | `oracle-fault` | triage |
 | oracle-only fault (`oracle-fault`, or an `oracle-vcall` error) at a garbage address in the x86 private range 0x0e000000 | `oracle-private-address` | artifact (the native machine maps that range as background) |
-| ... a dword access at 0xfffffffd..0xffffffff (a near-null pointer minus a few bytes, wrapped past 4 GiB) | `ilp32-pointer` | by-design |
+| ... a dword access at 0xfffffffd..0xffffffff, oracle only | `oracle-fault` | triage (the native may never have made the access; S13b audit) |
 | ... and the native function calls a function its own object defines as a bare `ret` (decomp stub, empty destructor) | `native-empty-callee` | real-bug S1 (the exe's work there is skipped natively) |
 | `oracle-vcall` call-target (`vcall: unplanted`): the native trace passes a `__s13_vtpad_` slot | `vptr-unpaired` | real-bug S2c, soft (classify.py tests `unplanted` first) |
 | ... the oracle calls a garbage word in the AArch64 stub range, the native trace names that word (word - 0x08000000, or `name:<hex>`) | `vcall-stub-alias` | artifact (one call, two spellings) |
@@ -274,8 +274,8 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | native 0 where the oracle has a value; the native function or a direct callee in its unit is `mov w0, #0; ret` | `native-zero-stub` | real-bug S1 (a placeholder body) |
 | call flow, the native function's own body is `ret` / return-a-constant (or it calls such a decomp-local `..FUN_<X>..` stand-in for an original X another object defines) and the oracle makes calls | `native-empty-body` | real-bug S1 |
 | the oracle's first missing call is CRT `_atexit` (0x00ec658f), the native function names no `fnvnx_xc_atexit` / `atexit` | `dyninit-no-atexit` | real-bug S10 (soft: the destructor is lost at exit only) |
-| `??_G` / `??_E` called with flags bit 0 clear; the native (D0) makes the oracle's calls plus deallocator calls only | `deleting-dtor-flags` | by-design |
-| the function takes a class by value (`AGG:` parameter); the oracle's calls after the native stops are deallocators only | `byvalue-arg-dtor` | by-design (MSVC: callee destroys, Itanium: caller) |
+| `??_G` / `??_E` called with flags bit 0 clear; the native (D0) makes the oracle's calls plus deallocator calls only | `deleting-dtor-flags` | triage S13 (by design, but the call-count difference hides the destructor body; until the harness runs D1 for flags 0) |
+| the function takes a class by value (`AGG:` parameter); the oracle's calls after the native stops are deallocators only | `byvalue-arg-dtor` | triage S13 (by design only for a non-trivial native destructor, and the difference hides the return and writes; until the harness drops the trailing argument frees) |
 | call-target: the native calls an image-window (data) address where the oracle calls a function | `native-calls-data` | real-bug S1 (virtual slot past a decomp class's shorter vtable) |
 | call-target: oracle an unnamed CRT entry (addrmap E, x87 `_CI*`) or `f`, native the libm (float) function; `sprintf` vs `__sprintf_chk`; `atof` vs `strtod` | `libc-variant` | artifact (libcalls.X86 / FAMILY lack the pair) |
 | the oracle's callee X is defined by the native function's own object and called by it (runs natively, intercepted on x86), **and** the native's calls from the divergence on include a call X reaches that leaves the unit and the caller does not make itself (`causes.native_ran`: evidence the native ran X) | `oracle-callee-unloaded` | artifact (X not in the oracle's code set); never over an unbound name; an early exit before X, or X with no traced call, stays `native-early-exit` / `call-flow` (V1 tests/v1/test_s13b_callee_unloaded.py U1/U2) |

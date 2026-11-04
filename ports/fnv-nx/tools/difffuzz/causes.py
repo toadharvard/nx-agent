@@ -76,9 +76,11 @@ POLICY = {
                                                 'unrounded x87 value'),
     'division':       ('by-design', '-', False, 'x86 raises #DE (x/0, INT_MIN/-1) where sdiv/udiv give 0 / wrap: '
                                                 'the exe would crash on that input'),
-    'deleting-dtor-ret': ('by-design', '-', False, 'MSVC\'s scalar/vector deleting destructor returns this, the '
-                                                   'Itanium deleting destructor (D0) is void: no native caller reads '
-                                                   'the result'),
+    'deleting-dtor-ret': ('triage', 'S13', True, 'MSVC\'s scalar/vector deleting destructor returns this, the '
+                                                 'Itanium D0 is void (the difference is by design), but '
+                                                 'runner.compare stops there and never compares the destructor '
+                                                 'body: a real bug in it gets this label too. Triage until the '
+                                                 'harness skips the return of ??_G/??_E (S13b audit)'),
     'call-order':     ('by-design', '-', False, 'two adjacent calls swapped: C++ leaves operand evaluation order open'),
     'vptr-store':     ('by-design', '-', False, 'a dead vptr store GCC drops (D7: objects hold Itanium vptrs); in a '
                                                 'destructor MSVC resets the vptr to the base vftable, GCC does not'),
@@ -226,13 +228,15 @@ POLICY = {
                                               'constructor order difference'),
     'unclassified':   ('triage', 'S13b', True, 'no rule matched'),
     # --- call-flow sub-shapes (_rule_callflow) -----------------------------------------------------------------------
-    'deleting-dtor-flags': ('by-design', '-', False, 'MSVC\'s deleting destructor (??_G/??_E) frees only when flags '
-                                                     'bit 0 is set (an explicit destructor call passes 0); the '
-                                                     'Itanium D0 at that address always frees: such a call reaches '
-                                                     'D1 natively'),
-    'byvalue-arg-dtor': ('by-design', '-', False, 'the function takes a class by value: MSVC destroys such an '
-                                                   'argument in the callee (the oracle\'s last calls free its '
-                                                   'buffer), the Itanium ABI in the caller'),
+    'deleting-dtor-flags': ('triage', 'S13', True, '??_G/??_E fuzzed with flags bit 0 clear: MSVC does not free, '
+                                                   'the Itanium D0 always frees (by design), and the call-count '
+                                                   'difference hides the destructor body. Triage until the harness '
+                                                   'runs the native D1 for flags 0 (S13b audit)'),
+    'byvalue-arg-dtor': ('triage', 'S13', True, 'the function takes a class by value: MSVC destroys it in the '
+                                                'callee, Itanium in the caller (by design only for a non-trivial '
+                                                'native destructor, unchecked), and the call-count difference at '
+                                                'the free hides the return value and writes. Triage until the '
+                                                'harness drops the oracle\'s trailing argument frees (S13b audit)'),
     'libc-variant':   ('artifact', 'S13', False, 'the same C library function under another entry: an MSVC x87 '
                                                  'intrinsic (_CIacos ...) or the double function vs libc or its '
                                                  'float variant, sprintf vs GCC\'s fortified __sprintf_chk, atof vs '
@@ -289,9 +293,43 @@ def _float_close(bx, ba):
         return True, True
     if math.isnan(fx) or math.isnan(fa) or math.isinf(fx) or math.isinf(fa):
         return False, False
+    tiny = 1.1754943508222875e-38 if len(bx) == 4 else 2.2250738585072014e-308
+    if abs(fx) < tiny or abs(fa) < tiny or math.copysign(1, fx) != math.copysign(1, fa):
+        return False, False         # zero, denormal or a sign flip is not x87 precision (S13b audit)
     ulp = abs(struct.unpack(fmt[1], bx)[0] - struct.unpack(fmt[1], ba)[0])
     rel = abs(fx - fa) / max(abs(fx), abs(fa), 1e-300)
     return ulp <= 4 or rel <= fmt[2], False
+
+
+GEN_NAN = {4: (0xffc00000, 0x7fc00000), 8: (0xfff8000000000000, 0x7ff8000000000000)}   # x87 indefinite, A64 default
+
+
+def _nan_generated(bx, ba):
+    """Both NaN and one side is that machine's generated NaN (x87 real indefinite / AArch64 default NaN): the
+    payloads differ because a machine made the NaN, not because the native computed something else."""
+    tol, nan = _float_close(bx, ba)
+    if not nan:
+        return False
+    n = len(bx)
+    gx, ga = GEN_NAN[n]
+    return int.from_bytes(bx, 'little') == gx or int.from_bytes(ba, 'little') == ga
+
+
+def _window_words(d):
+    """[(x86 word bytes, native word bytes)] of every differing aligned word of a mem-write record when all its
+    differences lie in the record's 8-byte window and both machines wrote them; None otherwise (differences the
+    record does not show, or a store only one machine made)."""
+    try:
+        first = int(d.get('addr') or '', 16)
+        addrs = [int(a, 16) for a in d.get('addrs') or ()]
+    except ValueError:
+        return None
+    bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+    w = first & ~3
+    if (not addrs or len(addrs) != d.get('ndiff') or d.get('only_x86') or d.get('only_arm') or len(bx) != 8
+            or len(ba) != 8 or not all(w <= a < w + 8 for a in addrs)):
+        return None
+    return [(bx[i:i + 4], ba[i:i + 4]) for i in (0, 4) if bx[i:i + 4] != ba[i:i + 4]]
 
 
 def _fault_addr(err):
@@ -339,15 +377,10 @@ def _rule_call_args(d):
     bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
     if d.get('cls') in ('F32', 'F64'):
         tol, nan = _float_close(bx, ba)
-        if nan:
+        if nan and _nan_generated(bx, ba):
             return 'nan-bits'
         if tol:
             return 'x87-precision'
-    if d.get('cls') == 'I32' and len(bx) == 4 and len(ba) == 4:
-        vx, va = _word(d['x86']), _word(d['arm'])
-        ex, ea = (vx >> 23) & 0xff, (va >> 23) & 0xff
-        if ex == ea and 0 < ex < 0xff and (vx >> 31) == (va >> 31) and abs((vx & 0x7fffff) - (va & 0x7fffff)) <= 256:
-            return 'x87-precision'          # float bits through an int parameter, a few ulp apart
     if d.get('cls') in ('I32', 'P') and len(bx) >= 4 and len(ba) >= 4:
         vx, va = _word(d['x86']), _word(d['arm'])
         if _in(vx, LIT_POOL) and _in(va, A64_IMAGE):
@@ -375,7 +408,8 @@ def _rule_return(d, conv, sym=None):
     fl = d.get('float') or {}
     if fl and not fl.get('tolerant'):
         try:
-            if fl.get('x87') is not None and float(fl['x87']) == float(fl.get('arm')):
+            if (fl.get('x87') is not None and float(fl['x87']) == float(fl.get('arm'))
+                    and float(fl['x87']) != float(fl.get('x86'))):
                 return 'x87-precision'      # the native value is the oracle's unrounded x87 value
         except (TypeError, ValueError):
             pass
@@ -389,20 +423,20 @@ def _rule_return(d, conv, sym=None):
 
 def _rule_mem_write(d, rec=None):
     fw = d.get('float_word') or {}
-    if fw.get('tolerant'):
+    ww = _window_words(d)
+    if fw.get('tolerant') and ww and all(_float_close(x, a) == (True, False) for x, a in ww):
         return 'x87-precision'
     n, ox, oa = d.get('ndiff', 0), d.get('only_x86', 0), d.get('only_arm', 0)
     bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
     if len(bx) >= 4 and len(ba) >= 4:
-        tol, nan = _float_close(bx[:4], ba[:4])
-        if nan:
+        if ww and all(_nan_generated(x, a) for x, a in ww):
             return 'nan-bits'
         vx, va = _word(d['x86']), _word(d['arm'])
         if _in(vx, LIT_POOL) and _in(va, A64_IMAGE):
             return 'literal-store'
         vft = image_vftables()
         if vx in vft and va in vft and vx != va:
-            return 'vptr-store' if _is_dtor((rec or {}).get('symbol')) else 'vptr-differs'
+            return 'vptr-differs'       # in a destructor too: a class-chain check needs the exe's RTTI (audit)
         if _in(vx, WINDOW) and _in(va, A64_IMAGE):
             return 'native-address'
         if _in(va, A64_STUBS) and not _in(vx, A64_STUBS):
@@ -561,8 +595,6 @@ def _rule_oracle_fault(d, rec):
     fx = _fault_addr(d.get('x86'))
     if fx and _in(fx[1], X86_PRIV):
         return 'oracle-private-address'
-    if fx and fx[0] in ('r', 'w') and fx[1] >= 0xfffffffd:
-        return 'ilp32-pointer'         # a dword access at a near-null pointer minus a few bytes, wrapped past 4 GiB
     try:
         em = empty_callees(rec.get('source'), int(rec.get('address') or '0', 16))
     except (TypeError, ValueError):

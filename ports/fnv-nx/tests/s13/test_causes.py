@@ -81,8 +81,15 @@ def test_rules():
           'arg-other-buffer', 'another argument buffer')
     check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x03801048), arm=w(0x03801040))) ==
           'layout-offset', 'this+8 vs this+0: layout-offset')
-    check(refined(dict(kind='call-args', arg='p1', cls='I32', x86=w(0x9cf46a07), arm=w(0x9cf46a27))) ==
-          'x87-precision', 'float bits through an int parameter, 32 ulp apart')
+    check(refined(dict(kind='call-args', arg='p1', cls='I32', x86=w(0x9cf46a07), arm=w(0x9cf46a27))) !=
+          'x87-precision', 'an int parameter 32 apart is not x87 precision (no record shows it carries a float)')
+    # x87 precision only between normal values of one sign (audit: 0.0 vs a denormal, +0 vs -0)
+    check(refined(dict(kind='call-args', arg='p0', cls='F32', x86=f32(1.0), arm=f32(1.0000001))) == 'x87-precision',
+          'F32 1 ulp apart: x87-precision')
+    check(refined(dict(kind='call-args', arg='p0', cls='F32', x86=w(0), arm=w(1))) != 'x87-precision',
+          '0.0 vs the smallest denormal is not precision')
+    check(refined(dict(kind='call-args', arg='p0', cls='F32', x86=w(0), arm=w(0x80000000))) != 'x87-precision',
+          '+0 vs -0 is not precision')
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(0x14), arm=w(0x13))) == 'unclassified',
           'small ints are not float bits')
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(5), arm=w(7))) == 'unclassified',
@@ -100,10 +107,19 @@ def test_rules():
                              symbol='??_GFUN_00ba8e20@@UAEPAXI@Z'), 'unclassified') == 'deleting-dtor-ret',
           'scalar deleting destructor result')
     # memory writes
-    check(refined(dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=0, x86=w(0xffc00000, 0),
-                       arm=w(0x7fc00000, 0))) == 'nan-bits', 'NaN store: nan-bits')
-    check(refined(dict(kind='mem-write', addr='03000010', ndiff=1, only_x86=0, only_arm=0, x86=w(1, 0),
-                       arm=w(2, 0), float_word=dict(tolerant=True))) == 'x87-precision', 'tolerant float store')
+    nanw = dict(kind='mem-write', addr='03000010', ndiff=2, only_x86=0, only_arm=0, x86=w(0xffc00000, 0),
+                arm=w(0x7fc00000, 0), addrs=['03000010', '03000013'])
+    check(refined(nanw) == 'nan-bits', 'generated NaN store, all differences in the word: nan-bits')
+    check(refined(dict(nanw, ndiff=3, addrs=['03000010', '03000013', '03000020'])) != 'nan-bits',
+          'a NaN store with a difference outside the window is not nan-bits')
+    check(refined(dict(nanw, x86=w(0xffffffff, 0), arm=w(0xfffffffe, 0))) != 'nan-bits',
+          'int -1 vs -2 (NaN-shaped ints, neither a generated NaN) is not nan-bits')
+    fw = dict(kind='mem-write', addr='03000010', ndiff=1, only_x86=0, only_arm=0, x86=f32(1.0) + '00000000',
+              arm=f32(1.0000001) + '00000000', addrs=['03000010'], float_word=dict(tolerant=True))
+    check(refined(fw) == 'x87-precision', 'tolerant float store, the only difference: x87-precision')
+    check(refined(dict(fw, ndiff=2, only_x86=1, addrs=['03000010', '03000014'],
+                       x86=f32(1.0) + '07000000')) != 'x87-precision',
+          'a tolerant float word does not cover a store only the oracle makes (audit 00a58b00 shape)')
     check(refined(dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=0, x86=w(0x01200000, 0),
                        arm=w(0x0a200000, 0))) == 'native-address', 'native image address stored')
     check(refined(dict(kind='mem-write', addr='03000011', ndiff=3, only_x86=3, only_arm=0, x86=w(0x00000001, 0),
@@ -117,8 +133,8 @@ def test_rules():
     try:
         vw = dict(kind='mem-write', addr='03000000', ndiff=4, only_x86=0, only_arm=0, x86=w(0x0102e388, 0),
                   arm=w(0x010d7f44, 0))
-        check(causes.refine(dict(rec(vw), symbol='??1FUN_00ddcc60@@UAE@XZ'), 'unclassified') == 'vptr-store',
-              'base vftable reset in a destructor: vptr-store')
+        check(causes.refine(dict(rec(vw), symbol='??1FUN_00ddcc60@@UAE@XZ'), 'unclassified') == 'vptr-differs',
+              'two image vftables in a destructor: vptr-differs (no class-chain evidence without the exe RTTI)')
         check(causes.refine(dict(rec(vw), symbol='??0FUN_00590210@@QAE@XZ'), 'unclassified') == 'vptr-differs',
               'different vftables in a constructor: vptr-differs')
     finally:
@@ -431,7 +447,8 @@ def test_vcall_split():
     check(err('fault:r:0e0a1b2c') == 'oracle-private-address', 'oracle reads its own private range')
     check(err('fault:x:0e0a1b2c') == 'oracle-private-address', 'oracle executes its own private range')
     check(err('fault:w:0e0a1b20', 'unclassified') == 'oracle-private-address', 'oracle-fault in the private range')
-    check(err('fault:r:fffffffe', 'unclassified') == 'ilp32-pointer', 'dword read across 4 GiB: ilp32-pointer')
+    check(err('fault:r:fffffffe', 'unclassified') == 'oracle-fault',
+          'an oracle-only read across 4 GiB stays oracle-fault (the native may never have made it)')
     check(err('fault:r:00000010', 'unclassified') == 'oracle-fault', 'near-null oracle read stays oracle-fault')
     check(err('fault:x:00000000') == 'oracle-vcall', 'oracle executes at null: kept')
     check(causes.refine(rec(dict(kind='error', x86='fault:r:0e0a1b2c', arm='fault:r:00000004'), 'oracle-vcall'),
