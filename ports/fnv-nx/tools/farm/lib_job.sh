@@ -164,7 +164,7 @@ EOF
 		[ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ] || exit 1
 		[ "$(git rev-parse --git-common-dir | xargs realpath)" = "$(git -C "$ARTIFACTS" rev-parse --git-common-dir | (cd "$ARTIFACTS" && xargs realpath))" ] || exit 1
 		git rm -rqf --cached . >/dev/null 2>&1 || true
-		rm -rf out fixed guest boot summary.txt report.md meta.json
+		rm -rf out fixed guest boot v1 summary.txt report.md meta.json
 		mkdir -p out/cache fixed
 		for f in aliases.ld refs.tsv abi.tsv addrmap.tsv layouts.tsv; do cp "$bd/link/out/$f" out/; done
 		# apply's typeinfo pairs (fnvlink pair_typeinfo, in check's link order: sorted object names)
@@ -190,6 +190,8 @@ EOF
 				done
 			fi
 		fi
+		# V1-link's audits of this link (full_job.sh 4d): report, tables and logs, about 1 MB
+		[ -d "$bd/v1" ] && cp -r "$bd/v1" v1
 		cp "$REPORT" report.md
 		python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" > meta.json <<'EOF'
 import json, os, sys
