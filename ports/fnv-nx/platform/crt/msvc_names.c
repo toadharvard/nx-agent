@@ -9,6 +9,9 @@
  *                                     glibc headers (S9) call them; newlib has only the plain functions
  *   __emul, __movsd, __debugbreak     MSVC intrinsics declared as functions by Havok units (out-of-line calls)
  *   xmemcpy                           SpeedTree's memcpy wrapper (TreeModelX, bstreemodel)
+ *   FUN_00401460, FUN_00406d50        CopyMemoryBlock / AppendPreview (crt_symbols.tsv "needs body"): cdecl
+ *                                     forwarders in the exe to 0x00ec44d0 memcpy (VC9's, overlap-safe: memmove)
+ *                                     and 0x00ec6bd2 strcat_s, with the arguments in order
  *   FreeBlockImp                      the decomp's name for `call [0x010b7eb0]`: that .rdata word is a vtable slot
  *                                     holding 0x00cb9cb0 = `mov ecx, 0x011f6238; jmp 0x00aa4060`, i.e.
  *                                     MemoryManager::Deallocate(p) on the global heap, which is FormHeap_Free
@@ -59,6 +62,8 @@ WEAK void __movsb(unsigned char *d, const unsigned char *s, size_t n)
         dd[i] = s[i];
 }
 WEAK void *xmemcpy(void *d, const void *s, size_t n) { return memcpy(d, s, n); }
+WEAK void *FUN_00401460(void *d, const void *s, unsigned n) { return memmove(d, s, n); }   /* CopyMemoryBlock */
+WEAK int FUN_00406d50(char *d, unsigned n, const char *s) { return (int)strcat_s(d, n, s); }   /* AppendPreview */
 /* int 3 in the original: Havok's assertion path (hkgpConvexHull). Without a debugger Windows raises an exception
  * the game's top-level filter turns into a crash. Here it is logged and execution goes on, like the trap stub it
  * replaces: a failed geometry assertion should not end the game. */

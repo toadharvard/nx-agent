@@ -77,3 +77,19 @@ TEST(crt_msvc_intrinsics_out_of_line)
     CHECK_STR(x, "hi!");
     __debugbreak();   /* logged, then goes on */
 }
+
+extern "C" {
+void *FUN_00401460(void *, const void *, unsigned);
+int FUN_00406d50(char *, unsigned, const char *);
+}
+
+TEST(crt_exe_forwarders)
+{
+    char b[16] = "abcdef";
+    CHECK(FUN_00401460(b + 2, b, 4) == b + 2);   /* CopyMemoryBlock: overlap-safe */
+    CHECK_STR(b, "ababcd");
+    char c[8] = "ab";
+    CHECK_EQ(FUN_00406d50(c, sizeof c, "cde"), 0);   /* AppendPreview = strcat_s */
+    CHECK_STR(c, "abcde");
+    CHECK(FUN_00406d50(c, 6, "xyz") != 0);           /* too long: an error (and an empty string, as strcat_s) */
+}
