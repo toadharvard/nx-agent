@@ -395,11 +395,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- overrides: a native implementation replaces the decomp definition at an address (docs/LINK.md)
     shadowed = {}
+    osigs = load_override_sigs(override)   # optional 4th column: the override's own MSVC-decorated signature
+    ms.need(osigs.values())
     for a, osym, oobj in load_overrides(override):
         old = native.get(a)
         if old is not None:
             shadowed[a] = old
-        msv = old['msvc'] if old else (def_at[a][1] if a in def_at else '')
+        msv = osigs.get(a) or (old['msvc'] if old else (def_at[a][1] if a in def_at else ''))
         native[a] = dict(unit=None, sym=elfsyms.Sym(osym, 0, 0, 'func', 'global', 1, '', False), variants={},
                          tier='override', msvc=msv, override=oobj)
 
@@ -1202,7 +1204,8 @@ def find_import_thunks(native, units, iat, import_syms, gdef, gref, anydef, msvc
 
 
 def load_overrides(path):
-    """Override table: address (hex), native symbol, object or archive; '#' comments, tab-separated."""
+    """Override table: address (hex), native symbol, object or archive[, MSVC signature]; '#' comments,
+    tab-separated."""
     out = []
     if path:
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
@@ -1210,6 +1213,19 @@ def load_overrides(path):
             if line.startswith('#') or len(f) < 3:
                 continue
             out.append((int(f[0], 16), f[1], f[2]))
+    return out
+
+
+def load_override_sigs(path):
+    """Override table rows with a 4th column: {address: MSVC-decorated signature of the override}. References are
+    compared with it instead of the decomp definition's (an override whose signature differs on purpose, e.g. a
+    variadic replacement of a fixed-argument definition)."""
+    out = {}
+    if path:
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 4 and f[3]:
+                out[int(f[0], 16)] = f[3]
     return out
 
 
