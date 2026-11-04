@@ -181,6 +181,29 @@ def main():
     vpm = abi.compare(sigs.parse_msvc(npm5[0], fnvlink.batch_demangle(fnvlink.UNDNAME, npm5)[npm5[0]]), cpm)
     check(vpm.kind == 'x86-inconsistent' and 'pop-mismatch' in vpm.classes, 'C-named stdcall pops 8 of 12: %s %s'
           % (vpm.kind, vpm.classes))
+    # V1 round 3 item 6 (chain_x87): x86 hands st(0) through a function declared int; the bridges carry an FP result
+    # through an integer one as float bits in w0 (double bits in x0 for 64-bit) and convert to the reader's width
+    nx = ['?F@D@@QAENXZ', '?F@E@@QAEMXZ', '?F@@YIHPAX@Z', '?G@@YIHPAX@Z', '?G@C@@QAENXZ', '?H@@YA_JXZ', '?H@@YANXZ']
+    dx_ = fnvlink.batch_demangle(fnvlink.UNDNAME, nx)
+    X = {n: sigs.parse_msvc(n, dx_[n]) for n in nx}
+    for r_, d_, want_ in ((nx[0], nx[2], ['fmov s0, w0', 'fcvt d0, s0']), (nx[1], nx[2], ['fmov s0, w0']),
+                          (nx[3], nx[4], ['fcvt s0, d0', 'fmov w0, s0']), (nx[5], nx[6], ['fmov x0, d0'])):
+        va = abi.compare(X[r_], X[d_])
+        asm_a = abi.emit_bridge('b', 't', va, 'x87') if va.kind == 'bridge' else ''
+        pa = abi2.compare(X[r_], X[d_], lambda t: None, lambda t: None)
+        asm_b = abi2.emit('b', 't', pa, 'x87') if pa is not None and pa.kind == 'bridge' else ''
+        seq = '\n'.join('    ' + w for w in want_)
+        check(seq in asm_a and all(w in (asm_b or '') for w in want_),
+              'FP through an integer result %s -> %s: %s / %s' % (dx_[r_], dx_[d_], va.kind, pa and pa.kind))
+    # V1 F1-8-member-vs-regs: a member's 8-byte result (MSVC: hidden buffer) against a free fastcall function that
+    # returns it in edx:eax - the buffer lands in an int parameter and is never written: x86-inconsistent
+    n8 = ['?l@T@@QAE?AUP8@@HH@Z', '?l@@YI?AUP8@@PAUT@@HHH@Z']
+    d8 = fnvlink.batch_demangle(fnvlink.UNDNAME, n8)
+    l8 = layout.Layout(8, 4, 1, 0, 'G1', 1)
+    p8 = abi2.compare(sigs.parse_msvc(n8[0], d8[n8[0]]), sigs.parse_msvc(n8[1], d8[n8[1]]),
+                      lambda t: l8 if t == 'P8' else None, lambda t: l8 if t == 'P8' else None)
+    check(p8 is not None and p8.kind == 'x86-inconsistent' and 'result-buffer-not-written' in p8.classes,
+          'result buffer into an int parameter: %s' % ((p8 and (p8.kind, p8.classes)),))
     # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
     # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
     src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'

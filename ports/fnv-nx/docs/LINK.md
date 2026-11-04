@@ -179,6 +179,18 @@ class/struct/union/enum tags, which Itanium names do not.
 * A `float` result where the other side declares `double` (or the reverse): x86 hands either over exactly in st(0),
   AArch64 would read d0 where the callee wrote s0. The bridge calls and converts (`fcvt d0, s0` / `fcvt s0, d0`),
   class `ret-float-width` (V1 defect 2: 130 pairs were `same`); `long double` (binary128 here) is `manual`.
+* An FP result read as an integer one, or the reverse (`ret-regfile`; V1 round 3 `chain_x87.py`). On x86 a function
+  declared `int` that returns what an FP callee left in st(0) hands the value through untouched; a `double` caller
+  reads it exactly. AArch64 shares no register between the two, so the bridges use one convention (`abi.ret_carry`,
+  in abi and abi2 alike): an FP value in an integer result travels as float bits in w0 (32-bit integers,
+  pointers) or double bits in x0 (64-bit integers), and the reading side converts to its own width with `fmov` /
+  `fcvt`. Before, a `double` read of an `int` definition got the float's bits in the low half of d0. A double
+  through a 32-bit integer is rounded to float; x86 kept all of it. On the farm link `link/9a0243c7eabe`, 32 pairs
+  have such results, 3 of them `double` <- `int`.
+* A member function's aggregate result (always a hidden buffer on MSVC) against a definition that returns the
+  aggregate by value and takes an integer where the buffer pointer lands (V1 `F1-8-member-vs-regs`: an 8-byte POD
+  in edx:eax): nothing writes the buffer. abi2 lists the pair `x86-inconsistent`, class
+  `result-buffer-not-written`.
 * An undecorated C name (`@f@N` fastcall, `_f@N` stdcall, `_f` cdecl) carries no parameter types or result. Resolve
   reads them from a declaration or definition in the unit's prepared source and the local headers it includes
   (`CDecls`), the first one whose x86 argument bytes equal N, so these pairs are compared like decorated ones (V1

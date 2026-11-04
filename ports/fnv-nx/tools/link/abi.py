@@ -166,6 +166,28 @@ def a64_locations(sig):
     return out
 
 
+INT32_CLASSES = ('I8', 'I16', 'I32', 'P')
+
+
+def ret_carry(dcls, rcls):
+    """Instructions after the call that turn the definition's result (class dcls) into the reference's (rcls) when
+    one is floating-point and the other an integer (chain_x87, V1 round 3): x86 returns a float or double in st(0)
+    and an integer in eax(:edx), so a function declared int that returns what an FP callee left in st(0) hands the
+    FP value through untouched, while AArch64 has no shared register. Convention of the bridges: an FP value in an
+    integer result travels as float bits in w0 (32-bit integers, pointers) or as double bits in x0 (64-bit), and the
+    reading side converts to its own width (exact for a float; a double through a 32-bit integer is rounded to
+    float, where x86 kept all 64 bits). None when no such rule applies (long double)."""
+    if dcls in ('F32', 'F64') and (rcls in INT32_CLASSES or rcls == 'I64'):
+        if rcls == 'I64':
+            return (['fcvt d0, s0'] if dcls == 'F32' else []) + ['fmov x0, d0']
+        return (['fcvt s0, d0'] if dcls == 'F64' else []) + ['fmov w0, s0']
+    if rcls in ('F32', 'F64') and (dcls in INT32_CLASSES or dcls == 'I64'):
+        if dcls == 'I64':
+            return ['fmov d0, x0'] + (['fcvt s0, d0'] if rcls == 'F32' else [])
+        return ['fmov s0, w0'] + (['fcvt d0, s0'] if rcls == 'F64' else [])
+    return None
+
+
 def ret_a64(cls):
     if cls == 'VOID':
         return 'none'
@@ -289,8 +311,9 @@ def compare(ref, dfn, ecx_unused=False):
             v.notes.append('reference reads a result the definition does not produce')
         elif {rr, dr} == {'x0', 'v0'}:
             v.classes.append('ret-regfile')
-            if {ret_class(ref), ret_class(dfn)} <= {'F32', 'I32', 'P', 'I16', 'I8'}:
-                v.ret_fix = (dr, rr)
+            ops = ret_carry(ret_class(dfn), ret_class(ref))
+            if ops is not None:
+                v.ret_fix = ('ops', ops)
             else:
                 v.kind = 'manual'
         else:
@@ -407,11 +430,13 @@ def emit_bridge(name, target, verdict, comment):
     lines += ['    ' + _move(*m) for m in sequentialize(verdict.moves)]
     if verdict.ret_fix:
         if verdict.ret_fix[0] == 'fcvt':   # the definition's float width -> the reference's
-            fix = '    fcvt d0, s0' if verdict.ret_fix[1] == 'F32' else '    fcvt s0, d0'
+            fix = ['    fcvt d0, s0' if verdict.ret_fix[1] == 'F32' else '    fcvt s0, d0']
+        elif verdict.ret_fix[0] == 'ops':   # an FP result through an integer one (ret_carry)
+            fix = ['    ' + x for x in verdict.ret_fix[1]]
         else:
             frm, to = verdict.ret_fix
-            fix = '    fmov s0, w0' if to == 'v0' else '    fmov w0, s0'
-        lines += ['    stp x29, x30, [sp, #-16]!', '    mov x29, sp', '    bl %s' % target, fix,
+            fix = ['    fmov s0, w0' if to == 'v0' else '    fmov w0, s0']
+        lines += ['    stp x29, x30, [sp, #-16]!', '    mov x29, sp', '    bl %s' % target, *fix,
                   '    ldp x29, x30, [sp], #16', '    ret']
     else:
         lines.append('    b %s' % target)

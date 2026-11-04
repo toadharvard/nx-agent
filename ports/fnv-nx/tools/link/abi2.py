@@ -179,7 +179,7 @@ class Plan:
         self.dret = self.rret = None
         self.def_sret_from = None   # ref label whose pointer receives the definition's hidden result
         self.ret_conv = False
-        self.ret_fcvt = None      # (definition class, reference class): float <-> double result
+        self.ret_fcvt = None      # instructions after the call: float <-> double, FP through an integer result
         self.moves = False        # the AArch64 side needs a bridge (bytes elsewhere, a result to convert)
 
 
@@ -236,6 +236,13 @@ def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False):
             p.notes.append('%s: %d of %d bytes passed' % (lab, covered, size))
         if any(s == ('refsret',) for _, s, _, _ in pieces):
             p.classes.append('sret-explicit')
+            if next((v.cls for v in dv if v.label == lab), 'P') != 'P':
+                # the reference's result buffer reaches an integer parameter of a definition that returns by value
+                # (V1 F1-8-member-vs-regs: a member's 8-byte result vs a free function's edx:eax): nothing writes it
+                x86_ok = False
+                p.notes.append('%s receives the reference\'s result buffer but is no pointer: the result is never '
+                               'written there' % lab)
+                p.classes.append('result-buffer-not-written')
         p.pieces[lab] = pieces
         for vo, src, so, ln in pieces:
             if src == ('refsret',):
@@ -255,8 +262,12 @@ def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False):
         elif hidden_result(ref, rret) and not hidden_result(dfn, dret):
             pass  # the reference's buffer feeds an explicit definition parameter (refsret piece)
         elif rret.cls in ('F32', 'F64') and dret.cls in ('F32', 'F64') and rret.cls != dret.cls:
-            p.ret_fcvt = (dret.cls, rret.cls)   # a numeric conversion, not a byte copy (V1 defect 2)
+            # a numeric conversion, not a byte copy (V1 defect 2)
+            p.ret_fcvt = ('fcvt d0, s0',) if dret.cls == 'F32' else ('fcvt s0, d0',)
             p.classes.append('ret-float-width')
+        elif abi.ret_carry(dret.cls, rret.cls) is not None:
+            p.ret_fcvt = tuple(abi.ret_carry(dret.cls, rret.cls))   # chain_x87: FP through an integer result
+            p.classes.append('ret-regfile')
         else:
             for vo in range(min(rret.size, dret.size)):
                 if locate(rr, vo)[:2] != (locate(dr, vo) or (None, None, 0))[:2]:
@@ -451,7 +462,8 @@ def emit(name, target, p, comment):
                 a.copy('x9', 'x10', p.dret.size)
             src_base(cont, co, 'x9'); a('ldr w0, [x9]')  # MSVC returns the buffer pointer
         elif p.ret_fcvt:
-            a('fcvt d0, s0' if p.ret_fcvt[0] == 'F32' else 'fcvt s0, d0')
+            for ins in p.ret_fcvt:
+                a(ins)
         elif p.ret_conv or refsret:
             if p.ret_conv and not def_ind:
                 a.addr('x10', R); _store_ret(a, a64_ret(p.dret), 'x10')
