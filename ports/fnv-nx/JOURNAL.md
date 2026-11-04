@@ -1389,3 +1389,44 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - DECL1 math overloads;
   - SDK includes inside pack regions;
   - namespace statics (STATIC1).
+
+### J-0070 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0055,J-0056
+
+* **did** - Replayed all 529 saved divergences (405 distinct, 7 campaigns) on S2c's f11 (tree from 0c630cf).
+  Harness changes:
+  - edx-dummy and oracle-garbage argument filters;
+  - a model of MSVC custom register conventions;
+  - IAT slots as import stubs on both sides (Interlocked builtins);
+  - sized delete and atexit equivalences;
+  - code pointers stored as data are compared as original addresses;
+  - a `triage` command with a read-set probe;
+  - lockstep runs of 9 dynamic initializers;
+  - check_statics counts namespace-scope statics.
+
+  Merged d9c4bf0..828473c. Orchestrator re-ran the self-test: 0 failures.
+* **found**:
+  - **Replay of the 405 saved divergences:** 103 gone, 8 soft, 294 still. By cause: custom-cc 11/23 gone, call-flow
+    21/62, unclassified 56/155.
+  - **Verdicts on f11** (the f10 campaigns: 1,531 functions, 65,570 executions): hard 147 -> 115, soft 90 -> 86,
+    oracle gap 11 -> 7. FALL1: 3 of the 4 trapping functions gone.
+  - **Port-bug candidates:**
+    - STATIC1 misses namespace-scope statics (3 really diverge, e.g. fnv_0077da30::g_pHudMainMenuInstance folded to
+      null) -> S1;
+    - XINC1 this-not-passed 00b81330 -> 00ba95e0, 00bbe020 -> 00c0abd0 -> S2c (patches);
+    - ref-passes-fewer ecx 00a564a0 -> 00a36fd0 (verdict fixed in J-0059);
+    - varargs logger 00700350 -> 00703c00 -> S2c (override);
+    - vtable pairing: 00404920 stores vptr 0x01012120, native 0x0104d338 -> S2c;
+    - Havok layout shifts: Jacobian 00d6cc80 +48; hkpMeshShape 00dcf460 and 00e48cb0 +16 -> S1;
+    - HasValidTriangle 004ff7e0 still traps (the x86 code stores a vptr and returns `this`) -> S1 (RET1 or a
+      declaration fix).
+  - **The 106 unclassified divergences still reproducing:** 45 read the same memory but compute a different result,
+    35 read different object fields, 17 different image globals, 4 are layout shifts, 5 mixed.
+  - **Lockstep:** 8 of 9 dynamic initializers agree. 00fbe990 is soft: a vptr stored as data, where the decomp and
+    native names for the class differ.
+* **decided** - custom-cc functions get a real verdict only when the oracle outcome does not depend on planted
+  garbage. Arguments whose oracle value is garbage are not compared.
+* **metrics** - df_replayed=405 df_replay_gone=103 df_replay_soft=8 df_hard_f11=115 df_soft_f11=86
+  df_oracle_gap_f11=7 unit_local_image_vars=610 namespace_statics_image=77 namespace_statics_diverging=3
+  lockstep_dyninit_agree=8/9
+* **next** - Recheck after the S1/S2c fixes. Harness: compare the pointee for pointer-to-literal returns; triage the
+  45 "same reads, different result" by trace diff. Fuzz the Havok custom-cc functions now that they are modelled.
