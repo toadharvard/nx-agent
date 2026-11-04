@@ -146,7 +146,7 @@ def run_gcc(scratch, extra_variants):
         raise SystemExit('order_check: the fnvnx_order plugin does not build: %s' % r.stderr[-500:])
     plugin = r.stdout.strip()
     # the plugin exactly as compile.sh loads it; each named switch must be one compile.sh passes
-    build = ['-fplugin=' + plugin, *compile_sh_order_args(need=('mode=', 'args=', 'refcount=', 'object=', 'operator='))]
+    build = ['-fplugin=' + plugin, *compile_sh_order_args(need=('mode=', 'args=', 'refcount=', 'object=', 'operator=', 'assign='))]
     variants = dict(build=build)
     for name, flags in extra_variants.items():
         variants[name] = build + flags
