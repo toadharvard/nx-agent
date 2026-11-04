@@ -62,15 +62,29 @@ def run(out, tree, jobs=4):
         return
     import layout
     flags = layout.flags(tree)
-    todo = [u for u in units if not os.path.exists(unit_file(out, u))]
+    wants = collections.defaultdict(set)
+    for l in open(req, encoding='utf-8', errors='surrogateescape'):
+        f = l.rstrip('\n').split('\t')
+        if len(f) >= 2:
+            wants[f[0]].add(f[1])
+
+    def want_text(u):
+        return ''.join(n + '\n' for n in sorted(wants[u]))
+
+    def fresh(u):   # recorded, with the same wanted callees (their format literals)
+        w = unit_file(out, u) + '.want'
+        return os.path.exists(unit_file(out, u)) and os.path.exists(w) and open(w).read() == want_text(u)
+    todo = [u for u in units if not fresh(u)]
 
     def one(u):
         dst = unit_file(out, u)
         tmp = dst + '.tmp'
         if os.path.exists(tmp):
             os.remove(tmp)
+        open(dst + '.want', 'w').write(want_text(u))
         r = subprocess.run([layout.CXX, *flags, '-fsyntax-only', '-fplugin=' + so,
-                            '-fplugin-arg-fnvnx_vacall-out=' + tmp, os.path.join(tree, u)],
+                            '-fplugin-arg-fnvnx_vacall-out=' + tmp,
+                            '-fplugin-arg-fnvnx_vacall-want=' + dst + '.want', os.path.join(tree, u)],
                            cwd=tree, capture_output=True, text=True)
         if not os.path.exists(tmp):
             open(tmp, 'w').close()
@@ -93,7 +107,7 @@ def load(out, unit, _cache={}):
             got = collections.defaultdict(set)
             for line in open(p, encoding='utf-8', errors='surrogateescape'):
                 f = line.rstrip('\n').split('\t')
-                if f[0] == 'VADEF':
+                if f[0] in ('VADEF', 'FMT'):
                     continue
                 if len(f) >= 3:
                     got[f[0]].add(tuple(f[3 + int(f[2]):]))
@@ -172,3 +186,151 @@ def decide(rs, ds, seqs, va_reads=None):
     v.notes.append('every call site passes (%s)' % ', '.join(seq))
     v.classes.append('varargs-callsite')
     return v, fs, seq, 'vacall_decided'
+
+
+def load_fmts(out, unit, _cache={}):
+    """{callee: [{argument index: format bytes}] per call} of a unit's calls of the wanted callees (FMT lines), None
+    when the unit was not recorded."""
+    p = unit_file(out, unit)
+    if p not in _cache:
+        if not os.path.exists(p):
+            _cache[p] = None
+        else:
+            got = collections.defaultdict(list)
+            for line in open(p, encoding='utf-8', errors='surrogateescape'):
+                f = line.rstrip('\n').split('\t')
+                if f[0] == 'FMT' and len(f) >= 3:
+                    lits = {}
+                    for x in f[3:]:
+                        i, _, h = x.partition(':')
+                        lits[int(i)] = bytes.fromhex(h)
+                    got[f[1]].append(lits)
+            _cache[p] = got
+    return _cache[p]
+
+
+def parse_format(fmt):
+    """printf conversions of an MSVC 2008 format string -> the classes vsnprintf reads, in order, or None when one is
+    not modelled (%n, positional $, long double, an unknown conversion). `*` width/precision read an int; h/l/w
+    lengths keep a 4-byte word (MSVC long is 32 bits), ll / I64 / q / j a 64-bit integer; e f g a read a double;
+    s S p Z read a pointer."""
+    out, i, n = [], 0, len(fmt)
+    while i < n:
+        if fmt[i:i + 1] != b'%':
+            i += 1
+            continue
+        i += 1
+        if fmt[i:i + 1] == b'%':
+            i += 1
+            continue
+        while i < n and fmt[i:i + 1] in b'-+ #0':
+            i += 1
+        if fmt[i:i + 1] == b'*':
+            out.append('I32'); i += 1
+        while i < n and fmt[i:i + 1].isdigit():
+            i += 1
+        if fmt[i:i + 1] == b'$':
+            return None
+        if fmt[i:i + 1] == b'.':
+            i += 1
+            if fmt[i:i + 1] == b'*':
+                out.append('I32'); i += 1
+            while i < n and fmt[i:i + 1].isdigit():
+                i += 1
+        wide = False
+        for pre, w in ((b'I64', True), (b'I32', False), (b'll', True), (b'hh', False), (b'h', False), (b'l', False),
+                       (b'w', False), (b'q', True), (b'j', True), (b'z', False), (b't', False), (b'I', False),
+                       (b'L', None)):
+            if fmt.startswith(pre, i):
+                if w is None:
+                    return None   # long double: binary128 here, 8 bytes on MSVC
+                wide = w
+                i += len(pre)
+                break
+        c = fmt[i:i + 1]
+        i += 1
+        if c in (b'd', b'i', b'u', b'o', b'x', b'X', b'c', b'C'):
+            out.append('I64' if wide else 'I32')
+        elif c in (b'e', b'E', b'f', b'F', b'g', b'G', b'a', b'A'):
+            out.append('F64')
+        elif c in (b's', b'S', b'p', b'Z'):
+            out.append('P')
+        else:
+            return None
+    return out
+
+
+def format_reads(rs, ds, sites):
+    """('exact',) when every call site's format literal (the definition's last named parameter) reads, conversion by
+    conversion, a word of the width the fixed reference passes there; None otherwise (a non-literal format, a
+    conversion not modelled, other widths, unrecorded calls)."""
+    import abi
+    if not sites:
+        return None
+    dnamed = [p for p in (ds.raw_params or []) if p.strip() != '...']
+    if not dnamed or abi.classify(dnamed[-1]) != 'P':
+        return None
+    k = len(dnamed) - 1 + (1 if ds.member else 0)          # the format's index among the call's arguments
+    tail = [abi.classify(p) for p in (rs.raw_params or [])[len(dnamed):]]
+    want = [abi.VA_WIDTH.get(c) for c in tail]
+    if None in want:
+        return None
+    for lits in sites:
+        fmt = lits.get(k)
+        conv = parse_format(fmt) if fmt is not None else None
+        if conv is None or len(conv) > len(tail):
+            return None
+        if [abi.VA_WIDTH.get(c) for c in conv] != want[:len(conv)]:
+            return None
+    return ('exact',)
+
+
+def site_convs(rs, ds, sites):
+    """The set of conversion tuples the call sites' format literals read, or None (non-literal, not modelled)."""
+    import abi
+    dnamed = [p for p in (ds.raw_params or []) if p.strip() != '...']
+    if not sites or not dnamed or abi.classify(dnamed[-1]) != 'P':
+        return None
+    k = len(dnamed) - 1 + (1 if ds.member else 0)
+    got = set()
+    for lits in sites:
+        fmt = lits.get(k)
+        conv = parse_format(fmt) if fmt is not None else None
+        if conv is None:
+            return None
+        got.add(tuple(conv))
+    return got
+
+
+def decide_format(rs, ds, sites):
+    """(verdict, bridge key suffix, stat) for a fixed reference rs to a definition ds that hands its va_list to
+    vsnprintf, from the call sites' format literals: `exact` widths -> abi.compare with ('exact',); one conversion
+    list for every site whose words regroup (two ints read as %lld) -> the definition compared as fixed with those
+    conversions (abi, then abi2 bytes); else (None, None, stat)."""
+    import abi
+    import abi2
+    r = format_reads(rs, ds, sites)
+    if r is not None:
+        v = abi.compare(rs, ds, va_reads=r)
+        if v.kind in ('same', 'bridge'):
+            v.classes.append('varargs-format')
+            return v, None, 'format_exact'
+    convs = site_convs(rs, ds, sites)
+    if not convs:
+        return None, None, 'format_unknown'
+    if len(convs) > 1:
+        return None, None, 'format_sites_disagree'
+    conv = next(iter(convs))
+    fd = copy.copy(ds)
+    fd.raw_params = [p for p in (ds.raw_params or []) if p.strip() != '...'] + [TYPE_OF[c] for c in conv]
+    fd.params = fd.raw_params
+    v = abi.compare(rs, fd)
+    if v.kind not in ('same', 'bridge'):
+        p2 = abi2.compare(rs, fd, lambda t: None, lambda t: None)
+        if p2 is None or p2.kind not in ('same', 'bridge'):
+            return None, None, 'format_not_bridgeable'
+        v = abi.Verdict()
+        v.kind, v.classes, v.notes, v.plan = p2.kind, list(p2.classes), list(p2.notes), p2
+    v.classes.append('varargs-format')
+    v.notes.append('every call site formats (%s)' % ', '.join(conv))
+    return v, '|fmt ' + ','.join(conv), 'format_bridged'

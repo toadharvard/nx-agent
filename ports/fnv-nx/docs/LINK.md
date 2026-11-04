@@ -225,8 +225,17 @@ class/struct/union/enum tags, which Itanium names do not.
     definition (`VADEF`): `none` (no va_start), `escape` (its va_list goes to another function, vsnprintf-like:
     the format decides) or the va_arg classes. The tail must share one width class (4-byte words, 8-byte integers,
     doubles) with every va_arg the body reads, or the body must never call va_start. Without a record, `escape`
-    or mixed widths, the pair is `manual`. On link/c0d6c71516f6 this sends the 0x00703c00 override's fixed-tail
-    callers and 0x00406d00's to `manual` (both format through vsnprintf);
+    or mixed widths, the pair is `manual`. **Format literals** (`vacall.decide_format`): when the definition hands
+    its va_list on (`escape`: 0x00406d00; the 0x00703c00 override, declared `va=escape` in overrides.tsv column 5),
+    the plugin records the string-literal arguments of every call of the reference
+    (`-fplugin-arg-fnvnx_vacall-want`, `FMT` lines; a readonly array initialized with a literal counts too). The
+    definition's last named parameter is the format. Its conversions are parsed in MSVC 2008's syntax
+    (`parse_format`: `*`, h/l/w = 4 bytes, ll/I64/q/j = 8, e/f/g/a double, s/p pointer; %n, `$` and `L` are not
+    modelled). When every call site reads, word by word, the widths the fixed reference passes, the pair needs no
+    bridge. When every site has the same conversions but the words regroup (two ints read as `%lld` or `%f`), the
+    definition is compared as fixed with those conversions and bridged (abi2 bytes; the key includes the
+    conversions). A non-literal format, sites that disagree and unmodelled conversions stay `manual`. test_vacall
+    executes the %s, %lld and %f shapes under qemu;
   * both variadic: the named parts are compared like fixed ones and the anonymous parts must start at the same
     place;
   * definition parameters in the reference's anonymous part are decided **by the call sites** (`vacall.py`). Resolve 1
@@ -238,7 +247,7 @@ class/struct/union/enum tags, which Itanium names do not.
     aggregates by value and units not recorded yet stay `manual`. For a variadic definition only the words its
     named parameters read must agree; 0x00406d00's snprintf-like callers pass any number of arguments. Test:
     `test_vacall.py` covers V1's shapes end to end (plugin, decision, qemu run). On link/c0d6c71516f6, replayed with
-    its tree: 32 units recorded, bridge-gap pairs 70 -> 35, then 75 once V2's va_arg widths are checked.
+    its tree: 32 units recorded, bridge-gap pairs 70 -> 35, then 75 once V2's va_arg widths are checked, then 57 with the format literals.
   * without the call sites, such pairs are `manual`. Their x86 words come from the call site's
     argument types. A long long or a double is two words on x86 and one register on AArch64. A struct by value is
     several words, or a pointer. A struct { float } goes in an s register. V1 refuted (VA-U1..U4) an earlier rule
@@ -359,8 +368,10 @@ tsv `address<TAB>d`, stands in for tests).
 
 For each one whose native object defines the thunk, the address map's entry names `__fnvnx_msvc_<addr>`. aliases.ld
 defines that symbol as the thunk, so image code pointers rewritten through the map (vftable words, function tables)
-pass through the thunk, as do x86-convention callers. `__fnv_<addr>` stays the primary entry, because the units' own
-references pass the full object. On link/c0d6c71516f6 79 addresses have a thunk. 461 have none: the decomp defines
+pass through the thunk, as do x86-convention callers. `__fnv_<addr>` stays the primary entry for the units' own
+references to the definition's class, which pass the full object. A member reference through another class (a
+decomp shell declared at the subobject: 0x008d4870 calls 0x008805f0 with `this` at +0xa4) passes the subobject, as
+the x86 caller did, so it binds to the thunk too (V2 T1: 4 addresses, 7 references at link-head). On link/c0d6c71516f6 79 addresses have a thunk. 461 have none: the decomp defines
 them on a shell class that is the subobject itself, so `this` already agrees. 283 have no native definition.
 S13b's `thunk-binding` rows (11 on link/0bd144db1464, `this` off by 24, 60, 136, 164, 168) are this case. The
 harness has to enter through the map's link symbol to see the fix.
@@ -521,8 +532,10 @@ to 0. Report: `typeinfo_pairs.tsv`.
 **Slot functions no object defines.** Inline virtual functions and implicit destructors of a class that no unit
 constructs or destroys are emitted nowhere (GCC emits them with the vtable). For the synthesized vtables a compiled
 object references (`vtable-ref` requests: classes native code constructs), the slot symbols no compiled object
-defines (`rtti_defined.txt`) are emitted from the host unit itself: it is compiled again (`-O2
--fkeep-inline-functions -ffunction-sections -fdata-sections`) with a qualified destructor call per class
+defines (`rtti_defined.txt`) are emitted from the host unit itself: it is compiled again with compile.sh's own
+flags (`compile.sh --print-flags`, `layout.game_flags`: semantics, code generation, `-fPIC`, FTOI2 and the S12 order
+plugin; bodies.py's synthesized bodies use the same) plus `-fkeep-inline-functions -ffunction-sections
+-fdata-sections`, with a qualified destructor call per class
 (`p->E::~E()`: the implicit D1/D2, and with `-fkeep-inline-functions` D0 and the inline virtuals, are defined); a
 deleting destructor still missing (a destructor declared, defined in a unit that does not compile) is emulated
 under its mangled name: D1, then the deallocation a delete expression would pick (the class's `operator delete`,
@@ -618,6 +631,80 @@ Checks: of the slot symbols resolve bound strictly by name, 1,587 have the same 
 is known (74) it pops the declared bytes in 74; push counting matches the declaration at 114 of 184 (nested calls'
 arguments pushed earlier), and there all known targets (10) match the pushes.
 
+## Vftables from the player's exe (`exevft.py`, `resolve --exe`, S2c-vt)
+
+`resolve --exe <FalloutNV.exe|none>` (default `FNVNX_EXE`, then `PLAYER_EXE`; build.py passes `link_exe`: FNVNX_EXE,
+else a BOOT_IMAGE file, else `none`, and the exe's sha256 is part of the Link fingerprint; link_job.sh takes the
+owner's copy through `job_gamedata`). The exe is agent-only (D3): it is read, never copied; its scan is cached in
+`out/cache/exe_vftables.json`.
+
+**Scan.** Every MSVC vftable with RTTI follows a pointer to its complete object locator (COL: signature 0, the
+vfptr's offset in the complete object, the TypeDescriptor `.?AV<C>@@`, the class hierarchy). `exevft.scan` takes
+each (data word -> COL, next word in `.text`) pair as a vftable: class, COL offset, bases, slots (the `.text` words
+up to the next non-code word). On the GOG 1.4.0.525 exe: 3,269 vftables, 2,678 primary, in 0.8 s.
+
+**Pairing.** `exe_pair` gives each exe vftable its own class's native vtable (`_ZTV<C>` at the address point whose
+offset-to-top is minus the COL offset, the class named by llvm-undname of `??_7<td>6B@`). It replaces a pairing by
+decomp names or hand-stored vptrs that names another class, unless the own vtable is shorter than both (a unit's
+partial declaration), and adds V rows for vftables no unit names. `exe_vftables.tsv`: per exe vftable the class,
+its native vtable, the pairing before and the outcome. Classes with no native vtable are requested for synthesis
+(`vtable_requests.tsv`, why `exe-rtti`; hosts: units naming the address, then units naming a member).
+
+**Slot fill.** `exe_slot_fill`, after the pairing: a native vtable slot that calls a trap stub (`vslot-unresolved`,
+a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's
+vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the address map has one.
+* The native vtable (group, address point) stands for the exe vftables the address map pairs with it and those of
+  its own RTTI class at that offset. Image vftables the units name that have no RTTI in the exe (no COL before
+  them: 213 on link 31971038913d, many of the shader classes) are read at their address too
+  (`exevft.plain_vftables`), bounded by the next known vftable start; with no COL between two of them their real
+  end is unknown, so they fill only slots the native vtable has and are never used to extend one.
+* GCC slot k is exe slot j = k up to the complete destructor D1; D0 shares D1's slot and every later slot is one
+  lower (`exevft.exe_slot_index`, "minus-one rule": MSVC has one deleting destructor). The pair is found by name
+  (`D1Ev`/`D0Ev`, their address-bound forms) or, in an abstract class, as two adjacent zero words.
+* One undefined symbol is renamed once per object: every vtable of the object naming it must agree on the address,
+  else the declaring class's vtable decides, else it stays a trap.
+* ABI (`slot_abi`): every argument the slot's declaration passes and the definition reads must arrive where the
+  definition reads it, in the same register file (abi.a64_locations; a free definition takes the object as its
+  first pointer parameter, a free definition without parameters reads nothing). A definition that reads more
+  arguments than the slot declares is bound and listed: callers reach a slot through their own class's
+  declaration, and the decomp's shells declare placeholders (`FUN_00aa7400`: `virtual void v2();` for
+  `ZeroOverheadHeap::Allocate(unsigned, unsigned)`, the boot's first trap). Otherwise the link's x86 model decides
+  (`abi.compare` of a thiscall member with the slot's parameters against the definition, `slot_msvc_sig`): same ->
+  direct, register moves -> an ABI bridge (`__fnvnx_br_<a>_<hash>`; a pop mismatch alone is accepted as resolve
+  accepts it: the decomp's cdecl / stdcall stand-in for MSVC's thiscall code), anything else stays a gap. A
+  destructor slot binds to a
+  destructor variant at the address; where the decomp defines the exe's `??_G` as a plain function taking the
+  flags (`FUN_00c2a090(unsigned int)`), GCC's D0 / D1 go through `__fnvnx_vflag_<a>_1` / `_0` (w1 = flags, then
+  `b __fnv_<a>`); a placeholder slot (`virtual void v00();`) where the exe has a native `??_G` goes through
+  `__fnvnx_vgdel_<a>` (bit 0 of the caller's flags picks D0 or D1, as the kind-G adapter does).
+* An exe slot address with a provider in S4's `crt_symbols.tsv` (or an import thunk) binds to the provider:
+  MSVC's `_purecall` at 0x00ec60fa (the pure virtual slots of 670 exe vftable slots) -> platform/crt's
+  `_purecall`, the same fatal "pure virtual function call".
+* An exe slot address that no compiled unit defines but whose x86 body is a constant leaf (`ret`, `ret N`,
+  `xor eax, eax` / `mov al|eax, imm`, then a return: `exevft.leaf_constant`) gets its exact native form,
+  `__fnvnx_vconst_<a>` (`mov w0, #imm; ret`). MSVC folds identical functions, so one body stands in many slots:
+  0x00e7cd40 `return 0;` (defined only in nitexturingproperty.cpp, which does not compile) in 1,065 of them.
+* A derived class's vtable in the same object that holds another address in that slot (an override the decomp
+  does not declare), or vtables that disagree with no declaring class among them: that slot gets its own word in
+  a copy of the kept vtable (next point).
+* **Vtable copies** (`exe_vtable_copies`): a strong global definition of `_ZTV<C>` in bridges.S (zz_bridges.o)
+  wins over GCC's weak COMDAT copies. It holds the kept copy's words with resolve's renames for that object, the
+  per-slot words above, and, for a primary vtable shorter than the exe's (a single-vtable group: no secondary
+  address point moves), the exe's remaining slots: `__fnv_<a>`, the deleting-destructor stub for a `??_G`, else a
+  trap stub naming the exe address. Groups that hold a local or non-ABS32 relocation, or a strong (key-function)
+  definition, are not copied. The V rows name zz_bridges.o; `vtext.tsv` names the object the words came from,
+  which apply's typeinfo pairing takes as the vtable's object.
+* Outputs: `slot_fill.tsv` (object, symbol, address, target, how chosen, ABI verdict, the uses), `slot_gaps.tsv`
+  (trap slots left, per use, with the reason: no exe vftable, past the exe vftable's slots, not compiled, abi, kind
+  differs, vtables disagree). Trap stubs no object uses any more are dropped. Both files are published with the
+  link (`out/`).
+
+**Metric** (`vtmetric.py <link dir> <exe>`, read-only on a published link or a build's link stage): over the V rows,
+trap slots split by whether the address map has a native at the exe slot's address, primary vftables whose native
+vtable is shorter than the exe's (the destructor pair counted once), and mispairings (the native class is another
+RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
+`test_slotfill.py` (end to end: resolve, apply, trial link, vtmetric).
+
 ## Platform, imports, thread-locals and hand-written vptrs
 
 * **CRT and library code** (S4b, RUNTIME.md): a reference to a `.text` address no unit defines that S4's
@@ -666,7 +753,10 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   `__fnvnx_textaddr_<addr> = 0x<addr>;` (aliases.ld), so the native code passes the same number. Before, these were
   `extern-text` and reached a named stub (S13b native-stub-data: GlobalObject2 0x0045cfe0's second argument). On
   link/c0d6c71516f6 this applies to 11 references in units, plus their copies in the vtable objects. Other variables
-  at such addresses (an `int` at 0x00000065) stay `extern-text`.
+  at such addresses (an `int` at 0x00000065) stay `extern-text`, and so does a char label whose address the unit
+  passes to a call (`label_is_argument`, a scan of the prepared source). It may be a callback: 0x00c1d8b0 hands
+  `&UNK_00fdd3b0`, the static's x86 exit thunk, to `_atexit` (0x00ec658f, V2 X2). The native code then reaches a trap,
+  never the raw x86 address. A label only stored as data (`m_pDatB = &FUN_00a00000`) keeps the value.
 * **Calls of an IAT slot's address**: a decomp `__declspec(dllimport)` function named after its slot
   (`FUN_00fdf1c0(void *)`) is called directly by GCC (`bl`); when its name binds to an IAT slot as data, a call of it
   binds to the slot's api (S4's implementation or the api name), never into the image's IAT words.

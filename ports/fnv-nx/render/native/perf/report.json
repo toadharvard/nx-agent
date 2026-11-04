@@ -18800,9 +18800,9 @@
     "max": 24
    },
    "set_sampler_state": {
-    "min": 7,
-    "exp": 18.0,
-    "max": 24
+    "min": 8,
+    "exp": 16.8,
+    "max": 20
    },
    "set_texture": {
     "min": 8,
@@ -18866,10 +18866,10 @@
    }
   },
   "coverage": {
-   "functions_counted": 71,
-   "words_static": 7019,
+   "functions_counted": 72,
+   "words_static": 7043,
    "functions_missing": 0,
-   "vcalls_unresolved": 69,
+   "vcalls_unresolved": 70,
    "vcalls_resolved": 132,
    "calls_external": {
     "cut": 169,

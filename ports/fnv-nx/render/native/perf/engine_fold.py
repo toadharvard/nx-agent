@@ -113,9 +113,10 @@ def fold(rep, base, lo=None, hi=None, meta=None):
         e["1.02_with_engine_kept"] = round(worst / b, 3)
         e["d3d9_path_main_1.02"] = round((frames["mix_hi"]["ms_gate"]["total"]
                                           + gate(nine["nine_a64_estimate_instr"]["mix_hi"])) / b, 3)
-    s["targets_budget_fraction_rule"] += ("; '1.02_with_engine_kept' = the worst CPU thread with the kept engine part "
-                                          "on main; 'd3d9_path_main_1.02' = the D3D9 fallback's main thread (engine path "
-                                          "+ st/nine, no driver) / budget, for comparison")
+    note = ("; '1.02_with_engine_kept' = the worst CPU thread with the kept engine part on main; 'd3d9_path_main_1.02' "
+            "= the D3D9 fallback's main thread (engine path + st/nine, no driver) / budget, for comparison")
+    if note not in s["targets_budget_fraction_rule"]:            # fold() may run again on a folded report
+        s["targets_budget_fraction_rule"] += note
     s["engine_d3d9_path_source"] = eng["source"]
     rehotspot(rep)
     return rep

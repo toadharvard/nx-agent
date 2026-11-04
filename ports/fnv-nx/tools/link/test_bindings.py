@@ -95,8 +95,13 @@ SRC = {
     'src/mi.cpp': 'struct A { virtual void fa(); int a; };\nstruct B { virtual int fb(int); int b; };\n'
                   'struct D : A, B { void fa(); int fb(int); int d; };\n'
                   'void A::fa() {}\nint B::fb(int x) { return x; }\nvoid D::fa() {}\nint D::fb(int x) { return d + x; }\n',
+    # V2 T1: a shell declared at D's B subobject calls D::fb's address directly, passing the subobject
+    'src/sub.cpp': 'struct Sub { int fb(int); int b; };\nint call_sub(Sub *s) { return s->fb(1); }\n',
     # a variable placed at a .text address nothing defines: its address is the x86 value (S2c-abi)
-    'src/ta.cpp': 'extern const char g_011c5a4c_arg1[];\nconst char *ta_arg() { return g_011c5a4c_arg1; }\n',
+    'src/ta.cpp': 'extern const char g_011c5a4c_arg1[];\nconst char *ta_arg() { return g_011c5a4c_arg1; }\n'
+                  # V2 X2: a char label at a .text address passed to a call (atexit) may be code: no absolute value
+                  'extern char UNK_00fdd3b0;\nextern char FUN_00a00010;\nvoid reg_cb(void *);\nvoid *g_dat;\n'
+                  'void ta_reg() { reg_cb(&UNK_00fdd3b0); g_dat = &FUN_00a00010; }\n',
     'src/g.cpp': 'unsigned long fnvnx_game_GetCurrentThreadId();\n'                # GAME1 spellings
                  'extern "C" void fnvnx_game_EnterCriticalSection(void *);\nvoid fnvnx_game_Sleep(unsigned long);\n'
                  'struct CS;\nvoid fnvnx_game_LeaveCriticalSection(CS *);\n'   # C++ linkage, C++-decorated import
@@ -185,8 +190,11 @@ UNITS = {'units': [
                  '?g_pcount@@3PAHA': '0x01000a20'}},
     {'source': 'src/mi.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x401580, '?fb@D@@UAEHH@Z'), F(0x401590, '?fa@D@@UAEXXZ')], 'symbols': {}},
-    {'source': 'src/ta.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401240, '?ta_arg@@YAPBDXZ')],
-     'symbols': {'?g_011c5a4c_arg1@@3QBDB': '0x00a00000'}},
+    {'source': 'src/sub.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x4015a0, '?call_sub@@YAHPAUSub@@@Z')],
+     'symbols': {'?fb@Sub@@QAEHH@Z': '0x00401580'}},
+    {'source': 'src/ta.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401240, '?ta_arg@@YAPBDXZ'), F(0x401250, '?ta_reg@@YAXXZ')],
+     'symbols': {'?g_011c5a4c_arg1@@3QBDB': '0x00a00000', '?UNK_00fdd3b0@@3DA': '0x00fdd3b0',
+                 '?FUN_00a00010@@3DA': '0x00a00010'}},
     {'source': 'src/g.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401400, '?game_calls@@YAHPAX@Z')],
      'symbols': {'?GetCurrentThreadId@@YGKXZ': '0x00830470', '__imp__EnterCriticalSection@4': '0x00fdf008',
                  '?Sleep@@YGXK@Z': '0x00401410',
@@ -452,6 +460,12 @@ def main():
               sym.get('__fnv_00401580', (0, -1))[1] == sym.get('_ZN1D2fbEi', (0, -2))[1],
               'secondary-base override: the map names the thunk, __fnv_ stays the primary entry: %s %s' % (
                   rows.get(0x401580), rows.get(0x401590)))
+        r_ = refs.get(('src/sub.cpp', '_ZN3Sub2fbEi'), [''] * 6)
+        check(r_[5] == '__fnvnx_msvc_00401580', 'a call through a shell at the subobject reaches the thunk: %s' % r_)
+        r_ = refs.get(('src/ta.cpp', 'UNK_00fdd3b0'), [''] * 6)
+        r2_ = refs.get(('src/ta.cpp', 'FUN_00a00010'), [''] * 6)
+        check(r_[2] == 'extern-text' and r2_[2] == 'text-addr',
+              'a char label passed to a call stays extern-text, one stored as data is text-addr: %s %s' % (r_, r2_))
         r_ = refs.get(('src/ta.cpp', 'g_011c5a4c_arg1'), [''] * 6)
         check(r_[2] == 'text-addr' and sym.get('__fnvnx_textaddr_00a00000', (0, -1))[1] == 0x00a00000,
               'a variable at an undefined .text address -> absolute symbol there: %s %s' % (

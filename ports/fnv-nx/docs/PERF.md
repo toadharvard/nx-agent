@@ -532,6 +532,7 @@ run natively there (no qemu):
 | `tso_scan.py <decomp> [--tsv]` | spin-lock releases by plain store (inline copies of 0x0040fba0) and references to the override (6.5) |
 | `tests/s15/test_mtqemu.py` | builds and runs the QEMU multicore check (6.6) |
 | `frame_budget.py [--frameprof J] [--render J] --out J` | the whole-frame budget per core, clock and target for the gates (section 11), from `budget_model.json`; `hotspots[]` and `queue[]` (11.4); `--render` takes render/native/perf/report.json as it is |
+| `a57model/` (section 12, self-test `tests/s15/test_a57model.py`) | the Cortex-A57 cycle model: `calibrate.py` (its error), `uctrace.py` + `perf_report.py` (fnvnx-perf/1 of a guest), `funcmodel.py` (static price of named functions), farm job `tools/farm/perf_job.sh` |
 
 All of them print counts and names only; their outputs over decomp-derived objects stay in local scratch space.
 
@@ -819,3 +820,201 @@ model, so a shared bias cancels. Still, Slerp (-4 %) and FromRotationMatrix (-3 
 ties, kept because they run fewer instructions and are not worse in cycles. The real cycle gains are the cull
 (~290 -> 100) and UpdateWorldLoc. Dropped overrides keep their sources and tests (for an A57-aware rewrite), but lose their overrides.tsv rows. From
 here on an override is kept only if its mid cycles drop, as well as its instructions.
+
+## 12. The A57 cycle model (`tools/perf/a57model`, stream P0-perfmodel)
+
+Until now every millisecond in this file was instructions divided by an assumed IPC of 0.8. The model replaces that
+assumption with a per-block, per-function price for the Tegra X1's Cortex-A57, computed without the device, with a
+measured error bar. Every optimization stream reads its output (fnvnx-perf/1, 12.4).
+
+### 12.1 Method
+
+* **Trace.** The same simulator (`a57sim.c`) is driven by two front ends of QEMU's TCG: a TCG plugin
+  (`a57trace.so`, `qemu-system-aarch64 -M virt -cpu cortex-a57 -plugin`, Ubuntu's 8.2) for the bare-metal
+  calibration kernels, and Unicorn hooks (`uctrace.py`, a subclass of S5's `emu_guest.Emu`) for the game guest.
+  Per translation block it counts executions; per memory instruction its accesses.
+* **Simulator** (parameters and sources: `params.json`). L1I 48 KB 3-way, L1D 32 KB 2-way, L2 2 MB 16-way, 64-byte
+  lines, LRU (Chips and Cheese, measured on a Switch; the brief's "32 KB I" is the A53's). DTLB 32, ITLB 48,
+  L2 TLB 1024 4-way, 4 KB pages. L1D stride prefetcher per load PC (line granularity), L2 next-8-lines prefetcher
+  inside the page after two nearby misses, write streaming, a 12-entry store buffer. Global-history direction
+  predictor, 512 indirect targets, 32-entry return stack, 64-entry L1 BTB and 4K L2 BTB. It counts events; it does
+  not keep time.
+* **Prices** (`cost.py`). Each block: `llvm-mca -mcpu=cortex-a57` over the block as a loop body (steady-state cycles
+  per iteration), at least ceil(n/3), with the r1p0 ASIMD multiply latencies (12.2). Front end: 17.5 cycles per mispredict, +1 for a target from the L2 BTB, +4 for a
+  BTB miss, 11 per L1I miss. Loads: a load whose address depends on a loaded value (static dataflow over its block,
+  loop-carried) pays each miss in full (L2 22 cycles, DRAM 60 cycles + 90 ns, L2 TLB +20, walk +30); any other pays
+  once per miss group (the misses within 60 instructions, up to 6). Store-to-load forwarding 7 cycles. Stores pay
+  bandwidth only. Bandwidth: 8 B/cycle from L2, DRAM lines at 14.45 in flight over the DRAM latency (Little's law).
+  A function costs max(core + front end + latency, bandwidth).
+
+### 12.2 Calibration: the error bar (`calibrate.py`, `calib/truth.json`, result in `calib/last.json`)
+
+20 published Cortex-A57 numbers, reproduced by kernels in `calib/bench.c` (bare metal, inline assembly where the
+sequence matters) at the clock of the publication. 7 are **fit**: a parameter or rule was set from them, or the model's
+value echoes a parameter set from the same published number (V1 P0-E1/E2: `l2_latency` is `cost.l2_lat`,
+`taken_l2btb` is 1 + `btb_l2_bubble`; `tests/v1/test_a57_calib_circular.py`). 13 are **check**: independent of every
+parameter. The METRIC is the mean absolute error over the check points. Before: the flat IPC 0.8 on the same points.
+
+| point | role | published | model | error % | flat IPC 0.8 |
+|---|---|---:|---:|---:|---:|
+| L1 load-to-use (chase 4 KB), cycles | check | 4 | 4.00 | 0.0 | 1.56 |
+| L1 load-to-use, indexed (`ldr x0, [x2, x0]`) | check | 5 | **4.00** | **19.9** | 1.88 |
+| L2 load-to-use (chase 96 KB, 24 pages) | fit | 22 | 22.00 | 0.0 | 1.56 |
+| L2 with L2-TLB misses (chase 1.5 MB), "over 50", tol. 15 % | check | 52 | 40.4 | 7.3 | 1.56 |
+| DRAM (chase 64 MB) at 1.785 GHz | fit | 250 | 250.0 | 0.0 | 1.56 |
+| add / mul64 / fmla / vadd latency | check | 1 / 5 / 10 / 3 | 1 / 5 / 10 / 3 | 0-0.2 | 1.56 |
+| fmla .4s throughput, cycles each | check | 1 | 1.00 | 0.5 | 1.56 |
+| mul .4s latency | check | 4 | **5.00** | **25.0** | 1.56 |
+| mul .4s throughput | check | 2 | 2.01 | 0.3 | 1.56 |
+| store-to-load forwarding chain | fit | 7 | 7.00 | 0.0 | 2.81 |
+| L1D read, B/cycle | check | 15.69 | 15.65 | 0.2 | 14.54 |
+| L2 read, B/cycle | fit | 8 | 8.00 | 0.0 | 14.63 |
+| memcpy 8 MB, MB/s, Jetson Nano 1.43 GHz | fit | 3504 | 3504 | 0.0 | 9152 |
+| memcpy 8 MB, MB/s, Jetson TX1 1.73 GHz | check | 3862 | 3708 | 4.0 | 11072 |
+| mispredict penalty (random - zero branches) | fit | 17.5 | 17.5 | 0.1 | 1.26 |
+| taken branch, L1 BTB | check | 1 | 1.05 | 4.8 | 1.33 |
+| taken branch, L2 BTB | fit | 2 | 2.01 | 0.7 | 1.25 |
+
+**Error: 4.8 % mean over the 13 independent check points (RMS 9.3 %, max 25 %), against 63.7 % for the flat IPC
+0.8 (max 187 %).** The hotspot rows carry the RMS as their bar (cycles_lo/hi). History: 4.9 % over 14 points
+(6e0a34b) counted two circular points (V1 P0-E1/E2; over the honest 12 that was at least 5.7 %); the r1p0 multiply
+latencies below took it to 3.5 % over those 12; the new indexed-load check adds a real 20 % miss: 4.8 % over 13.
+The two large misses:
+* `mul .4s`: 5 cycles in the model, 4 measured. llvm-mca's A57 model has the r0pX latencies (Q-form 6, D-form 5);
+  ARM's Cortex-A57 Software Optimization Guide (UAN 0015B, 3.14 note 4) gives 5 and 4 from r1p0 on, and the Tegra
+  X1's A57 is r1p1. llvm-mca takes no latency overrides, so cost.py corrects a block whose loop-carried chain is the
+  bound: it recomputes the chain with the r1p0 latencies (register dataflow, `r1_latency`) and subtracts the
+  difference, never below ceil(n/3).
+* the indexed load: Chips and Cheese measured 5 cycles; llvm-mca and ARM's guide (AArch64 register-offset loads) say
+  4. Not corrected: the two sources disagree and only one measured.
+
+Divides and square roots (V1: "no point covers divides") are iterative and data-dependent: ARM's guide gives
+`sdiv`/`udiv` W 4-20, X 4-36, `fdiv`/`fsqrt` S 7-17, D 7-32 (ASIMD .4s 14-34, .2d 14-64), and llvm-mca prices the top of
+each range. No published measurement narrows them, so a latency-bound chain is priced at the middle (fdiv s 12,
+fdiv d 19.5, sdiv w 12 cycles; `calibrate.py` lists them as predictions) and the half range is carried as
+`div_band` into cycles_lo/hi. Not covered by any check: a direction-predictor accuracy test (the mispredict penalty
+is a fit, and no published A57 number gives pattern capacity), and mixed code (12.2 below).
+
+What the error bar covers and what it does not:
+* It covers the parts one at a time: latencies, throughputs, bandwidths, prediction, the miss model. It does not yet
+  cover their composition in compiled game code (llvm-mca's block-as-a-loop over code that is not a loop, overlap
+  between blocks, the guessed predictor). That needs a mixed benchmark with a published A57 number (CoreMark,
+  SPEC-like kernels) or the device; until then, read a game-code estimate as **+-5 % on the parts, likely +-20-30 %
+  on the whole**.
+* Not priced: the `dmb ish` drain of the store buffer (the inlined InterlockedIncrement prices at 13 cycles with or
+  without a store in flight; section 6.7 expects 15-40 more), contention between cores, the L2 shared with other
+  cores, power states (the clock is constant).
+
+### 12.3 The guest: boot to WinMain (`uctrace.py`, `perf_report.py`)
+
+Link `fa883870e756`'s guest on its synthesized image (`boot/synth.exe`; this link's loader refuses the owner's GOG
+exe with "not a well-formed PE32", link `06857911f5ab`'s accepts it), main thread, from the first guest instruction
+to WinMain [M, model]:
+
+| | instructions | cycles at 1.02 GHz | IPC | ms at 1.02 / 1.785 GHz |
+|---|---:|---:|---:|---:|
+| boot to WinMain | 62.2 M | 45.7 M | 1.36 | 44.8 / 26.2 (flat IPC 0.8: 76.2 / 43.6) |
+
+Cycles split: core 35.8 M, mispredicts and BTB 6.4 M, instruction fetch 1.1 M, memory latency 2.1 M. Top functions:
+`fnvnx_scan_codeptrs` 32 % (IPC 1.34; 162,772 mispredicts, 2.8 M cycles, 19 % of its time), `kx_build` 10 % (IPC 0.92),
+`early_zero` 9 % (byte stores, IPC 2.5), `kx_find` 7 %, `classify` 7 %. 100 % of the traced instructions were priced
+by llvm-mca. Tracing takes ~0.5 M instructions/s with the cache model (120 s here).
+
+### 12.4 fnvnx-perf/1 (`<head12>-perf.json`, farm job `perf_job.sh`)
+
+`tools/farm/perf_job.sh` (runner job `perf`) takes the newest `link/<L12>` with a guest on the head or an ancestor,
+runs the calibration, traces the boot to `$PERF_STOP` (WinMain; any two symbols once frames run), prices the
+per-frame function rows (12.5), and writes `<head12>-perf.md` and the sidecar `<head12>-perf.json`:
+`totals` (instructions, cycles, IPC, ms at both clocks, coverage, breakdown), `hotspots[]` (function, original
+address, instructions, cycles with the calibration's error bar, ms at 1.02 and 1.785 GHz, L1D / L2 / L1I misses,
+mispredicts, IPC, % of the workload, % of a 16.7 ms frame, bound: core / memory / frontend / bandwidth),
+`frame_hotspots[]` and `frame_coverage` (12.5), and `model` (error, method). S15-threads, S15-simd and the render
+machine read `hotspots[]` and `frame_hotspots[]`.
+
+### 12.5 The frame's hot functions, priced statically (`funcmodel.py`, `hot_rows.json`)
+
+No frame runs yet, so section 11.4's function rows (instructions per call measured by dyncount [M], calls per frame
+[E]) had no cycle price. `funcmodel.py` prices each function of the linked guest statically: llvm-mca over its whole
+body as one straight-line pass, back to back (steady state, low) and alone (one call, iterations=1, high). Limits:
+data in L1, branches predicted, callees excluded.
+
+| row (11.4) | M insns / frame | CPI steady - one call | cycles per call | ms at 1.02 GHz |
+|---|---:|---|---|---|
+| Interlocked refcounts (calibration kernel ilk_inline) | 1.8 | 1.63 | 13 | 2.88 |
+| culling per object 0x00a694e0 + classification 0x004b6100 | 0.91 | 1.04 - 3.43 | 52 - 308 | 0.93 - 3.06 |
+| NiQuaternion::Slerp 0x00a6e330 | 0.78 | 0.90 - 2.10 | 116 - 273 | 0.69 - 1.60 |
+| NiBound::Update 0x00a7fdd0 | 0.72 | 0.39 - 0.91 | 18 - 41 | 0.28 - 0.64 |
+| UpdateWorldData 0x00a68c60 + UpdateWorldLoc 0x00a68bf0 | 0.68 | 1.36 - 2.78 | 95 - 278 | 0.90 - 1.86 |
+| Havok GSK (0x00da8fb0, 8390, 8500, 8820) | 0.66 | 1.11 - 1.45 | 668 - 869 | 0.72 - 0.94 |
+| FindPassBucket + FindBucketIndex | 0.31 | 0.83 - 2.02 | 68 - 166 | 0.25 - 0.61 |
+| FromRotationMatrix 0x00a6df40 | 0.18 | 0.88 - 0.98 | 90 - 100 | 0.15 - 0.17 |
+| NiNode UpdateTransformAndBounds / UpdateDownwardPass | 0.16 | 0.99 - 1.46 | 19 - 88 | 0.16 - 0.23 |
+
+Coverage of the main thread's 23.8 M instructions per frame (J-0148) with an A57 price: **0 % -> 26 % (6.2 M)**,
+7.0-11.9 ms at 1.02 GHz for those rows against 7.6 ms at IPC 0.8 (rows' functions as S15-simd corrected them). The math leaves (NiBound::Update, the matrix
+product) run at IPC 1.1-2.6, above 0.8; the refcount operations and the branchy per-object cull run below it.
+The rest of the frame's main thread gets its price when frameprof's frames run under `uctrace.py`.
+
+
+### 12.6 per_call_cycles for S15-simd's metric (11.6)
+
+`funcmodel.py --budget-model tools/perf/budget_model.json --override-elf <ov.elf>` prices each `hotspot_functions`
+row: the functions are the addresses in its name; one with an override in `tools/link/overrides` is priced on the
+override's code (the objects of `build.sh`, linked into one ELF), since that is what its `per_call_insn` counts.
+`per_call_cycles` = [per_call_insn lo x steady CPI, per_call_insn hi x one-call CPI]. perf_job.sh publishes them as
+`per_call_cycles[]` in fnvnx-perf/1; `hotspot_metric.py` uses a row's `per_call_cycles` when the row has one.
+
+With link 06857911f5ab's guest and the overrides at 304901c, mid values [model]:
+
+| row | insn / call | cycles / call | CPI | note |
+|---|---:|---:|---|---|
+| fn_interlocked | 30 | 49 | 1.63 | calibration kernel; the dmb drain is not priced (12.2) |
+| fn_cull_test (override) | 58 | 100 | 1.07 - 2.21 | |
+| fn_slerp (override) | 88 | 207 | 2.05 - 2.66 | latency-bound: the decomp's serial float/double chain (S15-simd) |
+| fn_gsk | 571 | 731 | 1.11 - 1.45 | |
+| fn_nibound_update (override) | 19 | 33 | 0.85 - 2.58 | the `ld3` is slow; the decomp's 52 instructions price 20-39 |
+| fn_pass_bucket | 82 | 116 | 0.83 - 2.01 | |
+| fn_world_transform (override) | 32 | 36 | 0.82 - 1.19 | |
+| fn_node_update | 39.5 | 53 | 0.99 - 1.46 | |
+| fn_quat_from_matrix (override) | 77 | 80 | 0.77 - 1.30 | |
+
+The metric with these prices: **7.88 M cycles per frame (7.72 ms at 1.02 GHz)**, against 6.09 M at IPC 0.8. The
+rows whose code is one serial floating-point chain (Slerp) or uses multi-register loads (`ld3`) save fewer cycles than
+instructions. S15-simd now compares A/B rows in cycles (11.6) and dropped the NiBound and matrix-product overrides.
+
+### 12.7 The 3-core frame model (`mtmodel.py`, fnvnx-mtframe/1)
+
+frame_budget.py (11.1) puts each core's share of the work side by side: frame = the busiest core. `mtmodel.py`
+schedules the same work (budget_model.json, its scenarios and levers, frame_budget's `scenario_work`) in time, in
+1 us steps on the application cores with placement.h's masks and priorities (main core 0; render worker core 1; AI
+linear and workers on 0b110; background lowest):
+* main runs its phases in the main loop's order (game logic, Havok, animation, scene graph, cull, accumulation,
+  renderer, barriers, then the model's sync overhead);
+* work a lever moves off main is forked to two workers at its phase's start. A forked worker starts after a wake
+  latency (--wake-us, 15 us [E]) and runs at the model's parallel efficiency. Main joins it at the phase's end and
+  waits if it is late;
+* the AI linear threads run from the frame's start and are joined before culling. `threaded_anim` queues its work
+  behind the AI on them;
+* the render worker is pipelined (never joined) and background work fills idle time;
+* frame = max(main's critical path, every core's busy time).
+
+The work is priced with the A57 CPI of 12.6's rows for the items they cover (scene graph, cull, animation, Havok,
+accumulation: steady CPI in the lo case, one-call CPI in the hi case); other items stay at 1/0.8 and are listed.
+Check (tests/s15/test_a57model.py): with everything at 1/0.8 and no hand-offs, "placed" gives frame_budget's
+25.2 ms.
+
+| scenario | 1020 MHz frame lo / mid / hi (ms) | frame_budget mid | main waits | 1785 MHz mid |
+|---|---|---:|---:|---:|
+| placed | 12.4 / 28.5 / 50.0 | 25.2 | 0 | 16.3 |
+| plan45 | 9.2 / 21.6 / 39.1 | 17.2 | 1.8 | 12.4 |
+| plan45b | 7.8 / 18.7 / 35.4 | 15.4 | 1.8 | 10.7 |
+| plan60 | 7.0 / 17.6 / 34.3 | 14.7 | 1.5 | 10.1 |
+
+Two results for the plan. First, the hand-offs cost: at 1/0.8 alone, plan45's critical path is 19.7 ms against the
+water-filled 17.2. Main waits 1.5 ms at the joins of the moved cull, accumulation and Havok work, which runs slower
+on the workers (efficiency, wake) than main's share of the same phase. Second, the A57 prices raise main's phases
+(scene graph and animation at CPI 0.9-2.0 against 1.25). So plan45b's mid frame at 1.02 GHz is 18.7 ms, and with the
+model's worst-frame factor 1.25 that is 23.3 ms, just above the 22.2 ms of 45 fps stable. At 1.785 GHz, plan45b holds
+60 fps at the mid case (10.7 ms). The levers that shorten main's path without a join on it (render F2-F4, relaxed
+barriers, NEON math, overrides) gain their full value. A moved phase gains only when its worker finishes before
+main's share does: split the moved part so that the worker side is the smaller one.
