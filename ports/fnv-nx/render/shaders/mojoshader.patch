@@ -1034,7 +1034,7 @@ index 319e3cb..c16565f 100644
      make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s", src0);
      output_line(ctx, "%s", code);
  } // emit_GLSL_MOV
-@@ -1275,8 +1737,55 @@ void emit_GLSL_MUL(Context *ctx)
+@@ -1275,8 +1737,57 @@ void emit_GLSL_MUL(Context *ctx)
      output_line(ctx, "%s", code);
  } // emit_GLSL_MUL
  
@@ -1057,10 +1057,12 @@ index 319e3cb..c16565f 100644
 +    output_line(ctx, "const float dk_FLT_HALF = uintBitsToFloat(0x7effffffu);");
 +    // Zero is tested explicitly: GPUs and llvmpipe evaluate inversesqrt(0) /
 +    //  log2(0) through approximations whose result at 0 is not always +-inf.
-+    output_line(ctx, "float dk_log(float x) { float a = abs(x); if (a == 0.0) return -dk_FLT_MAX; float t = log2(a); return (-dk_FLT_MAX > t) ? -dk_FLT_MAX : t; }");
-+    output_line(ctx, "float dk_rcp(float x) { if (x == 0.0) return ((floatBitsToUint(x) & 0x80000000u) != 0u) ? -dk_FLT_HALF : dk_FLT_HALF; float t = 1.0 / x; t = (dk_FLT_HALF < t) ? dk_FLT_HALF : t; return (-dk_FLT_HALF > t) ? -dk_FLT_HALF : t; }");
-+    output_line(ctx, "float dk_rsq(float x) { float a = abs(x); if (a == 0.0) return dk_FLT_MAX; float t = inversesqrt(a); return (dk_FLT_MAX < t) ? dk_FLT_MAX : t; }");
-+    output_line(ctx, "float dk_nrm(vec3 v) { float d = dot(v, v); if (d == 0.0) return dk_FLT_MAX; float t = inversesqrt(d); return (dk_FLT_MAX < t) ? dk_FLT_MAX : t; }");
++    //  Every test is a mix(a, b, bool) select (TGSI UCMP), not an if or ?:, which
++    //  Mesa's GLSL front end lowers to UIF blocks (branch + sync on Maxwell).
++    output_line(ctx, "float dk_log(float x) { float a = abs(x); float t = log2(a); return mix(t, -dk_FLT_MAX, a == 0.0 || -dk_FLT_MAX > t); }");
++    output_line(ctx, "float dk_rcp(float x) { float t = 1.0 / x; t = mix(t, dk_FLT_HALF, dk_FLT_HALF < t); t = mix(t, -dk_FLT_HALF, -dk_FLT_HALF > t); return mix(t, uintBitsToFloat((floatBitsToUint(x) & 0x80000000u) | 0x7effffffu), x == 0.0); }");
++    output_line(ctx, "float dk_rsq(float x) { float a = abs(x); float t = inversesqrt(a); return mix(t, dk_FLT_MAX, a == 0.0 || dk_FLT_MAX < t); }");
++    output_line(ctx, "float dk_nrm(vec3 v) { float d = dot(v, v); float t = inversesqrt(d); return mix(t, dk_FLT_MAX, d == 0.0 || dk_FLT_MAX < t); }");
 +    output_blank_line(ctx);
 +    pop_output(ctx);
 +} // dk_numerics_helpers
