@@ -178,8 +178,36 @@ def test_rules():
         check(causes.refine(dict(rec(mw), _file='e2.json'), 'unclassified') == 'vptr-unpaired', 'effects: vptr-unpaired')
         check(causes.refine(dict(rec(mw), _file='e3.json'), 'unclassified') == 'native-stub-data',
               'effects: native named stub stored')
-        check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
-              'effects: store made by a callee only the oracle runs')
+        # oracle-callee-store needs evidence that the harness intercepted the call (V1 C1-C3): the store's pc is in
+        # a callee the native calls out of line through a name its own object does not define
+        check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'unclassified',
+              'effects: callee store without object evidence stays open')
+        saved = (causes.native_callees, causes.function_at, dict(causes._OBJ_CACHE), os.environ.get('FNVNX_CAUSES_OBJ'))
+        try:
+            os.environ['FNVNX_CAUSES_OBJ'] = '/nonexistent-obj'
+            obj = os.path.join('/nonexistent-obj', 'src_t.cpp.o')
+            causes.function_at = lambda pc: 0x0044dee0 if 0x0044dee0 <= pc < 0x0044df00 else None
+            causes.native_callees = lambda src, a: {'__fnv_0044dee0', 'memset'}
+            causes._OBJ_CACHE[obj] = {'_defined': {'__fnv_00401000'}}
+            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
+                  'effects: store made by a callee the native calls out of line (intercepted)')
+            for c in causes.NOT_INTERCEPTED:
+                check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), c) == c,
+                      'effects: %s is never a callee-store artefact' % c)
+            causes._OBJ_CACHE[obj] = {'_defined': {'__fnv_00401000', '__fnv_0044dee0'}}
+            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'unclassified',
+                  'effects: a callee the unit defines runs natively, not intercepted')
+            causes._OBJ_CACHE[obj] = {'_defined': {'__fnv_00401000'}}
+            causes.native_callees = lambda src, a: {'memset'}
+            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'unclassified',
+                  'effects: the native never calls that callee: stays open')
+        finally:
+            causes.native_callees, causes.function_at = saved[0], saved[1]
+            causes._OBJ_CACHE.clear(); causes._OBJ_CACHE.update(saved[2])
+            if saved[3] is None:
+                os.environ.pop('FNVNX_CAUSES_OBJ', None)
+            else:
+                os.environ['FNVNX_CAUSES_OBJ'] = saved[3]
         check(causes.refine(dict(rec(mw, addr='0044dee0'), _file='e4.json', _size=0x40), 'unclassified') ==
               'unclassified', 'effects: store inside the function stays open')
         check(causes.refine(dict(rec(mw), _file='e1.json'), 'uninit-arm') == 'uninit-arm',
@@ -272,9 +300,101 @@ def test_summary():
         check(causes.merge([nob])['shards'] == 0, 'a report without the block is skipped')
 
 
+def test_object_reader():
+    """Without pyelftools the object rules are off: the reader says so instead of passing silently."""
+    import io
+    saved = {k: v for k, v in sys.modules.items() if k == 'elftools' or k.startswith('elftools.')}
+    stats, cache, err = dict(causes.OBJ_STATS), dict(causes._OBJ_CACHE), sys.stderr
+    try:
+        for k in saved:
+            del sys.modules[k]
+        sys.modules['elftools'] = None              # import elftools.* raises ImportError
+        causes.OBJ_STATS.update(reader=None, scanned=0, missing=0)
+        causes._OBJ_CACHE.clear()
+        sys.stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, 'src_t.cpp.o'), 'wb').write(b'\x7fELF')
+            open(os.path.join(d, 'src_u.cpp.o'), 'wb').write(b'\x7fELF')
+            os.environ['FNVNX_CAUSES_OBJ'] = d
+            check(causes.native_callees('src/t.cpp', 0x00401000) is None, 'no reader: no callees')
+            causes.native_callees('src/u.cpp', 0x00401000)
+            causes.native_callees('src/missing.cpp', 0x00401000)
+            check(causes.OBJ_STATS['reader'] == 'unavailable' and causes.OBJ_STATS['scanned'] == 0 and
+                  causes.OBJ_STATS['missing'] == 1, 'reader state: unavailable, one object missing')
+            check('pyelftools is not installed' in sys.stderr.getvalue(), 'missing reader warns on stderr')
+            check(sys.stderr.getvalue().count('is not installed') == 1, 'it warns once')
+    finally:
+        sys.stderr = err
+        os.environ.pop('FNVNX_CAUSES_OBJ', None)
+        del sys.modules['elftools']
+        sys.modules.update(saved)
+        causes.OBJ_STATS.clear(); causes.OBJ_STATS.update(stats)
+        causes._OBJ_CACHE.clear(); causes._OBJ_CACHE.update(cache)
+
+
+def test_handoffs():
+    """Per-owner lists: real bugs, triage and owned artefacts get a row each, by-design causes none."""
+    with tempfile.TemporaryDirectory() as root:
+        d = os.path.join(root, '7of26')
+        os.makedirs(os.path.join(d, 'div'))
+        rows = [dict(address=a, source='src/t.cpp', status='ok') for a in ('00401000', '00402000', '00403000')]
+        rows.append(dict(address='00404000', source='src/t.cpp', status='setup:KeyError'))
+        open(os.path.join(d, 'results.jsonl'), 'w').write(''.join(json.dumps(r) + '\n' for r in rows))
+        recs = {'00401000-0.json': rec(dict(kind='error', x86=None, arm='exc:1@0'), addr='00401000'),
+                '00401000-1.json': rec(dict(kind='return', x86=w(1), arm=w(2)), 'bool-repr', addr='00401000'),
+                '00402000-0.json': rec(dict(kind='return', x86=w(1), arm=w(2)), addr='00402000'),
+                '00403000-0.json': rec(dict(kind='return', x86=w(1), arm=w(2)), 'local-static', addr='00403000'),
+                '00404000-0.json': rec(dict(kind='error', x86=None, arm='exc:1@0'), addr='00404000')}
+        for n, r in recs.items():
+            json.dump(r, open(os.path.join(d, 'div', n), 'w'))
+        eff = os.path.join(root, 'effects.jsonl')
+        open(eff, 'w').write(json.dumps(dict(file='/x/00402000-0.json', first='value')) + '\n')
+        out = os.path.join(root, 'ho')
+        saved = dict(causes.EFFECTS)
+        try:
+            causes.main(['handoffs', d, '--out-dir', out, '--effects', eff])
+        finally:
+            causes.EFFECTS.clear(); causes.EFFECTS.update(saved)
+        files = sorted(os.listdir(out))
+        check(files == ['handoffs_S1.tsv', 'harness_S13.tsv', 'index.tsv', 'triage_S13b.tsv'],
+              'one file per class and owner, none for by-design (%s)' % files)
+        s1 = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'handoffs_S1.tsv'))]
+        check(s1[0] == list(causes.HANDOFF_COLUMNS) and len(s1) == 2, 'S1 list: header and one row')
+        check(s1[1][:5] == ['S1', 'native-trap', '00401000', 'src/t.cpp', 'fuzz/cache/7of26:div/00401000-0.json'],
+              'row: owner, cause, address, unit, reproducer (setup function skipped)')
+        tr = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'triage_S13b.tsv'))]
+        check(tr[1][1] == 'unclassified' and tr[1][5] == 'value', 'triage row carries the first effect')
+        ix = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'index.tsv'))]
+        check(['harness_S13.tsv', 'artifact', 'S13', '1', '1', 'local-static 1'] in ix, 'index row per file')
+
+
+def test_cli_effects():
+    """Run as a script, `summary --effects` reaches the rules report.reclassify calls (one module, not two)."""
+    import subprocess
+    with tempfile.TemporaryDirectory() as root:
+        d = os.path.join(root, '1of1')
+        os.makedirs(os.path.join(d, 'div'))
+        open(os.path.join(d, 'results.jsonl'), 'w').write(
+            json.dumps(dict(address='00401000', source='src/t.cpp', status='ok', size=16)) + '\n')
+        json.dump(rec(dict(kind='mem-write', addr='03000010', x86='01000000', arm='02000000')),
+                  open(os.path.join(d, 'div', '00401000-0.json'), 'w'))
+        eff = os.path.join(root, 'eff.jsonl')
+        open(eff, 'w').write(json.dumps(dict(file='x/00401000-0.json', first='width')) + '\n')
+        out = os.path.join(root, 'c.json')
+        tool = os.path.join(HERE, '..', '..', 'tools', 'difffuzz', 'causes.py')
+        env = dict(os.environ, FNVNX_CAUSES_OBJ=root)
+        subprocess.run([sys.executable, tool, 'summary', d, '--effects', eff, '--out', out], check=True,
+                       stdout=subprocess.DEVNULL, env=env)
+        c = json.load(open(out))['causes']
+        check('field-width' in c and 'unclassified' not in c, 'CLI summary applies --effects (%s)' % sorted(c))
+
+
 if __name__ == '__main__':
     test_rules()
     test_policy()
     test_summary()
+    test_object_reader()
+    test_handoffs()
+    test_cli_effects()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)
