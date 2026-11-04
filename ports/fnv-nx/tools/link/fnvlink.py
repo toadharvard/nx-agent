@@ -901,8 +901,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                             'result-pointer-not-passed'} & set(v.classes))) else v.kind
                                 if ekind == 'bridge' and v.plan is not None:
                                     bn = abi.bridge_name(addr, bkey)
-                                    code = abi2.emit(bn, target, v.plan, 'ref: %s | def: %s'
-                                                     % (ms[refdecl] or refdecl, ms[defdecl] or defdecl))
+                                    cm_ = 'ref: %s | def: %s' % (ms[refdecl] or refdecl, ms[defdecl] or defdecl)
+                                    # the lean form first (register moves, a frame only to keep one value across the
+                                    # call; test_bridgefuzz.py checks it against the generic one), else the generic
+                                    # WIP: off by default until test_bridgefuzz passes on every real plan (3 IND-result
+                                    # shapes still disagree on link defb010a2a1b); FNVNX_BRIDGE_LEAN=1 turns it on
+                                    code = abi2.emit_lean(bn, target, v.plan, cm_) \
+                                        if os.environ.get('FNVNX_BRIDGE_LEAN') else None
+                                    stats['bridges_lean' if code is not None else 'bridges_generic'] += 1
+                                    if code is None:
+                                        code = abi2.emit(bn, target, v.plan, cm_)
                                     if code is None:
                                         cls = 'code-manual'
                                     else:
@@ -1395,6 +1403,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               '%d non-literal or not modelled, %d sites disagree, %d not bridgeable' % (
                   stats['format_exact'], stats['format_bridged'], stats['format_unknown'],
                   stats['format_sites_disagree'], stats['format_not_bridgeable'])]
+    lines += ['', 'byte-level (abi2) bridges: %d lean, %d generic (FNVNX_BRIDGE_LEAN=1: lean where it applies)' % (
+        stats['bridges_lean'], stats['bridges_generic'])]
     lines += ['', 'exit callbacks registered by address (xexit.py): niptr %d, thiscall %d; left to trap: %s' % (
         stats['xexit_niptr'], stats['xexit_thiscall'], ' '.join('%08x' % a for a in sorted(xexit_left)) or '-')]
     lines += ['', 'MSVC entries at a secondary base (exe vftables, thisadj.py): %d addresses; the map names the '

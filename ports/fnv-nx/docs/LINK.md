@@ -455,6 +455,36 @@ temporaries (x86 saw a bitwise copy too); ownership stays with the caller. `test
 register-result conversion, pointer vs non-trivial holder, fastcall edx dummy with stack arguments) under
 qemu-aarch64 against C++ definitions, with layouts from the real probe.
 
+### Lean bridges (`abi2.emit_lean`, S2c-abi)
+
+The generic byte-level bridge (`abi2.emit`) saves x0-x7, q0-q7 and x8 to a frame, builds every definition value in
+a buffer and copies results byte by byte: 41-49 instructions per bridge. S15-simd's overhead audit found these
+bridges dominating the worst codegen ratios (0x00a6dd50: 264 of 437 instructions per call inside six bridges).
+resolve emits the lean form only with `FNVNX_BRIDGE_LEAN=1` (WIP): `test_bridgefuzz.py --link` on defb010a2a1b ran
+132 distinct lean shapes and 3 still disagree with the generic form (indirect-result shapes: 0x00ae8b40, 0x0060b370,
+0x00dbafb0), so the default stays generic until they pass.
+
+* Argument values that come whole from reference registers become parallel register moves, with cycles through
+  x16/v16. A by-reference parameter whose bytes the reference already passes behind a pointer gets that pointer.
+  The reference's result buffer is either the reference's x8 or a frame buffer.
+* General-register chunks assembled from parts of reference registers use exact `ubfx`/`bfi` moves into scratch
+  registers x9-x15, written before any argument register. Examples: ints into a by-value struct, a struct's upper
+  word into an int.
+* No frame and a tail branch when nothing has to survive the call. Otherwise a 32-byte frame keeps one pointer
+  (the explicit result pointer, the reference's x8) or the result buffer. Result registers are stored or loaded
+  at their exact widths, and MSVC's returned buffer pointer goes back in x0.
+* Stack arguments, values from several mixed pieces and results of odd sizes return None, and the generic
+  emitter is used.
+
+On link/defb010a2a1b, rebuilt offline with `bridgecost.py`: 3,084 bridges, 70,054 -> 24,623 static instructions.
+sret-explicit (1,129) goes from 41.0 to 9.7 instructions per bridge, layout (268) from 49.0 to 25.4. No bridge was
+removed: every class-level bridge moves registers or converts a result, and byte-identical pairs were already bound
+directly. `test_bridgefuzz.py` calls both forms of one plan with the same random registers, stack words and memory
+under qemu-aarch64, into a recording definition. It compares what the definition reads (argument chunks by width,
+stack bytes, the bytes behind by-reference parameters) and what the caller sees (result registers, the whole
+memory arena, sp). It covers the synthetic plans and, with `--link/--units`, every abi2 plan of a link. A lean
+emitter that drops its result stores fails it.
+
 ## Vtables (`vtables.py`, kind `V`, D7)
 
 Objects only ever hold Itanium vptrs (DATAIMAGE.md D7); an image vftable address stands for the Itanium address

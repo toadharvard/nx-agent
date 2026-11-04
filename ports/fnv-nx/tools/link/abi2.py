@@ -496,3 +496,213 @@ def _load_ret(a, chunks, base):
     for vo, cont, _, ln in chunks:
         if cont[0] in ('x', 'v'):
             a('ldr %s, [%s, #%d]' % (_reg(cont, ln), base, vo))
+
+
+# ------------------------------------------------------------------------------------------------------- lean emit
+
+_RW = {1: ('b', 'ldrb', 'strb', 'w'), 2: ('h', 'ldrh', 'strh', 'w'), 4: ('s', 'ldr', 'str', 'w'), 8: ('d', 'ldr', 'str', 'x'),
+       16: ('q', 'ldr', 'str', None)}
+
+
+def _rname(cont, ln):
+    """Register name for a chunk of ln bytes in container cont (x: w/x by width, v: b/h/s/d/q)."""
+    if cont[0] == 'x':
+        return ('x%d' if ln > 4 else 'w%d') % cont[1]
+    return '%s%d' % (_RW[ln][0], cont[1])
+
+
+def _ldst(op, cont, ln, base, off):
+    """ldr/str of ln bytes between register chunk cont and [base, #off] (exact width; ln in 1 2 4 8 16)."""
+    if ln not in _RW or (cont[0] == 'x' and ln > 8):
+        raise Unknown(ln)
+    _, ld, st, _ = _RW[ln]
+    ins = ld if op == 'ld' else st
+    if cont[0] == 'x':
+        r = 'w%d' % cont[1] if ln <= 4 else 'x%d' % cont[1]
+        if ln == 1:
+            ins = 'ldrb' if op == 'ld' else 'strb'
+        elif ln == 2:
+            ins = 'ldrh' if op == 'ld' else 'strh'
+        else:
+            ins = 'ldr' if op == 'ld' else 'str'
+    else:
+        r = _rname(cont, ln)
+        ins = 'ldr' if op == 'ld' else 'str'
+    return '%s %s, [%s, #%d]' % (ins, r, base, off)
+
+
+def emit_lean(name, target, p, comment):
+    """The bridge for Plan p without the generic frame: argument values that come whole from reference registers (or
+    are the result buffer's address, or a pointer passed through) become parallel register moves; a frame is made
+    only to keep one pointer or the result buffer across the call. None when the plan needs the generic emitter
+    (stack arguments, values assembled from several pieces, results of odd sizes)."""
+    try:
+        return _emit_lean(name, target, p, comment)
+    except Unknown:
+        return None
+
+
+def _emit_lean(name, target, p, comment):
+    moves = []          # (dst reg ('x'|'v', n), src) ; src: ('x'|'v', n) | ('buf',) | ('x8',)
+    widths = {}
+    for v in p.dvals:
+        ps = p.pieces.get(v.label)
+        if ps is None:
+            continue
+        dch = p.dch[v.label]
+        if len(ps) == 1 and ps[0][1] == ('refsret',):
+            if len(dch) != 1 or dch[0][1][0] != 'x':
+                raise Unknown('refsret')
+            moves.append((dch[0][1], ('x8',) if p.rret is not None and p.rret.kind == 'IND' else ('buf',), 8, 8))
+            continue
+        if dch and dch[0][1][0] == 'mem':   # a by-reference definition parameter: the reference's own pointer
+            rc = p.rch[ps[0][1][1]] if len(ps) == 1 and ps[0][1][0] == 'ref' else None
+            if not (rc and len(ps) == 1 and ps[0][0] == 0 and ps[0][2] == 0 and ps[0][3] == v.size and len(rc) == 1
+                    and rc[0][1][0] == 'mem' and dch[0][1][1][0] == 'x' and rc[0][1][1][0] == 'x'):
+                raise Unknown('mem')
+            moves.append((dch[0][1][1], rc[0][1][1], 8, 8))
+            continue
+        for cvo, cont, co, ln in dch:
+            if cont[0] not in ('x', 'v') or co:
+                raise Unknown('stack')
+            src = [(vo, s, so, l) for vo, s, so, l in ps if vo <= cvo < vo + l]
+            if len(src) != 1 or src[0][1][0] != 'ref':
+                raise Unknown('pieces')
+            vo, s, so, l = src[0]
+            rc = locate(p.rch[s[1]], so + cvo - vo)
+            if rc is not None and rc[1] == 0 and rc[0][0] in ('x', 'v') and rc[2] >= ln:
+                moves.append((cont, rc[0], ln, rc[2]))
+                continue
+            if cont[0] != 'x':
+                raise Unknown('src')
+            # a general-register chunk assembled from parts of reference registers (ints into a by-value struct,
+            # a struct's upper word into an int): bitfield moves into a scratch register first
+            parts, k = [], 0
+            while k < ln:
+                hit = [(vo_, s_, so_, l_) for vo_, s_, so_, l_ in ps if vo_ <= cvo + k < vo_ + l_]
+                if len(hit) != 1 or hit[0][1][0] != 'ref':
+                    raise Unknown('pieces')
+                vo_, s_, so_, l_ = hit[0]
+                at = so_ + cvo + k - vo_
+                rc_ = locate(p.rch[s_[1]], at)
+                if rc_ is None or rc_[0][0] not in ('x', 'v'):
+                    raise Unknown('src')
+                n = min(rc_[2], vo_ + l_ - (cvo + k), ln - k)
+                if rc_[0][0] == 'v' and (rc_[1] != 0 or n not in (4, 8)):
+                    raise Unknown('src')
+                parts.append((k, rc_[0], rc_[1], n))
+                k += n
+            moves.append((cont, ('asm', tuple(parts)), ln, ln))
+    def_ind = p.dret is not None and p.dret.kind == 'IND'
+    ref_ind = p.rret is not None and p.rret.kind == 'IND'
+    refsret = any(m[1] == ('buf',) for m in moves)
+    keep = None     # what the frame keeps across the call: 'x8' (the reference's result buffer) or a reference register
+    if p.def_sret_from is not None:
+        rc = p.rch[p.def_sret_from]
+        if len(rc) != 1 or rc[0][1][0] != 'x':
+            raise Unknown('sret-from')
+        keep = rc[0][1]
+        if def_ind:
+            moves.append((('x', 8), keep, 8, 8))
+    elif def_ind:
+        if ref_ind and not p.ret_conv:
+            pass                               # the reference's x8 is the definition's x8
+        else:
+            moves.append((('x', 8), ('buf',), 8, 8))
+            refsret = True
+    if p.ret_conv and ref_ind and not def_ind:
+        keep = ('x8',)
+    rsize = max(p.rret.size if p.rret else 0, p.dret.size if p.dret else 0)
+    need_buf = refsret or (p.ret_conv and not ref_ind)
+    tail = not (keep or need_buf and not ref_ind or p.ret_conv or p.ret_fcvt)
+    if refsret and ref_ind is False and any(m[1] == ('buf',) for m in moves):
+        tail = False
+    out = ['', '    // %s (lean)' % comment.replace('\n', ' '), '    .p2align 2', '    .globl %s' % name,
+           '    .type %s, %%function' % name, '%s:' % name]
+    BUF = 32
+    frame = 0 if tail else (BUF + ((rsize + 15) // 16 * 16 if need_buf else 0))
+    if frame >= 4096:
+        raise Unknown('frame')
+    if not tail:
+        out += ['    stp x29, x30, [sp, #-%d]!' % frame, '    mov x29, sp']
+        if keep == ('x8',):
+            out.append('    str x8, [sp, #16]')
+        elif keep is not None:
+            out.append('    str x%d, [sp, #16]' % keep[1])
+    # assembled chunks first, into scratch registers x9-x15, while every reference register still holds its value
+    scratch = iter(range(9, 16))
+    built = []
+    for i, (dst, src, ln, sln) in enumerate(moves):
+        if src[0] != 'asm':
+            continue
+        try:
+            t = next(scratch)
+        except StopIteration:
+            raise Unknown('scratch')
+        out.append('    mov x%d, #0' % t)
+        for k, cont, at, n in src[1]:
+            if cont[0] == 'v':
+                out.append('    fmov %s, %s' % ('w17' if n == 4 else 'x17', _rname(cont, n)))
+                sreg, at = 'x17', 0
+            else:
+                sreg = 'x%d' % cont[1]
+            out.append('    ubfx x17, %s, #%d, #%d' % (sreg, 8 * at, 8 * n))
+            out.append('    bfi x%d, x17, #%d, #%d' % (t, 8 * k, 8 * n))
+        built.append((i, ('x', t)))
+    for i, reg in built:
+        moves[i] = (moves[i][0], reg, moves[i][2], moves[i][3])
+    # parallel moves, sources read before any destination is written (x16 / v16 break cycles)
+    pending = []
+    for dst, src, ln, sln in moves:
+        if src == ('buf',):
+            pending.append((dst, ('buf',), ln))
+        elif src == ('x8',):
+            pending.append((dst, ('x', 8), 8))
+        elif dst != src:
+            pending.append((dst, src, ln))
+    seq = []
+    while pending:
+        done = False
+        for m in list(pending):
+            if not any(o is not m and o[1] == m[0] for o in pending):
+                seq.append(m); pending.remove(m); done = True
+        if not done:
+            dst, src, ln = pending[0]
+            tmp = ('v', 16) if src[0] == 'v' else ('x', 16)
+            seq.append((tmp, src, ln if src[0] == 'v' else 8))
+            pending[0] = (dst, tmp, ln)
+    for dst, src, ln in seq:
+        if src == ('buf',):
+            out.append('    add x%d, sp, #%d' % (dst[1], BUF))
+        elif dst[0] == 'x' and src[0] == 'x':
+            out.append('    mov x%d, x%d' % (dst[1], src[1]))
+        elif dst[0] == 'v' and src[0] == 'v':
+            out.append('    mov v%d.16b, v%d.16b' % (dst[1], src[1]))
+        elif ln in (4, 8):
+            out.append('    fmov %s, %s' % (_rname(dst, ln), _rname(src, ln)))
+        else:
+            raise Unknown('cross')
+    if tail:
+        out.append('    b %s' % target)
+    else:
+        out.append('    bl %s' % target)
+        if p.def_sret_from is not None:
+            out.append('    ldr x9, [sp, #16]')
+            if not def_ind:
+                for vo, cont, _, ln in a64_ret(p.dret):
+                    out.append('    ' + _ldst('st', cont, ln, 'x9', vo))
+            out.append('    mov x0, x9')                 # MSVC returns the buffer pointer
+        elif p.ret_fcvt:
+            out += ['    ' + x for x in p.ret_fcvt]
+        elif p.ret_conv or refsret:
+            if p.ret_conv and not def_ind:   # the definition's result registers -> memory
+                base = 'x9'
+                out.append('    ldr x9, [sp, #16]' if ref_ind else '    add x9, sp, #%d' % BUF)
+                for vo, cont, _, ln in a64_ret(p.dret):
+                    out.append('    ' + _ldst('st', cont, ln, base, vo))
+            if not ref_ind:                  # the reference's result registers <- the buffer
+                for vo, cont, _, ln in a64_ret(p.rret):
+                    out.append('    ' + _ldst('ld', cont, ln, 'sp', BUF + vo))
+        out += ['    ldp x29, x30, [sp], #%d' % frame, '    ret']
+    out.append('    .size %s, .-%s' % (name, name))
+    return '\n'.join(out) + '\n'
