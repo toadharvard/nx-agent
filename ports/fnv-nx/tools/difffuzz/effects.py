@@ -63,10 +63,10 @@ def _code(uc, address, size, log):
 def _wrap(eng, name, log):
     orig = getattr(eng, name)
 
-    def wrapped(uc, address, size, user):
+    def wrapped(uc, address, size, user, **kw):      # kw: arm64emu._on_stub(..., wild=True) from _on_wild
         r = user[1]
         n = len(r.calls)
-        orig(uc, address, size, user)
+        orig(uc, address, size, user, **kw)
         if len(r.calls) > n:
             log.calls.append((len(log.acc), r.calls[-1].target, list(log.ring)))
     setattr(eng, name, wrapped)
