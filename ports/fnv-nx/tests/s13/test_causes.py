@@ -105,6 +105,17 @@ def test_rules():
                        arm_trace=['00401100', '00401200']), 'call-flow') == 'native-extra-calls', 'native calls more')
     check(refined(dict(kind='call-target', index=0, x86='00401100', arm='00401200'), 'call-flow') == 'call-flow',
           'call-target mismatch stays call-flow')
+    # native null write after an intercepted allocator (static callee facts, faked here)
+    real = causes.native_callees
+    try:
+        causes.native_callees = lambda src, a: {'__fnv_00aa13e0', '__fnv_00a57640'} if a == 0x00401000 else set()
+        check(refined(dict(kind='error', x86=None, arm='fault:w:00000000')) == 'new-null',
+              'null store after an allocator call: new-null')
+        check(causes.refine(rec(dict(kind='error', x86=None, arm='fault:w:00000000'), addr='00402000'),
+                            'unclassified') == 'native-null-read', 'null store without an allocator: native-null-read')
+    finally:
+        causes.native_callees = real
+    check(causes.native_callees('src/none.cpp', 0x00401000) is None, 'no object: no callee facts')
     # a definite probe cause is never overridden
     check(causes.refine(rec(dict(kind='error', x86=None, arm='exc:1@0'), 'uninit-arm'), 'uninit-arm') == 'uninit-arm',
           'probe cause kept')

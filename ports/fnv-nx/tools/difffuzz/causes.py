@@ -90,6 +90,10 @@ POLICY = {
                                                  'pointee the harness could not read (literal not pinned)'),
     'oracle-trap':    ('artifact', 'S13', False, 'the oracle executed int3/0xCC .text filler: code the harness did '
                                                  'not load (unit membership / preload gap)'),
+    'new-null':       ('artifact', 'S13', False, 'the native constructs into the null an intercepted allocator '
+                                                 'returned (GCC drops the null test after a throwing operator new, '
+                                                 'MSVC 2008 keeps it); the game\'s allocators never return null: '
+                                                 'canned allocator results should be heap addresses'),
     'no-native-entry': ('artifact', 'S13', False, 'the native image has no entry for the function (link subset)'),
     # --- real bugs -----------------------------------------------------------------------------------------------
     'uninit-arm':     ('real-bug', 'S1b', True, 'the native result depends on garbage: an argument slot the caller '
@@ -284,6 +288,98 @@ def _rule_calls(d):
     return None
 
 
+# --------------------------------------------------------------------- native object facts (optional, static)
+#
+# Where the link's rewritten objects are at hand (config.LINK/fixed/<unit>.o on a farm, or FNVNX_CAUSES_OBJ), a rule
+# may look at the native function's own direct callees. Without the objects these rules simply do not fire.
+
+ALLOCATORS = {'_Znwj', '_Znaj', '_Znwm', '_Znam', '_ZnwjRKSt9nothrow_t', '__fnv_00401000', '__fnv_00aa3e40',
+              '__fnv_00aa13e0'}       # operator new, MemoryManager::Allocate, the heap's Allocate (game allocators)
+_OBJ_CACHE = {}
+
+
+def _obj_dir():
+    d = os.environ.get('FNVNX_CAUSES_OBJ')
+    if d:
+        return d
+    try:
+        import config
+        return str(config.LINK / 'fixed')
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def native_callees(source, addr):
+    """Names the native definition of original function `addr` calls directly (bl/b relocations inside its
+    extent), or None when the object or the function is not available."""
+    d = _obj_dir()
+    if not d or not source:
+        return None
+    path = os.path.join(d, source.replace('/', '_') + '.o')
+    if path not in _OBJ_CACHE:
+        _OBJ_CACHE[path] = _scan_object(path) if os.path.exists(path) else None
+    t = _OBJ_CACHE[path]
+    if t is None:
+        return None
+    return t.get(addr)
+
+
+def _scan_object(path):
+    """{original address: set of called names} for every __fnv_<addr> defined in the object."""
+    try:
+        from elftools.elf.elffile import ELFFile
+        from elftools.elf.relocation import RelocationSection
+    except ImportError:
+        return None
+    out = {}
+    with open(path, 'rb') as f:
+        e = ELFFile(f)
+        st = e.get_section_by_name('.symtab')
+        if st is None:
+            return None
+        syms = list(st.iter_symbols())
+        by_sec = collections.defaultdict(list)          # section index -> [(start, end, orig addr)]
+        sized = collections.defaultdict(int)             # (section, value) -> the size of a function symbol there
+        for sy in syms:
+            if sy['st_info']['type'] == 'STT_FUNC' and isinstance(sy['st_shndx'], int):
+                k = (sy['st_shndx'], sy['st_value'])
+                sized[k] = max(sized[k], sy['st_size'])
+        for sy in syms:
+            n = sy.name
+            if n.startswith('__fnv_') and isinstance(sy['st_shndx'], int) and len(n) >= 14:
+                try:
+                    a = int(n[6:14], 16)
+                except ValueError:
+                    continue
+                k = (sy['st_shndx'], sy['st_value'])
+                if sized[k]:
+                    by_sec[sy['st_shndx']].append((sy['st_value'], sy['st_value'] + sized[k], a))
+        for sec in e.iter_sections():
+            if not isinstance(sec, RelocationSection) or sec['sh_info'] not in by_sec:
+                continue
+            spans = by_sec[sec['sh_info']]
+            for rel in sec.iter_relocations():
+                if rel['r_info_type'] not in (20, 21, 282, 283):     # P32_JUMP26/CALL26 (ILP32), JUMP26/CALL26 (LP64)
+                    continue
+                off = rel['r_offset']
+                name = syms[rel['r_info_sym']].name
+                for lo, hi, a in spans:
+                    if lo <= off < hi:
+                        out.setdefault(a, set()).add(name)
+        for spans in by_sec.values():
+            for lo, hi, a in spans:
+                out.setdefault(a, set())
+    return out
+
+
+def _calls_allocator(rec):
+    try:
+        cs = native_callees(rec.get('source'), int(rec.get('address') or '0', 16))
+    except ValueError:
+        return False
+    return bool(cs and cs & ALLOCATORS)
+
+
 REFINABLE = (None, 'unclassified', 'call-flow', 'signedness?')
 
 
@@ -297,6 +393,8 @@ def refine(rec, cause=None):
     got = None
     if k == 'error':
         got = _rule_error(d)
+        if got == 'native-null-read' and _calls_allocator(rec):
+            got = 'new-null'
     elif k == 'call-args':
         got = _rule_call_args(d)
     elif k == 'return':
