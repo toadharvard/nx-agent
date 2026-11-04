@@ -79,11 +79,14 @@ export CXX TREE OUT FLAGS_STR="${FLAGS[*]}" ORDER_KEYS
 if [ -z "$LIST" ]; then LIST="$OUT/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
 
 # ---- whole-program keys: discover=<unit>.keys under -fsyntax-only (no code generation), merged and sorted
+keys_key() { printf '%s' "$1" | sha256sum | cut -c1-24; }   # src/a_b.cpp and src_a/b.cpp must not share a file
 keys_one() {
-  local src=$1 k dep stale=0
-  k="$OUT/.keys/$(echo "$1" | tr / _).keys"
-  # up to date only when newer than the unit and than every header it includes (its .d from the last discovery)
-  if [ -f "$k" ] && [ -f "$k.d" ] && [ "$k" -nt "$TREE/$src" ]; then
+  local src=$1 k dep stale=0 h
+  k="$OUT/.keys/$(keys_key "$1").keys"
+  h=$(sha256sum < "$TREE/$src" | cut -c1-16)
+  # up to date only when the unit's content is the same (a copy with an older mtime is still a change) and no header
+  # it includes (its .d from the last discovery) is newer
+  if [ -f "$k" ] && [ -f "$k.d" ] && [ "$(cat "$k.src" 2>/dev/null)" = "$h" ]; then
     for dep in $(sed -e 's/\\$//' -e 's/^[^:]*://' "$k.d"); do
       case $dep in /*) ;; *) dep=$TREE/$dep ;; esac
       if [ ! -e "$dep" ] || [ "$dep" -nt "$k" ]; then stale=1; break; fi
@@ -95,6 +98,7 @@ keys_one() {
      -fplugin-arg-fnvnx_order-discover="$k.tmp" "$src") > /dev/null 2>&1 || true   # a unit that does not compile still contributes what it parsed
   if [ -f "$k.tmp" ]; then mv "$k.tmp" "$k"; else : > "$k"; fi
   if [ -f "$k.d.tmp" ]; then mv "$k.d.tmp" "$k.d"; else echo "x: $src" > "$k.d"; fi
+  echo "$h" > "$k.src"
 }
 if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
   KEYFLAGS_STR=$(printf '%s\n' "${KEYFLAGS[@]}" | grep -vxF -- -c | tr '\n' ' ')
@@ -103,11 +107,11 @@ if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
           sha256sum | cut -c1-16)
   if [ "$(cat "$OUT/.keys/.stamp" 2>/dev/null)" != "$stamp" ]; then rm -rf "$OUT/.keys"; fi
   mkdir -p "$OUT/.keys"; echo "$stamp" > "$OUT/.keys/.stamp"
-  export KEYFLAGS_STR; export -f keys_one
+  export KEYFLAGS_STR; export -f keys_one keys_key
   jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$OUT/.keys/units.list"
   xargs -a "$OUT/.keys/units.list" -P "$JOBS" -I{} bash -c 'keys_one "$@"' _ {}
   # forwarders defined in one unit and called in another are resolved over all units (keys_merge.py)
-  while read -r src; do echo "$OUT/.keys/$(echo "$src" | tr / _).keys"; done < "$OUT/.keys/units.list" > "$OUT/.keys/files.list"
+  while read -r src; do echo "$OUT/.keys/$(keys_key "$src").keys"; done < "$OUT/.keys/units.list" > "$OUT/.keys/files.list"
   python3 "$HERE/toolchain/order/keys_merge.py" --list "$OUT/.keys/files.list" > "$OUT/order.keys.tmp"
   # replaced only when it changes: its mtime decides which objects are stale (compile_one)
   if cmp -s "$OUT/order.keys.tmp" "$OUT/order.keys"; then rm "$OUT/order.keys.tmp"; else mv "$OUT/order.keys.tmp" "$OUT/order.keys"; fi
