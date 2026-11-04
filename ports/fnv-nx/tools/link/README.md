@@ -28,7 +28,9 @@ tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L
 tools/link/fnvlink.py probe $L $T                   # layouts of the aggregates + synthesized vtables; resolve again
 tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L [--override o.tsv] [--extern-text s4.txt]
                                                     # [--crt-symbols t.tsv|none] [--imports t.tsv|none]
-tools/link/fnvlink.py apply $L $L/fixed             # renamed objects + zz_bridges.o + zz_addrmap.o
+                                                    # [--units-renames t.tsv|none] (S1b, patched units only)
+tools/link/fnvlink.py apply $L $L/fixed             # renamed objects (own references of rebound variables
+                                                    # retargeted) + zz_bridges.o + zz_addrmap.o
 tools/link/fnvlink.py check $L $L/fixed             # trial link with aliases.ld; what is still undefined
 python3 tools/link/test_link.py; python3 tools/link/test_bridges.py   # need SSE2NEON; qemu-user for the second
 python3 tools/link/test_override.py; python3 tools/link/test_vtables.py; python3 tools/link/test_startup.py

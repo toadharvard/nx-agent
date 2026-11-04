@@ -68,6 +68,7 @@ only needs to remember which steps finished.
 | `out/objcopy/<obj>.redefine` | `old new` per line (the objcopy `--redefine-syms` format): undefined Itanium name -> address symbol or bridge. |
 | `out/objcopy/<obj>.args` | objcopy options for the object (`--add-symbol`, `--localize-symbol`, `--weaken-symbol`, `--redefine-sym`). |
 | `out/objcopy/<obj>.undefine` | Definitions `apply` turns into undefined references before renaming (import thunks: their name then follows the `.redefine` mapping to the import). |
+| `out/objcopy/<obj>.rebind` | Address (and TLS slot) symbols of the variables the object defines at image addresses: `apply` points the object's own local-symbol references to them at these symbols (split globals, below). |
 | `out/aliases.ld` | Linker script: absolute data address symbols, aliases of COMDAT definitions. |
 | `out/refs.tsv` | Every (object, undefined symbol): class, tier, address, target, matched MSVC declaration. |
 | `out/abi.tsv` | Every reference whose declaration passes arguments differently from the definition: verdict, classes, register moves, notes, both demangled declarations. |
@@ -85,6 +86,12 @@ only needs to remember which steps finished.
 Natively defined variables at data-image addresses (global objects with constructors, mostly the generated
 initializer units) are weakened and renamed to their address symbol, so every unit, the defining one included, uses
 the image copy, and the native static initializer constructs the object in place, as the original CRT init did.
+Renaming alone misses the defining object's own references (S13, J-0043 "split globals"): GAS writes a reference
+to a variable of the same object as `.bss + off` / `.data + off` (or relative to a `-O2` section anchor), so its
+functions, its static initializer and pointers in its data kept a private copy (`GetRTTI` 0x0049bb10 returned the
+native `ms_kRTTI`, not 0x011c7d74). `apply` therefore rewrites every relocation of an allocated section that reaches
+such a variable through a local symbol to name the variable's symbol (addend adjusted; `elfsyms.retarget_local_relocs`,
+list in `objcopy/<obj>.rebind`) before renaming. The same holds for thread-locals folded into the native TLS block.
 
 ## Address map (for the data-image loader, S3)
 
@@ -302,6 +309,19 @@ instead of leaving the link undefined.
   thread-local the source places at an address below it (outside `.tls`) gets a native TLS variable of its own. The block starts zeroed in each thread: S4 should point its per-thread template copy
   at it (`&__fnvnx_tls_image` of the current thread, `__fnvnx_tls_image_orig` / `_size`) and copy the image's
   template there at thread start, so `fs:[0x2c]` code and GCC's TLS accesses agree.
+* **GAME1 names** (S1, D13): prepare spells a Win32-looking name a unit binds to game code `fnvnx_game_<name>`
+  (`GetCurrentThreadId` -> 0x00830470, `Sleep` -> the spin lock's acquire, `EnterCriticalSection` ->
+  InterlockedIncrement's IAT slot in memorymanager.cpp); resolve looks such a reference up as `<name>` in the unit's
+  recipe, so the unit's own binding decides (a game function by address, or that IAT slot's api).
+* **Operator new/delete**: GCC's global forms bind to the game's allocator by the MSVC names the units bind (the
+  unit's own binding, else the one most units use), never to the platform's: `_Znwm` -> `??2@YAPAXI@Z`, `_Znam` ->
+  `??_U@YAPAXI@Z`, `_ZdlPv` -> `??3@YAXPAX@Z`, `_ZdaPv` -> `??_V@YAXPAX@Z`, the sized forms `_Zd[la]Pv[mj]` -> the
+  game's sized delete `??3@YAXPAXI@Z` (0x00aa1460; S13's oracle). Other new/delete forms (placement, extra
+  parameters) are decomp declarations and resolve like any name; the nothrow / aligned forms stay runtime.
+* **S1b renames** (`patches/units_renames.tsv`): the MSVC names of definitions and references an S1b patch changes.
+  Until prepare rewrites units.json itself, resolve applies the rows of every unit whose prepared source carries the
+  patch marker (`fnv-nx XINC1`, FTOL1, DBUG1); an unpatched unit keeps its names. Idempotent. `resolve
+  --units-renames <tsv|none>` (default: this tree's file).
 * **Hand-written vptr stores** (S4b, DATAIMAGE.md D7 point 2): the sources store image vftable addresses into
   objects by hand (`exception.vtable = (unsigned)&DAT_010176f8;`, `*(void **)this = kVtbl_X;`). Resolve scans the
   compiled units' sources for assignments whose right side is (after casts and `&`) a name the unit binds to a data
@@ -422,6 +442,24 @@ their image addresses. Import thunks: `0x00ee6df2` -> `D3DXVec3TransformNormal`,
 | C `unresolved` | 202 | C names and decomp data no unit defines |
 | platform `provider` / `import` | 276 | defined by S4's platform objects (162) and the import layer (114), not in this link |
 | C runtime / other | 75 | `extern-text` data 27, GCC runtime 24, others 24 |
+
+### Sixth round (S13's findings, J-0043; S2c)
+
+Same 2,729 objects (their tree predates GAME1 and S1b). `apply` retargets 852 relocations in 114 objects: S13's
+`check_rebind.py` counted 638 code relocations into 92 rebound variables of 86 objects before, 0 after; `GetRTTI`
+0x0049bb10 returned the unit's own `ms_kRTTI` (0x010a3bd0 in the trial image) and now returns 0x011c7d74. 2,044
+operator new/delete references go to the game's allocator (none to the platform). C++-decorated imports
+(`__imp_?X@@...`, 141 in units.json) are parsed through their inner declaration: import references bound by IAT
+slot 1,306 of 1,348 -> 1,345 of 1,389. Trial link: 8,741 -> **8,709 undefined names**, 0 multiple definitions
+(C++ `unresolved` 1,605 -> 1,570, C++ runtime 21 -> 18, C `unresolved` 202 -> 192; import names the platform layer
+provides 114 -> 125).
+
+GAME1 and S1b on a tree prepared with today's rules (GAME1 26 edits in 6 files, XINC1 135 in 49), its 53 compiled
+GAME1 / S1b units resolved alone: the 5 `fnvnx_game_` references bind as their unit says (`GetCurrentThreadId` ->
+0x00830470; memorymanager's `EnterCriticalSection` / `LeaveCriticalSection` -> the InterlockedIncrement /
+InterlockedDecrement slots; one `Sleep` -> the spin lock at 0x008691b0, another -> IAT slot 0x00fdf0d0, SetEvent's,
+as the pristine object calls it); `units_renames.tsv` renamed 35 definitions and added 72 reference names (989
+definitions matched exactly).
 
 ## Open problems
 
