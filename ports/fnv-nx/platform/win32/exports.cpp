@@ -20,6 +20,7 @@ unsigned long fnvnx_ws2_inet_addr(const char *);
 char *fnvnx_ws2_inet_ntoa(unsigned long);
 void *fnvnx_ws2_gethostbyname(const char *);
 int fnvnx_ws2_gethostname(char *, int);
+int fnvnx_ws2_fdisset(UINT_PTR, void *);
 bool SteamAPI_Init(void);
 bool SteamAPI_IsSteamRunning(void);
 void SteamAPI_Shutdown(void);
@@ -141,6 +142,7 @@ const exp g_exports[] = {
     { "ws2_32", "connect", (void *)&fnvnx_ws2_fail }, { "ws2_32", "send", (void *)&fnvnx_ws2_fail },
     { "ws2_32", "recv", (void *)&fnvnx_ws2_fail }, { "ws2_32", "setsockopt", (void *)&fnvnx_ws2_fail },
     { "ws2_32", "ioctlsocket", (void *)&fnvnx_ws2_fail }, { "ws2_32", "WSAAsyncSelect", (void *)&fnvnx_ws2_fail },
+    { "ws2_32", "select", (void *)&fnvnx_ws2_fail }, { "ws2_32", "__WSAFDIsSet", (void *)&fnvnx_ws2_fdisset },
     E("steam_api", SteamAPI_Init), E("steam_api", SteamAPI_IsSteamRunning), E("steam_api", SteamAPI_Shutdown),
     E("steam_api", SteamAPI_RunCallbacks), E("steam_api", SteamAPI_RegisterCallback),
     E("steam_api", SteamAPI_UnregisterCallback), E("steam_api", SteamUser), E("steam_api", SteamFriends),
@@ -173,10 +175,22 @@ int dll_eq(const char *a, const char *b)
 
 extern "C" void *fnvnx_registered_module_export(const char *dll, const char *proc);   // module.cpp
 
+/* DLLs the exe imports under another module's name: GalaxyWrp.dll (GOG's build) wraps the Steam API with the
+ * same export names; WSOCK32 (Winsock 1.1) forwards to ws2_32 */
+static const char *dll_alias(const char *dll)
+{
+    if (dll && dll_eq(dll, "GalaxyWrp"))
+        return "steam_api";
+    if (dll && dll_eq(dll, "wsock32"))
+        return "ws2_32";
+    return dll;
+}
+
 extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
 {
     if (!name)
         return NULL;
+    dll = dll_alias(dll);
     for (const exp &e : g_exports)
         if (e.fn && !strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
             return e.fn;
@@ -184,9 +198,35 @@ extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
     return dll ? fnvnx_registered_module_export(dll, name) : NULL;
 }
 
+/* Imports by ordinal: the exports' ordinals in the system DLLs the exe binds that way (WSOCK32 21 slots,
+ * XINPUT1_3 #2/#3, DSOUND #11), resolved by name. Winsock 1.1's numbering (wsock32: 10 inet_addr, 11 inet_ntoa,
+ * 12 ioctlsocket; ws2_32 orders those three differently and is not imported by ordinal). */
+namespace {
+struct ord { const char *dll; unsigned ordinal; const char *name; };
+const ord g_ordinals[] = {
+    {"wsock32", 1, "accept"}, {"wsock32", 2, "bind"}, {"wsock32", 3, "closesocket"}, {"wsock32", 4, "connect"},
+    {"wsock32", 5, "getpeername"}, {"wsock32", 6, "getsockname"}, {"wsock32", 7, "getsockopt"},
+    {"wsock32", 8, "htonl"}, {"wsock32", 9, "htons"}, {"wsock32", 10, "inet_addr"}, {"wsock32", 11, "inet_ntoa"},
+    {"wsock32", 12, "ioctlsocket"}, {"wsock32", 13, "listen"}, {"wsock32", 14, "ntohl"}, {"wsock32", 15, "ntohs"},
+    {"wsock32", 16, "recv"}, {"wsock32", 17, "recvfrom"}, {"wsock32", 18, "select"}, {"wsock32", 19, "send"},
+    {"wsock32", 20, "sendto"}, {"wsock32", 21, "setsockopt"}, {"wsock32", 22, "shutdown"}, {"wsock32", 23, "socket"},
+    {"wsock32", 51, "gethostbyaddr"}, {"wsock32", 52, "gethostbyname"}, {"wsock32", 57, "gethostname"},
+    {"wsock32", 101, "WSAAsyncSelect"}, {"wsock32", 111, "WSAGetLastError"}, {"wsock32", 112, "WSASetLastError"},
+    {"wsock32", 115, "WSAStartup"}, {"wsock32", 116, "WSACleanup"}, {"wsock32", 151, "__WSAFDIsSet"},
+    {"xinput1_3", 2, "XInputGetState"}, {"xinput1_3", 3, "XInputSetState"}, {"xinput1_3", 4, "XInputGetCapabilities"},
+    {"xinput1_3", 5, "XInputEnable"},
+    {"dsound", 1, "DirectSoundCreate"}, {"dsound", 2, "DirectSoundEnumerateA"}, {"dsound", 11, "DirectSoundCreate8"},
+};
+} // namespace
+
 extern "C" void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordinal)
 {
     if (ordinal == FNVNX_IMPORT_BY_NAME)
         return fnvnx_win32_lookup_export(dll, name);
+    if (!dll)
+        return NULL;
+    for (const ord &o : g_ordinals)
+        if (o.ordinal == ordinal && dll_eq(dll, o.dll))
+            return fnvnx_win32_lookup_export(dll, o.name);
     return NULL;
 }
