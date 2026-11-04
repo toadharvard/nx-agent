@@ -67,7 +67,7 @@ int plugin_is_GPL_compatible;   // the plugin interface asks for it; the code is
 
 enum order_mode { MODE_OFF, MODE_VOLATILE, MODE_TSO };
 static order_mode mode = MODE_VOLATILE;
-static bool verbose;
+static bool verbose, verbose_sites;
 static std::set<std::string> key_fields, key_vars;   // "Class::member", "name"
 static std::set<tree> interlocked_decls;             // FIELD_DECLs / VAR_DECLs this unit hands to Interlocked*
 struct counts { unsigned long ldar, stlr, fence_ld, fence_st; };
@@ -299,7 +299,13 @@ static void reorder_call(tree call) {
   for (int i = first; i < n; i++) {
     tree a = *arg_slot(call, i);
     if (TREE_SIDE_EFFECTS(a)) {
-      if (!scalar_arg(a)) { calls_skipped++; return; }
+      if (!scalar_arg(a)) {
+        calls_skipped++;
+        if (verbose_sites)
+          inform(EXPR_LOCATION(call), "%<fnvnx_order%>: arguments left in GCC order (argument %d: %qT with side effects)",
+                 i, TREE_TYPE(a));
+        return;
+      }
       effects++;
     }
     if (!TREE_CONSTANT(a)) live++;
@@ -348,6 +354,8 @@ static tree order_args_walk(tree *tp, int *, void *) {
 static void pre_genericize(void *gcc_data, void *) {
   tree fndecl = (tree)gcc_data;
   if (!fndecl || TREE_CODE(fndecl) != FUNCTION_DECL || !DECL_SAVED_TREE(fndecl)) return;
+  // compiler and C library headers (arm_neon.h, <string>, ...) are not decomp code: their order is GCC's to keep
+  if (in_system_header_at(DECL_SOURCE_LOCATION(fndecl))) return;
   walk_tree_without_duplicates(&DECL_SAVED_TREE(fndecl), order_args_walk, NULL);
 }
 
@@ -378,7 +386,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
   }
   for (int i = 0; i < info->argc; i++) {
     const char *k = info->argv[i].key, *v = info->argv[i].value;
-    if (!strcmp(k, "verbose")) verbose = true;
+    if (!strcmp(k, "verbose")) { verbose = true; if (v && !strcmp(v, "sites")) verbose_sites = true; }
     else if (!strcmp(k, "mode") && v) {
       if (!strcmp(v, "volatile")) mode = MODE_VOLATILE;
       else if (!strcmp(v, "tso")) mode = MODE_TSO;

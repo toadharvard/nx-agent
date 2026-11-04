@@ -80,7 +80,42 @@ on hardware once it lands). The litmus binary is self-contained and can run ther
 
 ## Cost
 
-See "Measured" below (filled from `toolchain/order/measure.py` on the prepared tree).
+**Measured [M]** with `toolchain/order/measure.py`. The tree was prepared locally from the pinned decomp, on this
+branch's base 25c5426. The sample is every 12th unit of units.json plus 40 thread, lock, queue, refcount and render
+units: 286 units, of which 280 compile in every configuration. Instructions are counted in the objects' executable
+sections.
+
+| config (compile.sh) | instructions | ldar | stlr | dmb ish | dmb ishld | vs base |
+|---|---:|---:|---:|---:|---:|---:|
+| base: `ORDER_MODE=off ORDER_ARGS=ltr` (the old build: no ordering, compiler-only barriers) | 276,344 | 20 | 0 | 0 | 0 | - |
+| volatile only (`ORDER_ARGS=ltr`) | 276,683 | 168 | 181 | 86 | 0 | +0.12 % |
+| **the build** (`volatile`, `rtl`) | 276,667 | 168 | 181 | 86 | 0 | **+0.12 %** |
+| full TSO (`ORDER_MODE=tso`) | 334,217 | 39,530 | 17,115 | 2,483 | 3,336 | +20.9 % |
+| the build + `-ftrivial-auto-var-init=zero` | 279,727 | 168 | 181 | 87 | 0 | +1.2 % |
+
+Hot units only (40): the build is -0.02 % (12 ldar, 14 stlr, 4 dmb), and full TSO +12.5 % (4,525 ldar).
+
+* **Argument order costs nothing measurable** (-16 instructions over the sample). On the 280 units the pass reordered
+  81,410 calls, most of them in inline functions of headers that are never emitted. It left 256 alone: 230 in
+  sse2neon, and about 25 distinct tree sites with a side-effecting by-value class argument (NiPoint3, hkBool, tag
+  types, va_list). `-fplugin-arg-fnvnx_order-verbose=sites` lists them.
+* **Per execution [E]** on the A57 (no device measurement yet):
+  * an `ldar` costs about an `ldr` plus waiting for earlier `stlr`s;
+  * an `stlr` waits for earlier stores to drain;
+  * a `dmb ish` costs tens of cycles when stores are in flight.
+
+  The new per-call cost of Interlocked* is the trailing `dmb ish`. An x86 `lock` instruction cost about as much on
+  the original hardware. The refcount traffic (NiPointer, 332 `InterlockedIncrement/Decrement(&m_uiRefCount)` sites)
+  makes this the largest dynamic item. Rough budget: at 100 k refcount operations per frame and ~30 cycles each,
+  3 M cycles, which is 2.9 ms at 1.02 GHz or 1.7 ms at 1.785 GHz. That is significant against 22.2 ms. **S15
+  measures it on device (B1).**
+  * If it is too much, inline the Interlocked functions in fnvnx_win32.h; this saves the call, and the decomp's calls
+    are real calls today.
+  * Relaxing Increment to acq_rel would change semantics and needs a per-site argument.
+* Full TSO at +21 % static instructions, nearly all of them ldar/stlr in place of ldr/str, is not affordable at the
+  45 fps target. That is why `volatile` is the contract.
+* `-ftrivial-auto-var-init=zero` is not adopted: it costs +1.2 % (memsets of local buffers on every call) and does not
+  change the W-UNINIT folding.
 
 ## Open, not closed by this
 
