@@ -8,7 +8,7 @@ metric = unverified + open
               ledger rows with verdict `unverified`
   open        ledger rows with verdict refuted or partial (each row is one refutation case with a failing test)
 A commit makes no claim when it only touches the journal (JOURNAL.md, journal/inbox/) or V1's own files
-(tests/v1/, tools/verify/): V1 cannot verify itself. The ledger is checked too: every refuted/partial/fixed row
+(tests/v1/, tools/verify/): V1 cannot verify itself. The owner's /CLAUDE.md holds rules, not claims. The ledger is checked too: every refuted/partial/fixed row
 names a test that exists, and a `fixed` row names its fix commit. A broken ledger is an error (exit 2), not a
 lower number.
 """
@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, '..', '..'))
 LEDGER = os.path.join(PORT, 'tests', 'v1', 'ledger.tsv')
 BASELINE = 'b6585b8'          # the integration head of V1's round 2 (v1-001); every later merge is counted
-EXEMPT = ('ports/fnv-nx/JOURNAL.md', 'ports/fnv-nx/journal/', 'ports/fnv-nx/tests/v1/', 'ports/fnv-nx/tools/verify/')
+EXEMPT = ('CLAUDE.md', 'ports/fnv-nx/JOURNAL.md', 'ports/fnv-nx/journal/', 'ports/fnv-nx/tests/v1/', 'ports/fnv-nx/tools/verify/')
 VERDICTS = {'confirmed', 'refuted', 'partial', 'fixed', 'unverified'}
 
 
