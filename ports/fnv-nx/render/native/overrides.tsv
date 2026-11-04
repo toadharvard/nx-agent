@@ -3,21 +3,28 @@
 # Columns (tab-separated): address <TAB> our symbol <TAB> ABI / notes
 #   address: hex function address, or vslot:<MSVC vftable symbol>:<slot index> for a virtual whose implementation
 #            address the image vftable holds (R1b: the linker reads the slot and treats the row as that address).
-# Rows marked "N1-pending" are the plan of docs: render/native/N1_PLAN.md; the symbols do not exist yet, so the
-# orchestrator must not enable this table before the N1 objects are built (R1c: --override-lib).
+# Rows marked "N1-pending" are planned (docs: render/native/N1_PLAN.md) and skipped by the linker. Every other row's
+# symbol is defined in libnxrender.a (render/native/n1/build.sh; n1/engine_stubs.cpp), checked by
+#   python3 -I tests/s6n/test_overrides.py <libnxrender.a>
+# Link (native build only, after NATIVE1 drops render/native/drop_units.txt):
+#   python3 tools/link/fnvlink.py resolve <units.json> <objects.tsv> <out> \
+#       --override render/native/overrides.tsv --override-lib <n1 out>/libnxrender.a [--msvc-objs <dir>]
 #
-# ---- NiDX9Renderer (NiRenderer protected virtuals). Slots confirmed by decomp call sites, see N1_PLAN.md §2 ----
-vslot:??_7NiDX9Renderer@@6B@:98	_ZN2nx8Renderer14Do_ClearBufferEPKvj	thiscall(this, const NiRect<float>* rect, unsigned mode); slot from 0x007148c0 ("ClearBuffer"); N1-pending
-vslot:??_7NiDX9Renderer@@6B@:99	_ZN2nx8Renderer16Do_SetCameraDataEPKvS2_S2_S2_S2_S2_	thiscall(this, loc, dir, up, right, const NiFrustum&, const NiRect<float>& port); slot from 0x004e9c90 ("SetCameraData"); N1-pending
-vslot:??_7NiDX9Renderer@@6B@:100	_ZN2nx8Renderer27Do_SetScreenSpaceCameraDataEPKv	thiscall(this, const NiRect<float>* port); slot from 0x004a0dd0 ("SetScreenSpaceCameraData"); N1-pending
-vslot:??_7NiDX9Renderer@@6B@:107	_ZN2nx8Renderer14Do_RenderShapeEPv	thiscall(this, NiTriShape*); slot from 0x00a745c0 (NiTriShape render); N1-pending
-vslot:??_7NiDX9Renderer@@6B@:108	_ZN2nx8Renderer18Do_RenderTristripsEPv	thiscall(this, NiTriStrips*); slot from 0x00a71d30; N1-pending
-# inferred from Gamebryo 2.2's declaration order around the confirmed slots (to confirm with R2's vftable dump):
-vslot:??_7NiDX9Renderer@@6B@:95	_ZN2nx8Renderer13Do_BeginFrameEv	thiscall(this) -> bool; candidate implementation 0x00e74f40 (BeginScene); N1-pending, inferred
-vslot:??_7NiDX9Renderer@@6B@:96	_ZN2nx8Renderer11Do_EndFrameEv	thiscall(this) -> bool; candidate 0x00e69660 (EndScene); N1-pending, inferred
-vslot:??_7NiDX9Renderer@@6B@:97	_ZN2nx8Renderer15Do_DisplayFrameEv	thiscall(this) -> bool; candidate 0x00e7ccd0 (Present); N1-pending, inferred
-vslot:??_7NiDX9Renderer@@6B@:101	_ZN2nx8Renderer30Do_BeginUsingRenderTargetGroupEPvj	thiscall(this, NiRenderTargetGroup*, unsigned clear) -> bool; candidate 0x00e6eea0 (SetRenderTarget loop); N1-pending, inferred
-vslot:??_7NiDX9Renderer@@6B@:102	_ZN2nx8Renderer28Do_EndUsingRenderTargetGroupEv	thiscall(this) -> bool; N1-pending, inferred
+# ---- NiDX9Renderer: implementation addresses (R2 fallback: no MSVC object emits ??_7NiDX9Renderer@@6B@, see
+# REQUESTS.md R2). Identified from the decomp bodies; signatures = the decomp definitions at these addresses.
+00e74f40	_ZN2nx6engine13NiDX9Renderer13Do_BeginFrameEv	thiscall(this) -> bool; device-lost check + BeginScene = Do_BeginFrame
+00e69660	_ZN2nx6engine13NiDX9Renderer11Do_EndFrameEv	thiscall(this) -> bool; EndScene if in a scene = Do_EndFrame
+00e7ccd0	_ZN2nx6engine13NiDX9Renderer15Do_DisplayFrameEv	thiscall(this) -> bool; Present only = Do_DisplayFrame
+00e6f310	_ZN2nx6engine13NiDX9Renderer14Do_ClearBufferEPNS_7NiRectFEm	thiscall(this, NiRectF* rect, unsigned mode); = Do_ClearBuffer (vslot 98)
+00e6eea0	_ZN2nx6engine13NiDX9Renderer30Do_BeginUsingRenderTargetGroupEPKvm	thiscall(this, NiRenderTargetGroup*, unsigned clear) -> bool; logs "NiDX9Renderer::BeginUsingRenderTargetGroup"
+# ---- NiDX9Renderer virtuals with no implementation address yet (need the image vftable, REQUESTS.md R2) ----
+vslot:??_7NiDX9Renderer@@6B@:99	_ZN2nx6engine13NiDX9Renderer16Do_SetCameraDataEPKNS_9NiPoint3fES4_S4_S4_PKNS_10NiFrustumFEPKNS_7NiRectFE	thiscall(this, loc, dir, up, right, const NiFrustum*, const NiRect<float>* port); slot from 0x004e9c90; N1-pending (R2: vftable)
+vslot:??_7NiDX9Renderer@@6B@:100	_ZN2nx6engine13NiDX9Renderer27Do_SetScreenSpaceCameraDataEPKNS_7NiRectFE	thiscall(this, const NiRect<float>* port); slot from 0x004a0dd0; N1-pending (R2: vftable)
+vslot:??_7NiDX9Renderer@@6B@:102	_ZN2nx6engine13NiDX9Renderer28Do_EndUsingRenderTargetGroupEv	thiscall(this) -> bool; inferred slot; N1-pending (R2: vftable)
+vslot:??_7NiDX9Renderer@@6B@:107	_ZN2nx8Renderer14Do_RenderShapeEPv	thiscall(this, NiTriShape*); slot from 0x00a745c0; N1-pending (geometry path, N2)
+vslot:??_7NiDX9Renderer@@6B@:108	_ZN2nx8Renderer18Do_RenderTristripsEPv	thiscall(this, NiTriStrips*); slot from 0x00a71d30; N1-pending (geometry path, N2)
+# NiDX9RenderState: forwarders exist (nx::engine::NiDX9RenderState in engine_stubs.cpp) but the engine reaches the
+# state cache only through virtuals of an unidentified vftable (R2), so no rows yet.
 # ---- TileShader (menus): the render-time half (property/material code stays) ----
 00bca760	_ZN2nx10TileFamily14ApplyToRendererEPv	thiscall(PassShader*, RenderPassArg*): selects the tile VS/PS pair by pass + geometry flags -> tile family packet; N1-pending
 00bca980	_ZN2nx10TileFamily12UpdateMaterialEPKv	thiscall(TileShaderS*, const NiPropertyState*): tint, TexScroll, scissor rect, stencil flags -> NxTileDraw + DynRec; N1-pending

@@ -211,6 +211,13 @@ Three mechanisms, all already in the S1/S2/S3 design:
    resolve` gives an override precedence over the decomp definition at the same address, so every call, every
    vtable-slot relocation and every code pointer the data image (S3) holds for that address lands on our function.
    Request to S2: an `--override <tsv>` input with that precedence and a report of decomp definitions it shadowed.
+   Status (round 3): done (R1). The N1 stubs are `render/native/n1/engine_stubs.cpp` in `libnxrender.a`; the link
+   command for the native build is
+   `python3 tools/link/fnvlink.py resolve <units.json> <objects.tsv> <out> --override render/native/overrides.tsv
+   --override-lib <n1 out>/libnxrender.a [--msvc-objs <pristine MSVC objects>]` (`<n1 out>` from
+   `render/native/n1/build.sh <n1 out>`). Without `--msvc-objs` the vslot rows are skipped (they are all
+   N1-pending anyway); the five NiDX9Renderer rows bind by implementation address. Pre-check:
+   `python3 -I tests/s6n/test_overrides.py <n1 out>/libnxrender.a`.
 2. **Prepare rules (S1, `tools/prepare.py`).** A rule (`NATIVE1`, proposed) drops whole units that become dead
    (`niconsolerenderer/*`, the replaced `bsshader` shader units, D3D stand-in headers) from the build list, so
    their D3D-dependent code does not even need to compile; units that are only partly replaced compile as they are

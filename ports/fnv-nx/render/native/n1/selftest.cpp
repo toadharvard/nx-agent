@@ -1,6 +1,7 @@
 // fnv-nx native renderer, N1: self-test (see selftest.h). Engine-shaped call sequences against nx::Renderer, with
 // expected values computed on the CPU.
 #include "selftest.h"
+#include "engine_stubs.h"
 #include "nx/families.h"
 #include "nx_shaders.h"
 #include <math.h>
@@ -209,6 +210,25 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     p = px(95, 10); q = px(96, 47);
     t.Check(p[0] == 255 && q[1] == 255, "partial ClearBuffer: rectangle edges x = 96, y = 48", p[0], q[1]);
     t.Check(r.frameNumber() == 1 && r.lastStateBinds() >= 2, "one frame, states bound", (int)r.frameNumber(), (int)r.lastStateBinds());
+
+    // frame 2 through the engine-facing override stubs (the engine's `this` is opaque, never dereferenced)
+    engine::NiDX9Renderer* eng = (engine::NiDX9Renderer*)(void*)&kGroupKey;
+    engine::NiDX9RenderState* ers = (engine::NiDX9RenderState*)(void*)&kGroupKey;
+    ers->SetRenderState(RS_ALPHABLENDENABLE, 1, true);
+    t.Check(r.state().GetRenderState(RS_ALPHABLENDENABLE) == 1 && ers->GetRenderState(RS_ALPHABLENDENABLE) == 1,
+            "stub: SetRenderState reaches the StateTracker");
+    ers->RestoreRenderState(RS_ALPHABLENDENABLE);
+    t.Check(ers->GetRenderState(RS_ALPHABLENDENABLE) == 0, "stub: RestoreRenderState");
+    t.Check(eng->Do_BeginFrame(), "stub: BeginFrame");
+    r.SetBackgroundColor(0, 0, 1, 1);
+    t.Check(eng->Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "stub: BeginUsingRenderTargetGroup");
+    r.SetBackgroundColor(1, 1, 0, 1);
+    eng->Do_ClearBuffer(&quarter, Renderer::CLEAR_BACKBUFFER);
+    t.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame() && eng->Do_DisplayFrame(), "stub: End + Display");
+    t.Check(be->Readback(rb), "readback back buffer (frame 2)");
+    p = px(10, 70); q = px(100, 10);
+    t.Check(p[2] == 255 && p[0] == 0 && q[0] == 255 && q[1] == 255 && q[2] == 0, "stub frame: clear + partial clear",
+            p[2], q[1]);
     *checks = t.checks;
     return t.fails;
 }
