@@ -2901,3 +2901,29 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - model virtual calls through the real exe's vftables (coverage target ≥ 90%);
   - fix fz1 publishing nothing;
   - shrink the unclassified bucket and emit a machine-readable summary.
+
+### J-0132 | 2026-11-04 | stream: S15-perf,S6n-native-render,R0-gates | status: wip | parent: J-0131
+
+* **decided (owner)** - Frame-rate targets. This supersedes the 30 fps target of PERF.md section 2.
+  - **45 fps stable** (22.2 ms worst frame) is the main target.
+  - **60 fps** (16.7 ms) is the stretch, and may be unstable.
+  - Below 30 fps is a fail.
+  - Gates are evaluated at two CPU clocks: 1.02 GHz stock, and 1.785 GHz boost (the owner's console can raise CPU
+    clocks).
+* **measured/estimated** - Main-thread budget per A57 core at IPC 0.8 [E]:
+  | target | frame | 1.02 GHz | 1.785 GHz |
+  |---|---|---|---|
+  | 30 fps | 33.3 ms | ~27 M | ~48 M |
+  | 45 fps | 22.2 ms | ~18 M | ~32 M |
+  | 60 fps | 16.7 ms | ~14 M | ~24 M |
+  - With the native renderer, the Mojave main thread is estimated at ~10-20 M instructions [E]: scene update and cull
+    4-9 M, animation, part of Havok, render accumulation.
+  - So 45 fps needs either the higher clock, or cull and accumulation moved to cores 1-2.
+  - 60 fps needs both, plus instancing.
+  - GPU: 60 fps at 720p docked likely needs dynamic resolution, since Maxwell is ~1.6x Xenos docked and the 360 ran
+    at 30 [E].
+* **did** - Asked for the targets in the work that tracks them:
+  - R0: three-level perf gates (fail < 30, pass 45, stretch 60) at both clocks;
+  - S15: a "45/60 fps" plan in PERF.md;
+  - render machine (S6n/P6n): per-target verdicts in render/native/perf/report.json, plus dynamic resolution and a
+    handheld preset in RENDER_NATIVE.md.
