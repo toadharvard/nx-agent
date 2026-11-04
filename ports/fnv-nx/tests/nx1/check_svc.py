@@ -80,7 +80,9 @@ def libnx_services() -> set[str]:
     return _LIBNX_SERVICES
 
 
-SERVICE_RX = re.compile(rb"(?<![\w:.-])([a-z][a-z0-9_-]{1,7}(?::[a-z0-9]{1,4})?)\x00")
+# an sm service name is at most 8 bytes (sm's ServiceName), up to two :sub parts ("pm:shell", "nfc:mf:u"); the
+# 8-byte bound is checked on the match (V1 NX1-S5: the old pattern allowed 4 characters after the colon)
+SERVICE_RX = re.compile(rb"(?<![\w:.-])([a-z][a-z0-9_-]{0,7}(?::[a-z0-9_]{1,7}){0,2})\x00")
 # libnx's service names in the order smGetService sees them; we only look at names in ELF rodata that libnx or our
 # code passes to smGetService/smGetServiceWrapper: the candidates are matched against this known-name corpus.
 KNOWN_SERVICES = APP_SERVICES | {"pm:shell", "pm:dmnt", "pm:bm", "ns:am2", "vi:m", "nvdrv:s", "nvdrv:t", "fsp-ldr",
@@ -256,6 +258,8 @@ def scan(path: str, role: str, c: Checks):
             if p.type == nxelf.PT_LOAD and not p.flags & 1:
                 for m in SERVICE_RX.finditer(elf.data[p.offset:p.offset + p.filesz]):
                     s = m.group(1).decode()
+                    if len(s) > 8:
+                        continue
                     # a service name: one libnx can request, one of our corpus, or any name:sub string (a colon
                     # name nobody listed is still a service name, V1 NX1-S3)
                     if s in KNOWN_SERVICES or s in libnx_services() or re.fullmatch(r"[a-z][a-z0-9_-]*:[a-z0-9_]+", s):
