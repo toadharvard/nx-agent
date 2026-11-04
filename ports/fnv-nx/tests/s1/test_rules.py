@@ -996,6 +996,41 @@ check('RSTR1 a plain local stays',
 check('RSTR1 a use outside the declaring function stays',
       run(s1.r_restrict_reference_args, _R + 'void f() { S* __restrict c = 0; }\nvoid h(Arr<S*>* o, S* c) '
           '{ o->AddBack(c); }\n'), [], ['fnvnx_unrestrict'])
+# ---- S1-refs: NEW1 plain `unsigned`, NEW5 (placement-only operator delete)
+check('NEW1 plain unsigned size parameter -> size_t, unsigned long / short kept',
+      prepare.r_newdel_size('x.cpp', 'static void operator delete[](void* p, unsigned);\n'
+                            'static void* operator new(unsigned n);\nvoid* operator new(unsigned long n, unsigned short k);\n'
+                            'void* operator new(unsigned n, unsigned& total);\n', Counter()),
+      ['operator delete[](void* p, size_t)', 'operator new(size_t n)', 'operator new(unsigned long n, unsigned short k)',
+       'operator new(size_t n, unsigned& total)'])
+_n5 = ('struct Pm\n{\n    virtual ~Pm();\n    int m;\n    static void operator delete(void*, void*);\n'
+       '    static void* operator new(size_t n);\n};\nstruct Pd : Pm\n{\n    int k;\n};\n'
+       'class Pc\n{\n    int h;\npublic:\n    virtual ~Pc() {}\n    static void* operator new(size_t, void* p) { return p; }\n'
+       '    static void operator delete(void*, void*) {}\n};\n')
+_o5 = run(s1.r_placement_only_delete, _n5)
+check('NEW5 placement-only delete + virtual dtor: global delete member',
+      _o5, ['struct Pm\n{ FNVNX_GLOBAL_DELETE /* fnv-nx NEW5 */\n',
+            'class Pc\n{ public: FNVNX_GLOBAL_DELETE private: /* fnv-nx NEW5 */\n    int h;'], ['struct Pd : Pm\n{ F'])
+check('NEW5 keeps the line count', str(_o5.count('\n') == _n5.count('\n')), ['True'])
+check('NEW5 a usual delete next to the placement form: unchanged',
+      run(s1.r_placement_only_delete, _n5.replace('static void operator delete(void*, void*);',
+                                                  'static void operator delete(void*, void*);\n    static void operator delete(void* p);')
+          .replace('class Pc', 'class Pc2 : Pm')), [], ['FNVNX_GLOBAL_DELETE'])
+check('NEW5 no virtual destructor, or a base class: unchanged',
+      run(s1.r_placement_only_delete, 'struct Q\n{\n    ~Q();\n    static void operator delete(void*, void*);\n};\n'
+          'struct R : B\n{\n    virtual ~R();\n    static void operator delete(void*, void*);\n};\n'), [], ['FNVNX_GLOBAL_DELETE'])
+check('NEW5 a placement form with another second parameter: unchanged',
+      run(s1.r_placement_only_delete, 'struct Q\n{\n    virtual ~Q();\n    static void operator delete(void*, int, int);\n};\n'),
+      [], ['FNVNX_GLOBAL_DELETE'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _c5 = os.path.join(tempfile.mkdtemp(), 'n5.cpp')
+    _m5 = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_GLOBAL_DELETE ')]          # the shim's own definition of the macro
+    open(_c5, 'w').write('#include <stddef.h>\n' + ''.join(_m5) + _o5 +
+                         'Pm::~Pm() {}\nvoid f(Pd* d, Pc* c) { delete d; delete c; }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror', _c5],
+                         capture_output=True, text=True)
+    check('NEW5 output compiles (derived class too)', _r.stderr or 'ok', ['ok'])
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
