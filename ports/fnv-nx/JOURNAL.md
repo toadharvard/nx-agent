@@ -2267,3 +2267,30 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - The fix is an INIT rule, waiting on S5 to say how native static initializers are ordered against WinMain.
 * **next** - S1: the A660A0Map VTBL1 entry (NiTMapBase: 0 dtor, 1 KeyToHashIndex, 2 IsKeysEqual, 3 SetValue,
   4 ClearValue, 5 NewItem, 6 DeleteItem), the NiMainSDM INIT rule, and the two SSE2 forms.
+
+### J-0107 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0106
+
+* **did** - S1 `5fad4be`: two more intrinsic declarations are dropped.
+  - SSE2 drops parenthesized intrinsic prototypes: `extern "C" ::hkQuadReal (_mm_load_ps)(const float*);`. PAREN_SSE used
+    to unwrap the name only after SSE2 had run.
+  - SSE4 drops unqualified intrinsic using-declarations (`using ::_mm_add_ps;`). sse2neon defines these intrinsics as
+    macros, so there is no name to bring in.
+  - tests/s1: 0 failed. tests/s11: ok.
+* **measured** - Local runs against farm1 at 23e0f0a, errors before -> after:
+  - hkpworld_rtm_variant: 13 -> 0.
+  - hkpvehicleinstance_gs_nogs_rtm_variant: 19 -> 0.
+  - blk_00e20000_..._rtm_variant: 11 -> 0.
+  - hkpcollectioncollectionagent3: 63 -> 55.
+  - With e82e698 the census should reach about 2,914 clean; the try farms will confirm.
+* **next** - S1 continues in a fresh agent (the first one's context is used up):
+  - The A660A0Map VTBL1 entry.
+  - The frontier classes:
+    - hkpcollectioncollectionagent3: 55, `union __m128` typedef.
+    - blk_00ca0000_o2_rtm: 38, numeric constant where an unqualified-id is expected.
+    - blk_00e60000_o2_gs_nogs_rtm: 22.
+    - blk_00ac0000_od_ob1: 18, ambiguous FnvStringBase copy.
+    - blk_00b20000_od_ob1_rtm: 16.
+    - blk_004c0000_od_decl_variant: 15, HTREEITEM.
+    - The `hkpWorld does not name a type` group: 4 units.
+    - hkgpmesh: 7, `_mm_set1_ps` ambiguous.
+  - NiMainSDM after S5's answer on the order of native initializers.
