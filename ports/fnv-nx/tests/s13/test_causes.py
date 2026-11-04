@@ -180,6 +180,16 @@ def test_rules():
               'effects never override a non-triage cause')
     finally:
         causes.EFFECTS.clear()
+    # a triage record in a function that calls an unbound C++ name
+    real = causes.unbound_callees
+    try:
+        causes.unbound_callees = lambda src, a: ['_ZNK6Point3mlEf']
+        check(causes.refine(rec(dict(kind='return', x86=w(1), arm=w(2))), 'unclassified') == 'after-native-undefined',
+              'triage record downstream of an unbound name')
+        check(causes.refine(rec(dict(kind='return', x86=w(1), arm=w(2))), 'bool-repr') == 'bool-repr',
+              'a by-design cause stays')
+    finally:
+        causes.unbound_callees = real
     # a definite probe cause is never overridden
     check(causes.refine(rec(dict(kind='error', x86=None, arm='exc:1@0'), 'uninit-arm'), 'uninit-arm') == 'uninit-arm',
           'probe cause kept')
