@@ -31,6 +31,17 @@ void *SteamFriends(void);
 void *SteamUtils(void);
 void *SteamApps(void);
 void *SteamUserStats(void);
+/* bink.cpp */
+void *BinkOpen(const char *, unsigned);
+void BinkClose(void *);
+int BinkDoFrame(void *);
+void BinkNextFrame(void *);
+int BinkWait(void *);
+int BinkPause(void *, int);
+int BinkCopyToBufferRect(void *, void *, int, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned,
+                         unsigned);
+void *BinkOpenDirectSound(unsigned long);
+int BinkSetSoundSystem(void *, unsigned long);
 /* window.cpp, not in the shim headers */
 int GetWindowTextA(HWND, LPSTR, int);
 int GetClassNameA(HWND, LPSTR, int);
@@ -138,6 +149,11 @@ const exp g_exports[] = {
     FNVNX_D3DX_EXPORTS(FNVNX_D3DX_ENTRY)
 #undef FNVNX_D3DX_ENTRY
     E("d3dx9_38", D3DXSaveTextureToFileA),
+    /* binkw32: the IAT's stdcall decorations, and the plain names for GetProcAddress */
+#define B(f, bytes) { "binkw32", "_" #f "@" #bytes, (void *)&f }, E("binkw32", f)
+    B(BinkOpen, 8), B(BinkClose, 4), B(BinkDoFrame, 4), B(BinkNextFrame, 4), B(BinkWait, 4), B(BinkPause, 8),
+    B(BinkCopyToBufferRect, 44), B(BinkOpenDirectSound, 4), B(BinkSetSoundSystem, 8),
+#undef B
 };
 #undef E
 #undef K
