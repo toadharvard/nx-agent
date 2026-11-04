@@ -309,6 +309,8 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(back && menu && depth, "targets");
     t.Check(r.Init(be, W, H, back, depth), "renderer init");
     t.Check(Renderer::Get() == &r, "Renderer::Get");
+    t.Check(r.state().GetRenderState(RS_ZENABLE) == 1 && r.state().Viewport().Width == W && r.state().ScissorRect().bottom == H,
+            "Init: the device after CreateDevice (ZENABLE TRUE with the depth buffer, full-target viewport and scissor)");
     test_tracker(t, r.state());
     test_sampler_cache(t, be, r.state());
     test_device_state(t, r.state());

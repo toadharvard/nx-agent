@@ -258,7 +258,7 @@ bool Renderer::Init(Backend* be, uint32_t w, uint32_t h, uint32_t backbuffer, ui
     be_ = be;
     if (!frame_.Init(be, 0, 512)) return false;   // ring sized for Frame::kMaxPackets draws per frame in flight
     if (!geomRing_.Init(be, 8u << 20)) return false;
-    state_.Reset();
+    state_.Reset(depth != 0, w, h);   // the device after CreateDevice: ZENABLE TRUE with an automatic depth-stencil
     nGroups_ = 0;
     groups_[nGroups_++] = {nullptr, backbuffer, depth, w, h};
     ident(view_); ScreenSpaceProjection(proj_, w, h);
