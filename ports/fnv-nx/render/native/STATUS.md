@@ -21,12 +21,13 @@ binutils 2.45.1, newlib 4.6.0, multilibs lp64/pic/ilp32/ilp32-pic), libnx (ext/l
 | front + GL shim unit tests | `tests/s6n/test_front.cpp` | `make -C tests/s6n` | 33 checks, 0 failed |
 | front end v2 | `include/nx/front.h`, `front/front.cpp`, `include/nx/gpu_abi.h`, `front/gpu_dispatch.c` | scenes | - |
 | GL 4.5 reference backend | `gl/nxgl.{h,c}` | scenes | all scenes pass |
-| shader package | `shaders/*.glsl` (N0 + tile + nolight families), `shaders/build.py` (variants; uam -> DKSH + GLSL in one C table) | build | 18 shaders, all compile with uam and on GL |
-| N0 scenes | `n0/scenes.{h,cpp}`, `n0/run_gl.cpp`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | `make -C tests/s6n scenes` | 13 scenes, 31500 conformance checks (30720 of them exact-coverage pixels), 0 failed; 13/13 goldens bit-exact |
+| shader package | `shaders/*.glsl` (N0, N1 tile + nolight, N2 lit + depth + land + sky), `shaders/build.py` (variants; uam -> DKSH + GLSL in one C table) | build | 30 shaders, all compile with uam and on GL |
+| N2 families | `shaders/{lit,depth,land,sky}.*.glsl`, blocks in `include/nx/families.h` | scenes lit, depth, land, sky | 118 checks, 0 failed; semantics provisional until the parity check |
+| N0 scenes | `n0/scenes.{h,cpp}`, `n0/run_gl.cpp`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | `make -C tests/s6n scenes` | 17 scenes, 31618 conformance checks (30720 of them exact-coverage pixels), 0 failed; 17/17 goldens bit-exact |
 | deko3d backend v2 | `host/nxgpu.{h,c}`, `host/nxgpu_host.c` (ext module 10) | compiles + links | not run on hardware |
 | N0 for the Switch | `n0/guest_main.cpp`, `switch/build.sh` | builds exefs.nsp + guest.nso | not run on hardware |
-| ILP32 guest under emulation | `tests/s6n/emu_n0.py` (S5 emu host + ext module 10 -> GL backend) | `make -C tests/s6n emu GUEST=...` | 31500 checks pass, 13/13 images bit-identical to the goldens |
-| capture + host replay | `capture/capture.{h,cpp}` (front side, guest and host), `capture/replay.{h,cpp}`, `capture/replay_gl.cpp` | `make -C tests/s6n capture`; guest capture via `make ... emu` | 13 frames replayed, 13/13 readbacks identical (host and ILP32 guest captures); the console guest writes `sdmc:/fnvnx/n0/out/n0.nxcap` |
+| ILP32 guest under emulation | `tests/s6n/emu_n0.py` (S5 emu host + ext module 10 -> GL backend) | `make -C tests/s6n emu GUEST=...` | 31618 checks pass, 17/17 images bit-identical to the goldens |
+| capture + host replay | `capture/capture.{h,cpp}` (front side, guest and host), `capture/replay.{h,cpp}`, `capture/replay_gl.cpp` | `make -C tests/s6n capture`; guest capture via `make ... emu` | 17 frames replayed, 17/17 readbacks identical (host and ILP32 guest captures); the console guest writes `sdmc:/fnvnx/n0/out/n0.nxcap` |
 | N1 renderer core | `n1/renderer.{h,cpp}` (nx::Renderer frame/target/camera virtuals, nx::StateTracker), `n1/selftest.cpp`, `n1/build.sh` -> `libnxrender.a` (ILP32) | `make -C tests/s6n n1`; `n1/build.sh <o>` + `make -C tests/s6n n1emu N1OUT=<o>` | 36 checks, 0 failed on GL and as the ILP32 guest; the engine-facing stubs wait for R1/R2 |
 | environment | `env.sh` | rebuilt here | ok |
 

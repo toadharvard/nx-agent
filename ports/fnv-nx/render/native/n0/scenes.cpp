@@ -859,6 +859,206 @@ void Raster(Ctx& c, Checks& k, uint32_t seed) {
 void S_raster_a(Ctx& c, Checks& k) { Raster(c, k, 5); }
 void S_raster_b(Ctx& c, Checks& k) { Raster(c, k, 77); }
 
+// ---- N2 family scenes (lit, depth, land, sky) ----------------------------------------------------------------------
+struct V36 { float x, y, z, u, v; uint32_t rgba; float nx, ny, nz; };   // pos, uv, colour, normal or land weights
+static_assert(sizeof(V36) == 36, "V36");
+void DrawN2(Ctx& c, const uint32_t* rs, uint16_t vs, uint16_t ps, const V36* v, uint32_t n, uint32_t prim,
+            const void* ubo, uint32_t uboSize, const uint32_t* tex, uint32_t ntex, uint8_t pass, uint8_t layer,
+            uint16_t depthKey = 0) {
+    NxDynamicState dyn;
+    uint32_t sb;
+    uint16_t st = StateFor(c, rs, vs, ps, c.layN2, &dyn, &sb);
+    uint32_t off;
+    V36* dst = (V36*)c.vb->Alloc(n * sizeof(V36), 16, &off);
+    nx::Packet* p = c.frame->Emit();
+    if (!dst || !p) return;
+    memcpy(dst, v, n * sizeof(V36));
+    uint32_t tb = ntex ? c.frame->AddTextures(tex, ntex) : 0;
+    p->key = nx::SortKey(pass, layer, st, (uint16_t)tb, depthKey);
+    p->state = st; p->texCount = (uint16_t)ntex; p->texBlock = (uint16_t)tb;
+    p->vtxBlock = c.vb->block(); p->vtxOffset = off; p->vtxSize = n * sizeof(V36);
+    p->prim = (uint8_t)prim; p->count = n; p->instances = 1;
+    void* u = c.frame->Constants(&p->uboOffset);
+    if (!u) return;
+    memset(u, 0, 512);
+    memcpy(u, ubo, uboSize > 512 ? 512 : uboSize);
+    Finish(c, p, dyn, sb, -1);
+}
+// pixel coordinates (y down) and z in [-100, 100] -> D3D clip space (z 0..1), column-major
+void PixelOrtho(float m[16]) {
+    memset(m, 0, 64);
+    m[0] = 2.0f / W; m[12] = -1.0f; m[5] = -2.0f / H; m[13] = 1.0f; m[10] = 1.0f / 200.0f; m[14] = 0.5f; m[15] = 1.0f;
+}
+void Ident(float m[16]) { memset(m, 0, 64); m[0] = m[5] = m[10] = m[15] = 1; }
+uint32_t WhiteTex(Ctx& c) {
+    static uint32_t img = 0;
+    static const uint32_t white = 0xFFFFFFFFu;
+    if (!img) img = MakeTex(c, FMT_A8R8G8B8, 1, 1, 1, &white, 4);
+    return img;
+}
+void QuadN2(V36* v, float x0, float y0, float x1, float y1, float z, uint32_t rgba, float a, float b, float cc) {
+    const float q[4][2] = {{x0, y0}, {x1, y0}, {x0, y1}, {x1, y1}};
+    for (int i = 0; i < 4; i++) {
+        v[i].x = q[i][0]; v[i].y = q[i][1]; v[i].z = z; v[i].u = i & 1 ? 1.0f : 0.0f; v[i].v = i & 2 ? 1.0f : 0.0f;
+        v[i].rgba = rgba; v[i].nx = a; v[i].ny = b; v[i].nz = cc;
+    }
+}
+
+void S_lit(Ctx& c, Checks& k) {
+    BeginFrame(c);
+    uint8_t pass = Pass(c, 1, RGBA(0, 0, 0, 255));
+    D3D a;
+    Samp s;
+    uint32_t h = Handle(c, WhiteTex(c), FMT_A8R8G8B8, s);
+    NxLitDraw u;
+    memset(&u, 0, sizeof u);
+    PixelOrtho(u.wvp); Ident(u.world);
+    u.ambient[0] = u.ambient[1] = u.ambient[2] = 0.1f;
+    u.diffuse[0] = u.diffuse[1] = u.diffuse[2] = 0.8f; u.diffuse[3] = 1.0f;
+    u.specular[0] = u.specular[1] = u.specular[2] = 0.5f; u.specular[3] = 8.0f;
+    u.eye[0] = 80; u.eye[1] = 60; u.eye[2] = -100;
+    u.lightCount = 2;
+    const float L0[4] = {40, 60, -20, 80}, C0[4] = {1, 0.2f, 0.1f, 0};   // point light
+    const float L1[4] = {0, 0, 1, 0}, C1[4] = {0.0f, 0.25f, 0.5f, 1};    // directional, travelling +z (towards the quad)
+    memcpy(u.lights[0].posRange, L0, 16); memcpy(u.lights[0].color, C0, 16);
+    memcpy(u.lights[1].posRange, L1, 16); memcpy(u.lights[1].color, C1, 16);
+    V36 v[4];
+    QuadN2(v, 0, 0, 80, 120, 0, RGBA(255, 255, 255, 255), 0, 0, -1);    // diffuse only (left half)
+    DrawN2(c, a.rs, c.vsLit, c.psLit, v, 4, NxPrim_TriStrip, &u, sizeof u, &h, 1, pass, 0);
+    QuadN2(v, 80, 0, 160, 120, 0, RGBA(255, 255, 255, 255), 0, 0, -1);  // diffuse + specular (right half)
+    DrawN2(c, a.rs, c.vsLit, c.psLitSpec, v, 4, NxPrim_TriStrip, &u, sizeof u, &h, 1, pass, 0);
+    for (int py = 5; py < H; py += 22)
+        for (int px = 5; px < W; px += 19) {
+            float P[3] = {(float)px, (float)py, 0}, N[3] = {0, 0, -1};
+            float dv[3] = {L0[0] - P[0], L0[1] - P[1], L0[2] - P[2]};
+            float dist = sqrtf(dv[0] * dv[0] + dv[1] * dv[1] + dv[2] * dv[2]);
+            float l[3] = {dv[0] / dist, dv[1] / dist, dv[2] / dist};
+            float q = dist / L0[3], att = 1 - q * q; att = att < 0 ? 0 : att > 1 ? 1 : att;
+            float ndl = N[0] * l[0] + N[1] * l[1] + N[2] * l[2]; ndl = ndl < 0 ? 0 : ndl;
+            float lt[3];
+            for (int i = 0; i < 3; i++) lt[i] = u.ambient[i] + ndl * att * C0[i] + 1.0f * C1[i];
+            float col[3];
+            for (int i = 0; i < 3; i++) col[i] = lt[i] * u.diffuse[i];
+            if (px >= 80) {   // + specular
+                float ev[3] = {u.eye[0] - P[0], u.eye[1] - P[1], u.eye[2] - P[2]};
+                float el = sqrtf(ev[0] * ev[0] + ev[1] * ev[1] + ev[2] * ev[2]);
+                float hv0[3] = {l[0] + ev[0] / el, l[1] + ev[1] / el, l[2] + ev[2] / el};
+                float hl = sqrtf(hv0[0] * hv0[0] + hv0[1] * hv0[1] + hv0[2] * hv0[2]);
+                float ndh = -(hv0[2] / hl); ndh = ndh < 0 ? 0 : ndh;
+                float h1[3] = {-L1[0] + ev[0] / el, -L1[1] + ev[1] / el, -L1[2] + ev[2] / el};
+                float h1l = sqrtf(h1[0] * h1[0] + h1[1] * h1[1] + h1[2] * h1[2]);
+                float ndh1 = -(h1[2] / h1l); ndh1 = ndh1 < 0 ? 0 : ndh1;
+                for (int i = 0; i < 3; i++)
+                    col[i] += (powf(ndh, 8.0f) * att * C0[i] + powf(ndh1, 8.0f) * C1[i]) * u.specular[i];
+            }
+            k.Add(px < 80 ? "lit: ambient + point + directional diffuse" : "lit_spec: + Blinn specular", px, py,
+                  u8(col[0]), u8(col[1]), u8(col[2]), 255, 2);
+        }
+    EndFrame(c);
+}
+
+void S_depth(Ctx& c, Checks& k) {
+    BeginFrame(c);
+    uint8_t pass = Pass(c, 1 | 2, RGBA(0, 0, 0, 255), true, 1.0f);
+    D3D a; a.rs[ZENABLE] = 1; a.rs[ZFUNC] = CMP_LESS;
+    NxDepthDraw u;
+    PixelOrtho(u.wvp);
+    // DEPTHMAP: three overlapping quads, drawn far to near and near to far; the nearest z/w wins
+    const float zs[3] = {50, -50, 0};   // -> depth 0.75, 0.25, 0.5
+    V36 v[4];
+    for (int i = 0; i < 3; i++) {
+        QuadN2(v, 10.0f + 20 * i, 10.0f + 10 * i, 80.0f + 20 * i, 70.0f + 10 * i, zs[i], 0, 0, 0, 0);
+        DrawN2(c, a.rs, c.vsDepth, c.psDepthOut, v, 4, NxPrim_TriStrip, &u, sizeof u, nullptr, 0, pass, (uint8_t)i);
+    }
+    k.Add("depth_out: only quad 0 (z/w 0.75)", 15, 15, u8(0.75f), u8(0.75f), u8(0.75f), u8(0.75f), 1);
+    k.Add("depth_out: quad 1 (0.25) in front of 0 and 2", 60, 45, u8(0.25f), u8(0.25f), u8(0.25f), u8(0.25f), 1);
+    k.Add("depth_out: only quad 2 (0.5)", 110, 85, u8(0.5f), u8(0.5f), u8(0.5f), u8(0.5f), 1);
+    k.Add("depth_out: quad 1 (0.25) in front of quad 2 (drawn later)", 90, 75, u8(0.25f), u8(0.25f), u8(0.25f), u8(0.25f), 1);
+    // ZONLY then EQUAL: a depth-only quad (colour writes off), then a colour pass with ZFUNC EQUAL at the same z
+    D3D zo; zo.rs[ZENABLE] = 1; zo.rs[ZFUNC] = CMP_LESS; zo.rs[COLORWRITEENABLE] = 0;
+    QuadN2(v, 110, 10, 150, 50, -80, 0, 0, 0, 0);
+    DrawN2(c, zo.rs, c.vsDepth, c.psDepth, v, 4, NxPrim_TriStrip, &u, sizeof u, nullptr, 0, pass, 5);
+    D3D eq; eq.rs[ZENABLE] = 1; eq.rs[ZFUNC] = CMP_EQUAL; eq.rs[ZWRITEENABLE] = 1;   // write forced off (EQUAL)
+    QuadN2(v, 100, 0, 160, 60, -80, 0, 0, 0, 0);
+    DrawN2(c, eq.rs, c.vsDepth, c.psDepthOut, v, 4, NxPrim_TriStrip, &u, sizeof u, nullptr, 0, pass, 6);
+    k.Add("ZONLY: no colour written, EQUAL pass fills it", 130, 30, u8(0.1f), u8(0.1f), u8(0.1f), u8(0.1f), 1);
+    k.Add("ZONLY: EQUAL fails outside the depth-only quad", 104, 4, 0, 0, 0, 255, 0);
+    EndFrame(c);
+}
+
+void S_land(Ctx& c, Checks& k) {
+    static uint32_t t[4];
+    static const uint32_t col[4] = {0xFFC00000u, 0xFF00C000u, 0xFF0000C0u, 0xFFFFFFFFu};
+    if (!t[0]) for (int i = 0; i < 4; i++) t[i] = MakeTex(c, FMT_A8R8G8B8, 1, 1, 1, &col[i], 4);
+    BeginFrame(c);
+    uint8_t pass = Pass(c, 1, RGBA(0, 0, 0, 255));
+    D3D a;
+    Samp s;
+    uint32_t h[4];
+    for (int i = 0; i < 4; i++) h[i] = Handle(c, t[i], FMT_A8R8G8B8, s);
+    NxLandDraw u;
+    memset(&u, 0, sizeof u);
+    PixelOrtho(u.wvp); u.uvScale[0] = u.uvScale[1] = 1;
+    const float w[4][3] = {{0, 0, 0}, {0.5f, 0, 0}, {0.25f, 0.25f, 0.25f}, {0, 0.5f, 0.5f}};
+    const uint32_t vc[4] = {RGBA(255, 255, 255, 255), RGBA(255, 128, 255, 255), RGBA(255, 255, 255, 255), RGBA(128, 128, 128, 255)};
+    V36 v[4];
+    for (int q = 0; q < 4; q++) {
+        QuadN2(v, 4.0f + q * 39, 4, 40.0f + q * 39, 60, 0, vc[q], w[q][0], w[q][1], w[q][2]);
+        DrawN2(c, a.rs, c.vsLand, c.psLand, v, 4, NxPrim_TriStrip, &u, sizeof u, h, 4, pass, 0);
+        float e[3] = {0, 0, 0};
+        float wb = 1 - w[q][0] - w[q][1] - w[q][2];
+        for (int ch = 0; ch < 3; ch++) {
+            int sh = 16 - 8 * ch;
+            e[ch] = wb * (col[0] >> sh & 255) / 255.f + w[q][0] * (col[1] >> sh & 255) / 255.f +
+                    w[q][1] * (col[2] >> sh & 255) / 255.f + w[q][2] * (col[3] >> sh & 255) / 255.f;
+            e[ch] *= (vc[q] >> (8 * ch) & 255) / 255.f;
+        }
+        k.Add("land: base + 3 layers by vertex weights x vertex colour", 22 + q * 39, 30, u8(e[0]), u8(e[1]), u8(e[2]), 255, 1);
+    }
+    // a weight gradient (golden only)
+    QuadN2(v, 4, 70, 156, 116, 0, RGBA(255, 255, 255, 255), 0, 0, 0);
+    v[1].nx = 1; v[2].ny = 1; v[3].nz = 1;
+    DrawN2(c, a.rs, c.vsLand, c.psLand, v, 4, NxPrim_TriStrip, &u, sizeof u, h, 4, pass, 0);
+    EndFrame(c);
+}
+
+void S_sky(Ctx& c, Checks& k) {
+    static uint32_t cloud = 0;
+    static uint32_t cl[16];
+    if (!cloud) { for (int i = 0; i < 16; i++) cl[i] = (uint32_t)(i * 16) << 24 | 0xF0F0F0u; cloud = MakeTex(c, FMT_A8R8G8B8, 4, 4, 1, cl, 64); }
+    BeginFrame(c);
+    uint8_t pass = Pass(c, 1, RGBA(0, 0, 0, 255));
+    D3D a;
+    NxSkyDraw u;
+    memset(&u, 0, sizeof u);
+    // directions (x, 1, z): clip.x = x, clip.y = 2z - 1
+    u.wvp[0] = 1; u.wvp[9] = 2; u.wvp[13] = -1; u.wvp[15] = 1; u.wvp[10] = 0; u.wvp[14] = 0.5f;
+    const float zen[3] = {0.1f, 0.2f, 0.6f}, hor[3] = {0.8f, 0.7f, 0.5f};
+    memcpy(u.zenith, zen, 12); memcpy(u.horizon, hor, 12);
+    u.params[0] = 2.0f; u.params[1] = 0.5f;
+    V36 v[4];
+    memset(v, 0, sizeof v);
+    const float d[4][3] = {{-1, 1, 1}, {1, 1, 1}, {-1, 1, 0}, {1, 1, 0}};   // top row z = 1, bottom row z = 0
+    for (int i = 0; i < 4; i++) { v[i].x = d[i][0]; v[i].y = d[i][1]; v[i].z = d[i][2]; v[i].u = i & 1 ? 1.0f : 0.0f; v[i].v = i & 2 ? 1.0f : 0.0f; }
+    DrawN2(c, a.rs, c.vsSky, c.psSky, v, 4, NxPrim_TriStrip, &u, sizeof u, nullptr, 0, pass, 0);
+    for (int py = 3; py < H; py += 13)
+        for (int px = 3; px < 100; px += 19) {   // the clouds cover x >= 100
+            float x = 2.0f * px / W - 1.0f, z = 1.0f - (float)py / H;
+            float e = z / sqrtf(x * x + 1 + z * z);
+            float t = powf(e, 1.0f / u.params[0]);
+            float kk = t * t * (3 - 2 * t);
+            k.Add("sky: horizon-zenith gradient by elevation", px, py, u8(hor[0] + (zen[0] - hor[0]) * kk),
+                  u8(hor[1] + (zen[1] - hor[1]) * kk), u8(hor[2] + (zen[2] - hor[2]) * kk), 255, 2);
+        }
+    // clouds over the right half (golden only)
+    Samp s; s.s[S_MINFILTER] = s.s[S_MAGFILTER] = 2;
+    uint32_t h = Handle(c, cloud, FMT_A8R8G8B8, s);
+    D3D b;
+    for (int i = 0; i < 4; i++) if (v[i].x < 0) v[i].x = 0.25f;
+    DrawN2(c, b.rs, c.vsSky, c.psSkyClouds, v, 4, NxPrim_TriStrip, &u, sizeof u, &h, 1, pass, 1);
+    EndFrame(c);
+}
+
 } // namespace
 
 const Scene kScenes[] = {
@@ -866,6 +1066,7 @@ const Scene kScenes[] = {
     {"blend", S_blend}, {"stencil", S_stencil}, {"sampler", S_sampler}, {"format", S_format},
     {"epilogue", S_epilogue}, {"border", S_border}, {"tile", S_tile},
     {"raster_a", S_raster_a}, {"raster_b", S_raster_b},
+    {"lit", S_lit}, {"depth", S_depth}, {"land", S_land}, {"sky", S_sky},
 };
 const int kSceneCount = sizeof kScenes / sizeof kScenes[0];
 
@@ -904,6 +1105,20 @@ bool Init(Ctx& c, nx::Backend* be, char* err, uint32_t errlen) {
     ll.attr[1].offset = 12; ll.attr[1].type = NxAttr_Float32; ll.attr[1].components = 2;
     ll.attr[2].offset = 20; ll.attr[2].type = NxAttr_Unorm8; ll.attr[2].components = 4;
     c.layTile = sc.Layout(ll);
+    c.vsLit = Shader(c, "lit", 0); c.psLit = Shader(c, "lit", 1); c.psLitSpec = Shader(c, "lit_spec", 1);
+    c.vsDepth = Shader(c, "depth", 0); c.psDepth = Shader(c, "depth", 1); c.psDepthOut = Shader(c, "depth_out", 1);
+    c.vsLand = Shader(c, "land", 0); c.psLand = Shader(c, "land", 1);
+    c.vsSky = Shader(c, "sky", 0); c.psSky = Shader(c, "sky", 1); c.psSkyClouds = Shader(c, "sky_clouds", 1);
+    if (!c.vsLit || !c.psLit || !c.psLitSpec || !c.vsDepth || !c.psDepth || !c.psDepthOut || !c.vsLand || !c.psLand ||
+        !c.vsSky || !c.psSky || !c.psSkyClouds) FAIL_("N2 shader creation");
+    NxVtxLayout ln;
+    memset(&ln, 0, sizeof ln);
+    ln.count = 4; ln.stride = 36;
+    ln.attr[0].offset = 0; ln.attr[0].type = NxAttr_Float32; ln.attr[0].components = 3;
+    ln.attr[1].offset = 12; ln.attr[1].type = NxAttr_Float32; ln.attr[1].components = 2;
+    ln.attr[2].offset = 20; ln.attr[2].type = NxAttr_Unorm8; ln.attr[2].components = 4;
+    ln.attr[3].offset = 24; ln.attr[3].type = NxAttr_Float32; ln.attr[3].components = 3;
+    c.layN2 = sc.Layout(ln);
     NxVtxLayout lq;
     memset(&lq, 0, sizeof lq);
     lq.count = 2; lq.stride = 16;

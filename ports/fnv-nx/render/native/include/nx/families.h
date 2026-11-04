@@ -27,6 +27,41 @@ typedef struct NxNoLightDraw {
     float uvOffsetScale[4]; /* uv' = uv * zw + xy */
 } NxNoLightDraw;
 
+/* ---- N2 families (provisional semantics: parity against the translated originals pending) ---- */
+
+/* lit (SM3 path: Lighting30 / 3XLIGHTING): per-pixel diffuse + optional specular from up to 8 lights in one pass.
+ * Variants: VS lit / lit_vc (vertex colour); PS lit / lit_spec (SPECULAR: specular masked by the texture alpha).
+ * Light i: posRange = (position or direction, range); w of color = 1 for a directional light (pos = direction the
+ * light travels), 0 for a point light. Point attenuation = clamp(1 - (d / range)^2, 0, 1). */
+typedef struct NxLight { float posRange[4]; float color[4]; } NxLight;
+typedef struct NxLitDraw {
+    float wvp[16];
+    float world[16];
+    float ambient[4];       /* rgb */
+    float diffuse[4];       /* material diffuse rgb, alpha */
+    float specular[4];      /* rgb, power in w */
+    float eye[4];           /* eye position, world space */
+    uint32_t lightCount, pad[3];
+    NxLight lights[8];
+} NxLitDraw;
+
+/* depth (ZONLY, DEPTHMAP, shadow casters): VS depth; PS depth (no colour: use COLORWRITEENABLE 0) / depth_out
+ * (DEPTHMAP: writes the post-projection depth z/w to all four channels). */
+typedef struct NxDepthDraw { float wvp[16]; } NxDepthDraw;
+
+/* land (LAND passes): a base texture plus up to 3 layers blended by per-vertex weights (attribute 3, xyz); the
+ * vertex colour (attribute 2) modulates the result. Textures: slot 0 base, 1-3 layers. */
+typedef struct NxLandDraw { float wvp[16]; float uvScale[4]; } NxLandDraw;
+
+/* sky (SKY passes): colour from the view direction's elevation e = normalize(dir).z (Gamebryo z up):
+ * c = mix(horizon, zenith, smoothstep(0, 1, max(e, 0) ^ (1/blend)) ) below the zenith, plus a cloud layer (sky_clouds:
+ * texture 0, alpha-blended over the gradient with alpha x cloudAlpha). */
+typedef struct NxSkyDraw {
+    float wvp[16];
+    float zenith[4], horizon[4];
+    float params[4];        /* blend exponent, cloud alpha, uv scroll x, uv scroll y */
+} NxSkyDraw;
+
 #ifdef __cplusplus
 }
 #define NX_FAM_ASSERT_ static_assert
@@ -35,4 +70,6 @@ typedef struct NxNoLightDraw {
 #endif
 NX_FAM_ASSERT_(sizeof(NxTileDraw) == 96, "NxTileDraw");
 NX_FAM_ASSERT_(sizeof(NxNoLightDraw) == 128, "NxNoLightDraw");
+NX_FAM_ASSERT_(sizeof(NxLitDraw) == 208 + 8 * 32, "NxLitDraw");
+NX_FAM_ASSERT_(sizeof(NxSkyDraw) == 112, "NxSkyDraw");
 #endif
