@@ -107,7 +107,7 @@ def test_rules():
                        arm=w(0x0a076000, 0))) == 'literal-store', 'pinned literal vs native .rodata literal stored')
     check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x02f00010), arm=w(0x0a076000))) == 'literal-arg',
           'pinned literal argument')
-    causes._VFT = {0x0102e388, 0x010d7f44}
+    causes._VFT, causes._LINKSYM = {0x0102e388, 0x010d7f44}, {}
     try:
         vw = dict(kind='mem-write', addr='03000000', ndiff=4, only_x86=0, only_arm=0, x86=w(0x0102e388, 0),
                   arm=w(0x010d7f44, 0))
@@ -116,7 +116,7 @@ def test_rules():
         check(causes.refine(dict(rec(vw), symbol='??0FUN_00590210@@QAE@XZ'), 'unclassified') == 'vptr-differs',
               'different vftables in a constructor: vptr-differs')
     finally:
-        causes._VFT = None
+        causes._VFT = causes._LINKSYM = None
     check(causes._narrower(bytes.fromhex(w(0x01020304)), bytes.fromhex('04000000')), 'narrower: byte vs dword')
     check(not causes._narrower(bytes.fromhex(w(0x01020304)), bytes.fromhex('05000000')), 'narrower: other value')
     check(refined(dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=4, x86=w(0, 0),
@@ -137,6 +137,11 @@ def test_rules():
               'native-inlined', 'oracle callee the native never names: native-inlined')
         check(refined(dict(kind='call-target', index=0, x86='00401200', arm='00401300'), 'call-flow') == 'call-flow',
               'oracle callee the native names: stays call-flow')
+        causes._VFT, causes._LINKSYM = set(), {0x00ecd291: 'free'}
+        causes.native_callees = lambda src, a: {'free'}
+        check(refined(dict(kind='call-target', index=0, x86='00ecd291', arm='00401300'), 'call-flow') == 'call-flow',
+              'oracle CRT callee the native calls by its link name: stays call-flow')
+        causes._VFT = causes._LINKSYM = None
     finally:
         causes.native_callees = real
     check(refined(dict(kind='call-target', index=0, x86='00401100', arm='00401200'), 'call-flow') == 'call-flow',

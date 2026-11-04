@@ -335,7 +335,12 @@ def _rule_calls(d, rec=None):
                 pass
         if rec is not None and not x.startswith(('imp:', 'name:')):
             cs = native_callees(rec.get('source'), int(rec.get('address') or '0', 16))
-            if cs is not None and '__fnv_' + x not in cs and not any(n.startswith('__fnv_' + x) for n in cs):
+            try:
+                ls = link_symbol(int(x, 16))
+            except ValueError:
+                ls = None
+            if cs is not None and '__fnv_' + x not in cs and not any(n.startswith('__fnv_' + x) for n in cs) \
+                    and ls not in cs:
                 return 'native-inlined'
     return _rule_count(d, tx, ta)
 
@@ -434,13 +439,26 @@ def _scan_object(path):
 
 
 _VFT = None
+_LINKSYM = None
 
 
 def image_vftables():
     """Original addresses of image vftables (address map kind V of the link), empty without the map."""
-    global _VFT
-    if _VFT is None:
-        _VFT = set()
+    _load_addrmap()
+    return _VFT
+
+
+def link_symbol(addr):
+    """The name the link binds original address `addr` to (address map link_symbol: `free`, `memmove_s`,
+    `__fnv_<addr>`), or None."""
+    _load_addrmap()
+    return _LINKSYM.get(addr)
+
+
+def _load_addrmap():
+    global _VFT, _LINKSYM
+    if _VFT is None or _LINKSYM is None:
+        _VFT, _LINKSYM = set(), {}
         p = os.environ.get('FNVNX_CAUSES_ADDRMAP')
         if not p:
             try:
@@ -450,13 +468,17 @@ def image_vftables():
                 p = None
         if p and os.path.exists(p):
             for line in open(p):
-                f = line.split('\t', 2)
-                if len(f) > 1 and f[1] == 'V':
-                    try:
-                        _VFT.add(int(f[0], 16))
-                    except ValueError:
-                        pass
-    return _VFT
+                f = line.split('\t', 3)
+                if len(f) < 3 or line.startswith('#'):
+                    continue
+                try:
+                    a = int(f[0], 16)
+                except ValueError:
+                    continue
+                if f[1] == 'V':
+                    _VFT.add(a)
+                elif f[2]:
+                    _LINKSYM[a] = f[2]
 
 
 def _is_dtor(sym):
