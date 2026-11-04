@@ -13,3 +13,21 @@ LIBSTDCXX-STD-ABS	unit	*	*	*	*	'abs' : is not a member of 'std'	after DECL1 the 
 SDK-FULL-NAMES	unit	*	*	*	*	'RequestLocation' : redefinition|'PCH' : redefinition|'vc_attributes::|'_IMAGE_THUNK_DATA|'_ULARGE_INTEGER' : 'union' type redefinition	the full PC SDK defines names the target shim does not (winioctl.h RequestLocation, PCH, vc_attributes, SDK struct copies): stand-in limit (Not comparable)
 PERMISSIVE-CONVERSION	unit	*	*	*	*	cannot convert from 'HANDLE' to|cannot convert parameter N from 'void \*' to	-fpermissive conversions and the shim looser void * parameter types the real SDK rejects (Not comparable; CALL1 stand-in limit)
 MSVC-FLOAT-MATH	unit	*	*	*	*	'sqrtf' : redefinition; different linkage	MSVC float math overloads collide with the decomp own copies (fabsf, cosf, sqrtf) (Not comparable)
+CRT-WRAPPER	wrapper	*	*	*	0x00403d30	^_memset$	game wrapper of memset; the prepared side calls the CRT memset
+CRT-WRAPPER	wrapper	*	*	*	0x00406d50	^_strcat_s$	game wrapper of strcat_s (TaskQueueInterface family); CRT strcat_s
+CRT-WRAPPER	wrapper	*	*	*	0x00406d30	^_strcpy_s$	0x00406d30 TaskQueueInterface::CopyStringToBuffer forwards to strcpy_s; CRT strcpy_s
+CRT-WRAPPER	wrapper	*	*	*	0x00404d80	^_strcpy_s$	template strcpy_s(char (&)[N], const char*) wrapper; CRT strcpy_s
+CRT-WRAPPER	wrapper	*	*	*	0x00401460	^_memcpy$	game wrapper of memcpy; CRT memcpy
+CRT-WRAPPER	wrapper	*	*	*	0x00404dc0	^__stricmp$	game wrapper of _stricmp; CRT _stricmp
+CRT-WRAPPER	wrapper	*	*	*	0x00ec44d0	^_(memcpy|memmove)$	0x00ec44d0 is the CRT memcpy/memmove itself, bound by a C++ name in the decomp; the C name now
+CRT-WRAPPER	wrapper	*	*	*	0x00eca590	^_tan$	0x00eca590 is the CRT tan, bound by a C++ name in the decomp; the C name now
+CRT-INLINE	wrapper	*	*	*	0x0043b9d0	^\?strchr@@YAPADPADH@Z$	game copy of strchr(char*, int); prepared: <string.h> inline C++ overload of the same signature, which calls the CRT strchr
+CRT-INLINE	wrapper	*	*	*	0x00ec7690	^\?strchr@@YAPADPADH@Z$	CRT strchr; prepared: <string.h> inline C++ overload strchr(char*, int) that forwards to it
+CRT-INLINE	wrapper	*	*	*	0x00408840	^\?abs@@YAMM@Z$	0x00408840 fabsf copy; prepared: <math.h> inline float abs(float) (STD1 / DECL1)
+CRT-INLINE	wrapper	*	*	*	0x006e6da0	^\?\?2@YAPAXIPAX@Z$	placement operator new(size_t, void*) copy; prepared: <new> inline placement form, returns its pointer (NEW2)
+DECORATION	wrapper	*	*	*	0x00403e20	^\?Float@GlobalObject_0044f440@@QAEPAUfnvnx_anon_Float@1@XZ$	same function, ANON1 names the unnamed return struct, so the MSVC decoration changes
+DECORATION	wrapper	*	*	*	0x00ee6de6	^\?FUN_00ee6de6@fnv_00b6bbd0@@YGJPAUIDirect3DSurface9@1@PBUtagPALETTEENTRY@@PBUtagRECT@@012KK@Z$	same function; its prototype names the SDK tagRECT in place of the namespace copy (DECL2), a decoration the recipe does not bind
+DECORATION	wrapper	*	*	*	0x01268794	^\?DAT_01268794@fnv_00cf6d60@@3PAU_RTL_CRITICAL_SECTION@@A$	same variable DAT_01268794; its type is the SDK _RTL_CRITICAL_SECTION in place of the namespace copy (DECL2), a decoration the recipe does not bind
+PTR1-UNSIGNED-ZERO	fn	code	PTR1	src/fallout/ai/playercharacter\.cpp	0x00946020	*	`!(GetTime64 > 0)`: the function address compared unsigned with 0; `test ecx,ecx; ja` -> `jne` (CF=0: the same branch), same length
+PTR1-UNSIGNED-ZERO	fn	code	PTR1	src/fallout_shared/tesrecipe\.cpp	0x005a8110	*	`component > 0`, a local QuantityData*: `cmp [ebp-0x1c],0; jbe` -> `je` (CF=0), same length
+PTR1-UNSIGNED-ZERO	fn	code	PTR1	src/staging/blk_00c60000_o2\.cpp	0x00c69580	*	`unk1c > 0` of the unsigned int member S69580_World::unk1c (PTR1 took the name for the file's `virtual void unk1c()`): `jbe` -> `je` (CF=0), same length; unsigned, so the same result

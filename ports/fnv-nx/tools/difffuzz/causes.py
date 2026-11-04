@@ -871,6 +871,23 @@ def native_defines(source, name):
     return None if t is None else name in t[0]
 
 
+def native_ran(source, name, trace, exclude=()):
+    """True when the native trace (from the divergence on) shows that the native ran the unit-local function `name`:
+    it holds a call `name` reaches that leaves the unit (a traced call: `__fnv_<addr>` as <addr>, others as
+    name:<n>). The unit's own functions run untraced, so without such a call there is no evidence (V1
+    tests/v1/test_s13b_callee_unloaded.py U1/U2): False, and the record keeps its call-flow cause. Names in
+    `exclude` (what the caller calls itself) prove nothing about `name`."""
+    reach = native_reaches(source, name)
+    if not reach or not trace:
+        return False
+    toks = set()
+    for n in reach:
+        if native_defines(source, n) is not False or n in exclude:
+            continue                                     # unit-local (untraced), unknown, or called by the caller too
+        toks.add(n[6:] if n.startswith('__fnv_') and len(n) == 14 else 'name:' + n)
+    return any(str(t) in toks for t in trace)
+
+
 def native_body(source, name):
     """(code bytes, names at the same address) of a function the native object defines, or None."""
     t = _obj_funcs(source)
@@ -1048,7 +1065,10 @@ def _rule_callflow(d, rec):
         return 'libc-variant'
     if xa is not None and xa != addr and native_defines(src, '__fnv_%08x' % xa):
         cs = native_callees(src, addr) or set()
-        if '__fnv_%08x' % xa in cs:
+        start = d.get('index') if isinstance(d.get('index'), int) else \
+            next((i for i, (p, q) in enumerate(zip(tx, ta)) if p != q), min(len(tx), len(ta)))
+        seen = list(ta[start:]) + ([a] if a else [])      # the native's calls from the divergence on
+        if '__fnv_%08x' % xa in cs and native_ran(src, '__fnv_%08x' % xa, seen, exclude=cs):
             return 'oracle-callee-unloaded'
     # a decomp-local stand-in for an original function defined elsewhere, with an empty body: tied to the divergence
     # when the oracle calls that original where the native diverges, or when the native stops early

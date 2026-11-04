@@ -161,4 +161,7 @@ python3 -I "$P/tools/farm/full_report.py" "$F/build" "$REPORT" --commit "$COMMIT
 } >> "$REPORT"
 if [ $INPUTS = 1 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
 echo "- link outputs: $NOTE_PUB" >> "$REPORT"
+# 6. The device package (NX1): fnv.nro + the SD tree on the private branch nro/<commit12>.
+if [ $INPUTS = 1 ]; then publish_nro "$F/build"; else NOTE_NRO="not published (no tree or no objects)"; fi
+echo "- device package: $NOTE_NRO" >> "$REPORT"
 echo "$REPORT"
