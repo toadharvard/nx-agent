@@ -169,3 +169,13 @@ failed` and `golden comparison: 19 scenes match`). One scene: `python3 tests/s6n
 | C99 | The lit static light permutations read per-draw values `Renderer::Render` prepares in the slice: the directional light as the unit vector towards it and each point light's 1 / range^2, so no fragment normalizes a constant or divides by range^2; images within 1/255 of the dynamic shader (n1 selftest), lit_spec_d1p2__e0 201 -> 179 Maxwell instructions. | n1 selftest (static vs dynamic); scenes |
 | C100 | `Renderer::Render` reuses the previous draw's epilogue block and dynamic record while the tracker has not re-translated in the frame (both depend only on the resolved state), instead of filling, comparing and appending them per draw; mix_hi .nxcap byte-identical. | n1 selftest, scenes, capture replay, nx_render |
 | C61 | The deko3d backend (`host/nxgpu.c`), host module (`host/nxgpu_host.c`) and the ILP32 N0 guest compile and link with fnvnx-a64 + libdeko3d 373bfd4 (`render/native/switch/build.sh`). Not yet run on hardware. | switch/build.sh |
+
+## Stream claims (who writes which native family)
+
+Families are claimed here before work starts, so parallel streams do not write the same GLSL. A family not claimed
+stays with the render machine. The Translated path (S6b's translation of the original) covers a family until its
+native GLSL lands.
+
+| stream | branch | families | native GLSL (`shaders/`) |
+|---|---|---|---|
+| render-land | claude/fnv-render-land | terrain (LAND*, DISTLOD), sky (SKY*), water (WATER*, water FFT), depth / shadow map (ZONLY, DEPTHMAP, SM3ZOnly/SM3DepthMap/SM3SimpleShadow, shadow casters), post (image space: IS* - HDR, bloom/blur, copy, cinematic, DOF, radial blur, refraction, sunbeams, VATS, TV, noise, map) | `is_*.glsl`, `land*`, `sky*`, `water*`, `depth*` (draws mapped in `shaders/native.tsv`) |
