@@ -343,14 +343,17 @@ def r_c_data_linkage(path, text, stats):
 
 # ---------------------------------------------------------------------------------------------------------- GOTO1
 
-SCALAR_INIT = re.compile(r'^([ \t]*)((?:(?:unsigned|signed|volatile)\s+)*(?:bool|char|short|int|long(?:\s+long)?|float|'
-                         r'double|unsigned|\w+\s*\*+))\s+(\**\s*\w+)\s*=\s*([^;{}=][^;{}]*);', re.M)
+SCALAR_INIT = re.compile(r'^([ \t]*)((?:const\s+)?(?:(?:unsigned|signed|volatile)\s+)*(?:bool|char|short|int|long(?:\s+long)?|'
+                         r'float|double|unsigned|__m128[id]?|__m64|hkQuadReal|hkReal|[\w:]+(?:\s+const)?\s*\*+))\s+'
+                         r'(\**\s*\w+)\s*=\s*([^;{}=][^;{}]*);', re.M)
 
 def r_goto_scalar_inits(path, text, stats):
-    """GOTO1: in functions that use goto, `T x = e;` (scalar or pointer T) -> `T x; x = e;` on the same line. MSVC
-    lets a goto jump past such an initialization; C++ (and GCC even with -fpermissive) does not, but jumping past a
-    declaration without initializer is allowed, and for a scalar the split changes nothing. A declarator list is split
-    declarator by declarator, `T a = e1, b = e2;` -> `T a, b; a = e1; b = e2;` (the initializers keep their order)."""
+    """GOTO1: in functions that use goto, `T x = e;` (scalar, SSE vector or pointer T) -> `T x; x = e;` on the same
+    line. MSVC lets a goto jump past such an initialization; C++ (and GCC even with -fpermissive) does not, but
+    jumping past a declaration without initializer is allowed, and for a scalar the split changes nothing. A const
+    scalar loses the const it cannot keep without its initializer (`const int n = e;` -> `int n; n = e;`; a pointer
+    to const keeps it). A declarator list is split declarator by declarator, `T a = e1, b = e2;` ->
+    `T a, b; a = e1; b = e2;` (the initializers keep their order)."""
     if 'goto' not in text: return text
     spans = [sp for sp in prepare.scope_spans(text) if sp[2] == 'function']
     edits = []
@@ -360,6 +363,7 @@ def r_goto_scalar_inits(path, text, stats):
         for m in SCALAR_INIT.finditer(text, o, c):
             t = m.group(2)
             if re.match(r'(?:return|else|case|goto|delete|throw|typedef|using)\b', t): continue
+            if t.startswith('const') and '*' not in t: t = t[5:].lstrip()          # the scalar's own const
             # a declarator list `float a = f(x), b = g(y);` -> `float a, b; a = f(x); b = g(y);` (same order)
             parts = [re.match(r'^\s*(\**\s*[A-Za-z_]\w*)\s*(?:=\s*(\S.*?))?\s*$', d, re.S)
                      for d in _split_args(m.group(3) + ' = ' + m.group(4))]

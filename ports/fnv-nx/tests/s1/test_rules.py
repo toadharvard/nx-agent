@@ -371,6 +371,12 @@ got = run(s1.r_goto_scalar_inits, 'int f(V& v, int e)\n{\n    if (e) goto out;\n
           '        int n = 4;\n        char *p = 0, *q = p;\n        return (int)(dw + di) + n + (p == q);\n    }\nout:\n    return 0;\n}\n')
 check('GOTO1 splits declarator lists declarator by declarator', got,
       ['float dw, di; dw = v.d(3); di = v.d(e);', 'int n; n = 4;', 'char *p, *q; p = 0; q = p;'])
+got = run(s1.r_goto_scalar_inits, 'int g(const H* h, int e)\n{\n    if (e) goto out;\n    {\n        const int n = h->n;\n'
+          '        __m128 ang = _mm_load_ss(&h->f);\n        const ns::Hdr* hd = h->hd;\n        static const int k = 3;\n'
+          '        return n + k + (hd != 0);\n    }\nout:\n    return 0;\n}\n')
+check('GOTO1 also splits SSE vectors, const scalars (dropping their const) and pointers to const', got,
+      ['int n; n = h->n;', '__m128 ang; ang = _mm_load_ss(&h->f);', 'const ns::Hdr* hd; hd = h->hd;',
+       'static const int k = 3;'])
 
 # ---- TAIL1
 check('TAIL1 names the last base without its access specifier',
