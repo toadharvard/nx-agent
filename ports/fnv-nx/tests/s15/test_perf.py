@@ -91,7 +91,7 @@ def test_budget(tmp):
     check(abs(b['budget_minsn']['1020']['pass_45'] - 18.1) < 0.1 and abs(b['budget_minsn']['1785']['pass_45'] - 31.7) < 0.1,
           'budget: 45 fps per-core budget 18.1 M at 1020 MHz, 31.7 M at 1785 MHz (IPC 0.8)')
     want = {'%s@%d' % (s['id'], c) for s in model['scenarios'] for c in (1020, 1785)}
-    check(set(b['gates']) == want and all(v in ('fail', 'pass_30', 'pass_45', 'stretch_60') for v in b['gates'].values()),
+    check(set(b['gates']) == want and all(v in ('fail', 'pass_30', 'pass_45', 'target_60') for v in b['gates'].values()),
           'budget: a level per scenario and clock (%d)' % len(b['gates']))
     placed = {s['id']: s for s in b['scenarios']}
     main_items = set(placed['placed']['cores']['0']['items'])

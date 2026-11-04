@@ -1557,7 +1557,7 @@ class Card:
         target: pass (the hi case fits) counts only with a measurement in the inputs (frameprof or the render report);
         a model-only pass, or uncertain (lo fits, hi does not), is no-data; fail (even the lo case misses) fails."""
         bt = self.th['perf'].get('budget', {})
-        scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'stretch_60')
+        scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'target_60')
         doc, src = None, None
         hits = []
         for br in self.report_branches():

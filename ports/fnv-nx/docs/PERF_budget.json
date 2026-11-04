@@ -81,15 +81,15 @@
    "id": "pass_45",
    "fps": 45,
    "ms": 22.2,
-   "kind": "goal",
-   "note": "45 fps stable: worst frame 22.2 ms (main target, J-0132)"
+   "kind": "info",
+   "note": "45 fps on the worst frame (22.2 ms): informational since J-0150"
   },
   {
-   "id": "stretch_60",
+   "id": "target_60",
    "fps": 60,
    "ms": 16.7,
-   "kind": "stretch",
-   "note": "60 fps, may be unstable (J-0132)"
+   "kind": "goal",
+   "note": "60 fps stable: worst frame 16.7 ms at the 1.02 GHz stock clock (the owner's target, J-0150)"
   }
  ],
  "clocks_mhz": [
@@ -100,24 +100,24 @@
   "1020": {
    "fail_below_30": 27.17,
    "pass_45": 18.12,
-   "stretch_60": 13.63
+   "target_60": 13.63
   },
   "1785": {
    "fail_below_30": 47.55,
    "pass_45": 31.7,
-   "stretch_60": 23.85
+   "target_60": 23.85
   }
  },
  "budget_mean_minsn": {
   "1020": {
    "fail_below_30": 21.74,
    "pass_45": 14.49,
-   "stretch_60": 13.63
+   "target_60": 10.9
   },
   "1785": {
    "fail_below_30": 38.04,
    "pass_45": 25.36,
-   "stretch_60": 23.85
+   "target_60": 19.08
   }
  },
  "placement": {
@@ -463,7 +463,7 @@
      "verdicts": {
       "fail_below_30": "uncertain",
       "pass_45": "uncertain",
-      "stretch_60": "uncertain"
+      "target_60": "uncertain"
      },
      "level": "fail"
     },
@@ -509,9 +509,9 @@
      "verdicts": {
       "fail_below_30": "uncertain",
       "pass_45": "uncertain",
-      "stretch_60": "uncertain"
+      "target_60": "uncertain"
      },
-     "level": "stretch_60"
+     "level": "pass_45"
     }
    },
    "main_minsn": {
@@ -617,7 +617,7 @@
      "verdicts": {
       "fail_below_30": "uncertain",
       "pass_45": "uncertain",
-      "stretch_60": "uncertain"
+      "target_60": "uncertain"
      },
      "level": "pass_30"
     },
@@ -663,9 +663,9 @@
      "verdicts": {
       "fail_below_30": "uncertain",
       "pass_45": "uncertain",
-      "stretch_60": "uncertain"
+      "target_60": "uncertain"
      },
-     "level": "stretch_60"
+     "level": "target_60"
     }
    },
    "main_minsn": {
@@ -774,7 +774,7 @@
      "verdicts": {
       "fail_below_30": "uncertain",
       "pass_45": "uncertain",
-      "stretch_60": "uncertain"
+      "target_60": "uncertain"
      },
      "level": "pass_45"
     },
@@ -820,9 +820,9 @@
      "verdicts": {
       "fail_below_30": "pass",
       "pass_45": "uncertain",
-      "stretch_60": "uncertain"
+      "target_60": "uncertain"
      },
-     "level": "stretch_60"
+     "level": "target_60"
     }
    },
    "main_minsn": {
@@ -947,9 +947,9 @@
      "verdicts": {
       "fail_below_30": "uncertain",
       "pass_45": "uncertain",
-      "stretch_60": "uncertain"
+      "target_60": "uncertain"
      },
-     "level": "stretch_60"
+     "level": "pass_45"
     },
     "1785": {
      "core_ms": {
@@ -998,9 +998,9 @@
      "verdicts": {
       "fail_below_30": "pass",
       "pass_45": "uncertain",
-      "stretch_60": "uncertain"
+      "target_60": "uncertain"
      },
-     "level": "stretch_60"
+     "level": "target_60"
     }
    },
    "main_minsn": {
@@ -1012,13 +1012,13 @@
  ],
  "gates": {
   "placed@1020": "fail",
-  "placed@1785": "stretch_60",
+  "placed@1785": "pass_45",
   "plan45@1020": "pass_30",
-  "plan45@1785": "stretch_60",
+  "plan45@1785": "target_60",
   "plan45b@1020": "pass_45",
-  "plan45b@1785": "stretch_60",
-  "plan60@1020": "stretch_60",
-  "plan60@1785": "stretch_60"
+  "plan45b@1785": "target_60",
+  "plan60@1020": "pass_45",
+  "plan60@1785": "target_60"
  },
  "needs_hardware": [
   "IPC of this code on the A57 (B1): every ms figure scales with it",

@@ -77,15 +77,15 @@
    "id": "pass_45",
    "fps": 45,
    "ms": 22.2,
-   "kind": "goal",
-   "note": "45 fps stable: worst frame 22.2 ms (main target, J-0132)"
+   "kind": "info",
+   "note": "45 fps on the worst frame (22.2 ms): informational since J-0150"
   },
   {
-   "id": "stretch_60",
+   "id": "target_60",
    "fps": 60,
    "ms": 16.7,
-   "kind": "stretch",
-   "note": "60 fps, may be unstable (J-0132)"
+   "kind": "goal",
+   "note": "60 fps stable: worst frame 16.7 ms at the 1.02 GHz stock clock (the owner's target, J-0150)"
   }
  ],
  "items": [
