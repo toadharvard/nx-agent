@@ -6,10 +6,17 @@ CC ?= gcc
 CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Werror -pedantic
 CPPFLAGS += -I$(NATIVE)/include -I$(NATIVE)/front
 
-all: $(OUT)/test_d3d9_state $(OUT)/test_d3d9_state_cxxcheck $(OUT)/test_front $(OUT)/test_harness
+all: $(OUT)/test_d3d9_state $(OUT)/test_d3d9_state_cxxcheck $(OUT)/test_front $(OUT)/test_harness $(OUT)/test_d9_families
 	$(OUT)/test_d3d9_state
 	$(OUT)/test_front
 	$(OUT)/test_harness
+	$(OUT)/test_d9_families
+
+# d9 family classifier (render-lit) on synthetic token streams
+$(OUT)/test_d9_families: test_d9_families.cpp $(NATIVE)/capture/d3d9_families.cpp $(NATIVE)/capture/d3d9_families.h
+	@mkdir -p $(OUT)
+	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I$(NATIVE)/capture -o $@ test_d9_families.cpp \
+		$(NATIVE)/capture/d3d9_families.cpp
 
 $(OUT)/test_harness: test_harness.c $(NATIVE)/front/harness.c $(NATIVE)/front/harness.h $(NATIVE)/gl/nxgl.c $(NATIVE)/front/d3d9_state.c $(NATIVE)/include/nx/gpu_abi.h
 	@mkdir -p $(OUT)
@@ -82,9 +89,9 @@ $(OUT)/replay_gl: $(NATIVE)/capture/replay.cpp $(NATIVE)/capture/replay_gl.cpp $
 
 # ---- nx_render: captures (.nxcap, .nxd9) and scenes -> PNG on the GL backend (S16-compare entry point) ----------
 $(OUT)/nx_render: $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/d3d9_exec.h \
-		$(NATIVE)/capture/d3d9cap.h $(NATIVE)/capture/png.h $(NATIVE)/capture/replay.cpp $(OUT)/run_gl
+		$(NATIVE)/capture/d3d9_families.cpp $(NATIVE)/capture/d3d9_families.h $(NATIVE)/capture/d3d9cap.h $(NATIVE)/capture/png.h $(NATIVE)/capture/replay.cpp $(OUT)/run_gl
 	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -I$(SHOUT) -o $@ $(NATIVE)/capture/nx_render.cpp \
-		$(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/replay.cpp $(OUT)/front.o $(OUT)/scenes.o $(OUT)/nxgl.o \
+		$(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/d3d9_families.cpp $(NATIVE)/capture/replay.cpp $(OUT)/front.o $(OUT)/scenes.o $(OUT)/nxgl.o \
 		$(OUT)/gpu_dispatch.o $(OUT)/d3d9_state_s.o $(OUT)/nx_shaders.o -lEGL -lm
 
 nx_render: $(OUT)/nx_render
@@ -120,9 +127,9 @@ n1emu: $(OUT)/libnxgl.so
 
 # ---- nx_render robustness: an ASan/UBSan build against malformed .nxd9/.nxcap (J-0147 V1 finding) -------------
 $(OUT)/nx_render_asan: $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/d3d9_exec.h \
-		$(NATIVE)/capture/d3d9cap.h $(NATIVE)/capture/png.h $(NATIVE)/capture/replay.cpp $(OUT)/run_gl
+		$(NATIVE)/capture/d3d9_families.cpp $(NATIVE)/capture/d3d9_families.h $(NATIVE)/capture/d3d9cap.h $(NATIVE)/capture/png.h $(NATIVE)/capture/replay.cpp $(OUT)/run_gl
 	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-sanitize=vptr -Wall -Wextra -Werror \
-		$(CPPFLAGS) -I$(SHOUT) -o $@ $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp \
+		$(CPPFLAGS) -I$(SHOUT) -o $@ $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/d3d9_families.cpp \
 		$(NATIVE)/capture/replay.cpp $(OUT)/front.o $(OUT)/scenes.o $(OUT)/nxgl.o $(OUT)/gpu_dispatch.o \
 		$(OUT)/d3d9_state_s.o $(OUT)/nx_shaders.o -lEGL -lm
 
