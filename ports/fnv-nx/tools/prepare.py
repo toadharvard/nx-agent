@@ -48,7 +48,9 @@ def match_brace(text, open_at):
 # `union __declspec(intrin_type) __declspec(align(16)) __m128 {...}`, also spelled as a struct (`{ float x, y, z, w; }`)
 INTRIN_UNION = re.compile(r'(?:typedef\s+)?(?:union|struct)\s+(?:__declspec\([^)]*\(?[^)]*\)?\)\s*)*(__m128[id]?|__m64)\b[^;{]*\{')
 
-INTRIN_ELABORATED = re.compile(r'\b(?:union|struct)\s+(__m128[id]?|__m64)\b(?!\s*\{)(?=\s*[\w\*&;,)])')
+# (also qualified, `typedef union ::__m128 hkQuadReal;`: SSE4 strips the `::` only later)
+INTRIN_ELABORATED = re.compile(r'\b(?:union|struct)\s+(?:::\s*)?(?:\w+\s*::\s*)*(__m128[id]?|__m64)\b(?!\s*\{)(?=\s*[\w\*&;,)])')
+INTRIN_ELAB_HINT = re.compile(r'\b(?:union|struct)\s+(?:::\s*)?(?:\w+\s*::\s*)*__m')
 
 def r_sse_local_types(path, text, stats):
     """SSE1: drop local copies of the MSVC <xmmintrin.h> vector unions (or structs); the global sse2neon type is used
@@ -64,8 +66,8 @@ def r_sse_local_types(path, text, stats):
     out.append(text[pos:])
     text = ''.join(out)
     # elaborated references to those types (`typedef union __m128 hkQuadReal;`): the global type is a typedef
-    if 'union __m' in text or 'struct __m' in text:
-        text, n0 = re.subn(r'\b(?:union|struct)\s+(?:__m128[id]?|__m64)\s*;', '', text)    # forward declarations
+    if INTRIN_ELAB_HINT.search(text):
+        text, n0 = re.subn(r'\b(?:union|struct)\s+(?:::\s*)?(?:\w+\s*::\s*)*(?:__m128[id]?|__m64)\s*;', '', text)   # forward declarations
         text, n = INTRIN_ELABORATED.subn(r'\1', text)
         n += n0
         stats['SSE1'] += n

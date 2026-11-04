@@ -2887,5 +2887,70 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- FRIEND1
+#
+# `friend class hkpWorld;` in a class body, with hkpWorld declared nowhere before it: MSVC 2008 makes the friend's
+# name visible to ordinary lookup in the enclosing namespace from there on, so the class goes on to use it
+# (`hkpWorld* m_pOwningWorld;`, `virtual void WorldAddedCallback(hkpWorld* world);`) and the class itself is defined
+# further down. C++ (GCC) does not: the friend declaration names the class but does not make it visible, so every
+# later use is "'hkpWorld' does not name a type" (the Havok viewers, hkpContinuousSimulation, hkpCdBody's
+# `friend class hkpCollidable;`). FRIEND1 forward-declares the class in front of the outermost class around the
+# friend declaration, in the same namespace (where the friend declaration puts it), when the name is declared
+# nowhere before: not in the unit's text in front of it, not in the local headers it includes. The class key is
+# that of the class's definition in the unit (a later `union X {..}` takes `union X;`), else the friend's. Only at
+# namespace scope (not in a local class), and not for a name the unit also uses as a typedef or a template, or a
+# template parameter of the enclosing class. Same line count: the declaration joins the line where the class's
+# declaration starts.
+
+FRIEND_CLASS = re.compile(r'(?<![\w>])friend\s+(class|struct|union)\s+([A-Za-z_]\w*)\s*;')
+FRIEND_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)|^[ \t]*#[^\n]*', re.S | re.M)
+DECOR = r'(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*|alignas\s*\([^()]*\)\s*)*'
+
+def _friend_declared(view, name):
+    """`name` is declared as a type (or anything else) in `view`, a name view of _visible."""
+    n = re.escape(name)
+    return re.search(r'(?<!friend )\b(?:class|struct|union|enum)\s+%s%s\b(?!\s*<)|\btypedef\b[^;]*\b%s\s*(?:\[[^\]]*\]\s*)?;|'
+                     r'\busing\s+%s\s*=|\bnamespace\s+%s\b' % (DECOR, n, n, n, n), view) is not None
+
+def r_friend_class_visibility(path, text, stats):
+    """FRIEND1: forward-declare a class that a friend declaration names before it is declared (see above)."""
+    if 'friend' not in text: return text
+    found = list(FRIEND_CLASS.finditer(text))
+    if not found: return text
+    masked = FRIEND_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+    spans = prepare.scope_spans(masked)
+    header_views, prefix_views, adds, done = None, {}, {}, set()
+    for m in found:
+        if masked[m.start():m.end()] != m.group(): continue          # in a comment or a string
+        key, name = m.group(1), m.group(2)
+        enclosing = [sp for sp in spans if sp[0] < m.start() < sp[1]]
+        if not enclosing or enclosing[-1][2] != 'class': continue
+        if any(sp[2] not in ('class', 'namespace', 'extern') for sp in enclosing): continue
+        outer = next(sp for sp in enclosing if sp[2] == 'class')
+        at = max(masked.rfind(c, 0, outer[0]) for c in ';{}') + 1     # where the outer class's declaration starts
+        if (at, name) in done: continue
+        n = re.escape(name)
+        if re.search(r'\btypedef\b[^;{}]*\b%s\s*;|\btemplate\s*<(?:[^<>]|<[^<>]*>)*>\s*(?:class|struct|union)\s+%s%s\b|'
+                     r'\busing\s+%s\s*=' % (n, DECOR, n, n), masked):
+            continue                                                  # a typedef or a template of that name
+        if re.search(r'\b(?:class|typename)\s+%s\s*[,>=]' % n, masked[at:m.start()]): continue   # template parameter
+        if at not in prefix_views: prefix_views[at] = _strip_closed(masked[:at], NAME_KEEP)
+        if _friend_declared(prefix_views[at], name): continue
+        if header_views is None:
+            parts = []
+            _visible('\n'.join(l for l in text.split('\n') if INCLUDE.match(l)), path, _roots(path), set(), parts, set())
+            header_views = [nv for _, nv in parts[:-1]]
+        if any(_friend_declared(v, name) for v in header_views): continue
+        d = re.search(r'\b(class|struct|union)\s+%s%s\s*(?:final\s*)?(?::[^;{}]*)?\{' % (DECOR, n), masked)
+        adds.setdefault(at, []).append('%s %s;' % (d.group(1) if d else key, name))
+        done.add((at, name))
+    if not adds: return text
+    out, pos = [], 0
+    for at in sorted(adds):
+        out.append(text[pos:at]); out.append(' %s /* fnv-nx FRIEND1 */ ' % ' '.join(adds[at])); pos = at
+        stats['FRIEND1'] += len(adds[at])
+    out.append(text[pos:])
+    return ''.join(out)
+
 RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
-         r_msvc_base_layout, r_class_alignment]
+         r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]

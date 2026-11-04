@@ -354,6 +354,10 @@ check('DECL1 drops a CRT prototype that ends in a // comment',
 check('SSE1 elaborated __m128 references',
       prepare.r_sse_local_types('x.cpp', 'typedef union __m128 hkQuadReal;\nvoid f(struct __m128* p);\n', Counter()),
       ['typedef __m128 hkQuadReal;', 'void f(__m128* p);'])
+check('SSE1 qualified elaborated __m128 references (`union ::__m128`)',
+      prepare.r_sse_local_types('x.cpp', 'typedef union ::__m128 hkQuadReal;\nunion :: __m128;\nvoid f(struct N::__m128i* p);\n'
+                                'union __m128_like { int a; };\n', Counter()),
+      ['typedef __m128 hkQuadReal;\n\nvoid f(__m128i* p);', 'union __m128_like { int a; };'], ['::'])
 
 check('DECL1 drops a prototype whose head is on the line above',
       prepare.r_platform_protos('/x/src/a.cpp', 'int a;\nextern "C" __declspec(dllimport) HANDLE\n    __stdcall CreateThread(void*, '
@@ -511,6 +515,19 @@ check('VTBL1 A660A0Map keeps the line count', str(got.count('\n')), ['11'])
 got = run(s1.r_stand_in_interfaces, 'class A660A0Map : public A660A0MapBase\n{\n    virtual ~A660A0Map();\n};\n',
           '/x/src/gamebryo2.2/corelibs/nimain/nistream_rtm_variant.cpp')
 check('VTBL1 A660A0Map: only in nistream.cpp', got, [], ['VTBL1'])
+
+# ---- FRIEND1
+src = ('namespace N {\nint a;\nclass A : public B\n{\n    friend class W;\n    W* m_w;\n};\nclass W { int x; };\n}\n'
+       'struct T;\nclass D { friend struct T; };\ntypedef int Q;\nclass E { friend class Q; };\n'
+       'void f() { class L { friend class M; }; }\n// class X { friend class Z; };\n'
+       'class G { friend class H; class I { friend class H; }; };\nunion H { int a; };\n'
+       'template <class P> class K { friend class P; };\ntemplate <class T2> class R;\nclass S { friend class R; };\n')
+got = run(s1.r_friend_class_visibility, src, '/nonexistent/src/f.cpp')
+check('FRIEND1 forward-declares a friend class declared nowhere before', got,
+      ['int a; class W; /* fnv-nx FRIEND1 */ \nclass A : public B', '}; } union H; /* fnv-nx FRIEND1 */ \n// class X'],
+      ['class T; /*', 'class Q; /*', 'class M; /*', 'class Z; /*', 'class P; /*', 'class R; /*', 'union H; union H;'])
+check('FRIEND1 two declarations only (not T, Q, M, Z, P, R)', str(got.count('fnv-nx FRIEND1')), ['2'])
+check('FRIEND1 keeps the line count', str(got.count('\n')), [str(src.count('\n'))])
 
 # ---- ALIGN1
 got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
