@@ -531,6 +531,11 @@ if (fi.flags & NXFMT_CONVERT) n = nx_d3d9_convert(d3dfmt, w, h, mips, faces, src
 NxEpilogue e; nx_epilogue_fill(&e, &dyn, shaderBits);             /* fragment UBO slot 2 of every shader */
 ```
 
+Test harness (`render/native/front/harness.h`, LP64 host): `nxh_init(&h, api, w, h, colorFmt, depthFmt)`,
+`nxh_shader(&h, NxStage_Fragment, glsl, dksh, size)`, `nxh_draw(&h, ps, &state, &dyn, ubo, size, &epi, handles, n)`,
+`nxh_clear(&h, flags, rgba8, depth, stencil, x, y, w, h)`, `nxh_readback(&h, NxRb_RGBA8 | NxRb_RGBA32F | NxRb_Depth32F |
+NxRb_Stencil8, x, y, w, h, dst, size)`. ABI v3 adds `NxReadback.format` and `NxOp_Clear` (rectangle clears).
+
 Units: blend constant, fog colour and border are colour channels in [0,1] (byte / 255); `alphaRef` = ALPHAREF /
 255 unclamped; `depthBiasUnits` is in GL `glPolygonOffset` units (r = 2^-24 for D24); viewport in pixels for a
 +0.5-centre rasterizer; scissor in pixels, top-left origin; sampler `minLod`/`maxLod` in mip levels.

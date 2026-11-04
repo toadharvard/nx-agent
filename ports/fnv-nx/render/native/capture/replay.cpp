@@ -114,8 +114,9 @@ int nx_replay(const NxGpuApi* api, const uint8_t* d, size_t size, NxReplayStats*
             NxReadback r; uint32_t bytes;
             memcpy(&r, p, sizeof r); memcpy(&bytes, p + sizeof r, 4);
             r.image = r.image ? imgMap[r.image] : 0;
-            uint8_t* out = (uint8_t*)malloc((size_t)r.w * r.h * 4 + 4);
-            r.dst = (uint64_t)(uintptr_t)out; r.dst_size = r.w * r.h * 4;
+            uint32_t rbBytes = r.w * r.h * nx_readback_bpp(r.format);
+            uint8_t* out = (uint8_t*)malloc((size_t)rbBytes + 4);
+            r.dst = (uint64_t)(uintptr_t)out; r.dst_size = rbBytes;
             if (call(api, NXGPU_FN_READBACK, (uint64_t)(uintptr_t)&r) == 0) {
                 if (bytes && (bytes != r.dst_size || memcmp(out, p + sizeof r + 4, bytes))) st->readbackMismatches++;
                 if (onReadback) onReadback(user, st->readbacks, &r, out);

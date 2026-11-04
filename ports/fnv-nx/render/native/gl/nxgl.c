@@ -134,6 +134,7 @@ static struct {
     uint32_t vtxBlock, vtxOffset, idxType;
     int vtxDirty;
     uint32_t stencilRef;
+    GLint scissor[4];      /* the dynamic scissor rectangle (restored after NxOp_Clear) */
 } g;
 
 const char* nxgl_last_error(void) { return g.err; }
@@ -577,8 +578,30 @@ static void begin_pass(const uint32_t* a) {
     p_glViewportIndexedf(0, 0.5f, 0.5f, (float)g.passW, (float)g.passH);
     p_glDepthRangef(0.0f, 1.0f);
     p_glScissor(0, 0, (GLsizei)g.passW, (GLsizei)g.passH);
+    g.scissor[0] = 0; g.scissor[1] = 0; g.scissor[2] = (GLint)g.passW; g.scissor[3] = (GLint)g.passH;
     p_glBlendColor(1, 1, 1, 1);
     p_glPolygonOffset(0, 0);
+}
+
+/* NxOp_Clear: a rectangle of the pass's targets, outside the bound state (scissor test does the rectangle) */
+static void clear_rect(const uint32_t* a) {
+    p_glEnable(GL_SCISSOR_TEST);
+    p_glScissor((GLint)a[4], (GLint)a[5], (GLsizei)a[6], (GLsizei)a[7]);
+    p_glDisable(GL_FRAMEBUFFER_SRGB);
+    if (a[0] & 1) {
+        p_glColorMaski(0, 1, 1, 1, 1);
+        float c[4] = {(a[1] & 255) / 255.0f, (a[1] >> 8 & 255) / 255.0f, (a[1] >> 16 & 255) / 255.0f, (a[1] >> 24) / 255.0f};
+        p_glClearBufferfv(GL_COLOR, 0, c);
+    }
+    float z = asf(a[2]);
+    GLint st = (GLint)(a[3] & 0xFF);
+    if (a[0] & 6) { p_glDepthMask(GL_TRUE); p_glStencilMaskSeparate(GL_FRONT_AND_BACK, 0xFF); }
+    if ((a[0] & 6) == 6) p_glClearBufferfi(GL_DEPTH_STENCIL, 0, z, st);
+    else if (a[0] & 2) p_glClearBufferfv(GL_DEPTH, 0, &z);
+    else if (a[0] & 4) p_glClearBufferiv(GL_STENCIL, 0, &st);
+    p_glScissor(g.scissor[0], g.scissor[1], g.scissor[2], g.scissor[3]);
+    if (g.boundState) apply_state(&g.st[g.boundState].rs, 1);   /* masks, scissor enable, sRGB back */
+    else { p_glDisable(GL_SCISSOR_TEST); g.haveApplied = 0; }
 }
 
 /* ---- replay ------------------------------------------------------------------------------------------------- */
@@ -714,7 +737,10 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
             }
             break;
         case NxOp_Scissor:
-            if (argc >= 4) p_glScissor((GLint)a[0], (GLint)a[1], (GLsizei)a[2], (GLsizei)a[3]);
+            if (argc >= 4) {
+                for (int q = 0; q < 4; q++) g.scissor[q] = (GLint)a[q];
+                p_glScissor(g.scissor[0], g.scissor[1], g.scissor[2], g.scissor[3]);
+            }
             break;
         case NxOp_StencilRef:
             if (argc >= 1 && g.boundState) { g.stencilRef = a[0] & 0xFF; apply_stencil_funcs(g.st[g.boundState].rs.w[1], g.stencilRef); }
@@ -724,6 +750,9 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
             break;
         case NxOp_DepthBias:
             if (argc >= 2) p_glPolygonOffset(asf(a[1]), asf(a[0]));
+            break;
+        case NxOp_Clear:
+            if (argc >= 8) clear_rect(a);
             break;
         default: break;
         }
@@ -752,22 +781,34 @@ static uint64_t api_wait_frame(uint64_t f) { (void)f; return 0; }   /* submit is
 
 static uint64_t api_readback(uint64_t a) {
     const NxReadback* r = (const NxReadback*)(uintptr_t)a;
-    if (!r || !r->dst) return NXGPU_BAD_CALL;
+    if (!r || !r->dst || r->format > NxRb_Stencil8) return NXGPU_BAD_CALL;
     uint32_t id = r->image ? r->image : g.swapImage;
-    if (!id || id > g.nImg || g.img[id].isDepth) return NXGPU_BAD_CALL;
+    if (!id || id > g.nImg) return NXGPU_BAD_CALL;
     if (g.img[id].isView) id = g.img[id].base;
-    if ((uint64_t)r->w * r->h * 4 > r->dst_size || r->x + r->w > g.img[id].w || r->y + r->h > g.img[id].h)
+    Image* im = &g.img[id];
+    int depthFmt = r->format == NxRb_Depth32F || r->format == NxRb_Stencil8;
+    if (depthFmt != im->isDepth || (r->format == NxRb_Stencil8 && !im->hasStencil)) return NXGPU_BAD_CALL;
+    if ((uint64_t)r->w * r->h * nx_readback_bpp(r->format) > r->dst_size || r->x + r->w > im->w || r->y + r->h > im->h)
         return NXGPU_BAD_CALL;
     if (!g.readFbo) p_glGenFramebuffers(1, &g.readFbo);
     p_glBindFramebuffer(GL_READ_FRAMEBUFFER, g.readFbo);
-    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.img[id].tex, 0);
-    p_glReadBuffer(GL_COLOR_ATTACHMENT0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, im->isDepth ? 0 : im->tex, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    if (im->isDepth)
+        p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, im->hasStencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
+                                 GL_TEXTURE_2D, im->tex, 0);
+    p_glReadBuffer(im->isDepth ? GL_NONE : GL_COLOR_ATTACHMENT0);
     p_glPixelStorei(GL_PACK_ALIGNMENT, 1);
     p_glPixelStorei(GL_PACK_ROW_LENGTH, 0);
     p_glDisable(GL_FRAMEBUFFER_SRGB);
     g.haveApplied = 0;
-    p_glReadPixels((GLint)r->x, (GLint)r->y, (GLsizei)r->w, (GLsizei)r->h, GL_RGBA, GL_UNSIGNED_BYTE,
-                   (void*)(uintptr_t)r->dst);
+    GLenum fmt = GL_RGBA, type = GL_UNSIGNED_BYTE;
+    if (r->format == NxRb_RGBA32F) type = GL_FLOAT;
+    else if (r->format == NxRb_Depth32F) { fmt = GL_DEPTH_COMPONENT; type = GL_FLOAT; }
+    else if (r->format == NxRb_Stencil8) { fmt = GL_STENCIL_INDEX; type = GL_UNSIGNED_BYTE; }
+    p_glReadPixels((GLint)r->x, (GLint)r->y, (GLsizei)r->w, (GLsizei)r->h, fmt, type, (void*)(uintptr_t)r->dst);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
     p_glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     return p_glGetError() ? NXGPU_BAD_CALL : 0;
 }

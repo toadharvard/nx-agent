@@ -255,6 +255,17 @@ void* Frame::PassConstants(uint8_t pass, uint32_t size) {
     return p;
 }
 
+bool Frame::Clear(uint8_t pass, uint8_t layer, uint16_t depthKey, uint32_t flags, uint32_t rgba8, float depth,
+                  uint32_t stencil, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    Packet* p = Emit();
+    if (!p) return false;
+    p->key = SortKey(pass, layer, 0, 0, depthKey);
+    p->prim = kClearPrim;
+    p->first = flags; p->count = rgba8; memcpy(&p->uboOffset, &depth, 4); p->baseVertex = (int32_t)stencil;
+    p->vtxOffset = x; p->vtxSize = y; p->idxOffset = w; p->idxSize = h;
+    return true;
+}
+
 NxEpilogue* Frame::Epilogue(Packet* p) {
     uint32_t off;
     NxEpilogue* e = (NxEpilogue*)ubo_.Alloc(256, 256, &off);
@@ -288,6 +299,12 @@ void Frame::Finish(StateCache& sc, NxFrameStats* stats, bool present) {
         uint32_t curEpi = 0;
         for (; i < nPackets_ && (keys_[i] >> 56) == pass; i++) {
             const Packet& p = packets_[order_[i]];
+            if (p.prim == kClearPrim) {
+                a = enc_.Op(NxOp_Clear, 8);
+                a[0] = p.first; a[1] = p.count; a[2] = p.uboOffset; a[3] = (uint32_t)p.baseVertex;
+                a[4] = p.vtxOffset; a[5] = p.vtxSize; a[6] = p.idxOffset; a[7] = p.idxSize;
+                continue;
+            }
             const DynRec& d = p.dyn && p.dyn <= nDyn_ ? dyn_[p.dyn - 1] : def;
             bool rebound = false;
             if (p.state != curState) {

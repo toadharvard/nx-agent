@@ -174,9 +174,27 @@ bool Renderer::Do_EndFrame() {
 bool Renderer::Do_DisplayFrame() { return !inFrame_; }   // EndFrame submitted with present
 
 void Renderer::Do_ClearBuffer(const NiRectF* rect, uint32_t mode) {
-    (void)rect;   // partial clears: N1 clears the whole target (the menu path clears whole targets)
     if (!inFrame_) return;
-    OpenPass(mode);   // a new pass on the current target: clears are pass loads
+    const Group* g = cur_ ? cur_ : &groups_[0];
+    // rect: normalized like a camera port (left, right, top, bottom; top > bottom); 0 or the whole target = full clear
+    int32_t x0 = 0, y0 = 0, x1 = (int32_t)g->w, y1 = (int32_t)g->h;
+    if (rect) {
+        x0 = (int32_t)(rect->left * g->w + 0.5f); x1 = (int32_t)(rect->right * g->w + 0.5f);
+        y0 = (int32_t)((1.0f - rect->top) * g->h + 0.5f); y1 = (int32_t)((1.0f - rect->bottom) * g->h + 0.5f);
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > (int32_t)g->w) x1 = (int32_t)g->w;
+        if (y1 > (int32_t)g->h) y1 = (int32_t)g->h;
+    }
+    if (x0 == 0 && y0 == 0 && x1 == (int32_t)g->w && y1 == (int32_t)g->h) { OpenPass(mode); return; }   // a pass load
+    if (x1 <= x0 || y1 <= y0) return;
+    OpenPass(0);   // a new pass keeps the order against earlier draws; the clear sorts first in it (layer 0, key 0)
+    if (!passOpen_) return;
+    uint32_t flags = (mode & CLEAR_BACKBUFFER ? 1u : 0u) | (mode & CLEAR_ZBUFFER && g->depth ? 2u : 0u) |
+                     (mode & CLEAR_STENCIL && g->depth ? 4u : 0u);
+    uint32_t rgba = (uint32_t)u8_(bg_[0]) | (uint32_t)u8_(bg_[1]) << 8 | (uint32_t)u8_(bg_[2]) << 16 | (uint32_t)u8_(bg_[3]) << 24;
+    frame_.Clear((uint8_t)pass_, 0, 0, flags, rgba, clearDepth_, clearStencil_, (uint32_t)x0, (uint32_t)y0,
+                 (uint32_t)(x1 - x0), (uint32_t)(y1 - y0));
 }
 
 void Renderer::Do_SetCameraData(const NiPoint3f& loc, const NiPoint3f& dir, const NiPoint3f& up, const NiPoint3f& right,

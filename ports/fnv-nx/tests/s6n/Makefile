@@ -6,9 +6,15 @@ CC ?= gcc
 CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Werror -pedantic
 CPPFLAGS += -I$(NATIVE)/include -I$(NATIVE)/front
 
-all: $(OUT)/test_d3d9_state $(OUT)/test_d3d9_state_cxxcheck $(OUT)/test_front
+all: $(OUT)/test_d3d9_state $(OUT)/test_d3d9_state_cxxcheck $(OUT)/test_front $(OUT)/test_harness
 	$(OUT)/test_d3d9_state
 	$(OUT)/test_front
+	$(OUT)/test_harness
+
+$(OUT)/test_harness: test_harness.c $(NATIVE)/front/harness.c $(NATIVE)/front/harness.h $(NATIVE)/gl/nxgl.c $(NATIVE)/front/d3d9_state.c $(NATIVE)/include/nx/gpu_abi.h
+	@mkdir -p $(OUT)
+	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -o $@ test_harness.c $(NATIVE)/front/harness.c \
+		$(NATIVE)/gl/nxgl.c $(NATIVE)/front/gpu_dispatch.c $(NATIVE)/front/d3d9_state.c -lEGL -lm
 
 $(OUT)/test_front: test_front.cpp $(NATIVE)/front/front.cpp $(NATIVE)/front/d3d9_state.c $(NATIVE)/gl/nxgl.c $(NATIVE)/include/nx/front.h
 	@mkdir -p $(OUT)

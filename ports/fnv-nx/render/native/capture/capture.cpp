@@ -100,7 +100,7 @@ bool CaptureBackend::Readback(const NxReadback& r) {
     bool ok = inner_ && inner_->Readback(r);
     NxReadback c = r;
     c.dst = 0;
-    uint32_t bytes = ok ? r.w * r.h * 4 : 0;
+    uint32_t bytes = ok ? r.w * r.h * nx_readback_bpp(r.format) : 0;
     Rec(kCapReadback, sizeof c + 4 + pad4(bytes)); Put(&c, sizeof c); Put(&bytes, 4);
     if (bytes) Put((const void*)(uintptr_t)r.dst, bytes);
     return ok;

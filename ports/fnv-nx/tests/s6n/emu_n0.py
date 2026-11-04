@@ -94,14 +94,14 @@ class N0Emu(emu_guest.Emu):
                 self.uc.mem_write(stats, st.raw)
             return r
         if fn == FN_READBACK:
-            d = bytearray(self.uc.mem_read(a[0], 32))
-            dsize, dst = struct.unpack_from("<IQ", d, 20)[0], struct.unpack_from("<Q", d, 24)[0]
-            hb = ctypes.create_string_buffer(dsize)
+            d = bytearray(self.uc.mem_read(a[0], 40))   # NxReadback v3: dst at 24, dst_size at 32
+            dst, dsize = struct.unpack_from("<QI", d, 24)
+            hb = ctypes.create_string_buffer(max(dsize, 1))
             struct.pack_into("<Q", d, 24, ctypes.addressof(hb))
-            desc = ctypes.create_string_buffer(bytes(d), 32)
+            desc = ctypes.create_string_buffer(bytes(d), 40)
             r = self.call(fn, ctypes.addressof(desc))
             if r == 0:
-                self.uc.mem_write(dst, hb.raw)
+                self.uc.mem_write(dst, hb.raw[:dsize])
             return r
         if fn in (FN_MEM_GPU_ADDR, FN_WAIT_FRAME):
             return self.call(fn, a[0])

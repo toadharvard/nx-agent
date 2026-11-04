@@ -154,6 +154,11 @@ public:
     Packet* Emit();                                              // zeroed packet, 0 when full
     void* Constants(uint32_t* offset);                           // per-draw UBO slice (uboSize bytes)
     void* PassConstants(uint8_t pass, uint32_t size);            // bound at slot 0, both stages, for the pass
+    // A clear of a rectangle (pixels) of the pass's targets, ordered like a draw by (pass, layer, ..., depth key).
+    // flags: 1 colour, 2 depth, 4 stencil. Encoded as NxOp_Clear (Packet.prim = kClearPrim).
+    bool Clear(uint8_t pass, uint8_t layer, uint16_t depthKey, uint32_t flags, uint32_t rgba8, float depth,
+               uint32_t stencil, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    enum { kClearPrim = 0xFF };
     // The D3D9 epilogue block for a packet (sets p->epi); 0 when the ring is full.
     NxEpilogue* Epilogue(Packet* p);
     // Sorts, encodes (with redundant-bind elimination) and submits. stats may be 0.

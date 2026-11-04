@@ -591,6 +591,21 @@ static void record(DkCmdBuf cb, const NxSubmit* s, NxFrameStats* st) {
         case NxOp_DepthBias:
             if (argc >= 3) { float f[3]; memcpy(f, a, 12); dkCmdBufSetDepthBias(cb, f[0], f[2], f[1]); }
             break;
+        case NxOp_Clear:
+            if (argc >= 8) {   /* Maxwell clears honour the scissor: clear inside the rectangle, then restore */
+                DkScissor r = {a[4], a[5], a[6], a[7]};
+                dkCmdBufSetScissors(cb, 0, &r, 1);
+                if ((a[0] & 1) && ps.haveColor) {
+                    float c[4] = {(a[1] & 255) / 255.0f, (a[1] >> 8 & 255) / 255.0f, (a[1] >> 16 & 255) / 255.0f, (a[1] >> 24) / 255.0f};
+                    dkCmdBufClearColor(cb, 0, DkColorMask_RGBA, c);
+                }
+                if ((a[0] & 6) && ps.haveDepth) {
+                    float z; memcpy(&z, &a[2], 4);
+                    dkCmdBufClearDepthStencil(cb, (a[0] & 2) != 0, z, (a[0] & 4) ? 0xFF : 0, (uint8_t)a[3]);
+                }
+                apply_scissor(cb, &ps);
+            }
+            break;
         default: break;   /* unknown op: skipped by its count */
         }
     }
@@ -687,34 +702,73 @@ static void drain(void) {   /* everything submitted so far has finished on the G
     dkQueueWaitIdle(g.queue);
 }
 
+static float half_to_float(uint16_t h) {
+    uint32_t sgn = (uint32_t)(h >> 15) << 31, e = h >> 10 & 31, m = h & 1023, u;
+    if (!e) { if (!m) u = sgn; else { e = 113; while (!(m & 1024)) { m <<= 1; e--; } u = sgn | e << 23 | (m & 1023) << 13; } }
+    else if (e == 31) u = sgn | 0x7F800000u | m << 13;
+    else u = sgn | (e + 112) << 23 | m << 13;
+    float f; memcpy(&f, &u, 4); return f;
+}
+
 static u64 api_readback(u64 a) {
     const NxReadback* r = (const NxReadback*)a;
-    if (!r || !r->dst) return NXGPU_BAD_CALL;
+    if (!r || !r->dst || r->format > NxRb_Stencil8) return NXGPU_BAD_CALL;
     DkImage* src;
     uint32_t fmt, iw, ih;
     if (r->image) {
-        if (r->image > g.nImages || g.img[r->image].isDepth) return NXGPU_BAD_CALL;
+        if (r->image > g.nImages) return NXGPU_BAD_CALL;
         src = &g.img[r->image].image; fmt = g.img[r->image].format; iw = g.img[r->image].w; ih = g.img[r->image].h;
     } else {
         src = &g.fb[g.lastSlot]; fmt = NxFmt_RGBA8; iw = g.width; ih = g.height;
     }
-    if (fmt != NxFmt_RGBA8 && fmt != NxFmt_BGRA8 && fmt != NxFmt_RGBX8 && fmt != NxFmt_BGRX8) return NXGPU_BAD_CALL;
-    if ((uint64_t)r->w * r->h * 4 > r->dst_size || (uint64_t)r->w * r->h * 4 > READBACK_SIZE ||
+    uint32_t sb;   /* source bytes per pixel */
+    switch (fmt) {
+    case NxFmt_RGBA8: case NxFmt_BGRA8: case NxFmt_RGBX8: case NxFmt_BGRX8: case NxFmt_Z24S8: case NxFmt_Z24X8:
+    case NxFmt_Z32F: sb = 4; break;
+    case NxFmt_RGBA16F: case NxFmt_Z32FS8: sb = 8; break;
+    case NxFmt_RGBA32F: sb = 16; break;
+    case NxFmt_Z16: sb = 2; break;
+    default: return NXGPU_BAD_CALL;
+    }
+    int depth = is_depth(fmt);
+    if (depth != (r->format == NxRb_Depth32F || r->format == NxRb_Stencil8)) return NXGPU_BAD_CALL;
+    if ((uint64_t)r->w * r->h * nx_readback_bpp(r->format) > r->dst_size || (uint64_t)r->w * r->h * sb > READBACK_SIZE ||
         r->x + r->w > iw || r->y + r->h > ih)
         return NXGPU_BAD_CALL;
     drain();
     DkImageView v; dkImageViewDefaults(&v, src);
+    if (r->format == NxRb_Stencil8) v.dsSource = DkDsSource_Stencil;
     DkImageRect rect = {r->x, r->y, 0, r->w, r->h, 1};
     DkCopyBuf dst = {dkMemBlockGetGpuAddr(g.readbackMem), 0, 0};
     dkCmdBufCopyImageToBuffer(g.upload, &v, &rect, &dst, 0);
     submit_and_wait(g.upload);
     const uint8_t* s = (const uint8_t*)dkMemBlockGetCpuAddr(g.readbackMem);
-    uint8_t* o = (uint8_t*)r->dst;
     uint32_t n = r->w * r->h;
-    int bgr = fmt == NxFmt_BGRA8 || fmt == NxFmt_BGRX8, x = fmt == NxFmt_RGBX8 || fmt == NxFmt_BGRX8;
-    for (uint32_t i = 0; i < n; i++) {
-        o[4 * i + 0] = s[4 * i + (bgr ? 2 : 0)]; o[4 * i + 1] = s[4 * i + 1];
-        o[4 * i + 2] = s[4 * i + (bgr ? 0 : 2)]; o[4 * i + 3] = x ? 255 : s[4 * i + 3];
+    if (r->format == NxRb_RGBA8 || r->format == NxRb_RGBA32F) {
+        int bgr = fmt == NxFmt_BGRA8 || fmt == NxFmt_BGRX8, x = fmt == NxFmt_RGBX8 || fmt == NxFmt_BGRX8;
+        for (uint32_t i = 0; i < n; i++) {
+            float c[4];
+            if (sb == 4) for (int k = 0; k < 4; k++) c[k] = s[4 * i + k] / 255.0f;
+            else if (sb == 8) for (int k = 0; k < 4; k++) { uint16_t h; memcpy(&h, s + 8 * i + 2 * k, 2); c[k] = half_to_float(h); }
+            else memcpy(c, s + 16 * i, 16);
+            if (bgr) { float t = c[0]; c[0] = c[2]; c[2] = t; }
+            if (x) c[3] = 1.0f;
+            if (r->format == NxRb_RGBA32F) memcpy((uint8_t*)r->dst + 16 * i, c, 16);
+            else for (int k = 0; k < 4; k++) {
+                float f = c[k] < 0 ? 0 : c[k] > 1 ? 1 : c[k];
+                ((uint8_t*)r->dst)[4 * i + k] = (uint8_t)(f * 255.0f + 0.5f);
+            }
+        }
+    } else if (r->format == NxRb_Depth32F) {   /* layouts per deko3d's copy engine (trap: confirm on hardware) */
+        for (uint32_t i = 0; i < n; i++) {
+            float z;
+            if (fmt == NxFmt_Z32F || fmt == NxFmt_Z32FS8) memcpy(&z, s + sb * i, 4);
+            else if (fmt == NxFmt_Z16) { uint16_t u; memcpy(&u, s + 2 * i, 2); z = u / 65535.0f; }
+            else { uint32_t u; memcpy(&u, s + 4 * i, 4); z = (u >> 8) / 16777215.0f; }   /* S8Z24: depth high 24 bits */
+            memcpy((uint8_t*)r->dst + 4 * i, &z, 4);
+        }
+    } else {
+        for (uint32_t i = 0; i < n; i++) ((uint8_t*)r->dst)[i] = s[i];   /* stencil view: one byte per pixel */
     }
     return 0;
 }

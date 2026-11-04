@@ -173,7 +173,10 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     NiRectF port = {0.5f, 1.0f, 1.0f, 0.0f};
     r.Do_SetScreenSpaceCameraData(&port);
     t.Check(quad(0, 0, 1, 1, red, 0), "render into a half viewport");
-    // ClearBuffer mid-frame: a new pass that clears the colour (the quad above stays: it is in the previous pass)
+    // ClearBuffer with a rectangle mid-frame (the top-right quarter, normalized like a port): only it is cleared
+    r.SetBackgroundColor(0, 1, 0, 1);
+    NiRectF quarter = {0.75f, 1.0f, 1.0f, 0.5f};
+    r.Do_ClearBuffer(&quarter, Renderer::CLEAR_BACKBUFFER);
     t.Check(r.Do_EndUsingRenderTargetGroup(), "EndUsing(default)");
     t.Check(r.Do_EndFrame() && r.Do_DisplayFrame(), "EndFrame + DisplayFrame");
     t.Check(!r.Do_EndFrame(), "EndFrame outside a frame fails");
@@ -197,10 +200,14 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(q[2] > p[2], "menu: blend quad starts at x = 64", p[2], q[2]);
     rb.image = back;
     t.Check(be->Readback(rb), "readback back buffer");
-    p = px(10, 40); q = px(100, 40);
+    p = px(10, 70); q = px(100, 70);
     t.Check(p[0] == 0 && q[0] == 255, "back buffer: the quad fills only the right-half viewport", p[0], q[0]);
-    p = px(63, 40); q = px(64, 40);
+    p = px(63, 70); q = px(64, 70);
     t.Check(p[0] == 0 && q[0] == 255, "back buffer: viewport edge at x = 64", p[0], q[0]);
+    p = px(100, 10); q = px(100, 60);
+    t.Check(p[1] == 255 && p[0] == 0 && q[0] == 255 && q[1] == 0, "partial ClearBuffer: top-right quarter only", p[1], q[0]);
+    p = px(95, 10); q = px(96, 47);
+    t.Check(p[0] == 255 && q[1] == 255, "partial ClearBuffer: rectangle edges x = 96, y = 48", p[0], q[1]);
     t.Check(r.frameNumber() == 1 && r.lastStateBinds() >= 2, "one frame, states bound", (int)r.frameNumber(), (int)r.lastStateBinds());
     *checks = t.checks;
     return t.fails;
