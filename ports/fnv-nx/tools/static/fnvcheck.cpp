@@ -873,8 +873,20 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
         return true;
       }
       if (auto *CE = dyn_cast<CallExpr>(P)) {
-        if (!addr || CE->getCallee()->IgnoreParenImpCasts() == Cur) return true;
+        if (CE->getCallee()->IgnoreParenImpCasts() == Cur) return true;
         const FunctionDecl *FD = CE->getDirectCallee();
+        if (!addr) {
+          // bound to a non-const reference parameter: `int lo; GetRange(lo, hi);`
+          if (!FD || isa<CXXOperatorCallExpr>(CE)) return true;
+          unsigned i = 0;
+          while (i < CE->getNumArgs() && CE->getArg(i) != Cur) i++;
+          if (i >= CE->getNumArgs() || i >= FD->getNumParams()) return true;
+          QualType PT = FD->getParamDecl(i)->getType();
+          if (!PT->isLValueReferenceType() || PT->getPointeeType().isConstQualified()) return true;
+          emit("OUTARG-UNINIT", DR->getLocation(), VD->getNameAsString() + "\tref of " + FD->getQualifiedNameAsString() +
+                                                     "\t" + fn());
+          return true;
+        }
         emit("OUTARG-UNINIT", DR->getLocation(), VD->getNameAsString() + "\targ of " +
                                                    (FD ? FD->getQualifiedNameAsString() : std::string("<indirect>")) +
                                                    "\t" + fn());

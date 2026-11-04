@@ -193,6 +193,17 @@ CLASSES = [
     ('LAYOUT-PACK-ALIGN', '#pragma pack with an over-aligned member', 'MSVC: __declspec(align)/__m128 beat pack; '
      'GCC: pack caps them', 'rule', 'PACK1: an explicit aligned(n) attribute on the member does not win in GCC; '
      'insert explicit padding before the member'),
+    ('ALIGN-IGNORED', '__declspec(align(n)) before the class key (`__declspec(align(16)) struct S {...};`)',
+     'MSVC aligns the type; GCC drops an attribute in that position ("attribute ignored in declaration of", '
+     '-Wattributes): the record is 4-aligned, and records holding it shrink and move their members '
+     '(LAYOUT-ALIGN-IGNORED, verified by layout_probe against real GCC)', 'rule',
+     'ALIGN1 (S1): `__declspec(align(n)) struct S` -> `struct __declspec(align(n)) S` - GCC honours the attribute '
+     'after the class key (tests/s12 layouts.cpp), MSVC means the same'),
+    ('LAYOUT-ALIGN-IGNORED', 'record MSVC aligns more than GCC (same members, no pack)', 'size, alignment and the '
+     'offsets after an aligned member differ; root cause ALIGN-IGNORED', 'rule', 'ALIGN1'),
+    ('LAYOUT-PARSE', 'the two clang configurations see different members', 'a proxy artefact (one configuration '
+     'dropped members after a parse error), not a layout difference; the gnu side is checked against GCC by the '
+     'probe', 'benign', 'none (proxy)'),
     ('LAYOUT-EMPTY-BASE', 'empty base gets a byte under MSVC', 'size/offsets differ', 'per-site', 'explicit padding'),
     ('LAYOUT-EMPTY-BASE-OFFSET', 'only an empty base at another offset', 'casts to that empty base adjust '
      'differently; no data moves', 'benign', 'none'),
@@ -216,14 +227,27 @@ WARN_CLASS = {
     'bitfield-enum-conversion': 'W-ENUM-BITFIELD', 'signed-enum-bitfield': 'W-ENUM-BITFIELD',
     'cast-function-type': 'W-CAST-FN', 'type-limits': 'W-TYPE-LIMITS', 'mismatched-new-delete': 'W-NEW-DELETE',
     'free-nonheap-object': 'W-NEW-DELETE', 'psabi': 'W-PSABI', 'varargs': 'W-VA-PROMOTE',
-    'tautological-undefined-compare': 'THIS-NULL',
+    'tautological-undefined-compare': 'THIS-NULL', 'undefined-bool-conversion': 'THIS-NULL',
+    'nonnull': 'THIS-NULL',                    # GCC: "'this' pointer is null" (a member call on a null object)
+    'cast-function-type-strict': 'W-CAST-FN', 'tautological-constant-out-of-range-compare': 'W-TYPE-LIMITS',
+    'delete-incomplete': 'W-NEW-DELETE',
 }
 # warnings of the sets that say nothing about MSVC vs AArch64 (kept in counts.tsv, not classified)
 WARN_IGNORE = {'invalid-offsetof', 'builtin-macro-redefined', 'unused-value', 'attributes', 'ignored-attributes',
                'return-type-c-linkage', 'fpermissive', 'narrowing', 'overflow', 'int-in-bool-context', 'bool-compare',
                'tautological-compare', 'float-conversion', 'stringop-overflow', 'stringop-overread', 'clobbered',
                'packed-not-aligned', 'div-by-zero', 'division-by-zero', 'null-dereference', 'float-overflow-conversion',
-               'bitfield-constant-conversion', 'constant-conversion', 'literal-conversion', 'cpp'}
+               'bitfield-constant-conversion', 'constant-conversion', 'literal-conversion', 'cpp',
+               # same meaning on both targets: unhandled enum values, multi-character constants (both pack them
+               # big-endian into an int), `register`, string literal constness, pragmas MSVC alone knows
+               'switch', 'multichar', 'register', 'writable-strings', 'write-strings', 'ignored-pragmas',
+               'unknown-pragmas', 'parentheses', 'self-assign-field', 'self-assign', 'constant-logical-operand',
+               'fortify-source', 'inaccessible-base', 'pointer-bool-conversion', 'address-of-packed-member'}
+
+
+def warn_flag(flag):
+    """-Warray-bounds= / -Wformat-overflow=1 as GCC prints them -> the warning's name"""
+    return flag.split('=')[0]
 
 DIAG = re.compile(r'^(.*?):(\d+):(\d+): (warning|error): (.*?)(?: \[(-W[^\]]+)\])?$')
 
@@ -332,8 +356,11 @@ def main():
                     if m.group(4) == 'error':
                         tree_errors['clang:' + unit] += 1
                         continue
-                    flag = (m.group(6) or '-W?')[2:]
+                    flag = warn_flag((m.group(6) or '-W?')[2:])
                     raw_warn['clang ' + flag] += 1
+                    if flag == 'ignored-attributes' and 'place it after' in m.group(5):
+                        S.add('ALIGN-IGNORED', r, m.group(2), 0, 'clang: %s' % m.group(5)[:160], unit)
+                        continue
                     if flag in WARN_IGNORE:
                         continue
                     S.add(WARN_CLASS.get(flag, 'W-OTHER'), r, m.group(2), m.group(3),
@@ -369,10 +396,13 @@ def main():
                 r = rel(m.group(1), tree)
                 if r is None:
                     continue
-                msg, flag = m.group(5), (m.group(6) or '')[2:]
+                msg, flag = m.group(5), warn_flag((m.group(6) or '')[2:])
                 if 'promoted to' in msg and 'passed through' in msg:
                     flag = 'varargs'
                 raw_warn['gcc ' + (flag or '?')] += 1
+                if flag == 'attributes' and 'ignored in declaration of' in msg:
+                    S.add('ALIGN-IGNORED', r, m.group(2), 0, 'gcc: %s' % msg[:160], unit)
+                    continue
                 if not flag or flag in WARN_IGNORE:
                     continue
                 S.add(WARN_CLASS.get(flag, 'W-OTHER'), r, m.group(2), m.group(3),
@@ -402,6 +432,9 @@ def main():
     # ---- write
     by = S.by_class()
     os.makedirs(os.path.join(out, 'sites'), exist_ok=True)
+    for name in os.listdir(os.path.join(out, 'sites')):      # classes of an earlier report that are gone now
+        if name.endswith('.tsv'):
+            os.remove(os.path.join(out, 'sites', name))
     counts = {}
     for cls, rows in by.items():
         counts[cls] = len(rows)

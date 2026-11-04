@@ -14,6 +14,12 @@ Causes (first that applies):
                before a vfptr-less base); a cast to that empty base adjusts the pointer differently, nothing else
   empty-base   an empty base gets its own byte under MSVC (not the first one) but overlaps at 0 under Itanium
   pack-align   #pragma pack with an over-aligned member (MSVC: __declspec(align) / __m128 win over pack; GCC: pack wins)
+  parse        the two configurations see a different number of members: one of them dropped members after a parse
+               error (a proxy artefact, not a layout difference; the probe checks the gnu side against GCC)
+  align-ignored  MSVC aligns more than GCC with the same members and no pack: an alignment GCC ignores, typically
+               `__declspec(align(16)) struct S {...};` - before the struct keyword GCC drops the attribute
+               ("attribute ignored in declaration of 'struct S'", -Wattributes), MSVC aligns the type; also every
+               record that holds such a member at a 16-aligned MSVC offset
   member-type  only because a member's type (another record) differs: not a root cause
   base-type    only because a base's layout differs: not a root cause
   other        anything else (look at the row)
@@ -108,6 +114,8 @@ def compare(m, g):
     # a bit-field difference is first-order only when the bit-field moves within the same bytes budget
     if 'vbase' in m['flags'] or any(b[1] is None for b in m['bases']):
         cause = 'vbase'
+    elif len(mf) != len(gf):
+        cause = 'parse'
     elif all(d.startswith('base ') for d in diffs) and all(
             b[3] for a, b in zip(m['bases'], g['bases']) if a[1] is not None and a[1] != b[1]):
         cause = 'empty-base-offset'   # same size and fields; only an empty base sits elsewhere (MSVC: after the vfptr)
@@ -121,6 +129,8 @@ def compare(m, g):
         cause = 'bitfield'
     elif any(f.startswith('pack') for f in m['flags']):
         cause = 'pack-align'
+    elif m['align'] > g['align'] or any(a[1] != b[1] and a[1] % 128 == 0 for a, b in zip(mf, gf)):
+        cause = 'align-ignored'
     else:
         cause = 'other'
     return cause, diffs

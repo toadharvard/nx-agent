@@ -43,7 +43,7 @@ extern void use(char *);
 const char *dangle(int c) { const char *s; { char buf[16]; buf[0] = c; s = buf; } char o[16]; o[0] = 0; use(o); return s; }
 int noret(int x) { if (x) return 1; }
 // fact: noret  !brk                                (missing return: the other path is assumed unreachable)
-// fixed: noret  brk                                (-funreachable-traps: that path traps instead)
+// (the build rejects this with -Werror=return-type; FALL1 puts __builtin_trap() where the decomp lacks the return)
 // -- classes the D10/D16 flags close (each line: what the flag guarantees in the generated code)
 // fact: ldc  ldrsb\tw0                             (-fsigned-char: plain char loads sign-extend, as MSVC)
 int ldc(char *p) { return *p; }

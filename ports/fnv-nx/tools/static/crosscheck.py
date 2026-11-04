@@ -14,9 +14,13 @@
           by class:     fuzzed functions containing a site of the class, how many diverged (any cause / a cause the
                         class predicts), against the base rate of all fuzzed functions
         --units restricts the fuzzed functions to the gate's sample units.
+    crosscheck.py targets <prepared tree> <gate out> CLASS... > targets.jsonl
+        S13 campaign targets: every function holding a site of those classes (unit index, source, address, symbol,
+        tag S12:<classes>), for classes the fuzzer has not reached (F2U, ALIGN-IGNORED readers, ...).
 Inputs and output are derived from the decomp: local only, never committed.
 """
 import argparse
+import bisect
 import collections
 import glob
 import json
@@ -81,6 +85,8 @@ def function_spans(text):
     """[(first line, last line, address)] of the function after each `// @fnv` tag: from the tag to the brace that
     closes the first body opened after it (before the next tag)"""
     tags = [(m.start(), int(m.group(1), 16)) for m in TAG.finditer(text)]
+    nl = [i for i, c in enumerate(text) if c == '\n'] if tags else []
+    line_of = lambda pos: bisect.bisect_left(nl, pos) + 1     # noqa: E731
     spans = []
     for k, (pos, addr) in enumerate(tags):
         limit = tags[k + 1][0] if k + 1 < len(tags) else len(text)
@@ -103,7 +109,7 @@ def function_spans(text):
             i += 1
         if end is None:
             continue
-        spans.append((text.count('\n', 0, pos) + 1, text.count('\n', 0, end) + 1, addr))
+        spans.append((line_of(pos), line_of(end), addr))
     return spans
 
 
@@ -176,7 +182,7 @@ def cmd_matrix(a):
         present = collections.Counter(cls for k in fns for cls in classes_of.get(k, set()))
         md.append('| %s | %d | %s | %d | %d | %s |' % (
             c, len(fns), ', '.join(pred) or '(none)', hit, len(fns) - hit,
-            ', '.join('%s %d' % kv for kv in present.most_common(8)) or '-'))
+            ', '.join('%s %d' % kv for kv in sorted(present.items(), key=lambda kv: (-kv[1], kv[0]))[:8]) or '-'))
     base = len(diverged & universe) / max(1, len(universe))
     md += ['', '## By gate class', '',
            'Base rate: %d of %d fuzzed functions diverged (%.0f%%).' % (len(diverged), len(universe), 100 * base), '',
@@ -207,9 +213,38 @@ def cmd_matrix(a):
                                                     ','.join(sorted(classes_of.get(k, ())))))
 
 
+def cmd_targets(tree, out_dir, classes):
+    """S13 campaign targets (difffuzz.py fuzz <file>): one JSON line per function holding a site of the classes"""
+    units = json.load(open(os.path.join(tree, 'build', 'units.json')))['units']
+    where = {}
+    for i, u in enumerate(units):
+        for f in u.get('functions', []):
+            where.setdefault((u['source'], int(f['address'], 16)), (i, f['symbol']))
+    sites = load_sites(out_dir)
+    seen, spans_of = {}, {}
+    for cls in classes:
+        for path, line in sites.get(cls, []):
+            if path not in spans_of:
+                try:
+                    spans_of[path] = function_spans(open(os.path.join(tree, path), encoding='utf-8',
+                                                         errors='replace').read())
+                except OSError:
+                    spans_of[path] = []
+            for lo, hi, addr in spans_of[path]:
+                if lo <= line <= hi and (path, addr) in where:
+                    seen.setdefault((path, addr), set()).add(cls)
+                    break
+    for (path, addr), cls in sorted(seen.items()):
+        i, sym = where[(path, addr)]
+        print(json.dumps(dict(unit=i, source=path, address='%08x' % addr, symbol=sym, tag='S12:' + '+'.join(sorted(cls)))))
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == 'causes':
         cmd_causes(sys.argv[2:])
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == 'targets':
+        cmd_targets(sys.argv[2], sys.argv[3], sys.argv[4:])
         return
     ap = argparse.ArgumentParser()
     ap.add_argument('cmd', choices=['matrix'])

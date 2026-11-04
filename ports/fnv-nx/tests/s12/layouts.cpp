@@ -25,5 +25,12 @@ struct Cls { virtual void f(); };
 struct VEmpty : E1 { virtual void g(); int y; };                  // layout: VEmpty msvc=8 gnu=8
 struct Base { virtual ~Base(); int a; char b; };
 struct Derived : Base { FNVNX_MSVC_BASE_END(Base) char c; };      // layout: Derived msvc=16 gnu=16
+// __declspec(align) before the class key: MSVC aligns the type, GCC drops the attribute (-Wattributes); after the
+// class key (the ALIGN1 rewrite) GCC honours it
+__declspec(align(16)) struct AlignPre { float x, y, z, w; };      // layout: AlignPre msvc=16 gnu=16
+struct UsesPre { AlignPre v; float f; };                          // layout: UsesPre msvc=32 gnu=20
+struct __declspec(align(16)) AlignPost { float x, y, z, w; };     // layout: AlignPost msvc=16 gnu=16
+struct UsesPost { AlignPost v; float f; };                        // layout: UsesPost msvc=32 gnu=32
 int sizes[] = {sizeof(D1), sizeof(D2), sizeof(D3), sizeof(P1), sizeof(P2), sizeof(P4), sizeof(B1), sizeof(B2),
-               sizeof(B3), sizeof(B4), sizeof(B6), sizeof(TwoEmpty), sizeof(VEmpty), sizeof(Derived)};
+               sizeof(B3), sizeof(B4), sizeof(B6), sizeof(TwoEmpty), sizeof(VEmpty), sizeof(Derived), sizeof(AlignPre),
+               sizeof(UsesPre), sizeof(AlignPost), sizeof(UsesPost)};

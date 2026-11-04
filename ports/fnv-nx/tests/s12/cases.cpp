@@ -87,3 +87,7 @@ struct Acc { int s; void Init(); };
 int outarg4() { Acc a; a.Init(); return a.s; }                     // expect: OUTARG-UNINIT
 void outarg5(char *dst) { char buf[16]; sprintf(buf, "%d", 1); dst[0] = buf[0]; } // expect: OUTARG-UNINIT
 int outarg6() { int v; int n = sizeof(v); Fill(&v); return v + n; } // expect: OUTARG-UNINIT
+void Range(int &lo, int &hi);
+void Show(const int &v);
+int outarg7() { int lo, hi; Range(lo, hi); return lo - hi; }       // expect: OUTARG-UNINIT
+int outarg8() { int v; Show(v); return 0; }                        // a const reference reads it: nothing
