@@ -40,7 +40,7 @@ d3dx9_38	D3DXMatrixRotationYawPitchRoll	logic	render/nine/d3dx/d3dx_math.cpp	ren
 d3dx9_38	D3DXMatrixTranspose	logic	render/nine/d3dx/d3dx_math.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
 d3dx9_38	D3DXPlaneNormalize	logic	render/nine/d3dx/d3dx_math.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
 d3dx9_38	D3DXPlaneTransform	logic	render/nine/d3dx/d3dx_math.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
-d3dx9_38	D3DXSaveTextureToFileA	open	platform/win32/exports.cpp	fails (D3DERR_INVALIDCALL)	screenshots are not written
+d3dx9_38	D3DXSaveTextureToFileA	device	render/nine/d3dx/d3dx_save.cpp	PNG/BMP/TGA/DDS through CreateFileA (host fs); render targets read back with GetRenderTargetData	the game asks for PNG (0x007a0797); tests: m32 test_d3dx_save.cpp
 d3dx9_38	D3DXVec3Normalize	logic	render/nine/d3dx/d3dx_math.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
 d3dx9_38	D3DXVec3TransformCoord	logic	render/nine/d3dx/d3dx_math.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
 d3dx9_38	D3DXVec3TransformNormal	logic	render/nine/d3dx/d3dx_math.cpp	render/nine/d3dx over the IDirect3DDevice9 in use	
