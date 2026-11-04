@@ -11,6 +11,7 @@
  *   rs NAME VALUE            SetRenderState            samp S NAME VALUE   SetSamplerState
  *   tss S NAME VALUE         SetTextureStageState      notex S             SetTexture(S, NULL)
  *   tex S FMT W H LEVELS hash SEED | solid HEXBYTES    texture from a deterministic generator (D3D memory layout)
+ *   texcube S FMT SIZE hash SEED                        cube texture, one level; face f is generated with SEED + f
  *   vp X Y W H MINZ MAXZ     SetViewport               scissor L T R B     SetScissorRect
  *   proj 16 floats           SetTransform(PROJECTION) (row-major)
  *   mode rhw|xyz             vertex position kind for the following vertices
@@ -145,6 +146,16 @@ static int run_scene(const V6nOps* ops, const char* path, const char* outdir, in
             int r = ops->texture(t, (uint32_t)atoi(a[1]), fmt, tw, th, lv, (const uint8_t* const*)lev);
             for (int i = 0; i < lv; i++) free(lev[i]);
             if (!r) FAIL("texture %s not supported by %s", a[2], ops->name);
+        } else if (!strcmp(a[0], "texcube") && n == 6) {
+            BEGIN();
+            uint32_t fmt; if (!lookup(V6N_FMT, a[2], &fmt) || !v6n_fmt(fmt)) FAIL("unknown texture format %s", a[2]);
+            int sz = atoi(a[3]); if (sz < 1 || sz > 4096) FAIL("bad cube size");
+            if (!ops->texture_cube) FAIL("cube textures not supported by %s", ops->name);
+            uint8_t* f[6]; int bytes;
+            for (int i = 0; i < 6; i++) f[i] = gen_level(fmt, sz, sz, 0, a[4], strtoull(a[5], NULL, 0) + (uint64_t)i, a[5], &bytes);
+            int r = ops->texture_cube(t, (uint32_t)atoi(a[1]), fmt, sz, (const uint8_t* const*)f);
+            for (int i = 0; i < 6; i++) free(f[i]);
+            if (!r) FAIL("cube texture %s not supported by %s", a[2], ops->name);
         } else if (!strcmp(a[0], "vp") && n == 7) {
             BEGIN(); ops->viewport(t, (uint32_t)atoi(a[1]), (uint32_t)atoi(a[2]), (uint32_t)atoi(a[3]), (uint32_t)atoi(a[4]), strtof(a[5], NULL), strtof(a[6], NULL));
         } else if (!strcmp(a[0], "scissor") && n == 5) { BEGIN(); ops->scissor(t, atoi(a[1]), atoi(a[2]), atoi(a[3]), atoi(a[4])); }

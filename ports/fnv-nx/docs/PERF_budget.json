@@ -4,7 +4,8 @@
   "model": "fnvnx-budget-model/1",
   "scene": "exterior, Mojave wasteland, ~2,500 draws (RENDER_NATIVE draw counts), native renderer",
   "frameprof": true,
-  "render": true
+  "render": true,
+  "a57": false
  },
  "assumptions": [
   {
@@ -185,12 +186,13 @@
    "name": "culling (NiCullingProcess, multibounds, occlusion; main, shadow and reflection passes)",
    "role": "main",
    "minsn": [
-    2,
-    4.5
+    3.54,
+    11.36
    ],
-   "basis": "E",
+   "basis": "E+M",
    "phase": "render",
-   "subsystem": "cull"
+   "subsystem": "cull",
+   "note": "reconciled with the fn_cull_test row (S15-simd, J-0150 follow-up): the earlier 2-4.5 M assumed 0.3-1.8 M for the per-object plane tests (50-90 instructions x 6,000-20,000 objects); V1 measured the decomp's per-object test at 306-433 instructions [M], so the item is the rest of the cull (traversal, multibounds, occlusion: 2-4.5 minus 0.3-1.8 = 1.7-2.7 M [E]) plus 306-433 x 6,000-20,000 (1.84-8.66 M, calls [E]). The measured per-call cost wins over the old item total; the call count stays the open estimate"
   },
   {
    "id": "render_accumulation",
@@ -209,8 +211,8 @@
    "name": "native renderer, main-thread side per draw (state keys, packets) x draws",
    "role": "main",
    "minsn": [
-    2.342621,
-    5.639252
+    2.027614,
+    4.861212
    ],
    "basis": "M",
    "per_draw_insn": [
@@ -227,8 +229,8 @@
    "name": "native renderer, submission worker (deko3d command building) x draws",
    "role": "render-worker",
    "minsn": [
-    3.358724,
-    5.425003
+    1.536917,
+    3.606421
    ],
    "basis": "M",
    "per_draw_insn": [
@@ -242,23 +244,49 @@
   },
   {
    "id": "animation",
-   "name": "animation (controller managers, blending, skinning palettes)",
+   "name": "animation on main: the player (FUN_008885e0, FaceActor::UpdateFaceAnimation) and the packed task-6 drain after the AI join (FUN_0087a790, main.cpp:3364: queued UpdateControllersRecursive)",
    "role": "main",
    "minsn": [
-    2,
-    4
+    0.5,
+    1.8
+   ],
+   "basis": "E",
+   "phase": "scene graph",
+   "subsystem": "animation",
+   "note": "PERF.md 6.11: NPC animation (ProcessLists::FUN_0096cda0 -> AnimData::UpdateAnimationForRef, tasklets) and the cell downward pass run on AI linear thread 0 / 1"
+  },
+  {
+   "id": "havok",
+   "name": "Havok on main: the consumers after the AI join (foot IK / ragdoll impulses FUN_00ca2ad0 / FUN_00ca1410, projectiles Update3D 0x009b17a0, muzzle flashes; processlists.cpp:8546-8589) and the player's controller input",
+   "role": "main",
+   "minsn": [
+    0.3,
+    1.5
+   ],
+   "basis": "E",
+   "phase": "havok",
+   "subsystem": "havok",
+   "note": "PERF.md 6.11: with iNumHWThreads > 1 (WinMain sets it from GetSystemInfo: 3) the step itself (bhkWorld::StepSimulation via TES::FUN_00453550) runs on AI linear thread 1 (ailineartaskthreadmanager.cpp:804); main steps only when iNumHWThreads == 1 (main.cpp:2447)"
+  },
+  {
+   "id": "animation_ai",
+   "name": "NPC animation and the cell downward pass on the AI linear threads (FUN_0096cda0, TESObjectCELL::FUN_00551890)",
+   "role": "ai-linear",
+   "minsn": [
+    1.5,
+    2.2
    ],
    "basis": "E",
    "phase": "scene graph",
    "subsystem": "animation"
   },
   {
-   "id": "havok",
-   "name": "Havok step + character controllers",
-   "role": "main",
+   "id": "havok_ai",
+   "name": "Havok step on AI linear thread 1 (TES::FUN_00453550 -> bhkWorld::StepSimulation, one world per frame)",
+   "role": "ai-linear",
    "minsn": [
-    2,
-    5
+    1.7,
+    3.5
    ],
    "basis": "E",
    "phase": "havok",
@@ -318,6 +346,71 @@
    "note": "instruction-equivalents (stall cycles x IPC 0.8): 20k-100k operations per frame on main x 12-32 (15-40 cycles of a dmb ish with stores in flight on the A57) + up to 1 left after the inlining (fnvnx_win32.h saves 1-2 instructions and the call/return per operation, costs +8.8 static instructions per site [M]). S12's estimate (100k x 30 cycles = 2.9 ms at 1.02 GHz) is the hi end. Boot path [M]: 3 Interlocked calls before WinMain (frameprof, owner's exe); no frame yet. B9 measures the per-operation cost on device."
   },
   {
+   "id": "simd_fn_world_transform",
+   "name": "S15-simd override of NiAVObject::UpdateWorldData 0x00a68c60 + the transform compose UpdateWorldLoc 0x00a68bf0 it tail-calls (after - before)",
+   "role": "main",
+   "subsystem": "scene-graph update",
+   "minsn": [
+    -0.6,
+    0.004
+   ],
+   "mid": -0.196,
+   "basis": "M",
+   "follows": "scene_update"
+  },
+  {
+   "id": "simd_fn_cull_test",
+   "name": "S15-simd override of culling per object: 0x00a694e0 (culling worker) + the bound-vs-frustum plane tests (after - before)",
+   "role": "main",
+   "subsystem": "cull",
+   "minsn": [
+    -7.32,
+    -1.542
+   ],
+   "mid": -4.0495,
+   "basis": "M",
+   "follows": "cull"
+  },
+  {
+   "id": "simd_fn_slerp",
+   "name": "S15-simd override of NiQuaternion::Slerp 0x00a6e330 (keyframe blending) (after - before)",
+   "role": "main",
+   "subsystem": "animation",
+   "minsn": [
+    -0.46,
+    -0.092
+   ],
+   "mid": -0.276,
+   "basis": "M",
+   "follows": "animation"
+  },
+  {
+   "id": "simd_fn_quat_from_matrix",
+   "name": "S15-simd override of NiQuaternion::FromRotationMatrix 0x00a6df40 (after - before)",
+   "role": "main",
+   "subsystem": "animation",
+   "minsn": [
+    -0.036,
+    -0.0025
+   ],
+   "mid": -0.014875,
+   "basis": "M",
+   "follows": "animation"
+  },
+  {
+   "id": "simd_fn_gsk",
+   "name": "S15-simd override of Havok GSK narrow phase (0x00da8fb0, 0x00da8390, 0x00da8500, 0x00da8820) (after - before)",
+   "role": "main",
+   "subsystem": "havok",
+   "minsn": [
+    -0.08,
+    -0.008
+   ],
+   "mid": -0.044,
+   "basis": "M",
+   "follows": "havok"
+  },
+  {
    "id": "sync",
    "name": "per-frame hand-offs on main",
    "role": "main",
@@ -356,23 +449,48 @@
    "draws": 3710,
    "frame_minsn": {
     "main": [
-     2.342621,
-     5.639252
+     2.027614,
+     4.861212
     ],
     "worker": [
-     3.358724,
-     5.425003
+     1.536917,
+     3.606421
     ]
    },
    "gpu_ms": {
     "docked_720p": [
-     7.11,
-     12.49
+     5.01,
+     5.49
     ]
    },
    "basis": "M",
    "gpu_basis": "E",
-   "source_commit": "2910d8d51206e94cc9f8f90b355294a525d32f5d"
+   "source_commit": "ec265a05cc5effe76f16370fde931f68a3a88a98"
+  },
+  "overrides": {
+   "rows": [
+    {
+     "id": "fn_world_transform",
+     "delta_minsn_mid": -0.196
+    },
+    {
+     "id": "fn_cull_test",
+     "delta_minsn_mid": -4.05
+    },
+    {
+     "id": "fn_slerp",
+     "delta_minsn_mid": -0.276
+    },
+    {
+     "id": "fn_quat_from_matrix",
+     "delta_minsn_mid": -0.015
+    },
+    {
+     "id": "fn_gsk",
+     "delta_minsn_mid": -0.044
+    }
+   ],
+   "delta_minsn_mid": -4.581
   }
  },
  "scenarios": [
@@ -385,38 +503,46 @@
    "core3": false,
    "cores": {
     "0": {
-     "lo": 13.055,
-     "mid": 22.947,
-     "hi": 33.159,
+     "lo": 2.584,
+     "mid": 17.57,
+     "hi": 31.901,
      "items": {
-      "animation": 3.0,
-      "cull": 3.25,
+      "animation": 1.15,
+      "cull": 7.45,
       "game_logic": 2.0,
-      "havok": 3.5,
+      "havok": 0.9,
       "interlocked_barriers": 0.906,
       "render_accumulation": 2.75,
-      "renderer_main": 3.991,
+      "renderer_main": 3.444,
       "scene_update": 3.25,
+      "simd_fn_cull_test": -4.05,
+      "simd_fn_gsk": -0.044,
+      "simd_fn_quat_from_matrix": -0.015,
+      "simd_fn_slerp": -0.276,
+      "simd_fn_world_transform": -0.196,
       "sync": 0.3
      }
     },
     "1": {
-     "lo": 3.659,
-     "mid": 5.942,
-     "hi": 8.225,
+     "lo": 4.387,
+     "mid": 7.272,
+     "hi": 10.156,
      "items": {
-      "ai_process_lists": 0.55,
+      "ai_process_lists": 2.75,
       "background": 1.0,
-      "renderer_worker": 4.392
+      "havok_ai": 0.95,
+      "renderer_worker": 2.572
      }
     },
     "2": {
-     "lo": 3.7,
-     "mid": 5.95,
-     "hi": 8.2,
+     "lo": 4.35,
+     "mid": 7.25,
+     "hi": 10.15,
      "items": {
-      "ai_process_lists": 4.95,
-      "background": 1.0
+      "ai_process_lists": 2.75,
+      "animation_ai": 1.85,
+      "background": 1.0,
+      "havok_ai": 1.65
      }
     }
    },
@@ -424,40 +550,40 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 12.8,
-       "mid": 28.12,
-       "hi": 54.18
+       "lo": 2.53,
+       "mid": 21.53,
+       "hi": 52.13
       },
       "1": {
-       "lo": 3.59,
-       "mid": 7.28,
-       "hi": 13.44
+       "lo": 4.3,
+       "mid": 8.91,
+       "hi": 16.6
       },
       "2": {
-       "lo": 3.63,
-       "mid": 7.29,
-       "hi": 13.4
+       "lo": 4.26,
+       "mid": 8.88,
+       "hi": 16.58
       }
      },
      "cpu_ms": {
-      "lo": 12.8,
-      "mid": 28.12,
-      "hi": 54.18
+      "lo": 4.3,
+      "mid": 21.53,
+      "hi": 52.13
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.11,
-      "hi": 12.49
+      "lo": 5.01,
+      "hi": 5.49
      },
      "frame_ms": {
-      "lo": 12.8,
-      "mid": 28.12,
-      "hi": 54.18
+      "lo": 5.01,
+      "mid": 21.53,
+      "hi": 52.13
      },
      "worst_frame_ms": {
-      "lo": 14.08,
-      "mid": 35.15,
-      "hi": 81.27
+      "lo": 5.51,
+      "mid": 26.91,
+      "hi": 78.2
      },
      "critical_core": 0,
      "verdicts": {
@@ -465,45 +591,45 @@
       "pass_45": "uncertain",
       "target_60": "uncertain"
      },
-     "level": "fail"
+     "level": "pass_30"
     },
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 7.31,
-       "mid": 16.07,
-       "hi": 30.96
+       "lo": 1.45,
+       "mid": 12.3,
+       "hi": 29.79
       },
       "1": {
-       "lo": 2.05,
-       "mid": 4.16,
-       "hi": 7.68
+       "lo": 2.46,
+       "mid": 5.09,
+       "hi": 9.48
       },
       "2": {
-       "lo": 2.07,
-       "mid": 4.17,
-       "hi": 7.66
+       "lo": 2.44,
+       "mid": 5.08,
+       "hi": 9.48
       }
      },
      "cpu_ms": {
-      "lo": 7.31,
-      "mid": 16.07,
-      "hi": 30.96
+      "lo": 2.46,
+      "mid": 12.3,
+      "hi": 29.79
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.11,
-      "hi": 12.49
+      "lo": 5.01,
+      "hi": 5.49
      },
      "frame_ms": {
-      "lo": 7.31,
-      "mid": 16.07,
-      "hi": 30.96
+      "lo": 5.01,
+      "mid": 12.3,
+      "hi": 29.79
      },
      "worst_frame_ms": {
-      "lo": 8.04,
-      "mid": 20.09,
-      "hi": 46.44
+      "lo": 5.51,
+      "mid": 15.38,
+      "hi": 44.69
      },
      "critical_core": 0,
      "verdicts": {
@@ -511,13 +637,13 @@
       "pass_45": "uncertain",
       "target_60": "uncertain"
      },
-     "level": "pass_45"
+     "level": "target_60"
     }
    },
    "main_minsn": {
-    "lo": 13.055,
-    "mid": 22.947,
-    "hi": 33.159
+    "lo": 2.584,
+    "mid": 17.57,
+    "hi": 31.901
    }
   },
   {
@@ -532,46 +658,52 @@
    "core3": false,
    "cores": {
     "0": {
-     "lo": 8.405,
-     "mid": 16.397,
-     "hi": 25.709,
+     "lo": 3.38,
+     "mid": 15.602,
+     "hi": 29.146,
      "items": {
-      "animation": 2.1,
-      "cull": 0.65,
+      "animation": 0.575,
+      "cull": 5.587,
       "game_logic": 2.0,
-      "havok": 2.1,
+      "havok": 0.9,
       "interlocked_barriers": 0.906,
-      "render_accumulation": 1.1,
-      "renderer_main": 3.991,
+      "render_accumulation": 2.062,
+      "renderer_main": 3.444,
       "scene_update": 3.25,
+      "simd_fn_cull_test": -3.037,
+      "simd_fn_gsk": -0.044,
+      "simd_fn_quat_from_matrix": -0.007,
+      "simd_fn_slerp": -0.138,
+      "simd_fn_world_transform": -0.196,
       "sync": 0.3
      }
     },
     "1": {
-     "lo": 6.106,
-     "mid": 9.795,
-     "hi": 13.521,
+     "lo": 5.448,
+     "mid": 9.11,
+     "hi": 12.292,
      "items": {
-      "ai_process_lists": 0.55,
-      "animation>threaded_anim": 0.504,
+      "ai_process_lists": 2.75,
+      "animation>threaded_anim": 0.338,
       "background": 1.0,
-      "cull>mt_cull": 1.554,
-      "havok>havok_workers": 0.848,
-      "render_accumulation>mt_cull": 0.946,
-      "renderer_worker": 4.392
+      "cull>mt_cull": 1.096,
+      "havok_ai": 0.95,
+      "render_accumulation>mt_cull": 0.404,
+      "renderer_worker": 2.572
      }
     },
     "2": {
-     "lo": 6.147,
-     "mid": 9.803,
-     "hi": 13.546,
+     "lo": 5.461,
+     "mid": 9.088,
+     "hi": 12.334,
      "items": {
-      "ai_process_lists": 4.95,
-      "animation>threaded_anim": 0.555,
+      "ai_process_lists": 2.75,
+      "animation>threaded_anim": 0.338,
+      "animation_ai": 1.85,
       "background": 1.0,
-      "cull>mt_cull": 1.504,
-      "havok>havok_workers": 0.799,
-      "render_accumulation>mt_cull": 0.995
+      "cull>mt_cull": 1.096,
+      "havok_ai": 1.65,
+      "render_accumulation>mt_cull": 0.404
      }
     }
    },
@@ -579,40 +711,40 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 8.24,
-       "mid": 20.09,
-       "hi": 42.01
+       "lo": 3.31,
+       "mid": 19.12,
+       "hi": 47.62
       },
       "1": {
-       "lo": 5.99,
-       "mid": 12.0,
-       "hi": 22.09
+       "lo": 5.34,
+       "mid": 11.16,
+       "hi": 20.09
       },
       "2": {
-       "lo": 6.03,
-       "mid": 12.01,
-       "hi": 22.13
+       "lo": 5.35,
+       "mid": 11.14,
+       "hi": 20.15
       }
      },
      "cpu_ms": {
-      "lo": 8.24,
-      "mid": 20.09,
-      "hi": 42.01
+      "lo": 5.35,
+      "mid": 19.12,
+      "hi": 47.62
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.11,
-      "hi": 12.49
+      "lo": 5.01,
+      "hi": 5.49
      },
      "frame_ms": {
-      "lo": 8.24,
-      "mid": 20.09,
-      "hi": 42.01
+      "lo": 5.35,
+      "mid": 19.12,
+      "hi": 47.62
      },
      "worst_frame_ms": {
-      "lo": 9.06,
-      "mid": 25.11,
-      "hi": 63.02
+      "lo": 5.88,
+      "mid": 23.9,
+      "hi": 71.43
      },
      "critical_core": 0,
      "verdicts": {
@@ -625,40 +757,40 @@
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 4.71,
-       "mid": 11.48,
-       "hi": 24.0
+       "lo": 1.89,
+       "mid": 10.93,
+       "hi": 27.21
       },
       "1": {
-       "lo": 3.42,
-       "mid": 6.86,
-       "hi": 12.63
+       "lo": 3.05,
+       "mid": 6.38,
+       "hi": 11.48
       },
       "2": {
-       "lo": 3.44,
-       "mid": 6.86,
-       "hi": 12.65
+       "lo": 3.06,
+       "mid": 6.36,
+       "hi": 11.52
       }
      },
      "cpu_ms": {
-      "lo": 4.71,
-      "mid": 11.48,
-      "hi": 24.0
+      "lo": 3.06,
+      "mid": 10.93,
+      "hi": 27.21
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.11,
-      "hi": 12.49
+      "lo": 5.01,
+      "hi": 5.49
      },
      "frame_ms": {
-      "lo": 7.11,
-      "mid": 11.48,
-      "hi": 24.0
+      "lo": 5.01,
+      "mid": 10.93,
+      "hi": 27.21
      },
      "worst_frame_ms": {
-      "lo": 7.82,
-      "mid": 14.35,
-      "hi": 36.0
+      "lo": 5.51,
+      "mid": 13.66,
+      "hi": 40.81
      },
      "critical_core": 0,
      "verdicts": {
@@ -670,9 +802,9 @@
     }
    },
    "main_minsn": {
-    "lo": 8.405,
-    "mid": 16.397,
-    "hi": 25.709
+    "lo": 3.38,
+    "mid": 15.602,
+    "hi": 29.146
    }
   },
   {
@@ -689,46 +821,52 @@
    "core3": false,
    "cores": {
     "0": {
-     "lo": 6.651,
-     "mid": 14.145,
-     "hi": 23.529,
+     "lo": 2.187,
+     "mid": 13.864,
+     "hi": 27.378,
      "items": {
-      "animation": 1.732,
-      "cull": 0.65,
+      "animation": 0.474,
+      "cull": 5.587,
       "game_logic": 2.0,
-      "havok": 2.1,
+      "havok": 0.9,
       "interlocked_barriers": 0.906,
-      "render_accumulation": 1.1,
-      "renderer_main": 2.594,
+      "render_accumulation": 2.062,
+      "renderer_main": 2.239,
       "scene_update": 2.763,
+      "simd_fn_cull_test": -3.037,
+      "simd_fn_gsk": -0.044,
+      "simd_fn_quat_from_matrix": -0.006,
+      "simd_fn_slerp": -0.114,
+      "simd_fn_world_transform": -0.167,
       "sync": 0.3
      }
     },
     "1": {
-     "lo": 5.462,
-     "mid": 9.127,
-     "hi": 12.986,
+     "lo": 5.133,
+     "mid": 8.69,
+     "hi": 11.969,
      "items": {
-      "ai_process_lists": 1.2,
-      "animation>threaded_anim": 0.504,
+      "ai_process_lists": 2.75,
+      "animation>threaded_anim": 0.29,
       "background": 1.0,
-      "cull>mt_cull": 1.554,
-      "havok>havok_workers": 0.848,
-      "render_accumulation>mt_cull": 0.946,
-      "renderer_worker": 3.074
+      "cull>mt_cull": 1.145,
+      "havok_ai": 1.3,
+      "render_accumulation>mt_cull": 0.404,
+      "renderer_worker": 1.8
      }
     },
     "2": {
-     "lo": 5.448,
-     "mid": 9.153,
-     "hi": 12.996,
+     "lo": 5.161,
+     "mid": 8.737,
+     "hi": 11.936,
      "items": {
-      "ai_process_lists": 4.3,
-      "animation>threaded_anim": 0.555,
+      "ai_process_lists": 2.75,
+      "animation>threaded_anim": 0.387,
+      "animation_ai": 1.85,
       "background": 1.0,
-      "cull>mt_cull": 1.504,
-      "havok>havok_workers": 0.799,
-      "render_accumulation>mt_cull": 0.995
+      "cull>mt_cull": 1.046,
+      "havok_ai": 1.3,
+      "render_accumulation>mt_cull": 0.404
      }
     }
    },
@@ -736,40 +874,40 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 6.52,
-       "mid": 17.33,
-       "hi": 38.45
+       "lo": 2.14,
+       "mid": 16.99,
+       "hi": 44.73
       },
       "1": {
-       "lo": 5.36,
-       "mid": 11.19,
-       "hi": 21.22
+       "lo": 5.03,
+       "mid": 10.65,
+       "hi": 19.56
       },
       "2": {
-       "lo": 5.34,
-       "mid": 11.22,
-       "hi": 21.24
+       "lo": 5.06,
+       "mid": 10.71,
+       "hi": 19.5
       }
      },
      "cpu_ms": {
-      "lo": 6.52,
-      "mid": 17.33,
-      "hi": 38.45
+      "lo": 5.06,
+      "mid": 16.99,
+      "hi": 44.73
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.11,
-      "hi": 12.49
+      "lo": 5.01,
+      "hi": 5.49
      },
      "frame_ms": {
-      "lo": 7.11,
-      "mid": 17.33,
-      "hi": 38.45
+      "lo": 5.06,
+      "mid": 16.99,
+      "hi": 44.73
      },
      "worst_frame_ms": {
-      "lo": 7.82,
-      "mid": 21.66,
-      "hi": 57.68
+      "lo": 5.57,
+      "mid": 21.24,
+      "hi": 67.09
      },
      "critical_core": 0,
      "verdicts": {
@@ -782,44 +920,44 @@
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 3.73,
-       "mid": 9.91,
-       "hi": 21.97
+       "lo": 1.23,
+       "mid": 9.71,
+       "hi": 25.56
       },
       "1": {
-       "lo": 3.06,
-       "mid": 6.39,
-       "hi": 12.13
+       "lo": 2.88,
+       "mid": 6.09,
+       "hi": 11.18
       },
       "2": {
-       "lo": 3.05,
-       "mid": 6.41,
-       "hi": 12.13
+       "lo": 2.89,
+       "mid": 6.12,
+       "hi": 11.14
       }
      },
      "cpu_ms": {
-      "lo": 3.73,
-      "mid": 9.91,
-      "hi": 21.97
+      "lo": 2.89,
+      "mid": 9.71,
+      "hi": 25.56
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.11,
-      "hi": 12.49
+      "lo": 5.01,
+      "hi": 5.49
      },
      "frame_ms": {
-      "lo": 7.11,
-      "mid": 9.91,
-      "hi": 21.97
+      "lo": 5.01,
+      "mid": 9.71,
+      "hi": 25.56
      },
      "worst_frame_ms": {
-      "lo": 7.82,
-      "mid": 12.39,
-      "hi": 32.95
+      "lo": 5.51,
+      "mid": 12.14,
+      "hi": 38.34
      },
      "critical_core": 0,
      "verdicts": {
-      "fail_below_30": "pass",
+      "fail_below_30": "uncertain",
       "pass_45": "uncertain",
       "target_60": "uncertain"
      },
@@ -827,9 +965,9 @@
     }
    },
    "main_minsn": {
-    "lo": 6.651,
-    "mid": 14.145,
-    "hi": 23.529
+    "lo": 2.187,
+    "mid": 13.864,
+    "hi": 27.378
    }
   },
   {
@@ -848,55 +986,57 @@
    "core3": true,
    "cores": {
     "0": {
-     "lo": 5.917,
-     "mid": 12.942,
-     "hi": 22.061,
+     "lo": 1.434,
+     "mid": 12.659,
+     "hi": 25.944,
      "items": {
-      "animation": 1.732,
-      "cull": 0.65,
+      "animation": 0.474,
+      "cull": 5.587,
       "game_logic": 2.0,
-      "havok": 2.1,
+      "havok": 0.9,
       "interlocked_barriers": 0.906,
-      "render_accumulation": 0.935,
-      "renderer_main": 1.556,
+      "render_accumulation": 1.753,
+      "renderer_main": 1.343,
       "scene_update": 2.763,
+      "simd_fn_cull_test": -3.037,
+      "simd_fn_gsk": -0.044,
+      "simd_fn_quat_from_matrix": -0.006,
+      "simd_fn_slerp": -0.114,
+      "simd_fn_world_transform": -0.167,
       "sync": 0.3
      }
     },
     "1": {
-     "lo": 3.406,
-     "mid": 5.897,
-     "hi": 8.434,
+     "lo": 3.469,
+     "mid": 5.868,
+     "hi": 8.359,
      "items": {
-      "ai_process_lists": 1.85,
-      "animation>threaded_anim": 0.555,
-      "cull>mt_cull": 0.451,
-      "havok>havok_workers": 0.549,
-      "render_accumulation>mt_cull": 0.647,
-      "renderer_worker": 1.845
+      "ai_process_lists": 2.75,
+      "animation>threaded_anim": 0.338,
+      "animation_ai": 0.4,
+      "havok_ai": 1.3,
+      "renderer_worker": 1.08
      }
     },
     "2": {
-     "lo": 3.448,
-     "mid": 5.852,
-     "hi": 8.397,
+     "lo": 3.508,
+     "mid": 5.838,
+     "hi": 8.389,
      "items": {
-      "ai_process_lists": 3.65,
-      "animation>threaded_anim": 0.504,
-      "cull>mt_cull": 0.501,
-      "havok>havok_workers": 0.549,
-      "render_accumulation>mt_cull": 0.647
+      "ai_process_lists": 2.75,
+      "animation>threaded_anim": 0.338,
+      "animation_ai": 1.45,
+      "havok_ai": 1.3
      }
     },
     "3": {
-     "lo": 3.049,
-     "mid": 5.302,
-     "hi": 7.85,
+     "lo": 2.857,
+     "mid": 5.0,
+     "hi": 6.291,
      "items": {
       "background": 2.0,
-      "cull>mt_cull": 2.106,
-      "havok>havok_workers": 0.549,
-      "render_accumulation>mt_cull": 0.647
+      "cull>mt_cull": 2.191,
+      "render_accumulation>mt_cull": 0.809
      }
     }
    },
@@ -904,45 +1044,45 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 5.8,
-       "mid": 15.86,
-       "hi": 36.05
+       "lo": 1.41,
+       "mid": 15.51,
+       "hi": 42.39
       },
       "1": {
-       "lo": 3.34,
-       "mid": 7.23,
-       "hi": 13.78
+       "lo": 3.4,
+       "mid": 7.19,
+       "hi": 13.66
       },
       "2": {
-       "lo": 3.38,
-       "mid": 7.17,
-       "hi": 13.72
+       "lo": 3.44,
+       "mid": 7.15,
+       "hi": 13.71
       },
       "3": {
-       "lo": 2.99,
-       "mid": 6.5,
-       "hi": 12.83
+       "lo": 2.8,
+       "mid": 6.13,
+       "hi": 10.28
       }
      },
      "cpu_ms": {
-      "lo": 5.8,
-      "mid": 15.86,
-      "hi": 36.05
+      "lo": 3.44,
+      "mid": 15.51,
+      "hi": 42.39
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.11,
-      "hi": 12.49
+      "lo": 5.01,
+      "hi": 5.49
      },
      "frame_ms": {
-      "lo": 7.11,
-      "mid": 15.86,
-      "hi": 36.05
+      "lo": 5.01,
+      "mid": 15.51,
+      "hi": 42.39
      },
      "worst_frame_ms": {
-      "lo": 7.82,
-      "mid": 19.82,
-      "hi": 54.07
+      "lo": 5.51,
+      "mid": 19.39,
+      "hi": 63.59
      },
      "critical_core": 0,
      "verdicts": {
@@ -955,49 +1095,49 @@
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 3.31,
-       "mid": 9.06,
-       "hi": 20.6
+       "lo": 0.8,
+       "mid": 8.86,
+       "hi": 24.22
       },
       "1": {
-       "lo": 1.91,
-       "mid": 4.13,
-       "hi": 7.88
+       "lo": 1.94,
+       "mid": 4.11,
+       "hi": 7.81
       },
       "2": {
-       "lo": 1.93,
-       "mid": 4.1,
-       "hi": 7.84
+       "lo": 1.97,
+       "mid": 4.09,
+       "hi": 7.83
       },
       "3": {
-       "lo": 1.71,
-       "mid": 3.71,
-       "hi": 7.33
+       "lo": 1.6,
+       "mid": 3.5,
+       "hi": 5.87
       }
      },
      "cpu_ms": {
-      "lo": 3.31,
-      "mid": 9.06,
-      "hi": 20.6
+      "lo": 1.97,
+      "mid": 8.86,
+      "hi": 24.22
      },
      "gpu_ms": {
       "case": "docked_720p",
-      "lo": 7.11,
-      "hi": 12.49
+      "lo": 5.01,
+      "hi": 5.49
      },
      "frame_ms": {
-      "lo": 7.11,
-      "mid": 9.8,
-      "hi": 20.6
+      "lo": 5.01,
+      "mid": 8.86,
+      "hi": 24.22
      },
      "worst_frame_ms": {
-      "lo": 7.82,
-      "mid": 12.25,
-      "hi": 30.9
+      "lo": 5.51,
+      "mid": 11.07,
+      "hi": 36.33
      },
      "critical_core": 0,
      "verdicts": {
-      "fail_below_30": "pass",
+      "fail_below_30": "uncertain",
       "pass_45": "uncertain",
       "target_60": "uncertain"
      },
@@ -1005,15 +1145,15 @@
     }
    },
    "main_minsn": {
-    "lo": 5.917,
-    "mid": 12.942,
-    "hi": 22.061
+    "lo": 1.434,
+    "mid": 12.659,
+    "hi": 25.944
    }
   }
  ],
  "gates": {
-  "placed@1020": "fail",
-  "placed@1785": "pass_45",
+  "placed@1020": "pass_30",
+  "placed@1785": "target_60",
   "plan45@1020": "pass_30",
   "plan45@1785": "target_60",
   "plan45b@1020": "pass_45",
@@ -1025,8 +1165,8 @@
   "IPC of this code on the A57 (B1): every ms figure scales with it",
   "thread placement and migration under Horizon (B2), hand-off latencies (B3)",
   "GPU time per frame (B7) and the native renderer per-draw cost on device (render machine)",
-  "lever mt_cull: bMTRendering:Display (0x011c710c) is unsafe on the PC code: accumulators are built with one batch renderer, the worker indexes a NULL second one and shares main's; current-accumulator globals shared (PERF.md 6.8). Needs port code; TLS fix done (S5 31cdca3), stage protocol modelled (mtqemu stages)",
-  "lever havok_workers: MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the whole chain (EnsureObjectsCreated 0x00cbf6b0, CreateObjects, pool ctor 0x00d2d110, dispatcher, InitHookTable and its handlers) has native code at link 06857911f5ab, both vtables complete; the run waits for a booted frame (PERF.md 6.9)",
+  "lever mt_cull: MT1 patches/mt1_cull.s1b (main accumulator with 2 batch renderers, only record 21 on the worker; PERF.md 6.8), off by default (bMTRendering=0); moves: half of the main-scene pass, which is part of the cull (shadow, water and interface passes stay on main); needs the S1b MT1 class, mtqemu on the real objects past WinMain, the race checker and frame equivalence",
+  "lever havok_workers: with iNumHWThreads > 1 the step already runs on AI linear thread 1 (PERF.md 6.11); the MT simulation (iSimType=4, linked natively, 6.9) spreads it over the pool, which relieves that thread's core, not main: no main lever (P0 mtmodel's per-core schedule shows the effect)",
   "lever core3: S5 33c0b1b, off by default; the system's own use of core 3 is unmeasured",
   "lever barrier_relax: in the build: S12 52cb478 ORDER_REFCOUNT=weak is compile.sh's default (ORDERING.md Refcounts; sample 110 increments relaxed, 220 decrements release, 201 sites full); race-checked by mtqemu litmus-order ref; B9 on an A57 confirms the stall saving"
  ],
@@ -1075,45 +1215,6 @@
   },
   {
    "kind": "subsystem",
-   "id": "sub_renderer (submission worker)",
-   "name": "renderer (submission worker)",
-   "subsystem": "renderer (submission worker)",
-   "role": "render-worker",
-   "critical": false,
-   "basis": "M",
-   "minsn": {
-    "lo": 3.359,
-    "mid": 4.392,
-    "hi": 5.425
-   },
-   "ms": {
-    "1020": {
-     "lo": 3.293,
-     "mid": 5.382,
-     "hi": 8.864
-    },
-    "1785": {
-     "lo": 1.882,
-     "mid": 3.076,
-     "hi": 5.065
-    }
-   },
-   "share_45": {
-    "1020": 0.242,
-    "1785": 0.139
-   },
-   "fix": "instancing (fewer draws); off the critical path while core 1 has headroom",
-   "gain_main_minsn": [
-    0,
-    0
-   ],
-   "owner": "S6n",
-   "needs_hardware": false,
-   "detail": "items: renderer_worker",
-   "rank": 2
-  },
-  {
-   "kind": "subsystem",
    "id": "sub_renderer (main side)",
    "name": "renderer (main side)",
    "subsystem": "renderer (main side)",
@@ -1121,25 +1222,25 @@
    "critical": true,
    "basis": "M",
    "minsn": {
-    "lo": 2.343,
-    "mid": 3.991,
-    "hi": 5.639
+    "lo": 2.028,
+    "mid": 3.444,
+    "hi": 4.861
    },
    "ms": {
     "1020": {
-     "lo": 2.297,
-     "mid": 4.891,
-     "hi": 9.214
+     "lo": 1.988,
+     "mid": 4.221,
+     "hi": 7.943
     },
     "1785": {
-     "lo": 1.312,
-     "mid": 2.795,
-     "hi": 5.265
+     "lo": 1.136,
+     "mid": 2.412,
+     "hi": 4.539
     }
    },
    "share_45": {
-    "1020": 0.22,
-    "1785": 0.126
+    "1020": 0.19,
+    "1785": 0.109
    },
    "fix": "render machine F2-F4 (RENDER_PERF.md 10: the radix sort's fixed cost, bind elimination)",
    "gain_main_minsn": [
@@ -1149,46 +1250,7 @@
    "owner": "S6n/P6n",
    "needs_hardware": false,
    "detail": "items: renderer_main",
-   "rank": 3
-  },
-  {
-   "kind": "subsystem",
-   "id": "sub_havok",
-   "name": "havok",
-   "subsystem": "havok",
-   "role": "main",
-   "critical": true,
-   "basis": "E",
-   "minsn": {
-    "lo": 2.0,
-    "mid": 3.5,
-    "hi": 5.0
-   },
-   "ms": {
-    "1020": {
-     "lo": 1.961,
-     "mid": 4.289,
-     "hi": 8.17
-    },
-    "1785": {
-     "lo": 1.12,
-     "mid": 2.451,
-     "hi": 4.669
-    }
-   },
-   "share_45": {
-    "1020": 0.193,
-    "1785": 0.11
-   },
-   "fix": "havok_workers: Havok's multithreaded simulation on the worker pool (trace bhkWorld first)",
-   "gain_main_minsn": [
-    0.6,
-    2.5
-   ],
-   "owner": "S15",
-   "needs_hardware": true,
-   "detail": "items: havok",
-   "rank": 4
+   "rank": 2
   },
   {
    "kind": "subsystem",
@@ -1199,35 +1261,35 @@
    "critical": true,
    "basis": "E",
    "minsn": {
-    "lo": 2.0,
-    "mid": 3.25,
-    "hi": 4.5
+    "lo": -3.78,
+    "mid": 3.4,
+    "hi": 9.818
    },
    "ms": {
     "1020": {
-     "lo": 1.961,
-     "mid": 3.983,
-     "hi": 7.353
+     "lo": -3.706,
+     "mid": 4.167,
+     "hi": 16.042
     },
     "1785": {
-     "lo": 1.12,
-     "mid": 2.276,
-     "hi": 4.202
+     "lo": -2.118,
+     "mid": 2.381,
+     "hi": 9.167
     }
    },
    "share_45": {
-    "1020": 0.179,
-    "1785": 0.103
+    "1020": 0.188,
+    "1785": 0.107
    },
-   "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
+   "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
-    1.4,
-    4.05
+    0.3,
+    1.414
    ],
    "owner": "S15/S5",
    "needs_hardware": true,
-   "detail": "items: cull",
-   "rank": 5
+   "detail": "items: cull, simd_fn_cull_test",
+   "rank": 3
   },
   {
    "kind": "subsystem",
@@ -1238,25 +1300,25 @@
    "critical": true,
    "basis": "E",
    "minsn": {
-    "lo": 2.0,
-    "mid": 3.25,
-    "hi": 4.5
+    "lo": 1.4,
+    "mid": 3.054,
+    "hi": 4.504
    },
    "ms": {
     "1020": {
-     "lo": 1.961,
-     "mid": 3.983,
-     "hi": 7.353
+     "lo": 1.373,
+     "mid": 3.743,
+     "hi": 7.359
     },
     "1785": {
-     "lo": 1.12,
-     "mid": 2.276,
-     "hi": 4.202
+     "lo": 0.784,
+     "mid": 2.139,
+     "hi": 4.205
     }
    },
    "share_45": {
-    "1020": 0.179,
-    "1785": 0.103
+    "1020": 0.169,
+    "1785": 0.096
    },
    "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
    "gain_main_minsn": [
@@ -1265,47 +1327,8 @@
    ],
    "owner": "S15/S2",
    "needs_hardware": false,
-   "detail": "items: scene_update",
-   "rank": 6
-  },
-  {
-   "kind": "subsystem",
-   "id": "sub_animation",
-   "name": "animation",
-   "subsystem": "animation",
-   "role": "main",
-   "critical": true,
-   "basis": "E",
-   "minsn": {
-    "lo": 2.0,
-    "mid": 3.0,
-    "hi": 4.0
-   },
-   "ms": {
-    "1020": {
-     "lo": 1.961,
-     "mid": 3.676,
-     "hi": 6.536
-    },
-    "1785": {
-     "lo": 1.12,
-     "mid": 2.101,
-     "hi": 3.735
-    }
-   },
-   "share_45": {
-    "1020": 0.166,
-    "1785": 0.095
-   },
-   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
-   "gain_main_minsn": [
-    0.5,
-    1.8
-   ],
-   "owner": "S15",
-   "needs_hardware": false,
-   "detail": "items: animation",
-   "rank": 7
+   "detail": "items: scene_update, simd_fn_world_transform",
+   "rank": 4
   },
   {
    "kind": "subsystem",
@@ -1336,15 +1359,93 @@
     "1020": 0.152,
     "1785": 0.087
    },
-   "fix": "mt_cull moves 50-70 % with the cull; instancing -10-20 %",
+   "fix": "moves with mt_cull (MT1: the worker registers its half into the main accumulator's second batch renderer); instancing",
    "gain_main_minsn": [
-    0.75,
-    2.8
+    0.225,
+    1.4
    ],
    "owner": "S6n/S15",
    "needs_hardware": true,
    "detail": "items: render_accumulation",
-   "rank": 8
+   "rank": 5
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_havok",
+   "name": "havok",
+   "subsystem": "havok",
+   "role": "ai-linear",
+   "critical": false,
+   "basis": "E",
+   "minsn": {
+    "lo": 1.7,
+    "mid": 2.6,
+    "hi": 3.5
+   },
+   "ms": {
+    "1020": {
+     "lo": 1.667,
+     "mid": 3.186,
+     "hi": 5.719
+    },
+    "1785": {
+     "lo": 0.952,
+     "mid": 1.821,
+     "hi": 3.268
+    }
+   },
+   "share_45": {
+    "1020": 0.144,
+    "1785": 0.082
+   },
+   "fix": "none on main: the step is on AI linear thread 1 already (PERF.md 6.11); iSimType=4 relieves that core",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S15",
+   "needs_hardware": true,
+   "detail": "items: havok_ai",
+   "rank": 6
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_renderer (submission worker)",
+   "name": "renderer (submission worker)",
+   "subsystem": "renderer (submission worker)",
+   "role": "render-worker",
+   "critical": false,
+   "basis": "M",
+   "minsn": {
+    "lo": 1.537,
+    "mid": 2.572,
+    "hi": 3.606
+   },
+   "ms": {
+    "1020": {
+     "lo": 1.507,
+     "mid": 3.152,
+     "hi": 5.893
+    },
+    "1785": {
+     "lo": 0.861,
+     "mid": 1.801,
+     "hi": 3.367
+    }
+   },
+   "share_45": {
+    "1020": 0.142,
+    "1785": 0.081
+   },
+   "fix": "instancing (fewer draws); off the critical path while core 1 has headroom",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S6n",
+   "needs_hardware": false,
+   "detail": "items: renderer_worker",
+   "rank": 7
   },
   {
    "kind": "subsystem",
@@ -1383,7 +1484,7 @@
    "owner": "S5",
    "needs_hardware": true,
    "detail": "items: background",
-   "rank": 9
+   "rank": 8
   },
   {
    "kind": "subsystem",
@@ -1422,6 +1523,45 @@
    "owner": "-",
    "needs_hardware": false,
    "detail": "items: game_logic",
+   "rank": 9
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_animation",
+   "name": "animation",
+   "subsystem": "animation",
+   "role": "ai-linear",
+   "critical": false,
+   "basis": "E",
+   "minsn": {
+    "lo": 1.5,
+    "mid": 1.85,
+    "hi": 2.2
+   },
+   "ms": {
+    "1020": {
+     "lo": 1.471,
+     "mid": 2.267,
+     "hi": 3.595
+    },
+    "1785": {
+     "lo": 0.84,
+     "mid": 1.296,
+     "hi": 2.054
+    }
+   },
+   "share_45": {
+    "1020": 0.102,
+    "1785": 0.058
+   },
+   "fix": "MT1: drain packed task 6 on the AI thread before the join (threaded_anim); NEON Slerp",
+   "gain_main_minsn": [
+    0.2,
+    1.08
+   ],
+   "owner": "S15",
+   "needs_hardware": false,
+   "detail": "items: animation_ai",
    "rank": 10
   },
   {
@@ -1465,6 +1605,84 @@
   },
   {
    "kind": "subsystem",
+   "id": "sub_animation",
+   "name": "animation",
+   "subsystem": "animation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.004,
+    "mid": 0.859,
+    "hi": 1.706
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.004,
+     "mid": 1.053,
+     "hi": 2.787
+    },
+    "1785": {
+     "lo": 0.002,
+     "mid": 0.602,
+     "hi": 1.592
+    }
+   },
+   "share_45": {
+    "1020": 0.047,
+    "1785": 0.027
+   },
+   "fix": "MT1: drain packed task 6 on the AI thread before the join (threaded_anim); NEON Slerp",
+   "gain_main_minsn": [
+    0.2,
+    1.08
+   ],
+   "owner": "S15",
+   "needs_hardware": false,
+   "detail": "items: animation, simd_fn_slerp, simd_fn_quat_from_matrix",
+   "rank": 12
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_havok",
+   "name": "havok",
+   "subsystem": "havok",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.22,
+    "mid": 0.856,
+    "hi": 1.492
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.216,
+     "mid": 1.049,
+     "hi": 2.438
+    },
+    "1785": {
+     "lo": 0.123,
+     "mid": 0.599,
+     "hi": 1.393
+    }
+   },
+   "share_45": {
+    "1020": 0.047,
+    "1785": 0.027
+   },
+   "fix": "none on main: the step is on AI linear thread 1 already (PERF.md 6.11); iSimType=4 relieves that core",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S15",
+   "needs_hardware": true,
+   "detail": "items: havok, simd_fn_gsk",
+   "rank": 13
+  },
+  {
+   "kind": "subsystem",
    "id": "sub_sync",
    "name": "sync",
    "subsystem": "sync",
@@ -1500,7 +1718,7 @@
    "owner": "",
    "needs_hardware": false,
    "detail": "items: sync",
-   "rank": 12
+   "rank": 14
   },
   {
    "kind": "function",
@@ -1570,15 +1788,54 @@
     "1020": 0.042,
     "1785": 0.024
    },
-   "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
+   "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
-    1.4,
-    4.05
+    0.3,
+    1.414
    ],
    "owner": "S15/S5",
    "needs_hardware": true,
-   "detail": "49-67 A64 instructions per call [E] x 6000-20000 calls per frame [E]: object tests over the main, 3 shadow and the reflection passes [E]; before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]",
+   "detail": "49-67 A64 instructions per call [E] x 6000-20000 calls per frame [E]: object tests over the main, 3 shadow and the reflection passes [E]; before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]; V1 (S15-simd PL1 notes): the classification override is 19 behind the plane, 21 in front or straddling (inside 49-67); the decomp before is 306-433 at 4-6 active planes, not 224-330 (understated)",
    "rank": 2
+  },
+  {
+   "kind": "function",
+   "id": "fn_nibound_update",
+   "name": "NiBound::Update 0x00a7fdd0 (an object's world bound, merged into its parent's)",
+   "subsystem": "scene-graph update",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.368,
+    "mid": 0.736,
+    "hi": 1.104
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.361,
+     "mid": 0.902,
+     "hi": 1.804
+    },
+    "1785": {
+     "lo": 0.206,
+     "mid": 0.515,
+     "hi": 1.031
+    }
+   },
+   "share_45": {
+    "1020": 0.041,
+    "1785": 0.023
+   },
+   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
+   "gain_main_minsn": [
+    0.3,
+    0.9
+   ],
+   "owner": "S15/S2",
+   "needs_hardware": false,
+   "detail": "46-46 A64 instructions per call [M] x 8000-24000 calls per frame [E]: two per updated object [E]; 46 A64 instructions on link 0bd144db1464 (dyncount); the NEON override (19 instructions) was dropped by S15-simd: 16 / 49 cycles against the decomp's 18 / 42 in the A57 model (PERF.md 11.6)",
+   "rank": 3
   },
   {
    "kind": "function",
@@ -1589,35 +1846,35 @@
    "critical": true,
    "basis": "E",
    "minsn": {
-    "lo": 0.114,
-    "mid": 0.628,
-    "hi": 1.142
+    "lo": 0.108,
+    "mid": 0.593,
+    "hi": 1.078
    },
    "ms": {
     "1020": {
-     "lo": 0.112,
-     "mid": 0.77,
-     "hi": 1.866
+     "lo": 0.106,
+     "mid": 0.727,
+     "hi": 1.761
     },
     "1785": {
-     "lo": 0.064,
-     "mid": 0.44,
-     "hi": 1.066
+     "lo": 0.06,
+     "mid": 0.415,
+     "hi": 1.007
     }
    },
    "share_45": {
-    "1020": 0.035,
-    "1785": 0.02
+    "1020": 0.033,
+    "1785": 0.019
    },
-   "fix": "havok_workers: Havok's multithreaded simulation on the worker pool (trace bhkWorld first)",
+   "fix": "none on main: the step is on AI linear thread 1 already (PERF.md 6.11); iSimType=4 relieves that core",
    "gain_main_minsn": [
-    0.6,
-    2.5
+    0,
+    0
    ],
    "owner": "S15",
    "needs_hardware": true,
-   "detail": "571-571 A64 instructions per call [M] x 200-2000 calls per frame [E]: convex pair queries per step: character controller casts, contact points [E]; 292 + 119 + 73 + 95 = 579 A64 instructions exclusive on link 0bd144db1464 [M] (600 on an older link); 571 with fnvnx_sse_fast.h's two-source _mm_shuffle_ps sequences (S15-simd, unit_ab.sh: 290 + 119 + 70 + 92, oracle agreement unchanged)",
-   "rank": 3
+   "detail": "539-539 A64 instructions per call [M] x 200-2000 calls per frame [E]: convex pair queries per step: character controller casts, contact points [E]; 292 + 119 + 73 + 95 = 579 A64 instructions exclusive on link 0bd144db1464 [M] (600 on an older link); fnvnx_sse_fast.h (S15-simd, unit_ab.sh, oracle agreement unchanged): two-source _mm_shuffle_ps -> 571, scalar _mm_rsqrt_ss / _mm_add_ss / _mm_set_ss / _mm_load_ss -> 275 + 114 + 70 + 80 = 539",
+   "rank": 4
   },
   {
    "kind": "function",
@@ -1648,93 +1905,15 @@
     "1020": 0.029,
     "1785": 0.017
    },
-   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "fix": "MT1: drain packed task 6 on the AI thread before the join (threaded_anim); NEON Slerp",
    "gain_main_minsn": [
-    0.5,
-    1.8
+    0.2,
+    1.08
    ],
    "owner": "S15",
    "needs_hardware": false,
    "detail": "88-88 A64 instructions per call [M] x 2000-10000 calls per frame [E]: 10-40 animated actors x 60-80 bones x 1-3 sequences [E]; NEON override fnvnx_slerp_00a6e330 (tools/link/overrides, S15-simd): 134 -> 88 A64 instructions per call incl. the weight 0x00a6dc30 and the normalisation 0x00a4ff00 (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 9 -> 9)",
-   "rank": 4
-  },
-  {
-   "kind": "function",
-   "id": "fn_pass_bucket",
-   "name": "BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 (registering a geometry pass)",
-   "subsystem": "render accumulation",
-   "role": "main",
-   "critical": true,
-   "basis": "E",
-   "minsn": {
-    "lo": 0.205,
-    "mid": 0.307,
-    "hi": 0.41
-   },
-   "ms": {
-    "1020": {
-     "lo": 0.201,
-     "mid": 0.377,
-     "hi": 0.67
-    },
-    "1785": {
-     "lo": 0.115,
-     "mid": 0.215,
-     "hi": 0.383
-    }
-   },
-   "share_45": {
-    "1020": 0.017,
-    "1785": 0.01
-   },
-   "fix": "mt_cull moves 50-70 % with the cull; instancing -10-20 %",
-   "gain_main_minsn": [
-    0.75,
-    2.8
-   ],
-   "owner": "S6n/S15",
-   "needs_hardware": true,
-   "detail": "82-82 A64 instructions per call [M] x 2500-5000 calls per frame [E]: geometry passes registered per frame (1.2-1.6 per draw) [E]; 70 + 12 A64 instructions (1.84x and 0.48x the x86 counts)",
    "rank": 5
-  },
-  {
-   "kind": "function",
-   "id": "fn_nibound_update",
-   "name": "NiBound::Update 0x00a7fdd0 (an object's world bound, merged into its parent's)",
-   "subsystem": "scene-graph update",
-   "role": "main",
-   "critical": true,
-   "basis": "E",
-   "minsn": {
-    "lo": 0.152,
-    "mid": 0.304,
-    "hi": 0.456
-   },
-   "ms": {
-    "1020": {
-     "lo": 0.149,
-     "mid": 0.373,
-     "hi": 0.745
-    },
-    "1785": {
-     "lo": 0.085,
-     "mid": 0.213,
-     "hi": 0.426
-    }
-   },
-   "share_45": {
-    "1020": 0.017,
-    "1785": 0.01
-   },
-   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
-   "gain_main_minsn": [
-    0.3,
-    0.9
-   ],
-   "owner": "S15/S2",
-   "needs_hardware": false,
-   "detail": "19-19 A64 instructions per call [M] x 8000-24000 calls per frame [E]: two per updated object [E]; NEON override fnvnx_nibound_update_00a7fdd0 (S15-simd): 46 -> 19 A64 instructions per call (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 15 -> 15)",
-   "rank": 6
   },
   {
    "kind": "function",
@@ -1773,6 +1952,45 @@
    "owner": "S15/S2",
    "needs_hardware": false,
    "detail": "14-50 A64 instructions per call [M] x 4000-12000 calls per frame [E]: objects whose world transform is recomputed per exterior frame [E]; with the override fnvnx_update_world_loc_00a68bf0 (S15-simd; NiTransform compose 0x0062c250, products 0x0043f8d0 / 0x004b4500 / 0x004a3760 / 0x00439e90 inlined): 13-14 on the copy paths, 47 + ~3 for a full compose [M] (override_ab.py, link 0bd144db1464, agreement 11 -> 12 of 16). Before: copy paths 12-14, the compose path 23 + a call to an operator* the link leaves unresolved (>100 counted from the parts); the earlier 45-75 also wrongly took the NiMatrix3 transpose product 0x00a588a0 as part of it",
+   "rank": 6
+  },
+  {
+   "kind": "function",
+   "id": "fn_pass_bucket",
+   "name": "BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 (registering a geometry pass)",
+   "subsystem": "render accumulation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.135,
+    "mid": 0.203,
+    "hi": 0.27
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.132,
+     "mid": 0.248,
+     "hi": 0.441
+    },
+    "1785": {
+     "lo": 0.076,
+     "mid": 0.142,
+     "hi": 0.252
+    }
+   },
+   "share_45": {
+    "1020": 0.011,
+    "1785": 0.006
+   },
+   "fix": "moves with mt_cull (MT1: the worker registers its half into the main accumulator's second batch renderer); instancing",
+   "gain_main_minsn": [
+    0.225,
+    1.4
+   ],
+   "owner": "S6n/S15",
+   "needs_hardware": true,
+   "detail": "54-54 A64 instructions per call [M] x 2500-5000 calls per frame [E]: geometry passes registered per frame (1.2-1.6 per draw) [E]; 42 + 12 A64 instructions on link 0bd144db1464 (dyncount, 15 and 8 clean cases; 1.11x and 0.48x the x86 counts); 70 + 12 (1.84x) on an older link. An override measured 42 -> 44 (S15-simd, dropped): the common path is frame setup",
    "rank": 7
   },
   {
@@ -1823,34 +2041,34 @@
    "critical": true,
    "basis": "E",
    "minsn": {
-    "lo": 0.038,
-    "mid": 0.135,
+    "lo": 0.017,
+    "mid": 0.097,
     "hi": 0.231
    },
    "ms": {
     "1020": {
-     "lo": 0.038,
-     "mid": 0.165,
+     "lo": 0.017,
+     "mid": 0.119,
      "hi": 0.377
     },
     "1785": {
-     "lo": 0.022,
-     "mid": 0.094,
+     "lo": 0.01,
+     "mid": 0.068,
      "hi": 0.216
     }
    },
    "share_45": {
-    "1020": 0.007,
-    "1785": 0.004
+    "1020": 0.005,
+    "1785": 0.003
    },
-   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "fix": "MT1: drain packed task 6 on the AI thread before the join (threaded_anim); NEON Slerp",
    "gain_main_minsn": [
-    0.5,
-    1.8
+    0.2,
+    1.08
    ],
    "owner": "S15",
    "needs_hardware": false,
-   "detail": "77-77 A64 instructions per call [M] x 500-3000 calls per frame [E]: [E]; override fnvnx_quat_from_matrix_00a6df40 (S15-simd: no frame, no volatile reload, no pointer array): 89 -> 77 A64 instructions per call (override_ab.py, link 0bd144db1464, 13 cases, agreement 13 -> 13); 103 was an older link",
+   "detail": "34-77 A64 instructions per call [M] x 500-3000 calls per frame [E]: [E]; override fnvnx_quat_from_matrix_00a6df40 (S15-simd): per path, 34 (trace > 0) to 77 (largest-diagonal path) A64 instructions (V1, tests/v1/test_s15simd_decomp.py); the harness median 89 -> 77 is the slow path; 103 was an older link",
    "rank": 9
   },
   {
@@ -2206,38 +2424,6 @@
  ],
  "queue": [
   {
-   "subsystem": "cull",
-   "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
-   "owner": "S15/S5",
-   "needs_hardware": true,
-   "gain_main_minsn": {
-    "lo": 1.4,
-    "mid": 2.725,
-    "hi": 4.05
-   },
-   "gain_ms_45": {
-    "1020": 3.34,
-    "1785": 1.91
-   },
-   "rank": 1
-  },
-  {
-   "subsystem": "render accumulation",
-   "fix": "mt_cull moves 50-70 % with the cull; instancing -10-20 %",
-   "owner": "S6n/S15",
-   "needs_hardware": true,
-   "gain_main_minsn": {
-    "lo": 0.75,
-    "mid": 1.775,
-    "hi": 2.8
-   },
-   "gain_ms_45": {
-    "1020": 2.17,
-    "1785": 1.24
-   },
-   "rank": 2
-  },
-  {
    "subsystem": "renderer (main side)",
    "fix": "render machine F2-F4 (RENDER_PERF.md 10: the radix sort's fixed cost, bind elimination)",
    "owner": "S6n/P6n",
@@ -2251,39 +2437,55 @@
     "1020": 2.15,
     "1785": 1.23
    },
+   "rank": 1
+  },
+  {
+   "subsystem": "cull",
+   "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
+   "owner": "S15/S5",
+   "needs_hardware": true,
+   "gain_main_minsn": {
+    "lo": 0.3,
+    "mid": 0.857,
+    "hi": 1.414
+   },
+   "gain_ms_45": {
+    "1020": 1.05,
+    "1785": 0.6
+   },
+   "rank": 2
+  },
+  {
+   "subsystem": "render accumulation",
+   "fix": "moves with mt_cull (MT1: the worker registers its half into the main accumulator's second batch renderer); instancing",
+   "owner": "S6n/S15",
+   "needs_hardware": true,
+   "gain_main_minsn": {
+    "lo": 0.225,
+    "mid": 0.812,
+    "hi": 1.4
+   },
+   "gain_ms_45": {
+    "1020": 1.0,
+    "1785": 0.57
+   },
    "rank": 3
   },
   {
-   "subsystem": "havok",
-   "fix": "havok_workers: Havok's multithreaded simulation on the worker pool (trace bhkWorld first)",
-   "owner": "S15",
-   "needs_hardware": true,
-   "gain_main_minsn": {
-    "lo": 0.6,
-    "mid": 1.55,
-    "hi": 2.5
-   },
-   "gain_ms_45": {
-    "1020": 1.9,
-    "1785": 1.08
-   },
-   "rank": 4
-  },
-  {
    "subsystem": "animation",
-   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "fix": "MT1: drain packed task 6 on the AI thread before the join (threaded_anim); NEON Slerp",
    "owner": "S15",
    "needs_hardware": false,
    "gain_main_minsn": {
-    "lo": 0.5,
-    "mid": 1.15,
-    "hi": 1.8
+    "lo": 0.2,
+    "mid": 0.64,
+    "hi": 1.08
    },
    "gain_ms_45": {
-    "1020": 1.41,
-    "1785": 0.81
+    "1020": 0.78,
+    "1785": 0.45
    },
-   "rank": 5
+   "rank": 4
   },
   {
    "subsystem": "scene-graph update",
@@ -2299,7 +2501,7 @@
     "1020": 0.73,
     "1785": 0.42
    },
-   "rank": 6
+   "rank": 5
   }
  ]
 }

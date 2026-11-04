@@ -72,7 +72,9 @@ static inline __attribute__((always_inline)) float32x4_t fnvnx_shuf2_d4(float32x
 /* --- scalar (_ss) forms: one lane computed, the others are a's bits ---
  * _mm_rsqrt_ss: sse2neon computes the vector estimate + Newton step + both zero fix-ups for four lanes, then moves
  * lane 0 (15 instructions). The same operations on lane 0 alone (frsqrte, fmul, frsqrts, fmul; the estimate's
- * +-inf kept as is, which is the fix-up for +-0 inputs) give the same bits: 10.
+ * +-inf kept as is, which is the fix-up for +-0 inputs) give the same bits for every input but a negative one: 10.
+ * For a negative input both return a NaN, but this one can be -qNaN (0xffc00000, seen at -O0) where sse2neon's
+ * vector form gives +qNaN; x86's rsqrtss gives -qNaN, so the difference is toward x86 (V1 SS2).
  * _mm_add_ss: sse2neon adds {b0, 0, 0, 0} to all of a (3 instructions), which turns a -0.0 in lanes 1-3 into +0.0
  * and quiets a signalling NaN there; x86 leaves them unchanged. fadd s + ins (2) is x86's result.
  * _mm_set_ss / _mm_load_ss: movi + ins (2) where `fmov s, s` / `ldr s` (1) write lane 0 and zero the rest. */

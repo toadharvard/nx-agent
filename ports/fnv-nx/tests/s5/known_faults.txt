@@ -12,34 +12,16 @@ exe-vtables         # stand-in for S2c's link-time slot fill (emu_guest.py --exe
                     # misaligned vtables are left); a virtual call past a native vtable's end continues at the exe
                     # slot's native; GOT entries of absolute aliases (aliases.ld `sym + 8`) are relocated. Remove
                     # when S2c fills the slots, sizes native vtables to the exe's and aliases.ld has SANE_EXPR
-0x00aa1070 use-malloc:x0  # NiMalloc: calls the same allocator (Gamebryo's memory manager 0x011f6080) through a slot of
-                      # that one-slot vtable (S1); without this the first setting initializers (0x00f35430..) and
-                      # about 3,470 others fault here
-0x00aa10b0 use-malloc:x0  # NiAlignedMalloc (size, alignment): likewise; malloc's 16-byte alignment
-0x00aa1130 use-malloc:x0  # the other aligned allocation (size, alignment): likewise
-0x00aa13e0 use-malloc:x0  # NiMemObject::operator new (BSFadeNode::operator new): Dispatch through the same allocator
-0x00aa1420            # its operator delete
-0x00aa10f0            # the frees of the same family: likewise, the block leaks
-0x00aa1110
-0x00aa1170
-0x00aa1190
+ctor-returns-this   # every constructor native (address map kind C) returns this: an MSVC constructor is called as a
+                    # function (0x00aa20b0: value = p->FUN_00aa2200(); the OSGlobals and NiGlobalStringTable
+                    # constructors before), and an Itanium constructor returns nothing (S2c: C bridges return this)
 0x00866690          # InitializeGlobal, after InitHolder: std::_Immortalize<StandardLibrarySingletonObject>() has a null
                     # vptr at its vfn_04 call (+0x6c); the options are already stored (S1)
-0x00aa3e40 use-malloc:x1  # MemoryManager::Allocate (+0xa8) calls slot 2 (Allocate) of its heap m_heaps[0] (this+12),
-                      # the FUN_00aa7400 that MemoryManager::InitializeHeaps makes; the decomp's FUN_00aa7400 declares
-                      # one virtual, so its native vtable has one slot and slot 2 is its typeinfo (S1). The farm
-                      # link 9a0243c7eabe stops here, first in the constructor (boot_banner skipped: 4,327 of its
-                      # 4,343 initializer skips), then at WinMain+0xa4. Replaced on every call
-0x00aa1460            # the sized free into the same heap (S13): faults the same way; the block leaks
-0x00aa4060            # MemoryManager::Deallocate: likewise
 0x005e0200            # the INI settings load in WinMain (+0x300): its collection 0x....c660 has the image vptr
                       # 0x01082ed8, stored by hand, which has no native vtable (hand_vptrs.tsv: 750 such on f13; S1/S2);
                       # Open tail-calls its slot 6 = 0. Returns false: the INI file did not open. On the player's exe
                       # it still faults: the tail call lands on _ZTIN12fnv_004d907012FUN_004d9070E (guest rodata), a
                       # slot read past the end of a native vtable (S2c, as 0x00a70b40)
-0x00a5b530 return-this  # NiGlobalStringTable constructor: 0x00a5b630 calls it as `__fastcall FUN_00a5b530(table)` and
-                      # stores the result in 0x011f42c0; the definition is a C++ constructor, which returns nothing on
-                      # AArch64, so the table pointer is whatever x0 held (misaligned: EnterCriticalSection faults; S1/S2)
 0x00aa64d0            # RunThreadProc of the Serialized IO Thread (FUN_00aa7eb0): it tail-calls slot 2 of the IO thread's
                       # vtable _ZTV12FUN_00aa8410, BSThread::v2, a virtual defined nowhere (vslot trap; S1/S2). The
                       # thread ends at once
@@ -55,6 +37,11 @@ _ZN12_GLOBAL__N_16Device13SetDataFormatEPK13_DIDATAFORMAT  # DirectInput SetData
 0x00aea230            # C::SetWindow (InitAudioCallbacks 0x0086ce40, OSGlobals): calls slot 2 of
                       # _ZTVN19ListenerDestruction12FUN_00aea770E, 2 slots, bound to the exe's 13-slot vftable 0x010a3b7c;
                       # the word past it is 0 (S2c, as 0x00a70b40)
-0x0086c160 return-this  # the OSGlobals constructor: WinMain (+0x5a8) stores its result as g_osGlobals 0x011dea0c, as the
-                      # x86 code does with the this an MSVC constructor returns; on AArch64 it returns nothing, so the
-                      # global held 0xfe50 and FUN_0086d500 faulted at WinMain+0x620 (S1/S2c, as 0x00a5b530)
+_Z12FUN_00c3c460v standin  # 0x00c3c460 (WinMain, via 0x00c3bd30): the decomp's `new MH(false)` with an empty MH::MH
+                      # leaves MessageHandler::pHandler without a vptr; once the heaps work (MemoryHeap stand-in,
+                      # heap_standin.c) the first AbstractHeap commit logs through it (slot 5 of a zeroed object).
+                      # standins.c does what the exe does: new(8), MessageHandler 0x00c3bcf0(this, false) (S1)
+_ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc standin  # 0x00aa3cc0: a pool without memory (no fixed-hint
+                      # reservation here) is freed through NiFree before Gamebryo's allocator exists, which skipped
+                      # boot_banner (MemoryManager's constructor) once the game's heaps are used; the exe destroys it
+                      # and calls MemoryManager::Deallocate (standins.c; S1)

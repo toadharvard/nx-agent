@@ -55,6 +55,21 @@ branch `nro/<commit12>` of fnv-nx-build (`publish_nro`). The package holds game-
 goes to nx-agent. The full report has a `## Package` table with every check, and meta.json has `check_package_rc`,
 `nx1_open` and `nx1_checks`.
 
+## Shaders: precompiled, never compiled on the console (owner rule)
+
+- The native renderer's own shaders (render/native/shaders, 162 with every variant) are built by uam at the pins
+  (toolchain/uam/build.sh) when libnxrender.a is built.
+- With `NX_SHADER_TABLE=device` (the pipeline sets it), render/native/n1/build.sh runs toolchain/nro/shaderpack.py:
+  - the DKSH go into one pack, shaders.nxsp, indexed by family and variant, each blob 256-aligned with a crc32;
+  - a shader without a DKSH stops the build;
+  - the guest's table (nx_shaders.c) holds no GLSL. It reads the DKSH from the pack at its first lookup, and only
+    from the pack whose id it was generated with.
+- The package stage puts the pack into fnv.nro's RomFS (toolchain/tools/romfs.py). The host mounts it at start as
+  `fnvshd:` (host_device.inc mount_shader_pack); a missing pack leaves the renderer without shaders, never a fallback.
+- The game's own D3D9 shaders are translated by sdp2dksh (D6) at install time, from the owner's
+  shaderpackage*.sdp into the owner's local shaders_nx.pak. That file never enters nx-agent. Its packer is the
+  missing piece (check 9, game.packer).
+
 ## The checks (`tests/nx1/run.py`; metric: the number not passing)
 
 | # | check | script | passes when |
@@ -67,6 +82,7 @@ goes to nx-agent. The full report has a `## Package` table with every check, and
 | 6 | GPU integration (native renderer only, owner decision) | check_gpu.py | the packaged host is the native deko3d one without libnx's console; nxgpu_init checks every object it creates; default window, acquire/present, 720p (VI scales docked) or the operation mode; pools fit NXGPU_HOST_HEAP_MIB; log path inside the layout; nothing desktop-only |
 | 7 | platform | check_platform.py | HID (4 pads, handheld, keyboard/mouse/touch, vibration), audren, applet pump, every exit path cleans up, crash log; host_device_test.c run under qemu |
 | 8 | owner checklist | check_checklist.py | NRO_CHECKLIST.md is one page and matches the launcher's files and messages |
+| 9 | no shader compiled on the console (owner) | check_shaders.py | fnv.nro's RomFS (romfs.py, = switch-tools build_romfs) holds shaders.nxsp (shaderpack.py: one pack, index by family/variant) with a DKSH for every variant build.py makes and every name the renderer asks for; the guest links the GLSL-free table of that pack (pack id); no compiler in guest or host; the device backend takes DKSH only; the game's sdp2dksh shaders_nx.pak is owner-local and never in git (its install-time packer is still missing) |
 
 Local tools for libnx code without devkitA64: `tests/nx1/syntax.sh` (system cross gcc, newlib headers, -Werror)
 and the qemu-run host_device test. Self-tests: `test_check_nro.py`, `test_check_svc.py`, `threads_harness.c`.

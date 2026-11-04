@@ -122,9 +122,20 @@ fetch_captures() {   # real-game NXD9 captures recorded with d9cap (private game
 			git -C "$ARTIFACTS" archive "$c" | tar -x -C "$gd" && echo "$c" >"$gd/.rev"
 		fi
 	fi
-	if ls "$gd"/*.nxd9 >/dev/null 2>&1 || ls "$gd"/*/*.nxd9 >/dev/null 2>&1; then
-		mkdir -p "$W/caps/game"; rm -f "$W/caps/game"/*.nxd9
-		find "$gd" -name '*.nxd9' -exec ln -sf {} "$W/caps/game/" \;
+	# .nxd9 or .nxd9.xz; when the branch's README lists a sha256 for the .nxd9, it must match (else skipped)
+	mkdir -p "$W/caps/game"; rm -f "$W/caps/game"/*.nxd9
+	local f n want
+	for f in $(find "$gd" -name '*.nxd9' -o -name '*.nxd9.xz' | sort); do
+		n=$(basename "${f%.xz}")
+		case "$f" in *.xz) [ -f "$gd/$n" ] || xz -dkc "$f" >"$gd/$n" || { NOTES+=("game capture $n: xz failed"); continue; } ;; esac
+		want=$(grep -o "| $(basename "$f") |.*" "$gd/README.md" 2>/dev/null | grep -oE '[0-9a-f]{64}' | head -1)
+		if [ -n "$want" ] && [ "$(sha256sum "$gd/$n" | cut -d' ' -f1)" != "$want" ]; then
+			NOTES+=("game capture $n: sha256 differs from the README, skipped"); continue
+		fi
+		# 8.3 conformance (nxd9norm.py: d9cap's empty managed-texture levels get their size), the same file for both sides
+		python3 -I "$CMP/nxd9norm.py" "$gd/$n" "$W/caps/game/$n" >/dev/null || { NOTES+=("game capture $n: nxd9norm failed"); continue; }
+	done
+	if ls "$W/caps/game"/*.nxd9 >/dev/null 2>&1; then
 		GAMECAPS=$W/caps/game
 		NOTES+=("game captures: $(ls "$GAMECAPS" | wc -l) from gamedata/captures at $(cut -c1-12 "$gd/.rev")")
 	fi
