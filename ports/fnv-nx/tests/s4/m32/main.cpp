@@ -27,6 +27,9 @@ void s4_write_file(const char *win_path, const char *data)
     CloseHandle(h);
 }
 
+extern "C" void fnvnx_d3d9_register(void) __attribute__((weak));   /* the null device's d3d9.dll module */
+extern "C" void fnvnx_audio_input_register(void);
+
 static int iat(const char *path)
 {
     FILE *f = fopen(path, "r");
@@ -62,6 +65,10 @@ int main(int argc, char **argv)
     if (system(cmd) != 0)
         return 2;
     fnvnx_path_reset(g_root);
+    /* the modules boot.cpp registers before the image's imports are bound */
+    fnvnx_audio_input_register();
+    if (fnvnx_d3d9_register)
+        fnvnx_d3d9_register();
     if (argc == 3 && !strcmp(argv[1], "--iat"))
         return iat(argv[2]);
     fnvnx_set_command_line(argc, argv);
