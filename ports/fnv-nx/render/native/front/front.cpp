@@ -234,6 +234,7 @@ bool Frame::Init(Backend* be, uint32_t uboBytes, uint32_t uboSize) {
 }
 
 void Frame::Begin(uint32_t frame) {
+    lastEpi_ = 0;
     dropped_ = 0;
     frame_ = frame;
     nPasses_ = nPackets_ = nTex_ = nDyn_ = 0;
@@ -298,6 +299,14 @@ bool Frame::Clear(uint8_t pass, uint8_t layer, uint16_t depthKey, uint32_t flags
 void Frame::Tag(const Packet* p, uint16_t enginePass, uint16_t family) {
     uint32_t i = (uint32_t)(p - packets_);
     if (i < nPackets_) tags_[i] = family ? ((uint32_t)enginePass | (uint32_t)family << 16) : 0;
+}
+
+void Frame::SetEpilogue(Packet* p, const NxEpilogue& e) {
+    if (lastEpi_ && !memcmp(ubo_.cpu() + lastEpi_ - 1, &e, sizeof e)) { p->epi = lastEpi_; return; }
+    NxEpilogue* d = Epilogue(p);
+    if (!d) return;
+    *d = e;
+    lastEpi_ = p->epi;
 }
 
 NxEpilogue* Frame::Epilogue(Packet* p) {
@@ -387,7 +396,9 @@ void Frame::Finish(StateCache& sc, NxFrameStats* stats, bool present) {
                 a = enc_.Op(NxOp_BindIdx, 4); a[0] = p.idxBlock; a[1] = p.idxOffset; a[2] = p.idxSize; a[3] = p.idxType;
                 curIdxB = p.idxBlock; curIdxO = p.idxOffset;
             }
-            if (p.epi && p.epi != curEpi) {
+            // bind the epilogue block on a change of contents (blocks of equal contents are interchangeable)
+            if (p.epi && p.epi != curEpi &&
+                (!curEpi || memcmp(ubo_.cpu() + p.epi - 1, ubo_.cpu() + curEpi - 1, sizeof(NxEpilogue)))) {
                 a = enc_.Op(NxOp_BindUbo, 5);
                 a[0] = 2; a[1] = 2; a[2] = ubo_.block(); a[3] = p.epi - 1; a[4] = 256;
                 curEpi = p.epi;

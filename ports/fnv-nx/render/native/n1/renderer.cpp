@@ -312,8 +312,10 @@ bool Renderer::Render(const Draw& d) {
         (void)litPoints;
     }
     if (needEpi) {
-        NxEpilogue* e = frame_.Epilogue(p);
-        if (e) nx_epilogue_fill(e, &r.dyn, r.shaderBits);
+        NxEpilogue e;
+        memset(&e, 0, sizeof e);
+        nx_epilogue_fill(&e, &r.dyn, r.shaderBits);
+        frame_.SetEpilogue(p, e);
     }
     DynRec dr;
     DynFromD3D9(&dr, r.dyn);

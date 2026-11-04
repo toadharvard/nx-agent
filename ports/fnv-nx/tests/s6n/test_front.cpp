@@ -210,7 +210,36 @@ static void test_sort_property() {
     CHECK(bad == 0);
 }
 
+static void test_epilogue_binds() {
+    // epilogue blocks: shared by SetEpilogue while equal, and bound only when the contents change
+    static RecBe be;
+    static nx::StateCache sc;
+    static nx::Frame f;
+    CHECK(f.Init(&be, 1 << 20, 64));
+    f.Begin(0);
+    nx::PassDesc pd; memset(&pd, 0, sizeof pd); pd.color = 1; pd.width = 64; pd.height = 32;
+    uint8_t pass = f.AddPass(pd);
+    NxRenderState r = {{0, 0, 0, 0}};
+    uint16_t st = sc.State(1, 2, 0, r);
+    NxEpilogue a, b;
+    memset(&a, 0, sizeof a); memset(&b, 0, sizeof b); b.alphaRef = 0.5f; b.alphaTest = 1;
+    const NxEpilogue* seq[6] = {&a, &a, &b, &b, &a, &a};
+    uint32_t epis[6];
+    for (int i = 0; i < 6; i++) {
+        nx::Packet* p = f.Emit();
+        p->key = nx::SortKey(pass, 0, st, 0, (uint16_t)i); p->state = st; p->count = 3; p->vtxBlock = 1;
+        f.Constants(&p->uboOffset);
+        if (i < 5) f.SetEpilogue(p, *seq[i]);
+        else { NxEpilogue* e = f.Epilogue(p); *e = a; }   // a fresh block with the same contents as draw 4's
+        epis[i] = p->epi;
+    }
+    CHECK(epis[0] == epis[1] && epis[2] == epis[3] && epis[0] != epis[2] && epis[4] != epis[0] && epis[5] != epis[4]);
+    f.Finish(sc, nullptr);
+    CHECK(be.Count(NxOp_BindUbo) == 6 + 3);   // 6 per-draw slices; epilogue a, b, a (draw 5's equal block: no bind)
+}
+
 int main() {
+    test_epilogue_binds();
     test_sort_property();
     test_ubo_ring_capacity();
     test_skin_palette();
