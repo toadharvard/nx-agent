@@ -201,7 +201,10 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 oracle gap: both machines read garbage). `python3 causes.py summary <dirs> [--recheck-tag t] --out causes.json`
 writes `fnvnx-causes/1`: per cause divergences, functions, functions whose worst cause it is (`worst_of`), kinds,
 five example reproducers, plus `functions_by_class` (each diverging function by its worst class, real-bug first)
-for R0. `causes.py explain <div.json>...` prints hint, refined cause and class. Test: `tests/s13/test_causes.py`.
+for R0. `causes.py merge <reports/fz<k> .md | causes.json>... --out all.json` adds the shards up
+(classes from this checkout's policy). Input layout (any campaign or `fuzz/cache/<k>of<N>` checkout): `results.jsonl`
+(address, source, status; only `ok` rows count), `div/<addr>-<n>.json` (divergence, hint, case), optional
+`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. Test: `tests/s13/test_causes.py`.
 
 ## Lockstep (`lockstep.py`, D14)
 

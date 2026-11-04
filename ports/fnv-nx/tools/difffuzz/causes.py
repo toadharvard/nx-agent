@@ -11,8 +11,19 @@ or `signedness?`.
         one row per cause: divergences, functions, functions whose worst cause it is, verdict class, owner, why
         (fnvnx-causes/1, read by tools/gates for R0); with --recheck-tag, replays that no longer reproduce are dropped
         exactly as report.py does
+    causes.py merge <report.md | causes.json>... [--out causes.json]
+        the shards' summaries added up: the ```json fnvnx-causes``` block of each fuzz report (reports/fz<k>, written
+        by tools/farm/fuzz_job.sh) or a causes_cum.json; one fnvnx-causes/1 for all shards (examples dropped)
     causes.py explain <div.json>...
         the refined cause of each record and the rule that gave it
+
+Input layout of a campaign or fuzz cache directory (fuzz.py / fuzzcache.py; branch fuzz/cache/<k>of<N>):
+    results.jsonl          one row per function: address, source (unit), status ('ok' is fuzzed; setup:*, run:*,
+                           crash:*, oracle-gap:* are not counted), divergences [{kind, cause, file, soft}], ...
+    div/<addr>-<n>.json    the minimised reproducer: source, address, symbol, conv, divergence {kind, x86, arm, ...},
+                           hint {cause, ...}, case
+    recheck[_<tag>].jsonl  optional (difffuzz.py recheck): replays gone are dropped, still ones use the new divergence
+A function counts when its results row says ok; its causes come from its div files (report.reclassify, then refine).
 
 Verdict classes (POLICY):
   by-design  MSVC and the port differ only where C++ leaves it open or the input is invalid for the original game
@@ -381,6 +392,36 @@ def summarize(dirs, tag=''):
     }
 
 
+def merge(paths):
+    """Sum the fnvnx-causes summaries of several shards (report .md blocks or JSON files)."""
+    tot = dict(format='fnvnx-causes/1', shards=0, functions_ok=0, functions_diverging=0,
+               functions_by_class={c: 0 for c in CLASS_ORDER}, causes={})
+    for p in paths:
+        txt = open(p).read()
+        if p.endswith('.md'):
+            i = txt.find('```json fnvnx-causes')
+            if i < 0:
+                continue
+            i = txt.index('\n', i) + 1
+            txt = txt[i:txt.index('```', i)]
+        s = json.loads(txt)
+        tot['shards'] += 1
+        tot['functions_ok'] += s.get('functions_ok', 0)
+        tot['functions_diverging'] += s.get('functions_diverging', 0)
+        for c, n in s.get('functions_by_class', {}).items():
+            tot['functions_by_class'][c] = tot['functions_by_class'].get(c, 0) + n
+        for c, r in s.get('causes', {}).items():
+            cls, owner, hard, why = policy(c)       # this checkout's policy decides the class
+            t = tot['causes'].setdefault(c, dict(verdict=cls, owner=owner, hard=hard, why=why, divergences=0,
+                                                 functions=0, worst_of=0, kinds={}))
+            for k_ in ('divergences', 'functions', 'worst_of'):
+                t[k_] += r.get(k_, 0)
+            for k_, n in (r.get('kinds') or {}).items():
+                t['kinds'][k_] = t['kinds'].get(k_, 0) + n
+    tot['causes'] = dict(sorted(tot['causes'].items(), key=lambda kv: (-kv[1]['divergences'], kv[0])))
+    return tot
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -388,11 +429,14 @@ def main(argv=None):
     s.add_argument('dirs', nargs='+')
     s.add_argument('--recheck-tag', default='')
     s.add_argument('--out', default='')
+    m = sub.add_parser('merge')
+    m.add_argument('files', nargs='+')
+    m.add_argument('--out', default='')
     e = sub.add_parser('explain')
     e.add_argument('files', nargs='+')
     a = ap.parse_args(argv)
-    if a.cmd == 'summary':
-        out = summarize(a.dirs, a.recheck_tag)
+    if a.cmd in ('summary', 'merge'):
+        out = summarize(a.dirs, a.recheck_tag) if a.cmd == 'summary' else merge(a.files)
         txt = json.dumps(out, indent=1, sort_keys=True)
         if a.out:
             open(a.out, 'w').write(txt + '\n')

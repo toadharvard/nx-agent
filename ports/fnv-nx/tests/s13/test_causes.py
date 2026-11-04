@@ -167,6 +167,18 @@ def test_summary():
         check(c['unclassified']['divergences'] == 1, 'a recheck-gone replay is dropped')
         check(s['functions_by_class'] == {'real-bug': 1, 'triage': 1, 'artifact': 0, 'by-design': 1},
               'functions by worst class')
+        # merge: one shard as a report block, one as the JSON file
+        md = os.path.join(d, 'fz1.md')
+        open(md, 'w').write('# fuzz\n\n```json fnvnx-causes\n%s\n```\n' % json.dumps(s))
+        mout = os.path.join(d, 'all.json')
+        causes.main(['merge', md, out, '--out', mout])
+        m = json.load(open(mout))
+        check(m['shards'] == 2 and m['functions_ok'] == 6 and m['functions_diverging'] == 6, 'merge adds shards')
+        check(m['causes']['native-trap']['divergences'] == 2 and m['functions_by_class']['real-bug'] == 2,
+              'merge adds causes and classes')
+        nob = os.path.join(d, 'empty.md')
+        open(nob, 'w').write('# fuzz, no causes block\n')
+        check(causes.merge([nob])['shards'] == 0, 'a report without the block is skipped')
 
 
 if __name__ == '__main__':
