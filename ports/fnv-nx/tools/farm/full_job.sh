@@ -82,6 +82,9 @@ if [ -n "$(art vorbis)" ]; then ARGS+=(VORBIS="$(art vorbis)"); else ARGS+=(VORB
 V1=$F/build/v1
 rm -rf "$V1" "$F/v1-run" "$F/v1-report.md"
 # the same cross tools as the steps after it, so the link is not redone for another compiler path
+# Short waits for the prepare/compile farms' artifacts: when they are not there, this job prepares and compiles
+# locally (step 4) instead of waiting up to 1.5 h for them
+export FARM_TREE_WAIT=${FARM_TREE_WAIT:-300} FARM_OBJ_WAIT=${FARM_OBJ_WAIT:-300}
 CROSS_BIN="$(art cross_bin)" LINK_BUILD=$F/build FARM_SRC=$SRC FARM_EXT=$EXT \
 	bash "$HERE/link_job.sh" "$COMMIT" "$F/link-$C12.md" > "$F/link_job.log" 2>&1 \
 	|| log "link_job.sh exited $?"
@@ -104,17 +107,22 @@ job_gamedata
 log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; boot image: $NOTE_EXE"
 
 # 4. Guest, emulated boot, host, package on that link (the link stage stays cached: same inputs).
-# INPUTS=0: no tree or no objects. Not rc=2: GNU make itself exits 2 whenever a stage fails (V1, J-0136), and such a
+# INPUTS stays 1: without farm inputs the build prepares and compiles locally. Not rc=2: GNU make itself exits 2 whenever a stage fails (V1, J-0136), and such a
 # build still gets its stub boot, audits and publish.
+# Without the prepare farm's tree or the compile farms' objects of this commit, the build prepares and compiles
+# locally at this head (make's own prepare and compile stages). It never reports the build directory's records of an
+# older commit as this one's (the 097cdd1504c8 report showed 06857911's tree, objects and link as "cached").
 rc=0; INPUTS=1
-if [ -n "$TREE" ] && [ -n "$OBJS" ]; then
-	# shellcheck disable=SC2086
-	make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
-		${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
-	ls -1t "$F"/make-*.log | tail -n +6 | xargs -r rm -f
-else
-	rc=2; INPUTS=0
+if [ -z "$TREE" ] || [ -z "$OBJS" ]; then
+	log "no farm tree/objects for $C12: preparing and compiling locally at this head"
+	NOTE_TREE="$NOTE_TREE; prepared locally at $C12"; NOTE_OBJS="$NOTE_OBJS; compiled locally at $C12"
+	KEEP=(); for a in "${ARGS[@]}"; do case "$a" in PREPARED=*|OBJECTS=*) ;; *) KEEP+=("$a") ;; esac; done
+	ARGS=("${KEEP[@]}")
 fi
+# shellcheck disable=SC2086
+make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
+	${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
+ls -1t "$F"/make-*.log | tail -n +6 | xargs -r rm -f
 
 # 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the
 # known faults (docs/TOOLCHAIN.md section 18), so the frontier beyond them is published next to the raw boot's
