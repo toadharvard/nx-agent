@@ -7,6 +7,7 @@
 //   int, long, short, signed char      call __ftol2_sse   - cvttsd2si on every SSE2 PC: int32, 0x80000000 for NaN
 //                                                           and anything outside int32 (truncated)
 //   unsigned short, unsigned char      inline fistp DWORD - x87 int32, the same 0x80000000
+//   (an enum without a fixed underlying type is int in MSVC, whatever its enumerators)
 //   unsigned int, unsigned long        inline fistp QWORD - x87 int64, low 32 bits; 0x8000000000000000 for NaN and
 //                                                           anything outside int64 (so 0)
 //   __int64, unsigned __int64          call __ftol2       - x87 int64, 0x8000000000000000 likewise
@@ -65,7 +66,12 @@ struct ftoi_pass : gimple_opt_pass {
         if (!SCALAR_FLOAT_TYPE_P(ft) || TYPE_PRECISION(ft) > 64) continue;
         unsigned p = TYPE_PRECISION(it);
         if (p > 64) continue;
-        bool wide = p > 32 || (p == 32 && TYPE_UNSIGNED(it));   // x87 int64 (__ftol2, fistp QWORD)
+        // MSVC's enums are int unless the enum names its underlying type (`enum E : unsigned`); GCC gives an enum
+        // without one whose enumerators are all >= 0 unsigned int. TYPE_LANG_FLAG_5 of an ENUMERAL_TYPE is the
+        // front end's ENUM_FIXED_UNDERLYING_TYPE_P (c-family/c-common.h): without it, take MSVC's int path.
+        bool uns = TYPE_UNSIGNED(it);
+        if (TREE_CODE(it) == ENUMERAL_TYPE && !TYPE_LANG_FLAG_5(TYPE_MAIN_VARIANT(it))) uns = false;
+        bool wide = p > 32 || (p == 32 && uns);                  // x87 int64 (__ftol2, fistp QWORD)
         tree st = wide ? long_long_integer_type_node : integer_type_node;
         gimple_seq seq = NULL;
         tree xd = x;

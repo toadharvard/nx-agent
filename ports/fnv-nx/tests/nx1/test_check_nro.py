@@ -106,6 +106,27 @@ def main():
             add_dyn(8, 24)(b)
         mutated("ABS64 relocation", "dyn.rela_types", bad_rela)
 
+        def rela_into_rodata(b):   # RELATIVE (1027) targeting rodata, which hbloader maps R-- (V1 NX1-NRO-N2)
+            ra = 0x1F00
+            struct.pack_into("<QQq", b, ra, 0x1000, 1027, 0)
+            add_dyn(7, ra)(b)
+            add_dyn(8, 24)(b)
+        mutated("RELATIVE into rodata", "dyn.rela_targets", rela_into_rodata)
+
+        def relr_into_text(b):     # one RELR address entry pointing at text
+            ra = 0x1F00
+            struct.pack_into("<Q", b, ra, 0x100)
+            add_dyn(36, ra)(b)
+            add_dyn(35, 8)(b)
+        mutated("RELR into text", "dyn.relr_targets", relr_into_text)
+
+        def relr_bitmap_into_rodata(b):   # address entry in data, then a bitmap entry reaching past it is fine;
+            ra = 0x1F00                  # an address entry in rodata is not
+            struct.pack_into("<QQ", b, ra, 0x2000, 0x1000)
+            add_dyn(36, ra)(b)
+            add_dyn(35, 16)(b)
+        mutated("RELR address in rodata", "dyn.relr_targets", relr_bitmap_into_rodata)
+
         # icon variants
         from_pil = None
         try:
@@ -131,6 +152,28 @@ def main():
             expect("packer refuses a segment gap", False)
         except ValueError:
             expect("packer refuses a segment gap", True)
+        # the packer refuses a relocation outside the RW segment too: a RELA table in a copy of the ELF
+        b = bytearray(open(elf, "rb").read())
+        ph = struct.unpack_from("<Q", b, 32)[0]
+        struct.pack_into("<Q", b, ph + 56 + 32, 0x1000)   # rodata filesz: the table at 0x1F00 is file-backed
+        e2 = nxelf.Elf(bytes(b))
+        dynp = next(p for p in e2.phdrs if p.type == nxelf.PT_DYNAMIC)
+        rel_va = 0x1F00
+        b[e2.vaddr_to_offset(0x1000) + 0xF00:e2.vaddr_to_offset(0x1000) + 0xF18] = struct.pack("<QQq", 0x1000, 1027, 0)
+        o = dynp.offset
+        while struct.unpack_from("<q", b, o)[0] != 0:
+            o += 16
+        struct.pack_into("<qQqQqQ", b, o, 7, rel_va, 8, 24, 0, 0)
+        try:
+            e3 = nxelf.Elf(bytes(b))
+            refused = False
+            try:
+                elf2nro.build_nro(e3, icon, nacp)
+            except ValueError as ex:
+                refused = "RW segment" in str(ex)
+            expect("packer refuses a relocation into rodata", refused)
+        except nxelf.ElfError as ex:
+            expect(f"packer refusal test set up ({ex})", False)
         print(f"{failures} failed")
         return 1 if failures else 0
     finally:

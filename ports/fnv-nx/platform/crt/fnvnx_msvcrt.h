@@ -206,7 +206,8 @@ void *fnvnx_exception_copy_ctor(void *self, const void *other);
 void *fnvnx_exception_assign(void *self, const void *other);
 void fnvnx_exception_dtor(void *self);
 const char *fnvnx_exception_what(const void *self);
-void *fnvnx_bad_cast_ctor(void *self, const char *msg);               /* std::bad_cast::bad_cast(const char *) */
+void *fnvnx_bad_cast_ctor(void *self, const char *msg);
+void *fnvnx_bad_alloc_ctor(void *self, const char *msg);              /* std::bad_alloc::bad_alloc(const char *) */               /* std::bad_cast::bad_cast(const char *) */
 void *fnvnx_mutex_ctor(void *self);                                    /* std::_Mutex */
 void fnvnx_mutex_dtor(void *self);
 void fnvnx_mutex_lock(void *self);

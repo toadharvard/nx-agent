@@ -65,13 +65,13 @@ NOTE_TREE=t; NOTE_OBJS=o; OBJ_COMMIT=""; REPORT=$T/report.md; echo "# report" > 
 COMMIT=4444444444444444444444444444444444444444; C12=${COMMIT:0:12}
 BD=$T/build
 rec() { mkdir -p "$BD/$1"; printf '{"stage": "%s", "status": "%s"%s}\n' "$1" "$2" "${4:-}" > "$BD/$1/stage.json"; touch -d "$3" "$BD/$1/stage.json"; }
-mkdir -p "$BD/link/out/cache" "$BD/link/out/vtables" "$BD/link/fixed" "$BD/guest" "$BD/boot/sdmc/fnvnx/game" "$BD/boot/stub"
+mkdir -p "$BD/link/out/cache" "$BD/link/out/vtables" "$BD/link/fixed" "$BD/guest" "$BD/boot/sdmc/switch/fnv" "$BD/boot/stub"
 for f in aliases.ld refs.tsv abi.tsv addrmap.tsv layouts.tsv; do echo x > "$BD/link/out/$f"; done
 echo x > "$BD/link/out/cache/msvc.tsv"; echo x > "$BD/link/fixed/zz_bridges.o"; echo x > "$BD/link/summary.txt"
 rec compile ok '2026-11-04 08:00'; rec link ok '2026-11-04 10:00' ", \"prepared_from\": {\"port_commit\": \"$COMMIT\"}"
 echo elf > "$BD/guest/fnvnx.elf"; rec guest ok '2026-11-04 10:10'
 for f in summary.txt frontier.txt frontier.tsv emu.log; do echo boot > "$BD/boot/$f"; done
-cp "$GAME_EXE" "$BD/boot/sdmc/fnvnx/game/FalloutNV.exe"; cp "$GAME_EXE" "$BD/boot/stub/FalloutNV.exe"
+cp "$GAME_EXE" "$BD/boot/sdmc/switch/fnv/FalloutNV.exe"; cp "$GAME_EXE" "$BD/boot/stub/FalloutNV.exe"
 printf 'STOPPED: x\n' > "$BD/boot/stub/emu_stub.log"
 rec boot warn '2026-11-04 10:20' ", \"image\": \"$GAME_EXE\""
 publish_link "$BD" >/dev/null 2>&1

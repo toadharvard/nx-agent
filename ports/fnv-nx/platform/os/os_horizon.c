@@ -228,7 +228,7 @@ void os_tls_set(void *p)
     threadTlsSet(g_tls_slot, p);
 }
 
-/* ---- time: the ARM generic timer (CNTVCT_EL0 / CNTFRQ_EL0, 19.2 MHz). QueryPerformanceCounter, __rdtsc
+/* ---- time: the ARM generic timer (CNTPCT_EL0 / CNTFRQ_EL0, 19.2 MHz; CNTVCT_EL0 traps at EL0 on Horizon). QueryPerformanceCounter, __rdtsc
  * (shim/include/fnvnx_asm.h) and os_cycle_counter all read the same counter so calibrations line up. */
 uint64_t os_ticks(void) { return armGetSystemTick(); }
 uint64_t os_tick_freq(void) { return armGetSystemTickFreq(); }
@@ -499,4 +499,4 @@ int os_vm_release(void *addr, size_t size)
     return r;
 }
 
-const char *os_default_root(void) { return "sdmc:/fnv-nx"; }
+const char *os_default_root(void) { return "sdmc:/switch/fnv"; }   /* = FNVNX_SD_DIR (toolchain/include/fnvnx/sdlayout.h) */

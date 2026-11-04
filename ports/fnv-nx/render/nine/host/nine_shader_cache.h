@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define NX_NINE_SHADER_CACHE_PATH "sdmc:/fnvnx/shaders.nvc0cache"
+#define NX_NINE_SHADER_CACHE_PATH "sdmc:/switch/fnv/shaders.nvc0cache"   /* inside FNVNX_SD_DIR (fnvnx/sdlayout.h) */
 
 /* path NULL: $NVC0_SHADER_CACHE if set, else NX_NINE_SHADER_CACHE_PATH. Read-write: shipped entries
  * hit, misses are compiled and appended. Creates the parent directory if missing.

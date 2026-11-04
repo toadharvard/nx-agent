@@ -30,3 +30,11 @@ void st_xcount(Obj *o) { o->m_xcount = 0; }
 // keys-expect: dmb\tish
 // nokeys-reject: dmb
 void st_copy(P *p, const P *n) { *p = *n; }
+// the writer of the K9 poll's flag
+// keys-expect: stlr\tw
+// nokeys-reject: stlr
+void st_brk() { g_brk = 1; }
+// a store through a local pointer to the polled flag (V1's K8)
+// keys-expect: stlr\tw
+// nokeys-reject: stlr
+void st_via_ptr(Worker *w) { int *q = &w->m_bDone; *q = 1; }

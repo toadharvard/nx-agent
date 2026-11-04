@@ -46,6 +46,10 @@ public:
     // Texture handles of stages 0..n-1 (sampler objects created through be and cached by NxSamplerState).
     uint32_t Handles(Backend* be, uint32_t* out, uint32_t n);
     uint32_t resolves() const { return resolves_; }
+    uint32_t samplerTranslations() const { return smpTranslations_; }   // nx_d3d9_sampler calls so far
+    // changes whenever a stage's image, texture kind or sampler states change (Handles' result may differ)
+    uint32_t textureGeneration() const { return texGen_; }
+    bool lastHandlesComplete() const { return handlesComplete_; }       // every sampler of the last Handles exists
     const uint32_t* rs() const { return rs_; }
 private:
     uint32_t rs_[NXD3D_RS_COUNT], rsSaved_[NXD3D_RS_COUNT];
@@ -61,6 +65,14 @@ private:
     enum { kSamplerCache = 128 };
     NxSamplerState smpKey_[kSamplerCache];
     uint32_t smpId_[kSamplerCache], nSmp_ = 0;
+    // per stage: the translated sampler of the current sampler states + texture kind (P6n F4: re-translated only
+    // after a SetSamplerState that changes a value, a restore, or a texture of another kind)
+    uint32_t stageSmp_[kStages] = {};      // sampler id, 0 = not translated since the last change
+    bool stageSrgb_[kStages] = {};
+    uint8_t srgbClass_[kStages] = {};      // of kind_[s].format: 1 sRGB-capable D3D format, 2 has an sRGB view
+    uint32_t smpTranslations_ = 0;
+    uint32_t texGen_ = 1;
+    bool handlesComplete_ = false;
 };
 
 // ---- the renderer ----------------------------------------------------------------------------------------------
@@ -189,6 +201,11 @@ private:
     uint16_t LitPermutation(int spec, int dir, int pointsIdx);
     bool EpiKnown(uint16_t ps) const;
     void LearnEpilogueVariants(uint16_t ps);
+    int EpiIndex(uint16_t ps);                       // epi_ index of a fragment shader's permutations, -1: none
+    void NoteEpi(uint16_t ps, int index);
+    // fragment shader id -> 0 not looked up yet, 1 no permutations, 2 + epi_ index (ids >= kEpiIds: the lists above)
+    enum { kEpiIds = 4096 };
+    uint8_t epiOf_[kEpiIds] = {};
     Ring geomRing_;
     uint32_t white_ = 0, geomDraws_ = 0;
     uint16_t geomVsScroll_ = 0, geomVsPlain_ = 0, geomVsPlainScroll_ = 0, geomPsPlain_ = 0, geomPsAlphaMap_ = 0;
@@ -203,6 +220,12 @@ private:
     bool inFrame_ = false, passOpen_ = false;
     uint32_t pendingClear_ = 0;
     uint32_t frameNo_ = 0, lastBinds_ = 0;
+    // reuse of the previous draw's state id and texture block while nothing they depend on changed (P6n: Render)
+    uint32_t lastResolve_ = ~0u, lastStFrameKey_ = 0;
+    uint16_t lastVs_ = 0, lastPsSt_ = 0, lastLayout_ = 0, lastSt_ = 0;
+    uint32_t lastTexGen_ = 0, lastTexN_ = 0, lastTexFrame_ = ~0u, lastTb_ = 0, lastTexCount_ = 0;
+    uint32_t lastEpiResolve_ = ~0u, lastEpiFrame_ = ~0u, lastEpiBlock_ = 0;
+    uint16_t lastDynId_ = 0;
     float bg_[4] = {0, 0, 0, 1};
     float clearDepth_ = 1.0f;
     uint32_t clearStencil_ = 0;
