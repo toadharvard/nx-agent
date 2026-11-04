@@ -1337,3 +1337,55 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - DECL1 math overloads keep the decomp's float/double;
   - the shim's SDK headers set their own packing.
   S11 gates S1 round 8 and re-checks D15.
+
+### J-0068 | 2026-11-04 | stream: S9-build | status: wip | parent: J-0041,J-0054
+
+* **did** - The committed pipeline now runs S2c's and S5's hand flow (`make`, tools/pipeline/build.py):
+  - **Provenance (J-0054):** `build/prepare/prepared_from.txt` and `.json` hold the port commit, the decomp commit and
+    any uncommitted changes to prepare inputs. census, compile, link, guest, boot and package carry that record, and
+    refuse inputs from another commit unless `FORCE_STALE=1`.
+  - **Link:** S2c's order resolve -> probe -> resolve -> apply -> check, then check_rebind.
+  - **New stage `boot`:** S5's emulated boot, emu_summary and frontier.
+  - **Defaults and options:** `GAME_CXX=standin` by default; new variables PREPARED, UNITS, CROSS_BIN, MSVC_OBJS,
+    UNITS_RENAMES, LINK_SEED and GAME_NEW.
+  - **Tests and tools:** tests/s9 (provenance); tools/pipeline/linkdiff.py.
+  - **Docs:** BUILD.md maps every hand step to the pipeline.
+
+  Orchestrator re-ran tests/s9: OK.
+* **found**:
+  - **Fingerprints were too narrow.** Prepare missed `patches/` and `shim/include/fnvnx_win32.h`; link missed the
+    provider tables, units_renames.tsv, the shim and sse2neon. The second resolve was skipped when only vtables
+    changed.
+  - **fnvlink's caches outlive the tree they were measured on.** The layout cache has no content key, and the vtable
+    caches ignore headers, so S2c's seeds carry layouts and vtables from older trees into later runs (sent to S2c).
+  - **Subset run** (31 units, S2c's fresh8 tree): 29/29 objects byte-identical to f11. Against f12: 0 unexplained
+    differences in refs, ABI verdicts, objcopy edits and rewritten objects. The guest is relocatable and boot enters
+    WinMain. Stale inputs are refused; a rerun leaves all stages cached.
+* **decided** - Layout and vtable caches from another tree are not reused. The emulated boot is a pipeline stage.
+* **metrics** - subset_units=31 subset_objects_identical=29/29 linkdiff_unexplained=0 rerun_cached_stages=11/11
+  provenance_refused=2
+* **next** - S9 makes `make BOOT=1` self-sufficient on a fresh machine, so a farm runner can run it:
+  - the cross tools come from the toolchain stage, not s2c/xtc;
+  - a committed generator for EXTERN_TEXT (`s4/addr_ids.txt`).
+
+### J-0069 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0062,J-0063
+
+* **did** - New rule STAND1 ("one function per address"). An untagged definition is removed when units.json binds
+  its MSVC name to the address of a tagged definition in the same unit; a free function keeps its declaration, so
+  calls go by name to the tagged one. Tree-wide that is 186 pairs in 92 units, and all 92 still compile. Example:
+  `new FUN_00632ec0` in blk_00620000 now calls the real constructor 0x00632ec0, which fixes 60 of S5's null reads.
+  Orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+* **found** - Four vftables can't be filled without the player's exe:
+  - 0x0101772c (INISettingCollection singleton);
+  - 0x0104e6ac;
+  - 0x01082ed8;
+  - FUN_004de530's.
+  The decomp knows INISettingCollection's 10-slot MSVC interface (setting_declarations.h), but no unit defines or
+  binds its slot functions. With the exe, S3 maps the slot pointers. Until then the 736 + 31 AddSetting null calls
+  stay; traps would gain nothing.
+* **next** - S1:
+  - D15 (NiCriticalSection +4 bytes);
+  - STR1;
+  - DECL1 math overloads;
+  - SDK includes inside pack regions;
+  - namespace statics (STATIC1).
