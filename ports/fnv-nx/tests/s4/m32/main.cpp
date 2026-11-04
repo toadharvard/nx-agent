@@ -36,6 +36,8 @@ extern "C" const struct fnvnx_iat_call { const char *name; uint32_t slot; const 
 
 static int iat(const char *path)
 {
+    if (getenv("FNVNX_IAT_LIST"))   /* addresses below are relative to iat() itself (PIE) */
+        printf("base\t%p\n", (void *)&iat);
     static struct { unsigned slot; char dll[128], what[256]; } seen[1024];
     int nseen = 0;
     FILE *f = fopen(path, "r");
@@ -58,6 +60,8 @@ static int iat(const char *path)
         }
         void *p = what[0] == '#' ? fnvnx_win32_lookup_import(dll, NULL, (unsigned)strtoul(what + 1, NULL, 10))
                                  : fnvnx_win32_lookup_import(dll, what, FNVNX_IMPORT_BY_NAME);
+        if (p && getenv("FNVNX_IAT_LIST"))
+            printf("resolved\t%s\t%s\t%s\t%p\n", slot, dll, what, p);
         if (!p) {
             missing++;
             printf("missing\t%s\t%s\t%s\n", slot, dll, what);

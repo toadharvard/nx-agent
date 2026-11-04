@@ -66,6 +66,35 @@ check(len(oc.strict_failures(oc.compare(cases, msvc, {'build': dict(results={})}
 md2 = oc.markdown(rows2, msvc, two)
 check('| cand | 0 |' in md2, 'markdown: per-variant line')
 
+# V1 C1: the build variant carries every ORDER_* default compile.sh passes to the plugin
+args = oc.compile_sh_order_args()
+cs = oc.COMPILE_SH.read_text()
+import re as _re
+want = [k for v, k in oc.ORDER_KEYS if _re.search(r'^%s=' % v, cs, _re.M) and ('fnvnx_order-%s=' % k) in cs]
+check(sorted(a.split('-')[-1].split('=')[0] for a in args) == sorted(want) and len(want) >= 4,
+      "build variant = compile.sh's plugin arguments (%s)" % ' '.join(args))
+fake = 'ORDER_MODE=${ORDER_MODE:-volatile}\nORDER_OBJECT=${ORDER_OBJECT:-msvc}\n-fplugin-arg-fnvnx_order-mode=x ' \
+       '-fplugin-arg-fnvnx_order-object=y\n'
+check(oc.compile_sh_order_args(fake) == ['-fplugin-arg-fnvnx_order-mode=volatile',
+                                         '-fplugin-arg-fnvnx_order-object=msvc'], 'compile.sh defaults parsed')
+# V1 T2: no MSVC log, or a log from only some configurations, is not agreement
+none = {cfg: dict(v, results={k: x for k, x in v['results'].items() if k != 'obj-arrow'}) for cfg, v in msvc.items()}
+part = {cfg: dict(v, results=dict(v['results'])) for cfg, v in msvc.items()}
+for cfg in list(part)[1:]:
+    part[cfg]['results'].pop('obj-arrow2')
+g = {'build': dict(results={n: next(iter(msvc.values()))['results'][n] for n in names})}
+r_none = {x['case']: x for x in oc.compare(cases, none, g)}
+r_part = {x['case']: x for x in oc.compare(cases, part, g)}
+check(r_none['obj-arrow']['verdict'] == 'no-msvc' and 'obj-arrow' in oc.strict_failures(list(r_none.values())),
+      'strict: a case no MSVC configuration logged fails')
+check(r_part['obj-arrow2']['verdict'] == 'msvc-incomplete' and 'obj-arrow2' in oc.strict_failures(list(r_part.values())),
+      'strict: a case logged by 1 of 5 configurations fails')
+# V1 T1: --strict without --gcc refuses
+import subprocess as _sp
+rr = _sp.run([sys.executable, '-I', str(PORT / 'tools/equiv/order_check.py'), sys.argv[1] + '/t1', '--strict'],
+             capture_output=True, text=True)
+check(rr.returncode == 2, '--strict without --gcc exits 2 (got %d)' % rr.returncode)
+
 # --msvc-stdout: identical outputs give the text, different ones name the line
 t1, v1 = oc.agreed_stdout({'x': ('', 'a\nb\n'), 'y': ('', 'a\nb\n')})
 check(t1 == 'a\nb\n' and v1 == [], 'agreed_stdout: identical')

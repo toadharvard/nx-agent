@@ -10,22 +10,37 @@ set -euo pipefail
 DECOMP=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd); JOBS=${3:-$(nproc)}; LIST=${4:-}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 CXX=${CXX:-aarch64-linux-gnu-g++}
+CC=${CC:-aarch64-linux-gnu-gcc}
 SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
-export CXX DECOMP OUT HERE SSE2NEON
+export CXX CC DECOMP OUT HERE SSE2NEON
 mkdir -p "$OUT/logs"
 
 FLAGS=(-mabi=ilp32 -std=gnu++17 -fsyntax-only -fms-extensions -fshort-wchar -fpermissive -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -ffp-contract=off -U_FORTIFY_SOURCE
        -Werror=return-type -Wno-narrowing -fmax-errors=200 -include "$HERE/shim/include/fnvnx_compat.h"
        -I"$HERE/shim/include" -I"$SSE2NEON" -I"$DECOMP/include")
 export FLAGS_STR="${FLAGS[*]}"
+# C units (third_party/zlib-1.2.1/*.c: MSVC compiled them as C; K&R definitions, C names `_adler32`) build with the C
+# compiler: the same flags with C's -std and without the C++-only ones. Every unit gets its units.json /D defines
+# (only the zlib units have any: memcpy=fnv_zlib_memcpy, memset=fnv_zlib_memset).
+CFLAGS=()
+for f in "${FLAGS[@]}"; do
+  case $f in -std=gnu++17) CFLAGS+=(-std=gnu99) ;; -fpermissive|-Wno-narrowing) ;; *) CFLAGS+=("$f") ;; esac
+done
+export CFLAGS_STR="${CFLAGS[*]}"
 
 if [ -n "$LIST" ]; then sort -u "$LIST" > "$OUT/units.list.tmp"; mv "$OUT/units.list.tmp" "$OUT/units.list"
 else jq -r '.units[].source' "$DECOMP/build/units.json" | sort -u > "$OUT/units.list"; fi
 
+jq -r '.units[] | [.source, ([.flags[]? | select(startswith("/D")) | "-D" + .[2:]] | join(" "))] | @tsv' \
+  "$DECOMP/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
 compile_one() {
-  local src=$1 log="$OUT/logs/$(echo "$1" | tr / _).log"
+  local src=$1 log="$OUT/logs/$(echo "$1" | tr / _).log" defs
+  defs=$(awk -F'\t' -v s="$1" '$1 == s {print $2; exit}' "$OUT/defines.tsv")
   # shellcheck disable=SC2086
-  (cd "$DECOMP" && timeout 300 $CXX $FLAGS_STR "$src") > "$log" 2>&1 || true
+  case $src in
+    *.c) (cd "$DECOMP" && timeout 300 $CC $CFLAGS_STR $defs "$src") > "$log" 2>&1 || true ;;
+    *)   (cd "$DECOMP" && timeout 300 $CXX $FLAGS_STR $defs "$src") > "$log" 2>&1 || true ;;
+  esac
 }
 export -f compile_one
 xargs -a "$OUT/units.list" -P "$JOBS" -I{} bash -c 'compile_one "$@"' _ {}
@@ -33,8 +48,8 @@ xargs -a "$OUT/units.list" -P "$JOBS" -I{} bash -c 'compile_one "$@"' _ {}
 : > "$OUT/units.tsv"
 while read -r src; do
   log="$OUT/logs/$(echo "$src" | tr / _).log"
-  n=$(grep -c ': error:' "$log" || true)
-  first=$(grep -m1 ': error:' "$log" | sed -E 's/^[^:]+:[0-9]+:[0-9]+: error: //' || true)
+  n=$(grep -cE ': (fatal )?error:' "$log" || true)       # fatal: e.g. a source missing from the tree
+  first=$(grep -m1 -E ': (fatal )?error:' "$log" | sed -E 's/^[^:]+:([0-9]+:[0-9]+:)? (fatal )?error: //' || true)
   printf '%s\t%s\t%s\n' "$src" "$n" "$first" >> "$OUT/units.tsv"
 done < "$OUT/units.list"
 

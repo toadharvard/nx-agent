@@ -120,8 +120,16 @@ int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask) {
     uint64_t spec = FNVNX_CPU_SPEC(ideal < 0 ? FNVNX_CPU_KEEP : (unsigned)ideal, mask);
     return fnvnx_hcall2(fnvnx_host->thread_set_cpu, id, spec) ? -1 : 0;
 }
-int os_thread_suspend(os_thread *t) { (void)t; return -1; }
-int os_thread_resume(os_thread *t) { (void)t; return -1; }
+/* another thread: the host pauses or resumes it (svcSetThreadActivity); the calling thread (NULL) cannot be paused
+ * by the kernel, thread.cpp blocks it instead. An older host without the call answers FNVNX_EXT_NO_MODULE. */
+static int thread_activity(os_thread *t, int paused) {
+    uint64_t id;
+    if (!t || host_id_of(t, &id) || !id || !fnvnx_host->ext_call) return -1;
+    uint64_t arg[2] = {id, paused ? 1u : 0u};
+    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_ACTIVITY, FNVNX_ADDR(arg), 2) ? -1 : 0;
+}
+int os_thread_suspend(os_thread *t) { return thread_activity(t, 1); }
+int os_thread_resume(os_thread *t) { return thread_activity(t, 0); }
 void os_thread_exit(void) { fnvnx_thread_exit(NULL); }
 /* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
  * (sdmc:/switch/fnv/fnvnx.ini boost_loading=0) turns it off */
@@ -130,6 +138,12 @@ void os_cpu_boost(int fast_load) {
     if (!fnvnx_host->ext_call) return;
     uint64_t arg[1] = {fast_load ? 1u : 0u};
     fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_CPU_BOOST, FNVNX_ADDR(arg), 1);
+}
+/* the host's error applet (toolchain/host/host_message.inc) */
+void os_show_message(const char *caption, const char *text) {
+    if (!fnvnx_host->ext_call) return;
+    uint64_t arg[2] = {FNVNX_ADDR(caption ? caption : ""), FNVNX_ADDR(text ? text : "")};
+    fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_MESSAGE, FNVNX_ADDR(arg), 2);
 }
 void os_yield(void) { fnvnx_yield(); }
 void os_sleep_ns(uint64_t ns) { fnvnx_hcall1(fnvnx_host->sleep_ns, ns); }
@@ -234,18 +248,41 @@ int os_fs_case_insensitive(void) {
     return folds;
 }
 
-/* ---- virtual memory: carved from the guest heap (committed and zeroed at reserve time).
- * A fixed hint is not supported (the S3 data window is mapped by the loader, not through this). */
+/* ---- virtual memory. With a host that has the VM service (toolchain/host/host_vm.inc): reservations are address
+ * space only, commits map zeroed heap memory, decommits give it back, fixed addresses are honoured. Otherwise (an
+ * older host, the emulator) carved from the guest heap: committed and zeroed at reserve time, no fixed address. */
+static int g_vm_host = -1;   /* -1 not probed yet */
+static uint64_t vm_ext(uint32_t fn, uint64_t a0, uint64_t a1) {
+    uint64_t arg[2] = {a0, a1};
+    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(arg), 2);
+}
+static int vm_host(void) {
+    if (g_vm_host < 0)   /* a reservation of 0 bytes: 0 from the service, FNVNX_EXT_NO_MODULE without it */
+        g_vm_host = fnvnx_host->ext_call && vm_ext(FNVNX_PLAT_VM_RESERVE, 0, 0) != FNVNX_EXT_NO_MODULE;
+    return g_vm_host;
+}
 size_t os_vm_page_size(void) { return 0x1000; }
 void *os_vm_reserve(void *hint, size_t size) {
+    if (vm_host()) return (void *)(uintptr_t)vm_ext(FNVNX_PLAT_VM_RESERVE, FNVNX_ADDR(hint), size);
     if (hint) return NULL;
     void *p = memalign(0x1000, (size + 0xFFF) & ~(size_t)0xFFF);
     if (p) memset(p, 0, size);
     return p;
 }
-int os_vm_commit(void *addr, size_t size) { (void)addr; (void)size; return 0; }
-int os_vm_decommit(void *addr, size_t size) { memset(addr, 0, size); return 0; }
-int os_vm_release(void *addr, size_t size) { (void)size; free(addr); return 0; }
+int os_vm_commit(void *addr, size_t size) {
+    return vm_host() ? (vm_ext(FNVNX_PLAT_VM_COMMIT, FNVNX_ADDR(addr), size) ? -1 : 0) : 0;
+}
+int os_vm_decommit(void *addr, size_t size) {
+    if (vm_host()) return vm_ext(FNVNX_PLAT_VM_DECOMMIT, FNVNX_ADDR(addr), size) ? -1 : 0;
+    memset(addr, 0, size);
+    return 0;
+}
+int os_vm_release(void *addr, size_t size) {
+    (void)size;
+    if (vm_host()) return vm_ext(FNVNX_PLAT_VM_RELEASE, FNVNX_ADDR(addr), 0) ? -1 : 0;
+    free(addr);
+    return 0;
+}
 
 /* One SD directory for everything of the port (fnvnx/sdlayout.h): fnv.nro, guest.nso and the logs, the game's
  * C:/FalloutNV itself (FalloutNV.exe and Data/, read by boot.cpp too), user/ (C:/Users/Player: My Games/FalloutNV,

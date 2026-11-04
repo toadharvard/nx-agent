@@ -166,6 +166,7 @@ static void load_config(void) {
         char key[64];
         if (sscanf(line, " %63s", key) != 1) continue;
         int v = atoi(eq + 1);
+        /* other keys are ignored: game_dir= is the guest's (S5-data: moves C:\FalloutNV off the default) */
         if (!strcmp(key, "core3")) g_cfg.core3 = v != 0;
         else if (!strcmp(key, "boost_loading")) g_cfg.boost_loading = v != 0;
     }
@@ -185,12 +186,20 @@ static void set_cpu_boost(int mode) {
     logf_("fnvnx host: cpu boost %s%s\n", mode ? "FastLoad" : "Normal", R_FAILED(rc) ? " (FAILED)" : "");
     if (R_SUCCEEDED(rc)) g_boost = mode;
 }
+#include "host_message.inc"
+#include "host_vm.inc"
 static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
     if (fn == FNVNX_PLAT_CPU_BOOST && nargs >= 1) {
         if (!g_cfg.boost_loading) return 1;
         set_cpu_boost(args[0] ? 1 : 0);
         return 0;
     }
+    if (fn == FNVNX_PLAT_THREAD_ACTIVITY && nargs >= 2) return h_thread_activity(args[0], args[1]);
+    if (fn == FNVNX_PLAT_MESSAGE && nargs >= 2) return host_show_message((const char *)args[0], (const char *)args[1]);
+    if (fn == FNVNX_PLAT_VM_RESERVE && nargs >= 2) return host_vm_reserve(args[0], args[1]);
+    if (fn == FNVNX_PLAT_VM_COMMIT && nargs >= 2) return host_vm_commit(args[0], args[1]);
+    if (fn == FNVNX_PLAT_VM_DECOMMIT && nargs >= 2) return host_vm_decommit(args[0], args[1]);
+    if (fn == FNVNX_PLAT_VM_RELEASE && nargs >= 1) return host_vm_release(args[0]);
     return FNVNX_EXT_NO_MODULE;
 }
 

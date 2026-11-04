@@ -48,6 +48,7 @@ class Art:
         self.boot_json = pick(a.boot_json, "boot/boot_summary.json")
         self.ref_bin = a.ref_bin or os.environ.get("NX1_REF_BIN")
         self.root = ROOT
+        self.build = b
 
 
 def run(cmd):
@@ -100,7 +101,9 @@ CHECKS = [
                       lambda a: ["--nro-elf", a.nro_elf], need=["guest_elf", "host_elf", "nro_elf"])),
     (4, "threads", script("check_threads.py", lambda a: ["--host-elf", a.host_elf] if a.host_elf else [])),
     (5, "fs", script("check_fs.py", lambda a: ["--sd", a.sd], need=["sd"])),
-    (6, "gpu", script("check_gpu.py", lambda a: ["--host-elf", a.host_elf] if a.host_elf else [])),
+    (6, "gpu", script("check_gpu.py", lambda a: ["--host-elf", a.host_elf] if a.host_elf else [],
+                      lambda a: ["--guest-elf", a.guest_elf] if a.guest_elf else [],
+                      lambda a: ["--build", a.build] if a.build else [])),
     (7, "platform", script("check_platform.py")),
     (8, "checklist", script("check_checklist.py")),
 ]

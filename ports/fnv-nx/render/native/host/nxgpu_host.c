@@ -25,7 +25,7 @@ const char* fnvnx_guest_path = NXGPU_GUEST_PATH;                  /* overrides h
 static FILE* g_log;
 void nxgpu_log(const char* line) {
     svcOutputDebugString(line, strlen(line));
-    if (!g_log) g_log = fopen("sdmc:/fnvnx/nxgpu.log", "a");
+    if (!g_log) g_log = fopen("sdmc:/switch/fnv/nxgpu.log", "a");   /* the one SD layout: FNVNX_SD_DIR (sdlayout.h) */
     if (g_log) { fputs(line, g_log); fflush(g_log); }
 }
 
