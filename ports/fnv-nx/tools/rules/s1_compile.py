@@ -299,6 +299,16 @@ def _split_bases(clause):
 
 BASE_CLAUSE = re.compile(r'^(?:typedef\s+)?(?:class|struct)\b(?:[^:]|::)*?(?<!:):(?!:)(.*)$', re.S)
 
+def _qualified_top(name):
+    """True when `name` has a `::` outside its template argument lists (`List<V, B>::Item`, `::X`, not
+    `_Ranit<T, typename A::difference_type>`, whose argument list may span lines)."""
+    depth = 0
+    for i, c in enumerate(name):
+        if c in '<(': depth += 1
+        elif c in '>)': depth -= 1
+        elif c == ':' and depth == 0 and name[i + 1:i + 2] == ':': return True
+    return False
+
 def r_msvc_base_layout(path, text, stats):
     """TAIL1: derived class members start at sizeof(last base), like MSVC (see above). Classes with a virtual base
     are left alone."""
@@ -314,8 +324,9 @@ def r_msvc_base_layout(path, text, stats):
         last = re.sub(r'^(?:(?:public|protected|private)\s+)+', '', bases[-1]).strip()
         if not last: continue
         # a qualified base (`List<VERTEX, BASE>::Item`) may be a dependent name: inside alignof it needs typename
-        # (C++11 allows it before any qualified name, in a template or not)
-        if '::' in re.sub(r'<.*>', '<>', last) and not last.startswith('typename'): last = 'typename ' + last
+        # (C++11 allows it before any qualified name, in a template or not); a `::` inside the template arguments
+        # does not make the name qualified
+        if _qualified_top(last) and not last.startswith('typename'): last = 'typename ' + last
         out.append(text[pos:o + 1]); out.append(' FNVNX_MSVC_BASE_END(%s)' % last); pos = o + 1
         stats['TAIL1'] += 1
     out.append(text[pos:])

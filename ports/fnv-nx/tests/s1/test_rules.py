@@ -444,6 +444,11 @@ check('TAIL1 writes typename in front of a qualified (possibly dependent) base',
           'struct U : N::Base\n{\n};\nstruct W : Base<N::X>\n{\n};\n'),
       ['FNVNX_MSVC_BASE_END(typename List<V, B>::Item)', 'FNVNX_MSVC_BASE_END(typename N::Base)',
        'FNVNX_MSVC_BASE_END(Base<N::X>)'])
+check('TAIL1 no typename for a template base whose arguments (over two lines) hold the ::',
+      run(s1.r_msvc_base_layout, 'template <class T, class A>\nclass I : public R<T, typename A::d,\n'
+          '                        typename A::p>\n{\n};\ntemplate <class T> struct J : ::G<T>::K<int>\n{\n};\n'),
+      ['FNVNX_MSVC_BASE_END(R<T, typename A::d,\n                        typename A::p>)',
+       'FNVNX_MSVC_BASE_END(typename ::G<T>::K<int>)'], ['(typename R<'])
 check('TAIL1 names the last base without its access specifier',
       run(s1.r_msvc_base_layout, 'class D : public NiMemObject\n{\n  public:\n    int x;\n};\n'
           'struct E : B, public T<int, char>\n{\n    int y;\n};\n'),
