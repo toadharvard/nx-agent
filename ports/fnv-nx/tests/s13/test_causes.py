@@ -601,8 +601,21 @@ def test_callflow():
         check(cf(tgt('00ec623a', 'name:__strcpy_chk')) != 'libc-variant', 'sprintf vs __strcpy_chk: not a variant')
         check(cf(tgt('00401200', '9e684216')) == 'native-vcall-oracle-direct', 'native wild call, oracle direct')
         bodies['__fnv_00401100'] = (BL_RET, {'__fnv_00401100'})
+        # oracle-callee-unloaded needs the native trace to show the native ran X: a call X makes out of the unit
+        check(cf(tgt('00401100', '00401300')) != 'oracle-callee-unloaded',
+              'X reaches no traced call: no evidence the native ran it, no artefact (V1 U1)')
+        causes.native_reaches = lambda src, n: {'__fnv_00401100', '__fnv_00401300'}
         check(cf(tgt('00401100', '00401300')) == 'oracle-callee-unloaded',
-              'oracle intercepts a callee the native object runs: oracle-callee-unloaded')
+              'oracle intercepts a callee the native ran (its traced call is in the native trace)')
+        real_cs = causes.native_callees
+        causes.native_callees = lambda src, a: real_cs(src, a) | {'__fnv_00401300'}
+        check(cf(tgt('00401100', '00401300')) != 'oracle-callee-unloaded',
+              'the caller calls Y itself: Y in the trace proves nothing about X')
+        causes.native_callees = real_cs
+        check(cf(tgt('00401100', '00401400')) != 'oracle-callee-unloaded',
+              'X\'s traced call missing from the native trace: the native never ran X (V1 U2)')
+        check(cf(dict(kind='call-count', x86=1, arm=0, x86_trace=['00401100'], arm_trace=[])) == 'native-early-exit',
+              'an early exit before X stays native-early-exit')
         causes.unbound_callees = lambda src, a: ['_ZN3Bar3getEv']
         check(cf(tgt('00401100', '00401300')) == 'after-native-undefined',
               'an artifact shape never hides an unbound C++ name')
