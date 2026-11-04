@@ -3458,6 +3458,70 @@ def _stand_ins(path, text, stats, which):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- STAND4
+#
+# STAND1 / STAND2 for `static` free stand-ins (S1-layout, S13b native-empty-body). tesconditionfunctions.cpp defines
+# `static bool __cdecl InFactionConditionForPlayerCallee(...) { return false; }` untagged, and the tagged 0x0059f790
+# returns its result; the recipe binds `?InFactionConditionForPlayerCallee@@YA_NPAVTESObjectREFR@@PAX1AAN@Z` to
+# 0x0059f630 (GetInFaction, tagged in the same unit). MSVC decorates a static free function like an extern one and
+# its /Od code calls it by that name, so the exe runs 0x0059f630; GCC inlines `return false` (fuzz: the native makes
+# no call). STAND1/2 leave static ones alone because an internal name cannot be rebound. STAND4 replaces the
+# definition by an extern declaration and drops `static` from the unit's other declarations of that name, so the
+# call is a call of the decorated name that the link binds. Same gates as STAND1 (an address tagged in the unit) or
+# STAND2 (an address only other units define, in a unit without /O1 /O2 /Ox /Ob2), for an untagged free function at
+# namespace scope; not inline, not a template, not overloaded in the unit (one definition of the name).
+
+def r_static_stand_ins(path, text, stats):
+    """STAND4: a static free stand-in bound to a decompiled address becomes an extern declaration (above)."""
+    if not path.endswith('.cpp') or '@fnv' not in text or 'static' not in text: return text
+    syms = _unit_symbols(path)
+    if not syms: return text
+    info = _unit_info(path)
+    tagged = {int(a, 16) for a in FNV_TAG_ADDR.findall(text)}
+    elsewhere = set() if info is None or set(info[0]) & STAND2_INLINING_FLAGS else _all_unit_functions(path) - info[1]
+    spans, edits, names = None, [], collections.Counter()
+    defs = []
+    for m in STAND_DEF.finditer(text):
+        q = re.sub(r'\s+', '', m.group(2))
+        if '::' in q or q in NOT_FUNCTIONS or q in CXX_KEYWORDS: continue
+        names[q] += 1
+        defs.append((m, q))
+    for m, name in defs:
+        lead = m.group(1) or ''
+        if names[name] != 1 or not re.search(r'\bstatic\b', lead): continue
+        if re.search(r'\b(?:inline|__inline|__forceinline|constexpr|template)\b', lead): continue
+        if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', lead): continue
+        before = text[max(0, m.start() - 400):m.start()]
+        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
+        if spans is None: spans = prepare.scope_spans(text)
+        chain = prepare.scope_chain(spans, m.start())
+        if any(k != 'namespace' for k, _ in chain): continue
+        ns = [h.split()[-1] for _, h in chain if h.split()[-1] != 'namespace']
+        if len(ns) != sum(1 for _ in chain): continue                     # an anonymous namespace
+        prefix = '?' + '@'.join([name] + list(reversed(ns))) + '@@'
+        bound = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
+        if not bound or len(bound) != 1: continue
+        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged)): continue
+        o = m.end() - 1
+        c = prepare.match_brace(text, o)
+        start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
+        nl = '\n' * text.count('\n', start, c)
+        head = re.sub(r'\bstatic\s+', '', text[start:o].rstrip(), count=1)
+        edits.append((start, c, head + '; /* fnv-nx STAND4 0x%08x */' % next(iter(bound)) + nl[head.count('\n'):]))
+        # the other declarations of the name lose `static` too (a first static declaration keeps the name internal)
+        for d in re.finditer(r'(?m)^([ \t]*)static\s+(?=[^;{}()]*\b%s\s*\([^;{}]*\)\s*;)' % re.escape(name), text):
+            if d.start() < start or d.start() >= c:
+                edits.append((d.start(), d.end(), d.group(1)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(r); pos = b
+    out.append(text[pos:])
+    stats['STAND4'] += sum(1 for e in edits if 'STAND4' in e[2])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- STAND3
 #
 # STAND2 for inline stand-ins (S1-fuzzA). The decomp writes small helpers as in-class bodies (modelloader.cpp
@@ -4104,7 +4168,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
