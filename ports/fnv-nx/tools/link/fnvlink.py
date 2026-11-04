@@ -1931,6 +1931,14 @@ def c_name_standin(csig, other):
     return sig
 
 
+# a function-pointer type named by a typedef or alias (S1b J-0112: `reinterpret_cast<AlphaFlag>(f)`,
+# `((FUN_00653180_type)f)`)
+FPTR_TYPEDEF = re.compile(r'\btypedef\s+(?P<ret>[A-Za-z_][\w:<>,\s\*&]*?)\s*\(\s*(?:__(?P<cc>thiscall|fastcall|stdcall|cdecl)\s*)?'
+                          r'\*\s*(?P<tname>[A-Za-z_]\w*)\s*\)\s*\((?P<params>[^()]*)\)\s*;'
+                          r'|\busing\s+(?P<uname>[A-Za-z_]\w*)\s*=\s*(?P<uret>[A-Za-z_][\w:<>,\s\*&]*?)\s*\(\s*'
+                          r'(?:__(?P<ucc>thiscall|fastcall|stdcall|cdecl)\s*)?\*\s*\)\s*\((?P<uparams>[^()]*)\)\s*;')
+
+
 def unit_casts(text):
     """{name: (set of (cc, ret, params) casts, direct calls of the name outside casts)} for one source text."""
     hits, spans = collections.defaultdict(set), []
@@ -1939,6 +1947,23 @@ def unit_casts(text):
             hits[m.group('name')].add((m.group('cc') or 'cdecl', ' '.join(m.group('ret').split()),
                                        ' '.join(m.group('params').split())))
             spans.append((m.start(), m.end()))
+    tdefs = {}
+    for m in FPTR_TYPEDEF.finditer(text):
+        if m.group('tname'):
+            tdefs[m.group('tname')] = (m.group('cc') or 'cdecl', ' '.join(m.group('ret').split()),
+                                       ' '.join(m.group('params').split()))
+        else:
+            tdefs[m.group('uname')] = (m.group('ucc') or 'cdecl', ' '.join(m.group('uret').split()),
+                                       ' '.join(m.group('uparams').split()))
+    if tdefs:
+        alt = '|'.join(re.escape(t) for t in sorted(tdefs, key=len, reverse=True))
+        for rx in (re.compile(r'\(\s*(?P<t>' + alt + r')\s*\)\s*&?\s*(?P<name>[A-Za-z_]\w*)(?=\s*[),;])'),
+                   re.compile(r'reinterpret_cast\s*<\s*(?P<t>' + alt + r')\s*>\s*\(\s*&?\s*(?P<name>[A-Za-z_]\w*)\s*\)')):
+            for m in rx.finditer(text):
+                if m.group('name') in tdefs:
+                    continue
+                hits[m.group('name')].add(tdefs[m.group('t')])
+                spans.append((m.start(), m.end()))
     out = {}
     for name, casts in hits.items():
         direct = 0

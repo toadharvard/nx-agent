@@ -216,6 +216,13 @@ def main():
            'MenuValueDescriptor* GetOrLoadXML(const char* apFilename, bool abAdd) {\n'
            '    if (abAdd) ((void(__thiscall*)(void*, const char*, MenuValueDescriptor*)) & FUN_00a0c900)(&map, f, x);\n'
            '    ((FUN_00a0c900_shell*)&map)->FUN_00a0c900(f, 1);\n    return x; }\n')
+    # S1b J-0112: the same cast through a typedef'd function-pointer type
+    uct = fnvlink.unit_casts('typedef void (__thiscall *XmlFn)(void*, const char*, MenuValueDescriptor*);\n'
+                             'using AlphaFlag = int (__fastcall *)(void *, int);\n'
+                             'void g(void *m) { ((XmlFn)&FUN_00a0c900)(m, "x", 0); reinterpret_cast<AlphaFlag>(FUN_00a0c910)(m, 1); }\n')
+    check(uct.get('FUN_00a0c900') == ({('thiscall', 'void', 'void*, const char*, MenuValueDescriptor*')}, 0) and
+          uct.get('FUN_00a0c910') == ({('fastcall', 'int', 'void *, int')}, 0),
+          'casts through typedef / alias names: %s' % uct)
     uc = fnvlink.unit_casts(src)
     check(uc.get('FUN_00a0c900') == ({('thiscall', 'void', 'void*, const char*, MenuValueDescriptor*')}, 0),
           'cast found, the member call is no direct call: %s' % (uc.get('FUN_00a0c900'),))
