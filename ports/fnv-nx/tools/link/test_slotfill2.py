@@ -61,6 +61,25 @@ def main():
     check(s3.raw_params == ['enum ActorValue::Index'] and abi.classify(s3.raw_params[0]) == 'I32',
           'an MSVC enum parameter classifies as I32 (%s)' % s3.raw_params)
     check(it3('_ZN1B3setE5Point').raw_params == ['Point'], 'other types are left alone')
+    # a decomp "constructor" at the exe slot: FUN_x::FUN_x(char) is the exe's ??_G taking the flags
+    import fnvlink
+    decl4 = {'??0FUN_00406000@@QAE@D@Z': 'public: __thiscall FUN_00406000::FUN_00406000(char)',
+             '??0FUN_00407000@@QAE@_N@Z': 'public: __thiscall FUN_00407000::FUN_00407000(bool)'}
+    native4 = {0x406000: {'msvc': '??0FUN_00406000@@QAE@D@Z'}, 0x407000: {'msvc': '??0FUN_00407000@@QAE@_N@Z'}}
+    dem4 = {'_ZN1YD0Ev': 'Y::~Y()', '_ZN1YD1Ev': 'Y::~Y()', '_ZN1Y2m0Eb': 'Y::m0(bool)', '_ZN1Y2m1Ev': 'Y::m1()',
+            '_ZN1Y2m2Ef': 'Y::m2(float)'}
+
+    def base4(un, a, otts=None, depth=0):
+        return None, 'kind differs (C1 at the exe slot, %s in the vtable)' % (sigs.itanium_variant(un) or 'function')
+    stubs4 = {}
+    tf4 = slotfill2.slot_ctor(base4, native4, lambda n: sigs.parse_itanium(n, dem4[n]),
+                              lambda n: sigs.parse_msvc(n, decl4[n]), abi.classify, fnvlink.slot_abi, stubs4, ADDR, st)
+    t4 = tf4('_ZN1YD0Ev', 0x406000)[0]
+    check(t4 == '__fnvnx_vflagc_00406000_1' and 'mov w1, #1' in stubs4[t4], 'D0 -> the "constructor" with flags 1')
+    check(tf4('_ZN1YD1Ev', 0x406000)[0] == '__fnvnx_vflagc_00406000_0', 'D1 -> flags 0')
+    check(tf4('_ZN1Y2m0Eb', 0x407000)[0] == ADDR % 0x407000, 'a plain slot (bool) -> the "constructor" (bool)')
+    check(tf4('_ZN1Y2m1Ev', 0x407000)[0] == ADDR % 0x407000, 'a placeholder slot () -> it too (reads more)')
+    check(tf4('_ZN1Y2m2Ef', 0x407000)[0] is None, 'a float slot against a bool stays a gap')
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 
