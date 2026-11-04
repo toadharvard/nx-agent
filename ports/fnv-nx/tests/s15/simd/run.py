@@ -26,6 +26,8 @@ OBJDUMP = os.environ.get('OBJDUMP', 'aarch64-linux-gnu-objdump')
 # kernel -> (override source, native symbol)
 KERNELS = {
     'slerp': ('slerp_00a6e330.c', 'fnvnx_slerp_00a6e330'),
+    'nibound': ('nibound_update_00a7fdd0.c', 'fnvnx_nibound_update_00a7fdd0'),
+    'mat3': ('mat3_tmul_00a588a0.c', 'fnvnx_mat3_tmul_00a588a0'),
 }
 
 
