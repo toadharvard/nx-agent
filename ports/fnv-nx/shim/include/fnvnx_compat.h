@@ -23,7 +23,7 @@
  * defines itself (as int64_t on AArch64) unless it is already defined: ours comes first, with MSVC's spelling. */
 #define __int64 long long
 #ifdef __cplusplus
-#include <sse2neon.h>
+#include "fnvnx_sse2neon.h"   /* sse2neon, with x86 results where it differs */
 #include "fnvnx_mmx.h"   /* the MMX intrinsics sse2neon lacks */
 #endif
 

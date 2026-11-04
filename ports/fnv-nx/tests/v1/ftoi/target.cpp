@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include "gen.h"
 #ifdef WITH_SSE2NEON
-#include "sse2neon.h"
+#include "fnvnx_sse2neon.h"   // the port's sse2neon (shim/include): sse2neon with its x86 fixes
 #endif
 
 enum E { E0, E1 = 5, E2 = 1000 };   // GCC: underlying unsigned int (all enumerators >= 0); MSVC: int
