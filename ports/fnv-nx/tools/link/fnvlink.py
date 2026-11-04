@@ -1129,13 +1129,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges, slot_over)
+                             canon_it, out, bridges, slot_over, exe_path)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
         byclass['vslot-exe'] += fill.get('bound_refs', 0)
         # primary vtables shorter than the exe's: an extended strong copy (the exe's remaining slots)
-        ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over)
+        ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over,
+                                exe_path)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
@@ -1536,6 +1537,19 @@ def slot_msvc_sig(isig, ds):
     return r
 
 
+CONST_SYM = '__fnvnx_vconst_%08x'   # a trivial x86 leaf (exevft.leaf_constant) no unit compiles
+
+
+def emit_const_stub(name, value):
+    """`return value;` (or `return;` for 'void'): the exact native form of the exe's constant leaf."""
+    body = ['    ret'] if value == 'void' else (
+        ['    mov w0, #%d' % value, '    ret'] if value < 0x10000 else
+        ['    movz w0, #0x%x' % (value & 0xffff), '    movk w0, #0x%x, lsl #16' % (value >> 16), '    ret'])
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name] + body +
+                     ['    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+
+
 FLAG_SYM = '__fnvnx_vflag_%08x_%d'   # GCC destructor slot -> a decomp (this, flags) function at the exe slot
 GDEL_SYM = '__fnvnx_vgdel_%08x'      # placeholder slot -> the exe's ??_G (native D0 / D1 by the caller's flags)
 
@@ -1567,7 +1581,7 @@ def emit_gdel_stub(name, d0, d1):
 
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
-                  stubs=None, overrides=None):
+                  stubs=None, overrides=None, exe_path=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -1597,9 +1611,14 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
 
     def target_for(un, a):
         nd = native.get(a)
-        if nd is None:
-            return None, 'not compiled'
         isig = itanium(un)
+        if nd is None:
+            c = exevft.leaf_constant(exe_path, a) if exe_path and not isig.variant else None
+            if c is not None:   # a trivial x86 leaf no unit compiles: its exact native form
+                name = CONST_SYM % a
+                stubs.setdefault(name, emit_const_stub(name, c))
+                return name, 'leaf constant (%s)' % c
+            return None, 'not compiled'
         dsym = nd['sym'].name
         dvar = sigs.itanium_variant(dsym)
         ds = msvc(nd['msvc']) if nd.get('msvc') else None
@@ -1775,7 +1794,7 @@ VTEXT_OBJ = 'zz_bridges.o'   # the extended vtables live in bridges.S (apply ass
 XTRAP = 'exe 0x%08x'
 
 
-def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None):
+def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
     kept object has them (its slot symbols renamed as resolve renames them in that object), then exe slot j for every
     j past the native slots (the minus-one rule): `__fnv_<a>` where the address map has a plain native definition,
@@ -1869,6 +1888,10 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 bridges.setdefault(t, emit_gdel_stub(t, ADDR_SYM % a, ADDR_SYM % a + (
                     '' if nd['variants']['D1'] is nd['sym'] else '_D1')))
                 st['slots-deleting-destructor'] += 1
+            elif nd is None and exe_path and exevft.leaf_constant(exe_path, a) is not None:
+                t = CONST_SYM % a
+                bridges.setdefault(t, emit_const_stub(t, exevft.leaf_constant(exe_path, a)))
+                st['slots-leaf-constant'] += 1
             else:
                 t = TRAP_SYM % int(hashlib.sha1((XTRAP % a).encode()).hexdigest()[:8], 16)
                 traps.setdefault(t, (XTRAP % a + (' (not compiled)' if nd is None else ' (%s)' % var), (z, 2 + j)))

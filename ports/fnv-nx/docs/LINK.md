@@ -609,6 +609,10 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   flags (`FUN_00c2a090(unsigned int)`), GCC's D0 / D1 go through `__fnvnx_vflag_<a>_1` / `_0` (w1 = flags, then
   `b __fnv_<a>`); a placeholder slot (`virtual void v00();`) where the exe has a native `??_G` goes through
   `__fnvnx_vgdel_<a>` (bit 0 of the caller's flags picks D0 or D1, as the kind-G adapter does).
+* An exe slot address that no compiled unit defines but whose x86 body is a constant leaf (`ret`, `ret N`,
+  `xor eax, eax` / `mov al|eax, imm`, then a return: `exevft.leaf_constant`) gets its exact native form,
+  `__fnvnx_vconst_<a>` (`mov w0, #imm; ret`). MSVC folds identical functions, so one body stands in many slots:
+  0x00e7cd40 `return 0;` (defined only in nitexturingproperty.cpp, which does not compile) in 1,065 of them.
 * A derived class's vtable in the same object that holds another address in that slot (an override the decomp
   does not declare), or vtables that disagree with no declaring class among them: that slot gets its own word in
   a copy of the kept vtable (next point).

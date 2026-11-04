@@ -12,6 +12,8 @@ vftable's .text words. Checks:
   pointer followed by a data word, a "COL" whose signature is not 0, a TypeDescriptor that is not `.?A`;
 * a vftable ends at the first word outside .text (the next vftable's COL pointer);
 * msvc_name() gives the primary vftable's MSVC name, which llvm-undname spells "const C::`vftable'" (if installed);
+* leaf_constant() recognises the constant x86 leaves (`ret`, `ret N`, `xor eax, eax` / `mov al|eax, imm`, then a
+  return) and nothing else;
 * load() caches the scan and reuses it;
 * plain_vftables() reads vftables without RTTI at given addresses, bounded by the next known start;
 * fnvlink.exe_slot_index (the minus-one rule): GCC's D1/D0 pair is MSVC's one deleting destructor.
@@ -57,12 +59,17 @@ class RData:
         return self.put(struct.pack('<%dI' % len(ws), *[w & 0xffffffff for w in ws]))
 
 
-def make_pe(path, build):
-    """build(rdata) writes the .rdata content; returns the PE bytes written to path."""
+def make_pe(path, build, code=None):
+    """build(rdata) writes the .rdata content; code: {address: x86 bytes} placed in .text (int3 elsewhere).
+    Returns the PE bytes written to path."""
     rd = RData()
     build(rd)
     rdata = bytes(rd.buf).ljust(RDATA_SIZE, b'\0')
-    text = b'\xc3' * 0x200                       # ret; the slots point into .text, contents do not matter
+    text = bytearray(b'\xcc' * 0x200)            # int3; the slots point into .text
+    for a, bs in (code or {}).items():
+        o = a - BASE - TEXT_RVA
+        text[o:o + len(bs)] = bs
+    text = bytes(text)
     falign = 0x200
     hdr_size = 0x400
     text_off, rdata_off = hdr_size, hdr_size + len(text)
@@ -166,6 +173,13 @@ def main():
               'Multi {for Side}: COL offset 8')
         check(t is not None and t.td == '.?AV?$Tmpl@H@@', 'template TypeDescriptor kept')
         check(exevft.msvc_name('.?AVMulti@@') == '??_7Multi@@6B@', 'msvc_name of a plain class')
+        leaf = os.path.join(tmp, 'Leaf.exe')
+        code = {T(1): b'\x33\xc0\xc3', T(2): b'\xb0\x01\xc2\x04\x00', T(3): b'\xb8\x78\x56\x34\x12\xc3',
+                T(4): b'\xc2\x08\x00', T(5): b'\x56\x8b\xf1\xc3', T(6): b'\x32\xc0\xc3'}
+        make_pe(leaf, lambda rd: None, code)
+        got_l = [exevft.leaf_constant(leaf, T(k)) for k in range(1, 8)]
+        check(got_l == [0, 1, 0x12345678, 'void', None, 0, None],
+              'leaf_constant: xor eax / mov al + ret 4 / mov eax / ret 8 / not a leaf / xor al / int3: %s' % got_l)
         und = shutil.which('llvm-undname') or shutil.which('llvm-undname-18')
         if und:
             r = subprocess.run([und], input='??_7?$Tmpl@H@@6B@\n', capture_output=True, text=True)

@@ -27,6 +27,7 @@ rest; its exe vftable holds the same bodies. Checks:
   follows the declaring class Vb, and Der's slot gets its own word in a strong copy of Der's vtable;
 * Vk::k(int), whose body the decomp defines as `int __stdcall kbody(int)` (the x86 model: the slot's int is the
   stack argument both read), goes through a bridge that moves it from x1 to x0;
+* Vk::kz, whose exe body is `xor eax, eax; ret` and which no unit compiles, gets the native stub `return 0`;
 * vtmetric.py counts what is left: trap slots 6 (c, d, e in both vtables), 2 of them with a native at the exe slot
   (c: the abi gap).
 """
@@ -57,7 +58,7 @@ struct Vd { virtual int g(); virtual ~Vd(); int z; };      // key function g; ~V
 struct Gd { virtual ~Gd(); int w; };
 struct Vp { virtual int h(); virtual void v00(); int u; }; // v00: a placeholder for the exe's ??_G
 struct Sh { virtual int p() { return 5; } int s; };         // a shell: its exe vftable has two slots more
-struct Vk { virtual int kk(); virtual int k(int); int t; };  // k's body: the decomp's stdcall kbody(int)
+struct Vk { virtual int kk(); virtual int k(int); virtual int kz(); int t; };  // k: stdcall kbody(int); kz: return 0
 int kbody(int);
 '''
 SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nint Der::a() { return 2; }\n'
@@ -108,7 +109,7 @@ def build_exe(rd, where):
     where['Vp'] = vft('.?AVVp@@', chd(['.?AVVp@@']), [0x401090, 0x401098])
     # Sh: p, then Shell::impl's address and an address no compiled unit defines
     where['Sh'] = vft('.?AVSh@@', chd(['.?AVSh@@']), [0x4010b0, 0x401020, 0x401060])
-    where['Vk'] = vft('.?AVVk@@', chd(['.?AVVk@@']), [0x4010c0, 0x4010c8])
+    where['Vk'] = vft('.?AVVk@@', chd(['.?AVVk@@']), [0x4010c0, 0x4010c8, 0x4010d0])
     rd.words(0)
 
 
@@ -117,7 +118,8 @@ def main():
         t = os.environ.get("FNVNX_TEST_KEEP") or t
         exe = os.path.join(t, 'Synthetic.exe')
         where = {}
-        test_exevft.make_pe(exe, lambda rd: build_exe(rd, where))
+        # .text: int3, except Vk::kz's body at 0x4010d0, `xor eax, eax; ret` (no unit defines it)
+        test_exevft.make_pe(exe, lambda rd: build_exe(rd, where), {0x4010d0: b'\x33\xc0\xc3'})
         tree = os.path.join(t, 'tree')
         os.makedirs(os.path.join(tree, 'include'))
         open(os.path.join(tree, 'include', 'h.h'), 'w').write(HEADER)
@@ -199,6 +201,10 @@ def main():
             r = refs.get(n)
             check(r is not None and r[2] == 'vslot-exe' and r[5] == want, '%s -> %s: %s' % (n, want, r))
         bridges_ = open(os.path.join(out, 'bridges.S')).read()
+        rz = refs.get('_ZN2Vk2kzEv')
+        check(rz is not None and rz[5] == '__fnvnx_vconst_004010d0' and
+              '__fnvnx_vconst_004010d0:\n    mov w0, #0\n    ret' in bridges_,
+              'kz (the exe\'s `xor eax, eax; ret`, compiled nowhere) -> a native `return 0` stub: %s' % (rz,))
         rk = refs.get('_ZN2Vk1kEi')
         check(rk is not None and rk[2] == 'vslot-exe' and rk[5].startswith('__fnvnx_br_004010c8_') and
               ('%s:\n    mov x0, x1\n    b __fnv_004010c8' % rk[5]) in bridges_,
@@ -227,8 +233,8 @@ def main():
               'vtmetric: 7 trap slots left (Sh\'s extension holds one), 2 with a native at the exe slot, no short '
               'primary (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
-        check(st0['trap-slots'] == 14 and st0['trap-native-at-exe'] == 10 and st0['primary-shorter'] == 1,
-              'vtmetric without the fill: 14 / 10, Sh short (%s)'
+        check(st0['trap-slots'] == 15 and st0['trap-native-at-exe'] == 10 and st0['primary-shorter'] == 1,
+              'vtmetric without the fill: 15 / 10, Sh short (%s)'
               % dict(st0))
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0

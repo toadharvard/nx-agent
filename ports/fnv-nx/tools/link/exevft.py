@@ -169,3 +169,45 @@ def plain_vftables(path, addrs, starts):
         if slots:
             out[v] = Vft(None, None, [], slots)
     return out
+
+
+# ---- trivial leaf functions of the exe (S2c-vt): an exact native stub where no unit compiles the address
+
+_PE = {}
+
+
+def _text(path):
+    if path not in _PE:
+        import fnvnx_pe
+        data = open(path, 'rb').read()
+        _PE[path] = (fnvnx_pe.PE(data), data)
+    return _PE[path]
+
+
+def leaf_constant(path, addr):
+    """What the x86 function at addr does, when it is a constant leaf: 'void' (`ret`, `ret N`), or the 32-bit value
+    it leaves in eax/al (`xor eax, eax` / `xor al, al` / `mov al, imm8` / `mov eax, imm32`, then `ret` or `ret N`);
+    else None. MSVC folds identical functions, so one such body (0x00e7cd40 `return 0;`) stands in many vtable
+    slots. al-only forms leave eax's upper bytes undefined on x86; the native stub returns the zero-extended byte,
+    which every bool / char reader of the result sees the same."""
+    pe, data = _text(path)
+    rva = addr - pe.image_base
+    try:
+        off = pe.rva_to_off(rva, 16)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    b = data[off:off + 16]
+
+    def ret_at(i):
+        return b[i:i + 1] == b'\xc3' or (b[i:i + 1] == b'\xc2' and b[i + 2:i + 3] == b'\x00')
+    if ret_at(0):
+        return 'void'
+    if b[:2] in (b'\x33\xc0', b'\x31\xc0', b'\x32\xc0', b'\x30\xc0') and ret_at(2):
+        return 0
+    if b[:1] == b'\xb0' and ret_at(2):
+        return b[1]
+    if b[:1] == b'\xb8' and ret_at(5):
+        return int.from_bytes(b[1:5], 'little')
+    return None
