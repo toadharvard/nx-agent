@@ -163,6 +163,23 @@ def test_rules():
     finally:
         causes.native_callees = real
     check(causes.native_callees('src/none.cpp', 0x00401000) is None, 'no object: no callee facts')
+    # effects lines refine triage causes
+    causes.EFFECTS.clear()
+    causes.EFFECTS.update({
+        'e1.json': dict(first='width'),
+        'e2.json': dict(first='store', store=dict(word=dict(x86='image address 0102e388',
+                                                           arm='native image .data.rel.ro _ZTV9FirstBase+8'))),
+        'e3.json': dict(first='store', store=dict(word=dict(x86='image address 01200000', arm='native named stub 0b000010')))})
+    try:
+        mw = dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=0, x86=w(5, 0), arm=w(6, 0))
+        check(causes.refine(dict(rec(mw), _file='e1.json'), 'unclassified') == 'field-width', 'effects: field-width')
+        check(causes.refine(dict(rec(mw), _file='e2.json'), 'unclassified') == 'vptr-unpaired', 'effects: vptr-unpaired')
+        check(causes.refine(dict(rec(mw), _file='e3.json'), 'unclassified') == 'native-stub-data',
+              'effects: native named stub stored')
+        check(causes.refine(dict(rec(mw), _file='e1.json'), 'uninit-arm') == 'uninit-arm',
+              'effects never override a non-triage cause')
+    finally:
+        causes.EFFECTS.clear()
     # a definite probe cause is never overridden
     check(causes.refine(rec(dict(kind='error', x86=None, arm='exc:1@0'), 'uninit-arm'), 'uninit-arm') == 'uninit-arm',
           'probe cause kept')

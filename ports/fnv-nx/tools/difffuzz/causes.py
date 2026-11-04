@@ -123,6 +123,8 @@ POLICY = {
                                                'unreachable) on a path where the exe returns'),
     'layout-offset':  ('real-bug', 'S1', True, 'a pointer into the same object at another offset (a few words): a '
                                                'base subobject or member placed differently (layout)'),
+    'field-width':    ('real-bug', 'S1', True, 'the machines read one field with another width or signedness '
+                                             '(char vs int, short vs int, bool byte vs word): a member type differs'),
     'stack-protector': ('real-bug', 'S1', True, 'the native overruns a local buffer that MSVC\'s frame tolerated'),
     'native-null-read': ('real-bug', 'S1', True, 'the native dereferences a near-null address the oracle never '
                                                  'touches (a field read at another offset, or a hoisted load)'),
@@ -503,6 +505,45 @@ def _calls_allocator(rec):
     return bool(cs and cs & ALLOCATORS)
 
 
+# ------------------------------------------------------------------ rules over `difffuzz.py effects` output
+#
+# `difffuzz.py effects --list <files> --out <effects.jsonl>` replays each record with every data access logged and
+# names the first effect the machines disagree on. Where such a line exists for a record (summary --effects), these
+# rules refine what the record rules left in triage.
+
+EFFECTS = {}            # reproducer basename -> effects line
+
+
+def load_effects(paths):
+    for p in paths:
+        for line in open(p):
+            line = line.strip()
+            if line:
+                e = json.loads(line)
+                if e.get('file'):
+                    EFFECTS[os.path.basename(e['file'])] = e
+
+
+def _rule_effects(e):
+    f = e.get('first')
+    if f == 'width':
+        return 'field-width'
+    if f == 'store':
+        w = (e.get('store') or {}).get('word') or {}
+        x, a = str(w.get('x86') or ''), str(w.get('arm') or '')
+        if x.startswith('image address') and 'native image .data.rel.ro _ZTV' in a:
+            return 'vptr-unpaired'
+        if 'native named stub' in a or 'native stub' in a:
+            return 'native-stub-data'
+    if f == 'value':
+        v = e.get('value') or {}
+        a = str(v.get('arm') or '')
+        if 'native named stub' in a or 'native stub' in a:
+            return 'native-stub-data'
+    return None
+
+
+TRIAGE_REFINABLE = {c for c, v in POLICY.items() if v[0] == 'triage'}
 REFINABLE = (None, 'unclassified', 'call-flow', 'signedness?')
 
 
@@ -510,7 +551,7 @@ def refine(rec, cause=None):
     """The record-level cause of a divergence the probes left at `cause` (unclassified / call-flow / signedness?),
     or `cause` itself when no rule applies. Never overrides a probe's definite cause."""
     if cause not in REFINABLE:
-        return cause
+        return _with_effects(rec, cause)
     d = (rec.get('_now') or rec.get('divergence') or {})
     k = d.get('kind')
     got = None
@@ -527,9 +568,15 @@ def refine(rec, cause=None):
     elif k in ('call-count', 'call-target'):
         got = _rule_calls(d, rec)
     if got is None:
-        return cause or 'unclassified'
-    # a probe that saw call-flow stays call-flow unless the record names something more specific
-    return got
+        got = cause or 'unclassified'
+    return _with_effects(rec, got)
+
+
+def _with_effects(rec, cause):
+    if cause not in TRIAGE_REFINABLE or not EFFECTS:
+        return cause
+    e = EFFECTS.get(os.path.basename(rec.get('_file') or rec.get('_p') or ''))
+    return (_rule_effects(e) if e else None) or cause
 
 
 # ------------------------------------------------------------------------------------------------------- summary
@@ -559,6 +606,7 @@ def _load_campaign(d, tag=''):
             continue
         rec = json.load(open(p))
         rec['_now'] = now.get(os.path.basename(p))
+        rec['_file'] = os.path.basename(p)
         try:
             rec['_cause'] = report.reclassify(rec)
         except Exception:  # noqa: BLE001 - a record the static reclassifier cannot read keeps its hint
@@ -649,6 +697,7 @@ def main(argv=None):
     s = sub.add_parser('summary')
     s.add_argument('dirs', nargs='+')
     s.add_argument('--recheck-tag', default='')
+    s.add_argument('--effects', action='append', default=[], help='difffuzz.py effects output (JSON lines)')
     s.add_argument('--out', default='')
     m = sub.add_parser('merge')
     m.add_argument('files', nargs='+')
@@ -656,6 +705,8 @@ def main(argv=None):
     e = sub.add_parser('explain')
     e.add_argument('files', nargs='+')
     a = ap.parse_args(argv)
+    if a.cmd == 'summary' and a.effects:
+        load_effects(a.effects)
     if a.cmd in ('summary', 'merge'):
         out = summarize(a.dirs, a.recheck_tag) if a.cmd == 'summary' else merge(a.files)
         txt = json.dumps(out, indent=1, sort_keys=True)
