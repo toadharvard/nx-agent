@@ -124,8 +124,8 @@ def reclassify(rec):
             import world
             if world.STACK[0] <= vx < world.STACK[1] and world.STACK[0] <= va < world.STACK[1]:
                 return 'stack-arg'       # each machine's own frame through an int parameter (harness, fixed since)
-            if 0x00fdf000 <= vx < 0x02100000 and 0x0a000000 <= va < 0x0b800000:
-                return 'literal-arg'     # a literal at its image address vs the native unit's copy (harness)
+            # (an image address vs a native image address is left to causes.refine: native-address, a real bug, or
+            # literal-arg when the oracle's value is in the literal pool; S13b audit)
         except ValueError:
             pass
     if d['kind'] == 'call-target' and str(d.get('arm', '')).startswith('name:') and \

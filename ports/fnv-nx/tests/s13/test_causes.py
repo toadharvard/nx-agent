@@ -59,7 +59,8 @@ def test_rules():
           'native fetch fault in the stub range is not a data access')
     check(refined(dict(kind='error', x86='exc:3', arm=None)) == 'oracle-trap', 'oracle runs into int3 filler')
     check(refined(dict(kind='error', x86='fault:r:00000004', arm=None)) == 'oracle-fault', 'oracle-only data fault')
-    check(refined(dict(kind='error', x86=None, arm='no-native-entry')) == 'no-native-entry', 'no native entry')
+    check(refined(dict(kind='error', x86=None, arm='no-native-entry')) == 'native-undefined',
+          'no native entry and no object in the address map defines it: native-undefined (audit)')
     check(refined(dict(kind='error', x86='fault:r:0be1aab8', arm=None)) == 'oracle-native-address',
           'oracle dereferences a native address')
     # call arguments
@@ -95,8 +96,12 @@ def test_rules():
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(5), arm=w(7))) == 'unclassified',
           'plain int argument difference stays open')
     # return values
+    check(refined(dict(kind='return', x86=w(0x02f00100), arm=w(0x0a100000), pointee_x86='', pointee_arm='6869'))
+          == 'literal-ret', 'pointer to a pool literal the oracle side cannot read')
     check(refined(dict(kind='return', x86=w(0x01001000), arm=w(0x0a100000), pointee_x86='', pointee_arm='6869'))
-          == 'literal-ret', 'pointer to a literal the oracle side cannot read')
+          != 'literal-ret', 'an image-data pointer vs a native pointer is not a literal (audit)')
+    check(refined(dict(kind='return', x86=w(0x01001000), arm=w(0x09000040), pointee_x86='', pointee_arm=''))
+          == 'native-stub-data', 'the native returns a named-stub address: native-stub-data (audit)')
     check(refined(dict(kind='return', x86=w(0x01001000), arm=w(0x0a100000), pointee_x86='6869', pointee_arm='6869'))
           == 'native-address', 'pointer result: native image vs image window, pointees known')
     check(refined(dict(kind='return', x86=f64(0.30000000000000004), arm=f64(0.3),
@@ -174,8 +179,12 @@ def test_rules():
     real = causes.native_callees
     try:
         causes.native_callees = lambda src, a: {'__fnv_00aa13e0', '__fnv_00a57640'} if a == 0x00401000 else set()
-        check(refined(dict(kind='error', x86=None, arm='fault:w:00000000')) == 'new-null',
-              'null store after an allocator call: new-null')
+        check(refined(dict(kind='error', x86=None, arm='fault:w:00000000')) == 'native-null-read',
+              'null store after an allocator call, no canned null: a native null (audit)')
+        r0 = rec(dict(kind='error', x86=None, arm='fault:w:00000000'))
+        r0['case'] = dict(rets=['00000000' + '00' * 12])
+        check(causes.refine(r0, 'unclassified') == 'native-null-read',
+              'a canned 0 is another call\'s valid result since difffuzz-12: new-null retired (audit)')
         check(causes.refine(rec(dict(kind='error', x86=None, arm='fault:w:00000000'), addr='00402000'),
                             'unclassified') == 'native-null-read', 'null store without an allocator: native-null-read')
     finally:
@@ -207,8 +216,11 @@ def test_rules():
             causes.function_at = lambda pc: 0x0044dee0 if 0x0044dee0 <= pc < 0x0044df00 else None
             causes.native_callees = lambda src, a: {'__fnv_0044dee0', 'memset'}
             causes._OBJ_CACHE[obj] = {'_defined': {'__fnv_00401000'}}
-            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
-                  'effects: store made by a callee the native calls out of line (intercepted)')
+            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') != 'oracle-callee-store',
+                  'effects: a mem-write record means the native never called the callee (audit C5)')
+            cc = dict(kind='call-count', x86=0, arm=1, x86_trace=[], arm_trace=['0044dee0'])
+            check(causes.refine(dict(rec(cc), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
+                  'effects: the native calls the callee the oracle ran untraced: oracle-callee-store')
             for c in causes.NOT_INTERCEPTED:
                 check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), c) == c,
                       'effects: %s is never a callee-store artefact' % c)
@@ -492,7 +504,7 @@ def test_vcall_split():
     for c in ('vcall-garbage', 'vcall-stub-alias', 'oracle-private-address', 'native-empty-callee'):
         check(c in causes.POLICY, 'policy has %s' % c)
     check(causes.policy('native-empty-callee')[:2] == ('real-bug', 'S1') and
-          causes.policy('vcall-garbage')[:2] == ('artifact', 'S13'), 'vcall split classes')
+          causes.policy('vcall-garbage')[:2] == ('triage', 'S13b'), 'vcall split classes (garbage: triage, audit)')
 
 
 def test_unclassified_shapes():
@@ -636,6 +648,7 @@ def test_callflow():
         tgt = lambda x, a: dict(kind='call-target', index=0, x86=x, arm=a)  # noqa: E731
         check(cf(tgt('00401200', '01268238')) == 'native-calls-data', 'native jumps to a data address')
         check(cf(tgt('00ec9650', 'name:asinf')) == 'libc-variant', 'x87 intrinsic vs libm float: libc-variant')
+        check(cf(tgt('00eca1d0', 'name:cos')) != 'libc-variant', '_CIacos vs cos is another function (audit)')
         check(cf(tgt('00ec623a', 'name:__sprintf_chk')) == 'libc-variant', 'sprintf vs __sprintf_chk')
         check(cf(tgt('00ec623a', 'name:__strcpy_chk')) != 'libc-variant', 'sprintf vs __strcpy_chk: not a variant')
         check(cf(tgt('00401200', '9e684216')) == 'native-vcall-oracle-direct', 'native wild call, oracle direct')
@@ -646,6 +659,15 @@ def test_callflow():
         causes.native_reaches = lambda src, n: {'__fnv_00401100', '__fnv_00401300'}
         check(cf(tgt('00401100', '00401300')) == 'oracle-callee-unloaded',
               'oracle intercepts a callee the native ran (its traced call is in the native trace)')
+        bodies['__fnv_00401500'] = (BL_RET, {'__fnv_00401500'})
+        cs0, rch0 = causes.native_callees, causes.native_reaches
+        causes.native_callees = lambda src, a: cs0(src, a) | {'__fnv_00401500'}
+        causes.native_reaches = lambda src, n: ({'__fnv_00401500', '__fnv_00401300'} if n == '__fnv_00401500'
+                                                else rch0(src, n))
+        check(cf(tgt('00401100', '00401300')) != 'oracle-callee-unloaded',
+              'another unit-local callee also reaches Y: Y proves nothing about X (audit U4)')
+        causes.native_callees, causes.native_reaches = cs0, rch0
+        del bodies['__fnv_00401500']
         real_cs = causes.native_callees
         causes.native_callees = lambda src, a: real_cs(src, a) | {'__fnv_00401300'}
         check(cf(tgt('00401100', '00401300')) != 'oracle-callee-unloaded',
