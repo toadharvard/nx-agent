@@ -22,6 +22,8 @@ long long p2i64(void *p) { return (long long)p; }                  // expect: P2
 bool psign(void *p, void *q) { return (int)p < (int)q; }           // expect: P2I-SIGNED
 long long sh64(long long x, int n) { return x << n; }              // expect: SHIFT64-VAR
 int sh32(int x, int n) { return x << n; }                          // expect: SHIFT32-VAR
+#include "shimlike/shiftmacro.h"
+int shm(int x, int n) { return FNVS_SHL(x, n) + fnvs_rotl(x, n); } // excluded macro and inline code: nothing
 int idiv(int a, int b) { return a / b; }                           // expect: DIV-VAR
 void order1() { Use(ReadByte(), ReadByte()); }                     // expect: ORDER-ARGS stream
 void order2(Stream *s) { Use(s->Read(), s->Read()); }              // expect: ORDER-ARGS stream

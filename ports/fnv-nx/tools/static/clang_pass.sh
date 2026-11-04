@@ -24,6 +24,7 @@ case $CFG in
   *) echo "config: gnu, msvc or atomic" >&2; exit 2 ;;
 esac
 ARGS+=(-resource-dir "$($CLANG -print-resource-dir)" -I"$TREE/include")
+TOOL+=("${CLANG_EXCLUDE[@]}")
 export TREE D BIN="$OUT/bin/fnvcheck" ARGS_STR="${ARGS[*]}" TOOL_STR="${TOOL[*]}" FORCE=${FORCE:-0}
 if [ -z "$LIST" ]; then LIST="$D/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
 

@@ -7,6 +7,10 @@
 //
 //   <CHECK> \t <relpath> \t <line> \t <col> \t <detail...>
 //
+// A finding counts only when both its expansion and its spelling location are in the tree and in no --exclude
+// directory (always excluded: paths containing /shim/include/ or /sse2neon/): an intrinsic macro or inline code of
+// the shim, of sse2neon or of the clang headers that stand in for it, expanded in a unit, is not the unit's code.
+//
 // AST checks (default): source constructs whose meaning differs between MSVC 2008 x86-32 (what the decomp was
 // matched against) and GCC AArch64 ILP32 (what we build): float->integer conversions, variable 64-bit shifts,
 // argument evaluation order, varargs and format strings, volatile / polling / Interlocked fields, TLS, pointer
@@ -30,6 +34,7 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <vector>
 #include <string>
 
 using namespace clang;
@@ -47,6 +52,10 @@ static llvm::cl::opt<std::string> AtomicKeys("atomic-keys",
                                              llvm::cl::cat(Cat));
 static llvm::cl::opt<bool> OnlyAtomic("only-atomic", llvm::cl::desc("only the ATOMIC-PLAIN-STORE check"),
                                       llvm::cl::cat(Cat));
+static llvm::cl::list<std::string> Exclude("exclude",
+                                           llvm::cl::desc("directory whose code is not the tree's even below --root "
+                                                          "(shim, sse2neon, generated headers; repeatable)"),
+                                           llvm::cl::cat(Cat));
 
 static std::set<std::string> SeenKeys, Atomic;
 
@@ -77,13 +86,43 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
   ASTContext &C;
   SourceManager &SM;
   std::string RootDir;
-  std::map<unsigned, std::pair<bool, std::string>> FileCache;  // FileID hash -> (in tree, relpath)
+  struct FileInfo { bool in, excluded; std::string rel; };
+  std::map<unsigned, FileInfo> FileCache;  // FileID hash -> in tree (and not excluded), excluded, relpath
+  std::vector<std::string> ExDirs;
   const FunctionDecl *CurFn = nullptr;
   std::set<const VarDecl *> Uninit;  // locals of the current function declared without an initializer, not used yet
 
   explicit Visitor(ASTContext &C) : C(C), SM(C.getSourceManager()) {
     RootDir = Root;
     if (!RootDir.empty() && RootDir.back() != '/') RootDir += '/';
+    for (const std::string &d : Exclude) {
+      llvm::SmallString<256> abs(d);
+      llvm::sys::fs::make_absolute(abs);
+      llvm::sys::path::remove_dots(abs, true);
+      std::string e = abs.str().str();
+      if (!e.empty() && e.back() != '/') e += '/';
+      ExDirs.push_back(e);
+    }
+  }
+  const FileInfo &info(FileID F) {
+    auto it = FileCache.find(F.getHashValue());
+    if (it != FileCache.end()) return it->second;
+    FileInfo fi{false, false, std::string()};
+    if (auto FE = SM.getFileEntryRefForID(F)) {
+      std::string p = FE->getName().str();
+      llvm::SmallString<256> abs(p);
+      llvm::sys::fs::make_absolute(abs);
+      llvm::sys::path::remove_dots(abs, true);
+      p = abs.str().str();
+      fi.excluded = p.find("/shim/include/") != std::string::npos || p.find("/sse2neon/") != std::string::npos;
+      for (const std::string &e : ExDirs)
+        if (p.compare(0, e.size(), e) == 0) fi.excluded = true;
+      if (!fi.excluded && !RootDir.empty() && p.compare(0, RootDir.size(), RootDir) == 0) {
+        fi.in = true;
+        fi.rel = p.substr(RootDir.size());
+      }
+    }
+    return FileCache.emplace(F.getHashValue(), fi).first->second;
   }
   bool shouldVisitTemplateInstantiations() const { return false; }
   bool shouldVisitImplicitCode() const { return false; }
@@ -91,26 +130,13 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
   // location in the tree: (relpath, line, col), or false
   bool where(SourceLocation L, std::string &path, unsigned &line, unsigned &col) {
     if (L.isInvalid()) return false;
-    L = SM.getExpansionLoc(L);
-    FileID F = SM.getFileID(L);
-    auto it = FileCache.find(F.getHashValue());
-    if (it == FileCache.end()) {
-      bool in = false;
-      std::string rel;
-      if (auto FE = SM.getFileEntryRefForID(F)) {
-        std::string p = FE->getName().str();
-        llvm::SmallString<256> abs(p);
-        llvm::sys::fs::make_absolute(abs);
-        llvm::sys::path::remove_dots(abs, true);
-        p = abs.str().str();
-        if (!RootDir.empty() && p.compare(0, RootDir.size(), RootDir) == 0) { in = true; rel = p.substr(RootDir.size()); }
-      }
-      it = FileCache.emplace(F.getHashValue(), std::make_pair(in, rel)).first;
-    }
-    if (!it->second.first) return false;
-    path = it->second.second;
-    line = SM.getExpansionLineNumber(L);
-    col = SM.getExpansionColumnNumber(L);
+    SourceLocation E = SM.getExpansionLoc(L);
+    const FileInfo &fi = info(SM.getFileID(E));
+    if (!fi.in) return false;
+    if (L.isMacroID() && info(SM.getFileID(SM.getSpellingLoc(L))).excluded) return false;  // a shim/sse2neon macro
+    path = fi.rel;
+    line = SM.getExpansionLineNumber(E);
+    col = SM.getExpansionColumnNumber(E);
     return true;
   }
 

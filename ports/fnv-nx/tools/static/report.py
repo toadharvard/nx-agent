@@ -295,8 +295,14 @@ class Sites:
         return d
 
 
+EXCLUDED = ('/shim/include/', '/sse2neon/')      # never the tree's code (as fnvcheck --exclude)
+OUT_DIR = None                                  # the gate's output: its generated headers are not the tree's
+
+
 def rel(path, tree):
     p = os.path.normpath(path if os.path.isabs(path) else os.path.join(tree, path))
+    if any(e in p for e in EXCLUDED) or (OUT_DIR and p.startswith(OUT_DIR + '/')):
+        return None
     return p[len(tree) + 1:] if p.startswith(tree + '/') else None
 
 
@@ -316,7 +322,9 @@ def load_units(tree):
 
 
 def main():
+    global OUT_DIR
     tree, out = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
+    OUT_DIR = out
     baseline = sys.argv[3] if len(sys.argv) > 3 else None
     S = Sites()
     passes = {}

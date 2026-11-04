@@ -12,7 +12,7 @@
 # SHIM=<dir> replaces <port>/shim/include (run.sh). The gnu configuration carries the D10 semantics flags clang knows
 # (-fsigned-char -fwrapv -fno-strict-aliasing -fno-delete-null-pointer-checks -ffp-contract=off -frounding-math).
 # clang_env_setup <out dir> writes the generated headers to <out>/clang/{inc,gnu}; CLANG_MSVC / CLANG_GNU are the
-# argument arrays (append -I<tree>/include).
+# argument arrays (append -I<tree>/include), CLANG_EXCLUDE the fnvcheck --exclude options.
 # shellcheck shell=bash
 CLANG=${CLANG:-clang++-18}
 
@@ -44,4 +44,8 @@ clang_env_setup() {
   CLANG_GNU=(--target=i686-linux-gnu -malign-double -fms-extensions -frounding-math -fwrapv -fno-strict-aliasing
              -fno-delete-null-pointer-checks -ffp-contract=off
              -include "$out/clang/gnu/fnvnx_compat.h" "${CLANG_COMMON[@]}")
+  # fnvcheck options: code of these directories is never the tree's, even when one lies below --root (the generated
+  # headers of <out>/clang when <out> is inside the tree, the shim, sse2neon and the clang headers standing in for it)
+  CLANG_EXCLUDE=(--exclude="$out/clang" --exclude="$shim" --exclude="$res/include")
+  if [ -n "${SSE2NEON:-}" ]; then CLANG_EXCLUDE+=(--exclude="$SSE2NEON"); fi
 }

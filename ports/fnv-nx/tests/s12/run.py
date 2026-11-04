@@ -42,6 +42,13 @@ def clang_args(scratch, cfg):
     return subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True).stdout.split('\n')[:-1]
 
 
+def clang_exclude(scratch):
+    """fnvcheck's --exclude options of clang_env.sh (generated headers, shim, sse2neon, clang's intrinsic headers)"""
+    script = ('. "%s/clang_env.sh"; clang_env_setup "%s" "%s" >/dev/null; printf "%%s\\n" "${CLANG_EXCLUDE[@]}"'
+              % (STATIC, scratch, PORT))
+    return subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True).stdout.split('\n')[:-1]
+
+
 def functions(asm):
     """mangled label -> body text (instructions and local labels)"""
     out, cur = {}, None
@@ -86,17 +93,21 @@ def facts(scratch):
 
 def run_fnvcheck(scratch, cfg, src, extra):
     exe = os.path.join(scratch, 'bin', 'fnvcheck')
-    args = [exe, '--root=' + HERE] + extra + [src, '--'] + clang_args(scratch, cfg)
+    args = [exe, '--root=' + HERE] + clang_exclude(scratch) + extra + [src, '--'] + clang_args(scratch, cfg)
     r = subprocess.run(args, capture_output=True, text=True, cwd=HERE)
     return r.stdout
 
 
 def cases(scratch):
-    rows = run_fnvcheck(scratch, 'gnu', 'cases.cpp', []).splitlines()
-    got = {}
+    rows = run_fnvcheck(scratch, 'gnu', 'cases.cpp', ['--exclude=' + os.path.join(HERE, 'shimlike')]).splitlines()
+    got, elsewhere = {}, []
     for r in rows:
         p = r.split('\t')
+        if p[1] != 'cases.cpp':     # the shim / sse2neon / generated headers are never the tree's (--exclude)
+            elsewhere.append('%s %s:%s' % (p[0], p[1], p[2]))
+            continue
         got.setdefault(int(p[2]), set()).add(p[0] + ('/' + p[4] if p[0] == 'ORDER-ARGS' else ''))
+    check(not elsewhere, 'cases.cpp: no rows outside the unit (%s)' % ', '.join(elsewhere[:4]))
     want = {}
     for n, line in enumerate(open(os.path.join(HERE, 'cases.cpp')), 1):
         m = re.search(r'// expect: (.*)$', line)
