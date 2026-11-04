@@ -44,9 +44,13 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, ha
 | `TYPEID1` | neutral | adds `<typeinfo>` only | real `<typeinfo>` |
 | `CSX1` | neutral | drops the decomp's Xbox 360 critical-section size / offset asserts (D15, J-0051); asserts emit no code | as is |
 | `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address; same callee, same bits | as is |
+| `RREF1` | neutral | `fnvnx_lvalue(...)` around an argument passed to a non-const reference parameter (every declaration the unit sees) that is not a plain lvalue | the temporary MSVC bound, same lifetime |
+| `TPL1` | neutral | `this->` in front of the members of a dependent base that a class template's member functions use by plain name | the members MSVC's (one-phase) lookup found |
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
 | `DTOR1` | neutral | declares `template <> NiPointer<T>::~NiPointer();` after a unit's includes for member pointees T it never completes (with DecRefCount): GCC's key-function vtable would instantiate it | MSVC never instantiated it in those units |
+| `ANON1` | platform | names an unnamed struct defined in a member function's return type (`struct fnvnx_anon_Float {...}; fnvnx_anon_Float* Float();`) | same layout; MSVC's decorated name of the function changes (`<unnamed-tag>`) |
+| `STL1` | platform | includes `fnvnx_msvcstl.h` (MSVC 2008 `<xutility>` internals: `_SCL_SECURE_VALIDATE`, `std::_Checked_base`, `std::_Ptr_cat`, iterator tags) where a unit uses them | MSVC's own header defines them; the gate builds with it |
 | `SPEC3` | neutral | qualifies the names a namespace declares in the body of an explicit class specialization written inside it (`fnv_x::T* p`) | the names MSVC's lookup found |
 | `LEX1` | neutral | MSVC token spellings: `i64`/`ui64` suffixes -> `LL`/`ULL`, `0xae-0x34` -> `0xae -0x34`, `"C"enum` -> `"C" enum` | same tokens as MSVC lexed them |
 | `STD1` | neutral | a decomp `struct std { static float abs(float); }` (the std namespace of the headers) -> the same declarations in `namespace std` | `std::abs(float)` is fabsf (0x00408840) either way |

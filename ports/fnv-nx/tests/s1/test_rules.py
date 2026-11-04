@@ -142,6 +142,10 @@ check('STATIC1 unsized DAT_ array becomes a declaration',
       run(s1.r_image_statics, 'const void* DAT_010d0fc4[];\nconst void* local_table[];\n'),
       ['extern const void* DAT_010d0fc4[];', '\nconst void* local_table[];'])
 
+check('RCAST1 a cast operand and a declarator are left alone',
+      run(s1.r_ref_cast_temporaries, 'a.Add((void* const&)(void*)this);\nbool GetAt(const char*, void(__cdecl*&)());\n'),
+      (), ['fnvnx_lvalue'])
+
 # ---- RCAST1 named casts
 check('RCAST1 static_cast to a reference of an operator result',
       run(s1.r_ref_cast_temporaries, 'v = static_cast<const D&>(a - b).Len();\nw = static_cast<const D&>(p->m).Len();\n'),
@@ -154,6 +158,12 @@ check('RCAST1 member operator call result',
 check('KEEP1 tag in front of a statement: no FNVNX_KEEP',
       run(s1.r_keep_definitions, 'bool f()\n{\n// @fnv 0x005c4940\n    if (x)\n        g();\n    return true;\n}\n'),
       (), ['FNVNX_KEEP'])
+
+check('KEEP1 tag above an access label: FNVNX_KEEP after the label',
+      run(s1.r_keep_definitions, 'class C {\n// @fnv 0x00cd3ad0\npublic:\n    C() {}\n};\n'), ['public:\n    FNVNX_KEEP C() {}'])
+
+check('KEEP1 tag in front of a member initializer list: no FNVNX_KEEP',
+      run(s1.r_keep_definitions, 'A::A(int n)\n// @fnv 0x00c31bd0\n    : Base(n)\n{}\n'), (), ['FNVNX_KEEP'])
 
 # ---- NEW1 keeps reference parameters
 check('NEW1 size parameter -> size_t, reference parameter kept',
@@ -171,6 +181,58 @@ check('DTOR1 needs code after the includes', run(s1.r_incomplete_pointee_dtors, 
 got = run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n// k\nvoid B::k() {}\n', _unit)
 check('DTOR1 declares the destructor for a pointee never completed at file scope', got,
       ['template <> NiPointer<Qa>::~NiPointer(); /* fnv-nx DTOR1 */'], ['NiPointer<Ra>::~', 'NiPointer<Sa>::~'])
+
+with open(os.path.join(_d, 'src', 'c.h'), 'w') as _h:
+    _h.write(DTOR1_HEAD.replace('template <class T> class NiPointer', '#define NiPointer X\ntemplate <class T> class NiPointer')
+             + '#undef NiPointer\ntemplate <class T> class NiPointer\n{\n    T* m_pObject;\n};\n')
+check('DTOR1 a unit-local NiPointer without that destructor: nothing',
+      run(s1.r_incomplete_pointee_dtors, '#include "c.h"\nvoid B::k() {}\n', os.path.join(_d, 'src', 'c.cpp')), (), ['DTOR1'])
+
+# ---- TPL1
+got = run(s1.r_dependent_base_members,
+          'template<class T> struct Store {\n T* data; int size; int capacity;\n void own(T* p,int n) {data=p;size=n;}\n'
+          ' typedef T value;\n};\n'
+          'template<class T> struct Arr : Store<T> {\n int extra;\n Arr(int count) {\n  own(0,count);\n  if(size>0) data[0]=T();\n'
+          '  int cap=capacity; extra=cap;\n }\n void f(int size) { data[size]=T(); other.size=1; }\n'
+          ' static void g() { int capacity=0; }\n};\n'
+          'template<class T> void Arr<T>::h() { capacity = 0; }\n')
+check('TPL1 this-> for dependent base members', got,
+      ['  this->own(0,count);', 'if(this->size>0) this->data[0]', 'int cap=this->capacity; extra=cap;',
+       'void f(int size) { this->data[size]=T(); other.size=1; }', 'static void g() { int capacity=0; }',
+       'void Arr<T>::h() { this->capacity = 0; }'], ['this->extra', 'this->value', 'this->size]'])
+check('TPL1 non-dependent base: untouched',
+      run(s1.r_dependent_base_members, 'struct Base { int size; };\ntemplate<class T> struct D : Base {\n'
+          ' void f() { size = 0; }\n};\n'), (), ['this->'])
+
+# ---- STL1
+check('STL1 MSVC library internals get fnvnx_msvcstl.h',
+      run(s1.r_msvc_library_internals, 'void f(int* p) { _SCL_SECURE_VALIDATE(p != 0); g(std::_Checked_base(p)); }\n'),
+      ['#include "fnvnx_msvcstl.h" /* fnv-nx STL1 */\n'])
+check('STL1 a unit with its own copies: untouched',
+      run(s1.r_msvc_library_internals, '#define _SCL_SECURE_VALIDATE(c) (void)0\nvoid f(int* p) { _SCL_SECURE_VALIDATE(p); }\n'),
+      (), ['fnvnx_msvcstl.h'])
+
+# ---- SAL1 class attributes
+check('SAL1 drops the attributes of the annotation classes',
+      run(s1.r_sal_attributes, 'enum A { N };\n[repeatable][source_annotation_attribute(Parameter)] struct PreAttribute\n{\n};\n'
+          '[repeatable]\n[source_annotation_attribute(Parameter)]\nstruct PostAttribute;\n'),
+      ['enum A { N };\nstruct PreAttribute\n', '};\n\n\nstruct PostAttribute;'], ['[repeatable]', 'source_annotation'])
+
+# ---- LINK1 declarator lists
+check('LINK1 C-linkage declarator list over two lines',
+      run(s1.r_c_data_linkage, 'extern "C" char str_a[], str_b[],\n    str_c[];\nextern "C" int f(int);\n'),
+      ['extern char str_a[], str_b[],\n    str_c[];', 'extern "C" int f(int);'])
+
+# ---- SSE3 / SSE1 forms
+check('SSE3 __m64 members', prepare.r_sse_members('x.cpp', 'short s = v.m64_i16[2];\n', Counter()), ['((short*)&(v))[2]'])
+check('SSE1 local struct __m128 removed',
+      prepare.r_sse_local_types('x.cpp', 'namespace Q {\nstruct __declspec(intrin_type) __declspec(align(16)) __m128\n{\n'
+                                '    float x, y, z, w;\n};\n}\n', Counter()), ['SSE1'], ['float x, y'])
+
+# ---- ANON1
+check('ANON1 names an unnamed struct in a return type',
+      run(s1.r_anonymous_return_types, 'struct G\n{\n    struct\n    {\n        float f;\n    }* Float();\n};\n'),
+      ['struct fnvnx_anon_Float {', 'fnvnx_anon_Float* Float('], ['}* Float'])
 
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')

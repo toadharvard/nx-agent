@@ -131,18 +131,25 @@ def r_if_exists(path, text, stats):
 
 SAL_ATTR = re.compile(r'\[\s*(?:returnvalue\s*:\s*)?SA_(?:Pre|Post|FormatString)\s*\([^\]]*\)\s*\]')
 
+# the attributes of sourceannotations.h's own attribute classes (`[repeatable][source_annotation_attribute(Parameter)]
+# struct PreAttribute`), pasted with it
+SAL_CLASS_ATTR = re.compile(r'^[ \t]*(?:\[\s*(?:repeatable|source_annotation_attribute\s*\([^\]\n]*\))\s*\][ \t]*\n?[ \t]*)+', re.M)
+
 def r_sal_attributes(path, text, stats):
-    """SAL1: drop MSVC attribute-syntax SAL annotations ([SA_Pre(Null=SA_No)] in pasted CRT prototypes); they
-    carry no semantics for the compiler."""
+    """SAL1: drop MSVC attribute-syntax SAL annotations ([SA_Pre(Null=SA_No)] in pasted CRT prototypes, and the
+    attributes of the annotation classes themselves); they carry no semantics for the compiler."""
     text, n = SAL_ATTR.subn('', text)
     stats['SAL1'] += n
+    if '[repeatable]' in text or 'source_annotation_attribute' in text:
+        text, n = SAL_CLASS_ATTR.subn(lambda m: '\n' * m.group(0).count('\n'), text)
+        stats['SAL1'] += n
     return text
 
 # ---------------------------------------------------------------------------------------------------------- DECL2
 
 SDK_TAGS = ('tagRECT tagPOINT tagSIZE _FILETIME _SYSTEMTIME _GUID _RTL_CRITICAL_SECTION _LARGE_INTEGER _ULARGE_INTEGER '
             '_OVERLAPPED _WIN32_FIND_DATAA _SYSTEM_INFO tagMSG tagPALETTEENTRY _LUID _RGNDATA tagBITMAPFILEHEADER '
-            'tagBITMAPINFOHEADER _iobuf').split()
+            'tagBITMAPINFOHEADER _iobuf _MEMORYSTATUS').split()
 SDK_TYPEDEFS = {n: '"fnvnx_win32.h"' for n in '''DWORD BOOL BYTE WORD LONG UINT HANDLE HRESULT LPVOID ULONG_PTR
     DWORD_PTR WPARAM LPARAM LRESULT HINSTANCE HMODULE HWND HHOOK HKEY HDC HICON HMENU HBRUSH HFONT HBITMAP HCURSOR
     UINT_PTR LONG_PTR INT_PTR ATOM COLORREF LPSTR LPCSTR'''.split()}
@@ -313,7 +320,8 @@ def r_msvc_base_layout(path, text, stats):
 
 # ---------------------------------------------------------------------------------------------------------- LINK1
 
-C_DATA_DECL = re.compile(r'^([ \t]*extern)\s+"C"(\s+[\w \t\*&:<>,]*?[\s\*&]\w+(?:\s*\[[^\]]*\])*\s*;)', re.M)
+C_DATA_DECL = re.compile(r'^([ \t]*extern)\s+"C"(\s+[\w \t\*&:<>,]*?[\s\*&]\w+(?:\s*\[[^\]]*\])*'
+                         r'(?:\s*,\s*[\*&]*\s*\w+(?:\s*\[[^\]]*\])*)*\s*;)', re.M)   # `extern "C" char a[], b[];` too
 C_FNPTR_DECL = re.compile(r'^([ \t]*extern)\s+"C"(\s*[\w \t\*&:<>,]*?\(\s*(?:__\w+\s*)?\*\s*(?:DAT|PTR|g)_\w+\s*\)\s*\([^;{}]*\)\s*;)',
                           re.M)
 
@@ -558,6 +566,12 @@ def r_ref_cast_temporaries(path, text, stats):
     if '&)' not in text and '&>' not in text and '& >' not in text: return text
     edits = []
     for m in REF_CAST_CALL.finditer(text):
+        if re.search(r'[\w\)\]]\s*$', text[max(0, m.start() - 20):m.start()]) and not re.search(
+                r'\b(?:return|case|throw)\s*$', text[max(0, m.start() - 20):m.start()]):
+            continue                                                  # a declarator (`void(__cdecl*&)(...)`), a call
+        if text[m.end()] == '(':                                      # parenthesized: an expression, not a type
+            inner = text[m.end() + 1:_call_end(text, m.end()) - 1]
+            if re.match(r'^[\w\s:<>,\*&]*$', inner): continue        # `(T&)(void*)p`, `(T&)(*p)`, `(T&)(x)`
         close, call = _postfix_end(text, m.end())
         if not call: continue                                         # an lvalue (a name, a member, an element)
         edits.append((m.end(), close))
@@ -1188,6 +1202,7 @@ def r_falloff_traps(path, text, stats):
 # size_t is unsigned long and the call is ambiguous. DUPINT1 keeps the first declaration and drops the later ones of
 # the same name, arity and scope when they differ only in integer types and every decorated spelling of that name
 # in the unit's units.json symbols binds the same address: the calls reach the same function with the same bits.
+# (With C linkage the two are a conflict outright: `extern "C" void _delete(void*, unsigned int)` and `(void*, size_t)`.)
 
 INT_TYPES = re.compile(r'^(?:(?:const|volatile|signed|unsigned|short|long|int|char|__int8|__int16|__int32|__int64|'
                        r'size_t|DWORD|UINT|INT|LONG|ULONG|WORD|BYTE|BOOL)\s*)+$')
@@ -1239,7 +1254,8 @@ def r_duplicate_int_overloads(path, text, stats):
         if len(sigs) != 2 or sigs[0][1] != sigs[1][1]: continue
         a, b = sigs[0][0], sigs[1][0]
         if not all(x == y or (INT_TYPES.match(x) and INT_TYPES.match(y)) for x, y in zip(a, b)): continue
-        addrs = {v for k, v in syms.items() if re.match(r'^\?%s@@' % re.escape(name), k)}
+        addrs = {v for k, v in syms.items()                # C++ decorations, or the C name (_name, _name@N)
+                 if re.match(r'^\?%s@@|^_%s(?:@\d+)?$' % (re.escape(name), re.escape(name)), k)}
         if len(addrs) != 1: continue
         drops += [m for types, ret, m in decls if types == b]
     if not drops: return text
@@ -1595,6 +1611,10 @@ def r_incomplete_pointee_dtors(path, text, stats):
     if 'NiPointer' not in alltext or not NIPTR_DTOR.search(alltext): return text
     lead = '\n'.join(t for _, t in _closure(path, text[:lead_end]))
     if not NIPTR_DTOR.search(lead): return text
+    # every NiPointer template the unit defines must declare that destructor (main.h defines its own without one,
+    # behind a macro that renames the canonical template)
+    for d in re.finditer(r'\btemplate\s*<\s*(?:class|typename)\s+\w+\s*>\s*class\s+NiPointer\s*\{', alltext):
+        if not NIPTR_DTOR.search(alltext[d.end() - 1:prepare.match_brace(alltext, d.end() - 1)]): return text
     spans = {}
     def defs(name):
         """[(base clause, body)] of the file-scope definitions of class `name` in the unit"""
@@ -1630,13 +1650,280 @@ def r_incomplete_pointee_dtors(path, text, stats):
     stats['DTOR1'] += len(out)
     return text[:lead_end] + ' '.join(out) + ' /* fnv-nx DTOR1 */ ' + text[lead_end:]
 
+# ---------------------------------------------------------------------------------------------------------- STL1
+#
+# A few units call internals of the MSVC 2008 C++ library by name (robertdavies_random: _SCL_SECURE_VALIDATE,
+# std::_Checked_base, std::_Ptr_cat, the checked-copy iterator tags of <xutility>). STL1 includes
+# shim/include/fnvnx_msvcstl.h, which defines them as <xutility> does, in a unit that uses them without defining them.
+
+STL_USE = re.compile(r'\b_SCL_SECURE_VALIDATE(?:_RANGE)?\s*\(|\bstd\s*::\s*(?:_Checked_base|_Ptr_cat|'
+                     r'_Range_checked_iterator_tag|_Nonscalar_ptr_iterator_tag|_Scalar_ptr_iterator_tag|'
+                     r'_Unchecked_iterator_tag)\b')
+
+def r_msvc_library_internals(path, text, stats):
+    """STL1: `#include "fnvnx_msvcstl.h"` on top of a unit that uses MSVC library internals (see above)."""
+    if '_S' not in text and 'std' not in text: return text
+    if not STL_USE.search(COMMENT.sub(' ', text)): return text
+    if re.search(r'#\s*define\s+_SCL_SECURE_VALIDATE\b|\bstruct\s+_Range_checked_iterator_tag\b', text): return text
+    stats['STL1'] += 1
+    return '#include "fnvnx_msvcstl.h" /* fnv-nx STL1 */\n' + text
+
+# ---------------------------------------------------------------------------------------------------------- TPL1
+#
+# MSVC 2008 has no two-phase name lookup: in a class template derived from a base that depends on a template
+# parameter (`template <class T> struct A : B<T> { void f() { size = 0; own(p, n); } }`), it found the base's members
+# by their plain names when it instantiated the class. Standard C++ looks such a name up where the template is
+# defined, where the dependent base is not searched, and GCC rejects the use (or binds it to a global of that name).
+# TPL1 writes `this->name` for the uses, in the member function bodies of such a class template (in the class or
+# out of it), of names the base declares as members (its bases' too, as far as the file defines them) and that the
+# class itself, the function's parameters or its locals do not declare: the members MSVC found. Type names,
+# enumerators and macros are left alone, and so are static member functions and friends.
+
+TPL1_CLASS = re.compile(r'\btemplate\s*<((?:[^<>]|<[^<>]*>)*)>\s*(?:struct|class)\s+'
+                        r'(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)?([A-Za-z_]\w*)\s*(?::\s*([^{};]*))?\{')
+PLAIN_CLASS = re.compile(r'(?<![<\w])(?:struct|class)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)?([A-Za-z_]\w*)\s*'
+                         r'(?::\s*([^{};]*))?\{')
+TPL1_OUT_DEF = re.compile(r'\btemplate\s*<((?:[^<>]|<[^<>]*>)*)>\s*(?:[^;{}()]*?[\s\*&>])?([A-Za-z_]\w*)\s*<[^<>;{}]*>\s*::'
+                          r'\s*~?[A-Za-z_]\w*\s*\(')
+TPL1_LOCAL = re.compile(r'\b([A-Za-z_]\w*)(?:\s*[\*&]+\s*|\s+)([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)?(?:=(?!=)|;|,|\[)')
+NOT_A_TYPE = set('return else case goto delete new throw sizeof do typedef'.split())
+CXX_KEYWORDS = set('''alignas alignof and asm auto bool break case catch char class const const_cast constexpr continue
+decltype default delete do double dynamic_cast else enum explicit export extern false float for friend goto if inline int
+long mutable namespace new noexcept not nullptr operator or private protected public register reinterpret_cast return
+short signed sizeof static static_assert static_cast struct switch template this throw true try typedef typeid typename
+union unsigned using virtual void volatile wchar_t while'''.split())
+
+def _flat_body(text, o, c):
+    """The class body text[o+1:c-1] with every nested brace block emptied (its top-level member declarations)."""
+    body = COMMENT.sub(' ', text[o + 1:c - 1])
+    res, depth = [], 0
+    for ch in body:
+        if ch == '{':
+            if depth == 0: res.append('{')
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0: res.append('}')
+        elif depth == 0:
+            res.append(ch)
+    return ''.join(res)
+
+def _members(flat, own_name):
+    """(value member names, type member names) declared at the top level of a flattened class body."""
+    values, types = set(), set()
+    for m in re.finditer(r'\btypedef\b[^;]*?\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;|\b(?:struct|class|union|enum)\s+'
+                         r'([A-Za-z_]\w*)|\busing\s+([A-Za-z_]\w*)\s*=', flat):
+        types.add(m.group(1) or m.group(2) or m.group(3))
+    for m in re.finditer(r'(?<![\w:~.>])([A-Za-z_]\w*)\s*\(', flat):        # member functions (and noise)
+        values.add(m.group(1))
+    for stmt in re.split(r'[;{}]', re.sub(r'\((?:[^()]|\([^()]*\))*\)', '()', flat)):
+        s = re.sub(r'^\s*(?:(?:public|private|protected)\s*:\s*)+', '', stmt).strip()
+        if not s or '(' in s or re.match(r'(?:typedef|using|friend|template|enum|struct|class|union)\b', s): continue
+        for d in s.split(','):
+            m = re.search(r'([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*(?::\s*\w+\s*)?(?:=.*)?$', d.strip(), re.S)
+            if m: values.add(m.group(1))
+    values = {v for v in values if v not in CXX_KEYWORDS and v != own_name and not v.startswith('__')
+              and not re.match(r'^[A-Z][A-Z0-9_]*$', v)}
+    return values, types
+
+def _base_specs(bases):
+    """[(name, template arguments or None)] of a base clause."""
+    out = []
+    for b in _split_args(bases):
+        b = re.sub(r'\b(?:public|protected|private|virtual)\b', '', b).strip()
+        m = re.match(r'(?:::)?([A-Za-z_]\w*)\s*(?:<(.*)>)?\s*$', b, re.S)
+        if m: out.append((m.group(1), m.group(2)))
+    return out
+
+def r_dependent_base_members(path, text, stats):
+    """TPL1: `this->` in front of the members of a dependent base used by plain name in a class template (see above)."""
+    if 'template' not in text or not TPL1_CLASS.search(text): return text
+    spans = prepare.scope_spans(text)
+    parent, stack = {}, []
+    for sp in spans:                                       # innermost enclosing brace of every brace
+        while stack and stack[-1][1] < sp[0]: stack.pop()
+        parent[sp[0]] = stack[-1][0] if stack else None
+        stack.append(sp)
+    heads = lambda pos: tuple(h for _, h in prepare.scope_chain(spans, pos))
+    classes = {}                                           # name -> [(open, close, bases, template params, scope)]
+    for m in TPL1_CLASS.finditer(text):
+        o = m.end() - 1
+        ps = set(re.findall(r'(?:class|typename|int|unsigned|bool|short|long|char)\s+([A-Za-z_]\w*)', m.group(1)))
+        classes.setdefault(m.group(2), []).append((o, prepare.match_brace(text, o), m.group(3) or '', ps, heads(m.start()),
+                                                   m.group(2)))
+    tdefs = {d[0] for v in classes.values() for d in v}
+    for m in PLAIN_CLASS.finditer(text):
+        o = m.end() - 1
+        if o in tdefs: continue
+        classes.setdefault(m.group(1), []).append((o, prepare.match_brace(text, o), m.group(2) or '', set(), heads(m.start()),
+                                                   m.group(1)))
+    def visible(name, scope):
+        """the definitions of `name` visible from `scope`: those of the innermost enclosing scope that has one"""
+        cands = [d for d in classes.get(name, ()) if d[4] == scope[:len(d[4])]]
+        if not cands: return []
+        best = max(len(d[4]) for d in cands)
+        return [d for d in cands if len(d[4]) == best]
+    cache = {}
+    def members_of(d, depth=0):
+        key = d[0]
+        if key in cache: return cache[key]
+        cache[key] = (set(), set())
+        vals, types = _members(_flat_body(text, d[0], d[1]), d[5])
+        if depth < 8:
+            for bname, _ in _base_specs(d[2]):
+                for bd in visible(bname, d[4]):
+                    bv, bt = members_of(bd, depth + 1)
+                    vals |= bv; types |= bt
+        cache[key] = (vals, types)
+        return cache[key]
+    fixes = {}                                             # class open -> names to qualify
+    for name, defs in classes.items():
+        for d in defs:
+            o, c, bases, params, scope, _ = d
+            if not params or not bases: continue
+            dep, dep_types = set(), set()
+            for bname, args in _base_specs(bases):
+                if args is None or not set(re.findall(r'[A-Za-z_]\w*', args)) & params: continue
+                for bd in visible(bname, scope):
+                    v, t = members_of(bd)
+                    dep |= v; dep_types |= t
+            own_v, own_t = _members(_flat_body(text, o, c), name)
+            names = dep - dep_types - own_v - own_t - params - {name}
+            if names: fixes[o] = (name, names)
+    if not fixes: return text
+    bodies = []                                            # (body open, body close, head, names)
+    for fo, fc, k, h in spans:
+        if k != 'function' or parent.get(fo) not in fixes: continue
+        if re.search(r'\b(?:static|friend)\b', h): continue
+        bodies.append((fo, fc, h, fixes[parent[fo]][1]))
+    by_name = {}
+    for o, (name, names) in fixes.items(): by_name.setdefault(name, []).append(names)
+    for m in TPL1_OUT_DEF.finditer(text):
+        if len(by_name.get(m.group(2), ())) != 1 or len(classes.get(m.group(2), ())) != 1: continue
+        brace = re.match(r'[^;{}]*\{', text[m.end():])
+        if not brace: continue
+        fo = m.end() + brace.end() - 1
+        if re.search(r'\b(?:static|friend)\b', text[m.start():fo]): continue
+        bodies.append((fo, prepare.match_brace(text, fo) - 1, text[m.start():fo], by_name[m.group(2)][0]))
+    edits = set()
+    for fo, fc, head, names in bodies:
+        body = COMMENT.sub(' ', text[fo:fc])
+        params_text = head[head.find('('):] if '(' in head else ''
+        declared = set(re.findall(r'([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)?(?:=[^,()]*)?\s*[,)]', params_text))
+        declared |= {v for t, v in TPL1_LOCAL.findall(body) if t not in NOT_A_TYPE}
+        use = names - declared
+        if not use: continue
+        for t in BODY_TOKENS.finditer(text, fo, fc):
+            w = t.group()
+            if w not in use: continue
+            before = text[max(0, t.start() - 12):t.start()]
+            if re.search(r'(?:::|->|\.|~)\s*$|\b(?:struct|class|union|enum|typename|goto)\s+$', before): continue
+            after = text[t.end():t.end() + 4]
+            if re.match(r'\s*::', after): continue
+            if re.match(r'\s*:(?!:)', after) and re.search(r'(?:^|[;{}])\s*$', before): continue          # a label
+            edits.add(t.start())
+    if not edits: return text
+    out, pos = [], 0
+    for at in sorted(edits):
+        out.append(text[pos:at]); out.append('this->'); pos = at
+    out.append(text[pos:])
+    stats['TPL1'] += len(edits)
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- RREF1
+#
+# MSVC binds a temporary to a non-const reference parameter (`actor->Unk_AA(a + b)` with Unk_AA(NiPoint3&),
+# `Add(va_arg(args, T*))` with Add(T&)); the temporary lives to the end of the full expression. GCC refuses. RREF1
+# wraps such an argument in fnvnx_lvalue (fnvnx_compat.h), which hands back the same object as an lvalue for that same
+# lifetime, where every declaration of the function the unit sees (by name and number of parameters) takes a
+# non-const reference at that position. An argument that already is an lvalue comes back unchanged.
+
+RREF_DECL = re.compile(r'(?:\b([A-Za-z_]\w*)\s+|[\*&]\s*|(?<!-)>\s*)(?:[A-Za-z_]\w*\s*::\s*)*~?([A-Za-z_]\w*)\s*'
+                       r'\(((?:[^;{}()]|\((?:[^;{}()]|\([^;{}()]*\))*\))*)\)\s*(?:const\s*)?(?:throw\s*\([^()]*\)\s*)?'
+                       r'(?:=\s*0\s*)?[;{:]')
+RREF_NOT_TYPE = set('return else case goto delete new throw sizeof do if while for switch'.split())
+
+def _nonconst_ref(param):
+    p = re.sub(r'=.*$', '', param, flags=re.S).strip()
+    if '&&' in p or not re.search(r'&\s*(?:[A-Za-z_]\w*)?\s*(?:\[[^\]]*\])?$', p): return False
+    return not re.search(r'\bconst\b', p[:p.rfind('&')])
+
+def r_temporaries_to_references(path, text, stats):
+    """RREF1: fnvnx_lvalue around a temporary passed to a non-const reference parameter (see above)."""
+    if '&' not in text or not path.endswith('.cpp'): return text
+    unit = '\n'.join(t for _, t in _closure(path, text)) if '#include' in text else COMMENT.sub(' ', text)
+    decls = {}
+    for m in RREF_DECL.finditer(unit):
+        if m.group(1) in RREF_NOT_TYPE: continue
+        params = m.group(3).strip()
+        ps = [] if params in ('', 'void') else _split_args(params)
+        decls.setdefault(m.group(2), []).append([_nonconst_ref(p) for p in ps])
+    refs = {n: v for n, v in decls.items() if any(any(r) for r in v)}
+    if not refs: return text
+    call = re.compile(r'(?<![\w~])(%s)\s*\(' % '|'.join(sorted(refs, key=len, reverse=True)))
+    spans = prepare.scope_spans(text)
+    bodies = []
+    for o, c, k, _ in spans:
+        if k == 'function' and not (bodies and o < bodies[-1][1]): bodies.append((o, c))
+    edits, bi = [], 0
+    for m in call.finditer(text):
+        while bi < len(bodies) and bodies[bi][1] < m.start(): bi += 1
+        if bi == len(bodies) or not bodies[bi][0] < m.start(): continue
+        before = text[max(0, m.start() - 40):m.start()]
+        pw = re.search(r'([A-Za-z_]\w*)\s*$', before)
+        if pw and pw.group(1) not in RREF_NOT_TYPE: continue                 # a declaration (`T name(...)`)
+        close = _call_end(text, m.end() - 1)
+        args = _split_args(text[m.end():close - 1])
+        if args == ['']: args = []
+        shapes = [r for r in refs[m.group(1)] if len(r) == len(args)]
+        if not shapes: continue
+        at = m.end()
+        for i, a in enumerate(args):
+            if all(r[i] for r in shapes) and a.strip() and not LVALUE_LIKE.match(a) and \
+                    not a.strip().startswith('fnvnx_lvalue('):
+                lead = len(a) - len(a.lstrip())
+                edits.append((at + lead, at + len(a.rstrip())))
+            at += len(a) + 1
+    if not edits: return text
+    out, pos = [], 0
+    for a, b in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append('fnvnx_lvalue(' + text[a:b] + ')'); pos = b
+        stats['RREF1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- ANON1
+#
+# MSVC takes an unnamed struct defined in a member function's return type (`struct { float f; }* Float();`, the
+# decomp's view of a setting object); C++ forbids defining a type there. ANON1 names it and defines it just before:
+# `struct fnvnx_anon_Float { float f; }; fnvnx_anon_Float* Float();`. Same layout; the return type is not part of the
+# function's (Itanium) symbol, so the call binds as before.
+
+ANON_RET = re.compile(r'\bstruct\s*\{([^{}]*)\}\s*(\*+|&)\s*([A-Za-z_]\w*)\s*\(')
+
+def r_anonymous_return_types(path, text, stats):
+    """ANON1: an unnamed struct defined in a return type gets a name (see above)."""
+    if 'struct' not in text or not ANON_RET.search(text): return text
+    out, pos = [], 0
+    for m in ANON_RET.finditer(text):
+        name = 'fnvnx_anon_' + m.group(3)
+        nl = '\n' * text.count('\n', m.start(), m.end())
+        out.append(text[pos:m.start()])
+        out.append('struct %s {%s}; %s%s %s(' % (name, m.group(1).replace('\n', ' '), name, m.group(2), m.group(3)) + nl)
+        pos = m.end()
+        stats['ANON1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
 KEEP_SKIP = re.compile(r'(?:#|//|/\*|template\b|extern\s*"C|namespace\b|typedef\b|using\b|struct\b|class\b|union\b|'
-                       r'enum\b|static_assert\b|FNV_STATIC_ASSERT\b|[{}]|'
+                       r'enum\b|static_assert\b|FNV_STATIC_ASSERT\b|[{}:,)]|'   # `: base(...)` of a constructor too
                        # a tag left in front of a statement inside a body
                        r'(?:if|for|while|do|switch|return|else|goto|break|continue|case|default|try)\b)')
+ACCESS_LABEL = re.compile(r'(?:public|private|protected)\s*:(?!:)\s*')
 
 def r_keep_definitions(path, text, stats):
     """KEEP1: FNVNX_KEEP (__attribute__((used))) in front of every declaration tagged `// @fnv 0x...`, so a definition
@@ -1645,11 +1932,13 @@ def r_keep_definitions(path, text, stats):
     if '@fnv' not in text: return text
     out, pos = [], 0
     for m in FNV_TAG.finditer(text):
-        if KEEP_SKIP.match(text, m.end()): continue
-        out.append(text[pos:m.end()]); out.append('FNVNX_KEEP '); pos = m.end()
+        lab = ACCESS_LABEL.match(text, m.end())          # a tag above an access label: the declaration after it
+        at = lab.end() if lab else m.end()
+        if KEEP_SKIP.match(text, at): continue
+        out.append(text[pos:at]); out.append('FNVNX_KEEP '); pos = at
         stats['KEEP1'] += 1
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout]

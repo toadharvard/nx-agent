@@ -33,6 +33,11 @@ char *strtok_s(char *, const char *, char **);
 int _splitpath_s(const char *, char *, size_t, char *, size_t, char *, size_t, char *, size_t);
 int _strlwr_s(char *, size_t);
 
+/* <float.h> / <stdlib.h> MSVC-only functions (platform/crt/fnvnx_msvcrt.h) */
+int _finite(double);
+int _isnan(double);
+char *_gcvt(double, int, char *);
+
 #ifdef __cplusplus
 }
 #endif

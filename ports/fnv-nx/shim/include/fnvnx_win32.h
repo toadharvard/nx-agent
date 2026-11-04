@@ -348,8 +348,10 @@ unsigned long __readfsdword(unsigned long);
 #define _byteswap_ulong(x) __builtin_bswap32(x)
 #define _byteswap_ushort(x) __builtin_bswap16(x)
 #define _byteswap_uint64(x) __builtin_bswap64(x)
+#ifndef FNVNX_COMPAT_H   /* game units: fnvnx_compat.h defines them with C linkage (the decomp re-declares them) */
 static inline unsigned int _rotl(unsigned int v, int s) { s &= 31; return s ? (v << s) | (v >> (32 - s)) : v; }
 static inline unsigned int _rotr(unsigned int v, int s) { s &= 31; return s ? (v >> s) | (v << (32 - s)) : v; }
+#endif
 
 /* ---- C++ exception plumbing referenced by name in a few units (compiler-generated on MSVC) */
 typedef struct _ThrowInfo _ThrowInfo;
@@ -425,6 +427,17 @@ void _CxxThrowException(void *, _ThrowInfo *);
 #define MB_RETRYCANCEL 0x5L
 #define MB_DEFBUTTON2 0x100L
 #define MB_DEFBUTTON3 0x200L
+#define MB_ICONHAND 0x10L
+#define MB_ICONQUESTION 0x20L
+#define MB_ICONEXCLAMATION 0x30L
+#define MB_ICONASTERISK 0x40L
+#define MB_ICONERROR MB_ICONHAND
+#define MB_ICONWARNING MB_ICONEXCLAMATION
+#define MB_ICONINFORMATION MB_ICONASTERISK
+#define MB_SYSTEMMODAL 0x1000L
+#define MB_TASKMODAL 0x2000L
+#define MB_SETFOREGROUND 0x10000L
+#define MB_TOPMOST 0x40000L
 #define IDOK 1
 #define IDCANCEL 2
 #define IDABORT 3

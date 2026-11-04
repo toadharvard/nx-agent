@@ -24,6 +24,7 @@
 #define __int64 long long
 #ifdef __cplusplus
 #include <sse2neon.h>
+#include "fnvnx_mmx.h"   /* the MMX intrinsics sse2neon lacks */
 #endif
 
 /* Calling conventions: AArch64 has one. Argument-order mismatches that x86 hid (fastcall with a
@@ -57,19 +58,33 @@
 #define __inline inline
 #define __assume(e) ((void)0)
 #define __noop(...) ((void)0)
-#define __debugbreak() __builtin_trap()
 #define __alignof(t) __alignof__(t)
 #define _alloca(n) __builtin_alloca(n)   /* the decomp's own _alloca prototypes are dropped by DECL1 */
 #define __pragma(x) _Pragma(#x)
 
-/* MSVC compiler intrinsics the decomp declares itself (extern "C" void _ReadWriteBarrier(void); in 600 places) and
- * calls qualified (::_ReadWriteBarrier()), so they must be functions with C linkage, not macros. */
+/* MSVC compiler intrinsics the decomp declares itself (extern "C" void _ReadWriteBarrier(void); in 600 places,
+ * extern "C" void __cdecl __debugbreak(void); and _exception_code(void) in some 50) and calls qualified
+ * (::_ReadWriteBarrier()), so they must be functions with C linkage, not macros. */
 #ifdef __cplusplus
 extern "C" {
 #endif
 inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
 inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
 inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
+inline __attribute__((always_inline)) void __debugbreak(void) { __builtin_trap(); }
+/* <stdlib.h> rotates (intrinsics on MSVC; the decomp declares some itself, extern "C" unsigned int _rotl(...)) */
+inline __attribute__((always_inline)) unsigned int _rotl(unsigned int v, int s)
+{
+    s &= 31;
+    return s ? (v << s) | (v >> (32 - s)) : v;
+}
+inline __attribute__((always_inline)) unsigned int _rotr(unsigned int v, int s)
+{
+    s &= 31;
+    return s ? (v >> s) | (v << (32 - s)) : v;
+}
+/* SEH has no exceptions on the target (below): the code of the exception being handled is never asked for */
+inline __attribute__((always_inline)) unsigned long _exception_code(void) { return 0UL; }
 #ifdef __cplusplus
 }
 #endif
@@ -79,7 +94,6 @@ inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volat
  * __leave. */
 #define __try if (1)
 #define __except(filter) else if (0 && (filter))
-#define _exception_code() 0UL
 #define GetExceptionCode() 0UL
 
 /* Every definition tagged `// @fnv 0x...` is emitted out of line and never inlined (prepare.py rule KEEP1): it is a

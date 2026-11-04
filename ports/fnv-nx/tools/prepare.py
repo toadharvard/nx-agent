@@ -45,10 +45,12 @@ def match_brace(text, open_at):
 
 # ---------------------------------------------------------------------------------------------------------- rules
 
-INTRIN_UNION = re.compile(r'(?:typedef\s+)?union\s+(?:__declspec\([^)]*\(?[^)]*\)?\)\s*)*(__m128[id]?|__m64)\b[^;{]*\{')
+# `union __declspec(intrin_type) __declspec(align(16)) __m128 {...}`, also spelled as a struct (`{ float x, y, z, w; }`)
+INTRIN_UNION = re.compile(r'(?:typedef\s+)?(?:union|struct)\s+(?:__declspec\([^)]*\(?[^)]*\)?\)\s*)*(__m128[id]?|__m64)\b[^;{]*\{')
 
 def r_sse_local_types(path, text, stats):
-    """SSE1: drop local copies of the MSVC <xmmintrin.h> vector unions; the global sse2neon type is used instead."""
+    """SSE1: drop local copies of the MSVC <xmmintrin.h> vector unions (or structs); the global sse2neon type is used
+    instead."""
     out, pos = [], 0
     for m in INTRIN_UNION.finditer(text):
         if m.start() < pos: continue
@@ -79,7 +81,7 @@ def r_sse_local_protos(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-M128_MEMBER = re.compile(r'\s*(\.|->)\s*(m128i?)_(f32|f64|u64|u32|u16|u8|i64|i32|i16|i8)\b')
+M128_MEMBER = re.compile(r'\s*(\.|->)\s*(m128[id]?|m64)_(f32|f64|u64|u32|u16|u8|i64|i32|i16|i8)\b')
 ELEM = {'f32': 'float', 'f64': 'double', 'u64': 'unsigned long long', 'u32': 'unsigned int', 'u16': 'unsigned short',
         'u8': 'unsigned char', 'i64': 'long long', 'i32': 'int', 'i16': 'short', 'i8': 'signed char'}
 CLOSERS = {')': '(', ']': '['}
@@ -239,7 +241,8 @@ CRT_HEADERS = {
     '<string.h>': 'memset memcpy memmove memcmp memchr strlen strcmp strncmp strcpy strncpy strcat strncat strchr '
                   'strrchr strstr strtok',
     '"fnvnx_crt.h"': '_stricmp _strnicmp stricmp strnicmp _strdup _snprintf _vsnprintf _msize strcpy_s strcat_s '
-                     'strncpy_s sprintf_s vsprintf_s memcpy_s memmove_s strtok_s _splitpath_s _strlwr_s',
+                     'strncpy_s sprintf_s vsprintf_s memcpy_s memmove_s strtok_s _splitpath_s _strlwr_s _finite _isnan '
+                     '_gcvt',
     '<stdio.h>': 'sprintf vsprintf sscanf printf fprintf',
     '<stdlib.h>': 'atoi atof atol strtol strtoul strtod malloc free calloc realloc abs labs qsort bsearch rand srand '
                   'exit abort',

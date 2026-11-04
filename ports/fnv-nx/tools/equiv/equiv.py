@@ -68,9 +68,13 @@ CLASSES = {
     'VA1': 'platform',          # MSVC char* va_list -> real va_list
     'FALL1': 'platform',        # __builtin_trap() at fall-off ends (GCC only)
     'DUPINT1': 'neutral',       # one of two integer-only-different prototypes of one address (same callee)
+    'RREF1': 'neutral',         # fnvnx_lvalue around temporaries passed to non-const reference parameters
+    'TPL1': 'neutral',          # this-> for members of dependent bases used by plain name (MSVC had no two-phase lookup)
     'TPL2': 'neutral',          # forward declarations of a namespace's function templates (MSVC's lookup)
     'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
     'DTOR1': 'neutral',         # declares NiPointer<T>::~NiPointer() specializations for pointees the unit never completes
+    'ANON1': 'platform',        # names an unnamed struct defined in a return type (MSVC decorates the name)
+    'STL1': 'platform',        # fnvnx_msvcstl.h: MSVC <xutility> internals (_SCL_SECURE_VALIDATE, _Ptr_cat) for libstdc++
     'SPEC3': 'neutral',         # namespace qualification of names in specializations written inside a namespace
     'LEX1': 'neutral',          # MSVC token spellings (i64 suffixes, 0xae-0x34, "C"enum) -> standard ones
     'STD1': 'neutral',          # a decomp `struct std { static float abs(float); }` -> namespace std declarations
