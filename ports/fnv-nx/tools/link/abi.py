@@ -103,6 +103,36 @@ def x86_locations(sig):
     return out
 
 
+CALLEE_POP = ('stdcall', 'thiscall', 'fastcall')
+
+
+def x86_stack_bytes(sig):
+    """Bytes of sig's x86 stack arguments (MSVC's hidden result pointer included), or None when unknown (a by-value
+    aggregate of unknown size, varargs)."""
+    n = 0
+    for _, cls, loc in x86_locations(sig):
+        if cls == 'VARARGS' or cls.startswith(('AGG:', '?:')):
+            return None
+        if isinstance(loc, tuple):
+            n += X86_SIZE.get(cls, 4)
+    return n
+
+
+def pop_mismatch(ref, dfn, ref_bytes, def_bytes):
+    """x86 stack balance after the call: a cdecl caller removes what it pushed and any other caller leaves that to the
+    callee; a stdcall / thiscall / fastcall callee pops its own stack arguments (`ret N`). -> a note when the bytes
+    the callee pops differ from the bytes the caller expects it to pop (V1 round 3: x86 returns with esp moved, so
+    one of the two declarations is wrong), else None."""
+    if ref_bytes is None or def_bytes is None:
+        return None
+    want = ref_bytes if (ref.cc or 'cdecl') in CALLEE_POP else 0
+    got = def_bytes if (dfn.cc or 'cdecl') in CALLEE_POP else 0
+    if want == got:
+        return None
+    return 'the callee pops %d stack bytes, the caller pushed %d and expects %d popped: esp moves on x86' % (
+        got, ref_bytes, want)
+
+
 # ------------------------------------------------------------------------------------------------------------ AArch64
 
 def a64_locations(sig):
@@ -203,6 +233,8 @@ def compare(ref, dfn, ecx_unused=False):
             elif lab == 'this':
                 x86_ok = False
                 v.notes.append('this not passed by the reference')
+                if 'this-not-passed' not in v.classes:
+                    v.classes.append('this-not-passed')
             elif loc == 'ecx':
                 # a register parameter the reference does not pass: the x86 callee reads whatever the caller left in
                 # ecx (its own `this` in a member function) - not junk, a declaration that only works on x86 (S13:
@@ -230,6 +262,8 @@ def compare(ref, dfn, ecx_unused=False):
         if X86_SIZE.get(scls, scls) != X86_SIZE.get(cls, cls):
             x86_ok = False
             v.notes.append('%s size differs (%s vs %s)' % (lab, scls, cls))
+            if 'size-differs' not in v.classes:
+                v.classes.append('size-differs')
             continue
         scls_a, sloc = ra[slab]
         if sloc == aloc and _bucket(scls_a) == _bucket(cls):
@@ -269,6 +303,11 @@ def compare(ref, dfn, ecx_unused=False):
             v.ret_fix = ('fcvt', ret_class(dfn), ret_class(ref))
         else:
             v.kind = 'manual'
+    pm = pop_mismatch(ref, dfn, x86_stack_bytes(ref), x86_stack_bytes(dfn))
+    if pm:
+        x86_ok = False
+        v.notes.append(pm)
+        v.classes.append('pop-mismatch')
     if not x86_ok:
         v.kind = 'x86-inconsistent'
         return v

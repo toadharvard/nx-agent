@@ -198,6 +198,15 @@ class/struct/union/enum tags, which Itanium names do not.
   signed on MSVC and now in GCC too with J-0034's `-fsigned-char`; `uxtb`/`uxth` for `bool`, unsigned types,
   `wchar_t`), class `narrow-extend`. The byte-level re-decision (below) keeps these bridges.
 
+**Callee-pop bytes** (V1 round 3): a cdecl caller removes what it pushed, any other caller leaves that to the
+callee, and a stdcall / thiscall / fastcall callee pops its own stack arguments (MSVC's hidden result pointer
+included). When the bytes the definition pops differ from the bytes the reference's caller expects it to pop, x86
+returned with esp moved, so one of the declarations is wrong. The pair is `x86-inconsistent` with class
+`pop-mismatch`; abi2 counts the bytes with known aggregate sizes. Like `ecx-not-passed`, such a pair keeps the
+bridge of its argument moves, unless something else is wrong on x86 too (`this-not-passed`, `size-differs`,
+`cast-conflict`, `result-pointer-not-passed`); with nothing to move it is bound directly and listed. V1 counts
+1,517 pairs / 2,196 references on f13.
+
 Classes in the report: `edx-dummy`, `reg-shift` (same register file, other index), `int-float-param`
 (x86 tolerated an int/float swap in a 4-byte slot), `ret-regfile`, `sret-explicit` (one side returns an aggregate,
 the other passes the buffer pointer explicitly), `aggregate-param` / `ret-aggregate` (aggregates of different

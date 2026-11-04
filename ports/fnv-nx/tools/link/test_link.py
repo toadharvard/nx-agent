@@ -158,6 +158,29 @@ def main():
     nf = ['?FUN_00c10001@@YGXM@Z']
     check(fnvlink.c_name_standin(sigs.parse_msvc('_FUN_00c10001@4', None), sigs.parse_msvc(
         nf[0], fnvlink.batch_demangle(fnvlink.UNDNAME, nf)[nf[0]])) is None, 'no stand-in for a float parameter')
+    # V1 round 3 item 4 (adversarial_r3 P-stdcall-pops-fewer / P-thiscall-pops-fewer, adversarial_cname c5/c6): a
+    # callee-pop definition that pops other stack bytes than the caller expects returns with esp moved on x86:
+    # x86-inconsistent 'pop-mismatch' (the moves stay, resolve bridges them like ecx-not-passed); a cdecl caller
+    # cleans its own pushes
+    npm = ['?sp1@@YGHHHH@Z', '?sp1@@YGHHH@Z', '?sp2@T@@QAEHHH@Z', '?sp2@T@@QAEHH@Z', '?sp3@@YAHHHH@Z', '?sp3@@YAHHH@Z',
+           '?sp4@@YGHHH@Z', '?sp5@@YAHHH@Z']
+    dpm = fnvlink.batch_demangle(fnvlink.UNDNAME, npm)
+    PM = {n: sigs.parse_msvc(n, dpm[n]) for n in npm}
+    for r_, d_, want_ in ((npm[0], npm[1], True), (npm[2], npm[3], True), (npm[1], npm[0], True),
+                          (npm[4], npm[5], False), (npm[6], npm[1], False), (npm[7], npm[6], True),
+                          (npm[6], npm[7], True)):
+        va = abi.compare(PM[r_], PM[d_])
+        pa = abi2.compare(PM[r_], PM[d_], lambda t: None, lambda t: None)
+        got_ = ('pop-mismatch' in va.classes and va.kind == 'x86-inconsistent',
+                pa is not None and 'pop-mismatch' in pa.classes and pa.kind == 'x86-inconsistent')
+        check(got_ == (want_, want_), 'pop-mismatch %s -> %s: want %s, abi %s %s, abi2 %s' % (
+            dpm[r_], dpm[d_], want_, va.kind, va.classes, pa and (pa.kind, pa.classes)))
+    cpm = fnvlink.c_name_sig(sigs.parse_msvc('_FUN_00c10050@8', None),
+                             'extern "C" int __stdcall FUN_00c10050(int a, int b) { return a - b; }\n')
+    npm5 = ['?FUN_00c10050@@YGHHHH@Z']
+    vpm = abi.compare(sigs.parse_msvc(npm5[0], fnvlink.batch_demangle(fnvlink.UNDNAME, npm5)[npm5[0]]), cpm)
+    check(vpm.kind == 'x86-inconsistent' and 'pop-mismatch' in vpm.classes, 'C-named stdcall pops 8 of 12: %s %s'
+          % (vpm.kind, vpm.classes))
     # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
     # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
     src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'
@@ -171,7 +194,9 @@ def main():
     ns = ['?FUN_00a0c900@FUN_00a0c900_shell@@QAEXPBDH@Z', '?FUN_00a0c900@@YIXPAXPBDPAUMenuValueDescriptor@@@Z']
     dd = fnvlink.batch_demangle(fnvlink.UNDNAME, ns)
     dfn, ref = sigs.parse_msvc(ns[0], dd[ns[0]]), sigs.parse_msvc(ns[1], dd[ns[1]])
-    check(abi.compare(ref, dfn).kind == 'bridge', 'the declaration alone would bridge')
+    vd_ = abi.compare(ref, dfn)   # fastcall (ecx, edx, 4 stack bytes) vs thiscall popping 8: inconsistent anyway
+    check(vd_.kind == 'x86-inconsistent' and 'pop-mismatch' in vd_.classes and vd_.moves,
+          'the declaration alone would move arguments (and pops 4 of 8): %s %s' % (vd_.kind, vd_.classes))
     (cc, ret, params), = uc['FUN_00a0c900'][0]
     v = abi.compare(fnvlink.cast_sig(cc, ret, params, 'FUN_00a0c900'), dfn)
     check(v.kind == 'same', 'through the __thiscall cast the call matches the definition: %s %s' % (v.kind, v.moves))

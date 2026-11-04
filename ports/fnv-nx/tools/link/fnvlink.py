@@ -687,11 +687,17 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                                  ['%s<-%s' % (d, s) for d, s, _, _ in v.moves] or []),
                                                  '; '.join(v.notes), ms[refdecl] or '', ms[defdecl] or ''))
                                 bkey = refdecl_key if cast and not cast_note else refdecl
-                                # an x86-inconsistent ecx-not-passed pair still gets the moves of the arguments the
-                                # reference does pass (the definition's ecx parameter is often unused: 0x00bbbe30,
-                                # 0x00a75ec0); the pair stays listed for S1b
-                                ekind = 'bridge' if v.kind == 'x86-inconsistent' and 'ecx-not-passed' in v.classes \
-                                    and (v.moves or v.plan is not None) else v.kind
+                                # an x86-inconsistent ecx-not-passed or pop-mismatch pair still gets the moves of the
+                                # arguments the reference does pass (the definition's ecx parameter is often unused:
+                                # 0x00bbbe30, 0x00a75ec0; a callee popping other stack bytes than the caller pushed
+                                # still reads the arguments both declare, unless something else is wrong on x86:
+                                # this not passed, sizes, casts, the result pointer); the pair stays listed
+                                ekind = 'bridge' if v.kind == 'x86-inconsistent' and (
+                                    ('ecx-not-passed' in v.classes and (v.moves or v.plan is not None)) or (
+                                        'pop-mismatch' in v.classes and (v.moves or (v.plan is not None and
+                                                                                     v.plan.moves)) and not {
+                                            'this-not-passed', 'size-differs', 'cast-conflict',
+                                            'result-pointer-not-passed'} & set(v.classes))) else v.kind
                                 if ekind == 'bridge' and v.plan is not None:
                                     bn = abi.bridge_name(addr, bkey)
                                     code = abi2.emit(bn, target, v.plan, 'ref: %s | def: %s'

@@ -180,6 +180,7 @@ class Plan:
         self.def_sret_from = None   # ref label whose pointer receives the definition's hidden result
         self.ret_conv = False
         self.ret_fcvt = None      # (definition class, reference class): float <-> double result
+        self.moves = False        # the AArch64 side needs a bridge (bytes elsewhere, a result to convert)
 
 
 def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False):
@@ -262,6 +263,11 @@ def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False):
                     p.ret_conv = True; break
             if p.ret_conv:
                 p.classes.append('result-moves')
+    pm = abi.pop_mismatch(ref, dfn, *(sum((sz + 3) // 4 * 4 for _, sp, _, sz in side if sp == 'stk')
+                                      for side in (rx, dx)))
+    if pm:
+        x86_ok = False; p.notes.append(pm); p.classes.append('pop-mismatch')
+    p.moves = not identity or p.ret_conv or bool(p.ret_fcvt) or p.def_sret_from is not None
     if not x86_ok:
         p.kind = 'x86-inconsistent'
     elif not identity or p.ret_conv or p.ret_fcvt or p.def_sret_from is not None:
