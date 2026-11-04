@@ -571,6 +571,20 @@ got = run(s1.r_va_enum_args, 'enum Index : int { A };\nvoid f(va_list args) {\n 
 check('VA2 reads an enum through ... as the int it was passed as', got,
       ['Index d = (Index)va_arg(args, int);', 'va_arg(args, const char*)', 'int i = va_arg(args, int);'])
 
+# ---- VLIT1
+_v = tempfile.mkdtemp()
+os.makedirs(os.path.join(_v, 'src')); os.makedirs(os.path.join(_v, 'build'))
+_json.dump({'units': [{'source': 'src/n.cpp', 'symbols': {'$SG2541': '0x0101212c'}, 'functions': []},
+                      {'source': 'src/k.cpp', 'symbols': {}, 'functions': [{'address': '0x00404b40', 'symbol': '?f@@YAXXZ'}]}]},
+           open(os.path.join(_v, 'build', 'units.json'), 'w'))
+_saved, s1._VLIT = s1._VLIT, None
+_st = Counter()
+got = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), '#include "x.h"\nvoid* F::Init()\n{\n    m_p = "@K@";\n    return this;\n}\n', _st)
+got2 = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), 'void f() { m_p = "@K@"; g("text"); }\n', _st)
+s1._VLIT = _saved
+check('VLIT1 stores the vftable address the unit binds the misread literal to; ambiguous sites are listed', got + got2 + ' %d' % _st['VLIT1-LIST'],
+      ['m_p = (char*)0x0101212c /* fnv-nx VLIT1: "@K@" */;', 'void f() { m_p = "@K@"; g("text"); }', ' 1'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

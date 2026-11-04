@@ -2785,6 +2785,57 @@ def r_va_enum_args(path, text, stats):
         return '(%s)va_arg(%s, int)' % (m.group(2), m.group(1))
     return VA_ARG.sub(sub, text)
 
+# ---------------------------------------------------------------------------------------------------------- VLIT1
+#
+# A vptr store the decompiler printed as a string literal: `m_p = "@K@";` in nitmapbase.cpp's FUN_00404b10. The
+# instruction stores an image address whose bytes it read as text: "@K@\0" is 0x00404b40, slot 0 (the scalar
+# deleting destructor, S00404b40::DestroyIfFlagged) of the vftable at that address (S5 J-0102: the
+# GameSettingCollection vptr, 3,454 setting initializers). The unit's recipe binds the literal (MSVC `$SG2541`)
+# to that vftable address, 0x0101212c. VLIT1 stores the address: `m_p = (char*)0x0101212c;`. Only where a literal
+# of at most 3 characters stored with `=` reads as the address of a function the recipe defines, and the unit's
+# `$SG` binding can only be that literal (the unit binds one `$SG` address and the file has one string literal);
+# the other sites (45 in the tree) are counted as VLIT1-LIST and left as they are until the exe says which.
+
+VLIT_STORE = re.compile(r'(=\s*)"([^"\\\n]{1,3})"(\s*;)')
+STRING_LIT = re.compile(r'"(?:\\.|[^"\\\n])*"')
+_VLIT = None
+
+def _vlit_index(path):
+    """(defined function addresses, {unit source: {$SG addresses}})"""
+    global _VLIT
+    if _VLIT is not None: return _VLIT
+    import json
+    root, uj = prepare._units_json(path)
+    defs, sg = set(), {}
+    if uj:
+        for u in json.load(open(uj))['units']:
+            defs.update(int(f['address'], 16) for f in u.get('functions', []))
+            s = {int(v, 16) for k, v in u.get('symbols', {}).items() if k.startswith('$SG')}
+            sg.setdefault(os.path.normpath(os.path.join(root, u['source'])), set()).update(s)
+    _VLIT = (defs, sg)
+    return _VLIT
+
+def r_vptr_literals(path, text, stats):
+    """VLIT1: a 1-3 character string literal stored as a vptr -> the vftable address the unit binds it to (see
+    above)."""
+    if '"' not in text: return text
+    hits = []
+    for m in VLIT_STORE.finditer(text):
+        a = int.from_bytes((m.group(2).encode('latin-1', 'replace') + b'\0' * 4)[:4], 'little')
+        if 0x00401000 <= a < 0x00fde578: hits.append((m, a))
+    if not hits: return text
+    defs, sg = _vlit_index(path)
+    hits = [(m, a) for m, a in hits if a in defs]
+    if not hits: return text
+    addrs = sg.get(os.path.normpath(os.path.abspath(path)), set())
+    code = re.sub(r'^[ \t]*#[^\n]*', '', COMMENT.sub(' ', text), flags=re.M)
+    if len(addrs) != 1 or len(hits) != 1 or len(STRING_LIT.findall(code)) != 1:
+        stats['VLIT1-LIST'] += len(hits)
+        return text
+    m, _ = hits[0]
+    stats['VLIT1'] += 1
+    return text[:m.start()] + '%s(char*)0x%08x /* fnv-nx VLIT1: "%s" */%s' % (m.group(1), next(iter(addrs)), m.group(2).replace('*/', '* /'), m.group(3)) + text[m.end():]
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2809,5 +2860,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment]
