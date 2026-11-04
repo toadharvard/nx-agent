@@ -55,6 +55,7 @@ void NiDX9RenderState::SetTexture(uint32_t stage, void* texture) {
     if (stage >= 16 || g_tex[stage] == texture) return;
     g_tex[stage] = texture;
     NativeTexture* t = NativeTextureFromPointer(texture);
+    if (t && t->dirty) MaterializeNativeTexture(t);
     NxD3D9Texture kind = {t ? t->d3dfmt : 0, 0, 0, 0, 0};
     if (R()) R()->state().SetTexture(stage, t ? t->image : 0, kind);
 }
@@ -111,19 +112,50 @@ bool ReadGeometry(const void* geometry, Renderer::GeomView* out) {
     if (const uint8_t* ap = GP(U32(geo, 0x9C))) {
         g.alphaFlags = U16(ap, 0x18); g.alphaRef = ap[0x1A]; g.hasAlpha = true;
     }
+    if (const uint8_t* stp = GP(U32(geo, 0xAC))) {   // NiStencilProperty
+        g.hasStencil = true; g.stencilFlags = U16(stp, 0x18); g.stencilRef = U32(stp, 0x1C); g.stencilMask = U32(stp, 0x20);
+    }
     float matAlpha = 1.0f;
     if (const uint8_t* mp = GP(U32(geo, 0xA4))) memcpy(&matAlpha, mp + 0x3C, 4);
     if (const uint8_t* sp = GP(U32(geo, 0xA8))) {   // TileShaderProperty
         memcpy(g.tint, sp + 0x68, 12);
         float a; memcpy(&a, sp + 0x78, 4);
         g.tint[3] = a * matAlpha;
+        if (sp[0x91]) { g.hasScroll = true; memcpy(g.scroll, sp + 0x7C, 8); }          // TexScroll (x, y of 4)
+        if (sp[0xAC]) { g.hasScissor = true; memcpy(&g.scissor, sp + 0x9C, 16); }     // NiRectI l, t, r, b
         if (const uint8_t* tex = GP(U32(sp, 0x60)))
-            if (NativeTexture* t = FindNativeTexture(GP(U32(tex, 0x24)), 0x40)) { g.image = t->image; g.d3dfmt = t->d3dfmt; }
+            if (NativeTexture* t = FindNativeTexture(GP(U32(tex, 0x24)), 0x80)) { g.image = t->image; g.d3dfmt = t->d3dfmt; }
     } else {
         g.tint[3] = matAlpha;
     }
     *out = g;
     return true;
+}
+
+// ---- image space: the effect dispatch ----------------------------------------------------------------------------
+static uint32_t g_isNative = 0, g_isSkipped = 0;
+uint32_t ImageSpaceEffectsNative() { return g_isNative; }
+uint32_t ImageSpaceEffectsSkipped() { return g_isSkipped; }
+
+void ImageSpaceManager::RenderEffect(int32_t effect, void*, void* src, void* dst, void*, bool) {
+    Renderer* r = R();
+    const uint8_t* self = (const uint8_t*)this;
+    const uint8_t* list = r && effect >= 0 ? GP(U32(self, 0x08)) : nullptr;
+    const uint8_t* fx = list ? GP(U32(list, 4 * (uint32_t)effect)) : nullptr;
+    if (!fx || effect != kEffectMenuBg) { g_isSkipped++; return; }
+    uint32_t scene = 0, w = 0, h = 0;
+    if (!r->GroupColor(src, &scene, &w, &h)) { g_isSkipped++; return; }
+    NativeTexture* tone = nullptr;
+    if (const uint8_t* ist = GP(U32(fx, 0x58)))
+        if (const uint8_t* tex = GP(U32(ist, 4))) tone = FindNativeTexture(GP(U32(tex, 0x24)), 0x80);
+    float blend; memcpy(&blend, fx + 0x5C, 4);
+    if (!tone) { g_isSkipped++; return; }
+    static const float kLuma[3] = {0.299f, 0.587f, 0.114f};   // Rec. 601 (the effect's vertex constant)
+    const bool switchTarget = dst != nullptr;
+    if (switchTarget && !r->Do_BeginUsingRenderTargetGroup(dst, 0)) { g_isSkipped++; return; }
+    bool ok = r->RenderMenuBackground(scene, 21, w, h, tone->image, tone->d3dfmt, kLuma, blend, 1.0f);
+    if (switchTarget) r->Do_EndUsingRenderTargetGroup();
+    if (ok) g_isNative++; else g_isSkipped++;
 }
 
 } // namespace engine

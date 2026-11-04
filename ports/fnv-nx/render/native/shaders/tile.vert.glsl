@@ -1,6 +1,6 @@
 #version 460
 // tile family, vertex stage (TileShader: tile.v.hlsl x {-, TEXSCROLL, VC}). Block = NxTileDraw (nx/families.h).
-// nx-variants: -= scroll=TEXSCROLL vc=VC
+// nx-variants: -= scroll=TEXSCROLL vc=VC vc_scroll=VC,TEXSCROLL
 layout (location = 0) in vec3 inPos;
 layout (location = 1) in vec2 inUv;
 #ifdef VC

@@ -258,19 +258,35 @@ the image vftables, §R2), code in `render/native/n1/`:
   (slots 55-57: SetTexture / GetTexture / ClearTextureUsage) -> `nx::StateTracker`.
 * **Shader construction:** TileShader CreateVertexShaders / CreatePixelShaders / CreateConstantMaps and
   BSShaderNoLighting::InitializeShaderData are no-ops.
-* **Menu background:** the effect itself is native (`Renderer::RenderMenuBackground`, family `menubg`: scene
-  luminance through the tone texture `sepia.dds`, mixed by the effect's constant, output alpha) and matches the
-  game's ISMENUBG shader formula (checked locally against the S6b translation of the user's shader package: 63 of
-  64 pixels within 2/255, one at a tone-texel boundary). Its row (0x00c04730, ImageSpaceEffectMenuBackground::Setup)
-  stays pending: the image-space manager's effect dispatch is the next seam to override, after which Setup can
-  hand the sepia texture to the native effect.
-* **Not native yet:** skinned geometry, texture scrolling (TileShaderProperty +0x7C..), the tile scissor rect and
-  stencil flags (+0x9C, NiStencilProperty), fonts if they are not tile geometry, the image-space chain.
+* **Lockable textures (fonts):** fonts are tile geometry (`Font::CreateTextShape`, 0x00a14a20: an NiTriShape with a
+  TileShaderProperty, its tint at +0x68 and the font page texture). Their textures are not files: the font loader
+  reads `TEXTURES\FONTS\*.TEX` (8-byte size + RGBA pixels) into NiPixelData, and the renderer data creates a D3D
+  texture (`NiDX9SourceTextureData::CreateSurf`, 0x00e68010) and fills it through GetSurfaceLevel / LockRect. That
+  function is replaced: it makes a lockable NativeTexture (CPU staging per level, D3DFORMAT from the renderer pixel
+  format's hint at +0x20, A8R8G8B8 without one) whose surfaces (IDirect3DSurface9 layout: GetDesc, LockRect,
+  UnlockRect, GetContainer) take the engine's copy; the native image is (re)made from the staging copy when the
+  texture is next bound or found after an UnlockRect.
+* **Tile scroll, scissor, stencil:** TileShaderProperty TexScroll (flag +0x91, offset +0x7C) -> the `tile_vc_scroll`
+  VS; its scissor rectangle (enable +0xAC, NiRectI at +0x9C, target pixels) -> scissor test for the draw;
+  NiStencilProperty (+0xAC on the geometry; flags +0x18: enable, fail / zfail / pass actions, test function; ref
+  +0x1C, mask +0x20) -> the D3D9 stencil states for the draw. All restored after the draw.
+* **Image space:** `ImageSpaceManager::RenderEffect` (0x00b97550) is replaced by a dispatcher. EFFECT_MENUBG (15)
+  renders natively (`Renderer::RenderMenuBackground`, family `menubg`: scene luminance through the tone texture,
+  mixed by the effect's blend amount at +0x5C; its ImageSpaceTexture at +0x58 gives the tone texture), source and
+  destination being engine render targets registered as target groups (destination 0: the current target). Every
+  other effect is counted and skipped: in the native build the world's image-space chain (HDR, bloom, ...) is not
+  drawn until its families exist. `ImageSpaceEffectMenuBackground::Setup` (0x00c04730) needs no replacement: it only
+  builds engine data and loads `sepia.dds` through the D3DX overrides. The `menubg` formula matches the game's
+  ISMENUBG shader (checked locally against the S6b translation of the user's shader package: 63 of 64 pixels within
+  2/255, one at a tone-texel boundary).
+* **Not native yet:** skinned geometry (N2, §4), engine render-target creation (BSRenderedTexture / NiRenderTargetGroup
+  -> `RegisterTargetGroup`), the other image-space effects, culling modes of NiStencilProperty's draw mode.
 
-Tested on GL and as the ILP32 guest by the N1 self-test (76 checks): a synthetic menu of three tiles built in
+Tested on GL and as the ILP32 guest by the N1 self-test (90 checks): a synthetic menu of three tiles built in
 engine layout (checker-textured background, a green button at material alpha 0.5 blended with SRCALPHA, an
 alpha-tested text tile) rendered only through the stubs, with textures created through the D3DX overrides, plus
-the menu-background effect over a rendered target.
+the menu-background effect over a rendered target; the RenderEffect dispatch for MENUBG with a tone texture made and
+filled through the lockable (font) path; stencil REPLACE/EQUAL, texture scroll and the tile scissor rectangle.
 
 ## 3. Native renderer design on deko3d
 

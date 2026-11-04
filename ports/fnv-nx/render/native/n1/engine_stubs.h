@@ -37,6 +37,17 @@ struct NiDX9RenderState {
     void RestoreSamplerState(uint32_t stage, uint32_t type);                              // (no row)
 };
 
+// ImageSpaceManager::RenderEffect (0x00b97550): the effect dispatch. Menu effects run natively; the others are
+// counted and skipped until their families exist. Interop: manager +0x08 the effect array; EFFECT_MENUBG (15) is an
+// ImageSpaceEffectMenuBackground: +0x58 ImageSpaceTexture* (its NiTexture at +4), +0x5C blend amount (float).
+// src / dst are engine render targets registered with Renderer::RegisterTargetGroup (dst 0: the current target).
+struct ImageSpaceManager {
+    enum { kEffectMenuBg = 15 };
+    void RenderEffect(int32_t effect, void* renderer, void* src, void* dst, void* param, bool flag);
+};
+uint32_t ImageSpaceEffectsNative();
+uint32_t ImageSpaceEffectsSkipped();
+
 // Shader construction the native path does not need (it never compiles the HLSL nor builds constant maps):
 struct TileShader {
     void CreateVertexShaders();     // 0x00bca0d0, slot 80
@@ -50,12 +61,28 @@ struct BSShaderNoLighting {
 // ---- engine textures (n1/engine_textures.cpp) ---------------------------------------------------------------------
 // A native texture handed to the engine where it expects an IDirect3DTexture9 (method-table layout of that
 // interface; GetLevelDesc / GetLevelCount / AddRef / Release answer, CPU access is refused).
+struct NativeSurface;
 struct NativeTexture {
     const uintptr_t* vtbl;
     uint32_t magic, refs, image, d3dfmt, lod;
-    uint16_t w, h, levels, pad;
+    uint16_t w, h, levels, dirty;
+    uint8_t* staging;               // lockable textures (CreateSurf path): CPU copy of all levels, D3D layout
+    NativeSurface* surfaces;        // one per level (GetSurfaceLevel)
     enum : uint32_t { kMagic = 0x5854584Eu };   // "NXTX"
 };
+// IDirect3DSurface9 layout over one level of a lockable NativeTexture (GetDesc, LockRect, UnlockRect).
+struct NativeSurface {
+    const uintptr_t* vtbl;
+    NativeTexture* tex;
+    uint32_t level, offset, pitch, rows;
+};
+// 0x00e68010 NiDX9SourceTextureData::CreateSurf(NiPixelData*): a lockable NativeTexture the engine then fills
+// through GetSurfaceLevel / LockRect (fonts, NiPixelData textures). D3DFORMAT from the renderer pixel format's hint.
+struct NiDX9SourceTextureData {
+    bool CreateSurf(const void* pixelData);
+};
+NativeTexture* CreateLockableTexture(uint32_t d3dfmt, uint32_t w, uint32_t h, uint32_t levels);
+void MaterializeNativeTexture(NativeTexture* t);   // a lockable texture's pending contents -> a native image
 int32_t D3DXGetImageInfoFromFileInMemory(const void* data, uint32_t size, uint32_t* info);              // 0x00ee6e22
 int32_t D3DXCreateTextureFromFileInMemory(void* device, const void* data, uint32_t size, void** out);  // 0x00ee6e1c
 NativeTexture* CreateNativeTexture(const void* dds, uint32_t size);
