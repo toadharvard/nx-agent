@@ -127,7 +127,7 @@ static int paced_start(uint32_t rate, uint32_t period)
     g_rate = rate;
     g_period = period;
     g_run = 1;
-    g_thread = os_thread_create(pump, NULL, 64 * 1024, 2, -1);
+    g_thread = os_thread_create(pump, NULL, 64 * 1024, 2, OS_THREAD_ROLE(OS_ROLE_AUDIO));
     if (!g_thread || os_thread_start(g_thread)) {
         g_run = 0;
         return -1;

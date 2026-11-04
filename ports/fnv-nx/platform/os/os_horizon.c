@@ -17,6 +17,7 @@
 #include <switch/kernel/random.h>
 #include <switch/kernel/svc.h>
 #include <switch/kernel/thread.h>
+#include <switch/services/applet.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -211,6 +212,9 @@ int os_thread_resume(os_thread *t)
 }
 
 void os_thread_exit(void) { threadExit(); }
+void os_cpu_boost(int fast_load) {
+    appletSetCpuBoostMode(fast_load ? ApmCpuBoostMode_FastLoad : ApmCpuBoostMode_Normal);
+}
 
 void os_yield(void) { svcSleepThread(0); } /* 0 = yield to threads of the same priority */
 

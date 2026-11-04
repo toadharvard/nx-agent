@@ -201,17 +201,24 @@ static void test_files() {
 /* thread placement (toolchain/host/placement.h): roles at creation, priority/affinity of another thread through
  * its host id. The emulator's host places threads with the same table and prints them; rt/build.sh checks it. */
 static void *placed_fn(void *) { return (void *)7; }
+/* what toolchain/guest/os_guest.c os_cpu_boost() sends (the loading screen's CPU boost) */
+static uint64_t cpu_boost(uint64_t mode) {
+    uint64_t arg[1] = {mode};
+    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_CPU_BOOST, FNVNX_ADDR(arg), 1);
+}
 static void test_placement() {
-    struct __pthread_t *ai1, *plain;
+    struct __pthread_t *ai1, *plain, *io;
     CHECK(fnvnx_thread_create(&ai1, placed_fn, nullptr, 0x10000, 0, (int)FNVNX_THREAD_ROLE(FNVNX_ROLE_AI_LINEAR_1)) == 0);
     CHECK(fnvnx_thread_create(&plain, placed_fn, nullptr, 0x10000, 0, -1) == 0);
+    CHECK(fnvnx_thread_create(&io, placed_fn, nullptr, 0x10000, 0, (int)FNVNX_THREAD_ROLE(FNVNX_ROLE_IO)) == 0);
     uint64_t id = fnvnx_thread_host_id(plain);
     CHECK(id != 0);
     CHECK(fnvnx_hcall2(fnvnx_host->thread_set_priority, id, (uint64_t)(int64_t)-1) == 0);   /* not started yet */
     CHECK(fnvnx_hcall2(fnvnx_host->thread_set_cpu, fnvnx_thread_host_id(ai1), FNVNX_CPU_SPEC(FNVNX_CPU_KEEP, 0x5)) == 0);
-    CHECK(fnvnx_thread_start(ai1) == 0 && fnvnx_thread_start(plain) == 0);
-    CHECK(fnvnx_thread_join(ai1) == (void *)7 && fnvnx_thread_join(plain) == (void *)7);
-    std::printf("  placement: roles and other-thread priority/affinity passed to the host\n");
+    CHECK(fnvnx_thread_start(ai1) == 0 && fnvnx_thread_start(plain) == 0 && fnvnx_thread_start(io) == 0);
+    CHECK(fnvnx_thread_join(ai1) == (void *)7 && fnvnx_thread_join(plain) == (void *)7 && fnvnx_thread_join(io) == (void *)7);
+    CHECK(cpu_boost(1) == 0 && cpu_boost(0) == 0);   /* the loading screen's boost, then back */
+    std::printf("  placement: roles and other-thread priority/affinity passed to the host, cpu boost on/off\n");
 }
 
 int main() {

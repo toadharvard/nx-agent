@@ -35,8 +35,8 @@ static u64 h_thread_create(u64 entry, u64 arg, u64 stack, u64 prio, u64 cpu) {
     stack = (stack + 0xFFF) & ~0xFFFull;
     int ideal, hprio;
     uint32_t mask;
-    int role = fnvnx_place(cpu, __atomic_fetch_add(&g_thread_seq, 1, __ATOMIC_RELAXED), (s64)prio, &ideal, &mask,
-                           &hprio);
+    int role = fnvnx_place_ex(cpu, __atomic_fetch_add(&g_thread_seq, 1, __ATOMIC_RELAXED), (s64)prio, g_cfg.core3,
+                              &ideal, &mask, &hprio);
     if (R_FAILED(threadCreate(&h->t, host_thread_main, h, NULL, stack ? stack : 0x40000, hprio, ideal))) {
         free(h);
         return 0;

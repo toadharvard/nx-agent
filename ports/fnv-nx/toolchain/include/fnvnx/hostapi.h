@@ -104,15 +104,22 @@ typedef struct FnvnxHostApi {
 } FnvnxHostApi;
 
 #define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
+/* ext_call module of the host's platform services (toolchain/host/host.c; render/nine is 9, render/native 10) */
+#define FNVNX_EXT_PLATFORM 11u
+#define FNVNX_PLAT_CPU_BOOST 1u   /* (mode: 0 normal, 1 fast load) -> 0 set, 1 off by the platform config (boost_loading) */
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
  * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
 enum {
-    FNVNX_ROLE_DEFAULT = 0,       /* game threads without a role: tasklets, Havok, IO, audio */
+    FNVNX_ROLE_DEFAULT = 0,       /* game threads without a role of their own (Havok, ...) */
     FNVNX_ROLE_MAIN = 1,          /* the main thread */
     FNVNX_ROLE_AI_LINEAR_1 = 2,   /* AI Linear Task Thread (1) */
     FNVNX_ROLE_AI_LINEAR_2 = 3,   /* AI Linear Task Thread 2 */
     FNVNX_ROLE_RENDER_WORKER = 4, /* the renderer's worker (Gallium Nine's CSMT thread, a host pthread) */
+    FNVNX_ROLE_IO = 5,            /* IO and background loading (the Serialized IO Thread, ...) */
+    FNVNX_ROLE_AUDIO = 6,         /* audio (the platform's mixer pump, the game's LibAudioUpdate) */
+    FNVNX_ROLE_TASKLET = 7,       /* tasklet workers */
+    FNVNX_ROLE_LOADING = 8,       /* the loading screen (LoadingMenuThread): CPU boost while it runs */
     FNVNX_ROLE_COUNT
 };
 #define FNVNX_THREAD_ROLE(r) (0x100u | (unsigned)(r))

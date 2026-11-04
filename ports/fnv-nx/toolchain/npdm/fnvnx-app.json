@@ -19,7 +19,7 @@
     "service_access": ["*"],
     "kernel_capabilities": [
         { "type": "kernel_flags", "value": {
-            "highest_thread_priority": 59, "lowest_thread_priority": 28, "highest_cpu_id": 2, "lowest_cpu_id": 0 } },
+            "highest_thread_priority": 59, "lowest_thread_priority": 28, "highest_cpu_id": 3, "lowest_cpu_id": 0 } },
         { "type": "syscalls", "value": "all" },
         { "type": "application_type", "value": 1 },
         { "type": "min_kernel_version", "value": "0x30" },

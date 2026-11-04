@@ -784,7 +784,8 @@ guest PC from it into a symbol, use the base of the "mapped at" line:
 docs/PERF.md 6.3 found every game thread and Nine's CSMT worker on core 0. This round fixes the runtime side.
 
 * **Placement table**, `toolchain/host/placement.h`: one row per role (`FNVNX_ROLE_*`, hostapi.h), each with an
-  ideal core, an affinity mask over cores 0-2, and a priority (0 = the thread's Win32 priority mapped).
+  ideal core, an affinity mask over cores 0-2 (cores 1-3 for the background roles with the core 3 opt-in,
+  section 20), and a priority (0 = the thread's Win32 priority mapped).
 
   | role | ideal core | mask | priority |
   |---|---|---|---|
@@ -1037,6 +1038,55 @@ The 951 image-bound addresses, by rule:
 - **VLIT1's fix moves the setting skips rather than ending them.** GameSettingCollection now stores 0x0101212c.
   That address has no V entry on 9a0243c7eabe, and `FUN_00404b10_class` declares no virtuals. So, unless the next
   link maps it, the 3,454 setting skips become "vslot 1 of image vtable 0x0101212c": an S1:virtuals case.
+
+## 20. Platform config, core 3 opt-in, CPU boost on loading screens
+
+**Config.** The host reads `sdmc:/fnvnx/fnvnx.ini` (`toolchain/host/host.c` `load_config`). It holds `key=value`
+lines (`#` or `;` starts a comment) and logs the values in effect. A missing file or key takes the build default.
+
+| key | default (build macro) | effect |
+|---|---|---|
+| `core3` | 0 (`FNVNX_CORE3_DEFAULT`) | the background roles may use core 3 |
+| `boost_loading` | 1 (`FNVNX_BOOST_LOADING_DEFAULT`) | `appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad)` while the loading screen runs |
+
+**Core 3 opt-in.**
+- **NPDM:** `highest_cpu_id` is now 3, with `default_cpu_id` 0. `check_package.py` requires cores 0..3 and default 0;
+  NpdmTest checks the kernel flags.
+- **`placement.h`:** each row gets `mask3`, its mask under the opt-in, and the host calls `fnvnx_place_ex(...,
+  g_cfg.core3, ...)`. The new roles are `FNVNX_ROLE_IO`, `_AUDIO`, `_TASKLET` and `_LOADING`.
+  - With the opt-in, `game` (everything else), `io`, `audio` and `tasklet` take mask 0xE (cores 1-3).
+  - `main` (core 0), `render-worker` (core 1), the two AI linear rows (0x6) and `loading` (0x6) never take core 3.
+  - Off is the default until S15's model and the hardware say otherwise. Align the rows with S15's recommendation
+    when it lands.
+- **Who gets which role today:**
+  - the Serialized IO Thread (IOThread vftable 0x010a29c0, `boot.cpp` `thread_role`): `io`;
+  - the platform's audio pump (`platform/audio` backend and backend_audren, `OS_ROLE_AUDIO`): `audio`;
+  - the LoadingMenuThread (0x010740ac): `loading`.
+  - The game's `LibAudioUpdate` BSThread and the tasklet workers are not identified yet. They stay in `game`, which
+    also gets core 3 under the opt-in.
+- **Tests:**
+  - `tests/s5/test_placement.c`: every row in both modes;
+  - PlacementTest: the emulator's copy of the table;
+  - `tests/s5/rt/build.sh`: a run with `--core3` (`placement core3: PASS`: io and game on mask 0xe, ai-linear-1 0x5).
+
+**CPU boost on loading screens.**
+- **The hook is the LoadingMenuThread, the game's loading-screen thread.** `LoadingMenuThread::ThreadProc`
+  0x0078d490 renders the loading screen while it runs. When the screen is done it parks on its semaphore:
+  `CountingSemaphore::Wait` 0x004424e0, `WaitForSingleObject(h, INFINITE)`.
+- **How the boost follows it:**
+  - `boot.cpp` tags that thread `OS_THREAD_BOOST` (`platform/os/os.h`).
+  - `platform/win32/thread.cpp` turns the boost on when the thread starts and off when it ends (also through
+    `ExitThread`).
+  - `sync.cpp`'s `WaitForMultipleObjects`, and so `WaitForSingleObject`, turns it off for each infinite wait of
+    that thread and back on after the wait.
+  - `os_cpu_boost()` sends it to the host: ext_call `FNVNX_EXT_PLATFORM` (11), `FNVNX_PLAT_CPU_BOOST`.
+  - The host calls `appletSetCpuBoostMode` only when the mode changes, refuses when `boost_loading=0`, and sets
+    Normal again before it exits.
+- **Why not IO activity:** FastLoad also throttles the GPU to its minimum. So the trigger must be the loading screen,
+  never streaming during play.
+- **Emulator:** it only logs (`cpu boost: FastLoad|Normal`). `tests/s5/rt/build.sh` checks both lines.
+- **Untested:** the boost on hardware, and the wait/start/end path inside the platform (the emulated boot does not
+  reach the LoadingMenuThread yet).
 
 ## 7. Not yet done / untested
 

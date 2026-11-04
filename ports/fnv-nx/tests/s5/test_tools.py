@@ -85,6 +85,11 @@ class NpdmTest(unittest.TestCase):
         self.assertEqual(len(d["kernel_caps"]), 14)
         app_type = [c for c in d["kernel_caps"] if c & 0x3FFF == 0x1FFF]
         self.assertEqual([(c >> 14) & 7 for c in app_type], [1])
+        # kernel flags: cores 0..3 (core 3 for the placement opt-in, toolchain/host/placement.h), default core 0
+        kf = [c for c in d["kernel_caps"] if c & 0xF == 0x7]
+        self.assertEqual(len(kf), 1)
+        self.assertEqual(((kf[0] >> 16) & 0xFF, (kf[0] >> 24) & 0xFF), (0, 3))
+        self.assertEqual(self.app_json()["default_cpu_id"], 0)
 
     def test_address_space_names(self):
         for name, val in (("32bit", 0), ("64bit_old", 1), ("32bit_no_reserved", 2), ("64bit", 3), (2, 2)):
@@ -269,10 +274,16 @@ class PlacementTest(unittest.TestCase):
         sys.path.insert(0, HERE)
         import emu_guest
         rows = emu_guest.placement_table()
-        self.assertEqual(rows[1][1:], (0, 0x1, 0))          # main: core 0 alone
-        self.assertEqual(rows[4][1:], (1, 0x2, 0x2B))       # render worker
+        self.assertEqual(rows[1][1:], (0, 0x1, 0, 0))       # main: core 0 alone, never core 3
+        self.assertEqual(rows[4][1:], (1, 0x2, 0x2B, 0))    # render worker
         self.assertEqual(emu_guest.place(0x102, 0, 0)[1:], (2, 0x6, 0x2C))
         self.assertEqual(emu_guest.place((1 << 64) - 1, 1, 0)[1:], (2, 0x6, 0x2C))
+        # core 3 opt-in: IO, audio, tasklets and the default row may use cores 1-3; main, render, AI, loading not
+        for role in (0, 5, 6, 7):
+            self.assertEqual(emu_guest.place(0x100 | role, 2, 0, core3=True)[1:], (3, 0xE, 0x2C))
+            self.assertEqual(emu_guest.place(0x100 | role, 2, 0)[1:3], (1, 0x6))   # seq 2 of cores 1-2
+        for role, ideal, mask in ((1, 0, 0x1), (2, 2, 0x6), (3, 1, 0x6), (4, 1, 0x2), (8, 1, 0x6)):
+            self.assertEqual(emu_guest.place(0x100 | role, 0, 0, core3=True)[1:3], (ideal, mask))
 
 
 class FaultTableTest(unittest.TestCase):

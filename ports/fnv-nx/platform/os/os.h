@@ -60,7 +60,15 @@ typedef void (*os_thread_fn)(void *arg);
  * OS_THREAD_ROLE(r): placement role r, which the backend maps to cores and a priority (the Switch guest: the
  * host's table, toolchain/host/placement.h; other backends: any core). */
 #define OS_THREAD_ROLE(r) (0x100 | (r))
+/* or'ed into fnvnx_thread_role_hook's result: the thread boosts the CPU while it runs (the loading screen): on at
+ * its start and after each infinite wait, off before such a wait and at its end (platform/win32 thread.cpp,
+ * sync.cpp). Not passed on to os_thread_create. */
+#define OS_THREAD_BOOST 0x10000
+#define OS_ROLE_AUDIO 6   /* FNVNX_ROLE_AUDIO (toolchain/include/fnvnx/hostapi.h): the platform's audio pump */
 os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int prio, int cpu);
+/* CPU boost for loading: 1 = fast load (Switch: appletSetCpuBoostMode FastLoad, CPU 1785 MHz, GPU at its minimum),
+ * 0 = normal. The host may refuse (platform config boost_loading=0); a no-op on other backends. */
+void os_cpu_boost(int fast_load);
 int os_thread_start(os_thread *t);
 int os_thread_join(os_thread *t);           /* waits for exit; does not free */
 void os_thread_free(os_thread *t);          /* after join, or to detach a running thread */

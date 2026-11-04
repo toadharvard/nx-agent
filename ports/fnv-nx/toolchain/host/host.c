@@ -124,6 +124,7 @@ static u64 h_output_debug_string(u64 str, u64 len) { return svcOutputDebugString
 static u64 h_sleep_ns(u64 ns) { svcSleepThread((s64)ns); return 0; }
 static u64 h_exit(u64 code) {
     logf_("fnvnx host: guest called exit(%d)\n", (int)code);
+    appletSetCpuBoostMode(ApmCpuBoostMode_Normal);   /* never leave the console boosted */
     if (g_log) fclose(g_log);
     consoleExit(NULL);
     exit((int)code);
@@ -135,9 +136,57 @@ static u64 h_buttons_down(void) { padUpdate(&g_pad); return padGetButtonsDown(&g
 static u64 h_system_tick(void) { return armGetSystemTick(); }
 static u64 h_system_tick_freq(void) { return armGetSystemTickFreq(); }
 
-#include "placement.h"
+/* ---- platform config: sdmc:/fnvnx/fnvnx.ini, `key=value` lines (# or ; starts a comment); the build defaults
+ * apply when the file or a key is missing. Read once at startup, logged. */
+#ifndef FNVNX_BOOST_LOADING_DEFAULT
+#define FNVNX_BOOST_LOADING_DEFAULT 1
+#endif
+#include "placement.h"   /* FNVNX_CORE3_DEFAULT */
+#define FNVNX_CONFIG_PATH FNVNX_LOG_DIR "/fnvnx.ini"
+static struct {
+    int core3;           /* placement.h: background roles may use core 3 */
+    int boost_loading;   /* CPU boost (ApmCpuBoostMode_FastLoad) while the loading screen runs */
+} g_cfg = {FNVNX_CORE3_DEFAULT, FNVNX_BOOST_LOADING_DEFAULT};
+
+static void load_config(void) {
+    FILE *f = fopen(FNVNX_CONFIG_PATH, "r");
+    char line[160];
+    while (f && fgets(line, sizeof line, f)) {
+        char *c = strpbrk(line, "#;\r\n");
+        if (c) *c = 0;
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = 0;
+        char key[64];
+        if (sscanf(line, " %63s", key) != 1) continue;
+        int v = atoi(eq + 1);
+        if (!strcmp(key, "core3")) g_cfg.core3 = v != 0;
+        else if (!strcmp(key, "boost_loading")) g_cfg.boost_loading = v != 0;
+    }
+    if (f) fclose(f);
+    logf_("fnvnx host: config %s%s: core3=%d boost_loading=%d\n", FNVNX_CONFIG_PATH, f ? "" : " (absent: defaults)",
+          g_cfg.core3, g_cfg.boost_loading);
+}
+
 #include "host_v2.inc"
 #include "host_v3.inc"
+
+/* ---- platform services (ext_call module FNVNX_EXT_PLATFORM) */
+static int g_boost;   /* the CPU boost mode set last */
+static void set_cpu_boost(int mode) {
+    if (mode == g_boost) return;
+    Result rc = appletSetCpuBoostMode(mode ? ApmCpuBoostMode_FastLoad : ApmCpuBoostMode_Normal);
+    logf_("fnvnx host: cpu boost %s%s\n", mode ? "FastLoad" : "Normal", R_FAILED(rc) ? " (FAILED)" : "");
+    if (R_SUCCEEDED(rc)) g_boost = mode;
+}
+static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
+    if (fn == FNVNX_PLAT_CPU_BOOST && nargs >= 1) {
+        if (!g_cfg.boost_loading) return 1;
+        set_cpu_boost(args[0] ? 1 : 0);
+        return 0;
+    }
+    return FNVNX_EXT_NO_MODULE;
+}
 
 /* ---- process layout ------------------------------------------------------------------------------------ */
 /* In 32-bit spaces Mesosphere reports the ASLR region as [0x00200000, 4 GiB) (alias code region = small +
@@ -371,6 +420,8 @@ int main(int argc, char **argv) {
     }
     if (!fnvnx_reserve_late) logf_("fnvnx host: built without startup/host/reserve*.c: windows NOT reserved\n");
     report_layout();
+    load_config();
+    fnvnx_host_register_ext(FNVNX_EXT_PLATFORM, platform_ext);
 
     u64 gbase = 0, gsize = 0, rc;
     if (!load_guest(fnvnx_guest_path, &gbase, &gsize)) {
@@ -392,6 +443,7 @@ int main(int argc, char **argv) {
         logf_("fnvnx host: guest returned %#lx\n", rc);
     }
 
+    set_cpu_boost(0);   /* never leave the console boosted */
     logf_("fnvnx host: press + to exit (auto exit in %u s)\n", fnvnx_host_linger_s);
     u64 deadline = armGetSystemTick() + (u64)fnvnx_host_linger_s * armGetSystemTickFreq();
     while (appletMainLoop() && armGetSystemTick() < deadline) {

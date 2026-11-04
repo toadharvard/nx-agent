@@ -195,6 +195,7 @@ struct w32_thread_obj {
     int started;
     int prio;
     int cpu;
+    int boost;                     /* OS_THREAD_BOOST from the role hook */
 };
 
 int w32_thread_signaled(struct w32_obj *o) { return ((struct w32_thread_obj *)o)->done; }
@@ -221,7 +222,14 @@ static void thread_trampoline(void *p)
     /* adopt the id handed out by CreateThread */
     self->tid = to->tid;
     self->self_obj = &to->o;
+    self->boost = to->boost;
+    if (self->boost)
+        os_cpu_boost(1);
     DWORD code = to->fn(to->arg);
+    if (self->boost) {
+        os_cpu_boost(0);
+        self->boost = 0;
+    }
     thread_finish(to, code);
     self->self_obj = NULL;
     w32_obj_unref(&to->o); /* the running thread's reference */
@@ -246,6 +254,10 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
     if (s < 256 * 1024)
         s = 256 * 1024;
     int place = fnvnx_thread_role_hook ? fnvnx_thread_role_hook((void *)fn, arg) : -1;
+    if (place >= 0 && (place & OS_THREAD_BOOST)) {
+        t->boost = 1;
+        place &= ~OS_THREAD_BOOST;
+    }
     t->os = os_thread_create(thread_trampoline, t, s, OS_PRIO_NORMAL, place);
     if (!t->os) {
         w32_obj_unref(&t->o);
@@ -333,6 +345,10 @@ extern "C" void ExitThread(DWORD code)
 {
     struct w32_thread *self = w32_self();
     struct w32_thread_obj *to = (struct w32_thread_obj *)self->self_obj;
+    if (self->boost) {
+        os_cpu_boost(0);
+        self->boost = 0;
+    }
     if (to) {
         thread_finish(to, code);
         self->self_obj = NULL;

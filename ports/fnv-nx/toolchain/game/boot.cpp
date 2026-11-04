@@ -310,25 +310,36 @@ extern "C" {
 extern int (*fnvnx_thread_role_hook)(void *start, void *arg);
 extern void *(*fnvnx_image_tls_hook)(void);
 }
-/* The engine starts every BSThread through RunThreadProc 0x00aa64d0 with the BSThread as the argument; the
- * AILinearTaskThread objects (image vftable 0x01085688, or its native vtable) are the AI linear task threads: the
- * first one created takes the ai-linear-1 row of toolchain/host/placement.h, the next ai-linear-2. Everything else
- * gets the default row. */
+/* The engine starts every BSThread through RunThreadProc 0x00aa64d0 with the BSThread as the argument; its vptr
+ * (the image vftable, or the native vtable S2 maps it to) names the thread:
+ *   AILinearTaskThread 0x01085688   the first one created takes the ai-linear-1 row of toolchain/host/placement.h,
+ *                                   the next ai-linear-2
+ *   LoadingMenuThread  0x010740ac   the loading screen: the "loading" row, and the CPU boost while it runs
+ *                                   (OS_THREAD_BOOST, platform/win32 thread.cpp + sync.cpp)
+ *   the IO thread      0x010a29c0   "Serialized IO Thread" (FUN_00aa7eb0): the "io" row
+ * Everything else gets the default row. */
 static int thread_role(void *start, void *arg) {
-    static void *run_thread_proc, *ai_vtable;
+    static void *run_thread_proc, *ai_vtable, *loading_vtable, *io_vtable;
     static int looked_up;
     static unsigned ai_threads;
     if (!looked_up) {
         run_thread_proc = addrmap_native(0x00aa64d0u, "F");
         ai_vtable = addrmap_native(0x01085688u, "V");
+        loading_vtable = addrmap_native(0x010740acu, "V");
+        io_vtable = addrmap_native(0x010a29c0u, "V");
         looked_up = 1;
     }
     if (start && start == run_thread_proc && arg) {
         uint32_t vptr = *(const uint32_t *)arg;
-        if (vptr && (vptr == 0x01085688u || vptr == (uint32_t)(uintptr_t)ai_vtable)) {
+        auto is = [vptr](uint32_t image, void *native) { return vptr && (vptr == image || vptr == (uint32_t)(uintptr_t)native); };
+        if (is(0x01085688u, ai_vtable)) {
             unsigned k = __atomic_fetch_add(&ai_threads, 1, __ATOMIC_RELAXED);
             return OS_THREAD_ROLE(k ? FNVNX_ROLE_AI_LINEAR_2 : FNVNX_ROLE_AI_LINEAR_1);
         }
+        if (is(0x010740acu, loading_vtable))
+            return OS_THREAD_ROLE(FNVNX_ROLE_LOADING) | OS_THREAD_BOOST;
+        if (is(0x010a29c0u, io_vtable))
+            return OS_THREAD_ROLE(FNVNX_ROLE_IO);
     }
     return OS_THREAD_ROLE(FNVNX_ROLE_DEFAULT);
 }
@@ -337,7 +348,7 @@ static void *image_tls_block(void) { return (void *)__fnvnx_tls_image; }
 
 /* After the platform's own constructors (clocks 101, module registrations 103) and before every game unit's
  * (unprioritized): FNVNX_INIT_BOOT, platform/os/os.h; toolchain/game/init_order.py checks the order. */
-__attribute__((constructor(110))) static void boot_banner(void) {
+__attribute__((constructor(FNVNX_INIT_BOOT))) static void boot_banner(void) {
     /* The game's own static initialisers (default priority) read and write the data image, so the image must
      * be mapped and bound before them: do the platform + loader steps here. */
     printf("fnvnx boot: early init (before the game's static initialisers)\n");
