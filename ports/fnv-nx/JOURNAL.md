@@ -2584,3 +2584,16 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - Stack parameters the x86 caller did not push are no longer compared. The count comes from the caller's cleanup or
     the callee's `ret N`. FUN_005accb0's callers 005c78f0 and 005d4c60 are gone, which confirms S1b's diagnosis.
   - Self-test: 0 failures.
+
+### J-0118 | 2026-11-04 | stream: V1-link | status: wip | parent: J-0111
+
+* **did** - V1 `c22fc50`, `afd9b5f`: the V1 audits now run as step 4d of full_job.sh, on the job's own link with
+  nothing refetched (D17).
+  - Budget `V1_BUDGET`, default 1200 s. Cheap audits run first. One whose estimate doesn't fit is skipped, and one still
+    running at the end of the budget is stopped; the report says which.
+  - `FARM_V1=0` skips the step.
+  - Results go to `link/<c12>/v1/`. The full report gets the audit table and "watched counters" with the 9a0243c
+    baselines: t5 79 -> 0 expected; the 12 classes should drop; the 23 callee-pop `same` pairs should stay.
+* **measured** - On link/9a0243c7eabe the audits take 372 s; the slow ones are c2-bridges (about 150 s) and c5-pic
+  (about 90 s). c2-bridges: 99 pass, 4 skipped, 0 fail. A full job takes about 41 min, so this adds about 6 min.
+  R4-1..R4-3 are still open at 40b2cb5.
