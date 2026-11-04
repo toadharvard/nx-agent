@@ -16,6 +16,8 @@ Two halves:
         W5 stur q, [x, #0x38]                      a 128-bit store (struct copy), parentCell in its third word
         W6 str x, [A-4]                            the player pointer itself stored as the upper word of a 64-bit store
         W7 the pointer moves P1 -> P2, then a store to P1+0x40 (P1 freed and reused): must not count
+        W9-W10 the field set by stlr, by ldaxr/stlxr (S12: volatiles, Interlocked*; armv8.0, no LSE): must count
+        W13 the pointer stored by stlr: must count
         W8 a non-zero store to +0x44 (the next field): must not count
   python3 -I tests/v1/test_s5_milestone_store.py   -> one line per case, exit 1 when any shows a defect
 """
@@ -139,6 +141,24 @@ def watch(work):
                    {"x0": A, "x1": OBJ, "x5": OBJ2, "x2": OBJ, "x3": CELL})
     say("W7", not got, "pointer P1 then P2, a store to P1+0x40: first-cell "
         + ("reached on the stale object" if got else "not reached"))
+    # W9-W10: ordered and exclusive stores. S12's plugin compiles volatiles to stlr and Interlocked* to ldaxr/stlxr
+    # (the guest is -march=armv8-a -mno-outline-atomics: no LSE swp/cas on the A57); Unicorn must report them as
+    # writes, or a field set that way is never seen.
+    atomics = [
+        ("W9", "stlr w3, [x4]", {"x3": CELL, "x4": OBJ + OFF}),
+        ("W10", "1: ldaxr w5, [x4]\nstlxr w6, w3, [x4]\ncbnz w6, 1b", {"x3": CELL, "x4": OBJ + OFF}),
+    ]
+    for case, asm, regs in atomics:
+        try:
+            got = run_case(work, pre + asm, {**base, **regs})
+        except Exception as ex:  # noqa: BLE001
+            say(case, False, f"{asm}: the watch raised {type(ex).__name__}: {ex}")
+            continue
+        say(case, got, asm.replace("\n", "; ") + ": first-cell "
+            + ("reached" if got else "NOT reached: the store is not reported to the write hook"))
+    # W13: the pointer itself stored with stlr (a volatile global under S12's plugin)
+    got = run_case(work, "stlr w1, [x0]\nstr w3, [x2, #0x40]", {"x0": A, "x1": OBJ, "x2": OBJ, "x3": CELL})
+    say("W13", got, "stlr pointer, then str w, [P+0x40]: first-cell " + ("reached" if got else "NOT reached"))
     # W8: the next field
     got = run_case(work, pre + "str w3, [x2, #0x44]", {**base, "x3": CELL})
     say("W8", not got, "str w, [P+0x44]: first-cell " + ("reached on the wrong field" if got else "not reached"))
