@@ -147,10 +147,13 @@ cmd_run() {
 		gfocus; xdotool key --delay 200 grave; sleep 1
 		local k w
 		for k in "scof s16_console_$scene.txt"; do xdotool type --delay 60 "$k"; sleep 0.5; xdotool key Return; sleep 1; done
+		local dbg=0
 		while read -r k w; do
 			gfocus; xdotool type --delay 60 "bat s16_${scene}_$k"; sleep 0.5; xdotool key Return; sleep "$w"
+			[ "${S16_DEBUG:-0}" = 1 ] && { shot "$out/dbg_$((dbg++))_after_chunk_$k.png"; }
 		done <<<"$plan"
 		gfocus; xdotool key --delay 200 grave; sleep 1
+		[ "${S16_DEBUG:-0}" = 1 ] && { shot "$out/dbg_$((dbg++))_closed.png"; gfocus; xdotool key --delay 200 grave; sleep 2; shot "$out/dbg_$((dbg++))_toggled_again.png"; gfocus; xdotool key --delay 200 grave; sleep 2; }
 		sleep "$settle"
 	fi
 	local i
