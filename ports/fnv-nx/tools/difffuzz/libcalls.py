@@ -12,6 +12,8 @@ new/delete, RTTI cast); those stay traced calls, compared by target only (their 
 import math
 import struct
 
+import world
+
 # original addresses (FalloutNV.exe 1.4.0.525, from units.json names)
 X86 = {
     0x00401460: 'memcpy', 0x00ec44d0: 'memmove', 0x00403d30: 'memset', 0x00ec4835: 'memcmp', 0x00ec6130: 'strlen',
@@ -21,8 +23,13 @@ X86 = {
     0x00ec408c: 'cookie', 0x00ec5ec0: 'chkstk', 0x00ec8660: 'chkstk',
     0x00ec62f6: 'ftol2', 0x00ec62c0: 'ftol2',
     0x00ec6040: 'CIsqrt', 0x00eca0a0: 'CIsin', 0x00ec9f70: 'CIcos', 0x00ec6cde: 'fabs', 0x00ec6054: 'sqrt',
+    0x00ecbc80: 'log10',
     0x00ecc300: 'allmul', 0x00ecc250: 'alldiv', 0x00ec7810: 'allshl', 0x00ec77e0: 'allshr',
+    0x00ec782f: 'ehvec_ctor', 0x00ec5fce: 'ehvec_dtor',
 }
+# x86 helpers that run as x86 code from a private stub page (each its own slot: some call back into game code)
+STUB_SLOT = {'ftol2': 0, 'CIsqrt': 1, 'CIsin': 2, 'CIcos': 3, 'fabs': 4, 'sqrt': 5, 'ehvec_ctor': 6, 'ehvec_dtor': 7,
+             'log10': 8}
 CRT_ADDR = {}
 for _a, _n in X86.items():
     CRT_ADDR.setdefault(_n, _a)
@@ -32,7 +39,8 @@ A64 = {n: n for n in ('memcpy', 'memmove', 'memset', 'memcmp', 'strlen', 'strcmp
                       'strchr', 'strrchr', 'strstr', 'tolower', 'toupper', 'strncmp', 'wcslen')}
 A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp', 'strncasecmp': 'strnicmp',
             '_strnicmp': 'strnicmp', 'sqrt': 'sqrt', 'sqrtf': 'sqrtf', 'sin': 'sin', 'sinf': 'sinf', 'cos': 'cos',
-            'cosf': 'cosf', 'fabs': 'fabs', 'fabsf': 'fabsf', '_memcpy': 'memcpy', '_memmove': 'memmove',
+            'cosf': 'cosf', 'fabs': 'fabs', 'fabsf': 'fabsf', 'log10': 'log10', 'log10f': 'log10f',
+            '_memcpy': 'memcpy', '_memmove': 'memmove',
             '_memset': 'memset', '_strlen': 'strlen', '_strcmp': 'strcmp',
             # GCC's thread-safe local statics (MSVC 2008: a plain guard bit, no call): single-threaded semantics
             '__cxa_guard_acquire': 'guard_acquire', '__cxa_guard_release': 'guard_release',
@@ -65,7 +73,8 @@ class Mem:
         self.ensure(a, len(b))
         self.uc.mem_write(a, b)
         for i, x in enumerate(b):
-            self.writes[a + i] = x
+            if any(lo <= a + i < hi for lo, hi in world.COMPARED):   # like the machines' write hooks
+                self.writes[a + i] = x
 
     def cstr(self, a, limit=4096):
         out = bytearray()
@@ -155,14 +164,14 @@ def run(name, m, a):
 
 def run_float(name, x):
     f = {'sqrt': math.sqrt, 'sqrtf': math.sqrt, 'sin': math.sin, 'sinf': math.sin, 'cos': math.cos,
-         'cosf': math.cos, 'fabs': abs, 'fabsf': abs}[name]
+         'cosf': math.cos, 'fabs': abs, 'fabsf': abs, 'log10': math.log10, 'log10f': math.log10}[name]
     try:
         return f(x)
     except (ValueError, OverflowError):
         return float('nan')
 
 
-FLOAT_NAMES = {'sqrt', 'sqrtf', 'sin', 'sinf', 'cos', 'cosf', 'fabs', 'fabsf'}
+FLOAT_NAMES = {'sqrt', 'sqrtf', 'sin', 'sinf', 'cos', 'cosf', 'fabs', 'fabsf', 'log10', 'log10f'}
 
 
 # x86 helpers that run as real x87 code from a private stub page: name -> bytes(slot address) (each ends in ret)
@@ -184,4 +193,12 @@ def x87_stub(name, slot):
         return b'\xdd\x44\x24\x04\xd9\xe1\xc3'
     if name == 'sqrt':
         return b'\xdd\x44\x24\x04\xd9\xfa\xc3'
+    if name == 'log10':     # cdecl double -> ST0: fldlg2; fld qword [esp+4]; fyl2x
+        return b'\xd9\xec\xdd\x44\x24\x04\xd9\xf1\xc3'
+    if name == 'ehvec_ctor':  # stdcall (ptr, size, count, ctor, dtor): ctor(ptr + i*size) for i in 0..count-1
+        return bytes.fromhex('558bec565753' '8b7508' '8b7d10' '85ff' '7e0b' '8bce' 'ff5514' '03750c' '4f' 'ebf1'
+                             '5b5f5e5d' 'c21400')
+    if name == 'ehvec_dtor':  # stdcall (ptr, size, count, dtor): dtor(ptr + i*size) for i = count-1 .. 0
+        return bytes.fromhex('558bec5657' '8b7d10' '8b450c' '0fafc7' '8b7508' '03f0' '4f' '780a' '2b750c' '8bce'
+                             'ff5514' 'ebf3' '5f5e5d' 'c21000')
     return None

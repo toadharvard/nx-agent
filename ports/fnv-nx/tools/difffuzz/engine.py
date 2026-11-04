@@ -65,6 +65,7 @@ class UnitCache:
                     self.tree_def.setdefault(int(f['address'], 16), f['symbol'])
         self._x86, self._img, self._pin, self._callee = {}, {}, {}, {}
         self._refmap = None
+        self._statics = None
         self._vrows = None
         self._vft_by_class = None
 
@@ -165,11 +166,7 @@ class UnitCache:
         img = self.arm_image(source)
         if not any(o == orig_addr for o in img.entries.values()):
             raise KeyError('no native entry for %08x' % orig_addr)
-        statics = set()
-        for _, u in self.by_source[source]:
-            for n, a in u['symbols'].items():
-                if LOCAL_STATIC.match(n):
-                    statics.update(range(int(a, 16), int(a, 16) + 16))
+        statics = self.local_statics()
         code = {orig_addr: fn['code']}
         if self.unit_closed:
             for a, f in xu.funcs.items():
@@ -181,7 +178,36 @@ class UnitCache:
         t.vtables = self.vtable_map(img)
         t.followed = self.preload(code, img, source)
         t.x86_code = code
+
+        def oracle_code(addr):
+            """(code, literals of its unit) of an oracle function, or None."""
+            if addr in libcalls.X86 or addr not in self.def_at:
+                return None
+            try:
+                xu2 = self.x86_unit(self.def_at[addr][0], addr)
+            except Exception:  # noqa: BLE001
+                return None
+            f = xu2.funcs.get(addr)
+            return (f['code'], xu2.literal_bytes()) if f and not f['unresolved'] else None
+        t.oracle_code = oracle_code
+        # literals of every unit that contributed preloaded code
+        t.extra_pinned = {}
+        for xu2 in list(self._x86.values()):
+            if xu2 is not xu and any(a in code for a in xu2.funcs):
+                t.extra_pinned.update(xu2.literal_bytes())
         return t
+
+    def local_statics(self):
+        """Byte addresses of every function-local static and guard any unit names (image-wide: followed callees of
+        other units have them too). MSVC keeps them in the image, GCC in the unit's .bss."""
+        if self._statics is None:
+            st = set()
+            for u in self.units:
+                for n, a in u['symbols'].items():
+                    if LOCAL_STATIC.match(n):
+                        st.update(range(int(a, 16), int(a, 16) + 16))
+            self._statics = st
+        return self._statics
 
     def preload(self, code, img, source):
         """Add to `code` (transitively) every oracle callee outside it that the native image never names: GCC
@@ -271,4 +297,6 @@ class UnitCache:
 
     def pair(self, source, orig_addr):
         t = self.target(source, orig_addr)
-        return runner.Pair(t, dict(self.pinned(source, orig_addr))), t
+        pin = dict(getattr(t, 'extra_pinned', {}))
+        pin.update(self.pinned(source, orig_addr))
+        return runner.Pair(t, pin), t

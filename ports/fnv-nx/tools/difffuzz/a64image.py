@@ -29,7 +29,7 @@ CODE_STUB = 0x08000000        # + original code address (0x00400000..0x00fdf000)
 NAMED_STUB = 0x09000000       # + 16 * k
 NAMED_STUB_MAX = 0x00800000 // 16
 STACK_GUARD = 0x0b800000      # page holding the stack protector canary (mapped by the AArch64 engine)
-LINK_VERSION = 4              # bump when the stub/alias rules change (invalidates cached unit images)
+LINK_VERSION = 5              # bump when the stub/alias rules change (invalidates cached unit images)
 ADDR_SYM = re.compile(r'^__fnv_([0-9a-f]{8})(?:_(C[0-9]|D[0-9]))?$')
 LAYOUT = """
 SECTIONS {
@@ -106,6 +106,17 @@ class Image:
                 self.syms.setdefault(s.name, s.value)
 
 
+def helpers_object(workdir):
+    """a64helpers.cpp compiled once (ILP32, -O2): the platform iterators the native objects call by name."""
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'a64helpers.cpp')
+    obj = os.path.join(workdir, 'zz_s13_helpers.o')
+    if not os.path.exists(obj) or os.path.getmtime(obj) < os.path.getmtime(src):
+        os.makedirs(workdir, exist_ok=True)
+        subprocess.run([os.environ.get('CXX', 'aarch64-linux-gnu-g++'), '-mabi=ilp32', '-O2', '-fno-exceptions',
+                        '-fno-stack-protector', '-c', src, '-o', obj], check=True)
+    return obj
+
+
 def build(source, linkdir, workdir):
     """Link the rewritten object of `source` -> Image (cached in workdir/<obj>.elf)."""
     return build_many([source], linkdir, workdir, config.obj_name(source))
@@ -130,7 +141,7 @@ def build_many(sources, linkdir, workdir, name):
         m = json.load(open(meta))
         if m.get('version') == LINK_VERSION and m.get('sources') == sorted(sources):
             return Image(elf, {int(k): v for k, v in m['stubs'].items()}, m['info'])
-    objs = units + ([bridges] if os.path.exists(bridges) else [])
+    objs = units + ([bridges] if os.path.exists(bridges) else []) + [helpers_object(workdir)]
     defined, undef, weak = set(), set(), set()
     for o in objs:
         for s in elfsyms.symbols(o):

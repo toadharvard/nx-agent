@@ -17,6 +17,8 @@ from pathlib import Path
 REL32, DIR32, DIR32NB, SECREL = 0x14, 0x06, 0x07, 0x0B
 IMAGE_SCN_CNT_CODE, IMAGE_SCN_CNT_UNINIT = 0x20, 0x80
 IMAGE_SCN_MEM_WRITE = 0x80000000
+LITERAL_POOL = 0x02f00000      # synthetic addresses of literals units.json does not name (world.py: background range)
+_POOL_NEXT = LITERAL_POOL
 
 
 class Coff:
@@ -68,6 +70,7 @@ class UnitImage:
         self.mappings = {k: int(v, 16) for k, v in unit['symbols'].items()}
         self.placements = {}
         self.errors = []
+        self.synthetic = {}                       # (section, value) -> (pool address, bytes)
         for f in unit['functions']:
             a = int(f['address'], 16)
             for name in [f['symbol']] + f.get('fold_aliases', []):
@@ -93,7 +96,30 @@ class UnitImage:
                     return address + point - value
         if sym['section'] == -1:
             return (sym['value'] + addend) & 0xffffffff
+        lit = self._synthetic(sym)
+        if lit is not None:
+            return (lit + addend) & 0xffffffff
         return None
+
+    def _synthetic(self, sym):
+        """A read-only literal of this object that units.json does not name ($SG strings, ??_C@ copies): only its
+        bytes matter, so it gets an address in the synthetic literal pool (pinned on both machines)."""
+        if sym['section'] <= 0 or not sym['name'].startswith(('$SG', '??_C@', '__real@', '__xmm@')):
+            return None
+        sec = self.coff.sections[sym['section']]
+        if sec['flags'] & (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_CNT_UNINIT):
+            return None
+        key = (sym['section'], sym['value'])
+        if key not in self.synthetic:
+            global _POOL_NEXT
+            blob = sec['data'][sym['value']:]
+            end = blob.find(b'\0\0' if sym['name'].startswith('??_C@_1') else b'\0')
+            blob = blob[:end + 2 if sym['name'].startswith('??_C@_1') else end + 1] if end >= 0 else blob[:256]
+            if sym['name'].startswith(('__real@', '__xmm@')):
+                blob = bytes.fromhex(sym['name'].split('@', 1)[1])[::-1]
+            self.synthetic[key] = (_POOL_NEXT, bytes(blob))
+            _POOL_NEXT += (len(blob) + 15) & ~15
+        return self.synthetic[key][0]
 
     def _load(self, f, a):
         s = self.coff.defined(f['symbol'])
@@ -136,7 +162,7 @@ class UnitImage:
         """{original address: bytes} for read-only data the unit's code refers to and the object holds:
         string literals ($SG, ??_C@), __real@/__xmm@ constants, other symbols defined in non-writable data sections
         that have a mapped address. These are pinned in the shared world."""
-        out = {}
+        out = {a: b for a, b in self.synthetic.values()}
         for f in self.funcs.values():
             for rel, kind, t, name in f['relocs']:
                 if t is None or kind != DIR32:

@@ -209,7 +209,8 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
         d = dict(kind='mem-write', addr='%08x' % first, ndiff=len(diff),
                  x86=bytes(wx.get(k, 0) for k in range(first & ~3, (first & ~3) + 8)).hex(),
                  arm=bytes(wa.get(k, 0) for k in range(first & ~3, (first & ~3) + 8)).hex(),
-                 only_x86=sum(1 for k in diff if k not in wa), only_arm=sum(1 for k in diff if k not in wx))
+                 only_x86=sum(1 for k in diff if k not in wa), only_arm=sum(1 for k in diff if k not in wx),
+                 addrs=["%08x" % k for k in diff[:16]])
         # float stores: compare the aligned words as floats
         if all(k in wx and k in wa for k in range(first & ~3, (first & ~3) + 4)):
             bx = bytes(wx[k] for k in range(first & ~3, (first & ~3) + 4))
@@ -223,6 +224,14 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     return None
 
 
+def _read(uc, w, a, n):
+    """Final memory of a machine, or the world's initial bytes where the machine never mapped the page."""
+    try:
+        return bytes(uc.mem_read(a, n))
+    except Exception:  # noqa: BLE001
+        return w.initial(a, n)
+
+
 class Pair:
     """Both engines for one function, reused across cases (world pages are dropped between runs)."""
 
@@ -230,8 +239,29 @@ class Pair:
         self.target = target
         self.pinned = pinned
         self.xe = self.ae = None
+        self.adapted = 0
 
     def run(self, case, max_steps=200000):
+        """One case on both machines. Adaptive follow: when the k-th call goes to oracle function X on x86 but
+        elsewhere natively and X's oracle code is available, the native side inlined X (the unit-wide preload test
+        missed it because the unit calls X elsewhere): X joins the oracle code and the case runs again."""
+        for _ in range(5):
+            rx, ra, d = self._run(case, max_steps)
+            if not d or d['kind'] != 'call-target' or self.adapted >= 16:
+                return rx, ra, d
+            x = int(d['x86'], 16) if not d['x86'].startswith('name:') else None
+            get = getattr(self.target, 'oracle_code', None)
+            got = get(x) if (get and x is not None and x not in self.target.x86_code) else None
+            if not got:
+                return rx, ra, d
+            self.target.x86_code[x] = got[0]
+            for a_, b_ in got[1].items():
+                self.pinned.setdefault(a_, b_)
+            self.adapted += 1
+            self.xe = None              # rebuilt with the larger code set
+        return rx, ra, d
+
+    def _run(self, case, max_steps):
         w = world.World(case, self.target.x86_code, self.pinned)
         placement = self.target.placement()
         if self.xe is None:
@@ -247,8 +277,7 @@ class Pair:
         ra = self.ae.run(self.target.conv, case, placement, self.target.orig_addr, max_steps=max_steps)
         d = compare(self.target.conv, rx, ra, w, placement.get('sret'), self.target.local_statics,
                                 getattr(self.target.callee_info, 'conv', None),
-                                (lambda a, n: bytes(self.xe.uc.mem_read(a, n)),
-                                 lambda a, n: bytes(self.ae.uc.mem_read(a, n))))
+                                (lambda a, n: _read(self.xe.uc, w, a, n), lambda a, n: _read(self.ae.uc, w, a, n)))
         if d is not None and ra.private_reads:
             d['arm_private_reads'] = ra.private_reads
         return rx, ra, d

@@ -269,8 +269,9 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_EIP, ret); return True
         stub = libcalls.x87_stub(name, BUILTIN_SLOT)
         if stub is not None:
-            uc.mem_write(BUILTIN_STUB, stub)
-            uc.reg_write(UC_X86_REG_EIP, BUILTIN_STUB); return True
+            at = BUILTIN_STUB + 0x80 * libcalls.STUB_SLOT[name]
+            uc.mem_write(at, stub)
+            uc.reg_write(UC_X86_REG_EIP, at); return True
         if name in ('allmul', 'alldiv'):         # stdcall (a_lo, a_hi, b_lo, b_hi) -> edx:eax, ret 16
             a = words[0] | words[1] << 32
             b = words[2] | words[3] << 32
