@@ -4834,8 +4834,36 @@ def r_header_unit_instantiations(path, text, stats):
             stats['HUNIT1'] += inst.count('template ')
     return text
 
+# ---------------------------------------------------------------------------------------------------------- XC2
+#
+# XC1 (S10, startup/tools/dyninit_rewrite.py) gives every ??__E dynamic initializer of the generated units its own
+# extern "C" __fnvnx_dyninit_<addr>, which the link maps to the address and the startup runner calls in the image's
+# order. A hand-written unit can spell one as a plain copy-initialization, which XC1 does not see (it rewrites
+# generated/ only): nipoint3_console.cpp's `NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;` is
+# ??__EgNiPoint3StartupDst@@YAXXZ at 0x00a62110 (the 17-dword copy; the decomp's tag sits on the line above), which
+# InitializeGameSystems calls directly (S5-boot collect-all: "decomp body exists, not in the link"). GCC made it an
+# anonymous local static initializer, so the address had no native definition. XC2 writes XC1's form for the sites
+# of XC2_SITES: the object becomes `extern` (the recipe binds it to its image address, 0x011f4600) and the copy
+# becomes __fnvnx_dyninit_<addr>. Same line. Platform, like XC1.
+
+XC2_SITES = [
+    ('gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp',
+     'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;',
+     'extern NiPoint3StartupTable gNiPoint3StartupDst; extern "C" void __fnvnx_dyninit_00a62110(void) '
+     '{ gNiPoint3StartupDst = gNiPoint3StartupSrc; } /* fnv-nx XC2: ??__EgNiPoint3StartupDst 0x00a62110 */'),
+]
+
+def r_handwritten_dyninit(path, text, stats):
+    """XC2: XC1's extern + __fnvnx_dyninit_<addr> form for hand-written dynamic initializers (XC2_SITES, above)."""
+    rel = path.replace(os.sep, '/')
+    for unit, old, new in XC2_SITES:
+        if rel.endswith('/' + unit) and text.count(old) == 1:
+            text = text.replace(old, new)
+            stats['XC2'] += 1
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
-              r_header_unit_instantiations]
+              r_header_unit_instantiations, r_handwritten_dyninit]
 RULES += REFS_RULES

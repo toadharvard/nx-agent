@@ -1386,6 +1386,16 @@ check('HUNIT1 once only', str(run(s1.r_header_unit_instantiations, _hu,
 check('HUNIT1 other units untouched', run(s1.r_header_unit_instantiations, 'int x;\n', '/nonexistent/src/x_h_unit.cpp'),
       [], ['HUNIT1'])
 
+# ---- S1-refs: XC2 (a hand-written dynamic initializer in XC1's form)
+_x2 = run(s1.r_handwritten_dyninit, 'struct NiPoint3StartupTable { int data[17]; };\nNiPoint3StartupTable gNiPoint3StartupSrc;\n'
+          'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
+          '/nonexistent/src/gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp')
+check('XC2 the copy-initialization becomes extern + __fnvnx_dyninit_<addr>', _x2,
+      ['extern NiPoint3StartupTable gNiPoint3StartupDst;', 'extern "C" void __fnvnx_dyninit_00a62110(void)'],
+      ['gNiPoint3StartupDst = gNiPoint3StartupSrc;\n'])
+check('XC2 other units untouched', run(s1.r_handwritten_dyninit, 'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
+      '/nonexistent/src/x.cpp'), [], ['XC2'])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''
