@@ -225,8 +225,17 @@ class/struct/union/enum tags, which Itanium names do not.
     definition (`VADEF`): `none` (no va_start), `escape` (its va_list goes to another function, vsnprintf-like:
     the format decides) or the va_arg classes. The tail must share one width class (4-byte words, 8-byte integers,
     doubles) with every va_arg the body reads, or the body must never call va_start. Without a record, `escape`
-    or mixed widths, the pair is `manual`. On link/c0d6c71516f6 this sends the 0x00703c00 override's fixed-tail
-    callers and 0x00406d00's to `manual` (both format through vsnprintf);
+    or mixed widths, the pair is `manual`. **Format literals** (`vacall.decide_format`): when the definition hands
+    its va_list on (`escape`: 0x00406d00; the 0x00703c00 override, declared `va=escape` in overrides.tsv column 5),
+    the plugin records the string-literal arguments of every call of the reference
+    (`-fplugin-arg-fnvnx_vacall-want`, `FMT` lines; a readonly array initialized with a literal counts too). The
+    definition's last named parameter is the format. Its conversions are parsed in MSVC 2008's syntax
+    (`parse_format`: `*`, h/l/w = 4 bytes, ll/I64/q/j = 8, e/f/g/a double, s/p pointer; %n, `$` and `L` are not
+    modelled). When every call site reads, word by word, the widths the fixed reference passes, the pair needs no
+    bridge. When every site has the same conversions but the words regroup (two ints read as `%lld` or `%f`), the
+    definition is compared as fixed with those conversions and bridged (abi2 bytes; the key includes the
+    conversions). A non-literal format, sites that disagree and unmodelled conversions stay `manual`. test_vacall
+    executes the %s, %lld and %f shapes under qemu;
   * both variadic: the named parts are compared like fixed ones and the anonymous parts must start at the same
     place;
   * definition parameters in the reference's anonymous part are decided **by the call sites** (`vacall.py`). Resolve 1
@@ -238,7 +247,7 @@ class/struct/union/enum tags, which Itanium names do not.
     aggregates by value and units not recorded yet stay `manual`. For a variadic definition only the words its
     named parameters read must agree; 0x00406d00's snprintf-like callers pass any number of arguments. Test:
     `test_vacall.py` covers V1's shapes end to end (plugin, decision, qemu run). On link/c0d6c71516f6, replayed with
-    its tree: 32 units recorded, bridge-gap pairs 70 -> 35, then 75 once V2's va_arg widths are checked.
+    its tree: 32 units recorded, bridge-gap pairs 70 -> 35, then 75 once V2's va_arg widths are checked, then 57 with the format literals.
   * without the call sites, such pairs are `manual`. Their x86 words come from the call site's
     argument types. A long long or a double is two words on x86 and one register on AArch64. A struct by value is
     several words, or a pointer. A struct { float } goes in an s register. V1 refuted (VA-U1..U4) an earlier rule
