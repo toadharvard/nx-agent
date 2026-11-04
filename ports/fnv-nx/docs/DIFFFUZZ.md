@@ -168,6 +168,18 @@ tail jumps and in-function switch tables (relocated with the oracle code) are fu
 aedcf24: targets / functions with a native object 64.4 % -> 98.4 % (21 functions with unresolved relocations
 remain); of 110 newly fuzzed functions 106 have a verdict (16 hard, 6 soft, 19 oracle gap).
 
+**S1b renames (J-0141, harness still difffuzz-13).** `patches/units_renames.tsv` rows of the units whose prepared
+source carries an S1b patch (`config.units_renames`, fnvlink's `load_renames`; `FNVNX_UNITS_RENAMES=<tsv|none>`)
+apply on top of the tree's units.json (`engine.apply_renames`): a `def` row gives the patched definition its new
+MSVC name, which places the arguments on both machines (0x00eacd00 `bool __stdcall f(void*)`, made a member that
+passes ecx on: `this:P/4, p0:P/4` on the oracle too), and a `ref` row is the patched caller's own declaration of
+a callee (`caller_conv`: canned results by declaration). Prepare's POST hook already rewrites the farm trees'
+units.json (all 239 `def` rows of the 254 patched units of tree efb9808e7d542f00), so this matters for a tree
+prepared without it or a local `FNVNX_TREE`, and for the `ref` rows. **Cache:** a unit's applicable rows go into
+its functions' keys (`fnkeys.py`), so only those units are fuzzed again: 9,669 of 68,667 functions (254 units)
+on that tree, no HARNESS bump; a later change of a unit's rows refreshes that unit only. 0x00eacd00 and 0x00a89b00
+(S1b's two XINC1 call-args artefacts) are ok on link c0d6c71516f6. Test: `tests/s13/test_renames.py`.
+
 **difffuzz-12 (J-0138).** The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
 names libcalls.EQUIV maps to them) return a fresh heap block (`world.alloc_result`, HEAP + 2 MiB + 4 KiB k), never
 the canned 0: GCC drops the null test after a throwing new that MSVC keeps (S13b `new-null`, 178 farm records). A
