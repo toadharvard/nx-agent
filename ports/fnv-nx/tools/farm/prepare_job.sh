@@ -26,23 +26,33 @@ if [ ! -d "$SRC" ]; then git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" >
 P=$SRC/ports/fnv-nx
 bash "$P/tools/fetch.sh" "$EXT" >/dev/null
 
-t0=$(date +%s)
-rm -rf "$WORK"; mkdir -p "$WORK"
-python3 "$P/tools/prepare.py" "$EXT/fnv_decomp" "$WORK/tree" > "$WORK/prepare.log" 2>&1
-TREE_HASH=$(bash "$P/tools/farm/tree_hash.sh" "$WORK/tree")
-t1=$(date +%s)
-
 if [ ! -d "$ARTIFACTS/.git" ]; then git clone -q https://github.com/toadharvard/fnv-nx-build "$ARTIFACTS"; fi
+if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/tree:refs/remotes/origin/tree" 2>/dev/null; then git -C "$ARTIFACTS" checkout -q -B tree origin/tree
+elif git -C "$ARTIFACTS" rev-parse -q --verify refs/heads/tree >/dev/null; then git -C "$ARTIFACTS" checkout -q tree
+else git -C "$ARTIFACTS" checkout -q --orphan tree; fi
+
+# A commit that changes none of prepare's inputs gets the previous tree again (no 5.5 min prepare).
+INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim ports/fnv-nx/tools/fetch.sh)
+PREV=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$ARTIFACTS/meta.json" 2>/dev/null || true)
+REUSE=0
+if [ -n "$PREV" ] && [ -d "$ARTIFACTS/tree" ] && git -C "$REPO" cat-file -e "$PREV^{commit}" 2>/dev/null \
+   && git -C "$REPO" diff --quiet "$PREV" "$COMMIT" -- "${INPUTS[@]}"; then REUSE=1; fi
+t0=$(date +%s)
+if [ $REUSE = 1 ]; then
+  TREE_HASH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tree_hash"])' "$ARTIFACTS/meta.json")
+  mkdir -p "$WORK"; echo "inputs unchanged since $PREV: tree reused" > "$WORK/prepare.log"
+else
+  rm -rf "$WORK"; mkdir -p "$WORK"
+  python3 "$P/tools/prepare.py" "$EXT/fnv_decomp" "$WORK/tree" > "$WORK/prepare.log" 2>&1
+  TREE_HASH=$(bash "$P/tools/farm/tree_hash.sh" "$WORK/tree")
+fi
+t1=$(date +%s)
 cd "$ARTIFACTS"
-if git fetch -q origin "+refs/heads/tree:refs/remotes/origin/tree" 2>/dev/null; then git checkout -q -B tree origin/tree
-elif git rev-parse -q --verify refs/heads/tree >/dev/null; then git checkout -q tree
-else git checkout -q --orphan tree; fi
-mkdir -p tree
-rsync -rc --delete "$WORK/tree/" tree/
+if [ $REUSE = 0 ]; then mkdir -p tree; rsync -rc --delete "$WORK/tree/" tree/; fi
 cp "$WORK/prepare.log" prepare.log
 DECOMP_COMMIT=$(git -C "$EXT/fnv_decomp" rev-parse HEAD)
 cat > meta.json <<EOF
-{"commit": "$COMMIT", "decomp_commit": "$DECOMP_COMMIT", "tree_hash": "$TREE_HASH", "prepare_s": $((t1-t0))}
+{"commit": "$COMMIT", "decomp_commit": "$DECOMP_COMMIT", "tree_hash": "$TREE_HASH", "prepare_s": $((t1-t0)), "reused": $REUSE}
 EOF
 git add -A tree prepare.log meta.json
 git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 tree $TREE_HASH" || true

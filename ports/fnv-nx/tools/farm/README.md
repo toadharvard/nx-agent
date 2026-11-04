@@ -23,6 +23,19 @@ that does not change the prepared tree recompiles nothing, and a changed unit so
 Headers, flags or the compiler changing rebuilds the shard. The session git proxy refuses tag pushes and ref
 deletions, so artifacts live on branches.
 
+| prepared tree for a commit | `prepare_job.sh <commit> [report.md]` | the artifacts repository with push | branch `t/<commit12>` (tree, meta.json); reused when no prepare input changed |
+
+**Running a farm machine.** `tools/farm/runner.sh <name> <job> [args]` is the whole loop in one process:
+- it watches the public integration branch (read-only, no credentials);
+- it runs the job at each new head;
+- it publishes the report to branch `reports/<name>` of the artifacts repository;
+- it exits by itself before a 2 h background limit, and is then started again.
+
+A farm session is created with the private artifacts repository as its source, so it needs no repository attach and
+no permission prompt. It clones the public nx-agent itself. Its agent only keeps the runner alive. Reports of
+runners are read from the artifacts repository:
+`git -C /home/user/fnv-nx-build fetch -q origin reports/<name> && git -C /home/user/fnv-nx-build show origin/reports/<name>:<file>`.
+
 Rules for every job:
 
 * Work trees live under `$FARM_HOME` (default `~/fnvnx-farm`), never inside the repository checkout.

@@ -39,7 +39,7 @@ if [ ! -f "$WORK/tree.done" ]; then
   rm -rf "$WORK"; mkdir -p "$WORK"
   rm -rf "$FARM_HOME"/compile-*/tree 2>/dev/null || true   # older per-commit trees; the persistent copy stays
   if [ "${PREP:-fetch}" = fetch ]; then   # the prepare farm publishes the tree (prepare_job.sh); fetching beats 5.5 min
-    ARTIFACTS=$ARTIFACTS FARM_HOME=$FARM_HOME bash "$P/tools/farm/fetch_tree.sh" "$COMMIT" "$WORK/tree" "${PREP_WAIT:-1800}" \
+    ARTIFACTS=$ARTIFACTS FARM_HOME=$FARM_HOME bash "$P/tools/farm/fetch_tree.sh" "$COMMIT" "$WORK/tree" "${PREP_WAIT:-900}" \
       > "$WORK/prepare.log" 2>&1 || { echo "no published tree, preparing locally" >> "$WORK/prepare.log"; rm -rf "$WORK/tree"
       python3 "$P/tools/prepare.py" "$EXT/fnv_decomp" "$WORK/tree" >> "$WORK/prepare.log" 2>&1; }
   else

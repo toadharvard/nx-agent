@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# runner.sh - the whole loop of a farm machine in one process, so the session's agent only has to keep it running.
+#
+#   tools/farm/runner.sh <name> <job> [job args]          e.g.  runner.sh farm7 compile 3 8
+#
+# Jobs: prepare | census | compile <k> <N> | <any tools/farm/<job>_job.sh with args after <commit>>.
+# Loop: wait for a new head of the integration branch of the public repository (read-only, no credentials), check out
+# the job scripts at that head, run the job, publish its report to branch `reports/<name>` of the private artifacts
+# repository, repeat. Several commits that land during one run collapse into the newest. The process exits by
+# itself after $RUNNER_MAX_S seconds (default 6600), so that a Bash background timeout of 2 h never kills a job
+# halfway; start it again when it exits. State: $FARM_HOME/<name>.last (last head done), $FARM_HOME/<name>.log.
+# Needs: git, python3, jq, rsync, g++-aarch64-linux-gnu; this session's checkout of toadharvard/fnv-nx-build (push),
+# found at $ARTIFACTS (default: the checkout this script runs from, else /home/user/fnv-nx-build).
+set -uo pipefail
+NAME=${1:?name}; JOB=${2:?job}; shift 2
+FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}; export FARM_HOME
+BRANCH=${INTEGRATION_BRANCH:-claude/port-nsw-un6t9s}
+PUBLIC=https://github.com/toadharvard/nx-agent
+NX=$FARM_HOME/nx-agent
+MAX=${RUNNER_MAX_S:-6600}
+if [ -z "${ARTIFACTS:-}" ]; then
+  for d in /home/user/fnv-nx-build "$FARM_HOME/artifacts"; do [ -d "$d/.git" ] && { ARTIFACTS=$d; break; }; done
+fi
+export ARTIFACTS=${ARTIFACTS:?no checkout of toadharvard/fnv-nx-build}
+mkdir -p "$FARM_HOME"; LOG=$FARM_HOME/$NAME.log; LAST=$FARM_HOME/$NAME.last
+log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$LOG"; }
+[ -d "$NX/.git" ] || git clone -q --filter=blob:none "$PUBLIC" "$NX"
+
+publish_report() {  # publish_report <file>: commit it to reports/<NAME> of the artifacts repository
+  local f=$1 rb=reports/$NAME wt=$FARM_HOME/reports-wt
+  git -C "$ARTIFACTS" worktree prune
+  if [ ! -d "$wt/.git" ] && [ ! -f "$wt/.git" ]; then
+    if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/$rb:refs/remotes/origin/$rb" 2>/dev/null; then
+      git -C "$ARTIFACTS" worktree add -q -B "$rb" "$wt" "origin/$rb"
+    else
+      git -C "$ARTIFACTS" worktree add -q --detach "$wt" && git -C "$wt" checkout -q --orphan "$rb" && git -C "$wt" rm -rqf . 2>/dev/null
+    fi
+  fi
+  cp "$f" "$wt/"
+  git -C "$wt" add "$(basename "$f")"
+  git -C "$wt" -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$NAME: $(basename "$f")" || true
+  for i in 1 2 3; do git -C "$wt" push -q -f origin "HEAD:refs/heads/$rb" 2>/dev/null && return 0; sleep $((i * 5)); done
+  log "report push failed: $f"
+}
+
+t_end=$(( $(date +%s) + MAX ))
+while [ "$(date +%s)" -lt "$t_end" ]; do
+  H=$(git ls-remote "$PUBLIC" "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
+  if [ -z "$H" ] || [ "$H" = "$(cat "$LAST" 2>/dev/null)" ]; then sleep 60; continue; fi
+  git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "$H" || { sleep 60; continue; }
+  H12=${H:0:12}; R=$FARM_HOME/out/$H12-$JOB.md; mkdir -p "$FARM_HOME/out"
+  J=$NX/ports/fnv-nx/tools/farm
+  log "start $JOB $* at $H12"
+  case "$JOB" in
+    prepare) bash "$J/prepare_job.sh" "$H" "$R" ;;
+    census)  bash "$J/census_job.sh" "$H" "$R" ;;
+    compile) bash "$J/compile_job.sh" "$H" "$1" "$2" "$R" ;;
+    *)       bash "$J/${JOB}_job.sh" "$H" "$@" "$R" ;;
+  esac >> "$LOG" 2>&1
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    { echo "# $JOB $H12 FAILED (rc $rc)"; echo; echo '```'; tail -40 "$LOG"; echo '```'; } > "$R"
+  fi
+  [ -f "$R" ] && publish_report "$R"
+  echo "$H" > "$LAST"
+  log "done $JOB at $H12 rc=$rc"
+  # housekeeping: keep only the newest per-commit work dirs
+  for pat in compile- prepare- census- src-; do
+    ls -1dt "$FARM_HOME"/$pat* 2>/dev/null | tail -n +3 | while read -r d; do
+      case "$d" in */src-*) git -C "$NX" worktree remove --force "$d" 2>/dev/null || rm -rf "$d" ;; *) rm -rf "$d" ;; esac
+    done
+  done
+done
+log "runner $NAME exits after ${MAX}s; start it again"
