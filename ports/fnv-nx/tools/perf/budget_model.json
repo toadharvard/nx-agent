@@ -647,8 +647,8 @@
   "cull": {
    "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
-    0.3,
-    1.575
+    0.531,
+    3.976
    ],
    "owner": "S15/S5",
    "needs_hardware": true
