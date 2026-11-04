@@ -22,8 +22,9 @@
 #
 # Optional: PRISTINE_OBJS=<dir> (S11's MSVC 2008 objects of the pristine decomp, tools/equiv) gives the boot S14's
 # synthesized data image, else it runs on the all-zero image; JOBS (default nproc); TESTS (default all);
-# FARM_SRC=<checkout at <commit>> instead of a new worktree; FARM_MAKE_ARGS (extra make variables, e.g.
-# "UNITS=<list>" for a quick check of the job itself); FNVNX_TC / DEVKITPRO / VORBIS to reuse existing ones.
+# FARM_SRC=<checkout at <commit>> instead of a new worktree; FARM_EXT=<pinned checkouts> instead of ext/ (read
+# only); FARM_MAKE_ARGS (extra make variables, e.g. "UNITS=<list>" for a quick check of the job itself);
+# FNVNX_TC / DEVKITPRO / VORBIS / CROSS to reuse existing ones or force a mode.
 set -euo pipefail
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 REPO=$(cd "$(dirname "$0")/../../../.." && pwd)
@@ -70,8 +71,8 @@ fi
 P=$SRC/ports/fnv-nx
 COMMIT=$(git -C "$SRC" rev-parse HEAD)
 
-# 2. Pinned third-party checkouts.
-bash "$P/tools/fetch.sh" "$EXT" >/dev/null
+# 2. Pinned third-party checkouts (FARM_EXT: existing ones, used read only; the fetch stage checks their commits).
+if [ -n "${FARM_EXT:-}" ]; then EXT=$(cd "$FARM_EXT" && pwd); else bash "$P/tools/fetch.sh" "$EXT" >/dev/null; fi
 
 # 3. The toolchain, shared by the commits that build it the same way.
 TCID=$(cat "$P"/toolchain/sources.sh "$P"/toolchain/gcc/build.sh "$P"/toolchain/devkita64/* "$P"/toolchain/cross/* \
