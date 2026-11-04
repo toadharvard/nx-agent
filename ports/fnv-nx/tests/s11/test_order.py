@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""S11 tests for tools/equiv/order_check.py (S12's ORDER-OBJECT / ORDER-OPERATOR check).
+
+    test_order.py <scratch> [--gcc]
+
+Without a compiler: the recorded MSVC results (tests/s11/order/order.msvc) cover every case of order.cpp in every
+MSVC configuration, and the verdict logic (same / differs / msvc-varies) works on synthetic GCC results. With --gcc
+(aarch64-linux-gnu-g++, the plugin headers, qemu-aarch64): the GCC side builds and every case prints a log.
+"""
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+HERE = Path(__file__).resolve().parent
+PORT = HERE.parent.parent
+spec = importlib.util.spec_from_file_location('order_check', PORT / 'tools/equiv/order_check.py')
+oc = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(oc)
+fails = []
+
+
+def check(cond, what):
+    print(('ok   ' if cond else 'FAIL ') + what)
+    if not cond:
+        fails.append(what)
+
+
+cases = oc.cases()
+names = [c for c, _ in cases]
+check(len(cases) >= 25 and len(set(names)) == len(names), 'order.cpp: %d distinct cases' % len(cases))
+check({k for _, k in cases} >= {'ORDER-OBJECT', 'ORDER-OPERATOR', 'ORDER-ARGS'}, 'order.cpp covers the S12 classes')
+rec = json.loads(oc.RECORD.read_text())
+check(rec.get('format') == oc.FORMAT, 'order.msvc format %s' % rec.get('format'))
+msvc = rec['msvc']
+check(set(msvc) == {'%s-%s' % (c, t) for c, t, _ in oc.MSVC_CONFIGS}, 'order.msvc has every MSVC configuration')
+for cfg, v in msvc.items():
+    missing = [n for n in names if n not in v['results']]
+    check(not missing, 'order.msvc %s: every case has a log (missing %s)' % (cfg, missing[:3]))
+# MSVC's x86 argument order is the calibration: right to left, as tests/s12/order/args.expect says
+check(all(v['results'].get('args-member') == 'ba:12' for v in msvc.values()), 'MSVC: arguments right to left')
+check(oc.parse('a ao:1\r\nb  bad line\nc \n') == {'a': 'ao:1', 'c': ''}, 'parse: one case per line, CR stripped')
+
+# verdicts on synthetic GCC results
+same = {'build': dict(results={n: next(iter(msvc.values()))['results'][n] for n in names})}
+rows = {r['case']: r for r in oc.compare(cases, msvc, same)}
+check(all(r['verdict'] in ('same', 'msvc-varies') for r in rows.values()), 'GCC = MSVC sp1-O2: no case differs')
+varies = [n for n, r in rows.items() if r['verdict'] == 'msvc-varies']
+check(all(rows[n]['gcc_matches'] for n in varies), 'msvc-varies: GCC equal to one configuration is listed as a match')
+bad = dict(same['build']['results'], **{'obj-arrow': 'oa:1'})
+r = {x['case']: x for x in oc.compare(cases, msvc, {'build': dict(results=bad)})}
+check(r['obj-arrow']['verdict'] == ('differs' if rows['obj-arrow']['verdict'] == 'same' else 'msvc-varies'),
+      'a changed order of an agreed case differs')
+md = oc.markdown(list(rows.values()), msvc, same)
+check('| ORDER-OBJECT |' in md and md.count('\n|') > len(cases), 'markdown table')
+
+if '--gcc' in sys.argv:
+    scratch = Path(sys.argv[1]) / 'order'
+    scratch.mkdir(parents=True, exist_ok=True)
+    gcc = oc.run_gcc(scratch, {})
+    b = gcc['build']
+    check(b['rc'] == 0 and all(n in b['results'] for n in names), 'GCC build variant runs every case (rc %s)' % b['rc'])
+    rows = oc.compare(cases, msvc, gcc)
+    print(oc.markdown(rows, msvc, gcc).split('\n\n')[-1])
+
+print('order: %d failed' % len(fails))
+sys.exit(1 if fails else 0)

@@ -203,6 +203,43 @@ above (round 8).
 | `ASM1` `ASM2` `ASM4` | platform | x87 / rdtsc / cpuid asm -> portable helpers (docs/ASM.md has their own checks) | - |
 | `NATIVE1` | platform | units leave the build (native renderer, D6) | - |
 
+## Evaluation order: ORDER-OBJECT and ORDER-OPERATOR (for S12)
+
+`tools/equiv/order_check.py` compiles `tests/s11/order/order.cpp` (27 cases, ours) with MSVC 2008 SP1 and RTM in the
+decomp's flag sets (`/O2`, `/Od /Oy-`, `/O2 /Ob1`), runs it under Wine, and compares the logged order with the
+build's GCC (AArch64 ILP32, compile.sh's semantics flags, the fnvnx_order plugin as compile.sh loads it) under
+qemu-aarch64. The MSVC results are recorded in `tests/s11/order/order.msvc`, so `order_check.py <scratch> --gcc`
+needs no Wine (S12's machines); `--msvc --record` measures them again; `--strict` fails on a `differs` case.
+
+Measured at the integration head of this note (plugin `args=rtl`):
+
+| case | MSVC 2008 (all 5 configurations unless noted) | GCC build | verdict |
+|---|---|---|---|
+| `obj()->m(a())`, `(*obj()).m(a())`, `ref().m(a())` | `ao`: arguments right to left, then the object | `oa` | differs |
+| `obj()->m(a(), b())`, `ref()(a(), b())` (member operator()) | `bao` | `oba` | differs |
+| `obj()->next()->m(a())` | `aon`: the argument before the whole object chain | `ona` | differs |
+| `obj()->vm(a())` (virtual) | `oa`: the object first | `oa` | same |
+| `obj()->sm(a())` (static member through an object) | `oa` | `oa` | same |
+| `(obj()->*pmf())(a())` | `aom` at /O2, `amo` at /Od | `oma` | msvc-varies |
+| member `<<`, `>>`, `[]`, `+`, `==` (`ref() OP a()`) | `ao` | `oa` | differs |
+| member `=`, `+=` | `ao` | `ao` (C++17: right operand first) | same |
+| free `y << a()` | `ao` (operands are arguments: right to left) | `oa` (C++17 fixes `<<` left to right) | differs |
+| free `y + a()`, `a() - y`, `y += a()` | `ao`, `oa`, `ao` | same | same |
+| built-in `*p() += a()` | `pa` | `ap` (C++17) | differs |
+| built-in `*p() = a()`, `arr()[i()] = b()` | `pa` / `abp` at /O2, `ap` / `bpa` at /Od | `ap`, `bpa` | msvc-varies |
+| built-in `a() + b()`, `a() << b()`, `a() * b() - c()` | left to right | same | same |
+| `x.m(a(), b())` (calibration, ORDER-ARGS) | `ba` | `ba` | same |
+
+So MSVC 2008 treats `this` of a non-virtual member call, and the left operand of a member operator, as the last
+argument: evaluated after every argument (it is passed in ecx, after the pushes). A virtual call evaluates the object
+first (it needs the vptr). A free operator's operands are ordinary arguments, right to left. `-fstrong-eval-order=some`
+or `=none` fix none of the member cases (the plugin keeps `this` first) and `=none` breaks member `=` / `+=`. The
+fix belongs in the plugin (S12): a non-virtual member call (also through an operator, also with
+`CALL_EXPR_ORDERED_ARGS`) evaluates `this` after its arguments; a free operator call with ordered arguments (`<<`,
+`>>`) gets the right-to-left chain too; built-in compound assignment evaluates its left operand first. The
+`msvc-varies` shapes are unspecified in the exe as well (the order follows the optimizer), so only the per-site x86
+code can decide them. `order_check.py --gcc --strict` is the acceptance test for that change.
+
 ## Class layouts (238 units, `/d1reportAllClassLayout`)
 
 | Trees (pristine vs) | classes | differ | what differs |
