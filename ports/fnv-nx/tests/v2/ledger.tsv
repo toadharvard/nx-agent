@@ -5,3 +5,6 @@
 # merged: the integration commit that carries the claim, or - when it is not merged
 # fix: the commit that fixed a refutation (re-verified), or -
 id	stream	commit	merged	verdict	fix	test	claim
+S2C-VATAIL-VA2	S2c-abi	0750425	0750425	partial	-	test_s2c_varargs.py	fixed reference, variadic definition ruled same: (int, int, int) where the body reads va_arg(double) (x86: 2 words = 1 double; AArch64 reads d0). Latent: 0 sites at link-head 06857911
+S2C-VATAIL-VA3	S2c-abi	0750425	0750425	partial	-	test_s2c_varargs.py	fixed reference (int, __int64), variadic body reading two va_arg(unsigned) words ruled same: AArch64 reads x1 low and x2. Latent
+S2C-VATAIL-VA4	S2c-abi	0750425	0750425	partial	-	test_s2c_varargs.py	fixed reference (int, int, int), variadic body reading va_arg(__int64) ruled same: AArch64 reads x1 only. Latent
