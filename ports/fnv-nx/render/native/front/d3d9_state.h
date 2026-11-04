@@ -85,7 +85,14 @@ extern "C" {
 
 #define NXD3D_RS_COUNT   210   /* D3DRS_BLENDOPALPHA + 1 */
 #define NXD3D_SAMP_COUNT 14    /* D3DSAMP_DMAPOFFSET + 1 */
+#define NXD3D_TSS_COUNT  33    /* D3DTSS_CONSTANT + 1 */
 #define NXD3D_MAX_CLIP   6
+/* Samplers of a D3D9 device: 16 pixel samplers, the displacement map sampler D3DDMAPSAMPLER (256) and the vertex
+ * samplers D3DVERTEXTEXTURESAMPLER0..3 (257..260), indexed 0..20 as Nine does (nx_d3d9_sampler_index). */
+#define NXD3D_PS_SAMPLERS 16
+#define NXD3D_SAMPLERS   21
+#define NXD3D_DMAPSAMPLER 256
+#define NXD3D_VERTEXSAMPLER0 257
 
 /* D3DFORMAT FOURCCs used below (D3DFMT_* numeric values are the D3D9 ones). */
 #define NXD3D_FOURCC(a, b, c, d) ((uint32_t)(uint8_t)(a) | (uint32_t)(uint8_t)(b) << 8 | \
@@ -141,9 +148,34 @@ uint32_t nx_d3d9_converted_size(uint32_t d3dfmt, uint32_t width, uint32_t height
 uint32_t nx_d3d9_convert(uint32_t d3dfmt, uint32_t width, uint32_t height, uint32_t mips, uint32_t faces,
                          const void* src, uint32_t srcSize, void* dst, uint32_t dstCap);
 
-/* D3D9 defaults (IDirect3DDevice9 after Reset), as Nine's nine_render_state_defaults / sampler defaults. */
+/* D3D9 defaults (IDirect3DDevice9 after CreateDevice / Reset): the D3D9 documentation's values, which are Nine's
+ * nine_render_state_defaults / nine_tex_stage_state_defaults / nine_samp_state_defaults except where Nine takes a
+ * value from its caps or deviates (each such state is tested in tests/s6n/test_d3d9_state.c, test_default_table):
+ *   ZENABLE        D3DZB_TRUE when the device has an automatic depth-stencil surface (EnableAutoDepthStencil),
+ *                  else D3DZB_FALSE; nx_d3d9_default_rs is the device without one (Nine: always FALSE).
+ *   POINTSIZE_MAX  64.0 (Nine: the caps' MaxPointSize).
+ *   (DEBUGMONITORTOKEN has no documented default; Nine's 0xDEADCAFE.)
+ * Texture stage states depend on the stage: COLOROP MODULATE / ALPHAOP SELECTARG1 on stage 0, DISABLE on the others,
+ * TEXCOORDINDEX = stage. Every sampler (pixel, displacement map, vertex) has the same defaults. */
 void nx_d3d9_default_rs(uint32_t rs[NXD3D_RS_COUNT]);
+void nx_d3d9_default_rs_device(uint32_t rs[NXD3D_RS_COUNT], int autoDepthStencil);
 void nx_d3d9_default_samp(uint32_t samp[NXD3D_SAMP_COUNT]);
+void nx_d3d9_default_tss(uint32_t tss[NXD3D_TSS_COUNT], uint32_t stage);
+/* D3D9 sampler number (0..15, D3DDMAPSAMPLER, D3DVERTEXTEXTURESAMPLER0..3) -> 0..NXD3D_SAMPLERS-1, -1 if invalid. */
+int nx_d3d9_sampler_index(uint32_t sampler);
+
+/* A constant a shader defines itself (def c#, defi i#, defb b#). D3D9: while the shader runs, a def'd register reads
+ * the shader's value, not the one the application set (Get*ShaderConstant* still returns the application's). */
+typedef struct NxD3D9Def {
+    uint8_t file;                  /* 0 float (def), 1 integer (defi), 2 boolean (defb) */
+    uint8_t pad;
+    uint16_t reg;
+    uint32_t v[4];                 /* def: float bit patterns; defi: ints; defb: v[0] */
+} NxD3D9Def;
+/* The def / defi / defb instructions of a D3D9 shader token stream (version token first). Shader model 2 and 3: every
+ * instruction (lengths from the opcode token); shader model 1: the defs before the first instruction other than dcl
+ * (where the model allows them). Stores up to cap, returns how many there are, -1 for a malformed stream. */
+int nx_d3d9_shader_defs(const uint32_t* tokens, uint32_t ntokens, NxD3D9Def* out, uint32_t cap);
 
 #ifdef __cplusplus
 }

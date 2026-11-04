@@ -340,7 +340,8 @@ void nx_d3d9_default_rs(uint32_t rs[NXD3D_RS_COUNT]) {
     rs[RS_LOCALVIEWER] = 1;         rs[RS_DIFFUSEMATERIALSOURCE] = 1; rs[RS_SPECULARMATERIALSOURCE] = 2;
     rs[RS_POINTSIZE] = 0x3F800000;  rs[RS_POINTSIZE_MIN] = 0x3F800000; rs[RS_POINTSCALE_A] = 0x3F800000;
     rs[RS_MULTISAMPLEANTIALIAS] = 1; rs[RS_MULTISAMPLEMASK] = 0xFFFFFFFF;
-    rs[RS_DEBUGMONITORTOKEN] = 0xDEADCAFE; rs[RS_POINTSIZE_MAX] = 0x3F800000;
+    rs[RS_DEBUGMONITORTOKEN] = 0xDEADCAFE;   /* the documentation names no default: Nine's */
+    rs[RS_POINTSIZE_MAX] = 0x42800000;   /* 64.0 (Nine: caps MaxPointSize) */
     rs[RS_COLORWRITEENABLE] = 0xF;  rs[RS_BLENDOP] = 1;             rs[RS_POSITIONDEGREE] = 3;
     rs[RS_NORMALDEGREE] = 1;        rs[RS_MINTESSELLATIONLEVEL] = 0x3F800000; rs[RS_MAXTESSELLATIONLEVEL] = 0x3F800000;
     rs[RS_ADAPTIVETESS_Z] = 0x3F800000;
@@ -349,6 +350,59 @@ void nx_d3d9_default_rs(uint32_t rs[NXD3D_RS_COUNT]) {
     rs[RS_COLORWRITEENABLE1] = 0xF; rs[RS_COLORWRITEENABLE2] = 0xF; rs[RS_COLORWRITEENABLE3] = 0xF;
     rs[RS_BLENDFACTOR] = 0xFFFFFFFF;
     rs[RS_SRCBLENDALPHA] = 2;       rs[RS_DESTBLENDALPHA] = 1;      rs[RS_BLENDOPALPHA] = 1;
+}
+
+void nx_d3d9_default_rs_device(uint32_t rs[NXD3D_RS_COUNT], int autoDepthStencil) {
+    nx_d3d9_default_rs(rs);
+    rs[RS_ZENABLE] = autoDepthStencil ? 1 : 0;   /* D3DZB_TRUE with an automatic depth-stencil surface */
+}
+
+void nx_d3d9_default_tss(uint32_t t[NXD3D_TSS_COUNT], uint32_t stage) {
+    memset(t, 0, NXD3D_TSS_COUNT * sizeof *t);
+    t[1] = stage ? 1 : 4;          /* COLOROP: MODULATE on stage 0, DISABLE after */
+    t[2] = 2; t[3] = 1;            /* COLORARG1 TEXTURE, COLORARG2 CURRENT */
+    t[4] = stage ? 1 : 2;          /* ALPHAOP: SELECTARG1 on stage 0, DISABLE after */
+    t[5] = 2; t[6] = 1;            /* ALPHAARG1 TEXTURE, ALPHAARG2 CURRENT */
+    t[11] = stage;                 /* TEXCOORDINDEX */
+    t[26] = 1; t[27] = 1; t[28] = 1;   /* COLORARG0, ALPHAARG0, RESULTARG: D3DTA_CURRENT */
+}
+
+int nx_d3d9_sampler_index(uint32_t s) {
+    if (s < NXD3D_PS_SAMPLERS) return (int)s;
+    if (s >= NXD3D_DMAPSAMPLER && s <= NXD3D_VERTEXSAMPLER0 + 3) return (int)(s - NXD3D_DMAPSAMPLER + NXD3D_PS_SAMPLERS);
+    return -1;
+}
+
+int nx_d3d9_shader_defs(const uint32_t* t, uint32_t n, NxD3D9Def* out, uint32_t cap) {
+    if (!t || n < 1 || ((t[0] >> 16) != 0xFFFE && (t[0] >> 16) != 0xFFFF)) return -1;
+    const uint32_t major = (t[0] >> 8) & 0xFF;
+    uint32_t found = 0, i = 1;
+    while (i < n) {
+        const uint32_t tok = t[i], op = tok & 0xFFFF;
+        uint32_t len;
+        if (op == 0xFFFF) return (int)found;                                 /* END */
+        if (op == 0xFFFE) { i += 1 + ((tok >> 16) & 0x7FFF); continue; }   /* comment */
+        if (major >= 2) len = (tok >> 24) & 0xF;
+        else if (op == 0x51) len = 5;                                       /* def: dst + 4 values */
+        else if (op == 0x1F) len = 2;                                       /* vs_1_1 dcl: usage + dst */
+        else return (int)found;                                             /* SM1: the defs come first */
+        if ((uint64_t)i + 1 + len > n) return -1;
+        if (op == 0x51 || op == 0x52 || op == 0x53) {
+            if (len < (op == 0x53 ? 2u : 5u)) return -1;
+            if (found < cap) {
+                NxD3D9Def* d = &out[found];
+                d->file = (uint8_t)(op - 0x51); d->pad = 0;
+                d->reg = (uint16_t)(t[i + 1] & 0x7FF);
+                d->v[0] = t[i + 2];
+                d->v[1] = op == 0x53 ? 0 : t[i + 3];
+                d->v[2] = op == 0x53 ? 0 : t[i + 4];
+                d->v[3] = op == 0x53 ? 0 : t[i + 5];
+            }
+            found++;
+        }
+        i += 1 + len;
+    }
+    return -1;                                                              /* no END token */
 }
 
 void nx_d3d9_default_samp(uint32_t s[NXD3D_SAMP_COUNT]) {
