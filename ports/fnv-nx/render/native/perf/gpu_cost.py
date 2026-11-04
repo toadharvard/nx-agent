@@ -78,7 +78,7 @@ LIT_PERMUTATION = {"lit.frag": "lit_d1p4.frag", "lit_spec.frag": "lit_spec_d1p4.
 # A draw that discards (alpha test) loses early-z: all its layers are shaded (and it rejects nothing after it, which
 # the model ignores). Depth-only, test-only and blended families shade every layer. EARLY_Z = False: every layer
 # shaded (the model before).
-EARLY_Z = False
+EARLY_Z = True
 
 
 def harmonic(k):
