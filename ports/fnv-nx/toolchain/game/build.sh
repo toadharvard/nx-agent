@@ -28,7 +28,7 @@ case "${GUEST:-pie}" in
 	*) echo "GUEST must be pie or fixed"; exit 1 ;;
 esac
 COMMON="$ARCH -O2 -g -ffunction-sections -fdata-sections -frounding-math -fshort-wchar -w"
-PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/startup/guest"
+PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/startup/guest -I$ROOT/ext/minimp3"   # minimp3: platform/audio/dshow.cpp (tools/fetch.sh)
 VFLAGS=""
 if [ -n "$VORBIS" ]; then VFLAGS="-DFNVNX_HAVE_VORBIS -I$VORBIS/include"; fi
 rm -rf "$OUT/obj"; mkdir -p "$OUT/obj"
