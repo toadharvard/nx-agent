@@ -406,6 +406,8 @@ for v in new cum; do
   (cd "$DF" && $PY report.py "$d" --rules "$ATT/rules.json" --bridges "$ATT/bridges.json" \
     --out "$RUN/verdicts_$v" --hard-tsv "$RUN/hard_$v.tsv" > "$RUN/report_$v.log" 2>&1)
 done
+# per-cause verdict classes of the cumulative campaign (S13b causes.py, fnvnx-causes/1): embedded in the report
+(cd "$DF" && $PY causes.py summary "$RUN/cum" --out "$RUN/causes_cum.json" > "$RUN/causes.log" 2>&1) || true
 t3=$(date +%s)
 
 $PY - "$RUN" "$REPORT" "$COMMIT" "$D12" "$K" "$N" "$NX86" "$ITERS" "$TIME" "$JOBS" "$((t1-t0))" "$((t2-t1))" \
@@ -464,6 +466,19 @@ out += ['## Verdicts, cumulative', ''] + table('cum') + ['']
 out += ['## Hard divergences, cumulative (%d in %d functions; * = fuzzed this head)' % (
     len(hard), len({row[0] for row in hard})), '', '| address | cause | stream | kind | unit |', '|---|---|---|---|---|']
 out += ['| %s%s | %s |' % (row[0], '*' if row[0] in fresh else '', ' | '.join(row[1:])) for row in hard]
+cp = os.path.join(run, 'causes_cum.json')
+if os.path.exists(cp):
+    cs = json.load(open(cp))
+    out += ['', '## Causes by verdict class, cumulative (fnvnx-causes/1, tools/difffuzz/causes.py)', '',
+            'functions by worst class: ' + ', '.join('%s %d' % kv for kv in cs['functions_by_class'].items()), '',
+            '| cause | class | owner | divergences | functions | worst of |', '|---|---|---|---:|---:|---:|']
+    out += ['| %s | %s | %s | %d | %d | %d |' % (c, r['verdict'], r['owner'], r['divergences'], r['functions'],
+                                               r['worst_of']) for c, r in cs['causes'].items()]
+    slim = dict(format=cs['format'], functions_ok=cs['functions_ok'], functions_diverging=cs['functions_diverging'],
+                functions_by_class=cs['functions_by_class'],
+                causes={c: {k_: r[k_] for k_ in ('verdict', 'owner', 'hard', 'divergences', 'functions', 'worst_of',
+                                                  'kinds')} for c, r in cs['causes'].items()})
+    out += ['', '```json fnvnx-causes', json.dumps(slim, sort_keys=True), '```']
 open(report, 'w').write('\n'.join(out) + '\n')
 print('\n'.join(out[:10]))
 EOF
@@ -474,6 +489,7 @@ if [ -s "$RUN/camp/results.jsonl" ]; then
   cp "$RUN/camp/results.jsonl" "$RUN/targets.json" "$RUN/todo.json" "$PUB/"
   [ -d "$RUN/camp/div" ] && cp -a "$RUN/camp/div" "$PUB/div"
   cp "$RUN/hard_new.tsv" "$PUB/" 2>/dev/null || true
+  cp "$RUN/causes_cum.json" "$PUB/" 2>/dev/null || true
   printf '{"commit": "%s", "decomp": "%s", "shard": %s, "shards": %s, "iters": %s, "time": %s}\n' \
     "$COMMIT" "$D12" "$K" "$N" "$ITERS" "$TIME" > "$PUB/meta.json"
   publish "fuzz/$C12/${K}of${N}" "$PUB" "$C12 fuzz shard $K/$N" || true

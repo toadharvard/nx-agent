@@ -246,7 +246,9 @@ code and that of the same-unit functions it calls, from `catalog.py`'s `ohash`; 
 bytes and relocations, targets named by what they resolve to, plus every function of its object it reaches and the
 bridges it calls; `fnkeys.HARNESS`, bumped when the harness changes verdicts). `fuzzcache.py` keeps one verdict row
 and the reproducers per function on branch `fuzz/cache/<k>of<N>`; a head fuzzes only the functions whose key
-changed, then those never fuzzed, and reports both this head's and the cumulative verdicts.
+changed, then those never fuzzed, and reports both this head's and the cumulative verdicts. The report ends with the
+cumulative per-cause table and a ```` ```json fnvnx-causes ```` block (`causes.py summary`; full file `causes_cum.json`
+in `fuzz/<c12>/<k>of<N>`), which R0 reads from `reports/fz<k>`.
 
 ## Oracle gaps
 
