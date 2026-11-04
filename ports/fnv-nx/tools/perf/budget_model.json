@@ -256,7 +256,7 @@
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "off on PC; needs the fs:[0x2c] TLS fix (done, S5 31cdca3) and the stage protocol (mtqemu 'stages' ok); setting 0x011c710c (PERF.md 6.4)"
+   "status": "bMTRendering:Display (0x011c710c) is unsafe on the PC code: accumulators are built with one batch renderer, the worker indexes a NULL second one and shares main's; current-accumulator globals shared (PERF.md 6.8). Needs port code; TLS fix done (S5 31cdca3), stage protocol modelled (mtqemu stages)"
   },
   {
    "id": "havok_workers",

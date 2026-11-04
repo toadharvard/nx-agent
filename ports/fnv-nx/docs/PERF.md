@@ -253,11 +253,50 @@ threads and the loading screen stay on cores 0-2.
 |---|---|---|
 | AI linear task threads (`iNumHWThreads` > 1, two at > 2) | **likely safe**: the default on every PC (the engine forces >= 2) | `iNumHWThreads=3` (what GetSystemInfo gives; two linear threads), **after** the placement fix; until then 2 |
 | AI task threads (inferred `bUseThreadedAI`) | **known-crashy on PC (hearsay)**: community guides report instability with `bUseThreadedAI=1` in FO3/FNV; off on PC, on on 360 | `bUseThreadedAI=0`; revisit with hardware traces |
-| Rendering Task Thread 2 (MT render setting) | **needs work**: 360 path, off on PC (untested there), and needs the `fs:[0x2c]` TLS fix | 0 |
+| Rendering Task Thread 2 (`bMTRendering:Display`, 0x011c710c, named from the owner's exe) | **unsafe on the PC code, needs port work (6.8)**: every accumulator is built with one batch renderer, so the worker shares main's and indexes a NULL second one | 0 (ini.cpp leaves it out of the Switch defaults) |
 | Havok workers (`iNumThreads:HAVOK`) | **needs work**: verify whether the pool is used and how many threads it starts on 3 cores | 1 (engine default) |
 | threaded morpher / particles / blood / temp effects (names hearsay) | **likely safe**: PC defaults on | 1 |
 | tasklets, background loading | **likely safe**: PC defaults | engine/ini defaults |
 | `bUseMultibounds` (hearsay name; culling) | likely safe, saves render work | 1 |
+
+### 6.8 `bMTRendering` on the PC code (S15-threads, read from the decomp)
+
+With the setting on, `TaskThreadManager::StartRenderingTaskThread` (0x00ba3720) starts the worker 0x00ba3190. It takes
+records 1..23 (`DAT_012000e4`, filled by 0x00ba3390, stage semaphores 0x00ba30f0 / 0x00ba3130):
+* water reflections (1-16): signalled and waited at once, so they do not overlap other work;
+* the shadow lights (17-20): culled while main goes on to the main scene;
+* half of the main scene (21, `leftList2`): culled while main culls `rightList4` and `commonList3` into the **same**
+  accumulator (main.cpp ~12531-12780).
+
+The accumulator is designed for two writers. `RenderBound` and `AccumulateRenderPasses` pick the batch renderer
+from the TLS slot `0x2bc`, which the worker sets to the record's index. On PC, though, every accumulator is built
+with count 1: main's `(99, 1, 759)` at `FUN_0086c160` (staging blk_00860000_od.cpp:4212), the shadow pool at
+bsshadermanager.cpp:4321, and water at teswater.cpp:9026 / 11475. The ctor (bsshaderaccumulator.cpp:4277) then
+makes no second renderer. So with the setting on:
+* `AccumulateRenderPasses` (0x00b63f90) indexes `m_apkRenderers[1]` without a modulo, which is NULL: the worker
+  crashes;
+* `RenderBound` (`% 1`) sends both threads into batch renderer 0. Its group lists, pass map, active-pass list and
+  bucket free lists are unlocked (bsbatchrenderer.cpp ~1786-1862, 2791-2896; only the node pool takes `g_011c5f80`).
+
+The current-accumulator globals are shared too:
+* `DAT_011f95ec` is swapped with a non-atomic compare/DecRef/store/IncRef (bsshadermanager.cpp:359), so two threads
+  can free a live accumulator;
+* `DAT_011f4748+8` is written from both threads (bsshaderutil.cpp:205);
+* BSFadeNode culling registers through that global, not through its culler (bsfadenode.cpp:1028-1060).
+
+Shadow records re-cull scene objects that main culls too, so the fade-node and object-flag updates race there as
+well.
+
+**Verdict: not an ini switch.** `mt_cull` needs port code:
+1. accumulators with two batch renderers while MT is on (the ctor's count argument at the construction sites above);
+2. per-thread current-accumulator globals (`DAT_011f95ec`, `DAT_011f4748`), or the worker's culler carrying them;
+3. fade-node registration through the culler's accumulator;
+4. the shadow-light / main overlap checked for the light-map edits main makes meanwhile (`FUN_00b5d300`,
+   shadowscenenode.cpp ~10835).
+
+Then mtqemu on the real culling units (not the `stages` model) and a race checker run. The lever stays out of the
+as-built scenario, and its moves (cull 70-90 %) are too high for what the split does (the main scene is halved; the
+shadow lights move whole).
 
 ### 6.5 Memory ordering: what x86 gave for free
 
