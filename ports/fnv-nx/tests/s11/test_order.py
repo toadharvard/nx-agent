@@ -54,6 +54,24 @@ check(r['obj-arrow']['verdict'] == ('differs' if rows['obj-arrow']['verdict'] ==
 md = oc.markdown(list(rows.values()), msvc, same)
 check('| ORDER-OBJECT |' in md and md.count('\n|') > len(cases), 'markdown table')
 
+# per-variant verdicts and --strict: msvc-varies never fails, an agreed case does, each variant on its own
+two = {'build': dict(results=bad), 'cand': same['build']}
+rows2 = oc.compare(cases, msvc, two)
+agreed = rows['obj-arrow']['verdict'] == 'same'
+check(oc.strict_failures(rows2, 'build') == (['obj-arrow'] if agreed else []), 'strict: the build variant fails')
+check(oc.strict_failures(rows2, 'cand') == [], 'strict: the candidate variant passes')
+check(all(r['verdicts']['build'] == r['verdict'] for r in rows2), 'verdict = the build variant\'s verdict')
+check(len(oc.strict_failures(oc.compare(cases, msvc, {'build': dict(results={})}))) ==
+      sum(r['verdict'] == 'same' for r in rows.values()), 'strict: a case without a GCC log differs')
+md2 = oc.markdown(rows2, msvc, two)
+check('| cand | 0 |' in md2, 'markdown: per-variant line')
+
+# --msvc-stdout: identical outputs give the text, different ones name the line
+t1, v1 = oc.agreed_stdout({'x': ('', 'a\nb\n'), 'y': ('', 'a\nb\n')})
+check(t1 == 'a\nb\n' and v1 == [], 'agreed_stdout: identical')
+t2, v2 = oc.agreed_stdout({'x': ('', 'a\nb\n'), 'y': ('', 'a\nc\nd\n')})
+check(t2 is None and [l for l, _ in v2] == [2, 3] and v2[1][1]['x'] is None, 'agreed_stdout: varying lines named')
+
 if '--gcc' in sys.argv:
     scratch = Path(sys.argv[1]) / 'order'
     scratch.mkdir(parents=True, exist_ok=True)

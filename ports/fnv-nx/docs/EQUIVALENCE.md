@@ -245,7 +245,25 @@ fix belongs in the plugin (S12): a non-virtual member call (also through an oper
 `CALL_EXPR_ORDERED_ARGS`) evaluates `this` after its arguments; a free operator call with ordered arguments (`<<`,
 `>>`) gets the right-to-left chain too; built-in compound assignment evaluates its left operand first. The
 `msvc-varies` shapes are unspecified in the exe as well (the order follows the optimizer), so only the per-site x86
-code can decide them. `order_check.py --gcc --strict` is the acceptance test for that change.
+code can decide them. `order_check.py --gcc --strict` is the acceptance test for that change
+(`--strict-variant NAME` checks a candidate variant instead of the build).
+
+**S12's switches** (`fnvnx_order object=last|first`, `operator=rtl|cpp17`, S12 branch `8def1d8`). Whenever the plugin
+source has them, order_check.py also measures the variants `object-last` and `object-last-rtl`. Cases that differ
+from an order every MSVC configuration agrees on:
+
+| GCC variant | differ | cases |
+|---|---:|---|
+| build (defaults) | 13 | the 5 non-virtual ORDER-OBJECT cases, 7 ORDER-OPERATOR (member `<<` `>>` `[]` `+` `==` `()`, free `<<`), built-in `+=` |
+| `object=last` | 6 | `obj-virtual`, member `<<` `>>` `[]`, free `<<`, built-in `+=` |
+| `object=last operator=rtl` | 2 | `obj-virtual` (MSVC: object first, `oa`; the variant gives `ao`), built-in `*p() += a()` (MSVC `pa`, GCC `ap`) |
+
+So the build needs `object=last` for non-virtual calls only (a virtual call keeps the object first, as `first` does),
+`operator=rtl`, and the left operand first for built-in compound assignment. S12's own `tests/s12/order/evalorder.cpp`
+(11 cases) prints the same text in all five MSVC configurations (`order_check.py <scratch> --msvc-stdout
+evalorder.cpp evalorder.msvc.expect`); it matches neither of S12's expectations: `member`, `member2`, `retslot`,
+`shl`, `shr`, `index` are those of `object=last operator=rtl`, while `virtual` / `virtual2` (`ga:`, `gyx:`: the object
+first) are those of the defaults.
 
 ## Class layouts (238 units, `/d1reportAllClassLayout`)
 
