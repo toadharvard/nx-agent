@@ -135,7 +135,9 @@ def test_rules():
     check(refined(dict(kind='call-target', index=0, x86='00406d30', arm='name:_ZNK10NiFixedStrcvPKcEv'),
                   'call-flow') == 'native-undefined', 'native calls an unbound C++ name')
     check(refined(dict(kind='call-target', index=0, x86='imp:VirtualFree', arm='00fdf10c'), 'call-flow') ==
-          'import-slot-called', 'native jumps to the IAT slot')
+          'runtime-equiv', 'native calls the same import, traced at its IAT slot')
+    check(refined(dict(kind='call-target', index=0, x86='imp:VirtualFree', arm='00fdf114'), 'call-flow') ==
+          'import-slot-called', 'native reaches another import\'s IAT slot')
     real = causes.native_callees
     try:
         causes.native_callees = lambda src, a: {'__fnv_00401200'}
