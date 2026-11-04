@@ -47,7 +47,17 @@ with the same role (`_Znw*`/`_Zdl*` -> 0x00401000/0x00401030, `__dynamic_cast` -
 
 **Inlined callees.** An oracle callee outside the unit that the native object never names (GCC inlined a header
 inline function MSVC called out of line) is preloaded from its defining unit's MSVC object and runs for real, so both
-sides do the same work (`engine.preload`). **Vtables (D7).** A native store of an Itanium address point is compared as
+sides do the same work (`engine.preload`); a remaining call-target mismatch whose oracle target has code loads that
+function too and replays the case (adaptive follow, `runner.Pair.run`). Literals units.json does not name get
+addresses in a pinned pool (0x02f00000); literals of every unit whose code is loaded are pinned. MSVC's
+`eh vector constructor/destructor iterator` (0x00ec782f / 0x00ec5fce) run as x86 loops, the platform's
+`fnvnx_eh_vector_*` as an AArch64 helper object (`a64helpers.cpp`) linked into each unit image. The prepared tree's
+declaration of a definition (S1b XINC1-corrected) places the arguments on both machines.
+
+**Object sets.** `FNVNX_DFPROFILE=<file>` gives defaults for the variables of `config.py` (`KEY=VALUE` lines), e.g.
+S2c's f10 link: `FNVNX_DFLINK=<run>/f10`, `FNVNX_TREE`, `FNVNX_A64OBJ`, `FNVNX_DFA64`. `recheck --tag <t>` replays
+saved divergences on another object set (`recheck_<t>.jsonl`), `recheck_summary.py <t> <dirs>` tabulates gone /
+soft / still per original cause. **Vtables (D7).** A native store of an Itanium address point is compared as
 the image vftable it stands for (S2 kind-V rows, else `??_7C@@6B@` paired with `_ZTV<C>`+8 by class name).
 
 ## Comparison (`runner.compare`, first difference wins)
@@ -106,6 +116,13 @@ python3 report.py <dir> [...]                                    # per-stream ve
 python3 difffuzz.py one <source> <addr>                          # one zero-world run
 python3 difffuzz.py repro --trace <dir>/div/<addr>-0.json
 ```
+
+## Oracle gaps
+
+`x86-custom-cc`: MSVC's whole-program optimisation gave some static functions (many in Havok) a register convention
+units.json does not record (e.g. the first pointer in eax); `classify.entry_register_reads` finds registers read on
+the entry path that the declared convention does not pass. Such divergences are reported apart (neither hard nor
+soft) until the convention is modelled.
 
 ## Limits
 
