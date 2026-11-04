@@ -343,6 +343,32 @@ stays unresolved (S2's trap) until the exe's vftable gives the address. No slot 
 | `0x0109bf4c` | A660A0Map, the NiStream loader map DAT_011f4784 (FUN_00a660a0) | 1-6: KeyToHashIndex, IsKeysEqual, SetValue, ClearValue, NewItem, DeleteItem (Gamebryo's NiTMapBase order; SetAt 0x00a642a0 calls 1-3) | slot 0 only, the destructor the decomp declares; no unit binds 0x0109bf4c with more slots, and the decomp's string-map slot functions belong to other vftables |
 | `0x0101772c`, `0x0104e6ac`, `0x01082ed8`, FUN_004de530's | INISettingCollection-like setting collections | all ten (no traps added; S5) | none yet: the decomp's interface is the 10-slot INISettingCollection of `src/bsmain/setting_declarations.h`: 0 scalar deleting destructor, 1 Add, 2 Remove, 3 GetViewerStrings, 4 WriteSetting, 5 ReadSetting, 6 Open, 7 Close, 8 WriteAllSettings, 9 ReadAllSettings |
 
+## Patch class MT1: gated Switch behaviour changes (mt_cull; decided by the orchestrator, S15-threads)
+
+**Purpose.** Every other class here restores what MSVC built from the decomp (byte parity). MT1 changes behaviour on
+purpose. It makes the engine's 360-era multithreaded culling path (`bMTRendering:Display`, docs/PERF.md 6.8) work
+on the PC code, so cull and accumulation can leave the main thread. The changes:
+* each accumulator built with two batch renderers while MT is on (FUN_0086c160, the shadow-accumulator pool in
+  bsshadermanager, teswater x2);
+* per-thread current-accumulator globals (`DAT_011f95ec`, `DAT_011f4748+8`);
+* BSFadeNode registration through the culler's accumulator instead of the global.
+
+**Gate.**
+* Switch build only, and every MT1 hunk is behind the engine's own flag (`DAT_011f94b4`, the copy of bMTRendering).
+* Off by default: ini.cpp's Switch defaults do not set bMTRendering until the checks below pass.
+* With `bMTRendering=0` the output must be byte-identical to the build without MT1. The fuzz / equivalence farms keep
+  running with it off.
+
+**Checks, in place of the MSVC byte check** (MT1 hunks are exempt from `msvc_check.py`; S1b adds the
+"exempt, gated" class to the .s1b tooling):
+1. GCC census clean on every patched unit.
+2. tests/s15 mtqemu on the real culling and accumulator objects (not the `stages` protocol model).
+3. The hb.c race checker: no race on the accumulators, batch renderers or the current-accumulator globals.
+4. Frame equivalence: the same scene with MT1 on and with it off gives the same accumulator contents and the same
+   draw list.
+
+**Owners.** S1b owns patches/ and the tooling; S15-threads writes the MT1 patches and their tests.
+
 ## Gated classes in the .s1b tooling (MT1)
 
 The tooling side of S15-threads' class MT1 (deliberate Switch behaviour changes for multithreaded culling; the class

@@ -50,6 +50,26 @@ are unexplained**.
 | MSVC-OPAQUE-ENUM | | 7 | ENUM1 |
 | unexplained | 32 | 28 | |
 
+Code differences that no rule-wide class covers were read one by one (the whole MSVC diff, with `/EHs-c-` on both
+sides where EH code mixes in, and the raw bytes where objdump restarts at a `$LN` label inside an instruction); each
+row of explained.tsv names its unit and address. Classes: CRT-BINDING, CRT-INTRINSIC (a constant-size memcpy becomes
+`rep movsd`), INLINE-DECISION, STL-CHECK-MACRO, PLACEMENT-NULLCHECK, PTR1-UNSIGNED-ZERO, BLOCK-ORDER, X87-SCHEDULE /
+SSE-SCHEDULE (commuted multiplies and adds, exact float round trips), and X87-EXCESS-PRECISION: MSVC 2008 keeps a
+`float` in an x87 register without rounding on one side only (a GOTO1 split `float x; x = e;` in
+hkpcontinuousgsk 0x00db60c0 and hkpcollidecapsuleutil 0x00cd58b0). AArch64 has no excess precision (FLT_EVAL_METHOD
+0), so the target rounds where the exe did; the class is limited to rows where both sides' source type is `float`.
+After the fixes of this round (GOTO1-CONST, PTR1-DEREF, literal padding) and these rows, the local gate of every
+unit with an unexplained difference at `0685791` has 0 unexplained functions; the eq farms confirm at the next head.
+
+Retargets are explained by evidence: shard reports list, per retarget, each relocation that moved as `pristine
+binding>prepared binding` (`## Retargets`), and a retarget is explained only when every pair is a `wrapper` row of
+explained.tsv (CRT-WRAPPER: the game's forwarding wrappers 0x00403d30 memset, 0x00406d30 / 0x00404d80 strcpy_s,
+0x00406d50 strcat_s, 0x00401460 memcpy, 0x00404dc0 _stricmp, and the CRT's own 0x00ec44d0 memcpy / 0x00eca590 tan
+bound by a C++ name; CRT-INLINE: the inline C++ overload of MSVC's header that the object defines, `strchr(char*,
+int)`, `abs(float)`, placement `operator new`; DECORATION: the same entity under another MSVC decoration). All 168
+retargets of the gate's 112 retarget units have such pairs at `c1039e7` (local). Literal digests drop the zero padding
+in front of the next symbol: `""` was `00` on one side and `00 00` on the other (blk_00c40000_od_ob1 0x00c44280).
+
 ## Verdicts per rule
 
 Leave-one-out attribution (method below). `eh` / `retarget` / `code`: kinds of the differing functions the rule
@@ -159,7 +179,7 @@ above (round 8).
 | Rule | Class | Why | MSVC meaning used in the comparison |
 |---|---|---|---|
 | `SSE1` `SSE2` `SSE3` `SSE4` | platform | the decomp's copies of MSVC's vector types / intrinsic prototypes give way to sse2neon's | - |
-| `DECL1` | neutral (claim) | the platform header declares the same CRT / Win32 function | the real MSVC CRT / SDK headers |
+| `DECL1` | neutral (claim) | the platform header declares the same CRT / Win32 function; in a namespace that keeps its own C++ copy of a CRT name (bound to a game wrapper), unqualified calls of it become `(name)(...)` so argument-dependent lookup cannot also reach the header's `::name` (DECL1-NSADL: 66 calls in 19 files; tesanimgroup was ambiguous on GCC and MSVC) | the real MSVC CRT / SDK headers |
 | `GAME1` | neutral | renames a unit's own Win32-named game declaration and its call sites; the address binding is unchanged | `fnvnx_game_X` bound like the decomp's `X` |
 | `NEW1` | neutral | `unsigned int` / plain `unsigned` is `size_t` on x86 (same type, same decoration) | as is |
 | `UNIT1` | neutral | renames local types of tesdatahandler (same layout) | as is |
@@ -175,7 +195,7 @@ above (round 8).
 | `CTOR1` | neutral (by design: the code differences are the placement form's) | explicit constructor call = placement new of the same class at the same address. `<new>`'s placement `operator new` is `throw()`, so MSVC null-checks the pointer before the constructor, and at `/Od` calls the placement function instead of inlining it (the gate's 58 code + 31 EH functions, e.g. 0x009cff10, 0x0092eb50, 0x007f9840). Standard C++ has no other way to construct in place, and for a non-null `this` (every decomp site constructs into an object it holds) the behaviour is the same | real `<new>` |
 | `LINK1` | neutral | C and C++ linkage of a global variable name the same symbol under Itanium | data names bound by variable name |
 | `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables; a namespace static bound by its plain name (`_s_fSpinTime`) gets C linkage in place, an uninitialised scalar / pointer one declared only (the image's variable) | variable bound by the recipe's address |
-| `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars | as is |
+| `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars; a const integer literal (`const int n = 4;`, an array bound) stays as written unless a forward goto crosses it, then `static const` (GOTO1-CONST: the split made `n` a VLA bound GCC accepted and MSVC rejected, C2057 in hkpagent1nmachineprocess_..._rtm_variant; now identical) | as is |
 | `GOTO2` | neutral (claim) | a forward goto across an initialized class object / reference / aggregate into its scope: `const float& a = f(x);` -> `float a; a = f(x);` for an f returning float by value; `{ ` ... `} ` around the crossed declarations before a label of their block when nothing they declare is named after it; or the label's straight `...; return e;` tail (names not declared in the function) cloned into each crossing goto | the path that jumped never used the crossed objects; scopes end earlier, a cloned tail is the same statements |
 | `QUAD1` | neutral | `return q;` -> `return (__m128)q;` where q's class converts to `__m128` and the function's return class is constructible from `__m128` only: MSVC chained both user-defined conversions | the same conversion operator and constructor, the first written out |
 | `MSCV1` | neutral | `_MSC_FULL_VER` / `_MSC_VER` in code (not in `#if`) -> the value of the compiler build/units.json gives the unit: sp1 150030729 / 1500, rtm 150021022 / 1500, vc8 140050727 / 1400 | the constant that compiler substituted |
@@ -195,8 +215,14 @@ above (round 8).
 | `RSTR1` | neutral | a function-local `T* __restrict v` passed by name to a parameter the unit declares `const X&` -> `fnvnx_unrestrict(v)` (hkpsavecontactpointsutil.cpp, S1-refs) | `#define fnvnx_unrestrict(x) (x)` under MSVC (fnvnx_equiv_fi.h): the original text; under GCC the same object as an unqualified lvalue, so the reference binds the local as MSVC's did |
 | `NEW5` | neutral | a base-less class with a virtual destructor whose only scalar `operator delete` is the placement form `(void*, void*)` gets `FNVNX_GLOBAL_DELETE` first in its body: under GCC `static void operator delete(void*)` forwarding to `::operator delete`, which MSVC 2008's scalar deleting destructor called (0x00d979a0: a one-argument cdecl call, 31 bytes); GCC otherwise rejects the deleting destructor (S1-refs) | `FNVNX_GLOBAL_DELETE` empty (tools/equiv/msvc/fnvnx_equiv_fi.h): the decomp's class unchanged |
 | `NSCALL1` | neutral | an unqualified call, inside namespace N, of N's own C++ prototype of a CRT / Win32 name (`strcpy_s`, `_stricmp`, ... DECL1 keeps it) -> `N::name(`, where the unit's units.json binds that name only in N and no class of the unit declares a member of that name; `<math.h>` names excluded (S1-refs) | the function MSVC called: on MSVC only N::name was declared; on the target a class-type argument brought the shim's ::name in by argument-dependent lookup |
+| `FINL1` | neutral | `__forceinline` dropped from a body-less declaration (`;`, file scope or class C) in a .cpp whose unit has no body of that name with the same parameter types and const (`C::name(...) {` or in C's braces) (tile_ob1_variant, three Havok `_rtm_variant` agents, blk_00ae0000_od_ob1; GCC's always_inline: "function body not available" at -O2) (S1-refs) | MSVC cannot inline a body it has not seen: the call was an ordinary call, which the declaration without the keyword gives |
 | `TPL1` | neutral | `this->` in front of the members of a dependent base that a class template's member functions use by plain name | the members MSVC's (one-phase) lookup found |
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
+| `TPL3` | neutral | declares `namespace N { template <..> R f(..); }` ahead of the first declaration that calls f qualified (`::N::f(x)`) or with explicit template arguments (`f<T>(..)`) before N defines it; only signatures whose names are all seen there (case B: template parameters and builtins only), no default arguments | declarations only |
+| `TYPN1` | neutral | `typename` before `X<..T..>::m` in a template argument list inside a template head that names T, for the library's type members (`iterator_category`, `value_type`, ...): MSVC 2008 already read it as that type | as is |
+| `INST1` | neutral | `unsigned int` -> `C<..>::size_type` in an explicit member instantiation, at the positions where C's member declaration (the definition of C in the qualifier's namespace, nearest before the directive) says `size_type`: the member MSVC instantiated | as is |
+| `COPY1` | neutral | `X::X(const X& o) : B(o)` -> `B(static_cast<const B&>(o))` when B also has a constructor taking one of its own bases by value: the copy constructor MSVC 2008 picked | as is |
+| `DECL3` | neutral | a unit's own `typedef _iobuf FILE;` is dropped and its FILEs spelled `_iobuf`; its `typedef __int64 fpos_t;` and uses become `fnvnx_msvc_fpos_t`: under MSVC FILE is `_iobuf` and fpos_t is `__int64` | as is |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
 | `DTOR1` | neutral | declares `template <> NiPointer<T>::~NiPointer();` after a unit's includes for member pointees T it never completes (with DecRefCount): GCC's key-function vtable would instantiate it | MSVC never instantiated it in those units |
 | `VTBL1` | platform | the listed stand-in polymorphic classes get their full virtual interface in MSVC slot order, slots forwarding to the decomp's functions for them (BSNiAllocator 7 of 10 known, NiStandardAllocator 8 of 10, the FUN_00aa7400 heap's AbstractHeap slots and the NiStream loader map A660A0Map's NiTMapBase slots declared only; StdAllocator's destructor is the plain slot 0 it is in MSVC's vftable; docs/PATCHES.md lists the slots that need the exe) | the native vtable has the slots the game calls; MSVC's vftable of the stand-in grows |
@@ -210,7 +236,8 @@ above (round 8).
 | `CSX2` | neutral | 4 bytes behind a generated-layout `_RTL_CRITICAL_SECTION` member whose class asserts it as 28 bytes (NiCriticalSection, RecursiveLock and their holders) | the offsets the pristine MSVC build and the byte-matched code have (J-0067) |
 | `STAND1` | platform | removes an untagged definition whose MSVC name the unit binds to the address of a tagged definition in the same unit (a free function keeps its declaration) | the call reaches the tagged function, as in the binary; an optimizing MSVC build may have inlined the stand-in |
 | `STAND2` | platform | STAND1 for an address another unit's tagged definition provides, only for a non-inline, non-static definition in a unit compiled without /O1, /O2, /Ox, /Ob2 | MSVC never inlined the stand-in there, so its code called the name, which the link took to the other unit's function |
-| `PTR1` | neutral | `f > 0` / `p > 0` -> `!= 0` and `<= 0` -> `== 0` for a function name or a local pointer | MSVC's unsigned compare of the address gives the same result |
+| `STAND3` | platform | in an /Od unit without /Ob1, /Ob2, /O1, /O2, /Ox, removes the body of an untagged in-class definition, or of an out-of-class or free one marked inline, whose MSVC name the unit binds to one address that some unit decompiles (declarations stay) | MSVC inlines nothing there, so the binary calls that address at every site; the call now reaches it too (the link binds the name, tier unit/exact) |
+| `PTR1` | neutral | `f > 0` / `p > 0` -> `!= 0` and `<= 0` -> `== 0` for a function name or a local pointer; not for `*p` of a `T* p` (PTR1-DEREF: `*type <= 0` of an `int* type` is a signed compare, bhkrigidbody 0x00c8cce0's caller 0x00c8dd10 got `je` for `jle`; now identical, with blk_00a20000_o2 0x00a29fe0) | MSVC's unsigned compare of the address gives the same result |
 | `INC1` | neutral | a quoted `#include` that names, up to case, a file in the including directory is spelled as that file (`"Actor.h"` -> `"actor.h"`) | the header MSVC opened (directory of the includer first, names without case) |
 | `ANON2` | platform | a member with a constructor / destructor / copy assignment in an anonymous struct of an anonymous union becomes raw storage of its size and alignment, its uses `(*(T*)(x.m))` | same bytes and calls; MSVC never ran those functions for a union member either |
 | `ANON3` | platform | an anonymous union in a function body with an anonymous struct in it -> `struct fnvnx_anon_uN { union {...}; } fnvnx_anon_vN;` and `decltype(v.m)& m = v.m;` for each member (GCC takes an anonymous struct only inside a named class) | same storage and layout under the same names; MSVC's code may keep the references |
@@ -218,6 +245,7 @@ above (round 8).
 | `ENUM1` | neutral | opaque `enum X;` -> `enum X : int;` and every definition of those enums -> `enum X : int {` | int is MSVC's underlying type of every unscoped enum |
 | `ANON1` | platform | names an unnamed struct defined in a member function's return type (`struct fnvnx_anon_Float {...}; fnvnx_anon_Float* Float();`) | same layout; MSVC's decorated name of the function changes (`<unnamed-tag>`) |
 | `STL1` | platform | includes `fnvnx_msvcstl.h` (MSVC 2008 `<xutility>` internals: `_SCL_SECURE_VALIDATE`, `std::_Checked_base`, `std::_Ptr_cat`, iterator tags) where a unit uses them; in a unit deriving from `std::_Container_base_aux_alloc_real` also its AUX part (container base, `_Destroy_range`, `stdext::unchecked_uninitialized_copy`, checked vector iterators) and `vector<T>::const_iterator` / `::iterator` spelled `_Vector_const_iterator<T, A>` / `_Vector_iterator<T, A>` | MSVC's own headers define them, and the iterator names are MSVC's names of the same types; the gate builds with `<xutility>`, `<memory>`, `<vector>` |
+| `STL2` | platform | in the 7 units that include the real `<string>` / `<vector>` / `<map>`: `std` -> `fnvnx_vc9`, `stdext` -> `fnvnx_vc9::stdext`, `size_t` in the unit's own `namespace std` -> `_Sizet` (unsigned int), and `fnvnx_vc9.h` for the headers. The shim is VC9's string / vector / map (`_Tree`) with the x86 release layout (28 / 24 / 32 bytes, iterators 8; static_asserted, checked against 0x00acb200, 0x00b31270, 0x00abfa90), VC9's growth and string algorithms, `_SECURE_SCL` checks through `_invalid_parameter_noinfo`. Not byte-identical code (GCC compiles the templates), the same layouts and results; libstdc++'s containers (string 24, vector 12) would move every game-struct member after them | MSVC side: the real VC9 headers (the shim is C++11) |
 | `SPEC3` | neutral | qualifies the names a namespace declares in the body of an explicit class specialization written inside it (`fnv_x::T* p`) | the names MSVC's lookup found |
 | `LEX1` | neutral | MSVC token spellings: `i64`/`ui64` suffixes -> `LL`/`ULL`, `0xae-0x34` -> `0xae -0x34`, `"C"enum` -> `"C" enum`, `inline __forceinline` -> `__forceinline`, `unsigned long(-1)` -> `((unsigned long)(-1))` | same tokens as MSVC lexed them |
 | `STD1` | platform | a decomp `struct std { static float abs(float); }` (the std namespace of the headers) -> `#include <cmath>`: the calls reach the standard `std::abs(float)` | MSVC called the out-of-line copy at 0x00408840 (fabsf) |
@@ -228,6 +256,8 @@ above (round 8).
 | `FTOL1` | platform | `fnvnx_ftol2(expr)` for arg-less `_ftol2_sse` calls | `fnvnx_ftol2(x)` = `(__int64)(x)` (gated anyway) |
 | `SDK1` | layout | the PC SDK definitions win over the decomp's guarded copies (Xbox 360 layouts) | real SDK |
 | `TAIL1` | layout | GCC must not reuse a base's tail padding; MSVC never does | zero-width bit-field, as on the target |
+| `EBO1` | layout | `char fnvnx_msvc_ebo;` first in a class with exactly two direct bases that are both empty in the unit (and data of its own): MSVC gives only the first empty base a zero size, so the members start at 1. 8 sites (FUN_00c612b0_Class x6, FUN_00c64de0, FUN_00c5da70); the exe allocates 0x14, 0x1c, 0xe0 for them (0x00c61510, 0x00c652c0, 0x00c5e4d0), GCC gave 0x13, 0x18, 0xdf | MSVC's layout of the class itself (not applied on the MSVC side) |
+| `EBO2` | layout | `FNVNX_EBO2` (GCC: `char fnvnx_ebo2[0];`, MSVC: nothing) first in an empty base B (no bases, data or virtuals; used only as a base, `B*`, `B&`, `B::`) whose derived classes all have it as their only base, one of them introducing its own vfptr: MSVC places B after the vfptr (+4), the Itanium ABI at 0 under the vptr; members and sizes are unchanged. effectitemlist.cpp `EffectItemList : BSSimpleList_Standin` (exe passes this+4 to IsEmpty 0x008256d0; pristine unit = exe byte for byte), S13b layout-offset (S1-refs) | MSVC's layout of the class, not applied on the MSVC side |
 | `INTL1` | platform | edits only the decomp's non-MSVC branch (`#else` of `_MSC_VER`) | invisible to MSVC |
 | `ALLOC1` | platform | drops untagged file-scope replacements of the global operator new/delete | target only |
 | `XC1` | platform | dynamic initializers become extern + `__fnvnx_dyninit_<addr>` run by S10 | target only |
@@ -235,6 +265,20 @@ above (round 8).
 | `FALL1` | platform | `__builtin_trap()` at fall-off ends of non-void functions | GCC only |
 | `ASM1` `ASM2` `ASM4` | platform | x87 / rdtsc / cpuid asm -> portable helpers (docs/ASM.md has their own checks) | - |
 | `NATIVE1` | platform | units leave the build (native renderer, D6) | - |
+
+## Gate of the rules after `0685791` (local, single units)
+
+Sites: each rule applied by itself to every decomp file; units by include closure (a superset of the real sites).
+
+| rules | units | result |
+|---|---:|---|
+| GOTO2, QUAD1, MSCV1, RREF1-CLASS, RREF2, ADDR1 (`c1039e7`) | 447 | no differing function and no failing unit beyond the `0685791` gate's (all explained above) |
+| TPL3, INST1, TYPN1, COPY1 (S1-STL, `6318d13`) | 1 | blk_00ac0000_od_ob1 compiles (with TPL2's specialization fix): 4 functions differ, identical with `/EHs-c-` (EH-only) |
+| STAND2, STAND3 (platform, `6318d13`) | 133 | the neutral set with and without them: the same differing functions and statuses in every unit whose source they change (a removed stand-in only changes which definition the bound name reaches) |
+| bsshader units with `_ReadWriteBarrier` | 10 | all compile under the stand-ins; bsshader.cpp identical, the rest EXC1 EH-only |
+
+LANE1 and ANON3 are platform rules that only rewrite what other platform rules (SSE1) or GCC need; the neutral gate
+leaves them out.
 
 ## Evaluation order: ORDER-OBJECT and ORDER-OPERATOR (for S12)
 
@@ -291,6 +335,14 @@ evalorder.cpp evalorder.msvc.expect`); it matches neither of S12's expectations:
 `shl`, `shr`, `index` are those of `object=last operator=rtl`, while `virtual` / `virtual2` (`ga:`, `gyx:`: the object
 first) are those of the defaults.
 
+**The build's own order** (V1 C1/T1/T2 fixed): the `build` variant is now the plugin with every `ORDER_*` default of
+`tools/link/compile.sh`, read from that file (environment overrides as there). `--strict` needs `--gcc`, and a case
+that some MSVC configuration did not log (`no-msvc`, `msvc-incomplete`) fails it. At the integration head with S12's
+per-shape switches (`object=msvc operator=rtl assign=msvc`): **0 of the 24 agreed cases differ**; the three
+`msvc-varies` shapes (`(obj->*pmf())(a())`, `*p() = a()`, `arr()[i()] = b()`) match one MSVC configuration each (`aom`,
+`ap`, `bpa`). `object=last` (all member calls) still gets `obj-virtual` wrong: MSVC evaluates a virtual call's object
+first.
+
 ## Class layouts (238 units, `/d1reportAllClassLayout`)
 
 | Trees (pristine vs) | classes | differ | what differs |
@@ -313,7 +365,8 @@ its recipe compiler and flags; objects are kept and fingerprinted again whenever
 whose include closure did not change between two rule sets reuse the earlier objects (compare_builds' closure test).
 
 What the rules include is given its MSVC meaning (`tools/equiv/msvc/`): `fnvnx_win32.h` = the real `<windows.h>`
-(SDK v6.0A) adjusted where the target shim deliberately differs (no A/W name macros, no `min`/`max`, the shim's
+(SDK v6.0A) adjusted where the target shim deliberately differs (no A/W name macros, no `min`/`max`, no object-like
+SDK macros the decomp uses as its own names: winerror.h's `ERROR_*`, `small`, `hyper`, `Yield`, `_FILETIME_`, the shim's
 looser parameter types and `void *` overloads as dllimport declarations of the same imports, `_ULARGE_INTEGER` with
 the forward-declared class key), `fnvnx_crt.h` / `fnvnx_iobuf.h` = MSVC's CRT headers, `fnvnx_new.h` = MSVC's
 placement forms, and for prepared trees only `fnvnx_equiv_compat.h` = what `fnvnx_compat.h` declares for DECL1
@@ -342,7 +395,13 @@ against a rule: `std::abs` after DECL1 (libstdc++'s C headers export into `std`,
 full SDK defines that the target shim does not (`RequestLocation` in winioctl.h, `vc_attributes`, `_MEMORYSTATUS`,
 `IUnknown`, `PCH`), MSVC's `float` math overloads colliding with the decomp's own (`fabsf`, `cosf`, `sqrt(float)`),
 and `-fpermissive` conversions (`HANDLE` -> integer), and ENUM1's opaque declarations `enum X : int;` (C++11; MSVC
-2008 parses the enum base only on a definition: 7 units). The `vc8` unit needs VC 2005 SP1.
+2008 parses the enum base only on a definition: 7 units, and actor, packagedatadialogue, tessaveloadgame where an
+interaction is attributed), decomp structs named like full-SDK functions or enumerators (DragObject, Arc, CacheData)
+and the SDK's own gethostname, ANON2's C++11 `alignas(T)` (MSVC 2008 has none; nipoint3interpolator, extradatalist),
+the CRT's const-correct `strrchr` overload (animation, -fpermissive on GCC), compat's C++14 sized `operator delete[]`
+hiding MSVC's implicit unsized one from an explicit call (tesland_od_variant_decl_variant), and `<intrin.h>` included
+inside a namespace, whose extern "C" `_ReadWriteBarrier` MSVC 2008 keeps apart from the global one
+(hkadeltacompressedanimation). explained.tsv has a row for each. The `vc8` unit needs VC 2005 SP1.
 
 What only the target can show: that GCC's layout equals MSVC's (TAIL1's purpose) needs a GCC-side comparison; MSVC
 shows that the TAIL1 construct is inert.

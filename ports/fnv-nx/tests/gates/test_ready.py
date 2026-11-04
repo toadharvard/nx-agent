@@ -500,6 +500,17 @@ class ReadyTest(unittest.TestCase):
         g = card.gates[-1]
         self.assertEqual((g['id'], g['value'], g['terms']['not_fuzzable']), ('fuzz.s13_metric', 1, 1), g['note'])
 
+    def test_fuzz_coverage_per_shard(self):
+        g = self.gate(self.world.run(), 'fuzz.coverage')
+        self.assertEqual(g['status'], 'pass')
+        self.assertEqual(set(g['per_shard']), {'1', '2'})
+        # shard 2 at 8 of 10: 90 % in total would pass, but shard 2 alone is below 90 %
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'cumulative (verdicts valid for this head): 10 functions',
+                       'cumulative (verdicts valid for this head): 8 functions')
+        g = self.gate(self.world.run(), 'fuzz.coverage')
+        self.assertEqual(g['status'], 'fail')
+        self.assertIn('shards below 90 %: 2', g['note'])
+
     def test_try_farms_never_count(self):
         """frames, frameprof and the frame budget of a try farm (unmerged wip heads) are not evidence (V1 R14)"""
         self.world.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'][0].update({'pass': False}))
@@ -626,23 +637,24 @@ class ReadyTest(unittest.TestCase):
     def test_frame_budget_per_clock(self):
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.budget.stock'), self.gate(card, 'perf.budget.boost')
-        self.assertEqual((stock['status'], stock['level'], stock['required']), ('pass', 'stretch_60', True))
+        self.assertEqual((stock['status'], stock['level'], stock['required']), ('pass', 'target_60', True))
         self.assertEqual((boost['status'], boost['required']), ('pass', False))
-        self.assertIn('plan45 stretch_60', stock['note'])
+        self.assertIn('plan45 target_60', stock['note'])
+        # lo fits 16.7 ms, hi does not: uncertain, whatever S15's verdicts say
         self.world.edit_json('reports/prof1/%s-frame-budget.json' % C, lambda d: d['scenarios'][0]['results'][
-            '1020']['verdicts'].update(stretch_60='uncertain'))
+            '1020']['worst_frame_ms'].update(lo=12.0, mid=15.0, hi=20.0))
         g = self.gate(self.world.run(), 'perf.budget.stock')
         self.assertEqual(g['status'], 'no-data')
         self.assertIn('needs a measured frame', g['note'])
 
     def test_frame_budget_fail_and_model_only(self):
         rel = 'reports/prof1/%s-frame-budget.json' % C
-        self.world.edit_json(rel, lambda d: d['scenarios'][0]['results']['1020']['verdicts'].update(stretch_60='fail'))
+        wf = lambda **k: lambda d: d['scenarios'][0]['results']['1020']['worst_frame_ms'].update(**k)
+        self.world.edit_json(rel, wf(lo=18.0, mid=22.0, hi=25.0))       # even the lo case misses 16.7 ms
         card = self.world.run()
         self.assertEqual(self.gate(card, 'perf.budget.stock')['status'], 'fail')
         self.assertEqual(card['verdict'], 'NOT READY')
-        self.world.edit_json(rel, lambda d: (d['scenarios'][0]['results']['1020']['verdicts'].update(stretch_60='pass'),
-                                             d['inputs'].update(frameprof=False)))
+        self.world.edit_json(rel, lambda d: (wf(lo=7.0, mid=12.0, hi=16.0)(d), d['inputs'].update(frameprof=False)))
         g = self.gate(self.world.run(), 'perf.budget.stock')
         self.assertEqual(g['status'], 'no-data')
         self.assertIn('model only', g['note'])
@@ -651,7 +663,7 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual(self.gate(self.world.run(), 'perf.budget.boost')['note'], 'no fnvnx-frame-budget/1 file')
         model = dict(schema='fnvnx-frame-budget/1', inputs=dict(frameprof=False), scenarios=[dict(
             id='placed', results={'1785': dict(worst_frame_ms=dict(lo=7, mid=17.2, hi=39.4),
-                                               verdicts=dict(pass_45='uncertain'), level='stretch_60')})])
+                                               verdicts=dict(pass_45='uncertain'), level='target_60')})])
         self.world.write('docs/PERF_budget.json', model, port=True)
         g = self.gate(self.world.run(), 'perf.budget.boost')
         self.assertEqual((g['status'], g['sources'][0]['path']), ('no-data', 'docs/PERF_budget.json'))

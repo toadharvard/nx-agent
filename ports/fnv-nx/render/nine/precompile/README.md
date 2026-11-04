@@ -21,7 +21,7 @@ causes hitches. This stream does three things:
 | `nine_precompile.c` | the CLI |
 | `patches/0005-nvc0-precompiled-cache.patch` | the runtime cache (`nvc0/nvc0_program_cache.[ch]`, a wrapper around `nvc0_program_translate`, fixup/relocation (de)serialisers in codegen) |
 | `patches/0006-nine-inline-subroutines.patch` | st/nine: D3D `call`/`callnz` inlined at the call site (Mesa 20.1's TGSI subroutines crashed nv50_ir), predicate `!p` fixed |
-| `render/nine/host/nine_shader_cache.[ch]` | `nx_nine_shader_cache_init()`: the host module's startup call that turns the cache on (`sdmc:/fnvnx/shaders.nvc0cache`, read-write) |
+| `render/nine/host/nine_shader_cache.[ch]` | `nx_nine_shader_cache_init()`: the host module's startup call that turns the cache on (`sdmc:/switch/fnv/shaders.nvc0cache`, read-write) |
 | `tests/s6d/` | extra SM1-3 corpus, the cache test harness, and the runner |
 
 The nouveau sources are built on the host with `-D__SWITCH__`, as on the console, so the code paths
@@ -60,7 +60,7 @@ python3 tests/s6d/run.py --host <work>/out --asm <S6b build>/s6b_asm
   `crash`), TGSI tokens, code bytes, GPRs, cache key.
 * On the console: the host module calls `nx_nine_shader_cache_init(NULL)` once at startup, before the
   first Nine device creates shaders (`render/nine/host/nine_shader_cache.h`). It uses
-  `$NVC0_SHADER_CACHE` if that is set, else `sdmc:/fnvnx/shaders.nvc0cache`. It creates `sdmc:/fnvnx/` if
+  `$NVC0_SHADER_CACHE` if that is set, else `sdmc:/switch/fnv/shaders.nvc0cache`. It creates `sdmc:/switch/fnv/` if
   needed and opens the cache read-write: shipped entries hit, misses are compiled and appended.
   `nx_nine_shader_cache_stats()` returns the entry, hit, miss and store counters for the log. Lower
   level: `nvc0_pcache_configure(path, flags)`, where `NVC0_PCACHE_READONLY` (env

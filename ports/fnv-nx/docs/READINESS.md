@@ -104,6 +104,31 @@ job publishes it per integration head (`reports/gates1/<c12>-gates.md` / `.json`
 - **Frame target.** The frame rows use `thresholds.json` `scorecard`: 60 fps at 720p handheld at the 1.02 GHz retail
   clock (J-0150), the same target as the frame gates.
 
+## Trend and regressions (fnvnx-trend/1)
+
+Merges into the integration branch are fast and do not run every test first, so the scorecard has to catch what
+they break.
+- **Trend.** Every scored head appends one entry `{head, generated, metrics: {<row id>: {gap, value, from, to}}}`
+  (`from`/`to`: the oldest and newest source commit of the row). The gates job keeps the list in its JSON sidecar
+  (`trend`, `trend_format: fnvnx-trend/1`) on the private repo, `reports/gates1/<c12>-gates.json`. Each run reads
+  the newest sidecar of `thresholds.json` `trend.farm` and appends. A re-score of the same head that changes nothing
+  replaces the last entry. The newest `trend.keep` (400) entries are kept.
+- **Row ids.** compile.errors, link.undefined, link.traps, abi.rows, fuzz.hard, fuzz.s13, equiv.diffs,
+  boot.milestones, render.scenes, frame.budget, frame.gpu.
+- **Regressions.** A row whose gap rises from one entry to the next (`rose`), or whose measurement is lost (`lost`:
+  a number before, none now), is a regression. It carries the range to bisect: from the earlier entry's oldest
+  source commit to the later entry's newest, and the two heads. It stays open until a later entry is back at or
+  below its `before`. The md report lists the open ones under "Regressions"; the JSON has them all
+  (`regressions`).
+- **Stale passes.** A stale pass does not count as a pass (counts: `stale`, not `pass`). A pass is stale when:
+  - its source is more than `max_commits_behind` behind, or not on the head's history;
+  - the farm published a newer report of the same job that FAILED or does not parse (`superseded_by`). The row
+    of that stage is then not measured (`lost`), since its number is an older run's;
+  - it is overdue: its source is behind the head and was published more than `report_due_s` (12 h) before the
+    newest publish time.
+- **Tests.** `python3 -I tests/gates/test_trend.py`, a synthetic set of regressions and stale passes. Its metric is
+  `undetected N, false alarms M`, both 0.
+
 ## The gates
 
 | id | what | source | threshold | why that threshold |
@@ -134,7 +159,7 @@ job publishes it per integration head (`reports/gates1/<c12>-gates.md` / `.json`
 | perf.cores | core placement | `toolchain/host/placement.h`, `toolchain/npdm/fnvnx-app.json` in the checkout | main on core 0, workers on 1-2, core 3 opt-in and off | PERF.md placement table |
 | perf.render.stock / perf.render.boost | render machine: the renderer's worst thread as a share of each target's frame | `render/native/perf/report.json`, summary `targets_budget_fraction` (hi bound) | <= 20 % of the frame at the target | RENDER_NATIVE.md 9.4: render thread 4.5 of 22.2 ms, packet build 4.0 ms |
 | perf.gpu.docked_720p / handheld_720p / handheld_540p | GPU frame time of the render machine's model | same report, `gpu.summary_ms.mix_hi` | three levels, informative | a model with no measured anchor (RENDER_PERF.md section 9) |
-| perf.budget.stock / perf.budget.boost | S15 whole-frame CPU budget, scenario `placed` | `reports/<farm>/<c12>-frame-budget.json`, else `docs/PERF_budget.json` | `stretch_60` verdict pass on a measured frame (mid worst frame <= 16.7 ms) | PERF.md section 11; a model-only or uncertain verdict is no-data |
+| perf.budget.stock / perf.budget.boost | S15 whole-frame CPU budget, scenario `placed` | `reports/<farm>/<c12>-frame-budget.json`, else `docs/PERF_budget.json` | worst frame, hi case, <= 16.7 ms on a measured frame (S15's verdicts are not used) | PERF.md section 11; a model-only or uncertain verdict is no-data |
 | package.exefs | exefs = main + main.npdm, guest.nso on the SD tree | full report | yes | Atmosphere's exefs override layout |
 | package.program_id | program id of an installed title | full report | not 0100000000000000 | the override needs a title that is installed |
 | package.pic | guest PC-relative absolute references | full report | 0 | the guest must be relocatable (D9) |
@@ -173,8 +198,10 @@ at the 1.02 GHz retail clock and 720p handheld**. Below 30 fps is a fail. 45 fps
   It is informative (`render_perf.gpu[].required`) until a console run measures the GPU.
 - **Whole frame (S15).** `perf.budget.<clock>` takes the scenario as the build is placed today (`perf.budget`), not a
   plan.
-  - Its `stretch_60` verdict (the mid worst frame within 16.7 ms) passes only when the budget's inputs hold a
-    measurement (frameprof or the render report).
+  - The gate judges the scenario's `worst_frame_ms` itself against the target's frame (16.7 ms): pass when the hi
+    case fits, fail when even the lo case misses, otherwise uncertain. S15's own `verdicts` are shown but not used:
+    frame_budget.py judges a `stretch` target on the typical frame (V1 R16).
+  - A pass counts only when the budget's inputs hold a measurement (frameprof or the render report).
   - `uncertain` and a model-only pass are no-data; `fail` fails.
 - **Which clock counts.** The stock clock, 1.02 GHz (`required: true`). The boost clock is reported as informative
   (`required: false`).

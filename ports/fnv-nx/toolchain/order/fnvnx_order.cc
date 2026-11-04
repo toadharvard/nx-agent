@@ -86,6 +86,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <map>
 #include <fstream>
 
 int plugin_is_GPL_compatible;   // the plugin interface asks for it; the code is MIT (LICENSE), which is compatible
@@ -111,7 +112,9 @@ struct counts { unsigned long ldar, stlr, fence_ld, fence_st; };
 static counts unit_total;
 static bool args_rtl = true;
 static unsigned long calls_reordered, calls_skipped;
-static bool object_last = false;                         // object=first (default) | last: ORDER-OBJECT
+static bool object_last = false;                         // object=first (default) | last | msvc: ORDER-OBJECT
+static bool object_msvc = false;                         // object=msvc: MSVC 2008's table (tests/s11/order/order.msvc)
+static bool assign_msvc = false;                         // assign=cpp17 (default) | msvc: built-in compound assignment
 static bool operator_rtl = false;                        // operator=cpp17 (default) | rtl: ORDER-OPERATOR
 static unsigned long calls_object_last, calls_operator;
 static bool refcount_weak = true;
@@ -143,39 +146,138 @@ static bool is_memory_ref(tree t) {
   }
 }
 
+// The record a field belongs to, by name. A member of an anonymous union or struct is named by the nearest named
+// record that contains it (`struct U { union { LONG lk; struct { short lo, hi; }; }; }`: U::lk, U::lo), so it
+// matches across units; a field with no named record around it has no cross-unit name.
 static std::string record_name(tree field) {
   tree ctx = DECL_CONTEXT(field);
-  if (!ctx || !TYPE_P(ctx)) return "";
-  tree n = TYPE_NAME(ctx);
-  if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_NAME(n);
-  return n && TREE_CODE(n) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(n) : "";
+  for (int depth = 0; ctx && TYPE_P(ctx) && depth < 8; depth++, ctx = TYPE_CONTEXT(ctx)) {
+    tree n = TYPE_NAME(ctx);
+    if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_NAME(n);
+    if (n && TREE_CODE(n) == IDENTIFIER_NODE && !IDENTIFIER_ANON_P(n)) return IDENTIFIER_POINTER(n);
+    if (!RECORD_OR_UNION_TYPE_P(ctx)) break;
+  }
+  return "";
+}
+
+// pointer fields whose pointee some unit hands to Interlocked* (`InterlockedIncrement(c->m_pRef)`): a store or load
+// through the field's value (`*c->m_pRef = 1`) is an access to the Interlocked operand (adversarial review, p5)
+static std::set<tree> pfield_decls;
+static std::set<std::string> key_pfields;
+static std::set<tree> pfield_temps;   // this function's temporaries loaded from such a field
+static bool pfield_keyed(tree f) {
+  return pfield_decls.count(f) ||
+         (DECL_NAME(f) && key_pfields.count(record_name(f) + "::" + IDENTIFIER_POINTER(DECL_NAME(f))));
 }
 
 static void resolve_forwarders();
 static void write_discovered();
+static bool field_keyed(tree f);
+// local pointers set from the address of a field or variable (`int *q = &w->done;`), for every function of the unit:
+// a store or load through such a pointer (`*q = 1`) is an access to its target (V1's K8)
+static std::map<tree, std::vector<tree>> alias_targets;
+
+static bool target_keyed(tree d) {
+  if (TREE_CODE(d) == FIELD_DECL) return field_keyed(d);
+  return interlocked_decls.count(d) || poll_decls.count(d) ||
+         (DECL_NAME(d) && key_vars.count(IDENTIFIER_POINTER(DECL_NAME(d))));
+}
+
+static bool overlaps_keyed(tree bfr);
 
 static bool keyed(tree t) {
   if (!forwarders_resolved) resolve_forwarders();
-  if (key_fields.empty() && key_vars.empty() && interlocked_decls.empty() && poll_decls.empty()) return false;
+  if (key_fields.empty() && key_vars.empty() && interlocked_decls.empty() && poll_decls.empty() && pfield_temps.empty())
+    return false;
   for (tree r = t; r; r = handled_component_p(r) ? TREE_OPERAND(r, 0) : NULL_TREE) {
-    if (TREE_CODE(r) == COMPONENT_REF) {
-      tree f = TREE_OPERAND(r, 1);
-      if (interlocked_decls.count(f) || poll_decls.count(f)) return true;
-      if (DECL_NAME(f) && key_fields.count(record_name(f) + "::" + IDENTIFIER_POINTER(DECL_NAME(f)))) return true;
-    }
+    if (TREE_CODE(r) == COMPONENT_REF && field_keyed(TREE_OPERAND(r, 1))) return true;
+    // the front end folds bit-field tests and adjacent narrow compares into a BIT_FIELD_REF over the record
+    // (`!f->done`, `c->x == 0 && c->y == 0`): ordered when the bits cover a keyed field (adversarial review 3, 4)
+    if (TREE_CODE(r) == BIT_FIELD_REF && overlaps_keyed(r)) return true;
     if (TREE_CODE(r) == VAR_DECL && (interlocked_decls.count(r) || poll_decls.count(r) ||
                                      (DECL_NAME(r) && key_vars.count(IDENTIFIER_POINTER(DECL_NAME(r))))))
       return true;
+    if ((TREE_CODE(r) == MEM_REF || TREE_CODE(r) == INDIRECT_REF) && !pfield_temps.empty() &&
+        pfield_temps.count(TREE_OPERAND(r, 0)))
+      return true;
+    if ((TREE_CODE(r) == MEM_REF || TREE_CODE(r) == INDIRECT_REF) && !alias_targets.empty()) {
+      tree p = TREE_OPERAND(r, 0);
+      auto it = alias_targets.find(p);
+      if (it != alias_targets.end())
+        for (tree d : it->second)
+          if (target_keyed(d)) return true;
+    }
     if (!handled_component_p(r)) break;
   }
   return false;
+}
+
+// a record (or array of records) with a keyed field somewhere inside: a copy of the whole object stores that field
+// too (`*p = *n` over a polled flag), so it is fenced like any ordered access that ldar/stlr cannot do
+static bool field_keyed_direct(tree f) {
+  if (interlocked_decls.count(f) || poll_decls.count(f)) return true;
+  return DECL_NAME(f) && key_fields.count(record_name(f) + "::" + IDENTIFIER_POINTER(DECL_NAME(f)));
+}
+// a member of a union is the same memory as its keyed sibling (adversarial review 17)
+static bool field_keyed(tree f) {
+  if (field_keyed_direct(f)) return true;
+  tree u = DECL_CONTEXT(f);
+  if (u && TREE_CODE(u) == UNION_TYPE)
+    for (tree g = TYPE_FIELDS(u); g; g = DECL_CHAIN(g))
+      if (TREE_CODE(g) == FIELD_DECL && g != f && field_keyed_direct(g)) return true;
+  return false;
+}
+
+// the fields of the record a BIT_FIELD_REF reads whose bits it covers
+static void overlapped_fields(tree bfr, std::vector<tree> &out) {
+  tree base = TREE_OPERAND(bfr, 0), ty = TREE_TYPE(base);
+  if (!RECORD_OR_UNION_TYPE_P(ty) || !tree_fits_uhwi_p(TREE_OPERAND(bfr, 1)) || !tree_fits_uhwi_p(TREE_OPERAND(bfr, 2)))
+    return;
+  unsigned HOST_WIDE_INT sz = tree_to_uhwi(TREE_OPERAND(bfr, 1)), pos = tree_to_uhwi(TREE_OPERAND(bfr, 2));
+  for (tree f = TYPE_FIELDS(ty); f; f = DECL_CHAIN(f)) {
+    if (TREE_CODE(f) != FIELD_DECL || !DECL_SIZE(f) || !tree_fits_uhwi_p(DECL_SIZE(f)) ||
+        !tree_fits_shwi_p(bit_position(f)))
+      continue;
+    unsigned HOST_WIDE_INT fp = int_bit_position(f), fs = tree_to_uhwi(DECL_SIZE(f));
+    if (fp < pos + sz && pos < fp + fs) out.push_back(f);
+  }
+}
+static bool overlaps_keyed(tree bfr) {
+  std::vector<tree> fs;
+  overlapped_fields(bfr, fs);
+  for (tree f : fs)
+    if (field_keyed(f)) return true;
+  return false;
+}
+static bool type_keyed(tree ty, int depth = 0) {
+  static std::map<tree, bool> memo;
+  if (!ty || depth > 8) return false;
+  ty = TYPE_MAIN_VARIANT(ty);
+  if (TREE_CODE(ty) == ARRAY_TYPE) return type_keyed(TREE_TYPE(ty), depth + 1);
+  if (!RECORD_OR_UNION_TYPE_P(ty)) return false;
+  auto it = memo.find(ty);
+  if (it != memo.end()) return it->second;
+  memo[ty] = false;   // recursion guard
+  bool k = false;
+  for (tree f = TYPE_FIELDS(ty); f && !k; f = DECL_CHAIN(f))
+    if (TREE_CODE(f) == FIELD_DECL) k = field_keyed(f) || type_keyed(TREE_TYPE(f), depth + 1);
+  memo[ty] = k;
+  return k;
 }
 
 static bool shared_ordered(tree t) {
   if (!t || !is_memory_ref(t)) return false;
   if (local_unshared(get_base_address(t))) return false;
   if (mode == MODE_TSO) return true;
-  return TREE_THIS_VOLATILE(t) || TYPE_VOLATILE(TREE_TYPE(t)) || keyed(t);
+  if (TREE_THIS_VOLATILE(t) || TYPE_VOLATILE(TREE_TYPE(t)) || keyed(t)) return true;
+  if (!AGGREGATE_TYPE_P(TREE_TYPE(t)) || (key_fields.empty() && interlocked_decls.empty() && poll_decls.empty()))
+    return false;
+  if (type_keyed(TREE_TYPE(t))) return true;
+  // a copy the front end turned into bytes (`MEM <unsigned char[6]> [(struct D1 *)a]`, a class with a base): the
+  // record type is the MEM_REF's alias pointer type (adversarial review 9)
+  if (TREE_CODE(t) == MEM_REF && POINTER_TYPE_P(TREE_TYPE(TREE_OPERAND(t, 1))))
+    return type_keyed(TREE_TYPE(TREE_TYPE(TREE_OPERAND(t, 1))));
+  return false;
 }
 
 // a naturally aligned scalar of 1/2/4/8 bytes that ldar/stlr can access: the size index 0..3, or -1
@@ -224,11 +326,27 @@ static tree to_bits(tree v, tree ity, gimple_seq *seq) {
   return gimplify_to(e, seq);
 }
 
+static void zero_memory_locals(function *fun);
+
 struct order_pass : gimple_opt_pass {
   order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
 
   unsigned int execute(function *fun) final override {
+    zero_memory_locals(fun);
     if (mode == MODE_OFF) return 0;
+    pfield_temps.clear();
+    if (!pfield_decls.empty() || !key_pfields.empty()) {
+      basic_block b0;
+      FOR_EACH_BB_FN(b0, fun)
+        for (gimple_stmt_iterator g = gsi_start_bb(b0); !gsi_end_p(g); gsi_next(&g)) {
+          gimple *st = gsi_stmt(g);
+          if (!gimple_assign_single_p(st)) continue;
+          tree l = gimple_assign_lhs(st), r = gimple_assign_rhs1(st);
+          if ((VAR_P(l) || TREE_CODE(l) == SSA_NAME) && POINTER_TYPE_P(TREE_TYPE(l)) && TREE_CODE(r) == COMPONENT_REF &&
+              pfield_keyed(TREE_OPERAND(r, 1)))
+            pfield_temps.insert(l);
+        }
+    }
     counts c = {0, 0, 0, 0};
     basic_block bb;
     FOR_EACH_BB_FN(bb, fun) {
@@ -339,7 +457,14 @@ struct uninit_pass : gimple_opt_pass {
       tree zero = build_zero_cst(TREE_TYPE(name));
       FOR_EACH_IMM_USE_STMT(use, it, name) {
         FOR_EACH_IMM_USE_ON_STMT(up, it) SET_USE(up, zero);
-        if (gimple_code(use) != GIMPLE_PHI) update_stmt(use);
+        if (gimple_code(use) != GIMPLE_PHI) {
+          // a use inside &p->b changed: the ADDR_EXPR's invariant flag must follow (-fchecking, review 18)
+          for (unsigned k = 0; k < gimple_num_ops(use); k++) {
+            tree op = gimple_op(use, k);
+            if (op && TREE_CODE(op) == ADDR_EXPR) recompute_tree_invariant_for_addr_expr(op);
+          }
+          update_stmt(use);
+        }
       }
       c++;
     }
@@ -349,6 +474,84 @@ struct uninit_pass : gimple_opt_pass {
     return 0;
   }
 };
+
+// Memory locals (an aggregate, an address-taken scalar, a small array) are not SSA values yet when the SSA pass
+// above runs: SRA and the promotion of address-taken locals make them registers later, with the same undefined value
+// (V1's U1-U3: `S s; if (c) s.a = 5; return s.a == 5;` folds to `return 1`). Before SSA, every such local of at most
+// 64 bytes that the function reads gets `x = {}` at its entry; dead-store elimination removes it where every read is
+// preceded by a write. Its end-of-scope clobbers go too, so a loop-body local keeps its value from one iteration to
+// the next, as MSVC's stack slot does (V1's U5). Larger buffers keep their junk: GCC does not scalarize them.
+static unsigned long uninit_mem_zeroed;
+
+static tree mem_local_read(tree *tp, int *walk_subtrees, void *data) {
+  if (TYPE_P(*tp)) { *walk_subtrees = 0; return NULL_TREE; }
+  if (TREE_CODE(*tp) == ADDR_EXPR) { *walk_subtrees = 0; return NULL_TREE; }   // &x is not a read of x
+  if (VAR_P(*tp)) ((std::set<tree> *)data)->insert(*tp);
+  return NULL_TREE;
+}
+
+static bool zero_candidate(function *fun, tree v) {
+  if (!VAR_P(v) || TREE_STATIC(v) || DECL_EXTERNAL(v) || DECL_HARD_REGISTER(v) || DECL_CONTEXT(v) != fun->decl) return false;
+  if (TREE_THIS_VOLATILE(v) || DECL_THREAD_LOCAL_P(v)) return false;
+  tree ty = TREE_TYPE(v);
+  if (!(TREE_ADDRESSABLE(v) || AGGREGATE_TYPE_P(ty))) return false;   // registers: the SSA pass
+  if (!TYPE_SIZE_UNIT(ty) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(ty))) return false;
+  unsigned HOST_WIDE_INT sz = tree_to_uhwi(TYPE_SIZE_UNIT(ty));
+  return sz > 0 && sz <= 64;
+}
+
+static void zero_memory_locals(function *fun) {
+  if (!uninit_zero) return;
+  std::set<tree> read;
+  basic_block bb;
+  FOR_EACH_BB_FN(bb, fun) {
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+      gimple *st = gsi_stmt(gsi);
+      if (gimple_clobber_p(st)) continue;
+      if (is_gimple_assign(st)) {
+        for (unsigned i = 1; i < gimple_num_ops(st); i++) {
+          tree op = gimple_op(st, i);
+          if (op) walk_tree(&op, mem_local_read, &read, NULL);
+        }
+        tree lhs = gimple_assign_lhs(st);   // a store into part of x through x.f[i] reads nothing of x
+        if (lhs && handled_component_p(lhs))
+          for (tree r = lhs; handled_component_p(r); r = TREE_OPERAND(r, 0))
+            for (int k = 1; k < TREE_OPERAND_LENGTH(r); k++)
+              if (TREE_OPERAND(r, k)) walk_tree(&TREE_OPERAND(r, k), mem_local_read, &read, NULL);
+      } else {
+        for (unsigned i = 0; i < gimple_num_ops(st); i++) {
+          tree op = gimple_op(st, i);
+          if (!op) continue;
+          if (is_gimple_call(st) && op == gimple_call_lhs(st)) continue;
+          walk_tree(&op, mem_local_read, &read, NULL);
+        }
+      }
+    }
+  }
+  std::vector<tree> zero;
+  for (tree v : read)
+    if (zero_candidate(fun, v)) zero.push_back(v);
+  if (zero.empty()) return;
+  std::set<tree> zs(zero.begin(), zero.end());
+  FOR_EACH_BB_FN(bb, fun) {
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi);) {
+      gimple *st = gsi_stmt(gsi);
+      if (gimple_clobber_p(st) && zs.count(gimple_assign_lhs(st))) gsi_remove(&gsi, true);
+      else gsi_next(&gsi);
+    }
+  }
+  basic_block entry = single_succ(ENTRY_BLOCK_PTR_FOR_FN(fun));
+  if (!single_pred_p(entry))   // the first block is also a loop header: zero once, on the way in
+    entry = split_edge(single_succ_edge(ENTRY_BLOCK_PTR_FOR_FN(fun)));
+  gimple_stmt_iterator gsi = gsi_after_labels(entry);
+  for (tree v : zero) {
+    tree ty = TREE_TYPE(v);
+    tree init = AGGREGATE_TYPE_P(ty) ? build_constructor(ty, NULL) : build_zero_cst(ty);
+    gimple *g = gimple_build_assign(v, init);
+    gsi_insert_before(&gsi, g, GSI_SAME_STMT);
+  }
+  uninit_mem_zeroed += zero.size();
+}
 
 static const pass_data uninit_data = {
     GIMPLE_PASS, "fnvnx_uninit", OPTGROUP_NONE, TV_NONE, PROP_ssa | PROP_cfg, 0, 0, 0, TODO_update_ssa | TODO_cleanup_cfg,
@@ -397,14 +600,19 @@ static tree *arg_slot(tree t, int i) {
 // OBJ_TYPE_REF's object, so the arguments run before the object and its vtable load. 0: neither (object=first, a
 // constructor or destructor, a call through a pointer to member or another computed callee). The callee itself is
 // never replaced: a COMPOUND_EXPR there would make a direct call indirect.
+// object=msvc follows MSVC 2008 as recorded in all five configurations (S11, tests/s11/order/order.msvc): a direct
+// member call (member operators included) evaluates its arguments, then the object (1); a virtual call evaluates the
+// object first (0: GCC's order); a call through a pointer to member evaluates its arguments, then object and member
+// pointer (3: the chain goes in front of the computed callee, which is an indirect call anyway).
 static int object_kind(tree call, tree fn) {
-  if (!object_last || !fn || arg_count(call) < 1) return 0;
+  if (!(object_last || object_msvc) || !fn || arg_count(call) < 1) return 0;
   if (TREE_CODE(call) == AGGR_INIT_EXPR && AGGR_INIT_VIA_CTOR_P(call)) return 0;
   if (TREE_CODE(fn) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(fn, 0)) == FUNCTION_DECL) {
     tree d = TREE_OPERAND(fn, 0);
     return DECL_CONSTRUCTOR_P(d) || DECL_DESTRUCTOR_P(d) ? 0 : 1;
   }
-  return TREE_CODE(fn) == OBJ_TYPE_REF ? 2 : 0;
+  if (TREE_CODE(fn) == OBJ_TYPE_REF) return object_msvc ? 0 : 2;
+  return object_msvc && TREE_CODE(call) == CALL_EXPR ? 3 : 0;
 }
 
 // an object no argument can change: a constant, or the address of a declaration
@@ -448,7 +656,10 @@ static void reorder_call(tree call) {
     }
     if (!TREE_CONSTANT(a)) live++;
   }
-  if (okind) {
+  if (okind == 3) {
+    // pointer to member: the callee holds the object and the member pointer; the arguments go in front of it
+    if (!TREE_SIDE_EFFECTS(fn) && !effects) okind = 0;
+  } else if (okind) {
     // the object moves only where it and an argument can see each other: one has side effects, the other is live
     tree obj = *arg_slot(call, 0);
     if (!scalar_arg(obj) || !((TREE_SIDE_EFFECTS(obj) && live) || (!invariant_object(obj) && effects))) okind = 0;
@@ -468,7 +679,9 @@ static void reorder_call(tree call) {
     tree a = *arg_slot(call, i);
     if (TREE_CODE(a) == SAVE_EXPR) chain = build2(COMPOUND_EXPR, TREE_TYPE(chain), a, chain);
   }
-  if (okind == 2) {
+  if (okind == 3) {
+    CALL_EXPR_FN(call) = build2(COMPOUND_EXPR, TREE_TYPE(fn), chain, fn);
+  } else if (okind == 2) {
     // GCC gimplifies the callee before the arguments, and an OBJ_TYPE_REF's object before its vtable load: with
     // the chain in front of that object, the arguments, the object and the vtable load run in this order
     tree &o = OBJ_TYPE_REF_OBJECT(fn);
@@ -497,9 +710,27 @@ static int parm_index(tree fndecl, tree parm) {
 
 // What a pointer argument designates: a field (`&obj.m`, `&p->m[2]`, or `obj.m` bound to a reference parameter), a
 // variable (`&g`), or a parameter of the current function (`p`, `&*r` for a reference r); NULL_TREE otherwise.
+static bool local_pointer(tree a) {
+  return a && TREE_CODE(a) == VAR_DECL && !TREE_STATIC(a) && !DECL_EXTERNAL(a) && POINTER_TYPE_P(TREE_TYPE(a));
+}
+
+// local pointers of the function being walked: what they were set to (`long *p = &o->m;`, `p = q` from a parameter)
+static std::map<tree, std::vector<tree>> local_addr;
+static std::map<tree, int> local_parm;
+struct local_use { tree local; tree callee; int arg; };   // callee NULL_TREE: handed to Interlocked*
+static std::vector<local_use> local_uses;
+static tree operand_local;   // set by operand_of when the argument is such a local pointer
+
 static tree operand_of(tree a, int *parm) {
   *parm = -1;
+  operand_local = NULL_TREE;
   while (CONVERT_EXPR_P(a) || TREE_CODE(a) == NON_LVALUE_EXPR || TREE_CODE(a) == VIEW_CONVERT_EXPR) a = TREE_OPERAND(a, 0);
+  // `o->cnt + i`, `g_cnt + i`, `&arr[i]` on a pointer parameter (folded to p + i*4): the base designates it (review 7, 12)
+  while (TREE_CODE(a) == POINTER_PLUS_EXPR) {
+    a = TREE_OPERAND(a, 0);   // the front end wraps a declaration in a VIEW_CONVERT_EXPR location wrapper here
+    while (CONVERT_EXPR_P(a) || TREE_CODE(a) == NON_LVALUE_EXPR || TREE_CODE(a) == VIEW_CONVERT_EXPR) a = TREE_OPERAND(a, 0);
+  }
+  if (local_pointer(a)) { operand_local = a; return NULL_TREE; }
   if (TREE_CODE(a) == PARM_DECL && current_fn) {
     if (POINTER_TYPE_P(TREE_TYPE(a))) *parm = parm_index(current_fn, a);
     return NULL_TREE;
@@ -517,16 +748,47 @@ static tree operand_of(tree a, int *parm) {
   return NULL_TREE;
 }
 
+// the field at offset 0 of the record a pointer of another type points to: `InterlockedCompareExchange((LONG *)this,
+// 1, 0)` locks the object's first member, which its own `m_state = 0` then unlocks (adversarial review 8)
+static tree first_field_of(tree a) {
+  tree inner = a;
+  while (CONVERT_EXPR_P(inner) || TREE_CODE(inner) == NON_LVALUE_EXPR) inner = TREE_OPERAND(inner, 0);
+  if (inner == a || !POINTER_TYPE_P(TREE_TYPE(inner))) return NULL_TREE;
+  tree rec = TREE_TYPE(TREE_TYPE(inner));
+  for (int depth = 0; rec && RECORD_OR_UNION_TYPE_P(rec) && depth < 8; depth++) {
+    tree f = TYPE_FIELDS(rec);
+    while (f && (TREE_CODE(f) != FIELD_DECL || !integer_zerop(bit_position(f)))) f = DECL_CHAIN(f);
+    if (!f) return NULL_TREE;
+    if (!DECL_FIELD_IS_BASE(f) && !RECORD_OR_UNION_TYPE_P(TREE_TYPE(f))) return f;
+    rec = TREE_TYPE(f);   // a base subobject or nested record at offset 0: its first member
+  }
+  return NULL_TREE;
+}
+
+static void ilk_operand(tree a, int depth) {
+  tree s0 = a;
+  while (CONVERT_EXPR_P(s0) || TREE_CODE(s0) == NON_LVALUE_EXPR) s0 = TREE_OPERAND(s0, 0);
+  if (TREE_CODE(s0) == COND_EXPR && depth < 4) {   // c ? &a->m : &b->m (review 14)
+    ilk_operand(TREE_OPERAND(s0, 1), depth + 1);
+    ilk_operand(TREE_OPERAND(s0, 2), depth + 1);
+    return;
+  }
+  if (tree f = first_field_of(a)) interlocked_decls.insert(f);
+  if (TREE_CODE(s0) == COMPONENT_REF && POINTER_TYPE_P(TREE_TYPE(s0))) pfield_decls.insert(TREE_OPERAND(s0, 1));
+  int parm;
+  tree d = operand_of(a, &parm);
+  if (d) interlocked_decls.insert(d);
+  else if (parm >= 0) forwarders.insert(std::make_pair(current_fn, parm));
+  else if (operand_local) local_uses.push_back({operand_local, NULL_TREE, 0});
+}
+
 static void note_interlocked(tree call) {
   tree fn = get_callee_fndecl(call);
   if (!fn || !DECL_NAME(fn) || call_expr_nargs(call) < 1) return;
   const char *n = IDENTIFIER_POINTER(DECL_NAME(fn));
   bool ilk = !strncmp(n, "Interlocked", 11) || !strncmp(n, "_Interlocked", 12);
   if (ilk) {
-    int parm;
-    tree d = operand_of(CALL_EXPR_ARG(call, 0), &parm);
-    if (d) interlocked_decls.insert(d);
-    else if (parm >= 0) forwarders.insert(std::make_pair(current_fn, parm));
+    ilk_operand(CALL_EXPR_ARG(call, 0), 0);
     return;
   }
   // any other direct call: remember which fields / variables / own parameters it binds to which argument, in case
@@ -539,7 +801,39 @@ static void note_interlocked(tree call) {
     tree d = operand_of(a, &parm);
     if (d) decl_calls.push_back({fn, i, d});
     else if (parm >= 0) param_calls.push_back({current_fn, parm, fn, i});
+    else if (operand_local) local_uses.push_back({operand_local, fn, i});
   }
+}
+
+// `p = &o->m` / `long *p = &o->m;` / `p = param` for a local pointer p
+static void note_local_set(tree lhs, tree rhs) {
+  if (!local_pointer(lhs) || !rhs) return;
+  int parm;
+  tree d = operand_of(rhs, &parm);
+  if (d) { local_addr[lhs].push_back(d); alias_targets[lhs].push_back(d); }
+  else if (parm >= 0) local_parm[lhs] = parm;
+  else if (operand_local && operand_local != lhs) {   // p = q: q's targets
+    for (tree x : local_addr[operand_local]) { local_addr[lhs].push_back(x); alias_targets[lhs].push_back(x); }
+    auto it = local_parm.find(operand_local);
+    if (it != local_parm.end()) local_parm[lhs] = it->second;
+  }
+}
+
+static void resolve_locals() {
+  for (const local_use &u : local_uses) {
+    for (tree d : local_addr[u.local]) {
+      if (!u.callee) interlocked_decls.insert(d);
+      else decl_calls.push_back({u.callee, u.arg, d});
+    }
+    auto it = local_parm.find(u.local);
+    if (it != local_parm.end()) {
+      if (!u.callee) forwarders.insert(std::make_pair(current_fn, it->second));
+      else param_calls.push_back({current_fn, it->second, u.callee, u.arg});
+    }
+  }
+  local_addr.clear();
+  local_parm.clear();
+  local_uses.clear();
 }
 
 static void resolve_forwarders() {
@@ -610,18 +904,56 @@ static tree poll_cond_walk(tree *tp, int *walk_subtrees, void *data) {
     case ADDR_EXPR:   // &x is not a read of x
       *walk_subtrees = 0;
       break;
+    case BIT_FIELD_REF: {   // a folded bit-field test: the fields its bits cover
+      std::vector<tree> fs;
+      overlapped_fields(t, fs);
+      for (tree f : fs) s->shared.push_back(f);
+      break;
+    }
+    case INDIRECT_REF: case MEM_REF: {
+      // `*(volatile BOOL *)&f->m_done` reads f->m_done; `*q` reads what the local pointer / reference q was set to
+      tree p = TREE_OPERAND(t, 0);
+      while (CONVERT_EXPR_P(p) || TREE_CODE(p) == NON_LVALUE_EXPR || TREE_CODE(p) == VIEW_CONVERT_EXPR) p = TREE_OPERAND(p, 0);
+      if (TREE_CODE(p) == ADDR_EXPR) {
+        tree r = TREE_OPERAND(p, 0);
+        while (TREE_CODE(r) == ARRAY_REF) r = TREE_OPERAND(r, 0);
+        if (TREE_CODE(r) == COMPONENT_REF) s->shared.push_back(TREE_OPERAND(r, 1));
+        else if (VAR_P(r) && (TREE_STATIC(r) || DECL_EXTERNAL(r))) s->shared.push_back(r);
+      } else if (local_pointer(p)) {
+        auto it = local_addr.find(p);
+        if (it != local_addr.end())
+          for (tree d : it->second) s->shared.push_back(d);
+      }
+      break;
+    }
     default: break;
   }
   return poll_body_walk(tp, walk_subtrees, data);
 }
 
-static void poll_loop(tree loop, tree cond, tree body) {
-  if (!cond) return;
+// `if (flag) break;` as a statement of an endless loop's body: the break's condition
+static tree break_cond(tree t) {
+  if (TREE_CODE(t) != IF_STMT || ELSE_CLAUSE(t)) return NULL_TREE;
+  tree th = THEN_CLAUSE(t);
+  while (th && TREE_CODE(th) == STATEMENT_LIST && tsi_one_before_end_p(tsi_start(th))) th = tsi_stmt(tsi_start(th));
+  return th && TREE_CODE(th) == BREAK_STMT ? IF_COND(t) : NULL_TREE;
+}
+
+static void poll_endless(tree loop, tree body);
+
+static void poll_loop(tree loop, tree cond, tree body, tree incr = NULL_TREE) {
+  if (!cond || (TREE_CODE(cond) == INTEGER_CST && !integer_zerop(cond))) {
+    if (!incr) poll_endless(loop, body);
+    return;
+  }
   poll_scan c = {false, false, false, {}};
   walk_tree_without_duplicates(&cond, poll_cond_walk, &c);
-  if (c.other || c.waited || c.vol || c.shared.empty()) return;   // a scan, a call, or a POLL-VOLATILE (ordered already)
+  // a scan or a call: not a poll. A volatile poll (POLL-VOLATILE) is ordered on the reader's side already, but its
+  // writer may be another unit's plain store: its fields are keyed too (adversarial review 2)
+  if (c.other || c.waited || c.shared.empty()) return;
   poll_scan b = {false, false, false, {}};
   if (body) walk_tree_without_duplicates(&body, poll_body_walk, &b);
+  if (incr) walk_tree_without_duplicates(&incr, poll_body_walk, &b);   // for (; !flag; Sleep(0)); (review 11)
   if (b.other) return;
   for (tree d : c.shared) poll_decls.insert(d);
   polls_plain++;
@@ -630,12 +962,44 @@ static void poll_loop(tree loop, tree cond, tree body) {
            "%<fnvnx_order%>: plain poll (%s): %qD ordered", b.waited ? "wait" : "spin", c.shared[0]);
 }
 
+// `for (;;) { if (flag) break; Sleep(0); }`: the same poll with its test inside an endless loop. Every statement of
+// the body is either such a break test or a wait; the break conditions are judged like a loop condition.
+static void poll_endless(tree loop, tree body) {
+  if (!body) return;
+  while (TREE_CODE(body) == BIND_EXPR) body = BIND_EXPR_BODY(body);
+  std::vector<tree> conds, rest;
+  if (TREE_CODE(body) == STATEMENT_LIST) {
+    for (tree_stmt_iterator i = tsi_start(body); !tsi_end_p(i); tsi_next(&i)) {
+      tree st = tsi_stmt(i);
+      if (TREE_CODE(st) == CLEANUP_POINT_EXPR) st = TREE_OPERAND(st, 0);
+      tree c = break_cond(st);
+      if (c) conds.push_back(c); else rest.push_back(st);
+    }
+  } else {
+    tree c = break_cond(body);
+    if (!c) return;
+    conds.push_back(c);
+  }
+  if (conds.empty()) return;
+  poll_scan c = {false, false, false, {}};
+  for (tree &x : conds) walk_tree_without_duplicates(&x, poll_cond_walk, &c);
+  if (c.other || c.waited || c.vol || c.shared.empty()) return;
+  poll_scan b = {false, false, false, {}};
+  for (tree &x : rest) walk_tree_without_duplicates(&x, poll_body_walk, &b);
+  if (b.other) return;
+  for (tree d : c.shared) poll_decls.insert(d);
+  polls_plain++;
+  if (verbose_sites)
+    inform(EXPR_LOCATION(loop) != UNKNOWN_LOCATION ? EXPR_LOCATION(loop) : DECL_SOURCE_LOCATION(current_fn),
+           "%<fnvnx_order%>: plain poll (%s, break test): %qD ordered", b.waited ? "wait" : "spin", c.shared[0]);
+}
+
 static void poll_contexts(tree t) {
   switch (TREE_CODE(t)) {
     case WHILE_STMT: poll_loop(t, WHILE_COND(t), WHILE_BODY(t)); break;
     case DO_STMT: poll_loop(t, DO_COND(t), DO_BODY(t)); break;
     case FOR_STMT:
-      if (!FOR_EXPR(t) && !FOR_INIT_STMT(t)) poll_loop(t, FOR_COND(t), FOR_BODY(t));
+      if (!FOR_INIT_STMT(t)) poll_loop(t, FOR_COND(t), FOR_BODY(t), FOR_EXPR(t));
       break;
     default: break;
   }
@@ -643,22 +1007,50 @@ static void poll_contexts(tree t) {
 
 // ---- discover=<file>: this unit's keys, for the whole-program key list (toolchain/order/keys.sh)
 
-static void key_line(std::set<std::string> &out, tree d) {
-  if (!DECL_NAME(d)) return;
+static std::string key_of(tree d) {
+  if (!DECL_NAME(d)) return "";
   const char *n = IDENTIFIER_POINTER(DECL_NAME(d));
   if (TREE_CODE(d) == FIELD_DECL) {
     std::string r = record_name(d);
-    if (!r.empty() && !IDENTIFIER_ANON_P(DECL_NAME(d))) out.insert("field " + r + "::" + n);
+    if (!r.empty() && !IDENTIFIER_ANON_P(DECL_NAME(d))) return "field " + r + "::" + n;
   } else if (TREE_CODE(d) == VAR_DECL && (TREE_STATIC(d) || DECL_EXTERNAL(d)) && !DECL_THREAD_LOCAL_P(d)) {
-    out.insert(std::string("var ") + n);
+    return std::string("var ") + n;
   }
+  return "";
+}
+static void key_line(std::set<std::string> &out, tree d) {
+  std::string k = key_of(d);
+  if (!k.empty()) out.insert(k);
+}
+static std::string fn_id(tree fn) {
+  return fn && DECL_ASSEMBLER_NAME(fn) ? IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn)) : "";
 }
 
+// Besides the unit's own keys, the facts another unit may complete (toolchain/order/keys_merge.py resolves them
+// over the whole program): a forwarder defined here and called elsewhere, a call here to a forwarder defined
+// elsewhere.  fwd <fn> <i>            fn hands (the pointee of) parameter i to Interlocked*
+//         pcall <f> <j> <g> <i>     f passes its parameter j to g's parameter i
+//         call <g> <i> <key>        a call of g binds <key> (field ... / var ...) to parameter i
 static void write_discovered() {
   if (!forwarders_resolved) resolve_forwarders();
   std::set<std::string> lines;
   for (tree d : interlocked_decls) key_line(lines, d);
   for (tree d : poll_decls) key_line(lines, d);
+  for (tree d : pfield_decls) {
+    std::string k = key_of(d);
+    if (k.compare(0, 6, "field ") == 0) lines.insert("pfield " + k.substr(6));
+  }
+  for (const auto &f : forwarders)
+    if (TREE_PUBLIC(f.first) || DECL_COMDAT(f.first)) lines.insert("fwd " + fn_id(f.first) + " " + std::to_string(f.second));
+  for (const param_call &c : param_calls)
+    if (!forwarders.count(std::make_pair(c.callee, c.arg)) && (TREE_PUBLIC(c.callee) || DECL_COMDAT(c.callee)))
+      lines.insert("pcall " + fn_id(c.caller) + " " + std::to_string(c.caller_parm) + " " + fn_id(c.callee) + " " +
+                   std::to_string(c.arg));
+  for (const decl_call &c : decl_calls) {
+    if (forwarders.count(std::make_pair(c.callee, c.arg)) || !(TREE_PUBLIC(c.callee) || DECL_COMDAT(c.callee))) continue;
+    std::string k = key_of(c.decl);
+    if (!k.empty()) lines.insert("call " + fn_id(c.callee) + " " + std::to_string(c.arg) + " " + k);
+  }
   std::ofstream out(discover_path, std::ios::trunc);
   if (!out) { error("%<fnvnx_order%>: cannot write %s", discover_path); return; }
   for (const std::string &l : lines) out << l << "\n";
@@ -738,9 +1130,47 @@ static void refcount_contexts(tree t) {
   }
 }
 
+// assign=msvc: a built-in compound assignment `*p() += a()` evaluates its left operand first under MSVC 2008 (all five
+// recorded configurations: "pa"); C++17 makes GCC evaluate the right one first. The front end has already put the
+// left operand's side effects into SAVE_EXPRs that the right side shares (the `lhs = lhs + rhs` form): they are
+// evaluated in front of the assignment. A plain `=` is left alone: MSVC's own order differs between /O2 and /Od.
+static std::set<tree> assigns_done;
+static unsigned long assigns_reordered;
+
+static tree collect_saves(tree *tp, int *walk_subtrees, void *data) {
+  if (TYPE_P(*tp)) { *walk_subtrees = 0; return NULL_TREE; }
+  if (TREE_CODE(*tp) == SAVE_EXPR) {
+    if (TREE_SIDE_EFFECTS(TREE_OPERAND(*tp, 0))) ((std::vector<tree> *)data)->push_back(*tp);
+    *walk_subtrees = 0;
+  }
+  return NULL_TREE;
+}
+static tree find_tree(tree *tp, int *, void *data) { return *tp == (tree)data ? *tp : NULL_TREE; }
+
+static void compound_assign(tree *tp) {
+  tree t = *tp;
+  if (!assign_msvc || TREE_CODE(t) != MODIFY_EXPR || assigns_done.count(t)) return;
+  tree lhs = TREE_OPERAND(t, 0), rhs = TREE_OPERAND(t, 1);
+  if (!TREE_SIDE_EFFECTS(lhs) || !TREE_SIDE_EFFECTS(rhs) || !scalar_arg(lhs)) return;
+  std::vector<tree> saves;
+  walk_tree_without_duplicates(&lhs, collect_saves, &saves);
+  tree chain = NULL_TREE;
+  for (tree sv : saves)
+    if (walk_tree_without_duplicates(&rhs, find_tree, sv))   // shared by both sides: the compound form
+      chain = chain ? build2(COMPOUND_EXPR, void_type_node, chain, sv) : sv;
+  if (!chain) return;
+  assigns_done.insert(t);
+  *tp = build2(COMPOUND_EXPR, TREE_TYPE(t), chain, t);
+  assigns_reordered++;
+}
+
 static tree order_args_walk(tree *tp, int *, void *) {
+  compound_assign(tp);
   refcount_contexts(*tp);
   poll_contexts(*tp);
+  if (TREE_CODE(*tp) == MODIFY_EXPR || TREE_CODE(*tp) == INIT_EXPR) note_local_set(TREE_OPERAND(*tp, 0), TREE_OPERAND(*tp, 1));
+  else if (TREE_CODE(*tp) == DECL_EXPR && TREE_CODE(DECL_EXPR_DECL(*tp)) == VAR_DECL)
+    note_local_set(DECL_EXPR_DECL(*tp), DECL_INITIAL(DECL_EXPR_DECL(*tp)));
   if (TREE_CODE(*tp) == CALL_EXPR) {
     note_interlocked(*tp);
     if (interlocked_kind(*tp)) ilk_full++;
@@ -761,6 +1191,7 @@ static void pre_genericize(void *gcc_data, void *) {
   if (in_system_header_at(DECL_SOURCE_LOCATION(fndecl))) return;
   current_fn = fndecl;
   walk_tree_without_duplicates(&DECL_SAVED_TREE(fndecl), order_args_walk, NULL);
+  resolve_locals();
   current_fn = NULL_TREE;
 }
 
@@ -776,6 +1207,12 @@ static void read_keys(const char *path) {
       if (last == std::string::npos) continue;
       size_t prev = last == 0 ? std::string::npos : k.rfind("::", last - 1);
       key_fields.insert(prev == std::string::npos ? k : k.substr(prev + 2));
+    } else if (line.compare(0, 7, "pfield ") == 0) {
+      std::string k = line.substr(7);
+      size_t last = k.rfind("::");
+      if (last == std::string::npos) continue;
+      size_t prev = last == 0 ? std::string::npos : k.rfind("::", last - 1);
+      key_pfields.insert(prev == std::string::npos ? k : k.substr(prev + 2));
     } else if (line.compare(0, 4, "var ") == 0) {
       std::string k = line.substr(4);
       size_t last = k.rfind("::");
@@ -813,13 +1250,18 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
       else if (!strcmp(v, "ltr")) args_rtl = false;
       else { error("%<fnvnx_order%>: unknown argument order %s", v); return 1; }
     } else if (!strcmp(k, "object") && v) {
-      if (!strcmp(v, "first")) object_last = false;
-      else if (!strcmp(v, "last")) object_last = true;
+      if (!strcmp(v, "first")) object_last = object_msvc = false;
+      else if (!strcmp(v, "last")) { object_last = true; object_msvc = false; }
+      else if (!strcmp(v, "msvc")) { object_msvc = true; object_last = false; }
       else { error("%<fnvnx_order%>: unknown object order %s", v); return 1; }
     } else if (!strcmp(k, "operator") && v) {
       if (!strcmp(v, "cpp17")) operator_rtl = false;
       else if (!strcmp(v, "rtl")) operator_rtl = true;
       else { error("%<fnvnx_order%>: unknown operator order %s", v); return 1; }
+    } else if (!strcmp(k, "assign") && v) {
+      if (!strcmp(v, "cpp17")) assign_msvc = false;
+      else if (!strcmp(v, "msvc")) assign_msvc = true;
+      else { error("%<fnvnx_order%>: unknown assignment order %s", v); return 1; }
     }
     else { error("%<fnvnx_order%>: unknown argument %s", k); return 1; }
   }

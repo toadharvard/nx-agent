@@ -106,9 +106,9 @@
   "boot_to_winmain_s": 3.0,
   "boot_clock": "stock",
   "budget": {
-   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock (stretch_60: the mid worst frame <= 16.7 ms, J-0150)",
+   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock (target_60: the worst frame <= 16.7 ms, J-0150)",
    "scenario": "placed",
-   "target": "stretch_60",
+   "target": "target_60",
    "model": "docs/PERF_budget.json"
   }
  },
@@ -151,5 +151,12 @@
   "_doc": "tools/difffuzz/metric.py as the scorecard's S13 row; trusted=false shows its value as no-data (set it to true once S13 fixes V1's findings)",
   "trusted": false,
   "why": "V1 refuted metric.py (M1-M3: a missing, FAILED-only or deadline-pending shard lowers the metric)"
+ },
+ "report_due_s": 43200,
+ "_report_due_s_doc": "a pass whose source is behind the head and older than this (s, against the newest publish time) is overdue: stale, not a pass",
+ "trend": {
+  "_doc": "fnvnx-trend/1: the gates job keeps the per-head scorecard history in its JSON sidecar (reports/<farm>/<c12>-gates.json, private repo); ready.py reads the newest one and appends",
+  "farm": "gates1",
+  "keep": 400
  }
 }

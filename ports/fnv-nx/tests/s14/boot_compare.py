@@ -8,7 +8,7 @@ Modes (each a fresh emulator, tests/s5/emu_guest.py with --skip-faulting-init se
   zero     no exe: the boot maps an empty window 0x00400000..0x02100000 (J-0032's traced boot)
   prefill  the same boot path, but the window is filled with the synthetic image's section bytes right after
            the boot zeroed it (before any static initializer runs): only the data differs from 'zero'
-  pe       the synthetic PE32 is the player's exe (sdmc:/fnvnx/game/FalloutNV.exe): S3's loader maps it, binds
+  pe       the synthetic PE32 is the player's exe (sdmc:/switch/fnv/FalloutNV.exe): S3's loader maps it, binds
            the IAT through S4's exports (the synthetic import directory) and rewrites code pointers through
            S2's address map; 0x00400000..0x00fdf000 is mapped zeroed first, as S10 claims it on the console
 
@@ -131,7 +131,7 @@ class Run(emu_guest.Emu):
 def run_mode(a, mode, out_dir, state):
     root = tempfile.mkdtemp(prefix='fnvnx-s14-')
     if mode == 'pe':
-        dst = os.path.join(root, 'fnvnx', 'game', 'FalloutNV.exe')
+        dst = os.path.join(root, 'switch', 'fnv', 'FalloutNV.exe')
         os.makedirs(os.path.dirname(dst))
         shutil.copyfile(a.image, dst)
     emu = Run(a.nso, root)

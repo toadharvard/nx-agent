@@ -312,14 +312,7 @@ extern "C" BOOL GetComputerNameA(LPSTR buf, LPDWORD n)
     return TRUE;
 }
 
-extern "C" DWORD GetEnvironmentVariableA(LPCSTR name, LPSTR buf, DWORD n)
-{
-    W32_UNUSED(name);
-    W32_UNUSED(buf);
-    W32_UNUSED(n);
-    SetLastError(203); /* ERROR_ENVVAR_NOT_FOUND */
-    return 0;
-}
+/* GetEnvironmentVariableA: crt_kernel32.cpp, next to the environment block it reads */
 
 /* FormatMessageA: FROM_SYSTEM yields "Error <n>." (no message tables); FROM_STRING copies the string
  * without insert processing beyond %0. */

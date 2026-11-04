@@ -7,7 +7,8 @@
 2. nxcap mode: run_gl's capture of all scenes replays to rb<i>.png equal to the goldens.
 3. d3d9 mode: a synthetic NXD9 capture (tests/s6n/nxd9.py; S6b-style GLSL written here, no game content):
    D3DCOLOR vertex colours, indexed and non-indexed draws, alpha test through the driver UBO, a varying the VS does
-   not write, a rect clear, a skipped fixed-function draw (exit code 3), two presents, per-draw images.
+   not write, a rect clear, a skipped fixed-function draw (exit code 3), two presents, per-draw images; a cube
+   texture sampled per face and a TEXC face update.
 """
 import argparse, os, shutil, subprocess, struct, sys
 
@@ -39,6 +40,15 @@ void main()
 {
 	_gl_FragData_0 = io_10_0 * ps_uniforms_vec4[0] + io_5_0;
 	if (ps_drv_alpha.x == 5 && !(_gl_FragData_0.a > ps_drv_alpharef.x)) discard;
+}
+"""
+PS_CUBE = """#version 450 core
+layout(std140, binding = 0) uniform ps_cbuf_f { vec4 ps_uniforms_vec4[256]; };
+layout(binding = 0) uniform samplerCube ps_s0;
+layout(location = 0) out highp vec4 _gl_FragData_0;
+void main()
+{
+	_gl_FragData_0 = texture(ps_s0, ps_uniforms_vec4[0].xyz);
 }
 """
 
@@ -161,6 +171,38 @@ def main():
     if os.path.exists(os.path.join(d6, "f00000.png")):
         f0 = png(os.path.join(d6, "f00000.png"))
         check(f0.getpixel((8, 24))[:3] == (255, 0, 0) and f0.getpixel((48, 10))[:3] == (0x20, 0x20, 0x20), "--until-draw 0 frame")
+    # cube textures (S16 R2): six 1x1 faces in D3DCUBEMAP_FACES order, sampled through a samplerCube; TEXC face update
+    cb = os.path.join(o.out, "cube.nxd9")
+    w = nxd9.Nxd9Writer(cb)
+    w.device(64, 48, 21, 0)
+    w.shader("vs", 1, struct.pack("<2I", 0xFFFE0300, 0x0000FFFF), VS)
+    w.shader("ps", 3, struct.pack("<2I", 0xFFFF0300, 0x0000FFFF), PS_CUBE)
+    w.decl(1, [(0, 0, 2, 0, 0, 0), (0, 12, 4, 0, 10, 0)])
+    w.vb(1, b"".join(quad(-1, -1, 0, 1, 0xFFFFFFFF) + quad(0, -1, 1, 1, 0xFFFFFFFF)))
+    faces = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 255, 0)]   # RGB per face
+    w.texture(5, 21, 1, 1, [b"".join(struct.pack("4B", b_, g_, r_, 255) for r_, g_, b_ in faces)], flags=2)
+    w.u32("SDCL", 1); w.u32("STRM", 0, 1, 0, 16); w.u32("SVS", 1); w.u32("SPS", 3); w.u32("STEX", 0, 5)
+    w.const_f("vs", 0, [(1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)])
+    w.rs(7, 0); w.rs(22, 1)
+    w.clear(1, 0xFF000000)
+    w.const_f("ps", 0, [(1, 0, 0, 0)]); w.draw(4, 0, 2)               # +X: face 0, left half
+    w.const_f("ps", 0, [(0, 0, -1, 0)]); w.draw(4, 6, 2)              # -Z: face 5, right half
+    w.present()
+    w.rec("TEXC", struct.pack("<4I", 5, 5, 0, 4) + struct.pack("4B", 10, 20, 30, 255))   # -Z face -> RGB (30, 20, 10)
+    w.clear(1, 0xFF000000)
+    w.const_f("ps", 0, [(0, 0, -1, 0)]); w.draw(4, 6, 2)
+    w.present()
+    w.close()
+    d7 = os.path.join(o.out, "cube")
+    os.makedirs(d7)
+    check(run([o.bin, "d3d9", cb, "-o", d7], 0), "cube: rendered, nothing skipped")
+    if os.path.exists(os.path.join(d7, "f00001.png")):
+        f0, f1 = png(os.path.join(d7, "f00000.png")), png(os.path.join(d7, "f00001.png"))
+        check(f0.getpixel((8, 24))[:3] == faces[0], "cube +X samples face 0 %s" % (f0.getpixel((8, 24)),))
+        check(f0.getpixel((48, 24))[:3] == faces[5], "cube -Z samples face 5 %s" % (f0.getpixel((48, 24)),))
+        check(f1.getpixel((48, 24))[:3] == (30, 20, 10), "TEXC updates one face %s" % (f1.getpixel((48, 24)),))
+    else:
+        check(False, "cube frames written")
     check(run([o.bin, "d3d9", os.path.join(o.out, "missing.nxd9"), "-o", d6], 2), "missing input: exit 2")
     open(os.path.join(o.out, "bad.nxd9"), "wb").write(b"NOPE")
     check(run([o.bin, "d3d9", os.path.join(o.out, "bad.nxd9"), "-o", d6], 1), "malformed input: exit 1")

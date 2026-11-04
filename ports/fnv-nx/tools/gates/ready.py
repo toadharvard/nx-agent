@@ -61,6 +61,9 @@ class GitStore:
             raise RuntimeError('git %s: %s' % (' '.join(args), r.stderr.strip()))
         return r.stdout if r.returncode == 0 else None
 
+    def now(self):
+        return int(time.time())
+
     def fetch(self):
         self.git('fetch', '-q', '--filter=blob:none', 'origin',
                  '+refs/heads/reports/*:refs/remotes/origin/reports/*',
@@ -108,6 +111,10 @@ class DirStore:
 
     def fetch(self):
         pass
+
+    def now(self):
+        """fixtures: the newest publish time stands for now (deterministic)"""
+        return max(self.published.values()) if self.published else int(time.time())
 
     def branches(self, prefix):
         out = []
@@ -608,13 +615,24 @@ class Card:
         self.gates = []
         self.boot_info = {}             # S5's boot/milestones.json beyond the milestones: image, peak heap, stub
         self.maxb = th.get('max_commits_behind', 25)
+        self._now = None
         self.abiclass_dir = abiclass_dir        # the gates job's abiclass tables, <c12>.tsv (decomp-derived: never published)
 
     # ---- sources
     def src(self, branch, path, commit, published=None):
         b = self.hist.behind(commit)
-        return dict(branch=branch, path=path, commit=(commit or '')[:12], behind=b, published=published,
-                    stale=b is None or b > self.maxb)   # b < 0: newer than the head, fresh
+        s = dict(branch=branch, path=path, commit=(commit or '')[:12], behind=b, published=published,
+                 stale=b is None or b > self.maxb)      # b < 0: newer than the head, fresh
+        due = self.th.get('report_due_s')
+        if due and b and b > 0 and published and self.store_now() - published > due:
+            # the head moved on and this farm has published nothing newer for longer than a report takes: overdue
+            s.update(stale=True, overdue=True)
+        return s
+
+    def store_now(self):
+        if self._now is None:
+            self._now = self.store.now() if hasattr(self.store, 'now') else int(time.time())
+        return self._now
 
     def report_branches(self, prefix=''):
         """reports/<prefix>* branches, try farms left out: they run agents' unmerged wip heads (push_wip.sh), so
@@ -628,17 +646,26 @@ class Card:
         out = {}
         for br in self.report_branches(prefix):
             farm = br.split('/', 1)[1]
+            newer = None                # a newer report of this farm that FAILED or does not parse
             for path, t in self.store.files(br):
                 if not re.search(pattern, path):
                     continue
                 text = self.store.read(br, path)
                 if not text or failed_report(text):
+                    newer = newer or path
                     continue
                 d = parser(text)
-                if d is None or not accept(d):
+                if d is None:
+                    newer = newer or path
                     continue
+                if not accept(d):
+                    continue            # another shard count: not this farm's newer run of the same job
                 d['_text_commit'] = report_commit(text, path)
-                out[farm] = (d, self.src(br, path, d['_text_commit'], t))
+                s = self.src(br, path, d['_text_commit'], t)
+                if newer:
+                    # the farm ran again and that run failed: this older pass is not today's evidence
+                    s.update(stale=True, superseded_by=newer)
+                out[farm] = (d, s)
                 break
         return out
 
@@ -962,22 +989,46 @@ class Card:
         if not self.fuzz_causes_gates(shards, n):
             self.fuzz_table_gate(shards, srcs, missing, n)
         if shards:
-            with_obj = sum(d['with_obj'] for d, _ in shards.values())
-            ver = sum(d['verdicts'] or 0 for d, _ in shards.values())
+            # per shard (V1 R16/R17): a shard's verdicts count up to its own functions with a native object, a shard
+            # without a positive count of such functions is broken, and every shard must reach the threshold on its
+            # own, so no surplus of one shard hides the gap of another
+            want = self.th.get('fuzz_min_coverage', 0.9)
+            per, broken, over = {}, [], []
+            for k, (d, _) in sorted(shards.items()):
+                wo, v = d.get('with_obj'), d.get('verdicts') or 0
+                if not isinstance(wo, int) or wo <= 0 or not isinstance(v, int) or v < 0:
+                    broken.append(k)
+                    continue
+                if v > wo:
+                    over.append(k)
+                per[k] = (min(v, wo), wo)
+            with_obj = sum(wo for _, wo in per.values())
+            ver = sum(v for v, _ in per.values())
             nm = sum(d['not_modelled'] or 0 for d, _ in shards.values())
             cov = ver / with_obj if with_obj > 0 else 0
-            want = self.th.get('fuzz_min_coverage', 0.9)
+            low = sorted(k for k, (v, wo) in per.items() if v / wo < want)
+            worst = min(per, key=lambda k: per[k][0] / per[k][1]) if per else None
             summ = sorted(k for k, (d, _) in shards.items() if d.get('status'))
             part = sorted(k for k, (d, _) in shards.items() if d.get('status') == 'partial')
             note = '%d not modelled (indirect control flow); %d of %d shards reported' % (nm, len(shards), n)
             if missing:
                 note += ' (missing: %s)' % ','.join(map(str, missing))
+            if worst is not None:
+                note += '; lowest shard %d: %.1f %%' % (worst, 100.0 * per[worst][0] / per[worst][1])
+            if low:
+                note += '; shards below %.0f %%: %s' % (100 * want, ','.join(map(str, low)))
+            if broken:
+                note += '; shards with no positive function count: %s' % ','.join(map(str, broken))
+            if over:
+                note += '; shards with more verdicts than functions (capped): %s' % ','.join(map(str, over))
             note += '; fnvnx-fuzz-summary/1 from %d shards' % len(summ)
             if part:
                 note += ', partial (pending functions): %s' % ','.join(map(str, part))
+            ok = per and not missing and not broken and not low and not over
             self.gate('fuzz.coverage', 'Fuzz', 'S13: functions with a verdict / functions with a native object',
-                      '%.1f %% (%d/%d)' % (100 * cov, ver, with_obj), '>= %.0f %%, all %d shards' % (100 * want, n),
-                      PASS if cov >= want and not missing and ver <= with_obj else FAIL, srcs, note, rank=19)
+                      '%.1f %% (%d/%d)' % (100 * cov, ver, with_obj), '>= %.0f %% in every one of %d shards' % (
+                          100 * want, n), PASS if ok else FAIL, srcs, note, rank=19,
+                      per_shard={str(k): [v, wo] for k, (v, wo) in per.items()})
         else:
             self.nodata('fuzz.coverage', 'Fuzz', 'S13 coverage', '>= 90 %', 'no fuzz report', rank=19)
         self.s13_metric_gate(n)
@@ -1557,7 +1608,7 @@ class Card:
         target: pass (the hi case fits) counts only with a measurement in the inputs (frameprof or the render report);
         a model-only pass, or uncertain (lo fits, hi does not), is no-data; fail (even the lo case misses) fails."""
         bt = self.th['perf'].get('budget', {})
-        scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'stretch_60')
+        scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'target_60')
         doc, src = None, None
         hits = []
         for br in self.report_branches():
@@ -1591,7 +1642,8 @@ class Card:
         for clk in self.th['perf']['clocks']:
             gid, req = 'perf.budget.' + clk['name'], clk.get('required', True)
             title = 'S15 whole-frame CPU budget, scenario %s (%s clock %.3f GHz)' % (scen_id, clk['name'], clk['hz'] / 1e9)
-            thr = 'verdict %s = pass on a measured frame' % target
+            tms = round(1000.0 / self.th['perf']['fps']['target'], 1)
+            thr = 'worst frame <= %.1f ms (hi case) on a measured frame' % tms
             s = scen.get(scen_id)
             res = ((s or {}).get('results') or {}).get(str(int(round(clk['hz'] / 1e6))))
             if not isinstance(res, dict):
@@ -1599,16 +1651,21 @@ class Card:
                             'no scenario %s at %d MHz' % (scen_id, clk['hz'] / 1e6), rank=22,
                             sources=[src] if src else None, required=req)
                 continue
-            v = (res.get('verdicts') or {}).get(target)
-            wf = res.get('worst_frame_ms') or {}
+            # J-0150 / V1 R16: the gate judges the worst frame itself against the target's frame time; S15's own
+            # verdicts (a stretch target is judged on the typical frame) are shown, never used
+            wf = dct(res.get('worst_frame_ms'))
+            lo, hi = wf.get('lo'), wf.get('hi')
+            v = (None if not (posnum(lo) and posnum(hi) and lo <= hi) else
+                 'pass' if hi <= tms else 'fail' if lo > tms else 'uncertain')
             others = ', '.join('%s %s' % (k, (((x.get('results') or {}).get(str(int(round(clk['hz'] / 1e6)))) or {})
                                              .get('level', '?'))) for k, x in scen.items() if k != scen_id)
-            note = 'verdicts %s; level (mid case) %s; critical core %s; inputs: %s; other scenarios: %s' % (
-                ', '.join('%s %s' % kv for kv in (res.get('verdicts') or {}).items()), res.get('level'),
+            note = 'worst frame against %.1f ms: %s; S15 verdicts (not used) %s; level (mid case) %s; critical core %s; inputs: %s; other scenarios: %s' % (
+                tms, v or 'no worst_frame_ms', ', '.join('%s %s' % kv for kv in dct(res.get('verdicts')).items()),
+                res.get('level'),
                 res.get('critical_core'), '+'.join(measured) or 'the model alone [E]', others or '-')
             st = FAIL if v == 'fail' else PASS if v == 'pass' and measured else NODATA
             if st == NODATA:
-                note = ('%s: %s; ' % (target, v or 'missing') + ('needs a measured frame (frameprof on the main loop, '
+                note = ('worst frame %s; ' % (v or 'missing') + ('needs a measured frame (frameprof on the main loop, '
                         'B1 on hardware)' if v != 'pass' else 'model only, needs a measurement') + '; ' + note)
             self.gate(gid, 'Performance', title, 'worst frame %s ms mid (%s - %s)' % (
                 wf.get('mid', '?'), wf.get('lo', '?'), wf.get('hi', '?')), thr, st, src, note, rank=22, required=req,
@@ -1677,8 +1734,10 @@ def verdict(gates):
         if not g.get('required', True):
             c['informative'] += 1
             continue
-        c[g['status']] += 1
-        c['stale'] += g['stale']
+        if g['status'] == PASS and g['stale']:
+            c['stale'] += 1             # a stale pass is not a pass (R0 regression detector)
+        else:
+            c[g['status']] += 1
     ready = c[FAIL] == 0 and c[NODATA] == 0 and c['stale'] == 0
     return ('READY' if ready else 'NOT READY'), c
 
@@ -1736,11 +1795,15 @@ def scorecard(gates, th):
     target_ms = round(1000.0 / fps, 1)
     rows = []
 
-    def row(stage, what, ids, value, target, gap, unit='', note=''):
+    def row(rid, stage, what, ids, value, target, gap, unit='', note=''):
         gs = [G[i] for i in ids if i in G]
         srcs = list({(s['branch'], s['path']): s for g in gs for s in g['sources']}.values())
+        sup = sorted(set(s['superseded_by'] for s in srcs if s.get('superseded_by')))
+        if sup:
+            # the farm's newer run failed: the number shown is an older run's, so this stage is not measured now
+            gap, note = None, 'newer report failed or unreadable: %s; %s' % (', '.join(sup), note)
         st = 'no-data' if gap is None else 'done' if gap <= 0 else 'open'
-        rows.append(dict(stage=stage, what=what, value=value, target=target, gap=gap, unit=unit, status=st,
+        rows.append(dict(id=rid, stage=stage, what=what, value=value, target=target, gap=gap, unit=unit, status=st,
                          stale=any(s['stale'] for s in srcs), gates=[g['id'] for g in gs], sources=srcs, note=note))
 
     def val(i, key='value'):
@@ -1751,49 +1814,49 @@ def scorecard(gates, th):
         return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
     e = val('compile.census', 'errors')
-    row('compile', 'census errors', ['compile.census'], e, 0, e,
+    row('compile.errors', 'compile', 'census errors', ['compile.census'], e, 0, e,
         note='%s failing units' % G['compile.census'].get('failing', '?') if 'compile.census' in G else '')
     u = val('link.undefined')
-    row('link', 'trial-link undefined names', ['link.undefined'], u, 0, u)
+    row('link.undefined', 'link', 'trial-link undefined names', ['link.undefined'], u, 0, u)
     tr = val('link.traps')
-    row('link', 'guest functions bound to trap stubs', ['link.traps'], tr, 0, tr)
+    row('link.traps', 'link', 'guest functions bound to trap stubs', ['link.traps'], tr, 0, tr)
     x, m = val('abi.x86_inconsistent'), val('abi.manual')
-    row('ABI', 'ABI rows open (x86-inconsistent not explained + manual)', ['abi.x86_inconsistent', 'abi.manual'],
+    row('abi.rows', 'ABI', 'ABI rows open (x86-inconsistent not explained + manual)', ['abi.x86_inconsistent', 'abi.manual'],
         None if x is None or m is None else x + m, 0, None if x is None or m is None else x + m,
         note='x86-inconsistent %s, manual %s' % (x, m))
     fd, ff = val('fuzz.hard', 'divergences'), val('fuzz.hard')
     fz = fd if fd is not None else ff
-    row('fuzz', 'hard divergences (real-bug + triage)' if fd is not None else 'functions with a hard divergence',
+    row('fuzz.hard', 'fuzz', 'hard divergences (real-bug + triage)' if fd is not None else 'functions with a hard divergence',
         ['fuzz.hard', 'fuzz.coverage'], fz, 0, fz,
         note='%s functions; coverage %s' % (ff, G['fuzz.coverage']['value'] if 'fuzz.coverage' in G else '-'))
     sm = G.get('fuzz.s13_metric')
     s13 = sm['value'] if sm and isinstance(sm.get('value'), int) else None
-    row('fuzz', 'S13 metric: artifacts + not fuzzable + unpublished shards (difffuzz/metric.py)',
+    row('fuzz.s13', 'fuzz', 'S13 metric: artifacts + not fuzzable + unpublished shards (difffuzz/metric.py)',
         ['fuzz.s13_metric'], s13, 0, s13 if sm and sm['status'] != NODATA else None, note=sm['note'] if sm else '')
     ec, en = val('equiv.code'), val('equiv.nobuild')
     eq = None if ec is None or en is None else ec + en
-    row('equivalence', 'S11 diffs not by design (functions + units)', ['equiv.code', 'equiv.nobuild'], eq, 0, eq,
+    row('equiv.diffs', 'equivalence', 'S11 diffs not by design (functions + units)', ['equiv.code', 'equiv.nobuild'], eq, 0, eq,
         note='functions %s, units %s' % (ec, en))
     names = th['boot_milestones']
     bg = [G.get('boot.' + n) for n in names]
     known = [g for g in bg if g and g['status'] != NODATA]
     reached = sum(1 for g in bg if g and g['status'] == PASS)
     real = G.get('boot.real_exe', {}).get('status')
-    row('boot', 'milestones reached on the real exe', ['boot.real_exe'] + ['boot.' + n for n in names],
+    row('boot.milestones', 'boot', 'milestones reached on the real exe', ['boot.real_exe'] + ['boot.' + n for n in names],
         '%d/%d' % (reached, len(names)), '%d/%d' % (len(names), len(names)),
         (len(names) - reached) if known or real == FAIL else None, 'milestones',
         note='real exe: %s; %s' % (real or '-', ', '.join('%s %s' % (n, g['status'] if g else '-')
                                                           for n, g in zip(names, bg))))
     fr = G.get('frames.compare')
     ok, n = (fr.get('scenes_ok'), fr.get('scenes')) if fr and fr['status'] != NODATA else (None, None)
-    row('render parity', 'S16 scenes matching the reference', ['frames.compare'],
+    row('render.scenes', 'render parity', 'S16 scenes matching the reference', ['frames.compare'],
         None if n is None else '%d/%d' % (ok, n), 'all', None if n is None else (n - ok) if n else None, 'scenes',
         note=fr['note'] if fr else '')
     bgid = 'perf.budget.' + clk['name']
     b = G.get(bgid)
     wf = dct(b.get('worst_frame_ms')) if b else {}
     mid = wf.get('mid') if posnum(wf.get('mid')) else None      # S15's headline number; lo / hi in the note
-    row('frame budget', 'worst frame at %.2f GHz (S15, mid case), target %d fps' % (clk['hz'] / 1e9, fps), [bgid],
+    row('frame.budget', 'frame budget', 'worst frame at %.2f GHz (S15, mid case), target %d fps' % (clk['hz'] / 1e9, fps), [bgid],
         mid, target_ms, None if mid is None else round(max(0.0, mid - target_ms), 1), 'ms',
         note='lo %s, hi %s; %s' % (wf.get('lo', '?'), wf.get('hi', '?'),
                                      'measured: ' + b['measured'] if b and b.get('measured') else
@@ -1801,10 +1864,103 @@ def scorecard(gates, th):
     cfg = sc.get('gpu_config', 'handheld_720p')
     gg = G.get('perf.gpu.' + cfg)
     gh = dct(gg.get('ms')).get('hi') if gg else None
-    row('frame budget', 'GPU frame, %s (render model, efficiency 0.6)' % cfg.replace('_', ' '), ['perf.gpu.' + cfg],
+    row('frame.gpu', 'frame budget', 'GPU frame, %s (render model, efficiency 0.6)' % cfg.replace('_', ' '), ['perf.gpu.' + cfg],
         gh, target_ms, None if not posnum(gh) else round(max(0.0, gh - target_ms), 1), 'ms',
         note='model, not measured (RENDER_PERF.md section 9)')
     return rows
+
+
+def trend_entry(head, generated, rows):
+    """one fnvnx-trend/1 entry: per scorecard row its gap (None: not measured) and the source commits it was
+    measured at, oldest (largest distance) to newest"""
+    m = {}
+    for r in rows:
+        cs = sorted(((s['behind'] if s['behind'] is not None else 1 << 30), s['commit']) for s in r['sources']
+                    if s.get('commit'))
+        m[r['id']] = dict(gap=r['gap'], value=r['value'], **{'from': cs[-1][1] if cs else None,
+                                                             'to': cs[0][1] if cs else None})
+    return dict(head=(head or '')[:12], generated=generated, metrics=m)
+
+
+def trend_update(prior, entry, keep=400):
+    """the trend with entry appended; a re-score of the same head that changes nothing replaces the last entry"""
+    tr = [e for e in prior if isinstance(e, dict) and isinstance(e.get('metrics'), dict)]
+    if tr and tr[-1].get('head') == entry['head'] and tr[-1]['metrics'] == entry['metrics']:
+        tr[-1] = entry
+    else:
+        tr.append(entry)
+    return tr[-keep:]
+
+
+def regressions(trend):
+    """every metric whose gap rose (or whose measurement was lost) from one entry to the next: {metric, kind:
+    rose | lost, before, after, range: {from, to} (source commits: the earlier entry's oldest .. the later entry's
+    newest, the commits to bisect), heads: {from, to}, open}. A regression closes when a later entry is back at or
+    below its `before`"""
+    out = []
+    ids = []
+    for e in trend:
+        ids += [k for k in e['metrics'] if k not in ids]
+    for mid in ids:
+        last, last_num, opened = None, None, []
+        for e in trend:
+            o = e['metrics'].get(mid)
+            if o is None:
+                continue
+            g = o.get('gap')
+            if last is not None:
+                kind = None
+                if g is None and last.get('gap') is not None:
+                    kind, base, bo = 'lost', last['gap'], last
+                elif g is not None and last_num is not None and g > last_num[0]['gap']:
+                    kind, base, bo = 'rose', last_num[0]['gap'], last_num[0]
+                if kind:
+                    r = dict(metric=mid, kind=kind, before=base, after=g,
+                             range={'from': bo.get('from'), 'to': o.get('to')},
+                             heads={'from': (last_num[1] if kind == 'rose' else last_head), 'to': e['head']},
+                             open=True)
+                    out.append(r)
+                    opened.append(r)
+            if g is not None:
+                for r in opened:
+                    if r['open'] and g <= r['before']:
+                        r['open'] = False
+                        r['closed_at'] = e['head']
+                opened = [r for r in opened if r['open']]
+                last_num = (o, e['head'])
+            last, last_head = o, e['head']
+    return out
+
+
+def regressions_md(regs):
+    op = [r for r in regs if r['open']]
+    L = ['## Regressions', '', 'Metrics of the scorecard that rose (or lost their measurement) between two consecutive '
+         'scored heads and have not come back; bisect the source commit range (fnvnx-trend/1 in the JSON).', '']
+    if not op:
+        return L + ['None open.', '']
+    L += ['| metric | change | source commits to bisect | heads |', '|---|---|---|---|']
+    for r in op:
+        L.append('| %s | %s %s -> %s | %s..%s | %s..%s |' % (
+            r['metric'], r['kind'], '-' if r['before'] is None else r['before'],
+            '-' if r['after'] is None else r['after'], r['range']['from'] or '?', r['range']['to'] or '?',
+            r['heads']['from'] or '?', r['heads']['to'] or '?'))
+    return L + ['']
+
+
+def prior_trend(store, th):
+    """the trend of the newest gates report that carries one: reports/<trend.farm>/*-gates.json"""
+    farm = dct(th.get('trend')).get('farm', 'gates1')
+    br = 'reports/' + farm
+    for path, _ in store.files(br) if br in store.branches(br) else []:
+        if not path.endswith('-gates.json'):
+            continue
+        try:
+            d = json.loads(store.read(br, path) or '')
+        except ValueError:
+            continue
+        if isinstance(d, dict) and isinstance(d.get('trend'), list):
+            return d['trend']
+    return []
 
 
 def scorecard_md(rows):
@@ -1821,7 +1977,7 @@ def scorecard_md(rows):
     return L + ['']
 
 
-def markdown(head, gates, risks, generated, rows=None):
+def markdown(head, gates, risks, generated, rows=None, regs=None):
     v, c = verdict(gates)
     L = ['# fnv-nx first-launch readiness %s' % (head or '?')[:12], '',
          '- integration head: `%s`; generated %s' % (head or '?', generated),
@@ -1830,6 +1986,8 @@ def markdown(head, gates, risks, generated, rows=None):
          '- thresholds: tools/gates/thresholds.json; gates and why: docs/READINESS.md', '']
     if rows:
         L += scorecard_md(rows)
+    if regs is not None:
+        L += regressions_md(regs)
     for grp in ORDER:
         gs = [g for g in gates if g['group'] == grp]
         if not gs:
@@ -1914,7 +2072,10 @@ def main(argv):
     risks = json.loads(readf(a.risks)) if os.path.isfile(a.risks) else []
     gen = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     rows = scorecard(card.gates, th)
-    md = markdown(hist.head, card.gates, risks, gen, rows)
+    trend = trend_update(prior_trend(store, th), trend_entry(hist.head, gen, rows),
+                         dct(th.get('trend')).get('keep', 400))
+    regs = regressions(trend)
+    md = markdown(hist.head, card.gates, risks, gen, rows, regs)
     v, c = verdict(card.gates)
     if a.md:
         writef(a.md, md)
@@ -1923,7 +2084,8 @@ def main(argv):
     if a.json:
         writef(a.json, json.dumps(dict(head=hist.head, generated=gen, verdict=v, counts=c, max_commits_behind=card.maxb,
                        gates=card.gates, blockers=[g['id'] for g in blockers(card.gates)],
-                       missing=[g['id'] for g in missing(card.gates)], scorecard=rows, hardware_risks=risks),
+                       missing=[g['id'] for g in missing(card.gates)], scorecard=rows, hardware_risks=risks,
+                       trend_format='fnvnx-trend/1', trend=trend, regressions=regs),
                                   indent=1) + '\n')
     return 0
 

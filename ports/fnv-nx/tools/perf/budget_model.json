@@ -77,15 +77,15 @@
    "id": "pass_45",
    "fps": 45,
    "ms": 22.2,
-   "kind": "goal",
-   "note": "45 fps stable: worst frame 22.2 ms (main target, J-0132)"
+   "kind": "info",
+   "note": "45 fps on the worst frame (22.2 ms): informational since J-0150"
   },
   {
-   "id": "stretch_60",
+   "id": "target_60",
    "fps": 60,
    "ms": 16.7,
-   "kind": "stretch",
-   "note": "60 fps, may be unstable (J-0132)"
+   "kind": "goal",
+   "note": "60 fps stable: worst frame 16.7 ms at the 1.02 GHz stock clock (the owner's target, J-0150)"
   }
  ],
  "items": [
@@ -106,12 +106,13 @@
    "name": "culling (NiCullingProcess, multibounds, occlusion; main, shadow and reflection passes)",
    "role": "main",
    "minsn": [
-    2,
-    4.5
+    3.54,
+    11.36
    ],
-   "basis": "E",
+   "basis": "E+M",
    "phase": "render",
-   "subsystem": "cull"
+   "subsystem": "cull",
+   "note": "reconciled with the fn_cull_test row (S15-simd, J-0150 follow-up): the earlier 2-4.5 M assumed 0.3-1.8 M for the per-object plane tests (50-90 instructions x 6,000-20,000 objects); V1 measured the decomp's per-object test at 306-433 instructions [M], so the item is the rest of the cull (traversal, multibounds, occlusion: 2-4.5 minus 0.3-1.8 = 1.7-2.7 M [E]) plus 306-433 x 6,000-20,000 (1.84-8.66 M, calls [E]). The measured per-call cost wins over the old item total; the call count stays the open estimate"
   },
   {
    "id": "render_accumulation",
@@ -242,21 +243,21 @@
  "levers": [
   {
    "id": "mt_cull",
-   "name": "cull and accumulation on cores 1-2 (the 360's Rendering Task Thread 2 path: 23 stage records a frame)",
+   "name": "cull and accumulation of the main-scene split on Rendering Task Thread 2 (MT1: record 21, the worker culls leftList2 while main culls the rest)",
    "moves": {
     "cull": [
-     0.7,
-     0.9
+     0.15,
+     0.35
     ],
     "render_accumulation": [
-     0.5,
-     0.7
+     0.15,
+     0.35
     ]
    },
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "bMTRendering:Display (0x011c710c) is unsafe on the PC code: accumulators are built with one batch renderer, the worker indexes a NULL second one and shares main's; current-accumulator globals shared (PERF.md 6.8). Needs port code; TLS fix done (S5 31cdca3), stage protocol modelled (mtqemu stages)"
+   "status": "MT1 patches/mt1_cull.s1b (main accumulator with 2 batch renderers, only record 21 on the worker; PERF.md 6.8), off by default (bMTRendering=0); moves: half of the main-scene pass, which is part of the cull (shadow, water and interface passes stay on main); needs the S1b MT1 class, mtqemu on the real objects past WinMain, the race checker and frame equivalence"
   },
   {
    "id": "havok_workers",
@@ -270,7 +271,7 @@
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the pool is made in the unreconstructed EnsureObjectsCreated (PERF.md 6.9)"
+   "status": "MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the whole chain (EnsureObjectsCreated 0x00cbf6b0, CreateObjects, pool ctor 0x00d2d110, dispatcher, InitHookTable and its handlers) has native code at link 06857911f5ab, both vtables complete; the run waits for a booted frame (PERF.md 6.9)"
   },
   {
    "id": "threaded_anim",
@@ -367,7 +368,9 @@
   {
    "id": "placed",
    "name": "as built: the placement plus the levers that are in the build (barrier_relax)",
-   "levers": ["barrier_relax"]
+   "levers": [
+    "barrier_relax"
+   ]
   },
   {
    "id": "plan45",
@@ -408,12 +411,12 @@
  "hotspot_functions": [
   {
    "id": "fn_world_transform",
-   "name": "NiAVObject::UpdateWorldData 0x00a68c60 + the NiMatrix3 product 0x00a588a0 it composes with",
+   "name": "NiAVObject::UpdateWorldData 0x00a68c60 + the transform compose UpdateWorldLoc 0x00a68bf0 it tail-calls",
    "subsystem": "scene-graph update",
    "role": "main",
    "per_call_insn": [
-    70,
-    100
+    14,
+    50
    ],
    "per_call_basis": "M",
    "calls": [
@@ -421,7 +424,19 @@
     12000
    ],
    "calls_note": "objects whose world transform is recomputed per exterior frame [E]",
-   "per_call_note": "6 + 63 A64 instructions exclusive (dyncount, PERF.md 7) + 10-30 for translation and scale (not measured)"
+   "per_call_note": "with the override fnvnx_update_world_loc_00a68bf0 (S15-simd; NiTransform compose 0x0062c250, products 0x0043f8d0 / 0x004b4500 / 0x004a3760 / 0x00439e90 inlined): 13-14 on the copy paths, 47 + ~3 for a full compose [M] (override_ab.py, link 0bd144db1464, agreement 11 -> 12 of 16). Before: copy paths 12-14, the compose path 23 + a call to an operator* the link leaves unresolved (>100 counted from the parts); the earlier 45-75 also wrongly took the NiMatrix3 transpose product 0x00a588a0 as part of it",
+   "per_call_cycles": [
+    11.5,
+    59.6
+   ],
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     13,
+     100
+    ],
+    "note": "decomp: copy paths 12-14 [M]; compose 23 + operator* (> 100 counted from the parts, the link leaves it unresolved) [M, lower bound]"
+   }
   },
   {
    "id": "fn_nibound_update",
@@ -429,15 +444,21 @@
    "subsystem": "scene-graph update",
    "role": "main",
    "per_call_insn": [
-    45,
-    45
+    46,
+    46
    ],
    "per_call_basis": "M",
    "calls": [
     8000,
     24000
    ],
-   "calls_note": "two per updated object [E]"
+   "calls_note": "two per updated object [E]",
+   "per_call_note": "46 A64 instructions on link 0bd144db1464 (dyncount); the NEON override (19 instructions) was dropped by S15-simd: 16 / 49 cycles against the decomp's 18 / 42 in the A57 model (PERF.md 11.6)",
+   "per_call_cycles": [
+    18.1,
+    42.0
+   ],
+   "per_call_cycles_note": "decomp object, funcmodel.py: 46 x 0.393 (steady) / 0.913 (one call)"
   },
   {
    "id": "fn_node_update",
@@ -454,7 +475,12 @@
     6000
    ],
    "calls_note": "nodes updated per frame [E]",
-   "per_call_note": "19 exclusive for 0x00a5e0b0 [M]; 0x00a5dd70 had no clean case, its loop is estimated"
+   "per_call_note": "19 exclusive for 0x00a5e0b0 [M]; 0x00a5dd70 had no clean case, its loop is estimated",
+   "per_call_cycles": [
+    18.7,
+    87.6
+   ],
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
   },
   {
    "id": "fn_cull_test",
@@ -462,8 +488,8 @@
    "subsystem": "cull",
    "role": "main",
    "per_call_insn": [
-    50,
-    90
+    49,
+    67
    ],
    "per_call_basis": "E",
    "calls": [
@@ -471,7 +497,19 @@
     20000
    ],
    "calls_note": "object tests over the main, 3 shadow and the reflection passes [E]",
-   "per_call_note": "12 exclusive for 0x00a694e0 [M] + 4-6 plane tests (40-80, not measured)"
+   "per_call_note": "before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]; V1 (S15-simd PL1 notes): the classification override is 19 behind the plane, 21 in front or straddling (inside 49-67); the decomp before is 306-433 at 4-6 active planes, not 224-330 (understated)",
+   "per_call_cycles": [
+    52.4,
+    148.0
+   ],
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     306,
+     433
+    ],
+    "note": "decomp: worker 0x00a694e0 + 4-6 active planes x (getter + classification + loop), V1 tests/v1/test_s15simd_decomp.py [M]"
+   }
   },
   {
    "id": "fn_slerp",
@@ -488,7 +526,19 @@
     10000
    ],
    "calls_note": "10-40 animated actors x 60-80 bones x 1-3 sequences [E]",
-   "per_call_note": "NEON override fnvnx_slerp_00a6e330 (tools/link/overrides, S15-simd): 134 -> 88 A64 instructions per call incl. the weight 0x00a6dc30 and the normalisation 0x00a4ff00 (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 9 -> 9)"
+   "per_call_note": "NEON override fnvnx_slerp_00a6e330 (tools/link/overrides, S15-simd): 134 -> 88 A64 instructions per call incl. the weight 0x00a6dc30 and the normalisation 0x00a4ff00 (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 9 -> 9)",
+   "per_call_cycles": [
+    180.6,
+    233.6
+   ],
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     134,
+     134
+    ],
+    "note": "decomp: Slerp + weight 0x00a6dc30 + normalisation 0x00a4ff00, override_ab.py on link 0bd144db1464 [M]"
+   }
   },
   {
    "id": "fn_quat_from_matrix",
@@ -496,15 +546,28 @@
    "subsystem": "animation",
    "role": "main",
    "per_call_insn": [
-    103,
-    103
+    34,
+    77
    ],
    "per_call_basis": "M",
    "calls": [
     500,
     3000
    ],
-   "calls_note": "[E]"
+   "calls_note": "[E]",
+   "per_call_note": "override fnvnx_quat_from_matrix_00a6df40 (S15-simd): per path, 34 (trace > 0) to 77 (largest-diagonal path) A64 instructions (V1, tests/v1/test_s15simd_decomp.py); the harness median 89 -> 77 is the slow path; 103 was an older link",
+   "per_call_cycles": [
+    26.3,
+    99.7
+   ],
+   "per_call_cycles_note": "funcmodel.py on the override: lo = 34 x 0.773 (steady), hi = 77 x 1.295 (one call)",
+   "before": {
+    "per_call_insn": [
+     39,
+     89
+    ],
+    "note": "decomp: trace > 0 path ~39 (static path count of the link object), largest-diagonal path 89 (dyncount) [M]"
+   }
   },
   {
    "id": "fn_pass_bucket",
@@ -512,8 +575,8 @@
    "subsystem": "render accumulation",
    "role": "main",
    "per_call_insn": [
-    82,
-    82
+    54,
+    54
    ],
    "per_call_basis": "M",
    "calls": [
@@ -521,7 +584,12 @@
     5000
    ],
    "calls_note": "geometry passes registered per frame (1.2-1.6 per draw) [E]",
-   "per_call_note": "70 + 12 A64 instructions (1.84x and 0.48x the x86 counts)"
+   "per_call_note": "42 + 12 A64 instructions on link 0bd144db1464 (dyncount, 15 and 8 clean cases; 1.11x and 0.48x the x86 counts); 70 + 12 (1.84x) on an older link. An override measured 42 -> 44 (S15-simd, dropped): the common path is frame setup",
+   "per_call_cycles": [
+    67.8,
+    165.1
+   ],
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
   },
   {
    "id": "fn_gsk",
@@ -529,8 +597,8 @@
    "subsystem": "havok",
    "role": "main",
    "per_call_insn": [
-    600,
-    600
+    539,
+    539
    ],
    "per_call_basis": "M",
    "calls": [
@@ -538,7 +606,19 @@
     2000
    ],
    "calls_note": "convex pair queries per step: character controller casts, contact points [E]",
-   "per_call_note": "303 + 119 + 72 + 109 A64 instructions exclusive [M]"
+   "per_call_note": "292 + 119 + 73 + 95 = 579 A64 instructions exclusive on link 0bd144db1464 [M] (600 on an older link); fnvnx_sse_fast.h (S15-simd, unit_ab.sh, oracle agreement unchanged): two-source _mm_shuffle_ps -> 571, scalar _mm_rsqrt_ss / _mm_add_ss / _mm_set_ss / _mm_load_ss -> 275 + 114 + 70 + 80 = 539",
+   "per_call_cycles": [
+    635.6,
+    826.5
+   ],
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     579,
+     579
+    ],
+    "note": "decomp with sse2neon unchanged: 292 + 119 + 73 + 95 (dyncount, link 0bd144db1464) [M]"
+   }
   },
   {
    "id": "fn_interlocked",
@@ -555,15 +635,20 @@
     100000
    ],
    "calls_note": "S12's 100k is the hi end [E]; boot to WinMain: 3 calls [M]",
-   "per_call_note": "8 instructions [M] (fnvnx_win32.h inline, objdump) + 15-40 cycles of dmb ish as instruction-equivalents at IPC 0.8 [E]"
+   "per_call_note": "8 instructions [M] (fnvnx_win32.h inline, objdump) + 15-40 cycles of dmb ish as instruction-equivalents at IPC 0.8 [E]",
+   "per_call_cycles": [
+    32.6,
+    65.2
+   ],
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
   }
  ],
  "fixes": {
   "cull": {
-   "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
+   "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
-    1.4,
-    4.05
+    0.3,
+    1.575
    ],
    "owner": "S15/S5",
    "needs_hardware": true
@@ -578,10 +663,10 @@
    "needs_hardware": false
   },
   "render accumulation": {
-   "fix": "mt_cull moves 50-70 % with the cull; instancing -10-20 %",
+   "fix": "moves with mt_cull (MT1: the worker registers its half into the main accumulator's second batch renderer); instancing",
    "gain_main_minsn": [
-    0.75,
-    2.8
+    0.225,
+    1.4
    ],
    "owner": "S6n/S15",
    "needs_hardware": true

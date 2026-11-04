@@ -37,3 +37,21 @@ TEST(d3d9_null_module)
 }
 
 static_assert(sizeof(void *) == 4 && sizeof(D3DXMATRIX) == 64, "-m32: the game's data model");
+
+#include <dsound.h>
+#include <xinput.h>
+
+TEST(s7_modules_by_ordinal_and_iat_name)
+{
+    CHECK(fnvnx_win32_lookup_import("XINPUT1_3.dll", NULL, 2) == (void *)&XInputGetState);
+    CHECK(fnvnx_win32_lookup_import("XINPUT1_3.dll", NULL, 3) == (void *)&XInputSetState);
+    CHECK(fnvnx_win32_lookup_import("DSOUND.dll", NULL, 11) == (void *)&DirectSoundCreate8);
+    CHECK(fnvnx_win32_lookup_import("DSOUND.dll", NULL, 1) == (void *)&DirectSoundCreate);
+    /* the exe's IAT names the vorbisfile module libvorbisfile.dll */
+    const char *ov[] = {"ov_open_callbacks", "ov_clear", "ov_pcm_total", "ov_seekable", "ov_read", "ov_info"};
+    for (const char *n : ov) {
+        void *p = fnvnx_win32_lookup_import("libvorbisfile.dll", n, FNVNX_IMPORT_BY_NAME);
+        CHECK(p != NULL);
+        CHECK(p == fnvnx_win32_lookup_export("vorbisfile.dll", n));
+    }
+}
