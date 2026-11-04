@@ -594,61 +594,11 @@ def r_ref_cast_temporaries(path, text, stats):
 
 # ---------------------------------------------------------------------------------------------------------- CSX1
 #
-# D15 (J-0051): the PC CRITICAL_SECTION is 24 bytes with nothing after it - S1b read it from the x86 code (BSThread's
-# constructor initialises the section at +4 and zeroes +0x1c..+0x2c, size 0x30; AbstractHeap is 0x20f0 with the lock
-# as its last 0x18 bytes; RecursiveLock::Leave is LeaveCriticalSection(this)). The decomp's generated layout headers
-# carry the Xbox 360 RTL_CRITICAL_SECTION (28 bytes, RawEvent[4]) and assert every size and offset after it on that
-# basis. Those asserts are wrong on PC; MSVC never saw them hold with the real SDK either (the SDK's type wins behind
-# the `_WINNT_` guard). CSX1 drops exactly those asserts - the ones that fail with the PC type, measured on every unit
-# that includes a decomp critical-section layout: sizeof and the offsets behind the section of
-#   RecursiveLock (0x28), BSThread (0x40), OEI::IO::IO_Thread (0x40), AbstractHeap (0x2100), NiCriticalSection
-#   (owner at 0x1C, lock count at 0x20) and the classes that embed one: BSShaderAccumulator, NiGlobalStringTable,
-#   NiRenderer, GraphicsRenderer (CSX1_ASSERTS below: class -> asserted members, 'sizeof' for the size).
-# The same goes for the member order of the Xbox 360 SDK's (big-endian) _FILETIME, which tesform's layout header
-# asserts. Every other assert stays. The members keep their (PC) layout; nothing else changes.
+# Asserts of the decomp's generated layouts that only hold on the Xbox 360: the member order of its big-endian
+# _FILETIME (tesform's layout header). The critical-section asserts this rule dropped under D15 (J-0051) hold again
+# since D15 was reopened (J-0067): CSX2 gives the generated sections their 28 bytes. Every other assert stays.
 
 CSX1_ASSERTS = {
-    'AbstractHeap': 'sizeof'.split(),
-    'BSShaderAccumulator': 'm_kSecondCriticalSection m_kSecondObjectMap sizeof'.split(),
-    'BSThread': (
-        'm_bThreadStarted m_pCurrentThreadHandle m_pThreadHandle m_uiCreatedThreadId m_uiCurrentThreadId '
-        'sizeof'
-    ).split(),
-    'GraphicsRenderer': (
-        'BatchedGeometryRenderState BatchedObjectRenderState BatchedPropertyRenderState '
-        'BatchedShaderRenderState BooleanFourIntegerFloatRecord GeometryRendererInterface '
-        'MaterialVertexBufferData MaterialVertexBufferRecord MixedInterfacePointerBundleA '
-        'MixedInterfacePointerBundleB RenderTargetState RendererStateRecord '
-        'SevenUnknownInterfacePointerGroupA SevenUnknownInterfacePointerGroupB '
-        'SevenUnknownInterfacePointerGroupC SevenUnknownInterfacePointerGroupD '
-        'SevenUnknownInterfacePointerGroupE ShadowGeometryData TexturePixelFormatCache '
-        'TwoBooleanThreeIntegerFloatRecord VertexBufferAndInterfacePointerBundle m_acPrePackObjectName '
-        'm_apRenderTargetPixelFormats m_aspRenderTargetPixelData m_bAdditionalDeviceCapabilityFlag '
-        'm_bDeviceCapabilityFlag m_bDeviceFlag m_bFlagAt6F4 m_bFlagAt6F5 m_bFlagAt8A4 m_bFlagAt8A5 '
-        'm_bSecondDeviceCapabilityFlag m_eTextureFormat m_fDeviceValue m_fFarPlaneDistance '
-        'm_fGeometryParameter m_fNearPlaneDistance m_fPrePackValue m_kCameraDirection m_kCameraPosition '
-        'm_kCameraRight m_kCameraUp m_kDeviceCapabilities m_kDirect3DResourceRecord m_kFirstShadowMatrix '
-        'm_kGeometryObjectMap m_kModelBound m_kPrePackObjectMap m_kRenderedCubeMapMap m_kRenderedTextureMap '
-        'm_kSecondShadowMatrix m_kShaderData m_kShaderList m_kShadowMatrixAfterThird m_kThirdShadowMatrix '
-        'm_kViewMatrix m_kViewport m_kWorldBound m_pAdditionalCOMInterface m_pCOMUnknownInterface '
-        'm_pCurrentRenderState m_pCurrentRenderTargetGroup m_pDefaultRenderTargetGroup m_pDirect3DDevice '
-        'm_pDynamicGeometryGroup m_pFirstCOMInterface m_pFourthRendererInterface m_pFourthRendererObject '
-        'm_pGeometryGroupManager m_pIndexArray m_pIntermediateGeometryObject m_pPropertyState '
-        'm_pRenderTargetGroup m_pSecondPoint2Array m_pShaderStreamInfo m_pSourcePoint2Array '
-        'm_pUnsharedGeometryGroup m_pVertexBufferData m_ppkPixelFormatTable m_spGeometryBuffer '
-        'm_spRenderMaterial m_spShaderInterface m_uiDeviceResourceCount m_uiDeviceState '
-        'm_uiFirstRendererStateValue m_uiIntegerAfterPrePackValue m_uiSecondInteger '
-        'm_uiSecondRendererStateValue m_uiSecondUnsignedValue m_uiThirdInteger m_uiThirdRendererStateValue '
-        'm_uiViewportState m_usIndexCount sizeof'
-    ).split(),
-    'NiCriticalSection': 'm_uiLockCount m_ulThreadOwner sizeof'.split(),
-    'NiGlobalStringTable': 'sizeof'.split(),
-    'NiRenderer': (
-        'm_acRendererDataD m_acRendererDataE m_bRendererFlagA m_bRendererFlagB m_iRendererState '
-        'm_uiRendererFlags sizeof'
-    ).split(),
-    'OEI::IO::IO_Thread': 'sizeof'.split(),
-    'RecursiveLock': 'm_uiFirstValue m_uiRecursionCount m_uiSecondValue sizeof'.split(),
     # not a critical section: the Xbox 360 SDK's big-endian _FILETIME puts dwHighDateTime first (PC: dwLowDateTime)
     '_FILETIME': 'dwHighDateTime dwLowDateTime'.split(),
 }
@@ -657,13 +607,13 @@ CSX1_LINE = re.compile(r'^[ \t]*\w*ASSERT\s*\(\s*(?:sizeof\s*\(\s*([\w:]+)\s*\)|
                        r'[^\n]*\)\s*;[ \t]*$', re.M)
 
 def r_xbox_cs_asserts(path, text, stats):
-    """CSX1: drop the decomp's Xbox 360 critical-section size / offset asserts (D15, see above)."""
+    """CSX1: drop the decomp's asserts that only hold on the Xbox 360 (see above)."""
     if 'ASSERT' not in text or not any(c.split('::')[-1] in text for c in CSX1_ASSERTS): return text
     def sub(m):
         cls, member = (m.group(1), 'sizeof') if m.group(1) else (m.group(2), m.group(3))
         if member not in CSX1_ASSERTS.get(cls, ()): return m.group(0)
         stats['CSX1'] += 1
-        return '/* fnv-nx CSX1: Xbox 360 layout (D15) */'
+        return '/* fnv-nx CSX1: Xbox 360 layout */'
     return CSX1_LINE.sub(sub, text)
 
 # ---------------------------------------------------------------------------------------------------------- NEW3
@@ -2283,6 +2233,56 @@ def r_stand_in_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- CSX2
+#
+# D15 reopened (J-0067): the decomp's generated layouts were taken from the Xbox 360 build, whose
+# RTL_CRITICAL_SECTION is 28 bytes, and the PC code keeps those 28 bytes. S11's MSVC gate shows the byte-matched
+# GraphicsRenderer::BeginUsingRenderTargetGroup reading +0x200 / +0x208, which only holds when each of its three
+# NiCriticalSections is 128 bytes with m_ulThreadOwner at 0x1C - 4 bytes behind the 24-byte PC section (the
+# section itself starts at +0x0: NiCriticalSection hands `this` to EnterCriticalSection). CSX2 puts those 4 bytes
+# back behind every member of the decomp's generated `_RTL_CRITICAL_SECTION` type whose class asserts the next
+# member (or its size) 0x1C bytes after the section: NiCriticalSection (7 layout copies) and RecursiveLock, and with
+# them every holder (GraphicsRenderer, BSShaderAccumulator, NiGlobalStringTable, NiRenderer, BSThread, AbstractHeap,
+# OEI::IO::IO_Thread). The decomp's asserts then hold again; what the PC build keeps in those 4 bytes is not known
+# (no code of the binary reads them).
+
+CS_MEMBER = re.compile(r'^([ \t]*)_RTL_CRITICAL_SECTION\s+([A-Za-z_]\w*)\s*;', re.M)
+
+def r_critical_section_tail(path, text, stats):
+    """CSX2: 4 bytes behind a generated-layout _RTL_CRITICAL_SECTION member that the class asserts as 28 bytes."""
+    if '_RTL_CRITICAL_SECTION' not in text or 'offsetof' not in text and 'sizeof' not in text: return text
+    spans, edits = None, []
+    for m in CS_MEMBER.finditer(text):
+        if spans is None: spans = prepare.scope_spans(text)
+        cls = [sp for sp in spans if sp[0] < m.start() < sp[1] and sp[2] == 'class']
+        if not cls: continue
+        o, c, _, head = max(cls)
+        name_m = re.search(r'(?:class|struct)\s+([A-Za-z_]\w*)\b(?:(?!\b(?:class|struct)\b)[^{])*$', head)
+        if not name_m: continue
+        cname, member = name_m.group(1), m.group(2)
+        asserts = text[c:c + 8000]
+        at = re.search(r'offsetof\s*\(\s*%s\s*,\s*%s\s*\)\s*==\s*(0[xX][0-9a-fA-F]+|\d+)' % (cname, member), asserts)
+        if not at: continue
+        start = int(at.group(1), 0)
+        eol = text.find('\n', m.end())
+        nxt = re.match(r'\s*(?:[\w:<>\*& \t]+?[\s\*&])([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;', text[eol:c])
+        want = None
+        if nxt:
+            nm = re.search(r'offsetof\s*\(\s*%s\s*,\s*%s\s*\)\s*==\s*(0[xX][0-9a-fA-F]+|\d+)' % (cname, nxt.group(1)), asserts)
+            if nm: want = int(nm.group(1), 0)
+        else:
+            sm = re.search(r'sizeof\s*\(\s*%s\s*\)\s*==\s*(0[xX][0-9a-fA-F]+|\d+)' % cname, asserts)
+            if sm: want = int(sm.group(1), 0)
+        if want != start + 0x1C: continue
+        edits.append((m.end(), ' unsigned int %s_fnvnx_tail; /* fnv-nx CSX2: the 28 bytes of the layout */' % member))
+    if not edits: return text
+    out, pos = [], 0
+    for at, s in edits:
+        out.append(text[pos:at]); out.append(s); pos = at
+        stats['CSX2'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2307,5 +2307,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout]
