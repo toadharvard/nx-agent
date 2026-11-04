@@ -15,17 +15,6 @@ exe-vtables         # stand-in for S2c's link-time slot fill (emu_guest.py --exe
 ctor-returns-this   # every constructor native (address map kind C) returns this: an MSVC constructor is called as a
                     # function (0x00aa20b0: value = p->FUN_00aa2200(); the OSGlobals and NiGlobalStringTable
                     # constructors before), and an Itanium constructor returns nothing (S2c: C bridges return this)
-0x00aa1070 use-malloc:x0  # NiMalloc: calls the same allocator (Gamebryo's memory manager 0x011f6080) through a slot of
-                      # that one-slot vtable (S1); without this the first setting initializers (0x00f35430..) and
-                      # about 3,470 others fault here
-0x00aa10b0 use-malloc:x0  # NiAlignedMalloc (size, alignment): likewise; malloc's 16-byte alignment
-0x00aa1130 use-malloc:x0  # the other aligned allocation (size, alignment): likewise
-0x00aa13e0 use-malloc:x0  # NiMemObject::operator new (BSFadeNode::operator new): Dispatch through the same allocator
-0x00aa1420            # its operator delete
-0x00aa10f0            # the frees of the same family: likewise, the block leaks
-0x00aa1110
-0x00aa1170
-0x00aa1190
 0x00866690          # InitializeGlobal, after InitHolder: std::_Immortalize<StandardLibrarySingletonObject>() has a null
                     # vptr at its vfn_04 call (+0x6c); the options are already stored (S1)
 0x005e0200            # the INI settings load in WinMain (+0x300): its collection 0x....c660 has the image vptr
