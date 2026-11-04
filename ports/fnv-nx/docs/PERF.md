@@ -739,6 +739,8 @@ override:
 | NiMatrix3 transpose product 0x00a588a0 (in UpdateWorldData's row) | `mat3_tmul_00a588a0.c` | 64 -> 39 | 13/16 -> 13/16 | |
 | NiQuaternion::FromRotationMatrix 0x00a6df40 | `quat_from_matrix_00a6df40.c` (no frame, volatile reload or pointer array; errno of a negative root set after the stores) | 89 -> 77 (model: 103, older link) | 13/13 -> 13/13 | 6.660 -> 6.603 |
 | Havok GSK 0x00da8fb0, 0x00da8390, 0x00da8500, 0x00da8820 | `shim/include/fnvnx_sse_fast.h`: two-source `_mm_shuffle_ps` 0x00/0x55/0xaa/0xff/0xc4/0xd4 as 2-instruction asm sequences instead of tbl + literal | 579 -> 571 (model: 600, older link) | 16+11+9+0 -> same | 6.603 -> 6.563 |
+| sphere/plane classification 0x004b6100 (per active plane of the cull) | `sphere_plane_004b6100.c` | 38 -> 19 | 16/16 -> 16/16 | (with the next row) |
+| culling worker 0x00a694e0 (+ bound getter 0x0043d450, 0x004b6100, 0x004b6160, 0x004b6190 inlined) | `cull_worker_00a694e0.c`: two `ld4` give the six planes as lanes, behind/front masks by lane | per object with 4-6 active planes 224-330 -> 49-67 (static paths; harness: early exit only, 12 -> 10) | 8/8 -> 8/8 | 6.563 -> 9.927 (row re-measured) -> 6.368 |
 | BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | | - |
 
 Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no
@@ -748,3 +750,9 @@ The override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch o
 The NiBound::Update row's MSVC signature is the one four pristine objects reference; one object (u2763) declares
 `?Update@NiBound@@QAEXABU1@ABUNiTransformDummy@@@Z` (struct spellings): if the link's ABI check rejects that
 reference, it needs a bridge-free second spelling (inbox note).
+The culling worker override calls the object's culling callback through native vtable slot 53 (+212), which the
+decomp's object computes from the class: `tests/s15/simd/check_native.py <link>` checks that a link's native worker
+still uses that slot (ok on links 0bd144db1464 and c0d6c71516f6). Its plane loop is checked only by
+`cull_worker_test.c`; no harness case passes the null-bound and zero-radius checks. The pristine objects also
+reference 0x004b6100 and 0x00a694e0 under other class spellings (`CallerObj_b3918`, `Sphere`, `TreeVector`;
+`HostV`): the link's ABI check decides whether they bind.

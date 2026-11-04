@@ -463,8 +463,8 @@
    "subsystem": "cull",
    "role": "main",
    "per_call_insn": [
-    50,
-    90
+    49,
+    67
    ],
    "per_call_basis": "E",
    "calls": [
@@ -472,7 +472,7 @@
     20000
    ],
    "calls_note": "object tests over the main, 3 shadow and the reflection passes [E]",
-   "per_call_note": "12 exclusive for 0x00a694e0 [M] + 4-6 plane tests (40-80, not measured)"
+   "per_call_note": "before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]"
   },
   {
    "id": "fn_slerp",
