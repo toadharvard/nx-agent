@@ -10,6 +10,7 @@ compiled with the census flags (-fsyntax-only, tools/census.sh). Reports per fil
 errors before and after, and any error on a line a patch touched.
 """
 import argparse
+import difflib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -71,7 +72,8 @@ def main():
             dst.unlink()
         dst.write_text(text, encoding='utf-8', errors='surrogateescape')
         ref, _ = prepared(str(decomp / rel), without)
-        changed = {i + 1 for i, (x, y) in enumerate(zip(ref.split('\n'), text.split('\n'))) if x != y}
+        sm = difflib.SequenceMatcher(None, ref.split('\n'), text.split('\n'), autojunk=False)
+        changed = {j + 1 for op, _, _, j1, j2 in sm.get_opcodes() if op != 'equal' for j in range(j1, j2)}
         print('%-90s applied %s missed %s' % (rel, sum(v for k, v in stats.items() if k in ('XINC1', 'FTOL1', 'DBUG1')),
               sum(v for k, v in stats.items() if k.endswith('-MISS'))), flush=True)
         (work / (rel.replace('/', '_') + '.lines')).write_text(' '.join(map(str, sorted(changed))))
@@ -80,7 +82,8 @@ def main():
         before = compile_errors(base, rel, a.sse2neon)
         after = compile_errors(tree, rel, a.sse2neon)
         lines = set(map(int, (work / (rel.replace('/', '_') + '.lines')).read_text().split() or []))
-        new = [e for e in after if e not in before]
+        bare = lambda e: re.sub(r'^([^:]+):\d+:\d+:', r'\1:', e)      # patches may shift lines
+        new = [e for e in after if bare(e) not in {bare(b) for b in before}]
         at = [e for e in after if (lambda m: m and int(m.group(1)) in lines)(re.match(r'^[^:]+:(\d+):', e))]
         return rel, before, after, new, at
 

@@ -36,7 +36,7 @@ import equiv  # noqa: E402
 import s1b_patches  # noqa: E402
 
 CHECK_FI = HERE / 'msvc' / 's1b_check_fi.h'
-HELPER = re.compile(r'^__(?:ftol2(?:_sse)?|CI\w+)$')
+HELPER = re.compile(r'^(?:__(?:ftol2(?:_sse)?|CI\w+)|\$SG\d+)$')    # compiler helpers and string literals
 
 
 def overlay(decomp, work, files):
@@ -124,8 +124,12 @@ def check_unit(fpr, Coff, i, unit, pristine_obj, new_obj, want):
             mod['symbols'][nn] = '0x%08x' % a
             if not HELPER.match(nn):    # compiler helpers MSVC calls by itself: no GCC symbol to bind
                 renames.append((unit['source'], 'ref', '0x%08x' % a, on, nn))
-    fa = fpr.cb.fingerprint(str(pristine_obj), unit, fpr.names)
-    fb = fpr.cb.fingerprint(str(new_obj), mod, fpr.names)
+    # S11's bindings on both sides (equiv.Resolver): string literals by content - MSVC numbers $SGnnnn with a counter
+    # that any declaration a patch adds may advance - and recipe names of the whole tree
+    ea, _ = fpr.resolver.extend(old, unit)
+    eb, _ = fpr.resolver.extend(new, mod)
+    fa = fpr.cb.fingerprint(str(pristine_obj), ea, fpr.names_nolit)
+    fb = fpr.cb.fingerprint(str(new_obj), eb, fpr.names_nolit)
     res = {}
     for fn in unit['functions']:
         a = fn['address']
@@ -144,6 +148,7 @@ def main():
     ap.add_argument('--renames', help='write the measured units.json renames here')
     ap.add_argument('--all-functions', action='store_true', help='report every function of the units, not only sites')
     ap.add_argument('--jobs', type=int, default=2)
+    ap.add_argument('--reuse', action='store_true', help='compare objects already in WORK/obj (no compile)')
     a = ap.parse_args()
     decomp, work = Path(a.decomp).resolve(), Path(a.work).resolve()
     work.mkdir(parents=True, exist_ok=True)
@@ -167,7 +172,7 @@ def main():
     def one(job):
         i, u = job
         obj = work / 'obj' / ('u%d.obj' % i)
-        ok, out = compile_unit(decomp, tree, u, obj)
+        ok, out = (True, '') if a.reuse and obj.exists() else compile_unit(decomp, tree, u, obj)
         if not ok:
             return i, u, None, out
         want = None if a.all_functions else want_by_src.get(u['source'])
