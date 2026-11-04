@@ -1033,3 +1033,26 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - census_units=2978 census_clean=2759 census_errors=1635
 * **next** - memory manager units, SPEC1 placement, `template<>` for members of class template specializations,
   actormover; S11 MSVC gate on CSX1/DUPINT1/NEW4 units; S2c full recompile with today's rules.
+
+### J-0053 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0045,J-0046,J-0048,J-0052
+
+* **did** - Constructors/destructors GCC needs where MSVC did not: D1/D2 bound to the destructor of a class sharing
+  the deleting destructor (MSVC identical-code folding); members reached only by exception cleanups or by emitted
+  slot functions -> trap stubs (`fnvnx_special_trap`, class + member). STATIC1 copies rebound in every defining
+  object (62). `tools/link/compile.sh` compiles with `-fPIC`; apply retargets only absolute data pointers; resolve
+  ignores GCC `.localalias`; direct calls of an IAT slot's address bind to its import. Full recompile with today's
+  rules and link (run f10, 2,738 / 2,978 units in 16 min on 2 workers).
+* **found** - The round-3 split-global retargeting was unsound at -O2: GCC reaches several variables from one
+  section anchor with immediate offsets (no relocation), so the other variables behind an anchor were read at wrong
+  addresses; S5's 200 PC-relative image references (J-0048) had the same origin. With `-fPIC`: 0 PC-relative image
+  references, 0 bypassing references. 1,413 of 1,445 missing ctors/dtors have no body in any pristine MSVC object (MSVC
+  destroys through `??_G` at an address, whose decomp body always deletes - D1 cannot bind there). Trial link f10:
+  **8,027 undefined** (4,790 `__fnv_`, 1,606 C++ without address/definition, 769 ctors/dtors on normal paths, 154
+  extern-text, 111 typeinfo/thunks/vtables, 202 C, 287 platform/import left out of this link, 108 runtime/other),
+  **0 multiple definitions**; 279,507 references, 234,079 by address; address map F 52,580, C 1,793, X 1,017, G 88,
+  V 1,965, E 4,449.
+* **decided** - D16: `-fPIC` for decomp objects (docs/ARCHITECTURE.md).
+* **metrics** - link_objects=2738 link_trial_undefined=8027 link_trial_multidef=0 link_pcrel_image_refs=0
+  link_ctor_dtor_left=769 link_ctor_dtor_traps=1023 link_static1_copies=62 link_split_global=0
+* **next** - S5 game guest + emulated boot on f10 (relocatable again); S13 recheck on the -fPIC objects; S1 bodies
+  for the 769 normal-path ctors/dtors.

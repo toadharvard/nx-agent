@@ -76,6 +76,14 @@ selection, culling and scene graph stay. Prebuilt state blocks, sorted 64-bit dr
 own code); the game's translated `.sdp` shaders (S6b) are only the parity reference. Details:
 [`RENDER_NATIVE.md`](RENDER_NATIVE.md); the earlier D3D9-emulation design stays in [`RENDER.md`](RENDER.md).
 
+### D16. Decomp objects are compiled `-fPIC` (J-0053)
+
+GCC at -O2 reaches several variables a unit defines from one section anchor with immediate offsets and no
+relocation of their own, so by-address rebinding of image variables cannot be done by relocation rewriting. With
+`-fPIC` every variable is addressed through the GOT by its own symbol; renaming rebinds every reference and the GOT
+slot holds the image address. `-fno-semantic-interposition` is not used: it routes same-unit calls through local
+aliases past the by-address binding. Cost: one GOT load per global access (performance phase).
+
 ## Legal
 
 The decomp grants no licence. This directory contains only our own code: tools, shims, the platform layer and docs.
