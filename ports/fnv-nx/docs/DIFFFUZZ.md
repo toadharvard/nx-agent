@@ -120,7 +120,15 @@ their end: a non-void function without `return`, GCC drops the epilogue).
 reproduce and, with `--reads`, runs the read-set probe (`readset.py`): the addresses one machine reads and the other
 does not (argument buffers, image window), and a constant offset between them (`shift`: a struct layout difference).
 Groups: oracle-only / native-only reads of image globals or object fields, layout shift, same reads with a different
-result.
+result. `difffuzz.py effects <div files> [--list f] [--out f]` (`effects.py`) replays each with every data access
+of both machines recorded and reports the first effect they disagree on: bytes read with another width, the first
+byte read with another value, the final stores that differ (with both pcs), where a diverging argument or result
+comes from (a load, a stack or native image address, a stub, planted garbage, a constant), and the last
+instructions of both machines before that point.
+
+**Wild calls.** A jump to memory without code on either machine (an indirect call through a pointer the case
+planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
+(`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
 
 ## Lockstep (`lockstep.py`, D14)
 
