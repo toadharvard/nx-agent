@@ -72,27 +72,32 @@ in EH code and are identical with `/EHs-c-` (EXC1, as before). Layouts: `Graphic
 and member offsets, plus one line, the 4-byte tail member at +24 (`m_kCriticalSection_fnvnx_tail`,
 `CriticalSection_fnvnx_tail`).
 
-## First farm gate (eq1-6, heads `49f6666` / `650bf10` / `4f0f481`)
+## First farm gate (eq1-6, all 2,988 units)
 
-Shards 2, 4, 5 and 6 (2,016 units) passed on heads with the BIND1 fix; shards 1 and 3 had not reported yet. All four
-shards used the same decomp, rule set and pristine objects. Units: 1,597 identical, 362 differ, 56 do not compile
-(prepared side). Functions: 700 of 44,050 differ (EH-only 510, retarget 118, code 72). Per rule, ranked by code
-functions:
+All six shards passed on heads with the BIND1 fix (shard 1 `edf9fd1`, 2 / 3 / 6 `49f6666`, 4 `650bf10`, 5
+`808c50b`), with the same decomp, rule set and pristine objects. Results agree across heads where the rules are the
+same: shard 6 gave the same report at `49f6666` and `afca7d5`. Shard 5 changed only by two STATIC1 functions between
+`4f0f481` and `808c50b` (7fc664f, STATIC1 for namespace statics). Shard 4 predates that commit. Units: 2,362 identical,
+545 differ, 80 do not compile (prepared side). Functions: 1,067 of 59,567 differ (EH-only 777, retarget 174, code
+116). DECL1's 9 code functions are the 9 this document lists above (the local gate agrees); 3 of them are fixed by
+DECL1-MATHNS, which is newer than these heads. Per rule, ranked by code functions:
 
 | rule | code | retarget | eh | no-build | owner |
 |---|---:|---:|---:|---:|---|
-| `CTOR1` | 46 | | 15 | | S1 |
-| `STATIC1` | 11 | | | | S1 (link semantics: reloads of an external variable) |
-| `XINC1` | 5 | | | | S1b |
-| `PTR1` | 3 | | | | S1 |
-| `DECL1` | 2 | 108 | 4 | 23 | S1 (retargets: CRT wrappers the link binds by address, S2) |
-| `MATH1` | 1 | | | | S1 |
-| `RET1` | 1 | | | | S1b |
-| `EXC1` | | | 425 | | S1 (exceptional paths only) |
-| `NEW2` | | 1 | 41 | | S1 |
-| `ANON1` | | 2 | | | S1 |
-| `ENUM1` | | | | 5 | by design (MSVC 2008 parse limit) |
-| groups (`sdk`, `newdel`), interactions; `CALL1` `DECL2` `GOTO1` `IFX1` (no-build 1 each) | 3 | 7 | 25 | 28 | |
+| `CTOR1` | 58 | | 31 | | S1 |
+| `STATIC1` | 23 | | | | S1 (link semantics: reloads of an external variable) |
+| `DECL1` | 9 | 155 | 4 | 36 | S1; retargets: CRT wrappers the link binds by address (S2) |
+| `XINC1` | 8 | | | | S1b |
+| `PTR1` | 5 | | | | S1 |
+| `RET1` | 2 | | | | S1b |
+| `MATH1` | 2 | | | 1 | S1 |
+| `GOTO1` `NEW4` `UNIT1` | 1 each | | | GOTO1 1 | S1 |
+| `EXC1` | | | 646 | | S1 (exceptional paths only) |
+| `NEW2` | | 1 | 55 | | S1 |
+| `ANON1` `STD1` | | 2 / 1 | | | S1 |
+| `ENUM1` | | | | 7 | by design (MSVC 2008 parse limit) |
+| `DECL2` `IFX1` `RCAST1` `CALL1` | | | | 2 / 2 / 1 / 1 | stand-in limits, S1 |
+| groups (`sdk`, `newdel`), interactions | 6 | 15 | 41 | 29 | |
 
 ## Round 8 (S1 rules after `8fff58b`)
 
