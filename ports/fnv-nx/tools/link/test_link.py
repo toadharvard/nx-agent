@@ -82,6 +82,25 @@ def main():
     v = abi.compare(SE['?e@@YG_NPAX@Z'], SE['?e@@YI_NPAUB@@HPAUO@@@Z'])
     check(v.kind == 'x86-inconsistent' and 'ecx-not-passed' in v.classes,
           'stdcall f(void*) -> fastcall(ecx, edx, X): %s %s' % (v.kind, v.classes))
+    # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
+    # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
+    src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'
+           'struct FUN_00a0c900_shell { void __thiscall FUN_00a0c900(const char*, int); };\n'
+           'MenuValueDescriptor* GetOrLoadXML(const char* apFilename, bool abAdd) {\n'
+           '    if (abAdd) ((void(__thiscall*)(void*, const char*, MenuValueDescriptor*)) & FUN_00a0c900)(&map, f, x);\n'
+           '    ((FUN_00a0c900_shell*)&map)->FUN_00a0c900(f, 1);\n    return x; }\n')
+    uc = fnvlink.unit_casts(src)
+    check(uc.get('FUN_00a0c900') == ({('thiscall', 'void', 'void*, const char*, MenuValueDescriptor*')}, 0),
+          'cast found, the member call is no direct call: %s' % (uc.get('FUN_00a0c900'),))
+    ns = ['?FUN_00a0c900@FUN_00a0c900_shell@@QAEXPBDH@Z', '?FUN_00a0c900@@YIXPAXPBDPAUMenuValueDescriptor@@@Z']
+    dd = fnvlink.batch_demangle(fnvlink.UNDNAME, ns)
+    dfn, ref = sigs.parse_msvc(ns[0], dd[ns[0]]), sigs.parse_msvc(ns[1], dd[ns[1]])
+    check(abi.compare(ref, dfn).kind == 'bridge', 'the declaration alone would bridge')
+    (cc, ret, params), = uc['FUN_00a0c900'][0]
+    v = abi.compare(fnvlink.cast_sig(cc, ret, params, 'FUN_00a0c900'), dfn)
+    check(v.kind == 'same', 'through the __thiscall cast the call matches the definition: %s %s' % (v.kind, v.moves))
+    uc2 = fnvlink.unit_casts(src + 'void g() { FUN_00a0c900(0, \"s\", 0); }\n')
+    check(uc2['FUN_00a0c900'][1] == 1, 'a direct call next to the cast is counted: %s' % (uc2['FUN_00a0c900'],))
     v = abi.compare(SE['?e@M@@QAE_NPAU1@@Z'], SE['?e@@YI_NPAUB@@HPAUO@@@Z'])
     check(v.kind == 'bridge' and 'edx-dummy' in v.classes, 'thiscall M::f(M*) -> the same: %s %s'
           % (v.kind, v.classes))

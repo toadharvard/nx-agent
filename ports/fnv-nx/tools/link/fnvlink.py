@@ -480,6 +480,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         return got.pop() if len(got) == 1 else None
     xtraps = {}      # trap stub -> (ctor/dtor defined nowhere, why)
     unwind_cache = {}
+    cast_cache = {}
+
+    def casts_of(u_):
+        if u_.source not in cast_cache:
+            path_ = os.path.join(tree, u_.source)
+            cast_cache[u_.source] = unit_casts(open(path_, encoding='utf-8', errors='surrogateescape').read()) \
+                if u_.host is None and os.path.exists(path_) else {}
+        return cast_cache[u_.source]
     called_cache = {}
 
     def called_syms(u_):
@@ -553,10 +561,40 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     # ABI: reference declaration vs definition
                     refdecl = note  # msvc name of the matched reference declaration
                     defdecl = nd['msvc']
-                    if refdecl and refdecl != defdecl:
+                    cast = None
+                    if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
+                        cast = casts_of(u).get(isig.qual[-1])
+                    if refdecl and (refdecl != defdecl or cast):
                         rs, ds = msvc(refdecl), msvc(defdecl)
+                        cast_note = None
+                        if cast and ds.kind == 'func':
+                            # the unit calls the name through a cast to another function-pointer type: the cast's
+                            # convention is how x86 passed the arguments
+                            casts_, direct = cast
+                            vs = {}
+                            for cc_, ret_, params_ in sorted(casts_):
+                                cv = abi.compare(cast_sig(cc_, ret_, params_, isig.qual[-1]), ds)
+                                vs[(cv.kind, tuple(cv.moves))] = (cc_, ret_, params_)
+                            dv = abi.compare(rs, ds)
+                            if len(vs) > 1 or (direct and (dv.kind, tuple(dv.moves)) not in vs):
+                                cast_note = ('the unit casts the name %s and calls it %s' % (
+                                    'to %d conventions' % len(casts_) if len(vs) > 1 else 'to another convention',
+                                    'directly too' if direct else 'only through casts'))
+                                stats['cast_conflicts'] += 1
+                            else:
+                                cc_, ret_, params_ = next(iter(vs.values()))
+                                rs = cast_sig(cc_, ret_, params_, isig.qual[-1])
+                                refdecl_key = '%s|cast %s(__%s*)(%s)' % (refdecl, ret_, cc_, params_)
+                                stats['cast_refs'] += 1
                         if rs.kind == 'func' and ds.kind == 'func':
                             v = abi.compare(rs, ds)
+                            if cast_note:
+                                v = abi.Verdict()
+                                v.kind, v.classes, v.notes = 'x86-inconsistent', ['cast-conflict'], [cast_note]
+                            elif cast:
+                                v.notes.append('called through a cast: %s' % refdecl_key.split('|cast ', 1)[1])
+                                if 'cast-call' not in v.classes:
+                                    v.classes.append('cast-call')
                             for c in v.classes:
                                 pair_classes[c] += 1
                             if v.kind != 'same':
@@ -568,7 +606,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.source: layouts.get((x, t)),
                                                   lambda t, x=nd['unit']: layouts.get((x, t)))
                                 if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
-                                        not (v.kind == 'bridge' and 'narrow-extend' in v.classes):
+                                        not (v.kind == 'bridge' and 'narrow-extend' in v.classes) and \
+                                        'cast-conflict' not in v.classes:
                                     stats['abi2_' + v.kind + '->' + p2.kind] += 1
                                     v = abi.Verdict()
                                     v.kind, v.classes, v.notes, v.plan = p2.kind, p2.classes, p2.notes, p2
@@ -579,8 +618,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                                  ','.join(v.classes), '; '.join(v.moves and
                                                  ['%s<-%s' % (d, s) for d, s, _, _ in v.moves] or []),
                                                  '; '.join(v.notes), ms[refdecl] or '', ms[defdecl] or ''))
+                                bkey = refdecl_key if cast and not cast_note else refdecl
                                 if v.kind == 'bridge' and v.plan is not None:
-                                    bn = abi.bridge_name(addr, refdecl)
+                                    bn = abi.bridge_name(addr, bkey)
                                     code = abi2.emit(bn, target, v.plan, 'ref: %s | def: %s'
                                                      % (ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     if code is None:
@@ -590,7 +630,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                         target = bn
                                         cls = 'code-bridge'
                                 elif v.kind == 'bridge':
-                                    bn = abi.bridge_name(addr, refdecl)
+                                    bn = abi.bridge_name(addr, bkey)
                                     bridges.setdefault(bn, (target, v, ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     target = bn
                                     cls = 'code-bridge'
@@ -897,6 +937,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               % (stats['imports_bound'], byclass['import']),
               'import thunks bound to their import instead of the compiled decomp body: %d' % stats['import_thunks'],
               'calls of an IAT slot address bound to its import: %d' % stats['iat_calls'],
+              'references called through a cast to another function type (the cast decides): %d, conflicting casts '
+              'or direct calls (x86-inconsistent): %d' % (stats['cast_refs'], stats['cast_conflicts']),
               'GAME1 names (fnvnx_game_*) looked up by the unit\'s own name: %d references, %d resolved'
               % (stats['game1_refs'], stats['game1_resolved']),
               'operator new/delete references bound to the game\'s allocator: %d' % stats['newdel_refs'],
@@ -1281,6 +1323,78 @@ def emit_tls(addrs):
         n = TLS_SYM % a
         out += ['    .globl %s' % n, '    .type %s, %%tls_object' % n, '    .set %s, __fnvnx_tls_image + %d' % (n, a - base)]
     return '\n'.join(out) + '\n'
+
+
+# ---------------------------------------------------------------------------------------------------- casts
+
+# a named function reached through a cast to a function-pointer type: the cast's convention and parameters decide
+# how the x86 code called it, not the unit's declaration of the name (S13: GetOrLoadXML calls the fastcall-declared
+# FUN_00a0c900 through a __thiscall cast)
+_CAST_TYPE = r'(?P<ret>[A-Za-z_][\w:<>,\s\*&]*?)\s*\(\s*(?:__(?P<cc>thiscall|fastcall|stdcall|cdecl)\s*)?\*\s*\)\s*' \
+             r'\((?P<params>[^()]*)\)'
+CAST_C = re.compile(r'\(\s*' + _CAST_TYPE + r'\s*\)\s*&?\s*(?P<name>[A-Za-z_]\w*)(?=\s*[),;])')
+CAST_R = re.compile(r'reinterpret_cast\s*<\s*' + _CAST_TYPE + r'\s*>\s*\(\s*&?\s*(?P<name>[A-Za-z_]\w*)\s*\)')
+CAST_TYPEDEFS = {'UInt8': 'unsigned char', 'UInt16': 'unsigned short', 'UInt32': 'unsigned int', 'SInt8': 'char',
+                 'SInt16': 'short', 'SInt32': 'int', 'BYTE': 'unsigned char', 'WORD': 'unsigned short',
+                 'DWORD': 'unsigned long', 'BOOL': 'int', 'UINT': 'unsigned int', 'INT': 'int', 'LONG': 'long',
+                 'ULONG': 'unsigned long', 'HRESULT': 'long', 'size_t': 'unsigned int', 'uint32_t': 'unsigned int',
+                 'int32_t': 'int', 'uint16_t': 'unsigned short', 'uint8_t': 'unsigned char', 'LPVOID': 'void *',
+                 'HANDLE': 'void *', 'HWND': 'void *', 'LPCSTR': 'char const *', 'LPSTR': 'char *'}
+
+
+def split_top(text):
+    out, depth, cur = [], 0, ''
+    for ch in text:
+        if ch in '<([':
+            depth += 1
+        elif ch in '>)]':
+            depth -= 1
+        if ch == ',' and depth == 0:
+            out.append(cur); cur = ''
+        else:
+            cur += ch
+    out.append(cur)
+    return [x.strip() for x in out if x.strip()]
+
+
+def cast_sig(cc, ret, params, name):
+    """MSVC-model Sig of a call through `ret (__cc *)(params)` (a __thiscall pointer passes its first parameter in
+    ecx, like a member function's this)."""
+    def norm(t):
+        return re.sub(r'\b(%s)\b' % '|'.join(CAST_TYPEDEFS), lambda m: CAST_TYPEDEFS[m.group(1)], ' '.join(t.split()))
+    ps = split_top(params)
+    if ps == ['void']:
+        ps = []
+    sig = sigs.Sig('func', '%s __%s %s(%s)' % (ret, cc or 'cdecl', name, params))
+    sig.cc, sig.qual, sig.raw_ret, sig.static = cc or 'cdecl', [name], norm(ret), False
+    if (cc or 'cdecl') == 'thiscall' and ps:
+        sig.member, ps = True, ps[1:]
+    sig.raw_params = [norm(x) for x in ps]
+    sig.params = list(sig.raw_params)
+    return sig
+
+
+def unit_casts(text):
+    """{name: (set of (cc, ret, params) casts, direct calls of the name outside casts)} for one source text."""
+    hits, spans = collections.defaultdict(set), []
+    for rx in (CAST_C, CAST_R):
+        for m in rx.finditer(text):
+            hits[m.group('name')].add((m.group('cc') or 'cdecl', ' '.join(m.group('ret').split()),
+                                       ' '.join(m.group('params').split())))
+            spans.append((m.start(), m.end()))
+    out = {}
+    for name, casts in hits.items():
+        direct = 0
+        for m in re.finditer(r'\b%s\s*\(' % re.escape(name), text):
+            if any(lo <= m.start() < hi for lo, hi in spans):
+                continue
+            pre = text[max(0, m.start() - 400):m.start()].rstrip()
+            if pre.endswith(('->', '.', '::')) or not pre:
+                continue                                  # a member of that name / start of file
+            if pre[-1] in '=(,;{}?:!|+-/<>%^~[' or re.search(r'\b(?:return|else|case|do)$', pre):
+                direct += 1                               # a call (a declaration follows a type or __conv)
+        out[name] = (casts, direct)
+    return out
 
 
 def unwind_only(path, names):

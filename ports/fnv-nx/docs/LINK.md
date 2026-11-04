@@ -220,10 +220,14 @@ Two bridge divergences are not ABI-model errors:
   `((void (__thiscall *)(void *, const char *, MenuValueDescriptor *)) &FUN_00a0c900)(&map, name, xml)`; the unit
   declares `__fastcall FUN_00a0c900(void *, const char *, MenuValueDescriptor *)`, the definition is the thiscall
   member `(const char *, int)`. On x86 the cast decides (ecx = map, stack = name, xml: the definition gets name), so
-  the bridge built from the declaration (third argument -> p0) is wrong; natively the cast call already matches the
-  definition (x0, x1, x2). The reference name carries only the declaration, so the link cannot see the cast; about
-  100 such casts sit in 48 units. Fix in the source (declare the function as it is called, S1b), or a resolve rule that
-  takes the cast's convention for a unit that only calls the name through such a cast.
+  a bridge built from the declaration (third argument -> p0) is wrong. Resolve therefore reads each compiled unit's
+  source for casts of a named function to a function-pointer type, `((ret (__cc *)(params)) &NAME)` and
+  `reinterpret_cast<ret (__cc *)(params)>(&NAME)` (called at once, or passed on as a callback), and compares the
+  definition with the cast's convention and parameters (a `__thiscall` pointer passes its first parameter as `this`;
+  no convention is cdecl) for a reference to a free function of that name (`cast-call`; the bridge is keyed by the
+  cast). When the unit casts the name two ways that disagree, or also calls it directly with a declaration that
+  disagrees with the cast, the pair is `x86-inconsistent` (`cast-conflict`) instead of a guess. On the ninth-round
+  tree: 107 casts of 105 names in 74 compiled units; 16 of those names are called directly too, 2 are cast two ways.
 * **The variadic logger 0x00703c00** (S13: 00700350): referenced as `int __cdecl (const char *, ...)`, defined as
   `void __cdecl (const char *text, const char *context)` that passes `&context` on as the argument list - an x86
   stack walk: on AArch64 `&context` is a spilled register, and float arguments travel in v registers. `manual`
