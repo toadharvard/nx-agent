@@ -9,4 +9,7 @@
 #ifndef FNVNX_S1B_CHECK_FI_H
 #define FNVNX_S1B_CHECK_FI_H
 #define fnvnx_ftol2(x) ((__int64)(x))
+/* the int conversion that MSVC compiles to `call __ftol2_sse` (FTOL1 sites define the target helper as
+ * `(fnvnx_ftol2_sse)(double)`, untouched by this macro) */
+#define fnvnx_ftol2_sse(x) ((int)(x))
 #endif

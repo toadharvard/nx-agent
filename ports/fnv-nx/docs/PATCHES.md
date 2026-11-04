@@ -41,10 +41,14 @@ methods are named after their callee's address (`FUN_<addr>`), so S2's name-addr
 | `test_patches.py DECOMP` | every site parses, has evidence, applies exactly once to the pristine and to the rule-prepared text; renames well-formed |
 | `msvc_check.py DECOMP WORK [--all-functions] [--patches DIR]` | patches on the pristine text, each unit compiled with its recipe compiler/flags (S11 setup), every function fingerprinted against `$S11/obj/pristine` with S11's bindings (literals by content); renamed definitions and references followed; `--renames` writes `units_renames.tsv` |
 | `xinc1/xinc_enum.py`, `analyze.py`, `gen.py` | round-2 pipeline: x86-inconsistent references of a link run -> callers in the pristine objects -> ecx at each reference (`ecxflow.py`) -> candidate XINC1 patches for shapes A/B/C, the rest listed for reading by hand; `preserves.py ADDR`: does a function keep ecx / edx at every return |
+| `test_ftol.py` | FTOL1's inline `fnvnx_ftol2_sse` equals `cvttsd2si` on 48 values (qemu-aarch64 against the host's SSE2), stays inline, compiles for ILP32 |
 | `gcc_check.py DECOMP BASE_TREE WORK` | patched files prepared with all rules into an overlay of a prepared tree, compiled with the census flags before/after; reports new errors and errors on patched lines |
 
-`msvc/s1b_check_fi.h` gives `fnvnx_ftol2(x)` its MSVC meaning for the check only: the compiler's own
-float -> `__int64` conversion, i.e. a call of `_ftol2_sse` with x in ST0.
+`msvc/s1b_check_fi.h` gives `fnvnx_ftol2_sse(x)` its MSVC meaning for the check only: the compiler's own
+float -> `int` conversion, i.e. a call of `_ftol2_sse` with x in ST0 (`fnvnx_ftol2(x)`: the `__int64` one).
+`test_ftol.py` checks the target helper against the host's `cvttsd2si` (48 values: NaN payloads, infinities, int32
+bounds and neighbours, beyond int32 / int64 / float range, float operands) under qemu-aarch64, and that it stays
+inline.
 
 ## Results (decomp `87eb9373`)
 
@@ -53,6 +57,7 @@ float -> `__int64` conversion, i.e. a call of `_ftol2_sse` with x in ST0.
 | XINC1 | all 68 x86-inconsistent pairs of S2's latest run (a 69th of an earlier run is bridged by S2 now): 66 functions, 49 files | 62 identical, 4 differ by design | see below |
 | XINC1 round 2 | S2c run f12: 295 x86-inconsistent references, 295 callers in 174 files; 264 callers patched in 152 files (`xinc1_r2_*.s1b`) | 259 identical, 5 differ by design | 26 need no patch, 4 open, 1 patched in round 1 (see "Round 2") |
 | FTOL1 | 17 arg-less helper calls in 10 units (+1 dead copy) | all identical; whole units identical (1,535 functions) | the "~37" of J-0009 counted 20 declarations nobody calls |
+| FTOL1 exact | the 17 sites now call the inline `fnvnx_ftol2_sse` (was the out-of-line int64 `fnvnx_ftol2`); 5 casts in 0x00a1b450 / 0x006912a0 (`ftol1_casts.s1b`) | whole units identical (11 units, 1,690 functions) | NaN / out of int32 -> 0x80000000 as on an SSE2 PC |
 | RET1 | 11 functions | identical (whole units, 1,395 functions) | 6 trailing statements, 5 with the callee's return type restored |
 | RET1 round 2 | 6 functions S12 found trapping (`ret1_fall1_r2.s1b`) | 4 identical, 2 differ by design | 3 made void, 1 callee return restored, 2 return the x86 eax |
 | DBUG1 | 0 | - | the S4b items were merged by S1 (`FUN_00ec78f1_t` 12 bytes, J-0041) |
@@ -122,6 +127,22 @@ Interface floats (tileimage 0x00a1fd50, whose constructor also takes 13 argument
 blk_00e40000's dot product (0x00e54ad0 returns it, 0x00e54ae0 is a thiscall `length()`). Three sites also moved
 pushed arguments to the call that pops them (inventorymenu 0x0077ffd0, sleepwaitmenu 0x007c0220): the same
 argument-attribution pattern as XINC1 (d), which S2's `ref-passes-fewer` verdicts list elsewhere.
+
+**FTOL1 semantics (S13 J-0087).** libcmt's `_ftol2_sse` (ftol2.obj of the SP1 CRT) tests `__sse2_available` and
+then runs `cvttsd2si eax` on the operand stored as a double; only without SSE2 does it fall back to `_ftol2` (x87
+`fistp` into 64 bits, eax the low half). The CRT sets `__sse2_available` at startup on any SSE2 machine, so the
+game's int conversions give 0x80000000 for NaN and for anything outside int32 (truncated). AArch64 `fcvtzs` gives
+0 for NaN and 0x7fffffff above the range (below it, 0x80000000 as on x86). `(int32)(int64)x` would model the x87
+fallback, which no SSE2 PC runs (NaN -> 0, 3e9 -> 0xb2d05e00). `fnvnx_ftol2_sse(x)` (inline, defined per unit as
+`static inline int (fnvnx_ftol2_sse)(double)` so the MSVC macro leaves the definition alone) is the SSE2 path:
+`ok = (x > -2147483649.0) & (x < 2147483648.0); ok ? (int)x : INT_MIN` - fcmpe, fccmpe, cset, cbz, fcvtzs plus two
+constants, no call. S13's x86 oracle takes the x87 path because its image leaves `___sse2_available` at 0: 0x00691260
+(a coordinate below -2^31, ClampInt intercepted) gives 0x80000000 on an SSE2 PC and natively, so it is no divergence
+once the oracle sets the flag; 0x00a1b450 (a height above 2^31) is 0x80000000 on the PC and 0x7fffffff natively
+before this patch. Option taken: the narrow one - the arg-less helper sites and the casts S13 found. The pristine
+objects hold 1,253 compiler-made `__ftol2_sse` calls (228 units, inline copies counted) and 10 `__ftol2` (8 units);
+routing every int conversion (S12's F2S site list, 536 "runtime" sites) through this helper is S12's FTOI2 rule,
+which should use this helper verbatim (and the unsigned ones the int64 truncation of FTOI1).
 
 **RET1.** Of the 861 FALL1 sites on decomp code (after S1's two FALL1 fixes): 419 end only in jumps (unreachable
 trap, fine), about 220 end in a switch / loop / if without else / try (the x86 return value is not evident from the

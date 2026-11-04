@@ -2,9 +2,11 @@
 # in ST0, int64 result in edx:eax) and `helper_value()` = _CIsqrt (0x00ec6040, operand and result in ST0). The decomp
 # reaches those bytes by declaring the function that leaves the float in ST0 as void (MSVC then neither pops nor
 # stores it) and calling the helper without an operand. Each site below names that function from the x86 code and
-# its definition, gives it its float result back, and passes the result to fnvnx_ftol2 / sqrt. Under MSVC
-# (tests/s1b/msvc/s1b_check_fi.h) fnvnx_ftol2(x) is the compiler's own float -> __int64 conversion, i.e. a call of
-# _ftol2_sse with x in ST0, so the MSVC check proves the operand. Method: docs/PATCHES.md.
+# its definition, gives it its float result back, and passes the result to fnvnx_ftol2_sse / sqrt. fnvnx_ftol2_sse
+# is the SSE2 path of the CRT's _ftol2_sse (libcmt ftol2.obj: `cvttsd2si eax` once __sse2_available is set, as on
+# every SSE2 PC): truncation to int32, NaN and values outside int32 give 0x80000000; inline, a few instructions.
+# Under MSVC (tests/s1b/msvc/s1b_check_fi.h) fnvnx_ftol2_sse(x) is the compiler's own float -> int conversion, i.e. a
+# call of _ftol2_sse with x in ST0, so the MSVC check proves the operand. Method: docs/PATCHES.md.
 
 @@ FTOL1 src/bsmenu/tileimage.cpp 0x00a1fd50
 # x86 0x00a1fd50+0x2f7 (/Od): `call 0x00706df0; call _ftol2_sse; push eax; call 0x00706e00; call _ftol2_sse; push
@@ -26,7 +28,7 @@ extern float __cdecl FUN_00706e00(); /* fnv-nx FTOL1: 0x00706e00 Interface::Upda
 <<<
 extern unsigned int __cdecl FUN_00ec62c0();
 ===
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its operand */
+static inline int (fnvnx_ftol2_sse)(double x) { int ok = (x > -2147483649.0) & (x < 2147483648.0); int r = (int)(ok ? x : 0.0); return ok ? r : (-2147483647 - 1); } /* fnv-nx FTOL1: _ftol2_sse with its operand passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 >>>
 <<<
     FUN_00c5cf30(int, NiPoint3*, NiPoint3*, int, NiUV*, int, int, int, unsigned short*, int, int, unsigned int);
@@ -38,14 +40,14 @@ extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its
     FUN_00706e00(FUN_00ec62c0());
     return FUN_00ec62c0();
 ===
-    (void)fnvnx_ftol2(FUN_00706df0()); /* fnv-nx FTOL1: unused; see 0x00a1fd50 */
-    return (unsigned int)fnvnx_ftol2(FUN_00706e00());
+    (void)fnvnx_ftol2_sse(FUN_00706df0()); /* fnv-nx FTOL1: unused; see 0x00a1fd50 */
+    return (unsigned int)fnvnx_ftol2_sse(FUN_00706e00());
     ;
 >>>
 <<<
                                       0, (FUN_00706df0(), FUN_00706e00(FUN_00ec62c0()), FUN_00ec62c0()));
 ===
-                                      0, (unsigned int)fnvnx_ftol2(FUN_00706e00()), (unsigned int)fnvnx_ftol2(FUN_00706df0()));
+                                      0, (unsigned int)fnvnx_ftol2_sse(FUN_00706e00()), (unsigned int)fnvnx_ftol2_sse(FUN_00706df0()));
 >>>
 
 @@ FTOL1 src/fallout/ai/actor.cpp file
@@ -58,7 +60,7 @@ void* __cdecl FUN_00ec62c0();
 float __cdecl FUN_00648a10(void* p);
 ===
 float __fastcall FUN_008be7a0(void* pThis); /* fnv-nx FTOL1: 0x008be7a0 returns a float */
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its operand */
+static inline int (fnvnx_ftol2_sse)(double x) { int ok = (x > -2147483649.0) & (x < 2147483648.0); int r = (int)(ok ? x : 0.0); return ok ? r : (-2147483647 - 1); } /* fnv-nx FTOL1: _ftol2_sse with its operand passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 float __cdecl FUN_00648a10(int);
 >>>
 
@@ -69,7 +71,7 @@ float __cdecl FUN_00648a10(int);
     FUN_008be7a0(this);
     float f = FUN_00648a10(FUN_00ec62c0());
 ===
-    float f = FUN_00648a10((int)fnvnx_ftol2(FUN_008be7a0(this)));
+    float f = FUN_00648a10((int)fnvnx_ftol2_sse(FUN_008be7a0(this)));
     /* fnv-nx FTOL1: f above */
 >>>
 
@@ -85,14 +87,14 @@ float __cdecl FUN_00648a10(int);
 <<<
 unsigned int __cdecl FUN_00ec62c0();
 ===
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its operand */
+static inline int (fnvnx_ftol2_sse)(double x) { int ok = (x > -2147483649.0) & (x < 2147483648.0); int r = (int)(ok ? x : 0.0); return ok ? r : (-2147483647 - 1); } /* fnv-nx FTOL1: _ftol2_sse with its operand passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 >>>
 <<<
                                 reinterpret_cast<Actor0091*>(apActor)->FUN_005723b0(rememberedCharacter, 0, 0);
 
                                 item->operationHandle = FUN_00ec62c0();
 ===
-                                item->operationHandle = (unsigned int)fnvnx_ftol2(reinterpret_cast<Actor0091*>(apActor)->FUN_005723b0(rememberedCharacter, 0, 0));
+                                item->operationHandle = (unsigned int)fnvnx_ftol2_sse(reinterpret_cast<Actor0091*>(apActor)->FUN_005723b0(rememberedCharacter, 0, 0));
 
                                 /* fnv-nx FTOL1: operationHandle above */
 >>>
@@ -101,7 +103,7 @@ extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its
 
             item->operationHandle = FUN_00ec62c0();
 ===
-            item->operationHandle = (unsigned int)fnvnx_ftol2(reinterpret_cast<Actor0091*>(apActor)->FUN_005723b0(rememberedCharacter, 0, 0));
+            item->operationHandle = (unsigned int)fnvnx_ftol2_sse(reinterpret_cast<Actor0091*>(apActor)->FUN_005723b0(rememberedCharacter, 0, 0));
 
             /* fnv-nx FTOL1: operationHandle above */
 >>>
@@ -115,13 +117,13 @@ void __cdecl FUN_00406cc0(float v);
 int __cdecl FUN_00ec62c0(void);
 ===
 float __cdecl FUN_00406cc0(float v); /* fnv-nx FTOL1: 0x00406cc0 floor(float) */
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its operand */
+static inline int (fnvnx_ftol2_sse)(double x) { int ok = (x > -2147483649.0) & (x < 2147483648.0); int r = (int)(ok ? x : 0.0); return ok ? r : (-2147483647 - 1); } /* fnv-nx FTOL1: _ftol2_sse with its operand passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 >>>
 <<<
     FUN_00406cc0((float)((m_19c - FUN_00404010(m_198, 0.0f)) / m_19c * DAT_01075d30));
     int idx = FUN_00ec62c0();
 ===
-    int idx = (int)fnvnx_ftol2(FUN_00406cc0((float)((m_19c - FUN_00404010(m_198, 0.0f)) / m_19c * DAT_01075d30)));
+    int idx = (int)fnvnx_ftol2_sse(FUN_00406cc0((float)((m_19c - FUN_00404010(m_198, 0.0f)) / m_19c * DAT_01075d30)));
     /* fnv-nx FTOL1: idx above */
 >>>
 
@@ -140,13 +142,13 @@ struct UIOptions
 <<<
 extern "C" int __cdecl FUN_00ec62c0();
 ===
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its operand */
+static inline int (fnvnx_ftol2_sse)(double x) { int ok = (x > -2147483649.0) & (x < 2147483648.0); int r = (int)(ok ? x : 0.0); return ok ? r : (-2147483647 - 1); } /* fnv-nx FTOL1: _ftol2_sse with its operand passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 >>>
 <<<
         (*(UIOptions**)((char*)this + 0x6c))->FUN_00a011b0(DAT_011d9170);
         int imageKey = FUN_00ec62c0();
 ===
-        int imageKey = (int)fnvnx_ftol2((*(UIOptions**)((char*)this + 0x6c))->FUN_00a011b0(DAT_011d9170));
+        int imageKey = (int)fnvnx_ftol2_sse((*(UIOptions**)((char*)this + 0x6c))->FUN_00a011b0(DAT_011d9170));
         /* fnv-nx FTOL1: imageKey above */
 >>>
 
@@ -164,14 +166,14 @@ extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its
 extern int __cdecl FUN_00ec62c0();
 struct Menu0076ab40
 ===
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its operand */
+static inline int (fnvnx_ftol2_sse)(double x) { int ok = (x > -2147483649.0) & (x < 2147483648.0); int r = (int)(ok ? x : 0.0); return ok ? r : (-2147483647 - 1); } /* fnv-nx FTOL1: _ftol2_sse with its operand passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 struct Menu0076ab40
 >>>
 <<<
             current->FUN_00a011b0(0xfa1);
             total += FUN_00ec62c0();
 ===
-            total += (int)fnvnx_ftol2(current->FUN_00a011b0(0xfa1));
+            total += (int)fnvnx_ftol2_sse(current->FUN_00a011b0(0xfa1));
             /* fnv-nx FTOL1: total above */
 >>>
 
@@ -201,7 +203,7 @@ struct Menu0076ab40
 <<<
 int __cdecl FUN_00ec62c0();
 ===
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its operand */
+static inline int (fnvnx_ftol2_sse)(double x) { int ok = (x > -2147483649.0) & (x < 2147483648.0); int r = (int)(ok ? x : 0.0); return ok ? r : (-2147483647 - 1); } /* fnv-nx FTOL1: _ftol2_sse with its operand passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 >>>
 <<<
         reinterpret_cast<FUN_0077ffd0_obj*>(
@@ -209,7 +211,7 @@ extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its
             ->FUN_00a011b0();
         res5 = FUN_00ec62c0();
 ===
-        res5 = (int)fnvnx_ftol2(reinterpret_cast<FUN_0077ffd0_obj*>(
+        res5 = (int)fnvnx_ftol2_sse(reinterpret_cast<FUN_0077ffd0_obj*>(
             reinterpret_cast<FUN_0077ffd0_lbx*>(&InventoryMenu::ms_pInventoryMenu->m_kItemList)->vfn_04())
             ->FUN_00a011b0(0xfac));
         /* fnv-nx FTOL1: res5 above */
@@ -221,7 +223,7 @@ extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its
         ->FUN_00a011b0();
     InventoryMenu::ms_pInventoryMenu->m_kPageStates[idx].m_iScrollOffset = FUN_00ec62c0();
 ===
-    InventoryMenu::ms_pInventoryMenu->m_kPageStates[idx].m_iScrollOffset = (int)fnvnx_ftol2(reinterpret_cast<FUN_0077ffd0_obj*>(
+    InventoryMenu::ms_pInventoryMenu->m_kPageStates[idx].m_iScrollOffset = (int)fnvnx_ftol2_sse(reinterpret_cast<FUN_0077ffd0_obj*>(
         reinterpret_cast<FUN_0077ffd0_list*>(&InventoryMenu::ms_pInventoryMenu->m_kItemList)
             ->FUN_00825c00())
         ->FUN_00a011b0((int)FUN_00a01860("_current_value")));
@@ -239,13 +241,13 @@ extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its
 <<<
 int __cdecl Stamp();
 ===
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: Stamp is _ftol2_sse; its operand is passed */
+static inline int (fnvnx_ftol2_sse)(double x) { int ok = (x > -2147483649.0) & (x < 2147483648.0); int r = (int)(ok ? x : 0.0); return ok ? r : (-2147483647 - 1); } /* fnv-nx FTOL1: Stamp is _ftol2_sse; its operand is passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 >>>
 <<<
                 ((FUN_007a5730_item*)*node->Slot())->tile->Probe(0xfac);
                 selIdx = Stamp();
 ===
-                selIdx = (int)fnvnx_ftol2(((FUN_007a5730_item*)*node->Slot())->tile->Probe(0xfac));
+                selIdx = (int)fnvnx_ftol2_sse(((FUN_007a5730_item*)*node->Slot())->tile->Probe(0xfac));
                 /* fnv-nx FTOL1: selIdx above */
 >>>
 
@@ -265,14 +267,14 @@ extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: Stamp is _ftol2_sse
 int __cdecl FUN_00ec62c0();
 int __cdecl FUN_00a00940(const char*, int);
 ===
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its operand */
+static inline int (fnvnx_ftol2_sse)(double x); /* fnv-nx FTOL1 (defined at the other site of this file): _ftol2_sse with its operand passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 int __cdecl FUN_00a00940(const char*, int);
 >>>
 <<<
                 (*node->FUN_006815c0())->tile->FUN_00a011b0(0xfac);
                 selIdx = FUN_00ec62c0();
 ===
-                selIdx = (int)fnvnx_ftol2((*node->FUN_006815c0())->tile->FUN_00a011b0(0xfac));
+                selIdx = (int)fnvnx_ftol2_sse((*node->FUN_006815c0())->tile->FUN_00a011b0(0xfac));
                 /* fnv-nx FTOL1: selIdx above */
 >>>
 
@@ -289,13 +291,13 @@ int __cdecl FUN_00a00940(const char*, int);
 <<<
 int __cdecl FUN_00ec62c0();
 ===
-extern "C" long long (fnvnx_ftol2)(double); /* fnv-nx FTOL1: _ftol2_sse with its operand */
+static inline int (fnvnx_ftol2_sse)(double x) { int ok = (x > -2147483649.0) & (x < 2147483648.0); int r = (int)(ok ? x : 0.0); return ok ? r : (-2147483647 - 1); } /* fnv-nx FTOL1: _ftol2_sse with its operand passed; cvttsd2si: NaN / outside int32 -> 0x80000000 */
 >>>
 <<<
         reinterpret_cast<DecTile*>(m_slot[1])->FUN_00a011b0(DAT_011da918, m_45);
         DAT_011dea3c->FUN_005c1a00(FUN_00ec62c0() + 1);
 ===
-        DAT_011dea3c->FUN_005c1a00((int)fnvnx_ftol2(reinterpret_cast<DecTile*>(m_slot[1])->FUN_00a011b0(DAT_011da918)) + 1, m_45);
+        DAT_011dea3c->FUN_005c1a00((int)fnvnx_ftol2_sse(reinterpret_cast<DecTile*>(m_slot[1])->FUN_00a011b0(DAT_011da918)) + 1, m_45);
         /* fnv-nx FTOL1: Set(GetFloat + 1, m_45) above */
 >>>
 

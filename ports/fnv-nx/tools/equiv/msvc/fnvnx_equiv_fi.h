@@ -35,5 +35,10 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #ifndef fnvnx_ftol2
 #define fnvnx_ftol2(x) ((__int64)(x))
 #endif
+/* FTOL1 (S1b): fnvnx_ftol2_sse(x) is the CRT's _ftol2_sse of x (int result); the patches define it as
+ * `(fnvnx_ftol2_sse)(double)`, which this macro leaves alone */
+#ifndef fnvnx_ftol2_sse
+#define fnvnx_ftol2_sse(x) ((int)(x))
+#endif
 
 #endif
