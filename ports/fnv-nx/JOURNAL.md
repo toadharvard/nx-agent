@@ -1074,3 +1074,40 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **decided** - Every link run states the branch commit its tree was prepared from; boot runs use only links
   prepared from the current branch head (orchestrator).
 * **metrics** - game_undefined=7502 pcrel_abs_image=0 frontier_keys=138 init_skips=6603 boot_reached=WinMain+0x1c8
+
+### J-0055 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0043,J-0053
+
+* **did** - Replayed all 202 saved divergences on S2c's f10 objects (-fPIC, STATIC1, GAME1, FALL1, RET1, XINC1/FTOL1,
+  D15) and ran bounded campaigns on f10: 900 leaf, 400 rule-touched, 300 callers of S2 ABI-checked references (1,531
+  functions, 65,570 executions). Harness: MSVC vector ctor/dtor iterators and `fnvnx_eh_vector_*` on both machines,
+  log10, adaptive follow of callees GCC inlined, pinned literal pool, image-wide local statics, object-set profiles
+  (`FNVNX_DFPROFILE`), tagged recheck + `recheck_summary.py`, bridge picker, oracle custom-convention detection.
+  Self-test passes (orchestrator re-ran `tests/s13/test_difffuzz.py`: 0 failures).
+* **found** - Confirmed fixed: split-global 13/14 (8 gone, 5 now soft function-local statics), signedness 3/3
+  (STATIC1), call-flow 20/32. FALL1 turns 5 fall-off paths into traps where MSVC returned eax (e.g. HasValidTriangle
+  004ff7e0 returns `this`). Bridges: `ref-passes-fewer` is **not** junk when the missing definition parameter is
+  ecx/edx (00a564a0 -> 00a36fd0: the callee uses the caller's `this`); `this-not-passed` pairs still unpatched
+  (00b81330 -> 00ba95e0, 00bbe020 -> 00c0abd0); fastcall->thiscall 00a1c9b0 -> 00a0c900 and varargs 00700350 ->
+  00703c00 to triage. SSE: NaN representation 16 (soft); Havok whole-program conventions (pointer in eax) 13 - an
+  oracle-model gap, not a port bug. Deallocators 0x00401030 and 0x00aa1460 free into the same MemoryManager heap
+  (g_memoryManager via 0x00aa4060; the latter through BSNiAllocator, slot inferred from the signature).
+* **metrics** - df_functions_f10=1531 df_execs_f10=65570 df_hard_f10=147 df_soft_f10=90 df_oracle_gap_f10=11
+  df_recheck_gone=59 df_split_global_left=1 df_fall1_traps=5 df_bridge_callee_argdiff=15
+* **next** - S2: missing ecx/edx parameter -> x86-inconsistent (sent to S2c); S1b: remaining this-not-passed sites;
+  S1: FALL1 x86-evidence return value, GOTO1 10/54 hard (sent to S1); oracle: model MSVC register conventions, skip
+  edx-dummy compares; triage 116 unclassified; recheck on f11.
+
+### J-0056 | 2026-11-04 | stream: S2c-vtables | status: done | parent: J-0053,J-0054
+
+* **did** - Fresh full prepare + compile + link (f11) from branch commit `0c630cf` (after S1 round 7 and the FALL1
+  initializer fix); the run's `summary.txt` names that commit on its first line, and every run's summary does from
+  now on (J-0054 rule).
+* **found** - WinMain's units (blk_00ae0000_od, blk_00c20000_od, blk_004a0000_od, misc/main) and nicontrollermanager
+  compile and link; the boot frontier 0x00af3020 is defined. None of the 6,265 dyninit / 4,692 dynexit functions
+  contains a trap in f11 (all did in f10). Every vftable entry checks out; 95 deleting destructors have D1 and D0;
+  S13's split-global checker 0; `pcrel_abs.py` 0 image references. Undefined: `__fnv_` 4,574 (units not compiled),
+  C++ no address 1,619, ctors/dtors normal paths 779, `.text` with no provider 152, typeinfo/thunks/vtables 112,
+  C names 203, platform/import layer 165/130.
+* **metrics** - prepare_from=0c630cf compile_objects=2748 compile_failed_units=230 link_objects=3497
+  link_trial_undefined=7842 link_trial_multidef=0 link_ctor_dtor_left=779 fall1_edits=1171
+* **next** - S5: guest + emulated boot on f11; S2c: bridge findings from J-0055.
