@@ -9,7 +9,7 @@
  * Core 3 opt-in (off by default until S15's model and the hardware say otherwise): with it, the background roles
  * (IO/background loading, audio, tasklets, the "game" row of everything else) take mask3, which includes core 3. The
  * main thread, the render worker, the AI linear threads and the loading screen stay on cores 0-2. The switch is
- * FNVNX_CORE3_DEFAULT at build time and `core3=` in sdmc:/fnvnx/fnvnx.ini at run time (toolchain/host/host.c). */
+ * FNVNX_CORE3_DEFAULT at build time and `core3=` in sdmc:/switch/fnv/fnvnx.ini at run time (toolchain/host/host.c). */
 #ifndef FNVNX_PLACEMENT_H
 #define FNVNX_PLACEMENT_H
 

@@ -499,4 +499,4 @@ int os_vm_release(void *addr, size_t size)
     return r;
 }
 
-const char *os_default_root(void) { return "sdmc:/fnv-nx"; }
+const char *os_default_root(void) { return "sdmc:/switch/fnv"; }   /* = FNVNX_SD_DIR (toolchain/include/fnvnx/sdlayout.h) */
