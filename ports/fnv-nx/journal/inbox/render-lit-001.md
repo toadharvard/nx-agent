@@ -28,5 +28,16 @@
 * **decided** - Interface recognition over hash lists: works for any package and the console's engine path, and
   keeps hashes and names of game files out of git. Fixed registers instead of per-program defines: one map in all
   packages, so one DKSH per variant and no run-time compile.
+* **corrected** - (orchestrator, D21: coverage first; render/native/CLAIMS.md: family streams do not switch
+  families to native before step 1 holds) The d9 families are now opt-in: `nx_render --families all`; the default
+  is every program translated (168b5ff). Merged the integration branch with render-land's R4 fix (texture images
+  per TEXU/TEXC exhausted NX_MAX_IMAGES).
+* **measured** - D21 metric, lit draws passing against S16's WineD3D per-draw references (fnv-nx-build
+  reports/s16-refs, docmitchell frame 2, the only frame with references; S16 drawgate.py, normalized capture):
+  9/9 lit draws pass on Translated, 9/9 with `--families all`; all 19 draws of the frame pass either way. Menu: no
+  lit draws.
+* **request** - S16: package 019's lit programs through the general path need WineD3D references, which this
+  container cannot render (no nxd9play): 535 entries / 470 unique programs (SLS 351, SM3 131, SKIN 39, HAIR 14),
+  a perm.py set restricted to them (--programs). The list is local (names), sent on request.
 * **next** - The Lighting30 (SM3, ps_3_0) programs of package 019 (skin, hair, eyes, parallax, shadowed lights):
   they need a capture on the 3_0 path (the Wine run picked 012) or synthetic coverage; then the SKIN2x family.
