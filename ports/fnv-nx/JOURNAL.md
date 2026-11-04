@@ -3084,3 +3084,24 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - Measure it on the device (PERF.md B1).
   - Mitigation: inline Interlocked in fnvnx_win32.h.
   - `tests/s12/order/litmus.cpp` goes into the first hardware run's set (PERF.md section 9).
+
+### J-0140 | 2026-11-04 | stream: S6n-native-render,P6n,R0-gates | status: wip | parent: J-0139
+
+* **measured (P6n)** - render/native/perf/report.json, summary at e02c871.
+  - Renderer CPU per frame on the synthetic high mix:
+    - at 1.02 GHz: main 5.5-10.0 ms, render 5.3-8.9 ms;
+    - at 1.785 GHz: main 3.2-6.1 ms, render 3.0-5.1 ms.
+  - Native vs Nine state tracker on the same streams: 0.70-1.56x per draw, 0.69-0.92x per frame. The expected 3-5x is
+    not in this layer. The engine's own D3D9 path and nvc0 are being measured now.
+  - GPU model: docked 720p 7.4-12.4 ms; handheld 720p 14.9-24.8 ms.
+* **measured (V6n)** - Shader parity, all 16 packages, 15,791 programs.
+  - 11,161 translated: 8,386 pass, 2,775 fail.
+  - 4,630 do not translate. Main gap: centroid, 4,614 programs including all SM3 lighting PS. S6b is on it.
+* **decided (owner)** - Lowering the resolution must not hide render cost.
+  - Handheld is 720p. Dynamic resolution is only a safety net for peak scenes; it is off when the gates measure.
+  - Priority is optimization, each change measured before/after by P6n.
+  - GPU: fp16 on Tegra X1, single-pass lighting, merged image-space passes, overdraw, bandwidth, shadow caching,
+    occlusion.
+  - CPU: sort cost, UBO ring, sampler re-translation, constant slices, instancing, two-thread recording.
+  - The gate reads `targets_budget_fraction`: share of the whole frame, not the renderer alone. The target is 45 fps
+    stable at 720p handheld.
