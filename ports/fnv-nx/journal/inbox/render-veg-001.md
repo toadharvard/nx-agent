@@ -70,3 +70,12 @@
 * **found** - tree branches (STB2000-2019.vso) are the ShadowLightShader 2x lighting programs with TREE (wind
   matrix blend by BLENDINDICES.x/y); their pixel programs are the SLS ones, i.e. render-lit's lit family. Plan: a
   shared include for the TREE wind blend, offered to render-lit, instead of a second copy of the lit shaders.
+* **did** - decals and blood (item 4): `shaders/decal.vert.glsl` (GDECAL; skin = GDECALS, 4 bones from a D3DCOLOR
+  index in colour order, the fourth weight 1 - sum), `decal.frag.glsl` (GDECAL.pso: clamped uv into the atlas
+  rectangle, rgb x f, a x f^2), `blood.vert/frag.glsl` (BS: light-shifted second map, mix by the weighted alpha;
+  flare = BSF: clip offset by Ctrl.x, map0.r x map1 x Alpha). Blocks NxDecalDraw / NxDecalSkinDraw / NxBloodDraw
+  in veg_families.h (straight copies of the constants, no fold). Parity 4/4 (decal 0.53/255, the others exact);
+  8 mutations caught. The first skinned scene folded (random bone rotations up to 0.3 rad): one pixel of 29,099
+  differed at a depth tie; the palette is now mild (0.06 rad, 4 units) and the case is exact.
+* **found** - docs/RENDER_NATIVE.md §1.6 says particles are expanded by the `PAR2` VS (20 variants): PAR2xxx are the
+  PARALLAX lighting programs; particles use PARTICLE.vso (and NOLIGHTING_PSYS*). For the render machine.

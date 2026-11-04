@@ -1,4 +1,4 @@
-/* fnv-nx native renderer, render-veg families (grass; trees, particles and decals to follow): per-draw uniform
+/* fnv-nx native renderer, render-veg families (grass, tree leaves, particles, decals, blood): per-draw uniform
  * blocks (std140, UBO slot 1, both stages) and the CPU folding of the engine's shader constants into them.
  * Each struct mirrors the GLSL block of render/native/shaders/<family>.*.glsl field by field; matrices are
  * column-major (clip = M * vec4(p, 1)), clip space D3D9's (z in [0, 1]). Moves into nx/families.h when the render
@@ -111,6 +111,22 @@ typedef struct NxParticleDraw {           /* shaders/particle.vert.glsl Particle
 /* Returns the bytes to upload (the head plus 3 x count vec4), 0 when count > NX_PARTICLE_MAX. */
 size_t nx_particle_fold(const NxParticleConstants* c, const float (*instances)[4], uint32_t count, NxParticleDraw* out);
 
+/* ---- decals (GeometryDecalShader: GDECAL.vso, GDECALS.vso skinned, GDECAL.pso) ---- */
+typedef struct NxDecalDraw {        /* shaders/decal.*.glsl DecalDraw; filled straight from the constants */
+    float mvp[16];                  /* ModelViewProj c0-c3 (GDECALS: SkinModelViewProj c1-c4), column-major */
+    float fade[4];                  /* x = DecalFade.x x DecalFade.y (c31) */
+    float offset[4];                /* PSDecalOffset (PS c15) */
+} NxDecalDraw;
+typedef struct NxDecalSkinDraw { NxDecalDraw d; float bones[54][4]; } NxDecalSkinDraw;   /* Bones c44-c97 */
+
+/* ---- blood splatter (BSShaderBloodSplatter: BS.vso/pso, BSF.vso/pso = FLARE) ---- */
+typedef struct NxBloodDraw {        /* shaders/blood.*.glsl BloodDraw */
+    float mvp[16];                  /* ModelViewProj c0-c3, column-major */
+    float lightLoc[4];              /* LightLoc c4 */
+    float ctrl[4];                  /* Ctrl c5 (BSF) */
+    float alpha[4];                 /* Alpha (PS c0) */
+} NxBloodDraw;
+
 #ifdef __cplusplus
 }
 #define NX_VEG_ASSERT_ static_assert
@@ -120,5 +136,7 @@ size_t nx_particle_fold(const NxParticleConstants* c, const float (*instances)[4
 NX_VEG_ASSERT_(NX_GRASS_HEAD_BYTES == 208, "NxGrassDraw head = 13 vec4 + mat4 (std140)");
 NX_VEG_ASSERT_(sizeof(NxGrassDraw) == 208 + 16 * NX_GRASS_MAX_INSTANCES, "NxGrassDraw");
 NX_VEG_ASSERT_(sizeof(NxParticleDraw) == 256 + 3 * 16 * NX_PARTICLE_MAX, "NxParticleDraw");
+NX_VEG_ASSERT_(sizeof(NxDecalDraw) == 96 && sizeof(NxDecalSkinDraw) == 96 + 54 * 16, "NxDecalDraw");
+NX_VEG_ASSERT_(sizeof(NxBloodDraw) == 112, "NxBloodDraw");
 NX_VEG_ASSERT_(sizeof(NxTreeLeafDraw) == 64 + 12 * 16 + 64 * 16, "NxTreeLeafDraw");
 #endif

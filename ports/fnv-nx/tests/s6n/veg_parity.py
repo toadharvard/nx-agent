@@ -273,7 +273,8 @@ def draw(prog, vao, count, ubos, tex):
     GL.glUseProgram(prog)
     for binding, arr in ubos:
         ubo(binding, arr)
-    GL.glActiveTexture(GL.GL_TEXTURE0); GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
+    for unit, t in enumerate(tex if isinstance(tex, (list, tuple)) else [tex]):
+        GL.glActiveTexture(GL.GL_TEXTURE0 + unit); GL.glBindTexture(GL.GL_TEXTURE_2D, t)
     GL.glBindVertexArray(vao)
     GL.glDrawElements(GL.GL_TRIANGLES, count, GL.GL_UNSIGNED_INT, None)
     img = GL.glReadPixels(0, 0, W, H, GL.GL_RGBA, GL.GL_FLOAT)
@@ -472,6 +473,96 @@ PART_CASES = [("particle", "PARTICLE.vso", "PARTICLE.pso", "particle.vert", "par
               ("particle_e0", "PARTICLE.vso", "PARTICLE.pso", "particle.vert", "particle__e0.frag")]
 
 
+# ---- decals (GDECAL / GDECALS) and blood splatter (BS / BSF) ------------------------------------------------------
+
+def surface(rng, n=16):
+    """a curved n x n grid in front of the camera; per vertex: pos (x, y, z, 1), uv + fade weight, bone weights,
+    bone bytes (D3DCOLOR order, as floats k / 255), uv"""
+    v, ix = [], []
+    for j in range(n + 1):
+        for i in range(n + 1):
+            u, w = i / n, j / n
+            x, z = (u - 0.5) * 500, (w - 0.5) * 500
+            y = 600 + 80 * math.sin(u * 3) * math.cos(w * 2)
+            wt = rng.dirichlet([1, 1, 1, 1])
+            bones = rng.integers(0, 18, 4) / 255.0
+            v.append([x, y, z, 1, u * 1.3 - 0.15, w * 1.3 - 0.15, 0.2 + 0.8 * u * w, *wt[:3], *bones, u, w])
+    for j in range(n):
+        for i in range(n):
+            a = j * (n + 1) + i
+            ix += [a, a + 1, a + n + 2, a, a + n + 2, a + n + 1]
+    return np.array(v, np.float32), ix
+
+
+def surface_geometry(verts, ix, layout):
+    vao = GL.glGenVertexArrays(1); GL.glBindVertexArray(vao)
+    vb = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vb)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER, verts.nbytes, verts, GL.GL_STATIC_DRAW)
+    ia = np.array(ix, np.uint32)
+    ib = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, ib)
+    GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, ia.nbytes, ia, GL.GL_STATIC_DRAW)
+    for loc, off, n in layout:
+        GL.glEnableVertexAttribArray(loc)
+        GL.glVertexAttribPointer(loc, n, GL.GL_FLOAT, GL.GL_FALSE, 16 * 4, ctypes.c_void_p(off * 4))
+    return vao, len(ia)
+
+
+DECAL_LAYOUT = ((0, 0, 4), (3, 4, 3), (1, 7, 3), (2, 10, 4))   # POSITION, NORMAL (uv + fade), BLENDWEIGHT, BLENDINDICES
+BLOOD_LAYOUT = ((0, 0, 4), (6, 14, 2))                        # POSITION (z = alpha weight), TEXCOORD0
+
+
+def bones_palette(rng):
+    b = np.zeros((54, 4), np.float32)
+    for k in range(18):
+        a = rng.uniform(-0.06, 0.06); c, s = math.cos(a), math.sin(a)   # mild: the skinned surface must not fold
+        b[3 * k:3 * k + 3] = [[c, -s, 0, rng.uniform(-4, 4)], [s, c, 0, rng.uniform(-4, 4)], [0, 0, 1, rng.uniform(-4, 4)]]
+    return b
+
+
+def zero_ps():
+    return np.zeros((256, 4), np.float32)
+
+
+def decal_cases(rng, mvp):
+    fade = [0.8, 0.9, 0, 0]; off = [0.25, 0.5, 0.125, 0.75]
+    bones = bones_palette(rng)
+    vs = np.zeros((256, 4), np.float32); vs[0:4] = mvp; vs[31] = fade
+    vss = np.zeros((256, 4), np.float32); vss[1:5] = mvp; vss[31] = fade; vss[44:98] = bones
+    ps = zero_ps(); ps[15] = off
+    vdrv = np.zeros((4, 4), np.float32); vdrv[0] = [0, 0, 1, 0]
+    pdrv = np.zeros((20, 4), np.float32)
+    head = np.zeros((6, 4), np.float32); head[0:4] = mvp.T; head[4] = [fade[0] * fade[1], 0, 0, 0]; head[5] = off
+    epi = np.zeros((3, 4), np.float32)
+    return [
+        ("decal", "GDECAL.vso", "GDECAL.pso", "decal.vert", "decal.frag", [(0, vs), (2, vdrv), (3, ps), (5, pdrv)], [(1, head), (2, epi)]),
+        ("decal_skin", "GDECALS.vso", "GDECAL.pso", "decal_skin.vert", "decal__e0.frag", [(0, vss), (2, vdrv), (3, ps), (5, pdrv)],
+         [(1, np.concatenate([head, bones])), (2, epi)]),
+    ]
+
+
+def blood_matrix():
+    """the splatter is a screen-space quad set: clip = M (x, y, -, w) maps the surface's x (+-250) and y (520..680)
+    onto the target; POSITION.z (the alpha weight) does not enter the position"""
+    M = np.zeros((4, 4)); M[0, 0] = 1 / 280.0; M[1, 1] = 1 / 90.0; M[1, 3] = -600 / 90.0; M[2, 3] = 0.5; M[3, 3] = 1
+    return M
+
+
+def blood_cases(mvp):
+    ll = [0.3, -0.2, 0, 0.6]; ctrl = [0.35, 0, 0, 0]; al = [0.85, 0, 0, 0]
+    vs = np.zeros((256, 4), np.float32); vs[0:4] = mvp; vs[4] = ll; vs[5] = ctrl
+    ps = zero_ps(); ps[0] = al
+    vdrv = np.zeros((4, 4), np.float32); vdrv[0] = [0, 0, 1, 0]
+    pdrv = np.zeros((20, 4), np.float32)
+    blk = np.zeros((7, 4), np.float32); blk[0:4] = mvp.T; blk[4] = ll; blk[5] = ctrl; blk[6] = al
+    epi = np.zeros((3, 4), np.float32)
+    t = [(0, vs), (2, vdrv), (3, ps), (5, pdrv)]
+    return [("blood", "BS.vso", "BS.pso", "blood.vert", "blood.frag", t, [(1, blk), (2, epi)]),
+            ("blood_flare", "BSF.vso", "BSF.pso", "blood_flare.vert", "blood_flare__e0.frag", t, [(1, blk), (2, epi)])]
+
+
+SIMPLE_NAMES = ("GDECAL.vso", "GDECALS.vso", "GDECAL.pso", "BS.vso", "BS.pso", "BSF.vso", "BSF.pso")
+
+
 # ---- driver ---------------------------------------------------------------------------------------------------------
 
 def translated_prog(t019, idx, ovs, ops):
@@ -496,7 +587,9 @@ def compare(name, a, b, label, verbose):
     print("%-14s %s  covered %6d px, coverage diff %4d px, max |colour diff| %.5f (%.2f/255)%s"
           % (name, "ok  " if ok else "FAIL", cov_a, cover, diff, diff * 255, "" if ok else "  <- " + label))
     if verbose and both.any():
-        d = np.abs(a - b).max(axis=2); yx = np.unravel_index(np.argmax(d * both), d.shape)
+        d = np.abs(a - b).max(axis=2)
+        print("   px over tolerance: %d" % int(((d > TOL) & both).sum()))
+        yx = np.unravel_index(np.argmax(d * both), d.shape)
         print("   worst px", yx, "translated", a[yx], "native", b[yx])
     return ok
 
@@ -522,8 +615,8 @@ def main():
         lib.nx_tree_leaf_fold.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
         lib.nx_particle_fold.restype = ctypes.c_size_t
         lib.nx_particle_fold.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]
-    for _, ovs, ops, _, _ in CASES + LEAF_CASES + PART_CASES:
-        for f in (ovs, ops):
+    for f in SIMPLE_NAMES + tuple(x for c in CASES + LEAF_CASES + PART_CASES for x in c[1:3]):
+        if True:
             if f not in idx:
                 print("%s missing from FNVNX_T019" % f); return 2
     dpy, ctx = egl_context()
@@ -576,6 +669,22 @@ def main():
         b = draw(native_prog(pkg, nvs, nfs), pvao, pcount, particle_native_ubos(lib, pp, pinst), tex)
         ncases += 1
         fails += not compare(name, a, b, "%s+%s vs %s+%s" % (ovs, ops, nvs, nfs), verbose)
+    # decals and blood on a curved surface; second texture: an opaque gradient (decal map / blood map 1)
+    t2 = texture_rgba(rng); t2[..., 3] = np.clip(t2[..., 3].astype(int) + 60, 0, 255).astype(np.uint8); t2 = t2[::-1].copy()
+    tex2 = upload_tex(t2)
+    eye = np.array([0, -100.0, 50])
+    mvp = perspective_lookat(eye, [0, 600, 0], math.radians(60), 1.0, 10, 4000)
+    sverts, six = surface(rng)
+    bverts = sverts.copy(); bverts[:, 2] = bverts[:, 6]                  # blood: POSITION.z = the alpha weight
+    for verts_, layout, cases in ((sverts, DECAL_LAYOUT, decal_cases(rng, mvp)), (bverts, BLOOD_LAYOUT, blood_cases(blood_matrix()))):
+        svao, scount = surface_geometry(verts_, six, layout)
+        for name, ovs, ops, nvs, nfs, tu, nu in cases:
+            if only and name not in only:
+                continue
+            a = draw(translated_prog(t019, idx, ovs, ops), svao, scount, tu, [tex, tex2])
+            b = draw(native_prog(pkg, nvs, nfs), svao, scount, nu, [tex, tex2])
+            ncases += 1
+            fails += not compare(name, a, b, "%s+%s vs %s+%s" % (ovs, ops, nvs, nfs), verbose)
     print("veg_parity: %d cases, %d failed (blocks from %s)" % (ncases, fails, "veg_*.cpp" if lib else "numpy"))
     EGL.eglTerminate(dpy)
     return 1 if fails else 0
