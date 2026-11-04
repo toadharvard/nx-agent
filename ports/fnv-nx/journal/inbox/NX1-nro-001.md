@@ -62,3 +62,32 @@
 * **next** - Read the first full1 report at a head >= ac00629: fnv.nro built, checks 1 and 3 on real artifacts.
   Then nro/<c12> as the owner's download. After that, the largest bucket left: check 2's representative peak,
   with S5.
+
+## Update (later the same day)
+
+* **found / fixed**
+  - V1 refutations, each in its own commit:
+    - N2 (relocations into rodata);
+    - P1/P2 (stale publish, rejected push);
+    - G3 (pool define parsing);
+    - S1/S2 (v8.1+ instructions: the A57 is ARMv8.0, masks validated against GNU as, 0 false hits on 4.7M guest
+      words);
+    - S3 (unreviewed services);
+    - S5 (pm:shell);
+    - EXIT-P1: appletLockExit is taken at pump start and released in cleanup_for_exit, so an exit request
+      reaches the host instead of killing it.
+  - Mesosphère allows only EL0PCTEN, so cntvct_el0 traps. Every guest and shim read now uses cntpct_el0.
+  - ldr gives a 32-bit process no system_resource_size, so it draws on the shared application slab (20,000
+    KMemoryBlocks). The VirtualAlloc extents are capped at 3072 (S4 adopted it).
+  - Owner rule, no shader compiled on the console, is check 9:
+    - 162 DKSH go in one pack (shaders.nxsp, 12 families, 294 KiB) in fnv.nro's RomFS;
+    - the console table holds no GLSL and is bound to the pack id;
+    - romfs.py is byte-identical to switch-tools build_romfs.
+* **measured** - 9 checks, 5 open: 1, 2, 3, 6, 9.
+  - 9 fails only on game.packer.
+  - 1, 3 and 6 wait for full1 with the native host plus LINK_OVERRIDES=render.
+  - 2 waits for a first-cell boot.
+* **requests**
+  - Orchestrator: an owner for the install-time sdp2dksh -> shaders_nx.pak packer (owner-local, never in git).
+  - Render machine: keep the device table's .glsl identity handle in LearnEpilogueVariants, or identify blobs by
+    name.

@@ -22,7 +22,8 @@ beyond the overdraw factor, no cross-family overlap, no CPU/GPU sync stalls.
 """
 import json, os, re, struct, subprocess, sys
 
-LIGHTS = 3                  # active lights per lit draw (sun + 2 point lights; the shader caps at 8)
+LIGHTS = 5                  # active lights per lit draw: the sun + 4 point lights (an FNV exterior object near a
+                            # settlement; interiors use up to the shader's 8; V1's sensitivity runs: 1+4, 1+8)
 TEX_COST = 1.5              # TMU cycles per texture instruction (bilinear 1, trilinear 2: mixed)
 EFF = (1.0, 0.6)            # SM issue efficiency (ALU and TMU): 1.0 = peak (lo estimate), 0.6 = latency/occupancy bound (hi)
 GPU = {"name": "Tegra X1 GM20B", "sm": 2, "lanes": 256, "tmu": 16, "rop": 16, "dram_gbs": 25.6, "dram_eff": 0.6,
@@ -49,6 +50,10 @@ TEX_BYTES = 0.5             # DRAM bytes per texture fetch after the texture cac
 FP16_RATE = 2.0             # Tegra X1: HFMA2/HADD2/HMUL2 issue two fp16 lanes per fp32 lane
 # family -> shaders, target kind, coverage, overdraw, vertices/draw; blend: colour read-modify-write;
 # depth: 0 none, 1 test only, 2 test + write.
+# Families whose native shader is a stand-in (no dedicated native shader yet): their native row is a lower bound,
+# real019 (the game's own programs, translated) is the metric for them.
+STAND_IN = {"water_refl": "lit.frag", "lod": "lit.frag", "trees": "lit.frag", "grass": "nolight_tex.frag",
+            "particles": "nolight_tex.frag", "imagespace_ui": "tex.frag (one copy for the whole chain)"}
 MODEL = {
     "shadow":       dict(vs="depth.vert", ps="depth.frag", target="shadow", coverage=0.6, overdraw=1.5, verts=600, depth=2, depth_only=True),
     "water_refl":   dict(vs="lit.vert", ps="lit.frag", target="refl", coverage=0.8, overdraw=1.5, verts=400, depth=2),
@@ -70,7 +75,57 @@ MODEL = {
 # binds for the same D3D9 state; a permutation missing from the package falls back to the shader without it.
 # PERMUTATIONS = False models the runtime shaders only (the model before the permutations existed).
 PERMUTATIONS = True
-LIT_PERMUTATION = {"lit.frag": "lit_d1p2.frag", "lit_spec.frag": "lit_spec_d1p2.frag"}
+LIT_PERMUTATION = {"lit.frag": "lit_d1p4.frag", "lit_spec.frag": "lit_spec_d1p4.frag"}   # LIGHTS = 1 + 4
+# Early-z. Overdraw is the layers rasterized per covered pixel. A depth-writing draw without discard is rejected
+# before shading where an earlier draw is in front: in the renderer's state-sorted order depths are random, so of k
+# layers the expected number shaded is the harmonic number H(k) (H(1) = 1, H(2) = 1.5, H(3) = 1.83; linear between).
+# A draw that discards (alpha test) loses early-z: all its layers are shaded (and it rejects nothing after it, which
+# the model ignores). Depth-only passes (shadow maps) write depth too and are rejected the same way; test-only and
+# blended families shade every layer. EARLY_Z = False: every layer
+# shaded (the model before).
+EARLY_Z = True
+# The renderer orders opaque draws (layer 0) by DEPTH_BUCKETS coarse depth buckets, front to back, then by state
+# (nx/front.h SortKey, kDepthBucketBits): of k layers with uniform random depths, the fragments in nearer buckets are
+# drawn first and those inside a bucket in random order. shaded(k, B) is that expectation (exact Monte Carlo with a
+# fixed seed for integer k, linear between); B = 1 is state order, shaded(k, 1) = H(k).
+DEPTH_BUCKETS = 4
+
+
+def _shaded_table(buckets, nmax=8, trials=20000):
+    import random
+    rnd = random.Random(12345)
+    tab = [0.0, 1.0]
+    for n in range(2, nmax + 1):
+        tot = 0
+        for _ in range(trials):
+            d = [rnd.random() for _ in range(n)]
+            order = sorted(range(n), key=lambda i: (int(d[i] * buckets), rnd.random()))
+            near = 2.0
+            for i in order:
+                if d[i] < near:
+                    tot += 1; near = d[i]
+        tab.append(tot / trials)
+    return tab
+
+
+_SHADED = {}
+
+
+def harmonic(k, buckets=1):
+    if k <= 1.0:
+        return k
+    if buckets not in _SHADED:
+        _SHADED[buckets] = _shaded_table(buckets)
+    t = _SHADED[buckets]
+    n = min(int(k), len(t) - 2)
+    return t[n] + (k - n) * (t[n + 1] - t[n])
+
+
+def shaded_layers(m, alpha_share):
+    k = m["overdraw"]
+    if not EARLY_Z or m.get("depth", 0) < 2 or m.get("blend"):
+        return k
+    return alpha_share * k + (1.0 - alpha_share) * harmonic(k, DEPTH_BUCKETS)
 RS_ALPHATESTENABLE, RS_FOGENABLE = 15, 28
 
 
@@ -132,6 +187,8 @@ def mix_stats(tab, shaders):
 # Real-like shader costs: the game's own programs (shaderpackage019.sdp, the SM3 package) translated by S6b's
 # sdp2dksh (MojoShader glsldk -> uam), averaged per shader class over the programs that translate. Used as the
 # D3D9-translation reference scene ("real019_"); family -> (vertex class, pixel class). Classes are name prefixes.
+# lod: DISTLOD's own pixel program. "SM pso" (the name prefix of SM3xxx / SM3LLxxx) is the SM3 per-pixel lighting
+# class, 50 programs, ~600-1,200 Maxwell instructions, which LOD meshes do not use.
 REAL_MAP = {
     "shadow": ("SLS vso", "SLS pso"), "water_refl": ("SLS vso", "SLS pso"), "lit": ("SLS vso", "SLS pso"),
     "land": ("SLS vso", "SLS pso"), "lod": ("DISTLOD vso", "DISTLOD pso"), "trees": ("STB vso", "STB pso"),
@@ -332,7 +389,9 @@ def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
             fams[fam] = real_imagespace(tab, p, hz, eff)
             total_s += fams[fam]["ms"] / 1e3; dram += fams[fam]["dram_mb"] * 1e6
             continue
-        px = target_px(m, p) * m["coverage"] * m["overdraw"]
+        mix = epi.get(fam, {})
+        at_share = sum(n for (a, _f), n in mix.items() if a) / max(1, sum(mix.values()))
+        px = target_px(m, p) * m["coverage"] * shaded_layers(m, at_share)
         alu = ps["alu_slots"] / GPU["lanes"] / eff
         texc = ps["tex"] * TEX_COST / GPU["tmu"] / eff
         rop = 1.0 / (2 * GPU["rop"]) if m.get("depth_only") else 1.0 / GPU["rop"]
@@ -347,6 +406,10 @@ def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
                      "dram_mb": round(b / 1e6, 2), "vs": vs.get("name", m["vs"]) if not shader_map else shader_map[fam][0],
                      "ps": (bound[0][0] if bound else m["ps"]) if not shader_map else shader_map[fam][1],
                      "ps_mix": [[n, round(f, 3)] for n, f in bound] if bound else None, "ps_alu_slots": round(ps["alu_slots"], 1),
+                     "stand_in": (fam in STAND_IN) if not shader_map else False,
+                     "alpha_tested_share": round(at_share, 3), "shaded_layers": round(shaded_layers(m, at_share), 3),
+                     "shader_source": ("native stand-in: " + STAND_IN[fam] if fam in STAND_IN else "native family shader")
+                                      if not shader_map else "the game's programs (shaderpackage019 via sdp2dksh), class average",
                      "target_format": None if m.get("depth_only") else fmts[m["target"]]}
         total_s += t; dram += b
     bw_s = dram / (GPU["dram_gbs"] * 1e9 * GPU["dram_eff"])
@@ -379,14 +442,17 @@ def main():
         real_tab = real_table(real)
         tab.update(real_tab)
         draws = {f["name"]: f["draws"][1] for f in gen_stream.FAMILIES}
-        scenes["real019_mix_hi"] = [scene(tab, draws, c, e, fmts, REAL_MAP) for c in PRESETS for e in EFF]
+        scenes["real019_mix_hi"] = [scene(tab, draws, c, e, fmts, REAL_MAP, epi=epis["hi"]) for c in PRESETS for e in EFF]
     res = {"method": __doc__.strip().split("\n\n", 2)[2], "assumptions": {"lights": LIGHTS, "tex_cost": TEX_COST, "efficiency": EFF, "gpu": GPU,
            "presets": PRESETS, "target_formats": fmts, "format_bytes": FORMAT_BYTES, "z_compress": Z_COMPRESS,
            "tex_bytes": TEX_BYTES, "fp16_rate": FP16_RATE, "families": MODEL, "permutations": PERMUTATIONS,
-           "lit_permutation": LIT_PERMUTATION,
+           "lit_permutation": LIT_PERMUTATION, "stand_in": STAND_IN, "early_z": EARLY_Z, "depth_buckets": DEPTH_BUCKETS,
            "epilogue_mix_hi": {f: {"at%d_fog%d" % k: n for k, n in v.items()} for f, v in epis["hi"].items()},
            "real_map": REAL_MAP if real_tab else None,
-           "real_imagespace": REAL_IMAGESPACE if real_tab else None, "hud": [HUD_UI, HUD_COVERAGE] if real_tab else None}, "shaders": tab, "scenes": scenes}
+           "real_imagespace": REAL_IMAGESPACE if real_tab else None, "hud": [HUD_UI, HUD_COVERAGE] if real_tab else None,
+           "real019_translator": (open(os.path.join(real, "translator.sha256")).read().strip()
+                                  if real and os.path.exists(os.path.join(real, "translator.sha256")) else None)},
+           "shaders": tab, "scenes": scenes}
     json.dump(res, open(out, "w"), indent=1)
     for k, v in scenes.items():
         print(k, ", ".join("%s@%.1f %.1f ms (%s)" % (s["config"], s["efficiency"], s["frame_ms"], s["bound"]) for s in v))

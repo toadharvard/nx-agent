@@ -5,14 +5,24 @@
 #   <name> call re:REGEX     a native function whose ELF symbol matches starts (the D3D9 device: null or Nine proxy)
 #   <name> store 0xADDR      a non-zero word is stored at that data-window address
 #   <name> store *0xADDR+N   a non-zero word is stored at (the pointer at ADDR) + N
+#   <name> data WHAT         a game-data step seen in the host file calls (tests/s5/datapath.py: ini-read,
+#                            archive-list, bsa-opened, esm-header, masters-loaded); needs the game files (--game)
 # The addresses are the decomp's (units.json) and the player's FalloutNV.exe 1.4.0.525's; each comment says how it is
 # known. Reproduce the RTTI ones with the exe: the type descriptor .?AVC@@, its complete-object locator, the vftable
 # that names the locator, and the function in .text that stores that vftable.
 
 winmain        call   0x0086a850   # WinMain (units.json, the decomp's entry; boot.cpp calls it)
+# the game read its INI (Fallout_default.ini / Fallout.ini / FalloutPrefs.ini, ReadFile through platform/win32)
+ini-read       data   ini-read
 # the game's D3D9 device exists: IDirect3D9::CreateDevice of the null device (toolchain/game/null_d3d9.cpp) or of
 # the Nine proxy (render/nine, class Px<interface>)
 renderer-init  call   re:^_ZN\d+(Null_I|Px)Direct3D9(Ex)?\d+CreateDevice(Ex)?E
+# the archives: a file call on one of SArchiveList's archives, then every one of them opened
+archive-list   data   archive-list
+bsa-opened     data   bsa-opened
+# FalloutNV.esm: its TES4 header read at offset 0, then every master (FalloutNV.esm, plugins.txt's .esm) read to its end
+esm-header     data   esm-header
+masters-loaded data   masters-loaded
 # the start menu exists: the StartMenu constructor (it stores the exe's StartMenu vftable 0x01076d1c, RTTI
 # .?AVStartMenu@@), or the StartMenu singleton the decomp binds at 0x011daac0 (DAT_011daac0 : StartMenu*)
 main-menu      call   0x007cb330

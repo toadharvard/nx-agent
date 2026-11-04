@@ -318,6 +318,14 @@ export FNVNX_DECOMP=$DECOMP FNVNX_X86OBJ=$ORACLE/obj FNVNX_TREE=$TREE FNVNX_A64O
 export FNVNX_DFWORK=$RUN/work FNVNX_DFA64=$RUN/a64 SSE2NEON=$EXT/sse2neon
 unset FNVNX_DFPROFILE
 mkdir -p "$RUN/work"
+# FUZZ_SETUP_ONLY=<file> (tools/farm/audit_job.sh): stop here, with every input in place, and write them as a harness
+# profile (FNVNX_DFPROFILE format, KEY=VALUE) plus the python and the link it names; no fuzzing, no report, no push.
+if [ -n "${FUZZ_SETUP_ONLY:-}" ]; then
+  { for v in FNVNX_EXE FNVNX_DECOMP FNVNX_X86OBJ FNVNX_TREE FNVNX_A64OBJ FNVNX_DFLINK FNVNX_DFWORK FNVNX_DFA64 SSE2NEON; do
+      echo "$v=${!v}"; done
+    echo "FNVNX_AUDIT_PY=$PY"; echo "FNVNX_AUDIT_LINK=$NOTE_LINK"; echo "FNVNX_AUDIT_SRC=$P"; } > "$FUZZ_SETUP_ONLY"
+  exit 0
+fi
 t1=$(date +%s)
 
 # --- targets: catalog (per decomp commit), modelled functions with both objects, this shard ------------------------

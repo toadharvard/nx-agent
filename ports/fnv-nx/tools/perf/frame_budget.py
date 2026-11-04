@@ -29,6 +29,7 @@ Targets (J-0150; every target is judged on the worst frame): fail below 30 fps (
 informational), 60 fps stable (target_60: the worst frame at or under 16.7 ms, the owner's target at 1.02 GHz).
 'level' (fail, pass_30, pass_45, target_60) is the highest target the mid worst frame meets. Output schema fnvnx-frame-budget/1, keys:
 
+  ai2_critical_minsn per scenario: AI linear thread 2's path to event 6 (items' ai2_path shares, PERF.md 6.11);
   schema, inputs{...}, assumptions[{id,value,range,unit,basis,note}], targets[...], clocks_mhz[...],
   budget_minsn{clock: {target: M instructions per core in the target's frame time at the assumed IPC}},
   budget_mean_minsn{clock: {target: the same for the mean frame that keeps the worst frame inside it}},
@@ -201,7 +202,7 @@ def scenario_work(items, levers, sc):
                     w[2] = [w[2][0] * flo, w[2][1] * mid((flo, fhi)), w[2][2] * fhi]
         for iid, (flo, fhi) in lv.get('moves', {}).items():
             for w in list(work):
-                if (w[0] == iid or follows.get(w[0]) == iid) and w[1] == 'main' and len(w) < 5:
+                if (w[0] == iid or follows.get(w[0]) == iid) and w[1] == lv.get('from', 'main') and len(w) < 5:
                     fm = mid((flo, fhi))
                     moved = [w[2][0] * fhi, w[2][1] * fm, w[2][2] * flo]   # lo case: more moved
                     w[2] = [w[2][0] - moved[0], w[2][1] - moved[1], w[2][2] - moved[2]]
@@ -365,6 +366,12 @@ def build(model, profs=None, render=None, perf=None):
                                    'items': {i: round(v, 3) for i, v in sorted(cases[1][1][c].items())}}
         rs['main_minsn'] = rs['cores'].get('0', {'lo': 0, 'mid': 0, 'hi': 0})
         rs['main_minsn'] = {k: rs['main_minsn'][k] for k in ('lo', 'mid', 'hi')}
+        # AI linear thread 2's critical path (PERF.md 6.11): what it runs before it signals event 6, which the world
+        # render waits for under the MT1 cull sync: each item's ai2_path share of what stays on an AI linear thread
+        share = {it['id']: it.get('ai2_path', 0) for it in items}
+        base = lambda wid: wid.split('>')[0]
+        rs['ai2_critical_minsn'] = {n: round(sum(w[2][k] * share.get(base(w[0]), 0) for w in work
+                                                 if w[1] == 'ai-linear'), 3) for k, n in enumerate(('lo', 'mid', 'hi'))}
         for clk in clocks:
             core_ms = {}
             for c in cores:
