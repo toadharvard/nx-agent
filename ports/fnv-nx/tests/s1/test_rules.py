@@ -453,6 +453,16 @@ check('ENUM2 gives enums with values >= 2^31 MSVC\'s int', got,
        'enum Small { S0 = 1 };', 'enum Expr { E0 = 0x80000000 | 1 };', 'enum class Sc { Q = 0x80000000 };',
        'enum Huge { H = 0x100000000 };', 'enum Based : unsigned { U = 0x80000000 };'])
 
+# ---- BIND1 (units.json)
+_c = Counter()
+_data = {'units': [{'source': 'src/staging/blk_00aa0000_od_ob1_variant.cpp', 'symbols': {'?x@@3HA': '0x1'}},
+                   {'source': 'src/other.cpp', 'symbols': {}}]}
+s1.bind_units_data(_data, _c)
+s1.bind_units_data(_data, _c)
+check('BIND1 binds the stand-in names once, in their unit only', repr(_data) + ' %d' % _c['BIND1'],
+      ["'?Allocate@MemoryManagerAA3880@@QAEPAXI@Z': '0x00aa3e40'", "'?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A': '0x011f6238'",
+       "'symbols': {}}]} 2", "'?x@@3HA': '0x1'"])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

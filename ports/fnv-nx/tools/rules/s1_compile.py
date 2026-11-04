@@ -2622,6 +2622,52 @@ def r_class_alignment(path, text, stats):
         return m.group(3) + m.group(4) + ' ' + m.group(1) + ws
     return ALIGN_HEAD.sub(sub, text)
 
+# ---------------------------------------------------------------------------------------------------------- BIND1
+#
+# A member or variable of a stand-in class that the unit uses but units.json does not bind: MSVC never emitted a
+# reference to it as such (the use sits in an inline function MSVC compiled out of line, and the matcher bound that
+# copy to the exe's function), while GCC inlines that function and references the name itself, which the link cannot
+# resolve (S2 leaves it to a trap). BIND1 adds the binding to the unit's symbols in the prepared build/units.json
+# (POST hook) where the decomp shows what the name is in the exe:
+# * blk_00aa0000_od_ob1_variant.cpp, MemoryManager's constructor 0x00aa3880 (f13, J-0080): its m_kTable is a
+#   TableAA3880 whose base constructor TableBaseAA3880(37) allocates through g_kMemoryAA3880.Allocate. The unit
+#   binds that inline constructor (??0TableBaseAA3880@@QAE@I@Z) to 0x00aa47e0, and the decomp's 0x00aa47e0
+#   (blk_00aa0000_od.cpp, FUN_00aa47e0_Class::FUN_00aa47e0) makes that allocation as g_memoryManager.Allocate, which
+#   its unit binds to 0x00aa3e40 (MemoryManager::Allocate, defined in this unit as MemoryManagerStandIn::FUN_00aa3e40)
+#   on 0x011f6238 (the memory manager, ?DAT_011f6238@@3UMemoryManager@@A here too).
+
+BIND1_REFS = [
+    # (unit source, MSVC decorated name, address)
+    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?Allocate@MemoryManagerAA3880@@QAEPAXI@Z', '0x00aa3e40'),
+    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A', '0x011f6238'),
+]
+
+def bind_units_data(data, stats, refs=BIND1_REFS):
+    """BIND1 on a units.json object (in place): add each listed name to its unit's symbols unless it is bound."""
+    by_src = {}
+    for src, name, addr in refs:
+        by_src.setdefault(src, []).append((name, addr))
+    for u in data['units']:
+        for name, addr in by_src.get(u['source'], ()):
+            if name not in u.setdefault('symbols', {}):
+                u['symbols'][name] = addr
+                stats['BIND1'] += 1
+    return data
+
+def bind_stand_in_names(out_root, stats, files=None):
+    """POST hook: BIND1 on <out_root>/build/units.json."""
+    import json
+    p = os.path.join(out_root, 'build', 'units.json')
+    if not os.path.exists(p): return
+    data = json.load(open(p))
+    before = stats['BIND1']
+    bind_units_data(data, stats)
+    if stats['BIND1'] != before:
+        json.dump(data, open(p, 'w'))
+        if files is not None: files['BIND1'] += 1
+
+POST = [bind_stand_in_names]
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
