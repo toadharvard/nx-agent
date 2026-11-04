@@ -50,3 +50,23 @@
 * **measured** - real019's trees row is costed with the STB (branch) class; with the trees row costed as leaves
   (STLEAF vso 299 / pso 117.5 class averages) the leaves go 1.37 -> 0.65 ms (vertex 0.68 -> 0.45, fragment 0.69 ->
   0.19: tree_leaf__ea.frag 33 instr). Request to G1-gpu: split the trees row into branches / fronds / leaves.
+* **did** - particles family (item 3):
+  - `shaders/particle.vert.glsl`, `particle.frag.glsl` (BSParticleShader: PARTICLE.vso / PARTICLE.pso + epilogue
+    permutations): the GPU particle simulation per vertex from InstanceData (3 vec4 per particle, up to 79):
+    position = birth + (radial wind + velocity + variation) t + (variation x fVars0.w + acceleration) t^2 / 2,
+    rotation, size and colour piecewise linear in the normalized age, atlas frame offsets.
+  - `n1/veg_particle.cpp`: NxParticleDraw, `nx_particle_fold()` (1 / lifetime folded).
+  - Parity: 79 particles at every age (all curve segments), 2 cases, 0/255 difference, coverage equal; 8 mutations
+    (size and colour segments, rotation, wind, acceleration, atlas row, variation) each fail. The first scene
+    version had integer atlas rows, which wrap and hid the row term; fixed.
+  - Unit tests: veg.mk 32 checks.
+* **found** - real019's particles row is costed with the "PAR" class, but PAR2000-2019 are ShadowLightShader's
+  PARALLAX lighting programs, not particles (staging blk_00bc0000 builds them from lighting\2x\v\*.hlsl with
+  PARALLAX). The particle programs are PARTICLE.vso (441 Maxwell instr: most of it the relative-read checks of
+  vs_dk_relc) and PARTICLE.pso (114). Request to G1-gpu: REAL_MAP particles -> ("PARTICLE vso", "PARTICLE pso").
+* **measured** - particles on real019 handheld 720p with the PARTICLE classes: 0.94 ms -> 0.44 ms (vertex 0.22 ->
+  0.12: particle.vert 226 instr; fragment with the family's measured epilogue mix 65 none / 67 fog / 18 both:
+  particle__e0 32, __ef ~70, runtime 104 instr).
+* **found** - tree branches (STB2000-2019.vso) are the ShadowLightShader 2x lighting programs with TREE (wind
+  matrix blend by BLENDINDICES.x/y); their pixel programs are the SLS ones, i.e. render-lit's lit family. Plan: a
+  shared include for the TREE wind blend, offered to render-lit, instead of a second copy of the lit shaders.

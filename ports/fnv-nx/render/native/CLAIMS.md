@@ -36,7 +36,7 @@ Rules for family streams:
 | image space: world chain | HDR, bloom/blur, DOF, radial blur, sunbeams, refraction, cinematic, VATS, night vision, ... | - | skipped -> Translated | render-land | open |
 | trees | SpeedTree branch/frond/leaf/billboard | leaves: tree_leaf, _fog, _pt, _ptfog (VS); tree_leaf, _fog, _tms, _fogtms (PS) | skipped -> Translated | render-veg | leaves: shaders + parity on a synthetic crown done (veg.mk parity 6/6); branches (STB), fronds, billboards open; dispatch row pending (render machine) |
 | grass | GRASS* | grass, grass_vl, grass_slope, grass_vlslope (VS); grass, grass_tms (PS) | skipped -> Translated | render-veg | shaders + parity on the synthetic field done (veg.mk parity 6/6); PTLIGHT, PROJ_SHADOW, BILLBOARD, SHADOWMAP stay Translated; dispatch row pending (render machine) |
-| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - (planned) | skipped -> Translated | render-veg | open |
+| particles, precipitation, bolt, beam, decal, blood, vfog | per class | particle (BSParticleShader: PARTICLE.vso/pso) | skipped -> Translated | render-veg | particles: shaders + parity done (veg.mk parity 2/2, exact); precipitation, bolt, beam, decal, blood, vfog open; dispatch row pending (render machine) |
 | GPU cost model and pass structure | render/native/perf (gpu_cost.py, gen_stream.py, report.*), pass order, early-z, sorting | - | - | G1-gpu (with the render machine's perf work) | open |
 
 "skipped -> Translated": this pass is skipped today, and the render machine's Translated path, now in progress, will

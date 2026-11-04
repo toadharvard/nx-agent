@@ -91,6 +91,26 @@ enum { NxTree_Fog = 1u, NxTree_Pt = 2u, NxTree_TransparencyMS = 4u };
 const char* nx_tree_leaf_vs(uint32_t macros);
 const char* nx_tree_leaf_ps(uint32_t macros);
 
+/* ---- particles (BSParticleShader: PARTICLE.vso / PARTICLE.pso) ---- */
+#define NX_PARTICLE_MAX 79                 /* InstanceData c18 + 3i, i < 79: VS c18..c254 */
+typedef struct NxParticleConstants {      /* the engine's values by register (CTAB names) */
+    float wvpRows[16];                    /* WorldViewProj c0-c3, rows */
+    float vars0[4], vars1[4], vars2[4], vars3[4], vars4[4];   /* fVars0-4 c4-c8 */
+    float color1[4], color2[4], color3[4];                    /* c9-c11 */
+    float velocity[4], acceleration[4], scaleAdjust[4], wind[4];   /* c12-c15 */
+} NxParticleConstants;
+
+typedef struct NxParticleDraw {           /* shaders/particle.vert.glsl ParticleDraw */
+    float wvp[16];
+    float vars0[4];                       /* fVars0 with y = 1 / fVars0.y */
+    float vars1[4], vars2[4], vars3[4], vars4[4], color1[4], color2[4], color3[4], velocity[4], accel[4],
+          scaleAdjust[4], wind[4];
+    float inst[3 * NX_PARTICLE_MAX][4];
+} NxParticleDraw;
+
+/* Returns the bytes to upload (the head plus 3 x count vec4), 0 when count > NX_PARTICLE_MAX. */
+size_t nx_particle_fold(const NxParticleConstants* c, const float (*instances)[4], uint32_t count, NxParticleDraw* out);
+
 #ifdef __cplusplus
 }
 #define NX_VEG_ASSERT_ static_assert
@@ -99,5 +119,6 @@ const char* nx_tree_leaf_ps(uint32_t macros);
 #endif
 NX_VEG_ASSERT_(NX_GRASS_HEAD_BYTES == 208, "NxGrassDraw head = 13 vec4 + mat4 (std140)");
 NX_VEG_ASSERT_(sizeof(NxGrassDraw) == 208 + 16 * NX_GRASS_MAX_INSTANCES, "NxGrassDraw");
+NX_VEG_ASSERT_(sizeof(NxParticleDraw) == 256 + 3 * 16 * NX_PARTICLE_MAX, "NxParticleDraw");
 NX_VEG_ASSERT_(sizeof(NxTreeLeafDraw) == 64 + 12 * 16 + 64 * 16, "NxTreeLeafDraw");
 #endif

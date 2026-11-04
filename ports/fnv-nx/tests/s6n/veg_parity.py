@@ -395,6 +395,83 @@ LEAF_CASES = [
 ]
 
 
+# ---- particles (BSParticleShader) ---------------------------------------------------------------------------------
+
+PART_VS = dict(WorldViewProj=0, fVars0=4, fVars1=5, fVars2=6, fVars3=7, fVars4=8, Color1=9, Color2=10, Color3=11,
+               Velocity=12, Acceleration=13, ScaleAdjust=14, Wind=15, InstanceData=18)
+
+
+def particle_scene(rng, n=79, life=4.0, now=50.0):
+    """n particles x 4 corners; InstanceData (3 vec4 per particle): A = (birth pos, birth time),
+    B = (velocity variation, time scale), C = (rotation start, speed, variation weight, atlas frame)"""
+    inst = np.zeros((3 * n, 4), np.float32)
+    v, ix = [], []
+    for i in range(n):
+        u = (i + 0.5) / n                                    # every age, so all curve segments are hit
+        inst[3 * i] = [rng.uniform(-150, 150), rng.uniform(300, 700), rng.uniform(0, 200), now - u * life]
+        inst[3 * i + 1] = [*rng.uniform(-20, 20, 3), 1.0]
+        inst[3 * i + 2] = [rng.uniform(0, 6), rng.uniform(-1.5, 1.5), rng.uniform(0, 1),
+                           float(rng.integers(0, 4)) * 25 + 0.25 * int(rng.integers(0, 4))]   # row: v + 0.25 k
+        base = len(v)
+        for cx, cy, uvx, uvy in ((-1, -1, 0, 1), (1, -1, 1, 1), (1, 1, 1, 0), (-1, 1, 0, 0)):
+            v.append([cx, cy, uvx, uvy, i, 0, 0, 0])
+        ix += [base, base + 1, base + 2, base, base + 2, base + 3]
+    return inst, np.array(v, np.float32), ix, life, now
+
+
+def particle_geometry(verts, ix):
+    vao = GL.glGenVertexArrays(1); GL.glBindVertexArray(vao)
+    vb = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vb)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER, verts.nbytes, verts, GL.GL_STATIC_DRAW)
+    ia = np.array(ix, np.uint32)
+    ib = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, ib)
+    GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, ia.nbytes, ia, GL.GL_STATIC_DRAW)
+    for loc, off, n in ((0, 0, 2), (6, 2, 2), (5, 4, 4)):     # POSITION TEXCOORD0 index (location 5)
+        GL.glEnableVertexAttribArray(loc)
+        GL.glVertexAttribPointer(loc, n, GL.GL_FLOAT, GL.GL_FALSE, 32, ctypes.c_void_p(off * 4))
+    return vao, len(ia)
+
+
+def particle_params(mvp, life, now):
+    return dict(WorldViewProj=mvp, fVars0=[now, life, 0.8, 0.3], fVars1=[0.15, 0.5, 0.8, 0],
+                fVars2=[22.0, 40.0, 0.2, 0.7], fVars3=[5.0, -3.0, 2.0, 0.9], fVars4=[0.25, 0.25, 0, 0],
+                Color1=[1.0, 0.8, 0.5, 0.9], Color2=[0.7, 0.6, 0.55, 0.7], Color3=[0.4, 0.4, 0.45, 0.5],
+                Velocity=[0, 0, 25.0, 0], Acceleration=[3.0, 0, -6.0, 0], ScaleAdjust=[1.0, 1.0, 0, 0],
+                Wind=[0, 500.0, -100.0, 12.0])
+
+
+def particle_translated_ubos(p, inst):
+    vs = np.zeros((256, 4), np.float32)
+    for k, r in PART_VS.items():
+        v = np.asarray(inst if k == "InstanceData" else p[k], np.float32)
+        vs[r:r + (v.shape[0] if v.ndim == 2 else 1)] = v
+    vdrv = np.zeros((4, 4), np.float32); vdrv[0] = [0, 0, 1, 0]
+    return [(0, vs), (2, vdrv), (3, np.zeros((256, 4), np.float32)), (5, np.zeros((20, 4), np.float32))]
+
+
+def particle_native_ubos(lib, p, inst):
+    if lib is None:
+        raise SystemExit("particle cases need FNVNX_VEG_LIB (tests/s6n/veg.mk parity)")
+    keys = ("fVars0", "fVars1", "fVars2", "fVars3", "fVars4", "Color1", "Color2", "Color3", "Velocity",
+            "Acceleration", "ScaleAdjust", "Wind")
+    class Consts(ctypes.Structure):
+        _fields_ = [("wvpRows", ctypes.c_float * 16)] + [(k, ctypes.c_float * 4) for k in keys]
+    c = Consts()
+    c.wvpRows[:] = [float(x) for x in np.asarray(p["WorldViewProj"], np.float32).reshape(16)]
+    for k in keys:
+        getattr(c, k)[:] = [float(x) for x in p[k]]
+    out = np.zeros((4 + 12 + 3 * 79, 4), np.float32)
+    ins = np.ascontiguousarray(inst, np.float32)
+    n = lib.nx_particle_fold(ctypes.byref(c), ins.ctypes.data_as(ctypes.c_void_p), len(inst) // 3,
+                             out.ctypes.data_as(ctypes.c_void_p))
+    assert n == (16 + len(inst)) * 16, n
+    return [(1, out), (2, np.zeros((3, 4), np.float32))]
+
+
+PART_CASES = [("particle", "PARTICLE.vso", "PARTICLE.pso", "particle.vert", "particle.frag"),
+              ("particle_e0", "PARTICLE.vso", "PARTICLE.pso", "particle.vert", "particle__e0.frag")]
+
+
 # ---- driver ---------------------------------------------------------------------------------------------------------
 
 def translated_prog(t019, idx, ovs, ops):
@@ -443,7 +520,9 @@ def main():
         lib.nx_grass_fold.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]
         lib.nx_tree_leaf_fold.restype = ctypes.c_size_t
         lib.nx_tree_leaf_fold.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    for _, ovs, ops, _, _ in CASES + LEAF_CASES:
+        lib.nx_particle_fold.restype = ctypes.c_size_t
+        lib.nx_particle_fold.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]
+    for _, ovs, ops, _, _ in CASES + LEAF_CASES + PART_CASES:
         for f in (ovs, ops):
             if f not in idx:
                 print("%s missing from FNVNX_T019" % f); return 2
@@ -482,6 +561,19 @@ def main():
             continue
         a = draw(translated_prog(t019, idx, ovs, ops), lvao, lcount, leaf_translated_ubos(lp), tex)
         b = draw(native_prog(pkg, nvs, nfs), lvao, lcount, leaf_native_ubos(lib, lp), tex)
+        ncases += 1
+        fails += not compare(name, a, b, "%s+%s vs %s+%s" % (ovs, ops, nvs, nfs), verbose)
+    # particles
+    eye = np.array([0, -150.0, 120])
+    mvp = perspective_lookat(eye, [0, 500, 100], math.radians(60), 1.0, 10, 4000)
+    pinst, pverts, pix, life, now = particle_scene(rng)
+    pp = particle_params(mvp, life, now)
+    pvao, pcount = particle_geometry(pverts, pix)
+    for name, ovs, ops, nvs, nfs in PART_CASES:
+        if only and name not in only:
+            continue
+        a = draw(translated_prog(t019, idx, ovs, ops), pvao, pcount, particle_translated_ubos(pp, pinst), tex)
+        b = draw(native_prog(pkg, nvs, nfs), pvao, pcount, particle_native_ubos(lib, pp, pinst), tex)
         ncases += 1
         fails += not compare(name, a, b, "%s+%s vs %s+%s" % (ovs, ops, nvs, nfs), verbose)
     print("veg_parity: %d cases, %d failed (blocks from %s)" % (ncases, fails, "veg_*.cpp" if lib else "numpy"))
