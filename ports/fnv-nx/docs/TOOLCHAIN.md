@@ -598,6 +598,40 @@ on purpose. A rule that drops file-scope definitions of the replaceable global a
 `@fnv` fixes this at the source for every consumer. `GAME_NEW=runtime` then has nothing to weaken, but stays
 as a guard.
 
+## 12. Round 6: S2c's -fPIC f10 link (J-0048, J-0053 follow-up)
+
+Input: `s2c/latest` = run f10 (tree and objects `s2c/fresh7`: 2,738 units ok, 240 failed; 3,477 objects; decomp
+objects `-fPIC`, D16). The build takes 43 s, D3D9=null. **7,502 undefined** (was 8,190): 4,656 image `.text`
+addresses, 2,112 C++ declared-only, 433 `FUN_`, 129 C, 47 `DAT_`, 41 std::, 39 vtable/typeinfo, 23 D3DX9, 9 Bink,
+9 CRT, 4 Win32. `pcrel_abs.py`: **0 PC-relative references to absolute symbols**. `__dso_handle`, which S2c's
+own trial link lists, is a `.data` symbol in the guest link, not an absolute one. So `PIN=auto` leaves the guest
+**relocatable** again (20 MiB, run by the emulator at 0x05000000).
+
+`emu_guest.py` now prints every skipped initializer grouped by fault (`skip-summary`). `frontier.py` reads those
+lines and gives units that failed in the linked set but are clean in the census a class of their own.
+
+| | empty image | S14 image (round-5 imports) |
+|---|---|---|
+| frontier | 129 keys, 3,685 hits, 36 units (31 failed at link, 5 of them clean in S1's census c16) | 138 keys, 3,695 hits (128 init, 10 WinMain), 39 units (33 failed at link, 6 clean in c16) |
+| initializers skipped | 6,603 | 6,603 |
+| WinMain | entered; first IAT call (empty IAT) | entered; past `GetSaveDirectory`; **stops at WinMain [0086a850]+0x1c8**: `FUN_008526c0` -> untranslated 0x00af3020 returns 0, NULL `this` in `CombatProcedure::Initialize` [006ecd40]+0x4 |
+
+The WinMain path is unchanged: 0x00c3bd30/bb90/bbe0/bc30/bc80 and 0x00c3bbd0/bc20 (`blk_00c20000_od`), 0x004b4a30
+(`blk_004a0000_od`), `StandardLibrarySingletonObject`'s constructor, then 0x00af3020 (`blk_00ae0000_od`). **The f10
+object set predates S1's round 7**: `fresh7` was prepared at 01:29, S1 round 7 (J-0052) landed at 02:18. All three
+WinMain units are `fail` in `fresh7/obj` with their old first errors (`conflicting declaration 'typedef ... WPARAM'`,
+`operator new(sizetype, char*)`, ambiguous `_fnv_zlib_memset`), while census c16 has them clean. The same holds for
+`nicontrollermanager`, `nifloatinterpolator` and `magicshaderhiteffect`. A fresh S2 run on S1's current tree is the
+next step for WinMain.
+
+The same stale tree explains the rise in skipped initializers (2,885 -> 6,603). **3,718** of them are `brk #0x3e8`
+at the end of XC1-generated `__fnvnx_dyninit_*` functions: `__builtin_trap(); /* fnv-nx FALL1 */`, 6,266 of
+them in `generated/global_object_initializers.cpp` alone. That is the FALL1 false positive J-0049 fixed at 01:35;
+S1's current tree has 0. Each trapped initializer has already constructed its object, so the boot loses the
+atexit registrations, not the objects. The rest: 1,675 in `FUN_00aa1070` (the uninitialised memory manager,
+section 11), 767 calls through a null function pointer (first `__fnvnx_dyninit_00f37f30`), 337
+`RegisterFloatKeyOps` writes into `.text` (S1/S2), and about 100 constructors reading through null.
+
 ## 7. Not yet done / untested
 
 * Nothing has run on hardware. Untested: ldr accepting the 64-bit + `32BitNoReserved` NPDM as an application
