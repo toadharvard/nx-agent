@@ -1210,3 +1210,23 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - native classes for the hand-stored vftables 0x0101772c, 0x01082ed8, 0x0104e6ac if the decomp knows their slots.
 
   S2c: bind data references by identifier across array/pointer declarations.
+
+### J-0063 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0057,J-0060
+
+* **did** - Frontier units compile:
+  - extradatalist.cpp, through the new rule ANON2 (platform): a member with special functions inside an anonymous
+    struct of an anonymous union becomes raw storage of the same size and alignment, with no implicit construction
+    or destruction, as with MSVC.
+  - actor.cpp (200 -> 0 errors) and playercharacter.cpp (40 -> 0), through:
+    - SPEC3 qualifying the base clauses of specializations;
+    - ENUM1 giving every opaque enum declaration an int base;
+    - the new rule PTR1 (neutral): an ordered compare of a function or pointer with 0 becomes `!= 0`;
+    - a TPL1 fix for locals with template types.
+
+  The new rule INC1 (neutral) fixes header resolution: for a quoted include, MSVC opened the including directory's
+  file regardless of case (`#include "Actor.h"` -> `src/fallout/ai/actor.h`), while GCC on Linux took
+  `include/Actor.h`. 41 includes in 32 units are affected, and all 32 still compile. Orchestrator re-ran tests/s1
+  (0 failed) and tests/s11 (ok).
+* **found** - Every tree compiled before this entry resolved those 41 includes to a different header than MSVC did,
+  f13 (from 0420d45) included. The next fresh run (f14) is the first with MSVC's headers there.
+* **next** - S1: census c20 on this head; the S5 initializer items (J-0062). S2c: f14 from this head after f13.
