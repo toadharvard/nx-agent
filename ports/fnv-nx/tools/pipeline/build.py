@@ -2439,8 +2439,9 @@ class Package(Stage):
     prov = ('guest',)      # only when the guest is packaged
 
     def fingerprint(self, b):
-        return ['package-v2', up_id(b, 'host'), up_id(b, 'guest'), b.cfg['PROGRAM_ID'], tree_hash('toolchain/tools'),
-                tree_hash('toolchain/nro', 'toolchain/include', 'tests/nx1', 'tests/s5/check_package.py')]
+        return ['package-v3', up_id(b, 'host'), up_id(b, 'guest'), b.cfg['PROGRAM_ID'], tree_hash('toolchain/tools'),
+                tree_hash('toolchain/nro', 'toolchain/include', 'tests/nx1', 'tests/s5/check_package.py',
+                          'tests/s13/ilp32_wrap'), up_id(b, 'toolchain')]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'package', 'exefs.nsp'))
@@ -2517,6 +2518,7 @@ class Package(Stage):
             r.artifact('nx1.json', nx1)
         except (OSError, ValueError, KeyError):
             r.note('tests/nx1/run.py wrote no nx1.json')
+        self.ilp32_wrap(b, r, d)
         r.metric('package_exefs_bytes', os.path.getsize(nsp))
         r.metric('package_sd_bytes', sum(s for _, s in files))
         r.artifact('exefs.nsp', nsp)
@@ -2532,6 +2534,35 @@ class Package(Stage):
         if not gnso:
             r.note('no guest.nso (guest stage did not succeed): SD tree holds the host only')
             r['status'] = 'warn'
+
+    @staticmethod
+    def ilp32_wrap(b, r, d):
+        """Toolchain check: S13b's tests/s13/ilp32_wrap/check.sh with this build's fnvnx-a64 gcc. GCC's AArch64 ILP32
+        code forms base + 32-bit index in 64 bits (add x, x, w, uxtw) on an integer-constant base, so it does not wrap
+        at 2^32 the way the exe's does. The report (per flag set and form) is the artifact ilp32_wrap.txt; the metric
+        ilp32_wrap_64bit counts the forms with the build's flags (the default row) that do not wrap. It reports,
+        never gates: the sites are fixed in the prepared source (S1)."""
+        prefix = b.art('toolchain', 'prefix')
+        gcc = os.path.join(prefix, 'bin', 'aarch64-none-elf-gcc') if prefix else ''
+        if not gcc or not os.path.isfile(gcc):
+            r.note('ilp32_wrap: no fnvnx-a64 gcc (toolchain stage): not checked')
+            return
+        out = os.path.join(d, 'ilp32_wrap.txt')
+        env = dict(b.env(), FNVNX_A64_CC=gcc)
+        with open(out, 'w') as f:
+            p = subprocess.run(['bash', os.path.join(ROOT, 'tests', 's13', 'ilp32_wrap', 'check.sh')], env=env,
+                               stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, timeout=300)
+        rows = [ln.split(None, 2) for ln in open(out, errors='replace') if ln.strip()]
+        r.artifact('ilp32_wrap.txt', out)
+        if p.returncode or not rows or rows[0][0] == 'skip:':
+            r.note('ilp32_wrap: check.sh exit %d: %s' % (p.returncode, ' '.join(map(' '.join, rows[-2:]))[:200]))
+            return
+        bad = [w[1] for w in rows if len(w) == 3 and w[0] == 'default' and 'NOT' in w[2]]
+        r.metric('ilp32_wrap_64bit', len(bad))
+        if bad:
+            r.note('ilp32_wrap: fnvnx-a64 forms %d of %d constant-base address forms in 64 bits (%s): such a site '
+                   'does not wrap at 2^32 like the exe (tests/s13/ilp32_wrap, S13b)' % (
+                       len(bad), sum(1 for w in rows if w[0] == 'default'), ', '.join(bad)))
 
 
 # ---------------------------------------------------------------------------------------------------- 12 tests
