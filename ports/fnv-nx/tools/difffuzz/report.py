@@ -23,7 +23,7 @@ import config
 
 SOFT_CAUSES = {'local-static', 'vptr-store', 'bool-repr', 'ilp32-pointer', 'division', 'uninit-x86', 'nan-bits',
                'call-order', 'array-new-check'}
-HARNESS_CAUSES = {'x86-custom-cc', 'msvc-inlined', 'runtime-equiv', 'oracle-vcall'}     # oracle-model gaps: neither hard nor soft, reported apart
+HARNESS_CAUSES = {'x86-custom-cc', 'msvc-inlined', 'runtime-equiv', 'oracle-vcall', 'stack-arg', 'literal-arg'}     # oracle-model gaps: neither hard nor soft, reported apart
 LINK_CAUSES = {'split-global', 'call-args', 'callee-saved'}
 
 
@@ -90,6 +90,17 @@ def reclassify(rec):
             pass
     if d['kind'] == 'call-count' and d.get('x86') == 0:
         return 'falloff?'
+    if d['kind'] == 'call-args' and d.get('cls') in ('I32', 'P'):
+        try:
+            vx = int.from_bytes(bytes.fromhex(d.get('x86') or '')[:4], 'little')
+            va = int.from_bytes(bytes.fromhex(d.get('arm') or '')[:4], 'little')
+            import world
+            if world.STACK[0] <= vx < world.STACK[1] and world.STACK[0] <= va < world.STACK[1]:
+                return 'stack-arg'       # each machine's own frame through an int parameter (harness, fixed since)
+            if 0x00fdf000 <= vx < 0x02100000 and 0x0a000000 <= va < 0x0b800000:
+                return 'literal-arg'     # a literal at its image address vs the native unit's copy (harness)
+        except ValueError:
+            pass
     if d['kind'] == 'call-target' and d.get('arm') == 'name:__cxa_throw_bad_array_new_length':
         return 'array-new-check'  # GCC checks new[]'s count for overflow, MSVC 2008 does not (only huge counts)
     if d['kind'] == 'call-target':

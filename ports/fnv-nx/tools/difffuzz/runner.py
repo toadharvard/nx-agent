@@ -165,13 +165,13 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
         if bx == ba:
             continue
         px, pa = struct.unpack('<I', bx.ljust(4, b'\0'))[0], struct.unpack('<I', ba.ljust(4, b'\0'))[0]
-        if v.is_ptr and _in_stack(px) and _in_stack(pa):
-            continue
+        if v.size == 4 and _in_stack(px) and _in_stack(pa):
+            continue        # each machine's own stack frame (also through an int parameter that carries a pointer)
         if v.size == 4 and px in gx:
             continue
         if v.size == 4 and codeptr is not None and codeptr(pa) == px:
             continue        # a native code address (stub or entry) passed as data stands for the original function
-        if v.is_ptr and rdx and rda and world.A64_PRIV[0] <= pa < world.A64_PRIV[1]:
+        if v.size == 4 and rdx and rda and world.A64_PRIV[0] <= pa < world.A64_PRIV[1]:
             # a literal or constant the native unit keeps in its own .rodata, the oracle at its image address:
             # equal when the strings are
             sx, sa = _cstr(rdx, px), _cstr(rda, pa)
