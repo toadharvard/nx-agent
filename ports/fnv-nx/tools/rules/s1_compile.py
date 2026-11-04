@@ -980,7 +980,7 @@ def r_falloff_traps(path, text, stats):
         if not re.search(r'[A-Za-z_]', ret): continue
         if re.search(r'\\[ \t]*\n', text[o:c]): continue          # inside a #define (continued lines)
         body = COMMENT.sub(' ', text[o + 1:c]).rstrip()
-        if not body or FALL_END.search(body): continue
+        if body and FALL_END.search(body): continue        # (an empty body falls off too: `virtual T* V0() {}`)
         edits.append((c, ' __builtin_trap(); /* fnv-nx FALL1 */ '))
         stats['FALL1'] += 1
     if not edits: return text
