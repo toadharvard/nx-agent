@@ -63,6 +63,9 @@ typedef struct V6nOps {
      * usage index index[i] (one stream, stride 16 * nelem), DrawPrimitiveUP; needs a vertex shader */
     int (*draw_generic)(V6nTarget*, uint32_t prim, uint32_t count, int nelem, const uint8_t* usage, const uint8_t* index,
                         const float* data, int nverts);
+    /* cube texture (optional, NULL = unsupported): one mip level, faces[f] = D3D memory layout of face f in D3D9
+     * order (+X -X +Y -Y +Z -Z, D3DCUBEMAP_FACES), size x size texels each */
+    int (*texture_cube)(V6nTarget*, uint32_t stage, uint32_t d3dfmt, int size, const uint8_t* const* faces);
 } V6nOps;
 
 extern const V6nOps v6n_target_ops;   /* each executable links exactly one implementation */

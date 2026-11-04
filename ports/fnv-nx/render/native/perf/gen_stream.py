@@ -23,6 +23,8 @@ FRAMES = 3
 # shaders: distinct shader pairs in the family; mats: distinct render-state sets.
 # Order = frame order (shadow maps, reflection, main scene, alpha, image space + UI).
 # targets: render targets the family's draws go to, switched every `per_target` draws (0 = one target).
+# alpha_test: every draw of the family is alpha tested (FNV's tree leaves and grass are; ALPHATESTENABLE 1,
+# ALPHAREF 128, ALPHAFUNC GREATEREQUAL on top of whatever material the draw has).
 FAMILIES = [
     dict(name="shadow", fam=4, draws=(100, 300), tex=1, tex_p=0.2, rs=6, p_mat=0.05, p_tex=0.20, p_sh=0.10, p_geo=0.95,
          vs=64, ps=0, shaders=2, mats=2, targets=["shadow0", "shadow1", "shadow2"], per_target=-1, layer=0),
@@ -35,9 +37,9 @@ FAMILIES = [
     dict(name="lod", fam=3, draws=(100, 200), tex=2, tex_p=1.0, rs=8, p_mat=0.05, p_tex=0.50, p_sh=0.10, p_geo=1.0,
          vs=80, ps=16, shaders=3, mats=2, targets=["main"], per_target=0, layer=0),
     dict(name="trees", fam=3, draws=(150, 450), tex=2, tex_p=1.0, rs=10, p_mat=0.33, p_tex=0.40, p_sh=0.33, p_geo=0.7,
-         vs=112, ps=16, shaders=3, mats=3, targets=["main"], per_target=0, layer=0),
+         vs=112, ps=16, shaders=3, mats=3, targets=["main"], per_target=0, layer=0, alpha_test=True),
     dict(name="grass", fam=2, draws=(100, 300), tex=1, tex_p=1.0, rs=8, p_mat=0.02, p_tex=0.10, p_sh=0.05, p_geo=0.5,
-         vs=48, ps=16, shaders=2, mats=1, targets=["main"], per_target=0, layer=0),
+         vs=48, ps=16, shaders=2, mats=1, targets=["main"], per_target=0, layer=0, alpha_test=True),
     dict(name="actors", fam=3, draws=(50, 200), tex=3, tex_p=1.0, rs=14, p_mat=0.20, p_tex=0.70, p_sh=0.30, p_geo=1.0,
          vs=192, ps=64, shaders=6, mats=3, targets=["main"], per_target=0, layer=0),
     dict(name="particles", fam=2, draws=(50, 150), tex=1, tex_p=1.0, rs=12, p_mat=0.50, p_tex=0.40, p_sh=0.30,
@@ -144,6 +146,8 @@ def gen(families, level, frames=FRAMES, seed=1):
                     mat = rnd.randrange(len(MATERIALS)) if f["name"] != "imagespace_ui" else rnd.choice([3, 5, 2])
                     st["mat_changes"] += 1
                 m = MATERIALS[mat]
+                if f.get("alpha_test"):        # no RNG use: the rest of the stream is unchanged
+                    m = list(m); m[2] = 1; m[7] = 128; m[8] = 7
                 for k in range(f["rs"]):
                     w.op(14, RS_ORDER[k], m[k])
                 st["rs_calls"] += f["rs"]

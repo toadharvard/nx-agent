@@ -184,6 +184,9 @@ extern __thread char __fnvnx_tls_image[] __attribute__((weak));
 extern char __fnvnx_tls_image_orig[] __attribute__((weak));   /* absolute symbols: address = value */
 extern char __fnvnx_tls_image_size[] __attribute__((weak));
 static int g_image_mapped;
+/* global_new.cpp routes operator new/delete to the game's MemoryManager once its data window (g_memoryManager at
+ * 0x011f6238) is mapped; before that, malloc/free. */
+extern "C" int fnvnx_image_is_mapped(void) { return __atomic_load_n(&g_image_mapped, __ATOMIC_ACQUIRE); }
 void fnvnx_guest_thread_tls_hook(void) {
     if (!g_image_mapped || !__fnvnx_tls_image_orig || !__fnvnx_tls_image_size) return;
     memcpy(__fnvnx_tls_image, (const void *)__fnvnx_tls_image_orig, (size_t)(uintptr_t)__fnvnx_tls_image_size);
@@ -211,7 +214,7 @@ static int load_image(void) {
     static fnvnx_image img;
     rc = fnvnx_image_map(&img, &pe, &os, pe.image_base, 0, 0x00400000u, 0x02100000u, 0);
     if (rc) { printf("fnvnx boot: STOP: image_map: %s\n", fnvnx_strerror(rc)); return -1; }
-    g_image_mapped = 1;
+    __atomic_store_n(&g_image_mapped, 1, __ATOMIC_RELEASE);
     fnvnx_image_load_relocs(&img, &os);
     capture_xc(&pe, &img);
     fnvnx_import_stats is = {};

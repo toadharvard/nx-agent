@@ -12,6 +12,11 @@ export PATH=$DEVKITPRO/tools/bin:$DEVKITPRO/devkitA64/bin:$PATH FNVNX_TOOLCHAIN=
 CC=aarch64-none-elf-gcc; CXX=aarch64-none-elf-g++
 mkdir -p "$OUT/obj" "$OUT/rt"
 python3 "$N/shaders/build.py" "$OUT/shaders" --uam "$UAM" >/dev/null
+# NX_SHADER_TABLE=device (the console package, NX1): no GLSL in the guest; the DKSH go to <out>/shaders.nxsp (fnv.nro's
+# RomFS) and the table loads them from there (toolchain/nro/shaderpack.py). A shader without DKSH stops the build.
+if [ "${NX_SHADER_TABLE:-}" = device ]; then
+	python3 -I "$TC/nro/shaderpack.py" "$OUT/shaders" --pack "$OUT/shaders.nxsp" --table "$OUT/shaders" >/dev/null
+fi
 GA="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec"
 GF="-O2 -g -Wall -Wextra -Werror -ffp-contract=off -ffunction-sections -fdata-sections -I$TC/include -I$N/include -I$N/front -I$N/n1 -I$OUT/shaders"
 GXX="$GF -std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics"

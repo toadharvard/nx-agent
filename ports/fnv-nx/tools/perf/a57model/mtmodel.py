@@ -11,10 +11,11 @@ on core 1, AI linear 1/2 and game threads on mask 0b110 (0b1110 with the core 3 
 worker, AI linear and workers, background.
 Main runs its phases in the main loop's order (PHASES). Work a lever moves off main (frame_budget.scenario_work)
 is forked to a worker of the lever's role at the start of its phase, after --wake-us, at the model's
-parallel_efficiency. Main joins it at the end of the phase and waits if the worker is late. The AI linear threads
-run from the frame's start and are joined before culling (AI_JOIN). threaded_anim's work queues behind the AI on those
-threads. The render worker is pipelined (it runs the previous frame's commands) and is never joined. Background
-work fills idle time. Locks: the model's sync_overhead_minsn on main plus one wake per hand-off.
+parallel_efficiency. Main joins it at the end of the phase and waits if the worker is late (mt_cull's
+non-overlapping share, the water records, is joined at once). The AI linear threads are signalled before animation
+and joined at the frame's end, their two halves staggered; threaded_anim's work queues behind the AI and comes back
+at the same join (STRUCT, from the decomp). The render worker is pipelined (it runs the previous frame's commands)
+and is never joined. Background work fills idle time. Locks: the model's sync_overhead_minsn on main plus one wake per hand-off.
 Frame = max(main's critical path, every core's busy time).
 CPI per item: the mean of funcmodel.py's budget_rows for the item's subsystem (SUBSYS), steady CPI for the lo case
 and one-call CPI for the hi case; other items keep 1/ipc (0.8) and are flagged. --flat prices everything at 1/ipc
@@ -32,7 +33,23 @@ import frame_budget  # noqa: E402
 
 PHASES = ['game_logic', 'havok', 'animation', 'scene_update', 'cull', 'render_accumulation', 'renderer_main',
           'interlocked_barriers']
-AI_JOIN = 'cull'
+# The frame's hand-off structure (S15-threads, from the decomp: src/fallout/misc/main.cpp ~9029-9084,
+# ailineartaskthreadmanager.cpp, mtrenderingsystem_o2_variant.cpp):
+# - main signals the AI linear threads (FUN_008c78c0) before the per-frame body 0x0086ff70 (scene graph, cull, render)
+#   and joins them (0x008c7990, a counting semaphore) after it; then main drains the packed task queue (FUN_00870610),
+#   where threaded_anim's controller updates come back;
+# - the two AI linear threads stagger each other (SetEvent / WaitForSingleObject): their halves run one after the other;
+# - Rendering Task Thread 2 (mt_cull), as MT1 ships it (S15-threads, patches/mt1_cull.s1b, PERF.md 6.8): every record
+#   but 21 runs inline on main through 0x00ba3390's non-MT branch (the worker passes their stages at once), so the
+#   lever's moved work is record 21 only, the main-scene split: main signals stage 21 (FUN_00ba30f0(0,21)), culls its
+#   own lists, and joins at FUN_00ba3130(1,21) right after them - the end of its own share of the phase. The whole
+#   moved share overlaps (mt_cull_overlap 1.0); the lever's size is budget_model.json's;
+# - Havok MT: the calling thread processes jobs too, then waits for the pool (fork / join around the phase).
+STRUCT = {'ai_fork_before': 'animation', 'ai_join_after': 'interlocked_barriers', 'ai_stagger': True,
+          'mt_cull_overlap': 1.0,
+          # where main joins a lever's overlapping work when not at the end of its own phase (none under MT1; the
+          # stock PC path joined the shadow records at FUN_00b9f780: {'mt_cull': 'render_accumulation'})
+          'join_after': {}}
 SUBSYS = {'scene_update': ['fn_nibound_update', 'fn_world_transform', 'fn_node_update'], 'cull': ['fn_cull_test'],
           'animation': ['fn_slerp', 'fn_quat_from_matrix'], 'havok': ['fn_gsk'],
           'render_accumulation': ['fn_pass_bucket']}
@@ -50,6 +67,7 @@ class Thread:
 def simulate(threads, cycles_per_us, wake_us, max_us=200000):
     """-> (main end us, {thread: busy us}, {core: busy us}, main wait us, {key: (fork us, done us)})"""
     done, ready_at, started = {}, {}, {}
+    waits = {}
     queues = {t.name: [] for t in threads}  # forked tasks waiting on a worker: (ready us, key, cycles)
     by = {t.name: t for t in threads}
     core_busy = {}
@@ -92,6 +110,8 @@ def simulate(threads, cycles_per_us, wake_us, max_us=200000):
                     else:
                         if t.name == 'main':
                             main_wait += 1
+                            base = op[1].split('#')[0].split('>')[-1] if '>' in op[1] else op[1].rstrip('0123456789')
+                            waits[base] = waits.get(base, 0) + 1
                         break
         if main_end is None and pos['main'] >= len(by['main'].ops) and rem['main'] is None:
             main_end = t_us
@@ -116,6 +136,7 @@ def simulate(threads, cycles_per_us, wake_us, max_us=200000):
                     done[cur_task[t.name]] = t_us + 1
                     cur_task[t.name] = None
         t_us += 1
+    simulate.waits = waits
     return main_end if main_end is not None else t_us, {t.name: t.busy for t in threads}, core_busy, main_wait, \
         {k: (ready_at.get(k), done.get(k)) for k in ready_at}
 
@@ -152,29 +173,60 @@ def build_threads(work, placement, core3, eff, k, cpi, flat_cpi, sync_minsn):
             moved.setdefault(w[0].split('>')[0], []).append((w[0], w[1], w[2][k]))
         else:
             by_item[w[0]] = w
-    # AI linear: from the frame's start, joined before culling
     ai_item = by_item.get('ai_process_lists')
-    for i, t in enumerate(ai):
-        if ai_item:
-            frac = (ai_item[3] or {}).get(t.name, 0.5)
-            main.ops.append(('fork', f'ai{i}', t.name, cyc('ai_process_lists', ai_item[2][k] * frac), 'ai'))
-    for iid in [p for p in PHASES if p in by_item] + [i for i, w in by_item.items()
-                                                       if w[1] == 'main' and i not in PHASES]:
+    ai_keys = []
+
+    def fork_ai():
+        if not ai_item:
+            return
+        parts = [(t, (ai_item[3] or {}).get(t.name, 0.5)) for t in ai]
+        if STRUCT['ai_stagger']:   # the halves run one after the other: one task on one AI thread
+            parts = [(ai[0], 1.0)]
+        for i, (t, frac) in enumerate(parts):
+            key = f'ai{i}'
+            main.ops.append(('fork', key, t.name, cyc('ai_process_lists', ai_item[2][k] * frac), 'ai'))
+            ai_keys.append(key)
+
+    order = [p for p in PHASES if p in by_item] + [i for i, w in by_item.items() if w[1] == 'main' and i not in PHASES]
+    if STRUCT['ai_fork_before'] not in order:
+        fork_ai()
+    late = []   # moved work joined with the AI (threaded_anim's queued updates)
+    pending = {}  # phase -> joins deferred to its end
+    for iid in order:
         w = by_item[iid]
         if w[1] != 'main':
             continue
-        if iid == AI_JOIN and ai_item:
-            main.ops += [('join', 'ai0'), ('join', 'ai1')]
-        keys = []
+        if iid == STRUCT['ai_fork_before']:
+            fork_ai()
+        keys, serial = [], []
         for j, (mid_, role, m) in enumerate(moved.get(iid, [])):
-            # moved work: split over the two workers of its role (AI linear threads for threaded_anim)
-            targets = [t.name for t in (ai if role == 'ai-linear' else wk)]
-            for n, tn in enumerate(targets):
-                key = f'{mid_}#{n}'
-                main.ops.append(('fork', key, tn, cyc(mid_, m / len(targets), True), mid_))
-                keys.append(key)
+            if role == 'ai-linear':   # queued behind the AI on its threads, back at the AI join
+                key = f'{mid_}#ai'
+                main.ops.append(('fork', key, ai[0].name, cyc(mid_, m, True), mid_))
+                late.append(key)
+                continue
+            share = STRUCT['mt_cull_overlap'] if mid_.endswith('>mt_cull') else 1.0
+            # the serial share first (signalled and waited at once: no overlap with main), then the overlapping one
+            for part, frac in (('s', 1.0 - share), ('o', share)):
+                if frac <= 0:
+                    continue
+                for n, tn in enumerate(t.name for t in wk):
+                    key = f'{mid_}#{part}{n}'
+                    main.ops.append(('fork', key, tn, cyc(mid_, m * frac / len(wk), True), mid_))
+                    (keys if part == 'o' else serial).append(key)
+                if part == 's':
+                    main.ops += [('join', key) for key in serial]
+                    serial = []
         main.ops.append(('run', cyc(iid, w[2][k]), iid))
-        main.ops += [('join', key) for key in keys]
+        for key in keys:
+            lever = key.split('>')[1].split('#')[0]
+            at = STRUCT['join_after'].get(lever, iid)
+            pending.setdefault(at if at in order[order.index(iid):] else iid, []).append(key)
+        main.ops += [('join', key) for key in pending.pop(iid, [])]
+        if iid == STRUCT['ai_join_after']:
+            main.ops += [('join', key) for key in ai_keys + late]
+    if STRUCT['ai_join_after'] not in order:
+        main.ops += [('join', key) for key in ai_keys + late]
     main.ops.append(('run', sync_minsn[k] * 1e6 * flat_cpi, 'sync'))
     for iid, w in by_item.items():
         if w[1] == 'render-worker':
@@ -209,6 +261,7 @@ def run(model, funcs, scenarios, clocks, wake_us, flat):
                 frame = max([end] + list(core_busy.values()))
                 cases.append({'frame_ms': round(frame / 1e3, 2), 'main_path_ms': round(end / 1e3, 2),
                               'main_wait_ms': round(wait / 1e3, 2),
+                              'main_wait_by_join_ms': {j: round(v / 1e3, 2) for j, v in sorted(simulate.waits.items())},
                               'core_ms': {str(c): round(v / 1e3, 2) for c, v in sorted(core_busy.items())},
                               'critical': 'main path' if end >= max(core_busy.values()) else
                               'core %s' % max(core_busy, key=core_busy.get)})
@@ -225,6 +278,8 @@ def main(argv=None):
     ap.add_argument('--clock', type=int, action='append', help='MHz (default 1020 and 1785)')
     ap.add_argument('--wake-us', type=float, default=15.0)
     ap.add_argument('--flat', action='store_true')
+    ap.add_argument('--no-stagger', action='store_true', help='the two AI linear halves in parallel (sensitivity)')
+    ap.add_argument('--overlap', type=float, help="mt_cull's overlapping share (default %s)" % STRUCT['mt_cull_overlap'])
     ap.add_argument('--json')
     a = ap.parse_args(argv)
     with open(a.model) as f:
@@ -233,7 +288,12 @@ def main(argv=None):
     if a.funcs:
         with open(a.funcs) as f:
             funcs = json.load(f)
+    if a.no_stagger:
+        STRUCT['ai_stagger'] = False
+    if a.overlap is not None:
+        STRUCT['mt_cull_overlap'] = a.overlap
     out = run(model, funcs, a.scenario, a.clock or [1020, 1785], a.wake_us, a.flat)
+    out['struct'] = dict(STRUCT)
     print(f"CPI from the A57 model: {', '.join(f'{k} {v[0]:.2f}-{v[1]:.2f}' for k, v in out['cpi'].items()) or 'none'}"
           f"; at 1/IPC: {', '.join(out['unpriced_items'])}")
     for s in out['scenarios']:
@@ -241,7 +301,7 @@ def main(argv=None):
             m = r['mid']
             print(f"{s['id']:8} {clk} MHz: frame {r['lo']['frame_ms']}/{m['frame_ms']}/{r['hi']['frame_ms']} ms "
                   f"(lo/mid/hi), main path {m['main_path_ms']} ms, main waits {m['main_wait_ms']} ms, "
-                  f"cores {m['core_ms']}, critical {m['critical']}")
+                  f"cores {m['core_ms']}, critical {m['critical']}, waits by join {m['main_wait_by_join_ms']}")
     if a.json:
         with open(a.json, 'w') as f:
             json.dump(out, f, indent=1)
