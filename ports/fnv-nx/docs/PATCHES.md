@@ -41,6 +41,9 @@ methods are named after their callee's address (`FUN_<addr>`), so S2's name-addr
 | `test_patches.py DECOMP` | every site parses, has evidence, applies exactly once to the pristine and to the rule-prepared text; renames well-formed |
 | `msvc_check.py DECOMP WORK [--all-functions] [--patches DIR]` | patches on the pristine text, each unit compiled with its recipe compiler/flags (S11 setup), every function fingerprinted against `$S11/obj/pristine` with S11's bindings (literals by content); renamed definitions and references followed; `--renames` writes `units_renames.tsv` |
 | `xinc1/xinc_enum.py`, `analyze.py`, `gen.py` | round-2 pipeline: x86-inconsistent references of a link run -> callers in the pristine objects -> ecx at each reference (`ecxflow.py`) -> candidate XINC1 patches for shapes A/B/C, the rest listed for reading by hand; `preserves.py ADDR`: does a function keep ecx / edx at every return |
+| `pop/popscan.py ABI OUT` | every `pop-mismatch` pair of a link run read against the pristine objects: per call site the callee's real words (`ret N`), the words its code reads, and for a callee that takes more than its declaration pushes, the earlier call of the same caller that the missing words were pushed for (stack simulated with every direct callee's real pop count); families `more`, `conv-only`, `fewer-unread`, `fewer-donor`, `fewer-other`, `nocaller` |
+| `pop/popgen.py POP ABI OUTDIR [--exclude SRC,..]` | candidate patches for the `fewer-donor` chains `D(.., x).R(..)` -> `D(..).R(.., x)` with overloads declared next to the decomp's; everything not mechanical goes to `OUTDIR/manual.tsv` with the reason |
+| `pop/abiclass.py ABI POP OUT` | S1b verdict for every unexplained x86-inconsistent and manual pair of a link run, with the call distance of the calling function from the boot roots (WinMain 0x0086a850 and the dynamic initializers) |
 | `test_ftol.py` | FTOL1's inline `fnvnx_ftol2_sse` equals `cvttsd2si` on 48 values (qemu-aarch64 against the host's SSE2), stays inline, compiles for ILP32 |
 | `gcc_check.py DECOMP BASE_TREE WORK` | patched files prepared with all rules into an overlay of a prepared tree, compiled with the census flags before/after; reports new errors and errors on patched lines |
 
@@ -58,6 +61,7 @@ inline.
 | XINC1 round 2 | S2c run f12: 295 x86-inconsistent references, 295 callers in 174 files; 264 callers patched in 152 files (`xinc1_r2_*.s1b`) | 259 identical, 5 differ by design | 26 need no patch, 4 open, 1 patched in round 1 (see "Round 2") |
 | XINC1 round 3 | S2c run f13 (resolve 1, tree 0420d45, before round 2): 456 caller rows, 266 covered by rounds 1-2; 128 of the 188 open generated (`xinc1_r3_*.s1b`: A 21, B 15, C 92; 27 files) | identical (all 156 site functions of the 27 files) | 51 callers left to read by hand, about 30 of them round 2's no-patch / open ones |
 | XINC1 round 4 | farm link/aedcf247e999 (tree 9a0243c, C-named references now compared): 757 this / ecx / result-pointer / cast-conflict rows, 576 caller rows, 388 covered by rounds 1-3; 66 generated + 9 by hand (`xinc1_r4_*.s1b`, 59 files) | 74 identical, 1 differs by design (+ 2 pattern (d) rewrites: 1 identical, 1 by design) | 182 open read: see "Round 4" |
+| XINC1 pop-mismatch | farm link/31971038913d: 2,136 pop-mismatch pairs, 2,939 call sites; 967 `fewer-donor` calls. Pilot `xinc1_pop_changeflags.s1b` (2 sites); 173 callers generated (`xinc1_pop_gen.s1b`: 292 calls, 170 sites in 97 files); 3 boot-path callers of WinMain's loop by hand (`xinc1_pop_boot.s1b`) | all identical (191 site functions of the 97 files; main.cpp 3); GCC census 0 -> 0 errors in all 98 files | see "Pop-mismatch families" |
 | FTOL1 | 17 arg-less helper calls in 10 units (+1 dead copy) | all identical; whole units identical (1,535 functions) | the "~37" of J-0009 counted 20 declarations nobody calls |
 | FTOL1 exact | the 17 sites now call the inline `fnvnx_ftol2_sse` (was the out-of-line int64 `fnvnx_ftol2`); 5 casts in 0x00a1b450 / 0x006912a0 (`ftol1_casts.s1b`) | whole units identical (11 units, 1,690 functions) | NaN / out of int32 -> 0x80000000 as on an SSE2 PC |
 | RET1 | 11 functions | identical (whole units, 1,395 functions) | 6 trailing statements, 5 with the callee's return type restored |
@@ -198,6 +202,71 @@ The other 5 functions of S12's list have no FALL1 trap: InitWinsock 0x00da2ff0, 
 whenever `count > 0`: GCC replaces `va_arg(args, Index)` (an enum, promoted through `...`) by a trap - for S1 (VA:
 `(Index)va_arg(args, int)`). QuadRenderer::UploadQuads 0x00e723a0 has a reachable `brk` (`cbnz w1` falls into it)
 of another origin - for S12 / S1.
+
+## Pop-mismatch families
+
+A `pop-mismatch` pair (S2's resolve) is a reference whose declaration pushes a different number of stack words than
+the definition pops. On x86 the pushes are the same either way, so the code ran; natively a callee that takes more
+words than its call passes reads argument registers nobody set (S13b's `native-garbage-arg`). The byte-exact MSVC
+code of both sides says which call pops which words (`popscan.py`).
+
+Families at link/31971038913d (2,136 pairs, 2,939 call sites):
+
+| family | calls | native effect |
+|---|---:|---|
+| `more`: the call passes more words than the callee takes | 1,386 | none (extra arguments); usually the donor of a `fewer-donor` call |
+| `fewer-donor`: the missing words were pushed for an earlier call of the same caller | 967 | garbage arguments: the decomp gave the pushes to the wrong call |
+| `fewer-other`: the missing words come from elsewhere (caller's own stack arguments, pushes no declaration covers, an indirect call) | 456 | garbage arguments; read by hand |
+| `fewer-unread`: the callee never reads the missing words | 70 | none |
+| `nocaller`: no call in the pristine object (address taken, declaration only) | 50 | none at a call |
+| `conv-only`: same words, only who pops differs | 10 | none (the link's moves) |
+
+Most `fewer-donor` calls are chains: `D(a.., x..)->R(r..)` where D is a getter that pops only its own arguments and
+R pops the words x. The patch moves them, `D(a..)->R(r.., x..)`, and declares the two overloads next to the decomp's
+(same class, result and qualifiers; the moved parameters keep the donor's spelling, so MSVC pushes the same words in
+the same order). `popgen.py` generates a caller only when every chain of the pair in it is a flagged site, all argument
+counts match their declarations, no declaration is virtual, static, inline-defined or defaulted, no other overload of
+the same arity exists, and the moved arguments have no side effects (x86 evaluates them before D, GCC's C++17 order
+evaluates D first). A moved `T*` whose class is declared after the receiver's class is spelled `struct T*` (it
+declares T at namespace scope, as the later definition does); a one-line class body gets the overload inside the
+braces.
+
+- `xinc1_pop_gen.s1b`: 173 callers, 292 calls, 97 files. MSVC: all 191 site functions identical; GCC census: no
+  new errors.
+  `flameprojectile.cpp`, `highprocess.cpp` and `tesrace.cpp` are left out: their hunks overlap other patches.
+- `xinc1_pop_boot.s1b` (by hand): WinMain's per-frame body 0x0086ff70 (distance 2 from WinMain; four getter/receiver
+  pairs and the nested `0x00874b90(0x004e3270(core, 0x004dc310(), 0))`, which is
+  `0x00874b90(0x004e3270(), core, 0x004dc310(), 0)`), 0x00877430 and 0x00871a50. MSVC identical.
+- Not generated (popgen's `manual.tsv`, 420 callers): the chain is not spelled as one (210: the donor's result is
+  stored first, or it is nested as an argument); the declarations live in a `_decls.h` header or more than one class
+  body has them (76, among them the `GetChangeFlags` family of the pilot in 27 files); free functions (38); the donor's
+  surplus differs from the receiver's deficit (30: one call shares its words with two others); side effects in moved
+  arguments (19); conflicting hunks (26); paths with blanks (10).
+
+S13b's `native-garbage-arg` hand-offs (131 functions) are mostly these: 30 are sites of these patches, 52 are
+`fewer-donor` / `fewer-other` callers still open, 4 call only `more` / `fewer-unread` callees, and 45 have no
+pop-mismatch row (indirect callees, or callers in units the link did not compare). Of the 175 `uninit-arm`
+hand-offs, 158 have no pop-mismatch row.
+
+## ABI verdicts (`pop/abiclass.py`)
+
+`tools/gates/ready.py` counts an x86-inconsistent pair as explained only when its classes are all `pop-mismatch`.
+At link/31971038913d 1,875 rows are not (1,262 pairs once a unit's `#vtables` copy folds into it); 1,529 of the rows
+are `pop-mismatch,ref-passes-fewer`, the same calls as popscan's `fewer` families. Per pair, by its worst call:
+
+| verdict | pairs | meaning |
+|---|---:|---|
+| `fix-donor` | 481 | `fewer-donor` calls not generated (see above) |
+| `fix-other` | 352 | `fewer-other` calls |
+| `patched` | 222 | the caller is an S1b site; the next link drops the row |
+| `ecx` | 179 | this / ecx / result-pointer classes: XINC1 rounds 1-4 (calls through thiscall casts and addresses taken are by design there) |
+| `benign-unread` / `-more` / `-nocall` | 37 / 34 / 30 | no native effect |
+| `bridge-gap` (manual rows) | 2,221 | varargs, aggregates by value, struct results: shapes the link does not bridge (S2c) |
+
+By boot distance (direct calls and the tables a function refers to, from WinMain and the 6,266 dynamic initializers;
+29,034 functions reached): of the open callers, `fix-donor` 53 and `fix-other` 17 are within 4 calls, and the three
+main.cpp callers among them are patched in `xinc1_pop_boot.s1b`. The two at distance 1 are open: 0x00448420 (three
+chains of 0x00559450 / 0x0044ac40 spelled through a local) and 0x0086c010 (one push shared by two calls).
 
 ## By-design MSVC differences (S11 gate)
 
