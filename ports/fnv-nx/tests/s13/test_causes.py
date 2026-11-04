@@ -627,6 +627,19 @@ def test_unclassified_shapes():
     check(il('fault:r:ilp32-high:1011e6370', x86='fault:r:011e6370') == 'ilp32-pointer',
           'the oracle faulted too: not the wrap shape')
     check(causes.policy('ilp32-wrap')[:2] == ('real-bug', 'S1'), 'ilp32-wrap is a real bug for S1')
+    # thunk-binding in the case buffers (S1-layout): native this = oracle this + d, and the function has _ZThn<d>_
+    of, oc = causes._object_facts, causes._own_and_callees
+    try:
+        causes._own_and_callees = lambda r: {'__fnv_00401000'}
+        ta = dict(kind='call-args', arg='this', cls='P', x86=w(0x03000000), arm=w(0x0300000c), index=0)
+        causes._object_facts = lambda src: ({'__fnv_00401000': {12}}, set())
+        check(refined(ta) == 'thunk-binding', 'buffer this + d with a _ZThn<d>_ thunk: thunk-binding')
+        causes._object_facts = lambda src: ({'__fnv_00401000': {8}}, set())
+        check(refined(ta) == 'layout-offset', 'a thunk by another d: still layout-offset')
+        causes._object_facts = lambda src: ({}, set())
+        check(refined(ta) == 'layout-offset', 'no thunk: layout-offset')
+    finally:
+        causes._object_facts, causes._own_and_callees = of, oc
     for c in ('ctor-this', 'canned-this', 'native-wild-private'):
         check(causes.policy(c)[0] == 'triage', '%s is triage: the record cannot tell harness from bug (V1)' % c)
     for c in ('ctor-this', 'canned-this', 'native-wild-private', 'stub-normalized', 'thunk-binding',

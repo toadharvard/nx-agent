@@ -474,7 +474,7 @@ def _rule_trap(d, rec):
     return LINK_TRAPS.get(_image_word((rec or {}).get('source'), pc))
 
 
-def _rule_call_args(d):
+def _rule_call_args(d, rec=None):
     if d.get('arm_garbage'):
         return 'native-garbage-arg'
     if d.get('arg') == 'sret':
@@ -497,6 +497,8 @@ def _rule_call_args(d):
         objs = (BUFS, HEAP)
         if (_in(vx, STACK) and any(_in(va, o) for o in objs)) or (_in(va, STACK) and any(_in(vx, o) for o in objs)):
             return 'arg-stack-vs-object'
+        if rec is not None and _thunk_delta(rec, vx, va):
+            return 'thunk-binding'          # MSVC's this of a secondary-base override, the native's full object
         for reg in (BUFS, HEAP, WINDOW):
             if _in(vx, reg) and _in(va, reg) and 0 < abs(vx - va) <= 0x100 and (vx - va) % 4 == 0:
                 return 'layout-offset'      # the same object, another member offset (base or field placement)
@@ -1496,6 +1498,21 @@ def _object_facts(source):
     return out
 
 
+def _thunk_delta(rec, vx, va):
+    """The native pointer is the oracle's plus d, both into one object region (literal pool / case buffers / heap /
+    image), and the function or a direct callee in its unit has a _ZThn<d>_ this-adjusting thunk by exactly d: an
+    override entered with MSVC's secondary-base this while __fnv_<addr> is bound to the GCC primary entry (S1-layout:
+    these were labelled layout-offset)."""
+    off = (va - vx) & 0xffffffff
+    if not (0 < off <= 0x400 and off % 4 == 0):
+        return False
+    regs = (LIT_POOL, BUFS, HEAP, WINDOW)
+    if not (any(_in(vx, r) for r in regs) and any(_in(va, r) for r in regs)):
+        return False
+    th = (_object_facts(rec.get('source')) or ({}, set()))[0]
+    return any(off in th.get(n, ()) for n in _own_and_callees(rec) or ())
+
+
 def _own_and_callees(rec):
     """{__fnv_<addr>} | the native function's direct callees, or None without the object."""
     try:
@@ -1639,7 +1656,7 @@ def refine(rec, cause=None):
         elif got == 'oracle-fault':
             got = _rule_oracle_fault(d, rec) or got
     elif k == 'call-args':
-        got = _rule_call_args(d)
+        got = _rule_call_args(d, rec)
     elif k == 'return':
         got = _rule_return(d, rec.get('conv'), rec.get('symbol'))
     elif k == 'mem-write':
