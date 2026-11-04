@@ -288,6 +288,15 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(ers->GetRenderState(19) == 5 && ers->GetRenderState(20) == 6, "stub: SetBlendFunc");
     ers->SetSamplerState(0, 5, 1, 0);    // MAGFILTER POINT
     t.Check(ers->GetSamplerState(0, 5) == 1, "stub: Set/GetSamplerState");
+    ers->RestoreSamplerState(0, 5);
+    t.Check(ers->GetSamplerState(0, 5) == 1, "stub: RestoreSamplerState returns to the saved default (POINT)",
+            (int)ers->GetSamplerState(0, 5));
+    // slot 48/49 are texture stage states: recorded, never sampler states
+    t.Check(ers->GetTextureStageState(0, 1) == 4 && ers->GetTextureStageState(1, 1) == 1,
+            "stub: texture stage state defaults (COLOROP MODULATE / DISABLE)");
+    ers->SetTextureStageState(0, 5, 3, 0);   // ALPHAARG1 = D3DTA_TFACTOR: type 5 is MAGFILTER as a sampler state
+    t.Check(ers->GetTextureStageState(0, 5) == 3 && ers->GetSamplerState(0, 5) == 1,
+            "stub: SetTextureStageState does not touch the sampler states");
 
     // synthetic engine geometry (interop layout of engine_stubs.h) in an arena; embedded pointers are offsets
     static uint8_t arena[2048] __attribute__((aligned(16)));
