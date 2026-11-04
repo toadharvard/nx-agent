@@ -48,3 +48,8 @@ _ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc standin  # 0x00aa3cc0: a pool wit
 _Z12FUN_00406d50z standin  # 0x00406d50 strcat_s(dst, size, src), declared `(...)` and defined nowhere: WinMain's INI paths
                       # stayed empty, FalloutPrefs.ini was never read, sD3DDevice was "" and the device check sent the
                       # game to the launcher (ShellExecute, WinMain returns 0) (standins.c; S1-refs)
+before-winmain 0x00e91e30 0x0126f104  # NiDX9Renderer's static-data object (exe initializer 0x00fc72d0: this = 0x0126f104,
+                      # jmp 0x00e91e30) has no native dyninit: one of the startup runner's "missing natives" (537 on
+                      # 06857911f5ab). Without it AddLibrary never registers 0x00e91dc0, NiInit never adds the five
+                      # display formats to 0x0126f0f8, the adapter lists no modes and renderer init fails ("Your display
+                      # doesn't support the selected resolution"). Class: exe initializers without a native (S1-refs)
