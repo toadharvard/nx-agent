@@ -546,6 +546,11 @@ check('ELAB1 renames a typedef named like a Win32 function',
           'unsigned int f(void* p) { return ((VirtualQuery)(*(void***)p)[3])(p); }\n'),
       ['(__fastcall* fnvnx_t_VirtualQuery)(void* object);', '((fnvnx_t_VirtualQuery)(*(void***)p)[3])(p)'])
 
+check('PTR1-DEREF leaves the compare of a pointee (int* p: *p <= 0 is signed), keeps pointer compares',
+      run(s1.r_pointer_zero_compares, 'bool f(int* type, char** pp, char* q)\n{\n    if (*type > 0 && *type <= 3) return q > 0;\n'
+          '    return *pp > 0 || a * q <= 0;\n}\n'),
+      ['if (*type > 0 && *type <= 3) return q != 0;', 'return *pp != 0'], ['*type != 0', '*type == 0'])
+
 # ---- GOTO1
 got = run(s1.r_goto_scalar_inits, 'int f(V& v, int e)\n{\n    if (e) goto out;\n    {\n        float dw = v.d(3), di = v.d(e);\n'
           '        int n = 4;\n        char *p = 0, *q = p;\n        return (int)(dw + di) + n + (p == q);\n    }\nout:\n    return 0;\n}\n')
