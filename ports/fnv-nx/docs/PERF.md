@@ -648,6 +648,14 @@ misses even 30 fps at 1020 MHz. At 1785 MHz plan45 already meets the target. Eve
 (2.6x spread of work, 1.7x of IPC).
 The two measurements that close it stay frameprof on a real frame and B1 (IPC) on hardware.
 
+**A57 prices (`--perf`, P0-perfmodel's fnvnx-perf/1, section 12).**
+* Each `hotspot_functions` row with a `per_call_cycles` price adds an item on its thread: cycles x the mid IPC minus
+  its instructions, per frame. The unpriced work stays at the assumed IPC; `fn_interlocked` is left out, because its
+  price lacks the dmb drain that `interlocked_barriers` models.
+* With P0's 12.6 prices the as-built worst frame at 1020 MHz goes from 35.15 to about 36.5 ms (+0.88 M main;
+  Slerp +0.47 M and the per-object cull +0.29 M are latency-bound).
+* The committed budget takes `--perf` once a farm publishes `<head12>-perf.json`.
+
 ### 11.4 Hotspots (`hotspots[]` in `fnvnx-frame-budget/1`)
 
 Owner's direction: profile first, then optimize the biggest costs first. `frame_budget.py` writes the ranked rows
