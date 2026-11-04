@@ -10,7 +10,7 @@ buildscripts `master` (2026-11-03); file references are relative to those trees.
 | Question | Decision |
 |---|---|
 | Process | One 64-bit process (AArch64 instructions) with a 32-bit address space, NPDM `AddressSpace32BitNoReserved` |
-| Packaging | Host NSO in an exefs override `/atmosphere/contents/<program id>/exefs.nsp` (`main` + `main.npdm`); no NRO |
+| Packaging | Host NSO in an exefs override `/atmosphere/contents/<program id>/exefs.nsp` (`main` + `main.npdm`), installed by the launcher `sdmc:/switch/fnv/fnv.nro` for the title it was started from (title takeover) and removed by the host once it runs (NX1, docs/NRO.md); the game never runs inside hbloader |
 | libnx | Stays LP64 and unmodified. The game is a separate ILP32 module; they talk through a 64-bit-clean table (`FnvnxHostApi`) |
 | Guest | ILP32 ELF32, **relocatable** (PIE linked at `0x30000000`, self-relocating, placed by the host after the S10 reservation; section 9) or fixed (`guest.specs`, claimed by S10), packed as `guest.nso` |
 | Reserved | `0x00400000..0x02100000`: original image (S2: no native code/data there) incl. the data window `0x00fdf000..0x02100000` (S3) |

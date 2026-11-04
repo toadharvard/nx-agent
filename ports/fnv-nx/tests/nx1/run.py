@@ -10,7 +10,7 @@ exist yet or its input artifact is missing, and `fail` when it ran and found a p
 pass. `--build` fills the artifact paths from a full build directory (tools/farm/full_job.sh layout:
 package/sd, package/nro, guest/fnvnx.elf, package/host/host.elf, boot/).
 
-Checks (docs/NRO.md has the details and the thresholds):
+Checks (docs/NRO.md has the details and the thresholds; each is tests/nx1/check_*.py):
   1 nro       NRO header, MOD0, NACP, icon (tests/nx1/check_nro.py) and the switch-tools round trip
   2 memory    peak heap + image + GPU pools within the title-takeover budget; applet mode refused
   3 svc       every svc / IPC service on the homebrew allowlist; no forbidden instructions
@@ -102,7 +102,7 @@ CHECKS = [
     (5, "fs", script("check_fs.py", lambda a: ["--sd", a.sd], need=["sd"])),
     (6, "gpu", script("check_gpu.py", lambda a: ["--host-elf", a.host_elf] if a.host_elf else [])),
     (7, "platform", script("check_platform.py")),
-    (8, "checklist", not_yet("owner checklist")),
+    (8, "checklist", script("check_checklist.py")),
 ]
 
 
