@@ -39,7 +39,17 @@ by pass and by shader program, docked and handheld, native and real019 shaders).
 | 10 | CPU function | `nx_d3d9_sampler` | CPU main | 1.01 | 4.5 % | every stage's sampler translated on every draw (F4) |
 
 S6n takes the rows in order, one commit each; every commit is re-profiled and recorded in `report.json`
-`optimizations[]` (§5).
+`optimizations[]` (§5) by
+
+```sh
+python3 -I render/native/perf/opt_delta.py <commit> [--before <commit>] [--name <text>]   # ~1 min per new commit
+python3 -I render/native/perf/report.py /home/user/work/p6n render/native/perf/report.json --reuse
+```
+
+`opt_delta.py` checks each commit out as a detached worktree (`<work>/opt/trees/`), puts the current perf tools over
+its `render/native/perf`, and measures mix_hi: AArch64 instructions of main / render front / deko3d recording, the
+GPU model at docked and handheld 720p (the commit's shaders), the top functions. Baseline: 443daf3 (main 5.64 M,
+render 3.38 M + 2.04 M instructions; GPU 12.44 / 23.22 ms docked / handheld at efficiency 0.6).
 
 ## 1. What is counted
 
