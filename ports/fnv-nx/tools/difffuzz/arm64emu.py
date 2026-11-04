@@ -169,7 +169,7 @@ class Arm64Engine:
             hws.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_private_read, user_data=r, begin=lo, end=hi - 1))
         self._fault = None
         try:
-            uc.emu_start(native, world.SENTINEL, count=max_steps)
+            uc.emu_start(native, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
         except UcError as e:
             r.error = self._fault or 'fault:uc:%s' % e
         finally:
@@ -355,7 +355,9 @@ class Arm64Engine:
             except Exception:  # noqa: BLE001
                 ccv = None
         ck = world.canned_kind((cv, ccv))
-        if ck == 'ref':
+        if target in world.ALLOCATORS:
+            x0 = world.alloc_result(k)
+        elif ck == 'ref':
             x0 = world.ref_result(k)
         elif ck == 'bool':
             x0 = (x0 & ~0xff) | (rb[0] & 1)            # a real bool result is 0/1

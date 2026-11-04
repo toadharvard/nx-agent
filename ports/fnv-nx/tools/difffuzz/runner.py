@@ -17,6 +17,7 @@ Timeouts on either side are inconclusive (not a divergence), both sides faulting
 """
 import math
 import struct
+import time
 
 import libcalls
 import world
@@ -288,6 +289,10 @@ def _read(uc, w, a, n):
         return w.initial(a, n)
 
 
+class FunctionTimeout(Exception):
+    """The function's hard wall-clock bound (Pair.deadline, set by fuzz.fuzz_one) ran out."""
+
+
 class Pair:
     """Both engines for one function, reused across cases (world pages are dropped between runs)."""
 
@@ -296,12 +301,15 @@ class Pair:
         self.pinned = pinned
         self.xe = self.ae = None
         self.adapted = 0
+        self.deadline = None             # time.time() after which run() raises FunctionTimeout
 
     def run(self, case, max_steps=200000):
         """One case on both machines. Adaptive follow: when the k-th call goes to oracle function X on x86 but
         elsewhere natively and X's oracle code is available, the native side inlined X (the unit-wide preload test
         missed it because the unit calls X elsewhere): X joins the oracle code and the case runs again."""
         for _ in range(5):
+            if self.deadline is not None and time.time() > self.deadline:
+                raise FunctionTimeout()
             rx, ra, d = self._run(case, max_steps)
             if not d or d['kind'] not in ('call-target', 'call-count') or self.adapted >= 16:
                 return rx, ra, d

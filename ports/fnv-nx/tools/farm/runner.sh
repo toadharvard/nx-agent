@@ -67,6 +67,11 @@ next_wip() {  # prints "<sha> <branch>" of a wip branch of this farm that has no
   done
 }
 t_end=$(( $(date +%s) + MAX ))
+# The session's background Bash kills this process (and the job under it) $RUNNER_KILL_S seconds (default 7200, the
+# 2 h background limit) after it starts: a job that has not published by then publishes nothing, ever, if each pass
+# takes that long (fz1, J-0138). FARM_DEADLINE (epoch seconds, 5 min before the kill) tells the job when it must
+# have written its report; tools/farm/fuzz_job.sh stops fuzzing in time and reports the rest as pending.
+export FARM_DEADLINE=$(( $(date +%s) + ${RUNNER_KILL_S:-7200} - 300 ))
 while [ "$(date +%s)" -lt "$t_end" ]; do
   TAG=""
   if [ "$WATCH" = wip ]; then

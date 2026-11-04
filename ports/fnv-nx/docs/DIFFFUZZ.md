@@ -149,6 +149,17 @@ definition and the calling unit's declaration of it: a reference result (`T&`) i
 its oracle code (`ret N`) when known, not from its declaration (a declaration with a parameter too many or too few
 left the oracle's esp off by 4: `fault:x:00000000`).
 
+**difffuzz-12 (J-0138).** The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
+names libcalls.EQUIV maps to them) return a fresh heap block (`world.alloc_result`, HEAP + 2 MiB + 4 KiB k), never
+the canned 0: GCC drops the null test after a throwing new that MSVC keeps (S13b `new-null`, 178 farm records). A
+machine's own private range faults when unmapped; the other machine's is plain background, so a garbage pointer
+there no longer faults on the oracle only (S13b `oracle-native-address`, 62 records). Of 60 of S13b's reproducers
+replayed on link aedcf24, 43 no longer diverge (28 before), the rest diverge later. Bounds: each machine's run stops
+after `FNVNX_DF_RUN_S` (2 s, Unicorn's emu_start timeout; one farm run of 004b6220 took 48 min, the step count did
+not bound it), each function after `fuzz.fn_limit` (6 x --time + 30 s, at least 60; `FNVNX_DF_FN_S`), and --time
+starts after the setup. A function out of its bound keeps its executions as the verdict (`truncated`), or with none
+is `run:slow` (a harness failure, fuzzed again after everything else).
+
 **difffuzz-11.** CRT addresses the link gives a provider whose name is a harness builtin (every address of the
 name: memmove 0x00ec44d0 and 0x00ec7230, ...) run as that builtin on the oracle, untraced like the native call.
 Adaptive follow also answers a call-count divergence: the first oracle callee the native run never calls was inlined

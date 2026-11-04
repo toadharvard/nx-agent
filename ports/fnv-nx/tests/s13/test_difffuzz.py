@@ -75,6 +75,10 @@ def test_pure():
           'FUN_00404920', 'itanium class names')
     check(world.mappable(0x100, 'x86') is False and world.mappable(0x08001000, 'a64') is False and
           world.mappable(0x00fdf000, 'a64'), 'world mapping policy')
+    al = [world.alloc_result(k) for k in range(3)]
+    check(all(world.HEAP <= a < world.HEAP_END for a in al) and len(set(al)) == 3 and
+          not {a & ~0xfff for a in al} & {world.ref_result(k) & ~0xfff for k in range(0x200)},
+          'allocator results: distinct heap blocks, apart from reference results')
 
 
 ORACLE = bytes.fromhex('0fbe442404' 'c1e81f' 'c3')     # movsx eax, byte [esp+4]; shr eax, 31; ret

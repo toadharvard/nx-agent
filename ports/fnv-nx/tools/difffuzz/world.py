@@ -18,6 +18,7 @@ Background bytes are zero ('zero') or a function of (seed, page) ('rand'). A cas
 (buffers, globals); pinned bytes (string literals and constants recovered from the oracle object, IAT slots) always
 win over both.
 """
+import os
 import random
 import struct
 
@@ -36,6 +37,9 @@ A64_PRIV = (0x08000000, 0x0c000000)
 X86_PRIV = (0x0e000000, 0x0e100000)
 SENTINEL = 0x0f000000
 MAX = 1 << 32
+# wall-clock bound of one machine's run (Unicorn emu_start timeout, microseconds): the step count alone did not
+# bound a run (one farm run took 48 minutes, 004b6220 on shard 2/26); a run stopped by it is a timeout (inconclusive)
+RUN_TIMEOUT_US = int(float(os.environ.get('FNVNX_DF_RUN_S', '2')) * 1e6)
 
 
 # where neither machine has code: a jump there is an indirect call through a pointer the case planted (a vtable
@@ -54,13 +58,16 @@ COMPARED = ((NULL_END, STACK[0]), (STACK[1], A64_PRIV[0]))
 
 
 def mappable(a, side):
-    """May page a be mapped on first touch on this machine ('x86' / 'a64')? Not the null region, not the private
-    ranges, and (AArch64) nothing at or above 4 GiB: an ILP32 address with its upper half set."""
+    """May page a be mapped on first touch on this machine ('x86' / 'a64')? Not the null region, not the machine's
+    own private range, and (AArch64) nothing at or above 4 GiB: an ILP32 address with its upper half set."""
     if a < NULL_END or a >= MAX:
         return False
-    # private ranges are never world memory on either machine (what a machine owns there is mapped up front), so a
-    # wild pointer into them faults on both sides alike
-    if A64_PRIV[0] <= a < A64_PRIV[1] or X86_PRIV[0] <= a < X86_PRIV[1]:
+    # a machine's own private range is never world memory (what it owns there is mapped up front, the rest faults).
+    # The other machine's private range is plain background: a garbage pointer there (bg 'rand' words, canned
+    # results) used to fault on the oracle only, because the native machine had its image there and never made the
+    # dead load (S13b oracle-native-address, 62 of J-0137's artefacts: 006ef0c0, 00490400, 0070c440, 006f03a0)
+    own = A64_PRIV if side == 'a64' else X86_PRIV
+    if own[0] <= a < own[1]:
         return False
     return True
 
@@ -203,6 +210,19 @@ def ref_result(k):
     address (heap; its bytes are the world's), the same on both machines. A null reference made the oracle fault
     where MSVC dereferenced the result at once and GCC only after a test (about 160 farm functions)."""
     return HEAP + 0x1000 * (k % 0x200) + 0x40
+
+
+# the game's allocators (operator new, MemoryManager::Allocate, the heap's Allocate; their native names map to these
+# addresses through libcalls.EQUIV / the address stubs): they never return null, and GCC drops the null test after a
+# throwing new that MSVC 2008 keeps, so a canned 0 made the native code construct at 0 (S13b new-null, J-0137)
+ALLOCATORS = {0x00401000, 0x00aa3e40, 0x00aa13e0}
+ALLOC_BASE = HEAP + 0x200000         # above the reference results (ref_result: HEAP + 0..0x1ff pages)
+
+
+def alloc_result(k):
+    """The canned result of the k-th intercepted call when it is a game allocator: a fresh heap block (its bytes are
+    the world's), the same on both machines."""
+    return ALLOC_BASE + 0x1000 * (k % 0x400) + 0x10
 
 
 def canned_kind(convs):

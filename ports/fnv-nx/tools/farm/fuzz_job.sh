@@ -27,8 +27,14 @@
 # fuzz/cache/<k>of<N> of the artifacts repository (results.jsonl + div/), pushed after every $FUZZ_CHUNK (200)
 # functions, so a recreated machine continues from it; a new shard count is seeded from the existing caches.
 # $FUZZ_BUDGET=<seconds> stops after the chunk that reaches it (the rest is "pending", done by the next run).
+# Deadline (J-0138): the job must have published its report before the farm session kills the runner (runner.sh's
+# FARM_DEADLINE, 5 min before the 2 h background limit; else $FUZZ_MAX_S, default 5400 s, after the job's start).
+# No chunk starts later than $FUZZ_REPORT_S (900) s before it, and a running chunk is stopped then: its unfinished
+# functions stay pending. Without this a shard whose pass took longer than the runner's life (fz1, fz2, ... on the
+# 26-shard layout) published nothing at all.
 # A wall-clock watchdog per chunk (function count x 3 x TIME + 30 s / JOBS, x2) kills a hung chunk; its unfinished
-# functions are recorded as run:timeout and fuzzed again by the next run. After each chunk the job looks at the
+# functions are recorded as run:timeout and fuzzed again by the next run, after everything else (fuzzcache.py todo).
+# Every function has a hard wall-clock bound too (fuzz.py fn_limit, each machine's run world.RUN_TIMEOUT_US). After each chunk the job looks at the
 # integration head ($FUZZ_HEAD_BRANCH): when its fnkeys.HARNESS differs from this checkout's, it stops and reports,
 # so the runner moves to the newest head.
 # Resumable: a rerun with the same arguments continues after the last finished function.
@@ -352,6 +358,10 @@ log "cache: $(cat "$RUN/todo.json")"
 
 # --- campaign over the changed and new functions, in chunks (cache merged and pushed after each) ----------------
 CHUNK=${FUZZ_CHUNK:-200}; BUDGET=${FUZZ_BUDGET:-0}
+FUZZ_END=$(( t0 + ${FUZZ_MAX_S:-5400} ))
+if [ -n "${FARM_DEADLINE:-}" ] && [ "$FARM_DEADLINE" -lt "$FUZZ_END" ]; then FUZZ_END=$FARM_DEADLINE; fi
+FUZZ_END=$(( FUZZ_END - ${FUZZ_REPORT_S:-900} ))
+log "fuzzing stops at $(date -u -d "@$FUZZ_END" +%T) UTC (report deadline)"
 mkdir -p "$RUN/camp"; touch "$RUN/camp/results.jsonl"
 (cd "$DF" && $PY fuzzcache.py dropcrash "$RUN/camp") >> "$RUN/merge.log"
 rm -f "$RUN"/chunk.*
@@ -365,10 +375,20 @@ for c in "$RUN"/chunk.*; do
   # watchdog: a harness hang costs this chunk, not the shard. Per function at most TIME s of fuzzing plus setup,
   # minimisation and classification (~3 x TIME + 30 s), JOBS in parallel, x2 margin.
   wd=$(( (nf * (3 * ${TIME%.*} + 30) / JOBS + 1) * 2 + 120 ))
+  left=$(( FUZZ_END - $(date +%s) ))
+  if [ "$left" -lt 60 ]; then log "report deadline: $(basename "$c") and later chunks stay pending"; break; fi
+  capped=0; if [ "$left" -lt "$wd" ]; then wd=$left; capped=1; fi
   log "fuzz $(basename "$c"): $nf functions ($JOBS jobs, $ITERS executions / ${TIME}s per function, watchdog ${wd}s)"
   rc=0
   (cd "$DF" && timeout -k 30 "$wd" nice $PY difffuzz.py fuzz "$c" --out "$RUN/camp" --iters "$ITERS" \
     --time "$TIME" --jobs "$JOBS" --resume >> "$RUN/fuzz.log" 2>&1) || rc=$?
+  if { [ $rc -eq 124 ] || [ $rc -eq 137 ]; } && [ $capped = 1 ]; then
+    # stopped by the report deadline, not hung: the unfinished functions stay pending (the next run fuzzes them)
+    log "report deadline reached during $(basename "$c")"
+    (cd "$DF" && $PY fuzzcache.py merge "$CACHE" "$RUN/camp" "$RUN/keys.json" "$COMMIT") >> "$RUN/merge.log"
+    cache_commit "$C12 shard $K/$N: $(basename "$c") (part)"
+    break
+  fi
   if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
     # the chunk's unfinished functions become harness failures (run:timeout): fuzzed again by the next run
     log "watchdog fired after ${wd}s on $(basename "$c")"

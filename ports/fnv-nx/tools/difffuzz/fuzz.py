@@ -213,12 +213,11 @@ def unit_cache():
 
 
 def fuzz_one(item, opts):
-    import classify
     src, addr = item['source'], int(item['address'], 16)
     out = dict(source=src, address=item['address'], symbol=item.get('symbol'), unit=item.get('unit'),
                size=item.get('size'), kind=item.get('kind'), tag=item.get('tag'), execs=0, divergences=[],
                status='ok')
-    t0 = time.time()
+    t_start = time.time()
     try:
         uc = unit_cache()
         pair, target = uc.pair(src, addr)
@@ -226,6 +225,37 @@ def fuzz_one(item, opts):
         out['status'] = 'setup:' + type(e).__name__
         out['error'] = str(e)[:300]
         return out
+    # the fuzzing budget (--time) starts after the setup (unit cache, unit image link: seconds on a fresh worker,
+    # which used up a whole 8 s budget before the first execution); the hard bound covers everything after it
+    t0 = time.time()
+    out['setup_seconds'] = round(t0 - t_start, 2)
+    import runner
+    pair.deadline = t0 + fn_limit(opts)
+    try:
+        return _fuzz_body(out, item, opts, uc, pair, target, src, addr, t0)
+    except runner.FunctionTimeout:
+        # the function's hard wall-clock bound ran out (minimisation / classification of a slow function): the
+        # executions done so far are its verdict; with none it is a harness failure (fuzzed again, last)
+        out['truncated'] = True
+        if not out['execs']:
+            out['status'] = 'run:slow'
+            out['error'] = 'function wall-clock bound %ss' % fn_limit(opts)
+        out['seconds'] = round(time.time() - t_start, 2)
+        return out
+    finally:
+        pair.deadline = None
+
+
+def fn_limit(opts):
+    """Hard wall-clock seconds of one function after its setup: fuzzing (--time), minimisation and classification
+    of up to three divergences (FNVNX_DF_FN_S overrides)."""
+    v = os.environ.get('FNVNX_DF_FN_S')
+    return float(v) if v else max(60.0, 6 * float(opts.get('time') or 8) + 30)
+
+
+def _fuzz_body(out, item, opts, uc, pair, target, src, addr, t0):
+    import classify
+    import runner
     out['conv'] = target.conv.describe()
     fn = uc.x86_unit(src, addr).funcs[addr]
     pinned = set(pair.pinned)
@@ -257,6 +287,8 @@ def fuzz_one(item, opts):
         i += 1
         try:
             rx, ra, div = pair.run(case, opts['max_steps'])
+        except runner.FunctionTimeout:
+            raise
         except Exception as e:  # noqa: BLE001
             out['status'] = 'run:' + type(e).__name__
             out['error'] = (str(e) + traceback.format_exc()[-400:])[:800]
@@ -291,7 +323,7 @@ def fuzz_one(item, opts):
             break
     out['coverage'] = len(cov)
     out['corpus'] = len(corpus)
-    out['seconds'] = round(time.time() - t0, 2)
+    out['seconds'] = round(time.time() - t0 + out.get('setup_seconds', 0), 2)
     return out
 
 
