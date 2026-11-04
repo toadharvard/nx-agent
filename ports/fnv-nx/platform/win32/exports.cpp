@@ -135,3 +135,10 @@ extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
     /* not an S4 export: modules registered at run time (S7's dsound/dinput8/xinput/vorbisfile) */
     return dll ? fnvnx_registered_module_export(dll, name) : NULL;
 }
+
+extern "C" void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordinal)
+{
+    if (ordinal == FNVNX_IMPORT_BY_NAME)
+        return fnvnx_win32_lookup_export(dll, name);
+    return NULL;
+}

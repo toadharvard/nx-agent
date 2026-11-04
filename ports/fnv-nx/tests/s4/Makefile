@@ -1,6 +1,9 @@
 # tests/s4 - host tests of the runtime layer (platform/) and the ILP32 syntax check.
 #
 #   make -C tests/s4            build and run the host tests (x86-64 or aarch64 Linux, os_posix backend)
+#   make -C tests/s4 m32        the -m32 tests (tests/s4/m32: platform/ + S7 + render/nine/d3dx on i386, the game's
+#                               data model; needs gcc-multilib's lib32 libraries)
+#   make -C tests/s4 iat EXE=<FalloutNV.exe>   S4's IAT metric: the exe's import slots with no export at boot
 #   make -C tests/s4 ilp32      -fsyntax-only of platform/ with aarch64-linux-gnu-gcc -mabi=ilp32
 #                               (os_horizon.c against libnx headers: LIBNX=<libnx checkout>)
 #
@@ -25,7 +28,7 @@ TEST_CXX := $(wildcard $(HERE)/*.cpp)
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 
-.PHONY: all test ilp32 clean
+.PHONY: all test ilp32 m32 iat clean
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -42,6 +45,34 @@ $(OUT)/s4_tests: $(OBJS)
 test: $(OUT)/s4_tests
 	rm -rf $(OUT)/root && FNVNX_ROOT=$(OUT)/root $(OUT)/s4_tests
 
+# ---- i386 (-m32) build: the ILP32 data model with a host libc. /usr/include/asm is the multilib packages' symlink,
+# missing when a cross compiler replaced them; the x86-64 asm headers serve i386 too.
+M32OUT := $(OUT)-m32
+M32FLAGS := -m32 -idirafter /usr/include/x86_64-linux-gnu $(FLAGS) -I$(ROOT)/shim/include
+M32_CXX := $(PLAT_CXX) $(wildcard $(P)/audio/*.cpp) $(wildcard $(P)/input/*.cpp)   # input_horizon.cpp: host no-op pump
+M32_D3DX := $(wildcard $(ROOT)/render/nine/d3dx/*.cpp)
+M32_TEST := $(wildcard $(HERE)/m32/*.cpp)
+M32_OBJS := $(patsubst $(ROOT)/%,$(M32OUT)/%.o,$(PLAT_C) $(M32_CXX) $(M32_D3DX) $(M32_TEST))
+$(M32OUT)/render/nine/d3dx/%.cpp.o: $(ROOT)/render/nine/d3dx/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -std=gnu++17 -m32 -idirafter /usr/include/x86_64-linux-gnu -g -O1 -frounding-math -Wall -fshort-wchar \
+		-fno-exceptions -fno-rtti -include $(HERE)/m32/compat_m32.h -I$(ROOT)/shim/include -I$(ROOT)/toolchain/include \
+		-c $< -o $@
+$(M32OUT)/%.c.o: $(ROOT)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(M32FLAGS) -c $< -o $@
+$(M32OUT)/%.cpp.o: $(ROOT)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -std=gnu++17 $(M32FLAGS) -c $< -o $@
+$(M32OUT)/s4_m32: $(M32_OBJS)
+	$(CXX) -m32 -pthread $^ -o $@ -lm
+m32: $(M32OUT)/s4_m32
+	rm -rf $(M32OUT)/root && FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32
+iat: $(M32OUT)/s4_m32
+	@test -n "$(EXE)" || { echo "set EXE=<FalloutNV.exe>"; exit 2; }
+	python3 -I $(HERE)/iat/pe_imports.py "$(EXE)" > $(M32OUT)/imports.txt
+	rm -rf $(M32OUT)/root && FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32 --iat $(M32OUT)/imports.txt
+
 # ---- AArch64 ILP32 syntax check (the game's data model)
 XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
@@ -56,4 +87,4 @@ ilp32:
 	@echo "ilp32: all platform sources parse"
 
 clean:
-	rm -rf $(OUT)
+	rm -rf $(OUT) $(M32OUT)
