@@ -106,3 +106,21 @@
     - Decision needed (owner / orchestrator): where reconstructed bodies of functions the decomp lacks may live. For
       example, the private artifacts repository, with a rule that applies them when present, or upstream in the
       decomp. Until then, heap_standin.c stays.
+* **D20 done (MemoryHeap)**
+  - Private: fnv-nx-build `recon/bscore_memoryheap` (d3da8fd), the constructor 0x00aa78a0 and the destructor
+    0x00aa7930 (not a second constructor). build_and_match: 19 / 19 functions, 1,246 / 1,246 bytes.
+  - nx-agent: the rule REC1 (2d859ea), which applies recon bodies when FNVNX_RECON is set.
+  - Waiting on: prepare_job / full_job must fetch the recon/* branches into one directory and export FNVNX_RECON.
+  - Before heap_standin.c goes: the native MemoryHeap vtable has only the destructor slots, so S5 must boot-check
+    that the link pairs it with the exe vftable at the full slot count.
+* **layout-offset, the 17 rows left** - every one is a call-args divergence: the same object, another offset.
+
+| shape | rows | units |
+|---|---:|---|
+| x86 passes a base or member at +N, native at +0 | 7 | extradataobjects (+0xc / +0x10), tesregionpointlist (+0x6c), bgszonetargetlistener (+0x10), actor, archive (+0x160 / +0x158), bgsprimitive (+0x24), blk_00720000_od (EBO2 fires there) |
+| native passes +N, x86 +0 | 5 | tesflora (+0xc), tesattackdamageform (+0x30), blk_006a0000_od (+4), hkpcharacterproxy (+0xc), blk_00c40000 rtm (+0x14 / +0x10, EBO2 fires there) |
+| a pointer into the data image 0x80 apart, all to FUN_00403e20 | 3 | sky, bstreemanager, blk_00800000_od (likely one global, to check against S2c's split-global) |
+| other | 2 | blk_00480000_od (p0 +0x14), statsmenu (p0 0 vs a value) |
+
+  - The diverging call sits in a callee of the fuzzed function (0x004f81e0's own text has no BSSimpleList call), so
+    each row needs its call site found first: the fuzz record's x86 / arm traces, then build_and_match on that unit.

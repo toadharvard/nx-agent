@@ -5,9 +5,10 @@
 # Runs the real tools/farm/link_job.sh on a scratch copy of the port's tools whose Makefile is a mock: `make link`
 # records the FNVNX_EXE it was given and writes an ok link. The exe is a synthetic one on a local gamedata/exe branch.
 #   1  the gamedata branch has the pinned exe: make link sees FNVNX_EXE = the fetched exe, the report names it
-#   2  FARM_REAL_EXE=0: FNVNX_EXE is empty, the report says so
-#   3  an exe with another sha256: refused, FNVNX_EXE is empty
-#   4  the publish (FARM_PUBLISH=always, local artifacts remote) and the report hold no byte run of the exe
+#   2  FARM_REAL_EXE=0: FNVNX_EXE is unset, the report says so
+#   3  an exe with another sha256: refused, FNVNX_EXE is unset
+#   4  the publish (FARM_PUBLISH=always, local artifacts remote) and the report hold no byte run of the exe; the
+#      publish has S2d's tables out/bodies/{bodies,bind,synth}.tsv + stats.txt, not its work dir or objects
 #   5  build.py's link stage: link_exe() picks FNVNX_EXE, else a BOOT_IMAGE file, and the stage fingerprint changes
 #      with the exe's content (a cached link made without the exe is redone with it)
 #   bash tests/farm/test_link_exe.sh   -> "link_exe: ok", exit 1 on any failure
@@ -39,6 +40,8 @@ def w(rel, text):
 for f in ('aliases.ld', 'refs.tsv', 'abi.tsv', 'addrmap.tsv', 'layouts.tsv', 'cache/msvc.tsv', 'vtables/a.vt.S'):
     w('link/out/' + f, 'x\n')
 w('link/fixed/zz_bridges.o', 'x\n'); w('link/summary.txt', 'x\n')
+for f in ('bodies.tsv', 'bind.tsv', 'synth.tsv', 'stats.txt', 'work/u.bd.cpp', 'zz_bd_u.o'):
+    w('link/out/bodies/' + f, 'x\n')
 for s, r in (('compile', {}), ('link', {'prepared_from': {'port_commit': commit},
                                         'metrics': {'link_bodies_s': 1.0, 'link_bodies_exe_addr': 7}})):
     os.makedirs(os.path.join(bd, s), exist_ok=True)
@@ -65,16 +68,20 @@ run() { # run <home> [env...]: link_job.sh -> $T/seen, $T/<home>.md
 }
 run h1 FARM_EXE_SHA256="$PIN" FARM_PUBLISH=always
 check "$(cat "$T/seen" 2>/dev/null)" "$T/h1/gamedata/FalloutNV.exe" "1: FNVNX_EXE for make link"
-grep -q "^- bodies --exe: the player's FalloutNV.exe" "$T/h1.md" || { echo "FAIL: 1: report names no exe"; fail=1; }
+grep -q "^- resolve / bodies --exe: the player's FalloutNV.exe" "$T/h1.md" || { echo "FAIL: 1: report names no exe"; fail=1; }
 grep -q '^- bodies (S2d, 1.0 s): exe_addr 7' "$T/h1.md" || { echo "FAIL: 1: report has no bodies line"; fail=1; }
 run h2 FARM_EXE_SHA256="$PIN" FARM_REAL_EXE=0 FARM_PUBLISH=0
-check "$(cat "$T/seen" 2>/dev/null)" "" "2: FARM_REAL_EXE=0"
-grep -q '^- bodies --exe: player exe not used' "$T/h2.md" || { echo "FAIL: 2: report"; fail=1; }
+check "$(cat "$T/seen" 2>/dev/null)" "<unset>" "2: FARM_REAL_EXE=0"
+grep -q '^- resolve / bodies --exe: player exe not used' "$T/h2.md" || { echo "FAIL: 2: report"; fail=1; }
 run h3 FARM_EXE_SHA256=0000 FARM_PUBLISH=0
-check "$(cat "$T/seen" 2>/dev/null)" "" "3: another sha256"
+check "$(cat "$T/seen" 2>/dev/null)" "<unset>" "3: another sha256"
 mkdir -p "$T/pub"
 git -C "$T/origin.git" archive "refs/heads/link/${COMMIT:0:12}" | tar -x -C "$T/pub" \
 	|| { echo "FAIL: 4: nothing published"; fail=1; }
+for f in bodies.tsv bind.tsv synth.tsv stats.txt; do
+	[ -f "$T/pub/out/bodies/$f" ] || { echo "FAIL: 4: out/bodies/$f not published"; fail=1; }
+done
+[ -e "$T/pub/out/bodies/work" ] || [ -e "$T/pub/out/bodies/zz_bd_u.o" ] && { echo "FAIL: 4: bodies work dir or objects published"; fail=1; }
 cp "$T/h1.md" "$T/pub/report-h1.md"
 python3 -I "$PORT/tests/v1/scan_gamedata_leak.py" "$T/fake.exe" "$T/pub" >/dev/null || { echo "FAIL: 4: exe bytes"; fail=1; }
 
@@ -86,7 +93,10 @@ import build
 class B:
     cfg = {'BOOT_IMAGE': 'auto', 'OVERRIDE': ''}
 b = B()
-for k in ('link_tool_inputs', 'up_id', 'extern_text_id', 'msvc_objs_id', 'game_cxx_id'):
+for k in ('link_tool_inputs', 'up_id', 'extern_text_id', 'msvc_objs_id', 'game_cxx_id', 'override_id',
+          'link_overrides', 'order_keys_id', 'link_game_flags_id'):
+    if not hasattr(build, k):
+        continue
     setattr(build, k, lambda *a, **k: 'same')
 fp = lambda: build.Link.fingerprint(None, b)
 open(t + '/e1', 'wb').write(b'MZone'); open(t + '/e2', 'wb').write(b'MZtwo')

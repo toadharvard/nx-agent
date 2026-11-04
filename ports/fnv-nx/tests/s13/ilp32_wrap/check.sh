@@ -9,7 +9,7 @@ command -v "$CC" >/dev/null 2>&1 || { echo "skip: no $CC (set FNVNX_A64_CC to th
 D=$(dirname "$0"); T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 for flags in "" "-fwrapv-pointer" "-fno-tree-ter"; do
   "$CC" -mabi=ilp32 -O2 $flags -S -o "$T/w.s" "$D/wrap.c" 2>"$T/err" || { cat "$T/err"; exit 1; }
-  for fn in by_unsigned by_pointer by_int; do
+  for fn in by_unsigned by_pointer by_int by_cast32 ok_asmbase; do
     body=$(awk -v f="$fn:" '$1==f{p=1;next} p&&/^\t\.size|ret/{print;exit} p{print}' "$T/w.s")
     # the bug: the index is zero-extended into a 64-bit add with the base (add xD, xB, wI, uxtw), so the sum
     # does not wrap at 2^32; a 32-bit add (add wD, ...) followed by a load through xD wraps correctly

@@ -30,12 +30,19 @@ if [ ! -d "$ARTIFACTS/.git" ]; then git clone -q https://github.com/toadharvard/
 if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/tree:refs/remotes/origin/tree" 2>/dev/null; then git -C "$ARTIFACTS" checkout -q -B tree origin/tree
 elif git -C "$ARTIFACTS" rev-parse -q --verify refs/heads/tree >/dev/null; then git -C "$ARTIFACTS" checkout -q tree
 else git -C "$ARTIFACTS" checkout -q --orphan tree; fi
+# the reconstructed bodies (D20, branches recon/*) for S1-refs' rule REC1; none is not an error
+# shellcheck source=recon.sh
+. "$(dirname "$0")/recon.sh"
+fetch_recon "$ARTIFACTS" "$FARM_HOME/recon"
+echo "recon: $RECON_NOTE" >&2
 
-# A commit that changes none of prepare's inputs gets the previous tree again (no 5.5 min prepare).
+# A commit that changes none of prepare's inputs, with the same recon, gets the previous tree again (no 5.5 min
+# prepare).
 INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim ports/fnv-nx/tools/fetch.sh ports/fnv-nx/render/native/drop_units.txt)
 PREV=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$ARTIFACTS/meta.json" 2>/dev/null || true)
+PREV_RECON=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("recon", ""))' "$ARTIFACTS/meta.json" 2>/dev/null || true)
 REUSE=0
-if [ -n "$PREV" ] && [ -d "$ARTIFACTS/tree" ] && git -C "$REPO" cat-file -e "$PREV^{commit}" 2>/dev/null \
+if [ -n "$PREV" ] && [ "$PREV_RECON" = "$RECON_ID" ] && [ -d "$ARTIFACTS/tree" ] && git -C "$REPO" cat-file -e "$PREV^{commit}" 2>/dev/null \
    && git -C "$REPO" diff --quiet "$PREV" "$COMMIT" -- "${INPUTS[@]}"; then REUSE=1; fi
 t0=$(date +%s)
 if [ $REUSE = 1 ]; then
@@ -52,7 +59,7 @@ if [ $REUSE = 0 ]; then mkdir -p tree; rsync -rc --delete "$WORK/tree/" tree/; f
 cp "$WORK/prepare.log" prepare.log
 DECOMP_COMMIT=$(git -C "$EXT/fnv_decomp" rev-parse HEAD)
 cat > meta.json <<EOF
-{"commit": "$COMMIT", "decomp_commit": "$DECOMP_COMMIT", "tree_hash": "$TREE_HASH", "prepare_s": $((t1-t0)), "reused": $REUSE}
+{"commit": "$COMMIT", "decomp_commit": "$DECOMP_COMMIT", "tree_hash": "$TREE_HASH", "prepare_s": $((t1-t0)), "reused": $REUSE, "recon": "$RECON_ID"}
 EOF
 git add -A tree prepare.log meta.json
 git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 tree $TREE_HASH" || true
@@ -67,6 +74,6 @@ rm -rf "$WORK/tree"
 if [ -n "$REPORT" ]; then
   mkdir -p "$(dirname "$REPORT")"
   { printf '# prepare %s\n\n- tree hash %s, prepare %ss\n- branch t/%s in toadharvard/fnv-nx-build\n\n```\n' \
-      "$C12" "$TREE_HASH" "$((t1-t0))" "$C12"; tail -8 "$WORK/prepare.log"; printf '```\n'; } > "$REPORT"
+      "$C12" "$TREE_HASH" "$((t1-t0))" "$RECON_NOTE" "$C12"; tail -8 "$WORK/prepare.log"; printf '```\n'; } > "$REPORT"
 fi
 echo "tree $TREE_HASH for $C12"

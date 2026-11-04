@@ -226,10 +226,23 @@ extern "C" void _operator_delete_sized(void *, __SIZE_TYPE__);
 /* MSVC-only CRT names (secure CRT, _stricmp, ...) that units call without a declaration of their own */
 #include "fnvnx_crt.h"
 
+/* Patch class MT1 (docs/PATCHES.md): gated Switch behaviour changes emit `if (FNVNX_MT1_ON) {..} else {..}`. The gate
+ * is the engine's copy of bMTRendering:Display, read by fnvnx_mt1_on() (the platform defines it). The declaration is
+ * weak: while nothing defines it, its address is null and every MT1 hunk stays off. */
+#ifdef __cplusplus
+extern "C"
+#endif
+int fnvnx_mt1_on(void) __attribute__((weak));
+#define FNVNX_MT1_ON (fnvnx_mt1_on != 0 && fnvnx_mt1_on() != 0)
+/* MT1 cull sync (patches/mt1_cull_sync.s1b, docs/PERF.md 6.11): wait for this frame's cell update on AI linear
+ * thread 2 before the world render culls (toolchain/game/boot.cpp) */
+#ifdef __cplusplus
+extern "C"
+#endif
+void fnvnx_mt1_wait_cell_update(void);
+
 #define FNVNX_ASM_FNV_HELPERS
 #include "fnvnx_asm.h"
 
-/* patch class MT1: the gate of the multithreaded-culling changes (docs/PATCHES.md) */
-#include "fnvnx_mt1.h"
 
 #endif

@@ -213,6 +213,10 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             # bytes, and both get the same canned result. Not a divergence by itself; the calls after it and the
             # rest are compared (difffuzz-15: `oracle-vcall`, 2,439 divergences, ended the comparison here)
             continue
+        if tx[i] != ta[i] and tx[i] >= 0 and getattr(ra.calls[i], 'addr', None) == tx[i]:
+            # both machines branched to the same garbage word; on the native it lies in the stub range and traces by
+            # the stub's identity (S13b vcall-stub-alias: compare stopped here)
+            continue
         if tx[i] != ta[i] and not (tx[i] in fam and fam.get(tx[i]) == fam.get(ta[i])):
             d = dict(kind='call-target', index=i, x86=_hex(tx[i]), arm=_hex(ta[i]),
                      x86_trace=[_hex(t) for t in tx[:i + 1]], arm_trace=[_hex(t) for t in ta[:i + 1]],
@@ -225,7 +229,13 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
         return dict(kind='error', x86=ex, arm=ea)
     if ex is not None:
         return None   # both faulted after the same calls
-    if len(tx) != len(ta):
+    dealloc = {a for a, f in fam.items() if f == 'delete'} | {0x00aa4060}
+    if len(tx) > len(ta) and all(t in dealloc for t in tx[len(ta):]) and \
+            any(str(getattr(v, 'cls', '')).startswith('AGG:') for v in conv.vals):
+        # MSVC destroys an aggregate passed by value in the callee (its buffer freed on the way out), Itanium in the
+        # caller: the trailing oracle-only frees are by design and the rest is compared (S13b byvalue-arg-dtor)
+        pass
+    elif len(tx) != len(ta):
         return dict(kind='call-count', x86=len(tx), arm=len(ta), x86_trace=[_hex(t) for t in tx],
                     arm_trace=[_hex(t) for t in ta])
     if callee_conv is not None:
@@ -515,6 +525,13 @@ class Pair:
                                 getattr(self.target, 'dummies', None),
                                 (world.garbage_words(case.seed, 'x86'), world.garbage_words(case.seed, 'a64')),
                                 self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()))
+        if d is not None:
+            # dynamic evidence for causes.py (S13b: oracle-callee-unloaded): the original addresses of the unit's
+            # functions the native actually entered in this run (their __fnv_<X> entry blocks were executed)
+            ent = getattr(self.target.image, 'entries', {}) or {}
+            got = sorted({o for a, o in ent.items() if a in ra.blocks})
+            if got:
+                d['arm_entered'] = ['%08x' % o for o in got[:64]]
         if d is not None and ra.private_reads:
             d['arm_private_reads'] = ra.private_reads
             names = self._private_names(ra.private_addrs)

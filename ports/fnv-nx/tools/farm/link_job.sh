@@ -34,7 +34,8 @@
 # repository toadharvard/fnv-nx-build (branches only: the session proxy refuses tags and ref deletions):
 #   out/{aliases.ld,refs.tsv,abi.tsv,addrmap.tsv,layouts.tsv,typeinfo_pairs.tsv,slot_fill.tsv,slot_gaps.tsv,
 #   cache/msvc.tsv,vtables/}
-#   (vtables/ without the probe work dir; typeinfo_pairs.tsv from apply, in check's link order)
+#   (vtables/ without the probe work dir; typeinfo_pairs.tsv from apply, in check's link order; S2d's
+#   out/bodies/{bodies.tsv,bind.tsv,synth.tsv,stats.txt} when the bodies step ran, without its work dir)
 #   fixed/*.o   summary.txt   report.md   meta.json
 # The rolling branch with the history of every publish is link-head: a branch named `link` cannot exist next to
 # link/<commit12> (git refs are paths). Each publish is a child of link-head's newest commit, so a push sends only

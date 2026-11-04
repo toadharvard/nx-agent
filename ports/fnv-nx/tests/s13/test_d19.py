@@ -61,6 +61,21 @@ def main():
     h = classify.hint(None, None, None, div, dict(code=b'\xc3', address=0x00401000), 0)
     check(h.get('cause') == 'vptr-unpaired', 'a vtpad slot is vptr-unpaired before oracle-vcall (%s)' % h)
     check(fnkeys.HARNESS == 'difffuzz-19', 'HARNESS names the full refresh')
+    # a custom-convention function whose case does not depend on garbage gets its real cause, not x86-custom-cc
+    cc_or = bytes.fromhex('8b00' 'c3')                  # mov eax, [eax]; ret  (reads eax: a custom convention)
+    cvc = conv.Conv('?f@@YAHPAH@Z', 'test')
+    regs = classify.entry_register_reads(dict(code=cc_or, address=0x00401000), cvc)
+    if regs:
+        cvc.with_registers(regs)
+    with tempfile.TemporaryDirectory() as d:
+        tc = runner.Target(cvc, 0x00401000, {0x00401000: cc_or}, build_image('\tldr w0, [x0]\n\tadd w0, w0, #1\n'
+                                                                              '\tret\n', d), {})
+        pc = runner.Pair(tc, {})
+        c = world.Case(seed=2, mem={world.BUF: b'\x05\0\0\0'})
+        _, _, dv = pc.run(c)
+        h = classify.hint(pc, tc, c, dv, dict(code=cc_or, address=0x00401000), 200000) if dv else {}
+        check(bool(regs) and dv is not None and h.get('cause') not in (None, 'x86-custom-cc'),
+              'custom convention, garbage-independent case: a real cause (%s, regs %s)' % (h.get('cause'), regs))
     check(world.mappable(0x09900000, 'a64') and not world.mappable(0x0a000000, 'a64') and
           world.mappable(0x0e030000, 'x86') and not world.mappable(0x0e001000, 'x86') and
           any(lo <= 0x0e030000 < hi for lo, hi in world.WILD_X86), 'private-range holes: background and wild')
