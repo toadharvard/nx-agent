@@ -1839,6 +1839,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
         return ADDR_SYM % a, how
 
     target_for = slotfill2.secondary_entry(target_for, native, ADDR_SYM, MSVC_ENTRY_SYM, st)   # S2c-vt2
+    target_for = slotfill2.fastcall_dtor(target_for, native, itanium, msvc, abi.classify, stubs, ADDR_SYM, st)
 
     for u in have:
         ren = per_obj.get(u.source) or {}

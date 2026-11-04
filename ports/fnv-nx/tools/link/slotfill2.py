@@ -25,3 +25,45 @@ def secondary_entry(target_for, native, addr_sym, entry_sym, stats=None):
             return entry_sym % a, '%s; msvc this = base subobject +%d: the _ZThn thunk' % (why, me[1])
         return tgt, why
     return wrapped
+
+
+FLAG3_SYM = '__fnvnx_vflag3_%08x_%d'   # GCC destructor slot -> a decomp `__fastcall f(this, int edx, flags)` ??_G
+
+
+def fastcall_flags_param(ds, classify):
+    """The MSVC declaration is the decomp's fastcall spelling of a thiscall deleting destructor: a free `__fastcall`
+    function (pointer, int, integer): ecx = this, edx unused, the flags on the stack (the third argument)."""
+    if ds is None or ds.kind != 'func' or ds.raw_params is None or ds.member or ds.cc != 'fastcall':
+        return False
+    ps = [classify(p) for p in ds.raw_params if p != 'void']
+    return len(ps) == 3 and ps[0] == 'P' and ps[1] in ('I8', 'I16', 'I32') and ps[2] in ('I8', 'I16', 'I32')
+
+
+def emit_flag3_stub(name, target, flags):
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
+                      '    mov w2, #%d' % flags, '    b %s' % target, '    .size %s, .-%s' % (name, name),
+                      '    .text']) + '\n'
+
+
+def fastcall_dtor(target_for, native, itanium, msvc, classify, stubs, addr_sym, stats=None):
+    """Wrap target_for: GCC's D0 / D1 / D2 slot where the exe slot's function is the decomp's fastcall deleting
+    destructor `f(this, int, flags)` (DestroyNiTriShape, NiMaterialProperty_Destructor) goes through a stub that
+    passes the flags in the third argument register: 1 for D0 (delete), 0 for D1 / D2."""
+
+    def wrapped(un, a, otts=None, depth=0):
+        tgt, why = target_for(un, a, otts, depth)
+        if tgt is not None or not why.startswith('kind differs (function at the exe slot, D'):
+            return tgt, why
+        nd = native.get(a)
+        isig = itanium(un)
+        ds = msvc(nd['msvc']) if nd and nd.get('msvc') else None
+        if not (isig.variant or '').startswith('D') or not fastcall_flags_param(ds, classify):
+            return tgt, why
+        fl = 1 if isig.variant == 'D0' else 0
+        name = FLAG3_SYM % (a, fl)
+        stubs.setdefault(name, emit_flag3_stub(name, addr_sym % a, fl))
+        if stats is not None:
+            stats['fastcall_dtor'] += 1
+        return name, 'fastcall flags stub (%d)' % fl
+    return wrapped
