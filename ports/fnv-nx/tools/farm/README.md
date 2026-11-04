@@ -34,8 +34,12 @@ deletions, so artifacts live on branches.
 - it publishes the report to branch `reports/<name>` of the artifacts repository;
 - it exits by itself before a 2 h background limit, and is then started again.
 
-A farm session is created with the private artifacts repository as its source, so it needs no repository attach and
-no permission prompt. It clones the public nx-agent itself. Its agent only keeps the runner alive. Reports of
+A farm session is created from the private artifacts repository at branch `main` (`source_revision: main`). It
+needs no repository attach. The agent runs exactly `bash /home/user/fnv-nx-build/farm/start.sh <name> <job> [args]`
+in the background, and `main`'s `.claude/settings.json` allows that command; the rule was set at the owner's request
+(J-0079). `start.sh` clones the public nx-agent, checks it out at the integration head and runs this `runner.sh`.
+Artifacts and reports go to a separate clone at `$FARM_HOME/artifacts`. The agent only keeps the runner alive, with
+a check-in every 30 min. Reports of
 runners are read from the artifacts repository:
 `git -C /home/user/fnv-nx-build fetch -q origin reports/<name> && git -C /home/user/fnv-nx-build show origin/reports/<name>:<file>`.
 
