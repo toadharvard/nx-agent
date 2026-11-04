@@ -1672,6 +1672,24 @@ class Link(Stage):
             r.metric('link_vtable_host_probes', sum(int(x[2]) for x in mm))
         if rc:
             r.note('probe exited %d; resolve 2 uses the layouts and vtables it left' % rc)
+        # ---- S2d (tools/link/bodies.py): the C++ names resolve 1 left undefined, bound by address, called through
+        # the vptr or synthesized; resolve 2 reads out/bodies/ (FNVNX_NO_BODIES=1: left out)
+        if not os.environ.get('FNVNX_NO_BODIES'):
+            b.say('link: fnvlink bodies (declared-only functions; %d jobs)' % b.jobs)
+            t = time.time()
+            pr = b.cfg['MSVC_OBJS'] or b.cfg['MSVC_CODE']
+            brc = b.sh([PY, '-I', fl, 'bodies', out, tree, '--jobs', str(b.jobs)]
+                       + (['--msvc-objs', os.path.abspath(pr)] if pr and pr != 'none' else []), log, env=env)
+            r.metric('link_bodies_s', round(time.time() - t, 1))
+            bst = os.path.join(out, 'bodies', 'stats.txt')
+            if brc:
+                r.note('bodies exited %d; resolve 2 uses what it left' % brc)
+            elif os.path.exists(bst):
+                for line in open(bst):
+                    mm = re.match(r'(addr|vcall|msvc-empty|msvc-inline|special-default|missing)\s+(\d+)', line)
+                    if mm:
+                        r.metric('link_bodies_' + mm.group(1).replace('-', '_'), int(mm.group(2)))
+        # ---- end S2d
         resolve(2)
         shutil.rmtree(fixed, ignore_errors=True)
         b.say('link: fnvlink apply')

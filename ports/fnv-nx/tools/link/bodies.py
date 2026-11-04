@@ -8,7 +8,7 @@ guest link binds them to trap stubs. `fnvlink.py bodies out/ tree/ [--msvc-objs 
 in this order (first that applies):
 
 1. `addr` - the same function at an original address under another name: the Itanium name, with class shells
-   (`X_shell`, `X_<addr8>`) and then namespaces relaxed, matches MSVC names of exactly one address the native build
+   (`X_shell`) and then namespaces relaxed, matches MSVC names of exactly one address the native build
    defines (`addrmap.tsv` F/C/X; never a G: a deleting destructor is not a D1). Bound to `__fnv_<addr>`.
 2. `msvc-empty` - a pristine MSVC object (`<dir>/u<index>.obj`, S11) defines the function (COMDAT code) and its x86
    body is only `ret` / `ret N` / `mov eax, ecx; ret[ N]` (a constructor returning this): an AArch64 `ret` stub
@@ -51,7 +51,7 @@ import sigs
 
 TRAPPED = ('unresolved', 'unresolved-ctor-dtor', 'ctor-dtor-trap')
 ADDR_SYM = '__fnv_%08x'
-SHELL = re.compile(r'(?:_shell|_Shell|_SHELL|_[0-9a-fA-F]{8})$')
+SHELL = re.compile(r'(?:_shell|_Shell|_SHELL)$')
 UNIT_NS = re.compile(r'^fnv_[0-9a-f]{8}$')            # the decomp's per-function namespaces (fnvlink.UNIT_NS)
 UNIT_NS_ANY = re.compile(r'\bfnv_[0-9a-f]{8}::')
 IMAGE_SCN_CNT_CODE, IMAGE_SCN_LNK_COMDAT = 0x20, 0x1000
@@ -92,27 +92,42 @@ def load_native(addrmap_tsv):
 
 # ---------------------------------------------------------------------------------------------------- keys
 
+GHIDRA = re.compile(r'^(?:[A-Z]{1,4}|thunk_FUN|switchD|caseD|Unk|unk|fnv|vf|v|s|f)$')   # FUN_<addr8>, DAT_, S_, ...
+
+
 def norm(part):
-    return SHELL.sub('', part)
+    """A class shell's name -> the class it stands for (`NiNode_shell` -> `NiNode`). An address suffix is not a
+    shell: `Entry_004d4b00` and `Entry_0075d6b0` are different classes (link fa883870e756), like `FUN_00402b40`."""
+    m = SHELL.search(part)
+    if not m or GHIDRA.match(part[:m.start()]) or len(part[:m.start()]) < 3:
+        return part
+    return part[:m.start()]
 
 
 def relaxed_keys(sig):
-    """(tier, key) strict -> loose for a parsed function name: class shells stripped, then namespaces dropped (the
-    innermost class kept). Parameters at sigs level 2 (cv and long/int spellings ignored)."""
+    """(tier, key) strict -> loose for a parsed function name: class shells stripped (`X_shell`); then
+    a unit-local copy of a class (`fnv_00650ea0::NiFixedString`, resolve's ns binding) keyed as the global class
+    (key 'g'), which a name without unit namespaces also gives, so two units' copies never pair with each other.
+    Parameters at sigs level 2 (cv and long/int spellings ignored)."""
     if sig.kind != 'func' or sig.params is None or not sig.qual:
         return []
     p2 = tuple(sigs.canon_param(p, 2) for p in sig.params)
     last = sig.qual[-1]
     scope = tuple(norm(q) for q in sig.qual[:-1])
     keys = [('shell', ('s', scope, last, p2))]
-    if len(scope) > 1:
-        keys.append(('scope', ('c', scope[-1], last, p2)))
-    # a unit-local copy of a class (`fnv_00650ea0::NiFixedString`) and the global class of that name
     pu = tuple(UNIT_NS_ANY.sub('', p) for p in p2)
     su = tuple(q for q in scope if not UNIT_NS.match(q))
-    if (pu, su) != (p2, scope) and su:
-        keys.append(('unit-ns', ('s', su, UNIT_NS_ANY.sub('', last), pu)))
+    if (pu, su) == (p2, scope):
+        keys.append(('global', ('g', scope, last, p2)))      # what a unit-local copy of this class looks for
+    elif su:
+        keys.append(('unit-ns', ('g', su, UNIT_NS_ANY.sub('', last), pu)))
     return keys
+
+
+def def_keys(sig):
+    """The relaxed keys a definition (or a name standing for one) is indexed under: not a unit-local copy's
+    global key (a global reference never binds to one unit's copy)."""
+    return [(t, k) for t, k in relaxed_keys(sig) if t != 'unit-ns']
 
 
 def special_of(isig):
@@ -232,12 +247,12 @@ class Classifier:
             for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
                 if a in native and n.startswith('?'):
                     m = msvc(n)
-                    for _, k in relaxed_keys(m):
+                    for _, k in def_keys(m):
                         self.idx[k][a].add(n)
         self.bidx = collections.defaultdict(set)   # key -> {msvc names with a pristine body}
         for n in bodies or {}:
             m = msvc(n)
-            for _, k in [('exact', kk) for t, kk in m.keys() if t in ('exact', 'l1', 'l2')] + relaxed_keys(m):
+            for _, k in [('exact', kk) for t, kk in m.keys() if t in ('exact', 'l1', 'l2')] + def_keys(m):
                 self.bidx[k].add(n)
 
     def by_address(self, isig):
@@ -311,7 +326,25 @@ def emit_empty(rows):
     return '\n'.join(out) + '\n'
 
 
-def synth_host(tree, work, host, rows, itanium, inline=False):
+# compile.sh's code-generation flags (layout.flags has the semantics flags only): emitted bodies are game code
+CODEGEN = ('-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-fno-stack-protector', '-fno-stack-clash-protection',
+           '-mno-outline-atomics')
+
+
+def ftoi_plugin(bdir):
+    """compile.sh's FTOI2 plugin (MSVC's float -> integer conversions): built like compile.sh builds it, no silent
+    fallback (objects with and without it must never mix)."""
+    port = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    r = subprocess.run(['bash', os.path.join(port, 'toolchain', 'ftoi', 'build.sh'), os.path.join(bdir, '.ftoi')],
+                       capture_output=True, text=True)
+    so = r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ''
+    if not so or not os.path.exists(so):
+        raise SystemExit('bodies: the fnvnx_ftoi plugin does not build (%s); synthesis needs it, or --no-synth'
+                         % (r.stderr.strip().splitlines() or ['?'])[-1])
+    return so
+
+
+def synth_host(tree, work, host, rows, itanium, inline=False, codegen=CODEGEN):
     """Compile the host unit again with the `= default` lines (special-default) or with -fkeep-inline-functions
     (msvc-inline); keep only the wanted symbols. -> (object path or None, {names defined}, {name: why failed})."""
     import vtables
@@ -326,8 +359,8 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
             items.append((k, 'bd', line))
     else:
         items.append((0, 'anchor', 'extern "C" void __fnvnx_bd_anchor() {}'))
-    flags = ('-O2', '-ffunction-sections', '-fdata-sections', *layout.PIC) + (('-fkeep-inline-functions',)
-                                                                             if inline else ())
+    flags = ('-O2', '-ffunction-sections', '-fdata-sections', *layout.PIC, *codegen) + (
+        ('-fkeep-inline-functions',) if inline else ())
     obj, alive = vtables.compile_probe(tree, work, host, items, 'bdi' if inline else 'bd', flags)
     if obj is None:
         return None, set(), {n: 'synth-failed (host does not compile)' for n in want}
@@ -342,7 +375,7 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
         byk = collections.defaultdict(set)
         for n in defined:
             if n.startswith('_Z') and n not in want:
-                for _, k in relaxed_keys(itanium(n)):
+                for _, k in def_keys(itanium(n)):
                     byk[k].add(n)
         for w in want - defined:
             for _, k in relaxed_keys(itanium(w)):
@@ -527,6 +560,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     if synth:
         work = os.path.join(bdir, 'work')
         os.makedirs(work, exist_ok=True)
+        codegen = CODEGEN + ('-fplugin=' + ftoi_plugin(bdir),)
         by_host = collections.defaultdict(lambda: collections.defaultdict(list))
         for r in rows:
             if r.cls in ('special-default', 'msvc-inline') and r.host:
@@ -536,7 +570,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         def one(job):
             h, inl, rs = job
             try:
-                return h, inl, synth_host(tree, work, h, rs, itanium, inl)
+                return h, inl, synth_host(tree, work, h, rs, itanium, inl, codegen)
             except Exception as e:   # one host must not stop the step
                 return h, inl, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
         with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
