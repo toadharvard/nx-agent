@@ -188,7 +188,7 @@ def win32_to_horizon_prio(prio):
 
 def place(cpu, seq, prio, core3=False):
     """fnvnx_place_ex(): thread_create's cpu argument -> (role name, ideal core, mask, Horizon priority); core3: the
-    core 3 opt-in (sdmc:/fnvnx/fnvnx.ini core3=1, --core3)"""
+    core 3 opt-in (sdmc:/switch/fnv/fnvnx.ini core3=1, --core3)"""
     prio = prio - (1 << 64) if prio >> 63 else prio
     table = placement_table()
     if cpu & ~0xFF == 0x100 and (cpu & 0xFF) in table:

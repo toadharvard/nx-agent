@@ -90,7 +90,7 @@ CONFIG = [
                        'toolchain stage (toolchain/vorbis/build.sh), none = without, or a prefix'),
     ('BOOT', '0', '1: the boot stage (emulated boot of the game guest + boot frontier) runs with `all`; it also runs '
                   'when named as a goal (make boot)'),
-    ('BOOT_IMAGE', 'auto', 'data image for the emulated boot (sdmc:/fnvnx/game/FalloutNV.exe): auto = S14\'s '
+    ('BOOT_IMAGE', 'auto', 'data image for the emulated boot (sdmc:/switch/fnv/FalloutNV.exe): auto = S14\'s '
                            'synthesized image when PRISTINE_OBJS is given, else none; none = no image (all-zero '
                            'data); or an exe file'),
     ('PRISTINE_OBJS', '', 'MSVC 2008 objects of the pristine decomp (S11, tools/equiv: u<index>.obj), for S14\'s '
@@ -2051,7 +2051,7 @@ class Boot(Stage):
         image = boot_image(b, r, d)
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'
         if image:
-            argv += ['--file', 'fnvnx/game/FalloutNV.exe=' + image]
+            argv += ['--file', 'switch/fnv/FalloutNV.exe=' + image]
         elog = os.path.join(d, 'emu.log')
         open(elog, 'w').close()
         tmo = int(b.cfg['EMU_TIMEOUT'])
