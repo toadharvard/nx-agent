@@ -2555,3 +2555,23 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **found** - The link farms lag: the newest published link is still 9844d8d (republished 09:50 with old scripts).
   S5's farm checks (4b/4c) and the frontier move from S1's heap slots, VLIT1 and S2c's mapping wait for the first
   link from a head ≥ 68fcbe0.
+
+### J-0116 | 2026-11-04 | stream: S13-difffuzz,farms | status: wip | parent: J-0114
+
+* **found** - 14 of the 26 fuzz shards published nothing after the restart: fz1, 2, 4, 7, 8, 10, 11, 17, 19, 25, and
+  fz12/20/22/24, which hung in their first chunk.
+  - The cause is a harness hang. A jump into memory without code is treated as an intercepted call, and a native
+    `ret` to a garbage LR "returns" to that same address forever, before the step limit counts.
+  - One worker loops, and the chunk waits for it indefinitely.
+* **did** - S13 `346b33d` (no HARNESS bump):
+  - A wild call to LR is a fault. Each machine stops after 20,000 intercepted calls (timeout, inconclusive).
+  - A per-chunk watchdog in fuzz_job runs the chunk under `timeout -k 30 <wd>` and kills the process group. The
+    unfinished functions become `run:timeout` and are re-fuzzed next run.
+  - After every chunk the job reads `fnkeys.HARNESS` on the integration branch. On a bump it stops, publishes, and lets
+    the runner restart at the newest head, so a bump now costs at most one chunk per shard.
+  - Checked on fz10's 128 stuck functions: about 3.5 min, no timeout. Self-test: 0 failures.
+  - The runners hung now can't see the fix. Their 2 h background timeout ends them at about 11:13 UTC.
+* **did** - S13 `96492c1`: int arguments that hold each machine's own stack address, or a literal at its image address
+  against the native unit's copy, now compare equal (50 + 17 call-args divergences at 40b2cb5).
+* **next** - S13 difffuzz-10 (HARNESS bump): `_byteswap_ulong` builtins, dynamic_cast as an untraced builtin, and
+  stack arguments beyond what the x86 caller pushed are not compared (FUN_005accb0).
