@@ -93,3 +93,21 @@ TEST(crt_exe_forwarders)
     CHECK_STR(c, "abcde");
     CHECK(FUN_00406d50(c, 6, "xyz") != 0);           /* too long: an error (and an empty string, as strcat_s) */
 }
+
+extern "C" void __fnv_00401050(void *, unsigned, int, void (*)(void *));
+int t_appendpreview_v(char *, unsigned, const char *) __asm__("_Z12FUN_00406d50z");
+static int g_ctor_calls;
+static void t_ctor(void *p) { *(int *)p = 0x55 + g_ctor_calls++; }
+
+TEST(crt_vector_ctor_and_variadic_appendpreview)
+{
+    int a[5] = {0, 0, 0, 0, 0};
+    g_ctor_calls = 0;
+    __fnv_00401050(a, sizeof(int), 4, t_ctor);
+    CHECK(g_ctor_calls == 4 && a[0] == 0x55 && a[3] == 0x58 && a[4] == 0);
+    __fnv_00401050(a, sizeof(int), 0, t_ctor);
+    CHECK_EQ(g_ctor_calls, 4);
+    char b[8] = "ab";
+    CHECK_EQ(t_appendpreview_v(b, sizeof b, "cd"), 0);
+    CHECK_STR(b, "abcd");
+}

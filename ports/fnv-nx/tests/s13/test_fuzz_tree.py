@@ -90,8 +90,11 @@ def main():
 
         meta2 = dict(meta, tree='')
         r, calls = run(tmp, cs, meta2, {'O': '2222222222222222'})
-        check(r.returncode == 0 and 'prepare farm tree of %s (tree hash 2222222222222222)' % cs['O'][:12]
-              in r.stdout, 'no recorded tree hash: the objects commit is taken as is')
+        check(r.returncode == 3 and not any(c.startswith(cs['O']) for c in calls),
+              'no recorded tree hash: the objects commit is not taken unchecked (V1 F2), rc %d' % r.returncode)
+        r, calls = run(tmp, cs, dict(meta, tree='prepare farm, tree (published for %s), tree hash '
+                                     'efb9808e7d542f00' % cs['T'][:12]), {'L': '3333333333333333'})
+        check(r.returncode == 3, 'the waited-for t/<L12> with another hash than the recorded one is refused (V1 F1)')
 
         r, calls = run(tmp, cs, meta, {})
         check(r.returncode == 3 and 'FAILED: no prepared tree' in r.stdout, 'nothing published: fail_report 3')

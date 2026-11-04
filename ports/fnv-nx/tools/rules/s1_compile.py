@@ -4711,7 +4711,100 @@ def r_vfptr_empty_base(path, text, stats):
     stats['EBO2'] += len(edits)
     return text
 
+# ---------------------------------------------------------------------------------------------------------- REC1
+#
+# Bodies the decomp lacks (D20): a function of the exe that no unit defines (MemoryHeap's constructor 0x00aa78a0 and
+# destructor 0x00aa7930: the default heaps stayed raw memory, S5-boot) is reconstructed against the exe and accepted
+# only when tools/build_and_match.py gives all bytes equal. The reconstruction is exe-derived, so it lives only in the
+# private artifacts repository (fnv-nx-build branch recon/<unit>), never here. REC1 applies what a prepare run is
+# given: FNVNX_RECON names a directory holding recon.json files (one per recon, in subdirectories or at its top):
+#   {"format": "fnvnx-recon/1", "unit": <source>, "decomp_commit": <sha>, "append": <file next to recon.json>,
+#    "functions": [{address, symbol, size}], "symbols": {decorated name: address}}
+# The text rule appends the body to its unit; the POST hook add_recon_definitions adds the functions and symbols to
+# the prepared build/units.json. A recon whose decomp_commit is not the checkout's, or whose addresses a unit already
+# defines, is skipped (REC1-STALE / REC1-DUP). Without FNVNX_RECON (or with no recon in it) REC1 does nothing.
+
+def _recon_entries(path):
+    """[(recon dict, directory)] valid for the decomp checkout that holds path (cached on the prepare module:
+    equiv.py loads the stream modules twice and keeps the first copy's POST hook)."""
+    got = prepare.__dict__.get('_fnvnx_recon')
+    if got is not None: return got
+    import json, subprocess
+    _RECON = prepare.__dict__['_fnvnx_recon'] = []
+    top = os.environ.get('FNVNX_RECON')
+    if not top or not os.path.isdir(top): return _RECON
+    root, uj = prepare._units_json(path)
+    head = None
+    if root:
+        try:
+            head = subprocess.run(['git', '-C', root, 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                                  timeout=30).stdout.strip() or None
+        except (OSError, subprocess.SubprocessError):
+            head = None
+    defined = set()
+    if uj:
+        for u in json.load(open(uj))['units']:
+            defined.update(f['address'] for f in u.get('functions', []))
+    files = sorted(os.path.join(dp, 'recon.json') for dp, _, ns in os.walk(top) if 'recon.json' in ns)
+    for f in files:
+        try:
+            r = json.load(open(f))
+        except (OSError, ValueError):
+            continue
+        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not r.get('append'): continue
+        if head and r.get('decomp_commit') and r['decomp_commit'] != head:
+            r['_skip'] = 'REC1-STALE'
+        elif any(fn.get('address') in defined for fn in r.get('functions', [])):
+            r['_skip'] = 'REC1-DUP'
+        _RECON.append((r, os.path.dirname(f)))
+    return _RECON
+
+def r_recon_bodies(path, text, stats):
+    """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""
+    if not os.environ.get('FNVNX_RECON') or not path.endswith(('.cpp', '.c')): return text
+    entries = _recon_entries(path)
+    if not entries: return text
+    root, _ = prepare._units_json(path)
+    if not root: return text
+    src = os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/')
+    for r, d in entries:
+        if r['unit'] != src: continue
+        if r.get('_skip'):
+            stats[r['_skip']] += 1; continue
+        body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
+        text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
+        if not text.endswith('\n'): text += '\n'
+        stats['REC1'] += len(r.get('functions', []))
+        r['_applied'] = True
+    return text
+
+def add_recon_definitions(out_root, stats, files=None):
+    """POST hook: REC1's recipe entries (functions and symbols) in <out_root>/build/units.json."""
+    import json
+    _RECON = prepare.__dict__.get('_fnvnx_recon')
+    if not _RECON or not any(r.get('_applied') for r, _ in _RECON): return
+    p = os.path.join(out_root, 'build', 'units.json')
+    if not os.path.exists(p): return
+    data = json.load(open(p))
+    n = 0
+    for r, _ in _RECON:
+        if not r.get('_applied'): continue
+        for u in data['units']:
+            if u['source'] != r['unit']: continue
+            have = {f['address'] for f in u['functions']}
+            for fn in r.get('functions', []):
+                if fn['address'] not in have:
+                    u['functions'].append(dict(fn)); n += 1
+            for k, v in r.get('symbols', {}).items():
+                u.setdefault('symbols', {}).setdefault(k, v)
+    if n:
+        stats['REC1-DEF'] += n
+        json.dump(data, open(p, 'w'))
+        if files is not None: files['REC1-DEF'] += 1
+
+POST.append(add_recon_definitions)
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
-              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base]
+              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies]
 RULES += REFS_RULES

@@ -14,7 +14,7 @@
 # Inputs the harness does not drive (t1..t7, v1 beyond specular, VS-specific semantics) are reported per shader.
 # Vertex shaders are translated and validated (DKSH header) only. Output: one line per shader + summary;
 # decomp/game-derived results stay in --work (default build/v6n/parity), never in git.
-import os, sys, subprocess, random, json, struct, shutil
+import os, sys, subprocess, random, json, struct, shutil, re
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
 import cmp as C
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
@@ -48,14 +48,21 @@ def scene_text(name, bin_, glsl, seed, opts):
     L.append('draw TRIANGLESTRIP 2')
     return '\n'.join(L) + '\n'
 
+def cube_samplers(glsl_text):
+    """sampler stages the translation declares as samplerCube (layout(binding = N) uniform samplerCube ...)"""
+    return {int(m) for m in re.findall(r'layout\(binding = (\d+)\) uniform samplerCube', glsl_text)}
+
 def drive_scene(bin_, glsl, seed, vs, model):
     """packages: a VS (tests/v6n/shaders/drv2|drv3.vsa) drives COLOR0/1 and TEXCOORD0..7 (TEXCOORD0 = uv, 1..7 random
-    affine in uv), 8 point-sampled 2D textures, random c0..c63"""
+    affine in uv), 8 point-sampled textures (2D, or an 8x8 cube where the translation declares a samplerCube),
+    random c0..c63"""
     r = random.Random(seed)
+    cubes = cube_samplers(open(glsl).read())
     L = ['size 16 16', 'rt A8R8G8B8', 'ds D24S8', 'clear 7 0xff203040 1.0 0', 'rs CULLMODE CULL_NONE']
     for s_ in range(8):
-        L += ['tex %d A8R8G8B8 8 8 1 hash %d' % (s_, seed * 7 + 1 + s_ * 101), 'samp %d MINFILTER TEXF_POINT' % s_,
-              'samp %d MAGFILTER TEXF_POINT' % s_, 'samp %d MIPFILTER TEXF_NONE' % s_]
+        if s_ in cubes: L.append('texcube %d A8R8G8B8 8 hash %d' % (s_, seed * 7 + 1 + s_ * 101))
+        else: L.append('tex %d A8R8G8B8 8 8 1 hash %d' % (s_, seed * 7 + 1 + s_ * 101))
+        L += ['samp %d MINFILTER TEXF_POINT' % s_, 'samp %d MAGFILTER TEXF_POINT' % s_, 'samp %d MIPFILTER TEXF_NONE' % s_]
     vb, vg = vs['vs_3_0' if model.startswith('ps_3') else 'vs_2_0']
     L += ['vs %s %s' % (vb, vg), 'ps %s %s' % (bin_, glsl)]
     for c in range(1, 16):
@@ -137,7 +144,7 @@ def main():
             undriven = [x['name'] for x in j.get('inputs', []) if not ((x['usage'] == 'TEXCOORD' and x['index'] < 8) or
                         (x['usage'] == 'COLOR' and x['index'] < 2) or x['usage'] in ('POSITION', 'FOG') or x['name'] in ('vPos', 'vFace'))]
             g = open(os.path.join(tr, h + '.glsl')).read()
-            undriven += ['samplerCube' for _ in range(g.count('uniform samplerCube'))][:1] + ['sampler3D' for _ in range(g.count('uniform sampler3D'))][:1]
+            undriven += ['sampler3D' for _ in range(g.count('uniform sampler3D'))][:1]   # cube samplers are driven
         stats['undriven'] += bool(undriven)
         for sd in range(seeds):
             sc = os.path.join(work, '%s_%s_%d.scene' % (os.path.basename(pkg)[:-4], name.replace('.', '_'), sd))
