@@ -262,7 +262,6 @@ bool Renderer::Init(Backend* be, uint32_t w, uint32_t h, uint32_t backbuffer, ui
     nGroups_ = 0;
     groups_[nGroups_++] = {nullptr, backbuffer, depth, w, h};
     ident(view_); ScreenSpaceProjection(proj_, w, h);
-    vp_ = {0, 0, w, h, 0.0f, 1.0f};
     return true;
 }
 
@@ -354,7 +353,7 @@ void Renderer::Do_SetCameraData(const NiPoint3f& loc, const NiPoint3f& dir, cons
     eye_[0] = loc.x; eye_[1] = loc.y; eye_[2] = loc.z;
     CameraProjection(f, proj_);
     const Group* g = cur_ ? cur_ : &groups_[0];
-    vp_ = PortViewport(port, g->w, g->h);
+    state_.SetViewport(PortViewport(port, g->w, g->h));
 }
 
 void Renderer::Do_SetScreenSpaceCameraData(const NiRectF* port) {
@@ -362,8 +361,7 @@ void Renderer::Do_SetScreenSpaceCameraData(const NiRectF* port) {
     ident(view_);
     ScreenSpaceProjection(proj_, g->w, g->h);
     eye_[0] = 0.5f; eye_[1] = 0.5f; eye_[2] = -1.0f;
-    if (port) vp_ = PortViewport(*port, g->w, g->h);
-    else vp_ = {0, 0, g->w, g->h, 0.0f, 1.0f};
+    state_.SetViewport(port ? PortViewport(*port, g->w, g->h) : NxD3D9Viewport{0, 0, g->w, g->h, 0.0f, 1.0f});
 }
 
 bool Renderer::Do_BeginUsingRenderTargetGroup(const void* group, uint32_t clearMode) {
@@ -372,7 +370,8 @@ bool Renderer::Do_BeginUsingRenderTargetGroup(const void* group, uint32_t clearM
     if (!g) return false;
     cur_ = g;
     OpenPass(clearMode);
-    vp_ = {0, 0, g->w, g->h, 0.0f, 1.0f};
+    // the engine's SetRenderTarget(0): D3D9 resets viewport and scissor rectangle to the target
+    state_.SetRenderTarget(0, g, g->w, g->h);
     return passOpen_;
 }
 
@@ -388,8 +387,7 @@ bool Renderer::Render(const Draw& d) {
     if (!passOpen_) OpenPass(0);
     if (!passOpen_) return false;
     const Group* g = cur_ ? cur_ : &groups_[0];
-    NxD3D9Rect sc = scissorSet_ ? scissor_ : NxD3D9Rect{0, 0, (int32_t)g->w, (int32_t)g->h};
-    const StateTracker::Resolved& r = state_.Resolve(vp_, sc, g->depth ? 75 : 0);
+    const StateTracker::Resolved& r = state_.Resolve(state_.Viewport(), state_.ScissorRect(), g->depth ? 75 : 0);
     // compile-time epilogue permutation for this draw's alpha test / fog
     uint16_t ps = d.ps;
     bool needEpi = !d.translated;   // a translated program has its own fog / alpha test (driver UBO)
@@ -640,7 +638,6 @@ bool Renderer::UploadGeometry(const GeomView& g, uint32_t* vOff, uint32_t* iOff,
 static const uint8_t kSavedRs[17] = {15, 19, 20, 24, 25, 27, 174, 52, 53, 54, 55, 56, 57, 58, 59, 14, 168};
 struct Renderer::SavedDrawState {
     uint32_t rs[17];
-    bool hadScissor;
     NxD3D9Rect scissor;
 };
 
@@ -649,8 +646,7 @@ void Renderer::ApplyGeomStates(const GeomView& g, SavedDrawState& sv) {
     static const uint8_t kCmp[8] = {8, 2, 3, 4, 5, 6, 7, 1};
     enum { RS_ALPHATEST = 15, RS_SRC = 19, RS_DST = 20, RS_REF = 24, RS_FUNC = 25, RS_BLEND = 27 };
     for (int i = 0; i < 17; i++) sv.rs[i] = state_.GetRenderState(kSavedRs[i]);
-    sv.hadScissor = scissorSet_;
-    sv.scissor = scissor_;
+    sv.scissor = state_.ScissorRect();
     if (g.hasScissor) { state_.SetRenderState(174, 1); SetScissorRect(&g.scissor); }
     if (g.hasStencil && (g.stencilFlags & 1)) {   // NiStencilProperty::Action / TestFunction -> D3DSTENCILOP / D3DCMPFUNC
         static const uint8_t kOp[8] = {1, 2, 3, 4, 5, 6, 1, 1};
@@ -674,7 +670,7 @@ void Renderer::ApplyGeomStates(const GeomView& g, SavedDrawState& sv) {
 void Renderer::RestoreGeomStates(const GeomView& g, const SavedDrawState& sv) {
     for (int i = 0; i < 17; i++)
         if (state_.GetRenderState(kSavedRs[i]) != sv.rs[i]) state_.SetRenderState(kSavedRs[i], sv.rs[i]);
-    if (g.hasScissor) SetScissorRect(sv.hadScissor ? &sv.scissor : nullptr);
+    if (g.hasScissor) state_.SetScissorRect(sv.scissor);
 }
 
 void Renderer::WorldMatrix(const GeomView& g, float world[16]) {

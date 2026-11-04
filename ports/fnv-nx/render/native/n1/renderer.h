@@ -175,8 +175,11 @@ public:
     void SetBackgroundColor(float r, float g, float b, float a);
     void SetDepthClear(float z) { clearDepth_ = z; }
     void SetStencilClear(uint32_t s) { clearStencil_ = s; }
-    // IDirect3DDevice9::SetScissorRect equivalent (used while D3DRS_SCISSORTESTENABLE is set); 0 = whole target
-    void SetScissorRect(const NxD3D9Rect* r) { scissorSet_ = r != nullptr; if (r) scissor_ = *r; }
+    // IDirect3DDevice9::SetScissorRect (the tracker's; used while D3DRS_SCISSORTESTENABLE is set); 0 = whole target
+    void SetScissorRect(const NxD3D9Rect* r) {
+        const Group* g = cur_ ? cur_ : &groups_[0];
+        state_.SetScissorRect(r ? *r : NxD3D9Rect{0, 0, (int32_t)g->w, (int32_t)g->h});
+    }
     // Native description of an engine NiRenderTargetGroup (0 = the default group: back buffer + depth).
     bool RegisterTargetGroup(const void* group, uint32_t color, uint32_t depth, uint32_t width, uint32_t height);
     // The colour image and size of a registered group (engine render targets: BSRenderedTexture / target groups).
@@ -282,7 +285,7 @@ public:
     // Matrices of the current camera (column-major, clip = proj * view * world; D3D9 clip space).
     const float* view() const { return view_; }
     const float* proj() const { return proj_; }
-    const NxD3D9Viewport& viewport() const { return vp_; }
+    const NxD3D9Viewport& viewport() const { return state_.Viewport(); }
     uint32_t frameNumber() const { return frameNo_; }
     uint32_t lastStateBinds() const { return lastBinds_; }
     bool inFrame() const { return inFrame_; }
