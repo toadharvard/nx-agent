@@ -36,16 +36,18 @@ def main():
             rec = json.load(open(os.path.join(d, 'div', x['file'])))
             rec['_now'] = prev.get(x['file'], {}).get('divergence')
             cause = report.reclassify(rec)
+            if x['status'] == 'still' and (x.get('divergence') or {}).get('soft'):
+                x['status'] = 'soft'        # reproduces only as a representation-level verdict now
             tab[cause][x['status']] += 1
             tab[cause]['total'] += 1
             if x['status'] == 'still':
                 still[cause].append((rec['address'], rec['symbol'], (x.get('divergence') or {}).get('kind')))
             elif x['status'] == 'error':
                 errs[(x.get('divergence') or {}).get('error', '')[:60]] += 1
-    print('%-16s %6s %6s %6s %6s' % ('cause', 'total', 'gone', 'still', 'error'))
+    print('%-16s %6s %6s %6s %6s %6s' % ('cause', 'total', 'gone', 'soft', 'still', 'error'))
     for c in sorted(tab, key=lambda c: -tab[c]['total']):
         t = tab[c]
-        print('%-16s %6d %6d %6d %6d' % (c, t['total'], t['gone'], t['still'], t['error']))
+        print('%-16s %6d %6d %6d %6d %6d' % (c, t['total'], t['gone'], t['soft'], t['still'], t['error']))
     print('\nstill reproducing:')
     for c, xs in sorted(still.items()):
         print('  %s: %s' % (c, ', '.join('%s %s (%s)' % (a, s[:40], k) for a, s, k in xs[:5])))
