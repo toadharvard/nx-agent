@@ -111,3 +111,12 @@ NX1-N2-FIX	NX1	9a5390b	9a5390b	confirmed	-	test_nx1_nro.py	check 1: relocations 
 S15S-SL1-FIX	S15-simd	5a03d41	5a03d41	confirmed	-	test_slerp_decomp.py	NaN claim corrected (Slerp, NiBound, matrix product): non-NaN results to the bit, a NaN result a NaN; 199 payload-only differences, none beyond
 S15T-B2-FIX	S15-threads	e04253d	e04253d	confirmed	-	test_budget_built_levers.py	every plan includes the built levers (frame_budget.build adds placed's); mtqemu links again (w32_std_stub.cpp): B1, B2, W1-W3 ok; 40a8d98 fails B2
 GATES-R16-FIX	gates	02272b0	02272b0	confirmed	-	test_ready_fuzz_shards.py	fuzz.coverage per shard, capped: 18/10 + 0/10 fails at 50 %; R16a, R16b, R17 ok
+S15S-XFORM	S15-simd	a931294	a931294	confirmed	-	test_s15simd_decomp.py	UpdateWorldLoc override = the decomp's bodies on 200,000 cases; only NaN sign/payload differs (PERF.md 11.6 any-NaN scope)
+S15S-XFORM-ROW	S15-simd	84d0516	84d0516	confirmed	-	test_s15simd_decomp.py	copy 13/14, compose 47 per call (decomp 221)
+S15S-CULL	S15-simd	a0381d4	a0381d4	confirmed	-	test_s15simd_decomp.py	cull worker and 0x004b6100 bit-identical incl. NaN, d == -r / d == r, r = +-0
+S15S-CULL-PL1	S15-simd	68d0aab	68d0aab	refuted	-	test_s15simd_decomp.py	row says 0x004b6100 is 38 -> 19: 19 only when behind, 21 in front or straddling (+10.5 %); cull 49/67/10 hold (its 224 "before" is 306-433 at 4-6 planes: the gain is understated)
+S15S-SHUF-SH1	S15-simd	e1e16cb	e1e16cb	refuted	-	test_s15simd_shuffle.py	two-source _mm_shuffle_ps as 2 instructions: 0xc4 returned from a noinline function is 3 (early-clobber copy); semantics = x86 for 256 imm x 5 forms incl. NaN
+S15S-QUAT	S15-simd	7c4e9db	7c4e9db	confirmed	-	test_s15simd_decomp.py	FromRotationMatrix override bit-identical incl. NaN and diagonal ties
+S15S-QUAT-ROW	S15-simd	beb2ba6	beb2ba6	confirmed	-	test_s15simd_decomp.py	89 -> 77 per call is the largest-diagonal path (76-77); the trace > 0 path is 34 (decomp 47): the row overstates the cost (note QF1)
+S15S-BOUNDMAT	S15-simd	314a221	314a221	confirmed	-	test_s15simd_decomp.py	NiBound::Update and 0x00a588a0 = the decomp; only NaN sign/payload differs
+S15S-BOUNDMAT-ROW	S15-simd	1c74384	1c74384	confirmed	-	test_s15simd_decomp.py	NiBound 19, mat3 39 per call; the before 46 reproduces without plugins, 52 with the order plugin
