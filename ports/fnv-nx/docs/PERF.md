@@ -1018,3 +1018,14 @@ model's worst-frame factor 1.25 that is 23.3 ms, just above the 22.2 ms of 45 fp
 60 fps at the mid case (10.7 ms). The levers that shorten main's path without a join on it (render F2-F4, relaxed
 barriers, NEON math, overrides) gain their full value. A moved phase gains only when its worker finishes before
 main's share does: split the moved part so that the worker side is the smaller one.
+
+**Worst frame (frame_budget.py).** Overrides now feed the frame model. A hotspot row with a `before` (the decomp's
+measured instructions per call) adds an item `simd_<row>`: (after - before) x calls, on the row's thread and
+subsystem (`apply_overrides`). The items estimate the decomp's code; with --perf, apply_perf prices the after side
+in A57 cycles on top. **Cull reconciled:** the cull item's 2-4.5 M assumed 0.3-1.8 M for the per-object plane
+tests. V1 measured the decomp's test at 306-433 instructions, which is 1.84-8.66 M at 6,000-20,000 objects. The
+measured per-call cost wins. The item is now the rest of the cull (1.7-2.7 M [E]) plus that, 3.54-11.36 M (E+M). The
+number of objects tested per frame stays the open estimate; frameprof on a real frame settles it.
+Worst frame, placed, mid, at 1.02 GHz (--render report.json, --perf perf1 004d29413190): 34.9 ms before; 41.3 ms
+with the cull reconciled and no override counted; 34.3 ms with the overrides (-7.0 ms, most of it the culling
+worker).

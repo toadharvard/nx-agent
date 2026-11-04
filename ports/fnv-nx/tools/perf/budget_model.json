@@ -106,12 +106,13 @@
    "name": "culling (NiCullingProcess, multibounds, occlusion; main, shadow and reflection passes)",
    "role": "main",
    "minsn": [
-    2,
-    4.5
+    3.54,
+    11.36
    ],
-   "basis": "E",
+   "basis": "E+M",
    "phase": "render",
-   "subsystem": "cull"
+   "subsystem": "cull",
+   "note": "reconciled with the fn_cull_test row (S15-simd, J-0150 follow-up): the earlier 2-4.5 M assumed 0.3-1.8 M for the per-object plane tests (50-90 instructions x 6,000-20,000 objects); V1 measured the decomp's per-object test at 306-433 instructions [M], so the item is the rest of the cull (traversal, multibounds, occlusion: 2-4.5 minus 0.3-1.8 = 1.7-2.7 M [E]) plus 306-433 x 6,000-20,000 (1.84-8.66 M, calls [E]). The measured per-call cost wins over the old item total; the call count stays the open estimate"
   },
   {
    "id": "render_accumulation",
@@ -428,7 +429,14 @@
     11.5,
     59.6
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     13,
+     100
+    ],
+    "note": "decomp: copy paths 12-14 [M]; compose 23 + operator* (> 100 counted from the parts, the link leaves it unresolved) [M, lower bound]"
+   }
   },
   {
    "id": "fn_nibound_update",
@@ -494,7 +502,14 @@
     52.4,
     148.0
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     306,
+     433
+    ],
+    "note": "decomp: worker 0x00a694e0 + 4-6 active planes x (getter + classification + loop), V1 tests/v1/test_s15simd_decomp.py [M]"
+   }
   },
   {
    "id": "fn_slerp",
@@ -516,7 +531,14 @@
     180.6,
     233.6
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     134,
+     134
+    ],
+    "note": "decomp: Slerp + weight 0x00a6dc30 + normalisation 0x00a4ff00, override_ab.py on link 0bd144db1464 [M]"
+   }
   },
   {
    "id": "fn_quat_from_matrix",
@@ -538,7 +560,14 @@
     26.3,
     99.7
    ],
-   "per_call_cycles_note": "funcmodel.py on the override: lo = 34 x 0.773 (steady), hi = 77 x 1.295 (one call)"
+   "per_call_cycles_note": "funcmodel.py on the override: lo = 34 x 0.773 (steady), hi = 77 x 1.295 (one call)",
+   "before": {
+    "per_call_insn": [
+     39,
+     89
+    ],
+    "note": "decomp: trace > 0 path ~39 (static path count of the link object), largest-diagonal path 89 (dyncount) [M]"
+   }
   },
   {
    "id": "fn_pass_bucket",
@@ -582,7 +611,14 @@
     635.6,
     826.5
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
+   "before": {
+    "per_call_insn": [
+     579,
+     579
+    ],
+    "note": "decomp with sse2neon unchanged: 292 + 119 + 73 + 95 (dyncount, link 0bd144db1464) [M]"
+   }
   },
   {
    "id": "fn_interlocked",
