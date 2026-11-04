@@ -44,6 +44,8 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, ha
 | `TYPEID1` | neutral | adds `<typeinfo>` only | real `<typeinfo>` |
 | `CSX1` | neutral | drops the decomp's Xbox 360 critical-section size / offset asserts (D15, J-0051); asserts emit no code | as is |
 | `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address; same callee, same bits | as is |
+| `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
+| `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
 | `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
 | `ALLOC1` | platform | drops untagged file-scope replacements of the global operator new/delete; the game's are bound by address | target only |
 | `SDK1` | layout | the PC SDK definitions win over the decomp's guarded copies (Xbox 360 layouts) | real SDK |

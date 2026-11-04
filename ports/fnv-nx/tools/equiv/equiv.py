@@ -68,6 +68,8 @@ CLASSES = {
     'VA1': 'platform',          # MSVC char* va_list -> real va_list
     'FALL1': 'platform',        # __builtin_trap() at fall-off ends (GCC only)
     'DUPINT1': 'neutral',       # one of two integer-only-different prototypes of one address (same callee)
+    'TPL2': 'neutral',          # forward declarations of a namespace's function templates (MSVC's lookup)
+    'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
     'NEW4': 'neutral',          # adds <new> where placement new is used
     'ALLOC1': 'platform',       # drops untagged TU-local replacements of the global operator new/delete
     'FTOL1': 'platform',        # fnvnx_ftol2(expr): neutral with #define fnvnx_ftol2(x) ((__int64)(x)) under MSVC

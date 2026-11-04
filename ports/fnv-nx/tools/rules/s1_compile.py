@@ -695,7 +695,8 @@ def r_unit_renames(path, text, stats):
 
 SPEC_DEF = re.compile(r'^([ \t]*)(template\s*<\s*>\s*)?((?:FNVNX_KEEP\s+)?(?:(?:inline|static|virtual)\s+)*)'
                       r'((?:[\w:<>,\*& \t]+?[\s\*&])?)'                    # return type (none for constructors)
-                      r'(\b[A-Za-z_]\w*)\s*<([^<>;{}()]*(?:<[^<>;{}()]*>[^<>;{}()]*)*)>\s*::\s*(~?\w+)\s*'
+                      r'(\b[A-Za-z_]\w*)\s*<([^<>;{}()]*(?:<[^<>;{}()]*(?:<[^<>;{}()]*>[^<>;{}()]*)*>[^<>;{}()]*)*)>'
+                      r'\s*::\s*(~?\w+)\s*'
                       r'\(([^;{}]*)\)\s*(const\s*)?(?=[{;:])', re.M)
 TEMPLATE_PARAM_LIKE = re.compile(r'^\s*(?:class|typename)\b|^\s*[A-Z]\s*$')
 
@@ -722,7 +723,10 @@ def r_specialization_decls(path, text, stats):
         tmpl, args, member = m.group(5), m.group(6).strip(), m.group(7)
         if tmpl in ('static_cast', 'reinterpret_cast', 'const_cast', 'dynamic_cast'): continue
         if not args or any(TEMPLATE_PARAM_LIKE.match(a) for a in args.split(',')): continue
-        if re.search(r'\btemplate\s*<\s*>\s*(?:class|struct)\s+%s\s*<' % re.escape(tmpl), text): continue
+        squash = lambda x: re.sub(r'\s+', '', x)
+        if any(squash(c) == squash(args) for c in re.findall(
+                r'\btemplate\s*<\s*>\s*(?:class|struct)\s+%s\s*<([^{};]*)>\s*(?::[^{};]*)?\{' % re.escape(tmpl), text)):
+            continue                                                 # this very T<A> is a class specialization
         if spans is None: spans = prepare.scope_spans(text)
         if any(k != 'namespace' for k, _ in prepare.scope_chain(spans, m.start())): continue
         if prepare.scope_chain(spans, m.start()): continue          # file scope only
@@ -730,7 +734,12 @@ def r_specialization_decls(path, text, stats):
         if last.endswith('>') and re.search(r'\btemplate\s*<[^\n]*>$', last): continue   # template <class U> ...
         p0 = _primary_template_end(text[:m.start()], tmpl)
         if p0 is None:
-            incs = [i.end() for i in re.finditer(r'^[ \t]*#[ \t]*include[^\n]*', text[:m.start()], re.M)]
+            # after the file's include preamble (the #includes before its first line of code): later #includes
+            # (DECL1 puts some mid-file) may come after the first use
+            pre = re.match(r'(?:[ \t]*(?:#[^\n]*|//[^\n]*)?\n|[ \t]*/\*.*?\*/[ \t]*\n)*', text[:m.start()], re.S)
+            incs = [i.end() for i in re.finditer(r'^[ \t]*#[ \t]*include[^\n]*', text[:pre.end()], re.M)]
+            if not incs:
+                incs = [i.end() for i in re.finditer(r'^[ \t]*#[ \t]*include[^\n]*', text[:m.start()], re.M)][:1]
             if not incs: continue
             p0 = incs[-1]
         # typedef names in the arguments that the file declares after p0: use what they stand for
@@ -748,7 +757,37 @@ def r_specialization_decls(path, text, stats):
                                                      ' const' if m.group(9) else '', ' FNVNX_KEEP' if keep else '')
         nl = text.find('\n', p0)
         if nl < 0 or nl >= m.start(): continue
-        edits.append((nl + 1, nl + 1, decl + ' /* fnv-nx SPEC1 */ '))
+        # names of the declaration that are not declared yet at that point get a forward declaration when the file
+        # declares them as a class / struct at file scope; otherwise the declaration is not moved
+        fwd, unknown = [], False
+        # + the local headers included before it, transitively
+        seen_text, todo, done = text[:nl], [(path, text[:nl])], set()
+        root = _roots(path)
+        while todo:
+            fpath, ftext = todo.pop()
+            for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', ftext, re.M):
+                f = _resolve(inc, os.path.dirname(fpath), root)
+                if not f or f in done: continue
+                done.add(f)
+                with open(f, encoding='utf-8', errors='surrogateescape') as h: t2 = h.read()
+                seen_text += '\n' + t2
+                todo.append((f, t2))
+        if any(squash(c) == squash(args) for c in re.findall(
+                r'\btemplate\s*<\s*>\s*(?:class|struct)\s+%s\s*<([^{};]*)>\s*(?::[^{};]*)?\{' % re.escape(tmpl), seen_text)):
+            continue                                                 # a class specialization in an included header
+        ptypes = ','.join(re.sub(r'\b[A-Za-z_]\w*\s*$', '', p) if len(re.findall(r'[A-Za-z_]\w*', p)) > 1 else p
+                          for p in _split_args(params))                # parameter names are not types
+        for n in sorted(set(re.findall(r'(?<![\w:])([A-Za-z_]\w*)\b(?!\s*::)', args + ',' + ptypes + ',' + ret))):
+            if n in TPL_PLAIN or n in CXX_WORDS or n == tmpl or re.search(r'\b%s\b' % re.escape(n), seen_text): continue
+            if n in ('FNVNX_KEEP',): continue
+            k = re.search(r'^[ \t]*(class|struct|union)\s+%s\s*[;:{]' % re.escape(n), text, re.M)
+            if not k: unknown = True; break
+            fwd.append('%s %s;' % (k.group(1), n))
+        if unknown: continue
+        for n in set(re.findall(r'(?<![\w:])([A-Za-z_]\w*)\s*::', args + ',' + params + ',' + ret)):
+            if not re.search(r'\b%s\b' % re.escape(n), seen_text): unknown = True
+        if unknown: continue
+        edits.append((nl + 1, nl + 1, ' '.join(fwd + [decl]) + ' /* fnv-nx SPEC1 */ '))
         stats['SPEC1'] += 1
     if not edits: return text
     out, pos = [], 0
@@ -1228,6 +1267,81 @@ def r_global_allocators(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- TPL2
+#
+# MSVC 2008 looks names up when it instantiates a template; GCC binds the non-dependent part at the definition. In the
+# decomp's copies of MSVC's STL, a class template inside namespace N calls `_DestroyS(p)` and N defines its own
+# `_DestroyS` template only further down: GCC finds the global one at the definition and N's through ADL at the
+# instantiation - ambiguous - while MSVC saw only N's (it hides the global one). TPL2 declares such a function template
+# at the start of its namespace block, so ordinary lookup inside N finds N's, as MSVC did. Only templates whose
+# declaration names nothing but their own template parameters and built-in types are moved forward.
+
+TPL_FN_DEF = re.compile(r'^[ \t]*(template\s*<([^<>{};]*)>\s*)((?:inline\s+|static\s+)*)([\w \t\*&:<>,]*?[\s\*&])'
+                        r'([A-Za-z_]\w*)\s*\(([^;{}()]*)\)\s*\{', re.M)
+TPL_PLAIN = set('''const volatile unsigned signed int char short long float double bool void class typename inline static
+    __cdecl __stdcall __thiscall __fastcall size_t'''.split())
+
+def r_namespace_template_decls(path, text, stats):
+    """TPL2: forward-declare a namespace's function templates that its earlier class templates call (see above)."""
+    if 'template' not in text or 'namespace' not in text: return text
+    spans = prepare.scope_spans(text)
+    inserts = []
+    for o, c, k, h in spans:
+        if k != 'namespace' or h == 'namespace': continue
+        block = text[o + 1:c]
+        decls = []
+        for m in TPL_FN_DEF.finditer(block):
+            # top level of this namespace only
+            inner = [sp for sp in spans if o < sp[0] < o + 1 + m.start() < sp[1]]
+            if inner: continue
+            name = m.group(5)
+            if not re.search(r'(?<![\w.>:~])%s\s*\(' % re.escape(name), block[:m.start()]): continue
+            tparams = set(re.findall(r'(?:class|typename)\s+(\w+)', m.group(2)))
+            words = set(re.findall(r'[A-Za-z_]\w*', m.group(4) + ' ' + m.group(6)))
+            params = _split_args(m.group(6))
+            pnames = set()
+            for p in params:
+                ids = re.findall(r'[A-Za-z_]\w*', p)
+                if len(ids) > 1: pnames.add(ids[-1])
+            if words - tparams - TPL_PLAIN - pnames: continue
+            decls.append('%s%s%s%s(%s);' % (m.group(1), m.group(3), m.group(4), name, m.group(6)))
+        if decls:
+            inserts.append((o + 1, ' ' + ' '.join(decls) + ' /* fnv-nx TPL2 */ '))
+            stats['TPL2'] += len(decls)
+    if not inserts: return text
+    out, pos = [], 0
+    for at, s in sorted(inserts):
+        out.append(text[pos:at]); out.append(s); pos = at
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- MATH1
+
+MATH_OVERLOAD_DEF = re.compile(
+    r'^[ \t]*(?:inline|__inline|__forceinline)\s+(?:float|long\s+double|double)\s+(?:__cdecl\s+)?'
+    r'(abs|fabs|sqrt|sin|cos|tan|asin|acos|atan|atan2|exp|log|log10|pow|floor|ceil|fmod|modf|frexp|ldexp|sinh|cosh|'
+    r'tanh)\s*\(([^;{}()]*)\)\s*\{', re.M)
+
+def r_math_overloads(path, text, stats):
+    """MATH1: drop the decomp's copies of MSVC <math.h>'s C++ overloads (`inline float sqrt(float _X)
+    { return sqrtf(_X); }`, also long double and the double (int) forms) at file scope; the target's <math.h> defines
+    the same overloads (std::sqrt(float) brought to the global namespace), so the copy is a redefinition and its calls
+    ambiguous. The header takes the place of the first one."""
+    if 'inline' not in text and '__forceinline' not in text: return text
+    spans, out, pos, have = None, [], 0, False
+    for m in MATH_OVERLOAD_DEF.finditer(text):
+        if m.start() < pos: continue
+        if spans is None: spans = prepare.scope_spans(text)
+        if any(k not in ('extern',) or '"C"' in h for k, h in prepare.scope_chain(spans, m.start())): continue
+        end = prepare.match_brace(text, m.end() - 1)
+        nl = '\n' * text.count('\n', m.start(), end)
+        out.append(text[pos:m.start()])
+        out.append(('/* fnv-nx MATH1 */' if have else '#include <math.h> /* fnv-nx MATH1 */') + nl)
+        have, pos = True, end
+        stats['MATH1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -1247,5 +1361,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_falloff_traps,
+RULES = [r_unit_renames, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_math_overloads, r_falloff_traps,
          r_msvc_base_layout]
