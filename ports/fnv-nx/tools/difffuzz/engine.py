@@ -54,6 +54,15 @@ class UnitCache:
             self.by_source.setdefault(u['source'], []).append((i, u))
             for f in u['functions']:
                 self.def_at.setdefault(int(f['address'], 16), (u['source'], f['symbol']))
+        # the candidate tree's declarations: per-site patches (S1b XINC1) correct a definition's signature to what
+        # the binary really does (e.g. a `void f(void)` that reads ecx = this); that corrected declaration places the
+        # arguments on BOTH machines
+        self.tree_def = {}
+        tj = config.TREE / 'build/units.json'
+        if tj.exists():
+            for u in json.load(open(tj))['units']:
+                for f in u['functions']:
+                    self.tree_def.setdefault(int(f['address'], 16), f['symbol'])
         self._x86, self._img, self._pin, self._callee = {}, {}, {}, {}
         self._refmap = None
         self._vrows = None
@@ -117,7 +126,9 @@ class UnitCache:
             key = (source, addr)
             if key not in self._callee:
                 got = None
-                for src, name in ((self.def_at.get(addr) or (None, None)), (source, refs.get(addr))):
+                dsrc = (self.def_at.get(addr) or (source, None))[0]
+                for src, name in ((dsrc, self.tree_def.get(addr)), (self.def_at.get(addr) or (None, None)),
+                                  (source, refs.get(addr))):
                     if not name:
                         continue
                     try:
@@ -146,7 +157,11 @@ class UnitCache:
         fn = xu.funcs[orig_addr]
         if fn['unresolved']:
             raise ValueError('unresolved x86 relocations: %s' % ','.join(n for _, _, n in fn['unresolved'][:4]))
-        cv = convmod.Conv(fn['symbol'], source)
+        name = self.tree_def.get(orig_addr, fn['symbol'])
+        try:
+            cv = convmod.Conv(name, source)
+        except convmod.Unsupported:
+            cv = convmod.Conv(fn['symbol'], source)
         img = self.arm_image(source)
         if not any(o == orig_addr for o in img.entries.values()):
             raise KeyError('no native entry for %08x' % orig_addr)
