@@ -9,7 +9,8 @@ hand-made MSVC-style COFF objects (no decomp content). Each check gets planted v
   rtti       a complete COL -> TD -> CHD -> BCA -> BCD chain; a COL naming another class's TypeDescriptor; the same
              CHD with another hierarchy and the same COL spelled struct in another object; TDs at one address
              spelled class/struct (majority); a TD whose vptr names type_info's vftable that no object defines;
-             a literal ending on a vftable's [-1] word (no COL there in the original)
+             a literal ending on a vftable's [-1] word (no COL there in the original): an S3 hint, and the
+             verdicts of loader/tools/check_hints.py
   overlaps   two __real@ constants at one address (contested: 0 in the shell), a .bss int over a literal
   strings    $SG literals of 4 characters (terminator after the last word: the J-0062 bug), of 2 characters
              and UTF-16
@@ -156,7 +157,7 @@ class ChecksTest(unittest.TestCase):
         rc = synth_image.main(['--units', p('units.json'), '--objdir', p('obj'), '--imports', p('imports.tsv'),
                                '--addrmap', p('addrmap.tsv'), '--checks', p('checks.json'),
                                '--violations', p('violations.tsv'), '--state-out', p('state.bin'),
-                               '--report', p('r.json'), '--out', p('s.exe')])
+                               '--report', p('r.json'), '--out', p('s.exe'), '--hints-out', p('hints.txt')])
         assert rc == 0
         with open(p('checks.json')) as f:
             cls.c = json.load(f)
@@ -269,6 +270,25 @@ class ChecksTest(unittest.TestCase):
         g = {x['label']: x for x in self.r['boot_globals']}
         self.assertIn('run-once flag of FUN_00aa3050', g)
         self.assertEqual(g['run-once flag of FUN_00aa3050']['state'], '-')
+
+    def test_colless_hints(self):
+        """S3 hints for vftables without a COL (Qux: its [-1] word is the literal's NUL), and their verdicts"""
+        with open(os.path.join(self.tmp, 'hints.txt')) as f:
+            lines = f.read().splitlines()
+        self.assertEqual([x for x in lines if not x.startswith('#')], ['0x%08x' % VT_QUX])
+        self.assertTrue(any('??_7Qux@@6B@' in x and LIT2 in x for x in lines if x.startswith('#')))
+        self.assertEqual(self.r['hints'], 1)
+        sys.path.insert(0, os.path.join(ROOT, 'loader', 'tools'))
+        import check_hints
+        import fnvnx_pe
+        with open(os.path.join(self.tmp, 's.exe'), 'rb') as f:
+            img = fnvnx_pe.Image(fnvnx_pe.PE(f.read()))
+        from fnvnx_formats import AddrMap
+        amap = AddrMap.read_s2_tsv(os.path.join(self.tmp, 'addrmap.tsv'))
+        v = {h: verdict for h, verdict, _ in check_hints.verdicts(img, [VT_QUX, VT_BAR, LIT_VA, TX], amap)}
+        self.assertEqual(v, {VT_QUX: 'colless', VT_BAR: 'colless', LIT_VA: 'not-code', TX: 'outside'})
+        # without the map "xyz\0" (0x0078797a) looks like a .text address: why --s2-addrmap is recommended
+        self.assertEqual(check_hints.verdicts(img, [LIT_VA])[0][1], 'colless')
 
     def test_kinds_table(self):
         for k, (viol, owner, meaning) in synth_checks.KINDS.items():

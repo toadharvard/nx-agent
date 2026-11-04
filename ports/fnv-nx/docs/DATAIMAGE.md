@@ -109,6 +109,66 @@ implemented); compare the runtime list with the offline one (the tests require t
 and counted unresolved at apply time; elsewhere it is `unknown`. The largest group is expected to be compiler
 generated scalar/vector deleting destructors: 183 `??_G` are defined, while every polymorphic class has one.
 
+### Scan cost
+
+S15 measured the scan as 737 M of the 762 M instructions the boot runs up to InitHolder, about 0.9 s on the device
+(J-0076). It looked up each of the window's 676 k words five times in the sorted exclusion ranges (`eligible_in`, twice
+per word in each of the two COL passes, once in the main pass) and searched the 62 k-entry code map for every
+non-`.text` word (the vptr test). The scan now builds per call, with the same answers:
+
+* an **eligibility bitmap** per mapping: bounds, exclusion ranges (sorted and merged by
+  `fnvnx_collect_exclusions`, so a word is excluded exactly when a range has `lo < w + 4` and `hi > w`; checked,
+  else the binary searches answer) and, in `.reloc` mode, the relocated words; the main pass visits the set bits
+  32 at a time;
+* a **two-level index** over the code map and over the vftable starts: buckets are address pages (1 KiB for S2's
+  map, at most 64 Ki of them), each pointing at its first record, then a binary search inside the bucket;
+* a **running cursor** for the vftable holding the current word (the vftables are sorted, non-empty and disjoint;
+  checked);
+* **zero blocks**: when 0 is neither a `.text` address nor (after relocation) an image vftable in the map, a zero
+  word yields nothing, so 128 zero bytes are skipped at once in the COL search and the main pass;
+* one COL pass instead of two (the candidate list grows by doubling).
+
+Missing memory, unsorted keys or odd mappings fall back to the plain searches; `FNVNX_SCAN_NO_INDEX` (loadcheck
+`--no-index`) forces them. **Same output:** tests/s3 checks the indexed scan against the Python scanner and against
+`--no-index` on every configuration, and the S14 synth image with S2c's f12 map gives byte-identical fixup lists and
+statistics before and after (no hints; the 40 COL-less hints below; all 2,333 vftables the decomp names: 265
+vftables, 967 slots). **Measured** with `tools/perf/frameprof.py` on `loader/bench/` (S3's load sequence as an ILP32
+guest under S5's emulator, the boot's calls: scan to count, scan to fill, apply), same image and map:
+
+| | before | after |
+|---|---:|---:|
+| one `fnvnx_scan_codeptrs` call | 367.1 M (`eligible_in` 191.4 M, `fnvnx_codemap_find` 132.9 M) | 17.4 M |
+| the boot's two calls | 734.3 M (S15's boot profile: 737.4 M) | 34.8 M (about 43 ms at IPC 0.8) |
+
+A real exe has fewer zero words than the synth image (about 82 % zero), so expect more there, but the same order of
+magnitude. The boot still scans twice (count, then fill); one call with a large enough buffer would halve it (S5).
+
+### COL-less vftables
+
+Gamebryo and BSShader classes are built without C++ RTTI in the original, so their vftables have no COL at `[-1]`.
+S14's data checks show this for 45 vftable names at 40 addresses: the word before the vftable holds the end of the
+preceding literal or float (`rtti:col-word-other-item`, see the synthetic image section). S3's COL search cannot find
+these vftables. Without hints their slots are found only as `run`s (medium confidence) or `isolated` words (low,
+not applied), and a neighbouring vftable is not cut off from them.
+
+`synth_image.py ... --checks C --hints-out hints.txt` writes these addresses as S3 hints, one original VA per line
+with the evidence in `#` lines. The list is derived from the decomp, so it stays local. Hints reach the scan through
+`fnvnx_scan_opts.vtable_hints` or loadcheck `--hints`. A hint is accepted only if its first word is a `.text` address
+and eligible, so a wrong hint cannot add a fixup that would not be found anyway. **To be confirmed on the player's
+exe:** `loader/tools/check_hints.py FalloutNV.exe hints.txt --s2-addrmap out/addrmap.tsv` gives one verdict per hint:
+
+| Verdict | Meaning |
+|---|---|
+| `colless` | the hint is needed |
+| `has-col` | the class has RTTI after all |
+| `col-at-plus4` | the decomp's `??_7` is 4 too low |
+| `not-code` | not a vftable here: drop the hint |
+| `outside` | not in a mapped data section |
+
+On the synth image all 40 are `not-code`, because their slots have no address there. The boot does not pass hints yet
+(`toolchain/game/boot.cpp`: `opts = NULL`); S5 would read them from `sdmc:/fnvnx/game/vtable_hints.txt`, written next
+to the exe by the build.
+
 ## Steam executable
 
 The player's game is most likely the Steam release, whose `FalloutNV.exe` is wrapped by SteamStub: a `.bind`
@@ -276,7 +336,8 @@ the image is not accounted for) and checks:
 * the Python scanner gives exactly the list the generator built, with hints, without hints (the hint-only vftable then
   runs on in its neighbour), and with `.reloc` (exact mode);
 * the C runtime scanner writes a byte-identical fixup list and the same statistics, at the original base and moved
-  by `0x01c00000` with relocations applied;
+  by `0x01c00000` with relocations applied, and the same again with its index switched off (`--no-index`, the plain
+  searches; see "Scan cost");
 * after the whole pipeline (`loader/host/loadcheck`): every fixed word holds its native value (trap values with
   `--trap`), rejected words are untouched, IAT and delay IAT are bound, data-to-data pointers still reach their
   strings, `.bss` and the `.data` tail are zero, `.tls` holds its template, `.text` and `.reloc` are not mapped,
@@ -389,7 +450,8 @@ not 14 as the decomp's comment says, and NiStandardAllocator's at `0x010a24fc` a
 
 **Tests** (`tests/s14/`, hand-made COFF objects, no decomp content): `test_synth.py` (placement, relocations,
 ranks, `$SG` shift, sections, PE shell and imports; the C loader with `FNVNX_LOADCHECK`), `test_checks.py` (every
-check with planted violations; with `FNVNX_S14_RUN=<output dir>` also a real run: no violation owned by S14),
+check with planted violations, the COL-less hints and `check_hints.py`'s verdicts; with `FNVNX_S14_RUN=<output dir>`
+also a real run: no violation owned by S14),
 `boot_compare.py` (S5's emulated boot on the zero, prefilled and PE images).
 
 ## Open risks

@@ -412,6 +412,7 @@ def rel_at(it, o):
 def check_rtti(img, distinct, every_item, names):
     """every_item: placed and unplaced items of all objects (phase 1 items + unplaced)"""
     r = Result('rtti')
+    r.colless = []         # (vftable VA, its name, the item holding its [-1] word, that item's unit)
     by_unit = {}
     for it in every_item:
         if it.name.startswith('??_R'):
@@ -454,6 +455,7 @@ def check_rtti(img, distinct, every_item, names):
             o2 = distinct[img.win[cw]]
             r.add('rtti:col-word-other-item', where, '%s %s (u%d) holds 0x%08x' % (
                 h(o2.addr), o2.name[:50], o2.unit, img.word(cw + WIN_LO) or 0))
+            r.colless.append((it.addr + it.soff, it.name, o2.name, o2.unit))
         col = by_unit.get((it.unit, col_rel[2]))
         if col is None:
             r.add('rtti:chd-broken', where, 'COL %s not in the object' % col_rel[2])
@@ -649,6 +651,25 @@ def run_all(img, distinct, every_item, sec, names, conflicts, codemap):
     out['violations_by_owner'] = dict(collections.Counter(
         KINDS[k][1] for x in res for k, _, _ in x.violations))
     return out, res
+
+
+def write_hints(path, results):
+    """S3 vftable hints (loader/host/loadcheck --hints, fnvnx_scan_opts.vtable_hints): the vftables whose [-1]
+    word the image gives to the preceding item, i.e. classes without a COL in the original (built without C++
+    RTTI), which S3's COL search cannot find. One original VA per line, sorted; '#' lines name the evidence.
+    Decomp-derived: local only. Confirm on the player's exe with loader/tools/check_hints.py."""
+    rows = {}
+    for x in results:
+        for va, name, holder, unit in getattr(x, 'colless', ()):
+            rows.setdefault(va, []).append('%s ([-1] is the end of %s, u%d)' % (name, holder, unit))
+    with open(path, 'w') as f:
+        f.write('# fnvnx vftable hints: COL-less vftables (synth_checks rtti:col-word-other-item), %d\n' % len(rows))
+        for va in sorted(rows):
+            for why in rows[va]:
+                f.write('# 0x%08x %s\n' % (va, why))
+        for va in sorted(rows):
+            f.write('0x%08x\n' % va)
+    return len(rows)
 
 
 def write_violations(path, results):

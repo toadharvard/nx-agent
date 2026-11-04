@@ -1317,6 +1317,7 @@ def main(argv=None):
                                       '(default: the functions units.json defines)')
     ap.add_argument('--checks', help='self-consistency checks (synth_checks.py) as JSON')
     ap.add_argument('--violations', help='every check violation as TSV (check, kind, owner, where, detail)')
+    ap.add_argument('--hints-out', help='S3 vftable hints for the COL-less vftables the checks find (needs the checks)')
     a = ap.parse_args(argv)
     t0 = time.time()
     with open(a.units) as f:
@@ -1374,7 +1375,7 @@ def main(argv=None):
     report['boot_globals'] = explain(img, distinct, sec, iat_range, ref, BOOT_GLOBALS, cls, ph1['refs'], names)
     check_probes(units, img, report)
     check_vftables(distinct, names, report)
-    if a.checks or a.violations:
+    if a.checks or a.violations or a.hints_out:
         import synth_checks
         codemap = synth_checks.load_addrmap(a.addrmap) if a.addrmap else {f: 'F' for f in names.funcs}
         checks, results = synth_checks.run_all(img, distinct, ph1['items'] + ph1['unplaced'], sec, names,
@@ -1386,6 +1387,8 @@ def main(argv=None):
                 json.dump(checks, f, indent=1)
         if a.violations:
             synth_checks.write_violations(a.violations, results)
+        if a.hints_out:
+            report['hints'] = synth_checks.write_hints(a.hints_out, results)
     report['conflicts'] = [dict(addr='0x%08x' % c[0].addr, a=c[0].name, a_unit=c[0].unit, a_src=c[0].src,
                                 b_addr='0x%08x' % c[1].addr, b=c[1].name, b_unit=c[1].unit, b_src=c[1].src,
                                 agree=c[2], differ=c[3]) for c in conflicts[:200]]
