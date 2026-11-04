@@ -1,7 +1,7 @@
 // fnv-nx native renderer: the translated path (RENDER_NATIVE.md §4.5, nx::Family::Translated).
 // The game's own VS/PS of a pass, translated by S6b's sdp2dksh at install/build time from the player's shader
 // packages and packed into translated.nxsp (render/native/tools/nxsp_pack.py), which the console loads at run time
-// from fnvshd:/translated.nxsp: every program as precompiled DKSH, indexed by its bytecode hash (fnvnx_shader_hash).
+// from sdmc:/switch/fnv/translated.nxsp (FNVNX_SD_TRANSLATED; game-derived, never in the RomFS): every program as precompiled DKSH, indexed by its bytecode hash (fnvnx_shader_hash).
 // No shader is compiled on the console; a program without DKSH is a skipped draw, never a compile. Host / emulator
 // packs (--glsl) also carry each program's GLSL for the GL reference backend. Game-derived: never in the repository.
 // Constants follow the translator's layout contract (render/shaders/include/fnvnx_dk_layout.h): per stage UBO 0 =
