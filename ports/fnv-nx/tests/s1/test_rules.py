@@ -354,6 +354,29 @@ check('DECL1 drops a CRT prototype that ends in a // comment',
 check('SSE1 elaborated __m128 references',
       prepare.r_sse_local_types('x.cpp', 'typedef union __m128 hkQuadReal;\nvoid f(struct __m128* p);\n', Counter()),
       ['typedef __m128 hkQuadReal;', 'void f(__m128* p);'])
+got = prepare.r_sse_local_types('x.cpp', 'union __declspec(intrin_type) __declspec(align(16)) __m128\n{\n    struct\n    {\n'
+                                '        float x, y, z, w;\n    } lanes;\n};\nfloat f(__m128 v, __m128* p) { return v.lanes.x '
+                                '+ p->lanes . w + g(v).lanes.y; }\n', Counter())
+check('SSE1 named lane struct of a removed local __m128: v.lanes.x -> element access', got,
+      ['((float*)&(v))[0] + ((float*)(p))[3] + ((float*)&(g(v)))[1]; }'], ['lanes'])
+got = prepare.r_sse_local_types('x.cpp', 'union __declspec(intrin_type) __m128\n{\n    struct { float x, y, z, w; } lanes;\n};\n'
+                                'struct Q { int lanes; };\nfloat f(__m128 v) { return v.lanes.x; }\n', Counter())
+check('SSE1 lane struct: left alone when the unit declares another member of that name', got, ['v.lanes.x'])
+check('SSE2 drops `T(_mm_x)(...)` prototypes (no space before the parenthesized name)',
+      prepare.r_sse_local_protos('x.cpp', 'namespace P {\nextern "C"\n{\n    ::__m128(_mm_load_ss)(const float* p);\n'
+                                 '    ::__m128(_mm_sub_ps)(::__m128 a, ::__m128 b);\n}\n}\n', Counter()),
+      ['namespace P {\n\n}'], ['_mm_load_ss', 'extern'])
+got = prepare.r_sse_local_protos('x.cpp', 'int a;\nstatic __m128 _mm_set1_ps(const float& f) {__m128 a=_mm_load_ss(&f);\n'
+                                  'return _mm_shuffle_ps(a,a,0);}\nstruct S { __m128 _mm_x(int) { return 0; } };\nint b;\n',
+                                  Counter())
+check('SSE2 drops a local intrinsic definition at namespace scope, same line count', got,
+      ['int a;\n/* fnv-nx SSE2: local intrinsic definition removed */\n\nstruct S { __m128 _mm_x(int) { return 0; } };'],
+      ['_mm_set1_ps'])
+check('SSE4 (_mm_x)( after a name keeps them apart',
+      prepare.r_sse_qualified('x.cpp', 'T(_mm_load_ss)(p); f((_mm_add_ps)(a, b));\n', Counter()),
+      ['T _mm_load_ss(p); f(_mm_add_ps(a, b));'])
+check('FALL1 _CRT_ALIGN(16) in a union head is a class head, not a function',
+      run(s1.r_falloff_traps, 'typedef union __declspec(intrin_type) _CRT_ALIGN(16) Q\n{\n    float f[4];\n} Q;\n'), (), [TRAP])
 check('SSE1 qualified elaborated __m128 references (`union ::__m128`)',
       prepare.r_sse_local_types('x.cpp', 'typedef union ::__m128 hkQuadReal;\nunion :: __m128;\nvoid f(struct N::__m128i* p);\n'
                                 'union __m128_like { int a; };\n', Counter()),

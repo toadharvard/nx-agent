@@ -52,19 +52,45 @@ INTRIN_UNION = re.compile(r'(?:typedef\s+)?(?:union|struct)\s+(?:__declspec\([^)
 INTRIN_ELABORATED = re.compile(r'\b(?:union|struct)\s+(?:::\s*)?(?:\w+\s*::\s*)*(__m128[id]?|__m64)\b(?!\s*\{)(?=\s*[\w\*&;,)])')
 INTRIN_ELAB_HINT = re.compile(r'\b(?:union|struct)\s+(?:::\s*)?(?:\w+\s*::\s*)*__m')
 
+# a named struct of four lanes inside a local copy, and the element types it may use
+NAMED_LANES = re.compile(r'\bstruct\s*\{([^{}]*)\}\s*(\w+)\s*;')
+LANE_DECL = re.compile(r'((?:unsigned\s+|signed\s+)?(?:float|double|int|__int32|unsigned|long))\s+([\w\s,]+?)\s*;')
+LANE_ELEM = {'float': 'float', 'int': 'int', '__int32': 'int', 'unsigned int': 'unsigned int', 'unsigned': 'unsigned int',
+             'unsigned __int32': 'unsigned int', 'long': 'int'}
+
 def r_sse_local_types(path, text, stats):
     """SSE1: drop local copies of the MSVC <xmmintrin.h> vector unions (or structs); the global sse2neon type is used
     instead."""
-    out, pos = [], 0
+    out, pos, lanes = [], 0, {}
     for m in INTRIN_UNION.finditer(text):
         if m.start() < pos: continue
         end = match_brace(text, m.end() - 1)
+        for fields, name in NAMED_LANES.findall(text[m.end():end - 1]):     # `struct { float x, y, z, w; } lanes;`
+            decl = [(ty, f) for ty, fs in LANE_DECL.findall(fields) for f in re.split(r'\s*,\s*', fs.strip())]
+            if len(decl) == 4 and all(LANE_ELEM.get(re.sub(r'\s+', ' ', ty)) for ty, _ in decl):
+                lanes[name] = {f: (LANE_ELEM[re.sub(r'\s+', ' ', ty)], i) for i, (ty, f) in enumerate(decl)}
         tail = re.match(r'\s*(?:__m128[id]?|__m64)?\s*;', text[end:])
         if tail: end += tail.end()
         out.append(text[pos:m.start()]); out.append('/* fnv-nx SSE1: local %s removed */' % m.group(1)); pos = end
         stats['SSE1'] += 1
     out.append(text[pos:])
     text = ''.join(out)
+    # members of a named lane struct of the removed copy (`v.lanes.x`, `p->lanes.y`) -> element access as in SSE3,
+    # when nothing else in the unit declares a member of that name
+    for name, fields in lanes.items():
+        if re.search(r'\b%s\s*(?:\[[^\]]*\]\s*)?[;,=]' % re.escape(name), text): continue
+        rx = re.compile(r'\s*(\.|->)\s*%s\s*\.\s*(%s)\b' % (re.escape(name), '|'.join(map(re.escape, fields))))
+        out, pos = [], 0
+        for m in rx.finditer(text):
+            s = operand_start(text, m.start())
+            if s >= m.start() or s < pos: continue
+            ty, i = fields[m.group(2)]
+            out.append(text[pos:s])
+            out.append('((%s*)%s(%s))[%d]' % (ty, '&' if m.group(1) == '.' else '', text[s:m.start()].strip(), i))
+            pos = m.end()
+            stats['SSE1'] += 1
+        out.append(text[pos:])
+        text = ''.join(out)
     # elaborated references to those types (`typedef union __m128 hkQuadReal;`): the global type is a typedef
     if INTRIN_ELAB_HINT.search(text):
         text, n0 = re.subn(r'\b(?:union|struct)\s+(?:::\s*)?(?:\w+\s*::\s*)*(?:__m128[id]?|__m64)\s*;', '', text)   # forward declarations
@@ -83,14 +109,31 @@ def r_sse_local_types(path, text, stats):
 # (the return type may be the decomp's own name for __m128: `hkQuadReal _mm_load_ps(const float*);`)
 MM_PROTO = re.compile(r'(?:^|(?<=[;{}]))[ \t]*(?:extern\s*(?:"C"\s*)?)?(?:static\s+)?(?:inline\s+)?(?:const\s+)?(?:::)?(?:\w+::)*'
                       r'(?:__m128[id]?|__m64|float|double|int|unsigned\s+int|void|'
-                      r'(?!(?:return|else|case|throw|goto|delete|new|typedef|using|operator|sizeof)\b)[A-Za-z_]\w*)\s+'
-                      r'(?:__cdecl\s+)?(?:_mm_\w+|\(\s*_mm_\w+\s*\))\s*\([^;{)]*\)\s*;[ \t]*', re.M)   # also `(_mm_load_ps)(...)`
+                      r'(?!(?:return|else|case|throw|goto|delete|new|typedef|using|operator|sizeof)\b)[A-Za-z_]\w*)'
+                      r'(?:\s+(?:__cdecl\s+)?(?:_mm_\w+|\(\s*_mm_\w+\s*\))|\s*\(\s*_mm_\w+\s*\))'     # also `(_mm_load_ps)(...)`,
+                      r'\s*\([^;{)]*\)\s*;[ \t]*', re.M)                                      # `::__m128(_mm_load_ss)(...)`
 EXTERN_C_BLOCK = re.compile(r'extern\s+"C"\s*\{')
+# a local definition of an intrinsic (`static __m128 _mm_set1_ps(const float& f) {...}`, hkgpmesh): the target's
+# intrinsic (sse2neon) is the same operation, and both overloads together are ambiguous
+MM_DEF = re.compile(r'(?:^|(?<=[;{}]))[ \t]*(?:(?:static|inline|__inline|__forceinline)\s+)*(?:const\s+)?(?:::)?'
+                    r'(?:__m128[id]?|__m64|float|double|int|void)\s+(?:__cdecl\s+)?_mm_\w+\s*\([^;{)]*\)\s*\{', re.M)
 
 def r_sse_local_protos(path, text, stats):
-    """SSE2: drop local prototypes of _mm_* intrinsics (and extern "C" blocks left empty by that)."""
+    """SSE2: drop local prototypes of _mm_* intrinsics (and extern "C" blocks left empty by that), and local
+    definitions of them at namespace scope (same line count)."""
     text, n = MM_PROTO.subn('', text)
     stats['SSE2'] += n
+    if MM_DEF.search(text):
+        spans, out, pos = scope_map(text), [], 0
+        for m in MM_DEF.finditer(text):
+            if m.start() < pos or innermost(spans, m.end() - 1) not in ('file', 'namespace', 'extern'): continue
+            end = match_brace(text, m.end() - 1)
+            out.append(text[pos:m.start()])
+            out.append('/* fnv-nx SSE2: local intrinsic definition removed */' + '\n' * text.count('\n', m.start(), end))
+            pos = end
+            stats['SSE2'] += 1
+        out.append(text[pos:])
+        text = ''.join(out)
     out, pos = [], 0
     for m in EXTERN_C_BLOCK.finditer(text):
         if m.start() < pos: continue
@@ -172,7 +215,7 @@ def r_sse_members(path, text, stats):
 QUALIFIED_SSE = re.compile(r'\b(?:\w+::)+(?=(?:__m128[id]?|__m64|_mm_\w+)\b)')
 
 GLOBAL_SSE = re.compile(r'(?<![\w>)\]:])::\s*(?=(?:__m128[id]?|__m64|_mm_\w+)\b)')
-PAREN_SSE = re.compile(r'\(\s*(_mm_\w+)\s*\)\s*\(')
+PAREN_SSE = re.compile(r'(\w)?\(\s*(_mm_\w+)\s*\)\s*\(')
 # (also unqualified: `using ::_mm_add_ps;` the decomp wrote, or the same without `::`; sse2neon's macros have no name)
 USING_SSE = re.compile(r'\busing\s+(?:::)?(?:\w+::)*(?:__m128[id]?|__m64|_mm_\w+)\s*;')
 
@@ -185,7 +228,8 @@ def r_sse_qualified(path, text, stats):
     stats['SSE4'] += n
     text, n = GLOBAL_SSE.subn('', text)       # ::_mm_shuffle_ps(...) - sse2neon defines some as macros
     stats['SSE4'] += n
-    text, n = PAREN_SSE.subn(r'\1(', text)    # (_mm_shuffle_ps)(a, b, i) suppresses the macro
+    # (_mm_shuffle_ps)(a, b, i) suppresses the macro; a name in front stays apart (`T(_mm_f)(..)` -> `T _mm_f(..)`)
+    text, n = PAREN_SSE.subn(lambda m: (m.group(1) + ' ' if m.group(1) else '') + m.group(2) + '(', text)
     stats['SSE4'] += n
     return text
 
@@ -194,7 +238,7 @@ def r_sse_qualified(path, text, stats):
 # comments and preprocessor lines before a '{' say nothing about it ('// end namespace X', '#pragma pack(push, 4)')
 HEAD_NOISE = re.compile(r'//[^\n]*|/\*.*?\*/|^[ \t]*#[^\n]*', re.S | re.M)
 # parenthesized decorations of a class head: __declspec(align(16)), __attribute__((x)), FNV_ALIGN(16), alignas(16)
-HEAD_DECOR = re.compile(r'\b(?:__declspec|__attribute__|alignas|[A-Z][A-Z0-9_]*ALIGN[A-Z0-9_]*)\s*'
+HEAD_DECOR = re.compile(r'\b(?:__declspec|__attribute__|alignas|_*[A-Z][A-Z0-9_]*ALIGN[A-Z0-9_]*)\s*'
                         r'\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)')
 TEMPLATE_PREFIX = re.compile(r'^\s*template\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>\s*')
 

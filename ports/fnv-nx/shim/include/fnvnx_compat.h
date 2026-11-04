@@ -173,6 +173,10 @@ template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribu
 #define __fnvnx_ds_intrin_type
 #define __fnvnx_ds_property(...)
 #define __fnvnx_ds_uuid(...)
+/* MSVC <crtdefs.h>: _CRT_ALIGN(x) is __declspec(align(x)) (a local copy of the __m128 union uses it) */
+#ifndef _CRT_ALIGN
+#define _CRT_ALIGN(x) __attribute__((aligned(x)))
+#endif
 
 /* Compiler-runtime helpers the decomp calls without declaring them in every unit (prepare.py DECL1 drops its own
  * unsigned-int prototypes of operator_delete_sized). */
