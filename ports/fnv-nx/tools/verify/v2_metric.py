@@ -112,9 +112,11 @@ def v1_branch_rows(ref):
 
 
 def merged_set(rows):
+    """Hashes the ledger verifies: every row's merged commits, and a fixed row's fix commit (re-run with its test)."""
     seen = set()
     for r in rows:
-        for h in r['merged'].split(','):
+        hs = r['merged'].split(',') + ([r['fix']] if r.get('verdict') == 'fixed' and r.get('fix', '-') != '-' else [])
+        for h in hs:
             if h != '-':
                 try:
                     seen.add(v1.git('rev-parse', '--short=7', h + '^{commit}').strip())
