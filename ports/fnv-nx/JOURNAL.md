@@ -1545,3 +1545,44 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   so artifacts use branches.
 * **next** - S2c/S9 link from farm objects. Farm jobs for full build+boot (S9), whole-decomp fuzzing (S13) and the
   MSVC gate (S11).
+
+### J-0076 | 2026-11-04 | stream: S15-perf | status: wip | parent: J-0018,J-0064
+
+* **did**:
+  - New `docs/PERF.md` and `tools/perf/`: objcensus, flagdiff, dyncount, frameprof, setting_names.
+    tests/s15 passes (orchestrator re-ran it: 0 failed).
+  - Static census of f12's 3,497 objects; 11 flag variants on 10 hot units.
+  - Dynamic counts, x86 oracle vs AArch64, on 23 hot functions through S13's harness.
+  - frameprof of the boot up to InitHolder.
+  - Console threading audit from the decomp and the platform layer.
+* **found**:
+  - **Every game thread and Nine's CSMT worker run on core 0.** CreateThread passes core -1, which becomes -2, a
+    one-core mask. The CSMT worker is a libnx pthread at priority 0x3B. So frame time is the sum of all threads,
+    not their max.
+  - SetThreadPriority and affinity on another thread's handle fail in the guest.
+  - `fs:[0x2c]` and `__fnvnx_tls_image` are separate TLS blocks, so 13 sites see two copies.
+  - Threading paths:
+    - The AI linear task threads (int 0x011c3ea4, likely `iNumHWThreads`, set from GetSystemInfo, at least 2) are
+      the PC default path.
+    - AI task threads (0x011dfb68) and Rendering Task Thread 2 (0x011c710c) are Xbox 360 paths, off on PC.
+  - **Instruction count is not where we lose time:** AArch64 code executes 0.92x the x86 instructions.
+  - **Our own overhead:**
+    - Ubuntu gcc 13's default stack protector covers 9.4 % of functions; without it, hot units have 4.73 % fewer
+      instructions.
+    - GOT loads: 4.66 per 100 instructions; ld does not relax them.
+    - Bridges: 1.1 % of call sites.
+    - sse2neon: under 1 %.
+  - **Boot:** S3's code-pointer scan is 737 of the 762 M instructions to InitHolder, about 0.9 s on the device.
+  - **Draw submission** (estimate): 2.6-7.5 k main-thread instructions per draw, plus 3-10 k on the CSMT worker.
+    The main-thread budget is about 27 M instructions per frame at 30 fps.
+* **decided** - compile.sh now uses `-march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector
+  -fno-stack-clash-protection -mno-outline-atomics`. These are code-generation flags only, not semantics flags.
+  All objects rebuild once.
+* **metrics** - perf_budget_main_minsn=27 perf_ratio_a64_x86=0.92 perf_stack_protected_funcs=7396
+  perf_got_per100=4.66 perf_bridge_sites=4124 perf_boot_insns_initholder=762M perf_s3_scan_insns=737M
+* **next**:
+  - S5: thread placement (main on core 0, CSMT worker on core 1, AI linear threads on cores 2 and 1, the rest
+    0b110); priority/affinity on other threads' handles; one TLS block for `fs:[0x2c]`.
+  - S14/S3: index the code-pointer scan.
+  - Later: proxy batching (S6c), sse2neon hot spots (S1). The ini defaults go in when the exe arrives
+    (setting_names.py).
