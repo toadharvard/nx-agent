@@ -15,17 +15,20 @@ Steps:
 * `Coff(path)` - i386 COFF reader (sections, symbols with aux records, weak externals, relocations);
   `Coff.vftables()` - each `??_7` with its slots and its COL (vfptr offset in the complete object, class name).
 * `MsvcIndex` - every unit's vftables (`u<index>.obj`, index = position in units.json); each slot target resolved
-  through units.json (`def`, `ref`, `name-addr`, `gdef`, `gref`; adjustor thunks to their function; `??_E` to `??_G`;
-  `__purecall`); vftables joined by image address (`table(address)`, per slot the agreeing addresses, the
+  through units.json (`def`, `ref`, `gdef`, `gref`, then `name-addr`; adjustor thunks to their function; `??_E` to
+  `??_G`; `__purecall`); vftables joined by image address (`table(address)`: per slot the best-ranked address, the
   disagreements).
-* `itanium_to_msvc(...)` - GCC vtable group of a class (from the ELF object) against the MSVC vftables of the same
-  class: subobject offsets pair a GCC (secondary) vtable with the MSVC vftable of the same vfptr; inside one, slots
-  pair by signature (overloads: MSVC groups them in reverse declaration order), the virtual destructor's D1/D0 pair
-  with the one `??_G`/`??_E` slot, the rest by position.
-* `Binder` - for `fnvlink.py resolve` (hook `classify`): an undefined slot symbol of a GCC object -> its original
-  address (the native definition there, a pending unit's address, `??_G` for D0/D1).
-* `validate(...)` - checks of the slot model against the matched x86 code (thiscall `ret N` of the bound targets vs
-  the declared arity; `this`-based `call [reg+off]` sites).
+* `gcc_vtables` / `pair_slots` - a GCC vtable group (ELF object) against the MSVC vftables of the same class: the
+  subobject offset pairs a GCC (secondary) vtable with the MSVC vftable of the same vfptr; inside one, slots pair by
+  signature (MSVC groups the overloads one class introduces in reverse declaration order), the virtual destructor's
+  D1/D0 with the one `??_G`/`??_E` slot, the rest by position.
+* `Binder` - the `fnvlink.py resolve` hook (`classify`): an undefined slot symbol of a GCC object (or an implicit
+  D1/D2 GCC calls where MSVC inlined it) -> the native definition at its original address (D1 of a `??_G`), or a
+  stub that tail-calls through the image vftable slot (`emit_image_stub`: the S3 loader rewrites that word to the
+  native definition, the `(this, flags)` deleting-dtor adapter or an address-reporting trap) when the slot's image
+  vftable is known but its target is named by no unit.
+* `validate` - checks against the matched x86 code: thiscall `ret N` of the static targets vs the declared stack
+  bytes; `this`-based `call [vptr+off]` sites (pushes and the joined slot's target).
 
 Everything this reads or writes is derived from the decomp or MSVC output: local only, never committed.
 """
@@ -801,25 +804,50 @@ class Code:
         return self._rets[a]
 
     def this_vcalls(self, i, name, size):
-        """Virtual calls through the vptr of `this` in a thiscall member function: [(slot, pushed bytes)], the bytes
-        pushed since the previous call (sites before a function's first call, or after a branch target since the
-        previous call, are left out: prologue pushes and merges make the count unreliable)."""
+        """Virtual calls through the vptr of `this` in a thiscall member function: [(slot, pushed bytes)].
+
+        `this` is followed from ecx through register copies and stack slots written once (unoptimized code spills it
+        to [ebp-x]); its vptr is a load from [this]. Pushed bytes count from the end of the prologue (frame, locals,
+        SEH registration, security cookie) or from the previous call; a site after a branch target since then is left
+        out (merging paths make the count unreliable)."""
         import capstone.x86 as X
         ins = self.insns(i, name, size)
-        targets = {op.imm for x in ins if x.group(X.X86_GRP_JUMP) for op in x.operands if op.type == X.X86_OP_IMM}
         cs = self.cs
+        targets = {op.imm for x in ins if x.group(X.X86_GRP_JUMP) for op in x.operands if op.type == X.X86_OP_IMM}
+
+        def reg(op):
+            return FULL_REG.get(cs.reg_name(op.reg), cs.reg_name(op.reg)) if op.type == X.X86_OP_REG else None
+
+        def frame_slot(op):   # [ebp+d] / [esp+d] with no index -> ('ebp', d)
+            if op.type == X.X86_OP_MEM and op.mem.index == 0 and op.mem.base and op.mem.segment == 0:
+                b = cs.reg_name(op.mem.base)
+                if b == 'ebp':
+                    return b, op.mem.disp
+            return None
+        writes = collections.Counter(frame_slot(x.operands[0]) for x in ins if x.mnemonic == 'mov' and x.operands
+                                     and frame_slot(x.operands[0]))
         out = []
-        this, vptr, fnreg = {'ecx'}, set(), {}
-        pushed, seen_call, merged, after_call = 0, False, False, False
+        this, vptr, fnreg, this_slots = {'ecx'}, set(), {}, set()
+        pushed, counting, merged, after_call = 0, False, False, False
+        prologue = True
         for x in ins:
+            m, ops = x.mnemonic, x.operands
             if x.address in targets:
-                vptr.clear()
-                fnreg.clear()
+                vptr.clear(); fnreg.clear()
                 this &= {'esi', 'edi', 'ebx', 'ebp'}
                 merged = True
-            m = x.mnemonic
-            ops = x.operands
-            if m == 'add' and after_call and ops[0].type == X.X86_OP_REG and cs.reg_name(ops[0].reg) == 'esp':
+            if prologue:     # frame, locals, SEH registration, security cookie, saved registers
+                pro = (m == 'push' and ops and (ops[0].type == X.X86_OP_IMM or reg(ops[0]) in
+                                                 ('ebp', 'ebx', 'esi', 'edi', 'eax', 'ecx'))) or \
+                    (m == 'mov' and len(ops) == 2 and (
+                        (reg(ops[0]) == 'ebp' and reg(ops[1]) == 'esp') or
+                        any(o.type == X.X86_OP_MEM and o.mem.segment != 0 for o in ops) or
+                        (reg(ops[0]) == 'eax' and ops[1].type == X.X86_OP_MEM and ops[1].mem.base == 0))) or \
+                    (m in ('sub', 'and') and reg(ops[0]) == 'esp') or (m in ('xor', 'lea') and reg(ops[0]) == 'eax')
+                if pro:
+                    continue
+                prologue, counting, pushed = False, True, 0
+            if m == 'add' and after_call and reg(ops[0]) == 'esp':
                 continue            # cdecl cleanup of the previous call
             after_call = False
             if m == 'call':
@@ -827,11 +855,11 @@ class Code:
                 if ops and ops[0].type == X.X86_OP_MEM and ops[0].mem.index == 0 and ops[0].mem.base and \
                         cs.reg_name(ops[0].mem.base) in vptr:
                     site = ops[0].mem.disp
-                elif ops and ops[0].type == X.X86_OP_REG and cs.reg_name(ops[0].reg) in fnreg:
-                    site = fnreg[cs.reg_name(ops[0].reg)]
-                if site is not None and site % 4 == 0 and seen_call and not merged:
+                elif ops and reg(ops[0]) in fnreg:
+                    site = fnreg[reg(ops[0])]
+                if site is not None and site % 4 == 0 and site >= 0 and counting and not merged:
                     out.append((site // 4, pushed))
-                pushed, seen_call, merged, after_call = 0, True, False, True
+                pushed, counting, merged, after_call = 0, True, False, True
                 for r in ('eax', 'ecx', 'edx'):
                     this.discard(r); vptr.discard(r); fnreg.pop(r, None)
                 continue
@@ -839,17 +867,22 @@ class Code:
                 pushed += 4
             elif m == 'pop':
                 pushed -= 4
-            elif m in ('sub', 'add') and ops[0].type == X.X86_OP_REG and cs.reg_name(ops[0].reg) == 'esp' and \
-                    ops[1].type == X.X86_OP_IMM:
+            elif m in ('sub', 'add') and reg(ops[0]) == 'esp' and ops[1].type == X.X86_OP_IMM:
                 pushed += ops[1].imm if m == 'sub' else -ops[1].imm
-            dst = None
-            if m == 'mov' and ops[0].type == X.X86_OP_REG:
-                dst = cs.reg_name(ops[0].reg)
-                src = ops[1]
-                new_this = src.type == X.X86_OP_REG and cs.reg_name(src.reg) in this
-                new_vptr = (src.type == X.X86_OP_REG and cs.reg_name(src.reg) in vptr) or \
-                    (src.type == X.X86_OP_MEM and src.mem.index == 0 and src.mem.disp == 0 and src.mem.base and
-                     cs.reg_name(src.mem.base) in this)
+            if m == 'mov' and len(ops) == 2 and frame_slot(ops[0]):
+                fs = frame_slot(ops[0])
+                if reg(ops[1]) in this and writes[fs] == 1:
+                    this_slots.add(fs)
+                else:
+                    this_slots.discard(fs)
+                continue
+            if m == 'mov' and len(ops) == 2 and ops[0].type == X.X86_OP_REG:
+                dst, src = reg(ops[0]), ops[1]
+                new_this = reg(src) in this or frame_slot(src) in this_slots
+                new_vptr = reg(src) in vptr or (src.type == X.X86_OP_MEM and src.mem.index == 0 and
+                                                src.mem.disp == 0 and src.mem.base and
+                                                FULL_REG.get(cs.reg_name(src.mem.base), cs.reg_name(src.mem.base))
+                                                in this)
                 new_fn = src.mem.disp if (src.type == X.X86_OP_MEM and src.mem.index == 0 and src.mem.base and
                                           cs.reg_name(src.mem.base) in vptr) else None
                 this.discard(dst); vptr.discard(dst); fnreg.pop(dst, None)
@@ -887,17 +920,20 @@ def validate(ix, objdir, msvc_sig, vslots_tsv=None, max_units=None):
     a_stats = collections.Counter()
     if vslots_tsv and os.path.exists(vslots_tsv):
         for line in open(vslots_tsv, encoding='utf-8', errors='surrogateescape'):
-            f = line.rstrip('\n').split('\t')
-            if line.startswith('#') or len(f) < 11 or not f[2].startswith('bound') or not f[3]:
+            f = line.rstrip('\n').split('\t')   # object unit symbol outcome address ... msvc_declaration (12)
+            if line.startswith('#') or len(f) < 13 or not f[4]:
                 continue
-            a = int(f[3], 16)
-            want = 4 if is_msvc_dtor(f[10]) else stack_bytes(msvc_sig(f[10]))
-            got = code.ret_bytes(a)
+            what = 'bound' if 'static (' in f[3] and '[was' in f[3] else 'check-differs' if \
+                f[3].startswith('check-differs') else None
+            if what is None:
+                continue
+            want = 4 if is_msvc_dtor(f[12]) else stack_bytes(msvc_sig(f[12]))
+            got = code.ret_bytes(int(f[4], 16))
             key = 'unknown' if want is None or got is None else ('same' if want == got else 'DIFFERENT')
-            a_stats[('dtor ' if is_msvc_dtor(f[10]) else '') + key] += 1
-        lines.append('A. bound slots, declared stack bytes vs ret N of the bound function: ' +
+            a_stats['%s %s%s' % (what, 'dtor ' if is_msvc_dtor(f[12]) else '', key)] += 1
+        lines.append('A. static slot targets, declared stack bytes vs ret N of the target: ' +
                      ' '.join('%s=%d' % kv for kv in sorted(a_stats.items())))
-    b = collections.Counter()
+    b, examples = collections.Counter(), []
     units = sorted(ix.by_unit)[:max_units] if max_units else sorted(ix.by_unit)
     for i in units:
         prim = {}
@@ -927,9 +963,17 @@ def validate(ix, objdir, msvc_sig, vslots_tsv=None, max_units=None):
                 b['declared: ' + ('unknown' if want is None else 'same' if want == pushed else 'DIFFERENT')] += 1
                 a = tab[slot][0] if tab is not None and slot < len(tab) else t.addr
                 got = code.ret_bytes(a) if a is not None else None
-                b['joined target: ' + ('unknown' if got is None else 'same' if got == pushed else 'DIFFERENT')] += 1
+                key = 'unknown' if got is None else 'same' if got == pushed else 'DIFFERENT'
+                b['joined target vs pushed: ' + key] += 1
+                if got is not None and want is not None:
+                    b['joined target vs declared: ' + ('same' if got == want else 'DIFFERENT')] += 1
+                if got is not None and want == pushed:
+                    b['joined target vs pushed, where pushed == declared: ' + key] += 1
+                if key == 'DIFFERENT' and want == pushed and len(examples) < 8:
+                    examples.append('   u%d %s slot %d: pushed %d, %08x pops %d (%s)'
+                                    % (i, f['symbol'], slot, pushed, a, got, t.name))
     lines.append('B. this-based virtual calls in matched code: ' + ' '.join('%s=%d' % kv for kv in sorted(b.items())))
-    return lines
+    return lines + examples
 
 
 def main():
