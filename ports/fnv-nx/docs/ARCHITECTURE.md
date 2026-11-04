@@ -150,6 +150,11 @@ relocation of their own, so by-address rebinding of image variables cannot be do
 slot holds the image address. `-fno-semantic-interposition` is not used: it routes same-unit calls through local
 aliases past the by-address binding. Cost: one GOT load per global access (performance phase).
 
+### D17. Ten-minute rule: long jobs on farms, development never waits (J-0082, user)
+
+Anything that can take more than about 10 minutes runs as a farm job (docs/MACHINES.md, tools/farm/). Development
+agents queue the next item instead of waiting, and verify their own change with small local checks.
+
 ## Legal
 
 The decomp grants no licence. This directory contains only our own code: tools, shims, the platform layer and docs.

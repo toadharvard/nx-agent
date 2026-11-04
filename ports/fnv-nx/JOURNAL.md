@@ -1695,3 +1695,13 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - link_trial_undefined=6121 link_trial_multidef=0 v1_c4_mixed_classes=0 (was 36)
 * **next** - V1 re-runs its reproducers on the merged tools (D14). S2c judges ecx/this-not-passed on the
   definition's MSVC code (`resolve --msvc-code`). Full links move to the farm (S9 link_job).
+
+### J-0082 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0079,J-0081
+
+* **decided** - D17 (user): everything that can take more than about 10 minutes runs on a farm, and porting must
+  never stall on a build. Development agents queue their next item while farm jobs run. They read farm reports
+  when they land and check their own changes with small local tests. A long job that is not yet a farm job is
+  first written as one (docs/MACHINES.md, ARCHITECTURE.md D17).
+* **did** - Started four static-gate farms st1-4 (`static_job.sh`, shards of 4) next to prep, farm1 (census),
+  farm2-5 (compile), eq1-6 (MSVC gate). Link (S9 link_job), fuzz (S13 fuzz_job, needs link outputs) and full boot
+  follow.

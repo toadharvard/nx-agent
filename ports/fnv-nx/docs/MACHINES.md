@@ -42,6 +42,16 @@ scenes, golden images of them, fuzz reproducers) is fine to commit.
 Commit messages end with exactly one trailer line, `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 There is no `Claude-Session` line, and no session URL or session id appears anywhere in commits or files.
 
+## Ten-minute rule (D17)
+
+Any job that can take more than about 10 minutes runs on a farm machine (`tools/farm/<job>_job.sh`), never in a
+development session. That covers full prepare, compile, census, link, probe, MSVC gate, fuzz campaigns, the static
+gate and full boots. Development agents never wait for a build:
+- while a farm job runs, they keep working on the next item of their queue;
+- they read the result when its report lands, and check their own change with a small local test (one unit,
+  minimal tree, a single relink);
+- a job that does not exist yet as a farm job is written first, then started on a farm.
+
 ## Load
 
 A session's container has 4 CPUs, 15 GB RAM and a fixed disk allowance. Keep at most about 5 heavy jobs per
