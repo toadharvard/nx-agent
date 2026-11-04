@@ -126,6 +126,9 @@ static void ov_done(LPOVERLAPPED ov, int64_t n)
 
 extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPED ov)
 {
+    int std = w32_std_io(h, 0, buf, n, got);   /* GetStdHandle's pseudo handles (crt_kernel32.cpp) */
+    if (std >= 0)
+        return std;
     struct w32_file *f = file_of(h);
     if (got)
         *got = 0;
@@ -150,6 +153,9 @@ extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPE
 
 extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD put, LPOVERLAPPED ov)
 {
+    int std = w32_std_io(h, 1, (void *)buf, n, put);
+    if (std >= 0)
+        return std;
     struct w32_file *f = file_of(h);
     if (put)
         *put = 0;
