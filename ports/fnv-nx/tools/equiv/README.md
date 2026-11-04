@@ -28,7 +28,8 @@ own, it is created on first use).
 
 On another machine `tools/equiv/setup_msvc.sh <dest>` does all of this (apt, download, checksum, unpack, signature
 check, Wine prefix) and prints the three variables; `tools/farm/equiv_job.sh` runs the whole gate for one shard of
-units and publishes the pristine objects to the private artifacts repository (`msvc/pristine/<decomp12>`).
+units and publishes the pristine objects to the private artifacts repository (`msvc/pristine/<decomp12>`: `obj/`
+and `meta.json`; the job fingerprints the objects itself, `rows.jsonl` there is optional).
 
 ## One unit to a COFF object (the decomp's own wrapper and flags)
 
@@ -54,7 +55,8 @@ recipe functions in them is present in its object with exactly the recipe size (
     equiv.py rules                                  every prepare rule with its class (neutral / layout / platform)
     equiv.py prepare DECOMP OUT --rules SPEC        prepare.py with an allow-list ('neutral', 'neutral,-EXC1', 'TAIL1')
     equiv.py build DECOMP TREE --out FP.jsonl [--units all|i,j|FILE|shard:K/N] [--objdir D] [--layout] [--eh-off]
-    equiv.py refp DECOMP FP.jsonl OBJDIR --out NEW.jsonl [--tree T]   fingerprint kept objects again
+    equiv.py refp DECOMP FP.jsonl OBJDIR --out NEW.jsonl [--tree T] [--units U]   fingerprint kept objects again
+                                                    (FP.jsonl '-': rows from the objects alone, no object = failed)
     equiv.py compare A.jsonl B.jsonl [--out R.json]          per-unit / per-function differences, retargeted calls
     equiv.py attribute DECOMP TREE A.jsonl B.jsonl --rules SPEC --out X.jsonl [--hier --default-groups] [--failed]
     equiv.py show DECOMP TREE_A TREE_B --unit I [--fn ADDR]  disassembly diff of one unit (output is decomp-derived)

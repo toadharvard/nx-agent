@@ -629,9 +629,19 @@ def cmd_build(a):
 
 def cmd_refp(a):
     """Fingerprint again from the objects a build kept (--objdir), e.g. after a change to Resolver: rows of units that
-    did not compile are copied over."""
+    did not compile are copied over. OLD '-' (or a missing file): the rows come from the objects alone, for --units
+    (default all): a unit without an object did not compile."""
     fpr = Fingerprinter(a.decomp, a.tree)
-    old = load_rows(a.old)
+    old = load_rows(a.old) if a.old != '-' and Path(a.old).exists() else {}
+    spec = a.units or (None if old else 'all')
+    if spec:
+        keep = set(select_units(spec, fpr.units))
+        old = {i: r for i, r in old.items() if i in keep}
+        for i in sorted(keep - set(old)):
+            u = fpr.units[i]
+            ok = Path(a.objdir, 'u%d.obj' % i).exists()
+            old[i] = dict(unit=i, source=u['source'], compiler=u['compiler'], status='ok' if ok else 'compile-failed',
+                          **({} if ok else {'error': 'no object'}))
     out = Path(a.out)
     out.unlink(missing_ok=True)
     put = append_rows(out, None, len(old))
@@ -1144,6 +1154,7 @@ def main():
                    'WIN32_LEAN_AND_MEAN (retry of units the full SDK breaks)')
     p = sub.add_parser('refp'); p.add_argument('decomp'); p.add_argument('old'); p.add_argument('objdir')
     p.add_argument('--out', required=True); p.add_argument('--tree', help='the prepared tree the objects come from')
+    p.add_argument('--units', help='only these units (as build --units); units without a row get one from the objects')
     p = sub.add_parser('compare'); p.add_argument('a'); p.add_argument('b'); p.add_argument('--out')
     p = sub.add_parser('show'); p.add_argument('decomp'); p.add_argument('tree_a'); p.add_argument('tree_b')
     p.add_argument('--unit', type=int, required=True); p.add_argument('--fn', help='addresses, comma-separated')

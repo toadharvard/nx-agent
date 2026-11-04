@@ -7,9 +7,11 @@
 # 1. Installs Wine and Visual C++ 2008 SP1 / RTM from Microsoft's ISOs (tools/equiv/setup_msvc.sh) into
 #    $FARM_HOME/msvc9, once.
 # 2. Pristine MSVC objects of the decomp, published to the private artifacts repository toadharvard/fnv-nx-build:
-#    branch `msvc/pristine/<decomp12>` holds every unit (obj/u<i>.obj, rows.jsonl, meta.json); S13 reuses it. When
-#    it is missing, this shard's pristine units are built and published as `msvc/pristine-part/<decomp12>/<k>of<N>`;
-#    the first job that finds all N parts assembles and pushes the full branch.
+#    branch `msvc/pristine/<decomp12>` holds every unit (obj/u<i>.obj, meta.json, rows.jsonl optional); S13 reuses it.
+#    When it is missing, this shard's pristine units are built and published as `msvc/pristine-part/<decomp12>/<k>of<N>`;
+#    the first job that finds all N parts assembles and pushes the full branch. Only the objects are read: the pristine
+#    rows are fingerprinted from them on every run (equiv.py refp - --units), with the head's equiv.py, into
+#    $FARM_HOME/equiv-<commit12>/<k>-of-<N>/base.jsonl; a unit without an object did not compile (the vc8 unit).
 # 3. Prepares the tree at <commit> with the gated rules ($EQUIV_RULES, default: the neutral set and the platform rules
 #    that have an MSVC meaning) and builds the shard's units (crc32(source) mod N + 1 == k, as compile_job.sh);
 #    compares per function (compare_builds' fingerprint, link-by-address bindings); builds the differing units with
@@ -22,7 +24,7 @@
 # 6 GB of disk; the artifacts repository attached to the session with push. MSVC binaries, prepared trees and objects
 # stay in $FARM_HOME / the private repository; the report holds numbers, unit names, addresses, short diagnostics.
 # Environment: FARM_HOME (~/fnvnx-farm), JOBS (nproc), NICE (10), EQUIV_RULES, ARTIFACTS ($FARM_HOME/artifacts-equiv);
-# EQUIV_PRISTINE_DIR=<dir with obj/u<i>.obj and rows.jsonl> uses a local pristine build and touches no artifacts.
+# EQUIV_PRISTINE_DIR=<dir with obj/u<i>.obj> uses a local pristine build and touches no artifacts.
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../../../.." && pwd)
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
@@ -93,19 +95,21 @@ SHARD=shard:$K/$N
 python3 -c 'import json,sys,zlib
 k,n=map(int,sys.argv[2].split("/"))
 u=json.load(open(sys.argv[1]))["units"]
-print(" ".join(str(i) for i,x in enumerate(u) if zlib.crc32(x["source"].encode())%n+1==k))' \
+print(" ".join(str(i) for i,x in enumerate(u) if zlib.crc32(x["source"].encode())%n+1==k and x["compiler"]!="vc8"))' \
   "$DECOMP/build/units.json" "$K/$N" > "$FARM_HOME/shard-$K-of-$N.txt"
 read -r -a MINE < "$FARM_HOME/shard-$K-of-$N.txt"
-have_all() { for i in "${MINE[@]}"; do grep -q "\"unit\": $i," "$PR/rows.jsonl" 2>/dev/null || return 1; done; }
+have_all() {   # the objects of this shard are there (units that failed in pristine: the fetch left a marker)
+  [ -f "$PR/full.done" ] || [ -f "$PR/part-$K-of-$N.done" ] && return 0
+  for i in "${MINE[@]}"; do [ -f "$PR/obj/u$i.obj" ] || return 1; done   # MINE leaves out the vc8 unit
+}
 if [ -n "${EQUIV_PRISTINE_DIR:-}" ]; then
   have_all || { echo "equiv_job: $PR lacks units of shard $K/$N" >&2; exit 1; }
 elif ! have_all; then
   artifacts
   if ref=$(fetch_ref "msvc/pristine/$D12"); then
-    git -C "$ARTIFACTS" archive "$ref" | tar -x -C "$PR"
+    git -C "$ARTIFACTS" archive "$ref" obj | tar -x -C "$PR"; touch "$PR/full.done"
   elif ref=$(fetch_ref "msvc/pristine-part/$D12/${K}of$N"); then
-    git -C "$ARTIFACTS" archive "$ref" obj | tar -x -C "$PR"
-    git -C "$ARTIFACTS" show "$ref:rows.jsonl" >> "$PR/rows.jsonl"
+    git -C "$ARTIFACTS" archive "$ref" obj | tar -x -C "$PR"; touch "$PR/part-$K-of-$N.done"
   else
     "${EQ[@]}" build "$DECOMP" "$DECOMP" --out "$PR/rows-$K-of-$N.jsonl" --units "$SHARD" --objdir "$PR/obj" \
       --jobs "$JOBS" > "$PR/build-$K-of-$N.log" 2>&1
@@ -113,8 +117,7 @@ elif ! have_all; then
     for i in "${MINE[@]}"; do cp "$PR/obj/u$i.obj" "$PART/obj/" 2>/dev/null || true; done
     cp "$PR/rows-$K-of-$N.jsonl" "$PART/rows.jsonl"
     publish "$PART" "msvc/pristine-part/$D12/${K}of$N" "pristine MSVC objects of fnv_decomp $D12, shard $K/$N" || true
-    rm -rf "$PART"
-    cat "$PR/rows-$K-of-$N.jsonl" >> "$PR/rows.jsonl"
+    rm -rf "$PART"; touch "$PR/part-$K-of-$N.done"
   fi
 fi
 # every part there and no full branch yet: assemble it once
@@ -125,7 +128,7 @@ if [ -z "${EQUIV_PRISTINE_DIR:-}" ] && ! remote_has "msvc/pristine/$D12"; then
     for k in $(seq 1 "$N"); do
       ref=$(fetch_ref "msvc/pristine-part/$D12/${k}of$N") || continue
       git -C "$ARTIFACTS" archive "$ref" obj | tar -x -C "$FULL"
-      git -C "$ARTIFACTS" show "$ref:rows.jsonl" >> "$FULL/rows.jsonl"
+      git -C "$ARTIFACTS" show "$ref:rows.jsonl" >> "$FULL/rows.jsonl" 2>/dev/null || true
     done
     meta "$DECOMP" "$FARM_HOME/msvc9/msvc" "$(ls "$FULL/obj" | wc -l)" "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["units"]))' "$DECOMP/build/units.json")" > "$FULL/meta.json"
     remote_has "msvc/pristine/$D12" || publish "$FULL" "msvc/pristine/$D12" "pristine MSVC objects of fnv_decomp $D12 (from $N parts)" || true
@@ -140,14 +143,8 @@ W=$FARM_HOME/equiv-$C12; WK=$W/$K-of-$N; mkdir -p "$WK"
 if [ ! -f "$W/tree.done" ]; then
   rm -rf "$W/tree"; "${EQ[@]}" prepare "$DECOMP" "$W/tree" --rules "$RULES" > "$W/prepare.log" 2>&1; touch "$W/tree.done"
 fi
-python3 -c 'import json,sys
-keep=set(map(int,open(sys.argv[2]).read().split()))
-rows={}
-for l in open(sys.argv[1]):
-    r=json.loads(l)
-    if r["unit"] in keep: rows[r["unit"]]=l
-open(sys.argv[3],"w").writelines(rows[i] for i in sorted(rows))' "$PR/rows.jsonl" "$FARM_HOME/shard-$K-of-$N.txt" "$WK/base0.jsonl"
-"${EQ[@]}" refp "$DECOMP" "$WK/base0.jsonl" "$PR/obj" --out "$WK/base.jsonl" > /dev/null
+# the pristine rows from the objects (a published branch may carry no rows.jsonl; a unit without an object failed)
+"${EQ[@]}" refp "$DECOMP" - "$PR/obj" --units "$SHARD" --out "$WK/base.jsonl" > /dev/null
 "${EQ[@]}" build "$DECOMP" "$W/tree" --out "$WK/head.jsonl" --units "$SHARD" --objdir "$WK/obj" --jobs "$JOBS" > "$WK/build.log" 2>&1
 "${EQ[@]}" compare "$WK/base.jsonl" "$WK/head.jsonl" --out "$WK/cmp.json" > /dev/null
 python3 -c 'import json,sys
