@@ -43,6 +43,17 @@ it stays local and is never committed. The tests are in `tests/s12/run.py <scrat
 compile.sh and census.sh, the code generation facts below, every `fnvcheck` check, the layout fixtures, the layout
 steps and report.py end to end, and crosscheck.py's function attribution.
 
+The whole-tree run belongs on the farm: `tools/farm/static_job.sh <commit> <k> <N> <report.md>` prepares the tree
+at a commit and runs every step on shard k of N (crc32 of the unit path, as compile_job.sh). Its report has counts and
+sites as `file line CLASS` only, and the shards' `.tsv` files merge with `sort -u`.
+
+fnvcheck reports a site only when both its expansion and its spelling location are in the tree and in no excluded
+directory (`--exclude`, `CLANG_EXCLUDE` of clang_env.sh): the shim, sse2neon, the clang headers standing in for
+sse2neon, and the generated headers under `<out>/clang`. An intrinsic macro or inline code of those, expanded in a
+unit, is not the unit's code. Before this, a scratch directory inside the root (the tests' default `tests/s12/out`)
+put the shim copy's `_rotl`/`_rotr` shifts into the findings. On real runs the out dir lies outside the tree, and the
+rows were identical before and after on the 5 sample units with the most rows (1,589 rows).
+
 **The gate compiles what the build compiles.** On the f8 sample (below) the GCC pass failed on exactly the units
 S2c's `compile.sh` run of the same tree failed on (462 of 462 agree: 436 compile, 26 do not).
 
