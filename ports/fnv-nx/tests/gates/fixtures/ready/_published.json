@@ -11,6 +11,7 @@
  "reports/fz1/c0ffee000001-fuzz.md": 1800000480,
  "reports/fz2/c0ffee000001-fuzz.md": 1800000540,
  "reports/link1/c0ffee000001-link.md": 1800000240,
+ "reports/prof1/c0ffee000001-frame-budget.json": 1800000670,
  "reports/prof1/c0ffee000001-frameprof.json": 1800000660,
  "reports/s16/c0ffee000001-frames.json": 1800000600,
  "reports/st1/c0ffee000001-static.md": 1800000420

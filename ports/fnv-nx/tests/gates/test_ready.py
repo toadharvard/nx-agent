@@ -459,6 +459,37 @@ class ReadyTest(unittest.TestCase):
         self.assertIn('no render perf report', g['note'])
         self.assertIn('perf.render.boost', card['missing'])
 
+    def test_frame_budget_per_clock(self):
+        card = self.world.run()
+        stock, boost = self.gate(card, 'perf.budget.stock'), self.gate(card, 'perf.budget.boost')
+        self.assertEqual((boost['status'], boost['level']), ('pass', 'stretch_60'))
+        self.assertEqual((stock['status'], stock['required']), ('no-data', False))   # uncertain at 1020 MHz
+        self.assertIn('needs a measured frame', stock['note'])
+        self.assertIn('plan45 stretch_60', boost['note'])
+
+    def test_frame_budget_fail_and_model_only(self):
+        rel = 'reports/prof1/%s-frame-budget.json' % C
+        self.world.edit_json(rel, lambda d: d['scenarios'][0]['results']['1785']['verdicts'].update(pass_45='fail'))
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'perf.budget.boost')['status'], 'fail')
+        self.assertEqual(card['verdict'], 'NOT READY')
+        self.world.edit_json(rel, lambda d: (d['scenarios'][0]['results']['1785']['verdicts'].update(pass_45='pass'),
+                                             d['inputs'].update(frameprof=False)))
+        g = self.gate(self.world.run(), 'perf.budget.boost')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('model only', g['note'])
+
+    def test_frame_budget_from_the_checkout_model(self):
+        self.world.remove('reports/prof1/%s-frame-budget.json' % C)
+        self.assertEqual(self.gate(self.world.run(), 'perf.budget.boost')['note'], 'no fnvnx-frame-budget/1 file')
+        model = dict(schema='fnvnx-frame-budget/1', inputs=dict(frameprof=False), scenarios=[dict(
+            id='placed', results={'1785': dict(worst_frame_ms=dict(lo=7, mid=17.2, hi=39.4),
+                                               verdicts=dict(pass_45='uncertain'), level='stretch_60')})])
+        self.world.write('docs/PERF_budget.json', model, port=True)
+        g = self.gate(self.world.run(), 'perf.budget.boost')
+        self.assertEqual((g['status'], g['sources'][0]['path']), ('no-data', 'docs/PERF_budget.json'))
+        self.assertEqual(g['value'], 'worst frame 17.2 ms mid (7 - 39.4)')
+
     def test_memory_over_budget(self):
         self.world.edit_json('link/%s/meta.json' % C, lambda d: d.__setitem__('boot_peak_heap_bytes', 1900 << 20))
         self.assertEqual(self.gate(self.world.run(), 'perf.memory')['status'], 'fail')

@@ -88,7 +88,13 @@
    "stretch": 60
   },
   "boot_to_winmain_s": 3.0,
-  "boot_clock": "stock"
+  "boot_clock": "stock",
+  "budget": {
+   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock",
+   "scenario": "placed",
+   "target": "pass_45",
+   "model": "docs/PERF_budget.json"
+  }
  },
  "memory": {
   "heap_region_bytes": 2147483648,

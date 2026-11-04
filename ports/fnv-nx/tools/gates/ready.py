@@ -1176,6 +1176,70 @@ class Card:
                           '%s fps %s' % (k, (tg.get(k) or {}).get(name, '?')) for k in sorted(tg))), rank=22,
                       required=req, levels=dict(lv, level=lname))
 
+    def budget_gate(self):
+        """S15's whole-frame CPU budget (tools/perf/frame_budget.py, fnvnx-frame-budget/1): the newest
+        reports/<farm>/<c12>-frame-budget.json, else the checkout's docs/PERF_budget.json (the model alone). Per clock,
+        the scenario thresholds perf.budget.scenario (the build as placed today, not a plan) and its verdict for the
+        target: pass (the hi case fits) counts only with a measurement in the inputs (frameprof or the render report);
+        a model-only pass, or uncertain (lo fits, hi does not), is no-data; fail (even the lo case misses) fails."""
+        bt = self.th['perf'].get('budget', {})
+        scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'pass_45')
+        doc, src = None, None
+        hits = []
+        for br in self.store.branches('reports/'):
+            for path, t in self.store.files(br):
+                if path.endswith('-frame-budget.json'):
+                    hits.append((t, br, path))
+                    break
+        for t, br, path in sorted(hits, reverse=True):
+            try:
+                d = json.loads(self.store.read(br, path) or '')
+            except ValueError:
+                continue
+            if isinstance(d, dict) and str(d.get('schema', '')).startswith('fnvnx-frame-budget/'):
+                m = re.match(r'([0-9a-f]{12})-', os.path.basename(path))
+                doc, src = d, self.src(br, path, m.group(1) if m else None, t)
+                break
+        if doc is None:
+            rel = bt.get('model', 'docs/PERF_budget.json')
+            f = os.path.join(self.port, rel)
+            try:
+                d = json.loads(readf(f)) if os.path.isfile(f) else None
+            except ValueError:
+                d = None
+            if isinstance(d, dict) and str(d.get('schema', '')).startswith('fnvnx-frame-budget/'):
+                doc = d
+                src = dict(branch='nx-agent', path=rel, commit=(self.hist.head or '')[:12], behind=0, published=None,
+                           stale=False)
+        inputs = (doc or {}).get('inputs') or {}
+        measured = [k for k in ('frameprof', 'render') if inputs.get(k)]
+        scen = {s.get('id'): s for s in (doc or {}).get('scenarios') or [] if isinstance(s, dict)}
+        for clk in self.th['perf']['clocks']:
+            gid, req = 'perf.budget.' + clk['name'], clk.get('required', True)
+            title = 'S15 whole-frame CPU budget, scenario %s (%s clock %.3f GHz)' % (scen_id, clk['name'], clk['hz'] / 1e9)
+            thr = 'verdict %s = pass (hi case fits) on a measured frame' % target
+            s = scen.get(scen_id)
+            res = ((s or {}).get('results') or {}).get(str(int(round(clk['hz'] / 1e6))))
+            if not isinstance(res, dict):
+                self.nodata(gid, 'Performance', title, thr, 'no fnvnx-frame-budget/1 file' if doc is None else
+                            'no scenario %s at %d MHz' % (scen_id, clk['hz'] / 1e6), rank=22,
+                            sources=[src] if src else None, required=req)
+                continue
+            v = (res.get('verdicts') or {}).get(target)
+            wf = res.get('worst_frame_ms') or {}
+            others = ', '.join('%s %s' % (k, (((x.get('results') or {}).get(str(int(round(clk['hz'] / 1e6)))) or {})
+                                             .get('level', '?'))) for k, x in scen.items() if k != scen_id)
+            note = 'verdicts %s; level (mid case) %s; critical core %s; inputs: %s; other scenarios: %s' % (
+                ', '.join('%s %s' % kv for kv in (res.get('verdicts') or {}).items()), res.get('level'),
+                res.get('critical_core'), '+'.join(measured) or 'the model alone [E]', others or '-')
+            st = FAIL if v == 'fail' else PASS if v == 'pass' and measured else NODATA
+            if st == NODATA:
+                note = ('%s: %s; ' % (target, v or 'missing') + ('needs a measured frame (frameprof on the main loop, '
+                        'B1 on hardware)' if v != 'pass' else 'model only, needs a measurement') + '; ' + note)
+            self.gate(gid, 'Performance', title, 'worst frame %s ms mid (%s - %s)' % (
+                wf.get('mid', '?'), wf.get('lo', '?'), wf.get('hi', '?')), thr, st, src, note, rank=22, required=req,
+                      level=res.get('level'), verdicts=res.get('verdicts'))
+
     def package_gates(self):
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
         if not fb:
@@ -1221,6 +1285,7 @@ class Card:
         self.frames_gate()
         self.perf_gates()
         self.render_gate()
+        self.budget_gate()
         self.package_gates()
         return self
 
