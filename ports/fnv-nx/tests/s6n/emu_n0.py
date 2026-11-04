@@ -2,7 +2,7 @@
 """Run the N0 Switch guest (ILP32, the same scene code as the console build) under Unicorn, with S5's emulated host
 (tests/s5/emu_guest.py) plus an ext_call module 10 that forwards every nxgpu call to the GL reference backend.
 
-    python3 tests/s6n/emu_n0.py <guest.nso> <libnxgl.so> <out dir>
+    python3 tests/s6n/emu_n0.py <guest.nso> <libnxgl.so> <out dir> [results file under <out dir>]
 
 The guest writes its readbacks to sdmc:/fnvnx/n0/out/ (= <out dir>/fnvnx/n0/out/); compare them with the goldens:
     python3 tests/s6n/scenes.py --compare <out dir>/fnvnx/n0/out
@@ -111,15 +111,16 @@ class N0Emu(emu_guest.Emu):
 
 
 def main():
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (4, 5):
         raise SystemExit(__doc__)
-    nso, lib, out = sys.argv[1:]
+    nso, lib, out = sys.argv[1:4]
+    results = sys.argv[4] if len(sys.argv) == 5 else os.path.join("fnvnx", "n0", "out", "results.txt")
     os.makedirs(out, exist_ok=True)
     emu = N0Emu(nso, os.path.abspath(out))
     emu.budget = 4_000_000_000
     emu.attach_gl(os.path.abspath(lib))
     rc = emu.run()
-    res = os.path.join(out, "fnvnx", "n0", "out", "results.txt")
+    res = os.path.join(out, results)
     if os.path.exists(res):
         sys.stdout.write(open(res).read())
     print("guest rc=%s, host calls %d, nxgpu ext calls %d" % (rc, emu.calls, emu.ext_calls))
