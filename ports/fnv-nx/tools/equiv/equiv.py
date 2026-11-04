@@ -108,7 +108,7 @@ CLASSES = {
     'ADDR1': 'neutral',         # &_mm_f(args) -> &fnvnx_lvalue(_mm_f(args)): the temporary MSVC took the address of
     'LANE1': 'platform',        # &((T*)&(v)) (SSE1 lane array, address taken) -> ((T(*)[n])&(v))
     'STD2': 'neutral',          # file-scope `R std::f(..)` definition -> fnvnx_std_f (+ its recipe symbol, POST hook)
-    'COND1': 'neutral',         # `c ? false : f()` with f returning a bool gate class -> `c ? false : (bool)(f())`
+    'COND1': 'neutral',         # `c ? false : f()` with f returning a bool gate class -> `c ? G(false) : f()`
     'RSTR1': 'neutral',         # restrict local passed to a const X& parameter -> fnvnx_unrestrict(v) ((v) under MSVC)
     'NEW5': 'neutral',          # FNVNX_GLOBAL_DELETE in a class whose only scalar delete is the placement form (MSVC: empty)
     'NSCALL1': 'neutral',       # unqualified call of N's own CRT-named prototype (bound only in N) -> N::name(
