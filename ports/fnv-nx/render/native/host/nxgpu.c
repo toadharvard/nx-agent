@@ -610,6 +610,7 @@ static void record(DkCmdBuf cb, const NxSubmit* s, NxFrameStats* st) {
                 apply_scissor(cb, &ps);
             }
             break;
+        case NxOp_Marker: break;   /* tags for captures and tools */
         default: break;   /* unknown op: skipped by its count */
         }
     }

@@ -163,12 +163,15 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     r.SetBackgroundColor(0.25f, 0.5f, 0.75f, 1.0f);
     t.Check(r.Do_BeginUsingRenderTargetGroup(&kGroupKey, Renderer::CLEAR_ALL), "BeginUsingRenderTargetGroup(menu)");
     r.Do_SetScreenSpaceCameraData(nullptr);
+    r.SetEnginePass(757, NxFam_Tile);          // TILE
     t.Check(quad(0.25f, 0.25f, 0.75f, 0.75f, red, 0), "render opaque quad");
+    r.SetEnginePass(758, NxFam_ImageSpace);    // a second tag in the same pass
     r.state().SetRenderState(RS_ALPHABLENDENABLE, 1);
     r.state().SetRenderState(RS_SRCBLEND, 5); r.state().SetRenderState(RS_DESTBLEND, 6);
     t.Check(quad(0.5f, 0.0f, 1.0f, 0.5f, half, 1), "render blended quad");
     r.state().SetRenderState(RS_ALPHABLENDENABLE, 0);
     t.Check(r.Do_EndUsingRenderTargetGroup(), "EndUsingRenderTargetGroup");
+    r.SetEnginePass(0, NxFam_None);
     r.SetBackgroundColor(0, 0, 0, 1);
     t.Check(r.Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "BeginUsingRenderTargetGroup(default)");
     // a viewport on the right half of the back buffer
@@ -182,6 +185,19 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(r.Do_EndUsingRenderTargetGroup(), "EndUsing(default)");
     t.Check(r.Do_EndFrame() && r.Do_DisplayFrame(), "EndFrame + DisplayFrame");
     t.Check(!r.Do_EndFrame(), "EndFrame outside a frame fails");
+    {   // NxOp_Marker PASS tags in the encoded stream: 757/Tile then 758/ImageSpace in the menu pass, none after
+        const uint32_t* w = r.frame().encodedData();
+        uint32_t n = r.frame().encodedWords(), found = 0, tags[4][2] = {};
+        for (uint32_t k = 0; k < n; k += 1 + (w[k] >> 16)) {
+            if ((w[k] & 0xFFFF) == NxOp_Marker && (w[k] >> 16) == 3 && w[k + 1] == NX_MARKER_PASS && found < 4) {
+                tags[found][0] = w[k + 2]; tags[found][1] = w[k + 3]; found++;
+            }
+            if ((w[k] & 0xFFFF) == NxOp_End) break;
+        }
+        t.Check(found == 2 && tags[0][0] == 757 && tags[0][1] == NxFam_Tile && tags[1][0] == 758 &&
+                tags[1][1] == NxFam_ImageSpace, "PASS markers: TILE 757 then 758, untagged pass has none", (int)found,
+                (int)tags[0][0]);
+    }
 
     static uint8_t img[W * H * 4];
     NxReadback rb;

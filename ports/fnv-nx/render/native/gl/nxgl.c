@@ -755,6 +755,7 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
         case NxOp_Clear:
             if (argc >= 8) clear_rect(a);
             break;
+        case NxOp_Marker: break;   /* tags for captures and tools */
         default: break;
         }
     }

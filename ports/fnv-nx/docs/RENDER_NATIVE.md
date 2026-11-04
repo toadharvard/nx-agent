@@ -441,6 +441,14 @@ image + vtable rewrite), S4 (boot), S5 (toolchain/deko3d linkage).
   rings, family.
 * `render/native/tools/d3d_boundary.py <decomp>` - groups S6's D3D call-site scan by subsystem (§1.9).
 
+### 6.x Pass markers in the stream
+
+`NxOp_Marker` with tag `NX_MARKER_PASS` (`nx/gpu_abi.h`) carries the engine pass id (the numbering of §1.3) and the
+family id (`NxFamilyId`, `nx/families.h`) of the draws that follow it in a pass. The front encodes one before the
+first draw of each run of equally tagged draws after sorting; nx::Renderer tags its draws from `Draw.enginePass` /
+`Draw.family` or from `Renderer::SetEnginePass(pass, family)`, which the N1/N2 families call where they know the pass.
+Backends ignore it; `.nxcap` captures keep it, so `render/verify/capture/nxcap.py` can count draws per pass id.
+
 ## 7. N0: what exists (2026-11-04)
 
 Status, commands and numbers: [`render/native/STATUS.md`](../render/native/STATUS.md); testable claims for the

@@ -161,6 +161,9 @@ public:
     enum { kClearPrim = 0xFF };
     // The D3D9 epilogue block for a packet (sets p->epi); 0 when the ring is full.
     NxEpilogue* Epilogue(Packet* p);
+    // Engine pass id + family of a draw packet: encoded as NxOp_Marker (NX_MARKER_PASS) before the first draw of each
+    // run of draws with the same tag in a pass. family 0 = untagged.
+    void Tag(const Packet* p, uint16_t enginePass, uint16_t family);
     // Sorts, encodes (with redundant-bind elimination) and submits. stats may be 0.
     void Finish(StateCache& sc, NxFrameStats* stats, bool present = false);
     Ring& ubo() { return ubo_; }
@@ -179,6 +182,7 @@ private:
     uint32_t* order_ = nullptr; uint32_t* tmp_ = nullptr;
     uint64_t* keys_ = nullptr; uint64_t* ktmp_ = nullptr;
     uint32_t* tex_ = nullptr;
+    uint32_t* tags_ = nullptr;                                   // per packet: pass id | family << 16, 0 = none
     DynRec* dyn_ = nullptr;
     uint32_t* words_[2] = {nullptr, nullptr};                    // double-buffered: the backend may read N-1
     Encoder enc_;

@@ -108,8 +108,16 @@ enum NxOp {
                            the bound state's masks and scissor (v3). With NxClear_Srgb the colour goes through the
                            target's sRGB view when it has one (D3D9 Clear under SRGBWRITEENABLE, Nine
                            nine_context_clear_fb): 0x80 is stored as 188 */
+    NxOp_Marker,        /* tag (fourcc), a, b: a no-op for the backends, kept by captures (v3, additive). Tag
+                           NX_MARKER_PASS: a = the engine pass id of the draws that follow in this pass (0..758, the
+                           numbering of docs/RENDER_NATIVE.md §1.3; NX_PASS_UNKNOWN = none), b = NxFamilyId
+                           (nx/families.h). Emitted by the front before the first draw of each run of draws with the
+                           same (pass id, family); a pass with no tagged draw has no marker */
     NxOp_Count
 };
+#define NX_FOURCC(a, b, c, d) ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
+#define NX_MARKER_PASS  NX_FOURCC('P', 'A', 'S', 'S')
+#define NX_PASS_UNKNOWN 0xFFFFFFFFu
 enum NxClearFlags { NxClear_Color = 1, NxClear_Depth = 2, NxClear_Stencil = 4, NxClear_Srgb = 8 };
 enum NxPrim { NxPrim_Triangles = 0, NxPrim_TriStrip = 1, NxPrim_Lines = 2, NxPrim_LineStrip = 3, NxPrim_Points = 4,
               NxPrim_TriFan = 5 };

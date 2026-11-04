@@ -101,7 +101,11 @@ public:
         uint32_t textures;          // texture stages 0..n-1 from the state tracker
         const void* ubo;
         uint32_t uboSize;
+        uint16_t enginePass;        // engine pass id (docs/RENDER_NATIVE.md §1.3) with family != 0, else the current
+        uint16_t family;            // NxFamilyId; 0: use SetEnginePass's
     };
+    // The engine pass the following draws belong to (family NxFam_None: none). Tagged into the stream as NxOp_Marker.
+    void SetEnginePass(uint16_t enginePass, uint16_t family) { curPass_ = enginePass; curFamily_ = family; }
     bool Render(const Draw& d);
 
     StateTracker& state() { return state_; }
@@ -121,6 +125,7 @@ private:
     const Group* FindGroup(const void* g) const;
     void OpenPass(uint32_t clearMode);
     Backend* be_ = nullptr;
+    uint16_t curPass_ = 0, curFamily_ = 0;
     StateCache sc_;
     Frame frame_;
     StateTracker state_;

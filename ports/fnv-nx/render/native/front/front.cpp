@@ -204,9 +204,10 @@ bool Frame::Init(Backend* be, uint32_t uboBytes, uint32_t uboSize) {
     order_ = (uint32_t*)malloc(kMaxPackets * 4); tmp_ = (uint32_t*)malloc(kMaxPackets * 4);
     keys_ = (uint64_t*)malloc(kMaxPackets * 8); ktmp_ = (uint64_t*)malloc(kMaxPackets * 8);
     tex_ = (uint32_t*)malloc(kMaxTex * 4);
+    tags_ = (uint32_t*)malloc(kMaxPackets * 4);
     dyn_ = (DynRec*)malloc(kMaxDyn * sizeof(DynRec));
     words_[0] = (uint32_t*)malloc(kWords * 4); words_[1] = (uint32_t*)malloc(kWords * 4);
-    if (!packets_ || !order_ || !tmp_ || !keys_ || !ktmp_ || !tex_ || !dyn_ || !words_[0] || !words_[1]) return false;
+    if (!packets_ || !order_ || !tmp_ || !keys_ || !ktmp_ || !tex_ || !tags_ || !dyn_ || !words_[0] || !words_[1]) return false;
     return ubo_.Init(be, uboBytes);
 }
 
@@ -241,6 +242,7 @@ uint16_t Frame::AddDyn(const DynRec& d) {
 
 Packet* Frame::Emit() {
     if (nPackets_ >= kMaxPackets) return nullptr;
+    tags_[nPackets_] = 0;
     Packet* p = &packets_[nPackets_++];
     memset(p, 0, sizeof *p);
     return p;
@@ -264,6 +266,11 @@ bool Frame::Clear(uint8_t pass, uint8_t layer, uint16_t depthKey, uint32_t flags
     p->first = flags; p->count = rgba8; memcpy(&p->uboOffset, &depth, 4); p->baseVertex = (int32_t)stencil;
     p->vtxOffset = x; p->vtxSize = y; p->idxOffset = w; p->idxSize = h;
     return true;
+}
+
+void Frame::Tag(const Packet* p, uint16_t enginePass, uint16_t family) {
+    uint32_t i = (uint32_t)(p - packets_);
+    if (i < nPackets_) tags_[i] = family ? ((uint32_t)enginePass | (uint32_t)family << 16) : 0;
 }
 
 NxEpilogue* Frame::Epilogue(Packet* p) {
@@ -296,9 +303,14 @@ void Frame::Finish(StateCache& sc, NxFrameStats* stats, bool present) {
         cur = def;
         // Redundant-bind elimination: every bind is compared with the last value encoded in this pass.
         uint32_t curState = 0, curTex = ~0u, curTexN = 0, curVtxB = 0, curVtxO = ~0u, curIdxB = 0, curIdxO = ~0u;
-        uint32_t curEpi = 0;
+        uint32_t curEpi = 0, curTag = 0;
         for (; i < nPackets_ && (keys_[i] >> 56) == pass; i++) {
             const Packet& p = packets_[order_[i]];
+            if (p.prim != kClearPrim && tags_[order_[i]] != curTag) {
+                curTag = tags_[order_[i]];
+                a = enc_.Op(NxOp_Marker, 3);
+                a[0] = NX_MARKER_PASS; a[1] = curTag ? (curTag & 0xFFFF) : NX_PASS_UNKNOWN; a[2] = curTag >> 16;
+            }
             if (p.prim == kClearPrim) {
                 a = enc_.Op(NxOp_Clear, 8);
                 a[0] = p.first; a[1] = p.count; a[2] = p.uboOffset; a[3] = (uint32_t)p.baseVertex;

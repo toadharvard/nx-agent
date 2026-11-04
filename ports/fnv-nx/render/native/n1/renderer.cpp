@@ -271,6 +271,8 @@ bool Renderer::Render(const Draw& d) {
     DynRec dr;
     DynFromD3D9(&dr, r.dyn);
     p->dyn = frame_.AddDyn(dr);
+    if (d.family) frame_.Tag(p, d.enginePass, d.family);
+    else if (curFamily_) frame_.Tag(p, curPass_, curFamily_);
     return true;
 }
 
