@@ -415,6 +415,29 @@ can see a transform half-written (an NiTransform is 13 floats).
   pathing `FUN_006ebc50` (about 10-25 % of main).
 * This costs main time: the wait the race hid. The serial cull-after-step order is the real code limit (6.10).
 
+**The fix and its cost.** `patches/mt1_cull_sync.s1b` puts the wait at the top of `FUN_008706b0`: thread 2's event 6
+(`fnvnx_mt1_wait_cell_update()`, toolchain/game/boot.cpp). The event is manual-reset; `FUN_008c78c0` resets all 12 + 8
+with ResetEvent (x86 `call [0x00fdf1cc]` at 0x8c78ec / 0x8c7917) when main starts the AI threads. With one AI thread
+there is no wait, and the wait is bounded at 100 ms. It sits behind `FNVNX_MT1_ON`, off by default.
+
+Cost [E] (model items, mid):
+* Thread 2 reaches event 6 after thread 0's part up to its event 4 (~half the process lists, 2.75 M), the Havok step
+  (havok_ai 2.6 M) and the downward part of animation_ai (~0.9 M): ~6.25 M.
+* Main reaches `FUN_008706b0` after temp effects, sky, effect roots and pathing: ~1 M.
+* The wait is about 5.2 M on main, ~6.4 ms at 1020 MHz, ~8 ms on the worst frame (as built about 35 ms instead of
+  26.9).
+
+**Verdict: keep the PC behaviour by default.**
+* Tearing of a multi-word transform during the overlap is possible on x86 as well. TSO orders stores, it does not make
+  a 13-float write atomic, so the PC game ships with it.
+* What the A57 adds is reordering. That matters where a pointer is published before what it points to is written.
+* During this overlap the scene graph's structure does not change: attaches and detaches are queued as packed tasks
+  and drained on main after the join (main.cpp:3364-3365). The downward pass writes transforms and bounds in place.
+* So the residual race is the same class the PC has: a frame's cull may use a mix of this and last frame's
+  transforms.
+* The patch stays available behind the gate for an A/B on hardware, if artefacts show up. A cheaper fix, if one is
+  needed: cull from bounds copied at the end of the downward pass (one frame of latency, no wait).
+
 ### 6.5 Memory ordering: what x86 gave for free
 
 x86 is TSO: every store is a release and every load an acquire. AArch64 is not, so engine code that synchronises

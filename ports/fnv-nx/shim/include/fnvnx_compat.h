@@ -231,6 +231,12 @@ extern "C"
 #endif
 int fnvnx_mt1_on(void) __attribute__((weak));
 #define FNVNX_MT1_ON (fnvnx_mt1_on != 0 && fnvnx_mt1_on() != 0)
+/* MT1 cull sync (patches/mt1_cull_sync.s1b, docs/PERF.md 6.11): wait for this frame's cell update on AI linear
+ * thread 2 before the world render culls (toolchain/game/boot.cpp) */
+#ifdef __cplusplus
+extern "C"
+#endif
+void fnvnx_mt1_wait_cell_update(void);
 
 #define FNVNX_ASM_FNV_HELPERS
 #include "fnvnx_asm.h"
