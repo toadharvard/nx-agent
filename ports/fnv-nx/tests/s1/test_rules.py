@@ -103,6 +103,9 @@ check('MATH1 in a namespace that takes the C fabs: the copy goes',
       run(s1.r_math_overloads, 'namespace N {\nusing ::fabs; /* fnv-nx DECL1 */\ninline float fabs(float f)\n{\n'
           '    return (float)fabs((double)f);\n}\nfloat g(float x) { return fabs(x); }\n}\n'),
       ['/* fnv-nx MATH1 */', 'float g(float x)'], ['(float)fabs((double)f)', '#include <math.h>'])
+check('MATH1 next to the namespace\'s own extern "C" prototype: the copy stays (MSVC found it)',
+      run(s1.r_math_overloads, 'namespace N {\nextern "C" double cos(double);\ninline float __cdecl cos(float _X)\n{\n'
+          '    return cosf(_X);\n}\n}\n'), ['return cosf(_X);'], ['MATH1'])
 check('MATH1 in a namespace of its own: the overload stays',
       run(s1.r_math_overloads, 'namespace N {\ninline float fabs(float f)\n{\n    return f < 0 ? -f : f;\n}\n}\n'),
       ['return f < 0 ? -f : f;'], ['MATH1'])
@@ -295,7 +298,19 @@ got = prepare.r_platform_protos('/x/src/m.cpp', 'extern "C" double __cdecl sqrt(
                                 Counter())
 check('DECL1 declares the C math function itself (no <math.h> overloads), keeps a float overload of the decomp', got,
       ['#include "fnvnx_cmath/fabs.h" /* fnv-nx DECL1 */\n#include "fnvnx_cmath/sqrt.h" /* fnv-nx DECL1 */\n'
-       'float __cdecl floor(float);\nnamespace N {\nusing ::fabs; /* fnv-nx DECL1 */\n}'], ['<math.h>'])
+       'float __cdecl floor(float);\nnamespace N {\nextern "C" double fabs(double);\n}'], ['<math.h>', 'using ::fabs'])
+# in a namespace the C function stays alone: a using-declaration would bring <math.h>'s float overload in (S11)
+_st = Counter()
+got = prepare.r_platform_protos('/x/src/n.cpp', '#include <math.h>\nnamespace N {\nextern "C" double __cdecl fabs(double);\n'
+                                'float f(float x) { return (float)fabs(x); }\n}\n', _st)
+check('DECL1 keeps a namespace\'s extern "C" prototype of the C math function, header on top', got,
+      ['#include "fnvnx_cmath/fabs.h" /* fnv-nx DECL1 */\n#include <math.h>\nnamespace N {\nextern "C" double __cdecl fabs(double);'],
+      ['using ::fabs'])
+check('DECL1-MATHNS counted', str(_st['DECL1-MATHNS']), ['1'])
+got = prepare.r_platform_protos('/x/src/s.cpp', 'namespace N {\nextern "C" {\ndouble __cdecl fabs([SA_Pre(Null=SA_No)]'
+                                '[SA_Pre(Deref=1,Valid=SA_Yes,Access=SA_Read)]double _X);\n}\n}\n', Counter())
+check('DECL1 reads the C signature through attribute SAL (commas inside [...])', got,
+      ['#include "fnvnx_cmath/fabs.h" /* fnv-nx DECL1 */', 'double __cdecl fabs([SA_Pre(Null=SA_No)]'], ['using ::fabs'])
 # where a translation unit of the file includes <math.h>, the decomp's float overload is MSVC's <math.h> one: dropped
 import json as _json
 import tempfile

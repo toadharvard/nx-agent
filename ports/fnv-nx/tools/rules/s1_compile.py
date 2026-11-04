@@ -1420,8 +1420,9 @@ def r_math_overloads(path, text, stats):
     the same overloads (std::sqrt(float) brought to the global namespace), so the copy is a redefinition and its calls
     ambiguous. Also the x86 header's inline float functions themselves (`inline float fabsf(float _X) { return
     (float)fabs((double)_X); }`, also `extern "C" inline`): <math.h> declares fabsf as the C function. The header
-    takes the place of the first one. In a namespace that takes the C function itself (`using
-    ::fabs;`, `extern "C" double fabs(double);`), whose overloads are then the global ones, an untagged copy goes too."""
+    takes the place of the first one. In a namespace that takes the global overloads (`using ::fabs;`) an untagged
+    copy goes too; next to the namespace's own `extern "C" double fabs(double);` (DECL1 keeps it, DECL1-MATHNS) the
+    copy stays: MSVC's lookup in the namespace found the copy for a float argument, and GCC takes both."""
     if 'inline' not in text and '__forceinline' not in text: return text
     spans, out, pos, have = None, [], 0, False
     for m in MATH_OVERLOAD_DEF.finditer(text):
@@ -1430,13 +1431,12 @@ def r_math_overloads(path, text, stats):
         chain = prepare.scope_chain(spans, m.start())
         in_ns = bool(chain) and all(k == 'namespace' for k, _ in chain)
         if in_ns:
-            # in a namespace only where the namespace takes the C function itself (`using ::fabs;` from DECL1, or
-            # an extern "C" prototype): its overloads then are the global ones and the copy collides with them.
-            # A copy tagged as a function of the binary (`// @fnv`) is kept.
+            # in a namespace only where the namespace takes the global overloads (`using ::fabs;`): the copy
+            # collides with them. A copy tagged as a function of the binary (`// @fnv`) is kept.
             o = max(sp[0] for sp in spans if sp[0] < m.start() < sp[1])
             before = text[o:m.start()]
             name = m.group(1)
-            if not re.search(r'\busing\s+::\s*%s\s*;|\bextern\s+"C"[^;{}]*\b%s\s*\(' % (name, name), before): continue
+            if not re.search(r'\busing\s+::\s*%s\s*;' % name, before): continue
             if re.search(r'//\s*@fnv\b[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', text[max(0, m.start() - 300):m.start()]): continue
         elif any(k not in ('extern',) or '"C"' in h for k, h in chain): continue
         end = prepare.match_brace(text, m.end() - 1)

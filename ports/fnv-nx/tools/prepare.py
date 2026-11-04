@@ -310,6 +310,12 @@ def platform_names():
 # the unit's recipe) is kept as it is, where no translation unit that sees the file includes <math.h> (there the
 # overloads are MSVC's too and the decomp's copy would collide with libstdc++'s). One with C linkage
 # (`extern "C" float floor(float)`) cannot sit next to the C function; GAME1 renames it (see there).
+# In a namespace N, the decomp's prototype of the C function hides the global overloads: N's `fabs(f)` is the double
+# C function, also where the unit includes <math.h> (MSVC). `using ::fabs;` would bring <math.h>'s float overload
+# into N (S11: niobbox, bhkrigidbody, hkpworldviewerbase rounded through float), so N keeps a declaration of the C
+# function alone: the decomp's own prototype where it has C linkage, else (a C++ spelling the unit binds to the CRT
+# function) `extern "C" double fabs(double);` in its place; the shim's header goes on top of the file, so its noexcept
+# declaration comes first and GCC takes the redeclaration (DECL1-MATHNS).
 
 MATH_NAMES = set(CRT_HEADERS['<math.h>'].split())
 
@@ -337,6 +343,7 @@ def math_proto_sig(proto, name):
     i = re.search(r'\b%s\s*\(' % re.escape(name), proto)
     params = proto[i.end():proto.rindex(')')]
     params = re.sub(r'\)\s*throw\s*\([^)]*$', '', params)
+    params = re.sub(r'\[[^\]]*\]', ' ', params)          # attribute SAL ([SA_Pre(Deref=1,Valid=SA_Yes)]) has commas
     ps = tuple(_norm_type(x) for x in params.split(',')) if params.strip() not in ('', 'void') else ()
     return (_norm_type(proto[:i.start()]), ps)
 
@@ -473,9 +480,20 @@ def r_platform_protos(path, text, stats):
                 ls = text.rfind('\n', 0, start - 1) + 1
                 if ls >= pos and PROTO_HEAD.match(text, ls, start): start = ls
             nl = '\n' * text.count('\n', start, m.end())
+            key = 'math:' + name
+            if spaces and math_proto_sig(m.group(0), name) == C_MATH_SIG[name]:
+                # N keeps the C function alone (see MATH_NAMES above): no using-declaration of the overloads
+                if key not in have: have.add(key); top.append(c_math_header(name))
+                stats['DECL1-MATHNS'] += 1
+                if c_linkage: continue                    # the decomp's prototype stays as it is
+                ret, params = C_MATH_SIG[name]
+                out.append(text[pos:start])
+                out.append('extern "C" %s %s(%s); /* fnv-nx DECL1 */%s' % (ret, name, ', '.join(params), nl))
+                pos = m.end()
+                stats['DECL1'] += 1
+                continue
             out.append(text[pos:start])
             alias = 'using ::%s; ' % name if spaces else ''
-            key = 'math:' + name
             if not chain and key not in have:
                 out.append('#include %s /* fnv-nx DECL1 */%s' % (c_math_header(name), nl)); have.add(key)
             else:

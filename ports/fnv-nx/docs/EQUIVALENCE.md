@@ -35,7 +35,7 @@ explains; `no-build`: units that compile under MSVC without the rule but not wit
 | Rule | eh | retarget | code | no-build | Verdict |
 |---|---:|---:|---:|---:|---|
 | `EXC1` | 562 | | | | **exceptional paths only.** Without `throw()` MSVC adds EH frames / unwind states (318 units, e.g. `NiRenderedTexture::Create` frees the memory when the constructor throws). Every one is identical with `/EHs-c-`. |
-| `DECL1` | 4 | 153 | 27 | 65 | **changes callees and math precision.** Retargets: the decomp's C++ prototypes of `strcpy_s` / `strcat_s` / `_stricmp` / `sprintf_s` / `memset` / `memcpy` / `strchr` are bound to game wrappers (0x00406d30 `TaskQueueInterface::CopyStringToBuffer`, 0x00404dc0, 0x00406d00, 0x00403d30, ...) that only forward to the CRT function; DECL1 calls the CRT directly (equivalent). Code: the CRT's `<math.h>` overloads replace the decomp's declarations, so `fabs` / `sqrt` / `floor` of a `float` round through `float` where the matched code stayed in x87 precision, or the other way round (`Calendar::GetGameHoursPassed` passed `floor` a `float` to the game helper 0x00406cc0 bound to `_floor`; it now passes a `double`: hours can differ by one at a boundary); CRT attributes change code after `_invalid_parameter_noinfo` and EH states around CRT calls. No-build: MSVC-only (`std::abs` 29, SDK names, `float` math overloads). **Re-gated at `357bc06`** (J-0093: a dropped C math prototype becomes `fnvnx_cmath/<name>.h`; the gate puts that directory on MSVC's include path). 18 of the 27 code functions are identical now, among them `Calendar::GetGameHoursPassed`; activeeffect (48 functions) is identical too. 3 are not math but CRT bindings: `memset` goes to the CRT instead of the decomp's namespace copy (one EH state store fewer), `free` is called directly instead of through its import slot, and the `_invalid_parameter_noinfo` paths change. 3 more (niobbox 0x00eba680, bhkrigidbody 0x00c8e160, hkpworldviewerbase 0x00ddd040) come from `using ::fabs;`, which DECL1 writes in place of a namespace's `extern "C" double fabs(double);` in a unit that includes `<math.h>` itself. The using-declaration brings in the `float fabs(float)` overload that the namespace declaration hid, so `fabs(f)` rounds through `float`, where the exe stayed in `double`; reported to S1. The last 3 (shadowlightshader 0x00b79050, robertdavies_random 0x00b43120, tile EvalValue 0x00a09410) are still x87 / register differences, to be attributed by the eq farms. |
+| `DECL1` | 4 | 153 | 27 | 65 | **changes callees and math precision.** Retargets: the decomp's C++ prototypes of `strcpy_s` / `strcat_s` / `_stricmp` / `sprintf_s` / `memset` / `memcpy` / `strchr` are bound to game wrappers (0x00406d30 `TaskQueueInterface::CopyStringToBuffer`, 0x00404dc0, 0x00406d00, 0x00403d30, ...) that only forward to the CRT function; DECL1 calls the CRT directly (equivalent). Code: the CRT's `<math.h>` overloads replace the decomp's declarations, so `fabs` / `sqrt` / `floor` of a `float` round through `float` where the matched code stayed in x87 precision, or the other way round (`Calendar::GetGameHoursPassed` passed `floor` a `float` to the game helper 0x00406cc0 bound to `_floor`; it now passes a `double`: hours can differ by one at a boundary); CRT attributes change code after `_invalid_parameter_noinfo` and EH states around CRT calls. No-build: MSVC-only (`std::abs` 29, SDK names, `float` math overloads). **Re-gated at `357bc06`** (J-0093: a dropped C math prototype becomes `fnvnx_cmath/<name>.h`; the gate puts that directory on MSVC's include path). 18 of the 27 code functions are identical now, among them `Calendar::GetGameHoursPassed`; activeeffect (48 functions) is identical too. 3 are not math but CRT bindings: `memset` goes to the CRT instead of the decomp's namespace copy (one EH state store fewer), `free` is called directly instead of through its import slot, and the `_invalid_parameter_noinfo` paths change. 3 more (niobbox 0x00eba680, bhkrigidbody 0x00c8e160, hkpworldviewerbase 0x00ddd040) come from `using ::fabs;`, which DECL1 writes in place of a namespace's `extern "C" double fabs(double);` in a unit that includes `<math.h>` itself. The using-declaration brings in the `float fabs(float)` overload that the namespace declaration hid, so `fabs(f)` rounds through `float`, where the exe stayed in `double`. DECL1 now keeps the namespace's declaration of the C function (DECL1-MATHNS: 33 sites in 24 files; a C++ spelling the unit binds to the CRT becomes `extern "C" double fabs(double);`), and the three are identical. Before/after on the 43 units with such a site changes exactly these 3 functions. The last 3 (shadowlightshader 0x00b79050, robertdavies_random 0x00b43120, tile EvalValue 0x00a09410) are still x87 / register differences, to be attributed by the eq farms. |
 | `GAME1` | | | | | **fixes DECL1's rebinding (D13).** No unit differs because of it; `falloutaudiomedia.cpp` (14 functions), `bsspinlock_console`, `memorymanager.cpp` are identical again (they call 0x00830470, `FUN_008691b0::Lock`, the Interlocked import slots as the exe does). |
 | `CTOR1` | 31 | 2 | 60 | | **null check only.** `::new ((void*)p) T(args)` calls `<new>`'s placement form (`throw()`): MSVC null-checks the pointer before the constructor, and at `/Od` calls the placement function instead of inlining it. Same behaviour for a non-null `this`. |
 | `NEW2` | 55 | | | | **exceptional paths only** (MSVC's placement forms are `throw()`, the decomp's were not). |
@@ -71,6 +71,28 @@ in EH code and are identical with `/EHs-c-` (EXC1, as before). Layouts: `Graphic
 `BSShaderAccumulator` (896) are as in pristine. `NiCriticalSection` (128) and `RecursiveLock` keep pristine's size
 and member offsets, plus one line, the 4-byte tail member at +24 (`m_kCriticalSection_fnvnx_tail`,
 `CriticalSection_fnvnx_tail`).
+
+## First farm gate (eq1-6, heads `49f6666` / `650bf10` / `4f0f481`)
+
+Shards 2, 4, 5 and 6 (2,016 units) passed on heads with the BIND1 fix; shards 1 and 3 had not reported yet. All four
+shards used the same decomp, rule set and pristine objects. Units: 1,597 identical, 362 differ, 56 do not compile
+(prepared side). Functions: 700 of 44,050 differ (EH-only 510, retarget 118, code 72). Per rule, ranked by code
+functions:
+
+| rule | code | retarget | eh | no-build | owner |
+|---|---:|---:|---:|---:|---|
+| `CTOR1` | 46 | | 15 | | S1 |
+| `STATIC1` | 11 | | | | S1 (link semantics: reloads of an external variable) |
+| `XINC1` | 5 | | | | S1b |
+| `PTR1` | 3 | | | | S1 |
+| `DECL1` | 2 | 108 | 4 | 23 | S1 (retargets: CRT wrappers the link binds by address, S2) |
+| `MATH1` | 1 | | | | S1 |
+| `RET1` | 1 | | | | S1b |
+| `EXC1` | | | 425 | | S1 (exceptional paths only) |
+| `NEW2` | | 1 | 41 | | S1 |
+| `ANON1` | | 2 | | | S1 |
+| `ENUM1` | | | | 5 | by design (MSVC 2008 parse limit) |
+| groups (`sdk`, `newdel`), interactions; `CALL1` `DECL2` `GOTO1` `IFX1` (no-build 1 each) | 3 | 7 | 25 | 28 | |
 
 ## Round 8 (S1 rules after `8fff58b`)
 
