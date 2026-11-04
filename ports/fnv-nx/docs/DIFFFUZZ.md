@@ -143,6 +143,11 @@ causes `msvc-inlined` (oracle gap: the native calls X out of line where the orac
 next call being one X makes), `runtime-equiv` (oracle gap, records from before difffuzz-8) and `array-new-check`
 (soft: GCC checks new[]'s count, MSVC 2008 does not).
 
+**Native runtime state (difffuzz-8).** The AArch64 machine has a zeroed thread-local block at `tpidr_el0`
+(0x0b900000, private, not compared): the platform's `thread_local` state read as `[tpidr_el0 + off]` faulted at
+small addresses before. A native indirect call through the value of an IAT slot (pinned to the x86 import stub)
+is that import, as on x86.
+
 **Wild calls.** A jump to memory without code on either machine (an indirect call through a pointer the case
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.

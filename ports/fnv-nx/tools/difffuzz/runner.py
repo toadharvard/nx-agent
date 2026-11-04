@@ -329,6 +329,7 @@ class Pair:
             self.ae.reset(w)
         self.ae.callee_conv = getattr(self.target.callee_info, 'conv', None)
         self.ae.iat_names = getattr(self.target, 'iat_names', {}) or {}
+        self.ae.imports = getattr(self.target, 'imports', {}) or {}
         NAMES.clear(); NAMES.update(self.target.image.stubs)
         rx = self.xe.run(self.target.conv, case, placement, max_steps=max_steps, start=self.target.orig_addr)
         ra = self.ae.run(self.target.conv, case, placement, self.target.orig_addr, max_steps=max_steps)
