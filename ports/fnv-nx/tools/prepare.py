@@ -637,7 +637,7 @@ def r_platform_protos(path, text, stats):
     out.append(text[pos:])
     return ''.join('#include %s /* fnv-nx DECL1 */\n' % h for h in top) + ''.join(out)
 
-# ---- DECL1-TYPEDEF: the decomp's own typedefs of C library types that the target defines differently
+# ---- DECL3: the decomp's own typedefs of C library types that the target defines differently
 #
 # A unit that carries its own <stdio.h> (`typedef _iobuf FILE;`, `typedef __int64 fpos_t;`) clashes with the target's
 # FILE (glibc's struct _IO_FILE) and fpos_t (a struct). Under MSVC FILE is _iobuf: the typedef goes and every FILE of
@@ -657,18 +657,18 @@ def _rename_code_word(text, old, new):
     return ''.join(out), n
 
 def r_crt_typedefs(path, text, stats):
-    """DECL1-TYPEDEF: the unit's own FILE / fpos_t typedefs give way to the MSVC types they name (see above)."""
+    """DECL3: the unit's own FILE / fpos_t typedefs give way to the MSVC types they name (see above)."""
     if 'FILE' in text:
         m = CRT_TYPEDEF_FILE.search(text)
         if m and not prepare_in_scope(text, m.start()):
-            text = text[:m.start()] + '/* fnv-nx DECL1-TYPEDEF: FILE is _iobuf */' + text[m.end():]
+            text = text[:m.start()] + '/* fnv-nx DECL3: FILE is _iobuf */' + text[m.end():]
             text, n = _rename_code_word(text, 'FILE', '_iobuf')
-            stats['DECL1-TYPEDEF'] += 1 + n
+            stats['DECL3'] += 1 + n
     if 'fpos_t' in text:
         m = CRT_TYPEDEF_FPOS.search(text)
         if m and not prepare_in_scope(text, m.start()):
             text, n = _rename_code_word(text, 'fpos_t', 'fnvnx_msvc_fpos_t')
-            stats['DECL1-TYPEDEF'] += n
+            stats['DECL3'] += n
     return text
 
 def prepare_in_scope(text, pos):

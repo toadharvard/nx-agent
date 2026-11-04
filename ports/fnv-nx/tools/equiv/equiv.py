@@ -73,6 +73,11 @@ CLASSES = {
     'RREF1': 'neutral',         # fnvnx_lvalue around temporaries passed to non-const reference parameters
     'TPL1': 'neutral',          # this-> for members of dependent bases used by plain name (MSVC had no two-phase lookup)
     'TPL2': 'neutral',          # forward declarations of a namespace's function templates (MSVC's lookup)
+    'TPL3': 'neutral',          # forward declarations of templates called qualified / with template args before definition
+    'TYPN1': 'neutral',         # `typename` before a dependent library type member (MSVC took it as a type)
+    'INST1': 'neutral',         # `unsigned int` -> C<..>::size_type in an explicit member instantiation (same member)
+    'COPY1': 'neutral',         # B(o) -> B(static_cast<const B&>(o)) in a copy ctor: the copy ctor MSVC chose
+    'DECL3': 'neutral',         # a unit's own `typedef _iobuf FILE` / `typedef __int64 fpos_t`: the MSVC types themselves
     'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
     'DTOR1': 'neutral',         # declares NiPointer<T>::~NiPointer() specializations for pointees the unit never completes
     'VTBL1': 'platform',        # full MSVC-order virtual interface for listed stand-ins (BSNiAllocator), slots forward

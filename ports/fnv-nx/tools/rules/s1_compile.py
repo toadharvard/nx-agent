@@ -1791,6 +1791,11 @@ def r_dependent_typenames(path, text, stats):
 INST1_DIR = re.compile(r'^([ \t]*template\s+(?!<)[\w \t\*&:<>,]*?[\s\*&])((?:::\s*)?(?:[A-Za-z_]\w*\s*::\s*)*'
                        r'([A-Za-z_]\w*)\s*<[^;{}()]*>)\s*::\s*([A-Za-z_]\w*)\s*\(([^;{}]*)\)\s*;', re.M)
 
+def _inst1_namespaces(text, at):
+    """Names of the namespaces open at offset `at`, outermost first."""
+    return [n.group(1) for n in re.compile(r'\bnamespace\s+([A-Za-z_]\w*)\s*\{').finditer(text, 0, at)
+            if prepare.match_brace(text, n.end() - 1) > at]
+
 def r_instantiation_size_types(path, text, stats):
     """INST1: `unsigned int` -> `C<..>::size_type` in an explicit member instantiation (see above)."""
     if 'template' not in text or 'unsigned' not in text: return text
@@ -1798,13 +1803,18 @@ def r_instantiation_size_types(path, text, stats):
     for m in INST1_DIR.finditer(text):
         ps = _split_args(m.group(5))
         if not any(re.sub(r'\s+', ' ', p.strip()) == 'unsigned int' for p in ps): continue
-        cls = re.search(r'\btemplate\s*<[^{};]*>\s*(?:class|struct)\s+%s\b[^;{]*\{' % re.escape(m.group(3)), text)
-        if not cls: continue
-        body = text[cls.end():prepare.match_brace(text, cls.end() - 1)]
-        decl = re.search(r'\b%s\s*\(([^;{}()]*)\)' % re.escape(m.group(4)), body)
-        if not decl: continue
-        dps = _split_args(decl.group(1))
-        if len(dps) != len(ps): continue
+        # the class template the directive names: in the qualifier's namespace, the nearest definition before it
+        # that declares the member with as many parameters (the decomp has several `vector`s in other namespaces)
+        quals = [q for q in re.split(r'\s*::\s*', m.group(2).split('<', 1)[0].strip()) if q][:-1]
+        dps = None
+        for cls in reversed(list(re.compile(r'\btemplate\s*<[^{};]*>\s*(?:class|struct)\s+%s\b[^;{]*\{'
+                                                % re.escape(m.group(3))).finditer(text, 0, m.start()))):
+            if quals and _inst1_namespaces(text, cls.start())[-len(quals):] != quals: continue
+            body = text[cls.end():prepare.match_brace(text, cls.end() - 1)]
+            decl = re.search(r'\b%s\s*\(([^;{}()]*)\)' % re.escape(m.group(4)), body)
+            if decl and len(_split_args(decl.group(1))) == len(ps):
+                dps = _split_args(decl.group(1)); break
+        if dps is None: continue
         new = []
         for p, d in zip(ps, dps):
             if re.sub(r'\s+', ' ', p.strip()) == 'unsigned int' and re.match(r'\s*size_type\b', d):
