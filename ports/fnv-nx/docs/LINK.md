@@ -671,6 +671,37 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   The synthesized share is measured on the farm, where the probe runs. A class whose slot order differs from the
   callers' declarations (an MSVC deleting-destructor slot against Itanium's two) still needs S1's class shapes.
 
+  S5's work list (J-0109, `tests/s5/hand_vptrs.py`) added three rules:
+
+  * **Every V entry rebinds its data symbol** (S2:mapped). A V entry's `__fnv_<addr>` is its address point in
+    `aliases.ld` whether or not a vptr store was recognised, so a comparison or an unrecognised store reads the
+    native vtable too.
+  * **Unbound `DAT_<hex>` names count as image addresses** (S2:class). A right side that units.json does not bind
+    for the unit still counts when the address is within 64 KiB of the named vftables.
+  * **Stores at a nonzero offset are secondary vptrs.** `*(void **)((char *)this + 0xa8) = ...` and
+    `((int *)this)[k] = ...` map to the address point whose offset-to-top is minus that offset.
+
+  The two S2:named rows are not link rules. 0x010d1854 (`FUN_00d63cb0`{for `S_B0'}) needs the typeinfo of
+  `FUN_00ddcc60`, whose key function is compiled nowhere. 0x01023ac4's `FUN_004f1460` declares only
+  `virtual void Dummy()` and is waiting for synthesis.
+
+  On f13's objects:
+
+  | Result | Count |
+  |---|---|
+  | data references to image vftables rebound | 1,156 (62 of them without a recognised store) |
+  | hand-stored addresses | 1,860 |
+  | bound to a native address point | 1,101 |
+  | candidate class requested for synthesis | 425 |
+  | no candidate | 334 |
+
+  The `why no candidate` column of `hand_vptrs.tsv` says what a candidate would need:
+
+  * 235 storing functions are shells: no unit names their address as a constructor or destructor. A candidate
+    needs S1 to give the shell a polymorphic class, or the image's RTTI, which needs the exe.
+  * 99 stores have no usable storing address: the function stores several vtables at one offset (a base's, then
+    its own), or it has no `@fnv` annotation.
+
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
 2,029 objects compiled (of 2,978 units; S1 census flags, `-O2`). 106,043 undefined (object, symbol) references:

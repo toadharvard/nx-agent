@@ -120,6 +120,14 @@ SRC = {
                  'extern int DAT_01000820;\nextern int DAT_01000830;\n'
                  '// @fnv 0x00406000\nvoid ShellV::FUN_00406000() { *(int*)this = (int)&DAT_01000820; }\n'
                  '// @fnv 0x00406010\nvoid ShellV::FUN_00406010() { *(int*)this = (int)&DAT_01000830; }\n',
+    # S5 J-0109: a V entry whose vptr store is not recognised (a comparison) and a secondary vptr stored at +8
+    'src/m.cpp': 'struct Named2 { virtual int g2(); };\nint Named2::g2() { return 6; }\n'
+                 'Named2 *mk_n2() { return new Named2; }\nextern int DAT_01000740;\n'
+                 'bool is_n2(void *p) { return *(void **)p == (void *)&DAT_01000740; }\n'
+                 'struct MB1 { virtual int b1(); int x; };\nstruct MB2 { virtual int b2(); };\nint MB1::b1() { return 1; }\n'
+                 'int MB2::b2() { return 2; }\nstruct MI : MB1, MB2 { void set(); };\nMI *mk_mi() { return new MI; }\n'
+                 'extern int DAT_01000850;\n'
+                 'void MI::set() { *(void **)((char *)this + 8) = &DAT_01000850; }\n',
     'src/w.cpp': 'struct Real2 { virtual int r(); virtual int s(); Real2(); };\nint Real2::r() { return 4; }\n'
                  'int Real2::s() { return 5; }\nstruct Lazy { virtual int z(); Lazy(); };\n'
                  'Lazy *mk_lazy() { return new Lazy; }\n',
@@ -185,6 +193,10 @@ UNITS = {'units': [
      'symbols': {'?g_hdr@@3HA': '0x01000b00'}},
     {'source': 'src/s2.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401810, '?get_hdr2@@YAHXZ')],
      'symbols': {}},
+    {'source': 'src/m.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x406200, '?g2@Named2@@UAEHXZ'), F(0x406210, '?is_n2@@YA_NPAX@Z'), F(0x406220, '?set@MI@@QAEXXZ')],
+     'symbols': {'??_7Named2@@6B@': '0x01000740', '?DAT_01000740@@3HA': '0x01000740',
+                 '?DAT_01000850@@3HA': '0x01000850'}},
     {'source': 'src/v.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x406000, '?FUN_00406000@ShellV@@QAEXXZ'), F(0x406010, '?FUN_00406010@ShellV@@QAEXXZ')],
      'symbols': {'?DAT_01000820@@3HA': '0x01000820', '?DAT_01000830@@3HA': '0x01000830'}},
@@ -286,6 +298,12 @@ def main():
         check(0x01000800 not in rows and 0x01000810 not in rows, 'a function storing two vftables maps neither')
         check(rows.get(0x01000820, [''] * 3)[1:3] == ['V', '_ZTV5Real2'],
               '`*(int*)this = (int)&DAT_x` in a shell -> the class constructed at its address: %s' % rows.get(0x01000820))
+        ld_ = open(os.path.join(out, 'aliases.ld')).read()
+        check('__fnv_01000740 = _ZTV6Named2 + 8;' in ld_, 'a V entry without a recognised store: its data symbol is '
+              'the address point: %s' % [l for l in ld_.splitlines() if '01000740' in l])
+        check(rows.get(0x01000850, [''] * 3)[1:3] == ['V', '_ZTV2MI'] and '__fnv_01000850 = _ZTV2MI + 20;' in ld_,
+              'a vptr stored at +8: MI\'s secondary address point: %s %s' % (
+                  rows.get(0x01000850), [l for l in ld_.splitlines() if '01000850' in l]))
         hv = {r[0]: r for r in (l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'hand_vptrs.tsv'))
                                 if not l.startswith('#'))}
         req = open(os.path.join(out, 'vtable_requests.tsv')).read()
