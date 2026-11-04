@@ -23,6 +23,13 @@ def main():
         if m not in seen:
             seen.add(m)
             print("  " + m)
+    game = [l.split("\t") for l in log if l.startswith("milestone\t")]   # emu_guest.py --milestones
+    if game:
+        got = [g[1] for g in game if len(g) > 2 and g[2] == "reached"]
+        print(f"game milestones (tests/s5/milestones.txt): {len(got)} of {len(game)} reached"
+              + (f", last: {got[-1]}" if got else ""))
+        for g in game:
+            print(f"  {g[1]}: " + (f"{g[3]} {g[4]}" if len(g) > 4 and g[2] == "reached" else "not reached"))
     names = [m.group(1) for l in log for m in [re.search(r"trap #\d+: unresolved (\S+)", l)] if m]
     names = list(dict.fromkeys(names))
     after = 0

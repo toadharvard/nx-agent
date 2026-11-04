@@ -201,7 +201,7 @@ EOF
 		if [ -f "$bd/guest/fnvnx.elf" ] && stage_after "$bd" guest link; then mkdir -p guest; cp "$bd/guest/fnvnx.elf" guest/; fi
 		if stage_after "$bd" guest link && stage_after "$bd" boot guest; then
 			mkdir -p boot
-			for f in summary.txt frontier.txt frontier.tsv emu.log; do [ -f "$bd/boot/$f" ] && cp "$bd/boot/$f" boot/; done
+			for f in summary.txt frontier.txt frontier.tsv emu.log boot_summary.json; do [ -f "$bd/boot/$f" ] && cp "$bd/boot/$f" boot/; done
 			# the data image the boots ran on (S14's synthesized image) and S5's stub-fault boot (full_job.sh 4b)
 			if [ -f "$bd/boot/synth/synth.exe" ]; then
 				cp "$bd/boot/synth/synth.exe" boot/synth.exe
@@ -210,7 +210,7 @@ EOF
 			for f in hand_vptrs.tsv hand_vptrs_sites.tsv hand_vptrs.txt; do [ -f "$bd/boot/$f" ] && cp "$bd/boot/$f" boot/; done
 			if [ -d "$bd/boot/stub" ]; then
 				mkdir -p boot/stub
-				for f in summary.txt emu_stub.log frontier_stub.txt frontier_stub.tsv; do
+				for f in summary.txt emu_stub.log frontier_stub.txt frontier_stub.tsv boot_summary_stub.json; do
 					[ -f "$bd/boot/stub/$f" ] && cp "$bd/boot/stub/$f" boot/stub/
 				done
 			fi
@@ -218,7 +218,7 @@ EOF
 		# V1-link's audits of this link (full_job.sh 4d): report, tables and logs, about 1 MB
 		[ -d "$bd/v1" ] && cp -r "$bd/v1" v1
 		cp "$REPORT" report.md
-		python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" > meta.json <<'EOF'
+		BOOT_EXE=${GAME_EXE:-} python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" > meta.json <<'EOF'
 import json, os, sys
 bd, commit, tree, objs, objs_commit = sys.argv[1:6]
 def rec(s):
@@ -228,7 +228,12 @@ def rec(s):
         return {}
 lm = rec('link').get('metrics', {})
 import hashlib
-img = os.path.join(bd, 'boot', 'synth', 'synth.exe')
+img = os.environ.get('BOOT_EXE') or os.path.join(bd, 'boot', 'synth', 'synth.exe')   # the player's exe or S14's image
+def milestone(f):   # S5's boot summary (tests/s5/emu_guest.py --summary-json): the last game milestone reached
+    try:
+        return json.load(open(os.path.join(bd, 'boot', f))).get('milestone')
+    except (OSError, ValueError):
+        return None
 stub = os.path.join(bd, 'boot', 'stub', 'emu_stub.log')
 stub_lines = open(stub, errors='replace').read().splitlines() if os.path.isfile(stub) else []
 print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
@@ -238,7 +243,10 @@ print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
                   'boot_winmain': rec('boot').get('metrics', {}).get('boot_winmain'), 'boot_stop': rec('boot').get('stop'),
                   'boot_image_sha256': hashlib.sha256(open(img, 'rb').read()).hexdigest() if os.path.isfile(img) else None,
                   'boot_stub_stop': next((l for l in reversed(stub_lines) if l.startswith('STOPPED')), None),
-                  'boot_stub_winmain': int(any('fnvnx boot: calling WinMain' in l for l in stub_lines)) if stub_lines else None},
+                  'boot_stub_winmain': int(any('fnvnx boot: calling WinMain' in l for l in stub_lines)) if stub_lines else None,
+                  'boot_image': 'player exe' if os.environ.get('BOOT_EXE') else 'synthesized' if os.path.isfile(img) else None,
+                  'boot_milestone': milestone('boot_summary.json'),
+                  'boot_stub_milestone': milestone(os.path.join('stub', 'boot_summary_stub.json'))},
                  indent=1, sort_keys=True))
 EOF
 		git add -f -A .

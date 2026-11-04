@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import struct
 import subprocess
 import sys
@@ -314,6 +315,59 @@ class FaultTableTest(unittest.TestCase):
                 f.write("# c\nInitHolder  # why\n0x00aa1070 use-malloc:x0\nbefore-winmain 0x00a8a5f0 0x10\n")
             self.assertEqual(emu_guest.parse_fault_table(p),
                              ([("InitHolder", "return0"), ("0x00aa1070", "use-malloc:x0")], [("0x00a8a5f0", 16)]))
+
+
+class MilestoneTest(unittest.TestCase):
+    """tests/s5/milestones.txt (emu_guest.py --milestones) parses into the five boot milestones in boot order, the
+    store watch reads the right word of a wide store, and the farm report shows the summary of a boot that ended by
+    itself (no STOPPED line)."""
+
+    def test_table(self):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        rows = emu_guest.parse_milestones(emu_guest.MILESTONES)
+        names = list(dict.fromkeys(n for n, _, _ in rows))
+        self.assertEqual(names, ["winmain", "renderer-init", "main-menu", "first-frame", "first-cell"])
+        self.assertIn(("winmain", "call", "0x0086a850"), rows)
+        self.assertIn(("first-cell", "store", "*0x011dea3c+0x40"), rows)
+        rx = dict((n, re.compile(t[3:])) for n, k, t in rows if t.startswith("re:"))
+        self.assertTrue(rx["renderer-init"].search("_ZN15Null_IDirect3D912CreateDeviceEj10_D3DDEVTYPE"))
+        self.assertTrue(rx["renderer-init"].search("_ZN11PxDirect3D912CreateDeviceEj10_D3DDEVTYPE"))
+        self.assertTrue(rx["first-frame"].search("_ZN21Null_IDirect3DDevice97PresentEPK7tagRECT"))
+        self.assertTrue(rx["first-frame"].search("_ZN24Null_IDirect3DSwapChain97PresentEPK7tagRECT"))
+        self.assertFalse(rx["first-frame"].search("_ZN14E7CCD0Renderer12PresentFrameEv"))
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "m.txt")
+            for bad in ("x call\n", "x jump 0x1\n", "x store 0x1+\n", "X call 0x1\n", "x call re:(\n"):
+                with open(p, "w") as f:
+                    f.write(bad)
+                with self.assertRaises((ValueError, re.error)):
+                    emu_guest.parse_milestones(p)
+
+    def test_stored_word(self):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        sw = emu_guest.Emu.stored_word
+        self.assertEqual(sw(0x100, 4, 0x1234, 0x100), 0x1234)
+        self.assertEqual(sw(0x100, 8, 0x5555000000000000 | 7, 0x104), 0x55550000)   # stp w, w: the upper word
+        self.assertIsNone(sw(0x100, 4, 0, 0x100))                                     # zero: not reached
+        self.assertEqual(sw(0x100, 4, 0, 0x100, nonzero=False), 0)
+        self.assertIsNone(sw(0x102, 2, 0xFFFF, 0x100))                                # partial store
+        self.assertIsNone(sw(0x0FC, 8, 1, 0x100 + 4))                                 # does not cover it
+
+    def test_report_without_stop_line(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "..", "tools", "farm"))
+        import full_report
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(os.path.join(t, "boot", "stub"))
+            _write(os.path.join(t, "boot", "stub", "emu_stub.log"), b"   fnvnx boot: calling WinMain\nPASS\n")
+            _write(os.path.join(t, "boot", "stub", "boot_summary_stub.json"), json.dumps({
+                "milestone": "winmain", "milestones": [{"name": "winmain", "reached": True},
+                                                       {"name": "renderer-init", "reached": False}],
+                "stop": {"reason": "guest returned 0x0", "messages": ["[fnvnx] MessageBox [Fallout]: x"]}}).encode())
+            text = "\n".join(full_report.stub_boot(t, lambda s, n=200: str(s)[:n]))
+        self.assertIn("stop: guest returned 0x0 / [fnvnx] MessageBox [Fallout]: x", text)
+        self.assertIn("game milestones: winmain yes, renderer-init no; last reached: winmain", text)
 
 
 class NullD3d9Test(unittest.TestCase):

@@ -51,10 +51,21 @@ def stub_boot(bd, clean):
     winmain = any('fnvnx boot: calling WinMain' in l for l in lines)
     skips = next((m.group(1) for l in reversed(lines)
                   for m in [re.search(r'initializers skipped after a fault: (\d+)', l)] if m), None)
-    stop = next((l for l in reversed(lines) if l.startswith('STOPPED')), 'no STOPPED line')
+    stop = next((l for l in reversed(lines) if l.startswith('STOPPED')), None)
+    try:   # tests/s5/farm_boot.sh --summary-json: game milestones, and the stop when the game exited by itself
+        bs = json.load(open(os.path.join(bd, 'boot', 'stub', 'boot_summary_stub.json')))
+    except (OSError, ValueError):
+        bs = {}
+    if stop is None:
+        st = bs.get('stop') or {}
+        stop = ' / '.join([st.get('reason') or 'no STOPPED line'] + (st.get('messages') or [])[:3])
     L = ['', 'Stub-fault boot (tests/s5/known_faults.txt, docs/TOOLCHAIN.md section 18):', '',
          '- WinMain entered: %s; initializers skipped after a fault: %s' % ('yes' if winmain else 'NO', fmt(skips)),
          '- stop: %s' % clean(stop)]
+    if bs.get('milestones'):
+        L.append('- game milestones: %s; last reached: %s' % (
+            ', '.join('%s %s' % (clean(m.get('name'), 30), 'yes' if m.get('reached') else 'no') for m in bs['milestones']),
+            clean(bs.get('milestone') or 'none')))
     starts = [i for i, l in enumerate(lines) if l.startswith('== trace (')]
     if starts:
         L += ['', '```'] + [clean(l.strip(), 160) for l in lines[starts[-1]:starts[-1] + 12]
@@ -206,6 +217,10 @@ def main(argv):
             'yes' if m.get('boot_winmain') else 'NO', fmt(m.get('boot_init_skips')), fmt(m.get('boot_trap_keys')),
             fmt(m.get('boot_trap_hits'))))
         L.append('- last milestones: ' + ' / '.join(clean(x, 100) for x in (bo.get('milestones') or [])[-3:]))
+        if bo.get('game_milestones'):
+            L.append('- game milestones (tests/s5/milestones.txt): %s; last reached: %s' % (
+                ', '.join('%s %s' % (clean(n, 30), 'yes' if ok else 'no') for n, ok in bo['game_milestones']),
+                clean(bo.get('milestone') or 'none')))
         L.append('- stop: %s' % clean(bo.get('stop')))
         if bo.get('fault'):
             L.append('')

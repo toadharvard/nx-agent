@@ -1986,7 +1986,8 @@ class Boot(Stage):
 
     def fingerprint(self, b):
         img, bc = b.cfg['BOOT_IMAGE'], b.cfg['BOOT_CENSUS']
-        return ['boot-v2', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
+        return ['boot-v3', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
+                                     'tests/s5/milestones.txt',
                                      'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
                 up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
                 synth_inputs_id(b) if img == 'auto' else '',
@@ -2007,7 +2008,8 @@ class Boot(Stage):
         shutil.rmtree(root, ignore_errors=True)
         os.makedirs(root)
         argv = [PY, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_guest.py'), nso, '--elf', elf, '--skip-faulting-init',
-                '--expect', 'fnvnx boot: calling WinMain', '--root', root, '--budget', b.cfg['EMU_BUDGET']]
+                '--expect', 'fnvnx boot: calling WinMain', '--root', root, '--budget', b.cfg['EMU_BUDGET'],
+                '--summary-json', os.path.join(d, 'boot_summary.json')]
         image = boot_image(b, r, d)
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'
         if image:
@@ -2029,6 +2031,17 @@ class Boot(Stage):
         r.metric('boot_init_skips', skipped)
         r.metric('boot_trap_keys', len(table))
         r.metric('boot_trap_hits', sum(int(t[2]) for t in table if len(t) > 2 and t[2].isdigit()))
+        # S5's boot summary (tests/s5/milestones.txt): the game milestones reached, the stop with the game's own
+        # messages (a boot that ends in ExitProcess has no STOPPED line)
+        try:
+            bs = json.load(open(os.path.join(d, 'boot_summary.json')))
+        except (OSError, ValueError):
+            bs = {}
+        r.metric('boot_milestones_reached', bs.get('reached'))
+        r['milestone'] = bs.get('milestone')
+        r['game_milestones'] = [[m.get('name'), bool(m.get('reached'))] for m in bs.get('milestones', [])]
+        if stop is None and bs.get('stop'):
+            stop = ' / '.join([bs['stop'].get('reason') or ''] + (bs['stop'].get('messages') or [])[:3])
         r['stop'] = stop
         # the fault that stopped the boot (the last trace block: pc, lr, call frames) and the skipped initializers
         # grouped by fault (tests/s5/emu_guest.py skip-summary lines)
