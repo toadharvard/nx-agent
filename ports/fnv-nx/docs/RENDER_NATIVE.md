@@ -485,6 +485,18 @@ the permutation uses it. Image space (`menubg`) never had an epilogue. Maxwell c
 The permutations are the same source with the branches folded, so results are identical (all scenes, the N1
 self-test and V6n's c69 cases unchanged). The N0 scenes still use the full runtime shaders (they exercise it).
 
+**Alpha compare without a switch (C98).** uam's GLSL front end (Mesa's GLSL IR to TGSI, no NIR) keeps a `switch` as
+a loop of one test per case even when the selector is a compile-time constant, so every alpha-tested shader carried
+seven tests and their bookkeeping. `nx_compare` now treats NxCompare as the bit set it is (1 LESS, 2 EQUAL, 4 GREATER):
+`(func & mask) != 0 || func >= 7 || (unordered && func == 5)`, equal to the switch for every function with ordered and
+NaN operands. Maxwell instructions: lit_spec_d1p2__ea 249 -> 222, nolight_tex__ea 80 -> 35, tex / nolight_tex with
+the runtime epilogue 131 -> 104.
+
+**Which shader P6n's GPU model costs.** `perf/gpu_cost.py` costs each family with what `Render` binds: the static
+light permutation for the model's 1 directional + 2 point lights, then the epilogue permutation for the family's
+(alpha test, fog) mix, replayed from the synthetic stream's D3D9 state (`epilogue_mix`). Before this round (P6n: "GPU model binds the renderer's ... permutations") it costed the
+runtime base shaders, so §4.3 and §4.4 never showed in its numbers.
+
 ### 4.4 lit pass: static light permutations and the fp16 analysis (P6n hotspot 2)
 
 **Permutations.** `lit[_spec]_d<D>p<P>` (D = 1: light 0 is the directional light; P = 1, 2, 4, 8 point lights,
@@ -507,6 +519,12 @@ light, which is how P6n's ~411 instructions per pixel arise):
 Results are unchanged: the N1 self-test draws 1 directional + 2 point lights (given point first) through the
 dynamic and the static shader, identical within 1/255 (exact on GL); the `lit` scene and its golden are unchanged
 (the point-light maths now uses `dot(dv, dv)` and `inversesqrt`, the same values).
+
+**Prepared per-draw values (C99).** The permutations read two values `Render` computes once per draw while it
+orders the lights into the slice: the directional light's `posRange.xyz` is the unit vector towards the light
+(-normalize(direction)) and every point light's `posRange.w` is 1 / range^2 (padding lights: 1). No fragment
+normalizes a constant or divides by range^2 any more: lit_spec_d1p2__e0 201 -> 179, lit_spec_d1p8__e0 419 -> 394
+Maxwell instructions. The dynamic shader keeps the D3D-style values (direction, range).
 
 **fp16 precision analysis** (what may run at half precision without visible change on 8-bit targets):
 
