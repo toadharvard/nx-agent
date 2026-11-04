@@ -242,7 +242,9 @@ run_set synthetic "$W/caps/synthetic"
 if [ -n "$SDP" ] && deadline_ok 900; then
 	log "permutations"
 	# coverage-guided seeds (permcover.py), cached per package and perm.py: computed once from a first reference run
-	SALTS=$W/salts-$(key_of "$SDP" "$CMP/perm.py" "$CMP/permcover.py").json
+	# the key covers everything that decides whether a seed's reference frame draws (V1 SK-3): the package, the
+	# generator, the shader tools that assemble and translate, and the reference renderer
+	SALTS=$W/salts-$(key_of "$SDP" "$CMP/perm.py" "$CMP/permcover.py" "$SH/s6b_asm" "$SH/sdp2dksh" "$BIN/nxd9play.exe").json
 	build_perm() {   # build_perm [--salts file]
 		python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/perm" "$@" >"$W/perm.log" 2>&1 &&
 		python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/permp" \
