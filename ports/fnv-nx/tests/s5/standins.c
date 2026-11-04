@@ -56,21 +56,28 @@ void fnv_standin_00aa3cc0(void *self, uint32_t block, uint32_t pool, const char 
     mm[0x129] = 1;
 }
 
-/* 0x00406d50 (dst, size, src): the exe's body is strcpy_s (0x00ec6bd2) of src into dst[size]. The decomp declares it
- * `FUN_00406d50(...)` and defines it nowhere, so every call was a trap returning 0 and left dst as it was: WinMain
- * builds the INI paths with it (the FalloutPrefs.ini load got an empty path, sD3DDevice stayed "" and the device
- * check sent the game to the launcher: ShellExecute, WinMain returns 0). Variadic integer arguments come in x0..x2
- * as fixed ones do (AAPCS64), so a three-argument definition serves every caller. S1-refs: declare and define it. */
+/* 0x00406d50 (dst, size, src): the exe's body is strcat_s (0x00ec6bd2) of src onto dst[size]; 0x00406d30 before it is
+ * strcpy_s (0x00ec65a6). WinMain builds each INI path as strcpy_s(buf, 0x104, <My Games dir>) then
+ * strcat_s(buf, 0x104, "FalloutPrefs.ini"). The decomp declares this one `FUN_00406d50(...)` and defines it nowhere,
+ * so every call was a trap returning 0: the FalloutPrefs.ini load got only the directory, sD3DDevice stayed "" and
+ * the device check sent the game to the launcher (ShellExecute, WinMain returns 0). Variadic integer arguments come
+ * in x0..x2 as fixed ones do (AAPCS64), so a three-argument definition serves every caller. S1-refs: define it. */
 void fnv_standin_00406d50(char *dst, uint32_t size, const char *src) __asm__("_Z12FUN_00406d50z");
 void fnv_standin_00406d50(char *dst, uint32_t size, const char *src) {
-    uint32_t i = 0;
+    uint32_t n = 0, i = 0;
     if (!dst || !size)
         return;
-    if (!src) {
+    while (n < size && dst[n])
+        n++;
+    if (n == size || !src) {   /* not terminated, or no source: strcat_s fails and empties dst */
         dst[0] = 0;
         return;
     }
-    for (; i + 1 < size && src[i]; i++)
-        dst[i] = src[i];
-    dst[src[i] && i + 1 >= size ? 0 : i] = 0;   /* strcpy_s on overflow empties dst */
+    for (; n + i + 1 < size && src[i]; i++)
+        dst[n + i] = src[i];
+    if (src[i]) {              /* does not fit: strcat_s empties dst */
+        dst[0] = 0;
+        return;
+    }
+    dst[n + i] = 0;
 }
