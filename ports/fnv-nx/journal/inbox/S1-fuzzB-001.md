@@ -5,11 +5,12 @@
   reproducer paths are on the private branch `reports/s1-fuzzb` (README there).
 * **metric** - S1-owned fuzz divergences, in functions, over the caches: falloff? + float + signedness.
   - **266 -> 99**: falloff? 176 -> 48, float 51 -> 19, signedness 39 -> 32.
+  - Measured the same against the integration branch's own tools (2bce418): 266 there too.
   - The falloff? and signedness figures come from causes summary on the cached records. Float and the STAND2 item
     are measured by replay on link c0d6c71516f6: the cache keeps the old verdicts until the functions are fuzzed
     again.
 * **did** - Commits on claude/fnv-s1-fuzz-b, each with `metric: before -> after`:
-  - `d9cc589` **STAND2** (rule, platform class).
+  - `d9cc589` **STAND2** (rule, platform class), merged as 57fe267.
     - STAND1 widened to an address that another unit defines (units.json `functions`).
     - Only where MSVC cannot have inlined the stand-in, so the oracle never ran its body:
       - a non-inline, non-static, non-virtual out-of-class or free definition;
@@ -22,13 +23,15 @@
       `__fnv_008454f0`. 006442e0-0/1/2 are gone, and a fresh 40-exec fuzz finds 0 divergences.
     - Correction to the commit text: the replay compiled from the rolling prepared tree (prepare of b6585b8), not
       t/7b3b. A force-push to amend the commit was refused.
-  - `0090770` **falloff? attribution** (report.reclassify). A call-count with no oracle call was always called
-    falloff?. Two shapes have other causes:
-    - `dtor-flags` (new, artifact, S13): a `??_G` fuzzed with flags bit 0 clear, where the native D0 adds only
-      deallocator calls. 79 records: 38 falloff?, 41 native-extra-calls.
+  - `ee1cf13` **falloff? attribution** (report.reclassify). A call-count with no oracle call was always called
+    falloff?, before causes.refine could see it. Two shapes have other causes:
+    - `deleting-dtor-flags` (S13b's by-design cause on the integration branch; its _rule_callflow never saw these
+      records): a `??_G` fuzzed with flags bit 0 clear, where the native D0 adds only deallocator calls. 42
+      records: 38 falloff?, 4 native-extra-calls. The commit text says `dtor-flags`: that was the name before
+      the rebase.
     - `native-undefined` / `after-native-undefined` (S2c/S2d): the native calls a named stub where the oracle ran
       the body. 107 + 2 records.
-  - `149b571` **float, harness**.
+  - `774a36f` **float, harness**.
     - CRT math (log, log10, exp, pow, atan2, tan, atan, asin, acos, fmod, floor, ceil, sin, cos) runs as C99
       builtins on both machines, at the addresses the link gives libm providers. Before:
       - the log10 x87 `fyl2x` stub gave log10(0) = 0.0 under Unicorn;
@@ -40,7 +43,7 @@
     - The port itself needs no change: the link already binds these names to libc.
     - Replay of the 51 float records: 2 gone at HEAD, 31 gone with this branch. A 200-record random sample of all
       causes replays the same at HEAD and with this branch.
-  - `0905dc7`, `4bebc32` **signedness**. The top-bit probe also fires on by-design shapes, which now get their own
+  - `47727a1`, `d20b859` **signedness**. The top-bit probe also fires on by-design shapes, which now get their own
     cause:
     - a float argument within tolerance: x87-precision (007d2eb0, 00649390, 009a7c60);
     - a bool result 1 vs 0x80: bool-repr (004de080);
@@ -70,7 +73,8 @@
   - decomp-local handle conversions (Flt, GO, StrH, StrOp, ObstacleMeshHandle) and a few destructors.
   Not faked here: they stay real bugs under native-undefined.
 * **for S13**
-  - `dtor-flags`, 79 records (`dtor_flags.tsv`). Fuzz `??_G` with flags & 1, or pair flags 0 with D1.
+  - `deleting-dtor-flags`: the 79 records of `dtor_flags.tsv` (37 were already yours through _rule_callflow).
+    Fuzzing `??_G` with flags & 1, or pairing flags 0 with D1, would test them for real.
   - native-private-address, 5 signedness records (00a5b870, 00e48290, 00af9bf0, 00afa120, 00a672b0). Both
     machines compute the same wild address in 0x09000000-0x0bffffff. The oracle reads background there (it is
     the other machine's range, difffuzz-12), but the native faults because the address is its own private range.
