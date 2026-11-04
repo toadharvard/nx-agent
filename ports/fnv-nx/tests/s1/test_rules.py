@@ -547,10 +547,13 @@ src = ('namespace N {\nint a;\nclass A : public B\n{\n    friend class W;\n    W
        'template <class P> class K { friend class P; };\ntemplate <class T2> class R;\nclass S { friend class R; };\n')
 got = run(s1.r_friend_class_visibility, src, '/nonexistent/src/f.cpp')
 check('FRIEND1 forward-declares a friend class declared nowhere before', got,
-      ['int a; class W; /* fnv-nx FRIEND1 */ \nclass A : public B', '}; } union H; /* fnv-nx FRIEND1 */ \n// class X'],
+      ['int a;\n class W; /* fnv-nx FRIEND1 */ class A : public B', '}; }\n// class X { friend class Z; };\n union H; /* fnv-nx FRIEND1 */ class G {'],
       ['class T; /*', 'class Q; /*', 'class M; /*', 'class Z; /*', 'class P; /*', 'class R; /*', 'union H; union H;'])
 check('FRIEND1 two declarations only (not T, Q, M, Z, P, R)', str(got.count('fnv-nx FRIEND1')), ['2'])
 check('FRIEND1 keeps the line count', str(got.count('\n')), [str(src.count('\n'))])
+got = run(s1.r_friend_class_visibility, '#include "a.h"\nclass A\n{\n    friend class W;\n    W* m_w;\n};\n', '/nonexistent/src/f.cpp')
+check('FRIEND1 at the start of a file stays off the #include line', got,
+      ['#include "a.h"\n class W; /* fnv-nx FRIEND1 */ class A\n'])
 
 # ---- INIT1
 got = run(s1.r_static_initializers, 'int a;\n// @fnv 0x00a8a5f0\nvoid* FUN_00a8a5f0_class::FUN_00a8a5f0()\n{\n'
@@ -661,7 +664,12 @@ got = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), '#include "x.h"\nvoid
 got2 = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), 'void f() { m_p = "@K@"; g("text"); }\n', _st)
 s1._VLIT = _saved
 check('VLIT1 stores the vftable address the unit binds the misread literal to; ambiguous sites are listed', got + got2 + ' %d' % _st['VLIT1-LIST'],
-      ['m_p = (char*)0x0101212c /* fnv-nx VLIT1: "@K@" */;', 'void f() { m_p = "@K@"; g("text"); }', ' 1'])
+      ['#include "x.h"\nextern "C" char DAT_0101212c; /* fnv-nx VLIT1 */ void* F::Init()\n',
+       'm_p = (char*)&DAT_0101212c; /* fnv-nx VLIT1: "@K@" */\n', 'void f() { m_p = "@K@"; g("text"); }', ' 1'])
+check('VLIT1 keeps the line count', str(got.count('\n')), ['6'])
+check('VLIT1 binds its DAT name in the unit (BIND1 hook)', repr(sorted(s1.VLIT1_BINDS)),
+      ["('src/n.cpp', '_DAT_0101212c', '0x0101212c')"])
+s1.VLIT1_BINDS.clear()
 
 # ---- SSE2 with the decomp's own name for __m128
 got = prepare.r_sse_local_protos('/x/src/a.cpp', 'typedef __m128 ClosestPointQuad;\nClosestPointQuad _mm_shuffle_ps(ClosestPointQuad, ClosestPointQuad, unsigned int);\n'
@@ -679,6 +687,39 @@ check('SSE2 drops (_mm_x)(...) prototypes, SSE4 unqualified using-declarations o
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
+
+# ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
+# reach the output: tree hashes and incremental compiles depend on it)
+_DET = r'''
+import hashlib, os, sys
+from collections import Counter
+sys.path.insert(0, sys.argv[1])
+import prepare
+rules = prepare.RULES + prepare.load_stream_rules()
+src = open(sys.argv[2]).read()
+h = hashlib.sha256()
+for rule in rules:
+    st = Counter()
+    out = rule('/nonexistent/src/staging/blk_00aa0000_o2.cpp', src, st)
+    h.update(rule.__name__.encode() + b'\0' + out.encode('utf-8', 'surrogateescape') + repr(sorted(st.items())).encode())
+print(h.hexdigest())
+'''
+_dd = tempfile.mkdtemp()
+_snip = os.path.join(_dd, 'snippet.cpp')
+open(_snip, 'w').write(
+    'namespace N {\nclass A { friend class W; friend class V; W* w; V* v; };\nclass W {}; class V {};\n}\n'
+    'typedef union ::__m128 Q;\nextern "C" ::__m128(_mm_load_ss)(const float* p);\nunion __declspec(intrin_type) __m128 '
+    '{ struct { float x, y, z, w; } lanes; };\nfloat f(__m128 v) { return v.lanes.x + v.m128_f32[1]; }\n'
+    'struct S { int* vtbl; S() { vtbl = 0; } virtual ~S(); };\nint g(int a) { if (a) return 1; }\n'
+    'enum E { E_A = 0x80000000 };\nvoid h(va_list ap) { int i = va_arg(ap, int); }\n')
+_hashes = set()
+for _seed in ('1', '2', '3'):
+    _r = _subprocess.run([sys.executable, '-I', '-c', _DET, TOOLS, _snip], capture_output=True, text=True,
+                         env=dict(os.environ, PYTHONHASHSEED=_seed))
+    _hashes.add(_r.stdout.strip() or 'error: ' + _r.stderr[-300:])
+check('determinism: all rules give the same output under PYTHONHASHSEED 1, 2, 3', ' | '.join(sorted(_hashes)),
+      [], ['error', ' | '])
+_shutil.rmtree(_dd, ignore_errors=True)
 
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

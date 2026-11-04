@@ -2746,6 +2746,8 @@ def r_class_alignment(path, text, stats):
 #   its unit binds to 0x00aa3e40 (MemoryManager::Allocate, defined in this unit as MemoryManagerStandIn::FUN_00aa3e40)
 #   on 0x011f6238 (the memory manager, ?DAT_011f6238@@3UMemoryManager@@A here too).
 
+# VLIT1's `DAT_<addr>` names, bound in their unit (the C name `_DAT_<addr>`), filled while the tree is prepared
+VLIT1_BINDS = set()
 BIND1_REFS = [
     # (unit source, MSVC decorated name, address)
     ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?Allocate@MemoryManagerAA3880@@QAEPAXI@Z', '0x00aa3e40'),
@@ -2771,7 +2773,7 @@ def bind_stand_in_names(out_root, stats, files=None):
     if not os.path.exists(p): return
     data = json.load(open(p))
     before = stats['BIND1']
-    bind_units_data(data, stats)
+    bind_units_data(data, stats, BIND1_REFS + sorted(VLIT1_BINDS))
     if stats['BIND1'] != before:
         json.dump(data, open(p, 'w'))
         if files is not None: files['BIND1'] += 1
@@ -2818,7 +2820,11 @@ def r_va_enum_args(path, text, stats):
 # instruction stores an image address whose bytes it read as text: "@K@\0" is 0x00404b40, slot 0 (the scalar
 # deleting destructor, S00404b40::DestroyIfFlagged) of the vftable at that address (S5 J-0102: the
 # GameSettingCollection vptr, 3,454 setting initializers). The unit's recipe binds the literal (MSVC `$SG2541`)
-# to that vftable address, 0x0101212c. VLIT1 stores the address: `m_p = (char*)0x0101212c;`. Only where a literal
+# to that vftable address, 0x0101212c. VLIT1 stores the address through the image symbol the link maps image
+# vftables by: `m_p = (char*)&DAT_0101212c;`, with `extern "C" char DAT_0101212c;` declared at namespace scope in
+# front of the storing function (S2c 1aeaa9b: an unbound DAT_<hex> right side counts as that image address, so the
+# store can be mapped to a native vtable; a raw constant could not be). The comment goes behind the `;`, outside the
+# statement the link reads. Only where a literal
 # of at most 3 characters stored with `=` reads as the address of a function the recipe defines, and the unit's
 # `$SG` binding can only be that literal (the unit binds one `$SG` address and the file has one string literal);
 # the other sites (45 in the tree) are counted as VLIT1-LIST and left as they are until the exe says which.
@@ -2861,7 +2867,18 @@ def r_vptr_literals(path, text, stats):
         return text
     m, _ = hits[0]
     stats['VLIT1'] += 1
-    return text[:m.start()] + '%s(char*)0x%08x /* fnv-nx VLIT1: "%s" */%s' % (m.group(1), next(iter(addrs)), m.group(2).replace('*/', '* /'), m.group(3)) + text[m.end():]
+    name = 'DAT_%08x' % next(iter(addrs))
+    root, _ = prepare._units_json(path)
+    if root: VLIT1_BINDS.add((os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/'), '_' + name,
+                              '0x%08x' % next(iter(addrs))))
+    text = (text[:m.start()] + '%s(char*)&%s%s /* fnv-nx VLIT1: "%s" */' % (m.group(1), name, m.group(3),
+                                                                             m.group(2).replace('*/', '* /'))
+            + text[m.end():])
+    # the declaration, at namespace scope in front of the outermost function or class around the store (same line)
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    outer = [sp for sp in prepare.scope_map(masked) if sp[0] < m.start() < sp[1] and sp[2] not in ('namespace', 'extern')]
+    at = _decl_start(masked, outer[0][0]) if outer else 0
+    return text[:at] + 'extern "C" char %s; /* fnv-nx VLIT1 */ ' % name + text[at:]
 
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
@@ -2938,6 +2955,13 @@ FRIEND_CLASS = re.compile(r'(?<![\w>])friend\s+(class|struct|union)\s+([A-Za-z_]
 FRIEND_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)|^[ \t]*#[^\n]*', re.S | re.M)
 DECOR = r'(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*|alignas\s*\([^()]*\)\s*)*'
 
+def _decl_start(masked, brace):
+    """Where the declaration whose body opens at `brace` begins: the first character after the previous `;`, `{` or
+    `}` that is not blank in `masked` (comments, literals and preprocessor lines blanked), so text inserted there
+    stays off a preprocessor line and out of a comment."""
+    at = max(masked.rfind(c, 0, brace) for c in ';{}') + 1
+    return at + len(masked[at:brace]) - len(masked[at:brace].lstrip())
+
 def _friend_declared(view, name):
     """`name` is declared as a type (or anything else) in `view`, a name view of _visible."""
     n = re.escape(name)
@@ -2959,7 +2983,7 @@ def r_friend_class_visibility(path, text, stats):
         if not enclosing or enclosing[-1][2] != 'class': continue
         if any(sp[2] not in ('class', 'namespace', 'extern') for sp in enclosing): continue
         outer = next(sp for sp in enclosing if sp[2] == 'class')
-        at = max(masked.rfind(c, 0, outer[0]) for c in ';{}') + 1     # where the outer class's declaration starts
+        at = _decl_start(masked, outer[0])                              # where the outer class's declaration starts
         if (at, name) in done: continue
         n = re.escape(name)
         if re.search(r'\btypedef\b[^;{}]*\b%s\s*;|\btemplate\s*<(?:[^<>]|<[^<>]*>)*>\s*(?:class|struct|union)\s+%s%s\b|'
