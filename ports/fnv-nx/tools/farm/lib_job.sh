@@ -46,41 +46,64 @@ job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and
 	[ -d "$ARTIFACTS/.git" ] || git clone -q --no-checkout https://github.com/toadharvard/fnv-nx-build "$ARTIFACTS"
 }
 
-job_inputs() {   # job_inputs <dir>: the prepare farm's tree and the compile farms' objects of COMMIT into <dir>
-	local d=$1 th meta end complete M
+# what decides a commit's objects: the prepared tree (prepare inputs, as fetch_tree.sh / prepare_job.sh check them,
+# plus render/native/drop_units.txt which prepare.py also reads) and compile.sh's flags (compile_job.sh's flag hash:
+# compile.sh, shim, the sse2neon pin in fetch.sh)
+COMPILE_INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim
+	ports/fnv-nx/tools/fetch.sh ports/fnv-nx/tools/link/compile.sh ports/fnv-nx/render/native/drop_units.txt)
+
+objects_commit() {  # the newest ancestor of COMMIT (itself included) whose N compile shards all exist and whose
+	                # compile inputs equal COMMIT's -> its full hash, or nothing
+	local n=$1 have c
+	have=$(git -C "$ARTIFACTS" ls-remote origin "refs/heads/c/*" 2>/dev/null \
+		| sed -n "s|.*refs/heads/c/\([0-9a-f]\{12\}\)/[0-9]*of$n\$|\1|p" | sort | uniq -c | awk -v n="$n" '$1 == n {print $2}')
+	[ -n "$have" ] || return 0
+	for c in $(git -C "$SRC" rev-list --max-count="${FARM_OBJ_DEPTH:-300}" "$COMMIT"); do
+		if grep -qx "${c:0:12}" <<<"$have"; then
+			git -C "$SRC" diff --quiet "$c" "$COMMIT" -- "${COMPILE_INPUTS[@]}" && { echo "$c"; return 0; }
+		fi
+	done
+}
+
+job_inputs() {   # job_inputs <dir>: the prepare farm's tree of COMMIT and the compile farms' objects of the newest
+	             # commit with the same compile inputs into <dir> -> TREE, OBJS, OBJ_COMMIT, NOTE_TREE, NOTE_OBJS
+	local d=$1 th meta end n=${FARM_OBJ_SHARDS:-4} ref
 	mkdir -p "$d"
-	TREE=${FARM_TREE:-}; NOTE_TREE="local tree $TREE"
+	TREE=${FARM_TREE:-}; NOTE_TREE="local tree $TREE"; OBJ_COMMIT=""
 	if [ -z "$TREE" ]; then
 		if th=$(bash "$P/tools/farm/fetch_tree.sh" "$COMMIT" "$d/tree" "${FARM_TREE_WAIT:-1800}" 2>"$d/fetch_tree.log"); then
 			TREE=$d/tree
-			meta=$(git -C "$ARTIFACTS" show "refs/remotes/origin/t/$C12:meta.json")
-			python3 -I -c 'import json,sys; m=json.loads(sys.argv[1]); print(m["commit"]); print("decomp", m["decomp_commit"])' \
-				"$meta" > "$d/prepared_from.txt"   # the pipeline reads the tree's provenance here (PREPARED)
-			NOTE_TREE="prepare farm, branch t/$C12, tree hash $th"
+			# fetch_tree.sh takes t/<commit12>, or the rolling tree when its commit has the same prepare inputs
+			ref=refs/remotes/origin/t/$C12
+			git -C "$ARTIFACTS" rev-parse -q --verify "$ref" >/dev/null || ref=refs/remotes/origin/tree
+			meta=$(git -C "$ARTIFACTS" show "$ref:meta.json")
+			# the tree is what COMMIT's prepare gives (same inputs): its provenance is COMMIT (PREPARED reads it here)
+			python3 -I -c 'import json,sys; m=json.loads(sys.argv[1]); print(sys.argv[2]); print("decomp", m["decomp_commit"]); print("published for", m["commit"])' \
+				"$meta" "$COMMIT" > "$d/prepared_from.txt"
+			NOTE_TREE="prepare farm, ${ref#refs/remotes/origin/} (published for $(sed -n 's/^published for //p' "$d/prepared_from.txt" | cut -c1-12)), tree hash $th"
 		else
-			NOTE_TREE="no published tree t/$C12 (see fetch_tree.log)"; rm -rf "$d/tree"
+			NOTE_TREE="no published tree for $C12 (see fetch_tree.log)"; rm -rf "$d/tree"
 		fi
 	fi
 	OBJS=${FARM_OBJS:-}; NOTE_OBJS="local objects $OBJS"
 	if [ -z "$OBJS" ] && [ -n "$TREE" ]; then
-		end=$(( $(date +%s) + ${FARM_OBJ_WAIT:-3600} )); M=""
-		while :; do   # FARM_OBJ_SHARDS (default 4) once all its shards c/<commit12>/<i>of<M> exist
-			complete=$(git -C "$ARTIFACTS" ls-remote origin "refs/heads/c/$C12/*" 2>/dev/null \
-				| sed -n 's|.*/\([0-9]*\)of\([0-9]*\)$|\2|p' | sort | uniq -c | awk '$1 == $2 {print $2}' | sort -n)
-			grep -qx "${FARM_OBJ_SHARDS:-4}" <<<"$complete" && M=${FARM_OBJ_SHARDS:-4}
-			[ -n "$M" ] && break
+		end=$(( $(date +%s) + ${FARM_OBJ_WAIT:-3600} ))
+		until OBJ_COMMIT=$(objects_commit "$n") && [ -n "$OBJ_COMMIT" ]; do
 			[ "$(date +%s)" -lt "$end" ] || break
 			sleep 60
 		done
 		rm -rf "$d"/obj-*
-		if [ -n "$M" ] && bash "$P/tools/farm/fetch_objs.sh" "$COMMIT" "$M" "$d/obj-$C12" "$TREE" > "$d/fetch_objs.log" 2>&1; then
-			OBJS=$d/obj-$C12/objects.tsv; NOTE_OBJS="compile farms, $M shards c/$C12/*of$M: $(tail -1 "$d/fetch_objs.log")"
+		if [ -n "$OBJ_COMMIT" ] && bash "$P/tools/farm/fetch_objs.sh" "$OBJ_COMMIT" "$n" "$d/obj-${OBJ_COMMIT:0:12}" "$TREE" \
+				> "$d/fetch_objs.log" 2>&1; then
+			OBJS=$d/obj-${OBJ_COMMIT:0:12}/objects.tsv
+			NOTE_OBJS="compile farms, c/${OBJ_COMMIT:0:12}/*of$n (objects of ${OBJ_COMMIT:0:12}$([ "$OBJ_COMMIT" = "$COMMIT" ] \
+				&& echo ", this commit" || echo ", an ancestor with the same compile inputs"); tree hash checked): $(tail -1 "$d/fetch_objs.log")"
 		else
-			NOTE_OBJS="no complete compile shards c/$C12/*of${FARM_OBJ_SHARDS:-4} (see fetch_objs.log)"; rm -rf "$d/obj-$C12"
+			NOTE_OBJS="no compile shards c/<commit12>/*of$n of this commit or of an ancestor with the same compile inputs (see fetch_objs.log)"
+			OBJ_COMMIT=""; rm -rf "$d"/obj-*
 		fi
 	fi
 }
-
 job_pristine() { # S11's MSVC 2008 objects of the pristine decomp (branch msvc/pristine/<decomp12>, fetched once) -> PR
 	PR=${PRISTINE_OBJS:-}
 	if [ -z "$PR" ] && [ -n "$D12" ]; then
@@ -141,16 +164,17 @@ EOF
 			for f in summary.txt frontier.txt frontier.tsv emu.log; do [ -f "$bd/boot/$f" ] && cp "$bd/boot/$f" boot/; done
 		fi
 		cp "$REPORT" report.md
-		python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" > meta.json <<'EOF'
+		python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" > meta.json <<'EOF'
 import json, os, sys
-bd, commit, tree, objs = sys.argv[1:5]
+bd, commit, tree, objs, objs_commit = sys.argv[1:6]
 def rec(s):
     try:
         return json.load(open(os.path.join(bd, s, 'stage.json')))
     except (OSError, ValueError):
         return {}
 lm = rec('link').get('metrics', {})
-print(json.dumps({'commit': commit, 'prepared_from': rec('prepare').get('prepared_from'), 'tree': tree, 'objects': objs,
+print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
+                  'prepared_from': rec('prepare').get('prepared_from'), 'tree': tree, 'objects': objs,
                   'link': {k[5:]: v for k, v in lm.items() if k.startswith('link_')},
                   'guest_undefined': rec('guest').get('metrics', {}).get('guest_undefined'),
                   'boot_winmain': rec('boot').get('metrics', {}).get('boot_winmain'), 'boot_stop': rec('boot').get('stop')},

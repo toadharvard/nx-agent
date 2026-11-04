@@ -9,9 +9,13 @@
 #   ext/       the pinned checkouts (tools/fetch.sh; FARM_EXT=<dir> uses existing ones read only)
 #   tree       the prepare farm's tree, branch t/<commit12> (tools/farm/fetch_tree.sh, waited for up to
 #              $FARM_TREE_WAIT s, default 1800; FARM_TREE=<dir> instead)
-#   objects    the compile farms' objects of that tree, branches c/<commit12>/<i>of<M> with M = $FARM_OBJ_SHARDS
-#              (default 4) (tools/farm/fetch_objs.sh, which checks the tree hash; waited for up to $FARM_OBJ_WAIT s,
-#              default 3600; FARM_OBJS=<objects.tsv> instead)
+#   objects    the compile farms' objects: the compile farms each take the newest head when they get to it, so the
+#              objects linked are those of the newest commit C that is an ancestor of <commit> (or <commit>
+#              itself), has all $FARM_OBJ_SHARDS (default 4) shards c/<C12>/<i>of4 and the same compile inputs
+#              as <commit> (prepare inputs, render/native/drop_units.txt, tools/link/compile.sh, shim, fetch.sh),
+#              looked for $FARM_OBJ_DEPTH (default 300) commits back and waited for up to $FARM_OBJ_WAIT s
+#              (default 3600); tools/farm/fetch_objs.sh checks that they were compiled from this tree (tree hash).
+#              The report and meta.json (objects_commit) name C. FARM_OBJS=<objects.tsv> instead.
 # The link runs through the pipeline (tools/pipeline/build.py `make link`, docs/BUILD.md) in the persistent build
 # directory link/build, so fnvlink's demangle, layout and vtable caches carry over between commits (each dropped
 # where its inputs changed). It needs only the AArch64 Linux cross tools (the host's when they are the pinned Ubuntu
@@ -58,7 +62,7 @@ LB=${LINK_BUILD:-$FARM_HOME/link/build}
 job_inputs "$(dirname "$LB")"
 job_pristine
 log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR"
-printf 'TREE=%q\nOBJS=%q\nNOTE_TREE=%q\nNOTE_OBJS=%q\n' "$TREE" "$OBJS" "$NOTE_TREE" "$NOTE_OBJS" \
+printf 'TREE=%q\nOBJS=%q\nOBJ_COMMIT=%q\nNOTE_TREE=%q\nNOTE_OBJS=%q\n' "$TREE" "$OBJS" "$OBJ_COMMIT" "$NOTE_TREE" "$NOTE_OBJS" \
 	> "$(dirname "$LB")/inputs-$C12.env"     # for full_job.sh, which builds on this link
 ARGS=(TC_DL=none VORBIS=none)          # the link needs only the cross tools, not fnvnx-a64
 # S2c's resolve --msvc-code: ecx-not-passed / this-not-passed judged on the definitions' MSVC code (capstone)
