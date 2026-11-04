@@ -203,6 +203,27 @@ def main():
         check(f1.getpixel((48, 24))[:3] == (30, 20, 10), "TEXC updates one face %s" % (f1.getpixel((48, 24)),))
     else:
         check(False, "cube frames written")
+    # --native (render-land): <hash>.glsl in the native dir replaces the shader of that bytecode hash; the summary
+    # counts native shaders and the draws whose VS and PS are both native
+    nd = os.path.join(o.out, "native")
+    os.makedirs(nd)
+    vs_bc, ps_bc = struct.pack("<2I", 0xFFFE0300, 0x0000FFFF), struct.pack("<2I", 0xFFFF0200, 0x0000FFFF)
+    open(os.path.join(nd, "%016x.glsl" % nxd9.fnv1a64(vs_bc)), "w").write(VS)
+    open(os.path.join(nd, "%016x.glsl" % nxd9.fnv1a64(ps_bc)), "w").write(PS.replace(
+        "_gl_FragData_0 = io_10_0 * ps_uniforms_vec4[0] + io_5_0;", "_gl_FragData_0 = vec4(0.0, 0.0, 1.0, io_10_0.a);"))
+    d8 = os.path.join(o.out, "d3d9_native")
+    os.makedirs(d8)
+    check(run([o.bin, "d3d9", nx, "-o", d8, "--native", nd], 3), "d3d9 --native: rendered (exit 3, the fixed-function draw)")
+    s = open(os.path.join(d8, "summary.txt")).read() if os.path.exists(os.path.join(d8, "summary.txt")) else ""
+    check("native shaders 2, native draws 3" in s, "--native summary: " + s.strip())
+    if os.path.exists(os.path.join(d8, "f00000.png")):
+        f0 = png(os.path.join(d8, "f00000.png"))
+        check(f0.getpixel((8, 24))[:3] == (0, 0, 255), "--native shader replaces the record's %s" % (f0.getpixel((8, 24)),))
+        check(f0.getpixel((48, 36))[:3] == (0x20, 0x20, 0x20), "--native keeps the alpha test %s" % (f0.getpixel((48, 36)),))
+    else:
+        check(False, "--native f00000.png written")
+    s = open(os.path.join(d5, "summary.txt")).read() if os.path.exists(os.path.join(d5, "summary.txt")) else ""
+    check("native" not in s, "no --native: summary unchanged")
     check(run([o.bin, "d3d9", os.path.join(o.out, "missing.nxd9"), "-o", d6], 2), "missing input: exit 2")
     open(os.path.join(o.out, "bad.nxd9"), "wb").write(b"NOPE")
     check(run([o.bin, "d3d9", os.path.join(o.out, "bad.nxd9"), "-o", d6], 1), "malformed input: exit 1")

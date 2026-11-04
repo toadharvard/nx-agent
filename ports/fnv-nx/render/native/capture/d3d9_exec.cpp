@@ -25,7 +25,7 @@ struct Tex { uint32_t image = 0, format = 0, w = 0, h = 0, levels = 1, flags = 0
 struct Surf { uint32_t kind = 0, format = 0, w = 0, h = 0, tex = 0, image = 0; };
 struct Buf { vector<uint8_t> data; uint32_t format = 0; };
 struct Elem { uint16_t stream, offset; uint8_t type, method, usage, index; };
-struct Shader { uint32_t version = 0; string glsl; };
+struct Shader { uint32_t version = 0; string glsl; bool native = false; };   // native: hand-written GLSL (--native)
 
 // D3DDECLTYPE -> float component count (0 = unsupported)
 int Comps(uint8_t t) {
@@ -94,7 +94,7 @@ vector<Decl> Decls(const string& s) {
 
 class Exec {
 public:
-    const NxGpuApi* api; nx::Backend* be; const char* shaderDir;
+    const NxGpuApi* api; nx::Backend* be; const char* shaderDir; const char* nativeDir = nullptr;
     void (*onPresent)(void*, uint32_t, uint32_t); void* user;
     NxD9Stats* st; char* err; size_t errlen;
 
@@ -179,17 +179,26 @@ public:
         return be->ImageCreate(d);
     }
 
-    bool LoadGlsl(Shader& s, uint32_t lo, uint32_t hi) {
-        if (!s.glsl.empty()) return true;
-        if (!shaderDir) return false;
+    static bool ReadFile(const char* dir, uint32_t lo, uint32_t hi, string& out) {
         char p[1024];
-        snprintf(p, sizeof p, "%s/%08x%08x.glsl", shaderDir, hi, lo);
+        snprintf(p, sizeof p, "%s/%08x%08x.glsl", dir, hi, lo);
         FILE* f = fopen(p, "rb");
         if (!f) return false;
-        char buf[65536]; size_t n;
-        while ((n = fread(buf, 1, sizeof buf, f)) > 0) s.glsl.append(buf, n);
+        string t; char buf[65536]; size_t n;
+        while ((n = fread(buf, 1, sizeof buf, f)) > 0) t.append(buf, n);
         fclose(f);
+        out.swap(t);
         return true;
+    }
+
+    // --native <dir>: <hash>.glsl there is our hand-written shader for that original and replaces its translation
+    // (render/native/shaders/native.tsv, laid out by render/native/tools/native_dir.py). Else the record's GLSL,
+    // else --shaders <dir>.
+    bool LoadGlsl(Shader& s, uint32_t lo, uint32_t hi) {
+        if (nativeDir && ReadFile(nativeDir, lo, hi, s.glsl)) { s.native = true; st->nativeShaders++; return true; }
+        if (!s.glsl.empty()) return true;
+        if (!shaderDir) return false;
+        return ReadFile(shaderDir, lo, hi, s.glsl);
     }
 
     void BeginPassIfNeeded() {
@@ -283,6 +292,7 @@ public:
         auto di = decls.find(curDecl);
         if (vi == vsh.end() || pi == psh.end()) { Skip("unknown shader id"); return true; }
         if (di == decls.end()) { Skip("no vertex declaration (FVF)"); return true; }
+        if (vi->second.native && pi->second.native) st->nativeDraws++;
         auto bi = vb.find(strmVB);
         if (bi == vb.end() || !strmStride) { Skip("no stream 0"); return true; }
         // attributes: stream-0 elements with a fnvnx_dk location, up to 8, all converted to 4 floats
@@ -645,13 +655,16 @@ public:
 
 } // namespace
 
+static const char* g_nativeDir = nullptr;
+void nx_d3d9_native_dir(const char* dir) { g_nativeDir = dir; }
+
 int nx_d3d9_run(const NxGpuApi* api, const uint8_t* data, size_t size, const char* shaderDir,
                 void (*onPresent)(void*, uint32_t, uint32_t), void* user, NxD9Stats* stats, char* err, size_t errlen) {
     static NxD9Stats local;
     if (!stats) stats = &local;
     memset(stats, 0, sizeof *stats);
     Exec* x = new Exec();
-    x->api = api; x->be = nx::GpuBackend(api); x->shaderDir = shaderDir; x->onPresent = onPresent; x->user = user;
+    x->api = api; x->be = nx::GpuBackend(api); x->shaderDir = shaderDir; x->nativeDir = g_nativeDir; x->onPresent = onPresent; x->user = user;
     x->st = stats; x->err = err; x->errlen = errlen;
     if (err && errlen) err[0] = 0;
     int rc = x->be && x->Run(data, size) ? 0 : -1;
