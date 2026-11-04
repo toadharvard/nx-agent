@@ -36,3 +36,17 @@
 * **requests** - render machine: the dispatch row for the grass family (TallGrassShader passes -> nx_grass_vs/ps,
   NxGrassDraw from the shader's constant maps: ShaderVariableMap at +0x34, InstanceData pointer +0x1a4, count
   +0x1ac); G1-gpu: MODEL/REAL_MAP grass row to the native shaders once the dispatch lands.
+* **did** - trees family, SpeedTree leaves (item 2):
+  - `shaders/tree_leaf.vert.glsl` (STLEAF000-003: base / FOG / one point light / both), `tree_leaf.frag.glsl`
+    (STLEAF2000/2001[TMS]: base / fog / tms / fogtms + epilogue permutations). Semantics: leaf corner =
+    LeafBase[int(BLENDINDICES.z)] x BLENDINDICES.w, rocked about x (RockParams), billboard axes rustled about z
+    (RustleParams), blended to WindMatrices[int(BLENDINDICES.y)] by BLENDINDICES.x; lighting with the corner-bent
+    normal (LeafLighting.y), shade = fract(BLENDINDICES.z) on the sun term only; the point light (LightPos,
+    DiffColorPt) is attenuated by 1 - sat(d / range)^2 and not shaded; fog as the grass (clip-space length, power).
+  - `n1/veg_tree.cpp`: NxTreeLeafDraw (1,280 bytes), `nx_tree_leaf_fold()`, `nx_tree_leaf_vs/ps()`.
+  - Parity: 6 leaf cases on a 400-leaf crown (4 wind matrices, 12 leaf clusters), coverage equal, max 1/255 (one
+    pixel, alpha only, a filtering LSB; 2/255 with TMS's 2 x alpha). Mutations of rock, rustle, wind blend, shade,
+    point attenuation, fog power and the corner-normal weight each fail.
+* **measured** - real019's trees row is costed with the STB (branch) class; with the trees row costed as leaves
+  (STLEAF vso 299 / pso 117.5 class averages) the leaves go 1.37 -> 0.65 ms (vertex 0.68 -> 0.45, fragment 0.69 ->
+  0.19: tree_leaf__ea.frag 33 instr). Request to G1-gpu: split the trees row into branches / fronds / leaves.

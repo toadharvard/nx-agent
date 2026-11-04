@@ -58,6 +58,39 @@ enum { NxGrass_VertLit = 1u, NxGrass_FitToSlope = 2u, NxGrass_PtLight = 4u, NxGr
 const char* nx_grass_vs(uint32_t macros);
 const char* nx_grass_ps(uint32_t macros);
 
+/* ---- trees: leaves (SpeedTreeLeafShader: STLEAF000-003.vso, STLEAF2000/2001[TMS].pso) ---- */
+typedef struct NxTreeLeafConstants {   /* the engine's values by register (CTAB names) */
+    float mvpRows[16];      /* ModelViewProj c0-c3, rows */
+    float ambientColor[4];  /* AmbientColor c5 */
+    float diffColor[4];     /* DiffColor c6 */
+    float diffColorPt[4];   /* DiffColorPt c7 (PT) */
+    float fogParam[4];      /* FogParam c8 (FOG): x far, y range, z power */
+    float fogColor[4];      /* FogColor c9 (FOG) */
+    float sunDimmer[4];     /* SunDimmer c10: x */
+    float lightVector[4];   /* LightVector c11 */
+    float lightPos[4];      /* LightPos c12 (PT): xyz, w range */
+    float billboardRight[4], billboardUp[4];   /* c13, c14 */
+    float rockParams[4], rustleParams[4];      /* c15, c16 */
+    float leafLighting[4];  /* LeafLighting c17 */
+    float windMatrices[16][4];   /* c18-c33 */
+    float leafBase[48][4];       /* c34-c81 */
+} NxTreeLeafConstants;
+
+typedef struct NxTreeLeafDraw {   /* shaders/tree_leaf.vert.glsl TreeLeafDraw; the PS reads the head through fogColor */
+    float mvp[16];
+    float ambient[4], diffuse[4], diffusePt[4], lightVec[4], lightPos[4], bbRight[4], bbUp[4], rock[4], rustle[4],
+          leafLight[4], fog[4], fogColor[4];
+    float wind[16][4];
+    float leafBase[48][4];
+} NxTreeLeafDraw;
+
+/* Fills out; returns the bytes to upload (the whole block). */
+size_t nx_tree_leaf_fold(const NxTreeLeafConstants* c, NxTreeLeafDraw* out);
+/* Package names: macros = NxTree_Fog | NxTree_Pt (vertex), NxTree_Fog | NxTree_TransparencyMS (pixel). */
+enum { NxTree_Fog = 1u, NxTree_Pt = 2u, NxTree_TransparencyMS = 4u };
+const char* nx_tree_leaf_vs(uint32_t macros);
+const char* nx_tree_leaf_ps(uint32_t macros);
+
 #ifdef __cplusplus
 }
 #define NX_VEG_ASSERT_ static_assert
@@ -66,4 +99,5 @@ const char* nx_grass_ps(uint32_t macros);
 #endif
 NX_VEG_ASSERT_(NX_GRASS_HEAD_BYTES == 208, "NxGrassDraw head = 13 vec4 + mat4 (std140)");
 NX_VEG_ASSERT_(sizeof(NxGrassDraw) == 208 + 16 * NX_GRASS_MAX_INSTANCES, "NxGrassDraw");
+NX_VEG_ASSERT_(sizeof(NxTreeLeafDraw) == 64 + 12 * 16 + 64 * 16, "NxTreeLeafDraw");
 #endif

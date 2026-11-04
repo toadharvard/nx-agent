@@ -11,13 +11,13 @@ CXX ?= g++
 all: $(OUT)/test_veg $(SHOUT)/nx_shaders.c
 	$(OUT)/test_veg
 
-$(OUT)/test_veg: test_veg.cpp $(NATIVE)/n1/veg_grass.cpp $(NATIVE)/n1/veg_families.h
+$(OUT)/test_veg: test_veg.cpp $(NATIVE)/n1/veg_grass.cpp $(NATIVE)/n1/veg_tree.cpp $(NATIVE)/n1/veg_families.h
 	@mkdir -p $(OUT)
-	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror -fno-exceptions -fno-rtti -I$(NATIVE)/n1 -o $@ test_veg.cpp $(NATIVE)/n1/veg_grass.cpp
+	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror -fno-exceptions -fno-rtti -I$(NATIVE)/n1 -o $@ test_veg.cpp $(NATIVE)/n1/veg_grass.cpp $(NATIVE)/n1/veg_tree.cpp
 
-$(OUT)/libnxveg.so: $(NATIVE)/n1/veg_grass.cpp $(NATIVE)/n1/veg_families.h
+$(OUT)/libnxveg.so: $(NATIVE)/n1/veg_grass.cpp $(NATIVE)/n1/veg_tree.cpp $(NATIVE)/n1/veg_families.h
 	@mkdir -p $(OUT)
-	$(CXX) -std=c++17 -O1 -fPIC -shared -Wall -Wextra -Werror -fno-exceptions -fno-rtti -I$(NATIVE)/n1 -o $@ $(NATIVE)/n1/veg_grass.cpp
+	$(CXX) -std=c++17 -O1 -fPIC -shared -Wall -Wextra -Werror -fno-exceptions -fno-rtti -I$(NATIVE)/n1 -o $@ $(NATIVE)/n1/veg_grass.cpp $(NATIVE)/n1/veg_tree.cpp
 
 $(SHOUT)/nx_shaders.c: $(wildcard $(NATIVE)/shaders/*.glsl) $(NATIVE)/shaders/build.py
 	python3 $(NATIVE)/shaders/build.py $(SHOUT) $(if $(UAM),--uam $(UAM))

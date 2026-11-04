@@ -291,6 +291,139 @@ CASES = [
 ]
 
 
+# ---- trees: SpeedTree leaves ------------------------------------------------------------------------------------
+
+LEAF_VS = dict(ModelViewProj=0, AmbientColor=5, DiffColor=6, DiffColorPt=7, FogParam=8, FogColor=9, SunDimmer=10,
+               LightVector=11, LightPos=12, BillboardRight=13, BillboardUp=14, RockParams=15, RustleParams=16,
+               LeafLighting=17, WindMatrices=18, LeafBase=34)
+
+
+def leaf_scene(rng, nleaves=400):
+    """a tree crown: leaf cards (4 vertices at the leaf centre each); BLENDINDICES = (wind weight, wind matrix
+    register offset 0/4/8/12, corner index (cluster x 4 + corner) + shade fraction, scale)"""
+    v, ix = [], []
+    for k in range(nleaves):
+        c = np.array([rng.uniform(-260, 260), rng.uniform(500, 900), rng.uniform(150, 600)])
+        n = rng.normal(size=3); n /= np.linalg.norm(n)
+        cl = int(rng.integers(0, 12)); wgt = rng.uniform(0, 1); wm = 4 * int(rng.integers(0, 4))
+        shade = rng.uniform(0.3, 0.99); sc = rng.uniform(0.7, 1.4)
+        base = len(v)
+        for corner, uv in enumerate(((0, 1), (1, 1), (1, 0), (0, 0))):
+            v.append([*c, *n, *uv, wgt, wm, cl * 4 + corner + shade, sc])
+        ix += [base, base + 1, base + 2, base, base + 2, base + 3]
+    return np.array(v, np.float32), ix
+
+
+def leaf_geometry(verts, ix):
+    vao = GL.glGenVertexArrays(1); GL.glBindVertexArray(vao)
+    vb = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vb)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER, verts.nbytes, verts, GL.GL_STATIC_DRAW)
+    ia = np.array(ix, np.uint32)
+    ib = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, ib)
+    GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, ia.nbytes, ia, GL.GL_STATIC_DRAW)
+    stride = 12 * 4
+    for loc, off, n in ((0, 0, 3), (3, 3, 3), (6, 6, 2), (2, 8, 4)):     # POSITION NORMAL TEXCOORD0 BLENDINDICES
+        GL.glEnableVertexAttribArray(loc)
+        GL.glVertexAttribPointer(loc, n, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(off * 4))
+    return vao, len(ia)
+
+
+def leaf_params(rng, mvp, eye):
+    f = np.array([0, 900.0, 0]) - eye; f /= np.linalg.norm(f)
+    r = np.cross(f, [0, 0, 1.0]); r /= np.linalg.norm(r); u = np.cross(r, f)
+    lb = np.zeros((48, 4))
+    for cl in range(12):
+        s = rng.uniform(14, 30)
+        for corner, (a, b) in enumerate(((-1, -1), (1, -1), (1, 1), (-1, 1))):
+            lb[cl * 4 + corner] = [rng.uniform(-4, 4), a * s, b * s, 0]
+    wind = np.zeros((16, 4))
+    for m in range(4):
+        ang = rng.uniform(-0.12, 0.12); c, sn = math.cos(ang), math.sin(ang)
+        M = np.identity(4); M[0, 0] = c; M[0, 2] = sn; M[2, 0] = -sn; M[2, 2] = c; M[0, 3] = rng.uniform(-15, 15)
+        wind[m * 4:m * 4 + 4] = M
+    ld = np.array([0.3, -0.5, 0.8]); ld /= np.linalg.norm(ld)
+    return dict(ModelViewProj=mvp, AmbientColor=[0.3, 0.32, 0.36, 1], DiffColor=[0.95, 0.9, 0.75, 1],
+                DiffColorPt=[0.8, 0.4, 0.2, 0.5], FogParam=[1300.0, 900.0, 1.4, 0], FogColor=[0.65, 0.6, 0.55, 1],
+                SunDimmer=[0.85, 0, 0, 0], LightVector=[*ld, 0], LightPos=[60.0, 600.0, 300.0, 420.0],
+                BillboardRight=[*r, 0], BillboardUp=[*u, 0], RockParams=[0.6, rng.uniform(0, 9), 0.5, 0],
+                RustleParams=[0.8, rng.uniform(0, 9), 0.4, 0], LeafLighting=[0, 0.45, 0, 0], WindMatrices=wind,
+                LeafBase=lb)
+
+
+def leaf_translated_ubos(p):
+    vs = np.zeros((256, 4), np.float32)
+    for k, r in LEAF_VS.items():
+        v = np.asarray(p[k], np.float32)
+        vs[r:r + (v.shape[0] if v.ndim == 2 else 1)] = v
+    vdrv = np.zeros((4, 4), np.float32); vdrv[0] = [0, 0, 1, 0]
+    pdrv = np.zeros((20, 4), np.float32)
+    pdrv[2].view(np.int32)[0] = 5; pdrv[3] = [0.3, 0, 0, 0]                  # ALPHAFUNC GREATER, ref 0.3
+    return [(0, vs), (2, vdrv), (3, np.zeros((256, 4), np.float32)), (5, pdrv)]
+
+
+def leaf_native_ubos(lib, p):
+    if lib is None:
+        raise SystemExit("leaf cases need FNVNX_VEG_LIB (tests/s6n/veg.mk parity)")
+    F4 = ctypes.c_float * 4
+    names = ("ambientColor", "diffColor", "diffColorPt", "fogParam", "fogColor", "sunDimmer", "lightVector",
+             "lightPos", "billboardRight", "billboardUp", "rockParams", "rustleParams", "leafLighting")
+    class Consts(ctypes.Structure):
+        _fields_ = [("mvpRows", ctypes.c_float * 16)] + [(k, F4) for k in names] + \
+                   [("windMatrices", ctypes.c_float * 64), ("leafBase", ctypes.c_float * 192)]
+    keys = ("AmbientColor", "DiffColor", "DiffColorPt", "FogParam", "FogColor", "SunDimmer", "LightVector", "LightPos",
+            "BillboardRight", "BillboardUp", "RockParams", "RustleParams", "LeafLighting")
+    c = Consts()
+    c.mvpRows[:] = [float(x) for x in np.asarray(p["ModelViewProj"], np.float32).reshape(16)]
+    for k, ck in zip(keys, names):
+        getattr(c, ck)[:] = [float(x) for x in p[k]]
+    c.windMatrices[:] = [float(x) for x in np.asarray(p["WindMatrices"], np.float32).reshape(64)]
+    c.leafBase[:] = [float(x) for x in np.asarray(p["LeafBase"], np.float32).reshape(192)]
+    out = np.zeros((4 + 12 + 64, 4), np.float32)
+    n = lib.nx_tree_leaf_fold(ctypes.byref(c), out.ctypes.data_as(ctypes.c_void_p))
+    assert n == out.nbytes, n
+    epi = np.zeros((3, 4), np.float32); epi[1] = [0, 0, 0, 0.3]; epi[2].view(np.uint32)[:] = [4, 0, 1, 0]
+    return [(1, out), (2, epi)]
+
+
+LEAF_CASES = [
+    ("leaf_base", "STLEAF000.vso", "STLEAF2000.pso", "tree_leaf.vert", "tree_leaf.frag"),
+    ("leaf_fog", "STLEAF001.vso", "STLEAF2001.pso", "tree_leaf_fog.vert", "tree_leaf_fog.frag"),
+    ("leaf_pt", "STLEAF002.vso", "STLEAF2000.pso", "tree_leaf_pt.vert", "tree_leaf.frag"),
+    ("leaf_ptfog", "STLEAF003.vso", "STLEAF2001.pso", "tree_leaf_ptfog.vert", "tree_leaf_fog.frag"),
+    ("leaf_tms", "STLEAF000.vso", "STLEAF2000TMS.pso", "tree_leaf.vert", "tree_leaf_tms.frag"),
+    ("leaf_fogtms_ea", "STLEAF001.vso", "STLEAF2001TMS.pso", "tree_leaf_fog.vert", "tree_leaf_fogtms__ea.frag"),
+]
+
+
+# ---- driver ---------------------------------------------------------------------------------------------------------
+
+def translated_prog(t019, idx, ovs, ops):
+    tv = translated_src(open(os.path.join(t019, idx[ovs] + ".glsl")).read(), 0)
+    if "dk_fog_out" not in tv:   # the PS < 3.0 fog input (location 18) needs a writer in GL; D3D fog is off here
+        tv = tv.replace("void main()\n{", "layout(location = 18) out vec4 dk_fog_out;\nvoid main()\n{\n\tdk_fog_out = vec4(1.0);", 1)
+    tf = translated_src(open(os.path.join(t019, idx[ops] + ".glsl")).read(), 3)
+    return compile_prog(tv, tf)
+
+
+def native_prog(pkg, nvs, nfs):
+    return compile_prog(native_src(open(os.path.join(pkg, nvs + ".glsl")).read()),
+                        native_src(open(os.path.join(pkg, nfs + ".glsl")).read()))
+
+
+def compare(name, a, b, label, verbose):
+    ca, cb = a[..., 3] > 0, b[..., 3] > 0
+    cov_a = int(ca.sum()); cover = int((ca != cb).sum())
+    both = ca & cb
+    diff = float(np.abs(a[both] - b[both]).max()) if both.any() else 0.0
+    ok = cov_a > 0.02 * W * H and cover <= max(1, COVER_LIMIT * cov_a) and diff <= TOL
+    print("%-14s %s  covered %6d px, coverage diff %4d px, max |colour diff| %.5f (%.2f/255)%s"
+          % (name, "ok  " if ok else "FAIL", cov_a, cover, diff, diff * 255, "" if ok else "  <- " + label))
+    if verbose and both.any():
+        d = np.abs(a - b).max(axis=2); yx = np.unravel_index(np.argmax(d * both), d.shape)
+        print("   worst px", yx, "translated", a[yx], "native", b[yx])
+    return ok
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     verbose = "-v" in sys.argv
@@ -301,53 +434,57 @@ def main():
     if not args:
         raise SystemExit(__doc__)
     pkg = args[0]
+    only = args[1:]
     idx = t019_index(t019)
     lib = None
     if os.environ.get("FNVNX_VEG_LIB"):
         lib = ctypes.CDLL(os.environ["FNVNX_VEG_LIB"])
         lib.nx_grass_fold.restype = ctypes.c_size_t
         lib.nx_grass_fold.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]
+        lib.nx_tree_leaf_fold.restype = ctypes.c_size_t
+        lib.nx_tree_leaf_fold.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    for _, ovs, ops, _, _ in CASES + LEAF_CASES:
+        for f in (ovs, ops):
+            if f not in idx:
+                print("%s missing from FNVNX_T019" % f); return 2
     dpy, ctx = egl_context()
     GL.glEnable(GL.GL_DEPTH_TEST); GL.glDepthFunc(GL.GL_LEQUAL)
     GL.glClipControl(GL.GL_LOWER_LEFT, GL.GL_ZERO_TO_ONE)
     GL.glViewport(0, 0, W, H)
     make_target()
     rng = np.random.default_rng(19)
+    tex = upload_tex(texture_rgba(rng))
+    fails = ncases = 0
+    # grass field
     verts, ix = clump(rng)
     inst = field(rng, 200)
     vao, count = geometry(verts, ix, len(inst))
-    tex = upload_tex(texture_rgba(rng))
     mvp = perspective_lookat(np.array([0, -120.0, 90]), [0, 900, 0], math.radians(65), 1.0, 10, 4000)
     p = params(rng, mvp)
     p["alpha_ref_d3d"] = 0.0                    # the D3D9 alpha test after the shader's own test (ALPHAFUNC GREATER 0)
-    fails = 0
     for name, ovs, ops, nvs, nfs in CASES:
-        for f in (ovs, ops):
-            if f not in idx:
-                print("%s: %s missing from FNVNX_T019" % (name, f)); return 2
-        tv = translated_src(open(os.path.join(t019, idx[ovs] + ".glsl")).read(), 0)
-        if "dk_fog_out" not in tv:   # the PS < 3.0 fog input (location 18) needs a writer in GL; D3D fog is off here
-            tv = tv.replace("void main()\n{", "layout(location = 18) out vec4 dk_fog_out;\nvoid main()\n{\n\tdk_fog_out = vec4(1.0);", 1)
-        tf = translated_src(open(os.path.join(t019, idx[ops] + ".glsl")).read(), 3)
-        tprog = compile_prog(tv, tf)
+        if only and name not in only:
+            continue
         vsc, psc, vdrv, pdrv = translated_ubos(p, inst)
-        a = draw(tprog, vao, count, [(0, vsc), (2, vdrv), (3, psc), (5, pdrv)], tex)
-        nprog = compile_prog(native_src(open(os.path.join(pkg, nvs + ".glsl")).read()),
-                             native_src(open(os.path.join(pkg, nfs + ".glsl")).read()))
+        a = draw(translated_prog(t019, idx, ovs, ops), vao, count, [(0, vsc), (2, vdrv), (3, psc), (5, pdrv)], tex)
         nubo, epi = native_ubo(p, inst, lib)
-        b = draw(nprog, vao, count, [(1, nubo), (2, epi)], tex)
-        ca, cb = a[..., 3] > 0, b[..., 3] > 0
-        cov_a = int(ca.sum()); cover = int((ca != cb).sum())
-        both = ca & cb
-        diff = float(np.abs(a[both] - b[both]).max()) if both.any() else 0.0
-        ok = cov_a > 0.02 * W * H and cover <= max(1, COVER_LIMIT * cov_a) and diff <= TOL
-        fails += not ok
-        print("%-14s %s  covered %6d px, coverage diff %4d px, max |colour diff| %.5f (%.2f/255)%s"
-              % (name, "ok  " if ok else "FAIL", cov_a, cover, diff, diff * 255, "" if ok else "  <- %s+%s vs %s+%s" % (ovs, ops, nvs, nfs)))
-        if verbose and both.any():
-            d = np.abs(a - b).max(axis=2); yx = np.unravel_index(np.argmax(d * both), d.shape)
-            print("   worst px", yx, "translated", a[yx], "native", b[yx])
-    print("veg_parity: %d cases, %d failed (block from %s)" % (len(CASES), fails, "veg_grass.cpp" if lib else "numpy"))
+        b = draw(native_prog(pkg, nvs, nfs), vao, count, [(1, nubo), (2, epi)], tex)
+        ncases += 1
+        fails += not compare(name, a, b, "%s+%s vs %s+%s" % (ovs, ops, nvs, nfs), verbose)
+    # tree crown (leaves)
+    eye = np.array([0, -200.0, 300])
+    mvp = perspective_lookat(eye, [0, 700, 380], math.radians(60), 1.0, 10, 4000)
+    lp = leaf_params(rng, mvp, eye)
+    lverts, lix = leaf_scene(rng)
+    lvao, lcount = leaf_geometry(lverts, lix)
+    for name, ovs, ops, nvs, nfs in LEAF_CASES:
+        if only and name not in only:
+            continue
+        a = draw(translated_prog(t019, idx, ovs, ops), lvao, lcount, leaf_translated_ubos(lp), tex)
+        b = draw(native_prog(pkg, nvs, nfs), lvao, lcount, leaf_native_ubos(lib, lp), tex)
+        ncases += 1
+        fails += not compare(name, a, b, "%s+%s vs %s+%s" % (ovs, ops, nvs, nfs), verbose)
+    print("veg_parity: %d cases, %d failed (blocks from %s)" % (ncases, fails, "veg_*.cpp" if lib else "numpy"))
     EGL.eglTerminate(dpy)
     return 1 if fails else 0
 
