@@ -2829,3 +2829,23 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - Test: tests/farm/test_job_gamedata.sh (ok).
 * **next** - full1's first job at a head with this and the J-0127 loader fix: the first emulated boot on the real exe.
   It shows the frontier past the image-vftable traps of J-0126.
+
+### J-0129 | 2026-11-04 | stream: orchestration | status: wip | parent: J-0128
+
+* **decided (owner)** - All streams run at once. The target is a first console launch that our own metrics call a
+  near-certain success, and fast: a native renderer, plus scene and frame comparison against the real game.
+* **did** - Streams running now. Each is a worktree agent that reports back; the orchestrator merges.
+  | stream | owns | first goal |
+  |---|---|---|
+  | S1-compile | prepare rules | STL1, blk_00ac0000, the 43 failing units, then S13's FALL1/uninit/split-global |
+  | S2c-link | fnvlink, vtables | image vftable slots from the player's exe; undefined 4,468 -> boot-relevant 0 |
+  | S5-boot | emulated boot | boot on the real exe; milestones WinMain / menu / first frame / first cell |
+  | S1b-patches | per-site ABI | pop-mismatch families, S1b fuzz divergences, ABI manual/x86-inconsistent |
+  | S11-equivalence | MSVC gate | 1,067 differing functions -> fixed or by design, 0 unexplained |
+  | S15-perf | threads, frame cost | mtqemu race checker, core placement, per-frame budget on real data |
+  | S6n-native-render | deko3d renderer | backend seam (deko3d console, Vulkan/lavapipe host), menu and first cell |
+  | S16-compare (new) | reference vs port | real exe under Wine for reference frames and scene state; PSNR/SSIM/FLIP gates |
+  | R0-gates (new) | readiness scorecard | tools/gates/ready.py over every farm report; docs/READINESS.md |
+  | V1 | verification (D14) | TAIL1, stage_after, loader SizeOfImage, job_gamedata, FTOI2, fastcall non-POD |
+  - The farms (census, compile, link, full, static, eq, fuzz x26) keep running on the head as before.
+* **next** - Each stream's own entry, with `parent: J-0129`.
