@@ -86,8 +86,20 @@ def test_budget(tmp):
     import json
     import frame_budget
     model = json.load(open(os.path.join(HERE, '..', '..', 'tools', 'perf', 'budget_model.json')))
+    model_cpi = model
+    model = json.loads(json.dumps(model))   # rows without their own CPI take --perf's prices (the checks below)
+    for h in model['hotspot_functions']:
+        h.pop('cpi', None)
     b = frame_budget.build(model)
     check(b['schema'] == 'fnvnx-frame-budget/1', 'budget: schema')
+    # a row with its own CPI is priced from it and its current instructions per call, whatever --perf says (V1 P1)
+    bc = frame_budget.build(model_cpi, perf={'schema': 'fnvnx-perf/1', 'per_call_cycles': []})
+    sc_ = next(h for h in model_cpi['hotspot_functions'] if h['id'] == 'fn_slerp')
+    rc = next((r for r in bc['measured']['a57']['rows'] if r['id'] == 'fn_slerp'), None)
+    want_c = frame_budget.mid([sc_['per_call_insn'][0] * sc_['cpi']['lo'], sc_['per_call_insn'][1] * sc_['cpi']['hi']]) \
+        * frame_budget.mid(sc_['calls'])
+    check(rc is not None and abs(rc['cycles_per_frame_mid'] - want_c) <= 1,
+          'budget: a row with its own CPI is priced from it (slerp %.0f cycles per frame)' % want_c)
     # --perf (P0's fnvnx-perf/1): a priced row adds cycles x IPC - instructions on its thread; fn_interlocked is skipped
     sl = next(h for h in model['hotspot_functions'] if h['id'] == 'fn_slerp')
     perf = {'schema': 'fnvnx-perf/1', 'per_call_cycles': [
