@@ -24,11 +24,11 @@ binutils 2.45.1, newlib 4.6.0, multilibs lp64/pic/ilp32/ilp32-pic), libnx (ext/l
 | GL 4.5 reference backend | `gl/nxgl.{h,c}` | scenes | all scenes pass |
 | shader package | `shaders/*.glsl` (N0, N1 tile + nolight, N2 lit + depth + land + sky), `shaders/build.py` (variants; uam -> DKSH + GLSL in one C table) | build | 30 shaders, all compile with uam and on GL |
 | N2 families | `shaders/{lit,depth,land,sky}.*.glsl`, blocks in `include/nx/families.h` | scenes lit, depth, land, sky | 118 checks, 0 failed; semantics provisional until the parity check |
-| N0 scenes | `n0/scenes.{h,cpp}`, `n0/run_gl.cpp`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | `make -C tests/s6n scenes` | 18 scenes, 31630 conformance checks (30720 of them exact-coverage pixels), 0 failed; 18/18 goldens bit-exact |
+| N0 scenes | `n0/scenes.{h,cpp}`, `n0/run_gl.cpp`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | `make -C tests/s6n scenes` | 19 scenes, 31637 conformance checks (30720 of them exact-coverage pixels), 0 failed; 19/19 goldens bit-exact |
 | deko3d backend v2 | `host/nxgpu.{h,c}`, `host/nxgpu_host.c` (ext module 10) | compiles + links | not run on hardware |
 | N0 for the Switch | `n0/guest_main.cpp`, `switch/build.sh` | builds exefs.nsp + guest.nso | not run on hardware |
 | ILP32 guest under emulation | `tests/s6n/emu_n0.py` (S5 emu host + ext module 10 -> GL backend) | `make -C tests/s6n emu GUEST=...` | 31618 checks pass, 17/17 images bit-identical to the goldens |
-| capture + host replay | `capture/capture.{h,cpp}` (front side, guest and host), `capture/replay.{h,cpp}`, `capture/replay_gl.cpp` | `make -C tests/s6n capture`; guest capture via `make ... emu` | 18 frames replayed, 18/18 readbacks identical (host and ILP32 guest captures); the console guest writes `sdmc:/fnvnx/n0/out/n0.nxcap` |
+| capture + host replay | `capture/capture.{h,cpp}` (front side, guest and host), `capture/replay.{h,cpp}`, `capture/replay_gl.cpp` | `make -C tests/s6n capture`; guest capture via `make ... emu` | 19 frames replayed, 19/19 readbacks identical (host and ILP32 guest captures); the console guest writes `sdmc:/fnvnx/n0/out/n0.nxcap` |
 | N1 renderer core | `n1/renderer.{h,cpp}` (nx::Renderer frame/target/camera virtuals, nx::StateTracker), `n1/selftest.cpp`, `n1/build.sh` -> `libnxrender.a` (ILP32) | `make -C tests/s6n n1`; `n1/build.sh <o>` + `make -C tests/s6n n1emu N1OUT=<o>` | 90 checks, 0 failed on GL and as the ILP32 guest (incl. a synthetic textured menu through the stubs: D3DX and lockable texture overrides, tile tint, material alpha, alpha property blend/test, stencil, scroll, scissor, the MENUBG image-space dispatch); `n1/engine_stubs.cpp` in libnxrender.a |
 | environment | `env.sh` | rebuilt here | ok |
 
@@ -65,4 +65,5 @@ python3 ports/fnv-nx/tests/s6n/scenes.py --compare <copied out dir> --tol 2
   otherwise and the sorted scene then differs from the x86 goldens by 1 LSB).
 
 | nx_render (S16-compare) | `capture/nx_render.cpp`, `capture/d3d9_exec.{h,cpp}`, `capture/d3d9cap.h` (NXD9), `capture/png.h`; `tests/s6n/nxd9.py` writer; docs §8 | `make -C tests/s6n nx_render` | 42 checks, 0 failed |
-| dynamic resolution | `front/dynres.h` controller, scene `dynres` (scaled scene + upscale + native UI); docs §9 (frame graph, controller, presets, budgets) | `make -C tests/s6n`, `make -C tests/s6n scenes` | test_dynres OK; 18 scenes match |
+| dynamic resolution | `front/dynres.h` controller, scene `dynres` (scaled scene + upscale + native UI); docs §9 (frame graph, controller, presets, budgets) | `make -C tests/s6n`, `make -C tests/s6n scenes` | test_dynres OK; 19 scenes match |
+| N2 skinning (started) | `include/nx/skin.h`, `lit_skin` / `depth_skin` VS variants, scene `skin`; docs §4.1 | `make -C tests/s6n`, `make -C tests/s6n scenes` | test_skin_palette OK; scene skin 7/7 |

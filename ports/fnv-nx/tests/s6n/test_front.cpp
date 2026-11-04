@@ -2,6 +2,7 @@
 // GL shim (gl/nxgl.c nxgl_shim_glsl). Host LP64 with a recording backend; no GPU.
 #include "nx/front.h"
 #include "dynres.h"
+#include "nx/skin.h"
 #include "../../render/native/gl/nxgl.h"
 #include <stdio.h>
 #include <math.h>
@@ -151,7 +152,23 @@ static void test_dynres() {
     CHECK(d.scale() == 1.0f);                         // clamped at maxScale
 }
 
+static void test_skin_palette() {
+    // bone world: rotate 90 degrees about z, scale 2, translate (1, 2, 3); bind (skin to bone): translate (-1, 0, 0)
+    NxBoneXform w = {{0, -1, 0, 1, 0, 0, 0, 0, 1}, {1, 2, 3}, 2}, b = {{1, 0, 0, 0, 1, 0, 0, 0, 1}, {-1, 0, 0}, 1};
+    float rows[3][4];
+    const uint16_t bones[1] = {0};
+    CHECK(nx_skin_palette(&w, &b, bones, 1, rows) == 1);
+    // v = (2, 0, 0): skin -> bone (1, 0, 0) -> world 2 * R (1, 0, 0) + t = (0, 2, 0) + (1, 2, 3) = (1, 4, 3)
+    float v[4] = {2, 0, 0, 1}, o[3];
+    for (int r = 0; r < 3; r++) o[r] = rows[r][0] * v[0] + rows[r][1] * v[1] + rows[r][2] * v[2] + rows[r][3];
+    CHECK(fabsf(o[0] - 1) < 1e-6f && fabsf(o[1] - 4) < 1e-6f && fabsf(o[2] - 3) < 1e-6f);
+    uint16_t many[40] = {0};
+    static float big[3 * 40][4];
+    CHECK(nx_skin_palette(&w, &b, many, 40, big) == NX_SKIN_MAX_BONES);
+}
+
 int main() {
+    test_skin_palette();
     test_dynres();
     test_state_cache(); test_encoder_overflow(); test_sort_stable(); test_frame_encoding(); test_dds(); test_glsl_shim();
     printf("front: %d checks, %d failed\n", g_checks, g_fail);

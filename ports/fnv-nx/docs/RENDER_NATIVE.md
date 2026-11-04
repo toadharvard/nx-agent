@@ -447,6 +447,23 @@ reference, never shipped in place of our shaders unless as a temporary fallback)
 4. The translated original remains a selectable per-family fallback (`nx::Family::Translated`), which also lets
    world rendering come up before every family is hand-written.
 
+### 4.1 N2 skinning (started)
+
+Gamebryo skins on the GPU per NiSkinPartition: each partition has its bone list (the palette), up to 4 weights and
+palette indices per vertex, and a vertex goes to world space by `BoneWorld[b] * SkinToBone[b] * v` (NiSkinData's
+skin-to-bone transforms, the bones' world transforms from NiSkinInstance's bone nodes). The native path:
+
+* `include/nx/skin.h`: `NxBoneXform` (an NiTransform) and `nx_skin_palette` (composition, 3x4 rows per palette entry,
+  up to `NX_SKIN_MAX_BONES` = 32 per partition);
+* SKIN variants `lit_skin` and `depth_skin` (vertex stage): attributes 4 (weights) and 5 (indices), both unorm8x4;
+  the palette (`vec4 bones[96]`) follows the draw block (`NxLitSkinDraw`, `NxDepthSkinDraw`, 2000 / 1600 bytes), the
+  skinned position and normal replace the model-space ones (world = identity, wvp = view-projection);
+* N0 scene `skin`: a limb bent 90 degrees at a joint with blended weights, a quad whose bone turns its normal away
+  from the light, a depth_skin quad moved in z by its bone; golden + checks, identical on the ILP32 guest.
+
+Next: reading NiSkinInstance / NiSkinData / NiSkinPartition from engine objects into palettes and partition draws
+(Do_RenderGeometry's skinned branch, now skipped and counted), and the remaining families' SKIN variants.
+
 ## 5. Recommendation
 
 **Native renderer, hybrid on the shader side; drop the D3D9 emulation layer as the main path.**
