@@ -244,6 +244,18 @@ class T(unittest.TestCase):
         self.assertEqual(roots, set(names[:2]))
         self.assertEqual(got['_ZN1K1fEi'], (0, 0))   # K's first virtual (its destructor is not virtual)
 
+    def test_conversion_operator_pairs(self):
+        """An MSVC conversion operator to a pointer type (`operator class A *(void)`) parses as a function and pairs
+        with its Itanium name (it used to be dropped as a function returning a function pointer)."""
+        ms, it = '??B?$P@VA@@@@QBEPAVA@@XZ', '_ZNK1PI1AEcvPS0_Ev'
+        dm = fnvlink.batch_demangle(fnvlink.UNDNAME, [ms])
+        di = fnvlink.batch_demangle(fnvlink.CXXFILT, [it])
+        m, i = sigs.parse_msvc(ms, dm[ms]), sigs.parse_itanium(it, di[it])
+        self.assertEqual((m.kind, m.qual, m.params, m.cc), ('func', ['P<A>', 'operator A*'], [], 'thiscall'))
+        mk = {k for t, k in m.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.def_keys(m)}
+        ik = {k for t, k in i.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.relaxed_keys(i)}
+        self.assertTrue(mk & ik)
+
 def coff(funcs, externs, data=None):
     """Minimal i386 COFF: one COMDAT code section per function {name: (bytes, {offset: callee})}; data: the same
     for read-only data sections (a vftable: DIR32 words)."""
