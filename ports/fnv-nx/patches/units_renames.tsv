@@ -45,6 +45,9 @@ src/fallout/ai/actor.cpp	ref	0x008be7a0	?FUN_008be7a0@@YIXPAX@Z	?FUN_008be7a0@@Y
 src/fallout/ai/actor_o2_variant.cpp	ref	0x0062d4b0	_FUN_0062d4b0	?FUN_0062d4b0@FUN_00cb9900_s1b@@QAEXXZ
 src/fallout/ai/actor_o2_variant.cpp	ref	0x00cc58c0	?FUN_00cc58c0@@YAXXZ	?FUN_00cc58c0@FUN_00c7fa70_s1b@@QAEXXZ
 src/fallout/ai/actor_o2_variant.cpp	ref	0x00cda340	?FUN_00cda340@@YAXXZ	?FUN_00cda340@FUN_00cda4b0_s1b@@QAEXXZ
+src/fallout/ai/combat/explosion.cpp	def	0x005762b0	?FUN_005762b0@FUN_005762b0_cls@@QAEHH@Z	?FUN_005762b0@FUN_005762b0_cls@@QAE?AUVec3f@@XZ
+src/fallout/ai/combat/explosion.cpp	ref	0x00439e90	?Callee00439e90@@YIPAXPAX@Z	?FUN_00439e90@Vec3f@@QBE?AU1@ABU1@@Z
+src/fallout/ai/combat/explosion.cpp	ref	0x0053d280	?Callee0053d280@@YIPAXPAX@Z	?FUN_0053d280@Vec3f@@QBE?AU1@M@Z
 src/fallout/ai/combat/explosion_o2_variant.cpp	ref	0x00cbc740	?FUN_00cbc740@@YAXXZ	?FUN_00cbc740@FUN_00cbd4e0_s1b@@QAEXXZ
 src/fallout/ai/combat/flameprojectile_o2_variant_od_oy_noo2_variant.cpp	ref	0x004a3a20	?FUN_004a3a20@BoundForm@@QAE?AUFilterKey@@XZ	?FUN_004a3a20@BoundForm@@QAEIXZ
 src/fallout/ai/combat/flameprojectile_o2_variant_od_oy_noo2_variant.cpp	ref	0x0059ce80	?FUN_0059ce80@Handle@@QAEXABUFilterKey@@@Z	?FUN_0059ce80@Handle@@QAEXI@Z
@@ -663,6 +666,7 @@ src/staging/blk_00c80000_o2.cpp	def	0x00c8ff80	?FUN_00c8ff80@@YAXHH@Z	?FUN_00c8f
 src/staging/blk_00c80000_o2.cpp	def	0x00c8ff90	?FUN_00c8ff90@@YAXXZ	?FUN_00c8ff90@FUN_00c8ff90_s1b@@QAEXPAX@Z
 src/staging/blk_00c80000_o2.cpp	def	0x00c8ffb0	?FUN_00c8ffb0@@YAXXZ	?FUN_00c8ffb0@FUN_00c8ffb0_s1b@@QAEXH@Z
 src/staging/blk_00c80000_o2.cpp	def	0x00c8ffc0	?FUN_00c8ffc0@@YA_NPAVC815B0Constraint@@@Z	?FUN_00c8ffc0@FUN_00c8ffc0_s1b@@QAE_NPAX@Z
+src/staging/blk_00c80000_o2.cpp	ref	0x0043f8d0	?FUN_0043f8d0@FUN_00c90030_Transform@@QAEPAXPAX000@Z	?FUN_0043f8d0@FUN_00c90030_Matrix@@QBE?AU1@ABU1@@Z
 src/staging/blk_00c80000_o2.cpp	ref	0x00a5d3a0	?FUN_00a5d3a0@@YAXXZ	?FUN_00a5d3a0@FUN_00c87c30_s1b@@QAEXXZ
 src/staging/blk_00c80000_o2.cpp	ref	0x00ba87d0	?FUN_00ba87d0@@YAXXZ	?FUN_00ba87d0@FUN_00c85800_s1b@@QAE_NPAX@Z
 src/staging/blk_00c80000_o2.cpp	ref	0x00c6b730	?DispatchToTarget@@YAXXZ	?FUN_00c6b730@FUN_00c87fa0_s1b@@QAEXH@Z
