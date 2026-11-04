@@ -44,6 +44,7 @@ enum DrawSkip : uint8_t {
     Skip_NoEngineShader,    // translated route: the geometry has no engine shader / pass / program objects
     Skip_Submit,            // the renderer refused the packet (ring or state cache full, shader missing)
     Skip_ImageSpace,        // an image-space effect with no native family and no translated program
+    Skip_NoFamily,          // translated route, but the translated path is unavailable (no program store bound)
     Skip_Count
 };
 const char* SkipName(DrawSkip s);

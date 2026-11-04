@@ -8,6 +8,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 namespace {
 using namespace nx;
@@ -212,33 +213,78 @@ int n1_selftest_world(Backend* be, Renderer& r, uint32_t back, char* log, uint32
     c.Check(w.ar.top <= w.ar.size, "world: arena");
     static uint32_t passId, renderPass;
     engine::BindPassGlobals(&passId, &renderPass);
+    const uint32_t routes0 = engine::NativeFamilies();
     engine::NiDX9Renderer* eng = (engine::NiDX9Renderer*)&r;
     engine::ImageSpaceManager* ism = (engine::ImageSpaceManager*)(w.ar.a + w.imgMgr);
-    r.state().Reset();
-    r.SetBackgroundColor(0, 0, 0, 1);
-    c.Check(eng->Do_BeginFrame() && eng->Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "world: begin");
-    eng->Do_SetScreenSpaceCameraData(nullptr);
-    for (int i = 0; i < kNumCells; i++) {
-        passId = kCells[i].pass;
-        renderPass = w.rp[i] ? w.ar.G(w.rp[i]) : 0;
-        eng->Do_RenderGeometry(w.ar.a + w.geo[i]);
-    }
-    passId = 0; renderPass = 0;
-    for (int e = 1; e <= kEffects; e++) ism->RenderEffect(e, &r, nullptr, nullptr, nullptr, false);
-    c.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame(), "world: end");
-    const DrawStats& s = r.lastFrameStats();
-    Report(c, s, "world frame");
+    static const float sky[12] = {0.2f, 0.4f, 0.6f, 1, 0, 1, 0, 1, 0, 0, 1, 1};   // SkyShader Color0-2
+    engine::BindSkyColors(sky);
+    auto frame = [&]() {
+        r.state().Reset();
+        r.SetBackgroundColor(0, 0, 1, 1);
+        c.Check(eng->Do_BeginFrame() && eng->Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "world: begin");
+        eng->Do_SetScreenSpaceCameraData(nullptr);
+        for (int i = 0; i < kNumCells; i++) {
+            passId = kCells[i].pass;
+            renderPass = w.rp[i] ? w.ar.G(w.rp[i]) : 0;
+            eng->Do_RenderGeometry(w.ar.a + w.geo[i]);
+        }
+        passId = 0; renderPass = 0;
+        for (int e = 1; e <= kEffects; e++) ism->RenderEffect(e, &r, nullptr, nullptr, nullptr, false);
+        c.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame(), "world: end");
+        return r.lastFrameStats();
+    };
+    // the default routing: lit / depth / land / sky passes go to the translated route
+    const DrawStats s0 = frame();
+    Report(c, s0, "world frame (default routes)");
+    c.Check(s0.Native() == 4 && s0.native[Route_NoLight] == 2 && s0.translated + s0.skipped[Skip_NoFamily] +
+            s0.skipped[Skip_NoProgram] + s0.skipped[Skip_NoEngineShader] == (uint32_t)(kNumCells - 5),
+            "world (default): native tile + nolight, the rest translated", (int)s0.Native());
+    engine::SetNativeFamilies(~0u);   // the hand-written world families too
+    const DrawStats s = frame();
+    Report(c, s, "world frame (all native families)");
     c.Check(s.engineDraws == (uint32_t)(kNumCells + kEffects), "world: every engine draw counted", (int)s.engineDraws);
     c.Check(s.Native() + s.translated + s.misrendered + s.Skipped() == s.engineDraws, "world: counters add up");
-    // before the world families: every world pass is drawn with the tile family (misrendered), the skinned one and
-    // the image-space effects are skipped
-    c.Check(s.native[Route_Tile] == 1 && s.native[Route_Legacy] == 1, "world: tile + menu path native",
-            (int)s.native[Route_Tile], (int)s.native[Route_Legacy]);
-    c.Check(s.misrendered == (uint32_t)(kNumCells - 3) && s.skipped[Skip_Skinned] == 1 &&
+    // native families: lit 3, land 1, sky 2, depth 3, nolight 2, tile 1 + the menu path; the skinned lit pass and
+    // the passes without a native family are skipped (no translated path yet), as are the image-space effects
+    c.Check(s.native[Route_Lit] == 3 && s.native[Route_Land] == 1 && s.native[Route_Sky] == 2 &&
+            s.native[Route_Depth] == 3 && s.native[Route_NoLight] == 2 && s.native[Route_Tile] == 1 &&
+            s.native[Route_Legacy] == 1, "world: native routes", (int)s.Native());
+    c.Check(s.misrendered == 0 && s.skipped[Skip_Skinned] == 1 && s.skipped[Skip_NoFamily] == 14 &&
             s.skipped[Skip_ImageSpace] == (uint32_t)kEffects, "world: misrendered / skipped", (int)s.misrendered,
             (int)s.Skipped());
+    // pixels: one cell per draw (clear blue)
+    static uint8_t img[W * H * 4];
+    NxReadback rb;
+    memset(&rb, 0, sizeof rb);
+    rb.image = back; rb.w = W; rb.h = H; rb.dst = FNVNX_ADDR_(img); rb.dst_size = sizeof img;
+    c.Check(be->Readback(rb), "world: readback");
+    auto px = [&](int cell) { return img + 4 * (((cell / kCols) * kCell + 8) * W + (cell % kCols) * kCell + 8); };
+    auto near = [&](const uint8_t* p, int r, int g, int b) {
+        return abs(p[0] - r) <= 2 && abs(p[1] - g) <= 2 && abs(p[2] - b) <= 2;
+    };
+    const uint8_t* p = px(0);
+    c.Check(near(p, 255, 153, 89), "lit (3XLIGHTING): white x (ambient 0.1 + sun (1, .5, .25))", p[1], p[2]);
+    const uint8_t* q = px(1);
+    c.Check(q[1] > p[1] + 20 && q[2] > p[2] + 20, "lit_spec (3XLIGHTING_Spc): specular on top", q[1], q[2]);
+    p = px(2); c.Check(near(p, 255, 0, 0), "lit_vc (3XLIGHTING_Vc): vertex colour red", p[1], p[2]);
+    p = px(3); c.Check(near(p, 255, 0, 0), "land_lit (LANDAD): base x vc x (N.L sun + ambient)", p[0], p[1]);
+    p = px(4); c.Check(near(p, 51, 102, 153), "sky (SKY): Color0 by the vertex colour's red weight", p[0], p[2]);
+    p = px(5); c.Check(near(p, 255, 255, 255), "sky_clouds (SKY_CLOUDS): stage-0 texture over the gradient", p[0], p[2]);
+    p = px(6); c.Check(near(p, 0, 0, 0), "depth_out (DEPTHMAP): z/w ~ 0 in screen space", p[0], p[2]);
+    p = px(7); q = px(8);
+    c.Check(near(p, 0, 0, 255) && near(q, 0, 0, 255), "depth (ZONLY, ZONLY_At): no colour written", p[2], q[2]);
+    p = px(9); c.Check(near(p, 255, 255, 255), "nolight_tex (NOLIGHTING): texture x emissive", p[0], p[1]);
+    p = px(10); c.Check(near(p, 255, 0, 0), "nolight_vc (NOLIGHTING_VC): vertex colour x emissive", p[1], p[2]);
+    p = px(11); q = px(12);
+    c.Check(near(p, 255, 255, 255) && near(q, 255, 255, 255), "tile (TILE) and the menu path", p[2], q[2]);
+    p = px(13); c.Check(near(p, 0, 0, 255), "skinned: skipped", p[0], p[2]);
+    int untouched = 0;
+    for (int i = 14; i < kNumCells; i++) untouched += near(px(i), 0, 0, 255);
+    c.Check(untouched == kNumCells - 14, "passes without a native family: not drawn", untouched);
     (void)be; (void)back;
     engine::BindPassGlobals(nullptr, nullptr);
+    engine::BindSkyColors(nullptr);
+    engine::SetNativeFamilies(routes0);
     *checks += c.checks;
     return c.fails;
 }

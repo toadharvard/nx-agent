@@ -34,9 +34,13 @@ uint32_t SkippedGeometry() { return g_skipped; }
 // drawn outside the accumulator would otherwise inherit the last world pass).
 static const uint32_t* g_passId = nullptr;
 static const uint32_t* g_renderPass = nullptr;
+static const float* g_skyColors = nullptr;
 void BindPassGlobals(const uint32_t* passId, const uint32_t* renderPass) { g_passId = passId; g_renderPass = renderPass; }
+void BindSkyColors(const float* color0) { g_skyColors = color0; }
 void BindImagePassGlobals() {
     BindPassGlobals((const uint32_t*)(g_guestBase + 0x011f91e4u), (const uint32_t*)(g_guestBase + 0x011f91e0u));
+    // SkyShader's vertex constants Color0-2 (its constant map's data sources: 0x011ff910, +0x10, +0x20)
+    BindSkyColors((const float*)(g_guestBase + 0x011ff910u));
 }
 const uint8_t* CurrentRenderPass(const void* geometry, uint16_t* passId) {
     *passId = 0;
@@ -49,14 +53,24 @@ const uint8_t* CurrentRenderPass(const void* geometry, uint16_t* passId) {
     return rp;
 }
 
+// Native families on the engine path. Plan of 2026-11-04 (orchestrator): until a hand-written family is finished
+// and checked against the game's program on real frames, its passes go through the translated original; on by default
+// only tile, nolight and image space (menuBG). Lit, depth, land and sky are written (Renderer::RenderWorld) and tested
+// by the self-test with SetNativeFamilies.
+static uint32_t g_nativeRoutes = 1u << Route_Legacy | 1u << Route_Tile | 1u << Route_NoLight | 1u << Route_ImageSpace;
+void SetNativeFamilies(uint32_t routeMask) { g_nativeRoutes = routeMask | 1u << Route_Legacy | 1u << Route_Translated; }
+uint32_t NativeFamilies() { return g_nativeRoutes; }
+bool NativeFamilyEnabled(PassRoute r) { return r == Route_Translated || ((g_nativeRoutes >> r) & 1); }
+
 void NiDX9Renderer::Do_RenderGeometry(const void* geometry) {
     Renderer* r = R();
     if (!r) { g_skipped++; return; }
     DrawStats& st = r->stats();
     st.engineDraws++;
     uint16_t passId = 0;
-    CurrentRenderPass(geometry, &passId);
-    const PassInfo pi = RoutePass(passId);
+    const uint8_t* rp = CurrentRenderPass(geometry, &passId);
+    PassInfo pi = RoutePass(passId);
+    if (!NativeFamilyEnabled(pi.route)) pi = {Route_Translated, 0};
     Renderer::GeomView g;
     if (!ReadGeometry(geometry, &g)) {
         const uint8_t* geo = (const uint8_t*)geometry;
@@ -66,10 +80,23 @@ void NiDX9Renderer::Do_RenderGeometry(const void* geometry) {
         g_skipped++;
         return;
     }
-    if (!r->RenderGeometry(g)) { st.skipped[Skip_Submit]++; g_skipped++; return; }
-    // drawn with the tile family: right only for menus (TILE, or no pass known)
-    if (pi.route == Route_Tile || pi.route == Route_Legacy) st.native[pi.route]++;
-    else st.misrendered++;
+    switch (pi.route) {
+    case Route_Tile: case Route_Legacy:
+        if (!r->RenderGeometry(g)) { st.skipped[Skip_Submit]++; g_skipped++; return; }
+        st.native[pi.route]++;
+        return;
+    case Route_Lit: case Route_Depth: case Route_Land: case Route_Sky: case Route_NoLight: {
+        Renderer::WorldInputs in;
+        ReadWorldInputs(geometry, rp, pi, passId, &in);
+        if (!r->RenderWorld(g, in)) { st.skipped[Skip_Submit]++; g_skipped++; return; }
+        st.native[pi.route]++;
+        return;
+    }
+    default:
+        st.skipped[Skip_NoFamily]++;
+        g_skipped++;
+        return;
+    }
 }
 
 // ---- render-state cache --------------------------------------------------------------------------------------
@@ -162,6 +189,10 @@ bool ReadGeometry(const void* geometry, Renderer::GeomView* out) {
     g.pos = (const float*)GP(U32(data, 0x20));
     g.color = (const float*)GP(U32(data, 0x28));
     g.uv = (const float*)GP(U32(data, 0x2C));
+    // NiGeometryData normals (+0x24); with an NBT method (data flags +0x0C, bits 12-15) the binormals and the tangents
+    // follow the normals (N, B, T: vertices x 3 floats each)
+    g.normal = (const float*)GP(U32(data, 0x24));
+    if (g.normal && (U16(data, 0x0C) & 0xF000)) { g.binormal = g.normal + 3 * g.vertices; g.tangent = g.normal + 6 * g.vertices; }
     const uint32_t tris = U16(data, 0x40);
     if (!g.vertices || !g.pos || !tris) return false;
     // NiTriShapeData keeps 3 x triangles at +0x44; NiTriStripsData keeps its strip count (< 3 x triangles) there.
@@ -200,6 +231,68 @@ bool ReadGeometry(const void* geometry, Renderer::GeomView* out) {
     }
     *out = g;
     return true;
+}
+
+// ---- world-family inputs -------------------------------------------------------------------------------------------
+static NativeTexture* TextureOf(uint32_t niTexture) {   // NiTexture -> renderer data (+0x24) -> its NativeTexture
+    const uint8_t* tex = GP(niTexture);
+    return tex ? FindNativeTexture(GP(U32(tex, 0x24)), 0x80) : nullptr;
+}
+static void SetTex(Renderer::WorldInputs* in, int stage, NativeTexture* t) {
+    if (t) { if (t->dirty) MaterializeNativeTexture(t); in->tex[stage] = t->image; in->texFmt[stage] = t->d3dfmt; }
+}
+
+void ReadWorldInputs(const void* geometry, const uint8_t* rp, const PassInfo& pi, uint16_t passId, Renderer::WorldInputs* in) {
+    memset(in, 0, sizeof *in);
+    in->route = pi; in->pass = passId;
+    in->color[0] = in->color[1] = in->color[2] = in->color[3] = 1.0f;
+    in->specular[3] = 10.0f;
+    const uint8_t* geo = (const uint8_t*)geometry;
+    const uint8_t* sp = GP(U32(geo, 0xA8));      // the BSShaderProperty
+    float alpha = 1.0f, matAlpha = 1.0f;
+    if (sp) memcpy(&alpha, sp + 0x28, 4);         // BSShaderProperty alpha
+    const uint8_t* mp = GP(U32(geo, 0xA4));      // NiMaterialProperty: alpha +0x3C, glossiness +0x38
+    if (mp) { memcpy(&matAlpha, mp + 0x3C, 4); memcpy(&in->specular[3], mp + 0x38, 4); }
+    in->color[3] = alpha * matAlpha;
+    if (pi.route == Route_NoLight) {             // BSShaderNoLightingProperty: texture +0x68, emissive colour +0x78
+        if (sp) { SetTex(in, 0, TextureOf(U32(sp, 0x68))); memcpy(in->color, sp + 0x78, 16); in->color[3] *= alpha * matAlpha; }
+        return;
+    }
+    if (pi.route == Route_Sky) {
+        for (int i = 0; i < 3; i++) {
+            in->blend[i][0] = in->blend[i][1] = in->blend[i][2] = in->blend[i][3] = 1.0f;
+            if (g_skyColors) memcpy(in->blend[i], g_skyColors + 4 * i, 16);
+        }
+        return;   // the cloud texture: the state tracker's stage 0 (set by the sky shader's texture setup)
+    }
+    // BSShaderPPLightingProperty: texture slot arrays +0xB4 (slot 0 diffuse, slot 1 normal map; element = layer),
+    // specular colour +0x9C
+    if (sp) {
+        const uint8_t* s0 = GP(U32(sp, 0xB4));
+        const uint8_t* s1 = GP(U32(sp, 0xB8));
+        if (s0) SetTex(in, 0, TextureOf(U32(s0, 0)));
+        if (s1 && pi.route == Route_Land) SetTex(in, 4, TextureOf(U32(s1, 0)));
+        memcpy(in->specular, sp + 0x9C, 12);
+    }
+    // lights of the pass: RenderPass +9 count, +0xC ShadowSceneLight** (+0xF8 the NiLight: world translate +0x8C,
+    // effect type +0x9D (1 point, 2 directional), dimmer +0xC4, ambient +0xC8, diffuse +0xD4; NiDirectionalLight world
+    // direction +0xF0; NiPointLight radius +0xF0)
+    if (!rp) return;
+    const uint32_t n = rp[9] < 8 ? rp[9] : 8;
+    const uint8_t* list = GP(U32(rp, 0xC));
+    for (uint32_t i = 0; list && i < n; i++) {
+        const uint8_t* ssl = GP(U32(list, 4 * i));
+        const uint8_t* nl = ssl ? GP(U32(ssl, 0xF8)) : nullptr;
+        if (!nl) continue;
+        NxLight& L = in->lights[in->lightCount];
+        float dimmer, amb[3], diff[3];
+        memcpy(&dimmer, nl + 0xC4, 4); memcpy(amb, nl + 0xC8, 12); memcpy(diff, nl + 0xD4, 12);
+        for (int k = 0; k < 3; k++) L.color[k] = diff[k] * dimmer;
+        if (nl[0x9D] == 2) { memcpy(L.posRange, nl + 0xF0, 12); L.posRange[3] = 0; L.color[3] = 1.0f; }
+        else { memcpy(L.posRange, nl + 0x8C, 12); memcpy(&L.posRange[3], nl + 0xF0, 4); L.color[3] = 0; }
+        if (in->lightCount == 0) for (int k = 0; k < 3; k++) in->ambient[k] = amb[k] * dimmer;
+        in->lightCount++;
+    }
 }
 
 // ---- image space: the effect dispatch ----------------------------------------------------------------------------

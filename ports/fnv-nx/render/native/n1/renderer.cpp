@@ -240,6 +240,7 @@ void Renderer::Do_ClearBuffer(const NiRectF* rect, uint32_t mode) {
 void Renderer::Do_SetCameraData(const NiPoint3f& loc, const NiPoint3f& dir, const NiPoint3f& up, const NiPoint3f& right,
                                 const NiFrustumF& f, const NiRectF& port) {
     CameraView(loc, dir, up, right, view_);
+    eye_[0] = loc.x; eye_[1] = loc.y; eye_[2] = loc.z;
     CameraProjection(f, proj_);
     const Group* g = cur_ ? cur_ : &groups_[0];
     vp_ = PortViewport(port, g->w, g->h);
@@ -249,6 +250,7 @@ void Renderer::Do_SetScreenSpaceCameraData(const NiRectF* port) {
     const Group* g = cur_ ? cur_ : &groups_[0];
     ident(view_);
     ScreenSpaceProjection(proj_, g->w, g->h);
+    eye_[0] = 0.5f; eye_[1] = 0.5f; eye_[2] = -1.0f;
     if (port) vp_ = PortViewport(*port, g->w, g->h);
     else vp_ = {0, 0, g->w, g->h, 0.0f, 1.0f};
 }
@@ -468,6 +470,8 @@ uint16_t Renderer::FragmentShader(const char* name) {
 
 namespace {
 struct GeomVtx { float x, y, z, u, v; uint32_t rgba; };
+struct WorldVtx { float pos[3], uv[2]; uint32_t rgba; float n[3], t[3], b[3], w[3]; };   // 72 bytes
+static_assert(sizeof(WorldVtx) == 72, "WorldVtx");
 inline uint32_t Rgba8(const float* c) {
     uint32_t o = 0;
     for (int i = 0; i < 4; i++) {
@@ -486,44 +490,34 @@ inline void Mul(const float* a, const float* b, float* o) {   // column-major o 
 }
 }  // namespace
 
-bool Renderer::RenderGeometry(const GeomView& g) {
-    if (!inFrame_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
-    if (!geomVs_) {
-        geomVs_ = BlobShader(be_, "tile_vc", NxStage_Vertex);
-        geomVsScroll_ = BlobShader(be_, "tile_vc_scroll", NxStage_Vertex);
-        geomPs_ = FragmentShader("tile_vc");
-        geomVsPlain_ = BlobShader(be_, "tile", NxStage_Vertex);
-        geomVsPlainScroll_ = BlobShader(be_, "tile_scroll", NxStage_Vertex);
-        geomPsPlain_ = FragmentShader("tile");
-        geomPsAlphaMap_ = FragmentShader("tile_alphamap");
-        NxVtxLayout ll;
-        memset(&ll, 0, sizeof ll);
-        ll.count = 3; ll.stride = sizeof(GeomVtx);
-        ll.attr[0].offset = 0; ll.attr[0].type = NxAttr_Float32; ll.attr[0].components = 3;
-        ll.attr[1].offset = 12; ll.attr[1].type = NxAttr_Float32; ll.attr[1].components = 2;
-        ll.attr[2].offset = 20; ll.attr[2].type = NxAttr_Unorm8; ll.attr[2].components = 4;
-        geomLayout_ = sc_.Layout(ll);
-        static const uint32_t kWhite = 0xFFFFFFFFu;
-        NxImageDesc td;
-        memset(&td, 0, sizeof td);
-        td.width = 1; td.height = 1; td.format = NxFmt_BGRA8; td.data = FNVNX_ADDR_(&kWhite); td.data_size = 4;
-        white_ = be_->ImageCreate(td);
-        if (!geomVs_ || !geomPs_ || !geomLayout_ || !white_) return false;
-    }
-    // triangle list (strips: alternate winding, degenerate triangles dropped)
+// triangle list into the geometry ring (strips: alternate winding, degenerate triangles dropped); world = false:
+// GeomVtx (tile), true: WorldVtx (world families, normals / tangent frame)
+bool Renderer::UploadGeometry(const GeomView& g, bool world, uint32_t* vOff, uint32_t* iOff, uint32_t* nOut) {
     uint32_t nIdx = g.indices ? g.indexCount - g.indexCount % 3 : 0;
     if (!g.indices && g.strips && g.stripLengths)
         for (uint32_t s = 0; s < g.stripCount; s++) nIdx += g.stripLengths[s] > 2 ? 3u * (g.stripLengths[s] - 2u) : 0u;
     if (!nIdx) return false;
-    uint32_t vOff, iOff;
-    GeomVtx* v = (GeomVtx*)geomRing_.Alloc(g.vertices * sizeof(GeomVtx), 16, &vOff);
-    uint16_t* ix = (uint16_t*)geomRing_.Alloc(nIdx * 2, 16, &iOff);
-    if (!v || !ix) return false;
+    const uint32_t stride = world ? sizeof(WorldVtx) : sizeof(GeomVtx);
+    uint8_t* vb = (uint8_t*)geomRing_.Alloc(g.vertices * stride, 16, vOff);
+    uint16_t* ix = (uint16_t*)geomRing_.Alloc(nIdx * 2, 16, iOff);
+    if (!vb || !ix) return false;
     static const float kOne[4] = {1, 1, 1, 1};
     for (uint32_t i = 0; i < g.vertices; i++) {
-        v[i].x = g.pos[3 * i]; v[i].y = g.pos[3 * i + 1]; v[i].z = g.pos[3 * i + 2];
-        v[i].u = g.uv ? g.uv[2 * i] : 0; v[i].v = g.uv ? g.uv[2 * i + 1] : 0;
-        v[i].rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
+        if (world) {
+            WorldVtx& v = ((WorldVtx*)vb)[i];
+            memset(&v, 0, sizeof v);
+            memcpy(v.pos, g.pos + 3 * i, 12);
+            if (g.uv) { v.uv[0] = g.uv[2 * i]; v.uv[1] = g.uv[2 * i + 1]; }
+            v.rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
+            if (g.normal) memcpy(v.n, g.normal + 3 * i, 12);
+            if (g.tangent) memcpy(v.t, g.tangent + 3 * i, 12);
+            if (g.binormal) memcpy(v.b, g.binormal + 3 * i, 12);
+        } else {
+            GeomVtx& v = ((GeomVtx*)vb)[i];
+            v.x = g.pos[3 * i]; v.y = g.pos[3 * i + 1]; v.z = g.pos[3 * i + 2];
+            v.u = g.uv ? g.uv[2 * i] : 0; v.v = g.uv ? g.uv[2 * i + 1] : 0;
+            v.rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
+        }
     }
     uint32_t n = 0;
     if (g.indices) {
@@ -537,45 +531,28 @@ bool Renderer::RenderGeometry(const GeomView& g) {
                 if (t & 1) { uint16_t x = a; a = b; b = x; }
                 ix[n++] = a; ix[n++] = b; ix[n++] = c;
             }
-        if (!n) return false;
     }
-    float world[16];
-    memset(world, 0, sizeof world);
-    for (int r = 0; r < 3; r++) {
-        for (int c = 0; c < 3; c++) world[c * 4 + r] = g.rot[r * 3 + c] * g.scale;
-        world[12 + r] = g.trans[r];
-    }
-    world[15] = 1;
-    NxTileDraw u;
-    memset(&u, 0, sizeof u);
-    float vp[16];
-    Mul(proj_, view_, vp);
-    Mul(vp, world, u.wvp);
-    memcpy(u.tint, g.tint, 16);
-    if (g.hasScroll || g.alphaMap) memcpy(u.texScroll, g.scroll, 16);
-    else { u.texScroll[2] = u.texScroll[3] = 1.0f; }
-    // texture: the geometry's own (tile property), else the tracker's stage 0, else a white texel
-    static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};   // D3DFMT_A8R8G8B8 2D
-    const uint32_t prevTex = state_.Texture(0);
-    const NxD3D9Texture prevKind = state_.TextureKind(0);
-    const bool swapTex = g.image || prevTex == 0;
-    if (g.image) { NxD3D9Texture k = {g.d3dfmt, 0, 0, 0, 0}; state_.SetTexture(0, g.image, k); }
-    else if (!prevTex) state_.SetTexture(0, white_, kWhiteKind);
-    const uint32_t prevTex1 = state_.Texture(1);
-    const NxD3D9Texture prevKind1 = state_.TextureKind(1);
-    if (g.alphaMap) { NxD3D9Texture k = {g.alphaMapFmt, 0, 0, 0, 0}; state_.SetTexture(1, g.alphaMap, k); }
-    // NiAlphaProperty -> D3D9 blend and alpha-test states for this draw (the engine pipeline that would set them is
-    // replaced); NiAlphaProperty::AlphaFunction -> D3DBLEND, TestFunction -> D3DCMPFUNC
+    *nOut = n;
+    return n != 0;
+}
+
+// NiAlphaProperty -> D3D9 blend and alpha-test states for this draw (the engine pipeline that would set them is
+// replaced); NiAlphaProperty::AlphaFunction -> D3DBLEND, TestFunction -> D3DCMPFUNC. Plus the scissor test and the
+// stencil states (NiStencilProperty); all restored after the draw.
+static const uint8_t kSavedRs[17] = {15, 19, 20, 24, 25, 27, 174, 52, 53, 54, 55, 56, 57, 58, 59, 14, 168};
+struct Renderer::SavedDrawState {
+    uint32_t rs[17];
+    bool hadScissor;
+    NxD3D9Rect scissor;
+};
+
+void Renderer::ApplyGeomStates(const GeomView& g, SavedDrawState& sv) {
     static const uint8_t kBlend[16] = {2, 1, 3, 4, 9, 10, 5, 6, 7, 8, 11, 2, 2, 2, 2, 2};
     static const uint8_t kCmp[8] = {8, 2, 3, 4, 5, 6, 7, 1};
     enum { RS_ALPHATEST = 15, RS_SRC = 19, RS_DST = 20, RS_REF = 24, RS_FUNC = 25, RS_BLEND = 27 };
-    // + scissor test and the stencil states (NiStencilProperty), all restored after the draw
-    static const uint8_t kSaved[15] = {RS_ALPHATEST, RS_SRC, RS_DST, RS_REF, RS_FUNC, RS_BLEND, 174,
-                                       52, 53, 54, 55, 56, 57, 58, 59};
-    uint32_t saved[15];
-    for (int i = 0; i < 15; i++) saved[i] = state_.GetRenderState(kSaved[i]);
-    const bool hadScissor = scissorSet_;
-    const NxD3D9Rect prevScissor = scissor_;
+    for (int i = 0; i < 17; i++) sv.rs[i] = state_.GetRenderState(kSavedRs[i]);
+    sv.hadScissor = scissorSet_;
+    sv.scissor = scissor_;
     if (g.hasScissor) { state_.SetRenderState(174, 1); SetScissorRect(&g.scissor); }
     if (g.hasStencil && (g.stencilFlags & 1)) {   // NiStencilProperty::Action / TestFunction -> D3DSTENCILOP / D3DCMPFUNC
         static const uint8_t kOp[8] = {1, 2, 3, 4, 5, 6, 1, 1};
@@ -594,6 +571,76 @@ bool Renderer::RenderGeometry(const GeomView& g) {
         state_.SetRenderState(RS_FUNC, kCmp[(f >> 10) & 7]);
         state_.SetRenderState(RS_REF, g.alphaRef);
     }
+}
+
+void Renderer::RestoreGeomStates(const GeomView& g, const SavedDrawState& sv) {
+    for (int i = 0; i < 17; i++)
+        if (state_.GetRenderState(kSavedRs[i]) != sv.rs[i]) state_.SetRenderState(kSavedRs[i], sv.rs[i]);
+    if (g.hasScissor) SetScissorRect(sv.hadScissor ? &sv.scissor : nullptr);
+}
+
+void Renderer::WorldMatrix(const GeomView& g, float world[16]) {
+    memset(world, 0, 64);
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) world[c * 4 + r] = g.rot[r * 3 + c] * g.scale;
+        world[12 + r] = g.trans[r];
+    }
+    world[15] = 1;
+}
+
+bool Renderer::EnsureWhite() {
+    if (white_) return true;
+    static const uint32_t kWhite = 0xFFFFFFFFu;
+    NxImageDesc td;
+    memset(&td, 0, sizeof td);
+    td.width = 1; td.height = 1; td.format = NxFmt_BGRA8; td.data = FNVNX_ADDR_(&kWhite); td.data_size = 4;
+    white_ = be_->ImageCreate(td);
+    return white_ != 0;
+}
+
+bool Renderer::RenderGeometry(const GeomView& g) {
+    if (!inFrame_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
+    if (!geomVs_) {
+        geomVs_ = BlobShader(be_, "tile_vc", NxStage_Vertex);
+        geomVsScroll_ = BlobShader(be_, "tile_vc_scroll", NxStage_Vertex);
+        geomPs_ = FragmentShader("tile_vc");
+        geomVsPlain_ = BlobShader(be_, "tile", NxStage_Vertex);
+        geomVsPlainScroll_ = BlobShader(be_, "tile_scroll", NxStage_Vertex);
+        geomPsPlain_ = FragmentShader("tile");
+        geomPsAlphaMap_ = FragmentShader("tile_alphamap");
+        NxVtxLayout ll;
+        memset(&ll, 0, sizeof ll);
+        ll.count = 3; ll.stride = sizeof(GeomVtx);
+        ll.attr[0].offset = 0; ll.attr[0].type = NxAttr_Float32; ll.attr[0].components = 3;
+        ll.attr[1].offset = 12; ll.attr[1].type = NxAttr_Float32; ll.attr[1].components = 2;
+        ll.attr[2].offset = 20; ll.attr[2].type = NxAttr_Unorm8; ll.attr[2].components = 4;
+        geomLayout_ = sc_.Layout(ll);
+        if (!geomVs_ || !geomPs_ || !geomLayout_ || !EnsureWhite()) return false;
+    }
+    uint32_t vOff, iOff, n;
+    if (!UploadGeometry(g, false, &vOff, &iOff, &n)) return false;
+    float world[16];
+    WorldMatrix(g, world);
+    NxTileDraw u;
+    memset(&u, 0, sizeof u);
+    float vp[16];
+    Mul(proj_, view_, vp);
+    Mul(vp, world, u.wvp);
+    memcpy(u.tint, g.tint, 16);
+    if (g.hasScroll || g.alphaMap) memcpy(u.texScroll, g.scroll, 16);
+    else { u.texScroll[2] = u.texScroll[3] = 1.0f; }
+    // texture: the geometry's own (tile property), else the tracker's stage 0, else a white texel
+    static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};   // D3DFMT_A8R8G8B8 2D
+    const uint32_t prevTex = state_.Texture(0);
+    const NxD3D9Texture prevKind = state_.TextureKind(0);
+    const bool swapTex = g.image || prevTex == 0;
+    if (g.image) { NxD3D9Texture k = {g.d3dfmt, 0, 0, 0, 0}; state_.SetTexture(0, g.image, k); }
+    else if (!prevTex) state_.SetTexture(0, white_, kWhiteKind);
+    const uint32_t prevTex1 = state_.Texture(1);
+    const NxD3D9Texture prevKind1 = state_.TextureKind(1);
+    if (g.alphaMap) { NxD3D9Texture k = {g.alphaMapFmt, 0, 0, 0, 0}; state_.SetTexture(1, g.alphaMap, k); }
+    SavedDrawState sv;
+    ApplyGeomStates(g, sv);
     Draw d;
     memset(&d, 0, sizeof d);
     // the engine's TileShader choice: TILE1002 (VC) for geometry with vertex colours, TILE1001 (scroll VS, ALPHAMAP PS)
@@ -608,8 +655,157 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     bool ok = Render(d);
     if (swapTex) state_.SetTexture(0, prevTex, prevKind);
     if (g.alphaMap) state_.SetTexture(1, prevTex1, prevKind1);
-    for (int i = 0; i < 15; i++) if (state_.GetRenderState(kSaved[i]) != saved[i]) state_.SetRenderState(kSaved[i], saved[i]);
-    if (g.hasScissor) SetScissorRect(hadScissor ? &prevScissor : nullptr);
+    RestoreGeomStates(g, sv);
+    if (ok) geomDraws_++;
+    return ok;
+}
+
+// ---- N2 world families on the engine path -----------------------------------------------------------------------
+// World shader sets: index -> (VS blob, PS blob, attribute set). Attribute sets use WorldVtx with explicit locations
+// (NxVtxLayout.attr[].location): A_LIT pos0 uv1 rgba2 n3; A_DEPTH pos0 uv1; A_LAND pos0 uv1 rgba2 w3 n4 t5 b6;
+// A_SKY pos0 uv1 rgba2.
+enum { A_LIT, A_DEPTH, A_LAND, A_SKY };
+struct WorldSet { const char* vs; const char* ps; uint8_t attrs; };
+static const WorldSet kWorldSets[] = {
+    {"lit", "lit", A_LIT},              // 0
+    {"lit", "lit_spec", A_LIT},         // 1
+    {"lit_vc", "lit", A_LIT},           // 2
+    {"lit_vc", "lit_spec", A_LIT},      // 3
+    {"depth", "depth", A_DEPTH},        // 4
+    {"depth", "depth_out", A_DEPTH},    // 5
+    {"depth_at", "depth_at", A_DEPTH},  // 6
+    {"land_lit", "land_lit", A_LAND},   // 7
+    {"sky", "sky", A_SKY},              // 8
+    {"sky", "sky_clouds", A_SKY},       // 9
+    {"nolight_tex", "nolight_tex", A_LIT},      // 10
+    {"nolight_vc", "nolight_col", A_LIT},       // 11
+    {"nolight_texvc", "nolight_tex", A_LIT},    // 12
+    {"nolight_vc", "nolight_col", A_LIT},       // 13: MAT (colour only; vertex colour white without VC)
+};
+
+static int WorldSetIndex(const PassInfo& p) {
+    const uint16_t v = p.variant;
+    switch (p.route) {
+    case Route_Lit: return ((v & PV_VC) ? 2 : 0) + ((v & PV_SPEC) ? 1 : 0);
+    case Route_Depth: return (v & PV_DEPTHOUT) ? 5 : (v & PV_ALPHATEST) ? 6 : 4;
+    case Route_Land: return 7;
+    case Route_Sky: return (v & PV_CLOUDS) ? 9 : 8;
+    case Route_NoLight: return (v & PV_TEX) ? ((v & PV_VC) ? 12 : 10) : 11;
+    default: return -1;
+    }
+}
+
+bool Renderer::RenderWorld(const GeomView& g, const WorldInputs& in) {
+    if (!inFrame_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
+    const int si = WorldSetIndex(in.route);
+    if (si < 0 || si >= kWorldShaders) return false;
+    WorldShaders& ws = world_[si];
+    if (!ws.vs) {
+        const WorldSet& k = kWorldSets[si];
+        ws.vs = BlobShader(be_, k.vs, NxStage_Vertex);
+        ws.ps = FragmentShader(k.ps);
+        NxVtxLayout ll;
+        memset(&ll, 0, sizeof ll);
+        ll.stride = sizeof(WorldVtx);
+        struct A { uint8_t off, type, comps, loc; };
+        static const A kPos = {0, NxAttr_Float32, 3, 0}, kUv = {12, NxAttr_Float32, 2, 1}, kCol = {20, NxAttr_Unorm8, 4, 2};
+        A at[8];
+        uint8_t n = 0;
+        at[n++] = kPos; at[n++] = kUv;
+        if (k.attrs != A_DEPTH) at[n++] = kCol;
+        if (k.attrs == A_LIT) at[n++] = A{24, NxAttr_Float32, 3, 3};
+        if (k.attrs == A_LAND) {
+            at[n++] = A{60, NxAttr_Float32, 3, 3}; at[n++] = A{24, NxAttr_Float32, 3, 4};
+            at[n++] = A{36, NxAttr_Float32, 3, 5}; at[n++] = A{48, NxAttr_Float32, 3, 6};
+        }
+        ll.count = n;
+        for (uint8_t i = 0; i < n; i++) {
+            ll.attr[i].offset = at[i].off; ll.attr[i].type = at[i].type; ll.attr[i].components = at[i].comps;
+            ll.attr[i].location = (uint8_t)(at[i].loc + 1);
+        }
+        ws.layout = sc_.Layout(ll);
+        if (!ws.vs || !ws.ps || !ws.layout || !EnsureWhite()) { ws.vs = 0; return false; }
+    }
+    uint32_t vOff, iOff, n;
+    if (!UploadGeometry(g, true, &vOff, &iOff, &n)) return false;
+    float world[16], vp[16], wvp[16];
+    WorldMatrix(g, world);
+    Mul(proj_, view_, vp);
+    Mul(vp, world, wvp);
+    // per-draw block of the family
+    union { NxLitDraw lit; NxDepthDraw depth; NxLandDraw land; NxSkyDraw sky; NxNoLightDraw nl; } u;
+    memset(&u, 0, sizeof u);
+    uint32_t uboSize = 0, ntex = 1;
+    switch (in.route.route) {
+    case Route_Lit:
+        memcpy(u.lit.wvp, wvp, 64); memcpy(u.lit.world, world, 64);
+        memcpy(u.lit.ambient, in.ambient, 12);
+        memcpy(u.lit.diffuse, in.color, 16);
+        memcpy(u.lit.specular, in.specular, 16);
+        memcpy(u.lit.eye, eye_, 12);
+        u.lit.lightCount = in.lightCount < 8 ? in.lightCount : 8;
+        memcpy(u.lit.lights, in.lights, sizeof u.lit.lights);
+        uboSize = sizeof u.lit;
+        break;
+    case Route_Depth: memcpy(u.depth.wvp, wvp, 64); uboSize = sizeof u.depth; ntex = 1; break;
+    case Route_Land: {
+        memcpy(u.land.wvp, wvp, 64);
+        u.land.uvScale[0] = u.land.uvScale[1] = 1.0f;
+        // LightData is model space: the directional light's direction towards the light, through the inverse
+        // rotation (NiTransform rotation is orthonormal: transpose)
+        float L[3] = {0, 0, 1};
+        for (uint32_t i = 0; i < in.lightCount && i < 8; i++)
+            if (in.lights[i].color[3] > 0.5f) {
+                const float* d = in.lights[i].posRange;
+                L[0] = -d[0]; L[1] = -d[1]; L[2] = -d[2];
+                memcpy(u.land.lightColor, in.lights[i].color, 12);
+                break;
+            }
+        for (int r = 0; r < 3; r++) u.land.lightDir[r] = g.rot[0 * 3 + r] * L[0] + g.rot[1 * 3 + r] * L[1] + g.rot[2 * 3 + r] * L[2];
+        memcpy(u.land.ambient, in.ambient, 12);
+        uboSize = sizeof u.land; ntex = 5;
+        break;
+    }
+    case Route_Sky:
+        memcpy(u.sky.wvp, wvp, 64);
+        memcpy(u.sky.blend0, in.blend[0], 16); memcpy(u.sky.blend1, in.blend[1], 16); memcpy(u.sky.blend2, in.blend[2], 16);
+        u.sky.params[0] = 0.9999f; u.sky.params[1] = 1.0f;
+        uboSize = sizeof u.sky;
+        break;
+    case Route_NoLight:
+        memcpy(u.nl.wvp, wvp, 64);
+        memcpy(u.nl.color, in.color, 16);
+        u.nl.uvOffsetScale[2] = u.nl.uvOffsetScale[3] = 1.0f;
+        u.nl.falloff[0] = 1.0f; u.nl.falloff[2] = u.nl.falloff[3] = 1.0f;
+        uboSize = sizeof u.nl;
+        break;
+    default: return false;
+    }
+    // textures: the inputs' stages (a white texel where a stage has none), the tracker's restored after the draw
+    static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};
+    uint32_t prev[5];
+    NxD3D9Texture prevKind[5];
+    for (uint32_t s = 0; s < ntex; s++) {
+        prev[s] = state_.Texture(s); prevKind[s] = state_.TextureKind(s);
+        if (in.tex[s]) { NxD3D9Texture k = {in.texFmt[s], 0, 0, 0, 0}; state_.SetTexture(s, in.tex[s], k); }
+        else if (!prev[s]) state_.SetTexture(s, white_, kWhiteKind);
+    }
+    SavedDrawState sv;
+    ApplyGeomStates(g, sv);
+    // pass render states the engine's (replaced) pass setup would have applied
+    if (in.route.route == Route_Depth && !(in.route.variant & PV_DEPTHOUT)) state_.SetRenderState(168, 0);   // ZONLY: no colour
+    if (in.route.route == Route_Sky) state_.SetRenderState(14, 0);                                           // sky: no z write
+    Draw d;
+    memset(&d, 0, sizeof d);
+    d.vs = ws.vs; d.ps = ws.ps; d.layout = ws.layout; d.prim = NxPrim_Triangles;
+    d.vtxBlock = geomRing_.block(); d.vtxOffset = vOff; d.vtxSize = g.vertices * sizeof(WorldVtx);
+    d.idxBlock = geomRing_.block(); d.idxOffset = iOff; d.idxSize = n * 2; d.idxType = 0;
+    d.count = n; d.textures = ntex; d.ubo = &u; d.uboSize = uboSize;
+    d.enginePass = in.pass; d.family = (uint16_t)(in.route.route == Route_Lit ? NxFam_Lit : in.route.route == Route_Depth ? NxFam_Depth :
+                                                  in.route.route == Route_Land ? NxFam_Land : in.route.route == Route_Sky ? NxFam_Sky : NxFam_NoLight);
+    bool ok = Render(d);
+    for (uint32_t s = 0; s < ntex; s++) state_.SetTexture(s, prev[s], prevKind[s]);
+    RestoreGeomStates(g, sv);
     if (ok) geomDraws_++;
     return ok;
 }

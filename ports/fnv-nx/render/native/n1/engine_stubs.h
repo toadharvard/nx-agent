@@ -117,6 +117,17 @@ void BindPassGlobals(const uint32_t* passId, const uint32_t* renderPass);
 void BindImagePassGlobals();
 // The RenderPass of the draw of `geometry` (0 when none is current or it names another geometry) and its pass id.
 const uint8_t* CurrentRenderPass(const void* geometry, uint16_t* passId);
+// Which native families serve their passes (bit per PassRoute); the others go to the translated route. Default:
+// tile, nolight, image space (lit / depth / land / sky through the translated originals until they are checked).
+void SetNativeFamilies(uint32_t routeMask);
+uint32_t NativeFamilies();
+bool NativeFamilyEnabled(PassRoute r);
+// SkyShader's Color0-2 (3 x float4; the native build: the data image's 0x011ff910, bound by BindImagePassGlobals).
+void BindSkyColors(const float* color0);
+// What the replaced shader pipeline would have put in constants / texture stages for a world-family pass: textures
+// of the BSShader property, the RenderPass's lights, material / property colours (see engine_stubs.cpp).
+void ReadWorldInputs(const void* geometry, const uint8_t* renderPass, const PassInfo& pi, uint16_t passId,
+                     Renderer::WorldInputs* in);
 
 } // namespace engine
 } // namespace nx

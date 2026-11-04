@@ -12,6 +12,7 @@
 #include "nx/front.h"
 #include "d3d9_state.h"
 #include "passes.h"
+#include "nx/families.h"
 
 namespace nx {
 
@@ -165,7 +166,27 @@ public:
         bool hasStencil = false;         // NiStencilProperty: flags (enable, fail/zfail/pass actions, func), ref, mask
         uint16_t stencilFlags = 0;
         uint32_t stencilRef = 0, stencilMask = 0xFFFFFFFFu;
+        // world families: NiGeometryData normals (+ binormals and tangents with NBT), 3 floats per vertex, or 0
+        const float* normal = nullptr;
+        const float* binormal = nullptr;
+        const float* tangent = nullptr;
     };
+    // Inputs of a world-family draw (N2: lit, depth, land, sky, nolight) besides the geometry: what the engine's
+    // shader would have put in its constants and texture stages for the pass (read by engine_stubs.cpp).
+    struct WorldInputs {
+        PassInfo route;
+        uint16_t pass;
+        uint32_t tex[5], texFmt[5];      // lit / depth_at / nolight: 0 diffuse; land: 0 base, 4 normal map; sky: 0 clouds
+        NxLight lights[8];               // lit: NxLitDraw convention (directional: posRange = direction, color.w = 1)
+        uint32_t lightCount;
+        float ambient[3];
+        float specular[4];               // rgb, power
+        float color[4];                  // material / emissive colour x alpha (nolight, lit diffuse)
+        float blend[3][4];               // sky: SkyShader Color0-2 (SKY.vso BlendColor c4-c6)
+    };
+    bool RenderWorld(const GeomView& g, const WorldInputs& in);
+    // Camera world position (Do_SetCameraData; screen space: (0.5, 0.5, -1)).
+    const float* eye() const { return eye_; }
     bool RenderGeometry(const GeomView& g);
     // Menu background image-space effect (menubg family): the scene image toned through a lookup texture, drawn over
     // the current pass with the tracked blend state. scene: w x h image; tone: lookup image (D3DFORMATs for sRGB).
@@ -215,6 +236,16 @@ private:
     DrawStats stats_ = {}, lastStats_ = {};
     uint16_t geomVsScroll_ = 0, geomVsPlain_ = 0, geomVsPlainScroll_ = 0, geomPsPlain_ = 0, geomPsAlphaMap_ = 0;
     uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0, bgVs_ = 0, bgPs_ = 0, bgLayout_ = 0;
+    struct WorldShaders { uint16_t vs, ps, layout; };
+    enum { kWorldShaders = 24 };
+    WorldShaders world_[kWorldShaders] = {};       // by WorldShaderIndex (renderer.cpp)
+    float eye_[3] = {0.5f, 0.5f, -1.0f};
+    bool UploadGeometry(const GeomView& g, bool world, uint32_t* vOff, uint32_t* iOff, uint32_t* nIdx);
+    struct SavedDrawState;
+    void ApplyGeomStates(const GeomView& g, SavedDrawState& sv);
+    void RestoreGeomStates(const GeomView& g, const SavedDrawState& sv);
+    static void WorldMatrix(const GeomView& g, float world[16]);
+    bool EnsureWhite();
     StateCache sc_;
     Frame frame_;
     StateTracker state_;

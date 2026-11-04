@@ -14,13 +14,12 @@ PassInfo RoutePass(uint16_t id) {
     // DEPTHMAP (16), DEPTHMAP_S (18): shadow-map casters, post-projection depth out
     case 16: return {Route_Depth, PV_DEPTHOUT};
     case 18: return {Route_Depth, PV_DEPTHOUT | PV_SKIN};
-    // NOLIGHTING 66-81 (MAT + FALLOFF and the particle-system passes 82-87 have no native permutation)
+    // NOLIGHTING 66-73 (FALLOFF 74-81 and the particle-system passes 82-87 have no native permutation)
     case 66: case 70: return {Route_NoLight, PV_TEX};
     case 67: case 71: return {Route_NoLight, PV_VC};
     case 68: case 72: return {Route_NoLight, PV_TEX | PV_VC};
     case 69: case 73: return {Route_NoLight, 0};
-    case 74: case 78: return {Route_NoLight, PV_TEX | PV_FALLOFF};
-    case 76: case 80: return {Route_NoLight, PV_TEX | PV_VC | PV_FALLOFF};
+    // FALLOFF (74-81): the property's falloff angles / opacities are not read natively yet -> translated
     // LANDAD (147): one layer, normal map, one directional light
     case 147: return {Route_Land, PV_LANDLIT};
     // 3XLIGHTING base / _S / _Vc / _VcS / _Spc / _SSpc / _VcSpc / _VcSSpc (no H, Px, Pxo, Fg, G, Shp bits)
@@ -49,7 +48,8 @@ const char* RouteName(PassRoute r) {
 
 const char* SkipName(DrawSkip s) {
     static const char* const k[Skip_Count] = {"-", "no renderer", "unreadable geometry", "skinned", "no translated program",
-                                              "no engine shader/pass", "submit refused", "image-space effect"};
+                                              "no engine shader/pass", "submit refused", "image-space effect",
+                                              "no native family, no translated path"};
     return s < Skip_Count ? k[s] : "?";
 }
 

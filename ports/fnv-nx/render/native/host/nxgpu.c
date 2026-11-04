@@ -236,21 +236,27 @@ static uint16_t block_get(int kind, uint64_t key, const void* arg) {
     }
     case BK_LAYOUT: {
         const NxVtxLayout* l = (const NxVtxLayout*)arg;
-        DkVtxAttribState at[8];
+        DkVtxAttribState at[16];
         static const DkVtxAttribSize sz32[] = {DkVtxAttribSize_1x32, DkVtxAttribSize_2x32, DkVtxAttribSize_3x32, DkVtxAttribSize_4x32};
         static const DkVtxAttribSize sz16[] = {DkVtxAttribSize_1x16, DkVtxAttribSize_2x16, DkVtxAttribSize_3x16, DkVtxAttribSize_4x16};
         static const DkVtxAttribSize sz8[] = {DkVtxAttribSize_1x8, DkVtxAttribSize_2x8, DkVtxAttribSize_3x8, DkVtxAttribSize_4x8};
-        uint32_t n = l->count > 8 ? 8 : l->count;
-        for (uint32_t i = 0; i < n; i++) {
+        uint32_t na = l->count > 8 ? 8 : l->count, n = 0;
+        /* attribute i at location i, or at attr[i].location - 1; locations no attribute feeds read a fixed 0 */
+        for (uint32_t k = 0; k < 16; k++) { memset(&at[k], 0, sizeof at[k]); at[k].isFixed = 1; at[k].size = DkVtxAttribSize_4x32; at[k].type = DkVtxAttribType_Float; }
+        for (uint32_t i = 0; i < na; i++) {
+            uint32_t loc = l->attr[i].location ? (uint32_t)l->attr[i].location - 1u : i;
+            if (loc > 15) continue;
+            DkVtxAttribState* a = &at[loc];
             uint32_t c = (l->attr[i].components - 1) & 3;
-            memset(&at[i], 0, sizeof at[i]);
-            at[i].bufferId = 0; at[i].offset = l->attr[i].offset;
+            memset(a, 0, sizeof *a);
+            a->bufferId = 0; a->offset = l->attr[i].offset;
             switch (l->attr[i].type) {
-            case NxAttr_Unorm8: at[i].size = sz8[c]; at[i].type = DkVtxAttribType_Unorm; break;
-            case NxAttr_Snorm16: at[i].size = sz16[c]; at[i].type = DkVtxAttribType_Snorm; break;
-            case NxAttr_Float16: at[i].size = sz16[c]; at[i].type = DkVtxAttribType_Float; break;
-            default: at[i].size = sz32[c]; at[i].type = DkVtxAttribType_Float; break;
+            case NxAttr_Unorm8: a->size = sz8[c]; a->type = DkVtxAttribType_Unorm; break;
+            case NxAttr_Snorm16: a->size = sz16[c]; a->type = DkVtxAttribType_Snorm; break;
+            case NxAttr_Float16: a->size = sz16[c]; a->type = DkVtxAttribType_Float; break;
+            default: a->size = sz32[c]; a->type = DkVtxAttribType_Float; break;
             }
+            if (loc + 1 > n) n = loc + 1;
         }
         DkVtxBufferState vb = {l->stride, 0};
         dkCmdBufBindVtxAttribState(g.capture, at, n);
