@@ -62,3 +62,16 @@
 * **next** - after-native-undefined (270) follows these callees and is re-measured when the link changes land.
   S1-refs takes the per-unit groups (the 91 + 23 + 22 + 7 rows). For each one, build_and_match against the exe
   decides whether the call is GCC-only or a placeholder.
+* **did (layout-offset)** - 70379cf + 8a6a983 EBO2 (layout, new).
+  - Problem: a class that introduces its own vfptr, with an empty base B. MSVC puts the vfptr at 0 and B at +4; the
+    Itanium ABI puts B at 0, under the vptr. The members are unchanged, but B's address differs.
+  - The case: effectitemlist.cpp's `EffectItemList : BSSimpleList_Standin`. Its base methods are bound to
+    BSSimpleList's code in the exe, which receives this+4 (x86) vs this+0, the vptr (native), on
+    IsEmpty 0x008256d0. build_and_match: the pristine unit equals the exe, 29 / 29 functions.
+  - Fix: `FNVNX_EBO2` = `char fnvnx_ebo2[0];` (GCC) as the first member of B, so B is not empty but still 0
+    bytes. Empty under MSVC, so the MSVC code is identical by construction.
+  - Gates: .cpp only; B is used only as a base, `B*`, `B&` or `B::`; every derived class has B as its only base.
+  - Verified: an ILP32 probe on the prepared unit gives base at +4, member at +4, sizeof 8.
+  - Decomp-wide: 143 edits in 127 .cpp units, 0 -> 0 -O2 errors in them.
+  - Of the 20 layout-offset rows it covers effectitemlist's 3 and fires in blk_00720000_od and
+    blk_00c40000_od_ob1_variant_rtm_variant (1 row each). The rest are other layout causes, next on the list.
