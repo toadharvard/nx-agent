@@ -138,3 +138,18 @@ NX1-L1	NX1	57907a2	57907a2	confirmed	-	test_nx1_checks.py	lenient decoding: Lati
 GATES-TR	gates	e446506	e446506	confirmed	-	test_gates_trend.py	fnvnx-trend/1: rise, lost, missing head, creep, re-score and direction all detected; no false alarm
 GATES-D18	gates	21867b6	21867b6	confirmed	-	test_gates_trend.py	thresholds implement D18: 60 fps worst frame, stock 1.02 GHz, handheld_720p (note: perf.budget at 16.7 ms, perf.frame at 16.667 ms)
 S15S-PB	S15-simd	e8891c1	e8891c1	confirmed	-	test_s15_pass_bucket.py	82 -> 54 with no code change: the stack protector dropped from compile.sh (2be012c) explains 68 -> 53 static; same x86 path (~38 on both links)
+S6N-REUSE	S6n	831830a	831830a	confirmed	-	test_s6n_render_reuse.py	epilogue block / dynamic record reuse: stream and constant ring equal the uncached build (R1-R11, F1-F40; 5 wrong caches caught)
+S6N-STTEX	S6n	90fc3c2	90fc3c2	confirmed	-	test_s6n_render_reuse.py	state id / texture block reuse equals uncached; StateCache never resets, so lastSt_ cannot go stale
+S6N-FINDYN	S6n	f7b342a	f7b342a	confirmed	-	test_s6n_render_reuse.py	Frame::Finish dynamic-state skip equals uncached
+S6N-EPITAB	S6n	c94cc7d	c94cc7d	confirmed	-	test_s6n_render_reuse.py	epilogue permutation table equals the list scan; constant slice once
+S6N-SMPC	S6n	89ee4a8	89ee4a8	confirmed	-	test_s6n_render_reuse.py	per-stage sampler cache equals per-draw translation
+S6N-LITP	S6n	d80096c	d80096c	confirmed	-	test_s6n_lit_prepared.py	prepared direction and 1/range^2: static == dynamic, worst 0/255, ranges 0, inf, 1e30, 1e-20, negative
+S6N-ACMP	S6n	021fc46	021fc46	confirmed	-	test_s6n_alpha_compare.py	branch-free alpha compare == the old switch == D3D9 for every function and ref, NaN and equality
+S6N-OVR-O2	S6n	68ccc78	68ccc78	refuted	-	test_s6n_overrides_slots.py	RestoreSamplerState (slot 53) returns the D3D9 default, not the value slot 47 saved: 10 of 10 states
+S6N-OVR-O3	S6n	68ccc78	68ccc78	refuted	-	test_s6n_overrides_slots.py	texture stage state defaults: ALPHAARG0 (27) and RESULTARG (28) left 0; the value at 26 commented RESULTARG is COLORARG0; 16 differ from D3D9
+S6N-NXGI	S6n	4abbae3	4abbae3	confirmed	-	test_s6n_nxgpu_init_checks.py	each of 18 failing deko3d creates makes nxgpu_init return NULL, no NULL used (pre-fix code: 13 defects)
+S6N-CUBE	S6n	ac928fc	ac928fc	confirmed	-	test_s6n_cube_nxd9.py	cube textures and TEXC face updates C1-C5 on an ASan nx_render of the head
+P6N-OPT-D3	P6n	4463ec3	4463ec3	refuted	-	test_p6n_opt_rederive.py	optimizations[]: 9 of 21 recorded commits are not in the repository (nor on claude/port-nsw-render); two deltas re-measured exactly
+P6N-OPT-D3B	P6n	c4ebb04	c4ebb04	refuted	-	test_p6n_opt_rederive.py	the message names 19031e3, the entry records 147155ba/e564afbd: none exist in the repository
+P6N-HOT	P6n	b374619	b374619	confirmed	-	test_p6n_doc_report.py	every hotspot row names its thread and share of 16.7 ms (183 rows)
+P6N-DOC-H3	P6n	91710d3	91710d3	fixed	2f5880c	test_p6n_doc_report.py	RENDER_PERF.md at 91710d3 said 10.25/8.71/5.45 ms where report.json said 23.31/10.02/8.86; equal from 2f5880c
