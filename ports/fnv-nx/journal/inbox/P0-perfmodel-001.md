@@ -33,10 +33,11 @@
     overrides priced on their own code): 7.88 M cycles per frame, against 6.09 M at IPC 0.8. The Slerp override is
     latency-bound (CPI 2.05-2.66), and NiBound's ld3 override prices 16-49 cycles against the decomp's 20-39. The
     values went to S15-simd as proposals; budget_model.json is its file.
-  - 3-core frame model (mtmodel.py, PERF.md 12.7): placement masks, fork/join critical path, wake latency, A57 CPI
-    for 5 of 11 items. 1020 MHz mid frame: placed 28.5 ms (frame_budget 25.2), plan45 21.6 (17.2; main waits
-    1.8 ms at the joins), plan45b 18.7 (15.4). x1.25 worst gives 23.3 ms, above 22.2 for 45 fps stable. At
-    1785 MHz plan45b is 10.7 ms.
+  - 3-core frame model (mtmodel.py, PERF.md 12.7): placement masks and priorities, the decomp's hand-offs (AI
+    signalled before 0x0086ff70 and joined after it, the staggered AI halves, mt_cull's water records waited at once
+    and the shadow/main-scene records joined at FUN_00b9f780, Havok fork/join), wake latency, A57 CPI for 5 of 11
+    items. 1020 MHz mid frame: placed 28.5 ms (frame_budget 25.2), plan45 22.4 (17.2), plan45b 20.0 (15.4; main
+    waits 3.2 ms, all at mt_cull's joins; x1.25 worst 25.0 > 22.2), plan60 18.0. At 1785 MHz plan45b is 11.5 ms.
 * **limits** - The error bar covers the parts one at a time. Composition in compiled game code is not yet checked
   against hardware (read +-20-30 %). Not priced: the `dmb ish` store-buffer drain (the inlined InterlockedIncrement
   prices 13 cycles with or without a store in flight), contention between cores, the shared L2.

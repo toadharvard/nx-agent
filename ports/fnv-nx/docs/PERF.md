@@ -986,35 +986,46 @@ instructions. S15-simd now compares A/B rows in cycles (11.6) and dropped the Ni
 
 frame_budget.py (11.1) puts each core's share of the work side by side: frame = the busiest core. `mtmodel.py`
 schedules the same work (budget_model.json, its scenarios and levers, frame_budget's `scenario_work`) in time, in
-1 us steps on the application cores with placement.h's masks and priorities (main core 0; render worker core 1; AI
-linear and workers on 0b110; background lowest):
-* main runs its phases in the main loop's order (game logic, Havok, animation, scene graph, cull, accumulation,
-  renderer, barriers, then the model's sync overhead);
-* work a lever moves off main is forked to two workers at its phase's start. A forked worker starts after a wake
-  latency (--wake-us, 15 us [E]) and runs at the model's parallel efficiency. Main joins it at the phase's end and
-  waits if it is late;
-* the AI linear threads run from the frame's start and are joined before culling. `threaded_anim` queues its work
-  behind the AI on them;
-* the render worker is pipelined (never joined) and background work fills idle time;
-* frame = max(main's critical path, every core's busy time).
+1 us steps on the application cores with placement.h's masks and priorities. Main is on core 0. The render worker
+is on core 1 at Horizon priority 43, above the default 44. The AI linear threads and the workers share 0b110, and
+background work runs lowest. Equal priorities are not time-sliced, as on Horizon.
+
+The frame's hand-off structure comes from the decomp (S15-threads; `STRUCT` in the script):
+* main signals the AI linear threads (FUN_008c78c0) before the per-frame body 0x0086ff70 (scene graph, cull,
+  render). It joins them (0x008c7990, a counting semaphore) after that body, then drains the packed task queue
+  (FUN_00870610);
+* the two AI linear threads stagger each other (SetEvent / WaitForSingleObject), so their halves run one after the
+  other;
+* `threaded_anim`'s work queues behind the AI and comes back at the same join;
+* Rendering Task Thread 2 (`mt_cull`): the water records 1-16 are signalled and waited at once, so main waits for
+  them; the shadow records 17-20 and the main-scene record 21 overlap main and are joined at FUN_00b9f780 (in the
+  accumulation). The overlapping share, 0.7, is an estimate [E] until the records are counted;
+* Havok MT: main processes jobs too, then waits for the pool (fork / join around the phase);
+* a forked worker starts after a wake latency (15 us [E]) and runs at the model's parallel efficiency. The render
+  worker is pipelined and never joined. Frame = max(main's critical path, every core's busy time).
 
 The work is priced with the A57 CPI of 12.6's rows for the items they cover (scene graph, cull, animation, Havok,
 accumulation: steady CPI in the lo case, one-call CPI in the hi case); other items stay at 1/0.8 and are listed.
-Check (tests/s15/test_a57model.py): with everything at 1/0.8 and no hand-offs, "placed" gives frame_budget's
-25.2 ms.
+Checks (tests/s15/test_a57model.py): with everything at 1/0.8 and no hand-offs, "placed" gives frame_budget's
+25.2 ms; a plan's critical path is never shorter than the water-fill; a fork/join case to the microsecond.
 
-| scenario | 1020 MHz frame lo / mid / hi (ms) | frame_budget mid | main waits | 1785 MHz mid |
+| scenario | 1020 MHz frame lo / mid / hi (ms) | frame_budget mid | main waits (mid) | 1785 MHz mid |
 |---|---|---:|---:|---:|
 | placed | 12.4 / 28.5 / 50.0 | 25.2 | 0 | 16.3 |
-| plan45 | 9.2 / 21.6 / 39.1 | 17.2 | 1.8 | 12.4 |
-| plan45b | 7.8 / 18.7 / 35.4 | 15.4 | 1.8 | 10.7 |
-| plan60 | 7.0 / 17.6 / 34.3 | 14.7 | 1.5 | 10.1 |
+| plan45 | 9.7 / 22.4 / 40.0 | 17.2 | 2.6 | 12.8 |
+| plan45b | 8.4 / 20.0 / 36.2 | 15.4 | 3.2 | 11.5 |
+| plan60 | 7.3 / 18.0 / 35.2 | 14.7 | 1.9 | 10.3 |
 
-Two results for the plan. First, the hand-offs cost: at 1/0.8 alone, plan45's critical path is 19.7 ms against the
-water-filled 17.2. Main waits 1.5 ms at the joins of the moved cull, accumulation and Havok work, which runs slower
-on the workers (efficiency, wake) than main's share of the same phase. Second, the A57 prices raise main's phases
-(scene graph and animation at CPI 0.9-2.0 against 1.25). So plan45b's mid frame at 1.02 GHz is 18.7 ms, and with the
-model's worst-frame factor 1.25 that is 23.3 ms, just above the 22.2 ms of 45 fps stable. At 1.785 GHz, plan45b holds
-60 fps at the mid case (10.7 ms). The levers that shorten main's path without a join on it (render F2-F4, relaxed
-barriers, NEON math, overrides) gain their full value. A moved phase gains only when its worker finishes before
-main's share does: split the moved part so that the worker side is the smaller one.
+Sensitivity (plan45b, 1020 MHz mid): AI halves in parallel 18.7 ms; mt_cull overlap 1.0 20.2 ms; both 18.1 ms.
+
+What the model says about the plan:
+* main's waits are all at mt_cull's joins. The water records cost main their full time plus the wake: 1.5 ms at the
+  cull and 1.7 ms at the accumulation in plan45b. Only the overlapping records gain. Moving the water records onto
+  the overlapping side, or keeping them on main, is worth about as much as the whole lever claims.
+* the staggered AI runs 6.8 ms serially on one AI thread, with threaded_anim's queue after it. In that time the
+  mt_cull workers and the Havok pool compete for the same two cores, so the moved work runs late.
+* the A57 prices raise main's phases: scene graph and animation run at CPI 0.9-2.0, against 1.25.
+* plan45b's mid frame at 1.02 GHz is 20.0 ms. With the model's worst-frame factor of 1.25 that is 25.0 ms, above the
+  22.2 ms of 45 fps stable. At 1.785 GHz the mid frame is 11.5 ms, which holds 60 fps.
+* the levers that shorten main's path without a join on it (render F2-F4, relaxed barriers, NEON math, overrides)
+  gain their full value.
