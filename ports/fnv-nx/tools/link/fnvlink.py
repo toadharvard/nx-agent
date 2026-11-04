@@ -2034,13 +2034,15 @@ def apply(out, fixed):
                                                                                       left, left_objs))
     rows, cnt = pair_typeinfo(fixed)
     with open(os.path.join(out, 'typeinfo_pairs.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('#class\tvtable object (kept)\ttypeinfo object the linker would have kept\ttypeinfo definitions '
-                'turned into references\n')
+        f.write('#class\tkept typeinfo object (the vtable\'s)\tthe copy the linker would keep first\tcopies of '
+                'another view turned into references\n')
         for r in rows:
             f.write('\t'.join(r) + '\n')
-    print('typeinfo kept with its vtable (V1 C4): %d classes whose first typeinfo copy came from another object than '
-          'the kept vtable, %d typeinfo definitions turned into references (typeinfo_pairs.tsv); vtable object '
-          'defines no typeinfo: %d' % (len(rows), cnt['undefined'], cnt['vtable object defines no typeinfo']))
+    print('typeinfo kept with its vtable (V1 C4): %d classes with copies of another view, %d typeinfo definitions '
+          'turned into references (typeinfo_pairs.tsv); private base views %d in %d objects, %d base pointers '
+          'retargeted; vtable object defines no typeinfo: %d' % (
+              len(rows), cnt['undefined'], cnt['private base views'], cnt['objects with private base views'],
+              cnt['base pointers retargeted'], cnt['vtable object defines no typeinfo']))
 
 
 def kept_def(defs):
@@ -2049,41 +2051,150 @@ def kept_def(defs):
 
 
 def pair_typeinfo(fixed):
-    """Keep each class's typeinfo from the object whose vtable is kept (V1 defect C4). Units reconstruct one class
-    with different bases; vtable and typeinfo are separate weak COMDAT groups (_ZTV<C>, _ZTI<C>) and the linker keeps
-    the first copy of each in link order independently, so the kept vtable's offset-to-top words could name a base
-    the kept typeinfo lacks (__dynamic_cast to it fails). The typeinfo definitions of the objects that link before
-    the vtable's object become references (elfsyms.undefine_symbols, their group no longer COMDAT): every typeid and
-    every derived class's base list then reaches the vtable object's copy. Link order is `check`'s (sorted names).
-    -> ([(class, vtable object, replaced typeinfo object, objects changed)], Counter)."""
+    """Make each class's kept typeinfo describe the layout its kept vtable was built for (V1 defect C4, round 3).
+    Units reconstruct one class with different bases; vtable and typeinfo are separate weak COMDAT groups (_ZTV<C>,
+    _ZTI<C>) and the linker keeps the first copy of each in link order independently, so the kept vtable's
+    offset-to-top words could name a base the kept typeinfo lacks (__dynamic_cast to it fails).
+
+    * The class's typeinfo is the vtable object's own copy (when it has one), else the first in `check`'s link order.
+      Every other copy whose *view* differs - its words and base names, and the same for its bases as that object
+      sees them - becomes a reference (elfsyms.undefine_symbols, its group no longer COMDAT), so any link order
+      keeps that copy (t2b); copies of the same view stay (they are interchangeable).
+    * Base pointers: a kept typeinfo names its bases by global symbol, and the kept base typeinfo can come from
+      another unit's view (t4: C : B in both, B's second base differs). Where the object holding the kept typeinfo
+      has its own, different view of a base, that copy stays as a local `_ZTI<B>.fnvnx_view` (its global definition
+      a reference like above) and the base pointers inside the object's kept typeinfos (and inside those local
+      views, recursively) are retargeted to it. typeid(B) and B's own vtable keep the global one; type_info
+      equality compares names, so casts between the views still match.
+    -> ([(class, kept object, the copy the linker would have kept, objects changed)], Counter)."""
     objs = sorted(n for n in os.listdir(fixed) if n.endswith('.o'))
     vt, ti = collections.defaultdict(list), collections.defaultdict(list)
     for n in objs:
         for s in elfsyms.symbols(os.path.join(fixed, n)):
             if s.shndx and s.bind in ('global', 'weak') and s.name.startswith(('_ZTV', '_ZTI')):
                 (vt if s.name[3] == 'V' else ti)[s.name[4:]].append((n, s.bind == 'global'))
-    order = {n: k for k, n in enumerate(objs)}
-    undef, rows, cnt = collections.defaultdict(set), [], collections.Counter()
-    for cls, vdefs in sorted(vt.items()):
-        tdefs = ti.get(cls)
-        if not tdefs:
+    cnt = collections.Counter()
+    kept = {}
+    for cls, tdefs in ti.items():
+        kt = kept_def(tdefs)
+        kept[cls] = kt[0]
+        vdefs = vt.get(cls)
+        if not vdefs:
             continue
-        kv, kt = kept_def(vdefs), kept_def(tdefs)
-        if kv[0] == kt[0]:
-            continue
-        if not any(o == kv[0] for o, _ in tdefs):
+        kv = kept_def(vdefs)[0]
+        own = dict(tdefs)
+        if kv not in own:
             cnt['vtable object defines no typeinfo'] += 1
-            continue
-        if kt[1] and not dict(tdefs)[kv[0]]:
+        elif kt[1] and not own[kv] and kt[0] != kv:
             cnt['a strong typeinfo elsewhere'] += 1   # a key function's unit: leave it to the linker
+        else:
+            kept[cls] = kv
+    defs_in = collections.defaultdict(set)
+    for cls, tdefs in ti.items():
+        for o, _ in tdefs:
+            defs_in[o].add(cls)
+    # words and base names of every typeinfo in the objects that hold a copy with a rival, read once per object
+    multi = {c for c, ds in ti.items() if len(ds) > 1}
+    shapes, bases_of = {}, {}
+    for o in objs:
+        if not defs_in[o] & multi:
             continue
-        before = sorted({o for o, _ in tdefs if order[o] < order[kv[0]]})
-        for o in before:
-            undef[o].add('_ZTI' + cls)
-        rows.append((cls, kv[0], kt[0], ' '.join(before)))
+        ob = vtables.Obj(os.path.join(fixed, o))
+        for c in defs_in[o]:
+            ents = ob.ents('_ZTI' + c)
+            shapes[(o, c)] = tuple((e.word if e.sym is None else 0, e.sym, e.addend) for e in ents)
+            bases_of[(o, c)] = [e.sym[4:] for e in ents if e.sym and e.sym.startswith('_ZTI') and e.sym[4:] != c]
+    memo = {}
+
+    def view(o, c, depth=0):
+        """The view of class c's typeinfo in object o: its words, and the views of its bases (o's own copy where o
+        has one, else the kept one). Classes with one copy have no rival: their view is their name."""
+        k = (o, c)
+        if k in memo:
+            return memo[k]
+        if k not in shapes or depth > 40:
+            r = ('=', c)
+        else:
+            memo[k] = ('...', c)   # guard
+            r = (shapes[k], tuple(view(o if b in defs_in[o] else kept.get(b, o), b, depth + 1)
+                                  for b in bases_of[k]))
+        memo[k] = r
+        return r
+
+    undef, views, rows = collections.defaultdict(set), collections.defaultdict(set), []
+    for cls, tdefs in sorted(ti.items()):
+        if len(tdefs) < 2:
+            continue
+        k = kept[cls]
+        want = view(k, cls)
+        diff = sorted(o for o, _ in tdefs if o != k and view(o, cls) != want)
+        for o in diff:
+            undef[o].add(cls)
+        first = kept_def(tdefs)[0]
+        if diff:
+            rows.append((cls, k, first, ' '.join(diff)))
+    # private views of bases (t4), from the typeinfos each object keeps
+    for o in objs:
+        todo = [c for c in defs_in.get(o, ()) if kept.get(c) == o]
+        seen = set(todo)
+        while todo:
+            c = todo.pop()
+            for b in bases_of.get((o, c), ()):
+                if b in seen or b not in defs_in[o] or kept.get(b) in (None, o):
+                    continue
+                seen.add(b)
+                if view(o, b) != view(kept[b], b):
+                    views[o].add(b)
+                    undef[o].add(b)
+                    todo.append(b)
+        # a kept typeinfo that reaches a private view is the only copy left: another copy of the same view would
+        # point at the global bases in another link order
+        for c in [c for c in defs_in.get(o, ()) if kept.get(c) == o and views.get(o)]:
+            reach, stack = set(), [c]
+            while stack:
+                x = stack.pop()
+                for b in bases_of.get((o, x), ()):
+                    if b in defs_in[o] and b not in reach:
+                        reach.add(b)
+                        stack.append(b)
+            if reach & views[o]:
+                for d, _ in ti[c]:
+                    if d != o and c not in undef[d]:
+                        undef[d].add(c)
+                        cnt['copies of a class with private base views'] += 1
+    cnt['private base views'] = sum(len(v) for v in views.values())
+    cnt['objects with private base views'] = sum(1 for v in views.values() if v)
     for o, names in sorted(undef.items()):
         p = os.path.join(fixed, o)
-        cnt['undefined'] += elfsyms.undefine_symbols(p, p + '.ti', names)
+        if views.get(o):
+            # local symbols at the object's own copies, then the global definitions become references
+            secs = {s.name: s for s in elfsyms.symbols(p)}
+            args = ['--add-symbol=_ZTI%s.fnvnx_view=%s:0x%x,local,object' % (b, secs['_ZTI' + b].section,
+                                                                            secs['_ZTI' + b].value)
+                    for b in sorted(views[o])]
+            r = subprocess.run([OBJCOPY, *args, p, p + '.v'], capture_output=True, text=True)
+            if r.returncode:
+                log('pair_typeinfo: objcopy failed for %s: %s' % (o, r.stderr[:300]))
+                continue
+            elfsyms.set_sizes(p + '.v', {'_ZTI%s.fnvnx_view' % b: secs['_ZTI' + b].size for b in views[o]})
+            syms = elfsyms.symbols(p + '.v')
+            index = {}
+            for k_, s in enumerate(syms, 1):
+                if s.name.startswith('_ZTI') and s.shndx and (s.bind != 'local' or s.name.endswith('.fnvnx_view')):
+                    index[s.name] = (k_, s)
+            ranges = [(s.shndx, s.value, s.value + s.size) for nm, (k_, s) in index.items()
+                      if nm.endswith('.fnvnx_view') or (nm[4:] in defs_in[o] and kept.get(nm[4:]) == o)]
+            for b in views[o]:   # a local view's range: the size of the global copy it stands at
+                g = index.get('_ZTI' + b)
+                if g:
+                    ranges.append((g[1].shndx, g[1].value, g[1].value + g[1].size))
+            mapping = {index['_ZTI' + b][0]: index['_ZTI%s.fnvnx_view' % b][0] for b in views[o]
+                       if '_ZTI' + b in index and '_ZTI%s.fnvnx_view' % b in index}
+            cnt['undefined'] += elfsyms.undefine_symbols(p + '.v', p + '.u', {'_ZTI' + c for c in names})
+            cnt['base pointers retargeted'] += elfsyms.retarget_relocs(p + '.u', p + '.ti', ranges, mapping)
+            os.remove(p + '.v'); os.remove(p + '.u')
+        else:
+            cnt['undefined'] += elfsyms.undefine_symbols(p, p + '.ti', {'_ZTI' + c for c in names})
         os.replace(p + '.ti', p)
     return rows, cnt
 

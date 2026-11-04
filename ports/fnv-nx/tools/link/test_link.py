@@ -390,6 +390,56 @@ class Q4 { int a; public: int get() const { return a; } };
               % [(s.size, s.bind) for s in ti])
         check(fnvlink.pair_typeinfo(fixed)[0] == [], 'typeinfo pairing is idempotent')
 
+    # V1 round 3 (adversarial_typeinfo t2b, t4): every copy of another view becomes a reference, so a link in another
+    # order keeps the vtable unit's typeinfo too (t2b: a third view sorting after it); a kept typeinfo's base pointer
+    # reaches its own object's view of the base (t4: C : B in both, B's second base differs, B's vtable kept elsewhere)
+    ti_c = ti_a.replace('ti_from_a', 'ti_from_c').replace('virtual void f()', 'virtual void h()')
+    t4a = ('struct P { virtual ~P() {} int p; };\nstruct Q { virtual void q() {} int qq; };\n'
+           'struct B : P, Q { virtual void b() {} };\nB *make_b() { return new B; }\n')
+    t4b = ('struct P { virtual ~P() {} int p; };\nstruct R { virtual void r() {} int rr; };\n'
+           'struct B : P, R { virtual void b() {} };\nstruct C : B { virtual void c() {} int cc; };\n'
+           'C *make_c() { return new C; }\n')
+
+    def image(elf):
+        """({symbol: address}, word(address)) of a linked ELF32 image."""
+        data = open(elf, 'rb').read()
+        shoff, = struct.unpack_from('<I', data, 0x20)
+        shentsize, shnum, _ = struct.unpack_from('<HHH', data, 0x2e)
+        secs = [struct.unpack_from('<IIIIIIIIII', data, shoff + i * shentsize) for i in range(shnum)]
+
+        def word(a):
+            for sh in secs:
+                if sh[1] != 8 and sh[3] and sh[3] <= a < sh[3] + sh[5]:
+                    return struct.unpack_from('<I', data, sh[4] + a - sh[3])[0]
+            return None
+        return {y.name: y.value for y in elfsyms.symbols(elf) if y.shndx}, word
+    for case, units, rev in (('t2b', (('a_view.cpp', ti_a), ('b_vtable.cpp', ti_b), ('c_view.cpp', ti_c)), True),
+                             ('t4', (('a_bview.cpp', t4a), ('b_cview.cpp', t4b)), False)):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixed = os.path.join(tmp, 'fixed')
+            os.makedirs(fixed)
+            for name, text in units:
+                open(os.path.join(tmp, name), 'w').write(text)
+                subprocess.run([fnvlink.CC, '-x', 'c++', '-mabi=ilp32', '-O2', '-fPIC', '-c', os.path.join(tmp, name),
+                                '-o', os.path.join(fixed, name + '.o')], capture_output=True)
+            rows, cnt = fnvlink.pair_typeinfo(fixed)
+            elf = os.path.join(tmp, 'trial.elf')
+            subprocess.run([fnvlink.LD, '-m', 'aarch64linux32', '--noinhibit-exec', '-e', '0', '-o', elf,
+                            *sorted((os.path.join(fixed, n) for n in os.listdir(fixed)), reverse=rev)],
+                           capture_output=True)
+            syms, word = image(elf)
+            if case == 't2b':
+                ti = [y for y in elfsyms.symbols(elf) if y.name == '_ZTI1C' and y.shndx]
+                check(len(ti) == 1 and ti[0].size == 32 and cnt['undefined'] == 2,
+                      't2b: reverse link order keeps the vtable unit\'s typeinfo: %s %s' % (
+                          [(y.size, y.bind) for y in ti], dict(cnt)))
+            else:
+                base = word(syms.get('_ZTI1C', 0) + 8)   # __si_class_type_info: the base pointer
+                check(base == syms.get('_ZTI1B.fnvnx_view') and word(base + 24) == syms.get('_ZTI1R') and
+                      word(base + 28) == 0x802 and word(syms['_ZTI1B'] + 24) == syms.get('_ZTI1Q'),
+                      't4: C\'s base B is its own unit\'s view (P, R at +8): base %s view %s, +24 %s R %s; %s' % (
+                          base, syms.get('_ZTI1B.fnvnx_view'), base and word(base + 24), syms.get('_ZTI1R'), dict(cnt)))
+
     print('ok' if ok else 'FAILED')
     sys.exit(0 if ok else 1)
 

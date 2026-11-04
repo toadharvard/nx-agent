@@ -5,6 +5,7 @@ symbols(path) -> list of Sym(name, value, size, type, bind, shndx, section, comd
   shndx 0 == undefined; section is the section name ('' for undefined/absolute/common); comdat is True when the
   section belongs to a COMDAT group (inline functions, template instances: any copy may be the one kept).
 """
+import collections
 import os
 import struct
 from collections import namedtuple
@@ -174,6 +175,49 @@ def undefine_symbols(src, dst, names):
             if g[1] == SHT_GROUP and g[6] == si and g[7] in changed and g[5] >= 4:
                 flags, = struct.unpack_from('<I', data, g[4])
                 struct.pack_into('<I', data, g[4], flags & ~1)   # GRP_COMDAT off: a plain group, always kept
+    open(dst, 'wb').write(data)
+    return n
+
+
+def set_sizes(path, sizes):
+    """Set st_size of the named symbols of an ELF32 object in place ({name: size}; objcopy --add-symbol gives 0)."""
+    data = bytearray(open(path, 'rb').read())
+    shoff, = struct.unpack_from('<I', data, 0x20)
+    shentsize, shnum, _ = struct.unpack_from('<HHH', data, 0x2e)
+    secs = [struct.unpack_from('<IIIIIIIIII', data, shoff + i * shentsize) for i in range(shnum)]
+    for s in secs:
+        if s[1] != SHT_SYMTAB:
+            continue
+        stroff = secs[s[6]][4]
+        for k in range(1, s[5] // 16):
+            o = s[4] + k * 16
+            nm, = struct.unpack_from('<I', data, o)
+            name = data[stroff + nm:data.index(b'\0', stroff + nm)].decode('utf-8', 'surrogateescape')
+            if name in sizes:
+                struct.pack_into('<I', data, o + 8, sizes[name])
+    open(path, 'wb').write(data)
+
+
+def retarget_relocs(src, dst, ranges, mapping):
+    """Copy ELF32 object src to dst with the RELA relocations inside [(section index, lo, hi)] whose symbol index is a
+    key of mapping pointed at mapping[index] instead. -> relocations rewritten."""
+    data = bytearray(open(src, 'rb').read())
+    shoff, = struct.unpack_from('<I', data, 0x20)
+    shentsize, shnum, _ = struct.unpack_from('<HHH', data, 0x2e)
+    secs = [struct.unpack_from('<IIIIIIIIII', data, shoff + i * shentsize) for i in range(shnum)]
+    by_sec = collections.defaultdict(list)
+    for sh, lo, hi in ranges:
+        by_sec[sh].append((lo, hi))
+    n = 0
+    for r in secs:
+        if r[1] != 4 or r[7] not in by_sec:
+            continue
+        for o in range(r[4], r[4] + r[5] - 11, 12):
+            off, info = struct.unpack_from('<II', data, o)
+            k = info >> 8
+            if k in mapping and any(lo <= off < hi for lo, hi in by_sec[r[7]]):
+                struct.pack_into('<I', data, o + 4, (mapping[k] << 8) | (info & 0xff))
+                n += 1
     open(dst, 'wb').write(data)
     return n
 

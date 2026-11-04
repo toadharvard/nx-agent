@@ -896,14 +896,19 @@ def run(out, tree, jobs=4):
         if enc in done_enc:
             continue
         done_enc.add(enc)
-        what = []
+        what, own_vt = [], False
         if r['polymorphic'] and '_ZTV' + enc not in defined:
             vt, why = synth_vtable(r)
             if vt is not None:
                 per_host[h].append(('vt', enc, vt)); what.append('vtable'); stats['vtables synthesized'] += 1
+                own_vt = True
             else:
                 stats['vtable not synthesized: ' + why] += 1; what.append('no vtable: ' + why)
-        if '_ZTI' + enc not in defined:
+        # a synthesized vtable carries its own view's typeinfo even where a compiled object has a copy (of maybe
+        # another view): fnvlink.pair_typeinfo keeps this one with the vtable (V1 round 3 t5: 78 classes on f13)
+        if '_ZTI' + enc not in defined or own_vt:
+            if own_vt and '_ZTI' + enc in defined:
+                stats['typeinfo synthesized beside a compiled copy (with the vtable)'] += 1
             ti, why = synth_typeinfo(r)
             if ti is not None:
                 per_host[h].append(('ti', enc, ti)); what.append('typeinfo'); stats['typeinfos synthesized'] += 1

@@ -65,7 +65,9 @@ SRC = {
     'src/b.cpp': '#include "h.h"\nKey::~Key() {}\nint Key::g2() { return 6; }\nKey *mk() { return new Key; }\n'
                  'extern "C" char DAT_01000a80[];\n'           # S13 00404920: a free function's vptr store
                  'void *init_free(void *self)\n{\n    *(void **)self = DAT_01000a80;\n    return self;\n}\n',
-    'src/c.cpp': '#include "h.h"\nint use_inl(Inl *p) { return p->Inl::g2() + p->Inl::i(); }\nint helper_c() { return 9; }\n'
+    'src/c.cpp': '#include <typeinfo>\n#include "h.h"\nint use_inl(Inl *p) { return p->Inl::g2() + p->Inl::i(); }\n'
+                 'int helper_c() { return 9; }\n'
+                 'const std::type_info &ti_inl() { return typeid(Inl); }\n'   # a compiled copy of Inl's typeinfo
                  'static int s_init = helper_c();\nint get_init() { return s_init; }\n'
                  'int use_abs(Abs2 *p) { return p->Abs2::f2(); }\nLeaf *mk_leaf() { return new Leaf; }\n'
                  'void KeyDel::operator delete(void *p) { ::operator delete(p); }\n'
@@ -223,6 +225,11 @@ def main():
                     got, want = synth[n].ents(n), oracle.ents(n)
                     check(got == want, '%s differs from GCC:\n  got  %s\n  want %s' % (n, got, want))
         check('_ZTS3Key' in synth and '_ZTV5Multi' not in synth, 'typeinfo names synthesized, emitted vtables not')
+        # V1 round 3 t5: unit c holds a compiled copy of Inl's typeinfo (typeid), yet the synthesized vtable object
+        # carries its own (checked against GCC above) and that is the one apply keeps with the vtable
+        pairs = [l.split('\t') for l in open(os.path.join(out, 'typeinfo_pairs.tsv')) if not l.startswith('#')]
+        check(not any(r[0] == '3Inl' and r[1] != os.path.basename(synth['_ZTI3Inl'].path) for r in pairs),
+              'Inl\'s typeinfo kept from the synthesized vtable object: %s' % [r for r in pairs if r[0] == '3Inl'])
         for host, path in vtables.load_synth(out):   # unit c has a static initializer: it must never run twice
             secs = vtables.Obj(path).secnames
             check(not any(n.endswith(('.init_array', '.ctors', '.fini_array', '.dtors')) for n in secs),

@@ -402,17 +402,35 @@ resolve links each as an extra object of its host unit, resolved with the host's
 address like everywhere else. Because all GCC vtables are weak too, a compiled copy wins as soon as its unit
 compiles. GCC stores 0 in both destructor slots of an abstract class, genuine and synthesized alike.
 
-**Typeinfo kept with its vtable** (V1 defect 4). `_ZTV<C>` and `_ZTI<C>` are separate weak COMDAT groups, and the
-linker keeps the first copy of each independently. When units reconstruct C with different bases, the kept vtable's
-offset-to-top words could name a base the kept typeinfo lacks, and `__dynamic_cast` to it fails. apply's last pass
-(`pair_typeinfo`) takes `check`'s link order (sorted names) and finds every class whose first typeinfo copy comes
-from another object than the kept vtable, when the vtable's object has one of its own. The typeinfo definitions
-of the objects linking before it become references (`elfsyms.undefine_symbols`, which also clears `GRP_COMDAT` on
-the group they signed: an emptied group would still win its signature and drop the real copy). Every `typeid` and
-every derived class's base list then reaches the vtable object's typeinfo (`typeinfo_pairs.tsv`). On f13's objects
-137 classes change (299 definitions) and V1's `c4_definers.py --audit` goes from 36 disagreeing classes (33 by size,
-3 by bases) to 0; trial-link counts are unchanged. The pass assumes `check`'s order: a link that orders the objects
-otherwise keeps another vtable and needs the pass run for that order.
+**Typeinfo kept with its vtable** (V1 defect 4, round 3). `_ZTV<C>` and `_ZTI<C>` are separate weak COMDAT groups,
+and the linker keeps the first copy of each independently. When units reconstruct C with different bases, the kept
+vtable's offset-to-top words could name a base the kept typeinfo lacks, and `__dynamic_cast` to it fails. apply's
+last pass (`pair_typeinfo`) works in three steps:
+
+* **The copy to keep.** Each class keeps the vtable object's own typeinfo (when it has one), else the first copy in
+  `check`'s order. A *view* of a typeinfo is its words and base names, plus the views of its bases as that object
+  sees them: its own copy where it has one, else the kept one. Every other copy with a different view becomes a
+  reference, wherever it sorts, so another link order keeps the same copy (V1 t2b: a third view sorting after the
+  vtable object). `elfsyms.undefine_symbols` also clears `GRP_COMDAT` on the group the symbol signed; an emptied
+  group would still win its signature and drop the real copy. Copies of the same view stay: they are
+  interchangeable.
+* **Base pointers** (V1 t4: C : B in two units, B's second base differs, and B's vtable is kept from the other
+  unit). A kept typeinfo names its bases by global symbol, and the kept base can be another unit's view. Where the
+  object holding the kept typeinfo has its own, different view of a base, that copy stays as a local
+  `_ZTI<B>.fnvnx_view`, with its global definition turned into a reference. The base pointers inside the object's
+  kept typeinfos, and inside those views recursively, are retargeted to it (`elfsyms.retarget_relocs`), and the
+  other copies of a class that reaches such a view become references. `typeid(B)` and B's own vtable keep the
+  global copy; `type_info` equality compares names, so casts between the views still match.
+* **Synthesized vtables** (V1 t5) always carry their own view's typeinfo (`vtables.py`), even where a compiled
+  object has a copy, so the first step keeps it with the vtable. On the farm link `link/9a0243c7eabe`, all 79 classes
+  whose vtable object had no typeinfo were synthesized ones.
+
+Measured on that farm link's objects, which had already been through the earlier pass: 115 classes still had a
+copy of another view defined elsewhere, and 64 kept base pointers reached another view. After the pass, both are 0
+(120 classes, 467 definitions turned into references, 50 private views in 32 objects, 78 base pointers
+retargeted). V1's `c4_definers.py --audit` stays at 0 and the trial-link counts are unchanged; the pass takes 2 s.
+On f13's objects the first version of the pass took V1's audit from 36 disagreeing classes (33 by size, 3 by bases)
+to 0. Report: `typeinfo_pairs.tsv`.
 
 **Slot functions no object defines.** Inline virtual functions and implicit destructors of a class that no unit
 constructs or destroys are emitted nowhere (GCC emits them with the vtable). For the synthesized vtables a compiled
