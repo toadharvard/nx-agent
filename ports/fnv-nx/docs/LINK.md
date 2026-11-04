@@ -465,6 +465,17 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   thread-local the source places at an address below it (outside `.tls`) gets a native TLS variable of its own. The block starts zeroed in each thread: S4 should point its per-thread template copy
   at it (`&__fnvnx_tls_image` of the current thread, `__fnvnx_tls_image_orig` / `_size`) and copy the image's
   template there at thread start, so `fs:[0x2c]` code and GCC's TLS accesses agree.
+* **Data names** (S5, J-0062): a reference to a variable the image holds must bind to its address, or the guest
+  keeps a private copy the rest of the game never sees. Three gaps closed: (1) a pointer to a function pointer
+  (`void (__cdecl **g_apfnA26E20CurvesCopy)(void *)`, the handler tables `FUN_00a28cb0_aTable0..11`) is parsed as
+  a variable of that name; (2) `llvm-undname` drops the space after a type whose name ends in `_` (`class
+  SettingT_GameSettingCollection_bKeepLowDetailTerrain`), so a plain variable's qualified name is read from its
+  decoration (`?name@scope@@3...`) instead; (3) a data reference that still matches nothing is looked up by its
+  identifier among every unit's data names at image addresses - the same variable in another scope (the decomp's
+  per-function namespaces) or with another decorated type (an array where MSVC saw a pointer, cv) - and bound when
+  exactly one address carries it (tier `gref/ident`; several addresses: `ambiguous`, not guessed). On the
+  ninth-round objects: (1)+(2) bind 52 names (101 references), (3) 7 names (12 references), 1 identifier stays
+  ambiguous.
 * **Calls of an IAT slot's address**: a decomp `__declspec(dllimport)` function named after its slot
   (`FUN_00fdf1c0(void *)`) is called directly by GCC (`bl`); when its name binds to an IAT slot as data, a call of it
   binds to the slot's api (S4's implementation or the api name), never into the image's IAT words.
