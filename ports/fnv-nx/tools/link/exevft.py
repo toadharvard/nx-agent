@@ -148,3 +148,24 @@ def exe_slot_index(k, d):
     """The minus-one rule: MSVC has one deleting destructor where GCC has D1 and D0 (at d, d + 1), so GCC slot k
     is exe slot k up to D1, D0 shares D1's slot, and every later slot is one lower."""
     return k if d is None or k <= d else k - 1
+
+
+def plain_vftables(path, addrs, starts):
+    """{address: Vft(None, None, [], slots)} for vftables without RTTI (no COL before them: some of the shader
+    classes) at the given image addresses (the V rows the units name), their slots read like scan() but bounded by
+    the next known vftable start (starts: every scanned or named vftable): with no COL pointer between them, one
+    vftable's words run straight into the next one's."""
+    import bisect
+    import fnvnx_pe
+    pe = fnvnx_pe.PE(open(path, 'rb').read())
+    img = fnvnx_pe.Image(pe)
+    st = sorted(set(starts) | set(addrs))
+    out = {}
+    for v in sorted(addrs):
+        slots = img.vtable_slots(v, cap=1024)
+        i = bisect.bisect_right(st, v)
+        if i < len(st):
+            slots = slots[:max(0, (st[i] - v) // 4)]
+        if slots:
+            out[v] = Vft(None, None, [], slots)
+    return out

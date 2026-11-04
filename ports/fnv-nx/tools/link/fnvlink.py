@@ -1122,14 +1122,20 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             rebind[a] = vmap[a][:2]
         # the slots of virtual functions defined nowhere: the native definition at the exe slot's address
         slot_over = {}   # (object, vtable group, word index) -> target, where one symbol's vtables disagree
-        fill = exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
+        # the image vftables the units name that have no RTTI in the exe (no COL): their slots, bounded by the next
+        # known vftable
+        exev_all = dict(exev)
+        exev_all.update(exevft.plain_vftables(exe_path, [v for v in vmap if v not in exev],
+                                              set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
+        vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
+        fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
                              canon_it, out, bridges, slot_over)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
         byclass['vslot-exe'] += fill.get('bound_refs', 0)
         # primary vtables shorter than the exe's: an extended strong copy (the exe's remaining slots)
-        ext = exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over)
+        ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
@@ -1759,7 +1765,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     by_obj = {u.obj: u for u in have}
     want = collections.defaultdict(list)    # (z, path) -> [exe vftable]
     for v, (z, ap, path, note) in vmap.items():
-        if v in exev and note.startswith('primary') and ap == 8:
+        # only vftables with RTTI: their end is the next COL pointer; a plain one (exevft.plain_vftables) may run on
+        # into an unnamed neighbour, so it only fills slots the native vtable has (exe_slot_fill)
+        if v in exev and exev[v].td and note.startswith('primary') and ap == 8:
             want[(z, path)].append(v)
     over = collections.defaultdict(dict)    # (z, kept path) -> {word index: target}
     for (path, z, i), t in (slot_over or {}).items():

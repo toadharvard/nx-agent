@@ -13,6 +13,7 @@ vftable's .text words. Checks:
 * a vftable ends at the first word outside .text (the next vftable's COL pointer);
 * msvc_name() gives the primary vftable's MSVC name, which llvm-undname spells "const C::`vftable'" (if installed);
 * load() caches the scan and reuses it;
+* plain_vftables() reads vftables without RTTI at given addresses, bounded by the next known start;
 * fnvlink.exe_slot_index (the minus-one rule): GCC's D1/D0 pair is MSVC's one deleting destructor.
 """
 import os
@@ -131,6 +132,13 @@ def build(rd, out):
     bogus = rd.put(struct.pack('<II', 0, 0) + b'xyz\0')
     col = rd.words(0, 0, 0, bogus, h_base)
     rd.words(col, T(11))
+    # two vftables without RTTI back to back (no COL pointer between them), then a data word
+    rd.words(0)
+    out['plain1'] = rd.here()
+    rd.words(T(12), T(13), T(14))
+    out['plain2'] = rd.here()
+    rd.words(T(15), T(16))
+    rd.words(0)
 
 
 def main():
@@ -140,7 +148,14 @@ def main():
         where = {}
         make_pe(exe, lambda rd: build(rd, where))
         got = exevft.scan(exe)
+        plain = {where.pop('plain1'), where.pop('plain2')}
         check(set(got) == set(where.values()), 'scan finds the 5 vftables and no decoy (%d found)' % len(got))
+        p1, p2 = sorted(plain)
+        pv = exevft.plain_vftables(exe, [p1, p2], set(got))
+        check(pv.get(p1) is not None and pv[p1].slots == [T(12), T(13), T(14)] and pv[p2].slots == [T(15), T(16)],
+              'plain_vftables: vftables without RTTI, each bounded by the next start: %s' % pv)
+        pv1 = exevft.plain_vftables(exe, [p1], set(got))
+        check(len(pv1[p1].slots) == 5, 'plain_vftables without the next start reads on to the data word')
         b, m, ms, t = (got.get(where[k]) for k in ('Base', 'Multi', 'Multi{Side}', 'Tmpl'))
         check(b is not None and b.td == '.?AVBase@@' and b.off == 0 and b.slots == [T(1), T(2), T(3)],
               'Base: class, offset 0, its 3 slots (ends at the next COL pointer)')

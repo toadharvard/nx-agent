@@ -22,6 +22,10 @@ destructor D1, j = k - 1 after the deleting destructor D0 (the "minus-one rule")
 name (D1/D0 or their address-bound forms `__fnv_<a>_D1`, `__fnvnx_vslot_*_d1|_d0`) or, in an abstract class, as the
 two adjacent zero words GCC stores.
 
+The exe vftables are those scan() finds through RTTI plus, at the V rows' other addresses, the vftables without
+RTTI (plain_vftables, bounded by the next known vftable); VTMETRIC_RTTI_ONLY=1 counts the RTTI ones only (the
+first definition of the metric, before fc8b9f9's successor).
+
 Reads only; the exe is the player's own (agent-only, D3) and nothing derived from it is written except --rows.
 """
 import collections
@@ -101,6 +105,8 @@ def measure(link, exe, rows_path=None):
     native, vrows = read_addrmap(os.path.join(out, 'addrmap.tsv'))
     renames = read_renames(os.path.join(out, 'refs.tsv'))
     exev = exevft.scan(exe)
+    if os.environ.get('VTMETRIC_RTTI_ONLY') != '1':   # the V rows' vftables without RTTI too (exevft.plain_vftables)
+        exev.update(exevft.plain_vftables(exe, [v for v in vrows if v not in exev], set(exev) | set(vrows)))
     objs = {}
     st = collections.Counter()
     rows = []
@@ -132,7 +138,7 @@ def measure(link, exe, rows_path=None):
         st['v-%s' % kind] += 1
         if e is None:
             st['v-%s-not-in-exe' % kind] += 1
-        elif nmsvc < len(e.slots):
+        elif nmsvc < len(e.slots) and e.td:   # a vftable without RTTI has no reliable end (exevft.plain_vftables)
             st['%s-shorter' % kind] += 1
         for k, ent in enumerate(slot_ents):
             if not (ent.sym or '').startswith(TRAP):
@@ -158,7 +164,7 @@ def measure(link, exe, rows_path=None):
     st['trap-symbols-unpaired'] = len(trap_syms - trap_paired)
     # mispairings: the native vtable's class against the exe's RTTI class
     it = demangle(znames, os.environ.get('CXXFILT', 'c++filt'))
-    msn = {v: exevft.msvc_name(e.td) for v, (_, _, _, _, e) in per_v.items() if e is not None}
+    msn = {v: exevft.msvc_name(e.td) for v, (_, _, _, _, e) in per_v.items() if e is not None and e.td}
     ms = demangle(msn.values(), os.environ.get('UNDNAME', 'llvm-undname-18' if not shutil_which('llvm-undname')
                                                 else 'llvm-undname'))
     exe_classes = set()
@@ -167,7 +173,7 @@ def measure(link, exe, rows_path=None):
         if m:
             exe_classes.add(norm_class(m.group(1)))
     for v, (z, note, n, nmsvc, e) in per_v.items():
-        if e is None:
+        if e is None or v not in msn:
             continue
         nat = it.get(z, '')
         if not nat.startswith('vtable for '):

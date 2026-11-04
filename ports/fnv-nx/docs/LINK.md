@@ -586,7 +586,10 @@ its native vtable, the pairing before and the outcome. Classes with no native vt
 a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's
 vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the address map has one.
 * The native vtable (group, address point) stands for the exe vftables the address map pairs with it and those of
-  its own RTTI class at that offset.
+  its own RTTI class at that offset. Image vftables the units name that have no RTTI in the exe (no COL before
+  them: 213 on link 31971038913d, many of the shader classes) are read at their address too
+  (`exevft.plain_vftables`), bounded by the next known vftable start; with no COL between two of them their real
+  end is unknown, so they fill only slots the native vtable has and are never used to extend one.
 * GCC slot k is exe slot j = k up to the complete destructor D1; D0 shares D1's slot and every later slot is one
   lower (`exevft.exe_slot_index`, "minus-one rule": MSVC has one deleting destructor). The pair is found by name
   (`D1Ev`/`D0Ev`, their address-bound forms) or, in an abstract class, as two adjacent zero words.
