@@ -1764,17 +1764,6 @@ def _members(flat, own_name):
               and not re.match(r'^[A-Z][A-Z0-9_]*$', v)}
     return values, types
 
-def _split_bases(bases):
-    """a base clause split at its top-level commas (template argument lists nest)"""
-    out, depth, cur = [], 0, ''
-    for c in bases:
-        if c in '<([': depth += 1
-        elif c in '>)]': depth -= 1
-        if c == ',' and depth == 0: out.append(cur); cur = ''
-        else: cur += c
-    out.append(cur)
-    return out
-
 def _base_specs(bases):
     """[(name, template arguments or None)] of a base clause."""
     out = []

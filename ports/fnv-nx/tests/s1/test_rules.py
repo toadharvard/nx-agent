@@ -309,6 +309,12 @@ got = run(s1.r_goto_scalar_inits, 'int f(V& v, int e)\n{\n    if (e) goto out;\n
 check('GOTO1 splits declarator lists declarator by declarator', got,
       ['float dw, di; dw = v.d(3); di = v.d(e);', 'int n; n = 4;', 'char *p, *q; p = 0; q = p;'])
 
+# ---- TAIL1
+check('TAIL1 names the last base without its access specifier',
+      run(s1.r_msvc_base_layout, 'class D : public NiMemObject\n{\n  public:\n    int x;\n};\n'
+          'struct E : B, public T<int, char>\n{\n    int y;\n};\n'),
+      ['{ FNVNX_MSVC_BASE_END(NiMemObject)', '{ FNVNX_MSVC_BASE_END(T<int, char>)'], ['(public'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
