@@ -15,8 +15,16 @@ python3 -I "$P/gen_stream.py" "$W/streams"
 # (the GPU metric since 2026-11-04: rebuilt every run, never carried; ~2 min, one core)
 SDP=${SDP:-/home/user/work/shaders/shaderpackage019.sdp}
 SDP2DKSH=${SDP2DKSH:-/home/user/work/s6b/host/sdp2dksh}
+# The translator moves (S6b): its binary's sha256 goes into gpu.json (real019_translator). REAL019_DIR=<an earlier
+# sdp2dksh -o dir> pins a translator build so that renderer changes are compared on the same translated programs.
 REAL=()
-if [ -f "$SDP" ] && [ -x "$SDP2DKSH" ]; then mkdir -p "$W/sdp/out019"; "$SDP2DKSH" -o "$W/sdp/out019" "$SDP" >"$W/out/sdp2dksh.log" 2>&1 || true; REAL=(--real "$W/sdp/out019"); fi
+if [ -n "${REAL019_DIR:-}" ] && [ -f "$REAL019_DIR/index.tsv" ]; then
+	REAL=(--real "$REAL019_DIR")
+elif [ -f "$SDP" ] && [ -x "$SDP2DKSH" ]; then
+	mkdir -p "$W/sdp/out019"; "$SDP2DKSH" -o "$W/sdp/out019" "$SDP" >"$W/out/sdp2dksh.log" 2>&1 || true
+	sha256sum "$SDP2DKSH" | cut -d' ' -f1 > "$W/sdp/out019/translator.sha256"
+	REAL=(--real "$W/sdp/out019")
+fi
 python3 -I "$P/gpu_cost.py" "$W/b/n1/shaders" "$UAM" "$W/out/gpu.json" "${REAL[@]}"
 # per-pass counters: the synthetic mixes through the native front with CaptureBackend, and S6n's N0 capture
 for m in mix_lo mix_hi; do

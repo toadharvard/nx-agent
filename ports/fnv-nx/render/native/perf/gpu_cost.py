@@ -400,7 +400,10 @@ def main():
            "tex_bytes": TEX_BYTES, "fp16_rate": FP16_RATE, "families": MODEL, "permutations": PERMUTATIONS,
            "lit_permutation": LIT_PERMUTATION, "stand_in": STAND_IN, "early_z": EARLY_Z, "depth_buckets": DEPTH_BUCKETS,
            "epilogue_mix_hi": {f: {"at%d_fog%d" % k: n for k, n in v.items()} for f, v in epis["hi"].items()},
-           "real_map": REAL_MAP if real_tab else None}, "shaders": tab, "scenes": scenes}
+           "real_map": REAL_MAP if real_tab else None,
+           "real019_translator": (open(os.path.join(real, "translator.sha256")).read().strip()
+                                  if real and os.path.exists(os.path.join(real, "translator.sha256")) else None)},
+           "shaders": tab, "scenes": scenes}
     json.dump(res, open(out, "w"), indent=1)
     for k, v in scenes.items():
         print(k, ", ".join("%s@%.1f %.1f ms (%s)" % (s["config"], s["efficiency"], s["frame_ms"], s["bound"]) for s in v))
