@@ -11,8 +11,16 @@ once() {
     [ -e "$wt/.git" ] || continue
     name=$(basename "$wt"); name=${name#agent-}; name=${name:0:12}
     h=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || continue
-    git -C "$wt" merge-base --is-ancestor "$h" "$BR" 2>/dev/null && continue        # nothing unmerged
-    [ -n "$(git -C "$ROOT" log --oneline "$BR..$h" -- ports/fnv-nx 2>/dev/null | head -1)" ] || continue
+    # unmerged = commits of the worktree that touch the port and have no patch-equivalent commit on the integration
+    # branch (the orchestrator merges by cherry-pick, so ancestry alone says nothing)
+    if ! git -C "$ROOT" cherry "$BR" "$h" 2>/dev/null | grep -q '^+'; then
+      # nothing unmerged: retire an existing wip branch by pointing it at the integration head (try farms skip that)
+      if [ -f "$ROOT/.git/wip-$name" ] && [ "$(cat "$ROOT/.git/wip-$name")" != retired ]; then
+        git -C "$ROOT" push -q -f "$ART" "$(git -C "$ROOT" rev-parse "$BR"):refs/heads/wip/$name" 2>/dev/null &&
+          echo retired > "$ROOT/.git/wip-$name" && echo "$(date -u +%T) wip/$name retired"
+      fi
+      continue
+    fi
     [ "$(cat "$ROOT/.git/wip-$name" 2>/dev/null)" = "$h" ] && continue
     if git -C "$wt" push -q -f "$ART" "$h:refs/heads/wip/$name" 2>/dev/null; then
       echo "$h" > "$ROOT/.git/wip-$name"; echo "$(date -u +%T) wip/$name ${h:0:12}"

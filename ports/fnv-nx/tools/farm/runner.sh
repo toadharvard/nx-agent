@@ -50,7 +50,10 @@ publish_report() {  # publish_report <file>: commit it to reports/<NAME> of the 
 # the runner itself still come from the integration head; only the commit under test is the agent's.
 WATCH=${WATCH:-head}; TRY_K=${TRY_K:-1}; TRY_N=${TRY_N:-1}
 next_wip() {  # prints "<sha> <branch>" of a wip branch of this farm that has not been done yet, or nothing
+  git -C "$NX" fetch -q origin "$BRANCH" 2>/dev/null
   git -C "$ARTIFACTS" ls-remote origin 'refs/heads/wip/*' 2>/dev/null | while read -r sha ref; do
+    # retired wip branches point at an integration commit: nothing to try
+    git -C "$NX" merge-base --is-ancestor "$sha" "origin/$BRANCH" 2>/dev/null && continue
     b=${ref#refs/heads/}
     python3 -c 'import sys,zlib; sys.exit(0 if zlib.crc32(sys.argv[1].encode()) % int(sys.argv[2]) == int(sys.argv[3]) - 1 else 1)' "$b" "$TRY_N" "$TRY_K" || continue
     grep -qx "$sha" "$FARM_HOME/$NAME.done" 2>/dev/null && continue
