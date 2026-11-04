@@ -29,6 +29,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "toolchain", "tools"))
 import elf2nso  # noqa: E402
+sys.path.insert(0, HERE)
+import datapath  # noqa: E402
 
 from unicorn import UC_ARCH_ARM64, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, UC_PROT_EXEC, \
     UC_PROT_READ, UC_PROT_WRITE, Uc, UcError  # noqa: E402
@@ -160,9 +162,11 @@ def parse_milestones(path):
             continue
         ok = len(f) == 3 and re.fullmatch(r"[a-z][\w-]*", f[0]) and (
             f[1] == "call" and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
-            f[1] == "store" and re.fullmatch(r"\*?0x[0-9a-fA-F]+(\+(0x[0-9a-fA-F]+|\d+))?", f[2]))
+            f[1] == "store" and re.fullmatch(r"\*?0x[0-9a-fA-F]+(\+(0x[0-9a-fA-F]+|\d+))?", f[2]) or
+            f[1] == "data" and f[2] in datapath.DATA_MILESTONES)
         if not ok:
-            raise ValueError(f"{path}:{k}: <name> call <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N>")
+            raise ValueError(f"{path}:{k}: <name> call <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N> | "
+                             f"<name> data <{'|'.join(datapath.DATA_MILESTONES)}>")
         if f[1] == "call" and f[2].startswith("re:"):
             re.compile(f[2][3:])
         out.append(tuple(f))
@@ -235,7 +239,7 @@ class Thread:
 
 
 class Emu:
-    def __init__(self, nso_path, root, verbose=False, load_base=None):
+    def __init__(self, nso_path, root, verbose=False, load_base=None, game=None):
         with open(nso_path, "rb") as f:
             info = elf2nso.parse_nso(f.read())
         for s in info["segments"]:
@@ -287,6 +291,7 @@ class Emu:
         self.cur: Thread | None = None
         self.exit_code = None
         self.fds, self.dirs, self.next_dir = {}, {}, 1
+        self.dp = datapath.DataPath(root, game)
         self.ctx_switches, self.max_threads, self.addr_waits = 0, 1, 0
         uc.hook_add(UC_HOOK_CODE, self.on_code, begin=HOST_PAGE, end=HOST_PAGE + PAGE - 1)
         uc.hook_add(UC_HOOK_MEM_INVALID, self.on_bad)
@@ -302,10 +307,9 @@ class Emu:
             out += b
 
     def path(self, p):
-        p = self.rs(p)
-        if p.startswith("sdmc:"):
-            p = p[5:]
-        return os.path.join(self.root, p.lstrip("/"))
+        """the host path of the guest's SD path at p (datapath.DataPath: --root, the --game mounts, folded case)"""
+        self.last_sd = self.rs(p)
+        return self.dp.resolve(self.last_sd)
 
     def now_ns(self):
         return self.tick * 1_000_000_000 // TICK_FREQ
@@ -500,31 +504,37 @@ class Emu:
         return 3
 
     # v2 files
-    def fs(self, fn, *a):
+    def fs(self, fn, *a, call=None, sd=None):
         try:
             r = fn(*a)
             return 0 if r is None else r
         except OSError as e:
+            self.dp.fault(call or getattr(fn, "__name__", "fs"), sd, e.errno or 5)
             return neg(e.errno or 5)
 
     def h_fs_open(self, p, flags, *_):
         fl = (os.O_RDWR if flags & 3 == 3 else os.O_WRONLY if flags & 2 else os.O_RDONLY)
         fl |= (os.O_CREAT if flags & 4 else 0) | (os.O_EXCL if flags & 8 else 0) | (os.O_TRUNC if flags & 0x10 else 0)
         fl |= os.O_APPEND if flags & 0x20 else 0
-        path = self.path(p)
+        path, sd = self.path(p), self.last_sd
 
         def op():
             fd = os.open(path, fl, 0o666)
             self.fds[fd] = path
+            if fl & os.O_CREAT:
+                self.dp.changed()
+            self.dp.on_open(fd, sd, path)
             return fd
-        return self.fs(op)
+        return self.fs(op, call="open", sd=sd)
 
     def h_fs_read(self, fd, b, n, *_):
         def op():
+            off = os.lseek(fd, 0, os.SEEK_CUR)
             d = os.read(fd, n)
             self.uc.mem_write(b, d)
+            self.dp.on_read(fd, off, d)
             return len(d)
-        return self.fs(op)
+        return self.fs(op, call="read", sd=self.fds.get(fd))
 
     def h_fs_write(self, fd, b, n, *_):
         return self.fs(lambda: os.write(fd, bytes(self.uc.mem_read(b, n))))
@@ -533,8 +543,9 @@ class Emu:
         def op():
             d = os.pread(fd, n, off)
             self.uc.mem_write(b, d)
+            self.dp.on_read(fd, off, d)
             return len(d)
-        return self.fs(op)
+        return self.fs(op, call="pread", sd=self.fds.get(fd))
 
     def h_fs_pwrite(self, fd, b, n, off, *_):
         return self.fs(lambda: os.pwrite(fd, bytes(self.uc.mem_read(b, n)), off))
@@ -559,32 +570,43 @@ class Emu:
 
     def h_fs_close(self, fd, *_):
         self.fds.pop(fd, None)
-        return self.fs(lambda: os.close(fd))
+        self.dp.on_close(fd)
+        return self.fs(lambda: os.close(fd), call="close")
 
     def h_fs_stat(self, p, out, *_):
-        path = self.path(p)
-        return self.fs(lambda: self.put_stat(os.stat(path), out))
+        path, sd = self.path(p), self.last_sd
+        self.dp.touch(path)
+        return self.fs(lambda: self.put_stat(os.stat(path), out), call="stat", sd=sd)
+
+    def mutate(self, fn, call, sd):
+        r = self.fs(fn, call=call, sd=sd)
+        self.dp.changed()
+        return r
 
     def h_fs_mkdir(self, p, *_):
         path = self.path(p)
-        return self.fs(lambda: os.mkdir(path))
+        return self.mutate(lambda: os.mkdir(path), "mkdir", self.last_sd)
 
     def h_fs_rmdir(self, p, *_):
         path = self.path(p)
-        return self.fs(lambda: os.rmdir(path))
+        return self.mutate(lambda: os.rmdir(path), "rmdir", self.last_sd)
 
     def h_fs_remove(self, p, *_):
         path = self.path(p)
-        return self.fs(lambda: os.remove(path))
+        return self.mutate(lambda: os.remove(path), "remove", self.last_sd)
 
     def h_fs_rename(self, a, b, *_):
-        pa, pb = self.path(a), self.path(b)
-        return self.fs(lambda: os.replace(pa, pb))
+        pa, sa = self.path(a), self.last_sd
+        pb = self.path(b)
+        return self.mutate(lambda: os.replace(pa, pb), "rename", sa)
 
     def h_fs_dir_open(self, p, *_):
+        path, sd = self.path(p), self.last_sd
+        self.dp.touch(path)
         try:
-            names = sorted(os.listdir(self.path(p)))
-        except OSError:
+            names = sorted(os.listdir(path))
+        except OSError as e:
+            self.dp.fault("dir_open", sd, e.errno or 5)
             return 0
         d = self.next_dir
         self.next_dir += 1
@@ -1406,7 +1428,9 @@ class Emu:
     # 're:<regex>' over the ELF's code symbols, for native code such as the D3D9 device); 'store A' when a non-zero
     # word is written to the data-window address A; 'store *A+N' when one is written to (the pointer stored at A)+N.
     def install_milestones(self, path):
-        self.miles, self.mile_order = {}, []
+        self.miles, self.mile_order, self.mile_data = {}, [], {}
+        if getattr(self, "dp", None):   # tests may build an Emu without __init__
+            self.dp.notify = self.on_mile_data
         for name, kind, target in parse_milestones(path):
             if name not in self.mile_order:
                 self.mile_order.append(name)
@@ -1420,6 +1444,8 @@ class Emu:
                     self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
                 if not addrs:
                     print(f"   milestones: {name}: {target} is not in the link")
+            elif kind == "data":
+                self.mile_data.setdefault(target, []).append(name)
             else:
                 m = re.fullmatch(r"(\*?)(0x[0-9a-fA-F]+)(?:\+(0x[0-9a-fA-F]+|\d+))?", target)
                 addr, off = int(m.group(2), 16), int(m.group(3) or "0", 0)
@@ -1442,6 +1468,10 @@ class Emu:
                             "seq": len(self.miles) + 1, "host_calls": self.calls,
                             "thread": self.cur.tid if self.cur else 1}
         print(f"   milestone: {name} ({how} at {where}, caller {self.miles[name]['caller']})")
+
+    def on_mile_data(self, target, how):
+        for name in self.mile_data.get(target, ()):
+            self.mile_hit(name, f"data {how}")
 
     def on_mile_call(self, uc, addr, size, name):
         if name not in self.miles:
@@ -1521,6 +1551,8 @@ class Emu:
             "exe_vtables": getattr(self, "exe_vt_stats", None),
             "vslot_past_end_calls": sum(getattr(self, "vt_past", {}).values()),
             "peak_heap_bytes": self.heap_high_water(),
+            "data": self.dp.counts(),
+            "file_faults": [dict(call=c, errno=e, path=p, n=n) for (c, e, p), n in sorted(self.dp.faults.items())][:200],
         }
 
     def heap_high_water(self):
@@ -1731,6 +1763,8 @@ def main(argv):
     ap.add_argument("--expect", default="fnvnx guest: OK")
     ap.add_argument("--root", help="host directory for sdmc:/ (default: a fresh temp dir)")
     ap.add_argument("--file", action="append", default=[], help="NAME=PATH: copy PATH to sdmc:/NAME first")
+    ap.add_argument("--game", metavar="DIR", help="the game install (FalloutNV.exe, Data/), mounted at sdmc:/switch/fnv "
+                    "and sdmc:/fnvnx/game without copying (default <root>/fnvnx/game; tests/s5/datapath.py)")
     ap.add_argument("--elf", help="guest ELF for symbolized crash traces")
     ap.add_argument("--load-base", type=lambda v: int(v, 0), help="where to map a relocatable guest")
     ap.add_argument("--skip-faulting-init", action="store_true",
@@ -1745,7 +1779,7 @@ def main(argv):
     ap.add_argument("--addrmap", metavar="TSV", help="the link's out/addrmap.tsv (for exe-vtables)")
     ap.add_argument("--exe-vtables", action="store_true",
                     help="fill the trap slots of native vtables from the exe's vftables (needs --elf, --addrmap and "
-                    "the exe as --file switch/fnv/FalloutNV.exe=PATH); also the line 'exe-vtables' of --stub-faults")
+                    "the exe as --file switch/fnv/FalloutNV.exe=PATH or in --game); also the line 'exe-vtables' of --stub-faults")
     ap.add_argument("--summary-json", metavar="FILE", help="write the machine-readable boot summary here")
     ap.add_argument("--inject", action="append", default=[], metavar="OBJ",
                     help="map an ILP32 object (a guest-side stand-in) after the guest; trap stubs of the functions it "
@@ -1758,12 +1792,13 @@ def main(argv):
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
     root = a.root or tempfile.mkdtemp(prefix="fnvnx-emu-")
+    sd = datapath.DataPath(root, a.game)
     for spec in a.file:
         name, _, src = spec.partition("=")
-        dst = os.path.join(root, name.lstrip("/"))
+        dst = sd.resolve("/" + name.lstrip("/"))   # the guest's view: fnvnx/game and switch/fnv are the game dir
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
-    emu = Emu(a.nso, root, load_base=a.load_base)
+    emu = Emu(a.nso, root, load_base=a.load_base, game=a.game)
     emu.budget = a.budget
     emu.core3, emu.boost_loading = a.core3, not a.no_boost
     if a.elf:
@@ -1774,8 +1809,9 @@ def main(argv):
             emu.install_fault_stubs(a.stub_faults)
         if a.exe_vtables or a.stub_faults and "exe-vtables" in fault_table_options(a.stub_faults):
             exe = [src for name, _, src in (f.partition("=") for f in a.file) if name.lower().endswith(".exe")]
+            exe += [p for p in [emu.dp.resolve("/switch/fnv/FalloutNV.exe")] if not exe and os.path.isfile(p)]
             exe += [p for p in (os.path.join(root, d, "FalloutNV.exe") for d in ("switch/fnv", "fnvnx/game"))
-                    if os.path.exists(p)]   # a game install mounted with --root
+                    if not exe and os.path.exists(p)]   # a game install mounted with --root
             if not a.addrmap or not exe:
                 print("   exe-vtables: off (needs --addrmap and the exe as --file)")
             else:
@@ -1834,7 +1870,8 @@ def main(argv):
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
         for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
-                     + emu.milestone_lines() + emu.vt_past_lines() + emu.watch_lines()):
+                     + emu.milestone_lines() + emu.dp.lines()
+                     + emu.vt_past_lines() + emu.watch_lines()):
             print(line)
         print(f"STOPPED: {why}")
         write_summary(f"STOPPED: {why}")
@@ -1857,7 +1894,8 @@ def main(argv):
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
     for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
-                 + emu.milestone_lines() + emu.vt_past_lines() + emu.watch_lines()):
+                 + emu.milestone_lines() + emu.dp.lines()
+                 + emu.vt_past_lines() + emu.watch_lines()):
         print(line)
     ok = rc == 0 and a.expect in out and tp_ok
     write_summary(f"guest returned {rc:#x}", rc)

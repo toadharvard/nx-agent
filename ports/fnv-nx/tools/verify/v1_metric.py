@@ -8,7 +8,8 @@ metric = unverified + open
               ledger rows with verdict `unverified`
   open        ledger rows with verdict refuted or partial (each row is one refutation case with a failing test)
 A commit makes no claim when it only touches the journal (JOURNAL.md, journal/inbox/) or V1's own files
-(tests/v1/, tools/verify/): V1 cannot verify itself. The owner's /CLAUDE.md holds rules, not claims. The ledger is checked too: every refuted/partial/fixed row
+(tests/v1/, tools/verify/): V1 cannot verify itself. The owner's /CLAUDE.md and the orchestrator's decision docs (ARCHITECTURE.md decisions, STREAM_START.md)
+hold rules, not claims. The ledger is checked too: every refuted/partial/fixed row
 names a test that exists, and a `fixed` row names its fix commit. A broken ledger is an error (exit 2), not a
 lower number.
 """
@@ -22,14 +23,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, '..', '..'))
 LEDGER = os.path.join(PORT, 'tests', 'v1', 'ledger.tsv')
 BASELINE = 'b6585b8'          # the integration head of V1's round 2 (v1-001); every later merge is counted
-EXEMPT = ('CLAUDE.md', 'ports/fnv-nx/JOURNAL.md', 'ports/fnv-nx/journal/', 'ports/fnv-nx/tests/v1/', 'ports/fnv-nx/tools/verify/')
+EXEMPT = ('CLAUDE.md', 'ports/fnv-nx/docs/ARCHITECTURE.md', 'ports/fnv-nx/docs/STREAM_START.md', 'ports/fnv-nx/JOURNAL.md', 'ports/fnv-nx/journal/', 'ports/fnv-nx/tests/v1/', 'ports/fnv-nx/tools/verify/')
 VERDICTS = {'confirmed', 'refuted', 'partial', 'fixed', 'unverified'}
 # J-0150 split (orchestrator): V2 (claude/fnv-v2) verifies the compile, rules and ABI streams and the link streams.
 # Their commits and ledger rows are out of V1's scope: listed as handed over, never counted. V1 keeps S13, S13b,
 # render/S6*/P6n/S16, S15-*, P0, R0/gates, S5-* and NX1.
-V2_STREAMS = ('S1', 'S1-STL', 'S1-refs', 'S1-fuzzA', 'S1-fuzzB', 'S1b', 'S1-compile', 'S1-crt', 'S11', 'S12',
+V2_STREAMS = ('V2', 'S1', 'S1-STL', 'S1-refs', 'S1-fuzzA', 'S1-fuzzB', 'S1b', 'S1-compile', 'S1-crt', 'S11', 'S12',
               'S12-ordering', 'S2c', 'S2c-vt', 'S2c-abi', 'S2d', 'S4', 'S4-runtime')
-V2_ADOPT = ('fnv-s1', 'fnv-s11', 'fnv-s12', 'fnv-s2c', 'fnv-s2d', 'fnv-s4')
+V2_ADOPT = ('fnv-s1', 'fnv-s11', 'fnv-s12', 'fnv-s2c', 'fnv-s2d', 'fnv-s4', 'fnv-v2')   # fnv-v2: the other verifier's own tests
 
 
 def v2_scope(subject=None, stream=None):

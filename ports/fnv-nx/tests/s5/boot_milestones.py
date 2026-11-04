@@ -15,7 +15,8 @@ import argparse
 import json
 import sys
 
-KEYS = ("winmain", "renderer-init", "main-menu", "first-frame", "first-cell")
+KEYS = ("winmain", "ini-read", "renderer-init", "archive-list", "bsa-opened", "esm-header", "masters-loaded",
+        "main-menu", "first-frame", "first-cell")
 
 
 def flat(summary):

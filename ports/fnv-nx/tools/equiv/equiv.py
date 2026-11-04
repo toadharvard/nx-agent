@@ -66,6 +66,7 @@ CLASSES = {
     'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
     'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
     'DBUG1': 'neutral',         # decomp-bug fixes per site (S1-crt 0x00b01510: identical)
+    'MT1': 'platform',          # gated Switch behaviour changes (S15-threads mt_cull), behind FNVNX_MT1_ON; no MSVC parity
     'XC1': 'platform',          # dynamic initializers -> extern + __fnvnx_dyninit_<addr> (S10 runner order)
     'VA1': 'platform',          # MSVC char* va_list -> real va_list
     'FALL1': 'platform',        # __builtin_trap() at fall-off ends (GCC only)
@@ -122,6 +123,8 @@ CLASSES = {
     'FINL1': 'neutral',         # __forceinline dropped from a body-less declaration the unit never defines (an ordinary call)
     'EBO2': 'layout',          # FNVNX_EBO2 (empty under MSVC): an empty base of a class introducing a vfptr goes after the vptr
     'REC1': 'neutral',         # D20: reconstructed bodies from fnv-nx-build recon/ appended (new functions; nothing else changes)
+    'HUNIT1': 'neutral',       # explicit instantiations of the template members a header unit's recipe lists (MSVC emitted them)
+    'XC2': 'platform',         # XC1's extern + __fnvnx_dyninit_<addr> form for a hand-written dynamic initializer (site table)
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
