@@ -814,5 +814,8 @@ Dense NEON code has a higher CPI than the scalar code GCC spreads over both FP p
 | culling worker + classification | 224-330 instructions at CPI ~1.05 (worker 1.04, classification 1.05) | 52 / 148 | ~290 -> 100 | kept |
 | UpdateWorldLoc | compose > 100 instructions at CPI 1.35 | 12 / 60 | | kept |
 
-Dropped overrides keep their sources and tests (for an A57-aware rewrite), but lose their overrides.tsv rows. From
+The model's error bar is at least 5.7 % (V1 P0-E1/E2). Each before/after above prices both sides with the same
+model, so a shared bias cancels. Still, Slerp (-4 %) and FromRotationMatrix (-3 %) are within that bar: they count as
+ties, kept because they run fewer instructions and are not worse in cycles. The real cycle gains are the cull
+(~290 -> 100) and UpdateWorldLoc. Dropped overrides keep their sources and tests (for an A57-aware rewrite), but lose their overrides.tsv rows. From
 here on an override is kept only if its mid cycles drop, as well as its instructions.
