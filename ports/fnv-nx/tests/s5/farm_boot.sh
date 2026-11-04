@@ -35,6 +35,9 @@
 #                   farm boots it)
 #   PY              the Python with unicorn (default python3)
 #   VORBIS          the libvorbis prefix for build.sh; JOBS, SSE2NEON, DEVKITPRO passed to build.sh
+#   FARM_NATIVE_RENDER  a dir with tests/s5/native_render_inject.sh's outputs (nxrender_inject.o, libnxgl.so): every
+#                   boot runs on the native renderer's engine path (tests/s5/native_render.py --native-render --gpu,
+#                   the stand-in for a LINK_OVERRIDES=render link), its frames as PNG in <out dir>/frames_<boot>/
 #   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 6000000000)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
 set -euo pipefail
@@ -125,12 +128,16 @@ fi
 # --- boots ----------------------------------------------------------------------------------------------------------
 ADDRMAP=""
 [ -f "$LINK/out/addrmap.tsv" ] && ADDRMAP=$LINK/out/addrmap.tsv
+EMU=("$HERE/emu_guest.py"); NR=${FARM_NATIVE_RENDER:-}
+[ -n "$NR" ] && EMU=("$HERE/native_render.py" --native-render "$NR/nxrender_inject.o" --gpu "$NR/libnxgl.so")
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift
   log "boot $tag"
   local rc=0 root=$OUT/sdmc-$tag
+  local NR_ARGS=()
+  [ -n "$NR" ] && NR_ARGS=(--frames "$OUT/frames_$tag")
   rm -rf "$root"; mkdir -p "$root"
-  timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
+  timeout "$EMU_TIMEOUT" nice "$PY" -I "${EMU[@]}" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" "${NR_ARGS[@]}" \
     --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE"} \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
@@ -173,6 +180,7 @@ done
     grep -h "^STOPPED\|^deadlock" "$L" || echo "(no stop line: timeout or normal end, see emu_$tag.log)"
     grep -h "^   \[fnvnx\] \(MessageBox\|ExitProcess\)" "$L" | sort -u | head -5 || true
     grep -h "^milestone	" "$L" | cut -f2-4 | tr '\t' ' ' | sed 's/^/game milestone /' || true
+    grep -h "^native-render	\|^gpu	\|^gpu-frame	\|native-render: \|fnvnx native renderer: " "$L" | tr '\t' ' ' | head -20 || true
     if [ -f "$OUT/frontier_$tag.txt" ]; then echo; echo "### frontier ($tag boot)"; head -12 "$OUT/frontier_$tag.txt"; fi
   done
 } > "$SUM"
