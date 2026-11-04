@@ -472,6 +472,16 @@ known: the trishape/indexed/unskinned common path, the value filters at mix_hi r
 2.4 texture stages, 8 hardware stages for the texcoord states, 2.5 predefined + 1 other constant-map entries per
 map, 2 state-group entries per pass). Range: redundancy 90 % / 60 % and 1 / 4 group entries.
 
+Loops nested in one function multiply: loops are taken innermost first, and an outer iteration costs its blocks
+plus the extra trips already put on the inner headers (V1's refutation L1: a 4 x 4 nest had counted 39 of its 66
+instructions). `tests/s6n/test_engine_path_loops.py` checks exact counts on hand-written AArch64 (4 x 4, 2 x 3 x 4,
+two sibling inner loops, a triangular nest at its mean trip count, a conditional block inside the inner body).
+The re-count after the fix (2026-11-04) is identical to the first one: on the counted path no function nests a
+loop with more than one trip inside another (the render-mesh pass loop's inner loops run once; the
+constant-map walk's two loops are siblings), and loops in different functions already multiplied through the
+callee's inclusive count. Only the informational `set_sampler_state` role moved (16.8 instead of 18.0 per call),
+because S6n's overrides row now names the real sampler-state slot.
+
 | per draw (AArch64 instructions, mix_hi) | value |
 |---|---|
 | **expectation (gate)** | **2,303** (range 2,280 - 2,355), 3.76 µs at IPC 0.6 / 1.02 GHz, 1.28 µs at IPC 1.0 / 1.785 GHz |
@@ -501,7 +511,7 @@ reference and are in no budget row. On the native path only the kept engine part
 settles the value of the native renderer on the CPU side: it removes 12.9 ms per mix_hi frame of engine code, not only the driver.
 
 **Limits.** A static count, not a trace: branch probabilities are rules, and 69 indirect calls stay unresolved
-(geometry/skin getters, the strip path), counting only their call; the BSShader virtuals use the lit class;
+(70 on the re-count: geometry/skin getters, the strip path), counting only their call; the BSShader virtuals use the lit class;
 per-frame engine work (BeginFrame/EndFrame, target groups, the batch sort) is not in it; the class code that fills
 most shader constants is counted only for the lit class. The slot-48 NiDX9RenderState function (overrides row
 "SetSamplerState") called the device's SetTextureStageState: fixed this round (S6n "overrides - slots 48/49 are texture stage states"; slots 48/49 are NiD3DRenderState's
