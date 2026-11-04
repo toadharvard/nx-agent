@@ -3,8 +3,8 @@
  "inputs": {
   "model": "fnvnx-budget-model/1",
   "scene": "exterior, Mojave wasteland, ~2,500 draws (RENDER_NATIVE draw counts), native renderer",
-  "frameprof": false,
-  "render": false
+  "frameprof": true,
+  "render": true
  },
  "assumptions": [
   {
@@ -169,15 +169,28 @@
  },
  "items": [
   {
-   "id": "scene_update_cull",
-   "name": "scene graph update (NiNode downward pass, bounds, controllers) + culling (NiCullingProcess, multibounds, occlusion)",
+   "id": "scene_update",
+   "name": "scene graph update (NiNode downward pass: world transforms, bounds, controllers)",
    "role": "main",
    "minsn": [
-    4,
-    9
+    2,
+    4.5
    ],
    "basis": "E",
-   "phase": "scene graph + render"
+   "phase": "scene graph",
+   "subsystem": "scene-graph update"
+  },
+  {
+   "id": "cull",
+   "name": "culling (NiCullingProcess, multibounds, occlusion; main, shadow and reflection passes)",
+   "role": "main",
+   "minsn": [
+    2,
+    4.5
+   ],
+   "basis": "E",
+   "phase": "render",
+   "subsystem": "cull"
   },
   {
    "id": "render_accumulation",
@@ -188,41 +201,44 @@
     4
    ],
    "basis": "E",
-   "phase": "render"
+   "phase": "render",
+   "subsystem": "render accumulation"
   },
   {
    "id": "renderer_main",
    "name": "native renderer, main-thread side per draw (state keys, packets) x draws",
    "role": "main",
    "minsn": [
-    0.75,
-    2.5
+    2.342621,
+    5.639252
    ],
-   "basis": "E",
+   "basis": "M",
    "per_draw_insn": [
     300,
     1000
    ],
    "draws": 2500,
    "phase": "render",
-   "source": "render"
+   "source": "render",
+   "subsystem": "renderer (main side)"
   },
   {
    "id": "renderer_worker",
    "name": "native renderer, submission worker (deko3d command building) x draws",
    "role": "render-worker",
    "minsn": [
-    0.75,
-    3
+    3.358724,
+    5.425003
    ],
-   "basis": "E",
+   "basis": "M",
    "per_draw_insn": [
     300,
     1200
    ],
    "draws": 2500,
    "phase": "render",
-   "source": "render"
+   "source": "render",
+   "subsystem": "renderer (submission worker)"
   },
   {
    "id": "animation",
@@ -233,7 +249,8 @@
     4
    ],
    "basis": "E",
-   "phase": "scene graph"
+   "phase": "scene graph",
+   "subsystem": "animation"
   },
   {
    "id": "havok",
@@ -244,7 +261,8 @@
     5
    ],
    "basis": "E",
-   "phase": "havok"
+   "phase": "havok",
+   "subsystem": "havok"
   },
   {
    "id": "game_logic",
@@ -255,7 +273,8 @@
     3
    ],
    "basis": "E",
-   "phase": "input, menus, scripts"
+   "phase": "input, menus, scripts",
+   "subsystem": "game logic, UI, scripts"
   },
   {
    "id": "ai_process_lists",
@@ -270,7 +289,8 @@
    "split": {
     "ai-linear-1": 0.5,
     "ai-linear-2": 0.5
-   }
+   },
+   "subsystem": "ai"
   },
   {
    "id": "background",
@@ -281,7 +301,21 @@
     3
    ],
    "basis": "E",
-   "phase": "background"
+   "phase": "background",
+   "subsystem": "background (tasklets, IO, audio)"
+  },
+  {
+   "id": "interlocked_barriers",
+   "name": "the trailing dmb ish of every Interlocked* (S12, ORDERING.md): the main thread's refcount traffic (NiRefObject/NiPointer), task and stage counters",
+   "role": "main",
+   "minsn": [
+    0.25,
+    3.2
+   ],
+   "basis": "E",
+   "phase": "all",
+   "subsystem": "interlocked barriers",
+   "note": "instruction-equivalents (stall cycles x IPC 0.8): 20k-100k operations per frame on main x 12-32 (15-40 cycles of a dmb ish with stores in flight on the A57) + up to 1 left after the inlining (fnvnx_win32.h saves 1-2 instructions and the call/return per operation, costs +8.8 static instructions per site [M]). S12's estimate (100k x 30 cycles = 2.9 ms at 1.02 GHz) is the hi end. Boot path [M]: 3 Interlocked calls before WinMain (frameprof, owner's exe); no frame yet. B9 measures the per-operation cost on device."
   },
   {
    "id": "sync",
@@ -295,7 +329,52 @@
    "basis": "E"
   }
  ],
- "measured": {},
+ "measured": {
+  "frameprof": {
+   "files": 1,
+   "frames": 0,
+   "boot": [
+    {
+     "label": "until __fnv_0086a850",
+     "minsn": 242.572,
+     "threads": {
+      "main": 242.572
+     }
+    },
+    {
+     "label": "until stop (emulation fault at pc=0x5c17c5c thread 1: Unhandled CPU exception (UC_ERR_EXCEPT)",
+     "minsn": 0.001,
+     "threads": {
+      "main": 0.001
+     }
+    }
+   ],
+   "used": false
+  },
+  "render": {
+   "scene": "P6n synthetic mix (mix_lo 1490 .. mix_hi 3710 draws)",
+   "draws": 3710,
+   "frame_minsn": {
+    "main": [
+     2.342621,
+     5.639252
+    ],
+    "worker": [
+     3.358724,
+     5.425003
+    ]
+   },
+   "gpu_ms": {
+    "docked_720p": [
+     7.05,
+     12.38
+    ]
+   },
+   "basis": "M",
+   "gpu_basis": "E",
+   "source_commit": "e02c871a80ea1b970ae9c30bd279c4a4797adae4"
+  }
+ },
  "scenarios": [
   {
    "id": "placed",
@@ -304,35 +383,37 @@
    "core3": false,
    "cores": {
     "0": {
-     "lo": 11.35,
-     "mid": 19.675,
-     "hi": 28.1,
+     "lo": 13.193,
+     "mid": 23.766,
+     "hi": 34.439,
      "items": {
       "animation": 3.0,
+      "cull": 3.25,
       "game_logic": 2.0,
       "havok": 3.5,
+      "interlocked_barriers": 1.725,
       "render_accumulation": 2.75,
-      "renderer_main": 1.625,
-      "scene_update_cull": 6.5,
+      "renderer_main": 3.991,
+      "scene_update": 3.25,
       "sync": 0.3
      }
     },
     "1": {
-     "lo": 2.4,
-     "mid": 4.675,
-     "hi": 7.0,
+     "lo": 3.659,
+     "mid": 5.942,
+     "hi": 8.225,
      "items": {
-      "ai_process_lists": 1.8,
+      "ai_process_lists": 0.55,
       "background": 1.0,
-      "renderer_worker": 1.875
+      "renderer_worker": 4.392
      }
     },
     "2": {
-     "lo": 2.35,
-     "mid": 4.7,
-     "hi": 7.0,
+     "lo": 3.7,
+     "mid": 5.95,
+     "hi": 8.2,
      "items": {
-      "ai_process_lists": 3.7,
+      "ai_process_lists": 4.95,
       "background": 1.0
      }
     }
@@ -341,36 +422,40 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 11.13,
-       "mid": 24.11,
-       "hi": 45.92
+       "lo": 12.93,
+       "mid": 29.12,
+       "hi": 56.27
       },
       "1": {
-       "lo": 2.35,
-       "mid": 5.73,
-       "hi": 11.44
+       "lo": 3.59,
+       "mid": 7.28,
+       "hi": 13.44
       },
       "2": {
-       "lo": 2.3,
-       "mid": 5.76,
-       "hi": 11.44
+       "lo": 3.63,
+       "mid": 7.29,
+       "hi": 13.4
       }
      },
      "cpu_ms": {
-      "lo": 11.13,
-      "mid": 24.11,
-      "hi": 45.92
+      "lo": 12.93,
+      "mid": 29.12,
+      "hi": 56.27
      },
-     "gpu_ms": null,
+     "gpu_ms": {
+      "case": "docked_720p",
+      "lo": 7.05,
+      "hi": 12.38
+     },
      "frame_ms": {
-      "lo": 11.13,
-      "mid": 24.11,
-      "hi": 45.92
+      "lo": 12.93,
+      "mid": 29.12,
+      "hi": 56.27
      },
      "worst_frame_ms": {
-      "lo": 12.24,
-      "mid": 30.14,
-      "hi": 68.88
+      "lo": 14.22,
+      "mid": 36.4,
+      "hi": 84.41
      },
      "critical_core": 0,
      "verdicts": {
@@ -378,41 +463,45 @@
       "pass_45": "uncertain",
       "stretch_60": "uncertain"
      },
-     "level": "pass_30"
+     "level": "fail"
     },
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 6.36,
-       "mid": 13.78,
-       "hi": 26.24
+       "lo": 7.39,
+       "mid": 16.64,
+       "hi": 32.16
       },
       "1": {
-       "lo": 1.34,
-       "mid": 3.27,
-       "hi": 6.54
+       "lo": 2.05,
+       "mid": 4.16,
+       "hi": 7.68
       },
       "2": {
-       "lo": 1.32,
-       "mid": 3.29,
-       "hi": 6.54
+       "lo": 2.07,
+       "mid": 4.17,
+       "hi": 7.66
       }
      },
      "cpu_ms": {
-      "lo": 6.36,
-      "mid": 13.78,
-      "hi": 26.24
+      "lo": 7.39,
+      "mid": 16.64,
+      "hi": 32.16
      },
-     "gpu_ms": null,
+     "gpu_ms": {
+      "case": "docked_720p",
+      "lo": 7.05,
+      "hi": 12.38
+     },
      "frame_ms": {
-      "lo": 6.36,
-      "mid": 13.78,
-      "hi": 26.24
+      "lo": 7.39,
+      "mid": 16.64,
+      "hi": 32.16
      },
      "worst_frame_ms": {
-      "lo": 7.0,
-      "mid": 17.22,
-      "hi": 39.36
+      "lo": 8.13,
+      "mid": 20.8,
+      "hi": 48.24
      },
      "critical_core": 0,
      "verdicts": {
@@ -424,9 +513,9 @@
     }
    },
    "main_minsn": {
-    "lo": 11.35,
-    "mid": 19.675,
-    "hi": 28.1
+    "lo": 13.193,
+    "mid": 23.766,
+    "hi": 34.439
    }
   },
   {
@@ -440,44 +529,46 @@
    "core3": false,
    "cores": {
     "0": {
-     "lo": 6.1,
-     "mid": 12.475,
-     "hi": 20.2,
+     "lo": 8.543,
+     "mid": 17.216,
+     "hi": 26.989,
      "items": {
       "animation": 2.1,
+      "cull": 0.65,
       "game_logic": 2.0,
       "havok": 2.1,
+      "interlocked_barriers": 1.725,
       "render_accumulation": 1.1,
-      "renderer_main": 1.625,
-      "scene_update_cull": 3.25,
+      "renderer_main": 3.991,
+      "scene_update": 3.25,
       "sync": 0.3
      }
     },
     "1": {
-     "lo": 5.138,
-     "mid": 8.935,
-     "hi": 12.643,
+     "lo": 6.106,
+     "mid": 9.795,
+     "hi": 13.521,
      "items": {
-      "ai_process_lists": 1.8,
-      "animation>threaded_anim": 0.555,
+      "ai_process_lists": 0.55,
+      "animation>threaded_anim": 0.504,
       "background": 1.0,
-      "havok>havok_workers": 0.799,
-      "render_accumulation>mt_cull": 0.995,
-      "renderer_worker": 1.875,
-      "scene_update_cull>mt_cull": 1.912
+      "cull>mt_cull": 1.554,
+      "havok>havok_workers": 0.848,
+      "render_accumulation>mt_cull": 0.946,
+      "renderer_worker": 4.392
      }
     },
     "2": {
-     "lo": 5.138,
-     "mid": 8.91,
-     "hi": 12.643,
+     "lo": 6.147,
+     "mid": 9.803,
+     "hi": 13.546,
      "items": {
-      "ai_process_lists": 3.7,
-      "animation>threaded_anim": 0.504,
+      "ai_process_lists": 4.95,
+      "animation>threaded_anim": 0.555,
       "background": 1.0,
-      "havok>havok_workers": 0.848,
-      "render_accumulation>mt_cull": 0.946,
-      "scene_update_cull>mt_cull": 1.912
+      "cull>mt_cull": 1.504,
+      "havok>havok_workers": 0.799,
+      "render_accumulation>mt_cull": 0.995
      }
     }
    },
@@ -485,36 +576,86 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 5.98,
-       "mid": 15.29,
-       "hi": 33.01
+       "lo": 8.38,
+       "mid": 21.1,
+       "hi": 44.1
       },
       "1": {
-       "lo": 5.04,
-       "mid": 10.95,
-       "hi": 20.66
+       "lo": 5.99,
+       "mid": 12.0,
+       "hi": 22.09
       },
       "2": {
-       "lo": 5.04,
-       "mid": 10.92,
-       "hi": 20.66
+       "lo": 6.03,
+       "mid": 12.01,
+       "hi": 22.13
       }
      },
      "cpu_ms": {
-      "lo": 5.98,
-      "mid": 15.29,
-      "hi": 33.01
+      "lo": 8.38,
+      "mid": 21.1,
+      "hi": 44.1
      },
-     "gpu_ms": null,
+     "gpu_ms": {
+      "case": "docked_720p",
+      "lo": 7.05,
+      "hi": 12.38
+     },
      "frame_ms": {
-      "lo": 5.98,
-      "mid": 15.29,
-      "hi": 33.01
+      "lo": 8.38,
+      "mid": 21.1,
+      "hi": 44.1
      },
      "worst_frame_ms": {
-      "lo": 6.58,
-      "mid": 19.11,
-      "hi": 49.52
+      "lo": 9.22,
+      "mid": 26.38,
+      "hi": 66.15
+     },
+     "critical_core": 0,
+     "verdicts": {
+      "fail_below_30": "uncertain",
+      "pass_45": "uncertain",
+      "stretch_60": "uncertain"
+     },
+     "level": "pass_30"
+    },
+    "1785": {
+     "core_ms": {
+      "0": {
+       "lo": 4.79,
+       "mid": 12.06,
+       "hi": 25.2
+      },
+      "1": {
+       "lo": 3.42,
+       "mid": 6.86,
+       "hi": 12.63
+      },
+      "2": {
+       "lo": 3.44,
+       "mid": 6.86,
+       "hi": 12.65
+      }
+     },
+     "cpu_ms": {
+      "lo": 4.79,
+      "mid": 12.06,
+      "hi": 25.2
+     },
+     "gpu_ms": {
+      "case": "docked_720p",
+      "lo": 7.05,
+      "hi": 12.38
+     },
+     "frame_ms": {
+      "lo": 7.05,
+      "mid": 12.06,
+      "hi": 25.2
+     },
+     "worst_frame_ms": {
+      "lo": 7.76,
+      "mid": 15.08,
+      "hi": 37.8
      },
      "critical_core": 0,
      "verdicts": {
@@ -523,40 +664,155 @@
       "stretch_60": "uncertain"
      },
      "level": "stretch_60"
+    }
+   },
+   "main_minsn": {
+    "lo": 8.543,
+    "mid": 17.216,
+    "hi": 26.989
+   }
+  },
+  {
+   "id": "plan45b",
+   "name": "plan45 + the next three queue rows: render F2-F4, refcount barriers relaxed, NEON math",
+   "levers": [
+    "mt_cull",
+    "havok_workers",
+    "threaded_anim",
+    "render_f2f4",
+    "barrier_relax",
+    "neon_math"
+   ],
+   "core3": false,
+   "cores": {
+    "0": {
+     "lo": 6.651,
+     "mid": 14.145,
+     "hi": 23.529,
+     "items": {
+      "animation": 1.732,
+      "cull": 0.65,
+      "game_logic": 2.0,
+      "havok": 2.1,
+      "interlocked_barriers": 0.906,
+      "render_accumulation": 1.1,
+      "renderer_main": 2.594,
+      "scene_update": 2.763,
+      "sync": 0.3
+     }
+    },
+    "1": {
+     "lo": 5.462,
+     "mid": 9.127,
+     "hi": 12.986,
+     "items": {
+      "ai_process_lists": 1.2,
+      "animation>threaded_anim": 0.504,
+      "background": 1.0,
+      "cull>mt_cull": 1.554,
+      "havok>havok_workers": 0.848,
+      "render_accumulation>mt_cull": 0.946,
+      "renderer_worker": 3.074
+     }
+    },
+    "2": {
+     "lo": 5.448,
+     "mid": 9.153,
+     "hi": 12.996,
+     "items": {
+      "ai_process_lists": 4.3,
+      "animation>threaded_anim": 0.555,
+      "background": 1.0,
+      "cull>mt_cull": 1.504,
+      "havok>havok_workers": 0.799,
+      "render_accumulation>mt_cull": 0.995
+     }
+    }
+   },
+   "results": {
+    "1020": {
+     "core_ms": {
+      "0": {
+       "lo": 6.52,
+       "mid": 17.33,
+       "hi": 38.45
+      },
+      "1": {
+       "lo": 5.36,
+       "mid": 11.19,
+       "hi": 21.22
+      },
+      "2": {
+       "lo": 5.34,
+       "mid": 11.22,
+       "hi": 21.24
+      }
+     },
+     "cpu_ms": {
+      "lo": 6.52,
+      "mid": 17.33,
+      "hi": 38.45
+     },
+     "gpu_ms": {
+      "case": "docked_720p",
+      "lo": 7.05,
+      "hi": 12.38
+     },
+     "frame_ms": {
+      "lo": 7.05,
+      "mid": 17.33,
+      "hi": 38.45
+     },
+     "worst_frame_ms": {
+      "lo": 7.76,
+      "mid": 21.66,
+      "hi": 57.68
+     },
+     "critical_core": 0,
+     "verdicts": {
+      "fail_below_30": "uncertain",
+      "pass_45": "uncertain",
+      "stretch_60": "uncertain"
+     },
+     "level": "pass_45"
     },
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 3.42,
-       "mid": 8.74,
-       "hi": 18.86
+       "lo": 3.73,
+       "mid": 9.91,
+       "hi": 21.97
       },
       "1": {
-       "lo": 2.88,
-       "mid": 6.26,
-       "hi": 11.8
+       "lo": 3.06,
+       "mid": 6.39,
+       "hi": 12.13
       },
       "2": {
-       "lo": 2.88,
-       "mid": 6.24,
-       "hi": 11.8
+       "lo": 3.05,
+       "mid": 6.41,
+       "hi": 12.13
       }
      },
      "cpu_ms": {
-      "lo": 3.42,
-      "mid": 8.74,
-      "hi": 18.86
+      "lo": 3.73,
+      "mid": 9.91,
+      "hi": 21.97
      },
-     "gpu_ms": null,
+     "gpu_ms": {
+      "case": "docked_720p",
+      "lo": 7.05,
+      "hi": 12.38
+     },
      "frame_ms": {
-      "lo": 3.42,
-      "mid": 8.74,
-      "hi": 18.86
+      "lo": 7.05,
+      "mid": 9.91,
+      "hi": 21.97
      },
      "worst_frame_ms": {
-      "lo": 3.76,
-      "mid": 10.93,
-      "hi": 28.29
+      "lo": 7.76,
+      "mid": 12.39,
+      "hi": 32.95
      },
      "critical_core": 0,
      "verdicts": {
@@ -568,71 +824,76 @@
     }
    },
    "main_minsn": {
-    "lo": 6.1,
-    "mid": 12.475,
-    "hi": 20.2
+    "lo": 6.651,
+    "mid": 14.145,
+    "hi": 23.529
    }
   },
   {
    "id": "plan60",
-   "name": "60 fps plan: plan45 + instancing + core 3",
+   "name": "60 fps plan: plan45b + instancing + core 3",
    "levers": [
     "mt_cull",
     "havok_workers",
     "threaded_anim",
+    "render_f2f4",
+    "barrier_relax",
+    "neon_math",
     "instancing",
     "core3"
    ],
    "core3": true,
    "cores": {
     "0": {
-     "lo": 5.635,
-     "mid": 11.66,
-     "hi": 19.25,
+     "lo": 5.917,
+     "mid": 12.942,
+     "hi": 22.061,
      "items": {
-      "animation": 2.1,
+      "animation": 1.732,
+      "cull": 0.65,
       "game_logic": 2.0,
       "havok": 2.1,
+      "interlocked_barriers": 0.906,
       "render_accumulation": 0.935,
-      "renderer_main": 0.975,
-      "scene_update_cull": 3.25,
+      "renderer_main": 1.556,
+      "scene_update": 2.763,
       "sync": 0.3
      }
     },
     "1": {
-     "lo": 3.418,
-     "mid": 5.881,
-     "hi": 8.295,
+     "lo": 3.406,
+     "mid": 5.897,
+     "hi": 8.434,
      "items": {
-      "ai_process_lists": 2.2,
+      "ai_process_lists": 1.85,
       "animation>threaded_anim": 0.555,
+      "cull>mt_cull": 0.451,
       "havok>havok_workers": 0.549,
       "render_accumulation>mt_cull": 0.647,
-      "renderer_worker": 1.125,
-      "scene_update_cull>mt_cull": 0.805
+      "renderer_worker": 1.845
      }
     },
     "2": {
-     "lo": 3.443,
-     "mid": 5.856,
-     "hi": 8.345,
+     "lo": 3.448,
+     "mid": 5.852,
+     "hi": 8.397,
      "items": {
-      "ai_process_lists": 3.3,
+      "ai_process_lists": 3.65,
       "animation>threaded_anim": 0.504,
+      "cull>mt_cull": 0.501,
       "havok>havok_workers": 0.549,
-      "render_accumulation>mt_cull": 0.647,
-      "scene_update_cull>mt_cull": 0.855
+      "render_accumulation>mt_cull": 0.647
      }
     },
     "3": {
-     "lo": 3.041,
-     "mid": 5.359,
-     "hi": 7.746,
+     "lo": 3.049,
+     "mid": 5.302,
+     "hi": 7.85,
      "items": {
       "background": 2.0,
+      "cull>mt_cull": 2.106,
       "havok>havok_workers": 0.549,
-      "render_accumulation>mt_cull": 0.647,
-      "scene_update_cull>mt_cull": 2.163
+      "render_accumulation>mt_cull": 0.647
      }
     }
    },
@@ -640,41 +901,45 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 5.52,
-       "mid": 14.29,
-       "hi": 31.45
+       "lo": 5.8,
+       "mid": 15.86,
+       "hi": 36.05
       },
       "1": {
-       "lo": 3.35,
-       "mid": 7.21,
-       "hi": 13.55
+       "lo": 3.34,
+       "mid": 7.23,
+       "hi": 13.78
       },
       "2": {
        "lo": 3.38,
-       "mid": 7.18,
-       "hi": 13.64
+       "mid": 7.17,
+       "hi": 13.72
       },
       "3": {
-       "lo": 2.98,
-       "mid": 6.57,
-       "hi": 12.66
+       "lo": 2.99,
+       "mid": 6.5,
+       "hi": 12.83
       }
      },
      "cpu_ms": {
-      "lo": 5.52,
-      "mid": 14.29,
-      "hi": 31.45
+      "lo": 5.8,
+      "mid": 15.86,
+      "hi": 36.05
      },
-     "gpu_ms": null,
+     "gpu_ms": {
+      "case": "docked_720p",
+      "lo": 7.05,
+      "hi": 12.38
+     },
      "frame_ms": {
-      "lo": 5.52,
-      "mid": 14.29,
-      "hi": 31.45
+      "lo": 7.05,
+      "mid": 15.86,
+      "hi": 36.05
      },
      "worst_frame_ms": {
-      "lo": 6.07,
-      "mid": 17.86,
-      "hi": 47.17
+      "lo": 7.76,
+      "mid": 19.82,
+      "hi": 54.07
      },
      "critical_core": 0,
      "verdicts": {
@@ -687,41 +952,45 @@
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 3.16,
-       "mid": 8.17,
-       "hi": 17.97
+       "lo": 3.31,
+       "mid": 9.06,
+       "hi": 20.6
       },
       "1": {
        "lo": 1.91,
-       "mid": 4.12,
-       "hi": 7.75
+       "mid": 4.13,
+       "hi": 7.88
       },
       "2": {
        "lo": 1.93,
        "mid": 4.1,
-       "hi": 7.79
+       "hi": 7.84
       },
       "3": {
-       "lo": 1.7,
-       "mid": 3.75,
-       "hi": 7.23
+       "lo": 1.71,
+       "mid": 3.71,
+       "hi": 7.33
       }
      },
      "cpu_ms": {
-      "lo": 3.16,
-      "mid": 8.17,
-      "hi": 17.97
+      "lo": 3.31,
+      "mid": 9.06,
+      "hi": 20.6
      },
-     "gpu_ms": null,
+     "gpu_ms": {
+      "case": "docked_720p",
+      "lo": 7.05,
+      "hi": 12.38
+     },
      "frame_ms": {
-      "lo": 3.16,
-      "mid": 8.17,
-      "hi": 17.97
+      "lo": 7.05,
+      "mid": 9.715,
+      "hi": 20.6
      },
      "worst_frame_ms": {
-      "lo": 3.48,
-      "mid": 10.21,
-      "hi": 26.95
+      "lo": 7.76,
+      "mid": 12.14,
+      "hi": 30.9
      },
      "critical_core": 0,
      "verdicts": {
@@ -733,17 +1002,19 @@
     }
    },
    "main_minsn": {
-    "lo": 5.635,
-    "mid": 11.66,
-    "hi": 19.25
+    "lo": 5.917,
+    "mid": 12.942,
+    "hi": 22.061
    }
   }
  ],
  "gates": {
-  "placed@1020": "pass_30",
+  "placed@1020": "fail",
   "placed@1785": "stretch_60",
-  "plan45@1020": "stretch_60",
+  "plan45@1020": "pass_30",
   "plan45@1785": "stretch_60",
+  "plan45b@1020": "pass_45",
+  "plan45b@1785": "stretch_60",
   "plan60@1020": "stretch_60",
   "plan60@1785": "stretch_60"
  },
@@ -753,6 +1024,1292 @@
   "GPU time per frame (B7) and the native renderer per-draw cost on device (render machine)",
   "lever mt_cull: off on PC; needs the fs:[0x2c] TLS fix (done, S5 31cdca3) and the stage protocol (mtqemu 'stages' ok); setting 0x011c710c (PERF.md 6.4)",
   "lever havok_workers: not traced whether bhkWorld uses the MT simulation (PERF.md 6.4)",
-  "lever core3: S5 33c0b1b, off by default; the system's own use of core 3 is unmeasured"
+  "lever core3: S5 33c0b1b, off by default; the system's own use of core 3 is unmeasured",
+  "lever barrier_relax: needs S12's per-site argument and the B9 measurement"
+ ],
+ "hotspots": [
+  {
+   "kind": "subsystem",
+   "id": "sub_ai",
+   "name": "ai",
+   "subsystem": "ai",
+   "role": "ai-linear",
+   "critical": false,
+   "basis": "E",
+   "minsn": {
+    "lo": 3.0,
+    "mid": 5.5,
+    "hi": 8.0
+   },
+   "ms": {
+    "1020": {
+     "lo": 2.941,
+     "mid": 6.74,
+     "hi": 13.072
+    },
+    "1785": {
+     "lo": 1.681,
+     "mid": 3.852,
+     "hi": 7.47
+    }
+   },
+   "share_45": {
+    "1020": 0.304,
+    "1785": 0.174
+   },
+   "fix": "already off main (AI linear task threads, iNumHWThreads=3)",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "-",
+   "needs_hardware": true,
+   "detail": "items: ai_process_lists",
+   "rank": 1
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_renderer (submission worker)",
+   "name": "renderer (submission worker)",
+   "subsystem": "renderer (submission worker)",
+   "role": "render-worker",
+   "critical": false,
+   "basis": "M",
+   "minsn": {
+    "lo": 3.359,
+    "mid": 4.392,
+    "hi": 5.425
+   },
+   "ms": {
+    "1020": {
+     "lo": 3.293,
+     "mid": 5.382,
+     "hi": 8.864
+    },
+    "1785": {
+     "lo": 1.882,
+     "mid": 3.076,
+     "hi": 5.065
+    }
+   },
+   "share_45": {
+    "1020": 0.242,
+    "1785": 0.139
+   },
+   "fix": "instancing (fewer draws); off the critical path while core 1 has headroom",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S6n",
+   "needs_hardware": false,
+   "detail": "items: renderer_worker",
+   "rank": 2
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_renderer (main side)",
+   "name": "renderer (main side)",
+   "subsystem": "renderer (main side)",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 2.343,
+    "mid": 3.991,
+    "hi": 5.639
+   },
+   "ms": {
+    "1020": {
+     "lo": 2.297,
+     "mid": 4.891,
+     "hi": 9.214
+    },
+    "1785": {
+     "lo": 1.312,
+     "mid": 2.795,
+     "hi": 5.265
+    }
+   },
+   "share_45": {
+    "1020": 0.22,
+    "1785": 0.126
+   },
+   "fix": "render machine F2-F4 (RENDER_PERF.md 10: the radix sort's fixed cost, bind elimination)",
+   "gain_main_minsn": [
+    1.0,
+    2.5
+   ],
+   "owner": "S6n/P6n",
+   "needs_hardware": false,
+   "detail": "items: renderer_main",
+   "rank": 3
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_havok",
+   "name": "havok",
+   "subsystem": "havok",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 2.0,
+    "mid": 3.5,
+    "hi": 5.0
+   },
+   "ms": {
+    "1020": {
+     "lo": 1.961,
+     "mid": 4.289,
+     "hi": 8.17
+    },
+    "1785": {
+     "lo": 1.12,
+     "mid": 2.451,
+     "hi": 4.669
+    }
+   },
+   "share_45": {
+    "1020": 0.193,
+    "1785": 0.11
+   },
+   "fix": "havok_workers: Havok's multithreaded simulation on the worker pool (trace bhkWorld first)",
+   "gain_main_minsn": [
+    0.6,
+    2.5
+   ],
+   "owner": "S15",
+   "needs_hardware": true,
+   "detail": "items: havok",
+   "rank": 4
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_cull",
+   "name": "cull",
+   "subsystem": "cull",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 2.0,
+    "mid": 3.25,
+    "hi": 4.5
+   },
+   "ms": {
+    "1020": {
+     "lo": 1.961,
+     "mid": 3.983,
+     "hi": 7.353
+    },
+    "1785": {
+     "lo": 1.12,
+     "mid": 2.276,
+     "hi": 4.202
+    }
+   },
+   "share_45": {
+    "1020": 0.179,
+    "1785": 0.103
+   },
+   "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
+   "gain_main_minsn": [
+    1.4,
+    4.05
+   ],
+   "owner": "S15/S5",
+   "needs_hardware": true,
+   "detail": "items: cull",
+   "rank": 5
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_scene-graph update",
+   "name": "scene-graph update",
+   "subsystem": "scene-graph update",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 2.0,
+    "mid": 3.25,
+    "hi": 4.5
+   },
+   "ms": {
+    "1020": {
+     "lo": 1.961,
+     "mid": 3.983,
+     "hi": 7.353
+    },
+    "1785": {
+     "lo": 1.12,
+     "mid": 2.276,
+     "hi": 4.202
+    }
+   },
+   "share_45": {
+    "1020": 0.179,
+    "1785": 0.103
+   },
+   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
+   "gain_main_minsn": [
+    0.3,
+    0.9
+   ],
+   "owner": "S15/S2",
+   "needs_hardware": false,
+   "detail": "items: scene_update",
+   "rank": 6
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_animation",
+   "name": "animation",
+   "subsystem": "animation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 2.0,
+    "mid": 3.0,
+    "hi": 4.0
+   },
+   "ms": {
+    "1020": {
+     "lo": 1.961,
+     "mid": 3.676,
+     "hi": 6.536
+    },
+    "1785": {
+     "lo": 1.12,
+     "mid": 2.101,
+     "hi": 3.735
+    }
+   },
+   "share_45": {
+    "1020": 0.166,
+    "1785": 0.095
+   },
+   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "gain_main_minsn": [
+    0.5,
+    1.8
+   ],
+   "owner": "S15",
+   "needs_hardware": false,
+   "detail": "items: animation",
+   "rank": 7
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_render accumulation",
+   "name": "render accumulation",
+   "subsystem": "render accumulation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 1.5,
+    "mid": 2.75,
+    "hi": 4.0
+   },
+   "ms": {
+    "1020": {
+     "lo": 1.471,
+     "mid": 3.37,
+     "hi": 6.536
+    },
+    "1785": {
+     "lo": 0.84,
+     "mid": 1.926,
+     "hi": 3.735
+    }
+   },
+   "share_45": {
+    "1020": 0.152,
+    "1785": 0.087
+   },
+   "fix": "mt_cull moves 50-70 % with the cull; instancing -10-20 %",
+   "gain_main_minsn": [
+    0.75,
+    2.8
+   ],
+   "owner": "S6n/S15",
+   "needs_hardware": true,
+   "detail": "items: render_accumulation",
+   "rank": 8
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_background (tasklets, IO, audio)",
+   "name": "background (tasklets, IO, audio)",
+   "subsystem": "background (tasklets, IO, audio)",
+   "role": "game",
+   "critical": false,
+   "basis": "E",
+   "minsn": {
+    "lo": 1.0,
+    "mid": 2.0,
+    "hi": 3.0
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.98,
+     "mid": 2.451,
+     "hi": 4.902
+    },
+    "1785": {
+     "lo": 0.56,
+     "mid": 1.401,
+     "hi": 2.801
+    }
+   },
+   "share_45": {
+    "1020": 0.11,
+    "1785": 0.063
+   },
+   "fix": "core3 opt-in",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S5",
+   "needs_hardware": true,
+   "detail": "items: background",
+   "rank": 9
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_game logic, UI, scripts",
+   "name": "game logic, UI, scripts",
+   "subsystem": "game logic, UI, scripts",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 1.0,
+    "mid": 2.0,
+    "hi": 3.0
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.98,
+     "mid": 2.451,
+     "hi": 4.902
+    },
+    "1785": {
+     "lo": 0.56,
+     "mid": 1.401,
+     "hi": 2.801
+    }
+   },
+   "share_45": {
+    "1020": 0.11,
+    "1785": 0.063
+   },
+   "fix": "none planned: measure first",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "-",
+   "needs_hardware": false,
+   "detail": "items: game_logic",
+   "rank": 10
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_interlocked barriers",
+   "name": "interlocked barriers",
+   "subsystem": "interlocked barriers",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.25,
+    "mid": 1.725,
+    "hi": 3.2
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.245,
+     "mid": 2.114,
+     "hi": 5.229
+    },
+    "1785": {
+     "lo": 0.14,
+     "mid": 1.208,
+     "hi": 2.988
+    }
+   },
+   "share_45": {
+    "1020": 0.095,
+    "1785": 0.054
+   },
+   "fix": "inlined (done, fnvnx_win32.h); next: a per-site argument to drop the barrier of refcount increments (an increment publishes nothing), about half of the stalls",
+   "gain_main_minsn": [
+    0.1,
+    1.6
+   ],
+   "owner": "S12/S15",
+   "needs_hardware": true,
+   "detail": "items: interlocked_barriers",
+   "rank": 11
+  },
+  {
+   "kind": "subsystem",
+   "id": "sub_sync",
+   "name": "sync",
+   "subsystem": "sync",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.1,
+    "mid": 0.3,
+    "hi": 0.6
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.098,
+     "mid": 0.368,
+     "hi": 0.98
+    },
+    "1785": {
+     "lo": 0.056,
+     "mid": 0.21,
+     "hi": 0.56
+    }
+   },
+   "share_45": {
+    "1020": 0.017,
+    "1785": 0.009
+   },
+   "fix": "",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "",
+   "needs_hardware": false,
+   "detail": "items: sync",
+   "rank": 12
+  },
+  {
+   "kind": "function",
+   "id": "fn_interlocked",
+   "name": "InterlockedIncrement / InterlockedDecrement (NiRefObject refcounts), inlined",
+   "subsystem": "interlocked barriers",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.4,
+    "mid": 1.8,
+    "hi": 4.0
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.392,
+     "mid": 2.206,
+     "hi": 6.536
+    },
+    "1785": {
+     "lo": 0.224,
+     "mid": 1.261,
+     "hi": 3.735
+    }
+   },
+   "share_45": {
+    "1020": 0.099,
+    "1785": 0.057
+   },
+   "fix": "inlined (done, fnvnx_win32.h); next: a per-site argument to drop the barrier of refcount increments (an increment publishes nothing), about half of the stalls",
+   "gain_main_minsn": [
+    0.1,
+    1.6
+   ],
+   "owner": "S12/S15",
+   "needs_hardware": true,
+   "detail": "20-40 A64 instructions per call [E] x 20000-100000 calls per frame [E]: S12's 100k is the hi end [E]; boot to WinMain: 3 calls [M]; 8 instructions [M] (fnvnx_win32.h inline, objdump) + 15-40 cycles of dmb ish as instruction-equivalents at IPC 0.8 [E]",
+   "rank": 1
+  },
+  {
+   "kind": "function",
+   "id": "fn_cull_test",
+   "name": "culling per object: 0x00a694e0 (culling worker) + the bound-vs-frustum plane tests",
+   "subsystem": "cull",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.3,
+    "mid": 0.91,
+    "hi": 1.8
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.294,
+     "mid": 1.115,
+     "hi": 2.941
+    },
+    "1785": {
+     "lo": 0.168,
+     "mid": 0.637,
+     "hi": 1.681
+    }
+   },
+   "share_45": {
+    "1020": 0.05,
+    "1785": 0.029
+   },
+   "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
+   "gain_main_minsn": [
+    1.4,
+    4.05
+   ],
+   "owner": "S15/S5",
+   "needs_hardware": true,
+   "detail": "50-90 A64 instructions per call [E] x 6000-20000 calls per frame [E]: object tests over the main, 3 shadow and the reflection passes [E]; 12 exclusive for 0x00a694e0 [M] + 4-6 plane tests (40-80, not measured)",
+   "rank": 2
+  },
+  {
+   "kind": "function",
+   "id": "fn_slerp",
+   "name": "NiQuaternion::Slerp 0x00a6e330 (keyframe blending)",
+   "subsystem": "animation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.26,
+    "mid": 0.78,
+    "hi": 1.3
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.255,
+     "mid": 0.956,
+     "hi": 2.124
+    },
+    "1785": {
+     "lo": 0.146,
+     "mid": 0.546,
+     "hi": 1.214
+    }
+   },
+   "share_45": {
+    "1020": 0.043,
+    "1785": 0.025
+   },
+   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "gain_main_minsn": [
+    0.5,
+    1.8
+   ],
+   "owner": "S15",
+   "needs_hardware": false,
+   "detail": "130-130 A64 instructions per call [M] x 2000-10000 calls per frame [E]: 10-40 animated actors x 60-80 bones x 1-3 sequences [E]",
+   "rank": 3
+  },
+  {
+   "kind": "function",
+   "id": "fn_nibound_update",
+   "name": "NiBound::Update 0x00a7fdd0 (an object's world bound, merged into its parent's)",
+   "subsystem": "scene-graph update",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.36,
+    "mid": 0.72,
+    "hi": 1.08
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.353,
+     "mid": 0.882,
+     "hi": 1.765
+    },
+    "1785": {
+     "lo": 0.202,
+     "mid": 0.504,
+     "hi": 1.008
+    }
+   },
+   "share_45": {
+    "1020": 0.04,
+    "1785": 0.023
+   },
+   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
+   "gain_main_minsn": [
+    0.3,
+    0.9
+   ],
+   "owner": "S15/S2",
+   "needs_hardware": false,
+   "detail": "45-45 A64 instructions per call [M] x 8000-24000 calls per frame [E]: two per updated object [E]",
+   "rank": 4
+  },
+  {
+   "kind": "function",
+   "id": "fn_world_transform",
+   "name": "NiAVObject::UpdateWorldData 0x00a68c60 + the NiMatrix3 product 0x00a588a0 it composes with",
+   "subsystem": "scene-graph update",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.28,
+    "mid": 0.68,
+    "hi": 1.2
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.275,
+     "mid": 0.833,
+     "hi": 1.961
+    },
+    "1785": {
+     "lo": 0.157,
+     "mid": 0.476,
+     "hi": 1.12
+    }
+   },
+   "share_45": {
+    "1020": 0.038,
+    "1785": 0.021
+   },
+   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
+   "gain_main_minsn": [
+    0.3,
+    0.9
+   ],
+   "owner": "S15/S2",
+   "needs_hardware": false,
+   "detail": "70-100 A64 instructions per call [M] x 4000-12000 calls per frame [E]: objects whose world transform is recomputed per exterior frame [E]; 6 + 63 A64 instructions exclusive (dyncount, PERF.md 7) + 10-30 for translation and scale (not measured)",
+   "rank": 5
+  },
+  {
+   "kind": "function",
+   "id": "fn_gsk",
+   "name": "Havok GSK narrow phase (0x00da8fb0, 0x00da8390, 0x00da8500, 0x00da8820)",
+   "subsystem": "havok",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.12,
+    "mid": 0.66,
+    "hi": 1.2
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.118,
+     "mid": 0.809,
+     "hi": 1.961
+    },
+    "1785": {
+     "lo": 0.067,
+     "mid": 0.462,
+     "hi": 1.12
+    }
+   },
+   "share_45": {
+    "1020": 0.036,
+    "1785": 0.021
+   },
+   "fix": "havok_workers: Havok's multithreaded simulation on the worker pool (trace bhkWorld first)",
+   "gain_main_minsn": [
+    0.6,
+    2.5
+   ],
+   "owner": "S15",
+   "needs_hardware": true,
+   "detail": "600-600 A64 instructions per call [M] x 200-2000 calls per frame [E]: convex pair queries per step: character controller casts, contact points [E]; 303 + 119 + 72 + 109 A64 instructions exclusive [M]",
+   "rank": 6
+  },
+  {
+   "kind": "function",
+   "id": "fn_pass_bucket",
+   "name": "BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 (registering a geometry pass)",
+   "subsystem": "render accumulation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.205,
+    "mid": 0.307,
+    "hi": 0.41
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.201,
+     "mid": 0.377,
+     "hi": 0.67
+    },
+    "1785": {
+     "lo": 0.115,
+     "mid": 0.215,
+     "hi": 0.383
+    }
+   },
+   "share_45": {
+    "1020": 0.017,
+    "1785": 0.01
+   },
+   "fix": "mt_cull moves 50-70 % with the cull; instancing -10-20 %",
+   "gain_main_minsn": [
+    0.75,
+    2.8
+   ],
+   "owner": "S6n/S15",
+   "needs_hardware": true,
+   "detail": "82-82 A64 instructions per call [M] x 2500-5000 calls per frame [E]: geometry passes registered per frame (1.2-1.6 per draw) [E]; 70 + 12 A64 instructions (1.84x and 0.48x the x86 counts)",
+   "rank": 7
+  },
+  {
+   "kind": "function",
+   "id": "fn_quat_from_matrix",
+   "name": "NiQuaternion::FromRotationMatrix 0x00a6df40",
+   "subsystem": "animation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.051,
+    "mid": 0.18,
+    "hi": 0.309
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.05,
+     "mid": 0.221,
+     "hi": 0.505
+    },
+    "1785": {
+     "lo": 0.029,
+     "mid": 0.126,
+     "hi": 0.289
+    }
+   },
+   "share_45": {
+    "1020": 0.01,
+    "1785": 0.006
+   },
+   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "gain_main_minsn": [
+    0.5,
+    1.8
+   ],
+   "owner": "S15",
+   "needs_hardware": false,
+   "detail": "103-103 A64 instructions per call [M] x 500-3000 calls per frame [E]: [E]",
+   "rank": 8
+  },
+  {
+   "kind": "function",
+   "id": "fn_node_update",
+   "name": "NiNode::UpdateTransformAndBounds 0x00a5e0b0 / UpdateDownwardPass 0x00a5dd70 (the child loop)",
+   "subsystem": "scene-graph update",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.038,
+    "mid": 0.158,
+    "hi": 0.36
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.037,
+     "mid": 0.194,
+     "hi": 0.588
+    },
+    "1785": {
+     "lo": 0.021,
+     "mid": 0.111,
+     "hi": 0.336
+    }
+   },
+   "share_45": {
+    "1020": 0.009,
+    "1785": 0.005
+   },
+   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
+   "gain_main_minsn": [
+    0.3,
+    0.9
+   ],
+   "owner": "S15/S2",
+   "needs_hardware": false,
+   "detail": "19-60 A64 instructions per call [M] x 2000-6000 calls per frame [E]: nodes updated per frame [E]; 19 exclusive for 0x00a5e0b0 [M]; 0x00a5dd70 had no clean case, its loop is estimated",
+   "rank": 9
+  },
+  {
+   "kind": "boot",
+   "id": "boot_fnvnx_scan_codeptrs",
+   "name": "fnvnx_scan_codeptrs",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 77.63,
+    "mid": 77.63,
+    "hi": 77.63
+   },
+   "ms": {
+    "1020": {
+     "lo": 76.108,
+     "mid": 95.135,
+     "hi": 126.847
+    },
+    "1785": {
+     "lo": 43.49,
+     "mid": 54.363,
+     "hi": 72.484
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 1
+  },
+  {
+   "kind": "boot",
+   "id": "boot_fnvnx_image_ptr",
+   "name": "fnvnx_image_ptr",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 39.923,
+    "mid": 39.923,
+    "hi": 39.923
+   },
+   "ms": {
+    "1020": {
+     "lo": 39.14,
+     "mid": 48.925,
+     "hi": 65.234
+    },
+    "1785": {
+     "lo": 22.366,
+     "mid": 27.957,
+     "hi": 37.276
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 2
+  },
+  {
+   "kind": "boot",
+   "id": "boot_fnvnx_codemap_find",
+   "name": "fnvnx_codemap_find",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 17.492,
+    "mid": 17.492,
+    "hi": 17.492
+   },
+   "ms": {
+    "1020": {
+     "lo": 17.149,
+     "mid": 21.436,
+     "hi": 28.582
+    },
+    "1785": {
+     "lo": 9.799,
+     "mid": 12.249,
+     "hi": 16.332
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 3
+  },
+  {
+   "kind": "boot",
+   "id": "boot_eligible_in",
+   "name": "eligible_in",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 15.995,
+    "mid": 15.995,
+    "hi": 15.995
+   },
+   "ms": {
+    "1020": {
+     "lo": 15.681,
+     "mid": 19.602,
+     "hi": 26.136
+    },
+    "1785": {
+     "lo": 8.961,
+     "mid": 11.201,
+     "hi": 14.935
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 4
+  },
+  {
+   "kind": "boot",
+   "id": "boot_classify",
+   "name": "classify",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 13.889,
+    "mid": 13.889,
+    "hi": 13.889
+   },
+   "ms": {
+    "1020": {
+     "lo": 13.617,
+     "mid": 17.021,
+     "hi": 22.695
+    },
+    "1785": {
+     "lo": 7.781,
+     "mid": 9.726,
+     "hi": 12.968
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 5
+  },
+  {
+   "kind": "boot",
+   "id": "boot_fnvnx_image_load_relocs",
+   "name": "fnvnx_image_load_relocs",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 13.865,
+    "mid": 13.865,
+    "hi": 13.865
+   },
+   "ms": {
+    "1020": {
+     "lo": 13.594,
+     "mid": 16.992,
+     "hi": 22.656
+    },
+    "1785": {
+     "lo": 7.768,
+     "mid": 9.71,
+     "hi": 12.946
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 6
+  },
+  {
+   "kind": "boot",
+   "id": "boot_kx_find",
+   "name": "kx_find",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 10.084,
+    "mid": 10.084,
+    "hi": 10.084
+   },
+   "ms": {
+    "1020": {
+     "lo": 9.886,
+     "mid": 12.358,
+     "hi": 16.477
+    },
+    "1785": {
+     "lo": 5.649,
+     "mid": 7.062,
+     "hi": 9.415
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 7
+  },
+  {
+   "kind": "boot",
+   "id": "boot_early_zero.constprop.0",
+   "name": "early_zero.constprop.0",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 9.879,
+    "mid": 9.879,
+    "hi": 9.879
+   },
+   "ms": {
+    "1020": {
+     "lo": 9.685,
+     "mid": 12.106,
+     "hi": 16.142
+    },
+    "1785": {
+     "lo": 5.534,
+     "mid": 6.918,
+     "hi": 9.224
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 8
+  },
+  {
+   "kind": "boot",
+   "id": "boot_qsort",
+   "name": "qsort",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 7.177,
+    "mid": 7.177,
+    "hi": 7.177
+   },
+   "ms": {
+    "1020": {
+     "lo": 7.036,
+     "mid": 8.795,
+     "hi": 11.727
+    },
+    "1785": {
+     "lo": 4.021,
+     "mid": 5.026,
+     "hi": 6.701
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 9
+  },
+  {
+   "kind": "boot",
+   "id": "boot_fnvnx_xc_locate",
+   "name": "fnvnx_xc_locate",
+   "subsystem": "boot",
+   "role": "main",
+   "critical": true,
+   "basis": "M",
+   "minsn": {
+    "lo": 6.443,
+    "mid": 6.443,
+    "hi": 6.443
+   },
+   "ms": {
+    "1020": {
+     "lo": 6.317,
+     "mid": 7.896,
+     "hi": 10.528
+    },
+    "1785": {
+     "lo": 3.609,
+     "mid": 4.512,
+     "hi": 6.016
+    }
+   },
+   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
+   "gain_main_minsn": [
+    0,
+    0
+   ],
+   "owner": "S3",
+   "needs_hardware": false,
+   "detail": "interval: until __fnv_0086a850",
+   "rank": 10
+  }
+ ],
+ "queue": [
+  {
+   "subsystem": "cull",
+   "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
+   "owner": "S15/S5",
+   "needs_hardware": true,
+   "gain_main_minsn": {
+    "lo": 1.4,
+    "mid": 2.725,
+    "hi": 4.05
+   },
+   "gain_ms_45": {
+    "1020": 3.34,
+    "1785": 1.91
+   },
+   "rank": 1
+  },
+  {
+   "subsystem": "render accumulation",
+   "fix": "mt_cull moves 50-70 % with the cull; instancing -10-20 %",
+   "owner": "S6n/S15",
+   "needs_hardware": true,
+   "gain_main_minsn": {
+    "lo": 0.75,
+    "mid": 1.775,
+    "hi": 2.8
+   },
+   "gain_ms_45": {
+    "1020": 2.17,
+    "1785": 1.24
+   },
+   "rank": 2
+  },
+  {
+   "subsystem": "renderer (main side)",
+   "fix": "render machine F2-F4 (RENDER_PERF.md 10: the radix sort's fixed cost, bind elimination)",
+   "owner": "S6n/P6n",
+   "needs_hardware": false,
+   "gain_main_minsn": {
+    "lo": 1.0,
+    "mid": 1.75,
+    "hi": 2.5
+   },
+   "gain_ms_45": {
+    "1020": 2.15,
+    "1785": 1.23
+   },
+   "rank": 3
+  },
+  {
+   "subsystem": "havok",
+   "fix": "havok_workers: Havok's multithreaded simulation on the worker pool (trace bhkWorld first)",
+   "owner": "S15",
+   "needs_hardware": true,
+   "gain_main_minsn": {
+    "lo": 0.6,
+    "mid": 1.55,
+    "hi": 2.5
+   },
+   "gain_ms_45": {
+    "1020": 1.9,
+    "1785": 1.08
+   },
+   "rank": 4
+  },
+  {
+   "subsystem": "animation",
+   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "owner": "S15",
+   "needs_hardware": false,
+   "gain_main_minsn": {
+    "lo": 0.5,
+    "mid": 1.15,
+    "hi": 1.8
+   },
+   "gain_ms_45": {
+    "1020": 1.41,
+    "1785": 0.81
+   },
+   "rank": 5
+  },
+  {
+   "subsystem": "interlocked barriers",
+   "fix": "inlined (done, fnvnx_win32.h); next: a per-site argument to drop the barrier of refcount increments (an increment publishes nothing), about half of the stalls",
+   "owner": "S12/S15",
+   "needs_hardware": true,
+   "gain_main_minsn": {
+    "lo": 0.1,
+    "mid": 0.85,
+    "hi": 1.6
+   },
+   "gain_ms_45": {
+    "1020": 1.04,
+    "1785": 0.59
+   },
+   "rank": 6
+  },
+  {
+   "subsystem": "scene-graph update",
+   "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
+   "owner": "S15/S2",
+   "needs_hardware": false,
+   "gain_main_minsn": {
+    "lo": 0.3,
+    "mid": 0.6,
+    "hi": 0.9
+   },
+   "gain_ms_45": {
+    "1020": 0.73,
+    "1785": 0.42
+   },
+   "rank": 7
+  }
  ]
 }

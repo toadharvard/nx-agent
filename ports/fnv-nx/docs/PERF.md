@@ -126,6 +126,15 @@ is ~97 % of the boot's instructions; at IPC 0.8 it is about 0.9 s on device, and
 Finding for S4: newlib's printf runs `__utf8_mbtowc` over the format string (0.16 M of the 3.6 M above); per-frame
 logging would pay for it on every character **[E]**.
 
+**On the owner's exe [M]** (S5's `fa88387` guest, the player's FalloutNV.exe, 2026-11-04; the newest link
+`3197103` stops at the same place and publishes no guest): **242.6 M instructions to WinMain**, then 821 more to the
+stop (a trap: slot 2 of the vtable of `0x00aa7400`, called from `0x00aa3e40` under WinMain). No frame and no D3D9
+call yet. The loader's code-pointer scan is still 97 % of it: `fnvnx_scan_codeptrs` 77.6 M, `fnvnx_image_ptr`
+39.9 M, `fnvnx_codemap_find` 17.5 M, `eligible_in` 16.0 M, `classify` 13.9 M, `fnvnx_image_load_relocs` 13.9 M,
+`kx_find` 10.1 M (0.30 s at 1.02 GHz, 0.17 s at 1.785 GHz, IPC 0.8). Interlocked calls on that path: **3** (two
+InterlockedCompareExchange, one InterlockedIncrement); no EnterCriticalSection or TlsGetValue. The boot rows of
+`hotspots[]` (11.4) carry these numbers.
+
 ## 5. D3D9 -> proxy -> Nine: cost per call and what batching saves
 
 Path of one call (all of it on the game thread until Nine's CSMT queue):
@@ -296,6 +305,17 @@ thread is a host thread, so the cases run in parallel on the container's cores. 
 | spin-override | the same with `fnvnx_spin_unlock_0040fba0` | 0 races |
 | unsync | a plain shared counter (checker sanity) | races reported |
 | detach | 3 x 40 threads whose handles are closed while they run (records freed by the threads themselves, slots reused) | 120 of 120 end; with the old `thread_free` it hangs |
+| placement | 6.3 on host threads, read back with `sched_getaffinity`: main, a game thread, SetThreadAffinityMask / SetThreadIdealProcessor / SetThreadPriority on another thread's handle while it runs and before its first ResumeThread | main 0x1, game 0x6, moved 0x4, suspended 0x2, ideal core 2 joins the mask (0x6); priorities advisory on Linux (calls checked only) |
+| ilk-count | the inlined Interlocked* (6.7), 4 threads x 3,000 x (inc, add, dec, CAS) on an aligned and a misaligned counter | 36,000 of 36,000 on both, 0 races |
+| ilk-refs | NiRefObject's last-owner protocol: plain writes, then InterlockedDecrement; the thread that reaches 0 reads them all | 300 of 300 objects right, 0 races |
+| ilk-cost | B9 (section 9): ns per operation, uninstrumented | under qemu (x86 host, not the device): plain 2.5, LL/SC 42, inline 73, call 148, inline after a store 154, shared by 2 threads 513 |
+| litmus-order | S12's litmus test (`tests/s12/order/litmus.cpp`, unchanged but for `LITMUS_ROUNDS`) on platform threads, built with the fnvnx_order plugin, 2,000 rounds | bad 0 / 0 / 0; races mp2 0, lock 0 (mp1: 2,000, its scratch store after the release is a value race by design) |
+| litmus-plain | the same without the plugin | bad mp1 342-580, **mp2 2,000 of 2,000**, lock 0; races in all three (mp2 0.8-1.5 M) |
+
+The litmus cases close the gap ORDERING.md names: on an x86 host the "bad" counts only see the compiler's
+reorderings, but the race checker works in the C11 model, so a hand-off without a happens-before edge is reported
+whatever the host's memory order. With the plugin, mp2 and lock have their edges; without it they have none. S12's
+own run (`tests/s12/order/run.py`, 20,000 rounds, raw clone): order 0 / 0 / 0, plain mp1 60, mp2 20,000, lock 0.
 
 Why the first prototype "printed nothing in 300 s" (J-0125): two host bugs, not the guest. (1) Joins waited on the
 `CLONE_CHILD_CLEARTID` word with `FUTEX_WAIT_PRIVATE`, but the kernel's (and qemu-user's) wake at thread exit is a
@@ -303,6 +323,34 @@ shared-key `FUTEX_WAKE`, which never reaches a private-key waiter: a join that s
 forever. (2) `thread_free` joined the thread, so a thread that dropped its own last reference joined itself. Both
 depend on timing (about one run in three hung, at a different case each time; 0 hangs in 30 runs after the fix). The
 second bug is real on the Switch host too (section 6.3, "thread end of a closed handle").
+
+### 6.7 The cost of Interlocked* (S12's trailing `dmb ish`)
+
+S12 made every Interlocked function fully ordered, like x86 `lock` (ORDERING.md): a SEQ_CST `ldaxr/stlxr` loop
+and a trailing `dmb ish`. 332 decomp sites hand an operand to it, most of them NiRefObject refcounts through
+`NiAtomicIncrement` / `NiAtomicSubtract` (inline in every unit that uses NiPointer: 6,843 call sites in f12).
+
+* **Instructions [M]** (objdump, compile.sh's flags and plugins): InterlockedIncrement is 8 instructions on the
+  aligned path (`tst; b.ne; ldaxr; add; stlxr; cbnz; dmb ish; ret`) plus the caller's `bl` and argument move.
+* **Inlined (done):** `shim/include/fnvnx_win32.h` now gives game units the same body as `gnu_inline,
+  always_inline` (AArch64 ILP32, `FNVNX_COMPAT_H`; `-DFNVNX_INTERLOCKED_OUT_OF_LINE` turns it off for an A/B
+  run). The misaligned case branches to sync.cpp's definition (split lock) through an asm-label alias;
+  `&InterlockedIncrement`, the IAT and S13's harness (which runs Interlocked as a builtin, not a traced call) are
+  unaffected, and the fnvnx_order plugin still orders the operand's plain accesses (`m_uiRefCount = 0` stays
+  `stlr`). On 28 units of the prepared tree (the 10 hot units and every 25th refcount user): 270 sites inlined,
+  **+2,373 static instructions (+8.8 per site, +2.4 % in these units)** [M]. Per operation it saves the `bl`/`ret`
+  pair and 1-2 instructions; under qemu the inlined increment takes half the time of the call (73 vs 148 ns), which
+  says nothing about the A57. Tests: mtqemu ilk-count, ilk-refs, test_mtqemu.py's object check.
+* **The barrier [E]:** a `dmb ish` with stores in flight waits for them to drain: 15-40 cycles on the A57 (no
+  device number yet). The main thread's refcount traffic per exterior frame is 20k-100k operations [E] (draw setup
+  2-6 per draw, task queues, property and controller references; S12's 100k is the hi end). The budget item
+  `interlocked_barriers` is therefore **0.25-3.2 M instruction-equivalents on main (mid 1.7 M: 2.1 ms at 1.02 GHz,
+  1.2 ms at 1.785 GHz; S12's 2.9 ms is the hi end)**. On the boot path to WinMain there are only 3 Interlocked
+  calls [M], so the per-frame rate needs a frame (frameprof counts entries with `--calls Interlocked`; inlined
+  sites need `--calls` on the caller or the dmb census) or B9 on device.
+* **Next lever (queue row 6):** an increment publishes nothing, so NiRefObject::IncRefCount does not need the
+  trailing barrier; dropping it (a per-site argument, S12) halves the stalls. Relaxing Decrement is not proposed:
+  the last owner's DeleteThis must see every other owner's writes (ilk-refs is that protocol).
 
 ## 7. Our own overhead, measured
 
@@ -353,6 +401,8 @@ Instruction mix of fresh8 (2.43 M static instructions) **[M]**: loads 22.2 %, st
 | slim bridges, `-fno-semantic-interposition` with alias rebinding | < 1 % **[E]** | medium | S2c |
 | `fs:[0x2c]` TLS unification | correctness first, enables MT rendering | **done** (S5 `31cdca3`) | S4 |
 | release stores for the RecursiveSpinLock (6.5) | correctness on AArch64 | out-of-line Unlock **done** (override); 43 inline sites need an S1 rule | S15, S1 |
+| inline Interlocked* in game units (6.7) | the call/return and 1-2 instructions per operation; +8.8 static instructions per site | **done** (fnvnx_win32.h) | S15 |
+| no barrier on refcount increments (6.7) | about half of the 0.25-3.2 M barrier stalls on main **[E]** | per-site argument | S12, S15 |
 
 ## 9. What needs hardware, and the first on-device benchmark set
 
@@ -373,6 +423,18 @@ Minimal set for the first run (each a guest under the S5 host, timed with `svcGe
 | B6 | memcpy bandwidth (64 MiB), a global-access loop through the GOT vs `movz/movk` | DRAM bandwidth; the GOT lever |
 | B7 | 720p / 1080p full-screen passes (10-20 like the image-space chain), docked and handheld | GPU budget for image space |
 | B8 | the game: main menu, Goodsprings, the Strip, fixed camera, 30 s each; per-phase ticks around the main loop's phases (section 3) | the real bottleneck table |
+| B9 | Interlocked cost: mtqemu `ilk-cost` (plain, LL/SC, inline, call, with a store in flight, shared by two cores) | the dmb ish stall per operation: replaces the 15-40 cycles of `interlocked_barriers` (6.7) |
+
+**First hardware run: the multicore set.** These need an A57 that reorders, not Horizon: the Switch under Linux
+(L4T) or a Jetson TX1 / Nano (the same Tegra X1, Cortex-A57 x4). Both binaries are static AArch64 Linux programs that
+run natively there (no qemu):
+
+| id | run | must show |
+|---|---|---|
+| H1 | S12's litmus: the executables `<scratch>/litmus_order` and `<scratch>/litmus_plain` that `tests/s12/order/run.py <scratch>` builds (ELF64 wrappers of the ILP32 image, 20,000 rounds) | order: bad 0 in mp1, mp2 and lock; plain: bad > 0 (on the A57 lock may now fail too: the plain release store is reordered by the CPU, not only by GCC) |
+| H2 | the mtqemu pair natively: `tests/s15/mtqemu/build.sh <dir>`, then `<dir>/linhost <dir>/guest.elf` | every case ok; `parallel` >= 2.5 on an idle device; `litmus-order` bad 0 (now on hardware that reorders); `spin-decomp` may also show wrong payload sums |
+| H3 | `ilk-cost` from H2's output | B9: ns per Interlocked operation with and without the barrier; scale `interlocked_barriers` in budget_model.json |
+| H4 | `placement` from H2's output (Linux affinity) and B2 under Horizon | the masks of 6.3 hold, on Linux and in Mesosphere |
 
 ## 10. Tools (`tools/perf/`, self-test `tests/s15/test_perf.py`)
 
@@ -385,7 +447,7 @@ Minimal set for the first run (each a guest under the S5 host, timed with `svcGe
 | `setting_names.py <exe> <decomp>` | names of the setting objects from the player's exe (untested without the exe) |
 | `tso_scan.py <decomp> [--tsv]` | spin-lock releases by plain store (inline copies of 0x0040fba0) and references to the override (6.5) |
 | `tests/s15/test_mtqemu.py` | builds and runs the QEMU multicore check (6.6) |
-| `frame_budget.py [--frameprof J] [--render J] --out J` | the whole-frame budget per core, clock and target for the gates (section 11), from `budget_model.json` |
+| `frame_budget.py [--frameprof J] [--render J] --out J` | the whole-frame budget per core, clock and target for the gates (section 11), from `budget_model.json`; `hotspots[]` and `queue[]` (11.4); `--render` takes render/native/perf/report.json as it is |
 
 All of them print counts and names only; their outputs over decomp-derived objects stay in local scratch space.
 
@@ -398,7 +460,14 @@ goal, **60 fps** (16.7 ms, may be unstable) the stretch, **below 30 fps** (33.3 
 ### 11.1 The budget file (`tools/perf/frame_budget.py` -> `fnvnx-frame-budget/1`)
 
 One JSON for the readiness gates (R0, `tools/gates/`): `frame_budget.py [--frameprof prof.json] [--render
-report.json] --out budget.json`. The committed `docs/PERF_budget.json` is the model alone (no measurement yet).
+report.json] --out budget.json`. The committed `docs/PERF_budget.json` takes two measurements: the render
+machine's `render/native/perf/report.json` (its commit `e02c871`: the renderer's main and worker sides [M], the
+docked 720p GPU [E]) and frameprof of the boot on the owner's exe (section 4; boot rows only, no frame yet):
+
+```sh
+tools/perf/frame_budget.py --frameprof boot-prof.json --render render/native/perf/report.json --out docs/PERF_budget.json
+```
+
 `gates` holds one level per scenario and clock (`fail`, `pass_30`, `pass_45`, `stretch_60`); each scenario's
 `results.<clock>.verdicts` says per target `pass` (even the pessimistic case fits), `fail` (even the optimistic
 case does not) or `uncertain`. Schema in the tool's docstring.
@@ -410,8 +479,9 @@ case does not) or `uncertain`. Schema in the tool's docstring.
     (`threads` per interval). Frame intervals replace the CPU items by the measured per-role counts (median, min,
     max). Boot intervals are listed under `measured.frameprof.boot` until the boot reaches the main loop;
   - `--render`: the render machine's report, `fnvnx-render-cost/1` (per-draw or per-frame instructions of the
-    renderer's main-thread and worker sides, draws, GPU ms; the format is in the tool). It replaces the two renderer
-    items, and the GPU time bounds the frame.
+    renderer's main-thread and worker sides, draws, GPU ms; the format is in the tool), or its report.json as it is
+    (`fnv-nx P6n report v1`: mix_lo..mix_hi frames, 1,490-3,710 draws). It replaces the two renderer items, and the
+    GPU time bounds the frame.
 * **Placement.** Read from `toolchain/host/placement.h` (the same parser as the emulator): fixed-core roles first
   (main on core 0, render worker on core 1), then each role's work spread over its mask onto the least loaded core,
   as the scheduler balances inside a mask. Core 3 only in scenarios with the `core3` lever.
@@ -439,50 +509,127 @@ inside the target at the 1.25 factor):
 | 45 fps (goal) | 22.2 ms | 18.1 M (14.5) | 31.7 M (25.4) |
 | 60 fps (stretch) | 16.7 ms | 13.6 M | 23.9 M |
 
-### 11.2 Where the main thread's work goes [E]
+### 11.2 Where the main thread's work goes
 
-Model items (M instructions per frame, exterior, ~2,500 draws, native renderer):
+Model items (M instructions per frame, exterior, native renderer; [E] unless marked):
 
 | item | thread | M instructions | movable by |
 |---|---|---:|---|
-| scene graph update + cull | main | 4-9 | `mt_cull`: 40-60 % to cores 1-2 |
+| scene graph update (world transforms, bounds, controllers) | main | 2-4.5 | `neon_math`: -10-20 % |
+| culling (main, 3 shadow, reflection passes) | main | 2-4.5 | `mt_cull`: 70-90 % to cores 1-2 |
 | engine render accumulation (accumulator, batch renderer, shadow-scene lights) | main | 1.5-4 | `mt_cull`: 50-70 %; `instancing`: -10-20 % |
-| native renderer, main side (300-1,000 per draw) | main | 0.75-2.5 | `instancing`: -30-50 % |
-| animation | main | 2-4 | `threaded_anim`: 20-40 % to the AI linear threads |
+| native renderer, main side (P6n mix_lo..mix_hi, 1,490-3,710 draws) | main | **2.34-5.64 [M]** | `render_f2f4`: -25-45 %; `instancing`: -30-50 % |
+| animation | main | 2-4 | `threaded_anim`: 20-40 % to the AI linear threads; `neon_math`: -10-25 % |
 | Havok step + character controllers | main | 2-5 | `havok_workers`: 30-50 % to cores 1-2 |
 | input, menus, sky, scripts, UI | main | 1-3 | - |
+| Interlocked barrier stalls (6.7) | main | 0.25-3.2 | `barrier_relax`: -40-55 % |
 | hand-offs | main | 0.1-0.6 | - |
 | AI process lists, detection, actor updates | AI linear 1 + 2 (cores 2, 1) | 3-8 | already off main (iNumHWThreads=3) |
-| renderer submission worker (300-1,200 per draw) | render worker (core 1) | 0.75-3 | `instancing` |
+| renderer submission worker (P6n: Frame::Finish + deko3d recording) | render worker (core 1) | **3.36-5.43 [M]** | `render_f2f4`, `instancing` |
 | tasklets, IO, audio | mask 0b110 (0b1110 with core 3) | 1-3 | `core3` |
 
-Main thread total **19.7 M (11.3-28.1)** as placed today, inside the 10-20 M of J-0132 at the mid point.
+Main thread total **23.8 M (13.2-34.4)** as placed today. It was 19.7 M (11.3-28.1) before the render machine's
+measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked barrier item.
 
 ### 11.3 The plan, ranked by main-thread time moved
 
 | rank | lever | main thread saving (mid) | status | needs hardware |
 |---|---|---:|---|---|
-| 1 | AI on the AI linear task threads (cores 2 and 1) | 5.5 M | in: PC default path, placement done (S5) | B2: do they really run in parallel with main |
-| 2 | **cull and accumulation on cores 1-2** (`mt_cull`: the 360's Rendering Task Thread 2, 23 stage records per frame) | 4.9 M | off on PC; its TLS fix is in (S5), its stage protocol passes mtqemu (6.6); setting 0x011c710c; needs the culling task's shared state checked for TSO reliance (6.5) | yes: stability of a 360-only path, the hand-off cost per stage |
-| 3 | Havok worker pool (`havok_workers`) | 1.4 M | not traced whether bhkWorld uses the MT simulation | yes |
-| 4 | threaded morpher/particles/blood (`threaded_anim`) | 0.9 M | PC defaults on (hearsay names) | no (PC path) |
-| 5 | instancing / sorted packets in the native renderer | 0.8 M main, 0.8 M worker | S6n plan | no (the render machine measures) |
-| 6 | core 3 for background roles | frees 1-3 M on cores 1-2 | S5 opt-in, off by default | yes: what the system runs on core 3 |
+| 1 | AI on the AI linear task threads (cores 2 and 1) | 5.5 M | in: PC default path, placement done (S5), placement checked on host threads (mtqemu `placement`) | B2: do they really run in parallel with main |
+| 2 | **cull and accumulation on cores 1-2** (`mt_cull`: the 360's Rendering Task Thread 2, 23 stage records per frame) | 4.3 M | off on PC; its TLS fix is in (S5), its stage protocol passes mtqemu (6.6); setting 0x011c710c; needs the culling task's shared state checked for TSO reliance (6.5) | yes: stability of a 360-only path, the hand-off cost per stage |
+| 3 | render machine F2-F4 (`render_f2f4`) | 1.4 M | proposed (RENDER_PERF.md 10) | no |
+| 4 | Havok worker pool (`havok_workers`) | 1.4 M | not traced whether bhkWorld uses the MT simulation | yes |
+| 5 | threaded morpher/particles/blood (`threaded_anim`) | 0.9 M | PC defaults on (hearsay names) | no (PC path) |
+| 6 | no barrier on refcount increments (`barrier_relax`) | 0.8 M | per-site argument (S12) | B9 |
+| 7 | NEON per-object math (`neon_math`) | 0.9 M | proposed (S15) | no |
+| 8 | instancing / sorted packets in the native renderer | 1.0 M main, 1.3 M worker | S6n plan | no (the render machine measures) |
+| 9 | core 3 for background roles | frees 1-3 M on cores 1-2 | S5 opt-in, off by default | yes: what the system runs on core 3 |
 | - | clock 1785 MHz | x1.75 on every core | owner's console setting | no |
 
-**Result** (`docs/PERF_budget.json`; frame = critical core; mid with the lo-hi range; level by the mid case):
+**Result** (`docs/PERF_budget.json`; frame = critical core, here always core 0, or the GPU if larger; mid with the
+lo-hi range; level by the mid case):
 
 | scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
 |---|---:|---|---|---|---|
-| placed (no lever) | 19.7 (11.3-28.1) | 24.1 (11.1-45.9) / 30.1 | pass_30 | 13.8 (6.4-26.2) / 17.2 | stretch_60 |
-| plan45 (mt_cull, havok_workers, threaded_anim) | 12.5 (6.1-20.2) | 15.3 (6.0-33.0) / 19.1 | stretch_60 | 8.7 (3.4-18.9) / 10.9 | stretch_60 |
-| plan60 (+ instancing, core 3) | 11.7 (5.6-19.2) | 14.3 (5.5-31.4) / 17.9 | stretch_60 | 8.2 (3.2-18.0) / 10.2 | stretch_60 |
+| placed (no lever) | 23.8 (13.2-34.4) | 29.1 (12.9-56.3) / 36.4 | **fail** | 16.6 (7.4-32.2) / 20.8 | stretch_60 |
+| plan45 (mt_cull, havok_workers, threaded_anim) | 17.2 (8.5-27.0) | 21.1 (8.4-44.1) / 26.4 | pass_30 | 12.1 (7.1-25.2) / 15.1 | stretch_60 |
+| plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | **pass_45** | 9.9 (7.1-22.0) / 12.4 | stretch_60 |
+| plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | stretch_60 | 9.7 (7.1-20.6) / 12.1 | stretch_60 |
 
 Reading it: **45 fps at stock clock needs the main thread under ~14.5 M mean** (worst frame 22.2 ms at the 1.25
-factor). As placed, the mid case is 19.7 M: 30 fps at 1020 MHz, 45-60 fps only at 1785 MHz. With cull and
-accumulation on cores 1-2 plus the Havok pool, the mid case is 12.5 M and meets 45 fps at 1020 MHz, with cores 1-2
-at 8.9 M each (headroom left). Every verdict is still `uncertain` because the ranges combine a 2.5x spread of work
-with a 1.7x spread of IPC: the two measurements that close it are frameprof on a real frame (work, [M] per thread,
-as soon as S5's boot reaches the main loop) and B1 on hardware (IPC). 60 fps at stock clock needs the plan60 levers
-and the low half of the IPC range; at 1785 MHz the mid case meets it in every scenario. GPU time is not in the
-model until the render machine's report gives it (J-0132: 60 fps at 720p docked likely needs dynamic resolution).
+factor). With the measured renderer, the placed mid case (23.8 M) misses even 30 fps on its worst frame at
+1020 MHz, and the earlier plan45 now only reaches 30 fps there. 45 fps at 1020 MHz needs plan45b: the three
+threading levers plus the next three rows of the queue (11.5), 14.1 M mid, worst frame 21.7 ms. At 1785 MHz the mid
+case meets 60 fps from plan45 on (placed: 45 fps). Every verdict is still `uncertain` (2.6x spread of work, 1.7x of
+IPC); the lo end of the 1785 MHz cases is the docked 720p GPU estimate (7.05 ms) now that the render report gives it.
+The two measurements that close it stay frameprof on a real frame and B1 (IPC) on hardware.
+
+### 11.4 Hotspots (`hotspots[]` in `fnvnx-frame-budget/1`)
+
+Owner's direction: profile first, then optimize the biggest costs first. `frame_budget.py` writes the ranked rows
+(schema in its docstring): per **subsystem** (the frame's items by subsystem and thread role), per **function**, and
+the **boot**'s top functions. Until the boot reaches a scene the per-frame rows are proxies: the subsystems are the
+model's items [E] (the renderer rows are the render machine's [M]); a function row is its A64 instructions per call,
+measured by dyncount over S13's harness (section 7, callees excluded) [M], times an estimated number of calls per
+exterior frame [E], so the row is [E]. Once frameprof profiles frames, its per-subsystem and per-function medians
+replace both [M]. Share = mid ms at IPC 0.8 / 22.2 ms.
+
+**Top 10 per frame** (mid M instructions; lo-hi in brackets):
+
+| rank | subsystem (thread) | M per frame | share of 22.2 ms at 1020 / 1785 MHz | basis | fix (11.5) |
+|---:|---|---|---|---|---|
+| 1 | AI (AI linear 1 + 2, cores 2/1) | 5.5 (3-8) | 30 % / 17 % | E | already off main |
+| 2 | renderer, submission worker (core 1) | 4.4 (3.4-5.4) | 24 % / 14 % | M | instancing; off the critical path |
+| 3 | **renderer, main side** | 4.0 (2.3-5.6) | 22 % / 13 % | M | render F2-F4 |
+| 4 | **Havok** | 3.5 (2-5) | 19 % / 11 % | E | Havok worker pool |
+| 5 | **cull** | 3.25 (2-4.5) | 18 % / 10 % | E | mt_cull |
+| 6 | **scene graph update** | 3.25 (2-4.5) | 18 % / 10 % | E | NEON math, GOT pass |
+| 7 | **animation** | 3.0 (2-4) | 17 % / 10 % | E | threaded_anim, NEON Slerp |
+| 8 | **render accumulation** | 2.75 (1.5-4) | 15 % / 9 % | E | mt_cull, instancing |
+| 9 | background: tasklets, IO, audio (cores 1-2) | 2.0 (1-3) | 11 % / 6 % | E | core 3 |
+| 10 | **game logic, UI, scripts** | 2.0 (1-3) | 11 % / 6 % | E | measure first |
+| 11 | **Interlocked barrier stalls** | 1.7 (0.25-3.2) | 10 % / 5 % | E | relax increments |
+
+(bold: on the main thread, the critical path)
+
+| rank | function (main thread) | M per frame | share at 1020 / 1785 | per call [M] x calls [E] |
+|---:|---|---|---|---|
+| 1 | InterlockedIncrement / Decrement (refcounts), inlined | 1.8 (0.4-4.0) | 9.9 % / 5.7 % | 8 instructions + 15-40 stall cycles x 20k-100k |
+| 2 | culling per object (0x00a694e0 + the plane tests) | 0.91 (0.3-1.8) | 5.0 % / 2.9 % | 50-90 (12 measured) x 6k-20k |
+| 3 | NiQuaternion::Slerp 0x00a6e330 | 0.78 (0.26-1.3) | 4.3 % / 2.5 % | 130 x 2k-10k |
+| 4 | NiBound::Update 0x00a7fdd0 | 0.72 (0.36-1.08) | 4.0 % / 2.3 % | 45 x 8k-24k |
+| 5 | NiAVObject::UpdateWorldData 0x00a68c60 + NiMatrix3 product 0x00a588a0 | 0.68 (0.28-1.2) | 3.8 % / 2.1 % | 70-100 x 4k-12k |
+| 6 | Havok GSK narrow phase (0x00da8fb0 and 3 helpers) | 0.66 (0.12-1.2) | 3.6 % / 2.1 % | 600 x 200-2,000 |
+| 7 | BSBatchRenderer::FindPassBucket + FindBucketIndex | 0.31 (0.2-0.4) | 1.7 % / 1.0 % | 82 x 2.5k-5k |
+| 8 | NiQuaternion::FromRotationMatrix 0x00a6df40 | 0.18 (0.05-0.31) | 1.0 % / 0.6 % | 103 x 0.5k-3k |
+| 9 | NiNode::UpdateTransformAndBounds / UpdateDownwardPass | 0.16 (0.04-0.36) | 0.9 % / 0.5 % | 19-60 x 2k-6k |
+
+The function proxies cover ~6 M of the ~24 M main thread: the per-call counts exclude callees, and the engine's
+virtual-call glue, controllers and the renderer's engine side are not in them. They say which leaf functions are
+worth an override; the subsystem rows say where the frame goes.
+
+**Boot [M]** (owner's exe, to WinMain, 242.6 M instructions; ms at IPC 0.8, 1020 / 1785 MHz): `fnvnx_scan_codeptrs`
+77.6 M (95 / 54 ms), `fnvnx_image_ptr` 39.9 M (49 / 28), `fnvnx_codemap_find` 17.5 M (21 / 12), `eligible_in`
+16.0 M (20 / 11), `classify` 13.9 M, `fnvnx_image_load_relocs` 13.9 M, `kx_find` 10.1 M, `early_zero` 9.9 M,
+`qsort` 7.2 M, `fnvnx_xc_locate` 6.4 M: the top 10 are 212 M, 87 % of the boot (0.26 s at 1.02 GHz). All S3's
+loader (code-pointer scan, relocations, cross-check tables) and S10's runtime.
+
+### 11.5 The optimization queue (`queue[]`)
+
+The fixes ranked by main-thread instructions saved (mid; ms at IPC 0.8). The first rows are the 45 fps path at
+stock clock (plan45b):
+
+| rank | hotspot | fix | main saving M (lo-hi) | ms at 1020 / 1785 | owner | needs hardware |
+|---:|---|---|---|---|---|---|
+| 1 | cull | `mt_cull`: Rendering Task Thread 2 on cores 1-2 | 2.7 (1.4-4.05) | 3.3 / 1.9 | S15, S5 | yes |
+| 2 | render accumulation | moves with `mt_cull`; instancing | 1.8 (0.75-2.8) | 2.2 / 1.2 | S6n, S15 | yes |
+| 3 | renderer, main side | render machine F2-F4 (sort fixed cost, bind elimination) | 1.75 (1.0-2.5) | 2.1 / 1.2 | S6n, P6n | no |
+| 4 | Havok | Havok's multithreaded simulation on the worker pool (trace bhkWorld first) | 1.55 (0.6-2.5) | 1.9 / 1.1 | S15 | yes |
+| 5 | animation | `threaded_anim` (PC defaults) + NEON Slerp / FromRotationMatrix | 1.15 (0.5-1.8) | 1.4 / 0.8 | S15 | no |
+| 6 | Interlocked barriers | inlined (done); next: no barrier on refcount increments | 0.85 (0.1-1.6) | 1.0 / 0.6 | S12, S15 | B9 |
+| 7 | scene graph update | NEON overrides of NiMatrix3 product, NiBound::Update, transform compose; GOT movz/movk pass | 0.6 (0.3-0.9) | 0.7 / 0.4 | S15, S2 | no |
+| - | boot | an index for S3's code-pointer scan (212 M of 243 M) | boot only | 0.26 s / 0.15 s | S3 | no |
+
+Next for S15, in queue order among what needs no hardware: rows 5 and 7 (NEON overrides of the per-object math,
+first Slerp, NiBound::Update and the matrix product: override rows like `spinlock_0040fba0.c`, checked by S13's
+harness against the oracle) and row 6's per-site argument with S12.
