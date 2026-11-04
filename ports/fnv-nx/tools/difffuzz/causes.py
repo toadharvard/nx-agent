@@ -134,6 +134,11 @@ POLICY = {
     'x86-only-store': ('triage', 'S13b', True, 'the oracle writes memory the native never writes'),
     'oracle-fault':   ('triage', 'S13b', True, 'only the oracle faults on a data access: a dead load GCC dropped '
                                                '(by design) or a field the native reads at another offset (layout)'),
+    'arg-stack-vs-object': ('triage', 'S13b', True, 'one side passes a temporary in its own frame, the other the '
+                                                    'object itself: copy elision (by design) or a by-value '
+                                                    'aggregate passed differently (ABI)'),
+    'arg-other-buffer': ('triage', 'S13b', True, 'the two sides pass different argument objects: another member '
+                                                 'or parameter (layout / argument order)'),
     'unclassified':   ('triage', 'S13b', True, 'no rule matched'),
 }
 
@@ -225,6 +230,11 @@ def _rule_call_args(d):
             return 'native-address'
         if _in(va, A64_STUBS) and not _in(vx, A64_STUBS):
             return 'native-stub-data'
+        objs = (BUFS, HEAP)
+        if (_in(vx, STACK) and any(_in(va, o) for o in objs)) or (_in(va, STACK) and any(_in(vx, o) for o in objs)):
+            return 'arg-stack-vs-object'
+        if _in(vx, BUFS) and _in(va, BUFS):
+            return 'arg-other-buffer'
     return None
 
 

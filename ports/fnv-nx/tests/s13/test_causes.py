@@ -73,6 +73,10 @@ def test_rules():
           'native-garbage-arg', 'native garbage argument')
     check(refined(dict(kind='call-args', arg='sret', cls='P', x86=w(0x03000000), arm=w(0)))
           == 'sret-mismatch', 'hidden result pointer differs')
+    check(refined(dict(kind='call-args', arg='this', cls='P', x86=w(0x06effff0), arm=w(0x03002000))) ==
+          'arg-stack-vs-object', 'stack temporary vs the object')
+    check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x03002000), arm=w(0x03001000))) ==
+          'arg-other-buffer', 'another argument buffer')
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(5), arm=w(7))) == 'unclassified',
           'plain int argument difference stays open')
     # return values
