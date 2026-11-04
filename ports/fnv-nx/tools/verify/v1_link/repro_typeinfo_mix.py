@@ -49,13 +49,25 @@ def main():
         open(src, 'w').write(text)
         subprocess.run([qemu_ilp32.CXX, '-mabi=ilp32', '-O2', '-fPIC', '-c', src, '-o',
                         os.path.join(fixed, name + '.o')], check=True)
-    elf = os.path.join(work, 'trial.elf')
-    objs = sorted(os.path.join(fixed, n) for n in os.listdir(fixed))
-    subprocess.run([qemu_ilp32.LD, '-m', 'aarch64linux32', '--noinhibit-exec', '-e', '0', '-o', elf, *objs],
-                   capture_output=True)
-    rc = c4_definers.audit(fixed, elf, os.path.join(work, 'audit.tsv'))
-    print('DEFECT reproduced: the kept typeinfo of C is not the one of the unit whose vtable was kept' if rc else
-          'not reproduced')
+    def link_audit(tag):
+        elf = os.path.join(work, 'trial%s.elf' % tag)
+        objs = sorted(os.path.join(fixed, n) for n in os.listdir(fixed))
+        subprocess.run([qemu_ilp32.LD, '-m', 'aarch64linux32', '--noinhibit-exec', '-e', '0', '-o', elf, *objs],
+                       capture_output=True)
+        return c4_definers.audit(fixed, elf, os.path.join(work, 'audit%s.tsv' % tag))
+    raw = link_audit('_raw')
+    print('mechanism (objects as compiled): %s' % ('vtable and typeinfo of C from different units' if raw else
+                                                   'not shown'))
+    # the code under test: apply's last pass keeps each class's typeinfo with its vtable (J-0081)
+    sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
+    import fnvlink
+    if not hasattr(fnvlink, 'pair_typeinfo'):
+        print('DEFECT: tools/link has no typeinfo pairing')
+        return 1
+    rows, cnt = fnvlink.pair_typeinfo(fixed)
+    rc = link_audit('')
+    print('after fnvlink.pair_typeinfo (%d classes, %s): %s' % (len(rows), dict(cnt), 'DEFECT: still mixed' if rc
+                                                                 else 'fixed: typeinfo kept with its vtable'))
     return rc
 
 

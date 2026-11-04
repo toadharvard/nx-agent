@@ -47,6 +47,8 @@ def load_bridges(path):
 
 def load_layouts(path):
     lay = collections.defaultdict(dict)
+    if not os.path.exists(path):          # a link without the probe step: no aggregate layouts
+        return lay
     for line in open(path):
         if line.startswith('#'):
             continue

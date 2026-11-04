@@ -22,6 +22,8 @@ import v1pairs               # noqa: E402
 
 def lay_of(out_dir):
     lay = {}
+    if not os.path.exists(os.path.join(out_dir, 'layouts.tsv')):
+        return lay
     for line in open(os.path.join(out_dir, 'layouts.tsv')):
         c = line.rstrip('\n').split('\t')
         if len(c) >= 7 and not line.startswith('#') and c[2] != '-1':
@@ -59,6 +61,28 @@ def main():
         fl = {'float', 'double', 'long double'}
         if rr in fl and dr in fl and (rr == 'float') != (dr == 'float'):
             found['C float/double result'][key] = (p, rs, ds)
+        # E: the callee pops its arguments (stdcall / thiscall / fastcall) and the reference pushes another number
+        # of stack bytes: x86 returns with esp moved (the pair cannot have worked as declared)
+        if ds.cc in ('stdcall', 'thiscall', 'fastcall'):
+            try:
+                def stack_bytes(s):
+                    lay = {}
+                    tys = [bh.ty_of(t, lay) for t in s.params]
+                    locs, _ = bh.x86_args(s, tys, bh.ty_of(s.ret, lay))   # aggregates (no layout here): Skip
+                    return sum((sz + 3) // 4 * 4 for lab, loc, sz in locs if isinstance(loc, tuple))
+                if stack_bytes(rs) != stack_bytes(ds):
+                    found['E callee-pop byte count differs'][key] = (p, rs, ds)
+            except bh.Skip:
+                pass
+        # D: a member returns a 1/2/4/8-byte aggregate (MSVC: hidden buffer, always for members) and the other side
+        # is a free function returning an aggregate of the same size in edx:eax (trivial: as abi2 assumes)
+        for x, y in ((rs, ds), (ds, rs)):
+            ax, ay = agg_name(x.ret), agg_name(y.ret)
+            if ax and ay and x.member and not y.member and y.cc != 'thiscall':
+                sx = lay.get((p.obj, ax)) or next((v for (u, t), v in lay.items() if t == ax), None)
+                sy = next((v for (u, t), v in lay.items() if t == ay), None)
+                if sx in (1, 2, 4, 8) and sy == sx:
+                    found['D member hidden result vs free small aggregate in registers'][key] = (p, rs, ds)
         for x, y in ((rs, ds), (ds, rs)):
             ag = agg_name(x.ret)
             if ag and x.cc == 'fastcall' and p.cls == 'code-bridge':
