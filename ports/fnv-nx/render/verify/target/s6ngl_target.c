@@ -5,9 +5,8 @@
  * V6n supplies only what S6n has no code for yet: the fixed-function vertex/pixel model (the same model as
  * gl_target.c, written as deko3d-flavour GLSL against S6n's binding rules) and the mapping of D3D9 calls onto
  * S6n's stream (one DefineState per draw, BeginPass for each Clear).
- * Limits of S6n's API that this adapter reports as errors instead of emulating: Clear restricted to a viewport /
- * scissor sub-rectangle (BeginPass clears the whole target), read-back of depth/stencil and of float targets
- * (NxReadback is RGBA8 colour only). */
+ * Uses ABI v3: D3D9 Clear = NxOp_Clear on the viewport (intersected with the scissor when enabled); read-back of
+ * float targets (NxRb_RGBA32F), depth (NxRb_Depth32F) and stencil (NxRb_Stencil8). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -165,9 +164,7 @@ static V6nTarget* s_begin2(int w, int h, uint32_t rtf, uint32_t dsf, char* err, 
     g_live = 1;
     t->w = w; t->h = h; t->rtf = rtf; t->dsf = dsf; t->nextState = 1;
     NxFormatInfo fi = nx_d3d9_format(rtf);
-    if (!fi.format || !(fi.flags & NXFMT_RENDER) || fi.format == NxFmt_RGBA16F || fi.format == NxFmt_RGBA32F) {
-        snprintf(err, errlen, "rt format %u: S6n read-back is RGBA8 only", rtf); return NULL;
-    }
+    if (!fi.format || !(fi.flags & NXFMT_RENDER)) { snprintf(err, errlen, "rt format %u: no render format", rtf); return NULL; }
     NxImageDesc d; memset(&d, 0, sizeof d);
     d.width = (uint16_t)w; d.height = (uint16_t)h; d.format = fi.format; d.flags = NxImg_RenderTarget;
     t->colorImg = (uint32_t)CALL1(t->api->image_create, &d);
@@ -211,18 +208,24 @@ static V6nTarget* s_begin2(int w, int h, uint32_t rtf, uint32_t dsf, char* err, 
 }
 static void s_end(V6nTarget* t) {
     nxgl_destroy(); g_live = 0;
-    free(t->block); free(t->rb.color); free(t);
+    free(t->block); free(t->rb.color); free(t->rb.depth); free(t->rb.stencil); free(t);
 }
 static void s_clear(V6nTarget* t, uint32_t flags, uint32_t color, float z, uint32_t s) {
     /* D3D9 (Nine device9.c user_assert): ZBUFFER without a depth surface, or STENCIL without a stencil format,
      * make the whole Clear D3DERR_INVALIDCALL: nothing is cleared */
     if ((flags & 2) && !t->dsf) return;
     if ((flags & 4) && !(t->dsf && (nx_d3d9_format(t->dsf).flags & NXFMT_STENCIL))) return;
-    int full = t->vp.X == 0 && t->vp.Y == 0 && (int)t->vp.Width >= t->w && (int)t->vp.Height >= t->h;
-    if (t->rs[174] && (t->sc.left > 0 || t->sc.top > 0 || t->sc.right < t->w || t->sc.bottom < t->h)) full = 0;
-    if (!full) { fprintf(stderr, "s6n-gl: Clear of a sub-rectangle has no S6n op (BeginPass clears the target)\n"); t->err = 1; return; }
-    emit(t, NxOp_EndPass, NULL, 0);
-    begin_pass(t, flags & 7, color, z, s);
+    /* D3D9 / Nine: the rectangle is the viewport, intersected with the scissor rect when the scissor test is on */
+    int x1 = t->vp.X, y1 = t->vp.Y, x2 = t->vp.X + t->vp.Width, y2 = t->vp.Y + t->vp.Height;
+    if (t->rs[174]) {
+        if (t->sc.left > x1) x1 = t->sc.left; if (t->sc.top > y1) y1 = t->sc.top;
+        if (t->sc.right < x2) x2 = t->sc.right; if (t->sc.bottom < y2) y2 = t->sc.bottom;
+    }
+    if (x2 > t->w) x2 = t->w; if (y2 > t->h) y2 = t->h;
+    if (x2 <= x1 || y2 <= y1) return;
+    uint32_t rgba = ((color >> 16) & 0xFF) | (color & 0xFF00) | (color & 0xFF) << 16 | (color & 0xFF000000u);
+    uint32_t a[8] = {flags & 7, rgba, fb(z), s & 0xFF, (uint32_t)x1, (uint32_t)y1, (uint32_t)(x2 - x1), (uint32_t)(y2 - y1)};
+    emit(t, NxOp_Clear, a, 8);
 }
 static void s_rs(V6nTarget* t, uint32_t st, uint32_t v) { if (st < NXD3D_RS_COUNT) t->rs[st] = v; }
 static void s_samp(V6nTarget* t, uint32_t s, uint32_t ty, uint32_t v) { if (s < 2 && ty < NXD3D_SAMP_COUNT) t->samp[s][ty] = v; }
@@ -343,17 +346,42 @@ static int s_readback(V6nTarget* t, V6nReadback* out) {
     NxSubmit sub; memset(&sub, 0, sizeof sub);
     sub.stream = (uint64_t)(uintptr_t)t->cmd; sub.words = t->nw; sub.frame = 1;
     if (CALL1(t->api->submit, &sub)) return 0;
-    uint8_t* px = malloc((size_t)t->w * t->h * 4);
-    NxReadback r; memset(&r, 0, sizeof r);
-    r.image = t->colorImg; r.w = t->w; r.h = t->h; r.dst_size = t->w * t->h * 4; r.dst = (uint64_t)(uintptr_t)px;
-    if (CALL1(t->api->readback, &r)) { free(px); return 0; }
-    V6nReadback* o = &t->rb;
-    o->w = t->w; o->h = t->h; o->color = calloc((size_t)t->w * t->h * 4, sizeof(float));
-    for (int i = 0; i < t->w * t->h * 4; i++) o->color[i] = px[i];
-    free(px);
+    int w = t->w, h = t->h, np = w * h;
     NxFormatInfo fi = nx_d3d9_format(t->rtf);
+    int isf = fi.format == NxFmt_RGBA16F || fi.format == NxFmt_RGBA32F;
+    V6nReadback* o = &t->rb;
+    o->w = w; o->h = h; o->color = calloc((size_t)np * 4, sizeof(float)); o->color_is_float = isf;
+    NxReadback r; memset(&r, 0, sizeof r);
+    r.image = t->colorImg; r.w = w; r.h = h;
+    if (isf) {   /* ABI v3: exact floats */
+        r.format = NxRb_RGBA32F; r.dst_size = np * 16; r.dst = (uint64_t)(uintptr_t)o->color;
+        if (CALL1(t->api->readback, &r)) return 0;
+    } else {
+        uint8_t* px = malloc((size_t)np * 4);
+        r.format = NxRb_RGBA8; r.dst_size = np * 4; r.dst = (uint64_t)(uintptr_t)px;
+        if (CALL1(t->api->readback, &r)) { free(px); return 0; }
+        for (int i = 0; i < np * 4; i++) o->color[i] = px[i];
+        free(px);
+    }
     o->color_channels = (fi.format == NxFmt_BGRX8 || fi.format == NxFmt_RGBX8) ? 3 : 4;
-    if (o->color_channels == 3) for (int i = 0; i < t->w * t->h; i++) o->color[4 * i + 3] = 0;
+    if (o->color_channels == 3) for (int i = 0; i < np; i++) o->color[4 * i + 3] = 0;
+    if (t->depthImg) {   /* depth as the stored [0,1] float -> the integer of the D3D format (as v6n_nine/v6n_gl) */
+        NxFormatInfo di = nx_d3d9_format(t->dsf);
+        float* d = malloc((size_t)np * 4);
+        NxReadback rd = r; rd.image = t->depthImg; rd.format = NxRb_Depth32F; rd.dst_size = np * 4; rd.dst = (uint64_t)(uintptr_t)d;
+        if (CALL1(t->api->readback, &rd)) { free(d); return 0; }
+        o->depth = calloc((size_t)np, 4);
+        for (int i = 0; i < np; i++) {
+            if (di.format == NxFmt_Z32F) memcpy(&o->depth[i], &d[i], 4);
+            else { double m = di.format == NxFmt_Z16 ? 65535.0 : 16777215.0; o->depth[i] = (uint32_t)(d[i] * m + 0.5); }
+        }
+        free(d);
+        if (di.flags & NXFMT_STENCIL) {
+            o->stencil = calloc((size_t)np, 1);
+            NxReadback rs = r; rs.image = t->depthImg; rs.format = NxRb_Stencil8; rs.dst_size = np; rs.dst = (uint64_t)(uintptr_t)o->stencil;
+            if (CALL1(t->api->readback, &rs)) return 0;
+        }
+    }
     *out = *o;
     return 1;
 }

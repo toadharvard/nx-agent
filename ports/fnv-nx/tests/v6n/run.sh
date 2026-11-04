@@ -68,6 +68,7 @@ defect() {   # name -> 0 when the defect is fixed (test passes)
 		g++ -std=c++17 -O1 -I"$N/include" -I"$N/front" -I"$N/n1" -I"$S/shaders" -I"$S" -o "$S/v6n_cpr" "$T/defects/camera_port_rounding.cpp" \
 			"$N/n1/renderer.cpp" "$S/front.o" "$S/nxgl.o" "$S/gpu_dispatch.o" "$S/d3d9_state_s.o" "$S/nx_shaders.o" -lEGL -lm || return 2
 		"$S/v6n_cpr" ;;
+	clear_srgb) py "$V/pixdiff.py" --target s6ngl "$T/defects/clear_srgb.scene" ;;
 	*) echo "unknown defect $1"; return 2 ;;
 	esac
 }
