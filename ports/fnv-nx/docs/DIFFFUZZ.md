@@ -70,6 +70,14 @@ stdcall imports pop their arguments. The Interlocked family runs as builtins on 
 allocator (0x00aa1460), `__dynamic_cast` -> 0x00ec43fb, `atexit` -> 0x00ec658f.
 **Dynamic initializers.** `??__E`/`??__F` and the platform's `__fnvnx_dyn*` run as `void(void)`.
 
+**Canned results (difffuzz-5).** An intercepted callee declared `bool` returns 0/1 (MSVC callers test al, GCC
+bit 0). A callee MSVC returns through a hidden result pointer gets the same canned bytes on both machines (x86: in
+the caller's buffer, eax = its address; AArch64: wherever AAPCS64 puts that type, x8 memory or registers). An
+intercepted MSVC constructor (`??0`) returns `this`. Native `sincos`/`sincosf` run as builtins. A pointer result
+into the native unit's own .rodata is compared by its pointee (C string); a native code address passed or
+returned as data compares as the original function; a bool result with the same truth value but another byte is
+soft `bool-repr`; call arguments that are NaN on both sides are soft `nan-bits`.
+
 **Argument filters.** A call argument is not compared when the callee's declaration only carries it for MSVC's
 register placement (S2 `abi.tsv` "edx dummy" notes), or when the oracle's own value is the case's planted garbage
 (an uninitialised stack or register word: `world.garbage_words`); a native argument equal to native garbage is

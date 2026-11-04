@@ -40,6 +40,7 @@ A64 = {n: n for n in ('memcpy', 'memmove', 'memset', 'memcmp', 'strlen', 'strcmp
 A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp', 'strncasecmp': 'strnicmp',
             '_strnicmp': 'strnicmp', 'sqrt': 'sqrt', 'sqrtf': 'sqrtf', 'sin': 'sin', 'sinf': 'sinf', 'cos': 'cos',
             'cosf': 'cosf', 'fabs': 'fabs', 'fabsf': 'fabsf', 'log10': 'log10', 'log10f': 'log10f',
+            'sincos': 'sincos', 'sincosf': 'sincosf',
             '_memcpy': 'memcpy', '_memmove': 'memmove',
             '_memset': 'memset', '_strlen': 'strlen', '_strcmp': 'strcmp',
             # GCC's thread-safe local statics (MSVC 2008: a plain guard bit, no call): single-threaded semantics

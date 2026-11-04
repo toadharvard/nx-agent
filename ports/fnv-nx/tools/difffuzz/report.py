@@ -66,6 +66,10 @@ def reclassify(rec):
         d = rec['_now']
         if d.get('arm_private_reads'):
             return 'split-global'
+    if d.get('bool_repr'):
+        return 'bool-repr'
+    if d.get('nan_bits'):
+        return 'nan-bits'
     if d['kind'] in ('mem-write', 'return'):
         try:
             import classify

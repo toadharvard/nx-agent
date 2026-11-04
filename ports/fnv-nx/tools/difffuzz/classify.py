@@ -116,6 +116,10 @@ def hint(pair, target, case, div, fn, max_steps):
     k = div['kind']
     if k == 'local-static':
         h['cause'] = 'local-static'; return h
+    if div.get('bool_repr'):
+        h['cause'] = 'bool-repr'; return h
+    if div.get('nan_bits'):
+        h['cause'] = 'nan-bits'; return h
     regs = entry_register_reads(fn, target.conv)
     if regs:
         h['cause'] = 'x86-custom-cc'; h['regs'] = regs; return h

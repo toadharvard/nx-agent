@@ -249,7 +249,18 @@ class X86Engine:
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
         pop, kind = info if info else (0, 'int')
-        uc.reg_write(UC_X86_REG_EAX, world.u32(rb, 0))
+        eax = world.u32(rb, 0)
+        cv = self._callee_conv(address)
+        if cv is not None and cv.ret is not None and cv.ret.is_bool:
+            eax = (eax & ~0xff) | (rb[0] & 1)          # a real bool result is 0/1 (MSVC tests al, GCC bit 0)
+        if cv is not None and cv.hidden and cv.ret is not None:
+            p = self._sret_of(cv, r.calls[-1])
+            if p is not None:                          # the result in the caller's buffer, its address in eax
+                libcalls.Mem(uc, r.writes, self._ensure).write(p, world.result_bytes(case, k, cv.ret.size))
+                eax = p
+        elif cv is not None and (getattr(cv, 'name', '') or '').startswith('??0'):
+            eax = r.calls[-1].args[0]                  # an MSVC constructor returns this
+        uc.reg_write(UC_X86_REG_EAX, eax)
         uc.reg_write(UC_X86_REG_EDX, world.u32(rb, 4))
         uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
         if kind in ('f32', 'f64'):
@@ -266,6 +277,29 @@ class X86Engine:
             return
         uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
         uc.reg_write(UC_X86_REG_EIP, retaddr)
+
+    def _callee_conv(self, address):
+        f = getattr(self.callee_info, 'conv', None)
+        try:
+            return f(address) if f else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _sret_of(cv, call):
+        """The hidden result pointer the caller passed (MSVC: first stack word, or ecx/edx/another register)."""
+        for lab, space, off, size in cv.x86:
+            if lab != 'sret':
+                continue
+            if space == 'ecx':
+                return call.args[0]
+            if space == 'edx':
+                return call.args[1]
+            if space in call.regs:
+                return call.regs[space]
+            if off % 4 == 0 and 2 + off // 4 < len(call.args):
+                return call.args[2 + off // 4]
+        return None
 
     def _on_import(self, uc, address, size, user):
         """A call through an IAT slot (pinned to import stub k): the Interlocked family runs, anything else is a

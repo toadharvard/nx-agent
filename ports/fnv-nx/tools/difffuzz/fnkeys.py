@@ -21,7 +21,7 @@ import sys
 
 import config
 
-HARNESS = 'difffuzz-4'
+HARNESS = 'difffuzz-5'
 ADDR = re.compile(r'^__fnv_([0-9a-f]{8})$')
 CALLS = {282, 283}               # R_AARCH64_JUMP26 / CALL26 (ELF32 ILP32 uses the same numbers)
 SHF_EXEC = 4

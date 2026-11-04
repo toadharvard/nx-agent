@@ -191,5 +191,16 @@ def garbage32(seed, k):
     return random.Random((seed * 7919 + k * 104729) & 0xffffffff).getrandbits(32)
 
 
+def result_bytes(case, k, n):
+    """The canned result of the k-th intercepted call when it is returned through memory (or a register pair
+    wider than eax:edx): the case's canned bytes, extended with garbage words; the same on both machines."""
+    b = bytearray(case.ret_bytes(k))
+    i = 0
+    while len(b) < n:
+        b += garbage32(case.seed, 900 + 64 * k + i).to_bytes(4, 'little')
+        i += 1
+    return bytes(b[:n])
+
+
 def u32(b, o=0):
     return struct.unpack_from('<I', b, o)[0]

@@ -52,6 +52,7 @@ class Result:
 class Arm64Engine:
     def __init__(self, world_obj, image, stub_orig, vtables=None):
         self.vtables = vtables or {}
+        self.callee_conv = None          # original address -> Conv of the callee definition (set by runner.Pair)
         self.world = world_obj
         self.image = image
         self.stub_orig = stub_orig
@@ -288,12 +289,34 @@ class Arm64Engine:
         r.calls.append(Call(target, [uc.reg_read(XR[i]) for i in range(8)], [uc.reg_read(VR[i]) for i in range(8)],
                             uc.reg_read(A.UC_ARM64_REG_X8), stk))
         rb = case.ret_bytes(k)
+        x8 = uc.reg_read(A.UC_ARM64_REG_X8) & 0xffffffff
         for i in list(range(1, 18)):
             uc.reg_write(XR[i], world.garbage32(case.seed, 600 + i + 32 * k))
         for i in list(range(1, 8)) + list(range(16, 32)):
             uc.reg_write(VR[i], world.garbage32(case.seed, 700 + i + 32 * k))
-        uc.reg_write(XR[0], int.from_bytes(rb[:8], 'little'))
+        x0 = int.from_bytes(rb[:8], 'little')
+        cv = None
+        if self.callee_conv is not None and target is not None and target >= 0:
+            try:
+                cv = self.callee_conv(target)
+            except Exception:  # noqa: BLE001
+                cv = None
+        if cv is not None and cv.ret is not None and cv.ret.is_bool:
+            x0 = (x0 & ~0xff) | (rb[0] & 1)            # a real bool result is 0/1
+        uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
+        if cv is not None and cv.hidden and cv.ret is not None:
+            # the MSVC side returns this value through memory: the same bytes here, wherever AAPCS64 puts them
+            res = world.result_bytes(case, k, cv.ret.size)
+            for voff, cont, coff, ln in cv.a64_ret:
+                if cont == ('mem', 'x8'):
+                    libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes).write(x8 + voff, res[voff:voff + ln])
+                elif cont[0] in ('x', 'v'):
+                    reg = XR[cont[1]] if cont[0] == 'x' else VR[cont[1]]
+                    width = 8 if cont[0] == 'x' else 16
+                    cur = bytearray((uc.reg_read(reg) & ((1 << (8 * width)) - 1)).to_bytes(width, 'little'))
+                    cur[coff:coff + ln] = res[voff:voff + ln]
+                    uc.reg_write(reg, int.from_bytes(bytes(cur), 'little'))
         uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
 
     def _builtin(self, uc, name, target, r):
@@ -310,6 +333,16 @@ class Arm64Engine:
                 bname = None
         if bname is None:
             return False
+        if bname in ('sincos', 'sincosf'):              # void sincos(x, double *s, double *c)
+            v = uc.reg_read(VR[0])
+            f = bname.endswith('f')
+            x = struct.unpack('<f' if f else '<d', (v & (2 ** (32 if f else 64) - 1)).to_bytes(4 if f else 8, 'little'))[0]
+            s, c = libcalls.run_float('sin', x), libcalls.run_float('cos', x)
+            m = libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes)
+            m.write(uc.reg_read(XR[0]) & 0xffffffff, struct.pack('<f' if f else '<d', s))
+            m.write(uc.reg_read(XR[1]) & 0xffffffff, struct.pack('<f' if f else '<d', c))
+            uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+            return True
         if bname in libcalls.FLOAT_NAMES:
             v = uc.reg_read(VR[0])
             if bname.endswith('f'):
