@@ -563,6 +563,69 @@ def blood_cases(mvp):
 SIMPLE_NAMES = ("GDECAL.vso", "GDECALS.vso", "GDECAL.pso", "BS.vso", "BS.pso", "BSF.vso", "BSF.pso")
 
 
+# ---- precipitation (PRECIP000-003) and beam (BEAM) ---------------------------------------------------------------
+
+def precip_scene(rng, n=300):
+    """drops (4 corners each): POSITION = corner (x right, y forward, z up), TEXCOORD0 = uv, TEXCOORD1 = drop position"""
+    v, ix = [], []
+    for k in range(n):
+        p = [rng.uniform(-400, 400), rng.uniform(100, 900), rng.uniform(-100, 500)]
+        base = len(v)
+        for cx, cz, uvx, uvy in ((-1, -1, 0, 1), (1, -1, 1, 1), (1, 1, 1, 0), (-1, 1, 0, 0)):
+            v.append([cx * 6, rng.uniform(-2, 2), cz * 14, uvx, uvy, *p, 0])
+        ix += [base, base + 1, base + 2, base, base + 2, base + 3]
+    return np.array(v, np.float32), ix
+
+
+PRECIP_LAYOUT = ((0, 0, 3), (6, 3, 2), (7, 5, 3))
+
+
+def precip_geometry(verts, ix):
+    vao = GL.glGenVertexArrays(1); GL.glBindVertexArray(vao)
+    vb = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vb)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER, verts.nbytes, verts, GL.GL_STATIC_DRAW)
+    ia = np.array(ix, np.uint32)
+    ib = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, ib)
+    GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, ia.nbytes, ia, GL.GL_STATIC_DRAW)
+    for loc, off, n in PRECIP_LAYOUT:
+        GL.glEnableVertexAttribArray(loc)
+        GL.glVertexAttribPointer(loc, n, GL.GL_FLOAT, GL.GL_FALSE, 9 * 4, ctypes.c_void_p(off * 4))
+    return vao, len(ia)
+
+
+def precip_cases(mvp, eye):
+    up = np.array([0.1, -0.2, 1.0]); up /= np.linalg.norm(up)
+    regs = {0: None, 8: [*eye, 1], 9: [35.0, -20.0, -260.0, 0], 10: [-300.0, 200.0, 0.0, 0], 11: [300.0, 800.0, 400.0, 0],
+            12: [3.7, 0, 1.3, 0], 13: [*up, 0]}
+    vs = np.zeros((256, 4), np.float32); vs[0:4] = mvp
+    for r, x in regs.items():
+        if x is not None:
+            vs[r] = x
+    ps = zero_ps(); ps[0] = [0.15, 0.1, 0.05, 0]
+    vdrv = np.zeros((4, 4), np.float32); vdrv[0] = [0, 0, 1, 0]
+    blk = np.zeros((11, 4), np.float32); blk[0:4] = mvp.T; blk[4:10] = vs[8:14]; blk[10] = ps[0]
+    t = [(0, vs), (2, vdrv), (3, ps), (5, np.zeros((20, 4), np.float32))]
+    nat = [(1, blk), (2, np.zeros((3, 4), np.float32))]
+    return [("precip", "PRECIP000.vso", "PRECIP000.pso", "precip.vert", "precip.frag", t, nat),
+            ("precip_up", "PRECIP001.vso", "PRECIP001.pso", "precip_up.vert", "precip.frag", t, nat),
+            ("precip_spin", "PRECIP002.vso", "PRECIP000.pso", "precip_spin.vert", "precip__e0.frag", t, nat),
+            ("precip_upspin", "PRECIP003.vso", "PRECIP001.pso", "precip_upspin.vert", "precip.frag", t, nat)]
+
+
+def beam_cases(mvp):
+    f0 = [1.6, 2.4, 0.75, 0.8]
+    vs = np.zeros((256, 4), np.float32); vs[0:4] = mvp; vs[4] = f0
+    vdrv = np.zeros((4, 4), np.float32); vdrv[0] = [0, 0, 1, 0]
+    blk = np.zeros((6, 4), np.float32); blk[0:4] = mvp.T; blk[4] = [*f0[:3], min(max(f0[3], 0), 1)]
+    blk[5] = [f0[0] / (f0[2] * f0[1]), 0, 0, 0]
+    t = [(0, vs), (2, vdrv), (3, zero_ps()), (5, np.zeros((20, 4), np.float32))]
+    return [("beam", "BEAM.vso", "BEAM.pso", "beam.vert", "beam.frag", t, [(1, blk), (2, np.zeros((3, 4), np.float32))])]
+
+
+SIMPLE_NAMES = SIMPLE_NAMES + ("PRECIP000.vso", "PRECIP001.vso", "PRECIP002.vso", "PRECIP003.vso", "PRECIP000.pso",
+                               "PRECIP001.pso", "BEAM.vso", "BEAM.pso")
+
+
 # ---- driver ---------------------------------------------------------------------------------------------------------
 
 def translated_prog(t019, idx, ovs, ops):
@@ -683,6 +746,21 @@ def main():
                 continue
             a = draw(translated_prog(t019, idx, ovs, ops), svao, scount, tu, [tex, tex2])
             b = draw(native_prog(pkg, nvs, nfs), svao, scount, nu, [tex, tex2])
+            ncases += 1
+            fails += not compare(name, a, b, "%s+%s vs %s+%s" % (ovs, ops, nvs, nfs), verbose)
+    # precipitation in a box in front of the camera; a beam on the curved surface's grid (x scaled, y = 0 plane)
+    eye = np.array([0, -100.0, 200]); mvp = perspective_lookat(eye, [0, 500, 200], math.radians(65), 1.0, 10, 4000)
+    rverts, rix = precip_scene(rng)
+    bverts2 = sverts.copy(); bverts2[:, 0:4] = np.stack([sverts[:, 0] / 2.5, sverts[:, 2] / 2.0, sverts[:, 1] * 0, sverts[:, 3]], 1)
+    bmvp = np.zeros((4, 4)); bmvp[0, 0] = bmvp[1, 1] = 1 / 300.0; bmvp[2, 3] = 0.5; bmvp[3, 3] = 1   # beam plane = screen
+    for verts_, ix_, layout, cases in ((rverts, rix, PRECIP_LAYOUT, precip_cases(mvp, eye)),
+                                       (bverts2, six, BLOOD_LAYOUT, beam_cases(bmvp))):
+        gvao, gcount = surface_geometry(verts_, ix_, layout) if verts_.shape[1] == 16 else precip_geometry(verts_, ix_)
+        for name, ovs, ops, nvs, nfs, tu, nu in cases:
+            if only and name not in only:
+                continue
+            a = draw(translated_prog(t019, idx, ovs, ops), gvao, gcount, tu, tex)
+            b = draw(native_prog(pkg, nvs, nfs), gvao, gcount, nu, tex)
             ncases += 1
             fails += not compare(name, a, b, "%s+%s vs %s+%s" % (ovs, ops, nvs, nfs), verbose)
     print("veg_parity: %d cases, %d failed (blocks from %s)" % (ncases, fails, "veg_*.cpp" if lib else "numpy"))

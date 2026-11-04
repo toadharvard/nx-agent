@@ -1,4 +1,4 @@
-/* fnv-nx native renderer, render-veg families (grass, tree leaves, particles, decals, blood): per-draw uniform
+/* fnv-nx native renderer, render-veg families (grass, tree leaves, particles, decals, blood, precipitation, beams): per-draw uniform
  * blocks (std140, UBO slot 1, both stages) and the CPU folding of the engine's shader constants into them.
  * Each struct mirrors the GLSL block of render/native/shaders/<family>.*.glsl field by field; matrices are
  * column-major (clip = M * vec4(p, 1)), clip space D3D9's (z in [0, 1]). Moves into nx/families.h when the render
@@ -127,6 +127,20 @@ typedef struct NxBloodDraw {        /* shaders/blood.*.glsl BloodDraw */
     float alpha[4];                 /* Alpha (PS c0) */
 } NxBloodDraw;
 
+/* ---- precipitation (PRECIP000-003.vso, PRECIP000/001.pso) ---- */
+typedef struct NxPrecipDraw {       /* shaders/precip.*.glsl PrecipDraw: VS c8-c13 in order, then PS c0 */
+    float wvp[16];                  /* WorldViewProj c0-c3, column-major */
+    float eye[4], velocity[4], minPos[4], maxPos[4], params[4], cameraUp[4];
+    float ambient[4];               /* AmbientColor (PS c0) */
+} NxPrecipDraw;
+
+/* ---- beams (BeamShader: BEAM.vso/pso) ---- */
+typedef struct NxBeamDraw {         /* shaders/beam.*.glsl BeamDraw */
+    float mvp[16];                  /* ModelViewProj c0-c3, column-major */
+    float vars0[4];                 /* fVars0 (c4), w saturated */
+    float uScale[4];                /* x = fVars0.x / (fVars0.z x fVars0.y) */
+} NxBeamDraw;
+
 #ifdef __cplusplus
 }
 #define NX_VEG_ASSERT_ static_assert
@@ -138,5 +152,6 @@ NX_VEG_ASSERT_(sizeof(NxGrassDraw) == 208 + 16 * NX_GRASS_MAX_INSTANCES, "NxGras
 NX_VEG_ASSERT_(sizeof(NxParticleDraw) == 256 + 3 * 16 * NX_PARTICLE_MAX, "NxParticleDraw");
 NX_VEG_ASSERT_(sizeof(NxDecalDraw) == 96 && sizeof(NxDecalSkinDraw) == 96 + 54 * 16, "NxDecalDraw");
 NX_VEG_ASSERT_(sizeof(NxBloodDraw) == 112, "NxBloodDraw");
+NX_VEG_ASSERT_(sizeof(NxPrecipDraw) == 176 && sizeof(NxBeamDraw) == 96, "NxPrecipDraw, NxBeamDraw");
 NX_VEG_ASSERT_(sizeof(NxTreeLeafDraw) == 64 + 12 * 16 + 64 * 16, "NxTreeLeafDraw");
 #endif

@@ -79,3 +79,8 @@
   differed at a depth tie; the palette is now mild (0.06 rad, 4 units) and the case is exact.
 * **found** - docs/RENDER_NATIVE.md §1.6 says particles are expanded by the `PAR2` VS (20 variants): PAR2xxx are the
   PARALLAX lighting programs; particles use PARTICLE.vso (and NOLIGHTING_PSYS*). For the render machine.
+* **did** - precipitation and beams (item 5): `shaders/precip.vert.glsl` (PRECIP000-003: drops wrapped in the
+  [MinPos, MaxPos] box by a truncated fmod, cylindrical billboard about z or CAMERAUP-aligned, SPIN in the corner's
+  xz plane, fade (1 - |offset from the box centre / size|)^2), `precip.frag.glsl` (PRECIP000/001.pso),
+  `beam.vert/frag.glsl` (BEAM). Blocks NxPrecipDraw, NxBeamDraw (beam's u scale folded). Parity 5/5 (precip 1/255,
+  beam exact); 8 mutations caught. 23/23 cases overall.
