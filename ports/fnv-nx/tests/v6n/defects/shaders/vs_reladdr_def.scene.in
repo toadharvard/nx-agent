@@ -1,4 +1,4 @@
-# V6n defect vs_reladdr_def (S6b translator): expected (Nine) colour (0.25, 0.5, 0.75, 1) everywhere (the def value of c2)
+# V6n defect vs_reladdr_def (S6b translator): expected (Nine) colour (0.0625, 0.25, 0.5625, 1) everywhere (the def value of c2, squared)
 size 4 4
 rt A32B32G32R32F
 ds NONE
@@ -6,7 +6,7 @@ clear 1 0xff000000 1.0 0
 rs CULLMODE CULL_NONE
 vs @vs_reladdr_def
 ps @col
-vsc 0 -1 0 0 0
+vsc 0 -1 -2 0 0
 vsc 2 0 0 0 1
 vsc 3 0 0 0 1
 vdecl 0:0
