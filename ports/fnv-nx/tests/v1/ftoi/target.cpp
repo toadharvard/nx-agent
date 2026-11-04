@@ -9,11 +9,12 @@
 
 enum E { E0, E1 = 5, E2 = 1000 };   // GCC: underlying unsigned int (all enumerators >= 0); MSVC: int
 enum ES { ES_NEG = -1, ES1 = 1 };     // GCC: underlying int
+enum EF : unsigned int { EF0, EF1 };  // a fixed unsigned base: unsigned int on both (MSVC 2008 extension)
 struct BF { int a : 5; unsigned b : 20; unsigned long long c : 40; };
 #define NI __attribute__((noinline))
 #define CONV(name, T) NI unsigned long long name##_d(double x) { return (T)x; } NI unsigned long long name##_f(float x) { return (T)x; }
 CONV(i8, signed char) CONV(ch, char) CONV(u8, unsigned char) CONV(i16, short) CONV(u16, unsigned short)
-CONV(wc, wchar_t) CONV(i32, int) CONV(en, E) CONV(ens, ES) CONV(u32, unsigned int) CONV(ul, unsigned long) CONV(i64, long long)
+CONV(wc, wchar_t) CONV(i32, int) CONV(en, E) CONV(ens, ES) CONV(enf, EF) CONV(u32, unsigned int) CONV(ul, unsigned long) CONV(i64, long long)
 CONV(u64, unsigned long long)
 template <class X> NI unsigned long long bf5(X x) { BF s{}; s.a = x; return (unsigned long long)s.a; }
 template <class X> NI unsigned long long bfu20(X x) { BF s{}; s.b = x; return s.b; }
@@ -34,7 +35,7 @@ NI int k5() { return conv_inl(2147483647.5); }
 #define ONE(X, x)                                                                                                    \
   P("i8", 8, i8_##X(x)); P("ch", 8, ch_##X(x)); P("u8", 8, u8_##X(x)); P("i16", 16, i16_##X(x));                 \
   P("u16", 16, u16_##X(x)); P("wc", 16, wc_##X(x)); P("i32", 32, i32_##X(x)); P("en", 32, en_##X(x));            \
-  P("ens", 32, ens_##X(x));                                                                                      \
+  P("ens", 32, ens_##X(x)); P("enf", 32, enf_##X(x));                                                            \
   P("u32", 32, u32_##X(x)); P("ul", 32, ul_##X(x)); P("i64", 64, i64_##X(x)); P("u64", 64, u64_##X(x));          \
   P("bf5", 5, bf5(x)); P("bfu20", 20, bfu20(x)); P("bfu40", 40, bfu40(x));                                        \
   P("ca32", 32, ca32(x)); P("cau32", 32, cau32(x)); P("cas16", 16, cas16(x))
