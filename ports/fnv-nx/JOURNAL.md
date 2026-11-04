@@ -3209,3 +3209,20 @@ The owner moves the work to another session or account (quota). Resume with docs
 * **measured** - Fuzzable targets as a share of functions with a native object: shard 26 64.4 -> 98.4 %, shard 1 68.9 -> 99.3 %.
   - Of the paired primary vftables, 1,082 of 1,628 have a native vtable shorter than the exe's. S2c should pair each with the static class's own _ZTV.
 * **next** - The farms re-fuzz everything on difffuzz-13.
+
+### J-0146 | 2026-11-04 | stream: S1-compile (crt),render | status: wip | parent: J-0145
+
+* **merged** - S1-crt `775daac`..`f3ca74a`. Census 3197103: 113 -> 108 errors, 42 -> 39 failing units.
+  - DBUG1 at 0x00b01510: the decomp declares FindFirstFileA with one parameter; the real API takes two.
+  - DECL1-FOPEN.
+  - DECL2 for `_RTL_CRITICAL_SECTION_DEBUG`.
+  - COM1: bsshader's own IUnknown is renamed rather than dropped.
+  - Open for S1-refs: guardpackage `std::abs(float)`; bsshader's `_ReadWriteBarrier` under the S11 MSVC stand-ins.
+* **merged** - Render @fb6b4f5:
+  - family fixes (584a8d9);
+  - UBO ring sized for 8,192 draws (dropped draws 74 -> 0);
+  - 720p in both presets;
+  - OPT 1: compile-time epilogue permutations (uam size per pixel: tex 114 -> 18, lit_spec 246 -> 150; the frame delta from P6n is pending).
+  - Render agents on that machine: S6n, V6n, P6n, S6b.
+* **open (render)** - Full link with LINK_OVERRIDES=render (S2c); prepared objects for P6n; S16 NXD9 captures.
+* **note** - Subagent worktrees see sse2neon at `/tmp/claude-0/-home-user-nx-agent/<session>/scratchpad/ext/sse2neon`.
