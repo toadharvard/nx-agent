@@ -25,6 +25,11 @@ that does not show what the gate claims, or when a producer's real output can ne
                                                              boot.first_cell must not pass
   R12 boot/summary.txt says "fnvnx milestone: first_cell", milestones.json says first_cell false
                                                              boot.first_cell must not pass
+  R13 no image hash; S5's milestones.json says "player exe", but the full report's data image is synth.exe
+      (R13b: meta.json boot_image says "synthesized")       boot.real_exe must not pass (labels contradict)
+  R14 a try farm (unmerged wip head) publishes a newer S16 gate file, frameprof run or frame budget that passes,
+      the merged producer's file fails                       frames.compare / perf.frame.boost / perf.budget.boost
+                                                             must not pass (R14, R14b, R14c)
 """
 import io
 import json
@@ -170,4 +175,50 @@ def r12(w):
 
 
 case('R12 summary.txt overrides milestones.json', r12, must_not_pass('boot.first_cell'))
+
+# R13
+def r13(w):
+    w.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_image_sha256'))
+    w.sub(F, "- data image: the owner's FalloutNV.exe", '- data image: build/boot/synth.exe')
+
+
+def r13b(w):
+    w.edit_json('link/%s/meta.json' % C, lambda d: (d.pop('boot_image_sha256'), d.__setitem__('boot_image',
+                                                                                           'synthesized')))
+
+
+case('R13 no hash, milestones.json "player exe", report data image synth.exe', r13, must_not_pass('boot.real_exe'))
+case('R13b no hash, milestones.json "player exe", meta.json "synthesized"', r13b, must_not_pass('boot.real_exe'))
+
+
+# R14
+def r14(w):
+    w.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'][0].__setitem__('pass', False))
+    w.write('reports/try1of4/aaaaaaaaaaaa-frames.json', {'commit': 'aaaaaaaaaaaa', 'scenes': [
+        {'name': 'main_menu', 'metric': 'ssim', 'value': 0.99, 'threshold': 0.98, 'pass': True}]},
+        published=w.latest() + 60)
+
+
+def r14b(w):
+    slow = [{'label': 'boot until WinMain', 'instructions': 800000000}, {'label': 'frame 1', 'instructions': 90000000}]
+    w.write('reports/prof1/%s-frameprof.json' % C, slow)
+    w.write('reports/try2of4/aaaaaaaaaaaa-frameprof.json', [{'label': 'boot until WinMain', 'instructions': 800000000},
+                                                           {'label': 'frame 1', 'instructions': 1000000}],
+            published=w.latest() + 60)
+
+
+def r14c(w):
+    b = json.loads(w.read('reports/prof1/%s-frame-budget.json' % C))
+    good = json.dumps(b)
+    for s in b.get('scenarios', []):
+        for r in (s.get('results') or {}).values():
+            if isinstance(r, dict) and isinstance(r.get('verdicts'), dict):
+                r['verdicts'] = {k: 'fail' for k in r['verdicts']}
+    w.write('reports/prof1/%s-frame-budget.json' % C, b)
+    w.write('reports/try3of4/aaaaaaaaaaaa-frame-budget.json', good, published=w.latest() + 60)
+
+
+case('R14 try farm frames.json newer than S16\'s', r14, must_not_pass('frames.compare'))
+case('R14b try farm frameprof newer than the merged one', r14b, must_not_pass('perf.frame.boost'))
+case('R14c try farm frame budget newer than the merged one', r14c, must_not_pass('perf.budget.boost'))
 sys.exit(FAIL)

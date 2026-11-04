@@ -616,14 +616,18 @@ class Card:
         return dict(branch=branch, path=path, commit=(commit or '')[:12], behind=b, published=published,
                     stale=b is None or b > self.maxb)   # b < 0: newer than the head, fresh
 
+    def report_branches(self, prefix=''):
+        """reports/<prefix>* branches, try farms left out: they run agents' unmerged wip heads (push_wip.sh), so
+        nothing they publish is evidence for the integration head (V1 R14)"""
+        return [br for br in self.store.branches('reports/' + prefix)
+                if not re.match(r'try\d+of\d+$', br.split('/', 1)[1])]
+
     def newest(self, prefix, pattern, parser, accept=lambda d: True):
         """{farm: (parsed, source)}: per farm branch under reports/<prefix>, the newest report matching pattern
         that parses and is accepted"""
         out = {}
-        for br in self.store.branches('reports/' + prefix):
+        for br in self.report_branches(prefix):
             farm = br.split('/', 1)[1]
-            if re.match(r'try\d+of\d+$', farm):
-                continue        # try farms run unmerged work
             for path, t in self.store.files(br):
                 if not re.search(pattern, path):
                     continue
@@ -1126,7 +1130,8 @@ class Card:
         got = meta.get('boot_image_sha256')
         got = got.lower() if isinstance(got, str) else None
         reached = self.milestones(br, meta, d)
-        label = self.boot_info.get('image') or meta.get('boot_image')     # S5: "player exe" | "synthesized" | none
+        labels = self.image_labels(meta, d)
+        label = labels[0][1] if labels and len(set(v for _, v in labels)) == 1 else None
         if got and want:
             real = got == want
             self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes' if real else
@@ -1137,18 +1142,25 @@ class Card:
             real = None
             self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
                         'image sha256 %s.. not checked: %s' % (got[:8], why_not), rank=1, sources=[s])
-        elif label in ('player exe', 'synthesized'):
-            # no hash to compare: S5's image label (boot/milestones.json "image", meta.json boot_image)
-            real = label == 'player exe'
-            self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe',
-                      'yes' if real else 'no (synthesized image)', 'yes', PASS if real else FAIL, s,
-                      'image "%s" (S5 label; no image hash to check)' % label, rank=1)
-        elif 'synth' in (d.get('image') or ''):
+        elif len(set(v for _, v in labels)) > 1:
+            # no hash, and the labels disagree: none of them stands for the image (V1 R13)
+            real = None
+            self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
+                        'no image hash, and the image labels contradict each other: %s' % ', '.join(
+                            '%s "%s"' % kv for kv in labels), rank=1, sources=[s])
+        elif label == 'synthesized' and labels[0][0] == 'report data image':
             # no hash to compare (link/<c12> not kept), but the report names the synthesized image
             real = False
             self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'no (synthesized image)',
                       'yes', FAIL, s, 'data image %s; no image hash (link/%s not kept)' % (
                           os.path.basename(d['image']), (d['_text_commit'] or '')[:12]), rank=1)
+        elif label in ('player exe', 'synthesized') and any(k != 'report data image' for k, _ in labels):
+            # no hash to compare: S5's image label (boot/milestones.json "image", meta.json boot_image), and nothing
+            # that says otherwise; the report's data image line alone only ever fails the gate (its text is free)
+            real = label == 'player exe'
+            self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe',
+                      'yes' if real else 'no (synthesized image)', 'yes', PASS if real else FAIL, s,
+                      'image "%s" (S5 label: %s; no image hash to check)' % (label, ' = '.join(k for k, _ in labels)), rank=1)
         else:
             real = None
             self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
@@ -1172,6 +1184,25 @@ class Card:
         sk = d.get('init_skips')
         self.gate('boot.init_skips', 'Emulated boot', 'static initializers skipped after a fault', sk, '0',
                   NODATA if sk is None else PASS if sk == 0 else FAIL, s, (d.get('stop') or '')[:120], rank=6)
+
+    def image_labels(self, meta, d):
+        """[(where, "player exe" | "synthesized" | the unknown value)]: every claim about the boot image besides its
+        hash: S5's boot/milestones.json image (and its stub boot's), meta.json boot_image, and the full report's
+        `- data image:` line (synth* -> synthesized, FalloutNV.exe / the owner's exe -> player exe). A value that is
+        none of the two is kept as itself, so it contradicts any known label rather than vanishing"""
+        out = []
+        for where, v in (('milestones.json image', self.boot_info.get('image')),
+                         ('milestones.json stub image', dct(self.boot_info.get('stub')).get('image')),
+                         ('meta.json boot_image', meta.get('boot_image'))):
+            if v is not None:
+                out.append((where, v if isinstance(v, str) else repr(v)))
+        im = d.get('image')
+        if im:
+            b = os.path.basename(im.strip())
+            out.append(('report data image', 'synthesized' if 'synth' in b.lower() else
+                        'player exe' if b.lower() == 'falloutnv.exe' or im.strip() == "the owner's FalloutNV.exe"
+                        else 'data image ' + b))
+        return out
 
     def milestones(self, br, meta, d):
         """S5's machine-readable milestones, by precedence: boot/milestones.json (fnvnx-boot-milestones/1,
@@ -1213,7 +1244,7 @@ class Card:
 
     def frames_gate(self):
         hits = []
-        for br in self.store.branches('reports/'):
+        for br in self.report_branches():
             for path, t in self.store.files(br):
                 if re.search(r'-frames\.json$', path):
                     hits.append((t, br, path))
@@ -1266,7 +1297,7 @@ class Card:
     def perf_gates(self):
         p = self.th['perf']
         hits = []
-        for br in self.store.branches('reports/'):
+        for br in self.report_branches():
             for path, t in self.store.files(br):
                 if path.endswith('-frameprof.json'):
                     hits.append((t, br, path))
@@ -1480,7 +1511,7 @@ class Card:
         scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'pass_45')
         doc, src = None, None
         hits = []
-        for br in self.store.branches('reports/'):
+        for br in self.report_branches():
             for path, t in self.store.files(br):
                 if path.endswith('-frame-budget.json'):
                     hits.append((t, br, path))

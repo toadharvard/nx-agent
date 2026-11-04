@@ -54,7 +54,7 @@ text, no game data. It can be published next to the other reports.
   yet, or the evidence is unreadable).
 - **Stale.** A pass whose source is more than `max_commits_behind` (25) commits behind, or not on the head's
   history, is *stale*.
-- **Evidence that cannot show the claim.** These never pass a gate (V1's R1-R12, `tests/v1/test_ready_adversarial.py`):
+- **Evidence that cannot show the claim.** These never pass a gate (V1's R1-R14, `tests/v1/test_ready_adversarial.py`):
   - a shard header `k/N` with k outside 1..N, which is no shard of N;
   - a scene whose `pass` is anything but JSON `true`, or an S16 gate file whose top-level status disagrees with its
     scenes, or whose candidate is not the port;
@@ -62,6 +62,11 @@ text, no game data. It can be published next to the other reports.
   - a render report with a non-positive or non-finite frame time or budget fraction, or lo > hi (no-data);
   - an image hash checked against a checksum line for any file other than `FalloutNV.exe`, or against an exe other
     than the pinned one (`player_exe_sha256`, GOG 1.4.0.525(a)); an unchecked hash is no-data, and no label stands in;
+  - without a hash, image labels that contradict each other (R13): S5's milestones.json `image` (and its stub
+    boot's), meta.json `boot_image` and the full report's `- data image:` line must all agree, else the gate is
+    no-data; an unknown label value contradicts a known one, and the report line alone can only fail the gate;
+  - anything a try farm (`reports/try<k>of<N>`) published: they run agents' unmerged wip heads (R14). This holds for
+    every reader, the per-farm reports and the frames, frameprof and frame-budget files alike;
   - `link/<c12>` boot files when the full build's own boot stage failed (fail) or did not run (no-data);
   - a `boot/summary.txt` line or a meta.json key for a milestone that `boot/milestones.json` gives (false or null);
   - a fuzz report titled `HARNESS BROKEN`, or whose `fnvnx-fuzz-summary/1` block names another shard or says

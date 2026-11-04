@@ -415,8 +415,34 @@ class ReadyTest(unittest.TestCase):
         self.assertIn('S5 label', g['note'])
         self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d.update(image='synthesized'))
         card = self.world.run()
+        # the report still says the owner's exe: contradicting labels, none stands (V1 R13)
+        g = self.gate(card, 'boot.real_exe')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('contradict', g['note'])
+        self.assertEqual(self.gate(card, 'boot.main_menu')['status'], 'fail')
+        self.world.sub('reports/full1/%s-full.md' % C, "data image: the owner's FalloutNV.exe",
+                       'data image: build/boot/synth.exe')
+        card = self.world.run()
         self.assertEqual(self.gate(card, 'boot.real_exe')['status'], 'fail')
         self.assertEqual(self.gate(card, 'boot.main_menu')['status'], 'fail')
+        # an unknown label value contradicts a known one
+        self.world.sub('reports/full1/%s-full.md' % C, 'data image: build/boot/synth.exe',
+                       "data image: the owner's FalloutNV.exe")
+        self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d.update(image='player exe'))
+        self.world.edit_json('link/%s/meta.json' % C, lambda d: d.update(boot_image='patched exe'))
+        self.assertEqual(self.gate(self.world.run(), 'boot.real_exe')['status'], 'no-data')
+
+    def test_try_farms_never_count(self):
+        """frames, frameprof and the frame budget of a try farm (unmerged wip heads) are not evidence (V1 R14)"""
+        self.world.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'][0].update({'pass': False}))
+        self.world.write('reports/try1of4/aaaaaaaaaaaa-frames.json', {'commit': 'aaaaaaaaaaaa', 'scenes': [
+            {'name': 'main_menu', 'pass': True}]}, published=self.world.latest() + 60)
+        self.world.write('reports/try2of4/aaaaaaaaaaaa-frameprof.json', [{'label': 'frame 1', 'instructions': 0}],
+                         published=self.world.latest() + 60)
+        card = self.world.run()
+        g = self.gate(card, 'frames.compare')
+        self.assertEqual((g['status'], g['sources'][0]['branch']), ('fail', 'reports/s16'))
+        self.assertEqual(self.gate(card, 'perf.frame.boost')['sources'][0]['branch'], 'reports/prof1')
 
     def test_peak_heap_from_milestones(self):
         self.world.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_peak_heap_bytes'))

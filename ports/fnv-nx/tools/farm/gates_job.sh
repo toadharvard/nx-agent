@@ -105,6 +105,7 @@ abiclass() {  # abiclass <link12>: $AC/cur/<link12>.tsv, or false
         "$pop.tmp" > "$AC/$l12-pop.log" 2>&1 || { log "popscan failed: $(tail -1 "$AC/$l12-pop.log")"; return 1; }
       mv "$pop.tmp" "$pop"
     fi
+    touch "$pop"                          # in use: the pruning below keeps the three most recently used links
     log "abiclass on link/$l12, patches ${pt:0:12}"
     DECOMP=$dec S11=$AC/s11-$d12 timeout "$TMO" nice $py -I "$P/tests/s1b/pop/abiclass.py" "$AC/$l12-abi.tsv" "$pop" \
       "$out.tmp" --patches "$P/patches" > "$AC/$l12-abiclass.log" 2>&1 \
