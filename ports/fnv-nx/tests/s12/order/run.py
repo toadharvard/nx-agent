@@ -177,6 +177,42 @@ def uninit_codegen(scratch, plugin):
     check('uninitialized' in r.stderr, 'uninit keep: GCC warns (the test bites)')
 
 
+def msvc_table(scratch, plugin):
+    """S11's recorded MSVC 2008 order (tests/s11/order/order.msvc, five configurations) against order.cpp built with
+    compile.sh's ORDER_OBJECT / ORDER_OPERATOR / ORDER_ASSIGN defaults: every case MSVC agrees on must match"""
+    src = os.path.join(PORT, 'tests', 's11', 'order', 'order.cpp')
+    rec = os.path.join(PORT, 'tests', 's11', 'order', 'order.msvc')
+    if not (os.path.exists(src) and os.path.exists(rec) and shutil.which('qemu-aarch64')):
+        print('skip msvc table: needs tests/s11/order and qemu-aarch64')
+        return
+    cs = open(os.path.join(PORT, 'tools', 'link', 'compile.sh')).read()
+    opts = {k: re.search(r'^%s=\$\{%s:-(\w+)\}' % (k, k), cs, re.M).group(1)
+            for k in ('ORDER_OBJECT', 'ORDER_OPERATOR', 'ORDER_ASSIGN')}
+    import json
+    import qemu_ilp32 as q
+    base = list(q.CXXFLAGS)
+    q.CXXFLAGS = base + ['-fms-extensions', '-fno-strict-aliasing', '-fwrapv', '-mno-outline-atomics', '-fplugin=' + plugin,
+                         '-fplugin-arg-fnvnx_order-object=' + opts['ORDER_OBJECT'],
+                         '-fplugin-arg-fnvnx_order-operator=' + opts['ORDER_OPERATOR'],
+                         '-fplugin-arg-fnvnx_order-assign=' + opts['ORDER_ASSIGN']]
+    try:
+        exe = q.build([src], os.path.join(scratch, 'msvc_table'))
+    except RuntimeError as e:
+        check(False, 'msvc table: order.cpp builds (%s)' % str(e)[-300:])
+        return
+    finally:
+        q.CXXFLAGS = base
+    rc, out = q.run(exe)
+    got = dict(l.split(' ', 1) for l in out.splitlines() if ' ' in l)
+    m = json.load(open(rec))['msvc']
+    cases = sorted(next(iter(m.values()))['results'])
+    agreed = [c for c in cases if len({m[k]['results'][c] for k in m}) == 1]
+    bad = ['%s MSVC %s GCC %s' % (c, m[next(iter(m))]['results'][c], got.get(c, '?').strip()) for c in agreed
+           if got.get(c, '').strip() != m[next(iter(m))]['results'][c]]
+    check(rc == 0 and len(agreed) >= 20 and not bad, 'msvc table: compile.sh order (%s) matches MSVC on all %d agreed cases %s'
+          % (' '.join('%s=%s' % kv for kv in sorted(opts.items())), len(agreed), bad))
+
+
 def wholeprog(scratch, plugin):
     """wholeprog_a.cpp / wholeprog_b.cpp: the whole-program key list (keys.sh, discover=). Unit A's syntax-only
     discovery finds its Interlocked operands (also through forwarders) and plain polls; unit B, which does neither,
@@ -202,7 +238,7 @@ def wholeprog(scratch, plugin):
     r = subprocess.run([sys.executable, os.path.join(PORT, 'toolchain', 'order', 'keys_merge.py')] + parts,
                        capture_output=True, text=True)
     open(keys, 'w').write(r.stdout)
-    union = sorted({l for p in parts for l in open(p).read().splitlines() if l.startswith(('field ', 'var '))})
+    union = sorted({l for p in parts for l in open(p).read().splitlines() if l.startswith(('field ', 'var ', 'pfield '))})
     check('field Obj::m_xcount' not in union, 'wholeprog: no single unit knows Obj::m_xcount (the merge bites)')
     got = open(keys).read().splitlines()
     want = sorted(l.split('discover:', 1)[1].strip() for l in open(a) if '// discover:' in l)
@@ -290,6 +326,16 @@ def compile_sh_keys(scratch):
     got = open(keys).read().splitlines() if os.path.exists(keys) else []
     check(r.returncode == 0 and 'field Worker::m_result' in got,
           'compile.sh keys: a changed header refreshes the cached discovery (Worker::m_result in order.keys)')
+    # a unit replaced by a copy with an older mtime (cp -p, rsync -a, tar x): the content decides, not the mtime
+    cpath = os.path.join(tree, 'wholeprog_c.cpp')
+    old_mtime = os.path.getmtime(cpath) - 3600
+    with open(cpath, 'w') as f:
+        f.write('#include "wholeprog.h"\nvoid use_x(Obj *o) { (void)o; }\n')
+    os.utime(cpath, (old_mtime, old_mtime))
+    r = run(out, {'KEYS_ONLY': '1'})
+    got = open(keys).read().splitlines() if os.path.exists(keys) else []
+    check(r.returncode == 0 and 'field Obj::m_xcount' not in got,
+          'compile.sh keys: a unit replaced by an older-mtime copy is discovered again (Obj::m_xcount gone)')
     r = run(out + '_unit', {'ORDER_KEYS': 'unit'})
     m = re.search(r'<_Z6unlockP3Obj>:\n(.*?)\n\n', disasm(out + '_unit'), re.S)
     check(r.returncode == 0 and bool(m) and '\tstlr\t' not in m.group(1),

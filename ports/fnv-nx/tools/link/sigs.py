@@ -287,7 +287,8 @@ def parse_msvc(mangled, dem):
         sig.kind = 'special'; return sig
     pclose = matching_close(post, popen)
     qual = post[:popen].strip()
-    if qual.endswith('*') or qual.endswith(')'):  # function returning a function pointer etc.: unsupported
+    conv = re.match(r'operator [\w ]', (split_qual(qual) or [''])[-1])   # a conversion operator: 'operator T *'
+    if (qual.endswith('*') and not conv) or qual.endswith(')'):  # function returning a function pointer: unsupported
         sig.kind = 'special'; return sig
     sig.qual = canon_qual(split_qual(qual))
     sig.raw_params = _parse_params(post[popen + 1:pclose])

@@ -86,6 +86,12 @@ extern "C" const char *fnvnx_exception_what(const void *self)
     return s->_m_what ? s->_m_what : "Unknown exception";
 }
 
+/* bad_alloc(const char *msg = "bad allocation"): an exception copying msg, catchable as std::bad_alloc */
+extern "C" void *fnvnx_bad_alloc_ctor(void *self, const char *msg)
+{
+    return new (self) exc<std::bad_alloc>(msg ? msg : "bad allocation", true);
+}
+
 /* bad_cast(const char *msg = "bad cast"): an exception copying msg, catchable as std::bad_cast */
 extern "C" void *fnvnx_bad_cast_ctor(void *self, const char *msg)
 {

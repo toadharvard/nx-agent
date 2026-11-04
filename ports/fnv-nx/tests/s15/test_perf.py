@@ -88,6 +88,19 @@ def test_budget(tmp):
     model = json.load(open(os.path.join(HERE, '..', '..', 'tools', 'perf', 'budget_model.json')))
     b = frame_budget.build(model)
     check(b['schema'] == 'fnvnx-frame-budget/1', 'budget: schema')
+    # --perf (P0's fnvnx-perf/1): a priced row adds cycles x IPC - instructions on its thread; fn_interlocked is skipped
+    sl = next(h for h in model['hotspot_functions'] if h['id'] == 'fn_slerp')
+    perf = {'schema': 'fnvnx-perf/1', 'per_call_cycles': [
+        {'id': 'fn_slerp', 'per_call_cycles': [sl['per_call_insn'][0] * 2, sl['per_call_insn'][1] * 2]},
+        {'id': 'fn_interlocked', 'per_call_cycles': [100, 100]}]}
+    bp = frame_budget.build(model, perf=perf)
+    want = (frame_budget.mid(sl['per_call_insn']) * 2 * 0.8 - frame_budget.mid(sl['per_call_insn'])) * \
+        frame_budget.mid(sl['calls']) / 1e6
+    a57 = bp['measured']['a57']
+    d_main = bp['scenarios'][0]['main_minsn']['mid'] - b['scenarios'][0]['main_minsn']['mid']
+    check([r['id'] for r in a57['rows']] == ['fn_slerp'] and abs(a57['delta_minsn_mid'] - want) < 1e-3 and
+          abs(d_main - want) < 2e-3 and bp['inputs']['a57'],
+          'budget: --perf prices a row on its thread (slerp at CPI 2: +%.3f M main), interlocked skipped' % d_main)
     check(abs(b['budget_minsn']['1020']['pass_45'] - 18.1) < 0.1 and abs(b['budget_minsn']['1785']['pass_45'] - 31.7) < 0.1,
           'budget: 45 fps per-core budget 18.1 M at 1020 MHz, 31.7 M at 1785 MHz (IPC 0.8)')
     want = {'%s@%d' % (s['id'], c) for s in model['scenarios'] for c in (1020, 1785)}

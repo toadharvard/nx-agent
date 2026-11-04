@@ -375,7 +375,7 @@ TEST(iob_overloads_for_game_code)
     CHECK_EQ(fflush(f), 0);
     CHECK_EQ(fclose(f), 0);
     /* libc's FILE* functions are untouched */
-    FILE *h = fopen((std::string(s4_root()) + "/game/Data/ovl.txt").c_str(), "rb");
+    FILE *h = fopen((std::string(s4_root()) + "/Data/ovl.txt").c_str(), "rb");
     CHECK(h != NULL);
     if (h) {
         CHECK_EQ(fgetc(h), 'x');

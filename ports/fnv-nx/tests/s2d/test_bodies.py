@@ -221,6 +221,41 @@ class T(unittest.TestCase):
         self.assertEqual(why['_ZN1A2naEi'], 'not virtual')
 
 
+    @unittest.skipUnless(shutil.which(vtables.CXX), 'needs the aarch64 cross compiler')
+    def test_probe_without_prelude(self):
+        """A host unit that defines its own std::exception (as decomp units do) still hosts a synthesized
+        `= default` member and a vcall probe: the probes include no <typeinfo> before the unit."""
+        src = ('namespace std { class exception { public: exception(const char *); virtual ~exception(); }; }\n'
+               'struct M { M(); ~M(); int z; };\n'
+               'struct K { M m; K(); ~K(); virtual int f(int); };\n'
+               'int use(K *k) { K a; return k->f(1); }\n')
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'src'))
+            os.makedirs(os.path.join(d, 'include'))
+            with open(os.path.join(d, 'src', 'e.cpp'), 'w') as f:
+                f.write(src)
+            names = ['_ZN1KC1Ev', '_ZN1KD1Ev', '_ZN1K1fEi']
+            dem = fnvlink.batch_demangle(fnvlink.CXXFILT, names)
+            it = (lambda n: sigs.parse_itanium(n, dem[n]))
+            rows = [bodies.Row(n, 'special-default', None, None, 'src/e.cpp', '', 'src/e.cpp') for n in names[:2]]
+            path, roots, failed = bodies.synth_host(d, d, 'src/e.cpp', rows, it)
+            got, why = bodies.probe_vcalls(d, d, 'src/e.cpp', names[2:], it)
+        self.assertEqual(failed, {})
+        self.assertEqual(roots, set(names[:2]))
+        self.assertEqual(got['_ZN1K1fEi'], (0, 0))   # K's first virtual (its destructor is not virtual)
+
+    def test_conversion_operator_pairs(self):
+        """An MSVC conversion operator to a pointer type (`operator class A *(void)`) parses as a function and pairs
+        with its Itanium name (it used to be dropped as a function returning a function pointer)."""
+        ms, it = '??B?$P@VA@@@@QBEPAVA@@XZ', '_ZNK1PI1AEcvPS0_Ev'
+        dm = fnvlink.batch_demangle(fnvlink.UNDNAME, [ms])
+        di = fnvlink.batch_demangle(fnvlink.CXXFILT, [it])
+        m, i = sigs.parse_msvc(ms, dm[ms]), sigs.parse_itanium(it, di[it])
+        self.assertEqual((m.kind, m.qual, m.params, m.cc), ('func', ['P<A>', 'operator A*'], [], 'thiscall'))
+        mk = {k for t, k in m.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.def_keys(m)}
+        ik = {k for t, k in i.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.relaxed_keys(i)}
+        self.assertTrue(mk & ik)
+
 def coff(funcs, externs, data=None):
     """Minimal i386 COFF: one COMDAT code section per function {name: (bytes, {offset: callee})}; data: the same
     for read-only data sections (a vftable: DIR32 words)."""
@@ -249,7 +284,8 @@ def coff(funcs, externs, data=None):
         pos += len(code)
         rel_off = pos
         for off, callee in sorted(calls.items()):
-            raw += struct.pack('<IIH', off, idx[callee], 0x14 if kind[n] == 'code' else 0x06)
+            callee, typ = callee if isinstance(callee, tuple) else (callee, 0x14 if kind[n] == 'code' else 0x06)
+            raw += struct.pack('<IIH', off, idx[callee], typ)
             pos += 10
         secs.append(struct.pack('<8sIIIIIIHHI', b'.text$%d' % k if kind[n] == 'code' else b'.rdata$%d' % k, 0, 0,
                                 len(code), data_off, rel_off, 0, len(calls), 0,
@@ -304,6 +340,24 @@ class Exe(unittest.TestCase):
             self.assertEqual(exe.read(F, 2), b'\x55\xe8')
             got = bodies.exe_call_targets(d, 0, unit, {'?g@@YAXXZ', '?k@@YAXXZ'}, exe)
         self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}, '?k@@YAXXZ': {K: 1}})
+
+    def test_exe_address_taken(self):
+        """A DIR32 in a placed function (push offset ?g) gives the target from the exe's word, minus the addend."""
+        import struct
+        f = b'\x68\x04\0\0\0\xc3'                               # push offset ?g+4; ret
+        obj = coff({'?f@@YAXXZ': (f, {1: ('?g@@YAXXZ', 0x06)})}, ['?g@@YAXXZ'])
+        F, G = 0x401000, 0x401080
+        text = bytearray(0x100)
+        text[0:len(f)] = f
+        struct.pack_into('<I', text, 1, G + 4)
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            got = bodies.exe_call_targets(d, 0, {'functions': [{'symbol': '?f@@YAXXZ', 'address': '%x' % F}]},
+                                          {'?g@@YAXXZ'}, bodies.Pe(os.path.join(d, 'x.exe')))
+        self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}})
 
     def test_code_only_externs(self):
         """A name the pristine object names only in a vftable slot is not a direct call (the vcall class may take

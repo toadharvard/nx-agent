@@ -188,13 +188,15 @@ def win32_to_horizon_prio(prio):
 
 def place(cpu, seq, prio, core3=False):
     """fnvnx_place_ex(): thread_create's cpu argument -> (role name, ideal core, mask, Horizon priority); core3: the
-    core 3 opt-in (sdmc:/fnvnx/fnvnx.ini core3=1, --core3)"""
+    core 3 opt-in (sdmc:/switch/fnv/fnvnx.ini core3=1, --core3)"""
     prio = prio - (1 << 64) if prio >> 63 else prio
     table = placement_table()
     if cpu & ~0xFF == 0x100 and (cpu & 0xFF) in table:
         role = cpu & 0xFF
     elif cpu >> 63 or cpu & ~0xFF:
         role = 0
+    elif cpu >= 32 or not ((0xF if core3 else 0x7) >> cpu & 1):
+        role = 0   # a core that is not ours: the default row (placement.h, NX1)
     else:
         return ("explicit", cpu, 1 << (cpu & 31), win32_to_horizon_prio(prio))
     name, ideal, mask, hp, mask3 = table[role]
@@ -208,10 +210,10 @@ def place(cpu, seq, prio, core3=False):
 def cpu_spec(spec, ideal, mask):
     """fnvnx_cpu_spec(): thread_set_cpu's spec applied to (ideal, mask)"""
     if not spec >> 63:
-        return spec & 31, 1 << (spec & 31)
+        return (spec, 1 << spec) if spec < 3 else (ideal, mask)   # not an application core: unchanged (NX1)
     m, want = (spec >> 8) & 7, spec & 0xFF
     mask = m or mask
-    if want != 0xFF and want < 32:
+    if want != 0xFF and want < 3:
         ideal = want
     elif not mask >> ideal & 1:
         ideal = next(c for c in range(32) if mask >> c & 1)
@@ -1380,7 +1382,7 @@ def main(argv):
     ap.add_argument("--addrmap", metavar="TSV", help="the link's out/addrmap.tsv (for exe-vtables)")
     ap.add_argument("--exe-vtables", action="store_true",
                     help="fill the trap slots of native vtables from the exe's vftables (needs --elf, --addrmap and "
-                    "the exe as --file fnvnx/game/FalloutNV.exe=PATH); also the line 'exe-vtables' of --stub-faults")
+                    "the exe as --file switch/fnv/FalloutNV.exe=PATH); also the line 'exe-vtables' of --stub-faults")
     ap.add_argument("--summary-json", metavar="FILE", help="write the machine-readable boot summary here")
     ap.add_argument("--watch", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="log every guest write to ADDR..ADDR+SIZE (default 4) with pc, lr and the value")
