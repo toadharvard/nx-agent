@@ -13,6 +13,7 @@ libclang-18-dev headers (fnvcheck is built into the scratch dir given as argumen
    layouts.cpp.
 5. crosscheck.py attributes a site to the tagged function whose body contains it.
 6. toolchain/ftoi: the fnvnx_ftoi plugin's float -> integer conversions equal MSVC's x86 ones (ftoi/, qemu-aarch64).
+7. toolchain/order: MSVC memory ordering and argument order (order/run.py: code generation, args, multicore litmus).
 """
 import os
 import re
@@ -260,6 +261,12 @@ def main():
     facts(scratch)
     crosscheck()
     ftoi(scratch)
+    o = subprocess.run([sys.executable, os.path.join(HERE, 'order', 'run.py'), os.path.join(scratch, 'order')],
+                       capture_output=True, text=True)
+    for line in o.stdout.splitlines():
+        if line.startswith('FAIL'):
+            print(line)
+    check(o.returncode == 0, 'order/run.py: %s' % (o.stdout.strip().splitlines() or ['no output'])[-1])
     if r.returncode == 0:
         cases(scratch)
         layouts(scratch)
