@@ -1111,3 +1111,30 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - prepare_from=0c630cf compile_objects=2748 compile_failed_units=230 link_objects=3497
   link_trial_undefined=7842 link_trial_multidef=0 link_ctor_dtor_left=779 fall1_edits=1171
 * **next** - S5: guest + emulated boot on f11; S2c: bridge findings from J-0055.
+
+### J-0057 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0054,J-0056
+
+* **did** - Guest from S2c's f11 (fresh8, tree from 0c630cf): builds with D3D9=null; `tests/s5/dynbrk.py` scans the
+  linked ELF for traps in static initializers/finalizers.
+* **found** - 7,307 undefined (f10 7,502); relocatable (0 PC-relative absolute references); `GAME_NEW=runtime` weakens
+  0 objects. Independent check of J-0056: 0/6,265 dyninit and 0/4,692 dynexit functions hold a `brk`, and the skip
+  summary has no trap group. Emulated boot: WinMain passes +0x1c8; +0x1d0 -> FUN_00aa20b0 -> FUN_00aa3050 (run-once
+  Gamebryo memory init) -> InitHolder 0x00aa2020 stores the holder at 0x011f6080, then CBaseList::GetHeadPositionI
+  0x009fd0f0 is untranslated (blk_009e0000_o2: VirtualAlloc C declaration conflict) -> first fault InitHolder+0x54.
+  Skipped initializers 2,889: 1,679 memory manager (FUN_00aa1070), 767 null function pointers, 338 `.text` writes
+  (RegisterFloatKeyOps), 105 null reads in constructors. Frontier: 122 keys / 3,300 hits in 35 units; 24 of the 29
+  units that failed in fresh8 are clean in census c18 (109 keys), among them the memory-manager constructor unit and
+  middlehighprocess (0x00401000). Still failing in c18: blk_009e0000_o2, blk_00c20000_od_ob1_variant (`fabs`), actor,
+  playercharacter, extradatalist.
+* **metrics** - game_undefined=7307 pcrel_abs_image=0 dyninit_brk=0 dynexit_brk=0 init_skips=2889
+  frontier_keys=122 boot_reached=InitHolder+0x54(WinMain+0x1d0)
+* **next** - S1: blk_009e0000_o2 and the other four; S2 fresh run with S1 round 8 (makes construct_memory_manager()
+  real); S5 boot again.
+
+### J-0058 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0052
+
+* **did** - Merged S1 round 8 so far (10 commits): TPL1/TPL2, MATH1, SPEC2/SPEC3, LEX1, STD1, ENUM1, ELAB1, RREF1,
+  STL1, ANON1, DTOR1, GOTO1 declarator lists, TAIL1 `_split_bases` shadow removed, shim SendInput records.
+  Orchestrator re-ran `tests/s1/test_rules.py` (0 failed) and `tests/s11/run.sh` (ok) on the merged head.
+* **metrics** - census_c18_clean=2869 census_c18_failing=109 census_c18_errors=875
+* **next** - S1: the five frontier units (J-0057); S11 gates the new rules; S2 fresh run from this head.
