@@ -13,6 +13,8 @@ unit puts at +o, by name. Cases:
   t2b a third view that sorts after the vtable's object, reverse link order (its copy is left defined)
   t3 virtual inheritance: the vtable unit has D : W, virtual V; the other unit's D : virtual V only
   t4 nested: C : B in both units, B's second base differs; B's vtable kept from the other unit
+  t6 as t4, but the C unit only references B's typeinfo (B has a key function defined in the other unit, whose
+     view of B differs): no copy of its own to keep, the kept B is the other view
   t5 the vtable's object defines no typeinfo (synthesized vtable objects did before J-0102), another view does:
      the pass cannot repair it and must report it ('vtable object defines no typeinfo'; c4_definers counts it)
 """
@@ -66,6 +68,16 @@ B *make_b() { return new B; }'''),
             ('b_cview.cpp', '''struct P { virtual ~P() {} int p; };
 struct R { virtual void r() {} int rr; };
 struct B : P, R { virtual void b() {} };
+struct C : B { virtual void c() {} int cc; };
+C *make_c() { return new C; }''')], 'C', {8: 'R'}, False),
+    't6': ([('a_bview.cpp', '''struct P { virtual ~P() {} int p; };
+struct Q { virtual void q() {} int qq; };
+struct B : P, Q { virtual void b(); };
+void B::b() {}
+B *make_b() { return new B; }'''),
+             ('b_cview.cpp', '''struct P { virtual ~P() {} int p; };
+struct R { virtual void r() {} int rr; };
+struct B : P, R { virtual void b(); };
 struct C : B { virtual void c() {} int cc; };
 C *make_c() { return new C; }''')], 'C', {8: 'R'}, False),
     't5': ([('a_view.cpp', '''#include <typeinfo>
@@ -151,7 +163,8 @@ def link(work, fixed, reverse=False):
 def main():
     work = os.path.abspath(sys.argv[1])
     bad = 0
-    runs = [('t1', False), ('t2', True), ('t2b', True), ('t3', False), ('t4', False), ('t5', False)]
+    runs = [('t1', False), ('t2', True), ('t2b', True), ('t3', False), ('t4', False), ('t5', False),
+            ('t6', False)]
     for cid, reverse in runs:
         units, cls, want, no_ti = CASES['t1' if cid == 't2' else cid]
         w = os.path.join(work, cid)
