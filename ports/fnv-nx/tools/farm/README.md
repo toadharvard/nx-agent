@@ -42,7 +42,7 @@ needs no repository attach. The agent runs exactly `bash /home/user/fnv-nx-build
 in the background, and `main`'s `.claude/settings.json` allows that command; the rule was set at the owner's request
 (J-0079). `start.sh` clones the public nx-agent, checks it out at the integration head and runs this `runner.sh`.
 Artifacts and reports go to a separate clone at `$FARM_HOME/artifacts`. The agent only keeps the runner alive, with
-a check-in every 30 min. Reports of
+a check-in every hour. That check-in is a scheduled task of the owner's account bound to the farm session, so it fires server-side even after an account rate-limit stop; a farm comes back within an hour of a reset (J-0101). Farm sessions run on Haiku, since they only keep one script running. Fuzzing runs as 26 shards (`start.sh fz<k> fuzz <k> 26`), so all farms fit under the concurrent-session cap of about 50. Reports of
 runners are read from the artifacts repository:
 `git -C /home/user/fnv-nx-build fetch -q origin reports/<name> && git -C /home/user/fnv-nx-build show origin/reports/<name>:<file>`.
 
