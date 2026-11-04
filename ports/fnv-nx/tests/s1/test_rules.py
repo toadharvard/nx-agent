@@ -455,6 +455,16 @@ got = run(s1.r_goto_scalar_inits, 'int g(const H* h, int e)\n{\n    if (e) goto 
 check('GOTO1 also splits SSE vectors, const scalars (dropping their const) and pointers to const', got,
       ['int n; n = h->n;', '__m128 ang; ang = _mm_load_ss(&h->f);', 'const ns::Hdr* hd; hd = h->hd;',
        'static const int k = 3;'])
+got = run(s1.r_goto_scalar_inits, 'int g(H* h, int e)\n{\n    const int slots = 4;\n    const unsigned m = (1u << 3) - 1;\n'
+          '    const int n = h->n;\n    const float f = 4;\n    int a[slots];\n    if (e) goto out;\n    a[0] = n & m;\n'
+          '    return a[0] + (int)f;\nout:\n    return 0;\n}\n')
+check('GOTO1-CONST leaves a const integer literal no goto crosses, splits the rest', got,
+      ['    const int slots = 4;', '    const unsigned m = (1u << 3) - 1;', 'int n; n = h->n;', 'float f; f = 4;'],
+      ['static const'])
+got = run(s1.r_goto_scalar_inits, 'int g(H* h, int e)\n{\n    if (e) goto out;\n    const int slots = 4;\n'
+          '    { const int k = 2; h->n = k; }\n    int a[slots];\n    a[0] = h->n;\nout:\n    return e ? 0 : slots;\n}\n')
+check('GOTO1-CONST: a crossed const integer literal becomes static const (still a constant)', got,
+      ['    static const int slots = 4;', '{ const int k = 2; h->n = k; }'])
 
 # ---- GOTO2
 got = run(s1.r_goto_crossed_scopes, 'int f(const P* p, int n)\n{\n    if (n < 2) goto out;\n    Cmp cmp = {0};\n'
