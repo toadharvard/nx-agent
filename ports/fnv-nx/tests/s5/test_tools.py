@@ -301,6 +301,17 @@ class FaultTableTest(unittest.TestCase):
         for n in names:
             self.assertRegex(n, r"^(0x[0-9a-f]{8}|[A-Za-z_]\w*)$")
 
+    def test_standins_defined(self):
+        """every 'standin' line names a function tests/s5/standins.c defines (by its asm label)"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        stubs, _ = emu_guest.parse_fault_table(os.path.join(HERE, "known_faults.txt"))
+        src = open(emu_guest.STANDINS).read()
+        names = [n for n, a in stubs if a == "standin"]
+        self.assertTrue(names)
+        for n in names:
+            self.assertRegex(src, r'\b\w+\(void\) __asm__\("%s"\);|__asm__\("%s"\)' % (re.escape(n), re.escape(n)))
+
     def test_bad_lines(self):
         sys.path.insert(0, HERE)
         import emu_guest
