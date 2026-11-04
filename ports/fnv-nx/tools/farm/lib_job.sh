@@ -239,9 +239,15 @@ EOF
 		# V1-link's audits of this link (full_job.sh 4d): report, tables and logs, about 1 MB
 		[ -d "$bd/v1" ] && cp -r "$bd/v1" v1
 		cp "$REPORT" report.md
-		BOOT_EXE=${GAME_EXE:-} python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" > meta.json <<'EOF'
+		BOOT_EXE=${GAME_EXE:-} python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" "$P" > meta.json <<'EOF'
 import json, os, sys
-bd, commit, tree, objs, objs_commit = sys.argv[1:6]
+bd, commit, tree, objs, objs_commit, port = sys.argv[1:7]
+sys.path.insert(0, os.path.join(port, 'tools', 'farm'))
+try:
+    import full_report
+    prov = full_report.provenance_failures({s: full_report.rec(bd, s) for s in full_report.STAGES}, commit)
+except Exception as ex:   # an older tree without the function
+    prov = ['provenance not checked: %s' % ex]
 def rec(s):
     try:
         return json.load(open(os.path.join(bd, s, 'stage.json')))
@@ -273,7 +279,9 @@ print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
                   # NX1: the package checks (tests/s5/check_package.py, tests/nx1/run.py) of the package stage
                   'check_package_rc': rec('package').get('check_package_rc'),
                   'nx1_open': rec('package').get('metrics', {}).get('nx1_open'),
-                  'nx1_checks': rec('package').get('nx1')},
+                  'nx1_checks': rec('package').get('nx1'),
+                  # every tree-derived stage prepared from this commit (full_report.provenance_failures): [] = PASS
+                  'provenance_ok': not prov, 'provenance_failures': prov},
                  indent=1, sort_keys=True))
 EOF
 		git add -f -A .
