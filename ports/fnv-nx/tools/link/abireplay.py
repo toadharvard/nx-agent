@@ -57,12 +57,13 @@ def fnvlink_demangle(name, _cache={}):
 
 
 TREE, DECLS = None, {}
+OVER_VA = {}   # override address -> va_reads (overrides.tsv column 5)
 DEF_SYM = {}   # MSVC name of a definition -> its native (Itanium) symbol, from the link's addrmap.tsv
 VACALL_OUT, VACALL_REQ = None, set()   # --vacall: work dir of the recorded calls; (unit, undefined) requested
 import vacall  # noqa: E402
 
 
-def replay(ref_m, def_m, ref_d, def_d, src, dunit, lay, un=None):
+def replay(ref_m, def_m, ref_d, def_d, src, dunit, lay, un=None, over_va=None):
     rs, ds = sigs.parse_msvc(ref_m, ref_d or None), sigs.parse_msvc(def_m, def_d or None)
     if TREE:   # undecorated C names: their declarations in the prepared tree, as resolve reads them
         import fnvlink
@@ -78,14 +79,23 @@ def replay(ref_m, def_m, ref_d, def_d, src, dunit, lay, un=None):
             ds = fnvlink.c_name_standin(ds, rs) or ds
     if rs.kind != 'func' or ds.kind != 'func':
         return None
-    va_r = None
+    va_r = over_va
+    if VACALL_OUT and over_va:
+        VACALL_REQ.add((src, un))
     if VACALL_OUT and dunit and any(p.strip() == '...' for p in ds.raw_params or ()):
         dsym = DEF_SYM.get(def_m)
         if dsym:
             VACALL_REQ.add((dunit, dsym))
+            VACALL_REQ.add((src, un))
             defs = vacall.load_defs(VACALL_OUT, dunit)
             va_r = defs.get(dsym) if defs else None
     v = abi.compare(rs, ds, va_reads=va_r)
+    if VACALL_OUT and va_r == ('escape',) and v.kind == 'manual' and 'varargs' in v.classes:
+        VACALL_REQ.add((src, un))
+        fm = vacall.load_fmts(VACALL_OUT, src)
+        v3, _, _ = vacall.decide_format(rs, ds, fm.get(un) if fm and un else None)
+        if v3 is not None:
+            v = v3
     if VACALL_OUT and vacall.needs(v):
         VACALL_REQ.add((src, un))
         calls = vacall.load(VACALL_OUT, src)
@@ -125,6 +135,8 @@ def main():
             if line.startswith('#') or len(f) < 4 or not f[3]:
                 continue
             over[int(f[0], 16)] = f[3]
+            if len(f) >= 5 and f[4].startswith('va='):
+                OVER_VA[int(f[0], 16)] = (f[4][3:],)
     am = os.path.join(a.out, 'addrmap.tsv')
     by_addr_sym = {}
     if os.path.exists(am):
@@ -155,7 +167,7 @@ def main():
                     if ad in over:   # the override's own signature; no unit, so no layouts (resolve: nd['unit'] None)
                         dm = over[ad]
                         dd = fnvlink_demangle(dm)
-                        r = replay(f[3], dm, f[9], dd, src, None, lay, f[1])
+                        r = replay(f[3], dm, f[9], dd, src, None, lay, f[1], OVER_VA.get(ad))
                     else:
                         r = replay(f[3], f[4], f[9], f[10], src, def_unit.get(ad), lay, f[1])
                 except Exception as e:   # a declaration the parser rejects: keep the link's verdict
@@ -173,6 +185,7 @@ def main():
         vacall.run(VACALL_OUT, TREE)
         vacall.load.__defaults__[0].clear()
         vacall.load_defs.__defaults__[0].clear()
+        vacall.load_fmts.__defaults__[0].clear()
         old, new, out = passes()
     for name, rows in (('old', old), ('new', new)) if a.old else (('new', new),):
         n, cl = metric(rows)

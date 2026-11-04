@@ -24,7 +24,7 @@ TEST_CXX := $(wildcard $(HERE)/*.cpp)
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(S4_C) $(S4_CXX) $(S7_CXX) $(TEST_CXX))
 
-.PHONY: all test ilp32 clean
+.PHONY: all test ilp32 qemu clean
 all: test
 -include $(OBJS:.o=.d)
 
@@ -42,6 +42,12 @@ $(OUT)/s7_tests: $(OBJS)
 test: $(OUT)/s7_tests
 	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
 
+# the same tests built static for AArch64 and run under qemu-aarch64
+qemu:
+	$(MAKE) --no-print-directory OUT=$(OUT)-a64 CC="aarch64-linux-gnu-gcc -static" CXX="aarch64-linux-gnu-g++ -static" \
+		$(OUT)-a64/s7_tests
+	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root/game && FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s7_tests
+
 XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
@@ -58,4 +64,4 @@ ilp32:
 	@echo "ilp32: all S7 sources parse"
 
 clean:
-	rm -rf $(OUT)
+	rm -rf $(OUT) $(OUT)-a64

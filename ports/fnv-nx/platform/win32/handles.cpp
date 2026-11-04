@@ -108,7 +108,7 @@ void w32_obj_unref(struct w32_obj *o)
 
 extern "C" BOOL CloseHandle(HANDLE h)
 {
-    if (h == W32_PSEUDO_THREAD || h == W32_PSEUDO_PROCESS || w32_is_std_handle(h))
+    if (h == W32_PSEUDO_THREAD || h == W32_PSEUDO_PROCESS || (w32_is_std_handle && w32_is_std_handle(h)))
         return TRUE;
     return w32_handle_close(h, 0);
 }
