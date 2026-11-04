@@ -23,3 +23,35 @@ void fnv_standin_00c3c460(void) {
     void *p = fnv_mm_allocate(G_MEMORY_MANAGER, 8);
     MESSAGEHANDLER_PHANDLER = p ? fnv_messagehandler_init(p, 0) : 0;
 }
+
+extern void fnv_mm_deallocate(void *mm, void *p) __asm__("__fnv_00aa4060");          /* MemoryManager::Deallocate */
+extern void fnv_memorypool_init(void *self, uint32_t block, uint32_t pool, const char *desc)
+    __asm__("__fnv_00aa66a0");                                                           /* MemoryPool constructor */
+extern void fnv_memorypool_fini(void *self) __asm__("__fnv_00aa6800");               /* MemoryPool destructor */
+
+/* 0x00aa3cc0 MemoryManager::CreateMemoryPool (block size, pool size, description), from MemoryManager's
+ * constructor 0x00aa3880 (boot_banner): the exe allocates the 0x80-byte pool from the memory manager, constructs it
+ * (0x00aa66a0) and, when it got no memory ([pool+4] == 0: every VirtualAlloc at the fixed hints k << 24 failed, as
+ * they do here: os_vm_reserve takes no hint), destroys it (0x00aa6800) and gives the block back with
+ * MemoryManager::Deallocate (0x00aa4060); m_bPoolAllocationEnabled (+0x129) is 0 meanwhile. The decomp's
+ * `delete pnewPool` frees through NiFree (0x00aa1460), which needs Gamebryo's allocator (0x011f6080): it is made
+ * later in the same constructor (InitializeGlobal -> InitHolder), so the first static initializer faulted and was
+ * skipped (S1: the pool's delete is the memory manager's). The exe's memory context 3 (TLS +0x2b4) around it is
+ * not set here; it only labels the allocation for the heap statistics. */
+void fnv_standin_00aa3cc0(void *self, uint32_t block, uint32_t pool, const char *desc)
+    __asm__("_ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc");
+void fnv_standin_00aa3cc0(void *self, uint32_t block, uint32_t pool, const char *desc) {
+    unsigned char *mm = self;
+    if (block < 8)
+        return;
+    mm[0x129] = 0;
+    void *p = fnv_mm_allocate(G_MEMORY_MANAGER, 0x80);
+    if (p) {
+        fnv_memorypool_init(p, block, pool, desc);
+        if (!((uint32_t *)p)[1]) {
+            fnv_memorypool_fini(p);
+            fnv_mm_deallocate(G_MEMORY_MANAGER, p);
+        }
+    }
+    mm[0x129] = 1;
+}

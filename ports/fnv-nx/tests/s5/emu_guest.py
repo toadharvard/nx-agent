@@ -1003,6 +1003,7 @@ class Emu:
                 st["vtables not extended (region full)"] += 1
                 continue
             uc.mem_write(at, bytes(new))
+            self.vt_ext_copies = getattr(self, "vt_ext_copies", []) + [(at, at + len(new), sym)]
             for r in refs:
                 uc.mem_write(r, struct.pack("<I", at + off))
             st["vtables extended"] += 1
@@ -1435,6 +1436,11 @@ class Emu:
     def sym(self, a):
         if not getattr(self, "sym_addrs", None):
             return f"{a:#x}"
+        ext = getattr(self, "vt_ext_copies", None)
+        if ext and self.VT_EXT_BASE <= a < self.VT_EXT_BASE + self.VT_EXT_SIZE:   # exe-vtables' extended copies
+            j = self._bisect([c[0] for c in ext], a) - 1
+            if j >= 0 and a < ext[j][1]:
+                return f"{a:#x} (extended copy of {ext[j][2]})+{a - ext[j][0]:#x}"
         if self.base <= a < self.base + self.size:   # runtime -> link address (relocatable guest)
             a = a - self.base + self.link_base
         i = self._bisect(self.sym_addrs, a) - 1

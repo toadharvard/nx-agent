@@ -28,13 +28,6 @@ ctor-returns-this   # every constructor native (address map kind C) returns this
 0x00aa1190
 0x00866690          # InitializeGlobal, after InitHolder: std::_Immortalize<StandardLibrarySingletonObject>() has a null
                     # vptr at its vfn_04 call (+0x6c); the options are already stored (S1)
-0x00aa3e40 use-malloc:x1  # MemoryManager::Allocate (+0xa8) calls slot 2 (Allocate) of its heap m_heaps[0] (this+12),
-                      # the FUN_00aa7400 that MemoryManager::InitializeHeaps makes; the decomp's FUN_00aa7400 declares
-                      # one virtual, so its native vtable has one slot and slot 2 is its typeinfo (S1). The farm
-                      # link 9a0243c7eabe stops here, first in the constructor (boot_banner skipped: 4,327 of its
-                      # 4,343 initializer skips), then at WinMain+0xa4. Replaced on every call
-0x00aa1460            # the sized free into the same heap (S13): faults the same way; the block leaks
-0x00aa4060            # MemoryManager::Deallocate: likewise
 0x005e0200            # the INI settings load in WinMain (+0x300): its collection 0x....c660 has the image vptr
                       # 0x01082ed8, stored by hand, which has no native vtable (hand_vptrs.tsv: 750 such on f13; S1/S2);
                       # Open tail-calls its slot 6 = 0. Returns false: the INI file did not open. On the player's exe
@@ -59,3 +52,7 @@ _Z12FUN_00c3c460v standin  # 0x00c3c460 (WinMain, via 0x00c3bd30): the decomp's 
                       # leaves MessageHandler::pHandler without a vptr; once the heaps work (MemoryHeap stand-in,
                       # heap_standin.c) the first AbstractHeap commit logs through it (slot 5 of a zeroed object).
                       # standins.c does what the exe does: new(8), MessageHandler 0x00c3bcf0(this, false) (S1)
+_ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc standin  # 0x00aa3cc0: a pool without memory (no fixed-hint
+                      # reservation here) is freed through NiFree before Gamebryo's allocator exists, which skipped
+                      # boot_banner (MemoryManager's constructor) once the game's heaps are used; the exe destroys it
+                      # and calls MemoryManager::Deallocate (standins.c; S1)

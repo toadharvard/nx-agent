@@ -294,7 +294,7 @@ class FaultTableTest(unittest.TestCase):
         sys.path.insert(0, HERE)
         import emu_guest
         stubs, pre = emu_guest.parse_fault_table(os.path.join(HERE, "known_faults.txt"))
-        self.assertIn(("0x00aa3e40", "use-malloc:x1"), stubs)
+        self.assertNotIn("0x00aa3e40", [n for n, _ in stubs])   # MemoryManager::Allocate runs on the game's heaps
         self.assertNotIn("0x00a8a5f0", [f for f, _ in pre])   # NiMainSDM: S1's INIT1 static calls it now
         names = [n for n, _ in stubs]
         self.assertEqual(len(names), len(set(names)), "a function listed twice")
