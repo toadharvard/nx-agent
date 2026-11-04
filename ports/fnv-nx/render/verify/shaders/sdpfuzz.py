@@ -81,26 +81,29 @@ def combo_ps(outputs, vs_model, asm, sdp2, work, cache, glsl=''):
     cache[key] = (b, g, len(reg))
     return cache[key]
 
-NUM_HELPERS = """
-float v6n_log2(float x) { return x == 0.0 ? -1.7014117e38 : log2(abs(x)); }
-vec2 v6n_log2(vec2 x) { return vec2(v6n_log2(x.x), v6n_log2(x.y)); }
-vec3 v6n_log2(vec3 x) { return vec3(v6n_log2(x.x), v6n_log2(x.y), v6n_log2(x.z)); }
-vec4 v6n_log2(vec4 x) { return vec4(v6n_log2(x.x), v6n_log2(x.y), v6n_log2(x.z), v6n_log2(x.w)); }
-vec3 v6n_nrm(vec3 v) { float d = dot(v, v); return d == 0.0 ? vec3(0.0) : v * inversesqrt(d); }
-vec4 v6n_nrm(vec4 v) { float d = dot(v, v); return d == 0.0 ? vec4(0.0) : v * inversesqrt(d); }
+KNOWN_HELPERS = """
+float v6n_pow(float x, float y) { return x == 0.0 ? (y == 0.0 ? 1.0 : (y < 0.0 ? uintBitsToFloat(0x7f800000u) : 0.0)) : pow(x, y); }
+vec2 v6n_pow(vec2 x, vec2 y) { return vec2(v6n_pow(x.x, y.x), v6n_pow(x.y, y.y)); }
+vec3 v6n_pow(vec3 x, vec3 y) { return vec3(v6n_pow(x.x, y.x), v6n_pow(x.y, y.y), v6n_pow(x.z, y.z)); }
+vec4 v6n_pow(vec4 x, vec4 y) { return vec4(v6n_pow(x.x, y.x), v6n_pow(x.y, y.y), v6n_pow(x.z, y.z), v6n_pow(x.w, y.w)); }
 """
-def d3d9_numerics(glsl, model=''):
-    """V6n-side variant of a translated shader with Nine's D3D9 numerics: log = log2(|x|) and log(0) = -2^127, nrm(0) = 0,
-    rcp(0) / rsq(0) = 2^127 (S6b: log2(x), NaN, 1e38), and for vs < 3.0 oD0/oD1 saturated per vertex. Used only to
-    attribute differences (findings P2-P4); the verdict is the unmodified translation's."""
-    g = glsl.replace('const float FLT_MAX = 1e38;', 'const float FLT_MAX = 1.7014117e38;')
-    g = re.sub(r'\blog2\(', 'v6n_log2(', g); g = re.sub(r'\bnormalize\(', 'v6n_nrm(', g)
-    if model.startswith('vs_1') or model.startswith('vs_2'):   # D3D9 saturates oD0/oD1 per vertex (finding P2)
-        cl = ''.join('\tvs_%s = clamp(vs_%s, 0.0, 1.0);\n' % (n, n) for n in ('oD0', 'oD1') if '#define vs_%s ' % n in g)
-        k = g.find('\tgl_Position.xy += vs_drv_posfix')
-        if cl and k > 0: g = g[:k] + cl + g[k:]
+def known_s6b(glsl, model=''):
+    """V6n-side variant of a translated shader with the open S6b defects of tests/v6n/DEFECTS.md fixed the way Nine
+    behaves: ps_pow_zero (pow(0, 0) = 1, pow(0, y < 0) = +inf), ps_texkill_w (ps >= 2.0 texkill tests xyzw),
+    vs_reladdr_def (relative reads through a CTAB array see the def'd constants, out of range reads 0). Used only to
+    attribute failures (cause known_s6b); the verdict is the unmodified translation's."""
+    g = re.sub(r'\bpow\(', 'v6n_pow(', glsl)
+    if model.startswith(('ps_2', 'ps_3')):
+        g = re.sub(r'any\(lessThan\(([\w.]+?)\.xyz, vec3\(0\.0\)\)\)', r'any(lessThan(\1, vec4(0.0)))', g)
+    rel = ''
+    if re.search(r'\w+_uniforms_vec4\[ARRAYBASE_\d+ ', g):
+        t = 'vs' if model.startswith('vs') else 'ps'
+        defs = re.findall(r'^const vec4 %s_c(\d+) = vec4' % t, g, flags=re.M)
+        rel = 'vec4 v6n_relc(int i)\n{\n' + ''.join('\tif (i == %s) return %s_c%s;\n' % (k, t, k) for k in defs) + \
+              '\treturn (uint(i) < 256u) ? %s_uniforms_vec4[i] : vec4(0.0);\n}\n' % t
+        g = re.sub(r'\w+_uniforms_vec4\[(ARRAYBASE_\d+ [^\]]*)\]', r'v6n_relc(\1)', g)
     j = g.find('void main()')
-    return g[:j] + NUM_HELPERS + g[j:] if j > 0 else g
+    return g[:j] + KNOWN_HELPERS + rel + g[j:] if j > 0 else g
 
 def vs_scene(j, vbin, vglsl, combo, seed):
     r = random.Random(seed)
@@ -152,16 +155,22 @@ COV_TIE = 2   # differing pixels tolerated per vertex-program seed (centres on a
               # or the neighbouring triangle's depth / attributes at a shared edge)
 SENS = 0.1    # a pixel may differ by SENS x the oracle's own change under the 1e-5 input perturbation (float32 rounding
               # is ~1e-7 relative, so a correct translation stays well inside; an ill-conditioned input is not a defect)
-def maxerr(a, b, q=None):
-    """-> (ok, colour max |d| (8-bit steps or float units), depth max LSB, px over tolerance, first finding).
+def maxerr(a, b, q=None, f=None):
+    """-> (ok, colour max |d| (8-bit steps or float units), depth max LSB, px over tolerance, first finding, oracle NaN px).
     Colour tolerance as cmp.py (2/255, or 1e-3 relative on float targets), depth 8 LSB (D24), each widened per pixel by
     SENS x |oracle - oracle on perturbed inputs| when q is given. Pixels covered in only one image: float (vertex
     program) scenes compare where both are covered and allow COV_TIE coverage differences, excluding pixels whose
-    coverage already flips under the perturbation."""
+    coverage already flips under the perturbation.
+    Oracle NaN (O10): a colour channel whose oracle value is NaN - in the image itself (float targets) or in f, the
+    oracle's read-back of the same scene on a float target (8-bit targets, where NaN is not visible) - is not compared.
+    D3D9 defines no NaN propagation, saturation or UNORM conversion; softpipe keeps NaN through _sat, where D3D10+,
+    NV hardware and GLSL clamp() on llvmpipe give 0."""
     ch = min(a['ch'], 4)
     ca, cb = a['c'][..., :ch].astype(np.float64), b['c'][..., :ch].astype(np.float64)
-    nan2 = np.isnan(ca) & np.isnan(cb); one = np.isnan(ca) ^ np.isnan(cb)
-    d = np.where(nan2, 0.0, np.abs(ca - cb)); d = np.where(one, np.inf, d)
+    onan = np.isnan(ca)
+    if f is not None and not a['isf'] and f['c'].shape[:2] == ca.shape[:2]: onan = onan | np.isnan(f['c'][..., :ch].astype(np.float64))
+    one = np.isnan(ca) ^ np.isnan(cb)
+    d = np.where(onan, 0.0, np.abs(ca - cb)); d = np.where(one & ~onan, np.inf, d)
     tol = C.FLOAT_REL * np.maximum(1.0, np.abs(np.nan_to_num(ca))) if a['isf'] else np.full(ca.shape, C.COLOR_TOL_8)
     da, db = a['d'].astype(np.int64), b['d'].astype(np.int64)
     dd = np.abs(da - db); dtol = np.full(dd.shape, float(C.DEPTH_TOL[24]))
@@ -187,12 +196,13 @@ def maxerr(a, b, q=None):
     ce = float(np.max(np.where(both[..., None], d, 0.0))); de = int(np.max(np.where(both, dd, 0)))
     nbad = int((badc | badd).sum()) + covdiff
     if a['isf'] and nbad <= COV_TIE: nbad = 0   # a pixel on a shared edge drawn by the neighbouring triangle
+    nanpx = int((onan.any(axis=-1) & both).sum())
     msg = ''
     if covdiff > COV_TIE: msg = 'coverage: %d px differ' % covdiff
     elif badc.any():
         y, x = np.argwhere(badc)[0]; msg = 'colour: %d px (max |d| %.4g), first (%d,%d) ref %s test %s' % (badc.sum(), ce, x, y, ca[y, x].tolist(), cb[y, x].tolist())
     elif badd.any(): msg = 'depth: %d px (max %d LSB)' % (badd.sum(), de)
-    return nbad == 0, ce, de, nbad, msg
+    return nbad == 0, ce, de, nbad, msg, nanpx
 
 def perturb(text, r, eps=1e-5):
     """the same scene with every constant and vertex value scaled by 1 +- eps (stability probe of the oracle)"""
@@ -318,7 +328,7 @@ def main():
                 sc = os.path.join(sw, '%s_v%d.scene' % (h, sd)); open(sc, 'w').write(t); byhash[h].append(sc)
         e['undriven'] = und; undriven_of[h] = und
         if byhash[h]:
-            gn = os.path.join(work, h + '.num.glsl'); open(gn, 'w').write(d3d9_numerics(open(g).read(), model))
+            gn = os.path.join(work, h + '.known.glsl'); open(gn, 'w').write(known_s6b(open(g).read(), model))
             for sc in list(byhash[h]):
                 nsc = sc[:-6] + 'n.scene'
                 open(nsc, 'w').write(open(sc).read().replace(' %s\n' % g, ' %s\n' % gn))
@@ -326,6 +336,10 @@ def main():
                 psc_ = sc[:-6] + 'q.scene'
                 open(psc_, 'w').write(perturb(open(sc).read(), random.Random(os.path.basename(sc))))   # by name: the same in every work dir
                 probescenes.append(psc_)
+                if stage == 'pixel':   # the oracle on a float target: shows where its colour is NaN (O10)
+                    fsc = sc[:-6] + 'f.scene'
+                    open(fsc, 'w').write(open(sc).read().replace('rt A8R8G8B8\n', 'rt A32B32G32R32F\n'))
+                    probescenes.append(fsc)
         scenes += byhash[h] or []
     print('%s; %d programs, %d unique translated, %d scenes' % (tline, len(programs), len(byhash), len(scenes)), flush=True)
     nd, gd = os.path.join(work, 'out_nine'), os.path.join(work, 'out_' + target)
@@ -340,19 +354,21 @@ def main():
     res = {}
     for h, scs in byhash.items():
         if scs is None: res[h] = {'status': 'not_run', 'detail': 'no drivable input' if target == 'gl' else 'vertex programs need --target gl'}; continue
-        ce = 0.0; de = 0; bp = 0; det = ''; seeds_res = []; onan = False
+        ce = 0.0; de = 0; bp = 0; det = ''; seeds_res = []; onan = False; nanpx = 0
         err = None
         for sc in scs:
             base = os.path.basename(sc)[:-6]
             fa, fb = os.path.join(nd, base + '.v6nd'), os.path.join(gd, base + '.v6nd')
             fq, fn = os.path.join(nd, base + 'q.v6nd'), os.path.join(gd, base + 'n.v6nd')
+            ff = os.path.join(nd, base + 'f.v6nd')
             if not os.path.exists(fa): err = ('oracle_error', 'oracle could not run the bytecode'); break
             if not os.path.exists(fb): err = ('target_error', 'target could not run the GLSL'); break
             A = C.load(fa); Q = C.load(fq) if os.path.exists(fq) else None
-            ok, c_, d_, n_, m_ = maxerr(A, C.load(fb), Q)
-            num_ok = os.path.exists(fn) and maxerr(A, C.load(fn), Q)[0]
-            seeds_res.append((ok, num_ok))
-            if not ok and np.isnan(A['c']).any(): onan = True   # the oracle itself produced NaN on this input
+            Fo = C.load(ff) if os.path.exists(ff) else None
+            ok, c_, d_, n_, m_, k_ = maxerr(A, C.load(fb), Q, Fo)
+            num_ok = os.path.exists(fn) and maxerr(A, C.load(fn), Q, Fo)[0]
+            seeds_res.append((ok, num_ok)); nanpx = max(nanpx, k_)
+            if not ok and k_: onan = True   # the oracle itself produced NaN on this input (pixels not compared)
             ce = max(ce, c_); de = max(de, d_); bp = max(bp, n_)
             if not ok and not det: det = m_
         if err:
@@ -360,9 +376,9 @@ def main():
         st = 'pass' if all(ok for ok, _ in seeds_res) else 'fail'
         nst = 'pass' if all(nok for _, nok in seeds_res) else 'fail'
         res[h] = {'status': st, 'max_err_color': ce, 'max_err_depth_lsb': de, 'bad_px': bp, 'seeds': len(scs), 'detail': det[:200],
-                  'status_d3d9_numerics': nst, 'oracle_nan': onan, 'undriven': undriven_of.get(h, [])}
+                  'status_known_s6b': nst, 'oracle_nan': onan, 'oracle_nan_px': nanpx, 'undriven': undriven_of.get(h, [])}
         if st == 'fail':
-            res[h]['cause'] = ('d3d9_numerics' if nst == 'pass' else 'undriven_input' if res[h]['undriven'] else
+            res[h]['cause'] = ('known_s6b' if nst == 'pass' else 'undriven_input' if res[h]['undriven'] else
                                'oracle_nan' if onan else 'open')
     for e in programs:
         if e['status'] is None: e.update(res[e['hash']])
