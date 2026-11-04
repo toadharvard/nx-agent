@@ -2688,3 +2688,18 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - A routine's prompt can be changed only from the session it posts into, so this session cannot edit the 48 check-ins.
     Deleting and recreating them needs the owner's explicit request.
 * **next** - The owner decides: recreate the 48 check-ins with the fixed command, or another remedy.
+
+### J-0122 | 2026-11-04 | stream: farms | status: wip | parent: J-0121
+
+* **did** - The owner asked to recreate the 48 hourly farm check-ins. They now run
+  `pgrep -f '[t]ools/farm/runner.sh'`; the brackets keep pgrep from matching the agent's own shell. The old 48 are
+  deleted.
+* **measured** - First farm link with today's fixes, `link/fa883870e756` (objects of b152bec, FTOI2):
+  - trial link: 3,824 objects, **4,468 undefined** (was 5,080), 0 multiple definitions;
+  - C++ by name: 3,172 (was 3,762);
+  - census at fa88387: 2,917/2,978 clean, 312 errors (was 385).
+* **did** - Freed disk for the owner's game data.
+  - Deleted the scratch of retired streams and of the agents the owner stopped (S11, S2c, S1b, V1, S5). That included
+    three separate Wine prefixes.
+  - S1's hand-vptr work lists are kept in scratchpad/keep/.
+  - Free space is now 22 GB (was 3.6 GB).
