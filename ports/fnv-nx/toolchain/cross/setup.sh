@@ -61,7 +61,10 @@ done < "$LIST"
 R=$PREFIX/root/usr
 ELFS=$(ls "$R"/bin/aarch64-linux-gnu-* "$R"/libexec/gcc-cross/aarch64-linux-gnu/13/{cc1,cc1plus,collect2,lto-wrapper} \
 	"$R"/aarch64-linux-gnu/bin/* 2>/dev/null)
-missing() { for e in $ELFS; do ldd "$e" 2>/dev/null | awk '/not found/ {print $1}'; done | sort -u; }
+# the target binutils package ships its own host libraries (libbfd/libopcodes/libctf-*-arm64) under root/usr/lib
+RLIB=$R/lib/x86_64-linux-gnu
+missing() { for e in $ELFS; do LD_LIBRARY_PATH="$RLIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$e" 2>/dev/null |
+	awk '/not found/ {print $1}'; done | sort -u; }
 LIBDIR=""
 if [ -n "$(missing)" ] || [ "${CROSS_HOSTLIBS:-0}" = 1 ]; then   # CROSS_HOSTLIBS=1: always (tests the path)
 	echo "host lacks: $(missing | tr '\n' ' ')- unpacking the pinned host libraries"
@@ -74,6 +77,7 @@ if [ -n "$(missing)" ] || [ "${CROSS_HOSTLIBS:-0}" = 1 ]; then   # CROSS_HOSTLIB
 	still=$(export LD_LIBRARY_PATH=$LIBDIR; missing)
 	[ -z "$still" ] || { echo "still missing on this host: $still"; exit 1; }
 fi
+if ls "$RLIB"/lib*.so* >/dev/null 2>&1; then LIBDIR=$RLIB${LIBDIR:+:$LIBDIR}; fi
 
 # bin/: the drivers (GCC finds cc1plus, its headers and the sysroot relative to the resolved driver path) and
 # binutils, by their unversioned names
