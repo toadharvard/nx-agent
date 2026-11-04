@@ -68,7 +68,7 @@ only needs to remember which steps finished.
 | `out/objcopy/<obj>.redefine` | `old new` per line (the objcopy `--redefine-syms` format): undefined Itanium name -> address symbol or bridge. |
 | `out/objcopy/<obj>.args` | objcopy options for the object (`--add-symbol`, `--localize-symbol`, `--weaken-symbol`, `--redefine-sym`). |
 | `out/objcopy/<obj>.undefine` | Definitions `apply` turns into undefined references before renaming (import thunks: their name then follows the `.redefine` mapping to the import). |
-| `out/objcopy/<obj>.rebind` | Address (and TLS slot) symbols of the variables the object defines at image addresses: `apply` points the object's own local-symbol references to them at these symbols (split globals, below). |
+| `out/objcopy/<obj>.rebind` | Address (and TLS slot) symbols of the variables the object defines at image addresses: `apply` points the object's own data pointers to them at these symbols (split globals, below). |
 | `out/aliases.ld` | Linker script: absolute data address symbols, aliases of COMDAT definitions. |
 | `out/refs.tsv` | Every (object, undefined symbol): class, tier, address, target, matched MSVC declaration. |
 | `out/abi.tsv` | Every reference whose declaration passes arguments differently from the definition: verdict, classes, register moves, notes, both demangled declarations. |
@@ -88,12 +88,20 @@ only needs to remember which steps finished.
 Natively defined variables at data-image addresses (global objects with constructors, mostly the generated
 initializer units) are weakened and renamed to their address symbol, so every unit, the defining one included, uses
 the image copy, and the native static initializer constructs the object in place, as the original CRT init did.
-Renaming alone misses the defining object's own references (S13, J-0043 "split globals"): GAS writes a reference
-to a variable of the same object as `.bss + off` / `.data + off` (or relative to a `-O2` section anchor), so its
-functions, its static initializer and pointers in its data kept a private copy (`GetRTTI` 0x0049bb10 returned the
-native `ms_kRTTI`, not 0x011c7d74). `apply` therefore rewrites every relocation of an allocated section that reaches
-such a variable through a local symbol to name the variable's symbol (addend adjusted; `elfsyms.retarget_local_relocs`,
-list in `objcopy/<obj>.rebind`) before renaming. The same holds for thread-locals folded into the native TLS block.
+Renaming alone misses the defining object's own references when they do not go by name (S13, J-0043 "split
+globals"): GCC (`-O2`, the toolchain's default PIE) addresses the variables a unit defines from a section anchor - one
+`adrp`/`add` to `.data + 0`, then immediate offsets that no relocation shows - so the unit's functions and its static
+initializer kept a private copy (`GetRTTI` 0x0049bb10 returned the native `ms_kRTTI`, not 0x011c7d74). Pointing the
+anchor's relocations at one variable's image address (round 3) misplaces every other variable of that anchor, and a
+PC-relative reference to an absolute `__fnv_` symbol only works at the guest's link address (S5, J-0048: 200 such
+relocations in 87 objects). `compile.sh` therefore compiles with `-fPIC -fno-semantic-interposition`: a defined
+variable is reached through the GOT by its own symbol, like the extern ones already were, so renaming rebinds every
+reference and the GOT slot holds the image address; functions still inline. `apply` then only rewrites absolute data
+relocations (ABS32/ABS16: pointers in the object's data) that reach a rebound variable through a local symbol
+(`elfsyms.retarget_local_relocs`, list in `objcopy/<obj>.rebind`) and reports code references through a local
+symbol, which should be none (objects compiled without `-fPIC` keep their private copies there). The same holds for
+thread-locals folded into the native TLS block. Emitted slot functions are compiled with `-fPIC` too; the probes,
+which are only read, are not.
 
 ## Address map (for the data-image loader, S3)
 
