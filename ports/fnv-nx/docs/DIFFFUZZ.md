@@ -59,6 +59,27 @@ S2c's f10 link: `FNVNX_DFLINK=<run>/f10`, `FNVNX_TREE`, `FNVNX_A64OBJ`, `FNVNX_D
 saved divergences on another object set (`recheck_<t>.jsonl`), `recheck_summary.py <t> <dirs>` tabulates gone /
 soft / still per original cause. **Vtables (D7).** A native store of an Itanium address point is compared as
 the image vftable it stands for (S2 kind-V rows, else `??_7C@@6B@` paired with `_ZTV<C>`+8 by class name).
+**Code pointers as data.** A native code address stored to memory (a `__fnv_X` stub, a native entry of the image)
+is compared as the original address it stands for, at any byte offset of the store and through `memcpy`-like
+builtins too (tables of initializers, callbacks in objects).
+
+**Imports.** Each IAT slot the oracle reads (0x00fdf000..) is pinned to an x86 import stub (0x0e010000 + 16 per
+import); a call through it and a native call of the same import name are traced as `imp:<name>` on both machines,
+stdcall imports pop their arguments. The Interlocked family runs as builtins on both sides.
+**Runtime equivalences.** `_Znw*`/`_Zdl*` (sized delete included) -> 0x00401000/0x00401030 or the unit's MSVC
+allocator (0x00aa1460), `__dynamic_cast` -> 0x00ec43fb, `atexit` -> 0x00ec658f.
+**Dynamic initializers.** `??__E`/`??__F` and the platform's `__fnvnx_dyn*` run as `void(void)`.
+
+**Argument filters.** A call argument is not compared when the callee's declaration only carries it for MSVC's
+register placement (S2 `abi.tsv` "edx dummy" notes), or when the oracle's own value is the case's planted garbage
+(an uninitialised stack or register word: `world.garbage_words`); a native argument equal to native garbage is
+reported as `arm_garbage` (the port passes something uninitialised).
+
+**MSVC custom register conventions.** `classify.entry_register_reads` lists the registers the oracle reads on its
+entry path before writing them that the declared convention does not pass (eax, edx, edi...: whole-program
+optimisation in Havok and elsewhere); `Conv.with_registers` assigns the declared register-eligible parameters to
+them in declared order, the native side keeps AAPCS64. A function so modelled is fuzzed only if three cases that
+differ only in the planted garbage give the same oracle outcome; otherwise its status is `oracle-gap:custom-cc`.
 
 ## Comparison (`runner.compare`, first difference wins)
 
@@ -83,8 +104,15 @@ the function is done: `--resume` continues after a restart.
 
 Static checks found through divergences: `check_rebind.py` (references that bypass S2's image-variable rebinding:
 GAS resolves a reference to a global of the same object to `.bss+off`, so the defining unit keeps a native copy),
-`check_statics.py` (unit-local variables the oracle keeps at an image address), `check_falloff.py` (native functions
-that run off their end: a non-void function without `return`, GCC drops the epilogue).
+`check_statics.py` (unit-local variables the oracle keeps at an image address, top-level `_ZL` and namespace-scope
+`_ZN<ns>L..E` statics; one GCC folded away has no symbol left), `check_falloff.py` (native functions that run off
+their end: a non-void function without `return`, GCC drops the epilogue).
+
+**Triage.** `difffuzz.py triage <dirs> [--tag t] [--only cause] [--reads]` replays saved divergences that still
+reproduce and, with `--reads`, runs the read-set probe (`readset.py`): the addresses one machine reads and the other
+does not (argument buffers, image window), and a constant offset between them (`shift`: a struct layout difference).
+Groups: oracle-only / native-only reads of image globals or object fields, layout shift, same reads with a different
+result.
 
 ## Lockstep (`lockstep.py`, D14)
 
@@ -115,14 +143,20 @@ python3 attrib.py rules rules.json; python3 attrib.py bridges bridges.json
 python3 report.py <dir> [...]                                    # per-stream verdict table + catalogue
 python3 difffuzz.py one <source> <addr>                          # one zero-world run
 python3 difffuzz.py repro --trace <dir>/div/<addr>-0.json
+FNVNX_DFPROFILE=<profile> python3 difffuzz.py recheck <dir> --tag f11  # replay on another object set
+python3 recheck_summary.py f11 <dir> [...]                       # gone / soft / still per cause
+FNVNX_DFPROFILE=<profile> python3 difffuzz.py triage <dir> --tag f11 --only unclassified --reads
+FNVNX_DFPROFILE=<profile> python3 difffuzz.py lockstep <dyninit addr> --out <dir>
 ```
 
 ## Oracle gaps
 
 `x86-custom-cc`: MSVC's whole-program optimisation gave some static functions (many in Havok) a register convention
-units.json does not record (e.g. the first pointer in eax); `classify.entry_register_reads` finds registers read on
-the entry path that the declared convention does not pass. Such divergences are reported apart (neither hard nor
-soft) until the convention is modelled.
+units.json does not record (e.g. the first pointer in eax). The model above covers a function whose extra registers
+carry its declared parameters; one whose oracle outcome still depends on the planted garbage (a register that is
+not a parameter of the declaration, a caller-computed value) stays `oracle-gap:custom-cc` and its divergences are
+reported apart (neither hard nor soft). A function returning a pointer to a literal compares the pointer, not the
+pointee (the native literal has another address): reported under `unclassified`.
 
 ## Limits
 

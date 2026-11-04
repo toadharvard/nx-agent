@@ -7,8 +7,10 @@ a private copy while everything else (other units, image data pointers) sees the
 
     check_statics.py <objects dir> [--list]
 
-Matches local OBJECT symbols `_ZL<n><name>` (and plain C names) against `?<name>@@3...` / `_<name>` entries of the
-unit's units.json symbols with a data-window address.
+Matches local OBJECT symbols `_ZL<n><name>`, namespace-scope statics `_ZN<ns>L<n><name>E` (MSVC names those
+`_<name>`, storage class STATIC) and plain C names against `?<name>@...@3...` / `_<name>` entries of the unit's
+units.json symbols with a data-window address. A static GCC folded away (never written: a pointer read as null)
+has no symbol left and is not counted here; only the source shows it.
 """
 import json
 import os
@@ -21,7 +23,8 @@ sys.path.insert(0, str(config.LINKTOOLS))
 import elfsyms  # noqa: E402
 
 ZL = re.compile(r'^_ZL(\d+)(\w+)$')
-MS = re.compile(r'^\?(\w+)@@3')
+ZNL = re.compile(r'^_ZN(?:\d+\w+?)*?L(\d+)(\w+)E$')       # static inside a namespace: _ZN<ns>L<n><name>E
+MS = re.compile(r'^\?(\w+)@(?:\w+@)*@3')
 
 
 def main():
@@ -47,7 +50,7 @@ def main():
         for s in elfsyms.symbols(os.path.join(d, n)):
             if s.bind != 'local' or s.type != 'object' or not s.shndx:
                 continue
-            m = ZL.match(s.name)
+            m = ZL.match(s.name) or ZNL.match(s.name)
             base = m.group(2)[:int(m.group(1))] if m else s.name
             a = names[n].get(base)
             if a is not None:
