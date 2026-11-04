@@ -186,6 +186,7 @@ def apply_render(items, rep):
 def scenario_work(items, levers, sc):
     """items -> [(item id, role, [lo, mid, hi])] after the scenario's levers (moves and scales)"""
     work = []
+    follows = {it['id']: it.get('follows') for it in items}   # corrections move and scale with the item they correct
     for it in items:
         lo, hi = it['minsn']
         md = it.get('mid', mid(it['minsn']))
@@ -196,15 +197,15 @@ def scenario_work(items, levers, sc):
         core3 |= bool(lv.get('core3'))
         for iid, (flo, fhi) in lv.get('scales', {}).items():
             for w in work:
-                if w[0] == iid:   # lo case: the larger saving
+                if w[0] == iid or follows.get(w[0]) == iid:   # lo case: the larger saving
                     w[2] = [w[2][0] * flo, w[2][1] * mid((flo, fhi)), w[2][2] * fhi]
         for iid, (flo, fhi) in lv.get('moves', {}).items():
             for w in list(work):
-                if w[0] == iid and w[1] == 'main':
+                if (w[0] == iid or follows.get(w[0]) == iid) and w[1] == 'main' and len(w) < 5:
                     fm = mid((flo, fhi))
                     moved = [w[2][0] * fhi, w[2][1] * fm, w[2][2] * flo]   # lo case: more moved
                     w[2] = [w[2][0] - moved[0], w[2][1] - moved[1], w[2][2] - moved[2]]
-                    work.append([iid + '>' + lid, lv['to'], moved, None, True])
+                    work.append([w[0] + '>' + lid, lv['to'], moved, None, True])
     return work, core3
 
 
@@ -263,12 +264,38 @@ def apply_perf(items, model, perf, ipc_mid):
         d = [(c * ipc_mid - i) / 1e6 for c, i in zip(cyc, ins)]
         items.append({'id': 'a57_' + h['id'], 'name': 'A57 price of %s (cycles vs instructions)' % h['name'],
                       'role': h.get('role', 'main'), 'subsystem': h.get('subsystem'),
-                      'minsn': [min(d[0], d[2]), max(d[0], d[2])], 'mid': d[1], 'basis': 'model'})
+                      'minsn': [min(d[0], d[2]), max(d[0], d[2])], 'mid': d[1], 'basis': 'model',
+                      'follows': follows_item(model, h.get('subsystem'))})
         used.append({'id': h['id'], 'cycles_per_frame_mid': round(cyc[1]), 'insns_per_frame_mid': round(ins[1]),
                      'delta_minsn_mid': round(d[1], 3)})
     return items, {'source': perf.get('head') or perf.get('schema'), 'rows': used,
                    'delta_minsn_mid': round(sum(u['delta_minsn_mid'] for u in used), 3)}
 
+
+def follows_item(model, subsystem):
+    """the model item a correction on `subsystem` follows through the levers (the first item of that subsystem)"""
+    return next((it['id'] for it in model['items'] if it.get('subsystem') == subsystem), None)
+
+
+def apply_overrides(items, model):
+    """S15-simd's native overrides (tools/link/overrides, docs/PERF.md 11.6) as corrections to their subsystems'
+    items: for each hotspot_functions row with a `before` (the decomp's own instructions per call, measured before the
+    override), (after - before) instructions per call x calls per frame, on the row's thread and subsystem. The items
+    are estimates of the decomp's code, so the frame then carries the code that runs; with --perf, apply_perf prices
+    the after side in A57 cycles on top. lo pairs the lo per-call counts with the lo calls, hi the hi ones."""
+    used = []
+    for h in model.get('hotspot_functions', []):
+        b = h.get('before')
+        if not b:
+            continue
+        pa, pb, ca = h['per_call_insn'], b['per_call_insn'], h['calls']
+        d = [(pa[0] - pb[0]) * ca[0] / 1e6, (mid(pa) - mid(pb)) * mid(ca) / 1e6, (pa[1] - pb[1]) * ca[1] / 1e6]
+        items.append({'id': 'simd_' + h['id'], 'name': 'S15-simd override of %s (after - before)' % h['name'],
+                      'role': h.get('role', 'main'), 'subsystem': h.get('subsystem'),
+                      'minsn': [min(d[0], d[2]), max(d[0], d[2])], 'mid': d[1], 'basis': 'M',
+                      'follows': follows_item(model, h.get('subsystem'))})
+        used.append({'id': h['id'], 'delta_minsn_mid': round(d[1], 3)})
+    return items, {'rows': used, 'delta_minsn_mid': round(sum(u['delta_minsn_mid'] for u in used), 3)}
 
 def build(model, profs=None, render=None, perf=None):
     placement = load_placement()
@@ -291,6 +318,8 @@ def build(model, profs=None, render=None, perf=None):
         items = apply_render(items, render)
         measured['render'] = {k: render.get(k) for k in ('scene', 'draws', 'per_draw_insn', 'frame_minsn', 'gpu_ms',
                                                          'basis', 'gpu_basis', 'source_commit') if k in render}
+    if not measured.get('frameprof', {}).get('used'):   # a measured frame already runs the overrides
+        items, measured['overrides'] = apply_overrides(items, model)
     if perf and not measured.get('frameprof', {}).get('used'):   # measured frames are priced by P0 already
         items, measured['a57'] = apply_perf(items, model, perf, ipc['value'])
     if not measured.get('frameprof', {}).get('used'):   # a measured main thread already contains its hand-offs

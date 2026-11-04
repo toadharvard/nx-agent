@@ -176,6 +176,18 @@ agents queue the next item instead of waiting, and verify their own change with 
   checker, and a frame-equivalence test (same accumulators and draw list with the flag on and off).
 - S1b owns the mechanism; S15-threads writes the patches.
 
+### D20. Bodies missing from the decomp; the Switch settings preset (orchestrator)
+
+- A function the decomp lacks (e.g. the MemoryHeap constructors 0x00aa78a0 and 0x00aa7930) can be reconstructed
+  against the exe. It is accepted only with build_and_match = all bytes equal.
+- A reconstructed body is exe-derived. It therefore lives only in the private artifacts repository, under
+  fnv-nx-build `recon/<unit>` with its match report, never in nx-agent. The nx-agent side holds only the rule that
+  applies `recon/` bodies when they are present (S1 rules: recon class). The boot stand-ins go once the guest is
+  built with them.
+- Performance content lever: the Switch build uses a settings preset made only of the exe's existing INI keys
+  (fade multipliers, shadow counts, grass, decals; uGridsToLoad stays 5). It is applied as port defaults, not by
+  editing the owner's ini files. Its values are ours: tools/perf/content_presets.py, `switch_b` (PERF.md 11.7).
+
 ## Legal
 
 The decomp grants no licence. This directory contains only our own code: tools, shims, the platform layer and docs.

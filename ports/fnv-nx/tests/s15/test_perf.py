@@ -145,7 +145,11 @@ def test_budget(tmp):
           all(subs[i]['minsn']['mid'] >= subs[i + 1]['minsn']['mid'] for i in range(len(subs) - 1)),
           'hotspots: subsystem rows ranked by mid instructions')
     cu = next(h for h in subs if h['subsystem'] == 'cull')
-    want = 3.25 / (0.8 * 1020) * 1e3 / 22.2
+    cm = sum((i['minsn'][0] + i['minsn'][1]) / 2 for i in model['items'] if i.get('subsystem') == 'cull') + sum(
+        ((h['per_call_insn'][0] + h['per_call_insn'][1]) / 2 - (h['before']['per_call_insn'][0] + h['before']['per_call_insn'][1]) / 2)
+        * (h['calls'][0] + h['calls'][1]) / 2 / 1e6 for h in model['hotspot_functions']
+        if h.get('before') and h.get('subsystem') == 'cull')   # the item plus S15-simd's override correction
+    want = cm / (0.8 * 1020) * 1e3 / 22.2
     check(cu['critical'] and abs(cu['share_45']['1020'] - want) < 2e-3 and cu['fix'] and cu['basis'] == 'E',
           'hotspots: share of 22.2 ms at the assumed IPC, fix attached (cull %.3f)' % cu['share_45']['1020'])
     sl = next(h for h in fns if h['id'] == 'fn_slerp')
@@ -153,6 +157,20 @@ def test_budget(tmp):
     check(abs(sl['minsn']['lo'] - hs['per_call_insn'][0] * hs['calls'][0] / 1e6) < 1e-6 and
           abs(sl['minsn']['hi'] - hs['per_call_insn'][1] * hs['calls'][1] / 1e6) < 1e-6 and sl['basis'] == 'E',
           'hotspots: function proxy = per-call A64 count x calls per frame')
+    # S15-simd overrides: a row with `before` becomes an item of (after - before) x calls on its subsystem
+    mo = json.loads(json.dumps(model))
+    mo['hotspot_functions'] = [{'id': 'fn_t', 'name': 't', 'subsystem': 'cull', 'role': 'main', 'per_call_insn': [10, 10],
+                                'calls': [1000, 3000], 'before': {'per_call_insn': [30, 50]}}]
+    bo = frame_budget.build(mo, None)
+    ov = bo['measured']['overrides']
+    check(ov['rows'] and abs(ov['rows'][0]['delta_minsn_mid'] - (10 - 40) * 2000 / 1e6) < 1e-6,
+          'budget: an override row corrects its subsystem by (after - before) x calls')
+    # content presets: the base preset scales nothing; a smaller fade multiplier scales the cull down
+    import content_presets
+    fbase, _ = content_presets.factors(model['content'], 'base')
+    fa, _ = content_presets.factors(model['content'], 'switch_a')
+    check(all(abs(v - 1) < 1e-9 for v in fbase.values()) and fa['cull'] < 1 and fa['render_accumulation'] < 1,
+          'content: base preset is the model, switch_a scales cull and accumulation down')
     q = b['queue']
     check(q and q[0]['rank'] == 1 and all(q[i]['gain_main_minsn']['mid'] >= q[i + 1]['gain_main_minsn']['mid']
                                           for i in range(len(q) - 1)), 'hotspots: queue ranked by main-thread gain')
