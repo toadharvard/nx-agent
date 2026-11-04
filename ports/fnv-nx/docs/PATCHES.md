@@ -57,6 +57,7 @@ inline.
 | XINC1 | all 68 x86-inconsistent pairs of S2's latest run (a 69th of an earlier run is bridged by S2 now): 66 functions, 49 files | 62 identical, 4 differ by design | see below |
 | XINC1 round 2 | S2c run f12: 295 x86-inconsistent references, 295 callers in 174 files; 264 callers patched in 152 files (`xinc1_r2_*.s1b`) | 259 identical, 5 differ by design | 26 need no patch, 4 open, 1 patched in round 1 (see "Round 2") |
 | XINC1 round 3 | S2c run f13 (resolve 1, tree 0420d45, before round 2): 456 caller rows, 266 covered by rounds 1-2; 128 of the 188 open generated (`xinc1_r3_*.s1b`: A 21, B 15, C 92; 27 files) | identical (all 156 site functions of the 27 files) | 51 callers left to read by hand, about 30 of them round 2's no-patch / open ones |
+| XINC1 round 4 | farm link/aedcf247e999 (tree 9a0243c, C-named references now compared): 757 this / ecx / result-pointer / cast-conflict rows, 576 caller rows, 388 covered by rounds 1-3; 66 generated + 9 by hand (`xinc1_r4_*.s1b`, 59 files) | 74 identical, 1 differs by design | 182 open read: see "Round 4" |
 | FTOL1 | 17 arg-less helper calls in 10 units (+1 dead copy) | all identical; whole units identical (1,535 functions) | the "~37" of J-0009 counted 20 declarations nobody calls |
 | FTOL1 exact | the 17 sites now call the inline `fnvnx_ftol2_sse` (was the out-of-line int64 `fnvnx_ftol2`); 5 casts in 0x00a1b450 / 0x006912a0 (`ftol1_casts.s1b`) | whole units identical (11 units, 1,690 functions) | NaN / out of int32 -> 0x80000000 as on an SSE2 PC |
 | RET1 | 11 functions | identical (whole units, 1,395 functions) | 6 trailing statements, 5 with the callee's return type restored |
@@ -120,6 +121,20 @@ real and patched. Open: 4 result-pointer callers (pattern (d): 0x005762b0, 0x009
 pushes the decomp attributed to the wrong calls (0x005762b0 computes `*out = *vf_1f4() + (vf_1d8() + vf_1dc()) / c`
 through NiPoint3 operator+ 0x00439e90 and operator/ 0x0053d280): they need a rewrite of the function. Not in abi.tsv:
 the 76 C-named pairs V1 found unflagged (resolve does not compare C names yet, V1 defect 3).
+
+**Round 4 (farm link/aedcf247e999).** Resolve now compares C-named references: 73 of V1's 74 C-named addresses are
+flagged there (the 74th, 0x00c1ad80, is called by the forwarder 0x00c21900 through an `extern "C"
+__declspec(noreturn)` declaration that resolve does not parse - patched by hand, the `noreturn` is wrong as well).
+`gen.py` takes a C-named reference's signature from the unit's `extern "C"` declaration. Of the 182 open caller rows:
+66 generated, 9 by hand (`xinc1_r4_manual.s1b`: DynamicCast on `enabledData` and GrowBuffer on the output buffer,
+`extern "C"` / `noreturn` / declaration-split forwarders, the base constructor 0x00a5d3a0 on this instead of the
+decomp's temporary), MSVC 74 identical and 0x00bb7f90 by design (`enabledData` read again for the member call). No patch:
+43 rows call through a thiscall cast, 10 of them through a typedef'd pointer type (`reinterpret_cast<AlphaFlag>(f)`,
+`((FUN_00653180_type)f)`), which resolve's cast reader does not see; 30 rows take addresses (iterators, callbacks).
+0x006eac70 passes the hidden result buffer of a `__fastcall` struct return in ecx (consistent on x86; resolve's model
+misses it). Open: 18 result-pointer rows (pattern (d), the 4 of round 2 among them), 6 `cast-conflict` rows of the
+varargs 0x005b5e40 / 0x00a29680, and 8 callers still to read (0x00c6d7e0, 0x00cc26c0, 0x00e3deb0, 0x00e8dd70,
+0x00a4fb10, 0x00a60850, 0x00ccb160, 0x00ccb180).
 
 **FTOL1.** The decomp reaches the bytes by declaring the function that leaves the float in ST0 as void and calling
 the helper with no operand. Sites name that function from the code and its definition: Tile::GetFloat (0x00a011b0,

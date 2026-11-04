@@ -45,6 +45,40 @@ def parse_sig(dem):
     return ret, cc, name, split_params(params)
 
 
+def cname_name(sym):
+    """C-decorated name -> identifier: _f, _f@N (stdcall), @f@N (fastcall)"""
+    m = re.match(r'^@(\w+?)@\d+$', sym) or re.match(r'^_(\w+?)@\d+$', sym) or re.match(r'^_(\w+)$', sym)
+    return m.group(1) if m else sym
+
+
+def cname_sig(text, sym):
+    """(ret, cc, name, [params]) of a C-named reference, from the unit's extern "C" declaration of it"""
+    name = cname_name(sym)
+    ms = list(re.finditer(r'extern\s+"C"\s+((?:[^;{}()]|__declspec\(\w+\))*?)\b(?:(__cdecl|__stdcall|__fastcall)\s+)?'
+                          r'%s\s*\(([^;{}]*)\)\s*(?:throw\(\))?\s*;' % re.escape(name), text))
+    if len(ms) != 1:
+        return None
+    m = ms[0]
+    ret = re.sub(r'__declspec\(\w+\)', ' ', m.group(1))
+    ret = re.sub(r'\b(static|inline|__inline|extern)\b', ' ', ret)
+    ret = re.sub(r'\s+', ' ', ret).strip()
+    if not ret:
+        return None
+    params = [re.sub(r'\s+', ' ', x) for x in split_params(m.group(3))]
+    # drop parameter names: keep the type part (the declaration may name them)
+    out = []
+    for x in params:
+        x = x.strip()
+        if x == '...':
+            return None
+        mm = re.match(r'^(.*?[\w>*&\s])\s*\b([A-Za-z_]\w*)$', x)
+        if mm and not re.match(r'^(const|volatile|unsigned|signed|int|char|short|long|float|double|bool|void)$', mm.group(2)) \
+                and re.search(r'[\w>*&]', mm.group(1).strip()):
+            x = mm.group(1).strip()
+        out.append(x)
+    return ret, m.group(2) or '__cdecl', name, out
+
+
 SCALAR = {'int', 'unsigned int', 'long', 'unsigned long', 'bool', 'char', 'signed char', 'unsigned char', 'short',
           'unsigned short', 'wchar_t', 'float', 'double', '__int64', 'unsigned __int64', 'void'}
 
@@ -199,7 +233,9 @@ for (src, caller), rs in by_caller.items():
     methods, notes, hunks, ok = [], [], [], True
     callmap = []
     for r in rs:
-        ref = parse_sig(r['ref'])
+        ref = parse_sig(r['ref']) if r['ref'] else cname_sig(text, r.get('ref_ms', ''))
+        if ref is None and not r['ref'] and pat == 'A':
+            ref = ('void', '__cdecl', cname_name(r.get('ref_ms', '')), [])     # a forwarder needs only the name
         dsig = parse_sig(r['def'])
         if r['dkind'] in ('ctor', 'dtor') or dsig is None:
             m = re.match(r'^(?:public|private|protected): (?:virtual )?__thiscall (.+?)\((.*)\)$', r['def'])
@@ -361,7 +397,7 @@ for src, items in out_files.items():
             if kind == '__BODY__':
                 k_ = body_new.rfind(val[0])
                 body_new = body_new[:k_] + val[1] + body_new[k_ + len(val[0]):]
-                body_new = re.sub(r'extern [^;{}]*\b%s\s*\([^;{}]*\)\s*;' % re.escape(rs[0]['ref'].split('(')[0].split('::')[-1].split()[-1]), '', body_new)
+                body_new = re.sub(r'extern [^;{}]*\b%s\s*\([^;{}]*\)\s*;' % re.escape(rs[0]['ref'].split('(')[0].split('::')[-1].split()[-1] if rs[0]['ref'] else cname_name(rs[0].get('ref_ms', ''))), '', body_new)
             elif kind == '__BODYALL__':
                 body_new = val[1]
         hl = []
