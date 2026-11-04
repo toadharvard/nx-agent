@@ -289,6 +289,48 @@ check('ENUM1 a definition int cannot hold keeps its form',
       run(s1.r_opaque_enums, 'enum WIDE { W = 0x80000000 };\n', os.path.join(_e, 'src', 'c.cpp')), ['enum WIDE { W'])
 s1._OPAQUE_NAMES = None
 
+# ---- DECL1 math: the decomp's float / double declarations
+got = prepare.r_platform_protos('/x/src/m.cpp', 'extern "C" double __cdecl sqrt(double);\nfloat __cdecl floor(float);\n'
+                                'namespace N {\nextern "C" double fabs(double);\n}\nfloat g(float x) { return sqrt(x); }\n',
+                                Counter())
+check('DECL1 declares the C math function itself (no <math.h> overloads), keeps a float overload of the decomp', got,
+      ['#include "fnvnx_cmath/fabs.h" /* fnv-nx DECL1 */\n#include "fnvnx_cmath/sqrt.h" /* fnv-nx DECL1 */\n'
+       'float __cdecl floor(float);\nnamespace N {\nusing ::fabs; /* fnv-nx DECL1 */\n}'], ['<math.h>'])
+# where a translation unit of the file includes <math.h>, the decomp's float overload is MSVC's <math.h> one: dropped
+import json as _json
+import tempfile
+_m = tempfile.mkdtemp()
+os.makedirs(os.path.join(_m, 'src')); os.makedirs(os.path.join(_m, 'build'))
+_json.dump({'units': [{'source': 'src/u.cpp', 'symbols': {'_floor': '0x00406cc0'}},
+                      {'source': 'src/v.cpp', 'symbols': {}}]}, open(os.path.join(_m, 'build', 'units.json'), 'w'))
+open(os.path.join(_m, 'src', 'u_decls.h'), 'w').write('extern "C" double floor(float);\n')
+open(os.path.join(_m, 'src', 'u.cpp'), 'w').write('#include "u_decls.h"\nbool f(float a, float b) { return floor(a) != floor(b); }\n')
+open(os.path.join(_m, 'src', 'v_decls.h'), 'w').write('float cos(float);\n')
+open(os.path.join(_m, 'src', 'v.cpp'), 'w').write('#include <math.h>\n#include "v_decls.h"\n')
+_saved = (prepare._GAME_FILES, prepare._INC_GRAPH, dict(prepare._MATH_SEEN), dict(prepare._GAME_FLOAT_RET))
+prepare._GAME_FILES, prepare._INC_GRAPH = None, None
+prepare._MATH_SEEN.clear(); prepare._GAME_FLOAT_RET.clear()
+_h = os.path.join(_m, 'src', 'u_decls.h')
+got = prepare.r_game_bound_names(_h, open(_h).read(), Counter())
+got2 = prepare.r_game_bound_names(os.path.join(_m, 'src', 'u.cpp'), open(os.path.join(_m, 'src', 'u.cpp')).read(), Counter())
+_v = os.path.join(_m, 'src', 'v_decls.h')
+got3 = prepare.r_platform_protos(_v, open(_v).read(), Counter())
+prepare._GAME_FILES, prepare._INC_GRAPH = _saved[0], _saved[1]
+prepare._MATH_SEEN.clear(); prepare._MATH_SEEN.update(_saved[2])
+prepare._GAME_FLOAT_RET.clear(); prepare._GAME_FLOAT_RET.update(_saved[3])
+check('GAME1 renames a C-linkage float math prototype the unit binds, with the game function\'s float return',
+      got + got2, ['extern "C" float fnvnx_game_floor(float); /* fnv-nx GAME1: the game function returns float */',
+                   'return fnvnx_game_floor(a) != fnvnx_game_floor(b);'])
+check('DECL1 drops the decomp\'s float overload where a unit includes <math.h>', got3,
+      ['#include "fnvnx_cmath/cos.h" /* fnv-nx DECL1 */'], ['float cos(float)'])
+
+# the one-function math headers DECL1 includes: one per name, declaring the C function
+for _n in sorted(prepare.MATH_NAMES):
+    _r, _ps = prepare.C_MATH_SIG[_n]
+    _hp = os.path.join(os.path.dirname(os.path.abspath(prepare.__file__)), '..', 'shim', 'include', 'fnvnx_cmath', _n + '.h')
+    if not os.path.exists(_hp) or 'extern "C" %s %s(%s) noexcept;' % (_r, _n, ', '.join(_ps)) not in open(_hp).read():
+        check('fnvnx_cmath/%s.h declares the C function' % _n, '', ['x'])
+
 # ---- DECL1 with a trailing comment
 check('DECL1 drops a CRT prototype that ends in a // comment',
       prepare.r_platform_protos('/x/src/a.h', 'extern "C" char* __cdecl strchr(const char*, int);  // CRT strchr (x)\n',

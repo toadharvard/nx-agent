@@ -1337,15 +1337,17 @@ def r_namespace_template_decls(path, text, stats):
 # ---------------------------------------------------------------------------------------------------------- MATH1
 
 MATH_OVERLOAD_DEF = re.compile(
-    r'^[ \t]*(?:inline|__inline|__forceinline)\s+(?:float|long\s+double|double)\s+(?:__cdecl\s+)?'
-    r'(abs|fabs|sqrt|sin|cos|tan|asin|acos|atan|atan2|exp|log|log10|pow|floor|ceil|fmod|modf|frexp|ldexp|sinh|cosh|'
-    r'tanh)\s*\(([^;{}()]*)\)\s*\{', re.M)
+    r'^[ \t]*(?:extern\s*"C"\s*)?(?:inline|__inline|__forceinline)\s+(?:float|long\s+double|double)\s+(?:__cdecl\s+)?'
+    r'(abs|(?:fabs|sqrt|sin|cos|tan|asin|acos|atan|atan2|exp|log|log10|pow|floor|ceil|fmod|modf|frexp|ldexp|sinh|cosh|'
+    r'tanh)f?)\s*\(([^;{}()]*)\)\s*\{', re.M)
 
 def r_math_overloads(path, text, stats):
     """MATH1: drop the decomp's copies of MSVC <math.h>'s C++ overloads (`inline float sqrt(float _X)
     { return sqrtf(_X); }`, also long double and the double (int) forms) at file scope; the target's <math.h> defines
     the same overloads (std::sqrt(float) brought to the global namespace), so the copy is a redefinition and its calls
-    ambiguous. The header takes the place of the first one. In a namespace that takes the C function itself (`using
+    ambiguous. Also the x86 header's inline float functions themselves (`inline float fabsf(float _X) { return
+    (float)fabs((double)_X); }`, also `extern "C" inline`): <math.h> declares fabsf as the C function. The header
+    takes the place of the first one. In a namespace that takes the C function itself (`using
     ::fabs;`, `extern "C" double fabs(double);`), whose overloads are then the global ones, an untagged copy goes too."""
     if 'inline' not in text and '__forceinline' not in text: return text
     spans, out, pos, have = None, [], 0, False

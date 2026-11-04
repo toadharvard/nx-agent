@@ -293,6 +293,138 @@ def platform_names():
         if m: names.setdefault(m.group(1), '"fnvnx_win32.h"')
     return names
 
+# ---- DECL1 for <math.h> names: the decomp's float / double declarations
+#
+# MSVC compiled each unit against the math declarations the unit itself has: the decomp's own prototypes, plus the
+# C++ float / long double overloads of MSVC's <math.h> only where the unit includes it. libstdc++'s <math.h> always
+# brings those overloads into the global namespace, so including it for a unit that does not include it changes the
+# callee and the precision of every call with a float argument (`sqrt(f)` was the double sqrt, `floor(f * 24.0)`
+# went to the decomp's float floor). So for these names DECL1 declares exactly the C function the decomp prototype
+# is, with the shim's one-function header "fnvnx_cmath/sqrt.h" (glibc's declaration, noexcept, so a later <math.h>
+# agrees; a system header, so a later decomp redeclaration without noexcept is accepted), not <math.h>; and a
+# decomp prototype with other types than the C function (`float floor(float)`, `float cos(float)`,
+# `float fmod(float, float)`: MSVC's float overloads, out of line in the game at 0x00406cc0 / 0x004e4470, bound by
+# the unit's recipe) is kept as it is, where no translation unit that sees the file includes <math.h> (there the
+# overloads are MSVC's too and the decomp's copy would collide with libstdc++'s). One with C linkage
+# (`extern "C" float floor(float)`) cannot sit next to the C function; GAME1 renames it (see there).
+
+MATH_NAMES = set(CRT_HEADERS['<math.h>'].split())
+
+def _c_math_sig(name):
+    t = 'float' if name.endswith('f') and name[:-1] in MATH_NAMES else 'double'
+    base = name[:-1] if t == 'float' else name
+    second = {'atan2': t, 'pow': t, 'fmod': t, 'modf': t + '*', 'frexp': 'int*', 'ldexp': 'int'}.get(base)
+    return (t, (t, second) if second else (t,))
+
+C_MATH_SIG = {n: _c_math_sig(n) for n in MATH_NAMES}
+
+def c_math_header(name):
+    return '"fnvnx_cmath/%s.h"' % name
+
+def _norm_type(t):
+    t = re.sub(r'\[[^\]]*\]|"C"', ' ', t)
+    t = re.sub(r'\b(?:__cdecl|__stdcall|_CRTIMP|_CRT_JIT_INTRINSIC|__declspec\s*\(\w+\)|extern|inline|__inline|static|'
+               r'const|_In_|_Out_|_Inout_|register)\b', ' ', t).strip()
+    if re.search(r'[\w\*&]\s*\b[A-Za-z_]\w*$', t) and len(re.findall(r'[A-Za-z_]\w*', t)) > 1:
+        t = re.sub(r'\b[A-Za-z_]\w*$', '', t)               # the parameter name
+    return re.sub(r'\s+', '', t)
+
+def math_proto_sig(proto, name):
+    """(return type, parameter types) of a decomp prototype of `name` (PROTO's match text), normalized."""
+    i = re.search(r'\b%s\s*\(' % re.escape(name), proto)
+    params = proto[i.end():proto.rindex(')')]
+    params = re.sub(r'\)\s*throw\s*\([^)]*$', '', params)
+    ps = tuple(_norm_type(x) for x in params.split(',')) if params.strip() not in ('', 'void') else ()
+    return (_norm_type(proto[:i.start()]), ps)
+
+MATH_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"](?:math\.h|cmath|d3dx9[a-z]*\.h)[>"]', re.M | re.I)
+# the decomp's copies of MSVC <math.h>'s inline overloads (S1 MATH1 replaces them by <math.h>): the header's content
+MATH_PASTED = re.compile(r'^[ \t]*(?:extern\s*"C"\s*)?(?:inline|__inline|__forceinline)\s+(?:float|long\s+double|double)\s+'
+                         r'(?:__cdecl\s+)?(?:abs|(?:fabs|sqrt|sin|cos|tan|asin|acos|atan|atan2|exp|log|log10|pow|floor|'
+                         r'ceil|fmod|modf|frexp|ldexp|sinh|cosh|tanh)f?)\s*\([^;{}()]*\)\s*\{', re.M)
+_INC_GRAPH, _MATH_SEEN = None, {}
+
+def _include_graph(root):
+    """{file: ([files it includes], has a math include)} for the tree (quoted includes: the including file's directory,
+    including case-insensitively as MSVC on Windows, then include/ and src/)."""
+    graph, listing = {}, {}
+    def ci(d, b):
+        if d not in listing:
+            try: listing[d] = {f.lower(): f for f in os.listdir(d)}
+            except OSError: listing[d] = {}
+        return listing[d].get(b.lower())
+    for top in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(root, top)):
+            for f in fs:
+                if not f.endswith(('.h', '.cpp', '.inl', '.hpp', '.c')): continue
+                fp = os.path.normpath(os.path.join(dp, f))
+                with open(fp, encoding='utf-8', errors='surrogateescape') as h: t = h.read()
+                incs = []
+                for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', t, re.M):
+                    full = os.path.normpath(os.path.join(dp, inc))
+                    real = full if os.path.isfile(full) else None
+                    if not real:
+                        hit = ci(os.path.dirname(full), os.path.basename(full))
+                        if hit: real = os.path.join(os.path.dirname(full), hit)
+                    if not real:
+                        for base in ('include', 'src'):
+                            g = os.path.normpath(os.path.join(root, base, inc))
+                            if os.path.isfile(g): real = g; break
+                    if real: incs.append(real)
+                graph[fp] = (incs, bool(MATH_INCLUDE.search(t) or MATH_PASTED.search(t)), c_math_others(t))
+    return graph
+
+def c_math_others(text):
+    """math names this text declares at file / namespace scope with C linkage and other types than the C function
+    (`extern "C" float floor(float);`)"""
+    if '"C"' not in text: return set()
+    out, spans = set(), None
+    for m in PROTO.finditer(text):
+        name = m.group(1)
+        if name not in MATH_NAMES or math_proto_sig(m.group(0), name) == C_MATH_SIG[name]: continue
+        if spans is None: spans = scope_spans(text)
+        chain = scope_chain(spans, m.start())
+        if any(k not in ('namespace', 'extern') for k, _ in chain): continue
+        if 'extern "C"' in m.group(0) or any(k == 'extern' and '"C"' in h for k, h in chain): out.add(name)
+    return out
+
+def include_graph(path):
+    global _INC_GRAPH
+    if _INC_GRAPH is None:
+        root, _ = _units_json(path)
+        _INC_GRAPH = _include_graph(root) if root else {}
+    return _INC_GRAPH
+
+def math_seen(path):
+    """True when a translation unit that has this file (a .cpp including it, or the file itself) includes <math.h>
+    (<cmath>, or the d3dx9 headers that include it) anywhere."""
+    p = os.path.normpath(os.path.abspath(path))
+    if p in _MATH_SEEN: return _MATH_SEEN[p]
+    include_graph(path)
+    rev = {}
+    for f, (incs, _, _) in _INC_GRAPH.items():
+        for i in incs: rev.setdefault(i, []).append(f)
+    users, todo = set(), [p]
+    while todo:                                      # the files that include p, transitively
+        f = todo.pop()
+        if f in users: continue
+        users.add(f)
+        todo.extend(rev.get(f, ()))
+    seen = False
+    for u in users:
+        if not u.endswith(('.cpp', '.c')) and u != p: continue
+        done, todo = set(), [u]
+        while todo and not seen:
+            f = todo.pop()
+            if f in done: continue
+            done.add(f)
+            incs, has, _ = _INC_GRAPH.get(f, ((), False, ()))
+            seen = has
+            todo.extend(incs)
+        if seen: break
+    _MATH_SEEN[p] = seen
+    return seen
+
 PLATFORM = None
 # path -> {name: indices of the reference parameters of the decomp prototype DECL1 dropped} (CALL1 passes addresses)
 DECL1_REFS = {}
@@ -311,7 +443,8 @@ def r_platform_protos(path, text, stats):
     AArch64 ILP32, unsigned int on MSVC x86). The header that declares the function on the target takes the place
     of the first such prototype at file scope (same line, so line numbers are kept), or goes on top of the file
     when the prototype was inside a namespace or extern block. A prototype that declares a different entity is
-    kept: C++ linkage inside a namespace other than ::std (N::fmod is not ::fmod)."""
+    kept: C++ linkage inside a namespace other than ::std (N::fmod is not ::fmod). <math.h> names get the C
+    function's own declaration instead of the header, and the decomp's float overloads stay (see MATH_NAMES)."""
     global PLATFORM
     if PLATFORM is None: PLATFORM = platform_names()
     spans, out, pos, have, top = None, [], 0, set(), []
@@ -324,8 +457,30 @@ def r_platform_protos(path, text, stats):
         if any(k not in ('namespace', 'extern') for k, _ in chain): continue
         spaces = [re.sub(r'\s+', ' ', h) for k, h in chain if k == 'namespace']
         c_linkage = 'extern "C"' in m.group(0) or any(k == 'extern' and '"C"' in h for k, h in chain)
+        is_math = not is_op and name in MATH_NAMES
+        if (is_math and not c_linkage and math_proto_sig(m.group(0), name) != C_MATH_SIG[name]
+                and not math_seen(path)):
+            stats['DECL1-MATHKEEP'] += 1             # the decomp's float / double types (see MATH_NAMES above)
+            continue
         if (not is_op and spaces and spaces != ['namespace std'] and not c_linkage
                 and not cxx_copy_is_crt(path, name)): continue
+        if is_math and spaces != ['namespace std']:  # the C function, by itself (no <math.h> overloads)
+            start = m.start()
+            if start > 0 and text[start - 1] == '\n':
+                ls = text.rfind('\n', 0, start - 1) + 1
+                if ls >= pos and PROTO_HEAD.match(text, ls, start): start = ls
+            nl = '\n' * text.count('\n', start, m.end())
+            out.append(text[pos:start])
+            alias = 'using ::%s; ' % name if spaces else ''
+            key = 'math:' + name
+            if not chain and key not in have:
+                out.append('#include %s /* fnv-nx DECL1 */%s' % (c_math_header(name), nl)); have.add(key)
+            else:
+                out.append(alias + '/* fnv-nx DECL1 */' + nl)
+                if key not in have: have.add(key); top.append(c_math_header(name))
+            pos = m.end()
+            stats['DECL1'] += 1
+            continue
         if is_op:   # the usual forms are declared implicitly in every unit; placement forms come from <new>
             params = re.search(r'\(([^;{}]*)\)', m.group(0)[m.group(0).index('operator'):]).group(1)
             hdr = new_header(text) if PLACEMENT_PARAMS.match(params) else ''
@@ -390,6 +545,20 @@ _DECO = [re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$'), re.compile(r'^__imp_\
          re.compile(r'^_([A-Za-z_]\w*?)(?:@\d+)?$')]
 
 _CRT_BINDINGS = None
+# file -> math names whose GAME1 prototype there gets the float return type of the game function (see GAME1)
+_GAME_FLOAT_RET = {}
+
+def crt_inline_float():
+    """addresses of the game's out-of-line copies of MSVC's float math overloads (platform/crt/crt_symbols.tsv
+    `crt_inline` rows `name(float) -> namef`)"""
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'platform', 'crt', 'crt_symbols.tsv')
+    out = set()
+    if os.path.exists(here):
+        for line in open(here):
+            f = line.rstrip('\n').split('\t')
+            if len(f) > 2 and f[1] == 'crt_inline' and re.match(r'\w+\(float(?:, float)*\) -> \w+f\b', f[2]):
+                out.add(int(f[0], 16))
+    return out
 
 def cxx_copy_is_crt(path, name):
     """True when the unit of `path` binds a namespace-qualified C++ spelling of the CRT function `name`
@@ -451,6 +620,26 @@ def game_bound_names(path):
                     if not (in_iat and (n in iat_owner.get(a, {n}))):
                         bad.setdefault(u['source'], set()).add(n)
                 break
+    # a math function the unit declares with C linkage and other types than the C function (DECL1 math above) and
+    # binds (`_floor` -> 0x00406cc0, the game's floor(float)): the unit's own function, under its own name
+    graph = include_graph(path)
+    others = {f: v[2] for f, v in graph.items() if v[2]}
+    if others:
+        names = set().union(*others.values())
+        float_ret = crt_inline_float()
+        for u in units:
+            syms = u.get('symbols', {})
+            want = {n for n in names if '_' + n in syms}
+            if not want: continue
+            todo, done = [os.path.normpath(os.path.join(root, u['source']))], set()
+            while todo:
+                f = todo.pop()
+                if f in done: continue
+                done.add(f)
+                for n in others.get(f, set()) & want:
+                    bad.setdefault(u['source'], set()).add(n)
+                    if int(syms['_' + n], 16) in float_ret: _GAME_FLOAT_RET.setdefault(f, set()).add(n)
+                todo.extend(graph.get(f, ((),))[0])
     inc = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
     for src, names in bad.items():
         todo, seen = [os.path.normpath(os.path.join(root, src))], set()
@@ -469,7 +658,8 @@ def game_bound_names(path):
 
 def r_game_bound_names(path, text, stats):
     """GAME1: rename Win32-looking names that this unit binds to game code (D13, see above)."""
-    names = game_bound_names(path).get(os.path.normpath(os.path.abspath(path)))
+    key = os.path.normpath(os.path.abspath(path))
+    names = game_bound_names(path).get(key)
     if not names: return text
     spans = scope_spans(text)
     out, pos = [], 0
@@ -479,7 +669,15 @@ def r_game_bound_names(path, text, stats):
         out.append(text[pos:m.start()]); out.append(GAME_PREFIX + m.group(1)); pos = m.end()
         stats['GAME1'] += 1
     out.append(text[pos:])
-    return ''.join(out)
+    text = ''.join(out)
+    # `extern "C" double floor(float);` bound to the game's floor(float) (0x00406cc0): on x86 both return in st0, so
+    # the double declaration read the float result exactly; on AArch64 the function returns it in s0, so the
+    # prototype says float (the call converts it to double, the value the x86 caller read)
+    for n in _GAME_FLOAT_RET.get(key, ()):
+        text, k = re.subn(r'\bdouble(\s+(?:__cdecl\s+)?%s%s\s*\(\s*float\b[^(),]*\)\s*;)' % (GAME_PREFIX, n),
+                          r'float\1 /* fnv-nx GAME1: the game function returns float */', text)
+        stats['GAME1'] += k
+    return text
 
 RULES = [r_sse_local_types, r_sse_local_protos, r_sse_members, r_sse_qualified, r_game_bound_names,
          r_platform_protos, r_newdel_size]
