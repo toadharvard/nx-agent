@@ -68,17 +68,18 @@ struct Draw {
     int instances = 0;
     const float (*inst)[4] = nullptr;
     int stencilRef = -1;
+    uint32_t vw = 0, vh = 0;      // viewport of a pass on a target other than W x H (0: W x H)
 };
 
 struct DrawUbo { float rect[4], color[4], uv[4], rot[4], inst[16][4]; };
 
 uint16_t StateFor(Ctx& c, const uint32_t* rs, uint16_t vs, uint16_t ps, uint16_t lay, NxDynamicState* dyn,
-                  uint32_t* sb) {
+                  uint32_t* sb, uint32_t vw = W, uint32_t vh = H) {
     NxD3D9Input in;
     memset(&in, 0, sizeof in);
     in.rs = rs; in.ps_version = 0x0200; in.depth_format = 75;
-    in.viewport.Width = W; in.viewport.Height = H; in.viewport.MaxZ = 1.0f;
-    in.scissor.right = W; in.scissor.bottom = H;
+    in.viewport.Width = vw; in.viewport.Height = vh; in.viewport.MaxZ = 1.0f;
+    in.scissor.right = (int32_t)vw; in.scissor.bottom = (int32_t)vh;
     NxRenderState st;
     nx_d3d9_translate(&in, &st, dyn, sb);
     return c.sc->State(vs, ps, lay, st);
@@ -97,7 +98,7 @@ void DrawQuad(Ctx& c, const Draw& d) {
     NxDynamicState dyn;
     uint32_t sb;
     uint16_t ps = d.ps ? d.ps : c.psSolid;
-    uint16_t st = StateFor(c, d.rs, c.vsQuad, ps, c.layQuad, &dyn, &sb);
+    uint16_t st = StateFor(c, d.rs, c.vsQuad, ps, c.layQuad, &dyn, &sb, d.vw ? d.vw : (uint32_t)W, d.vh ? d.vh : (uint32_t)H);
     nx::Packet* p = c.frame->Emit();
     if (!p) return;
     uint32_t tb = d.ntex ? c.frame->AddTextures(d.tex, d.ntex) : 0;
@@ -1061,12 +1062,69 @@ void S_sky(Ctx& c, Checks& k) {
 
 } // namespace
 
+// ---- scene: dynres (dynamic resolution frame graph, RENDER_NATIVE.md §9) ------------------------------------------
+// The 3D scene renders into a target at 0.75 x 0.75 of native (120x90), is upscaled bilinearly onto the native
+// target (texel centres meet pixel centres: the full-screen quad sits at -0.5 px, D3D9 convention), and the UI is
+// drawn after it at native resolution, so UI edges stay one pixel sharp.
+void S_dynres(Ctx& c, Checks& k) {
+    enum { SW = 120, SH = 90 };
+    static uint32_t scaled = 0;
+    if (!scaled) {
+        NxImageDesc d;
+        memset(&d, 0, sizeof d);
+        d.width = SW; d.height = SH; d.format = NxFmt_RGBA8; d.flags = NxImg_RenderTarget;
+        scaled = c.be->ImageCreate(d);
+    }
+    BeginFrame(c);
+    nx::PassDesc pd;
+    memset(&pd, 0, sizeof pd);
+    pd.color = scaled; pd.clearFlags = 1; pd.clearColor = RGBA(0, 0, 64, 255); pd.width = SW; pd.height = SH;
+    pd.sampledAfter = 1;
+    uint8_t scene = c.frame->AddPass(pd);
+    float* t = (float*)c.frame->PassConstants(scene, 16);
+    if (t) { t[0] = 2.0f / SW; t[1] = 2.0f / SH; t[2] = 0; t[3] = 0; }
+    D3D a;
+    Draw q; q.rs = a.rs; q.pass = scene; q.vw = SW; q.vh = SH;
+    q.x = 12; q.y = 12; q.w = 48; q.h = 48; q.color[0] = 1; q.color[1] = 0; q.color[2] = 0;
+    DrawQuad(c, q);
+    q.x = 66; q.y = 30; q.w = 40; q.h = 40; q.color[0] = 0; q.color[1] = 1; q.color[2] = 0;
+    DrawQuad(c, q);
+    uint8_t native = Pass(c, 1, RGBA(0, 0, 0, 255));
+    Samp lin; lin.s[S_MINFILTER] = lin.s[S_MAGFILTER] = 2; lin.s[S_ADDRESSU] = lin.s[S_ADDRESSV] = 3;
+    uint32_t h = Handle(c, scaled, FMT_A8B8G8R8, lin);
+    Draw up; up.rs = a.rs; up.ps = c.psTex; up.pass = native; up.x = -0.5f; up.y = -0.5f; up.w = W; up.h = H;
+    up.tex = &h; up.ntex = 1;
+    DrawQuad(c, up);
+    Draw ui; ui.rs = a.rs; ui.pass = native; ui.layer = 1; ui.x = 4; ui.y = 100; ui.w = 40; ui.h = 12;
+    DrawQuad(c, ui);
+    ui.x = 150; ui.y = 0; ui.w = 1; ui.h = H;
+    DrawQuad(c, ui);
+    EndFrame(c);
+    // UI at native resolution: exact and one pixel sharp
+    k.Add("dynres UI box", 10, 105, 255, 255, 255, 255, 0);
+    k.Add("dynres UI box edge (outside)", 44, 105, 0, 0, 64, 255, 0, 7);
+    k.Add("dynres UI 1-px line", 150, 50, 255, 255, 255, 255, 0);
+    k.Add("dynres UI line left neighbour", 149, 50, 0, 0, 64, 255, 0, 7);
+    k.Add("dynres UI line right neighbour", 151, 50, 0, 0, 64, 255, 0, 7);
+    // scene interior after the upscale: exact
+    k.Add("dynres scene red interior", 48, 48, 255, 0, 0, 255, 0);
+    k.Add("dynres scene green interior", 115, 66, 0, 255, 0, 255, 0);
+    // bilinear upscale at the red quad's left edge: native x samples scaled u = (x + 0.5) * 0.75 - 0.5 texels
+    for (int x = 14; x <= 18; x++) {
+        float u = (x + 0.5f) * 0.75f - 0.5f, f = u - floorf(u);
+        int i0 = (int)floorf(u);
+        float r0 = i0 >= 12 ? 1.0f : 0.0f, r1 = i0 + 1 >= 12 ? 1.0f : 0.0f;
+        float r = r0 + (r1 - r0) * f, b = (1.0f - r) * 64.0f / 255.0f;
+        k.Add("dynres bilinear edge", x, 48, u8(r), 0, u8(b), 255, 2);
+    }
+}
+
 const Scene kScenes[] = {
     {"textured", S_textured}, {"sorted", S_sorted}, {"instanced", S_instanced}, {"cull", S_cull},
     {"blend", S_blend}, {"stencil", S_stencil}, {"sampler", S_sampler}, {"format", S_format},
     {"epilogue", S_epilogue}, {"border", S_border}, {"tile", S_tile},
     {"raster_a", S_raster_a}, {"raster_b", S_raster_b},
-    {"lit", S_lit}, {"depth", S_depth}, {"land", S_land}, {"sky", S_sky},
+    {"lit", S_lit}, {"depth", S_depth}, {"land", S_land}, {"sky", S_sky}, {"dynres", S_dynres},
 };
 const int kSceneCount = sizeof kScenes / sizeof kScenes[0];
 

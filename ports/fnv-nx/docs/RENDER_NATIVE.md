@@ -676,3 +676,94 @@ streams other than 0 (instancing), cube textures (sampled as none), vertex textu
 the PS are fine. A converter should still emit everything; nx_render reports what it skipped.
 
 Size limits: 4096x4096 images, 128 MiB of per-frame vertex/index/constant copies, 4 M command words per frame.
+
+## 9. Frame-rate targets, dynamic resolution and presets
+
+Targets set by the owner: **45 fps stable** (22.2 ms) is the main target, **60 fps** (16.7 ms) the stretch, below
+30 fps a fail. Maxwell docked (768 MHz) is about 1.6x Xenos and FNV ran at 30 fps on the 360, so 60 fps at 720p
+docked needs the scene resolution to move with the load; handheld (384 MHz GPU, about half of docked) needs a
+lower range from the start. The UI is never scaled.
+
+### 9.1 Frame graph with a scaled scene
+
+```
+ shadow maps (fixed size per preset)            -- not scaled
+ water reflection / depth (preset fraction)     -- scaled with the scene
+ scene passes, pass ids < 757 (§1.3)            -> scene colour + depth at  s x native   (sub-rectangle)
+ image space (HDR adapt, bloom, DOF, ...)       -> at the scene scale, last effect writes the scene colour
+ upscale                                        -> native target  (bilinear now; an EASU/RCAS-style family later)
+ TILE (757), menu background, HUD, IMAGESPACE (758) for menus -> native target at native resolution
+ present
+```
+
+* **Targets** are allocated once at the preset's maximum scale; a frame renders into the top-left
+  `s x W` by `s x H` sub-rectangle (viewport and scissor), so a scale change never reallocates or flushes.
+  The upscale samples `uv x (sW/W_max, sH/H_max)` with the sampler clamped half a texel inside the sub-rectangle.
+* **Where the switch happens:** the default target group of `Do_BeginUsingRenderTargetGroup` names the scene target
+  (size `sW x sH`) while scene passes run, and the native back buffer from the first TILE draw or
+  `Do_SetScreenSpaceCameraData` of the menu/HUD phase on; the upscale is emitted at that switch. Camera ports
+  (`Do_SetCameraData`, C75) and the screen-space projection (C74) take the group's size, so the engine's
+  pixel-exact maths keeps working at the scaled size; `PASS` markers (§6.1) show which side each draw is on.
+* **Upscale pass:** a full-screen quad at -0.5 px (D3D9: texel centres meet pixel centres), bilinear, before the
+  UI. Implemented and tested in the N0 scene `dynres` (0.75x: 120x90 -> 160x120; UI box and a 1-px line exact at
+  native resolution, scene interiors exact, the bilinear edge within 2/255 of the formula), bit-identical on the
+  ILP32 guest. Cost on Maxwell: one 1280x720 RGBA8 read + write, ~0.15 ms docked.
+
+### 9.2 Controller (`render/native/front/dynres.h`, `nx::DynResController`)
+
+* **Input:** GPU time of each completed frame: deko3d timestamps (`dkCmdBufReportCounter(DkCounter_Timestamp)`) at
+  the start of the stream and after the upscale, read back with the frame's fence (`NxFrameStats.gpu_us`). It
+  arrives two frames late (2 frames in flight); the controller only needs a trend.
+* **Smoothing and hysteresis:** EMA with weight 0.25 on the newest frame. One step down when the smoothed time stays
+  above 95 % of the budget for 3 frames; one step up only after 30 frames below 80 %; nothing in between (a dead
+  band, so the scale does not oscillate). A single frame above 125 % drops two steps at once (camera cuts,
+  explosions). The EMA restarts after each change (a new resolution is measured afresh).
+* **Steps:** 0.05 per axis on a fixed grid from the maximum (so sizes repeat), sizes rounded down to multiples of 8.
+* **Range:** per preset (below). Budget = 22.2 ms (45 fps mode) or 16.7 ms (60 fps mode); the frame cap stays at
+  the target rate (`dkQueuePresentImage` with swap interval), so a fast GPU raises resolution, not frame rate.
+* Tested in `tests/s6n/test_front.cpp` (`test_dynres`: hysteresis, panic, clamps, dead band, 8-aligned sizes).
+
+### 9.3 Presets
+
+Output 1280x720 in both modes (the UI, the upscale target); docked 1080p output is a later option (the UI at
+1080p, the scene range unchanged). Values are the starting points to tune with measurements (P6n's CPU numbers in
+`render/native/perf/`, GPU timestamps); INI settings are the game's own (`FalloutPrefs.ini` / `Fallout.ini`).
+
+| setting | docked | handheld |
+|---|---|---|
+| GPU clock | 768 MHz | 384 MHz (460 boost profile if allowed) |
+| scene scale range (per axis) | 0.60 - 1.00 (768x432 - 1280x720) | 0.50 - 0.75 (640x360 - 960x540) |
+| start scale | 0.85 | 0.65 |
+| budget | 22.2 ms (45); 16.7 ms in 60-fps mode | 22.2 ms (45) only |
+| shadow maps `iShadowMapResolution` | 1024 | 512 |
+| `iActorShadowCountExt` / `Int` | 2 / 4 | 1 / 2 |
+| `fShadowLODStartFade` | 200 | 100 |
+| water reflections `iWaterReflectWidth` x `Height` | 512 x 512 (scaled with the scene) | 256 x 256 |
+| `bUseWaterReflections` / `bUseWaterDisplacements` | 1 / 1 | 1 / 0 |
+| grass `fGrassStartFadeDistance` / `iMinGrassSize` | 3500 / 80 | 2000 / 120 |
+| object LOD `fLODFadeOutMultObjects` / `Items` / `Actors` | 10 / 3 / 6 | 6 / 2 / 4 |
+| `fBlockLoadDistanceLow` / `fTreeLoadDistance` | 50000 / 40000 | 35000 / 25000 |
+| `fSpecularLODStartFade` | 1500 | 800 |
+| `iMaxDecalsPerFrame` / `iMaxSkinDecalsPerFrame` | 10 / 3 | 5 / 1 |
+| `bDoDepthOfField` | 1 | 0 |
+| `iMultiSample` / `bTransparencyMultisampling` | 0 / 0 | 0 / 0 |
+| `uGridsToLoad` | 5 (gameplay: unchanged) | 5 |
+
+### 9.4 Render-thread budgets
+
+The render thread runs the native back half (§3.6): sort, encode, submit, plus the per-draw translation the
+families do at packet build. Budgets per frame (the main thread's game update and cull are measured by P6n and are
+not part of these numbers):
+
+| work | 22.2 ms (45 fps) | 16.7 ms (60 fps) |
+|---|---|---|
+| packet build in the families (main thread, ~1-2 us x 1.5-3.5 k draws) | 4.0 ms | 3.0 ms |
+| sort + encode (render thread, ~0.5 us/draw) | 1.5 ms | 1.2 ms |
+| deko3d command recording + submit (render thread) | 2.0 ms | 1.5 ms |
+| dynamic geometry / UBO ring writes (render thread) | 1.0 ms | 0.8 ms |
+| render thread total (must overlap the main thread) | **4.5 ms** of 22.2 | **3.5 ms** of 16.7 |
+| GPU (the controller's budget; frame N-1 while the CPU builds N) | 22.2 ms, aim 19-21 | 16.7 ms, aim 14-16 |
+| slack for the main thread (game update, AI, cull) | ~16 ms | ~12 ms |
+
+Above budget, the order of measures is: instancing (trees, grass, LOD), the SM3 light loop (fewer passes), the
+controller's scene scale, then the preset's distances.
