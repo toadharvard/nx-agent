@@ -261,7 +261,7 @@ POLICY = {
     'native-empty-body': ('real-bug', 'S1', True, 'the native function, or a decomp-local stand-in it calls for an '
                                                   'original function defined elsewhere, is an empty body (ret / '
                                                   'return constant) where the exe runs code that makes calls'),
-    'native-calls-data': ('real-bug', 'S1', True, 'the native calls an image data address where the exe calls a '
+    'native-calls-data': ('real-bug', 'S2c', True, 'the native calls an image data address where the exe calls a '
                                                   'function: a virtual slot read past the end of a decomp class\'s '
                                                   'shorter vtable (or a data word called as code)'),
     'native-missing-free': ('real-bug', 'S1', True, 'the exe frees a block here (CRT free / operator delete / '
@@ -275,6 +275,53 @@ POLICY = {
 }
 
 CLASS_ORDER = ('real-bug', 'triage', 'artifact', 'by-design')
+
+# D21 (coverage first): every real-bug cause belongs to one fix class, a single general mechanism its owner closes
+# for all instances at once. class -> (owner, mechanism, causes).
+FIX_CLASSES = {
+    'callee-bodies': ('S1', 'every call from a prepared unit reaches the original function\'s real body: emit all '
+                            'inline/template/declared-only bodies, no decomp-local stand-in (empty or return-0) '
+                            'shadows an original function',
+                      ('native-undefined', 'after-native-undefined', 'native-empty-body', 'native-empty-callee',
+                       'native-zero-stub')),
+    'object-layout': ('S1', 'every field is read at the exe\'s offset, width and signedness (struct layouts and '
+                            'member types from the exe, base subobject placement)',
+                      ('native-null-read', 'layout-offset', 'field-width', 'signedness')),
+    'control-flow':  ('S1', 'no path the exe takes ends in a trap, a fall-off or a stack-protector abort (no UB '
+                            'GCC exploits: missing returns, unreachable, out-of-bounds locals)',
+                      ('native-trap', 'falloff?', 'stack-protector')),
+    'arithmetic':    ('S1', 'integer and float arithmetic as MSVC x86 computes it: 32-bit address wraparound '
+                            '(ilp32-wrap), float results beyond x87 tolerance',
+                      ('float', 'ilp32-wrap')),
+    'ownership':     ('S1', 'the native frees exactly what the exe frees',
+                      ('native-missing-free',)),
+    'static-init':   ('S10', 'every dynamic initializer registers its destructor as the exe does (atexit)',
+                      ('dyninit-no-atexit',)),
+    'call-abi':      ('S1b', 'every call passes and preserves registers by the callee\'s MSVC convention (argument '
+                             'slots written, results not reused, callee-saved kept, sret as MSVC)',
+                      ('uninit-arm', 'native-garbage-arg', 'native-stale-result', 'callee-saved', 'sret-mismatch')),
+    'data-binding':  ('S2c', 'every data symbol and import binds to the exe object (no stub as data, no unit copy, '
+                             'no native address where the exe has an image address, bridges deliver the bytes)',
+                      ('native-stub-data', 'native-address', 'split-global', 'import-slot-called', 'call-args')),
+    'vtables':       ('S2c', 'every image vftable pairs with a full native vtable of the static class (no short '
+                             'vtables, overrides bound to their this-adjusting thunks)',
+                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap')),
+}
+FIX_CLASS_OF = {c: k for k, v in FIX_CLASSES.items() for c in v[2]}
+
+
+def fix_classes(causes_rows):
+    """{class: owner, mechanism, causes, divergences, functions (sum over causes; a function in two causes counts
+    twice), worst_of} from a summary's per-cause rows, largest first."""
+    out = {}
+    for k, (owner, mech, cs) in FIX_CLASSES.items():
+        rows = [causes_rows.get(c) or {} for c in cs]
+        out[k] = dict(owner=owner, mechanism=mech,
+                      causes={c: (causes_rows.get(c) or {}).get('divergences', 0) for c in cs},
+                      divergences=sum(r.get('divergences', 0) for r in rows),
+                      functions=sum(r.get('functions', 0) for r in rows),
+                      worst_of=sum(r.get('worst_of', 0) for r in rows))
+    return dict(sorted(out.items(), key=lambda kv: (-kv[1]['worst_of'], kv[0])))
 
 
 def policy(cause):
@@ -427,7 +474,7 @@ def _rule_trap(d, rec):
     return LINK_TRAPS.get(_image_word((rec or {}).get('source'), pc))
 
 
-def _rule_call_args(d):
+def _rule_call_args(d, rec=None):
     if d.get('arm_garbage'):
         return 'native-garbage-arg'
     if d.get('arg') == 'sret':
@@ -450,6 +497,8 @@ def _rule_call_args(d):
         objs = (BUFS, HEAP)
         if (_in(vx, STACK) and any(_in(va, o) for o in objs)) or (_in(va, STACK) and any(_in(vx, o) for o in objs)):
             return 'arg-stack-vs-object'
+        if rec is not None and _thunk_delta(rec, vx, va):
+            return 'thunk-binding'          # MSVC's this of a secondary-base override, the native's full object
         for reg in (BUFS, HEAP, WINDOW):
             if _in(vx, reg) and _in(va, reg) and 0 < abs(vx - va) <= 0x100 and (vx - va) % 4 == 0:
                 return 'layout-offset'      # the same object, another member offset (base or field placement)
@@ -1449,6 +1498,21 @@ def _object_facts(source):
     return out
 
 
+def _thunk_delta(rec, vx, va):
+    """The native pointer is the oracle's plus d, both into one object region (literal pool / case buffers / heap /
+    image), and the function or a direct callee in its unit has a _ZThn<d>_ this-adjusting thunk by exactly d: an
+    override entered with MSVC's secondary-base this while __fnv_<addr> is bound to the GCC primary entry (S1-layout:
+    these were labelled layout-offset)."""
+    off = (va - vx) & 0xffffffff
+    if not (0 < off <= 0x400 and off % 4 == 0):
+        return False
+    regs = (LIT_POOL, BUFS, HEAP, WINDOW)
+    if not (any(_in(vx, r) for r in regs) and any(_in(va, r) for r in regs)):
+        return False
+    th = (_object_facts(rec.get('source')) or ({}, set()))[0]
+    return any(off in th.get(n, ()) for n in _own_and_callees(rec) or ())
+
+
 def _own_and_callees(rec):
     """{__fnv_<addr>} | the native function's direct callees, or None without the object."""
     try:
@@ -1592,7 +1656,7 @@ def refine(rec, cause=None):
         elif got == 'oracle-fault':
             got = _rule_oracle_fault(d, rec) or got
     elif k == 'call-args':
-        got = _rule_call_args(d)
+        got = _rule_call_args(d, rec)
     elif k == 'return':
         got = _rule_return(d, rec.get('conv'), rec.get('symbol'))
     elif k == 'mem-write':
@@ -1702,6 +1766,7 @@ def summarize(dirs, tag=''):
         'functions_by_class': {c: by_class.get(c, 0) for c in CLASS_ORDER},
         'native_objects': dict(OBJ_STATS, dir=_obj_dir()),
         'causes': causes,
+        'fix_classes': fix_classes(causes),
         'policy': {c: dict(verdict=v[0], owner=v[1], hard=v[2], why=v[3]) for c, v in sorted(POLICY.items())},
     }
 
@@ -1733,11 +1798,12 @@ def merge(paths):
             for k_, n in (r.get('kinds') or {}).items():
                 t['kinds'][k_] = t['kinds'].get(k_, 0) + n
     tot['causes'] = dict(sorted(tot['causes'].items(), key=lambda kv: (-kv[1]['divergences'], kv[0])))
+    tot['fix_classes'] = fix_classes(tot['causes'])
     return tot
 
 
 HANDOFF_FILES = (('real-bug', 'handoffs'), ('triage', 'triage'), ('artifact', 'harness'))
-HANDOFF_COLUMNS = ('owner', 'cause', 'address', 'unit', 'reproducer', 'first effect')
+HANDOFF_COLUMNS = ('owner', 'cause', 'address', 'unit', 'reproducer', 'first effect', 'fix class')
 
 
 def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/', by_head=False):
@@ -1758,10 +1824,11 @@ def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/', by_head=False):
                 continue
             e = EFFECTS.get(rec['_file']) or {}
             head = str((results.get(rec['address']) or {}).get('commit') or '')[:12]
-            ref = ('fuzz/%s/%s:div/%s' % (head, name, rec['_file']) if by_head and head else
+            shard = (results.get(rec['address']) or {}).get('shard') or name   # a seeded row keeps its source
+            ref = ('fuzz/%s/%s:div/%s' % (head, shard, rec['_file']) if by_head and head else
                    '%s%s:div/%s' % (ref_prefix, name, rec['_file']))
             out[(prefix[cls], owner)].append((owner, rec['_cause'], rec['address'], rec.get('source') or '', ref,
-                                              e.get('first') or ''))
+                                              e.get('first') or '', FIX_CLASS_OF.get(rec['_cause'], '')))
     for rows in out.values():
         rows.sort(key=lambda r: (r[1], r[2], r[4]))
     return dict(out)
@@ -1802,6 +1869,9 @@ def main(argv=None):
     m.add_argument('--out', default='')
     e = sub.add_parser('explain')
     e.add_argument('files', nargs='+')
+    fc = sub.add_parser('classes', help='the D21 fix classes of a causes.json (summary or merge output)')
+    fc.add_argument('file')
+    fc.add_argument('--tsv', default='')
     h = sub.add_parser('handoffs')
     h.add_argument('dirs', nargs='+')
     h.add_argument('--out-dir', required=True)
@@ -1813,6 +1883,17 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd in ('summary', 'handoffs') and a.effects:
         load_effects(a.effects)
+    if a.cmd == 'classes':
+        fcs = fix_classes(json.load(open(a.file)).get('causes') or {})
+        lines = ['class\towner\tworst_of\tfunctions\tdivergences\tcauses\tmechanism']
+        for k, v in fcs.items():
+            lines.append('\t'.join([k, v['owner'], str(v['worst_of']), str(v['functions']), str(v['divergences']),
+                                    ', '.join('%s %d' % kv for kv in v['causes'].items() if kv[1]), v['mechanism']]))
+        if a.tsv:
+            open(a.tsv, 'w').write('\n'.join(lines) + '\n')
+        for l in lines:
+            print('  '.join(l.split('\t')[:6]))
+        return 0
     if a.cmd == 'handoffs':
         for row in write_handoffs(a.dirs, a.out_dir, a.recheck_tag, a.ref_prefix, a.ref_by_head):
             print('%-22s %-9s %-5s rows %5d fn %5d  %s' % row)

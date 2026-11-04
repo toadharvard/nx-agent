@@ -29,6 +29,7 @@ Targets (J-0150; every target is judged on the worst frame): fail below 30 fps (
 informational), 60 fps stable (target_60: the worst frame at or under 16.7 ms, the owner's target at 1.02 GHz).
 'level' (fail, pass_30, pass_45, target_60) is the highest target the mid worst frame meets. Output schema fnvnx-frame-budget/1, keys:
 
+  ai2_critical_minsn per scenario: AI linear thread 2's path to event 6 (items' ai2_path shares, PERF.md 6.11);
   schema, inputs{...}, assumptions[{id,value,range,unit,basis,note}], targets[...], clocks_mhz[...],
   budget_minsn{clock: {target: M instructions per core in the target's frame time at the assumed IPC}},
   budget_mean_minsn{clock: {target: the same for the mean frame that keeps the worst frame inside it}},
@@ -201,7 +202,7 @@ def scenario_work(items, levers, sc):
                     w[2] = [w[2][0] * flo, w[2][1] * mid((flo, fhi)), w[2][2] * fhi]
         for iid, (flo, fhi) in lv.get('moves', {}).items():
             for w in list(work):
-                if (w[0] == iid or follows.get(w[0]) == iid) and w[1] == 'main' and len(w) < 5:
+                if (w[0] == iid or follows.get(w[0]) == iid) and w[1] == lv.get('from', 'main') and len(w) < 5:
                     fm = mid((flo, fhi))
                     moved = [w[2][0] * fhi, w[2][1] * fm, w[2][2] * flo]   # lo case: more moved
                     w[2] = [w[2][0] - moved[0], w[2][1] - moved[1], w[2][2] - moved[2]]
@@ -247,24 +248,34 @@ def verdict(lo, hi, target):
 A57_SKIP = ('fn_interlocked',)   # its price leaves out the dmb drain; the interlocked_barriers item models that
 
 
-def apply_perf(items, model, perf, ipc_mid):
+def apply_perf(items, model, perf, ipcs):
     """P0-perfmodel's A57 prices (fnvnx-perf/1 per_call_cycles[], docs/PERF.md 12.6): for each hotspot_functions row
     with a price, the difference between its cycles and its instructions, both per frame, as an item on the row's
-    thread in IPC-equivalent instructions (cycles x the assumed mid IPC - instructions), so the frame keeps one IPC
-    for the unpriced work and the priced rows run at their own. The lo case takes the lo cycles at the lo calls."""
+    thread in IPC-equivalent instructions: per case, cycles x that case's IPC - instructions, so that the frame's
+    division by the case's IPC gives exactly the row's cycles (V1 45e8724 T1: converting at the mid IPC and dividing
+    by the lo / hi IPC scaled the cycles by 0.8 / 1.33). The unpriced work keeps the assumed IPC. ipcs = the IPC of
+    the lo, mid and hi cases (1.0, 0.8, 0.6); the lo case takes the lo cycles at the lo calls. minsn is in case order
+    (lo case first), not sorted."""
     rows = {h['id']: h for h in model.get('hotspot_functions', [])}
     used = []
-    for r in perf.get('per_call_cycles') or []:
+    # a row with its own A57 CPI (PERF.md 11.9: lo = throughput bound, hi = one call) is priced from it and the
+    # model's current instructions per call, so a re-measured count re-prices it (V1 P1); the others take the
+    # report's cycles per call
+    priced = [{'id': h['id'], 'per_call_cycles': [h['per_call_insn'][0] * h['cpi']['lo'],
+                                                   h['per_call_insn'][1] * h['cpi']['hi']]}
+              for h in rows.values() if 'cpi' in h]
+    have = {r['id'] for r in priced}
+    for r in priced + [r for r in perf.get('per_call_cycles') or [] if r.get('id') not in have]:
         h = rows.get(r.get('id'))
         if not h or h['id'] in A57_SKIP or not r.get('per_call_cycles'):
             continue
         pc, ca, cy = h['per_call_insn'], h['calls'], r['per_call_cycles']
         ins = (pc[0] * ca[0], mid(pc) * mid(ca), pc[1] * ca[1])
         cyc = (cy[0] * ca[0], mid(cy) * mid(ca), cy[1] * ca[1])
-        d = [(c * ipc_mid - i) / 1e6 for c, i in zip(cyc, ins)]
+        d = [(c * ipc - i) / 1e6 for c, ipc, i in zip(cyc, ipcs, ins)]
         items.append({'id': 'a57_' + h['id'], 'name': 'A57 price of %s (cycles vs instructions)' % h['name'],
                       'role': h.get('role', 'main'), 'subsystem': h.get('subsystem'),
-                      'minsn': [min(d[0], d[2]), max(d[0], d[2])], 'mid': d[1], 'basis': 'model',
+                      'minsn': [d[0], d[2]], 'mid': d[1], 'basis': 'model',
                       'follows': follows_item(model, h.get('subsystem'))})
         used.append({'id': h['id'], 'cycles_per_frame_mid': round(cyc[1]), 'insns_per_frame_mid': round(ins[1]),
                      'delta_minsn_mid': round(d[1], 3)})
@@ -297,6 +308,24 @@ def apply_overrides(items, model):
         used.append({'id': h['id'], 'delta_minsn_mid': round(d[1], 3)})
     return items, {'rows': used, 'delta_minsn_mid': round(sum(u['delta_minsn_mid'] for u in used), 3)}
 
+def corrected_items(model):
+    """the model's items with S15-simd's override corrections (apply_overrides), the work the code that runs does:
+    the one place other models (a57model/mtmodel.py) take their items from, so the two agree"""
+    items, _ = apply_overrides([dict(it) for it in model['items']], model)
+    # fold each correction into the item it follows: a scheduler (mtmodel) cannot run negative work, and the sums
+    # (lo + lo, mid + mid, hi + hi, the pairing build's scenario_work uses) stay the same
+    by = {it['id']: it for it in items}
+    out = []
+    for it in items:
+        f = by.get(it.get('follows'))
+        if f is None or not it['id'].startswith('simd_'):
+            out.append(it)
+            continue
+        fm = f.get('mid', mid(f['minsn']))
+        f['minsn'] = [f['minsn'][0] + it['minsn'][0], f['minsn'][1] + it['minsn'][1]]
+        f['mid'] = fm + it.get('mid', mid(it['minsn']))
+    return out
+
 def build(model, profs=None, render=None, perf=None):
     placement = load_placement()
     ipc = assume(model, 'ipc')
@@ -321,7 +350,7 @@ def build(model, profs=None, render=None, perf=None):
     if not measured.get('frameprof', {}).get('used'):   # a measured frame already runs the overrides
         items, measured['overrides'] = apply_overrides(items, model)
     if perf and not measured.get('frameprof', {}).get('used'):   # measured frames are priced by P0 already
-        items, measured['a57'] = apply_perf(items, model, perf, ipc['value'])
+        items, measured['a57'] = apply_perf(items, model, perf, ipcs)
     if not measured.get('frameprof', {}).get('used'):   # a measured main thread already contains its hand-offs
         items.append({'id': 'sync', 'name': 'per-frame hand-offs on main', 'role': 'main',
                       'minsn': [syncs[0], syncs[2]], 'mid': syncs[1], 'basis': sync['basis']})
@@ -365,6 +394,12 @@ def build(model, profs=None, render=None, perf=None):
                                    'items': {i: round(v, 3) for i, v in sorted(cases[1][1][c].items())}}
         rs['main_minsn'] = rs['cores'].get('0', {'lo': 0, 'mid': 0, 'hi': 0})
         rs['main_minsn'] = {k: rs['main_minsn'][k] for k in ('lo', 'mid', 'hi')}
+        # AI linear thread 2's critical path (PERF.md 6.11): what it runs before it signals event 6, which the world
+        # render waits for under the MT1 cull sync: each item's ai2_path share of what stays on an AI linear thread
+        share = {it['id']: it.get('ai2_path', 0) for it in items}
+        base = lambda wid: wid.split('>')[0]
+        rs['ai2_critical_minsn'] = {n: round(sum(w[2][k] * share.get(base(w[0]), 0) for w in work
+                                                 if w[1] == 'ai-linear'), 3) for k, n in enumerate(('lo', 'mid', 'hi'))}
         for clk in clocks:
             core_ms = {}
             for c in cores:

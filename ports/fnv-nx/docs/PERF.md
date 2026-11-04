@@ -1161,6 +1161,14 @@ uGridsToLoad 5, fLODFadeOutMultObjects 5.0, Items 3.0, Actors 2.5, iActorShadowC
 | switch_b | fade x 3 / 1.5 / 1.5; actor shadows 0 / 1; iMinGrassSize 160; grass fade 2500; decals 3 / 1 |
 | switch_b_g3 | switch_b with uGridsToLoad 3. It breaks scripted events and AI packages that expect loaded cells, so it is shown as the bound only, not proposed |
 
+**Base (D20 as now worded):** the default settings are Fallout_default.ini as shipped, with the exe's values only
+where it is silent. The preset `base` is that ini: fLODFadeOutMultActors 6 and iActorShadowCountInt 2, where the
+exe's defaults are 2.5 and 4; the other keys agree. The exe's own defaults are kept as `exe_defaults`. The presets
+scale relative to `base`, so with the ini's actor fade of 6 they save more than the table below, which was
+computed on the exe's 2.5. The current figures (placed, mid, 1.02 GHz): base 26.4 ms, exe_defaults 25.8, switch_a
+21.4, switch_b 18.8, switch_b_g3 15.9 (`content_presets.py`). The work items themselves are taken to describe
+`base`; no measurement ties them to either fade.
+
 **Calibration of the work items (asked by the orchestrator).** No ini. The items are code-path estimates
 (sections 3 and 5): the per-draw costs times RENDER_NATIVE.md 3.7's draw table, which assumes uGridsToLoad 5 (25
 cells) and 2-4 shadow lights. Those match the exe's defaults (5; iActorShadowCountExt 2, Int 4), and the table names
@@ -1200,3 +1208,90 @@ default settings instead. What these settings do not touch (distant LOD, trees, 
   (High/Ultra) has longer fades, so if the items were estimated for those, the presets save more.
 - The shares and the square law are estimates. frameprof per preset on one scene replaces them.
 - Applying a preset is ini.cpp's `port_default` table (S15-threads / S4): no game code.
+
+### 11.8 Port-overhead audit (stream S15-simd; owner rule D21: coverage first, then fixes, largest class first)
+
+**Tools.**
+- `tools/perf/overhead_audit.py`: per function, x86 vs A64 instructions per call on S13's harness, the A64
+  instructions executed inside ABI bridges, and A57 cycles from P0's funcmodel.
+- `tools/farm/audit_job.sh <commit> <k> <N>`: the same over shard k of N of every unit, on a farm. It prepares its
+  inputs through `fuzz_job.sh` with `FUZZ_SETUP_ONLY`.
+- `tools/perf/objcensus.py --disasm`: the static classes, now including acquire/release.
+
+**Static classes, link defb010a2a1b** (all 4,324 objects, 4.74 M instructions):
+
+| class | count | share of instructions |
+|---|---|---|
+| GOT loads (127,624 of them image data) | 168,610 | 3.56 % |
+| ABI bridge call sites (5,843 units, 1,446 zz_vt) | 7,289 | - |
+| ILP32 re-zero-extension (`mov wN, wN`) | 44,397 | 0.9 % |
+| exclusives / barriers / acquire-release (ordering) | 11,942 / 9,575 / 4,193 | 0.3 / 0.2 / 0.1 % |
+| zz_vt_* synthesized objects (vtables.py) | 1.38 M | 29 % |
+| stack protector / outline atomics: only in zz_vt_* | 4,584 checks / 3,447 calls | - |
+
+**Dynamic, hot units** (link 0bd144db1464; 161 clean functions of ninode, nimatrix3*, nibound*, niquaternion,
+nicullingprocess, nitransform*, bsbatchrenderer, hkpgsk, nitransforminterpolator):
+- A64 runs 0.81x the x86 instructions, at 1.25 A57 cycles per x86 instruction.
+- Bridges are 6.0 % of the A64 instructions executed (497 of 8,222 per call). Four float/matrix callers account for
+  nearly all of it: 0x00a6dd50 264 of 437, 0x004b4880 78 of 117, 0x00a59540 / 0x00a59660 74 of 159-160 (sent to S2c-abi).
+- The other classes are priced per frame once audit_job.sh has covered every unit.
+
+### 11.9 Pricing methodology, fixed as a class (V1 v1-003: P1, S2, S1, CE1; D21)
+
+**The chain (S2).** llvm-mca's Total Cycles over 300 iterations treats a function as a loop, so each pass's inputs
+are the previous pass's results. That chains calls that do not feed each other and overstates latency-bound code
+(Slerp 244 chained, 162 with the chain broken). The steady figure is now llvm-mca's **Block RThroughput**: the
+resource bound, with independent calls overlapping. That is `cost.MCA(metric='rthroughput')`, and funcmodel's
+`cpi_tput`. A row's cycles per call are its measured instructions x [throughput CPI (lo), one-call CPI (hi)]: lo the
+best overlap, hi a cold single call. The truth lies between them; the metric takes the mid.
+
+**Stale prices (P1).** A row now stores its CPI (`cpi: {lo, hi}`), not cycles. hotspot_metric.py and frame_budget.py
+(apply_perf) compute the cycles from the row's current instructions per call. A re-measured count (pass bucket
+82 -> 54, GSK 571 -> 539) re-prices automatically. Rows without a CPI still take P0's report.
+
+**Decisions re-made on the new bounds** (cycles per call, lo / hi / mid):
+
+| function | decomp | override | verdict |
+|---|---|---|---|
+| Slerp (+ weight, normalisation) | 49 / 302 / 175 | 34 / 233 / 134 | better (-23 %): kept (S1's "steady +39 %" was the chained figure) |
+| NiBound::Update | 17.5 / 42 / 29.7 | 12.4 / 49 / 30.7 | tie (+3 %, inside 5.7 %): stays dropped; CE1 holds, worse only at one call |
+| NiMatrix3 transpose product | 23.7 / 39 / 31.4 | 19.1 / 42.1 / 30.6 | tie (-2.5 %): stays dropped |
+| FromRotationMatrix (slow path) | 49.8 / 86.3 / 68 | 50 / 99.6 / 75 | worse (+10 %): **row dropped** (overrides.tsv); the source stays |
+| culling worker + classification | (306-433 instructions at CPI 0.4-2.2) | 26.5 / 148 | better: kept |
+| UpdateWorldLoc | (compose > 100 instructions) | 8.3 / 57 | better: kept |
+
+**Two models, one set of items.** a57model/mtmodel.py scheduled the raw items, without the override corrections,
+so `tests/s15/test_a57model.py` saw mtmodel 24.92 ms against frame_budget 19.32 ms. A scheduler cannot run the
+negative correction items either. `frame_budget.corrected_items(model)` folds each correction into the item it
+follows (the same sums), and mtmodel takes its items from it. The two now agree; the test passes. Its calibration
+case is skipped here: no qemu-system-aarch64.
+
+**Result.** The metric (top hotspot functions, cycles per frame) is 6.715 M on the corrected method, against 7.808
+on the chained one, with no code change. The worst frame at the exe's defaults (frame_budget.py placed, mid, 1.02
+GHz, with the render report and perf1) is 26.5 ms, against 27.5 before.
+
+**Per-class A/B on three hot units** (`unit_ab.sh`, each unit compiled alone, relinked by S2's resolve + apply, the
+same harness cases; A64 instructions per call summed over the unit's clean functions; ORDER_KEYS=unit on both sides;
+AB_FLAGS for the flags compile.sh would otherwise override):
+
+| variant | niquaternion | nimatrix3 | hkpgsk | oracle agreement |
+|---|---|---|---|---|
+| base (compile.sh) | 1,285 | 1,421 | 961 | 181/205, 168/176, 98/151 |
+| ordering plugin off (ORDER_MODE=off) | 1,274 (-0.9 %) | 1,421 | 960 | same |
+| -fstrict-aliasing | 1,213 (-5.6 %) | 1,421 | 961 | same |
+| parity set reversed (strict aliasing, no -frounding-math, no -fwrapv, null checks deleted) | 1,209 (-5.9 %) | 1,421 | 961 | same |
+| -O3 | 1,285 | 1,124 (-21 %) | 892 (-7.2 %) | same |
+
+Reading it:
+- The ordering plugin costs under 1 % here.
+- The parity flags' cost is nearly all -fno-strict-aliasing, and only in niquaternion. They stay (D10: MSVC
+  semantics); priced only.
+- -O3 is the largest lever found so far: up to -21 % (nimatrix3: 0x00a59780 412 -> 214, 0x00a598a0 109 -> 60), with
+  agreement unchanged on these cases.
+
+Before it goes into compile.sh it needs the farms' census and fuzz on the whole tree, and the A57 cycles of the -O3
+code: its unrolled/vectorized loops can raise CPI and code size. The 1/26 sample (farm eq3) prices the classes over
+the whole link.
+-O3 in A57 cycles (mid of throughput and one-call CPI, per function, summed): niquaternion 1,808 -> 1,808 (0 %),
+nimatrix3 1,574 -> 1,314 (-16.5 %), hkpgsk 843 -> 760 (-9.9 %). .text grows 0 / +21 % / +8 % (3,328 / 5,780 -> 7,020
+/ 15,364 -> 16,612 bytes).

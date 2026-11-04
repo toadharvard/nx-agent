@@ -19,13 +19,15 @@ render machine merges it.
    Metric: skipped draws = 0, and every capture scene passing (menu, docmitchell, and S5-data's new ones).
 2. Only after that, family by family: hand-written GLSL, then GPU tuning. Each step is measured against
    Translated on the captures, at equal pixels and lower GPU time.
-Until step 1 holds, family streams (render-lit, render-land, G1-gpu) work on correctness and measurement:
+Until step 1 holds, family streams (render-lit, render-land, render-veg, G1-gpu) work on correctness and measurement:
 - the family's parity on the captures;
 - defects in the Translated path or the state emulation, with failing tests;
 - cost-model accuracy.
 They do not switch families to native.
 
 Rules for family streams:
+- Block structs may live in the stream's own header (e.g. `n1/veg_families.h`) until the render machine takes
+  them into `families.h`.
 - Family code lives in your family's files: `shaders/<family>*.glsl`, a family module under `n1/`, and the
   family's scenes and tests under `tests/s6n/`.
 - You may add or change only your family's row in the dispatch table, and only your family's override rows.
@@ -48,9 +50,9 @@ Rules for family streams:
 | water | WATER*, wading, interior, LOD water | - | skipped -> Translated | render-land | open |
 | depth / shadow | ZONLY, DEPTHMAP, 3XDEPTH*, GRASS_SHADOW, shadow maps | depth, depth_at | skipped -> Translated | render-land | open |
 | image space: world chain | HDR, bloom/blur, DOF, radial blur, sunbeams, refraction, cinematic, VATS, night vision, ... | - | skipped -> Translated | render-land | open |
-| trees | SpeedTree branch/frond/leaf/billboard | - | skipped -> Translated | unclaimed | open |
-| grass | GRASS* | - | skipped -> Translated | unclaimed | open |
-| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - | skipped -> Translated | unclaimed | open |
+| trees | SpeedTree branch/frond/leaf/billboard | leaves: tree_leaf, _fog, _pt, _ptfog (VS); tree_leaf, _fog, _tms, _fogtms (PS) | skipped -> Translated | render-veg | leaves: shaders + parity on a synthetic crown done (veg.mk parity 6/6); branches (STB), fronds, billboards open; dispatch row pending (render machine) |
+| grass | GRASS* | grass, grass_vl, grass_slope, grass_vlslope (VS); grass, grass_tms (PS) | skipped -> Translated | render-veg | shaders + parity on the synthetic field done (veg.mk parity 6/6); PTLIGHT, PROJ_SHADOW, BILLBOARD, SHADOWMAP stay Translated; dispatch row pending (render machine) |
+| particles, precipitation, bolt, beam, decal, blood, vfog | per class | particle (PARTICLE.vso/pso), decal / decal_skin (GDECAL[S].vso, GDECAL.pso), blood / blood_flare (BS, BSF), precip[_up/_spin/_upspin] (PRECIP000-003), beam (BEAM) | skipped -> Translated | render-veg | particles, decals, blood, precipitation, beams: shaders + parity done (veg.mk parity, 0-1/255); bolt, vfog open; dispatch rows pending (render machine) |
 | GPU cost model and pass structure | render/native/perf (gpu_cost.py, gen_stream.py, report.*), pass order, early-z, sorting | - | - | G1-gpu (with the render machine's perf work) | open |
 
 "skipped -> Translated": this pass is skipped today, and the render machine's Translated path, now in progress, will
@@ -167,3 +169,29 @@ failed` and `golden comparison: 19 scenes match`). One scene: `python3 tests/s6n
 | C99 | The lit static light permutations read per-draw values `Renderer::Render` prepares in the slice: the directional light as the unit vector towards it and each point light's 1 / range^2, so no fragment normalizes a constant or divides by range^2; images within 1/255 of the dynamic shader (n1 selftest), lit_spec_d1p2__e0 201 -> 179 Maxwell instructions. | n1 selftest (static vs dynamic); scenes |
 | C100 | `Renderer::Render` reuses the previous draw's epilogue block and dynamic record while the tracker has not re-translated in the frame (both depend only on the resolved state), instead of filling, comparing and appending them per draw; mix_hi .nxcap byte-identical. | n1 selftest, scenes, capture replay, nx_render |
 | C61 | The deko3d backend (`host/nxgpu.c`), host module (`host/nxgpu_host.c`) and the ILP32 N0 guest compile and link with fnvnx-a64 + libdeko3d 373bfd4 (`render/native/switch/build.sh`). Not yet run on hardware. | switch/build.sh |
+
+## Stream claims (who writes which native family)
+
+Families are claimed here before work starts, so parallel streams do not write the same GLSL. A family not claimed
+stays with the render machine. The Translated path (S6b's translation of the original) covers a family until its
+native GLSL lands.
+
+| stream | branch | families | native GLSL (`shaders/`) |
+|---|---|---|---|
+| render-land | claude/fnv-render-land | terrain (LAND*, DISTLOD), sky (SKY*), water (WATER*, water FFT), depth / shadow map (ZONLY, DEPTHMAP, SM3ZOnly/SM3DepthMap/SM3SimpleShadow, shadow casters), post (image space: IS* - HDR, bloom/blur, copy, cinematic, DOF, radial blur, refraction, sunbeams, VATS, TV, noise, map) | `is_*.glsl`, `land*`, `sky*`, `water*`, `depth*` (draws mapped in `shaders/native.tsv`) |
+
+## render-lit: d9 lit families (stream render-lit, branch claude/fnv-render-lit; RENDER_NATIVE.md §4.5)
+
+Claimed families (hand-written by render-lit; others stay with S6n): the lit object families of ShadowLightShader
+and Lighting30 - per-pixel lighting (ADTS), specular, normal map, env map, fog pass, then skin, hair, eyes, parallax
+and shadowed lights. Ids L1.. so they do not collide with S6n's C numbers.
+
+Run: `make -C ports/fnv-nx/tests/s6n` (prints `d9_families: N checks, 0 failed`); with the player's packages and
+captures (local): `render/verify/shaders/d9_synth.py` + `d9_parity.py` (RENDER_NATIVE.md §4.5).
+
+| id | claim | backed by |
+|---|---|---|
+| L1 | `nx_d9_classify` recognises a program by its interface only (shader model, CTAB names/sets/registers/counts, dcl declarations; for the fog-pass pixel program its single instruction); a constant at another register, an extra constant, a missing input, another sampler type or shader model 3 gives `NxD9_None`; truncated or empty streams give `NxD9_None`. | `tests/s6n/test_d9_families.cpp` (24 checks, ASan/UBSan); nx_render_robust (mutated NXD9) |
+| L2 | `nx_d9_pair` gives a package shader only for a vertex and pixel program of one family with equal light count and specular bit, and only for a built variant (`d9_adts_p2s`, `_p3`, `_p5`, `d9_envmap`, `d9_fogpass`); otherwise the draw keeps the translated programs. | test_d9_families |
+| L3 | nx_render d3d9 draws a pair with its d9 family unless `--families none`; counters `native` (summary) and `--draw-log` (frame, draw, backend draw, hashes, family, shader) report it; `--raw` writes the float colour target after each draw; `--force-visible` (verification only) ignores ZENABLE, STENCILENABLE, ALPHABLENDENABLE, CULLMODE. Without the option nothing else changes: 19 goldens, nx_render 47 checks, n1 113 checks unchanged. | `make -C tests/s6n scenes nx_render n1 nx_render_robust` |
+| L4 | d9_adts, d9_envmap and d9_fogpass match the translated originals: on docmitchell_13000 all 27 lit draws go native (was 0), adts max abs 1.5e-5 over 2.97 M written pixels, 0 pixels beyond 2/255 and 1e-3 relative; on synthetic captures of packages 012 and 019 (8 pairs, 6 seeds each: every program the classifier accepts, light counts 0..6 incl. fractional, all toggles) 96 / 96 draws per package, max abs 4.9e-4 (fp16 target), 0 bad pixels. All d9 shaders compile with uam to DKSH (package build). | `d9_synth.py` + `d9_parity.py` (local, needs the packages and captures) |
