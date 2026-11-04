@@ -741,6 +741,7 @@ override:
 | Havok GSK 0x00da8fb0, 0x00da8390, 0x00da8500, 0x00da8820 | `shim/include/fnvnx_sse_fast.h`: two-source `_mm_shuffle_ps` 0x00/0x55/0xaa/0xff/0xc4/0xd4 as 2-instruction asm sequences instead of tbl + literal | 579 -> 571 (model: 600, older link) | 16+11+9+0 -> same | 6.603 -> 6.563 |
 | sphere/plane classification 0x004b6100 (per active plane of the cull) | `sphere_plane_004b6100.c` | 38 -> 19 | 16/16 -> 16/16 | (with the next row) |
 | culling worker 0x00a694e0 (+ bound getter 0x0043d450, 0x004b6100, 0x004b6160, 0x004b6190 inlined) | `cull_worker_00a694e0.c`: two `ld4` give the six planes as lanes, behind/front masks by lane | per object with 4-6 active planes 224-330 -> 49-67 (static paths; harness: early exit only, 12 -> 10) | 8/8 -> 8/8 | 6.563 -> 9.927 (row re-measured) -> 6.368 |
+| NiAVObject::UpdateWorldLoc 0x00a68bf0 (+ NiTransform compose 0x0062c250 and its four helpers inlined) | `update_world_loc_00a68bf0.c` | copy paths 13 -> 14; compose 23 + an unresolved operator* (> 100) -> 47 | 11/16 -> 12/16 | 6.368 -> 6.088 |
 | BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | | - |
 
 Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no
@@ -756,3 +757,8 @@ still uses that slot (ok on links 0bd144db1464 and c0d6c71516f6). Its plane loop
 `cull_worker_test.c`; no harness case passes the null-bound and zero-radius checks. The pristine objects also
 reference 0x004b6100 and 0x00a694e0 under other class spellings (`CallerObj_b3918`, `Sphere`, `TreeVector`;
 `HostV`): the link's ABI check decides whether they bind.
+**Bug found (S2c/S1):** the native compose path of 0x00a68bf0 calls NiTransform::operator* (nimatrix3_h_unit),
+which calls ThreeByThreeMatrix::operator*(matrix) and operator*(point). The link leaves both names undefined
+(`out/refs.tsv`; 0x0062c250 is `code-defmissing`). The override no longer calls them. Other callers of operator*
+still do. The NiMatrix3 transpose product 0x00a588a0 (override above) is not on this path: the 25 instructions it
+saves were counted in fn_world_transform until this row was re-measured.
