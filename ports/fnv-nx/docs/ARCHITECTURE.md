@@ -187,6 +187,11 @@ agents queue the next item instead of waiting, and verify their own change with 
 - No settings presets (owner). The 60 fps target is met at the exe's own default settings, through code: the
   port's own overhead (bridges, thunks, ordering, ILP32, compiler flags) and the game's hot code (threading per
   D19, algorithms). tools/perf/content_presets.py stays a model of how cost scales with content, not a default.
+- "Default settings" means what the shipped game uses with no player change: Fallout_default.ini as installed
+  (e.g. shadow maps 1024), with the exe's built-in values only for keys that file does not set. The CPU and GPU
+  models both use that one set.
+- The GPU metric follows the programs the real game binds in the capture scenes (the packages our driver's caps
+  select), not a fixed package: the cost of the captured frames' draw lists.
 
 ### D21. Coverage first, then optimization (owner)
 
