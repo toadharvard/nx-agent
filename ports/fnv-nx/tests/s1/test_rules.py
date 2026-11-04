@@ -421,6 +421,11 @@ check('GOTO1 also splits SSE vectors, const scalars (dropping their const) and p
        'static const int k = 3;'])
 
 # ---- TAIL1
+check('TAIL1 writes typename in front of a qualified (possibly dependent) base',
+      run(s1.r_msvc_base_layout, 'template <class V, class B> struct T : public List<V, B>::Item\n{\n    int a;\n};\n'
+          'struct U : N::Base\n{\n};\nstruct W : Base<N::X>\n{\n};\n'),
+      ['FNVNX_MSVC_BASE_END(typename List<V, B>::Item)', 'FNVNX_MSVC_BASE_END(typename N::Base)',
+       'FNVNX_MSVC_BASE_END(Base<N::X>)'])
 check('TAIL1 names the last base without its access specifier',
       run(s1.r_msvc_base_layout, 'class D : public NiMemObject\n{\n  public:\n    int x;\n};\n'
           'struct E : B, public T<int, char>\n{\n    int y;\n};\n'),

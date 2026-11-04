@@ -313,6 +313,9 @@ def r_msvc_base_layout(path, text, stats):
         if not bases or any(re.search(r'\bvirtual\b', b) for b in bases): continue
         last = re.sub(r'^(?:(?:public|protected|private)\s+)+', '', bases[-1]).strip()
         if not last: continue
+        # a qualified base (`List<VERTEX, BASE>::Item`) may be a dependent name: inside alignof it needs typename
+        # (C++11 allows it before any qualified name, in a template or not)
+        if '::' in re.sub(r'<.*>', '<>', last) and not last.startswith('typename'): last = 'typename ' + last
         out.append(text[pos:o + 1]); out.append(' FNVNX_MSVC_BASE_END(%s)' % last); pos = o + 1
         stats['TAIL1'] += 1
     out.append(text[pos:])
