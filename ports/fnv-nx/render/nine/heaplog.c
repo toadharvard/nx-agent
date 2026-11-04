@@ -2,7 +2,7 @@
  *
  * fnvnx_heaplog_report(tag) posts the guest heap's numbers (newlib mallinfo, the heap block size) to the host
  * module through ext_call(NINE_EXT_MODULE, NINE_FN_HEAPSTAT); the host adds its own heap and the process memory
- * (host/nine_heaplog.c) and appends one line to sdmc:/fnvnx/host.log. fnvnx_heaplog_start(period_s) starts a
+ * (host/nine_heaplog.c) and appends one line to sdmc:/switch/fnv/host.log. fnvnx_heaplog_start(period_s) starts a
  * thread that reports every period_s seconds. The game enables it with the build switch HEAPLOG_S=<seconds>
  * (render/nine/game/build.sh -> -DFNVNX_HEAPLOG_S, started by nine_register.cpp); off by default. */
 #include <malloc.h>

@@ -90,7 +90,7 @@ CONFIG = [
                        'toolchain stage (toolchain/vorbis/build.sh), none = without, or a prefix'),
     ('BOOT', '0', '1: the boot stage (emulated boot of the game guest + boot frontier) runs with `all`; it also runs '
                   'when named as a goal (make boot)'),
-    ('BOOT_IMAGE', 'auto', 'data image for the emulated boot (sdmc:/fnvnx/game/FalloutNV.exe): auto = S14\'s '
+    ('BOOT_IMAGE', 'auto', 'data image for the emulated boot (sdmc:/switch/fnv/FalloutNV.exe): auto = S14\'s '
                            'synthesized image when PRISTINE_OBJS is given, else none; none = no image (all-zero '
                            'data); or an exe file'),
     ('PRISTINE_OBJS', '', 'MSVC 2008 objects of the pristine decomp (S11, tools/equiv: u<index>.obj), for S14\'s '
@@ -98,6 +98,9 @@ CONFIG = [
     ('BOOT_CENSUS', '', 'census units.tsv the frontier reports the current compile status from (empty: this '
                         'build\'s census when it ran)'),
     ('NINE', '0', '1: Gallium Nine (render/nine) in the host module; 0: no D3D9 backend in the host (null device)'),
+    ('HOST_BACKEND', 'native', 'host module: native = host.c without console + the native deko3d renderer (render/native/host, '
+                       'toolchain/host/build_native.sh; owner decision); plain = host.c with its text console (opt-in); '
+                       'NINE=1 overrides both with the Nine host'),
     ('NINE_SRC', '', 'directory holding mesa/ and libdrm_nouveau/ checkouts to copy instead of cloning'),
     ('PROGRAM_ID', '0100000000000000', 'program id written into main.npdm; ldr replaces it with the title the launcher '
                                        'fnv.nro restarts, so the placeholder is fine (NX1)'),
@@ -2060,7 +2063,7 @@ class Boot(Stage):
         image = boot_image(b, r, d)
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'
         if image:
-            argv += ['--file', 'fnvnx/game/FalloutNV.exe=' + image]
+            argv += ['--file', 'switch/fnv/FalloutNV.exe=' + image]
         elog = os.path.join(d, 'emu.log')
         open(elog, 'w').close()
         tmo = int(b.cfg['EMU_TIMEOUT'])
@@ -2220,9 +2223,11 @@ class Host(Stage):
     soft = ('nine',)
 
     def fingerprint(self, b):
-        return ['host-v2', tree_hash('toolchain/host', 'toolchain/include', 'toolchain/npdm', 'toolchain/tools',
-                                     'tests/s5/hello', 'startup'),
+        return ['host-v3', tree_hash('toolchain/host', 'toolchain/include', 'toolchain/npdm', 'toolchain/tools',
+                                     'tests/s5/hello', 'startup', 'toolchain/deko3d'),
                 tree_hash('render/nine') if b.cfg['NINE'] == '1' else '',
+                tree_hash('render/native/host', 'render/native/front', 'render/native/include')
+                if b.cfg['HOST_BACKEND'] == 'native' and b.cfg['NINE'] != '1' else '', b.cfg['HOST_BACKEND'],
                 up_id(b, 'toolchain'), b.cfg['NINE'], up_id(b, 'nine') if b.cfg['NINE'] == '1' else '',
                 b.cfg['PROGRAM_ID']]
 
@@ -2245,6 +2250,15 @@ class Host(Stage):
             b.sh(['bash', os.path.join(ROOT, 'render', 'nine', 'switch_host.sh'), nh], r['log'],
                  env=b.env({'NINE': b.art('nine', 'work')}), check=True)
             shutil.copyfile(os.path.join(nh, 'host.elf'), os.path.join(d, 'host.elf'))
+        elif b.cfg['HOST_BACKEND'] == 'native':
+            b.say('host: native renderer host module (toolchain/host/build_native.sh, deko3d)')
+            # libdeko3d at its pins, cached across builds next to the host stage (toolchain/deko3d/build.sh)
+            b.sh(['bash', os.path.join(ROOT, 'toolchain', 'host', 'build_native.sh'), os.path.join(d, 'native'),
+                  os.path.join(d, 'deko3d')], r['log'], check=True, timeout=1800)
+            r['method'] = 'NX1 toolchain/host/build_native.sh (host.c -DFNVNX_HOST_NO_CONSOLE + render/native/host + deko3d)'
+            shutil.copyfile(os.path.join(d, 'native', 'host.elf'), os.path.join(d, 'host.elf'))
+        elif b.cfg['HOST_BACKEND'] != 'plain':
+            raise StageError('HOST_BACKEND must be native or plain, got %r' % b.cfg['HOST_BACKEND'])
         else:
             hb = os.path.join(d, 's5-hello')
             b.say('host: LP64 host module (tests/s5/hello/build.sh recipe)')
@@ -2264,7 +2278,8 @@ class Host(Stage):
             r.metric('host_%s_bytes' % n.replace('.', '_'), os.path.getsize(os.path.join(d, n)))
         r['output_id'] = sha(file_hash(os.path.join(d, 'main')), file_hash(os.path.join(d, 'main.npdm')))
         r['summary'] = '%s; main (NSO) %s, main.npdm %s' % (
-            'Nine' if b.cfg['NINE'] == '1' else 'no D3D9 backend', human(os.path.getsize(os.path.join(d, 'main'))),
+            'Nine' if b.cfg['NINE'] == '1' else 'native renderer (deko3d)' if b.cfg['HOST_BACKEND'] == 'native'
+            else 'plain host, no GPU backend', human(os.path.getsize(os.path.join(d, 'main'))),
             human(os.path.getsize(os.path.join(d, 'main.npdm'))))
 
 

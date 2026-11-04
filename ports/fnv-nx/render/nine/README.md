@@ -74,8 +74,8 @@ DEVKITPRO=<S5 dkp tree> render/nine/build.sh <work dir> [jobs] [switch|host]
 * Heap statistics: `HEAPLOG_S=<seconds>` builds of the game post guest + host heap numbers to host.log
   periodically (§6).
 * Shader cache: the host module configures S6d's nvc0 cache (`host/nine_shader_cache.c`,
-  `sdmc:/fnvnx/shaders.nvc0cache`, read-write) at the first `Direct3DCreate9` and appends its counters to
-  `sdmc:/fnvnx/host.log` at exit.
+  `sdmc:/switch/fnv/shaders.nvc0cache`, read-write) at the first `Direct3DCreate9` and appends its counters to
+  `sdmc:/switch/fnv/host.log` at exit.
 * Bugs the gate found, all of which would have failed on hardware:
   1. Nine needs a REF screen: the device always creates a softpipe context on it (software vertex processing).
      With `ref = NULL` `CreateDevice` crashed. Now softpipe on the wrapper winsys around the HAL screen, as Mesa's
@@ -235,7 +235,7 @@ How to settle it: build the game with `HEAPLOG_S=60` (`game/build.sh`): `nine_re
 `heaplog.c`'s thread, which posts the guest heap (newlib `mallinfo`, heap block size) through
 `ext_call(9, NINE_FN_HEAPSTAT)` every 60 s; the host (`host/nine_heaplog.c`) adds its own heap (`mallinfo`,
 `fnvnx_host_heap_size`) and the process (`svcGetInfo` used/total memory) and appends one line to
-`sdmc:/fnvnx/host.log`:
+`sdmc:/switch/fnv/host.log`:
 
 ```
 heap #3 "periodic" t=180.0s guest used 612.40 / arena 640.00 / heap 1536.0 MiB | host used 301.20 / arena 330.00 / heap 512.0 MiB | process 1210.5 / 3264.0 MiB
@@ -261,8 +261,8 @@ SSE2NEON=... DEVKITPRO=... NINE=<build.sh work dir> [VORBIS=...] [HOST_HEAP_MIB=
   `toolchain/game/boot.cpp` calls it (weak hook `fnvnx_d3d9_register`) in its priority-101 constructor, before
   S3 binds the image's imports (one IAT slot is `d3d9!D3DPERF_SetOptions`).
 * Host: `switch_host.sh` (S5's `host.c` with `FNVNX_HOST_NO_CONSOLE` + `host/` + the patched Mesa libraries).
-* SD tree: `atmosphere/contents/<id>/exefs.nsp`, `fnvnx/guest.nso`; the player's `FalloutNV.exe` goes to
-  `fnvnx/game/`.
+* SD tree: `atmosphere/contents/<id>/exefs.nsp`, `switch/fnv/guest.nso`; the player's `FalloutNV.exe` goes to
+  `switch/fnv/`.
 * `EXTRA_OBJS` also carries `d3dx/*.o` (§8) and `heaplog.o`; `HEAPLOG_S=<seconds>` turns the periodic heap
   statistics on (§6). The objects are PIC (`-fPIE`) like S5's relocatable game guest.
 * Gate (`gate.py --game`), run through `gate/gate_launcher`: the image window `0x00400000-0x02100000` is host

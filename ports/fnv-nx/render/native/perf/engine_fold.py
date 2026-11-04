@@ -130,6 +130,17 @@ def rehotspot(rep):
                 if isinstance(r, dict) and "ms" in r:
                     r.pop("share_of_22_2ms", None)
                     r["share_of_16_7ms"] = round(r["ms"] / FRAME_BUDGET_MS, 4)
+                    # every row names the resource it runs on: main, render (CPU threads) or GPU
+                    if r.get("kind", "").startswith("gpu"):
+                        r["thread"] = "GPU"
+                    elif r.get("kind") == "cpu_family":
+                        r["thread"] = "main+render (the family's work on both threads, summed)"
+                    elif r.get("thread") == "main+render (front)":
+                        r["thread"] = "render" if r["name"].startswith(("nx::Frame::Finish", "nx::SortPackets",
+                            "nx::Encoder::", "nx::StateCache::FlushDefines", "nx::DefaultDyn")) else "main"
+                    elif r.get("thread") == "render (backend)":
+                        r["thread"] = "render"
+
     eng = rep.get("engine_d3d9_path")
     if eng:
         a = rep["assumptions"]; ipc, clocks = a["ipc"], a["clock_ghz"]
@@ -140,8 +151,11 @@ def rehotspot(rep):
             kept = name.endswith(KEPT)
             rows.append({"kind": "cpu_engine_function", "name": name, "ms": round(ms(v), 3),
                          "share_of_16_7ms": round(ms(v) / FRAME_BUDGET_MS, 4), "instr_per_draw": v,
-                         "thread": "main (engine)", "path": "kept on the native path" if kept else
-                         "D3D9 path (replaced by the native renderer)", "source": "measured (engine_path.py, static)"})
+                         "thread": "main", "path": "kept on the native path" if kept else
+                         "D3D9 path (replaced by the native renderer)",
+                         "applies_to": "native path and Nine fallback (runs on main)" if kept else
+                                       "Nine fallback only (the native renderer replaces it)",
+                         "source": "measured (engine_path.py, static)"})
         rows.sort(key=lambda r: -r["ms"])
         h["engine_d3d9_path_by_function"] = rows
         kept_rows = [r for r in rows if r["path"].startswith("kept")]
@@ -152,6 +166,11 @@ def rehotspot(rep):
     top = sorted(cpu + gpu, key=lambda r: -r["ms"])
     h["top10"] = top[:10]
     h["frame_budget_ms"] = FRAME_BUDGET_MS
+    h["rows_rule"] = ("every row: thread = the resource it runs on (main, render: CPU threads at IPC 0.6, 1.02 GHz; "
+                      "GPU: model at handheld 720p, efficiency 0.6); share_of_16_7ms = ms / 16.7 (the 60 fps frame). "
+                      "Threads and the GPU run in parallel: shares of different threads do not add up. "
+                      "engine_d3d9_path_by_function rows marked 'Nine fallback only' are not on the native path; "
+                      "on the native path only the kept engine part runs, on main")
 
 
 def main():

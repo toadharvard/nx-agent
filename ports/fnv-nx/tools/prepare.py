@@ -911,6 +911,9 @@ def main():
                 with open(d, 'w', encoding='utf-8', errors='surrogateescape') as f:
                     f.write(text)
     shutil.copytree(os.path.join(src_root, 'build'), os.path.join(out_root, 'build'), dirs_exist_ok=True)
+    # third_party/ (zlib 1.2.1: C units of units.json, compiled as C) is copied as it is: no rule edits it
+    if os.path.isdir(os.path.join(src_root, 'third_party')):
+        shutil.copytree(os.path.join(src_root, 'third_party'), os.path.join(out_root, 'third_party'), dirs_exist_ok=True)
     drop_native_units(out_root, stats, files)
     for hook in STREAM_POST:
         hook(out_root, stats, files)
