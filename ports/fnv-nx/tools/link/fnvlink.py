@@ -496,6 +496,25 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             p_ = os.path.join(tree, src_.split('#')[0])
             text_cache[src_] = open(p_, encoding='utf-8', errors='surrogateescape').read() if os.path.exists(p_) else ''
         return text_cache[src_]
+    decl_cache = {}
+
+    def c_decls(src_):
+        """CDecls of a unit and the local headers it includes (\"...\" from the including file's directory, then
+        <tree>/include): the unit's own declarations first."""
+        src_ = src_.split('#')[0]
+        if src_ not in decl_cache:
+            texts, seen, todo = [], set(), [os.path.join(tree, src_)]
+            while todo and len(seen) < 200:
+                f_ = os.path.normpath(todo.pop(0))
+                if f_ in seen or not os.path.isfile(f_):
+                    continue
+                seen.add(f_)
+                t_ = open(f_, encoding='utf-8', errors='surrogateescape').read()
+                texts.append(t_)
+                for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', t_, re.M):
+                    todo += [os.path.join(os.path.dirname(f_), inc), os.path.join(tree, 'include', inc)]
+            decl_cache[src_] = CDecls('\n;\n'.join(texts))
+        return decl_cache[src_]
 
     def casts_of(u_):
         if u_.source not in cast_cache:
@@ -584,13 +603,26 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                         cast = casts_of(u).get(isig.qual[-1])
                     if refdecl and (refdecl != defdecl or cast):
                         rs, ds = msvc(refdecl), msvc(defdecl)
-                        # an undecorated C name carries no parameter types: read them from its unit's source
-                        if rs.kind == 'cname' and rs.special is None:
-                            rs = c_name_sig(rs, source_text(u.host or u.source)) or rs
-                            stats['cname_ref_' + ('compared' if rs.kind == 'func' else 'unknown')] += 1
-                        if ds.kind == 'cname' and ds.special is None and nd['unit']:
-                            ds = c_name_sig(ds, source_text(nd['unit'])) or ds
-                            stats['cname_def_' + ('compared' if ds.kind == 'func' else 'unknown')] += 1
+                        # an undecorated C name carries no parameter types: read them from the declaring unit's
+                        # source and headers; undeclared, a stdcall/fastcall stand-in for the parameters only
+                        rc_ = rs.kind == 'cname' and rs.special is None
+                        dc_ = ds.kind == 'cname' and ds.special is None and nd['unit']
+                        if rc_:
+                            rs = c_name_sig(rs, c_decls(u.host or u.source)) or rs
+                        if dc_:
+                            ds = c_name_sig(ds, c_decls(nd['unit'])) or ds
+                        for side_, on_, sg_, other_ in (('ref', rc_, rs, ds), ('def', dc_, ds, rs)):
+                            if not on_:
+                                continue
+                            if sg_.kind == 'func':
+                                stats['cname_%s_compared' % side_] += 1
+                                continue
+                            st_ = c_name_standin(sg_, other_)
+                            stats['cname_%s_%s' % (side_, 'standin' if st_ else 'unknown')] += 1
+                            if st_ is not None and side_ == 'ref':
+                                rs = st_
+                            elif st_ is not None:
+                                ds = st_
                         cast_note = None
                         if cast and ds.kind == 'func':
                             # the unit calls the name through a cast to another function-pointer type: the cast's
@@ -999,9 +1031,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'ecx-not-passed / this-not-passed pairs judged on the definition\'s MSVC code (--msvc-code/-objs): ecx '
               'unused, bridged: %d; used, flagged: %d; no code: %d' % (stats['ecx_code_unused'],
                                                                       stats['ecx_code_used'], stats['ecx_code_unknown']),
-              'C-named declarations compared from their unit\'s source: %d references, %d definitions; without a usable '
-              'declaration: %d / %d' % (stats['cname_ref_compared'], stats['cname_def_compared'],
-                                         stats['cname_ref_unknown'], stats['cname_def_unknown']),
+              'C-named declarations compared from their unit\'s source and headers: %d references, %d definitions; '
+              'undeclared, compared through an integer stand-in (the other side\'s result): %d / %d; not compared: '
+              '%d / %d' % (stats['cname_ref_compared'], stats['cname_def_compared'], stats['cname_ref_standin'],
+                           stats['cname_def_standin'], stats['cname_ref_unknown'], stats['cname_def_unknown']),
               'references called through a cast to another function type (the cast decides): %d, conflicting casts '
               'or direct calls (x86-inconsistent): %d' % (stats['cast_refs'], stats['cast_conflicts']),
               'GAME1 names (fnvnx_game_*) looked up by the unit\'s own name: %d references, %d resolved'
@@ -1514,38 +1547,150 @@ def cast_sig(cc, ret, params, name):
 
 TYPE_WORDS = {'int', 'char', 'short', 'long', 'float', 'double', 'void', 'bool', 'unsigned', 'signed', 'const',
               'volatile', 'struct', 'class', 'union', 'enum', '__int64', 'wchar_t'}
+CODE_NOISE = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|^[ \t]*#(?:[^\n]*\\\n)*[^\n]*',
+                        re.S | re.M)
+DECL_SPEC = re.compile(r'\b(?:extern|static|inline|__inline|__forceinline|virtual|friend|FNVNX_KEEP|WINAPI|CALLBACK|'
+                       r'__declspec\s*\([^()]*\)|__(?:cdecl|stdcall|fastcall|thiscall))\b')
+NOT_A_TYPE = {'return', 'else', 'case', 'goto', 'throw', 'new', 'delete', 'sizeof', 'do', 'typedef', 'if', 'while',
+              'for', 'switch', 'using', 'operator', 'co_return', 'default'}
 
 
-def param_type(p):
-    """'T *self' -> 'T *', 'int a' -> 'int', 'unsigned int' -> 'unsigned int', 'char buf[8]' -> 'char *'."""
-    p = ' '.join(p.split())
-    m = re.match(r'^(.*?[\s\*&])([A-Za-z_]\w*)\s*(\[[^\]]*\])?$', p)
-    if m and m.group(2) not in TYPE_WORDS and m.group(1).strip() and m.group(1).strip() not in ('const', 'volatile'):
-        return m.group(1).strip() + (' *' if m.group(3) else '')
-    return p
+def blank_noise(text):
+    """Comments, string and character literals and preprocessor lines replaced by blanks (newlines kept): what is
+    left is code a declaration can be read from (R3-2: a Ghidra-style signature note is not a declaration)."""
+    return CODE_NOISE.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text or '')
 
 
-def c_name_sig(csig, text):
-    """MSVC-model Sig for an undecorated C name (@f@N fastcall, _f@N stdcall, _f cdecl; V1 defect 3: those pairs were
-    never compared) from its declaration or definition in a unit's source: the parameter types the decoration does
-    not carry. A declaration whose x86 argument bytes disagree with N is skipped; without one, N/4 four-byte
-    integers stand in for stdcall/fastcall; None when nothing is known (a cdecl name nobody declares)."""
+def int_words(t):
+    """Canonical MSVC spelling of the integer words of a C type: 'unsigned' -> 'unsigned int', 'long int' -> 'long',
+    '__int16' -> 'short', 'signed int' -> 'int'."""
+    def canon(m):
+        w = m.group(0).split()
+        u = 'unsigned ' if 'unsigned' in w else ''
+        if 'char' in w or '__int8' in w:
+            base = 'char' if u else ('signed char' if 'signed' in w else 'char')
+        elif 'short' in w or '__int16' in w:
+            base = 'short'
+        elif '__int64' in w or w.count('long') >= 2:
+            base = '__int64'
+        elif 'long' in w:
+            base = 'long'
+        else:
+            base = 'int'
+        return u + base + ' '
+    return ' '.join(re.sub(r'\b(?:(?:unsigned|signed|short|long|int|char|__int8|__int16|__int32|__int64)\b\s*)+',
+                           canon, t).split())
+
+
+class CDecls:
+    """Free-function declarations and definitions of one source text (a unit and its local headers), for the C names
+    the decoration leaves untyped. Typedefs (plain ones, and function-pointer typedefs as `void *`) are expanded,
+    class/struct/union/enum names get their tag (classify needs it), integer spellings are canonical."""
+
+    def __init__(self, text):
+        self.s = blank_noise(text)
+        self.typedefs, self.tags = {}, {}
+        self.class_body = []   # (open, close, is a class/struct/union body) of every brace pair
+        stack = []
+        for m in re.finditer(r'[{}]', self.s):
+            if m.group(0) == '{':
+                stack.append((m.start(), bool(re.search(r'\b(?:struct|class|union)\s+[A-Za-z_][^;{}()]*$|'
+                                                        r'\b(?:struct|class|union)\s*$', self.s[max(0, m.start() - 300):m.start()]))))
+            elif stack:
+                o, cls = stack.pop()
+                self.class_body.append((o, m.start(), cls))
+        for m in re.finditer(r'\btypedef\s+[^;{}]*?\(\s*(?:__\w+\s+)?\*\s*([A-Za-z_]\w*)\s*\)\s*\([^;{}]*\)\s*;', self.s):
+            self.typedefs[m.group(1)] = 'void *'
+        for m in re.finditer(r'\btypedef\s+([^;{}()]+?)\s*\b([A-Za-z_]\w*)\s*;', self.s):
+            if m.group(2) not in self.typedefs and m.group(2) not in m.group(1).split():
+                self.typedefs[m.group(2)] = ' '.join(m.group(1).split())
+        for m in re.finditer(r'\b(struct|class|union|enum)\s+([A-Za-z_]\w*)\s*(?=[{;:])', self.s):
+            self.tags.setdefault(m.group(2), m.group(1) if m.group(1) != 'class' else 'struct')
+
+    def ctype(self, t):
+        t = ' '.join(t.split())
+        for _ in range(6):
+            n = re.sub(r'(?<!struct )(?<!class )(?<!union )(?<!enum )\b([A-Za-z_]\w*)\b',
+                       lambda m: self.typedefs.get(m.group(1), m.group(1)), t)
+            if n == t:
+                break
+            t = n
+        t = re.sub(r'(?<!struct )(?<!class )(?<!union )(?<!enum )(?<!:)\b([A-Za-z_]\w*)\b(?!\s*::)',
+                   lambda m: ('%s %s' % (self.tags[m.group(1)], m.group(1))) if m.group(1) in self.tags
+                   else m.group(1), t)
+        return int_words(t)
+
+    def param(self, p):
+        """'T *self' -> 'struct T *', 'void (*cb)(int)' -> 'void (*)(int)', 'char buf[8]' -> 'char *', 'int a = 0' ->
+        'int', 'unsigned n' -> 'unsigned int'."""
+        p = ' '.join(p.split('=', 1)[0].split())   # a default argument
+        p = re.sub(r'\(\s*((?:__\w+\s+)?[*&]+)\s*(?:const\s+)?[A-Za-z_]\w*\s*\)', r'(\1)', p)   # function pointer
+        m = re.match(r'^(.*?[\s\*&])([A-Za-z_]\w*)\s*(\[[^\]]*\])?$', p)
+        if m and m.group(2) not in TYPE_WORDS and m.group(1).strip() and m.group(1).strip() not in ('const',
+                                                                                                    'volatile'):
+            p = m.group(1).strip() + (' *' if m.group(3) else '')
+        return self.ctype(p)
+
+    def find(self, name):
+        """[(result type, [parameter types])] of the declarations of the free function `name`, in text order."""
+        out, s = [], self.s
+        for m in re.finditer(r'(?<![\w.>:])' + re.escape(name) + r'\s*\(', s):
+            depth, j = 0, m.end() - 1
+            while j < len(s):
+                depth += {'(': 1, ')': -1}.get(s[j], 0)
+                if depth == 0:
+                    break
+                j += 1
+            if j >= len(s):
+                continue
+            tail = re.match(r'\s*(?:const\b\s*)?(?:throw\s*\([^()]*\)\s*)?([;{])', s[j + 1:])
+            if not tail:
+                continue
+            inner = max((b for b in self.class_body if b[0] < m.start() < b[1]), default=None)
+            if inner is not None and inner[2]:
+                continue                      # declared in a class body: a member, not the C function
+            k = max(s.rfind(c, 0, m.start()) for c in ';{}')
+            pre = re.sub(r'^\s*(?:(?:public|private|protected)\s*:(?!:))?', '', s[k + 1:m.start()])
+            pre = ' '.join(DECL_SPEC.sub(' ', pre).split())
+            words = set(re.findall(r'[A-Za-z_]\w*', pre))
+            if not pre or not re.match(r'^[A-Za-z_][\w\s\*&:<>,]*$', pre) or words & NOT_A_TYPE or \
+                    pre.endswith((':', ',')) or pre.startswith('template'):
+                continue                      # a call (`return f(x);`, `a = f(x);`, `case 1: f(x);`), a template
+            params = [self.param(x) for x in split_top(s[m.end():j])]
+            out.append((self.ctype(pre), [x for x in params if x != 'void']))
+        return out
+
+
+def c_name_sig(csig, decls):
+    """MSVC-model Sig for an undecorated C name (@f@N fastcall, _f@N stdcall, _f cdecl) from its declaration or
+    definition (CDecls of the unit and its local headers): the parameter types and result the decoration does not
+    carry. A declaration whose x86 argument bytes disagree with N is skipped. None when nothing is declared (see
+    c_name_standin)."""
     name, cc, nbytes = csig.qual[-1], csig.cc or 'cdecl', csig.stack_bytes
-    rx = re.compile(r'(?P<ret>\b[A-Za-z_][\w\s\*&:]*?)\s*\b(?:__(?P<cc>cdecl|stdcall|fastcall|thiscall)\s+)?'
-                    + re.escape(name) + r'\s*\((?P<params>[^()]*)\)\s*(?:const\s*)?[;{]')
-    for m in rx.finditer(text or ''):
-        ret = ' '.join(m.group('ret').split()[-3:])
-        ret = re.sub(r'^(?:extern|static|inline|FNVNX_KEEP|__declspec\(\w+\))\s+', '', ret)
-        ps = [param_type(x) for x in split_top(m.group('params'))]
-        sig = cast_sig(cc, ret, ', '.join(ps), name)
+    if isinstance(decls, str):
+        decls = CDecls(decls)
+    for ret, ps in decls.find(name):
+        sig = cast_sig(cc, ret, ', '.join(ps) or 'void', name)
         if nbytes is not None:
-            got = sum(abi.X86_SIZE.get(c, 4) for _, c in abi.params_of(sig))
+            got = sum((abi.X86_SIZE.get(c, 4) + 3) // 4 * 4 for _, c in abi.params_of(sig))
             if got != nbytes:
                 continue
         return sig
-    if nbytes is None:
+    return None
+
+
+def c_name_standin(csig, other):
+    """An undeclared stdcall/fastcall C name compared through N/4 four-byte integer parameters - only when the other
+    side passes nothing but 32-bit integers and pointers (an edx dummy, a missing ecx still show) - and the other
+    side's own result type: no result kind is assumed (R3-1: an int stand-in result put a float callee's s0 through
+    `fmov s0, w0`). None otherwise: the pair is not compared."""
+    if csig.stack_bytes is None or other is None or other.kind != 'func' or \
+            any(c not in ('I8', 'I16', 'I32', 'P') for _, c in abi.params_of(other)):
         return None
-    return cast_sig(cc, 'int', ', '.join(['int'] * (nbytes // 4)) or 'void', name)
+    sig = cast_sig(csig.cc or 'cdecl', other.raw_ret or 'void', ', '.join(['int'] * (csig.stack_bytes // 4)) or 'void',
+                   csig.qual[-1])
+    sig.raw_ret = other.raw_ret
+    return sig
 
 
 def unit_casts(text):

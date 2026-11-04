@@ -179,11 +179,19 @@ class/struct/union/enum tags, which Itanium names do not.
 * A `float` result where the other side declares `double` (or the reverse): x86 hands either over exactly in st(0),
   AArch64 would read d0 where the callee wrote s0. The bridge calls and converts (`fcvt d0, s0` / `fcvt s0, d0`),
   class `ret-float-width` (V1 defect 2: 130 pairs were `same`); `long double` (binary128 here) is `manual`.
-* An undecorated C name (`@f@N` fastcall, `_f@N` stdcall, `_f` cdecl) carries no parameter types. Resolve reads
-  them from the declaration or definition in the unit's prepared source (the one whose x86 argument bytes equal N;
-  without one, N/4 four-byte integers), so these pairs are compared like decorated ones (V1 defect 3: 0x00ba3130's
-  missing edx got no `edx-dummy` bridge; 76 pairs left ecx or `this` unpassed unseen). A cdecl name nobody declares
-  stays uncompared.
+* An undecorated C name (`@f@N` fastcall, `_f@N` stdcall, `_f` cdecl) carries no parameter types or result. Resolve
+  reads them from a declaration or definition in the unit's prepared source and the local headers it includes
+  (`CDecls`), the first one whose x86 argument bytes equal N, so these pairs are compared like decorated ones (V1
+  defect 3: 0x00ba3130's missing edx got no `edx-dummy` bridge; 76 pairs left ecx or `this` unpassed unseen).
+  Only real declarations count (V1 round 3, R3-2). Comments, string literals and preprocessor lines are blanked
+  first, so a decompiler's signature note is not read. The name must stand in declaration context: a type before
+  it, after `;`, `{` or `}`, no `return` / `case` / operator, not inside a class body (a member). The parameter list
+  is read with balanced parentheses (function-pointer parameters). Typedefs, `struct`/`class`/`enum` tags and
+  integer spellings (`unsigned`, `long int`, `__int16`) are resolved. Undeclared, a stdcall/fastcall name gets a
+  stand-in for its parameters only: N/4 integers, when the other side passes nothing but 32-bit integers and
+  pointers, with the other side's own result type (R3-1: an assumed int result gave a float callee a
+  `fmov s0, w0` bridge that clobbered its result). Otherwise, and for a cdecl name nobody declares, the pair is not
+  compared and is bound directly.
 * A narrow integer the reference passes (`char`, `bool`, `short`, ...) where the definition reads a 32/64-bit value
   or a pointer in the same register: the AArch64 caller leaves the upper bits unspecified, MSVC's caller pushed the
   value extended, so the bridge extends it in place by the reference's type (`sxtb`/`sxth` for `char`/`short`,

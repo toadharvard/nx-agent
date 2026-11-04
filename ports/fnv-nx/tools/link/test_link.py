@@ -125,9 +125,39 @@ def main():
     check(vc is not None and vc.kind == 'bridge' and 'edx-dummy' in vc.classes and
           sorted(vc.moves) == [(('x', 2), ('x', 1), 'I32', 'I32'), (('x', 3), ('x', 2), 'I32', 'I32')],
           'C-named fastcall definition compared: %s' % ((vc and (vc.kind, vc.classes, vc.moves)),))
-    cf = fnvlink.c_name_sig(sigs.parse_msvc('_FUN_00c10000@8', None), '')   # nothing declared: N/4 integers
-    check(cf is not None and cf.cc == 'stdcall' and len(cf.raw_params) == 2, 'stdcall fallback by its byte count')
     check(fnvlink.c_name_sig(sigs.parse_msvc('_FUN_00c10010', None), '') is None, 'cdecl, undeclared: unknown')
+    # V1 round 3 (adversarial_cname c2-c4, c8, c9; R3-1, R3-2): real declarations only - comments, strings and
+    # preprocessor lines blanked, a declaration context (not `return f(x);`, not a class member), balanced parameter
+    # lists (function-pointer parameters), typedefs, bare `unsigned`, the unit's headers through CDecls
+    src3 = ('#define __stdcall\ntypedef float real;\nstruct T { int v; void FUN_00c10050(double); };\n'
+            'extern "C" float __stdcall FUN_00c10020(void (*cb)(int), int k) { if (cb) cb(k); return k * 0.5f; }\n'
+            '// double __stdcall FUN_00c10030(int x);   (decompiler note)\n'
+            'const char *note = "float __stdcall FUN_00c10030(int);";\n'
+            'extern "C" int __stdcall FUN_00c10030(int x) { return x + 1; }\n'
+            'float g4(float v) { return FUN_00c10040(v); }\nfloat g5(float v) { if (v) return FUN_00c10040(-v); '
+            'switch ((int)v) { case 1: FUN_00c10040(v); default: break; } return 0; }\n'
+            'extern "C" real __stdcall FUN_00c10080(int k) { return k * 0.25f; }\n'
+            'extern "C" {\nchar * __stdcall FUN_00c10090(const char *s, unsigned n) { return (char *)s + n; }\n}\n')
+    cd3 = fnvlink.CDecls(src3)
+    n3 = ['?FUN_00c10020@@YGMPAXH@Z', '?FUN_00c10030@@YGHH@Z', '?FUN_00c10080@@YGMH@Z', '?FUN_00c10090@@YGPADPBDI@Z']
+    d3 = fnvlink.batch_demangle(fnvlink.UNDNAME, n3)
+    for cn, rn in (('_FUN_00c10020@8', n3[0]), ('_FUN_00c10030@4', n3[1]), ('_FUN_00c10080@4', n3[2]),
+                   ('_FUN_00c10090@8', n3[3])):
+        c3 = fnvlink.c_name_sig(sigs.parse_msvc(cn, None), cd3)
+        v3 = abi.compare(sigs.parse_msvc(rn, d3[rn]), c3) if c3 is not None else None
+        check(v3 is not None and v3.kind == 'same', 'C-named %s against %s: %s' % (
+            cn, d3[rn], c3 and (c3.raw_ret, c3.raw_params, v3.kind, v3.classes)))
+    check(cd3.find('FUN_00c10040') == [] and cd3.find('FUN_00c10050') == [],
+          'calls and class members are not declarations: %s %s' % (cd3.find('FUN_00c10040'), cd3.find('FUN_00c10050')))
+    # R3-1: undeclared, a stdcall/fastcall name is compared through integer parameters with the other side's own
+    # result (no int result assumed: a float callee kept s0); not at all when the other side passes a float
+    sf = fnvlink.c_name_standin(sigs.parse_msvc('_FUN_00c10000@8', None), sigs.parse_msvc(n3[0], d3[n3[0]]))
+    check(sf is not None and sf.cc == 'stdcall' and len(sf.raw_params) == 2 and abi.ret_class(sf) == 'F32' and
+          abi.compare(sigs.parse_msvc(n3[0], d3[n3[0]]), sf).kind == 'same', 'stand-in keeps the result: %s' % (
+              (sf and (sf.raw_ret, sf.raw_params)),))
+    nf = ['?FUN_00c10001@@YGXM@Z']
+    check(fnvlink.c_name_standin(sigs.parse_msvc('_FUN_00c10001@4', None), sigs.parse_msvc(
+        nf[0], fnvlink.batch_demangle(fnvlink.UNDNAME, nf)[nf[0]])) is None, 'no stand-in for a float parameter')
     # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
     # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
     src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'
