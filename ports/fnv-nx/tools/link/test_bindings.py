@@ -97,6 +97,18 @@ SRC = {
     'src/h.cpp': 'unsigned long FUN_00830470() { return 7; }\nvoid FUN_00401410(unsigned long) {}\n'
                  'void *FUN_00402000(unsigned n) { return (void *)n; }\nvoid FUN_00402030(void *) {}\n'
                  'void FUN_00aa1460(void *, unsigned) {}\n',
+    # S13 J-0114: a unit-local namespaced copy of a class binds like the global class (by address, else by the
+    # native definition of the global name)
+    'src/ns.cpp': 'namespace fnv_00406400 { struct NS { int a; int get() const; };\n'
+                  'struct NT { int b; int peek() const; };\n'
+                  'int use_ns(NS *p, NT *q) { return p->get() + q->peek(); } }\n',
+    'src/nsg.cpp': 'struct NS { int a; int get() const; };\nint NS::get() const { return a; }\n'
+                   'struct NT { int b; int peek() const; };\nint NT::peek() const { return b; }\n',
+    # J-0108: a class's own operator new / delete that nothing defines -> the game's allocator
+    'src/cd.cpp': 'struct CD { virtual ~CD(); int x; static void *operator new(unsigned long); '
+                  'static void operator delete(void *); static void operator delete[](void *); };\n'
+                  'CD::~CD() {}\nCD *mk_cd() { return new CD; }\nvoid del_cd(CD *p) { delete p; }\n'
+                  'void del_cds(CD *p) { ::operator delete[](p); CD::operator delete[](p); }\n',
     'src/n.cpp': 'struct Obj { int a, b; };\nObj *mk_obj() { return new Obj(); }\nvoid del_obj(Obj *p) { delete p; }\n'
                  'int *mk_arr(int n) { return new int[n]; }\nvoid del_arr(int *p) { delete[] p; }\n',
     'src/x.cpp': '/* fnv-nx XINC1: test */ struct FUN_00403000_s1b { void FUN_00403000(int); };\n'   # patched
@@ -179,6 +191,13 @@ UNITS = {'units': [
         F(0x402000, '?FUN_00402000@@YAPAXI@Z'), F(0x402030, '?FUN_00402030@@YAXPAX@Z'),
         F(0xaa1460, '?FUN_00aa1460@@YAXPAXI@Z')],
      'symbols': {'??3@YAXPAXI@Z': '0x00aa1460'}},
+    {'source': 'src/ns.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x406400, '?use_ns@fnv_00406400@@YAHPAUNS@1@PAUNT@1@@Z')], 'symbols': {}},
+    {'source': 'src/nsg.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x406410, '?get@NS@@QBEHXZ')],
+     'symbols': {}},
+    {'source': 'src/cd.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x406300, '??1CD@@UAE@XZ'), F(0x406310, '?mk_cd@@YAPAUCD@@XZ'), F(0x406320, '?del_cd@@YAXPAUCD@@@Z'),
+        F(0x406330, '?del_cds@@YAXPAUCD@@@Z')], 'symbols': {}},
     {'source': 'src/n.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x401500, '?mk_obj@@YAPAUObj@@XZ'), F(0x401510, '?del_obj@@YAXPAUObj@@@Z'),
         F(0x401520, '?mk_arr@@YAPAHH@Z'), F(0x401530, '?del_arr@@YAXPAH@Z')],
@@ -298,6 +317,17 @@ def main():
         check(0x01000800 not in rows and 0x01000810 not in rows, 'a function storing two vftables maps neither')
         check(rows.get(0x01000820, [''] * 3)[1:3] == ['V', '_ZTV5Real2'],
               '`*(int*)this = (int)&DAT_x` in a shell -> the class constructed at its address: %s' % rows.get(0x01000820))
+        r_ = refs.get(('src/ns.cpp', '_ZNK12fnv_004064002NS3getEv'), [''] * 6)
+        check(r_[3].startswith('ns/') and r_[4] == '00406410', 'namespaced copy bound by the global name\'s address: %s'
+              % r_)
+        r_ = refs.get(('src/ns.cpp', '_ZNK12fnv_004064002NT4peekEv'), [''] * 6)
+        check(r_[2] == 'ns-alias' and r_[5] == '_ZNK2NT4peekEv', 'namespaced copy -> the native global definition: %s'
+              % r_)
+        for name, want in (('_ZN2CDnwEm', '__fnv_00402000'), ('_ZN2CDdlEPv', '__fnv_00402030'),
+                           ('_ZN2CDdaEPv', '__fnv_00402030')):
+            r_ = refs.get(('src/cd.cpp', name), [''] * 6)
+            check(r_[3] == 'game/newdel-member' and r_[5] == want, 'class operator %s -> the game allocator: %s'
+                  % (name, r_))
         ld_ = open(os.path.join(out, 'aliases.ld')).read()
         check('__fnv_01000740 = _ZTV6Named2 + 8;' in ld_, 'a V entry without a recognised store: its data symbol is '
               'the address point: %s' % [l for l in ld_.splitlines() if '01000740' in l])

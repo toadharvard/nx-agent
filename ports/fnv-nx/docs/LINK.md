@@ -877,6 +877,41 @@ link's `--defsym`). Trial link of 3,497 objects: 0 multiple definitions, **7,842
 C++ 2,701 (`unresolved` 1,619, `unresolved-ctor-dtor` 779, `extern-text` 152, special 112, runtime / other 39),
 C / platform 567 (`unresolved` 203, `provider` 165, `import` 130, others 69).
 
+## Undefined C++ names (J-0108, farm link `link/9844d8dd0fa4`)
+
+The trial link at 9844d8d leaves 5,080 names undefined, 3,762 of them C++. Each was traced to a cause: its resolve
+class, a global name lookup over every unit's `units.json` names, and a search of the prepared tree for a body (an
+inline definition in a class, or an out-of-class one; the search keys on class and method name, not parameters).
+
+| Cause | Names | Examples | Owner |
+|---|---:|---|---|
+| member function declared only: no body in the tree, no MSVC name anywhere | 1,713 (252 templates) | `BoneValues::Get(int)`, `CCFA00List::GetSize()`, `NiRefObject::IncRefCount()` (67 refcount methods) | S1: bodies or bindings |
+| destructor / constructor declared only | 747 dtors, 126 ctors | `A438D0Name::~A438D0Name()`, `AddOnArray::~AddOnArray()`, `TextureMap::TextureMap()` | S1 (an empty `{}` body would do for most destructors; constructors need the vptr, so they must be compiled) |
+| a class's own `operator new/delete` declared only | 501 | `A46TextKey::operator delete[](void*)`, `Attachment::operator delete(void*, unsigned long)` | **S2c, done**: the game allocator |
+| extern-text: a referenced address without a definition | 210 | `GameStrcat`, `xSplitPath` | the definition's unit (pending code) |
+| a body exists but no translation unit emits it | ~180 (83 dtors, 25 ctors, 34 operator new/delete, 25 members, 6 free) | `BSSimpleList<TESRegionData*>::BSSimpleList(TESRegionData*&)`, `DecodeBlock(...)` | S2c next: emit from a host that sees the body (like the slot functions) |
+| free function declared only | 119 | `PipboyFree(void*)`, `consumeRay(...)` | S1 |
+| special names: typeinfo / vtable / thunks / VTT of classes no unit emits | 137 | `typeinfo for Base64ce20`, `non-virtual thunk to Own_00b8dad0::FUN_00b8dad0()` | synthesis (vtables.py) or S1 key functions |
+| data declared only | 36 | `fnv_00a19f70::LayoutNodeLock`, `PoolAllocatorBase<unsigned int>::ms_kPoolLock` | S1 |
+| runtime (C++ library) | 30 | `std::StringBase::_Xlen()` | S4 |
+| a unit-local namespaced copy of a class (`fnv_XXXXXXXX::`) | 988 of the rows above | `fnv_00650ea0::NiFixedString::operator char const*() const` | **S2c, done** where the global name has an address (~82) or a native definition (32) |
+| only a looser parameter match (l2 / arity) at one address | 13 | `FindKeyInterval(int, int, unsigned char, unsigned char const*)` | **S2c, done** |
+| MSVC deleting destructor vs Itanium's two (class shape) | 2 D0 | `Output538c00::~Output538c00()` | negligible: the G entries cover it |
+
+The rules resolve now applies:
+
+* **A class's own operator new / new[] / delete / delete[]** (sized or not) that nothing defines or binds goes to
+  the game allocator, like GCC's global forms (`member_newdel_global`, then the NEWDEL table).
+* **A unit-local namespaced copy of a class** (`namespace fnv_00650ea0 { struct NiFixedString ... }`): a
+  reference that finds nothing is looked up again without the `fnv_XXXXXXXX::` qualifiers, in the unit's names
+  and globally. Failing that, it is renamed to the native definition of the global name (`ns-alias`).
+* **A looser global match** (l2: typedef / cv spellings, arity) binds when one address carries it; the ABI check
+  then compares the declarations.
+
+Expected on the next farm link: about 600 fewer undefined C++ names. Most of the rest are declarations without
+a body or an address anywhere: what they need is S1's (bodies, `@fnv` bindings or class shapes), and the table
+gives the counts.
+
 ## Open problems
 
 * **Virtual functions behind native vtables**: the Itanium/MSVC slot correspondence and the image vftable slots

@@ -80,6 +80,28 @@ NEWDEL = {'_Znwm': ('??2@YAPAXI@Z',), '_Znwj': ('??2@YAPAXI@Z',),
 # other operator new/delete forms (placement, class-like extra parameters) are decomp declarations: resolved like any
 # other name, not as runtime; the nothrow / aligned forms stay runtime
 NEWDEL_ANY = re.compile(r'^_Z(?:n[wa]|d[la])')
+# the decomp's unit-local namespaces (`namespace fnv_00650ea0 { struct NiFixedString ... }`): a copy of a class
+UNIT_NS = re.compile(r'^fnv_[0-9a-f]{8}$')
+UNIT_NS_ANY = re.compile(r'\bfnv_[0-9a-f]{8}::')
+# a class's own operator new / new[] / delete / delete[] (sized or not): the global form it stands for, read from
+# the demangled name (the mangled operator codes nw/na/dl/da cannot be told from a name ending in those letters)
+MEMBER_NEWDEL_GLOBAL = {('operator new', 1): '_Znwj', ('operator new[]', 1): '_Znaj',
+                        ('operator delete', 1): '_ZdlPv', ('operator delete', 2): '_ZdlPvj',
+                        ('operator delete[]', 1): '_ZdaPv', ('operator delete[]', 2): '_ZdaPvj'}
+SIZE_PARAM = ('unsigned int', 'unsigned long')
+
+
+def member_newdel_global(isig):
+    """The global allocation function a class's own `operator new/delete` (no placement form) stands for, or None."""
+    if isig.kind != 'func' or not isig.qual or len(isig.qual) < 2 or isig.params is None:
+        return None
+    g = MEMBER_NEWDEL_GLOBAL.get((isig.qual[-1], len(isig.params)))
+    if g is None:
+        return None
+    p = [' '.join(x.split()) for x in isig.params]
+    if isig.qual[-1].startswith('operator new'):
+        return g if p[0] in SIZE_PARAM else None
+    return g if p[0] == 'void*' and (len(p) == 1 or p[1] in SIZE_PARAM) else None
 NEWDEL_STD = re.compile(r'^_Z(?:n[wa][jm]|d[la]Pv[jm]?)(?:RKSt9nothrow_t|St11align_val_t)*$')
 # S1b (patches/units_renames.tsv): MSVC names of the definitions and references a patch changes; applied by resolve to
 # the units whose prepared source carries the patch, when prepare has not rewritten units.json yet
@@ -462,6 +484,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if newdel_votes.get(mn):
                 return newdel_votes[mn].most_common(1)[0][0], mn
         return None, None
+    native_text = None   # demangled text -> a native definition's mangled name (built when first needed)
     bridges, abi_rows, abi_classes = {}, [], collections.Counter()
     traps = {}       # trap stub -> (slot symbol defined nowhere, (vtable, slot) where first seen)
     pair_classes = collections.Counter()
@@ -594,6 +617,35 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident)
                 if tier == 'gref/ident':
                     stats['ident_' + cls] += 1
+                if cls == 'unresolved' and isig.qual and UNIT_NS.match(isig.qual[0]) and it[un]:
+                    # a unit-local namespaced copy of a class (`fnv_00650ea0::NiFixedString`, S13 J-0114): bound like
+                    # the global class - by its names in units.json without the namespace, else to the native
+                    # definition of the global name
+                    st_ = UNIT_NS_ANY.sub('', it[un])
+                    ts_ = sigs.parse_itanium(un, st_)
+                    r_ = classify_ref('', ts_, idx, gdef, gref, set(), msvc, ident) if ts_.qual else None
+                    if r_ and r_[0] not in ('unresolved', 'runtime'):
+                        cls, tier, addr, target, note = r_[0], 'ns/' + (r_[1] or ''), r_[2], r_[3], r_[4]
+                        stats['unit_ns_bound'] += 1
+                    else:
+                        if native_text is None:
+                            native_text = {}
+                            for n_ in sorted(anydef):
+                                if it[n_]:
+                                    native_text.setdefault(it[n_], n_)
+                        g_ = native_text.get(st_)
+                        if g_:
+                            cls, tier, target = 'ns-alias', 'ns/native', g_
+                            stats['unit_ns_aliased'] += 1
+                gname_ = member_newdel_global(isig) if cls == 'unresolved' else None
+                if gname_:
+                    # a class's own operator new/delete that nothing defines or binds (a decomp class declares it,
+                    # GCC's deleting destructor and new expressions call it): the game's allocator, like the
+                    # global forms (J-0108: 509 undefined names)
+                    na2, nm2 = newdel_addr(u, gname_)
+                    if na2 is not None:
+                        cls, tier, addr, target, note = 'addr', 'game/newdel-member', na2, None, nm2
+                        stats['newdel_member_refs'] += 1
             if cls != 'unresolved' and isig.qual and un.find(GAME_PREFIX) >= 0:
                 stats['game1_resolved'] += 1
             if vsb is not None and (un in vslots or (cls == 'unresolved' and isig.variant in ('D1', 'D2'))):
@@ -1143,6 +1195,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'ecx-not-passed / this-not-passed pairs judged on the definition\'s MSVC code (--msvc-code/-objs): ecx '
               'unused, bridged: %d; used, flagged: %d; no code: %d' % (stats['ecx_code_unused'],
                                                                       stats['ecx_code_used'], stats['ecx_code_unknown']),
+              'a class\'s own operator new/delete bound to the game allocator: %d; unit-local namespaced copies '
+              '(fnv_XXXXXXXX::) bound like the global class: %d by address, %d to its native definition'
+              % (stats['newdel_member_refs'], stats['unit_ns_bound'], stats['unit_ns_aliased']),
               'C-named declarations compared from their unit\'s source and headers: %d references, %d definitions; '
               'undeclared, compared through an integer stand-in (the other side\'s result): %d / %d; not compared: '
               '%d / %d' % (stats['cname_ref_compared'], stats['cname_def_compared'], stats['cname_ref_standin'],
@@ -1662,7 +1717,9 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
     if not hit:
         for g, name in ((gdef, 'gdef'), (gref, 'gref')):
             t, h = g.lookup(isig)
-            if h and t in ('exact', 'l1', 'cname', 'name') and len(h) == 1:
+            # a looser parameter match (l2: typedef / cv spellings, arity) only when one address carries it anywhere
+            # (J-0108: FindKeyInterval, DecodeBlock, FinishScriptRunLock ...); the ABI check then compares them
+            if h and t in ('exact', 'l1', 'cname', 'name', 'l2', 'arity') and len(h) == 1:
                 tier, hit, scope = t, h, name
                 break
     if not hit:
