@@ -570,22 +570,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     decl_cache = {}
 
     def c_decls(src_):
-        """CDecls of a unit and the local headers it includes (\"...\" from the including file's directory, then
-        <tree>/include): the unit's own declarations first."""
-        src_ = src_.split('#')[0]
-        if src_ not in decl_cache:
-            texts, seen, todo = [], set(), [os.path.join(tree, src_)]
-            while todo and len(seen) < 200:
-                f_ = os.path.normpath(todo.pop(0))
-                if f_ in seen or not os.path.isfile(f_):
-                    continue
-                seen.add(f_)
-                t_ = open(f_, encoding='utf-8', errors='surrogateescape').read()
-                texts.append(t_)
-                for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', t_, re.M):
-                    todo += [os.path.join(os.path.dirname(f_), inc), os.path.join(tree, 'include', inc)]
-            decl_cache[src_] = CDecls('\n;\n'.join(texts))
-        return decl_cache[src_]
+        return unit_c_decls(tree, src_, decl_cache)
 
     def casts_of(u_):
         if u_.source not in cast_cache:
@@ -1910,6 +1895,25 @@ def int_words(t):
         return u + base + ' '
     return ' '.join(re.sub(r'\b(?:(?:unsigned|signed|short|long|int|char|__int8|__int16|__int32|__int64)\b\s*)+',
                            canon, t).split())
+
+
+def unit_c_decls(tree, src_, cache):
+    """CDecls of a unit and the local headers it includes (\"...\" from the including file's directory, then
+    <tree>/include): the unit's own declarations first."""
+    src_ = src_.split('#')[0]
+    if src_ not in cache:
+        texts, seen, todo = [], set(), [os.path.join(tree, src_)]
+        while todo and len(seen) < 200:
+            f_ = os.path.normpath(todo.pop(0))
+            if f_ in seen or not os.path.isfile(f_):
+                continue
+            seen.add(f_)
+            t_ = open(f_, encoding='utf-8', errors='surrogateescape').read()
+            texts.append(t_)
+            for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', t_, re.M):
+                todo += [os.path.join(os.path.dirname(f_), inc), os.path.join(tree, 'include', inc)]
+        cache[src_] = CDecls('\n;\n'.join(texts))
+    return cache[src_]
 
 
 class CDecls:
