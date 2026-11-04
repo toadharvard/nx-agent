@@ -160,6 +160,10 @@ POLICY = {
     'thunk-binding':  ('real-bug', 'S2c', True, 'the original address is an override\'s MSVC entry (this = the '
                                                 'secondary-base subobject); the link binds __fnv_<addr> to the GCC '
                                                 'primary entry (this = the full object), not its _ZThn<d>_ thunk'),
+    'ilp32-wrap':     ('real-bug', 'S1', True, 'the native faults at 2^32 + w where w is memory the oracle maps: the '
+                                             'exe adds a base and a 32-bit index modulo 2^32 (a negative int as '
+                                             'unsigned / as a pointer), GCC ILP32 adds it in 64 bits (uxtw); the '
+                                             'decomp type or -fwrapv-pointer must make it wrap'),
     'native-zero-stub': ('real-bug', 'S1', True, 'the native has 0 where the oracle has a value, and the native '
                                                  'function or a direct callee in its unit is a placeholder body '
                                                  '`mov w0, #0; ret` (a stand-in the port never filled in)'),
@@ -582,7 +586,7 @@ def _rule_count(d, tx, ta):
 # at an unmapped pc; causes.py's _rule_error leaves the other oracle-only data faults at oracle-fault. These rules
 # split what the record shows; what they cannot split keeps its cause.
 
-HINT_REFINABLE = {'oracle-vcall'}        # probe causes refine() still splits (report.reclassify hands them over)
+HINT_REFINABLE = {'oracle-vcall', 'ilp32-pointer'}        # probe causes refine() still splits (report.reclassify hands them over)
 
 
 def _code_target(t):
@@ -607,6 +611,28 @@ def _stub_alias(x, a):
     if not _in(vx, A64_STUBS):
         return False
     return a == 'name:%x' % vx or a == '%08x' % (vx - A64_STUBS[0])
+
+
+X86_MAPPED = (TEXT, WINDOW, LIT_POOL, BUFS, HEAP, STACK)    # what the oracle's world maps for every case
+
+
+def _rule_ilp32(rec):
+    """The probe's ilp32-pointer (the native touched an address >= 4 GiB) split by where the address lands mod 2^32.
+    In memory the oracle maps, the oracle made the same 32-bit access validly: a valid base plus an index that relies
+    on 32-bit wraparound (a negative int carried as unsigned or as a pointer), which GCC's ILP32 code adds in 64 bits
+    (`add x, base, w, uxtw`). The exe computes that address on such input, so it is not a pointer the exe never
+    holds: ilp32-wrap, a real bug. Near null or unmapped, the by-design reading stands."""
+    d = rec.get('_now') or rec.get('divergence') or {}
+    a = str(d.get('arm') or '')
+    if d.get('kind') != 'error' or 'ilp32-high' not in a or d.get('x86') is not None:
+        return None
+    try:
+        v = int(a.rsplit(':', 1)[1], 16)
+    except ValueError:
+        return None
+    if v >> 32 == 1 and any(_in(v & 0xffffffff, r) for r in X86_MAPPED):
+        return 'ilp32-wrap'
+    return None
 
 
 def _rule_vcall(rec):
@@ -1547,6 +1573,8 @@ def refine(rec, cause=None):
     """The record-level cause of a divergence the probes left at `cause` (unclassified / call-flow / signedness?),
     or `cause` itself when no rule applies. Never overrides a probe's definite cause; oracle-vcall (HINT_REFINABLE,
     the runner's vcall tag or the fault probe, not a decision) is split by _rule_vcall."""
+    if cause == 'ilp32-pointer':
+        return _rule_ilp32(rec) or cause
     if cause in HINT_REFINABLE:
         return _rule_vcall(rec) or cause
     if cause not in REFINABLE:

@@ -607,6 +607,16 @@ def test_unclassified_shapes():
     check(not st(bytes.fromhex('11223308'), bytes.fromhex('11223301'), [3]), 'other native top byte: not the rewrite')
     check(not st(bytes.fromhex('1122330899'), bytes.fromhex('1122330098'), [3, 4]),
           'a difference outside the rewritten window: not only the rewrite')
+    # ilp32-pointer split: a 32-bit wrap into memory the oracle maps is a real bug (a valid base + a wrapping index)
+    def il(arm, x86=None):
+        return causes.refine(rec(dict(kind='error', x86=x86, arm=arm), 'ilp32-pointer'), 'ilp32-pointer')
+    check(il('fault:r:ilp32-high:1011e6370') == 'ilp32-wrap', 'image base + a negative index added in 64 bits: ilp32-wrap')
+    check(il('fault:w:ilp32-high:103000010') == 'ilp32-wrap', 'wrap into a case buffer: ilp32-wrap')
+    check(il('fault:r:ilp32-high:100000062') == 'ilp32-pointer', 'a garbage pointer at the top + offset (near null): stays')
+    check(il('fault:r:ilp32-high:ffffffffce300584') == 'ilp32-pointer', 'a sign-extended garbage pointer: stays')
+    check(il('fault:r:ilp32-high:1011e6370', x86='fault:r:011e6370') == 'ilp32-pointer',
+          'the oracle faulted too: not the wrap shape')
+    check(causes.policy('ilp32-wrap')[:2] == ('real-bug', 'S1'), 'ilp32-wrap is a real bug for S1')
     for c in ('ctor-this', 'canned-this', 'native-wild-private'):
         check(causes.policy(c)[0] == 'triage', '%s is triage: the record cannot tell harness from bug (V1)' % c)
     for c in ('ctor-this', 'canned-this', 'native-wild-private', 'stub-normalized', 'thunk-binding',
