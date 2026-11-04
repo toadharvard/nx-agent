@@ -17,8 +17,8 @@
   - meta.json gets check_package_rc, nx1_open and nx1_checks. The full report gets a check table.
   - full_job.sh publishes the package to the private branch nro/<commit12> only.
   - Commits 5256786 and ac00629 are merged already. Then on claude/fnv-nx1-nro: 61f12cc, 6ee9eeb, 79ee2d2, 59e3c67,
-    17f1396, 416e36c, 9e95565, cdbc98a.
-* **found** - Five device failures that no emulated boot could show:
+    17f1396, 416e36c, 9e95565, cdbc98a, and after this note the service-review fix and the 4 MiB stack.
+* **found** - Six device failures that no emulated boot could show:
   - CNTVCT_EL0 traps at EL0 on Horizon: Mesosphère sets CNTKCTL_EL1 = EL0PCTEN only. The guest read it at 1,131
     sites (fnvnx_rdtsc64 in Havok and every __rdtsc, plus os_cycle_counter); Unicorn runs it anyway. Fixed: these
     now read CNTPCT_EL0, like libnx's armGetSystemTick.
@@ -31,6 +31,9 @@
     path.cpp mounts C:\FalloutNV at the root. FAT case folding is now probed at run time, not assumed.
   - Nobody wrote check_package_rc, so R0's package.check gate always read no-data. Fixed: the package stage
     records it.
+  - The main thread stack was 1 MiB, the same as the PC exe's x86-32 reserve, though AArch64 frames are larger.
+    The emulator's stacks (256 KiB each, back to back) cannot show an overflow. Raised to 4 MiB: S10's relaunch
+    model (relocatable guest) goes from 5.3 % to 5.5 %, 1.06 launches either way.
 * **measured** - Metric (open device-readiness checks): 8 -> 4.
   - Passing: 4 threads, 5 fs, 7 platform (host_device.inc runs under qemu with libnx stubbed), 8 checklist.
   - Check 1 (NRO) is open: the tooling is byte-identical to switch-tools elf2nro/nacptool on a fixture. The real
