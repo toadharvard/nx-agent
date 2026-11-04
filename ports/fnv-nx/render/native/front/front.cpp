@@ -200,6 +200,7 @@ void DynFromD3D9(DynRec* d, const NxDynamicState& s) {
 bool Frame::Init(Backend* be, uint32_t uboBytes, uint32_t uboSize) {
     be_ = be;
     uboSize_ = (uboSize + 255) & ~255u;  // UBO offsets must be 256-byte aligned on Maxwell
+    if (!uboBytes) uboBytes = UboBytesFor(kMaxPackets, uboSize_, be->Info().frames_in_flight ? be->Info().frames_in_flight : 2);
     packets_ = (Packet*)aligned_alloc_(64, kMaxPackets * sizeof(Packet));
     order_ = (uint32_t*)malloc(kMaxPackets * 4); tmp_ = (uint32_t*)malloc(kMaxPackets * 4);
     keys_ = (uint64_t*)malloc(kMaxPackets * 8); ktmp_ = (uint64_t*)malloc(kMaxPackets * 8);
@@ -212,6 +213,7 @@ bool Frame::Init(Backend* be, uint32_t uboBytes, uint32_t uboSize) {
 }
 
 void Frame::Begin(uint32_t frame) {
+    dropped_ = 0;
     frame_ = frame;
     nPasses_ = nPackets_ = nTex_ = nDyn_ = 0;
     ubo_.BeginFrame(frame);
@@ -248,7 +250,11 @@ Packet* Frame::Emit() {
     return p;
 }
 
-void* Frame::Constants(uint32_t* offset) { return ubo_.Alloc(uboSize_, 256, offset); }
+void* Frame::Constants(uint32_t* offset) {
+    void* p = ubo_.Alloc(uboSize_, 256, offset);
+    if (!p) dropped_++;
+    return p;
+}
 
 void* Frame::PassConstants(uint8_t pass, uint32_t size) {
     uint32_t off;
@@ -277,6 +283,7 @@ NxEpilogue* Frame::Epilogue(Packet* p) {
     uint32_t off;
     NxEpilogue* e = (NxEpilogue*)ubo_.Alloc(256, 256, &off);
     if (e) p->epi = off + 1;
+    else dropped_++;
     return e;
 }
 

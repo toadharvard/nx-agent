@@ -167,7 +167,30 @@ static void test_skin_palette() {
     CHECK(nx_skin_palette(&w, &b, many, 40, big) == NX_SKIN_MAX_BONES);
 }
 
+static void test_ubo_ring_capacity() {
+    // P6n: an 8 MiB ring at 3 frames in flight holds ~3,640 draws of 512 + 256 B; the high mix needs 3,710
+    static RecBe be;
+    be.info.frames_in_flight = 3;
+    auto run = [&](nx::Frame& f, uint32_t draws) {
+        f.Begin(0);
+        uint32_t ok = 0;
+        for (uint32_t i = 0; i < draws; i++) {
+            nx::Packet* p = f.Emit();
+            if (p && f.Constants(&p->uboOffset) && f.Epilogue(p)) ok++;
+        }
+        return ok;
+    };
+    static nx::Frame old, sized;
+    CHECK(old.Init(&be, 8u << 20, 512));
+    CHECK(run(old, 3710) < 3710 && old.droppedDraws() > 0);        // the bug, reproduced and counted
+    CHECK(sized.Init(&be, 0, 512));                                 // sized for kMaxPackets per frame in flight
+    CHECK(run(sized, nx::Frame::kMaxPackets) == nx::Frame::kMaxPackets && sized.droppedDraws() == 0);
+    CHECK(nx::Frame::UboBytesFor(4000, 512, 3) >= 3u * 4000u * 768u);
+    be.info.frames_in_flight = 2;
+}
+
 int main() {
+    test_ubo_ring_capacity();
     test_skin_palette();
     test_dynres();
     test_state_cache(); test_encoder_overflow(); test_sort_stable(); test_frame_encoding(); test_dds(); test_glsl_shim();

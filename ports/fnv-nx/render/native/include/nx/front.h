@@ -146,7 +146,15 @@ struct PassDesc {
 class Frame {
 public:
     enum { kMaxPackets = 8192, kMaxPasses = 16, kMaxTex = 16384, kMaxDyn = 4096, kWords = 256 * 1024 };
+    // uboBytes 0: sized for kMaxPackets draws per frame in each of the backend's frames in flight (UboBytesFor).
     bool Init(Backend* be, uint32_t uboBytes, uint32_t uboSize);
+    // UBO ring bytes for `draws` draws per frame: per draw the constant slice (uboSize, 256-aligned) and one
+    // 256-byte epilogue, plus 64 KiB of pass constants, times frames in flight.
+    static uint32_t UboBytesFor(uint32_t draws, uint32_t uboSize, uint32_t framesInFlight) {
+        uint64_t per = (uint64_t)draws * (((uboSize + 255) & ~255u) + 256u) + (64u << 10);
+        return (uint32_t)(per * framesInFlight);
+    }
+    uint32_t droppedDraws() const { return dropped_; }        // draws of the last frame the ring could not hold
     void Begin(uint32_t frame);
     uint8_t AddPass(const PassDesc& p);                          // pass index used in sort keys
     uint32_t AddTextures(const uint32_t* handles, uint32_t n);
@@ -174,7 +182,7 @@ public:
 private:
     Backend* be_ = nullptr;
     Ring ubo_;
-    uint32_t uboSize_ = 0, frame_ = 0;
+    uint32_t uboSize_ = 0, frame_ = 0, dropped_ = 0;
     PassDesc passes_[kMaxPasses];
     uint32_t passUbo_[kMaxPasses], passUboSize_[kMaxPasses];
     uint32_t nPasses_ = 0, nPackets_ = 0, nTex_ = 0, nDyn_ = 0, stateBinds_ = 0;
