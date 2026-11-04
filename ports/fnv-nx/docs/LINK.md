@@ -677,7 +677,10 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   `__fnvnx_textaddr_<addr> = 0x<addr>;` (aliases.ld), so the native code passes the same number. Before, these were
   `extern-text` and reached a named stub (S13b native-stub-data: GlobalObject2 0x0045cfe0's second argument). On
   link/c0d6c71516f6 this applies to 11 references in units, plus their copies in the vtable objects. Other variables
-  at such addresses (an `int` at 0x00000065) stay `extern-text`.
+  at such addresses (an `int` at 0x00000065) stay `extern-text`, and so does a char label whose address the unit
+  passes to a call (`label_is_argument`, a scan of the prepared source). It may be a callback: 0x00c1d8b0 hands
+  `&UNK_00fdd3b0`, the static's x86 exit thunk, to `_atexit` (0x00ec658f, V2 X2). The native code then reaches a trap,
+  never the raw x86 address. A label only stored as data (`m_pDatB = &FUN_00a00000`) keeps the value.
 * **Calls of an IAT slot's address**: a decomp `__declspec(dllimport)` function named after its slot
   (`FUN_00fdf1c0(void *)`) is called directly by GCC (`bl`); when its name binds to an IAT slot as data, a call of it
   binds to the slot's api (S4's implementation or the api name), never into the image's IAT words.

@@ -538,6 +538,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     used_addr = set()
     data_defs, tls_defs, tls_addrs = [], [], set()
     text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
+    label_cache = {}
     exports = load_exports(EXPORTS if imports is None else (os.path.join(os.path.dirname(imports), 'exports.cpp')
                                                              if imports != 'none' else None))
     providers, crt_classes = load_providers(CRT_SYMBOLS if crt_symbols is None else
@@ -880,13 +881,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     target = ADDR_SYM % addr
                     used_addr.add(addr)
                 elif ak == 'text' and note and re.search(r'@@3[QD]', note) and msvc(note).kind == 'data' and \
-                        un not in called_syms(u):
+                        un not in called_syms(u) and not (re.search(r'@@3D', note) and label_is_argument(
+                            tree, u.host or u.source, msvc(note).qual[-1] if msvc(note).qual else un, label_cache)):
                     # a variable the decomp places at a .text address nothing defines (the generated initializers'
                     # `extern const char g_011c5a4c_arg1[]` at 0x00a00000: an immediate the generator took for an
                     # address): the code uses its address, which on x86 is that number - an absolute symbol there
                     # gives the native code the same value (S2c-abi, S13b native-stub-data). Only arrays (`@@3Q`)
                     # and char labels (`@@3D`, `&FUN_00a00000`), whose address is all the code uses; an `int` at
-                    # 0x00000065 stays extern-text
+                    # 0x00000065 stays extern-text. A char label whose address the unit passes to a call may be a
+                    # callback (0x00c1d8b0: `FUN_00ec658f(&UNK_00fdd3b0)`, _atexit with the static's x86 exit thunk,
+                    # V2 X2): it stays extern-text (a trap), never the raw x86 address
                     cls = 'text-addr'; target = TEXTADDR_SYM % addr
                     text_addrs.add(addr)
                 elif ak == 'text':
@@ -2005,6 +2009,18 @@ def int_words(t):
         return u + base + ' '
     return ' '.join(re.sub(r'\b(?:(?:unsigned|signed|short|long|int|char|__int8|__int16|__int32|__int64)\b\s*)+',
                            canon, t).split())
+
+
+def label_is_argument(tree, src_, name, cache):
+    """Does the unit's prepared source pass `&name` (a char label) to a call: an argument position, `(` or `,`
+    before it, a cast in between allowed? Then the label may be a callback (atexit with an x86 exit thunk, V2 X2)."""
+    src_ = src_.split('#')[0]
+    if src_ not in cache:
+        p = os.path.join(tree, src_)
+        cache[src_] = blank_noise(open(p, encoding='utf-8', errors='surrogateescape').read()) \
+            if os.path.isfile(p) else ''
+    text = cache[src_]
+    return re.search(r'[(,]\s*(?:\([^()]*\)\s*)*&\s*%s\b' % re.escape(name), text) is not None
 
 
 def unit_c_decls(tree, src_, cache):
