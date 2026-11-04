@@ -93,6 +93,13 @@ check('CTOR1 explicit constructor call of a template class',
 check('CTOR1 a constructor definition after a comment ending in "." is not a call',
       run(s1.r_ctor_calls, '// see the matcher checks.\nA::A(int x)\n    : m(x)\n{}\n'), ['A::A(int x)'], ['::new'])
 
+# ---- CSX1
+got = run(s1.r_xbox_cs_asserts, 'FNV_STATIC_ASSERT(sizeof(RecursiveLock) == 0x28);\n'
+          'FNV_STATIC_ASSERT(offsetof(RecursiveLock, CriticalSection) == 0x0);\n'
+          'FNV_STATIC_ASSERT(offsetof(RecursiveLock, m_uiFirstValue) == 0x1C);\n')
+check('CSX1 drops the Xbox-only asserts, keeps the rest', got,
+      ['offsetof(RecursiveLock, CriticalSection) == 0x0', 'CSX1'], ['== 0x28', '== 0x1C'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

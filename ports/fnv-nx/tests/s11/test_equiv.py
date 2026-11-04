@@ -37,7 +37,7 @@ check(all('`%s`' % i in doc for i in ids), 'rules missing from docs/EQUIVALENCE.
 neutral = eq.resolve_spec('neutral')
 check('EXC1' in neutral and 'TAIL1' not in neutral and 'SSE1' not in neutral, 'neutral class')
 check(eq.resolve_spec('neutral,-EXC1') == neutral - {'EXC1'}, 'spec subtraction')
-check(eq.resolve_spec('TAIL1,CS28') == {'TAIL1', 'CS28'}, 'spec ids')
+check(eq.resolve_spec('TAIL1,SDK1') == {'TAIL1', 'SDK1'}, 'spec ids')
 check(eq.resolve_spec('all') == set(ids), 'spec all')
 
 # 3. linkage-equivalent names of global variables (LINK1)

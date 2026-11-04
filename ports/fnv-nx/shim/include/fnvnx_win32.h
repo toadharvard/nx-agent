@@ -613,14 +613,6 @@ void CoFreeUnusedLibraries(void);
 #endif
 
 
-/* The decomp's 28-byte critical-section slot (prepare.py CS28): the PC CRITICAL_SECTION and 4 more bytes that the
- * engine's classes keep after it (offsets asserted by the decomp; meaning not identified, verify on the PC exe). */
-#ifdef __cplusplus
-struct FNVNX_CS28 : CRITICAL_SECTION { DWORD fnvnx_after_cs; };   /* converts to the CRITICAL_SECTION it starts with */
-#else
-typedef struct FNVNX_CS28 { CRITICAL_SECTION cs; DWORD fnvnx_after_cs; } FNVNX_CS28;
-#endif
-
 /* ---- GDI structures (wingdi.h / winnt.h); struct tags as in the SDK, d3d9.h forward-declares some of them */
 typedef struct tagPALETTEENTRY { BYTE peRed, peGreen, peBlue, peFlags; } PALETTEENTRY, *PPALETTEENTRY, *LPPALETTEENTRY;
 typedef struct _RGNDATAHEADER { DWORD dwSize, iType, nCount, nRgnSize; RECT rcBound; } RGNDATAHEADER, *PRGNDATAHEADER;

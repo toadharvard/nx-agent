@@ -42,7 +42,10 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, ha
 | `RCAST1` | neutral | `fnvnx_lvalue` returns the temporary itself | `fnvnx_lvalue(x)` = `(x)` |
 | `NEW3` | neutral | deallocation functions are implicitly `noexcept` (C++11) | `noexcept` empty |
 | `TYPEID1` | neutral | adds `<typeinfo>` only | real `<typeinfo>` |
-| `CS28` | layout | 28-byte slot = PC CRITICAL_SECTION + 4 bytes where the decomp asserts 28 | real SDK + `FNVNX_CS28` |
+| `CSX1` | neutral | drops the decomp's Xbox 360 critical-section size / offset asserts (D15, J-0051); asserts emit no code | as is |
+| `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address; same callee, same bits | as is |
+| `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
+| `ALLOC1` | platform | drops untagged file-scope replacements of the global operator new/delete; the game's are bound by address | target only |
 | `SDK1` | layout | the PC SDK definitions win over the decomp's guarded copies (Xbox 360 layouts) | real SDK |
 | `TAIL1` | layout | GCC must not reuse a base's tail padding; MSVC never does | zero-width bit-field, as on the target |
 | `GAME1` | neutral | renames a unit's own Win32-named game declaration and its call sites; the address binding is unchanged | same code, other symbol name |
@@ -62,7 +65,7 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, ha
 ## Method
 
 Trees: pristine decomp; `equiv.py prepare --rules neutral` (FNVNX_PREPARE_SKIP = every other rule function,
-NATIVE1 off; the prepare stats are checked to contain only allowed rules); `neutral,SDK1,CS28`; `TAIL1` alone. Every
+NATIVE1 off; the prepare stats are checked to contain only allowed rules); `neutral,SDK1`; `TAIL1` alone. Every
 unit is compiled with its recipe compiler and flags; objects are kept for re-fingerprinting.
 
 What the rules include is given its MSVC meaning (`tools/equiv/msvc/`): `fnvnx_win32.h` = the real `<windows.h>`
@@ -79,7 +82,7 @@ encode it); string literals by content instead of by `$SGnnnn` number (MSVC numb
 included header advances).
 
 Attribution: for each differing (or no longer compiling) unit, rebuild with the rule set minus one rule, and minus
-groups (`SDK` = DECL1, DECL2, SDK1, CALL1, CS28, INTL1; `NEWDEL` = NEW1, NEW2, NEW3, CTOR1) for interacting rules;
+groups (`SDK` = DECL1, DECL2, SDK1, CALL1, CSX1, INTL1; `NEWDEL` = NEW1, NEW2, NEW3, CTOR1) for interacting rules;
 a function identical again without R is attributed to R. Differences are also sorted by kind: *retarget* (same code
 bytes, a call or data reference reaches another address), *EH* (identical when both sides build with `/EHs-c-`),
 *code*.

@@ -51,7 +51,7 @@ COMPAT_INCLUDE = SHIM / 'fnvnx_equiv_compat.h'  # prepared trees only (stands in
 CLASSES = {
     'SSE1': 'platform', 'SSE2': 'platform', 'SSE3': 'platform', 'SSE4': 'platform',
     'DECL1': 'neutral', 'NEW1': 'neutral',
-    'UNIT1': 'neutral', 'KEEP1': 'neutral', 'IFX1': 'neutral', 'SAL1': 'neutral', 'CS28': 'layout',
+    'UNIT1': 'neutral', 'KEEP1': 'neutral', 'IFX1': 'neutral', 'SAL1': 'neutral', 'CSX1': 'neutral',
     'DECL2': 'neutral', 'EXC1': 'neutral', 'NEW2': 'neutral', 'CTOR1': 'neutral', 'LINK1': 'neutral',
     'GOTO1': 'neutral', 'SDK1': 'layout', 'STR1': 'neutral', 'INTL1': 'platform', 'CALL1': 'neutral',
     'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout',
@@ -67,6 +67,9 @@ CLASSES = {
     'XC1': 'platform',          # dynamic initializers -> extern + __fnvnx_dyninit_<addr> (S10 runner order)
     'VA1': 'platform',          # MSVC char* va_list -> real va_list
     'FALL1': 'platform',        # __builtin_trap() at fall-off ends (GCC only)
+    'DUPINT1': 'neutral',       # one of two integer-only-different prototypes of one address (same callee)
+    'NEW4': 'neutral',          # adds <new> where placement new is used
+    'ALLOC1': 'platform',       # drops untagged TU-local replacements of the global operator new/delete
     'FTOL1': 'platform',        # fnvnx_ftol2(expr): neutral with #define fnvnx_ftol2(x) ((__int64)(x)) under MSVC
 }
 PSEUDO = {'NATIVE1': 'drop_native_units'}
