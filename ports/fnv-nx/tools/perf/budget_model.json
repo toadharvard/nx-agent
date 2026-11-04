@@ -647,11 +647,12 @@
   "cull": {
    "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
-    0.531,
-    3.976
+    0.3,
+    1.414
    ],
    "owner": "S15/S5",
-   "needs_hardware": true
+   "needs_hardware": true,
+   "gain_note": "the mt_cull lever (MT1) moves 15-35 % of the cull: lo 0.15 x 2.00, hi 0.35 x 4.04 M, the cull item (3.54-11.36) plus S15-simd's override correction (lo (49-306) x 6,000, hi (67-433) x 20,000); was 0.7 x 2 .. 0.9 x 4.5"
   },
   "scene-graph update": {
    "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",

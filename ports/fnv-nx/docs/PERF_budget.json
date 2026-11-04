@@ -329,7 +329,8 @@
     0.004
    ],
    "mid": -0.196,
-   "basis": "M"
+   "basis": "M",
+   "follows": "scene_update"
   },
   {
    "id": "simd_fn_cull_test",
@@ -341,7 +342,8 @@
     -1.542
    ],
    "mid": -4.0495,
-   "basis": "M"
+   "basis": "M",
+   "follows": "cull"
   },
   {
    "id": "simd_fn_slerp",
@@ -353,7 +355,8 @@
     -0.092
    ],
    "mid": -0.276,
-   "basis": "M"
+   "basis": "M",
+   "follows": "animation"
   },
   {
    "id": "simd_fn_quat_from_matrix",
@@ -365,7 +368,8 @@
     -0.0025
    ],
    "mid": -0.014875,
-   "basis": "M"
+   "basis": "M",
+   "follows": "animation"
   },
   {
    "id": "simd_fn_gsk",
@@ -377,7 +381,8 @@
     -0.008
    ],
    "mid": -0.044,
-   "basis": "M"
+   "basis": "M",
+   "follows": "havok"
   },
   {
    "id": "sync",
@@ -624,9 +629,9 @@
    "core3": false,
    "cores": {
     "0": {
-     "lo": 2.212,
-     "mid": 17.156,
-     "hi": 32.978,
+     "lo": 5.013,
+     "mid": 18.274,
+     "hi": 33.231,
      "items": {
       "animation": 2.1,
       "cull": 5.587,
@@ -636,10 +641,10 @@
       "render_accumulation": 2.062,
       "renderer_main": 3.431,
       "scene_update": 3.25,
-      "simd_fn_cull_test": -4.05,
-      "simd_fn_gsk": -0.044,
-      "simd_fn_quat_from_matrix": -0.015,
-      "simd_fn_slerp": -0.276,
+      "simd_fn_cull_test": -3.037,
+      "simd_fn_gsk": -0.026,
+      "simd_fn_quat_from_matrix": -0.01,
+      "simd_fn_slerp": -0.193,
       "simd_fn_world_transform": -0.196,
       "sync": 0.3
      }
@@ -676,9 +681,9 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 2.17,
-       "mid": 21.02,
-       "hi": 53.89
+       "lo": 4.91,
+       "mid": 22.39,
+       "hi": 54.3
       },
       "1": {
        "lo": 4.5,
@@ -692,9 +697,9 @@
       }
      },
      "cpu_ms": {
-      "lo": 4.5,
-      "mid": 21.02,
-      "hi": 53.89
+      "lo": 4.91,
+      "mid": 22.39,
+      "hi": 54.3
      },
      "gpu_ms": {
       "case": "docked_720p",
@@ -703,13 +708,13 @@
      },
      "frame_ms": {
       "lo": 5.55,
-      "mid": 21.02,
-      "hi": 53.89
+      "mid": 22.39,
+      "hi": 54.3
      },
      "worst_frame_ms": {
       "lo": 6.11,
-      "mid": 26.27,
-      "hi": 80.84
+      "mid": 27.99,
+      "hi": 81.45
      },
      "critical_core": 0,
      "verdicts": {
@@ -722,9 +727,9 @@
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 1.24,
-       "mid": 12.01,
-       "hi": 30.79
+       "lo": 2.81,
+       "mid": 12.8,
+       "hi": 31.03
       },
       "1": {
        "lo": 2.57,
@@ -738,9 +743,9 @@
       }
      },
      "cpu_ms": {
-      "lo": 2.57,
-      "mid": 12.01,
-      "hi": 30.79
+      "lo": 2.81,
+      "mid": 12.8,
+      "hi": 31.03
      },
      "gpu_ms": {
       "case": "docked_720p",
@@ -749,13 +754,13 @@
      },
      "frame_ms": {
       "lo": 5.55,
-      "mid": 12.01,
-      "hi": 30.79
+      "mid": 12.8,
+      "hi": 31.03
      },
      "worst_frame_ms": {
       "lo": 6.11,
-      "mid": 15.01,
-      "hi": 46.19
+      "mid": 16.0,
+      "hi": 46.55
      },
      "critical_core": 0,
      "verdicts": {
@@ -767,9 +772,9 @@
     }
    },
    "main_minsn": {
-    "lo": 2.212,
-    "mid": 17.156,
-    "hi": 32.978
+    "lo": 5.013,
+    "mid": 18.274,
+    "hi": 33.231
    }
   },
   {
@@ -786,9 +791,9 @@
    "core3": false,
    "cores": {
     "0": {
-     "lo": 0.603,
-     "mid": 15.1,
-     "hi": 30.997,
+     "lo": 3.598,
+     "mid": 16.283,
+     "hi": 31.257,
      "items": {
       "animation": 1.732,
       "cull": 5.587,
@@ -798,11 +803,11 @@
       "render_accumulation": 2.062,
       "renderer_main": 2.23,
       "scene_update": 2.763,
-      "simd_fn_cull_test": -4.05,
-      "simd_fn_gsk": -0.044,
-      "simd_fn_quat_from_matrix": -0.015,
-      "simd_fn_slerp": -0.276,
-      "simd_fn_world_transform": -0.196,
+      "simd_fn_cull_test": -3.037,
+      "simd_fn_gsk": -0.026,
+      "simd_fn_quat_from_matrix": -0.009,
+      "simd_fn_slerp": -0.159,
+      "simd_fn_world_transform": -0.167,
       "sync": 0.3
      }
     },
@@ -838,9 +843,9 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": 0.59,
-       "mid": 18.51,
-       "hi": 50.65
+       "lo": 3.53,
+       "mid": 19.95,
+       "hi": 51.07
       },
       "1": {
        "lo": 4.2,
@@ -855,8 +860,8 @@
      },
      "cpu_ms": {
       "lo": 4.22,
-      "mid": 18.51,
-      "hi": 50.65
+      "mid": 19.95,
+      "hi": 51.07
      },
      "gpu_ms": {
       "case": "docked_720p",
@@ -865,13 +870,13 @@
      },
      "frame_ms": {
       "lo": 5.55,
-      "mid": 18.51,
-      "hi": 50.65
+      "mid": 19.95,
+      "hi": 51.07
      },
      "worst_frame_ms": {
       "lo": 6.11,
-      "mid": 23.14,
-      "hi": 75.97
+      "mid": 24.94,
+      "hi": 76.61
      },
      "critical_core": 0,
      "verdicts": {
@@ -884,9 +889,9 @@
     "1785": {
      "core_ms": {
       "0": {
-       "lo": 0.34,
-       "mid": 10.57,
-       "hi": 28.94
+       "lo": 2.02,
+       "mid": 11.4,
+       "hi": 29.19
       },
       "1": {
        "lo": 2.4,
@@ -901,8 +906,8 @@
      },
      "cpu_ms": {
       "lo": 2.41,
-      "mid": 10.57,
-      "hi": 28.94
+      "mid": 11.4,
+      "hi": 29.19
      },
      "gpu_ms": {
       "case": "docked_720p",
@@ -911,13 +916,13 @@
      },
      "frame_ms": {
       "lo": 5.55,
-      "mid": 10.57,
-      "hi": 28.94
+      "mid": 11.4,
+      "hi": 29.19
      },
      "worst_frame_ms": {
       "lo": 6.11,
-      "mid": 13.21,
-      "hi": 43.41
+      "mid": 14.25,
+      "hi": 43.79
      },
      "critical_core": 0,
      "verdicts": {
@@ -929,9 +934,9 @@
     }
    },
    "main_minsn": {
-    "lo": 0.603,
-    "mid": 15.1,
-    "hi": 30.997
+    "lo": 3.598,
+    "mid": 16.283,
+    "hi": 31.257
    }
   },
   {
@@ -950,9 +955,9 @@
    "core3": true,
    "cores": {
     "0": {
-     "lo": -0.147,
-     "mid": 13.899,
-     "hi": 29.568,
+     "lo": 2.848,
+     "mid": 15.081,
+     "hi": 29.828,
      "items": {
       "animation": 1.732,
       "cull": 5.587,
@@ -962,11 +967,11 @@
       "render_accumulation": 1.753,
       "renderer_main": 1.338,
       "scene_update": 2.763,
-      "simd_fn_cull_test": -4.05,
-      "simd_fn_gsk": -0.044,
-      "simd_fn_quat_from_matrix": -0.015,
-      "simd_fn_slerp": -0.276,
-      "simd_fn_world_transform": -0.196,
+      "simd_fn_cull_test": -3.037,
+      "simd_fn_gsk": -0.026,
+      "simd_fn_quat_from_matrix": -0.009,
+      "simd_fn_slerp": -0.159,
+      "simd_fn_world_transform": -0.167,
       "sync": 0.3
      }
     },
@@ -1011,9 +1016,9 @@
     "1020": {
      "core_ms": {
       "0": {
-       "lo": -0.14,
-       "mid": 17.03,
-       "hi": 48.31
+       "lo": 2.79,
+       "mid": 18.48,
+       "hi": 48.74
       },
       "1": {
        "lo": 2.81,
@@ -1033,8 +1038,8 @@
      },
      "cpu_ms": {
       "lo": 2.81,
-      "mid": 17.03,
-      "hi": 48.31
+      "mid": 18.48,
+      "hi": 48.74
      },
      "gpu_ms": {
       "case": "docked_720p",
@@ -1043,13 +1048,13 @@
      },
      "frame_ms": {
       "lo": 5.55,
-      "mid": 17.03,
-      "hi": 48.31
+      "mid": 18.48,
+      "hi": 48.74
      },
      "worst_frame_ms": {
       "lo": 6.11,
-      "mid": 21.29,
-      "hi": 72.47
+      "mid": 23.1,
+      "hi": 73.11
      },
      "critical_core": 0,
      "verdicts": {
@@ -1057,14 +1062,14 @@
       "pass_45": "uncertain",
       "target_60": "uncertain"
      },
-     "level": "pass_45"
+     "level": "pass_30"
     },
     "1785": {
      "core_ms": {
       "0": {
-       "lo": -0.08,
-       "mid": 9.73,
-       "hi": 27.61
+       "lo": 1.6,
+       "mid": 10.56,
+       "hi": 27.85
       },
       "1": {
        "lo": 1.61,
@@ -1084,8 +1089,8 @@
      },
      "cpu_ms": {
       "lo": 1.61,
-      "mid": 9.73,
-      "hi": 27.61
+      "mid": 10.56,
+      "hi": 27.85
      },
      "gpu_ms": {
       "case": "docked_720p",
@@ -1094,13 +1099,13 @@
      },
      "frame_ms": {
       "lo": 5.55,
-      "mid": 9.73,
-      "hi": 27.61
+      "mid": 10.56,
+      "hi": 27.85
      },
      "worst_frame_ms": {
       "lo": 6.11,
-      "mid": 12.16,
-      "hi": 41.41
+      "mid": 13.2,
+      "hi": 41.78
      },
      "critical_core": 0,
      "verdicts": {
@@ -1112,9 +1117,9 @@
     }
    },
    "main_minsn": {
-    "lo": -0.147,
-    "mid": 13.899,
-    "hi": 29.568
+    "lo": 2.848,
+    "mid": 15.081,
+    "hi": 29.828
    }
   }
  ],
@@ -1125,7 +1130,7 @@
   "plan45@1785": "target_60",
   "plan45b@1020": "pass_30",
   "plan45b@1785": "target_60",
-  "plan60@1020": "pass_45",
+  "plan60@1020": "pass_30",
   "plan60@1785": "target_60"
  },
  "needs_hardware": [
@@ -1289,8 +1294,8 @@
    },
    "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
-    0.531,
-    3.976
+    0.3,
+    1.414
    ],
    "owner": "S15/S5",
    "needs_hardware": true,
@@ -1679,8 +1684,8 @@
    },
    "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
-    0.531,
-    3.976
+    0.3,
+    1.414
    ],
    "owner": "S15/S5",
    "needs_hardware": true,
@@ -2313,22 +2318,6 @@
  ],
  "queue": [
   {
-   "subsystem": "cull",
-   "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
-   "owner": "S15/S5",
-   "needs_hardware": true,
-   "gain_main_minsn": {
-    "lo": 0.531,
-    "mid": 2.253,
-    "hi": 3.976
-   },
-   "gain_ms_45": {
-    "1020": 2.76,
-    "1785": 1.58
-   },
-   "rank": 1
-  },
-  {
    "subsystem": "renderer (main side)",
    "fix": "render machine F2-F4 (RENDER_PERF.md 10: the radix sort's fixed cost, bind elimination)",
    "owner": "S6n/P6n",
@@ -2342,7 +2331,7 @@
     "1020": 2.15,
     "1785": 1.23
    },
-   "rank": 2
+   "rank": 1
   },
   {
    "subsystem": "havok",
@@ -2358,7 +2347,7 @@
     "1020": 1.9,
     "1785": 1.08
    },
-   "rank": 3
+   "rank": 2
   },
   {
    "subsystem": "animation",
@@ -2373,6 +2362,22 @@
    "gain_ms_45": {
     "1020": 1.41,
     "1785": 0.81
+   },
+   "rank": 3
+  },
+  {
+   "subsystem": "cull",
+   "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
+   "owner": "S15/S5",
+   "needs_hardware": true,
+   "gain_main_minsn": {
+    "lo": 0.3,
+    "mid": 0.857,
+    "hi": 1.414
+   },
+   "gain_ms_45": {
+    "1020": 1.05,
+    "1785": 0.6
    },
    "rank": 4
   },
