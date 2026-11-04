@@ -529,6 +529,16 @@ check('FRIEND1 forward-declares a friend class declared nowhere before', got,
 check('FRIEND1 two declarations only (not T, Q, M, Z, P, R)', str(got.count('fnv-nx FRIEND1')), ['2'])
 check('FRIEND1 keeps the line count', str(got.count('\n')), [str(src.count('\n'))])
 
+# ---- INIT1
+got = run(s1.r_static_initializers, 'int a;\n// @fnv 0x00a8a5f0\nvoid* FUN_00a8a5f0_class::FUN_00a8a5f0()\n{\n'
+          '    void* old = (void*)DAT_011f5b84;\n    if (!old)\n    {\n        g();\n    }\n    return this;\n}\nint b;\n',
+          '/x/src/staging/blk_00a80000_o2.cpp')
+check('INIT1 one static NiMainSDM after its constructor, same line count', got,
+      ['    return this;\n} /* fnv-nx INIT1', 'static FUN_00a8a5f0_class fnvnx_init1_NiMainSDM; static void* const '
+       'fnvnx_init1_NiMainSDM_ctor = fnvnx_init1_NiMainSDM.FUN_00a8a5f0();\nint b;\n'], ["\\'"])
+check('INIT1 only in the constructor\'s unit', run(s1.r_static_initializers, '// @fnv 0x00a8a5f0\nvoid* '
+      'FUN_00a8a5f0_class::FUN_00a8a5f0()\n{\n}\n', '/x/src/staging/blk_00a80000_o2_noehsc_variant.cpp'), [], ['INIT1'])
+
 # ---- ALIGN1
 got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
           '__declspec(align(16))class H:public C\n{\n};\n__declspec(align(16))struct TAU32;\n'

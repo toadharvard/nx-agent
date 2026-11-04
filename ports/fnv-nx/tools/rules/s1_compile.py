@@ -2887,6 +2887,38 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- INIT1
+#
+# A static object whose dynamic initializer the exe has and the decomp does not. Gamebryo gives every unit that
+# includes NiMain.h a `static NiMainSDM` object; its constructor (0x00a8a5f0, `FUN_00a8a5f0_class::FUN_00a8a5f0` in
+# staging/blk_00a80000_o2.cpp) counts the objects in DAT_011f5b84 and the first one registers NiMain's init and
+# shutdown (InitializeGameSystems 0x00a89cc0, FUN_00a8a280) with NiStaticDataManager (FUN_00aa2060: 0x011f6110 /
+# 0x011f6114), which NiInit 0x00aa20b0 runs. The exe calls it from many dynamic initializers; nothing in the decomp
+# calls it, so on the target 0x011f6110 stays 0, NiInit skips NiMain's init and the NiStream loader map, its
+# post-process array and the global string table stay NULL (S5 J-0106, known_faults `before-winmain 0x00a8a5f0`).
+# INIT1 adds one such static to the constructor's own unit. S5 (J-0109, TOOLCHAIN.md section 19): a native static's
+# .init_array entry runs after boot_banner (data image mapped, memory manager constructed), before every game
+# initializer and before WinMain. Game statics run before the platform's constructors, so the constructor may not
+# use the clock, the profile strings or exceptions: 0x00a8a5f0 and FUN_00aa2060 only write image variables. Same
+# line count: the static joins the line of the constructor's closing brace.
+
+INIT1_SITES = [
+    ('staging/blk_00a80000_o2.cpp',
+     re.compile(r'(// @fnv 0x00a8a5f0\s*\nvoid\* FUN_00a8a5f0_class::FUN_00a8a5f0\(\)\s*\{(?:[^{}]|\{[^{}]*\})*\})'),
+     r"\1 /* fnv-nx INIT1: the exe's static NiMainSDM objects (none in the decomp) */ "
+     r'static FUN_00a8a5f0_class fnvnx_init1_NiMainSDM; '
+     r'static void* const fnvnx_init1_NiMainSDM_ctor = fnvnx_init1_NiMainSDM.FUN_00a8a5f0();'),
+]
+
+def r_static_initializers(path, text, stats):
+    """INIT1: static objects whose dynamic initializers the exe has and the decomp lacks (INIT1_SITES, see above)."""
+    rel = path.replace(os.sep, '/')
+    for unit, rx, repl in INIT1_SITES:
+        if not rel.endswith('/src/' + unit): continue
+        text, n = rx.subn(repl, text, count=1)
+        stats['INIT1'] += n
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- FRIEND1
 #
 # `friend class hkpWorld;` in a class body, with hkpWorld declared nowhere before it: MSVC 2008 makes the friend's
@@ -2952,5 +2984,5 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]

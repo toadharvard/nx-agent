@@ -34,13 +34,10 @@ InitHolder          # 0x00aa2020: tail call through slot 7 of the allocator's vt
 0x00aa4060            # MemoryManager::Deallocate: likewise
 0x00aa8a40            # IOQueue push (FUN_00aa7eb0, the IO task init in WinMain): NewItem through the hand-written vptr
                       # 0x010a2960, which has no native vtable (S2 hand_vptrs.tsv: IOQueue/IOFreeQueue 0x010a2960-b0, S1/S2)
-before-winmain 0x00a8a5f0  # NiMainSDM constructor: no initializer calls it (the decomp has no caller; S1), so it never
-                      # registers NiMain's init 0x00a89cc0 in 0x011f6110 for NiInit 0x00aa20b0, and the NiStream loader
-                      # map 0x011f4784, its post-process array 0x011f4788 (both from 0x00a660a0) and the global
-                      # string table stay NULL: the library inits of NiInit then fault in RegisterObjectLoader
 0x00a64900            # NiStream::RegisterObjectLoader: the loader map (new A660A0Map in 0x00a660a0) gets the decomp's
                       # two-slot vtable (A660A0Map declares only its destructor); SetAt calls slot 2, KeyToHashIndex,
-                      # past its end (S1: the stand-in class lacks NiTStringPointerMap's virtuals)
+                      # past its end. S1 VTBL1 (491c776) declares the NiTMapBase slots 1-6, but the decomp has none of
+                      # their functions: they are vslot traps until the exe's vftable 0x0109bf4c gives the addresses
 0x005e0200            # the INI settings load in WinMain (+0x300): its collection 0x....c660 has the image vptr
                       # 0x01082ed8, stored by hand, which has no native vtable (hand_vptrs.tsv: 750 such on f13; S1/S2);
                       # Open tail-calls its slot 6 = 0. Returns false: the INI file did not open
