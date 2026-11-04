@@ -101,7 +101,7 @@ capture: $(OUT)/run_gl $(OUT)/replay_gl
 
 # ---- N1: nx::Renderer / StateTracker self-test on the GL backend --------------------------------------------------
 N1 := $(NATIVE)/n1
-N1SRC := $(N1)/renderer.cpp $(N1)/passes.cpp $(N1)/engine_stubs.cpp $(N1)/engine_textures.cpp
+N1SRC := $(N1)/renderer.cpp $(N1)/passes.cpp $(N1)/translated.cpp $(N1)/engine_stubs.cpp $(N1)/engine_device.cpp $(N1)/engine_textures.cpp
 $(OUT)/test_n1_gl: $(N1SRC) $(wildcard $(N1)/*.h) $(N1)/selftest.cpp $(N1)/selftest_world.cpp $(N1)/test_gl.cpp $(OUT)/run_gl
 	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror -fno-exceptions -fno-rtti $(CPPFLAGS) -I$(SHOUT) -I$(N1) -o $@ \
 		$(N1SRC) $(N1)/selftest.cpp $(N1)/selftest_world.cpp $(N1)/test_gl.cpp $(OUT)/front.o $(OUT)/nxgl.o $(OUT)/gpu_dispatch.o \

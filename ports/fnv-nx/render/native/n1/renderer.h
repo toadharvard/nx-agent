@@ -13,6 +13,7 @@
 #include "d3d9_state.h"
 #include "passes.h"
 #include "nx/families.h"
+#include "translated.h"
 
 namespace nx {
 
@@ -126,6 +127,8 @@ public:
         uint32_t uboSize;
         uint16_t enginePass;        // engine pass id (docs/RENDER_NATIVE.md §1.3) with family != 0, else the current
         uint16_t family;            // NxFamilyId; 0: use SetEnginePass's
+        bool translated;            // a translated program pair: constants in the bundle below, no epilogue block
+        uint32_t transBlock, transOffset;
     };
     // The engine pass the following draws belong to (family NxFam_None: none). Tagged into the stream as NxOp_Marker.
     void SetEnginePass(uint16_t enginePass, uint16_t family) { curPass_ = enginePass; curFamily_ = family; }
@@ -166,25 +169,27 @@ public:
         bool hasStencil = false;         // NiStencilProperty: flags (enable, fail/zfail/pass actions, func), ref, mask
         uint16_t stencilFlags = 0;
         uint32_t stencilRef = 0, stencilMask = 0xFFFFFFFFu;
-        // world families: NiGeometryData normals (+ binormals and tangents with NBT), 3 floats per vertex, or 0
+        // NiGeometryData normals (+ binormals and tangents with NBT), 3 floats per vertex, or 0 (translated path)
         const float* normal = nullptr;
         const float* binormal = nullptr;
         const float* tangent = nullptr;
     };
-    // Inputs of a world-family draw (N2: lit, depth, land, sky, nolight) besides the geometry: what the engine's
-    // shader would have put in its constants and texture stages for the pass (read by engine_stubs.cpp).
-    struct WorldInputs {
-        PassInfo route;
-        uint16_t pass;
-        uint32_t tex[5], texFmt[5];      // lit / depth_at / nolight: 0 diffuse; land: 0 base, 4 normal map; sky: 0 clouds
-        NxLight lights[8];               // lit: NxLitDraw convention (directional: posRange = direction, color.w = 1)
-        uint32_t lightCount;
-        float ambient[3];
-        float specular[4];               // rgb, power
-        float color[4];                  // material / emissive colour x alpha (nolight, lit diffuse)
-        float blend[3][4];               // sky: SkyShader Color0-2 (SKY.vso BlendColor c4-c6)
-    };
-    bool RenderWorld(const GeomView& g, const WorldInputs& in);
+    // The translated path (translated.h): the program store the console loaded (0: none), and one draw of the
+    // engine geometry with the game's VS/PS (store indices) and the register files the engine wrote.
+    void SetTranslatedStore(const TranslatedStore* s);
+    const TranslatedStore* translatedStore() const { return store_; }
+    static void WorldMatrix(const GeomView& g, float world[16]);   // NiTransform -> column-major matrix
+    bool RenderTranslated(const GeomView& g, int vsProgram, int psProgram, const TranslatedConstants& c, uint16_t pass);
+    uint32_t translatedShaderLoads() const { return transLoads_; }   // shader objects created from the pack so far
+    // programs created from GLSL because the pack had no DKSH (GL only; on the console that would be a compile)
+    uint32_t translatedRuntimeCompiles() const { return transCompiles_; }
+    uint32_t translatedNoDksh() const { return transNoDksh_; }      // refused: no DKSH (and no GLSL on GL)
+    // the program can be bound without a console compile (DKSH; on the GL backend also GLSL)
+    bool TranslatedLoadable(int prog) const {
+        if (!store_ || prog < 0 || (uint32_t)prog >= store_->count()) return false;
+        const TranslatedProgram& p = store_->program(prog);
+        return p.dksh || (be_->Info().backend == 2 && p.glsl);
+    }
     // Camera world position (Do_SetCameraData; screen space: (0.5, 0.5, -1)).
     const float* eye() const { return eye_; }
     bool RenderGeometry(const GeomView& g);
@@ -236,15 +241,21 @@ private:
     DrawStats stats_ = {}, lastStats_ = {};
     uint16_t geomVsScroll_ = 0, geomVsPlain_ = 0, geomVsPlainScroll_ = 0, geomPsPlain_ = 0, geomPsAlphaMap_ = 0;
     uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0, bgVs_ = 0, bgPs_ = 0, bgLayout_ = 0;
-    struct WorldShaders { uint16_t vs, ps, layout; };
-    enum { kWorldShaders = 24 };
-    WorldShaders world_[kWorldShaders] = {};       // by WorldShaderIndex (renderer.cpp)
     float eye_[3] = {0.5f, 0.5f, -1.0f};
-    bool UploadGeometry(const GeomView& g, bool world, uint32_t* vOff, uint32_t* iOff, uint32_t* nIdx);
+    const TranslatedStore* store_ = nullptr;
+    uint16_t* transShader_ = nullptr;                // store index -> shader id (0: not loaded)
+    struct TransPair { int vs, ps; uint16_t id; };
+    enum { kTransPairs = 1024, kTransLayouts = 64 };
+    TransPair transPairs_[kTransPairs];
+    uint32_t transCompiles_ = 0, transNoDksh_ = 0;
+    uint32_t nTransPairs_ = 0, transLoads_ = 0, nTransLayouts_ = 0, transFrame_ = ~0u;
+    uint16_t transLayoutMask_[kTransLayouts], transLayout_[kTransLayouts];
+    Ring transRing_;
+    uint16_t TranslatedShader(int prog, int psForPad);
+    bool UploadGeometry(const GeomView& g, uint32_t* vOff, uint32_t* iOff, uint32_t* nIdx);
     struct SavedDrawState;
     void ApplyGeomStates(const GeomView& g, SavedDrawState& sv);
     void RestoreGeomStates(const GeomView& g, const SavedDrawState& sv);
-    static void WorldMatrix(const GeomView& g, float world[16]);
     bool EnsureWhite();
     StateCache sc_;
     Frame frame_;

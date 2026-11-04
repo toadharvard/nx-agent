@@ -49,7 +49,7 @@ const char* RouteName(PassRoute r) {
 const char* SkipName(DrawSkip s) {
     static const char* const k[Skip_Count] = {"-", "no renderer", "unreadable geometry", "skinned", "no translated program",
                                               "no engine shader/pass", "submit refused", "image-space effect",
-                                              "no native family, no translated path"};
+                                              "no native family, no translated path", "no precompiled DKSH"};
     return s < Skip_Count ? k[s] : "?";
 }
 

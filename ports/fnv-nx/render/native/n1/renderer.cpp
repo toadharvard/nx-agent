@@ -5,6 +5,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <new>
 
 namespace nx {
@@ -281,11 +282,11 @@ bool Renderer::Render(const Draw& d) {
     const StateTracker::Resolved& r = state_.Resolve(vp_, sc, g->depth ? 75 : 0);
     // compile-time epilogue permutation for this draw's alpha test / fog
     uint16_t ps = d.ps;
-    bool needEpi = true;
-    if (d.ps) EpiIndex(d.ps);   // learns litBase_ on a shader's first use
+    bool needEpi = !d.translated;   // a translated program has its own fog / alpha test (driver UBO)
+    if (d.ps && !d.translated) EpiIndex(d.ps);   // learns litBase_ on a shader's first use
     // lit family: static light permutation (directional first, points padded to 1/2/4/8 with zero-colour lights)
     int litDir = -1, litPoints = 0, litPad = 0;
-    if (permutations_ && d.ps && d.ubo && d.uboSize >= sizeof(NxLitDraw) && (d.ps == litBase_[0] || d.ps == litBase_[1])) {
+    if (permutations_ && !d.translated && d.ps && d.ubo && d.uboSize >= sizeof(NxLitDraw) && (d.ps == litBase_[0] || d.ps == litBase_[1])) {
         const NxLitDraw* L = (const NxLitDraw*)d.ubo;
         const uint32_t n = L->lightCount < 8 ? L->lightCount : 8;
         int dirs = 0;
@@ -300,7 +301,7 @@ bool Renderer::Render(const Draw& d) {
         }
     }
     const uint16_t epiBase = ps;
-    const int ei = epiBase ? EpiIndex(epiBase) : -1;
+    const int ei = epiBase && !d.translated ? EpiIndex(epiBase) : -1;
     if (ei >= 0) {
         const EpiSet& es = epi_[ei];
         const bool at = (r.shaderBits >> NXSB_ALPHATEST) & 1, fog = ((r.shaderBits >> NXSB_FOG) & 7) != 0;
@@ -387,6 +388,7 @@ bool Renderer::Render(const Draw& d) {
         lastEpiResolve_ = state_.resolves(); lastEpiFrame_ = frameNo_;
         if (!needEpi) lastEpiBlock_ = 0;
     }
+    if (d.translated) frame_.SetTranslated(p, d.transBlock, d.transOffset);
     if (d.family) frame_.Tag(p, d.enginePass, d.family);
     else if (curFamily_) frame_.Tag(p, curPass_, curFamily_);
     return true;
@@ -470,8 +472,6 @@ uint16_t Renderer::FragmentShader(const char* name) {
 
 namespace {
 struct GeomVtx { float x, y, z, u, v; uint32_t rgba; };
-struct WorldVtx { float pos[3], uv[2]; uint32_t rgba; float n[3], t[3], b[3], w[3]; };   // 72 bytes
-static_assert(sizeof(WorldVtx) == 72, "WorldVtx");
 inline uint32_t Rgba8(const float* c) {
     uint32_t o = 0;
     for (int i = 0; i < 4; i++) {
@@ -490,34 +490,22 @@ inline void Mul(const float* a, const float* b, float* o) {   // column-major o 
 }
 }  // namespace
 
-// triangle list into the geometry ring (strips: alternate winding, degenerate triangles dropped); world = false:
-// GeomVtx (tile), true: WorldVtx (world families, normals / tangent frame)
-bool Renderer::UploadGeometry(const GeomView& g, bool world, uint32_t* vOff, uint32_t* iOff, uint32_t* nOut) {
+// triangle list into the geometry ring (strips: alternate winding, degenerate triangles dropped), GeomVtx vertices
+bool Renderer::UploadGeometry(const GeomView& g, uint32_t* vOff, uint32_t* iOff, uint32_t* nOut) {
     uint32_t nIdx = g.indices ? g.indexCount - g.indexCount % 3 : 0;
     if (!g.indices && g.strips && g.stripLengths)
         for (uint32_t s = 0; s < g.stripCount; s++) nIdx += g.stripLengths[s] > 2 ? 3u * (g.stripLengths[s] - 2u) : 0u;
     if (!nIdx) return false;
-    const uint32_t stride = world ? sizeof(WorldVtx) : sizeof(GeomVtx);
+    const uint32_t stride = sizeof(GeomVtx);
     uint8_t* vb = (uint8_t*)geomRing_.Alloc(g.vertices * stride, 16, vOff);
     uint16_t* ix = (uint16_t*)geomRing_.Alloc(nIdx * 2, 16, iOff);
     if (!vb || !ix) return false;
     static const float kOne[4] = {1, 1, 1, 1};
     for (uint32_t i = 0; i < g.vertices; i++) {
-        if (world) {
-            WorldVtx& v = ((WorldVtx*)vb)[i];
-            memset(&v, 0, sizeof v);
-            memcpy(v.pos, g.pos + 3 * i, 12);
-            if (g.uv) { v.uv[0] = g.uv[2 * i]; v.uv[1] = g.uv[2 * i + 1]; }
-            v.rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
-            if (g.normal) memcpy(v.n, g.normal + 3 * i, 12);
-            if (g.tangent) memcpy(v.t, g.tangent + 3 * i, 12);
-            if (g.binormal) memcpy(v.b, g.binormal + 3 * i, 12);
-        } else {
-            GeomVtx& v = ((GeomVtx*)vb)[i];
-            v.x = g.pos[3 * i]; v.y = g.pos[3 * i + 1]; v.z = g.pos[3 * i + 2];
-            v.u = g.uv ? g.uv[2 * i] : 0; v.v = g.uv ? g.uv[2 * i + 1] : 0;
-            v.rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
-        }
+        GeomVtx& v = ((GeomVtx*)vb)[i];
+        v.x = g.pos[3 * i]; v.y = g.pos[3 * i + 1]; v.z = g.pos[3 * i + 2];
+        v.u = g.uv ? g.uv[2 * i] : 0; v.v = g.uv ? g.uv[2 * i + 1] : 0;
+        v.rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
     }
     uint32_t n = 0;
     if (g.indices) {
@@ -618,7 +606,7 @@ bool Renderer::RenderGeometry(const GeomView& g) {
         if (!geomVs_ || !geomPs_ || !geomLayout_ || !EnsureWhite()) return false;
     }
     uint32_t vOff, iOff, n;
-    if (!UploadGeometry(g, false, &vOff, &iOff, &n)) return false;
+    if (!UploadGeometry(g, &vOff, &iOff, &n)) return false;
     float world[16];
     WorldMatrix(g, world);
     NxTileDraw u;
@@ -660,156 +648,6 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     return ok;
 }
 
-// ---- N2 world families on the engine path -----------------------------------------------------------------------
-// World shader sets: index -> (VS blob, PS blob, attribute set). Attribute sets use WorldVtx with explicit locations
-// (NxVtxLayout.attr[].location): A_LIT pos0 uv1 rgba2 n3; A_DEPTH pos0 uv1; A_LAND pos0 uv1 rgba2 w3 n4 t5 b6;
-// A_SKY pos0 uv1 rgba2.
-enum { A_LIT, A_DEPTH, A_LAND, A_SKY };
-struct WorldSet { const char* vs; const char* ps; uint8_t attrs; };
-static const WorldSet kWorldSets[] = {
-    {"lit", "lit", A_LIT},              // 0
-    {"lit", "lit_spec", A_LIT},         // 1
-    {"lit_vc", "lit", A_LIT},           // 2
-    {"lit_vc", "lit_spec", A_LIT},      // 3
-    {"depth", "depth", A_DEPTH},        // 4
-    {"depth", "depth_out", A_DEPTH},    // 5
-    {"depth_at", "depth_at", A_DEPTH},  // 6
-    {"land_lit", "land_lit", A_LAND},   // 7
-    {"sky", "sky", A_SKY},              // 8
-    {"sky", "sky_clouds", A_SKY},       // 9
-    {"nolight_tex", "nolight_tex", A_LIT},      // 10
-    {"nolight_vc", "nolight_col", A_LIT},       // 11
-    {"nolight_texvc", "nolight_tex", A_LIT},    // 12
-    {"nolight_vc", "nolight_col", A_LIT},       // 13: MAT (colour only; vertex colour white without VC)
-};
-
-static int WorldSetIndex(const PassInfo& p) {
-    const uint16_t v = p.variant;
-    switch (p.route) {
-    case Route_Lit: return ((v & PV_VC) ? 2 : 0) + ((v & PV_SPEC) ? 1 : 0);
-    case Route_Depth: return (v & PV_DEPTHOUT) ? 5 : (v & PV_ALPHATEST) ? 6 : 4;
-    case Route_Land: return 7;
-    case Route_Sky: return (v & PV_CLOUDS) ? 9 : 8;
-    case Route_NoLight: return (v & PV_TEX) ? ((v & PV_VC) ? 12 : 10) : 11;
-    default: return -1;
-    }
-}
-
-bool Renderer::RenderWorld(const GeomView& g, const WorldInputs& in) {
-    if (!inFrame_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
-    const int si = WorldSetIndex(in.route);
-    if (si < 0 || si >= kWorldShaders) return false;
-    WorldShaders& ws = world_[si];
-    if (!ws.vs) {
-        const WorldSet& k = kWorldSets[si];
-        ws.vs = BlobShader(be_, k.vs, NxStage_Vertex);
-        ws.ps = FragmentShader(k.ps);
-        NxVtxLayout ll;
-        memset(&ll, 0, sizeof ll);
-        ll.stride = sizeof(WorldVtx);
-        struct A { uint8_t off, type, comps, loc; };
-        static const A kPos = {0, NxAttr_Float32, 3, 0}, kUv = {12, NxAttr_Float32, 2, 1}, kCol = {20, NxAttr_Unorm8, 4, 2};
-        A at[8];
-        uint8_t n = 0;
-        at[n++] = kPos; at[n++] = kUv;
-        if (k.attrs != A_DEPTH) at[n++] = kCol;
-        if (k.attrs == A_LIT) at[n++] = A{24, NxAttr_Float32, 3, 3};
-        if (k.attrs == A_LAND) {
-            at[n++] = A{60, NxAttr_Float32, 3, 3}; at[n++] = A{24, NxAttr_Float32, 3, 4};
-            at[n++] = A{36, NxAttr_Float32, 3, 5}; at[n++] = A{48, NxAttr_Float32, 3, 6};
-        }
-        ll.count = n;
-        for (uint8_t i = 0; i < n; i++) {
-            ll.attr[i].offset = at[i].off; ll.attr[i].type = at[i].type; ll.attr[i].components = at[i].comps;
-            ll.attr[i].location = (uint8_t)(at[i].loc + 1);
-        }
-        ws.layout = sc_.Layout(ll);
-        if (!ws.vs || !ws.ps || !ws.layout || !EnsureWhite()) { ws.vs = 0; return false; }
-    }
-    uint32_t vOff, iOff, n;
-    if (!UploadGeometry(g, true, &vOff, &iOff, &n)) return false;
-    float world[16], vp[16], wvp[16];
-    WorldMatrix(g, world);
-    Mul(proj_, view_, vp);
-    Mul(vp, world, wvp);
-    // per-draw block of the family
-    union { NxLitDraw lit; NxDepthDraw depth; NxLandDraw land; NxSkyDraw sky; NxNoLightDraw nl; } u;
-    memset(&u, 0, sizeof u);
-    uint32_t uboSize = 0, ntex = 1;
-    switch (in.route.route) {
-    case Route_Lit:
-        memcpy(u.lit.wvp, wvp, 64); memcpy(u.lit.world, world, 64);
-        memcpy(u.lit.ambient, in.ambient, 12);
-        memcpy(u.lit.diffuse, in.color, 16);
-        memcpy(u.lit.specular, in.specular, 16);
-        memcpy(u.lit.eye, eye_, 12);
-        u.lit.lightCount = in.lightCount < 8 ? in.lightCount : 8;
-        memcpy(u.lit.lights, in.lights, sizeof u.lit.lights);
-        uboSize = sizeof u.lit;
-        break;
-    case Route_Depth: memcpy(u.depth.wvp, wvp, 64); uboSize = sizeof u.depth; ntex = 1; break;
-    case Route_Land: {
-        memcpy(u.land.wvp, wvp, 64);
-        u.land.uvScale[0] = u.land.uvScale[1] = 1.0f;
-        // LightData is model space: the directional light's direction towards the light, through the inverse
-        // rotation (NiTransform rotation is orthonormal: transpose)
-        float L[3] = {0, 0, 1};
-        for (uint32_t i = 0; i < in.lightCount && i < 8; i++)
-            if (in.lights[i].color[3] > 0.5f) {
-                const float* d = in.lights[i].posRange;
-                L[0] = -d[0]; L[1] = -d[1]; L[2] = -d[2];
-                memcpy(u.land.lightColor, in.lights[i].color, 12);
-                break;
-            }
-        for (int r = 0; r < 3; r++) u.land.lightDir[r] = g.rot[0 * 3 + r] * L[0] + g.rot[1 * 3 + r] * L[1] + g.rot[2 * 3 + r] * L[2];
-        memcpy(u.land.ambient, in.ambient, 12);
-        uboSize = sizeof u.land; ntex = 5;
-        break;
-    }
-    case Route_Sky:
-        memcpy(u.sky.wvp, wvp, 64);
-        memcpy(u.sky.blend0, in.blend[0], 16); memcpy(u.sky.blend1, in.blend[1], 16); memcpy(u.sky.blend2, in.blend[2], 16);
-        u.sky.params[0] = 0.9999f; u.sky.params[1] = 1.0f;
-        uboSize = sizeof u.sky;
-        break;
-    case Route_NoLight:
-        memcpy(u.nl.wvp, wvp, 64);
-        memcpy(u.nl.color, in.color, 16);
-        u.nl.uvOffsetScale[2] = u.nl.uvOffsetScale[3] = 1.0f;
-        u.nl.falloff[0] = 1.0f; u.nl.falloff[2] = u.nl.falloff[3] = 1.0f;
-        uboSize = sizeof u.nl;
-        break;
-    default: return false;
-    }
-    // textures: the inputs' stages (a white texel where a stage has none), the tracker's restored after the draw
-    static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};
-    uint32_t prev[5];
-    NxD3D9Texture prevKind[5];
-    for (uint32_t s = 0; s < ntex; s++) {
-        prev[s] = state_.Texture(s); prevKind[s] = state_.TextureKind(s);
-        if (in.tex[s]) { NxD3D9Texture k = {in.texFmt[s], 0, 0, 0, 0}; state_.SetTexture(s, in.tex[s], k); }
-        else if (!prev[s]) state_.SetTexture(s, white_, kWhiteKind);
-    }
-    SavedDrawState sv;
-    ApplyGeomStates(g, sv);
-    // pass render states the engine's (replaced) pass setup would have applied
-    if (in.route.route == Route_Depth && !(in.route.variant & PV_DEPTHOUT)) state_.SetRenderState(168, 0);   // ZONLY: no colour
-    if (in.route.route == Route_Sky) state_.SetRenderState(14, 0);                                           // sky: no z write
-    Draw d;
-    memset(&d, 0, sizeof d);
-    d.vs = ws.vs; d.ps = ws.ps; d.layout = ws.layout; d.prim = NxPrim_Triangles;
-    d.vtxBlock = geomRing_.block(); d.vtxOffset = vOff; d.vtxSize = g.vertices * sizeof(WorldVtx);
-    d.idxBlock = geomRing_.block(); d.idxOffset = iOff; d.idxSize = n * 2; d.idxType = 0;
-    d.count = n; d.textures = ntex; d.ubo = &u; d.uboSize = uboSize;
-    d.enginePass = in.pass; d.family = (uint16_t)(in.route.route == Route_Lit ? NxFam_Lit : in.route.route == Route_Depth ? NxFam_Depth :
-                                                  in.route.route == Route_Land ? NxFam_Land : in.route.route == Route_Sky ? NxFam_Sky : NxFam_NoLight);
-    bool ok = Render(d);
-    for (uint32_t s = 0; s < ntex; s++) state_.SetTexture(s, prev[s], prevKind[s]);
-    RestoreGeomStates(g, sv);
-    if (ok) geomDraws_++;
-    return ok;
-}
-
 bool Renderer::RenderMenuBackground(uint32_t scene, uint32_t sceneFmt, uint32_t w, uint32_t h, uint32_t tone,
                                     uint32_t toneFmt, const float luma[3], float blend, float alpha) {
     if (!inFrame_ || !scene || !tone || !w || !h) return false;
@@ -842,6 +680,206 @@ bool Renderer::RenderMenuBackground(uint32_t scene, uint32_t sceneFmt, uint32_t 
     bool ok = Render(d);
     state_.SetTexture(0, t0, k0); state_.SetTexture(1, t1, k1);
     for (int st = 0; st < 2; st++) for (int i = 0; i < 4; i++) state_.SetSamplerState(st, kTypes[i], s[st][i]);
+    return ok;
+}
+
+
+// ---- the translated path (translated.h): the game's own programs on the native renderer ---------------------------
+void Renderer::SetTranslatedStore(const TranslatedStore* s) {
+    store_ = s;
+    delete[] transShader_;
+    transShader_ = nullptr;
+    nTransPairs_ = 0;
+    if (s && s->count()) {
+        transShader_ = new (std::nothrow) uint16_t[s->count()];
+        if (transShader_) memset(transShader_, 0, 2 * s->count());
+    }
+}
+
+// GL only: a fragment input the vertex program does not write must still exist as a VS output for the link (the
+// DKSH stages are separate and need nothing). Appends `layout(location = N) out <type> nx_padN;` and zero writes.
+static uint32_t PadVertexGlsl(const char* vs, const char* ps, char* out, uint32_t cap) {
+    char decl[2048], init[1024];
+    uint32_t nd = 0, ni = 0;
+    decl[0] = init[0] = 0;
+    for (const char* p = ps; (p = strstr(p, "layout(location = ")); p++) {
+        const int loc = atoi(p + 18);
+        const char* r = strchr(p, ')');
+        const char* e = strchr(p, ';');
+        if (!r || !e || r > e) continue;
+        const char* q = r + 1;
+        while (*q == ' ') q++;
+        if (strncmp(q, "in ", 3)) continue;
+        q += 3;
+        // type: the token before the name (skip qualifiers such as highp / centroid)
+        const char* nameStart = e;
+        while (nameStart > q && nameStart[-1] != ' ') nameStart--;
+        const char* typeEnd = nameStart - 1, *typeStart = typeEnd;
+        while (typeStart > q && typeStart[-1] != ' ') typeStart--;
+        char want[48];
+        snprintf(want, sizeof want, "layout(location = %d) out", loc);
+        if (strstr(vs, want) || typeEnd <= typeStart || typeEnd - typeStart > 16) continue;
+        char type[20];
+        memcpy(type, typeStart, (size_t)(typeEnd - typeStart)); type[typeEnd - typeStart] = 0;
+        if (nd < sizeof decl - 96) nd += (uint32_t)snprintf(decl + nd, sizeof decl - nd, "layout(location = %d) out %s nx_pad%d;\n", loc, type, loc);
+        if (ni < sizeof init - 64) ni += (uint32_t)snprintf(init + ni, sizeof init - ni, "\tnx_pad%d = %s(0.0);\n", loc, type);
+    }
+    const uint32_t n = (uint32_t)strlen(vs);
+    if (!nd) { if (n + 1 > cap) return 0; memcpy(out, vs, n + 1); return n; }
+    const char* m = strstr(vs, "void main()");
+    const char* brace = m ? strchr(m, '{') : nullptr;
+    if (!m || !brace || n + nd + ni + 1 > cap) return 0;
+    uint32_t o = 0;
+    memcpy(out, vs, (size_t)(m - vs)); o = (uint32_t)(m - vs);
+    memcpy(out + o, decl, nd); o += nd;
+    memcpy(out + o, m, (size_t)(brace + 1 - m)); o += (uint32_t)(brace + 1 - m);
+    out[o++] = '\n';
+    memcpy(out + o, init, ni); o += ni;
+    const uint32_t rest = (uint32_t)(n - (brace + 1 - vs));
+    memcpy(out + o, brace + 1, rest); o += rest;
+    out[o] = 0;
+    return o;
+}
+
+uint16_t Renderer::TranslatedShader(int prog, int psForPad) {
+    if (!store_ || prog < 0 || (uint32_t)prog >= store_->count() || !transShader_) return 0;
+    const TranslatedProgram& p = store_->program(prog);
+    // never a compile on the console: deko3d takes the pack's DKSH or nothing; the GL reference backend compiles
+    // GLSL (counted: a program without DKSH would be a compile on the console)
+    const bool gl = be_->Info().backend == 2;
+    if (!p.dksh && (!gl || !p.glsl)) { transNoDksh_++; return 0; }
+    if (p.stage == 1 || psForPad < 0) {
+        uint16_t& id = transShader_[prog];
+        if (!id) {
+            NxShaderDesc d;
+            memset(&d, 0, sizeof d);
+            d.stage = p.stage ? NxStage_Fragment : NxStage_Vertex;
+            d.dksh = FNVNX_ADDR_(p.dksh); d.dksh_size = p.dkshSize;
+            d.glsl = FNVNX_ADDR_(p.glsl); d.glsl_size = p.glslSize;
+            id = (uint16_t)be_->ShaderCreate(d);
+            transLoads_++;
+            if (!p.dksh) { transCompiles_++; stats_.runtimeCompiles++; }
+        }
+        return id;
+    }
+    // vertex program for a fragment program: the GLSL padded for that pair (the DKSH is the same)
+    for (uint32_t i = 0; i < nTransPairs_; i++)
+        if (transPairs_[i].vs == prog && transPairs_[i].ps == psForPad) return transPairs_[i].id;
+    static char buf[256 * 1024];
+    const char* pg = store_->program(psForPad).glsl;
+    const uint32_t n = p.glsl && pg ? PadVertexGlsl(p.glsl, pg, buf, sizeof buf) : 0;
+    NxShaderDesc d;
+    memset(&d, 0, sizeof d);
+    d.stage = NxStage_Vertex;
+    d.dksh = FNVNX_ADDR_(p.dksh); d.dksh_size = p.dkshSize;
+    d.glsl = n ? FNVNX_ADDR_(buf) : 0; d.glsl_size = n;
+    const uint16_t id = n || p.dksh ? (uint16_t)be_->ShaderCreate(d) : 0;
+    transLoads_++;
+    if (!p.dksh) { transCompiles_++; stats_.runtimeCompiles++; }
+    if (id && nTransPairs_ < kTransPairs) transPairs_[nTransPairs_++] = {prog, psForPad, id};
+    return id;
+}
+
+bool Renderer::RenderTranslated(const GeomView& g, int vsProg, int psProg, const TranslatedConstants& c, uint16_t pass) {
+    if (!inFrame_ || !store_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
+    if (vsProg < 0 || psProg < 0 || store_->program(vsProg).stage != 0 || store_->program(psProg).stage != 1) return false;
+    if (!transRing_.block() && !transRing_.Init(be_, 16u << 20)) return false;
+    if (transFrame_ != frameNo_) { transRing_.BeginFrame(frameNo_); transFrame_ = frameNo_; }
+    const uint16_t vs = TranslatedShader(vsProg, psProg), ps = TranslatedShader(psProg, -1);
+    if (!vs || !ps) return false;
+    // vertex layout: one float4 per input location the VS reads (POSITION 0, NORMAL 3, COLOR0 4, TEXCOORD0 6,
+    // TANGENT 14, BINORMAL 15 from the geometry; any other input reads (0, 0, 0, 1))
+    const uint16_t mask = store_->program(vsProg).inputMask ? store_->program(vsProg).inputMask : 1;
+    uint8_t locs[8], na = 0;
+    for (uint8_t l = 0; l < 16 && na < 8; l++) if (mask >> l & 1) locs[na++] = l;
+    uint16_t layout = 0;
+    for (uint32_t i = 0; i < nTransLayouts_; i++) if (transLayoutMask_[i] == mask) layout = transLayout_[i];
+    if (!layout) {
+        NxVtxLayout ll;
+        memset(&ll, 0, sizeof ll);
+        ll.count = na; ll.stride = (uint8_t)(16 * na);
+        for (uint8_t i = 0; i < na; i++) {
+            ll.attr[i].offset = (uint8_t)(16 * i); ll.attr[i].type = NxAttr_Float32; ll.attr[i].components = 4;
+            ll.attr[i].location = (uint8_t)(locs[i] + 1);
+        }
+        layout = sc_.Layout(ll);
+        if (!layout) return false;
+        if (nTransLayouts_ < kTransLayouts) { transLayoutMask_[nTransLayouts_] = mask; transLayout_[nTransLayouts_++] = layout; }
+    }
+    uint32_t nIdx = g.indices ? g.indexCount - g.indexCount % 3 : 0;
+    if (!g.indices && g.strips && g.stripLengths)
+        for (uint32_t s = 0; s < g.stripCount; s++) nIdx += g.stripLengths[s] > 2 ? 3u * (g.stripLengths[s] - 2u) : 0u;
+    if (!nIdx) return false;
+    uint32_t vOff, iOff, bOff;
+    float* vb = (float*)transRing_.Alloc(g.vertices * 16u * na, 16, &vOff);
+    uint16_t* ix = (uint16_t*)transRing_.Alloc(nIdx * 2, 16, &iOff);
+    uint8_t* bundle = (uint8_t*)transRing_.Alloc(Frame::kTransBytes, 256, &bOff);
+    if (!vb || !ix || !bundle) return false;
+    for (uint32_t v = 0; v < g.vertices; v++)
+        for (uint8_t a = 0; a < na; a++) {
+            float* o = vb + (v * na + a) * 4;
+            o[0] = o[1] = o[2] = 0; o[3] = 1;
+            switch (locs[a]) {
+            case 0: memcpy(o, g.pos + 3 * v, 12); break;
+            case 3: if (g.normal) { memcpy(o, g.normal + 3 * v, 12); o[3] = 0; } break;
+            case 4: if (g.color) memcpy(o, g.color + 4 * v, 16); else o[0] = o[1] = o[2] = 1; break;
+            case 6: if (g.uv) { o[0] = g.uv[2 * v]; o[1] = g.uv[2 * v + 1]; } break;
+            case 14: if (g.tangent) { memcpy(o, g.tangent + 3 * v, 12); o[3] = 0; } break;
+            case 15: if (g.binormal) { memcpy(o, g.binormal + 3 * v, 12); o[3] = 0; } break;
+            default: break;
+            }
+        }
+    uint32_t n = 0;
+    if (g.indices) {
+        for (uint32_t i = 0; i < nIdx; i++) ix[n++] = g.indices[i] < g.vertices ? g.indices[i] : 0;
+    } else {
+        const uint16_t* s = g.strips;
+        for (uint32_t k = 0; k < g.stripCount; s += g.stripLengths[k], k++)
+            for (uint32_t t = 0; t + 2 < g.stripLengths[k]; t++) {
+                uint16_t a = s[t], b = s[t + 1], cc = s[t + 2];
+                if (a == b || b == cc || a == cc || a >= g.vertices || b >= g.vertices || cc >= g.vertices) continue;
+                if (t & 1) { uint16_t x = a; a = b; b = x; }
+                ix[n++] = a; ix[n++] = b; ix[n++] = cc;
+            }
+    }
+    if (!n) return false;
+    // the constant bundle (fnvnx_dk_layout.h)
+    memset(bundle, 0, Frame::kTransBytes);
+    memcpy(bundle + Frame::kTransVsC, c.vsc, 4096);
+    memcpy(bundle + Frame::kTransPsC, c.psc, 4096);
+    memcpy(bundle + Frame::kTransVsIB, c.vsi, 256);
+    memcpy(bundle + Frame::kTransPsIB, c.psi, 256);
+    for (int k = 0; k < 16; k++) {
+        memcpy(bundle + Frame::kTransVsIB + 256 + 16 * k, &c.vsb[k], 4);
+        memcpy(bundle + Frame::kTransPsIB + 256 + 16 * k, &c.psb[k], 4);
+    }
+    float* vd = (float*)(bundle + Frame::kTransVsDrv);
+    vd[2] = 1.0f;   // posfix (0, 0, 1): the native viewport carries D3D9's half pixel; y as is (nx_render's rule)
+    float* pd = (float*)(bundle + Frame::kTransPsDrv);
+    const uint32_t* rs = state_.rs();
+    const TranslatedProgram& pp = store_->program(psProg);
+    nx_d3d9_color(rs[34], pd);                                  // FOGCOLOR
+    float mode = 0;
+    if (rs[28] && pp.major < 3) mode = rs[35] == 1 ? 2.0f : rs[35] == 2 ? 3.0f : rs[35] == 3 ? 4.0f : 1.0f;
+    pd[4] = mode; memcpy(&pd[5], &rs[36], 4); memcpy(&pd[6], &rs[37], 4); memcpy(&pd[7], &rs[38], 4);
+    const int32_t af = rs[15] ? (int32_t)rs[25] : 0;
+    memcpy(&pd[8], &af, 4);
+    pd[12] = (float)(rs[24] & 0xFF) / 255.0f;
+    // draw: the tracked render state, the 16 texture stages
+    state_.SetPixelShaderVersion((uint32_t)pp.major << 8 | pp.minor);
+    SavedDrawState sv;
+    ApplyGeomStates(g, sv);
+    Draw d;
+    memset(&d, 0, sizeof d);
+    d.vs = vs; d.ps = ps; d.layout = layout; d.prim = NxPrim_Triangles;
+    d.vtxBlock = transRing_.block(); d.vtxOffset = vOff; d.vtxSize = g.vertices * 16u * na;
+    d.idxBlock = transRing_.block(); d.idxOffset = iOff; d.idxSize = n * 2; d.idxType = 0;
+    d.count = n; d.textures = StateTracker::kStages;
+    d.translated = true; d.transBlock = transRing_.block(); d.transOffset = bOff;
+    d.enginePass = pass; d.family = NxFam_Translated;
+    const bool ok = Render(d);
+    RestoreGeomStates(g, sv);
+    state_.SetPixelShaderVersion(0x0200);
     return ok;
 }
 

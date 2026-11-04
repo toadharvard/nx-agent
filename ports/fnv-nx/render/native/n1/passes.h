@@ -45,6 +45,7 @@ enum DrawSkip : uint8_t {
     Skip_Submit,            // the renderer refused the packet (ring or state cache full, shader missing)
     Skip_ImageSpace,        // an image-space effect with no native family and no translated program
     Skip_NoFamily,          // translated route, but the translated path is unavailable (no program store bound)
+    Skip_NoDksh,            // translated: the pack has no precompiled DKSH for the program (never compiled at run time)
     Skip_Count
 };
 const char* SkipName(DrawSkip s);
@@ -57,6 +58,7 @@ struct DrawStats {
     uint32_t translatedPartial;         // ... of which with a constant-map entry the native side could not evaluate
     uint32_t misrendered;               // rendered, but not by the family/program its pass needs
     uint32_t skipped[Skip_Count];       // not rendered, by reason (index 0 unused)
+    uint32_t runtimeCompiles;           // shaders created from GLSL without DKSH (GL reference only; a failure on NX)
     uint32_t Skipped() const { uint32_t n = 0; for (int i = 1; i < Skip_Count; i++) n += skipped[i]; return n; }
     uint32_t Native() const { uint32_t n = 0; for (int i = 0; i < Route_Count; i++) n += native[i]; return n; }
 };

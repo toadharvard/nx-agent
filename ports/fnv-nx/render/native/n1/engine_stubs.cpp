@@ -34,13 +34,9 @@ uint32_t SkippedGeometry() { return g_skipped; }
 // drawn outside the accumulator would otherwise inherit the last world pass).
 static const uint32_t* g_passId = nullptr;
 static const uint32_t* g_renderPass = nullptr;
-static const float* g_skyColors = nullptr;
 void BindPassGlobals(const uint32_t* passId, const uint32_t* renderPass) { g_passId = passId; g_renderPass = renderPass; }
-void BindSkyColors(const float* color0) { g_skyColors = color0; }
 void BindImagePassGlobals() {
     BindPassGlobals((const uint32_t*)(g_guestBase + 0x011f91e4u), (const uint32_t*)(g_guestBase + 0x011f91e0u));
-    // SkyShader's vertex constants Color0-2 (its constant map's data sources: 0x011ff910, +0x10, +0x20)
-    BindSkyColors((const float*)(g_guestBase + 0x011ff910u));
 }
 const uint8_t* CurrentRenderPass(const void* geometry, uint16_t* passId) {
     *passId = 0;
@@ -53,14 +49,25 @@ const uint8_t* CurrentRenderPass(const void* geometry, uint16_t* passId) {
     return rp;
 }
 
-// Native families on the engine path. Plan of 2026-11-04 (orchestrator): until a hand-written family is finished
-// and checked against the game's program on real frames, its passes go through the translated original; on by default
-// only tile, nolight and image space (menuBG). Lit, depth, land and sky are written (Renderer::RenderWorld) and tested
-// by the self-test with SetNativeFamilies.
-static uint32_t g_nativeRoutes = 1u << Route_Legacy | 1u << Route_Tile | 1u << Route_NoLight | 1u << Route_ImageSpace;
-void SetNativeFamilies(uint32_t routeMask) { g_nativeRoutes = routeMask | 1u << Route_Legacy | 1u << Route_Translated; }
-uint32_t NativeFamilies() { return g_nativeRoutes; }
-bool NativeFamilyEnabled(PassRoute r) { return r == Route_Translated || ((g_nativeRoutes >> r) & 1); }
+// ---- the family dispatch table: one row per family (passes.h routes) ----------------------------------------------
+// native = the family's own draw serves its passes; otherwise they take the translated route (the game's programs,
+// translated). Family streams switch their row to native when their family is finished and checked on real frames
+// (CLAIMS.md: render-lit owns lit, render-land owns land / LOD / sky / water / depth / the world image-space chain).
+// A row switched to native whose family has no engine-path draw here yet still goes to the translated route.
+static FamilyRow g_rows[Route_Count] = {
+    {Route_Legacy, "tile (menu path, no pass)", true},
+    {Route_Tile, "tile", true},
+    {Route_NoLight, "nolight", false},      // the native engine-path draw for NoLighting passes is not written
+    {Route_Lit, "lit", false},
+    {Route_Depth, "depth", false},
+    {Route_Land, "land", false},
+    {Route_Sky, "sky", false},
+    {Route_ImageSpace, "imagespace (menuBG)", true},
+    {Route_Translated, "translated", false},
+};
+const FamilyRow* FamilyRows() { return g_rows; }
+void SetFamilyNative(PassRoute r, bool native) { if (r < Route_Count && r != Route_Translated) g_rows[r].native = native; }
+static bool HasNativeDraw(PassRoute r) { return r == Route_Tile || r == Route_Legacy; }
 
 void NiDX9Renderer::Do_RenderGeometry(const void* geometry) {
     Renderer* r = R();
@@ -68,9 +75,9 @@ void NiDX9Renderer::Do_RenderGeometry(const void* geometry) {
     DrawStats& st = r->stats();
     st.engineDraws++;
     uint16_t passId = 0;
-    const uint8_t* rp = CurrentRenderPass(geometry, &passId);
+    CurrentRenderPass(geometry, &passId);
     PassInfo pi = RoutePass(passId);
-    if (!NativeFamilyEnabled(pi.route)) pi = {Route_Translated, 0};
+    if (pi.route >= Route_Count || !g_rows[pi.route].native || !HasNativeDraw(pi.route)) pi = {Route_Translated, 0};
     Renderer::GeomView g;
     if (!ReadGeometry(geometry, &g)) {
         const uint8_t* geo = (const uint8_t*)geometry;
@@ -85,18 +92,124 @@ void NiDX9Renderer::Do_RenderGeometry(const void* geometry) {
         if (!r->RenderGeometry(g)) { st.skipped[Skip_Submit]++; g_skipped++; return; }
         st.native[pi.route]++;
         return;
-    case Route_Lit: case Route_Depth: case Route_Land: case Route_Sky: case Route_NoLight: {
-        Renderer::WorldInputs in;
-        ReadWorldInputs(geometry, rp, pi, passId, &in);
-        if (!r->RenderWorld(g, in)) { st.skipped[Skip_Submit]++; g_skipped++; return; }
-        st.native[pi.route]++;
+    default: {
+        if (!r->translatedStore()) { st.skipped[Skip_NoFamily]++; g_skipped++; return; }
+        int vs = -1, ps = -1;
+        const uint8_t* pass = nullptr;
+        const DrawSkip why = TranslatedPrograms(geometry, &vs, &ps, &pass);
+        if (why) { st.skipped[why]++; g_skipped++; return; }
+        if (!r->TranslatedLoadable(vs) || !r->TranslatedLoadable(ps)) { st.skipped[Skip_NoDksh]++; g_skipped++; return; }
+        static TranslatedConstants c;
+        const uint32_t unmapped = TranslatedConstantsFor(geometry, pass, g, &c);
+        if (!r->RenderTranslated(g, vs, ps, c, passId)) { st.skipped[Skip_Submit]++; g_skipped++; return; }
+        st.translated++;
+        if (unmapped) st.translatedPartial++;
         return;
     }
-    default:
-        st.skipped[Skip_NoFamily]++;
-        g_skipped++;
-        return;
     }
+}
+
+// ---- translated programs and constants ------------------------------------------------------------------------------
+static int ProgramOf(const TranslatedStore* s, const uint8_t* obj) {
+    if (!obj) return -1;
+    for (uint32_t o = 0x08; o < 0x60; o += 4) {   // the D3D shader the hooked device created, held by the program
+        uint32_t v; memcpy(&v, obj + o, 4);
+        uint64_t h;
+        if (v && ShaderObjectHash((const void*)(g_guestBase + v), &h)) return s->Find(h);
+    }
+    uint32_t name; memcpy(&name, obj + 0x0C, 4);   // NiD3DShaderProgram name
+    return name ? s->FindName((const char*)(g_guestBase + name)) : -1;
+}
+
+DrawSkip TranslatedPrograms(const void* geometry, int* vs, int* ps, const uint8_t** passOut) {
+    const TranslatedStore* s = R() ? R()->translatedStore() : nullptr;
+    const uint8_t* geo = (const uint8_t*)geometry;
+    uint32_t a; memcpy(&a, geo + 0xC0, 4);
+    const uint8_t* shader = a ? (const uint8_t*)(g_guestBase + a) : nullptr;
+    if (!s || !shader) return Skip_NoEngineShader;
+    memcpy(&a, shader + 0x5C, 4);
+    const uint8_t* pass = a ? (const uint8_t*)(g_guestBase + a) : nullptr;
+    if (!pass) return Skip_NoEngineShader;
+    uint32_t v, p; memcpy(&v, pass + 0x5C, 4); memcpy(&p, pass + 0x44, 4);
+    if (!v || !p) return Skip_NoEngineShader;
+    *vs = ProgramOf(s, (const uint8_t*)(g_guestBase + v));
+    *ps = ProgramOf(s, (const uint8_t*)(g_guestBase + p));
+    *passOut = pass;
+    return *vs < 0 || *ps < 0 ? Skip_NoProgram : Skip_NotSkipped;
+}
+
+static void MulCM(const float* a, const float* b, float* o) {   // column-major o = a * b
+    for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++) { float s = 0; for (int k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; }
+}
+// a matrix into registers: "...Transpose" keys hold the rows of the column-vector matrix (dp4 with c0..c3 gives x..w),
+// the others its columns (Gamebryo's D3D row-vector matrix rows)
+static void PutMatrix(float (*c)[4], uint32_t reg, uint32_t count, const float* m, bool transpose) {
+    for (uint32_t i = 0; i < count && i < 4 && reg + i < 256; i++)
+        for (int k = 0; k < 4; k++) c[reg + i][k] = transpose ? m[k * 4 + i] : m[i * 4 + k];
+}
+static bool Ends(const char* s, const char* suf) {
+    const size_t n = strlen(s), m = strlen(suf);
+    return n >= m && !strcmp(s + n - m, suf);
+}
+
+static uint32_t EvalMap(const uint8_t* map, float (*c)[4], const float* world, const float* view, const float* proj,
+                        const float* eye) {
+    if (!map) return 0;
+    uint32_t base; memcpy(&base, map + 0x10, 4);
+    uint16_t maxSize; memcpy(&maxSize, map + 0x14, 2);
+    uint32_t unmapped = 0;
+    for (uint32_t i = 0; base && i < maxSize; i++) {
+        uint32_t ea; memcpy(&ea, (const uint8_t*)(g_guestBase + base) + 4 * i, 4);
+        if (!ea) continue;
+        const uint8_t* e = (const uint8_t*)(g_guestBase + ea);
+        uint32_t keyA, reg, count, size, data;
+        memcpy(&keyA, e + 0x0C, 4); memcpy(&reg, e + 0x1C, 4); memcpy(&count, e + 0x20, 4);
+        memcpy(&size, e + 0x28, 4); memcpy(&data, e + 0x30, 4);
+        if (reg >= 256) continue;
+        if (!count) count = 1;
+        if (data) {   // attribute / constant / global entry: its data source
+            uint32_t bytes = count * 16;
+            if (size && size < bytes) bytes = size;
+            if (bytes > (256 - reg) * 16) bytes = (256 - reg) * 16;
+            memcpy(c[reg], (const void*)(g_guestBase + data), bytes);
+            continue;
+        }
+        const char* key = keyA ? (const char*)(g_guestBase + keyA) : "";
+        const bool tr = Ends(key, "Transpose");
+        char k[64];
+        size_t kl = strlen(key) - (tr ? 9 : 0);
+        if (kl >= sizeof k) kl = sizeof k - 1;
+        memcpy(k, key, kl); k[kl] = 0;
+        float m[16], t[16];
+        if (!strcmp(k, "WorldViewProj") || !strcmp(k, "ModelViewProj")) { MulCM(proj, view, t); MulCM(t, world, m); }
+        else if (!strcmp(k, "World")) memcpy(m, world, 64);
+        else if (!strcmp(k, "View")) memcpy(m, view, 64);
+        else if (!strcmp(k, "Proj") || !strcmp(k, "Projection")) memcpy(m, proj, 64);
+        else if (!strcmp(k, "ViewProj")) MulCM(proj, view, m);
+        else if (!strcmp(k, "WorldView")) MulCM(view, world, m);
+        else if (!strcmp(k, "EyePos") || !strcmp(k, "EyePosition")) {
+            c[reg][0] = eye[0]; c[reg][1] = eye[1]; c[reg][2] = eye[2]; c[reg][3] = 1.0f;
+            continue;
+        } else { unmapped++; continue; }
+        PutMatrix(c, reg, count, m, tr);
+    }
+    return unmapped;
+}
+
+uint32_t TranslatedConstantsFor(const void*, const uint8_t* pass, const Renderer::GeomView& g, TranslatedConstants* c) {
+    *c = DeviceConstants();
+    float world[16];
+    Renderer::WorldMatrix(g, world);
+    Renderer* r = R();
+    uint32_t vm, pm; memcpy(&vm, pass + 0x48, 4); memcpy(&pm, pass + 0x34, 4);
+    return EvalMap(vm ? (const uint8_t*)(g_guestBase + vm) : nullptr, c->vsc, world, r->view(), r->proj(), r->eye()) +
+           EvalMap(pm ? (const uint8_t*)(g_guestBase + pm) : nullptr, c->psc, world, r->view(), r->proj(), r->eye());
+}
+
+bool HookRendererDevice(const void* renderer) {
+    uint32_t d; memcpy(&d, (const uint8_t*)renderer + 0x28C, 4);
+    return d && HookD3DDevice((void*)(g_guestBase + d));
 }
 
 // ---- render-state cache --------------------------------------------------------------------------------------
@@ -231,68 +344,6 @@ bool ReadGeometry(const void* geometry, Renderer::GeomView* out) {
     }
     *out = g;
     return true;
-}
-
-// ---- world-family inputs -------------------------------------------------------------------------------------------
-static NativeTexture* TextureOf(uint32_t niTexture) {   // NiTexture -> renderer data (+0x24) -> its NativeTexture
-    const uint8_t* tex = GP(niTexture);
-    return tex ? FindNativeTexture(GP(U32(tex, 0x24)), 0x80) : nullptr;
-}
-static void SetTex(Renderer::WorldInputs* in, int stage, NativeTexture* t) {
-    if (t) { if (t->dirty) MaterializeNativeTexture(t); in->tex[stage] = t->image; in->texFmt[stage] = t->d3dfmt; }
-}
-
-void ReadWorldInputs(const void* geometry, const uint8_t* rp, const PassInfo& pi, uint16_t passId, Renderer::WorldInputs* in) {
-    memset(in, 0, sizeof *in);
-    in->route = pi; in->pass = passId;
-    in->color[0] = in->color[1] = in->color[2] = in->color[3] = 1.0f;
-    in->specular[3] = 10.0f;
-    const uint8_t* geo = (const uint8_t*)geometry;
-    const uint8_t* sp = GP(U32(geo, 0xA8));      // the BSShaderProperty
-    float alpha = 1.0f, matAlpha = 1.0f;
-    if (sp) memcpy(&alpha, sp + 0x28, 4);         // BSShaderProperty alpha
-    const uint8_t* mp = GP(U32(geo, 0xA4));      // NiMaterialProperty: alpha +0x3C, glossiness +0x38
-    if (mp) { memcpy(&matAlpha, mp + 0x3C, 4); memcpy(&in->specular[3], mp + 0x38, 4); }
-    in->color[3] = alpha * matAlpha;
-    if (pi.route == Route_NoLight) {             // BSShaderNoLightingProperty: texture +0x68, emissive colour +0x78
-        if (sp) { SetTex(in, 0, TextureOf(U32(sp, 0x68))); memcpy(in->color, sp + 0x78, 16); in->color[3] *= alpha * matAlpha; }
-        return;
-    }
-    if (pi.route == Route_Sky) {
-        for (int i = 0; i < 3; i++) {
-            in->blend[i][0] = in->blend[i][1] = in->blend[i][2] = in->blend[i][3] = 1.0f;
-            if (g_skyColors) memcpy(in->blend[i], g_skyColors + 4 * i, 16);
-        }
-        return;   // the cloud texture: the state tracker's stage 0 (set by the sky shader's texture setup)
-    }
-    // BSShaderPPLightingProperty: texture slot arrays +0xB4 (slot 0 diffuse, slot 1 normal map; element = layer),
-    // specular colour +0x9C
-    if (sp) {
-        const uint8_t* s0 = GP(U32(sp, 0xB4));
-        const uint8_t* s1 = GP(U32(sp, 0xB8));
-        if (s0) SetTex(in, 0, TextureOf(U32(s0, 0)));
-        if (s1 && pi.route == Route_Land) SetTex(in, 4, TextureOf(U32(s1, 0)));
-        memcpy(in->specular, sp + 0x9C, 12);
-    }
-    // lights of the pass: RenderPass +9 count, +0xC ShadowSceneLight** (+0xF8 the NiLight: world translate +0x8C,
-    // effect type +0x9D (1 point, 2 directional), dimmer +0xC4, ambient +0xC8, diffuse +0xD4; NiDirectionalLight world
-    // direction +0xF0; NiPointLight radius +0xF0)
-    if (!rp) return;
-    const uint32_t n = rp[9] < 8 ? rp[9] : 8;
-    const uint8_t* list = GP(U32(rp, 0xC));
-    for (uint32_t i = 0; list && i < n; i++) {
-        const uint8_t* ssl = GP(U32(list, 4 * i));
-        const uint8_t* nl = ssl ? GP(U32(ssl, 0xF8)) : nullptr;
-        if (!nl) continue;
-        NxLight& L = in->lights[in->lightCount];
-        float dimmer, amb[3], diff[3];
-        memcpy(&dimmer, nl + 0xC4, 4); memcpy(amb, nl + 0xC8, 12); memcpy(diff, nl + 0xD4, 12);
-        for (int k = 0; k < 3; k++) L.color[k] = diff[k] * dimmer;
-        if (nl[0x9D] == 2) { memcpy(L.posRange, nl + 0xF0, 12); L.posRange[3] = 0; L.color[3] = 1.0f; }
-        else { memcpy(L.posRange, nl + 0x8C, 12); memcpy(&L.posRange[3], nl + 0xF0, 4); L.color[3] = 0; }
-        if (in->lightCount == 0) for (int k = 0; k < 3; k++) in->ambient[k] = amb[k] * dimmer;
-        in->lightCount++;
-    }
 }
 
 // ---- image space: the effect dispatch ----------------------------------------------------------------------------

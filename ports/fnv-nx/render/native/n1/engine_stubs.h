@@ -117,17 +117,30 @@ void BindPassGlobals(const uint32_t* passId, const uint32_t* renderPass);
 void BindImagePassGlobals();
 // The RenderPass of the draw of `geometry` (0 when none is current or it names another geometry) and its pass id.
 const uint8_t* CurrentRenderPass(const void* geometry, uint16_t* passId);
-// Which native families serve their passes (bit per PassRoute); the others go to the translated route. Default:
-// tile, nolight, image space (lit / depth / land / sky through the translated originals until they are checked).
-void SetNativeFamilies(uint32_t routeMask);
-uint32_t NativeFamilies();
-bool NativeFamilyEnabled(PassRoute r);
-// SkyShader's Color0-2 (3 x float4; the native build: the data image's 0x011ff910, bound by BindImagePassGlobals).
-void BindSkyColors(const float* color0);
-// What the replaced shader pipeline would have put in constants / texture stages for a world-family pass: textures
-// of the BSShader property, the RenderPass's lights, material / property colours (see engine_stubs.cpp).
-void ReadWorldInputs(const void* geometry, const uint8_t* renderPass, const PassInfo& pi, uint16_t passId,
-                     Renderer::WorldInputs* in);
+// The family dispatch table (engine_stubs.cpp): one row per PassRoute; native rows draw with their family, the
+// others with the translated originals. Defaults: tile and image space (menuBG) native, every world family translated.
+struct FamilyRow { PassRoute route; const char* family; bool native; };
+const FamilyRow* FamilyRows();                      // Route_Count rows, indexed by PassRoute
+void SetFamilyNative(PassRoute r, bool native);
+// ---- the translated path (engine_device.cpp, engine_stubs.cpp) ----
+// The engine's D3D9 device as the sink of program creation and direct constant writes (method-table hook; calls go
+// on to the device behind). The native boot calls HookRendererDevice(NiDX9Renderer*) (device at +0x28C) before the
+// renderer creates its shaders, or HookD3DDevice(device) right after CreateDevice.
+bool HookD3DDevice(void* device);
+bool HookRendererDevice(const void* niDX9Renderer);
+void* HookedD3DDevice();
+TranslatedConstants& DeviceConstants();                          // the register files the engine wrote so far
+void RegisterShaderObject(const void* d3dShader, uint64_t hash);  // what the hooked CreateVertex/PixelShader record
+bool ShaderObjectHash(const void* d3dShader, uint64_t* hash);
+// The translated programs of the geometry's current engine pass: its shader (NiGeometry +0xC0, a BSShader) ->
+// current NiD3DPass (+0x5C) -> VS object (+0x5C) / PS object (+0x44) -> the D3D shader the hooked device created
+// (found by scanning the program object), else the program's name (+0x0C). Returns the skip reason, 0 when found.
+DrawSkip TranslatedPrograms(const void* geometry, int* vs, int* ps, const uint8_t** pass);
+// The constant registers of a translated draw: the device's register files, then the pass's constant maps (VS map
+// NiD3DPass +0x48, PS map +0x34; entries in NiTArray +0x0C; entry key +0x0C, register +0x1C, count +0x20, data size
+// +0x28, data +0x30): data-backed entries copied, predefined matrices / eye position computed. Returns the number of
+// entries that could not be evaluated (0: complete).
+uint32_t TranslatedConstantsFor(const void* geometry, const uint8_t* pass, const Renderer::GeomView& g, TranslatedConstants* c);
 
 } // namespace engine
 } // namespace nx

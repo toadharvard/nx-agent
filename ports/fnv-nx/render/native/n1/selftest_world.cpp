@@ -82,7 +82,70 @@ struct World {
     uint32_t geo[32], rp[32];
     uint32_t imgMgr, effectList;
     void* tex[2];
+    uint32_t shader;    // the engine shader every geometry points at (BSShader -> NiD3DPass -> programs, maps)
 };
+
+// ---- a synthetic translated program pair (our own GLSL in the S6b layout contract, not a game program) --------------
+const char kTestVs[] =
+    "#version 450 core\n"
+    "layout(std140, binding = 2) uniform vs_driver { vec4 vs_drv_posfix; vec4 vs_drv_reserved[3]; };\n"
+    "layout(std140, binding = 0) uniform vs_cbuf_f { vec4 vs_uniforms_vec4[256]; };\n"
+    "layout(location = 0) in vec4 vs_v0;\n"
+    "layout(location = 4) in vec4 vs_v1;\n"
+    "layout(location = 0) out highp vec4 io_10_0;\n"
+    "void main()\n{\n"
+    "\tgl_Position = vec4(dot(vs_uniforms_vec4[0], vs_v0), dot(vs_uniforms_vec4[1], vs_v0), dot(vs_uniforms_vec4[2], vs_v0), dot(vs_uniforms_vec4[3], vs_v0));\n"
+    "\tio_10_0 = vs_v1 * vs_uniforms_vec4[4];\n"
+    "\tgl_Position.xy += vs_drv_posfix.xy * gl_Position.w;\n"
+    "\tgl_Position.y *= vs_drv_posfix.z;\n}\n";
+// reads a varying the VS does not write (location 3): the GL path pads the vertex program for the pair
+const char kTestPs[] =
+    "#version 450 core\n"
+    "layout(std140, binding = 2) uniform ps_driver { vec4 ps_drv_fogcolor; vec4 ps_drv_fog; ivec4 ps_drv_alpha; vec4 ps_drv_alpharef; vec4 ps_drv_texbem[16]; };\n"
+    "layout(std140, binding = 0) uniform ps_cbuf_f { vec4 ps_uniforms_vec4[256]; };\n"
+    "layout(std140, binding = 1) uniform ps_cbuf_ib { ivec4 ps_i[16]; uint ps_b[16]; };\n"
+    "layout(location = 0) in highp vec4 io_10_0;\n"
+    "layout(location = 3) in highp vec4 io_5_1;\n"
+    "layout(location = 0) out highp vec4 _gl_FragData_0;\n"
+    "void main()\n{\n"
+    "\tvec4 c = io_10_0 * ps_uniforms_vec4[0] + ps_uniforms_vec4[1] + io_5_1;\n"
+    "\tif (ps_b[0] != 0u) c.b += 0.25;\n"
+    "\t_gl_FragData_0 = c;\n}\n";
+const uint32_t kPsBytecode[2] = {0xFFFF0200u, 0x0000FFFFu};   // ps_2_0 + END: the hooked CreatePixelShader hashes it
+
+uint8_t g_nxsp[32 + 6 * 104 + 3 * 1024] __attribute__((aligned(256)));
+// the NXSP container of NX1's shaders.nxsp (translated.h): two "translated" rows (no DKSH: the GL reference only),
+// their "translated-glsl" rows and two "translated-name" rows
+uint32_t BuildNxsp() {
+    memset(g_nxsp, 0, sizeof g_nxsp);
+    const uint64_t h[2] = {0x1111111111111111ull, TranslatedStore::Hash(kPsBytecode, sizeof kPsBytecode)};
+    const char* src[2] = {kTestVs, kTestPs};
+    const char* names[2] = {"TESTVS.vso", "TESTPS.pso"};
+    const uint32_t n = 6, idx = 32, data = (idx + n * 104 + 255) & ~255u;
+    uint32_t o = data, row = 0;
+    auto put = [&](const char* name, const char* fam, const char* var, uint32_t stage, const void* blob, uint32_t size) {
+        uint8_t* e = g_nxsp + idx + 104 * row++;
+        strncpy((char*)e, name, 47); strncpy((char*)e + 48, fam, 23); memcpy(e + 72, var, strlen(var) < 16 ? strlen(var) : 16);
+        const uint32_t w[4] = {stage, size ? o : data, size, size ? TranslatedStore::Crc32(blob, size) : 0};
+        memcpy(e + 88, w, 16);
+        if (size) { memcpy(g_nxsp + o, blob, size); o += (size + 255) & ~255u; }
+    };
+    char hex[2][17];
+    for (int s = 0; s < 2; s++) snprintf(hex[s], 17, "%08x%08x", (unsigned)(h[s] >> 32), (unsigned)h[s]);
+    put(hex[0], "translated", "vs_2_0/0011", 0, nullptr, 0);
+    put(hex[1], "translated", "ps_2_0/0000", 1, nullptr, 0);
+    for (int s = 0; s < 2; s++) put(hex[s], "translated-glsl", "", (uint32_t)s, src[s], (uint32_t)strlen(src[s]) + 1);
+    for (int s = 0; s < 2; s++) put(names[s], "translated-name", hex[s], 0, nullptr, 0);
+    const uint32_t head[5] = {0x5053584Eu, 1, n, idx, data};   // "NXSP"
+    memcpy(g_nxsp, head, 20);
+    return o;
+}
+
+// a stand-in D3D9 device: every method returns S_OK; CreatePixelShader (106) hands out a token object
+int32_t DevOk() { return 0; }
+uint32_t g_psObject;
+int32_t DevCreatePs(void*, const uint32_t*, void** out) { *out = &g_psObject; return 0; }
+struct FakeDevice { const uintptr_t* vtbl; };
 
 void Build(World& w, C& c) {
     Arena& A = w.ar;
@@ -181,6 +244,38 @@ void Build(World& w, C& c) {
             w.rp[i] = r;
         }
     }
+    // the engine shader of the translated passes: BSShader +0x5C NiD3DPass {+0x34 PS constant map, +0x44 PS program,
+    // +0x48 VS constant map, +0x5C VS program}; VS program found by name (+0x0C), PS program by the D3D shader the
+    // hooked device created (held at +0x10); VS map: WorldViewProjTranspose (c0-c3, predefined) and a data entry c4
+    const uint32_t sh = A.Alloc(0x70), pass = A.Alloc(0x70), vsObj = A.Alloc(0x80), psObj = A.Alloc(0x80);
+    w.shader = sh;
+    A.P32(sh + 0x5C, A.G(pass));
+    A.P32(pass + 0x5C, A.G(vsObj)); A.P32(pass + 0x44, A.G(psObj));
+    const uint32_t vsName = A.Alloc(16);
+    memcpy(A.a + vsName, "TESTVS.vso", 11);
+    A.P32(vsObj + 0x0C, A.G(vsName));
+    A.P32(psObj + 0x10, engine::GuestAddress(&g_psObject));
+    auto map = [&](int n, const char* const* keys, const uint32_t* regs, const uint32_t* counts, const float (*data)[4]) {
+        const uint32_t m = A.Alloc(0x40), arr = A.Alloc(4 * n);
+        A.P32(m + 0x10, A.G(arr)); A.P16(m + 0x14, (uint16_t)n); A.P16(m + 0x16, (uint16_t)n);
+        for (int i = 0; i < n; i++) {
+            const uint32_t e = A.Alloc(0x38), k = A.Alloc(32);
+            memcpy(A.a + k, keys[i], strlen(keys[i]) + 1);
+            A.P32(e + 0x0C, A.G(k)); A.P32(e + 0x1C, regs[i]); A.P32(e + 0x20, counts[i]);
+            if (data[i][3] >= 0) { const uint32_t d = A.Alloc(16); A.PF(d, data[i], 4); A.P32(e + 0x28, 16); A.P32(e + 0x30, A.G(d)); }
+            A.P32(arr + 4 * i, A.G(e));
+        }
+        return m;
+    };
+    static const char* const vk[2] = {"WorldViewProjTranspose", "Color"};
+    static const uint32_t vr[2] = {0, 4}, vc[2] = {4, 1};
+    static const float vd[2][4] = {{0, 0, 0, -1}, {0.5f, 0.5f, 0.5f, 1}};
+    static const char* const pk[1] = {"Tint"};
+    static const uint32_t pr[1] = {0}, pc[1] = {1};
+    static const float pdd[1][4] = {{1, 1, 1, 1}};
+    A.P32(pass + 0x48, A.G(map(2, vk, vr, vc, vd)));
+    A.P32(pass + 0x34, A.G(map(1, pk, pr, pc, pdd)));
+    for (int i = 0; i < kNumCells; i++) A.P32(w.geo[i] + 0xC0, A.G(sh));
     // ImageSpaceManager (+0x08 the effect array) with three effects that have no native family
     w.imgMgr = A.Alloc(0x40); w.effectList = A.Alloc(4 * 8);
     A.P32(w.imgMgr + 0x08, A.G(w.effectList));
@@ -196,7 +291,7 @@ void Report(C& c, const DrawStats& s, const char* label) {
                   (unsigned)s.translatedPartial, (unsigned)s.misrendered, (unsigned)s.Skipped());
     for (int i = 1; i < Skip_Count; i++)
         if (s.skipped[i]) n += snprintf(b + n, sizeof b - n, "%s %u ", SkipName((DrawSkip)i), (unsigned)s.skipped[i]);
-    snprintf(b + n, sizeof b - n, ")\n");
+    snprintf(b + n, sizeof b - n, "), runtime compiles %u\n", (unsigned)s.runtimeCompiles);
     c.Info(b);
 }
 }  // namespace
@@ -213,11 +308,8 @@ int n1_selftest_world(Backend* be, Renderer& r, uint32_t back, char* log, uint32
     c.Check(w.ar.top <= w.ar.size, "world: arena");
     static uint32_t passId, renderPass;
     engine::BindPassGlobals(&passId, &renderPass);
-    const uint32_t routes0 = engine::NativeFamilies();
     engine::NiDX9Renderer* eng = (engine::NiDX9Renderer*)&r;
     engine::ImageSpaceManager* ism = (engine::ImageSpaceManager*)(w.ar.a + w.imgMgr);
-    static const float sky[12] = {0.2f, 0.4f, 0.6f, 1, 0, 1, 0, 1, 0, 0, 1, 1};   // SkyShader Color0-2
-    engine::BindSkyColors(sky);
     auto frame = [&]() {
         r.state().Reset();
         r.SetBackgroundColor(0, 0, 1, 1);
@@ -233,58 +325,76 @@ int n1_selftest_world(Backend* be, Renderer& r, uint32_t back, char* log, uint32
         c.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame(), "world: end");
         return r.lastFrameStats();
     };
-    // the default routing: lit / depth / land / sky passes go to the translated route
+    // without a translated store: the translated route has nothing to draw with
+    const DrawStats sNo = frame();
+    Report(c, sNo, "world frame (default routes, no translated store)");
+    c.Check(sNo.Native() == 2 && sNo.skipped[Skip_NoFamily] == (uint32_t)(kNumCells - 3), "world: no store -> skipped",
+            (int)sNo.skipped[Skip_NoFamily]);
+    // the translated path: the synthetic NXSP, a stand-in device hooked for program creation and constants
+    static TranslatedStore store;
+    c.Check(store.Load(g_nxsp, BuildNxsp()) && store.count() == 2 && store.FindName("TESTVS.vso") >= 0,
+            "translated: NXSP load");
+    static uintptr_t devTable[120];
+    for (int i = 0; i < 120; i++) devTable[i] = (uintptr_t)&DevOk;
+    devTable[106] = (uintptr_t)&DevCreatePs;
+    static FakeDevice dev = {devTable};
+    c.Check(engine::HookD3DDevice(&dev) && dev.vtbl != devTable, "translated: device hooked");
+    typedef int32_t (*CreateFn)(void*, const uint32_t*, void**);
+    typedef int32_t (*ConstFn)(void*, uint32_t, const void*, uint32_t);
+    void* psh = nullptr;
+    c.Check(((CreateFn)dev.vtbl[106])(&dev, kPsBytecode, &psh) == 0 && psh == &g_psObject, "translated: CreatePixelShader through the hook");
+    const float tint[4] = {0, 0.25f, 0, 0};
+    const uint32_t bTrue = 1;
+    ((ConstFn)dev.vtbl[109])(&dev, 1, tint, 1);   // SetPixelShaderConstantF(1)
+    ((ConstFn)dev.vtbl[113])(&dev, 0, &bTrue, 1);  // SetPixelShaderConstantB(0)
+    c.Check(engine::DeviceConstants().psc[1][1] == 0.25f && engine::DeviceConstants().psb[0] == 1,
+            "translated: the device's register files recorded");
+    r.SetTranslatedStore(&store);
     const DrawStats s0 = frame();
     Report(c, s0, "world frame (default routes)");
-    c.Check(s0.Native() == 4 && s0.native[Route_NoLight] == 2 && s0.translated + s0.skipped[Skip_NoFamily] +
-            s0.skipped[Skip_NoProgram] + s0.skipped[Skip_NoEngineShader] == (uint32_t)(kNumCells - 5),
-            "world (default): native tile + nolight, the rest translated", (int)s0.Native());
-    engine::SetNativeFamilies(~0u);   // the hand-written world families too
-    const DrawStats s = frame();
-    Report(c, s, "world frame (all native families)");
-    c.Check(s.engineDraws == (uint32_t)(kNumCells + kEffects), "world: every engine draw counted", (int)s.engineDraws);
-    c.Check(s.Native() + s.translated + s.misrendered + s.Skipped() == s.engineDraws, "world: counters add up");
-    // native families: lit 3, land 1, sky 2, depth 3, nolight 2, tile 1 + the menu path; the skinned lit pass and
-    // the passes without a native family are skipped (no translated path yet), as are the image-space effects
-    c.Check(s.native[Route_Lit] == 3 && s.native[Route_Land] == 1 && s.native[Route_Sky] == 2 &&
-            s.native[Route_Depth] == 3 && s.native[Route_NoLight] == 2 && s.native[Route_Tile] == 1 &&
-            s.native[Route_Legacy] == 1, "world: native routes", (int)s.Native());
-    c.Check(s.misrendered == 0 && s.skipped[Skip_Skinned] == 1 && s.skipped[Skip_NoFamily] == 14 &&
-            s.skipped[Skip_ImageSpace] == (uint32_t)kEffects, "world: misrendered / skipped", (int)s.misrendered,
-            (int)s.Skipped());
-    // pixels: one cell per draw (clear blue)
-    static uint8_t img[W * H * 4];
-    NxReadback rb;
-    memset(&rb, 0, sizeof rb);
-    rb.image = back; rb.w = W; rb.h = H; rb.dst = FNVNX_ADDR_(img); rb.dst_size = sizeof img;
-    c.Check(be->Readback(rb), "world: readback");
-    auto px = [&](int cell) { return img + 4 * (((cell / kCols) * kCell + 8) * W + (cell % kCols) * kCell + 8); };
-    auto near = [&](const uint8_t* p, int r, int g, int b) {
-        return abs(p[0] - r) <= 2 && abs(p[1] - g) <= 2 && abs(p[2] - b) <= 2;
-    };
-    const uint8_t* p = px(0);
-    c.Check(near(p, 255, 153, 89), "lit (3XLIGHTING): white x (ambient 0.1 + sun (1, .5, .25))", p[1], p[2]);
-    const uint8_t* q = px(1);
-    c.Check(q[1] > p[1] + 20 && q[2] > p[2] + 20, "lit_spec (3XLIGHTING_Spc): specular on top", q[1], q[2]);
-    p = px(2); c.Check(near(p, 255, 0, 0), "lit_vc (3XLIGHTING_Vc): vertex colour red", p[1], p[2]);
-    p = px(3); c.Check(near(p, 255, 0, 0), "land_lit (LANDAD): base x vc x (N.L sun + ambient)", p[0], p[1]);
-    p = px(4); c.Check(near(p, 51, 102, 153), "sky (SKY): Color0 by the vertex colour's red weight", p[0], p[2]);
-    p = px(5); c.Check(near(p, 255, 255, 255), "sky_clouds (SKY_CLOUDS): stage-0 texture over the gradient", p[0], p[2]);
-    p = px(6); c.Check(near(p, 0, 0, 0), "depth_out (DEPTHMAP): z/w ~ 0 in screen space", p[0], p[2]);
-    p = px(7); q = px(8);
-    c.Check(near(p, 0, 0, 255) && near(q, 0, 0, 255), "depth (ZONLY, ZONLY_At): no colour written", p[2], q[2]);
-    p = px(9); c.Check(near(p, 255, 255, 255), "nolight_tex (NOLIGHTING): texture x emissive", p[0], p[1]);
-    p = px(10); c.Check(near(p, 255, 0, 0), "nolight_vc (NOLIGHTING_VC): vertex colour x emissive", p[1], p[2]);
-    p = px(11); q = px(12);
-    c.Check(near(p, 255, 255, 255) && near(q, 255, 255, 255), "tile (TILE) and the menu path", p[2], q[2]);
-    p = px(13); c.Check(near(p, 0, 0, 255), "skinned: skipped", p[0], p[2]);
-    int untouched = 0;
-    for (int i = 14; i < kNumCells; i++) untouched += near(px(i), 0, 0, 255);
-    c.Check(untouched == kNumCells - 14, "passes without a native family: not drawn", untouched);
+    c.Check(s0.engineDraws == (uint32_t)(kNumCells + kEffects) &&
+            s0.Native() + s0.translated + s0.misrendered + s0.Skipped() == s0.engineDraws, "world: every draw counted once");
+    c.Check(s0.Native() == 2 && s0.translated == (uint32_t)(kNumCells - 3) && s0.misrendered == 0 &&
+            s0.translatedPartial == 0 && s0.Skipped() == 1u + kEffects, "world (default): tile native, every other pass translated",
+            (int)s0.translated, (int)s0.Skipped());
+    {
+        static uint8_t img0[W * H * 4];
+        NxReadback rb0;
+        memset(&rb0, 0, sizeof rb0);
+        rb0.image = back; rb0.w = W; rb0.h = H; rb0.dst = FNVNX_ADDR_(img0); rb0.dst_size = sizeof img0;
+        c.Check(be->Readback(rb0), "translated: readback");
+        auto px0 = [&](int cell) { return img0 + 4 * (((cell / kCols) * kCell + 8) * W + (cell % kCols) * kCell + 8); };
+        // VS: WVP x position, colour = vertex colour (white without) x c4 (0.5); PS: x c0 (1) + c1 (0, .25, 0) + the
+        // padded varying (0), b0 -> blue + .25
+        int good = 0;
+        for (int i = 0; i < kNumCells; i++) {
+            const PassInfo pi = RoutePass(kCells[i].pass);
+            if (pi.route == Route_Tile || pi.route == Route_Legacy || (kCells[i].flags & Q_SKIN)) continue;
+            const uint8_t* p = px0(i);
+            const bool vc = (kCells[i].flags & Q_VC) != 0;
+            const int er = 128, eg = vc ? 64 : 191, eb = vc ? 64 : 191;
+            good += abs(p[0] - er) <= 2 && abs(p[1] - eg) <= 2 && abs(p[2] - eb) <= 2;
+        }
+        c.Check(good == kNumCells - 3, "translated: every translated cell = vertex colour x c4 x c0 + c1 (+ b0)", good);
+        c.Check(r.translatedShaderLoads() == 2, "translated: one VS (padded for the pair) + one PS loaded", (int)r.translatedShaderLoads());
+    }
+    // the tile family against the translated route in the same frame: tile cells white
+    {
+        static uint8_t img1[W * H * 4];
+        NxReadback rb1;
+        memset(&rb1, 0, sizeof rb1);
+        rb1.image = back; rb1.w = W; rb1.h = H; rb1.dst = FNVNX_ADDR_(img1); rb1.dst_size = sizeof img1;
+        c.Check(be->Readback(rb1), "world: readback");
+        const uint8_t* t0 = img1 + 4 * ((1 * kCell + 8) * W + 3 * kCell + 8);   // cell 11 (TILE), row 1 col 3
+        const uint8_t* t1 = img1 + 4 * ((1 * kCell + 8) * W + 4 * kCell + 8);   // cell 12 (no pass)
+        const uint8_t* sk = img1 + 4 * ((1 * kCell + 8) * W + 5 * kCell + 8);   // cell 13 (skinned)
+        c.Check(t0[0] == 255 && t0[1] == 255 && t0[2] == 255 && t1[0] == 255 && t1[2] == 255,
+                "world: tile cells drawn by the tile family", t0[1], t1[1]);
+        c.Check(sk[0] == 0 && sk[2] == 255, "world: the skinned cell is skipped", sk[0], sk[2]);
+    }
     (void)be; (void)back;
     engine::BindPassGlobals(nullptr, nullptr);
-    engine::BindSkyColors(nullptr);
-    engine::SetNativeFamilies(routes0);
+    r.SetTranslatedStore(nullptr);
     *checks += c.checks;
     return c.fails;
 }
