@@ -447,7 +447,7 @@ def _rule_calls(d, rec=None):
                 if _in(int(a, 16), WINDOW):
                     # the link binds a call of an import to the api (fnvlink `import`), and the harness gives the
                     # native api symbol the address of its IAT slot (engine.iat_names): the same import is the
-                    # same call (S2c-abi: all 11 rows of reports/s13b-causes were VirtualAlloc/VirtualFree)
+                    # same call (S2c-abi: the 11 rows of reports/s13b-causes: VirtualAlloc, VirtualFree, EnterCriticalSection)
                     if iat_names().get(int(a, 16)) == x[4:]:
                         return 'runtime-equiv'
                     return 'import-slot-called'
