@@ -946,8 +946,8 @@ def r_image_statics(path, text, stats):
 # end is unreachable it is dead code, where it is reached the game stops there with a trap instead of executing the
 # next function. (What MSVC returned there has to be read from the x86 code per site; S1b patches can replace a trap.)
 
-FALL_SKIP_RET = re.compile(r'^(?:(?:FNVNX_KEEP|inline|static|virtual|explicit|extern|constexpr|__forceinline|'
-                           r'__inline|friend)\s+|extern\s+"C\+?\+?"\s*|template\s*<[^{};]*>\s*)+')
+FALL_SKIP_RET = re.compile(r'^(?:extern\s*"C\+?\+?"\s*|(?:FNVNX_KEEP|inline|static|virtual|explicit|extern|constexpr|'
+                           r'__forceinline|__inline|friend)\s+|template\s*<[^{};]*>\s*)+')
 FALL_DECLARATOR = re.compile(r'((?:::)?(?:[A-Za-z_]\w*(?:\s*<[^<>;{}()]*(?:<[^<>;{}()]*>)?[^<>;{}()]*>)?\s*::\s*)*'
                              r'(?:~?[A-Za-z_]\w*|operator\s*(?:\(\)|[^\s(]+)))\s*\(')
 FALL_END = re.compile(r'(?:\breturn\b[^;]*;|\bthrow\b[^;]*;|__builtin_trap\s*\(\s*\)\s*;|__builtin_unreachable\s*\(\s*\)\s*;|'
@@ -975,6 +975,11 @@ def r_falloff_traps(path, text, stats):
         if not ret or re.search(r'(?:^|\W)(?:if|while|for|switch|catch|return|else|do|sizeof)$', ret): continue
         ret = re.sub(r'\b(?:__thiscall|__cdecl|__stdcall|__fastcall|__clrcall|WINAPI|CALLBACK|APIENTRY|NTAPI|WINAPIV|'
                      r'STDMETHODCALLTYPE|__declspec|FNV_\w+|FNVNX_\w+|FORCEINLINE|NOINLINE)\b', ' ', ret).strip()
+        # linkage / storage / function specifiers are not part of the return type: `extern "C" void f(void)` is void
+        # (S1b found FALL1 trapping all 10,957 XC1 dyninit/dynexit functions without this)
+        ret = re.sub(r'(?:\bextern\s*)?"C\+?\+?"|\b(?:extern|static|inline|virtual|explicit|friend|constexpr|'
+                     r'__inline|__forceinline)\b', ' ', ret)
+        ret = re.sub(r'\s+', ' ', ret).strip()
         if re.fullmatch(r'(?:const\s+|volatile\s+)*void', ret) or 'operator' in name and not ret: continue
         if re.search(r'[=,(]$', ret) or ret.endswith(('return', 'new', 'delete')): continue   # an expression
         if not re.search(r'[A-Za-z_]', ret): continue
