@@ -27,7 +27,7 @@ optimizers see.
 |---|---|---|
 | volatile access (VOLATILE-DECL, POLL-VOLATILE) | load of a naturally aligned 1/2/4/8-byte volatile scalar -> `__atomic_load_n(ACQUIRE)` = `ldar`/`ldarh`/`ldarb`; store -> `__atomic_store_n(RELEASE)` = `stlr*`. Bit-fields, packed or misaligned fields (ldar faults on misalignment) and aggregates keep their volatile access with `dmb ishld` after a load and `dmb ish` before a store. Automatic variables whose address is never taken are left alone. | plugin, GIMPLE pass after `cfg` |
 | plain access to an Interlocked operand (ATOMIC-USE, ATOMIC-PLAIN-STORE) | every field or variable whose address the unit passes to `Interlocked*` / `_Interlocked*` is ordered like a volatile in the whole unit (the plain `m_uiRefCount = 0` release). Operands that only another unit hands to Interlocked are reached with `-fplugin-arg-fnvnx_order-keys=<file>`, the gate's `clang/atomic.keys` (`field Class::member` / `var name`). | plugin (PRE_GENERICIZE discovery) |
-| Interlocked* (ATOMIC-USE) | x86 `lock` is a full barrier; a SEQ_CST `ldaxr/stlxr` loop is not (a later plain load can pass it). Each function now ends with `dmb ish`, as GCC's `__sync` builtins and Linux's fully ordered atomics do. | `platform/win32/sync.cpp` |
+| Interlocked* (ATOMIC-USE) | x86 `lock` is a full barrier; a SEQ_CST `ldaxr/stlxr` loop is not (a later plain load can pass it). Each function now ends with `dmb ish`, as GCC's `__sync` builtins and Linux's fully ordered atomics do; inline in fnvnx_win32.h. Refcount sites only: relaxed increment / release decrement (below, "Refcounts"). | `fnvnx_win32.h`, `platform/win32/sync.cpp`, plugin |
 | Interlocked on a misaligned operand (ATOMIC-UNALIGNED) | `lock` is atomic on a split operand; `ldaxr` faults. A misaligned operand goes through one global spin lock (one `tst` + branch on the aligned path). | `platform/win32/sync.cpp` |
 | `_ReadWriteBarrier`, `_ReadBarrier`, `_WriteBarrier`, `MemoryBarrier` (BARRIER) | x86 TSO at a compiler barrier: `dmb ish` (the cheapest single barrier that covers TSO; it also orders store -> load), `dmb ishld` (load -> load, load -> store), `dmb ishst` (store -> store); `MemoryBarrier` `dmb ish`; `YieldProcessor` `yield`. | `shim/include/fnvnx_compat.h` |
 | argument order (ORDER-ARGS) | before a body is lowered, every call or constructor call with a side-effecting argument and another non-constant one gets its scalar arguments as SAVE_EXPRs, and its first argument becomes the chain `(s_n, ..., s_2, s_1)`. GCC evaluates the first argument first, so all are evaluated last to first, while the call node itself (return slot, constructor) stays as it is. Calls with a side-effecting class-type argument are left alone (counted). `this` and the callee expression stay first (ORDER-OBJECT, below). | plugin (PRE_GENERICIZE) |
@@ -37,7 +37,48 @@ Modes for A/B measurements only (compile.sh `ORDER_MODE=off|tso`, `ORDER_ARGS=lt
 compiler-only barriers (`-DFNVNX_COMPILER_BARRIERS=1`). Neither is a valid build: the program's semantics are
 `ORDER_MODE=volatile ORDER_ARGS=rtl`, the defaults.
 
-### Why not full TSO
+### Refcounts: the one place the Interlocked semantics are weakened
+
+Interlocked* are inline now (`shim/include/fnvnx_win32.h`, gnu_inline: no call; an address taken is sync.cpp's
+out-of-line copy with the same semantics). Each one keeps x86 `lock` semantics: the SEQ_CST exclusive loop plus
+`dmb ish`, with misaligned operands sent to sync.cpp's split lock. The exception is the refcount pattern, which
+the plugin lowers the way MSVC's own ARM64 STL lowers `shared_ptr` (`_InterlockedIncrement_nf`, release
+decrement):
+
+| class | exact pattern (all must hold) | lowered to |
+|---|---|---|
+| refcount increment | `InterlockedIncrement(&obj.f)`, result discarded | `fnvnx_refcount_inc`: `ldxr/add/stxr`, no barrier |
+| refcount decrement | `InterlockedDecrement(&obj.f)`, result discarded or only tested against 0 (`== 0`, `!= 0`, `!`, `if (...)`) | `fnvnx_refcount_dec`: `ldxr/sub/stlxr`, then `dmb ishld` only when the count reached 0 |
+| everything else | locks, task queues, flags, CAS loops, Exchange*, counters, an increment whose value is used, a decrement compared with anything but 0, any operand that is not a refcount field | full x86 semantics, inline |
+
+The other conditions for a refcount site:
+* `f` is a field (not a global) named `m_uiRefCount`, `m_iRefCount`, `m_lRefCount`, `m_lRef`, `m_ref`, `refCount`,
+  `refs`, `references`, `referenceCount`, `ref_count`, `m_iObjectReferenceCount` or `m_lObjectReferenceCount`.
+* `f` is a 32-bit integer, not a bit-field, and aligned to 4 in a record that is not packed. The helpers still check
+  the runtime pointer, like the full ones.
+* The unit includes fnvnx_win32.h (the helpers are defined there).
+
+Generic names (`unk04`, `count`, `field_04`, `m_04`, `lValue`, `DAT_*`) stay full even where the code looks like a
+refcount: unknown means full. `-fplugin-arg-fnvnx_order-refcount=full` (compile.sh `ORDER_REFCOUNT=full`) turns
+the rule off.
+
+**Why it is safe:**
+* The increment is made by a thread that already holds a reference: through the object, or through a pointer it
+  obtained with its own synchronization. So the object cannot be freed under it, and the increment publishes
+  nothing.
+* Each decrement is a release. Every use of the object by the decrementing thread happens before its decrement, and
+  the decrements of one counter form a release sequence. The thread that reads 0 issues an acquire fence before it
+  deletes, so every other thread's uses happen before the deletion.
+* This is the C++11 `shared_ptr` argument, and the lowering MSVC itself chose for ARM64.
+
+**What it gives up:**
+* On x86, and with the full lowering, an IncRefCount was also a full barrier. Code that wrote an object and then
+  published its pointer with a *plain* store got release order for free from the refcount increment between the
+  two. With a relaxed increment it does not.
+* The engine's cross-thread publication goes through volatile pointers (stlr), queues and locks, all of which are
+  still ordered. Publication through a plain pointer was already a data race the A57 can break (POLL-PLAIN).
+* If a bug shows up that `ORDER_REFCOUNT=full` makes go away, this is the place to look.
+
 
 `mode=tso` makes every load to shared memory `ldar` and every store `stlr`: x86's model for every access, including
 the data races that TSO happened to make work. It is measured below. Its cost is far beyond the budget (45 fps,
@@ -112,6 +153,37 @@ Hot units only (40): the build is -0.02 % (12 ldar, 14 stlr, 4 dmb), and full TS
   * If it is too much, inline the Interlocked functions in fnvnx_win32.h; this saves the call, and the decomp's calls
     are real calls today.
   * Relaxing Increment to acq_rel would change semantics and needs a per-site argument.
+* **Refcount rule and inline Interlocked [M]** (the same 280 units). Compared are: the merged head c0d6c71, where
+  Interlocked* are out-of-line calls; inline with full semantics everywhere (`ORDER_REFCOUNT=full`); and the build
+  (inline plus the refcount rule).
+
+  | config | instructions | `bl Interlocked*` | dmb ish | dmb ishld | exclusives | vs head |
+  |---|---:|---:|---:|---:|---:|---:|
+  | head c0d6c71 | 276,667 | 520 | 86 | 0 | 0 | - |
+  | inline, full | 283,151 | 0 | 617 | 0 | 1,062 | +2.34 % |
+  | **inline + refcount rule** | 283,735 | 0 | 287 | 220 | 1,104 | +2.55 % |
+
+  Classes of the emitted Interlocked sites (each emitted site has one `dmb ish` when full, 86 of them are barriers
+  and fenced volatiles):
+  * 110 refcount increments relaxed;
+  * 220 refcount decrements release, whose `dmb ishld` runs only on the path to delete;
+  * 201 kept full: CompareExchange and Exchange loops, counters, `unk04`-style unnamed refcounts, increments whose
+    value is used.
+
+  At the source level (calls in function bodies, header inline members included) the pass classified 84 / 119 / 129.
+  The static size grows because an inline exclusive loop (about 8 instructions plus the misalignment check) replaces
+  a 1-instruction `bl`. Executed instructions per operation go down: no call, return or argument moves.
+* **Expected dynamic saving [E]** against head, per operation:
+  * every Interlocked* loses the call: about 6-8 instructions (bl, the function's own `mov`, `ret`, caller-saved
+    register traffic);
+  * a refcount increment or decrement also loses its `dmb ish`: an estimated 20-40 cycles when stores are in flight,
+    which is the common case right after the object writes around an IncRef / DecRef.
+
+  At J-0139's working figure of 100 k refcount operations per frame, that is about 100 k x (30 + 7) cycles = 3.7 M
+  cycles: ~3.6 ms per frame at 1.02 GHz, ~2.1 ms at 1.785 GHz. In other words, the 2.9 ms the trailing barrier was
+  estimated to add comes back, and the call overhead the old out-of-line build already paid goes too. The 201 full
+  sites keep their barrier (locks and queues are much rarer than refcounts). S15 owns the frame budget and the
+  on-device number (B1).
 * Full TSO at +21 % static instructions, nearly all of them ldar/stlr in place of ldr/str, is not affordable at the
   45 fps target. That is why `volatile` is the contract.
 * `-ftrivial-auto-var-init=zero` is not adopted: it costs +1.2 % (memsets of local buffers on every call) and does not

@@ -4,7 +4,9 @@
 // acquire, volatile write = release): MSVC x86 code never shows the "bad" outcome. Prints one line per test:
 //   <test> rounds=<n> bad=<count>
 // Freestanding: no libc; the threads come from raw clone() (litmus_rt.S).
+#include "fnvnx_win32.h"   // the inline Interlocked* and refcount helpers, as decomp units see them
 extern "C" {
+LONG fnvnx_interlocked_slow(int, volatile LONG *, LONG, LONG) { return 0; }   // operands here are aligned
 void v1_puts(const char *);
 int lt_spawn(void (*fn)(void *), void *arg, void *stack_top);
 void lt_exit_group(int);
@@ -19,7 +21,7 @@ static void put_num(const char *k, unsigned long v) {
   v1_puts(b + i);
 }
 
-enum { ROUNDS = 20000, NTHREADS = 4 };
+enum { ROUNDS = 20000, NTHREADS = 8 };
 alignas(16) static char g_stacks[NTHREADS][64 * 1024];
 static volatile int g_running;   // threads still running (decremented with an atomic, polled volatile)
 
@@ -143,10 +145,72 @@ static void lock_test() {
   v1_puts("\n");
 }
 
+// ---- REF: the engine's refcount (NiRefObject IncRefCount / DecRefCount, NiPointer). Every round the main thread
+// publishes a fresh object holding one reference; three workers take a reference from the published pointer
+// (relaxed increment under fnvnx_order's refcount rule), read the payload, write their mark into the object and drop
+// the reference (release decrement). Whoever drops the last reference "deletes": it must see every worker's mark
+// (acquire on the path to 0), exactly once per round, and no worker may see a deleted (poisoned) payload.
+struct RefObj {
+  unsigned int m_uiRefCount;
+  int payload;
+  int seen[3];
+  int dead;
+};
+static RefObj g_obj;
+static RefObj *volatile g_pub;
+static volatile int g_ref_round, g_deleted;
+static volatile LONG g_taken;   // not a refcount name: full x86 semantics
+static unsigned long g_ref_bad_use, g_ref_bad_delete, g_ref_deletes;
+
+__attribute__((noinline)) void ref_delete(RefObj *o, int k) {
+  for (int w = 0; w < 3; w++)
+    if (o->seen[w] != k) g_ref_bad_delete++;
+  if (o->dead == k) g_ref_bad_delete++;
+  o->dead = k;
+  o->payload = -1;
+  g_ref_deletes++;
+  g_deleted = k;
+}
+__attribute__((noinline)) void ref_inc(RefObj *o) { InterlockedIncrement((volatile LONG *)&o->m_uiRefCount); }
+__attribute__((noinline)) void ref_dec(RefObj *o, int k) {
+  if (InterlockedDecrement((volatile LONG *)&o->m_uiRefCount) == 0) ref_delete(o, k);
+}
+static void ref_worker(void *arg) {
+  int w = (int)(unsigned long)arg;
+  for (int k = 1; k <= ROUNDS / 4; k++) {
+    while (g_ref_round != k) {}
+    RefObj *o = g_pub;
+    ref_inc(o);
+    InterlockedIncrement(&g_taken);
+    if (o->payload != k) g_ref_bad_use++;
+    o->seen[w] = k;
+    ref_dec(o, k);
+  }
+  done();
+}
+static void ref_test() {
+  for (int w = 0; w < 3; w++) spawn(ref_worker, (void *)(unsigned long)w);
+  for (int k = 1; k <= ROUNDS / 4; k++) {
+    g_obj.payload = k;
+    g_obj.m_uiRefCount = 1;
+    g_taken = 0;
+    g_pub = &g_obj;
+    g_ref_round = k;                     // release: the object is initialized
+    while (g_taken != 3) {}              // every worker holds its own reference now
+    ref_dec(&g_obj, k);                  // the main thread's reference
+    while (g_deleted != k) {}
+  }
+  join();
+  put_num("ref rounds=", ROUNDS / 4);
+  put_num(" bad=", g_ref_bad_use + g_ref_bad_delete + (g_ref_deletes != ROUNDS / 4));
+  v1_puts("\n");
+}
+
 extern "C" int main() {
   mp1();
   mp2();
   lock_test();
+  ref_test();
   lt_exit_group(0);
   return 0;
 }

@@ -8,6 +8,7 @@
  * Waitable objects share one lock (w32_wait_lock). A waiting thread links itself to every object it waits on
  * and sleeps on its own condition variable; signalling an object wakes exactly the threads linked to it.
  */
+#define FNVNX_W32_IMPL 1   /* the out-of-line Interlocked* (fnvnx_win32.h has inline copies for everyone else) */
 #include "w32.h"
 
 #include <stdlib.h>
@@ -128,6 +129,18 @@ template <class T, class F> static T w32_split(volatile T *p, F f)
     return old;
 }
 #define W32_MISALIGNED(p) __builtin_expect(((uintptr_t)(p) & (sizeof(*(p)) - 1)) != 0, 0)
+
+/* misaligned operands of the inline Interlocked* of fnvnx_win32.h */
+extern "C" LONG fnvnx_interlocked_slow(int op, volatile LONG *p, LONG a, LONG b)
+{
+    switch (op) {
+    case 0: return w32_split(p, [](LONG v) { return v + 1; }) + 1;
+    case 1: return w32_split(p, [](LONG v) { return v - 1; }) - 1;
+    case 2: return w32_split(p, [a](LONG) { return a; });
+    case 3: return w32_split(p, [a](LONG o) { return o + a; });
+    default: return w32_split(p, [a, b](LONG o) { return o == b ? a : o; });
+    }
+}
 
 extern "C" LONG InterlockedIncrement(volatile LONG *p)
 {
