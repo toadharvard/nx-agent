@@ -27,6 +27,7 @@ selfcheck() {
 	if [ -x "${FNVNX_SHADERS_BUILD:-$ROOT/render/shaders/build/host}/s6b_asm" ]; then
 		echo "== shader paths (S6b tools): VS+PS+indexed scenes, the double-half-pixel trap, PS parity self-test (P1 known)"
 		py "$V/shaders/vsscenes.py" || bad=1
+		py "$V/shaders/vsscenes.py" --target s6ngl || bad=1
 		py "$V/shaders/vsscenes.py" --mutant vs_posfix_halfpixel > /dev/null || { echo "vs_posfix_halfpixel survived"; bad=1; }
 		py "$V/shaders/parity.py" --selftest | tail -1
 	else echo "== shader paths skipped: build S6b's tools (render/shaders/build.sh --tests, FNVNX_SHADERS_BUILD)"; fi

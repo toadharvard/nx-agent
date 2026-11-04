@@ -123,6 +123,8 @@ struct V6nTarget {
     NxD3D9Viewport vp; NxD3D9Rect sc; float proj[16];
     int err; uint32_t white;
     uint32_t vs_ps, ps, ps_version; float psc[256][4];   /* programmable PS: S6b's GLSL through S6n's shim */
+    char* ps_glsl; char* vs_glsl; float vsc[256][4];      /* programmable VS (S6b GLSL), compiled per PS */
+    struct { uint32_t vh, ph, id; } vsp[64]; int nvsp;
     V6nReadback rb;
 };
 static int g_live;
@@ -193,6 +195,15 @@ static V6nTarget* s_begin2(int w, int h, uint32_t rtf, uint32_t dsf, char* err, 
     L.attr[3].offset = 24; L.attr[3].type = NxAttr_Float32; L.attr[3].components = 2;
     uint32_t la[10]; la[0] = 1; memcpy(la + 1, &L, sizeof L);
     emit(t, NxOp_DefineLayout, la, 10);
+    /* layout 2 for S6b vertex shaders (fnvnx_dk_attrib_location: POSITION0 0, COLOR0/1 4/5, TEXCOORD0 6); the colours
+     * are uploaded byte-swapped to RGBA order (D3DCOLOR -> UBYTE4N, the adapter's job) */
+    memset(&L, 0, sizeof L); L.count = 7; L.stride = sizeof(V6nVertex);
+    for (int i = 0; i < 4; i++) { L.attr[i].offset = 0; L.attr[i].type = NxAttr_Float32; L.attr[i].components = i ? 1 : 3; }
+    L.attr[4].offset = 16; L.attr[4].type = NxAttr_Unorm8; L.attr[4].components = 4;
+    L.attr[5].offset = 20; L.attr[5].type = NxAttr_Unorm8; L.attr[5].components = 4;
+    L.attr[6].offset = 24; L.attr[6].type = NxAttr_Float32; L.attr[6].components = 2;
+    la[0] = 2; memcpy(la + 1, &L, sizeof L);
+    emit(t, NxOp_DefineLayout, la, 10);
     nx_d3d9_default_rs(t->rs);
     for (int s = 0; s < 2; s++) {
         nx_d3d9_default_samp(t->samp[s]);
@@ -208,6 +219,7 @@ static V6nTarget* s_begin2(int w, int h, uint32_t rtf, uint32_t dsf, char* err, 
 }
 static void s_end(V6nTarget* t) {
     nxgl_destroy(); g_live = 0;
+    free(t->ps_glsl); free(t->vs_glsl);
     free(t->block); free(t->rb.color); free(t->rb.depth); free(t->rb.stencil); free(t);
 }
 static void s_clear(V6nTarget* t, uint32_t flags, uint32_t color, float z, uint32_t s) {
@@ -267,15 +279,49 @@ static uint32_t nxprim(uint32_t p) {
 static uint32_t vcount(uint32_t p, uint32_t n) {
     switch (p) { case 1: return n; case 2: return 2 * n; case 3: return n + 1; case 4: return 3 * n; default: return n + 2; }
 }
+static uint32_t fnv1a(const char* s) { uint32_t h = 2166136261u; while (*s) h = (h ^ (uint8_t)*s++) * 16777619u; return h; }
+/* D3D9 lets a PS read a varying the VS does not write; GL refuses to link. Add the missing VS outputs, written as 0
+ * (same reconciliation as v6n_gl, RENDER_VERIFY §7 V1). */
+static uint32_t vs_for(V6nTarget* t) {
+    uint32_t vh = fnv1a(t->vs_glsl), ph = fnv1a(t->ps_glsl);
+    for (int i = 0; i < t->nvsp; i++) if (t->vsp[i].vh == vh && t->vsp[i].ph == ph) return t->vsp[i].id;
+    const char* vsrc = t->vs_glsl;
+    char decl[2048] = "", init[2048] = "";
+    for (const char* q = t->ps_glsl; (q = strstr(q, "layout(location = ")); q++) {
+        int loc = atoi(q + 18); const char* e = strchr(q, ';'); if (!e) break;
+        if (!strstr(q, ") in ") || strstr(q, ") in ") > e) continue;
+        char pat[64]; snprintf(pat, sizeof pat, "layout(location = %d) out", loc);
+        if (strstr(vsrc, pat)) continue;
+        snprintf(decl + strlen(decl), sizeof decl - strlen(decl), "layout(location = %d) out highp vec4 v6n_stub_%d;\n", loc, loc);
+        snprintf(init + strlen(init), sizeof init - strlen(init), "v6n_stub_%d = vec4(0.0);\n", loc);
+    }
+    const char* mainp = strstr(vsrc, "void main()"); const char* brace = mainp ? strchr(mainp, '{') : NULL;
+    const char* nl = strchr(vsrc, '\n');
+    size_t n = strlen(vsrc) + strlen(decl) + strlen(init) + 1; char* full = malloc(n);
+    if (brace && nl && nl < brace)
+        snprintf(full, n, "%.*s%s%.*s%s%s", (int)(nl - vsrc + 1), vsrc, decl, (int)(brace - nl), nl + 1, init, brace + 1);
+    else snprintf(full, n, "%s", vsrc);
+    uint32_t id = shader(t->api, NxStage_Vertex, full); free(full);
+    if (!id) { fprintf(stderr, "s6n-gl: vs: %s\n", nxgl_last_error()); return 0; }
+    if (t->nvsp < 64) { t->vsp[t->nvsp].vh = vh; t->vsp[t->nvsp].ph = ph; t->vsp[t->nvsp].id = id; t->nvsp++; }
+    return id;
+}
+static const uint16_t* g_idx; static int g_nidx;   /* set by s_drawidx around s_draw */
 static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6nVertex* v, int nv) {
     uint32_t n = vcount(prim, count);
-    if ((int)n > nv || t->err) return 0;
+    if ((g_idx ? (int)n > g_nidx : (int)n > nv) || t->err) return 0;
+    uint32_t vsid = 0;
+    if (t->vs_glsl) {
+        if (rhw) { fprintf(stderr, "s6n-gl: vertex shaders take XYZ vertices\n"); return 0; }
+        if (!t->ps) { fprintf(stderr, "s6n-gl: a vertex shader needs a pixel shader here\n"); return 0; }
+        if (!(vsid = vs_for(t))) return 0;
+    }
     NxD3D9Input in; memset(&in, 0, sizeof in);
     in.rs = t->rs; in.ps_version = t->ps ? t->ps_version : 0; in.depth_format = t->dsf; in.viewport = t->vp; in.scissor = t->sc;
     NxRenderState st; NxDynamicState dyn; uint32_t sb;
     nx_d3d9_translate(&in, &st, &dyn, &sb);
     uint32_t id = t->nextState++;
-    uint32_t ds[12] = {id, t->ps ? t->vs_ps : t->vs, t->ps ? t->ps : t->fs, 1};
+    uint32_t ds[12] = {id, vsid ? vsid : t->ps ? t->vs_ps : t->vs, t->ps ? t->ps : t->fs, vsid ? 2u : 1u};
     for (int i = 0; i < 4; i++) { ds[4 + 2 * i] = (uint32_t)st.w[i]; ds[5 + 2 * i] = (uint32_t)(st.w[i] >> 32); }
     if (!rhw || 1) emit(t, NxOp_DefineState, ds, 12);
     emit(t, NxOp_BindState, &id, 1);
@@ -310,7 +356,12 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     ep.fogParams[0] = dyn.fogEnd; ep.fogParams[1] = dyn.fogScale; ep.fogParams[2] = dyn.fogDensity; ep.fogParams[3] = dyn.alphaRef;
     ep.modes[0] = (sb >> NXSB_ALPHAFUNC) & 7; ep.modes[1] = fogmode; ep.modes[2] = (sb >> NXSB_ALPHATEST) & 1; ep.modes[3] = 0;
     uint32_t o;
-    o = put(t, &vu, sizeof vu); { uint32_t a[5] = {1, 0, t->mem, o, sizeof vu}; emit(t, NxOp_BindUbo, a, 5); }
+    if (vsid) {   /* S6b VS: vertex UBO 0 = c#, UBO 2 = driver posfix (0, 0, 1): no half-pixel shift (the +0.5 viewport
+                     does it), D3D y (S6n's shim negates gl_Position.y) */
+        float drv[16] = {0, 0, 1.0f, 0};
+        o = put(t, t->vsc, sizeof t->vsc); { uint32_t a[5] = {1, 0, t->mem, o, sizeof t->vsc}; emit(t, NxOp_BindUbo, a, 5); }
+        o = put(t, drv, sizeof drv); { uint32_t a[5] = {1, 2, t->mem, o, sizeof drv}; emit(t, NxOp_BindUbo, a, 5); }
+    } else { o = put(t, &vu, sizeof vu); uint32_t a[5] = {1, 0, t->mem, o, sizeof vu}; emit(t, NxOp_BindUbo, a, 5); }
     o = put(t, &fu, sizeof fu); { uint32_t a[5] = {2, 0, t->mem, o, sizeof fu}; emit(t, NxOp_BindUbo, a, 5); }
     o = put(t, &ep, sizeof ep); { uint32_t a[5] = {2, 2, t->mem, o, sizeof ep}; emit(t, NxOp_BindUbo, a, 5); }
     if (t->ps) {   /* layout contract: fragment UBO 0 = c#, UBO 2 = driver (fog mode/start/end/density, alpha test) */
@@ -324,7 +375,16 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
         o = put(t, t->psc, sizeof t->psc); { uint32_t a[5] = {2, 0, t->mem, o, sizeof t->psc}; emit(t, NxOp_BindUbo, a, 5); }
         o = put(t, &drv, sizeof drv); { uint32_t a[5] = {2, 2, t->mem, o, sizeof drv}; emit(t, NxOp_BindUbo, a, 5); }
     }
-    o = put(t, v, n * sizeof *v); { uint32_t a[3] = {t->mem, o, n * (uint32_t)sizeof *v}; emit(t, NxOp_BindVtx, a, 3); }
+    uint32_t nup = g_idx ? (uint32_t)nv : n;
+    o = put(t, v, nup * sizeof *v); { uint32_t a[3] = {t->mem, o, nup * (uint32_t)sizeof *v}; emit(t, NxOp_BindVtx, a, 3); }
+    if (vsid && !t->err) {   /* D3DCOLOR (B, G, R, A bytes) -> RGBA bytes for NxAttr_Unorm8 */
+        V6nVertex* u = (V6nVertex*)(t->block + o);
+        for (uint32_t i = 0; i < nup; i++) {
+            uint32_t* c[2] = {&u[i].diffuse, &u[i].specular};
+            for (int k = 0; k < 2; k++) { uint32_t x = *c[k]; *c[k] = (x & 0xFF00FF00u) | (x >> 16 & 0xFF) | (x & 0xFF) << 16; }
+        }
+    }
+    if (g_idx) { o = put(t, g_idx, n * 2); uint32_t a[4] = {t->mem, o, n * 2, 0}; emit(t, NxOp_BindIdx, a, 4); }
     uint32_t th[5] = {NxStage_Fragment, 0, 2, 0, 0};
     for (int s = 0; s < 2; s++) {
         uint32_t img = t->tex[s] ? t->tex[s] : t->white;
@@ -335,8 +395,8 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
         th[3 + s] = NX_TEX_HANDLE(img, smp);
     }
     emit(t, NxOp_BindTextures, th, 5);
-    uint32_t dr[5] = {nxprim(prim), n, 1, 0, 0};
-    emit(t, NxOp_Draw, dr, 5);
+    if (g_idx) { uint32_t dr[6] = {nxprim(prim), n, 1, 0, 0, 0}; emit(t, NxOp_DrawIndexed, dr, 6); }
+    else { uint32_t dr[5] = {nxprim(prim), n, 1, 0, 0}; emit(t, NxOp_Draw, dr, 5); }
     return !t->err;
 }
 static int s_readback(V6nTarget* t, V6nReadback* out) {
@@ -391,9 +451,23 @@ static int s_psh(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
     if (!t->vs_ps) t->vs_ps = shader(t->api, NxStage_Vertex, VS_PS);
     t->ps = shader(t->api, NxStage_Fragment, glsl);   /* nxgl_shim_glsl: version, bindings, block names */
     t->ps_version = bc[0] & 0xFFFF;
+    free(t->ps_glsl); t->ps_glsl = strdup(glsl);
     if (!t->vs_ps || !t->ps) { fprintf(stderr, "s6n-gl: %s\n", nxgl_last_error()); t->ps = 0; return 0; }
     return 1;
 }
 static void s_psc(V6nTarget* t, uint32_t reg, const float v[4]) { if (reg < 256) memcpy(t->psc[reg], v, 16); }
+static int s_vsh(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
+    free(t->vs_glsl); t->vs_glsl = NULL;
+    if (!bc) return 1;
+    if (!glsl || n < 1) return 0;
+    t->vs_glsl = strdup(glsl);
+    return 1;
+}
+static void s_vsc(V6nTarget* t, uint32_t reg, const float v[4]) { if (reg < 256) memcpy(t->vsc[reg], v, 16); }
+static int s_drawidx(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6nVertex* v, int nv, const uint16_t* idx, int ni) {
+    for (int i = 0; i < ni; i++) if (idx[i] >= nv) return 0;
+    g_idx = idx; g_nidx = ni; int r = s_draw(t, prim, count, rhw, v, nv); g_idx = NULL; g_nidx = 0;
+    return r;
+}
 const V6nOps v6n_target_ops = {"s6n-nxgl", s_begin, s_end, s_clear, s_rs, s_samp, s_tss, s_tex, s_notex, s_vp,
-                               s_scissor, s_proj, s_draw, s_readback, s_psh, s_psc, NULL, NULL, NULL};
+                               s_scissor, s_proj, s_draw, s_readback, s_psh, s_psc, s_vsh, s_vsc, s_drawidx};

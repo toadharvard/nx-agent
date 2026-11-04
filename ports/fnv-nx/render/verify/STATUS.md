@@ -62,6 +62,10 @@ tests/v6n/run.sh
 | C66 capture/replay | host: reproduced and PASS under mutation (5/5 corruptions flagged); guest half pending C62 |
 | C68 N1 camera | view/projection agree with the engine (0x00e6c780); **FAIL** -> defects `screen_space_halfpixel`, `camera_port_rounding` |
 | C69 N2 families | provisional semantics; not falsifiable without the SLS/SM3 shaders (parity harness ready, pass_space.tsv names the binaries per pass) |
+| C41, C42 (sRGB views; D3 no native D32) | consistent with Nine's tables (L8/A8L8 sRGB, L16/V8U8 none) and exercised by the conformance + fuzz sRGB restriction A2; D3 is a declared deviation, not falsified |
+| C70 ABI v3 read-back formats | PASS in use: `v6n_s6ngl` reads RGBA32F for float targets and Depth32F/Stencil8 for depth-stencil; 104/104 committed scenes and 380/400 fuzz cases match Nine (the rest classified, none a read-back error) |
+| C71 NxOp_Clear rectangles | PASS in use (V6n clears viewport ∩ scissor through it, as D3D9 Clear requires; trap `clear_ignores_scissor` matches); its sRGB rule differs from Nine -> defect `clear_srgb` |
+| C72 C pixel-shader harness | not used by V6n (V6n drives NxGpuApi through its own adapter); note: uv = x/W at integer centres puts point-sampled texel boundaries on pixel centres when the texture is W wide (same root as `screen_space_halfpixel`), so harness goldens are sensitive to sub-ulp filtering differences |
 | C61, C62 | pending: toolchain being built from source (render/native/env.sh) to run the ILP32 guest under Unicorn |
 
 ## Defects filed (tests/v6n/DEFECTS.md)
@@ -69,10 +73,12 @@ tests/v6n/run.sh
 - `y_fill_bias`: fixed by S6n, verified.
 - `screen_space_halfpixel`: open.
 - `camera_port_rounding`: open.
+- `clear_srgb`: open (low).
 
 ## Next
 - capture/replay (RENDER_VERIFY.md §6) once S6n's N1 capture is wired to the Nine path; shader draws with VS in
   the scene format (`vs`, `vb`, `ib`).
-- PS path for `v6n_s6ngl` (S6n's shader package families), float/depth read-back when S6n adds it.
+- PS path for `v6n_s6ngl`: done (S6b GLSL through shader_create); float/depth/stencil read-back: done (ABI v3).
+  VS + indexed draws on `v6n_s6ngl`: done (2 VS scenes match Nine on both targets).
 - Run parity.py on the player's .sdp packages.
 - Fuzz reproducers: classified (1 FF-model gap fixed, 4 implementation-defined in tests/v6n/repro/impl_defined).
