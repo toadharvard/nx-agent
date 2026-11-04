@@ -13,6 +13,10 @@
 # -march/-mtune as the guest build (toolchain/game/build.sh). No hardening defaults of the distro compiler: Ubuntu's
 # gcc enables -fstack-protector-strong and -fstack-clash-protection, and outline atomics call libgcc helpers
 # (S15, docs/PERF.md: -4.7 % instructions and -32 % GOT loads in hot units). None of them is a semantics flag.
+# -U_FORTIFY_SOURCE: Ubuntu's gcc predefines _FORTIFY_SOURCE=3, which turns memcpy/memset/sprintf/strcpy into the
+# glibc checking variants __*_chk (114 references in link c0d6c71516f6): they abort where MSVC 2008's CRT wrote past
+# an object the exe tolerated, the runtime would have to provide them, and the fuzz harness saw unbound names
+# (S1-fuzzB). Unlike the flags above it does change what a program does, towards the exe's behaviour.
 # -ffile-prefix-map: __FILE__ and other recorded paths do not depend on where the tree lives, so objects built on
 # different machines from the same tree are byte-identical (tools/farm/).
 # Objects are derived from the decomp: local output only, never committed.
@@ -24,7 +28,7 @@ CXX=${CXX:-aarch64-linux-gnu-g++}
 SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
 OPT=${OPT:--O2}
 FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -ffp-contract=off -fPIC -fpermissive -Werror=return-type -Wno-narrowing -fmax-errors=20
-       -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection -mno-outline-atomics
+       -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection -mno-outline-atomics -U_FORTIFY_SOURCE
        -ffile-prefix-map="$TREE"/= -ffile-prefix-map="$HERE"/=fnv-nx/ -ffile-prefix-map="$SSE2NEON"/=sse2neon/
        -include "$HERE/shim/include/fnvnx_compat.h" -I"$HERE/shim/include" -I"$SSE2NEON" -I"$TREE/include")
 # FTOI2 (S12, docs/STATIC_CHECKS.md): the fnvnx_ftoi plugin rewrites every float -> integer conversion into MSVC 2008's
