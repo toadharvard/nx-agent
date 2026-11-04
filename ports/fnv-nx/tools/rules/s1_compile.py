@@ -3735,6 +3735,57 @@ def r_restrict_reference_args(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- NEW5
+#
+# A class whose only scalar operator delete is the placement form `operator delete(void*, void*)` (the decomp's copies
+# of Havok's placement allocator and of Gamebryo's NiMemObject placement pair, without the usual forms) and that has a
+# virtual destructor. The deleting destructor needs a usual deallocation function: class-scope lookup finds only the
+# placement one, so GCC rejects the class (and every class derived from it: "no suitable 'operator delete'"). MSVC 2008
+# accepted it and called the global ::operator delete(void*) from the scalar deleting destructor (??_G of the
+# kd-tree raycaster helper at 0x00d979a0 is 31 bytes: vfptr store, `test [esp+8],1`, `push esi; call; add esp,4` -
+# a one-argument cdecl call, i.e. ??3@YAXPAX@Z, the class has no one-argument delete of its own). NEW5 puts
+# FNVNX_GLOBAL_DELETE first in such a class (with `public:` / `private:` around it in a `class`, so no member changes
+# its access): under GCC a static `operator delete(void*)` that forwards to ::operator delete, the function MSVC
+# called; under MSVC (tools/equiv) it is empty. Only classes without base classes (class-scope lookup then sees
+# nothing but the class's own placement form, so MSVC's choice is the global function, not a base's) and only the
+# scalar form (GCC needs the array form for `delete[]` expressions only, and the classes NEW5 edits declare none, so
+# `delete[]` on them already reaches the global one). Decomp-wide: 3 classes in 3 files (S1-refs).
+
+NEW5_DELETE = re.compile(r'\boperator\s+delete\s*(\[\s*\])?\s*\(([^;{}()]*)\)')
+NEW5_PLACEMENT = re.compile(r'^\s*void\s*\*\s*\w*\s*,\s*void\s*\*\s*\w*\s*$')
+NEW5_HEAD = re.compile(r'^(class|struct)\s+(?:\w+\s+)*?([A-Za-z_]\w*)\s*(:(?!:).*)?$', re.S)
+
+def r_placement_only_delete(path, text, stats):
+    """NEW5: FNVNX_GLOBAL_DELETE in a base-less class with a virtual destructor whose only scalar operator delete is
+    the placement form (void*, void*): the global ::operator delete(void*) its MSVC deleting destructor called."""
+    if 'operator delete' not in text or 'virtual' not in text: return text
+    spans, dels = None, {}
+    for m in NEW5_DELETE.finditer(text):
+        if m.group(1): continue
+        if spans is None: spans = prepare.scope_spans(text)
+        inner = None
+        for sp in spans:
+            if sp[0] > m.start(): break
+            if sp[0] < m.start() < sp[1]: inner = sp
+        if not inner or inner[2] != 'class': continue
+        dels.setdefault(inner, []).append(m.group(2))
+    inserts = []
+    for (o, c, k, h), params in dels.items():
+        if not all(NEW5_PLACEMENT.match(p) for p in params): continue
+        head = prepare.HEAD_DECOR.sub(' ', prepare.TEMPLATE_PREFIX.sub('', h)).strip()
+        hm = NEW5_HEAD.match(head)
+        if not hm or hm.group(3): continue                                   # no base classes
+        if not re.search(r'\bvirtual\s+~\s*%s\s*\(' % re.escape(hm.group(2)), text[o:c]): continue
+        inserts.append((o + 1, ' public: FNVNX_GLOBAL_DELETE private:' if hm.group(1) == 'class'
+                        else ' FNVNX_GLOBAL_DELETE'))
+    if not inserts: return text
+    out, pos = [], 0
+    for at, s in sorted(inserts):
+        out.append(text[pos:at]); out.append(s + ' /* fnv-nx NEW5 */'); pos = at
+        stats['NEW5'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
-              r_conditional_bool_gates, r_restrict_reference_args]
+              r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete]
 RULES += REFS_RULES

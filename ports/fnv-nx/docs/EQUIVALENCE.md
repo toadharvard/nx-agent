@@ -137,7 +137,7 @@ above (round 8).
 | `SSE1` `SSE2` `SSE3` `SSE4` | platform | the decomp's copies of MSVC's vector types / intrinsic prototypes give way to sse2neon's | - |
 | `DECL1` | neutral (claim) | the platform header declares the same CRT / Win32 function | the real MSVC CRT / SDK headers |
 | `GAME1` | neutral | renames a unit's own Win32-named game declaration and its call sites; the address binding is unchanged | `fnvnx_game_X` bound like the decomp's `X` |
-| `NEW1` | neutral | `unsigned int` is `size_t` on x86 (same type, same decoration) | as is |
+| `NEW1` | neutral | `unsigned int` / plain `unsigned` is `size_t` on x86 (same type, same decoration) | as is |
 | `UNIT1` | neutral | renames local types of tesdatahandler (same layout) | as is |
 | `KEEP1` | neutral | `__attribute__((used))`: emission only, no code meaning | `FNVNX_KEEP` empty: inert by construction |
 | `IFX1` | neutral (claim) | static resolution of `__if_exists`; MSVC evaluates the original itself | as is (strongest check) |
@@ -169,6 +169,7 @@ above (round 8).
 | `STD2` | neutral | a file-scope definition `R std::f(...)` whose recipe symbol is `?f@std@@...` (guardpackage.cpp's `double std::abs(float)`, 0x00408840) -> `R fnvnx_std_f(...)`; a POST hook renames the recipe symbol to `?fnvnx_std_f@@...` (S1-refs) | same body and signature, only the decorated name differs; callers bind the address; the Fingerprinter takes the renamed definition from the prepared recipe |
 | `COND1` | neutral | `c ? false : x.f(a)` (or `? true :`) where f returns a class with `G(bool)` and `operator bool()` and every same-arity declaration of f returns a bool-convertible class -> `c ? false : (bool)(x.f(a))` (hkgpmesh.cpp, S1-refs) | GCC finds both conversions and refuses; either one gives the same truth value, and the cast is the conversion the condition applies anyway |
 | `RSTR1` | neutral | a function-local `T* __restrict v` passed by name to a parameter the unit declares `const X&` -> `fnvnx_unrestrict(v)` (hkpsavecontactpointsutil.cpp, S1-refs) | `#define fnvnx_unrestrict(x) (x)` under MSVC (fnvnx_equiv_fi.h): the original text; under GCC the same object as an unqualified lvalue, so the reference binds the local as MSVC's did |
+| `NEW5` | neutral | a base-less class with a virtual destructor whose only scalar `operator delete` is the placement form `(void*, void*)` gets `FNVNX_GLOBAL_DELETE` first in its body: under GCC `static void operator delete(void*)` forwarding to `::operator delete`, which MSVC 2008's scalar deleting destructor called (0x00d979a0: a one-argument cdecl call, 31 bytes); GCC otherwise rejects the deleting destructor (S1-refs) | `FNVNX_GLOBAL_DELETE` empty (tools/equiv/msvc/fnvnx_equiv_fi.h): the decomp's class unchanged |
 | `TPL1` | neutral | `this->` in front of the members of a dependent base that a class template's member functions use by plain name | the members MSVC's (one-phase) lookup found |
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
