@@ -836,8 +836,20 @@ def main(argv):
     def peeks():
         out = []
         for spec in a.peek:
-            addr, _, n = spec.partition(":")
+            hops = len(spec) - len(spec.lstrip("*"))   # "**ADDR": follow two 32-bit pointers first
+            addr, _, n = spec.lstrip("*").partition(":")
             addr, n = int(addr, 0), int(n, 0) if n else 4
+            chain = []
+            try:
+                for _ in range(hops):
+                    (nxt,) = struct.unpack("<I", emu.uc.mem_read(addr, 4))
+                    chain.append(f"{addr:#010x} -> {nxt:#010x}")
+                    addr = nxt
+            except UcError as e:
+                out.append(f"peek\t{spec}\t{' / '.join(chain)} / unreadable ({e})")
+                continue
+            if chain:
+                out.append(f"peek\t{spec}\t{' / '.join(chain)}\t{emu.sym(addr)}")
             try:
                 b = bytes(emu.uc.mem_read(addr, n))
                 val = f"{int.from_bytes(b, 'little'):#x}" if n in (1, 2, 4, 8) else b.hex()
