@@ -17,6 +17,7 @@ Timeouts on either side are inconclusive (not a divergence), both sides faulting
 """
 import math
 import struct
+import time
 
 import libcalls
 import world
@@ -190,7 +191,10 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
 
 
 def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
-            garbage=None, codeptr=None):
+            garbage=None, codeptr=None, vcalls=None):
+    """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
+    the planted vftables; a differing call to neither is an indirect call through memory the case did not plant
+    (marked vcall='unplanted': an oracle-model gap, classify.py oracle-vcall)."""
     ex, ea = rx.error, ra.error
     if ex == 'timeout' or ea == 'timeout':
         return None
@@ -201,10 +205,13 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     fam = libcalls.FAMILY
     for i in range(min(len(tx), len(ta))):
         if tx[i] != ta[i] and not (tx[i] in fam and fam.get(tx[i]) == fam.get(ta[i])):
-            return dict(kind='call-target', index=i, x86=_hex(tx[i]), arm=_hex(ta[i]),
-                        x86_trace=[_hex(t) for t in tx[:i + 1]], arm_trace=[_hex(t) for t in ta[:i + 1]],
-                        x86_next=_hex(tx[i + 1]) if i + 1 < len(tx) else None,
-                        arm_next=_hex(ta[i + 1]) if i + 1 < len(ta) else None)
+            d = dict(kind='call-target', index=i, x86=_hex(tx[i]), arm=_hex(ta[i]),
+                     x86_trace=[_hex(t) for t in tx[:i + 1]], arm_trace=[_hex(t) for t in ta[:i + 1]],
+                     x86_next=_hex(tx[i + 1]) if i + 1 < len(tx) else None,
+                     arm_next=_hex(ta[i + 1]) if i + 1 < len(ta) else None)
+            if vcalls is not None and tx[i] >= 0 and tx[i] not in vcalls[0]:
+                d['vcall'] = 'planted' if tx[i] in vcalls[1] else 'unplanted'
+            return d
     if ex is not None:
         return None   # both faulted after the same calls
     if len(tx) != len(ta):
@@ -216,6 +223,10 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             if cv is None:
                 continue
             skip = dummies(cx.target) if dummies else ()
+            if (getattr(cv, 'name', '') or '').startswith(('??_G', '??_E')):
+                # an MSVC deleting destructor (this, flags) is the Itanium D0 / D1 natively (this only, D7): the
+                # flags are the variant, not an argument
+                skip = set(skip) | {v.label for v in cv.vals if v.label != 'this'}
             d = compare_args(cv, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
                              garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr)
             if d:
@@ -288,6 +299,10 @@ def _read(uc, w, a, n):
         return w.initial(a, n)
 
 
+class FunctionTimeout(Exception):
+    """The function's hard wall-clock bound (Pair.deadline, set by fuzz.fuzz_one) ran out."""
+
+
 class Pair:
     """Both engines for one function, reused across cases (world pages are dropped between runs)."""
 
@@ -296,12 +311,15 @@ class Pair:
         self.pinned = pinned
         self.xe = self.ae = None
         self.adapted = 0
+        self.deadline = None             # time.time() after which run() raises FunctionTimeout
 
     def run(self, case, max_steps=200000):
         """One case on both machines. Adaptive follow: when the k-th call goes to oracle function X on x86 but
         elsewhere natively and X's oracle code is available, the native side inlined X (the unit-wide preload test
         missed it because the unit calls X elsewhere): X joins the oracle code and the case runs again."""
         for _ in range(5):
+            if self.deadline is not None and time.time() > self.deadline:
+                raise FunctionTimeout()
             rx, ra, d = self._run(case, max_steps)
             if not d or d['kind'] not in ('call-target', 'call-count') or self.adapted >= 16:
                 return rx, ra, d
@@ -344,14 +362,29 @@ class Pair:
                 out.add(self._priv_syms[i][1])
         return out
 
+    def _vcalls(self):
+        """(direct call / jump targets of the oracle code, planted slots) for compare(); recomputed when adaptive
+        follow loads more oracle code."""
+        key = len(self.target.x86_code)
+        if getattr(self, '_vc_key', None) != key:
+            get = getattr(self.target, 'oracle_callees', None)
+            direct = set(self.target.x86_code)
+            if get:
+                for a in list(self.target.x86_code):
+                    direct |= get(a)
+            self._vc, self._vc_key = (direct, getattr(self.target, 'vt_slots', set())), key
+        return self._vc
+
     def _run(self, case, max_steps):
         w = world.World(case, self.target.x86_code, self.pinned)
+        ap = getattr(self.target, 'vt_ap', {})
+        w.a64_vptrs = {a: ap[v] for a, v in case.vptrs.items() if v in ap}
         placement = self.target.placement()
         if self.xe is None:
             self.xe = x86emu.X86Engine(w, self.target.x86_code, self.target.callee_info,
                                        getattr(self.target, 'follow', None), getattr(self.target, 'imports', None))
             self.ae = arm64emu.Arm64Engine(w, self.target.image, self.target.stub_orig,
-                                           getattr(self.target, 'vtables', None))
+                                           getattr(self.target, 'vtables', None), getattr(self.target, 'vt_mem', None))
         else:
             self.xe.reset(w)
             self.ae.reset(w)
@@ -367,7 +400,7 @@ class Pair:
                                 (lambda a, n: _read(self.xe.uc, w, a, n), lambda a, n: _read(self.ae.uc, w, a, n)),
                                 getattr(self.target, 'dummies', None),
                                 (world.garbage_words(case.seed, 'x86'), world.garbage_words(case.seed, 'a64')),
-                                self.ae._codeptr)
+                                self.ae._codeptr, self._vcalls())
         if d is not None and ra.private_reads:
             d['arm_private_reads'] = ra.private_reads
             names = self._private_names(ra.private_addrs)

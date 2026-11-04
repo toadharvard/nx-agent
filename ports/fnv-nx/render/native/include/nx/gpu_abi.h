@@ -23,7 +23,7 @@ extern "C" {
 
 #define FNVNX_ADDR_(p) ((uint64_t)(uintptr_t)(p))
 #define NXGPU_MAGIC      0x5550474eu /* "NGPU" */
-#define NXGPU_VERSION    2u
+#define NXGPU_VERSION    3u
 #define NXGPU_EXT_MODULE 10u         /* S5 ext_call module id (Nine is 9) */
 
 /* ---- memory blocks: caller-backed (4 KiB aligned, size multiple of 4 KiB) ----------------------------------- */
@@ -103,8 +103,22 @@ enum NxOp {
     NxOp_StencilRef,    /* ref (both faces; until the next BindState) */
     NxOp_BlendConst,    /* r, g, b, a (float bits) */
     NxOp_DepthBias,     /* units, slope, clamp (float bits; units as NxDynamicState.depthBiasUnits) */
+    NxOp_Clear,         /* flags (NxClear_*: 1 colour, 2 depth, 4 stencil, 8 sRGB), RGBA8 (R low), depth f32, stencil,
+                           x, y, w, h (pixels, top-left origin): clears that rectangle of the pass's targets; ignores
+                           the bound state's masks and scissor (v3). With NxClear_Srgb the colour goes through the
+                           target's sRGB view when it has one (D3D9 Clear under SRGBWRITEENABLE, Nine
+                           nine_context_clear_fb): 0x80 is stored as 188 */
+    NxOp_Marker,        /* tag (fourcc), a, b: a no-op for the backends, kept by captures (v3, additive). Tag
+                           NX_MARKER_PASS: a = the engine pass id of the draws that follow in this pass (0..758, the
+                           numbering of docs/RENDER_NATIVE.md §1.3; NX_PASS_UNKNOWN = none), b = NxFamilyId
+                           (nx/families.h). Emitted by the front before the first draw of each run of draws with the
+                           same (pass id, family); a pass with no tagged draw has no marker */
     NxOp_Count
 };
+#define NX_FOURCC(a, b, c, d) ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
+#define NX_MARKER_PASS  NX_FOURCC('P', 'A', 'S', 'S')
+#define NX_PASS_UNKNOWN 0xFFFFFFFFu
+enum NxClearFlags { NxClear_Color = 1, NxClear_Depth = 2, NxClear_Stencil = 4, NxClear_Srgb = 8 };
 enum NxPrim { NxPrim_Triangles = 0, NxPrim_TriStrip = 1, NxPrim_Lines = 2, NxPrim_LineStrip = 3, NxPrim_Points = 4,
               NxPrim_TriFan = 5 };
 
@@ -128,11 +142,20 @@ typedef struct NxSubmit {
     uint32_t pad;
 } NxSubmit;
 
-typedef struct NxReadback {     /* copies a colour image as RGBA8 bytes, row 0 = top, tightly packed */
+enum NxReadbackFormat {        /* what NxReadback writes per pixel (row 0 = top, tightly packed) */
+    NxRb_RGBA8 = 0,             /* colour images: 4 bytes R, G, B, A (unorm formats; float formats clamped) */
+    NxRb_RGBA32F = 1,           /* colour images: 4 floats (exact for float formats, unorm as c / max) */
+    NxRb_Depth32F = 2,          /* depth images: one float, the stored depth in [0,1] */
+    NxRb_Stencil8 = 3           /* depth-stencil images: one byte */
+};
+static inline uint32_t nx_readback_bpp(uint32_t f) { return f == NxRb_RGBA32F ? 16u : f == NxRb_Stencil8 ? 1u : 4u; }
+typedef struct NxReadback {
     uint32_t image;             /* image id, 0 = the swapchain image of the last frame */
     uint32_t x, y, w, h;
-    uint32_t dst_size;
+    uint32_t format;            /* NxReadbackFormat (v3) */
     uint64_t dst;
+    uint32_t dst_size;
+    uint32_t pad;
 } NxReadback;
 
 typedef struct NxGpuInfo {
@@ -180,7 +203,7 @@ NX_ASSERT_(sizeof(NxShaderDesc) == 32, "NxShaderDesc");
 NX_ASSERT_(sizeof(NxVtxLayout) == 36, "NxVtxLayout");
 NX_ASSERT_(sizeof(NxFrameStats) == 32, "NxFrameStats");
 NX_ASSERT_(sizeof(NxSubmit) == 32, "NxSubmit");
-NX_ASSERT_(sizeof(NxReadback) == 32, "NxReadback");
+NX_ASSERT_(sizeof(NxReadback) == 40, "NxReadback");
 NX_ASSERT_(sizeof(NxGpuInfo) == 32, "NxGpuInfo");
 NX_ASSERT_(sizeof(NxGpuApi) == 32 + 9 * 8, "NxGpuApi");
 

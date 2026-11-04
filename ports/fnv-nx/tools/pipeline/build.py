@@ -1672,6 +1672,27 @@ class Link(Stage):
             r.metric('link_vtable_host_probes', sum(int(x[2]) for x in mm))
         if rc:
             r.note('probe exited %d; resolve 2 uses the layouts and vtables it left' % rc)
+        # ---- S2d (tools/link/bodies.py): the C++ names resolve 1 left undefined, bound by address, called through
+        # the vptr or synthesized; resolve 2 reads out/bodies/ (FNVNX_NO_BODIES=1: left out)
+        if not os.environ.get('FNVNX_NO_BODIES'):
+            b.say('link: fnvlink bodies (declared-only functions; %d jobs)' % b.jobs)
+            t = time.time()
+            pr = b.cfg['MSVC_OBJS'] or b.cfg['MSVC_CODE']
+            # the player's exe (FNVNX_EXE, else a BOOT_IMAGE file): addresses of the calls the pristine objects make
+            exe = os.environ.get('FNVNX_EXE') or (b.cfg['BOOT_IMAGE'] if os.path.isfile(b.cfg['BOOT_IMAGE']) else '')
+            brc = b.sh([PY, '-I', fl, 'bodies', out, tree, '--jobs', str(b.jobs)]
+                       + (['--msvc-objs', os.path.abspath(pr)] if pr and pr != 'none' else [])
+                       + (['--exe', os.path.abspath(exe)] if exe else []), log, env=env)
+            r.metric('link_bodies_s', round(time.time() - t, 1))
+            bst = os.path.join(out, 'bodies', 'stats.txt')
+            if brc:
+                r.note('bodies exited %d; resolve 2 uses what it left' % brc)
+            elif os.path.exists(bst):
+                for line in open(bst):
+                    mm = re.match(r'(addr|exe-addr|vcall|msvc-empty|msvc-inline|special-default|missing)\s+(\d+)', line)
+                    if mm:
+                        r.metric('link_bodies_' + mm.group(1).replace('-', '_'), int(mm.group(2)))
+        # ---- end S2d
         resolve(2)
         shutil.rmtree(fixed, ignore_errors=True)
         b.say('link: fnvlink apply')
@@ -1986,7 +2007,8 @@ class Boot(Stage):
 
     def fingerprint(self, b):
         img, bc = b.cfg['BOOT_IMAGE'], b.cfg['BOOT_CENSUS']
-        return ['boot-v2', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
+        return ['boot-v3', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
+                                     'tests/s5/milestones.txt',
                                      'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
                 up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
                 synth_inputs_id(b) if img == 'auto' else '',
@@ -2007,7 +2029,8 @@ class Boot(Stage):
         shutil.rmtree(root, ignore_errors=True)
         os.makedirs(root)
         argv = [PY, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_guest.py'), nso, '--elf', elf, '--skip-faulting-init',
-                '--expect', 'fnvnx boot: calling WinMain', '--root', root, '--budget', b.cfg['EMU_BUDGET']]
+                '--expect', 'fnvnx boot: calling WinMain', '--root', root, '--budget', b.cfg['EMU_BUDGET'],
+                '--summary-json', os.path.join(d, 'boot_summary.json')]
         image = boot_image(b, r, d)
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'
         if image:
@@ -2029,6 +2052,17 @@ class Boot(Stage):
         r.metric('boot_init_skips', skipped)
         r.metric('boot_trap_keys', len(table))
         r.metric('boot_trap_hits', sum(int(t[2]) for t in table if len(t) > 2 and t[2].isdigit()))
+        # S5's boot summary (tests/s5/milestones.txt): the game milestones reached, the stop with the game's own
+        # messages (a boot that ends in ExitProcess has no STOPPED line)
+        try:
+            bs = json.load(open(os.path.join(d, 'boot_summary.json')))
+        except (OSError, ValueError):
+            bs = {}
+        r.metric('boot_milestones_reached', bs.get('reached'))
+        r['milestone'] = bs.get('milestone')
+        r['game_milestones'] = [[m.get('name'), bool(m.get('reached'))] for m in bs.get('milestones', [])]
+        if stop is None and bs.get('stop'):
+            stop = ' / '.join([bs['stop'].get('reason') or ''] + (bs['stop'].get('messages') or [])[:3])
         r['stop'] = stop
         # the fault that stopped the boot (the last trace block: pc, lr, call frames) and the skipped initializers
         # grouped by fault (tests/s5/emu_guest.py skip-summary lines)

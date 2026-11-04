@@ -1,0 +1,20 @@
+# P5: c[a0 + 20] past the CTAB array, landing on a def (c21) and on c19
+size 4 4
+rt A32B32G32R32F
+ds D24S8
+clear 7 0xff000000 1.0 0
+rs CULLMODE CULL_NONE
+vs @p5_relc
+ps @tc
+vsc 19 0.125 0.25 0.375 0.5
+vsc 20 9 9 9 9
+vsc 21 7 7 7 7
+vsc 22 5 5 5 5
+vdecl 0:0
+vg -1 1 0.5 1
+vg 1 1 0.5 1
+vg -1 -1 0.5 1
+vg 1 1 0.5 1
+vg 1 -1 0.5 1
+vg -1 -1 0.5 1
+drawg TRIANGLELIST 2

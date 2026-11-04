@@ -74,6 +74,13 @@ class Gen:
         self.r = random.Random(seed)
         self.bufs = [a for _, a in target.buffers()]
         self.globals = globals_
+        # objects with a class: {buffer address: [image vftables]} (vtmodel.py; empty without the player's exe)
+        place = dict(target.buffers())
+        self.vt = {place[lab]: vs for lab, vs in (getattr(target, 'vt_cands', None) or {}).items() if lab in place}
+
+    def _vptr(self, vs):
+        """The class's own vftable half of the time, else one of its derived classes."""
+        return vs[0] if len(vs) == 1 or self.r.random() < 0.5 else self.r.choice(vs)
 
     def fresh(self):
         r = self.r
@@ -88,6 +95,9 @@ class Gen:
             if r.random() < 0.7:
                 c.mem[g] = _rand_buffer(r, self.bufs, GLOBAL_LEN)
         c.rets = [_rets(r, self.bufs) for _ in range(8)]
+        for a, vs in self.vt.items():
+            if r.random() < 0.85:
+                c.vptrs[a] = self._vptr(vs)
         return c
 
     def mutate(self, c):
@@ -119,6 +129,12 @@ class Gen:
                 else:
                     b[i:i + 4] = struct.pack('<f', r.choice(FLT_EDGES))
                 c.mem[a] = bytes(b)
+            elif what < 0.85 and self.vt:
+                a = r.choice(list(self.vt))
+                if a in c.vptrs and r.random() < 0.2:
+                    del c.vptrs[a]
+                else:
+                    c.vptrs[a] = self._vptr(self.vt[a])
             elif what < 0.9:
                 k = r.randrange(8)
                 while len(c.rets) <= k:
@@ -162,6 +178,10 @@ def minimise(pair, case, kind, max_steps, budget=120, seconds=20.0):
         best = trial
     for a in list(best.mem):
         trial = best.copy(); del trial.mem[a]
+        if same(trial):
+            best = trial
+    for a in list(best.vptrs):
+        trial = best.copy(); del trial.vptrs[a]
         if same(trial):
             best = trial
     for lab in list(best.args):
@@ -213,12 +233,11 @@ def unit_cache():
 
 
 def fuzz_one(item, opts):
-    import classify
     src, addr = item['source'], int(item['address'], 16)
     out = dict(source=src, address=item['address'], symbol=item.get('symbol'), unit=item.get('unit'),
                size=item.get('size'), kind=item.get('kind'), tag=item.get('tag'), execs=0, divergences=[],
                status='ok')
-    t0 = time.time()
+    t_start = time.time()
     try:
         uc = unit_cache()
         pair, target = uc.pair(src, addr)
@@ -226,6 +245,37 @@ def fuzz_one(item, opts):
         out['status'] = 'setup:' + type(e).__name__
         out['error'] = str(e)[:300]
         return out
+    # the fuzzing budget (--time) starts after the setup (unit cache, unit image link: seconds on a fresh worker,
+    # which used up a whole 8 s budget before the first execution); the hard bound covers everything after it
+    t0 = time.time()
+    out['setup_seconds'] = round(t0 - t_start, 2)
+    import runner
+    pair.deadline = t0 + fn_limit(opts)
+    try:
+        return _fuzz_body(out, item, opts, uc, pair, target, src, addr, t0)
+    except runner.FunctionTimeout:
+        # the function's hard wall-clock bound ran out (minimisation / classification of a slow function): the
+        # executions done so far are its verdict; with none it is a harness failure (fuzzed again, last)
+        out['truncated'] = True
+        if not out['execs']:
+            out['status'] = 'run:slow'
+            out['error'] = 'function wall-clock bound %ss' % fn_limit(opts)
+        out['seconds'] = round(time.time() - t_start, 2)
+        return out
+    finally:
+        pair.deadline = None
+
+
+def fn_limit(opts):
+    """Hard wall-clock seconds of one function after its setup: fuzzing (--time), minimisation and classification
+    of up to three divergences (FNVNX_DF_FN_S overrides)."""
+    v = os.environ.get('FNVNX_DF_FN_S')
+    return float(v) if v else max(60.0, 6 * float(opts.get('time') or 8) + 30)
+
+
+def _fuzz_body(out, item, opts, uc, pair, target, src, addr, t0):
+    import classify
+    import runner
     out['conv'] = target.conv.describe()
     fn = uc.x86_unit(src, addr).funcs[addr]
     pinned = set(pair.pinned)
@@ -250,6 +300,9 @@ def fuzz_one(item, opts):
     iters, tlimit = opts['iters'], opts['time']
     zero = world.Case(seed=1)
     queue = [zero] + [gen.fresh() for _ in range(3)]
+    if gen.vt:                                   # the zero world with every object of its own class
+        zv = world.Case(seed=1, vptrs={a: vs[0] for a, vs in gen.vt.items()})
+        queue.insert(1, zv)
     i = 0
     while i < iters and (not tlimit or time.time() - t0 < tlimit):
         case = queue.pop() if queue else (gen.mutate(random.Random(i).choice(corpus)) if corpus and
@@ -257,6 +310,8 @@ def fuzz_one(item, opts):
         i += 1
         try:
             rx, ra, div = pair.run(case, opts['max_steps'])
+        except runner.FunctionTimeout:
+            raise
         except Exception as e:  # noqa: BLE001
             out['status'] = 'run:' + type(e).__name__
             out['error'] = (str(e) + traceback.format_exc()[-400:])[:800]
@@ -291,7 +346,7 @@ def fuzz_one(item, opts):
             break
     out['coverage'] = len(cov)
     out['corpus'] = len(corpus)
-    out['seconds'] = round(time.time() - t0, 2)
+    out['seconds'] = round(time.time() - t0 + out.get('setup_seconds', 0), 2)
     return out
 
 

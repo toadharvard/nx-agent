@@ -147,7 +147,7 @@ typedef struct _SYSTEMTIME {
 } SYSTEMTIME, *PSYSTEMTIME, *LPSYSTEMTIME;
 
 /* ---- synchronization (winbase.h); layout of the 32-bit SDK, 24 bytes */
-typedef struct _RTL_CRITICAL_SECTION_DEBUG *PRTL_CRITICAL_SECTION_DEBUG;
+typedef struct _RTL_CRITICAL_SECTION_DEBUG RTL_CRITICAL_SECTION_DEBUG, *PRTL_CRITICAL_SECTION_DEBUG;
 typedef struct _RTL_CRITICAL_SECTION {
     PRTL_CRITICAL_SECTION_DEBUG DebugInfo;
     LONG LockCount;
@@ -165,6 +165,13 @@ void LeaveCriticalSection(LPCRITICAL_SECTION);
 void DeleteCriticalSection(LPCRITICAL_SECTION);
 /* Interlocked*: C linkage as in the SDK (the platform layer defines them); prepare.py INTL1 drops the decomp's own
  * C++ inline fallbacks (include/layout_support.h, non-MSVC branch). */
+/* They are inline here (S12-ordering, docs/ORDERING.md "Interlocked"): x86 lock semantics, i.e. the SEQ_CST RMW plus
+ * a trailing dmb ish, with misaligned operands (a split lock on x86, a fault for ldaxr) handed to sync.cpp. gnu_inline:
+ * no copy is ever emitted, so an address taken (or a call the compiler does not inline) is sync.cpp's out-of-line
+ * definition with the same semantics. The fnvnx_order plugin lowers refcount sites to relaxed / release before this
+ * body is inlined. sync.cpp itself defines FNVNX_W32_IMPL and sees plain prototypes. */
+LONG fnvnx_interlocked_slow(int op, volatile LONG *p, LONG a, LONG b);  /* op 0 inc, 1 dec, 2 xchg, 3 xadd, 4 cmpxchg */
+#if defined(FNVNX_W32_IMPL) || !defined(__GNUC__)
 LONG InterlockedIncrement(volatile LONG *);
 LONG InterlockedDecrement(volatile LONG *);
 LONG InterlockedExchange(volatile LONG *, LONG);
@@ -172,6 +179,71 @@ LONG InterlockedExchangeAdd(volatile LONG *, LONG);
 LONG InterlockedCompareExchange(volatile LONG *, LONG, LONG);
 PVOID InterlockedCompareExchangePointer(PVOID volatile *, PVOID, PVOID);
 PVOID InterlockedExchangePointer(PVOID volatile *, PVOID);
+#else
+#define FNVNX_ILK inline __attribute__((gnu_inline, always_inline))
+#define FNVNX_ILK_MISALIGNED(p) __builtin_expect(((uintptr_t)(p) & (sizeof(*(p)) - 1)) != 0, 0)
+#define FNVNX_ILK_FULL(expr) ({ __typeof__(expr) r_ = (expr); __atomic_thread_fence(__ATOMIC_SEQ_CST); r_; })
+FNVNX_ILK LONG InterlockedIncrement(volatile LONG *p)
+{
+    if (FNVNX_ILK_MISALIGNED(p)) return fnvnx_interlocked_slow(0, p, 0, 0);
+    return FNVNX_ILK_FULL(__atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST));
+}
+FNVNX_ILK LONG InterlockedDecrement(volatile LONG *p)
+{
+    if (FNVNX_ILK_MISALIGNED(p)) return fnvnx_interlocked_slow(1, p, 0, 0);
+    return FNVNX_ILK_FULL(__atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST));
+}
+FNVNX_ILK LONG InterlockedExchange(volatile LONG *p, LONG v)
+{
+    if (FNVNX_ILK_MISALIGNED(p)) return fnvnx_interlocked_slow(2, p, v, 0);
+    return FNVNX_ILK_FULL(__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST));
+}
+FNVNX_ILK LONG InterlockedExchangeAdd(volatile LONG *p, LONG v)
+{
+    if (FNVNX_ILK_MISALIGNED(p)) return fnvnx_interlocked_slow(3, p, v, 0);
+    return FNVNX_ILK_FULL(__atomic_fetch_add(p, v, __ATOMIC_SEQ_CST));
+}
+FNVNX_ILK LONG InterlockedCompareExchange(volatile LONG *p, LONG xchg, LONG cmp)
+{
+    if (FNVNX_ILK_MISALIGNED(p)) return fnvnx_interlocked_slow(4, p, xchg, cmp);
+    __atomic_compare_exchange_n(p, &cmp, xchg, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    return cmp;
+}
+FNVNX_ILK PVOID InterlockedCompareExchangePointer(PVOID volatile *p, PVOID xchg, PVOID cmp)
+{
+    if (FNVNX_ILK_MISALIGNED(p))
+        return (PVOID)(uintptr_t)fnvnx_interlocked_slow(4, (volatile LONG *)p, (LONG)(intptr_t)xchg, (LONG)(intptr_t)cmp);
+    __atomic_compare_exchange_n(p, &cmp, xchg, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    return cmp;
+}
+FNVNX_ILK PVOID InterlockedExchangePointer(PVOID volatile *p, PVOID v)
+{
+    if (FNVNX_ILK_MISALIGNED(p))
+        return (PVOID)(uintptr_t)fnvnx_interlocked_slow(2, (volatile LONG *)p, (LONG)(intptr_t)v, 0);
+    return FNVNX_ILK_FULL(__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST));
+}
+#undef FNVNX_ILK_FULL
+/* Refcount sites (docs/ORDERING.md "Refcounts"): the fnvnx_order plugin redirects an InterlockedIncrement whose
+ * result is discarded, and an InterlockedDecrement whose result is discarded or only tested against 0, to these when
+ * the operand is a 32-bit refcount field by name (m_uiRefCount, refs, ...). What MSVC's own ARM64 STL does for
+ * shared_ptr: the increment of a reference one already holds needs no order; the decrement releases this thread's
+ * uses of the object, and the thread that reaches 0 acquires everyone's before it deletes. */
+#define FNVNX_RC_HELPER static inline __attribute__((always_inline))   /* a macro: prepare.py's name scan reads lines */
+FNVNX_RC_HELPER LONG fnvnx_refcount_inc(volatile LONG *p)
+{
+    if (FNVNX_ILK_MISALIGNED(p)) return fnvnx_interlocked_slow(0, p, 0, 0);
+    return __atomic_add_fetch(p, 1, __ATOMIC_RELAXED);
+}
+FNVNX_RC_HELPER LONG fnvnx_refcount_dec(volatile LONG *p)
+{
+    if (FNVNX_ILK_MISALIGNED(p)) return fnvnx_interlocked_slow(1, p, 0, 0);
+    LONG r = __atomic_sub_fetch(p, 1, __ATOMIC_RELEASE);
+    if (r == 0) __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    return r;
+}
+#endif
 HANDLE CreateEventA(void *, BOOL, BOOL, LPCSTR);
 HANDLE CreateMutexA(void *, BOOL, LPCSTR);
 HANDLE CreateSemaphoreA(void *, LONG, LONG, LPCSTR);

@@ -4,8 +4,8 @@ A cache directory has a campaign's layout: results.jsonl (one row per function, 
 from fnkeys.py and `commit`, the head it was fuzzed on) and div/<addr>-<n>.json (the minimised reproducers).
 
     fuzzcache.py todo  <cache> <targets.jsonl> <keys.json> <out todo.jsonl> <out counts.json>
-        targets whose key changed (first) or that the cache does not hold yet; targets without a key (no native
-        definition in the link) are counted, not fuzzed
+        targets whose key changed (first), that the cache does not hold yet, then earlier harness failures (last);
+        targets without a key (no native definition in the link) are counted, not fuzzed
     fuzzcache.py merge <cache> <campaign> <keys.json> <commit>
         the campaign's finished functions replace their cache rows and reproducers
     fuzzcache.py view  <cache> <targets.jsonl> <keys.json> <out dir>
@@ -18,6 +18,7 @@ from fnkeys.py and `commit`, the head it was fuzzed on) and div/<addr>-<n>.json 
         forget the campaign's harness crashes (crash:<exception> rows), so a rerun on the same head fuzzes them again
     fuzzcache.py seed  <cache> <targets.jsonl> <other cache>...
         rows of other caches (another shard count) for this shard's functions: their keys decide reuse later
+        (harness failures are not seeded)
 """
 import glob
 import json
@@ -60,7 +61,7 @@ def harness_failure(r):
 
 def cmd_todo(cache, targets, keys, out, counts_out):
     rows, keys = load_rows(cache), json.load(open(keys))
-    stale, new, c = [], [], dict(shard=0, no_key=0, up_to_date=0, changed=0, new=0)
+    stale, new, retry, c = [], [], [], dict(shard=0, no_key=0, up_to_date=0, changed=0, new=0, retry=0)
     for line in open(targets):
         t = json.loads(line)
         c['shard'] += 1
@@ -73,6 +74,9 @@ def cmd_todo(cache, targets, keys, out, counts_out):
         # signature or a missing definition) is not a verdict: fuzz it again
         if r is not None and r.get('key') == k and not harness_failure(r):
             c['up_to_date'] += 1
+        elif r is not None and harness_failure(r):
+            c['retry'] += 1
+            retry.append(t)
         elif r is not None:
             c['changed'] += 1
             stale.append(t)
@@ -80,7 +84,9 @@ def cmd_todo(cache, targets, keys, out, counts_out):
             c['new'] += 1
             new.append(t)
     with open(out, 'w') as f:
-        for t in stale + new:
+        # earlier harness failures (crash, run:timeout, run:slow) go last: a function that hung a chunk or ran out
+        # of its bound must not hold back the rest of the shard on every run (fz1, J-0138)
+        for t in stale + new + retry:
             f.write(json.dumps(t) + '\n')
     json.dump(c, open(counts_out, 'w'))
     print(c)
@@ -171,7 +177,9 @@ def cmd_seed(cache, targets, others):
     n = 0
     for o in others:
         for a, r in load_rows(o).items():
-            if a in want and a not in rows:
+            # a harness failure is no verdict to reuse (the 32-shard caches held only crash:ModuleNotFoundError
+            # rows of 9a0243c: seeding them made every new 26-shard cache start with a backlog of failures)
+            if a in want and a not in rows and not harness_failure(r):
                 rows[a] = r
                 for p in divs_of(o, a):
                     shutil.copy(p, os.path.join(cache, 'div', os.path.basename(p)))

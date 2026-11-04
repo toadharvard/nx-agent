@@ -10,11 +10,45 @@
 typedef struct HostThread {
     Thread t;
     u64 entry, arg;
+    u32 state;                       /* HT_* bits, atomic */
+    struct HostThread *next_zombie;  /* g_zombies */
 } HostThread;
+#define HT_STARTED 1u
+#define HT_FINISHED 2u               /* the guest entry returned: the thread is in libnx's threadExit */
+#define HT_DETACHED 4u               /* thread_free came before the end: the thread hands itself to the reaper */
+
+/* Detached threads. Win32 code closes a thread handle while the thread runs (CreateThread + CloseHandle), and a
+ * thread often drops the last reference itself (platform/win32 thread_trampoline), so thread_free can come before
+ * the end or from the thread itself. libnx's threadClose refuses a running thread (tls_array set: BadInput) and
+ * unmaps the stack of an ended one, so freeing the record there would leave threadExit writing freed memory (and
+ * leak the stack and handle). A thread whose record was freed early queues itself here as its last act; the next
+ * thread_create/thread_free waits for it (it is inside threadExit) and closes it. tests/s15/mtqemu checks the
+ * protocol on Linux (linhost.c does the same with its slots). */
+static HostThread *g_zombies;
+static Mutex g_zombie_lock;
+static void reap_zombies(void) {
+    mutexLock(&g_zombie_lock);
+    HostThread *z = g_zombies;
+    g_zombies = NULL;
+    mutexUnlock(&g_zombie_lock);
+    while (z) {
+        HostThread *n = z->next_zombie;
+        threadWaitForExit(&z->t);
+        threadClose(&z->t);
+        free(z);
+        z = n;
+    }
+}
 
 static void host_thread_main(void *p) {
     HostThread *h = (HostThread *)p;
     ((u64 (*)(u64))h->entry)(h->arg);
+    if (__atomic_fetch_or(&h->state, HT_FINISHED, __ATOMIC_ACQ_REL) & HT_DETACHED) {
+        mutexLock(&g_zombie_lock);
+        h->next_zombie = g_zombies;
+        g_zombies = h;
+        mutexUnlock(&g_zombie_lock);
+    }
 }
 
 #define win32_to_horizon_prio fnvnx_win32_to_horizon_prio
@@ -28,6 +62,7 @@ static void place_log(const char *what, Handle th, int role, int ideal, uint32_t
 }
 
 static u64 h_thread_create(u64 entry, u64 arg, u64 stack, u64 prio, u64 cpu) {
+    reap_zombies();
     HostThread *h = calloc(1, sizeof *h);
     if (!h) return 0;
     h->entry = entry;
@@ -64,11 +99,23 @@ int __wrap___syscall_thread_create(struct __pthread_t **t, void *(*fn)(void *), 
     }
     return rc;
 }
-static u64 h_thread_start(u64 id) { return threadStart(&((HostThread *)id)->t); }
-static u64 h_thread_join(u64 id) { return threadWaitForExit(&((HostThread *)id)->t); }
-static u64 h_thread_free(u64 id) {
+static u64 h_thread_start(u64 id) {
     HostThread *h = (HostThread *)id;
-    threadClose(&h->t);   /* a still-running detached thread keeps running; its record leaks */
+    __atomic_fetch_or(&h->state, HT_STARTED, __ATOMIC_RELEASE);   /* before it runs: its end sees the bit */
+    Result rc = threadStart(&h->t);
+    if (R_FAILED(rc)) __atomic_fetch_and(&h->state, ~HT_STARTED, __ATOMIC_RELEASE);
+    return rc;
+}
+static u64 h_thread_join(u64 id) { return threadWaitForExit(&((HostThread *)id)->t); }
+static u64 h_thread_free(u64 id) {   /* after join, or a detach: also of a running thread, also by itself */
+    HostThread *h = (HostThread *)id;
+    reap_zombies();
+    u32 old = __atomic_fetch_or(&h->state, HT_DETACHED, __ATOMIC_ACQ_REL);
+    if ((old & HT_STARTED) && !(old & HT_FINISHED))
+        return 0;   /* still running: host_thread_main queues it for reap_zombies */
+    if (old & HT_STARTED)
+        threadWaitForExit(&h->t);   /* finished: it is at most inside threadExit */
+    threadClose(&h->t);
     free(h);
     return 0;
 }

@@ -25,6 +25,9 @@ FLAGS=("${BUILD_FLAGS[@]}" -c "$OPT" -o /dev/null "${GCC_WARN[@]}" "${GCC_DIAG[@
 if grep -q 'toolchain/ftoi' "$HERE/tools/link/compile.sh"; then
   FLAGS+=(-fplugin="$(bash "$HERE/toolchain/ftoi/build.sh" "$OUT/gcc/plugin" | tail -1)")
 fi
+if grep -q 'toolchain/order' "$HERE/tools/link/compile.sh"; then
+  FLAGS+=(-fplugin="$(bash "$HERE/toolchain/order/build.sh" "$OUT/gcc/plugin" | tail -1)")
+fi
 export CXX TREE OUT FLAGS_STR="${FLAGS[*]}" FORCE=${FORCE:-0} NICE=${NICE:-19}
 if [ -z "$LIST" ]; then LIST="$OUT/gcc/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
 

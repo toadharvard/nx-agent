@@ -2917,3 +2917,36 @@ extern "C" HRESULT WINAPI Direct3DCreate9Ex(UINT, IDirect3D9Ex **pp) {
     if (pp) *pp = new Null_IDirect3D9Ex();
     return S_OK;
 }
+
+typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
+extern "C" void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
+extern "C" {
+int WINAPI D3DPERF_BeginEvent(D3DCOLOR, LPCWSTR) { return -1; }
+int WINAPI D3DPERF_EndEvent(void) { return -1; }
+void WINAPI D3DPERF_SetMarker(D3DCOLOR, LPCWSTR) {}
+void WINAPI D3DPERF_SetRegion(D3DCOLOR, LPCWSTR) {}
+BOOL WINAPI D3DPERF_QueryRepeatFrame(void) { return FALSE; }
+void WINAPI D3DPERF_SetOptions(DWORD) {}
+DWORD WINAPI D3DPERF_GetStatus(void) { return 0; }
+}
+static FARPROC null_d3d9_export(const char *proc) {
+    static const struct { const char *name; FARPROC fn; } exports[] = {
+        {"Direct3DCreate9", (FARPROC)Direct3DCreate9},
+        {"D3DPERF_BeginEvent", (FARPROC)D3DPERF_BeginEvent},
+        {"D3DPERF_EndEvent", (FARPROC)D3DPERF_EndEvent},
+        {"D3DPERF_SetMarker", (FARPROC)D3DPERF_SetMarker},
+        {"D3DPERF_SetRegion", (FARPROC)D3DPERF_SetRegion},
+        {"D3DPERF_QueryRepeatFrame", (FARPROC)D3DPERF_QueryRepeatFrame},
+        {"D3DPERF_SetOptions", (FARPROC)D3DPERF_SetOptions},
+        {"D3DPERF_GetStatus", (FARPROC)D3DPERF_GetStatus},
+    };
+    if (!proc) return nullptr;
+    for (const auto &e : exports)
+        if (!strcmp(e.name, proc)) return e.fn;
+    return nullptr;
+}
+extern "C" void fnvnx_d3d9_register(void) {
+    static int done;
+    if (__atomic_exchange_n(&done, 1, __ATOMIC_ACQ_REL)) return;
+    fnvnx_register_module("d3d9.dll", null_d3d9_export);
+}

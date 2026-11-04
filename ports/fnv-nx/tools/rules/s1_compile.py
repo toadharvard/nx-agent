@@ -149,7 +149,12 @@ def r_sal_attributes(path, text, stats):
 
 SDK_TAGS = ('tagRECT tagPOINT tagSIZE _FILETIME _SYSTEMTIME _GUID _RTL_CRITICAL_SECTION _LARGE_INTEGER _ULARGE_INTEGER '
             '_OVERLAPPED _WIN32_FIND_DATAA _SYSTEM_INFO tagMSG tagPALETTEENTRY _LUID _RGNDATA tagBITMAPFILEHEADER '
-            'tagBITMAPINFOHEADER _iobuf _MEMORYSTATUS CRITICAL_SECTION').split()   # CRITICAL_SECTION: a struct copy of the PC type
+            'tagBITMAPINFOHEADER _iobuf _MEMORYSTATUS CRITICAL_SECTION _RTL_CRITICAL_SECTION_DEBUG').split()
+# CRITICAL_SECTION: a struct copy of the PC type. _RTL_CRITICAL_SECTION_DEBUG: the decomp's SDK copy of
+# hkpcpuworldgetclosestpointsjob merges winnt.h's two records into `typedef struct _RTL_CRITICAL_SECTION_DEBUG {...}
+# RTL_CRITICAL_SECTION, *PRTL_CRITICAL_SECTION;` (so its CRITICAL_SECTION was the 32-byte debug record under MSVC);
+# dropped, the unit's CRITICAL_SECTION is the platform's 24-byte PC section (D15; no assert of the unit sizes it, so
+# neither CSX1 nor CSX2 applies, and no code of the unit reads the holder's layout)
 SDK_TYPEDEFS = {n: '"fnvnx_win32.h"' for n in '''DWORD BOOL BYTE WORD LONG UINT HANDLE HRESULT LPVOID ULONG_PTR
     DWORD_PTR WPARAM LPARAM LRESULT HINSTANCE HMODULE HWND HHOOK HKEY HDC HICON HMENU HBRUSH HFONT HBITMAP HCURSOR
     UINT_PTR LONG_PTR INT_PTR ATOM COLORREF LPSTR LPCSTR'''.split()}
@@ -193,6 +198,33 @@ def r_sdk_types(path, text, stats):
         stats['DECL2'] += 1
     out.append(text[pos:])
     return ''.join('#include %s /* fnv-nx DECL2 */\n' % h for h in top) + ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- COM1
+#
+# A unit that defines its own `struct IUnknown {...}` (bsshader.cpp, for its D3DX buffer / constant-table
+# stand-ins) declares the COM base with its own parameter types (`int QueryInterface(void*, void**)`, not pure), and
+# its interfaces redeclare those methods with the same types. DECL2 cannot give way to the platform's IUnknown
+# (fnvnx_win32.h, `HRESULT QueryInterface(REFIID, void**) = 0`): the redeclarations would no longer override it,
+# QueryInterface would get a new slot behind GetBufferSize, and every slot of ID3DXConstantTable would move by one.
+# So the unit's copy keeps its slots under its own name: every IUnknown of that file is renamed (types only, the
+# unit has no function with IUnknown in its signature, so no decoration the recipe binds changes).
+
+COM_OWN = re.compile(r'^[ \t]*(?:typedef\s+)?(?:struct|class)\s+IUnknown\s*\{', re.M)
+COM_NAME = 'fnvnx_unit_IUnknown'
+
+def r_own_iunknown(path, text, stats):
+    """COM1: rename a unit's own copy of the COM base IUnknown (defined in that file) and its uses there."""
+    if 'IUnknown' not in text: return text
+    m = COM_OWN.search(text)
+    if not m or prepare.scope_chain(prepare.scope_spans(text), m.start()): return text
+    out, pos = [], 0
+    for u in re.finditer(r'(?<![\w.>:~])IUnknown\b', text):
+        line = text[text.rfind('\n', 0, u.start()) + 1:u.start()]
+        if '//' in line or line.lstrip().startswith('#'): continue
+        out.append(text[pos:u.start()]); out.append(COM_NAME); pos = u.end()
+        stats['COM1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
 
 # ---------------------------------------------------------------------------------------------------------- EXC1
 
@@ -391,6 +423,212 @@ def r_goto_scalar_inits(path, text, stats):
         if s < pos: continue
         out.append(text[pos:s]); out.append(r); pos = e
         stats['GOTO1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- GOTO2
+#
+# A forward goto that crosses a declaration with an initializer into its scope (a class object, a reference, an
+# aggregate: what GOTO1's split cannot help). MSVC let it through - the object is just not constructed on that path,
+# and the code after the label never uses it there - GCC refuses it even with -fpermissive. Three shapes, each kept
+# to cases where the meaning provably stays (lines are kept):
+#  (a) a const scalar reference to the value of a function the unit declares as returning that scalar by value,
+#      `const float& a = f(x);` -> `float a; a = f(x);` (the reference named a const temporary of that value);
+#  (b) the label is in the declaration's own block, and nothing declared in that block between the first crossed
+#      declaration and the label is named after the label in the block: `{ ` before that declaration and `} ` before
+#      the label end those scopes before the label, so the jump enters none of them;
+#  (c) the label starts a straight tail `L: s1; ... return e;` (no braces, no other label) whose names are not
+#      declared in the function (parameters, members, globals): each crossing `goto L;` -> `{ s1; ... return e; }`.
+
+GOTO_KW = frozenset('return goto delete throw else case default new typedef using break continue do sizeof if while '
+                    'for switch try catch operator public private protected static_cast reinterpret_cast const_cast '
+                    'dynamic_cast struct class union enum const volatile static register this true false'.split())
+GOTO_DECL = re.compile(r'((?:(?:const|volatile|static|register|struct|class|union|enum|unsigned|signed|short|long)\s+)*'
+                       r'(?:::\s*)?([A-Za-z_]\w*)(?:\s*::\s*[A-Za-z_]\w*)*(?:\s*<[^;{}()]*>)?(?:\s+const)?)'
+                       r'(?=\s*[\*&]+\s*(?:const\s+)?[A-Za-z_]|\s+(?:const\s+)?[A-Za-z_])')
+GOTO_DECLARATOR = re.compile(r'^\s*([\*&\s]*)(?:const\s+)?([A-Za-z_]\w*)\s*(\S?)', re.S)
+GOTO_LABEL = re.compile(r'(?:[;{}]|^)\s*([A-Za-z_]\w*)[ \t]*:(?!:)', re.M)
+GOTO_STARTS = re.compile(r'[;{}]|(?<!:):(?!:)|\bfor\s*\(')
+GOTO_STMT = re.compile(r'\bgoto\s+([A-Za-z_]\w*)\s*;')
+GOTO_SCALAR = r'(?:(?:unsigned|signed)\s+)?(?:bool|char|short|int|long(?:\s+long)?|float|double|unsigned|hkReal)'
+GOTO_CREF = re.compile(r'^const\s+(%s)\s*&\s*([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*(\(.*\))\s*;$' % GOTO_SCALAR, re.S)
+CXX_WORDS = GOTO_KW | frozenset('int char short long float double bool void unsigned signed auto inline'.split())
+
+def _goto_decls(masked, o, c):
+    """Declarations of the function body masked[o:c]: [(start, type end, end after ';', [(name, has init, is ref)],
+    is static)]; also for-init declarations (start -1, so they never count as crossed)."""
+    starts = [o + 1] + [m.end() for m in GOTO_STARTS.finditer(masked, o + 1, c)]
+    out = []
+    for s in starts:
+        s += len(masked[s:c]) - len(masked[s:c].lstrip())
+        m = GOTO_DECL.match(masked, s)
+        if not m or m.group(2) in GOTO_KW or m.group(1).split()[-1] in GOTO_KW - {'const'}: continue
+        depth, e = 0, m.end(1)
+        while e < c:
+            ch = masked[e]
+            if ch in '([{': depth += 1
+            elif ch in ')]}':
+                if depth == 0: break
+                depth -= 1
+            elif ch == ';' and depth == 0: break
+            e += 1
+        if e >= c or masked[e] != ';': continue
+        decls = []
+        for d in _split_args(masked[m.end(1):e]):
+            dm = GOTO_DECLARATOR.match(d)
+            if not dm or dm.group(2) in CXX_WORDS: decls = None; break
+            decls.append((dm.group(2), dm.group(3) in ('=', '(', '{'), '&' in dm.group(1)))
+        if decls:
+            for_init = re.search(r'\bfor\s*\(\s*$', masked[o:s])
+            out.append((-1 if for_init else s, m.end(1), e + 1, decls,
+                        bool(re.match(r'(?:\w+\s+)*static\b', m.group(1)))))
+    return out
+
+def _goto_fix(text, stats, skip):
+    """One GOTO2 edit in `text` (the first crossing it can fix), or None."""
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    spans = prepare.scope_spans(masked)
+    funcs, last = [], -1
+    for sp in spans:
+        if sp[2] == 'function' and sp[0] > last:
+            funcs.append(sp); last = sp[1]
+    for o, c, _, _ in funcs:
+        if not GOTO_STMT.search(masked, o, c): continue
+        blocks = [sp for sp in spans if o <= sp[0] and sp[1] <= c and sp[2] not in ('init', 'class', 'enum')]
+        def block(p): return max((sp for sp in blocks if sp[0] < p < sp[1]), key=lambda sp: sp[0])
+        gotos = [(m.start(), m.end(), m.group(1)) for m in GOTO_STMT.finditer(masked, o, c)]
+        targets = {g[2] for g in gotos}
+        labels = [(m.start(1), m.end(), m.group(1)) for m in GOTO_LABEL.finditer(masked, o + 1, c)
+                  if m.group(1) in targets and m.group(1) not in GOTO_KW]
+        decls = _goto_decls(masked, o, c)
+        local = {n for d in decls for n, _, _ in d[3]}
+        for lp, le, name in labels:
+            lb = block(lp)
+            crossing = [d for d in decls if d[0] >= 0 and not d[4] and d[0] < lp and any(i or r for _, i, r in d[3])
+                        and block(d[0])[0] < lp < block(d[0])[1]
+                        and any(g[0] < d[0] and g[2] == name for g in gotos)]
+            for d in crossing:
+                key = (name, masked[d[0]:d[2]])
+                if key in skip: continue
+                s, te, e, dl, _ = d
+                # (a) const scalar reference to a by-value scalar result
+                cm = GOTO_CREF.match(text[s:e])
+                if cm and len(dl) == 1:
+                    rets = re.findall(r'\b(%s)\s*(&?)\s*(?:(?:__cdecl|__stdcall|__fastcall|__thiscall)\s+)?%s\s*\('
+                                      % (GOTO_SCALAR, re.escape(cm.group(3))), masked)
+                    if rets and all(not r for _, r in rets) and \
+                            not re.search(r'[\w>]\s*&\s*(?:\w+::)*%s\s*\(' % re.escape(cm.group(3)), masked):
+                        stats['GOTO2'] += 1
+                        return text[:s] + '%s %s; %s = %s%s;' % (cm.group(1), cm.group(2), cm.group(2), cm.group(3),
+                                                               cm.group(4)) + text[e:]
+                db = block(s)
+                # (b) close the crossed scopes before the label
+                if lb == db:
+                    names = {n for d2 in decls if d2[0] >= s and d2[2] <= lp and block(d2[0]) == db for n, _, _ in d2[3]}
+                    if not re.search(r'\b(?:%s)\b' % '|'.join(sorted(names)), masked[le:db[1]]):
+                        stats['GOTO2'] += 1
+                        return text[:s] + '{ ' + text[s:lp] + '} ' + text[lp:]
+                # (c) the label's straight tail cloned into each crossing goto
+                tail = re.match(r'(?:[^;{}:]*;){0,3}?\s*return\b[^;{}:]*;', masked[le:db[1]])
+                if tail and text[le:le + tail.end()] == masked[le:le + tail.end()]:
+                    t = text[le:le + tail.end()]
+                    words = re.findall(r'(?<![\w:])([A-Za-z_]\w*)\b(?!\s*::)', re.sub(r'(?:\.|->)\s*\w+', ' ', t))
+                    if not re.search(r'\bgoto\b', t) and not (set(words) - CXX_WORDS) & local:
+                        clone = '{ %s }' % re.sub(r'\s*\n\s*', ' ', t.strip())
+                        for g0, g1, gn in reversed(gotos):
+                            if gn == name and g0 < s: text = text[:g0] + clone + text[g1:]
+                        stats['GOTO2'] += 1
+                        return text
+                skip.add(key)
+    return None
+
+def r_goto_crossed_scopes(path, text, stats):
+    """GOTO2: forward gotos that cross a declaration with an initializer of a class, reference or aggregate (see
+    above): (a) `const float& a = f(x);` -> `float a; a = f(x);` for a by-value scalar f, (b) `{ ` ... `} ` around
+    the crossed declarations before a label of their block, when nothing they declare is named after the label,
+    (c) the label's straight `...; return e;` tail cloned into each crossing goto."""
+    if 'goto' not in text: return text
+    skip = set()
+    for _ in range(64):
+        new = _goto_fix(text, stats, skip)
+        if new is None: break
+        text = new
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- MSCV1
+#
+# The decomp tests the compiler's version in code, not only in #if: `if (_MSC_FULL_VER >= 150030729)`. The value is
+# the one of the compiler build/units.json names for the unit (the decomp README: sp1 cl 15.00.30729.01, rtm
+# 15.00.21022.08, vc8 14.00.50727.762), so the branch MSVC compiled is the one we compile.
+
+MSC_VERSIONS = {'sp1': ('1500', '150030729'), 'rtm': ('1500', '150021022'), 'vc8': ('1400', '140050727')}
+MSC_IN_CODE = re.compile(r'^(?![ \t]*#).*\b_MSC_(?:FULL_)?VER\b', re.M)
+_unit_compilers = {}
+
+def _unit_compiler(path):
+    root, uj = prepare._units_json(path)
+    if not uj: return None
+    if uj not in _unit_compilers:
+        import json
+        with open(uj, encoding='utf-8') as f:
+            _unit_compilers[uj] = {u.get('source'): u.get('compiler') for u in json.load(f).get('units', [])}
+    return _unit_compilers[uj].get(os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/'))
+
+def r_msc_version_values(path, text, stats):
+    """MSCV1: `_MSC_FULL_VER` / `_MSC_VER` used in code (not in a preprocessor line) -> the value of the compiler
+    build/units.json gives the unit (sp1, rtm or vc8); left alone where the file is no unit or none is given."""
+    if '_MSC_' not in text or not MSC_IN_CODE.search(text): return text
+    ver = MSC_VERSIONS.get(_unit_compiler(path))
+    if not ver: return text
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    out, pos = [], 0
+    for m in re.finditer(r'\b_MSC_(FULL_)?VER\b', masked):
+        out.append(text[pos:m.start()]); out.append(ver[1] if m.group(1) else ver[0]); pos = m.end()
+        stats['MSCV1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- QUAD1
+#
+# A decomp class of four floats that converts to __m128 (`operator __m128() const`), returned by a function whose
+# return type is constructible from __m128 only: `return m_q;`. MSVC chains the two user-defined conversions (the
+# conversion to its __m128 union, then the constructor); C++ allows one, so the first is written out:
+# `return (__m128)m_q;`.
+
+QUAD_CONV = re.compile(r'\boperator\s+__m128\s*\(\s*\)\s*const\b')
+QUAD_HEAD = re.compile(r'\b(?:struct|class)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)')
+
+def r_quad_returns(path, text, stats):
+    """QUAD1: `return q;` -> `return (__m128)q;` where q is declared only with a class that converts to __m128 and
+    the function returns a class constructible from __m128 but not from q's class."""
+    if 'operator __m128' not in text and not re.search(r'operator\s+__m128', text): return text
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    spans = prepare.scope_spans(masked)
+    classes = {}
+    for o, c, k, h in spans:
+        hm = QUAD_HEAD.search(h) if k == 'class' else None
+        if hm: classes.setdefault(hm.group(1), []).append(masked[o:c])
+    conv = sorted(n for n, bodies in classes.items() if any(QUAD_CONV.search(b) for b in bodies))
+    if not conv: return text
+    names = set()
+    for m in re.finditer(r'\b(?:%s)\s+([A-Za-z_]\w*)\s*;' % '|'.join(conv), masked):
+        others = {t for t in re.findall(r'\b([A-Za-z_]\w*)[\s\*&]+%s\s*[;,=)\[]' % m.group(1), masked)
+                  if t not in GOTO_KW}
+        if others <= set(conv): names.add(m.group(1))
+    rets = sorted(n for n, bodies in classes.items()
+                  if any(re.search(r'\b%s\s*\(\s*(?:const\s+)?__m128\s*&?\s*\w*\s*\)' % n, b) for b in bodies)
+                  and not any(re.search(r'\b%s\s*\(\s*(?:const\s+)?(?:%s)\b' % (n, '|'.join(conv)), b) for b in bodies))
+    if not names or not rets: return text
+    head = re.compile(r'(?:^|\s)(?:%s)\s+(?:\w+::)*\w+\s*\([^()]*\)\s*(?:const\s*)?$' % '|'.join(rets))
+    ret = re.compile(r'\breturn\s+((?:this\s*->\s*)?(?:%s))\s*;' % '|'.join(sorted(names)))
+    edits = []
+    for o, c, k, h in spans:
+        if k == 'function' and head.search(h):
+            edits += [(m.start(1), m.group(1)) for m in ret.finditer(masked, o, c)]
+    out, pos = [], 0
+    for s, name in sorted(set(edits)):
+        out.append(text[pos:s]); out.append('(__m128)' + name); pos = s + len(name)
+        stats['QUAD1'] += 1
     out.append(text[pos:])
     return ''.join(out)
 
@@ -2033,6 +2271,44 @@ def _nonconst_ref(param):
     if '&&' in p or not re.search(r'&\s*(?:[A-Za-z_]\w*)?\s*(?:\[[^\]]*\])?$', p): return False
     return not re.search(r'\bconst\b', p[:p.rfind('&')])
 
+_RREF_CLASS_HEAD = re.compile(r'\b(?:class|struct|union)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)')
+_RREF_MEMBER_HEAD = re.compile(r'([A-Za-z_]\w*)\s*(?:<[^<>()]*>\s*)?::\s*~?[A-Za-z_]\w*\s*\(')
+
+def _rref_member_class(text, spans, pos):
+    """The class whose member function body holds pos (`T C::f(...) {` or a function defined in C's body), or None."""
+    cls = None
+    for k, h in prepare.scope_chain(spans, pos):
+        if k == 'class':
+            m = _RREF_CLASS_HEAD.search(h)
+            cls = m.group(1) if m else None
+        elif k == 'function':
+            m = list(_RREF_MEMBER_HEAD.finditer(h.split('(')[0] + '('))
+            if m: cls = m[-1].group(1)
+            return cls
+    return None
+
+def _rref_class_shapes(unit, cls, name, cache):
+    """[[non-const reference per parameter]] of the declarations of member `name` in the nearest class, starting at
+    cls and going through its bases, that declares it (class scope lookup); [] when none does."""
+    key = (cls, name)
+    if key in cache: return cache[key]
+    found, level, seen = [], [cls], set()
+    while level and not found and len(seen) < 16:
+        nxt = []
+        for c in level:
+            if c in seen: continue
+            seen.add(c)
+            for body, bases in _class_bodies(unit, c):
+                for d in RREF_DECL.finditer(body):
+                    if d.group(2) != name or d.group(1) in RREF_NOT_TYPE: continue
+                    params = d.group(3).strip()
+                    ps = [] if params in ('', 'void') else _split_args(params)
+                    found.append([_nonconst_ref(p) for p in ps])
+                nxt += [b for b in bases if b]
+        level = nxt
+    cache[key] = found
+    return found
+
 def r_temporaries_to_references(path, text, stats):
     """RREF1: fnvnx_lvalue around a temporary passed to a non-const reference parameter (see above)."""
     if '&' not in text or not path.endswith('.cpp'): return text
@@ -2050,7 +2326,7 @@ def r_temporaries_to_references(path, text, stats):
     bodies = []
     for o, c, k, _ in spans:
         if k == 'function' and not (bodies and o < bodies[-1][1]): bodies.append((o, c))
-    edits, bi = [], 0
+    edits, bi, class_cache = [], 0, {}
     for m in call.finditer(text):
         while bi < len(bodies) and bodies[bi][1] < m.start(): bi += 1
         if bi == len(bodies) or not bodies[bi][0] < m.start(): continue
@@ -2061,6 +2337,15 @@ def r_temporaries_to_references(path, text, stats):
         args = _split_args(text[m.end():close - 1])
         if args == ['']: args = []
         shapes = [r for r in refs[m.group(1)] if len(r) == len(args)]
+        cls = _rref_member_class(text, spans, m.start())
+        if cls and not re.search(r'(?:\.|->|::)\s*$', before):
+            # an unqualified call in a member function of cls: class scope is searched first, so the class's own
+            # declarations of the name (or the nearest base's) are the candidates where it has any (RREF1-CLASS)
+            own = _rref_class_shapes(unit, cls, m.group(1), class_cache)
+            if own:
+                own = [r for r in own if len(r) == len(args)]
+                if own != shapes and own: stats['RREF1-CLASS'] += 1
+                shapes = own
         if not shapes: continue
         at = m.end()
         for i, a in enumerate(args):
@@ -2227,6 +2512,65 @@ def r_function_named_classes(path, text, stats):
         stats['ELAB1'] += 1
     out.append(text[pos:])
     return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- ANON3
+#
+# An anonymous union declared in a function body with an anonymous struct in it (`union { Stream s; struct { T* a;
+# T* b; }; };`): GCC takes an anonymous struct only inside a named class. The union goes into a local struct
+# of its own, one object of it, and a reference of each member's name to that member, so the code goes on using the
+# plain names on the same storage and layout.
+
+ANON3_DECOR = re.compile(r'__declspec\s*\((?:[^()]|\([^()]*\))*\)|alignas\s*\([^()]*\)')
+
+def _anon3_members(masked, o, c, spans):
+    """Member names of the union body masked[o+1:c]: its own declarations and those of its anonymous structs;
+    None when a member is something else (a function, a named nested type, a bit-field)."""
+    body, names, pos = [], [], o + 1
+    inner = [sp for sp in spans if o < sp[0] and sp[1] < c]
+    for so, sc, sk, sh in inner:
+        if so < pos: continue
+        if sk != 'class' or ANON3_DECOR.sub('', sh).strip() != 'struct' or not re.match(r'\s*;', masked[sc + 1:]):
+            return None
+        sub = _anon3_members(masked, so, sc, spans)
+        if sub is None: return None
+        names += sub
+        body.append(masked[pos:masked.rfind('struct', 0, so)]); pos = masked.index(';', sc) + 1
+    body.append(masked[pos:c])
+    for stmt in ''.join(body).split(';'):
+        if not stmt.strip(): continue
+        if re.search(r'[(){}:]', stmt.replace('::', '')): return None
+        for d in _split_args(re.sub(r'^\s*(?:[A-Za-z_][\w:]*(?:\s*<[^;{}]*>)?\s*)', '', stmt) if ',' in stmt else stmt):
+            m = re.search(r'([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*$', d)
+            if not m: return None
+            names.append(m.group(1))
+    return names
+
+def r_local_anonymous_unions(path, text, stats):
+    """ANON3: `union { ... struct { ... }; ... };` in a function body -> `struct fnvnx_anon_uN { union ... }; }
+    fnvnx_anon_vN; decltype(fnvnx_anon_vN.m)& m = fnvnx_anon_vN.m; ...` (same line count)."""
+    if 'union' not in text or 'struct' not in text: return text
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    spans = prepare.scope_spans(masked)
+    edits, n = [], 0
+    for o, c, k, h in spans:
+        if k != 'class' or ANON3_DECOR.sub('', h).strip() != 'union': continue
+        tail = re.match(r'\s*;', masked[c + 1:])
+        chain = prepare.scope_chain(spans, o)
+        if not tail or not chain or chain[-1][0] not in ('function', 'other') or \
+                'function' not in [ck for ck, _ in chain]: continue
+        if not any(sp[2] == 'class' and o < sp[0] and sp[1] < c for sp in spans): continue
+        names = _anon3_members(masked, o, c, spans)
+        if not names: continue
+        u = masked.rfind('union', 0, o)
+        v = 'fnvnx_anon_v%d' % n
+        refs = ' '.join('decltype(%s.%s)& %s = %s.%s;' % (v, m, m, v, m) for m in names)
+        edits.append((u, 'struct fnvnx_anon_u%d { ' % n))
+        edits.append((c + 1 + tail.end(), ' } %s; %s' % (v, refs)))
+        n += 1
+        stats['ANON3'] += 1
+    for at, s in sorted(edits, reverse=True):
+        text = text[:at] + s + text[at:]
+    return text
 
 # ---------------------------------------------------------------------------------------------------------- ANON2
 #
@@ -3072,5 +3416,105 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]
+
+# ==================================================================================================== stream S1-refs
+#
+# Rules of the S1-refs stream (references to temporaries, overload ambiguities, single-unit errors). They run after
+# every rule above, in the order of REFS_RULES (appended to RULES at the end of this section).
+
+# ---------------------------------------------------------------------------------------------------------- RREF2
+#
+# RREF1 for operators: `a != T(0)` where class T's own `bool operator!=(T& other)` takes a non-const reference. MSVC
+# binds the temporary T(0) to it (alive to the end of the full expression); GCC refuses. RREF2 wraps the functional
+# cast in fnvnx_lvalue where every member operator of that symbol the unit declares with a parameter of type T takes
+# it by non-const reference (so no other overload could have been chosen).
+
+RREF2_OPS = r'==|!=|\+=|-=|\*=|/=|\+|-|\*|/'
+RREF2_DECL = re.compile(r'\boperator\s*(%s)\s*\(\s*((?:const\s+)?(?:volatile\s+)?[A-Za-z_]\w*(?:\s*const)?\s*[&*]?)'
+                        r'\s*[A-Za-z_]\w*\s*\)' % RREF2_OPS)
+
+def r_operator_temporaries(path, text, stats):
+    """RREF2: `x OP T(args)` -> `x OP fnvnx_lvalue(T(args))` where the unit's member operators OP with a T parameter
+    all take a non-const T& (see above)."""
+    if 'operator' not in text and '#include' not in text: return text
+    if not path.endswith('.cpp'): return text
+    unit = '\n'.join(t for _, t in _closure(path, text)) if '#include' in text else COMMENT.sub(' ', text)
+    kinds = {}                                       # (op, T) -> {non-const reference?}
+    for m in RREF2_DECL.finditer(unit):
+        p = re.sub(r'\s+', ' ', m.group(2)).strip()
+        t = re.sub(r'\b(?:const|volatile)\b|[&*]', ' ', p).split()
+        if not t: continue
+        kinds.setdefault((m.group(1), t[0]), set()).add(p.endswith('&') and 'const' not in p.split())
+    want = sorted(k for k, v in kinds.items() if v == {True})
+    if not want: return text
+    spans = prepare.scope_spans(text)
+    edits = []
+    for op, t in want:
+        for m in re.finditer(r'(?<![=!<>+\-*/&|^%%])(%s)\s*(%s)\s*\(' % (re.escape(op), re.escape(t)), text):
+            if 'function' not in [k for k, _ in prepare.scope_chain(spans, m.start())]: continue
+            edits.append((m.start(2), _call_end(text, m.end() - 1)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append('fnvnx_lvalue(' + text[a:b] + ')'); pos = b
+        stats['RREF2'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- ADDR1
+#
+# MSVC takes the address of a class rvalue (an extension, warning C4238): `(const Vec*)&_mm_andnot_ps(m, v)` hands
+# the callee the address of the returned __m128 temporary, alive to the end of the full expression. GCC refuses the
+# address of an rvalue. ADDR1 spells the operand fnvnx_lvalue(...): the same temporary as an lvalue, for the same
+# lifetime. Only intrinsic calls (`_mm_*`), only as the operand of a unary `&` (after `(`, `,`, `=`, `return` or a
+# pointer cast).
+
+ADDR1_SITE = re.compile(r'(?:(?<=[(,=])|(?<=\breturn)|(?<=\*\)))(\s*&\s*)(_mm_\w+\s*\()')
+
+def r_address_of_temporaries(path, text, stats):
+    """ADDR1: `&_mm_f(args)` (the address of a returned vector temporary) -> `&fnvnx_lvalue(_mm_f(args))`."""
+    if '&' not in text or '_mm_' not in text: return text
+    out, pos = [], 0
+    for m in ADDR1_SITE.finditer(text):
+        if m.start() < pos: continue
+        if m.group(0).lstrip().startswith('&&'): continue
+        close = _call_end(text, m.end() - 1)
+        out.append(text[pos:m.start(2)]); out.append('fnvnx_lvalue(' + text[m.start(2):close] + ')'); pos = close
+        stats['ADDR1'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- LANE1
+#
+# SSE1 turns a lane array `v.m128_f32` into `((float*)&(v))`, a pointer prvalue. Where the decomp takes the address
+# of the whole array (`(&v.m128_f32)[0]`, `(0)[&v.m128_f32]`: a float[4] lvalue that decays to the first lane's
+# address) that gives `&((float*)&(v))`, the address of an rvalue. LANE1 writes the array pointer itself:
+# `((float(*)[sizeof(v) / sizeof(float)])&(v))`, the same address with the same type as MSVC's `&v.m128_f32`.
+
+LANE1_SITE = re.compile(r'&\s*\(\(\s*((?:unsigned\s+|signed\s+)?(?:float|double|int|char|short|long\s+long|__int64|'
+                        r'__int32|__int16|__int8))\s*\*\s*\)\s*&\s*\(')
+
+def r_lane_array_address(path, text, stats):
+    """LANE1: `&((T*)&(v))` (SSE1's lane array, its address taken) -> `((T(*)[sizeof(v) / sizeof(T)])&(v))`."""
+    if 'm128' not in text and '*)&(' not in text: return text
+    out, pos = [], 0
+    for m in LANE1_SITE.finditer(text):
+        if m.start() < pos: continue
+        inner_end = _call_end(text, m.end() - 1)                 # past `(v)`
+        if text[inner_end:inner_end + 1] != ')': continue
+        after = text[inner_end + 1:inner_end + 40].lstrip()
+        if after.startswith(('[', '.', '->')): continue          # `&((T*)&(v))[i]`: a lane's address, fine
+        t, v = m.group(1), text[m.end() - 1:inner_end]
+        out.append(text[pos:m.start()])
+        out.append('((%s(*)[sizeof%s / sizeof(%s)])&%s)' % (t, v, t, v)); pos = inner_end + 1
+        stats['LANE1'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
+REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address]
+RULES += REFS_RULES

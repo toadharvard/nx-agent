@@ -38,13 +38,13 @@ So the render layer we would replace is about **2,300-3,400 functions** (named u
 2. **Accumulate.** `BSShaderAccumulator` (an `NiAccumulator`, 38 functions; `SetupDepth 0x00b65550`,
    `ClearActivePasses 0x00b65580`) asks each geometry's `BSShaderProperty` for its **render pass list**
    (`BSShaderProperty::ShaderPassList::Add 0x00ba9ee0`, `ShaderPassEntry 0x00ba8ec0`): one entry per pass, each
-   entry = (geometry, `eBSSMPassEnum` pass id, up to N lights, flags). The pass list is built by the property from its
+   entry = (geometry, pass id (true FNV numbering, §1.3), up to N lights, flags). The pass list is built by the property from its
    NIF flags (specular, skinned, vertex colours, parallax, facegen, env map, glow, ...), the lights assigned by
    `ShadowSceneNode`, fog and the shader level.
 3. **Batch.** `BSBatchRenderer` (43 functions; `FindPassBucket 0x00b9a090`, `FindBucketIndex 0x00b98ae0`) buckets the
    entries **by pass id**, then by texture/geometry group inside a bucket; alpha geometry is sorted by depth
    (`ComputeAlphaDepth`). The accumulator renders buckets in pass-id order: the pass enum *is* the render order
-   (z-only/depth first, opaque lighting, land, LOD, sky, alpha passes from `FIRST_ALPHA_PASS=494`, water,
+   (z-only/depth first, opaque lighting, land, LOD, sky, alpha passes from `FIRST_ALPHA_PASS` = 568 (true numbering, RENDER_VERIFY.md §1), water,
    precipitation, sun glare, blood splatter).
 4. **Draw.** For each bucket the owning `BSShader` (a `NiD3DShader`) runs Gamebryo's shader protocol: setup pass
    (pick VS/PS from the pass id, `NiD3DPass` render/sampler state through the `NiDX9RenderState` cache), update
@@ -62,31 +62,36 @@ Extra scene renders per frame: shadow maps (§1.4), water reflection (§1.5), th
 
 `BSShaderManager` loads one `shaderpackage%03i.sdp` by shader level (`etShaderLevel`: 1_X, 2_0, 2_A96, 2_B96, 2_A,
 2_B, 3_0) and each shader class fetches its blobs by name; the decomp also keeps each class's **developer table**
-(HLSL source + `#define`s per index), which documents every permutation. Pass enum: **756 values** (`eBSSMPassEnum`,
-`bsshader_shader_layout.h`), 667 live render passes + shadow volume/tile/image-space + 83 unused.
+(HLSL source + `#define`s per index), which documents every permutation. Pass ids: FNV uses
+**759 ids** (0 = disabled, 1..758; `COUNT` = 759), not the decomp header's `eBSSMPassEnum` (`bsshader_shader_layout.h`,
+756 values), which is an older/re-sorted list. The true ids come from the binary's pass-name function `FUN_00b4f9d0`
+(V6n, `render/verify/enum/pass_names.py`, docs/RENDER_VERIFY.md §1): `FIRST_ALPHA_PASS` = 568, TILE = 757,
+IMAGESPACE = 758; the header's "unused" block maps into live ranges. Only ZONLY..DEPTHMAP (1-19) and NOLIGHTING
+(65-87) have the same ids in both. Ranges below are true ids (correction of 2026-11-04; the first version of this
+section used the header).
 
 | class (family) | binaries it loads (count) | HLSL sources (dev table) | passes (examples) | notes |
 |---|---|---|---|---|
 | `ShadowLightShader` (SLS, the main per-pixel lighting) | `SLS1%03i.vso` 31, `SLS1S%03i.vso` 22, `SLS2%03i.vso` 103, `SLS1%03i.pso` 48, `SLS2%03i.pso` 160 (+`SLS2%03is%01i.pso` shadow-sample variants) | `ADTS`, `ADTS10`, `AD`, `DiffusePt`, `Specular`, `Texture`, `land`, `LandO`, `landlod`, `landlighting`, `decal`, `depthmap`, `SimpleShadow`, `WaterFog`, `EnvMap`, `renderNormals/Depth/Velocity`, `localMap` | ADTS* / ADT* (ambient+diffuse+texture+spec, 1/2/3/4/10 lights), AD2/AD3, DIFFUSEPT2/3, TEXTURE, 2x_SPECULAR*, LAND* (1-7 layers, `O4` 4-layer), ZONLY, DEPTHMAP, SIMPLESHADOW, FOG, ENVMAP | defines: `LIGHTS`/`MAXLIGHTS`/`NUM_PT_LIGHTS`, `SKIN`, `VC`, `SPECULAR`, `PROJ_SHADOW`/`SHADOWMAP`, `FOG`, `PARALLAX`, `FACEGENBLEND`, `HAIR`, `EYE`, `GLOW`, `MODELSPACENORM`, `LANDALPHA`, `TREE` |
-| `Lighting30Shader` (SM3 path) | `SM3%03i.pso` 50, `SM3LL%03i.pso`; VS from `SM3Lighting/SM3ZOnly/SM3DepthMap/SM3SimpleShadow` | `lighting\3x\*` | all `3X*` passes 306-409: 3XLIGHTING (+S/H/Px/Pxo/Fg/G/Vc/Spc/Shp), 3XZONLY, 3XDEPTHMAP, 3XENVMAP, 3XSILHOUETTE, 3XDEPTH/VELOCITY/LOCALMAP | the SM3 lighting loop does several lights in one pass |
-| `BSShaderNoLighting` | `NOLIGHT%03i.vso` 28, `NOLIGHT{MAT,TEX,TEXVC,TEXVCPMA,VCONLY,WF,WFAt}.pso` | `NoLighting` | NOLIGHTING* 66-87 (incl. particle-system strips, falloff) | effects, glow, UI-in-world |
-| `TallGrassShader` | `GRASS2%03i.vso` 24, `GRASS23x%03i.vso` 24, `GRASS2/23x %03i[TMS].pso` 4 each | `tallgrass\lowDetail/highDetail` | GRASS_* 20-59, 524-567 (dir only / 1 point light, vertex/fragment lit, shadow, `B`illboard) | instance data in per-batch constant arrays (`TallGrassGroup`: 16 B position+scale per instance) |
+| `Lighting30Shader` (SM3 path) | `SM3%03i.pso` 50, `SM3LL%03i.pso`; VS from `SM3Lighting/SM3ZOnly/SM3DepthMap/SM3SimpleShadow` | `lighting\3x\*` | all `3X*` passes 376-479 (+ the eight `3XWATER_DEPTH*` ids in 730-749): 3XLIGHTING (+S/H/Px/Pxo/Fg/G/Vc/Spc/Shp), 3XZONLY, 3XDEPTHMAP, 3XENVMAP, 3XSILHOUETTE, 3XDEPTH/VELOCITY/LOCALMAP | the SM3 lighting loop does several lights in one pass |
+| `BSShaderNoLighting` | `NOLIGHT%03i.vso` 28, `NOLIGHT{MAT,TEX,TEXVC,TEXVCPMA,VCONLY,WF,WFAt}.pso` | `NoLighting` | NOLIGHTING* 66-87 (same in the header; incl. particle-system strips, falloff) | effects, glow, UI-in-world |
+| `TallGrassShader` | `GRASS2%03i.vso` 24, `GRASS23x%03i.vso` 24, `GRASS2/23x %03i[TMS].pso` 4 each | `tallgrass\lowDetail/highDetail` | GRASS_* 22-61, 604-647 (dir only / 1 point light, vertex/fragment lit, shadow, `B`illboard) | instance data in per-batch constant arrays (`TallGrassGroup`: 16 B position+scale per instance) |
 | SpeedTree: `SpeedTreeBranchShader`/`FrondShader`/`LeafShader`, `BSDistantTreeShader` | `STB1%03i.vso` 10, `STB2%03i.vso` 20, `STB1%03i.pso`, `STFROND[2]%03i.*`, `DISTTREE[Sil].*` | `speedtree\frond`, `distanttree\DistantTree` | LEAVES_AD/ADPt, FRONDS, DISTANT_TREE_BASE/SILHOUETTE | leaf cards rotate in the VS (`STBB` billboard constants) |
 | `DistantLODShader` | `DISTLOD1/2%03i` 2+2 | `landlod` | ADT_OptLOD, LANDLO_A, LANDO_Am | distant land and object LOD |
-| `SkyShader` | `SKY*.vso/pso` 21 named binaries | `sky\sky[_quad]` | SKYBASEPRE, SKY, SKY_STARS/TEXTURE/CLOUDS/MOON_STARS_MASK, SKY_SUNGLARE | |
-| `WaterShader` | `WATER%03i.pso` 38, `WATER000-002.vso` | `water\2_ab\*` (water, waterhmap, displace, waterlighting) | WATER* 568-638 (wading, interior, no-reflection/refraction/depth, Vc), WATER_LOD, WATER_DEPTH* 642-665 | |
+| `SkyShader` | `SKY*.vso/pso` 21 named binaries | `sky\sky[_quad]` | SKYBASEPRE, SKY, SKY_STARS/TEXTURE/CLOUDS/MOON_STARS_MASK (568-574, the first alpha passes), SKY_SUNGLARE | |
+| `WaterShader` | `WATER%03i.pso` 38, `WATER000-002.vso` | `water\2_ab\*` (water, waterhmap, displace, waterlighting) | WATER* 648-718 (accumulator group base 648: wading, interior, no-reflection/refraction/depth, Vc; 705 = WATER_NO_REFLECTIONS_Vc), WATER_LOD, WATER_DEPTH* 728-747 | |
 | `ParticleShader`, `PrecipitationShader` | `PAR2%03i` 20 VS, `PARTICLE.*`, `PRECIP%03i` 4+2 | `particle`, `precipitation` | PARTICLE, PARTICLE_PREPASS, PRECIPITATION_RAIN | GPU-side particle expansion |
 | `GeometryDecalShader` | `GDECAL[S].vso`, `GDECAL.pso` | `decal` | GEOMDECAL[_S] | skinned decals |
 | `BSShaderBloodSplatter` | `BS.*`, `BSF.*` | `BloodSplatter` | BLOOD_SPLATTER[_FLARE] | screen-space splats |
 | `BoltShader`, `BeamShader` | `BOLT.*`, `BEAM.*` | `bolt`, `beam` | BOLT, BEAM | |
-| `VolumetricFogShader` | `VolumetricFog%03d` 2+2 | `vfog` | VFOG_* 519-523 | |
-| `TileShader` (UI) | `TILE1%03i` 3+3 | `tile` | TILE (671) | menus |
-| `ImageSpaceShader*` | `IS%s.vso/pso` (one per effect shader) | `imagespace\*` (base, copy, blur2, HDR*, DOF, radial blur, sunbeams, refraction, map, tv, noise, cinematic, scanlines, menuBG, motion blur, water FFT) | IMAGESPACE (672) | §1.7 |
+| `VolumetricFogShader` | `VolumetricFog%03d` 2+2 | `vfog` | VFOG_* 599-603 | |
+| `TileShader` (UI) | `TILE1%03i` 3+3 | `tile` | TILE (757) | menus |
+| `ImageSpaceShader*` | `IS%s.vso/pso` (one per effect shader) | `imagespace\*` (base, copy, blur2, HDR*, DOF, radial blur, sunbeams, refraction, map, tv, noise, cinematic, scanlines, menuBG, motion blur, water FFT) | IMAGESPACE (758) | §1.7 |
 | `NiD3DDefaultShader` (Gamebryo) | none (fixed function) | - | - | debug lines, fallback; `SetTransform`/`SetLight`/texture stages |
 
 57 distinct `#define` tokens appear in the developer tables (`SKIN` 80, `SM3` 41, `LIGHTS` 39, `VC` 38, `SPECULAR` 31,
 `TREE` 30, `PROJ_SHADOW` 29, `MAXLIGHTS` 25, `FOG` 15, `FACEGENBLEND` 10, `LANDALPHA` 10, `ENVMAP` 8, `PARALLAX` 4,
-...): the real permutation space is a handful of orthogonal bits per family, not 667 shaders.
+...): the real permutation space is a handful of orthogonal bits per family, not one shader per pass id.
 
 **Vertex formats.** Geometry comes from `NiGeometryData` streams (position, normal, binormal, tangent, colour, up to
 N UV sets) and `NiSkinPartition` partitions (4 weights + 4 bone indices, a bone palette per partition, skinning in
@@ -206,6 +211,13 @@ Three mechanisms, all already in the S1/S2/S3 design:
    resolve` gives an override precedence over the decomp definition at the same address, so every call, every
    vtable-slot relocation and every code pointer the data image (S3) holds for that address lands on our function.
    Request to S2: an `--override <tsv>` input with that precedence and a report of decomp definitions it shadowed.
+   Status (round 3): done (R1). The N1 stubs are `render/native/n1/engine_stubs.cpp` in `libnxrender.a`; the link
+   command for the native build is
+   `python3 tools/link/fnvlink.py resolve <units.json> <objects.tsv> <out> --override render/native/overrides.tsv
+   --override-lib <n1 out>/libnxrender.a [--msvc-objs <pristine MSVC objects>]` (`<n1 out>` from
+   `render/native/n1/build.sh <n1 out>`). Without `--msvc-objs` the vslot rows are skipped (they are all
+   N1-pending anyway); the five NiDX9Renderer rows bind by implementation address. Pre-check:
+   `python3 -I tests/s6n/test_overrides.py <n1 out>/libnxrender.a`.
 2. **Prepare rules (S1, `tools/prepare.py`).** A rule (`NATIVE1`, proposed) drops whole units that become dead
    (`niconsolerenderer/*`, the replaced `bsshader` shader units, D3D stand-in headers) from the build list, so
    their D3D-dependent code does not even need to compile; units that are only partly replaced compile as they are
@@ -217,6 +229,64 @@ Three mechanisms, all already in the S1/S2/S3 design:
 Object layouts of replaced classes stay the decomp's (the 3,171 `static_assert`s still apply), because kept code
 reads fields directly (e.g. `BSShaderProperty` subclasses read renderer/shader-manager globals; `fallout` reads
 `NiDX9Renderer` fields for the screen size). New state goes in side structures reached from one reused pointer field.
+
+### 2.4 The N1 menu path as wired (round 5)
+
+What the native build replaces for the main menu, all rows in `render/native/overrides.tsv` (slots checked against
+the image vftables, §R2), code in `render/native/n1/`:
+
+* **Frame, targets, camera:** `NiDX9Renderer` slots 95, 96, 98-102 and the Present at 0x00e7ccd0 (`engine_stubs.cpp`
+  -> `nx::Renderer`). Slot 97 (`Do_DisplayFrame`, deferred releases) stays the engine's.
+* **Geometry:** slots 107/108 (one function, 0x00e744b0) -> `engine::ReadGeometry` -> `Renderer::RenderGeometry`.
+  The engine's shader pipeline for the draw (TileShader pass setup, constant maps) is not reached; the draw uses the
+  tile family with what the geometry's properties say:
+  * NiPropertyState at geometry +0x9C: NiAlphaProperty (+0x9C; flags: blend, src/dst function, alpha test and its
+    function, ref) -> D3D9 ALPHABLENDENABLE / SRCBLEND / DESTBLEND / ALPHATESTENABLE / ALPHAFUNC / ALPHAREF for that
+    draw (restored after it); NiMaterialProperty (+0xA4) alpha; the shader property (+0xA8) as a
+    TileShaderProperty: texture +0x60, tint rgb +0x68, alpha +0x78 -> tint = (rgb, alpha x material alpha);
+  * texture: TileShaderProperty texture -> NiTexture renderer data (+0x24) -> the NativeTexture pointer in it
+    (found by scanning the renderer data's dwords for a live NativeTexture, so its field offset is not needed);
+    without one, the state tracker's stage 0, else a white texel.
+* **Textures:** `NiDX9SourceTextureData::LoadFromFilename` (0x00e68a80) stays; the two D3DX calls it makes are
+  replaced (`engine_textures.cpp`): `D3DXGetImageInfoFromFileInMemory` (0x00ee6e22) answers from the DDS header,
+  `D3DXCreateTextureFromFileInMemory` (0x00ee6e1c) creates the native image (`ParseDDS`, `nx_d3d9_format`,
+  NXFMT_CONVERT expansion) and returns a **NativeTexture**: an object laid out as an IDirect3DTexture9 (22-slot
+  method table: AddRef/Release, GetType, GetLevelCount, GetLevelDesc, LOD; LockRect and GetSurfaceLevel refuse, the
+  native path has no CPU access). The engine stores it as its D3D texture. Cube and volume textures (0x00ee6e16,
+  0x00ee6e10) are not replaced yet (menus do not use them).
+* **State cache:** NiDX9RenderState set/get of render and sampler states, the blend setters, and texture binding
+  (slots 55-57: SetTexture / GetTexture / ClearTextureUsage) -> `nx::StateTracker`.
+* **Shader construction:** TileShader CreateVertexShaders / CreatePixelShaders / CreateConstantMaps and
+  BSShaderNoLighting::InitializeShaderData are no-ops.
+* **Lockable textures (fonts):** fonts are tile geometry (`Font::CreateTextShape`, 0x00a14a20: an NiTriShape with a
+  TileShaderProperty, its tint at +0x68 and the font page texture). Their textures are not files: the font loader
+  reads `TEXTURES\FONTS\*.TEX` (8-byte size + RGBA pixels) into NiPixelData, and the renderer data creates a D3D
+  texture (`NiDX9SourceTextureData::CreateSurf`, 0x00e68010) and fills it through GetSurfaceLevel / LockRect. That
+  function is replaced: it makes a lockable NativeTexture (CPU staging per level, D3DFORMAT from the renderer pixel
+  format's hint at +0x20, A8R8G8B8 without one) whose surfaces (IDirect3DSurface9 layout: GetDesc, LockRect,
+  UnlockRect, GetContainer) take the engine's copy; the native image is (re)made from the staging copy when the
+  texture is next bound or found after an UnlockRect.
+* **Tile scroll, scissor, stencil:** TileShaderProperty TexScroll (flag +0x91, offset +0x7C) -> the `tile_vc_scroll`
+  VS; its scissor rectangle (enable +0xAC, NiRectI at +0x9C, target pixels) -> scissor test for the draw;
+  NiStencilProperty (+0xAC on the geometry; flags +0x18: enable, fail / zfail / pass actions, test function; ref
+  +0x1C, mask +0x20) -> the D3D9 stencil states for the draw. All restored after the draw.
+* **Image space:** `ImageSpaceManager::RenderEffect` (0x00b97550) is replaced by a dispatcher. EFFECT_MENUBG (15)
+  renders natively (`Renderer::RenderMenuBackground`, family `menubg`: scene luminance through the tone texture,
+  mixed by the effect's blend amount at +0x5C; its ImageSpaceTexture at +0x58 gives the tone texture), source and
+  destination being engine render targets registered as target groups (destination 0: the current target). Every
+  other effect is counted and skipped: in the native build the world's image-space chain (HDR, bloom, ...) is not
+  drawn until its families exist. `ImageSpaceEffectMenuBackground::Setup` (0x00c04730) needs no replacement: it only
+  builds engine data and loads `sepia.dds` through the D3DX overrides. The `menubg` formula matches the game's
+  ISMENUBG shader (checked locally against the S6b translation of the user's shader package: 63 of 64 pixels within
+  2/255, one at a tone-texel boundary).
+* **Not native yet:** skinned geometry (N2, §4), engine render-target creation (BSRenderedTexture / NiRenderTargetGroup
+  -> `RegisterTargetGroup`), the other image-space effects, culling modes of NiStencilProperty's draw mode.
+
+Tested on GL and as the ILP32 guest by the N1 self-test (90 checks): a synthetic menu of three tiles built in
+engine layout (checker-textured background, a green button at material alpha 0.5 blended with SRCALPHA, an
+alpha-tested text tile) rendered only through the stubs, with textures created through the D3DX overrides, plus
+the menu-background effect over a rendered target; the RenderEffect dispatch for MENUBG with a tone texture made and
+filled through the lockable (font) path; stencil REPLACE/EQUAL, texture scroll and the tile scissor rectangle.
 
 ## 3. Native renderer design on deko3d
 
@@ -377,6 +447,102 @@ reference, never shipped in place of our shaders unless as a temporary fallback)
 4. The translated original remains a selectable per-family fallback (`nx::Family::Translated`), which also lets
    world rendering come up before every family is hand-written.
 
+### 4.2 Family semantics against the originals (V6n's c69 harness)
+
+V6n compares each family with the game's original program for the same pass (`tests/v6n/claims/c69_families.py`,
+the originals from the player's shader package, never in the repo). The families now follow the originals:
+
+| family / variant | original | semantics | inputs the family needs |
+|---|---|---|---|
+| `tile_scroll` VS | TILE1001.vso | uv = uv x TexScroll.zw + TexScroll.xy (texture 0); texture 1 at the plain uv | NxTileDraw.texScroll all four (zw = 1 without scaling) |
+| `tile_alphamap` PS | TILE1001.pso | rgb = Src0.rgb x tint.rgb, a = Src0.a x tint.a x AlphaMap.r | **two textures**: slot 0 Src0, slot 1 the alpha map |
+| `tile_vc` PS | TILE1002.pso | rgb = tex.rgb x tint.rgb, a = tex.a x vertex alpha | vertex colour (alpha) |
+| `nolight_texfall` VS | NOLIGHT004.vso | opacity mix by smoothstep(t), t from \|N.V\| between the falloff angles | as before |
+| `sky` VS + PS | SKY.vso / .pso | rgb = B0 x vc.r + B1 x vc.g + B2 x vc.b, a = vc.a x B0.a, z = params.x x w (far plane) | **vertex colour at location 2**; NxSkyDraw = {wvp, blend0, blend1, blend2, params (far z/w, cloud alpha, uv scroll)} |
+| `land_lit` VS + PS | SLS1025.vso / SLS1040.pso (LANDAD) | base x vc x clamp(clamp(N.Lt) x lightColor + ambient), N = 2 x normalMap - 1, Lt = (T.L, B.L, N.L) | **normal, tangent, binormal at locations 4-6; normal map at slot 4**; NxLandDraw += lightDir, lightColor, ambient |
+| `depth_at` VS + PS | SLS1000 (ZONLY_At) | alpha = diffuse.a through the D3D9 alpha test (epilogue), depth only | **uv at location 1, diffuse at slot 0**, the epilogue's alpha test |
+
+The first three plus the falloff pass V6n's cases as filed. For the other four the cases still feed the families'
+old interfaces (one texture for the alpha map, no vertex colour for the sky, `land` instead of `land_lit`, `depth`
+without uv); with the inputs in the last column all 12 cases match (run locally from a copy of the harness with
+those inputs; nothing of it is in the repo). Request to V6n: update those four cases' family inputs accordingly.
+
+### 4.3 Compile-time epilogue permutations (P6n hotspot 1)
+
+Every fragment shader that includes `d3d9_epilogue.glsl` is also built as `<name>__e0` (no fog, no alpha test: no
+epilogue code, no epilogue UBO), `<name>__ea` (alpha test only) and `<name>__ef` (fog only); `<name>` keeps the full
+runtime epilogue for draws with both. `nx::Renderer::Render` picks the permutation from the draw's resolved shader
+bits (alpha test enable, fog mode) for any package shader (it finds the blob from the shader's GLSL address,
+`Backend::ShaderGlsl`, so callers that create shaders themselves benefit too) and binds the epilogue UBO only when
+the permutation uses it. Image space (`menubg`) never had an epilogue. Maxwell code (uam, raw bytes x 3/32):
+
+| shader | full | __e0 | __ea | __ef |
+|---|---|---|---|---|
+| tex (P6n's image-space stand-in) | ~114 | ~18 | ~66 | ~60 |
+| tile (UI) | ~114 | ~12 | | |
+| lit_spec | ~246 | ~150 | | |
+
+The permutations are the same source with the branches folded, so results are identical (all scenes, the N1
+self-test and V6n's c69 cases unchanged). The N0 scenes still use the full runtime shaders (they exercise it).
+
+### 4.4 lit pass: static light permutations and the fp16 analysis (P6n hotspot 2)
+
+**Permutations.** `lit[_spec]_d<D>p<P>` (D = 1: light 0 is the directional light; P = 1, 2, 4, 8 point lights,
+7 with a directional one) unroll the light loop with constant indices: no loop counter, no per-light type branch,
+and constant-bank operands instead of indexed UBO loads. `nx::Renderer::Render` picks the smallest permutation that
+holds the draw's lights (at most one directional), copies the lights into the slice in the permutation's order
+(directional first, then points, then zero-colour padding with range 1, which contributes exactly 0), and then the
+epilogue permutation of §4.3 on top. More than one directional light, or no lights, keeps the dynamic shader.
+Code (uam, approximate Maxwell instructions; the dynamic shader executes its ~110-instruction loop body once per
+light, which is how P6n's ~411 instructions per pixel arise):
+
+| shader | static size | executed for 1 directional + 2 points |
+|---|---|---|
+| lit_spec (dynamic, runtime epilogue) | ~270 | ~400 (loop x 3 + epilogue) |
+| lit_spec__e0 (dynamic loop) | ~174 | ~300 |
+| **lit_spec_d1p2__e0** | ~186 | **~186** |
+| lit_spec_d1p1__e0 / _d1p4__e0 | ~138 / ~276 | same as size |
+| lit_d1p2__e0 (no specular) | ~108 | ~108 |
+
+Results are unchanged: the N1 self-test draws 1 directional + 2 point lights (given point first) through the
+dynamic and the static shader, identical within 1/255 (exact on GL); the `lit` scene and its golden are unchanged
+(the point-light maths now uses `dot(dv, dv)` and `inversesqrt`, the same values).
+
+**fp16 precision analysis** (what may run at half precision without visible change on 8-bit targets):
+
+| quantity | range | fp16 error | verdict |
+|---|---|---|---|
+| world positions, `lightPos - world` | FNV worldspace up to ~10^5 units | ~32 units at 4x10^4, overflow at 65504 | **highp** |
+| N, L, V, H (unit vectors after normalisation) | [-1, 1] | 2^-11 ~ 4.9e-4 relative | mediump: N.L error ~1e-3, < 0.3/255 |
+| attenuation 1 - d^2/r^2 (d^2 computed highp) | [0, 1] | 4.9e-4 | mediump |
+| light / ambient sums (rgb) | 0 .. ~8 | 4.9e-4 relative, ~0.004 at 8 | mediump: < 1/255 after the clamp to [0, 1] in the output |
+| specular pow(N.H, power), power up to ~100 | [0, 1] | relative error x power: ~5 % at 100 | **highp** (mediump only for power <= 16: < 1/255) |
+| texture colour, vertex colour | [0, 1] | 4.9e-4 | mediump |
+
+The shader marks those quantities `mediump`. **Today that changes nothing:** desktop GL ignores precision
+qualifiers, and uam compiles GLSL through TGSI, which has no 16-bit types, so no FP16 (HFMA2) code is generated
+(checked: a `mediump` and a `highp` test shader produce identical Maxwell code; `GL_EXT_shader_explicit_arithmetic_types_float16`
+is rejected). Getting real fp16 needs a uam change (an fp16-aware path to the Maxwell backend), which belongs to
+`render/shaders/uam.patch` (S6b): request filed in the S6n report. Until then the permutations are the lit pass's
+gain, and V6n stays exact because the arithmetic is unchanged.
+
+### 4.1 N2 skinning (started)
+
+Gamebryo skins on the GPU per NiSkinPartition: each partition has its bone list (the palette), up to 4 weights and
+palette indices per vertex, and a vertex goes to world space by `BoneWorld[b] * SkinToBone[b] * v` (NiSkinData's
+skin-to-bone transforms, the bones' world transforms from NiSkinInstance's bone nodes). The native path:
+
+* `include/nx/skin.h`: `NxBoneXform` (an NiTransform) and `nx_skin_palette` (composition, 3x4 rows per palette entry,
+  up to `NX_SKIN_MAX_BONES` = 32 per partition);
+* SKIN variants `lit_skin` and `depth_skin` (vertex stage): attributes 4 (weights) and 5 (indices), both unorm8x4;
+  the palette (`vec4 bones[96]`) follows the draw block (`NxLitSkinDraw`, `NxDepthSkinDraw`, 2000 / 1600 bytes), the
+  skinned position and normal replace the model-space ones (world = identity, wvp = view-projection);
+* N0 scene `skin`: a limb bent 90 degrees at a joint with blended weights, a quad whose bone turns its normal away
+  from the light, a depth_skin quad moved in z by its bone; golden + checks, identical on the ILP32 guest.
+
+Next: reading NiSkinInstance / NiSkinData / NiSkinPartition from engine objects into palettes and partition draws
+(Do_RenderGeometry's skinned branch, now skipped and counted), and the remaining families' SKIN variants.
+
 ## 5. Recommendation
 
 **Native renderer, hybrid on the shader side; drop the D3D9 emulation layer as the main path.**
@@ -428,6 +594,14 @@ image + vtable rewrite), S4 (boot), S5 (toolchain/deko3d linkage).
 * `render/native/include/nx/` - interfaces only (no implementation yet): packet, pipeline state, frame graph,
   rings, family.
 * `render/native/tools/d3d_boundary.py <decomp>` - groups S6's D3D call-site scan by subsystem (§1.9).
+
+### 6.1 Pass markers in the stream
+
+`NxOp_Marker` with tag `NX_MARKER_PASS` (`nx/gpu_abi.h`) carries the engine pass id (the numbering of §1.3) and the
+family id (`NxFamilyId`, `nx/families.h`) of the draws that follow it in a pass. The front encodes one before the
+first draw of each run of equally tagged draws after sorting; nx::Renderer tags its draws from `Draw.enginePass` /
+`Draw.family` or from `Renderer::SetEnginePass(pass, family)`, which the N1/N2 families call where they know the pass.
+Backends ignore it; `.nxcap` captures keep it, so `render/verify/capture/nxcap.py` can count draws per pass id.
 
 ## 7. N0: what exists (2026-11-04)
 
@@ -526,6 +700,243 @@ if (fi.flags & NXFMT_CONVERT) n = nx_d3d9_convert(d3dfmt, w, h, mips, faces, src
 NxEpilogue e; nx_epilogue_fill(&e, &dyn, shaderBits);             /* fragment UBO slot 2 of every shader */
 ```
 
+Test harness (`render/native/front/harness.h`, LP64 host): `nxh_init(&h, api, w, h, colorFmt, depthFmt)`,
+`nxh_shader(&h, NxStage_Fragment, glsl, dksh, size)`, `nxh_draw(&h, ps, &state, &dyn, ubo, size, &epi, handles, n)`,
+`nxh_clear(&h, flags, rgba8, depth, stencil, x, y, w, h)`, `nxh_readback(&h, NxRb_RGBA8 | NxRb_RGBA32F | NxRb_Depth32F |
+NxRb_Stencil8, x, y, w, h, dst, size)`. ABI v3 adds `NxReadback.format` and `NxOp_Clear` (rectangle clears).
+
 Units: blend constant, fog colour and border are colour channels in [0,1] (byte / 255); `alphaRef` = ALPHAREF /
 255 unclamped; `depthBiasUnits` is in GL `glPolygonOffset` units (r = 2^-24 for D24); viewport in pixels for a
 +0.5-centre rasterizer; scissor in pixels, top-left origin; sampler `minLod`/`maxLod` in mip levels.
+
+## 8. nx_render: captures and scenes to PNG (the S16-compare entry point)
+
+S16-compare renders reference frames with the real exe under Wine and compares them (PSNR/SSIM/FLIP) with the
+native renderer. Its one entry point here is **`nx_render`**, a host program that renders a capture or a scene
+with the native renderer on the GL reference backend (`render/native/gl`, bit-exact to the goldens) and writes PNGs.
+
+### 8.1 Build, run, outputs, exit codes
+
+```sh
+source <(render/native/env.sh --print)
+make -C tests/s6n /tmp/fnvnx-s6n-tests/nx_render     # binary (OUT=<dir> to place it elsewhere)
+make -C tests/s6n nx_render                          # its test (tests/s6n/test_nx_render.py)
+
+nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--per-draw] [--until-draw N] [--frame F]
+nx_render nxcap <file.nxcap> -o <dir> [--per-draw] [--until-draw N] [--frame F]
+nx_render scene <name|all>   -o <dir> [--per-draw] [--until-draw N]
+```
+
+Needs a Mesa/EGL GL 4.5 context (surfaceless; llvmpipe is fine). `<dir>` is created (one level).
+
+| file | written for |
+|---|---|
+| `f<frame %05u>.png` | every frame: an NXD9 `PRES`, or an `.nxcap` `SUBM` with present = 1 (the swapchain image) |
+| `rb<index %04u>.png` | every `.nxcap` `RDBK` record, in file order (RGBA8 as is; RGBA32F clamped; depth and stencil as grey) |
+| `f<frame>_d<draw %05u>.png` | `--per-draw`: after each draw, the colour target of that draw's pass; draw = index of the draw in the frame's submit, counting backend draws (skipped NXD9 draws are not counted) |
+| `<scene>.png`, `<scene>_d<draw>.png` | scene mode (160x120; identical to `tests/s6n/golden/<scene>.png`) |
+| `summary.txt` | the counters line also printed on stdout; for NXD9 the first skipped draw and why |
+
+`--until-draw N` stops drawing after draw N of each frame (the frame image then holds draws 0..N; clears and later
+passes still run). `--frame F` restricts `--per-draw` and `--until-draw` to frame F. Together they localise a
+mismatch: bisect with `--until-draw`, then `--per-draw --frame F` around it.
+
+Exit codes: **0** rendered everything; **1** runtime failure (malformed input, missing shader GLSL, backend error;
+message on stderr); **2** usage or file I/O error; **3** rendered, but some draws were skipped as unsupported
+(counts and the first reason in `summary.txt`). Images are PNG RGBA8, row 0 at the top, D3D9 pixel coordinates.
+
+### 8.2 The `.nxcap` format (post-translation capture, `render/native/capture/capture.h`)
+
+Recorded by `nx::CaptureBackend` after the native front end (state words, GLSL families); replayable only into an
+NxGpuApi, not into D3D9. All integers little-endian; structs are those of `include/nx/gpu_abi.h` and
+`include/nx/state.h` (sizes static-asserted there).
+
+* Magic `"NXCAP\0\0\1"` (8 bytes), then records `u32 tag, u32 payload bytes, payload` (payloads are multiples of 4
+  bytes). Tags are four ASCII bytes read as a little-endian u32. Unknown tags must be skipped.
+
+| tag | payload |
+|---|---|
+| `INFO` | `NxGpuInfo` (32 B: magic `0x5550474e`, version 3, frames_in_flight, flags, width, height, backend, pad) |
+| `MEMC` | u32 id, u32 size, u32 kind (`NxMemKind`): a memory block; contents arrive with `SUBM` |
+| `IMGC` | u32 id, `NxImageDesc` (32 B; its `data` field 0), then `data_size` bytes of texels (mips 0..n-1 tightly packed, BCn by 4x4 blocks, padded to 4). An image whose format has an sRGB view also owns id + 1 |
+| `SMPC` | u32 id, `NxSamplerState` (16 B) |
+| `SHDC` | u32 id, u32 stage (0 vertex, 1 fragment), u32 dkshBytes, u32 glslBytes, DKSH, GLSL (each padded to 4) |
+| `SUBM` | u32 frame, u32 present, u32 words, the command words, u32 nranges, then per range u32 block, u32 offset, u32 size and `size` bytes (padded to 4): the bytes of every memory range the stream binds (UBO, vertex, index), as the GPU saw them |
+| `RDBK` | `NxReadback` (40 B; `dst` 0), u32 bytes, the pixels read at that point (row 0 at the top, format per `NxReadback.format`) |
+
+Command words: `[opcode | argument count << 16]` then the arguments; the opcodes and their arguments are the
+`NxOp` list in `gpu_abi.h` (End, DefineState, DefineLayout, BeginPass, EndPass, Barrier, BindState, BindUbo,
+BindVtx, BindIdx, BindTextures, Draw, DrawIndexed, Viewport, Scissor, StencilRef, BlendConst, DepthBias, Clear,
+Marker). A reader skips an unknown opcode by its count. `NxOp_Marker` with tag `PASS` names the engine pass id
+(§1.3) and family of the draws that follow (§6.1). Texture handles in `BindTextures` are `image | sampler << 20`.
+`render/verify/capture/nxcap.py` (V6n) is an independent reader.
+
+### 8.3 The `.nxd9` format (D3D9-level capture; what S16's converter writes)
+
+`.nxcap` cannot carry the exe's frames (it is recorded after translation), so S16 converts its D3D9 call stream to
+**NXD9** (`render/native/capture/d3d9cap.h`; Python reference writer `tests/s6n/nxd9.py`). `nx_render d3d9` runs it
+through the native D3D9 translator (`front/d3d9_state.h`, Nine 20.1 rules) and S6b's translated shaders into the GL
+backend. **Choice:** shader translation is S6b's (`render/shaders`, MojoShader `glsldk` profile, layout contract
+`render/shaders/include/fnvnx_dk_layout.h`); nx_render does not link it. The converter either embeds each shader's
+GLSL in its `VSH`/`PSH` record, or leaves it empty and passes `--shaders <dir>` holding `<hash %016llx>.glsl` as
+`sdp2dksh -o <dir> --glsl shaderpackage*.sdp` writes them (hash = `fnvnx_shader_hash`, FNV-1a 64 of the bytecode).
+
+File: magic `"NXD9\0\0\0\1"`, then records `u32 tag, u32 payload bytes, payload, zero padding to 4` (the length
+excludes the padding). Little-endian; ids are converter-chosen, nonzero, unique per kind; records apply in order,
+exactly like the D3D9 calls they stand for. Unknown tags are skipped.
+
+| tag | payload | D3D9 call |
+|---|---|---|
+| `DEV ` | u32 width, height, back-buffer D3DFORMAT, auto depth-stencil D3DFORMAT (0 none) | CreateDevice / Reset |
+| `TEX ` | u32 id, D3DFORMAT, width, height, levels, flags (1 render target, 2 cube), then per level u32 bytes + the level's texels, tightly packed rows (BCn: 4x4 blocks), padded to 4; render targets: levels with 0 bytes | CreateTexture (+ initial contents) |
+| `TEXU` | u32 id, level, bytes, texels | LockRect/UnlockRect, UpdateTexture, UpdateSurface |
+| `SURF` | u32 id, kind (1 colour, 2 depth-stencil), D3DFORMAT, width, height, texture id (render-target texture whose level 0 this is, else 0) | GetSurfaceLevel, CreateRenderTarget, CreateDepthStencilSurface |
+| `VB  ` / `IB  ` | u32 id, size; IB adds format (101 INDEX16, 102 INDEX32) | CreateVertexBuffer / CreateIndexBuffer |
+| `VBU ` / `IBU ` | u32 id, offset, bytes, data | Lock/Unlock (the bytes written; DISCARD needs no special record) |
+| `DECL` | u32 id, count, count x D3DVERTEXELEMENT9 (8 B: u16 stream, offset; u8 type, method, usage, usageIndex), no END element | CreateVertexDeclaration |
+| `VSH ` / `PSH ` | u32 id, hash lo, hash hi, bytecodeBytes, bytecode (padded), u32 glslBytes, GLSL | CreateVertexShader / CreatePixelShader |
+| `RS  ` | u32 D3DRENDERSTATETYPE, value (floats as their bits) | SetRenderState |
+| `SS  ` | u32 sampler 0-15, D3DSAMPLERSTATETYPE, value | SetSamplerState |
+| `TSS ` | u32 stage, type, value | SetTextureStageState (recorded; unused) |
+| `STEX` | u32 sampler 0-15, texture id (0 none) | SetTexture |
+| `SVS ` / `SPS ` | u32 shader id (0 = fixed function) | SetVertexShader / SetPixelShader |
+| `VSCF` / `PSCF` | u32 start register, count, count x 4 floats | Set*ShaderConstantF |
+| `VSCI` / `PSCI` | u32 start, count, count x 4 int32 | Set*ShaderConstantI |
+| `VSCB` / `PSCB` | u32 start, count, count x u32 | Set*ShaderConstantB |
+| `SDCL` | u32 declaration id | SetVertexDeclaration |
+| `STRM` | u32 stream, vb id, offset, stride | SetStreamSource |
+| `SIDX` | u32 ib id | SetIndices |
+| `SRT ` | u32 index, surface id (0 = back buffer); resets viewport and scissor to the target, as D3D9 does | SetRenderTarget |
+| `SDS ` | u32 surface id (0 none, 0xFFFFFFFF the auto depth-stencil) | SetDepthStencilSurface |
+| `VIEW` | D3DVIEWPORT9 (u32 x, y, w, h; f32 minZ, maxZ) | SetViewport |
+| `SCIS` | RECT (i32 left, top, right, bottom) | SetScissorRect |
+| `CLR ` | u32 flags (D3DCLEAR_*), D3DCOLOR, f32 z, u32 stencil, u32 rect count, rects | Clear (viewport, intersected with the scissor rect while SCISSORTESTENABLE, and with each rect; the colour through the sRGB view under SRGBWRITEENABLE) |
+| `DRAW` | u32 D3DPRIMITIVETYPE, startVertex, primitiveCount | DrawPrimitive |
+| `DRWI` | u32 type, i32 baseVertex, u32 minIndex, numVertices, startIndex, primitiveCount | DrawIndexedPrimitive |
+| `PRES` | (empty) | Present: the end of a frame, written as `f<frame>.png` |
+
+Executed (and claimed by the test): programmable draws from stream 0 with a declaration; every D3DDECLTYPE except
+UDEC3/DEC3N (decoded to float4 on the CPU, D3DCOLOR swizzled to RGBA); attribute locations by
+`fnvnx_dk_attrib_location`, remapped to the backend's 8 attribute slots; VS outputs added (as 0) for PS inputs the
+VS does not write (D3D9 allows it, GL refuses to link); per stage UBO 0 = `c[256]`, UBO 1 = `i[16]` + `b[16]`,
+UBO 2 = driver constants (VS posfix (0, 0, 1): the native viewport already carries D3D9's half pixel; PS fog mode
+from FOGENABLE / FOGTABLEMODE (vertex fog when the table mode is NONE; none for ps_3_0), FOGSTART/END/DENSITY,
+FOGCOLOR, alpha test = ALPHAFUNC when ALPHATESTENABLE, ALPHAREF / 255); all render states through
+`nx_d3d9_translate` (blend, depth, stencil, raster, sRGB write, bias, scissor); sampler states through
+`nx_d3d9_sampler` (sRGB view when SRGBTEXTURE); render-target textures and surfaces, the auto depth surface.
+
+Skipped and counted (exit code 3): fixed-function draws (no VS or no PS), FVF draws (no declaration), POSITIONT,
+streams other than 0 (instancing), cube textures (sampled as none), vertex textures. Varyings the VS writes beyond
+the PS are fine. A converter should still emit everything; nx_render reports what it skipped.
+
+Size limits: 4096x4096 images, 128 MiB of per-frame vertex/index/constant copies, 4 M command words per frame.
+
+### 8.4 Input limits (malformed files)
+
+Both formats are outside input (S16's converter, console captures), so both readers check every size against its
+record in 64 bits, and against fixed bounds, before they allocate, copy or call the backend. A file that breaks a
+rule ends in exit 1 with a message that names the record (J-0147, V1). Ids out of a table's range map to 0 (no
+resource) and do not fail.
+
+| | limit |
+|---|---|
+| both | a record's length never runs past the file |
+| `.nxd9` | DEV at most 4096x4096; TEX and SURF at most 8192 on a side and 16 M texels, at most 14 levels; VB/IB at most 64 MiB, VBU/IBU ranges inside 64 MiB; DECL at most 64 elements; CLR rect count fits the record; draws over 4 M vertices are skipped (exit 3); buffers and texture levels together at most 1 GiB |
+| `.nxcap` | MEMC ids 0-256, each defined once, 1 byte to 256 MiB, at most 1 GiB in all; IMGC at most 8192 on a side and 16 M texels, at most 14 mips, `data_size` inside the record; SUBM: words, memory ranges and each op's arguments inside the record, ranges inside their block; RDBK at most 8192 on a side, pixel bytes inside the record |
+
+Tests: `make -C tests/s6n nx_render_robust` builds nx_render with ASan and UBSan, then runs
+`tests/s6n/test_nx_render_bounds.py` (35 cases, one per limit) and V1's `tests/v1/test_nx_render_robust.py` (13
+cases, plus `ITERS` mutations of the two `nx_render` test captures, 300 by default).
+
+## 9. Frame-rate targets, dynamic resolution and presets
+
+Targets set by the owner: **45 fps stable** (22.2 ms) is the main target, **60 fps** (16.7 ms) the stretch, below
+30 fps a fail, and the target platform for the gates is **720p handheld**. Lowering the resolution must not hide
+render cost: both presets render the scene at **1280x720** (scale 1.0); the performance gates measure that frame
+with dynamic resolution **off**, and the work to reach 45 fps there is optimisation (profile-driven, P6n's ranked
+hotspots in `render/native/perf/report.json` / `docs/RENDER_PERF.md`). Dynamic resolution (below) is only a safety
+net for peak scenes in shipped builds, never the baseline. The UI is never scaled.
+
+### 9.1 Frame graph with a scaled scene
+
+```
+ shadow maps (fixed size per preset)            -- not scaled
+ water reflection / depth (preset fraction)     -- scaled with the scene
+ scene passes, pass ids < 757 (§1.3)            -> scene colour + depth at  s x native   (sub-rectangle)
+ image space (HDR adapt, bloom, DOF, ...)       -> at the scene scale, last effect writes the scene colour
+ upscale                                        -> native target  (bilinear now; an EASU/RCAS-style family later)
+ TILE (757), menu background, HUD, IMAGESPACE (758) for menus -> native target at native resolution
+ present
+```
+
+* **Targets** are allocated once at the preset's maximum scale; a frame renders into the top-left
+  `s x W` by `s x H` sub-rectangle (viewport and scissor), so a scale change never reallocates or flushes.
+  The upscale samples `uv x (sW/W_max, sH/H_max)` with the sampler clamped half a texel inside the sub-rectangle.
+* **Where the switch happens:** the default target group of `Do_BeginUsingRenderTargetGroup` names the scene target
+  (size `sW x sH`) while scene passes run, and the native back buffer from the first TILE draw or
+  `Do_SetScreenSpaceCameraData` of the menu/HUD phase on; the upscale is emitted at that switch. Camera ports
+  (`Do_SetCameraData`, C75) and the screen-space projection (C74) take the group's size, so the engine's
+  pixel-exact maths keeps working at the scaled size; `PASS` markers (§6.1) show which side each draw is on.
+* **Upscale pass:** a full-screen quad at -0.5 px (D3D9: texel centres meet pixel centres), bilinear, before the
+  UI. Implemented and tested in the N0 scene `dynres` (0.75x: 120x90 -> 160x120; UI box and a 1-px line exact at
+  native resolution, scene interiors exact, the bilinear edge within 2/255 of the formula), bit-identical on the
+  ILP32 guest. Cost on Maxwell: one 1280x720 RGBA8 read + write, ~0.15 ms docked.
+
+### 9.2 Controller (`render/native/front/dynres.h`, `nx::DynResController`)
+
+* **Input:** GPU time of each completed frame: deko3d timestamps (`dkCmdBufReportCounter(DkCounter_Timestamp)`) at
+  the start of the stream and after the upscale, read back with the frame's fence (`NxFrameStats.gpu_us`). It
+  arrives two frames late (2 frames in flight); the controller only needs a trend.
+* **Smoothing and hysteresis:** EMA with weight 0.25 on the newest frame. One step down when the smoothed time stays
+  above 95 % of the budget for 3 frames; one step up only after 30 frames below 80 %; nothing in between (a dead
+  band, so the scale does not oscillate). A single frame above 125 % drops two steps at once (camera cuts,
+  explosions). The EMA restarts after each change (a new resolution is measured afresh).
+* **Steps:** 0.05 per axis on a fixed grid from the maximum (so sizes repeat), sizes rounded down to multiples of 8.
+* **Range:** 0.75 - 1.0 in both presets (a safety net for peaks, starting at 1.0; the gates run with it off). Budget = 22.2 ms (45 fps mode) or 16.7 ms (60 fps mode); the frame cap stays at
+  the target rate (`dkQueuePresentImage` with swap interval), so a fast GPU raises resolution, not frame rate.
+* Tested in `tests/s6n/test_front.cpp` (`test_dynres`: hysteresis, panic, clamps, dead band, 8-aligned sizes).
+
+### 9.3 Presets
+
+Output 1280x720 in both modes (the UI, the upscale target); docked 1080p output is a later option (the UI at
+1080p, the scene range unchanged). Values are the starting points to tune with measurements (P6n's CPU numbers in
+`render/native/perf/`, GPU timestamps); INI settings are the game's own (`FalloutPrefs.ini` / `Fallout.ini`).
+
+| setting | docked | handheld |
+|---|---|---|
+| GPU clock | 768 MHz | 384 MHz (460 boost profile if allowed) |
+| scene resolution | 1280x720 (scale 1.0) | 1280x720 (scale 1.0) |
+| dynamic resolution (safety net only, off in the gates) | 0.75 - 1.00 (960x540 - 1280x720), starts at 1.0 | 0.75 - 1.00 (960x540 - 1280x720), starts at 1.0 |
+| budget | 22.2 ms (45); 16.7 ms in 60-fps mode | 22.2 ms (45) only |
+| shadow maps `iShadowMapResolution` | 1024 | 512 |
+| `iActorShadowCountExt` / `Int` | 2 / 4 | 1 / 2 |
+| `fShadowLODStartFade` | 200 | 100 |
+| water reflections `iWaterReflectWidth` x `Height` | 512 x 512 (scaled with the scene) | 256 x 256 |
+| `bUseWaterReflections` / `bUseWaterDisplacements` | 1 / 1 | 1 / 0 |
+| grass `fGrassStartFadeDistance` / `iMinGrassSize` | 3500 / 80 | 2000 / 120 |
+| object LOD `fLODFadeOutMultObjects` / `Items` / `Actors` | 10 / 3 / 6 | 6 / 2 / 4 |
+| `fBlockLoadDistanceLow` / `fTreeLoadDistance` | 50000 / 40000 | 35000 / 25000 |
+| `fSpecularLODStartFade` | 1500 | 800 |
+| `iMaxDecalsPerFrame` / `iMaxSkinDecalsPerFrame` | 10 / 3 | 5 / 1 |
+| `bDoDepthOfField` | 1 | 0 |
+| `iMultiSample` / `bTransparencyMultisampling` | 0 / 0 | 0 / 0 |
+| `uGridsToLoad` | 5 (gameplay: unchanged) | 5 |
+
+### 9.4 Render-thread budgets
+
+The render thread runs the native back half (§3.6): sort, encode, submit, plus the per-draw translation the
+families do at packet build. Budgets per frame (the main thread's game update and cull are measured by P6n and are
+not part of these numbers):
+
+| work | 22.2 ms (45 fps) | 16.7 ms (60 fps) |
+|---|---|---|
+| packet build in the families (main thread, ~1-2 us x 1.5-3.5 k draws) | 4.0 ms | 3.0 ms |
+| sort + encode (render thread, ~0.5 us/draw) | 1.5 ms | 1.2 ms |
+| deko3d command recording + submit (render thread) | 2.0 ms | 1.5 ms |
+| dynamic geometry / UBO ring writes (render thread) | 1.0 ms | 0.8 ms |
+| render thread total (must overlap the main thread) | **4.5 ms** of 22.2 | **3.5 ms** of 16.7 |
+| GPU (the controller's budget; frame N-1 while the CPU builds N) | 22.2 ms, aim 19-21 | 16.7 ms, aim 14-16 |
+| slack for the main thread (game update, AI, cull) | ~16 ms | ~12 ms |
+
+Above budget, the order of measures is: instancing (trees, grass, LOD), the SM3 light loop (fewer passes), the
+controller's scene scale, then the preset's distances.

@@ -15,6 +15,9 @@
                                                               # the synthesized vtables/typeinfo (vtables.py;
                                                               # FNVNX_NO_VTABLES=1 skips them); then resolve again
     fnvlink.py vtables <out dir> <prepared tree> [jobs]        # only the vtable/typeinfo synthesis
+    fnvlink.py bodies  <out dir> <prepared tree> [--msvc-objs <dir>] [--exe <exe>] [--names <undefined.txt>] [--no-synth]
+                                                              # declared-only functions (bodies.py): bound by
+                                                              # address or synthesized; then resolve again
     fnvlink.py apply   <out dir> <fixed dir>                   # objcopy every object with its generated args
     fnvlink.py check   <out dir> <fixed dir>                   # trial link: what is still undefined / duplicated
 
@@ -41,6 +44,7 @@ import layout   # noqa: E402
 import sigs     # noqa: E402
 import vtables  # noqa: E402
 import vslots as msvc_vslots  # noqa: E402  (`vslots` is a local name in resolve)
+import bodies   # noqa: E402  (S2d: declared-only functions)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
 DATA_END = 0x0200c612
@@ -331,6 +335,22 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             have.append(su)
     if len(have) > len(real):
         log('synthesized vtable objects: %d' % (len(have) - len(real)))
+    # ---- S2d (bodies.py, `fnvlink.py bodies`): synthesized bodies of declared-only functions, extra objects of
+    # their host unit like the vtables above; body_bind: names bound to an address under another name
+    n_vt = len(have)
+    for host, path in bodies.load_synth(out):
+        if host in units:
+            su = Unit('%s#bodies%d' % (host, len(have)))
+            su.host, su.obj = host, path
+            su.refs = dict(units[host].refs)
+            for a, n in units[host].defs:
+                su.refs.setdefault(n, a)
+            units[su.source] = su
+            have.append(su)
+    if len(have) > n_vt:
+        log('synthesized body objects: %d' % (len(have) - n_vt))
+    body_bind = bodies.load_bind(out)
+    # ---- end S2d
 
     # Itanium side
     objsyms, itnames = {}, set()
@@ -829,6 +849,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                         xtraps.setdefault(target, (un, why))
             elif cls == 'special-unresolved':
                 cls = 'special-unresolved:' + (note or '?').replace(' ', '-')
+            if cls in bodies.TRAPPED and un in body_bind:   # S2d: same function at an address, another name
+                cls, target = body_bind[un]
             if un in vslots:
                 stats['vslot_refs'] += 1
             if cls == 'runtime' and un in GAME_RENAMES:
@@ -2491,6 +2513,8 @@ def main():
         if os.path.exists(os.path.join(sys.argv[2], 'vtable_requests.tsv')) and \
                 (cmd == 'vtables' or not os.environ.get('FNVNX_NO_VTABLES')):
             vtables.run(sys.argv[2], sys.argv[3], jobs)
+    elif cmd == 'bodies':
+        bodies.main(sys.argv[2:])
     elif cmd == 'apply':
         apply(*sys.argv[2:4])
     elif cmd == 'check':

@@ -1,0 +1,9 @@
+vs_2_0
+defi i1, 3, 4, 2, 0
+dcl_position v0
+mov r0, c0
+loop aL, i1
+add r0, r0, c[aL + 0]
+endloop
+mov oPos, v0
+mov oT0, r0

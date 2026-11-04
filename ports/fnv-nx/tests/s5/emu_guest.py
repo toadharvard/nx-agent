@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "toolchain", "tools"))
 import elf2nso  # noqa: E402
 
-from unicorn import UC_ARCH_ARM64, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_MODE_ARM, UC_PROT_ALL, UC_PROT_EXEC, \
+from unicorn import UC_ARCH_ARM64, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, UC_PROT_EXEC, \
     UC_PROT_READ, UC_PROT_WRITE, Uc, UcError  # noqa: E402
 from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, \
@@ -91,6 +91,30 @@ def parse_fault_table(path):
             raise ValueError(f"{path}:{k}: <function> [return0 | return-this | malloc:xN | use-malloc:xN]")
         stubs.append((f[0], action))
     return stubs, pre
+
+
+MILESTONES = os.path.join(HERE, "milestones.txt")
+
+
+def parse_milestones(path):
+    """--milestones table (tests/s5/milestones.txt): [(name, 'call'|'store', target)] in file order; a name may have
+    several lines (any one reaches it); '#' starts a comment."""
+    out = []
+    with open(path) as fh:
+        lines = fh.read().splitlines()
+    for k, line in enumerate(lines, 1):
+        f = line.split("#", 1)[0].split()
+        if not f:
+            continue
+        ok = len(f) == 3 and re.fullmatch(r"[a-z][\w-]*", f[0]) and (
+            f[1] == "call" and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
+            f[1] == "store" and re.fullmatch(r"\*?0x[0-9a-fA-F]+(\+(0x[0-9a-fA-F]+|\d+))?", f[2]))
+        if not ok:
+            raise ValueError(f"{path}:{k}: <name> call <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N>")
+        if f[1] == "call" and f[2].startswith("re:"):
+            re.compile(f[2][3:])
+        out.append(tuple(f))
+    return out
 
 
 def placement_table():
@@ -192,7 +216,7 @@ class Emu:
         map_seg(ro, UC_PROT_READ)
         map_seg(data, UC_PROT_READ | UC_PROT_WRITE, data["bss"])
         uc.mem_map(STACKS_TOP - STACK_SIZE * MAX_THREADS, STACK_SIZE * MAX_THREADS, UC_PROT_READ | UC_PROT_WRITE)
-        heap = HEAP_BASE if base >= HEAP_BASE + HEAP_SIZE or base + size <= HEAP_BASE else HEAP_BASE_ALT
+        heap = self.heap = HEAP_BASE if base >= HEAP_BASE + HEAP_SIZE or base + size <= HEAP_BASE else HEAP_BASE_ALT
         uc.mem_map(heap, HEAP_SIZE, UC_PROT_READ | UC_PROT_WRITE)
         uc.mem_map(HOST_PAGE, PAGE, UC_PROT_ALL)
         self.stubs = {HOST_PAGE + 0x800 + 4 * i: name for i, name in enumerate(SLOTS)}
@@ -828,6 +852,118 @@ class Emu:
             out.append(f"trap-table\t{first}\t{hits}\t{'winmain' if phase else 'init'}\t{k}\t{name}\t{who}")
         return out
 
+    # -- boot milestones (--milestones, default tests/s5/milestones.txt): how far the game got, from events the
+    # boot cannot fake. 'call F' is reached when F's first instruction runs (F an original address 0x... or
+    # 're:<regex>' over the ELF's code symbols, for native code such as the D3D9 device); 'store A' when a non-zero
+    # word is written to the data-window address A; 'store *A+N' when one is written to (the pointer stored at A)+N.
+    def install_milestones(self, path):
+        self.miles, self.mile_order = {}, []
+        for name, kind, target in parse_milestones(path):
+            if name not in self.mile_order:
+                self.mile_order.append(name)
+            if kind == "call":
+                if target.startswith("re:"):
+                    rx = re.compile(target[3:])
+                    addrs = sorted({self.code_addr(n) for n in self.code_syms if rx.search(n)})
+                else:
+                    addrs = [a for a in [self.code_addr(target)] if a is not None]
+                for a in addrs:
+                    self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
+                if not addrs:
+                    print(f"   milestones: {name}: {target} is not in the link")
+            else:
+                m = re.fullmatch(r"(\*?)(0x[0-9a-fA-F]+)(?:\+(0x[0-9a-fA-F]+|\d+))?", target)
+                addr, off = int(m.group(2), 16), int(m.group(3) or "0", 0)
+                if m.group(1):
+                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_base, user_data=(name, target, addr, off),
+                                     begin=addr, end=addr + 3)
+                else:
+                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(name, target, addr),
+                                     begin=addr, end=addr + 3)
+        print(f"   milestones: {', '.join(self.mile_order)}")
+
+    def mile_hit(self, name, how, at=None):
+        if name in self.miles:
+            return
+        lr = self.uc.reg_read(UC_ARM64_REG_LR)
+        where = self.sym(self.uc.reg_read(UC_ARM64_REG_PC) if at is None else at).split(" ", 1)[-1]
+        self.miles[name] = {"how": how, "where": where, "caller": self.sym(lr).split(" ", 1)[-1],
+                            "seq": len(self.miles) + 1, "host_calls": self.calls,
+                            "thread": self.cur.tid if self.cur else 1}
+        print(f"   milestone: {name} ({how} at {where}, caller {self.miles[name]['caller']})")
+
+    def on_mile_call(self, uc, addr, size, name):
+        if name not in self.miles:
+            self.mile_hit(name, "call", at=addr)
+
+    def on_mile_store(self, uc, access, addr, size, value, data):
+        name, target, want = data
+        if name not in self.miles and self.stored_word(addr, size, value, want):
+            self.mile_hit(name, f"store {target}")
+
+    def on_mile_base(self, uc, access, addr, size, value, data):
+        """a store to A of 'store *A+N': watch (the new pointer)+N, which may hold its value already"""
+        name, target, base, off = data
+        p = self.stored_word(addr, size, value, base, nonzero=False)
+        if name in self.miles or not p:
+            return
+        try:
+            (cur,) = struct.unpack("<I", uc.mem_read(p + off, 4))
+        except UcError:
+            cur = 0
+        if cur:
+            self.mile_hit(name, f"store {target} (already set when the pointer was stored)")
+        else:
+            uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(name, target, p + off),
+                        begin=p + off, end=p + off + 3)
+
+    @staticmethod
+    def stored_word(addr, size, value, want, nonzero=True):
+        """the 32-bit word a store of size bytes at addr leaves at want (None if it does not cover all of it)"""
+        if size not in (4, 8, 16) or not addr <= want < addr + size or want + 4 > addr + size:
+            return None
+        w = (value >> (8 * (want - addr))) & 0xFFFFFFFF
+        return (w if w or not nonzero else None)
+
+    def milestone_lines(self):
+        """milestone <name> <reached|-> <how> <where> <caller>, in the table's order"""
+        out = []
+        for n in getattr(self, "mile_order", []):
+            m = self.miles.get(n)
+            out.append(f"milestone\t{n}\t" + ("\t".join(["reached", m["how"], m["where"], m["caller"]]) if m else "-"))
+        return out
+
+    def summary(self, stop, rc=None):
+        """the machine-readable boot summary (--summary-json): milestones in order, the highest reached, the stop"""
+        order = getattr(self, "mile_order", [])
+        reached = [n for n in order if n in self.miles]
+        best = None
+        for n in order:   # the last milestone in table order that was reached (later ones may come without earlier)
+            if n in self.miles:
+                best = n
+        msgs = [l.strip() for l in self.console.decode(errors="replace").splitlines()
+                if re.search(r"\[fnvnx\] (MessageBox|ExitProcess|FatalAppExit)", l)]
+        tr = getattr(self, "last_trace", None)
+        return {
+            "schema": "fnvnx-boot-summary/1",
+            "milestones": [dict(name=n, reached=n in self.miles, **self.miles.get(n, {})) for n in order],
+            "milestone": best, "reached": len(reached), "of": len(order),
+            "winmain": "calling WinMain" in self.console.decode(errors="replace"),
+            "stop": {"reason": stop, "exit_code": rc, "trace": tr, "messages": msgs[:20]},
+            "initializers_skipped": len(getattr(self, "skipped", None) or []),
+            "stubbed_faults": len(getattr(self, "stubbed", [])),
+            "host_calls": self.calls, "threads": len(self.threads),
+            "peak_heap_bytes": self.heap_high_water(),
+        }
+
+    def heap_high_water(self):
+        """bytes from the start of the guest heap (the host's malloc arena, mapped zeroed) to its last non-zero byte:
+        the most the boot's heap ever reached, as far as memory it wrote shows (R0's boot_peak_heap_bytes)"""
+        try:
+            return len(bytes(self.uc.mem_read(self.heap, HEAP_SIZE)).rstrip(b"\0"))
+        except UcError:
+            return None
+
     # -- guarded initializer calls (--skip-faulting-init): every indirect call (blr) made by the initializer
     # runners is a checkpoint; a fault below one restores the registers of the call and returns 0 from it, so a
     # boot without game data can be traced past initializers that fault on the empty image.
@@ -883,6 +1019,9 @@ class Emu:
         uc = self.uc
         pc, lr, fp = uc.reg_read(UC_ARM64_REG_PC), uc.reg_read(UC_ARM64_REG_LR), uc.reg_read(UC_ARM64_REG_X29)
         print(f"== trace ({why}), thread {self.cur.tid if self.cur else '?'}")
+        self.last_trace = tr = {"why": why, "thread": self.cur.tid if self.cur else None,
+                                "pc": self.sym(pc), "lr": self.sym(lr), "trap": self.trap_text() or None,
+                                "call": self.null_call() if pc == 0 or "fetch" in why.lower() else None, "frames": []}
         xa = getattr(self, "data_syms", {}).get("g_fnvnx_xc_current")
         if xa is not None:
             xa = xa - self.link_base + self.base if self.relocatable else xa
@@ -905,6 +1044,7 @@ class Emu:
             except UcError:
                 break
             print(f"   #{i:<2} {self.sym(ret)}")
+            tr["frames"].append(self.sym(ret))
             if nfp <= fp:
                 break
             fp = nfp
@@ -1012,6 +1152,9 @@ def main(argv):
     ap.add_argument("--no-boost", action="store_true", help="the host's boost_loading=0")
     ap.add_argument("--stub-faults", metavar="FILE", help="functions (names or 0xORIG, one per line) that return 0 "
                     "when a fault happens below them, e.g. tests/s5/known_faults.txt; needs --elf")
+    ap.add_argument("--milestones", metavar="FILE", default=MILESTONES,
+                    help="boot milestones to watch (default tests/s5/milestones.txt; 'none': none); needs --elf")
+    ap.add_argument("--summary-json", metavar="FILE", help="write the machine-readable boot summary here")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
@@ -1030,6 +1173,16 @@ def main(argv):
             emu.install_guards()
         if a.stub_faults:
             emu.install_fault_stubs(a.stub_faults)
+        if a.milestones and a.milestones != "none":
+            emu.install_milestones(a.milestones)
+    emu.miles = getattr(emu, "miles", {})
+
+    def write_summary(stop, rc=None):
+        if a.summary_json:
+            import json
+            with open(a.summary_json, "w") as f:
+                json.dump(emu.summary(stop, rc), f, indent=1)
+                f.write("\n")
     def peeks():
         out = []
         for spec in a.peek:
@@ -1059,9 +1212,11 @@ def main(argv):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
-        for line in emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements():
+        for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
+                     + emu.milestone_lines()):
             print(line)
         print(f"STOPPED: {why}")
+        write_summary(f"STOPPED: {why}")
         return 1
     try:
         rc = emu.run()
@@ -1080,9 +1235,11 @@ def main(argv):
     if getattr(emu, "skipped", None) is not None:
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
-    for line in emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements():
+    for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
+                 + emu.milestone_lines()):
         print(line)
     ok = rc == 0 and a.expect in out and tp_ok
+    write_summary(f"guest returned {rc:#x}", rc)
     print("PASS" if ok else "FAIL")
     if not a.root:
         shutil.rmtree(root, ignore_errors=True)

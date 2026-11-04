@@ -356,11 +356,16 @@ render table's free text, library, pending, refused and vslot rows).
 
 For every pair that the class-level model above cannot settle, the aggregates passed or returned by value are
 measured in the unit that declares them: a probe translation unit includes the unit's source and, per type, emits
-`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible), `__is_empty` and MSVC's C++03 POD bit
-(`__is_pod`, `__is_aggregate` and no direct base: no user constructor, destructor or copy assignment, no private
-member, no virtual function) as constants (read back from the object), and a function taking the type by value
-whose spills show the SIMD registers it arrives in. `layouts.tsv` rows carry the unit content key (column 8) and
-the POD bit (column 9); a row without either is probed again.
+`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible), `__is_empty` and MSVC 2008's POD bit
+as constants (read back from the object), and a function taking the type by value whose spills show the SIMD
+registers it arrives in. The POD bit is V1's predicate, checked against MSVC 2008 on 24 kinds (J-0147,
+`tests/v1/test_fastcall_nonpod.py`): `__is_aggregate` (no user constructor, no private or protected data member, no
+virtual function), no direct base, a trivial destructor and a trivial copy assignment (`__is_trivially_assignable(T &,
+const T &)`; a reference member deletes it). A member's own user constructor or copy constructor does not count:
+MSVC returns such 8-byte structs in eax:edx, and the earlier `__is_pod && __is_aggregate && no base` called them
+non-POD (3 of the 24 kinds wrong, among them the fastcall buffer in ecx). `layouts.tsv` rows carry the unit content
+key (column 8), the POD bit (column 9) and the POD rule (column 10, `pod2`); a row without them, or of another rule,
+is probed again.
 Class: `G1`/`G2` (one/two general registers), `H<n>x<w>` (HFA/HVA: n SIMD registers of w bytes), `IND` (by
 reference: over 16 bytes or not trivial for calls). Types the probe cannot name are dropped and stay `manual`.
 
@@ -911,6 +916,26 @@ The rules resolve now applies:
 Expected on the next farm link: about 600 fewer undefined C++ names. Most of the rest are declarations without
 a body or an address anywhere: what they need is S1's (bodies, `@fnv` bindings or class shapes), and the table
 gives the counts.
+
+## Declared-only functions (`bodies.py`, stream S2d)
+
+`fnvlink.py bodies out/ tree/ [--msvc-objs <pristine dir>] [--exe FalloutNV.exe] [--names <guest undefined.txt>]` runs between two
+resolves, on the `refs.tsv` rows still `unresolved`, `unresolved-ctor-dtor` or `ctor-dtor-trap` (the C++ names the
+guest link turns into trap stubs; `vslot-unresolved` stays S2c's). Every name gets one class, first match wins:
+
+| class | rule | fix |
+|---|---|---|
+| `addr` | class shells (`X_shell`) stripped, a unit-local copy (`fnv_<addr8>::X`) taken as the global `X` (never another unit's copy, never another namespace's class of the same name: `SaveManager::String` is not `ExtraSave::String`), the name and level-2 parameters match MSVC names of one address the native build defines (`addrmap.tsv` F; C for C1/C2, X for D1/D2; never G) | the next resolve binds it to `__fnv_<addr>` (`bodies/bind.tsv`, class `body-addr`); C2/D2 to the complete-object definition |
+| `exe-addr` | (with `--exe`, the player's FalloutNV.exe) a pristine object calls the MSVC counterpart: functions are placed at their units.json address, then at the address the exe's REL32 call to a COMDAT reaches, each only where its bytes equal the exe outside relocations; the exe's displacement at every call of the name, in every pristine object, gives one address the native build defines (F; C/X for ctors/dtors, or an F member function of the same shape; MSVC reference and definition with the same parameter count, member-ness and calling convention: no bridge is made) | bound to `__fnv_<addr>`, before any synthesized special member (an address beats `= default`) |
+| `vcall` | a virtual member function GCC calls directly (the object is a member or a local: `a->m.f()`; GCC's front end devirtualizes, MSVC 2008 called through the vptr) and the unit's pristine object does not reference it (a qualified `B::f()` call would) | a stub `__fnvnx_bdvc_<hash>`: `this` adjusted, the function loaded from the object's vtable at the byte offset of GCC's own pointer-to-member constant `&C::f` (probed in the referencing unit), tail call |
+| `msvc-empty` | a pristine object defines it (code COMDAT) as `ret`, `ret N` or `mov eax, ecx; ret[ N]` | weak AArch64 `ret` stub (`zz_bd_empty.o`) |
+| `msvc-inline` | a pristine object `u<i>.obj` defines a real body: unit *i*'s source has it | unit *i* compiled again with `-fkeep-inline-functions`, only the wanted symbols kept (`vtables.gc_weaken`); a body under a shell's name renamed when the relaxed key pairs one symbol |
+| `special-default` | default / copy constructor, destructor, copy assignment of a non-template class, no pristine body | out-of-line `= default` in the referencing unit (the implicit member's semantics; not a decomp body) |
+| `missing` | the rest, and synthesized items GCC refuses (`synth-failed`); the note says why (`not virtual`, `MSVC calls it directly`, ...) | listed with the referencing units for the real-exe path (S3) |
+
+Output in `out/bodies/` (local): `bodies.tsv`, `bind.tsv`, `synth.tsv` (objects the next resolve links as extra
+objects of their host unit, like `vtables/synth.tsv`), `stats.txt`. The resolve hook is two marked blocks in
+`fnvlink.py` (`# ---- S2d`); without a `bodies/` directory resolve is unchanged. Tests: `tests/s2d/test_bodies.py`.
 
 ## Open problems
 

@@ -33,6 +33,8 @@ public:
     void RestoreSamplerState(uint32_t stage, uint32_t type);
     // The texture bound to a stage: image id (0 = none), its D3DFORMAT and kind, for the sampler translation.
     void SetTexture(uint32_t stage, uint32_t image, const NxD3D9Texture& kind);
+    uint32_t Texture(uint32_t stage) const { return stage < kStages ? image_[stage] : 0; }
+    NxD3D9Texture TextureKind(uint32_t stage) const { return stage < kStages ? kind_[stage] : NxD3D9Texture{0, 0, 0, 0, 0}; }
     void SetPixelShaderVersion(uint32_t v) { psVersion_ = v; dirty_ = true; }
     // Translates what is recorded (only when something changed). viewport/scissor in D3D9 pixels.
     struct Resolved {
@@ -89,6 +91,13 @@ public:
     void SetScissorRect(const NxD3D9Rect* r) { scissorSet_ = r != nullptr; if (r) scissor_ = *r; }
     // Native description of an engine NiRenderTargetGroup (0 = the default group: back buffer + depth).
     bool RegisterTargetGroup(const void* group, uint32_t color, uint32_t depth, uint32_t width, uint32_t height);
+    // The colour image and size of a registered group (engine render targets: BSRenderedTexture / target groups).
+    bool GroupColor(const void* group, uint32_t* image, uint32_t* w, uint32_t* h) const {
+        const Group* g = FindGroup(group);
+        if (!g) return false;
+        *image = g->color; *w = g->w; *h = g->h;
+        return true;
+    }
 
     // Family entry: one draw with the recorded state. ubo: per-draw block (copied, <= the frame's slice size).
     struct Draw {
@@ -101,8 +110,55 @@ public:
         uint32_t textures;          // texture stages 0..n-1 from the state tracker
         const void* ubo;
         uint32_t uboSize;
+        uint16_t enginePass;        // engine pass id (docs/RENDER_NATIVE.md §1.3) with family != 0, else the current
+        uint16_t family;            // NxFamilyId; 0: use SetEnginePass's
     };
+    // The engine pass the following draws belong to (family NxFam_None: none). Tagged into the stream as NxOp_Marker.
+    void SetEnginePass(uint16_t enginePass, uint16_t family) { curPass_ = enginePass; curFamily_ = family; }
     bool Render(const Draw& d);
+    // A fragment shader of the package with its compile-time epilogue permutations (build.py: name__e0 none,
+    // __ea alpha test, __ef fog). Render() then binds the cheapest permutation the draw's D3D9 state allows and
+    // skips the epilogue UBO when it is not used. Returns the base (full runtime epilogue) shader id.
+    uint16_t FragmentShader(const char* name);
+    uint16_t lastPs() const { return lastPs_; }
+    // Tests: off = always the dynamic shaders the caller gave (lit light loop, runtime epilogue).
+    void SetPermutations(bool on) { permutations_ = on; }
+
+    // N1 geometry path (Do_RenderShape / Do_RenderTristrips): an engine NiTriShape / NiTriStrips described
+    // engine-independently (n1/engine_stubs.cpp reads the engine objects). Drawn with the tile family (tile_vc):
+    // position x world x camera, vertex colour (white without), uv set 0, the stage-0 texture of the state tracker
+    // (a white texel without), tint; strips become a triangle list. Geometry goes into a per-frame vertex ring.
+    struct GeomView {
+        float rot[9], trans[3], scale;   // NiTransform: world = rot * (scale * p) + trans (rot row-major)
+        uint32_t vertices;
+        const float* pos;                // 3 floats per vertex
+        const float* color;              // 4 floats per vertex (NiColorA) or 0
+        const float* uv;                 // 2 floats per vertex (set 0) or 0
+        const uint16_t* indices;         // triangle list (indexCount = 3 x triangles), or
+        uint32_t indexCount;
+        const uint16_t* stripLengths;    // strips: stripCount lengths, then the concatenated strip lists
+        const uint16_t* strips;
+        uint32_t stripCount;
+        float tint[4];
+        uint32_t image = 0, d3dfmt = 0;  // texture (0: the state tracker's stage 0, else a white texel)
+        uint32_t alphaMap = 0, alphaMapFmt = 0;   // TileShaderProperty's second texture: TILE1001 ALPHAMAP
+        bool hasAlpha = false;           // NiAlphaProperty present: blend / alpha test from alphaFlags / alphaRef
+        uint16_t alphaFlags = 0;
+        uint8_t alphaRef = 0;
+        bool hasScroll = false;          // TileShaderProperty TexScroll: uv += scroll
+        float scroll[4] = {0, 0, 1, 1};
+        bool hasScissor = false;         // the tile's scissor rectangle (target pixels)
+        NxD3D9Rect scissor = {0, 0, 0, 0};
+        bool hasStencil = false;         // NiStencilProperty: flags (enable, fail/zfail/pass actions, func), ref, mask
+        uint16_t stencilFlags = 0;
+        uint32_t stencilRef = 0, stencilMask = 0xFFFFFFFFu;
+    };
+    bool RenderGeometry(const GeomView& g);
+    // Menu background image-space effect (menubg family): the scene image toned through a lookup texture, drawn over
+    // the current pass with the tracked blend state. scene: w x h image; tone: lookup image (D3DFORMATs for sRGB).
+    bool RenderMenuBackground(uint32_t scene, uint32_t sceneFmt, uint32_t w, uint32_t h, uint32_t tone, uint32_t toneFmt,
+                              const float luma[3], float blend, float alpha);
+    uint32_t geometryDraws() const { return geomDraws_; }
 
     StateTracker& state() { return state_; }
     StateCache& cache() { return sc_; }
@@ -121,6 +177,22 @@ private:
     const Group* FindGroup(const void* g) const;
     void OpenPass(uint32_t clearMode);
     Backend* be_ = nullptr;
+    uint16_t curPass_ = 0, curFamily_ = 0, lastPs_ = 0;
+    struct EpiSet { uint16_t base, e0, ea, ef; };
+    EpiSet epi_[64];
+    uint32_t nEpi_ = 0;
+    uint16_t noEpi_[64];
+    uint32_t nNoEpi_ = 0;
+    uint16_t litBase_[2] = {0, 0};                   // shader ids of the package's lit / lit_spec (learned)
+    uint16_t litVar_[2][2][5] = {};                  // [spec][dir][points 0,1,2,4,8] -> permutation id (0xFFFF none)
+    bool permutations_ = true;
+    uint16_t LitPermutation(int spec, int dir, int pointsIdx);
+    bool EpiKnown(uint16_t ps) const;
+    void LearnEpilogueVariants(uint16_t ps);
+    Ring geomRing_;
+    uint32_t white_ = 0, geomDraws_ = 0;
+    uint16_t geomVsScroll_ = 0, geomVsPlain_ = 0, geomVsPlainScroll_ = 0, geomPsPlain_ = 0, geomPsAlphaMap_ = 0;
+    uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0, bgVs_ = 0, bgPs_ = 0, bgLayout_ = 0;
     StateCache sc_;
     Frame frame_;
     StateTracker state_;
@@ -143,7 +215,9 @@ private:
 // D3D9 matrices (column-major for GLSL) as NiDX9Renderer builds them; exposed for tests.
 void CameraView(const NiPoint3f& loc, const NiPoint3f& dir, const NiPoint3f& up, const NiPoint3f& right, float out[16]);
 void CameraProjection(const NiFrustumF& f, float out[16]);
-void ScreenSpaceProjection(float out[16]);   // x, y in [0,1] (y down), z -> z: Gamebryo screen space
+// Gamebryo screen space (x, y in [0,1], y down) of a w x h target, with the engine's D3D9 half-pixel correction and
+// z/9999 (0x00e6cf40). The defaults are the game's 1280x720 back buffer; nx::Renderer always passes its target size.
+void ScreenSpaceProjection(float out[16], uint32_t w = 1280, uint32_t h = 720);
 
 } // namespace nx
 #endif

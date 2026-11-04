@@ -1,0 +1,24 @@
+# VS + PS: perspective w = 1 + 0.5 z (c3), COLOR0 + COLOR1 summed in the PS, two indexed strips under ZFUNC GREATER
+size 16 16
+rt A8R8G8B8
+ds D24S8
+clear 7 0xff000000 0.0 0
+rs CULLMODE CULL_NONE
+rs ZENABLE 1
+rs ZFUNC CMP_GREATER
+vs @persp_spec
+ps @diff_spec
+vsc 0 1 0 0 0
+vsc 1 0 1 0 0
+vsc 2 0 0 1 0
+vsc 3 0 0 0.5 1
+mode xyz
+v -1.2 1.2 0.0 1 0xff800000 0xff000010 0 0
+v 1.2 1.2 1.0 1 0xff008000 0xff001000 0 0
+v -1.2 -1.2 1.0 1 0xff000080 0xff100000 0 0
+v 1.2 -1.2 0.0 1 0xff808080 0xff000000 0 0
+drawidx TRIANGLESTRIP 2 0 1 2 3
+v -0.6 0.9 0.6 1 0xff004000 0xff400000 0 0
+v 0.9 0.3 0.6 1 0xff000040 0xff004000 0 0
+v -0.3 -0.9 0.3 1 0xff400000 0xff000040 0 0
+drawidx TRIANGLELIST 1 2 0 1

@@ -60,11 +60,12 @@ CLASSES = {
     'NATIVE1': 'platform',      # drop_native_units in prepare.py (not a text rule)
     # classified by the orchestrator (J-0051) from each rule's docstring; the S11 gate confirms or refutes:
     'GAME1': 'neutral',         # renames a unit's own declaration + call sites; binding by address unchanged
+    'COM1': 'neutral',          # renames a unit's own IUnknown copy (types only; the decomp's vtable slots kept)
     'SPEC1': 'neutral',         # early template<> declarations
     'STATIC1': 'neutral',       # internal -> external linkage of image-bound variables (MSVC may inline less)
     'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
     'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
-    'DBUG1': 'neutral',         # no sites
+    'DBUG1': 'neutral',         # decomp-bug fixes per site (S1-crt 0x00b01510: identical)
     'XC1': 'platform',          # dynamic initializers -> extern + __fnvnx_dyninit_<addr> (S10 runner order)
     'VA1': 'platform',          # MSVC char* va_list -> real va_list
     'FALL1': 'platform',        # __builtin_trap() at fall-off ends (GCC only)
@@ -98,6 +99,13 @@ CLASSES = {
     'BIND1': 'neutral',         # POST hook: units.json binds a stand-in member the unit uses to the exe's address
     'FRIEND1': 'neutral',       # `class X;` in front of a class whose `friend class X;` MSVC made visible
     'INIT1': 'platform',        # a static object whose initializer the exe has and the decomp lacks (NiMainSDM)
+    'GOTO2': 'neutral',         # forward gotos across class / reference initializations: scope closed, copy or tail clone
+    'QUAD1': 'neutral',         # `return q;` -> `return (__m128)q;`: the first of MSVC's two chained conversions spelled out
+    'ANON3': 'platform',        # a function-local anonymous union with an anonymous struct -> local struct + member references
+    'MSCV1': 'neutral',         # _MSC_FULL_VER / _MSC_VER in code -> the value of the unit's compiler (units.json)
+    'RREF2': 'neutral',         # fnvnx_lvalue around T(args) passed to a member operator taking a non-const T&
+    'ADDR1': 'neutral',         # &_mm_f(args) -> &fnvnx_lvalue(_mm_f(args)): the temporary MSVC took the address of
+    'LANE1': 'platform',        # &((T*)&(v)) (SSE1 lane array, address taken) -> ((T(*)[n])&(v))
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
@@ -117,8 +125,8 @@ DEFAULT_GROUPS = {
     'link': 'LINK1 STATIC1 BIND1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
     'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
-    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RCAST1 GOTO1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
-    'plat': 'STL1 STD1 ANON1 ANON2',
+    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
+    'plat': 'STL1 STD1 ANON1 ANON2 ANON3',
 }
 RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+)\b')
 

@@ -149,6 +149,58 @@ definition and the calling unit's declaration of it: a reference result (`T&`) i
 its oracle code (`ret N`) when known, not from its declaration (a declaration with a parameter too many or too few
 left the oracle's esp off by 4: `fault:x:00000000`).
 
+**Virtual calls (difffuzz-13, vtmodel.py, J-0138).** With the player's exe (`FNVNX_EXE`; the farms take it through
+`job_gamedata`) an object the fuzzer gives a class gets a planted vptr (`Case.vptrs`): `this` of a member function
+and pointer / reference parameters to a class, at offset 0 of their buffer. The class's vftables come from the
+exe's RTTI (complete object locators: class, offset, hierarchy), by the decomp's `??_7C@@6B@` name of the class,
+the RTTI class name, or (for decomp shell classes) the vftables whose slots hold the function itself, plus up to 6
+classes derived at offset 0. x86 reads the vftable V there, its slots pinned to the exe's words (original
+addresses); AArch64 reads the native address point the kind-V row pairs with V: a copy of that Itanium vtable in
+the private range 0x0bc00000, its relocated slots resolved for the unit image (the unit's own definition,
+`CODE_STUB + X` for `__fnv_<X>`, the named stub of a D0/D1 that names the `??_G`). A virtual call is then a call
+event of the same original address on both machines, compared like a direct one; an MSVC deleting destructor
+`??_G(this, flags)` compares `this` only (the flags are D0 / D1 natively). Where the link pairs V with a native
+vtable shorter than the exe's (decomp shell classes), the copy is padded with `__s13_vtpad_<V>_<k>` stubs: a call
+through one is `vptr-unpaired` (soft, S2c). A differing call that is neither a direct target of the oracle code
+nor a planted slot went through memory the case did not plant (`vcall: unplanted`): `oracle-vcall`, an oracle gap.
+The farms fuzz functions with indirect calls and jumps only with the exe (`not_modelled_indirect` without it);
+tail jumps and in-function switch tables (relocated with the oracle code) are fuzzed always. Shard 26 on link
+aedcf24: targets / functions with a native object 64.4 % -> 98.4 % (21 functions with unresolved relocations
+remain); of 110 newly fuzzed functions 106 have a verdict (16 hard, 6 soft, 19 oracle gap).
+
+**Vtable pairs (`vtmodel.py pairs`).** A kind-V pair is short when the native vtable has fewer slots than the exe's
+vftable (an exact Itanium pair has as many, or one more with a virtual destructor); the harness's copy always
+carries spare `__s13_vtpad` slots up to the exe's count + 2, which J-0145 counted as short (1,082 of 1,628).
+Link c0d6c71516f6: primary 1,870 paired, short 1,380, exact 449, longer 41; secondary 515: short 330. Of the 1,380
+short primary pairs, the RTTI class's own `_ZTV` is defined in no linked object for 765, also short for 122,
+already the row's vtable for 103, long enough for 31 (e.g. MagicItemObject: row `_ZTV12FUN_00402b40` with 1 slot,
+`_ZTV15MagicItemObject` 99 of 97), no RTTI name 359. Pairing to the static class's `_ZTV` alone therefore closes
+~2 %; the padding stays (a call through it is `vptr-unpaired`) until S2c's link gives those classes complete
+vtables. Verdicts are unchanged (the count is only reported). Test: `tests/s13/test_vtpairs.py`.
+
+**S1b renames (J-0141, harness still difffuzz-13).** `patches/units_renames.tsv` rows of the units whose prepared
+source carries an S1b patch (`config.units_renames`, fnvlink's `load_renames`; `FNVNX_UNITS_RENAMES=<tsv|none>`)
+apply on top of the tree's units.json (`engine.apply_renames`): a `def` row gives the patched definition its new
+MSVC name, which places the arguments on both machines (0x00eacd00 `bool __stdcall f(void*)`, made a member that
+passes ecx on: `this:P/4, p0:P/4` on the oracle too), and a `ref` row is the patched caller's own declaration of
+a callee (`caller_conv`: canned results by declaration). Prepare's POST hook already rewrites the farm trees'
+units.json (all 239 `def` rows of the 254 patched units of tree efb9808e7d542f00), so this matters for a tree
+prepared without it or a local `FNVNX_TREE`, and for the `ref` rows. **Cache:** a unit's applicable rows go into
+its functions' keys (`fnkeys.py`), so only those units are fuzzed again: 9,669 of 68,667 functions (254 units)
+on that tree, no HARNESS bump; a later change of a unit's rows refreshes that unit only. 0x00eacd00 and 0x00a89b00
+(S1b's two XINC1 call-args artefacts) are ok on link c0d6c71516f6. Test: `tests/s13/test_renames.py`.
+
+**difffuzz-12 (J-0138).** The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
+names libcalls.EQUIV maps to them) return a fresh heap block (`world.alloc_result`, HEAP + 2 MiB + 4 KiB k), never
+the canned 0: GCC drops the null test after a throwing new that MSVC keeps (S13b `new-null`, 178 farm records). A
+machine's own private range faults when unmapped; the other machine's is plain background, so a garbage pointer
+there no longer faults on the oracle only (S13b `oracle-native-address`, 62 records). Of 60 of S13b's reproducers
+replayed on link aedcf24, 43 no longer diverge (28 before), the rest diverge later. Bounds: each machine's run stops
+after `FNVNX_DF_RUN_S` (2 s, Unicorn's emu_start timeout; one farm run of 004b6220 took 48 min, the step count did
+not bound it), each function after `fuzz.fn_limit` (6 x --time + 30 s, at least 60; `FNVNX_DF_FN_S`), and --time
+starts after the setup. A function out of its bound keeps its executions as the verdict (`truncated`), or with none
+is `run:slow` (a harness failure, fuzzed again after everything else).
+
 **difffuzz-11.** CRT addresses the link gives a provider whose name is a harness builtin (every address of the
 name: memmove 0x00ec44d0 and 0x00ec7230, ...) run as that builtin on the oracle, untraced like the native call.
 Adaptive follow also answers a call-count divergence: the first oracle callee the native run never calls was inlined

@@ -58,17 +58,63 @@ LANE_DECL = re.compile(r'((?:unsigned\s+|signed\s+)?(?:float|double|int|__int32|
 LANE_ELEM = {'float': 'float', 'int': 'int', '__int32': 'int', 'unsigned int': 'unsigned int', 'unsigned': 'unsigned int',
              'unsigned __int32': 'unsigned int', 'long': 'int'}
 
+ANON_LANES = re.compile(r'\bstruct\s*\{([^{}]*)\}\s*;')
+M128_ALIAS = re.compile(r'\btypedef\s+(?:const\s+)?(?:::\s*)?(?:\w+\s*::\s*)*__m128\s+(\w+)\s*;')
+NOT_A_TYPE = {'return', 'else', 'case', 'goto', 'delete', 'throw', 'sizeof', 'new', 'typedef', 'using', 'const',
+              'volatile', 'static', 'operator'}
+ARRAY_DIM = r'(?:\[[^\]]*\]\s*)?'
+
+def _lane_decl(fields):
+    """{lane: (element type, index)} of `float x, y, z, w;` (four lanes of one element type), or None."""
+    decl = [(ty, f) for ty, fs in LANE_DECL.findall(fields) for f in re.split(r'\s*,\s*', fs.strip())]
+    if len(decl) == 4 and all(LANE_ELEM.get(re.sub(r'\s+', ' ', ty)) for ty, _ in decl):
+        return {f: (LANE_ELEM[re.sub(r'\s+', ' ', ty)], i) for i, (ty, f) in enumerate(decl)}
+    return None
+
+def _sse_direct_lanes(text, fields, stats):
+    """SSE1 for lanes that were members of the removed copy: `q.x` -> `((float*)&(q))[0]`, for each name q the unit
+    declares (variable, member or parameter) only with __m128 or a typedef of it."""
+    types = {'__m128'} | set(M128_ALIAS.findall(text))
+    tx = '|'.join(sorted(map(re.escape, types)))
+    names = set()
+    for lst in re.findall(r'\b(?:%s)\s+(?:const\s+)?((?:[A-Za-z_]\w*\s*%s,\s*)*[A-Za-z_]\w*)\s*%s[;,=)]'
+                          % (tx, ARRAY_DIM, ARRAY_DIM), text):    # `__m128 a, b[2];`, a parameter `__m128 a,`
+        names |= {re.sub(r'\[.*', '', d).strip() for d in lst.split(',')}
+    keep = []
+    for n in sorted(names):
+        others = {t for t in re.findall(r'\b([A-Za-z_]\w*)[\s\*&]+(?:[A-Za-z_]\w*\s*%s,[\s\*&]*)*%s\s*%s[;,=)]'
+                                        % (ARRAY_DIM, re.escape(n), ARRAY_DIM), text) if t not in NOT_A_TYPE}
+        if others <= types: keep.append(n)
+    if not keep: return text
+    rx = re.compile(r'\b(?:%s)(\s*\.\s*(%s))\b(?!\s*\()' % ('|'.join(map(re.escape, keep)),
+                                                         '|'.join(map(re.escape, sorted(fields)))))
+    out, pos = [], 0
+    for m in rx.finditer(text):
+        s = operand_start(text, m.start(1))
+        if s >= m.start(1) or s < pos: continue
+        ty, i = fields[m.group(2)]
+        out.append(text[pos:s]); out.append('((%s*)&(%s))[%d]' % (ty, text[s:m.start(1)].strip(), i)); pos = m.end()
+        stats['SSE1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 def r_sse_local_types(path, text, stats):
     """SSE1: drop local copies of the MSVC <xmmintrin.h> vector unions (or structs); the global sse2neon type is used
-    instead."""
-    out, pos, lanes = [], 0, {}
+    instead. Lanes of the copy (`v.lanes.x`, or `q.x` when x..w were its own members or an anonymous struct's)
+    become element access."""
+    out, pos, lanes, direct = [], 0, {}, {}
     for m in INTRIN_UNION.finditer(text):
         if m.start() < pos: continue
         end = match_brace(text, m.end() - 1)
-        for fields, name in NAMED_LANES.findall(text[m.end():end - 1]):     # `struct { float x, y, z, w; } lanes;`
-            decl = [(ty, f) for ty, fs in LANE_DECL.findall(fields) for f in re.split(r'\s*,\s*', fs.strip())]
-            if len(decl) == 4 and all(LANE_ELEM.get(re.sub(r'\s+', ' ', ty)) for ty, _ in decl):
-                lanes[name] = {f: (LANE_ELEM[re.sub(r'\s+', ' ', ty)], i) for i, (ty, f) in enumerate(decl)}
+        body = text[m.end():end - 1]
+        for fields, name in NAMED_LANES.findall(body):     # `struct { float x, y, z, w; } lanes;`
+            decl = _lane_decl(fields)
+            if decl: lanes[name] = decl
+        # lanes that are members of the copy itself: `struct __m128 { float x, y, z, w; }`, or of an anonymous
+        # struct in the union (`union __m128 { struct { float x, y, z, w; }; }`)
+        for fields in ANON_LANES.findall(body) + ([body] if '{' not in body else []):
+            decl = _lane_decl(fields)
+            if decl: direct.update(decl)
         tail = re.match(r'\s*(?:__m128[id]?|__m64)?\s*;', text[end:])
         if tail: end += tail.end()
         out.append(text[pos:m.start()]); out.append('/* fnv-nx SSE1: local %s removed */' % m.group(1)); pos = end
@@ -97,6 +143,7 @@ def r_sse_local_types(path, text, stats):
         text, n = INTRIN_ELABORATED.subn(r'\1', text)
         n += n0
         stats['SSE1'] += n
+    if direct: text = _sse_direct_lanes(text, direct, stats)
     # MSVC's union initializer of a __m128 (first member m128_f32[4]): `= {{a, b, c, d}}` -> the vector's `{a, b, c, d}`
     if '{{' in text.replace(' ', '') and '__m128' in text:
         names = ['__m128'] + re.findall(r'\btypedef\s+(?:const\s+)?__m128\s+(\w+)\s*;', text)
@@ -121,8 +168,10 @@ MM_DEF = re.compile(r'(?:^|(?<=[;{}]))[ \t]*(?:(?:static|inline|__inline|__force
 def r_sse_local_protos(path, text, stats):
     """SSE2: drop local prototypes of _mm_* intrinsics (and extern "C" blocks left empty by that), and local
     definitions of them at namespace scope (same line count)."""
-    text, n = MM_PROTO.subn('', text)
-    stats['SSE2'] += n
+    n = 1
+    while n:        # again: a match takes the blank after its `;`, so a prototype right behind it is matched next time
+        text, n = MM_PROTO.subn('', text)
+        stats['SSE2'] += n
     if MM_DEF.search(text):
         spans, out, pos = scope_map(text), [], 0
         for m in MM_DEF.finditer(text):
@@ -180,6 +229,7 @@ def operand_start(text, end):
             while n > 0 and (text[n - 1].isalnum() or text[n - 1] == '_'): n -= 1
             if n < i and not text[n].isdigit(): i = n
             elif text[i] == '(': return i      # parenthesized primary: (expr)
+            elif text[i] == '[' and i > 0 and text[i - 1] in CLOSERS: continue   # (&a)[i], f(x)[i], m[i][j]
         elif j > 0 and (text[j - 1].isalnum() or text[j - 1] == '_'):
             n = j
             while n > 0 and (text[n - 1].isalnum() or text[n - 1] == '_'): n -= 1
@@ -318,10 +368,14 @@ CRT_HEADERS = {
 }
 CRT_NAMES = [n for v in CRT_HEADERS.values() for n in v.split()]
 # stdio functions S4b implements on MSVC's struct _iobuf (platform/crt/fnvnx_iobuf.h): a decomp prototype of one of
-# these that takes or returns _iobuf* is replaced by that header (its C++ overloads take _iobuf*)
+# these that takes or returns _iobuf* is replaced by that header (its C++ overloads take _iobuf*). fopen has libc's
+# parameters, so no overload can return _iobuf*: its prototype is replaced by "fnvnx_iobuf_fopen.h", that header plus
+# `#define fopen fnvnx_iob_fopen` for the rest of the unit (fnvnx_iob_fopen is the provider of the CRT fopen that
+# units.json binds, platform/crt/crt_symbols.tsv; DECL1-FOPEN)
 IOBUF_NAMES = set('''_fclose_nolock _fdopen _fileno _fseeki64 _fsopen _ftelli64 clearerr fclose feof ferror fflush fgetc
-    fgetpos fgets fopen_s fprintf fputc fputs fread fseek fsetpos ftell fwrite getc putc rewind setvbuf ungetc vfprintf
-    __iob_func'''.split())
+    fgetpos fgets fopen fopen_s fprintf fputc fputs fread fseek fsetpos ftell fwrite getc putc rewind setvbuf ungetc
+    vfprintf __iob_func'''.split())
+IOBUF_MACRO = {'fopen': '"fnvnx_iobuf_fopen.h"'}
 MACRO_NAMES = {'_alloca'}     # macros on the target (fnvnx_compat.h): no using-declaration possible
 
 OWN_STD = re.compile(r'\b(?:class|struct)\s+(?:exception|bad_alloc|bad_cast|type_info)\s*[:{]')
@@ -552,7 +606,8 @@ def r_platform_protos(path, text, stats):
             params = re.search(r'\(([^;{}]*)\)', m.group(0)[m.group(0).index('operator'):]).group(1)
             hdr = new_header(text) if PLACEMENT_PARAMS.match(params) else ''
         elif name in IOBUF_NAMES and '_iobuf' in m.group(0):
-            hdr = '"fnvnx_iobuf.h"'
+            hdr = IOBUF_MACRO.get(name, '"fnvnx_iobuf.h"')
+            if name in IOBUF_MACRO: stats['DECL1-FOPEN'] += 1
         else:
             hdr = PLATFORM[name]
         if not is_op:

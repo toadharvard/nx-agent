@@ -86,14 +86,16 @@ job_gamedata
 log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; boot image: $NOTE_EXE"
 
 # 4. Guest, emulated boot, host, package on that link (the link stage stays cached: same inputs).
-rc=0
+# INPUTS=0: no tree or no objects. Not rc=2: GNU make itself exits 2 whenever a stage fails (V1, J-0136), and such a
+# build still gets its stub boot, audits and publish.
+rc=0; INPUTS=1
 if [ -n "$TREE" ] && [ -n "$OBJS" ]; then
 	# shellcheck disable=SC2086
 	make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
 		${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
 	ls -1t "$F"/make-*.log | tail -n +6 | xargs -r rm -f
 else
-	rc=2
+	rc=2; INPUTS=0
 fi
 
 # 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the
@@ -101,7 +103,7 @@ fi
 # (boot/stub/). tests/s5/farm_boot.sh FARM_BOOTS=stub on the pipeline's build directory; under a minute.
 STUB=$F/build/boot/stub
 rm -rf "$STUB"
-if [ $rc -ne 2 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" ]; then
+if [ $INPUTS = 1 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" ]; then
 	log "stub-fault boot (tests/s5/farm_boot.sh)"
 	IMG=${GAME_EXE:-$F/build/boot/synth/synth.exe}; [ -f "$IMG" ] || IMG=""
 	FARM_LINK_DIR=$F/build/link FARM_GUEST_DIR=$F/build/guest FARM_BOOTS=stub \
@@ -127,7 +129,7 @@ fi
 # 1200) bound it, the slow audits (bridge runs, C5) are skipped once it is used up. FARM_V1=0 skips the step.
 NOTE_V1="not run (no link outputs)"
 if [ "${FARM_V1:-1}" = 0 ]; then NOTE_V1="not run (FARM_V1=0)"
-elif [ $rc -ne 2 ] && [ -f "$F/build/link/fixed/zz_bridges.o" ] && [ -f "$F/build/link/out/aliases.ld" ]; then
+elif [ $INPUTS = 1 ] && [ -f "$F/build/link/fixed/zz_bridges.o" ] && [ -f "$F/build/link/out/aliases.ld" ]; then
 	log "V1-link audits (tools/farm/v1_job.sh)"
 	XB=$(art cross_bin)   # the pinned ILP32 cross tools (the harness compiles its cases with them)
 	V1_LINK_DIR=$F/build/link V1_TREE=$TREE V1_OBJ_DIR=$(dirname "$OBJS") V1_X86OBJ=${PR:-} V1_EXT=$EXT V1_NO_FETCH=1 \
@@ -157,6 +159,6 @@ python3 -I "$P/tools/farm/full_report.py" "$F/build" "$REPORT" --commit "$COMMIT
 		echo "- V1-link audits: $NOTE_V1"
 	fi
 } >> "$REPORT"
-if [ $rc -ne 2 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
+if [ $INPUTS = 1 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
 echo "- link outputs: $NOTE_PUB" >> "$REPORT"
 echo "$REPORT"

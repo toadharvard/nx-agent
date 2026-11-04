@@ -75,6 +75,31 @@ def test_pure():
           'FUN_00404920', 'itanium class names')
     check(world.mappable(0x100, 'x86') is False and world.mappable(0x08001000, 'a64') is False and
           world.mappable(0x00fdf000, 'a64'), 'world mapping policy')
+    import vtmodel
+    check(vtmodel.td_class('.?AVBar@Foo@@') == 'Foo::Bar' and vtmodel.td_class('.?AV?$T@H@@') is None,
+          'RTTI type descriptor names')
+    check(vtmodel.native_slots([0, None, 'a', 'b', 'c', -8, None, 'd'], 8) == 3 and
+          vtmodel.native_slots([0, None, 'a', 'b'], 8) == 2, 'native vtable length up to the next vtable of the group')
+    c = world.Case(seed=3, vptrs={0x03000000: 0x0101144c})
+    c2 = world.Case.from_json(c.to_json())
+    check(c2.vptrs == c.vptrs and c.copy().vptrs == c.vptrs, 'planted vptrs survive json and copy')
+    w = world.World(c, {}, {0x0101144c: b'\x10\x20\x40\x00'})
+    w.a64_vptrs = {0x03000000: 0x0bc00008}
+    check(world.u32(w.page(0x03000000)) == 0x0101144c and world.u32(w.page_a64(0x03000000)) == 0x0bc00008 and
+          w.page_a64(0x01011000) == w.page(0x01011000), 'x86 sees the image vftable, AArch64 the address point')
+    cmp = runner.compare
+    import types
+    mk = lambda ts: types.SimpleNamespace(error=None, calls=[types.SimpleNamespace(target=t) for t in ts], ret=None,
+                                         writes={}, saved_ok=True)
+    cv0 = conv.Conv('?f@@YAXXZ', 'test')
+    d = cmp(cv0, mk([0x00401230]), mk([0x00405670]), w, vcalls=({0x00405670}, set()))
+    check(d and d.get('vcall') == 'unplanted', 'a differing call to no direct target and no planted slot: unplanted')
+    d = cmp(cv0, mk([0x00401230]), mk([0x00405670]), w, vcalls=(set(), {0x00401230}))
+    check(d and d.get('vcall') == 'planted', 'a differing call through a planted slot is kept as such')
+    al = [world.alloc_result(k) for k in range(3)]
+    check(all(world.HEAP <= a < world.HEAP_END for a in al) and len(set(al)) == 3 and
+          not {a & ~0xfff for a in al} & {world.ref_result(k) & ~0xfff for k in range(0x200)},
+          'allocator results: distinct heap blocks, apart from reference results')
 
 
 ORACLE = bytes.fromhex('0fbe442404' 'c1e81f' 'c3')     # movsx eax, byte [esp+4]; shr eax, 31; ret

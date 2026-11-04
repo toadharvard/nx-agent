@@ -1,0 +1,17 @@
+# P3: log2|x|, exp(log(0)) = 0, log(0) = -FLT_MAX exactly, logp
+size 4 4
+rt A32B32G32R32F
+ds D24S8
+clear 7 0xff000000 1.0 0
+rs CULLMODE CULL_NONE
+vs @p3_log
+ps @tc
+vsc 0 -4 0 0.5 0
+vdecl 0:0
+vg -1 1 0.5 1
+vg 1 1 0.5 1
+vg -1 -1 0.5 1
+vg 1 1 0.5 1
+vg 1 -1 0.5 1
+vg -1 -1 0.5 1
+drawg TRIANGLELIST 2

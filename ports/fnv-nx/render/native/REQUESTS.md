@@ -29,6 +29,16 @@ addresses in `N1_PLAN.md` §2.
 
 Test: `test_r2_vftable_dump` (expects `render/native/vftables.tsv` with slots 95-111 of NiDX9Renderer).
 
+**Status (S6n, round 4): done locally from the user's own exe.** `python3 -I render/native/tools/exe_vftables.py
+<FalloutNV.exe> NiDX9Renderer NiDX9RenderState TileShader BSShaderNoLighting --units ext/fnv_decomp/build/units.json
+--anchor TileShader=0x00bca760 --anchor BSShaderNoLighting=0x00bc9a50` writes the gitignored `vftables.tsv`
+(NiDX9Renderer and NiDX9RenderState from RTTI; the two BSShader classes have none and are found from an anchor slot
+plus the constructor's vptr store). It settles the slots: 95-102 as expected except 97 (Do_DisplayFrame is the
+engine's deferred-release function, not the Present at 0x00e7ccd0), and 107 = 108 (one function for shapes and
+strips). overrides.tsv now binds every row by address and records the slot as `vft=<class>:<slot>`, which
+`tests/s6n/test_overrides.py` checks against the dump when it exists. The round-3 MSVC-object attempt (no object
+emits `??_7NiDX9Renderer@@6B@`) is superseded. `test_r2_vftable_dump` passes where the dump exists.
+
 ## R3. Prepare rule NATIVE1: drop units
 
 `tools/rules/native1.py <units.json> <render/native/drop_units.txt> <out units.json>`: copies units.json without the

@@ -101,6 +101,7 @@ static int run_scene(const V6nOps* ops, const char* path, const char* outdir, in
     int w = 32, h = 32; uint32_t rt = 21 /* A8R8G8B8 */, ds = 75 /* D24S8 */;
     V6nTarget* t = NULL;
     static V6nVertex verts[MAXV]; int nv = 0, rhw = 1;
+    static float gdata[MAXV * 64]; static uint8_t gus[16], gix[16]; int gne = 0, gnv = 0;   /* vdecl / vg */
     char line[4096], err[256] = "";
     int lineno = 0, ok = 1;
 #define BEGIN() do { if (!t) { t = ops->begin(w, h, rt, ds, err, sizeof err); if (!t) { fprintf(stderr, "%s: begin: %s\n", path, err); ok = 0; goto done; } ops->render_state(t, 137 /* LIGHTING */, 0); } } while (0)
@@ -108,8 +109,8 @@ static int run_scene(const V6nOps* ops, const char* path, const char* outdir, in
     while (fgets(line, sizeof line, f)) {
         lineno++;
         char* hash = strchr(line, '#'); if (hash) *hash = 0;
-        char* a[40]; int n = 0;
-        for (char* tok = strtok(line, " \t\r\n"); tok && n < 40; tok = strtok(NULL, " \t\r\n")) a[n++] = tok;
+        char* a[80]; int n = 0;
+        for (char* tok = strtok(line, " \t\r\n"); tok && n < 80; tok = strtok(NULL, " \t\r\n")) a[n++] = tok;
         if (!n) continue;
         uint32_t x, y, z; int vok;
         if (!strcmp(a[0], "size") && n == 3) { if (t) FAIL("size after begin"); w = atoi(a[1]); h = atoi(a[2]); }
@@ -148,10 +149,12 @@ static int run_scene(const V6nOps* ops, const char* path, const char* outdir, in
             BEGIN(); ops->viewport(t, (uint32_t)atoi(a[1]), (uint32_t)atoi(a[2]), (uint32_t)atoi(a[3]), (uint32_t)atoi(a[4]), strtof(a[5], NULL), strtof(a[6], NULL));
         } else if (!strcmp(a[0], "scissor") && n == 5) { BEGIN(); ops->scissor(t, atoi(a[1]), atoi(a[2]), atoi(a[3]), atoi(a[4])); }
         else if (!strcmp(a[0], "proj") && n == 17) { BEGIN(); float m[16]; for (int i = 0; i < 16; i++) m[i] = strtof(a[1 + i], NULL); ops->projection(t, m); }
-        else if (!strcmp(a[0], "ps") && (n == 2 || n == 3)) {
+        else if ((!strcmp(a[0], "ps") || !strcmp(a[0], "vs")) && (n == 2 || n == 3)) {
+            int isvs = a[0][0] == 'v';
             /* ps BYTECODE_FILE [GLSL_FILE] | ps NONE ; relative paths are relative to the scene file */
             BEGIN();
-            if (!strcmp(a[1], "NONE")) { if (!ops->pixel_shader || !ops->pixel_shader(t, NULL, 0, NULL)) FAIL("ps NONE"); continue; }
+            int (*setsh)(V6nTarget*, const uint32_t*, int, const char*) = isvs ? ops->vertex_shader : ops->pixel_shader;
+            if (!strcmp(a[1], "NONE")) { if (!setsh || !setsh(t, NULL, 0, NULL)) FAIL("%s NONE", a[0]); continue; }
             char p1[1024], p2[1024]; const char* sl = strrchr(path, '/');
             int dl = sl ? (int)(sl - path + 1) : 0;
             snprintf(p1, sizeof p1, "%s%.*s%s", a[1][0] == '/' ? "" : "", a[1][0] == '/' ? 0 : dl, path, a[1]);
@@ -163,12 +166,36 @@ static int run_scene(const V6nOps* ops, const char* path, const char* outdir, in
                 FILE* gf = fopen(p2, "rb"); if (!gf) FAIL("cannot open %s", p2);
                 size_t k = fread(glsl, 1, sizeof glsl - 1, gf); glsl[k] = 0; fclose(gf);
             }
-            if (!ops->pixel_shader || !ops->pixel_shader(t, tok, nt, n == 3 ? glsl : NULL)) FAIL("pixel shader not supported by %s", ops->name);
-        } else if (!strcmp(a[0], "psc") && n == 6) {
+            if (!setsh || !setsh(t, tok, nt, n == 3 ? glsl : NULL)) FAIL("%s not supported by %s", a[0], ops->name);
+        } else if ((!strcmp(a[0], "psc") || !strcmp(a[0], "vsc")) && n == 6) {
             BEGIN(); float v[4]; for (int k = 0; k < 4; k++) v[k] = strtof(a[2 + k], NULL);
-            if (ops->ps_const) ops->ps_const(t, (uint32_t)atoi(a[1]), v);
+            void (*setc)(V6nTarget*, uint32_t, const float*) = a[0][0] == 'p' ? ops->ps_const : ops->vs_const;
+            if (setc) setc(t, (uint32_t)atoi(a[1]), v);
+        } else if (!strcmp(a[0], "drawidx") && n >= 4) {
+            /* drawidx PRIM COUNT i0 i1 ...: DrawIndexedPrimitiveUP over the pending vertices (16-bit indices) */
+            BEGIN(); if (!lookup(V6N_PRIM, a[1], &x)) FAIL("unknown primitive %s", a[1]);
+            uint16_t idx[64]; int ni = 0;
+            for (int k = 3; k < n && ni < 64; k++) idx[ni++] = (uint16_t)atoi(a[k]);
+            if (!ops->draw_indexed || !ops->draw_indexed(t, x, (uint32_t)atoi(a[2]), rhw, verts, nv, idx, ni)) FAIL("drawidx failed on %s", ops->name);
+            nv = 0;
         }
         else if (!strcmp(a[0], "mode") && n == 2) rhw = !strcmp(a[1], "rhw");
+        else if (!strcmp(a[0], "vdecl") && n >= 2 && n <= 17) {
+            /* vdecl USAGE:INDEX ... (D3DDECLUSAGE numbers, FLOAT4 each) for vg / drawg (vertex-shader parity) */
+            gne = n - 1; gnv = 0;
+            for (int k = 0; k < gne; k++) { gus[k] = (uint8_t)atoi(a[1 + k]); const char* c = strchr(a[1 + k], ':'); gix[k] = c ? (uint8_t)atoi(c + 1) : 0; }
+        } else if (!strcmp(a[0], "vg") && gne && n == 1 + 4 * gne) {
+            if (gnv == MAXV) FAIL("too many vertices");
+            for (int k = 0; k < 4 * gne; k++) gdata[gnv * 64 + k] = strtof(a[1 + k], NULL);
+            gnv++;
+        } else if (!strcmp(a[0], "drawg") && n == 3) {
+            BEGIN(); if (!lookup(V6N_PRIM, a[1], &x)) FAIL("unknown primitive %s", a[1]);
+            /* repack to stride 16 * gne */
+            static float pk[MAXV * 64];
+            for (int i = 0; i < gnv; i++) memcpy(pk + i * 4 * gne, gdata + i * 64, 16 * gne);
+            if (!ops->draw_generic || !ops->draw_generic(t, x, (uint32_t)atoi(a[2]), gne, gus, gix, pk, gnv)) FAIL("drawg failed on %s", ops->name);
+            gnv = 0;
+        }
         else if (!strcmp(a[0], "v") && n == 9) {
             if (nv == MAXV) FAIL("too many vertices");
             V6nVertex* v = &verts[nv++];

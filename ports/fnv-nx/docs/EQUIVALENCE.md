@@ -51,7 +51,7 @@ explains; `no-build`: units that compile under MSVC without the rule but not wit
 | `CSX1` | | | | | asserts only, no code; but see D15 below. |
 | `DUPINT1` `LINK1` `NEW1` `NEW3` `RET1` `SPEC1` `RCAST1` `TYPEID1` `SAL1` | | | | | **identical** in every unit they touch. |
 | `KEEP1` | | | | | inert by construction under MSVC (`FNVNX_KEEP` is empty). |
-| `DBUG1` | | | | | no sites. |
+| `DBUG1` | | | | | one site (0x00b01510, `patches/dbug1_crt.s1b`): identical under tests/s1b/msvc_check.py. |
 | two or more rules together | 102 | 13 | 6 | 21 | explained only by leaving out a group or a pair of groups: the EH-only ones are EXC1 with NEW2 / CTOR1 or two NEWDEL rules; the retargets are CRT wrappers (DECL1 with DECL2 / CALL1) and `FUN_00ee6de6` (declared with the SDK's global `tagRECT` instead of the namespace's: a decoration the recipe does not bind); code: `GraphicsRenderer::BeginUsingRenderTargetGroup` (D15, below) and 5 functions; no-build: stand-in limits. |
 
 **D15 (CS28 removed, CSX1) is refuted by the matched code.** Of the eight critical-section units, four are identical
@@ -144,6 +144,7 @@ above (round 8).
 | `SAL1` | neutral | attribute-syntax SAL annotations have no code meaning | as is |
 | `CSX1` | neutral (claim) | drops the decomp's Xbox 360 critical-section asserts (D15, J-0051); asserts emit no code | as is |
 | `DECL2` | neutral (claim) | the SDK's definition of the type replaces the decomp's copy | real SDK |
+| `COM1` | neutral | renames a unit's own copy of IUnknown (bsshader: the decomp's parameter types, its slots); no signature with it | as is |
 | `EXC1` | neutral (claim) | MSVC 2008 never enforced `throw()`; but it is an optimizer hint there | as is |
 | `NEW2` | neutral | `<new>` defines the placement forms identically | real `<new>` |
 | `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
@@ -151,6 +152,9 @@ above (round 8).
 | `LINK1` | neutral | C and C++ linkage of a global variable name the same symbol under Itanium | data names bound by variable name |
 | `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables; a namespace static bound by its plain name (`_s_fSpinTime`) gets C linkage in place, an uninitialised scalar / pointer one declared only (the image's variable) | variable bound by the recipe's address |
 | `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars | as is |
+| `GOTO2` | neutral (claim) | a forward goto across an initialized class object / reference / aggregate into its scope: `const float& a = f(x);` -> `float a; a = f(x);` for an f returning float by value; `{ ` ... `} ` around the crossed declarations before a label of their block when nothing they declare is named after it; or the label's straight `...; return e;` tail (names not declared in the function) cloned into each crossing goto | the path that jumped never used the crossed objects; scopes end earlier, a cloned tail is the same statements |
+| `QUAD1` | neutral | `return q;` -> `return (__m128)q;` where q's class converts to `__m128` and the function's return class is constructible from `__m128` only: MSVC chained both user-defined conversions | the same conversion operator and constructor, the first written out |
+| `MSCV1` | neutral | `_MSC_FULL_VER` / `_MSC_VER` in code (not in `#if`) -> the value of the compiler build/units.json gives the unit: sp1 150030729 / 1500, rtm 150021022 / 1500, vc8 140050727 / 1400 | the constant that compiler substituted |
 | `STR1` | neutral | `&arr` and `arr` are the same address | as is |
 | `CALL1` | neutral | the cast is the conversion the dropped prototype made implicitly | real SDK parameter types |
 | `RCAST1` | neutral | `fnvnx_lvalue` returns the temporary itself | `fnvnx_lvalue(x)` = `(x)` |
@@ -158,7 +162,10 @@ above (round 8).
 | `TYPEID1` | neutral | adds `<typeinfo>` only | real `<typeinfo>` |
 | `SPEC1` | neutral | early `template<>` declarations of member specializations | declarations only |
 | `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address | as is |
-| `RREF1` | neutral | `fnvnx_lvalue(...)` around an argument passed to a non-const reference parameter (every declaration the unit sees) that is not a plain lvalue | the temporary MSVC bound, same lifetime |
+| `RREF1` | neutral | `fnvnx_lvalue(...)` around an argument passed to a non-const reference parameter (every declaration the unit sees; for an unqualified call in a member function, the declarations of the nearest class that declares the name, RREF1-CLASS) that is not a plain lvalue | the temporary MSVC bound, same lifetime |
+| `RREF2` | neutral | `fnvnx_lvalue(T(args))` as the operand of a member operator whose every declaration with a T parameter takes a non-const `T&` (S1-refs) | the temporary MSVC bound, same lifetime |
+| `ADDR1` | neutral | `&_mm_f(args)` -> `&fnvnx_lvalue(_mm_f(args))` as the operand of a unary `&` (MSVC's address of a class rvalue, C4238) | the same temporary's address, same lifetime |
+| `LANE1` | platform | `&((T*)&(v))`, SSE1's lane array with its address taken (`(&v.m128_f32)[0]`), -> `((T(*)[sizeof(v) / sizeof(T)])&(v))` | MSVC's `&v.m128_f32`: same address and array type; SSE1 is target only |
 | `TPL1` | neutral | `this->` in front of the members of a dependent base that a class template's member functions use by plain name | the members MSVC's (one-phase) lookup found |
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
@@ -176,6 +183,7 @@ above (round 8).
 | `PTR1` | neutral | `f > 0` / `p > 0` -> `!= 0` and `<= 0` -> `== 0` for a function name or a local pointer | MSVC's unsigned compare of the address gives the same result |
 | `INC1` | neutral | a quoted `#include` that names, up to case, a file in the including directory is spelled as that file (`"Actor.h"` -> `"actor.h"`) | the header MSVC opened (directory of the includer first, names without case) |
 | `ANON2` | platform | a member with a constructor / destructor / copy assignment in an anonymous struct of an anonymous union becomes raw storage of its size and alignment, its uses `(*(T*)(x.m))` | same bytes and calls; MSVC never ran those functions for a union member either |
+| `ANON3` | platform | an anonymous union in a function body with an anonymous struct in it -> `struct fnvnx_anon_uN { union {...}; } fnvnx_anon_vN;` and `decltype(v.m)& m = v.m;` for each member (GCC takes an anonymous struct only inside a named class) | same storage and layout under the same names; MSVC's code may keep the references |
 | `ELAB1` | neutral | type uses of a file-scope class named like a Win32/CRT function (`struct HeapAlloc`) spelled elaborated: `struct HeapAlloc* p` | same type, same symbols |
 | `ENUM1` | neutral | opaque `enum X;` -> `enum X : int;` and every definition of those enums -> `enum X : int {` | int is MSVC's underlying type of every unscoped enum |
 | `ANON1` | platform | names an unnamed struct defined in a member function's return type (`struct fnvnx_anon_Float {...}; fnvnx_anon_Float* Float();`) | same layout; MSVC's decorated name of the function changes (`<unnamed-tag>`) |
@@ -186,7 +194,7 @@ above (round 8).
 | `SPEC2` | neutral | `template <>` on the decomp's member definitions of class template specializations (5 files) | MSVC accepts both spellings |
 | `XINC1` | neutral (claim) | caller declarations corrected from the x86 code (S1b) | as is |
 | `RET1` | neutral | `return <trailing stmt>` where MSVC's code is identical (S1b) | as is |
-| `DBUG1` | neutral | per-site debug fixes (no sites) | - |
+| `DBUG1` | neutral | per-site decomp-bug fixes (S1b; one site, identical) | as is |
 | `FTOL1` | platform | `fnvnx_ftol2(expr)` for arg-less `_ftol2_sse` calls | `fnvnx_ftol2(x)` = `(__int64)(x)` (gated anyway) |
 | `SDK1` | layout | the PC SDK definitions win over the decomp's guarded copies (Xbox 360 layouts) | real SDK |
 | `TAIL1` | layout | GCC must not reuse a base's tail padding; MSVC never does | zero-width bit-field, as on the target |

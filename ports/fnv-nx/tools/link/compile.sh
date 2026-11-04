@@ -33,13 +33,72 @@ FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding
 FTOI_SO=$(CXX=$CXX bash "$HERE/toolchain/ftoi/build.sh" "$OUT/.ftoi") \
   || { echo "compile.sh: the fnvnx_ftoi plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
 FLAGS+=(-fplugin="$FTOI_SO")
-export CXX TREE OUT FLAGS_STR="${FLAGS[*]}"
+# S12-ordering (docs/ORDERING.md): the fnvnx_order plugin gives volatile accesses MSVC's /volatile:ms meaning on the
+# A57 (acquire loads ldar, release stores stlr; fences where ldar/stlr cannot reach). Same rule: no fallback.
+# ORDER_MODE=off (with the compiler-only barriers of fnvnx_compat.h) or tso only for A/B measurements, never for a
+# build that runs: ORDER_MODE=volatile is the program's semantics.
+ORDER_MODE=${ORDER_MODE:-volatile}
+ORDER_SO=$(CXX=$CXX bash "$HERE/toolchain/order/build.sh" "$OUT/.order") \
+  || { echo "compile.sh: the fnvnx_order plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
+# ORDER_ARGS=rtl: call arguments evaluated right to left like MSVC x86 (ORDER-ARGS); ltr only for A/B measurements.
+ORDER_ARGS=${ORDER_ARGS:-rtl}
+# ORDER_REFCOUNT=weak: refcount sites of InterlockedIncrement/Decrement relaxed / release (docs/ORDERING.md
+# "Refcounts"); full keeps x86 lock semantics everywhere (A/B, or a suspected refcount ordering bug).
+ORDER_REFCOUNT=${ORDER_REFCOUNT:-weak}
+FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS"
+        -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT")
+if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
+# ORDER_KEYS: the whole program's key list (docs/ORDERING.md "Whole-program keys"): every field and global that some
+# unit hands to Interlocked* (directly or through a forwarder) or polls in a wait-only loop. Their plain accesses are
+# ordered in every unit, not only in the unit that calls Interlocked on them (ATOMIC-PLAIN-STORE, the writer side of
+# POLL-PLAIN). Default: <obj dir>/order.keys, which this script keeps current itself from a syntax-only discovery
+# pass over ALL units of units.json (not only [units.list]; cached per unit in <obj dir>/.keys/), so a shard or a
+# one-unit compile sees the same list as the full build. The farm computes it once per tree (tools/farm/keys_job.sh)
+# and hands it in as ORDER_KEYS=<file>. ORDER_KEYS=unit: in-unit discovery only, for A/B runs and quick local checks,
+# never for a build that runs. KEYS_ONLY=1: write the key list and stop.
+ORDER_KEYS=${ORDER_KEYS:-$OUT/order.keys}
+KEYFLAGS=("${FLAGS[@]}")
+if [ "$ORDER_KEYS" != unit ]; then FLAGS+=(-fplugin-arg-fnvnx_order-keys="$ORDER_KEYS"); fi
+export CXX TREE OUT FLAGS_STR="${FLAGS[*]}" ORDER_KEYS
 if [ -z "$LIST" ]; then LIST="$OUT/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
+
+# ---- whole-program keys: discover=<unit>.keys under -fsyntax-only (no code generation), merged and sorted
+keys_one() {
+  local src=$1 k
+  k="$OUT/.keys/$(echo "$1" | tr / _).keys"
+  if [ -f "$k" ] && [ "$k" -nt "$TREE/$src" ]; then return; fi
+  # shellcheck disable=SC2086
+  (cd "$TREE" && timeout 900 $CXX $KEYFLAGS_STR -fsyntax-only -fplugin-arg-fnvnx_order-discover="$k.tmp" "$src") \
+    > /dev/null 2>&1 || true   # a unit that does not compile still contributes what it parsed
+  if [ -f "$k.tmp" ]; then mv "$k.tmp" "$k"; else : > "$k"; fi
+}
+if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
+  KEYFLAGS_STR=$(printf '%s\n' "${KEYFLAGS[@]}" | grep -vxF -- -c | tr '\n' ' ')
+  # per-unit results are kept while the plugin, the shim headers and the flags stay the same
+  stamp=$( (echo "$KEYFLAGS_STR"; cat "$ORDER_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z | xargs -0 cat) |
+          sha256sum | cut -c1-16)
+  if [ "$(cat "$OUT/.keys/.stamp" 2>/dev/null)" != "$stamp" ]; then rm -rf "$OUT/.keys"; fi
+  mkdir -p "$OUT/.keys"; echo "$stamp" > "$OUT/.keys/.stamp"
+  export KEYFLAGS_STR; export -f keys_one
+  jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$OUT/.keys/units.list"
+  xargs -a "$OUT/.keys/units.list" -P "$JOBS" -I{} bash -c 'keys_one "$@"' _ {}
+  while read -r src; do cat "$OUT/.keys/$(echo "$src" | tr / _).keys"; done < "$OUT/.keys/units.list" |
+    LC_ALL=C sort -u > "$OUT/order.keys.tmp"
+  # replaced only when it changes: its mtime decides which objects are stale (compile_one)
+  if cmp -s "$OUT/order.keys.tmp" "$OUT/order.keys"; then rm "$OUT/order.keys.tmp"; else mv "$OUT/order.keys.tmp" "$OUT/order.keys"; fi
+  echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)"
+elif [ "$ORDER_KEYS" != unit ] && [ ! -f "$ORDER_KEYS" ]; then
+  echo "compile.sh: ORDER_KEYS=$ORDER_KEYS does not exist (unset it to compute the list, or use tools/farm/keys_job.sh)" >&2
+  exit 2
+fi
+if [ "${KEYS_ONLY:-0}" = 1 ]; then exit 0; fi
 
 compile_one() {
   local src=$1 base
   base="$OUT/$(echo "$1" | tr / _)"
-  if [ -f "$base.o" ] && [ "$base.o" -nt "$TREE/$src" ]; then return; fi
+  if [ -f "$base.o" ] && [ "$base.o" -nt "$TREE/$src" ] && { [ "$ORDER_KEYS" = unit ] || [ "$base.o" -nt "$ORDER_KEYS" ]; }; then
+    return
+  fi
   # shellcheck disable=SC2086
   if (cd "$TREE" && timeout 900 $CXX $FLAGS_STR "$src" -o "$base.o.tmp") > "$base.log" 2>&1; then
     mv "$base.o.tmp" "$base.o"

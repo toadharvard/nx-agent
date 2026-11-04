@@ -172,7 +172,7 @@ class X86Engine:
         start = start if start is not None else next(iter(self.text_funcs))
         self._fault = None
         try:
-            uc.emu_start(start, world.SENTINEL, count=max_steps)
+            uc.emu_start(start, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
         except UcError as e:
             r.error = self._fault or 'fault:uc:%s' % e
         finally:
@@ -263,7 +263,9 @@ class X86Engine:
         eax = world.u32(rb, 0)
         cv = self._callee_conv(address)
         ck = world.canned_kind((cv, self._callee_conv(address, caller=True)))
-        if ck == 'ref':
+        if address in world.ALLOCATORS:
+            eax = world.alloc_result(k)
+        elif ck == 'ref':
             eax = world.ref_result(k)
         elif ck == 'bool':
             eax = (eax & ~0xff) | (rb[0] & 1)          # a real bool result is 0/1 (MSVC tests al, GCC bit 0)

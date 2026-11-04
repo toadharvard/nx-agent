@@ -9,6 +9,9 @@ key = sha1(HARNESS, oracle hash, native hash):
            unit for real, so a changed callee or inlined helper changes the caller's verdict) and for the S2 bridges
            it calls (zz_bridges.o). A target is named by what it resolves to: an absolute address from aliases.ld,
            `__fnv_<addr>`, a symbol name, or for a local data reference the referenced bytes (a literal's content).
+  renames  S1b's units_renames rows of the function's unit that apply to the link's tree (config.units_renames:
+           they set the definition's and the callers' conventions, engine.UnitCache); left out when there are
+           none, so the keys of every other unit stay what they were (J-0141 renames: no HARNESS bump, only those units refresh).
 HARNESS is bumped when the harness changes verdicts (a deliberate full refresh); a function without a native
 definition gets no key (not fuzzed).
 """
@@ -21,7 +24,16 @@ import sys
 
 import config
 
-HARNESS = 'difffuzz-11'
+HARNESS = 'difffuzz-13'
+
+
+def harness_tag():
+    """HARNESS plus the vtable model's input: verdicts with the player's exe (vptrs planted, vtmodel.py) and without
+    it differ, so a farm that gains or loses the exe fuzzes again."""
+    import vtmodel
+    return HARNESS + ('+exe' if vtmodel.exe_path() else '')
+
+
 ADDR = re.compile(r'^__fnv_([0-9a-f]{8})$')
 CALLS = {282, 283}               # R_AARCH64_JUMP26 / CALL26 (ELF32 ILP32 uses the same numbers)
 SHF_EXEC = 4
@@ -169,6 +181,9 @@ def main():
         if 'ohash' in r:
             ohash[r['address']] = r['ohash']
     nat = Native(str(config.LINK))
+    rn = {}
+    for row in config.units_renames():
+        rn.setdefault(row[0], []).append('\t'.join(row))
     per_unit, keys = {}, {}
     for line in open(targets):
         t = json.loads(line)
@@ -177,7 +192,10 @@ def main():
         n = per_unit[t['source']].get(t['address'])
         o = ohash.get(t['address'])
         if n and o:
-            keys[t['address']] = hashlib.sha1(('%s|%s|%s' % (HARNESS, o, n)).encode()).hexdigest()[:20]
+            k = '%s|%s|%s' % (harness_tag(), o, n)
+            if t['source'] in rn:
+                k += '|renames:' + hashlib.sha1('\n'.join(sorted(rn[t['source']])).encode()).hexdigest()
+            keys[t['address']] = hashlib.sha1(k.encode()).hexdigest()[:20]
     json.dump(keys, open(out, 'w'))
     print('%d keys (%d units)' % (len(keys), len(per_unit)))
 

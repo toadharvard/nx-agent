@@ -5,7 +5,7 @@
 
 Each <name>.vert.glsl / <name>.frag.glsl is one shader, or one per variant when the file has a line
     // nx-variants: <suffix>=<DEFINE>[,<DEFINE>...] <suffix>=...      (suffix "-" = no suffix, no defines: "-=")
-which builds <name>_<suffix> with "#define DEFINE 1" lines after #version. `#include "file"` lines are expanded
+which builds <name>_<suffix> with "#define DEFINE 1" lines after #version ("DEFINE=VALUE" defines a value). `#include "file"` lines are expanded
 textually (uam and GL have no include support). Outputs in <out dir>:
   <name>.<stage>.glsl   expanded GLSL 4.60 (deko3d flavour: per-stage binding slots)
   <name>.<stage>.dksh   uam output (only with --uam, or $UAM)
@@ -79,12 +79,21 @@ def main():
                 for item in vm.group(1).split():
                     suffix, _, defs = item.partition("=")
                     variants.append(("" if suffix == "-" else suffix, [d for d in defs.split(",") if d]))
+        # epilogue permutations (fragment shaders using the D3D9 epilogue): __e0 none, __ea alpha test, __ef fog
+        if stage == "frag" and any('d3d9_epilogue.glsl' in l for l in lines if l.startswith("// begin")):
+            extra = []
+            for suffix, defs in variants:
+                for tag, edefs in (("e0", ["NX_FOG_MODE 0", "NX_NO_ALPHA_TEST"]), ("ea", ["NX_FOG_MODE 0", "NX_ALPHA_TEST"]),
+                                   ("ef", ["NX_NO_ALPHA_TEST"])):
+                    extra.append((suffix + "__" + tag if suffix else "_" + tag, defs + edefs))   # name__tag
+            variants = variants + extra
         for suffix, defs in variants:
             name = base + ("_" + suffix if suffix else "")
             text = "".join(lines)
             if defs:
                 i = text.index("\n", text.index("#version")) + 1
-                text = text[:i] + "".join("#define %s 1\n" % d for d in defs) + text[i:]
+                text = text[:i] + "".join("#define %s\n" % (d if " " in d else d.replace("=", " ", 1) if "=" in d else d + " 1")
+                                          for d in defs) + text[i:]
             shaders.append(build_one(out, name, stage, text, uam))
 
     with open(os.path.join(out, "nx_shaders.h"), "w") as h:

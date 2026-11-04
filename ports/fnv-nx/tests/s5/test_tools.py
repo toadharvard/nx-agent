@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import struct
 import subprocess
 import sys
@@ -314,6 +315,126 @@ class FaultTableTest(unittest.TestCase):
                 f.write("# c\nInitHolder  # why\n0x00aa1070 use-malloc:x0\nbefore-winmain 0x00a8a5f0 0x10\n")
             self.assertEqual(emu_guest.parse_fault_table(p),
                              ([("InitHolder", "return0"), ("0x00aa1070", "use-malloc:x0")], [("0x00a8a5f0", 16)]))
+
+
+class MilestoneTest(unittest.TestCase):
+    """tests/s5/milestones.txt (emu_guest.py --milestones) parses into the five boot milestones in boot order, the
+    store watch reads the right word of a wide store, and the farm report shows the summary of a boot that ended by
+    itself (no STOPPED line)."""
+
+    def test_table(self):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        rows = emu_guest.parse_milestones(emu_guest.MILESTONES)
+        names = list(dict.fromkeys(n for n, _, _ in rows))
+        self.assertEqual(names, ["winmain", "renderer-init", "main-menu", "first-frame", "first-cell"])
+        self.assertIn(("winmain", "call", "0x0086a850"), rows)
+        self.assertIn(("first-cell", "store", "*0x011dea3c+0x40"), rows)
+        rx = dict((n, re.compile(t[3:])) for n, k, t in rows if t.startswith("re:"))
+        self.assertTrue(rx["renderer-init"].search("_ZN15Null_IDirect3D912CreateDeviceEj10_D3DDEVTYPE"))
+        self.assertTrue(rx["renderer-init"].search("_ZN11PxDirect3D912CreateDeviceEj10_D3DDEVTYPE"))
+        self.assertTrue(rx["first-frame"].search("_ZN21Null_IDirect3DDevice97PresentEPK7tagRECT"))
+        self.assertTrue(rx["first-frame"].search("_ZN24Null_IDirect3DSwapChain97PresentEPK7tagRECT"))
+        self.assertFalse(rx["first-frame"].search("_ZN14E7CCD0Renderer12PresentFrameEv"))
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "m.txt")
+            for bad in ("x call\n", "x jump 0x1\n", "x store 0x1+\n", "X call 0x1\n", "x call re:(\n"):
+                with open(p, "w") as f:
+                    f.write(bad)
+                with self.assertRaises((ValueError, re.error)):
+                    emu_guest.parse_milestones(p)
+
+    def test_stored_word(self):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        sw = emu_guest.Emu.stored_word
+        self.assertEqual(sw(0x100, 4, 0x1234, 0x100), 0x1234)
+        self.assertEqual(sw(0x100, 8, 0x5555000000000000 | 7, 0x104), 0x55550000)   # stp w, w: the upper word
+        self.assertIsNone(sw(0x100, 4, 0, 0x100))                                     # zero: not reached
+        self.assertEqual(sw(0x100, 4, 0, 0x100, nonzero=False), 0)
+        self.assertIsNone(sw(0x102, 2, 0xFFFF, 0x100))                                # partial store
+        self.assertIsNone(sw(0x0FC, 8, 1, 0x100 + 4))                                 # does not cover it
+
+    def test_store_watch_follows_pointer(self):
+        """'store *A+N' under Unicorn: the pointer stored at A is followed, then the store to it +N reaches it"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc
+        from unicorn.arm64_const import UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3
+        e = emu_guest.Emu.__new__(emu_guest.Emu)
+        e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        e.calls, e.cur, e.code_syms, e.miles = 0, None, {}, {}
+        uc.mem_map(0x1000, 0x1000)       # code
+        uc.mem_map(0x01100000, 0x1000)   # "data window": the pointer at 0x01100010
+        uc.mem_map(0x20000000, 0x1000)   # "heap": the object
+        code = struct.pack("<4I", 0xB9000001, 0xB9004043, 0xB9004043, 0xD503201F)   # str w1,[x0]; str w3,[x2,#64] x2
+        uc.mem_write(0x1000, code)
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "m.txt")
+            with open(p, "w") as f:
+                f.write("cell store *0x01100010+0x40\nother store 0x01100020\n")
+            e.install_milestones(p)
+        for r, v in ((UC_ARM64_REG_X0, 0x01100010), (UC_ARM64_REG_X1, 0x20000000), (UC_ARM64_REG_X2, 0x20000000),
+                     (UC_ARM64_REG_X3, 0x1234)):
+            uc.reg_write(r, v)
+        uc.emu_start(0x1000, 0x1000 + len(code))
+        self.assertEqual(list(e.miles), ["cell"])
+        self.assertEqual(e.milestone_lines()[1], "milestone\tother\t-")
+
+    def test_r0_milestones_file(self):
+        sys.path.insert(0, HERE)
+        import boot_milestones
+        with tempfile.TemporaryDirectory() as t:
+            raw = os.path.join(t, "raw.json")
+            _write(raw, json.dumps({"milestone": "winmain", "peak_heap_bytes": 4096, "milestones": [
+                {"name": n, "reached": n == "winmain"} for n in boot_milestones.KEYS],
+                "stop": {"reason": "STOPPED: x", "messages": []}}).encode())
+            out = os.path.join(t, "milestones.json")
+            boot_milestones.main([out, raw, os.path.join(t, "missing.json"), "--image", "player exe"])
+            doc = json.loads(_read(out))
+        self.assertEqual({k: doc[k] for k in ("winmain", "main_menu", "first_frame", "first_cell")},
+                         {"winmain": True, "main_menu": False, "first_frame": False, "first_cell": False})
+        self.assertEqual((doc["renderer_init"], doc["milestone"], doc["boot_peak_heap_bytes"], doc["image"]),
+                         (False, "winmain", 4096, "player exe"))
+        self.assertIsNone(doc["stub"]["winmain"])   # no summary: unknown, not false
+
+    def test_report_without_stop_line(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "..", "tools", "farm"))
+        import full_report
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(os.path.join(t, "boot", "stub"))
+            _write(os.path.join(t, "boot", "stub", "emu_stub.log"), b"   fnvnx boot: calling WinMain\nPASS\n")
+            _write(os.path.join(t, "boot", "stub", "boot_summary_stub.json"), json.dumps({
+                "milestone": "winmain", "milestones": [{"name": "winmain", "reached": True},
+                                                       {"name": "renderer-init", "reached": False}],
+                "stop": {"reason": "guest returned 0x0", "messages": ["[fnvnx] MessageBox [Fallout]: x"]}}).encode())
+            text = "\n".join(full_report.stub_boot(t, lambda s, n=200: str(s)[:n]))
+        self.assertIn("stop: guest returned 0x0 / [fnvnx] MessageBox [Fallout]: x", text)
+        self.assertIn("game milestones: winmain yes, renderer-init no; last reached: winmain", text)
+
+
+class NullD3d9Test(unittest.TestCase):
+    """toolchain/game/null_d3d9.cpp is what gen_null_d3d9.py makes of shim/include/d3d9.h, and it registers
+    d3d9.dll: the engine reaches Direct3DCreate9 only through LoadLibraryA("D3D9.DLL") + GetProcAddress, so a
+    null-device guest without the module stops at "Failed to initialize renderer." (the first boot on the real exe)."""
+
+    def test_generated_and_registers_module(self):
+        game = os.path.join(TC, "game")
+        with tempfile.TemporaryDirectory() as t:
+            out = os.path.join(t, "null_d3d9.cpp")
+            subprocess.run([sys.executable, "-I", os.path.join(game, "gen_null_d3d9.py"),
+                            os.path.join(TC, "..", "shim", "include", "d3d9.h"), out], check=True,
+                           capture_output=True)
+            gen = _read(out)
+        committed = _read(os.path.join(game, "null_d3d9.cpp"))
+        self.assertEqual(gen, committed, "null_d3d9.cpp is stale: rerun gen_null_d3d9.py")
+        src = committed.decode()
+        self.assertIn('extern "C" void fnvnx_d3d9_register(void) {', src)   # boot.cpp's weak hook
+        self.assertIn('fnvnx_register_module("d3d9.dll", null_d3d9_export);', src)
+        exports = src.split("null_d3d9_export(const char *proc) {", 1)[1].split("};", 1)[0]
+        self.assertIn('{"Direct3DCreate9", (FARPROC)Direct3DCreate9}', exports)
+        self.assertIn('{"D3DPERF_SetOptions", (FARPROC)D3DPERF_SetOptions}', exports)   # the exe's one IAT import
+        self.assertNotIn("Direct3DCreate9Ex", exports)   # as Nine: the engine takes its Direct3DCreate9 path
 
 
 class InitOrderTest(unittest.TestCase):

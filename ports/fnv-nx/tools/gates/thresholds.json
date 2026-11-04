@@ -1,0 +1,128 @@
+{
+ "_doc": "Thresholds of tools/gates/ready.py. Why each one is enough: docs/READINESS.md. Change a threshold only with a journal entry.",
+ "max_commits_behind": 25,
+ "units": 2978,
+ "compile_shards": 4,
+ "equiv_shards": 6,
+ "static_shards": 4,
+ "fuzz_shards": 26,
+ "equiv_by_design": {
+  "_doc": "S11 rules whose differences docs/EQUIVALENCE.md records as by design; S1b sites come from docs/PATCHES.md 'By-design MSVC differences'",
+  "code_rules": [
+   "CTOR1"
+  ],
+  "nobuild_rules": [
+   "ENUM1"
+  ]
+ },
+ "abi_explained_classes": [
+  "pop-mismatch"
+ ],
+ "static_closed": {
+  "_doc": "a non-benign S12 class counts as closed only while its fix is present in this checkout (file + regex)",
+  "F2S": {
+   "file": "tools/link/compile.sh",
+   "regex": "fnvnx_ftoi",
+   "why": "FTOI2 plugin in compile.sh"
+  },
+  "F2U": {
+   "file": "tools/link/compile.sh",
+   "regex": "fnvnx_ftoi",
+   "why": "FTOI2 plugin in compile.sh"
+  },
+  "F2S64": {
+   "file": "tools/link/compile.sh",
+   "regex": "fnvnx_ftoi",
+   "why": "FTOI2 plugin in compile.sh"
+  },
+  "F2U64": {
+   "file": "tools/link/compile.sh",
+   "regex": "fnvnx_ftoi",
+   "why": "FTOI2 plugin in compile.sh"
+  },
+  "BARRIER": {
+   "file": "shim/include/fnvnx_compat.h",
+   "regex": "_ReadWriteBarrier\\(void\\)\\s*\\{\\s*__atomic_thread_fence",
+   "why": "barriers are dmb fences"
+  }
+ },
+ "fuzz_by_design_causes": {
+  "x87-precision": "result within tolerance of x87 80-bit intermediates; AArch64 has IEEE single/double only"
+ },
+ "_fuzz_by_design_doc": "used only for fuzz reports without an fnvnx-causes block; with one, tools/difffuzz/causes.py POLICY decides",
+ "fuzz_hard_classes": [
+  "real-bug",
+  "triage"
+ ],
+ "fuzz_causes": {
+  "_doc": "S13b's whole-campaign summary (causes.py summary over the fuzz caches); fuzz.hard takes it when it covers more shards than the reports' fnvnx-causes blocks",
+  "branch": "reports/s13b-causes",
+  "path": "causes_all.json"
+ },
+ "fuzz_min_coverage": 0.9,
+ "boot_milestones": [
+  "winmain",
+  "renderer_init",
+  "main_menu",
+  "first_frame",
+  "first_cell"
+ ],
+ "perf": {
+  "_doc": "frame-rate levels set by the owner (J-0132): below 30 fps fails; 45 fps stable is the target (worst frame); 60 fps is the stretch, even if unstable (median frame). Each frame gate is evaluated at every clock; only clocks with required=true count for the verdict, the others are reported as informative",
+  "ipc": 0.8,
+  "clocks": [
+   {
+    "name": "stock",
+    "hz": 1020000000,
+    "required": false
+   },
+   {
+    "name": "boost",
+    "hz": 1785000000,
+    "required": true
+   }
+  ],
+  "fps": {
+   "floor": 30,
+   "target": 45,
+   "stretch": 60
+  },
+  "boot_to_winmain_s": 3.0,
+  "boot_clock": "stock",
+  "budget": {
+   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock",
+   "scenario": "placed",
+   "target": "pass_45",
+   "model": "docs/PERF_budget.json"
+  }
+ },
+ "memory": {
+  "heap_region_bytes": 2147483648,
+  "host_heap_bytes": 67108864,
+  "max_use_fraction": 0.75
+ },
+ "render_perf": {
+  "_doc": "render machine report (docs/RENDER_PERF.md section 5). perf.render.<clock>: summary.targets_budget_fraction (the renderer's worst thread / the target's frame, hi bound = IPC 0.6, mix_hi; not summary.targets, which compares the renderer alone with the whole frame) against max_budget_fraction, the renderer's share of the frame (RENDER_NATIVE.md 9.4: render thread 4.5 of 22.2 ms, 3.5 of 16.7 ms); without the fractions, from frame_ms gate values scaled from assumptions.clock_ghz. perf.gpu.<config>: gpu.summary_ms.<gpu_mix>.<config>, efficiency 1.0 (lo) - 0.6 (hi, judged), a model with no measured anchor, so informative until required is set",
+  "branch": "claude/port-nsw-render",
+  "path": "ports/fnv-nx/render/native/perf/report.json",
+  "max_budget_fraction": 0.2,
+  "gpu_mix": "mix_hi",
+  "gpu": [
+   {
+    "name": "docked_720p",
+    "required": false
+   },
+   {
+    "name": "handheld_720p",
+    "required": false
+   },
+   {
+    "name": "handheld_540p",
+    "required": false,
+    "aliases": [
+     "handheld_540p_dynres"
+    ]
+   }
+  ]
+ }
+}

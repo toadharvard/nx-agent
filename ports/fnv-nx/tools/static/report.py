@@ -46,9 +46,9 @@ CLASSES = [
      'benign', 'none'),
     ('ORDER-ARGS', 'call with two or more side-effecting arguments',
      'MSVC x86 evaluates (pushes) arguments right to left, GCC AArch64 left to right (verified, tests/s12): '
-     'Use(Read(), Read()) swaps the values', 'per-site',
-     'same-callee / same-object rows: hoist the arguments into locals in MSVC order (last argument first); ORDER1 '
-     'rule from the site list, or a GCC plugin that gimplifies side-effecting scalar arguments right to left'),
+     'Use(Read(), Read()) swaps the values', 'compiler',
+     'the fnvnx_order plugin (args=rtl) evaluates every call\'s scalar arguments right to left (tests/s12/order '
+     'args.cpp against GCC x86-32); calls with a side-effecting class-type argument are left (counted per unit)'),
     ('ORDER-OBJECT', 'member call whose object expression and arguments both have side effects',
      'C++17 (GCC): object expression first; MSVC 2008: arguments first, ecx last', 'per-site',
      'hoist the object pointer or the argument as MSVC ordered them'),
@@ -80,29 +80,31 @@ CLASSES = [
      'rewrite with va_list'),
     ('VA-LDBL', 'long double through ...', '8 bytes vs 16', 'per-site', 'double'),
     ('ATOMIC-UNALIGNED', 'Interlocked* on a misaligned or packed field',
-     'x86 lock prefix works unaligned; AArch64 ldaxr/stlxr fault on misalignment', 'per-site', 'align the field'),
+     'x86 lock prefix works unaligned; AArch64 ldaxr/stlxr fault on misalignment', 'runtime',
+     'platform/win32/sync.cpp: misaligned operands go through a split lock (atomic against every Interlocked call)'),
     ('ATOMIC-USE', 'fields and globals updated with Interlocked*', 'lock-free protocols: on x86 a plain store after '
-     'an Interlocked acquire releases (TSO); on AArch64 it does not', 'per-site',
-     'plain stores to these fields (ATOMIC-PLAIN-STORE) become __atomic_store_n(.., __ATOMIC_RELEASE)'),
+     'an Interlocked acquire releases (TSO); on AArch64 it does not; x86 lock is a full barrier, ldaxr/stlxr is not',
+     'compiler', 'Interlocked* end with dmb ish (sync.cpp); fnvnx_order orders the plain accesses to every operand the '
+     'unit hands to Interlocked (keys=<atomic.keys> for operands only other units hand over)'),
     ('ATOMIC-PLAIN-STORE', 'plain store to a field that is elsewhere updated with Interlocked*',
-     'x86 TSO: release; AArch64: unordered', 'per-site', '__atomic_store_n(&f, v, __ATOMIC_RELEASE) (rule ATOM1)'),
+     'x86 TSO: release; AArch64: unordered', 'compiler', 'fnvnx_order: stlr (replaces rule ATOM1)'),
     ('BARRIER', '_ReadWriteBarrier / _ReadBarrier / _WriteBarrier / MemoryBarrier calls',
-     'MSVC: compiler barrier, and x86 TSO orders the hardware; fnvnx_compat.h: compiler barrier only - no dmb',
-     'header', 'fnvnx_compat.h: _ReadWriteBarrier -> __atomic_thread_fence(__ATOMIC_SEQ_CST), _ReadBarrier -> '
-     '__ATOMIC_ACQUIRE, _WriteBarrier -> __ATOMIC_RELEASE (dmb ish / ishld)'),
+     'MSVC: compiler barrier, and x86 TSO orders the hardware; AArch64 needs a dmb for the same order',
+     'header', 'fnvnx_compat.h: _ReadWriteBarrier dmb ish, _ReadBarrier dmb ishld, _WriteBarrier dmb ishst, '
+     'MemoryBarrier dmb ish'),
     ('VOLATILE-DECL', 'volatile globals and fields',
      'MSVC (/volatile:ms, the x86 default): volatile loads acquire, stores release; GCC: no ordering at all, and it '
-     'moves plain stores across volatile ones (verified)', 'runtime',
-     'compiler support: a GCC plugin turning volatile accesses of decomp units into ldar/stlr (MSVC volatile), or a '
-     'rule wrapping these declarations in fnvnx_msvolatile<T> (acquire/release accessors, same size)'),
+     'moves plain stores across volatile ones (verified)', 'compiler',
+     'the fnvnx_order plugin: volatile loads ldar, stores stlr; fences for bit-fields, packed fields, aggregates '
+     '(docs/ORDERING.md, tests/s12/order)'),
     ('POLL-VOLATILE', 'loop polling a volatile', 'as VOLATILE-DECL: the data read after the loop needs acquire',
-     'runtime', 'as VOLATILE-DECL'),
+     'compiler', 'as VOLATILE-DECL'),
     ('POLL-PLAIN', 'loop polling plain shared memory (only waiting in the body)',
      'x86 TSO makes the data written before the flag visible in order; AArch64 does not; GCC may also hoist the '
      'load when the body makes no call', 'per-site', '__atomic_load_n(.., __ATOMIC_ACQUIRE) in the condition'),
     ('TLS', '__declspec(thread) variables', 'MSVC: image .tls section through the TEB TLS index; native: __thread on '
-     'TPIDR_EL0 (S5 guest runtime)', 'runtime', 'S2: never rebind a native __thread definition to an image address; '
-     'S4/S5: no image code reads these through the image TLS index'),
+     'TPIDR_EL0 (S5 guest runtime)', 'runtime', 'S2 binds every image .tls reference to __fnvnx_tls_image; '
+     '__readfsdword(0x2c)[0] returns the same per-thread block (fnvnx_image_tls_hook); _tls_index stays 0'),
     ('P2I64', 'pointer converted to a 64-bit integer', 'GCC ILP32 sign-extends (sxtw, verified); differs from a zero '
      'extension only for addresses >= 2 GiB', 'runtime', 'keep guest addresses below 0x80000000 (see P2I-SIGNED)'),
     ('P2I-SIGNED', 'pointer as signed int compared / shifted / divided',
@@ -256,8 +258,46 @@ CLOSED = {
     'THIS-NULL': 'flag -fno-delete-null-pointer-checks (D10)',
     'W-RETURN': 'rule FALL1 (trap), patches RET1 (return); build -Werror=return-type',
     'SHIFT32-VAR': 'benign (both mask by 31)',
-    'TLS': 'S5 guest runtime',
+    'TLS': 'S2 binds __declspec(thread) to __fnvnx_tls_image; fs:[0x2c][0] is the same block (S4 thread.cpp, boot hook)',
 }
+PORT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+
+
+def _text(rel):
+    try:
+        return open(os.path.join(PORT, rel)).read()
+    except OSError:
+        return ''
+
+
+def build_closures():
+    """classes the current build closes by compiler plugin, header or runtime - each entry only when the mechanism is
+    really in place (compile.sh loads the plugin with the program's mode, the header has the fence, ...), so a
+    report of an older tree or a reverted change does not count them closed (docs/ORDERING.md)"""
+    out = {}
+    comp, compat, sync = _text('tools/link/compile.sh'), _text('shim/include/fnvnx_compat.h'), _text('platform/win32/sync.cpp')
+    if 'toolchain/ftoi' in comp:
+        for c in ('F2U', 'F2U64', 'F2S', 'F2S64'):
+            out[c] = 'compiler: fnvnx_ftoi plugin (FTOI2)'
+    if 'toolchain/order' in comp and 'ORDER_MODE=${ORDER_MODE:-volatile}' in comp:
+        for c in ('VOLATILE-DECL', 'POLL-VOLATILE'):
+            out[c] = 'compiler: fnvnx_order plugin (volatile = ldar/stlr, docs/ORDERING.md)'
+        # in-unit discovery covers a plain store only where the same unit calls Interlocked on the operand; the
+        # gate's sites are cross-unit, so the class is closed only when the build passes the gate's key list
+        if re.search(r'^ORDER_KEYS=\$\{ORDER_KEYS:-[^}]', comp, re.M):
+            out['ATOMIC-PLAIN-STORE'] = 'compiler: fnvnx_order keys (the gate\'s atomic.keys)'
+        if 'ORDER_ARGS=${ORDER_ARGS:-rtl}' in comp:
+            out['ORDER-ARGS'] = 'compiler: fnvnx_order args=rtl (arguments right to left, as MSVC)'
+    if re.search(r'_ReadWriteBarrier\(void\) \{ __asm__ __volatile__\("dmb ish"', compat):
+        out['BARRIER'] = 'header: fnvnx_compat.h dmb ish / ishld / ishst'
+    if 'W32_FULL' in sync:
+        out['ATOMIC-USE'] = 'runtime: Interlocked* fully ordered (dmb ish); plain accesses: fnvnx_order'
+    if 'w32_split' in sync:
+        out['ATOMIC-UNALIGNED'] = 'runtime: misaligned Interlocked through a split lock (sync.cpp)'
+    return out
+
+
+CLOSED.update(build_closures())
 
 UNITS_ENV = os.environ.get('UNITS') or ''
 
@@ -482,6 +522,13 @@ def main():
         t = CLASS.get(cls, (cls, cls, '-', '?', '-'))
         md.append('| `%s` %s | %d | %s | %s | %s | %s |' % (cls, t[1], counts.get(cls, 0), t[3], CLOSED.get(cls, '-'),
                                                        t[2], t[4]))
+    closed_n = sum(counts.get(c, 0) for c in CLOSED)
+    benign_n = sum(n for c, n in counts.items() if c not in CLOSED and CLASS.get(c, ('', '', '', ''))[3] == 'benign')
+    md += ['', 'Sites in closed classes: %d; benign: %d; open: %d (closed.tsv lists the closed classes)'
+           % (closed_n, benign_n, sum(counts.values()) - closed_n - benign_n)]
+    with open(os.path.join(out, 'closed.tsv'), 'w') as f:
+        for c in sorted(CLOSED):
+            f.write('%s\t%d\t%s\n' % (c, counts.get(c, 0), CLOSED[c]))
     order_strength = Counter(r[3].split('\t')[0] for r in by.get('ORDER-ARGS', []))
     md += ['', 'ORDER-ARGS by strength: ' + ', '.join('%s %d' % kv for kv in order_strength.most_common()), '']
     f2 = Counter(r[3].split('\t')[1] for r in by.get('F2U', []) if '\t' in r[3])

@@ -22,6 +22,7 @@ void main() {
     // opacity by view angle: |N.V| from start (facing) to stop (grazing) angle
     float d = abs(dot(normalize(inNormal), normalize(eyeModel.xyz - inPos)));
     float t = clamp((falloff.x - d) / max(falloff.x - falloff.y, 1e-5), 0.0, 1.0);
+    t = t * t * (3.0 - 2.0 * t);   // NOLIGHT004: smoothstep of the angle term before the opacity mix
     c.a *= mix(falloff.z, falloff.w, t);
 #endif
     outColor = c;

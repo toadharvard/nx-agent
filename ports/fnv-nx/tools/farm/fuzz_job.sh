@@ -27,8 +27,14 @@
 # fuzz/cache/<k>of<N> of the artifacts repository (results.jsonl + div/), pushed after every $FUZZ_CHUNK (200)
 # functions, so a recreated machine continues from it; a new shard count is seeded from the existing caches.
 # $FUZZ_BUDGET=<seconds> stops after the chunk that reaches it (the rest is "pending", done by the next run).
+# Deadline (J-0138): the job must have published its report before the farm session kills the runner (runner.sh's
+# FARM_DEADLINE, 5 min before the 2 h background limit; else $FUZZ_MAX_S, default 5400 s, after the job's start).
+# No chunk starts later than $FUZZ_REPORT_S (900) s before it, and a running chunk is stopped then: its unfinished
+# functions stay pending. Without this a shard whose pass took longer than the runner's life (fz1, fz2, ... on the
+# 26-shard layout) published nothing at all.
 # A wall-clock watchdog per chunk (function count x 3 x TIME + 30 s / JOBS, x2) kills a hung chunk; its unfinished
-# functions are recorded as run:timeout and fuzzed again by the next run. After each chunk the job looks at the
+# functions are recorded as run:timeout and fuzzed again by the next run, after everything else (fuzzcache.py todo).
+# Every function has a hard wall-clock bound too (fuzz.py fn_limit, each machine's run world.RUN_TIMEOUT_US). After each chunk the job looks at the
 # integration head ($FUZZ_HEAD_BRANCH): when its fnkeys.HARNESS differs from this checkout's, it stops and reports,
 # so the runner moves to the newest head.
 # Resumable: a rerun with the same arguments continues after the last finished function.
@@ -60,6 +66,8 @@ EXT=${FUZZ_EXT:-$FARM_HOME/ext}
 RUN=$FARM_HOME/fuzz-$C12-${K}of${N}
 mkdir -p "$FARM_HOME" "$RUN" "$(dirname "$REPORT")"
 REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
+# shellcheck source=lib_job.sh
+. "$HERE/lib_job.sh"                 # job_gamedata (the player's exe, J-0128 / V1); its log() is replaced below
 log() { echo "== $(date +%T) $*"; }
 t0=$(date +%s)
 
@@ -201,7 +209,7 @@ if ! python3 -c "$PYMODS" 2>/dev/null; then
 fi
 # Preflight: every module the harness imports must load here, or each function would come back as one harness
 # exception ("crash:ModuleNotFoundError") instead of a verdict.
-if ! (cd "$DF" && $PY -c 'import fuzz, classify, check_rebind, fnkeys, fuzzcache, effects' ) \
+if ! (cd "$DF" && $PY -c 'import fuzz, classify, check_rebind, fnkeys, fuzzcache, effects, vtmodel' ) \
     > "$FARM_HOME/fuzz-preflight.log" 2>&1; then
   echo "fuzz harness does not load on this host ($PY):"; tail -5 "$FARM_HOME/fuzz-preflight.log"; exit 1
 fi
@@ -245,15 +253,62 @@ NX86=$(ls "$ORACLE/obj" | grep -c '\.obj$' || true)
 if [ -n "${FUZZ_TREE:-}" ]; then TREE=$FUZZ_TREE; NOTE_TREE="local tree $TREE"
 else
   TREE=$FARM_HOME/tree-$L12
+  # The tree the link was made on. t/<L12> exists only when the prepare farm got to L itself; the link job may have
+  # taken the rolling `tree` (published for an earlier commit with the same prepare inputs), which has moved on
+  # since, so fetch_tree.sh on L alone waits 30 min and fails (link/c0d6c71516f6, 14:04, fz1 and fz25). Candidates,
+  # first hit wins: L; the commit the link's meta.json "tree" note says its tree was published for (checked
+  # against the tree hash it records); the link's objects commit (its objects were compiled from that tree). Only
+  # L is waited for, and only when no candidate exists yet.
   if [ ! -f "$TREE.done" ]; then
-    th=$(ARTIFACTS=$ARTIFACTS REPO=$REPO FARM_HOME=$FARM_HOME bash "$HERE/fetch_tree.sh" "$LCOMMIT" "$TREE" \
-         "${FUZZ_TREE_WAIT:-1800}" 2> "$RUN/fetch_tree.log") \
-      || fail_report 3 "no prepared tree for the link commit $L12 (see fetch_tree.log)"
-    echo "$th" > "$TREE.done"
+    mapfile -t LT < <(python3 -I - "$LINK/meta.json" <<'EOF'
+import json, re, sys
+try:
+    m = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    m = {}
+note = m.get('tree') or ''
+h = re.search(r'tree hash ([0-9a-f]{8,})', note)
+print(h.group(1) if h else '')
+c = re.search(r'published for ([0-9a-f]{7,40})', note)
+for x in (c.group(1) if c else '', m.get('objects_commit') or ''):
+    if x:
+        print(x)
+EOF
+)
+    want_th=${LT[0]:-}; th=""; TREE_FROM=""
+    cands=("$LCOMMIT")
+    for x in "${LT[@]:1}"; do
+      full=$(git -C "$REPO" rev-parse -q --verify "$x^{commit}" 2>/dev/null) || continue
+      [ "$full" = "$LCOMMIT" ] || cands+=("$full")
+    done
+    : > "$RUN/fetch_tree.log"
+    for c in "${cands[@]}"; do
+      t=$(ARTIFACTS=$ARTIFACTS REPO=$REPO FARM_HOME=$FARM_HOME bash "$HERE/fetch_tree.sh" "$c" "$TREE" 0 \
+          2>> "$RUN/fetch_tree.log") || continue
+      if [ -n "$want_th" ] && [ "${t:0:${#want_th}}" != "$want_th" ] && [ "${want_th:0:${#t}}" != "$t" ]; then
+        echo "tree of ${c:0:12}: hash $t, the link was made on $want_th" >> "$RUN/fetch_tree.log"; continue
+      fi
+      th=$t; TREE_FROM=$c; break
+    done
+    if [ -z "$th" ]; then
+      th=$(ARTIFACTS=$ARTIFACTS REPO=$REPO FARM_HOME=$FARM_HOME bash "$HERE/fetch_tree.sh" "$LCOMMIT" "$TREE" \
+           "${FUZZ_TREE_WAIT:-1800}" 2>> "$RUN/fetch_tree.log") \
+        || fail_report 3 "no prepared tree for the link commit $L12, the tree it records or its objects commit (see fetch_tree.log)"
+      TREE_FROM=$LCOMMIT
+    fi
+    echo "$th ${TREE_FROM:0:12}" > "$TREE.done"
   fi
-  NOTE_TREE="prepare farm tree of $L12 (tree hash $(cat "$TREE.done"))"
+  read -r th TREE_FROM < "$TREE.done"
+  NOTE_TREE="prepare farm tree of ${TREE_FROM:-$L12} (tree hash $th)"
 fi
 
+# --- the player's FalloutNV.exe (private branch gamedata/exe, sha256 pinned, lib_job.sh): its RTTI vftables are the
+# objects' vptrs on the oracle (tools/difffuzz/vtmodel.py). Read only, never copied into a published branch or a
+# report; without it virtual calls are not modelled. FARM_REAL_EXE=0 leaves it out.
+[ -d "$ARTIFACTS/.git" ] || git clone -q --no-checkout "$ARTIFACTS_URL" "$ARTIFACTS"
+job_gamedata
+log "exe: $NOTE_EXE"
+export FNVNX_EXE=$GAME_EXE
 export FNVNX_DECOMP=$DECOMP FNVNX_X86OBJ=$ORACLE/obj FNVNX_TREE=$TREE FNVNX_A64OBJ=$LINK/fixed FNVNX_DFLINK=$LINK
 export FNVNX_DFWORK=$RUN/work FNVNX_DFA64=$RUN/a64 SSE2NEON=$EXT/sse2neon
 unset FNVNX_DFPROFILE
@@ -268,9 +323,13 @@ if [ ! -s "$CAT" ] || ! head -1 "$CAT" | grep -q '"ohash"'; then
 fi
 (cd "$DF" && $PY - "$CAT" "$K" "$N" "${FUZZ_LIMIT:-0}" "$RUN/targets.jsonl" "$RUN/targets.json" <<'EOF'
 import json, sys, zlib
-import config
+import config, vtmodel
 cat, k, n, limit, out, summary = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6]
-counts = dict(catalogued=0, shard=0, no_native_object=0, not_modelled=0, targets=0)
+# difffuzz-13: indirect calls and jumps are modelled with the player's exe (vptrs from its vftables, vtmodel.py);
+# tail jumps and in-function switch tables always were (an intercepted call / the oracle's own relocated table)
+vcalls = vtmodel.exe_path() is not None
+counts = dict(catalogued=0, shard=0, no_native_object=0, not_modelled=0, not_modelled_unresolved=0,
+              not_modelled_indirect=0, indirect=0, targets=0, vtable_model=vcalls)
 have = {}
 rows = []
 for line in open(cat):
@@ -287,10 +346,12 @@ for line in open(cat):
     if not have[s]:
         counts['no_native_object'] += 1
         continue
-    if r['unresolved'] or r['indirect'] or r['tails']:
+    if r['unresolved'] or (r['indirect'] and not vcalls):
         counts['not_modelled'] += 1
+        counts['not_modelled_unresolved' if r['unresolved'] else 'not_modelled_indirect'] += 1
         continue
-    ncalls = len(r['calls'])
+    counts['indirect'] += bool(r['indirect'])
+    ncalls = len(r['calls']) + len(r['tails']) + r['indirect']
     rows.append(dict(unit=r['unit'], source=s, address=r['address'], symbol=r['symbol'], size=r['size'],
                      calls=r['calls'], x87=r['x87'], sse=r['sse'], fs=r['fs'],
                      kind='leaf' if ncalls == 0 else 'calls%d' % ncalls))
@@ -352,23 +413,40 @@ log "cache: $(cat "$RUN/todo.json")"
 
 # --- campaign over the changed and new functions, in chunks (cache merged and pushed after each) ----------------
 CHUNK=${FUZZ_CHUNK:-200}; BUDGET=${FUZZ_BUDGET:-0}
+FUZZ_END=$(( t0 + ${FUZZ_MAX_S:-5400} ))
+if [ -n "${FARM_DEADLINE:-}" ] && [ "$FARM_DEADLINE" -lt "$FUZZ_END" ]; then FUZZ_END=$FARM_DEADLINE; fi
+FUZZ_END=$(( FUZZ_END - ${FUZZ_REPORT_S:-900} ))
+log "fuzzing stops at $(date -u -d "@$FUZZ_END" +%T) UTC (report deadline)"
 mkdir -p "$RUN/camp"; touch "$RUN/camp/results.jsonl"
 (cd "$DF" && $PY fuzzcache.py dropcrash "$RUN/camp") >> "$RUN/merge.log"
-rm -f "$RUN"/chunk.*
+rm -f "$RUN"/chunk.* "$RUN/stop.txt"
 split -l "$CHUNK" -d -a 4 "$RUN/todo.jsonl" "$RUN/chunk."
 HEAD_BRANCH=${FUZZ_HEAD_BRANCH:-claude/port-nsw-un6t9s}
 harness_of() { sed -n "s/^HARNESS = '\(.*\)'/\1/p"; }
-MY_HARNESS=$(harness_of < "$DF/fnkeys.py")
+MY_HARNESS=$(harness_of < "$DF/fnkeys.py"); export MY_HARNESS
 for c in "$RUN"/chunk.*; do
   [ -s "$c" ] || continue
   nf=$(wc -l < "$c")
   # watchdog: a harness hang costs this chunk, not the shard. Per function at most TIME s of fuzzing plus setup,
   # minimisation and classification (~3 x TIME + 30 s), JOBS in parallel, x2 margin.
   wd=$(( (nf * (3 * ${TIME%.*} + 30) / JOBS + 1) * 2 + 120 ))
+  left=$(( FUZZ_END - $(date +%s) ))
+  if [ "$left" -lt 60 ]; then
+    log "report deadline: $(basename "$c") and later chunks stay pending"; echo deadline > "$RUN/stop.txt"; break
+  fi
+  capped=0; if [ "$left" -lt "$wd" ]; then wd=$left; capped=1; fi
   log "fuzz $(basename "$c"): $nf functions ($JOBS jobs, $ITERS executions / ${TIME}s per function, watchdog ${wd}s)"
   rc=0
   (cd "$DF" && timeout -k 30 "$wd" nice $PY difffuzz.py fuzz "$c" --out "$RUN/camp" --iters "$ITERS" \
     --time "$TIME" --jobs "$JOBS" --resume >> "$RUN/fuzz.log" 2>&1) || rc=$?
+  if { [ $rc -eq 124 ] || [ $rc -eq 137 ]; } && [ $capped = 1 ]; then
+    # stopped by the report deadline, not hung: the unfinished functions stay pending (the next run fuzzes them)
+    log "report deadline reached during $(basename "$c")"
+    (cd "$DF" && $PY fuzzcache.py merge "$CACHE" "$RUN/camp" "$RUN/keys.json" "$COMMIT") >> "$RUN/merge.log"
+    cache_commit "$C12 shard $K/$N: $(basename "$c") (part)"
+    echo deadline > "$RUN/stop.txt"
+    break
+  fi
   if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
     # the chunk's unfinished functions become harness failures (run:timeout): fuzzed again by the next run
     log "watchdog fired after ${wd}s on $(basename "$c")"
@@ -376,13 +454,14 @@ for c in "$RUN"/chunk.*; do
   fi
   (cd "$DF" && $PY fuzzcache.py merge "$CACHE" "$RUN/camp" "$RUN/keys.json" "$COMMIT") >> "$RUN/merge.log"
   cache_commit "$C12 shard $K/$N: $(basename "$c")"
-  if [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - t1)) -ge "$BUDGET" ]; then log "time budget reached"; break; fi
+  if [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - t1)) -ge "$BUDGET" ]; then log "time budget reached"; echo budget > "$RUN/stop.txt"; break; fi
   # a newer harness on the integration head (HARNESS bumped) makes these verdicts stale: stop after this chunk
   # and report, so the runner starts again at the newest head instead of finishing a pass that is thrown away
   if git -C "$REPO" fetch -q origin "$HEAD_BRANCH" 2>/dev/null; then
     new_h=$(git -C "$REPO" show "FETCH_HEAD:ports/fnv-nx/tools/difffuzz/fnkeys.py" 2>/dev/null | harness_of)
     if [ -n "$new_h" ] && [ "$new_h" != "$MY_HARNESS" ]; then
-      log "integration head has harness $new_h (this run: $MY_HARNESS): stopping after $(basename "$c")"; break
+      log "integration head has harness $new_h (this run: $MY_HARNESS): stopping after $(basename "$c")"
+      echo newer-harness > "$RUN/stop.txt"; break
     fi
   fi
 done
@@ -411,9 +490,9 @@ done
 t3=$(date +%s)
 
 $PY - "$RUN" "$REPORT" "$COMMIT" "$D12" "$K" "$N" "$NX86" "$ITERS" "$TIME" "$JOBS" "$((t1-t0))" "$((t2-t1))" \
-  "$((t3-t2))" "$NOTE_LINK" "$NOTE_TREE" <<'EOF'
+  "$((t3-t2))" "$NOTE_LINK" "$NOTE_TREE" "$NOTE_EXE" <<'EOF'
 import collections, json, os, sys
-run, report, commit, d12, k, n, nx86, iters, tm, jobs, ts, tf, tr, note_link, note_tree = sys.argv[1:]
+run, report, commit, d12, k, n, nx86, iters, tm, jobs, ts, tf, tr, note_link, note_tree, note_exe = sys.argv[1:]
 counts = json.load(open(os.path.join(run, 'targets.json')))
 st = json.load(open(os.path.join(run, 'status.json')))
 
@@ -446,9 +525,9 @@ hard = [l.rstrip('\n').split('\t') for l in open(os.path.join(run, 'hard_cum.tsv
     if os.path.exists(os.path.join(run, 'hard_cum.tsv')) else []
 out = ['# fuzz %s shard %s/%s%s' % (commit[:12], k, n, ' - HARNESS BROKEN' if broken else '')] + banner + ['',
        '- commit %s, decomp %s, oracle: %s MSVC 2008 objects of the pristine decomp' % (commit, d12, nx86),
-       '- link: %s; tree: %s' % (note_link, note_tree),
-       '- functions catalogued %d; in this shard %d: no native object %d, control flow not modelled (indirect '
-       'calls/jumps, unresolved relocations) %d, fuzzable %d (no native definition in the link: %d)' % (
+       '- link: %s; tree: %s; exe: %s' % (note_link, note_tree, note_exe),
+       '- functions catalogued %d; in this shard %d: no native object %d, control flow not modelled (unresolved '
+       'relocations, indirect calls without the player\'s exe) %d, fuzzable %d (no native definition in the link: %d)' % (
            counts['catalogued'], counts['shard'], counts['no_native_object'], counts['not_modelled'],
            counts['targets'], st['no_key']),
        '- this head: fuzzed %d, verdict reused from an earlier head (key unchanged) %d, pending %d (key changed %d, '
@@ -479,7 +558,34 @@ if os.path.exists(cp):
                 causes={c: {k_: r[k_] for k_ in ('verdict', 'owner', 'hard', 'divergences', 'functions', 'worst_of',
                                                   'kinds')} for c, r in cs['causes'].items()})
     out += ['', '```json fnvnx-causes', json.dumps(slim, sort_keys=True), '```']
+# the machine-readable summary for the R0 gates (fnvnx-fuzz-summary/1): <report>.json beside the report (runner.sh
+# publishes both) and the same object in the report's last block
+by = collections.Counter(r_[1] for r_ in hard)
+allrow = json.load(open(os.path.join(run, 'verdicts_cum.json'))).get('ALL', {}) \
+    if os.path.exists(os.path.join(run, 'verdicts_cum.json')) else {}
+with_obj = counts['shard'] - counts['no_native_object']
+stop = open(os.path.join(run, 'stop.txt')).read().strip() if os.path.exists(os.path.join(run, 'stop.txt')) else ''
+pending = st['pending_changed'] + st['pending_new']
+summary = dict(
+    format='fnvnx-fuzz-summary/1', commit=commit, decomp=d12, shard=int(k), shards=int(n), link=note_link,
+    exe=bool(counts.get('vtable_model')), harness=os.environ.get('MY_HARNESS', ''),
+    status='harness-broken' if broken else ('partial' if pending or stop else 'complete'), stopped=stop or None,
+    functions=dict(catalogued=counts['catalogued'], shard=counts['shard'], no_native_object=counts['no_native_object'],
+                   with_native_object=with_obj, not_modelled=counts['not_modelled'],
+                   not_modelled_unresolved=counts.get('not_modelled_unresolved'),
+                   not_modelled_indirect=counts.get('not_modelled_indirect'), targets=counts['targets'],
+                   no_native_definition=st['no_key'], verdicts=len(cum), fuzzed_this_head=st['fuzzed_this_head'],
+                   reused=st['reused'], pending=pending, harness_exception=st.get('crashed', 0)),
+    coverage_pct=round(100.0 * len(cum) / with_obj, 2) if with_obj else None,
+    targets_pct=round(100.0 * counts['targets'] / with_obj, 2) if with_obj else None,
+    hard=dict(divergences=len(hard), functions=len({r_[0] for r_ in hard}), by_cause=dict(by.most_common())),
+    verdicts=dict(ok=allrow.get('functions', 0), hard=allrow.get('hard', 0), soft=allrow.get('soft', 0),
+                  oracle_gap=allrow.get('harness', 0), not_set_up=allrow.get('setup', 0)),
+    divergences_by_cause=dict(collections.Counter(allrow.get('causes', {})).most_common()),
+    executions_this_head=execs)
+out += ['', '```json fnvnx-fuzz-summary', json.dumps(summary, sort_keys=True), '```']
 open(report, 'w').write('\n'.join(out) + '\n')
+json.dump(summary, open(os.path.splitext(report)[0] + '.json', 'w'), indent=1, sort_keys=True)
 print('\n'.join(out[:10]))
 EOF
 
@@ -490,6 +596,7 @@ if [ -s "$RUN/camp/results.jsonl" ]; then
   [ -d "$RUN/camp/div" ] && cp -a "$RUN/camp/div" "$PUB/div"
   cp "$RUN/hard_new.tsv" "$PUB/" 2>/dev/null || true
   cp "$RUN/causes_cum.json" "$PUB/" 2>/dev/null || true
+  cp "${REPORT%.md}.json" "$PUB/summary.json" 2>/dev/null || true
   printf '{"commit": "%s", "decomp": "%s", "shard": %s, "shards": %s, "iters": %s, "time": %s}\n' \
     "$COMMIT" "$D12" "$K" "$N" "$ITERS" "$TIME" > "$PUB/meta.json"
   publish "fuzz/$C12/${K}of${N}" "$PUB" "$C12 fuzz shard $K/$N" || true

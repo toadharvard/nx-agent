@@ -53,6 +53,16 @@ typedef struct V6nOps {
      * A target uses the one it can execute; returns 0 if it cannot. */
     int (*pixel_shader)(V6nTarget*, const uint32_t* bytecode, int ntokens, const char* glsl);
     void (*ps_const)(V6nTarget*, uint32_t reg, const float v[4]);   /* SetPixelShaderConstantF */
+    /* programmable vertex shader (with the scene's FVF XYZ|DIFFUSE|SPECULAR|TEX1: POSITION0, COLOR0, COLOR1,
+     * TEXCOORD0), same conventions as pixel_shader; and DrawIndexedPrimitiveUP (16-bit indices) */
+    int (*vertex_shader)(V6nTarget*, const uint32_t* bytecode, int ntokens, const char* glsl);
+    void (*vs_const)(V6nTarget*, uint32_t reg, const float v[4]);
+    int (*draw_indexed)(V6nTarget*, uint32_t prim, uint32_t count, int rhw, const V6nVertex* v, int nverts,
+                        const uint16_t* idx, int nidx);
+    /* generic vertices for vertex-shader parity: nelem FLOAT4 elements per vertex with D3DDECLUSAGE usage[i] /
+     * usage index index[i] (one stream, stride 16 * nelem), DrawPrimitiveUP; needs a vertex shader */
+    int (*draw_generic)(V6nTarget*, uint32_t prim, uint32_t count, int nelem, const uint8_t* usage, const uint8_t* index,
+                        const float* data, int nverts);
 } V6nOps;
 
 extern const V6nOps v6n_target_ops;   /* each executable links exactly one implementation */

@@ -12,6 +12,16 @@ extern "C" {
 
 /* tile (TileShader, TILE passes; menus and HUD). Variants: VS tile / tile_scroll (TEXSCROLL) / tile_vc (VC);
  * PS tile / tile_alphamap (ALPHAMAP) / tile_vc (VC) - the engine's three VS and three PS (TILE1000-1002). */
+/* Family ids (NxOp_Marker PASS tag, b). */
+enum NxFamilyId { NxFam_None = 0, NxFam_Tile = 1, NxFam_NoLight = 2, NxFam_Lit = 3, NxFam_Depth = 4, NxFam_Land = 5,
+                  NxFam_Sky = 6, NxFam_ImageSpace = 7 };
+
+typedef struct NxMenuBgDraw {   /* shaders/menubg.*.glsl */
+    float luma[4];          /* luminance weights (rgb) */
+    float params[4];        /* x = tone blend (0 scene .. 1 toned), y = output alpha */
+    float uvXform[4];       /* uv = pixel uv * xy + zw (zw = half a texel of the scene) */
+} NxMenuBgDraw;
+
 typedef struct NxTileDraw {
     float wvp[16];          /* "WorldViewProjTranspose" (VS c0-c3) */
     float texScroll[4];     /* "TexScroll" (VS c4): uv offset in xy */
@@ -45,21 +55,31 @@ typedef struct NxLitDraw {
     NxLight lights[8];
 } NxLitDraw;
 
+/* SKIN variants (lit_skin, depth_skin VS): the draw block followed by the bone palette (nx/skin.h). */
+typedef struct NxLitSkinDraw { NxLitDraw lit; float bones[96][4]; } NxLitSkinDraw;
+
 /* depth (ZONLY, DEPTHMAP, shadow casters): VS depth; PS depth (no colour: use COLORWRITEENABLE 0) / depth_out
  * (DEPTHMAP: writes the post-projection depth z/w to all four channels). */
 typedef struct NxDepthDraw { float wvp[16]; } NxDepthDraw;
+typedef struct NxDepthSkinDraw { float wvp[16]; float bones[96][4]; } NxDepthSkinDraw;
 
 /* land (LAND passes): a base texture plus up to 3 layers blended by per-vertex weights (attribute 3, xyz); the
  * vertex colour (attribute 2) modulates the result. Textures: slot 0 base, 1-3 layers. */
-typedef struct NxLandDraw { float wvp[16]; float uvScale[4]; } NxLandDraw;
+typedef struct NxLandDraw {
+    float wvp[16];
+    float uvScale[4];
+    float lightDir[4];      /* LIT (LANDAD): light direction, model space (LightData) */
+    float lightColor[4];    /* LIT: PSLightColor */
+    float ambient[4];       /* LIT: AmbientColor */
+} NxLandDraw;
 
 /* sky (SKY passes): colour from the view direction's elevation e = normalize(dir).z (Gamebryo z up):
  * c = mix(horizon, zenith, smoothstep(0, 1, max(e, 0) ^ (1/blend)) ) below the zenith, plus a cloud layer (sky_clouds:
  * texture 0, alpha-blended over the gradient with alpha x cloudAlpha). */
-typedef struct NxSkyDraw {
+typedef struct NxSkyDraw {   /* SKY.vso: vertex colour = weights of three blend colours */
     float wvp[16];
-    float zenith[4], horizon[4];
-    float params[4];        /* blend exponent, cloud alpha, uv scroll x, uv scroll y */
+    float blend0[4], blend1[4], blend2[4];   /* BlendColor c4-c6; alpha = vc.a x blend0.a */
+    float params[4];        /* far-plane z/w (0.9999), cloud alpha, uv scroll x, uv scroll y */
 } NxSkyDraw;
 
 #ifdef __cplusplus
@@ -71,5 +91,5 @@ typedef struct NxSkyDraw {
 NX_FAM_ASSERT_(sizeof(NxTileDraw) == 96, "NxTileDraw");
 NX_FAM_ASSERT_(sizeof(NxNoLightDraw) == 128, "NxNoLightDraw");
 NX_FAM_ASSERT_(sizeof(NxLitDraw) == 208 + 8 * 32, "NxLitDraw");
-NX_FAM_ASSERT_(sizeof(NxSkyDraw) == 112, "NxSkyDraw");
+NX_FAM_ASSERT_(sizeof(NxSkyDraw) == 128, "NxSkyDraw");
 #endif

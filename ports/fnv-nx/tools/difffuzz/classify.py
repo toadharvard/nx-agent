@@ -164,6 +164,15 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'bool-repr'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
+    if k == 'call-target' and div.get('vcall') == 'unplanted':
+        # an indirect call through memory the case did not plant (an object's vptr the fuzzer filled with bytes):
+        # each machine reads its own slot layout (Itanium has two destructor slots), not a port divergence
+        h['cause'] = 'oracle-vcall'; return h
+    if k in ('call-target', 'call-count') and any(str(x).startswith('name:__s13_vtpad_')
+                                                  for x in [div.get('arm')] + list(div.get('arm_trace') or [])):
+        # the native call went through a slot past the native vtable the link pairs with the planted vftable
+        # (vtmodel.py padding): a pairing gap of S2c, not this function's behaviour
+        h['cause'] = 'vptr-unpaired'; return h
     if k == 'call-target' and msvc_inlined(target, div):
         h['cause'] = 'msvc-inlined'; return h
     regs = entry_register_reads(fn, target.conv)

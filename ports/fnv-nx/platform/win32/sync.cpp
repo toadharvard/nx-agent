@@ -8,6 +8,7 @@
  * Waitable objects share one lock (w32_wait_lock). A waiting thread links itself to every object it waits on
  * and sleeps on its own condition variable; signalling an object wakes exactly the threads linked to it.
  */
+#define FNVNX_W32_IMPL 1   /* the out-of-line Interlocked* (fnvnx_win32.h has inline copies for everyone else) */
 #include "w32.h"
 
 #include <stdlib.h>
@@ -107,25 +108,82 @@ extern "C" void LeaveCriticalSection(LPCRITICAL_SECTION cs)
 
 extern "C" void DeleteCriticalSection(LPCRITICAL_SECTION cs) { memset(cs, 0, sizeof *cs); }
 
-/* ---- Interlocked*: full barriers, as on x86 */
-extern "C" LONG InterlockedIncrement(volatile LONG *p) { return __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST); }
-extern "C" LONG InterlockedDecrement(volatile LONG *p) { return __atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST); }
-extern "C" LONG InterlockedExchange(volatile LONG *p, LONG v) { return __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST); }
-extern "C" LONG InterlockedExchangeAdd(volatile LONG *p, LONG v) { return __atomic_fetch_add(p, v, __ATOMIC_SEQ_CST); }
+/* ---- Interlocked*: full barriers, as on x86. A lock-prefixed instruction orders every earlier access before every
+ * later one, store -> load included. A SEQ_CST ldaxr/stlxr loop alone does not: a later plain load can be satisfied
+ * before the stlxr (and an earlier plain store) is visible. The trailing dmb ish makes the operation fully ordered,
+ * as GCC's __sync builtins and Linux's fully ordered atomics do (S12-ordering, docs/ORDERING.md). */
+#define W32_FULL(expr) ({ __typeof__(expr) r_ = (expr); __atomic_thread_fence(__ATOMIC_SEQ_CST); r_; })
+/* A lock-prefixed instruction is atomic on a misaligned operand too (a split lock); ldaxr/stlxr fault on one
+ * (ATOMIC-UNALIGNED). Such operands go through one global spin lock: atomic against every other Interlocked call,
+ * as on x86, and fully ordered. */
+static unsigned char g_split_lock;
+template <class T, class F> static T w32_split(volatile T *p, F f)
+{
+    while (__atomic_exchange_n(&g_split_lock, 1, __ATOMIC_ACQUIRE)) {}
+    T old;
+    memcpy(&old, (const void *)p, sizeof old);
+    T nv = f(old);
+    memcpy((void *)p, &nv, sizeof nv);
+    __atomic_store_n(&g_split_lock, 0, __ATOMIC_RELEASE);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    return old;
+}
+#define W32_MISALIGNED(p) __builtin_expect(((uintptr_t)(p) & (sizeof(*(p)) - 1)) != 0, 0)
+
+/* misaligned operands of the inline Interlocked* of fnvnx_win32.h */
+extern "C" LONG fnvnx_interlocked_slow(int op, volatile LONG *p, LONG a, LONG b)
+{
+    switch (op) {
+    case 0: return w32_split(p, [](LONG v) { return v + 1; }) + 1;
+    case 1: return w32_split(p, [](LONG v) { return v - 1; }) - 1;
+    case 2: return w32_split(p, [a](LONG) { return a; });
+    case 3: return w32_split(p, [a](LONG o) { return o + a; });
+    default: return w32_split(p, [a, b](LONG o) { return o == b ? a : o; });
+    }
+}
+
+extern "C" LONG InterlockedIncrement(volatile LONG *p)
+{
+    if (W32_MISALIGNED(p)) return w32_split(p, [](LONG v) { return v + 1; }) + 1;
+    return W32_FULL(__atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST));
+}
+extern "C" LONG InterlockedDecrement(volatile LONG *p)
+{
+    if (W32_MISALIGNED(p)) return w32_split(p, [](LONG v) { return v - 1; }) - 1;
+    return W32_FULL(__atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST));
+}
+extern "C" LONG InterlockedExchange(volatile LONG *p, LONG v)
+{
+    if (W32_MISALIGNED(p)) return w32_split(p, [v](LONG) { return v; });
+    return W32_FULL(__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST));
+}
+extern "C" LONG InterlockedExchangeAdd(volatile LONG *p, LONG v)
+{
+    if (W32_MISALIGNED(p)) return w32_split(p, [v](LONG o) { return o + v; });
+    return W32_FULL(__atomic_fetch_add(p, v, __ATOMIC_SEQ_CST));
+}
 
 extern "C" LONG InterlockedCompareExchange(volatile LONG *p, LONG xchg, LONG cmp)
 {
+    if (W32_MISALIGNED(p)) return w32_split(p, [xchg, cmp](LONG o) { return o == cmp ? xchg : o; });
     __atomic_compare_exchange_n(p, &cmp, xchg, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     return cmp; /* the initial value either way */
 }
 
 extern "C" PVOID InterlockedCompareExchangePointer(PVOID volatile *p, PVOID xchg, PVOID cmp)
 {
+    if (W32_MISALIGNED(p)) return w32_split(p, [xchg, cmp](PVOID o) { return o == cmp ? xchg : o; });
     __atomic_compare_exchange_n(p, &cmp, xchg, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     return cmp;
 }
 
-extern "C" PVOID InterlockedExchangePointer(PVOID volatile *p, PVOID v) { return __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST); }
+extern "C" PVOID InterlockedExchangePointer(PVOID volatile *p, PVOID v)
+{
+    if (W32_MISALIGNED(p)) return w32_split(p, [v](PVOID) { return v; });
+    return W32_FULL(__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST));
+}
 
 /* ---- waitable objects */
 struct w32_event { struct w32_obj o; int manual, state; char *name; };

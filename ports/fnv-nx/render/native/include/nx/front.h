@@ -21,6 +21,9 @@ struct Backend {
     virtual bool Readback(const NxReadback& r) = 0;
     virtual void Shutdown() = 0;
     virtual const NxGpuInfo& Info() const = 0;
+    // The GLSL address a shader id was created from (0 if unknown): lets nx::Renderer find a package shader's
+    // compile-time permutations by name (RENDER_NATIVE.md §4.3).
+    virtual uint64_t ShaderGlsl(uint32_t) const { return 0; }
 };
 
 // The backend behind an NxGpuApi. In the ILP32 guest pass api = 0: calls go through S5's ext_call slot to the host
@@ -38,6 +41,7 @@ public:
     // Returns the CPU pointer, writes the block offset; 0 when the region is full.
     void* Alloc(uint32_t size, uint32_t align, uint32_t* offset);
     uint32_t block() const { return block_; }
+    const uint8_t* cpu() const { return cpu_; }
     uint32_t used() const { return head_ - regionStart_; }
     uint32_t region_size() const { return region_; }
 private:
@@ -127,7 +131,7 @@ struct Packet {                  // 64 bytes
 };
 static_assert(sizeof(Packet) == 64, "Packet");
 
-// LSD radix sort of (key, index) pairs, 16 bits per pass, skips passes whose digit is constant. Stable.
+// LSD radix sort of (key, index) pairs, 8 bits per pass (one histogram pass), skips constant digits. Stable.
 void SortPackets(const Packet* p, uint32_t n, uint32_t* order, uint32_t* tmp, uint64_t* keys, uint64_t* ktmp);
 
 // ---- frame graph ------------------------------------------------------------------------------------------------
@@ -146,7 +150,15 @@ struct PassDesc {
 class Frame {
 public:
     enum { kMaxPackets = 8192, kMaxPasses = 16, kMaxTex = 16384, kMaxDyn = 4096, kWords = 256 * 1024 };
+    // uboBytes 0: sized for kMaxPackets draws per frame in each of the backend's frames in flight (UboBytesFor).
     bool Init(Backend* be, uint32_t uboBytes, uint32_t uboSize);
+    // UBO ring bytes for `draws` draws per frame: per draw the constant slice (uboSize, 256-aligned) and one
+    // 256-byte epilogue, plus 64 KiB of pass constants, times frames in flight.
+    static uint32_t UboBytesFor(uint32_t draws, uint32_t uboSize, uint32_t framesInFlight) {
+        uint64_t per = (uint64_t)draws * (((uboSize + 255) & ~255u) + 256u) + (64u << 10);
+        return (uint32_t)(per * framesInFlight);
+    }
+    uint32_t droppedDraws() const { return dropped_; }        // draws of the last frame the ring could not hold
     void Begin(uint32_t frame);
     uint8_t AddPass(const PassDesc& p);                          // pass index used in sort keys
     uint32_t AddTextures(const uint32_t* handles, uint32_t n);
@@ -154,8 +166,19 @@ public:
     Packet* Emit();                                              // zeroed packet, 0 when full
     void* Constants(uint32_t* offset);                           // per-draw UBO slice (uboSize bytes)
     void* PassConstants(uint8_t pass, uint32_t size);            // bound at slot 0, both stages, for the pass
+    // A clear of a rectangle (pixels) of the pass's targets, ordered like a draw by (pass, layer, ..., depth key).
+    // flags: 1 colour, 2 depth, 4 stencil. Encoded as NxOp_Clear (Packet.prim = kClearPrim).
+    bool Clear(uint8_t pass, uint8_t layer, uint16_t depthKey, uint32_t flags, uint32_t rgba8, float depth,
+               uint32_t stencil, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    enum { kClearPrim = 0xFF };
     // The D3D9 epilogue block for a packet (sets p->epi); 0 when the ring is full.
     NxEpilogue* Epilogue(Packet* p);
+    // The draw's epilogue block with these contents: reuses the last one written this frame when it is equal (so
+    // consecutive draws with the same fog / alpha test share one block and one bind).
+    void SetEpilogue(Packet* p, const NxEpilogue& e);
+    // Engine pass id + family of a draw packet: encoded as NxOp_Marker (NX_MARKER_PASS) before the first draw of each
+    // run of draws with the same tag in a pass. family 0 = untagged.
+    void Tag(const Packet* p, uint16_t enginePass, uint16_t family);
     // Sorts, encodes (with redundant-bind elimination) and submits. stats may be 0.
     void Finish(StateCache& sc, NxFrameStats* stats, bool present = false);
     Ring& ubo() { return ubo_; }
@@ -166,7 +189,8 @@ public:
 private:
     Backend* be_ = nullptr;
     Ring ubo_;
-    uint32_t uboSize_ = 0, frame_ = 0;
+    uint32_t uboSize_ = 0, frame_ = 0, dropped_ = 0;
+    uint32_t lastEpi_ = 0;                                       // 1 + ring offset of the last SetEpilogue block
     PassDesc passes_[kMaxPasses];
     uint32_t passUbo_[kMaxPasses], passUboSize_[kMaxPasses];
     uint32_t nPasses_ = 0, nPackets_ = 0, nTex_ = 0, nDyn_ = 0, stateBinds_ = 0;
@@ -174,6 +198,7 @@ private:
     uint32_t* order_ = nullptr; uint32_t* tmp_ = nullptr;
     uint64_t* keys_ = nullptr; uint64_t* ktmp_ = nullptr;
     uint32_t* tex_ = nullptr;
+    uint32_t* tags_ = nullptr;                                   // per packet: pass id | family << 16, 0 = none
     DynRec* dyn_ = nullptr;
     uint32_t* words_[2] = {nullptr, nullptr};                    // double-buffered: the backend may read N-1
     Encoder enc_;

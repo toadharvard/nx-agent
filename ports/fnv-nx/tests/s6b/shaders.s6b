@@ -5,6 +5,7 @@
 //   // expect: TEXT          generated GLSL must contain TEXT
 //   // json: TEXT            reflection JSON must contain TEXT
 //   // expect-fail: TEXT     translation must fail with an error containing TEXT (known gap)
+//   // expect-not: TEXT      generated GLSL must not contain TEXT
 
 === vs11_basic
 // SM1.1 VS: dcl semantics, m4x4 -> oPos, oD0/oD1, oT0/oT1, oFog, CTAB
@@ -354,3 +355,203 @@ else
 mov r1, c0.y
 endif
 mul oC0, r1, r0.x
+
+=== ps20_centroid
+// P5: ps_2_x _centroid on t# and v# input dcls -> interpolateAtCentroid() (uam accepts it)
+// expect: layout(location = 2) in highp vec4 io_5_0;
+// expect: ps_t0 = interpolateAtCentroid(io_5_0);
+// expect: #define ps_t1 io_5_1
+// expect: ps_v0 = interpolateAtCentroid(io_10_0);
+ps_2_0
+dcl_centroid t0
+dcl t1
+dcl_centroid v0
+dcl_2d s0
+texld r0, t0, s0
+mad r0, r0, v0, t1
+mov oC0, r0
+
+=== ps30_centroid
+// P5: ps_3_0 dcl_<usage>_centroid v# (the SM3 lighting PS pattern), mixed with plain inputs
+// expect: ps_v0 = interpolateAtCentroid(io_5_0);
+// expect: ps_v1 = interpolateAtCentroid(io_10_0);
+// expect: #define ps_v2 io_3_0
+ps_3_0
+dcl_texcoord0_centroid v0
+dcl_color0_centroid v1
+dcl_normal0 v2
+dcl_2d s0
+texld r0, v0, s0
+dp3 r1.x, v2, v2
+mul r0, r0, v1
+mul oC0, r0, r1.x
+
+=== vs20_relc_outside
+// P5: c[a0.x + n] past the end of the CTAB array that holds n's neighbours (instance data read
+// as 3 vec4 while the CTAB declares 2), with def'd constants around it: the dk UBO by register,
+// def values overlaid, out of range = 0
+// ctab: WorldViewProj float 0 4 matrix_rows float 4 4
+// ctab: InstanceData float 18 2 vector float 1 4
+// expect: vs_dk_relc(20 + vs_a0.x)
+// expect: if (i == 21) return uintBitsToFloat(uvec4(0x3f800000u, 0x00000000u, 0x40000000u, 0xbf800000u));
+// expect: return (uint(i) < 256u) ? vs_uniforms_vec4[i] : vec4(0.0);
+// expect: vs_uniforms_vec4[ARRAYBASE_18 + vs_a0.x]
+vs_2_0
+def c16, 0.0, 0.5, 1.0, 3.0
+def c21, 1.0, 0.0, 2.0, -1.0
+dcl_position v0
+dcl_blendindices v1
+mul r0.x, v1.x, c16.w
+mova a0.x, r0.x
+mov r1, c[a0.x + 18]
+add r1, r1, c[a0.x + 19]
+mad r1, c[a0.x + 20], c16.y, r1
+m4x4 oPos, v0, c0
+mov oT0, r1
+
+=== vs20_relc_noctab
+// P5: relative addressing in a shader without a CTAB (dk layout needs none)
+// expect: vs_dk_relc(8 + vs_a0.x)
+// expect: layout(std140, binding = 0) uniform vs_cbuf_f
+vs_2_0
+dcl_position v0
+dcl_texcoord v1
+mova a0.x, v1.x
+mov oPos, v0
+mov oT0, c[a0.x + 8]
+
+=== vs30_relio
+// P5: vs_3_0 v[aL + n] (input array) and o[aL + n] / o[a0.x + n] (output array copied out in the epilogue)
+// expect: vec4 vertex_input_array[16] = vec4[16](vs_v0, vs_v1, vs_v2, vec4(0.0, 0.0, 0.0, 1.0)
+// expect: vertex_input_array[1 + aL]
+// expect: vs_o_arr[1 + aL] =
+// expect: vs_o_arr[1 + vs_a0.x].xy =
+// expect: #define vs_o0 vs_o_arr[0]
+// expect: vs_dk_out0 = vs_o_arr[0];
+// expect: vs_dk_out2 = vs_o_arr[2];
+// expect: vs_dk_out3 = vs_o_arr[3].x;
+// expect: #define vs_dk_out0 gl_Position
+// expect: #define vs_dk_out3 io_11_0.x
+vs_3_0
+defi i0, 2, 0, 1, 0
+def c8, 0.0, 1.0, 0.5, 2.0
+dcl_position v0
+dcl_texcoord0 v1
+dcl_texcoord1 v2
+dcl_position o0
+dcl_texcoord0 o1
+dcl_texcoord1 o2
+dcl_fog o3
+mov o0, v0
+loop aL, i0
+mul o[aL + 1], v[aL + 1], c8.z
+endloop
+mova a0.x, c8.y
+add o[a0.x + 1].xy, v1, c8.w
+mov o3, c8.x
+
+=== ps30_relin
+// P5: ps_3_0 v[aL + n] inside a loop (ps_3_0 allows it with aL)
+// expect: vec4 vertex_input_array[10] = vec4[10](ps_v0, ps_v1, ps_v2
+// expect: vertex_input_array[aL]
+ps_3_0
+defi i0, 3, 0, 1, 0
+def c0, 0.0, 0.0, 0.0, 0.0
+dcl_texcoord0 v0
+dcl_texcoord1 v1
+dcl_texcoord2 v2
+mov r0, c0
+loop aL, i0
+add r0, r0, v[aL + 0]
+endloop
+mov oC0, r0
+
+=== vs11_colorsat
+// P2: vs < 3.0 oD0/oD1 (and oFog) saturated per vertex, as D3D9 and Nine do (written components only)
+// expect: vs_oD0 = clamp(vs_oD0, 0.0, 1.0);
+// expect: vs_oFog = clamp(vs_oFog, 0.0, 1.0);
+// expect: vs_oD1.xyz = clamp(vs_oD1.xyz, 0.0, 1.0);
+// expect-not: vs_oT0 = clamp(
+vs_1_1
+dcl_position v0
+mov oPos, v0
+mov oD0, c0
+add oD1.xyz, c0, c1
+mov oT0, c1
+mov oFog, c1.x
+
+=== vs30_nocolorsat
+// P2 counterpart: vs_3_0 colour outputs are not saturated
+// expect-not: clamp(
+vs_3_0
+dcl_position v0
+dcl_position o0
+dcl_color0 o1
+mov o0, v0
+mov o1, c0
+
+=== vs20_numerics
+// P3/P4/6: Nine's D3D9 numerics on a driver without MUL_ZERO_WINS (softpipe):
+// log/logp = max(-FLT_MAX, log2|x|), rcp clamped to +-FLT_MAX/2, rsq to FLT_MAX, nrm 3-component with
+// rsq clamped (nrm(0) = 0), min/max as a < b ? a : b
+// expect: float dk_log(float x) { float a = abs(x); if (a == 0.0) return -dk_FLT_MAX; float t = log2(a);
+// expect: const float dk_FLT_MAX = uintBitsToFloat(0x7f7fffffu);
+// expect: const float dk_FLT_HALF = uintBitsToFloat(0x7effffffu);
+// expect: vs_r0.x = (dk_log(vs_c0.x));
+// expect: vs_r0.y = (dk_log(vs_c0.y));
+// expect: vs_r1 = vec4(dk_rcp(vs_c0.z));
+// expect: vs_r2.xy = vec2(dk_rsq(vs_c0.w));
+// expect: vs_r3 = vs_c1 * dk_nrm(vs_c1.xyz);
+// expect: vs_r4.xyz = vs_c1.xyz * dk_nrm(vs_c1.xyz);
+// expect: vs_r5 = mix(vs_c1, vs_c0, lessThan(vs_c0, vs_c1));
+// expect: vs_r6.x = ((vs_c0.x > vs_c1.x) ? vs_c0.x : vs_c1.x);
+// expect-not: normalize(
+// expect-not: = log2(vs_
+vs_2_0
+dcl_position v0
+mov oPos, v0
+log r0.x, c0.x
+logp r0.y, c0.y
+rcp r1, c0.z
+rsq r2.xy, c0.w
+nrm r3, c1
+nrm r4.xyz, c1
+min r5, c0, c1
+max r6.x, c0.x, c1.x
+add r0, r0, r1
+add r0, r0, r2
+add r0, r0, r3
+add r0, r0, r4
+add r0, r0, r5
+add oT0, r0, r6.x
+
+=== vs11_expp
+// vs_1_1 expp is TGSI EXP in Nine: (2^floor(x), frac(x), 2^x, 1)
+// expect: vs_r0 = vec4(exp2(floor(vs_c0.x)), vs_c0.x - floor(vs_c0.x), exp2(vs_c0.x), 1.0);
+vs_1_1
+dcl_position v0
+mov oPos, v0
+expp r0, c0.x
+mov oT0, r0
+
+=== vs20_loopstep
+// loop aL, i#: i#.x iterations with aL = i#.y + k * i#.z (upstream bound aL < x + y broke step != 1)
+// expect: for (int dk_k = 0, aL = vs_i1.y; dk_k < vs_i1.x; dk_k++, aL += vs_i1.z) {
+vs_2_0
+defi i1, 3, 4, 2, 0
+dcl_position v0
+mov r0, c0.x
+loop aL, i1
+add r0, r0, c[aL + 0]
+endloop
+mov oPos, v0
+mov oT0, r0
+
+=== vs20_deflit
+// def literals printed exactly (%.9g; upstream printed 9 fixed decimals: 1e-30 -> 0.0, 1.2345678e-5 -> 0.000012346)
+// expect: const vec4 vs_c4 = vec4(1e-30, 1.23456784e-05, -3.0, 0.5);
+vs_2_0
+def c4, 1e-30, 1.2345678e-5, -3.0, 0.5
+dcl_position v0
+mov oPos, v0
+mul oT0, v0, c4

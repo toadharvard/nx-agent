@@ -1,0 +1,7 @@
+ps_2_0
+dcl t0.xy
+dcl v0
+dcl_2d s0
+texld r0, t0, s0
+mul r0, r0, v0
+mov oC0, r0

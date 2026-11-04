@@ -1088,6 +1088,88 @@ lines (`#` or `;` starts a comment) and logs the values in effect. A missing fil
 - **Untested:** the boost on hardware, and the wait/start/end path inside the platform (the emulated boot does not
   reach the LoadingMenuThread yet).
 
+## 21. The boot on the player's exe, boot milestones
+
+**Milestones** (`tests/s5/milestones.txt`, read by `emu_guest.py` by default; `--milestones none` turns it off).
+Each one is an event the boot cannot fake:
+
+| milestone | reached when | how the address is known |
+|---|---|---|
+| `winmain` | 0x0086a850 starts | units.json |
+| `renderer-init` | `IDirect3D9::CreateDevice` of the null device or of the Nine proxy starts | native symbols |
+| `main-menu` | the StartMenu constructor 0x007cb330 starts, or a non-zero store to 0x011daac0 | exe RTTI `.?AVStartMenu@@` -> vftable 0x01076d1c -> the function that stores it; units.json `DAT_011daac0 : StartMenu*` |
+| `first-frame` | `Present` of a device or swap chain starts | native symbols |
+| `first-cell` | a non-zero store to `g_thePlayer->parentCell` (`*0x011dea3c+0x40`) | units.json `g_thePlayer`; the decomp's TESObjectREFR layout |
+
+Outputs:
+- the log gets `milestone\t<name>\treached\t...` lines, or `-` for a milestone not reached;
+- `--summary-json F` writes the boot summary (`fnvnx-boot-summary/1`). It holds the milestones in order and the
+  last one reached. It also holds the stop: its trace, or the game's own MessageBox/ExitProcess lines when the game
+  ended by itself and there is no STOPPED line. Then `peak_heap_bytes` (the high-water of the heap arena) and counts.
+
+The milestones cost about 15 % of the boot's time (write hooks on two words).
+
+Who writes what:
+- the pipeline's boot stage writes `boot/boot_summary.json` (metric `boot_milestones_reached`);
+- `farm_boot.sh` writes `boot_summary_<boot>.json`;
+- `publish_link` also writes R0's `boot/milestones.json` (J-0131) with `tests/s5/boot_milestones.py`:
+  - top level: the raw boot's booleans `winmain renderer_init main_menu first_frame first_cell`, `milestone`,
+    `boot_peak_heap_bytes` and `stop`;
+  - under `stub`: the stub-fault boot's, which is not the guest's own progress;
+- `meta.json` gets `boot_milestone`, `boot_stub_milestone` and `boot_image`.
+
+**Booting locally on the player's data** (the data never leaves this machine):
+
+```
+mkdir -p <sdmc>/fnvnx && ln -s <game dir> <sdmc>/fnvnx/game        # FalloutNV.exe and Data/
+python3 -I tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init --root <sdmc> \
+    --budget 6000000000 [--stub-faults tests/s5/known_faults.txt] --summary-json boot.json
+```
+
+**First boots on FalloutNV.exe 1.4.0.525 (GOG)**, guest of fa88387. That guest predates 8b24dc6, so its pe_open
+check of SizeOfImage was patched by hand for this analysis. That guest also predates INIT1, so its stub table adds
+`before-winmain 0x00a8a5f0`.
+
+The loader:
+- the exe is taken, and the initializers run in IMAGE order: 17,191 natives, 537 missing;
+- code pointers: 101,385 found, 81,662 applied, 3,086 trapped;
+- imports: 156 of 280 resolved. The boot names 64 of the unresolved ones (S4):
+  - KERNEL32 39: the CRT's locale, console, environment and startup helpers (`MultiByteToWideChar`,
+    `LCMapStringA/W`, `GetStringTypeA/W`, `GetEnvironmentStrings*`, `SetUnhandledExceptionFilter`, ...);
+  - GalaxyWrp 11: the Steam API of the GOG build;
+  - WSOCK32 9 and XINPUT1_3 2 (`#2` XInputGetState, `#3` XInputSetState): imports by ordinal;
+  - USER32 `GetClassLongA`, ADVAPI32 `GetUserNameA`, d3d9 `D3DPERF_SetOptions` (registered now, see below).
+
+Raw boot:
+- milestone `winmain`; 4,343 initializers skipped;
+- it stops at WinMain+0xa4 in the vslot trap `_ZN12FUN_00aa74002v2Ev` (slot 2 of `_ZTV12FUN_00aa7400`), as on the
+  synthesized image;
+- `boot_peak_heap_bytes` 5,032,094.
+
+Stub-fault boot:
+- 767 initializers skipped;
+- 0x010472d0 and the IOQueue vftables are filled by the exe, so their lines are gone from the table;
+- WinMain runs through NiInit and the OSGlobals constructor 0x0086c160 into the renderer init;
+- it ends with `MessageBox [Fallout]: Failed to initialize renderer.` and `ExitProcess(0)`;
+- the cause: `LoadLibraryA("D3D9.DLL")` fails. The exe imports only `D3DPERF_SetOptions` from d3d9.dll and resolves
+  `Direct3DCreate9` with GetProcAddress, and the null device never registered the module. It does now
+  (`fnvnx_d3d9_register` in `null_d3d9.cpp`, test `NullD3d9Test`). The next guest gets past this.
+
+The new table lines, the faults the stub boot ran past to get there:
+- **S2c: native vtables shorter than the exe vftable they are bound to.** The `__fnv_<vftable>` alias sits at
+  their address point, but they have fewer slots:
+  - `_ZTV19FUN_00a712f0_Camera`: 2 slots, the exe's vftable 0x0109cb9c has 55. NiCamera::UpdateWorldBound
+    0x00a70b40 calls slot 31.
+  - `_ZTVN19ListenerDestruction12FUN_00aea770E`: 2 slots, 0x010a3b7c has 13. C::SetWindow 0x00aea230 calls slot 2.
+  - On fa88387, 863 of the 1,112 bound native vtables are shorter than their exe vftable. The comparison counts the
+    exe's slots up to the first word outside .text.
+- **S3: data inside .text.** The exe's DIDATAFORMAT 0x01100cb4 (DirectInput) points its object table `rgodf` at
+  0x00ee6f10, inside `.text`. The loader maps only data sections, so `SetDataFormat` faults. Mapping `.text`
+  read-only (not executable) at its original address would serve such data.
+- **S1/S2c: a constructor called as a function.** WinMain (+0x5a8) stores the result of the OSGlobals constructor
+  0x0086c160 as `g_osGlobals` 0x011dea0c. On AArch64 a constructor returns nothing, so WinMain+0x620 faulted on
+  0xfe50 (`return-this`, like 0x00a5b530).
+
 ## 7. Not yet done / untested
 
 * Nothing has run on hardware. Untested: ldr accepting the 64-bit + `32BitNoReserved` NPDM as an application

@@ -842,7 +842,9 @@ mode but pass bytes to the host's stdout/stderr unchanged; stdin is at end of fi
 For **S1**: include `fnvnx_iobuf.h` where DECL1 drops the decomp's `_iobuf` stdio prototypes, and drop the
 decomp's own `struct _iobuf` definitions (one unit has the same fields). In C++ it includes `<cstdio>` first
 and adds C++ overloads of the standard names taking `_iobuf*` (they coexist with libc's `FILE*` functions);
-`fopen` cannot be overloaded: `-DFNVNX_IOBUF_FOPEN` maps it (macro), or call `fnvnx_iob_fopen`. A literal
+`fopen` cannot be overloaded: `-DFNVNX_IOBUF_FOPEN` maps it (macro), or call `fnvnx_iob_fopen` (S1's DECL1 puts
+`shim/include/fnvnx_iobuf_fopen.h`, the header plus that macro and `std::fopen`, in place of a decomp `_iobuf* fopen`
+prototype: DECL1-FOPEN, bsshader). A literal
 `fflush(NULL)` would be ambiguous (none in the decomp). For **S2**: E entries must bind to the `provider`
 column; a libc fallback by name now hands libc a runtime `_iobuf` (the runtime rejects foreign pointers with
 EINVAL, libc would not).

@@ -2946,3 +2946,422 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
     `claude/fnv-s4-runtime`.
   - Also queued for cloud containers: S12-ordering, S2d-link-bodies, S13b-fuzz-causes.
   - The owner decides which farms to pause; the proposal is st1-st4, then fuzz 26 -> 18 shards.
+
+### J-0134 | 2026-11-04 | stream: orchestration | status: wip | parent: J-0133
+
+* **decided (owner: "pick what is best")** - Free cloud slots by pausing the four static-scan farms st1-st4 and keep
+  all 26 fuzz shards.
+  - The static results are already in (R0, J-0131), and the open classes need one whole-program fix, not more scans.
+  - Fuzzing is needed again as soon as the next link and S13's vftable modelling land.
+* **did** - Disabled the hourly check-ins of st1-st4 (not deleted, so they can be re-enabled) and archived the four
+  sessions; they can be unarchived.
+* **did** - Started four new cloud streams. Each pushes to its own branch and reports to the orchestrator, which
+  merges.
+  | stream | branch | goal |
+  |---|---|---|
+  | S4-runtime | claude/fnv-s4-runtime | 603 runtime names, 40 imports: D3DX math/textures/shaders, mmio, Bink |
+  | S12-ordering | claude/fnv-s12-ordering | x86 ordering on AArch64: volatile acquire/release, `_ReadWriteBarrier`, TLS unification; litmus tests under qemu |
+  | S2d-bodies | claude/fnv-s2d-bodies | 2,035 declared-only C++ functions and 912 ctors/dtors: bind by address, synthesize, or report |
+  | S13b-causes | claude/fnv-s13b-causes | classify the unclassified bucket, separate artifacts from real bugs, fix bool-repr/signedness/division/nan-bits |
+
+### J-0135 | 2026-11-04 | stream: orchestration,V1,farms | status: wip | parent: J-0134
+
+* **found** - The owner's stop interrupted every local agent: S1 x4, S5, S1b, S11, S15, R0, V1, S16, S13, S2c.
+  - Still running: the cloud streams S12, S2d and S13b (S4 queued), the render machine and the farms.
+  - The owner then asked for the best option: merge, then restart all.
+* **did** - Merged the finished work.
+  - Render machine `claude/port-nsw-render` up to 8fa17b3, as `66c96ad`:
+    - nx_render (the S16 entry point);
+    - the NXD9/.nxcap capture specs (RENDER_NATIVE.md section 8);
+    - R2 vftables from the player's exe;
+    - N1 geometry;
+    - dynamic resolution.
+  - S5 (7 commits):
+    - the null D3D9 device registers d3d9.dll;
+    - boot milestones plus `boot/milestones.json` (the R0 format);
+    - known_faults for the boot on the player's exe;
+    - TOOLCHAIN.md section 21.
+  - S15 (2): the multicore check under QEMU, the RecursiveSpinLock release override, the whole-frame budget
+    `fnvnx-frame-budget/1` and the 45/60 fps plan.
+  - R0 (6): `tools/gates/ready.py`, tests/gates (32 tests) and docs/READINESS.md.
+  - V1 (4): reproducers against J-0123, J-0125, J-0127 and J-0128.
+* **V1 verdicts**
+  - J-0127 loader SizeOfImage: see tests/v1/test_loader_soi.py.
+  - J-0128 `job_gamedata`: **refuted** (G1-G3).
+    - G1: a checksum file that names another file passes the exe unchecked.
+    - G2: any exe with its own checksum passes.
+    - G3: a symlink out of the directory passes.
+    - Fixed here. The exe must be a regular file with the pinned sha256 of GOG 1.4.0.525(a) (89e70204...),
+      checked on every use; `FARM_EXE_SHA256` pins another copy. tests/v1/test_gamedata.sh: G1-G3 refused, L1 ok.
+  - J-0125 `stage_after`: **refuted**.
+    - Old boot fields reach meta.json.
+    - A half-failed boot leaves frontier.tsv behind.
+    - A clock step defeats the mtime order.
+    - Fixed here: link_job.sh deletes build/guest and build/boot before every link, so a publish can only carry
+      this job's guest and boot, at the cost of a guest rebuild (~95 s) per full job.
+    - tests/v1/test_publish_stale.sh mocks publish_link without link_job.sh, so V1 must retarget it.
+  - J-0123 TAIL1 typename: **open**. tests/v1/test_tail1_typename.py fails 7 cases; this goes to S1.
+
+### J-0136 | 2026-11-04 | stream: orchestration | status: wip | parent: J-0135
+
+* **did** - docs/HANDOFF.md: how to resume the project in another account or session when this one runs out of
+  quota. It covers:
+  - what lives where (both repositories);
+  - the account setup (GitHub connect, environment);
+  - the orchestrator's resume prompt;
+  - the farm table with its prompt and hourly check-ins;
+  - the render machine;
+  - the game data on a new machine (gamedata/* branches, exe sha256, GOG token).
+  - It names no session ids.
+* **did** - Merged the cloud streams S13b (causes.py, fnvnx-causes JSON in every fuzz report) and S2d (bodies.py +
+  resolve hook), as d6062e4.
+  - Both are blocked from reading the private repo: add_repo was refused in their sessions.
+  - `.claude/settings.json` now allows add_repo for sessions started after b49aa77 (owner's explicit permission).
+  - S4 moved from a stuck PENDING cloud session to a local agent, which can read the link data.
+
+### J-0137 | 2026-11-04 | stream: S13b-causes | status: wip | parent: J-0133
+
+* **did** - S13b `54d0dbd`..`965e963`, merged:
+  - `tools/difffuzz/causes.py` classifies divergences from the saved records, and reads native callees from the link's
+    `fixed/<unit>.o`;
+  - a POLICY table: cause -> by-design / artifact / real-bug / triage, with an owner;
+  - an `fnvnx-causes` block in every fuzz report, merged across shards.
+  - Self-test: 0 failures. The harness core is unchanged.
+* **measured** - 25 caches (1-26of26; 22of26 does not exist): 32,215 functions ok, 5,994 diverging.
+  - Unclassified: **2,066 -> 725**. Hard functions: **3,375 -> 2,836**.
+  - Largest new artefact: new-null, 178 of the 293 native near-null faults. An intercepted allocator returns its
+    canned 0, and GCC drops MSVC's null test after a throwing new. Harness fix: canned allocator results become heap
+    addresses.
+  - Real bugs, by owner:
+    - S1: falloff? 147 functions (animation, tesobjectcell, modelloader); native-null-read 111; signedness 26;
+      native-trap 7; float 18.
+    - S1b: uninit-arm 175; native-garbage-arg 131 (modelloader); callee-saved 5.
+    - S2c: native-address 108; native-stub-data 68; split-global 23 (tile.cpp).
+  - Triage still open: oracle-fault 404, call-flow 965.
+* **next** - Publish the full hand-off lists to the private repo. Make allocators return non-null in the harness
+  (S13). The owners take their lists.
+
+### J-0138 | 2026-11-04 | stream: S12-ordering,S13b-causes | status: wip | parent: J-0137
+
+* **decided (S12)** - x86 ordering semantics come from one GCC plugin, `toolchain/order/fnvnx_order.cc`. compile.sh
+  loads it for every decomp unit, with no fallback (docs/ORDERING.md).
+  - volatile follows /volatile:ms: ldar/stlr for aligned scalars, fences for the rest.
+  - Operands passed to Interlocked* are ordered like volatiles.
+  - Call arguments are evaluated right to left, as MSVC does.
+  - `_ReadWriteBarrier` is `dmb ish` (ishld/ishst for the read/write forms). Every Interlocked* ends with `dmb ish`,
+    and a split lock handles misaligned operands.
+  - Full TSO emulation was rejected on cost.
+* **measured (S12)** - Statically on 280 units: +0.12 % instructions; on hot units: -0.02 %.
+  - Litmus test, 4 threads under qemu: without the plugin, GCC deletes a store that is dead across a volatile release
+    (mp1: 79 bad of 20,000), and it reuses a load across an acquire poll (mp2: 20,000 of 20,000). With the plugin, 0.
+  - Limit: qemu on an x86 host is TSO, so the hardware half rests on the ldar/stlr/dmb code-generation checks.
+  - The dynamic cost of the Interlocked dmb needs the device (S15 B1).
+* **closed (S12)** - S12 classes VOLATILE-DECL, POLL-VOLATILE, BARRIER, ORDER-ARGS, ATOMIC-USE, ATOMIC-UNALIGNED.
+  ATOMIC-PLAIN-STORE closes once compile.sh gets ORDER_KEYS. Still open: ORDER-OBJECT/OPERATOR (need S11) and
+  POLL-PLAIN. W-UNINIT stays per site.
+* **measured (S13b)** - call-flow 1,276 -> 216, split into:
+  - native-undefined 291 (real bug, S1/S2c: unbound C++ names such as `NiPointer<T>::operator T*`);
+  - import-slot-called 11 (S2c: the native jumps to the IAT slot itself);
+  - native-inlined 447 (triage).
+  - The 1,208 real-bug rows, with reproducer paths, are on the private branch `reports/s13b-causes`. They went to S1,
+    S1b and S2c.
+* **found** - The shared sse2neon checkout was gone from the scratch area; it is restored at the pin 2272251c.
+* **checked** - tests/s12/order: 0 failed. tests/s1: 0 failed. tests/s11: ok. Every compile shard rebuilds once
+  (the plugin source is in FLAGS_HASH).
+
+### J-0139 | 2026-11-04 | stream: S12-ordering,S15-perf | status: wip | parent: J-0138
+
+* **measured (S12)** - With `toolchain/order/measure.py`, on 280 units in 5 configurations [M]:
+  | configuration | instructions | verdict |
+  |---|---|---|
+  | the build (volatile + right-to-left) | +0.12 % (hot units -0.02 %) | kept |
+  | full TSO | +20.9 % | rejected for 45 fps |
+  | -ftrivial-auto-var-init=zero | +1.2 % | rejected: does not fix W-UNINIT |
+  - Argument order: 81,410 calls are reordered and 256 are left, 230 of them in sse2neon. No size change.
+  - tests/s12/run.py runs the ordering tests as step 7.
+* **open, for S15 (its agent is not running)** - The trailing `dmb ish` of every Interlocked*: 332 sites, mostly
+  NiPointer refcounts. Estimate [E]: ~2.9 ms per frame at 1.02 GHz.
+  - Measure it on the device (PERF.md B1).
+  - Mitigation: inline Interlocked in fnvnx_win32.h.
+  - `tests/s12/order/litmus.cpp` goes into the first hardware run's set (PERF.md section 9).
+
+### J-0140 | 2026-11-04 | stream: S6n-native-render,P6n,R0-gates | status: wip | parent: J-0139
+
+* **measured (P6n)** - render/native/perf/report.json, summary at e02c871.
+  - Renderer CPU per frame on the synthetic high mix:
+    - at 1.02 GHz: main 5.5-10.0 ms, render 5.3-8.9 ms;
+    - at 1.785 GHz: main 3.2-6.1 ms, render 3.0-5.1 ms.
+  - Native vs Nine state tracker on the same streams: 0.70-1.56x per draw, 0.69-0.92x per frame. The expected 3-5x is
+    not in this layer. The engine's own D3D9 path and nvc0 are being measured now.
+  - GPU model: docked 720p 7.4-12.4 ms; handheld 720p 14.9-24.8 ms.
+* **measured (V6n)** - Shader parity, all 16 packages, 15,791 programs.
+  - 11,161 translated: 8,386 pass, 2,775 fail.
+  - 4,630 do not translate. Main gap: centroid, 4,614 programs including all SM3 lighting PS. S6b is on it.
+* **decided (owner)** - Lowering the resolution must not hide render cost.
+  - Handheld is 720p. Dynamic resolution is only a safety net for peak scenes; it is off when the gates measure.
+  - Priority is optimization, each change measured before/after by P6n.
+  - GPU: fp16 on Tegra X1, single-pass lighting, merged image-space passes, overdraw, bandwidth, shadow caching,
+    occlusion.
+  - CPU: sort cost, UBO ring, sampler re-translation, constant slices, instancing, two-thread recording.
+  - The gate reads `targets_budget_fraction`: share of the whole frame, not the renderer alone. The target is 45 fps
+    stable at 720p handheld.
+
+### J-0141 | 2026-11-04 | stream: S1b-patches | status: wip | parent: J-0135
+
+* **did** - S1b `5b94e1a` fixes the pop-mismatch chain family. The decomp hands a receiver's trailing stack arguments
+  to the getter before it (`D(.., x)->R()`), so the native R reads registers nobody set.
+  - `tests/s1b/pop/popscan.py` checks every pop-mismatch call site against the pristine MSVC objects.
+  - `popgen.py` moves those words to the call that pops them, and declares the overloads.
+  - `xinc1_pop_gen.s1b`: 173 callers, 292 calls, 97 files.
+  - `xinc1_pop_boot.s1b`: WinMain's per-frame body 0x0086ff70, plus 0x00877430 and 0x00871a50.
+  - Checks: MSVC identical on 194 functions, the GCC census clean, units_renames +359 rows. tests/s1: 0 failed;
+    tests/s11: ok.
+* **measured** - On link/31971038913d.
+  - popscan: 2,136 pairs over 2,939 calls.
+  - The ABI's unexplained x86-inconsistent rows: 1,875, which is 1,262 pairs.
+  - By class: fix-donor 481, fix-other 352, patched 222 (they drop at the next link), ecx 179, benign 101.
+  - The 2,221 manual pairs are bridge-gap shapes (varargs, by-value aggregates, struct results), for S2c.
+  - Within 4 calls of the boot roots: 53 fix-donor and 17 fix-other callers.
+* **found** - Of S13b's 131 native-garbage-arg functions, 30 are fixed by this patch and 52 are still open.
+  - The XINC1 call-args divergences at 0x00a89b00 and 0x00eacd00 are harness artifacts. The oracle keeps the
+    pristine stdcall signature of a function that S1b made a member.
+* **next** - The 420 hand-written callers, the two distance-1 boot callers first (0x00448420, 0x0086c010). Then
+  uninit-arm, callee-saved and 0x00b61220.
+  - To S13: the `def` rows of units_renames.
+  - To R0: accept abiclass's `patched` and `benign` verdicts as explained.
+
+### J-0142 | 2026-11-04 | stream: S1-compile (m128/goto) | status: wip | parent: J-0135
+
+* **did** - The Havok units with `__m128`-as-union and goto-across-initialization errors: 15 units, 33 errors -> 0,
+  with rules only (`586334e`, `559155f`, `4dbdc14`).
+  - GOTO2 (new) fixes a goto that skips an initialization in three provably equivalent ways:
+    - a const scalar reference to a by-value result becomes a copy;
+    - the skipped declarations get a block that closes before the label;
+    - the label's short return tail is copied into each goto.
+  - SSE1 gets direct lane access. Two SSE2/SSE3 bugs are fixed (every second prototype on a line was kept; `m128_f32`
+    was cut at `[`).
+  - QUAD1 (new) adds the cast where MSVC chained two conversions.
+  - ANON3 (new) turns a local anonymous union holding an anonymous struct into a local struct.
+  - MSCV1 (new) replaces `_MSC_FULL_VER`/`_MSC_VER` used in code with the value for the unit's compiler.
+  - tests/s1: 0 failed (18 new cases). tests/s11: ok. GOTO2/QUAD1/MSCV1 are classified neutral, ANON3 platform.
+* **merged** - Also S1b `5b94e1a` (J-0141).
+* **next** - The farm census confirms the whole tree: the full GOTO2 sweep did not fit in 10 minutes (D17). The S11
+  MSVC gate checks the GOTO2/QUAD1 sites.
+
+### J-0143 | 2026-11-04 | stream: orchestration (HANDOFF) | status: wip | parent: J-0142
+
+The owner moves the work to another session or account (quota). Resume with docs/HANDOFF.md, then this entry.
+
+* **state at 41cc427**
+  - Census: 2,935/2,978 at bd37e22; ~28 failing expected after the m128/goto merge (J-0142).
+  - Link 979cb1d: 4,427 undefined. S2d bodies (J-0137/J-0138) and S2c's vftables pending.
+  - Boot: WinMain on the synthesized image; no boot on the real exe yet. It waits for a full1 guest built at a head
+    >= 8b24dc6. Every compile shard rebuilds once because of the S12 plugin hash.
+  - Fuzz: hard functions 3,375 -> 2,715, unclassified 2,066 -> 546 (S13b). Lists are on the private branch
+    `fuzz/causes/ea77051c97c7`.
+  - Readiness (R0): NOT READY.
+  - Perf: renderer CPU is measured; engine side not yet. Targets: 45 fps stable at 720p handheld, no resolution cuts,
+    profile first (J-0140).
+* **streams and their next items** (local worktree agents lose uncommitted work when this container ends)
+  | stream | where | next |
+  |---|---|---|
+  | S1-STL | local | blk_00ac0000 (28), `_std` variants, speedtree, tesobject; V1's TAIL1 failures (tests/v1/test_tail1_typename.py); the 0x13/0x14 alloc size at 00c61510 |
+  | S1-refs | local | references to temporaries, overloads, singles (~15 units) |
+  | S1-crt | local | `fopen`, `FindFirstFileA`, `_RTL_CRITICAL_SECTION_DEBUG` |
+  | S1 fuzz queue | private `handoffs_S1.tsv` | falloff 147, null-read 111, signedness 26, trap 7, float 18 |
+  | S1b | local, next round | boot-distance callers 0x00448420/0x0086c010, then 420 manual callers, then uninit-arm/callee-saved |
+  | S2c | local | vftable slots from the exe (PLAYER_EXE), LINK_OVERRIDES=render, the bodies step in the link stage, vtables.py with compile.sh flags, `handoffs_S2c.tsv`, 20 vptr mispairings |
+  | S2d | cloud, branch claude/fnv-s2d-bodies | 397 MSVC-direct calls from the exe's rel32, template special members |
+  | S4 | local | D3DX math/textures/shaders, mmio, Bink, CRT (603 names, 40 imports) |
+  | S5 | local | boot on the real exe as soon as a new guest exists; milestones |
+  | S11 | local | ~70 + ~70 unexplained equivalence differences |
+  | S12 | cloud, branch claude/fnv-s12-ordering | refcount Interlocked weakening (relaxed incref, release/acquire decref), inline Interlocked |
+  | S13 | local | vcalls through exe vftables (coverage >= 90 %), non-null allocators, fz1 fix, units_renames `def` rows |
+  | S13b | cloud, branch claude/fnv-s13b-causes | 546 unclassified, native-inlined 400, oracle-fault 342 |
+  | S15 | local | Interlocked dmb cost, mtqemu + litmus, thread placement, engine hotspot table |
+  | S16 | local | Wine reference (noise floor), NXD9 capture, coverage-guided scenes, compare_job.sh |
+  | R0 | local | gates_job.sh, new gate sources; accept abiclass patched/benign |
+  | V1 | local | re-verify J-0135 fixes, S5 milestones, S15 override, ready.py, nx_render, FTOI2 |
+  | render machine | cloud, branch claude/port-nsw-render | profile-first hotspots[], CPU fixes, fp16/single-pass lighting/merged image space, S6b centroid translator |
+* **owner decisions in force** - Listed below. Farms: st1-st4 paused (triggers disabled, sessions archived); 26 fuzz
+  shards.
+  - Commits end with the Co-Authored-By trailer only; no session ids in files.
+  - Game data is agent-only, on the private `gamedata/*` branches. The GOG token in `gamedata/gog` may be stale; the
+    owner logs in again when needed.
+  - `.claude/settings.json` allows add_repo.
+
+### J-0144 | 2026-11-04 | stream: S12,S2d,render | status: wip | parent: J-0143
+
+* **merged** - Three cloud branches.
+  - S12 `52cb478`: Interlocked* are inline, and refcounts are weakened only on the exact pattern (ORDER_REFCOUNT=weak by default, =full to compare). 110 increments relaxed, 220 decrements release with an acquire on the zero path, 201 sites kept full. Estimated saving about 3.6 ms per frame at 1.02 GHz [E], to be confirmed on the device (B1).
+  - S2d `bfc3a1b`: the exe-addr class, 389 names bound from the exe rel32 calls. Still missing: 1,219, of which 331 exist in the exe only inline (gaps for S3). The link needs FNVNX_EXE.
+  - Render machine `443daf3`: hotspot top-10 on the synthetic mix. Handheld 720p fails at 1.05 of the 45 fps budget, GPU-bound at 23.3 ms. The top two items are the lit pass (32.7 %) and image space + UI (31.8 %), both dominated by the runtime shader epilogue; S6n is on them. The renderer CPU top item is SortPackets at 3.74 ms (65,536-bucket radix).
+* **next** - Wire FNVNX_EXE into link_job via job_gamedata. P6n needs the prepared/pristine objects (private repo `c/<c12>/*of4`, `msvc/pristine/87eb9373a0bb`) to count the engine D3D9 path.
+
+### J-0145 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0144
+
+* **found** - Shards fz1, 2, 4, 7, 8, 10, 11, 12, 19 and 22 never published a 26-shard report. The farm session kills its runner after 2 h, and single functions ran without a bound (004b6220 took 2,896 s).
+* **did** - Merged the four S13 commits.
+  - `3c54f8a` difffuzz-12: the runner exports FARM_DEADLINE; each emulator run is capped at 2 s of wall clock and each function at fuzz.fn_limit; the game allocators return heap blocks (new-null); the other machine's private range is mapped as background memory.
+  - `c171ea6`: fuzz_job takes the exe through job_gamedata.
+  - `f328bd1` difffuzz-13: virtual calls go through the exe's vftables, paired by kind V; short native vtables are padded (vptr-unpaired).
+  - `08f8122`: fnvnx-fuzz-summary/1, written as <head12>-fuzz.json.
+* **measured** - Fuzzable targets as a share of functions with a native object: shard 26 64.4 -> 98.4 %, shard 1 68.9 -> 99.3 %.
+  - Of the paired primary vftables, 1,082 of 1,628 have a native vtable shorter than the exe's. S2c should pair each with the static class's own _ZTV.
+* **next** - The farms re-fuzz everything on difffuzz-13.
+
+### J-0146 | 2026-11-04 | stream: S1-compile (crt),render | status: wip | parent: J-0145
+
+* **merged** - S1-crt `775daac`..`f3ca74a`. Census 3197103: 113 -> 108 errors, 42 -> 39 failing units.
+  - DBUG1 at 0x00b01510: the decomp declares FindFirstFileA with one parameter; the real API takes two.
+  - DECL1-FOPEN.
+  - DECL2 for `_RTL_CRITICAL_SECTION_DEBUG`.
+  - COM1: bsshader's own IUnknown is renamed rather than dropped.
+  - Open for S1-refs: guardpackage `std::abs(float)`; bsshader's `_ReadWriteBarrier` under the S11 MSVC stand-ins.
+* **merged** - Render @fb6b4f5:
+  - family fixes (584a8d9);
+  - UBO ring sized for 8,192 draws (dropped draws 74 -> 0);
+  - 720p in both presets;
+  - OPT 1: compile-time epilogue permutations (uam size per pixel: tex 114 -> 18, lit_spec 246 -> 150; the frame delta from P6n is pending).
+  - Render agents on that machine: S6n, V6n, P6n, S6b.
+* **open (render)** - Full link with LINK_OVERRIDES=render (S2c); prepared objects for P6n; S16 NXD9 captures.
+* **note** - Subagent worktrees see sse2neon at `/tmp/claude-0/-home-user-nx-agent/<session>/scratchpad/ext/sse2neon`.
+
+* **correction (J-0146)** - COM1 `f3ca74a` was NOT merged: the cherry-pick conflicted. The commit survives on the private branch `wip/aa7b13cae4bb` (push_wip). Cherry-pick it again in the new session; until then bsshader keeps its IUnknown error.
+
+### J-0147 | 2026-11-04 | stream: V1 | status: wip | parent: J-0146
+
+* **merged** - The V1 commits: e42c593, b6be277, 67bc967, ba67ffe, dd65a14, aa17bfd.
+* **verdicts** - Fixes are in V1's commits.
+  - job_gamedata G4 (a refused exe stayed cached): fixed.
+  - full_job: make's exit 2 was read as "no inputs", and meta.json named a boot image when no boot ran. Both fixed.
+  - TAIL1: confirmed fixed.
+  - S5 milestones: partial. parentCell +0x40 under ILP32 is unverified.
+  - S15 mtqemu: confirmed.
+  - ready.py: **refuted**, 10 of 12 adversarial cases (tests/v1/test_ready_adversarial.py) -> R0.
+  - nx_render: **partial**. Malformed .nxd9/.nxcap input crashes it (segfault, bad_alloc, a 4 GB allocation) -> render machine.
+  - FTOI2: **partial**. An enum with only non-negative enumerators takes the unsigned path; MSVC enums are int. Fix via TYPE_LANG_FLAG_5; it forces a full recompile, which is the owner's call.
+  - fastcall non-POD: the ecx rule is confirmed. layout.py's POD bit is wrong for 3 of 24 kinds; proposed predicate __is_aggregate && no base && trivial dtor && trivially assignable -> S2c.
+* **owner action** - A V1 test ran with an empty mktemp and wrote synthetic files under `/` (12:48-12:49): /a-g1 /a-g2 /a-g3 /artifacts /build /fake.exe /farm /origin.git /outside.bin /pub /r-g1 /r-g2 /r-g3 /report.md. They are not removed: check what they are before deleting. The tests now stop when mktemp fails.
+
+### J-0148 | 2026-11-04 | stream: S15-perf | status: wip | parent: J-0147
+
+* **merged** - S15 `4c785dd` only (PERF.md: hotspot top-10, the optimization queue, section 6.7 on Interlocked cost, the first-hardware set H1-H4; PERF_budget.json).
+* **NOT merged** - `d909c82` (Interlocked inlining, mtqemu ilk/placement/litmus cases) and `42e9fa5` (hotspots[]/queue[] in fnvnx-frame-budget/1) conflict with S12's inlining `52cb478`. Both edit fnvnx_win32.h/sync.cpp. Both commits are on the private branch `wip/afe99a646b20` (push_wip). Merge them by hand in the new session: S12's inline version plus the refcount rule wins; keep S15's tests and the frame-budget changes.
+* **measured (S15)**
+  - Boot on the owner's exe (fa88 guest): 242.6 M instructions to WinMain, then the vslot trap at 0x00aa7400. The loader is 212 M of that (0.26 s at 1.02 GHz).
+  - Litmus under the race checker: with the plugin, 0 bad.
+  - Placement on host threads: ok.
+* **estimated (S15)** - Main thread as placed: 23.8 M instructions, worst frame 36.4 ms at 1.02 GHz, which **fails 30 fps**.
+  - plan45b (mt_cull, Havok workers, threaded animation, render F2-F4, relaxed refcount increments, NEON math) reaches 14.1 M, worst frame 21.7 ms: 45 fps at 1.02 GHz.
+  - 60 fps at 1.785 GHz from plan45 on.
+  - The queue, ranked by main-thread saving: mt_cull 2.7 M, accumulation 1.8 M, render F2-F4 1.75 M, Havok workers 1.55 M, threaded animation + NEON Slerp 1.15 M.
+  - Hardware tests need Linux on an A57 (the Switch under L4T, or a Jetson TX1/Nano).
+
+### J-0149 | 2026-11-04 | stream: orchestration (resume),S1-crt,S13b-causes,S6n-native-render | status: wip | parent: J-0148
+
+The project resumed in a new account. Done along docs/HANDOFF.md.
+
+* **did (farms)** - All 44 farms run again, each with an hourly check-in task bound to its session.
+  - On Haiku: prep, farm1, farm2-5 (compile k/4), link1, eq1-6, try1of4-try4of4, fz1-26.
+  - On Opus: full1 (it builds and boots).
+  - st1-st4 stay paused (J-0134).
+  - `push_wip.sh 120` runs on the orchestrator.
+  - Setup needs `apt-get update` first: a fresh image's package index is stale.
+* **did (streams)** - The cloud streams run on Opus: render machine (claude/port-nsw-render), S2d, S12 and S13b. They
+  attach the private repo themselves.
+  - Local worktree agents (Opus): S1-STL, S1-refs, S1-fuzzq (the S1 real-bug queue), S1b, S2c, S4, S5, S11, S13,
+    S15, S16, R0 and V1.
+  - The shared local brief lives outside git. Pinned externals are in a shared ext directory (tools/fetch.sh).
+* **did (game data)** - The owner logged in to GOG again (browser login). lgogdownloader was built from source at
+  98dcbd7, and the installer downloaded and unpacked with innoextract.
+  - FalloutNV.exe sha256 89e70204...dd0fe matches GOG 1.4.0.525(a). The full Data/ (9.5 GB) is in the
+    orchestrator's container, agent-only.
+  - The refreshed token was not pushed to `gamedata/gog`: the session's permission check refused it. The branch
+    still holds the stale token.
+* **merged**
+  - COM1 f3ca74a as 0685791 (J-0146 correction). The RULES conflict was resolved onto the current order. tests/s1:
+    0 failed.
+  - S13b aa77579..0111901: layout-offset, effects.py kwargs, triage refinement, after-native-undefined,
+    oracle-callee-store. tests/s13 (causes, difffuzz, fuzzcache): 0 failures.
+  - Render f37af7a, f280eb4, a16a489: the fp16 finding, SortPackets as an 8-bit-digit radix, UBO binds only on
+    change. tests/s6n: d3d9_state 527/0, front 53/0, harness 29/0.
+  - test_overrides and test_requests fail the same way before and after the merge: they need local artifacts
+    (vftables.tsv, ext/fnv_decomp/build/units.json, libnxrender.a).
+* **next** - The S15 agent hand-merges d909c82 and 42e9fa5 (J-0148). Merge each stream as it reports. Restart
+  st1-st4 when S12 says its whole-program fix has landed. Start a gates farm once R0's gates_job.sh is merged.
+
+### J-0150 | 2026-11-04 | stream: orchestration (restructure),S1b,S2c,S1-refs,V1 | status: wip | parent: J-0149
+
+* **decided (owner)**
+  - Frame target: 60 fps (16.7 ms whole frame) at 720p handheld, at the 1.02 GHz retail CPU clock. Do not count on
+    1.785 GHz.
+  - No hardware tests until the port is excellent under emulation and fuzzing. No Switch emulators. "Parity" means
+    translation parity with the original (difffuzz against the x86 oracle, MSVC equivalence) and render parity
+    against the D3D9 reference.
+  - The deliverable is an .nro that works on the device on its first run, with performance inside the model's error
+    bar.
+  - Convergence rule: every stream has one METRIC. Every commit body states `metric: before -> after`, and a commit
+    reduces it or names the reduction it enables. Every pipeline stage has a stream.
+  - The orchestrator speaks for the owner: /CLAUDE.md (3e418b3a) and the settings pre-approve add_repo.
+* **found** - The local worktree agents were crippled: worktree isolation refuses git on the private repo, so none
+  of them could read trees or links directly. They also loaded the shared 4-CPU container to about 10 and cost 10 GB
+  of disk. Every stream now runs as its own cloud session.
+* **did** - Restructured the streams. All run on Opus, start from the integration branch, and push their own branch.
+  | stream | branch | metric |
+  |---|---|---|
+  | S1-STL | claude/fnv-s1-stl | errors in the STL-family units (blk_00ac0000 18, _std, speedtree, tesobject) |
+  | S1-refs | claude/fnv-s1-refs | census failing units/errors outside S1-STL's list (expected 20/67) |
+  | S1-fuzzA | claude/fnv-s1-fuzz-a | S1 fuzz native-null-read 185 + native-trap 70 |
+  | S1-fuzzB | claude/fnv-s1-fuzz-b | S1 fuzz falloff? 164 + float 37 + signedness 35 |
+  | S1b | claude/fnv-s1b | x86-inconsistent ABI rows 1,875 + uninit-arm 214 / callee-saved 5 / garbage-arg 52 |
+  | S2c-vt | claude/fnv-s2c | trap-stub vtable slots 9,617 + 828, short vftables 1,380, mispairings 11 |
+  | S2c-abi | claude/fnv-s2c-abi | bridge-gap pairs 2,221 + S2c fuzz rows 501 |
+  | S2d | claude/fnv-s2d-bodies | names still undefined 1,219 (331 exe-inline gaps listed) |
+  | S4 | claude/fnv-s4 | S4 trap stubs 40 + IAT slots without export 124/280 |
+  | S5-boot | claude/fnv-s5 | milestones up, initializer skips 3,469, known faults down |
+  | S5-data | claude/fnv-s5-data | data-path milestones (INI, BSA, ESM, masters, first cell) |
+  | S11 | claude/fnv-s11 | unexplained MSVC equivalence diffs (~140) |
+  | S12 | claude/fnv-s12-ordering | open ordering sites + litmus failures |
+  | S13 | claude/fnv-s13 | harness artifacts, fuzz coverage, shards missing the deadline |
+  | S13b | claude/fnv-s13b-causes | unclassified 546 + triage (native-inlined ~400, oracle-fault ~342) |
+  | S15-threads | claude/fnv-s15-threads | main-thread worst frame 36.4 ms -> <= 16.7 ms |
+  | S15-simd | claude/fnv-s15-simd | cycles of the top-20 CPU hotspots |
+  | P0-perfmodel | claude/fnv-p0-perf | error bar of the A57 cycle model (QEMU plugins + cache model + llvm-mca) |
+  | render machine | claude/port-nsw-render | GPU/CPU hotspot ms, shader parity 2,775 fail + 4,630 untranslated |
+  | S16 | claude/fnv-s16 | render parity frames over threshold vs the Wine reference |
+  | NX1-nro | claude/fnv-nx1-nro | open device-readiness checks (NRO format, memory, svc/IPC, threads, FS, GPU, HID/audio, exit) |
+  | R0 | claude/fnv-r0 | adversarial failures R13/R14 + the per-stage scorecard |
+  | V1 | claude/fnv-v1 | unverified merged claims + unfixed refutations |
+* **did (farms)**
+  - The fuzz farms fz9-fz26 are paused (triggers disabled, sessions archived) until the next link; fz1-fz8 keep
+    running.
+  - The try farms went from 4 to 2 (try1of2, try2of2).
+  - A mirror loop on the orchestrator replaces push_wip.sh: it pushes every stream branch with unmerged commits to
+    wip/<name> on the private repo, so the try farms census it.
+  - About 48 sessions run.
+* **merged** - All three with their tests: tests/s1 0 failed; tests/s11 ok; the POD test 0/24 kinds differ;
+  test_link ok.
+  - S1b 20af3594: the two distance-1 boot callers 0x00448420 and 0x0086c010. MSVC is identical on 417 functions,
+    and the GCC census stays 0 -> 0.
+  - S2c ad93b389: the MSVC 2008 POD predicate (V1 J-0147), 24/24 kinds.
+  - S1-refs c1039e7e: RREF1-CLASS, RREF2, ADDR1, LANE1, which fix 4 units (expected census 24/75 -> 20/67).
+* **V1 verdicts** - Tests on claude/fnv-v1.
+  - job_gamedata G1-G4 and the stale publish: confirmed.
+  - S5 first-cell store watch: partial (W2, W6, W7).
+  - ready.py R13/R14: refuted.
+  - S13b oracle-callee-store (merged bf442d5): **refuted**. C1-C3 are real-bug shapes labelled artifact; this goes
+    to S13b as a priority.
+  - SortPackets radix: confirmed, but its static `hist` is not reentrant.
+  - nxgpu UBO cache: partial (slot aliasing).
+  - FTOI2: partial, 7,970 enum conversions. New: sse2neon `_mm_cvtss_si32` returns 0x7fffffff where x86 returns
+    0x80000000.
+* **found (local agents' hand-offs, on their branches' inbox notes)**
+  - S5: the 0x00aa7400 trap is ZeroOverheadHeap. Its 14 vtable slots are trap stubs, yet 9,617 trap slots
+    guest-wide have a native at the exe slot address. A first stand-in got the boot past it. The stub boot ends at
+    renderer init (D3D9.DLL lookup).
+  - S4: 3,551 functions in the full1 guest are trap stubs, 40 of them S4's. 124 of 280 IAT slots have no export.
+  - S2c: 1,870 primary vftables pair with the exe RTTI; 1,457 RTTI classes have no native vtable.
+  - S1-fuzzq: the old hand-off paths are stale after difffuzz-13. The real queue is rebuilt from the caches.
+* **next** - The hourly check-in merges only metric-reducing, tested commits. Resume fz9-26 on the next link. Add a
+  gates farm once R0 delivers gates_job.sh.

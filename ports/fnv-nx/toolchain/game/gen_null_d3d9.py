@@ -206,5 +206,37 @@ o += defs + [""]
 o += ["extern \"C\" IDirect3D9 *WINAPI Direct3DCreate9(UINT) { return new Null_IDirect3D9(); }",
       "extern \"C\" HRESULT WINAPI Direct3DCreate9Ex(UINT, IDirect3D9Ex **pp) {",
       "    if (pp) *pp = new Null_IDirect3D9Ex();", "    return S_OK;", "}", ""]
+# d3d9.dll as a module, as render/nine/nine_register.cpp does for the Nine proxy: the engine loads it with
+# LoadLibraryA("D3D9.DLL") and GetProcAddress("Direct3DCreate9") (its only IAT import from d3d9.dll is
+# D3DPERF_SetOptions), so a null-device guest that does not register it stops at "Failed to initialize renderer."
+# boot.cpp calls fnvnx_d3d9_register() (weak) before the image's imports are bound. Direct3DCreate9Ex is not offered,
+# like Nine: the engine then takes the Direct3DCreate9 path it takes on the hardware.
+o += ["typedef FARPROC (*fnvnx_module_resolver)(const char *proc);",
+      "extern \"C\" void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);",
+      "extern \"C\" {",
+      "int WINAPI D3DPERF_BeginEvent(D3DCOLOR, LPCWSTR) { return -1; }",
+      "int WINAPI D3DPERF_EndEvent(void) { return -1; }",
+      "void WINAPI D3DPERF_SetMarker(D3DCOLOR, LPCWSTR) {}",
+      "void WINAPI D3DPERF_SetRegion(D3DCOLOR, LPCWSTR) {}",
+      "BOOL WINAPI D3DPERF_QueryRepeatFrame(void) { return FALSE; }",
+      "void WINAPI D3DPERF_SetOptions(DWORD) {}",
+      "DWORD WINAPI D3DPERF_GetStatus(void) { return 0; }",
+      "}",
+      "static FARPROC null_d3d9_export(const char *proc) {",
+      "    static const struct { const char *name; FARPROC fn; } exports[] = {"]
+o += [f"        {{\"{n}\", (FARPROC){n}}}," for n in (
+    "Direct3DCreate9", "D3DPERF_BeginEvent", "D3DPERF_EndEvent", "D3DPERF_SetMarker", "D3DPERF_SetRegion",
+    "D3DPERF_QueryRepeatFrame", "D3DPERF_SetOptions", "D3DPERF_GetStatus")]
+o += ["    };",
+      "    if (!proc) return nullptr;",
+      "    for (const auto &e : exports)",
+      "        if (!strcmp(e.name, proc)) return e.fn;",
+      "    return nullptr;",
+      "}",
+      "extern \"C\" void fnvnx_d3d9_register(void) {",
+      "    static int done;",
+      "    if (__atomic_exchange_n(&done, 1, __ATOMIC_ACQ_REL)) return;",
+      "    fnvnx_register_module(\"d3d9.dll\", null_d3d9_export);",
+      "}", ""]
 open(out, "w").write("\n".join(o))
 print(f"{out}: {len(ifaces)} interfaces, {sum(len(chain(n)) for n in ifaces)} methods")

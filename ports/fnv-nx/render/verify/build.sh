@@ -87,4 +87,8 @@ PY
 	$CC $CF -std=gnu99 -I"$HERE" -I"$OUT" $S6N -I"$ROOT/render/native/gl" -c "$HERE/target/s6ngl_target.c" -o "$OUT/s6ngl_target.o"
 	$CC -o "$OUT/v6n_s6ngl" "$OUT/scene.o" "$OUT/s6ngl_target.o" "$OUT/s6n_nxgl.o" "$OUT/s6n_d3d9_state.o" -lEGL -lGL -lm
 	echo "built $OUT/v6n_s6ngl"
+	# v6n_family: S6n's family shaders on its GL backend (C69 checks), and the families expanded by S6n's build.py
+	$CC $CF -std=gnu99 $S6N -I"$ROOT/render/native/gl" "$HERE/target/family_run.c" "$OUT/s6n_nxgl.o" "$OUT/s6n_d3d9_state.o" -o "$OUT/v6n_family" -lEGL -lGL -lm
+	python3 -I "$ROOT/render/native/shaders/build.py" "$OUT/s6n_shaders" > /dev/null
+	echo "built $OUT/v6n_family"
 fi

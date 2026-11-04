@@ -6,9 +6,15 @@ CC ?= gcc
 CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Werror -pedantic
 CPPFLAGS += -I$(NATIVE)/include -I$(NATIVE)/front
 
-all: $(OUT)/test_d3d9_state $(OUT)/test_d3d9_state_cxxcheck $(OUT)/test_front
+all: $(OUT)/test_d3d9_state $(OUT)/test_d3d9_state_cxxcheck $(OUT)/test_front $(OUT)/test_harness
 	$(OUT)/test_d3d9_state
 	$(OUT)/test_front
+	$(OUT)/test_harness
+
+$(OUT)/test_harness: test_harness.c $(NATIVE)/front/harness.c $(NATIVE)/front/harness.h $(NATIVE)/gl/nxgl.c $(NATIVE)/front/d3d9_state.c $(NATIVE)/include/nx/gpu_abi.h
+	@mkdir -p $(OUT)
+	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -o $@ test_harness.c $(NATIVE)/front/harness.c \
+		$(NATIVE)/gl/nxgl.c $(NATIVE)/front/gpu_dispatch.c $(NATIVE)/front/d3d9_state.c -lEGL -lm
 
 $(OUT)/test_front: test_front.cpp $(NATIVE)/front/front.cpp $(NATIVE)/front/d3d9_state.c $(NATIVE)/gl/nxgl.c $(NATIVE)/include/nx/front.h
 	@mkdir -p $(OUT)
@@ -74,6 +80,18 @@ $(OUT)/replay_gl: $(NATIVE)/capture/replay.cpp $(NATIVE)/capture/replay_gl.cpp $
 	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -o $@ $(NATIVE)/capture/replay.cpp $(NATIVE)/capture/replay_gl.cpp \
 		$(OUT)/nxgl.o $(OUT)/gpu_dispatch.o -lEGL
 
+# ---- nx_render: captures (.nxcap, .nxd9) and scenes -> PNG on the GL backend (S16-compare entry point) ----------
+$(OUT)/nx_render: $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/d3d9_exec.h \
+		$(NATIVE)/capture/d3d9cap.h $(NATIVE)/capture/png.h $(NATIVE)/capture/replay.cpp $(OUT)/run_gl
+	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -I$(SHOUT) -o $@ $(NATIVE)/capture/nx_render.cpp \
+		$(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/replay.cpp $(OUT)/front.o $(OUT)/scenes.o $(OUT)/nxgl.o \
+		$(OUT)/gpu_dispatch.o $(OUT)/d3d9_state_s.o $(OUT)/nx_shaders.o -lEGL -lm
+
+nx_render: $(OUT)/nx_render
+	python3 -I test_nx_render.py --bin $(OUT)/nx_render --run-gl $(OUT)/run_gl --out $(OUT)/nx_render_test
+
+.PHONY: nx_render
+
 capture: $(OUT)/run_gl $(OUT)/replay_gl
 	@mkdir -p $(OUT)/cap
 	$(OUT)/run_gl $(OUT)/cap --capture $(OUT)/cap/n0.nxcap
@@ -83,9 +101,9 @@ capture: $(OUT)/run_gl $(OUT)/replay_gl
 
 # ---- N1: nx::Renderer / StateTracker self-test on the GL backend --------------------------------------------------
 N1 := $(NATIVE)/n1
-$(OUT)/test_n1_gl: $(N1)/renderer.cpp $(N1)/selftest.cpp $(N1)/test_gl.cpp $(N1)/renderer.h $(OUT)/run_gl
+$(OUT)/test_n1_gl: $(N1)/renderer.cpp $(N1)/engine_stubs.cpp $(N1)/engine_textures.cpp $(N1)/engine_stubs.h $(N1)/selftest.cpp $(N1)/test_gl.cpp $(N1)/renderer.h $(OUT)/run_gl
 	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror -fno-exceptions -fno-rtti $(CPPFLAGS) -I$(SHOUT) -I$(N1) -o $@ \
-		$(N1)/renderer.cpp $(N1)/selftest.cpp $(N1)/test_gl.cpp $(OUT)/front.o $(OUT)/nxgl.o $(OUT)/gpu_dispatch.o \
+		$(N1)/renderer.cpp $(N1)/engine_stubs.cpp $(N1)/engine_textures.cpp $(N1)/selftest.cpp $(N1)/test_gl.cpp $(OUT)/front.o $(OUT)/nxgl.o $(OUT)/gpu_dispatch.o \
 		$(OUT)/d3d9_state_s.o $(OUT)/nx_shaders.o -lEGL -lm
 
 n1: $(OUT)/test_n1_gl
@@ -98,3 +116,19 @@ n1emu: $(OUT)/libnxgl.so
 	python3 emu_n0.py $(N1OUT)/n1_test.nso $(OUT)/libnxgl.so $(OUT)/emu_n1 fnvnx/n1/results.txt
 
 .PHONY: n1emu
+
+# ---- nx_render robustness: an ASan/UBSan build against malformed .nxd9/.nxcap (J-0147 V1 finding) -------------
+$(OUT)/nx_render_asan: $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/d3d9_exec.h \
+		$(NATIVE)/capture/d3d9cap.h $(NATIVE)/capture/png.h $(NATIVE)/capture/replay.cpp $(OUT)/run_gl
+	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-sanitize=vptr -Wall -Wextra -Werror \
+		$(CPPFLAGS) -I$(SHOUT) -o $@ $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp \
+		$(NATIVE)/capture/replay.cpp $(OUT)/front.o $(OUT)/scenes.o $(OUT)/nxgl.o $(OUT)/gpu_dispatch.o \
+		$(OUT)/d3d9_state_s.o $(OUT)/nx_shaders.o -lEGL -lm
+
+nx_render_robust: $(OUT)/nx_render_asan nx_render
+	python3 -I test_nx_render_bounds.py --bin $(OUT)/nx_render_asan --work $(OUT)/nxr_bounds
+	python3 -I ../v1/test_nx_render_robust.py --bin $(OUT)/nx_render_asan --work $(OUT)/nxr_v1 --iters $(ITERS) \
+		--seed $(OUT)/nx_render_test/t.nxd9 --seed $(OUT)/nx_render_test/n0.nxcap
+
+ITERS ?= 300
+.PHONY: nx_render_robust

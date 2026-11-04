@@ -23,6 +23,10 @@ D3D9 calls: entries of the functions matching `--calls` (default: the null devic
 proxies `PxIDirect3D*`), counted per method; plus every `ext_call` the guest makes, decoded with `--nine-ids`
 (render/nine's generated nine_proxy_ids.h) into interface::method.
 
+Threads: each interval also counts instructions per emulated thread, with the thread's placement role, ideal core and
+mask (toolchain/host/placement.h, as the emulated host placed it): `threads` in the JSON, which
+tools/perf/frame_budget.py turns into per-core frame times.
+
 Prints counts and symbol names only. The cost model in docs/PERF.md turns instructions into milliseconds.
 """
 from __future__ import annotations
@@ -150,7 +154,8 @@ class Prof(emu_guest.Emu):
         self.call_starts = {}
         self.call_counts = Counter()
         self.ext_counts = Counter()
-        self.intervals = []               # (label, counts snapshot, call snapshot, ext snapshot)
+        self.thread_counts = Counter()    # emulated thread id -> executed instructions
+        self.intervals = []               # (label, counts snapshot, call snapshot, ext snapshot, thread snapshot)
         self.frame_no = 0
         self.max_intervals = a.max_intervals
         rx = re.compile(a.calls or DEFAULT_CALLS)
@@ -172,6 +177,7 @@ class Prof(emu_guest.Emu):
 
     def _on_block(self, uc, address, size, _):
         self.counts[address] += size >> 2
+        self.thread_counts[self.cur.tid if self.cur else 1] += size >> 2
         n = self.call_starts.get(address)
         if n is not None:
             self.call_counts[n] += 1
@@ -188,8 +194,16 @@ class Prof(emu_guest.Emu):
     def close_interval(self, label):
         if len(self.intervals) >= self.max_intervals:
             return
-        self.intervals.append((label, self.counts, self.call_counts, self.ext_counts))
-        self.counts, self.call_counts, self.ext_counts = Counter(), Counter(), Counter()
+        self.intervals.append((label, self.counts, self.call_counts, self.ext_counts, self.thread_counts))
+        self.counts, self.call_counts, self.ext_counts, self.thread_counts = Counter(), Counter(), Counter(), Counter()
+
+    def thread_info(self, tid):
+        """(placement role, ideal core, mask) of an emulated thread; the main thread is role main"""
+        t = self.threads.get(tid)
+        pl = getattr(t, 'place', None) if t is not None else None
+        if tid == 1 or not pl:
+            return ('main', 0, 1) if tid == 1 else ('?', -1, 0)
+        return (pl[0], pl[1], pl[2])
 
     def h_ext_call(self, module=0, fn=0, *rest):
         self.ext_counts[(module, fn)] += 1
@@ -255,7 +269,7 @@ class Attributor:
 
 def report(emu, attr, intervals, nine_ids, top, out_json):
     res = []
-    for label, counts, calls, ext in intervals:
+    for label, counts, calls, ext, threads in intervals:
         per_fn = Counter()
         per_sub = Counter()
         for addr, n in counts.items():
@@ -280,8 +294,14 @@ def report(emu, attr, intervals, nine_ids, top, out_json):
             print('   D3D9 calls: %d' % sum(d3d.values()))
             for f, n in d3d.most_common(40):
                 print('     %8d  %s' % (n, f[:100]))
+        th = {}
+        for tid, n in sorted(threads.items()):
+            role, ideal, mask = emu.thread_info(tid)
+            th[str(tid)] = dict(role=role, ideal=ideal, mask=mask, instructions=n)
+        if len(th) > 1:
+            print('   threads: ' + ', '.join('%s %s %d' % (k, v['role'], v['instructions']) for k, v in th.items()))
         res.append(dict(label=label, instructions=total, subsystems=dict(per_sub),
-                        top=per_fn.most_common(top), d3d9=dict(d3d)))
+                        top=per_fn.most_common(top), d3d9=dict(d3d), threads=th))
     if out_json:
         json.dump(res, open(out_json, 'w'), indent=1)
 

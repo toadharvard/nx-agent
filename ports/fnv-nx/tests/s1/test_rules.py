@@ -380,6 +380,24 @@ check('SSE1 named lane struct of a removed local __m128: v.lanes.x -> element ac
 got = prepare.r_sse_local_types('x.cpp', 'union __declspec(intrin_type) __m128\n{\n    struct { float x, y, z, w; } lanes;\n};\n'
                                 'struct Q { int lanes; };\nfloat f(__m128 v) { return v.lanes.x; }\n', Counter())
 check('SSE1 lane struct: left alone when the unit declares another member of that name', got, ['v.lanes.x'])
+got = prepare.r_sse_local_types('x.cpp', 'struct __declspec(intrin_type) __declspec(align(16)) __m128 { float x, y, z, w; };\n'
+                                'typedef __m128 Quad;\nstruct V { Quad q; float& at(int i) { return (&q.x)[i]; } };\n'
+                                'struct B { __m128 a, lim, c; };\nstruct P { float x; } pt;\n'
+                                'float f(const B* b, V v, __m128 r) { return b->lim.y + v.q.z + r.w + pt.x; }\n', Counter())
+check('SSE1 lanes that were members of a removed struct __m128: q.x -> element access', got,
+      ['(&((float*)&(q))[0])[i]', '((float*)&(b->lim))[1] + ((float*)&(v.q))[2] + ((float*)&(r))[3] + pt.x'])
+got = prepare.r_sse_local_types('x.cpp', 'union __declspec(intrin_type) __m128\n{\n    struct\n    {\n        float x, y, z, w;\n'
+                                '    };\n};\nstruct A { __m128 q; };\nstruct C { Pt q; };\n'
+                                'float f(A a, C c) { return a.q.x + c.q.x; }\n', Counter())
+check('SSE1 anonymous lane struct: left alone for a name also declared with another type', got,
+      ['a.q.x + c.q.x'])
+check('SSE3 element access behind a subscripted parenthesized operand',
+      prepare.r_sse_members('x.cpp', 'float& at(int r, int c) { return (&c0)[c].q.m128_f32[r]; }\n', Counter()),
+      ['return ((float*)&((&c0)[c].q))[r];'])
+check('SSE2 drops each of several prototypes in one extern "C" block on one line',
+      prepare.r_sse_local_protos('x.cpp', 'extern "C" { __m128 _mm_set_ps(float,float,float,float); __m128 '
+                                 '_mm_setr_ps(float,float,float,float); __m128 _mm_load_ss(const float*); }\nint a;\n',
+                                 Counter()), ['int a;'], ['_mm_', 'extern'])
 check('SSE2 drops `T(_mm_x)(...)` prototypes (no space before the parenthesized name)',
       prepare.r_sse_local_protos('x.cpp', 'namespace P {\nextern "C"\n{\n    ::__m128(_mm_load_ss)(const float* p);\n'
                                  '    ::__m128(_mm_sub_ps)(::__m128 a, ::__m128 b);\n}\n}\n', Counter()),
@@ -437,6 +455,79 @@ got = run(s1.r_goto_scalar_inits, 'int g(const H* h, int e)\n{\n    if (e) goto 
 check('GOTO1 also splits SSE vectors, const scalars (dropping their const) and pointers to const', got,
       ['int n; n = h->n;', '__m128 ang; ang = _mm_load_ss(&h->f);', 'const ns::Hdr* hd; hd = h->hd;',
        'static const int k = 3;'])
+
+# ---- GOTO2
+got = run(s1.r_goto_crossed_scopes, 'int f(const P* p, int n)\n{\n    if (n < 2) goto out;\n    Cmp cmp = {0};\n'
+          '    Vec& v = p->v;\n    sort(p, n, cmp, v);\nout:\n    return n;\n}\n')
+check('GOTO2 (b) closes the crossed scopes before the label', got,
+      ['    { Cmp cmp = {0};\n    Vec& v = p->v;\n    sort(p, n, cmp, v);\n} out:\n    return n;'])
+got = run(s1.r_goto_crossed_scopes, 'int f(const P* p, int n)\n{\n    if (n < 2) goto out;\n    Cmp cmp = {0};\n'
+          '    sort(p, n, cmp);\nout:\n    return cmp.k + n;\n}\n')
+check('GOTO2 (b) keeps a scope that is used after the label', got, ['    Cmp cmp = {0};\n'], ['{ Cmp'])
+got = run(s1.r_goto_crossed_scopes, 'static float dot(V a, V b) { return a.x * b.x; }\n'
+          'bool f(V a, V b, float r)\n{\n    if (r < 0) goto miss;\n    const float& d = dot(a, b);\n'
+          '    if (d > r) { miss: return false; }\n    return d < 2 * r;\n}\n')
+check('GOTO2 (a) copies a const scalar reference to a by-value result', got, ['float d; d = dot(a, b);'],
+      ['const float&'])
+got = run(s1.r_goto_crossed_scopes, 'static const float& dot(V a, V b);\n'
+          'bool f(V a, V b, float r)\n{\n    if (r < 0) goto miss;\n    const float& d = dot(a, b);\n'
+          '    if (d > r) { miss: return false; }\n    return d < 2 * r;\n}\n')
+check('GOTO2 (a) leaves a reference to a returned reference', got, ['const float& d = dot(a, b);'])
+got = run(s1.r_goto_crossed_scopes, 'R* f(R* res, const S* s, int op)\n{\n    switch (op) {\n'
+          '    case 1: if (s->lo > 3) goto reject; break;\n    case 2: {\n        Res a(false), b(false);\n'
+          '        if (s->hi) { a = g(s); } else { reject: res->v = 0; return res; }\n        res->v = a.v | b.v;\n'
+          '    }\n    }\n    return res;\n}\n')
+check('GOTO2 (c) clones a straight return tail into the crossing goto', got,
+      ['case 1: if (s->lo > 3) { res->v = 0; return res; } break;', 'reject: res->v = 0; return res;'], ['goto reject'])
+got = run(s1.r_goto_crossed_scopes, 'R* f(R* res, const S* s, int op)\n{\n    R* tmp = 0;\n    switch (op) {\n'
+          '    case 1: if (s->lo > 3) goto reject; break;\n    case 2: {\n        Res a(false), b(false);\n'
+          '        if (s->hi) { a = g(s); } else { reject: tmp->v = 0; return tmp; }\n        res->v = a.v | b.v;\n'
+          '    }\n    }\n    return res;\n}\n')
+check('GOTO2 (c) does not clone a tail that names a local', got, ['goto reject;'])
+got = run(s1.r_goto_crossed_scopes, 'int f(int n)\n{\n    Obj o(n);\n    if (n) goto out;\n    o.run();\nout:\n'
+          '    return n;\n}\n')
+check('GOTO2 leaves declarations before the goto alone', got, ['    Obj o(n);\n    if (n) goto out;'], ['{ '])
+
+# ---- ANON3
+got = run(s1.r_local_anonymous_unions, 'void f(E* e)\n{\n    for (;;)\n    {\n        union\n        {\n            Stream st;\n'
+          '            struct\n            {\n                Body *a, *b;\n                float w[2];\n            };\n'
+          '        };\n        st.read(e); g(a, b, w[1]);\n    }\n}\nstruct K { union { int i; struct { short lo, hi; }; }; };\n')
+check('ANON3 puts a local anonymous union with an anonymous struct in a struct, same lines', got,
+      ['        struct fnvnx_anon_u0 { union\n', '        }; } fnvnx_anon_v0; decltype(fnvnx_anon_v0.a)& a = fnvnx_anon_v0.a; '
+       'decltype(fnvnx_anon_v0.b)& b = fnvnx_anon_v0.b; decltype(fnvnx_anon_v0.w)& w = fnvnx_anon_v0.w; '
+       'decltype(fnvnx_anon_v0.st)& st = fnvnx_anon_v0.st;\n        st.read(e);',
+       'struct K { union { int i; struct { short lo, hi; }; }; };'])
+check('ANON3 leaves a local anonymous union without an anonymous struct',
+      run(s1.r_local_anonymous_unions, 'void f() { union { int i; float x; }; i = 1; }\n'), ['void f() { union { int i;'],
+      ['fnvnx_anon'])
+
+# ---- MSCV1
+import shutil as _shutil
+_m = tempfile.mkdtemp()
+os.makedirs(os.path.join(_m, 'src'))
+os.makedirs(os.path.join(_m, 'build'))
+with open(os.path.join(_m, 'build', 'units.json'), 'w') as _h:
+    _h.write(_json.dumps({'units': [{'source': 'src/a.cpp', 'compiler': 'rtm'}, {'source': 'src/b.cpp', 'compiler': 'sp1'}]}))
+_src = '#if _MSC_VER >= 1500\nint v;\n#endif\nint f() { if (_MSC_FULL_VER >= 150030729) return 1; return _MSC_VER; } // _MSC_VER\n'
+check('MSCV1 an rtm unit sees cl 15.00.21022 in code, #if lines and comments stay',
+      run(s1.r_msc_version_values, _src, os.path.join(_m, 'src', 'a.cpp')),
+      ['#if _MSC_VER >= 1500\n', 'if (150021022 >= 150030729) return 1; return 1500; } // _MSC_VER'])
+check('MSCV1 an sp1 unit sees cl 15.00.30729', run(s1.r_msc_version_values, _src, os.path.join(_m, 'src', 'b.cpp')),
+      ['if (150030729 >= 150030729)'])
+check('MSCV1 a file that is no unit is left alone', run(s1.r_msc_version_values, _src, os.path.join(_m, 'src', 'c.h')),
+      ['if (_MSC_FULL_VER >= 150030729)'])
+_shutil.rmtree(_m, ignore_errors=True)
+
+# ---- QUAD1
+_q = ('struct __declspec(align(16)) PQ { float x, y, z, w; operator __m128() const { return *(const __m128*)this; } };\n'
+      'class SR { public: SR(const __m128& v) { m = v; } SR(float f); private: PQ m; };\n'
+      'struct V4 { PQ m_q; SR at(int i) const { switch (i) { case 0: return m_q; default: return _mm_set1_ps(i); } }\n'
+      '  PQ raw() const { return m_q; } };\n')
+got = run(s1.r_quad_returns, _q)
+check('QUAD1 writes out the conversion to __m128 for a class built from __m128', got,
+      ['case 0: return (__m128)m_q;', 'PQ raw() const { return m_q; }'])
+check('QUAD1 leaves a return type that is constructible from the class itself',
+      run(s1.r_quad_returns, _q.replace('SR(float f);', 'SR(const PQ& q);')), ['case 0: return m_q;'])
 
 # ---- TAIL1
 check('TAIL1 writes typename in front of a qualified (possibly dependent) base',
@@ -735,6 +826,88 @@ check('SSE2 drops (_mm_x)(...) prototypes, SSE4 unqualified using-declarations o
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
+
+# ---- DECL1-FOPEN: an _iobuf fopen prototype gives way to the shim's fopen -> fnvnx_iob_fopen (S1-crt)
+_fo = prepare.r_platform_protos('/x/src/a.h', 'struct _iobuf;\nextern "C" _iobuf* fopen(const char*, const char*);\n'
+                                'extern "C" int fclose(_iobuf*);\nvoid g();\n', Counter())
+check('DECL1-FOPEN _iobuf fopen -> fnvnx_iobuf_fopen.h, same lines', _fo,
+      ['struct _iobuf;\n#include "fnvnx_iobuf_fopen.h" /* fnv-nx DECL1 */\n#include "fnvnx_iobuf.h" /* fnv-nx DECL1 */\n'
+       'void g();'], ['fopen(const'])
+check('DECL1-FOPEN a fopen prototype without _iobuf is left alone',
+      prepare.r_platform_protos('/x/src/a.cpp', 'extern "C" void* __cdecl fopen(const char*, const char*);\n', Counter()),
+      ['void* __cdecl fopen(const char*, const char*);'], ['fnv-nx'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _fc = os.path.join(tempfile.mkdtemp(), 'fo.cpp')
+    open(_fc, 'w').write(_fo + '#include <fstream>\n#include <type_traits>\n'
+                         'static_assert(std::is_same<decltype(fopen("a", "rb")), _iobuf*>::value, "the game FILE");\n'
+                         'static_assert(std::is_same<decltype(std::fopen("a", "rb")), _iobuf*>::value, "std:: too");\n'
+                         'static_assert(std::is_same<decltype(::freopen("a", "rb", stdin)), FILE*>::value, "libc");\n'
+                         'int h(const char* p) { _iobuf* f = fopen(p, "rb"); return f ? fclose(f) : -1; }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror',
+                          '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _fc], capture_output=True, text=True)
+    check('DECL1-FOPEN output compiles: fopen and std::fopen are the _iobuf one', _r.stderr or 'ok', ['ok'])
+
+# ---- DECL2 the decomp's merged SDK record `struct _RTL_CRITICAL_SECTION_DEBUG {...} RTL_CRITICAL_SECTION` (S1-crt)
+_cs = ('extern "C"{\ntypedef struct _RTL_CRITICAL_SECTION_DEBUG{\nWORD Type;\nstruct _RTL_CRITICAL_SECTION*CriticalSection;\n'
+       'DWORD Flags;\n}RTL_CRITICAL_SECTION,*PRTL_CRITICAL_SECTION;\ntypedef RTL_CRITICAL_SECTION CRITICAL_SECTION;}\n'
+       'class Lock { CRITICAL_SECTION m_kSection; };\n')
+_csg = run(s1.r_sdk_types, _cs)
+check('DECL2 drops a _RTL_CRITICAL_SECTION_DEBUG copy named RTL_CRITICAL_SECTION, same lines', _csg,
+      ['#include "fnvnx_win32.h" /* fnv-nx DECL2 */\nextern "C"{\n/* fnv-nx DECL2 */\n\n\n\n\n'
+       'typedef RTL_CRITICAL_SECTION CRITICAL_SECTION;}'], ['WORD Type'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _cc = os.path.join(tempfile.mkdtemp(), 'cs.cpp')
+    open(_cc, 'w').write(_csg + 'static_assert(sizeof(Lock) == 24, "the PC section (D15)");\n'
+                         'RTL_CRITICAL_SECTION_DEBUG* d; PRTL_CRITICAL_SECTION_DEBUG e = d;\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror',
+                          '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _cc], capture_output=True, text=True)
+    check('DECL2 critical-section output compiles; CRITICAL_SECTION is 24 bytes', _r.stderr or 'ok', ['ok'])
+
+# ---- COM1: a unit's own IUnknown keeps its slots under its own name (S1-crt, bsshader)
+_com = ('struct IUnknown\n{\n    virtual int QueryInterface(void*, void**);\n    virtual unsigned long AddRef();\n'
+        '    virtual unsigned long Release();\n};\ntypedef char _sizecheck_IUnknown[sizeof(IUnknown) == 4 ? 1 : -1];\n'
+        'struct ID3DXBuffer : public IUnknown\n{\n    virtual void* GetBufferPointer();\n'
+        '    virtual int QueryInterface(void*, void**);\n};\n// IUnknown in a comment\n')
+_comg = run(s1.r_own_iunknown, _com)
+check('COM1 renames the own IUnknown, its base use and sizeof', _comg,
+      ['struct fnvnx_unit_IUnknown\n{', '_sizecheck_IUnknown[sizeof(fnvnx_unit_IUnknown)',
+       ': public fnvnx_unit_IUnknown\n', '// IUnknown in a comment'], ['struct IUnknown', 'public IUnknown'])
+check('COM1 leaves a unit without its own IUnknown alone',
+      run(s1.r_own_iunknown, 'struct IDirect3D9;\nvoid f(IUnknown* p);\n'), ['void f(IUnknown* p);'], ['fnvnx_unit'])
+check('COM1 leaves an IUnknown nested in a namespace alone',
+      run(s1.r_own_iunknown, 'namespace N {\nstruct IUnknown\n{\n};\n}\n'), ['struct IUnknown'], ['fnvnx_unit'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _ci = os.path.join(tempfile.mkdtemp(), 'com.cpp')
+    open(_ci, 'w').write('#include "fnvnx_win32.h"\n' + _comg +
+                         'void* g(ID3DXBuffer* b, IUnknown* u) { b->Release(); u->Release(); return b->GetBufferPointer(); }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror',
+                          '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _ci], capture_output=True, text=True)
+    check('COM1 output compiles next to the platform IUnknown', _r.stderr or 'ok', ['ok'])
+
+# ---- S1-refs: RREF1-CLASS, RREF2, ADDR1, LANE1
+_rc = ('struct V { int x; };\nstruct R\n{\n    int Read(void* p, V& v);\n    int Use(int n);\n};\n'
+       'struct Other\n{\n    int Read(void* p, V* v);\n};\nV Make();\n'
+       'int R::Use(int n)\n{\n    return Read(0, Make());\n}\n')
+check('RREF1-CLASS an unqualified call in R:: takes R\'s own declarations',
+      run(s1.r_temporaries_to_references, _rc), ['Read(0, fnvnx_lvalue(Make()))'])
+check('RREF1-CLASS a free function with a pointer overload elsewhere stays',
+      run(s1.r_temporaries_to_references, _rc.replace('int R::Use(int n)', 'int Use2(int n)')), [], ['fnvnx_lvalue'])
+_r2 = ('struct E\n{\n    E(int v) { m = v; }\n    bool operator!=(E& o) { return m != o.m; }\n    int m;\n};\n'
+       'bool f(E* p) { return p[0] != E(0); }\n')
+check('RREF2 a temporary for a non-const reference operator parameter',
+      run(s1.r_operator_temporaries, _r2), ['p[0] != fnvnx_lvalue(E(0))'])
+check('RREF2 a const reference operator: unchanged',
+      run(s1.r_operator_temporaries, _r2.replace('operator!=(E& o)', 'operator!=(const E& o)')), [], ['fnvnx_lvalue'])
+check('ADDR1 address of an intrinsic result after a pointer cast',
+      run(s1.r_address_of_temporaries, 'void f(__m128 a) { g((const V*)&_mm_andnot_ps(a, a)); }\n'),
+      ['(const V*)&fnvnx_lvalue(_mm_andnot_ps(a, a))'])
+check('ADDR1 binary & with an intrinsic: unchanged',
+      run(s1.r_address_of_temporaries, 'int f(__m128 a) { return (x) & _mm_movemask_ps(a); }\n'), [], ['fnvnx_lvalue'])
+check('LANE1 address of the lane array',
+      run(s1.r_lane_array_address, 'void f(S s) { g(((&((float*)&(s.v)))[0])); h((0)[&((float*)&(s.v))]); }\n'),
+      ['((float(*)[sizeof(s.v) / sizeof(float)])&(s.v))'], ['&((float*)&(s.v))'])
+check('LANE1 a lane\'s address stays',
+      run(s1.r_lane_array_address, 'void f(S s) { g(&((float*)&(s.v))[1]); }\n'), ['&((float*)&(s.v))[1]'], ['(*)['])
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
