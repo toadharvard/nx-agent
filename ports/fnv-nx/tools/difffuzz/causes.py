@@ -380,6 +380,9 @@ def _rule_count(d, tx, ta):
 ALLOCATORS = {'_Znwj', '_Znaj', '_Znwm', '_Znam', '_ZnwjRKSt9nothrow_t', '__fnv_00401000', '__fnv_00aa3e40',
               '__fnv_00aa13e0'}       # operator new, MemoryManager::Allocate, the heap's Allocate (game allocators)
 _OBJ_CACHE = {}
+# native object reader state, reported in every summary: without pyelftools every object rule (native-inlined,
+# new-null, native-undefined callees, after-native-undefined) is skipped, which must not pass silently
+OBJ_STATS = dict(reader=None, scanned=0, missing=0)
 
 
 def _obj_dir():
@@ -401,7 +404,12 @@ def native_callees(source, addr):
         return None
     path = os.path.join(d, source.replace('/', '_') + '.o')
     if path not in _OBJ_CACHE:
-        _OBJ_CACHE[path] = _scan_object(path) if os.path.exists(path) else None
+        if os.path.exists(path):
+            _OBJ_CACHE[path] = _scan_object(path)
+            OBJ_STATS['scanned'] += _OBJ_CACHE[path] is not None
+        else:
+            _OBJ_CACHE[path] = None
+            OBJ_STATS['missing'] += 1
     t = _OBJ_CACHE[path]
     if t is None:
         return None
@@ -414,7 +422,12 @@ def _scan_object(path):
         from elftools.elf.elffile import ELFFile
         from elftools.elf.relocation import RelocationSection
     except ImportError:
+        if OBJ_STATS['reader'] is None:
+            sys.stderr.write('causes.py: pyelftools is not installed: native object rules are OFF '
+                             '(pip install pyelftools)\n')
+        OBJ_STATS['reader'] = 'unavailable'
         return None
+    OBJ_STATS['reader'] = 'pyelftools'
     out = {}
     with open(path, 'rb') as f:
         e = ELFFile(f)
@@ -698,6 +711,7 @@ def summarize(dirs, tag=''):
         'functions_ok': ok,
         'functions_diverging': len(by_fn),
         'functions_by_class': {c: by_class.get(c, 0) for c in CLASS_ORDER},
+        'native_objects': dict(OBJ_STATS, dir=_obj_dir()),
         'causes': causes,
         'policy': {c: dict(verdict=v[0], owner=v[1], hard=v[2], why=v[3]) for c, v in sorted(POLICY.items())},
     }
@@ -756,6 +770,10 @@ def main(argv=None):
             open(a.out, 'w').write(txt + '\n')
         print('functions ok %d, diverging %d: %s' % (out['functions_ok'], out['functions_diverging'],
                                                     ', '.join('%s %d' % kv for kv in out['functions_by_class'].items())))
+        no = out.get('native_objects')
+        if no:
+            print('native objects: reader %s, scanned %d, missing %d (%s)' % (no['reader'], no['scanned'],
+                                                                              no['missing'], no['dir']))
         for c, row in out['causes'].items():
             print('  %-20s %-9s %-5s div %5d fn %5d worst %5d' % (c, row['verdict'], row['owner'], row['divergences'],
                                                                  row['functions'], row['worst_of']))
