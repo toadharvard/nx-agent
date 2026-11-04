@@ -342,3 +342,57 @@ stays unresolved (S2's trap) until the exe's vftable gives the address. No slot 
 | `0x010a24fc` | NiStandardAllocator (FUN_00aa2200) | 0 (scalar deleting destructor), 9 | nistandardallocator.cpp (360 source path of 0x00aa3090..0x00aa3560): 1-6 in slot order with BSNiAllocator's signatures, 3 calls 1 and 2 itself; 7 = 0x00aa3430 creates the small-object allocator (Initialize), 8 = 0x00aa3460 deletes it (Shutdown) |
 | `0x0109bf4c` | A660A0Map, the NiStream loader map DAT_011f4784 (FUN_00a660a0) | 1-6: KeyToHashIndex, IsKeysEqual, SetValue, ClearValue, NewItem, DeleteItem (Gamebryo's NiTMapBase order; SetAt 0x00a642a0 calls 1-3) | slot 0 only, the destructor the decomp declares; no unit binds 0x0109bf4c with more slots, and the decomp's string-map slot functions belong to other vftables |
 | `0x0101772c`, `0x0104e6ac`, `0x01082ed8`, FUN_004de530's | INISettingCollection-like setting collections | all ten (no traps added; S5) | none yet: the decomp's interface is the 10-slot INISettingCollection of `src/bsmain/setting_declarations.h`: 0 scalar deleting destructor, 1 Add, 2 Remove, 3 GetViewerStrings, 4 WriteSetting, 5 ReadSetting, 6 Open, 7 Close, 8 WriteAllSettings, 9 ReadAllSettings |
+
+## Patch class MT1: gated Switch behaviour changes (mt_cull; decided by the orchestrator, S15-threads)
+
+**Purpose.** Every other class here restores what MSVC built from the decomp (byte parity). MT1 changes behaviour on
+purpose. It makes the engine's 360-era multithreaded culling path (`bMTRendering:Display`, docs/PERF.md 6.8) work
+on the PC code, so cull and accumulation can leave the main thread. The changes:
+* each accumulator built with two batch renderers while MT is on (FUN_0086c160, the shadow-accumulator pool in
+  bsshadermanager, teswater x2);
+* per-thread current-accumulator globals (`DAT_011f95ec`, `DAT_011f4748+8`);
+* BSFadeNode registration through the culler's accumulator instead of the global.
+
+**Gate.**
+* Switch build only, and every MT1 hunk is behind `FNVNX_MT1_ON` (S1b's tooling, below).
+* `fnvnx_mt1_on()` (toolchain/game/boot.cpp) reads bMTRendering from the INI setting object (0x011c710c, the value at
+  +4), not from the engine's copy `DAT_011f94b4`. WinMain builds the accumulators (FUN_0086c160) before the renderer
+  init copies the setting, and the gate has to give the same answer at both.
+* Off by default: ini.cpp's Switch defaults do not set bMTRendering until the checks below pass.
+* With `bMTRendering=0` the output must be byte-identical to the build without MT1. The fuzz / equivalence farms keep
+  running with it off.
+
+**Checks, in place of the MSVC byte check** (MT1 hunks are exempt from `msvc_check.py`; S1b adds the
+"exempt, gated" class to the .s1b tooling):
+1. GCC census clean on every patched unit.
+2. tests/s15 mtqemu on the real culling and accumulator objects (not the `stages` protocol model).
+3. The hb.c race checker: no race on the accumulators, batch renderers or the current-accumulator globals.
+4. Frame equivalence: the same scene with MT1 on and with it off gives the same accumulator contents and the same
+   draw list.
+
+**Owners.** S1b owns patches/ and the tooling; S15-threads writes the MT1 patches and their tests.
+
+## Gated classes in the .s1b tooling (MT1)
+
+The tooling side of S15-threads' class MT1 (deliberate Switch behaviour changes for multithreaded culling; the class
+itself, its gate and its checks are described by S15-threads). `tools/rules/s1b_patches.py`:
+
+* `MSVC_RULES` (XINC1, FTOL1, DBUG1, RET1) are the byte-parity classes; `GATED` (MT1) are exempt from the MSVC byte
+  check. `msvc_sites()` is what `msvc_check.py` checks, so MT1 sites are never compiled against the pristine
+  objects. `tools/equiv/equiv.py` classifies MT1 as `platform`: no neutral MSVC build applies it. prepare (the Switch
+  build) runs `r_mt1` after the other S1b rules. `gcc_check.py` and `test_patches.py` cover MT1 like any class.
+* Files: `patches/mt1_*.s1b`, sites `@@ MT1 <path> <0xaddr|file>`, the same format and evidence rule as the others.
+* Every MT1 hunk is behind `FNVNX_MT1_ON`. `shim/include/fnvnx_compat.h`, which the Switch build force-includes,
+  declares `fnvnx_mt1_on()` weak and defines the macro as `fnvnx_mt1_on != 0 && fnvnx_mt1_on() != 0`. While nothing
+  defines `fnvnx_mt1_on()`, the gate is off. S15 defines it in the platform layer to read the engine's copy of
+  bMTRendering (`DAT_011f94b4`).
+* Hunk modes (the `===` line), MT1 only:
+  | mode | emitted | check |
+  |---|---|---|
+  | `===` (statements) | `if (FNVNX_MT1_ON) { new } else { <matched old> }`: with the gate off, the decomp's code | the old text is whole statements |
+  | `=== guarded` | the new text as written | it must test `FNVNX_MT1_ON` itself |
+  | `=== inert` | the new text as written | it only adds text: the old text occurs in it verbatim (declarations the gated code uses) |
+  A mode on a byte-parity class, or an unknown mode, is a parse error.
+* Test: `tests/s1b/test_mt1.py`. It covers parsing and emission, the refusals, the MSVC exemption, the equiv class,
+  and prepare's rule list. It also compiles and runs emitted code with the gate block: the decomp's path while
+  `fnvnx_mt1_on()` is undefined, the MT1 path once it returns 1.

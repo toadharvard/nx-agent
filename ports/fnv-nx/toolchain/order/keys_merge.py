@@ -10,7 +10,7 @@ Each unit's file holds its own keys (`field Class::member`, `var name`) and the 
     pcall <f> <j> <g> <i>   f passes its parameter j on to g's parameter i
     call <g> <i> <key>      a call of g binds <key> to g's parameter i
 A forwarder defined in one unit and called in another (or a forwarder of a forwarder across units) is resolved here,
-to a fixed point. The output is the sorted `field` / `var` lines only, which the plugin reads with keys=.
+to a fixed point. The output is the sorted `field` / `var` / `pfield` lines only, which the plugin reads with keys=.
 """
 import sys
 
@@ -26,7 +26,7 @@ def main(argv):
         except OSError:
             continue
         for l in lines:
-            if l.startswith('field ') or l.startswith('var '):
+            if l.startswith('field ') or l.startswith('var ') or l.startswith('pfield '):
                 keys.add(l)
                 continue
             w = l.split(' ', 3)

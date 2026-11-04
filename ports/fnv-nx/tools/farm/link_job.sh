@@ -32,7 +32,8 @@
 # Published when the link is complete and prepared from <commit> (FARM_PUBLISH=always also publishes a UNITS
 # subset, for tests against a local ARTIFACTS remote; 0 never), as branch link/<commit12> of the private artifacts
 # repository toadharvard/fnv-nx-build (branches only: the session proxy refuses tags and ref deletions):
-#   out/{aliases.ld,refs.tsv,abi.tsv,addrmap.tsv,layouts.tsv,typeinfo_pairs.tsv,cache/msvc.tsv,vtables/}
+#   out/{aliases.ld,refs.tsv,abi.tsv,addrmap.tsv,layouts.tsv,typeinfo_pairs.tsv,slot_fill.tsv,slot_gaps.tsv,
+#   cache/msvc.tsv,vtables/}
 #   (vtables/ without the probe work dir; typeinfo_pairs.tsv from apply, in check's link order; S2d's
 #   out/bodies/{bodies.tsv,bind.tsv,synth.tsv,stats.txt} when the bodies step ran, without its work dir)
 #   fixed/*.o   summary.txt   report.md   meta.json
@@ -65,12 +66,26 @@ job_sources "$REPO"
 LB=${LINK_BUILD:-$FARM_HOME/link/build}
 job_inputs "$(dirname "$LB")"
 job_pristine
+# the player's exe (private branch gamedata/exe, sha256 checked; agent-only, never published): S2c's resolve pairs
+# the image vftables by its RTTI class and fills trapped vtable slots from it; S2d's bodies binds exe-addr calls
 job_gamedata
-export FNVNX_EXE=$GAME_EXE           # S2d exe-addr (tools/link/bodies.py --exe); empty: the class binds nothing
-log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; exe: $NOTE_EXE"
+if [ -n "$GAME_EXE" ]; then export FNVNX_EXE=$GAME_EXE; else unset FNVNX_EXE; fi
+# the whole-program ordering keys keys_job.sh published for this commit (k/<commit12>), when they match this tree and
+# these inputs: the link's emitted code compiles with the objects' list; otherwise build.py computes it (cached)
+unset ORDER_KEYS; NOTE_KEYS="ordering keys: computed by the link stage"
+if [ -n "$TREE" ] && git -C "$ARTIFACTS" fetch -q origin "+refs/heads/k/$C12:refs/remotes/origin/k/$C12" 2>/dev/null; then
+	kmeta=$(git -C "$ARTIFACTS" show "origin/k/$C12:meta.json" 2>/dev/null || true)
+	if [ "$(jq -r .tree_hash <<<"$kmeta" 2>/dev/null)" = "$(bash "$P/tools/farm/tree_hash.sh" "$TREE")" ] &&
+			[ "$(jq -r .inputs_hash <<<"$kmeta" 2>/dev/null)" = "$(bash "$P/tools/farm/keys_inputs.sh" "$P")" ]; then
+		git -C "$ARTIFACTS" show "origin/k/$C12:order.keys" > "$(dirname "$LB")/order-$C12.keys"
+		export ORDER_KEYS=$(dirname "$LB")/order-$C12.keys; NOTE_KEYS="ordering keys: k/$C12"
+	fi
+fi
+log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; exe: $NOTE_EXE; $NOTE_KEYS"
 printf 'TREE=%q\nOBJS=%q\nOBJ_COMMIT=%q\nNOTE_TREE=%q\nNOTE_OBJS=%q\n' "$TREE" "$OBJS" "$OBJ_COMMIT" "$NOTE_TREE" "$NOTE_OBJS" \
 	> "$(dirname "$LB")/inputs-$C12.env"     # for full_job.sh, which builds on this link
 ARGS=(TC_DL=none VORBIS=none)          # the link needs only the cross tools, not fnvnx-a64
+ARGS+=(LINK_OVERRIDES=none)            # the pristine path for the fuzz and equivalence farms (full_job.sh: render)
 # S2c's resolve --msvc-code: ecx-not-passed / this-not-passed judged on the definitions' MSVC code (capstone)
 [ -n "$PR" ] && ARGS+=(MSVC_CODE="$PR")
 [ -n "$TREE" ] && ARGS+=(PREPARED="$TREE")
@@ -101,7 +116,7 @@ def rec(s):
     except (OSError, ValueError):
         return {}
 L = ['# link %s' % commit[:12], '', '- commit: `%s`; make exit %s; %.0f min' % (commit, rc, int(secs) / 60.0),
-     '- tree: ' + tree, '- objects: ' + objs, '- resolve --msvc-code: ' + pristine, '- bodies --exe: ' + exe]
+     '- tree: ' + tree, '- objects: ' + objs, '- resolve --msvc-code: ' + pristine, '- resolve / bodies --exe: ' + exe]
 if fail:
     L.append('- ' + fail)
 pf = rec('prepare').get('prepared_from') or {}

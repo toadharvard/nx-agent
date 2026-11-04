@@ -255,7 +255,8 @@ DWORD GetClassLongA(HWND, int);              /* user32 */
 }
 /* the standard handles (GetStdHandle): fixed pseudo values outside the handle table. ReadFile/WriteFile/CloseHandle
  * route them here: -1 = not a standard handle, else the BOOL result */
-int w32_std_io(HANDLE h, int write, void *buf, DWORD n, LPDWORD done);
-int w32_is_std_handle(HANDLE h);
+/* crt_kernel32.cpp; weak so harnesses that link part of platform/win32 (tests/s15/mtqemu) need not take it */
+int w32_std_io(HANDLE h, int write, void *buf, DWORD n, LPDWORD done) __attribute__((weak));
+int w32_is_std_handle(HANDLE h) __attribute__((weak));
 
 #endif

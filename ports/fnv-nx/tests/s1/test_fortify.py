@@ -3,7 +3,7 @@
 
 Ubuntu's aarch64 g++ predefines _FORTIFY_SOURCE=3: memcpy into a sized object, memset and sprintf become the glibc
 checking calls __memcpy_chk / __memset_chk / __sprintf_chk, which abort where the exe's CRT did not. Checks that
-compile.sh, census.sh, tools/static/flags.sh and bodies.py's CODEGEN undefine it, and that a hand-written unit
+compile.sh, census.sh and tools/static/flags.sh undefine it (bodies.py builds with compile.sh --print-flags), and that a hand-written unit
 compiled with BUILD_FLAGS calls no *_chk function. Our own snippet, nothing of the decomp.
 """
 import os
@@ -22,7 +22,7 @@ def check(cond, what):
         FAILS.append(what)
 
 
-for rel in ('tools/link/compile.sh', 'tools/census.sh', 'tools/static/flags.sh', 'tools/link/bodies.py'):
+for rel in ('tools/link/compile.sh', 'tools/census.sh', 'tools/static/flags.sh'):
     check('-U_FORTIFY_SOURCE' in open(os.path.join(PORT, rel)).read(), '%s undefines _FORTIFY_SOURCE' % rel)
 
 flags = subprocess.run(['bash', '-c', '. "%s/tools/static/flags.sh"; printf "%%s\\n" "${BUILD_FLAGS[@]}"' % PORT],

@@ -13,8 +13,11 @@
 enum : uint32_t {
     kD9Device   = NXD9_TAG('D', 'E', 'V', ' '),   // u32 width, height, backFormat (D3DFORMAT), autoDepthFormat (0 none)
     kD9Texture  = NXD9_TAG('T', 'E', 'X', ' '),   // u32 id, format, width, height, levels, flags (1 render target,
-                                                  //   2 cube: unsupported), then per level: u32 bytes, bytes
+                                                  //   2 cube), then per level: u32 bytes, bytes (cube: the
+                                                  //   six faces of the level in D3DCUBEMAP_FACES order;
+                                                  //   cube render targets are unsupported)
     kD9TexLevel = NXD9_TAG('T', 'E', 'X', 'U'),   // u32 id, level, bytes, bytes: new contents of one level
+    kD9TexCube  = NXD9_TAG('T', 'E', 'X', 'C'),   // u32 id, face (D3DCUBEMAP_FACES), level, bytes, bytes: one face
     kD9Surface  = NXD9_TAG('S', 'U', 'R', 'F'),   // u32 id, kind (1 colour, 2 depth-stencil), format, width,
                                                   //   height, texture id (level 0 of that render-target texture, or 0)
     kD9VBuffer  = NXD9_TAG('V', 'B', ' ', ' '),   // u32 id, size

@@ -1,3 +1,47 @@
+# render/native: family claims and behaviour claims
+
+## Family claims (who works on which shader family)
+
+The render machine (branch `claude/port-nsw-render`) owns render/native's integration. That covers the frame and
+pass structure in `n1/renderer.cpp`, the family dispatch table, `overrides.tsv`, `include/nx/families.h`, the
+**Translated** path (each pass that has no finished native family runs the game's own program through S6b's
+sdp2dksh on deko3d), the skip counters (skipped engine draws = 0), and the scene check against the real captures
+(fnv-nx-build `gamedata/captures`: menu_11640, docmitchell_13000).
+
+A family stream claims a row by setting `owner` and `status` on its own branch and telling the render machine. The
+render machine merges it.
+
+Rules for family streams:
+- Family code lives in your family's files: `shaders/<family>*.glsl`, a family module under `n1/`, and the
+  family's scenes and tests under `tests/s6n/`.
+- You may add or change only your family's row in the dispatch table, and only your family's override rows.
+- Any other change to renderer.cpp, overrides.tsv or families.h goes to the render machine as a request with a
+  failing test.
+- A family switches from Translated to native only when it passes the scene check against Translated on the
+  captures (equal pixels within the RENDER_NATIVE §4 tolerances) and costs no more GPU time (real019 and the
+  captures).
+
+| family | engine passes / classes (RENDER_NATIVE §1.3) | native GLSL | path today | owner | status |
+|---|---|---|---|---|---|
+| UI tile | TileShader | tile, tile_vc, tile_scroll, tile_alphamap, text | native | render machine | done (V6n c69 TILE1000-1002) |
+| nolight | BSShaderNoLighting, PSYS strips | nolight* | native | render machine | done (c69 NOLIGHT004) |
+| image space: menuBG | ImageSpaceManager menuBG | menubg | native | render machine | done |
+| lit: statics | SLS, Lighting30 (ADTS/ADT/AD/DIFFUSEPT/SPECULAR/TEXTURE, 3XLIGHTING) | lit, lit_spec, light/epilogue permutations | skipped -> Translated | render-lit | open |
+| lit: actors (skinned, facegen, hair, eye) | SLS SKIN, Lighting30 skin variants | lit + SKIN (started) | skipped -> Translated | render-lit | open |
+| land | LAND*, LANDAD, LANDLO | land, land_lit | skipped -> Translated | render-land | open |
+| LOD (land, objects, trees) | DISTLOD, LOD land | - | skipped -> Translated | render-land | open |
+| sky | SKY* (quad, clouds, stars, moon, sun) | sky | skipped -> Translated | render-land | open |
+| water | WATER*, wading, interior, LOD water | - | skipped -> Translated | render-land | open |
+| depth / shadow | ZONLY, DEPTHMAP, 3XDEPTH*, GRASS_SHADOW, shadow maps | depth, depth_at | skipped -> Translated | render-land | open |
+| image space: world chain | HDR, bloom/blur, DOF, radial blur, sunbeams, refraction, cinematic, VATS, night vision, ... | - | skipped -> Translated | render-land | open |
+| trees | SpeedTree branch/frond/leaf/billboard | - | skipped -> Translated | unclaimed | open |
+| grass | GRASS* | - | skipped -> Translated | unclaimed | open |
+| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - | skipped -> Translated | unclaimed | open |
+| GPU cost model and pass structure | render/native/perf (gpu_cost.py, gen_stream.py, report.*), pass order, early-z, sorting | - | - | G1-gpu (with the render machine's perf work) | open |
+
+"skipped -> Translated": this pass is skipped today, and the render machine's Translated path, now in progress, will
+draw it. A claim replaces that with native.
+
 # S6n claims (native renderer) - for the verifier
 
 Each claim is a statement about behaviour. "Backed by" names the code and the test that shows it; run the tests
@@ -101,4 +145,11 @@ failed` and `golden comparison: 19 scenes match`). One scene: `python3 tests/s6n
 | C91 | lit static light permutations: `Renderer::Render` binds `lit_spec_d1p2__e0` for 1 directional + 2 point lights (given in another order) with the lights reordered and padded, and the image equals the dynamic `lit_spec` within 1/255; the lit scene is unchanged. `mediump` marks the fp16-safe quantities (§4.4); uam emits no fp16 code yet. | n1 selftest (100 checks, GL + ILP32); scene `lit` |
 | C92 | `SortPackets` is an 8-bit-digit LSD radix over the full 64-bit key (one histogram pass, 8 KiB tables, constant digits skipped, ping-pong buffers): stable and identical to std::stable_sort on 200 random sets of up to 4,000 keys with ties; V6n's C65 property check passes. Measured with callgrind on the same generator (pass/layer/state/texture/depth keys): 3,710 draws 3.13 M -> 0.70 M instructions per sort, 1,490 draws 2.80 M -> 0.29 M, 300 draws 2.65 M -> 0.07 M (11-bit digits measured 0.73 M / 0.37 M / 0.17 M). | test_front `test_sort_property`; V6n selfcheck C65 |
 | C93 | Uniform binds on change: `Frame::SetEpilogue` shares one epilogue block between consecutive draws with equal contents, and the encoder binds an epilogue block only when its contents differ from the bound one (6 draws a, a, b, b, a, a -> 3 epilogue binds instead of 6); the deko3d backend skips a uniform-buffer bind of the same range on the same stage and slot within a command list and reads cached block GPU addresses. Output unchanged. | test_front `test_epilogue_binds`; scenes, N1 selftest, V6n selfcheck |
+| C94 | Per-stage sampler cache: `StateTracker::Handles` translates a stage's sampler (`nx_d3d9_sampler` + cache search) only after a `SetSamplerState` that changes a value, a restore, or a texture whose kind (cube, shadow, managed LOD, sRGB capability of the format) differs; another image of the same kind keeps the sampler. Handles are identical to the per-draw translation. | n1 selftest `test_sampler_cache` (7 checks); scenes, nx_render |
+| C95 | `Renderer::Render` finds a fragment shader's epilogue permutations with one table read (shader id -> permutation set, ids below 4,096; larger ids keep the list scans), so shaders without permutations beyond the former 64-entry list are no longer looked up again on every draw; the per-draw constant slice is written once (data, then a zero tail) instead of cleared and then copied. Permutation choice and slice contents unchanged. | n1 selftest; scenes, nx_render |
+| C96 | `Frame::Finish` compares a draw's dynamic record (viewport, scissor, blend constant, depth bias) with the encoded values only when its record id differs from the previous draw's in the pass; the encoded stream is byte-identical (mix_hi .nxcap before/after: same md5). | scenes, capture replay (19/19), n1 selftest, nx_render |
+| C97 | `Renderer::Render` reuses the previous draw's state id while the tracker has not re-translated and shaders/layout are equal, and the previous draw's texture block while the tracker's texture generation (image, kind or sampler state of any stage) is unchanged in the frame and its samplers all exist; mix_hi .nxcap byte-identical. | n1 selftest (texture generation checks); scenes, capture replay, nx_render |
+| C98 | The D3D9 epilogue's alpha compare is branch-free (NxCompare as a LESS/EQUAL/GREATER bit set; unordered operands pass NOTEQUAL and ALWAYS only), equal to the former switch for all 8 functions and ordered/NaN operands; uam no longer emits the switch as a 7-test loop: lit_spec_d1p2__ea 249 -> 222, nolight_tex__ea 80 -> 35, tex/nolight_tex runtime 131 -> 104 Maxwell instructions. | scenes (alpha test GREATER/LESS/EQUAL, 19 goldens), n1 selftest, capture replay |
+| C99 | The lit static light permutations read per-draw values `Renderer::Render` prepares in the slice: the directional light as the unit vector towards it and each point light's 1 / range^2, so no fragment normalizes a constant or divides by range^2; images within 1/255 of the dynamic shader (n1 selftest), lit_spec_d1p2__e0 201 -> 179 Maxwell instructions. | n1 selftest (static vs dynamic); scenes |
+| C100 | `Renderer::Render` reuses the previous draw's epilogue block and dynamic record while the tracker has not re-translated in the frame (both depend only on the resolved state), instead of filling, comparing and appending them per draw; mix_hi .nxcap byte-identical. | n1 selftest, scenes, capture replay, nx_render |
 | C61 | The deko3d backend (`host/nxgpu.c`), host module (`host/nxgpu_host.c`) and the ILP32 N0 guest compile and link with fnvnx-a64 + libdeko3d 373bfd4 (`render/native/switch/build.sh`). Not yet run on hardware. | switch/build.sh |

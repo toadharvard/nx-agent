@@ -391,6 +391,9 @@ class Counter:
             for x in succ:
                 preds[x].append(b)
         topo = list(reversed(order))
+        # natural loops, innermost first: an outer iteration repeats the inner loops' extra trips too (nested
+        # loops multiply), so one iteration costs its blocks' own words plus the extra already on inner headers
+        bodies = []
         for h, us in heads.items():
             body = {h}; work = list(us)
             while work:
@@ -398,22 +401,27 @@ class Counter:
                 if x in body:
                     continue
                 body.add(x); work.extend(preds[x])
+            bodies.append((h, body))
+        bodies.sort(key=lambda hb: (len(hb[1]), hb[0]))
+        for h, body in bodies:
             rel_off = '%x' % (ins[blocks[h][0]][0] - ins[0][0])
             trips = lp.get(rel_off, 1)
             info['loops'].append((rel_off, sum(blocks[b][1] - blocks[b][0] for b in body), trips))
             if trips <= 1:
                 continue
-            prob = {h: 1.0}; it_exp = 0.0; it_max = 0; it_d3 = collections.Counter()
+            prob = {h: 1.0}; it_exp = 0.0; it_d3 = collections.Counter()
             for b in topo:
                 if b not in body or b not in prob:
                     continue
-                it_exp += prob[b] * own[b][0][1]
+                it_exp += prob[b] * (own[b][0][1] + extra_exp[b])
                 for k2, v2 in own[b][1].items():
+                    it_d3[k2] += prob[b] * v2
+                for k2, v2 in extra_d3[b].items():
                     it_d3[k2] += prob[b] * v2
                 for x, px in P[b].items():
                     if x in body:
                         prob[x] = prob.get(x, 0.0) + prob[b] * px
-            it_max = sum(own[b][0][2] for b in body)
+            it_max = sum(own[b][0][2] + extra_max[b] for b in body)
             extra_exp[h] += (trips - 1) * it_exp; extra_max[h] += (trips - 1) * it_max
             for k2, v2 in it_d3.items():
                 extra_d3[h][k2] += (trips - 1) * v2

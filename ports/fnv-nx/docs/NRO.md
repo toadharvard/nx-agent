@@ -39,19 +39,36 @@ replaced that process.
 | `sdmc:/switch/fnv/FalloutNV.exe`, `Data/` | the player's game, as in a PC install (C:\FalloutNV) | player |
 | `sdmc:/switch/fnv/user/` | profile: My Games/FalloutNV (INIs, Saves), AppData/Local/FalloutNV | game |
 | `sdmc:/switch/fnv/{launcher,host,crash}.log` | what the owner sends back | launcher, host |
-| `sdmc:/switch/fnv/fnvnx.ini`, `shaders.nvc0cache`, `override.txt` | options, Nine's shader cache, the marker | owner, host, launcher |
+| `sdmc:/switch/fnv/fnvnx.ini`, `nxgpu.log`, `override.txt` | options, the native renderer's log, the marker | owner, renderer, launcher |
 
 `os_fs_case_insensitive()` probes the card once (guest.nso against GUEST.NSO) instead of assuming FAT case folding.
 On a case-sensitive card, path.cpp resolves each component against the directory.
 
 ## Build and publish
 
-The pipeline's `package` stage (tools/pipeline/build.py) makes the SD tree, `toolchain/nro/build.sh` (libnx;
+The host stage builds the native renderer's host by default (`HOST_BACKEND=native`: host.c without console,
+render/native/host, libdeko3d 373bfd4 with dekodef from dekotools c15523c, `toolchain/deko3d/build.sh`); `plain` is
+opt-in. The pipeline's `package` stage (tools/pipeline/build.py) makes the SD tree, `toolchain/nro/build.sh` (libnx;
 `elf2nro.py` with the NACP and `toolchain/nro/icon.jpg`), `tests/s5/check_package.py` and `tests/nx1/run.py`.
 `tools/farm/full_job.sh` publishes `sd/`, the launcher's and host's ELFs and maps, and `nx1.json` to the **private**
 branch `nro/<commit12>` of fnv-nx-build (`publish_nro`). The package holds game-derived code (the guest), so it never
 goes to nx-agent. The full report has a `## Package` table with every check, and meta.json has `check_package_rc`,
 `nx1_open` and `nx1_checks`.
+
+## Shaders: precompiled, never compiled on the console (owner rule)
+
+- The native renderer's own shaders (render/native/shaders, 162 with every variant) are built by uam at the pins
+  (toolchain/uam/build.sh) when libnxrender.a is built.
+- With `NX_SHADER_TABLE=device` (the pipeline sets it), render/native/n1/build.sh runs toolchain/nro/shaderpack.py:
+  - the DKSH go into one pack, shaders.nxsp, indexed by family and variant, each blob 256-aligned with a crc32;
+  - a shader without a DKSH stops the build;
+  - the guest's table (nx_shaders.c) holds no GLSL. It reads the DKSH from the pack at its first lookup, and only
+    from the pack whose id it was generated with.
+- The package stage puts the pack into fnv.nro's RomFS (toolchain/tools/romfs.py). The host mounts it at start as
+  `fnvshd:` (host_device.inc mount_shader_pack); a missing pack leaves the renderer without shaders, never a fallback.
+- The game's own D3D9 shaders are translated by sdp2dksh (D6) at install time, from the owner's
+  shaderpackage*.sdp into the owner's local shaders_nx.pak. That file never enters nx-agent. Its packer is the
+  missing piece (check 9, game.packer).
 
 ## The checks (`tests/nx1/run.py`; metric: the number not passing)
 
@@ -62,9 +79,10 @@ goes to nx-agent. The full report has a `## Package` table with every check, and
 | 3 | SVCs, services, instructions | check_svc.py | guest: no svc; host/launcher: svcs in the application set, services in the application set; nothing traps at EL0 (cntvct_el0 included) |
 | 4 | threads | check_threads.py | NPDM ranges; placement.h over every input stays on cores 0-2 (0-3 opted in) with priorities 0x1C..0x3B; literal threadCreate sites |
 | 5 | filesystem | check_fs.py | one layout everywhere, roots and mounts, the case probe, tests/s4's layout cases, the package tree |
-| 6 | GPU integration | check_gpu.py | the package has a GPU backend; default window, present, 720p (1080p docked via VI or the operation mode); cache/log paths; nothing desktop-only |
+| 6 | GPU integration (native renderer only, owner decision) | check_gpu.py | the packaged host is the native deko3d one without libnx's console; nxgpu_init checks every object it creates; default window, acquire/present, 720p (VI scales docked) or the operation mode; pools fit NXGPU_HOST_HEAP_MIB; log path inside the layout; nothing desktop-only |
 | 7 | platform | check_platform.py | HID (4 pads, handheld, keyboard/mouse/touch, vibration), audren, applet pump, every exit path cleans up, crash log; host_device_test.c run under qemu |
 | 8 | owner checklist | check_checklist.py | NRO_CHECKLIST.md is one page and matches the launcher's files and messages |
+| 9 | no shader compiled on the console (owner) | check_shaders.py | fnv.nro's RomFS (romfs.py, = switch-tools build_romfs) holds shaders.nxsp (shaderpack.py: one pack, index by family/variant) with a DKSH for every variant build.py makes and every name the renderer asks for; the guest links the GLSL-free table of that pack (pack id); no compiler in guest or host; the device backend takes DKSH only; the game's sdp2dksh shaders_nx.pak is owner-local and never in git (its install-time packer is still missing) |
 
 Local tools for libnx code without devkitA64: `tests/nx1/syntax.sh` (system cross gcc, newlib headers, -Werror)
 and the qemu-run host_device test. Self-tests: `test_check_nro.py`, `test_check_svc.py`, `threads_harness.c`.
@@ -84,5 +102,5 @@ and the qemu-run host_device test. Self-tests: `test_check_nro.py`, `test_check_
 - **Layout split.** The host read sdmc:/switch/fnv while the guest read sdmc:/fnvnx/game and os_horizon.c
   sdmc:/fnv-nx. There is now one layout, and Data/ sits next to FalloutNV.exe.
 - **Memory.** The heap region (2 GiB), not the ~3.2 GiB pool, is the limit, and GPU memory is process heap. That
-  leaves 1,491 MiB of guest heap with a 512 MiB GPU host. The emulator maps a 64 MiB guest heap, so it cannot measure
+  leaves 1,491 MiB of guest heap with the native renderer's 512 MiB host heap (its pools: 249 MiB). The emulator maps a 64 MiB guest heap, so it cannot measure
   a boot to the first cell yet.

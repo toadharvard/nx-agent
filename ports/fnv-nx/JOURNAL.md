@@ -3417,3 +3417,58 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - st1-st4 and gates1 run. fz1-fz4 run; fz5-fz26 are paused for the slot cap.
   - The farms trail the integration head by about 70-80 commits.
 * **next** - S2c-vt's slot fill (boot critical path), S1-refs on full1's 74 excluded units, the GPU hotspots (render), R0's regression detector.
+
+### J-0152 | 2026-11-04 | stream: orchestration,S15-threads,S1b | status: wip | parent: J-0151
+
+* **decided (owner)** - D19: performance changes that cannot keep MSVC byte parity ship as patch class MT1.
+  - MT1 is Switch-only, behind a feature flag (bMTRendering), off by default.
+  - With the flag off the build is byte-identical to the parity build.
+  - Checks: census, mtqemu on the real objects, the race checker, and frame equivalence with the flag on and off.
+  - First user: mt_cull, 2.7 M + 1.8 M main-thread instructions, the largest CPU lever toward 60 fps.
+  - S1b adds the class to the patch tooling; S15-threads writes the patches.
+* **decided (owner)** - D18 (from J-0150) is recorded in ARCHITECTURE.md. The native renderer is the only target:
+  no further work on the Nine fallback.
+* **decided** - The refreshed GOG token is not pushed to gamedata/gog; the owner notes it expires anyway.
+  - S5-data holds the real install (GOG API download, md5-checked).
+  - S5-data produces the real-game NXD9 captures with S16's d9cap under Wine, on private branch gamedata/captures.
+  - S16 compares against those captures.
+* **reverted and re-landed** - S12's order defaults: reverted (3f7d5714) after V1's C2v/C2a, then re-landed per
+  MSVC shape (92f3b4d6): object=msvc, operator=rtl, assign=msvc. S11's order.msvc has 5 configurations; V2
+  re-verifies.
+* **verification** - V2 is added (compile, rules, ABI and link streams); V1 keeps the rest.
+  - The R0 regression detector is merged: trend per head, regressions with their commit ranges, and stale passes no
+    longer count.
+  - Scorecard: 1 pass / 17 fail / 11 no-data / 4 stale.
+
+### J-0153 | 2026-11-04 | stream: orchestration | status: wip | parent: J-0152
+
+* **decided (owner)** - No settings presets (D20 revised): 60 fps at the exe's default settings, met in code (port
+  overhead, threading, algorithms). S15-simd audits the port's own overhead, by class and in M per frame.
+* **decided** - D20: bodies the decomp lacks may be reconstructed against the exe (byte match required). They live
+  on fnv-nx-build `recon/<unit>` only; nx-agent holds only the rule that applies them.
+* **landed** - LINK_OVERRIDES=auto: every full build links the native renderer. uam is built at its pin in the farms.
+  S5-boot gets past the memory manager to WinMain; the ini files are on gamedata/exe. S5-data publishes Data/ for
+  the main menu. NX1 closes V1's 7 device-check refutations. S12's P1/P2 are fixed (3 -> 0). S13b's cause audit:
+  692 functions move from artifact to real-bug or triage.
+* **allocation (owner)** - Closed work is put to sleep, and the critical path is parallelized.
+  - Archived: S11, S12, S1-STL, S2c-abi; farms keys1, try1of4, cmp1, perf1, eq4-eq6 (equivalence at 3/6 shards).
+  - Finishing their last merge: R0, P0, S1-fuzzB.
+  - New streams: S2c-vt2 (general slot fill), S1-layout (layout-offset, native-empty-body), render-lit,
+    render-land, G1-gpu (GPU 27.2 -> 16.7 ms), S15-scene (scene graph in parallel).
+  - New farms: full4 and full5, so a fresh NRO comes out more often.
+  - Every new stream starts from docs/STREAM_START.md.
+
+| metric | value |
+|---|---|
+| census errors | 0 / 2978 |
+| link undefined / trap stubs | 4279 / 2315 (last full1 link 06857911f5ab, before the S2c/S4/S5 merges) |
+| runtime traps up to the boot's stop | 2 names + 123 IAT slots -> 0 |
+| slot fill (trial link) | 1,295 -> 880 |
+| ABI open pairs (S1b) | 1,001 -> 867 |
+| fuzz (S13b) | 2,018 -> 2,927 functions with verdicts; artifact 2,321 -> 1,629 |
+| order divergences (S12) | 3 -> 0 |
+| boot | WinMain; stub boot initializer skips 767 -> 1; known_faults 22 -> 10 |
+| native render | UI only; Doc Mitchell frame black (S16 bisecting) |
+| CPU worst frame (model, defaults) | 34.3 ms placed; plan60 23.4 ms |
+| GPU real019 | 27.22 ms handheld |
+| gates1 | 1 pass / 17 fail / 11 no-data / 4 stale (last scorecard) |

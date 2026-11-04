@@ -42,16 +42,52 @@
   - Check 2 (memory) fails. The heap region (2 GiB), not the 3.2 GiB pool, is the limit, and GPU memory is process
     heap. With a 512 MiB GPU host that leaves 1,491 MiB of guest heap. The boot's peak is 4.8 MiB at WinMain, which
     is not representative: the check needs the first cell.
-  - Check 6 (gpu) fails: the package is HOST=plain with D3D9=null, and render/native's log path is outside the
-    layout.
+  - Check 6 (gpu, the native renderer only, owner decision) fails on three points:
+    - nxgpu_init uses 11 created objects without checking them (queue, swapchain, fbMem, cmdMem, codeMem,
+      descMem, ...);
+    - the native log is outside the layout;
+    - the package is HOST=plain, not the native host.
+    The native pools (249 MiB) fit the 512 MiB host heap.
 * **requests**
-  - Orchestrator: build the full1 package with a GPU host (NINE=1, or the native renderer when it links) so the
-    package draws. Add the D8 launcher sentence.
-  - Render machine: render/native/host/nxgpu_host.c should log to sdmc:/switch/fnv/nxgpu.log. Docked: either pick
-    1920x1080 from appletGetOperationMode or keep 720p and let VI scale (both work).
+  - Orchestrator: link the full1 package's host with render/native/host (nxgpu.c, nxgpu_host.c, deko3d) and
+    -DFNVNX_HOST_NO_CONSOLE, so the package draws. The Nine fallback is out (owner). Add the D8 launcher sentence.
+  - Render machine:
+    - nxgpu_init: check every create (queue, swapchain, every host_block, command buffers) and return NULL on
+      failure, so the host logs "deko3d init FAILED" instead of faulting;
+    - log to sdmc:/switch/fnv/nxgpu.log;
+    - docked output: either pick 1920x1080 from appletGetOperationMode or keep 720p and let VI scale.
   - S5: the emulator maps a 64 MiB guest heap (emu_guest.py HEAP_SIZE), so no boot can measure check 2's peak.
     The device gives 1,491 MiB.
   - R0: a gate on meta.json nx1_open (0 = device-ready).
 * **next** - Read the first full1 report at a head >= ac00629: fnv.nro built, checks 1 and 3 on real artifacts.
   Then nro/<c12> as the owner's download. After that, the largest bucket left: check 2's representative peak,
   with S5.
+
+## Update (later the same day)
+
+* **found / fixed**
+  - V1 refutations, each in its own commit:
+    - N2 (relocations into rodata);
+    - P1/P2 (stale publish, rejected push);
+    - G3 (pool define parsing);
+    - S1/S2 (v8.1+ instructions: the A57 is ARMv8.0, masks validated against GNU as, 0 false hits on 4.7M guest
+      words);
+    - S3 (unreviewed services);
+    - S5 (pm:shell);
+    - EXIT-P1: appletLockExit is taken at pump start and released in cleanup_for_exit, so an exit request
+      reaches the host instead of killing it.
+  - Mesosphère allows only EL0PCTEN, so cntvct_el0 traps. Every guest and shim read now uses cntpct_el0.
+  - ldr gives a 32-bit process no system_resource_size, so it draws on the shared application slab (20,000
+    KMemoryBlocks). The VirtualAlloc extents are capped at 3072 (S4 adopted it).
+  - Owner rule, no shader compiled on the console, is check 9:
+    - 162 DKSH go in one pack (shaders.nxsp, 12 families, 294 KiB) in fnv.nro's RomFS;
+    - the console table holds no GLSL and is bound to the pack id;
+    - romfs.py is byte-identical to switch-tools build_romfs.
+* **measured** - 9 checks, 5 open: 1, 2, 3, 6, 9.
+  - 9 fails only on game.packer.
+  - 1, 3 and 6 wait for full1 with the native host plus LINK_OVERRIDES=render.
+  - 2 waits for a first-cell boot.
+* **requests**
+  - Orchestrator: an owner for the install-time sdp2dksh -> shaders_nx.pak packer (owner-local, never in git).
+  - Render machine: keep the device table's .glsl identity handle in LearnEpilogueVariants, or identify blobs by
+    name.

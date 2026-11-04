@@ -63,7 +63,8 @@ def strip_comments(src: str) -> str:
 def parse_layout(path=SDLAYOUT) -> dict[str, str]:
     """#define NAME "lit" [NAME "lit"]... -> NAME: concatenated string (macros of this file expanded)."""
     defs: dict[str, str] = {}
-    for m in re.finditer(r'^#define[ \t]+(FNVNX_\w+)[ \t]+(.+)$', strip_comments(open(path).read()), re.M):
+    text = re.sub(r'\\\n', ' ', strip_comments(open(path).read()))   # join continuation lines
+    for m in re.finditer(r'^#define[ \t]+(FNVNX_\w+)[ \t]+(.+)$', text, re.M):
         parts = re.findall(r'"((?:[^"\\]|\\.)*)"|(FNVNX_\w+)', m.group(2))
         if not parts:
             continue
@@ -85,7 +86,7 @@ def check(sd: str | None, run_s4: bool) -> Checks:
     sd_dir = L.get("FNVNX_SD_DIR", "")
     c.ok("layout.dir", re.fullmatch(r"sdmc:/switch/[A-Za-z0-9_-]+", sd_dir) is not None,
          f"FNVNX_SD_DIR {sd_dir!r} is not sdmc:/switch/<name>: hbmenu would not list fnv.nro")
-    inside = [k for k, v in L.items() if k.startswith("FNVNX_SD_") and k != "FNVNX_SD_DIR"]
+    inside = [k for k, v in L.items() if k.startswith("FNVNX_SD_") and k not in ("FNVNX_SD_DIR", "FNVNX_SD_PORT_NAMES")]
     bad = [k for k in inside if not L[k].startswith(sd_dir + "/")]
     c.ok("layout.inside", inside and not bad, f"outside {sd_dir}: {bad}")
     c.ok("layout.nro_name", L.get("FNVNX_SD_NRO") == sd_dir + "/fnv.nro", f"FNVNX_SD_NRO {L.get('FNVNX_SD_NRO')}")
@@ -115,12 +116,26 @@ def check(sd: str | None, run_s4: bool) -> Checks:
         c.ok(f"src.root.{os.path.basename(rel)}", good, f"os_default_root returns {val}, not FNVNX_SD_DIR")
     boot = strip_comments(open(os.path.join(ROOT, "toolchain", "game", "boot.cpp")).read())
     m = re.search(r'k_exe\s*=\s*([^;]+);', boot)
-    c.ok("src.boot_exe", m is not None and m.group(1).strip() in ("FNVNX_SD_EXE", f'"{L.get("FNVNX_SD_EXE")}"'),
+    # either the fixed FNVNX_SD_EXE or S5-data's os_game_dir() (FNVNX_SD_DIR unless fnvnx.ini sets game_dir=)
+    via_game_dir = re.search(r'os_game_dir\(\)[^;]*FalloutNV\.exe', boot) is not None
+    c.ok("src.boot_exe", via_game_dir or m is not None and m.group(1).strip() in ("FNVNX_SD_EXE", f'"{L.get("FNVNX_SD_EXE")}"'),
          f"boot.cpp k_exe = {m.group(1) if m else None}")
+    og_all = strip_comments(open(os.path.join(ROOT, "toolchain", "guest", "os_guest.c")).read())
+    gd = re.search(r'os_game_dir\s*\(\s*void\s*\)\s*\{(.*?)\n\}', og_all, re.S)
+    if gd:
+        c.ok("src.game_dir_default", "FNVNX_SD_DIR" in gd.group(1) or f'"{sd_dir}"' in gd.group(1) or "os_default_root" in gd.group(1),
+             "os_game_dir() does not default to FNVNX_SD_DIR")
     pc = strip_comments(open(os.path.join(ROOT, "platform", "win32", "path.cpp")).read())
     c.ok("src.game_mount_root", re.search(r'fnvnx_path_mount\(\s*GAME_DIR\s*,\s*g_root\s*\)', pc) is not None,
          "path.cpp does not mount C:\\FalloutNV at the root (Data/ would not be sdmc:/switch/fnv/Data)")
     c.ok("src.user_mount", re.search(r'"%s/user"', pc) is not None, "path.cpp: no <root>/user profile mount")
+    c.ok("src.drive_mount", re.search(r'"%s/drive_%c"', pc) is not None, "path.cpp: other drives not under <root>/drive_<x>")
+    names = L.get("FNVNX_SD_PORT_NAMES", "").split()
+    own = {os.path.basename(v) for k, v in L.items() if k.startswith("FNVNX_SD_") and k not in ("FNVNX_SD_DIR", "FNVNX_SD_EXE",
+                                                                                                 "FNVNX_SD_DATA", "FNVNX_SD_PORT_NAMES")}
+    c.ok("layout.port_names", own <= set(names) and {"user", "drive_*"} <= set(names),
+         f"FNVNX_SD_PORT_NAMES lacks {sorted(own - set(names))}")
+    c.ok("layout.port_names_not_game", not {"FalloutNV.exe", "Data"} & set(names), "a game file is listed as the port's")
     og = strip_comments(open(os.path.join(ROOT, "toolchain", "guest", "os_guest.c")).read())
     m = re.search(r'int\s+os_fs_case_insensitive\s*\(\s*void\s*\)\s*\{(.*?)\n\}', og, re.S)
     c.ok("case.probed", m is not None and "os_stat" in m.group(1),

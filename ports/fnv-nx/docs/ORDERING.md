@@ -70,6 +70,22 @@ A plain store in unit B to a field that unit A hands to InterlockedCompareExchan
   copied to another local) carries it: a store or load through it (`*q = 1`) is ordered when its target is keyed.
 * **Break-test polls.** An endless loop (`for (;;)`, `while (1)`, `do ... while (1)`) whose body is only
   `if (flag) break;` tests and waits is a plain poll like `while (!flag) Sleep(0);`.
+* **Shapes from the adversarial review** (synthetic cases in tests/s12/order wholeprog_a/b.cpp):
+  * operands: pointer arithmetic (`o->cnt + i`, `&arr[i]` on a pointer parameter), a conditional
+    (`c ? &a->m : &b->m`), a pointer to another type (`(LONG *)this`: the record's first member), a pointer field's
+    value (`InterlockedIncrement(c->m_pRef)`: a `pfield Class::member` key orders `*c->m_pRef = 1` elsewhere);
+  * polls: through a volatile cast or volatile pointer (the reader was ordered, now its writer is keyed too), through a
+    local pointer or reference, a bit-field (`!f->done`, which the front end folds into a BIT_FIELD_REF mask test)
+    and adjacent narrow flags compared together (folded into one wider load): a BIT_FIELD_REF is ordered when its
+    bits cover a keyed field; a wait in the for-increment (`for (; !flag; Sleep(0));`);
+  * records: a union member is keyed with its siblings, a member of an anonymous union or struct is named by the
+    enclosing named record (`U::lk`), a copy the front end turned into bytes (`MEM <unsigned char[6]>`, a class with
+    a base) is fenced through its alias type.
+  * the per-unit cache is keyed by a hash of the unit's path (`src/a_b.cpp` and `src_a/b.cpp` are different) and
+    refreshed when the unit's content changes, whatever its mtime.
+* **Still open** (listed, rarer): an Interlocked operand through a pointer to member, through a virtual forwarder
+  called on a base pointer, or returned by an accessor; a poll whose condition calls an inline accessor; a keyed
+  record passed by value or copied with memcpy.
 * **Cost of the pass:** about 0.6 CPU seconds per unit, a census of the tree without code generation.
 
 Modes for A/B measurements only (compile.sh `ORDER_MODE=off|tso`, `ORDER_ARGS=ltr`); `off` also selects the
@@ -262,6 +278,8 @@ not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B
   |---|---|---|
   | direct member call `obj()->f(a())`, `(*obj()).f`, `ref().f`, chains, member operators (`<<` `>>` `[]` `+` `==` `()`) | arguments, then the object | `ORDER_OBJECT=msvc` |
   | virtual call `obj()->vf(a())` | object first | `ORDER_OBJECT=msvc` (GCC's order) |
+  | virtual call on a prvalue `make().vf(a())` (GCC calls it directly) | object first (V2's P1) | `ORDER_OBJECT=msvc` (kept first) |
+  | call through a computed pointer `fp()(a())` | arguments, then the callee expression (V2's P2) | `ORDER_OBJECT=msvc` |
   | static member through an object | object first | GCC's order |
   | pointer to member `(obj()->*pmf())(a())` | arguments first (/O2: `aom`) | `ORDER_OBJECT=msvc` |
   | free overloaded operator `y << a()`, `y + a()`, `a() - y` | right to left, as any call | `ORDER_OPERATOR=rtl` |

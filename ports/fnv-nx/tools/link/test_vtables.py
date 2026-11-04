@@ -225,6 +225,10 @@ def main():
                     got, want = synth[n].ents(n), oracle.ents(n)
                     check(got == want, '%s differs from GCC:\n  got  %s\n  want %s' % (n, got, want))
         check('_ZTS3Key' in synth and '_ZTV5Multi' not in synth, 'typeinfo names synthesized, emitted vtables not')
+        # S2c-vt item 5: emitted slot functions are game code, compiled with compile.sh's own flags (--print-flags)
+        gf = layout.game_flags(tree, os.path.join(out, 'vtables', 'probe'))
+        check(any(f.endswith('fnvnx_ftoi.so') for f in gf) and any(f.endswith('fnvnx_order.so') for f in gf) and
+              '-mno-outline-atomics' in gf and '-fPIC' in gf, 'emitted code: compile.sh\'s flags and plugins: %s' % gf)
         # V1 round 3 t5: unit c holds a compiled copy of Inl's typeinfo (typeid), yet the synthesized vtable object
         # carries its own (checked against GCC above) and that is the one apply keeps with the vtable
         pairs = [l.split('\t') for l in open(os.path.join(out, 'typeinfo_pairs.tsv')) if not l.startswith('#')]

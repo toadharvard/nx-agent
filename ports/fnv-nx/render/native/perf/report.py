@@ -124,6 +124,16 @@ def cpu_ms(instr):
     return instr / (IPC[0] * CLOCKS_GHZ[0] * 1e9) * 1e3
 
 
+# front-end functions that run on the render thread (Frame::Finish and what it calls, RENDER_NATIVE.md §3.6);
+# every other front function runs on the main thread (packet build: StateTracker, Renderer::Render, ...)
+RENDER_THREAD_FRONT = ("nx::Frame::Finish", "nx::SortPackets", "nx::Encoder::", "nx::StateCache::FlushDefines",
+                       "nx::DefaultDyn")
+
+
+def front_thread(fn):
+    return "render" if fn.startswith(RENDER_THREAD_FRONT) else "main"
+
+
 def build_hotspots(raw, prof, dk, gpu):
     """ranked rows per scene: CPU by function / family, GPU by pass / shader program (docked + handheld 720p).
     ms: CPU at IPC 0.6, 1.02 GHz (instructions of one measured mix_hi frame); GPU at issue efficiency 0.6."""
@@ -137,9 +147,9 @@ def build_hotspots(raw, prof, dk, gpu):
     for fn, n in (prof.get("profile") or {}).items():
         if fn == "main":
             continue    # native_drv's stream decoder (harness), not renderer code
-        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread="main+render (front)", module="render/native front"))
+        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread=front_thread(fn), module="render/native front"))
     for fn, n in ((dk or {}).get("streams", {}).get("mix_hi", {}).get("profile_last_frame") or {}).items():
-        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread="render (backend)", module="nxgpu.c + libdeko3d"))
+        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread="render", module="nxgpu.c + libdeko3d (backend)"))
     cpu_fn.sort(key=lambda r: -r["ms"])
     cpu_fam = []
     for f in fam_names:
@@ -160,7 +170,8 @@ def build_hotspots(raw, prof, dk, gpu):
             fams = s["families"]
             out["gpu_by_pass/" + key] = sorted((row("gpu_pass", f, v["ms"], bound=v["bound"], pixels=v["pixels"],
                                                     frag_ms=v["frag_ms"], vertex_ms=v["vertex_ms"], dram_mb=v["dram_mb"],
-                                                    target_format=v.get("target_format"))
+                                                    target_format=v.get("target_format"), stand_in=v.get("stand_in", False),
+                                                    shader_source=v.get("shader_source"))
                                                 for f, v in fams.items()), key=lambda r: -r["ms"])
             prog = {}
             for f, v in fams.items():
@@ -250,7 +261,7 @@ def build_report(spec, raw, prof, ovf, dk, work):
     commit = sh(["git", "-C", HERE, "rev-parse", "HEAD"]).stdout.strip()
     # the commit changes when the branch is rebased; the tree of render/native (+ dirty flag) identifies the code
     tree = sh(["git", "-C", HERE, "rev-parse", "HEAD:ports/fnv-nx/render/native"]).stdout.strip()
-    dirty = bool(sh(["git", "-C", HERE, "status", "--porcelain", "--", ".."]).stdout.strip())
+    dirty = bool(sh(["git", "-C", HERE, "status", "--porcelain", "--", "..", ":!report.json"]).stdout.strip())   # not itself
     gpu = json.load(open(os.path.join(work, "out", "gpu.json")))
     gpu_sum = {}
     for mix, lst in gpu["scenes"].items():
@@ -264,13 +275,19 @@ def build_report(spec, raw, prof, ovf, dk, work):
     # efficiency 0.6), and the frame = max(CPU at 1.02 GHz, GPU) per gate config (the CPU clock is 1.02 GHz both
     # docked and handheld). > 1.0 = over budget.
     cpu_worst = {str(g): max(hi["ms"][str(g)]["main"]["hi"], hi["ms"][str(g)]["render"]["hi"]) for g in CLOCKS_GHZ}
-    gpu_gate = {cfg: gpu_sum["mix_hi"][cfg]["eff_0.6"] for cfg in GATE_CONFIGS}
+    # the GPU metric is real019 (the game's own programs, translated) when it was built; the synthetic native row costs
+    # several families with stand-in shaders and is a lower bound (gpu_*_native_lower_bound)
+    gpu_metric = "real019_mix_hi" if "real019_mix_hi" in gpu_sum else "mix_hi"
+    gpu_gate = {cfg: gpu_sum[gpu_metric][cfg]["eff_0.6"] for cfg in GATE_CONFIGS}
+    gpu_native = {cfg: gpu_sum["mix_hi"][cfg]["eff_0.6"] for cfg in GATE_CONFIGS}
     budget_fraction = {}
     for t, b in TARGETS_MS.items():
         e = {g: round(v / b, 3) for g, v in cpu_worst.items()}
         for cfg, v in gpu_gate.items():
             e["gpu_" + cfg] = round(v / b, 3)
             e["frame_" + cfg] = round(max(cpu_worst["1.02"], v) / b, 3)
+            e["gpu_" + cfg + "_native_lower_bound"] = round(gpu_native[cfg] / b, 3)
+        e["gpu_metric"] = gpu_metric
         budget_fraction[t] = e
     for t, b in TARGETS_MS.items():
         for cfg in GATE_CONFIGS:

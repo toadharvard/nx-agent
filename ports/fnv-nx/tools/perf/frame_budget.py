@@ -11,6 +11,7 @@ replaces items by measurements when given:
     ("threads": {tid: {"role", "ideal", "mask", "instructions"}}) replace the model's CPU items by the measured
     per-role counts (median frame as mid, the largest as hi, the smallest as lo). Without frame intervals (a boot that
     has not reached the main loop yet) the model stays and the profile's intervals are listed under measured.boot;
+  * --perf: P0-perfmodel's fnvnx-perf/1: the hot rows' A57 cycle prices (per_call_cycles) as corrections;
   * --render: the render machine's cost report replaces the renderer items and adds its GPU time: schema
     fnvnx-render-cost/1 (RENDER_SCHEMA below), or the render machine's own render/native/perf/report.json ("fnv-nx
     P6n report v1", RENDER_PERF.md 5), read through p6n_to_cost (mix_lo..mix_hi frames, docked 720p GPU);
@@ -185,6 +186,7 @@ def apply_render(items, rep):
 def scenario_work(items, levers, sc):
     """items -> [(item id, role, [lo, mid, hi])] after the scenario's levers (moves and scales)"""
     work = []
+    follows = {it['id']: it.get('follows') for it in items}   # corrections move and scale with the item they correct
     for it in items:
         lo, hi = it['minsn']
         md = it.get('mid', mid(it['minsn']))
@@ -195,15 +197,15 @@ def scenario_work(items, levers, sc):
         core3 |= bool(lv.get('core3'))
         for iid, (flo, fhi) in lv.get('scales', {}).items():
             for w in work:
-                if w[0] == iid:   # lo case: the larger saving
+                if w[0] == iid or follows.get(w[0]) == iid:   # lo case: the larger saving
                     w[2] = [w[2][0] * flo, w[2][1] * mid((flo, fhi)), w[2][2] * fhi]
         for iid, (flo, fhi) in lv.get('moves', {}).items():
             for w in list(work):
-                if w[0] == iid and w[1] == 'main':
+                if (w[0] == iid or follows.get(w[0]) == iid) and w[1] == 'main' and len(w) < 5:
                     fm = mid((flo, fhi))
                     moved = [w[2][0] * fhi, w[2][1] * fm, w[2][2] * flo]   # lo case: more moved
                     w[2] = [w[2][0] - moved[0], w[2][1] - moved[1], w[2][2] - moved[2]]
-                    work.append([iid + '>' + lid, lv['to'], moved, None, True])
+                    work.append([w[0] + '>' + lid, lv['to'], moved, None, True])
     return work, core3
 
 
@@ -242,7 +244,60 @@ def verdict(lo, hi, target):
     return 'pass' if hi <= target else 'fail' if lo > target else 'uncertain'
 
 
-def build(model, profs=None, render=None):
+A57_SKIP = ('fn_interlocked',)   # its price leaves out the dmb drain; the interlocked_barriers item models that
+
+
+def apply_perf(items, model, perf, ipc_mid):
+    """P0-perfmodel's A57 prices (fnvnx-perf/1 per_call_cycles[], docs/PERF.md 12.6): for each hotspot_functions row
+    with a price, the difference between its cycles and its instructions, both per frame, as an item on the row's
+    thread in IPC-equivalent instructions (cycles x the assumed mid IPC - instructions), so the frame keeps one IPC
+    for the unpriced work and the priced rows run at their own. The lo case takes the lo cycles at the lo calls."""
+    rows = {h['id']: h for h in model.get('hotspot_functions', [])}
+    used = []
+    for r in perf.get('per_call_cycles') or []:
+        h = rows.get(r.get('id'))
+        if not h or h['id'] in A57_SKIP or not r.get('per_call_cycles'):
+            continue
+        pc, ca, cy = h['per_call_insn'], h['calls'], r['per_call_cycles']
+        ins = (pc[0] * ca[0], mid(pc) * mid(ca), pc[1] * ca[1])
+        cyc = (cy[0] * ca[0], mid(cy) * mid(ca), cy[1] * ca[1])
+        d = [(c * ipc_mid - i) / 1e6 for c, i in zip(cyc, ins)]
+        items.append({'id': 'a57_' + h['id'], 'name': 'A57 price of %s (cycles vs instructions)' % h['name'],
+                      'role': h.get('role', 'main'), 'subsystem': h.get('subsystem'),
+                      'minsn': [min(d[0], d[2]), max(d[0], d[2])], 'mid': d[1], 'basis': 'model',
+                      'follows': follows_item(model, h.get('subsystem'))})
+        used.append({'id': h['id'], 'cycles_per_frame_mid': round(cyc[1]), 'insns_per_frame_mid': round(ins[1]),
+                     'delta_minsn_mid': round(d[1], 3)})
+    return items, {'source': perf.get('head') or perf.get('schema'), 'rows': used,
+                   'delta_minsn_mid': round(sum(u['delta_minsn_mid'] for u in used), 3)}
+
+
+def follows_item(model, subsystem):
+    """the model item a correction on `subsystem` follows through the levers (the first item of that subsystem)"""
+    return next((it['id'] for it in model['items'] if it.get('subsystem') == subsystem), None)
+
+
+def apply_overrides(items, model):
+    """S15-simd's native overrides (tools/link/overrides, docs/PERF.md 11.6) as corrections to their subsystems'
+    items: for each hotspot_functions row with a `before` (the decomp's own instructions per call, measured before the
+    override), (after - before) instructions per call x calls per frame, on the row's thread and subsystem. The items
+    are estimates of the decomp's code, so the frame then carries the code that runs; with --perf, apply_perf prices
+    the after side in A57 cycles on top. lo pairs the lo per-call counts with the lo calls, hi the hi ones."""
+    used = []
+    for h in model.get('hotspot_functions', []):
+        b = h.get('before')
+        if not b:
+            continue
+        pa, pb, ca = h['per_call_insn'], b['per_call_insn'], h['calls']
+        d = [(pa[0] - pb[0]) * ca[0] / 1e6, (mid(pa) - mid(pb)) * mid(ca) / 1e6, (pa[1] - pb[1]) * ca[1] / 1e6]
+        items.append({'id': 'simd_' + h['id'], 'name': 'S15-simd override of %s (after - before)' % h['name'],
+                      'role': h.get('role', 'main'), 'subsystem': h.get('subsystem'),
+                      'minsn': [min(d[0], d[2]), max(d[0], d[2])], 'mid': d[1], 'basis': 'M',
+                      'follows': follows_item(model, h.get('subsystem'))})
+        used.append({'id': h['id'], 'delta_minsn_mid': round(d[1], 3)})
+    return items, {'rows': used, 'delta_minsn_mid': round(sum(u['delta_minsn_mid'] for u in used), 3)}
+
+def build(model, profs=None, render=None, perf=None):
     placement = load_placement()
     ipc = assume(model, 'ipc')
     clocks = assume(model, 'clocks_mhz')['value']
@@ -263,6 +318,10 @@ def build(model, profs=None, render=None):
         items = apply_render(items, render)
         measured['render'] = {k: render.get(k) for k in ('scene', 'draws', 'per_draw_insn', 'frame_minsn', 'gpu_ms',
                                                          'basis', 'gpu_basis', 'source_commit') if k in render}
+    if not measured.get('frameprof', {}).get('used'):   # a measured frame already runs the overrides
+        items, measured['overrides'] = apply_overrides(items, model)
+    if perf and not measured.get('frameprof', {}).get('used'):   # measured frames are priced by P0 already
+        items, measured['a57'] = apply_perf(items, model, perf, ipc['value'])
     if not measured.get('frameprof', {}).get('used'):   # a measured main thread already contains its hand-offs
         items.append({'id': 'sync', 'name': 'per-frame hand-offs on main', 'role': 'main',
                       'minsn': [syncs[0], syncs[2]], 'mid': syncs[1], 'basis': sync['basis']})
@@ -275,7 +334,7 @@ def build(model, profs=None, render=None):
     out = {
         'schema': 'fnvnx-frame-budget/1',
         'inputs': {'model': model.get('schema'), 'scene': model.get('scene'),
-                   'frameprof': bool(profs), 'render': bool(render)},
+                   'frameprof': bool(profs), 'render': bool(render), 'a57': bool(perf)},
         'assumptions': model['assumptions'], 'targets': targets, 'clocks_mhz': clocks,
         'budget_minsn': {}, 'budget_mean_minsn': {}, 'placement': {r: {'ideal': v[0], 'mask': v[1], 'mask_core3': v[2]} for r, v in placement.items()},
         'items': items, 'measured': measured, 'scenarios': [], 'gates': {},
@@ -477,13 +536,15 @@ def main(argv):
     ap.add_argument('--model', default=os.path.join(HERE, 'budget_model.json'))
     ap.add_argument('--frameprof', action='append', default=[])
     ap.add_argument('--render')
+    ap.add_argument('--perf', help="P0-perfmodel's fnvnx-perf/1 (<head12>-perf.json): A57 prices of the hot rows")
     ap.add_argument('--out')
     ap.add_argument('--quiet', action='store_true')
     a = ap.parse_args(argv)
     model = json.load(open(a.model))
     profs = [json.load(open(p)) for p in a.frameprof]
     render = json.load(open(a.render)) if a.render else None
-    b = build(model, profs, render)
+    perf = json.load(open(a.perf)) if a.perf else None
+    b = build(model, profs, render, perf)
     if a.out:
         with open(a.out, 'w') as f:
             json.dump(b, f, indent=1)

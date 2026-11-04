@@ -12,7 +12,8 @@ the GNU build id is copied; assets (ASET) follow the image. The output is byte-i
 inputs (tests/nx1/check_nro.py checks it against a switch-tools build when one is given).
 
 Unlike elf2nro, this tool also refuses inputs hbloader would load wrongly: segments out of order or overlapping,
-text not at 0, a gap between the segments (elf2nro silently writes a wrong header.size), and no MOD0.
+text not at 0, a gap between the segments (elf2nro silently writes a wrong header.size), no MOD0, and dynamic
+relocations other than RELATIVE or outside the RW segment (text and rodata are read-only when libnx relocates).
 """
 from __future__ import annotations
 
@@ -60,6 +61,14 @@ def build_nro(elf: nxelf.Elf, icon: bytes | None = None, nacp: bytes | None = No
     bss = align(data.memsz - padded) if data.memsz > padded else 0
     if len(out) < NRO_START_SIZE + NRO_HEADER_SIZE:
         raise ValueError("text too small for the NRO header")
+    if any(p.type == nxelf.PT_DYNAMIC for p in elf.phdrs):
+        rw_lo, rw_hi = data.vaddr, data.vaddr + data.memsz
+        for off, rtype, _sym, _add in elf.relocations():
+            if rtype not in (nxelf.R_AARCH64_NONE, nxelf.R_AARCH64_RELATIVE):
+                raise ValueError(f"relocation type {rtype} at {off:#x}: libnx's __nx_dynamic applies RELATIVE only")
+            if rtype != nxelf.R_AARCH64_NONE and not rw_lo <= off <= rw_hi - 8:
+                raise ValueError(f"relocation at {off:#x} outside the RW segment {rw_lo:#x}..{rw_hi:#x}: hbloader maps "
+                                 "text and rodata read-only before libnx relocates (put it in .data.rel.ro / RELRO)")
     mod_off = struct.unpack_from("<I", out, 4)[0]
     if mod_off + 4 > hdr_segs[0][1] + hdr_segs[1][1] + hdr_segs[2][1] or out[mod_off:mod_off + 4] != b"MOD0":
         raise ValueError(f"no MOD0 at the offset in NroStart+4 ({mod_off:#x}): not built with a libnx-style crt0")

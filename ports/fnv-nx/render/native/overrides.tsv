@@ -27,8 +27,11 @@
 00e88860	_ZN2nx6engine16NiDX9RenderState14GetRenderStateEm	thiscall(this, state) -> value; vft=NiDX9RenderState:27
 00e887d0	_ZN2nx6engine16NiDX9RenderState12SetBlendFuncEmmmm	thiscall(this, src, dst, unused, unused): SRCBLEND, DESTBLEND; vft=NiDX9RenderState:23
 00e88830	_ZN2nx6engine16NiDX9RenderState19SetAlphaBlendEnableEmmm	thiscall(this, enable, unused, unused): ALPHABLENDENABLE; vft=NiDX9RenderState:24
-00e88930	_ZN2nx6engine16NiDX9RenderState15SetSamplerStateEmmmm	thiscall(this, stage, type, value, unused); vft=NiDX9RenderState:48
-00e88980	_ZN2nx6engine16NiDX9RenderState15GetSamplerStateEmm	thiscall(this, stage, type) -> value; vft=NiDX9RenderState:49
+00e88930	_ZN2nx6engine16NiDX9RenderState20SetTextureStageStateEmmmm	thiscall(this, stage, type, value, unused): texture stage state (NiD3DRenderState, the device's SetTextureStageState), recorded only; vft=NiDX9RenderState:48
+00e88980	_ZN2nx6engine16NiDX9RenderState20GetTextureStageStateEmm	thiscall(this, stage, type) -> value; vft=NiDX9RenderState:49
+00e910a0	_ZN2nx6engine16NiDX9RenderState15SetSamplerStateEmmmm	thiscall(this, stage, type, value, unused): the device's SetSamplerState; vft=NiDX9RenderState:51
+00e910f0	_ZN2nx6engine16NiDX9RenderState15GetSamplerStateEmm	thiscall(this, stage, type) -> value; vft=NiDX9RenderState:52
+00e91120	_ZN2nx6engine16NiDX9RenderState19RestoreSamplerStateEmm	thiscall(this, stage, type): back to the value saved by the defaults pass (slot 47); vft=NiDX9RenderState:53
 00e88a20	_ZN2nx6engine16NiDX9RenderState10SetTextureEmPv	thiscall(this, stage, IDirect3DBaseTexture9*): a NativeTexture -> its image on the tracker stage; vft=NiDX9RenderState:55
 00e88a50	_ZN2nx6engine16NiDX9RenderState10GetTextureEm	thiscall(this, stage) -> texture; vft=NiDX9RenderState:56
 00e88a60	_ZN2nx6engine16NiDX9RenderState17ClearTextureUsageEPv	thiscall(this, texture): unbinds it from every stage; vft=NiDX9RenderState:57

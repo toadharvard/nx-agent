@@ -38,11 +38,11 @@ S13-VTPAIRS	S13	61fd136	61fd136	confirmed	-	test_s13_tools.py	kind-V pair short 
 S13-RENAMES-R1	S13	545e0c5	545e0c5	refuted	-	test_s13_tools.py	a def row of unit A changes the callee convention (tree_def) every caller unit uses; only A's keys refresh, callers keep stale verdicts
 S13-FZTREE-F1	S13	a01a297	a01a297	refuted	-	test_s13_tools.py	fuzz_job: t/<L12> whose hash differs from the link's recorded tree is rejected, then taken by the fallback wait unchecked
 S6B-CENSUS	S6b	283fe49	283fe49	confirmed	-	test_s13_tools.py	census counts sum (translated + failed, cause table, unique); s6b_centroid 23/23 (K1; K2 note: malformed package counted)
-NXR-H1	render	2686fc6	fc7713a	refuted	-	test_nx_render_robust.py	nx_render bounds every size of .nxcap: a SUBM Draw with 0x7fffffff instances is not bounded (hangs > 120 s; .nxd9 skips draws over 4 M vertices)
+NXR-H1	render	2686fc6	fc7713a	fixed	e0485fc	test_nx_render_robust.py	nx_render bounds every size of .nxcap: a SUBM Draw with 0x7fffffff instances is not bounded (hangs > 120 s; .nxd9 skips draws over 4 M vertices)
 R0-GATES	R0	450c5d6	450c5d6	confirmed	-	test_ready_adversarial.py	resolved gates tree: R1-R15 all ok on the integration head (R13, R14 fixed)
 R0-R16	R0	a506770	a506770	fixed	2bce418	test_ready_adversarial.py	perf.budget gates 60 fps on stretch_60, which frame_budget.py judges on the typical frame: a 25 ms worst frame passes (J-0150 wants the worst frame)
-S13B-UNLOADED-U1	S13b	a93f5e6	a93f5e6	refuted	-	test_s13b_callee_unloaded.py	oracle-callee-unloaded (artifact) on static evidence only: a native that returned before a unit-local X with no traced call gets the artifact label
-S13B-UNLOADED-U2	S13b	a93f5e6	a93f5e6	refuted	-	test_s13b_callee_unloaded.py	oracle-callee-unloaded although X's native body calls Y and the native trace has no Y: the native never ran X
+S13B-UNLOADED-U1	S13b	a93f5e6	a93f5e6	fixed	97f8af8	test_s13b_callee_unloaded.py	oracle-callee-unloaded (artifact) on static evidence only: a native that returned before a unit-local X with no traced call gets the artifact label
+S13B-UNLOADED-U2	S13b	a93f5e6	a93f5e6	fixed	97f8af8	test_s13b_callee_unloaded.py	oracle-callee-unloaded although X's native body calls Y and the native trace has no Y: the native never ran X
 S13B-VSPLIT	S13b	82be13c	82be13c	confirmed	-	test_s13b_callee_unloaded.py	oracle-vcall/oracle-fault split: records move artifact -> artifact (vcall-garbage, vcall-stub-alias) or -> real-bug (native-empty-callee); triage -> artifact only for an oracle-only fault in the oracle's private range (rule read; counts not re-derived)
 S12-KEYS-FIX	S12	8c18138	8c18138	confirmed	-	test_s12_keys.py	whole-program keys fixed: K1-K7c and K10 ok through keys_merge.py (K8 pointer alias, K9 Sleep poll stay notes outside the claim)
 S12-UNINIT-U1	S12	1634ca7	1634ca7	refuted	-	test_s12_order_close.py	aggregate local (SRA after the pass) still folds an uninitialized read to a constant (return 1)
@@ -58,3 +58,107 @@ S11-EX-E1	S11	5468b6b	5468b6b	refuted	-	test_s12_order_close.py	explain.py: a FA
 S11-EX-E2	S11	5468b6b	5468b6b	refuted	-	test_s12_order_close.py	rule-wide explained rows (EXTERN-RELOAD, PLACEMENT-NULLCHECK, GLOBAL-NEW, CRT-WRAPPER) explain any new difference of that rule
 R0-R16-FIX	R0	2bce418	2bce418	confirmed	-	test_ready_adversarial.py	perf.budget judges worst_frame_ms against 16.7 ms itself: R16 ok on head, PASSES on a506770
 S15-TARGET60	S15-threads	d994f1e	d994f1e	confirmed	-	test_ready_adversarial.py	frame_budget.py judges every target on the worst frame; target_60 is kind goal at 16.7 ms (code read; R16 ok on head)
+S2C-RESTRICT-R1	S2c-abi	8e9ad7a	8e9ad7a	refuted	-	test_s2c_s4_batch.py	int *const volatile __restrict (SIAH) classifies ?:int *; its pair with int * stays manual aggregate-param (one qualifier only)
+S2C-VAUNPROTO-U1	S2c-abi	e2dbe73	e2dbe73	refuted	-	test_s2c_s4_batch.py	unprototyped int f(...) vs (int,int) ruled same: a long long argument, the ILP32 definition reads other values
+S2C-VAUNPROTO-U2	S2c-abi	e2dbe73	e2dbe73	refuted	-	test_s2c_s4_batch.py	f(...) vs (int,int) ruled same: a double argument goes in d0
+S2C-VAUNPROTO-U3	S2c-abi	e2dbe73	e2dbe73	refuted	-	test_s2c_s4_batch.py	f(...) vs (int x5) ruled same: a 20-byte struct is passed by pointer
+S2C-VAUNPROTO-U4	S2c-abi	e2dbe73	e2dbe73	refuted	-	test_s2c_s4_batch.py	f(...) vs (int) ruled same: struct{float} goes in s0 (HFA)
+S2C-VACHECK	S2c-abi	0750425	0750425	confirmed	-	test_s2c_s4_batch.py	anonymous variadic arguments passed like named ones on AArch64 Linux (test_varargs 8 ok)
+S2C-OVRAUTO-F1	S2c-abi	94a3d29	94a3d29	refuted	-	test_s2c_s4_batch.py	Link fingerprint equal for OVERRIDE=auto and none (file_hash of a non-file is None): switching keeps the cached link
+S2C-OVRAUTO-E1	S2c-abi	94a3d29	94a3d29	refuted	-	test_s2c_s4_batch.py	an empty OVERRIDE in build.py env becomes auto, not off
+S2C-HOSTLAY-B1	S2c-abi	e0ed8d5	e0ed8d5	refuted	-	test_s2c_s4_batch.py	abireplay strips #vtables but not #bodiesN: a body row stays manual where the same vtable row becomes bridge
+S2D-VCALL	S2d	944515f	944515f	confirmed	-	test_s2c_s4_batch.py	a vftable slot is not a direct call (tests/s2d 15 OK)
+S2D-LINKEXE	S2d	009bab5	009bab5	confirmed	-	test_s2c_s4_batch.py	link fingerprint follows the exe content (test_link_exe.sh not run: no rsync)
+S4-BINK	S4	afe8f43	afe8f43	confirmed	-	test_s2c_s4_batch.py	BinkOpen returns NULL: the exe's one call site 0xec0c2f is null-tested; the update path is guarded
+S4-D3DX	S4	0c08b8d	0c08b8d	confirmed	-	test_s2c_s4_batch.py	D3DX in the null guest: 35 names, C linkage, ILP32; 24 of 25 imports, a weak fallback for the last
+S4-IAT	S4	b72b749	b72b749	confirmed	-	test_s2c_s4_batch.py	IAT metric: 280 slots, per-DLL counts, lookup = boot path, no dropped lines (code read; m32 not run: no lib32)
+S1REFS-NEW5-N2	S1-refs	5e8816f	5e8816f	refuted	-	test_s1refs_b.py	class operator new(size_t) + placement-only delete: a throwing ctor frees the pool block via ::operator delete; MSVC (C4291) frees nothing
+S1REFS-TPL1	S1-refs	56e41cc	56e41cc	confirmed	-	test_s1refs_b.py	TPL1 header template member: base member over a global, local kept; RCAST1 after a comment
+S1REFS-DUPINT1RET-D2	S1-refs	e39da35	e39da35	refuted	-	test_s1refs_b.py	DUPINT1-RET may keep a prototype returning a class by value: hidden result pointer shifts the arguments (latent: the decomp's 3 pairs return int, char*, void, void*)
+S1REFS-COND1RSTR1	S1-refs	e3465bd	e3465bd	confirmed	-	test_s1refs_b.py	RSTR1 binds the restrict local itself; its COND1 form superseded by 5279bb5
+S1REFS-COND1-C2	S1-refs	5279bb5	5279bb5	refuted	-	test_s1refs_b.py	COND1: an explicit G(bool) still passes the gate, ?: becomes G and h(G) is called where MSVC calls h(bool)
+S1REFS-COND1-C3	S1-refs	5279bb5	5279bb5	refuted	-	test_s1refs_b.py	COND1: c ? false : !x.f(1) gets G(false) against bool, a GCC error on input that compiled
+S1REFS-STD2	S1-refs	0a0c0cc	0a0c0cc	confirmed	-	test_s1refs_b.py	std::abs(float) rename: units.json symbol, link double-to-float bridge for float callers, same-unit caller value
+S1FUZZB-STAND2	S1-fuzzB	57fe267	57fe267	confirmed	-	test_s1refs_b.py	STAND2: the /Od stand-in call reaches the other unit's body; /O2 and inline stand-ins untouched
+S13B-UNLOADED-FIX	S13b	97f8af8	97f8af8	confirmed	-	test_s13b_callee_unloaded.py	oracle-callee-unloaded only when the native trace shows the native ran X: U1/U2 native-early-exit, U3 control kept
+S15T-J0148	S15-threads	258d777	258d777	confirmed	-	test_weak_interlocked.py	J-0148 hand-merge: no conflict markers (W3), litmus 0 bad, refcount inc relaxed / dec release + dmb
+S15T-WEAK	S15-threads	35fe02d	35fe02d	confirmed	-	test_weak_interlocked.py	guest.elf takes sync.cpp's strong fnvnx_interlocked_slow, litmus calls it by relocation (W1, W2 at the subagent's base, before 79481ab)
+S15T-HAVOK	S15-threads	b5c0f19	b5c0f19	confirmed	-	test_budget_built_levers.py	Havok MT is iSimType=4 (FUN_00c661d0 maps 4 -> 3); the setting name not checked against the exe
+S15T-MTR	S15-threads	af36244	af36244	confirmed	-	test_budget_built_levers.py	bMTRendering unsafe on the PC code: second accumulator renderer only for count 2, no modulo on the batch index
+S15T-INI	S15-threads	4364484	4364484	confirmed	-	test_ini_port_defaults.py	port ini defaults only for absent keys, case-insensitive, GetPrivateProfileString lengths (I1-I3)
+S15T-BUILT-B2	S15-threads	40a8d98	40a8d98	fixed	e04253d	test_budget_built_levers.py	plan45 omits the built lever barrier_relax: with it the model-only plan45@1020 goes pass_30 -> pass_45
+S15S-SLERP-SL1	S15-simd	f0861e2	f0861e2	fixed	5a03d41	test_slerp_decomp.py	NEON Slerp claims the decomp's result to the bit, NaN included: 199 NaN-input cases give a NaN of another sign (144,000 others bit-identical)
+S15S-METRIC	S15-simd	b7a4022	b7a4022	confirmed	-	test_slerp_decomp.py	hotspot metric labelled [E]; note: the 7.745 baseline used a stale 130, not the measured 134
+GATES-FZ-R16a	gates	82805db	82805db	fixed	02272b0	test_ready_fuzz_shards.py	fnvnx-fuzz-summary per shard: shard 1 at 18/10 masks shard 2 at 0/10, fuzz.coverage passes 90 % (text and summary)
+NX1-NRO-N2	NX1	5256786	5256786	fixed	9a5390b	test_nx1_nro.py	check_nro passes a RELATIVE relocation into rodata, which hbloader maps read-only (header offsets ok, N1)
+S15-MTQEMU-B1	S15-threads	79481ab	79481ab	fixed	e04253d	test_weak_interlocked.py	tests/s15/mtqemu/build.sh no longer links after S4 79481ab: handles.cpp needs w32_is_std_handle from crt_kernel32.cpp, not in build.sh
+NXR-H1-FIX	render	e0485fc	e0485fc	confirmed	-	test_nx_render_robust.py	.nxcap draws bounded by vertices x instances: H1 exit 1 (ASan build of the head), D1-D7/C1-C6 and 1,000 mutations each of t.nxd9 and n0.nxcap clean
+P0-E1	P0-perfmodel	6e0a34b	6e0a34b	refuted	-	test_a57_calib_circular.py	calibration check point l2_latency echoes cost.l2_lat (22/30/40 in, out); truth.json calls check points independent
+P0-E2	P0-perfmodel	6e0a34b	6e0a34b	refuted	-	test_a57_calib_circular.py	check point taken_l2btb echoes 1 + btb_l2_bubble; without E1/E2 the claimed 4.9 % over 14 points is >= 5.7 % over 12
+P6N-L1	P6n	b34a429	b34a429	fixed	63a57c0	test_p6n_engine_path.py	engine_path.py undercounts nested in-function loops (4x4: 39 counted, 66 run); the 2,303 instr/draw not re-derived (objects not here)
+P6N-BUDGET	P6n	bbe6e74	bbe6e74	confirmed	-	test_p6n_engine_path.py	report.json arithmetic re-derives (8,544,130 instr, 13.96 ms, 3.763 us/draw); 60 fps judged on mix_hi at the hi end (0.662 of 16.7 ms)
+S13B-UNCL-A1	S13b	524ab2e	524ab2e	fixed	e82a1dd	test_s13b_unclassified_artifacts.py	stub-normalized (artifact) labels a native that forgets flag 0x800 of a stored flags word
+S13B-UNCL-A2	S13b	524ab2e	524ab2e	fixed	e82a1dd	test_s13b_unclassified_artifacts.py	ctor-this (artifact) labels a native that drops p->Init()'s result and returns p
+S13B-UNCL-A3	S13b	524ab2e	524ab2e	fixed	e82a1dd	test_s13b_unclassified_artifacts.py	canned-this (artifact) labels a by-value declaration mismatch (native passes &tmp)
+S13B-UNCL-A4	S13b	524ab2e	524ab2e	fixed	e82a1dd	test_s13b_unclassified_artifacts.py	native-wild-private (artifact) labels a wrong-slot vcall while x86 made the right call
+NX1-P1	NX1	ac00629	ac00629	fixed	8e2c191	test_nx1_publish_nro.sh	host stage fails, package not run: publish_nro ships the previous job's fnv.nro as nro/<new commit>
+NX1-P2	NX1	ac00629	ac00629	fixed	8e2c191	test_nx1_publish_nro.sh	a rejected push is reported published when the branch already exists
+S5DATA-PROFILE	S5-data	e601246	e601246	confirmed	-	tests/s4/test_profile.cpp	first-run profile files (tests/s4: 95 tests, 0 failed); the game also copies Fallout_default.ini itself (0x00876ad0)
+S5-ADOPT	S5	352c315	352c315	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 7bfec755 lossless: 5 stream files equal or every stream line kept
+S16-ADOPT	S16	6a5c605	6a5c605	confirmed	-	test_adopt_lossless.py	adopt of fnv-s16 ce6d1272 lossless: 12 stream files equal
+P6N-GPUPERM	P6n	5f8952b	d71bbcf	confirmed	-	test_p6n_gpu_permutations.py	GPU model binds the permutations Render binds (permutations_ on by default; d1p2 for 1+2 lights; e0/ea/ef/runtime), light loop unrolled (G1, G2). 10.25 ms stays model-only: 1+4 lights 11.67, 1+8 14.13 ms (G3); no real captures
+NX1-N2-FIX	NX1	9a5390b	9a5390b	confirmed	-	test_nx1_nro.py	check 1: relocations must target the RW segment: N1-N3 ok
+S15S-SL1-FIX	S15-simd	5a03d41	5a03d41	confirmed	-	test_slerp_decomp.py	NaN claim corrected (Slerp, NiBound, matrix product): non-NaN results to the bit, a NaN result a NaN; 199 payload-only differences, none beyond
+S15T-B2-FIX	S15-threads	e04253d	e04253d	confirmed	-	test_budget_built_levers.py	every plan includes the built levers (frame_budget.build adds placed's); mtqemu links again (w32_std_stub.cpp): B1, B2, W1-W3 ok; 40a8d98 fails B2
+GATES-R16-FIX	gates	02272b0	02272b0	confirmed	-	test_ready_fuzz_shards.py	fuzz.coverage per shard, capped: 18/10 + 0/10 fails at 50 %; R16a, R16b, R17 ok
+S15S-XFORM	S15-simd	a931294	a931294	confirmed	-	test_s15simd_decomp.py	UpdateWorldLoc override = the decomp's bodies on 200,000 cases; only NaN sign/payload differs (PERF.md 11.6 any-NaN scope)
+S15S-XFORM-ROW	S15-simd	84d0516	84d0516	confirmed	-	test_s15simd_decomp.py	copy 13/14, compose 47 per call (decomp 221)
+S15S-CULL	S15-simd	a0381d4	a0381d4	confirmed	-	test_s15simd_decomp.py	cull worker and 0x004b6100 bit-identical incl. NaN, d == -r / d == r, r = +-0
+S15S-CULL-PL1	S15-simd	68d0aab	68d0aab	refuted	-	test_s15simd_decomp.py	row says 0x004b6100 is 38 -> 19: 19 only when behind, 21 in front or straddling (+10.5 %); cull 49/67/10 hold (its 224 "before" is 306-433 at 4-6 planes: the gain is understated)
+S15S-SHUF-SH1	S15-simd	e1e16cb	e1e16cb	refuted	-	test_s15simd_shuffle.py	two-source _mm_shuffle_ps as 2 instructions: 0xc4 returned from a noinline function is 3 (early-clobber copy); semantics = x86 for 256 imm x 5 forms incl. NaN
+S15S-QUAT	S15-simd	7c4e9db	7c4e9db	confirmed	-	test_s15simd_decomp.py	FromRotationMatrix override bit-identical incl. NaN and diagonal ties
+S15S-QUAT-ROW	S15-simd	beb2ba6	beb2ba6	confirmed	-	test_s15simd_decomp.py	89 -> 77 per call is the largest-diagonal path (76-77); the trace > 0 path is 34 (decomp 47): the row overstates the cost (note QF1)
+S15S-BOUNDMAT	S15-simd	314a221	314a221	confirmed	-	test_s15simd_decomp.py	NiBound::Update and 0x00a588a0 = the decomp; only NaN sign/payload differs
+S15S-BOUNDMAT-ROW	S15-simd	1c74384	1c74384	confirmed	-	test_s15simd_decomp.py	NiBound 19, mat3 39 per call; the before 46 reproduces without plugins, 52 with the order plugin
+NX1-G1	NX1	785d700	785d700	refuted	-	test_nx1_checks.py	check 6 passes a package on a native host.elf alone; the default full build links the guest with D3D9=null and no render overrides, so nothing calls nxgpu (black screen)
+NX1-G3	NX1	78d75b2	78d75b2	refuted	-	test_nx1_checks.py	a pool written (600u * 1024 * 1024) is read as 600 bytes: pools.fit passes 849 MiB of pools in a 512 MiB heap
+NX1-S1	NX1	e6c895f	e6c895f	refuted	-	test_nx1_checks.py	dc cvap (ARMv8.2 FEAT_DPB, UNDEFINED on the Cortex-A57) is allowlisted
+NX1-S2	NX1	e6c895f	e6c895f	refuted	-	test_nx1_checks.py	ldadd, casal, swp, ldapr and fadd h (ARMv8.1+, UNDEFINED on the A57) pass the instruction scan
+NX1-S5	NX1	e6c895f	e6c895f	refuted	-	test_nx1_checks.py	pm:shell, named by the commit as a failing system-only name, is never matched (the service pattern allows 4 characters after the colon)
+NX1-S3	NX1	e89ee89	e89ee89	refuted	-	test_nx1_checks.py	unreviewed service names outside the scan corpus (spsm, psc:m) are dropped, not failed
+NX1-EXIT-P1	NX1	6c432f0	6c432f0	refuted	-	test_nx1_checks.py	"orderly exit on HOME close": nothing calls appletLockExit, so AM terminates the process and cleanup_for_exit / exit(0) never run (from libnx applet.h; not tested on hardware)
+S15S-SS2	S15-simd	8fc5af8	8fc5af8	refuted	-	test_s15_sse_scalar.py	scalar _mm_rsqrt_ss etc. claim sse2neon's bits: same at -O2/-O3; at -O0 rsqrt_ss of a negative gives ffc00000 where sse2neon gives 7fc00000 (x86 gives ffc00000 too: harmless for the oracle)
+NX1-H1	NX1	c203030	c203030	confirmed	-	test_nx1_checks.py	HOST_BACKEND=native by default, package HOST=native
+NX1-M1	NX1	3db7366	3db7366	confirmed	-	test_nx1_checks.py	check 2 accepts a 100 MiB first-cell budget; refuses 1400 MiB, main-menu only and a 1 GiB address space
+NX1-T1	NX1	023421d	023421d	confirmed	-	test_nx1_checks.py	the encoded NPDM main thread stack is 0x400000
+NX1-T2	NX1	d9462c7	d9462c7	confirmed	-	test_nx1_checks.py	placement and cpu_spec stay on cores 0-2
+NX1-F1	NX1	bc92651	bc92651	confirmed	-	test_nx1_checks.py	check 5 accepts the package tree and refuses Data/ (check_fs 21/21)
+NX1-C1	NX1	8a726fd	8a726fd	confirmed	-	test_nx1_checks.py	first-run checklist passes, fails without the hold-R step
+NX1-L1	NX1	57907a2	57907a2	confirmed	-	test_nx1_checks.py	lenient decoding: Latin-1 tool output with exit 1 stays a fail
+GATES-TR	gates	e446506	e446506	confirmed	-	test_gates_trend.py	fnvnx-trend/1: rise, lost, missing head, creep, re-score and direction all detected; no false alarm
+GATES-D18	gates	21867b6	21867b6	confirmed	-	test_gates_trend.py	thresholds implement D18: 60 fps worst frame, stock 1.02 GHz, handheld_720p (note: perf.budget at 16.7 ms, perf.frame at 16.667 ms)
+S15S-PB	S15-simd	e8891c1	e8891c1	confirmed	-	test_s15_pass_bucket.py	82 -> 54 with no code change: the stack protector dropped from compile.sh (2be012c) explains 68 -> 53 static; same x86 path (~38 on both links)
+S6N-REUSE	S6n	831830a	831830a	confirmed	-	test_s6n_render_reuse.py	epilogue block / dynamic record reuse: stream and constant ring equal the uncached build (R1-R11, F1-F40; 5 wrong caches caught)
+S6N-STTEX	S6n	90fc3c2	90fc3c2	confirmed	-	test_s6n_render_reuse.py	state id / texture block reuse equals uncached; StateCache never resets, so lastSt_ cannot go stale
+S6N-FINDYN	S6n	f7b342a	f7b342a	confirmed	-	test_s6n_render_reuse.py	Frame::Finish dynamic-state skip equals uncached
+S6N-EPITAB	S6n	c94cc7d	c94cc7d	confirmed	-	test_s6n_render_reuse.py	epilogue permutation table equals the list scan; constant slice once
+S6N-SMPC	S6n	89ee4a8	89ee4a8	confirmed	-	test_s6n_render_reuse.py	per-stage sampler cache equals per-draw translation
+S6N-LITP	S6n	d80096c	d80096c	confirmed	-	test_s6n_lit_prepared.py	prepared direction and 1/range^2: static == dynamic, worst 0/255, ranges 0, inf, 1e30, 1e-20, negative
+S6N-ACMP	S6n	021fc46	021fc46	confirmed	-	test_s6n_alpha_compare.py	branch-free alpha compare == the old switch == D3D9 for every function and ref, NaN and equality
+S6N-OVR-O2	S6n	68ccc78	68ccc78	refuted	-	test_s6n_overrides_slots.py	RestoreSamplerState (slot 53) returns the D3D9 default, not the value slot 47 saved: 10 of 10 states
+S6N-OVR-O3	S6n	68ccc78	68ccc78	refuted	-	test_s6n_overrides_slots.py	texture stage state defaults: ALPHAARG0 (27) and RESULTARG (28) left 0; the value at 26 commented RESULTARG is COLORARG0; 16 differ from D3D9
+S6N-NXGI	S6n	4abbae3	4abbae3	confirmed	-	test_s6n_nxgpu_init_checks.py	each of 18 failing deko3d creates makes nxgpu_init return NULL, no NULL used (pre-fix code: 13 defects)
+S6N-CUBE	S6n	ac928fc	ac928fc	confirmed	-	test_s6n_cube_nxd9.py	cube textures and TEXC face updates C1-C5 on an ASan nx_render of the head
+P6N-OPT-D3	P6n	4463ec3	4463ec3	refuted	-	test_p6n_opt_rederive.py	optimizations[]: 9 of 21 recorded commits are not in the repository (nor on claude/port-nsw-render); two deltas re-measured exactly
+P6N-OPT-D3B	P6n	c4ebb04	c4ebb04	refuted	-	test_p6n_opt_rederive.py	the message names 19031e3, the entry records 147155ba/e564afbd: none exist in the repository
+P6N-HOT	P6n	b374619	b374619	confirmed	-	test_p6n_doc_report.py	every hotspot row names its thread and share of 16.7 ms (183 rows)
+P6N-DOC-H3	P6n	91710d3	91710d3	fixed	2f5880c	test_p6n_doc_report.py	RENDER_PERF.md at 91710d3 said 10.25/8.71/5.45 ms where report.json said 23.31/10.02/8.86; equal from 2f5880c
+S13B-A-FIX	S13b	e82a1dd	e82a1dd	confirmed	-	test_s13b_unclassified_artifacts.py	ctor-this, canned-this, native-wild-private to triage, stub-normalized only for arm64emu's rewrite: A1-A4 triage, K1 control artifact
+P6N-L1-FIX	P6n	63a57c0	63a57c0	confirmed	-	test_p6n_engine_path.py	engine_path nested loops multiply: 4x4 counts 66 of 66 (L1), single loop 14 (L2); report arithmetic re-derives (B1, B2)
+NX1-ADOPT1	NX1	097cdd1	097cdd1	confirmed	-	test_adopt_lossless.py	adopt of fnv-nx1-nro 0599176b lossless (4 stream files)
+NX1-ADOPT2	NX1	43900fb	43900fb	confirmed	-	test_adopt_lossless.py	adopt of fnv-nx1-nro 398bdb9b lossless (3 stream files)
+S5-ADOPT2	S5	1d02521	1d02521	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 60f4d234 lossless (7 stream files)
+P0-ADOPT	P0-perfmodel	004d294	004d294	confirmed	-	test_adopt_lossless.py	adopt of fnv-p0-perf 2e8547ef lossless (13 stream files; the content is P0's own, verified separately)
+NX1-P12-MERGED	NX1	8e2c191	9dc4871	confirmed	-	test_nx1_publish_nro.sh	the integration copy of 8e2c191: K1, P1, P2 ok (re-run on the integration head after the merge)
+S5-ADOPT3	S5	fed86ee	fed86ee	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 1d8d273f lossless (5 stream files)
+NX1-ADOPT3	NX1	cd1e0eb	cd1e0eb	confirmed	-	test_adopt_lossless.py	adopt of fnv-nx1-nro 7bc3c97a lossless (6 stream files)
