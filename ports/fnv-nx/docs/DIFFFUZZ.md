@@ -173,6 +173,36 @@ is that import, as on x86.
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
 
+## Cause refinement and verdict policy (`causes.py`, S13b)
+
+`report.reclassify` hands what the probes left at `unclassified`, `call-flow` or `signedness?` to `causes.refine`,
+rules on the saved record alone (no replay; a probe's definite cause is never overridden):
+
+| record shape | cause | class |
+|---|---|---|
+| native `exc:N` (brk/udf), oracle returns | `native-trap` | real-bug S1 (FALL1 trap / GCC unreachable on a path the exe takes) |
+| native `stack-protector` | `stack-protector` | real-bug S1 |
+| native data fault below 64 KiB, oracle fine | `native-null-read` | real-bug S1 |
+| native data access in the stub range; stub address passed/stored | `native-stub-data` | real-bug S2c |
+| native image address where the oracle has an image-window one (arg, result, store) | `native-address` | real-bug S2c (unrebound variable/table; check the pointee for literals) |
+| call argument the runner marked `arm_garbage` | `native-garbage-arg` | real-bug S1b |
+| `sret` argument differs | `sret-mismatch` | real-bug S1b |
+| float argument within tolerance / NaN on both | `x87-precision` / `nan-bits` | by-design |
+| float result equal to the oracle's unrounded x87 value | `x87-precision` | by-design |
+| pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
+| oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
+| `no-native-entry` | `no-native-entry` | artifact |
+| oracle-only data fault | `oracle-fault` | triage |
+| one side's store covers bytes the other leaves | `store-width` / `x86-only-store` / `native-only-store` | triage |
+| native calls a prefix of the oracle's calls / the oracle's calls and more | `native-early-exit` / `native-extra-calls` | triage |
+
+`causes.POLICY` gives every cause a class (by-design, artifact, real-bug, triage), an owner and a reason;
+`report.py` takes its by-design causes as soft and its artefacts as oracle gaps (`uninit-both` moves from hard to
+oracle gap: both machines read garbage). `python3 causes.py summary <dirs> [--recheck-tag t] --out causes.json`
+writes `fnvnx-causes/1`: per cause divergences, functions, functions whose worst cause it is (`worst_of`), kinds,
+five example reproducers, plus `functions_by_class` (each diverging function by its worst class, real-bug first)
+for R0. `causes.py explain <div.json>...` prints hint, refined cause and class. Test: `tests/s13/test_causes.py`.
+
 ## Lockstep (`lockstep.py`, D14)
 
 `difffuzz.py lockstep <addr> [--depth N]` runs a call tree once on both machines: the units of the functions reachable

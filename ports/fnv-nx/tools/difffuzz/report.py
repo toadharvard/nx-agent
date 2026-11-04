@@ -25,6 +25,13 @@ SOFT_CAUSES = {'local-static', 'vptr-store', 'bool-repr', 'ilp32-pointer', 'divi
                'call-order', 'array-new-check', 'vptr-unpaired'}
 HARNESS_CAUSES = {'x86-custom-cc', 'msvc-inlined', 'runtime-equiv', 'oracle-vcall', 'stack-arg', 'literal-arg'}     # oracle-model gaps: neither hard nor soft, reported apart
 LINK_CAUSES = {'split-global', 'call-args', 'callee-saved'}
+try:        # S13b-causes policy (causes.py): its by-design causes are soft, its artefacts oracle gaps
+    import causes as _causes
+    SOFT_CAUSES |= {c for c, v in _causes.POLICY.items() if v[0] == 'by-design'}
+    HARNESS_CAUSES |= {c for c, v in _causes.POLICY.items() if v[0] == 'artifact'} - SOFT_CAUSES
+    LINK_CAUSES |= {c for c, v in _causes.POLICY.items() if v[0] == 'real-bug' and v[1] == 'S2c'} - SOFT_CAUSES
+except ImportError:  # pragma: no cover
+    _causes = None
 
 
 _UC = None
@@ -160,6 +167,8 @@ def reclassify(rec):
     if d['kind'] == 'call-target' and d.get('x86_next') and d.get('x86_next') == d.get('arm') and \
             d.get('arm_next') == d.get('x86'):
         return 'call-order'      # two adjacent calls swapped: C++ leaves the evaluation order of operands open
+    if _causes is not None:
+        return _causes.refine(rec, cause)       # record-level rules for what the probes left open
     return cause or 'unclassified'
 
 
