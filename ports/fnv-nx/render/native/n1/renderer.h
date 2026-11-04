@@ -121,6 +121,8 @@ public:
     // skips the epilogue UBO when it is not used. Returns the base (full runtime epilogue) shader id.
     uint16_t FragmentShader(const char* name);
     uint16_t lastPs() const { return lastPs_; }
+    // Tests: off = always the dynamic shaders the caller gave (lit light loop, runtime epilogue).
+    void SetPermutations(bool on) { permutations_ = on; }
 
     // N1 geometry path (Do_RenderShape / Do_RenderTristrips): an engine NiTriShape / NiTriStrips described
     // engine-independently (n1/engine_stubs.cpp reads the engine objects). Drawn with the tile family (tile_vc):
@@ -181,6 +183,10 @@ private:
     uint32_t nEpi_ = 0;
     uint16_t noEpi_[64];
     uint32_t nNoEpi_ = 0;
+    uint16_t litBase_[2] = {0, 0};                   // shader ids of the package's lit / lit_spec (learned)
+    uint16_t litVar_[2][2][5] = {};                  // [spec][dir][points 0,1,2,4,8] -> permutation id (0xFFFF none)
+    bool permutations_ = true;
+    uint16_t LitPermutation(int spec, int dir, int pointsIdx);
     bool EpiKnown(uint16_t ps) const;
     void LearnEpilogueVariants(uint16_t ps);
     Ring geomRing_;

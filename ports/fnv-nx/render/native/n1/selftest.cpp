@@ -504,6 +504,58 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
         t.Check(p[0] == 255 && p[1] == 0 && q[0] == 0 && q3[0] == 0, "tile scissor: only (100, 60)-(110, 70)", p[0], q[0]);
         t.Check(r.state().GetRenderState(52) == 0 && r.state().GetRenderState(174) == 0, "stencil and scissor restored");
     }
+    // ---- lit permutations: 1 directional + 2 point lights through lit_spec, static (lit_spec_d1p2) vs dynamic loop
+    {
+        struct LV { float x, y, z, u, v; uint32_t rgba; float nx, ny, nz; };
+        NxVtxLayout ll;
+        memset(&ll, 0, sizeof ll);
+        ll.count = 4; ll.stride = 36;
+        ll.attr[0].offset = 0; ll.attr[0].type = NxAttr_Float32; ll.attr[0].components = 3;
+        ll.attr[1].offset = 12; ll.attr[1].type = NxAttr_Float32; ll.attr[1].components = 2;
+        ll.attr[2].offset = 20; ll.attr[2].type = NxAttr_Unorm8; ll.attr[2].components = 4;
+        ll.attr[3].offset = 24; ll.attr[3].type = NxAttr_Float32; ll.attr[3].components = 3;
+        uint16_t lay = r.cache().Layout(ll), lvs = shader(be, "lit", 0), lps = shader(be, "lit_spec", 1);
+        uint32_t off;
+        LV* lv = (LV*)vb.Alloc(4 * sizeof(LV), 16, &off);
+        const float q[4][2] = {{0, 0}, {W, 0}, {0, H}, {W, H}};
+        for (int i = 0; i < 4; i++) { lv[i] = LV{q[i][0], q[i][1], 0, 0, 0, 0xFFFFFFFFu, 0, 0, -1}; }
+        static NxLitDraw u;
+        memset(&u, 0, sizeof u);
+        u.wvp[0] = 2.0f / W; u.wvp[5] = -2.0f / H; u.wvp[10] = 0.5f; u.wvp[12] = -1; u.wvp[13] = 1; u.wvp[14] = 0.5f; u.wvp[15] = 1;
+        u.world[0] = u.world[5] = u.world[10] = u.world[15] = 1;
+        u.ambient[0] = u.ambient[1] = u.ambient[2] = 0.1f;
+        u.diffuse[0] = u.diffuse[1] = u.diffuse[2] = 0.8f; u.diffuse[3] = 1;
+        u.specular[0] = u.specular[1] = u.specular[2] = 0.5f; u.specular[3] = 8;
+        u.eye[0] = 64; u.eye[1] = 48; u.eye[2] = -100;
+        u.lightCount = 3;   // a point light first, the directional second: the permutation reorders
+        const float P0[4] = {30, 40, -20, 80}, C0[4] = {1, 0.2f, 0.1f, 0}, D1[4] = {0, 0, 1, 0}, C1[4] = {0, 0.25f, 0.5f, 1},
+                    P2[4] = {100, 60, -30, 70}, C2[4] = {0.2f, 0.9f, 0.3f, 0};
+        memcpy(u.lights[0].posRange, P0, 16); memcpy(u.lights[0].color, C0, 16);
+        memcpy(u.lights[1].posRange, D1, 16); memcpy(u.lights[1].color, C1, 16);
+        memcpy(u.lights[2].posRange, P2, 16); memcpy(u.lights[2].color, C2, 16);
+        static uint8_t imgs[2][W * H * 4];
+        uint16_t used[2];
+        for (int pass2 = 0; pass2 < 2; pass2++) {
+            r.SetPermutations(pass2 == 0);
+            r.state().Reset();
+            r.state().SetTexture(0, tex, kind);
+            t.Check(r.Do_BeginFrame() && r.Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "lit frame: begin");
+            Renderer::Draw d;
+            memset(&d, 0, sizeof d);
+            d.vs = lvs; d.ps = lps; d.layout = lay; d.prim = NxPrim_TriStrip; d.vtxBlock = vb.block(); d.vtxOffset = off;
+            d.vtxSize = 4 * sizeof(LV); d.count = 4; d.textures = 1; d.ubo = &u; d.uboSize = sizeof u;
+            t.Check(r.Render(d), "lit draw");
+            used[pass2] = r.lastPs();
+            t.Check(r.Do_EndUsingRenderTargetGroup() && r.Do_EndFrame(), "lit frame: end");
+            rb.image = back; rb.dst = FNVNX_ADDR_(imgs[pass2]);
+            t.Check(be->Readback(rb), "lit readback");
+        }
+        r.SetPermutations(true);
+        rb.dst = FNVNX_ADDR_(img);
+        int worst = 0;
+        for (int i = 0; i < W * H * 4; i++) { int dd = abs((int)imgs[0][i] - (int)imgs[1][i]); if (dd > worst) worst = dd; }
+        t.Check(used[0] != used[1] && worst <= 1, "lit_spec_d1p2__e0 (static, reordered) == dynamic lit_spec within 1/255", worst, (int)used[0]);
+    }
     *checks = t.checks;
     return t.fails;
 }
