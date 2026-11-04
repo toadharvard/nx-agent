@@ -104,6 +104,9 @@ POLICY = {
                                                           'leaked to the x86 machine through the harness'),
     'literal-store':  ('artifact', 'S13', False, 'a pointer to a literal stored: the oracle\'s pinned-pool copy vs '
                                                  'the native unit\'s .rodata copy (stores do not compare pointees)'),
+    'oracle-callee-store': ('artifact', 'S13', False, 'the first differing store is made by a callee the oracle '
+                                                      'runs (preloaded or followed) while the native calls it out of '
+                                                      'line and the harness intercepts it: no side effects natively'),
     'no-native-entry': ('artifact', 'S13', False, 'the native image has no entry for the function (link subset)'),
     # --- real bugs -----------------------------------------------------------------------------------------------
     'uninit-arm':     ('real-bug', 'S1b', True, 'the native result depends on garbage: an argument slot the caller '
@@ -547,12 +550,20 @@ def load_effects(paths):
                     EFFECTS[os.path.basename(e['file'])] = e
 
 
-def _rule_effects(e):
+def _rule_effects(e, rec=None):
     f = e.get('first')
     if f == 'width':
         return 'field-width'
     if f == 'store':
-        w = (e.get('store') or {}).get('word') or {}
+        st = e.get('store') or {}
+        try:
+            a, n = int((rec or {}).get('address') or e.get('address') or '0', 16), int((rec or {}).get('_size') or 0)
+            pc = int(((st.get('x86') or {}).get('pc')) or '0', 16)
+        except (TypeError, ValueError):
+            a = n = pc = 0
+        if n and pc and not st.get('arm') and not a <= pc < a + n:
+            return 'oracle-callee-store'      # the store is made by a callee the oracle runs, the native intercepts
+        w = st.get('word') or {}
         x, a = str(w.get('x86') or ''), str(w.get('arm') or '')
         if x.startswith('image address') and 'native image .data.rel.ro _ZTV' in a:
             return 'vptr-unpaired'
@@ -599,7 +610,7 @@ def _with_effects(rec, cause):
     if cause not in TRIAGE_REFINABLE:
         return cause
     e = EFFECTS.get(os.path.basename(rec.get('_file') or rec.get('_p') or '')) if EFFECTS else None
-    got = _rule_effects(e) if e else None
+    got = _rule_effects(e, rec) if e else None
     if got:
         return got
     try:
@@ -637,6 +648,7 @@ def _load_campaign(d, tag=''):
         rec = json.load(open(p))
         rec['_now'] = now.get(os.path.basename(p))
         rec['_file'] = os.path.basename(p)
+        rec['_size'] = (results.get(rec.get('address')) or {}).get('size')
         try:
             rec['_cause'] = report.reclassify(rec)
         except Exception:  # noqa: BLE001 - a record the static reclassifier cannot read keeps its hint

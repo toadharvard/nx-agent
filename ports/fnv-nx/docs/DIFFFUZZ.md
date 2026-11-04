@@ -206,7 +206,10 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 
 With `summary --effects <difffuzz.py effects output>`, a record still in triage is refined by its first effect:
 `width` -> `field-width` (real-bug S1), an image vftable stored where the native stores its own `_ZTV` address
-point -> `vptr-unpaired` (S2c), a native named stub stored or passed as data -> `native-stub-data` (S2c).
+point -> `vptr-unpaired` (S2c), a native named stub stored or passed as data -> `native-stub-data` (S2c). A first differing store made only by the oracle at a pc
+outside the function (a callee the oracle runs, the native calls out of line and the harness intercepts) ->
+`oracle-callee-store` (artifact). A triage record in a function that calls a C++ name neither its object defines nor
+the address map binds -> `after-native-undefined` (real-bug S1: the native side got a canned result).
 
 `causes.POLICY` gives every cause a class (by-design, artifact, real-bug, triage), an owner and a reason;
 `report.py` takes its by-design causes as soft and its artefacts as oracle gaps (`uninit-both` moves from hard to
