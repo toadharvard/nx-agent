@@ -1611,7 +1611,22 @@ def build_render_lib(b, r, d):
     path = os.pathsep.join([os.path.join(dkp, 'tools', 'bin'), os.path.join(prefix, 'bin'), os.environ.get('PATH', '')])
     b.sh(['bash', os.path.join(ROOT, 'render', 'native', 'n1', 'build.sh'), out], r['log'],
          env=b.env({'DEVKITPRO': dkp, 'UAM': uam, 'PATH': path}), check=True, timeout=3600)
-    return os.path.join(out, 'libnxrender.a')
+    lib = os.path.join(out, 'libnxrender.a')
+    with open(lib + '.abi', 'w') as f:   # the nxgpu ABI it was built against (NX1: the package checks host == guest)
+        f.write(file_hash(GPU_ABI_H) + '\n')
+    return lib
+
+
+GPU_ABI_H = os.path.join(ROOT, 'render', 'native', 'include', 'nx', 'gpu_abi.h')
+
+
+def render_lib_abi(lib):
+    """The gpu_abi.h hash a libnxrender.a was built against: its <lib>.abi sidecar (build_render_lib writes it), else
+    'unknown' (an external RENDER_LIB without one: its ABI cannot be shown to match the host's)"""
+    try:
+        return open(lib + '.abi').read().strip() or 'unknown'
+    except OSError:
+        return 'unknown'
 
 
 def objects_map(objects_tsv):
@@ -1700,6 +1715,7 @@ class Link(Stage):
             if not os.path.isfile(rv_lib):
                 raise StageError('LINK_OVERRIDES=render: no %s' % rv_lib)
             r.artifact('override_lib', rv_lib)
+            r['render_abi'] = render_lib_abi(rv_lib)
             both = os.path.join(d, 'overrides_all.tsv')
             with open(both, 'w', encoding='utf-8', errors='surrogateescape') as f:
                 for t_ in (ov_tsv, rv_tsv):
@@ -2335,6 +2351,7 @@ class Host(Stage):
             b.sh(['bash', os.path.join(ROOT, 'toolchain', 'host', 'build_native.sh'), os.path.join(d, 'native'),
                   os.path.join(d, 'deko3d')], r['log'], check=True, timeout=1800)
             r['method'] = 'NX1 toolchain/host/build_native.sh (host.c -DFNVNX_HOST_NO_CONSOLE + render/native/host + deko3d)'
+            r['gpu_abi'] = file_hash(GPU_ABI_H)   # the guest's libnxrender.a must be built against the same header
             shutil.copyfile(os.path.join(d, 'native', 'host.elf'), os.path.join(d, 'host.elf'))
         elif b.cfg['HOST_BACKEND'] != 'plain':
             raise StageError('HOST_BACKEND must be native or plain, got %r' % b.cfg['HOST_BACKEND'])
