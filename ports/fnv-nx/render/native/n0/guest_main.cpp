@@ -26,7 +26,9 @@ int main() {
         memset(rgba, 0, sizeof rgba);
         if (!n0::Run(c, s, rgba, k)) { if (res) fprintf(res, "%s: readback FAILED\n", s.name); total++; continue; }
         int f = n0::Evaluate(k, rgba, log, sizeof log);
-        total += f; checks += k.n + (k.expectStateBinds >= 0);
+        int nk = k.n + (k.expectStateBinds >= 0);
+        if (k.hasImage) for (int p = 0; p < n0::W * n0::H; p++) nk += k.imageMask[p] != 0;
+        total += f; checks += nk;
         if (res) { fprintf(res, "%-10s %3d checks, %d failed, %u state binds\n%s", s.name, k.n, f, (unsigned)c.stateBinds, log); fflush(res); }
         char path[128];
         snprintf(path, sizeof path, "sdmc:/fnvnx/n0/out/%s.rgba", s.name);

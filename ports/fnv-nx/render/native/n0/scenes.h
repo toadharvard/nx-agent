@@ -23,6 +23,11 @@ struct Checks {
     Check c[kMaxChecks];
     int n = 0;
     int expectStateBinds = -1, gotStateBinds = 0;   // BindState ops in the frame, checked when >= 0
+    // whole-image expectation: pixels with imageMask != 0 must equal image (RGB, exact); used by the raster scenes
+    bool hasImage = false;
+    const char* imageWhat = nullptr;
+    uint8_t image[W * H * 4];
+    uint8_t imageMask[W * H];
     void Add(const char* what, int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int tol = 1, int mask = 15);
 };
 

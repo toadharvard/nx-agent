@@ -30,9 +30,10 @@ int main(int argc, char** argv) {
         memset(rgba, 0, sizeof rgba);
         if (!n0::Run(c, s, rgba, k)) { printf("%-10s readback FAILED (%s)\n", s.name, nxgl_last_error()); total++; continue; }
         int f = n0::Evaluate(k, rgba, log, sizeof log);
-        printf("%-10s %3d checks, %d failed, %u packets, %u state binds\n%s", s.name, k.n + (k.expectStateBinds >= 0),
-               f, c.packets, c.stateBinds, log);
-        total += f; checks += k.n + (k.expectStateBinds >= 0);
+        int nk = k.n + (k.expectStateBinds >= 0);
+        if (k.hasImage) for (int p = 0; p < n0::W * n0::H; p++) nk += k.imageMask[p] != 0;
+        printf("%-10s %3d checks, %d failed, %u packets, %u state binds\n%s", s.name, nk, f, c.packets, c.stateBinds, log);
+        total += f; checks += nk;
         char path[1024];
         snprintf(path, sizeof path, "%s/%s.rgba", argv[1], s.name);
         FILE* o = fopen(path, "wb");

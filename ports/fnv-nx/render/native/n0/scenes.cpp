@@ -809,12 +809,63 @@ void S_tile(Ctx& c, Checks& k) {
     EndFrame(c);
 }
 
+// ---- scenes: raster (exact D3D9 coverage) -----------------------------------------------------------------------------
+// One triangle per 32x32 cell, vertices on a 1, 1/2, 1/16 or 1/256 px grid; the CPU computes the D3D9 coverage
+// (pixel centres at integers, top-left tie rule) exactly in 1/256 px fixed point and the whole cell is compared.
+bool D3D9Covers(const int64_t* vx, const int64_t* vy, int64_t px, int64_t py) {   // 1/256 px units
+    int64_t ax = vx[0], ay = vy[0], bx = vx[1], by = vy[1], cx = vx[2], cy = vy[2];
+    int64_t area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    if (area == 0) return false;
+    if (area < 0) { int64_t t = bx; bx = cx; cx = t; t = by; by = cy; cy = t; }
+    const int64_t ex[3][4] = {{ax, ay, bx, by}, {bx, by, cx, cy}, {cx, cy, ax, ay}};
+    for (int e = 0; e < 3; e++) {
+        int64_t dx = ex[e][2] - ex[e][0], dy = ex[e][3] - ex[e][1];
+        int64_t v = dx * (py - ex[e][1]) - dy * (px - ex[e][0]);
+        if (v < 0) return false;
+        if (v == 0 && !((dy == 0 && dx > 0) || dy < 0)) return false;   // ties: top or left edges only
+    }
+    return true;
+}
+void Raster(Ctx& c, Checks& k, uint32_t seed) {
+    BeginFrame(c);
+    uint8_t pass = Pass(c, 1, RGBA(0, 0, 0, 255));
+    D3D a;
+    uint32_t lcg = seed;
+    auto rnd = [&lcg](uint32_t n) { lcg = lcg * 1103515245u + 12345u; return (lcg >> 8) % n; };
+    k.hasImage = true; k.imageWhat = "raster: D3D9 coverage (integer centres, top-left rule)";
+    memset(k.image, 0, sizeof k.image);
+    memset(k.imageMask, 0, sizeof k.imageMask);
+    static const int grids[4] = {1, 2, 16, 256};
+    for (int cell = 0; cell < 15; cell++) {
+        int ox = (cell % 5) * 32, oy = (cell / 5) * 32 + 12, g = grids[cell % 4];
+        int64_t vx[3], vy[3];
+        Vtx v[3];
+        for (int i = 0; i < 3; i++) {
+            int qx = (int)rnd(32 * g + 1), qy = (int)rnd(32 * g + 1);
+            vx[i] = (int64_t)ox * 256 + (int64_t)qx * (256 / g); vy[i] = (int64_t)oy * 256 + (int64_t)qy * (256 / g);
+            v[i].x = (float)vx[i] / 256.0f; v[i].y = (float)vy[i] / 256.0f; v[i].z = 0; v[i].rgba = RGBA(255, 255, 255, 255);
+        }
+        DrawTris(c, a.rs, v, 3, pass, 0);
+        for (int y = oy; y < oy + 32 && y < H; y++)
+            for (int x = ox; x < ox + 32; x++) {
+                bool in = D3D9Covers(vx, vy, (int64_t)x * 256, (int64_t)y * 256);
+                uint8_t* p = k.image + (y * W + x) * 4;
+                p[0] = p[1] = p[2] = in ? 255 : 0; p[3] = 255;
+                k.imageMask[y * W + x] = 1;
+            }
+    }
+    EndFrame(c);
+}
+void S_raster_a(Ctx& c, Checks& k) { Raster(c, k, 5); }
+void S_raster_b(Ctx& c, Checks& k) { Raster(c, k, 77); }
+
 } // namespace
 
 const Scene kScenes[] = {
     {"textured", S_textured}, {"sorted", S_sorted}, {"instanced", S_instanced}, {"cull", S_cull},
     {"blend", S_blend}, {"stencil", S_stencil}, {"sampler", S_sampler}, {"format", S_format},
     {"epilogue", S_epilogue}, {"border", S_border}, {"tile", S_tile},
+    {"raster_a", S_raster_a}, {"raster_b", S_raster_b},
 };
 const int kSceneCount = sizeof kScenes / sizeof kScenes[0];
 
@@ -883,6 +934,7 @@ bool Init(Ctx& c, nx::Backend* be, char* err, uint32_t errlen) {
 bool Run(Ctx& c, const Scene& s, uint8_t* rgba, Checks& k) {
     k.n = 0;
     k.expectStateBinds = -1;
+    k.hasImage = false;
     s.fn(c, k);
     k.gotStateBinds = (int)c.stateBinds;
     NxReadback r;
@@ -906,6 +958,17 @@ int Evaluate(const Checks& k, const uint8_t* rgba, char* log, uint32_t loglen) {
             if (log && at < loglen)
                 at += (uint32_t)snprintf(log + at, loglen - at, "  FAIL %s at (%d,%d): got %d,%d,%d,%d want %d,%d,%d,%d (tol %d)\n",
                     c.what, c.x, c.y, p[0], p[1], p[2], p[3], c.rgba[0], c.rgba[1], c.rgba[2], c.rgba[3], c.tol);
+        }
+    }
+    if (k.hasImage) {
+        int wrong = 0, first = -1;
+        for (int i = 0; i < W * H; i++)
+            if (k.imageMask[i] && memcmp(rgba + i * 4, k.image + i * 4, 3)) { if (first < 0) first = i; wrong++; }
+        if (wrong) {
+            fails += wrong;
+            if (log && at < loglen)
+                at += (uint32_t)snprintf(log + at, loglen - at, "  FAIL %s: %d pixels differ, first at (%d,%d)\n",
+                                         k.imageWhat, wrong, first % W, first / W);
         }
     }
     if (k.expectStateBinds >= 0 && k.gotStateBinds != k.expectStateBinds) {
