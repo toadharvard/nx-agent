@@ -32,6 +32,26 @@ import engine  # noqa: E402
 import cost  # noqa: E402
 import funcmodel  # noqa: E402
 
+BRIDGE = [0, 0]   # [lo, hi) of the current image's ABI bridges (__fnvnx_br_*: zz_bridges.o, linked contiguously)
+_count = dyncount.CountingA64._count_block
+
+
+def _count_block(self, uc, address, size, user):
+    _count(self, uc, address, size, user)
+    if BRIDGE[0] <= address < BRIDGE[1]:
+        dyncount.COUNT['a64_bridge'] = dyncount.COUNT.get('a64_bridge', 0) + size // 4
+
+
+dyncount.CountingA64._count_block = _count_block
+
+
+def bridge_range(img):
+    br = sorted(a for n, a in img.syms.items() if n.startswith('__fnvnx_br_'))
+    if not br:
+        return [0, 0]
+    after = sorted(a for a in img.syms.values() if a > br[-1])
+    return [br[0], after[0] if after else br[-1] + 256]
+
 
 def unit_functions(rx):
     units = json.load(open(os.path.join(str(config.TREE), 'build', 'units.json')))['units']
@@ -63,6 +83,7 @@ def main():
     rows = []
     for source, addr, sym in funcs:
         try:
+            BRIDGE[:] = bridge_range(uc.arm_image(source))
             rs = dyncount.run_target(uc, source, addr, a.seeds, a.max_steps)
         except Exception as e:  # noqa: BLE001 - one function must not stop the audit
             rows.append(dict(source=source, addr=addr, sym=sym, note='setup: %r' % e))
@@ -73,6 +94,7 @@ def main():
             continue
         x = statistics.median(r['x86'] for r in good)
         y = statistics.median(r['a64'] for r in good)
+        yb = statistics.median(r.get('a64_bridge', 0) for r in good)
         cpi = cpi1 = None
         try:
             elf = uc.arm_image(source).elf if hasattr(uc.arm_image(source), 'elf') else None
@@ -82,19 +104,19 @@ def main():
         except Exception as e:  # noqa: BLE001
             pass
         cyc = y * (cpi + cpi1) / 2 if cpi and cpi1 else None
-        rows.append(dict(source=source, addr=addr, sym=sym, x86=x, a64=y, cpi=cpi, cpi1=cpi1, cyc=cyc,
+        rows.append(dict(source=source, addr=addr, sym=sym, x86=x, a64=y, br=yb, cpi=cpi, cpi1=cpi1, cyc=cyc,
                          ok=len(good), agree=sum(1 for r in good if not r.get('div'))))
     if a.tsv:
         with open(a.tsv, 'w') as f:
-            f.write('source\taddr\tsymbol\tx86\ta64\tinsn_ratio\tcpi\tcpi_once\ta64_cycles_mid\tcycle_ratio\tok\tagree\tnote\n')
+            f.write('source\taddr\tsymbol\tx86\ta64\ta64_in_bridges\tinsn_ratio\tcpi\tcpi_once\ta64_cycles_mid\tcycle_ratio\tok\tagree\tnote\n')
             for r in rows:
                 if 'x86' in r:
-                    f.write('%s\t0x%08x\t%s\t%d\t%d\t%.2f\t%s\t%s\t%s\t%s\t%d\t%d\t\n' % (
-                        r['source'], r['addr'], r['sym'], r['x86'], r['a64'], r['a64'] / r['x86'], r['cpi'],
+                    f.write('%s\t0x%08x\t%s\t%d\t%d\t%d\t%.2f\t%s\t%s\t%s\t%s\t%d\t%d\t\n' % (
+                        r['source'], r['addr'], r['sym'], r['x86'], r['a64'], r['br'], r['a64'] / r['x86'], r['cpi'],
                         r['cpi1'], '%.1f' % r['cyc'] if r['cyc'] else '',
                         '%.2f' % (r['cyc'] / r['x86']) if r['cyc'] else '', r['ok'], r['agree']))
                 else:
-                    f.write('%s\t0x%08x\t%s\t\t\t\t\t\t\t\t\t\t%s\n' % (r['source'], r['addr'], r['sym'], r['note']))
+                    f.write('%s\t0x%08x\t%s\t\t\t\t\t\t\t\t\t\t\t%s\n' % (r['source'], r['addr'], r['sym'], r['note']))
     # functions under 10 x86 instructions are all call overhead on both sides: listed in the TSV, not ranked
     ranked = sorted((r for r in rows if r.get('cyc') and r['x86'] >= 10), key=lambda r: -r['cyc'] / r['x86'])
     print('%-44s %10s %6s %6s %6s %8s %6s' % ('function', 'addr', 'x86', 'a64', 'CPI', 'cycles', 'c/x86'))
