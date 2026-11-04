@@ -54,6 +54,38 @@ def _custom_cc(rec):
         return []
 
 
+DEALLOCATORS = {'00401030', '00aa1460', '00aa4060', '00ecd291'}     # operator delete, sized delete, Deallocate, free
+
+
+def _call_count_cause(rec, d):
+    """A call-count divergence explained by the record alone:
+    - `deleting-dtor-flags` (causes.py, S13b): an MSVC deleting destructor ??_G fuzzed with flags bit 0 clear
+      (destroy, do not free) makes the oracle's calls; the native ??_G is the Itanium D0, which always frees: the
+      native makes the same calls plus deallocator calls only (natively such a call reaches D1). Decided here
+      because the falloff? fallback below came first;
+    - `native-undefined` / `after-native-undefined`: the oracle makes no call while the native's first call /
+      a later call goes to a named stub (a C++ name the link binds to nothing): the native ran on a canned result
+      where the oracle ran the body (S2c / S2d bind the name)."""
+    tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    if not isinstance(tx, list) or not isinstance(ta, list):
+        return None
+    if (rec.get('symbol') or '').startswith('??_G') and ta[:len(tx)] == tx and len(ta) > len(tx) and \
+            all(str(t) in DEALLOCATORS for t in ta[len(tx):]):
+        try:
+            flags = int.from_bytes(bytes.fromhex(((rec.get('case') or {}).get('args') or {}).get('p0') or '00')[:4],
+                                   'little')
+        except ValueError:
+            flags = 1
+        if not flags & 1:
+            return 'deleting-dtor-flags'
+    if d.get('x86') == 0 and ta:
+        if str(ta[0]).startswith('name:'):
+            return 'native-undefined'
+        if any(str(t).startswith('name:') for t in ta):
+            return 'after-native-undefined'
+    return None
+
+
 def reclassify(rec):
     """Static re-classification of a saved divergence (causes added after the record was written)."""
     global _UC
@@ -115,6 +147,10 @@ def reclassify(rec):
                 return 'vptr-unpaired'
         except Exception:  # noqa: BLE001
             pass
+    if d['kind'] == 'call-count':
+        got = _call_count_cause(rec, d)
+        if got:
+            return got
     if d['kind'] == 'call-count' and d.get('x86') == 0:
         return 'falloff?'
     if d['kind'] == 'call-args' and d.get('cls') in ('I32', 'P'):
