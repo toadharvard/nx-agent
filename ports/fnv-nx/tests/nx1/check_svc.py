@@ -14,9 +14,10 @@ fixed-width, the scan is exact for code and conservative for data placed in text
            tpidr_el0, tpidrro_el0 (read), dczid_el0, cntfrq_el0 and cntpct_el0 (read). cntvct_el0 and ctr_el0 are
            refused too: Mesosphere does not open them to EL0 (CNTKCTL_EL1.EL0VCTEN, SCTLR_EL1.UCT);
            brk is counted (trap stubs), not refused: it ends in the crash handler with a log;
-  services every IPC service name in the host and launcher (string literals of the form libnx's sm uses) is in
-           APP_SERVICES, the services an application (appletOE side) may open; system-only services (pm:*, ns:am2,
-           vi:m, nvdrv:s, ...) fail.
+  services every IPC service name in the host and launcher (string literals libnx's sm calls use) is reviewed:
+           APP_SERVICES, or one of the alternatives libnx itself picks by service type at run time (vi:m/vi:s/vi:u,
+           nvdrv/nvdrv:a/:s/:t, acc:u0/u1/su, set:fd). Both NPDMs grant service_access "*", so sm grants any name;
+           an unreviewed one fails because it may not exist on retail firmware or may be single-session.
 """
 from __future__ import annotations
 
@@ -66,6 +67,8 @@ KNOWN_SERVICES = APP_SERVICES | {"pm:shell", "pm:dmnt", "pm:bm", "ns:am2", "vi:m
                                  "pinmux", "pwm", "uart", "pcie", "ldn:u", "ldn:s", "nim", "nim:eca", "olsc:u",
                                  "dauth:0", "aoc:u", "fsp-pr", "bcat:u", "bcat:s", "news:a", "news:c", "news:m",
                                  "news:p", "news:v", "npns:u", "npns:s", "acc:aa", "acc:su", "bsd:a", "sfdnsres"}
+LIBNX_ALTERNATIVES = {"vi:m", "vi:s", "vi:u", "nvdrv", "nvdrv:a", "nvdrv:s", "nvdrv:t", "acc:u0", "acc:u1", "acc:su",
+                      "set:fd", "set:sys", "set:cal"}
 SYSTEM_ONLY = {"pm:shell", "pm:dmnt", "pm:bm", "ns:am2", "vi:m", "nvdrv:s", "nvdrv:t", "ldr:pm", "ldr:shel",
                "ldr:dmnt", "sm:m", "dmnt:cht", "set:fd", "spl:mig", "spl:fs", "spl:ssl", "spl:es", "spl:manu", "hid:dbg",
                "i2c", "gpio", "pinmux", "pwm", "uart", "pcie", "acc:aa", "acc:su"}
@@ -191,10 +194,10 @@ def scan(path: str, role: str, c: Checks):
                     s = m.group(1).decode()
                     if s in KNOWN_SERVICES:
                         found.add(s)
-        sysonly = sorted(found & SYSTEM_ONLY)
-        unknown = sorted(found - APP_SERVICES - SYSTEM_ONLY)
-        c.ok(f"{role}.services_app", not sysonly, f"system-only services: {sysonly}")
-        c.ok(f"{role}.services_known", not unknown, f"services not reviewed for applications: {unknown}")
+        unknown = sorted(found - APP_SERVICES - LIBNX_ALTERNATIVES)
+        c.ok(f"{role}.services_reviewed", not unknown, f"services not reviewed for an application: {unknown}")
+        if found & SYSTEM_ONLY - LIBNX_ALTERNATIVES:
+            print(f"info {role}: system services named (granted by service_access *): {sorted(found & SYSTEM_ONLY)}")
         print(f"info {role}: services {sorted(found)}")
 
 
