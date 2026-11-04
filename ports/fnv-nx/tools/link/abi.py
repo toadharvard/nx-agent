@@ -168,8 +168,10 @@ def _bucket(cls):
     return cls
 
 
-def compare(ref, dfn):
-    """Verdict for a call through declaration `ref` to the function defined as `dfn` (both MSVC Sigs)."""
+def compare(ref, dfn, ecx_unused=False):
+    """Verdict for a call through declaration `ref` to the function defined as `dfn` (both MSVC Sigs). ecx_unused:
+    the definition's x86 code never uses the incoming ecx (fnvlink reads the pristine MSVC object), so a `this` or
+    ecx parameter the reference does not pass is a dead register on x86, not an inconsistency."""
     v = Verdict()
     shape = describe_shape(ref, dfn)
     if shape:
@@ -194,7 +196,11 @@ def compare(ref, dfn):
             continue
         aloc = da[lab][1]
         if src is None:
-            if lab == 'this':
+            if ecx_unused and (lab == 'this' or loc == 'ecx'):
+                v.notes.append('%s (ecx) not passed by the reference; the definition\'s code never uses ecx' % lab)
+                if 'ecx-unused' not in v.classes:
+                    v.classes.append('ecx-unused')
+            elif lab == 'this':
                 x86_ok = False
                 v.notes.append('this not passed by the reference')
             elif loc == 'ecx':

@@ -8,6 +8,8 @@
                        [--units-renames <tsv|none>]           # S1b's patches/units_renames.tsv (default: this
                                                               # tree's; patched units only)
                        [--msvc-objs <dir>]                    # vtable slots via the MSVC vftables (vslots.py)
+                       [--msvc-code <dir>]                    # only the definitions' register reads (ecx-not-
+                                                              # passed verdicts) from those objects
     fnvlink.py probe   <out dir> <prepared tree> [jobs]        # layouts of the aggregates resolve asked for, and
                                                               # the synthesized vtables/typeinfo (vtables.py;
                                                               # FNVNX_NO_VTABLES=1 skips them); then resolve again
@@ -512,6 +514,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         return called_cache[u_.source]
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
     vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
+    ecx_use = msvc_code_use(units_json, ms, msvc)
     for u in have:
         idx = KeyIndex()
         for n, a in u.refs.items():
@@ -610,6 +613,17 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 stats['cast_refs'] += 1
                         if rs.kind == 'func' and ds.kind == 'func':
                             v = abi.compare(rs, ds)
+                            ecx_dead = False
+                            if v.kind == 'x86-inconsistent' and ecx_use is not None and (
+                                    'ecx-not-passed' in v.classes or 'this not passed by the reference' in v.notes):
+                                # does the definition's x86 code use the ecx the reference leaves behind? (V1 c3:
+                                # 0x00a75ec0, 0x00bbbe30 and ten this-not-passed pairs never read it)
+                                use_ = ecx_use(addr)
+                                ecx_dead = use_ is not None and use_['ecx'] not in ('read', 'pass')
+                                stats['ecx_code_' + ('unknown' if use_ is None else 'unused' if ecx_dead
+                                                     else 'used')] += 1
+                                if ecx_dead:
+                                    v = abi.compare(rs, ds, ecx_unused=True)
                             if cast_note:
                                 v = abi.Verdict()
                                 v.kind, v.classes, v.notes = 'x86-inconsistent', ['cast-conflict'], [cast_note]
@@ -626,7 +640,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                         if c.startswith('AGG:') and '{anon}' not in c:
                                             probe_req.add((unit, abi2.agg_name(c)))
                                 p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.source: layouts.get((x, t)),
-                                                  lambda t, x=nd['unit']: layouts.get((x, t)))
+                                                  lambda t, x=nd['unit']: layouts.get((x, t)), ecx_unused=ecx_dead)
                                 if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
                                         not (v.kind == 'bridge' and 'narrow-extend' in v.classes) and \
                                         'cast-conflict' not in v.classes:
@@ -982,6 +996,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'calls of an IAT slot address bound to its import: %d' % stats['iat_calls'],
               'data references bound by identifier only (another scope or decorated type): %d; identifiers at several '
               'addresses (left ambiguous): %d' % (stats['ident_addr'], stats['ident_ambiguous']),
+              'ecx-not-passed / this-not-passed pairs judged on the definition\'s MSVC code (--msvc-code/-objs): ecx '
+              'unused, bridged: %d; used, flagged: %d; no code: %d' % (stats['ecx_code_unused'],
+                                                                      stats['ecx_code_used'], stats['ecx_code_unknown']),
               'C-named declarations compared from their unit\'s source: %d references, %d definitions; without a usable '
               'declaration: %d / %d' % (stats['cname_ref_compared'], stats['cname_def_compared'],
                                          stats['cname_ref_unknown'], stats['cname_def_unknown']),
@@ -1267,6 +1284,50 @@ def load_overrides(path):
                 continue
             out.append((int(f[0], 16), f[1], f[2]))
     return out
+
+
+def msvc_code_use(units_json, ms, msvc):
+    """f(original address) -> how the pristine MSVC code there uses the incoming ecx / edx (vslots.Code.entry_use),
+    from FNVNX_MSVC_CODE or FNVNX_MSVC_OBJS (`--msvc-code` / `--msvc-objs`: S11's u<index>.obj); None without them.
+    A callee takes the registers its declaration puts there (abi.x86_locations); a call through a function-pointer
+    variable takes any."""
+    d = os.environ.get('FNVNX_MSVC_CODE') or os.environ.get('FNVNX_MSVC_OBJS')
+    if not d or not os.path.isdir(d):
+        return None
+    try:
+        import types
+        code = msvc_vslots.Code(types.SimpleNamespace(units=json.load(open(units_json))['units']), d)
+    except ImportError as e:
+        log('--msvc-code: %s (capstone): register reads not checked' % e)
+        return None
+
+    def takes(n, slot=False):
+        if slot:
+            if not n.startswith('__imp_'):
+                return None
+            n = n[6:]
+        if n.startswith('?'):
+            s = msvc(n)
+            return {loc for _, _, loc in abi.x86_locations(s) if loc in ('ecx', 'edx')} if s and s.kind == 'func' \
+                else None
+        m = re.match(r'^@[^@]+@(\d+)$', n)
+        if m:
+            k = int(m.group(1)) // 4
+            return {'ecx', 'edx'} if k >= 2 else {'ecx'} if k else set()
+        return set()
+
+    def need(names):
+        names = [n[6:] if n.startswith('__imp_?') else n for n in names]
+        missing = sorted({n for n in names if n.startswith('?') and n not in ms.map})
+        if missing:
+            ms.map.update(batch_demangle(UNDNAME, missing))
+    cache = {}
+
+    def use(a):
+        if a not in cache:
+            cache[a] = code.entry_use(a, takes, need)
+        return cache[a]
+    return use
 
 
 def load_override_sigs(path):
@@ -1831,6 +1892,10 @@ def main():
     if cmd == 'resolve' and '--msvc-objs' in sys.argv:   # vslots.py: the pristine MSVC objects (u<index>.obj)
         k = sys.argv.index('--msvc-objs')
         os.environ['FNVNX_MSVC_OBJS'] = sys.argv[k + 1]
+        del sys.argv[k:k + 2]
+    if cmd == 'resolve' and '--msvc-code' in sys.argv:   # the same objects, for the register reads only
+        k = sys.argv.index('--msvc-code')
+        os.environ['FNVNX_MSVC_CODE'] = sys.argv[k + 1]
         del sys.argv[k:k + 2]
     if cmd == 'resolve':
         argv, opts = [], {}

@@ -176,8 +176,9 @@ class Plan:
         self.ret_fcvt = None      # (definition class, reference class): float <-> double result
 
 
-def compare(ref, dfn, lay_ref, lay_def):
-    """Plan for calling definition `dfn` through declaration `ref`, or None when a layout is missing."""
+def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False):
+    """Plan for calling definition `dfn` through declaration `ref`, or None when a layout is missing. ecx_unused: as
+    abi.compare (the definition's code never uses the incoming ecx)."""
     try:
         rv, rret = values(ref, lay_ref)
         dv, dret = values(dfn, lay_def)
@@ -210,7 +211,10 @@ def compare(ref, dfn, lay_ref, lay_def):
                 p.classes.append('result-pointer-not-passed')
             continue
         if covered == 0:
-            if lab == 'this':
+            if ecx_unused and (lab == 'this' or space == 'ecx'):
+                p.notes.append('%s (ecx) not passed; the definition\'s code never uses ecx' % lab)
+                p.classes.append('ecx-unused')
+            elif lab == 'this':
                 x86_ok = False; p.notes.append('this not passed by the reference')
                 p.classes.append('this-not-passed')
             elif space == 'ecx':   # the x86 callee reads the caller's ecx (abi.compare, 'ecx-not-passed')

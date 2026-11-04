@@ -3,10 +3,13 @@
 
     python3 tools/link/test_link.py        # needs llvm-undname(-18), c++filt, aarch64-linux-gnu-as
 """
+import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
+import types
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import abi      # noqa: E402
@@ -15,6 +18,7 @@ import elfsyms  # noqa: E402
 import fnvlink  # noqa: E402
 import layout   # noqa: E402
 import sigs     # noqa: E402
+import vslots   # noqa: E402
 
 # (MSVC decorated, Itanium mangled, expected tier)
 PAIRS = [
@@ -230,6 +234,62 @@ struct D4 { double a, b, c, d; };
             g = got.get(t)
             check(g is not None and (g.size, g.cls) == (size, cls), 'layout %s: %s (want %s %s)' % (t, g, size, cls))
         check(got.get('Nope') is None, 'unnameable type dropped')
+
+    # V1 c3_ecx (FP-dead, TP-this-dead): ecx-not-passed / this-not-passed is decided on the definition's x86 code.
+    # A hand-made i386 COFF object stands in for a pristine MSVC unit (u0.obj): six functions, one relocation
+    funcs = [('?dead@@YIHH@Z', bytes.fromhex('8b442404c20400')),          # mov eax, [esp+4]; ret 4
+             ('?rd@@YIHH@Z', bytes.fromhex('8b4108c3')),                  # mov eax, [ecx+8]; ret
+             ('?psh@@YIHH@Z', bytes.fromhex('51c7042400000000' '58c3')),  # push ecx; mov [esp], 0; pop eax; ret
+             ('?tail@@YIHH@Z', bytes.fromhex('e900000000')),              # jmp ?g@C@@QAEXXZ (thiscall: takes ecx)
+             ('?zero@@YIHH@Z', bytes.fromhex('33c98bc1c3')),              # xor ecx, ecx; mov eax, ecx; ret
+             ('?br@@YIHH@Z', bytes.fromhex('85c074028b01c3'))]            # test eax, eax; je +2; mov eax, [ecx]; ret
+    text, offs = b'', []
+    for _, code_ in funcs:
+        offs.append(len(text)); text += code_
+    names = [n for n, _ in funcs] + ['?g@C@@QAEXXZ']
+    strtab = b''.join(n.encode() + b'\0' for n in names)
+    sym = b''
+    for k, n in enumerate(names):
+        so = 4 + sum(len(x) + 1 for x in names[:k])
+        sym += struct.pack('<IIIhHBB', 0, so, offs[k] if k < len(funcs) else 0, 1 if k < len(funcs) else 0, 0x20, 2, 0)
+    rel = struct.pack('<IIH', offs[3] + 1, len(names) - 1, 0x14)          # REL32 -> ?g@C@@QAEXXZ
+    p_text = 20 + 40
+    p_rel = p_text + len(text)
+    p_sym = p_rel + len(rel)
+    coff = struct.pack('<HHIIIHH', 0x14c, 1, 0, p_sym, len(names), 0, 0) + \
+        struct.pack('<8sIIIIIIHHI', b'.text', 0, 0, len(text), p_text, p_rel, 0, 1, 0, 0x60000020) + \
+        text + rel + sym + struct.pack('<I', 4 + len(strtab)) + strtab
+    with tempfile.TemporaryDirectory() as tmp:
+        open(os.path.join(tmp, 'u0.obj'), 'wb').write(coff)
+        units = [{'source': 'src/u.cpp', 'symbols': {}, 'functions': [
+            {'address': '%08x' % (0x401000 + 16 * k), 'symbol': n, 'size': len(c_)} for k, (n, c_) in enumerate(funcs)]}]
+        code = vslots.Code(types.SimpleNamespace(units=units), tmp)
+        takes = {'?g@C@@QAEXXZ': {'ecx'}}.get
+        got = [code.entry_use(0x401000 + 16 * k, lambda n, slot=False: takes(n))['ecx'] for k in range(len(funcs))]
+        check(got == [None, 'read', 'push', 'pass', None, 'read'], 'incoming ecx use by code: %s' % got)
+        check(code.entry_use(0x402000, takes) is None, 'no code: unknown')
+        json.dump({'units': units}, open(os.path.join(tmp, 'units.json'), 'w'))
+        os.environ['FNVNX_MSVC_CODE'] = tmp
+        ms = fnvlink.DemangleCache(os.path.join(tmp, 'msvc.tsv'), fnvlink.UNDNAME)
+        msig = {}
+        use = fnvlink.msvc_code_use(os.path.join(tmp, 'units.json'), ms,
+                                    lambda n: msig.setdefault(n, sigs.parse_msvc(n, ms[n])))
+        del os.environ['FNVNX_MSVC_CODE']
+        check(use is not None and use(0x401030) == {'ecx': 'pass', 'edx': None},
+              'resolve\'s reader: a tail call to a thiscall callee passes ecx: %s' % (use and use(0x401030)))
+    ne = ['?h@@YGDD@Z', '?h@S@@QAEEAAUN@@@Z', '?k@@YAXXZ', '?k@@YIPAUN@@PAU1@@Z']
+    de = fnvlink.batch_demangle(fnvlink.UNDNAME, ne)
+    E = {n: sigs.parse_msvc(n, de[n]) for n in ne}
+    v0 = abi.compare(E['?h@@YGDD@Z'], E['?h@S@@QAEEAAUN@@@Z'])
+    v1 = abi.compare(E['?h@@YGDD@Z'], E['?h@S@@QAEEAAUN@@@Z'], ecx_unused=True)
+    check(v0.kind == 'x86-inconsistent' and v1.kind == 'bridge' and 'ecx-unused' in v1.classes and
+          [(d, s) for d, s, _, _ in v1.moves] == [(('x', 1), ('x', 0))],
+          'this-not-passed, this unused: bridged (x1 <- x0): %s -> %s %s' % (v0.kind, v1.kind, v1.moves))
+    p1 = abi2.compare(E['?h@@YGDD@Z'], E['?h@S@@QAEEAAUN@@@Z'], lambda t: None, lambda t: None, ecx_unused=True)
+    check(p1 is not None and p1.kind == 'bridge' and 'ecx-unused' in p1.classes, 'abi2 too: %s' % (p1 and p1.kind))
+    v2 = abi.compare(E['?k@@YAXXZ'], E['?k@@YIPAUN@@PAU1@@Z'], ecx_unused=True)
+    check(v2.kind == 'same', 'ecx-not-passed, ecx unused, nothing else to move: %s %s' % (v2.kind, v2.classes))
+    check(abi.compare(E['?k@@YAXXZ'], E['?k@@YIPAUN@@PAU1@@Z']).kind == 'x86-inconsistent', 'used: still flagged')
 
     # V1 defect C4 (tools/verify/v1_link/repro_typeinfo_mix.py): two units reconstruct C with different bases; the
     # one that sorts first only names C's typeinfo, the other has the vtable. The linker kept the first typeinfo

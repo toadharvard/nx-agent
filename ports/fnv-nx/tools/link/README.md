@@ -31,10 +31,13 @@ tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L
 tools/link/fnvlink.py probe $L $T                   # layouts of the aggregates + synthesized vtables; resolve again
 tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L [--override o.tsv] [--extern-text s4.txt] \
     [--msvc-objs $S11/obj/pristine]                # vtable slots through the MSVC vftables (u<index>.obj)
+                                                    # [--msvc-code $S11/obj/pristine] only the definitions' ecx
+                                                    # reads (ecx-not-passed verdicts; also with --msvc-objs)
                                                     # [--crt-symbols t.tsv|none] [--imports t.tsv|none]
                                                     # [--units-renames t.tsv|none] (S1b, patched units only)
 tools/link/fnvlink.py apply $L $L/fixed             # renamed objects (own references of rebound variables
-                                                    # retargeted) + zz_bridges.o + zz_addrmap.o
+                                                    # retargeted) + zz_bridges.o + zz_addrmap.o; typeinfo
+                                                    # kept with its vtable (typeinfo_pairs.tsv)
 tools/link/fnvlink.py check $L $L/fixed             # trial link with aliases.ld; what is still undefined
 python3 tools/link/test_link.py; python3 tools/link/test_bridges.py   # need SSE2NEON; qemu-user for the second
 python3 tools/link/test_override.py; python3 tools/link/test_vtables.py; python3 tools/link/test_startup.py
