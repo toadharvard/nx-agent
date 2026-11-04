@@ -81,3 +81,14 @@ S1REFS-COND1-C3	S1-refs	5279bb5	5279bb5	refuted	-	test_s1refs_b.py	COND1: c ? fa
 S1REFS-STD2	S1-refs	0a0c0cc	0a0c0cc	confirmed	-	test_s1refs_b.py	std::abs(float) rename: units.json symbol, link double-to-float bridge for float callers, same-unit caller value
 S1FUZZB-STAND2	S1-fuzzB	57fe267	57fe267	confirmed	-	test_s1refs_b.py	STAND2: the /Od stand-in call reaches the other unit's body; /O2 and inline stand-ins untouched
 S13B-UNLOADED-FIX	S13b	97f8af8	97f8af8	confirmed	-	test_s13b_callee_unloaded.py	oracle-callee-unloaded only when the native trace shows the native ran X: U1/U2 native-early-exit, U3 control kept
+S15T-J0148	S15-threads	258d777	258d777	confirmed	-	test_weak_interlocked.py	J-0148 hand-merge: no conflict markers (W3), litmus 0 bad, refcount inc relaxed / dec release + dmb
+S15T-WEAK	S15-threads	35fe02d	35fe02d	confirmed	-	test_weak_interlocked.py	guest.elf takes sync.cpp's strong fnvnx_interlocked_slow, litmus calls it by relocation (W1, W2 at the subagent's base, before 79481ab)
+S15T-HAVOK	S15-threads	b5c0f19	b5c0f19	confirmed	-	test_budget_built_levers.py	Havok MT is iSimType=4 (FUN_00c661d0 maps 4 -> 3); the setting name not checked against the exe
+S15T-MTR	S15-threads	af36244	af36244	confirmed	-	test_budget_built_levers.py	bMTRendering unsafe on the PC code: second accumulator renderer only for count 2, no modulo on the batch index
+S15T-INI	S15-threads	4364484	4364484	confirmed	-	test_ini_port_defaults.py	port ini defaults only for absent keys, case-insensitive, GetPrivateProfileString lengths (I1-I3)
+S15T-BUILT-B2	S15-threads	40a8d98	40a8d98	refuted	-	test_budget_built_levers.py	plan45 omits the built lever barrier_relax: with it the model-only plan45@1020 goes pass_30 -> pass_45
+S15S-SLERP-SL1	S15-simd	f0861e2	f0861e2	refuted	-	test_slerp_decomp.py	NEON Slerp claims the decomp's result to the bit, NaN included: 199 NaN-input cases give a NaN of another sign (144,000 others bit-identical)
+S15S-METRIC	S15-simd	b7a4022	b7a4022	confirmed	-	test_slerp_decomp.py	hotspot metric labelled [E]; note: the 7.745 baseline used a stale 130, not the measured 134
+GATES-FZ-R16a	gates	82805db	82805db	refuted	-	test_ready_fuzz_shards.py	fnvnx-fuzz-summary per shard: shard 1 at 18/10 masks shard 2 at 0/10, fuzz.coverage passes 90 % (text and summary)
+NX1-NRO-N2	NX1	5256786	5256786	refuted	-	test_nx1_nro.py	check_nro passes a RELATIVE relocation into rodata, which hbloader maps read-only (header offsets ok, N1)
+S15-MTQEMU-B1	S15-threads	79481ab	79481ab	refuted	-	test_weak_interlocked.py	tests/s15/mtqemu/build.sh no longer links after S4 79481ab: handles.cpp needs w32_is_std_handle from crt_kernel32.cpp, not in build.sh
