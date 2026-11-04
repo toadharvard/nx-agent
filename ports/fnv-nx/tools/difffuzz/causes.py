@@ -17,6 +17,7 @@ or `signedness?`, or the oracle-model tag `oracle-vcall` (HINT_REFINABLE).
     causes.py explain <div.json>...
         the refined cause of each record and the rule that gave it
     causes.py handoffs <campaign dir>... --out-dir d [--recheck-tag t] [--effects e.jsonl] [--ref-prefix p]
+                       [--ref-by-head]
         the per-owner lists: handoffs_<owner>.tsv (real-bug), triage_<owner>.tsv, harness_<owner>.tsv (artifacts
         with an owner), one row per counted divergence: owner, cause, address, unit, reproducer
         (<ref-prefix><campaign dir name>:div/<file>, default prefix fuzz/cache/), first effect; and index.tsv
@@ -1543,9 +1544,11 @@ HANDOFF_FILES = (('real-bug', 'handoffs'), ('triage', 'triage'), ('artifact', 'h
 HANDOFF_COLUMNS = ('owner', 'cause', 'address', 'unit', 'reproducer', 'first effect')
 
 
-def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/'):
+def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/', by_head=False):
     """{(file stem, owner): [row]} for every counted divergence whose cause has an owner and is not by design;
-    rows are HANDOFF_COLUMNS tuples, sorted by cause, address and reproducer."""
+    rows are HANDOFF_COLUMNS tuples, sorted by cause, address and reproducer. With by_head, the reproducer names
+    the per-head branch of the head that fuzzed the function (results `commit`: fuzz/<head12>/<dir name>), which
+    the farms never rewrite, instead of the rolling cache branch."""
     prefix = dict(HANDOFF_FILES)
     out = collections.defaultdict(list)
     for d in dirs:
@@ -1558,17 +1561,20 @@ def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/'):
             if cls not in prefix or owner in ('-', ''):
                 continue
             e = EFFECTS.get(rec['_file']) or {}
-            out[(prefix[cls], owner)].append((owner, rec['_cause'], rec['address'], rec.get('source') or '',
-                                              '%s%s:div/%s' % (ref_prefix, name, rec['_file']), e.get('first') or ''))
+            head = str((results.get(rec['address']) or {}).get('commit') or '')[:12]
+            ref = ('fuzz/%s/%s:div/%s' % (head, name, rec['_file']) if by_head and head else
+                   '%s%s:div/%s' % (ref_prefix, name, rec['_file']))
+            out[(prefix[cls], owner)].append((owner, rec['_cause'], rec['address'], rec.get('source') or '', ref,
+                                              e.get('first') or ''))
     for rows in out.values():
         rows.sort(key=lambda r: (r[1], r[2], r[4]))
     return dict(out)
 
 
-def write_handoffs(dirs, out_dir, tag='', ref_prefix='fuzz/cache/'):
+def write_handoffs(dirs, out_dir, tag='', ref_prefix='fuzz/cache/', by_head=False):
     """Write the per-owner TSVs and index.tsv (file, class, owner, rows, functions, causes); returns the index."""
     os.makedirs(out_dir, exist_ok=True)
-    groups = handoff_rows(dirs, tag, ref_prefix)
+    groups = handoff_rows(dirs, tag, ref_prefix, by_head)
     cls_of = {stem: cls for cls, stem in HANDOFF_FILES}
     index = []
     for (stem, owner), rows in sorted(groups.items()):
@@ -1606,11 +1612,13 @@ def main(argv=None):
     h.add_argument('--recheck-tag', default='')
     h.add_argument('--effects', action='append', default=[], help='difffuzz.py effects output (JSON lines)')
     h.add_argument('--ref-prefix', default='fuzz/cache/', help='reproducer = <prefix><dir name>:div/<file>')
+    h.add_argument('--ref-by-head', action='store_true',
+                   help='reproducer = fuzz/<head12 of the results row>/<dir name>:div/<file> (stable branch)')
     a = ap.parse_args(argv)
     if a.cmd in ('summary', 'handoffs') and a.effects:
         load_effects(a.effects)
     if a.cmd == 'handoffs':
-        for row in write_handoffs(a.dirs, a.out_dir, a.recheck_tag, a.ref_prefix):
+        for row in write_handoffs(a.dirs, a.out_dir, a.recheck_tag, a.ref_prefix, a.ref_by_head):
             print('%-22s %-9s %-5s rows %5d fn %5d  %s' % row)
         return 0
     if a.cmd in ('summary', 'merge'):
