@@ -20,3 +20,12 @@ __attribute__((weak)) void *__fnv_00aa3e40(void *heap, uint32_t size) {   /* Mem
     (void)heap;
     return malloc(size ? size : 1);
 }
+
+/* MemoryManagerAA3880::Allocate(unsigned): the decomp's stand-in member for the allocation the MemoryManager
+ * constructor 0x00aa3880 makes first (TableBaseAA3880(37)); it has no address (units.json), so it was a trap returning
+ * 0 and the constructor's memset faulted (TOOLCHAIN.md section 17). It is MemoryManager::Allocate on a manager that
+ * is not initialised yet, which takes the fallback allocation: forward to 0x00aa3e40 (native or the stand-in above). */
+void *__fnv_00aa3e40(void *heap, uint32_t size);
+__attribute__((weak)) void *_ZN19MemoryManagerAA38808AllocateEj(void *self, uint32_t size) {
+    return __fnv_00aa3e40(self, size);
+}

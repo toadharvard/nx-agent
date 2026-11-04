@@ -70,6 +70,28 @@ def neg(e):
 # places threads exactly like host_v2.inc; each thread's (role, ideal core, mask, priority) is printed at the end.
 _PLACEMENT = None
 
+STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]"
+
+
+def parse_fault_table(path):
+    """--stub-faults table (tests/s5/known_faults.txt): ([(function, action)], [(before-winmain function, x0)]).
+    A function is a link name or an original address 0x...; '#' starts a comment."""
+    stubs, pre = [], []
+    for k, line in enumerate(open(path), 1):
+        f = line.split("#", 1)[0].split()
+        if not f:
+            continue
+        if f[0] == "before-winmain":   # before-winmain <function> [x0]
+            if len(f) not in (2, 3):
+                raise ValueError(f"{path}:{k}: before-winmain <function> [x0]")
+            pre.append((f[1], int(f[2], 0) if len(f) > 2 else 0))
+            continue
+        action = f[1] if len(f) > 1 else "return0"
+        if len(f) > 2 or not re.fullmatch(STUB_ACTIONS, action):
+            raise ValueError(f"{path}:{k}: <function> [return0 | return-this | malloc:xN | use-malloc:xN]")
+        stubs.append((f[0], action))
+    return stubs, pre
+
 
 def placement_table():
     """{role number: (name, ideal, mask, prio)} from placement.h and the FNVNX_ROLE_* enum of hostapi.h"""
@@ -547,6 +569,8 @@ class Emu:
             if len(f) == 3 and f[1] in "tTwW":
                 a = int(f[0], 16)
                 by_addr.setdefault(a, []).append(f[2])
+                self.code_syms = getattr(self, "code_syms", {})
+                self.code_syms.setdefault(f[2], a)
         self.sym_addrs = sorted(by_addr)
         self.sym_names = [by_addr[a] for a in self.sym_addrs]
         self._bisect = bisect.bisect_right
@@ -554,6 +578,17 @@ class Emu:
     def xreg(self, i):
         import unicorn.arm64_const as c
         return self.uc.reg_read(getattr(c, f"UC_ARM64_REG_X{i}")) if i < 31 else 0
+
+    def trap_text(self):
+        """At S2's trap stubs (fnvnx_vslot_trap: a virtual function defined nowhere, fnvnx_special_trap): the text the
+        stub passes in x1, e.g. 'virtual function defined nowhere: <symbol> (slot <k> of <vtable>)'; '' elsewhere."""
+        name = self.sym(self.uc.reg_read(UC_ARM64_REG_PC))
+        if not re.search(r" fnvnx_(vslot|special)_trap\+0x0$", name):
+            return ""
+        try:
+            return bytes(self.uc.mem_read(self.xreg(1) & 0xFFFFFFFF, 240)).split(b"\0")[0].decode("latin-1")
+        except UcError:
+            return ""
 
     def null_call(self):
         """At a fetch fault from address 0: where the call came from and where the null was loaded from.
@@ -597,6 +632,132 @@ class Emu:
             if (w & 31) == n and w & 0x1F000000 in (0x11000000, 0x0B000000, 0x2A000000):   # add/orr/mov into xN
                 break
         return f"{caller} | register x{n} (source not found)"
+
+    # -- fault stubs (--stub-faults): known faults the boot should run past while their fixes are pending. Each
+    # listed function returns 0 when a fault happens anywhere below it: its entry saves the registers (the caller's
+    # callee-saved registers and SP, per AAPCS64), the fault restores them and resumes at the return address.
+    # A line 'before-winmain <function> [x0]' instead calls that function once, right before WinMain, for an
+    # initializer the decomp lacks (one whose effect the boot needs).
+    def code_addr(self, n):
+        key = f"__fnv_{int(n, 16):08x}" if re.fullmatch(r"0x[0-9a-fA-F]+", n) else n
+        link = self.code_syms.get(key)
+        if link is None:
+            return None
+        return link - self.link_base + self.base if self.relocatable else link
+
+    def install_fault_stubs(self, path):
+        self.stub_guards, self.stubbed, self.stub_returns = {}, [], set()
+        stubs, self.pre_calls = parse_fault_table(path)
+        names, actions = [n for n, _ in stubs], dict(stubs)
+        for n in names:
+            a = self.code_addr(n)
+            if a is None:
+                print(f"   stub-faults: {n}: not in the link")
+                continue
+            self.uc.hook_add(UC_HOOK_CODE, self.on_stub_entry, user_data=(n, actions[n]), begin=a, end=a)
+        print(f"   stub-faults: {len(names)} functions stubbed, {len(self.pre_calls)} called before WinMain")
+        winmain = self.code_addr("0x0086a850")
+        if self.pre_calls and winmain is not None:
+            self.pre_ctx = None
+            self.uc.hook_add(UC_HOOK_CODE, self.on_winmain_entry, begin=winmain, end=winmain)
+
+    def on_winmain_entry(self, uc, addr, size, _):
+        """WinMain's first instruction: run the before-winmain calls one after the other, each returning to this
+        address, then restore WinMain's arguments and go on."""
+        if self.pre_calls is None:
+            return
+        if self.pre_ctx is None:
+            self.pre_ctx = uc.context_save()
+        while self.pre_calls:
+            n, x0 = self.pre_calls.pop(0)
+            fn = self.code_addr(n)
+            if fn is None:
+                print(f"   before-winmain: {n}: not in the link")
+                continue
+            print(f"   before-winmain: calling {self.sym(fn)} (x0 {x0:#x})")
+            uc.reg_write(UC_ARM64_REG_X0, x0)
+            uc.reg_write(UC_ARM64_REG_LR, addr)
+            uc.reg_write(UC_ARM64_REG_PC, fn)
+            return
+        self.pre_calls = None
+        uc.context_restore(self.pre_ctx)
+
+    def on_stub_entry(self, uc, addr, size, data):
+        if data[1].startswith("use-malloc:x") and "malloc" in self.code_syms:   # replaced on every call
+            self.replaced = getattr(self, "replaced", {})
+            self.replaced[data[0]] = self.replaced.get(data[0], 0) + 1
+            uc.reg_write(UC_ARM64_REG_X0, self.xreg(int(data[1][12:])) & 0xFFFFFFFF)
+            uc.reg_write(UC_ARM64_REG_PC, self.code_addr("malloc"))   # returns to the caller's lr
+            return
+        tid = self.cur.tid if self.cur else 1
+        sp, lr = uc.reg_read(UC_ARM64_REG_SP), uc.reg_read(UC_ARM64_REG_LR)
+        if data[1] == "return-this":   # returns x0 as it came in (an MSVC constructor called as a function)
+            self.ret_this = getattr(self, "ret_this", {})
+            st = [g for g in self.ret_this.get(tid, []) if g[0] > sp]
+            st.append((sp, lr, self.xreg(0), data[0]))
+            self.ret_this[tid] = st
+            if ("this", lr) not in self.stub_returns:
+                self.stub_returns.add(("this", lr))
+                uc.hook_add(UC_HOOK_CODE, self.on_this_return, begin=lr, end=lr)
+            return
+        st = [g for g in self.stub_guards.get(tid, []) if g[0] >= sp]   # drop guards left by an unwind
+        st.append((sp, uc.context_save(), lr, data[0], data[1]))
+        self.stub_guards[tid] = st
+        if lr not in self.stub_returns:   # the guard ends when its call returns (also after a tail call)
+            self.stub_returns.add(lr)
+            uc.hook_add(UC_HOOK_CODE, self.on_stub_return, begin=lr, end=lr)
+
+    def on_this_return(self, uc, addr, size, _):
+        tid = self.cur.tid if self.cur else 1
+        st = self.ret_this.get(tid)
+        if st and st[-1][1] == addr and st[-1][0] == uc.reg_read(UC_ARM64_REG_SP):
+            _, _, this, name = st.pop()
+            if uc.reg_read(UC_ARM64_REG_X0) & 0xFFFFFFFF != this:
+                self.replaced = getattr(self, "replaced", {})
+                self.replaced[name + " return-this"] = self.replaced.get(name + " return-this", 0) + 1
+            uc.reg_write(UC_ARM64_REG_X0, this)
+
+    def on_stub_return(self, uc, addr, size, _):
+        tid = self.cur.tid if self.cur else 1
+        sp = uc.reg_read(UC_ARM64_REG_SP)
+        st = self.stub_guards.get(tid)
+        if st and st[-1][2] == addr and st[-1][0] == sp:
+            st.pop()
+
+    def stub_fault(self, tid, err):
+        """the innermost live fault stub of the thread, restored: (resume pc, x0), its return address and 0, or for
+        'malloc:xN' the guest's malloc with the size from xN, returning to the same address; None if none"""
+        st = getattr(self, "stub_guards", {}).get(tid)
+        sp = self.uc.reg_read(UC_ARM64_REG_SP)
+        while st and st[-1][0] < sp:   # guards whose frames an unwind already left
+            st.pop()
+        if not st:
+            return None
+        g_sp, ctx, lr, name, action = st.pop()
+        pc = self.uc.reg_read(UC_ARM64_REG_PC)
+        bad_call = pc == 0 or "fetch" in err.lower()
+        where = self.sym(pc) + (" | " + self.null_call() if bad_call else "")
+        if self.trap_text():
+            where += " | " + self.trap_text()
+        self.uc.context_restore(ctx)
+        resume, result, how = lr, 0, "returns 0"
+        if action.startswith("malloc:x") and "malloc" in self.code_syms:
+            result = self.xreg(int(action[8:])) & 0xFFFFFFFF
+            m = self.code_syms["malloc"]
+            resume = m - self.link_base + self.base if self.relocatable else m
+            how = f"returns malloc({result})"
+        self.stubbed.append((name, err, where))
+        if len(self.stubbed) <= 30:
+            print(f"   stubbed fault: {name} {how} ({err} at {where})")
+        return resume, result
+
+    def stub_summary(self):
+        import collections
+        c = collections.Counter((n, re.sub(r" \(UC_ERR_\w+\)", "", e), re.sub(r"\+0x[0-9a-f]+", "", w))
+                                for n, e, w in getattr(self, "stubbed", []))
+        return ([f"stubbed-fault\t{k}\t{n}\t{e}\t{w}" for (n, e, w), k in c.most_common()]
+                + [f"replaced-call\t{k}\t{n}" + ("" if n.endswith("return-this") else " use-malloc")
+                   for n, k in getattr(self, "replaced", {}).items()])
 
     def skip_summary(self, top=60):
         """All skipped initializers grouped by (fault, faulting function):
@@ -713,10 +874,15 @@ class Emu:
         if xa is not None:
             xa = xa - self.link_base + self.base if self.relocatable else xa
             (cur,) = struct.unpack("<I", uc.mem_read(xa, 4))
-            if cur:
-                print(f"   S10 initializer running: orig {cur:#010x}")
+            if cur:   # S10's xc runner does not clear it: after the initializers this is the last one run
+                print(f"   S10 initializer (running or last run): orig {cur:#010x}")
         print(f"   pc  {self.sym(pc)}")
+        if self.trap_text():
+            print(f"   trap {self.trap_text()}")
+        if pc == 0 or "fetch" in why.lower():   # a call through a bad pointer: where it came from
+            print(f"   call {self.null_call()}")
         print(f"   lr  {self.sym(lr)}")
+        print("   " + " ".join(f"x{i} {self.xreg(i):#x}" for i in range(8)))
         for i in range(40):
             if not fp or fp & 7:
                 break
@@ -778,12 +944,20 @@ class Emu:
             try:
                 uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
             except UcError as e:
+                stub = self.stub_fault(t.tid, str(e))
+                if stub is not None:   # a known fault: the stubbed function returns and the thread goes on
+                    t.ctx, t.state = uc.context_save(), "ready"
+                    t.resume_pc, t.result = stub
+                    self.cur = None
+                    continue
                 g = getattr(self, "guard", {}).pop(t.tid, None)
                 if g is not None and len(self.skipped) < getattr(self, "max_skips", 100000):
                     pc = uc.reg_read(UC_ARM64_REG_PC)
                     why = str(e)
-                    if pc == 0:   # a call through a null pointer: name its call site and the pointer's source
+                    if pc == 0 or "fetch" in why.lower():   # a call through a bad pointer: call site, source
                         why += " | " + self.null_call()
+                    elif self.trap_text():
+                        why += " | " + self.sym(uc.reg_read(UC_ARM64_REG_LR)).split(" ", 1)[-1] + " | " + self.trap_text()
                     self.skipped.append((g[2], pc, why))
                     if len(self.skipped) <= 30:
                         print(f"   skipped initializer {self.sym(g[2])}: {e} at {self.sym(pc)}")
@@ -793,7 +967,9 @@ class Emu:
                     self.cur = None
                     continue
                 self.trace(f"fault: {e}")
-                raise SystemExit(f"emulation fault at pc={uc.reg_read(UC_ARM64_REG_PC):#x} thread {t.tid}: {e}")
+                trap = self.trap_text()
+                raise SystemExit(f"emulation fault at pc={uc.reg_read(UC_ARM64_REG_PC):#x} thread {t.tid}: {e}"
+                                 + (f": {trap}" if trap else ""))
             if self.exit_code is not None:
                 self.tp_after = 0xDEAD0000 if t.tid != 1 else uc.reg_read(UC_ARM64_REG_TPIDR_EL0)
                 break
@@ -818,6 +994,8 @@ def main(argv):
     ap.add_argument("--skip-faulting-init", action="store_true",
                     help="trace mode: return 0 from an initializer that faults (needs --elf)")
     ap.add_argument("--budget", type=int, default=400_000_000, help="instructions per scheduling slice")
+    ap.add_argument("--stub-faults", metavar="FILE", help="functions (names or 0xORIG, one per line) that return 0 "
+                    "when a fault happens below them, e.g. tests/s5/known_faults.txt; needs --elf")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
@@ -833,6 +1011,8 @@ def main(argv):
         emu.load_symbols(a.elf)
         if a.skip_faulting_init:
             emu.install_guards()
+        if a.stub_faults:
+            emu.install_fault_stubs(a.stub_faults)
     def peeks():
         out = []
         for spec in a.peek:
@@ -862,7 +1042,7 @@ def main(argv):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
-        for line in emu.skip_summary() + emu.trap_table() + peeks() + emu.placements():
+        for line in emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements():
             print(line)
         print(f"STOPPED: {why}")
         return 1
@@ -883,7 +1063,7 @@ def main(argv):
     if getattr(emu, "skipped", None) is not None:
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
-    for line in emu.skip_summary() + emu.trap_table() + peeks() + emu.placements():
+    for line in emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements():
         print(line)
     ok = rc == 0 and a.expect in out and tp_ok
     print("PASS" if ok else "FAIL")

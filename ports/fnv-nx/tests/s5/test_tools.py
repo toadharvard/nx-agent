@@ -275,5 +275,35 @@ class PlacementTest(unittest.TestCase):
         self.assertEqual(emu_guest.place((1 << 64) - 1, 1, 0)[1:], (2, 0x6, 0x2C))
 
 
+class FaultTableTest(unittest.TestCase):
+    """tests/s5/known_faults.txt, the emulator's --stub-faults table, parses; every entry has a known action."""
+
+    def test_known_faults(self):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        stubs, pre = emu_guest.parse_fault_table(os.path.join(HERE, "known_faults.txt"))
+        self.assertIn(("0x00aa3e40", "use-malloc:x1"), stubs)
+        self.assertIn(("0x00a8a5f0", 0), pre)
+        names = [n for n, _ in stubs]
+        self.assertEqual(len(names), len(set(names)), "a function listed twice")
+        for n in names:
+            self.assertRegex(n, r"^(0x[0-9a-f]{8}|[A-Za-z_]\w*)$")
+
+    def test_bad_lines(self):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "f.txt")
+            for bad in ("0x00401000 return1\n", "0x00401000 malloc:x1 extra\n", "before-winmain\n"):
+                with open(p, "w") as f:
+                    f.write(bad)
+                with self.assertRaises(ValueError):
+                    emu_guest.parse_fault_table(p)
+            with open(p, "w") as f:
+                f.write("# c\nInitHolder  # why\n0x00aa1070 use-malloc:x0\nbefore-winmain 0x00a8a5f0 0x10\n")
+            self.assertEqual(emu_guest.parse_fault_table(p),
+                             ([("InitHolder", "return0"), ("0x00aa1070", "use-malloc:x0")], [("0x00a8a5f0", 16)]))
+
+
 if __name__ == "__main__":
     unittest.main()

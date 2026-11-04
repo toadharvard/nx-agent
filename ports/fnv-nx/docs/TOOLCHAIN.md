@@ -851,6 +851,78 @@ docs/PERF.md 6.3 found every game thread and Nine's CSMT worker on core 0. This 
   - 31 through the one-slot native vtable of `FUN_004de530`;
   - 60 reads in the `FUN_00632ec0` stand-in (section 14).
 
+## 18. Running past known faults (`--stub-faults tests/s5/known_faults.txt`)
+
+The emulator can run past faults whose fixes are pending (S1, S2), so the boot shows what lies beyond them. The table
+`tests/s5/known_faults.txt` has one function per line, by link name or original address, with an action and a comment
+that says why and who fixes it. Remove a line when its fix lands.
+
+| action | effect |
+|---|---|
+| `return0` (default) | a fault anywhere below the function makes it return 0. Its entry saves the registers, the fault restores them and resumes at its return address. The guard ends when that address executes, so tail calls stay covered. |
+| `malloc:xN` | on a fault, return `malloc(xN)` instead (allocators) |
+| `use-malloc:xN` | replace the function by `malloc(xN)` on every call. Calls that do not fault can still return garbage. |
+| `return-this` | the function returns its x0 as it came in: an MSVC constructor (it returns `this`) called as a function |
+| `before-winmain F [x0]` | call F once, right before WinMain: an initializer the decomp lacks |
+
+The log has a `stubbed fault:` line for each of the first 30. The summary lines are:
+
+* `stubbed-fault <count> <function> <fault> <where>`;
+* `replaced-call <count> <function> use-malloc|return-this`.
+
+The trace now names the text of S2's vslot traps (`virtual function defined nowhere: <symbol> (slot k of <vtable>)`)
+and the source of a bad call. It also prints x0-x7.
+
+**f13 guest (section 17) on S14's `r2/fix/synth.exe`.** The table has 19 functions and one call before WinMain.
+Each run takes about 40 s.
+
+* **Memory manager**: the constructor 0x00aa3880 completes. The state before WinMain is the x86 path: options and
+  holder set, run-once 0, default-options 0. `boot_banner` is no longer skipped (4,326 initializers are skipped,
+  down from 4,340).
+* **NiInit** `FUN_00aa20b0` (WinMain+0x1d0) completes. It runs NiMain's init `InitializeGameSystems` 0x00a89cc0 and
+  the three registered library inits (0x00a2d8a0, `RegisterParticleSystems`, `InitNiStreamCallbacks`).
+* **The INI load** at WinMain+0x300 is stubbed (it returns false).
+* **Stop: WinMain+0x43c**. `PathList::FUN_00afdda0` -> `BSSimpleArray<NavMeshInfo*,1024>::Add` ->
+  `FUN_00761540` calls slot 1 of the image vtable 0x010472d0. `bgsragdoll.cpp` stores `&DAT_010472d0` as the vptr
+  by hand, and the image's slots are not native code.
+
+The faults it runs past, and their causes:
+
+* **Allocator, one-slot vtable (S1).**
+  - `InitHolder` 0x00aa2020 makes the tail call through slot 7.
+  - NiMalloc 0x00aa1070, the aligned allocations 0x00aa10b0 and 0x00aa1130, and `NiMemObject::operator new`
+    0x00aa13e0 all call through the same allocator (`use-malloc`). Their frees return 0.
+* **MemoryManager::Allocate 0x00aa3e40 (S1).** Its main heap has a garbage vptr after the constructor: the layout of
+  0x00aa3880 does not match `MemoryManagerStandIn`. Calls that do not fault return garbage. For example, the global
+  string table came back misaligned. It is replaced on every call. Its frees, 0x00aa1460 and 0x00aa4060, return 0.
+* **No initializer calls the NiMainSDM constructor 0x00a8a5f0** (the decomp has no caller). So 0x011f6110 stays 0,
+  NiInit skips NiMain's init, and the NiStream loader map 0x011f4784, its post-process array and the global string
+  table stay NULL. Called before WinMain.
+* **The loader map `A660A0Map` (S1)** declares only a destructor, so its vtable has two slots.
+  `NiTStringTemplateMap::SetAt` calls slot 2 (`KeyToHashIndex`). `RegisterObjectLoader` 0x00a64900 is stubbed: 226
+  registrations are lost.
+* **The constructor 0x00a5b530 (S1/S2)** is called as `__fastcall FUN_00a5b530(table)` and its result is stored. On
+  AArch64 a C++ constructor returns nothing (`return-this`).
+* **`std::_Immortalize<StandardLibrarySingletonObject>()`** in InitializeGlobal 0x00866690 has a null vptr (S1).
+* **The IO task init** `FUN_00aa7eb0` has two faults:
+  - IOQueue and IOFreeQueue store the hand vptrs 0x010a2960..b0, which have no native vtable (`hand_vptrs.tsv`).
+    The 32 pushes 0x00aa8a40 return.
+  - The IO thread's `RunThreadProc` 0x00aa64d0 tail-calls `BSThread::v2`, slot 2 of `_ZTV12FUN_00aa8410`, which is
+    defined nowhere (vslot trap). The thread ends.
+* **The INI collection** has the hand vptr 0x01082ed8, which has no native vtable (`FUN_005e0200`).
+
+The initializer skips that remain:
+
+* **3,454: the setting constructors** (`FUN_0040c150`, `FUN_0040e0b0`, ...) register through
+  `GameSettingCollection::Instance()->v1`. The collection's constructor `FUN_00404b10_class::Initialize`
+  (`unmapped/nitmapbase.cpp`) stores the string literal `"@K@"` as its vptr. Those are the bytes 0x00404b40, which
+  the decompiler read as text. Slot 1 of that "vtable" is 0 (S1).
+* **735: the image vftable 0x0101772c** (INISettingCollection).
+
+**The remaining class.** Most of what is left comes from image vtables used as vptrs. On f13, `hand_vptrs.tsv` lists
+750 hand-stored vptrs with no native vtable, and `*(int*)this = (int)&DAT_<vtable>` stores (0x010472d0) are not
+listed at all. Whatever image is loaded, those slots are not native code: x86 addresses, or 0 in the synth image.
+
 ## 7. Not yet done / untested
 
 * Nothing has run on hardware. Untested: ldr accepting the 64-bit + `32BitNoReserved` NPDM as an application
