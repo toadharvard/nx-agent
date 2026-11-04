@@ -127,6 +127,13 @@ got = run(s1.r_critical_section_tail, 'class RecursiveLock\n{\n  public:\n    _R
 check('CSX2 gives a section the class asserts as 28 bytes its 4 bytes', got,
       ['_RTL_CRITICAL_SECTION CriticalSection; unsigned int CriticalSection_fnvnx_tail;', '    _RTL_CRITICAL_SECTION cs;\n    int n;'])
 
+# ---- STR1 uses the declaration in scope
+got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(&str_01082ab8); }\nnamespace N {\n'
+          'extern char str_01082ab8;\nvoid h() { g(&str_01082ab8); }\n}\nextern "C" char str_a0000000[], str_b0000000[],\n'
+          '    str_c0000000[];\nvoid k() { const char* p = str_c0000000; g(&str_c0000000); }\n')
+check('STR1 rewrites only where the array is the declaration in scope', got,
+      ['void f() { g(str_01082ab8); }', 'void h() { g(&str_01082ab8); }', 'g(str_c0000000); }'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

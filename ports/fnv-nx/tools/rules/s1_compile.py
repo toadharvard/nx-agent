@@ -391,14 +391,31 @@ def r_sdk_guarded_copies(path, text, stats):
 
 STR_ADDR = re.compile(r'&\s*(str_[0-9a-fA-F]{8})\b(?!\s*\[)')
 
+# a declaration statement (it may go on over lines: `extern "C" char str_a[], str_b[],\n    str_c[];`), up to its
+# first initializer or parameter list: the names in it are the ones it declares
+STR_DECL_LINE = re.compile(r'^[ \t]*(?:extern\b|static\b|const\b|char\b|unsigned\b|signed\b|wchar_t\b)[^;{}=(]*', re.M)
+STR_DECL_NAME = re.compile(r'\b(str_[0-9a-fA-F]{8})\b\s*(\[)?')
+
 def r_string_array_address(path, text, stats):
-    """STR1: `&str_01082ab8` where the decomp declares `extern char str_01082ab8[];` -> `str_01082ab8`: the same
-    address; MSVC converted char (*)[] to const char* silently, GCC does not."""
-    if 'str_' not in text: return text
-    arrays = set(re.findall(r'\b(str_[0-9a-fA-F]{8})\s*\[', text))
-    if not arrays: return text
+    """STR1: `&str_01082ab8` where the declaration in scope is `extern char str_01082ab8[];` -> `str_01082ab8`: the
+    same address; MSVC converted char (*)[] to const char* silently, GCC does not. A file may declare the same name
+    as an array in one place and as a scalar `char` in another: the declaration in scope at the use decides (the
+    latest one before it, in the use's namespace or an enclosing one)."""
+    if 'str_' not in text or not re.search(r'\bstr_[0-9a-fA-F]{8}\s*\[', text): return text
+    spans = prepare.scope_spans(text)
+    heads = lambda pos: tuple(h for k, h in prepare.scope_chain(spans, pos) if k == 'namespace')
+    decls = {}                                             # name -> [(pos, scope, is_array)]
+    for line in STR_DECL_LINE.finditer(text):
+        for d in STR_DECL_NAME.finditer(line.group(0)):
+            pos = line.start() + d.start()
+            decls.setdefault(d.group(1), []).append((pos, heads(pos), bool(d.group(2))))
+    if not decls: return text
     def sub(m):
-        if m.group(1) not in arrays: return m.group(0)
+        scope = heads(m.start())
+        seen = [d for d in decls.get(m.group(1), ()) if d[0] < m.start() and d[1] == scope[:len(d[1])]]
+        if not seen: return m.group(0)
+        best = max(seen, key=lambda d: (len(d[1]), d[0]))  # innermost namespace, then the latest
+        if not best[2]: return m.group(0)
         stats['STR1'] += 1
         return m.group(1)
     return STR_ADDR.sub(sub, text)
