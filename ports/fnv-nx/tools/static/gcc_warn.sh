@@ -34,6 +34,8 @@ one() {
   echo "rc=$?" >> "$log.tmp"; mv "$log.tmp" "$log"
 }
 export -f one
+# the full command of the first unit, for a report that has to say why nothing compiled
+printf 'cd %s && %s %s %s\n' "$TREE" "$CXX" "$FLAGS_STR" "$(head -1 "$LIST")" > "$OUT/gcc/command.txt"
 xargs -a "$LIST" -P "$JOBS" -I{} bash -c 'one "$@" || true' _ {}
 
 : > "$OUT/gcc/status.tsv"
