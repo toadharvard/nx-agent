@@ -7,7 +7,8 @@ MSVC 2008 (SP1 and RTM, the decomp's own flag sets, run under Wine) gives the or
 order the port has. Each case is equivalent when GCC's order is MSVC's.
 
     order_check.py <scratch> [--msvc] [--gcc] [--record tests/s11/order/order.msvc] [--out R.json] [--md R.md]
-                   [--gcc-extra FLAGS]... [--strict]
+                   [--gcc-extra NAME=FLAGS]... [--strict [--strict-variant NAME]]
+    order_check.py <scratch> --msvc-stdout SRC.cpp OUT.expect
 
   --msvc         build and run the MSVC side (needs FNV_MSVC9_ROOT, FNV_MSVC9_RTM_ROOT, FNV_MSVC9_PREFIX, DECOMP
                  or ext/fnv_decomp for tools/msvc.py, Wine). Without it the recorded MSVC results are used
@@ -16,10 +17,13 @@ order the port has. Each case is equivalent when GCC's order is MSVC's.
   --gcc          build and run the GCC side (aarch64-linux-gnu-g++, gcc-13-plugin-dev-aarch64-linux-gnu, qemu-aarch64);
                  variants: `build` (the plugin as compile.sh loads it) plus each --gcc-extra NAME=FLAGS (default:
                  -fstrong-eval-order=some and =none, the candidates ORDERING.md names).
-  --strict       exit 1 when a case of the build variant differs from an MSVC order that every MSVC configuration
-                 agrees on.
+  --strict       exit 1 when a case of the build variant (or --strict-variant NAME, e.g. a --gcc-extra candidate)
+                 differs from an MSVC order that every MSVC configuration agrees on.
+  --msvc-stdout  build another order program (plain C++03, prints its own log) in every MSVC configuration, run it
+                 under Wine, and write its stdout to OUT when all configurations print the same; otherwise exit 1 and
+                 name the lines that vary. S12's tests/s12/order/evalorder.cpp -> evalorder.msvc.expect.
 
-Verdicts per case: `same` (GCC's order is MSVC's in every MSVC configuration), `differs` (MSVC agrees with itself,
+Each GCC variant gets its own verdict per case (`verdicts`); `verdict` is the build variant's. Verdicts per case: `same` (GCC's order is MSVC's in every MSVC configuration), `differs` (MSVC agrees with itself,
 GCC does something else), `msvc-varies` (MSVC's own order depends on the compiler or optimization level: the order
 is unspecified for the exe too, and each site's x86 code decides; GCC matches some configuration or none, as noted).
 """
@@ -45,6 +49,9 @@ MSVC_CONFIGS = [('sp1', 'O2', '/MT /O2 /GS /EHsc /Gy'), ('sp1', 'Od', '/MT /Od /
 GCC_SEM = ['-fms-extensions', '-frounding-math', '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks',
            '-ffp-contract=off', '-fpermissive', '-Wno-narrowing', '-mno-outline-atomics']
 GCC_VARIANTS = {'strong-some': ['-fstrong-eval-order=some'], 'strong-none': ['-fstrong-eval-order=none']}
+# S12's switches (fnvnx_order object= / operator=, S12 2e2e9f9): measured whenever the plugin source has them
+S12_VARIANTS = {'object-last': ['-fplugin-arg-fnvnx_order-object=last'],
+                'object-last-rtl': ['-fplugin-arg-fnvnx_order-object=last', '-fplugin-arg-fnvnx_order-operator=rtl']}
 LINE = re.compile(r'^(\S+) (\S*)\s*$')
 
 
@@ -68,24 +75,44 @@ def parse(text):
     return res
 
 
-def run_msvc(scratch, decomp):
+def msvc_outputs(scratch, decomp, src=SRC):
+    """{config: (flags, stdout)} of src built and run in every MSVC configuration (CR stripped)."""
     msvc = Path(decomp, 'tools/msvc.py')
     if not msvc.exists():
         raise SystemExit('order_check: no %s (set DECOMP)' % msvc)
-    res = {}
+    stem, res = Path(src).stem, {}
     for comp, tag, flags in MSVC_CONFIGS:
         name = '%s-%s' % (comp, tag)
-        exe, obj = scratch / ('msvc-%s.exe' % name), scratch / ('msvc-%s.obj' % name)
+        exe, obj = scratch / ('msvc-%s-%s.exe' % (stem, name)), scratch / ('msvc-%s-%s.obj' % (stem, name))
         r = subprocess.run([sys.executable, str(msvc), '--compiler', comp, '/nologo'] + flags.split() +
-                           [str(SRC), '/Fe' + str(exe), '/Fo' + str(obj)], capture_output=True, text=True,
+                           [str(src), '/Fe' + str(exe), '/Fo' + str(obj)], capture_output=True, text=True,
                            errors='replace', cwd=scratch)
         if r.returncode or not exe.exists():
             raise SystemExit('order_check: MSVC %s failed:\n%s' % (name, (r.stdout + r.stderr)[-2000:]))
         env = dict(os.environ, WINEPREFIX=os.environ['FNV_MSVC9_PREFIX'], WINEDEBUG='-all')
         r = subprocess.run(['wine', str(exe)], capture_output=True, text=True, errors='replace', env=env,
                            stdin=subprocess.DEVNULL, timeout=300)
-        res[name] = dict(flags=flags, results=parse(r.stdout))
+        res[name] = (flags, r.stdout.replace('\r', ''))
     return res
+
+
+def run_msvc(scratch, decomp):
+    return {name: dict(flags=flags, results=parse(out)) for name, (flags, out) in msvc_outputs(scratch, decomp).items()}
+
+
+def agreed_stdout(outputs):
+    """(text, []) when every configuration printed the same, else (None, [(line number, {config: line})])."""
+    texts = {cfg: out for cfg, (_, out) in outputs.items()}
+    if len(set(texts.values())) == 1:
+        return next(iter(texts.values())), []
+    split = {cfg: t.splitlines() for cfg, t in texts.items()}
+    n = max(len(v) for v in split.values())
+    varies = []
+    for i in range(n):
+        at = {cfg: (v[i] if i < len(v) else None) for cfg, v in split.items()}
+        if len(set(at.values())) > 1:
+            varies.append((i + 1, at))
+    return None, varies
 
 
 def run_gcc(scratch, extra_variants):
@@ -121,15 +148,24 @@ def compare(case_list, msvc, gcc):
         orders = sorted({o for o in mo.values() if o is not None})
         go = {var: v['results'].get(name) for var, v in gcc.items()}
         b = go.get('build')
-        if len(orders) == 1:
-            verdict = 'same' if b == orders[0] else 'differs'
-        elif not orders:
-            verdict = 'no-msvc'
-        else:
-            verdict = 'msvc-varies'
-        rows.append(dict(case=name, cls=cls, msvc=mo, gcc=go, verdict=verdict,
+        verdicts = {var: verdict_of(orders, o) for var, o in go.items()}
+        rows.append(dict(case=name, cls=cls, msvc=mo, gcc=go, verdict=verdict_of(orders, b), verdicts=verdicts,
                          gcc_matches=[cfg for cfg, o in mo.items() if o == b]))
     return rows
+
+
+def verdict_of(orders, got):
+    if not orders:
+        return 'no-msvc'
+    if len(orders) > 1:
+        return 'msvc-varies'
+    return 'same' if got == orders[0] else 'differs'
+
+
+def strict_failures(rows, variant='build'):
+    """cases where the variant differs from an order every MSVC configuration agrees on (msvc-varies is allowed)"""
+    return [r['case'] for r in rows if r.get('verdicts', {}).get(variant, r['verdict'] if variant == 'build' else None)
+            == 'differs']
 
 
 def summary(rows):
@@ -154,6 +190,11 @@ def markdown(rows, msvc, gcc):
     out += ['', '| class | ' + ' | '.join(('same', 'differs', 'msvc-varies')) + ' |', '|---|---:|---:|---:|']
     for cls, s in summary(rows).items():
         out.append('| %s | %d | %d | %d |' % (cls, s.get('same', 0), s.get('differs', 0), s.get('msvc-varies', 0)))
+    if len(vars_) > 1:
+        out += ['', '| GCC variant | cases that differ from an agreed MSVC order |', '|---|---|']
+        for v in vars_:
+            bad = strict_failures(rows, v)
+            out.append('| %s | %d%s |' % (v, len(bad), (': ' + ', '.join(bad)) if bad else ''))
     return '\n'.join(out) + '\n'
 
 
@@ -168,17 +209,32 @@ def main():
     ap.add_argument('--out')
     ap.add_argument('--md')
     ap.add_argument('--strict', action='store_true')
+    ap.add_argument('--strict-variant', default='build')
+    ap.add_argument('--msvc-stdout', nargs=2, metavar=('SRC', 'OUT'))
     a = ap.parse_args()
     scratch = Path(a.scratch).resolve()
     scratch.mkdir(parents=True, exist_ok=True)
+    decomp = os.environ.get('DECOMP') or str(PORT / 'ext/fnv_decomp')
+    if a.msvc_stdout:
+        text, varies = agreed_stdout(msvc_outputs(scratch, decomp, Path(a.msvc_stdout[0]).resolve()))
+        if text is None:
+            for line, at in varies:
+                print('line %d varies: %s' % (line, ', '.join('%s %r' % kv for kv in sorted(at.items()))))
+            sys.exit(1)
+        Path(a.msvc_stdout[1]).write_text(text)
+        print('order_check: %d lines, identical in %s' % (len(text.splitlines()), ', '.join(
+            '%s-%s' % (c, t) for c, t, _ in MSVC_CONFIGS)))
+        return
     if a.msvc:
-        msvc = run_msvc(scratch, os.environ.get('DECOMP') or str(PORT / 'ext/fnv_decomp'))
+        msvc = run_msvc(scratch, decomp)
         if a.record:
             Path(a.record).write_text(json.dumps(dict(format=FORMAT, source='tests/s11/order/order.cpp',
                                                       msvc=msvc), indent=1, sort_keys=True) + '\n')
     else:
         msvc = json.loads(Path(a.msvc_results).read_text())['msvc']
     extra = dict(GCC_VARIANTS)
+    if '"object"' in (PORT / 'toolchain/order/fnvnx_order.cc').read_text():
+        extra.update(S12_VARIANTS)
     if a.gcc_extra:
         extra = {k: v.split() for k, _, v in (g.partition('=') for g in a.gcc_extra)}
     gcc = run_gcc(scratch, extra) if a.gcc else {}
@@ -190,8 +246,11 @@ def main():
     if a.md:
         Path(a.md).write_text(md)
     print(md)
-    if a.strict and gcc and any(r['verdict'] == 'differs' for r in rows):
-        sys.exit(1)
+    if a.strict and gcc:
+        if a.strict_variant not in gcc:
+            raise SystemExit('order_check: no GCC variant %s (have %s)' % (a.strict_variant, ', '.join(gcc)))
+        if strict_failures(rows, a.strict_variant):
+            sys.exit(1)
 
 
 if __name__ == '__main__':

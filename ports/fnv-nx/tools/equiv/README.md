@@ -70,8 +70,10 @@ recipe functions in them is present in its object with exactly the recipe size (
     equiv.py layouts DECOMP OBJDIR_A OBJDIR_B [--show CLASS,..]    MSVC class layouts of two --layout builds
     equiv.py report BASE.jsonl HEAD.jsonl --out R.md [--attr A.jsonl] [--eh A B]   markdown report of a gate
     merge_reports.py R1.md R2.md ... | --git CLONE [--farms eq1,..] [--commit C12]   one summary of shard reports
-    order_check.py SCRATCH [--msvc [--record F]] [--gcc] [--strict]   evaluation order MSVC vs the build (S12's
-                                                    ORDER-OBJECT / ORDER-OPERATOR; docs/EQUIVALENCE.md)
+    order_check.py SCRATCH [--msvc [--record F]] [--gcc] [--strict [--strict-variant V]]   evaluation order MSVC
+                                                    vs the build (S12's ORDER-OBJECT / ORDER-OPERATOR; EQUIVALENCE.md)
+    order_check.py SCRATCH --msvc-stdout SRC.cpp OUT   another order program's stdout, the same in every MSVC
+                                                    configuration (S12's evalorder.msvc.expect)
 
 Prepared trees get `msvc/fnvnx_*.h` (MSVC meanings of the fnv-nx shim headers: the real SDK / CRT; `--lean` builds
 the stand-in `<windows.h>` with WIN32_LEAN_AND_MEAN) and `/FI msvc/fnvnx_equiv_compat.h`; both sides get
