@@ -19,13 +19,15 @@ render machine merges it.
    Metric: skipped draws = 0, and every capture scene passing (menu, docmitchell, and S5-data's new ones).
 2. Only after that, family by family: hand-written GLSL, then GPU tuning. Each step is measured against
    Translated on the captures, at equal pixels and lower GPU time.
-Until step 1 holds, family streams (render-lit, render-land, G1-gpu) work on correctness and measurement:
+Until step 1 holds, family streams (render-lit, render-land, render-veg, G1-gpu) work on correctness and measurement:
 - the family's parity on the captures;
 - defects in the Translated path or the state emulation, with failing tests;
 - cost-model accuracy.
 They do not switch families to native.
 
 Rules for family streams:
+- Block structs may live in the stream's own header (e.g. `n1/veg_families.h`) until the render machine takes
+  them into `families.h`.
 - Family code lives in your family's files: `shaders/<family>*.glsl`, a family module under `n1/`, and the
   family's scenes and tests under `tests/s6n/`.
 - You may add or change only your family's row in the dispatch table, and only your family's override rows.
@@ -48,9 +50,9 @@ Rules for family streams:
 | water | WATER*, wading, interior, LOD water | - | skipped -> Translated | render-land | open |
 | depth / shadow | ZONLY, DEPTHMAP, 3XDEPTH*, GRASS_SHADOW, shadow maps | depth, depth_at | skipped -> Translated | render-land | open |
 | image space: world chain | HDR, bloom/blur, DOF, radial blur, sunbeams, refraction, cinematic, VATS, night vision, ... | - | skipped -> Translated | render-land | open |
-| trees | SpeedTree branch/frond/leaf/billboard | - | skipped -> Translated | unclaimed | open |
-| grass | GRASS* | - | skipped -> Translated | unclaimed | open |
-| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - | skipped -> Translated | unclaimed | open |
+| trees | SpeedTree branch/frond/leaf/billboard | - | skipped -> Translated | render-veg | open |
+| grass | GRASS* | - | skipped -> Translated | render-veg | open |
+| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - | skipped -> Translated | render-veg | open |
 | GPU cost model and pass structure | render/native/perf (gpu_cost.py, gen_stream.py, report.*), pass order, early-z, sorting | - | - | G1-gpu (with the render machine's perf work) | open |
 
 "skipped -> Translated": this pass is skipped today, and the render machine's Translated path, now in progress, will
