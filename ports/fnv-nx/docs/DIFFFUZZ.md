@@ -208,7 +208,11 @@ With `summary --effects <difffuzz.py effects output>`, a record still in triage 
 `width` -> `field-width` (real-bug S1), an image vftable stored where the native stores its own `_ZTV` address
 point -> `vptr-unpaired` (S2c), a native named stub stored or passed as data -> `native-stub-data` (S2c). A first differing store made only by the oracle at a pc
 outside the function (a callee the oracle runs, the native calls out of line and the harness intercepts) ->
-`oracle-callee-store` (artifact). A triage record in a function that calls a C++ name neither its object defines nor
+`oracle-callee-store` (artifact), only with evidence of the interception: the pc lies in a function of the address
+map (`causes.function_at`) that the native calls out of line through `__fnv_<addr>` or its link name and that its own
+object does not define (the unit's own functions run natively). Never for `native-inlined`, `native-early-exit` or
+`x86-only-store` (`causes.NOT_INTERCEPTED`: the native never made the call or ran the callee's code itself; V1
+tests/v1/test_s13b_callee_store.py C1-C3); without the object or the map the record stays in triage. A triage record in a function that calls a C++ name neither its object defines nor
 the address map binds -> `after-native-undefined` (real-bug S1: the native side got a canned result).
 
 `causes.POLICY` gives every cause a class (by-design, artifact, real-bug, triage), an owner and a reason;

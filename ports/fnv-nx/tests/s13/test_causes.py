@@ -178,8 +178,36 @@ def test_rules():
         check(causes.refine(dict(rec(mw), _file='e2.json'), 'unclassified') == 'vptr-unpaired', 'effects: vptr-unpaired')
         check(causes.refine(dict(rec(mw), _file='e3.json'), 'unclassified') == 'native-stub-data',
               'effects: native named stub stored')
-        check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
-              'effects: store made by a callee only the oracle runs')
+        # oracle-callee-store needs evidence that the harness intercepted the call (V1 C1-C3): the store's pc is in
+        # a callee the native calls out of line through a name its own object does not define
+        check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'unclassified',
+              'effects: callee store without object evidence stays open')
+        saved = (causes.native_callees, causes.function_at, dict(causes._OBJ_CACHE), os.environ.get('FNVNX_CAUSES_OBJ'))
+        try:
+            os.environ['FNVNX_CAUSES_OBJ'] = '/nonexistent-obj'
+            obj = os.path.join('/nonexistent-obj', 'src_t.cpp.o')
+            causes.function_at = lambda pc: 0x0044dee0 if 0x0044dee0 <= pc < 0x0044df00 else None
+            causes.native_callees = lambda src, a: {'__fnv_0044dee0', 'memset'}
+            causes._OBJ_CACHE[obj] = {'_defined': {'__fnv_00401000'}}
+            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
+                  'effects: store made by a callee the native calls out of line (intercepted)')
+            for c in causes.NOT_INTERCEPTED:
+                check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), c) == c,
+                      'effects: %s is never a callee-store artefact' % c)
+            causes._OBJ_CACHE[obj] = {'_defined': {'__fnv_00401000', '__fnv_0044dee0'}}
+            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'unclassified',
+                  'effects: a callee the unit defines runs natively, not intercepted')
+            causes._OBJ_CACHE[obj] = {'_defined': {'__fnv_00401000'}}
+            causes.native_callees = lambda src, a: {'memset'}
+            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'unclassified',
+                  'effects: the native never calls that callee: stays open')
+        finally:
+            causes.native_callees, causes.function_at = saved[0], saved[1]
+            causes._OBJ_CACHE.clear(); causes._OBJ_CACHE.update(saved[2])
+            if saved[3] is None:
+                os.environ.pop('FNVNX_CAUSES_OBJ', None)
+            else:
+                os.environ['FNVNX_CAUSES_OBJ'] = saved[3]
         check(causes.refine(dict(rec(mw, addr='0044dee0'), _file='e4.json', _size=0x40), 'unclassified') ==
               'unclassified', 'effects: store inside the function stays open')
         check(causes.refine(dict(rec(mw), _file='e1.json'), 'uninit-arm') == 'uninit-arm',
