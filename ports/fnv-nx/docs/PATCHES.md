@@ -265,8 +265,10 @@ are `pop-mismatch,ref-passes-fewer`, the same calls as popscan's `fewer` familie
 
 By boot distance (direct calls and the tables a function refers to, from WinMain and the 6,266 dynamic initializers;
 29,034 functions reached): of the open callers, `fix-donor` 53 and `fix-other` 17 are within 4 calls, and the three
-main.cpp callers among them are patched in `xinc1_pop_boot.s1b`. The two at distance 1 are open: 0x00448420 (three
-chains of 0x00559450 / 0x0044ac40 spelled through a local) and 0x0086c010 (one push shared by two calls).
+main.cpp callers among them are patched in `xinc1_pop_boot.s1b`. The two at distance 1 are patched there too:
+0x00448420 (three `D(item.FUN_00559450(0))` calls: 0x00559450 is a plain-`ret` getter, the 0 is 0x0044ac40's second
+word, `ret 8`) and 0x0086c010 (`push value; push 0xc` before the image-space manager getter 0x004e3270: 0xc is
+0x004ebbc0's index, value is 0x005b9f80's float, each `ret 4`); MSVC identical (both units, 417 functions).
 
 ## By-design MSVC differences (S11 gate)
 

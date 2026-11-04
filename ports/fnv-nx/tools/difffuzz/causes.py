@@ -104,6 +104,9 @@ POLICY = {
                                                           'leaked to the x86 machine through the harness'),
     'literal-store':  ('artifact', 'S13', False, 'a pointer to a literal stored: the oracle\'s pinned-pool copy vs '
                                                  'the native unit\'s .rodata copy (stores do not compare pointees)'),
+    'oracle-callee-store': ('artifact', 'S13', False, 'the first differing store is made by a callee the oracle '
+                                                      'runs (preloaded or followed) while the native calls it out of '
+                                                      'line and the harness intercepts it: no side effects natively'),
     'no-native-entry': ('artifact', 'S13', False, 'the native image has no entry for the function (link subset)'),
     # --- real bugs -----------------------------------------------------------------------------------------------
     'uninit-arm':     ('real-bug', 'S1b', True, 'the native result depends on garbage: an argument slot the caller '
@@ -119,8 +122,15 @@ POLICY = {
                                                 'variable or table (or a literal: check the pointee)'),
     'vptr-unpaired':  ('real-bug', 'S2c', False, 'no kind-V row pairs the native vtable with the image vftable'),
     'falloff?':       ('real-bug', 'S1', True, 'the native runs off a function end (FALL1)'),
+    'after-native-undefined': ('real-bug', 'S1', True, 'the function calls a C++ name the link binds to nothing '
+                                                       '(native-undefined): the native side gets a canned result '
+                                                       'where the oracle runs the body; fix the name, then re-fuzz'),
     'native-trap':    ('real-bug', 'S1', True, 'the native executes a trap (FALL1 __builtin_trap or GCC '
                                                'unreachable) on a path where the exe returns'),
+    'layout-offset':  ('real-bug', 'S1', True, 'a pointer into the same object at another offset (a few words): a '
+                                               'base subobject or member placed differently (layout)'),
+    'field-width':    ('real-bug', 'S1', True, 'the machines read one field with another width or signedness '
+                                             '(char vs int, short vs int, bool byte vs word): a member type differs'),
     'stack-protector': ('real-bug', 'S1', True, 'the native overruns a local buffer that MSVC\'s frame tolerated'),
     'native-null-read': ('real-bug', 'S1', True, 'the native dereferences a near-null address the oracle never '
                                                  'touches (a field read at another offset, or a hoisted load)'),
@@ -260,6 +270,9 @@ def _rule_call_args(d):
         objs = (BUFS, HEAP)
         if (_in(vx, STACK) and any(_in(va, o) for o in objs)) or (_in(va, STACK) and any(_in(vx, o) for o in objs)):
             return 'arg-stack-vs-object'
+        for reg in (BUFS, HEAP, WINDOW):
+            if _in(vx, reg) and _in(va, reg) and 0 < abs(vx - va) <= 0x100 and (vx - va) % 4 == 0:
+                return 'layout-offset'      # the same object, another member offset (base or field placement)
         if _in(vx, BUFS) and _in(va, BUFS):
             return 'arg-other-buffer'
     return None
@@ -440,11 +453,28 @@ def _scan_object(path):
         for spans in by_sec.values():
             for lo, hi, a in spans:
                 out.setdefault(a, set())
+        out['_defined'] = {sy.name for sy in syms if isinstance(sy['st_shndx'], int) and sy.name}
     return out
+
+
+def unbound_callees(source, addr):
+    """C++ names the native function calls that neither its object defines nor the link's address map binds
+    (declared-only members, inline functions never emitted): the native side calls a trap stub there. None
+    without the object or the map."""
+    cs = native_callees(source, addr)
+    if cs is None:
+        return None
+    _load_addrmap()
+    if not _LINKSYM:
+        return None
+    path = os.path.join(_obj_dir(), source.replace('/', '_') + '.o')
+    defined = (_OBJ_CACHE.get(path) or {}).get('_defined', set())
+    return sorted(n for n in cs if n.startswith('_Z') and n not in defined and n not in _BOUND)
 
 
 _VFT = None
 _LINKSYM = None
+_BOUND = set()           # every link_symbol / native_symbol the address map names
 
 
 def image_vftables():
@@ -484,6 +514,9 @@ def _load_addrmap():
                     _VFT.add(a)
                 elif f[2]:
                     _LINKSYM[a] = f[2]
+                _BOUND.add(f[2])
+                if len(f) > 3:
+                    _BOUND.add(f[3].split('\t', 1)[0])
 
 
 def _is_dtor(sym):
@@ -498,6 +531,53 @@ def _calls_allocator(rec):
     return bool(cs and cs & ALLOCATORS)
 
 
+# ------------------------------------------------------------------ rules over `difffuzz.py effects` output
+#
+# `difffuzz.py effects --list <files> --out <effects.jsonl>` replays each record with every data access logged and
+# names the first effect the machines disagree on. Where such a line exists for a record (summary --effects), these
+# rules refine what the record rules left in triage.
+
+EFFECTS = {}            # reproducer basename -> effects line
+
+
+def load_effects(paths):
+    for p in paths:
+        for line in open(p):
+            line = line.strip()
+            if line:
+                e = json.loads(line)
+                if e.get('file'):
+                    EFFECTS[os.path.basename(e['file'])] = e
+
+
+def _rule_effects(e, rec=None):
+    f = e.get('first')
+    if f == 'width':
+        return 'field-width'
+    if f == 'store':
+        st = e.get('store') or {}
+        try:
+            a, n = int((rec or {}).get('address') or e.get('address') or '0', 16), int((rec or {}).get('_size') or 0)
+            pc = int(((st.get('x86') or {}).get('pc')) or '0', 16)
+        except (TypeError, ValueError):
+            a = n = pc = 0
+        if n and pc and not st.get('arm') and not a <= pc < a + n:
+            return 'oracle-callee-store'      # the store is made by a callee the oracle runs, the native intercepts
+        w = st.get('word') or {}
+        x, a = str(w.get('x86') or ''), str(w.get('arm') or '')
+        if x.startswith('image address') and 'native image .data.rel.ro _ZTV' in a:
+            return 'vptr-unpaired'
+        if 'native named stub' in a or 'native stub' in a:
+            return 'native-stub-data'
+    if f == 'value':
+        v = e.get('value') or {}
+        a = str(v.get('arm') or '')
+        if 'native named stub' in a or 'native stub' in a:
+            return 'native-stub-data'
+    return None
+
+
+TRIAGE_REFINABLE = {c for c, v in POLICY.items() if v[0] == 'triage'}
 REFINABLE = (None, 'unclassified', 'call-flow', 'signedness?')
 
 
@@ -505,7 +585,7 @@ def refine(rec, cause=None):
     """The record-level cause of a divergence the probes left at `cause` (unclassified / call-flow / signedness?),
     or `cause` itself when no rule applies. Never overrides a probe's definite cause."""
     if cause not in REFINABLE:
-        return cause
+        return _with_effects(rec, cause)
     d = (rec.get('_now') or rec.get('divergence') or {})
     k = d.get('kind')
     got = None
@@ -522,9 +602,22 @@ def refine(rec, cause=None):
     elif k in ('call-count', 'call-target'):
         got = _rule_calls(d, rec)
     if got is None:
-        return cause or 'unclassified'
-    # a probe that saw call-flow stays call-flow unless the record names something more specific
-    return got
+        got = cause or 'unclassified'
+    return _with_effects(rec, got)
+
+
+def _with_effects(rec, cause):
+    if cause not in TRIAGE_REFINABLE:
+        return cause
+    e = EFFECTS.get(os.path.basename(rec.get('_file') or rec.get('_p') or '')) if EFFECTS else None
+    got = _rule_effects(e, rec) if e else None
+    if got:
+        return got
+    try:
+        u = unbound_callees(rec.get('source'), int(rec.get('address') or '0', 16))
+    except (ValueError, TypeError):
+        u = None
+    return 'after-native-undefined' if u else cause
 
 
 # ------------------------------------------------------------------------------------------------------- summary
@@ -554,6 +647,8 @@ def _load_campaign(d, tag=''):
             continue
         rec = json.load(open(p))
         rec['_now'] = now.get(os.path.basename(p))
+        rec['_file'] = os.path.basename(p)
+        rec['_size'] = (results.get(rec.get('address')) or {}).get('size')
         try:
             rec['_cause'] = report.reclassify(rec)
         except Exception:  # noqa: BLE001 - a record the static reclassifier cannot read keeps its hint
@@ -644,6 +739,7 @@ def main(argv=None):
     s = sub.add_parser('summary')
     s.add_argument('dirs', nargs='+')
     s.add_argument('--recheck-tag', default='')
+    s.add_argument('--effects', action='append', default=[], help='difffuzz.py effects output (JSON lines)')
     s.add_argument('--out', default='')
     m = sub.add_parser('merge')
     m.add_argument('files', nargs='+')
@@ -651,6 +747,8 @@ def main(argv=None):
     e = sub.add_parser('explain')
     e.add_argument('files', nargs='+')
     a = ap.parse_args(argv)
+    if a.cmd == 'summary' and a.effects:
+        load_effects(a.effects)
     if a.cmd in ('summary', 'merge'):
         out = summarize(a.dirs, a.recheck_tag) if a.cmd == 'summary' else merge(a.files)
         txt = json.dumps(out, indent=1, sort_keys=True)

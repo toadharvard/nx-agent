@@ -2271,6 +2271,44 @@ def _nonconst_ref(param):
     if '&&' in p or not re.search(r'&\s*(?:[A-Za-z_]\w*)?\s*(?:\[[^\]]*\])?$', p): return False
     return not re.search(r'\bconst\b', p[:p.rfind('&')])
 
+_RREF_CLASS_HEAD = re.compile(r'\b(?:class|struct|union)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)')
+_RREF_MEMBER_HEAD = re.compile(r'([A-Za-z_]\w*)\s*(?:<[^<>()]*>\s*)?::\s*~?[A-Za-z_]\w*\s*\(')
+
+def _rref_member_class(text, spans, pos):
+    """The class whose member function body holds pos (`T C::f(...) {` or a function defined in C's body), or None."""
+    cls = None
+    for k, h in prepare.scope_chain(spans, pos):
+        if k == 'class':
+            m = _RREF_CLASS_HEAD.search(h)
+            cls = m.group(1) if m else None
+        elif k == 'function':
+            m = list(_RREF_MEMBER_HEAD.finditer(h.split('(')[0] + '('))
+            if m: cls = m[-1].group(1)
+            return cls
+    return None
+
+def _rref_class_shapes(unit, cls, name, cache):
+    """[[non-const reference per parameter]] of the declarations of member `name` in the nearest class, starting at
+    cls and going through its bases, that declares it (class scope lookup); [] when none does."""
+    key = (cls, name)
+    if key in cache: return cache[key]
+    found, level, seen = [], [cls], set()
+    while level and not found and len(seen) < 16:
+        nxt = []
+        for c in level:
+            if c in seen: continue
+            seen.add(c)
+            for body, bases in _class_bodies(unit, c):
+                for d in RREF_DECL.finditer(body):
+                    if d.group(2) != name or d.group(1) in RREF_NOT_TYPE: continue
+                    params = d.group(3).strip()
+                    ps = [] if params in ('', 'void') else _split_args(params)
+                    found.append([_nonconst_ref(p) for p in ps])
+                nxt += [b for b in bases if b]
+        level = nxt
+    cache[key] = found
+    return found
+
 def r_temporaries_to_references(path, text, stats):
     """RREF1: fnvnx_lvalue around a temporary passed to a non-const reference parameter (see above)."""
     if '&' not in text or not path.endswith('.cpp'): return text
@@ -2288,7 +2326,7 @@ def r_temporaries_to_references(path, text, stats):
     bodies = []
     for o, c, k, _ in spans:
         if k == 'function' and not (bodies and o < bodies[-1][1]): bodies.append((o, c))
-    edits, bi = [], 0
+    edits, bi, class_cache = [], 0, {}
     for m in call.finditer(text):
         while bi < len(bodies) and bodies[bi][1] < m.start(): bi += 1
         if bi == len(bodies) or not bodies[bi][0] < m.start(): continue
@@ -2299,6 +2337,15 @@ def r_temporaries_to_references(path, text, stats):
         args = _split_args(text[m.end():close - 1])
         if args == ['']: args = []
         shapes = [r for r in refs[m.group(1)] if len(r) == len(args)]
+        cls = _rref_member_class(text, spans, m.start())
+        if cls and not re.search(r'(?:\.|->|::)\s*$', before):
+            # an unqualified call in a member function of cls: class scope is searched first, so the class's own
+            # declarations of the name (or the nearest base's) are the candidates where it has any (RREF1-CLASS)
+            own = _rref_class_shapes(unit, cls, m.group(1), class_cache)
+            if own:
+                own = [r for r in own if len(r) == len(args)]
+                if own != shapes and own: stats['RREF1-CLASS'] += 1
+                shapes = own
         if not shapes: continue
         at = m.end()
         for i, a in enumerate(args):
@@ -3371,3 +3418,103 @@ def r_friend_class_visibility(path, text, stats):
 
 RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]
+
+# ==================================================================================================== stream S1-refs
+#
+# Rules of the S1-refs stream (references to temporaries, overload ambiguities, single-unit errors). They run after
+# every rule above, in the order of REFS_RULES (appended to RULES at the end of this section).
+
+# ---------------------------------------------------------------------------------------------------------- RREF2
+#
+# RREF1 for operators: `a != T(0)` where class T's own `bool operator!=(T& other)` takes a non-const reference. MSVC
+# binds the temporary T(0) to it (alive to the end of the full expression); GCC refuses. RREF2 wraps the functional
+# cast in fnvnx_lvalue where every member operator of that symbol the unit declares with a parameter of type T takes
+# it by non-const reference (so no other overload could have been chosen).
+
+RREF2_OPS = r'==|!=|\+=|-=|\*=|/=|\+|-|\*|/'
+RREF2_DECL = re.compile(r'\boperator\s*(%s)\s*\(\s*((?:const\s+)?(?:volatile\s+)?[A-Za-z_]\w*(?:\s*const)?\s*[&*]?)'
+                        r'\s*[A-Za-z_]\w*\s*\)' % RREF2_OPS)
+
+def r_operator_temporaries(path, text, stats):
+    """RREF2: `x OP T(args)` -> `x OP fnvnx_lvalue(T(args))` where the unit's member operators OP with a T parameter
+    all take a non-const T& (see above)."""
+    if 'operator' not in text and '#include' not in text: return text
+    if not path.endswith('.cpp'): return text
+    unit = '\n'.join(t for _, t in _closure(path, text)) if '#include' in text else COMMENT.sub(' ', text)
+    kinds = {}                                       # (op, T) -> {non-const reference?}
+    for m in RREF2_DECL.finditer(unit):
+        p = re.sub(r'\s+', ' ', m.group(2)).strip()
+        t = re.sub(r'\b(?:const|volatile)\b|[&*]', ' ', p).split()
+        if not t: continue
+        kinds.setdefault((m.group(1), t[0]), set()).add(p.endswith('&') and 'const' not in p.split())
+    want = sorted(k for k, v in kinds.items() if v == {True})
+    if not want: return text
+    spans = prepare.scope_spans(text)
+    edits = []
+    for op, t in want:
+        for m in re.finditer(r'(?<![=!<>+\-*/&|^%%])(%s)\s*(%s)\s*\(' % (re.escape(op), re.escape(t)), text):
+            if 'function' not in [k for k, _ in prepare.scope_chain(spans, m.start())]: continue
+            edits.append((m.start(2), _call_end(text, m.end() - 1)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append('fnvnx_lvalue(' + text[a:b] + ')'); pos = b
+        stats['RREF2'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- ADDR1
+#
+# MSVC takes the address of a class rvalue (an extension, warning C4238): `(const Vec*)&_mm_andnot_ps(m, v)` hands
+# the callee the address of the returned __m128 temporary, alive to the end of the full expression. GCC refuses the
+# address of an rvalue. ADDR1 spells the operand fnvnx_lvalue(...): the same temporary as an lvalue, for the same
+# lifetime. Only intrinsic calls (`_mm_*`), only as the operand of a unary `&` (after `(`, `,`, `=`, `return` or a
+# pointer cast).
+
+ADDR1_SITE = re.compile(r'(?:(?<=[(,=])|(?<=\breturn)|(?<=\*\)))(\s*&\s*)(_mm_\w+\s*\()')
+
+def r_address_of_temporaries(path, text, stats):
+    """ADDR1: `&_mm_f(args)` (the address of a returned vector temporary) -> `&fnvnx_lvalue(_mm_f(args))`."""
+    if '&' not in text or '_mm_' not in text: return text
+    out, pos = [], 0
+    for m in ADDR1_SITE.finditer(text):
+        if m.start() < pos: continue
+        if m.group(0).lstrip().startswith('&&'): continue
+        close = _call_end(text, m.end() - 1)
+        out.append(text[pos:m.start(2)]); out.append('fnvnx_lvalue(' + text[m.start(2):close] + ')'); pos = close
+        stats['ADDR1'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- LANE1
+#
+# SSE1 turns a lane array `v.m128_f32` into `((float*)&(v))`, a pointer prvalue. Where the decomp takes the address
+# of the whole array (`(&v.m128_f32)[0]`, `(0)[&v.m128_f32]`: a float[4] lvalue that decays to the first lane's
+# address) that gives `&((float*)&(v))`, the address of an rvalue. LANE1 writes the array pointer itself:
+# `((float(*)[sizeof(v) / sizeof(float)])&(v))`, the same address with the same type as MSVC's `&v.m128_f32`.
+
+LANE1_SITE = re.compile(r'&\s*\(\(\s*((?:unsigned\s+|signed\s+)?(?:float|double|int|char|short|long\s+long|__int64|'
+                        r'__int32|__int16|__int8))\s*\*\s*\)\s*&\s*\(')
+
+def r_lane_array_address(path, text, stats):
+    """LANE1: `&((T*)&(v))` (SSE1's lane array, its address taken) -> `((T(*)[sizeof(v) / sizeof(T)])&(v))`."""
+    if 'm128' not in text and '*)&(' not in text: return text
+    out, pos = [], 0
+    for m in LANE1_SITE.finditer(text):
+        if m.start() < pos: continue
+        inner_end = _call_end(text, m.end() - 1)                 # past `(v)`
+        if text[inner_end:inner_end + 1] != ')': continue
+        after = text[inner_end + 1:inner_end + 40].lstrip()
+        if after.startswith(('[', '.', '->')): continue          # `&((T*)&(v))[i]`: a lane's address, fine
+        t, v = m.group(1), text[m.end() - 1:inner_end]
+        out.append(text[pos:m.start()])
+        out.append('((%s(*)[sizeof%s / sizeof(%s)])&%s)' % (t, v, t, v)); pos = inner_end + 1
+        stats['LANE1'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
+REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address]
+RULES += REFS_RULES

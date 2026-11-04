@@ -5,6 +5,7 @@
 #include "nx/skin.h"
 #include "../../render/native/gl/nxgl.h"
 #include <stdio.h>
+#include <algorithm>
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -189,7 +190,57 @@ static void test_ubo_ring_capacity() {
     be.info.frames_in_flight = 2;
 }
 
+static void test_sort_property() {
+    // stable and equal to std::stable_sort on random 64-bit keys with many ties (C65's property, 8-bit digits)
+    static nx::Packet pk[4000];
+    static uint32_t order[4000], tmp[4000], ref[4000];
+    static uint64_t keys[4000], ktmp[4000];
+    uint64_t rng = 12345;
+    auto rnd = [&]() { rng = rng * 6364136223846793005ull + 1442695040888963407ull; return rng >> 11; };
+    int bad = 0;
+    for (int set = 0; set < 200; set++) {
+        uint32_t n = 1 + (uint32_t)(rnd() % 4000);
+        uint64_t mask = rnd() | rnd() << 32;   // which key bits vary in this set
+        for (uint32_t i = 0; i < n; i++) { pk[i].key = (rnd() % 7 == 0 ? (rnd() | rnd() << 40) : (rnd() % 16) * 0x0101010101010101ull) & mask; ref[i] = i; }
+        nx::SortPackets(pk, n, order, tmp, keys, ktmp);
+        std::stable_sort(ref, ref + n, [&](uint32_t a, uint32_t b) { return pk[a].key < pk[b].key; });
+        if (memcmp(order, ref, n * 4)) bad++;
+        for (uint32_t i = 0; i < n; i++) if (keys[i] != pk[order[i]].key) { bad++; break; }
+    }
+    CHECK(bad == 0);
+}
+
+static void test_epilogue_binds() {
+    // epilogue blocks: shared by SetEpilogue while equal, and bound only when the contents change
+    static RecBe be;
+    static nx::StateCache sc;
+    static nx::Frame f;
+    CHECK(f.Init(&be, 1 << 20, 64));
+    f.Begin(0);
+    nx::PassDesc pd; memset(&pd, 0, sizeof pd); pd.color = 1; pd.width = 64; pd.height = 32;
+    uint8_t pass = f.AddPass(pd);
+    NxRenderState r = {{0, 0, 0, 0}};
+    uint16_t st = sc.State(1, 2, 0, r);
+    NxEpilogue a, b;
+    memset(&a, 0, sizeof a); memset(&b, 0, sizeof b); b.alphaRef = 0.5f; b.alphaTest = 1;
+    const NxEpilogue* seq[6] = {&a, &a, &b, &b, &a, &a};
+    uint32_t epis[6];
+    for (int i = 0; i < 6; i++) {
+        nx::Packet* p = f.Emit();
+        p->key = nx::SortKey(pass, 0, st, 0, (uint16_t)i); p->state = st; p->count = 3; p->vtxBlock = 1;
+        f.Constants(&p->uboOffset);
+        if (i < 5) f.SetEpilogue(p, *seq[i]);
+        else { NxEpilogue* e = f.Epilogue(p); *e = a; }   // a fresh block with the same contents as draw 4's
+        epis[i] = p->epi;
+    }
+    CHECK(epis[0] == epis[1] && epis[2] == epis[3] && epis[0] != epis[2] && epis[4] != epis[0] && epis[5] != epis[4]);
+    f.Finish(sc, nullptr);
+    CHECK(be.Count(NxOp_BindUbo) == 6 + 3);   // 6 per-draw slices; epilogue a, b, a (draw 5's equal block: no bind)
+}
+
 int main() {
+    test_epilogue_binds();
+    test_sort_property();
     test_ubo_ring_capacity();
     test_skin_palette();
     test_dynres();
