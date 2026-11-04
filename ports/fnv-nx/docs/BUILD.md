@@ -272,7 +272,7 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `FORCE_STALE` | 0 | 1: consume inputs prepared from another commit than the head (recorded, `warn`). |
 | `PORT_COMMIT` | | The commit of a ports/fnv-nx copy without git metadata. In a checkout it must equal HEAD. |
 | `CENSUS` | 1 | 0 skips the census. |
-| `OVERRIDE` | | fnvlink resolve `--override` file. |
+| `OVERRIDE` | `auto` | fnvlink resolve `--override` file. `auto`: the port's own replacements (`tools/link/overrides/`, built by its `build.sh` into `build/link/overrides/`); `none` or empty: off. |
 | `EXTERN_TEXT` | auto | fnvlink resolve `--extern-text`: `auto` = made from the tree's `units.json` (`tools/pipeline/extern_text.py`, S4's `addr_ids.txt`), `none` = off, or a file. |
 | `MSVC_OBJS` | | fnvlink resolve `--msvc-objs` (S11's pristine MSVC objects, S2b's vtable slots). Not used by f11/f12. |
 | `MSVC_CODE` | | fnvlink resolve `--msvc-code` (the same objects, only for the definitions' register reads: ecx-not-passed / this-not-passed judged on the MSVC code; needs python capstone). The link farm passes S11's pristine objects. |

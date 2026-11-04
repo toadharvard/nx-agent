@@ -132,3 +132,35 @@ TEST(ini_bare_name_is_windows_dir)
     CHECK(WritePrivateProfileStringA("S", "k", "v", "fnvnx_test.ini"));
     CHECK(GetFileAttributesA("C:\\Windows\\fnvnx_test.ini") != INVALID_FILE_ATTRIBUTES);
 }
+
+/* the Switch defaults (ini.cpp port_default): only the engine's ini, only keys the file lacks, [fnvnx] switch */
+TEST(ini_port_defaults)
+{
+    seed();
+    char b[64];
+    CHECK_EQ(GetPrivateProfileStringA("General", "bUseThreadedMorpher", "0", b, sizeof b, INI), 1);
+    CHECK_STR(b, "1");
+    CHECK_EQ(GetPrivateProfileIntA("GENERAL", "BUSETHREADEDPARTICLESYSTEM", 0, INI), 1);
+    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedTempEffects", 0,
+                                   "C:\\FalloutNV\\Fallout_default.ini"), 1);   /* missing file: still the engine's */
+    CHECK_EQ(GetPrivateProfileIntA("Display", "bUseThreadedMorpher", 7, INI), 7);  /* other section */
+    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedMorpher", 7,
+                                   "C:\\Users\\Player\\Documents\\My Games\\FalloutNV\\FalloutPrefs.ini"), 7);
+    CHECK_EQ(GetPrivateProfileIntA("General", "iNotInTable", 5, INI), 5);
+    /* listings stay the file's */
+    char l[256];
+    DWORD n = GetPrivateProfileStringA("General", NULL, "", l, sizeof l, INI);
+    bool listed = false;
+    for (DWORD i = 0; i < n; i += (DWORD)strlen(l + i) + 1)
+        listed |= !strcmp(l + i, "bUseThreadedMorpher");
+    CHECK(!listed);
+    /* the player's value wins */
+    CHECK(WritePrivateProfileStringA("General", "bUseThreadedMorpher", "0", INI));
+    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedMorpher", 7, INI), 0);
+    /* and [fnvnx] bPortDefaults=0 turns the table off */
+    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedParticleSystem", 7, INI), 1);
+    CHECK(WritePrivateProfileStringA("fnvnx", "bPortDefaults", "0", INI));
+    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedParticleSystem", 7, INI), 7);
+    CHECK(WritePrivateProfileStringA("fnvnx", "bPortDefaults", "1", INI));
+    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedParticleSystem", 7, INI), 1);
+}

@@ -3,3 +3,10 @@
 # address	native symbol	source (this directory)	MSVC signature the references are checked against
 00703c00	fnvnx_log_00703c00	log_00703c00.c	?FUN_00703c00@@YAHPBDZZ
 0040fba0	fnvnx_spin_unlock_0040fba0	spinlock_0040fba0.c	?FUN_0040fba0@RecursiveSpinLock@@QAEXXZ
+00a6e330	fnvnx_slerp_00a6e330	slerp_00a6e330.c	?Slerp@NiQuaternion@@QAEXMABV1@0@Z
+00a7fdd0	fnvnx_nibound_update_00a7fdd0	nibound_update_00a7fdd0.c	?Update@NiBound@@QAEXABV1@ABVNiTransform@@@Z
+00a588a0	fnvnx_mat3_tmul_00a588a0	mat3_tmul_00a588a0.c	?FUN_00a588a0@Matrix3A588@@QBE?AV1@ABV1@@Z
+00a6df40	fnvnx_quat_from_matrix_00a6df40	quat_from_matrix_00a6df40.c	?FromRotationMatrix@NiQuaternion@@QAEXABVThreeByThreeMatrix@@@Z
+004b6100	fnvnx_sphere_plane_004b6100	sphere_plane_004b6100.c	?ClassifySphereAgainstPlane@B_004b6100@@QAEHPAUNiPlane_004b6100@@@Z
+00a694e0	fnvnx_cull_worker_00a694e0	cull_worker_00a694e0.c	?FUN_00a694e0@WorkerS694a0@@QAEXPAUNiAVObject@@@Z
+00a68bf0	fnvnx_update_world_loc_00a68bf0	update_world_loc_00a68bf0.c	?UpdateWorldLoc@NiAVObject@@QAEXXZ

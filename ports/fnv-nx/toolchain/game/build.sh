@@ -63,10 +63,11 @@ case "${GAME_NEW:-runtime}" in
 	game) ;;
 	*) echo "GAME_NEW must be runtime or game"; exit 1 ;;
 esac
-# D3D9=null (default): headless null device (null_d3d9.cpp, generated); D3D9=external: none here, the
-# renderer (render/nine's guest-side proxy) provides Direct3DCreate9 and is added with EXTRA_OBJS.
+# D3D9=null (default): headless null device (null_d3d9.cpp, generated) and D3DX (render/nine/d3dx, on top of any
+# IDirect3DDevice9; flags as render/nine/game/build.sh's); D3D9=external: none here, the renderer (render/nine's
+# guest-side proxy) provides Direct3DCreate9 and D3DX and is added with EXTRA_OBJS.
 case "${D3D9:-null}" in
-	null) SRCS+=("$TC/game/null_d3d9.cpp") ;;
+	null) SRCS+=("$TC/game/null_d3d9.cpp" "$ROOT"/render/nine/d3dx/*.cpp) ;;
 	external) ;;
 	*) echo "D3D9 must be null or external"; exit 1 ;;
 esac
@@ -86,6 +87,7 @@ for f in "${SRCS[@]}"; do
 		*/loader/src/*) extra="-I$ROOT/loader/include -I$ROOT/loader/src" ;;
 		*/game/boot.cpp) extra="-I$ROOT/loader/include" ;;
 		*/game/null_d3d9.cpp) extra="-USTDMETHODCALLTYPE -include $ROOT/shim/include/fnvnx_compat.h -I$SSE2NEON -fms-extensions -fpermissive" ;;
+		*/render/nine/d3dx/*) extra="-USTDMETHODCALLTYPE -include $ROOT/shim/include/fnvnx_compat.h -I$SSE2NEON -fno-exceptions -fno-rtti -fno-threadsafe-statics" ;;
 	esac
 	echo "$f $o${extra:+ $extra}"
 done | xargs -P "$JOBS" -L 1 bash -c 'compile "$0" "$1" ${@:2}'

@@ -255,7 +255,15 @@ def main(argv):
         L.append('- exefs.nsp: ' + '; '.join(clean(x, 80) for x in (pk.get('pfs0') or [])[:3]))
         L.append('- guest.nso in the SD tree: %s' % ('yes' if any(n.endswith('guest.nso') for n, _ in pk['sd_files'])
                                                    else 'NO'))
-    else:
+        L.append('- fnv.nro in the SD tree: %s' % ('yes' if any(n.endswith('fnv.nro') for n, _ in pk['sd_files']) else 'NO'))
+    if pk.get('check_package_rc') is not None:
+        L.append('- check_package: exit %d' % pk['check_package_rc'])
+    if pk.get('nx1'):
+        L.append('- nx1: open device-readiness checks = %s of %d (tests/nx1/run.py)' % (
+            fmt(pk.get('metrics', {}).get('nx1_open')), len(pk['nx1'])))
+        L.append('')
+        L += table(['check', 'name', 'status', 'note'], [(n, c, st, clean(note, 110)) for n, c, st, note in pk['nx1']])
+    if not pk.get('sd_files') and not pk.get('nx1'):
         L.append('- %s' % clean(pk.get('summary') or pk.get('error') or pk.get('status') or 'not run'))
     L.append('')
     te = R['tests']

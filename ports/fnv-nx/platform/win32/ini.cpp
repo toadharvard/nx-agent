@@ -15,6 +15,12 @@
  *  - GetPrivateProfileInt parses like RtlUnicodeStringToInteger(base 0): blanks, sign, 0x/0o/0b prefixes, digits
  *    until the first non-digit; an empty or missing value returns the default;
  *  - a file name without a directory refers to the Windows directory (C:\Windows\name).
+ *
+ * Switch defaults (port_default below, docs/PERF.md 6.4): for Fallout.ini and Fallout_default.ini only, a key the
+ * file does not have reads as the port's value instead of the caller's default. The engine reads its settings one
+ * key at a time, so this sets the Switch value of a setting whose compiled default is the PC's; a key the player
+ * writes in the file always wins, and `bPortDefaults=0` in the file's [fnvnx] section turns the table off. Key and
+ * section listings are the file's alone.
  */
 #include "w32.h"
 
@@ -234,6 +240,38 @@ DWORD copy_value(const std::string &v, LPSTR buf, DWORD size)
     return n;
 }
 
+/* The Switch values of engine settings (section, key, value). Each row names what it turns on and why it is safe:
+ * docs/PERF.md 6.4 and 11. */
+struct PortDefault {
+    const char *sec, *key, *val;
+};
+const PortDefault k_port_defaults[] = {
+    /* threaded_anim: morph, particle and temporary-effect updates through the packed task queue, which the AI linear
+     * task threads drain (cores 2 and 1). The exe's defaults are 0; the PC's Fallout_default.ini turns them on. */
+    {"General", "bUseThreadedMorpher", "1"},
+    {"General", "bUseThreadedParticleSystem", "1"},
+    {"General", "bUseThreadedTempEffects", "1"},
+    /* not bMTRendering:Display: on the PC code the worker would share main's batch renderer and index a NULL second
+     * one (docs/PERF.md 6.8); it needs port code first. */
+};
+
+/* the base name of an ini path, lower case */
+std::string ini_base(const char *file)
+{
+    const char *b = file;
+    for (const char *p = file; *p; p++)
+        if (*p == '\\' || *p == '/' || *p == ':')
+            b = p + 1;
+    std::string r(b);
+    for (char &c : r)
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+    return r;
+}
+
+/* the port's value of sec/key when f is the engine's ini and does not switch the table off, else NULL */
+const char *port_default(const IniFile *f, const char *file, const char *sec, const char *key);
+
 DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, DWORD size, const char *file)
 {
     size = W32_DW(size);
@@ -269,7 +307,11 @@ DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, D
                 for (size_t i = a + 1; i < b && !found; i++)
                     if (key_of(f->lines[i], k, &v) && ieq(k, key))
                         found = true;
-            if (!found) {
+            const char *pd = found ? NULL : port_default(f, file, sec, key);
+            if (pd) {
+                v = pd;
+                SetLastError(ERROR_SUCCESS);
+            } else if (!found) {
                 v = def ? def : "";
                 while (!v.empty() && v.back() == ' ')
                     v.pop_back();
@@ -282,6 +324,26 @@ DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, D
     }
     os_unlock(&g_ini_lock);
     return r;
+}
+
+const char *port_default(const IniFile *f, const char *file, const char *sec, const char *key)
+{
+    std::string base = ini_base(file);
+    if (base != "fallout.ini" && base != "fallout_default.ini")
+        return NULL;
+    const PortDefault *hit = NULL;
+    for (const PortDefault &d : k_port_defaults)
+        if (!w32_stricmp(d.sec, sec) && !w32_stricmp(d.key, key))
+            hit = &d;
+    if (!hit)
+        return NULL;
+    size_t a, b;
+    std::string k, v;
+    if (find_section(f, "fnvnx", a, b))
+        for (size_t i = a + 1; i < b; i++)
+            if (key_of(f->lines[i], k, &v) && ieq(k, "bPortDefaults"))
+                return atoi(v.c_str()) ? hit->val : NULL;
+    return hit->val;
 }
 
 } // namespace
