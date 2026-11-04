@@ -193,6 +193,7 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 | pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
 | `no-native-entry` | `no-native-entry` | artifact |
+| oracle-only data fault in the AArch64 private range | `oracle-native-address` | artifact (a native address leaked to the x86 machine) |
 | oracle-only data fault | `oracle-fault` | triage |
 | call-target: native calls a named stub `name:_Z...` | `native-undefined` | real-bug S1/S2c (fallback without the link's providers) |
 | call-target: oracle calls an import, native jumps to the IAT slot address | `import-slot-called` | real-bug S2c |
