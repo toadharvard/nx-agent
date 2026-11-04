@@ -20,7 +20,7 @@ C12=${COMMIT:0:12}
 # `tree` branch is used instead when its commit has the same prepare inputs as <commit> (REPO: a clone holding both
 # commits, default the repository this script lives in).
 REPO=${REPO:-$(cd "$HERE/../../../.." && pwd)}
-INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim ports/fnv-nx/tools/fetch.sh)
+INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim ports/fnv-nx/tools/fetch.sh ports/fnv-nx/render/native/drop_units.txt)
 end=$(( $(date +%s) + WAIT ))
 ref=""
 while [ -z "$ref" ]; do

@@ -32,7 +32,7 @@ elif git -C "$ARTIFACTS" rev-parse -q --verify refs/heads/tree >/dev/null; then 
 else git -C "$ARTIFACTS" checkout -q --orphan tree; fi
 
 # A commit that changes none of prepare's inputs gets the previous tree again (no 5.5 min prepare).
-INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim ports/fnv-nx/tools/fetch.sh)
+INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim ports/fnv-nx/tools/fetch.sh ports/fnv-nx/render/native/drop_units.txt)
 PREV=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$ARTIFACTS/meta.json" 2>/dev/null || true)
 REUSE=0
 if [ -n "$PREV" ] && [ -d "$ARTIFACTS/tree" ] && git -C "$REPO" cat-file -e "$PREV^{commit}" 2>/dev/null \
