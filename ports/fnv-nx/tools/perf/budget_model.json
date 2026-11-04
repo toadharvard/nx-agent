@@ -270,7 +270,7 @@
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the pool is made in the unreconstructed EnsureObjectsCreated (PERF.md 6.9)"
+   "status": "MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the whole chain (EnsureObjectsCreated 0x00cbf6b0, CreateObjects, pool ctor 0x00d2d110, dispatcher, InitHookTable and its handlers) has native code at link 06857911f5ab, both vtables complete; the run waits for a booted frame (PERF.md 6.9)"
   },
   {
    "id": "threaded_anim",
