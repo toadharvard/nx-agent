@@ -520,6 +520,154 @@ class ReadyTest(unittest.TestCase):
         self.world.edit_json('link/%s/meta.json' % C, lambda d: d.pop('check_package_rc'))
         self.assertEqual(self.gate(self.world.run(), 'package.check')['status'], 'no-data')
 
+    # ---- evidence that does not show what the gate claims (V1's R1-R12, tests/v1/test_ready_adversarial.py)
+    def test_shard_beyond_the_count_is_no_shard(self):
+        self.world.sub('reports/farm3/%s-compile.md' % C, 'shard 2/2', 'shard 3/2')
+        g = self.gate(self.world.run(), 'compile.objects')
+        self.assertEqual((g['status'], g['note']), ('no-data', 'compile shards with a report: 1 of 2'))
+        self.world.sub('reports/eq1/%s-equiv.md' % C, 'shard 1/1', 'shard 0/1')
+        self.assertEqual(self.gate(self.world.run(), 'equiv.code')['status'], 'no-data')
+
+    def test_scene_pass_must_be_true(self):
+        self.world.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'][0].update({'pass': 'false'}))
+        self.assertEqual(self.gate(self.world.run(), 'frames.compare')['status'], 'fail')
+        self.world.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'].append('main_menu'))
+        g = self.gate(self.world.run(), 'frames.compare')                # a malformed entry: no crash, no pass
+        self.assertEqual((g['status'], g['value']), ('fail', '0/2'))
+
+    def s16_gate(self, statuses, kind='port', top=None, commit=C):
+        sc = [dict(id='scene%d' % i, status=st, frames=[]) for i, st in enumerate(statuses)]
+        top = top or ('pass' if all(s == 'pass' for s in statuses) else 'fail')
+        self.world.write('reports/s16/%s-frames.json' % C, dict(
+            format='fnvnx-gate/1', gate='S16-compare', status=top, candidate=dict(kind=kind, commit=commit),
+            summary=dict(scenes=len(sc)), scenes=sc))
+
+    def test_s16_gate_file(self):
+        self.s16_gate(['pass', 'pass'])
+        g = self.gate(self.world.run(), 'frames.compare')
+        self.assertEqual((g['status'], g['value'], g['stale']), ('pass', '2/2', False))
+        self.s16_gate(['pass', 'unstable'], top='incomplete')
+        g = self.gate(self.world.run(), 'frames.compare')
+        self.assertEqual((g['status'], g['value']), ('fail', '1/2'))
+        self.assertIn('scene1 unstable', g['note'])
+        self.s16_gate(['pass'], top='fail')                              # scenes and the gate's status disagree
+        self.assertEqual(self.gate(self.world.run(), 'frames.compare')['status'], 'fail')
+        self.s16_gate(['pass'], kind='nine-replay')                      # not the port's own frames
+        g = self.gate(self.world.run(), 'frames.compare')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('not the port', g['note'])
+        self.s16_gate(['pass'], commit=None)                             # no candidate commit: stale
+        self.assertTrue(self.gate(self.world.run(), 'frames.compare')['stale'])
+
+    def test_broken_frameprof_is_no_measurement(self):
+        self.world.write('reports/prof1/%s-frameprof.json' % C, [
+            dict(label='boot until WinMain', instructions=800000000), dict(label='frame 1', instructions=0),
+            dict(label='frame 2', instructions='many'), 'junk'])
+        card = self.world.run()
+        for gid in ('perf.frame.stock', 'perf.frame.boost', 'perf.boot'):
+            g = self.gate(card, gid)
+            self.assertEqual(g['status'], 'no-data', gid)
+            self.assertIn('broken frameprof run', g['note'])
+
+    def test_render_report_must_be_plausible(self):
+        self.world.edit_json('_render/report.json', lambda d: d['summary'].update(frame_ms=dict(main=-1.0, render=-1.0)))
+        card = self.world.run()
+        g = self.gate(card, 'perf.render.boost')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('frame_ms.main.value -1.0', g['note'])
+        self.world.edit_json('_render/report.json', lambda d: d['summary'].update(
+            frame_ms=dict(main=dict(lo=7.0, hi=6.0, gate=6.0), render=0)))
+        g = self.gate(self.world.run(), 'perf.render.stock')
+        self.assertIn('frame_ms.main lo 7.0 > hi 6.0', g['note'])
+        self.assertIn('frame_ms.render.value 0', g['note'])
+        self.world.edit_json('_render/report.json', lambda d: (d['summary'].pop('frame_ms'),
+                                                                d['summary']['targets_budget_fraction']['45'].update(
+                                                                    {'1.785': -0.1})))
+        self.assertEqual(self.gate(self.world.run(), 'perf.render.boost')['status'], 'no-data')
+
+    def test_gpu_time_must_be_plausible(self):
+        self.world.edit_json('_render/report.json', lambda d: d['gpu']['summary_ms']['mix_hi']['docked_720p'].update(
+            {'eff_1.0': -3.0}))
+        g = self.gate(self.world.run(), 'perf.gpu.docked_720p')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('not a plausible time', g['note'])
+
+    def test_checksum_file_must_name_the_exe(self):
+        self.world.write('gamedata/exe/FalloutNV.exe.sha256', 'ab' * 32 + '  README\n')
+        g = self.gate(self.world.run(), 'boot.real_exe')
+        self.assertEqual(g['status'], 'no-data')                        # the image hash is not checked: no label pass
+        self.assertIn('no line for FalloutNV.exe', g['note'])
+        self.world.write('gamedata/exe/FalloutNV.exe.sha256', 'cd' * 32 + '  README\n' + 'AB' * 32 + ' *FalloutNV.exe\n')
+        self.assertEqual(self.gate(self.world.run(), 'boot.real_exe')['status'], 'pass')
+
+    def test_checksum_file_must_be_the_pinned_exe(self):
+        self.world.edit_json('thresholds.json', lambda d: d.update(player_exe_sha256='ef' * 32), port=True)
+        g = self.gate(self.world.run(), 'boot.real_exe')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('holds another exe', g['note'])
+
+    def test_failed_boot_stage_counts_nothing_of_the_link(self):
+        self.world.sub('reports/full1/%s-full.md' % C, '| boot | ok |', '| boot | fail |')
+        card = self.world.run()
+        for gid in ('boot.real_exe', 'boot.winmain', 'boot.first_cell'):
+            g = self.gate(card, gid)
+            self.assertEqual(g['status'], 'fail', gid)
+            self.assertIn('boot stage of this full build failed', g['note'])
+        self.world.sub('reports/full1/%s-full.md' % C, '| boot | fail |', '| boot | disabled |')
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'boot.real_exe')['status'], 'no-data')
+        self.assertIn('did not run the boot (stage disabled)', self.gate(card, 'boot.main_menu')['note'])
+
+    def test_milestones_json_decides_over_summary_and_meta(self):
+        self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d.update(first_cell=0, first_frame=None))
+        self.world.edit_json('link/%s/meta.json' % C, lambda d: d.update(boot_first_frame=1))
+        self.world.write('link/%s/boot/summary.txt' % C, 'fnvnx milestone: first_cell\nfnvnx milestone: first_frame\n')
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'boot.first_cell')['status'], 'fail')
+        self.assertEqual(self.gate(card, 'boot.first_frame')['status'], 'no-data')       # null: not measured
+
+    def test_malformed_link_json_does_not_crash(self):
+        self.world.write('link/%s/meta.json' % C, [1, 2])
+        self.world.write('link/%s/boot/milestones.json' % C, 'null')
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'boot.real_exe')['status'], 'no-data')
+
+    # ---- fnvnx-fuzz-summary/1 (tools/farm/fuzz_job.sh)
+    def fuzz_summary(self, k, **kw):
+        rel = 'reports/fz%d/%s-fuzz.md' % (k, C)
+        s = dict(format='fnvnx-fuzz-summary/1', commit=C, shard=k, shards=2, status='complete',
+                 functions=dict(with_native_object=10, verdicts=10, not_modelled=0))
+        for key, v in kw.items():
+            if isinstance(v, dict) and isinstance(s.get(key), dict):
+                s[key].update(v)
+            else:
+                s[key] = v
+        self.world.write(rel, self.world.read(rel) + '\n```json fnvnx-fuzz-summary\n%s\n```\n' % json.dumps(s))
+
+    def test_fuzz_summary_counts(self):
+        self.fuzz_summary(1)
+        self.fuzz_summary(2, status='partial', functions=dict(with_native_object=20, verdicts=16))
+        g = self.gate(self.world.run(), 'fuzz.coverage')
+        self.assertEqual((g['status'], g['value']), ('fail', '86.7 % (26/30)'))
+        self.assertIn('fnvnx-fuzz-summary/1 from 2 shards, partial (pending functions): 2', g['note'])
+
+    def test_fuzz_summary_of_another_shard_or_broken_harness(self):
+        self.fuzz_summary(2, shard=1)
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'fuzz.coverage')['status'], 'fail')
+        self.assertIn('missing: 2', self.gate(card, 'fuzz.coverage')['note'])
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, '"shard": 1', '"shard": 2')
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, '"complete"', '"harness-broken"')
+        self.assertIn('missing: 2', self.gate(self.world.run(), 'fuzz.coverage')['note'])
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, '"harness-broken"', '"complete"')
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'shard 2/2', 'shard 2/2 - HARNESS BROKEN')
+        self.assertIn('missing: 2', self.gate(self.world.run(), 'fuzz.coverage')['note'])
+
+    def test_fuzz_more_verdicts_than_functions(self):
+        self.fuzz_summary(1, functions=dict(with_native_object=5, verdicts=10))
+        self.fuzz_summary(2, functions=dict(with_native_object=5, verdicts=10))
+        self.assertEqual(self.gate(self.world.run(), 'fuzz.coverage')['status'], 'fail')
+
     # ---- output helpers
     def test_blockers_one_per_group(self):
         gates = [dict(id='a', group='G', status='fail', stale=False, rank=1, required=True),

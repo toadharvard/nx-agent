@@ -60,6 +60,8 @@
   "path": "causes_all.json"
  },
  "fuzz_min_coverage": 0.9,
+ "_player_exe_doc": "boot.real_exe: gamedata/exe/FalloutNV.exe.sha256 must have a line for FalloutNV.exe with this sha256, GOG 1.4.0.525(a), as job_gamedata pins it (J-0135); the boot image hash in meta.json must equal it",
+ "player_exe_sha256": "89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe",
  "boot_milestones": [
   "winmain",
   "renderer_init",
