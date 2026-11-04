@@ -28,7 +28,7 @@ TEST_CXX := $(wildcard $(HERE)/*.cpp)
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 
-.PHONY: all test ilp32 m32 iat device clean
+.PHONY: all test ilp32 m32 iat device qemu clean
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -80,6 +80,12 @@ iat: $(M32OUT)/s4_m32
 	python3 -I $(HERE)/iat/pe_imports.py "$(EXE)" > $(M32OUT)/imports.txt
 	rm -rf $(M32OUT)/root && FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32 --iat $(M32OUT)/imports.txt
 
+# ---- the host tests built static for AArch64 and run under qemu-aarch64 (the device's ISA: atomics, float, signals)
+qemu:
+	$(MAKE) --no-print-directory OUT=$(OUT)-a64 CC="aarch64-linux-gnu-gcc -static" CXX="aarch64-linux-gnu-g++ -static" \
+		$(OUT)-a64/s4_tests
+	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root && FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s4_tests
+
 # ---- device backends: the inventory (tests/s4/backends/backends.tsv, metric device-open) and the qemu-aarch64 tests
 # of the host-side pieces. With EXE=, the inventory is checked against every import of the exe.
 device:
@@ -102,4 +108,4 @@ ilp32:
 	@echo "ilp32: all platform sources parse"
 
 clean:
-	rm -rf $(OUT) $(M32OUT) $(OUT)-device
+	rm -rf $(OUT) $(M32OUT) $(OUT)-device $(OUT)-a64
