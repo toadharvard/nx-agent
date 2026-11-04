@@ -1,8 +1,8 @@
 /* fnv-nx native renderer: desktop OpenGL 4.5 reference backend (stream S6n). See nxgl.h and nx/gpu_abi.h.
  *
  * Conventions mapped onto GL (they are the backend contract in nx/state.h):
- *   - glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE): clip +y lands on framebuffer row 0, which readback returns as
- *     the top row; depth range [0,1].
+ *   - glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE) and every vertex shader ends with gl_Position.y = -gl_Position.y
+ *     (added by the shim): clip +y lands on framebuffer row 0, which readback returns as *     the top row; depth range [0,1].
  *   - first-vertex provoking vertex (glProvokingVertex(GL_FIRST_VERTEX_CONVENTION)).
  *   - "CW on screen" is front: NXGL_FRONT_FACE below (checked by the cull scene, tests/s6n/scenes).
  *   - bindings: GL binding = stage * 16 + deko3d slot (UBOs and texture units), done by nxgl_shim_glsl().
@@ -35,15 +35,12 @@
 #define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT 0x8C4F
 #endif
 
-/* "CW on screen = front". GL decides facing from window coordinates; with GL_UPPER_LEFT the window y axis runs down
- * the image like D3D9's, so on-screen CW is GL_CW (measured: tests/s6n cull scene, llvmpipe). */
-#define NXGL_FRONT_FACE GL_CW
-
-/* Fill rule: D3D9 includes pixels whose centre lies exactly on a top or left edge (top-left rule in the y-down image).
- * llvmpipe applies GL's rule in GL's y-up window space, so with GL_UPPER_LEFT the edge it includes on ties is the
- * image-space bottom one. Moving all geometry up by one subpixel step (1/256 px) turns those ties into the D3D9
- * result; edges that are not on a pixel centre move by less than the rasterizer's precision. */
-#define NXGL_Y_FILL_BIAS (-1.0f / 256.0f)
+/* "CW on screen = front". GL decides facing in its y-up window space; the image's y runs the other way (framebuffer
+ * row 0 = image top), so on-screen CW is GL_CCW. Fill rule: with GL_LOWER_LEFT and y negated in the vertex shader
+ * llvmpipe's tie rule is D3D9's top-left rule in image space (V6n defect y_fill_bias: GL_UPPER_LEFT got ties on
+ * slanted edges wrong, a viewport bias only fixed horizontal ones). Checked by the cull and textured scenes and by
+ * V6n's exact raster reference (render/verify/rastercheck.py). */
+#define NXGL_FRONT_FACE GL_CCW
 
 /* ---- GL entry points (loaded with eglGetProcAddress) ------------------------------------------------------- */
 #define NXGL_FUNCS(X) \
@@ -193,8 +190,20 @@ size_t nxgl_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size
                 continue;
             }
         }
+        /* vertex stage: "void main(" -> "void nx_main_(", wrapper appended below */
+        if (stage == 0 && n - i >= 9 && !memcmp(src + i, "void main", 9) && (i == 0 || src[i - 1] == '\n' ||
+            src[i - 1] == ' ') && (i + 9 >= n || src[i + 9] == '(' || src[i + 9] == ' ')) {
+            const char* r = "void nx_main_";
+            for (const char* q = r; *q; q++) PUT(*q);
+            i += 9;
+            continue;
+        }
         PUT(src[i]);
         i++;
+    }
+    if (stage == 0) {
+        const char* w = "\nvoid main() { nx_main_(); gl_Position.y = -gl_Position.y; }\n";
+        for (const char* q = w; *q; q++) PUT(*q);
     }
     out[o] = 0;
     return o;
@@ -565,7 +574,7 @@ static void begin_pass(const uint32_t* a) {
     }
     g.haveApplied = 0;
     g.boundState = 0;
-    p_glViewportIndexedf(0, 0.5f, 0.5f + NXGL_Y_FILL_BIAS, (float)g.passW, (float)g.passH);
+    p_glViewportIndexedf(0, 0.5f, 0.5f, (float)g.passW, (float)g.passH);
     p_glDepthRangef(0.0f, 1.0f);
     p_glScissor(0, 0, (GLsizei)g.passW, (GLsizei)g.passH);
     p_glBlendColor(1, 1, 1, 1);
@@ -700,7 +709,7 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
         }
         case NxOp_Viewport:
             if (argc >= 6) {
-                p_glViewportIndexedf(0, asf(a[0]), asf(a[1]) + NXGL_Y_FILL_BIAS, asf(a[2]), asf(a[3]));
+                p_glViewportIndexedf(0, asf(a[0]), asf(a[1]), asf(a[2]), asf(a[3]));
                 p_glDepthRangef(asf(a[4]), asf(a[5]));
             }
             break;
@@ -790,7 +799,7 @@ const NxGpuApi* nxgl_create(uint32_t width, uint32_t height, char* err, size_t e
         }
     }
 #undef FAIL
-    p_glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE);
+    p_glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
     p_glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
     p_glFrontFace(NXGL_FRONT_FACE);
     p_glEnable(GL_PROGRAM_POINT_SIZE);

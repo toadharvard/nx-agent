@@ -46,9 +46,12 @@ python3 ports/fnv-nx/tests/s6n/scenes.py --compare <copied out dir> --tol 2
 |---|---|---|
 | `tests/v6n/defects/border_swizzle.scene` (`tests/v6n/run.sh border_swizzle`) | fixed in S6n's code. The V6n harness has to upload NXFMT_CONVERT formats through `nx_d3d9_convert()` (API change in `d3d9_state.h`); its GL target still uploads raw L8/A8/... texels, so the test keeps failing until that adapter follows the new contract. | A8, L8, A8L8, L16, A2R10G10B10 and ATI1 are stored expanded (RGBA8 / RGBA16 / R-B-swapped RGB10A2 / decoded BC4), so no view swizzle duplicates, invents or moves a channel. S6n's own `border` scene checks the border colour on A8, L8, A2R10G10B10, ATI1 (C35). |
 
+| `tests/v6n/defects/y_fill_bias.scene` + `rastercheck.py v6n_s6ngl` | fixed, `tests/v6n/run.sh y_fill_bias` passes here (0 wrong px on all four grids) | the GL backend drops the 1/256 px bias and GL_UPPER_LEFT: it runs GL_LOWER_LEFT with the vertex shader's y negated by the shim (`nxgl_shim_glsl` wraps `main`), front face GL_CCW; llvmpipe's tie rule is then D3D9's top-left rule on every edge. Goldens regenerated (edge pixels of 7 scenes changed; all 780 checks pass before and after). |
+
 ## Open problems / traps to settle on hardware
 
-* deko3d front face (`NXGPU_FRONT_FACE = DkFrontFace_CW`), the fill rule on pixel-centre ties, the A4R4G4B4
+* deko3d front face (`NXGPU_FRONT_FACE = DkFrontFace_CW`), the fill rule on pixel-centre ties (slanted edges too:
+  the GL lesson of y_fill_bias; port V6n's rastercheck scenes to the N0 guest), the A4R4G4B4
   native swizzle, and whether Maxwell applies the TIC (format) swizzle of BGRA8/BGR565/BGR5A1 to the border colour.
   Each is covered by an N0 scene check (cull, textured, format, sampler BORDER on A8R8G8B8): run the Switch package.
 * The GL backend ignores the raster flat-shading bit (GLSL needs `flat` qualifiers: families declare them).

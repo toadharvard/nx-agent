@@ -459,8 +459,8 @@ backend replays it. Both backends take the same stream and the same `NxGpuApi` c
   (rasterizer) is captured once into Maxwell command words and replayed on BindState; stencil masks/ref, blend
   constant, depth bias, viewport and scissor are dynamic (`dkCmdBufSet*`); sRGB write rebinds the render target
   through its sRGB view; device flags DepthZeroToOne | OriginUpperLeft | YAxisPointsUp (the D3D conventions).
-* **GL** (`nxgl.c`): the same state applied with GL calls (diffed per word); `glClipControl(GL_UPPER_LEFT,
-  GL_ZERO_TO_ONE)`, first-vertex provoking vertex, GL binding = stage x 16 + deko3d slot (shim on the GLSL text,
+* **GL** (`nxgl.c`): the same state applied with GL calls (diffed per word); `glClipControl(GL_LOWER_LEFT,
+  GL_ZERO_TO_ONE)` with the vertex shader's y negated (framebuffer row 0 = image top, D3D9 tie rule), first-vertex provoking vertex, GL binding = stage x 16 + deko3d slot (shim on the GLSL text,
   `#version 460` -> `#version 450 core` because llvmpipe stops at 4.50), sRGB texture views + `GL_FRAMEBUFFER_SRGB`,
   caller-backed memory copied into GL buffers when a bind is replayed. Synchronous; readback by `glReadPixels`.
 * In the ILP32 guest the front reaches the backend through S5's `ext_call` (module `NXGPU_EXT_MODULE` = 10,
@@ -483,8 +483,8 @@ backend replays it. Both backends take the same stream and the same `NxGpuApi` c
 | trap | rule | where |
 |---|---|---|
 | D3D9 pixel centres are integers (Nine: `half_pixel_center = 0`) | NxViewport = D3D viewport + 0.5 for +0.5-centre rasterizers; `gl_FragCoord.xy` = VPOS + 0.5 | translator, C25/C59 |
-| GL fill rule on ties is bottom-left in image space with UPPER_LEFT | GL backend moves geometry up 1/256 px | `nxgl.c` `NXGL_Y_FILL_BIAS`, scene `textured` |
-| front face | "front" = CW on screen in y-down space; GL: `glFrontFace(GL_CW)` (measured); deko3d: `DkFrontFace_CW` (to confirm) | scene `cull` |
+| GL tie rule with GL_UPPER_LEFT is not D3D9's (horizontal and slanted edges; a viewport bias fixes only horizontal ones) | GL backend: GL_LOWER_LEFT + `gl_Position.y` negated by the shim; llvmpipe then follows the top-left rule exactly (V6n defect y_fill_bias) | `nxgl.c`, C59 |
+| front face | "front" = CW on screen in y-down space; GL: `glFrontFace(GL_CCW)` in its y-up space (measured); deko3d: `DkFrontFace_CW` (to confirm) | scene `cull` |
 | depth write with EQUAL/NEVER | forced off (Nine) | C4 |
 | BOTHSRCALPHA / non-separate alpha | Nine's fix-ups and alpha table | C9, C12 |
 | depth bias units | D3D9 units x 2^24 (D24) / 2^16 (D16); Nine-on-softpipe applies about half (oracle quirk, D1) | C18, C40 |
