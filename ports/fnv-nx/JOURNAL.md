@@ -1905,3 +1905,20 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   2,907.
 * **next** - S11 puts `shim/include/fnvnx_cmath/` on the MSVC gate's include path and re-gates DECL1. S1 then does
   the shim pack(push, 8) and the namespace statics.
+
+### J-0094 | 2026-11-04 | stream: S14-dataimage-synth | status: wip | parent: J-0083
+
+* **did** - Render R2: `loader/synth/vftable_dump.py <classes> --units ... --objdir ... [--synth ...]` writes
+  `render/native/vftables.tsv` (gitignored; decomp-derived, generated where it is used). The columns are: class,
+  vftable, address, slot, target, symbol, demangled name, source (msvc-object / decomp declaration / unknown),
+  target_known, note. Orchestrator re-ran tests/s14: OK.
+* **found** - For the four render classes, almost every slot target needs the exe:
+  - BSShaderNoLighting: 72 slots from an MSVC object (vftable 0x010bb230); 1 target known.
+  - NiDX9Renderer: 143 slots in the order of the decomp's largest declaration; this order is a guess, since about
+    15 declarations conflict.
+  - NiDX9RenderState and TileShader: no vftable in any object.
+
+  On the exe, `scan_codeptrs.py --vtables` gives the real slots. The scan needs hints because these classes have no
+  COL.
+* **next** - Render machine: N1 wiring with R1 (S2c, J-0092) and R3 (S1 NATIVE1, J-0093). Slot targets come from
+  the exe later.
