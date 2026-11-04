@@ -378,7 +378,10 @@ class NativeRenderEmu(emu_guest.Emu):
     # -- --trace RE: entry (x0..x3) and return (x0) of the guest functions whose symbol matches ---------------------
     def nr_install_trace(self, patterns):
         rxs = [re.compile(p) for p in patterns]
-        hits = sorted({(self.code_addr(n), n) for n in self.code_syms if any(r.search(n) for r in rxs)})
+        hits = {(self.code_addr(n), n) for n in self.code_syms if any(r.search(n) for r in rxs)}
+        # the object's definitions too: its own vtables and calls reach them without the guest's entry
+        hits |= {(a, n + " [object]") for n, a in getattr(self, "nr_funcs", {}).items() if any(r.search(n) for r in rxs)}
+        hits = sorted(hits)
         self.nr_trace_pending, self.nr_trace_lr, self.nr_trace_log = {}, set(), []
         for a, n in hits[:400]:
             if a is not None:

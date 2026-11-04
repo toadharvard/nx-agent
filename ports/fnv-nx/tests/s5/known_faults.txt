@@ -58,3 +58,19 @@ _ZN12_GLOBAL__N_16Device13SetDataFormatEPK13_DIDATAFORMAT  # DirectInput SetData
 0x0086c160 return-this  # the OSGlobals constructor: WinMain (+0x5a8) stores its result as g_osGlobals 0x011dea0c, as the
                       # x86 code does with the this an MSVC constructor returns; on AArch64 it returns nothing, so the
                       # global held 0xfe50 and FUN_0086d500 faulted at WinMain+0x620 (S1/S2c, as 0x00a5b530)
+# Initializers of the exe's __xc table that have no native (S10's IMAGE mode counts them missing and goes on; 537 on
+# link 06857911f5ab, the decomp's undecompiled gaps of .text$yc). Four are a bare `mov ecx, <object>; jmp <ctor>`;
+# their constructors have natives, so each is called here once before WinMain with the object as this (S1/S2d: a
+# native for the initializer, or a link-time synthesis of this thunk shape). 0x00fc72d0 is the critical one:
+# NiDX9Renderer's static-data-manager object, whose constructor registers the library Init 0x00e91dc0 with NiInit.
+# Without it the D3D format list 0x0126f0f8 stays empty, the adapter reports no display modes, and renderer init
+# fails ("Your display doesn't support the selected resolution").
+before-winmain _ZN17FUN_00e91e30_This12FUN_00e91e30Ev 0x0126f104      # 0x00fc72d0: NiDX9Renderer SDM (0x0126f104)
+before-winmain _ZN18FUN_00a8a5f0_class12FUN_00a8a5f0Ev 0x011f4414    # 0x00fb56c0
+before-winmain _ZN13NiPixelFormatC1Ev 0x011f4600                     # 0x00fb5860
+before-winmain _ZN7NiPlaneC1Ev 0x011f9604                            # 0x00fb97d0
+0x00e93e70            # NiD3DShaderProgramFactory::RegisterCreator, from NiDX9Renderer's library Init 0x00e91dc0 (NiInit):
+                      # its map's SetAt (0x00a642a0, nitstringmap.inl) calls KeyToHashIndex/IsKeysEqual as slots 2/3,
+                      # the exe's layout, on a native vtable in GCC's (D1/D0 at 0/1): slot 3 runs FUN_00e93470 with
+                      # SetAt's arguments and strlen(0) faults (S2c: one slot layout per exe class, s5-002 item 4).
+                      # The creators are the D3D shader-program loaders, which the native renderer does not use
