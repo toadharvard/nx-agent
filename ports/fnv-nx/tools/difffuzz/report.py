@@ -22,8 +22,8 @@ import os
 import config
 
 SOFT_CAUSES = {'local-static', 'vptr-store', 'bool-repr', 'ilp32-pointer', 'division', 'uninit-x86', 'nan-bits',
-               'call-order'}
-HARNESS_CAUSES = {'x86-custom-cc'}     # oracle-model gaps: neither hard nor soft, reported apart
+               'call-order', 'array-new-check'}
+HARNESS_CAUSES = {'x86-custom-cc', 'msvc-inlined', 'runtime-equiv'}     # oracle-model gaps: neither hard nor soft, reported apart
 LINK_CAUSES = {'split-global', 'call-args', 'callee-saved'}
 
 
@@ -88,6 +88,33 @@ def reclassify(rec):
             pass
     if d['kind'] == 'call-count' and d.get('x86') == 0:
         return 'falloff?'
+    if d['kind'] == 'call-target' and d.get('arm') == 'name:__cxa_throw_bad_array_new_length':
+        return 'array-new-check'  # GCC checks new[]'s count for overflow, MSVC 2008 does not (only huge counts)
+    if d['kind'] == 'call-target':
+        try:
+            global _UC
+            if _UC is None:
+                import engine
+                _UC = engine.UnitCache(str(config.LINK), str(config.A64WORK))
+            import classify
+
+            class _T:
+                oracle_callees = staticmethod(_UC.oracle_callees)
+            if classify.msvc_inlined(_T, d):
+                return 'msvc-inlined'
+            prov = _UC.providers()
+            a, x = d.get('arm') or '', d.get('x86') or ''
+            if a.startswith('name:') and prov.get(a[5:]) is not None and '%08x' % prov[a[5:]] == x:
+                return 'runtime-equiv'   # the native provider of that CRT address (harness before difffuzz-8)
+            import libcalls
+            if x.startswith('imp:') and a[:1].isdigit() and _UC.iat_names().get(int(a, 16)) == x[4:]:
+                return 'runtime-equiv'   # the import, called natively through its IAT slot
+            fam = libcalls.FAMILY
+            if fam.get(int(x, 16) if x[:1].isdigit() else None) and \
+                    fam.get(int(x, 16)) == fam.get(int(a, 16) if a[:1].isdigit() else None):
+                return 'runtime-equiv'
+        except Exception:  # noqa: BLE001
+            pass
     if d['kind'] == 'call-target' and d.get('x86_next') and d.get('x86_next') == d.get('arm') and \
             d.get('arm_next') == d.get('x86'):
         return 'call-order'      # two adjacent calls swapped: C++ leaves the evaluation order of operands open

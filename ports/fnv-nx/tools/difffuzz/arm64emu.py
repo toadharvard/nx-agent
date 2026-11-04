@@ -53,6 +53,7 @@ class Arm64Engine:
     def __init__(self, world_obj, image, stub_orig, vtables=None):
         self.vtables = vtables or {}
         self.callee_conv = None          # original address -> Conv of the callee definition (set by runner.Pair)
+        self.iat_names = {}              # IAT slot -> import name (set by runner.Pair)
         self.world = world_obj
         self.image = image
         self.stub_orig = stub_orig
@@ -285,6 +286,10 @@ class Arm64Engine:
         else:
             target = self.stub_orig.get(address, -address)
             name = self.image.stubs.get(address)
+        if not wild and target is not None and target in self.iat_names:
+            # an import called through its IAT slot (S2's IAT binding): the import, as on x86
+            name = self.iat_names[target]
+            target = libcalls.import_id(name)
         if self._builtin(uc, name, target, r):
             return
         if name == '__stack_chk_fail':

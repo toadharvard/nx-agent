@@ -128,6 +128,48 @@ class UnitCache:
                 out[addr] = libcalls.EQUIV[name]
             elif self._import_names().get(libcalls.import_name(name)[0]):
                 out[addr] = libcalls.import_id(libcalls.import_name(name)[0])
+            elif name in self.providers():
+                out[addr] = self.providers()[name]     # a CRT / library address the link gives a native provider
+        return out
+
+    def providers(self):
+        """{native name: original address} of the link's provider rows (addrmap kind F, `provider: ...`): the CRT
+        and library functions the port implements natively (free, _invalid_parameter_noinfo, fnvnx_rt_dynamic_cast)."""
+        if getattr(self, '_prov', None) is None:
+            self._prov = {}
+            p = config.LINK / 'out/addrmap.tsv'
+            if p.exists():
+                for line in open(p, encoding='utf-8', errors='replace'):
+                    f = line.rstrip('\n').split('\t')
+                    if len(f) > 5 and f[1] == 'F' and f[5].startswith('provider:') and f[2]:
+                        try:
+                            self._prov.setdefault(f[2], int(f[0], 16))
+                        except ValueError:
+                            pass
+        return self._prov
+
+    def iat_names(self):
+        """{IAT slot address: import name}: the native code calls an import through its slot (S2's IAT binding)."""
+        self.import_stubs()
+        return {ad: self._imports[(stub - libcalls.IMPORT_BASE) // 16][0] for ad, stub in self._iat.items()}
+
+    def oracle_callees(self, addr):
+        """Call targets in the oracle code of `addr` (any unit): original addresses, and import identities for calls
+        through IAT slots. Empty when the code is unknown."""
+        if addr not in self.def_at:
+            return set()
+        try:
+            f = self.x86_unit(self.def_at[addr][0], addr).funcs.get(addr)
+        except Exception:  # noqa: BLE001
+            return set()
+        out, iat = set(), self.iat_names()
+        for rel, kind, tg, _ in (f or {}).get('relocs', ()):
+            if tg is None:
+                continue
+            if kind == 0x14:
+                out.add(tg)
+            elif tg in iat:
+                out.add(libcalls.import_id(iat[tg]))
         return out
 
     def callee_info_for(self, source):
@@ -207,12 +249,12 @@ class UnitCache:
                           statics)
         t.source = source
         t.imports = self.import_stubs()
+        t.iat_names = self.iat_names()
+        t.oracle_callees = self.oracle_callees
         t.custom_cc = list(getattr(cv, 'custom', []) or [])
         t.vtables = self.vtable_map(img)
         t.followed = self.preload(code, img, source)
         t.x86_code = code
-        # functions the native unit calls out of line (code stubs): never "inlined natively" (runner adaptive follow)
-        t.arm_out = self.arm_called(img, source) - set(img.entries.values())
 
         def oracle_code(addr):
             """(code, literals of its unit) of an oracle function, or None."""

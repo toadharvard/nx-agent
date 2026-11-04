@@ -58,7 +58,11 @@ EQUIV = {'_Znwm': 0x00401000, '_Znwj': 0x00401000, '_Znam': 0x00401000, '_Znaj':
          '_ZdaPvm': 0x00aa1460, '_ZdaPvj': 0x00aa1460, '__dynamic_cast': 0x00ec43fb,
          # registration of a static destructor: CRT _atexit in the oracle, XC1's onexit table natively
          'fnvnx_xc_atexit': 0x00ec658f, 'atexit': 0x00ec658f, 'fnvnx_xc_cxa_atexit': 0x00ec658f}
-NO_ARGS = {0x00401000, 0x00401030, 0x00aa1460, 0x00ec43fb, 0x00ec658f}    # traced, compared by target only
+NO_ARGS = {0x00401000, 0x00401030, 0x00aa1460, 0x00ec43fb, 0x00ec658f, 0x00aa3e40, 0x00ecd291}
+# traced calls compared by family: the oracle calls the allocator or the CRT directly where the native code calls
+# the game's operator new / delete (MSVC inlined the operator; MemoryManager::Allocate 0x00aa3e40, CRT free
+# 0x00ecd291); the arguments are not compared
+FAMILY = {0x00401000: 'new', 0x00aa3e40: 'new', 0x00401030: 'delete', 0x00aa1460: 'delete', 0x00ecd291: 'delete'}
 
 
 class Mem:

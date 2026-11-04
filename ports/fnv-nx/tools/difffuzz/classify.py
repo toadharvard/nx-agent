@@ -110,6 +110,26 @@ def image_vftables():
     return _VFT
 
 
+def msvc_inlined(target, div):
+    """The native code calls X out of line where the oracle runs X's body inline (MSVC inlined it; the oracle's
+    next call is one X itself makes): the native side would have to run X too. An oracle-model gap."""
+    callees = getattr(target, 'oracle_callees', None)
+    try:
+        a = int(div['arm'], 16)
+    except (TypeError, ValueError, KeyError):
+        return False
+    x = div.get('x86') or ''
+    if x.startswith('imp:'):
+        import libcalls
+        xv = libcalls.import_id(x[4:])
+    else:
+        try:
+            xv = int(x, 16)
+        except ValueError:
+            return False
+    return bool(callees) and xv in callees(a)
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
@@ -120,6 +140,8 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'bool-repr'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
+    if k == 'call-target' and msvc_inlined(target, div):
+        h['cause'] = 'msvc-inlined'; return h
     regs = entry_register_reads(fn, target.conv)
     if regs:
         h['cause'] = 'x86-custom-cc'; h['regs'] = regs; return h

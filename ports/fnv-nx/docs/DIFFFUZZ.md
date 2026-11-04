@@ -133,6 +133,16 @@ is an order difference, not inlining. Two adjacent calls in swapped order (`x86_
 divergence) are the soft cause `call-order`: C++ leaves the evaluation order of operands open (S13 00740980:
 `SetField628(FUN_00740960() + 1)` next to `FUN_00740940()`).
 
+**Runtime equivalences (difffuzz-8, from the first farm pass).** A native call of a name the link gives a provider
+(addrmap kind F `provider:` rows: `free`, `_invalid_parameter_noinfo`, `memmove_s`, `fnvnx_rt_dynamic_cast`, ...)
+traces as that CRT address; a native call through an IAT slot traces as the import, as on x86; the allocation and
+release families (operator new 0x00401000 = MemoryManager::Allocate 0x00aa3e40; operator delete 0x00401030 =
+sized delete 0x00aa1460 = CRT free 0x00ecd291) compare equal, arguments not compared. Adaptive follow loads the
+oracle's callee X unless the native trace makes X's call later (then the two orders differ: `call-order`). Report
+causes `msvc-inlined` (oracle gap: the native calls X out of line where the oracle ran X's body inline, the oracle's
+next call being one X makes), `runtime-equiv` (oracle gap, records from before difffuzz-8) and `array-new-check`
+(soft: GCC checks new[]'s count, MSVC 2008 does not).
+
 **Wild calls.** A jump to memory without code on either machine (an indirect call through a pointer the case
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
