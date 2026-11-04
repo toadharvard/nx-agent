@@ -436,13 +436,13 @@ class ReadyTest(unittest.TestCase):
         card = self.world.run()
         rows = {(r['stage'], r['what'].split(' (')[0]): r for r in card['scorecard']}
         self.assertEqual([r['stage'] for r in card['scorecard']],
-                         ['compile', 'link', 'link', 'ABI', 'fuzz', 'equivalence', 'boot', 'render parity',
+                         ['compile', 'link', 'link', 'ABI', 'fuzz', 'fuzz', 'equivalence', 'boot', 'render parity',
                           'frame budget', 'frame budget'])
-        for r in card['scorecard'][:8]:
+        for r in card['scorecard'][:9]:
             self.assertEqual((r['gap'], r['status']), (0, 'done'), r)
             self.assertTrue(r['sources'], r)
         # the frame rows are judged against the orchestrator's 60 fps at 1.02 GHz, not J-0132's gate levels
-        fb = card['scorecard'][8]
+        fb = card['scorecard'][9]
         self.assertEqual((fb['target'], fb['unit'], fb['status']), (16.7, 'ms', 'open'))
         self.assertAlmostEqual(fb['gap'], fb['value'] - 16.7, places=1)
         self.assertEqual(card['verdict'], 'READY')
@@ -456,6 +456,41 @@ class ReadyTest(unittest.TestCase):
         md = readf(os.path.join(self.world.tmp, 'card.md'))
         self.assertIn('## Scorecard', md)
         self.assertIn('| compile | census errors | 3 | 0 | 3 | **open** |', md)
+
+    def test_s13_metric_from_difffuzz_metric_py(self):
+        g = self.gate(self.world.run(), 'fuzz.s13_metric')
+        self.assertEqual((g['status'], g['value'], g['required']), ('pass', 0, False))
+        self.assertEqual([s['branch'] for s in g['sources']], ['reports/fz1', 'reports/fz2'])
+        self.world.edit_json('_s13_metric.json', lambda d: d['totals'].update(artifacts=7, metric=9, unpublished=2))
+        card = self.world.run()
+        g = self.gate(card, 'fuzz.s13_metric')
+        self.assertEqual((g['status'], g['terms']['artifacts']), ('fail', 7))
+        self.assertEqual(card['verdict'], 'READY')          # informative: fuzz.hard decides
+        self.assertEqual([r['gap'] for r in card['scorecard'] if r['gates'] == ['fuzz.s13_metric']], [9])
+        self.world.remove('_s13_metric.json')
+        self.assertEqual(self.gate(self.world.run(), 'fuzz.s13_metric')['status'], 'no-data')
+
+    def test_s13_metric_runs_metric_py_on_a_git_store(self):
+        """the real path: tools/difffuzz/metric.py of the checkout on a bare artifacts repository"""
+        import subprocess
+        mod = ready.load_module(PORT, os.path.join('tools', 'difffuzz', 'metric.py'), 'fnvnx_difffuzz_metric')
+        if mod is None:
+            self.skipTest('no tools/difffuzz/metric.py')
+        git = os.path.join(self.world.tmp, 'art')
+        run = lambda *a: subprocess.run(['git', '-C', git, *a], check=True, capture_output=True)
+        os.makedirs(git)
+        run('init', '-q')
+        run('checkout', '-q', '-b', 'fz1')
+        writef(os.path.join(git, C + '-fuzz.md'), '# fuzz %s shard 1/1\n- in this shard 10: no native object 2, '
+               'control flow not modelled (x) 1, fuzzable 7\n' % C)
+        run('add', '.')
+        run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'r')
+        run('update-ref', 'refs/remotes/origin/reports/fz1', 'HEAD')
+        card = ready.Card(ready.GitStore(os.path.join(git, '.git')), ready.History(head=C, table={}),
+                          json.loads(self.world.read('thresholds.json', True)) | {'fuzz_shards': 1}, port=PORT)
+        card.s13_metric_gate(1)
+        g = card.gates[-1]
+        self.assertEqual((g['id'], g['value'], g['terms']['not_fuzzable']), ('fuzz.s13_metric', 1, 1), g['note'])
 
     def test_try_farms_never_count(self):
         """frames, frameprof and the frame budget of a try farm (unmerged wip heads) are not evidence (V1 R14)"""

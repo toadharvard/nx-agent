@@ -977,6 +977,46 @@ class Card:
                       PASS if cov >= want and not missing and ver <= with_obj else FAIL, srcs, note, rank=19)
         else:
             self.nodata('fuzz.coverage', 'Fuzz', 'S13 coverage', '>= 90 %', 'no fuzz report', rank=19)
+        self.s13_metric_gate(n)
+
+    def s13_metric_gate(self, n):
+        """S13's own convergence metric, tools/difffuzz/metric.py of this checkout (artifacts + not fuzzable +
+        unpublished shards, fnvnx-s13-metric/1), run on the artifacts repository; fixtures: <dir>/_s13_metric.json.
+        Informative: the hard divergences are fuzz.hard; this is the harness's distance from a complete campaign"""
+        title = 'S13 metric: artifact divergences + functions not fuzzable + unpublished shards (difffuzz/metric.py)'
+        m, why = None, None
+        if getattr(self.store, 'gitdir', None):
+            mod = load_module(self.port, os.path.join('tools', 'difffuzz', 'metric.py'), 'fnvnx_difffuzz_metric')
+            if mod is None:
+                why = 'no tools/difffuzz/metric.py in this checkout'
+            else:
+                try:
+                    m = mod.measure(self.store.gitdir, self.hist.repo, n)
+                except Exception as e:          # noqa: BLE001 - a broken tool must not hide the other gates
+                    why = 'metric.py failed: %s: %s' % (type(e).__name__, str(e)[:80])
+        else:
+            f = os.path.join(getattr(self.store, 'root', ''), '_s13_metric.json')
+            try:
+                m = json.loads(readf(f)) if os.path.isfile(f) else None
+            except ValueError:
+                m = None
+            why = None if m else 'no S13 metric (fixtures: _s13_metric.json)'
+        tot = dct(dct(m).get('totals'))
+        if not isinstance(tot.get('metric'), int):
+            self.nodata('fuzz.s13_metric', 'Fuzz', title, '0', why or 'metric.py gave no totals', rank=19,
+                        required=False)
+            return
+        shards = [s for s in dct(m).get('shards') or [] if isinstance(s, dict)]
+        srcs = [self.src('reports/fz%d' % s['shard'], '%s-fuzz.md' % s['good'], s['good'])
+                for s in shards if s.get('good')]
+        bad = [str(s.get('shard')) for s in shards if s.get('newest_status') != 'ok']
+        note = 'artifacts %s + not fuzzable %s (coverage %s %%) + unpublished shards %s%s; artifact causes: %s' % (
+            tot.get('artifacts'), tot.get('not_fuzzable'), tot.get('coverage'), tot.get('unpublished'),
+            ' (%s)' % ','.join(bad) if bad else '',
+            ', '.join('%s %s' % kv for kv in list(dct(m.get('artifact_causes')).items())[:6]) or '-')
+        self.gate('fuzz.s13_metric', 'Fuzz', title, tot['metric'], '0', PASS if tot['metric'] == 0 else FAIL, srcs,
+                  note, rank=19, required=False, terms={k: tot.get(k) for k in ('artifacts', 'not_fuzzable',
+                                                                                 'unpublished', 'coverage')})
 
     def fuzz_table_gate(self, shards, srcs, missing, n):
         """fuzz.hard from the reports' hard-divergence tables (reports without an fnvnx-causes block)"""
@@ -1720,6 +1760,10 @@ def scorecard(gates, th):
     row('fuzz', 'hard divergences (real-bug + triage)' if fd is not None else 'functions with a hard divergence',
         ['fuzz.hard', 'fuzz.coverage'], fz, 0, fz,
         note='%s functions; coverage %s' % (ff, G['fuzz.coverage']['value'] if 'fuzz.coverage' in G else '-'))
+    sm = G.get('fuzz.s13_metric')
+    s13 = sm['value'] if sm and sm['status'] != NODATA else None
+    row('fuzz', 'S13 metric: artifacts + not fuzzable + unpublished shards (difffuzz/metric.py)',
+        ['fuzz.s13_metric'], s13, 0, s13, note=sm['note'] if sm else '')
     ec, en = val('equiv.code'), val('equiv.nobuild')
     eq = None if ec is None or en is None else ec + en
     row('equivalence', 'S11 diffs not by design (functions + units)', ['equiv.code', 'equiv.nobuild'], eq, 0, eq,
