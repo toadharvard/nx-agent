@@ -1799,3 +1799,34 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   The farms skip retired branches and publish to `reports/try<k>of4`. Farms running now: prep, farm1 (census),
   farm2-5 (compile), eq1-6 (MSVC gate), st1-4 (static gate), try1-4 (try). Next: link, then 32 fuzz farms, then
   full boot.
+
+### J-0089 | 2026-11-04 | stream: V1-link | status: wip | parent: J-0074,J-0081,J-0085
+
+* **did** - D14 verification of S2c's J-0081 fixes with the head tools. Re-ran the existing reproducers and added new
+  adversarial cases run through the real `fnvlink resolve` on hand-made trees, under qemu:
+  - fastcall aggregates of every size;
+  - float, double and long double results;
+  - C-named declarations and casts;
+  - typeinfo with multiple, virtual and nested inheritance, and link order.
+
+  Also new: `c4_vtti.py` (whole-image vtable/typeinfo check) and `tools/farm/v1_job.sh` (the full-set audits as a
+  farm job, waiting for `link/<commit12>`).
+* **found**:
+  - Fix 1 (the fastcall hidden result is the first stack word) holds for 11 new shapes.
+  - Fix 2 (fcvt bridge for float vs double results) holds, including -0, denormals, infinity and NaN payloads.
+    long double against float or double is correctly `manual`: GCC's long double here is 16 bytes, read from q0.
+  - Fix 4 holds for the reported shape. Residual gaps: a vtable object without its own typeinfo (f12 had 77 such
+    classes), a base typeinfo kept from another unit's view, and a dependency on link order.
+  - The ecx-not-passed argument moves and the cast rule hold.
+  - **Fix 3 is broken:**
+    - R3-1: when no C declaration matches, the signature falls back to N/4 ints with an int result, so a float
+      function gets a `bl; fmov s0, w0` bridge that clobbers its result.
+    - R3-2: a signature written in a comment, or call text, is taken as the declaration.
+  - Pre-existing gaps:
+    - a callee-pop byte mismatch is never flagged: 1,517 pairs / 2,196 references on f13, mostly judged `same`;
+    - a float carried through an int-returning middle function (chain_x87);
+    - a member's hidden 8-byte result bound to a fastcall function that returns it in registers (0 pairs on f13).
+  - fastcall-agg and c2_shapes on real pairs need a link made with the head tools; f13 used the old ones.
+* **metrics** - v1_r3_fix_holds=1,2,4(partial),moves,cast v1_r3_fix_broken=3 v1_callee_pop_mismatch_pairs=1517
+* **next** - S2c: R3-1 and R3-2 (high), then the callee-pop flag, the typeinfo residuals and chain_x87. V1 audits
+  run on the farm once link_job publishes `link/<commit12>`.
