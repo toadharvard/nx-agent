@@ -1077,29 +1077,39 @@ def _param_type(p):
     return re.sub(r'\s+', ' ', p).strip()
 
 def r_duplicate_int_overloads(path, text, stats):
-    """DUPINT1: drop later integer-only-different duplicate prototypes bound to one address (see above)."""
+    """DUPINT1: drop later integer-only-different duplicate prototypes bound to one address (see above). Only a pair
+    of signatures with the same return type is handled; anything else is left as it is."""
     syms = _unit_symbols(path)
     if not syms: return text
-    seen, spans, out, pos = {}, None, [], 0
+    groups, spans = {}, None
     for m in prepare.PROTO.finditer(text):
         name = m.group(1)
         if name.startswith('operator'): continue
         decl = m.group(0)
-        params = _split_args(decl[decl.index('(', decl.index(name) + len(name)) + 1:decl.rindex(')')])
+        at = decl.index('(', decl.index(name) + len(name))
+        params = _split_args(decl[at + 1:decl.rindex(')')])
         if spans is None: spans = prepare.scope_spans(text)
-        chain = tuple(h for k, h in prepare.scope_chain(spans, m.start()))
-        if any(k not in ('namespace', 'extern') for k, _ in prepare.scope_chain(spans, m.start())): continue
-        types = [_param_type(p) for p in params]
-        key = (name, len(types), chain)
-        prev = seen.get(key)
-        if prev is None:
-            seen[key] = types
-            continue
-        if prev == types: continue
-        if not all(a == b or (INT_TYPES.match(a) and INT_TYPES.match(b)) for a, b in zip(prev, types)): continue
-        addrs = {a for k, a in syms.items() if re.match(r'^\?%s@@' % re.escape(name), k)}
+        chain = prepare.scope_chain(spans, m.start())
+        if any(k not in ('namespace', 'extern') for k, _ in chain): continue
+        ret = re.sub(r'\s+', ' ', re.sub(r'\b(?:extern|static|inline|__cdecl|__stdcall|__fastcall|__thiscall)\b|"C"', ' ',
+                                        decl[:decl.index(name)])).strip()
+        key = (name, len(params), tuple(h for _, h in chain))
+        groups.setdefault(key, []).append((tuple(_param_type(p) for p in params), ret, m))
+    drops = []
+    for (name, _, _), decls in groups.items():
+        sigs = []
+        for types, ret, m in decls:
+            if (types, ret) not in [(t, r) for t, r, _ in sigs]: sigs.append((types, ret, m))
+        if len(sigs) != 2 or sigs[0][1] != sigs[1][1]: continue
+        a, b = sigs[0][0], sigs[1][0]
+        if not all(x == y or (INT_TYPES.match(x) and INT_TYPES.match(y)) for x, y in zip(a, b)): continue
+        addrs = {v for k, v in syms.items() if re.match(r'^\?%s@@' % re.escape(name), k)}
         if len(addrs) != 1: continue
-        out.append(text[pos:m.start()]); out.append('/* fnv-nx DUPINT1 */' + '\n' * decl.count('\n')); pos = m.end()
+        drops += [m for types, ret, m in decls if types == b]
+    if not drops: return text
+    out, pos = [], 0
+    for m in sorted(drops, key=lambda x: x.start()):
+        out.append(text[pos:m.start()]); out.append('/* fnv-nx DUPINT1 */' + '\n' * m.group(0).count('\n')); pos = m.end()
         stats['DUPINT1'] += 1
     out.append(text[pos:])
     return ''.join(out)
