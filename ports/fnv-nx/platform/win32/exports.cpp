@@ -6,6 +6,7 @@
  * DirectInput/DirectSound/XInput/vorbisfile -> S7's registered modules). D3DX (render/nine/d3dx) is listed here by
  * weak reference. */
 #include "w32.h"
+#include "fnvnx_mmio.h"
 
 extern "C" {
 int fnvnx_ws2_WSAStartup(WORD, void *);
@@ -20,6 +21,7 @@ unsigned long fnvnx_ws2_inet_addr(const char *);
 char *fnvnx_ws2_inet_ntoa(unsigned long);
 void *fnvnx_ws2_gethostbyname(const char *);
 int fnvnx_ws2_gethostname(char *, int);
+int fnvnx_ws2_fdisset(UINT_PTR, void *);
 bool SteamAPI_Init(void);
 bool SteamAPI_IsSteamRunning(void);
 void SteamAPI_Shutdown(void);
@@ -111,6 +113,16 @@ const exp g_exports[] = {
     K(WaitForMultipleObjects), K(WaitForSingleObject), K(WriteFile), K(WritePrivateProfileSectionA),
     K(WritePrivateProfileStringA), K(lstrcatA), K(lstrcmpiA), K(lstrcpyA), K(lstrlenA),
     { "kernel32", "lstrcpy", (void *)&lstrcpyA },
+    /* kernel32, the exe's own CRT only (crt_kernel32.cpp) */
+    K(CompareStringA), K(CompareStringW), K(CreateFileW), K(EnumSystemLocalesA), K(FreeEnvironmentStringsA),
+    K(FreeEnvironmentStringsW), K(GetACP), K(GetCPInfo), K(GetConsoleCP), K(GetConsoleMode),
+    K(GetConsoleOutputCP), K(GetDriveTypeA), K(GetEnvironmentStrings), K(GetEnvironmentStringsW),
+    K(GetFileType), K(GetLocaleInfoA), K(GetLocaleInfoW), K(GetModuleHandleW), K(GetOEMCP), K(GetStartupInfoA),
+    K(GetStdHandle), K(GetStringTypeA), K(GetStringTypeW), K(GetTimeZoneInformation), K(GetUserDefaultLCID),
+    K(IsValidCodePage), K(IsValidLocale), K(LCMapStringA), K(LCMapStringW), K(MultiByteToWideChar),
+    K(SetEnvironmentVariableA), K(SetHandleCount), K(SetStdHandle), K(SetUnhandledExceptionFilter),
+    K(TerminateProcess), K(UnhandledExceptionFilter), K(WideCharToMultiByte), K(WriteConsoleA),
+    K(WriteConsoleW),
     /* user32 */
     U(AdjustWindowRect), U(AdjustWindowRectEx), U(CallNextHookEx), U(ClientToScreen), U(ClipCursor),
     U(CreateWindowExA), U(DefWindowProcA), U(DestroyWindow), U(DispatchMessageA), U(EnumChildWindows),
@@ -121,16 +133,20 @@ const exp g_exports[] = {
     U(ScreenToClient), U(SendInput), U(SendMessageA), U(SetCapture), U(SetCursorPos), U(SetFocus),
     U(SetForegroundWindow), U(SetWindowLongA), U(SetWindowPos), U(SetWindowTextA), U(SetWindowsHookExA),
     U(ShowCursor), U(ShowWindow), U(SwapMouseButton), U(TranslateMessage), U(UnhookWindowsHookEx),
-    U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA),
+    U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA), U(GetClassLongA),
     E("comctl32", InitCommonControlsEx), E("comctl32", ImageList_LoadImageA), E("comctl32", ImageList_Destroy),
     E("gdi32", GetStockObject), E("gdi32", DeleteObject),
     E("advapi32", RegCloseKey), E("advapi32", RegCreateKeyExA), E("advapi32", RegOpenKeyExA),
-    E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA),
+    E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA), E("advapi32", GetUserNameA),
     E("shell32", CommandLineToArgvW), E("shell32", ShellExecuteA), E("shell32", SHGetFolderPathA),
     E("ole32", CoCreateGuid), E("ole32", CoCreateInstance), E("ole32", CoFreeUnusedLibraries),
     E("ole32", CoInitialize), E("ole32", CoInitializeEx), E("ole32", CoTaskMemAlloc), E("ole32", CoTaskMemFree),
     E("ole32", CoUninitialize),
     E("winmm", timeGetTime), E("winmm", timeBeginPeriod), E("winmm", timeEndPeriod),
+    E("winmm", mmioOpenA), E("winmm", mmioClose), E("winmm", mmioRead), E("winmm", mmioWrite), E("winmm", mmioSeek),
+    E("winmm", mmioGetInfo), E("winmm", mmioSetInfo), E("winmm", mmioAdvance), E("winmm", mmioFlush),
+    E("winmm", mmioDescend), E("winmm", mmioAscend), E("winmm", mmioCreateChunk), E("winmm", mmioSendMessage),
+    E("winmm", mmioStringToFOURCCA),
     { "ws2_32", "WSAStartup", (void *)&fnvnx_ws2_WSAStartup }, { "ws2_32", "WSACleanup", (void *)&fnvnx_ws2_WSACleanup },
     { "ws2_32", "WSAGetLastError", (void *)&fnvnx_ws2_WSAGetLastError }, { "ws2_32", "socket", (void *)&fnvnx_ws2_socket },
     { "ws2_32", "closesocket", (void *)&fnvnx_ws2_closesocket }, { "ws2_32", "htons", (void *)&fnvnx_ws2_htons },
@@ -141,6 +157,7 @@ const exp g_exports[] = {
     { "ws2_32", "connect", (void *)&fnvnx_ws2_fail }, { "ws2_32", "send", (void *)&fnvnx_ws2_fail },
     { "ws2_32", "recv", (void *)&fnvnx_ws2_fail }, { "ws2_32", "setsockopt", (void *)&fnvnx_ws2_fail },
     { "ws2_32", "ioctlsocket", (void *)&fnvnx_ws2_fail }, { "ws2_32", "WSAAsyncSelect", (void *)&fnvnx_ws2_fail },
+    { "ws2_32", "select", (void *)&fnvnx_ws2_fail }, { "ws2_32", "__WSAFDIsSet", (void *)&fnvnx_ws2_fdisset },
     E("steam_api", SteamAPI_Init), E("steam_api", SteamAPI_IsSteamRunning), E("steam_api", SteamAPI_Shutdown),
     E("steam_api", SteamAPI_RunCallbacks), E("steam_api", SteamAPI_RegisterCallback),
     E("steam_api", SteamAPI_UnregisterCallback), E("steam_api", SteamUser), E("steam_api", SteamFriends),
@@ -173,10 +190,22 @@ int dll_eq(const char *a, const char *b)
 
 extern "C" void *fnvnx_registered_module_export(const char *dll, const char *proc);   // module.cpp
 
+/* DLLs the exe imports under another module's name: GalaxyWrp.dll (GOG's build) wraps the Steam API with the
+ * same export names; WSOCK32 (Winsock 1.1) forwards to ws2_32 */
+static const char *dll_alias(const char *dll)
+{
+    if (dll && dll_eq(dll, "GalaxyWrp"))
+        return "steam_api";
+    if (dll && dll_eq(dll, "wsock32"))
+        return "ws2_32";
+    return dll;
+}
+
 extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
 {
     if (!name)
         return NULL;
+    dll = dll_alias(dll);
     for (const exp &e : g_exports)
         if (e.fn && !strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
             return e.fn;
@@ -184,9 +213,35 @@ extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
     return dll ? fnvnx_registered_module_export(dll, name) : NULL;
 }
 
+/* Imports by ordinal: the exports' ordinals in the system DLLs the exe binds that way (WSOCK32 21 slots,
+ * XINPUT1_3 #2/#3, DSOUND #11), resolved by name. Winsock 1.1's numbering (wsock32: 10 inet_addr, 11 inet_ntoa,
+ * 12 ioctlsocket; ws2_32 orders those three differently and is not imported by ordinal). */
+namespace {
+struct ord { const char *dll; unsigned ordinal; const char *name; };
+const ord g_ordinals[] = {
+    {"wsock32", 1, "accept"}, {"wsock32", 2, "bind"}, {"wsock32", 3, "closesocket"}, {"wsock32", 4, "connect"},
+    {"wsock32", 5, "getpeername"}, {"wsock32", 6, "getsockname"}, {"wsock32", 7, "getsockopt"},
+    {"wsock32", 8, "htonl"}, {"wsock32", 9, "htons"}, {"wsock32", 10, "inet_addr"}, {"wsock32", 11, "inet_ntoa"},
+    {"wsock32", 12, "ioctlsocket"}, {"wsock32", 13, "listen"}, {"wsock32", 14, "ntohl"}, {"wsock32", 15, "ntohs"},
+    {"wsock32", 16, "recv"}, {"wsock32", 17, "recvfrom"}, {"wsock32", 18, "select"}, {"wsock32", 19, "send"},
+    {"wsock32", 20, "sendto"}, {"wsock32", 21, "setsockopt"}, {"wsock32", 22, "shutdown"}, {"wsock32", 23, "socket"},
+    {"wsock32", 51, "gethostbyaddr"}, {"wsock32", 52, "gethostbyname"}, {"wsock32", 57, "gethostname"},
+    {"wsock32", 101, "WSAAsyncSelect"}, {"wsock32", 111, "WSAGetLastError"}, {"wsock32", 112, "WSASetLastError"},
+    {"wsock32", 115, "WSAStartup"}, {"wsock32", 116, "WSACleanup"}, {"wsock32", 151, "__WSAFDIsSet"},
+    {"xinput1_3", 2, "XInputGetState"}, {"xinput1_3", 3, "XInputSetState"}, {"xinput1_3", 4, "XInputGetCapabilities"},
+    {"xinput1_3", 5, "XInputEnable"},
+    {"dsound", 1, "DirectSoundCreate"}, {"dsound", 2, "DirectSoundEnumerateA"}, {"dsound", 11, "DirectSoundCreate8"},
+};
+} // namespace
+
 extern "C" void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordinal)
 {
     if (ordinal == FNVNX_IMPORT_BY_NAME)
         return fnvnx_win32_lookup_export(dll, name);
+    if (!dll)
+        return NULL;
+    for (const ord &o : g_ordinals)
+        if (o.ordinal == ordinal && dll_eq(dll, o.dll))
+            return fnvnx_win32_lookup_export(dll, o.name);
     return NULL;
 }

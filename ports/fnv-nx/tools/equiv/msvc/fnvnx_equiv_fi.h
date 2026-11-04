@@ -33,6 +33,10 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_MSVC_BASE_END(...) fnvnx_int_of_align<__alignof(__VA_ARGS__)>::type : 0;
 #endif
 
+/* NEW5: under GCC a class-scope operator delete(void*) forwarding to ::operator delete; MSVC 2008 already called the
+ * global one from the deleting destructor of a class whose only scalar operator delete is the placement form. */
+#define FNVNX_GLOBAL_DELETE
+
 /* FTOL1 (S1b): fnvnx_ftol2(x) is the x87 _ftol2_sse of x; under MSVC the cast compiles to exactly that call */
 #ifndef fnvnx_ftol2
 #define fnvnx_ftol2(x) ((__int64)(x))

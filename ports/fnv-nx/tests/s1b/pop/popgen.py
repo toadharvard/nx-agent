@@ -12,6 +12,14 @@ reads registers nobody set. The patch moves them:
 
     D(a1, .., an) . R(r1, .., rj, x1, .., xk)
 
+The nested spelling, D's call as a whole argument of R (x86: the words pushed for D stay on the stack right after
+D's result, which R pops as its next arguments):
+
+    R(r1, .., D(a1, .., an, x1, .., xk), .., rj)   ->   R(r1, .., D(a1, .., an), x1, .., xk, .., rj)
+
+A moved parameter whose name the receiver already uses keeps its type only. --skip-patched DIR leaves out callers
+that another patch file owns.
+
 and declares the two overloads next to the decomp's declarations (same class, same result and qualifiers; the
 moved parameters keep the donor's spelling, so MSVC pushes the same words in the same order). An implicit
 `operator bool` becomes an explicit `FUN_<R>(x..) const` returning bool, as in the pilot (0x00428110 / 0x004280f0).
@@ -128,6 +136,42 @@ def fn_window(text, addr):
     return None
 
 
+def enclosing_arg(seg, ds, de, rn):
+    """D's call seg[ds:de] as a whole argument of a call `rn(..)`: (receiver '(' index, end after its ')', argument
+    index), else None. The argument may have an object expression or cast before D's name, nothing after D's ')'."""
+    depth, k = 0, ds - 1
+    while k >= 0:
+        c = seg[k]
+        if c in ')]':
+            depth += 1
+        elif c in '([':
+            if depth == 0:
+                break
+            depth -= 1
+        elif c in ';{}':
+            return None
+        k -= 1
+    if k < 0 or seg[k] != '(':
+        return None
+    if not re.search(r'(?<![\w~])%s\s*$' % re.escape(rn), seg[:k]):
+        return None
+    re_ = match_paren(seg, k)
+    if re_ is None:
+        return None
+    args = split_args(seg[k + 1:re_ - 1])
+    pos, idx = k + 1, None
+    for i, x in enumerate(args):
+        if pos <= ds < pos + len(x):
+            idx = i
+            if seg[de:pos + len(x)].strip():
+                return None
+            break
+        pos += len(x) + 1
+    if idx is None:
+        return None
+    return (k, re_, idx)
+
+
 def find_chains(seg, dn, rn):
     """[(start, end of `dn(...)`, args text, receiver start or None, receiver args span)] in seg."""
     out = []
@@ -143,7 +187,11 @@ def find_chains(seg, dn, rn):
             continue
         mm = re.match(r'\s*(?:\.|->)\s*%s\s*\(' % re.escape(rn), rest)
         if not mm:
-            out.append((m.start(), e, seg[p + 1:e - 1], 'other', None))
+            nest = enclosing_arg(seg, m.start(), e, rn)
+            if nest is not None:
+                out.append((m.start(), e, seg[p + 1:e - 1], 'nested', nest))
+            else:
+                out.append((m.start(), e, seg[p + 1:e - 1], 'other', None))
             continue
         rp = e + mm.end() - 1
         re_ = match_paren(seg, rp)
@@ -239,6 +287,13 @@ def param_type(p):
     return p
 
 
+def pname(p):
+    """'unsigned int flags' -> 'flags'; None for an unnamed parameter."""
+    t = param_type(p)
+    n = norm(p)[len(t):].strip()
+    return n or None
+
+
 def same_params(a, b):
     ta = [param_type(x) for x in split_args(a)]
     tb = [param_type(x) for x in split_args(b)]
@@ -294,7 +349,16 @@ def main():
     ap.add_argument('--exclude', help='source paths left out (e.g. hunks that conflict with other patches)')
     ap.add_argument('--family', help='donor:receiver address pairs (hex, 8 digits) to generate')
     ap.add_argument('--name', default='gen')
+    ap.add_argument('--skip-patched', metavar='DIR',
+                    help='leave out callers that are sites of a patch file in DIR other than xinc1_pop_<name>.s1b')
     a = ap.parse_args()
+    owned = set()
+    if a.skip_patched:
+        for fn in sorted(os.listdir(a.skip_patched)):
+            if fn.endswith('.s1b') and fn != 'xinc1_pop_%s.s1b' % a.name:
+                for m in re.finditer(r'^@@ \w+ (\S+) 0x([0-9a-fA-F]+)',
+                                     open(os.path.join(a.skip_patched, fn), encoding='utf-8').read(), re.M):
+                    owned.add((m.group(1), m.group(2).lower().zfill(8)))
     D = os.environ['DECOMP']
     os.makedirs(a.outdir, exist_ok=True)
     abi = {}
@@ -317,6 +381,9 @@ def main():
             continue
         if exclude and r[0] in exclude:
             manual.append((r[0], r[5], '-', 'excluded (hunks conflict with other patches)'))
+            continue
+        if (r[0], r[5].lower().zfill(8)) in owned:
+            manual.append((r[0], r[5], '-', 'site of another patch file'))
             continue
         if re.search(r'\s', r[0]):
             manual.append((r[0], r[5], '-', 'path with blanks (patch format)'))
@@ -386,8 +453,18 @@ def main():
                 ok, why = False, 'donor params do not split at %d words' % m
                 break
             chains = find_chains(seg, dn, rn)
-            want = [c for c in chains if (c[3] == 'chain' if not rn.startswith('operator ') else c[3] is None)
-                    and arity(c[2]) == len(dps)]
+            want = [c for c in chains if (c[3] in ('chain', 'nested') if not rn.startswith('operator ')
+                                          else c[3] is None) and arity(c[2]) == len(dps)]
+            if len({c[3] for c in want}) > 1:
+                ok, why = False, 'chain and nested spellings mixed (%s . %s)' % (dn, rn)
+                break
+            ins = None
+            if want and want[0][3] == 'nested':
+                ins = {c[4][2] + 1 for c in want}
+                if len(ins) != 1:
+                    ok, why = False, 'nested at different argument positions'
+                    break
+                ins = ins.pop()
             if len(want) != len(prs):
                 ok, why = False, '%d chains for %d sites (%s . %s)' % (len(want), len(prs), dn, rn)
                 break
@@ -441,7 +518,8 @@ def main():
                 n_new = (keep if role == 'D' else len(plist) + k)
                 clash = [x for x in others if arity(x['params']) == n_new]
                 pending.append(((b[0], md['start']), md, dict(role=role, name=newname, ret=ret, params=newp,
-                                                              const=newcst, k=k, donor=(src, daddr, dref), clash=clash)))
+                                                              const=newcst, k=k, donor=(src, daddr, dref), clash=clash,
+                                                              ins=ins)))
             if not ok:
                 break
         if not ok:
@@ -474,8 +552,25 @@ def main():
                     if dp is None:
                         bad = True
                         break
-                    mv = [elaborate(text, key[0], norm(x)) for x in dp[len(dp) - ad['k']:]]
-                    ps = ', '.join([norm(x) for x in ad['params']] + mv)
+                    rp_ = [norm(x) for x in ad['params']]
+                    late = False
+                    taken = {pname(x) for x in rp_} - {None}
+                    mv = []
+                    for x in dp[len(dp) - ad['k']:]:
+                        x = norm(x)
+                        if pname(x) in taken:            # the receiver already has a parameter of that name
+                            x = param_type(x)
+                        taken.add(pname(x))
+                        tm = re.match(r'^(?:const\s+)?(%s)\s*<' % ID, x)
+                        if tm and re.search(r'\btemplate\s*<[^;{]*>\s*(?:class|struct)\s+%s\b' % tm.group(1),
+                                            text[:key[0]]) is None:
+                            late = True              # a class template first declared after the receiver's class
+                        mv.append(elaborate(text, key[0], x))
+                    ins_ = len(rp_) if ad.get('ins') is None else ad['ins']
+                    ps = ', '.join(rp_[:ins_] + mv + rp_[ins_:])
+                    if late:
+                        bad = 'moved parameter of a class template declared later'
+                        break
                 # an existing declaration with the same parameters already is the overload
                 if any(same_params(x['params'], ps) and (x.get('ret') or '') == ad['ret'] for x in ad['clash']):
                     continue
@@ -492,7 +587,7 @@ def main():
                 decl_new[key] = texts_add
         if bad:
             for c in fd['calls']:
-                manual.append((src, c['caller'], '-', 'overload clash'))
+                manual.append((src, c['caller'], '-', bad if isinstance(bad, str) else 'overload clash'))
             continue
         # every edit (declarations and calls) as (start, end, replacement, (window lo, hi, caller) or None)
         edits_all = []
@@ -512,7 +607,9 @@ def main():
                 keep = ','.join(args[:len(args) - e['k']]).rstrip()
                 edits_all.append((wtag + e0 - 1 - len(args_t), wtag + e0 - 1, keep, wnd))
                 mv = ', '.join(e['moved'])
-                if kind == 'chain':
+                if kind == 'nested':
+                    edits_all.append((wtag + e0, wtag + e0, ', ' + mv, wnd))
+                elif kind == 'chain':
                     rp, re_ = rspan
                     rargs = text[wtag + rp + 1:wtag + re_ - 1]
                     if norm(rargs) in ('', 'void'):

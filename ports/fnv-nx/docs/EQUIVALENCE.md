@@ -50,6 +50,15 @@ are unexplained**.
 | MSVC-OPAQUE-ENUM | | 7 | ENUM1 |
 | unexplained | 32 | 28 | |
 
+Retargets are explained by evidence: shard reports list, per retarget, each relocation that moved as `pristine
+binding>prepared binding` (`## Retargets`), and a retarget is explained only when every pair is a `wrapper` row of
+explained.tsv (CRT-WRAPPER: the game's forwarding wrappers 0x00403d30 memset, 0x00406d30 / 0x00404d80 strcpy_s,
+0x00406d50 strcat_s, 0x00401460 memcpy, 0x00404dc0 _stricmp, and the CRT's own 0x00ec44d0 memcpy / 0x00eca590 tan
+bound by a C++ name; CRT-INLINE: the inline C++ overload of MSVC's header that the object defines, `strchr(char*,
+int)`, `abs(float)`, placement `operator new`; DECORATION: the same entity under another MSVC decoration). All 168
+retargets of the gate's 112 retarget units have such pairs at `c1039e7` (local). Literal digests drop the zero padding
+in front of the next symbol: `""` was `00` on one side and `00 00` on the other (blk_00c40000_od_ob1 0x00c44280).
+
 ## Verdicts per rule
 
 Leave-one-out attribution (method below). `eh` / `retarget` / `code`: kinds of the differing functions the rule
@@ -160,7 +169,7 @@ above (round 8).
 | `SSE1` `SSE2` `SSE3` `SSE4` | platform | the decomp's copies of MSVC's vector types / intrinsic prototypes give way to sse2neon's | - |
 | `DECL1` | neutral (claim) | the platform header declares the same CRT / Win32 function | the real MSVC CRT / SDK headers |
 | `GAME1` | neutral | renames a unit's own Win32-named game declaration and its call sites; the address binding is unchanged | `fnvnx_game_X` bound like the decomp's `X` |
-| `NEW1` | neutral | `unsigned int` is `size_t` on x86 (same type, same decoration) | as is |
+| `NEW1` | neutral | `unsigned int` / plain `unsigned` is `size_t` on x86 (same type, same decoration) | as is |
 | `UNIT1` | neutral | renames local types of tesdatahandler (same layout) | as is |
 | `KEEP1` | neutral | `__attribute__((used))`: emission only, no code meaning | `FNVNX_KEEP` empty: inert by construction |
 | `IFX1` | neutral (claim) | static resolution of `__if_exists`; MSVC evaluates the original itself | as is (strongest check) |
@@ -174,7 +183,7 @@ above (round 8).
 | `CTOR1` | neutral (by design: the code differences are the placement form's) | explicit constructor call = placement new of the same class at the same address. `<new>`'s placement `operator new` is `throw()`, so MSVC null-checks the pointer before the constructor, and at `/Od` calls the placement function instead of inlining it (the gate's 58 code + 31 EH functions, e.g. 0x009cff10, 0x0092eb50, 0x007f9840). Standard C++ has no other way to construct in place, and for a non-null `this` (every decomp site constructs into an object it holds) the behaviour is the same | real `<new>` |
 | `LINK1` | neutral | C and C++ linkage of a global variable name the same symbol under Itanium | data names bound by variable name |
 | `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables; a namespace static bound by its plain name (`_s_fSpinTime`) gets C linkage in place, an uninitialised scalar / pointer one declared only (the image's variable) | variable bound by the recipe's address |
-| `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars | as is |
+| `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars; a const integer literal (`const int n = 4;`, an array bound) stays as written unless a forward goto crosses it, then `static const` (GOTO1-CONST: the split made `n` a VLA bound GCC accepted and MSVC rejected, C2057 in hkpagent1nmachineprocess_..._rtm_variant; now identical) | as is |
 | `GOTO2` | neutral (claim) | a forward goto across an initialized class object / reference / aggregate into its scope: `const float& a = f(x);` -> `float a; a = f(x);` for an f returning float by value; `{ ` ... `} ` around the crossed declarations before a label of their block when nothing they declare is named after it; or the label's straight `...; return e;` tail (names not declared in the function) cloned into each crossing goto | the path that jumped never used the crossed objects; scopes end earlier, a cloned tail is the same statements |
 | `QUAD1` | neutral | `return q;` -> `return (__m128)q;` where q's class converts to `__m128` and the function's return class is constructible from `__m128` only: MSVC chained both user-defined conversions | the same conversion operator and constructor, the first written out |
 | `MSCV1` | neutral | `_MSC_FULL_VER` / `_MSC_VER` in code (not in `#if`) -> the value of the compiler build/units.json gives the unit: sp1 150030729 / 1500, rtm 150021022 / 1500, vc8 140050727 / 1400 | the constant that compiler substituted |
@@ -184,14 +193,16 @@ above (round 8).
 | `NEW3` | neutral | deallocation functions are implicitly `noexcept` (C++11) | `noexcept` empty |
 | `TYPEID1` | neutral | adds `<typeinfo>` only | real `<typeinfo>` |
 | `SPEC1` | neutral | early `template<>` declarations of member specializations | declarations only |
-| `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address | as is |
+| `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address; DUPINT1-RET (S1-refs): also when the return types differ, if every mention of the name is a call whose value is discarded and the differing parameters are 32-bit integers | as is |
 | `RREF1` | neutral | `fnvnx_lvalue(...)` around an argument passed to a non-const reference parameter (every declaration the unit sees; for an unqualified call in a member function, the declarations of the nearest class that declares the name, RREF1-CLASS) that is not a plain lvalue | the temporary MSVC bound, same lifetime |
 | `RREF2` | neutral | `fnvnx_lvalue(T(args))` as the operand of a member operator whose every declaration with a T parameter takes a non-const `T&` (S1-refs) | the temporary MSVC bound, same lifetime |
 | `ADDR1` | neutral | `&_mm_f(args)` -> `&fnvnx_lvalue(_mm_f(args))` as the operand of a unary `&` (MSVC's address of a class rvalue, C4238) | the same temporary's address, same lifetime |
 | `LANE1` | platform | `&((T*)&(v))`, SSE1's lane array with its address taken (`(&v.m128_f32)[0]`), -> `((T(*)[sizeof(v) / sizeof(T)])&(v))` | MSVC's `&v.m128_f32`: same address and array type; SSE1 is target only |
 | `STD2` | neutral | a file-scope definition `R std::f(...)` whose recipe symbol is `?f@std@@...` (guardpackage.cpp's `double std::abs(float)`, 0x00408840) -> `R fnvnx_std_f(...)`; a POST hook renames the recipe symbol to `?fnvnx_std_f@@...` (S1-refs) | same body and signature, only the decorated name differs; callers bind the address; the Fingerprinter takes the renamed definition from the prepared recipe |
-| `COND1` | neutral | `c ? false : x.f(a)` (or `? true :`) where f returns a class with `G(bool)` and `operator bool()` and every same-arity declaration of f returns a bool-convertible class -> `c ? false : (bool)(x.f(a))` (hkgpmesh.cpp, S1-refs) | GCC finds both conversions and refuses; either one gives the same truth value, and the cast is the conversion the condition applies anyway |
+| `COND1` | neutral | `c ? false : x.f(a)` (or `? true :`) where f returns a class with `G(bool)` and `operator bool()` and every same-arity declaration of f returns a bool-convertible class -> `c ? G(false) : x.f(a)` (hkgpmesh.cpp, S1-refs) | GCC finds both conversions and refuses; MSVC converted the literal to G (its code tests the result byte directly; a `(bool)` cast on the G operand measured different: `setne`/`test`) |
 | `RSTR1` | neutral | a function-local `T* __restrict v` passed by name to a parameter the unit declares `const X&` -> `fnvnx_unrestrict(v)` (hkpsavecontactpointsutil.cpp, S1-refs) | `#define fnvnx_unrestrict(x) (x)` under MSVC (fnvnx_equiv_fi.h): the original text; under GCC the same object as an unqualified lvalue, so the reference binds the local as MSVC's did |
+| `NEW5` | neutral | a base-less class with a virtual destructor whose only scalar `operator delete` is the placement form `(void*, void*)` gets `FNVNX_GLOBAL_DELETE` first in its body: under GCC `static void operator delete(void*)` forwarding to `::operator delete`, which MSVC 2008's scalar deleting destructor called (0x00d979a0: a one-argument cdecl call, 31 bytes); GCC otherwise rejects the deleting destructor (S1-refs) | `FNVNX_GLOBAL_DELETE` empty (tools/equiv/msvc/fnvnx_equiv_fi.h): the decomp's class unchanged |
+| `NSCALL1` | neutral | an unqualified call, inside namespace N, of N's own C++ prototype of a CRT / Win32 name (`strcpy_s`, `_stricmp`, ... DECL1 keeps it) -> `N::name(`, where the unit's units.json binds that name only in N and no class of the unit declares a member of that name; `<math.h>` names excluded (S1-refs) | the function MSVC called: on MSVC only N::name was declared; on the target a class-type argument brought the shim's ::name in by argument-dependent lookup |
 | `TPL1` | neutral | `this->` in front of the members of a dependent base that a class template's member functions use by plain name | the members MSVC's (one-phase) lookup found |
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
@@ -207,6 +218,7 @@ above (round 8).
 | `CSX2` | neutral | 4 bytes behind a generated-layout `_RTL_CRITICAL_SECTION` member whose class asserts it as 28 bytes (NiCriticalSection, RecursiveLock and their holders) | the offsets the pristine MSVC build and the byte-matched code have (J-0067) |
 | `STAND1` | platform | removes an untagged definition whose MSVC name the unit binds to the address of a tagged definition in the same unit (a free function keeps its declaration) | the call reaches the tagged function, as in the binary; an optimizing MSVC build may have inlined the stand-in |
 | `STAND2` | platform | STAND1 for an address another unit's tagged definition provides, only for a non-inline, non-static definition in a unit compiled without /O1, /O2, /Ox, /Ob2 | MSVC never inlined the stand-in there, so its code called the name, which the link took to the other unit's function |
+| `STAND3` | platform | in an /Od unit without /Ob1, /Ob2, /O1, /O2, /Ox, removes the body of an untagged in-class definition, or of an out-of-class or free one marked inline, whose MSVC name the unit binds to one address that some unit decompiles (declarations stay) | MSVC inlines nothing there, so the binary calls that address at every site; the call now reaches it too (the link binds the name, tier unit/exact) |
 | `PTR1` | neutral | `f > 0` / `p > 0` -> `!= 0` and `<= 0` -> `== 0` for a function name or a local pointer | MSVC's unsigned compare of the address gives the same result |
 | `INC1` | neutral | a quoted `#include` that names, up to case, a file in the including directory is spelled as that file (`"Actor.h"` -> `"actor.h"`) | the header MSVC opened (directory of the includer first, names without case) |
 | `ANON2` | platform | a member with a constructor / destructor / copy assignment in an anonymous struct of an anonymous union becomes raw storage of its size and alignment, its uses `(*(T*)(x.m))` | same bytes and calls; MSVC never ran those functions for a union member either |

@@ -91,7 +91,7 @@ def test_budget(tmp):
     check(abs(b['budget_minsn']['1020']['pass_45'] - 18.1) < 0.1 and abs(b['budget_minsn']['1785']['pass_45'] - 31.7) < 0.1,
           'budget: 45 fps per-core budget 18.1 M at 1020 MHz, 31.7 M at 1785 MHz (IPC 0.8)')
     want = {'%s@%d' % (s['id'], c) for s in model['scenarios'] for c in (1020, 1785)}
-    check(set(b['gates']) == want and all(v in ('fail', 'pass_30', 'pass_45', 'stretch_60') for v in b['gates'].values()),
+    check(set(b['gates']) == want and all(v in ('fail', 'pass_30', 'pass_45', 'target_60') for v in b['gates'].values()),
           'budget: a level per scenario and clock (%d)' % len(b['gates']))
     placed = {s['id']: s for s in b['scenarios']}
     main_items = set(placed['placed']['cores']['0']['items'])
@@ -136,7 +136,9 @@ def test_budget(tmp):
     check(cu['critical'] and abs(cu['share_45']['1020'] - want) < 2e-3 and cu['fix'] and cu['basis'] == 'E',
           'hotspots: share of 22.2 ms at the assumed IPC, fix attached (cull %.3f)' % cu['share_45']['1020'])
     sl = next(h for h in fns if h['id'] == 'fn_slerp')
-    check(abs(sl['minsn']['lo'] - 0.26) < 1e-6 and abs(sl['minsn']['hi'] - 1.3) < 1e-6 and sl['basis'] == 'E',
+    hs = next(h for h in model['hotspot_functions'] if h['id'] == 'fn_slerp')   # per call [M] x calls [E]
+    check(abs(sl['minsn']['lo'] - hs['per_call_insn'][0] * hs['calls'][0] / 1e6) < 1e-6 and
+          abs(sl['minsn']['hi'] - hs['per_call_insn'][1] * hs['calls'][1] / 1e6) < 1e-6 and sl['basis'] == 'E',
           'hotspots: function proxy = per-call A64 count x calls per frame')
     q = b['queue']
     check(q and q[0]['rank'] == 1 and all(q[i]['gain_main_minsn']['mid'] >= q[i + 1]['gain_main_minsn']['mid']
