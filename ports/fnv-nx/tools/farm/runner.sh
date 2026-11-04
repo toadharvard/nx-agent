@@ -10,6 +10,9 @@
 # repository, repeat. Several commits that land during one run collapse into the newest. The process exits by
 # itself after $RUNNER_MAX_S seconds (default 6600), so that a Bash background timeout of 2 h never kills a job
 # halfway; start it again when it exits. State: $FARM_HOME/<name>.last (last head done), $FARM_HOME/<name>.log.
+# A job may leave a machine-readable sidecar next to its report, <report>.json (e.g. <c12>-gates.json); the runner
+# publishes it with the report, in the same commit. RUNNER_REPEAT_S=<s>: also run the job again on the same head once
+# the last run is that old (the gates job reads reports that arrive without a new head; default 0, only new heads).
 # Needs: git, python3, jq, rsync, g++-aarch64-linux-gnu; this session's checkout of toadharvard/fnv-nx-build (push),
 # found at $ARTIFACTS (default: the checkout this script runs from, else /home/user/fnv-nx-build).
 set -uo pipefail
@@ -19,6 +22,7 @@ BRANCH=${INTEGRATION_BRANCH:-claude/port-nsw-un6t9s}
 PUBLIC=https://github.com/toadharvard/nx-agent
 NX=$FARM_HOME/nx-agent
 MAX=${RUNNER_MAX_S:-6600}
+REPEAT=${RUNNER_REPEAT_S:-0}
 if [ -z "${ARTIFACTS:-}" ]; then
   for d in /home/user/fnv-nx-build "$FARM_HOME/artifacts"; do [ -d "$d/.git" ] && { ARTIFACTS=$d; break; }; done
 fi
@@ -27,8 +31,8 @@ mkdir -p "$FARM_HOME"; LOG=$FARM_HOME/$NAME.log; LAST=$FARM_HOME/$NAME.last
 log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$LOG"; }
 [ -d "$NX/.git" ] || git clone -q --filter=blob:none "$PUBLIC" "$NX"
 
-publish_report() {  # publish_report <file>: commit it to reports/<NAME> of the artifacts repository
-  local f=$1 rb=reports/$NAME wt=$FARM_HOME/reports-wt
+publish_report() {  # publish_report <file.md>: commit it and its <file>.json sidecar, if any, to reports/<NAME>
+  local f=$1 rb=reports/$NAME wt=$FARM_HOME/reports-wt side=${1%.md}.json
   git -C "$ARTIFACTS" worktree prune
   if [ ! -d "$wt/.git" ] && [ ! -f "$wt/.git" ]; then
     if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/$rb:refs/remotes/origin/$rb" 2>/dev/null; then
@@ -39,6 +43,7 @@ publish_report() {  # publish_report <file>: commit it to reports/<NAME> of the 
   fi
   cp "$f" "$wt/"
   git -C "$wt" add "$(basename "$f")"
+  if [ "$side" != "$f" ] && [ -f "$side" ]; then cp "$side" "$wt/" && git -C "$wt" add "$(basename "$side")"; fi
   git -C "$wt" -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$NAME: $(basename "$f")" || true
   for i in 1 2 3; do git -C "$wt" push -q -f origin "HEAD:refs/heads/$rb" 2>/dev/null && return 0; sleep $((i * 5)); done
   log "report push failed: $f"
@@ -72,11 +77,17 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     TAG="${WB//\//_}-"
   else
     H=$(git ls-remote "$PUBLIC" "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
-    if [ -z "$H" ] || [ "$H" = "$(cat "$LAST" 2>/dev/null)" ]; then sleep 60; continue; fi
+    if [ -z "$H" ]; then sleep 60; continue; fi
+    if [ "$H" = "$(cat "$LAST" 2>/dev/null)" ]; then
+      # the same head: again only with RUNNER_REPEAT_S, once the last run is that old
+      age=$(( $(date +%s) - $(stat -c %Y "$LAST" 2>/dev/null || echo 0) ))
+      if [ "$REPEAT" -le 0 ] || [ "$age" -lt "$REPEAT" ]; then sleep 60; continue; fi
+    fi
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "$H" || { sleep 60; continue; }
   fi
   H12=${H:0:12}; R=$FARM_HOME/out/$TAG$H12-$JOB.md; mkdir -p "$FARM_HOME/out"
   J=$NX/ports/fnv-nx/tools/farm
+  rm -f "${R%.md}.json"     # a sidecar is this run's or none
   log "start $JOB $* at $H12"
   case "$JOB" in
     prepare) bash "$J/prepare_job.sh" "$H" "$R" ;;
@@ -87,6 +98,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
   rc=$?
   if [ $rc -ne 0 ]; then
     { echo "# $JOB $H12 FAILED (rc $rc)"; echo; echo '```'; tail -40 "$LOG"; echo '```'; } > "$R"
+    rm -f "${R%.md}.json"
   fi
   [ -f "$R" ] && publish_report "$R"
   if [ "$WATCH" = wip ]; then echo "$H" >> "$FARM_HOME/$NAME.done"; else echo "$H" > "$LAST"; fi
