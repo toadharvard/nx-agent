@@ -268,10 +268,28 @@ Blocked, with what unblocks it:
   (translated state words, GLSL families), so it cannot be fed to Nine. The capture point is the D3D9 boundary: one
   host call per D3D call through S6c's generated dispatcher (`nine_dispatch`), which needs the game running on the
   Nine path (`test/gate.py --game` reaches only the static-init stop today).
-* **Joining captured draws with the pass space.** Neither `.nxcap` nor the native command stream carries the
-  engine pass id of a draw. Request to S6n: a no-op marker op (e.g. `NxOp_Marker`: tag `PASS`, true pass id, family
-  id) emitted per packet by the families, ignored by the backends and kept by `CaptureBackend`; `nxcap.py stat`
-  then reports draws per pass id and joins them with `build/v6n/pass_space.tsv`.
+* **Joining captured draws with the pass space**: unblocked by S6n's `NxOp_Marker` (C77, a21198c). Done as far as
+  synthetic captures allow: `nxcap.py markers FILE` attributes every draw to the PASS marker in force in its pass and
+  joins the id with `build/v6n/pass_space.tsv` (name, class, emit kind; ids > 758 are flagged and fail the command).
+  No engine-side family emits markers yet, so the game's real per-pass draw counts wait for N2 families that call
+  `Renderer::SetEnginePass`.
+
+### 6.2 C77 verification (pass markers)
+
+* `tests/v6n/claims/c77_markers.cpp`: 3000 random frames (1-4 passes, tagged / untagged / mixed passes, clears,
+  tags including pass 0 and long runs of TILE 757) encoded by `nx::Frame::Finish` through a `CaptureBackend`; the
+  stream is parsed independently. Every draw sits under its own tag (or under none / `NX_PASS_UNKNOWN` when
+  untagged), no two markers without a draw between, never the same tag twice in a row, no marker in a pass without
+  tagged draws, markers never outside a pass, and the capture holds every frame's words verbatim. PASS (51316
+  draws, 27002 markers, 3099 untagged passes). Three mutants of `front.cpp` (UNKNOWN dropped, untagged runs not
+  marked, `curTag` not reset per pass) are each caught.
+* Backends ignore the marker: `nxcap.py inject` puts a marker before each of the 160 draws of S6n's N0 capture;
+  `replay_gl` gives 0 differing read-backs against the read-backs recorded without markers. deko3d
+  (`host/nxgpu.c`) skips it by source inspection (`case NxOp_Marker: break`, argument count honoured); not run.
+* S6n's own N1 checks: 46/46 on GL and 46/46 as the ILP32 guest under Unicorn (TILE 757 then IMAGESPACE* 758).
+* True numbering: 757 = TILE and 758 = IMAGESPACE* in V6n's `pass_names.tsv` / `pass_space.tsv`, as the selftest
+  uses. Observation (not a defect, no caller does it): `Frame::Tag` / `SetEnginePass` take any uint16 and do not
+  reject ids > 758 or pass 0 (disabled); `nxcap.py markers` flags such ids.
 
 ## 7. Findings for other streams
 

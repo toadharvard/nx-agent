@@ -45,7 +45,7 @@ selfcheck() {
 	for m in d24_bias_scale x8_dst_alpha; do
 		py "$V/claims.py" --mutant $m > /dev/null && { echo "claim check missed mutant $m"; bad=1; }
 	done
-	echo "== S6n claim checks: C54 MAXMIPLEVEL / mip scenes vs Nine on both targets, C65 radix sort property test"
+	echo "== S6n claim checks: C54 MAXMIPLEVEL / mip scenes vs Nine on both targets, C65 radix sort, C77 pass markers"
 	py "$V/pixdiff.py" "$T/claims" | tail -1; py "$V/pixdiff.py" --target s6ngl "$T/claims" | tail -1
 	py "$V/pixdiff.py" "$T/claims" > /dev/null || bad=1; py "$V/pixdiff.py" --target s6ngl "$T/claims" > /dev/null || bad=1
 	# S6n's objects (front.o, gpu_dispatch.o, d3d9_state_s.o) come from tests/s6n's run_gl target; build them here
@@ -53,6 +53,14 @@ selfcheck() {
 	if [ -n "$S" ]; then
 		g++ -std=c++17 -O2 -I"$ROOT/render/native/include" -I"$ROOT/render/native/front" -o "$S/v6n_c65" "$T/claims/c65_sort.cpp" \
 			"$S/front.o" "$S/gpu_dispatch.o" "$S/d3d9_state_s.o" -lm && "$S/v6n_c65" || { echo "FAIL: C65"; bad=1; }
+		g++ -std=c++17 -O2 -I"$ROOT/render/native/include" -I"$ROOT/render/native/front" -I"$ROOT/render/native" -o "$S/v6n_c77" \
+			"$T/claims/c77_markers.cpp" "$S/front.o" "$S/capture.o" "$S/gpu_dispatch.o" "$S/d3d9_state_s.o" -lm \
+			&& "$S/v6n_c77" "$S/v6n_c77.nxcap" || { echo "FAIL: C77"; bad=1; }
+		[ -f "$S/cap/n0.nxcap" ] || make -s -C "$ROOT/tests/s6n" capture OUT="$S" > "$S/capture.log" 2>&1
+		if [ -f "$S/cap/n0.nxcap" ] && [ -x "$S/replay_gl" ]; then   # C77: the GL backend ignores markers
+			py "$V/capture/nxcap.py" inject "$S/cap/n0.nxcap" "$S/v6n_c77_mk.nxcap" > /dev/null
+			"$S/replay_gl" "$S/v6n_c77_mk.nxcap" "$S/v6n_c77_out" | grep "0 differ" || { echo "FAIL: C77 replay with markers"; bad=1; }
+		else echo "FAIL: C77 replay: no N0 capture (make -C tests/s6n capture)"; bad=1; fi
 	fi
 	echo "== repro corpus: tests/v6n/repro/*.scene must match (fixed model/harness gaps)"
 	if ls "$T/repro"/*.scene > /dev/null 2>&1; then py "$V/pixdiff.py" "$T/repro" || bad=1; fi
@@ -64,7 +72,7 @@ s6n_objs() {   # prints the directory holding S6n's test objects after building 
 	local S=${S6N_TESTS:-$ROOT/build/v6n/s6n-tests}
 	mkdir -p "$S" && S=$(cd "$S" && pwd) || return 1
 	make -s -C "$ROOT/tests/s6n" "$S/run_gl" OUT="$S" > "$S/make.log" 2>&1 || { tail -5 "$S/make.log" >&2; return 1; }
-	for o in front.o gpu_dispatch.o d3d9_state_s.o nxgl.o nx_shaders.o; do [ -f "$S/$o" ] || return 1; done
+	for o in front.o gpu_dispatch.o d3d9_state_s.o nxgl.o nx_shaders.o capture.o; do [ -f "$S/$o" ] || return 1; done
 	echo "$S"
 }
 defect() {   # name -> 0 when the defect is fixed (test passes)

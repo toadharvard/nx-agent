@@ -66,6 +66,7 @@ tests/v6n/run.sh
 | C70 ABI v3 read-back formats | PASS in use: `v6n_s6ngl` reads RGBA32F for float targets and Depth32F/Stencil8 for depth-stencil; 104/104 committed scenes and 380/400 fuzz cases match Nine (the rest classified, none a read-back error) |
 | C71 NxOp_Clear rectangles | PASS in use (V6n clears viewport ∩ scissor through it, as D3D9 Clear requires; trap `clear_ignores_scissor` matches); its sRGB rule differs from Nine -> defect `clear_srgb` |
 | C72 C pixel-shader harness | not used by V6n (V6n drives NxGpuApi through its own adapter); note: uv = x/W at integer centres puts point-sampled texel boundaries on pixel centres when the texture is W wide (same root as `screen_space_halfpixel`), so harness goldens are sensitive to sub-ulp filtering differences |
+| C77 pass markers | PASS: property test (3000 random frames, 3 front.cpp mutants caught), capture verbatim, GL replay with injected markers 0 differ, N1 46/46 on GL and the ILP32 guest; ids use the true numbering; pass join in `nxcap.py markers` |
 | C61 | reproduced: toolchain built from source with render/native/env.sh, switch/build.sh links guest.nso, host.elf and exefs.nsp; not run on hardware (nor by V6n) |
 | C62 | reproduced: the ILP32 guest under Unicorn gives 17/17 scene images equal to the goldens (max diff 0) |
 | C68 guest half | `n1/build.sh` + `make n1emu`: 45 checks, 0 failed under Unicorn (the claim says 36; S6n's selftest has grown) |
