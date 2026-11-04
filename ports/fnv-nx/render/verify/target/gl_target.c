@@ -127,7 +127,7 @@ static const char* FS =
     "#version 450 core\n"
     "in vec4 vDiff; flat in vec4 vDiffF; in vec4 vSpec; flat in vec4 vSpecF; in vec2 vUV; in float vFog;\n"
     "layout(location=0) out vec4 oCol;\n"
-    "uniform sampler2D uTex0; uniform sampler2D uTex1; uniform int uFlat;\n"
+    "uniform sampler2D uTex0; uniform sampler2D uTex1; uniform int uFlat; uniform ivec2 uTci;\n"
     "uniform ivec4 uStage[2]; uniform ivec4 uStageB[2];\n"   /* colorop, carg1, carg2, carg0 | alphaop, aarg1, aarg2, aarg0 */
     "uniform vec4 uTFactor; uniform vec4 uConst[2]; uniform int uSpecular; uniform int uSpecA;\n"
     "uniform int uFogMode; uniform vec4 uFogColor; uniform vec3 uFogP; uniform int uFogW; uniform int uFogLinNoClamp;\n"
@@ -162,7 +162,7 @@ static const char* FS =
     "}\n"
     "void main() {\n"
     "  D = uFlat != 0 ? vDiffF : vDiff; S = uFlat != 0 ? vSpecF : vSpec;\n"
-    "  T[0] = texture(uTex0, vUV); T[1] = texture(uTex1, vUV);\n"
+    "  T[0] = texture(uTex0, uTci.x == 0 ? vUV : vec2(0.0)); T[1] = texture(uTex1, uTci.y == 0 ? vUV : vec2(0.0));\n"
     "  CUR = D; TMP = vec4(0.0);\n"
     "  for (int s = 0; s < 2; s++) {\n"
     "    if (uStage[s].x == 1) break;\n"
@@ -596,6 +596,8 @@ static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     glUniform4iv(U("uStage"), 2, &stage[0][0]); glUniform4iv(U("uStageB"), 2, &stageb[0][0]);
     glUniform4fv(U("uConst"), 2, &cst[0][0]);
     glUniform1i(U("uTex0"), 0); glUniform1i(U("uTex1"), 1);
+    /* TEXCOORDINDEX naming a set the FVF lacks (only TEX1 here): Nine feeds (0,0) -- test of the model */
+    glUniform2i(U("uTci"), (t->tss[0][11] & 0xFFFF) != 0, (t->tss[1][11] & 0xFFFF) != 0);
     if (t->ps) {   /* layout contract UBO 0 (c#) and UBO 2 (driver: fog, alpha test) */
         glUniform1f(U("uYSign"), M("upper_left_origin") ? 1.0f : -1.0f);
         if (!g_ubo[0]) glGenBuffers(2, g_ubo);

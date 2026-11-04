@@ -1,4 +1,5 @@
-# UNCLASSIFIED (V6n FF model + llvmpipe vs Nine-softpipe, not an S6n claim): isolated pixels with bilinear filtering or ZB_USEW/NOTEQUAL at the clear depth; kept as fuzz corpus
+# classified by V6n 2026-11-04: impl_defined
+# ZFUNC NOTEQUAL with fragment z equal to the clear depth (0.5): float -> D24 rounding of the clear and of the fragment differs between implementations (MATCH with clear depth 0.6). Oracle-side detail, not an S6n claim.
 # fuzz.py reproducer: target gl, seed 5, case c00519
 # colour: 12 px over tolerance (max |d| 255), first (10,14) ref [0.0, 0.0, 0.0, 0.0] test [0.0, 0.0, 0.0, 255.0]
 size 16 16

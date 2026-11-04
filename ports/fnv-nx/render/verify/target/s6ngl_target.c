@@ -74,7 +74,7 @@ static const char* FS_BODY =
     "}\n"
     "void main() {\n"
     "  D = flags.x != 0 ? vDiffF : vDiff; S = flags.x != 0 ? vSpecF : vSpec;\n"
-    "  T[0] = texture(uTex0, vUV); T[1] = texture(uTex1, vUV);\n"
+    "  T[0] = texture(uTex0, flags.z != 0 ? vec2(0.0) : vUV); T[1] = texture(uTex1, flags.w != 0 ? vec2(0.0) : vUV);\n"
     "  CUR = D; TMP = vec4(0.0);\n"
     "  for (int s = 0; s < 2; s++) {\n"
     "    if (st[s].x == 1) break;\n"
@@ -278,7 +278,7 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
         nx_d3d9_color(t->tss[s][32], fu.cst[s]);
     }
     nx_d3d9_color(t->rs[60], fu.tf);
-    fu.flags[0] = NXRS_GET(st.w[2], NXRS_R_FLAT, 1); fu.flags[1] = t->rs[29] != 0; fu.flags[2] = fu.flags[3] = 0;
+    fu.flags[0] = NXRS_GET(st.w[2], NXRS_R_FLAT, 1); fu.flags[1] = t->rs[29] != 0; fu.flags[2] = (t->tss[0][11] & 0xFFFF) != 0; fu.flags[3] = (t->tss[1][11] & 0xFFFF) != 0;   /* missing set -> (0,0) */
     struct { float fogColor[4]; float fogParams[4]; uint32_t modes[4]; } ep;   /* nx/epilogue (d3d9_epilogue.glsl) */
     memcpy(ep.fogColor, dyn.fogColor, 16);
     ep.fogParams[0] = dyn.fogEnd; ep.fogParams[1] = dyn.fogScale; ep.fogParams[2] = dyn.fogDensity; ep.fogParams[3] = dyn.alphaRef;

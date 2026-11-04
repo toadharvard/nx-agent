@@ -27,8 +27,9 @@ selfcheck() {
 	for m in d24_bias_scale x8_dst_alpha; do
 		py "$V/claims.py" --mutant $m > /dev/null && { echo "claim check missed mutant $m"; bad=1; }
 	done
-	echo "== repro corpus (fuzzer reproducers that once differed, now expected to match or listed as defects)"
-	[ -d "$T/repro" ] && ls "$T/repro"/*.scene > /dev/null 2>&1 && { py "$V/pixdiff.py" "$T/repro" || true; }
+	echo "== repro corpus: tests/v6n/repro/*.scene must match (fixed model/harness gaps); repro/impl_defined/ is reported only"
+	if ls "$T/repro"/*.scene > /dev/null 2>&1; then py "$V/pixdiff.py" "$T/repro" || bad=1; fi
+	if ls "$T/repro/impl_defined"/*.scene > /dev/null 2>&1; then py "$V/pixdiff.py" "$T/repro/impl_defined" | tail -1; fi
 	return $bad
 }
 defect() {   # name -> 0 when the defect is fixed (test passes)
