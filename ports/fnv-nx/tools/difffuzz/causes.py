@@ -45,6 +45,11 @@ import os
 import struct
 import sys
 
+if __name__ == '__main__':
+    # report.reclassify imports `causes`: run as a script, that would be a second copy of this module whose EFFECTS
+    # and OBJ_STATS the command line never fills (`summary --effects` silently ignored). One module, one state.
+    sys.modules.setdefault('causes', sys.modules[__name__])
+
 # address ranges of the shared world (world.py; duplicated so this module needs no emulator imports)
 NULL_END = 0x10000
 TEXT = (0x00400000, 0x00fdf000)

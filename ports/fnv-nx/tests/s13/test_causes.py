@@ -340,11 +340,33 @@ def test_handoffs():
         check(['harness_S13.tsv', 'artifact', 'S13', '1', '1', 'local-static 1'] in ix, 'index row per file')
 
 
+def test_cli_effects():
+    """Run as a script, `summary --effects` reaches the rules report.reclassify calls (one module, not two)."""
+    import subprocess
+    with tempfile.TemporaryDirectory() as root:
+        d = os.path.join(root, '1of1')
+        os.makedirs(os.path.join(d, 'div'))
+        open(os.path.join(d, 'results.jsonl'), 'w').write(
+            json.dumps(dict(address='00401000', source='src/t.cpp', status='ok', size=16)) + '\n')
+        json.dump(rec(dict(kind='mem-write', addr='03000010', x86='01000000', arm='02000000')),
+                  open(os.path.join(d, 'div', '00401000-0.json'), 'w'))
+        eff = os.path.join(root, 'eff.jsonl')
+        open(eff, 'w').write(json.dumps(dict(file='x/00401000-0.json', first='width')) + '\n')
+        out = os.path.join(root, 'c.json')
+        tool = os.path.join(HERE, '..', '..', 'tools', 'difffuzz', 'causes.py')
+        env = dict(os.environ, FNVNX_CAUSES_OBJ=root)
+        subprocess.run([sys.executable, tool, 'summary', d, '--effects', eff, '--out', out], check=True,
+                       stdout=subprocess.DEVNULL, env=env)
+        c = json.load(open(out))['causes']
+        check('field-width' in c and 'unclassified' not in c, 'CLI summary applies --effects (%s)' % sorted(c))
+
+
 if __name__ == '__main__':
     test_rules()
     test_policy()
     test_summary()
     test_object_reader()
     test_handoffs()
+    test_cli_effects()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)
