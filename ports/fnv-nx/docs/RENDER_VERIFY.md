@@ -200,28 +200,41 @@ programs on S6n's backend). Identical bytecode is run once (by hash) and the res
 holds it. Inputs are random per seed:
 
 * pixel programs: a synthetic driver VS (`tests/v6n/shaders/drv2.vsa`, `drv3.vsa` for ps_3_0) feeds COLOR0/1
-  (random vertex colours) and TEXCOORD0..7 (uv, and random affine maps of it), 8 random point-sampled 2D textures,
-  random c0..c63; 16x16 A8R8G8B8 target.
+  (random vertex colours) and TEXCOORD0..7 (uv, and random affine maps of it), 8 random point-sampled textures
+  (2D, or an 8x8 cube map on every stage the translation declares `samplerCube`: scene command `texcube`, D3D9
+  `CreateCubeTexture` on the oracle, `GL_TEXTURE_CUBE_MAP` with D3D9's face order and texel layout on `v6n_gl`),
+  random c0..c63; 16x16 A8R8G8B8 target. The oracle also runs each scene on an A32B32G32R32F target, which shows
+  where its colour is NaN before the 8-bit conversion (O10).
 * vertex programs: random FLOAT4 vertex elements for every declared input (scene commands `vdecl` / `vg` / `drawg`,
   new: D3D9 vertex declarations on Nine, `fnvnx_dk_attrib_location` on GL); every float constant random except the
   CTAB matrix whose name contains "Proj" (near identity, so the 3x3 grid of 8 triangles stays inside the target); a
   generated PS writes a random linear combination of every COLOR / TEXCOORD output (only the components the VS
-  writes; vs < 3.0 colours saturated in the PS) to an A32B32G32R32F target; D24S8 depth checks oPos.z.
+  writes; vs < 3.0 colours saturated in the PS) to an A32B32G32R32F target; D24S8 depth checks oPos.z; coverage is
+  marked in stencil (ALWAYS / REPLACE 1), since a VS may pin depth to the clear value 1.0 (z = w).
 
 Verdict per seed, against cmp.py's thresholds (2/255; float 1e-3 relative; depth 8 LSB), widened per pixel by 0.1 x
 the oracle's own change when every input is perturbed by 1e-5 (a stability probe: float32 rounding is ~1e-7, so a
 correct translation stays inside; an ill-conditioned random input is not a defect). Vertex scenes compare where both
 images are covered, tolerate 2 pixels per seed (pixel centres on a shared edge) and skip row 0 / column 0 (O9). A
-program passes when every seed passes. Failures are attributed: `d3d9_numerics` (passes once the translation is
-given Nine's D3D9 numerics: log = log2|x|, log(0) and rcp(0) = +-2^127, nrm(0) = 0, vs < 3.0 colours saturated per
-vertex - findings P2-P4), `undriven_input` (cube / volume samplers, no 2D-only harness input), `oracle_nan` (the
-oracle itself produced NaN on that input), else `open`.
+colour channel whose oracle value is NaN is not compared (O10, §5). A program that fails is judged again with two more
+perturbation sign patterns, each pixel widened by the largest of the oracle's changes: one random pattern can miss
+an ill-conditioned input (SpeedTree VS depth, 10-44 LSB, passed or failed depending on the pattern); more probes
+only widen, so probing the failures alone equals probing every program. Perturbations are seeded by scene name, so
+a verdict does not depend on the work directory. A program passes when every seed passes.
+Failures are attributed: `known_s6b` (passes once V6n applies, on its own copy of the GLSL, Nine's behaviour for the
+open S6b defects `ps_pow_zero`, `ps_texkill_w` and `vs_reladdr_def` of `tests/v6n/DEFECTS.md`; until 2026-11-04 this
+class was `d3d9_numerics`, findings P2-P4, which S6b has since fixed), `undriven_input` (volume samplers and
+inputs the driver VS does not write), `oracle_nan` (the oracle produced NaN on that input), else `open`.
+
+Runs over all packages are split by bytecode hash (`--shard K/N`, one work directory per shard, each well under
+D17's ten minutes) on one shared translation (`--translated DIR`: sdp2dksh `--glsl --no-dksh` once; DKSH
+compilation is counted by S6b's census `tests/s6b/census.py`), then joined with `--merge OUT.json WORK...`.
 
 Output (game-derived, stays in `build/v6n/sdpfuzz/`): `results.json`, schema `v6n-sdpfuzz/1`:
 `{schema, target, oracle, seeds, thresholds, translator, packages: [{file, sha256, programs, parsed, translated, pass,
 fail, translate_fail, ...}], totals: {...}, unique_bytecode: {...}, programs: [{package, name, model, stage, hash,
 bytes, parsed, translated, status: pass|fail|translate_fail|not_run|oracle_error|target_error, cause, max_err_color,
-max_err_depth_lsb, bad_px, seeds, undriven, status_d3d9_numerics, oracle_nan, detail}]}`. `max_err_color` is the
+max_err_depth_lsb, bad_px, seeds, probes, undriven, status_known_s6b, oracle_nan, oracle_nan_px, detail}], shards}`. `max_err_color` is the
 largest |difference| over compared pixels (8-bit steps for pixel programs, float units for vertex programs).
 
 ## 4. Results (2026-11-04)
@@ -241,7 +254,10 @@ largest |difference| over compared pixels (8-bit steps for pixel programs, float
 | fuzzer sensitivity (`--sensitivity`, 120 random cases, all matching unmutated) | 26 of 33 GL-target mutants killed by random cases alone (cull winding 66, upper-left origin 73, half-pixel 44, half-z 14, colour-mask order 12, two-sided stencil 9 ... down to 1). Not killed: d24_bias_scale, x8_dst_alpha, no_texture_black (excluded from fuzzing by design, covered analytically / by trap scenes), ati2_swizzle, a4r4g4b4_order, a8_swizzle (1 format in 21, rare at this sample size), clear_ignores_scissor (mid-scene scissored clears are rare). Every mutant is killed by its trap scene. |
 | shader parity self-test | 6/7 match on `v6n_gl` and on `v6n_s6ngl` (S6b GLSL through S6n's shim; ps_3_0 vPos matches under its y negation), 1 finding (P1) |
 | VS + PS + indexed draw (`vsscenes.py`, 2 scenes: affine + tint, perspective w + COLOR0/COLOR1 + two indexed draws under ZFUNC GREATER) | both match Nine on `v6n_gl` and on `v6n_s6ngl` (S6b VS GLSL through S6n's shim, layout 2 = S6b attribute locations, D3DCOLOR uploaded as RGBA bytes, NxOp_BindIdx/DrawIndexed; removing the colour swap is caught by both scenes); trap `vs_posfix_halfpixel` (S6b's posfix half-pixel shift on top of the +0.5 viewport) caught, 174 px |
-| whole-package fuzz, the player's 16 packages (§3.7, 4 seeds, `v6n_gl`) | 15,791 programs (8,160 PS, 7,631 VS), all parsed; 11,161 translated, 4,630 translation failures (4,614 `centroid unsupported in glsl profile`, 16 relative addressing of an indeterminate array: P5). Of the translated: **8,386 pass, 2,775 fail** = 2,257 attributed to D3D9 numerics (P2-P4), 128 undriven cube samplers, 154 oracle NaN, 236 open. By unique bytecode (843 translated): 621 pass, 170 numerics, 10 undriven, 16 oracle NaN, 26 open (GRASS wind VS 20, SM3 VS, STB/SLS cube PS, SKYSTARS). Per package below. |
+| whole-package fuzz, the player's 16 packages (§3.7, 4 seeds, `v6n_gl`), first run (S6b before 8975dc6) | 15,791 programs, 11,161 translated (P5: 4,614 centroid, 16 relative addressing), 8,386 pass, **2,775 fail** (2,257 D3D9 numerics P2-P4, 128 undriven cube samplers, 154 oracle NaN, 236 open) |
+| whole-package fuzz, re-run (S6b 8975dc6/65b35e8: P2-P5 fixed, all 15,791 translate) | same harness: **1,697 fail** (320 unique): 1,312 open, 229 undriven cube, 156 oracle NaN. After V6n's harness fixes (cube samplers driven, oracle NaN not compared (O10), name-seeded and repeated stability probe): **14,776 pass, 1,015 fail** (180 unique of 1,809); with VS coverage from stencil (ea79634) **999 fail** (178 unique):
+869 S6b defects (`ps_pow_zero` 653, `vs_reladdr_def` 216), 118 ill-conditioned random inputs at point-sampled lookups,
+12 implementation-defined edge ties. Every failure by root cause in §4.0a. |
 | C63 / C69 families vs the originals (`tests/v6n/claims/c69_families.py`, FNVNX_SDP) | 12 cases: tile, tile scroll offset, nolight tex / texvc / vc match; **7 differ, filed as defects**: tile_texscroll_scale, tile_alphamap, tile_vc, nolight_falloff_curve, sky_vertex_weights, land_light, depth_alphatest. lit not checked (the SM3 lighting PS do not translate and their LightData layout needs the decomp's Lighting30 setup) |
 | C54 MAXMIPLEVEL / mip selection (`tests/v6n/claims/c54_*`) | 8/8 scenes match Nine on both targets |
 | C65 radix sort (`tests/v6n/claims/c65_sort.cpp`) | 4000 random packet sets identical to std::stable_sort, SortKey packing exact: PASS |
@@ -250,26 +266,53 @@ largest |difference| over compared pixels (8-bit steps for pixel programs, float
 
 ### 4.0 Whole-package fuzz per package (aggregate counts; the per-program JSON stays in build/)
 
-Pairs 010/011, 012/013, 014/015, 016/017, 018/019 are byte-identical files. "checked" = translated and run (4 seeds).
+Pairs 010/011, 012/013, 014/015, 016/017, 018/019 are byte-identical files. Re-run of 2026-11-04 (S6b 65b35e8, final
+harness): every program translates and is run (4 seeds). "known S6b" = explained by the open S6b defects of
+`tests/v6n/DEFECTS.md` (pow = `ps_pow_zero`, relc = `vs_reladdr_def`).
 
-| package | programs (PS / VS) | parsed | translated | checked | pass | fail: numerics / undriven / oracle NaN / open |
+| package | programs (PS / VS) | pass | fail | fail: known S6b pow / relc / oracle NaN + other / open |
+|---|---|---|---|---|
+| shaderpackage002 | 830 (420 / 410) | 780 | 50 | 50: 40 / 7 / 0 / 3 |
+| shaderpackage003 | 983 (516 / 467) | 931 | 52 | 52: 40 / 7 / 1 / 4 |
+| shaderpackage004 | 1007 (516 / 491) | 951 | 56 | 56: 40 / 7 / 1 / 8 |
+| shaderpackage006 | 983 (516 / 467) | 927 | 56 | 56: 39 / 7 / 1 / 9 |
+| shaderpackage007 | 1007 (516 / 491) | 947 | 60 | 60: 39 / 7 / 1 / 13 |
+| shaderpackage009 | 1007 (516 / 491) | 946 | 61 | 61: 39 / 7 / 1 / 14 |
+| shaderpackage010 | 983 (516 / 467) | 921 | 62 | 62: 42 / 13 / 2 / 5 |
+| shaderpackage011 | 983 (516 / 467) | 921 | 62 | 62: 42 / 13 / 2 / 5 |
+| shaderpackage012 | 1007 (516 / 491) | 939 | 68 | 68: 42 / 15 / 2 / 9 |
+| shaderpackage013 | 1007 (516 / 491) | 939 | 68 | 68: 42 / 15 / 2 / 9 |
+| shaderpackage014 | 983 (516 / 467) | 919 | 64 | 64: 41 / 13 / 1 / 9 |
+| shaderpackage015 | 983 (516 / 467) | 919 | 64 | 64: 41 / 13 / 1 / 9 |
+| shaderpackage016 | 1007 (516 / 491) | 935 | 72 | 72: 41 / 15 / 2 / 14 |
+| shaderpackage017 | 1007 (516 / 491) | 935 | 72 | 72: 41 / 15 / 2 / 14 |
+| shaderpackage018 | 1007 (516 / 491) | 933 | 74 | 74: 42 / 15 / 2 / 15 |
+| shaderpackage019 | 1007 (516 / 491) | 933 | 74 | 74: 42 / 15 / 2 / 15 |
+
+### 4.0a Parity failures by root cause (programs, unique bytecodes in brackets)
+
+Method: per-instruction bisection of game programs (each prefix of the program writes its last destination to a
+float target, Nine vs S6b's GLSL; local tooling, results not committed), then one V6n-side fix per suspected cause
+applied to every failing program's GLSL to count what it explains. Buckets are exclusive.
+
+| root cause | owner | 1st run (2,775) | re-run, old harness | 911ba8f | now | how |
 |---|---|---|---|---|---|---|
-| shaderpackage002 | 830 (420 / 410) | 830 | 610 | 610 | 464 | 146: 124 / 8 / 4 / 10 |
-| shaderpackage003 | 983 (516 / 467) | 983 | 689 | 689 | 525 | 164: 137 / 8 / 9 / 10 |
-| shaderpackage004 | 1007 (516 / 491) | 1007 | 713 | 713 | 537 | 176: 149 / 8 / 9 / 10 |
-| shaderpackage006 | 983 (516 / 467) | 983 | 689 | 689 | 529 | 160: 133 / 8 / 9 / 10 |
-| shaderpackage007 | 1007 (516 / 491) | 1007 | 713 | 713 | 541 | 172: 145 / 8 / 9 / 10 |
-| shaderpackage009 | 1007 (516 / 491) | 1007 | 713 | 713 | 548 | 165: 137 / 8 / 10 / 10 |
-| shaderpackage010 | 983 (516 / 467) | 983 | 689 | 689 | 516 | 173: 139 / 8 / 9 / 17 |
-| shaderpackage011 | 983 (516 / 467) | 983 | 689 | 689 | 516 | 173: 139 / 8 / 9 / 17 |
-| shaderpackage012 | 1007 (516 / 491) | 1007 | 713 | 713 | 525 | 188: 151 / 8 / 11 / 18 |
-| shaderpackage013 | 1007 (516 / 491) | 1007 | 713 | 713 | 525 | 188: 151 / 8 / 11 / 18 |
-| shaderpackage014 | 983 (516 / 467) | 983 | 689 | 689 | 517 | 172: 138 / 8 / 9 / 17 |
-| shaderpackage015 | 983 (516 / 467) | 983 | 689 | 689 | 517 | 172: 138 / 8 / 9 / 17 |
-| shaderpackage016 | 1007 (516 / 491) | 1007 | 713 | 713 | 526 | 187: 150 / 8 / 11 / 18 |
-| shaderpackage017 | 1007 (516 / 491) | 1007 | 713 | 713 | 526 | 187: 150 / 8 / 11 / 18 |
-| shaderpackage018 | 1007 (516 / 491) | 1007 | 713 | 713 | 537 | 176: 138 / 8 / 12 / 18 |
-| shaderpackage019 | 1007 (516 / 491) | 1007 | 713 | 713 | 537 | 176: 138 / 8 / 12 / 18 |
+| translator: D3D9 numerics P2-P4 | S6b | 2,257 | 0 | 0 | 0 | fixed by S6b 8975dc6 |
+| translator: unsupported centroid / relative addressing P5 | S6b | 4,630 not translated | 0 | 0 | 0 | fixed by S6b 8975dc6; the 4,614 centroid programs now run, 3,843 pass; none of the remaining failures changes with `interpolateAtCentroid` removed |
+| translator: `ps_pow_zero` (pow(0, y <= 0)) | S6b | inside "open" | 653 (129) | 653 (129) | 653 (129) | defect filed, synthetic test |
+| translator: `vs_reladdr_def` (CTAB array misses def'd constants) | S6b | inside "open" | 216 (24) | 184 (22) | 216 (24) | defect filed, synthetic test; 32 more (DISTTREE, PARTICLE) were in "open": the `(ARRAYBASE + k)` form |
+| translator: `ps_texkill_w` (texkill xyz only) | S6b | - | 0 | 0 | 0 | defect filed (random inputs do not reach it) |
+| oracle: softpipe keeps NaN through `_sat` (O10) | V6n harness | inside "open" / oracle NaN | 431 | 0 | 0 | NaN channels not compared |
+| harness gap: cube samplers undriven | V6n harness | 128 | 229 (27) | 0 | 0 | `texcube`; all 229 pass |
+| harness bug: probe seeded by path | V6n harness | - | +-41 flips | 0 | 0 | seeded by name |
+| tolerance: ill-conditioned inputs one probe misses | V6n harness | - | 64 (4) | 0 | 0 | 3 probe patterns |
+| harness bug: VS coverage read from depth (z = w pins depth to the clear value) | V6n harness | - | 16 (2) | 16 (2) | 0 | coverage marked in stencil (SKYSTARS) |
+| implementation-defined: pixel centres < 1/256 px from a VS triangle edge | - | - | 12 (1) | 12 (1) | 12 (1) | SM3007 VS, one seed: 3 px within 0.0008 px of shared edges (GL rasterizers snap to 1/256 px); not excluded: a larger coverage probe would hide depth errors |
+| ill-conditioned random inputs at point-sampled lookups | V6n harness (inputs) | - | 118 (24) | 118 (24) | 118 (24) | bisected: the first difference is a texld/texldp in 17 of 24 (checked: projective w = 0.0036, coordinates ~700 texels out, so float rounding picks the texel), a parallax loop with rcp of near-zero values in 6 (SM3 / SM3LL ps_3_0), pow in 1 (WATER026); 23 programs also have oracle-NaN pixels. No translator rule found. Not fixed: a 1e-3 discontinuity probe skipped up to 248 of 256 px, and bilinear filtering makes 84 of 138 passing programs fail (llvmpipe vs softpipe filter precision) |
+| **total** | | **2,775** | **1,697** | **1,015** | **999** | |
+
+The "re-run, old harness" column splits the 1,697 of the old harness by the cause found since (the 41 path-seeded
+flips are inside the open count of that run); its rows do not add up to 1,697 exactly for that reason.
 
 ### 4.1 Rasterization finding
 
@@ -294,6 +337,7 @@ deko3d's `DkDeviceFlags_OriginUpperLeft` makes the hardware use the D3D-style ru
 | O6 | softpipe runs the stencil test without a stencil buffer (D24X8, D16) | fuzzer enables stencil on D24S8 only (GL and D3D9: test passes) |
 | O7 | Nine's FF samples a stage texture only when an argument names TA_TEXTURE: BLENDTEXTUREALPHA without one blends with alpha 0 | fuzzer adds a TA_TEXTURE argument to those stages |
 | O8 | D16 depth with RHW vertices: softpipe's interpolated z is up to 9 LSB off the exact screen-linear plane (both GL targets within 0.5 LSB) | reproducer `tests/v6n/repro/impl_defined/s6ngl_6a56a1c012.scene`; depth checks against D16 prefer `raster_ref`-style analytic planes |
+| O10 | softpipe keeps NaN through `_sat` (TGSI saturate as min/max that pass a NaN operand on); a NaN colour then reaches the 8-bit target as 0. D3D10+ hardware, NV's FMNMX/.SAT and GLSL `clamp()` on llvmpipe give 0 for sat(NaN), so a translation that is right for the device differs from the oracle wherever an input makes 0 x inf (bisected: specular `pow` of a saturated 0, times a texture alpha of 0) | sdpfuzz does not compare a colour channel whose oracle value is NaN, read from a second oracle run on a float target; the count is kept per program (`oracle_nan_px`). D3D9 defines no NaN propagation, saturation or conversion |
 | A1 | RHW vertices and the viewport: Nine's window-space path neither transforms nor clips them | V6n's FF model follows the oracle; D3D9 hardware behaviour should be confirmed on device (§8) |
 | A2 | SRGBTEXTURE on R5G6B5 and other formats S6n has no sRGB view for: Mesa decodes (B5G6R5_SRGB), S6n does not | caps-dependent in D3D9; fuzzer restricts sRGB read to formats with an sRGB view on both |
 
@@ -358,7 +402,10 @@ Blocked, with what unblocks it:
 | P2 | S6b | vs < 3.0 `oD0` / `oD1` are not saturated (D3D9 and Nine clamp them to [0, 1] per vertex): `tests/v6n/vs/findings/p2_color_sat` (c0 = (2, -1, .5, 1.5) reads (1, 0, .5, 1) on Nine, unchanged on GL) |
 | P3 | S6b | `log` / `logp` translate to log2(x); D3D9 is log2(abs(x)) (and Nine gives -2^127 for 0, GL -inf): `p3_log_abs` (log(-4) = 2 vs NaN). Reached by every pow-style log/exp pair with a non-positive input |
 | P4 | S6b | `nrm` of a zero vector: GLSL normalize -> NaN, Nine 0 (`p4_nrm_zero`); rcp(0) / rsq(0) = 1e38 vs Nine's 2^127. D3D9 leaves both implementation-defined; listed because they dominate the random-input fuzz |
-| P5 | S6b | 4,614 of 15,791 programs (4,164 ps_2_x, 450 ps_3_0; 966 unique) do not translate: MojoShader glsldk rejects the `centroid` modifier (`centroid unsupported in glsl profile`); 16 vs_2_0 fail on relative addressing of an indeterminate array. Fixed by S6b 8975dc6 (centroid inputs read with `interpolateAtCentroid()`; relative addressing through the UBO): S6b's census (`tests/s6b/census.py`) translates all 15,791 (0 failures); the parity fuzz of the 4,630 is still to be re-run |
+| P5 | S6b | 4,614 of 15,791 programs (4,164 ps_2_x, 450 ps_3_0; 966 unique) do not translate: MojoShader glsldk rejects the `centroid` modifier (`centroid unsupported in glsl profile`); 16 vs_2_0 fail on relative addressing of an indeterminate array. Fixed by S6b 8975dc6 (centroid inputs read with `interpolateAtCentroid()`; relative addressing through the UBO): S6b's census (`tests/s6b/census.py`) translates all 15,791 (0 failures). Re-run by V6n: the 4,614 centroid programs run, 3,843 pass; no remaining failure depends on centroid (§4.0a) |
+| P6 | S6b | defect `ps_pow_zero`: pow(0, 0) = 1 and pow(0, y < 0) = +inf in D3D9 (exp(y log x), log(0) = -FLT_MAX) and Nine; S6b's `pow(abs(x), y)` gives 0. 653 failing programs (129 unique). Test `tests/v6n/defects/shaders/ps_pow_zero.psa` |
+| P7 | S6b | defect `vs_reladdr_def`: relative reads through a CTAB-declared array use MojoShader's ARRAYBASE path, bypass `dk_relc()` and miss the def'd constants, for the array's first register and for later ones (`(ARRAYBASE + k) + a0`). 216 failing programs (24 unique: instancing VS, DISTTREE, PARTICLE). Test `tests/v6n/defects/shaders/vs_reladdr_def.vsa` |
+| P8 | S6b | defect `ps_texkill_w`: ps_2_0+ texkill tests xyz only (D3D9, Nine, wined3d: xyzw). Test `tests/v6n/defects/shaders/ps_texkill_w.psa` |
 | O8/O9 | oracle | O9: softpipe's clipper drops pixel centres on the x = -w / y = w clip planes (D3D9 row 0 / column 0) for clipped triangles whose w varies; llvmpipe (guard band) and D3D9 hardware keep them. Vertex-program fuzz skips row 0 / column 0 |
 | E1 | exe | the ShadowLight pass array `DAT_011fdff8[759]` (and the Lighting30 shader table `DAT_01200c48`, TileShader constants at `DAT_01202198`) lie in the zero-filled tail of the 1.4.0.525 executable's .data (raw size 0x40200 of 0xeea9c): filled at run time, so the static configured-vs-emitted question of §2 cannot be settled from the file; it needs a run (capture of §6) |
 | O3 | S6c (host gate) | stock softpipe is not a D3D9-exact rasterizer (O3), so gate images with slanted edges are off by up to a pixel per edge |
@@ -384,4 +431,8 @@ python3 -I render/verify/fuzz/fuzz.py -n 600 -s 5 [--target s6ngl]    # fuzzing,
 python3 -I render/verify/fuzz/fuzz.py -n 150 --sensitivity            # random cases killing each mutant
 FNVNX_SHADERS_BUILD=... render/shaders/build.sh --tests                # S6b tools
 FNVNX_SHADERS_BUILD=... python3 -I render/verify/shaders/parity.py --selftest | PATH/shaderpackage*.sdp
+for k in 0 1 2 3 4; do                                                 # whole-package fuzz: 5 shards, < 5 min each
+  python3 -I render/verify/shaders/sdpfuzz.py --translated W/translated --work W/s$k --shard $k/5 PATH/shaderpackage0*.sdp; done
+python3 -I render/verify/shaders/sdpfuzz.py --merge W/results.json W/s0 W/s1 W/s2 W/s3 W/s4
+tests/v6n/run.sh ps_pow_zero; tests/v6n/run.sh vs_reladdr_def; tests/v6n/run.sh ps_texkill_w   # S6b defects (fail while open)
 ```

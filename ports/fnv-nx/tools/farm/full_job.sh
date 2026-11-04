@@ -42,15 +42,23 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 . "$HERE/lib_job.sh"
 t0=$(date +%s)
 
-host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native)
+host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools py:mako meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native); mako: uam (LINK_OVERRIDES=render)
 # NX1's package checks (tests/nx1): switch-tools elf2nro needs lz4.h, the host device test qemu-user, the libnx
 # syntax check newlib's headers. Libraries are not commands, so host_check cannot see them.
-if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/include/newlib ] || ! command -v qemu-aarch64 >/dev/null; }; then
-	apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends liblz4-dev libnewlib-dev qemu-user \
+# uam (toolchain/uam/build.sh, LINK_OVERRIDES=render without RENDER_LIB) needs the system python's mako.
+if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/include/newlib ] || ! command -v qemu-aarch64 >/dev/null \
+		|| ! /usr/bin/python3 -c 'import mako' 2>/dev/null; }; then
+	apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends liblz4-dev libnewlib-dev qemu-user python3-mako \
 		|| echo "full_job.sh: NX1 packages not installed; checks 1 and 7 report incomplete"
 fi
 job_sources "$REPO"
 F=$FARM_HOME/full; mkdir -p "$F"
+# the reconstructed bodies (D20, branches recon/*) for S1-refs' rule REC1, exported for every prepare this job runs
+# (link_job.sh and make's prepare stage when no farm tree is adopted); none is not an error
+# shellcheck source=recon.sh
+. "$HERE/recon.sh"
+fetch_recon "$ARTIFACTS" "$F/recon"
+log "recon: $RECON_NOTE"
 
 # 1. The toolchain, shared by the commits that build it the same way.
 TCID=$(cat "$P"/toolchain/sources.sh "$P"/toolchain/gcc/build.sh "$P"/toolchain/devkita64/* "$P"/toolchain/cross/* \
@@ -74,6 +82,9 @@ if [ -n "$(art vorbis)" ]; then ARGS+=(VORBIS="$(art vorbis)"); else ARGS+=(VORB
 V1=$F/build/v1
 rm -rf "$V1" "$F/v1-run" "$F/v1-report.md"
 # the same cross tools as the steps after it, so the link is not redone for another compiler path
+# Short waits for the prepare/compile farms' artifacts: when they are not there, this job prepares and compiles
+# locally (step 4) instead of waiting up to 1.5 h for them
+export FARM_TREE_WAIT=${FARM_TREE_WAIT:-300} FARM_OBJ_WAIT=${FARM_OBJ_WAIT:-300}
 CROSS_BIN="$(art cross_bin)" LINK_BUILD=$F/build FARM_SRC=$SRC FARM_EXT=$EXT \
 	bash "$HERE/link_job.sh" "$COMMIT" "$F/link-$C12.md" > "$F/link_job.log" 2>&1 \
 	|| log "link_job.sh exited $?"
@@ -85,6 +96,10 @@ CROSS_BIN="$(art cross_bin)" LINK_BUILD=$F/build FARM_SRC=$SRC FARM_EXT=$EXT \
 # 3. Pristine MSVC objects for the synthesized boot image (link_job.sh took them for resolve --msvc-code too).
 job_pristine
 [ -n "$PR" ] && ARGS+=(PRISTINE_OBJS="$PR" MSVC_CODE="$PR")
+# the guest links the native renderer (S6n's overrides + libnxrender.a, built with this toolchain; RENDER_LIB=<a>
+# takes a prebuilt one): without it the engine's D3D9 entry points have no device and the boot stops at renderer init
+ARGS+=(LINK_OVERRIDES="${LINK_OVERRIDES:-render}")
+[ -n "${RENDER_LIB:-}" ] && ARGS+=(RENDER_LIB="$RENDER_LIB")
 # 3b. The player's exe, when the owner's copy is on the private branch gamedata/exe: the boots run on it instead of
 # S14's synthesized image (J-0128)
 job_gamedata
@@ -92,17 +107,22 @@ job_gamedata
 log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; boot image: $NOTE_EXE"
 
 # 4. Guest, emulated boot, host, package on that link (the link stage stays cached: same inputs).
-# INPUTS=0: no tree or no objects. Not rc=2: GNU make itself exits 2 whenever a stage fails (V1, J-0136), and such a
+# INPUTS stays 1: without farm inputs the build prepares and compiles locally. Not rc=2: GNU make itself exits 2 whenever a stage fails (V1, J-0136), and such a
 # build still gets its stub boot, audits and publish.
+# Without the prepare farm's tree or the compile farms' objects of this commit, the build prepares and compiles
+# locally at this head (make's own prepare and compile stages). It never reports the build directory's records of an
+# older commit as this one's (the 097cdd1504c8 report showed 06857911's tree, objects and link as "cached").
 rc=0; INPUTS=1
-if [ -n "$TREE" ] && [ -n "$OBJS" ]; then
-	# shellcheck disable=SC2086
-	make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
-		${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
-	ls -1t "$F"/make-*.log | tail -n +6 | xargs -r rm -f
-else
-	rc=2; INPUTS=0
+if [ -z "$TREE" ] || [ -z "$OBJS" ]; then
+	log "no farm tree/objects for $C12: preparing and compiling locally at this head"
+	NOTE_TREE="$NOTE_TREE; prepared locally at $C12"; NOTE_OBJS="$NOTE_OBJS; compiled locally at $C12"
+	KEEP=(); for a in "${ARGS[@]}"; do case "$a" in PREPARED=*|OBJECTS=*) ;; *) KEEP+=("$a") ;; esac; done
+	ARGS=("${KEEP[@]}")
 fi
+# shellcheck disable=SC2086
+make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
+	${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
+ls -1t "$F"/make-*.log | tail -n +6 | xargs -r rm -f
 
 # 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the
 # known faults (docs/TOOLCHAIN.md section 18), so the frontier beyond them is published next to the raw boot's

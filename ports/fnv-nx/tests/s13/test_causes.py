@@ -59,7 +59,8 @@ def test_rules():
           'native fetch fault in the stub range is not a data access')
     check(refined(dict(kind='error', x86='exc:3', arm=None)) == 'oracle-trap', 'oracle runs into int3 filler')
     check(refined(dict(kind='error', x86='fault:r:00000004', arm=None)) == 'oracle-fault', 'oracle-only data fault')
-    check(refined(dict(kind='error', x86=None, arm='no-native-entry')) == 'no-native-entry', 'no native entry')
+    check(refined(dict(kind='error', x86=None, arm='no-native-entry')) == 'native-undefined',
+          'no native entry and no object in the address map defines it: native-undefined (audit)')
     check(refined(dict(kind='error', x86='fault:r:0be1aab8', arm=None)) == 'oracle-native-address',
           'oracle dereferences a native address')
     # call arguments
@@ -81,15 +82,26 @@ def test_rules():
           'arg-other-buffer', 'another argument buffer')
     check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x03801048), arm=w(0x03801040))) ==
           'layout-offset', 'this+8 vs this+0: layout-offset')
-    check(refined(dict(kind='call-args', arg='p1', cls='I32', x86=w(0x9cf46a07), arm=w(0x9cf46a27))) ==
-          'x87-precision', 'float bits through an int parameter, 32 ulp apart')
+    check(refined(dict(kind='call-args', arg='p1', cls='I32', x86=w(0x9cf46a07), arm=w(0x9cf46a27))) !=
+          'x87-precision', 'an int parameter 32 apart is not x87 precision (no record shows it carries a float)')
+    # x87 precision only between normal values of one sign (audit: 0.0 vs a denormal, +0 vs -0)
+    check(refined(dict(kind='call-args', arg='p0', cls='F32', x86=f32(1.0), arm=f32(1.0000001))) == 'x87-precision',
+          'F32 1 ulp apart: x87-precision')
+    check(refined(dict(kind='call-args', arg='p0', cls='F32', x86=w(0), arm=w(1))) != 'x87-precision',
+          '0.0 vs the smallest denormal is not precision')
+    check(refined(dict(kind='call-args', arg='p0', cls='F32', x86=w(0), arm=w(0x80000000))) != 'x87-precision',
+          '+0 vs -0 is not precision')
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(0x14), arm=w(0x13))) == 'unclassified',
           'small ints are not float bits')
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(5), arm=w(7))) == 'unclassified',
           'plain int argument difference stays open')
     # return values
+    check(refined(dict(kind='return', x86=w(0x02f00100), arm=w(0x0a100000), pointee_x86='', pointee_arm='6869'))
+          == 'literal-ret', 'pointer to a pool literal the oracle side cannot read')
     check(refined(dict(kind='return', x86=w(0x01001000), arm=w(0x0a100000), pointee_x86='', pointee_arm='6869'))
-          == 'literal-ret', 'pointer to a literal the oracle side cannot read')
+          != 'literal-ret', 'an image-data pointer vs a native pointer is not a literal (audit)')
+    check(refined(dict(kind='return', x86=w(0x01001000), arm=w(0x09000040), pointee_x86='', pointee_arm=''))
+          == 'native-stub-data', 'the native returns a named-stub address: native-stub-data (audit)')
     check(refined(dict(kind='return', x86=w(0x01001000), arm=w(0x0a100000), pointee_x86='6869', pointee_arm='6869'))
           == 'native-address', 'pointer result: native image vs image window, pointees known')
     check(refined(dict(kind='return', x86=f64(0.30000000000000004), arm=f64(0.3),
@@ -100,10 +112,19 @@ def test_rules():
                              symbol='??_GFUN_00ba8e20@@UAEPAXI@Z'), 'unclassified') == 'deleting-dtor-ret',
           'scalar deleting destructor result')
     # memory writes
-    check(refined(dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=0, x86=w(0xffc00000, 0),
-                       arm=w(0x7fc00000, 0))) == 'nan-bits', 'NaN store: nan-bits')
-    check(refined(dict(kind='mem-write', addr='03000010', ndiff=1, only_x86=0, only_arm=0, x86=w(1, 0),
-                       arm=w(2, 0), float_word=dict(tolerant=True))) == 'x87-precision', 'tolerant float store')
+    nanw = dict(kind='mem-write', addr='03000010', ndiff=2, only_x86=0, only_arm=0, x86=w(0xffc00000, 0),
+                arm=w(0x7fc00000, 0), addrs=['03000010', '03000013'])
+    check(refined(nanw) == 'nan-bits', 'generated NaN store, all differences in the word: nan-bits')
+    check(refined(dict(nanw, ndiff=3, addrs=['03000010', '03000013', '03000020'])) != 'nan-bits',
+          'a NaN store with a difference outside the window is not nan-bits')
+    check(refined(dict(nanw, x86=w(0xffffffff, 0), arm=w(0xfffffffe, 0))) != 'nan-bits',
+          'int -1 vs -2 (NaN-shaped ints, neither a generated NaN) is not nan-bits')
+    fw = dict(kind='mem-write', addr='03000010', ndiff=1, only_x86=0, only_arm=0, x86=f32(1.0) + '00000000',
+              arm=f32(1.0000001) + '00000000', addrs=['03000010'], float_word=dict(tolerant=True))
+    check(refined(fw) == 'x87-precision', 'tolerant float store, the only difference: x87-precision')
+    check(refined(dict(fw, ndiff=2, only_x86=1, addrs=['03000010', '03000014'],
+                       x86=f32(1.0) + '07000000')) != 'x87-precision',
+          'a tolerant float word does not cover a store only the oracle makes (audit 00a58b00 shape)')
     check(refined(dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=0, x86=w(0x01200000, 0),
                        arm=w(0x0a200000, 0))) == 'native-address', 'native image address stored')
     check(refined(dict(kind='mem-write', addr='03000011', ndiff=3, only_x86=3, only_arm=0, x86=w(0x00000001, 0),
@@ -117,8 +138,8 @@ def test_rules():
     try:
         vw = dict(kind='mem-write', addr='03000000', ndiff=4, only_x86=0, only_arm=0, x86=w(0x0102e388, 0),
                   arm=w(0x010d7f44, 0))
-        check(causes.refine(dict(rec(vw), symbol='??1FUN_00ddcc60@@UAE@XZ'), 'unclassified') == 'vptr-store',
-              'base vftable reset in a destructor: vptr-store')
+        check(causes.refine(dict(rec(vw), symbol='??1FUN_00ddcc60@@UAE@XZ'), 'unclassified') == 'vptr-differs',
+              'two image vftables in a destructor: vptr-differs (no class-chain evidence without the exe RTTI)')
         check(causes.refine(dict(rec(vw), symbol='??0FUN_00590210@@QAE@XZ'), 'unclassified') == 'vptr-differs',
               'different vftables in a constructor: vptr-differs')
     finally:
@@ -158,8 +179,12 @@ def test_rules():
     real = causes.native_callees
     try:
         causes.native_callees = lambda src, a: {'__fnv_00aa13e0', '__fnv_00a57640'} if a == 0x00401000 else set()
-        check(refined(dict(kind='error', x86=None, arm='fault:w:00000000')) == 'new-null',
-              'null store after an allocator call: new-null')
+        check(refined(dict(kind='error', x86=None, arm='fault:w:00000000')) == 'native-null-read',
+              'null store after an allocator call, no canned null: a native null (audit)')
+        r0 = rec(dict(kind='error', x86=None, arm='fault:w:00000000'))
+        r0['case'] = dict(rets=['00000000' + '00' * 12])
+        check(causes.refine(r0, 'unclassified') == 'native-null-read',
+              'a canned 0 is another call\'s valid result since difffuzz-12: new-null retired (audit)')
         check(causes.refine(rec(dict(kind='error', x86=None, arm='fault:w:00000000'), addr='00402000'),
                             'unclassified') == 'native-null-read', 'null store without an allocator: native-null-read')
     finally:
@@ -191,8 +216,11 @@ def test_rules():
             causes.function_at = lambda pc: 0x0044dee0 if 0x0044dee0 <= pc < 0x0044df00 else None
             causes.native_callees = lambda src, a: {'__fnv_0044dee0', 'memset'}
             causes._OBJ_CACHE[obj] = {'_defined': {'__fnv_00401000'}}
-            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
-                  'effects: store made by a callee the native calls out of line (intercepted)')
+            check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') != 'oracle-callee-store',
+                  'effects: a mem-write record means the native never called the callee (audit C5)')
+            cc = dict(kind='call-count', x86=0, arm=1, x86_trace=[], arm_trace=['0044dee0'])
+            check(causes.refine(dict(rec(cc), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
+                  'effects: the native calls the callee the oracle ran untraced: oracle-callee-store')
             for c in causes.NOT_INTERCEPTED:
                 check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), c) == c,
                       'effects: %s is never a callee-store artefact' % c)
@@ -396,6 +424,7 @@ def test_handoffs():
         check(s1[0] == list(causes.HANDOFF_COLUMNS) and len(s1) == 2, 'S1 list: header and one row')
         check(s1[1][:5] == ['S1', 'native-trap', '00401000', 'src/t.cpp', 'fuzz/cache/7of26:div/00401000-0.json'],
               'row: owner, cause, address, unit, reproducer (setup function skipped)')
+        check(s1[1][6] == 'control-flow', 'row: the D21 fix class of its cause')
         tr = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'triage_S13b.tsv'))]
         check(tr[1][1] == 'unclassified' and tr[1][5] == 'value', 'triage row carries the first effect')
         hd = os.path.join(root, 'hd')
@@ -409,6 +438,15 @@ def test_handoffs():
               'by head: the reproducer names the stable per-head branch (%s)' % s1h[1][4])
         tr2 = [l.rstrip('\n').split('\t') for l in open(os.path.join(hd, 'triage_S13b.tsv'))]
         check(tr2[1][4] == 'fuzz/cache/7of26:div/00402000-0.json', 'by head: a row without commit keeps the cache ref')
+        # a row seeded from another shard's cache keeps the branch its head published it on (V1 RH-2)
+        lines = open(os.path.join(d, 'results.jsonl')).read().splitlines()
+        lines[0] = json.dumps(dict(json.loads(lines[0]), shard='3of13'))
+        open(os.path.join(d, 'results.jsonl'), 'w').write('\n'.join(lines) + '\n')
+        hd2 = os.path.join(root, 'hd2')
+        causes.main(['handoffs', d, '--out-dir', hd2, '--ref-by-head'])
+        s1s = [l.rstrip('\n').split('\t') for l in open(os.path.join(hd2, 'handoffs_S1.tsv'))]
+        check(s1s[1][4] == 'fuzz/0123456789ab/3of13:div/00401000-0.json',
+              'by head: a seeded row names its source shard (%s)' % s1s[1][4])
         ix = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'index.tsv'))]
         check(['harness_S13.tsv', 'artifact', 'S13', '1', '1', 'local-static 1'] in ix, 'index row per file')
 
@@ -463,7 +501,8 @@ def test_vcall_split():
     check(err('fault:r:0e0a1b2c') == 'oracle-private-address', 'oracle reads its own private range')
     check(err('fault:x:0e0a1b2c') == 'oracle-private-address', 'oracle executes its own private range')
     check(err('fault:w:0e0a1b20', 'unclassified') == 'oracle-private-address', 'oracle-fault in the private range')
-    check(err('fault:r:fffffffe', 'unclassified') == 'ilp32-pointer', 'dword read across 4 GiB: ilp32-pointer')
+    check(err('fault:r:fffffffe', 'unclassified') == 'oracle-fault',
+          'an oracle-only read across 4 GiB stays oracle-fault (the native may never have made it)')
     check(err('fault:r:00000010', 'unclassified') == 'oracle-fault', 'near-null oracle read stays oracle-fault')
     check(err('fault:x:00000000') == 'oracle-vcall', 'oracle executes at null: kept')
     check(causes.refine(rec(dict(kind='error', x86='fault:r:0e0a1b2c', arm='fault:r:00000004'), 'oracle-vcall'),
@@ -507,7 +546,7 @@ def test_vcall_split():
     for c in ('vcall-garbage', 'vcall-stub-alias', 'oracle-private-address', 'native-empty-callee'):
         check(c in causes.POLICY, 'policy has %s' % c)
     check(causes.policy('native-empty-callee')[:2] == ('real-bug', 'S1') and
-          causes.policy('vcall-garbage')[:2] == ('artifact', 'S13'), 'vcall split classes')
+          causes.policy('vcall-garbage')[:2] == ('triage', 'S13b'), 'vcall split classes (garbage: triage, audit)')
 
 
 def test_unclassified_shapes():
@@ -578,6 +617,16 @@ def test_unclassified_shapes():
     check(not st(bytes.fromhex('11223308'), bytes.fromhex('11223301'), [3]), 'other native top byte: not the rewrite')
     check(not st(bytes.fromhex('1122330899'), bytes.fromhex('1122330098'), [3, 4]),
           'a difference outside the rewritten window: not only the rewrite')
+    # ilp32-pointer split: a 32-bit wrap into memory the oracle maps is a real bug (a valid base + a wrapping index)
+    def il(arm, x86=None):
+        return causes.refine(rec(dict(kind='error', x86=x86, arm=arm), 'ilp32-pointer'), 'ilp32-pointer')
+    check(il('fault:r:ilp32-high:1011e6370') == 'ilp32-wrap', 'image base + a negative index added in 64 bits: ilp32-wrap')
+    check(il('fault:w:ilp32-high:103000010') == 'ilp32-wrap', 'wrap into a case buffer: ilp32-wrap')
+    check(il('fault:r:ilp32-high:100000062') == 'ilp32-pointer', 'a garbage pointer at the top + offset (near null): stays')
+    check(il('fault:r:ilp32-high:ffffffffce300584') == 'ilp32-pointer', 'a sign-extended garbage pointer: stays')
+    check(il('fault:r:ilp32-high:1011e6370', x86='fault:r:011e6370') == 'ilp32-pointer',
+          'the oracle faulted too: not the wrap shape')
+    check(causes.policy('ilp32-wrap')[:2] == ('real-bug', 'S1'), 'ilp32-wrap is a real bug for S1')
     for c in ('ctor-this', 'canned-this', 'native-wild-private'):
         check(causes.policy(c)[0] == 'triage', '%s is triage: the record cannot tell harness from bug (V1)' % c)
     for c in ('ctor-this', 'canned-this', 'native-wild-private', 'stub-normalized', 'thunk-binding',
@@ -651,6 +700,7 @@ def test_callflow():
         tgt = lambda x, a: dict(kind='call-target', index=0, x86=x, arm=a)  # noqa: E731
         check(cf(tgt('00401200', '01268238')) == 'native-calls-data', 'native jumps to a data address')
         check(cf(tgt('00ec9650', 'name:asinf')) == 'libc-variant', 'x87 intrinsic vs libm float: libc-variant')
+        check(cf(tgt('00eca1d0', 'name:cos')) != 'libc-variant', '_CIacos vs cos is another function (audit)')
         check(cf(tgt('00ec623a', 'name:__sprintf_chk')) == 'libc-variant', 'sprintf vs __sprintf_chk')
         check(cf(tgt('00ec623a', 'name:__strcpy_chk')) != 'libc-variant', 'sprintf vs __strcpy_chk: not a variant')
         check(cf(tgt('00401200', '9e684216')) == 'native-vcall-oracle-direct', 'native wild call, oracle direct')
@@ -661,6 +711,15 @@ def test_callflow():
         causes.native_reaches = lambda src, n: {'__fnv_00401100', '__fnv_00401300'}
         check(cf(tgt('00401100', '00401300')) == 'oracle-callee-unloaded',
               'oracle intercepts a callee the native ran (its traced call is in the native trace)')
+        bodies['__fnv_00401500'] = (BL_RET, {'__fnv_00401500'})
+        cs0, rch0 = causes.native_callees, causes.native_reaches
+        causes.native_callees = lambda src, a: cs0(src, a) | {'__fnv_00401500'}
+        causes.native_reaches = lambda src, n: ({'__fnv_00401500', '__fnv_00401300'} if n == '__fnv_00401500'
+                                                else rch0(src, n))
+        check(cf(tgt('00401100', '00401300')) != 'oracle-callee-unloaded',
+              'another unit-local callee also reaches Y: Y proves nothing about X (audit U4)')
+        causes.native_callees, causes.native_reaches = cs0, rch0
+        del bodies['__fnv_00401500']
         real_cs = causes.native_callees
         causes.native_callees = lambda src, a: real_cs(src, a) | {'__fnv_00401300'}
         check(cf(tgt('00401100', '00401300')) != 'oracle-callee-unloaded',
@@ -679,6 +738,61 @@ def test_callflow():
         causes._VFT = causes._LINKSYM = None
 
 
+def test_fix_classes():
+    """D21: every real-bug cause is in exactly one fix class, whose owner is the cause's owner."""
+    real = {c for c, v in causes.POLICY.items() if v[0] == 'real-bug'}
+    listed = [c for v in causes.FIX_CLASSES.values() for c in v[2]]
+    check(sorted(listed) == sorted(set(listed)), 'no cause in two fix classes')
+    check(set(listed) == real, 'fix classes cover exactly the real-bug causes (missing %s, extra %s)' % (
+        sorted(real - set(listed)), sorted(set(listed) - real)))
+    bad = [c for c in listed if causes.policy(c)[1] != causes.FIX_CLASSES[causes.FIX_CLASS_OF[c]][0]]
+    check(not bad, 'cause owner = class owner (%s)' % bad)
+    rows = {'native-undefined': dict(divergences=3, functions=2, worst_of=2),
+            'after-native-undefined': dict(divergences=1, functions=1, worst_of=0),
+            'vptr-unpaired': dict(divergences=5, functions=4, worst_of=4)}
+    fc = causes.fix_classes(rows)
+    check(list(fc)[0] == 'vtables' and fc['vtables']['worst_of'] == 4, 'classes ordered by worst_of')
+    check(fc['callee-bodies']['divergences'] == 4 and fc['callee-bodies']['owner'] == 'S1', 'class sums its causes')
+    with tempfile.TemporaryDirectory() as d:
+        js = os.path.join(d, 'c.json'); out = os.path.join(d, 'classes.tsv')
+        json.dump(dict(causes=rows), open(js, 'w'))
+        causes.main(['classes', js, '--tsv', out])
+        t = [l.split('\t') for l in open(out).read().splitlines()]
+        check(t[0][0] == 'class' and t[1][:3] == ['vtables', 'S2c', '4'], 'classes.tsv: class, owner, worst_of')
+
+
+def test_link_traps():
+    """exc:N at the link's trap stubs (brk #0xf5 / #0xf6 in the unit image) -> vslot-trap (S2c); another trap, a
+    missing image or a pc outside it -> native-trap (S1-fuzzA-001)."""
+    import shutil, subprocess
+    if not (shutil.which('aarch64-linux-gnu-as') and shutil.which('aarch64-linux-gnu-ld')):
+        print('test_link_traps: skipped (no aarch64 binutils)')
+        return
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, 't.s'), 'w').write('.text\n.globl _start\n_start:\n udf #0\n brk #0xf5\n brk #0xf6\n'
+                                                ' brk #0x3e8\n')
+        subprocess.run(['aarch64-linux-gnu-as', '-o', os.path.join(d, 't.o'), os.path.join(d, 't.s')], check=True)
+        subprocess.run(['aarch64-linux-gnu-ld', '-Ttext=0x0a000000', '-o', os.path.join(d, 'src_t.cpp.o.elf'),
+                        os.path.join(d, 't.o')], check=True)
+        os.environ['FNVNX_CAUSES_A64'] = d
+        causes._IMAGE_WORDS.clear()
+        try:
+            def tr(pc, src='src/t.cpp'):
+                r = rec(dict(kind='error', x86=None, arm='exc:7@%08x' % pc))
+                r['source'] = src
+                return causes.refine(r, 'unclassified')
+            check(tr(0x0a000004) == 'vslot-trap', 'brk #0xf5 (fnvnx_vslot_trap): vslot-trap')
+            check(tr(0x0a000008) == 'vslot-trap', 'brk #0xf6 (fnvnx_special_trap): vslot-trap')
+            check(tr(0x0a00000c) == 'native-trap', 'GCC __builtin_trap (brk #0x3e8): native-trap')
+            check(tr(0x0a000000) == 'native-trap', 'udf: native-trap')
+            check(tr(0x0b000000) == 'native-trap', 'pc outside the image: native-trap')
+            check(tr(0x0a000004, 'src/missing.cpp') == 'native-trap', 'no image: native-trap')
+            check(causes.policy('vslot-trap')[:2] == ('real-bug', 'S2c'), 'vslot-trap: real bug, S2c')
+        finally:
+            os.environ.pop('FNVNX_CAUSES_A64', None)
+            causes._IMAGE_WORDS.clear()
+
+
 if __name__ == '__main__':
     test_rules()
     test_vcall_split()
@@ -689,5 +803,7 @@ if __name__ == '__main__':
     test_handoffs()
     test_cli_effects()
     test_unclassified_shapes()
+    test_fix_classes()
+    test_link_traps()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)

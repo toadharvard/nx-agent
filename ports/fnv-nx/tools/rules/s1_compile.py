@@ -1561,7 +1561,7 @@ def r_image_statics(path, text, stats):
 
 FALL_SKIP_RET = re.compile(r'^(?:extern\s*"C\+?\+?"\s*|(?:FNVNX_KEEP|inline|static|virtual|explicit|extern|constexpr|'
                            r'__forceinline|__inline|friend)\s+|template\s*<[^{};]*>\s*)+')
-FALL_DECLARATOR = re.compile(r'((?:::)?(?:[A-Za-z_]\w*(?:\s*<[^<>;{}()]*(?:<[^<>;{}()]*>)?[^<>;{}()]*>)?\s*::\s*)*'
+FALL_DECLARATOR = re.compile(r'((?:::)?(?:[A-Za-z_]\w*(?:\s*<(?:[^<>;{}()]|<(?:[^<>;{}()]|<[^<>;{}()]*>)*>)*>)?\s*::\s*)*'
                              r'(?:~?[A-Za-z_]\w*|operator\s*(?:\(\)|[^\s(]+)))\s*\(')
 FALL_END = re.compile(r'(?:\breturn\b[^;]*;|\bthrow\b[^;]*;|__builtin_trap\s*\(\s*\)\s*;|__builtin_unreachable\s*\(\s*\)\s*;|'
                       r'\b(?:abort|exit|_exit|ExitProcess|ExitThread|terminate|_CxxThrowException|__CxxThrowException|'
@@ -3489,6 +3489,60 @@ def _stand3_maybe_virtual(text, cls, name):
         return False
     return bool(re.search(r'\bvirtual\b[^;{}()]*\b%s\s*\(' % re.escape(name), text))
 
+STAND3_BUILTIN = {'char': 'D', 'signed char': 'C', 'unsigned char': 'E', 'short': 'F', 'unsigned short': 'G',
+                  'int': 'H', 'unsigned int': 'I', 'unsigned': 'I', 'long': 'J', 'unsigned long': 'K', 'float': 'M',
+                  'double': 'N', 'bool': '_N', '__int64': '_J', 'unsigned __int64': '_K', 'void': 'X',
+                  'wchar_t': '_W'}
+
+def _stand3_param_codes(params):
+    """MSVC's encoding of a parameter list of builtin types and pointers / references to them (`int, const char*` ->
+    `HPBD`), None when a parameter is anything else (a class type, a typedef, a function pointer, an array, `...`).
+    MSVC abbreviates a repeated multi-character type to a back-reference digit, so lists with a repeated pointer
+    or reference type are not encoded either."""
+    if params in ('', 'void'): return ''
+    out, seen = [], set()
+    for p in _split_args(params):
+        p = re.sub(r'=.*$', '', p).strip()
+        m = re.fullmatch(r'((?:const\s+|volatile\s+)*)((?:unsigned\s+|signed\s+)?(?:__int64|char|short|int|long|float|'
+                         r'double|bool|void|wchar_t)|unsigned)((?:\s*const)?)\s*([*&]?)\s*(?:const\s*)?(?:[A-Za-z_]\w*)?', p)
+        if not m: return None
+        base = re.sub(r'\s+', ' ', m.group(2)).strip()
+        code = STAND3_BUILTIN.get(base)
+        if code is None or (code == 'X' and not m.group(4)): return None
+        cq = bool(m.group(1).strip()) or bool(m.group(3).strip())
+        if m.group(4):
+            code = {'*': 'PA', '&': 'AA'}[m.group(4)][0] + ('B' if cq else 'A') + code
+            if code in seen: return None
+            seen.add(code)
+        out.append(code)
+    return ''.join(out)
+
+def _stand3_overloads(text, spans, pos, name, in_class, cls):
+    """Declarations and definitions of `name` in the scope that holds the definition at `pos`: the class body for an
+    in-class member, the body of class `cls` for an out-of-class one (0 when the unit does not define it), the
+    enclosing namespace scope for a free function."""
+    pat = re.compile(r'(?<![\w.>:~])%s\s*\(' % re.escape(name))
+    if in_class:
+        body = next(((o, c) for o, c, k, _ in reversed([sp for sp in spans if sp[0] < pos < sp[1]]) if k == 'class'), None)
+    elif cls:
+        cm = re.search(r'\b(?:class|struct)\s+%s\b[^;{()]*\{' % re.escape(cls), text)
+        body = (cm.end() - 1, prepare.match_brace(text, cm.end() - 1) - 1) if cm else None
+        if body is None: return 0
+    else:
+        body = None
+    n = 0
+    for mm in pat.finditer(text):
+        at = mm.start()
+        if body is not None:
+            if not body[0] < at < body[1]: continue
+            inner = [sp for sp in spans if sp[0] < at < sp[1] and body[0] <= sp[0] and sp[0] != body[0]]
+            if inner: continue                            # inside a member's body or a nested class
+        else:
+            if any(k != 'namespace' for k, _ in prepare.scope_chain(spans, at)): continue
+        if re.search(r'[=(,!&|+\-*/?:<>]\s*$|\breturn\s*$|\.\s*$|->\s*$', text[max(0, at - 40):at]): continue   # a call
+        n += 1
+    return n
+
 def r_inline_stand_ins(path, text, stats):
     """STAND3: drop untagged inline bodies of an /Od unit without inlining flags whose MSVC name binds the address of
     a decompiled function (see above): in-class definitions become declarations, out-of-class ones go, free ones keep
@@ -3538,8 +3592,25 @@ def r_inline_stand_ins(path, text, stats):
             if not cls or name[1:] != cls: continue
             prefix = '??1' + '@'.join(scope) + '@@'
         else: prefix = '?' + '@'.join([name] + scope) + '@@'
-        addrs = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
-        if len(addrs) != 1 or not addrs <= decompiled: continue
+        # the definition's own spelling, not an overload's (V2 O1/O2: tesworldspace `NiPoint2() {}` took the address of
+        # the bound NiPoint2(float, float)). A spelling agrees with the definition on an empty parameter list (`XZ`),
+        # on const (`QBE` / `QAE`) and, when every parameter is a builtin type or a pointer / reference to one, on the
+        # encoded parameters; exactly one spelling must agree, and with a class-type parameter the name must have no
+        # other declaration in its scope
+        params = re.sub(r'\s+', ' ', m.group(3) or '').strip()
+        tail = text[m.end(3) + 1:m.end() - 1]
+        is_const = bool(re.match(r'\s*const\b', tail))
+        enc = _stand3_param_codes(params)
+        def agrees(k):
+            if (params in ('', 'void')) != k.endswith('XZ'): return False
+            if cls and not name.startswith('~') and name != cls and \
+                    k[len(prefix) + 1:len(prefix) + 2] != ('B' if is_const else 'A'): return False
+            return enc is None or params in ('', 'void') or k.endswith(enc + '@Z')
+        spell = [k for k in syms if k.startswith(prefix) and agrees(k)]
+        if len(spell) != 1: continue
+        if enc is None and _stand3_overloads(text, spans, m.start(), name, in_class, cls) != 1: continue
+        addrs = {int(syms[spell[0]], 16)}
+        if not addrs <= decompiled: continue
         if cls and _stand3_maybe_virtual(text, cls, name): continue
         o = m.end() - 1
         c = prepare.match_brace(text, o)

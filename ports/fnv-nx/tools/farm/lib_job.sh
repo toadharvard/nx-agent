@@ -10,7 +10,7 @@ log() { echo "$(date -u +%FT%TZ) $(basename "$0"): $*"; }
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
 export FARM_APT
 
-NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu liblz4-dev libnewlib-dev"
+NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu liblz4-dev libnewlib-dev python3-mako"
 host_check() {   # commands (py:<module> for python modules) -> installed with apt-get / pip when FARM_APT=1
 	local missing="" c
 	for c in "$@"; do
@@ -201,6 +201,14 @@ EOF
 		for f in slot_fill.tsv slot_gaps.tsv; do [ -f "$bd/link/out/$f" ] && cp "$bd/link/out/$f" out/; done
 		cp "$bd/link/out/cache/msvc.tsv" out/cache/
 		rsync -a --exclude probe/ "$bd/link/out/vtables/" out/vtables/   # the synthesized vtables, not the probe work dir
+		# S2d's tables (bodies.tsv: every trapped name's class and evidence; bind.tsv, synth.tsv, stats.txt), so a relink
+		# or S3 reads them from the publish; the synthesized objects are in fixed/ already, the work dir stays local
+		if [ -d "$bd/link/out/bodies" ]; then
+			mkdir -p out/bodies
+			for f in bodies.tsv bind.tsv synth.tsv stats.txt; do
+				[ -f "$bd/link/out/bodies/$f" ] && cp "$bd/link/out/bodies/$f" out/bodies/
+			done
+		fi
 		cp "$bd"/link/fixed/*.o fixed/
 		cp "$bd/link/summary.txt" summary.txt
 		# the guest and the boots only when they were built on this link (full_job.sh publishes twice: link_job.sh's

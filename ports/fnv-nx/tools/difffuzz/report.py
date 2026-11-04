@@ -129,8 +129,8 @@ def reclassify(rec):
     global _UC
     hint = rec.get('hint') or {}
     cause = hint.get('cause')
-    if cause != 'local-static' and _custom_cc(rec):
-        return 'x86-custom-cc'
+    # (an x86-custom-cc verdict is classify.hint's, on the case's own garbage probe since difffuzz-19; the static
+    # entry-register test here overrode real-bug hints: S13b audit)
     if cause == 'signedness':
         got = _signedness_by_design(rec)
         if got:
@@ -149,7 +149,9 @@ def reclassify(rec):
     d = rec['divergence']
     if rec.get('_now') is not None:
         d = rec['_now']
-        if d.get('arm_local_static'):
+        if d.get('arm_local_static') and ((d.get('kind') == 'mem-write' and d.get('only_x86') == d.get('ndiff')) or
+                                          (d.get('kind') == 'call-target' and d.get('arm_next') == d.get('x86') and
+                                           d.get('x86_next') != d.get('arm'))):
             return 'local-static'
         if d.get('arm_private_reads'):
             return 'split-global'
@@ -169,7 +171,7 @@ def reclassify(rec):
         try:
             import classify
             if int.from_bytes(bytes.fromhex(d['x86'])[:4], 'little') in classify.image_vftables():
-                return 'vptr-store'
+                return 'vptr-store' if classify.is_dtor_name(rec.get('symbol') or '') else 'vptr-differs'
         except Exception:  # noqa: BLE001
             pass
     if d['kind'] == 'mem-write' and d.get('x86') and d.get('arm'):
@@ -202,8 +204,8 @@ def reclassify(rec):
             import world
             if world.STACK[0] <= vx < world.STACK[1] and world.STACK[0] <= va < world.STACK[1]:
                 return 'stack-arg'       # each machine's own frame through an int parameter (harness, fixed since)
-            if 0x00fdf000 <= vx < 0x02100000 and 0x0a000000 <= va < 0x0b800000:
-                return 'literal-arg'     # a literal at its image address vs the native unit's copy (harness)
+            # (an image address vs a native image address is left to causes.refine: native-address, a real bug, or
+            # literal-arg when the oracle's value is in the literal pool; S13b audit)
         except ValueError:
             pass
     if d['kind'] == 'call-target' and str(d.get('arm', '')).startswith('name:') and \

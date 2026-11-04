@@ -73,10 +73,14 @@ CONFIG = [
     ('CENSUS', '1', '0: skip the -fsyntax-only census'),
     ('OVERRIDE', 'auto', 'fnvlink resolve --override table (native replacements): auto = the port\'s own, built by '
                          'tools/link/overrides/build.sh in the link stage; none = off; or a table'),
-    ('LINK_OVERRIDES', '', 'native replacements by name, added to OVERRIDE\'s: render = render/native/overrides.tsv '
-                           'with --override-lib libnxrender.a (RENDER_LIB; the guest links the archive); empty: none'),
+    ('LINK_OVERRIDES', 'auto', 'native replacements by name, added to OVERRIDE\'s: render = render/native/overrides.tsv '
+                               'with --override-lib libnxrender.a (RENDER_LIB; the guest links the archive, the engine\'s '
+                               'D3D9 entry points go to the native renderer); auto = render when the toolchain stage '
+                               'has DEVKITPRO and fnvnx-a64 (a build that links a guest: the full build), else none; '
+                               'none = the pristine path (fuzz, equivalence, the link farm)'),
     ('RENDER_LIB', '', 'libnxrender.a for LINK_OVERRIDES=render; empty: built by render/native/n1/build.sh in the link '
-                       'stage (needs the toolchain stage\'s DEVKITPRO and fnvnx-a64, and UAM in the environment)'),
+                       'stage with the toolchain stage\'s DEVKITPRO and fnvnx-a64 and UAM (the environment\'s, else '
+                       'toolchain/uam/build.sh, cached next to the link stage)'),
     ('EXTERN_TEXT', 'auto', 'fnvlink resolve --extern-text list: auto = made from the tree\'s units.json by '
                             'tools/pipeline/extern_text.py (S4\'s addr_ids.txt), none = off, or a file'),
     ('MSVC_OBJS', '', 'fnvlink resolve --msvc-objs: pristine MSVC 2008 objects (S11) for S2b\'s vtable slots'),
@@ -1039,6 +1043,23 @@ def write_prepared_from(d, pf):
         json.dump(pf, f, indent=1, sort_keys=True)
 
 
+def recon_id():
+    """the recon directory REC1 reads (FNVNX_RECON, D20: tools/farm/recon.sh fills it from fnv-nx-build recon/*) as a
+    content hash: part of prepare's key, so a new or changed recon prepares again; '' without one"""
+    top = os.environ.get('FNVNX_RECON')
+    if not top or not os.path.isdir(top):
+        return ''
+    h = hashlib.sha256()
+    for dp, dns, fns in sorted(os.walk(top)):
+        dns.sort()
+        for f in sorted(fns):
+            p = os.path.join(dp, f)
+            h.update(os.path.relpath(p, top).encode() + b'\0')
+            with open(p, 'rb') as fh:
+                h.update(hashlib.sha256(fh.read()).digest())
+    return h.hexdigest()[:16]
+
+
 class Prepare(Stage):
     name = 'prepare'
     deps = ('fetch',)
@@ -1051,7 +1072,8 @@ class Prepare(Stage):
             return ['prepare-adopt-v1', t, st and (st.st_size, st.st_mtime_ns), read_prepared_from(t)]
         # the head is part of the key: a tree is always prepared from the commit the run's tools come from (J-0054);
         # an unchanged tree keeps its files' mtimes (sync_tree), so the stages after it stay cached
-        return ['prepare-v2', rules_hash(), up_id(b, 'fetch'), os.environ.get('FNVNX_PREPARE_SKIP', ''), b.head]
+        return ['prepare-v3', rules_hash(), up_id(b, 'fetch'), os.environ.get('FNVNX_PREPARE_SKIP', ''), b.head,
+                recon_id()]
 
     def outputs_present(self, b):
         t = os.path.abspath(b.cfg['PREPARED']) if b.cfg['PREPARED'] else os.path.join(b.out, 'prepare', 'tree')
@@ -1066,7 +1088,7 @@ class Prepare(Stage):
         shutil.rmtree(staging, ignore_errors=True)
         dirty = port_dirty(PREPARE_INPUTS)
         pf = {'port_commit': b.head, 'port_dirty': dirty, 'decomp_commit': read_git_head(decomp), 'decomp': decomp,
-              'mode': 'prepare.py', 'tree': tree, 'at': now_iso()}
+              'recon': recon_id(), 'mode': 'prepare.py', 'tree': tree, 'at': now_iso()}
         b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'prepare.py'), decomp, staging], r['log'], check=True)
         stats = os.path.join(staging, 'prepare_stats.tsv')
         rules = read_rule_stats(stats)
@@ -1584,12 +1606,22 @@ RENDER_LIB_SOURCES = ('render/native/front', 'render/native/capture', 'render/na
                       'render/native/shaders', 'toolchain/include', 'toolchain/guest')
 
 
+def link_overrides_mode(b):
+    """LINK_OVERRIDES resolved: render or none. auto: render when the toolchain stage provides DEVKITPRO and
+    fnvnx-a64 (the full build: its guest needs the native renderer, the boot stops at renderer init without it),
+    none otherwise (TC_DL=none: the link farm, fuzz and equivalence take the pristine path)."""
+    lo = b.cfg['LINK_OVERRIDES'] or 'none'
+    if lo == 'auto':
+        return 'render' if b.art('toolchain', 'devkitpro') and b.art('toolchain', 'prefix') else 'none'
+    return lo
+
+
 def link_overrides(b):
     """(table, archive, id for the fingerprint) of LINK_OVERRIDES: render -> S6n's render/native/overrides.tsv and
     libnxrender.a (RENDER_LIB, else '' = built by the stage from RENDER_LIB_SOURCES); empty -> ('', '', ...). They
     are added to OVERRIDE's rows (override_id)."""
-    lo = b.cfg['LINK_OVERRIDES']
-    if lo in ('', 'none'):
+    lo = link_overrides_mode(b)
+    if lo == 'none':
         return ('', '', 'link-overrides:none')
     if lo != 'render':
         raise StageError('LINK_OVERRIDES=%s: only render (or empty) is known' % lo)
@@ -1603,14 +1635,26 @@ def build_render_lib(b, r, d):
     """libnxrender.a for LINK_OVERRIDES=render without RENDER_LIB: render/native/n1/build.sh <d>/render-n1 with the
     toolchain stage's DEVKITPRO and fnvnx-a64 and the environment's UAM (render/native/env.sh --print)."""
     dkp, prefix, uam = b.art('toolchain', 'devkitpro'), b.art('toolchain', 'prefix'), os.environ.get('UAM', '')
-    if not dkp or not prefix or not uam or not os.access(uam, os.X_OK):
+    if not dkp or not prefix:
         raise StageError('LINK_OVERRIDES=render needs RENDER_LIB=<libnxrender.a>, or the toolchain stage\'s DEVKITPRO '
-                         'and fnvnx-a64 plus UAM=<uam> (render/native/env.sh) to build it')
+                         'and fnvnx-a64 to build it (LINK_OVERRIDES=none: the pristine path)')
+    if not uam or not os.access(uam, os.X_OK):
+        # no render machine environment (the farms): build uam at its pin once per container, in a cache every build
+        # directory of the container shares ($FNVNX_TOOL_CACHE, default ~/.cache/fnvnx; toolchain/uam/build.sh stamps
+        # the pin); only a failed build is an error
+        up = os.path.join(os.environ.get('FNVNX_TOOL_CACHE') or os.path.join(os.path.expanduser('~'), '.cache', 'fnvnx'),
+                          'uam')
+        b.say('link: uam (toolchain/uam/build.sh, once per container)')
+        if b.sh(['bash', os.path.join(ROOT, 'toolchain', 'uam', 'build.sh'), up], r['log'], timeout=3600):
+            raise StageError('LINK_OVERRIDES=render: building uam failed (toolchain/uam/build.sh, see %s)' % b.rel(r['log']))
+        uam = os.path.join(up, 'bin', 'uam')
     out = os.path.join(d, 'render-n1')
     b.say('link: libnxrender.a (render/native/n1/build.sh)')
     path = os.pathsep.join([os.path.join(dkp, 'tools', 'bin'), os.path.join(prefix, 'bin'), os.environ.get('PATH', '')])
+    # NX_SHADER_TABLE=device: the console's table (no GLSL) and its precompiled pack shaders.nxsp next to the archive;
+    # the package stage puts that pack into fnv.nro's RomFS (NX1 check 9: nothing is compiled on the console)
     b.sh(['bash', os.path.join(ROOT, 'render', 'native', 'n1', 'build.sh'), out], r['log'],
-         env=b.env({'DEVKITPRO': dkp, 'UAM': uam, 'PATH': path}), check=True, timeout=3600)
+         env=b.env({'DEVKITPRO': dkp, 'UAM': uam, 'PATH': path, 'NX_SHADER_TABLE': 'device'}), check=True, timeout=3600)
     lib = os.path.join(out, 'libnxrender.a')
     with open(lib + '.abi', 'w') as f:   # the nxgpu ABI it was built against (NX1: the package checks host == guest)
         f.write(file_hash(GPU_ABI_H) + '\n')
@@ -1716,6 +1760,9 @@ class Link(Stage):
                 raise StageError('LINK_OVERRIDES=render: no %s' % rv_lib)
             r.artifact('override_lib', rv_lib)
             r['render_abi'] = render_lib_abi(rv_lib)
+            pack = os.path.join(os.path.dirname(rv_lib), 'shaders.nxsp')
+            if os.path.isfile(pack):   # the pack the guest's shader table was generated against
+                r.artifact('shader_pack', pack)
             both = os.path.join(d, 'overrides_all.tsv')
             with open(both, 'w', encoding='utf-8', errors='surrogateescape') as f:
                 for t_ in (ov_tsv, rv_tsv):
@@ -1724,7 +1771,7 @@ class Link(Stage):
             args += ['--override', both, '--override-lib', rv_lib]
         elif ov_tsv:
             args += ['--override', ov_tsv]
-        r['link_overrides'] = (b.cfg['OVERRIDE'] or 'none') + ('+' + b.cfg['LINK_OVERRIDES'] if rv_tsv else '')
+        r['link_overrides'] = (b.cfg['OVERRIDE'] or 'none') + ('+render' if rv_tsv else '')
         for opt, key in (('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
                          ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:
@@ -2392,8 +2439,9 @@ class Package(Stage):
     prov = ('guest',)      # only when the guest is packaged
 
     def fingerprint(self, b):
-        return ['package-v2', up_id(b, 'host'), up_id(b, 'guest'), b.cfg['PROGRAM_ID'], tree_hash('toolchain/tools'),
-                tree_hash('toolchain/nro', 'toolchain/include', 'tests/nx1', 'tests/s5/check_package.py')]
+        return ['package-v3', up_id(b, 'host'), up_id(b, 'guest'), b.cfg['PROGRAM_ID'], tree_hash('toolchain/tools'),
+                tree_hash('toolchain/nro', 'toolchain/include', 'tests/nx1', 'tests/s5/check_package.py',
+                          'tests/s13/ilp32_wrap'), up_id(b, 'toolchain')]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'package', 'exefs.nsp'))
@@ -2418,9 +2466,16 @@ class Package(Stage):
         # the commit this package is built from: the NRO's NACP version and the stage record carry it, and
         # full_job.sh's publish_nro refuses to label any other package nro/<commit12> (V1 NX1 P1)
         r['port_commit'] = b.head
+        # the guest's precompiled shader pack (link stage, LINK_OVERRIDES=render) goes into the NRO's RomFS
+        pack = b.art('link', 'shader_pack')
+        romfs = os.path.join(d, 'nro-romfs.img') if pack and os.path.isfile(pack) else None
+        if romfs:
+            b.sh([PY, '-I', os.path.join(ROOT, 'toolchain', 'tools', 'romfs.py'), '--build', romfs, pack], r['log'], check=True)
+        else:
+            r.note('no shader pack (the guest links no native renderer): fnv.nro has no RomFS, NX1 check 9 fails')
         nro_rc = b.sh(['bash', os.path.join(ROOT, 'toolchain', 'nro', 'build.sh'), nd] + ([b.head[:12]] if b.head else []),
                       r['log'],
-                      env=b.env({'NX1_REF_BIN': ref_bin}), timeout=600)
+                      env=b.env({'NX1_REF_BIN': ref_bin, 'NRO_ROMFS': romfs}), timeout=600)
         nro = os.path.join(nd, 'fnv.nro')
         if nro_rc or not os.path.isfile(nro):
             r.note('toolchain/nro/build.sh exited %d: no fnv.nro' % nro_rc)
@@ -2463,6 +2518,7 @@ class Package(Stage):
             r.artifact('nx1.json', nx1)
         except (OSError, ValueError, KeyError):
             r.note('tests/nx1/run.py wrote no nx1.json')
+        self.ilp32_wrap(b, r, d)
         r.metric('package_exefs_bytes', os.path.getsize(nsp))
         r.metric('package_sd_bytes', sum(s for _, s in files))
         r.artifact('exefs.nsp', nsp)
@@ -2478,6 +2534,35 @@ class Package(Stage):
         if not gnso:
             r.note('no guest.nso (guest stage did not succeed): SD tree holds the host only')
             r['status'] = 'warn'
+
+    @staticmethod
+    def ilp32_wrap(b, r, d):
+        """Toolchain check: S13b's tests/s13/ilp32_wrap/check.sh with this build's fnvnx-a64 gcc. GCC's AArch64 ILP32
+        code forms base + 32-bit index in 64 bits (add x, x, w, uxtw) on an integer-constant base, so it does not wrap
+        at 2^32 the way the exe's does. The report (per flag set and form) is the artifact ilp32_wrap.txt; the metric
+        ilp32_wrap_64bit counts the forms with the build's flags (the default row) that do not wrap. It reports,
+        never gates: the sites are fixed in the prepared source (S1)."""
+        prefix = b.art('toolchain', 'prefix')
+        gcc = os.path.join(prefix, 'bin', 'aarch64-none-elf-gcc') if prefix else ''
+        if not gcc or not os.path.isfile(gcc):
+            r.note('ilp32_wrap: no fnvnx-a64 gcc (toolchain stage): not checked')
+            return
+        out = os.path.join(d, 'ilp32_wrap.txt')
+        env = dict(b.env(), FNVNX_A64_CC=gcc)
+        with open(out, 'w') as f:
+            p = subprocess.run(['bash', os.path.join(ROOT, 'tests', 's13', 'ilp32_wrap', 'check.sh')], env=env,
+                               stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, timeout=300)
+        rows = [ln.split(None, 2) for ln in open(out, errors='replace') if ln.strip()]
+        r.artifact('ilp32_wrap.txt', out)
+        if p.returncode or not rows or rows[0][0] == 'skip:':
+            r.note('ilp32_wrap: check.sh exit %d: %s' % (p.returncode, ' '.join(map(' '.join, rows[-2:]))[:200]))
+            return
+        bad = [w[1] for w in rows if len(w) == 3 and w[0] == 'default' and 'NOT' in w[2]]
+        r.metric('ilp32_wrap_64bit', len(bad))
+        if bad:
+            r.note('ilp32_wrap: fnvnx-a64 forms %d of %d constant-base address forms in 64 bits (%s): such a site '
+                   'does not wrap at 2^32 like the exe (tests/s13/ilp32_wrap, S13b)' % (
+                       len(bad), sum(1 for w in rows if w[0] == 'default'), ', '.join(bad)))
 
 
 # ---------------------------------------------------------------------------------------------------- 12 tests

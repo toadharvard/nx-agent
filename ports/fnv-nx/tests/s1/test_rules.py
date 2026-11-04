@@ -53,6 +53,11 @@ check('FALL1 FNV_FORCEINLINE void member: no trap',
       (), [TRAP])
 check('FALL1 constructor after access label: no trap',
       run(s1.r_falloff_traps, 'class B\n{\n  public:\n    B(bool b)\n    {\n        v = b;\n    }\n};\n'), (), [TRAP])
+check('FALL1 void member of a class template with two nested template arguments: no trap',
+      run(s1.r_falloff_traps, 'FNVNX_KEEP void L<A<unsigned int>,P<B> >::AddTail(const P<B>& e)\n{\n    n = 1;\n}\n'),
+      (), [TRAP])
+check('FALL1 int member of the same template: trap',
+      run(s1.r_falloff_traps, 'int L<A<unsigned int>,P<B> >::Count()\n{\n    n = 1;\n}\n'), [TRAP])
 check('FALL1 ends in return: no trap',
       run(s1.r_falloff_traps, 'int f()\n{\n    return 3;\n}\n'), (), [TRAP])
 check('FALL1 class with declarations only, after a long comment: no trap',

@@ -50,6 +50,10 @@ def analyse(fn):
     return dict(calls=calls, indirect=indirect, tails=tails, x87=x87, sse=sse, fs=fs, insns=insns)
 
 
+# rows carry `cv`; fuzz_job rebuilds a cached catalog of an older version (2: SECREL / thread-local variables resolve)
+CATALOG_VERSION = 2
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default=str(config.WORK / 'catalog.jsonl'))
@@ -87,6 +91,7 @@ def main():
             for addr, fn in sorted(img.funcs.items()):
                 r = rows[addr]
                 r['ohash'] = ohash[addr]
+                r['cv'] = CATALOG_VERSION
                 r.update(unit=i, source=u['source'], address='%08x' % addr, size=fn['size'], symbol=fn['symbol'],
                          unresolved=len(fn['unresolved']),
                          data_refs=sorted({t for _, k, t, _ in fn['relocs'] if t is not None and t >= 0x00fdf000}))
