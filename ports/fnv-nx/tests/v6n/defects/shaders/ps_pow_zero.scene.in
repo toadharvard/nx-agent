@@ -1,0 +1,14 @@
+# V6n defect ps_pow_zero (S6b translator): expected (Nine) R = pow(0,0) = 1, G = pow(0,-0.5) = +inf -> 1, B = pow(0,0.5) = 0
+size 4 4
+rt A8R8G8B8
+ds NONE
+clear 1 0xff203040 1.0 0
+rs CULLMODE CULL_NONE
+ps @ps_pow_zero
+psc 7 0 -0.5 0.5 1
+mode rhw
+v 0 0 0.5 1 0xffffffff 0 0 0
+v 4 0 0.5 1 0xffffffff 0 1 0
+v 0 4 0.5 1 0xffffffff 0 0 1
+v 4 4 0.5 1 0xffffffff 0 1 1
+draw TRIANGLESTRIP 2

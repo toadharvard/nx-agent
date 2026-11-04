@@ -51,7 +51,7 @@ def overlay(decomp, work, files):
         src = Path(decomp, rel)
         text = src.read_text(encoding='utf-8', errors='surrogateescape')
         stats = __import__('collections').Counter()
-        for rule in ('XINC1', 'FTOL1', 'DBUG1', 'RET1'):
+        for rule in s1b_patches.MSVC_RULES:
             text = s1b_patches.apply_sites(str(src), text, stats, rule, report)
         dst = tree / rel
         if dst.is_symlink() or dst.exists():
@@ -159,7 +159,7 @@ def main():
         s1b_patches.BY_FILE = {}
         for s in s1b_patches.SITES:
             s1b_patches.BY_FILE.setdefault(s.path, []).append(s)
-    sites = s1b_patches.SITES
+    sites = s1b_patches.msvc_sites(s1b_patches.SITES)      # gated classes (MT1) are exempt from the byte check
     files = sorted({s.path for s in sites})
     if a.only:
         files = [f for f in files if f in a.only.split(',')]

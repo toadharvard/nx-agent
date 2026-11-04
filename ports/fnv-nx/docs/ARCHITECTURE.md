@@ -188,6 +188,15 @@ agents queue the next item instead of waiting, and verify their own change with 
   port's own overhead (bridges, thunks, ordering, ILP32, compiler flags) and the game's hot code (threading per
   D19, algorithms). tools/perf/content_presets.py stays a model of how cost scales with content, not a default.
 
+### D21. Coverage first, then optimization (owner)
+
+- Every stream closes problems as classes, with one general mechanism that covers all instances, before it
+  optimizes any instance. Correct and complete comes before fast.
+- Render: the general path (Translated programs + exact D3D9 state emulation) draws every program correctly, with
+  skipped draws = 0 and all capture scenes passing; hand-written GLSL and GPU tuning follow, and a family switches
+  only when it matches and is not slower.
+- Link/boot/runtime: whole classes (all .inl bodies, all short vtables, all services of a DLL), not trap by trap.
+
 ## Legal
 
 The decomp grants no licence. This directory contains only our own code: tools, shims, the platform layer and docs.
