@@ -93,6 +93,11 @@ got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> clas
           '    {\n        D(p);\n    }\n};\ntemplate <class T> inline void D(T* p)\n{\n    p->~T();\n}\n}\n')
 check('TPL2 forward-declares a namespace function template used earlier', got,
       ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'])
+got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> class A\n{\n  public:\n    void d(T* p)\n'
+          '    {\n        D(p);\n    }\n};\ntemplate <class T> inline void D(T* p)\n{\n    p->~T();\n}\n'
+          'template <> inline void D(char*)\n{\n}\n}\n')
+check('TPL2 never forward-declares an explicit specialization (template <>) ahead of its primary', got,
+      ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'], ['template <> inline void D(char*);'])
 
 # ---- S1-STL (blk_00ac0000): TPL2 specializations, TPL3, TYPN1, INST1, COPY1, DECL3
 got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> class A\n{\n  public:\n    void d(T* p)\n'
@@ -395,6 +400,18 @@ check('ENUM1 a definition int cannot hold keeps its form',
       run(s1.r_opaque_enums, 'enum WIDE { W = 0x80000000 };\n', os.path.join(_e, 'src', 'c.cpp')), ['enum WIDE { W'])
 s1._OPAQUE_NAMES = None
 
+# ---- DECL1-NSADL: a namespace's own C++ copy of a CRT name stays its own; argument-dependent lookup must not reach ::name
+_st = Counter()
+got = prepare.r_platform_protos('/x/src/ns.cpp', 'int strcpy_s(char* d, unsigned int n, const char* s);\n'
+                                'namespace N {\nstruct S : Base { operator const char*() const; };\n'
+                                'int strcpy_s(char* d, unsigned int n, const char* s);\n'
+                                'void f(char* b, S& s) { strcpy_s(b, 4, s); if (!strcpy_s(b, 4, "x")) return; p->strcpy_s(b);'
+                                ' N::strcpy_s(b, 4, s); // strcpy_s(b)\n}\n}\nvoid g(char* b) { strcpy_s(b, 4, "y"); }\n', _st)
+check('DECL1-NSADL: unqualified calls in the namespace keeping its own prototype are parenthesized', got,
+      ['{ (strcpy_s)(b, 4, s); if (!(strcpy_s)(b, 4, "x")) return; p->strcpy_s(b); N::strcpy_s(b, 4, s); // strcpy_s(b)',
+       'int strcpy_s(char* d, unsigned int n, const char* s);\nvoid f', 'void g(char* b) { strcpy_s(b, 4, "y"); }'])
+check('DECL1-NSADL counted', str(_st['DECL1-NSADL']), ['2'])
+
 # ---- DECL1 math: the decomp's float / double declarations
 got = prepare.r_platform_protos('/x/src/m.cpp', 'extern "C" double __cdecl sqrt(double);\nfloat __cdecl floor(float);\n'
                                 'namespace N {\nextern "C" double fabs(double);\n}\nfloat g(float x) { return sqrt(x); }\n',
@@ -528,6 +545,11 @@ check('ELAB1 renames a typedef named like a Win32 function',
       run(s1.r_function_named_classes, 'typedef unsigned int(__fastcall* VirtualQuery)(void* object);\n'
           'unsigned int f(void* p) { return ((VirtualQuery)(*(void***)p)[3])(p); }\n'),
       ['(__fastcall* fnvnx_t_VirtualQuery)(void* object);', '((fnvnx_t_VirtualQuery)(*(void***)p)[3])(p)'])
+
+check('PTR1-DEREF leaves the compare of a pointee (int* p: *p <= 0 is signed), keeps pointer compares',
+      run(s1.r_pointer_zero_compares, 'bool f(int* type, char** pp, char* q)\n{\n    if (*type > 0 && *type <= 3) return q > 0;\n'
+          '    return *pp > 0 || a * q <= 0;\n}\n'),
+      ['if (*type > 0 && *type <= 3) return q != 0;', 'return *pp != 0'], ['*type != 0', '*type == 0'])
 
 # ---- GOTO1
 got = run(s1.r_goto_scalar_inits, 'int f(V& v, int e)\n{\n    if (e) goto out;\n    {\n        float dw = v.d(3), di = v.d(e);\n'
@@ -1151,13 +1173,19 @@ check('NEW1 plain unsigned size parameter -> size_t, unsigned long / short kept'
       ['operator delete[](void* p, size_t)', 'operator new(size_t n)', 'operator new(unsigned long n, unsigned short k)',
        'operator new(size_t n, unsigned& total)'])
 _n5 = ('struct Pm\n{\n    virtual ~Pm();\n    int m;\n    static void operator delete(void*, void*);\n'
-       '    static void* operator new(size_t n);\n};\nstruct Pd : Pm\n{\n    int k;\n};\n'
+       '    static void* operator new(size_t n) { return ::operator new(n); }\n};\nstruct Pd : Pm\n{\n    int k;\n};\n'
        'class Pc\n{\n    int h;\npublic:\n    virtual ~Pc() {}\n    static void* operator new(size_t, void* p) { return p; }\n'
        '    static void operator delete(void*, void*) {}\n};\n')
 _o5 = run(s1.r_placement_only_delete, _n5)
 check('NEW5 placement-only delete + virtual dtor: global delete member',
       _o5, ['struct Pm\n{ FNVNX_GLOBAL_DELETE /* fnv-nx NEW5 */\n',
             'class Pc\n{ public: FNVNX_GLOBAL_DELETE private: /* fnv-nx NEW5 */\n    int h;'], ['struct Pd : Pm\n{ F'])
+check('NEW5 the class\'s own inline operator new gets the tag (no delete on a throwing constructor, V1 N2)',
+      _o5, ['static void* operator new(size_t n FNVNX_NEW5_TAG) { return ::operator new(n); }'])
+check('NEW5 a class whose operator new has no body here: unchanged',
+      run(s1.r_placement_only_delete, _n5.replace('static void* operator new(size_t n) { return ::operator new(n); }',
+                                                  'static void* operator new(size_t n);')),
+      ['class Pc\n{ public: FNVNX_GLOBAL_DELETE'], ['struct Pm\n{ FNVNX'])
 check('NEW5 keeps the line count', str(_o5.count('\n') == _n5.count('\n')), ['True'])
 check('NEW5 a usual delete next to the placement form: unchanged',
       run(s1.r_placement_only_delete, _n5.replace('static void operator delete(void*, void*);',
@@ -1172,8 +1200,8 @@ check('NEW5 a placement form with another second parameter: unchanged',
 if _shutil.which('aarch64-linux-gnu-g++'):
     _c5 = os.path.join(tempfile.mkdtemp(), 'n5.cpp')
     _m5 = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
-           if l.startswith('#define FNVNX_GLOBAL_DELETE ')]          # the shim's own definition of the macro
-    open(_c5, 'w').write('#include <stddef.h>\n' + ''.join(_m5) + _o5 +
+           if l.startswith(('#define FNVNX_GLOBAL_DELETE ', '#define FNVNX_NEW5_TAG ', 'struct fnvnx_new_tag'))]  # the shim's own
+    open(_c5, 'w').write('#include <stddef.h>\n#include <new>\n' + ''.join(_m5) + _o5 +
                          'Pm::~Pm() {}\nvoid f(Pd* d, Pc* c) { delete d; delete c; }\n')
     _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror', _c5],
                          capture_output=True, text=True)
@@ -1254,6 +1282,63 @@ check('DUPINT1-RET a narrower integer parameter: untouched',
           'void h(void* p) { Pick(p, 1); }\n', os.path.join(_s3, 'src', 'd.cpp')), ['int Pick('], ['fnv-nx DUPINT1'])
 s1._UNIT_SYMBOLS = _saved
 _shutil.rmtree(_s3, ignore_errors=True)
+
+check('COND1 an explicit G(bool): the conditional is bool, untouched (V1 C2)',
+      run(s1.r_conditional_bool_gates, _G.replace('Gate(bool b)', 'explicit Gate(bool b)') +
+          'void f(N* n) { if (!n ? false : n->test(0.5f)) g(); }\n'), [], ['Gate(false)'])
+check('COND1 `!x.f(a)` is bool already: untouched (V1 C3)',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { bool r = !n ? false : !n->test(0.5f); }\n'),
+      [], ['Gate(false)'])
+
+# ---- S1-refs: FINL1 (`__forceinline` on a declaration whose body the unit does not have)
+_F = ('struct A {\n    __forceinline ~A();\n    __forceinline int get(int i);\n    __forceinline int get(int i) const;\n'
+      '    __forceinline int put(int i);\n    __forceinline int one();\n};\n'
+      'struct B { int one() { return 1; } };\n'
+      'struct T { template<class X> static __forceinline void d(X* x, int n, Pod); '
+      'template<class X> static __forceinline void d(X* x, int n, Cls); };\n'
+      'template<class X> __forceinline void T::d(X* x, int n, Pod) {}\n'
+      'struct H : A { H() : A() {} };\n'
+      'int A::get(int i) const { return i; }\n__forceinline int A::put(int i) { return i; }\n')
+_o = run(s1.r_forceinline_declarations, _F)
+check('FINL1 body-less declarations of functions the unit does not define lose __forceinline',
+      _o, ['/* fnv-nx FINL1: __forceinline */ ~A();', '/* fnv-nx FINL1: __forceinline */ int get(int i);',
+           '/* fnv-nx FINL1: __forceinline */ int one();',
+           '/* fnv-nx FINL1: __forceinline */ void d(X* x, int n, Cls);'])
+check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overload)',
+      _o, ['__forceinline int get(int i) const;', '__forceinline int put(int i);',
+           'static __forceinline void d(X* x, int n, Pod);'])
+check('FINL1 headers are left alone',
+      run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
+
+# ---- S1-refs: EBO2 (an empty base of a class that introduces its own vfptr goes after the vptr, as in MSVC)
+_E = ('struct Lst\n{\n    bool IsEmpty();\n    Lst* Next();\n};\n'
+      'struct Holder : public Lst\n{\n    virtual ~Holder();\n    int m_iCount;\n};\n'
+      'struct Plain : public Lst\n{\n    int x;\n};\n'
+      'bool f(Holder* h) { return ((Lst*)h)->IsEmpty() || h->Next() == 0; }\n')
+_eo = run(s1.r_vfptr_empty_base, _E)
+check('EBO2 FNVNX_EBO2 first in the empty base of a class introducing a vfptr', _eo,
+      ['struct Lst\n{ FNVNX_EBO2 /* fnv-nx EBO2 */\n'], ['struct Holder : public Lst\n{ FNVNX'])
+check('EBO2 a base used as an object is left alone',
+      run(s1.r_vfptr_empty_base, _E + 'Lst g_list;\n'), [], ['FNVNX_EBO2'])
+check('EBO2 no class introducing a vfptr: nothing',
+      run(s1.r_vfptr_empty_base, _E.replace('virtual ~Holder();', '~Holder();')), [], ['FNVNX_EBO2'])
+check('EBO2 headers are left alone',
+      run(s1.r_vfptr_empty_base, _E, '/nonexistent/src/x.h'), [], ['FNVNX_EBO2'])
+check('EBO2 a base with data: nothing',
+      run(s1.r_vfptr_empty_base, _E.replace('bool IsEmpty();', 'int head;\n    bool IsEmpty();')), [], ['FNVNX_EBO2'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _cE = os.path.join(tempfile.mkdtemp(), 'e2.cpp')
+    _mE = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_EBO2 ')]
+    open(_cE, 'w').write('#include <stddef.h>\n' + ''.join(_mE) + _eo +
+                         'Holder::~Holder() {}\nstatic Holder g_h;\nstatic_assert(sizeof(Holder) == 8, "size");\n'
+                         'static_assert(sizeof(Plain) == 4, "plain");\n'
+                         'int off() { return (int)((char*)(Lst*)&g_h - (char*)&g_h); }\n'
+                         'static_assert(offsetof(Holder, m_iCount) == 4, "count");\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', _cE],
+                         capture_output=True, text=True)
+    check('EBO2 output: the base after the vptr (+4), members and sizes unchanged (ILP32)',
+          _r.stderr or _r.stdout, ['mov\tw0, 4'], ['error'])
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)

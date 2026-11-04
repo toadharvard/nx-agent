@@ -45,8 +45,16 @@ RUN_TIMEOUT_US = int(float(os.environ.get('FNVNX_DF_RUN_S', '2')) * 1e6)
 # where neither machine has code: a jump there is an indirect call through a pointer the case planted (a vtable
 # slot of a fuzzed object); both machines treat it as an intercepted call of that address instead of executing the
 # world's bytes (x86: plus .text outside the loaded code, which x86emu already intercepts; AArch64: .text too)
-WILD_X86 = ((NULL_END, TEXT[0]), (TEXT[1], 0x0e000000), (0x0e100000, SENTINEL), (SENTINEL + PAGE, MAX))
-WILD_A64 = ((NULL_END, 0x08000000), (0x0c000000, SENTINEL), (SENTINEL + PAGE, MAX))
+# The parts of each machine's private range it never uses (difffuzz-19): plain background there as on the other
+# machine, and a jump there is a wild call (S13b native-wild-private 52, oracle-private-address 6, S1-fuzzB
+# native-private-address 5: the same garbage address faulted on one machine only). AArch64: code stubs
+# 0x08000000.., named stubs up to 0x09800000, the unit image from 0x0a000000, TLS and exception blocks at
+# 0x0b900000, vtable copies from 0x0bc00000. x86: GDT/TEB/stub pages 0x0e000000-0x0e007000, import stubs
+# 0x0e010000, the TLS block 0x0e040000.
+A64_HOLES = ((0x09800000, 0x0a000000), (0x0b920000, 0x0bc00000))
+X86_HOLES = ((0x0e007000, 0x0e010000), (0x0e020000, 0x0e040000), (0x0e050000, 0x0e100000))
+WILD_X86 = ((NULL_END, TEXT[0]), (TEXT[1], 0x0e000000), (0x0e100000, SENTINEL), (SENTINEL + PAGE, MAX)) + X86_HOLES
+WILD_A64 = ((NULL_END, 0x08000000), (0x0c000000, SENTINEL), (SENTINEL + PAGE, MAX)) + A64_HOLES
 
 
 def page_of(a):
@@ -68,7 +76,7 @@ def mappable(a, side):
     # dead load (S13b oracle-native-address, 62 of J-0137's artefacts: 006ef0c0, 00490400, 0070c440, 006f03a0)
     own = A64_PRIV if side == 'a64' else X86_PRIV
     if own[0] <= a < own[1]:
-        return False
+        return any(lo <= a < hi for lo, hi in (A64_HOLES if side == 'a64' else X86_HOLES))
     return True
 
 
@@ -191,7 +199,15 @@ class World:
         return out
 
 
+# difffuzz-18: with UNIFORM set every planted garbage word is 0 on both machines (stack fill, non-argument and
+# clobbered registers), so an uninitialised read gives the same value on both; classify.py's uninit-both probe
+# runs a case once that way to tell "both read garbage, otherwise equal" from a real difference
+UNIFORM = False
+
+
 def stack_fill(seed, n):
+    if UNIFORM:
+        return bytes(n)
     return random.Random(seed ^ 0x5a5a5a5a).randbytes(n)
 
 
@@ -202,6 +218,8 @@ def garbage_words(seed, side):
     """The 32-bit words the harness plants as garbage for a case on one machine ('x86' / 'a64'): non-argument
     registers, registers clobbered by intercepted calls, the stack fill. An argument equal to one of them came from
     uninitialised state on that machine."""
+    if UNIFORM:
+        return set()
     key = (seed, side)
     got = _GARBAGE.get(key)
     if got is None:
@@ -226,6 +244,8 @@ def garbage_words(seed, side):
 
 
 def garbage32(seed, k):
+    if UNIFORM:
+        return 0
     return random.Random((seed * 7919 + k * 104729) & 0xffffffff).getrandbits(32)
 
 
@@ -252,12 +272,35 @@ def alloc_result(k):
 def canned_kind(convs):
     """('ref' | 'bool' | None) for an intercepted call's result, from the callee's definition and the calling
     unit's declaration of it (a callee defined char / int that the caller treats as bool: MSVC tests al, GCC bit 0)."""
+    if all(c is None for c in convs):
+        # nothing describes the callee (a wild or unplanted indirect call): the call site may test the result as a
+        # bool (MSVC al, GCC bit 0), so its low byte is 0/1 on both machines (difffuzz-19, S1-fuzzA: 17 records)
+        return 'untyped'
     rets = [c.ret for c in convs if c is not None and c.ret is not None]
     if any(getattr(r, 'is_ref', False) for r in rets):
         return 'ref'
     if any(r.is_bool for r in rets):
         return 'bool'
     return None
+
+
+def returns_this(convs):
+    """True when an intercepted callee returns its own `this` (difffuzz-19, S13b ctor-this / canned-this): an MSVC
+    constructor ??0 (MSVC returns this, the Itanium C1/C2 return nothing, so the call site may use either), or a
+    member function returning a pointer or reference to its own class (operator=, chaining calls)."""
+    for c in convs:
+        if c is None:
+            continue
+        if (getattr(c, 'name', '') or '').startswith('??0'):
+            return True
+        sig = getattr(c, 'sig', None)
+        if c.ret is not None and sig is not None and getattr(sig, 'member', False) and c.ret.is_ptr:
+            qual = list(getattr(sig, 'qual', ()) or ())
+            cls = qual[-2] if len(qual) >= 2 else None
+            t = ' '.join(c.ret.raw.replace('const', ' ').split())
+            if cls and t in ('class %s *' % cls, 'class %s &' % cls, 'struct %s *' % cls, 'struct %s &' % cls):
+                return True
+    return False
 
 
 def result_bytes(case, k, n):

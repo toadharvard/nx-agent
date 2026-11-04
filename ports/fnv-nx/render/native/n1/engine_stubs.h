@@ -28,13 +28,17 @@ struct NiDX9RenderState {
     uint32_t GetRenderState(uint32_t state);                                              // 0x00e88860, slot 27
     void SetBlendFunc(uint32_t src, uint32_t dst, uint32_t unused1, uint32_t unused2);    // 0x00e887d0, slot 23
     void SetAlphaBlendEnable(uint32_t enable, uint32_t unused1, uint32_t unused2);        // 0x00e88830, slot 24
-    void SetSamplerState(uint32_t stage, uint32_t type, uint32_t value, uint32_t unused); // 0x00e88930, slot 48
-    uint32_t GetSamplerState(uint32_t stage, uint32_t type);                              // 0x00e88980, slot 49
+    // slots 48/49 are NiD3DRenderState's texture stage states (the device's SetTextureStageState, vtable +0x10C);
+    // the sampler states are NiDX9RenderState's own slots 51-53 (the device's SetSamplerState, +0x114)
+    void SetTextureStageState(uint32_t stage, uint32_t type, uint32_t value, uint32_t unused); // 0x00e88930, slot 48
+    uint32_t GetTextureStageState(uint32_t stage, uint32_t type);                              // 0x00e88980, slot 49
+    void SetSamplerState(uint32_t stage, uint32_t type, uint32_t value, uint32_t unused); // 0x00e910a0, slot 51
+    uint32_t GetSamplerState(uint32_t stage, uint32_t type);                              // 0x00e910f0, slot 52
     void SetTexture(uint32_t stage, void* texture);                                       // 0x00e88a20, slot 55
     void* GetTexture(uint32_t stage);                                                     // 0x00e88a50, slot 56
     void ClearTextureUsage(void* texture);                                                // 0x00e88a60, slot 57
     void RestoreRenderState(uint32_t state);                                              // (no row)
-    void RestoreSamplerState(uint32_t stage, uint32_t type);                              // (no row)
+    void RestoreSamplerState(uint32_t stage, uint32_t type);                              // 0x00e91120, slot 53
 };
 
 // ImageSpaceManager::RenderEffect (0x00b97550): the effect dispatch. Menu effects run natively; the others are

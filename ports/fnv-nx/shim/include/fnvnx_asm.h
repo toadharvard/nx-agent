@@ -28,8 +28,8 @@ FNVNX_ASM_INLINE void fnvnx_asm_store32(volatile void* p, unsigned int v) { __bu
 FNVNX_ASM_INLINE void fnvnx_asm_store64(volatile void* p, unsigned long long v) { __builtin_memcpy((void*)p, &v, 8); }
 
 /* ------------------------------------------------------------------------------------------- time stamp counter
- * rdtsc: a free-running 64-bit tick counter. AArch64: the generic timer's virtual count (CNTVCT_EL0, 19.2 MHz on the
- * Switch, readable from EL0 under Horizon - libnx armGetSystemTick() reads the same register). Every tick consumer in
+ * rdtsc: a free-running 64-bit tick counter. AArch64: the generic timer's physical count (CNTPCT_EL0, 19.2 MHz on the
+ * Switch, the only count Horizon opens to EL0 - libnx armGetSystemTick() reads the same register). Every tick consumer in
  * the decomp either takes differences of these values or calibrates them against QueryPerformanceCounter (Havok
  * hkSystemClock), so only the rate changes. The "memory" clobber keeps the read ordered against surrounding memory
  * accesses like an MSVC __asm block (which the compiler does not move code across). */
@@ -38,7 +38,10 @@ FNVNX_ASM_INLINE unsigned long long fnvnx_rdtsc64(void)
 {
 #if defined(__aarch64__)
     unsigned long long v;
-    __asm__ __volatile__("mrs %0, cntvct_el0" : "=r"(v) : : "memory");
+    /* CNTPCT_EL0, not CNTVCT_EL0: Horizon's kernel opens only the physical count to EL0 (Mesosphere writes
+     * CNTKCTL_EL1 = EL0PCTEN, kern_k_hardware_timer.hpp), a CNTVCT_EL0 read traps; libnx's armGetSystemTick reads
+     * the same register (NX1 check 3) */
+    __asm__ __volatile__("mrs %0, cntpct_el0" : "=r"(v) : : "memory");
     return v;
 #elif defined(__i386__) || defined(__x86_64__)
     unsigned long long v;

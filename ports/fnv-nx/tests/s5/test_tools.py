@@ -81,7 +81,7 @@ class NpdmTest(unittest.TestCase):
         self.assertTrue(d["is_64_bit"])
         self.assertEqual(d["address_space"], "32BitNoReserved")
         self.assertEqual(d["mmu_flags"], 0b101)
-        self.assertEqual(d["main_thread_stack_size"], 0x100000)
+        self.assertEqual(d["main_thread_stack_size"], 0x400000)   # NX1: 4x the PC exe's 1 MiB reserve, AArch64 frames are larger
         # 8 syscall descriptors (0xC0 SVCs / 24 per descriptor) + 6 others
         self.assertEqual(len(d["kernel_caps"]), 14)
         app_type = [c for c in d["kernel_caps"] if c & 0x3FFF == 0x1FFF]
@@ -294,12 +294,23 @@ class FaultTableTest(unittest.TestCase):
         sys.path.insert(0, HERE)
         import emu_guest
         stubs, pre = emu_guest.parse_fault_table(os.path.join(HERE, "known_faults.txt"))
-        self.assertIn(("0x00aa3e40", "use-malloc:x1"), stubs)
+        self.assertNotIn("0x00aa3e40", [n for n, _ in stubs])   # MemoryManager::Allocate runs on the game's heaps
         self.assertNotIn("0x00a8a5f0", [f for f, _ in pre])   # NiMainSDM: S1's INIT1 static calls it now
         names = [n for n, _ in stubs]
         self.assertEqual(len(names), len(set(names)), "a function listed twice")
         for n in names:
             self.assertRegex(n, r"^(0x[0-9a-f]{8}|[A-Za-z_]\w*)$")
+
+    def test_standins_defined(self):
+        """every 'standin' line names a function tests/s5/standins.c defines (by its asm label)"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        stubs, _ = emu_guest.parse_fault_table(os.path.join(HERE, "known_faults.txt"))
+        src = open(emu_guest.STANDINS).read()
+        names = [n for n, a in stubs if a == "standin"]
+        self.assertTrue(names)
+        for n in names:
+            self.assertRegex(src, r'\b\w+\(void\) __asm__\("%s"\);|__asm__\("%s"\)' % (re.escape(n), re.escape(n)))
 
     def test_bad_lines(self):
         sys.path.insert(0, HERE)

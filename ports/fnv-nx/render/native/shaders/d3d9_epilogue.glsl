@@ -14,17 +14,12 @@ layout (std140, binding = 2) uniform NxEpilogue {
     uvec4 nxModes;
 };
 
+// NxCompare is a bit set: 1 LESS, 2 EQUAL, 4 GREATER (3 LESSEQUAL, 5 NOTEQUAL, 6 GREATEREQUAL, 7 ALWAYS, 0 NEVER).
+// Branch-free: uam's GLSL front end keeps a switch as a loop of 7 tests even when func is a constant. Unordered
+// (NaN) operands pass NOTEQUAL and ALWAYS only, as the switch on a < ref, a == ref, ... did.
 bool nx_compare(uint func, float a, float ref) {
-    switch (func) {
-    case 0u: return false;          // NEVER
-    case 1u: return a < ref;        // LESS
-    case 2u: return a == ref;       // EQUAL
-    case 3u: return a <= ref;       // LESSEQUAL
-    case 4u: return a > ref;        // GREATER
-    case 5u: return a != ref;       // NOTEQUAL
-    case 6u: return a >= ref;       // GREATEREQUAL
-    default: return true;           // ALWAYS
-    }
+    uint m = (a < ref ? 1u : 0u) | (a == ref ? 2u : 0u) | (a > ref ? 4u : 0u);
+    return (func & m) != 0u || func >= 7u || (m == 0u && func == 5u);
 }
 
 // c: the shader's colour output; vertexFog: the vertex fog factor (used when the fog mode is Vertex).

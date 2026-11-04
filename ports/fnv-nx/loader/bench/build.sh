@@ -7,8 +7,8 @@
 # The optional codeptr.c replaces loader/src/codeptr.c (to measure another scanner against the same inputs).
 # Output: <out>/scanbench.elf, .map, .nso. Run (inputs are local files, never committed):
 #   tools/perf/frameprof.py <out>/scanbench.nso --elf <out>/scanbench.elf --map <out>/scanbench.map \
-#       --file fnvnx/game/FalloutNV.exe=<image> --file fnvnx/game/addrmap.bin=<FNVAMAP1 blob> \
-#       [--file fnvnx/game/hints.txt=<hints>] --mark fnvnx_scan_codeptrs --mark fnvnx_fixups_apply \
+#       --file switch/fnv/FalloutNV.exe=<image> --file switch/fnv/addrmap.bin=<FNVAMAP1 blob> \
+#       [--file switch/fnv/hints.txt=<hints>] --mark fnvnx_scan_codeptrs --mark fnvnx_fixups_apply \
 #       --budget 3000000000
 set -euo pipefail
 : "${DEVKITPRO:?set DEVKITPRO}"
