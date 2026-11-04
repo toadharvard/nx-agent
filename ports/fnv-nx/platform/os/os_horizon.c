@@ -136,7 +136,7 @@ os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int p
     if (s < 0x10000)
         s = 0x10000;
     /* cpuid -2: the process' default core */
-    if (R_FAILED(threadCreate(&t->th, thread_entry, t, NULL, s, map_prio(prio), cpu < 0 ? -2 : cpu % 3))) {
+    if (R_FAILED(threadCreate(&t->th, thread_entry, t, NULL, s, map_prio(prio), cpu < 0 || cpu >= 0x100 ? -2 : cpu % 3))) {
         free(t);
         return NULL;
     }
@@ -183,10 +183,21 @@ int os_thread_set_priority(os_thread *t, int prio)
 
 int os_thread_set_cpu(os_thread *t, int cpu)
 {
-    if (cpu < 0)
+    if (cpu < 0 || cpu >= 0x100)
         return 0;
     cpu %= 3;
     return R_FAILED(svcSetThreadCoreMask(handle_of(t), cpu, 1u << cpu)) ? -1 : 0;
+}
+
+int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask)
+{
+    s32 cur = 0;
+    u64 cur_mask = 7;
+    svcGetThreadCoreMask(&cur, &cur_mask, handle_of(t));
+    u32 m = mask ? (mask & 7) : (u32)cur_mask;
+    s32 id = ideal >= 0 ? ideal % 3 : (m >> cur & 1) ? cur : (m & 1 ? 0 : m & 2 ? 1 : 2);
+    m |= 1u << id;
+    return R_FAILED(svcSetThreadCoreMask(handle_of(t), id, m)) ? -1 : 0;
 }
 
 int os_thread_suspend(os_thread *t)

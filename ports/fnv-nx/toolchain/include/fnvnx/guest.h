@@ -12,6 +12,7 @@ extern "C" {
 struct __pthread_t;
 
 /* threads (each has its own static TLS block and newlib reent) */
+uint64_t fnvnx_thread_host_id(struct __pthread_t *t);   /* the host's id, for thread_set_priority/_cpu */
 int fnvnx_thread_create(struct __pthread_t **out, void *(*fn)(void *), void *arg, size_t stack_size, int prio,
                         int cpu);                  /* 0 or errno; not started */
 int fnvnx_thread_start(struct __pthread_t *t);

@@ -268,16 +268,22 @@ extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers 
  * decompiled code calls the constructor: the initializer that does is not in the decomp (an undecompiled entry
  * ahead of the .text$yc group, docs/TOOLCHAIN.md section 11). Stand in for it, in the same place (before every game
  * initializer), once the constructor has a native definition; until then the game heap stays uninitialised. */
-static void construct_memory_manager(void) {
-    const uint32_t ctor = 0x00aa3880u, self = 0x011f6238u;
-    if (!g_image_mapped) return;   /* trace mode: no IAT, the constructor calls GlobalMemoryStatusEx */
+/* the native address S2's address map gives an original address, for an entry of one of the kinds; NULL if none */
+static void *addrmap_native(uint32_t orig, const char *kinds) {
     unsigned lo = 0, hi = fnvnx_addrmap_count;
     while (lo < hi) {
         unsigned mid = (lo + hi) / 2;
-        if (fnvnx_addrmap[mid].orig < ctor) lo = mid + 1; else hi = mid;
+        if (fnvnx_addrmap[mid].orig < orig) lo = mid + 1; else hi = mid;
     }
-    void *fn = lo < fnvnx_addrmap_count && fnvnx_addrmap[lo].orig == ctor &&
-               (fnvnx_addrmap_kinds[lo] == 'F' || fnvnx_addrmap_kinds[lo] == 'C') ? fnvnx_addrmap[lo].native : nullptr;
+    for (; lo < fnvnx_addrmap_count && fnvnx_addrmap[lo].orig == orig; lo++)
+        if (strchr(kinds, fnvnx_addrmap_kinds[lo]) && fnvnx_addrmap[lo].native) return fnvnx_addrmap[lo].native;
+    return nullptr;
+}
+
+static void construct_memory_manager(void) {
+    const uint32_t ctor = 0x00aa3880u, self = 0x011f6238u;
+    if (!g_image_mapped) return;   /* trace mode: no IAT, the constructor calls GlobalMemoryStatusEx */
+    void *fn = addrmap_native(ctor, "FC");
     if (!fn) {
         printf("fnvnx boot: memory manager: constructor %#010" PRIx32 " has no native definition, game heap not "
                "initialised\n", ctor);
@@ -299,12 +305,44 @@ static void memory_manager_state(const char *when) {
            *(volatile uint8_t *)(uintptr_t)0x011f6229u, *(volatile uint8_t *)(uintptr_t)0x011f610du);
 }
 
+/* ---- threads: placement roles and the image TLS block (platform/win32/thread.cpp hooks, docs/PERF.md 6.3) */
+extern "C" {
+extern int (*fnvnx_thread_role_hook)(void *start, void *arg);
+extern void *(*fnvnx_image_tls_hook)(void);
+}
+/* The engine starts every BSThread through RunThreadProc 0x00aa64d0 with the BSThread as the argument; the
+ * AILinearTaskThread objects (image vftable 0x01085688, or its native vtable) are the AI linear task threads: the
+ * first one created takes the ai-linear-1 row of toolchain/host/placement.h, the next ai-linear-2. Everything else
+ * gets the default row. */
+static int thread_role(void *start, void *arg) {
+    static void *run_thread_proc, *ai_vtable;
+    static int looked_up;
+    static unsigned ai_threads;
+    if (!looked_up) {
+        run_thread_proc = addrmap_native(0x00aa64d0u, "F");
+        ai_vtable = addrmap_native(0x01085688u, "V");
+        looked_up = 1;
+    }
+    if (start && start == run_thread_proc && arg) {
+        uint32_t vptr = *(const uint32_t *)arg;
+        if (vptr && (vptr == 0x01085688u || vptr == (uint32_t)(uintptr_t)ai_vtable)) {
+            unsigned k = __atomic_fetch_add(&ai_threads, 1, __ATOMIC_RELAXED);
+            return OS_THREAD_ROLE(k ? FNVNX_ROLE_AI_LINEAR_2 : FNVNX_ROLE_AI_LINEAR_1);
+        }
+    }
+    return OS_THREAD_ROLE(FNVNX_ROLE_DEFAULT);
+}
+/* fs:[0x2c][0] of the calling thread = its __fnvnx_tls_image, the block S2 binds __declspec(thread) data to */
+static void *image_tls_block(void) { return (void *)__fnvnx_tls_image; }
+
 /* first static initialiser (priority 101 runs before the default-priority ones of the game) */
 __attribute__((constructor(101))) static void boot_banner(void) {
     /* The game's own static initialisers (default priority) read and write the data image, so the image must
      * be mapped and bound before them: do the platform + loader steps here. */
     printf("fnvnx boot: early init (before the game's static initialisers)\n");
     fnvnx_trap_report = report_trap;
+    fnvnx_thread_role_hook = thread_role;
+    if (__fnvnx_tls_image_size) fnvnx_image_tls_hook = image_tls_block;
     fnvnx_guest_platform_init();
     fnvnx_audio_input_register();
     if (fnvnx_d3d9_register) fnvnx_d3d9_register();   /* before load_image: the IAT has a d3d9.dll slot */

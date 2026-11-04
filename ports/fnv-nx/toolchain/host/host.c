@@ -135,6 +135,7 @@ static u64 h_buttons_down(void) { padUpdate(&g_pad); return padGetButtonsDown(&g
 static u64 h_system_tick(void) { return armGetSystemTick(); }
 static u64 h_system_tick_freq(void) { return armGetSystemTickFreq(); }
 
+#include "placement.h"
 #include "host_v2.inc"
 #include "host_v3.inc"
 

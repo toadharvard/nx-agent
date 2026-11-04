@@ -30,7 +30,8 @@ static void self_release(void)
         return;
     os_tls_set(NULL);
     free(t->tls_ext);
-    free(t->implicit_tls[0]);
+    if (!t->implicit_tls_borrowed)
+        free(t->implicit_tls[0]);
     free(t);
 }
 
@@ -125,9 +126,18 @@ extern "C" void fnvnx_tls_set_template(const void *init_data, size_t init_size, 
     g_tls_total = total_size < init_size ? init_size : total_size;
 }
 
+/* Set by the game layer (toolchain/game/boot.cpp): the calling thread's native block of the image's TLS
+ * (__fnvnx_tls_image, where S2 binds every __declspec(thread) variable). fs:[0x2c][0] then is that same block,
+ * so an explicit __readfsdword(0x2c) access and a __declspec(thread) access see one variable, not two copies. */
+extern "C" { void *(*fnvnx_image_tls_hook)(void) = nullptr; }
+
 extern "C" void *fnvnx_tls_block(void)
 {
     struct w32_thread *t = w32_self();
+    if (!t->implicit_tls[0] && fnvnx_image_tls_hook) {
+        t->implicit_tls[0] = fnvnx_image_tls_hook();
+        t->implicit_tls_borrowed = 1;
+    }
     if (!t->implicit_tls[0] && g_tls_total) {
         void *b = calloc(1, g_tls_total);
         if (!b)
@@ -169,6 +179,10 @@ extern "C" unsigned long __readfsdword(unsigned long off)
 }
 
 /* ---- thread objects */
+
+/* Set by the game layer (toolchain/game/boot.cpp): the placement role of a new thread from its start routine and
+ * argument, OS_THREAD_ROLE(r) or -1 (default placement); see toolchain/host/placement.h. */
+extern "C" { int (*fnvnx_thread_role_hook)(void *start, void *arg) = nullptr; }
 struct w32_thread_obj {
     struct w32_obj o;
     os_thread *os;
@@ -231,7 +245,8 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
     size_t s = stack ? (size_t)stack : 1024 * 1024;
     if (s < 256 * 1024)
         s = 256 * 1024;
-    t->os = os_thread_create(thread_trampoline, t, s, OS_PRIO_NORMAL, -1);
+    int place = fnvnx_thread_role_hook ? fnvnx_thread_role_hook((void *)fn, arg) : -1;
+    t->os = os_thread_create(thread_trampoline, t, s, OS_PRIO_NORMAL, place);
     if (!t->os) {
         w32_obj_unref(&t->o);
         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
@@ -353,19 +368,16 @@ extern "C" BOOL SetThreadPriorityBoost(HANDLE h, BOOL disable)
 
 extern "C" DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask)
 {
-    int cpu = -1;
-    for (int i = 0; i < 32; i++)
-        if (mask & ((DWORD_PTR)1 << i)) {
-            cpu = i;
-            break;
-        }
+    DWORD_PTR all = ((DWORD_PTR)1 << os_cpu_count()) - 1;
+    if (!(mask & all))
+        return 0;
     if (h == W32_PSEUDO_THREAD)
-        os_thread_set_cpu(NULL, cpu);
+        os_thread_set_affinity(NULL, -1, (unsigned)(mask & all));
     else if (struct w32_thread_obj *t = thread_of(h))
-        os_thread_set_cpu(t->os, cpu);
+        os_thread_set_affinity(t->os, -1, (unsigned)(mask & all));
     else
         return 0;
-    return ((DWORD_PTR)1 << os_cpu_count()) - 1; /* previous mask: "all" */
+    return all; /* previous mask: "all" */
 }
 
 extern "C" DWORD SetThreadIdealProcessor(HANDLE h, DWORD cpu)
@@ -379,7 +391,7 @@ extern "C" DWORD SetThreadIdealProcessor(HANDLE h, DWORD cpu)
     int c = (int)(cpu % os_cpu_count());
     if (t)
         t->cpu = c;
-    os_thread_set_cpu(t ? t->os : NULL, c);
+    os_thread_set_affinity(t ? t->os : NULL, c, 0); /* a preference: the mask stays */
     return prev;
 }
 

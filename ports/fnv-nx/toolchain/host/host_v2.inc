@@ -17,9 +17,14 @@ static void host_thread_main(void *p) {
     ((u64 (*)(u64))h->entry)(h->arg);
 }
 
-static int win32_to_horizon_prio(s64 prio) {   /* 0x2C is libnx's default; Win32 higher = more urgent */
-    s64 p = 0x2C - prio;
-    return (int)(p < 0x1C ? 0x1C : p > 0x3B ? 0x3B : p);
+#define win32_to_horizon_prio fnvnx_win32_to_horizon_prio
+
+/* Thread placement (placement.h): libnx's threadCreate(..., -2) would put every thread on the process's ideal core 0
+ * with a one-core mask; instead each thread gets its role's ideal core, mask and priority. */
+static unsigned g_thread_seq;
+static void place_log(const char *what, Handle th, int role, int ideal, uint32_t mask, int prio, Result rc) {
+    logf_("fnvnx host: %s thread %#x: role %s, core %d, mask %#x, priority %#x%s\n", what, th,
+          role >= 0 ? fnvnx_placement[role].role : "explicit", ideal, mask, prio, R_FAILED(rc) ? " (FAILED)" : "");
 }
 
 static u64 h_thread_create(u64 entry, u64 arg, u64 stack, u64 prio, u64 cpu) {
@@ -28,12 +33,36 @@ static u64 h_thread_create(u64 entry, u64 arg, u64 stack, u64 prio, u64 cpu) {
     h->entry = entry;
     h->arg = arg;
     stack = (stack + 0xFFF) & ~0xFFFull;
-    if (R_FAILED(threadCreate(&h->t, host_thread_main, h, NULL, stack ? stack : 0x40000,
-                              win32_to_horizon_prio((s64)prio), (s64)cpu < 0 ? -2 : (int)cpu))) {
+    int ideal, hprio;
+    uint32_t mask;
+    int role = fnvnx_place(cpu, __atomic_fetch_add(&g_thread_seq, 1, __ATOMIC_RELAXED), (s64)prio, &ideal, &mask,
+                           &hprio);
+    if (R_FAILED(threadCreate(&h->t, host_thread_main, h, NULL, stack ? stack : 0x40000, hprio, ideal))) {
         free(h);
         return 0;
     }
+    Result rc = svcSetThreadCoreMask(h->t.handle, ideal, mask);   /* before it starts */
+    place_log("guest", h->t.handle, role, ideal, mask, hprio, rc);
     return (u64)h;
+}
+
+/* Host-side pthreads (libnx newlib: priority 0x3B, the process's ideal core, all cores) take the render-worker
+ * row: in the Nine host the long-lived one is Gallium Nine's CSMT worker. Active when the host links with
+ * -Wl,--wrap=__syscall_thread_create (toolchain/package/build.sh; render/nine/switch_host.sh should add it). */
+struct __pthread_t;
+int __real___syscall_thread_create(struct __pthread_t **t, void *(*fn)(void *), void *arg, void *stack, size_t size);
+int __wrap___syscall_thread_create(struct __pthread_t **t, void *(*fn)(void *), void *arg, void *stack, size_t size) {
+    int rc = __real___syscall_thread_create(t, fn, arg, stack, size);
+    if (rc == 0 && *t) {
+        Handle th = ((Thread *)*t)->handle;   /* libnx's struct __pthread_t starts with its Thread */
+        int ideal, prio;
+        uint32_t mask;
+        int role = fnvnx_place(FNVNX_THREAD_ROLE(FNVNX_ROLE_RENDER_WORKER), 0, 0, &ideal, &mask, &prio);
+        Result r = svcSetThreadCoreMask(th, ideal, mask);
+        if (R_SUCCEEDED(r)) r = svcSetThreadPriority(th, prio);
+        place_log("host pthread", th, role, ideal, mask, prio, r);
+    }
+    return rc;
 }
 static u64 h_thread_start(u64 id) { return threadStart(&((HostThread *)id)->t); }
 static u64 h_thread_join(u64 id) { return threadWaitForExit(&((HostThread *)id)->t); }
@@ -45,13 +74,20 @@ static u64 h_thread_free(u64 id) {
 }
 static u64 h_thread_exit(void) { threadExit(); }
 static u64 h_thread_yield(void) { svcSleepThread(0); return 0; }
-static u64 h_thread_set_priority(u64 id, u64 prio) {
+static u64 h_thread_set_priority(u64 id, u64 prio) {   /* id: any guest thread, also one not started yet */
     Handle th = id ? ((HostThread *)id)->t.handle : CUR_THREAD_HANDLE;
     return svcSetThreadPriority(th, win32_to_horizon_prio((s64)prio));
 }
-static u64 h_thread_set_cpu(u64 id, u64 cpu) {
+static u64 h_thread_set_cpu(u64 id, u64 spec) {
     Handle th = id ? ((HostThread *)id)->t.handle : CUR_THREAD_HANDLE;
-    return (s64)cpu < 0 ? 0 : svcSetThreadCoreMask(th, (s32)cpu, 1u << cpu);
+    if ((spec >> 40) & 0x7FFFFFull) return 0;   /* -1 and other negative values: nothing to do */
+    s32 cur_ideal = 0;
+    u64 cur_mask = FNVNX_APP_CORES;
+    if (spec >> 63) svcGetThreadCoreMask(&cur_ideal, &cur_mask, th);
+    int ideal;
+    uint32_t mask;
+    fnvnx_cpu_spec(spec, cur_ideal, (uint32_t)cur_mask, &ideal, &mask);
+    return svcSetThreadCoreMask(th, ideal, mask);
 }
 
 /* ---- address wait / wake */

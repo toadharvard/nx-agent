@@ -30,6 +30,7 @@ $CC $HOST_ARCH $CFLAGS $HINC -c "$TC/host/host.c" -o host.o
 $CC $HOST_ARCH $CFLAGS $HINC -c "$ST/reserve.c" -o reserve.o
 $CC $HOST_ARCH $CFLAGS $HINC -c "$ST/reserve_nx.c" -o reserve_nx.o
 $CC -specs="$DEVKITPRO/libnx/switch.specs" $HOST_ARCH host.o reserve.o reserve_nx.o -L"$DEVKITPRO/libnx/lib" -lnx \
+	-Wl,--wrap=__syscall_thread_create \
 	-Wl,-Map,host.map -o host.elf
 
 # guest: ILP32 (ELF32) static executable at 0x10000000, ILP32 newlib/libsysbase/libgcc multilib,

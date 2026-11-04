@@ -230,7 +230,7 @@ int os_thread_set_priority(os_thread *t, int prio)
 int os_thread_set_cpu(os_thread *t, int cpu)
 {
 #ifdef __linux__
-    if (cpu < 0)
+    if (cpu < 0 || cpu >= 0x100)   /* OS_THREAD_ROLE: no placement table on this backend */
         return 0;
     if (t && !t->started) {
         t->cpu = cpu;
@@ -242,6 +242,29 @@ int os_thread_set_cpu(os_thread *t, int cpu)
     return pthread_setaffinity_np(t ? t->th : pthread_self(), sizeof s, &s) ? -1 : 0;
 #else
     (void)t; (void)cpu;
+    return 0;
+#endif
+}
+
+int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask)
+{
+    (void)ideal;
+#ifdef __linux__
+    if (!mask)
+        return 0;
+    if (t && !t->started) {   /* applied at start, like os_thread_set_cpu */
+        for (int c = 0; c < 32; c++)
+            if (mask >> c & 1) { t->cpu = c; break; }
+        return 0;
+    }
+    cpu_set_t s;
+    CPU_ZERO(&s);
+    for (int c = 0; c < 32; c++)
+        if (mask >> c & 1)
+            CPU_SET(c % (int)os_cpu_count(), &s);
+    return pthread_setaffinity_np(t ? t->th : pthread_self(), sizeof s, &s) ? -1 : 0;
+#else
+    (void)t; (void)mask;
     return 0;
 #endif
 }

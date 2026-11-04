@@ -21,6 +21,7 @@ struct w32_thread {
     void *tls[64];
     void **tls_ext;                /* 1024 more, allocated on first use */
     void *implicit_tls[1];         /* fs:[0x2c] points here; [0] = image TLS block of this thread */
+    int implicit_tls_borrowed;     /* [0] came from fnvnx_image_tls_hook: not ours to free */
     struct w32_obj *self_obj;      /* thread object when created by CreateThread */
     struct w32_waiter waiter;
     char name[32];

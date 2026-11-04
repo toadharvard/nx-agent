@@ -66,6 +66,61 @@ def neg(e):
     return (-e) & U64
 
 
+# ---- thread placement: the host's table (toolchain/host/placement.h), read from the header so the emulated host
+# places threads exactly like host_v2.inc; each thread's (role, ideal core, mask, priority) is printed at the end.
+_PLACEMENT = None
+
+
+def placement_table():
+    """{role number: (name, ideal, mask, prio)} from placement.h and the FNVNX_ROLE_* enum of hostapi.h"""
+    global _PLACEMENT
+    if _PLACEMENT is None:
+        inc = os.path.join(HERE, "..", "..", "toolchain")
+        roles = dict((m.group(1), int(m.group(2))) for m in re.finditer(
+            r"FNVNX_ROLE_(\w+)\s*=\s*(\d+)", open(os.path.join(inc, "include", "fnvnx", "hostapi.h")).read()))
+        _PLACEMENT = {}
+        for m in re.finditer(r'\[FNVNX_ROLE_(\w+)\]\s*=\s*\{"([^"]+)",\s*(-?\d+),\s*(0x[0-9a-fA-F]+|\d+),\s*'
+                             r'(0x[0-9a-fA-F]+|\d+)\}', open(os.path.join(inc, "host", "placement.h")).read()):
+            _PLACEMENT[roles[m.group(1)]] = (m.group(2), int(m.group(3)), int(m.group(4), 0), int(m.group(5), 0))
+    return _PLACEMENT
+
+
+def win32_to_horizon_prio(prio):
+    p = 0x2C - prio
+    return 0x1C if p < 0x1C else 0x3B if p > 0x3B else p
+
+
+def place(cpu, seq, prio):
+    """fnvnx_place(): thread_create's cpu argument -> (role name, ideal core, mask, Horizon priority)"""
+    prio = prio - (1 << 64) if prio >> 63 else prio
+    table = placement_table()
+    if cpu & ~0xFF == 0x100 and (cpu & 0xFF) in table:
+        role = cpu & 0xFF
+    elif cpu >> 63 or cpu & ~0xFF:
+        role = 0
+    else:
+        return ("explicit", cpu, 1 << (cpu & 31), win32_to_horizon_prio(prio))
+    name, ideal, mask, hp = table[role]
+    mask &= 7
+    if ideal < 0:
+        cores = [c for c in range(32) if mask >> c & 1]
+        ideal = cores[seq % len(cores)] if cores else 0
+    return (name, ideal, mask | 1 << ideal, hp or win32_to_horizon_prio(prio))
+
+
+def cpu_spec(spec, ideal, mask):
+    """fnvnx_cpu_spec(): thread_set_cpu's spec applied to (ideal, mask)"""
+    if not spec >> 63:
+        return spec & 31, 1 << (spec & 31)
+    m, want = (spec >> 8) & 7, spec & 0xFF
+    mask = m or mask
+    if want != 0xFF and want < 32:
+        ideal = want
+    elif not mask >> ideal & 1:
+        ideal = next(c for c in range(32) if mask >> c & 1)
+    return ideal, mask | 1 << ideal
+
+
 class Thread:
     def __init__(self, tid, ctx=None):
         self.tid, self.ctx = tid, ctx
@@ -238,6 +293,9 @@ class Emu:
             return 0
         t = Thread(tid)
         t.entry, t.arg = entry, arg
+        self.thread_seq = getattr(self, "thread_seq", 0)
+        t.place = list(place(cpu, self.thread_seq, prio))
+        self.thread_seq += 1
         self.threads[tid] = t
         self.order.append(tid)
         self.max_threads = max(self.max_threads, sum(1 for x in self.threads.values() if x.state != "done"))
@@ -274,11 +332,31 @@ class Emu:
     def h_thread_yield(self, *_):
         return (("yield",), 0)
 
-    def h_thread_set_priority(self, *_):
+    def placed(self, tid):
+        t = self.threads.get(tid) if tid else self.cur
+        if t is not None and not hasattr(t, "place"):
+            t.place = ["main", 0, 1, 0x2C]
+        return t
+
+    def h_thread_set_priority(self, tid, prio, *_):   # another thread's id too (not started yet is fine)
+        t = self.placed(tid)
+        if t is None:
+            return 0xE401   # a Horizon "invalid handle" result
+        t.place[3] = win32_to_horizon_prio(prio - (1 << 64) if prio >> 63 else prio)
         return 0
 
-    def h_thread_set_cpu(self, *_):
+    def h_thread_set_cpu(self, tid, spec, *_):
+        t = self.placed(tid)
+        if t is None:
+            return 0xE401
+        if (spec >> 40) & 0x7FFFFF:   # -1: nothing to do
+            return 0
+        t.place[1], t.place[2] = cpu_spec(spec, t.place[1], t.place[2])
         return 0
+
+    def placements(self):
+        return [f"placement\tthread {tid}\t{p[0]}\tcore {p[1]}\tmask {p[2]:#x}\tpriority {p[3]:#x}"
+                for tid, t in sorted(self.threads.items()) for p in [getattr(t, "place", None)] if p]
 
     def h_wait_on_address(self, addr, expected, timeout, *_):
         (v,) = struct.unpack("<I", self.uc.mem_read(addr, 4))
@@ -772,7 +850,7 @@ def main(argv):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
-        for line in emu.skip_summary() + emu.trap_table() + peeks():
+        for line in emu.skip_summary() + emu.trap_table() + peeks() + emu.placements():
             print(line)
         print(f"STOPPED: {why}")
         return 1
@@ -793,7 +871,7 @@ def main(argv):
     if getattr(emu, "skipped", None) is not None:
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
-    for line in emu.skip_summary() + emu.trap_table() + peeks():
+    for line in emu.skip_summary() + emu.trap_table() + peeks() + emu.placements():
         print(line)
     ok = rc == 0 and a.expect in out and tp_ok
     print("PASS" if ok else "FAIL")

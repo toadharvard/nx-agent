@@ -32,7 +32,7 @@ plain)
 		aarch64-none-elf-gcc $HOST_ARCH $CFLAGS $HINC -c "$s" -o "$H/$(basename "${s%.c}").o"
 	done
 	aarch64-none-elf-gcc -specs="$DEVKITPRO/libnx/switch.specs" $HOST_ARCH "$H"/host.o "$H"/reserve.o "$H"/reserve_nx.o \
-		-L"$DEVKITPRO/libnx/lib" -lnx -Wl,-Map,"$H/host.map" -o "$H/host.elf"
+		-L"$DEVKITPRO/libnx/lib" -lnx -Wl,--wrap=__syscall_thread_create -Wl,-Map,"$H/host.map" -o "$H/host.elf"
 	$PY "$TC/tools/elf2nso.py" "$H/host.elf" "$H/main" >/dev/null
 	;;
 nine)

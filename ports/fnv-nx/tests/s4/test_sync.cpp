@@ -372,6 +372,90 @@ TEST(implicit_tls_and_teb)
         CHECK(__readfsdword(0x2c) == (unsigned long)(uintptr_t)fnvnx_tls_array());
 }
 
+/* fs:[0x2c][0] is the game layer's image TLS block (fnvnx_image_tls_hook, toolchain/game/boot.cpp), the same
+ * per-thread block __declspec(thread) data is bound to: one copy, not two (docs/PERF.md 6.3) */
+extern "C" void *(*fnvnx_image_tls_hook)(void);
+static thread_local unsigned char t_image_tls[64];
+static void *image_tls(void) { return t_image_tls; }
+static DWORD tls_identity_worker(LPVOID)
+{
+    void *blk = ((void **)fnvnx_tls_array())[0];
+    if (blk != (void *)t_image_tls)
+        return 1;
+    t_image_tls[3] = 77;   /* through the __declspec(thread) path ... */
+    return ((unsigned char *)fnvnx_tls_block())[3] == 77 ? 0 : 2;   /* ... seen through fs:[0x2c] */
+}
+
+TEST(implicit_tls_identity)
+{
+    void *(*saved)(void) = fnvnx_image_tls_hook;
+    fnvnx_image_tls_hook = image_tls;
+    HANDLE t = CreateThread(NULL, 0, tls_identity_worker, NULL, 0, NULL);
+    WaitForSingleObject(t, INFINITE);
+    DWORD c = 9;
+    GetExitCodeThread(t, &c);
+    CHECK_EQ(c, 0);
+    CloseHandle(t);
+    CHECK_EQ(t_image_tls[3], 0);   /* the worker wrote its own block */
+    fnvnx_image_tls_hook = saved;
+}
+
+/* the placement role hook sees CreateThread's start routine and argument; priority and affinity apply to
+ * another thread's handle (suspended or running) */
+extern "C" int (*fnvnx_thread_role_hook)(void *start, void *arg);
+static void *g_role_start, *g_role_arg;
+static int role_hook(void *start, void *arg) { g_role_start = start; g_role_arg = arg; return OS_THREAD_ROLE(2); }
+static DWORD role_worker(LPVOID) { return 5; }
+
+TEST(thread_role_and_other_thread_placement)
+{
+    int (*saved)(void *, void *) = fnvnx_thread_role_hook;
+    fnvnx_thread_role_hook = role_hook;
+    HANDLE t = CreateThread(NULL, 0, role_worker, (LPVOID)0x1234, CREATE_SUSPENDED, NULL);
+    fnvnx_thread_role_hook = saved;
+    CHECK(t != NULL);
+    CHECK(g_role_start == (void *)role_worker && g_role_arg == (void *)0x1234);
+    CHECK(SetThreadPriority(t, THREAD_PRIORITY_BELOW_NORMAL));
+    CHECK_EQ(GetThreadPriority(t), THREAD_PRIORITY_BELOW_NORMAL);
+    CHECK(SetThreadAffinityMask(t, 0x6) != 0);
+    CHECK(SetThreadIdealProcessor(t, 1) != (DWORD)-1);
+    CHECK(SetThreadAffinityMask(t, 0) == 0);   /* an empty mask is refused */
+    ResumeThread(t);
+    WaitForSingleObject(t, INFINITE);
+    DWORD c = 0;
+    GetExitCodeThread(t, &c);
+    CHECK_EQ(c, 5);
+    CloseHandle(t);
+}
+
+/* SpinCount: contended sections still exclude each other and count right with spinning on */
+static CRITICAL_SECTION g_spin_cs;
+static long g_spin_counter;
+static DWORD spin_worker(LPVOID)
+{
+    for (int i = 0; i < 20000; i++) {
+        EnterCriticalSection(&g_spin_cs);
+        g_spin_counter++;
+        LeaveCriticalSection(&g_spin_cs);
+    }
+    return 0;
+}
+
+TEST(critical_section_spin_count)
+{
+    CHECK(InitializeCriticalSectionAndSpinCount(&g_spin_cs, 0x80001000));
+    CHECK_EQ(g_spin_cs.SpinCount & 0xFFFFFF, 0x1000);
+    g_spin_counter = 0;
+    HANDLE t[3];
+    for (int i = 0; i < 3; i++)
+        t[i] = CreateThread(NULL, 0, spin_worker, NULL, 0, NULL);
+    WaitForMultipleObjects(3, t, TRUE, INFINITE);
+    for (int i = 0; i < 3; i++)
+        CloseHandle(t[i]);
+    CHECK_EQ(g_spin_counter, 60000);
+    DeleteCriticalSection(&g_spin_cs);
+}
+
 TEST(set_thread_name_exception)
 {
     struct { DWORD type; const char *name; DWORD tid; DWORD flags; } info = { 0x1000, "S4Worker", (DWORD)-1, 0 };
