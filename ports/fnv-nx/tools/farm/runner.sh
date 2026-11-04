@@ -49,6 +49,7 @@ publish_report() {  # publish_report <file>: commit it to reports/<NAME> of the 
 # this farm takes the wip branches with crc32(name) mod TRY_N == TRY_K-1, newest change first. The job scripts and
 # the runner itself still come from the integration head; only the commit under test is the agent's.
 WATCH=${WATCH:-head}; TRY_K=${TRY_K:-1}; TRY_N=${TRY_N:-1}
+if [[ "$NAME" =~ ^try([0-9]+)of([0-9]+)$ ]]; then WATCH=wip; TRY_K=${BASH_REMATCH[1]}; TRY_N=${BASH_REMATCH[2]}; fi  # try<k>of<n>
 next_wip() {  # prints "<sha> <branch>" of a wip branch of this farm that has not been done yet, or nothing
   git -C "$NX" fetch -q origin "$BRANCH" 2>/dev/null
   git -C "$ARTIFACTS" ls-remote origin 'refs/heads/wip/*' 2>/dev/null | while read -r sha ref; do
