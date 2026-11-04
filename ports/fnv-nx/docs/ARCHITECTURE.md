@@ -66,15 +66,72 @@ declarations differ in a way x86 tolerated and AArch64 does not (e.g. `__fastcal
 The decomp copies MSVC's `__m128` union into ~400 files; prepare removes those copies and the global `sse2neon` type
 is used everywhere; union member access (`v.m128_f32[i]`) becomes typed pointer access.
 
-### D6. Rendering: native renderer on deko3d, no D3D9 emulation (J-0015, supersedes J-0006)
+### D6. Rendering: Gallium Nine first, native deko3d renderer later (J-0018, supersedes J-0015)
 
-The engine reaches D3D9 only through `NiRenderer`, `NiDX9RenderState` and the `NiD3DShader`/`BSShader` protocol, and
-draws only inside the renderer. We replace NiDX9Renderer + NiD3D* + bsshader render-time code (~1,000-1,300
-functions) with a native deko3d renderer wired in by address overrides (S2) and a NATIVE1 prepare rule; pass
-selection, culling and scene graph stay. Prebuilt state blocks, sorted 64-bit draw keys, persistent rings, bindless
-32-bit texture handles, render thread one frame behind. Shaders are hand-written GLSL per family (uam -> DKSH, our
-own code); the game's translated `.sdp` shaders (S6b) are only the parity reference. Details:
-[`RENDER_NATIVE.md`](RENDER_NATIVE.md); the earlier D3D9-emulation design stays in [`RENDER.md`](RENDER.md).
+Shortest path to pixels (user priority): the game's own D3D9 calls go to **Gallium Nine** (Mesa's D3D9 state
+tracker) on the nouveau Gallium driver, as built in devkitPro's switch-mesa, LP64 in the host module, reached
+through generated ILP32 -> LP64 COM proxies from `shim/include/d3d9.h` (stream S6c; `render/nine/`, Mesa patches
+0001-0007: nvc0 shader precompile cache, subroutine inlining, MANAGED resources without RAM copies). D3DX9 runs in
+the guest. The native deko3d renderer of J-0015 (replace NiDX9Renderer + NiD3D* + bsshader render-time code, prebuilt
+state blocks, sorted draw keys, hand-written shaders; [`RENDER_NATIVE.md`](RENDER_NATIVE.md)) is the later
+performance phase. The earlier D3D9-emulation design is in [`RENDER.md`](RENDER.md).
+
+### D7. Vtables: objects hold Itanium vtables only (J-0010)
+
+An object only ever holds the GCC (Itanium) vtable. Statics are rebuilt by the native `??__E` initializers run from
+the image's `__xc` table. S2 binds image vftables to Itanium vtables (map kind V) and synthesizes missing ones
+(`??_G` -> D1 = `??_G(this,0)`, D0 = `??_G(this,1)`). Raw slot-number calls become `FNVNX_MSVC_VCALL` through an S1
+rule plus an S2 table. `__RTDynamicCast` maps MSVC type descriptors to Itanium `type_info`.
+
+### D8. Packaging: NSO exefs override, LP64 host + ILP32 guest (J-0012)
+
+The game ships as an NSO exefs override (`exefs.nsp`, NPDM is_64_bit + 32BitNoReserved) of an installed title; no
+NRO. libnx stays LP64 in the host module; the ILP32 game is a separate ELF32 module loaded by the host, across a
+u64-only boundary (`toolchain/include/fnvnx/hostapi.h`). Native code stays outside the data window
+0x00400000..0x02100000.
+
+### D9. The guest is relocatable (J-0032)
+
+Only the data window is a required address range; the guest module loads anywhere (fixed placement stays available
+as `GUEST=fixed`). Kept true by `-fPIC` (D16); `toolchain/pcrel_abs.py` checks it on every guest build.
+
+### D10. MSVC-like language semantics (J-0034)
+
+Decomp code is compiled with `-fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks
+-ffp-contract=off -frounding-math` (census, `tools/link/compile.sh`, game and Nine builds). `fnvnx_compat.h` refuses
+to compile with an unsigned plain char.
+
+### D11. Correctness gates without hardware (J-0035)
+
+Layered: (1) layout - the decomp's 3,171 static_asserts plus TAIL1; (2) ABI - S2's byte-level verdicts and bridges
+on every reference/definition pair; (3) rewrite rules - S11 compiles pristine vs prepared trees with MSVC 2008 and
+compares per function; (4) target semantics - S12 static hazard scan; (5) behaviour - S13 per-function differential
+fuzzing, with the pristine decomp built by MSVC 2008 under Unicorn x86 as the oracle and our AArch64 ILP32 code under
+Unicorn AArch64 as the candidate, in the same memory world.
+
+### D12. The MSVC 2008 build of the pristine decomp is the exe's code (J-0036)
+
+Byte-identical by the decomp's guarantee, so whatever needed "the original code" no longer waits for the player's
+exe: S1b per-site ABI patches, structure layouts proven by field offsets, vtable slots, lockstep differential runs,
+a synthetic data image (S14). Still needs the exe: initial values of global data beyond what objects emit, the 56
+functions with no body, and the game assets.
+
+### D13. Declarations are dropped only for imports and CRT functions (J-0037)
+
+A prepare rule may drop or retarget a declaration only when units.json binds that decorated name to an import slot
+or to the CRT function of the same name. Otherwise the declaration keeps its address binding (renamed if it
+collides). Every x86-neutral rule must pass the S11 equivalence gate.
+
+### D14. Every result is verified twice (J-0038, user)
+
+(a) An independent verifier agent gets the code and the claim but not the author's reasoning, writes its own tests
+and tries to break the result (`V<n>-<stream>` entries). (b) S13 runs differential fuzzing on every function the
+result touches. Entries stay `wip` until both pass; a verifier finding reopens the stream.
+
+### D15. Game structures follow the PC layout (J-0051)
+
+Where the decomp carries Xbox-only size asserts, the layout proven by the x86 code wins: CRITICAL_SECTION is the
+plain 24-byte PC structure (CSX1), and those asserts are dropped by rule.
 
 ### D16. Decomp objects are compiled `-fPIC` (J-0053)
 
