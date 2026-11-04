@@ -40,7 +40,11 @@
       kind-V pairing the harness does not see) or the stub of an unemitted `_ZTV` (42). These belong to S2c-vt
       (exe_pair, synthesis) and S13 (compare against the V map). I did not touch vtable code.
     - 21 are native reads of a named data stub (an unbound variable).
-    - 3 are `??__E` initializers passing a stub as the string argument of GlobalObject2 0x0045cfe0.
+    - 3 are `??__E` initializers passing a stub as the second argument of GlobalObject2 0x0045cfe0. They are fixed
+      in `75dbabc` (`text-addr`). The generated initializers pass immediates as arrays placed at the number
+      (`g_011c5a4c_arg1` at 0x00a00000, `g_011d3450_arg1` at 0x006e6e6e). Such an array or char label now binds to
+      an absolute symbol at that address, which is the x86 value. 11 unit references on link/c0d6c71516f6. The
+      metric goes from 70 to 67.
     - The rest are 4 call-target rows, 1 call-args, 1 call-count and 2 other mem-writes.
   - **native-undefined 291**: 170 of the functions call names the trial link leaves undefined. These are mostly
     out-of-line inlines such as `NiPointer<T>::operator T*` (13 functions), NiRefObject refcounts, destructors and
