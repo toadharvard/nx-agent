@@ -530,7 +530,7 @@ index 319e3cb..c16565f 100644
      #if SUPPORT_PROFILE_GLSLES3
      else if (strcmp(profilestr, MOJOSHADER_PROFILE_GLSLES3) == 0)
      {
-@@ -591,6 +750,98 @@ void emit_GLSL_start(Context *ctx, const char *profilestr)
+@@ -591,6 +750,96 @@ void emit_GLSL_start(Context *ctx, const char *profilestr)
      ctx->indent++;
  } // emit_GLSL_start
  
@@ -590,19 +590,17 @@ index 319e3cb..c16565f 100644
 +             reglist_find(&ctx->used_registers, REG_TYPE_COLOROUT, 0))
 +    {
 +        // D3D9 alpha test and (ps < 3.0) fixed-function fog, uniform branches.
++        //  The compare is branch-free: the outcome of a against ref is one bit
++        //  (1 less, 2 equal, 4 greater, 8 unordered), and D3DCMP_NEVER..ALWAYS
++        //  (1-8) select a nibble of 0xF6D43210 as the set of passing outcomes
++        //  (NOTEQUAL and ALWAYS pass a NaN alpha, like a != r and the default);
++        //  other values pass. A switch here costs ~47 more Maxwell instructions.
 +        output_line(ctx, "if (ps_drv_alpha.x != 0) {");
 +        ctx->indent++;
-+        output_line(ctx, "float dk_a = ps_oC0.a; float dk_r = ps_drv_alpharef.x; bool dk_pass;");
-+        output_line(ctx, "switch (ps_drv_alpha.x) {");
-+        output_line(ctx, "case 1: dk_pass = false; break;");
-+        output_line(ctx, "case 2: dk_pass = dk_a < dk_r; break;");
-+        output_line(ctx, "case 3: dk_pass = dk_a == dk_r; break;");
-+        output_line(ctx, "case 4: dk_pass = dk_a <= dk_r; break;");
-+        output_line(ctx, "case 5: dk_pass = dk_a > dk_r; break;");
-+        output_line(ctx, "case 6: dk_pass = dk_a != dk_r; break;");
-+        output_line(ctx, "case 7: dk_pass = dk_a >= dk_r; break;");
-+        output_line(ctx, "default: dk_pass = true; break;");
-+        output_line(ctx, "}");
++        output_line(ctx, "float dk_a = ps_oC0.a; float dk_r = ps_drv_alpharef.x; uint dk_k = uint(ps_drv_alpha.x - 1);");
++        output_line(ctx, "uint dk_m = mix(15u, (0xF6D43210u >> (4u * (dk_k & 7u))) & 15u, dk_k < 8u);");
++        output_line(ctx, "uint dk_c = mix(mix(mix(8u, 4u, dk_a > dk_r), 2u, dk_a == dk_r), 1u, dk_a < dk_r);");
++        output_line(ctx, "bool dk_pass = (dk_m & dk_c) != 0u;");
 +        output_line(ctx, "if (!dk_pass) discard;");
 +        ctx->indent--;
 +        output_line(ctx, "}");
