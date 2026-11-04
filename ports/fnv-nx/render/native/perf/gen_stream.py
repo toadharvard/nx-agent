@@ -3,7 +3,8 @@
 docs/RENDER_NATIVE.md §3.7. Every number used is in FAMILIES below and is copied into report.json.
 
     python3 -I gen_stream.py <out dir>      writes fam_<family>.nxd3d (one family, its 'hi' draw count),
-                                            mix_lo.nxd3d, mix_hi.nxd3d, empty.nxd3d and streams.json (the spec)
+                                            mix_lo.nxd3d, mix_hi.nxd3d, wo_<family>.nxd3d (mix_hi without it),
+                                            empty.nxd3d and streams.json (the spec)
 
 Each file has FRAMES frames; the consumers measure the last one (earlier frames warm the state caches, the
 sampler cache and Nine's shader variants). Deterministic (fixed seed).
@@ -120,6 +121,9 @@ def gen(families, level, frames=FRAMES, seed=1):
         w.op(10, fr)
         rnd.seed(seed * 1000 + fr % 2)          # the measured frame repeats a warm-up frame's draws exactly
         for fi, f in enumerate(families):
+            # per family seed: a family draws the same in every stream it is in (leave-one-out streams)
+            rnd.seed(seed * 1000 + fr % 2 + 17 * (FAMILIES.index(f) if f in FAMILIES else 0))
+            fi = FAMILIES.index(f) if f in FAMILIES else 0
             texs, pairs, geos = res[f["name"]]
             n = f["draws"][level]
             npairs = f["shaders"]
@@ -180,6 +184,8 @@ def main():
     spec = {"frames": FRAMES, "families": FAMILIES, "targets": TARGETS, "rs_order": RS_ORDER,
             "materials": MATERIALS, "sampler_states_per_stage": SAMP, "streams": {}}
     jobs = [("fam_" + f["name"], [f], 1) for f in FAMILIES] + [("mix_lo", FAMILIES, 0), ("mix_hi", FAMILIES, 1)]
+    # leave-one-out: mix_hi without one family; mix_hi - wo_<f> = the family's marginal cost inside the full frame
+    jobs += [("wo_" + f["name"], [g for g in FAMILIES if g is not f], 1) for f in FAMILIES]
     for name, fams, level in jobs:
         data, stats = gen(fams, level)
         open(os.path.join(out, name + ".nxd3d"), "wb").write(data)
