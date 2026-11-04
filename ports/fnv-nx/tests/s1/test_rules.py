@@ -649,6 +649,58 @@ check('STAND2 drops a stand-in of an address another unit defines (/Od)', got,
 check('STAND2 leaves units MSVC compiled with auto-inlining', got_o2, ['delete[] p', 'int Free(int a)\n{'], ['STAND2'])
 check('STAND2 keeps the line count', 'lines %d' % got.count('\n'), ['lines %d' % _STAND2_SRC.count('\n')])
 
+# ---- STAND3 (a units.json of its own: an /Od unit, an /O2 unit and the decompiled addresses of a third)
+_s3 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s3, 'src')); os.makedirs(os.path.join(_s3, 'build'))
+_STAND3_SYMS = {'??1Mem@@QAE@XZ': '0x0040c110', '??0Guard@@QAE@PAH@Z': '0x00528cb0', '?Helper@@YAHXZ': '0x00401230',
+                '?Get@Box@@QAEHXZ': '0x00401240', '?Put@Box@@QAEHXZ': '0x00401240', '??1Mem@ns@@QAE@XZ': '0x00500000', '?Two@@YAHH@Z': '0x00401230',
+                '?Two@@YAHM@Z': '0x00401240', '?Virt@Box@@UAEHXZ': '0x00401240', '??1Der@@QAE@XZ': '0x0040c110',
+                '?Tagged@@YAHXZ': '0x00401230'}
+_json.dump({'units': [
+    {'source': 'src/od.cpp', 'flags': ['/MT', '/Od', '/Oy-', '/GS', '/EHsc', '/Gy'], 'symbols': _STAND3_SYMS,
+     'functions': []},
+    {'source': 'src/o2.cpp', 'flags': ['/MT', '/O2', '/GS', '/EHsc', '/Gy'], 'symbols': _STAND3_SYMS, 'functions': []},
+    {'source': 'src/ob1.cpp', 'flags': ['/MT', '/Od', '/Oy-', '/GS', '/EHsc', '/Gy', '/Ob1'], 'symbols': _STAND3_SYMS,
+     'functions': []},
+    {'source': 'src/other.cpp', 'flags': ['/MT', '/Od'], 'symbols': {},
+     'functions': [{'address': a, 'symbol': '?f@@YAXXZ', 'size': 4}
+                   for a in ('0x0040c110', '0x00528cb0', '0x00401230', '0x00401240')]}]},
+           open(os.path.join(_s3, 'build', 'units.json'), 'w'))
+_STAND3_SRC = ('struct Mem\n{\n    int a;\n    ~Mem()\n    {\n        Free(this);\n    }\n};\n'
+               'struct Guard\n{\n    int* p;\n    Guard(int* q) : p(q)\n    {\n        Lock(q);\n    }\n};\n'
+               'inline int Helper()\n{\n    return 0;\n}\n'
+               'struct Box\n{\n    int Get();\n    int Put();\n    virtual int Virt()\n    {\n        return 1;\n    }\n};\n'
+               'inline int Box::Get()\n{\n    return 2;\n}\nint Box::Put()\n{\n    return 5;\n}\n'
+               'namespace ns {\nstruct Mem\n{\n    ~Mem()\n    {\n        Free(this);\n    }\n};\n}\n'
+               'int Two(int)\n{\n    return 3;\n}\n'
+               'struct Base\n{\n    virtual ~Base();\n};\nstruct Der : Base\n{\n    ~Der()\n    {\n        Free(this);\n    }\n};\n'
+               '// @fnv 0x00401230\nint Tagged()\n{\n    return 4;\n}\n'
+               'template <class T> struct Tm\n{\n    ~Tm()\n    {\n        Free(this);\n    }\n};\n'
+               'void use() { Mem m; Guard g(0); Helper(); }\n')
+_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+got = run(s1.r_inline_stand_ins, _STAND3_SRC, os.path.join(_s3, 'src', 'od.cpp'))
+got_o2 = run(s1.r_inline_stand_ins, _STAND3_SRC, os.path.join(_s3, 'src', 'o2.cpp'))
+got_ob1 = run(s1.r_inline_stand_ins, _STAND3_SRC, os.path.join(_s3, 'src', 'ob1.cpp'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+check('STAND3 in-class destructor bound to a decompiled address of another unit becomes a declaration', got,
+      ['    ~Mem(); /* fnv-nx STAND3 0x0040c110 */\n\n\n\n};'], ['        Free(this);\n    }\n};\nstruct Guard'])
+check('STAND3 constructor: declaration without its initializer list', got,
+      ['    Guard(int* q); /* fnv-nx STAND3 0x00528cb0 */'], ['p(q)'])
+check('STAND3 free inline function keeps a plain declaration', got,
+      ['int Helper(); /* fnv-nx STAND3 0x00401230 */'], ['inline int Helper'])
+check('STAND3 inline out-of-class member definition goes, a non-inline one is STAND2\'s', got,
+      ['/* fnv-nx STAND3: Box::Get is the function at 0x00401240 */', 'int Box::Put()\n{\n    return 5;'], ['return 2;'])
+check('STAND3 keeps: virtual, address no unit decompiles, two overloads at two addresses, tagged, template, '
+      'destructor of a derived class', got,
+      ['virtual int Virt()\n    {\n        return 1;', 'namespace ns {\nstruct Mem\n{\n    ~Mem()\n    {', 'int Two(int)\n{',
+       '// @fnv 0x00401230\nint Tagged()\n{', 'template <class T> struct Tm\n{\n    ~Tm()\n    {',
+       'struct Der : Base\n{\n    ~Der()\n    {'])
+check('STAND3 line count unchanged', got, [], []) if got.count('\n') == _STAND3_SRC.count('\n') else \
+    check('STAND3 line count unchanged', 'lines %d != %d' % (got.count('\n'), _STAND3_SRC.count('\n')), ['never'])
+check('STAND3 leaves an /O2 unit alone (MSVC may inline there)', got_o2, [_STAND3_SRC], [])
+check('STAND3 leaves an /Od /Ob1 unit alone (/Ob1 inlines in-class and inline definitions)', got_ob1, [_STAND3_SRC], [])
+
 # ---- STR1 uses the declaration in scope
 got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(&str_01082ab8); }\nnamespace N {\n'
           'extern char str_01082ab8;\nvoid h() { g(&str_01082ab8); }\n}\nextern "C" char str_a0000000[], str_b0000000[],\n'

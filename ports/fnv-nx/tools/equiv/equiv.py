@@ -83,6 +83,7 @@ CLASSES = {
     'CSX2': 'neutral',          # the decomp's 28-byte critical sections keep their 28 bytes (D15 reopened, J-0067)
     'STAND1': 'platform',       # drops untagged stand-ins bound to a tagged definition's address (one function per address)
     'STAND2': 'platform',       # STAND1 for an address another unit defines, in units MSVC compiled without auto-inlining
+    'STAND3': 'platform',       # STAND2 for in-class / inline stand-ins, in /Od units without /Ob1 (MSVC inlines nothing)
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
     'INC1': 'neutral',          # quoted include spelled as the including directory's file (MSVC: no case)
     'ANON2': 'platform',        # raw storage for members with special functions in an anonymous struct of a union
