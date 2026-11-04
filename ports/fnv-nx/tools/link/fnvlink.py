@@ -284,9 +284,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             def_at.setdefault(a, (u, n))
             gdef.add(msvc(n), a)
     gref = KeyIndex()
+    ident = collections.defaultdict(set)   # data identifier -> image data addresses any unit binds it to
     for u in units.values():
         for n, a in u.refs.items():
-            gref.add(msvc(n), a)
+            m_ = msvc(n)
+            gref.add(m_, a)
+            if m_.kind in ('data', 'cname') and m_.qual and m_.special is None and DATA_START <= a < DATA_END:
+                ident[m_.qual[-1]].add(a)
 
     # synthesized vtables/typeinfo (vtables.py, written by `probe`): one extra object per host unit, its references
     # resolved with the host unit's names
@@ -531,7 +535,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls, tier, addr, target, note = 'addr', 'game/newdel', na, None, nm
                 stats['newdel_refs'] += 1
             else:
-                cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc)
+                cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident)
+                if tier == 'gref/ident':
+                    stats['ident_' + cls] += 1
             if cls != 'unresolved' and isig.qual and un.find(GAME_PREFIX) >= 0:
                 stats['game1_resolved'] += 1
             if vsb is not None and (un in vslots or (cls == 'unresolved' and isig.variant in ('D1', 'D2'))):
@@ -939,6 +945,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               % (stats['imports_bound'], byclass['import']),
               'import thunks bound to their import instead of the compiled decomp body: %d' % stats['import_thunks'],
               'calls of an IAT slot address bound to its import: %d' % stats['iat_calls'],
+              'data references bound by identifier only (another scope or decorated type): %d; identifiers at several '
+              'addresses (left ambiguous): %d' % (stats['ident_addr'], stats['ident_ambiguous']),
               'references called through a cast to another function type (the cast decides): %d, conflicting casts '
               'or direct calls (x86-inconsistent): %d' % (stats['cast_refs'], stats['cast_conflicts']),
               'GAME1 names (fnvnx_game_*) looked up by the unit\'s own name: %d references, %d resolved'
@@ -1266,8 +1274,11 @@ def disambiguate_defs(names, m, itanium):
     return c or names
 
 
-def classify_ref(un, isig, idx, gdef, gref, anydef, msvc):
-    """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller)."""
+def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
+    """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller).
+    ident: {data identifier: image addresses} - the last resort for a data reference (S5): the same identifier in
+    another scope (the decomp's per-function namespaces) or with another decorated type (an array declared where
+    MSVC saw a pointer, cv), bound when exactly one address carries it, 'ambiguous' otherwise."""
     if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)):
         return 'runtime', None, None, None, None
     if isig.kind == 'special':
@@ -1286,6 +1297,11 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc):
         m = ADDR_IN_NAME.match(isig.qual[-1]) if isig.qual else None
         if m:  # Ghidra-style name carrying its address: right for 99.6 % of the names units.json binds (LINK.md)
             return 'addr', 'name-addr', int(m.group(1), 16), None, None
+        if ident is not None and isig.kind in ('data', 'cname') and isig.qual and ident.get(isig.qual[-1]):
+            a_ = ident[isig.qual[-1]]
+            if len(a_) == 1:
+                return 'addr', 'gref/ident', next(iter(a_)), None, None
+            return 'ambiguous', 'gref/ident', None, None, ' '.join('%08x' % x for x in sorted(a_))
         return 'unresolved', None, None, None, None
     addrs = sorted(hit)
     if len(addrs) > 1 and isig.params is not None:  # disambiguate by arity, then by const

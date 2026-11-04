@@ -222,6 +222,9 @@ def _parse_params(s):
 MS_SPECIAL = {"`scalar deleting dtor'": '{sdd}', "`vector deleting dtor'": '{vdd}'}
 
 
+DATA_DECO = re.compile(r'^\?([A-Za-z_]\w*)((?:@[A-Za-z_]\w*)*)@@[0-4]')   # ?name@scope...@@<storage class>
+
+
 def parse_msvc(mangled, dem):
     """Parse one llvm-undname line. dem is None when undname failed."""
     if not mangled.startswith('?'):
@@ -248,10 +251,11 @@ def parse_msvc(mangled, dem):
                 break
     if cc_at is None:  # data
         sig.kind = 'data'
-        # a function-pointer variable: 'void (__cdecl *g_fn)(int)' / '(__stdcall *const ns::p)(void)', or a
+        # a function-pointer variable: 'void (__cdecl *g_fn)(int)' / '(__stdcall *const ns::p)(void)' / a pointer to
+        # one ('void (__cdecl **g_apfn)(void *)', S5: tables of handlers), or a
         # pointer to an array: 'T *(*ns::g_x)[10]' (one character per repetition: a nested '+' backtracks
         # exponentially on long names that do not match)
-        fp = re.match(r'^(.*?)\(\s*(?:__\w+\s+)?\*\s*(?:const\s+)?((?:[\w`\'{}]|::|<[^()]*>)+)\s*\)\s*'
+        fp = re.match(r'^(.*?)\(\s*(?:__\w+\s+)?(?:\*\s*(?:const\s+)?)+((?:[\w`\'{}]|::|<[^()]*>)+)\s*\)\s*'
                       r'(?:\(.*\)|\[[^\]]*\])\s*$', s)
         if fp:
             sig.qual = canon_qual(split_qual(fp.group(2)))
@@ -265,6 +269,12 @@ def parse_msvc(mangled, dem):
         sig.qual = canon_qual(split_qual(s[name_at:]))
         sig.raw_ret = s[:name_at].strip()
         sig.static = access is not None
+        # the decoration of a plain variable spells its qualified name (`?name@inner@outer@@3...`); llvm-undname
+        # drops the space after a type whose name ends in '_' ('class Setting_x' for `?x@@3VSetting_@@A`), so the
+        # name read from the decoration wins (S5: the settings, bKeepLowDetailTerrain)
+        dm = DATA_DECO.match(mangled)
+        if dm:
+            sig.qual = canon_qual(list(reversed(dm.group(2).split('@')[1:])) + [dm.group(1)])
         return sig
     i, cc = cc_at
     sig.cc = cc[2:]

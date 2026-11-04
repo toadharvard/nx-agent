@@ -101,6 +101,21 @@ def main():
     check(v.kind == 'same', 'through the __thiscall cast the call matches the definition: %s %s' % (v.kind, v.moves))
     uc2 = fnvlink.unit_casts(src + 'void g() { FUN_00a0c900(0, \"s\", 0); }\n')
     check(uc2['FUN_00a0c900'][1] == 1, 'a direct call next to the cast is counted: %s' % (uc2['FUN_00a0c900'],))
+    # S5: data names. A pointer to a function pointer, and a type whose name ends in '_' (llvm-undname drops the
+    # space: 'class Setting_x'): the name comes from the decoration
+    dn2 = ['?g_apfnA@@3PAP6AXPAX@ZA', '?bKeep@@3VSettingT_Coll_@@A', '?v@fnv_00123456@@3HA']
+    dd2 = fnvlink.batch_demangle(fnvlink.UNDNAME, dn2)
+    for n_, q_ in zip(dn2, (['g_apfnA'], ['bKeep'], ['fnv_00123456', 'v'])):
+        s_ = sigs.parse_msvc(n_, dd2[n_])
+        check(s_.kind == 'data' and s_.qual == q_, 'data name %s -> %s (%s)' % (n_, s_.qual, dd2[n_]))
+    # a data reference that matches only by identifier (another namespace, an array where MSVC saw a pointer)
+    gi = fnvlink.KeyIndex()
+    ident = {'v': {0x01000100}, 'w': {0x01000200, 0x01000300}}
+    r_ = fnvlink.classify_ref('_ZN12fnv_00aaaaaa1vE', sigs.parse_itanium('_ZN12fnv_00aaaaaa1vE', 'fnv_00aaaaaa::v'),
+                              fnvlink.KeyIndex(), gi, gi, set(), None, ident)
+    check(r_[:3] == ('addr', 'gref/ident', 0x01000100), 'identifier-only data binding: %s' % (r_,))
+    r_ = fnvlink.classify_ref('w', sigs.parse_itanium('w', None), fnvlink.KeyIndex(), gi, gi, set(), None, ident)
+    check(r_[0] == 'ambiguous', 'identifier at two addresses is not guessed: %s' % (r_,))
     v = abi.compare(SE['?e@M@@QAE_NPAU1@@Z'], SE['?e@@YI_NPAUB@@HPAUO@@@Z'])
     check(v.kind == 'bridge' and 'edx-dummy' in v.classes, 'thiscall M::f(M*) -> the same: %s %s'
           % (v.kind, v.classes))
