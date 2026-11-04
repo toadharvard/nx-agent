@@ -42,7 +42,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 . "$HERE/lib_job.sh"
 t0=$(date +%s)
 
-host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native)
+host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools py:mako meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native); mako: uam (LINK_OVERRIDES=render)
 # NX1's package checks (tests/nx1): switch-tools elf2nro needs lz4.h, the host device test qemu-user, the libnx
 # syntax check newlib's headers. Libraries are not commands, so host_check cannot see them.
 # uam (toolchain/uam/build.sh, LINK_OVERRIDES=render without RENDER_LIB) needs the system python's mako.
@@ -87,6 +87,10 @@ CROSS_BIN="$(art cross_bin)" LINK_BUILD=$F/build FARM_SRC=$SRC FARM_EXT=$EXT \
 # 3. Pristine MSVC objects for the synthesized boot image (link_job.sh took them for resolve --msvc-code too).
 job_pristine
 [ -n "$PR" ] && ARGS+=(PRISTINE_OBJS="$PR" MSVC_CODE="$PR")
+# the guest links the native renderer (S6n's overrides + libnxrender.a, built with this toolchain; RENDER_LIB=<a>
+# takes a prebuilt one): without it the engine's D3D9 entry points have no device and the boot stops at renderer init
+ARGS+=(LINK_OVERRIDES="${LINK_OVERRIDES:-render}")
+[ -n "${RENDER_LIB:-}" ] && ARGS+=(RENDER_LIB="$RENDER_LIB")
 # 3b. The player's exe, when the owner's copy is on the private branch gamedata/exe: the boots run on it instead of
 # S14's synthesized image (J-0128)
 job_gamedata
