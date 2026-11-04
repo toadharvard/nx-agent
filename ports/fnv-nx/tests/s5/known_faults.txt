@@ -35,7 +35,9 @@ InitHolder          # 0x00aa2020: tail call through slot 7 of the allocator's vt
                       # their functions: they are vslot traps until the exe's vftable 0x0109bf4c gives the addresses
 0x005e0200            # the INI settings load in WinMain (+0x300): its collection 0x....c660 has the image vptr
                       # 0x01082ed8, stored by hand, which has no native vtable (hand_vptrs.tsv: 750 such on f13; S1/S2);
-                      # Open tail-calls its slot 6 = 0. Returns false: the INI file did not open
+                      # Open tail-calls its slot 6 = 0. Returns false: the INI file did not open. On the player's exe
+                      # it still faults: the tail call lands on _ZTIN12fnv_004d907012FUN_004d9070E (guest rodata), a
+                      # slot read past the end of a native vtable (S2c, as 0x00a70b40)
 0x00a5b530 return-this  # NiGlobalStringTable constructor: 0x00a5b630 calls it as `__fastcall FUN_00a5b530(table)` and
                       # stores the result in 0x011f42c0; the definition is a C++ constructor, which returns nothing on
                       # AArch64, so the table pointer is whatever x0 held (misaligned: EnterCriticalSection faults; S1/S2)
