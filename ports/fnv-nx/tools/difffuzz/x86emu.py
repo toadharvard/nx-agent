@@ -44,6 +44,45 @@ def _desc(base, limit, access, flags=0xC):
                        ((limit >> 16) & 0xf) | (flags << 4), (base >> 24) & 0xff)
 
 
+
+def x87_result_use(uc, retaddr, fret='int', depth=0):
+    """'f32' / 'f64' when the code the call returns to consumes ST0 (the caller takes a float result from the
+    callee), else 'int'. For an intercepted call whose callee nothing describes (a wild or unplanted indirect call,
+    a CRT name without a type): the native side always finds the canned bytes in v0, so the oracle gets the same
+    value in ST0 where it reads one. fst/fstp m32 -> f32, m64 -> f64; x87 arithmetic, fxch, fchs, fabs, fstp st(i)
+    -> f32; the caller's cleanup (add esp, pop) and epilogue (mov esp, ebp / leave / pop) are stepped over, and a
+    `ret` returns the fuzzed function's own result kind `fret` (a tail position)."""
+    if depth > 8:
+        return 'int'
+    try:
+        b = bytes(uc.mem_read(retaddr, 6))
+    except Exception:  # noqa: BLE001
+        return 'int'
+    skip = None
+    if b[:2] == b'\x83\xc4':
+        skip = 3
+    elif b[:2] == b'\x81\xc4':
+        skip = 6
+    elif b[:2] == b'\x8b\xe5':
+        skip = 2
+    elif b[0] in (0x59, 0x5b, 0x5d, 0x5e, 0x5f, 0xc9):     # pop ecx/ebx/ebp/esi/edi, leave
+        skip = 1
+    if skip:
+        return x87_result_use(uc, retaddr + skip, fret, depth + 1)
+    if b[0] in (0xc3, 0xc2):
+        return fret
+    b0, m = b[0], b[1]
+    if b0 == 0xd9 and m == 0xc0:          # fld st0 (the float epilogue stub): the store after it decides
+        nxt = x87_result_use(uc, retaddr + 2, fret, depth + 1)
+        return nxt if nxt != 'int' else 'f32'
+    mod, reg = m >> 6, (m >> 3) & 7
+    if b0 in (0xd9, 0xdd) and mod != 3 and reg in (2, 3):
+        return 'f64' if b0 == 0xdd else 'f32'
+    if b0 in (0xd8, 0xdc, 0xde) or (b0 == 0xd9 and (0xc8 <= m <= 0xcf or m in (0xe0, 0xe1))) or \
+            (b0 == 0xdd and 0xd8 <= m <= 0xdf):
+        return 'f32'
+    return 'int'
+
 class Call:
     __slots__ = ('target', 'args', 'ret_to', 'regs', 'pushed')
 
@@ -73,6 +112,7 @@ class X86Engine:
         self.world = world_obj
         self.text_funcs = text_funcs
         self.callee_info = callee_info or (lambda a: None)
+        self._fret = 'int'
         self.ranges = sorted((a, a + len(c)) for a, c in text_funcs.items())
         self._starts = [lo for lo, _ in self.ranges]
         self.mapped = set()
@@ -155,6 +195,7 @@ class X86Engine:
         self._ensure(world.SENTINEL, 1)
         uc.reg_write(UC_X86_REG_FPCW, FPCW_MSVC)
         ret_stub = STUBS if conv.x86_ret == 'st0' else STUBS + 0x20
+        self._fret = ('f32' if conv.ret.size == 4 else 'f64') if conv.x86_ret == 'st0' else 'int'
         # garbage in every register that is not an argument (identical per seed)
         for i, reg in enumerate((UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EBX, UC_X86_REG_ESI,
                                  UC_X86_REG_EDI, UC_X86_REG_EBP)):
@@ -259,7 +300,7 @@ class X86Engine:
         r.calls[-1].pushed = self._pushed(uc, retaddr, address)
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
-        pop, kind = info if info else (0, 'int')
+        pop, kind = info if info else (0, x87_result_use(uc, retaddr, self._fret))
         eax = world.u32(rb, 0)
         cv = self._callee_conv(address)
         ck = world.canned_kind((cv, self._callee_conv(address, caller=True)))
@@ -368,6 +409,10 @@ class X86Engine:
         if name == 'chkstk':                     # _chkstk/_alloca_probe: esp -= eax (probing is a no-op here)
             uc.reg_write(UC_X86_REG_ESP, (esp + 4 - uc.reg_read(UC_X86_REG_EAX)) & 0xffffffff)
             uc.reg_write(UC_X86_REG_EIP, ret); return True
+        if name in libcalls.CRT_MATH:            # cdecl double functions: doubles at [esp+4], [esp+12] -> ST0
+            xs = [struct.unpack('<d', bytes(uc.mem_read(esp + 4 + 8 * i, 8)))[0] for i in range(libcalls.CRT_MATH[name])]
+            uc.mem_write(FLD_VAL, struct.pack('<d', libcalls.crt_math(name, xs)))
+            uc.reg_write(UC_X86_REG_EIP, FLD_STUB); return True     # fld qword [FLD_VAL]; ret (to `ret`)
         stub = libcalls.x87_stub(name, BUILTIN_SLOT)
         if stub is not None:
             at = BUILTIN_STUB + 0x80 * libcalls.STUB_SLOT[name]
