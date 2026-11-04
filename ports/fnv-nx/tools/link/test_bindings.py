@@ -88,7 +88,11 @@ SRC = {
     'src/r.cpp': 'struct RTTI { const char *name; RTTI(const char *n); };\n'      # split globals (compiled -O2)
                  '__attribute__((noinline)) RTTI::RTTI(const char *n) : name(n) {}\n'
                  'RTTI ms_kRTTI("Seq");\nconst RTTI *GetRTTI() { return &ms_kRTTI; }\n'
-                 'int g_count = 5;\nint *g_pcount = &g_count;\nint bump() { return ++g_count; }\n',
+                 'int g_count = 5;\nint *g_pcount = &g_count;\nint bump() { return ++g_count; }\n'
+                 # a second definition of g_count's image address in the same object (tesform.cpp, S2c-abi)
+                 'namespace fnv_00401230 { int g_count; int bump2() { return ++g_count; } }\n',
+    # a variable placed at a .text address nothing defines: its address is the x86 value (S2c-abi)
+    'src/ta.cpp': 'extern const char g_011c5a4c_arg1[];\nconst char *ta_arg() { return g_011c5a4c_arg1; }\n',
     'src/g.cpp': 'unsigned long fnvnx_game_GetCurrentThreadId();\n'                # GAME1 spellings
                  'extern "C" void fnvnx_game_EnterCriticalSection(void *);\nvoid fnvnx_game_Sleep(unsigned long);\n'
                  'struct CS;\nvoid fnvnx_game_LeaveCriticalSection(CS *);\n'   # C++ linkage, C++-decorated import
@@ -170,9 +174,13 @@ UNITS = {'units': [
                  '??_7Named@@6B@': '0x01000700', '_DAT_01000800': '0x01000800', '_DAT_01000810': '0x01000810',
                  '_FUN_00ee6df2': '0x00ee6df2'}},
     {'source': 'src/r.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
-        F(0x401200, '??0RTTI@@QAE@PBD@Z'), F(0x401210, '?GetRTTI@@YAPBURTTI@@XZ'), F(0x401220, '?bump@@YAHXZ')],
+        F(0x401200, '??0RTTI@@QAE@PBD@Z'), F(0x401210, '?GetRTTI@@YAPBURTTI@@XZ'), F(0x401220, '?bump@@YAHXZ'),
+        F(0x401230, '?bump2@fnv_00401230@@YAHXZ')],
      'symbols': {'?ms_kRTTI@@3URTTI@@A': '0x01000a00', '?g_count@@3HA': '0x01000a10',
+                 '?g_count@fnv_00401230@@3HA': '0x01000a10',
                  '?g_pcount@@3PAHA': '0x01000a20'}},
+    {'source': 'src/ta.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401240, '?ta_arg@@YAPBDXZ')],
+     'symbols': {'?g_011c5a4c_arg1@@3QBDB': '0x00a00000'}},
     {'source': 'src/g.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401400, '?game_calls@@YAHPAX@Z')],
      'symbols': {'?GetCurrentThreadId@@YGKXZ': '0x00830470', '__imp__EnterCriticalSection@4': '0x00fdf008',
                  '?Sleep@@YGXK@Z': '0x00401410',
@@ -429,6 +437,15 @@ def main():
               'TLS slot offset in the block')
         check(sym.get('__fnv_01000600', (0, -1))[1] == sym.get('_ZTV4Poly', (0, 0))[1] + 8, 'linked vptr value')
         check(sym.get('__fnv_01000a00', (0, -1))[1] == 0x01000a00, 'rebound variable at its image address')
+        r_ = refs.get(('src/ta.cpp', 'g_011c5a4c_arg1'), [''] * 6)
+        check(r_[2] == 'text-addr' and sym.get('__fnvnx_textaddr_00a00000', (0, -1))[1] == 0x00a00000,
+              'a variable at an undefined .text address -> absolute symbol there: %s %s' % (
+                  r_, sym.get('__fnvnx_textaddr_00a00000')))
+        check(sym.get('__fnv_01000a10_d1', (0, -1))[1] == 0x01000a10 and
+              '__fnv_01000a10_d1 = __fnv_01000a10;' in ld_ and
+              '__fnv_01000a10_d1' in set().union(*(v for k, v in by.items() if k.startswith('.text'))),
+              'a second definition of the address in one object reaches the image too: %s' % (
+                  sym.get('__fnv_01000a10_d1'),))
     print('ok' if ok else 'FAILED')
     sys.exit(0 if ok else 1)
 

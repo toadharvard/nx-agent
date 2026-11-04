@@ -626,9 +626,9 @@ class ReadyTest(unittest.TestCase):
     def test_frame_budget_per_clock(self):
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.budget.stock'), self.gate(card, 'perf.budget.boost')
-        self.assertEqual((stock['status'], stock['level'], stock['required']), ('pass', 'stretch_60', True))
+        self.assertEqual((stock['status'], stock['level'], stock['required']), ('pass', 'target_60', True))
         self.assertEqual((boost['status'], boost['required']), ('pass', False))
-        self.assertIn('plan45 stretch_60', stock['note'])
+        self.assertIn('plan45 target_60', stock['note'])
         # lo fits 16.7 ms, hi does not: uncertain, whatever S15's verdicts say
         self.world.edit_json('reports/prof1/%s-frame-budget.json' % C, lambda d: d['scenarios'][0]['results'][
             '1020']['worst_frame_ms'].update(lo=12.0, mid=15.0, hi=20.0))
@@ -652,7 +652,7 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual(self.gate(self.world.run(), 'perf.budget.boost')['note'], 'no fnvnx-frame-budget/1 file')
         model = dict(schema='fnvnx-frame-budget/1', inputs=dict(frameprof=False), scenarios=[dict(
             id='placed', results={'1785': dict(worst_frame_ms=dict(lo=7, mid=17.2, hi=39.4),
-                                               verdicts=dict(pass_45='uncertain'), level='stretch_60')})])
+                                               verdicts=dict(pass_45='uncertain'), level='target_60')})])
         self.world.write('docs/PERF_budget.json', model, port=True)
         g = self.gate(self.world.run(), 'perf.budget.boost')
         self.assertEqual((g['status'], g['sources'][0]['path']), ('no-data', 'docs/PERF_budget.json'))

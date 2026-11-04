@@ -24,12 +24,13 @@ model (levers applied) and each clock it gives per-core and frame times as lo/mi
   fail       even the lo case does not fit
   uncertain  in between: needs a measurement (frameprof on a frame, B1/B2 on hardware)
 
-Targets (J-0132): fail below 30 fps (worst frame 33.3 ms), 45 fps stable (worst frame 22.2 ms), 60 fps stretch (mean
-frame 16.7 ms). 'level' is the highest target the mid case meets. Output schema fnvnx-frame-budget/1, keys:
+Targets (J-0150; every target is judged on the worst frame): fail below 30 fps (33.3 ms), 45 fps (22.2 ms,
+informational), 60 fps stable (target_60: the worst frame at or under 16.7 ms, the owner's target at 1.02 GHz).
+'level' (fail, pass_30, pass_45, target_60) is the highest target the mid worst frame meets. Output schema fnvnx-frame-budget/1, keys:
 
   schema, inputs{...}, assumptions[{id,value,range,unit,basis,note}], targets[...], clocks_mhz[...],
   budget_minsn{clock: {target: M instructions per core in the target's frame time at the assumed IPC}},
-  budget_mean_minsn{clock: {target: the same for the mean frame, worst frame factor applied for floor/goal targets}},
+  budget_mean_minsn{clock: {target: the same for the mean frame that keeps the worst frame inside it}},
   placement{role: {ideal, mask}}, items[{id, role, minsn[lo,hi], basis, ...}],
   measured{frameprof, render}, scenarios[{id, name, levers, core3, cores{core: {lo, mid, hi M instructions,
   items{item: mid M}}}, main_minsn{lo,mid,hi}, results{clock: {core_ms{core: {lo,mid,hi}}, cpu_ms{lo,mid,hi},
@@ -38,7 +39,8 @@ frame 16.7 ms). 'level' is the highest target the mid case meets. Output schema 
   hotspots[{rank, kind: subsystem|function|boot, id, name, subsystem, role, critical (runs on the main thread),
   basis (M|E), minsn{lo,mid,hi} (per frame; per boot for kind boot), ms{clock: {lo,mid,hi}} (IPC hi/mid/lo),
   share_45{clock: mid ms / 22.2 ms}, fix, gain_main_minsn[lo,hi], owner, needs_hardware, detail}],
-  queue[{rank, subsystem, fix, gain_main_minsn{lo,mid,hi}, gain_ms_45{clock: mid ms}, owner, needs_hardware}]
+  built_levers[...] (the 'placed' scenario's levers: in the build; hotspots and queue are after them, a fix marked
+  done leaves the queue), queue[{rank, subsystem, fix, gain_main_minsn{lo,mid,hi}, gain_ms_45{clock: mid ms}, owner, needs_hardware}]
 
 Hotspots (docs/PERF.md 11.4): subsystem rows are the frame's items by subsystem and thread role (frameprof's
 per-subsystem median of measured frames when there are any, else the model: [E] unless every item is measured);
@@ -285,9 +287,9 @@ def build(model, profs=None, render=None):
     }
     for clk in clocks:   # M instructions one core runs in the target's frame time at the assumed IPC
         out['budget_minsn'][str(clk)] = {t['id']: round(t['ms'] * clk * 1e3 * ipc['value'] / 1e6, 2) for t in targets}
-        # the mean frame that keeps the worst frame inside a floor/goal target (worst_frame_factor)
+        # the mean frame that keeps the worst frame inside the target (worst_frame_factor)
         out['budget_mean_minsn'][str(clk)] = {
-            t['id']: round(t['ms'] / (wff['value'] if t['kind'] != 'stretch' else 1.0) * clk * 1e3 * ipc['value'] / 1e6, 2)
+            t['id']: round(t['ms'] / wff['value'] * clk * 1e3 * ipc['value'] / 1e6, 2)
             for t in targets}
     for sc in model['scenarios']:
         work, core3 = scenario_work(items, levers, sc)
@@ -313,21 +315,34 @@ def build(model, profs=None, render=None):
                          'hi': max(cpu['hi'], gpu['hi'])}
             worst = {n: round(frame[n] * wffs[k], 2) for k, n in enumerate(('lo', 'mid', 'hi'))}
             verdicts, level = {}, 'fail'
-            for t in targets:
-                f = frame if t['kind'] == 'stretch' else worst
-                verdicts[t['id']] = verdict(f['lo'], f['hi'], t['ms'])
+            for t in targets:   # J-0150: every target on the worst frame (60 fps stable, not a mean)
+                verdicts[t['id']] = verdict(worst['lo'], worst['hi'], t['ms'])
             if worst['mid'] <= 33.3:
                 level = 'pass_30'
             if worst['mid'] <= 22.2:
                 level = 'pass_45'
-            if level == 'pass_45' and frame['mid'] <= 16.7:
-                level = 'stretch_60'
+            if worst['mid'] <= 16.7:
+                level = 'target_60'
             rs['results'][str(clk)] = {'core_ms': core_ms, 'cpu_ms': cpu, 'gpu_ms': gpu, 'frame_ms': frame,
                                        'worst_frame_ms': worst, 'critical_core': int(crit), 'verdicts': verdicts,
                                        'level': level}
             out['gates']['%s@%d' % (sc['id'], clk)] = level
         out['scenarios'].append(rs)
-    out['hotspots'], out['queue'] = hotspots(model, items, profs or [], clocks, (ipcs[2], ipc['value'], ipcs[0]))
+    # hotspots and the queue describe the build as it is: the items after the levers that are in it (the 'placed'
+    # scenario's), and no queue row for a fix that is done
+    built = next((sc for sc in model['scenarios'] if sc['id'] == 'placed'), {'levers': []})
+    hot_items = []
+    for it in items:
+        it = dict(it)
+        for lid in built['levers']:
+            if it['id'] in levers[lid].get('scales', {}):
+                flo, fhi = levers[lid]['scales'][it['id']]
+                md = it.get('mid', mid(it['minsn']))
+                it['minsn'] = [it['minsn'][0] * flo, it['minsn'][1] * fhi]
+                it['mid'] = md * mid((flo, fhi))
+        hot_items.append(it)
+    out['built_levers'] = list(built['levers'])
+    out['hotspots'], out['queue'] = hotspots(model, hot_items, profs or [], clocks, (ipcs[2], ipc['value'], ipcs[0]))
     return out
 
 
@@ -409,7 +424,7 @@ def hotspots(model, items, profs, clocks, ipcs):
     queue = []
     for sub, fx in fixes.items():
         g = fx.get('gain_main_minsn') or [0, 0]
-        if max(g) <= 0:
+        if max(g) <= 0 or fx.get('done'):
             continue
         gm = (g[0], mid(g), g[1])
         queue.append({'subsystem': sub, 'fix': fx.get('fix', ''), 'owner': fx.get('owner', ''),
