@@ -254,7 +254,7 @@ threads and the loading screen stay on cores 0-2.
 | AI linear task threads (`iNumHWThreads` > 1, two at > 2) | **likely safe**: the default on every PC (the engine forces >= 2) | `iNumHWThreads=3` (what GetSystemInfo gives; two linear threads), **after** the placement fix; until then 2 |
 | AI task threads (inferred `bUseThreadedAI`) | **known-crashy on PC (hearsay)**: community guides report instability with `bUseThreadedAI=1` in FO3/FNV; off on PC, on on 360 | `bUseThreadedAI=0`; revisit with hardware traces |
 | Rendering Task Thread 2 (`bMTRendering:Display`, 0x011c710c, named from the owner's exe) | **unsafe on the PC code, needs port work (6.8)**: every accumulator is built with one batch renderer, so the worker shares main's and indexes a NULL second one | 0 (ini.cpp leaves it out of the Switch defaults) |
-| Havok workers (`iNumThreads:HAVOK`, `iSimType:HAVOK` 0x011cc2e8) | **needs work (6.9)**: the multithreaded step is in the code (`bhkWorld::StepSimulation` 0x00c6ae70 -> stepMultithreaded over hkJobQueue + hkCpuJobThreadPool) and is selected by **`iSimType=4`** (FUN_00c661d0 maps 0/1/4 -> discrete/continuous/multithreaded, anything else, 3 included, -> continuous); the pool is created in the unreconstructed EnsureObjectsCreated | iSimType 1 (engine default, continuous) |
+| Havok workers (`iNumThreads:HAVOK`, `iSimType:HAVOK` 0x011cc2e8) | **needs work (6.9)**: the multithreaded step is in the code (`bhkWorld::StepSimulation` 0x00c6ae70 -> stepMultithreaded over hkJobQueue + hkCpuJobThreadPool) and is selected by **`iSimType=4`** (FUN_00c661d0 maps 0/1/4 -> discrete/continuous/multithreaded, anything else, 3 included, -> continuous); the pool is created by EnsureObjectsCreated 0x00cbf6b0 (staging), all linked natively | iSimType 1 (engine default, continuous) |
 | threaded morpher / particles / temp effects (`bUseThreadedMorpher` 0x011ded20, `bUseThreadedParticleSystem` 0x011deaec, `bUseThreadedTempEffects` 0x011decbc; named from the exe) | **unverified (6.9)**: PC defaults on, but their readers are not reconstructed and the AI-linear hand-off reads plain cross-thread fields | 1 (ini.cpp port default, = the PC default ini); not counted in the as-built scenario |
 | tasklets, background loading | **likely safe**: PC defaults | engine/ini defaults |
 | `bUseMultibounds` (hearsay name; culling) | likely safe, saves render work | 1 |
@@ -321,10 +321,27 @@ global_object_initializers.cpp:8621-8627). The parts of the hand-off that are re
 * The job queue uses critical sections and semaphores (hkjobqueue.cpp), which are ordered.
 * The world's type comes from `iSimType:HAVOK` through `FUN_00c661d0`, which maps **4** to 3. A plain 3 gives
   continuous.
-* The pool is created in `EnsureObjectsCreated` (not reconstructed; nothing calls the ctor 0x00d2d110 in the
-  decomp).
+* The pool and the job queue are created in `EnsureObjectsCreated` (0x00cbf6b0, staging blk_00ca0000_o2.cpp) ->
+  `CreateObjects` (0x00cbf540).
 
-Next: confirm that path builds and links in the port, then run it under mtqemu with `iSimType=4`.
+**Linked in the port** (link-head 06857911f5ab, `out/addrmap.tsv` and `out/refs.tsv`; `tools/perf/vtcover.py` for the
+vtables): every function of the chain has native code.
+* The chain: `FUN_00624bf0` -> `FUN_00c661d0` (the iSimType map), `bhkWorld::StepSimulation` 0x00c6ae70, the MT
+  step 0x00c93ae0, `EnsureObjectsCreated` 0x00cbf6b0 -> `CreateObjects` 0x00cbf540, the hkCpuJobThreadPool ctor
+  0x00d2d110, the dispatcher 0x00d051b0, `InitHookTable` 0x00d2cca0.
+* The handlers registered: dynamics through `DispatchNodeByKind` 0x00d01e50 and the hooks 0x00d96600-0x00d969e0;
+  the collision-query tables of 0x00da3400 (type 2, 7 functions) and 0x00da3480 (type 3, 8 functions).
+* `hkpMultiThreadedSimulation`'s vftable (0x010ccbc4, 21 slots) and `hkCpuJobThreadPool`'s (0x010ce774, 10 slots):
+  0 slots without native code.
+
+`CreateObjects` keys the pool and the job queue on `GetCurrentThreadId` and rebuilds them when another thread
+steps the world. What is left in these units:
+* placeholder names in staging units (`d10e90_stub`, `getVector_db0e50`, ...);
+* vslot traps in the collision-query jobs (`hkpcpuworldgetclosestpointsjob`, linear cast) and one in the MT
+  simulation unit (`SimBase::onEvent`).
+
+The run needs a booted frame (the boot stops before WinMain's loop today). Then: `[HAVOK] iSimType=4`,
+`iNumThreads=2` in Fallout.ini, under mtqemu and the race checker.
 
 ### 6.5 Memory ordering: what x86 gave for free
 
@@ -630,6 +647,14 @@ reaches it yet: plan60 (12.9 M) lands at a 19.8 ms worst frame, about 3 M short.
 misses even 30 fps at 1020 MHz. At 1785 MHz plan45 already meets the target. Every verdict is still `uncertain`
 (2.6x spread of work, 1.7x of IPC).
 The two measurements that close it stay frameprof on a real frame and B1 (IPC) on hardware.
+
+**A57 prices (`--perf`, P0-perfmodel's fnvnx-perf/1, section 12).**
+* Each `hotspot_functions` row with a `per_call_cycles` price adds an item on its thread: cycles x the mid IPC minus
+  its instructions, per frame. The unpriced work stays at the assumed IPC; `fn_interlocked` is left out, because its
+  price lacks the dmb drain that `interlocked_barriers` models.
+* With P0's 12.6 prices the as-built worst frame at 1020 MHz goes from 35.15 to about 36.5 ms (+0.88 M main;
+  Slerp +0.47 M and the per-object cull +0.29 M are latency-bound).
+* The committed budget takes `--perf` once a farm publishes `<head12>-perf.json`.
 
 ### 11.4 Hotspots (`hotspots[]` in `fnvnx-frame-budget/1`)
 

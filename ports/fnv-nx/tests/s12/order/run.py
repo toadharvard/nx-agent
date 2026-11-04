@@ -238,7 +238,7 @@ def wholeprog(scratch, plugin):
     r = subprocess.run([sys.executable, os.path.join(PORT, 'toolchain', 'order', 'keys_merge.py')] + parts,
                        capture_output=True, text=True)
     open(keys, 'w').write(r.stdout)
-    union = sorted({l for p in parts for l in open(p).read().splitlines() if l.startswith(('field ', 'var '))})
+    union = sorted({l for p in parts for l in open(p).read().splitlines() if l.startswith(('field ', 'var ', 'pfield '))})
     check('field Obj::m_xcount' not in union, 'wholeprog: no single unit knows Obj::m_xcount (the merge bites)')
     got = open(keys).read().splitlines()
     want = sorted(l.split('discover:', 1)[1].strip() for l in open(a) if '// discover:' in l)
@@ -326,6 +326,16 @@ def compile_sh_keys(scratch):
     got = open(keys).read().splitlines() if os.path.exists(keys) else []
     check(r.returncode == 0 and 'field Worker::m_result' in got,
           'compile.sh keys: a changed header refreshes the cached discovery (Worker::m_result in order.keys)')
+    # a unit replaced by a copy with an older mtime (cp -p, rsync -a, tar x): the content decides, not the mtime
+    cpath = os.path.join(tree, 'wholeprog_c.cpp')
+    old_mtime = os.path.getmtime(cpath) - 3600
+    with open(cpath, 'w') as f:
+        f.write('#include "wholeprog.h"\nvoid use_x(Obj *o) { (void)o; }\n')
+    os.utime(cpath, (old_mtime, old_mtime))
+    r = run(out, {'KEYS_ONLY': '1'})
+    got = open(keys).read().splitlines() if os.path.exists(keys) else []
+    check(r.returncode == 0 and 'field Obj::m_xcount' not in got,
+          'compile.sh keys: a unit replaced by an older-mtime copy is discovered again (Obj::m_xcount gone)')
     r = run(out + '_unit', {'ORDER_KEYS': 'unit'})
     m = re.search(r'<_Z6unlockP3Obj>:\n(.*?)\n\n', disasm(out + '_unit'), re.S)
     check(r.returncode == 0 and bool(m) and '\tstlr\t' not in m.group(1),
