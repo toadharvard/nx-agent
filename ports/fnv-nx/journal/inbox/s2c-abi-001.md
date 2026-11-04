@@ -6,7 +6,8 @@
   2 rows differ from the link because the replay reads layouts without the tree's POD check. The next farm link confirms the
   figures. That link also re-probes every layout, because of the pod2 rule.
 * **did** - Bridge-gap pairs, measured as S1b's abiclass BRIDGE pairs (unique src/address/reference):
-  **2,221 -> 32** (replayed with the tree; 58 without it). The commits:
+  **2,221 -> 70** (replayed with the tree). It reached 32, but V1 refuted the e2dbe73 rule (VA-U1..U4), and its 38
+  pairs are manual again. The commits:
   - `e0ed8d5` The synthesized vtable/body objects (`<host>#vtables`) asked for layouts under their own name. 985
     probe rows failed and 1,283 manual rows were never decided on bytes. They now use the host unit. 2,221 -> 943.
   - `0750425` Variadic pairs (`abi.varargs_check`). AArch64 Linux passes anonymous arguments like named ones. A
@@ -52,6 +53,27 @@
     ran without the exe, so that class never bound anything. S2d's `74e3a4a` (link_job FNVNX_EXE) is not merged
     yet. The per-function list is on the private branch `reports/s2c-abi` (`native_undefined.tsv`, for S2d; `s2c_records.tsv` groups the vptr rows for S2c-vt and S13). The other 121 functions call nothing undefined: their names went to
     trap stubs, or the record is older than the link.
+* **did (fuzz/causes/0bd144db1464, S2c 1,186 rows)** - These are vptr-unpaired 677, native-stub-data 448,
+  native-address 111, thunk-binding 11 and split-global 8. vptr-unpaired is S2c-vt's.
+  - **thunk-binding 11**, fixed by the commit "thisadj". MSVC enters an override of a secondary base's virtual with
+    `this` at that base. The exe's vftables show which addresses (`tools/link/thisadj.py`, COL offset d > 0
+    only). The 11 rows' `this` offsets of 24, 60, 136, 164 and 168 match the exe exactly. The address map now
+    names `__fnvnx_msvc_<addr>`, aliased to GCC's `_ZThn<d>_` thunk, for the 79 such addresses on
+    link/c0d6c71516f6 that have one. `__fnv_<addr>` stays the primary entry for native callers.
+  - **For S13**: the harness enters a function at `__fnv_<addr>`. For these 79 addresses it should enter at the
+    address map's link symbol, otherwise the rows remain.
+  - **For the orchestrator**: resolve reads the exe through FNVNX_EXE / PLAYER_EXE (S2d's link_job wiring).
+  - native-stub-data 448 and native-address 111 are not grouped yet on these heads.
+
+* **V1 refutations, fixed (commit "V1 VA-U...")**
+  - VA-U1..U4: an `int f(...)` call site's long long, double, struct by value or struct{float} gives other words
+    than the integer definition reads. Definition parameters taken from anonymous words are manual again.
+  - ABI-R1: a pointer with several cv-qualifiers was not recognized.
+  - OVR-F1: the Link fingerprint now differs between auto, none and a table.
+  - OVR-E1: an empty OVERRIDE means off.
+  - RPL-B1: abireplay strips `#bodiesN`.
+  - V1's test_s2c_s4_batch.py now reports "refuted: none" here.
+
 * **measured** - abireplay on link/c0d6c71516f6 with the override table: rows bridge 4,732, manual 79, same 1,995,
   x86-inconsistent 3,276 (before: bridge 4,183, manual 2,632, x86-inconsistent 3,267). The 9 new x86-inconsistent
   rows are pairs that were `manual` before and are now decided on bytes.

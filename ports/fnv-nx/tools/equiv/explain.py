@@ -9,10 +9,14 @@ reports are read as merge_reports.py --git reads them. Every differing function 
 unit the prepared side does not compile (unit, rule, first error) is matched against:
 
   * explained.tsv - one row per explanation: `class  what  kind  rule  unit  addr  error  reason`, tab-separated.
-    `what` is `fn` (differing function) or `unit` (no-build unit); `kind` eh / retarget / code (fn rows, `*` any);
+    `what` is `fn` (differing function), `unit` (no-build unit) or `wrapper` (one retarget pair: `addr` the
+    pristine binding, `error` a regular expression on the prepared one); `kind` eh / retarget / code (`*` any);
     `rule` the attributed rule or group (`*` any; `a|b` alternatives); `unit` a regular expression on the unit path
     (`*` any; anchored at both ends); `addr` 0x... or `*`; `error` a regular expression searched in the first error
     (unit rows; `*` any). The first matching row wins.
+  * a retarget whose report lists its relocation pairs (`## Retargets`) is explained by the class of the first
+    `wrapper` row when every pair matches a `wrapper` row (whatever rule the gate attributed it to); a retarget
+    without pairs falls back to the `fn` rows.
   * PATCHES.md, section "By-design MSVC differences (S11 gate)": S1b's by-design sites (source, function address),
     class `S1B-BYDESIGN`, whatever rule the gate attributed them to.
 
@@ -45,8 +49,8 @@ def load_table(path=TABLE):
         if len(parts) != len(FIELDS):
             raise SystemExit('explain: %s:%d: %d fields, want %d' % (path, n, len(parts), len(FIELDS)))
         r = dict(zip(FIELDS, (p.strip() for p in parts)))
-        if r['what'] not in ('fn', 'unit'):
-            raise SystemExit('explain: %s:%d: what must be fn or unit' % (path, n))
+        if r['what'] not in ('fn', 'unit', 'wrapper'):
+            raise SystemExit('explain: %s:%d: what must be fn, unit or wrapper' % (path, n))
         r['unit_re'] = None if r['unit'] == '*' else re.compile(r['unit'] + r'\Z')
         r['error_re'] = None if r['error'] == '*' else re.compile(r['error'])
         r['rules'] = None if r['rule'] == '*' else set(r['rule'].split('|'))
@@ -82,9 +86,24 @@ def parse_unit(line):
     return dict(unit=m.group(1), rule=m.group(2), error=m.group(3)) if m else None
 
 
+def classify_pairs(pairs, table):
+    """class of the first wrapper row when every 'A>B' pair matches a wrapper row, else None"""
+    first = None
+    for pair in pairs:
+        a, _, b = pair.partition('>')
+        hit = next((r for r in table if r['what'] == 'wrapper' and r['addr'].lower() == a.lower()
+                    and (r['error_re'] is None or r['error_re'].search(b))), None)
+        if hit is None:
+            return None
+        first = first or hit['cls']
+    return first
+
+
 def classify_fn(f, table, bydesign):
     if (f['unit'], f['addr']) in bydesign:
         return 'S1B-BYDESIGN'
+    if f['kind'] == 'retarget' and f.get('pairs'):
+        return classify_pairs(f['pairs'], table)
     for r in table:
         if r['what'] != 'fn':
             continue
@@ -116,11 +135,18 @@ def classify_unit(u, table):
 
 def explain(reports, table, bydesign):
     fns, units, seen_f, seen_u = [], [], set(), set()
+    pairs = {}
+    for r in reports:
+        for ln in r.get('retargets', []):
+            p = ln.split()
+            if len(p) == 3 and p[2] != '-':
+                pairs[(p[0], p[1].lower())] = p[2].split(',')
     for r in reports:
         for ln in r['differing']:
             f = parse_fn(ln)
             if f and (f['unit'], f['addr']) not in seen_f:
                 seen_f.add((f['unit'], f['addr']))
+                f['pairs'] = pairs.get((f['unit'], f['addr']), [])
                 f['cls'] = classify_fn(f, table, bydesign)
                 fns.append(f)
         for ln in r['nobuild']:
