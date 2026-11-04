@@ -3,6 +3,7 @@
 #include "d3d9cap.h"
 #include "nx/front.h"
 #include "d3d9_state.h"
+#include "../../shaders/include/fnvnx_dk_layout.h"   // fnvnx_dk_overlay_defs: def'd constants over UBO 0
 #include <map>
 #include <string>
 #include <vector>
@@ -382,9 +383,11 @@ public:
         uint32_t o;
         float* u = (float*)Alloc(4096, &o); if (!u) return Fail("frame arena full");
         memcpy(u, vsc, 4096);
+        fnvnx_dk_overlay_defs(vi->second.glsl.c_str(), (float(*)[4])u);   // a def overrides c# for the program (D3D9)
         a = enc.Op(NxOp_BindUbo, 5); a[0] = 1; a[1] = 0; a[2] = arenaBlock; a[3] = o; a[4] = 4096;
         u = (float*)Alloc(4096, &o); if (!u) return Fail("frame arena full");
         memcpy(u, psc, 4096);
+        fnvnx_dk_overlay_defs(pi->second.glsl.c_str(), (float(*)[4])u);
         a = enc.Op(NxOp_BindUbo, 5); a[0] = 2; a[1] = 0; a[2] = arenaBlock; a[3] = o; a[4] = 4096;
         for (int s = 0; s < 2; s++) {
             uint8_t* ib1 = (uint8_t*)Alloc(512, &o); if (!ib1) return Fail("frame arena full");

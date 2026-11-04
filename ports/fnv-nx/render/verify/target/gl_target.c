@@ -26,6 +26,7 @@
 #include <string.h>
 #include <math.h>
 #include "v6n_target.h"
+#include "../../shaders/include/fnvnx_dk_layout.h"   /* the def overlay of UBO 0 (fnvnx_dk_overlay_defs) */
 #include "d3d9_state.h"
 
 /* ---- mutants ------------------------------------------------------------------------------------------------ */
@@ -598,7 +599,8 @@ static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
          * every V6n GL draw (LOWER_LEFT origin, image row = GL row) */
         float drv[16] = {0, 0, M("upper_left_origin") ? 1.0f : -1.0f, 0};
         if (M("vs_posfix_halfpixel")) { drv[0] = -1.0f / (float)t->vp.Width; drv[1] = 1.0f / (float)t->vp.Height; }
-        glBindBuffer(GL_UNIFORM_BUFFER, g_ubo2[0]); glBufferData(GL_UNIFORM_BUFFER, sizeof t->vsc, t->vsc, GL_STREAM_DRAW);
+        static float vc[256][4]; memcpy(vc, t->vsc, sizeof vc); fnvnx_dk_overlay_defs(t->vs_glsl, vc);   /* defs over c# */
+        glBindBuffer(GL_UNIFORM_BUFFER, g_ubo2[0]); glBufferData(GL_UNIFORM_BUFFER, sizeof vc, vc, GL_STREAM_DRAW);
         glBindBufferBase(GL_UNIFORM_BUFFER, 8, g_ubo2[0]);
         glBindBuffer(GL_UNIFORM_BUFFER, g_ubo2[1]); glBufferData(GL_UNIFORM_BUFFER, sizeof drv, drv, GL_STREAM_DRAW);
         glBindBufferBase(GL_UNIFORM_BUFFER, 10, g_ubo2[1]);
@@ -717,7 +719,8 @@ static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     if (t->ps) {   /* layout contract UBO 0 (c#) and UBO 2 (driver: fog, alpha test) */
         glUniform1f(U("uYSign"), M("upper_left_origin") ? 1.0f : -1.0f);
         if (!g_ubo[0]) glGenBuffers(2, g_ubo);
-        glBindBuffer(GL_UNIFORM_BUFFER, g_ubo[0]); glBufferData(GL_UNIFORM_BUFFER, sizeof t->psc, t->psc, GL_STREAM_DRAW);
+        static float pc[256][4]; memcpy(pc, t->psc, sizeof pc); fnvnx_dk_overlay_defs(t->ps_glsl, pc);   /* defs over c# */
+        glBindBuffer(GL_UNIFORM_BUFFER, g_ubo[0]); glBufferData(GL_UNIFORM_BUFFER, sizeof pc, pc, GL_STREAM_DRAW);
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_ubo[0]);
         struct { float fogcolor[4], fog[4]; int32_t alpha[4]; float alpharef[4], texbem[16][4]; } drv;
         memset(&drv, 0, sizeof drv);

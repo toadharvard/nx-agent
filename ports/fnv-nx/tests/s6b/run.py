@@ -40,8 +40,8 @@ def main():
     ap.add_argument("--v6n-bin", default=os.path.join(ROOT, "build/v6n/bin"))
     ap.add_argument("--no-exec", action="store_true")
     a = ap.parse_args()
-    asm, tool, unit, cent = (os.path.join(a.build, x) for x in ("s6b_asm", "sdp2dksh", "s6b_unit", "s6b_centroid"))
-    for t in (asm, tool, unit, cent):
+    asm, tool, unit, cent, relc = (os.path.join(a.build, x) for x in ("s6b_asm", "sdp2dksh", "s6b_unit", "s6b_centroid", "s6b_relc"))
+    for t in (asm, tool, unit, cent, relc):
         if not os.path.exists(t):
             sys.exit("missing %s: run render/shaders/build.sh --tests" % t)
     os.makedirs(a.out, exist_ok=True)
@@ -50,6 +50,9 @@ def main():
     print(u.stdout.strip())
     unit_ok = u.returncode == 0
     u = subprocess.run([cent], capture_output=True, text=True)       # centroid on handwritten tokens
+    print(u.stdout.strip())
+    unit_ok = unit_ok and u.returncode == 0
+    u = subprocess.run([relc], capture_output=True, text=True)       # c[a0 + n] past a CTAB array onto a def (R1)
     print(u.stdout.strip())
     unit_ok = unit_ok and u.returncode == 0
 
