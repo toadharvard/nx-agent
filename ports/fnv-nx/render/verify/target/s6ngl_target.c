@@ -368,4 +368,4 @@ static int s_psh(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
 }
 static void s_psc(V6nTarget* t, uint32_t reg, const float v[4]) { if (reg < 256) memcpy(t->psc[reg], v, 16); }
 const V6nOps v6n_target_ops = {"s6n-nxgl", s_begin, s_end, s_clear, s_rs, s_samp, s_tss, s_tex, s_notex, s_vp,
-                               s_scissor, s_proj, s_draw, s_readback, s_psh, s_psc};
+                               s_scissor, s_proj, s_draw, s_readback, s_psh, s_psc, NULL, NULL, NULL};

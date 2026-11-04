@@ -24,6 +24,17 @@ selfcheck() {
 	echo "== coverage vs the exact D3D9 rule (raster_ref.py): V6n's GL executor exact, the oracle within 5 px"
 	py "$V/rastercheck.py" v6n_gl || bad=1; py "$V/rastercheck.py" --allow 5 v6n_nine || bad=1
 	echo "== analytic claim checks"; py "$V/claims.py" || bad=1
+	if [ -x "${FNVNX_SHADERS_BUILD:-$ROOT/render/shaders/build/host}/s6b_asm" ]; then
+		echo "== shader paths (S6b tools): VS+PS+indexed scenes, the double-half-pixel trap, PS parity self-test (P1 known)"
+		py "$V/shaders/vsscenes.py" || bad=1
+		py "$V/shaders/vsscenes.py" --mutant vs_posfix_halfpixel > /dev/null || { echo "vs_posfix_halfpixel survived"; bad=1; }
+		py "$V/shaders/parity.py" --selftest | tail -1
+	else echo "== shader paths skipped: build S6b's tools (render/shaders/build.sh --tests, FNVNX_SHADERS_BUILD)"; fi
+	echo "== capture/replay mutation (C66): every corrupted capture must be flagged by S6n's replay_gl"
+	if [ -n "${S6N_TESTS:-}" ] && [ -f "$S6N_TESTS/cap/n0.nxcap" ]; then
+		n=$(py "$V/capture/nxcap.py" mutate "$S6N_TESTS/cap/n0.nxcap" --replay "$S6N_TESTS/replay_gl" | grep -c "rc=1")
+		echo "$n/5 capture mutants flagged"; [ "$n" = 5 ] || bad=1
+	else echo "skipped: make -C tests/s6n capture OUT=<dir>, then S6N_TESTS=<dir>"; fi
 	for m in d24_bias_scale x8_dst_alpha; do
 		py "$V/claims.py" --mutant $m > /dev/null && { echo "claim check missed mutant $m"; bad=1; }
 	done
