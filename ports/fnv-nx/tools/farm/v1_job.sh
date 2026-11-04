@@ -126,7 +126,7 @@ audit() {  # audit <name> <command...>: run once, keep the output and the exit s
 }
 O=$LINK/out; F=$LINK/fixed
 audit selftest python3 "$V/selftest_harness.py" "$RUN/selftest/work"
-for s in adversarial_abi adversarial_r3 adversarial_cname adversarial_typeinfo chain_x87 repro_cname_abi \
+for s in adversarial_abi adversarial_r3 adversarial_cname adversarial_typeinfo chain_x87 repro_cname_abi repro_ecx_push_arg \
          repro_typeinfo_mix; do
   audit "repro-$s" python3 "$V/$s.py" "$RUN/repro-$s/work"
 done

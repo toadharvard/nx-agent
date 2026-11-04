@@ -119,7 +119,11 @@ def main():
         for cl in c[6].split(','):
             cl = re.sub(r'\(.*', '', cl)
             by_class[cl].append(k)
-    if os.environ.get('V1_SELECT') == 'fastcall-agg':
+    if os.environ.get('V1_SELECT') == 'cast':
+        for k, c in uniq.items():
+            if 'cast-call' in c[6]:
+                chosen[k] = 'cast-call'
+    elif os.environ.get('V1_SELECT') == 'fastcall-agg':
         # every bridged pair with a __fastcall side returning an aggregate by value (adversarial shape B)
         dall = bh.undname(sorted({n for k in uniq for n in k}))
         for k in uniq:
@@ -147,6 +151,16 @@ def main():
         def_units = [u for u, s in dba.get(addr, []) if s == c[4]]
         lref = {t: v for t, v in lays.get(obj, {}).items()}
         ldef = {t: v for t, v in lays.get(def_units[0], {}).items()} if def_units else {}
+        caller = c[3]
+        cm = re.search(r'called through a cast: (.*?)\(__(\w+)\*\)\((.*)\)\s*$', c[8])
+        if cm:      # the unit calls the name through a cast: the bridge is the cast's, so is the harness caller
+            ret, cc, params = cm.group(1).strip(), cm.group(2), [x.strip() for x in bh.split_top(cm.group(3))]
+            if cc == 'thiscall' and params:
+                txt = 'public: %s __thiscall V1CAST::f(%s)' % (ret, ', '.join(params[1:]) or 'void')
+            else:
+                txt = '%s __%s f(%s)' % (ret, cc, ', '.join(params) or 'void')
+            caller = 'V1CAST|' + c[3]
+            dem[caller] = txt
         outcomes = set()
         notes = []
         detail = ''
@@ -157,7 +171,7 @@ def main():
             sts = []
             for seed in range(nseeds):
                 try:
-                    st, nt = bh.run_case(c[3], c[4], hr, hd, asm, os.path.join(work, '%08x_%s' % (addr, bname[-8:])),
+                    st, nt = bh.run_case(caller, c[4], hr, hd, asm, os.path.join(work, '%08x_%s' % (addr, bname[-8:])),
                                          seed=seed + 1, dem=dem)
                 except bh.Skip as e:
                     st, nt = 'skip ' + str(e), []
