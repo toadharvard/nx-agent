@@ -912,6 +912,24 @@ Expected on the next farm link: about 600 fewer undefined C++ names. Most of the
 a body or an address anywhere: what they need is S1's (bodies, `@fnv` bindings or class shapes), and the table
 gives the counts.
 
+## Declared-only functions (`bodies.py`, stream S2d)
+
+`fnvlink.py bodies out/ tree/ [--msvc-objs <pristine dir>] [--names <guest undefined.txt>]` runs between two
+resolves, on the `refs.tsv` rows still `unresolved`, `unresolved-ctor-dtor` or `ctor-dtor-trap` (the C++ names the
+guest link turns into trap stubs; `vslot-unresolved` stays S2c's). Every name gets one class, first match wins:
+
+| class | rule | fix |
+|---|---|---|
+| `addr` | class shells (`X_shell`, `X_<addr8>`) stripped, then namespaces dropped, the name and level-2 parameters match MSVC names of one address the native build defines (`addrmap.tsv` F; C for C1/C2, X for D1/D2; never G) | the next resolve binds it to `__fnv_<addr>` (`bodies/bind.tsv`, class `body-addr`); C2/D2 to the complete-object definition |
+| `msvc-empty` | a pristine object defines it (code COMDAT) as `ret`, `ret N` or `mov eax, ecx; ret[ N]` | weak AArch64 `ret` stub (`zz_bd_empty.o`) |
+| `msvc-inline` | a pristine object `u<i>.obj` defines a real body: unit *i*'s source has it | unit *i* compiled again with `-fkeep-inline-functions`, only the wanted symbols kept (`vtables.gc_weaken`); a body under a shell's name renamed when the relaxed key pairs one symbol |
+| `special-default` | default / copy constructor, destructor, copy assignment of a non-template class, no pristine body | out-of-line `= default` in the referencing unit (the implicit member's semantics; not a decomp body) |
+| `missing` | the rest, and synthesized items GCC refuses (`synth-failed`) | listed with the referencing units for the real-exe path (S3) |
+
+Output in `out/bodies/` (local): `bodies.tsv`, `bind.tsv`, `synth.tsv` (objects the next resolve links as extra
+objects of their host unit, like `vtables/synth.tsv`), `stats.txt`. The resolve hook is two marked blocks in
+`fnvlink.py` (`# ---- S2d`); without a `bodies/` directory resolve is unchanged. Tests: `tests/s2d/test_bodies.py`.
+
 ## Open problems
 
 * **Virtual functions behind native vtables**: the Itanium/MSVC slot correspondence and the image vftable slots
