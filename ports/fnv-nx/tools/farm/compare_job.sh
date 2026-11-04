@@ -226,11 +226,19 @@ v = lambda c: subprocess.run(c, capture_output=True, text=True, shell=True).stdo
 out = {'format': 'fnvnx-compare/1', 'commit': commit, 'candidate': cand, 'seconds': int(secs), 'sets': sets,
        'versions': {'wine': v('wine --version'), 'mesa': v("dpkg-query -W -f='${Version}\\n' libgl1-mesa-dri | head -1")},
        'notes': notes, 'status': 'failed' if any(x.startswith('FAILED') for x in notes) else 'complete'}
+# the coverage gate's verdict (D21): FAIL unless the real-game set was measured and every draw of every set passes
+why = []
+if 'game' not in sets: why.append('game: not measured')
+dg0 = load(os.path.join(run, 'drawgate', 'drawgate.json'))
+if not dg0: why.append('coverage gate: not run')
+elif dg0['fail'] or dg0['skipped']: why.append(f"{dg0['fail']} draws fail, {dg0['skipped']} skipped")
+out['coverage_gate'] = {'status': 'fail' if why else 'pass', 'why': why}
 json.dump(out, open(js, 'w'), indent=1)
 m = lambda s: s['metric']
 L = [f'# S16 render parity at {commit[:12]}', '',
      f"- candidate: nx_render at {cand[:12] or '-'}; reference: nxd9play under {out['versions']['wine']}, Mesa {out['versions']['mesa']} llvmpipe",
-     f"- status: {out['status']}; {secs} s", '']
+     f"- status: {out['status']}; {secs} s",
+     f"- **coverage gate: {out['coverage_gate']['status'].upper()}**" + (f" ({'; '.join(out['coverage_gate']['why'])})" if out['coverage_gate']['why'] else ''), '']
 for n, s in sets.items():
     x = m(s)
     L.append(f"- **{n}**: {s['status']}, metric {x['frames_over']}/{x['frames']} over, mean {x['mean_abs']}, max {x['max_abs']}"
@@ -309,7 +317,9 @@ if [ -n "$GAMECAPS" ] && [ -n "$SDP" ] && deadline_ok 900; then
 	glsl_dir
 	CAND_SHADERS=$GLSL run_set game "$GAMECAPS"
 elif [ -n "$GAMECAPS" ]; then
-	NOTES+=("game captures skipped: no shader packages or FARM_DEADLINE")
+	NOTES+=("game: not measured (no shader packages or FARM_DEADLINE)")
+else
+	NOTES+=("game: not measured (no gamedata/captures)")   # V1 GC-2: said, and the coverage gate fails on it
 fi
 coverage_gate
 write_report
