@@ -18,7 +18,7 @@ OUT ?= $(HERE)/build
 CC ?= gcc
 CXX ?= g++
 FLAGS := -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar -pthread \
-         -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt
+         -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
@@ -99,7 +99,7 @@ XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
 XFLAGS := -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
-          -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt
+          -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3
 ilp32:
 	@set -e; for f in $(PLAT_C); do echo "ilp32 cc  $${f#$(ROOT)/}"; $(XCC) -std=gnu11 $(XFLAGS) $$f; done
 	@set -e; for f in $(PLAT_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done

@@ -86,8 +86,20 @@ def test_budget(tmp):
     import json
     import frame_budget
     model = json.load(open(os.path.join(HERE, '..', '..', 'tools', 'perf', 'budget_model.json')))
+    model_cpi = model
+    model = json.loads(json.dumps(model))   # rows without their own CPI take --perf's prices (the checks below)
+    for h in model['hotspot_functions']:
+        h.pop('cpi', None)
     b = frame_budget.build(model)
     check(b['schema'] == 'fnvnx-frame-budget/1', 'budget: schema')
+    # a row with its own CPI is priced from it and its current instructions per call, whatever --perf says (V1 P1)
+    bc = frame_budget.build(model_cpi, perf={'schema': 'fnvnx-perf/1', 'per_call_cycles': []})
+    sc_ = next(h for h in model_cpi['hotspot_functions'] if h['id'] == 'fn_slerp')
+    rc = next((r for r in bc['measured']['a57']['rows'] if r['id'] == 'fn_slerp'), None)
+    want_c = frame_budget.mid([sc_['per_call_insn'][0] * sc_['cpi']['lo'], sc_['per_call_insn'][1] * sc_['cpi']['hi']]) \
+        * frame_budget.mid(sc_['calls'])
+    check(rc is not None and abs(rc['cycles_per_frame_mid'] - want_c) <= 1,
+          'budget: a row with its own CPI is priced from it (slerp %.0f cycles per frame)' % want_c)
     # --perf (P0's fnvnx-perf/1): a priced row adds cycles x IPC - instructions on its thread; fn_interlocked is skipped
     sl = next(h for h in model['hotspot_functions'] if h['id'] == 'fn_slerp')
     perf = {'schema': 'fnvnx-perf/1', 'per_call_cycles': [
@@ -101,6 +113,14 @@ def test_budget(tmp):
     check([r['id'] for r in a57['rows']] == ['fn_slerp'] and abs(a57['delta_minsn_mid'] - want) < 1e-3 and
           abs(d_main - want) < 2e-3 and bp['inputs']['a57'],
           'budget: --perf prices a row on its thread (slerp at CPI 2: +%.3f M main), interlocked skipped' % d_main)
+    # V1 45e8724 T1: in every case the priced row costs its cycles at the clock, not cycles x 0.8 / that case's IPC
+    ipc = next(a for a in model['assumptions'] if a['id'] == 'ipc')
+    cyc_hi = sl['per_call_insn'][1] * 2 * sl['calls'][1]
+    ins_hi = sl['per_call_insn'][1] * sl['calls'][1]
+    want_ms = (cyc_hi - ins_hi / ipc['range'][0]) / (1020 * 1e3)
+    got_ms = bp['scenarios'][0]['results']['1020']['core_ms']['0']['hi'] - b['scenarios'][0]['results']['1020']['core_ms']['0']['hi']
+    check(abs(got_ms - want_ms) < 0.02, 'budget: --perf hi case = the row\'s cycles at 1020 MHz (+%.2f ms, want +%.2f)'
+          % (got_ms, want_ms))
     check(abs(b['budget_minsn']['1020']['pass_45'] - 18.1) < 0.1 and abs(b['budget_minsn']['1785']['pass_45'] - 31.7) < 0.1,
           'budget: 45 fps per-core budget 18.1 M at 1020 MHz, 31.7 M at 1785 MHz (IPC 0.8)')
     want = {'%s@%d' % (s['id'], c) for s in model['scenarios'] for c in (1020, 1785)}

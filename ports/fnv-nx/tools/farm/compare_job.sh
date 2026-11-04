@@ -12,6 +12,8 @@
 #   permutations    perm.py on gamedata/shaders' shaderpackage019 (COMPARE_SDP) -> the same, plus the reference of
 #                   the --perturb 1e-5 captures (conditioning floor) -> permreport (pass / over / ill / vacuous);
 #                   seeds of programs that drew nothing come from permcover.py, cached in $FARM_HOME/compare/salts-*
+#   coverage gate   (D21) per-draw runs of the synthetic and game sets on both sides -> drawgate.py: passing draws /
+#                   all draws, skipped draws, by family and by class of each frame's first divergence
 #   game captures   when private gamedata/captures exists: real-game NXD9 recorded with d9cap (empty GLSL, so the
 #                   candidate gets --shaders from every package of gamedata/shaders) -> the same verdicts
 # Report: <report.md> with numbers, the metric lines and the program classes. Sidecar <report>.json
@@ -113,6 +115,7 @@ fetch_shaders() {   # gamedata/shaders (agent-only), checked against its SHA256S
 
 fetch_captures() {   # real-game NXD9 captures recorded with d9cap (private gamedata/captures, agent-only) -> GAMECAPS
 	GAMECAPS=""
+	rm -rf "$W/run/game" "$W/caps/game"   # V1 GC-1: a run without captures must not report an earlier run's game set
 	local gd=$W/gamedata-captures
 	[ -n "${ARTIFACTS:-}" ] || return 0
 	if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/gamedata/captures:refs/remotes/origin/gamedata/captures" 2>/dev/null; then
@@ -122,19 +125,24 @@ fetch_captures() {   # real-game NXD9 captures recorded with d9cap (private game
 			git -C "$ARTIFACTS" archive "$c" | tar -x -C "$gd" && echo "$c" >"$gd/.rev"
 		fi
 	fi
-	# .nxd9 or .nxd9.xz; when the branch's README lists a sha256 for the .nxd9, it must match (else skipped)
+	# .nxd9 or .nxd9.xz, at any depth; each is measured under its path in the branch (menu/f.nxd9 -> menu_f.nxd9),
+	# so equal file names in different directories stay apart (V1 GC-3). When the README lists a sha256 for the
+	# .nxd9, it must match (else skipped, with a note).
 	mkdir -p "$W/caps/game"; rm -f "$W/caps/game"/*.nxd9
-	local f n want
-	for f in $(find "$gd" -name '*.nxd9' -o -name '*.nxd9.xz' | sort); do
-		n=$(basename "${f%.xz}")
+	local f rel n flat want
+	while IFS= read -r f; do
+		rel=${f#"$gd"/}; n=${rel%.xz}; flat=${n//\//_}
 		case "$f" in *.xz) [ -f "$gd/$n" ] || xz -dkc "$f" >"$gd/$n" || { NOTES+=("game capture $n: xz failed"); continue; } ;; esac
 		want=$(grep -o "| $(basename "$f") |.*" "$gd/README.md" 2>/dev/null | grep -oE '[0-9a-f]{64}' | head -1)
 		if [ -n "$want" ] && [ "$(sha256sum "$gd/$n" | cut -d' ' -f1)" != "$want" ]; then
 			NOTES+=("game capture $n: sha256 differs from the README, skipped"); continue
 		fi
-		# 8.3 conformance (nxd9norm.py: d9cap's empty managed-texture levels get their size), the same file for both sides
-		python3 -I "$CMP/nxd9norm.py" "$gd/$n" "$W/caps/game/$n" >/dev/null || { NOTES+=("game capture $n: nxd9norm failed"); continue; }
-	done
+		[ -e "$W/caps/game/$flat" ] && { NOTES+=("game capture $n: name $flat taken twice, skipped"); continue; }
+		# 8.3 conformance (nxd9norm.py: d9cap's empty managed-texture levels get their size), the same file for both
+		# sides. A file nxd9norm cannot read is measured as it is: it then fails visibly, never silently drops out.
+		python3 -I "$CMP/nxd9norm.py" "$gd/$n" "$W/caps/game/$flat" >/dev/null 2>&1 ||
+			{ cp "$gd/$n" "$W/caps/game/$flat"; NOTES+=("game capture $n: nxd9norm failed, measured as recorded"); }
+	done < <(find "$gd" \( -name '*.nxd9' -o -name '*.nxd9.xz' \) -not -path "$gd/.git/*" | sort | awk '{k=$0; sub(/\.xz$/, "", k); if (!(k in s)) {s[k]=1; print}}')
 	if ls "$W/caps/game"/*.nxd9 >/dev/null 2>&1; then
 		GAMECAPS=$W/caps/game
 		NOTES+=("game captures: $(ls "$GAMECAPS" | wc -l) from gamedata/captures at $(cut -c1-12 "$gd/.rev")")
@@ -172,6 +180,33 @@ run_set() {   # run_set <name> <capture dir> [perturbed capture dir]
 	fi
 }
 
+# ---- the render coverage gate (D21): every draw of the synthetic and game sets, per-draw on both sides -------------
+perdraw() {   # perdraw <set> <capture dir> [candidate --shaders dir]
+	local o=$W/run/$1/pd to=${COMPARE_TIMEOUT_S:-1500}
+	rm -rf "$o"; mkdir -p "$o"
+	python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$o/ref" --timeout "$to" \
+		"$2"/*.nxd9 -- --per-draw >"$o/ref.log" 2>&1 || NOTES+=("$1: per-draw reference exit $?")
+	python3 -I "$CMP/replay.py" cand --bin "$NXR/nx_render" --out "$o/cand" --timeout "$to" ${3:+--shaders "$3"} \
+		"$2"/*.nxd9 -- --per-draw >"$o/cand.log" 2>&1 || NOTES+=("$1: per-draw candidate exit $?")
+	DG_SETS+=(--set "$1=$2:$o/ref:$o/cand")
+}
+coverage_gate() {
+	rm -rf "$W/run/drawgate"   # V1 GC-1: never an earlier run's gate
+	if [ ! -f "${BIN:-}/nxd9play.exe" ] || [ ! -x "${NXR:-}/nx_render" ] || [ ! -d "$W/caps/synthetic" ]; then
+		NOTES+=("coverage gate: not run (no reference renderer, candidate or synthetic captures)"); return 0
+	fi
+	if ! deadline_ok 600; then NOTES+=("coverage gate skipped: FARM_DEADLINE"); return 0; fi
+	log "coverage gate"
+	DG_SETS=()
+	perdraw synthetic "$W/caps/synthetic"
+	[ -n "${GAMECAPS:-}" ] && perdraw game "$GAMECAPS" "${GLSL:-}"
+	[ -f "$W/run/perm/perm/permreport.json" ] && DG_SETS+=(--set perm=:: --perm "$W/run/perm/perm/permreport.json")
+	local f; DG_SDP=(); for f in "$W"/gamedata-shaders/shaderpackage*.sdp; do [ -f "$f" ] && DG_SDP+=(--sdp "$f"); done
+	python3 -I "$CMP/drawgate.py" "${DG_SETS[@]}" "${DG_SDP[@]}" --out "$W/run/drawgate" >"$W/run/drawgate.log" 2>&1 ||
+		NOTES+=("drawgate failed (log $W/run/drawgate.log)")
+	rm -rf "$W"/run/*/pd   # the per-draw images (hundreds of MB, game-derived) are not kept
+}
+
 write_report() {
 	python3 -I - "$W/run" "$REPORT" "$JSON" "$COMMIT" "${CAND:-}" "$(( $(date +%s) - T0 ))" "${NOTES[@]}" <<'EOF'
 import json, os, subprocess, sys
@@ -191,11 +226,19 @@ v = lambda c: subprocess.run(c, capture_output=True, text=True, shell=True).stdo
 out = {'format': 'fnvnx-compare/1', 'commit': commit, 'candidate': cand, 'seconds': int(secs), 'sets': sets,
        'versions': {'wine': v('wine --version'), 'mesa': v("dpkg-query -W -f='${Version}\\n' libgl1-mesa-dri | head -1")},
        'notes': notes, 'status': 'failed' if any(x.startswith('FAILED') for x in notes) else 'complete'}
+# the coverage gate's verdict (D21): FAIL unless the real-game set was measured and every draw of every set passes
+why = []
+if 'game' not in sets: why.append('game: not measured')
+dg0 = load(os.path.join(run, 'drawgate', 'drawgate.json'))
+if not dg0: why.append('coverage gate: not run')
+elif dg0['fail'] or dg0['skipped']: why.append(f"{dg0['fail']} draws fail, {dg0['skipped']} skipped")
+out['coverage_gate'] = {'status': 'fail' if why else 'pass', 'why': why}
 json.dump(out, open(js, 'w'), indent=1)
 m = lambda s: s['metric']
 L = [f'# S16 render parity at {commit[:12]}', '',
      f"- candidate: nx_render at {cand[:12] or '-'}; reference: nxd9play under {out['versions']['wine']}, Mesa {out['versions']['mesa']} llvmpipe",
-     f"- status: {out['status']}; {secs} s", '']
+     f"- status: {out['status']}; {secs} s",
+     f"- **coverage gate: {out['coverage_gate']['status'].upper()}**" + (f" ({'; '.join(out['coverage_gate']['why'])})" if out['coverage_gate']['why'] else ''), '']
 for n, s in sets.items():
     x = m(s)
     L.append(f"- **{n}**: {s['status']}, metric {x['frames_over']}/{x['frames']} over, mean {x['mean_abs']}, max {x['max_abs']}"
@@ -207,11 +250,27 @@ for n, s in sets.items():
         L.append('  |---|---|---|---|---|')
         for mo, c in s['by_model'].items():
             L.append(f"  | {mo} | " + ' | '.join(str(c.get(k, 0)) for k in ('pass', 'over', 'ill', 'vacuous')) + ' |')
+dg = load(os.path.join(run, 'drawgate', 'drawgate.json'))
+if dg:
+    out['drawgate'] = {k: dg[k] for k in ('draws', 'pass', 'fail', 'skipped', 'pass_fraction', 'by_set', 'by_family',
+                                          'first_divergence_by_class')}
+    out['drawgate']['first_divergences'] = [{k: f[k] for k in ('set', 'capture', 'frame', 'draw', 'family', 'class',
+                                                                 'why', 'vs_name', 'ps_name')} for f in dg['first_divergences']]
+    json.dump(out, open(js, 'w'), indent=1)
+    L += ['', '## Render coverage gate (D21)', '',
+          f"- **coverage**: {dg['pass']}/{dg['draws']} draws pass ({dg['pass_fraction']}), {dg['skipped']} skipped; first divergences "
+          + (', '.join(f'{k} {v}' for k, v in sorted(dg['first_divergence_by_class'].items())) or 'none'), '',
+          '| family | pass | fail | skipped |', '|---|---|---|---|']
+    for fam, c in sorted(dg['by_family'].items(), key=lambda x: -sum(x[1].values())):
+        L.append(f"| {fam} | {c.get('pass', 0)} | {c.get('fail', 0)} | {c.get('skipped', 0) + c.get('unaligned', 0)} |")
+    L += [''] + [f"- first divergence {f['set']}/{f['capture']} f{f['frame']} d{f['draw']}: **{f['class']}** ({f['why']}); "
+                 f"{f['vs_name']} + {f['ps_name']}" for f in dg['first_divergences']]
 L += ['', '## Notes', ''] + [f'- {x}' for x in notes] + ['', '```json fnvnx-compare', json.dumps(out, indent=1), '```']
 open(rep, 'w').write('\n'.join(L) + '\n')
 EOF
 }
 
+rm -rf "$W/run"   # V1 GC-1: every set and the gate are this run's
 setup_host
 build_shader_tools
 build_nxd9play
@@ -225,7 +284,9 @@ run_set synthetic "$W/caps/synthetic"
 if [ -n "$SDP" ] && deadline_ok 900; then
 	log "permutations"
 	# coverage-guided seeds (permcover.py), cached per package and perm.py: computed once from a first reference run
-	SALTS=$W/salts-$(key_of "$SDP" "$CMP/perm.py" "$CMP/permcover.py").json
+	# the key covers everything that decides whether a seed's reference frame draws (V1 SK-3): the package, the
+	# generator, the shader tools that assemble and translate, and the reference renderer
+	SALTS=$W/salts-$(key_of "$SDP" "$CMP/perm.py" "$CMP/permcover.py" "$SH/s6b_asm" "$SH/sdp2dksh" "$BIN/nxd9play.exe").json
 	build_perm() {   # build_perm [--salts file]
 		python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/perm" "$@" >"$W/perm.log" 2>&1 &&
 		python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/permp" \
@@ -256,8 +317,11 @@ if [ -n "$GAMECAPS" ] && [ -n "$SDP" ] && deadline_ok 900; then
 	glsl_dir
 	CAND_SHADERS=$GLSL run_set game "$GAMECAPS"
 elif [ -n "$GAMECAPS" ]; then
-	NOTES+=("game captures skipped: no shader packages or FARM_DEADLINE")
+	NOTES+=("game: not measured (no shader packages or FARM_DEADLINE)")
+else
+	NOTES+=("game: not measured (no gamedata/captures)")   # V1 GC-2: said, and the coverage gate fails on it
 fi
+coverage_gate
 write_report
 log "done: $(grep -c '^- \*\*' "$REPORT") sets ($(( $(date +%s) - T0 )) s)"
 echo "$REPORT"

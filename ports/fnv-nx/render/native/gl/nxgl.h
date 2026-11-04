@@ -28,6 +28,8 @@ size_t nxgl_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size
  * swapchain image) as RGBA8, top row first, without disturbing the replay state; safe inside the hook. */
 void nxgl_set_draw_hook(int (*hook)(void* user, uint32_t draw, uint32_t colorImage), void* user);
 int nxgl_read_rgba8(uint32_t image, uint32_t* w, uint32_t* h, uint8_t* dst, size_t cap);
+/* the same as RGBA float (4 x float per pixel, same row order as nxgl_read_rgba8; float targets unclamped) */
+int nxgl_read_rgba32f(uint32_t image, uint32_t* w, uint32_t* h, float* dst, size_t cap);
 
 /* Last GL/compile error text (empty if none). */
 const char* nxgl_last_error(void);

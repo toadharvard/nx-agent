@@ -73,9 +73,11 @@ typedef struct NxShaderDesc {
 
 /* ---- vertex layouts ----------------------------------------------------------------------------------------- */
 enum NxAttrType { NxAttr_Float32 = 0, NxAttr_Unorm8 = 1, NxAttr_Snorm16 = 2, NxAttr_Float16 = 3 };
-typedef struct NxVtxLayout {   /* up to 8 attributes from one interleaved buffer; attribute i = location i */
+typedef struct NxVtxLayout {   /* up to 8 attributes from one interleaved buffer; attribute i = location i, or
+                                  location - 1 when attr[i].location is set (1..16: translated programs read their
+                                  inputs at the fnvnx_dk_layout.h locations, up to 15) */
     uint8_t count, stride, pad[2];
-    struct { uint8_t offset, type, components, pad; } attr[8];
+    struct { uint8_t offset, type, components, location; } attr[8];
 } NxVtxLayout;
 
 /* ---- command stream ------------------------------------------------------------------------------------------ */

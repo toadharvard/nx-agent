@@ -251,7 +251,7 @@ def run(model, funcs, scenarios, clocks, wake_us, flat):
     for sc in model['scenarios']:
         if scenarios and sc['id'] not in scenarios:
             continue
-        work, core3 = frame_budget.scenario_work(model['items'], levers, sc)
+        work, core3 = frame_budget.scenario_work(frame_budget.corrected_items(model), levers, sc)
         rs = {'id': sc['id'], 'core3': core3, 'results': {}}
         for clk in clocks:
             cases = []

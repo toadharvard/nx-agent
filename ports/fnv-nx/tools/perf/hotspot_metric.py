@@ -28,10 +28,14 @@ def rows(model):
     for h in model.get('hotspot_functions', []):
         calls = mid(h['calls'])
         insn = mid(h['per_call_insn'])
-        cyc = mid(h['per_call_cycles']) if 'per_call_cycles' in h else insn / ipc
+        if 'cpi' in h:   # the A57 CPI of the code that runs: lo = throughput bound, hi = one call (PERF.md 11.9)
+            pc = h['per_call_insn']
+            cyc = (pc[0] * h['cpi']['lo'] + pc[1] * h['cpi']['hi']) / 2
+        else:
+            cyc = mid(h['per_call_cycles']) if 'per_call_cycles' in h else insn / ipc
         out.append(dict(id=h['id'], name=h['name'], per_call_insn=insn, per_call_cycles=round(cyc, 2), calls=calls,
                         mcycles=cyc * calls / 1e6, basis=h.get('per_call_basis', 'E'),
-                        cycles_basis='model' if 'per_call_cycles' in h else 'insn/ipc %.2f' % ipc))
+                        cycles_basis='cpi' if 'cpi' in h else ('model' if 'per_call_cycles' in h else 'insn/ipc %.2f' % ipc)))
     out.sort(key=lambda r: -r['mcycles'])
     return out
 
