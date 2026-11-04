@@ -156,8 +156,11 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
     noise (the original caller passed whatever its registers held), a native one that is native garbage while the
     oracle's is not stays a divergence (marked arm_garbage)."""
     dx, da = decode_x86(cv, cx), decode_a64(cv, ca)
+    pushed = getattr(cx, 'pushed', None)
+    beyond = {lab for lab, space, off, size in cv.x86 if space == 'stk' and pushed is not None and off >= pushed}
     for v in cv.vals:
-        if v.label not in dx or v.label not in da or v.kind not in ('gpr', 'fpr') or v.label in skip:
+        if v.label not in dx or v.label not in da or v.kind not in ('gpr', 'fpr') or v.label in skip or \
+                v.label in beyond:
             continue
         bx, ba = dx[v.label][:v.size], da[v.label][:v.size]
         if v.cls == 'I8' and v.is_bool:

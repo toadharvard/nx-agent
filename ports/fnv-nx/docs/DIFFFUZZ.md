@@ -149,6 +149,13 @@ definition and the calling unit's declaration of it: a reference result (`T&`) i
 its oracle code (`ret N`) when known, not from its declaration (a declaration with a parameter too many or too few
 left the oracle's esp off by 4: `fault:x:00000000`).
 
+**difffuzz-10.** `_byteswap_ulong` (0x00ec3bad) and `__RTDynamicCast` (0x00ec43fb) run as builtins on the oracle,
+`fnvnx_byteswap_ulong` / `fnvnx_rt_dynamic_cast` / `__dynamic_cast` natively (a cast succeeds: the object
+pointer; GCC folds the casts whose type it knows). Call arguments the caller did not push are not compared: the
+x86 caller's cleanup after the call (`add esp, N`, `pop ecx`) or the callee's `ret N` gives the bytes pushed, and a
+stack parameter of the definition beyond them is a read past the caller's arguments (FUN_005accb0's callers push 8
+words; ExtractArgs reads a ninth only when the fuzzed script data declares more parameters than the command).
+
 **Native runtime state (difffuzz-8).** The AArch64 machine has a zeroed thread-local block at `tpidr_el0`
 (0x0b900000, private, not compared): the platform's `thread_local` state read as `[tpidr_el0 + off]` faulted at
 small addresses before. A native indirect call through the value of an IAT slot (pinned to the x86 import stub)

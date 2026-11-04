@@ -45,10 +45,11 @@ def _desc(base, limit, access, flags=0xC):
 
 
 class Call:
-    __slots__ = ('target', 'args', 'ret_to', 'regs')
+    __slots__ = ('target', 'args', 'ret_to', 'regs', 'pushed')
 
     def __init__(self, target, args, ret_to, regs=None):
         self.target, self.args, self.ret_to, self.regs = target, args, ret_to, regs or {}
+        self.pushed = None       # stack bytes the caller passed, when its code shows it
 
 
 class Result:
@@ -255,6 +256,7 @@ class X86Engine:
             return
         r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr,
                             {n: uc.reg_read(REGS[n]) for n in ('eax', 'ebx', 'esi', 'edi')}))
+        r.calls[-1].pushed = self._pushed(uc, retaddr, address)
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
         pop, kind = info if info else (0, 'int')
@@ -293,6 +295,25 @@ class X86Engine:
     def _on_wild(self, uc, address, size, user):
         """Execution reached memory that holds no code: an indirect call through a planted pointer."""
         self._on_block(uc, address, size, user)
+
+    def _pushed(self, uc, retaddr, address):
+        """Stack bytes the caller passed: its cleanup after the call (`add esp, N`, `pop ecx` x n) or what the
+        callee pops (`ret N`); None when neither shows. A definition that declares more parameters than the caller
+        pushes (a variadic reader such as FUN_005accb0's ExtractArgs) reads past them: not an argument."""
+        try:
+            b = bytes(uc.mem_read(retaddr, 6))
+        except Exception:  # noqa: BLE001
+            b = b''
+        if b[:2] == b'\x83\xc4':
+            return b[2]
+        if b[:2] == b'\x81\xc4':
+            return int.from_bytes(b[2:6], 'little')
+        if b[:1] == b'\x59':
+            return 8 if b[1:2] == b'\x59' else 4
+        info = self.callee_info(address)
+        if info and info[0]:
+            return info[0]
+        return None
 
     def _callee_conv(self, address, caller=False):
         f = getattr(self.callee_info, 'caller_conv' if caller else 'conv', None)
