@@ -531,9 +531,91 @@ def test_unclassified_shapes():
         check(c in causes.POLICY, 'policy row for %s' % c)
 
 
+def test_callflow():
+    """Call-flow sub-shapes (_rule_callflow) with the native object facts faked."""
+    RET = bytes.fromhex('c0035fd6')                    # ret
+    MOV0_RET = bytes.fromhex('00008052') + RET           # mov w0, #0; ret
+    BL_RET = bytes.fromhex('00000094') + RET             # bl ...; ret
+
+    def cf(div, symbol='?f@@YAXXZ', conv='this:P/4 -> void', args=None, cause='call-flow'):
+        r = dict(source='src/t.cpp', address='00401000', symbol=symbol, conv=conv, divergence=div,
+                 hint=dict(cause=cause), case=dict(args=args or {}))
+        return causes.refine(r, cause)
+
+    def early(tx, ta):
+        return dict(kind='call-count', x86=len(tx), arm=len(ta), x86_trace=tx, arm_trace=ta)
+
+    names = ('native_body', 'native_defines', 'native_callees', 'native_reaches', 'crt_entries', 'unbound_callees')
+    saved = {n: getattr(causes, n) for n in names}
+    bodies = {}
+    try:
+        causes.native_body = lambda src, n: bodies.get(n)
+        causes.native_defines = lambda src, n: n in bodies
+        causes.native_callees = lambda src, a: {'__fnv_00401100'}
+        causes.native_reaches = lambda src, n: {'__fnv_00401100'}
+        causes.crt_entries = lambda: {0x00ec9650}
+        causes.unbound_callees = lambda src, a: []
+        causes._VFT, causes._LINKSYM = set(), {0x00ec623a: 'sprintf', 0x00ecd291: 'free',
+                                               0x00402000: '__fnv_00402000'}
+        # the function itself is an empty body
+        bodies['__fnv_00401000'] = (MOV0_RET, {'__fnv_00401000'})
+        check(cf(early(['00401100'], [])) == 'native-empty-body', 'empty native body, oracle calls: native-empty-body')
+        bodies['__fnv_00401000'] = (BL_RET, {'__fnv_00401000'})
+        check(cf(early(['00401100'], [])) == 'native-early-exit', 'a body with a call: stays native-early-exit')
+        # ... or a decomp-local empty stand-in for an original defined elsewhere
+        bodies['_ZN3Foo12FUN_00402000Ev'] = (RET, {'_ZN3Foo12FUN_00402000Ev'})
+        causes.native_callees = lambda src, a: {'_ZN3Foo12FUN_00402000Ev'}
+        check(cf(early(['00ecd291'], [])) == 'native-empty-body', 'empty local stand-in: native-empty-body')
+        bodies['_ZN3Foo12FUN_00402000Ev'] = (RET, {'_ZN3Foo12FUN_00402000Ev', '__fnv_00402000'})
+        check(cf(early(['00401100'], [])) == 'native-early-exit', 'the real (empty) definition: no stand-in')
+        del bodies['_ZN3Foo12FUN_00402000Ev']
+        causes.native_callees = lambda src, a: {'__fnv_00401100'}
+        # dynamic initializer without the exit registration
+        check(cf(early(['00401100', '00ec658f'], ['00401100']), symbol='??__Eg_x@@YAXXZ') == 'dyninit-no-atexit',
+              'oracle registers a destructor, native initializer does not: dyninit-no-atexit')
+        causes.native_callees = lambda src, a: {'__fnv_00401100', 'fnvnx_xc_atexit'}
+        check(cf(early(['00401100', '00ec658f'], ['00401100']), symbol='??__Eg_x@@YAXXZ') == 'native-early-exit',
+              'native initializer registers it: stays native-early-exit')
+        causes.native_callees = lambda src, a: {'__fnv_00401100'}
+        # deleting destructor called with flags 0
+        dd = dict(kind='call-count', x86=1, arm=2, x86_trace=['00401100'], arm_trace=['00401100', '00aa1460'])
+        check(cf(dd, symbol='??_GFoo@@UAEPAXI@Z', args={'p0': '00000000'}) == 'deleting-dtor-flags',
+              'D0 frees where ??_G got flags 0: deleting-dtor-flags')
+        check(cf(dd, symbol='??_GFoo@@UAEPAXI@Z', args={'p0': '01000000'}) == 'native-extra-calls',
+              'flags bit 0 set: stays native-extra-calls')
+        # a by-value class argument freed by the MSVC callee
+        check(cf(early(['00401100', '00ecd291'], ['00401100']), conv='this:P/4, p0:AGG:Str/8 -> void') ==
+              'byvalue-arg-dtor', 'oracle frees a by-value argument: byvalue-arg-dtor')
+        # the native skips a free
+        ct = dict(kind='call-target', index=0, x86='00ecd291', arm='00401300', x86_next='00401300')
+        causes.native_reaches = lambda src, n: {'__fnv_00401300'}
+        check(cf(ct) == 'native-missing-free', 'oracle frees, native reaches no deallocator: native-missing-free')
+        causes.native_reaches = lambda src, n: {'__fnv_00401300', '__fnv_00401030'}
+        check(cf(ct) != 'native-missing-free', 'native reaches operator delete: not native-missing-free')
+        causes.native_reaches = lambda src, n: {'__fnv_00401100'}
+        # call-target shapes
+        tgt = lambda x, a: dict(kind='call-target', index=0, x86=x, arm=a)  # noqa: E731
+        check(cf(tgt('00401200', '01268238')) == 'native-calls-data', 'native jumps to a data address')
+        check(cf(tgt('00ec9650', 'name:asinf')) == 'libc-variant', 'x87 intrinsic vs libm float: libc-variant')
+        check(cf(tgt('00ec623a', 'name:__sprintf_chk')) == 'libc-variant', 'sprintf vs __sprintf_chk')
+        check(cf(tgt('00ec623a', 'name:__strcpy_chk')) != 'libc-variant', 'sprintf vs __strcpy_chk: not a variant')
+        check(cf(tgt('00401200', '9e684216')) == 'native-vcall-oracle-direct', 'native wild call, oracle direct')
+        bodies['__fnv_00401100'] = (BL_RET, {'__fnv_00401100'})
+        check(cf(tgt('00401100', '00401300')) == 'oracle-callee-unloaded',
+              'oracle intercepts a callee the native object runs: oracle-callee-unloaded')
+        causes.unbound_callees = lambda src, a: ['_ZN3Bar3getEv']
+        check(cf(tgt('00401100', '00401300')) == 'after-native-undefined',
+              'an artifact shape never hides an unbound C++ name')
+    finally:
+        for n, f in saved.items():
+            setattr(causes, n, f)
+        causes._VFT = causes._LINKSYM = None
+
+
 if __name__ == '__main__':
     test_rules()
     test_vcall_split()
+    test_callflow()
     test_policy()
     test_summary()
     test_object_reader()
