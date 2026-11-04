@@ -293,6 +293,23 @@ class Resolver:
                     if k and len(self.by_key.get(k, ())) == 1:
                         syms[n] = hex(next(iter(self.by_key[k]))); how[what] += 1
                         break
+        # a variable this object defines under another linkage than the recipe's name of it (STATIC1 makes a static
+        # `_s_x` an external `?s_x@@3...`): the recipe binds the image address, both spellings are that variable
+        local = {}
+        for k, v in syms.items():
+            vk = var_key(k)
+            if vk:
+                local.setdefault(vk, set()).add(v)
+        for x in coff.symbols.values():
+            n = x['name']
+            if x['section'] <= 0 or n in own or n in syms or SG_LITERAL.match(n):
+                continue
+            vk = var_key(n)
+            if not vk:
+                continue
+            cand = local.get(vk) or {hex(a) for a in self.by_key.get(vk, ())}
+            if len({int(c, 16) for c in cand}) == 1:
+                syms[n] = next(iter(cand)); how['defined-linkage'] += 1
         ext = dict(unit)
         ext['symbols'] = syms
         ext['functions'] = fns
