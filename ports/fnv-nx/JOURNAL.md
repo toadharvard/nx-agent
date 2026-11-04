@@ -1669,3 +1669,29 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - give NiStandardAllocator's vtable its 10 slots, as VTBL1 did for BSNiAllocator.
 
   Then the next link (farms) and boot.
+
+### J-0081 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0059,J-0074
+
+* **did** - Merged 13 commits (ec9e812..41990b6). Each fix has a test_link case built from V1's reproducer. The
+  orchestrator re-ran all 7 link tests: ok.
+  - Cast rule: calls through a cast to another convention follow the cast.
+  - Logger override for 0x00703c00: a native variadic function; the override table has a signature column.
+  - Data names: the qualifier comes from the decoration. A name binds by identifier alone when exactly one address
+    carries it (fixes S5's array vs pointer case).
+  - ecx-not-passed pairs keep the argument moves the reference passes.
+  - Probe caches have content keys: layout rows and vtable entries are keyed on the unit source, every local header
+    and the flags. Rows whose key no longer matches are probed again.
+  - A vptr store in a free function no longer credits any class (S13 00404920; 0x01012120 is a folded vftable);
+    new vftable_aliases.tsv.
+  - V1 defect 1: the `__fastcall` hidden result pointer is the first stack word (0x0056fa00).
+  - V1 defect 2: a float result bound to a double result gets an fcvt bridge.
+  - V1 defect 3: C-named `@f@N` / `_f@N` / `_f` declarations are now compared; parameter types are read from the
+    declaring unit's source (0x00ba3130).
+  - V1 defect 4: each class keeps its typeinfo from the object whose vtable is kept. On f13's objects V1's audit
+    goes from 36 disagreeing classes to 0.
+* **found** - f13 was prepared from 0420d45 and seeded from f12: 2,081 layout rows came from the seed, 775 were
+  probed fresh. It has 2,883 objects (95 failed). Its trial link has 6,121 undefined names and 0 multiple
+  definitions. The WinMain and memory-manager units are in it.
+* **metrics** - link_trial_undefined=6121 link_trial_multidef=0 v1_c4_mixed_classes=0 (was 36)
+* **next** - V1 re-runs its reproducers on the merged tools (D14). S2c judges ecx/this-not-passed on the
+  definition's MSVC code (`resolve --msvc-code`). Full links move to the farm (S9 link_job).
