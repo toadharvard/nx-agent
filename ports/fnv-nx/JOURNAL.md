@@ -2395,3 +2395,30 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - lib_job's package list carries the plugin headers.
   - Checked on a 2-function unit: the int conversion yields 0x80000000 outside the int32 range.
   - tests/s12: 0 failures.
+
+### J-0111 | 2026-11-04 | stream: V1-link | status: wip | parent: J-0092,J-0102,J-0108
+
+* **measured** - V1 audits on the first farm link, link/9a0243c7eabe (built from 9a0243c, so before S2c's typeinfo views
+  and FP-through-int and S1b's XINC1 rounds 2-3):
+  - **C1 (by-address binding) holds:** 563 relocations, 0 wrong; 74,039 address-map rows with consistent kinds; 3 E
+    rows outside `.text` (minor).
+  - **C2 (bridges) holds:** 98 of 103 stratified pairs pass. Fastcall-aggregate results are fixed (f13: 34 broken).
+    All 218 float/double pairs are bridged (f13: 183 had no bridge). 1,745 of 1,768 callee-pop pairs are listed
+    x86-inconsistent; 23 are still `same` and not yet examined.
+  - **C3 (ecx/edx):** 429 true positives out of 227,583 references. The edx-dummy decision holds.
+  - **C4 (vftables):** 1,988 of 2,288 V entries ok and 265 ok apart from zero slots; 35 name a base the typeinfo lacks.
+    12 classes are inconsistent across the whole image (Actor, PlayerCharacter, TESNPC, ...). That drops to 10 with
+    the head's typeinfo pass.
+  - **C5 (-fPIC rebinding) holds:** 0 PC-relative image references.
+* **verified** - S2c is right on all four of V1's harness complaints (t4, t5, F1-24, A1/A2), and V1's harness is
+  fixed. S1b is right on 6 of the 7 c3 addresses. The seventh, 00a43330, is only right if the declaration is trusted;
+  the tool lists it x86-inconsistent, which is conservative.
+* **found** - New defects, each with a reproducer that fails now:
+  - **R4-1 (medium):** `vslots.Code.entry_use` reads an ecx pushed as a callee argument as a reserved slot
+    (00e89ad0, 00a5d450). This was checked against fa7d3f8's tree, so it may already be fixed.
+  - **R4-2 (minor):** a C-named `__declspec(noreturn)` reference gets a stand-in and is bound `same` (00c1ad80).
+  - **R4-3 (medium):** when a unit only references its base's typeinfo, there is no private view to keep
+    (FUN_004ffba0, FUN_008d45f0).
+* **did** - V1 `be8c781`, `70cee3a`, `442e5ea`: farm-link harness (it runs `fixed/zz_bridges.o` directly), POD bits,
+  local typeinfo sizes, jump tables and definition-following in c3, cast-call bridges, and reproducers t6 and c10/c11.
+* **next** - S2c: R4-1 (check it against fa7d3f8 first), R4-2, R4-3. V1: run on a farm runner from now on (D17).
