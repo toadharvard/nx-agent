@@ -3226,3 +3226,5 @@ The owner moves the work to another session or account (quota). Resume with docs
   - Render agents on that machine: S6n, V6n, P6n, S6b.
 * **open (render)** - Full link with LINK_OVERRIDES=render (S2c); prepared objects for P6n; S16 NXD9 captures.
 * **note** - Subagent worktrees see sse2neon at `/tmp/claude-0/-home-user-nx-agent/<session>/scratchpad/ext/sse2neon`.
+
+* **correction (J-0146)** - COM1 `f3ca74a` was NOT merged: the cherry-pick conflicted. The commit survives on the private branch `wip/aa7b13cae4bb` (push_wip). Cherry-pick it again in the new session; until then bsshader keeps its IUnknown error.
