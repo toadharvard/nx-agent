@@ -356,6 +356,22 @@ steps the world. What is left in these units:
 The run needs a booted frame (the boot stops before WinMain's loop today). Then: `[HAVOK] iSimType=4`,
 `iNumThreads=2` in Fallout.ini, under mtqemu and the race checker.
 
+### 6.10 Code limits with no thread lever (serial dependencies, global locks, singletons)
+
+All at the exe's default settings (D20 revised: no settings presets). Costs are main-thread time per exterior frame,
+[E] unless marked. The port's own overhead (bridges, platform layer) is S15-simd's audit and is not listed here.
+
+| limit | address | what it serialises | cost on main | what would remove it |
+|---|---|---|---|---|
+| AI join before the packed-queue drain | 0x008c7990 (CountingSemaphore wait), drain FUN_00870610 (main.cpp ~947, ~9077-9082) | main waits for both AI linear threads, then drains the queued controller updates (task 6, `UpdateControllersRecursive`) itself: the threaded effects come back to main | the drain: the queued controller work [E]; the join: whatever the staggered AI exceeds main's own work by (P0 mtmodel: one AI thread busy 6.8 ms) | drain the queue on the AI threads before they signal completion (MT1: the queue's lock `m_uiLockState` and the node subtrees must be checked first) |
+| staggered AI halves | ailineartaskthreadmanager.cpp:417-447 (SetEvent / WaitForSingleObject between the two threads) | the two AI linear threads run one after the other, not in parallel | none directly on main; it holds a core 1-2 for the whole AI time, which the culling worker and the Havok pool compete for | a split of the process lists that does not need the hand-over (needs the lists' shared state traced) |
+| AI recursive spin lock | 0x011f11a0 (InterlockedCompareExchange on the owner id, Sleep(0), Sleep(1) after 10,000 spins) | process lists, TES, packed queue, destruction map between main and the AI threads | contention only (unmeasured); `Sleep(1)` is a 1 ms+ stall when it triggers | finer locks, or the override's release store plus a bounded spin without `Sleep(1)` (tools/link/overrides/spinlock_0040fba0.c is the release half) |
+| one batch renderer per accumulator | BSShaderAccumulator ctor 0x00b660d0, built (99, 1, 759) everywhere (FUN_0086c160, bsshadermanager:4321, teswater) | two threads cannot register into one accumulator | blocks mt_cull | MT1 hunk 1 (m_88 with 2; done, off by default) |
+| current-accumulator globals | DAT_011f95ec (FUN_00b54ac0's non-atomic DecRef/IncRef swap), DAT_011f4748+8 (FUN_004dc540) | any two culling passes on different accumulators at once | blocks overlapping the shadow, water and interface records with main (so they stay inline under MT1) | per-thread copies (a TLS slot like 0x2bc), or the culling process carrying its accumulator to BSFadeNode and the batch renderer |
+| BSBatchRenderer node pool lock | g_011c5f80 (RecursiveSpinLock, bsbatchrenderer.cpp ~1767) | every group/pass node allocation of every accumulator | small while one thread registers; contended under MT1's split | per-renderer pools |
+| Havok objects keyed on the stepping thread | CreateObjects 0x00cbf540 (m_iThirdValue = GetCurrentThreadId) | the pool and job queue are rebuilt whenever a different thread steps the world | none if one thread always steps; a rebuild per frame if the step moves between threads | always step from the same thread (the Havok MT1 patch must keep one stepping thread) |
+| platform: one wait lock | platform/win32/sync.cpp `w32_wait_lock` (every event, semaphore, mutex wait and signal) | all Win32 waitable objects | small at dozens-hundreds of hand-offs a frame (6.3); a hot spot if Havok's job queue signals per job | per-object locks (S4's layer) |
+
 ### 6.5 Memory ordering: what x86 gave for free
 
 x86 is TSO: every store is a release and every load an acquire. AArch64 is not, so engine code that synchronises
