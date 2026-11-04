@@ -107,6 +107,8 @@ CLASSES = {
     'ADDR1': 'neutral',         # &_mm_f(args) -> &fnvnx_lvalue(_mm_f(args)): the temporary MSVC took the address of
     'LANE1': 'platform',        # &((T*)&(v)) (SSE1 lane array, address taken) -> ((T(*)[n])&(v))
     'STD2': 'neutral',          # file-scope `R std::f(..)` definition -> fnvnx_std_f (+ its recipe symbol, POST hook)
+    'COND1': 'neutral',         # `c ? false : f()` with f returning a bool gate class -> `c ? false : (bool)(f())`
+    'RSTR1': 'neutral',         # restrict local passed to a const X& parameter -> fnvnx_unrestrict(v) ((v) under MSVC)
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
@@ -126,7 +128,7 @@ DEFAULT_GROUPS = {
     'link': 'LINK1 STATIC1 BIND1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
     'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
-    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
+    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 COND1 RSTR1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
     'plat': 'STL1 STD1 ANON1 ANON2 ANON3',
 }
 RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+)\b')
