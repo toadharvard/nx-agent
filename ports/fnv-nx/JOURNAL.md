@@ -1639,3 +1639,33 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   and the farm's send_later check-ins. The rule was set at the owner's request. start.sh brings the public nx-agent
   checkout to the integration head and runs its runner.sh; artifacts go to a separate clone at
   `$FARM_HOME/artifacts`. Farms are recreated with `source_revision: main`.
+
+### J-0080 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0062,J-0076
+
+* **did** - Threads and TLS (docs/PERF.md 6.3).
+  - Placement table `toolchain/host/placement.h`: main on core 0; AI linear threads on ideal cores 2 and 1, mask
+    0b110; render worker on core 1 at priority 0x2B; every other thread mask 0b110, rotating over cores 1 and 2.
+  - Applied in h_thread_create, which sets the ideal core and core mask before the thread starts. Host pthreads go
+    through `--wrap=__syscall_thread_create`: plain host, package, and now the Nine host link (orchestrator).
+  - CreateThread takes the role from boot.cpp: a BSThread with an AILinearTaskThread object.
+  - Priority and affinity can now be set on another thread through its host id.
+  - `fs:[0x2c][0]` is the thread's `__fnvnx_tls_image`, so there is one TLS block.
+  - EnterCriticalSection honours SpinCount.
+  - Tests: native placement table, placement in the emulator's rt guest, S4 tests for TLS identity, role and spin.
+    The orchestrator re-ran tests/s5/test_tools.py (OK) and tests/s4 (70 tests, 0 failed).
+* **found** - Boot on f13 (5,447 undefined, was 7,307 on f11):
+  - The memory-manager stand-in now calls the linked constructor 0x00aa3880. It faults at its first allocation:
+    `MemoryManagerAA3880::Allocate` has no address, its trap returns 0, and memset(0) faults. So the x86 path
+    through InitializeGlobal does not happen yet.
+  - WinMain+0x1d0 takes the default-options path. InitHolder calls slot 7 of NiStandardAllocator's synthesized
+    one-slot vtable.
+  - 4,340 initializers skipped: 3,469 memory manager, 736 + 43 INISettingCollection vftables (need the exe), 31
+    FUN_004de530, 60 FUN_00632ec0 (STAND1 is not in f13's tree yet).
+  - Frontier: 11 keys / 315 hits (was 122 / 3,300).
+* **metrics** - game_undefined=5447 init_skips=4340 frontier_keys=11 frontier_hits=315
+  boot_reached=WinMain+0x1d0(InitHolder->NiStandardAllocator slot 7) s4_tests=70/70
+* **next** - S1:
+  - give `MemoryManagerAA3880::Allocate` its address or definition;
+  - give NiStandardAllocator's vtable its 10 slots, as VTBL1 did for BSNiAllocator.
+
+  Then the next link (farms) and boot.
