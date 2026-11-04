@@ -221,9 +221,14 @@ class T(unittest.TestCase):
         self.assertEqual(why['_ZN1A2naEi'], 'not virtual')
 
 
-def coff(funcs, externs):
-    """Minimal i386 COFF: one COMDAT code section per function {name: (bytes, {offset: callee})}."""
+def coff(funcs, externs, data=None):
+    """Minimal i386 COFF: one COMDAT code section per function {name: (bytes, {offset: callee})}; data: the same
+    for read-only data sections (a vftable: DIR32 words)."""
     import struct
+    data = data or {}
+    kind = {n: 'code' for n in funcs}
+    kind.update({n: 'data' for n in data})
+    funcs = dict(funcs, **data)
     names = list(funcs)
     syms, strtab = [], bytearray(4)
 
@@ -244,10 +249,11 @@ def coff(funcs, externs):
         pos += len(code)
         rel_off = pos
         for off, callee in sorted(calls.items()):
-            raw += struct.pack('<IIH', off, idx[callee], 0x14)
+            raw += struct.pack('<IIH', off, idx[callee], 0x14 if kind[n] == 'code' else 0x06)
             pos += 10
-        secs.append(struct.pack('<8sIIIIIIHHI', b'.text$%d' % k, 0, 0, len(code), data_off, rel_off, 0,
-                                len(calls), 0, 0x60501020))
+        secs.append(struct.pack('<8sIIIIIIHHI', b'.text$%d' % k if kind[n] == 'code' else b'.rdata$%d' % k, 0, 0,
+                                len(code), data_off, rel_off, 0, len(calls), 0,
+                                0x60501020 if kind[n] == 'code' else 0x40301040))
     symptr = pos
     for n in order:
         sec = names.index(n) + 1 if n in funcs else 0
@@ -298,6 +304,17 @@ class Exe(unittest.TestCase):
             self.assertEqual(exe.read(F, 2), b'\x55\xe8')
             got = bodies.exe_call_targets(d, 0, unit, {'?g@@YAXXZ', '?k@@YAXXZ'}, exe)
         self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}, '?k@@YAXXZ': {K: 1}})
+
+    def test_code_only_externs(self):
+        """A name the pristine object names only in a vftable slot is not a direct call (the vcall class may take
+        it); one a code section names is."""
+        obj = coff({'?f@@YAXXZ': (b'\xe8\0\0\0\0\xc3', {1: '?g@@YAXXZ'})}, ['?g@@YAXXZ', '?v@A@@UAEXXZ'],
+                   data={'??_7A@@6B@': (b'\0' * 4, {0: '?v@A@@UAEXXZ'})})
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            self.assertEqual(bodies.pristine_externs(d, 0), {'?g@@YAXXZ', '?v@A@@UAEXXZ'})
+            self.assertEqual(bodies.pristine_externs(d, 0, code_only=True), {'?g@@YAXXZ'})
 
 
 if __name__ == '__main__':
