@@ -36,8 +36,13 @@ struct IniFile {
 };
 
 os_lock_t g_ini_lock;
-/* process-lifetime cache; a heap vector so no static destructor runs at exit (other threads may still read) */
-std::vector<IniFile *> &g_cache = *new std::vector<IniFile *>;
+/* process-lifetime cache; a heap vector so no static destructor runs at exit (other threads may still read). Made on
+ * first use, so a game static that reads an ini file before the platform's constructors ran still finds it. */
+std::vector<IniFile *> &ini_cache()
+{
+    static std::vector<IniFile *> &c = *new std::vector<IniFile *>;
+    return c;
+}
 
 std::string trim(const std::string &s)
 {
@@ -160,7 +165,7 @@ IniFile *open_ini(const char *name)
         SetLastError(e);
         return NULL;
     }
-    for (IniFile *f : g_cache)
+    for (IniFile *f : ini_cache())
         if (f->host == host) {
             load(f);
             return f;
@@ -168,7 +173,7 @@ IniFile *open_ini(const char *name)
     IniFile *f = new IniFile;
     f->host = host;
     load(f);
-    g_cache.push_back(f);
+    ini_cache().push_back(f);
     return f;
 }
 
@@ -346,9 +351,9 @@ extern "C" BOOL WritePrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR val, L
     if (!sec) {
         /* (NULL, NULL, NULL, file): flush; we write through, so drop the cache instead */
         os_lock(&g_ini_lock);
-        for (IniFile *f : g_cache)
+        for (IniFile *f : ini_cache())
             delete f;
-        g_cache.clear();
+        ini_cache().clear();
         os_unlock(&g_ini_lock);
         return TRUE;
     }

@@ -133,6 +133,34 @@ is an order difference, not inlining. Two adjacent calls in swapped order (`x86_
 divergence) are the soft cause `call-order`: C++ leaves the evaluation order of operands open (S13 00740980:
 `SetField628(FUN_00740960() + 1)` next to `FUN_00740940()`).
 
+**Runtime equivalences (difffuzz-8, from the first farm pass).** A native call of a name the link gives a provider
+(addrmap kind F `provider:` rows: `free`, `_invalid_parameter_noinfo`, `memmove_s`, `fnvnx_rt_dynamic_cast`, ...)
+traces as that CRT address; a native call through an IAT slot traces as the import, as on x86; the allocation and
+release families (operator new 0x00401000 = MemoryManager::Allocate 0x00aa3e40; operator delete 0x00401030 =
+sized delete 0x00aa1460 = CRT free 0x00ecd291) compare equal, arguments not compared. Adaptive follow loads the
+oracle's callee X unless the native trace makes X's call later (then the two orders differ: `call-order`). Report
+causes `msvc-inlined` (oracle gap: the native calls X out of line where the oracle ran X's body inline, the oracle's
+next call being one X makes), `runtime-equiv` (oracle gap, records from before difffuzz-8) and `array-new-check`
+(soft: GCC checks new[]'s count, MSVC 2008 does not).
+
+**Canned results by declaration (difffuzz-9).** An intercepted call's canned result follows both the callee's
+definition and the calling unit's declaration of it: a reference result (`T&`) is a valid non-null heap address
+(`world.ref_result`), a bool result (either declaration) is 0/1. The bytes an intercepted callee pops are read from
+its oracle code (`ret N`) when known, not from its declaration (a declaration with a parameter too many or too few
+left the oracle's esp off by 4: `fault:x:00000000`).
+
+**difffuzz-10.** `_byteswap_ulong` (0x00ec3bad) and `__RTDynamicCast` (0x00ec43fb) run as builtins on the oracle,
+`fnvnx_byteswap_ulong` / `fnvnx_rt_dynamic_cast` / `__dynamic_cast` natively (a cast succeeds: the object
+pointer; GCC folds the casts whose type it knows). Call arguments the caller did not push are not compared: the
+x86 caller's cleanup after the call (`add esp, N`, `pop ecx`) or the callee's `ret N` gives the bytes pushed, and a
+stack parameter of the definition beyond them is a read past the caller's arguments (FUN_005accb0's callers push 8
+words; ExtractArgs reads a ninth only when the fuzzed script data declares more parameters than the command).
+
+**Native runtime state (difffuzz-8).** The AArch64 machine has a zeroed thread-local block at `tpidr_el0`
+(0x0b900000, private, not compared): the platform's `thread_local` state read as `[tpidr_el0 + off]` faulted at
+small addresses before. A native indirect call through the value of an IAT slot (pinned to the x86 import stub)
+is that import, as on x86.
+
 **Wild calls.** A jump to memory without code on either machine (an indirect call through a pointer the case
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.

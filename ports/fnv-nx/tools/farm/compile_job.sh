@@ -62,7 +62,16 @@ for line in sys.stdin:
 # compile.sh rebuilds a unit whose source is newer than its object. A change to anything that is not a unit
 # source (headers, units.json), to the flags (compile.sh, shim, sse2neon) or to the compiler rebuilds the shard.
 PT=$FARM_HOME/tree; OBJ=$FARM_HOME/obj-$K-of-$N; mkdir -p "$PT" "$OBJ"
-FLAGS_HASH=$( (cat "$P/tools/link/compile.sh"; find "$P/shim/include" -type f -print0 | LC_ALL=C sort -z | xargs -0 cat; \
+# compile.sh loads the FTOI2 plugin (toolchain/ftoi): its headers come with gcc-13-plugin-dev-aarch64-linux-gnu, and
+# the host g++ builds it. A root farm installs them when missing.
+if [ ! -f "$(aarch64-linux-gnu-g++ -print-file-name=plugin)/include/gcc-plugin.h" ] || ! command -v g++ >/dev/null; then
+  if [ "$(id -u)" = 0 ]; then
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gcc-13-plugin-dev-aarch64-linux-gnu g++ >/dev/null
+  else
+    echo "compile_job: need gcc-13-plugin-dev-aarch64-linux-gnu and g++ for the FTOI2 plugin" >&2; exit 2
+  fi
+fi
+FLAGS_HASH=$( (cat "$P/tools/link/compile.sh" "$P/toolchain/ftoi/fnvnx_ftoi.cc"; find "$P/shim/include" -type f -print0 | LC_ALL=C sort -z | xargs -0 cat; \
   git -C "$EXT/sse2neon" rev-parse HEAD; aarch64-linux-gnu-g++ --version | head -1) | sha256sum | cut -c1-16)
 rsync -rc --delete --out-format='%n' "$WORK/tree/" "$PT/" > "$WORK/changed.txt"
 grep -v '/$' "$WORK/changed.txt" | grep -vxF -f "$WORK/shard.list" | grep -v '^src/.*\.\(cpp\|c\)$' > "$WORK/changed_other.txt" || true

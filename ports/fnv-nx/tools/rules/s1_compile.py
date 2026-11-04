@@ -343,14 +343,17 @@ def r_c_data_linkage(path, text, stats):
 
 # ---------------------------------------------------------------------------------------------------------- GOTO1
 
-SCALAR_INIT = re.compile(r'^([ \t]*)((?:(?:unsigned|signed|volatile)\s+)*(?:bool|char|short|int|long(?:\s+long)?|float|'
-                         r'double|unsigned|\w+\s*\*+))\s+(\**\s*\w+)\s*=\s*([^;{}=][^;{}]*);', re.M)
+SCALAR_INIT = re.compile(r'^([ \t]*)((?:const\s+)?(?:(?:unsigned|signed|volatile)\s+)*(?:bool|char|short|int|long(?:\s+long)?|'
+                         r'float|double|unsigned|__m128[id]?|__m64|hkQuadReal|hkReal|[\w:]+(?:\s+const)?\s*\*+))\s+'
+                         r'(\**\s*\w+)\s*=\s*([^;{}=][^;{}]*);', re.M)
 
 def r_goto_scalar_inits(path, text, stats):
-    """GOTO1: in functions that use goto, `T x = e;` (scalar or pointer T) -> `T x; x = e;` on the same line. MSVC
-    lets a goto jump past such an initialization; C++ (and GCC even with -fpermissive) does not, but jumping past a
-    declaration without initializer is allowed, and for a scalar the split changes nothing. A declarator list is split
-    declarator by declarator, `T a = e1, b = e2;` -> `T a, b; a = e1; b = e2;` (the initializers keep their order)."""
+    """GOTO1: in functions that use goto, `T x = e;` (scalar, SSE vector or pointer T) -> `T x; x = e;` on the same
+    line. MSVC lets a goto jump past such an initialization; C++ (and GCC even with -fpermissive) does not, but
+    jumping past a declaration without initializer is allowed, and for a scalar the split changes nothing. A const
+    scalar loses the const it cannot keep without its initializer (`const int n = e;` -> `int n; n = e;`; a pointer
+    to const keeps it). A declarator list is split declarator by declarator, `T a = e1, b = e2;` ->
+    `T a, b; a = e1; b = e2;` (the initializers keep their order)."""
     if 'goto' not in text: return text
     spans = [sp for sp in prepare.scope_spans(text) if sp[2] == 'function']
     edits = []
@@ -360,6 +363,7 @@ def r_goto_scalar_inits(path, text, stats):
         for m in SCALAR_INIT.finditer(text, o, c):
             t = m.group(2)
             if re.match(r'(?:return|else|case|goto|delete|throw|typedef|using)\b', t): continue
+            if t.startswith('const') and '*' not in t: t = t[5:].lstrip()          # the scalar's own const
             # a declarator list `float a = f(x), b = g(y);` -> `float a, b; a = f(x); b = g(y);` (same order)
             parts = [re.match(r'^\s*(\**\s*[A-Za-z_]\w*)\s*(?:=\s*(\S.*?))?\s*$', d, re.S)
                      for d in _split_args(m.group(3) + ' = ' + m.group(4))]
@@ -1004,6 +1008,12 @@ def r_complete_views(path, text, stats):
 # of unknown size). Only names that a unit including the file binds to an image data address (`?name@@3...` /
 # `_name` in its units.json symbols) at file scope are touched, and for the unsized arrays also address names
 # (`DAT_<address>`, which the link binds by the address in the name).
+# A namespace-scope static (`namespace fnv_007bd2a0 { static float s_fSpinTime; }`, S13: 77 with an image address,
+# three of them uninitialised and written, so the private copy diverges for real: HUDMainMenu's instance pointer
+# 0x011d96c0, roulettemenu's s_fSpinTime / s_bValidBet 0x011da904 / 0x011da900) is bound under its plain name
+# (`_s_fSpinTime`), the way the link binds a C name: STATIC1 gives it C linkage where it stands,
+# `extern "C" { float s_fSpinTime; }` (a const one `extern "C" { extern const ... }`), so the definition is the
+# image's variable under that name. Only a name the file declares once.
 
 STATIC_DEF = re.compile(r'^([ \t]*)static\s+(?!inline\b)((?:const\s+|volatile\s+)*[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)'
                         r'\s*(?:\[[^\]]*\]\s*)*(?:=|;|\(|\{))', re.M)
@@ -1015,6 +1025,9 @@ UNSIZED_ADDR = re.compile(r'\b(?:DAT|g|UNK|PTR)_[0-9a-f]{8}\s*\[\s*\]\s*;')
 CONST_DEF = re.compile(r'^([ \t]*)(const\s+[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)\s*(?:\[[^\]]*\]\s*)*=)', re.M)
 DATA_NAME = re.compile(r'^\?(\w+)@@3')
 _IMAGE_NAMES = None
+_IMAGE_CNAMES = {}       # file -> names a unit including it binds to an image data address as `_name` (a C name)
+_IMAGE_ADDRS = {}        # file -> {('c' | 'g', name): {addresses}}: `_name` / `?name@...@3...` (decorated) bindings
+NOT_A_TYPE = {'return', 'case', 'goto', 'else', 'delete', 'throw', 'new', 'sizeof', 'typedef', 'using'}
 
 def _image_bound_names(path):
     """{absolute file: {name}} of global variables bound to image data addresses by a unit that includes it."""
@@ -1031,12 +1044,15 @@ def _image_bound_names(path):
             with open(f, encoding='utf-8', errors='surrogateescape') as h: texts[f] = h.read()
         return texts[f]
     for u in json.load(open(uj))['units']:
-        names = set()
+        names, cnames, addrs = set(), set(), {}
         for n, a in u.get('symbols', {}).items():
             if not 0x00fdf000 <= int(a, 16) < 0x02100000: continue
+            q = re.match(r'^\?(\w+)@[\w@]*?@3', n)                # any decorated variable, namespaced too
+            if q: addrs.setdefault(('g', q.group(1)), set()).add(int(a, 16))
             m = DATA_NAME.match(n)
             if m: names.add(m.group(1))
-            elif n.startswith('_') and n[1:].isidentifier(): names.add(n[1:])
+            elif n.startswith('_') and n[1:].isidentifier():
+                names.add(n[1:]); cnames.add(n[1:]); addrs.setdefault(('c', n[1:]), set()).add(int(a, 16))
         if not names: continue
         todo, seen = [os.path.normpath(os.path.join(root, u['source']))], set()
         while todo:
@@ -1046,16 +1062,56 @@ def _image_bound_names(path):
             t = text(f)
             if 'static' in t or 'const' in t:
                 _IMAGE_NAMES.setdefault(f, set()).update(names)
+                if cnames:
+                    _IMAGE_CNAMES.setdefault(f, set()).update(cnames)
+                    fa = _IMAGE_ADDRS.setdefault(f, {})
+                    for k, v in addrs.items(): fa.setdefault(k, set()).update(v)
             for i in inc.findall(t):
                 for base in (os.path.dirname(f), os.path.join(root, 'include')):
                     g = os.path.normpath(os.path.join(base, i))
                     if os.path.isfile(g): todo.append(g); break
     return _IMAGE_NAMES
 
+def _decl_end(text, i):
+    """Index of the ';' that ends the declaration whose declarator text[i] follows (brackets, strings skipped)."""
+    depth = 0
+    for t in re.finditer(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/|[(){}\[\];]', text[i:], re.S):
+        c = t.group()
+        if c in '({[': depth += 1
+        elif c in ')}]': depth -= 1
+        elif c == ';' and depth == 0: return i + t.start()
+        if depth < 0: return None
+    return None
+
+SCALAR_WORDS = set('volatile unsigned signed short long int char bool float double __int64 wchar_t BOOL BYTE WORD DWORD '
+                   'UInt8 UInt16 UInt32 SInt32 hkUint8 hkUint16 hkUint32 hkInt32 hkReal'.split())
+
+def _declared_once(text, name, spans, addrs, image=False):
+    """True when the namespace static `name` is the file's only declaration of that name that its C name could
+    meet: class members do not count, nor an `extern` declaration where every decorated binding of the name
+    (`?name@@3...`, `?name@ns@@3...`) is the C name's one address (the same variable)."""
+    bare = COMMENT.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
+    n = 0
+    for m in re.finditer(r'(\w+|[>\*&])\s+\**%s\s*(?:\[[^\]]*\]\s*)*[;=,(\[{]' % re.escape(name), bare):
+        if m.group(1) in NOT_A_TYPE: continue
+        chain = prepare.scope_chain(spans, m.start())
+        if chain and chain[-1][0] == 'class': continue
+        if chain and chain[-1][0] == 'function': return False      # a local of that name
+        line = bare[bare.rfind('\n', 0, m.start()) + 1:m.end()]
+        same = len(addrs.get(('c', name), ())) == 1 and addrs.get(('g', name), addrs[('c', name)]) == addrs[('c', name)]
+        if same and all(k == 'namespace' for k, _ in chain):
+            if re.match(r'\s*extern\b(?!\s*")', line) and '=' not in line: continue
+            if image and not re.search(r'=\s*$', line): continue   # declared only: another definition is the same one
+        n += 1
+    return n == 1 or image and n == 0
+
 def r_image_statics(path, text, stats):
-    """STATIC1: file-static / internal const variables bound to image addresses get external linkage (see above)."""
+    """STATIC1: file-static / internal const variables bound to image addresses get external linkage, a namespace
+    static bound by its plain name C linkage (see above)."""
     if 'static' not in text and 'const' not in text: return text
-    names = _image_bound_names(path).get(os.path.normpath(os.path.abspath(path))) or set()
+    key = os.path.normpath(os.path.abspath(path))
+    names = _image_bound_names(path).get(key) or set()
+    cnames = _IMAGE_CNAMES.get(key) or set()
     if not names and not UNSIZED_ADDR.search(text): return text
     spans, edits = None, {}
     for rx, kind in ((UNSIZED_DECL, 'unsized'), (STATIC_DEF, 'static'), (CONST_DEF, 'const')):
@@ -1064,7 +1120,24 @@ def r_image_statics(path, text, stats):
             if m.group(3) not in names and not (kind == 'unsized' and ADDR_NAME.match(m.group(3))): continue
             if kind == 'const' and re.search(r'\bextern\b', text[text.rfind('\n', 0, m.start()) + 1:m.start()]): continue
             if spans is None: spans = prepare.scope_spans(text)
-            if any(k != 'extern' for k, _ in prepare.scope_chain(spans, m.start())): continue
+            chain = prepare.scope_chain(spans, m.start())
+            if any(k != 'extern' for k, _ in chain):
+                # a namespace static bound by its plain name: C linkage where it stands
+                if kind == 'unsized' or m.group(3) not in cnames or any(k not in ('namespace', 'extern') for k, _ in chain):
+                    continue
+                end = _decl_end(text, m.end() - 1) if text[m.end() - 1] != ';' else m.end() - 1
+                if end is None or '#' in text[m.end():end]: continue
+                decl = text[m.start(2):end + 1]
+                const = kind == 'const' or decl.startswith('const')
+                # an uninitialised scalar / pointer is the image's variable: declared, not defined (the image holds it,
+                # and a definition elsewhere in the file of the same C name, a STATIC1 global, is the same one)
+                ty = text[m.start(2):m.start(3)]
+                image = (text[m.end() - 1] == ';' and not const and
+                         ('*' in ty or set(re.findall(r'\w+', ty)) <= SCALAR_WORDS))
+                if not _declared_once(text, m.group(3), spans, _IMAGE_ADDRS.get(key, {}), image): continue
+                edits[m.start()] = (m.start(), end + 1, m.group(1) + 'extern "C" { ' + ('extern ' if const or image else '')
+                                    + decl + ' }')
+                continue
             new = m.group(1) + ('' if kind == 'static' else 'extern ') + m.group(2)
             edits[m.start()] = (m.start(), m.end(), new)
     if not edits: return text
@@ -1347,8 +1420,9 @@ def r_math_overloads(path, text, stats):
     the same overloads (std::sqrt(float) brought to the global namespace), so the copy is a redefinition and its calls
     ambiguous. Also the x86 header's inline float functions themselves (`inline float fabsf(float _X) { return
     (float)fabs((double)_X); }`, also `extern "C" inline`): <math.h> declares fabsf as the C function. The header
-    takes the place of the first one. In a namespace that takes the C function itself (`using
-    ::fabs;`, `extern "C" double fabs(double);`), whose overloads are then the global ones, an untagged copy goes too."""
+    takes the place of the first one. In a namespace that takes the global overloads (`using ::fabs;`) an untagged
+    copy goes too; next to the namespace's own `extern "C" double fabs(double);` (DECL1 keeps it, DECL1-MATHNS) the
+    copy stays: MSVC's lookup in the namespace found the copy for a float argument, and GCC takes both."""
     if 'inline' not in text and '__forceinline' not in text: return text
     spans, out, pos, have = None, [], 0, False
     for m in MATH_OVERLOAD_DEF.finditer(text):
@@ -1357,13 +1431,12 @@ def r_math_overloads(path, text, stats):
         chain = prepare.scope_chain(spans, m.start())
         in_ns = bool(chain) and all(k == 'namespace' for k, _ in chain)
         if in_ns:
-            # in a namespace only where the namespace takes the C function itself (`using ::fabs;` from DECL1, or
-            # an extern "C" prototype): its overloads then are the global ones and the copy collides with them.
-            # A copy tagged as a function of the binary (`// @fnv`) is kept.
+            # in a namespace only where the namespace takes the global overloads (`using ::fabs;`): the copy
+            # collides with them. A copy tagged as a function of the binary (`// @fnv`) is kept.
             o = max(sp[0] for sp in spans if sp[0] < m.start() < sp[1])
             before = text[o:m.start()]
             name = m.group(1)
-            if not re.search(r'\busing\s+::\s*%s\s*;|\bextern\s+"C"[^;{}]*\b%s\s*\(' % (name, name), before): continue
+            if not re.search(r'\busing\s+::\s*%s\s*;' % name, before): continue
             if re.search(r'//\s*@fnv\b[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', text[max(0, m.start() - 300):m.start()]): continue
         elif any(k not in ('extern',) or '"C"' in h for k, h in chain): continue
         end = prepare.match_brace(text, m.end() - 1)
@@ -2534,6 +2607,14 @@ VTBL1_SITES = [
     ('gamebryo2.2/corelibs/nisystem/nistandardallocator.cpp',
      re.compile(r'^([ \t]*)virtual ~StdAllocator\(\);', re.M),
      r'\1virtual void* Destroy(unsigned int flags);   /* fnv-nx VTBL1: MSVC slot 0, the scalar deleting destructor */'),
+    # the second heap MemoryManager::InitializeHeaps creates (constructor 0x00aa7400): the decomp declares one
+    # virtual, MemoryManager::Allocate+0xa8 calls its slot 2 (S5 J-0102: 4,327 of 4,343 initializer skips); it is an
+    # AbstractHeap, whose 14 slots the same unit declares (v0 .. v13): the native vtable gets them all
+    ('staging/blk_00aa0000_od_ob1_variant.cpp',
+     re.compile(r'(\n[ \t]*HeapBlockLink m_20;\s*FUN_00aa7400\(unsigned int a, unsigned int b\);\s*virtual void v00\(\);)(\s*\};)'),
+     r'\1 /* fnv-nx VTBL1: the AbstractHeap slots 1-13 */ virtual void v1(); virtual void v2(); virtual void v3(); '
+     r'virtual void v4(); virtual void v5(); virtual void v6(); virtual void v7(); virtual void v8(); virtual void v9(); '
+     r'virtual void v10(); virtual void v11(); virtual void v12(); virtual void v13(void* value);\2'),
     ('staging/blk_00aa0000_o2.cpp',
         re.compile(r'^struct FUN_00aa2230_BSNiAllocator\s*\{\s*virtual void m_virtual0\(\);\s*'
                    r'FUN_00aa2230_BSNiAllocator\(\);\s*\};', re.M),
@@ -2670,6 +2751,91 @@ def bind_stand_in_names(out_root, stats, files=None):
 
 POST = [bind_stand_in_names]
 
+# ---------------------------------------------------------------------------------------------------------- VA2
+#
+# `va_arg(ap, Index)` with an enum type: an enum argument passed through `...` is promoted to its underlying type,
+# so in C++ the va_arg of the enum itself is undefined and GCC compiles it to a trap ("is promoted to 'int' when
+# passed through '...'; if this code is reached, the program will abort"; S1b: RegisterActorValue 0x0066efe0).
+# MSVC read the int the caller pushed. VA2 reads that int and converts it: `(Index)va_arg(ap, int)`.
+
+VA_ARG = re.compile(r'\bva_arg\s*\(\s*([A-Za-z_]\w*)\s*,\s*((?:[A-Za-z_]\w*::)*([A-Za-z_]\w*))\s*\)')
+ENUM_NAME = re.compile(r'\benum\s+(?:class\s+|struct\s+)?([A-Za-z_]\w*)\s*(?::[^;{]*)?[;{]')
+_ENUM_NAMES = None
+
+def _enum_names(path):
+    global _ENUM_NAMES
+    if _ENUM_NAMES is not None: return _ENUM_NAMES
+    names, root = set(), _roots(path)
+    for d in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(root, d)):
+            for f in fs:
+                if not f.endswith(('.h', '.cpp', '.inl', '.hpp', '.c')): continue
+                with open(os.path.join(dp, f), encoding='utf-8', errors='surrogateescape') as h: t = h.read()
+                if 'enum' in t: names.update(ENUM_NAME.findall(t))
+    _ENUM_NAMES = names
+    return names
+
+def r_va_enum_args(path, text, stats):
+    """VA2: `va_arg(ap, E)` with an enum E -> `(E)va_arg(ap, int)` (see above)."""
+    if 'va_arg' not in text: return text
+    local = set(ENUM_NAME.findall(text))
+    def sub(m):
+        if m.group(3) not in local and m.group(3) not in _enum_names(path): return m.group(0)
+        stats['VA2'] += 1
+        return '(%s)va_arg(%s, int)' % (m.group(2), m.group(1))
+    return VA_ARG.sub(sub, text)
+
+# ---------------------------------------------------------------------------------------------------------- VLIT1
+#
+# A vptr store the decompiler printed as a string literal: `m_p = "@K@";` in nitmapbase.cpp's FUN_00404b10. The
+# instruction stores an image address whose bytes it read as text: "@K@\0" is 0x00404b40, slot 0 (the scalar
+# deleting destructor, S00404b40::DestroyIfFlagged) of the vftable at that address (S5 J-0102: the
+# GameSettingCollection vptr, 3,454 setting initializers). The unit's recipe binds the literal (MSVC `$SG2541`)
+# to that vftable address, 0x0101212c. VLIT1 stores the address: `m_p = (char*)0x0101212c;`. Only where a literal
+# of at most 3 characters stored with `=` reads as the address of a function the recipe defines, and the unit's
+# `$SG` binding can only be that literal (the unit binds one `$SG` address and the file has one string literal);
+# the other sites (45 in the tree) are counted as VLIT1-LIST and left as they are until the exe says which.
+
+VLIT_STORE = re.compile(r'(=\s*)"([^"\\\n]{1,3})"(\s*;)')
+STRING_LIT = re.compile(r'"(?:\\.|[^"\\\n])*"')
+_VLIT = None
+
+def _vlit_index(path):
+    """(defined function addresses, {unit source: {$SG addresses}})"""
+    global _VLIT
+    if _VLIT is not None: return _VLIT
+    import json
+    root, uj = prepare._units_json(path)
+    defs, sg = set(), {}
+    if uj:
+        for u in json.load(open(uj))['units']:
+            defs.update(int(f['address'], 16) for f in u.get('functions', []))
+            s = {int(v, 16) for k, v in u.get('symbols', {}).items() if k.startswith('$SG')}
+            sg.setdefault(os.path.normpath(os.path.join(root, u['source'])), set()).update(s)
+    _VLIT = (defs, sg)
+    return _VLIT
+
+def r_vptr_literals(path, text, stats):
+    """VLIT1: a 1-3 character string literal stored as a vptr -> the vftable address the unit binds it to (see
+    above)."""
+    if '"' not in text: return text
+    hits = []
+    for m in VLIT_STORE.finditer(text):
+        a = int.from_bytes((m.group(2).encode('latin-1', 'replace') + b'\0' * 4)[:4], 'little')
+        if 0x00401000 <= a < 0x00fde578: hits.append((m, a))
+    if not hits: return text
+    defs, sg = _vlit_index(path)
+    hits = [(m, a) for m, a in hits if a in defs]
+    if not hits: return text
+    addrs = sg.get(os.path.normpath(os.path.abspath(path)), set())
+    code = re.sub(r'^[ \t]*#[^\n]*', '', COMMENT.sub(' ', text), flags=re.M)
+    if len(addrs) != 1 or len(hits) != 1 or len(STRING_LIT.findall(code)) != 1:
+        stats['VLIT1-LIST'] += len(hits)
+        return text
+    m, _ = hits[0]
+    stats['VLIT1'] += 1
+    return text[:m.start()] + '%s(char*)0x%08x /* fnv-nx VLIT1: "%s" */%s' % (m.group(1), next(iter(addrs)), m.group(2).replace('*/', '* /'), m.group(3)) + text[m.end():]
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2694,5 +2860,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment]

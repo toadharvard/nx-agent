@@ -784,7 +784,8 @@ guest PC from it into a symbol, use the base of the "mapped at" line:
 docs/PERF.md 6.3 found every game thread and Nine's CSMT worker on core 0. This round fixes the runtime side.
 
 * **Placement table**, `toolchain/host/placement.h`: one row per role (`FNVNX_ROLE_*`, hostapi.h), each with an
-  ideal core, an affinity mask over cores 0-2, and a priority (0 = the thread's Win32 priority mapped).
+  ideal core, an affinity mask over cores 0-2 (cores 1-3 for the background roles with the core 3 opt-in,
+  section 20), and a priority (0 = the thread's Win32 priority mapped).
 
   | role | ideal core | mask | priority |
   |---|---|---|---|
@@ -948,7 +949,144 @@ packs the farm's `guest/fnvnx.elf` to an NSO and boots it in about 30 s, with no
 
 **The remaining class.** Most of what is left comes from image vtables used as vptrs. On f13, `hand_vptrs.tsv` lists
 750 hand-stored vptrs with no native vtable, and `*(int*)this = (int)&DAT_<vtable>` stores (0x010472d0) are not
-listed at all. Whatever image is loaded, those slots are not native code: x86 addresses, or 0 in the synth image.
+listed at all. In the synth image those slots are 0. With the real exe, S3's code-pointer pass (`loader/src/codeptr.c`)
+rewrites the slots of image vftables it validates by their RTTI locator, to native code or trap stubs. Only for
+those vftables can a hand vptr into the image work at all.
+
+## 19. Farm boots, startup order, hand-stored image vptrs
+
+**Farm.**
+- `tools/farm/full_job.sh` step 4b runs the stub-fault boot after the pipeline's raw one:
+  `tests/s5/farm_boot.sh` with `FARM_BOOTS=stub` and `FARM_GUEST_DIR` set, on the same guest and data image.
+- Step 4c runs `tests/s5/hand_vptrs.py`.
+- `link/<commit12>` then also carries:
+  - `boot/stub/{summary.txt,emu_stub.log,frontier_stub.*}`;
+  - `boot/synth.exe` and `boot/synth_summary.txt`;
+  - `boot/hand_vptrs*.tsv`.
+- `meta.json` gets `boot_image_sha256`, `boot_stub_stop` and `boot_stub_winmain`.
+- On another host, `farm_boot.sh` boots a link with no local image: it uses the link's `boot/synth.exe`.
+
+**Is the farm image S14's r2?**
+- Byte identity is open until a link carries `boot/synth.exe`; `meta.json` will then hold the sha256 to compare.
+  `s14/r2/fix/synth.exe` has sha256 `4de39c5f…675b`.
+- On the 9a0243c7eabe guest, the farm's own boot and a local boot on r2 log the same lines: imports 204/164, 91
+  unbound IAT words, code pointers 3,814 found / 684 applied / 720 trapped, 240 trap hits at the end of static init,
+  4,343 skips, the same stop.
+
+**Startup order of the guest** (S1's INIT question):
+1. `__fnvnx_guest_entry` (`toolchain/guest/runtime.c:167`): bss, self-relocation, host API, TLS, newlib, files.
+2. `__libc_init_array()` (`runtime.c:199`): `.preinit_array`, `_init`, then `.init_array`. `toolchain/guest/guest.ld:95-96`
+   orders it: prioritized entries first, then the rest in link order. On the 9a0243c7eabe guest it has 19 entries:
+   - `register_fini`;
+   - `boot_banner`, `constructor(101)` (now 110, see below) (`toolchain/game/boot.cpp:339`): it maps the data image (`load_image`, :349)
+     and constructs the memory manager (:353);
+   - `frame_dummy`;
+   - eight game-unit `_GLOBAL__sub_I_*` (e.g. `blk_009e0000_o2.cpp`, `nipoint3_console.cpp`);
+   - the platform's (`fnvnx_exception`, `clock_init`, audio input, the profile-string unit, `time_init`);
+   - libstdc++'s (`eh_alloc`, `eh_globals`);
+   - `__stack_chk_init`.
+3. S10's `fnvnx_xc_run_initializers` (`runtime.c:202-210`): the game's initializers from `xctab.c`. The order is
+   IMAGE when `boot.cpp:163` captured the image's `__xc` slots, else ADDRESS (the synth image has none).
+4. `fnvnx_guest_main` (`runtime.c:215` -> `boot.cpp:248`), then WinMain `__fnv_0086a850` (`boot.cpp:260`).
+5. After it returns: `fnvnx_xc_cexit` (`runtime.c:216`).
+
+What that means for the INIT fix:
+- A native C++ static in a staging unit (rule XC1 rewrites only the 14 generated units) runs in step 2. That is after
+  the image is mapped and the memory manager constructed, before every game initializer, and before WinMain. So the
+  NiMainSDM fix works there.
+- The ordering gap is closed (round after J-0109). `.init_array` of the f13 guest now runs:
+  1. newlib's `__call_atexit`;
+  2. the platform at its priorities, from `platform/os/os.h` `FNVNX_INIT_*`: clocks 101 (`heap.c` `clock_init`,
+     `time.cpp` `time_init`), module/COM registrations 103 (`input/register.cpp`);
+  3. `boot_banner` 110;
+  4. the runtime libraries' unprioritized constructors (crtbegin, libstdc++ `eh_alloc`/`eh_globals`, newlib's
+     stack guard), which `toolchain/guest/guest.ld` now places ahead of the rest. It needs one input section per
+     `KEEP`, and `libstdc??.a`, because `+` is not a pattern character;
+  5. the game units' constructors.
+
+  The MSVC ctype table (`cpplib.cpp` `g_ctype`) is now `constexpr`, so it is constant-initialized and has no
+  constructor. The ini cache (`ini.cpp`) is built on first use. So a game static may use the clock, the ini
+  functions, the character tables, the registered modules and exceptions.
+  `toolchain/game/init_order.py` checks the linked order from the map, and `build.sh` fails the link if a
+  platform, runtime or boot constructor comes after a game one (test: `InitOrderTest`). On f13 the result is
+  `17 constructors: 5 runtime, 4 own, 8 game`. Both boots are unchanged: raw WinMain+0x1d0 with 4,340 skips, stub
+  WinMain+0x43c with 4,326. The S4 host suite passes (70 tests).
+- Drop `before-winmain 0x00a8a5f0` from `known_faults.txt` when the rule lands.
+
+**Hand-stored image vptrs** (`tests/s5/hand_vptrs.py`; rules in its docstring).
+
+The scan: t/9a0243c7eabe with link/9a0243c7eabe, its ELF and both boots. It found 2,651 stores of 1,583 image .rdata
+addresses:
+- 594 are bound to a native vtable (`__fnv_X = _ZTV<C> + 8`);
+- 38 are unbound;
+- 951 stay the image address.
+
+The 951 image-bound addresses, by rule:
+
+| rule | addresses | stores | fix |
+|---|---|---|---|
+| literal | 22 | 23 | S1 VLIT1 (string literals such as `"@K@"`; this tree predates ea92c84) |
+| S2:mapped | 16 | 21 | S2: addrmap has a V entry, but the `__fnv_` symbol stays the image address because the store was not recognised. Bind `__fnv_<addr>` of every V entry to its address point. |
+| S2:named | 2 | 2 | S2: a unit names it as `??_7C`, and C has a native vtable |
+| S2:class | 12 | 21 | S2: the storing function's class has a native vtable; widen `fnvlink.DEREF_LHS` (it needs a cast to `T**`, but 223 stores are `*(int*)this = (int)&DAT_`). Class names are matched by name: candidates only. |
+| S1:virtuals | 832 | 1,360 | S1: the storing class has no native vtable. Declare the image vftable's virtuals, in the original slot order, and drop the store. The slots are known only from the exe. |
+| S1:class | 67 | 80 | S1: the store is in a free function or on another object: give the object a class |
+
+- All 7 addresses the boots call through are S1:virtuals: 0x0101772c (735 calls), 0x0104e6ac, 0x01018508,
+  0x0106ba6c, 0x010472d0 (the WinMain+0x3f8 stop), 0x01082ed8, and the IOQueue family at 0x010a2960.
+- About two thirds of the S1:virtuals stores are in `src/staging` (1,007), the most in `blk_00b80000_o2.cpp` (169).
+- **VLIT1's fix moves the setting skips rather than ending them.** GameSettingCollection now stores 0x0101212c.
+  That address has no V entry on 9a0243c7eabe, and `FUN_00404b10_class` declares no virtuals. So, unless the next
+  link maps it, the 3,454 setting skips become "vslot 1 of image vtable 0x0101212c": an S1:virtuals case.
+
+## 20. Platform config, core 3 opt-in, CPU boost on loading screens
+
+**Config.** The host reads `sdmc:/fnvnx/fnvnx.ini` (`toolchain/host/host.c` `load_config`). It holds `key=value`
+lines (`#` or `;` starts a comment) and logs the values in effect. A missing file or key takes the build default.
+
+| key | default (build macro) | effect |
+|---|---|---|
+| `core3` | 0 (`FNVNX_CORE3_DEFAULT`) | the background roles may use core 3 |
+| `boost_loading` | 1 (`FNVNX_BOOST_LOADING_DEFAULT`) | `appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad)` while the loading screen runs |
+
+**Core 3 opt-in.**
+- **NPDM:** `highest_cpu_id` is now 3, with `default_cpu_id` 0. `check_package.py` requires cores 0..3 and default 0;
+  NpdmTest checks the kernel flags.
+- **`placement.h`:** each row gets `mask3`, its mask under the opt-in, and the host calls `fnvnx_place_ex(...,
+  g_cfg.core3, ...)`. The new roles are `FNVNX_ROLE_IO`, `_AUDIO`, `_TASKLET` and `_LOADING`.
+  - With the opt-in, `game` (everything else), `io`, `audio` and `tasklet` take mask 0xE (cores 1-3).
+  - `main` (core 0), `render-worker` (core 1), the two AI linear rows (0x6) and `loading` (0x6) never take core 3.
+  - Off is the default until S15's model and the hardware say otherwise. Align the rows with S15's recommendation
+    when it lands.
+- **Who gets which role today:**
+  - the Serialized IO Thread (IOThread vftable 0x010a29c0, `boot.cpp` `thread_role`): `io`;
+  - the platform's audio pump (`platform/audio` backend and backend_audren, `OS_ROLE_AUDIO`): `audio`;
+  - the LoadingMenuThread (0x010740ac): `loading`.
+  - The game's `LibAudioUpdate` BSThread and the tasklet workers are not identified yet. They stay in `game`, which
+    also gets core 3 under the opt-in.
+- **Tests:**
+  - `tests/s5/test_placement.c`: every row in both modes;
+  - PlacementTest: the emulator's copy of the table;
+  - `tests/s5/rt/build.sh`: a run with `--core3` (`placement core3: PASS`: io and game on mask 0xe, ai-linear-1 0x5).
+
+**CPU boost on loading screens.**
+- **The hook is the LoadingMenuThread, the game's loading-screen thread.** `LoadingMenuThread::ThreadProc`
+  0x0078d490 renders the loading screen while it runs. When the screen is done it parks on its semaphore:
+  `CountingSemaphore::Wait` 0x004424e0, `WaitForSingleObject(h, INFINITE)`.
+- **How the boost follows it:**
+  - `boot.cpp` tags that thread `OS_THREAD_BOOST` (`platform/os/os.h`).
+  - `platform/win32/thread.cpp` turns the boost on when the thread starts and off when it ends (also through
+    `ExitThread`).
+  - `sync.cpp`'s `WaitForMultipleObjects`, and so `WaitForSingleObject`, turns it off for each infinite wait of
+    that thread and back on after the wait.
+  - `os_cpu_boost()` sends it to the host: ext_call `FNVNX_EXT_PLATFORM` (11), `FNVNX_PLAT_CPU_BOOST`.
+  - The host calls `appletSetCpuBoostMode` only when the mode changes, refuses when `boost_loading=0`, and sets
+    Normal again before it exits.
+- **Why not IO activity:** FastLoad also throttles the GPU to its minimum. So the trigger must be the loading screen,
+  never streaming during play.
+- **Emulator:** it only logs (`cpu boost: FastLoad|Normal`). `tests/s5/rt/build.sh` checks both lines.
+- **Untested:** the boost on hardware, and the wait/start/end path inside the platform (the emulated boot does not
+  reach the LoadingMenuThread yet).
 
 ## 7. Not yet done / untested
 

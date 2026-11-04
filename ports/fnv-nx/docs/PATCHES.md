@@ -57,6 +57,7 @@ inline.
 | XINC1 | all 68 x86-inconsistent pairs of S2's latest run (a 69th of an earlier run is bridged by S2 now): 66 functions, 49 files | 62 identical, 4 differ by design | see below |
 | XINC1 round 2 | S2c run f12: 295 x86-inconsistent references, 295 callers in 174 files; 264 callers patched in 152 files (`xinc1_r2_*.s1b`) | 259 identical, 5 differ by design | 26 need no patch, 4 open, 1 patched in round 1 (see "Round 2") |
 | XINC1 round 3 | S2c run f13 (resolve 1, tree 0420d45, before round 2): 456 caller rows, 266 covered by rounds 1-2; 128 of the 188 open generated (`xinc1_r3_*.s1b`: A 21, B 15, C 92; 27 files) | identical (all 156 site functions of the 27 files) | 51 callers left to read by hand, about 30 of them round 2's no-patch / open ones |
+| XINC1 round 4 | farm link/aedcf247e999 (tree 9a0243c, C-named references now compared): 757 this / ecx / result-pointer / cast-conflict rows, 576 caller rows, 388 covered by rounds 1-3; 66 generated + 9 by hand (`xinc1_r4_*.s1b`, 59 files) | 74 identical, 1 differs by design (+ 2 pattern (d) rewrites: 1 identical, 1 by design) | 182 open read: see "Round 4" |
 | FTOL1 | 17 arg-less helper calls in 10 units (+1 dead copy) | all identical; whole units identical (1,535 functions) | the "~37" of J-0009 counted 20 declarations nobody calls |
 | FTOL1 exact | the 17 sites now call the inline `fnvnx_ftol2_sse` (was the out-of-line int64 `fnvnx_ftol2`); 5 casts in 0x00a1b450 / 0x006912a0 (`ftol1_casts.s1b`) | whole units identical (11 units, 1,690 functions) | NaN / out of int32 -> 0x80000000 as on an SSE2 PC |
 | RET1 | 11 functions | identical (whole units, 1,395 functions) | 6 trailing statements, 5 with the callee's return type restored |
@@ -121,6 +122,29 @@ pushes the decomp attributed to the wrong calls (0x005762b0 computes `*out = *vf
 through NiPoint3 operator+ 0x00439e90 and operator/ 0x0053d280): they need a rewrite of the function. Not in abi.tsv:
 the 76 C-named pairs V1 found unflagged (resolve does not compare C names yet, V1 defect 3).
 
+**Round 4 (farm link/aedcf247e999).** Resolve now compares C-named references: 73 of V1's 74 C-named addresses are
+flagged there (the 74th, 0x00c1ad80, is called by the forwarder 0x00c21900 through an `extern "C"
+__declspec(noreturn)` declaration that resolve does not parse - patched by hand, the `noreturn` is wrong as well).
+`gen.py` takes a C-named reference's signature from the unit's `extern "C"` declaration. Of the 182 open caller rows:
+66 generated, 9 by hand (`xinc1_r4_manual.s1b`: DynamicCast on `enabledData` and GrowBuffer on the output buffer,
+`extern "C"` / `noreturn` / declaration-split forwarders, the base constructor 0x00a5d3a0 on this instead of the
+decomp's temporary), MSVC 74 identical and 0x00bb7f90 by design (`enabledData` read again for the member call). No patch:
+43 rows call through a thiscall cast, 10 of them through a typedef'd pointer type (`reinterpret_cast<AlphaFlag>(f)`,
+`((FUN_00653180_type)f)`), which resolve's cast reader does not see; 30 rows take addresses (iterators, callbacks).
+0x006eac70 passes the hidden result buffer of a `__fastcall` struct return in ecx (consistent on x86; resolve's model
+misses it). Open: 6 `cast-conflict` rows of the varargs 0x005b5e40 / 0x00a29680, and 8 callers still to read
+(0x00c6d7e0, 0x00cc26c0, 0x00e3deb0, 0x00e8dd70, 0x00a4fb10, 0x00a60850, 0x00ccb160, 0x00ccb180).
+
+**Pattern (d) rewrites** (`xinc1_r4_resultptr.s1b`). Counting the stack words each callee pops (`ret n`, hidden
+result included) shows which pushes belong to which call. 0x005762b0 is `NiPoint3 f() { return *vf125() + (vf118()
++ vf119()) / c; }` (NiPoint3 operator+ 0x00439e90 and operator/ 0x0053d280 as members of the unit's Vec3f, slots 118
+/ 119 returning the point by value, 125 its address): MSVC identical. 0x00c90030 is `source->m68 = (outer->m68 +
+source->m34) + this->m2C` (ThreeByThreeMatrix::operator+ 0x0043f8d0 twice): differs by design, the copy reads the
+sum through `lea` instead of operator+'s returned pointer (the same buffer). Still open: 16 result-pointer rows, among
+them 0x008133f0 and 0x009ab390 - in both, 0x00461130 / 0x00524c40's caller is a getter of the transform at +0x68
+(no stack argument, `ret`), and the pushed point and buffer belong to the transform-by-point call 0x004b4500 /
+0x00524c40 after it; the word left over belongs to the enclosing call, whose arity has to be rebuilt too.
+
 **FTOL1.** The decomp reaches the bytes by declaring the function that leaves the float in ST0 as void and calling
 the helper with no operand. Sites name that function from the code and its definition: Tile::GetFloat (0x00a011b0,
 6 sites), GetDistanceToReference (0x005723b0, 2), floor (0x00406cc0), FloatValueProvider::FUN_008be7a0, the two
@@ -144,6 +168,10 @@ before this patch. Option taken: the narrow one - the arg-less helper sites and 
 objects hold 1,253 compiler-made `__ftol2_sse` calls (228 units, inline copies counted) and 10 `__ftol2` (8 units);
 routing every int conversion (S12's F2S site list, 536 "runtime" sites) through this helper is S12's FTOI2 rule,
 which should use this helper verbatim (and the unsigned ones the int64 truncation of FTOI1).
+With FTOI2 global (S12's plugin in compile.sh, ca2dcce, J-0110: every int / short / signed char conversion as
+`__ftol2_sse` = cvttsd2si) the helper and the 5 casts of `ftol1_casts.s1b` are redundant and harmless: test_ftol.py
+passes with the plugin loaded (same 48 values, still inline, 15 instructions). The operand restoration of the 17
+arg-less sites stays needed: the plugin sees no conversion where the decomp calls the helper without its operand.
 
 **RET1.** Of the 861 FALL1 sites on decomp code (after S1's two FALL1 fixes): 419 end only in jumps (unreachable
 trap, fine), about 220 end in a switch / loop / if without else / try (the x86 return value is not evident from the
@@ -170,6 +198,33 @@ The other 5 functions of S12's list have no FALL1 trap: InitWinsock 0x00da2ff0, 
 whenever `count > 0`: GCC replaces `va_arg(args, Index)` (an enum, promoted through `...`) by a trap - for S1 (VA:
 `(Index)va_arg(args, int)`). QuadRenderer::UploadQuads 0x00e723a0 has a reachable `brk` (`cbnz w1` falls into it)
 of another origin - for S12 / S1.
+
+## By-design MSVC differences (S11 gate)
+
+Every S1b site whose MSVC code is not identical to the pristine build, and why. Each one keeps the x86 semantics;
+the bytes differ because a per-unit MSVC cannot reproduce the exe's whole-program register allocation, or because
+the patch gives a value explicitly that the exe left in a register. S11's gate (`tools/equiv`, J-0113) can mark
+these rows as expected; any other S1b difference is a regression.
+
+| Rule | Source | Function | Difference |
+|---|---|---|---|
+| XINC1 | `src/gamebryo2.2/corelibs/nimain/bssegmentedtrishape.cpp` | 0x00a87120 | `mov ecx,esi` before the second call (FinalizeEntries keeps ecx in the exe) |
+| XINC1 | `src/gamebryo2.2/corelibs/nimain/bssegmentedtrishape.cpp` | 0x00a87130 | as 0x00a87120 |
+| XINC1 | `src/gamebryo2.2/corelibs/niconsolerenderer/nivbset.cpp` | 0x00e94490 | ecx reload after RemoveNode |
+| XINC1 | `src/havok/physics/utilities/weapons/hkpprojectilegun.cpp` | 0x00e44f30 | ecx reload after ClearProjectileFlags |
+| XINC1 | `src/gamebryo2.2/corelibs/nianimation/nicontrollersequence.cpp` | 0x00a30c80 | this and arg kept in saved registers across IsNotInChain (the exe keeps them in ecx / edx) |
+| XINC1 | `src/gamebryo2.2/corelibs/nimain/nicamera.cpp` | 0x00a712f0 | `mov ecx,esi` before UpdateWorldBound (UpdateWorldFrustum keeps ecx) |
+| XINC1 | `src/havok/physics/vehicle/hkpvehicleinstance.cpp` | 0x00e385e0 | `mov ecx,esi` before 0x00e38080 (0x00e376e0 keeps ecx) |
+| XINC1 | `src/gamebryo2.2/corelibs/niparticle/nipsysmodifierctlr.cpp` | 0x00c315b0 | one register choice after the member call (`ebx` for `eax`), same value |
+| XINC1 | `src/havok/common/internal/collide/tree/aabbtree/hkaabbtree.cpp` | 0x00d9be50 | one `push` scheduled later, same values |
+| XINC1 | `src/staging/blk_00ba0000_o2.cpp` | 0x00bb7f90 | `enabledData` read again (3 bytes) for the DynamicCast member call |
+| XINC1 | `src/staging/blk_00c80000_o2.cpp` | 0x00c90030 | pattern (d): the copy reads the sum through `lea` instead of operator+'s returned pointer (the same buffer) |
+| RET1 | `src/bssystemutilities/console/bsdlcsystemutility_console.cpp` | 0x00af28f0 | `xor eax,eax` for the 0 that was already in eax |
+| RET1 | `src/bsshader/bsdistanttreeshader.cpp` | 0x00bb62b0 | `lea eax,[edx-0x237]` for the `a - 0x237` the switch arithmetic left in eax |
+
+FTOL1 has none: with `fnvnx_ftol2_sse(x)` = `(int)(x)` under MSVC (`msvc/s1b_check_fi.h`, `tools/equiv/msvc/fnvnx_equiv_fi.h`)
+the patched calls are `_ftol2_sse` calls as in the exe; the gate's 9 "other helper" FTOL1 functions came from the
+earlier `fnvnx_ftol2(x)` = `(__int64)(x)`, which calls `_ftol2`.
 
 ## CRITICAL_SECTION on PC (the CS28 question)
 

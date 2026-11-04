@@ -286,9 +286,9 @@ extern "C" void fnvnx_locinfo_dtor(void *self) { (void)self; /* would restore _O
 namespace {
 /* MSVC's _pctype in the "C" locale: _UPPER 1, _LOWER 2, _DIGIT 4, _SPACE 8, _PUNCT 0x10, _CONTROL 0x20,
  * _BLANK 0x40, _HEX 0x80, C1_ALPHA 0x100 */
-struct ctype_table {
-    short t[256];
-    ctype_table()
+struct ctype_table {   /* constexpr: the table is constant-initialized, no static constructor (init order) */
+    short t[256] = {};
+    constexpr ctype_table()
     {
         for (int c = 0; c < 256; c++) {
             short m = 0;
@@ -312,7 +312,7 @@ struct ctype_table {
         }
     }
 };
-const ctype_table g_ctype;
+constexpr ctype_table g_ctype;
 } // namespace
 
 extern "C" const short *fnvnx_msvc_ctype_table(void) { return g_ctype.t; }

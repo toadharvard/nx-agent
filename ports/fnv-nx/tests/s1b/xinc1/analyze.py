@@ -55,7 +55,7 @@ rows = [l.rstrip('\n').split('\t') for l in open(sys.argv[1]) if not l.startswit
 out = open(sys.argv[2], 'w')
 sdir = sys.argv[3] if len(sys.argv) > 3 else None
 if sdir: os.makedirs(sdir, exist_ok=True)
-out.write('#src\tunit\tcallee\tclasses\tcaller\tckind\tinsn\tecx\tecx_def\tdkind\tv1\tref\tdef\tcaller_sym\n')
+out.write('#src\tunit\tcallee\tclasses\tcaller\tckind\tinsn\tecx\tecx_def\tdkind\tv1\tref\tdef\tcaller_sym\tref_ms\n')
 objs = {}
 for r in rows:
     src, unit, callee, classes, caller, csym, offs, status, v1, v1ecx, refms, defms, ref, dfn = r
@@ -82,7 +82,7 @@ for r in rows:
     ck = kind(csym)
     dk = kind(defms) if defms else '?'
     out.write('\t'.join([src, unit, callee, classes, caller, ck, ','.join(x[0] for x in res), ','.join(x[1] for x in res),
-                         ' | '.join(x[2] for x in res), dk, v1 + ':' + v1ecx, ref, dfn, csym]) + '\n')
+                         ' | '.join(x[2] for x in res), dk, v1 + ':' + v1ecx, ref, dfn, csym, refms]) + '\n')
     if sdir:
         with open('%s/%s_%s.txt' % (sdir, caller[2:], callee), 'w') as f:
             f.write('PAIR %s callee %s caller %s %s\nREF %s\nDEF %s\nCLASSES %s V1 %s %s\nCKIND %s ECX %s\n' % (

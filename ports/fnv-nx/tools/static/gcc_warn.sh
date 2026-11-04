@@ -21,6 +21,10 @@ SHIM=${SHIM:-$HERE/shim/include}
 # stays an error, so a unit the build cannot compile fails here too
 FLAGS=("${BUILD_FLAGS[@]}" -c "$OPT" -o /dev/null "${GCC_WARN[@]}" "${GCC_DIAG[@]}"
        -include "$SHIM/fnvnx_compat.h" -I"$SHIM" -I"$SSE2NEON" -I"$TREE/include")
+# the build's compiler plugin (toolchain/ftoi: MSVC float -> integer semantics), when compile.sh loads it
+if grep -q 'toolchain/ftoi' "$HERE/tools/link/compile.sh"; then
+  FLAGS+=(-fplugin="$(bash "$HERE/toolchain/ftoi/build.sh" "$OUT/gcc/plugin" | tail -1)")
+fi
 export CXX TREE OUT FLAGS_STR="${FLAGS[*]}" FORCE=${FORCE:-0} NICE=${NICE:-19}
 if [ -z "$LIST" ]; then LIST="$OUT/gcc/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
 

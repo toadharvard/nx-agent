@@ -94,16 +94,19 @@ def parse_fault_table(path):
 
 
 def placement_table():
-    """{role number: (name, ideal, mask, prio)} from placement.h and the FNVNX_ROLE_* enum of hostapi.h"""
+    """{role number: (name, ideal, mask, prio, mask3)} from placement.h and the FNVNX_ROLE_* enum of hostapi.h
+    (mask3: the mask with the core 3 opt-in, 0 = mask)"""
     global _PLACEMENT
     if _PLACEMENT is None:
         inc = os.path.join(HERE, "..", "..", "toolchain")
         roles = dict((m.group(1), int(m.group(2))) for m in re.finditer(
             r"FNVNX_ROLE_(\w+)\s*=\s*(\d+)", open(os.path.join(inc, "include", "fnvnx", "hostapi.h")).read()))
         _PLACEMENT = {}
-        for m in re.finditer(r'\[FNVNX_ROLE_(\w+)\]\s*=\s*\{"([^"]+)",\s*(-?\d+),\s*(0x[0-9a-fA-F]+|\d+),\s*'
-                             r'(0x[0-9a-fA-F]+|\d+)\}', open(os.path.join(inc, "host", "placement.h")).read()):
-            _PLACEMENT[roles[m.group(1)]] = (m.group(2), int(m.group(3)), int(m.group(4), 0), int(m.group(5), 0))
+        n = r'(0x[0-9a-fA-F]+|\d+)'
+        for m in re.finditer(r'\[FNVNX_ROLE_(\w+)\]\s*=\s*\{"([^"]+)",\s*(-?\d+),\s*' + n + r',\s*' + n + r',\s*' + n + r'\}',
+                             open(os.path.join(inc, "host", "placement.h")).read()):
+            _PLACEMENT[roles[m.group(1)]] = (m.group(2), int(m.group(3)), int(m.group(4), 0), int(m.group(6), 0),
+                                             int(m.group(5), 0))
     return _PLACEMENT
 
 
@@ -112,8 +115,9 @@ def win32_to_horizon_prio(prio):
     return 0x1C if p < 0x1C else 0x3B if p > 0x3B else p
 
 
-def place(cpu, seq, prio):
-    """fnvnx_place(): thread_create's cpu argument -> (role name, ideal core, mask, Horizon priority)"""
+def place(cpu, seq, prio, core3=False):
+    """fnvnx_place_ex(): thread_create's cpu argument -> (role name, ideal core, mask, Horizon priority); core3: the
+    core 3 opt-in (sdmc:/fnvnx/fnvnx.ini core3=1, --core3)"""
     prio = prio - (1 << 64) if prio >> 63 else prio
     table = placement_table()
     if cpu & ~0xFF == 0x100 and (cpu & 0xFF) in table:
@@ -122,8 +126,8 @@ def place(cpu, seq, prio):
         role = 0
     else:
         return ("explicit", cpu, 1 << (cpu & 31), win32_to_horizon_prio(prio))
-    name, ideal, mask, hp = table[role]
-    mask &= 7
+    name, ideal, mask, hp, mask3 = table[role]
+    mask = mask3 & 0xF if core3 and mask3 else mask & 7
     if ideal < 0:
         cores = [c for c in range(32) if mask >> c & 1]
         ideal = cores[seq % len(cores)] if cores else 0
@@ -316,7 +320,7 @@ class Emu:
         t = Thread(tid)
         t.entry, t.arg = entry, arg
         self.thread_seq = getattr(self, "thread_seq", 0)
-        t.place = list(place(cpu, self.thread_seq, prio))
+        t.place = list(place(cpu, self.thread_seq, prio, getattr(self, "core3", False)))
         self.thread_seq += 1
         self.threads[tid] = t
         self.order.append(tid)
@@ -551,7 +555,16 @@ class Emu:
         self.mapped_fixed = getattr(self, "mapped_fixed", []) + [(addr, size)]
         return 0
 
-    def h_ext_call(self, *_):
+    def h_ext_call(self, module, fn, args, nargs, *_):
+        """FNVNX_EXT_PLATFORM (11): the host's platform services; the CPU boost is only logged here"""
+        if module == 11 and fn == 1:   # FNVNX_PLAT_CPU_BOOST(mode)
+            mode = struct.unpack("<Q", self.uc.mem_read(args, 8))[0] if nargs >= 1 and args else 0
+            on = getattr(self, "boost_loading", True)
+            self.boosts = getattr(self, "boosts", []) + [(mode, on)]
+            if len(self.boosts) <= 40:
+                print(f"   cpu boost: {'FastLoad' if mode else 'Normal'}"
+                      f"{'' if on else ' (off: boost_loading=0)'} (thread {self.cur.tid if self.cur else '?'})")
+            return 0 if on else 1
         return 0xFFFFFFFFFFFFFF01
 
     # -- crash trace: PC/LR and the frame-record chain (x29), symbolized with --elf (S2's __fnv_<addr> aliases
@@ -995,6 +1008,8 @@ def main(argv):
     ap.add_argument("--skip-faulting-init", action="store_true",
                     help="trace mode: return 0 from an initializer that faults (needs --elf)")
     ap.add_argument("--budget", type=int, default=400_000_000, help="instructions per scheduling slice")
+    ap.add_argument("--core3", action="store_true", help="the host's core 3 opt-in (fnvnx.ini core3=1)")
+    ap.add_argument("--no-boost", action="store_true", help="the host's boost_loading=0")
     ap.add_argument("--stub-faults", metavar="FILE", help="functions (names or 0xORIG, one per line) that return 0 "
                     "when a fault happens below them, e.g. tests/s5/known_faults.txt; needs --elf")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
@@ -1008,6 +1023,7 @@ def main(argv):
         shutil.copyfile(src, dst)
     emu = Emu(a.nso, root, load_base=a.load_base)
     emu.budget = a.budget
+    emu.core3, emu.boost_loading = a.core3, not a.no_boost
     if a.elf:
         emu.load_symbols(a.elf)
         if a.skip_faulting_init:

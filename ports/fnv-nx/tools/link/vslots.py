@@ -819,29 +819,66 @@ class Code:
             self._rets[a] = next(iter(rets)) if len(rets) == 1 else None
         return self._rets[a]
 
-    def entry_use(self, a, takes, need=None):
-        """How the code at original address a uses the incoming ecx and edx before it writes them, strongest over
-        every pristine definition there: {'ecx': kind, 'edx': kind}, or None when no object has the code.
+    def names_at(self):
+        """{decorated name: original address} for relocation targets: every unit's definitions and references, plus
+        self.aliases [(address, old name, unit index or None)]: S1b's renamed definitions and references keep their
+        old names in the pristine objects."""
+        if not hasattr(self, '_names'):
+            self._names, self._unit_names = {}, collections.defaultdict(dict)
+            for i, u in enumerate(self.ix.units):
+                for f in u['functions']:
+                    self._unit_names[i][f['symbol']] = int(f['address'], 16)
+                    self._names.setdefault(f['symbol'], int(f['address'], 16))
+                for n, a in u.get('symbols', {}).items():
+                    self._unit_names[i][n] = int(a, 16)
+            for a, n, i in getattr(self, 'aliases', ()):
+                self._names.setdefault(n, a)
+                if i is not None:
+                    self._unit_names[i].setdefault(n, a)
+        return self._names
 
-        kind: 'read' (an operand, an address register or a sub-register reads it); 'pass' (a call or tail jump while
-        it is unwritten, to a callee that takes it - takes(symbol, through_slot) -> {'ecx', 'edx'} subset or None
-        when unknown, through_slot for `call [symbol]` - or a call or jump it cannot follow); 'push' (only pushed:
-        MSVC reserves a stack word with `push ecx`); None (never used). Every path from the entry is followed, both
-        ways at a conditional branch; a switch through the function's own jump table goes to every label its
-        relocations name. Calls write ecx and edx (caller-saved); `xor r, r`, `sub r, r`, `or r, -1`, `and r, 0`
-        write without reading. A definition S1b's patches renamed (units_renames.tsv: the patch gave it the register
-        the pristine code never declared) has no pristine code under its name: None, its pairs stay flagged.
-        need(names), when given, is called once with the relocation targets first (to demangle them in one go)."""
+    def entry_use(self, a, takes, need=None, arg_bytes=None, _depth=0, _busy=None):
+        """How the code at original address a uses the incoming ecx and edx, strongest over every pristine
+        definition there: {'ecx': kind, 'edx': kind}, or None when no object has the code. A definition S1b renamed
+        (self.renamed: its pristine code is the unpatched one) uses the registers its patched declaration has.
+
+        kind: 'read' (an operand, an address register or a sub-register reads it, or a read of the stack word it
+        was pushed to); 'pass' (it reaches a callee: still in the register at a call or tail jump to a callee that
+        takes it, or pushed to a stack word inside the callee's arguments; a callee takes a register when its own
+        pristine code uses it, else when its declaration puts a parameter there - takes(symbol, through_slot) ->
+        {'ecx', 'edx'} subset or None when unknown - and any call or jump it cannot follow takes both); 'push'
+        (only pushed to a stack word that is overwritten or never read: MSVC reserves a local with `push ecx`);
+        None (never used). The stack is followed by depth: a pushed incoming register is a slot; writes through
+        [esp+k] / [ebp+m] overwrite it, reads read it, `pop` restores it, and at a call it is an argument when it
+        lies within the callee's stack argument bytes (arg_bytes(symbol) -> (bytes, popped by the callee); else the
+        callee's own `ret N`; else the caller's cleanup right after the call, `add esp, N` or pops into eax / ecx /
+        edx; else the bytes pushed since the previous call). Every path from the entry is followed, both ways at a conditional
+        branch; a switch through the function's own jump table goes to every label its relocations name. Calls
+        write ecx and edx; `xor r, r`, `sub r, r`, `or r, -1`, `and r, 0` write without reading. need(names), when
+        given, is called once per function with the relocation targets (to demangle them in one go)."""
         import capstone.x86 as X
         if not hasattr(self, '_all_at'):
             self._all_at = collections.defaultdict(list)
             for i, u in enumerate(self.ix.units):
                 for f in u['functions']:
                     self._all_at[int(f['address'], 16)].append((i, f['symbol'], f['size']))
+            self._use_memo = {}
+        if a in self._use_memo:
+            return self._use_memo[a]
+        busy = _busy if _busy is not None else set()
+        busy.add(a)
         rank = {None: 0, 'push': 1, 'pass': 2, 'read': 3}
         sub = {'ecx': {X.X86_REG_ECX, X.X86_REG_CX, X.X86_REG_CL, X.X86_REG_CH},
                'edx': {X.X86_REG_EDX, X.X86_REG_DX, X.X86_REG_DL, X.X86_REG_DH}}
-        full = {'ecx': X.X86_REG_ECX, 'edx': X.X86_REG_EDX}
+        full = {X.X86_REG_ECX: 'ecx', X.X86_REG_EDX: 'edx'}
+        if a in getattr(self, 'renamed', ()) and self._all_at.get(a):
+            # S1b renamed (patched) this definition: its pristine code is the unpatched one, and the patch (XINC1)
+            # gave it the register the pristine declaration lacked - judge it by its patched declaration
+            t = takes(self._all_at[a][0][1], False)
+            res = {r: ('pass' if t is None or r in t else None) for r in ('ecx', 'edx')}
+            self._use_memo[a] = res
+            busy.discard(a)
+            return res
         best, found = {'ecx': None, 'edx': None}, False
         for i, name, size in self._all_at.get(a, []):
             c = self.coff(i)
@@ -856,12 +893,13 @@ class Code:
             rs = {off - lo: y for off, y in c.reloc_syms(s.secnum).items() if lo <= off < hi and y is not None}
             rel = {o: y.name for o, y in rs.items()}
             own = {o: y.value - lo for o, y in rs.items() if y.secnum == s.secnum and lo <= y.value < hi}
-            labels = set(own.values())   # switch cases (and the tables themselves) inside the function
+            labels = set(own.values())
             if need:
                 need(sorted(set(rel.values())))
             order = sorted(ins)
             nxt = dict(zip(order, order[1:] + [None]))
             use = {'ecx': None, 'edx': None}
+            unit_names = self.names_at() and self._unit_names[i]
 
             def note(r, kind):
                 if rank[kind] > rank[use[r]]:
@@ -869,44 +907,114 @@ class Code:
 
             def reads_mem(op, r):
                 return op.type == X.X86_OP_MEM and (op.mem.base in sub[r] or op.mem.index in sub[r])
-            seen, work = set(), [(0, frozenset(('ecx', 'edx')))]
-            while work:
-                pc, live = work.pop()
-                while pc is not None and pc in ins and live and (pc, live) not in seen:
-                    seen.add((pc, live))
+
+            def callee_takes(target, slot):
+                """Registers the callee at `target` uses: its own code when there is some, else its declaration."""
+                ta = None if slot else unit_names.get(target, self._names.get(target))
+                if ta is not None and ta not in busy and _depth < 6:
+                    r_ = self.entry_use(ta, takes, need, arg_bytes, _depth + 1, busy)
+                    if r_ is not None:
+                        return {x for x in ('ecx', 'edx') if r_[x] in ('read', 'pass')}
+                return takes(target, slot)
+
+            def stack_depth(op, d, fp):
+                """The slot depth a memory operand [esp+k] / [ebp+m] addresses, or None."""
+                if op.type != X.X86_OP_MEM or op.mem.index or op.mem.segment:
+                    return None
+                if op.mem.base == X.X86_REG_ESP:
+                    return d - op.mem.disp
+                if op.mem.base == X.X86_REG_EBP and fp is not None:
+                    return fp - op.mem.disp
+                return None
+            seen, work, steps = set(), [(0, frozenset(('ecx', 'edx')), frozenset(), 0, None, 0)], 0
+            while work and steps < 20000:
+                pc, live, slots, d, fp, since = work.pop()
+                while pc is not None and pc in ins and (live or slots) and steps < 20000:
+                    key = (pc, live, slots, d, fp)
+                    if key in seen:
+                        break
+                    seen.add(key)
+                    steps += 1
                     x = ins[pc]
                     m, ops = x.mnemonic, x.operands
                     at = next((o for o in range(pc, pc + x.size) if o in rel), None)
                     target = rel[at] if at is not None else None
+                    sl = dict(slots)   # depth -> register whose incoming value the stack word holds
+                    # memory operands touching a slot
+                    for k_, op in enumerate(ops):
+                        sd = stack_depth(op, d, fp) if op.type == X.X86_OP_MEM else None
+                        if sd in sl:
+                            if k_ == 0 and len(ops) == 2 and m in ('mov', 'movss', 'movd') and op.size == 4:
+                                del sl[sd]                      # overwritten: a reserved local
+                            elif m != 'lea':
+                                note(sl[sd], 'read')
                     if m == 'jmp' and ops and (ops[0].type == X.X86_OP_REG or (
                             ops[0].type == X.X86_OP_MEM and (ops[0].mem.base or ops[0].mem.index))):
-                        # through a register or a table: a switch on this function's own table goes to every label
-                        # of the function (the table's own label left out); any other target is unknown: a use
                         for r in live:
                             note(r, 'read' if (ops[0].type == X.X86_OP_REG and ops[0].reg in sub[r]) or
                                  reads_mem(ops[0], r) else 'pass' if at not in own else None)
                         if at in own:
-                            work.extend((t, live) for t in sorted(labels - {own[at]}))
+                            work.extend((t, live, frozenset(sl.items()), d, fp, since)
+                                        for t in sorted(labels - {own[at]}))
+                        else:
+                            for r in set(sl.values()):
+                                note(r, 'pass')
                         break
-                    if m == 'jmp' and at in own:   # a jump to a label of the function through a relocation
+                    if m == 'jmp' and at in own:
                         pc = own[at]
                         continue
                     if m == 'call' or (m == 'jmp' and target is not None):
                         op = ops[0] if ops else None
                         direct = op is not None and (op.type == X.X86_OP_IMM or (
-                            op.type == X.X86_OP_MEM and not op.mem.base and not op.mem.index))   # call [import slot]
+                            op.type == X.X86_OP_MEM and not op.mem.base and not op.mem.index))
+                        slot_call = op is not None and op.type == X.X86_OP_MEM
+                        nb, pops = (arg_bytes(target, slot_call) if (arg_bytes and direct and target) else None) \
+                            or (None, None)
+                        if nb is None and direct and target is not None and not slot_call:
+                            # no declaration: the callee's own `ret N` (callee-pop), else the caller's cleanup
+                            # right after the call (`add esp, N`, `pop` into a scratch register: V1 R4-1)
+                            ta_ = unit_names.get(target, self._names.get(target))
+                            rb_ = self.ret_bytes(ta_) if ta_ is not None else None
+                            if rb_:
+                                nb, pops = rb_, rb_
+                        if nb is None and m == 'call':
+                            q_, cl_ = nxt[pc], 0
+                            while q_ is not None and q_ in ins:
+                                y_ = ins[q_]
+                                if y_.mnemonic == 'add' and len(y_.operands) == 2 and \
+                                        y_.operands[0].type == X.X86_OP_REG and y_.operands[0].reg == X.X86_REG_ESP and \
+                                        y_.operands[1].type == X.X86_OP_IMM:
+                                    cl_ += y_.operands[1].imm
+                                    break
+                                if y_.mnemonic == 'pop' and y_.operands and y_.operands[0].type == X.X86_OP_REG and \
+                                        y_.operands[0].reg in (X.X86_REG_EAX, X.X86_REG_ECX, X.X86_REG_EDX):
+                                    cl_ += 4
+                                    q_ = nxt[q_]
+                                    continue
+                                break
+                            if cl_:
+                                nb, pops = cl_, 0
                         if direct and target is not None:
-                            t = takes(target, op.type == X.X86_OP_MEM)
+                            t = callee_takes(target, slot_call)
                             for r in live:
                                 if t is None or r in t:
                                     note(r, 'pass')
-                        else:   # through a register or a table: the callee may take either
+                        else:
                             for r in live:
                                 note(r, 'read' if op is not None and ((op.type == X.X86_OP_REG and op.reg in sub[r])
                                                                       or reads_mem(op, r)) else 'pass')
+                        span = nb if nb is not None else since
+                        lo_ = 4 if m == 'jmp' else 0   # a tail jump: the return address is at [esp]
+                        for sd, r in sl.items():
+                            if lo_ <= d - sd < lo_ + span or (m == 'jmp' and nb is None):
+                                note(r, 'pass')                 # a stack argument of the callee
                         if m == 'jmp':
                             break
-                        live, pc = frozenset(), nxt[pc]
+                        live, since = frozenset(), 0
+                        if pops:
+                            d -= pops
+                            sl = {k: v for k, v in sl.items() if k <= d}
+                        slots, pc = frozenset(sl.items()), nxt[pc]
                         continue
                     try:
                         rd, wr = (set(v) for v in x.regs_access())
@@ -917,10 +1025,51 @@ class Code:
                             (ops[1].type == X.X86_OP_IMM and ((m == 'or' and ops[1].imm & 0xffffffff == 0xffffffff)
                                                               or (m == 'and' and ops[1].imm == 0)))):
                         rd.discard(ops[0].reg)
-                    for r in live:
-                        if rd & sub[r]:
-                            note(r, 'push' if m == 'push' else 'read')
-                    live = frozenset(r for r in live if full[r] not in wr)
+                    if m == 'push':
+                        if ops and ops[0].type == X.X86_OP_REG and full.get(ops[0].reg) in live:
+                            note(full[ops[0].reg], 'push')
+                            d += 4
+                            sl[d] = full[ops[0].reg]
+                        else:
+                            for r in live:
+                                if rd & sub[r]:
+                                    note(r, 'read')
+                            d += 4
+                        since += 4
+                    elif m == 'pop':
+                        r_ = full.get(ops[0].reg) if ops and ops[0].type == X.X86_OP_REG else None
+                        held = sl.pop(d, None)
+                        live = frozenset(r for r in live if not (ops and ops[0].type == X.X86_OP_REG and
+                                                                 ops[0].reg in sub[r]))
+                        if held is not None:
+                            if r_ == held:
+                                live = live | {held}            # the incoming value is back in its register
+                            else:
+                                note(held, 'read')              # moved to another register: assume it is used
+                        d -= 4
+                        since = max(0, since - 4)
+                    else:
+                        for r in live:
+                            if rd & sub[r]:
+                                note(r, 'read')
+                        live = frozenset(r for r in live if not any(w_ in (X.X86_REG_ECX, X.X86_REG_EDX) and
+                                                                    full[w_] == r for w_ in wr))
+                        if len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[0].reg == X.X86_REG_ESP:
+                            if m in ('sub', 'add') and ops[1].type == X.X86_OP_IMM:
+                                n_ = ops[1].imm if m == 'sub' else -ops[1].imm
+                                d += n_
+                                since = max(0, since + n_) if n_ > 0 else max(0, since + n_)
+                            elif m == 'mov' and ops[1].type == X.X86_OP_REG and ops[1].reg == X.X86_REG_EBP:
+                                d = fp if fp is not None else d
+                            elif m == 'lea' and ops[1].type == X.X86_OP_MEM and ops[1].mem.base == X.X86_REG_EBP \
+                                    and fp is not None:
+                                d = fp - ops[1].mem.disp
+                            sl = {k: v for k, v in sl.items() if k <= d}
+                        if len(ops) == 2 and m == 'mov' and ops[0].type == X.X86_OP_REG and \
+                                ops[0].reg == X.X86_REG_EBP and ops[1].type == X.X86_OP_REG and \
+                                ops[1].reg == X.X86_REG_ESP:
+                            fp = d
+                    slots = frozenset(sl.items())
                     if m in ('ret', 'retf', 'int3', 'ud2', 'hlt'):
                         break
                     if m == 'jmp':
@@ -928,15 +1077,20 @@ class Code:
                             pc = ops[0].imm
                             continue
                         for r in live:
-                            note(r, 'read' if ops and reads_mem(ops[0], r) else 'pass')   # jmp [abs]: unknown
+                            note(r, 'read' if ops and reads_mem(ops[0], r) else 'pass')
+                        for r in set(sl.values()):
+                            note(r, 'pass')
                         break
                     if (m.startswith('j') or m.startswith('loop')) and ops and ops[0].type == X.X86_OP_IMM:
-                        work.append((ops[0].imm, live))
+                        work.append((ops[0].imm, live, slots, d, fp, since))
                     pc = nxt[pc]
             for r in best:
                 if rank[use[r]] > rank[best[r]]:
                     best[r] = use[r]
-        return best if found else None
+        res = best if found else None
+        busy.discard(a)
+        self._use_memo[a] = res
+        return res
 
     def this_vcalls(self, i, name, size):
         """Virtual calls through the vptr of `this` in a thiscall member function: [(slot, pushed bytes)].

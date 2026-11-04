@@ -95,7 +95,7 @@ static int audren_start(const char *arg, uint32_t rate, uint32_t period)
     audrvVoiceSetMixFactor(&g_drv, 0, 1.0f, 1, 1);
     audrvVoiceStart(&g_drv, 0);
     g_run = 1;
-    g_thread = os_thread_create(pump, NULL, 64 * 1024, 2, -1);  /* above normal: audio must not starve */
+    g_thread = os_thread_create(pump, NULL, 64 * 1024, 2, OS_THREAD_ROLE(OS_ROLE_AUDIO));  /* above normal: audio must not starve */
     if (!g_thread || os_thread_start(g_thread)) {
         g_run = 0;
         audren_stop();

@@ -71,7 +71,9 @@ class TI:
         if vp is None:
             return None
         n = self.name_of(ti)
-        size = self.img.by_name[n][1] if n in self.img.by_name else 0
+        # the size of the typeinfo symbol at ti, global or local (fnvlink keeps another unit's view of a base as
+        # a local _ZTI<B>.fnvnx_view; the image's symbol table has its size)
+        size = next((sz for nm, b, t, sz in self.img.by_addr.get(ti, []) if nm.startswith('_ZTI') and sz), 0)
         kind = None
         if vp and vp == self.cls or (not self.cls and size == 8):
             kind = 'class'

@@ -41,6 +41,41 @@ def table(head, rows):
     return out
 
 
+def stub_boot(bd, clean):
+    """Lines for S5's stub-fault boot (full_job.sh 4b: build/boot/stub/emu_stub.log): how far the boot gets once
+    tests/s5/known_faults.txt runs past the known faults, which of them fired, where it stopped."""
+    log = os.path.join(bd, 'boot', 'stub', 'emu_stub.log')
+    if not os.path.isfile(log):
+        return []
+    lines = open(log, errors='replace').read().splitlines()
+    winmain = any('fnvnx boot: calling WinMain' in l for l in lines)
+    skips = next((m.group(1) for l in reversed(lines)
+                  for m in [re.search(r'initializers skipped after a fault: (\d+)', l)] if m), None)
+    stop = next((l for l in reversed(lines) if l.startswith('STOPPED')), 'no STOPPED line')
+    L = ['', 'Stub-fault boot (tests/s5/known_faults.txt, docs/TOOLCHAIN.md section 18):', '',
+         '- WinMain entered: %s; initializers skipped after a fault: %s' % ('yes' if winmain else 'NO', fmt(skips)),
+         '- stop: %s' % clean(stop)]
+    starts = [i for i, l in enumerate(lines) if l.startswith('== trace (')]
+    if starts:
+        L += ['', '```'] + [clean(l.strip(), 160) for l in lines[starts[-1]:starts[-1] + 12]
+                             if l.startswith('== trace') or re.match(r'\s+(pc|lr|call|trap|#\d+)', l)] + ['```']
+    rows = [l.split('\t') for l in lines if l.startswith(('stubbed-fault\t', 'replaced-call\t'))]
+    if rows:
+        L.append('')
+        L += table(['stubbed', 'count', 'function', 'fault'],
+                   [(r[0].split('-')[0], r[1], clean(r[2], 50), clean(r[3] if len(r) > 3 else '', 60)) for r in rows[:20]])
+    hv = os.path.join(bd, 'boot', 'hand_vptrs.txt')   # tests/s5/hand_vptrs.py's summary: counts only
+    if os.path.isfile(hv):
+        L += ['', 'Hand-stored image vptrs (tests/s5/hand_vptrs.py; the list is boot/hand_vptrs.tsv of link/<commit12>):',
+              '', '```'] + [clean(l.rstrip(), 160) for l in open(hv, errors='replace')][:12] + ['```']
+    fr = os.path.join(bd, 'boot', 'stub', 'frontier_stub.txt')
+    if os.path.isfile(fr):
+        first = next((l for l in open(fr, errors='replace') if 'untranslated keys hit' in l), '')
+        if first:
+            L += ['', '- frontier of the stub-fault boot: %s' % clean(first.split(': ', 1)[-1].strip())]
+    return L
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('build')
@@ -194,6 +229,7 @@ def main(argv):
             L += table(['rank', 'hits', 'phase', 'key', 'why', 'units', 'link', 'census'],
                        [(p[0], p[2], p[3], clean(p[5], 60), clean(p[7], 50), clean(p[8], 70), clean(p[9], 20),
                          clean(p[10], 60)) for p in rows[:20] if len(p) > 10])
+        L += stub_boot(bd, clean)
     L.append('')
     pk = R['package']
     L.append('## Package')

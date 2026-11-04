@@ -156,8 +156,11 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
     noise (the original caller passed whatever its registers held), a native one that is native garbage while the
     oracle's is not stays a divergence (marked arm_garbage)."""
     dx, da = decode_x86(cv, cx), decode_a64(cv, ca)
+    pushed = getattr(cx, 'pushed', None)
+    beyond = {lab for lab, space, off, size in cv.x86 if space == 'stk' and pushed is not None and off >= pushed}
     for v in cv.vals:
-        if v.label not in dx or v.label not in da or v.kind not in ('gpr', 'fpr') or v.label in skip:
+        if v.label not in dx or v.label not in da or v.kind not in ('gpr', 'fpr') or v.label in skip or \
+                v.label in beyond:
             continue
         bx, ba = dx[v.label][:v.size], da[v.label][:v.size]
         if v.cls == 'I8' and v.is_bool:
@@ -165,13 +168,13 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
         if bx == ba:
             continue
         px, pa = struct.unpack('<I', bx.ljust(4, b'\0'))[0], struct.unpack('<I', ba.ljust(4, b'\0'))[0]
-        if v.is_ptr and _in_stack(px) and _in_stack(pa):
-            continue
+        if v.size == 4 and _in_stack(px) and _in_stack(pa):
+            continue        # each machine's own stack frame (also through an int parameter that carries a pointer)
         if v.size == 4 and px in gx:
             continue
         if v.size == 4 and codeptr is not None and codeptr(pa) == px:
             continue        # a native code address (stub or entry) passed as data stands for the original function
-        if v.is_ptr and rdx and rda and world.A64_PRIV[0] <= pa < world.A64_PRIV[1]:
+        if v.size == 4 and rdx and rda and world.A64_PRIV[0] <= pa < world.A64_PRIV[1]:
             # a literal or constant the native unit keeps in its own .rodata, the oracle at its image address:
             # equal when the strings are
             sx, sa = _cstr(rdx, px), _cstr(rda, pa)
@@ -195,8 +198,9 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
         return dict(kind='error', x86=ex, arm=ea)
     tx = [c.target for c in rx.calls]
     ta = [c.target for c in ra.calls]
+    fam = libcalls.FAMILY
     for i in range(min(len(tx), len(ta))):
-        if tx[i] != ta[i]:
+        if tx[i] != ta[i] and not (tx[i] in fam and fam.get(tx[i]) == fam.get(ta[i])):
             return dict(kind='call-target', index=i, x86=_hex(tx[i]), arm=_hex(ta[i]),
                         x86_trace=[_hex(t) for t in tx[:i + 1]], arm_trace=[_hex(t) for t in ta[:i + 1]],
                         x86_next=_hex(tx[i + 1]) if i + 1 < len(tx) else None,
@@ -302,8 +306,8 @@ class Pair:
             if not d or d['kind'] != 'call-target' or self.adapted >= 16:
                 return rx, ra, d
             x = int(d['x86'], 16) if not d['x86'].startswith(('name:', 'imp:')) else None
-            if x is not None and x in getattr(self.target, 'arm_out', ()):
-                return rx, ra, d        # the native calls X out of line too: the calls differ in order, not inlining
+            if x is not None and x in [c.target for c in ra.calls][d['index']:]:
+                return rx, ra, d        # the native makes that call later: the calls differ in order (00740980)
             get = getattr(self.target, 'oracle_code', None)
             got = get(x) if (get and x is not None and x not in self.target.x86_code) else None
             if not got:
@@ -314,6 +318,22 @@ class Pair:
             self.adapted += 1
             self.xe = None              # rebuilt with the larger code set
         return rx, ra, d
+
+    def _private_names(self, addrs):
+        """Names of the native image's data symbols that hold these addresses."""
+        import bisect
+        if getattr(self, '_priv_syms', None) is None:
+            img = self.target.image
+            lo_hi = getattr(img, 'private', ())
+            self._priv_syms = sorted((a, n) for n, a in img.syms.items()
+                                     if any(lo <= a < hi for lo, hi in lo_hi))
+            self._priv_keys = [a for a, _ in self._priv_syms]
+        out = set()
+        for a in addrs:
+            i = bisect.bisect_right(self._priv_keys, a) - 1
+            if i >= 0:
+                out.add(self._priv_syms[i][1])
+        return out
 
     def _run(self, case, max_steps):
         w = world.World(case, self.target.x86_code, self.pinned)
@@ -327,6 +347,9 @@ class Pair:
             self.xe.reset(w)
             self.ae.reset(w)
         self.ae.callee_conv = getattr(self.target.callee_info, 'conv', None)
+        self.ae.iat_names = getattr(self.target, 'iat_names', {}) or {}
+        self.ae.caller_conv = getattr(self.target.callee_info, 'caller_conv', None)
+        self.ae.imports = getattr(self.target, 'imports', {}) or {}
         NAMES.clear(); NAMES.update(self.target.image.stubs)
         rx = self.xe.run(self.target.conv, case, placement, max_steps=max_steps, start=self.target.orig_addr)
         ra = self.ae.run(self.target.conv, case, placement, self.target.orig_addr, max_steps=max_steps)
@@ -338,4 +361,11 @@ class Pair:
                                 self.ae._codeptr)
         if d is not None and ra.private_reads:
             d['arm_private_reads'] = ra.private_reads
+            names = self._private_names(ra.private_addrs)
+            if names:
+                d['arm_private_syms'] = sorted(names)[:6]
+                # only function-local statics and their guards (_ZZ.. / _ZGVZ..): MSVC keeps them in the image, GCC
+                # in the unit's .bss - the local-static case, not a split global
+                if all(n.startswith(('_ZZ', '_ZGVZ')) for n in names):
+                    d['arm_local_static'] = True
         return rx, ra, d

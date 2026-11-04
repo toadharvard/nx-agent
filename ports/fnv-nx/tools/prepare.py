@@ -78,9 +78,11 @@ def r_sse_local_types(path, text, stats):
     return text
 
 # one prototype; several may share a line (`extern"C"__m128 _mm_load_ss(float const*_A);extern"C"void ...`)
+# (the return type may be the decomp's own name for __m128: `hkQuadReal _mm_load_ps(const float*);`)
 MM_PROTO = re.compile(r'(?:^|(?<=[;{}]))[ \t]*(?:extern\s*(?:"C"\s*)?)?(?:static\s+)?(?:inline\s+)?(?:const\s+)?(?:::)?(?:\w+::)*'
-                      r'(?:__m128[id]?|__m64|float|double|int|unsigned\s+int|void)\s+(?:__cdecl\s+)?'
-                      r'_mm_\w+\s*\([^;{)]*\)\s*;[ \t]*', re.M)
+                      r'(?:__m128[id]?|__m64|float|double|int|unsigned\s+int|void|'
+                      r'(?!(?:return|else|case|throw|goto|delete|new|typedef|using|operator|sizeof)\b)[A-Za-z_]\w*)\s+'
+                      r'(?:__cdecl\s+)?(?:_mm_\w+|\(\s*_mm_\w+\s*\))\s*\([^;{)]*\)\s*;[ \t]*', re.M)   # also `(_mm_load_ps)(...)`
 EXTERN_C_BLOCK = re.compile(r'extern\s+"C"\s*\{')
 
 def r_sse_local_protos(path, text, stats):
@@ -169,7 +171,8 @@ QUALIFIED_SSE = re.compile(r'\b(?:\w+::)+(?=(?:__m128[id]?|__m64|_mm_\w+)\b)')
 
 GLOBAL_SSE = re.compile(r'(?<![\w>)\]:])::\s*(?=(?:__m128[id]?|__m64|_mm_\w+)\b)')
 PAREN_SSE = re.compile(r'\(\s*(_mm_\w+)\s*\)\s*\(')
-USING_SSE = re.compile(r'\busing\s+(?:::)?(?:\w+::)+(?:__m128[id]?|__m64|_mm_\w+)\s*;')
+# (also unqualified: `using ::_mm_add_ps;` the decomp wrote, or the same without `::`; sse2neon's macros have no name)
+USING_SSE = re.compile(r'\busing\s+(?:::)?(?:\w+::)*(?:__m128[id]?|__m64|_mm_\w+)\s*;')
 
 def r_sse_qualified(path, text, stats):
     """SSE4: N::__m128 / N::_mm_mul_ps (qualified names of the removed local copies) -> the global names;
@@ -307,6 +310,12 @@ def platform_names():
 # the unit's recipe) is kept as it is, where no translation unit that sees the file includes <math.h> (there the
 # overloads are MSVC's too and the decomp's copy would collide with libstdc++'s). One with C linkage
 # (`extern "C" float floor(float)`) cannot sit next to the C function; GAME1 renames it (see there).
+# In a namespace N, the decomp's prototype of the C function hides the global overloads: N's `fabs(f)` is the double
+# C function, also where the unit includes <math.h> (MSVC). `using ::fabs;` would bring <math.h>'s float overload
+# into N (S11: niobbox, bhkrigidbody, hkpworldviewerbase rounded through float), so N keeps a declaration of the C
+# function alone: the decomp's own prototype where it has C linkage, else (a C++ spelling the unit binds to the CRT
+# function) `extern "C" double fabs(double);` in its place; the shim's header goes on top of the file, so its noexcept
+# declaration comes first and GCC takes the redeclaration (DECL1-MATHNS).
 
 MATH_NAMES = set(CRT_HEADERS['<math.h>'].split())
 
@@ -334,6 +343,7 @@ def math_proto_sig(proto, name):
     i = re.search(r'\b%s\s*\(' % re.escape(name), proto)
     params = proto[i.end():proto.rindex(')')]
     params = re.sub(r'\)\s*throw\s*\([^)]*$', '', params)
+    params = re.sub(r'\[[^\]]*\]', ' ', params)          # attribute SAL ([SA_Pre(Deref=1,Valid=SA_Yes)]) has commas
     ps = tuple(_norm_type(x) for x in params.split(',')) if params.strip() not in ('', 'void') else ()
     return (_norm_type(proto[:i.start()]), ps)
 
@@ -470,9 +480,20 @@ def r_platform_protos(path, text, stats):
                 ls = text.rfind('\n', 0, start - 1) + 1
                 if ls >= pos and PROTO_HEAD.match(text, ls, start): start = ls
             nl = '\n' * text.count('\n', start, m.end())
+            key = 'math:' + name
+            if spaces and math_proto_sig(m.group(0), name) == C_MATH_SIG[name]:
+                # N keeps the C function alone (see MATH_NAMES above): no using-declaration of the overloads
+                if key not in have: have.add(key); top.append(c_math_header(name))
+                stats['DECL1-MATHNS'] += 1
+                if c_linkage: continue                    # the decomp's prototype stays as it is
+                ret, params = C_MATH_SIG[name]
+                out.append(text[pos:start])
+                out.append('extern "C" %s %s(%s); /* fnv-nx DECL1 */%s' % (ret, name, ', '.join(params), nl))
+                pos = m.end()
+                stats['DECL1'] += 1
+                continue
             out.append(text[pos:start])
             alias = 'using ::%s; ' % name if spaces else ''
-            key = 'math:' + name
             if not chain and key not in have:
                 out.append('#include %s /* fnv-nx DECL1 */%s' % (c_math_header(name), nl)); have.add(key)
             else:

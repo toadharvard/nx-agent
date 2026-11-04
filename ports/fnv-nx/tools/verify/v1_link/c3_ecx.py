@@ -33,7 +33,8 @@ def main():
     out_dir, units_json, pristine_json, objdir, work = sys.argv[1:6]
     os.makedirs(work, exist_ok=True)
     cache = os.path.join(work, 'undname.cache')
-    prs = v1pairs.pairs(out_dir, units_json)
+    only = [int(x, 16) for x in os.environ.get('V1_C3_ONLY', '').split(',') if x]
+    prs = [] if only else v1pairs.pairs(out_dir, units_json)
     pu = json.load(open(pristine_json))['units']
     pdef = collections.defaultdict(list)
     for i, u in enumerate(pu):
@@ -45,7 +46,7 @@ def main():
         names.update(p.defs)
     dem = v1pairs.undname_cached(names, cache)
     abi_def = {}
-    ab = v1pairs.load_abi(out_dir)
+    ab = {} if only else v1pairs.load_abi(out_dir)
     for k, c in ab.items():
         abi_def[k] = c[4]
 
@@ -85,11 +86,40 @@ def main():
         return r
 
     use_cache = {}
+    unit_syms = [dict((n, int(a, 16)) for n, a in u['symbols'].items()) for u in pu]
+    for i, u in enumerate(pu):
+        for fn in u['functions']:
+            unit_syms[i].setdefault(fn['symbol'], int(fn['address'], 16))
+    words_cache = {}
 
-    def code_use(addr):
-        """Strongest use of the incoming ecx/edx over the pristine definitions at addr."""
+    def stack_words(sym):
+        """4-byte stack arguments a callee takes, by its declaration (None: unknown)."""
+        if sym in words_cache:
+            return words_cache[sym]
+        n = None
+        m = re.match(r'^[_@]\w+@(\d+)$', sym or '')
+        if m:
+            n = int(m.group(1)) // 4 - (2 if sym.startswith('@') else 0)
+            n = max(n, 0)
+        elif sym and sym.startswith('?'):
+            t = v1pairs.undname_cached([sym], cache).get(sym)
+            try:
+                sg = bh.Sig(t or '')
+                tys = [bh.ty_of(x, {}) for x in sg.params]
+                locs, _ = bh.x86_args(sg, tys, bh.ty_of(sg.ret, {}))
+                n = sum((sz + 3) // 4 for lab, loc, sz in locs if isinstance(loc, tuple))
+            except bh.Skip:
+                n = None
+        words_cache[sym] = n
+        return n
+
+    def code_use(addr, depth=0):
+        """Strongest use of the incoming ecx/edx over the pristine definitions at addr. A call or tail jump whose
+        target has a definition counts what that definition does with the registers (it may be declared stdcall
+        in this unit and read ecx: the forwarders 00a43330 -> 00a95ca0); without one, the declaration decides."""
         if addr in use_cache:
             return use_cache[addr]
+        use_cache[addr] = None                      # in progress: a cycle falls back to declarations
         best = {'ecx': None, 'edx': None}
         found = 0
         for idx, sym in pdef.get(addr, []):
@@ -108,7 +138,15 @@ def main():
             if f is None:
                 continue
             found += 1
-            u = coff_x86.entry_reads(f[0], f[1], conv_of)
+
+            def conv_unit(target, idx=idx):
+                ta = unit_syms[idx].get(target)
+                if ta is not None and depth < 16 and pdef.get(ta):
+                    tu = code_use(ta, depth + 1)
+                    if tu is not None:
+                        return {k for k, v in tu.items() if v in ('read', 'pass')}
+                return conv_of(target)
+            u = coff_x86.entry_reads(f[0], f[1], conv_unit, o.labels(sym), stack_words)
             for k in best:
                 if coff_x86.RANK[u[k]] > coff_x86.RANK[best[k]]:
                     best[k] = u[k]
@@ -116,6 +154,10 @@ def main():
         use_cache[addr] = res
         return res
 
+    if only:      # V1_C3_ONLY=<addr,...>: the register use of those definitions only
+        for a in only:
+            print('%08x %s %s' % (a, code_use(a), [s_ for _, s_ in pdef.get(a, [])][:1]))
+        return 0
     rows = []
     buckets = collections.Counter()
     uniq = collections.defaultdict(set)

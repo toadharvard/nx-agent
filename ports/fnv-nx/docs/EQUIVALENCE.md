@@ -35,7 +35,7 @@ explains; `no-build`: units that compile under MSVC without the rule but not wit
 | Rule | eh | retarget | code | no-build | Verdict |
 |---|---:|---:|---:|---:|---|
 | `EXC1` | 562 | | | | **exceptional paths only.** Without `throw()` MSVC adds EH frames / unwind states (318 units, e.g. `NiRenderedTexture::Create` frees the memory when the constructor throws). Every one is identical with `/EHs-c-`. |
-| `DECL1` | 4 | 153 | 27 | 65 | **changes callees and math precision.** Retargets: the decomp's C++ prototypes of `strcpy_s` / `strcat_s` / `_stricmp` / `sprintf_s` / `memset` / `memcpy` / `strchr` are bound to game wrappers (0x00406d30 `TaskQueueInterface::CopyStringToBuffer`, 0x00404dc0, 0x00406d00, 0x00403d30, ...) that only forward to the CRT function; DECL1 calls the CRT directly (equivalent). Code: the CRT's `<math.h>` overloads replace the decomp's declarations, so `fabs` / `sqrt` / `floor` of a `float` round through `float` where the matched code stayed in x87 precision, or the other way round (`Calendar::GetGameHoursPassed` passed `floor` a `float` to the game helper 0x00406cc0 bound to `_floor`; it now passes a `double`: hours can differ by one at a boundary); CRT attributes change code after `_invalid_parameter_noinfo` and EH states around CRT calls. No-build: MSVC-only (`std::abs` 29, SDK names, `float` math overloads). **Re-gated at `357bc06`** (J-0093: a dropped C math prototype becomes `fnvnx_cmath/<name>.h`; the gate puts that directory on MSVC's include path). 18 of the 27 code functions are identical now, among them `Calendar::GetGameHoursPassed`; activeeffect (48 functions) is identical too. 3 are not math but CRT bindings: `memset` goes to the CRT instead of the decomp's namespace copy (one EH state store fewer), `free` is called directly instead of through its import slot, and the `_invalid_parameter_noinfo` paths change. 3 more (niobbox 0x00eba680, bhkrigidbody 0x00c8e160, hkpworldviewerbase 0x00ddd040) come from `using ::fabs;`, which DECL1 writes in place of a namespace's `extern "C" double fabs(double);` in a unit that includes `<math.h>` itself. The using-declaration brings in the `float fabs(float)` overload that the namespace declaration hid, so `fabs(f)` rounds through `float`, where the exe stayed in `double`; reported to S1. The last 3 (shadowlightshader 0x00b79050, robertdavies_random 0x00b43120, tile EvalValue 0x00a09410) are still x87 / register differences, to be attributed by the eq farms. |
+| `DECL1` | 4 | 153 | 27 | 65 | **changes callees and math precision.** Retargets: the decomp's C++ prototypes of `strcpy_s` / `strcat_s` / `_stricmp` / `sprintf_s` / `memset` / `memcpy` / `strchr` are bound to game wrappers (0x00406d30 `TaskQueueInterface::CopyStringToBuffer`, 0x00404dc0, 0x00406d00, 0x00403d30, ...) that only forward to the CRT function; DECL1 calls the CRT directly (equivalent). Code: the CRT's `<math.h>` overloads replace the decomp's declarations, so `fabs` / `sqrt` / `floor` of a `float` round through `float` where the matched code stayed in x87 precision, or the other way round (`Calendar::GetGameHoursPassed` passed `floor` a `float` to the game helper 0x00406cc0 bound to `_floor`; it now passes a `double`: hours can differ by one at a boundary); CRT attributes change code after `_invalid_parameter_noinfo` and EH states around CRT calls. No-build: MSVC-only (`std::abs` 29, SDK names, `float` math overloads). **Re-gated at `357bc06`** (J-0093: a dropped C math prototype becomes `fnvnx_cmath/<name>.h`; the gate puts that directory on MSVC's include path). 18 of the 27 code functions are identical now, among them `Calendar::GetGameHoursPassed`; activeeffect (48 functions) is identical too. 3 are not math but CRT bindings: `memset` goes to the CRT instead of the decomp's namespace copy (one EH state store fewer), `free` is called directly instead of through its import slot, and the `_invalid_parameter_noinfo` paths change. 3 more (niobbox 0x00eba680, bhkrigidbody 0x00c8e160, hkpworldviewerbase 0x00ddd040) come from `using ::fabs;`, which DECL1 writes in place of a namespace's `extern "C" double fabs(double);` in a unit that includes `<math.h>` itself. The using-declaration brings in the `float fabs(float)` overload that the namespace declaration hid, so `fabs(f)` rounds through `float`, where the exe stayed in `double`. DECL1 now keeps the namespace's declaration of the C function (DECL1-MATHNS: 33 sites in 24 files; a C++ spelling the unit binds to the CRT becomes `extern "C" double fabs(double);`), and the three are identical. Before/after on the 43 units with such a site changes exactly these 3 functions. The last 3 (shadowlightshader 0x00b79050, robertdavies_random 0x00b43120, tile EvalValue 0x00a09410) are still x87 / register differences, to be attributed by the eq farms. |
 | `GAME1` | | | | | **fixes DECL1's rebinding (D13).** No unit differs because of it; `falloutaudiomedia.cpp` (14 functions), `bsspinlock_console`, `memorymanager.cpp` are identical again (they call 0x00830470, `FUN_008691b0::Lock`, the Interlocked import slots as the exe does). |
 | `CTOR1` | 31 | 2 | 60 | | **null check only.** `::new ((void*)p) T(args)` calls `<new>`'s placement form (`throw()`): MSVC null-checks the pointer before the constructor, and at `/Od` calls the placement function instead of inlining it. Same behaviour for a non-null `this`. |
 | `NEW2` | 55 | | | | **exceptional paths only** (MSVC's placement forms are `throw()`, the decomp's were not). |
@@ -71,6 +71,33 @@ in EH code and are identical with `/EHs-c-` (EXC1, as before). Layouts: `Graphic
 `BSShaderAccumulator` (896) are as in pristine. `NiCriticalSection` (128) and `RecursiveLock` keep pristine's size
 and member offsets, plus one line, the 4-byte tail member at +24 (`m_kCriticalSection_fnvnx_tail`,
 `CriticalSection_fnvnx_tail`).
+
+## First farm gate (eq1-6, all 2,988 units)
+
+All six shards passed on heads with the BIND1 fix (shard 1 `edf9fd1`, 2 / 3 / 6 `49f6666`, 4 `650bf10`, 5
+`808c50b`), with the same decomp, rule set and pristine objects. Results agree across heads where the rules are the
+same: shard 6 gave the same report at `49f6666` and `afca7d5`. Shard 5 changed only by two STATIC1 functions between
+`4f0f481` and `808c50b` (7fc664f, STATIC1 for namespace statics). Shard 4 predates that commit. Units: 2,362 identical,
+545 differ, 80 do not compile (prepared side). Functions: 1,067 of 59,567 differ (EH-only 777, retarget 174, code
+116). DECL1's 9 code functions are the 9 this document lists above (the local gate agrees); 3 of them are fixed by
+DECL1-MATHNS, which is newer than these heads. Per rule, ranked by code functions:
+
+| rule | code | retarget | eh | no-build | owner |
+|---|---:|---:|---:|---:|---|
+| `CTOR1` | 58 | | 31 | | S1 |
+| `STATIC1` | 23 | | | | S1 (link semantics: reloads of an external variable) |
+| `DECL1` | 9 | 155 | 4 | 36 | S1; retargets: CRT wrappers the link binds by address (S2) |
+| `XINC1` | 8 | | | | S1b |
+| `PTR1` | 5 | | | | S1 |
+| `RET1` | 2 | | | | S1b |
+| `MATH1` | 2 | | | 1 | S1 |
+| `GOTO1` `NEW4` `UNIT1` | 1 each | | | GOTO1 1 | S1 |
+| `EXC1` | | | 646 | | S1 (exceptional paths only) |
+| `NEW2` | | 1 | 55 | | S1 |
+| `ANON1` `STD1` | | 2 / 1 | | | S1 |
+| `ENUM1` | | | | 7 | by design (MSVC 2008 parse limit) |
+| `DECL2` `IFX1` `RCAST1` `CALL1` | | | | 2 / 2 / 1 / 1 | stand-in limits, S1 |
+| groups (`sdk`, `newdel`), interactions | 6 | 15 | 41 | 29 | |
 
 ## Round 8 (S1 rules after `8fff58b`)
 
@@ -122,7 +149,7 @@ above (round 8).
 | `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
 | `CTOR1` | neutral | explicit constructor call = placement new of the same class at the same address | real `<new>` |
 | `LINK1` | neutral | C and C++ linkage of a global variable name the same symbol under Itanium | data names bound by variable name |
-| `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables | variable bound by the recipe's address |
+| `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables; a namespace static bound by its plain name (`_s_fSpinTime`) gets C linkage in place, an uninitialised scalar / pointer one declared only (the image's variable) | variable bound by the recipe's address |
 | `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars | as is |
 | `STR1` | neutral | `&arr` and `arr` are the same address | as is |
 | `CALL1` | neutral | the cast is the conversion the dropped prototype made implicitly | real SDK parameter types |
@@ -140,6 +167,8 @@ above (round 8).
 | `ALIGN1` | neutral | `__declspec(align(n)) struct S` -> `struct __declspec(align(n)) S` in front of a class definition or forward declaration; MSVC aligns the type in both positions, GCC only behind the class key | same type alignment and layout as MSVC (S12 f8 ALIGN-IGNORED) |
 | `ENUM2` | neutral | an enum with an enumerator literal in [2^31, 2^32) gets MSVC's underlying type written out, `enum E : int {`, and `(int)` on those literals | MSVC's type and values (0x80000000 is INT_MIN there); GCC chose unsigned int (S12 f8 ENUM-UNSIGNED) |
 | `BIND1` | neutral | prepared build/units.json: a stand-in member / variable the unit uses but does not bind gets the address the decomp shows it has (MemoryManagerAA3880::Allocate -> 0x00aa3e40 on 0x011f6238, via the unit's TableBaseAA3880 -> 0x00aa47e0) | no source change (a POST hook of s1_compile.py, like S1b's units.json fix, so not in the rule table); the link binds the name as the exe's code does |
+| `VA2` | neutral | `va_arg(ap, E)` with an enum E -> `(E)va_arg(ap, int)`: the promoted int the caller passed, read as MSVC read it (GCC traps on the enum form) | same value |
+| `VLIT1` | platform | a 1-3 character string literal stored with `=` whose bytes are a defined function's address (a vftable slot 0 read as text) -> the vftable address the unit's only `$SG` binding gives (nitmapbase.cpp `"@K@"` -> 0x0101212c) | MSVC stored that address; the pristine build stored a string |
 | `CSX2` | neutral | 4 bytes behind a generated-layout `_RTL_CRITICAL_SECTION` member whose class asserts it as 28 bytes (NiCriticalSection, RecursiveLock and their holders) | the offsets the pristine MSVC build and the byte-matched code have (J-0067) |
 | `STAND1` | platform | removes an untagged definition whose MSVC name the unit binds to the address of a tagged definition in the same unit (a free function keeps its declaration) | the call reaches the tagged function, as in the binary; an optimizing MSVC build may have inlined the stand-in |
 | `PTR1` | neutral | `f > 0` / `p > 0` -> `!= 0` and `<= 0` -> `== 0` for a function name or a local pointer | MSVC's unsigned compare of the address gives the same result |

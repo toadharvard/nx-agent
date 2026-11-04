@@ -34,6 +34,7 @@ FLD_VAL = 0x0e005800
 BUILTIN_STUB = 0x0e006000   # x87 helper code (_ftol2, _CIsqrt, ...) and its scratch slots
 BUILTIN_SLOT = 0x0e006800
 FPCW_MSVC = 0x027f
+MAX_CALLS = 20000           # intercepted calls per run (each costs no step)
 REGS = {'eax': UC_X86_REG_EAX, 'ecx': UC_X86_REG_ECX, 'edx': UC_X86_REG_EDX, 'ebx': UC_X86_REG_EBX,
         'esi': UC_X86_REG_ESI, 'edi': UC_X86_REG_EDI}          # MSVC CRT default: 53-bit precision, round to nearest, exceptions masked
 
@@ -44,10 +45,11 @@ def _desc(base, limit, access, flags=0xC):
 
 
 class Call:
-    __slots__ = ('target', 'args', 'ret_to', 'regs')
+    __slots__ = ('target', 'args', 'ret_to', 'regs', 'pushed')
 
     def __init__(self, target, args, ret_to, regs=None):
         self.target, self.args, self.ret_to, self.regs = target, args, ret_to, regs or {}
+        self.pushed = None       # stack bytes the caller passed, when its code shows it
 
 
 class Result:
@@ -248,14 +250,22 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_EIP, address)
             return
         k = len(r.calls)
+        if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
+            self._fault = 'timeout'
+            uc.emu_stop()
+            return
         r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr,
                             {n: uc.reg_read(REGS[n]) for n in ('eax', 'ebx', 'esi', 'edi')}))
+        r.calls[-1].pushed = self._pushed(uc, retaddr, address)
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
         pop, kind = info if info else (0, 'int')
         eax = world.u32(rb, 0)
         cv = self._callee_conv(address)
-        if cv is not None and cv.ret is not None and cv.ret.is_bool:
+        ck = world.canned_kind((cv, self._callee_conv(address, caller=True)))
+        if ck == 'ref':
+            eax = world.ref_result(k)
+        elif ck == 'bool':
             eax = (eax & ~0xff) | (rb[0] & 1)          # a real bool result is 0/1 (MSVC tests al, GCC bit 0)
         if cv is not None and cv.hidden and cv.ret is not None:
             p = self._sret_of(cv, r.calls[-1])
@@ -286,8 +296,27 @@ class X86Engine:
         """Execution reached memory that holds no code: an indirect call through a planted pointer."""
         self._on_block(uc, address, size, user)
 
-    def _callee_conv(self, address):
-        f = getattr(self.callee_info, 'conv', None)
+    def _pushed(self, uc, retaddr, address):
+        """Stack bytes the caller passed: its cleanup after the call (`add esp, N`, `pop ecx` x n) or what the
+        callee pops (`ret N`); None when neither shows. A definition that declares more parameters than the caller
+        pushes (a variadic reader such as FUN_005accb0's ExtractArgs) reads past them: not an argument."""
+        try:
+            b = bytes(uc.mem_read(retaddr, 6))
+        except Exception:  # noqa: BLE001
+            b = b''
+        if b[:2] == b'\x83\xc4':
+            return b[2]
+        if b[:2] == b'\x81\xc4':
+            return int.from_bytes(b[2:6], 'little')
+        if b[:1] == b'\x59':
+            return 8 if b[1:2] == b'\x59' else 4
+        info = self.callee_info(address)
+        if info and info[0]:
+            return info[0]
+        return None
+
+    def _callee_conv(self, address, caller=False):
+        f = getattr(self.callee_info, 'caller_conv' if caller else 'conv', None)
         try:
             return f(address) if f else None
         except Exception:  # noqa: BLE001

@@ -2223,3 +2223,421 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - The `using ::fabs;` case: in units that include `<math.h>`, it pulls in the `float fabs(float)` overload that the
     namespace's own C declaration hid, so `fabs(f)` rounds through float. This is for S1: keep the namespace's C
     declaration.
+
+### J-0105 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0052,J-0102
+
+* **did** - S1 `d414a1c`..`d63ab36`:
+  - `fnvnx_win32.h` sets its own `pack(push, 8)`. The 16 includes DECL1/DECL2 placed inside the decomp's
+    `pack(push, 4)` had made LARGE_INTEGER, ULARGE_INTEGER and MEMORYSTATUSEX 4-aligned.
+  - STATIC1 covers namespace statics: 134 in 44 files get C linkage where they stand, and uninitialised ones become the
+    image's variable.
+  - GOTO1 also splits `__m128`/hkQuadReal variables, const scalars and pointers to const. That fixes 3 units.
+  - VTBL1 gives the FUN_00aa7400 heap the AbstractHeap slots v1..v13 (boot item 1: 4,327 of 4,343 initializer skips).
+  - New rule VA2: `va_arg(ap, Enum)` becomes `(Enum)va_arg(ap, int)` (RegisterActorValue 0066efe0).
+  - tests/s1: 0 failed. tests/s11: ok.
+* **found** - Boot item 2 is not a string at all. `"@K@"` is the decompiler's text of the bytes stored at a vftable:
+  slot 0 is 0x00404b40. The unit binds the literal `$SG2541` to 0x0101212c, which is the vftable address to store.
+  There are 45 such 3-character-literal vptr stores tree-wide, mostly in `staging/blk_*_od.cpp`.
+* **found** - Two more boot items:
+  - A660A0Map's SetAt calls slot 2, which is IsKeysEqual in Gamebryo's NiTMapBase layout. VTBL1 needs that interface.
+  - BSNiAllocator slot 7 is Initialize by analogy with NiStandardAllocator. The decomp has no function for it.
+* **decided** - BSNiAllocator slot 7 stays unresolved (a vslot trap, stubbed in the emulator's known_faults) until the
+  exe's vftable 0x010a2528 can be read. Binding by analogy is not evidence.
+* **measured** - farm1 census at 23e0f0a: 2,908/2,978 clean, 70 failing, 385 errors. The next census should be about
+  2,911. The largest class left is decomp `_mm_*` prototypes whose return type is a typedef (about 15 Havok units,
+  about 100 errors).
+
+### J-0106 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0105
+
+* **did** - S1 `ea92c84` VLIT1 (new, platform): the decompiler had printed slot 0 of a vftable as a 1-3 character string
+  literal stored as a vptr. VLIT1 replaces such a literal with the vftable address from the unit's `$SG` binding.
+  - 4 sites rewritten, among them GameSettingCollection `"@K@"` -> 0x0101212c (boot: 3,454 skipped setting
+    initializers), plus teshealthform, pathsmootherpov and pathingrequestoptimallocation.
+  - 41 sites listed as `VLIT1-LIST`. Their units have no `$SG` binding, or several bindings or literals, and the
+    literal-to-`$SG` mapping needs the exe.
+* **did** - S1 `e82e698` SSE2: local `_mm_*` prototypes whose return type is the decomp's own name for `__m128`
+  (hkQuadReal, ClosestPointQuad, ...) are dropped.
+  - 7 units affected, about 18 errors fewer; boxbox_rtm and angulardashpot_rtm now compile.
+  - Left: `extern "C" ::hkQuadReal _mm_load_ps(...)` in hkpworld_rtm_variant, and `using _mm_add_ps;` of names that
+    sse2neon defines as macros.
+  - tests/s1: 0 failed. tests/s11: ok.
+* **found** - Nothing in the decomp calls the NiMainSDM constructor 0x00a8a5f0.
+  - In Gamebryo every unit that includes NiMain.h has a static NiMainSDM, so the exe calls it from many dynamic
+    initializers. The decomp has none of them.
+  - The fix is an INIT rule, waiting on S5 to say how native static initializers are ordered against WinMain.
+* **next** - S1: the A660A0Map VTBL1 entry (NiTMapBase: 0 dtor, 1 KeyToHashIndex, 2 IsKeysEqual, 3 SetValue,
+  4 ClearValue, 5 NewItem, 6 DeleteItem), the NiMainSDM INIT rule, and the two SSE2 forms.
+
+### J-0107 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0106
+
+* **did** - S1 `5fad4be`: two more intrinsic declarations are dropped.
+  - SSE2 drops parenthesized intrinsic prototypes: `extern "C" ::hkQuadReal (_mm_load_ps)(const float*);`. PAREN_SSE used
+    to unwrap the name only after SSE2 had run.
+  - SSE4 drops unqualified intrinsic using-declarations (`using ::_mm_add_ps;`). sse2neon defines these intrinsics as
+    macros, so there is no name to bring in.
+  - tests/s1: 0 failed. tests/s11: ok.
+* **measured** - Local runs against farm1 at 23e0f0a, errors before -> after:
+  - hkpworld_rtm_variant: 13 -> 0.
+  - hkpvehicleinstance_gs_nogs_rtm_variant: 19 -> 0.
+  - blk_00e20000_..._rtm_variant: 11 -> 0.
+  - hkpcollectioncollectionagent3: 63 -> 55.
+  - With e82e698 the census should reach about 2,914 clean; the try farms will confirm.
+* **next** - S1 continues in a fresh agent (the first one's context is used up):
+  - The A660A0Map VTBL1 entry.
+  - The frontier classes:
+    - hkpcollectioncollectionagent3: 55, `union __m128` typedef.
+    - blk_00ca0000_o2_rtm: 38, numeric constant where an unqualified-id is expected.
+    - blk_00e60000_o2_gs_nogs_rtm: 22.
+    - blk_00ac0000_od_ob1: 18, ambiguous FnvStringBase copy.
+    - blk_00b20000_od_ob1_rtm: 16.
+    - blk_004c0000_od_decl_variant: 15, HTREEITEM.
+    - The `hkpWorld does not name a type` group: 4 units.
+    - hkgpmesh: 7, `_mm_set1_ps` ambiguous.
+  - NiMainSDM after S5's answer on the order of native initializers.
+
+### J-0108 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0102
+
+* **did** - S2c `fa7d3f8`: the `--msvc-code` ecx verdict now covers S1b's three cases, so all seven of his sites count as
+  "ecx used" and get a real bridge.
+  - It follows ecx pushed as a callee argument.
+  - It follows callees' own code through `jmp` forwarders.
+  - It judges S1b-renamed definitions by their patched declaration.
+  - A `push ecx` that only reserves a local stays dead. Still dead as before: 00a75ec0, 00bbbe30, 00a8f730, 00e92e60.
+  - All 211 of V1's TP addresses come out as expected.
+* **did** - S2c `6aea0ac`: hand-stored image vtables.
+  - `*(int*)this = (int)&DAT_x` stores within 64 KiB of the named vftables are now detected.
+  - A store is matched to the class whose constructor or destructor is named at the storing function's `@fnv`
+    address.
+  - Candidates without a native vtable go to `vtable_requests.tsv` (reason `hand-vptr`), so the probe synthesizes them.
+* **measured** - On f13's objects:
+
+  | Image vtable addresses | before | now |
+  |---|---|---|
+  | stored by hand | 1,705 | 1,779 |
+  | bound to a native vtable | 954 | 1,100 |
+  | requested for synthesis | - | 363, including the boot stop 0x010472d0 |
+  | no candidate at all | 750 had no native vtable | 316 |
+
+  INISettingCollection 0x0101772c now maps to its native vtable. All seven link suites pass.
+
+### J-0109 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0102,J-0106,J-0108
+
+* **did** - S5 `68fcbe0`: two additions to the farm's full build.
+  - full_job step 4b also runs the stub-fault boot (`farm_boot.sh FARM_BOOTS=stub`).
+  - `link/<c12>` now carries `boot/stub/` (stub frontier), `boot/synth.exe` with its sha256 in meta.json
+    (`boot_image_sha256`, `boot_stub_stop`), and a report section. The image is derived from the decomp's MSVC
+    objects and goes only to the private artifacts repo.
+  - farm_boot.sh is fixed for farm hosts. Steps 4b/4c ran only on a mock build directory; the first farm run is the
+    real test.
+* **did** - S5 `51d1a19`: `tests/s5/hand_vptrs.py` (full_job step 4c, `boot/hand_vptrs*.tsv`) builds a work list of
+  hand-stored image vptrs. It covers `this` and secondary stores, other-object stores, vptr-named members and
+  literals. For each it records how the link binds it, whether a native vtable exists, and how often the boots call
+  through it.
+* **measured** - On t/9a0243c7eabe with its link: 2,651 stores of 1,583 addresses; 594 bound, 38 unbound, 951 still
+  the image address.
+
+  | rule | addresses | owner and fix |
+  |---|---|---|
+  | S1:virtuals | 832 (1,360 stores) | S1 declares the image vftable's virtuals |
+  | S1:class | 67 | S1 gives the stored-into object a class |
+  | literal | 22 | S1, VLIT1 (now merged) |
+  | S2:mapped | 16 | S2 binds `__fnv_<addr>` of every V entry |
+  | S2:class | 12 | S2: candidates only |
+  | S2:named | 2 | S2 |
+
+  - All 7 addresses the boots call through are S1:virtuals, in call order: 0x0101772c (735 calls), 0x0104e6ac (60),
+    0x01018508 (43), 0x0106ba6c (4), 0x010472d0, 0x01082ed8, 0x010a2960.
+  - 1,007 of the 1,360 S1:virtuals stores are in `src/staging`.
+* **found** - VLIT1's 0x0101212c (GameSettingCollection) has no native vtable, and `FUN_00404b10_class` declares no
+  virtuals. The 3,454 setting skips are therefore expected to move to "vslot 1 of image vtable 0x0101212c", not
+  disappear.
+* **found** - Startup order (TOOLCHAIN.md §19):
+  1. `__fnvnx_guest_entry`.
+  2. `__libc_init_array`: `boot_banner` (priority 101: maps the image and constructs the memory manager), then the
+     game units' native constructors in link order, then the platform and libstdc++ constructors.
+  3. S10's image initializers.
+  4. `fnvnx_guest_main`, then WinMain.
+
+  So a native NiMainSDM static runs after the memory manager and before every game initializer and WinMain. Gap: game
+  statics run before the platform constructors (clock, profile strings, exceptions). Raise the platform constructors'
+  priority if a game static ever needs them.
+* **verified** - `tests/s5/test_tools.py`: OK (4 skipped).
+
+### J-0110 | 2026-11-04 | stream: S12-static,orchestrator | status: wip | parent: J-0100,J-0103
+
+* **found** - S12 established MSVC 2008 SP1's real code for each float -> integer target, by test compiles at /Od and
+  /O2 and a scan of all 2,987 pristine objects:
+
+  | target | MSVC code | sites | NaN or out of range gives |
+  |---|---|---:|---|
+  | int, long, short, signed char, implicit, `i += f` | `call __ftol2_sse` (cvttsd2si) | 1,253 | 0x80000000 (then its low bits) |
+  | unsigned short, unsigned char | inline `fistp DWORD` | 445 | 0x80000000, so 0 |
+  | unsigned int, unsigned long | inline `fistp QWORD`, low dword | 267 | int64 indefinite, so 0 |
+  | __int64, unsigned __int64 | `call __ftol2` | 10 | 0x8000000000000000 |
+
+  FTOI1's `(T)(long long)x` was right only for unsigned int, and only in range. A source rule can't reach implicit
+  conversions, compound assignments, macros or templates.
+* **did** - S12 `c722375`: FTOI2 as a GCC plugin (`toolchain/ftoi/fnvnx_ftoi.cc`). It rewrites every GIMPLE
+  float -> integer conversion into MSVC's computation for its target type; the int32 path is S1b's
+  `fnvnx_ftol2_sse`. In tests/s12, 810 of 810 conversions match the host's cvttsd2si/fisttp under qemu, against 240
+  differing without the plugin.
+* **did** - S12 `cb78c46`, `63ea827`: the static gate loads the plugin when compile.sh does. Clang's copy of the
+  force-include leaves out the NEON-written `fnvnx_mmx.h` and declares `_rotl`/`_rotr`/`__debugbreak`/`_exception_code`.
+  Before, clang reported "0 clean" on every shard, and those errors switched off its flow warnings. The st farms now
+  build fnvcheck and report 8,043-8,564 sites per shard.
+* **found** - UploadQuads 00e723a0's trap is benign: GCC's isolated `byteCount / 0` path, where x86 raises #DE at the
+  same point. `-fno-isolate-erroneous-paths-dereference` stays off, because AArch64's `udiv` by 0 returns 0 and the
+  game would run on where x86 crashes.
+* **did** - Orchestrator: compile.sh loads the plugin (`-fplugin=`), with no silent fallback, so objects with and
+  without it never mix.
+  - compile_job installs `gcc-13-plugin-dev-aarch64-linux-gnu` and `g++` as root, and hashes the plugin source into
+    FLAGS_HASH. Every compile shard rebuilds once.
+  - lib_job's package list carries the plugin headers.
+  - Checked on a 2-function unit: the int conversion yields 0x80000000 outside the int32 range.
+  - tests/s12: 0 failures.
+
+### J-0111 | 2026-11-04 | stream: V1-link | status: wip | parent: J-0092,J-0102,J-0108
+
+* **measured** - V1 audits on the first farm link, link/9a0243c7eabe (built from 9a0243c, so before S2c's typeinfo views
+  and FP-through-int and S1b's XINC1 rounds 2-3):
+  - **C1 (by-address binding) holds:** 563 relocations, 0 wrong; 74,039 address-map rows with consistent kinds; 3 E
+    rows outside `.text` (minor).
+  - **C2 (bridges) holds:** 98 of 103 stratified pairs pass. Fastcall-aggregate results are fixed (f13: 34 broken).
+    All 218 float/double pairs are bridged (f13: 183 had no bridge). 1,745 of 1,768 callee-pop pairs are listed
+    x86-inconsistent; 23 are still `same` and not yet examined.
+  - **C3 (ecx/edx):** 429 true positives out of 227,583 references. The edx-dummy decision holds.
+  - **C4 (vftables):** 1,988 of 2,288 V entries ok and 265 ok apart from zero slots; 35 name a base the typeinfo lacks.
+    12 classes are inconsistent across the whole image (Actor, PlayerCharacter, TESNPC, ...). That drops to 10 with
+    the head's typeinfo pass.
+  - **C5 (-fPIC rebinding) holds:** 0 PC-relative image references.
+* **verified** - S2c is right on all four of V1's harness complaints (t4, t5, F1-24, A1/A2), and V1's harness is
+  fixed. S1b is right on 6 of the 7 c3 addresses. The seventh, 00a43330, is only right if the declaration is trusted;
+  the tool lists it x86-inconsistent, which is conservative.
+* **found** - New defects, each with a reproducer that fails now:
+  - **R4-1 (medium):** `vslots.Code.entry_use` reads an ecx pushed as a callee argument as a reserved slot
+    (00e89ad0, 00a5d450). This was checked against fa7d3f8's tree, so it may already be fixed.
+  - **R4-2 (minor):** a C-named `__declspec(noreturn)` reference gets a stand-in and is bound `same` (00c1ad80).
+  - **R4-3 (medium):** when a unit only references its base's typeinfo, there is no private view to keep
+    (FUN_004ffba0, FUN_008d45f0).
+* **did** - V1 `be8c781`, `70cee3a`, `442e5ea`: farm-link harness (it runs `fixed/zz_bridges.o` directly), POD bits,
+  local typeinfo sizes, jump tables and definition-following in c3, cast-call bridges, and reproducers t6 and c10/c11.
+* **next** - S2c: R4-1 (check it against fa7d3f8 first), R4-2, R4-3. V1: run on a farm runner from now on (D17).
+
+### J-0112 | 2026-11-04 | stream: S1b-patches,S13-difffuzz | status: wip | parent: J-0100,J-0103
+
+* **did** - S1b `5903141` (XINC1 round 4 on link/aedcf247e999). Resolve now compares C-named references: 3,874
+  x86-inconsistent rows, of which 757 involve this, ecx, result pointers or casts.
+  - 75 callers patched in 59 files: 66 generated (gen.py reads `extern "C"` signatures), 9 by hand. MSVC: 74 identical,
+    1 by design.
+  - All 51 f13 hand-read callers and V1's C-named pairs are handled.
+* **did** - S1b `00c537b` (pattern d): 0x005762b0 rewritten (MSVC identical) and 0x00c90030 rewritten (2 bytes, by
+  design). 0x008133f0 and 0x009ab390 have been analysed and are left open. tests/s1b test_patches (568 sites, 1,097
+  hunks) and test_ftol pass.
+* **found** - Resolve gaps for S2c:
+  - Casts spelled with a typedef'd pointer type are missed (10 rows).
+  - `__declspec(noreturn)` C declarations are not parsed.
+  - A `__fastcall` hidden result in ecx is flagged `ecx-not-passed`, though it is consistent on x86.
+  - About 3,000 `pop-mismatch` rows have no owner yet.
+* **measured** - S13 first real fuzz triage: 11 of 26 shards at 9844d8d (difffuzz-6), 12,482 functions, 2,039 hard
+  before reclassification. About 350 further S0/S2 hard divergences are runtime equivalences that difffuzz-8 removes.
+
+  | stream | functions | still hard |
+  |---|---:|---:|
+  | S0-compile | 1,913 | 1,636 |
+  | S2-link | 1,478 | 1,317 |
+  | S1 FALL1 | 60 | 56 |
+  | S1b XINC1 | 20 | 18 |
+  | RCAST1 | 10 | 10 |
+  | SSE | 7 | 7 |
+  | RET1 | 6 | 6 |
+  | GOTO1 | 5 | 5 |
+
+  For S0/S2 the main causes are unclassified 946, call-flow 605, uninit-both 193, split-global 121.
+* **did** - S13 `4f38ed8`, `0352a75` (difffuzz-8, merged together, HARNESS bump):
+  - Calls to names the link gives a provider trace as the CRT address, and IAT calls as the import.
+  - operator new is treated as MemoryManager::Allocate, and the delete forms as CRT free.
+  - Adaptive follow is refined.
+  - The AArch64 machine gets a zeroed TLS block at tpidr_el0 (TLS reads used to fault at small addresses).
+  - New causes: `msvc-inlined`, `runtime-equiv`, and `array-new-check` (soft).
+  - Self-test: 0 failures.
+* **found** - Filed by S13:
+  - S1b/S2: 7 tesscriptfunctions callers pass fewer arguments than FUN_005accb0 takes.
+  - S1/S2c: 007a44e0 has a field-offset/this difference.
+  - S2c: 00505010 is missing a V pairing (TESCombatStyle vs image 0x010266e4).
+  - Split-global in listbox, mapmenu and recipemenu (recheck after STATIC1 7fc664f).
+  - FALL1: 004ff7e0 and 00c25f40 still trap on links older than 77b2693.
+  - Harness, open: about 160 oracle-only null dereferences from canned null results; about 330 native-only faults
+    (~40% were TLS, now fixed); devirtualised indirect calls.
+
+### J-0113 | 2026-11-04 | stream: S11-equivalence,S13-difffuzz | status: wip | parent: J-0104,J-0112
+
+* **measured** - First full MSVC gate from the eq farms: all six shards pass. Shards 1-6 come from heads edf9fd1,
+  49f6666 (2, 3, 6), 650bf10 and 808c50b, with the same decomp, rules and pristine objects. The shards agree across
+  heads, and match the local gate.
+  - Units: 2,988 in all; 2,362 identical, 545 differ, 80 do not build on the prepared side, 1 does not build in
+    pristine (vc8).
+  - Functions: 1,067 of 59,567 differ. EH-only 777, retarget 174, code 116.
+  - Code differences by rule: CTOR1 58, STATIC1 23, DECL1 9 (6 after 4e75fd9), XINC1 8, PTR1 5, RET1 2, MATH1 2,
+    GOTO1/NEW4/UNIT1 1 each.
+  - EXC1 accounts for 646 of the EH-only functions (exceptional paths only). DECL1's 155 retargets are CRT calls by
+    name where the exe calls game wrapper addresses: same behaviour, different binding, which matters to S2.
+  - The table is in EQUIVALENCE.md (`1bc32ed`). The classes and examples went to S1, S1b and S2.
+* **did** - S11 `4e75fd9` DECL1-MATHNS. In a namespace other than std, the decomp's `extern "C" double fabs(double);`
+  hides the float overloads, so the exe computes in double. DECL1 used to replace it with `using ::fabs;`, which brought
+  `float fabs(float)` in.
+  - The namespace now keeps the C declaration (33 sites in 24 files).
+  - The signature check ignores SAL attributes, and MATH1 keeps a namespace's own float copy.
+  - niobbox 0x00eba680, bhkrigidbody 0x00c8e160 and hkpworldviewerbase 0x00ddd040 are identical to pristine again.
+    DECL1's math row is now 21/27.
+  - tests/s1 and tests/s11 pass.
+* **did** - S13 `88606c8` difffuzz-9 (HARNESS bump, merged before any farm paid for difffuzz-8):
+  - An intercepted call's canned result follows the callee's definition and the calling unit's declaration. A `T&`
+    result is a valid non-null address, and the bool rule applies when either side says bool. 5 of 16 sampled
+    oracle-only faults are gone.
+  - The bytes an intercepted callee pops come from its oracle code (`ret N`) rather than the declaration (00a4fc90 is
+    gone).
+  - Native-only faults that remain: ilp32-pointer from negative fuzzed indexes (soft); 00d234e0, a Havok custom
+    convention (oracle gap); 00bc2360 Emitter, a field read as a pointer versus embedded storage (S1 layout, not
+    confirmed); 006041d0 open.
+  - Self-test: 0 failures.
+
+### J-0114 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0113
+
+* **did** - S13 `8fcc60a`, `89d9647`: classification only, so no verdict or HARNESS change and no re-fuzz.
+  - New oracle-gap cause `oracle-vcall`: the oracle faults at an indirect call through a fuzzed object that the
+    native never makes (a devirtualised call). 4 of 16 sampled oracle-only faults fall here.
+  - New soft cause `local-static`: native reads of the unit's own .bss that touch only function-local statics and
+    their guards. MSVC's guard lives in the image and holds fuzzed bytes; GCC's sits in .bss and is 0. This was
+    reported as `split-global` before. 68 call-target divergences at 40b2cb5 follow this pattern (native calls
+    0x00a00940 first).
+  - Self-test: 0 failures.
+* **found** - Two harness items for the next HARNESS bump: the oracle needs an x86 `_byteswap_ulong` builtin (6
+  divergences), and folded `dynamic_cast` (4). For S2c: NiFixedString's `operator const char*` stays an unbound name
+  in bsfacegenmanager 00650ea0, while the oracle calls 0x00a5ff10. In the game build it would hit a trap stub.
+
+### J-0115 | 2026-11-04 | stream: S1b-patches,S5-toolchain | status: wip | parent: J-0109,J-0112
+
+* **measured** - S1b classified `pop-mismatch` on link/9844d8dd0fa4.
+  - 3,128 rows fold into 2,138 pairs: 990 callees, 1,204 calling functions. Both sides' MSVC code is byte-exact, so
+    the callee's `ret n` is the truth.
+
+  | class | pairs |
+  |---|---:|
+  | reference pushes fewer than the callee pops | 1,050 |
+  | reference pushes more | 763 |
+  | reference callee-pops, definition cdecl | 191 |
+  | reference cdecl, definition callee-pops | 74 |
+  | hidden result on one side only | 60 |
+
+  - Only the 1,050 "fewer" pairs are real native bugs: the callee reads an argument register nobody set.
+  - Per caller: 611 balance out (the decomp gave pushed words to the wrong one of the function's own calls, which a
+    mechanical fix per family solves), 356 net fewer (need reading), 237 net more.
+  - Top family: `buf->GetChangeFlags(flag)` is really `buf->GetChangeFlags().Test(flag)`, 102 pairs in 27 files.
+* **did** - S1b `75a24f7` pilot (bgsencounterzone.cpp: MSVC identical, GCC clean) and `c29fd27`, a PATCHES.md
+  by-design table that S11's gate can key on. S11's 10 S1b functions are all on it.
+  - FTOI2 makes the FTOL1 helper and casts redundant but harmless. The operand restoration at 17 sites stays.
+  - FUN_005accb0's 7 callers need no patch: x86 passes 8 words and the extractor is variadic, so that one is a fuzzer
+    input artefact.
+  - test_patches: 570 sites.
+* **did** - S5 `931f611`: platform and runtime static constructors run before every game unit's.
+  - Clocks are at priority 101, registrations at 103, boot_banner at 110.
+  - The ctype table is constexpr, and the ini cache is lazy.
+  - guest.ld places crtbegin, libstdc++ and newlib first.
+  - `init_order.py` fails the link on a bad order. On f13 the old guest fails the check and the relinked one passes;
+    both boots are unchanged.
+* **did** - S5 `33c0b1b` (owner request):
+  - **Core 3 opt-in:** NPDM cores 0..3. `sdmc:/fnvnx/fnvnx.ini` has `core3=` (default 0) and `boost_loading=`
+    (default 1). The placement table gets a `mask3` column and the roles io/audio/tasklet/loading. Under the opt-in,
+    game/io/audio/tasklet use cores 1-3; main, the render worker, the AI linear threads and loading stay on 0-2.
+  - **CPU boost:** `appletSetCpuBoostMode(FastLoad)` while the LoadingMenuThread renders, off during its infinite
+    waits and at exit. Never driven by IO, because FastLoad also drops the GPU to its minimum.
+  - Neither has run on hardware.
+* **found** - The link farms lag: the newest published link is still 9844d8d (republished 09:50 with old scripts).
+  S5's farm checks (4b/4c) and the frontier move from S1's heap slots, VLIT1 and S2c's mapping wait for the first
+  link from a head ≥ 68fcbe0.
+
+### J-0116 | 2026-11-04 | stream: S13-difffuzz,farms | status: wip | parent: J-0114
+
+* **found** - 14 of the 26 fuzz shards published nothing after the restart: fz1, 2, 4, 7, 8, 10, 11, 17, 19, 25, and
+  fz12/20/22/24, which hung in their first chunk.
+  - The cause is a harness hang. A jump into memory without code is treated as an intercepted call, and a native
+    `ret` to a garbage LR "returns" to that same address forever, before the step limit counts.
+  - One worker loops, and the chunk waits for it indefinitely.
+* **did** - S13 `346b33d` (no HARNESS bump):
+  - A wild call to LR is a fault. Each machine stops after 20,000 intercepted calls (timeout, inconclusive).
+  - A per-chunk watchdog in fuzz_job runs the chunk under `timeout -k 30 <wd>` and kills the process group. The
+    unfinished functions become `run:timeout` and are re-fuzzed next run.
+  - After every chunk the job reads `fnkeys.HARNESS` on the integration branch. On a bump it stops, publishes, and lets
+    the runner restart at the newest head, so a bump now costs at most one chunk per shard.
+  - Checked on fz10's 128 stuck functions: about 3.5 min, no timeout. Self-test: 0 failures.
+  - The runners hung now can't see the fix. Their 2 h background timeout ends them at about 11:13 UTC.
+* **did** - S13 `96492c1`: int arguments that hold each machine's own stack address, or a literal at its image address
+  against the native unit's copy, now compare equal (50 + 17 call-args divergences at 40b2cb5).
+* **next** - S13 difffuzz-10 (HARNESS bump): `_byteswap_ulong` builtins, dynamic_cast as an untraced builtin, and
+  stack arguments beyond what the x86 caller pushed are not compared (FUN_005accb0).
+
+### J-0117 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0116
+
+* **did** - S13 `difffuzz-10` (HARNESS bump; with the restart path it costs at most one chunk per shard):
+  - `_byteswap_ulong` is a builtin on both machines.
+  - `__RTDynamicCast` is a builtin that returns the object pointer, as GCC's folded cast does. 00591ca0 is gone.
+  - Stack parameters the x86 caller did not push are no longer compared. The count comes from the caller's cleanup or
+    the callee's `ret N`. FUN_005accb0's callers 005c78f0 and 005d4c60 are gone, which confirms S1b's diagnosis.
+  - Self-test: 0 failures.
+
+### J-0118 | 2026-11-04 | stream: V1-link | status: wip | parent: J-0111
+
+* **did** - V1 `c22fc50`, `afd9b5f`: the V1 audits now run as step 4d of full_job.sh, on the job's own link with
+  nothing refetched (D17).
+  - Budget `V1_BUDGET`, default 1200 s. Cheap audits run first. One whose estimate doesn't fit is skipped, and one still
+    running at the end of the budget is stopped; the report says which.
+  - `FARM_V1=0` skips the step.
+  - Results go to `link/<c12>/v1/`. The full report gets the audit table and "watched counters" with the 9a0243c
+    baselines: t5 79 -> 0 expected; the 12 classes should drop; the 23 callee-pop `same` pairs should stay.
+* **measured** - On link/9a0243c7eabe the audits take 372 s; the slow ones are c2-bridges (about 150 s) and c5-pic
+  (about 90 s). c2-bridges: 99 pass, 4 skipped, 0 fail. A full job takes about 41 min, so this adds about 6 min.
+  R4-1..R4-3 are still open at 40b2cb5.
+
+### J-0119 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0108,J-0109,J-0111,J-0112,J-0114
+
+* **did** - S2c `1aeaa9b`: every V entry's `__fnv_<addr>` is now its native address point.
+  - `DAT_<hex>` stores and offset (secondary) vptr stores are recognised.
+  - On f13's objects, 1,101 of 1,860 hand-stored vtables are bound and 425 requested for synthesis. 334 have no
+    candidate: 235 are shells no unit names as a constructor or destructor (S1, or the exe's RTTI), and 99 have no
+    usable storing address.
+* **did** - Two V1 defects fixed:
+  - R4-1 (`05bcc99`): without a declaration, argument bytes come from `ret N` or the caller's cleanup.
+  - R4-2 (`25bcace`): `__declspec(noreturn)` and `__attribute__` C declarations are read.
+* **did** - Two items from S1b:
+  - `8b5e40a`: casts through function-pointer typedefs and aliases count (58 names in 43 units).
+  - `a9fbc1b`: a non-POD's fastcall hidden result is in ecx, checked with MSVC 2008, so 0x006eac70 is consistent. V1's
+    `F1-8-nonpod-hidden` case models the buffer on the stack and should follow.
+* **measured** - S2c classified the 3,762 undefined C++ names at 9844d8d (table in docs/LINK.md):
+
+  | cause | names | owner |
+  |---|---:|---|
+  | member functions declared only (252 templates, 67 refcount) | 1,713 | S1 |
+  | destructors declared only | 747 | S1 |
+  | constructors declared only | 126 | S1 |
+  | a class's own operator new/delete | 501 | fixed by rule |
+  | extern-text | 210 | pending code |
+  | a body exists but no unit emits it | ~180 | S2c next |
+  | free functions declared only | 119 | S1 |
+  | special names (typeinfo, vtables, thunks) | 137 | synthesis or S1 key functions |
+  | data declared only | 36 | S1 |
+  | C++ runtime | 30 | S4 |
+  | class-shape cases | 2 | |
+
+* **did** - S2c `c412227`: three rules for undefined names.
+  - A class's own operator new/delete go to the game allocator (501).
+  - Unit-local namespaced class copies (`fnv_XXXXXXXX::`) are looked up without the namespace, else bound to the global
+    definition (~110). This covers S13's NiFixedString case.
+  - Unique loose parameter matches bind (13).
+  - About 600 fewer undefined names are expected; the next farm link will show.
+* **found** - Three answers to other streams:
+  - 00505010 (S13): the link has the V pairing (`010266e4 V _ZTV14TESCombatStyle`, offset 8). The fuzzer has to apply
+    V entries with their address-point offset.
+  - DECL1 retargets (S11): keep the CRT binding. Nothing on the Switch hooks the wrappers.
+  - R4-3: designed, not implemented. resolve asks the probe for "base typeinfo as unit U sees it", vtables.py
+    synthesizes it, and apply retargets to it. It needs probe changes, so it can only be measured on the farm.
+* **verified** - All 7 link suites pass.

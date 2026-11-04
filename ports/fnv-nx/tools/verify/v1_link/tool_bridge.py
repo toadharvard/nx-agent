@@ -1,7 +1,7 @@
 """tool_bridge.py - ask the code under test (tools/link abi.py / abi2.py) for its verdict and bridge on a hand-made
-(reference, definition) pair, the way fnvlink.resolve decides for a bound reference (mirrors resolve at J-0081:
-abi2 replaces abi's verdict unless abi bridges a narrow-extend pair; an x86-inconsistent ecx-not-passed pair still
-gets the bridge of the moves it has)."""
+(reference, definition) pair, the way fnvlink.resolve decides for a bound reference (mirrors resolve at 949e617:
+abi2 replaces abi's verdict unless abi bridges a narrow-extend pair; an x86-inconsistent ecx-not-passed or
+pop-mismatch pair still gets the bridge of the moves it has; layouts may carry the probe's MSVC POD bit)."""
 import os
 import sys
 
@@ -20,7 +20,8 @@ def verdict(ref_name, def_name, dem, lay_ref, lay_def, addr=0x00c0ffee):
     rs, ds = sigs.parse_msvc(ref_name, dem[ref_name]), sigs.parse_msvc(def_name, dem[def_name])
 
     def look(tab):
-        return lambda t: (layout.Layout(*tab[t][:3], 0, tab[t][3]) if t in tab else None)
+        # (size, align, trivial, class[, msvc pod]): the probe's POD bit decides MSVC's register vs hidden result
+        return lambda t: (layout.Layout(*tab[t][:3], 0, tab[t][3], *(tab[t][4:5])) if t in tab else None)
     v = abi.compare(rs, ds)
     if v.kind == 'same':
         return 'same', v.classes, None
@@ -31,8 +32,13 @@ def verdict(ref_name, def_name, dem, lay_ref, lay_def, addr=0x00c0ffee):
         nv.kind, nv.classes, nv.notes, nv.plan = p2.kind, p2.classes, p2.notes, p2
         v = nv
     target = '__fnv_%08x' % addr
-    ekind = 'bridge' if v.kind == 'x86-inconsistent' and 'ecx-not-passed' in v.classes and \
-        (getattr(v, 'moves', None) or getattr(v, 'plan', None) is not None) else v.kind
+    moves = getattr(v, 'moves', None)
+    plan = getattr(v, 'plan', None)
+    ekind = 'bridge' if v.kind == 'x86-inconsistent' and (
+        ('ecx-not-passed' in v.classes and (moves or plan is not None)) or (
+            'pop-mismatch' in v.classes and (moves or (plan is not None and getattr(plan, 'moves', None))) and not {
+                'this-not-passed', 'size-differs', 'cast-conflict', 'result-pointer-not-passed'} & set(v.classes))
+    ) else v.kind
     if ekind != 'bridge':
         return v.kind, v.classes, None
     bn = abi.bridge_name(addr, ref_name)

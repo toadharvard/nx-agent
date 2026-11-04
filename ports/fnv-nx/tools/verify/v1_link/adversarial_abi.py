@@ -56,7 +56,7 @@ def main():
     dem = bh.undname(names)
     bad_controls = bugs = 0
     for cid, role, ref, dfn, lays in CASES:
-        tl = {k: v[:4] for k, v in lays.items()}
+        tl = {k: v[:5] for k, v in lays.items()}          # with the MSVC POD bit (layouts.tsv column 9)
         hl = {k: bh.Lay(v[0], v[1], v[2], v[3], v[4]) for k, v in lays.items()}
         kind, classes, asm = tool_bridge.verdict(ref, dfn, dem, tl, tl)
         try:

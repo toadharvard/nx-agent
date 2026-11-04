@@ -128,6 +128,72 @@ class UnitCache:
                 out[addr] = libcalls.EQUIV[name]
             elif self._import_names().get(libcalls.import_name(name)[0]):
                 out[addr] = libcalls.import_id(libcalls.import_name(name)[0])
+            elif name in self.providers():
+                out[addr] = self.providers()[name]     # a CRT / library address the link gives a native provider
+        return out
+
+    def oracle_ret_pop(self, addr):
+        """N of the `ret N` instructions in the oracle code of `addr` (0 for a plain `ret`), None when the code is
+        unknown or its returns disagree."""
+        cache = self.__dict__.setdefault('_retpop', {})
+        if addr in cache:
+            return cache[addr]
+        got = None
+        if addr in self.def_at and addr not in libcalls.X86:
+            try:
+                f = self.x86_unit(self.def_at[addr][0], addr).funcs.get(addr)
+            except Exception:  # noqa: BLE001
+                f = None
+            if f:
+                import capstone
+                cs = self.__dict__.setdefault('_cs', capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32))
+                pops = set()
+                for ins in cs.disasm(f['code'], addr):
+                    if ins.mnemonic == 'ret':
+                        pops.add(int(ins.op_str, 0) if ins.op_str else 0)
+                if len(pops) == 1:
+                    got = pops.pop()
+        cache[addr] = got
+        return got
+
+    def providers(self):
+        """{native name: original address} of the link's provider rows (addrmap kind F, `provider: ...`): the CRT
+        and library functions the port implements natively (free, _invalid_parameter_noinfo, fnvnx_rt_dynamic_cast)."""
+        if getattr(self, '_prov', None) is None:
+            self._prov = {}
+            p = config.LINK / 'out/addrmap.tsv'
+            if p.exists():
+                for line in open(p, encoding='utf-8', errors='replace'):
+                    f = line.rstrip('\n').split('\t')
+                    if len(f) > 5 and f[1] == 'F' and f[5].startswith('provider:') and f[2]:
+                        try:
+                            self._prov.setdefault(f[2], int(f[0], 16))
+                        except ValueError:
+                            pass
+        return self._prov
+
+    def iat_names(self):
+        """{IAT slot address: import name}: the native code calls an import through its slot (S2's IAT binding)."""
+        self.import_stubs()
+        return {ad: self._imports[(stub - libcalls.IMPORT_BASE) // 16][0] for ad, stub in self._iat.items()}
+
+    def oracle_callees(self, addr):
+        """Call targets in the oracle code of `addr` (any unit): original addresses, and import identities for calls
+        through IAT slots. Empty when the code is unknown."""
+        if addr not in self.def_at:
+            return set()
+        try:
+            f = self.x86_unit(self.def_at[addr][0], addr).funcs.get(addr)
+        except Exception:  # noqa: BLE001
+            return set()
+        out, iat = set(), self.iat_names()
+        for rel, kind, tg, _ in (f or {}).get('relocs', ()):
+            if tg is None:
+                continue
+            if kind == 0x14:
+                out.add(tg)
+            elif tg in iat:
+                out.add(libcalls.import_id(iat[tg]))
         return out
 
     def callee_info_for(self, source):
@@ -163,13 +229,30 @@ class UnitCache:
 
         def info(addr):
             cv = conv_of(addr)
+            pop = self.oracle_ret_pop(addr)
             if cv is None:
-                return None
+                return (pop, 'int') if pop is not None else None
             kind = 'int'
             if cv.x86_ret == 'st0':
                 kind = 'f32' if cv.ret.size == 4 else 'f64'
-            return (cv.pop, kind)
+            # the stack bytes the callee really pops, read from its oracle code (`ret N`), win over the declaration:
+            # a decomp declaration with a parameter too few or too many left esp off by 4 after the intercepted
+            # call (the oracle then returned to garbage: fault:x:00000000)
+            return (pop if pop is not None else cv.pop, kind)
+        def caller_conv_of(addr):
+            """The calling unit's own declaration of the callee (its MSVC symbol for that address)."""
+            key = ('caller', source, addr)
+            if key not in self._callee:
+                got = None
+                if refs.get(addr):
+                    try:
+                        got = convmod.Conv(refs[addr], source)
+                    except Exception:  # noqa: BLE001
+                        got = None
+                self._callee[key] = got
+            return self._callee[key]
         info.conv = conv_of
+        info.caller_conv = caller_conv_of
         return info
 
     def target(self, source, orig_addr):
@@ -207,12 +290,12 @@ class UnitCache:
                           statics)
         t.source = source
         t.imports = self.import_stubs()
+        t.iat_names = self.iat_names()
+        t.oracle_callees = self.oracle_callees
         t.custom_cc = list(getattr(cv, 'custom', []) or [])
         t.vtables = self.vtable_map(img)
         t.followed = self.preload(code, img, source)
         t.x86_code = code
-        # functions the native unit calls out of line (code stubs): never "inlined natively" (runner adaptive follow)
-        t.arm_out = self.arm_called(img, source) - set(img.entries.values())
 
         def oracle_code(addr):
             """(code, literals of its unit) of an oracle function, or None."""

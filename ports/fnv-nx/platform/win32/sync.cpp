@@ -338,7 +338,23 @@ static void acquire(struct w32_obj *o, DWORD me)
     }
 }
 
+static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms);
+
+/* The loading-screen thread (OS_THREAD_BOOST) waits without a timeout only when the loading screen is done
+ * (LoadingMenuThread::ThreadProc parks on its semaphore): the CPU boost is off for such a wait. */
 extern "C" DWORD WaitForMultipleObjects(DWORD n, const HANDLE *hs, BOOL all, DWORD ms)
+{
+    struct w32_thread *self = w32_self();
+    int unboost = self->boost && W32_DW(ms) == INFINITE;
+    if (unboost)
+        os_cpu_boost(0);
+    DWORD r = wait_multiple(n, hs, all, ms);
+    if (unboost)
+        os_cpu_boost(1);
+    return r;
+}
+
+static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms)
 {
     n = W32_DW(n);
     ms = W32_DW(ms);

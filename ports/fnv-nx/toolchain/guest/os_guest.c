@@ -122,6 +122,14 @@ int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask) {
 int os_thread_suspend(os_thread *t) { (void)t; return -1; }
 int os_thread_resume(os_thread *t) { (void)t; return -1; }
 void os_thread_exit(void) { fnvnx_thread_exit(NULL); }
+/* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
+ * (sdmc:/fnvnx/fnvnx.ini boost_loading=0) turns it off */
+_Static_assert(OS_ROLE_AUDIO == FNVNX_ROLE_AUDIO, "platform/os/os.h OS_ROLE_AUDIO = hostapi.h FNVNX_ROLE_AUDIO");
+void os_cpu_boost(int fast_load) {
+    if (!fnvnx_host->ext_call) return;
+    uint64_t arg[1] = {fast_load ? 1u : 0u};
+    fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_CPU_BOOST, FNVNX_ADDR(arg), 1);
+}
 void os_yield(void) { fnvnx_yield(); }
 void os_sleep_ns(uint64_t ns) { fnvnx_hcall1(fnvnx_host->sleep_ns, ns); }
 

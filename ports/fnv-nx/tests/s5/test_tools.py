@@ -85,6 +85,11 @@ class NpdmTest(unittest.TestCase):
         self.assertEqual(len(d["kernel_caps"]), 14)
         app_type = [c for c in d["kernel_caps"] if c & 0x3FFF == 0x1FFF]
         self.assertEqual([(c >> 14) & 7 for c in app_type], [1])
+        # kernel flags: cores 0..3 (core 3 for the placement opt-in, toolchain/host/placement.h), default core 0
+        kf = [c for c in d["kernel_caps"] if c & 0xF == 0x7]
+        self.assertEqual(len(kf), 1)
+        self.assertEqual(((kf[0] >> 16) & 0xFF, (kf[0] >> 24) & 0xFF), (0, 3))
+        self.assertEqual(self.app_json()["default_cpu_id"], 0)
 
     def test_address_space_names(self):
         for name, val in (("32bit", 0), ("64bit_old", 1), ("32bit_no_reserved", 2), ("64bit", 3), (2, 2)):
@@ -269,10 +274,16 @@ class PlacementTest(unittest.TestCase):
         sys.path.insert(0, HERE)
         import emu_guest
         rows = emu_guest.placement_table()
-        self.assertEqual(rows[1][1:], (0, 0x1, 0))          # main: core 0 alone
-        self.assertEqual(rows[4][1:], (1, 0x2, 0x2B))       # render worker
+        self.assertEqual(rows[1][1:], (0, 0x1, 0, 0))       # main: core 0 alone, never core 3
+        self.assertEqual(rows[4][1:], (1, 0x2, 0x2B, 0))    # render worker
         self.assertEqual(emu_guest.place(0x102, 0, 0)[1:], (2, 0x6, 0x2C))
         self.assertEqual(emu_guest.place((1 << 64) - 1, 1, 0)[1:], (2, 0x6, 0x2C))
+        # core 3 opt-in: IO, audio, tasklets and the default row may use cores 1-3; main, render, AI, loading not
+        for role in (0, 5, 6, 7):
+            self.assertEqual(emu_guest.place(0x100 | role, 2, 0, core3=True)[1:], (3, 0xE, 0x2C))
+            self.assertEqual(emu_guest.place(0x100 | role, 2, 0)[1:3], (1, 0x6))   # seq 2 of cores 1-2
+        for role, ideal, mask in ((1, 0, 0x1), (2, 2, 0x6), (3, 1, 0x6), (4, 1, 0x2), (8, 1, 0x6)):
+            self.assertEqual(emu_guest.place(0x100 | role, 0, 0, core3=True)[1:3], (ideal, mask))
 
 
 class FaultTableTest(unittest.TestCase):
@@ -303,6 +314,96 @@ class FaultTableTest(unittest.TestCase):
                 f.write("# c\nInitHolder  # why\n0x00aa1070 use-malloc:x0\nbefore-winmain 0x00a8a5f0 0x10\n")
             self.assertEqual(emu_guest.parse_fault_table(p),
                              ([("InitHolder", "return0"), ("0x00aa1070", "use-malloc:x0")], [("0x00a8a5f0", 16)]))
+
+
+class InitOrderTest(unittest.TestCase):
+    """toolchain/game/init_order.py: no game unit's static constructor before the platform's, the runtime libraries'
+    or the boot's (the order toolchain/guest/guest.ld and platform/os/os.h FNVNX_INIT_* give)."""
+
+    MAP = (".text           0x30000000     0x100\n"
+           ".init_array     0x3177c000       0x{size:x}\n"
+           "                0x3177c000                        PROVIDE (__init_array_start = .)\n"
+           " *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*))\n"
+           " .init_array.00101\n"
+           "                0x3177c000        0x4 /b/obj/platform_crt_heap.c.o\n"
+           " .init_array.00110\n"
+           "                0x3177c004        0x4 /b/obj/toolchain_game_boot.cpp.o\n"
+           " *(.init_array .ctors)\n"
+           "{rest}"
+           "                0x3177c0f0                        PROVIDE (__init_array_end = .)\n"
+           "\n.fini_array     0x3177c04c        0xc\n"
+           " .fini_array    0x3177c04c        0x4 /b/obj/late_platform.cpp.o\n")
+
+    def run_map(self, rest, size):
+        sys.path.insert(0, os.path.join(HERE, "..", "..", "toolchain", "game"))
+        import init_order
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "fnvnx.map")
+            with open(p, "w") as f:
+                f.write(self.MAP.format(size=size, rest=rest))
+            lst = os.path.join(t, "game_objects.list")
+            with open(lst, "w") as f:
+                f.write('"/s2/fixed/src_a.cpp.o"\n"/s2/fixed/src_b.cpp.o"\n')
+            return init_order.check(init_order.init_array_entries(p), init_order.read_game_list(lst))
+
+    def test_good(self):
+        rest = (" .init_array    0x3177c008        0x4 /tc/lib/crtbegin.o\n"
+                " .init_array    0x3177c00c        0x4 /tc/lib/libstdc++.a(eh_alloc.o)\n"
+                " .init_array    0x3177c010        0x8 /s2/fixed/src_a.cpp.o\n")
+        rows, bad = self.run_map(rest, 0x18)
+        self.assertEqual([r[1] for r in rows], ["own", "own", "runtime", "runtime", "game", "game"])
+        self.assertEqual(rows[0][2], "00101")
+        self.assertEqual(bad, [])
+
+    def test_platform_after_game(self):
+        rest = (" .init_array    0x3177c008        0x4 /s2/fixed/src_b.cpp.o\n"
+                " .init_array    0x3177c00c        0x4 /b/obj/platform_win32_time.cpp.o\n"
+                " .init_array    0x3177c010        0x4 /tc/lib/libc.a(libc_a-stack_protector.o)\n")
+        rows, bad = self.run_map(rest, 0x14)
+        self.assertEqual([(r[1], os.path.basename(r[3])) for r in bad],
+                         [("own", "platform_win32_time.cpp.o"), ("runtime", "libc.a(libc_a-stack_protector.o)")])
+
+
+class HandVptrsTest(unittest.TestCase):
+    """tests/s5/hand_vptrs.py on a two-unit tree: store forms, binding and rule (no ELF: no native-vtable rules)."""
+
+    def test_rules(self):
+        src = (
+            "// @fnv 0x00401000\n"
+            "FNVNX_KEEP A::A() { *(int*)this = (int)&DAT_01011000; }\n"          # image-bound, class A -> S1:virtuals
+            "struct Q { int* vtable; Q() { vtable = &DAT_01011100; } };\n"       # inline ctor member store, bound -> ok
+            "void Free(void* p) { *(void**)p = (void*)&DAT_01011200; }\n"       # free function, deref -> S1:class
+            "void B::B() { *(const char**)this = \"@K@\"; m_x = &DAT_01011300; }\n"   # literal; m_x not a vptr
+            "void C::C() { *(int*)((char*)this + 8) = (int)&DAT_01011400; }\n"  # secondary, V entry -> S2:mapped
+            "void D::f() { *(int*)this = (int)&DAT_00401234; }\n")              # .text address: not a vptr
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(os.path.join(t, "tree", "build"))
+            os.makedirs(os.path.join(t, "tree", "src"))
+            os.makedirs(os.path.join(t, "link", "out"))
+            with open(os.path.join(t, "tree", "src", "u.cpp"), "w") as f:
+                f.write(src)
+            with open(os.path.join(t, "tree", "build", "units.json"), "w") as f:
+                json.dump({"units": [{"source": "src/u.cpp", "symbols": {}}]}, f)
+            with open(os.path.join(t, "link", "out", "aliases.ld"), "w") as f:
+                f.write("__fnv_01011000 = 0x01011000;\n__fnv_01011100 = _ZTV1Q + 8;\n__fnv_01011200 = 0x01011200;\n"
+                        "__fnv_01011400 = 0x01011400;\n")
+            with open(os.path.join(t, "link", "out", "addrmap.tsv"), "w") as f:
+                f.write("01011400\tV\t_ZTV1C\t_ZTV1C\tu.o\tsecondary\t8\t\t\n")
+            r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "hand_vptrs.py"), "--tree", os.path.join(t, "tree"),
+                                "--link", os.path.join(t, "link"), "--out", os.path.join(t, "hv")],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(os.path.join(t, "hv.tsv")) as f:
+                rows = {l.split("\t")[0]: l.rstrip("\n").split("\t") for l in f if not l.startswith("#")}
+            self.assertEqual(rows["01011000"][2], "S1:virtuals")
+            self.assertEqual(rows["01011000"][7], "A")
+            self.assertEqual(rows["01011100"][2], "ok")
+            self.assertEqual(rows["01011100"][7], "Q")
+            self.assertEqual(rows["01011200"][2:4], ["S1:class", "deref"])
+            self.assertEqual(rows["01011400"][2:4], ["S2:mapped", "this+N"])
+            self.assertEqual(rows[""][2], "literal")
+            self.assertNotIn("01011300", rows)
+            self.assertNotIn("00401234", rows)
 
 
 if __name__ == "__main__":

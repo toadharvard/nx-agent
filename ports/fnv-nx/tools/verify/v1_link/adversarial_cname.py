@@ -15,6 +15,8 @@ Cases (want: 'ok' = the binding must deliver what x86 delivers; 'flag' = must be
   c7  fastcall C name with a double parameter (@12: ecx int, 8 stack bytes)                              ok
   c8  stdcall C name whose result type is a typedef (float)                                              ok
   c9  extern "C" { } block, pointer result, const char * / unsigned parameters                          ok
+  c10 a C-named cdecl reference declared __declspec(noreturn), the definition a thiscall member (this, int)   flag
+  c11 c10 without __declspec(noreturn) (control)                                                         flag
   k1  a fastcall declaration called only through a cast to __thiscall (the cast decides)                 ok
   k2  the same name called directly and through a cast                                                   flag
 """
@@ -25,7 +27,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import v1tree  # noqa: E402
 
-CC = '#define __stdcall\n#define __fastcall\n#define __thiscall\n#define __cdecl\n'
+CC = ('#define __stdcall\n#define __fastcall\n#define __thiscall\n#define __cdecl\n'
+      '#define __declspec(x) __attribute__((x))\n')
 
 DEF_CPP = CC + r'''
 struct T { int v; };
@@ -45,6 +48,9 @@ char * __stdcall FUN_00c10090(const char *s, unsigned n) { return (char *)s + n;
 struct M { int v; void FUN_00c100a0(const char *s, int n); void FUN_00c100b0(const char *s, int n); };
 void M::FUN_00c100a0(const char *s, int n) { v = s[0] + n; }
 void M::FUN_00c100b0(const char *s, int n) { v = s[0] - n; }
+struct T10 { int v; void FUN_00c100c0(int a); void FUN_00c100d0(int a); };
+void T10::FUN_00c100c0(int a) { v = a; }
+void T10::FUN_00c100d0(int a) { v = a; }
 '''
 
 HDR = 'extern "C" float FUN_00c10040(float);\n'
@@ -61,6 +67,8 @@ float FUN_00c10080(int);
 char *FUN_00c10090(const char *, unsigned);
 void __fastcall FUN_00c100a0(void *a, const char *b, int *c);
 void __fastcall FUN_00c100b0(void *a, const char *b, int *c);
+extern "C" __declspec(noreturn) void __cdecl FUN_00c100c0();
+extern "C" void __cdecl FUN_00c100d0();
 float g4(float v) { return FUN_00c10040(v); }
 float g4b(float v) { if (v > 1) return FUN_00c10040(v); else return FUN_00c10040(-v); }
 void call_all(H *h, T7 *t7, void *m) {
@@ -76,6 +84,8 @@ void call_all(H *h, T7 *t7, void *m) {
     ((void (__thiscall *)(void *, const char *, int *)) &FUN_00c100a0)(m, "x", &k);
     ((void (__thiscall *)(void *, const char *, int *)) &FUN_00c100b0)(m, "y", &k);
     FUN_00c100b0(m, "z", &k);
+    if (k == 12345) FUN_00c100c0();
+    FUN_00c100d0();
 }
 '''
 
@@ -95,6 +105,10 @@ CASES = [
     ('c9', 0x00c10090, 'ok', '?FUN_00c10090@@YGPADPBDI@Z', '_FUN_00c10090@8', '?FUN_00c10090@@YGPADPBDI@Z', None),
     ('k1', 0x00c100a0, 'ok', '?FUN_00c100a0@@YIXPAXPBDPAH@Z', '?FUN_00c100a0@M@@QAEXPBDH@Z',
      '?FUN_00c100a0@M@@QAEXPBDH@Z', '?FUN_00c100a0@M@@QAEXPBDPAH@Z'),
+    ('c10', 0x00c100c0, 'flag', '_FUN_00c100c0', '?FUN_00c100c0@T10@@QAEXH@Z', '?FUN_00c100c0@T10@@QAEXH@Z',
+     '?FUN_00c100c0@@YAXXZ'),
+    ('c11', 0x00c100d0, 'flag', '_FUN_00c100d0', '?FUN_00c100d0@T10@@QAEXH@Z', '?FUN_00c100d0@T10@@QAEXH@Z',
+     '?FUN_00c100d0@@YAXXZ'),
     ('k2', 0x00c100b0, 'flag', '?FUN_00c100b0@@YIXPAXPBDPAH@Z', '?FUN_00c100b0@M@@QAEXPBDH@Z',
      '?FUN_00c100b0@M@@QAEXPBDH@Z', None),
 ]

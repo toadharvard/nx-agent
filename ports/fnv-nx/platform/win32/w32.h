@@ -25,6 +25,7 @@ struct w32_thread {
     struct w32_obj *self_obj;      /* thread object when created by CreateThread */
     struct w32_waiter waiter;
     char name[32];
+    int boost;                     /* the loading-screen thread: CPU boost while it runs (OS_THREAD_BOOST) */
 };
 struct w32_thread *w32_self(void);
 

@@ -236,23 +236,35 @@ in ecx, usually its own `this`. `abi.compare` / `abi2` classify it `x86-inconsis
 bridge moves (the ecx parameter is often unused - a decompiler artefact: 0x00a75ec0, a stream factory, and
 0x00bbbe30 never read ecx - and a direct call would leave them in the wrong registers). A missing **edx** stays the `edx-dummy`
 bridge (the decomp's `__fastcall f(T*, int edx_dummy, ...)` for a member function: edx is the x86 caller's scratch).
-**The definition's register reads** (`resolve --msvc-code <dir>`, or with `--msvc-objs`; V1's `c3_ecx.py`): for an
-`ecx-not-passed` or `this-not-passed` pair resolve reads the definition's x86 code in S11's pristine MSVC object
-(`<dir>/u<index>.obj`, `vslots.Code.entry_use`). Every path from the entry is followed until ecx is written: an
-operand, address or sub-register read is `read`; a call or tail jump to a callee that takes ecx (its declaration),
-an indirect call or a jump it cannot follow is `pass`; a switch through the function's own jump table goes to every
-label of the function. Only `push ecx` (MSVC reserves a stack word that way) or no use at all: the x86 callee
-never looked at ecx, so the pair is compared again with that parameter dead (`ecx-unused`) and gets an ordinary
-bridge, or none. A definition S1b's patches renamed (`units_renames.tsv`) has no pristine code under its new name:
-the patch gave it the `this` the pristine code never declared, and its pairs stay flagged. On V1's c3 pairs
-(f12) the reader agrees with `c3_ecx.py` on 224 of 225 addresses. The exception is 0x00e3dfb0: c3 saw `jmp [eax*4 + table]`
-as a call, and every case of that switch reads `[ecx+n]`, so it stays flagged. Of V1's three FP-dead and eleven
-TP-this-dead addresses, these are bridged now:
-0x00a75ec0, 0x00bbbe30, 0x00e89ad0 (`push`), 0x00a5d450 (`push`), 0x00a8f730, 0x00b80e70, 0x00bc10e0, 0x00bc59b0,
-0x00e92e60. Still flagged: the four S1b-renamed ones (0x00a43330, 0x00a50b10, 0x00a8a9a0, 0x00a98eb0) and 0x00e3dfb0.
-On the 22 units that reference or define those addresses (f13's objects), resolve reports 13 pairs `ecx unused,
-bridged`, 10 `used, flagged` and 1 without code. Without the objects, nothing changes. The edx side keeps
-`edx-dummy`: c3 found no definition that reads an edx it was not passed; two pass it on (0x00a62130).
+**The definition's register reads** (`resolve --msvc-code <dir>`, or with `--msvc-objs`; V1's `c3_ecx.py`, S1b's
+corrections J-0102). For an `ecx-not-passed` or `this-not-passed` pair, resolve reads the definition's x86 code in
+S11's pristine MSVC object (`<dir>/u<index>.obj`, `vslots.Code.entry_use`). Every path from the entry is followed,
+and a switch through the function's own jump table goes to every label of the function. The register is used when:
+
+* `read`: an operand, an address or a sub-register reads it while it still holds the incoming value;
+* `pass`: it reaches a callee. It is still in the register at a call or tail jump to a callee that takes it, or it
+  was pushed to a stack word that lies inside the callee's stack arguments at a call (00e89ad0 `push ecx; call
+  h(int)`, 00a5d450's thiscall `Create(a, ecx)`). A callee takes a register when its own pristine code uses it,
+  followed recursively through `jmp` forwarders (00a50b10, 00a98eb0, 00a8a9a0). Without code, its declaration
+  decides. An indirect call or a jump the reader cannot follow takes both registers;
+* a definition S1b renamed (`units_renames.tsv`, 00a43330 ...) is judged by its patched declaration: the patch gave
+  it the register its unpatched, pristine code lacks. Renamed references are found under their old names.
+
+The stack is followed by depth: writes through `[esp+k]` / `[ebp+m]` overwrite a pushed word, reads read it, and
+`pop` restores it. A callee's argument bytes come from its declaration, else from the bytes pushed since the
+previous call. A `push ecx` whose word is overwritten before use is a reserved local (MSVC's SEH prologues in the
+bsshader `CreateShader`s): the register stays dead.
+
+When ecx is not used, the x86 callee never looked at it, so the pair is compared again with that parameter dead
+(`ecx-unused`) and gets an ordinary bridge, or none. Against the current prepared tree and S11's objects:
+
+* used: all seven S1b cases (00e89ad0 and 00a5d450 `pass`, 00e3dfb0 `read`, 00a43330 / 00a50b10 / 00a98eb0 /
+  00a8a9a0 `pass`), and all 211 of V1's TP addresses (196 read, 15 pass);
+* dead, and bridged: 0x00a75ec0, 0x00bbbe30, 0x00a8f730, 0x00e92e60, plus the reserved locals 0x00b80e70,
+  0x00bc10e0, 0x00bc59b0.
+
+Without the objects nothing changes. The edx side keeps `edx-dummy`: c3 found no definition that reads an edx it
+was not passed; two pass it on (0x00a62130).
 
 Sites on the ninth-round objects (callee address: referencing units):
 
@@ -632,6 +644,64 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   (0x01012120: `FUN_00404920`, `FUN_00404950`, `FUN_0045cfb0`, `SettingBase_01012120`); the map names one native
   vtable, `vftable_aliases.tsv` every class's own.
 
+  **Image vtables without a named class** (S5 J-0102: on f13, 750 hand-stored image vtables had no native vtable,
+  and `*(int*)this = (int)&DAT_x` stores were not seen; the first boot stop is 0x010472d0 in `bgsragdoll.cpp`):
+
+  * A store through a single-pointer cast to a 4-byte integer or pointer at offset 0 (`*(int *)this = ...`,
+    `((unsigned *)p)[0] = ...`) also counts, when the address lies within 64 KiB of the named vftables.
+  * A decomp shell storing an image vtable is usually the constructor (or destructor) of the class that owns it,
+    and another unit often names that address properly. The storing function's address is its `// @fnv`
+    annotation, used only when the function stores a single vtable. Every name units.json gives that address
+    (`??0X`, `??1X`, `??_GX`, `??_EX`, in any unit) is a candidate class. Among candidates with a native vtable
+    (compiled or synthesized), the one with the most vtable words wins, and the image vtable maps to its primary
+    address point (`class constructed at the storing address`).
+  * Candidates that have no vtable yet go into `vtable_requests.tsv` (why `hand-vptr`, host units: the storing unit
+    and the units naming the address). The probe synthesizes those that are polymorphic in a host unit, so the
+    second resolve can map them (`requested for synthesis: ...` in `hand_vptrs.tsv`).
+
+  Resolving f13's objects with the new rules gives:
+
+  | Result | Image vtable addresses |
+  |---|---|
+  | stored by hand | 1,779 (was 1,705) |
+  | bound to a native address point | 1,100 (was 954): 911 by a named vftable, 31 by the storing function's class, 158 by the class constructed at the storing address |
+  | candidate class requested for synthesis | 363, among them 0x010472d0 |
+  | no candidate | 316 |
+
+  The synthesized share is measured on the farm, where the probe runs. A class whose slot order differs from the
+  callers' declarations (an MSVC deleting-destructor slot against Itanium's two) still needs S1's class shapes.
+
+  S5's work list (J-0109, `tests/s5/hand_vptrs.py`) added three rules:
+
+  * **Every V entry rebinds its data symbol** (S2:mapped). A V entry's `__fnv_<addr>` is its address point in
+    `aliases.ld` whether or not a vptr store was recognised, so a comparison or an unrecognised store reads the
+    native vtable too.
+  * **Unbound `DAT_<hex>` names count as image addresses** (S2:class). A right side that units.json does not bind
+    for the unit still counts when the address is within 64 KiB of the named vftables.
+  * **Stores at a nonzero offset are secondary vptrs.** `*(void **)((char *)this + 0xa8) = ...` and
+    `((int *)this)[k] = ...` map to the address point whose offset-to-top is minus that offset.
+
+  The two S2:named rows are not link rules. 0x010d1854 (`FUN_00d63cb0`{for `S_B0'}) needs the typeinfo of
+  `FUN_00ddcc60`, whose key function is compiled nowhere. 0x01023ac4's `FUN_004f1460` declares only
+  `virtual void Dummy()` and is waiting for synthesis.
+
+  On f13's objects:
+
+  | Result | Count |
+  |---|---|
+  | data references to image vftables rebound | 1,156 (62 of them without a recognised store) |
+  | hand-stored addresses | 1,860 |
+  | bound to a native address point | 1,101 |
+  | candidate class requested for synthesis | 425 |
+  | no candidate | 334 |
+
+  The `why no candidate` column of `hand_vptrs.tsv` says what a candidate would need:
+
+  * 235 storing functions are shells: no unit names their address as a constructor or destructor. A candidate
+    needs S1 to give the shell a polymorphic class, or the image's RTTI, which needs the exe.
+  * 99 stores have no usable storing address: the function stores several vtables at one offset (a base's, then
+    its own), or it has no `@fnv` annotation.
+
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
 2,029 objects compiled (of 2,978 units; S1 census flags, `-O2`). 106,043 undefined (object, symbol) references:
@@ -806,6 +876,41 @@ function contains a trap (6,265 / 4,692; in f10's tree every one did). 235,559 r
 link's `--defsym`). Trial link of 3,497 objects: 0 multiple definitions, **7,842 undefined names**: `__fnv_` 4,574,
 C++ 2,701 (`unresolved` 1,619, `unresolved-ctor-dtor` 779, `extern-text` 152, special 112, runtime / other 39),
 C / platform 567 (`unresolved` 203, `provider` 165, `import` 130, others 69).
+
+## Undefined C++ names (J-0108, farm link `link/9844d8dd0fa4`)
+
+The trial link at 9844d8d leaves 5,080 names undefined, 3,762 of them C++. Each was traced to a cause: its resolve
+class, a global name lookup over every unit's `units.json` names, and a search of the prepared tree for a body (an
+inline definition in a class, or an out-of-class one; the search keys on class and method name, not parameters).
+
+| Cause | Names | Examples | Owner |
+|---|---:|---|---|
+| member function declared only: no body in the tree, no MSVC name anywhere | 1,713 (252 templates) | `BoneValues::Get(int)`, `CCFA00List::GetSize()`, `NiRefObject::IncRefCount()` (67 refcount methods) | S1: bodies or bindings |
+| destructor / constructor declared only | 747 dtors, 126 ctors | `A438D0Name::~A438D0Name()`, `AddOnArray::~AddOnArray()`, `TextureMap::TextureMap()` | S1 (an empty `{}` body would do for most destructors; constructors need the vptr, so they must be compiled) |
+| a class's own `operator new/delete` declared only | 501 | `A46TextKey::operator delete[](void*)`, `Attachment::operator delete(void*, unsigned long)` | **S2c, done**: the game allocator |
+| extern-text: a referenced address without a definition | 210 | `GameStrcat`, `xSplitPath` | the definition's unit (pending code) |
+| a body exists but no translation unit emits it | ~180 (83 dtors, 25 ctors, 34 operator new/delete, 25 members, 6 free) | `BSSimpleList<TESRegionData*>::BSSimpleList(TESRegionData*&)`, `DecodeBlock(...)` | S2c next: emit from a host that sees the body (like the slot functions) |
+| free function declared only | 119 | `PipboyFree(void*)`, `consumeRay(...)` | S1 |
+| special names: typeinfo / vtable / thunks / VTT of classes no unit emits | 137 | `typeinfo for Base64ce20`, `non-virtual thunk to Own_00b8dad0::FUN_00b8dad0()` | synthesis (vtables.py) or S1 key functions |
+| data declared only | 36 | `fnv_00a19f70::LayoutNodeLock`, `PoolAllocatorBase<unsigned int>::ms_kPoolLock` | S1 |
+| runtime (C++ library) | 30 | `std::StringBase::_Xlen()` | S4 |
+| a unit-local namespaced copy of a class (`fnv_XXXXXXXX::`) | 988 of the rows above | `fnv_00650ea0::NiFixedString::operator char const*() const` | **S2c, done** where the global name has an address (~82) or a native definition (32) |
+| only a looser parameter match (l2 / arity) at one address | 13 | `FindKeyInterval(int, int, unsigned char, unsigned char const*)` | **S2c, done** |
+| MSVC deleting destructor vs Itanium's two (class shape) | 2 D0 | `Output538c00::~Output538c00()` | negligible: the G entries cover it |
+
+The rules resolve now applies:
+
+* **A class's own operator new / new[] / delete / delete[]** (sized or not) that nothing defines or binds goes to
+  the game allocator, like GCC's global forms (`member_newdel_global`, then the NEWDEL table).
+* **A unit-local namespaced copy of a class** (`namespace fnv_00650ea0 { struct NiFixedString ... }`): a
+  reference that finds nothing is looked up again without the `fnv_XXXXXXXX::` qualifiers, in the unit's names
+  and globally. Failing that, it is renamed to the native definition of the global name (`ns-alias`).
+* **A looser global match** (l2: typedef / cv spellings, arity) binds when one address carries it; the ABI check
+  then compares the declarations.
+
+Expected on the next farm link: about 600 fewer undefined C++ names. Most of the rest are declarations without
+a body or an address anywhere: what they need is S1's (bodies, `@fnv` bindings or class shapes), and the table
+gives the counts.
 
 ## Open problems
 

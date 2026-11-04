@@ -12,6 +12,7 @@ libclang-18-dev headers (fnvcheck is built into the scratch dir given as argumen
 4. the layout steps of run.sh (clang_pass.sh, layout_diff.py, layout_probe.py) and report.py on a one-unit tree of
    layouts.cpp.
 5. crosscheck.py attributes a site to the tagged function whose body contains it.
+6. toolchain/ftoi: the fnvnx_ftoi plugin's float -> integer conversions equal MSVC's x86 ones (ftoi/, qemu-aarch64).
 """
 import os
 import re
@@ -197,6 +198,47 @@ def build_flags():
     check(not missing, 'census.sh has every build flag but -fPIC (%s)' % sorted(missing))
 
 
+def ftoi(scratch):
+    """toolchain/ftoi: the fnvnx_ftoi plugin gives every float -> integer conversion the result MSVC 2008's code has
+    on an SSE2 PC: target.cpp (plain casts, compiled with the plugin, run under qemu-aarch64) against ref.c (the
+    host's cvttsd2si / x87 fisttp, the instructions MSVC uses); without the plugin the results differ"""
+    import shutil
+    d = os.path.join(scratch, 'ftoi')
+    os.makedirs(d, exist_ok=True)
+    src = os.path.join(HERE, 'ftoi')
+    r = subprocess.run(['bash', os.path.join(PORT, 'toolchain', 'ftoi', 'build.sh'), d], capture_output=True, text=True)
+    check(r.returncode == 0, 'fnvnx_ftoi plugin builds (%s)' % r.stderr.strip()[-200:])
+    if r.returncode:
+        return
+    so = r.stdout.strip().splitlines()[-1]
+    if not shutil.which('qemu-aarch64') or not shutil.which('gcc'):
+        print('skip ftoi semantics: needs qemu-aarch64 and a host gcc (x86-64)')
+        return
+    out = {}
+    r = subprocess.run(['gcc', '-O1', '-I' + src, '-o', os.path.join(d, 'ref'), os.path.join(src, 'ref.c')],
+                       capture_output=True, text=True)
+    check(r.returncode == 0, 'ftoi ref.c builds (%s)' % r.stderr.strip()[-200:])
+    out['ref'] = subprocess.run([os.path.join(d, 'ref')], capture_output=True, text=True).stdout
+    for tag, extra in (('plugin', ['-fplugin=' + so]), ('native', [])):
+        exe = os.path.join(d, tag)
+        r = subprocess.run(['aarch64-linux-gnu-g++', '-O2', '-static', '-I' + src] + extra +
+                           ['-o', exe, os.path.join(src, 'target.cpp')], capture_output=True, text=True)
+        check(r.returncode == 0, 'ftoi target.cpp builds (%s) (%s)' % (tag, r.stderr.strip()[-200:]))
+        out[tag] = subprocess.run(['qemu-aarch64', exe], capture_output=True, text=True).stdout
+    ref = out['ref'].splitlines()
+    diff = [a for a, b in zip(ref, out.get('plugin', '').splitlines()) if a != b]
+    check(len(ref) > 700 and out.get('plugin', '').splitlines() == ref,
+          'ftoi: plugin == MSVC x86 on %d conversions (%d differ: %s)' % (len(ref), len(diff), diff[:3]))
+    nat = sum(1 for a, b in zip(ref, out.get('native', '').splitlines()) if a != b)
+    check(nat > 0, 'ftoi: without the plugin %d conversions differ (the test bites)' % nat)
+    # ILP32 with the build's flags: the plugin loads and rewrites (no compiler error)
+    probe = os.path.join(d, 'ilp32.cpp')
+    open(probe, 'w').write('unsigned f(float x) { return (unsigned)x; }\nint g(double x, int i) { i += x; return i; }\n')
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + bash_array('BUILD_FLAGS') +
+                       ['-O2', '-S', '-o', '-', '-fplugin=' + so, probe], capture_output=True, text=True)
+    check(r.returncode == 0 and r.stdout.count('csel') >= 2, 'ftoi: ILP32 with the build flags (%s)' % r.stderr.strip()[-200:])
+
+
 def crosscheck():
     """crosscheck.py: a site belongs to the function whose tagged, brace-matched body contains it"""
     sys.path.insert(0, STATIC)
@@ -217,6 +259,7 @@ def main():
     build_flags()
     facts(scratch)
     crosscheck()
+    ftoi(scratch)
     if r.returncode == 0:
         cases(scratch)
         layouts(scratch)

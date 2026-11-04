@@ -109,6 +109,11 @@ def check_npdm(buf, program_id, nso_main):
               f"npdm: main thread priority {d['main_thread_priority']} in {kf['highest_priority']}..{kf['lowest_priority']}")
         check(kf["min_core"] <= d["default_cpu_id"] <= kf["max_core"],
               f"npdm: default core {d['default_cpu_id']} in {kf['min_core']}..{kf['max_core']}")
+        # toolchain/host/placement.h: the main thread on core 0, the game on 0-2, the core 3 opt-in (fnvnx.ini
+        # core3=1) on 1-3, so the process must be allowed cores 0..3
+        check(d["default_cpu_id"] == 0 and kf["min_core"] == 0 and kf["max_core"] == 3,
+              f"npdm: cores {kf['min_core']}..{kf['max_core']}, default {d['default_cpu_id']} (want 0..3, default 0: "
+              "core 3 for the placement opt-in)")
     missing = sorted(n for n, i in SVC_NEEDED.items() if i not in caps["syscalls"])
     check(not missing, f"npdm: {len(caps['syscalls'])} SVCs enabled, all {len(SVC_NEEDED)} the host needs"
           + (f" (missing: {', '.join(missing)})" if missing else ""))

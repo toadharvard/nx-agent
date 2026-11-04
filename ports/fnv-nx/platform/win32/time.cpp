@@ -127,4 +127,4 @@ extern "C" LONG CompareFileTime(const FILETIME *a, const FILETIME *b)
     return x < y ? -1 : x > y ? 1 : 0;
 }
 
-__attribute__((constructor)) static void time_init(void) { g_boot_ns = os_monotonic_ns() - 60000000000ull; }
+__attribute__((constructor(FNVNX_INIT_CLOCK))) static void time_init(void) { g_boot_ns = os_monotonic_ns() - 60000000000ull; }

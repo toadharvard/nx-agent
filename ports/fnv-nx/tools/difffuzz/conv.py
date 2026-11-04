@@ -57,7 +57,7 @@ def parse(name):
 
 
 class Value:
-    __slots__ = ('label', 'cls', 'size', 'kind', 'raw', 'signed', 'is_ptr', 'is_float', 'is_bool')
+    __slots__ = ('label', 'cls', 'size', 'kind', 'raw', 'signed', 'is_ptr', 'is_float', 'is_bool', 'is_ref')
 
     def __init__(self, v, raw):
         self.label, self.cls, self.size, self.kind = v.label, v.cls, v.size, v.kind
@@ -67,6 +67,7 @@ class Value:
         self.is_ptr = v.cls == 'P'
         self.is_float = v.cls in ('F32', 'F64')
         self.is_bool = t == 'bool'      # only 0/1 are valid bool representations (both ABIs assume it)
+        self.is_ref = t.endswith('&')   # a reference: never null
 
     def __repr__(self):
         return '%s:%s/%d' % (self.label, self.cls, self.size)

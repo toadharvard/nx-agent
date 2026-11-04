@@ -12,6 +12,8 @@ from fnkeys.py and `commit`, the head it was fuzzed on) and div/<addr>-<n>.json 
         the cumulative campaign of this head: cache rows whose key is the current one (reproducers linked)
     fuzzcache.py status <cache> <targets.jsonl> <keys.json> <commit> <out counts.json>
         fuzzed on this head / reused from an earlier head / pending (key changed, never fuzzed) / no key
+    fuzzcache.py timeouts <campaign> <chunk.jsonl>
+        the chunk's functions without a result after the watchdog fired: rows status run:timeout
     fuzzcache.py dropcrash <campaign>
         forget the campaign's harness crashes (crash:<exception> rows), so a rerun on the same head fuzzes them again
     fuzzcache.py seed  <cache> <targets.jsonl> <other cache>...
@@ -140,6 +142,20 @@ def cmd_status(cache, targets, keys, commit, out):
     print(c)
 
 
+def cmd_timeouts(camp, chunk):
+    rows = load_rows(camp)
+    n = 0
+    for line in open(chunk):
+        t = json.loads(line)
+        if t['address'] not in rows:
+            rows[t['address']] = dict(source=t['source'], address=t['address'], symbol=t.get('symbol'),
+                                      unit=t.get('unit'), kind=t.get('kind'), execs=0, divergences=[],
+                                      status='run:timeout', error='chunk watchdog')
+            n += 1
+    save_rows(camp, rows)
+    print('recorded %d timed-out functions' % n)
+
+
 def cmd_dropcrash(camp):
     rows = load_rows(camp)
     keep = {a: r for a, r in rows.items() if not harness_failure(r)}
@@ -176,6 +192,8 @@ if __name__ == '__main__':
         cmd_status(*args)
     elif cmd == 'dropcrash':
         cmd_dropcrash(*args)
+    elif cmd == 'timeouts':
+        cmd_timeouts(*args)
     elif cmd == 'seed':
         cmd_seed(args[0], args[1], args[2:])
     else:

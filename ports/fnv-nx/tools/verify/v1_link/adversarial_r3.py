@@ -39,7 +39,9 @@ CASES = [
     ('F1-4f-vs-int', 'pass', '?e@@YIHPAUT@@HH@Z', '?e@@YI?AUP4f@@PAUT@@HH@Z'),
     ('F1-PD-vs-int64', 'pass', '?f@@YI_JPAUT@@HH@Z', '?f@@YI?AUPD@@PAUT@@HH@Z'),
     ('F1-HFA3-member-edx', 'pass', '?g@T@@QAE?AUH3@@M@Z', '?g@@YI?AUH3@@PAUT@@HM@Z'),
-    ('F1-24-ref-fastcall-float', 'pass', '?h@@YI?AUP24@@MH@Z', '?h@@YAPAUP24@@PAU1@M@Z'),
+    # the fastcall reference expects its callee to pop the hidden pointer and the float (8 bytes; oracle
+    # call_fcf_p12), the cdecl definition pops nothing: a pop mismatch, bridged and listed (S2c, J-0102)
+    ('F1-24-ref-fastcall-float', 'pass-inconsistent', '?h@@YI?AUP24@@MH@Z', '?h@@YAPAUP24@@PAU1@M@Z'),
     ('F1-12-int64-first', 'pass', '?j@T@@QAE?AUP12@@_J@Z', '?j@@YI?AUP12@@_JH@Z'),
     ('F1-12-four-ints', 'pass', '?m@@YI?AUP12@@HHHH@Z', '?m@@YIPAUP12@@HHPAU1@HH@Z'),
     ('F1-12-def-explicit', 'pass', '?n@@YIPAUP12@@HHPAU1@HH@Z', '?n@@YI?AUP12@@HHHH@Z'),
@@ -81,7 +83,7 @@ def main():
     os.makedirs(work, exist_ok=True)
     names = sorted({n for c in CASES for n in c[2:]} | {n for c in EDGE_CASES for n in c[1:]})
     dem = bh.undname(names)
-    tl = {k: v[:4] for k, v in L.items()}
+    tl = {k: v[:5] for k, v in L.items()}
     hl = {k: bh.Lay(*v) for k, v in L.items()}
     bad = 0
     for cid, want, ref, dfn in CASES:

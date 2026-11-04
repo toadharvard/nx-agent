@@ -12,11 +12,12 @@ SYNTAX_ONLY_EXEMPT=(-fPIC -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack
                     -mno-outline-atomics)
 
 # script_flags <build script>: the compiler flags of the script's FLAGS=(...) array, without -c / -fsyntax-only, $OPT,
-# -o, -fmax-errors=N, the -include / -I paths and -ffile-prefix-map (it only rewrites recorded paths, so objects do
-# not depend on where the tree lives: tools/farm/) - one per line
+# -o, -fmax-errors=N, the -include / -I paths, -ffile-prefix-map (it only rewrites recorded paths, so objects do
+# not depend on where the tree lives: tools/farm/) and -fplugin (a path; gcc_warn.sh loads the same plugin) - one
+# per line
 script_flags() {
   sed -n '/^FLAGS=(/,/)$/p' "$1" | tr -s ' \t' '\n\n' | sed -e 's/^FLAGS=(//' -e 's/)$//' |
-    grep -E '^-' | grep -vE '^(-c|-fsyntax-only|-o|-include|-I.*|-fmax-errors=.*|-ffile-prefix-map=.*)$' || true
+    grep -E '^-' | grep -vE '^(-c|-fsyntax-only|-o|-include|-I.*|-fmax-errors=.*|-ffile-prefix-map=.*|-fplugin=.*|-fplugin-arg-.*)$' || true
 }
 
 # GCC warnings that point at code whose meaning differs between MSVC x86 and GCC AArch64 ILP32, or at UB that
@@ -33,5 +34,7 @@ GCC_DIAG=(-fno-diagnostics-show-caret -fdiagnostics-show-option -fno-diagnostics
 # Flags the gate proposes to add to D10 (docs/STATIC_CHECKS.md, "Flags"); tests/s12 checks what each one changes.
 # (-funreachable-traps is no longer proposed: FALL1 traps at the end of non-void functions and the build's
 # -Werror=return-type rejects any other missing return; the shim's __assume is a no-op.)
-PROPOSED_FLAGS=(-fwrapv-pointer -fno-finite-loops -fno-aggressive-loop-optimizations
-                -fno-isolate-erroneous-paths-dereference)
+# (-fno-isolate-erroneous-paths-dereference neither: the same GCC pass turns a division by a provable zero into a
+# trap, which is what x86 does there (#DE); without it the AArch64 udiv returns 0 and the game runs on - S12 J-0103+,
+# UploadQuads 0x00e723a0.)
+PROPOSED_FLAGS=(-fwrapv-pointer -fno-finite-loops -fno-aggressive-loop-optimizations)

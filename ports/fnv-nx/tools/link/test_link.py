@@ -147,6 +147,11 @@ def main():
         v3 = abi.compare(sigs.parse_msvc(rn, d3[rn]), c3) if c3 is not None else None
         check(v3 is not None and v3.kind == 'same', 'C-named %s against %s: %s' % (
             cn, d3[rn], c3 and (c3.raw_ret, c3.raw_params, v3.kind, v3.classes)))
+    # V1 R4-2 (adversarial_cname c10): a __declspec(noreturn) / __attribute__((...)) declaration is read too
+    cdn = fnvlink.CDecls('extern "C" __declspec(noreturn) void __cdecl FUN_00c100e0(int a);\n'
+                         'extern "C" __attribute__((noreturn)) void FUN_00c100f0(void);\n')
+    check(cdn.find('FUN_00c100e0') == [('void', ['int'])] and cdn.find('FUN_00c100f0') == [('void', [])],
+          'noreturn declarations: %s %s' % (cdn.find('FUN_00c100e0'), cdn.find('FUN_00c100f0')))
     check(cd3.find('FUN_00c10040') == [] and cd3.find('FUN_00c10050') == [],
           'calls and class members are not declarations: %s %s' % (cd3.find('FUN_00c10040'), cd3.find('FUN_00c10050')))
     # R3-1: undeclared, a stdcall/fastcall name is compared through integer parameters with the other side's own
@@ -204,6 +209,17 @@ def main():
                       lambda t: l8 if t == 'P8' else None, lambda t: l8 if t == 'P8' else None)
     check(p8 is not None and p8.kind == 'x86-inconsistent' and 'result-buffer-not-written' in p8.classes,
           'result buffer into an int parameter: %s' % ((p8 and (p8.kind, p8.classes)),))
+    # S1b J-0112 (0x006eac70), checked with MSVC 2008 cl /O2: a non-POD's hidden result buffer of a __fastcall call
+    # is ecx (the arguments move one place); a POD's stays the first stack word (B1/B2 above)
+    nnp = ['?f@@YI?AUNP@@XZ', '?f@@YIPAHPAH@Z', '?h@@YI?AUNP@@HH@Z', '?h@@YIPAHPAHHH@Z']
+    dnp = fnvlink.batch_demangle(fnvlink.UNDNAME, nnp)
+    NPs = {n: sigs.parse_msvc(n, dnp[n]) for n in nnp}
+    lnp = layout.Layout(8, 4, 0, 0, 'IND', 0)
+    for r_, d_ in ((nnp[0], nnp[1]), (nnp[2], nnp[3])):
+        pn = abi2.compare(NPs[r_], NPs[d_], lambda t: lnp if t == 'NP' else None, lambda t: lnp if t == 'NP' else None)
+        check(pn is not None and pn.kind in ('bridge', 'same') and 'ecx-not-passed' not in pn.classes and
+              'pop-mismatch' not in pn.classes, 'non-POD fastcall result buffer in ecx: %s -> %s: %s' % (
+                  dnp[r_], dnp[d_], pn and (pn.kind, pn.classes)))
     # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
     # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
     src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'
@@ -211,6 +227,13 @@ def main():
            'MenuValueDescriptor* GetOrLoadXML(const char* apFilename, bool abAdd) {\n'
            '    if (abAdd) ((void(__thiscall*)(void*, const char*, MenuValueDescriptor*)) & FUN_00a0c900)(&map, f, x);\n'
            '    ((FUN_00a0c900_shell*)&map)->FUN_00a0c900(f, 1);\n    return x; }\n')
+    # S1b J-0112: the same cast through a typedef'd function-pointer type
+    uct = fnvlink.unit_casts('typedef void (__thiscall *XmlFn)(void*, const char*, MenuValueDescriptor*);\n'
+                             'using AlphaFlag = int (__fastcall *)(void *, int);\n'
+                             'void g(void *m) { ((XmlFn)&FUN_00a0c900)(m, "x", 0); reinterpret_cast<AlphaFlag>(FUN_00a0c910)(m, 1); }\n')
+    check(uct.get('FUN_00a0c900') == ({('thiscall', 'void', 'void*, const char*, MenuValueDescriptor*')}, 0) and
+          uct.get('FUN_00a0c910') == ({('fastcall', 'int', 'void *, int')}, 0),
+          'casts through typedef / alias names: %s' % uct)
     uc = fnvlink.unit_casts(src)
     check(uc.get('FUN_00a0c900') == ({('thiscall', 'void', 'void*, const char*, MenuValueDescriptor*')}, 0),
           'cast found, the member call is no direct call: %s' % (uc.get('FUN_00a0c900'),))
@@ -333,37 +356,58 @@ class Q4 { int a; public: int get() const { return a; } };
 
     # V1 c3_ecx (FP-dead, TP-this-dead): ecx-not-passed / this-not-passed is decided on the definition's x86 code.
     # A hand-made i386 COFF object stands in for a pristine MSVC unit (u0.obj): six functions, one relocation
-    funcs = [('?dead@@YIHH@Z', bytes.fromhex('8b442404c20400')),          # mov eax, [esp+4]; ret 4
-             ('?rd@@YIHH@Z', bytes.fromhex('8b4108c3')),                  # mov eax, [ecx+8]; ret
-             ('?psh@@YIHH@Z', bytes.fromhex('51c7042400000000' '58c3')),  # push ecx; mov [esp], 0; pop eax; ret
-             ('?tail@@YIHH@Z', bytes.fromhex('e900000000')),              # jmp ?g@C@@QAEXXZ (thiscall: takes ecx)
-             ('?zero@@YIHH@Z', bytes.fromhex('33c98bc1c3')),              # xor ecx, ecx; mov eax, ecx; ret
-             ('?br@@YIHH@Z', bytes.fromhex('85c074028b01c3'))]            # test eax, eax; je +2; mov eax, [ecx]; ret
+    # S1b (J-0102): a `push ecx` that is a call argument (00e89ad0, 00a5d450), a read behind a jump table (00e3dfb0)
+    # and forwarders whose callee's own code reads ecx on (00a43330 ...) all use ecx; a reserved local does not
+    funcs = [('?dead@@YIHH@Z', bytes.fromhex('8b442404c20400'), []),          # mov eax, [esp+4]; ret 4
+             ('?rd@@YIHH@Z', bytes.fromhex('8b4108c3'), []),                  # mov eax, [ecx+8]; ret
+             ('?psh@@YIHH@Z', bytes.fromhex('51c7042400000000' '58c3'), []),  # push ecx; mov [esp], 0; pop eax; ret
+             ('?tail@@YIHH@Z', bytes.fromhex('e900000000'), [(1, '?g@C@@QAEXXZ')]),   # jmp a thiscall callee
+             ('?zero@@YIHH@Z', bytes.fromhex('33c98bc1c3'), []),              # xor ecx, ecx; mov eax, ecx; ret
+             ('?br@@YIHH@Z', bytes.fromhex('85c074028b01c3'), []),            # test eax, eax; je +2; mov eax, [ecx]; ret
+             ('?arg@@YIXH@Z', bytes.fromhex('51e80000000059c3'), [(2, '?h1@@YAXH@Z')]),  # push ecx; call h1(int); pop ecx
+             ('?fwd@@YAXXZ', bytes.fromhex('e900000000'), [(1, '?inner@@YAXXZ')]),       # jmp inner (declared cdecl)
+             ('?inner@@YAXXZ', bytes.fromhex('8b01c3'), []),                  # mov eax, [ecx]; ret: its code reads ecx
+             ('?res@@YAXXZ', bytes.fromhex('5133c0890424e8000000005959c3'),   # push ecx; xor eax, eax; mov [esp], eax;
+              [(8, '?h1@@YAXH@Z')])]                                         # call h1; pop ecx; pop ecx; ret: a local
     text, offs = b'', []
-    for _, code_ in funcs:
+    for _, code_, _ in funcs:
         offs.append(len(text)); text += code_
-    names = [n for n, _ in funcs] + ['?g@C@@QAEXXZ']
+    names = [n for n, _, _ in funcs] + ['?g@C@@QAEXXZ', '?h1@@YAXH@Z']
     strtab = b''.join(n.encode() + b'\0' for n in names)
     sym = b''
     for k, n in enumerate(names):
         so = 4 + sum(len(x) + 1 for x in names[:k])
         sym += struct.pack('<IIIhHBB', 0, so, offs[k] if k < len(funcs) else 0, 1 if k < len(funcs) else 0, 0x20, 2, 0)
-    rel = struct.pack('<IIH', offs[3] + 1, len(names) - 1, 0x14)          # REL32 -> ?g@C@@QAEXXZ
+    rel = b''.join(struct.pack('<IIH', offs[k] + o, names.index(t), 0x14)
+                   for k, (_, _, rs) in enumerate(funcs) for o, t in rs)
+    nrel = sum(len(rs) for _, _, rs in funcs)
     p_text = 20 + 40
     p_rel = p_text + len(text)
     p_sym = p_rel + len(rel)
     coff = struct.pack('<HHIIIHH', 0x14c, 1, 0, p_sym, len(names), 0, 0) + \
-        struct.pack('<8sIIIIIIHHI', b'.text', 0, 0, len(text), p_text, p_rel, 0, 1, 0, 0x60000020) + \
+        struct.pack('<8sIIIIIIHHI', b'.text', 0, 0, len(text), p_text, p_rel, 0, nrel, 0, 0x60000020) + \
         text + rel + sym + struct.pack('<I', 4 + len(strtab)) + strtab
     with tempfile.TemporaryDirectory() as tmp:
         open(os.path.join(tmp, 'u0.obj'), 'wb').write(coff)
         units = [{'source': 'src/u.cpp', 'symbols': {}, 'functions': [
-            {'address': '%08x' % (0x401000 + 16 * k), 'symbol': n, 'size': len(c_)} for k, (n, c_) in enumerate(funcs)]}]
+            {'address': '%08x' % (0x401000 + 16 * k), 'symbol': n, 'size': len(c_)}
+            for k, (n, c_, _) in enumerate(funcs)]}]
         code = vslots.Code(types.SimpleNamespace(units=units), tmp)
-        takes = {'?g@C@@QAEXXZ': {'ecx'}}.get
-        got = [code.entry_use(0x401000 + 16 * k, lambda n, slot=False: takes(n))['ecx'] for k in range(len(funcs))]
-        check(got == [None, 'read', 'push', 'pass', None, 'read'], 'incoming ecx use by code: %s' % got)
+        takes = {'?g@C@@QAEXXZ': {'ecx'}, '?h1@@YAXH@Z': set(), '?inner@@YAXXZ': set()}.get
+        nb = {'?h1@@YAXH@Z': (4, 0)}.get
+        got = [code.entry_use(0x401000 + 16 * k, lambda n, slot=False: takes(n), None,
+                              lambda n, slot=False: nb(n))['ecx'] for k in range(len(funcs))]
+        check(got == [None, 'read', 'push', 'pass', None, 'read', 'pass', 'pass', 'read', 'push'],
+              'incoming ecx use by code: %s' % got)
         check(code.entry_use(0x402000, takes) is None, 'no code: unknown')
+        # V1 R4-1 (repro_ecx_push_arg.py): without declarations, the caller's cleanup after the call (`pop ecx`,
+        # `add esp, 4`) gives the callee's argument bytes: a pushed argument vs MSVC's reserved word
+        code3 = vslots.Code(types.SimpleNamespace(units=units), tmp)
+        got3 = [code3.entry_use(0x401000 + 16 * k, lambda n, slot=False: takes(n))['ecx'] for k in (6, 9)]
+        check(got3 == ['pass', 'push'], 'argument bytes from the cleanup after the call: %s' % got3)
+        code2 = vslots.Code(types.SimpleNamespace(units=units), tmp)
+        code2.renamed = {0x401000}          # an S1b-renamed definition: its patched declaration decides
+        check(code2.entry_use(0x401000, lambda n, slot=False: {'ecx'})['ecx'] == 'pass', 'renamed: by declaration')
         json.dump({'units': units}, open(os.path.join(tmp, 'units.json'), 'w'))
         os.environ['FNVNX_MSVC_CODE'] = tmp
         ms = fnvlink.DemangleCache(os.path.join(tmp, 'msvc.tsv'), fnvlink.UNDNAME)
@@ -373,6 +417,8 @@ class Q4 { int a; public: int get() const { return a; } };
         del os.environ['FNVNX_MSVC_CODE']
         check(use is not None and use(0x401030) == {'ecx': 'pass', 'edx': None},
               'resolve\'s reader: a tail call to a thiscall callee passes ecx: %s' % (use and use(0x401030)))
+        check(use is not None and use(0x401060)['ecx'] == 'pass' and use(0x401090)['ecx'] == 'push',
+              'resolve\'s reader: pushed argument vs reserved local: %s %s' % (use and use(0x401060), use and use(0x401090)))
     ne = ['?h@@YGDD@Z', '?h@S@@QAEEAAUN@@@Z', '?k@@YAXXZ', '?k@@YIPAUN@@PAU1@@Z']
     de = fnvlink.batch_demangle(fnvlink.UNDNAME, ne)
     E = {n: sigs.parse_msvc(n, de[n]) for n in ne}

@@ -110,6 +110,50 @@ def image_vftables():
     return _VFT
 
 
+def oracle_vcall(pair, case, max_steps):
+    """The oracle faulted on an indirect call through a fuzzed object (loading its vptr or slot, or calling the
+    loaded address) that the native code never makes (GCC devirtualised it, or the call is on a path it does not
+    take with these canned results). Indirect calls are not modelled: an oracle gap."""
+    import capstone
+    from unicorn.x86_const import UC_X86_REG_EIP
+    rx, _, _ = pair.run(case, max_steps)
+    if not str(rx.error or '').startswith('fault:'):
+        return False
+    uc = pair.xe.uc
+    pc = uc.reg_read(UC_X86_REG_EIP)
+    try:
+        code = bytes(uc.mem_read(pc, 24))
+    except Exception:  # noqa: BLE001
+        return str(rx.error).startswith('fault:x:')     # the call itself jumped to an unmapped address
+    cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    for i, ins in enumerate(cs.disasm(code, pc)):
+        if i >= 4:
+            break
+        if ins.mnemonic == 'call' and not ins.op_str.startswith('0x'):
+            return True                                 # call [reg+N] / call reg within a few instructions
+    return False
+
+
+def msvc_inlined(target, div):
+    """The native code calls X out of line where the oracle runs X's body inline (MSVC inlined it; the oracle's
+    next call is one X itself makes): the native side would have to run X too. An oracle-model gap."""
+    callees = getattr(target, 'oracle_callees', None)
+    try:
+        a = int(div['arm'], 16)
+    except (TypeError, ValueError, KeyError):
+        return False
+    x = div.get('x86') or ''
+    if x.startswith('imp:'):
+        import libcalls
+        xv = libcalls.import_id(x[4:])
+    else:
+        try:
+            xv = int(x, 16)
+        except ValueError:
+            return False
+    return bool(callees) and xv in callees(a)
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
@@ -120,6 +164,8 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'bool-repr'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
+    if k == 'call-target' and msvc_inlined(target, div):
+        h['cause'] = 'msvc-inlined'; return h
     regs = entry_register_reads(fn, target.conv)
     if regs:
         h['cause'] = 'x86-custom-cc'; h['regs'] = regs; return h
@@ -130,6 +176,8 @@ def hint(pair, target, case, div, fn, max_steps):
             hits = check_rebind.bypassing_functions(str(obj)).get(target.orig_addr)
             if hits:
                 h['cause'] = 'split-global'; h['vars'] = hits; return h
+    if div.get('arm_local_static'):
+        h['cause'] = 'local-static'; return h
     if div.get('arm_private_reads') and k in ('return', 'mem-write', 'call-args', 'error', 'call-target'):
         h['cause'] = 'split-global'; h['note'] = 'native code read its unit-local data'; return h
     if k in ('mem-write', 'return'):
@@ -145,6 +193,9 @@ def hint(pair, target, case, div, fn, max_steps):
             h['cause'] = 'division'; return h
         if 'ilp32-high' in str(div.get('arm')):
             h['cause'] = 'ilp32-pointer'; return h
+        if str(div.get('x86', '')).startswith('fault:') and div.get('arm') is None and oracle_vcall(pair, case,
+                                                                                                    max_steps):
+            h['cause'] = 'oracle-vcall'; return h
     if k == 'callee-saved':
         h['cause'] = 'callee-saved'; return h
     # determinism probes: only garbage changes (stack fill, non-argument registers, argument padding)

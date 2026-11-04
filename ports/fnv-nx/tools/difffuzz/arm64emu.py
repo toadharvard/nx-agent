@@ -23,6 +23,8 @@ import a64image
 import libcalls
 
 PAGE = world.PAGE
+TLS_BASE, TLS_SIZE = 0x0b900000, 0x00010000   # inside the AArch64 private range (faults as data elsewhere)
+MAX_CALLS = 20000                             # intercepted calls per run (each costs no step)
 XR = [A.UC_ARM64_REG_X0 + i for i in range(29)] + [A.UC_ARM64_REG_X29, A.UC_ARM64_REG_X30]
 VR = [A.UC_ARM64_REG_V0 + i for i in range(32)]
 STUB_LO, STUB_HI = a64image.CODE_STUB, a64image.NAMED_STUB + 0x00800000
@@ -47,12 +49,16 @@ class Result:
         self.saved_ok = True
         self.vptr_stores = 0
         self.private_reads = 0
+        self.private_addrs = set()
 
 
 class Arm64Engine:
     def __init__(self, world_obj, image, stub_orig, vtables=None):
         self.vtables = vtables or {}
         self.callee_conv = None          # original address -> Conv of the callee definition (set by runner.Pair)
+        self.iat_names = {}              # IAT slot -> import name (set by runner.Pair)
+        self.caller_conv = None          # original address -> Conv of the calling unit's declaration (runner.Pair)
+        self.imports = {}                # x86 import stub index -> (name, stdcall bytes) (set by runner.Pair)
         self.world = world_obj
         self.image = image
         self.stub_orig = stub_orig
@@ -68,6 +74,9 @@ class Arm64Engine:
                     uc.mem_map(p, PAGE, UC_PROT_ALL)
                     self.mapped.add(p)
             uc.mem_write(base, data)
+        # thread-local storage: the native code reads [tpidr_el0 + offset] (the platform's thread_local state, GCC's
+        # TLS model local-exec); a zeroed private block, not compared (the oracle has no such state)
+        uc.mem_map(TLS_BASE, TLS_SIZE, UC_PROT_READ | UC_PROT_WRITE)
         uc.mem_map(a64image.STACK_GUARD, PAGE, UC_PROT_READ)
         uc.mem_write(a64image.STACK_GUARD, struct.pack('<Q', 0x5ca1ab1e0ddba11))
         self.mapped.add(a64image.STACK_GUARD)
@@ -99,6 +108,14 @@ class Arm64Engine:
             self._map(p)
 
     def _on_unmapped(self, uc, access, address, size, value, data):
+        if access == 21 and libcalls.IMPORT_BASE <= address < libcalls.IMPORT_BASE + libcalls.IMPORT_MAX * 16:
+            # an import called through the value of its IAT slot (pinned to the x86 import stub): a wild call
+            # there is that import (_on_stub)
+            p = world.page_of(address)
+            uc.mem_map(p, PAGE, UC_PROT_ALL)
+            uc.mem_write(p, BRK * (PAGE // 4))
+            self.mapped.add(p)
+            return True
         if STUB_LO <= address < STUB_HI and access == 21:     # UC_MEM_FETCH_UNMAPPED: a call into a stub
             p = world.page_of(address)
             uc.mem_map(p, PAGE, UC_PROT_ALL)
@@ -134,6 +151,8 @@ class Arm64Engine:
         for i in range(32):
             uc.reg_write(VR[i], world.garbage32(case.seed, 400 + i) | (world.garbage32(case.seed, 500 + i) << 32))
         self._place_args(conv, case, placement, world.SP0 & ~0xf)
+        uc.mem_write(TLS_BASE, bytes(TLS_SIZE))
+        uc.reg_write(A.UC_ARM64_REG_TPIDR_EL0, TLS_BASE)
         uc.reg_write(A.UC_ARM64_REG_LR, world.SENTINEL)
         self._ensure(world.SENTINEL, 4)
         saved = [uc.reg_read(XR[i]) for i in range(19, 30)] + [uc.reg_read(A.UC_ARM64_REG_SP)]
@@ -266,6 +285,8 @@ class Arm64Engine:
 
     def _on_private_read(self, uc, access, address, size, value, r):
         r.private_reads += 1
+        if len(r.private_addrs) < 32:
+            r.private_addrs.add(address)
 
     def _on_cov(self, uc, address, size, r):
         r.blocks.add(address)
@@ -273,23 +294,40 @@ class Arm64Engine:
     def _on_wild(self, uc, address, size, user):
         """Execution reached memory that holds no native code (an indirect call through a planted pointer, or a
         jump to an original .text address): an intercepted call of that address, as on x86."""
+        if address == (uc.reg_read(A.UC_ARM64_REG_LR) & 0xffffffff):
+            # a `ret` to a garbage return address: "returning" from the intercepted call would land on it again,
+            # forever, without executing an instruction (the step limit never fires): a fault
+            self._fault = 'fault:x:%08x' % address
+            uc.emu_stop()
+            return
         self._on_stub(uc, address, size, user, wild=True)
 
     def _on_stub(self, uc, address, size, user, wild=False):
         case, r = user
         if wild:
             target, name = address, None
+            if libcalls.IMPORT_BASE <= address < libcalls.IMPORT_BASE + libcalls.IMPORT_MAX * 16:
+                name = (self.imports.get((address - libcalls.IMPORT_BASE) // 16) or ('?', 0))[0]
+                target = libcalls.import_id(name)
         elif address < a64image.NAMED_STUB:
             target = address - a64image.CODE_STUB
             name = None
         else:
             target = self.stub_orig.get(address, -address)
             name = self.image.stubs.get(address)
+        if not wild and target is not None and target in self.iat_names:
+            # an import called through its IAT slot (S2's IAT binding): the import, as on x86
+            name = self.iat_names[target]
+            target = libcalls.import_id(name)
         if self._builtin(uc, name, target, r):
             return
         if name == '__stack_chk_fail':
             self._fault = 'stack-protector'; uc.emu_stop(); return
         k = len(r.calls)
+        if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
+            self._fault = 'timeout'
+            uc.emu_stop()
+            return
         sp = uc.reg_read(A.UC_ARM64_REG_SP)
         try:
             stk = bytes(uc.mem_read(sp, 64))
@@ -310,7 +348,16 @@ class Arm64Engine:
                 cv = self.callee_conv(target)
             except Exception:  # noqa: BLE001
                 cv = None
-        if cv is not None and cv.ret is not None and cv.ret.is_bool:
+        ccv = None
+        if self.caller_conv is not None and target is not None and target >= 0:
+            try:
+                ccv = self.caller_conv(target)
+            except Exception:  # noqa: BLE001
+                ccv = None
+        ck = world.canned_kind((cv, ccv))
+        if ck == 'ref':
+            x0 = world.ref_result(k)
+        elif ck == 'bool':
             x0 = (x0 & ~0xff) | (rb[0] & 1)            # a real bool result is 0/1
         uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))

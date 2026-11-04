@@ -103,6 +103,9 @@ check('MATH1 in a namespace that takes the C fabs: the copy goes',
       run(s1.r_math_overloads, 'namespace N {\nusing ::fabs; /* fnv-nx DECL1 */\ninline float fabs(float f)\n{\n'
           '    return (float)fabs((double)f);\n}\nfloat g(float x) { return fabs(x); }\n}\n'),
       ['/* fnv-nx MATH1 */', 'float g(float x)'], ['(float)fabs((double)f)', '#include <math.h>'])
+check('MATH1 next to the namespace\'s own extern "C" prototype: the copy stays (MSVC found it)',
+      run(s1.r_math_overloads, 'namespace N {\nextern "C" double cos(double);\ninline float __cdecl cos(float _X)\n{\n'
+          '    return cosf(_X);\n}\n}\n'), ['return cosf(_X);'], ['MATH1'])
 check('MATH1 in a namespace of its own: the overload stays',
       run(s1.r_math_overloads, 'namespace N {\ninline float fabs(float f)\n{\n    return f < 0 ? -f : f;\n}\n}\n'),
       ['return f < 0 ? -f : f;'], ['MATH1'])
@@ -295,7 +298,19 @@ got = prepare.r_platform_protos('/x/src/m.cpp', 'extern "C" double __cdecl sqrt(
                                 Counter())
 check('DECL1 declares the C math function itself (no <math.h> overloads), keeps a float overload of the decomp', got,
       ['#include "fnvnx_cmath/fabs.h" /* fnv-nx DECL1 */\n#include "fnvnx_cmath/sqrt.h" /* fnv-nx DECL1 */\n'
-       'float __cdecl floor(float);\nnamespace N {\nusing ::fabs; /* fnv-nx DECL1 */\n}'], ['<math.h>'])
+       'float __cdecl floor(float);\nnamespace N {\nextern "C" double fabs(double);\n}'], ['<math.h>', 'using ::fabs'])
+# in a namespace the C function stays alone: a using-declaration would bring <math.h>'s float overload in (S11)
+_st = Counter()
+got = prepare.r_platform_protos('/x/src/n.cpp', '#include <math.h>\nnamespace N {\nextern "C" double __cdecl fabs(double);\n'
+                                'float f(float x) { return (float)fabs(x); }\n}\n', _st)
+check('DECL1 keeps a namespace\'s extern "C" prototype of the C math function, header on top', got,
+      ['#include "fnvnx_cmath/fabs.h" /* fnv-nx DECL1 */\n#include <math.h>\nnamespace N {\nextern "C" double __cdecl fabs(double);'],
+      ['using ::fabs'])
+check('DECL1-MATHNS counted', str(_st['DECL1-MATHNS']), ['1'])
+got = prepare.r_platform_protos('/x/src/s.cpp', 'namespace N {\nextern "C" {\ndouble __cdecl fabs([SA_Pre(Null=SA_No)]'
+                                '[SA_Pre(Deref=1,Valid=SA_Yes,Access=SA_Read)]double _X);\n}\n}\n', Counter())
+check('DECL1 reads the C signature through attribute SAL (commas inside [...])', got,
+      ['#include "fnvnx_cmath/fabs.h" /* fnv-nx DECL1 */', 'double __cdecl fabs([SA_Pre(Null=SA_No)]'], ['using ::fabs'])
 # where a translation unit of the file includes <math.h>, the decomp's float overload is MSVC's <math.h> one: dropped
 import json as _json
 import tempfile
@@ -371,6 +386,12 @@ got = run(s1.r_goto_scalar_inits, 'int f(V& v, int e)\n{\n    if (e) goto out;\n
           '        int n = 4;\n        char *p = 0, *q = p;\n        return (int)(dw + di) + n + (p == q);\n    }\nout:\n    return 0;\n}\n')
 check('GOTO1 splits declarator lists declarator by declarator', got,
       ['float dw, di; dw = v.d(3); di = v.d(e);', 'int n; n = 4;', 'char *p, *q; p = 0; q = p;'])
+got = run(s1.r_goto_scalar_inits, 'int g(const H* h, int e)\n{\n    if (e) goto out;\n    {\n        const int n = h->n;\n'
+          '        __m128 ang = _mm_load_ss(&h->f);\n        const ns::Hdr* hd = h->hd;\n        static const int k = 3;\n'
+          '        return n + k + (hd != 0);\n    }\nout:\n    return 0;\n}\n')
+check('GOTO1 also splits SSE vectors, const scalars (dropping their const) and pointers to const', got,
+      ['int n; n = h->n;', '__m128 ang; ang = _mm_load_ss(&h->f);', 'const ns::Hdr* hd; hd = h->hd;',
+       'static const int k = 3;'])
 
 # ---- TAIL1
 check('TAIL1 names the last base without its access specifier',
@@ -471,6 +492,13 @@ got = run(s1.r_stand_in_interfaces, 'struct StdAllocator\n{\n    virtual ~StdAll
 check('VTBL1 StdAllocator: the destructor is MSVC slot 0, one plain slot', got,
       ['    virtual void* Destroy(unsigned int flags);   /* fnv-nx VTBL1', '    virtual void* Allocate();'], ['~StdAllocator'])
 
+got = run(s1.r_stand_in_interfaces, 'struct FUN_00aa7400 : HeapBlockBase\n{\n    int m_1c;\n    HeapBlockLink m_20;\n'
+          '    FUN_00aa7400(unsigned int a, unsigned int b);\n    virtual void v00();\n};\nint z;\n',
+          '/x/src/staging/blk_00aa0000_od_ob1_variant.cpp')
+check('VTBL1 the FUN_00aa7400 heap gets the AbstractHeap slots, same line count', got,
+      ['virtual void v00(); /* fnv-nx VTBL1', 'virtual void v2();', 'virtual void v13(void* value); };', '\nint z;'])
+check('VTBL1 FUN_00aa7400 keeps the line count', str(got.count('\n')), ['8'])
+
 # ---- ALIGN1
 got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
           '__declspec(align(16))class H:public C\n{\n};\n__declspec(align(16))struct TAU32;\n'
@@ -518,6 +546,72 @@ check('NATIVE1 drops listed units and glob matches, reports the addresses no ove
       repr([u['source'] for u in _kept['units']]) + ' %d ' % len(_gone) + repr(native1.uncovered(_gone, os.path.join(_d, 'ov.tsv'))),
       ["['src/a.cpp'] 2 [12363776]"])
 check('NATIVE1 with no list file drops nothing', repr(native1.load_list(os.path.join(_d, 'none.txt'))), ['[]'])
+
+# ---- shim packing: fnvnx_win32.h included inside a decomp #pragma pack(push, 4) region (DECL1 / DECL2, 16 sites)
+import shutil as _shutil, subprocess as _subprocess
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _pk = os.path.join(tempfile.mkdtemp(), 'pk.cpp')
+    open(_pk, 'w').write('#pragma pack(push, 4)\n#include "fnvnx_win32.h"\nstruct Inner { int a; LARGE_INTEGER b; };\n'
+                         '#pragma pack(pop)\nstatic_assert(alignof(LARGE_INTEGER) == 8 && alignof(ULARGE_INTEGER) == 8 && '
+                         'alignof(MEMORYSTATUSEX) == 8 && sizeof(MEMORYSTATUSEX) == 64, "SDK packing");\n'
+                         'static_assert(__builtin_offsetof(Inner, b) == 4, "the region packs its own structs");\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only',
+                          '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _pk], capture_output=True, text=True)
+    check('fnvnx_win32.h keeps the SDK packing inside a pack(4) region', _r.stderr or 'ok', ['ok'])
+
+# ---- STATIC1 namespace statics (S13: bound by their plain name; roulettemenu, hudmainmenu)
+_n = tempfile.mkdtemp()
+os.makedirs(os.path.join(_n, 'src')); os.makedirs(os.path.join(_n, 'build'))
+_json.dump({'units': [{'source': 'src/r.cpp', 'symbols': {
+    '_s_fSpinTime': '0x011da904', '_s_iLastState': '0x011a081c', '_s_szName': '0x01080000', '_g_pInst': '0x011d96c0',
+    '?g_pInst@@3PAUH@@A': '0x011d96c0', '?g_pInst@fnv_1@@3PAUH@@A': '0x011d96c0', '_s_kList': '0x011d0000'}}]},
+           open(os.path.join(_n, 'build', 'units.json'), 'w'))
+_src = ('struct H;\nstruct L { L(); };\nextern H* g_pInst;\nstatic H* g_pInst;\nnamespace fnv_1 {\nextern H* g_pInst;\n}\n'
+        'namespace fnv_007bd2a0 {\nstatic float s_fSpinTime;\nstatic int s_iLastState = 4;\n'
+        'static const char s_szName[] = "x";\nstatic H* g_pInst;\nstatic L s_kList;\nvoid f() { s_fSpinTime = 1; }\n}\n')
+open(os.path.join(_n, 'src', 'r.cpp'), 'w').write(_src)
+_saved = (s1._IMAGE_NAMES, dict(s1._IMAGE_CNAMES), dict(s1._IMAGE_ADDRS))
+s1._IMAGE_NAMES = None; s1._IMAGE_CNAMES.clear(); s1._IMAGE_ADDRS.clear()
+got = run(s1.r_image_statics, _src, os.path.join(_n, 'src', 'r.cpp'))
+s1._IMAGE_NAMES = _saved[0]; s1._IMAGE_CNAMES.clear(); s1._IMAGE_CNAMES.update(_saved[1])
+s1._IMAGE_ADDRS.clear(); s1._IMAGE_ADDRS.update(_saved[2])
+check('STATIC1 gives namespace statics bound by their plain name C linkage (image variables declared only)', got,
+      ['extern "C" { extern float s_fSpinTime; }', 'extern "C" { int s_iLastState = 4; }',
+       'extern "C" { extern const char s_szName[] = "x"; }', 'extern "C" { extern H* g_pInst; }',
+       'extern "C" { L s_kList; }', 'H* g_pInst;\nnamespace fnv_1', 'void f() { s_fSpinTime = 1; }'])
+
+# ---- VA2
+got = run(s1.r_va_enum_args, 'enum Index : int { A };\nvoid f(va_list args) {\n    Index d = va_arg(args, Index);\n'
+          '    const char* n = va_arg(args, const char*);\n    int i = va_arg(args, int);\n}\n')
+check('VA2 reads an enum through ... as the int it was passed as', got,
+      ['Index d = (Index)va_arg(args, int);', 'va_arg(args, const char*)', 'int i = va_arg(args, int);'])
+
+# ---- VLIT1
+_v = tempfile.mkdtemp()
+os.makedirs(os.path.join(_v, 'src')); os.makedirs(os.path.join(_v, 'build'))
+_json.dump({'units': [{'source': 'src/n.cpp', 'symbols': {'$SG2541': '0x0101212c'}, 'functions': []},
+                      {'source': 'src/k.cpp', 'symbols': {}, 'functions': [{'address': '0x00404b40', 'symbol': '?f@@YAXXZ'}]}]},
+           open(os.path.join(_v, 'build', 'units.json'), 'w'))
+_saved, s1._VLIT = s1._VLIT, None
+_st = Counter()
+got = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), '#include "x.h"\nvoid* F::Init()\n{\n    m_p = "@K@";\n    return this;\n}\n', _st)
+got2 = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), 'void f() { m_p = "@K@"; g("text"); }\n', _st)
+s1._VLIT = _saved
+check('VLIT1 stores the vftable address the unit binds the misread literal to; ambiguous sites are listed', got + got2 + ' %d' % _st['VLIT1-LIST'],
+      ['m_p = (char*)0x0101212c /* fnv-nx VLIT1: "@K@" */;', 'void f() { m_p = "@K@"; g("text"); }', ' 1'])
+
+# ---- SSE2 with the decomp's own name for __m128
+got = prepare.r_sse_local_protos('/x/src/a.cpp', 'typedef __m128 ClosestPointQuad;\nClosestPointQuad _mm_shuffle_ps(ClosestPointQuad, ClosestPointQuad, unsigned int);\n'
+                                 'extern "C" ::hkQuadReal __cdecl _mm_load_ps(const float*);\n'
+                                 'ClosestPointQuad f(ClosestPointQuad a) {\n    return _mm_add_ps(a, a);\n}\n', Counter())
+check('SSE2 drops intrinsic prototypes with a typedef return type, keeps statements', got,
+      ['typedef __m128 ClosestPointQuad;\n', '    return _mm_add_ps(a, a);'], ['_mm_shuffle_ps', '_mm_load_ps'])
+
+# ---- SSE2 parenthesized prototype names, SSE4 unqualified using-declarations
+got = prepare.r_sse_local_protos('/x/src/a.cpp', 'extern "C" ::hkQuadReal (_mm_load_ps)(const float*);\nint k;\n', Counter())
+got2 = prepare.r_sse_qualified('/x/src/a.cpp', 'namespace N {\nusing ::_mm_add_ps;\nusing _mm_mul_ps;\nusing ::hkpVehicleInstance;\n}\n', Counter())
+check('SSE2 drops (_mm_x)(...) prototypes, SSE4 unqualified using-declarations of intrinsics', got + got2,
+      ['int k;', 'using ::hkpVehicleInstance;'], ['_mm_load_ps', '_mm_add_ps', '_mm_mul_ps'])
 
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')

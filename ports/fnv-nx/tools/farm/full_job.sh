@@ -19,7 +19,10 @@
 # Outputs: <report.md> (tools/farm/full_report.py: provenance, stage table, link counts, undefined names by class,
 # boot reached and first fault, skipped initializers by fault, frontier top 20, package check; numbers, unit names
 # and short diagnostics only), and link/<commit12> (link_job.sh's files + guest/fnvnx.elf,
-# boot/{summary.txt,frontier.txt,frontier.tsv,emu.log}). Exit 0 once the report is written.
+# boot/{summary.txt,frontier.txt,frontier.tsv,emu.log} of the raw boot, boot/stub/{summary.txt,emu_stub.log,
+# frontier_stub.txt,frontier_stub.tsv} of the stub-fault boot, boot/synth.exe + boot/synth_summary.txt: the data image
+# both booted on, its sha256 in meta.json), v1/ (V1-link's audits of this link, step 4d; their table also in
+# <report.md>). Exit 0 once the report is written.
 #
 # Needs: link_job.sh's, plus g++; for fnvnx-a64: libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex; python
 # unicorn; for TESTS=all also qemu-user, cmake, meson, ninja-build. FARM_APT=1 installs them (root).
@@ -60,7 +63,10 @@ ARGS=(FNVNX_TC="$(art prefix)" DEVKITPRO="$(art devkitpro)")
 [ -n "$(art cross_bin)" ] && ARGS+=(CROSS_BIN="$(art cross_bin)")
 if [ -n "$(art vorbis)" ]; then ARGS+=(VORBIS="$(art vorbis)"); else ARGS+=(VORBIS=none); fi
 
-# 2. The link (link_job.sh in this job's build directory; it publishes link/<commit12> already).
+# 2. The link (link_job.sh in this job's build directory; it publishes link/<commit12> already, without v1/: the
+# previous commit's audits are removed first).
+V1=$F/build/v1
+rm -rf "$V1" "$F/v1-run" "$F/v1-report.md"
 # the same cross tools as the steps after it, so the link is not redone for another compiler path
 CROSS_BIN="$(art cross_bin)" LINK_BUILD=$F/build FARM_SRC=$SRC FARM_EXT=$EXT \
 	bash "$HERE/link_job.sh" "$COMMIT" "$F/link-$C12.md" > "$F/link_job.log" 2>&1 \
@@ -85,15 +91,68 @@ if [ -n "$TREE" ] && [ -n "$OBJS" ]; then
 else
 	rc=2
 fi
+
+# 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the
+# known faults (docs/TOOLCHAIN.md section 18), so the frontier beyond them is published next to the raw boot's
+# (boot/stub/). tests/s5/farm_boot.sh FARM_BOOTS=stub on the pipeline's build directory; under a minute.
+STUB=$F/build/boot/stub
+rm -rf "$STUB"
+if [ $rc -ne 2 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" ]; then
+	log "stub-fault boot (tests/s5/farm_boot.sh)"
+	IMG=$F/build/boot/synth/synth.exe; [ -f "$IMG" ] || IMG=""
+	FARM_LINK_DIR=$F/build/link FARM_GUEST_DIR=$F/build/guest FARM_BOOTS=stub \
+		FARM_UNITS="${TREE:+$TREE/build/units.json}" PY="${PY:-python3}" EMU_TIMEOUT="${EMU_TIMEOUT:-3000}" \
+		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB" $IMG > "$F/stub_boot-$C12.log" 2>&1 \
+		|| log "farm_boot.sh (stub boot) exited $?"
+	ls -1t "$F"/stub_boot-*.log | tail -n +6 | xargs -r rm -f
+fi
+# 4c. S5's work list of hand-stored image vptrs (tests/s5/hand_vptrs.py): each vptr store of an image vftable
+# address in the prepared tree, how this link binds it and the rule that fixes it, boot-hit addresses first;
+# published as boot/hand_vptrs*.tsv. About a minute.
+rm -f "$F/build/boot/hand_vptrs.tsv" "$F/build/boot/hand_vptrs_sites.tsv"
+if [ -n "$TREE" ] && [ -f "$F/build/link/out/aliases.ld" ] && [ -d "$F/build/boot" ]; then
+	HV=(--tree "$TREE" --link "$F/build/link" --out "$F/build/boot/hand_vptrs")
+	[ -f "$F/build/guest/fnvnx.elf" ] && HV+=(--elf "$F/build/guest/fnvnx.elf")
+	for l in "$F/build/boot/emu.log" "$STUB/emu_stub.log"; do [ -f "$l" ] && HV+=(--boot "$l"); done
+	"${PY:-python3}" -I "$P/tests/s5/hand_vptrs.py" "${HV[@]}" > "$F/build/boot/hand_vptrs.txt" 2>&1 \
+		|| log "hand_vptrs.py exited $?"
+fi
+# 4d. V1-link's audits of this link (tools/farm/v1_job.sh, D14/D17): on the link directory as built, with this job's
+# tree, objects, pristine MSVC objects and pinned checkouts, nothing fetched; the detail tables go to build/v1/ and are
+# published as link/<commit12>/v1/, the audit table into the report. About 6 minutes; V1_BUDGET seconds (default
+# 1200) bound it, the slow audits (bridge runs, C5) are skipped once it is used up. FARM_V1=0 skips the step.
+NOTE_V1="not run (no link outputs)"
+if [ "${FARM_V1:-1}" = 0 ]; then NOTE_V1="not run (FARM_V1=0)"
+elif [ $rc -ne 2 ] && [ -f "$F/build/link/fixed/zz_bridges.o" ] && [ -f "$F/build/link/out/aliases.ld" ]; then
+	log "V1-link audits (tools/farm/v1_job.sh)"
+	XB=$(art cross_bin)   # the pinned ILP32 cross tools (the harness compiles its cases with them)
+	V1_LINK_DIR=$F/build/link V1_TREE=$TREE V1_OBJ_DIR=$(dirname "$OBJS") V1_X86OBJ=${PR:-} V1_EXT=$EXT V1_NO_FETCH=1 \
+		V1_PUBLISH=0 V1_OUT_DIR=$V1 V1_RUN=$F/v1-run V1_BUDGET=${V1_BUDGET:-1200} \
+		PATH="${XB:+$XB:}$PATH" \
+		bash "$HERE/v1_job.sh" "$COMMIT" "$F/v1-report.md" > "$F/v1-$C12.log" 2>&1 || log "v1_job.sh exited $?"
+	ls -1t "$F"/v1-*.log | tail -n +6 | xargs -r rm -f
+	# its summary line, or why it did not run (v1_job.sh's report without audits)
+	NOTE_V1=$(cat "$F/v1-run/summary.txt" 2>/dev/null || sed -n 's/^- //p' "$F/v1-report.md" 2>/dev/null | tail -1)
+fi
 t1=$(date +%s)
 
 # 5. Report, then the link outputs again with the guest ELF and the boot reports.
 python3 -I "$P/tools/farm/full_report.py" "$F/build" "$REPORT" --commit "$COMMIT" --make-rc "$rc" \
 	--seconds $((t1 - t0)) --inputs "tree: $NOTE_TREE" "objects: $NOTE_OBJS" \
-	"pristine MSVC objects: ${PR:+branch msvc/pristine/$D12}${PR:-none (zero data image)}" \
+	"pristine MSVC objects: $(if [ -n "$PR" ]; then echo "branch msvc/pristine/$D12"; else echo "none (zero data image)"; fi)" \
 	--hide FARM_HOME="$FARM_HOME" SRC="$SRC" EXT="$EXT" TOOLCHAIN="$TCB" ARTIFACTS="$ARTIFACTS" \
 	${FNVNX_TC:+FNVNX_TC="$FNVNX_TC"} ${DEVKITPRO:+DEVKITPRO="$DEVKITPRO"} ${PRISTINE_OBJS:+PRISTINE_OBJS="$PRISTINE_OBJS"} \
 	HOME="$HOME" > /dev/null
+{
+	if [ -f "$V1/report.md" ]; then
+		printf -- '- V1-link audits: %s (details: link/%s/v1/report.md)\n' "$NOTE_V1" "$C12"
+		[ -f "$V1/watched.txt" ] && sed 's/^- /  - /' "$V1/watched.txt"
+		echo
+		sed -n '/^| audit /,/^$/p' "$V1/report.md"
+	else
+		echo "- V1-link audits: $NOTE_V1"
+	fi
+} >> "$REPORT"
 if [ $rc -ne 2 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
 echo "- link outputs: $NOTE_PUB" >> "$REPORT"
 echo "$REPORT"

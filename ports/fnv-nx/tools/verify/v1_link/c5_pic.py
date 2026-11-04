@@ -2,7 +2,7 @@
 """c5_pic.py - V1-link claim C5: with -fPIC no reference bypasses the by-address rebinding of variables that objects
 define natively at image addresses (no section-anchor offset or local-symbol relocation reaches such a variable).
 
-    c5_pic.py <fixed dir> <objcopy dir> <units.json> <out tsv>
+    c5_pic.py <fixed dir> <objcopy dir | objects.tsv> <units.json> <out tsv>
 
 Independent of tools/link (own ELF reader elf32.py, own disassembly with capstone). Per rewritten object:
 
@@ -248,9 +248,15 @@ def missed(units_json, fixed_dir, src_map, out_rows):
 def main():
     fixed, objcopy, units_json, out = sys.argv[1:5]
     src_map = {}
-    for fn in os.listdir(objcopy):
-        if fn.endswith('.src'):
-            src_map[fn[:-4]] = open(os.path.join(objcopy, fn)).read().strip()
+    if os.path.isdir(objcopy):              # a link's out/objcopy: <obj>.src names the original object
+        for fn in os.listdir(objcopy):
+            if fn.endswith('.src'):
+                src_map[fn[:-4]] = open(os.path.join(objcopy, fn)).read().strip()
+    elif os.path.isfile(objcopy):           # or the compile output's objects.tsv (farm links publish no objcopy/)
+        for line in open(objcopy):
+            c = line.rstrip('\n').split('\t')
+            if len(c) >= 3 and c[2] == 'ok':
+                src_map[os.path.basename(c[1])] = c[1]
     rows, nobj, nrel, nanch, nreb_obj = [], 0, 0, 0, 0
     for fn in sorted(os.listdir(fixed)):
         if not fn.endswith('.o'):

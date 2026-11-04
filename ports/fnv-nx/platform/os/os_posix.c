@@ -272,6 +272,7 @@ int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask)
 int os_thread_suspend(os_thread *t) { (void)t; return -1; }
 int os_thread_resume(os_thread *t) { (void)t; return -1; }
 void os_thread_exit(void) { pthread_exit(NULL); }
+void os_cpu_boost(int fast_load) { (void)fast_load; }   /* no CPU boost on a PC */
 void os_yield(void) { sched_yield(); }
 
 void os_sleep_ns(uint64_t ns)

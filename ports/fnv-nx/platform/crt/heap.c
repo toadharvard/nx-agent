@@ -141,7 +141,7 @@ void fnvnx_c_exit(void) { fnvnx_doexit(0, 1, 1); }        /* _c_exit: neither */
 
 /* clock(): MSVC counts wall time since process start, CLOCKS_PER_SEC = 1000 */
 static uint64_t g_start_ns;
-__attribute__((constructor)) static void clock_init(void) { g_start_ns = os_monotonic_ns(); }
+__attribute__((constructor(FNVNX_INIT_CLOCK))) static void clock_init(void) { g_start_ns = os_monotonic_ns(); }
 unsigned int fnvnx_clock(void) { return (unsigned int)((os_monotonic_ns() - g_start_ns) / 1000000ull); }
 
 /* rand/srand with MSVC's generator: per-thread state (seed 1), x = x * 214013 + 2531011, RAND_MAX 0x7FFF.

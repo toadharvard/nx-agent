@@ -9,6 +9,9 @@ whose kept vtable group and kept typeinfo come from objects that disagree on the
 Kept copy (GNU ld): the first strong definition in link order, else the first weak one (COMDAT copies of one group
 are dropped after the first). The audit compares the size of the kept _ZTI<C> with the _ZTI<C> of the object whose
 _ZTV<C> was kept (that object's own view of C's bases): a different size is a different base list.
+A kept vtable whose object defines no _ZTI<C> (another object's is kept) is counted and listed ('no-typeinfo'); for
+a synthesized vtable object (zz_vt_*, apply's vtables) it is a defect (J-0102: synthesis emits the vtable's own
+typeinfo; adversarial_typeinfo t5), for an original object a note.
 """
 import collections
 import os
@@ -61,7 +64,7 @@ def audit(fixed, elf, out):
     import elf32
     hits = scan(fixed, lambda n: n.startswith(('_ZTV', '_ZTI')))
     img = elf32.Image(elf)
-    rows = []
+    rows, notes = [], []
     cnt = collections.Counter()
     for name, defs in sorted(hits.items()):
         if not name.startswith('_ZTV'):
@@ -78,6 +81,11 @@ def audit(fixed, elf, out):
         isz = img.by_name.get(ti, (0, 0))[1]
         if not own:
             cnt['vtable object defines no typeinfo'] += 1
+            synth = kv[1].startswith('zz_vt_')
+            if synth:
+                cnt['vtable object defines no typeinfo: synthesized (zz_vt_*)'] += 1
+            notes.append((cls, kv[1], '-', kt[1], '%d' % kt[3], '%d' % isz, ','.join(sorted({str(d[3]) for d in tdefs})),
+                          'no-typeinfo (synthesized)' if synth else 'no-typeinfo'))
             continue
         if own[0][3] != kt[3] or (isz and isz != own[0][3]):
             cnt['typeinfo from an object that disagrees on the bases'] += 1
@@ -103,13 +111,13 @@ def audit(fixed, elf, out):
                 cnt['typeinfo from another object, same bases'] += 1
     with open(out, 'w') as f:
         f.write('#class\tvtable object\tits typeinfo size\tkept typeinfo object\tkept size\timage size\tall sizes / bases\twhy\n')
-        for r in rows:
+        for r in rows + notes:
             f.write('\t'.join(r) + '\n')
     for k, v in sorted(cnt.items()):
         print('%-55s %d' % (k, v))
     for r in rows[:15]:
         print('  ', r)
-    return 1 if rows else 0
+    return 1 if rows or cnt['vtable object defines no typeinfo: synthesized (zz_vt_*)'] else 0
 
 
 def main():

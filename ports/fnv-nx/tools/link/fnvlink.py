@@ -80,6 +80,28 @@ NEWDEL = {'_Znwm': ('??2@YAPAXI@Z',), '_Znwj': ('??2@YAPAXI@Z',),
 # other operator new/delete forms (placement, class-like extra parameters) are decomp declarations: resolved like any
 # other name, not as runtime; the nothrow / aligned forms stay runtime
 NEWDEL_ANY = re.compile(r'^_Z(?:n[wa]|d[la])')
+# the decomp's unit-local namespaces (`namespace fnv_00650ea0 { struct NiFixedString ... }`): a copy of a class
+UNIT_NS = re.compile(r'^fnv_[0-9a-f]{8}$')
+UNIT_NS_ANY = re.compile(r'\bfnv_[0-9a-f]{8}::')
+# a class's own operator new / new[] / delete / delete[] (sized or not): the global form it stands for, read from
+# the demangled name (the mangled operator codes nw/na/dl/da cannot be told from a name ending in those letters)
+MEMBER_NEWDEL_GLOBAL = {('operator new', 1): '_Znwj', ('operator new[]', 1): '_Znaj',
+                        ('operator delete', 1): '_ZdlPv', ('operator delete', 2): '_ZdlPvj',
+                        ('operator delete[]', 1): '_ZdaPv', ('operator delete[]', 2): '_ZdaPvj'}
+SIZE_PARAM = ('unsigned int', 'unsigned long')
+
+
+def member_newdel_global(isig):
+    """The global allocation function a class's own `operator new/delete` (no placement form) stands for, or None."""
+    if isig.kind != 'func' or not isig.qual or len(isig.qual) < 2 or isig.params is None:
+        return None
+    g = MEMBER_NEWDEL_GLOBAL.get((isig.qual[-1], len(isig.params)))
+    if g is None:
+        return None
+    p = [' '.join(x.split()) for x in isig.params]
+    if isig.qual[-1].startswith('operator new'):
+        return g if p[0] in SIZE_PARAM else None
+    return g if p[0] == 'void*' and (len(p) == 1 or p[1] in SIZE_PARAM) else None
 NEWDEL_STD = re.compile(r'^_Z(?:n[wa][jm]|d[la]Pv[jm]?)(?:RKSt9nothrow_t|St11align_val_t)*$')
 # S1b (patches/units_renames.tsv): MSVC names of the definitions and references a patch changes; applied by resolve to
 # the units whose prepared source carries the patch, when prepare has not rewritten units.json yet
@@ -462,6 +484,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if newdel_votes.get(mn):
                 return newdel_votes[mn].most_common(1)[0][0], mn
         return None, None
+    native_text = None   # demangled text -> a native definition's mangled name (built when first needed)
     bridges, abi_rows, abi_classes = {}, [], collections.Counter()
     traps = {}       # trap stub -> (slot symbol defined nowhere, (vtable, slot) where first seen)
     pair_classes = collections.Counter()
@@ -560,7 +583,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                        for _, (si, typ, _) in o_.rel(i_).items() if typ in (21, 20)}   # P32
         return called_cache[u_.source]
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
-    ecx_use = msvc_code_use(units_json, ms, msvc)
+    ecx_use = msvc_code_use(units_json, ms, msvc, renames)
     for u in have:
         idx = KeyIndex()
         for n, a in u.refs.items():
@@ -594,6 +617,35 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident)
                 if tier == 'gref/ident':
                     stats['ident_' + cls] += 1
+                if cls == 'unresolved' and isig.qual and UNIT_NS.match(isig.qual[0]) and it[un]:
+                    # a unit-local namespaced copy of a class (`fnv_00650ea0::NiFixedString`, S13 J-0114): bound like
+                    # the global class - by its names in units.json without the namespace, else to the native
+                    # definition of the global name
+                    st_ = UNIT_NS_ANY.sub('', it[un])
+                    ts_ = sigs.parse_itanium(un, st_)
+                    r_ = classify_ref('', ts_, idx, gdef, gref, set(), msvc, ident) if ts_.qual else None
+                    if r_ and r_[0] not in ('unresolved', 'runtime'):
+                        cls, tier, addr, target, note = r_[0], 'ns/' + (r_[1] or ''), r_[2], r_[3], r_[4]
+                        stats['unit_ns_bound'] += 1
+                    else:
+                        if native_text is None:
+                            native_text = {}
+                            for n_ in sorted(anydef):
+                                if it[n_]:
+                                    native_text.setdefault(it[n_], n_)
+                        g_ = native_text.get(st_)
+                        if g_:
+                            cls, tier, target = 'ns-alias', 'ns/native', g_
+                            stats['unit_ns_aliased'] += 1
+                gname_ = member_newdel_global(isig) if cls == 'unresolved' else None
+                if gname_:
+                    # a class's own operator new/delete that nothing defines or binds (a decomp class declares it,
+                    # GCC's deleting destructor and new expressions call it): the game's allocator, like the
+                    # global forms (J-0108: 509 undefined names)
+                    na2, nm2 = newdel_addr(u, gname_)
+                    if na2 is not None:
+                        cls, tier, addr, target, note = 'addr', 'game/newdel-member', na2, None, nm2
+                        stats['newdel_member_refs'] += 1
             if cls != 'unresolved' and isig.qual and un.find(GAME_PREFIX) >= 0:
                 stats['game1_resolved'] += 1
             if vsb is not None and (un in vslots or (cls == 'unresolved' and isig.variant in ('D1', 'D2'))):
@@ -928,12 +980,51 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         if any(s.shndx and s.bind != 'local' and s.name.startswith(('_ZTV', '_ZTI')) for s in objsyms[u.source]):
             rtti.add(vtables.Obj(u.obj), u.host is not None)
     vmap, vstats = vtables.vftable_map(vnames, rtti, canon_it)
-    write_vtable_requests(out, real, objsyms, vnames, it, itanium)
-    # hand-written vptr stores of image vftable addresses (`obj.vtbl = &DAT_010176f8;`): the address stands for the
-    # native vtable of the class constructed there - the one of the same name when some unit names that vftable,
-    # else the class whose member function stores it; its data symbol is bound to that address point (D7, point 2)
     hand = hand_vptr_stores(os.path.dirname(os.path.dirname(os.path.abspath(units_json))), real, vnames, msvc,
                             canon_msvc)
+    # the class constructed (or destroyed) at a storing function's address, by every name units.json gives it
+    # (`??0X`, `??1X`, `??_GX`, `??_EX` in any unit): a decomp shell storing an image vtable is often the
+    # constructor another unit names properly (S5 J-0102: 750 hand-stored vptrs had no native vtable on f13)
+    names_at, units_of = collections.defaultdict(set), collections.defaultdict(set)
+    for u_ in units.values():
+        for a_, n_ in u_.defs:
+            names_at[a_].add(n_)
+            units_of[n_].add(u_.source)
+        for n_, a_ in u_.refs.items():
+            names_at[a_].add(n_)
+            units_of[n_].add(u_.source)
+    compiled_ = {u_.source for u_ in units.values() if u_.obj and not u_.host}
+    ctor_of = {}
+
+    def ctor_classes(fa):
+        if fa not in ctor_of:
+            got = {}
+            for n_ in sorted(names_at.get(fa, ())):
+                if not n_.startswith(('??0', '??1', '??_G', '??_E')):
+                    continue
+                sg = msvc(n_)
+                if sg.kind == 'func' and sg.qual and len(sg.qual) >= 2 and sg.qual[-1] in ('{ctor}', '{dtor}', '{sdd}',
+                                                                                           '{vdd}'):
+                    text_ = '::'.join(sg.qual[:-1])
+                    got.setdefault(canon_msvc(text_), text_)
+            ctor_of[fa] = got
+        return ctor_of[fa]
+    hand_req = {}   # class -> (spelling, host units) for classes constructed at a storing address, no vtable yet
+    for a, sites in hand.items():
+        if a in vmap:
+            continue
+        for unit, _, fa, _ in sites:
+            for cc, text_ in ctor_classes(fa).items() if fa is not None else ():
+                hosts = sorted(set().union(*(units_of[n_] for n_ in names_at[fa])) & compiled_)
+                e = hand_req.setdefault(cc, (text_, []))
+                for h_ in [unit] + hosts:
+                    if h_ not in e[1]:
+                        e[1].append(h_)
+    write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req)
+    # hand-written vptr stores of image vftable addresses (`obj.vtbl = &DAT_010176f8;`): the address stands for the
+    # native vtable of the class constructed there - the one of the same name when some unit names that vftable,
+    # else the class whose member function stores it, else the class constructed or destroyed at the storing
+    # function's address; its data symbol is bound to that address point (D7, point 2)
     by_cls = collections.defaultdict(list)
     for n in rtti.where:
         if n.startswith('_ZTV'):
@@ -942,21 +1033,51 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     for a, sites in sorted(hand.items()):
         how = 'named vftable' if a in vmap else None
         if a not in vmap:
-            for unit, cls in sites:
+            for unit, cls, _, off in sites:
                 z = sorted(by_cls.get(cls or '', []))
-                pts = vtables.address_points(rtti.ents(z[0]) or []) if z else []
+                pts = [p for p, ott in (vtables.address_points(rtti.ents(z[0]) or []) if z else []) if ott == -off]
                 if pts:
                     obj = rtti.where[z[0]][0]
-                    vmap[a] = (z[0], pts[0][0], obj.path, 'primary, hand-written vptr store in %s (%s)' % (unit, cls))
+                    vmap[a] = (z[0], pts[0], obj.path, '%s, hand-written vptr store in %s (%s)'
+                               % ('primary' if not off else 'secondary at +%d' % off, unit, cls))
                     how = 'class of the storing function'
                     vstats['mapped-hand-written'] += 1
                     break
+        want_ = set()
+        if a not in vmap:
+            # the class constructed / destroyed at the storing function's address; of several, the native vtable
+            # with the most slots (a call through the rewritten vptr must find its slot), then the name
+            best = None
+            for unit, _, fa, off in sites:
+                for cc in (ctor_classes(fa) if fa is not None else {}):
+                    want_.add(cc)
+                    for z in sorted(by_cls.get(cc, [])):
+                        ents = rtti.ents(z) or []
+                        pts = [p for p, ott in vtables.address_points(ents) if ott == -off]
+                        if pts:
+                            k_ = (-len(ents), z)
+                            if best is None or k_ < best[0]:
+                                best = (k_, z, pts[0], rtti.where[z][0].path, unit, fa, cc)
+            if best is not None:
+                _, z, pt, path, unit, fa, cc = best
+                vmap[a] = (z, pt, path, 'primary, hand-written vptr store in %s at %08x, which constructs %s'
+                           % (unit, fa, cc))
+                how = 'class constructed at the storing address'
+                vstats['mapped-hand-written-by-address'] += 1
         if a in vmap:
             rebind[a] = vmap[a][:2]
+        elif want_:
+            how = 'requested for synthesis: ' + ' '.join(sorted(want_))
         hand_rows.append(('%08x' % a, how or 'no native vtable', vmap[a][0] if a in vmap else '',
-                          ' '.join(sorted({u for u, _ in sites})), ' '.join(sorted({c or '?' for _, c in sites}))))
+                          ' '.join(sorted({u for u, _, _, _ in sites})),
+                          ' '.join(sorted({c or '?' for _, c, _, _ in sites})),
+                          ' '.join(sorted({'%08x' % fa for _, _, fa, _ in sites if fa is not None})),
+                          no_candidate_why(sites, ctor_classes) if a not in vmap and not want_ else ''))
+    stats['hand_vptr_by_address'] = sum(1 for r in hand_rows if r[1] == 'class constructed at the storing address')
+    stats['hand_vptr_requested'] = sum(1 for r in hand_rows if r[1].startswith('requested for synthesis'))
     with open(os.path.join(out, 'hand_vptrs.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('#address\tmapped by\tnative vtable\tunits\tclasses of the storing functions\n')
+        f.write('#address\tmapped by\tnative vtable\tunits\tclasses of the storing functions\t'
+                'storing function addresses\twhy no candidate\n')
         for r in hand_rows:
             f.write('\t'.join(r) + '\n')
     stats['hand_vptr_addrs'], stats['hand_vptr_rebound'] = len(hand), len(rebind)
@@ -981,8 +1102,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     with open(os.path.join(out, 'aliases.ld'), 'w') as f:
         f.write('/* fnv-nx link-by-address aliases (generated by tools/link/fnvlink.py; local output) */\n')
         for a in sorted(x for x in used_addr if kind_of_addr(x) == 'data'):
-            if a in rebind:   # an image vftable stored into vptrs by hand: the native address point
-                f.write('%s = %s + %d;\n' % (ADDR_SYM % a, rebind[a][0], rebind[a][1]))
+            # an image vftable (a V entry, whether or not a vptr store was recognised: S5 J-0109 S2:mapped): every
+            # data reference to it is the native address point
+            rb_ = rebind.get(a) or (vmap[a][:2] if a in vmap else None)
+            if rb_:
+                f.write('%s = %s + %d;\n' % (ADDR_SYM % a, rb_[0], rb_[1]))
+                stats['vtable_data_refs_rebound'] += 1
+                stats['vtable_data_refs_rebound_unrecognised'] += a not in rebind
             else:
                 f.write('%s = 0x%08x;\n' % (ADDR_SYM % a, a))
         for line in sorted(set(alias_lines)):
@@ -1069,6 +1195,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'ecx-not-passed / this-not-passed pairs judged on the definition\'s MSVC code (--msvc-code/-objs): ecx '
               'unused, bridged: %d; used, flagged: %d; no code: %d' % (stats['ecx_code_unused'],
                                                                       stats['ecx_code_used'], stats['ecx_code_unknown']),
+              'a class\'s own operator new/delete bound to the game allocator: %d; unit-local namespaced copies '
+              '(fnv_XXXXXXXX::) bound like the global class: %d by address, %d to its native definition'
+              % (stats['newdel_member_refs'], stats['unit_ns_bound'], stats['unit_ns_aliased']),
               'C-named declarations compared from their unit\'s source and headers: %d references, %d definitions; '
               'undeclared, compared through an integer stand-in (the other side\'s result): %d / %d; not compared: '
               '%d / %d' % (stats['cname_ref_compared'], stats['cname_def_compared'], stats['cname_ref_standin'],
@@ -1080,8 +1209,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'operator new/delete references bound to the game\'s allocator: %d' % stats['newdel_refs'],
               'S1b units_renames.tsv applied: %d definitions renamed, %d reference names added'
               % (stats['units_renames_def'], stats['units_renames_ref']),
-              'image vftable addresses stored into vptrs by hand: %d, bound to a native address point: %d '
-              '(hand_vptrs.tsv)' % (stats['hand_vptr_addrs'], stats['hand_vptr_rebound']),
+              'data references to an image vftable bound to its native address point: %d (%d whose vptr store was '
+              'not recognised)' % (stats['vtable_data_refs_rebound'], stats['vtable_data_refs_rebound_unrecognised']),
+              'image vftable addresses stored into vptrs by hand: %d, bound to a native address point: %d (by the '
+              'class constructed at the storing address: %d); classes requested for synthesis: %d (hand_vptrs.tsv)'
+              % (stats['hand_vptr_addrs'], stats['hand_vptr_rebound'], stats['hand_vptr_by_address'],
+                 stats['hand_vptr_requested']),
               'classes sharing a primary image vftable (MSVC folded; vftable_aliases.tsv): %d rows'
               % stats['vftable_aliases'],
               'thread-local references bound to the native TLS block: %d (%d image .tls addresses, %d native '
@@ -1100,11 +1233,35 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 VPTR_LHS = re.compile(r'(?i)(?:^|[^\w])(?:\w*_)?(?:vptr|vtbl|vtable|vftable|vfptr|vft|vftbl|vtab|vt)\w*\s*$')
 DEREF_LHS = re.compile(r'^\s*\*\s*(?:\(\s*[\w\s:]+\*\s*\*\s*\)|reinterpret_cast\s*<[^<>]*\*\s*\*\s*>)\s*\(?\s*\w+\s*\)?\s*$'
                        r'|^\s*\(\s*\(\s*[\w\s:]+\*\s*\*\s*\)\s*\w+\s*\)\s*\[\s*0\s*\]\s*$')
+# `*(int *)this = (int)&DAT_x;` / `((unsigned *)p)[0] = ...`: a word store at offset 0 through a cast to a pointer to a
+# 4-byte integer or pointer (S5 J-0102: bgsragdoll.cpp's 0x010472d0); only for addresses near the named vftables
+DEREF1_LHS = re.compile(r'^\s*\*\s*\(\s*(?:const\s+|volatile\s+|unsigned\s+|signed\s+)*(?:int|long|uint|uint32_t|UInt32|DWORD|'
+                        r'undefined4|uintptr_t|size_t|unsigned|void\s*\*|char\s*\*)\s*\*\s*\)\s*\(?\s*\w+\s*\)?\s*$'
+                        r'|^\s*\(\s*\(\s*(?:const\s+|unsigned\s+)*(?:int|long|uint|uint32_t|UInt32|DWORD|undefined4|uintptr_t|'
+                        r'unsigned)\s*\*\s*\)\s*\w+\s*\)\s*\[\s*0\s*\]\s*$')
+FNV_ANNOT = re.compile(r'@fnv\s+(0x[0-9a-fA-F]+)')
+# a word store at a nonzero offset of an object: a secondary vptr (S5 J-0109: creature.cpp's
+# `*(void **)((char *)this + 0xa8) = &DAT_01086f9c`) -> the offset
+DEREFN_LHS = re.compile(r'^\s*\*\s*(?:\(\s*[\w\s:]+\*\s*(?:\*\s*)?\)|reinterpret_cast\s*<[^<>]*\*\s*>)\s*\(\s*\(\s*(?:const\s+)?'
+                        r'(?:char|unsigned\s+char|uint8_t|BYTE|undefined)\s*\*\s*\)\s*\w+\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\)\s*$')
+DEREFK_LHS = re.compile(r'^\s*\(\s*\(\s*(?:const\s+|unsigned\s+)*(?:int|long|uint|uint32_t|UInt32|DWORD|undefined4|uintptr_t|'
+                        r'unsigned|void\s*\*)\s*\*\s*\)\s*\w+\s*\)\s*\[\s*(0x[0-9a-fA-F]+|\d+)\s*\]\s*$')
+DAT_NAME = re.compile(r'^(?:DAT|PTR|PTR_DAT|vftable|vtbl|vtable)_([0-9a-fA-F]{8})$')
 FUNC_HDR = re.compile(r'^[^\n;{}#]*?\b((?:\w+\s*::\s*)*\w+)\s*::\s*~?\w+\s*\([^;{}]*\)\s*(?:const\s*)?\{', re.M)
 # a free function defined at column 0: a function head without a class (S13: a vptr store in the free function
 # InitLargePrimitiveArray after FUN_00404920's constructor was credited to FUN_00404920)
 FREE_HDR = re.compile(r'^(?![ \t]|//)(?![^\n;{}#(]*::)[^\n;{}#(]*?\b(?!(?:if|for|while|switch|catch|return)\b)\w+\s*'
                       r'\([^;{}]*\)\s*(?:const\s*)?\{', re.M)
+
+
+def no_candidate_why(sites, ctor_classes):
+    """Why a hand-stored image vtable has no candidate class (S5 J-0108 item 3): what a candidate would need."""
+    if all(fa is None for _, _, fa, _ in sites):
+        return 'no storing address: the function stores several vtables at one offset, or has no @fnv annotation'
+    names = [n for _, _, fa, _ in sites if fa is not None for n in ctor_classes(fa)]
+    if not names:
+        return 'no constructor/destructor name for the storing address in any unit (a shell only)'
+    return 'candidates without a vtable'
 
 
 def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
@@ -1114,6 +1271,7 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
     the left side looks like a vptr (vtbl/vtable/vptr/vft... member, *(T **)p, ((T **)p)[0]), or the address is a
     vftable some unit names (??_7) whatever the left side is called."""
     known = {a for (_, a) in vnames}
+    near = (min(known) - 0x10000, max(known) + 0x10000) if known else (1, 0)
     sites = []
     out = collections.defaultdict(list)
     for u in real:
@@ -1131,6 +1289,7 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
         text = open(path, encoding='utf-8', errors='surrogateescape').read()
         heads = sorted([(m.start(), m.group(1)) for m in FUNC_HDR.finditer(text)] +
                        [(m.start(), None) for m in FREE_HDR.finditer(text)], key=lambda h: h[0])
+        fnvs = [(m.start(), int(m.group(1), 16)) for m in FNV_ANNOT.finditer(text)]
         pos = 0
         for stmt in text.split(';'):
             start, pos = pos, pos + len(stmt) + 1
@@ -1147,31 +1306,44 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
                 rhs = r2
             rhs = re.sub(r'[\s&()]', '', rhs)
             a = names.get(rhs)
+            if a is None and DAT_NAME.match(rhs):   # a name units.json does not bind for this unit (S5 J-0109)
+                a = int(DAT_NAME.match(rhs).group(1), 16)
+                if not (kind_of_addr(a) == 'data' and near[0] <= a <= near[1]):
+                    a = None
             if a is None:
                 continue
             lhs = m.group('lhs').strip()
-            if not (a in known or VPTR_LHS.search(lhs) or DEREF_LHS.match(lhs)):
+            off = 0
+            mo = DEREFN_LHS.match(lhs) or DEREFK_LHS.match(lhs)
+            if mo:
+                off = int(mo.group(1), 0) * (4 if mo.re is DEREFK_LHS else 1)
+            if not (a in known or VPTR_LHS.search(lhs) or DEREF_LHS.match(lhs) or
+                    ((DEREF1_LHS.match(lhs) or (mo and off)) and near[0] <= a <= near[1])):
                 continue
-            cls, fn = None, -1
+            cls, fn, hpos_ = None, -1, 0
             for k, (hpos, hcls) in enumerate(heads):
                 if hpos > spos:
                     break
-                cls, fn = hcls, k
-            sites.append((a, u.source, canon_msvc(cls) if cls else None, (u.source, fn)))
+                cls, fn, hpos_ = hcls, k, hpos
+            # the storing function's original address: its `// @fnv 0x...` annotation, the last one before the
+            # store (prepare keeps them above each definition)
+            fa = max(((p_, x) for p_, x in fnvs if p_ < spos), default=(None, None))[1]
+            sites.append((a, u.source, canon_msvc(cls) if cls else None, (u.source, fn), fa, off))
     per_fn = collections.defaultdict(set)
-    for a, _, _, fn in sites:
-        per_fn[fn].add(a)
-    for a, unit, cls, fn in sites:
-        # the storing function's class only counts for a function that stores one vftable (a destructor resetting
-        # its own and then its base's vftable stores two)
-        out[a].append((unit, cls if len(per_fn[fn]) == 1 else None))
+    for a, _, _, fn, _, off in sites:
+        per_fn[(fn, off)].add(a)
+    for a, unit, cls, fn, fa, off in sites:
+        # the storing function's class and address only count for a function that stores one vftable at that
+        # offset (a destructor resetting its own and then its base's vftable stores two)
+        one = len(per_fn[(fn, off)]) == 1
+        out[a].append((unit, cls if one else None, fa if one else None, off))
     return out
 
 
 NOT_SYNTH = ('std::', '__gnu_cxx::', '__cxxabiv1::')   # the C++ runtime defines its own
 
 
-def write_vtable_requests(out, real, objsyms, vnames, it, itanium):
+def write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req=None):
     """What the synthesis step (vtables.run, `probe`) is asked for, from the compiled objects only (so a rerun after
     the second resolve asks for the same): vtable_requests.tsv - classes with an image vftable whose vtable no
     compiled object emits, and every _ZTV/_ZTI a compiled object references but none defines, each with the units
@@ -1204,6 +1376,10 @@ def write_vtable_requests(out, real, objsyms, vnames, it, itanium):
             v = vnames.get((n, a))
             if v and v[0] not in have_ztv:
                 want(v[0], v[2], 'vftable', u.source)
+    for cls, (text, hosts) in sorted((hand_req or {}).items()):   # constructed where an image vtable is stored
+        if cls not in have_ztv:
+            for h in hosts:
+                want(cls, text, 'hand-vptr', h)
     vtables.write_requests(os.path.join(out, 'vtable_requests.tsv'), {c: tuple(e) for c, e in reqs.items()})
     with open(os.path.join(out, 'rtti_defined.txt'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('\n'.join(sorted(rdefs)) + '\n')
@@ -1408,19 +1584,44 @@ def override_pending(path):
     return out
 
 
-def msvc_code_use(units_json, ms, msvc):
+def msvc_code_use(units_json, ms, msvc, renames=()):
     """f(original address) -> how the pristine MSVC code there uses the incoming ecx / edx (vslots.Code.entry_use),
     from FNVNX_MSVC_CODE or FNVNX_MSVC_OBJS (`--msvc-code` / `--msvc-objs`: S11's u<index>.obj); None without them.
-    A callee takes the registers its declaration puts there (abi.x86_locations); a call through a function-pointer
-    variable takes any."""
+    A callee takes the registers its own pristine code uses, else those its declaration puts there
+    (abi.x86_locations); a call through a function-pointer variable takes any. S1b's renamed references
+    (units_renames rows) are found under their old, pristine names; a renamed definition uses the registers of its
+    patched declaration."""
     d = os.environ.get('FNVNX_MSVC_CODE') or os.environ.get('FNVNX_MSVC_OBJS')
     if not d or not os.path.isdir(d):
         return None
     try:
         import types
-        code = msvc_vslots.Code(types.SimpleNamespace(units=json.load(open(units_json))['units']), d)
+        uu = json.load(open(units_json))['units']
+        code = msvc_vslots.Code(types.SimpleNamespace(units=uu), d)
     except ImportError as e:
         log('--msvc-code: %s (capstone): register reads not checked' % e)
+        return None
+    by_src = {u['source']: i for i, u in enumerate(uu)}
+    code.aliases = [(int(r[2], 16), r[3], by_src.get(r[0])) for r in renames if len(r) >= 5]
+    code.renamed = {int(r[2], 16) for r in renames if len(r) >= 5 and r[1] == 'def'}
+
+    def arg_bytes(n, slot=False):
+        """(stack argument bytes, bytes the callee pops) of a callee by its declaration, or None."""
+        if slot:
+            if not n.startswith('__imp_'):
+                return None
+            n = n[6:]
+        if n.startswith('?'):
+            s = msvc(n)
+            if not s or s.kind != 'func':
+                return None
+            nb = abi.x86_stack_bytes(s)
+            return None if nb is None else (nb, nb if (s.cc or 'cdecl') in abi.CALLEE_POP else 0)
+        m = re.match(r'^(@|_)[^@]+@(\d+)$', n)
+        if m:
+            nb = int(m.group(2))
+            nb = max(0, nb - 8) if m.group(1) == '@' else nb
+            return nb, nb
         return None
 
     def takes(n, slot=False):
@@ -1447,7 +1648,7 @@ def msvc_code_use(units_json, ms, msvc):
 
     def use(a):
         if a not in cache:
-            cache[a] = code.entry_use(a, takes, need)
+            cache[a] = code.entry_use(a, takes, need, arg_bytes)
         return cache[a]
     return use
 
@@ -1516,7 +1717,9 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
     if not hit:
         for g, name in ((gdef, 'gdef'), (gref, 'gref')):
             t, h = g.lookup(isig)
-            if h and t in ('exact', 'l1', 'cname', 'name') and len(h) == 1:
+            # a looser parameter match (l2: typedef / cv spellings, arity) only when one address carries it anywhere
+            # (J-0108: FindKeyInterval, DecodeBlock, FinishScriptRunLock ...); the ABI check then compares them
+            if h and t in ('exact', 'l1', 'cname', 'name', 'l2', 'arity') and len(h) == 1:
                 tier, hit, scope = t, h, name
                 break
     if not hit:
@@ -1638,8 +1841,11 @@ TYPE_WORDS = {'int', 'char', 'short', 'long', 'float', 'double', 'void', 'bool',
               'volatile', 'struct', 'class', 'union', 'enum', '__int64', 'wchar_t'}
 CODE_NOISE = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|^[ \t]*#(?:[^\n]*\\\n)*[^\n]*',
                         re.S | re.M)
+# specifiers before a declaration's result type; __declspec(...) / __attribute__((...)) end in a parenthesis, so no
+# word boundary after them (V1 R4-2: `__declspec(noreturn) void f();` was not read)
 DECL_SPEC = re.compile(r'\b(?:extern|static|inline|__inline|__forceinline|virtual|friend|FNVNX_KEEP|WINAPI|CALLBACK|'
-                       r'__declspec\s*\([^()]*\)|__(?:cdecl|stdcall|fastcall|thiscall))\b')
+                       r'__(?:cdecl|stdcall|fastcall|thiscall))\b|\b__declspec\s*\([^()]*\)'
+                       r'|\b__attribute__\s*\(\([^()]*(?:\([^()]*\)[^()]*)*\)\)')
 NOT_A_TYPE = {'return', 'else', 'case', 'goto', 'throw', 'new', 'delete', 'sizeof', 'do', 'typedef', 'if', 'while',
               'for', 'switch', 'using', 'operator', 'co_return', 'default'}
 
@@ -1782,6 +1988,14 @@ def c_name_standin(csig, other):
     return sig
 
 
+# a function-pointer type named by a typedef or alias (S1b J-0112: `reinterpret_cast<AlphaFlag>(f)`,
+# `((FUN_00653180_type)f)`)
+FPTR_TYPEDEF = re.compile(r'\btypedef\s+(?P<ret>[A-Za-z_][\w:<>,\s\*&]*?)\s*\(\s*(?:__(?P<cc>thiscall|fastcall|stdcall|cdecl)\s*)?'
+                          r'\*\s*(?P<tname>[A-Za-z_]\w*)\s*\)\s*\((?P<params>[^()]*)\)\s*;'
+                          r'|\busing\s+(?P<uname>[A-Za-z_]\w*)\s*=\s*(?P<uret>[A-Za-z_][\w:<>,\s\*&]*?)\s*\(\s*'
+                          r'(?:__(?P<ucc>thiscall|fastcall|stdcall|cdecl)\s*)?\*\s*\)\s*\((?P<uparams>[^()]*)\)\s*;')
+
+
 def unit_casts(text):
     """{name: (set of (cc, ret, params) casts, direct calls of the name outside casts)} for one source text."""
     hits, spans = collections.defaultdict(set), []
@@ -1790,6 +2004,23 @@ def unit_casts(text):
             hits[m.group('name')].add((m.group('cc') or 'cdecl', ' '.join(m.group('ret').split()),
                                        ' '.join(m.group('params').split())))
             spans.append((m.start(), m.end()))
+    tdefs = {}
+    for m in FPTR_TYPEDEF.finditer(text):
+        if m.group('tname'):
+            tdefs[m.group('tname')] = (m.group('cc') or 'cdecl', ' '.join(m.group('ret').split()),
+                                       ' '.join(m.group('params').split()))
+        else:
+            tdefs[m.group('uname')] = (m.group('ucc') or 'cdecl', ' '.join(m.group('uret').split()),
+                                       ' '.join(m.group('uparams').split()))
+    if tdefs:
+        alt = '|'.join(re.escape(t) for t in sorted(tdefs, key=len, reverse=True))
+        for rx in (re.compile(r'\(\s*(?P<t>' + alt + r')\s*\)\s*&?\s*(?P<name>[A-Za-z_]\w*)(?=\s*[),;])'),
+                   re.compile(r'reinterpret_cast\s*<\s*(?P<t>' + alt + r')\s*>\s*\(\s*&?\s*(?P<name>[A-Za-z_]\w*)\s*\)')):
+            for m in rx.finditer(text):
+                if m.group('name') in tdefs:
+                    continue
+                hits[m.group('name')].add(tdefs[m.group('t')])
+                spans.append((m.start(), m.end()))
     out = {}
     for name, casts in hits.items():
         direct = 0

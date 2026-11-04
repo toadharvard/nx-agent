@@ -112,6 +112,9 @@ python3 -I "$HERE/mktraps.py" "$OUT/undefined.txt" "$OUT/traps.S" --readelf aarc
 	--cxxfilt aarch64-none-elf-c++filt --objects @"$OUT/game_objects.list" "$OUT"/obj/*.o
 aarch64-none-elf-gcc $ARCH -c "$OUT/traps.S" -o "$OUT/traps.o"
 link "$OUT/traps.o" > "$OUT/link2.log" 2>&1 || { tail -20 "$OUT/link2.log"; exit 1; }
+# static constructors: the platform's, the runtime libraries' and the boot's before any game unit's (a game static
+# may use them; platform/os/os.h FNVNX_INIT_*, toolchain/guest/guest.ld)
+python3 -I "$HERE/init_order.py" "$OUT/fnvnx.map" "$OUT/game_objects.list" || exit 1
 # Position-dependent code: objects that address an absolute image symbol PC-relatively (S2 rebinds data a unit
 # defines to aliases.ld's absolute __fnv_<addr>, the adrp stays) are right only at the link address. PIN=auto
 # (default) pins the guest when there are any (elf2nso --pin: the host maps it at its link base), yes/no force it.
