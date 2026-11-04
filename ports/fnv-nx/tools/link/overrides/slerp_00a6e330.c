@@ -15,7 +15,8 @@
  * infinities included, is the decomp's to the bit (tests/s15/simd/slerp_test.c, random and edge inputs, against a
  * scalar reference in the same order; V1's tests/v1/test_slerp_decomp.py against the decomp's own bodies).
  * A NaN result is a NaN, but its sign and payload may differ from the decomp's compiled code: when two NaN
- * operands meet, AArch64 returns the first one, and GCC commutes operands freely in either build (V1, SL1). The tests accept any NaN for any NaN; PERF.md 11.6 says why no new difference arises.
+ * operands meet, AArch64 returns the first one, and GCC commutes operands freely in either build (V1, SL1).
+ * The tests accept any NaN for any NaN; PERF.md 11.6 says why no new difference arises.
  *
  * The four constants are read from the image, as the decomp does: 0x0109c9d0 / 0x0109c9d8 (doubles of the weight)
  * and 0x011f3fec / 0x011f3ff0 (floats of the normalisation, written by a static initializer at run time).

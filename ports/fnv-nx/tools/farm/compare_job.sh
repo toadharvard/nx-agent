@@ -10,7 +10,10 @@
 # The loop (tools/compare/README.md):
 #   synthetic set   synth.py -> reference twice (LP_NUM_THREADS 4 and 1: the noise floor) -> candidate -> capcompare
 #   permutations    perm.py on gamedata/shaders' shaderpackage019 (COMPARE_SDP) -> the same, plus the reference of
-#                   the --perturb 1e-5 captures (conditioning floor) -> permreport (pass / over / ill / vacuous)
+#                   the --perturb 1e-5 captures (conditioning floor) -> permreport (pass / over / ill / vacuous);
+#                   seeds of programs that drew nothing come from permcover.py, cached in $FARM_HOME/compare/salts-*
+#   game captures   when private gamedata/captures exists: real-game NXD9 recorded with d9cap (empty GLSL, so the
+#                   candidate gets --shaders from every package of gamedata/shaders) -> the same verdicts
 # Report: <report.md> with numbers, the metric lines and the program classes. Sidecar <report>.json
 # (fnvnx-compare/1): the metric of each set, the permreport counts, the versions. Both go to branch reports/<farm>
 # of the private artifacts repository. Captures and images stay in $FARM_HOME/compare (game-derived: never
@@ -108,6 +111,32 @@ fetch_shaders() {   # gamedata/shaders (agent-only), checked against its SHA256S
 	fi
 }
 
+fetch_captures() {   # real-game NXD9 captures recorded with d9cap (private gamedata/captures, agent-only) -> GAMECAPS
+	GAMECAPS=""
+	local gd=$W/gamedata-captures
+	[ -n "${ARTIFACTS:-}" ] || return 0
+	if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/gamedata/captures:refs/remotes/origin/gamedata/captures" 2>/dev/null; then
+		local c; c=$(git -C "$ARTIFACTS" rev-parse refs/remotes/origin/gamedata/captures)
+		if [ "$(cat "$gd/.rev" 2>/dev/null)" != "$c" ]; then
+			rm -rf "$gd"; mkdir -p "$gd"
+			git -C "$ARTIFACTS" archive "$c" | tar -x -C "$gd" && echo "$c" >"$gd/.rev"
+		fi
+	fi
+	if ls "$gd"/*.nxd9 >/dev/null 2>&1 || ls "$gd"/*/*.nxd9 >/dev/null 2>&1; then
+		mkdir -p "$W/caps/game"; rm -f "$W/caps/game"/*.nxd9
+		find "$gd" -name '*.nxd9' -exec ln -sf {} "$W/caps/game/" \;
+		GAMECAPS=$W/caps/game
+		NOTES+=("game captures: $(ls "$GAMECAPS" | wc -l) from gamedata/captures at $(cut -c1-12 "$gd/.rev")")
+	fi
+}
+glsl_dir() {   # every package of gamedata/shaders translated (sdp2dksh --glsl): nx_render --shaders for d9cap captures
+	local gd=$W/gamedata-shaders k
+	k=$(key_of "$gd/SHA256SUMS" "$SH/sdp2dksh")
+	GLSL=$W/glsl-$k
+	[ -f "$GLSL/.done" ] || { mkdir -p "$GLSL" && "$SH/sdp2dksh" -o "$GLSL" --glsl --no-dksh "$gd"/shaderpackage*.sdp >"$W/glsl.log" 2>&1 && touch "$GLSL/.done"; } ||
+		NOTES+=("sdp2dksh --glsl over gamedata/shaders failed")
+}
+
 # ---- one set: reference x2 (+ perturbed), candidate, verdicts --------------------------------------------------------
 PFX=$W/pfx
 run_set() {   # run_set <name> <capture dir> [perturbed capture dir]
@@ -119,7 +148,7 @@ run_set() {   # run_set <name> <capture dir> [perturbed capture dir]
 	deadline_ok || fail "$n: FARM_DEADLINE before the second reference"
 	python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$o/ref2" --lp-threads 1 \
 		--timeout "$to" "$caps"/*.nxd9 >"$o/ref2.log" 2>&1 || NOTES+=("$n: reference run 2 exit $?")
-	python3 -I "$CMP/replay.py" cand --bin "$NXR/nx_render" --out "$o/cand" --timeout "$to" "$caps"/*.nxd9 \
+	python3 -I "$CMP/replay.py" cand --bin "$NXR/nx_render" --out "$o/cand" --timeout "$to" ${CAND_SHADERS:+--shaders "$CAND_SHADERS"} "$caps"/*.nxd9 \
 		>"$o/cand.log" 2>&1 || NOTES+=("$n: candidate exit $?")
 	python3 -I "$CMP/capcompare.py" --ref "$o/ref1" --ref2 "$o/ref2" --cand "$o/cand" --out "$o/gate" >"$o/gate.log" 2>&1
 	if [ -n "$pert" ]; then
@@ -141,7 +170,7 @@ def load(p):
     try: return json.load(open(p))
     except (OSError, ValueError): return None
 sets = {}
-for n in ('synthetic', 'perm'):
+for n in ('synthetic', 'perm', 'game'):
     g = load(os.path.join(run, n, 'gate', 'capgate.json'))
     if g: sets[n] = {'status': g['status'], 'metric': g['summary']['metric'], 'captures': g['summary']['captures']}
 pr = load(os.path.join(run, 'perm', 'perm', 'permreport.json'))
@@ -184,12 +213,39 @@ python3 -I "$CMP/synth.py" build --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" -
 run_set synthetic "$W/caps/synthetic"
 if [ -n "$SDP" ] && deadline_ok 900; then
 	log "permutations"
-	python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/perm" >"$W/perm.log" 2>&1 &&
-	python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/permp" \
-		--perturb 1e-5 >>"$W/perm.log" 2>&1 || fail "perm.py"
+	# coverage-guided seeds (permcover.py), cached per package and perm.py: computed once from a first reference run
+	SALTS=$W/salts-$(key_of "$SDP" "$CMP/perm.py" "$CMP/permcover.py").json
+	build_perm() {   # build_perm [--salts file]
+		python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/perm" "$@" >"$W/perm.log" 2>&1 &&
+		python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/permp" \
+			--perturb 1e-5 "$@" >>"$W/perm.log" 2>&1 || fail "perm.py"
+	}
+	if [ ! -f "$SALTS" ]; then
+		build_perm
+		mkdir -p "$W/run/cover"
+		python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$W/run/cover/ref" \
+			"$W/caps/perm"/*.nxd9 >"$W/run/cover/ref.log" 2>&1
+		python3 -I "$CMP/permcover.py" --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --exe "$BIN/nxd9play.exe" \
+			--prefix "$PFX" --manifest "$W/caps/perm/manifest.json" --ref "$W/run/cover/ref" --out "$SALTS.tmp" \
+			>"$W/run/cover/cover.log" 2>&1 && mv "$SALTS.tmp" "$SALTS" || NOTES+=("permcover failed: seeds not guided")
+	fi
+	if [ -f "$SALTS" ]; then
+		build_perm --salts "$SALTS"
+		NOTES+=("coverage seeds: $(python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1])); print(len(s)-1, "programs reseeded,", len(s["_unreached"]), "unreached")' "$SALTS")")
+	else
+		build_perm
+	fi
 	run_set perm "$W/caps/perm" "$W/caps/permp"
 elif [ -n "$SDP" ]; then
 	NOTES+=("permutations skipped: FARM_DEADLINE")
+fi
+fetch_captures
+if [ -n "$GAMECAPS" ] && [ -n "$SDP" ] && deadline_ok 900; then
+	log "game captures"
+	glsl_dir
+	CAND_SHADERS=$GLSL run_set game "$GAMECAPS"
+elif [ -n "$GAMECAPS" ]; then
+	NOTES+=("game captures skipped: no shader packages or FARM_DEADLINE")
 fi
 write_report
 log "done: $(grep -c '^- \*\*' "$REPORT") sets ($(( $(date +%s) - T0 )) s)"
