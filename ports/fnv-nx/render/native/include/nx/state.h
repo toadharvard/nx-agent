@@ -206,6 +206,27 @@ typedef struct NxFormatInfo {
     uint8_t pad;
 } NxFormatInfo;
 
+/* The D3D9 pixel epilogue's uniform block (shaders/d3d9_epilogue.glsl, fragment UBO slot 2, std140, 48 bytes). */
+typedef struct NxEpilogue {
+    float fogColor[4];
+    float fogEnd, fogScale, fogDensity, alphaRef;
+    uint32_t alphaFunc, fogMode, alphaTest, pad;
+} NxEpilogue;
+static inline void nx_epilogue_fill(NxEpilogue* e, const NxDynamicState* d, uint32_t shaderBits) {
+    for (int i = 0; i < 4; i++) e->fogColor[i] = d->fogColor[i];
+    e->fogEnd = d->fogEnd; e->fogScale = d->fogScale; e->fogDensity = d->fogDensity; e->alphaRef = d->alphaRef;
+    e->alphaFunc = (shaderBits >> NXSB_ALPHAFUNC) & 7;
+    e->fogMode = (shaderBits >> NXSB_FOG) & 7;
+    e->alphaTest = (shaderBits >> NXSB_ALPHATEST) & 1;
+    e->pad = 0;
+}
+
+/* Native formats with an sRGB view on both backends (deko3d *_sRGB formats, GL sRGB texture views). */
+static inline int nx_format_has_srgb(uint32_t f) {
+    return f == NxFmt_RGBA8 || f == NxFmt_BGRA8 || f == NxFmt_BGRX8 || f == NxFmt_RGBX8 || f == NxFmt_BC1 ||
+           f == NxFmt_BC2 || f == NxFmt_BC3;
+}
+
 #ifdef __cplusplus
 }
 #define NX_STATE_ASSERT_ static_assert
@@ -215,6 +236,7 @@ typedef struct NxFormatInfo {
 NX_STATE_ASSERT_(sizeof(NxRenderState) == 32, "NxRenderState");
 NX_STATE_ASSERT_(sizeof(NxSamplerState) == 16, "NxSamplerState");
 NX_STATE_ASSERT_(sizeof(NxFormatInfo) == 8, "NxFormatInfo");
+NX_STATE_ASSERT_(sizeof(NxEpilogue) == 48, "NxEpilogue");
 NX_STATE_ASSERT_(sizeof(NxDynamicState) == 216, "NxDynamicState");
 
 #endif
