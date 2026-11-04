@@ -327,6 +327,7 @@ int os_thread_resume(os_thread *t)
 }
 void os_thread_exit(void) { pthread_exit(NULL); }
 void os_cpu_boost(int fast_load) { (void)fast_load; }   /* no CPU boost on a PC */
+void os_show_message(const char *caption, const char *text) { (void)caption; (void)text; }   /* logged by the caller */
 void os_yield(void) { sched_yield(); }
 
 void os_sleep_ns(uint64_t ns)

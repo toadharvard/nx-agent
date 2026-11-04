@@ -235,7 +235,7 @@ user32	GetWindowLongA	logic	platform/win32/window.cpp	in-process window/message 
 user32	GetWindowTextA	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 user32	LoadCursorA	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 user32	LoadIconA	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
-user32	MessageBoxA	open	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	logged and answered with the default button; nothing is shown on the device
+user32	MessageBoxA	device	platform/win32/window.cpp	MB_OK/MB_OKCANCEL: the error applet (os_show_message -> FNVNX_PLAT_MESSAGE); questions take their default button	tests: backends host_message_test.c (qemu)
 user32	PeekMessageA	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 user32	RegisterClassA	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 user32	SendInput	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	

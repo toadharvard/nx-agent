@@ -108,6 +108,7 @@ typedef struct FnvnxHostApi {
 #define FNVNX_EXT_PLATFORM 11u
 #define FNVNX_PLAT_CPU_BOOST 1u   /* (mode: 0 normal, 1 fast load) -> 0 set, 1 off by the platform config (boost_loading) */
 #define FNVNX_PLAT_THREAD_ACTIVITY 2u   /* (host thread id != 0, paused 0/1) -> 0, or the Horizon result of svcSetThreadActivity */
+#define FNVNX_PLAT_MESSAGE 3u           /* (caption, text: guest strings) -> 0 after the player closed the dialog, or the applet's result */
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
  * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
