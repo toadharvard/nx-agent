@@ -866,3 +866,25 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - fixes: S2 (fnvnx_game_ mapping, retarget section-relative refs of rebound variables in apply, sized
   delete -> 0x00aa1460), S1 (apply units_renames.tsv, drop `static` from image-address variables, `-Werror=return-type`
   census + rule, inline shadows); then S13 recheck, bridge campaign, lockstep on static initializers.
+
+### J-0044 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0032,J-0042
+
+* **did** - Game guest built from S2c's J-0034 object set (3,464 objects incl. synthesized vtables, address map
+  61,620) with `toolchain/game/build.sh` (D3D9=null, vorbis, platform/ + S4b CRT + S10 xc/onexit/xctab with 17,191
+  initializers in address order): relocatable guest, 19 MiB with bss; 8,224 undefined symbols, all trap stubs
+  (4,725 image `.text` addresses without native code, 2,595 C++ declared-only, 615 `FUN_`, 131 C, 47 `DAT_`, 39
+  vtable/typeinfo, 29 MSVC std::, 21 D3DX9, 9 Bink, 9 CRT, 4 Win32). Fixes (a63e315): game objects defined global
+  `operator new` as a stub returning 0 and `new[]` via the untranslated MemoryManager::Allocate, so every `new` in the
+  guest - platform and libstdc++ included - returned NULL; `GAME_NEW=runtime` (default) weakens them and links malloc
+  versions plus weak stand-ins for FormHeap_Allocate 0x00401000 / MemoryManager::Allocate 0x00aa3e40 (static-init
+  trap hits 5,355 -> 3,687); image `.tls` template copied into `__fnvnx_tls_image` per thread; unbound IAT words are
+  trap stubs; emulator robustness, `tests/s5/emu_summary.py`.
+* **found** - **Milestone: under emulation every one of the 17,191 static initializers runs and WinMain (0x0086a850)
+  is entered**, on the all-zero image and on S14's synthesized image (149/181 IAT slots bound, 3,809 code pointers
+  found, 0 mismatched). First faults: zero image - WinMain+0x118 -> GetSaveDirectory -> empty IAT slot; S14 image -
+  `SHGetFolderPathA` slot 0x00fdf274 unnamed, then WinMain+0x1cc -> FUN_008526c0 -> untranslated 0x00af3020 returns 0
+  -> write at [0+4]. The game memory manager is never initialised (heap pointer 0x011f6080 stays zero; 2,885 setting
+  constructors fault on FUN_00aa1070). Nothing on hardware yet.
+* **metrics** - guest_mib=19 game_undefined=8224 xc_called=17191 static_init_traps=3687 boot_reached=WinMain hw_tests=0
+* **next** - the boot frontier is untranslated code: compile the units owning the addresses WinMain and the setting
+  constructors hit (S1), name the remaining IAT slots, initialise the memory manager as the CRT start did.
