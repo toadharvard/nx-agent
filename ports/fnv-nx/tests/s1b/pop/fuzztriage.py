@@ -31,7 +31,7 @@ import popscan  # noqa: E402
 from abiclass import BRIDGE, ECX, classes  # noqa: E402
 
 PORT = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
-S1B = ('uninit-arm', 'native-garbage-arg', 'callee-saved')
+S1B = ('uninit-arm', 'native-garbage-arg', 'callee-saved', 'native-stale-result')
 
 
 def main():
