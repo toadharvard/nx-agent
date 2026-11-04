@@ -126,6 +126,9 @@ static struct {
     Fbo fbo[MAX_FBOS]; uint32_t nFbo;
     GLuint readFbo;
     uint32_t swapImage;    /* image id used for "colour 0" */
+    uint32_t passColor;    /* colour image of the current pass (resolved, never 0) */
+    uint32_t frameDraws;   /* draws replayed in the current submit */
+    int skipDraws;         /* the draw hook asked to stop drawing */
     char err[2048];
     /* replay state */
     uint32_t boundState, passW, passH;
@@ -554,6 +557,7 @@ static float asf(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 
 static void begin_pass(const uint32_t* a) {
     uint32_t color = a[0] ? a[0] : g.swapImage, depth = a[1];
+    g.passColor = color;
     p_glBindFramebuffer(GL_FRAMEBUFFER, fbo_for(color, depth));
     g.passW = a[6]; g.passH = a[7];
     /* clears: full target, all channels, no sRGB encoding of the clear colour */
@@ -603,6 +607,35 @@ static void clear_rect(const uint32_t* a) {
     p_glScissor(g.scissor[0], g.scissor[1], g.scissor[2], g.scissor[3]);
     if (g.boundState) apply_state(&g.st[g.boundState].rs, 1);   /* masks, scissor enable, sRGB back */
     else { p_glDisable(GL_SCISSOR_TEST); g.haveApplied = 0; }
+}
+
+/* ---- draw hook (tools: per-draw images) ---------------------------------------------------------------------- */
+static int (*g_drawHook)(void*, uint32_t, uint32_t);
+static void* g_drawUser;
+void nxgl_set_draw_hook(int (*hook)(void* user, uint32_t draw, uint32_t colorImage), void* user) {
+    g_drawHook = hook; g_drawUser = user; g.skipDraws = 0;
+}
+int nxgl_read_rgba8(uint32_t image, uint32_t* w, uint32_t* h, uint8_t* dst, size_t cap) {
+    uint32_t id = image ? image : g.swapImage;
+    if (!id || id > g.nImg) return -1;
+    if (g.img[id].isView) id = g.img[id].base;
+    Image* im = &g.img[id];
+    if (im->isDepth) return -1;
+    *w = im->w; *h = im->h;
+    if ((size_t)im->w * im->h * 4 > cap) return -1;
+    GLint prev = 0;
+    p_glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev);
+    if (!g.readFbo) p_glGenFramebuffers(1, &g.readFbo);
+    p_glBindFramebuffer(GL_READ_FRAMEBUFFER, g.readFbo);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, im->tex, 0);
+    p_glReadBuffer(GL_COLOR_ATTACHMENT0);
+    p_glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    p_glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    p_glReadPixels(0, 0, (GLsizei)im->w, (GLsizei)im->h, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+    p_glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev);
+    return 0;
 }
 
 /* ---- replay ------------------------------------------------------------------------------------------------- */
@@ -718,7 +751,7 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
             break;
         case NxOp_Draw:
         case NxOp_DrawIndexed: {
-            if (!g.boundState) break;
+            if (!g.boundState || g.skipDraws) break;
             if (g.vtxDirty) { bind_vertex_buffer(); g.vtxDirty = 0; }
             if (op == NxOp_Draw && argc >= 5) {
                 p_glDrawArraysInstancedBaseInstance(glprim(a[0]), (GLint)a[3], (GLsizei)a[1], (GLsizei)a[2], a[4]);
@@ -729,6 +762,8 @@ static void replay(const NxSubmit* sub, NxFrameStats* stats) {
                     (GLsizei)a[2], (GLint)a[4], a[5]);
             }
             stats->draws++;
+            if (g_drawHook && g_drawHook(g_drawUser, g.frameDraws, g.passColor)) g.skipDraws = 1;
+            g.frameDraws++;
             break;
         }
         case NxOp_Viewport:
@@ -769,6 +804,7 @@ static uint64_t api_submit(uint64_t a) {
     NxFrameStats st;
     memset(&st, 0, sizeof st);
     st.frame = s->frame; st.cmd_words = s->words;
+    g.frameDraws = 0;
     replay(s, &st);
     p_glFinish();
     clock_gettime(CLOCK_MONOTONIC, &t1);

@@ -80,6 +80,18 @@ $(OUT)/replay_gl: $(NATIVE)/capture/replay.cpp $(NATIVE)/capture/replay_gl.cpp $
 	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -o $@ $(NATIVE)/capture/replay.cpp $(NATIVE)/capture/replay_gl.cpp \
 		$(OUT)/nxgl.o $(OUT)/gpu_dispatch.o -lEGL
 
+# ---- nx_render: captures (.nxcap, .nxd9) and scenes -> PNG on the GL backend (S16-compare entry point) ----------
+$(OUT)/nx_render: $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/d3d9_exec.h \
+		$(NATIVE)/capture/d3d9cap.h $(NATIVE)/capture/png.h $(NATIVE)/capture/replay.cpp $(OUT)/run_gl
+	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -I$(SHOUT) -o $@ $(NATIVE)/capture/nx_render.cpp \
+		$(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/replay.cpp $(OUT)/front.o $(OUT)/scenes.o $(OUT)/nxgl.o \
+		$(OUT)/gpu_dispatch.o $(OUT)/d3d9_state_s.o $(OUT)/nx_shaders.o -lEGL -lm
+
+nx_render: $(OUT)/nx_render
+	python3 -I test_nx_render.py --bin $(OUT)/nx_render --run-gl $(OUT)/run_gl --out $(OUT)/nx_render_test
+
+.PHONY: nx_render
+
 capture: $(OUT)/run_gl $(OUT)/replay_gl
 	@mkdir -p $(OUT)/cap
 	$(OUT)/run_gl $(OUT)/cap --capture $(OUT)/cap/n0.nxcap

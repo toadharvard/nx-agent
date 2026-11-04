@@ -6,6 +6,12 @@
 #include <string.h>
 #include <malloc.h>
 
+static void (*g_submitHook)(void*, uint32_t, uint32_t, int);
+static void* g_submitUser;
+void nx_replay_set_submit_hook(void (*hook)(void*, uint32_t, uint32_t, int), void* user) {
+    g_submitHook = hook; g_submitUser = user;
+}
+
 static uint64_t call(const NxGpuApi* api, uint32_t fn, uint64_t a) { return nxgpu_dispatch(api, fn, &a, 1); }
 static uint32_t pad4(uint32_t n) { return (n + 3) & ~3u; }
 
@@ -104,8 +110,10 @@ int nx_replay(const NxGpuApi* api, const uint8_t* d, size_t size, NxReplayStats*
             }
             NxSubmit s; memset(&s, 0, sizeof s);
             s.stream = (uint64_t)(uintptr_t)w; s.words = h[2]; s.frame = h[0]; s.present = h[1];
+            if (g_submitHook) g_submitHook(g_submitUser, h[0], h[1], 0);
             call(api, NXGPU_FN_SUBMIT, (uint64_t)(uintptr_t)&s);
             call(api, NXGPU_FN_WAIT_FRAME, h[0]);
+            if (g_submitHook) g_submitHook(g_submitUser, h[0], h[1], 1);
             free(w);
             st->frames++;
             break;
