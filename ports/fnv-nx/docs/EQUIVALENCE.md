@@ -371,7 +371,13 @@ against a rule: `std::abs` after DECL1 (libstdc++'s C headers export into `std`,
 full SDK defines that the target shim does not (`RequestLocation` in winioctl.h, `vc_attributes`, `_MEMORYSTATUS`,
 `IUnknown`, `PCH`), MSVC's `float` math overloads colliding with the decomp's own (`fabsf`, `cosf`, `sqrt(float)`),
 and `-fpermissive` conversions (`HANDLE` -> integer), and ENUM1's opaque declarations `enum X : int;` (C++11; MSVC
-2008 parses the enum base only on a definition: 7 units). The `vc8` unit needs VC 2005 SP1.
+2008 parses the enum base only on a definition: 7 units, and actor, packagedatadialogue, tessaveloadgame where an
+interaction is attributed), decomp structs named like full-SDK functions or enumerators (DragObject, Arc, CacheData)
+and the SDK's own gethostname, ANON2's C++11 `alignas(T)` (MSVC 2008 has none; nipoint3interpolator, extradatalist),
+the CRT's const-correct `strrchr` overload (animation, -fpermissive on GCC), compat's C++14 sized `operator delete[]`
+hiding MSVC's implicit unsized one from an explicit call (tesland_od_variant_decl_variant), and `<intrin.h>` included
+inside a namespace, whose extern "C" `_ReadWriteBarrier` MSVC 2008 keeps apart from the global one
+(hkadeltacompressedanimation). explained.tsv has a row for each. The `vc8` unit needs VC 2005 SP1.
 
 What only the target can show: that GCC's layout equals MSVC's (TAIL1's purpose) needs a GCC-side comparison; MSVC
 shows that the TAIL1 construct is inert.
