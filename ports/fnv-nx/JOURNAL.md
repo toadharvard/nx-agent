@@ -2319,3 +2319,46 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   | no candidate at all | 750 had no native vtable | 316 |
 
   INISettingCollection 0x0101772c now maps to its native vtable. All seven link suites pass.
+
+### J-0109 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0102,J-0106,J-0108
+
+* **did** - S5 `68fcbe0`: two additions to the farm's full build.
+  - full_job step 4b also runs the stub-fault boot (`farm_boot.sh FARM_BOOTS=stub`).
+  - `link/<c12>` now carries `boot/stub/` (stub frontier), `boot/synth.exe` with its sha256 in meta.json
+    (`boot_image_sha256`, `boot_stub_stop`), and a report section. The image is derived from the decomp's MSVC
+    objects and goes only to the private artifacts repo.
+  - farm_boot.sh is fixed for farm hosts. Steps 4b/4c ran only on a mock build directory; the first farm run is the
+    real test.
+* **did** - S5 `51d1a19`: `tests/s5/hand_vptrs.py` (full_job step 4c, `boot/hand_vptrs*.tsv`) builds a work list of
+  hand-stored image vptrs. It covers `this` and secondary stores, other-object stores, vptr-named members and
+  literals. For each it records how the link binds it, whether a native vtable exists, and how often the boots call
+  through it.
+* **measured** - On t/9a0243c7eabe with its link: 2,651 stores of 1,583 addresses; 594 bound, 38 unbound, 951 still
+  the image address.
+
+  | rule | addresses | owner and fix |
+  |---|---|---|
+  | S1:virtuals | 832 (1,360 stores) | S1 declares the image vftable's virtuals |
+  | S1:class | 67 | S1 gives the stored-into object a class |
+  | literal | 22 | S1, VLIT1 (now merged) |
+  | S2:mapped | 16 | S2 binds `__fnv_<addr>` of every V entry |
+  | S2:class | 12 | S2: candidates only |
+  | S2:named | 2 | S2 |
+
+  - All 7 addresses the boots call through are S1:virtuals, in call order: 0x0101772c (735 calls), 0x0104e6ac (60),
+    0x01018508 (43), 0x0106ba6c (4), 0x010472d0, 0x01082ed8, 0x010a2960.
+  - 1,007 of the 1,360 S1:virtuals stores are in `src/staging`.
+* **found** - VLIT1's 0x0101212c (GameSettingCollection) has no native vtable, and `FUN_00404b10_class` declares no
+  virtuals. The 3,454 setting skips are therefore expected to move to "vslot 1 of image vtable 0x0101212c", not
+  disappear.
+* **found** - Startup order (TOOLCHAIN.md §19):
+  1. `__fnvnx_guest_entry`.
+  2. `__libc_init_array`: `boot_banner` (priority 101: maps the image and constructs the memory manager), then the
+     game units' native constructors in link order, then the platform and libstdc++ constructors.
+  3. S10's image initializers.
+  4. `fnvnx_guest_main`, then WinMain.
+
+  So a native NiMainSDM static runs after the memory manager and before every game initializer and WinMain. Gap: game
+  statics run before the platform constructors (clock, profile strings, exceptions). Raise the platform constructors'
+  priority if a game static ever needs them.
+* **verified** - `tests/s5/test_tools.py`: OK (4 skipped).
