@@ -775,9 +775,11 @@ Size limits: 4096x4096 images, 128 MiB of per-frame vertex/index/constant copies
 ## 9. Frame-rate targets, dynamic resolution and presets
 
 Targets set by the owner: **45 fps stable** (22.2 ms) is the main target, **60 fps** (16.7 ms) the stretch, below
-30 fps a fail. Maxwell docked (768 MHz) is about 1.6x Xenos and FNV ran at 30 fps on the 360, so 60 fps at 720p
-docked needs the scene resolution to move with the load; handheld (384 MHz GPU, about half of docked) needs a
-lower range from the start. The UI is never scaled.
+30 fps a fail, and the target platform for the gates is **720p handheld**. Lowering the resolution must not hide
+render cost: both presets render the scene at **1280x720** (scale 1.0); the performance gates measure that frame
+with dynamic resolution **off**, and the work to reach 45 fps there is optimisation (profile-driven, P6n's ranked
+hotspots in `render/native/perf/report.json` / `docs/RENDER_PERF.md`). Dynamic resolution (below) is only a safety
+net for peak scenes in shipped builds, never the baseline. The UI is never scaled.
 
 ### 9.1 Frame graph with a scaled scene
 
@@ -814,7 +816,7 @@ lower range from the start. The UI is never scaled.
   band, so the scale does not oscillate). A single frame above 125 % drops two steps at once (camera cuts,
   explosions). The EMA restarts after each change (a new resolution is measured afresh).
 * **Steps:** 0.05 per axis on a fixed grid from the maximum (so sizes repeat), sizes rounded down to multiples of 8.
-* **Range:** per preset (below). Budget = 22.2 ms (45 fps mode) or 16.7 ms (60 fps mode); the frame cap stays at
+* **Range:** 0.75 - 1.0 in both presets (a safety net for peaks, starting at 1.0; the gates run with it off). Budget = 22.2 ms (45 fps mode) or 16.7 ms (60 fps mode); the frame cap stays at
   the target rate (`dkQueuePresentImage` with swap interval), so a fast GPU raises resolution, not frame rate.
 * Tested in `tests/s6n/test_front.cpp` (`test_dynres`: hysteresis, panic, clamps, dead band, 8-aligned sizes).
 
@@ -827,8 +829,8 @@ Output 1280x720 in both modes (the UI, the upscale target); docked 1080p output 
 | setting | docked | handheld |
 |---|---|---|
 | GPU clock | 768 MHz | 384 MHz (460 boost profile if allowed) |
-| scene scale range (per axis) | 0.60 - 1.00 (768x432 - 1280x720) | 0.50 - 0.75 (640x360 - 960x540) |
-| start scale | 0.85 | 0.65 |
+| scene resolution | 1280x720 (scale 1.0) | 1280x720 (scale 1.0) |
+| dynamic resolution (safety net only, off in the gates) | 0.75 - 1.00 (960x540 - 1280x720), starts at 1.0 | 0.75 - 1.00 (960x540 - 1280x720), starts at 1.0 |
 | budget | 22.2 ms (45); 16.7 ms in 60-fps mode | 22.2 ms (45) only |
 | shadow maps `iShadowMapResolution` | 1024 | 512 |
 | `iActorShadowCountExt` / `Int` | 2 / 4 | 1 / 2 |

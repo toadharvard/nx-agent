@@ -9,7 +9,7 @@ namespace nx {
 
 struct DynResConfig {
     float targetMs = 22.2f;        // GPU budget of a frame (45 fps; 16.7 for 60)
-    float minScale = 0.6f, maxScale = 1.0f, step = 0.05f;   // per axis
+    float minScale = 0.75f, maxScale = 1.0f, step = 0.05f;  // per axis: a safety net down to 960x540, off in the gates
     float downAt = 0.95f;          // smoothed time > downAt x target for downFrames frames: one step down
     float upAt = 0.80f;            // smoothed time < upAt x target for upFrames frames: one step up
     uint32_t downFrames = 3, upFrames = 30;
