@@ -246,6 +246,7 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | record shape | cause | class |
 |---|---|---|
 | native `exc:N` (brk/udf), oracle returns | `native-trap` | real-bug S1 (FALL1 trap / GCC unreachable on a path the exe takes) |
+| ... and the instruction at that pc of the unit image (`FNVNX_CAUSES_A64`, default the run's a64 directory) is the link's `fnvnx_vslot_trap` / `fnvnx_special_trap` (`brk #0xf5` / `#0xf6`) | `vslot-trap` | real-bug S2c (a virtual defined nowhere; the exe vftable has a function in that slot) |
 | native `stack-protector` | `stack-protector` | real-bug S1 |
 | native data fault below 64 KiB, oracle fine | `native-null-read` | real-bug S1 |
 | ... and the native function calls a game allocator (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0; from `fixed/<unit>.o` or `FNVNX_CAUSES_OBJ`) and the case holds a canned result below 0x10000 (an allocator null; since difffuzz-12 allocators return heap blocks) | `new-null` | retired (S13b audit): since difffuzz-12 the allocators return heap blocks, so a canned 0 is another call's valid result and the native null access is `native-null-read` (real bug S1) |

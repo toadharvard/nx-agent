@@ -718,6 +718,38 @@ def test_callflow():
         causes._VFT = causes._LINKSYM = None
 
 
+def test_link_traps():
+    """exc:N at the link's trap stubs (brk #0xf5 / #0xf6 in the unit image) -> vslot-trap (S2c); another trap, a
+    missing image or a pc outside it -> native-trap (S1-fuzzA-001)."""
+    import shutil, subprocess
+    if not (shutil.which('aarch64-linux-gnu-as') and shutil.which('aarch64-linux-gnu-ld')):
+        print('test_link_traps: skipped (no aarch64 binutils)')
+        return
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, 't.s'), 'w').write('.text\n.globl _start\n_start:\n udf #0\n brk #0xf5\n brk #0xf6\n'
+                                                ' brk #0x3e8\n')
+        subprocess.run(['aarch64-linux-gnu-as', '-o', os.path.join(d, 't.o'), os.path.join(d, 't.s')], check=True)
+        subprocess.run(['aarch64-linux-gnu-ld', '-Ttext=0x0a000000', '-o', os.path.join(d, 'src_t.cpp.o.elf'),
+                        os.path.join(d, 't.o')], check=True)
+        os.environ['FNVNX_CAUSES_A64'] = d
+        causes._IMAGE_WORDS.clear()
+        try:
+            def tr(pc, src='src/t.cpp'):
+                r = rec(dict(kind='error', x86=None, arm='exc:7@%08x' % pc))
+                r['source'] = src
+                return causes.refine(r, 'unclassified')
+            check(tr(0x0a000004) == 'vslot-trap', 'brk #0xf5 (fnvnx_vslot_trap): vslot-trap')
+            check(tr(0x0a000008) == 'vslot-trap', 'brk #0xf6 (fnvnx_special_trap): vslot-trap')
+            check(tr(0x0a00000c) == 'native-trap', 'GCC __builtin_trap (brk #0x3e8): native-trap')
+            check(tr(0x0a000000) == 'native-trap', 'udf: native-trap')
+            check(tr(0x0b000000) == 'native-trap', 'pc outside the image: native-trap')
+            check(tr(0x0a000004, 'src/missing.cpp') == 'native-trap', 'no image: native-trap')
+            check(causes.policy('vslot-trap')[:2] == ('real-bug', 'S2c'), 'vslot-trap: real bug, S2c')
+        finally:
+            os.environ.pop('FNVNX_CAUSES_A64', None)
+            causes._IMAGE_WORDS.clear()
+
+
 if __name__ == '__main__':
     test_rules()
     test_vcall_split()
@@ -728,5 +760,6 @@ if __name__ == '__main__':
     test_handoffs()
     test_cli_effects()
     test_unclassified_shapes()
+    test_link_traps()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)
