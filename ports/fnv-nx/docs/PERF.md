@@ -1261,3 +1261,6 @@ Reading it:
 Before it goes into compile.sh it needs the farms' census and fuzz on the whole tree, and the A57 cycles of the -O3
 code: its unrolled/vectorized loops can raise CPI and code size. The 1/26 sample (farm eq3) prices the classes over
 the whole link.
+-O3 in A57 cycles (mid of throughput and one-call CPI, per function, summed): niquaternion 1,808 -> 1,808 (0 %),
+nimatrix3 1,574 -> 1,314 (-16.5 %), hkpgsk 843 -> 760 (-9.9 %). .text grows 0 / +21 % / +8 % (3,328 / 5,780 -> 7,020
+/ 15,364 -> 16,612 bytes).
