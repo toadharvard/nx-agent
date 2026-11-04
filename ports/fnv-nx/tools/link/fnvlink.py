@@ -631,6 +631,22 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     if vsb is not None:
         vsb.write(out)
         bridges.update(vsb.stubs)   # slots through image vftable words (vslots.emit_image_stub)
+    # STATIC1 (S1): a variable a header defines gets one definition per including object, also in units whose recipe
+    # never names it: every global copy of a name some unit binds to an image address is rebound like that unit's
+    # (never a private copy: localizing the duplicates would split the variable)
+    bound_var = {}
+    for a, name, src in data_defs + tls_defs:
+        bound_var.setdefault(name, a)
+    have_def = {(name, src) for _, name, src in data_defs + tls_defs}
+    for u in have:
+        if u.host is not None:
+            continue
+        for sym in objsyms[u.source]:
+            if sym.name in bound_var and (sym.name, u.source) not in have_def and sym.shndx != 0 and \
+                    sym.type in ('object', 'tls') and sym.bind != 'local':
+                (tls_defs if sym.type == 'tls' else data_defs).append((bound_var[sym.name], sym.name, u.source))
+                have_def.add((sym.name, u.source))
+                stats['rebound_copies'] += 1
 
     # ---- per object objcopy args: renames, address symbols for the definitions it holds, localize duplicates
     alias_lines, localize = [], collections.defaultdict(list)
@@ -836,7 +852,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             f.write('%08x\t%s\t%s\n' % (a, name, src))
     lines += ['', 'overrides: %d, shadowing a compiled decomp definition: %d (with possibly inlined callers in other '
               'units: %d; shadowed.tsv)' % (stats['overrides'], stats['shadowed'], stats['shadow_inlined_units'])]
-    lines += ['', 'variables defined natively at a data-image address: %d' % len(data_defs),
+    lines += ['', 'variables defined natively at a data-image address: %d (%d copies in objects whose unit does not '
+              'name the address: STATIC1 header variables)' % (len(data_defs), stats['rebound_copies']),
               'address map entries by kind: %s' % ' '.join('%s=%d' % kv for kv in sorted(amap_kinds.items())),
               'deleting destructors (G) with both D1 and D0: %d of %d' % (n_deldtor, amap_kinds.get('G', 0)),
               'synthesized vtable objects linked: %d' % (len(have) - len(real)),

@@ -20,7 +20,9 @@
 * S1b units_renames.tsv: applied to a unit whose source carries the patch, not to an unpatched one;
 * destructors defined nowhere that GCC calls where MSVC did not: one reached only by a constructor's exception
   cleanup -> trap stub; one at the end of a scope (normal code) stays undefined; one of a class sharing its deleting
-  destructor (??_G address) with a class whose destructor is compiled -> that destructor.
+  destructor (??_G address) with a class whose destructor is compiled -> that destructor;
+* STATIC1 header variables: two objects define the same variable, only one unit's recipe names its address - both
+  copies are rebound (none localized), the second object's own references included.
 """
 import collections
 import json
@@ -94,6 +96,8 @@ SRC = {
                  'void FUN_00403000_s1b::FUN_00403000(int) {}\n'
                  'void call_x(FUN_00403000_s1b *p) { p->FUN_00403000(1); }\n',
     'src/z.cpp': 'void FUN_00404000(int) {}\n',                                   # not patched: keeps its name
+    'src/s1.cpp': 'int g_hdr = 3;\nint get_hdr1() { return g_hdr; }\n',             # STATIC1 copies (-O2)
+    'src/s2.cpp': 'int g_hdr = 3;\nint get_hdr2() { return g_hdr + 1; }\n',
     'src/e.cpp': 'struct BaseX { BaseX(); ~BaseX(); int a; };\nstruct Mem { Mem(); ~Mem(); };\n'   # defined nowhere
                  'struct DerX : BaseX { Mem m; DerX(); };\nDerX::DerX() : BaseX(), m() {}\n'   # cleanup: ~BaseX
                  'void scope_user() { Mem m2; }\n'                                            # normal: ~Mem
@@ -151,6 +155,10 @@ UNITS = {'units': [
      'symbols': {}},
     {'source': 'src/z.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x404000, '?FUN_00404000@@YAXH@Z')],
      'symbols': {}},
+    {'source': 'src/s1.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401800, '?get_hdr1@@YAHXZ')],
+     'symbols': {'?g_hdr@@3HA': '0x01000b00'}},
+    {'source': 'src/s2.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401810, '?get_hdr2@@YAHXZ')],
+     'symbols': {}},
     {'source': 'src/e.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x401700, '??0DerX@@QAE@XZ'), F(0x401710, '?scope_user@@YAXXZ'), F(0x401720, '?del_shell@@YAXPAUShell1@@@Z'),
         F(0x401730, '??1Real1@@QAE@XZ')],
@@ -205,7 +213,8 @@ def main():
             os.makedirs(os.path.dirname(p), exist_ok=True)
             open(p, 'w').write(text)
             objs[rel] = os.path.join(t, rel.replace('/', '_') + '.o')
-            run([CXX, '-mabi=ilp32', '-O2' if rel == 'src/r.cpp' else '-O1', '-c', p, '-o', objs[rel]])
+            run([CXX, '-mabi=ilp32', '-O2' if rel in ('src/r.cpp', 'src/s1.cpp', 'src/s2.cpp') else '-O1', '-c', p,
+                 '-o', objs[rel]])
         units = os.path.join(tree, 'build', 'units.json')
         json.dump(UNITS, open(units, 'w'))
         with open(os.path.join(t, 'objects.tsv'), 'w') as f:
@@ -277,6 +286,8 @@ def main():
               in open(os.path.join(out, 'bridges.S')).read(), 'trap stub text')
         dd = {l.split('\t')[1] for l in open(os.path.join(out, 'data_defs.tsv'))}
         check({'ms_kRTTI', 'g_count', 'g_pcount'} <= dd, 'split-global variables are data defs: %s' % sorted(dd))
+        hdr = {l.split('\t')[2].strip() for l in open(os.path.join(out, 'data_defs.tsv')) if l.split('\t')[1] == 'g_hdr'}
+        check(hdr == {'src/s1.cpp', 'src/s2.cpp'}, 'every STATIC1 copy rebound: %s' % sorted(hdr))
         run([sys.executable, FNVLINK, 'apply', out, fixed])
         run([sys.executable, FNVLINK, 'check', out, fixed])
         t_o = vtables.Obj(os.path.join(fixed, os.path.basename(objs['src/t.cpp'])))
@@ -289,6 +300,11 @@ def main():
         check(r_before > 0, 'the -O2 unit reaches its variables through local symbols (%d relocations)' % r_before)
         check(local_refs_into(r_obj, ('__fnv_01000a00', '__fnv_01000a10', '__fnv_01000a20')) == 0,
               'no local-symbol reference into a rebound variable after apply')
+        s2_obj = os.path.join(fixed, os.path.basename(objs['src/s2.cpp']))
+        check(local_refs_into(s2_obj, ('__fnv_01000b00',)) == 0 and
+              '__fnv_01000b00' in {vtables.Obj(s2_obj).syms[si][0] for i in range(len(vtables.Obj(s2_obj).secnames))
+                                   for _, (si, _, _) in vtables.Obj(s2_obj).rel(i).items()},
+              'the unbound copy\'s own reference goes to the image address')
         r_o = vtables.Obj(r_obj)
         by = collections.defaultdict(set)
         for i, sec in enumerate(r_o.secnames):
