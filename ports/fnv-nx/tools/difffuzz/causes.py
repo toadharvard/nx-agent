@@ -16,6 +16,10 @@ or `signedness?`.
         by tools/farm/fuzz_job.sh) or a causes_cum.json; one fnvnx-causes/1 for all shards (examples dropped)
     causes.py explain <div.json>...
         the refined cause of each record and the rule that gave it
+    causes.py handoffs <campaign dir>... --out-dir d [--recheck-tag t] [--effects e.jsonl] [--ref-prefix p]
+        the per-owner lists: handoffs_<owner>.tsv (real-bug), triage_<owner>.tsv, harness_<owner>.tsv (artifacts
+        with an owner), one row per counted divergence: owner, cause, address, unit, reproducer
+        (<ref-prefix><campaign dir name>:div/<file>, default prefix fuzz/cache/), first effect; and index.tsv
 
 Input layout of a campaign or fuzz cache directory (fuzz.py / fuzzcache.py; branch fuzz/cache/<k>of<N>):
     results.jsonl          one row per function: address, source (unit), status ('ok' is fuzzed; setup:*, run:*,
@@ -40,6 +44,11 @@ import math
 import os
 import struct
 import sys
+
+if __name__ == '__main__':
+    # report.reclassify imports `causes`: run as a script, that would be a second copy of this module whose EFFECTS
+    # and OBJ_STATS the command line never fills (`summary --effects` silently ignored). One module, one state.
+    sys.modules.setdefault('causes', sys.modules[__name__])
 
 # address ranges of the shared world (world.py; duplicated so this module needs no emulator imports)
 NULL_END = 0x10000
@@ -380,6 +389,9 @@ def _rule_count(d, tx, ta):
 ALLOCATORS = {'_Znwj', '_Znaj', '_Znwm', '_Znam', '_ZnwjRKSt9nothrow_t', '__fnv_00401000', '__fnv_00aa3e40',
               '__fnv_00aa13e0'}       # operator new, MemoryManager::Allocate, the heap's Allocate (game allocators)
 _OBJ_CACHE = {}
+# native object reader state, reported in every summary: without pyelftools every object rule (native-inlined,
+# new-null, native-undefined callees, after-native-undefined) is skipped, which must not pass silently
+OBJ_STATS = dict(reader=None, scanned=0, missing=0)
 
 
 def _obj_dir():
@@ -401,7 +413,12 @@ def native_callees(source, addr):
         return None
     path = os.path.join(d, source.replace('/', '_') + '.o')
     if path not in _OBJ_CACHE:
-        _OBJ_CACHE[path] = _scan_object(path) if os.path.exists(path) else None
+        if os.path.exists(path):
+            _OBJ_CACHE[path] = _scan_object(path)
+            OBJ_STATS['scanned'] += _OBJ_CACHE[path] is not None
+        else:
+            _OBJ_CACHE[path] = None
+            OBJ_STATS['missing'] += 1
     t = _OBJ_CACHE[path]
     if t is None:
         return None
@@ -414,7 +431,12 @@ def _scan_object(path):
         from elftools.elf.elffile import ELFFile
         from elftools.elf.relocation import RelocationSection
     except ImportError:
+        if OBJ_STATS['reader'] is None:
+            sys.stderr.write('causes.py: pyelftools is not installed: native object rules are OFF '
+                             '(pip install pyelftools)\n')
+        OBJ_STATS['reader'] = 'unavailable'
         return None
+    OBJ_STATS['reader'] = 'pyelftools'
     out = {}
     with open(path, 'rb') as f:
         e = ELFFile(f)
@@ -474,6 +496,7 @@ def unbound_callees(source, addr):
 
 _VFT = None
 _LINKSYM = None
+_STARTS = []             # sorted original start addresses of every code entry in the address map (extents by bisect)
 _BOUND = set()           # every link_symbol / native_symbol the address map names
 
 
@@ -494,6 +517,7 @@ def _load_addrmap():
     global _VFT, _LINKSYM
     if _VFT is None or _LINKSYM is None:
         _VFT, _LINKSYM = set(), {}
+        del _STARTS[:]
         p = os.environ.get('FNVNX_CAUSES_ADDRMAP')
         if not p:
             try:
@@ -510,6 +534,8 @@ def _load_addrmap():
                     a = int(f[0], 16)
                 except ValueError:
                     continue
+                if f[1] in ('F', 'E', 'C', 'X') and TEXT[0] <= a < TEXT[1]:
+                    _STARTS.append(a)
                 if f[1] == 'V':
                     _VFT.add(a)
                 elif f[2]:
@@ -517,6 +543,7 @@ def _load_addrmap():
                 _BOUND.add(f[2])
                 if len(f) > 3:
                     _BOUND.add(f[3].split('\t', 1)[0])
+            _STARTS.sort()
 
 
 def _is_dtor(sym):
@@ -550,7 +577,38 @@ def load_effects(paths):
                     EFFECTS[os.path.basename(e['file'])] = e
 
 
-def _rule_effects(e, rec=None):
+def function_at(pc):
+    """Original start address of the code entry of the address map that contains `pc`, or None."""
+    import bisect
+    _load_addrmap()
+    i = bisect.bisect_right(_STARTS, pc) - 1
+    return _STARTS[i] if i >= 0 else None
+
+
+# causes whose shape says the native never made the call, or made it with its own code: a callee's store there is
+# the native's own defect, never the harness's interception (V1, tests/v1/test_s13b_callee_store.py C1-C3)
+NOT_INTERCEPTED = ('native-inlined', 'native-early-exit', 'x86-only-store')
+
+
+def intercepted_callee(rec, pc):
+    """The original callee containing x86 `pc` when the native calls it out of line through a name its own object
+    does not define (the harness runs the unit's own functions natively and intercepts only those calls), else
+    None. Without the native object or the address map there is no evidence: None."""
+    try:
+        addr = int((rec or {}).get('address') or '0', 16)
+    except ValueError:
+        return None
+    cs = native_callees((rec or {}).get('source'), addr)
+    callee = function_at(pc)
+    if not cs or callee is None or callee == addr:
+        return None
+    path = os.path.join(_obj_dir(), (rec.get('source') or '').replace('/', '_') + '.o')
+    defined = (_OBJ_CACHE.get(path) or {}).get('_defined', set())
+    names = {'__fnv_%08x' % callee, link_symbol(callee)} - {None, ''}
+    return callee if any(n in cs and n not in defined for n in names) else None
+
+
+def _rule_effects(e, rec=None, cause=None):
     f = e.get('first')
     if f == 'width':
         return 'field-width'
@@ -561,7 +619,8 @@ def _rule_effects(e, rec=None):
             pc = int(((st.get('x86') or {}).get('pc')) or '0', 16)
         except (TypeError, ValueError):
             a = n = pc = 0
-        if n and pc and not st.get('arm') and not a <= pc < a + n:
+        if (n and pc and not st.get('arm') and not a <= pc < a + n and cause not in NOT_INTERCEPTED
+                and intercepted_callee(rec, pc) is not None):
             return 'oracle-callee-store'      # the store is made by a callee the oracle runs, the native intercepts
         w = st.get('word') or {}
         x, a = str(w.get('x86') or ''), str(w.get('arm') or '')
@@ -610,7 +669,7 @@ def _with_effects(rec, cause):
     if cause not in TRIAGE_REFINABLE:
         return cause
     e = EFFECTS.get(os.path.basename(rec.get('_file') or rec.get('_p') or '')) if EFFECTS else None
-    got = _rule_effects(e, rec) if e else None
+    got = _rule_effects(e, rec, cause) if e else None
     if got:
         return got
     try:
@@ -698,6 +757,7 @@ def summarize(dirs, tag=''):
         'functions_ok': ok,
         'functions_diverging': len(by_fn),
         'functions_by_class': {c: by_class.get(c, 0) for c in CLASS_ORDER},
+        'native_objects': dict(OBJ_STATS, dir=_obj_dir()),
         'causes': causes,
         'policy': {c: dict(verdict=v[0], owner=v[1], hard=v[2], why=v[3]) for c, v in sorted(POLICY.items())},
     }
@@ -733,6 +793,54 @@ def merge(paths):
     return tot
 
 
+HANDOFF_FILES = (('real-bug', 'handoffs'), ('triage', 'triage'), ('artifact', 'harness'))
+HANDOFF_COLUMNS = ('owner', 'cause', 'address', 'unit', 'reproducer', 'first effect')
+
+
+def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/'):
+    """{(file stem, owner): [row]} for every counted divergence whose cause has an owner and is not by design;
+    rows are HANDOFF_COLUMNS tuples, sorted by cause, address and reproducer."""
+    prefix = dict(HANDOFF_FILES)
+    out = collections.defaultdict(list)
+    for d in dirs:
+        results, divs = _load_campaign(d, tag)
+        name = os.path.basename(os.path.normpath(d))
+        for rec in divs:
+            if results.get(rec['address'], {}).get('status', 'ok') != 'ok':
+                continue
+            cls, owner = policy(rec['_cause'])[:2]
+            if cls not in prefix or owner in ('-', ''):
+                continue
+            e = EFFECTS.get(rec['_file']) or {}
+            out[(prefix[cls], owner)].append((owner, rec['_cause'], rec['address'], rec.get('source') or '',
+                                              '%s%s:div/%s' % (ref_prefix, name, rec['_file']), e.get('first') or ''))
+    for rows in out.values():
+        rows.sort(key=lambda r: (r[1], r[2], r[4]))
+    return dict(out)
+
+
+def write_handoffs(dirs, out_dir, tag='', ref_prefix='fuzz/cache/'):
+    """Write the per-owner TSVs and index.tsv (file, class, owner, rows, functions, causes); returns the index."""
+    os.makedirs(out_dir, exist_ok=True)
+    groups = handoff_rows(dirs, tag, ref_prefix)
+    cls_of = {stem: cls for cls, stem in HANDOFF_FILES}
+    index = []
+    for (stem, owner), rows in sorted(groups.items()):
+        fn = '%s_%s.tsv' % (stem, owner)
+        with open(os.path.join(out_dir, fn), 'w') as f:
+            f.write('\t'.join(HANDOFF_COLUMNS) + '\n')
+            for r in rows:
+                f.write('\t'.join(r) + '\n')
+        cs = collections.Counter(r[1] for r in rows)
+        index.append((fn, cls_of[stem], owner, len(rows), len({r[2] for r in rows}),
+                      ', '.join('%s %d' % kv for kv in sorted(cs.items(), key=lambda kv: (-kv[1], kv[0])))))
+    with open(os.path.join(out_dir, 'index.tsv'), 'w') as f:
+        f.write('file\tclass\towner\trows\tfunctions\tcauses\n')
+        for row in index:
+            f.write('\t'.join(str(x) for x in row) + '\n')
+    return index
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -746,9 +854,19 @@ def main(argv=None):
     m.add_argument('--out', default='')
     e = sub.add_parser('explain')
     e.add_argument('files', nargs='+')
+    h = sub.add_parser('handoffs')
+    h.add_argument('dirs', nargs='+')
+    h.add_argument('--out-dir', required=True)
+    h.add_argument('--recheck-tag', default='')
+    h.add_argument('--effects', action='append', default=[], help='difffuzz.py effects output (JSON lines)')
+    h.add_argument('--ref-prefix', default='fuzz/cache/', help='reproducer = <prefix><dir name>:div/<file>')
     a = ap.parse_args(argv)
-    if a.cmd == 'summary' and a.effects:
+    if a.cmd in ('summary', 'handoffs') and a.effects:
         load_effects(a.effects)
+    if a.cmd == 'handoffs':
+        for row in write_handoffs(a.dirs, a.out_dir, a.recheck_tag, a.ref_prefix):
+            print('%-22s %-9s %-5s rows %5d fn %5d  %s' % row)
+        return 0
     if a.cmd in ('summary', 'merge'):
         out = summarize(a.dirs, a.recheck_tag) if a.cmd == 'summary' else merge(a.files)
         txt = json.dumps(out, indent=1, sort_keys=True)
@@ -756,6 +874,10 @@ def main(argv=None):
             open(a.out, 'w').write(txt + '\n')
         print('functions ok %d, diverging %d: %s' % (out['functions_ok'], out['functions_diverging'],
                                                     ', '.join('%s %d' % kv for kv in out['functions_by_class'].items())))
+        no = out.get('native_objects')
+        if no:
+            print('native objects: reader %s, scanned %d, missing %d (%s)' % (no['reader'], no['scanned'],
+                                                                              no['missing'], no['dir']))
         for c, row in out['causes'].items():
             print('  %-20s %-9s %-5s div %5d fn %5d worst %5d' % (c, row['verdict'], row['owner'], row['divergences'],
                                                                  row['functions'], row['worst_of']))
