@@ -395,6 +395,18 @@ check('ENUM1 a definition int cannot hold keeps its form',
       run(s1.r_opaque_enums, 'enum WIDE { W = 0x80000000 };\n', os.path.join(_e, 'src', 'c.cpp')), ['enum WIDE { W'])
 s1._OPAQUE_NAMES = None
 
+# ---- DECL1-NSADL: a namespace's own C++ copy of a CRT name stays its own; argument-dependent lookup must not reach ::name
+_st = Counter()
+got = prepare.r_platform_protos('/x/src/ns.cpp', 'int strcpy_s(char* d, unsigned int n, const char* s);\n'
+                                'namespace N {\nstruct S : Base { operator const char*() const; };\n'
+                                'int strcpy_s(char* d, unsigned int n, const char* s);\n'
+                                'void f(char* b, S& s) { strcpy_s(b, 4, s); if (!strcpy_s(b, 4, "x")) return; p->strcpy_s(b);'
+                                ' N::strcpy_s(b, 4, s); // strcpy_s(b)\n}\n}\nvoid g(char* b) { strcpy_s(b, 4, "y"); }\n', _st)
+check('DECL1-NSADL: unqualified calls in the namespace keeping its own prototype are parenthesized', got,
+      ['{ (strcpy_s)(b, 4, s); if (!(strcpy_s)(b, 4, "x")) return; p->strcpy_s(b); N::strcpy_s(b, 4, s); // strcpy_s(b)',
+       'int strcpy_s(char* d, unsigned int n, const char* s);\nvoid f', 'void g(char* b) { strcpy_s(b, 4, "y"); }'])
+check('DECL1-NSADL counted', str(_st['DECL1-NSADL']), ['2'])
+
 # ---- DECL1 math: the decomp's float / double declarations
 got = prepare.r_platform_protos('/x/src/m.cpp', 'extern "C" double __cdecl sqrt(double);\nfloat __cdecl floor(float);\n'
                                 'namespace N {\nextern "C" double fabs(double);\n}\nfloat g(float x) { return sqrt(x); }\n',

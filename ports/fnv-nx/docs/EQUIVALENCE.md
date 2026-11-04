@@ -178,7 +178,7 @@ above (round 8).
 | Rule | Class | Why | MSVC meaning used in the comparison |
 |---|---|---|---|
 | `SSE1` `SSE2` `SSE3` `SSE4` | platform | the decomp's copies of MSVC's vector types / intrinsic prototypes give way to sse2neon's | - |
-| `DECL1` | neutral (claim) | the platform header declares the same CRT / Win32 function | the real MSVC CRT / SDK headers |
+| `DECL1` | neutral (claim) | the platform header declares the same CRT / Win32 function; in a namespace that keeps its own C++ copy of a CRT name (bound to a game wrapper), unqualified calls of it become `(name)(...)` so argument-dependent lookup cannot also reach the header's `::name` (DECL1-NSADL: 66 calls in 19 files; tesanimgroup was ambiguous on GCC and MSVC) | the real MSVC CRT / SDK headers |
 | `GAME1` | neutral | renames a unit's own Win32-named game declaration and its call sites; the address binding is unchanged | `fnvnx_game_X` bound like the decomp's `X` |
 | `NEW1` | neutral | `unsigned int` / plain `unsigned` is `size_t` on x86 (same type, same decoration) | as is |
 | `UNIT1` | neutral | renames local types of tesdatahandler (same layout) | as is |

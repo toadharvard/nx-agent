@@ -558,7 +558,7 @@ def r_platform_protos(path, text, stats):
     function's own declaration instead of the header, and the decomp's float overloads stay (see MATH_NAMES)."""
     global PLATFORM
     if PLATFORM is None: PLATFORM = platform_names()
-    spans, out, pos, have, top = None, [], 0, set(), []
+    spans, out, pos, have, top, kept = None, [], 0, set(), [], set()
     for m in PROTO.finditer(text):
         name = re.sub(r'\s+', ' ', m.group(1))
         is_op = name.startswith('operator')
@@ -574,7 +574,9 @@ def r_platform_protos(path, text, stats):
             stats['DECL1-MATHKEEP'] += 1             # the decomp's float / double types (see MATH_NAMES above)
             continue
         if (not is_op and spaces and spaces != ['namespace std'] and not c_linkage
-                and not cxx_copy_is_crt(path, name)): continue
+                and not cxx_copy_is_crt(path, name)):
+            kept.add(name)                           # N::name stays N's own function (DECL1-NSADL below)
+            continue
         if is_math and spaces != ['namespace std']:  # the C function, by itself (no <math.h> overloads)
             start = m.start()
             if start > 0 and text[start - 1] == '\n':
@@ -635,7 +637,38 @@ def r_platform_protos(path, text, stats):
         pos = m.end()
         stats['DECL1'] += 1
     out.append(text[pos:])
-    return ''.join('#include %s /* fnv-nx DECL1 */\n' % h for h in top) + ''.join(out)
+    text = ''.join('#include %s /* fnv-nx DECL1 */\n' % h for h in top) + ''.join(out)
+    return ns_own_calls(text, kept, stats) if kept and (have or top) else text
+
+NS_CALL_PREV = re.compile(r'(?:[(=,;{}!?:+\-|<\[]|\b(?:return|else|do|case))\s*$')
+
+def ns_own_calls(text, names, stats):
+    """DECL1-NSADL: in a namespace N (not std) that keeps its own C++ prototype of a platform name (N::strcpy_s,
+    bound to the game's wrapper), an unqualified call of that name becomes `(name)(args)`. The platform header DECL1
+    added declares ::name too, and argument-dependent lookup finds it through an argument whose class has a base in
+    the global namespace: `strcpy_s(buf, 260, fixedString)` is ambiguous on GCC and MSVC. The parenthesized name
+    turns argument-dependent lookup off, so the call reaches N::name, as it did in the decomp."""
+    spans = scope_spans(text)
+    edits = []
+    for o, c, k, h in spans:
+        if k != 'namespace' or re.sub(r'\s+', ' ', h) == 'namespace std':
+            continue
+        if any(o2 < o and c < c2 and k2 == 'namespace' for o2, c2, k2, _ in spans):
+            continue                                     # the outermost namespace covers its nested ones
+        body = text[o:c]
+        own = [n for n in names if re.search(r'^[ \t]*(?!extern\s+"C")[A-Za-z_][\w \t\*&:<>,]*?[\s\*&]%s\s*\([^;{}]*\)\s*;'
+                                            % re.escape(n), body, re.M)]
+        for n in own:
+            for m in re.finditer(r'(?<![\w:.>~])%s(?=\s*\()' % re.escape(n), text[o:c]):
+                at = o + m.start()
+                line = text.rfind('\n', 0, at) + 1
+                if '//' in text[line:at] or not NS_CALL_PREV.search(text[max(o, at - 40):at]):
+                    continue                             # a declaration (`int strcpy_s(`) or a comment
+                edits.append((at, at + len(n)))
+    for a, b in sorted(set(edits), reverse=True):
+        text = text[:a] + '(' + text[a:b] + ')' + text[b:]
+        stats['DECL1-NSADL'] += 1
+    return text
 
 # ---- DECL3: the decomp's own typedefs of C library types that the target defines differently
 #
