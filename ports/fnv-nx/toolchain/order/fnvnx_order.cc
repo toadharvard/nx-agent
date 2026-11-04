@@ -70,6 +70,8 @@
 #include "tree-cfg.h"
 #include <set>
 #include <string>
+#include <vector>
+#include <utility>
 #include <fstream>
 
 int plugin_is_GPL_compatible;   // the plugin interface asks for it; the code is MIT (LICENSE), which is compatible
@@ -79,6 +81,18 @@ static order_mode mode = MODE_VOLATILE;
 static bool verbose, verbose_sites;
 static std::set<std::string> key_fields, key_vars;   // "Class::member", "name"
 static std::set<tree> interlocked_decls;             // FIELD_DECLs / VAR_DECLs this unit hands to Interlocked*
+static std::set<tree> poll_decls;                    // FIELD_DECLs / VAR_DECLs a wait-only loop of this unit polls
+// Interlocked forwarders: functions that hand (the pointee of) their parameter i to Interlocked* or to another
+// forwarder (`void NiAtomicInc(long &x) { InterlockedIncrement(&x); }`), and the calls that bind a field or variable
+// to a parameter of some function. Resolved once every body of the unit has passed PRE_GENERICIZE.
+struct param_call { tree caller; int caller_parm; tree callee; int arg; };   // f(p) inside caller, p its parameter
+struct decl_call { tree callee; int arg; tree decl; };                       // f(&obj.m) / f(obj.m) by reference
+static std::set<std::pair<tree, int>> forwarders;
+static std::vector<param_call> param_calls;
+static std::vector<decl_call> decl_calls;
+static bool forwarders_resolved;
+static const char *discover_path;                    // discover=<file>: write this unit's keys
+static unsigned long polls_plain;
 struct counts { unsigned long ldar, stlr, fence_ld, fence_st; };
 static counts unit_total;
 static bool args_rtl = true;
@@ -120,15 +134,19 @@ static std::string record_name(tree field) {
   return n && TREE_CODE(n) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(n) : "";
 }
 
+static void resolve_forwarders();
+static void write_discovered();
+
 static bool keyed(tree t) {
-  if (key_fields.empty() && key_vars.empty() && interlocked_decls.empty()) return false;
+  if (!forwarders_resolved) resolve_forwarders();
+  if (key_fields.empty() && key_vars.empty() && interlocked_decls.empty() && poll_decls.empty()) return false;
   for (tree r = t; r; r = handled_component_p(r) ? TREE_OPERAND(r, 0) : NULL_TREE) {
     if (TREE_CODE(r) == COMPONENT_REF) {
       tree f = TREE_OPERAND(r, 1);
-      if (interlocked_decls.count(f)) return true;
+      if (interlocked_decls.count(f) || poll_decls.count(f)) return true;
       if (DECL_NAME(f) && key_fields.count(record_name(f) + "::" + IDENTIFIER_POINTER(DECL_NAME(f)))) return true;
     }
-    if (TREE_CODE(r) == VAR_DECL && (interlocked_decls.count(r) ||
+    if (TREE_CODE(r) == VAR_DECL && (interlocked_decls.count(r) || poll_decls.count(r) ||
                                      (DECL_NAME(r) && key_vars.count(IDENTIFIER_POINTER(DECL_NAME(r))))))
       return true;
     if (!handled_component_p(r)) break;
@@ -274,13 +292,20 @@ static const pass_data order_data = {
     GIMPLE_PASS, "fnvnx_order", OPTGROUP_NONE, TV_NONE, PROP_gimple_any | PROP_cfg, 0, 0, 0, 0,
 };
 
+// PLUGIN_FINISH: runs under -fsyntax-only too (FINISH_UNIT does not), so keys.sh can discover without code generation
+static void finish_all(void *, void *) {
+  if (discover_path) write_discovered();
+}
+
 static void finish(void *, void *) {
   if (verbose)
     inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr, %lu fenced loads, %lu fenced stores; "
            "%lu calls with arguments right to left, %lu left (class-type argument with side effects); "
-           "Interlocked: %lu refcount increments relaxed, %lu refcount decrements release, %lu full",
+           "Interlocked: %lu refcount increments relaxed, %lu refcount decrements release, %lu full; "
+           "%lu Interlocked operands (%lu forwarders), %lu plain polls",
            unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st, calls_reordered, calls_skipped,
-           ilk_inc_weak, ilk_dec_weak, ilk_full);
+           ilk_inc_weak, ilk_dec_weak, ilk_full, (unsigned long)interlocked_decls.size(),
+           (unsigned long)forwarders.size(), polls_plain);
 }
 
 // ---- argument order (args=rtl)
@@ -348,18 +373,182 @@ static void reorder_call(tree call) {
 
 // ---- Interlocked operands of this unit
 
+static tree current_fn;   // the body PRE_GENERICIZE is walking
+
+static int parm_index(tree fndecl, tree parm) {
+  int i = 0;
+  for (tree p = DECL_ARGUMENTS(fndecl); p; p = DECL_CHAIN(p), i++)
+    if (p == parm) return i;
+  return -1;
+}
+
+// What a pointer argument designates: a field (`&obj.m`, `&p->m[2]`, or `obj.m` bound to a reference parameter), a
+// variable (`&g`), or a parameter of the current function (`p`, `&*r` for a reference r); NULL_TREE otherwise.
+static tree operand_of(tree a, int *parm) {
+  *parm = -1;
+  while (CONVERT_EXPR_P(a) || TREE_CODE(a) == NON_LVALUE_EXPR || TREE_CODE(a) == VIEW_CONVERT_EXPR) a = TREE_OPERAND(a, 0);
+  if (TREE_CODE(a) == PARM_DECL && current_fn) {
+    if (POINTER_TYPE_P(TREE_TYPE(a))) *parm = parm_index(current_fn, a);
+    return NULL_TREE;
+  }
+  if (TREE_CODE(a) != ADDR_EXPR) return NULL_TREE;
+  tree r = TREE_OPERAND(a, 0);
+  while (TREE_CODE(r) == ARRAY_REF || TREE_CODE(r) == VIEW_CONVERT_EXPR) r = TREE_OPERAND(r, 0);
+  if (TREE_CODE(r) == COMPONENT_REF) return TREE_OPERAND(r, 1);
+  if (TREE_CODE(r) == VAR_DECL) return r;
+  if ((TREE_CODE(r) == INDIRECT_REF || TREE_CODE(r) == MEM_REF) && current_fn) {
+    tree p = TREE_OPERAND(r, 0);
+    while (CONVERT_EXPR_P(p)) p = TREE_OPERAND(p, 0);
+    if (TREE_CODE(p) == PARM_DECL) *parm = parm_index(current_fn, p);
+  }
+  return NULL_TREE;
+}
+
 static void note_interlocked(tree call) {
   tree fn = get_callee_fndecl(call);
   if (!fn || !DECL_NAME(fn) || call_expr_nargs(call) < 1) return;
   const char *n = IDENTIFIER_POINTER(DECL_NAME(fn));
-  if (strncmp(n, "Interlocked", 11) && strncmp(n, "_Interlocked", 12)) return;
-  tree a = CALL_EXPR_ARG(call, 0);
-  while (CONVERT_EXPR_P(a) || TREE_CODE(a) == NON_LVALUE_EXPR || TREE_CODE(a) == VIEW_CONVERT_EXPR) a = TREE_OPERAND(a, 0);
-  if (TREE_CODE(a) != ADDR_EXPR) return;
-  tree r = TREE_OPERAND(a, 0);
-  while (TREE_CODE(r) == ARRAY_REF || TREE_CODE(r) == VIEW_CONVERT_EXPR) r = TREE_OPERAND(r, 0);
-  if (TREE_CODE(r) == COMPONENT_REF) interlocked_decls.insert(TREE_OPERAND(r, 1));
-  else if (TREE_CODE(r) == VAR_DECL) interlocked_decls.insert(r);
+  bool ilk = !strncmp(n, "Interlocked", 11) || !strncmp(n, "_Interlocked", 12);
+  if (ilk) {
+    int parm;
+    tree d = operand_of(CALL_EXPR_ARG(call, 0), &parm);
+    if (d) interlocked_decls.insert(d);
+    else if (parm >= 0) forwarders.insert(std::make_pair(current_fn, parm));
+    return;
+  }
+  // any other direct call: remember which fields / variables / own parameters it binds to which argument, in case
+  // the callee turns out to be a forwarder (decided after the whole unit is seen)
+  if (DECL_IS_UNDECLARED_BUILTIN(fn) || fndecl_built_in_p(fn)) return;
+  for (int i = 0; i < call_expr_nargs(call); i++) {
+    tree a = CALL_EXPR_ARG(call, i);
+    if (!POINTER_TYPE_P(TREE_TYPE(a)) && TREE_CODE(TREE_TYPE(a)) != REFERENCE_TYPE) continue;
+    int parm;
+    tree d = operand_of(a, &parm);
+    if (d) decl_calls.push_back({fn, i, d});
+    else if (parm >= 0) param_calls.push_back({current_fn, parm, fn, i});
+  }
+}
+
+static void resolve_forwarders() {
+  forwarders_resolved = true;
+  if (forwarders.empty()) return;
+  for (bool grew = true; grew;) {   // forwarders of forwarders
+    grew = false;
+    for (const param_call &c : param_calls)
+      if (forwarders.count(std::make_pair(c.callee, c.arg)) &&
+          forwarders.insert(std::make_pair(c.caller, c.caller_parm)).second)
+        grew = true;
+  }
+  for (const decl_call &c : decl_calls)
+    if (forwarders.count(std::make_pair(c.callee, c.arg))) interlocked_decls.insert(c.decl);
+}
+
+// ---- POLL-PLAIN: a loop that only waits for plain shared memory to change (docs/ORDERING.md)
+//
+// `while (!m_bDone) Sleep(0);`, `while (g_count < n) {}`: the condition reads fields or non-const globals, has no call
+// or side effect of its own, and the body does nothing but wait (empty, Sleep / SleepEx / SwitchToThread /
+// YieldProcessor / _mm_pause / WaitFor* / fnvnx_yield). Under x86 TSO and MSVC such a loop works: the store of another
+// thread becomes visible and MSVC rereads memory after a call. GCC may hoist the load out of an empty loop, and the
+// A57 gives the flag no order with the data it guards. The polled fields and variables are ordered like volatiles
+// (ldar in the loop, stlr wherever they are stored: in other units through the keys file, discover=).
+
+static bool wait_call(tree fn) {
+  if (!fn || !DECL_NAME(fn)) return false;
+  const char *n = IDENTIFIER_POINTER(DECL_NAME(fn));
+  return !strcmp(n, "Sleep") || !strcmp(n, "SleepEx") || !strcmp(n, "SwitchToThread") || !strcmp(n, "YieldProcessor") ||
+         !strcmp(n, "_mm_pause") || !strncmp(n, "WaitFor", 7) || !strcmp(n, "fnvnx_yield");
+}
+
+struct poll_scan { bool waited, other, vol; std::vector<tree> shared; };
+
+static tree poll_body_walk(tree *tp, int *walk_subtrees, void *data) {
+  poll_scan *s = (poll_scan *)data;
+  tree t = *tp;
+  switch (TREE_CODE(t)) {
+    case CALL_EXPR:
+      if (wait_call(get_callee_fndecl(t))) s->waited = true; else s->other = true;
+      break;
+    case AGGR_INIT_EXPR: case MODIFY_EXPR: case INIT_EXPR: case PREINCREMENT_EXPR: case PREDECREMENT_EXPR:
+    case POSTINCREMENT_EXPR: case POSTDECREMENT_EXPR: case ASM_EXPR: case TARGET_EXPR: case DECL_EXPR:
+    case RETURN_EXPR: case THROW_EXPR:
+      s->other = true;
+      break;
+    default: break;
+  }
+  if (s->other) return t;   // stop
+  (void)walk_subtrees;
+  return NULL_TREE;
+}
+
+static tree poll_cond_walk(tree *tp, int *walk_subtrees, void *data) {
+  poll_scan *s = (poll_scan *)data;
+  tree t = *tp;
+  if (TYPE_P(t)) { *walk_subtrees = 0; return NULL_TREE; }
+  if (TREE_THIS_VOLATILE(t) && (TREE_CODE(t) == COMPONENT_REF || TREE_CODE(t) == VAR_DECL || TREE_CODE(t) == INDIRECT_REF ||
+                                TREE_CODE(t) == MEM_REF))
+    s->vol = true;
+  switch (TREE_CODE(t)) {
+    case COMPONENT_REF:
+      if (TREE_CODE(TREE_OPERAND(t, 1)) == FIELD_DECL) s->shared.push_back(TREE_OPERAND(t, 1));
+      break;
+    case VAR_DECL:
+      if ((TREE_STATIC(t) || DECL_EXTERNAL(t)) && !TREE_READONLY(t) && !DECL_THREAD_LOCAL_P(t)) s->shared.push_back(t);
+      break;
+    case ADDR_EXPR:   // &x is not a read of x
+      *walk_subtrees = 0;
+      break;
+    default: break;
+  }
+  return poll_body_walk(tp, walk_subtrees, data);
+}
+
+static void poll_loop(tree loop, tree cond, tree body) {
+  if (!cond) return;
+  poll_scan c = {false, false, false, {}};
+  walk_tree_without_duplicates(&cond, poll_cond_walk, &c);
+  if (c.other || c.waited || c.vol || c.shared.empty()) return;   // a scan, a call, or a POLL-VOLATILE (ordered already)
+  poll_scan b = {false, false, false, {}};
+  if (body) walk_tree_without_duplicates(&body, poll_body_walk, &b);
+  if (b.other) return;
+  for (tree d : c.shared) poll_decls.insert(d);
+  polls_plain++;
+  if (verbose_sites)
+    inform(EXPR_LOCATION(loop) != UNKNOWN_LOCATION ? EXPR_LOCATION(loop) : DECL_SOURCE_LOCATION(current_fn),
+           "%<fnvnx_order%>: plain poll (%s): %qD ordered", b.waited ? "wait" : "spin", c.shared[0]);
+}
+
+static void poll_contexts(tree t) {
+  switch (TREE_CODE(t)) {
+    case WHILE_STMT: poll_loop(t, WHILE_COND(t), WHILE_BODY(t)); break;
+    case DO_STMT: poll_loop(t, DO_COND(t), DO_BODY(t)); break;
+    case FOR_STMT:
+      if (!FOR_EXPR(t) && !FOR_INIT_STMT(t)) poll_loop(t, FOR_COND(t), FOR_BODY(t));
+      break;
+    default: break;
+  }
+}
+
+// ---- discover=<file>: this unit's keys, for the whole-program key list (toolchain/order/keys.sh)
+
+static void key_line(std::set<std::string> &out, tree d) {
+  if (!DECL_NAME(d)) return;
+  const char *n = IDENTIFIER_POINTER(DECL_NAME(d));
+  if (TREE_CODE(d) == FIELD_DECL) {
+    std::string r = record_name(d);
+    if (!r.empty() && !IDENTIFIER_ANON_P(DECL_NAME(d))) out.insert("field " + r + "::" + n);
+  } else if (TREE_CODE(d) == VAR_DECL && (TREE_STATIC(d) || DECL_EXTERNAL(d)) && !DECL_THREAD_LOCAL_P(d)) {
+    out.insert(std::string("var ") + n);
+  }
+}
+
+static void write_discovered() {
+  if (!forwarders_resolved) resolve_forwarders();
+  std::set<std::string> lines;
+  for (tree d : interlocked_decls) key_line(lines, d);
+  for (tree d : poll_decls) key_line(lines, d);
+  std::ofstream out(discover_path, std::ios::trunc);
+  if (!out) { error("%<fnvnx_order%>: cannot write %s", discover_path); return; }
+  for (const std::string &l : lines) out << l << "\n";
 }
 
 // ---- refcount sites (refcount=weak)
@@ -438,6 +627,7 @@ static void refcount_contexts(tree t) {
 
 static tree order_args_walk(tree *tp, int *, void *) {
   refcount_contexts(*tp);
+  poll_contexts(*tp);
   if (TREE_CODE(*tp) == CALL_EXPR) {
     note_interlocked(*tp);
     if (interlocked_kind(*tp)) ilk_full++;
@@ -456,7 +646,9 @@ static void pre_genericize(void *gcc_data, void *) {
   }
   // compiler and C library headers (arm_neon.h, <string>, ...) are not decomp code: their order is GCC's to keep
   if (in_system_header_at(DECL_SOURCE_LOCATION(fndecl))) return;
+  current_fn = fndecl;
   walk_tree_without_duplicates(&DECL_SAVED_TREE(fndecl), order_args_walk, NULL);
+  current_fn = NULL_TREE;
 }
 
 static void read_keys(const char *path) {
@@ -493,6 +685,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
       else if (!strcmp(v, "off")) mode = MODE_OFF;
       else { error("%<fnvnx_order%>: unknown mode %s", v); return 1; }
     } else if (!strcmp(k, "keys") && v) read_keys(v);
+    else if (!strcmp(k, "discover") && v) discover_path = xstrdup(v);
     else if (!strcmp(k, "refcount") && v) {
       if (!strcmp(v, "weak")) refcount_weak = true;
       else if (!strcmp(v, "full")) refcount_weak = false;
@@ -511,6 +704,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
   pass.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pass);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish, NULL);
+  register_callback(info->base_name, PLUGIN_FINISH, finish_all, NULL);
   register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize, NULL);
   return 0;
 }

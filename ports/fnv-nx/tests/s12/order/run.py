@@ -142,6 +142,108 @@ def codegen(scratch, plugin):
             check(hit == (kind == 'expect'), 'codegen %s: %s %s /%s/' % (mode, fn, kind, rx))
 
 
+def wholeprog(scratch, plugin):
+    """wholeprog_a.cpp / wholeprog_b.cpp: the whole-program key list (keys.sh, discover=). Unit A's syntax-only
+    discovery finds its Interlocked operands (also through forwarders) and plain polls; unit B, which does neither,
+    gets ordered stores of them only from that list (ATOMIC-PLAIN-STORE, the writer side of POLL-PLAIN)"""
+    sse = os.environ.get('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
+    inc = ['-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'), '-I' + os.path.join(PORT, 'shim', 'include'),
+           '-I' + sse, '-I' + HERE, '-fplugin=' + plugin, '-w']
+    a, b = os.path.join(HERE, 'wholeprog_a.cpp'), os.path.join(HERE, 'wholeprog_b.cpp')
+    keys = os.path.join(scratch, 'wholeprog.keys')
+    if os.path.exists(keys):
+        os.unlink(keys)
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + [f for f in BUILD if f != '-O2'] + inc +
+                       ['-fsyntax-only', '-fplugin-arg-fnvnx_order-discover=' + keys, a], capture_output=True, text=True)
+    check(r.returncode == 0 and os.path.exists(keys), 'wholeprog: syntax-only discovery of unit A (%s)' % r.stderr[-300:])
+    if r.returncode or not os.path.exists(keys):
+        return
+    got = open(keys).read().splitlines()
+    want = sorted(l.split('discover:', 1)[1].strip() for l in open(a) if '// discover:' in l)
+    check(got == want, 'wholeprog: discovered keys of unit A = %s (want %s)' % (got, want))
+    a_asm = os.path.join(scratch, 'wholeprog_a.s')
+    r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + inc + ['-S', '-o', a_asm, a], capture_output=True, text=True)
+    check(r.returncode == 0, 'wholeprog: unit A compiles (%s)' % r.stderr[-300:])
+    jobs = [('volatile', a, a_asm)]
+    for mode, extra in (('keys', ['-fplugin-arg-fnvnx_order-keys=' + keys]), ('nokeys', [])):
+        asm = os.path.join(scratch, 'wholeprog_b_%s.s' % mode)
+        r = subprocess.run(['aarch64-linux-gnu-g++'] + BUILD + inc + extra + ['-S', '-o', asm, b], capture_output=True,
+                           text=True)
+        check(r.returncode == 0, 'wholeprog: unit B compiles, %s (%s)' % (mode, r.stderr[-300:]))
+        jobs.append((mode, b, asm))
+    for mode, src, asm in jobs:
+        if not os.path.exists(asm):
+            continue
+        funcs = functions(open(asm).read())
+        exp = [e for e in expectations(src) if e[1] == mode]
+        check(len(exp) >= 4, 'wholeprog %s: %d expectations in %s' % (mode, len(exp), os.path.basename(src)))
+        for fn, _, kind, rx in exp:
+            body = body_of(funcs, fn)
+            if body is None:
+                check(False, 'wholeprog %s: %s not found' % (mode, fn))
+                continue
+            check((re.search(rx, body) is not None) == (kind == 'expect'), 'wholeprog %s: %s %s /%s/' % (mode, fn, kind, rx))
+
+
+def compile_sh_keys(scratch):
+    """tools/link/compile.sh keeps the whole-program key list itself: a two-unit tree, compiled as a one-unit shard
+    (only unit B), still gives B the keys of unit A; ORDER_KEYS=unit does not; a second run rebuilds nothing"""
+    if not shutil.which('jq'):
+        print('skip compile.sh keys: needs jq')
+        return
+    import json
+    tree = os.path.join(scratch, 'cs_tree')
+    out = os.path.join(scratch, 'cs_obj')
+    shutil.rmtree(tree, ignore_errors=True)
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(os.path.join(tree, 'build'))
+    os.makedirs(os.path.join(tree, 'include'))
+    for f in ('wholeprog_a.cpp', 'wholeprog_b.cpp'):
+        shutil.copy(os.path.join(HERE, f), os.path.join(tree, f))
+    shutil.copy(os.path.join(HERE, 'wholeprog.h'), os.path.join(tree, 'include', 'wholeprog.h'))
+    json.dump({'units': [{'source': 'wholeprog_a.cpp'}, {'source': 'wholeprog_b.cpp'}]},
+              open(os.path.join(tree, 'build', 'units.json'), 'w'))
+    shard = os.path.join(scratch, 'cs_shard.list')
+    open(shard, 'w').write('wholeprog_b.cpp\n')
+    env = dict(os.environ)
+    env.setdefault('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
+    env.pop('ORDER_KEYS', None)
+    cs = os.path.join(PORT, 'tools', 'link', 'compile.sh')
+
+    def run(o, extra=None):
+        e = dict(env, **(extra or {}))
+        return subprocess.run(['bash', cs, tree, o, shard, '2'], capture_output=True, text=True, env=e)
+
+    def disasm(o):
+        obj = os.path.join(o, 'wholeprog_b.cpp.o')
+        if not os.path.exists(obj):
+            return ''
+        return subprocess.run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', obj], capture_output=True,
+                              text=True).stdout
+
+    r = run(out)
+    check(r.returncode == 0 and '1 ok, 0 failed' in r.stdout, 'compile.sh keys: shard of unit B compiles (%s)'
+          % (r.stdout + r.stderr)[-300:])
+    keys = os.path.join(out, 'order.keys')
+    want = sorted(l.split('discover:', 1)[1].strip() for l in open(os.path.join(HERE, 'wholeprog_a.cpp'))
+                  if '// discover:' in l)
+    got = open(keys).read().splitlines() if os.path.exists(keys) else None
+    check(got == want, 'compile.sh keys: <obj dir>/order.keys covers the whole tree, not the shard (%s)' % got)
+    d = disasm(out)
+    m = re.search(r'<_Z6unlockP3Obj>:\n(.*?)\n\n', d, re.S)
+    check(bool(m) and '\tstlr\t' in m.group(1), 'compile.sh keys: unit B\'s unlock() stores with stlr')
+    mt = os.path.getmtime(os.path.join(out, 'wholeprog_b.cpp.o'))
+    r = run(out)
+    check(r.returncode == 0 and os.path.getmtime(os.path.join(out, 'wholeprog_b.cpp.o')) == mt and
+          os.path.getmtime(keys) <= mt, 'compile.sh keys: a second run keeps the object and the key list')
+    r = run(out + '_unit', {'ORDER_KEYS': 'unit'})
+    m = re.search(r'<_Z6unlockP3Obj>:\n(.*?)\n\n', disasm(out + '_unit'), re.S)
+    check(r.returncode == 0 and bool(m) and '\tstlr\t' not in m.group(1),
+          'compile.sh keys: ORDER_KEYS=unit leaves unlock() plain (the default bites)')
+    r = run(out + '_missing', {'ORDER_KEYS': os.path.join(scratch, 'no-such.keys')})
+    check(r.returncode == 2, 'compile.sh keys: a missing ORDER_KEYS file is an error, not a silent fallback')
+
+
 X86_RT = r'''
 void v1_puts(const char *s) { int n = 0; while (s[n]) n++; int r;
     __asm__ volatile("int $0x80" : "=a"(r) : "a"(4), "b"(1), "c"(s), "d"(n) : "memory"); }
@@ -243,6 +345,8 @@ def main():
     plugin = r.stdout.strip()
     codegen(scratch, plugin)
     refcount_codegen(scratch, plugin)
+    wholeprog(scratch, plugin)
+    compile_sh_keys(scratch)
     args_order(scratch, plugin)
     litmus(scratch, plugin)
     print('%d failed' % len(FAIL))
