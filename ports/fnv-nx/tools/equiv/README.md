@@ -50,12 +50,17 @@ recipe functions in them is present in its object with exactly the recipe size (
     equiv.py rules                                  every prepare rule with its class (neutral / layout / platform)
     equiv.py prepare DECOMP OUT --rules SPEC        prepare.py with an allow-list ('neutral', 'neutral,-EXC1', 'TAIL1')
     equiv.py build DECOMP TREE --out FP.jsonl [--units all|i,j|FILE] [--objdir D] [--layout] [--eh-off] [--jobs N]
-    equiv.py refp DECOMP FP.jsonl OBJDIR --out NEW.jsonl      fingerprint kept objects again
+    equiv.py refp DECOMP FP.jsonl OBJDIR --out NEW.jsonl [--tree T]   fingerprint kept objects again
     equiv.py compare A.jsonl B.jsonl [--out R.json]          per-unit / per-function differences, retargeted calls
     equiv.py attribute DECOMP TREE A.jsonl B.jsonl --rules SPEC --out X.jsonl [--group N=ID,ID] [--failed]
     equiv.py show DECOMP TREE_A TREE_B --unit I [--fn ADDR]  disassembly diff of one unit (output is decomp-derived)
     equiv.py errors FP.jsonl                        units that did not compile, by first error
     equiv.py bindings DECOMP                        static: platform function names the recipe binds elsewhere
+    equiv.py summarize BASE.jsonl HEAD.jsonl --without NAME=FP.jsonl... [--eh A B]   per-rule table from leave-out runs
+    equiv.py layouts DECOMP OBJDIR_A OBJDIR_B [--show CLASS,..]    MSVC class layouts of two --layout builds
 
-Prepared trees get `msvc/fnvnx_*.h` (MSVC meanings of the fnv-nx shim headers: the real SDK / CRT) and
-`/FI msvc/fnvnx_equiv_compat.h`; both sides get `/FI msvc/fnvnx_equiv_fi.h` (macros only).
+Prepared trees get `msvc/fnvnx_*.h` (MSVC meanings of the fnv-nx shim headers: the real SDK / CRT; `--lean` builds
+the stand-in `<windows.h>` with WIN32_LEAN_AND_MEAN) and `/FI msvc/fnvnx_equiv_compat.h`; both sides get
+`/FI msvc/fnvnx_equiv_fi.h` (macros only). A prepared tree's own build/units.json (S1b renames) is used where the
+pristine name of a function is not in its object. `fnvnx_equiv_unaw.h` is generated from the SDK in use into
+`~/.cache/fnvnx-equiv/` (never committed).
