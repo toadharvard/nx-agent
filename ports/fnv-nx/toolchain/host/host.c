@@ -192,6 +192,7 @@ static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) 
         set_cpu_boost(args[0] ? 1 : 0);
         return 0;
     }
+    if (fn == FNVNX_PLAT_THREAD_ACTIVITY && nargs >= 2) return h_thread_activity(args[0], args[1]);
     return FNVNX_EXT_NO_MODULE;
 }
 

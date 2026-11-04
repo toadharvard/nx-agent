@@ -120,8 +120,16 @@ int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask) {
     uint64_t spec = FNVNX_CPU_SPEC(ideal < 0 ? FNVNX_CPU_KEEP : (unsigned)ideal, mask);
     return fnvnx_hcall2(fnvnx_host->thread_set_cpu, id, spec) ? -1 : 0;
 }
-int os_thread_suspend(os_thread *t) { (void)t; return -1; }
-int os_thread_resume(os_thread *t) { (void)t; return -1; }
+/* another thread: the host pauses or resumes it (svcSetThreadActivity); the calling thread (NULL) cannot be paused
+ * by the kernel, thread.cpp blocks it instead. An older host without the call answers FNVNX_EXT_NO_MODULE. */
+static int thread_activity(os_thread *t, int paused) {
+    uint64_t id;
+    if (!t || host_id_of(t, &id) || !id || !fnvnx_host->ext_call) return -1;
+    uint64_t arg[2] = {id, paused ? 1u : 0u};
+    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_ACTIVITY, FNVNX_ADDR(arg), 2) ? -1 : 0;
+}
+int os_thread_suspend(os_thread *t) { return thread_activity(t, 1); }
+int os_thread_resume(os_thread *t) { return thread_activity(t, 0); }
 void os_thread_exit(void) { fnvnx_thread_exit(NULL); }
 /* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
  * (sdmc:/switch/fnv/fnvnx.ini boost_loading=0) turns it off */
