@@ -149,6 +149,25 @@ class History:
         r = subprocess.run(['git', '-C', self.repo, *a], capture_output=True, text=True)
         return r.stdout.strip() if r.returncode == 0 else None
 
+    patch_root = None           # fixtures: <dir>/<commit12>/*.s1b stands for patches/ at that commit
+
+    def patch_sites(self, commit):
+        """the S1b sites (src, caller address) of patches/*.s1b at commit; None when that commit is unknown"""
+        if not commit:
+            return None
+        if self.table is not None:
+            d = os.path.join(self.patch_root or '', commit[:12])
+            if not (self.patch_root and os.path.isdir(d)):
+                return None
+            return patch_sites(readf(os.path.join(d, f)) for f in sorted(os.listdir(d)) if f.endswith('.s1b'))
+        c = self._git('rev-parse', '--verify', '-q', commit + '^{commit}')
+        if not c:
+            return None
+        names = self._git('ls-tree', '--name-only', c, 'patches/')
+        if names is None:
+            return None
+        return patch_sites(self._git('show', '%s:./%s' % (c, n)) or '' for n in names.split() if n.endswith('.s1b'))
+
     def behind(self, commit):
         if not commit:
             return None
@@ -170,6 +189,34 @@ class History:
 
 
 # ------------------------------------------------------------------------------------------------- parsers
+
+def patch_sites(texts):
+    """(src, caller address) of every `@@ RULE src 0xADDR` hunk (patches/*.s1b, as tests/s1b/pop/abiclass.py)"""
+    out = set()
+    for t in texts:
+        for m in re.finditer(r'^@@ \w+ (\S+) (0x[0-9a-fA-F]+)', t or '', re.M):
+            out.add((m.group(1), int(m.group(2), 16)))
+    return out
+
+
+ABICLASS_RANK = ['fix-other', 'fix-donor', 'ecx', 'bridge-gap', 'other', 'patched', 'benign-more', 'benign-unread',
+                 'benign-nocall', 'benign-conv']        # tests/s1b/pop/abiclass.py: a pair's verdict is its worst call's
+
+
+def parse_abiclass(text):
+    """S1b's abiclass.py table (#verdict boot src caller callee ref_msvc abi_verdict classes) -> {(abi verdict,
+    src, callee, ref): [(verdict, caller address or None)]}; None when it is not that table"""
+    if not text or not text.startswith('#verdict\tboot\tsrc\tcaller'):
+        return None
+    out = {}
+    for l in text.splitlines()[1:]:
+        f = l.split('\t')
+        if len(f) < 8 or l.startswith('#'):
+            continue
+        caller = int(f[3], 16) if re.fullmatch(r'[0-9a-fA-F]+', f[3]) else None
+        out.setdefault((f[6], f[2], f[4], f[5]), []).append((f[0], caller))
+    return out
+
 
 def num(s):
     return int(s.replace(',', '').replace(' ', ''))
@@ -555,12 +602,13 @@ def fuzz_policy(port):
 # ------------------------------------------------------------------------------------------------- scorecard
 
 class Card:
-    def __init__(self, store, hist, th, port=PORT, render=None):
+    def __init__(self, store, hist, th, port=PORT, render=None, abiclass_dir=None):
         self.store, self.hist, self.th, self.port = store, hist, th, port
         self.render = render or {}      # load_render(): text, branch, path, hist (distances on the render branch)
         self.gates = []
         self.boot_info = {}             # S5's boot/milestones.json beyond the milestones: image, peak heap, stub
         self.maxb = th.get('max_commits_behind', 25)
+        self.abiclass_dir = abiclass_dir        # the gates job's abiclass tables, <c12>.tsv (decomp-derived: never published)
 
     # ---- sources
     def src(self, branch, path, commit, published=None):
@@ -568,14 +616,18 @@ class Card:
         return dict(branch=branch, path=path, commit=(commit or '')[:12], behind=b, published=published,
                     stale=b is None or b > self.maxb)   # b < 0: newer than the head, fresh
 
+    def report_branches(self, prefix=''):
+        """reports/<prefix>* branches, try farms left out: they run agents' unmerged wip heads (push_wip.sh), so
+        nothing they publish is evidence for the integration head (V1 R14)"""
+        return [br for br in self.store.branches('reports/' + prefix)
+                if not re.match(r'try\d+of\d+$', br.split('/', 1)[1])]
+
     def newest(self, prefix, pattern, parser, accept=lambda d: True):
         """{farm: (parsed, source)}: per farm branch under reports/<prefix>, the newest report matching pattern
         that parses and is accepted"""
         out = {}
-        for br in self.store.branches('reports/' + prefix):
+        for br in self.report_branches(prefix):
             farm = br.split('/', 1)[1]
-            if re.match(r'try\d+of\d+$', farm):
-                continue        # try farms run unmerged work
             for path, t in self.store.files(br):
                 if not re.search(pattern, path):
                     continue
@@ -644,7 +696,8 @@ class Card:
             d, s = c['farm1']
             self.gate('compile.census', 'Compile', 'census: units that compile clean', '%d/%d' % (d['clean'], d['units']),
                       '%d/%d' % (units, units), PASS if d['clean'] == d['units'] == units else FAIL, s,
-                      '%d failing, %s errors' % (d['failing'], d['errors']), rank=12)
+                      '%d failing, %s errors' % (d['failing'], d['errors']), rank=12, errors=d['errors'],
+                      failing=d['failing'])
         else:
             self.nodata('compile.census', 'Compile', 'census: units that compile clean', '%d/%d' % (units, units),
                         'no census report on reports/farm1', rank=12)
@@ -734,6 +787,7 @@ class Card:
             xinc = [r for r in rows if len(r) > 6 and r[5] == 'x86-inconsistent']
             un = [r for r in xinc if not set(re.sub(r'\([^)]*\)', '', r[6]).split(',')) <= explained]
             manual = [r for r in rows if len(r) > 6 and r[5] == 'manual']
+            un, by_verdict, ac_src, ac_note = self.abiclass_explained(br, un)
             cl = {}
             for r in un:
                 for c in re.sub(r'\([^)]*\)', '', r[6]).split(','):
@@ -741,10 +795,18 @@ class Card:
                         cl[c] = cl.get(c, 0) + 1
             top = ', '.join('%s %d' % kv for kv in sorted(cl.items(), key=lambda x: -x[1])[:5])
             asrc = dict(s, branch=br, path='out/abi.tsv')
+            by_class = len(xinc) - len(un) - sum(v for k, v in by_verdict.items() if k in self.abi_verdicts())
             self.gate('abi.x86_inconsistent', 'ABI', 'S2 x86-inconsistent pairs not explained',
-                      len(un), '0', PASS if not un else FAIL, asrc,
-                      '%d x86-inconsistent, %d explained (classes %s only); open: %s' % (
-                          len(xinc), len(xinc) - len(un), '+'.join(sorted(explained)) or '-', top), rank=6)
+                      len(un), '0', PASS if not un else FAIL, [asrc] + ([ac_src] if ac_src else []),
+                      '%d x86-inconsistent; explained: %d by class (%s), %d by S1b abiclass verdicts (%s); open: %s; '
+                      'open by abiclass verdict: %s' % (
+                          len(xinc), by_class, '+'.join(sorted(explained)) or '-',
+                          sum(v for k, v in by_verdict.items() if k in self.abi_verdicts()),
+                          ac_note or ', '.join('%s %d' % (k, by_verdict[k]) for k in sorted(by_verdict)
+                                               if k in self.abi_verdicts()) or 'none', top,
+                          ', '.join('%s %d' % kv for kv in sorted(by_verdict.items(), key=lambda x: (-x[1], x[0]))
+                                    if kv[0] not in self.abi_verdicts()) or '-'),
+                      rank=6, abiclass=by_verdict)
             self.gate('abi.manual', 'ABI', 'S2 pairs with a manual verdict (no automatic bridge)', len(manual), '0',
                       PASS if not manual else FAIL, asrc, rank=7)
         elif L and L.get('x86_inconsistent') is not None:
@@ -756,6 +818,57 @@ class Card:
         else:
             self.nodata('abi.x86_inconsistent', 'ABI', 'S2 x86-inconsistent pairs not explained', '0', 'no link', rank=6)
             self.nodata('abi.manual', 'ABI', 'S2 pairs with a manual verdict', '0', 'no link', rank=7)
+
+    def abi_verdicts(self):
+        """abiclass verdicts that explain a pair (thresholds abi_explained_verdicts; S1b, J-0141)"""
+        return set(self.th.get('abi_explained_verdicts', []))
+
+    def abiclass_explained(self, br, un):
+        """(rows still open, {verdict: rows}, source, note): S1b's abiclass.py table for this link
+        (<--abiclass dir>/<c12>.tsv from the gates job, else link/<c12>/out/abiclass.tsv) explains a row when every
+        call of its pair has a verdict of abi_explained_verdicts. `patched` holds only while the site is an S1b hunk
+        at the head and was not yet one at the link's commit: a site the link already had and whose row is still
+        there was not fixed by its patch (patched-in-link); a site the head no longer has is patched-gone; with the
+        link commit's patches unknown, patched-unverified. Rows the table does not cover: no-verdict"""
+        ok = self.abi_verdicts()
+        if not ok or not br:
+            return un, {}, None, 'abi_explained_verdicts not set' if not ok else None
+        c12 = br[5:]
+        text, src = None, None
+        f = os.path.join(self.abiclass_dir, c12 + '.tsv') if self.abiclass_dir else None
+        if f and os.path.isfile(f):
+            text = readf(f)
+            src = dict(branch='gates job', path='S1b abiclass.py of link/%s at the head' % c12,
+                       commit=(self.hist.head or '')[:12], behind=0, published=None, stale=False)
+        elif self.store.exists(br, 'out/abiclass.tsv'):
+            text = self.store.read(br, 'out/abiclass.tsv')
+            src = self.src(br, 'out/abiclass.tsv', c12)
+        tbl = parse_abiclass(text)
+        if tbl is None:
+            return un, {}, None, 'no abiclass table for %s' % br
+        head_sites = patch_sites(readf(os.path.join(self.port, 'patches', n))
+                                 for n in sorted(os.listdir(os.path.join(self.port, 'patches')))
+                                 if n.endswith('.s1b')) if os.path.isdir(os.path.join(self.port, 'patches')) else set()
+        link_sites = self.hist.patch_sites(c12)
+        rest, by = [], {}
+        for r in un:
+            calls = tbl.get((r[5], r[0].replace('#vtables', ''), r[2], r[3]))
+            vs = []
+            for v, caller in calls or []:
+                site = (r[0].replace('#vtables', ''), caller)
+                if v == 'patched':
+                    v = ('patched-gone' if site not in head_sites else 'patched-unverified' if link_sites is None
+                         else 'patched-in-link' if site in link_sites else v)
+                vs.append(v)
+            # a pair counts by its worst call (abiclass's rank; patched-gone / -in-link / -unverified rank first)
+            rank = lambda v: ABICLASS_RANK.index(v) if v in ABICLASS_RANK else -1
+            if vs and all(v in ok for v in vs):
+                worst = min(vs, key=rank)
+            else:
+                worst = min((v for v in vs if v not in ok), key=rank) if vs else 'no-verdict'
+                rest.append(r)
+            by[worst] = by.get(worst, 0) + 1
+        return rest, by, src, None
 
     def equiv_gates(self):
         n = self.th['equiv_shards']
@@ -864,6 +977,51 @@ class Card:
                       PASS if cov >= want and not missing and ver <= with_obj else FAIL, srcs, note, rank=19)
         else:
             self.nodata('fuzz.coverage', 'Fuzz', 'S13 coverage', '>= 90 %', 'no fuzz report', rank=19)
+        self.s13_metric_gate(n)
+
+    def s13_metric_gate(self, n):
+        """S13's own convergence metric, tools/difffuzz/metric.py of this checkout (artifacts + not fuzzable +
+        unpublished shards, fnvnx-s13-metric/1), run on the artifacts repository; fixtures: <dir>/_s13_metric.json.
+        Informative: the hard divergences are fuzz.hard; this is the harness's distance from a complete campaign"""
+        title = 'S13 metric: artifact divergences + functions not fuzzable + unpublished shards (difffuzz/metric.py)'
+        m, why = None, None
+        if getattr(self.store, 'gitdir', None):
+            mod = load_module(self.port, os.path.join('tools', 'difffuzz', 'metric.py'), 'fnvnx_difffuzz_metric')
+            if mod is None:
+                why = 'no tools/difffuzz/metric.py in this checkout'
+            else:
+                try:
+                    m = mod.measure(self.store.gitdir, self.hist.repo, n)
+                except Exception as e:          # noqa: BLE001 - a broken tool must not hide the other gates
+                    why = 'metric.py failed: %s: %s' % (type(e).__name__, str(e)[:80])
+        else:
+            f = os.path.join(getattr(self.store, 'root', ''), '_s13_metric.json')
+            try:
+                m = json.loads(readf(f)) if os.path.isfile(f) else None
+            except ValueError:
+                m = None
+            why = None if m else 'no S13 metric (fixtures: _s13_metric.json)'
+        tot = dct(dct(m).get('totals'))
+        if not isinstance(tot.get('metric'), int):
+            self.nodata('fuzz.s13_metric', 'Fuzz', title, '0', why or 'metric.py gave no totals', rank=19,
+                        required=False)
+            return
+        shards = [s for s in dct(m).get('shards') or [] if isinstance(s, dict)]
+        srcs = [self.src('reports/fz%d' % s['shard'], '%s-fuzz.md' % s['good'], s['good'])
+                for s in shards if s.get('good')]
+        bad = [str(s.get('shard')) for s in shards if s.get('newest_status') != 'ok']
+        note = 'artifacts %s + not fuzzable %s (coverage %s %%) + unpublished shards %s%s; artifact causes: %s' % (
+            tot.get('artifacts'), tot.get('not_fuzzable'), tot.get('coverage'), tot.get('unpublished'),
+            ' (%s)' % ','.join(bad) if bad else '',
+            ', '.join('%s %s' % kv for kv in list(dct(m.get('artifact_causes')).items())[:6]) or '-')
+        tr = dct(self.th.get('fuzz_s13_metric'))
+        st = PASS if tot['metric'] == 0 else FAIL
+        if tr.get('trusted') is False:
+            # the value is shown, but a refuted tool decides nothing until its stream fixes it
+            st, note = NODATA, 'not trusted: %s; %s' % (tr.get('why') or 'refuted', note)
+        self.gate('fuzz.s13_metric', 'Fuzz', title, tot['metric'], '0', st, srcs,
+                  note, rank=19, required=False, terms={k: tot.get(k) for k in ('artifacts', 'not_fuzzable',
+                                                                                 'unpublished', 'coverage')})
 
     def fuzz_table_gate(self, shards, srcs, missing, n):
         """fuzz.hard from the reports' hard-divergence tables (reports without an fnvnx-causes block)"""
@@ -956,7 +1114,8 @@ class Card:
             note += '; shards not covered: %s' % ','.join(map(str, nocov))
         st = FAIL if hard_fn else PASS if not nocov else NODATA
         self.gate('fuzz.hard', 'Fuzz', 'S13: functions with a real-bug or triage divergence (S13b causes)', hard_fn,
-                  '0', st, srcs, note, rank=11, by_class={c: by[c]['functions'] for c in by}, owners=owners)
+                  '0', st, srcs, note, rank=11, by_class={c: by[c]['functions'] for c in by}, owners=owners,
+                  divergences=hard_div)
         art = by.get('artifact', dict(functions=0, divergences=0, causes={}))
         self.gate('fuzz.artifacts', 'Fuzz', 'S13: functions whose worst divergence is a harness artifact (S13 fixes)',
                   art['functions'], '0', PASS if not art['functions'] else FAIL, srcs, 'not the port (causes.py POLICY); '
@@ -1018,7 +1177,8 @@ class Card:
         got = meta.get('boot_image_sha256')
         got = got.lower() if isinstance(got, str) else None
         reached = self.milestones(br, meta, d)
-        label = self.boot_info.get('image') or meta.get('boot_image')     # S5: "player exe" | "synthesized" | none
+        labels = self.image_labels(meta, d)
+        label = labels[0][1] if labels and len(set(v for _, v in labels)) == 1 else None
         if got and want:
             real = got == want
             self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes' if real else
@@ -1029,18 +1189,25 @@ class Card:
             real = None
             self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
                         'image sha256 %s.. not checked: %s' % (got[:8], why_not), rank=1, sources=[s])
-        elif label in ('player exe', 'synthesized'):
-            # no hash to compare: S5's image label (boot/milestones.json "image", meta.json boot_image)
-            real = label == 'player exe'
-            self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe',
-                      'yes' if real else 'no (synthesized image)', 'yes', PASS if real else FAIL, s,
-                      'image "%s" (S5 label; no image hash to check)' % label, rank=1)
-        elif 'synth' in (d.get('image') or ''):
+        elif len(set(v for _, v in labels)) > 1:
+            # no hash, and the labels disagree: none of them stands for the image (V1 R13)
+            real = None
+            self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
+                        'no image hash, and the image labels contradict each other: %s' % ', '.join(
+                            '%s "%s"' % kv for kv in labels), rank=1, sources=[s])
+        elif label == 'synthesized' and labels[0][0] == 'report data image':
             # no hash to compare (link/<c12> not kept), but the report names the synthesized image
             real = False
             self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'no (synthesized image)',
                       'yes', FAIL, s, 'data image %s; no image hash (link/%s not kept)' % (
                           os.path.basename(d['image']), (d['_text_commit'] or '')[:12]), rank=1)
+        elif label in ('player exe', 'synthesized') and any(k != 'report data image' for k, _ in labels):
+            # no hash to compare: S5's image label (boot/milestones.json "image", meta.json boot_image), and nothing
+            # that says otherwise; the report's data image line alone only ever fails the gate (its text is free)
+            real = label == 'player exe'
+            self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe',
+                      'yes' if real else 'no (synthesized image)', 'yes', PASS if real else FAIL, s,
+                      'image "%s" (S5 label: %s; no image hash to check)' % (label, ' = '.join(k for k, _ in labels)), rank=1)
         else:
             real = None
             self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
@@ -1064,6 +1231,25 @@ class Card:
         sk = d.get('init_skips')
         self.gate('boot.init_skips', 'Emulated boot', 'static initializers skipped after a fault', sk, '0',
                   NODATA if sk is None else PASS if sk == 0 else FAIL, s, (d.get('stop') or '')[:120], rank=6)
+
+    def image_labels(self, meta, d):
+        """[(where, "player exe" | "synthesized" | the unknown value)]: every claim about the boot image besides its
+        hash: S5's boot/milestones.json image (and its stub boot's), meta.json boot_image, and the full report's
+        `- data image:` line (synth* -> synthesized, FalloutNV.exe / the owner's exe -> player exe). A value that is
+        none of the two is kept as itself, so it contradicts any known label rather than vanishing"""
+        out = []
+        for where, v in (('milestones.json image', self.boot_info.get('image')),
+                         ('milestones.json stub image', dct(self.boot_info.get('stub')).get('image')),
+                         ('meta.json boot_image', meta.get('boot_image'))):
+            if v is not None:
+                out.append((where, v if isinstance(v, str) else repr(v)))
+        im = d.get('image')
+        if im:
+            b = os.path.basename(im.strip())
+            out.append(('report data image', 'synthesized' if 'synth' in b.lower() else
+                        'player exe' if b.lower() == 'falloutnv.exe' or im.strip() == "the owner's FalloutNV.exe"
+                        else 'data image ' + b))
+        return out
 
     def milestones(self, br, meta, d):
         """S5's machine-readable milestones, by precedence: boot/milestones.json (fnvnx-boot-milestones/1,
@@ -1105,7 +1291,7 @@ class Card:
 
     def frames_gate(self):
         hits = []
-        for br in self.store.branches('reports/'):
+        for br in self.report_branches():
             for path, t in self.store.files(br):
                 if re.search(r'-frames\.json$', path):
                     hits.append((t, br, path))
@@ -1153,12 +1339,13 @@ class Card:
             note.append('%d malformed scene entries' % (len(g['scenes']) - len(sc)))
         note += ['%s %s' % (name(x), x.get('status', '')) if 'status' in x else name(x) for x in sc if not passed(x)]
         self.gate('frames.compare', 'Frame and scene comparison', title, '%d/%d' % (ok, len(g['scenes'])),
-                  'all scenes', PASS if good else FAIL, self.src(br, path, commit, t), ', '.join(note), rank=5)
+                  'all scenes', PASS if good else FAIL, self.src(br, path, commit, t), ', '.join(note), rank=5,
+                  scenes_ok=ok, scenes=len(g['scenes']))
 
     def perf_gates(self):
         p = self.th['perf']
         hits = []
-        for br in self.store.branches('reports/'):
+        for br in self.report_branches():
             for path, t in self.store.files(br):
                 if path.endswith('-frameprof.json'):
                     hits.append((t, br, path))
@@ -1360,7 +1547,7 @@ class Card:
                       'report: %s' % (self.fps_note(lv, lname), ', '.join(
                           '%s fps %s' % (k, next((dct(tg.get(k))[a] for a in [name] + cfg.get('aliases', [])
                                                  if a in dct(tg.get(k))), '?')) for k in sorted(tg))), rank=22,
-                      required=req, levels=dict(lv, level=lname))
+                      required=req, levels=dict(lv, level=lname), ms=dict(lo=lo, hi=hi))
 
     def budget_gate(self):
         """S15's whole-frame CPU budget (tools/perf/frame_budget.py, fnvnx-frame-budget/1): the newest
@@ -1372,7 +1559,7 @@ class Card:
         scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'pass_45')
         doc, src = None, None
         hits = []
-        for br in self.store.branches('reports/'):
+        for br in self.report_branches():
             for path, t in self.store.files(br):
                 if path.endswith('-frame-budget.json'):
                     hits.append((t, br, path))
@@ -1424,7 +1611,8 @@ class Card:
                         'B1 on hardware)' if v != 'pass' else 'model only, needs a measurement') + '; ' + note)
             self.gate(gid, 'Performance', title, 'worst frame %s ms mid (%s - %s)' % (
                 wf.get('mid', '?'), wf.get('lo', '?'), wf.get('hi', '?')), thr, st, src, note, rank=22, required=req,
-                      level=res.get('level'), verdicts=res.get('verdicts'))
+                      level=res.get('level'), verdicts=res.get('verdicts'), worst_frame_ms=wf,
+                      measured='+'.join(measured) or None)
 
     def package_gates(self):
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
@@ -1516,7 +1704,7 @@ def fmt_src(srcs):
     if None in bs and known:
         worst += ', %d not on the head\'s history' % bs.count(None)
     farms = sorted(set(s['branch'].split('/')[-1] for s in srcs), key=lambda f: (re.sub(r'\d+$', '', f),
-                                                                                 int(re.sub(r'^\D*', '', f) or 0)))
+                                                                                 int(re.search(r'\d*$', f).group() or 0)))
     commits = sorted(set(s['commit'] for s in srcs))
     return '%d reports (%s) @%s (%s)' % (len(srcs), short_list(farms), short_list(commits, 3), worst)
 
@@ -1535,13 +1723,112 @@ def missing(gates):
                   key=lambda g: (g['rank'], g['id']))
 
 
-def markdown(head, gates, risks, generated):
+def scorecard(gates, th):
+    """the honest scorecard: one number per stage, the gap still to close, taken from the gates (so from the farm
+    reports they cite). Rows: [{stage, what, value, target, gap, unit, status: done|open|no-data, stale, gates,
+    sources, note}]; gap is how far the value is from its target (0 = done), None when nobody measures it"""
+    G = {g['id']: g for g in gates}
+    sc = th.get('scorecard', {})
+    fps = sc.get('frame_fps', 60)
+    clocks = {c['name']: c for c in th['perf']['clocks']}
+    clk = clocks.get(sc.get('frame_clock', 'stock')) or list(clocks.values())[0]
+    target_ms = round(1000.0 / fps, 1)
+    rows = []
+
+    def row(stage, what, ids, value, target, gap, unit='', note=''):
+        gs = [G[i] for i in ids if i in G]
+        srcs = list({(s['branch'], s['path']): s for g in gs for s in g['sources']}.values())
+        st = 'no-data' if gap is None else 'done' if gap <= 0 else 'open'
+        rows.append(dict(stage=stage, what=what, value=value, target=target, gap=gap, unit=unit, status=st,
+                         stale=any(s['stale'] for s in srcs), gates=[g['id'] for g in gs], sources=srcs, note=note))
+
+    def val(i, key='value'):
+        g = G.get(i)
+        if not g or g['status'] == NODATA:
+            return None
+        v = g.get(key)
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    e = val('compile.census', 'errors')
+    row('compile', 'census errors', ['compile.census'], e, 0, e,
+        note='%s failing units' % G['compile.census'].get('failing', '?') if 'compile.census' in G else '')
+    u = val('link.undefined')
+    row('link', 'trial-link undefined names', ['link.undefined'], u, 0, u)
+    tr = val('link.traps')
+    row('link', 'guest functions bound to trap stubs', ['link.traps'], tr, 0, tr)
+    x, m = val('abi.x86_inconsistent'), val('abi.manual')
+    row('ABI', 'ABI rows open (x86-inconsistent not explained + manual)', ['abi.x86_inconsistent', 'abi.manual'],
+        None if x is None or m is None else x + m, 0, None if x is None or m is None else x + m,
+        note='x86-inconsistent %s, manual %s' % (x, m))
+    fd, ff = val('fuzz.hard', 'divergences'), val('fuzz.hard')
+    fz = fd if fd is not None else ff
+    row('fuzz', 'hard divergences (real-bug + triage)' if fd is not None else 'functions with a hard divergence',
+        ['fuzz.hard', 'fuzz.coverage'], fz, 0, fz,
+        note='%s functions; coverage %s' % (ff, G['fuzz.coverage']['value'] if 'fuzz.coverage' in G else '-'))
+    sm = G.get('fuzz.s13_metric')
+    s13 = sm['value'] if sm and isinstance(sm.get('value'), int) else None
+    row('fuzz', 'S13 metric: artifacts + not fuzzable + unpublished shards (difffuzz/metric.py)',
+        ['fuzz.s13_metric'], s13, 0, s13 if sm and sm['status'] != NODATA else None, note=sm['note'] if sm else '')
+    ec, en = val('equiv.code'), val('equiv.nobuild')
+    eq = None if ec is None or en is None else ec + en
+    row('equivalence', 'S11 diffs not by design (functions + units)', ['equiv.code', 'equiv.nobuild'], eq, 0, eq,
+        note='functions %s, units %s' % (ec, en))
+    names = th['boot_milestones']
+    bg = [G.get('boot.' + n) for n in names]
+    known = [g for g in bg if g and g['status'] != NODATA]
+    reached = sum(1 for g in bg if g and g['status'] == PASS)
+    real = G.get('boot.real_exe', {}).get('status')
+    row('boot', 'milestones reached on the real exe', ['boot.real_exe'] + ['boot.' + n for n in names],
+        '%d/%d' % (reached, len(names)), '%d/%d' % (len(names), len(names)),
+        (len(names) - reached) if known or real == FAIL else None, 'milestones',
+        note='real exe: %s; %s' % (real or '-', ', '.join('%s %s' % (n, g['status'] if g else '-')
+                                                          for n, g in zip(names, bg))))
+    fr = G.get('frames.compare')
+    ok, n = (fr.get('scenes_ok'), fr.get('scenes')) if fr and fr['status'] != NODATA else (None, None)
+    row('render parity', 'S16 scenes matching the reference', ['frames.compare'],
+        None if n is None else '%d/%d' % (ok, n), 'all', None if n is None else (n - ok) if n else None, 'scenes',
+        note=fr['note'] if fr else '')
+    bgid = 'perf.budget.' + clk['name']
+    b = G.get(bgid)
+    wf = dct(b.get('worst_frame_ms')) if b else {}
+    mid = wf.get('mid') if posnum(wf.get('mid')) else None      # S15's headline number; lo / hi in the note
+    row('frame budget', 'worst frame at %.2f GHz (S15, mid case), target %d fps' % (clk['hz'] / 1e9, fps), [bgid],
+        mid, target_ms, None if mid is None else round(max(0.0, mid - target_ms), 1), 'ms',
+        note='lo %s, hi %s; %s' % (wf.get('lo', '?'), wf.get('hi', '?'),
+                                     'measured: ' + b['measured'] if b and b.get('measured') else
+                                     'model only [E], not measured'))
+    cfg = sc.get('gpu_config', 'handheld_720p')
+    gg = G.get('perf.gpu.' + cfg)
+    gh = dct(gg.get('ms')).get('hi') if gg else None
+    row('frame budget', 'GPU frame, %s (render model, efficiency 0.6)' % cfg.replace('_', ' '), ['perf.gpu.' + cfg],
+        gh, target_ms, None if not posnum(gh) else round(max(0.0, gh - target_ms), 1), 'ms',
+        note='model, not measured (RENDER_PERF.md section 9)')
+    return rows
+
+
+def scorecard_md(rows):
+    L = ['## Scorecard', '', 'One number per stage and the gap still to close (0 = done); sources are the farm reports '
+         'the gates cite (docs/READINESS.md, "Scorecard").', '',
+         '| stage | what | value | target | gap | status | source | note |', '|---|---|---|---|---|---|---|---|']
+    fmt = lambda v: '-' if v is None else '{:,}'.format(v) if isinstance(v, int) else str(v)
+    for r in rows:
+        L.append('| %s | %s | %s | %s | %s | **%s%s** | %s | %s |' % (
+            r['stage'], r['what'], fmt(r['value']), fmt(r['target']),
+            fmt(r['gap']) + (' ' + r['unit'] if r['unit'] and r['gap'] is not None else ''), r['status'],
+            ' (stale)' if r['stale'] and r['status'] == 'done' else '', fmt_src(r['sources']),
+            str(r['note']).replace('|', '/')))
+    return L + ['']
+
+
+def markdown(head, gates, risks, generated, rows=None):
     v, c = verdict(gates)
     L = ['# fnv-nx first-launch readiness %s' % (head or '?')[:12], '',
          '- integration head: `%s`; generated %s' % (head or '?', generated),
          '- verdict: **%s**: %d pass, %d fail, %d no-data, %d stale passes, of %d gates; %d more informative' % (
              v, c[PASS], c[FAIL], c[NODATA], c['stale'], len(gates) - c['informative'], c['informative']),
          '- thresholds: tools/gates/thresholds.json; gates and why: docs/READINESS.md', '']
+    if rows:
+        L += scorecard_md(rows)
     for grp in ORDER:
         gs = [g for g in gates if g['group'] == grp]
         if not gs:
@@ -1603,6 +1890,7 @@ def main(argv):
     ap.add_argument('--port', default=PORT, help='ports/fnv-nx checkout at the head (placement, PATCHES.md, ...)')
     ap.add_argument('--thresholds', default=os.path.join(HERE, 'thresholds.json'))
     ap.add_argument('--risks', default=os.path.join(HERE, 'hardware_risks.json'))
+    ap.add_argument('--abiclass', help='directory of S1b abiclass.py tables, <link c12>.tsv (tools/farm/gates_job.sh)')
     ap.add_argument('--md')
     ap.add_argument('--json')
     a = ap.parse_args(argv)
@@ -1611,6 +1899,7 @@ def main(argv):
         store = DirStore(a.fixtures)
         cj = os.path.join(a.fixtures, '_commits.json')
         hist = History(head=a.head or 'fixture', table=json.loads(readf(cj)) if os.path.isfile(cj) else {})
+        hist.patch_root = os.path.join(a.fixtures, '_patches')
     else:
         gd = a.artifacts or os.environ.get('ARTIFACTS') or '/home/user/fnv-nx-build'
         if os.path.isdir(os.path.join(gd, '.git')):
@@ -1620,10 +1909,11 @@ def main(argv):
             store.fetch()
         hist = History(head=a.head, repo=a.port)
     render = load_render(th, a.port, a.fetch, a.fixtures, hist.table, None if a.fixtures else hist.head)
-    card = Card(store, hist, th, port=a.port, render=render).run()
+    card = Card(store, hist, th, port=a.port, render=render, abiclass_dir=a.abiclass).run()
     risks = json.loads(readf(a.risks)) if os.path.isfile(a.risks) else []
     gen = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-    md = markdown(hist.head, card.gates, risks, gen)
+    rows = scorecard(card.gates, th)
+    md = markdown(hist.head, card.gates, risks, gen, rows)
     v, c = verdict(card.gates)
     if a.md:
         writef(a.md, md)
@@ -1632,7 +1922,8 @@ def main(argv):
     if a.json:
         writef(a.json, json.dumps(dict(head=hist.head, generated=gen, verdict=v, counts=c, max_commits_behind=card.maxb,
                        gates=card.gates, blockers=[g['id'] for g in blockers(card.gates)],
-                       missing=[g['id'] for g in missing(card.gates)], hardware_risks=risks), indent=1) + '\n')
+                       missing=[g['id'] for g in missing(card.gates)], scorecard=rows, hardware_risks=risks),
+                                  indent=1) + '\n')
     return 0
 
 
