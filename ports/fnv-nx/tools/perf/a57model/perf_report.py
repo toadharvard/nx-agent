@@ -43,6 +43,7 @@ def main(argv=None):
     ap.add_argument('--top', type=int, default=40)
     ap.add_argument('--mca-cache')
     ap.add_argument('--region')
+    ap.add_argument('--funcs', help="funcmodel.py's JSON: the per-frame function rows (frame_hotspots[])")
     a = ap.parse_args(argv)
     params = cost.load_params(a.params)
     mca = cost.MCA(a.mca_cache)
@@ -104,6 +105,15 @@ def main(argv=None):
                    'l1d_misses': int(t1['l1d_miss']), 'l2_misses': int(t1['l2_miss']), 'mispredicts': int(t1['mispred'])},
         'hotspots': rows,
     }
+    if a.funcs and os.path.exists(a.funcs):
+        with open(a.funcs) as f:
+            fm = json.load(f)
+        out['frame_hotspots'] = [{'id': r['id'], 'functions': r['funcs'], 'minsn_frame': r.get('minsn_frame'),
+                                  'cpi': [r.get('cpi'), r.get('cpi_once')], 'cycles_per_call': r.get('cycles_per_call'),
+                                  'mcycles_frame': r.get('mcycles_frame'), 'ms_1020': r.get('ms_1020'),
+                                  'basis': 'static A57 model (funcmodel.py) x instructions of PERF.md 11.4', 'src': r.get('src')}
+                                 for r in fm.get('rows', [])]
+        out['frame_coverage'] = fm.get('coverage')
     with open(a.out, 'w') as f:
         json.dump(out, f, indent=1)
     T = out['totals']
@@ -121,6 +131,14 @@ def main(argv=None):
         lines.append(f"| {i} | `{r['function'][:60]}` | {r['orig']} | {r['instructions']:,} | {r['cycles_est']:,} | "
                      f"{r['ms_1020']} | {r['ipc']} | {r['cache_misses']['l1d']:,} | {r['cache_misses']['l2']:,} | "
                      f"{r['mispredicts']:,} | {r['pct_of_frame']} | {r['bound']} |")
+    if out.get('frame_hotspots'):
+        fc = out.get('frame_coverage') or {}
+        lines += ['', f"Per-frame function rows (PERF.md 11.4 instructions x the static A57 model): {fc.get('covered_minsn')} M "
+                      f"of {fc.get('main_minsn_frame')} M main-thread instructions ({fc.get('covered_pct')} %), "
+                      f"{fc.get('covered_ms_1020')} ms at 1.02 GHz (flat IPC 0.8: {fc.get('covered_ms_1020_flat_ipc08')} ms)", '',
+                  '| row | M insns/frame | CPI (steady-once) | cycles/call | ms 1.02 |', '|---|---:|---|---|---|']
+        for r in out['frame_hotspots']:
+            lines.append(f"| {r['id']} | {r['minsn_frame']} | {r['cpi'][0]}-{r['cpi'][1]} | {r['cycles_per_call']} | {r['ms_1020']} |")
     text = '\n'.join(lines) + '\n'
     if a.md:
         with open(a.md, 'w') as f:

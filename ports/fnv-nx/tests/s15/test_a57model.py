@@ -115,6 +115,27 @@ def test_sim(out):
     check(m['pf_hit'] > 0.9 * m['count'], f"stride stream prefetched ({m['pf_hit']} of {m['count']} hit prefetched lines)")
 
 
+def test_funcmodel(out):
+    import cost
+    if cost.CS is None or not shutil.which('aarch64-linux-gnu-gcc') or not shutil.which('llvm-mca'):
+        print('skip funcmodel: capstone, aarch64-linux-gnu-gcc or llvm-mca missing')
+        return
+    src = os.path.join(out, 'f.c')
+    with open(src, 'w') as f:
+        f.write('float dot3(const float *a, const float *b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }\n'
+                'int find(const int *a, int n, int k) { for (int i = 0; i < n; i++) if (a[i] == k) return i; return -1; }\n'
+                'int main(void) { return 0; }\n')
+    elf = os.path.join(out, 'f.elf')
+    subprocess.run(['aarch64-linux-gnu-gcc', '-O2', '-mcpu=cortex-a57', '-nostdlib', '-static', '-e', 'main',
+                    '-o', elf, src], check=True)
+    import funcmodel
+    res = funcmodel.price_funcs(elf, ['dot3', 'find'], cost.MCA(None), cost.MCA(None, iterations=1))
+    by = {r['func']: r for r in res}
+    check(all(r['cpi'] and r['cpi_once'] for r in res), 'funcmodel prices both functions')
+    check(all(r['cpi'] <= r['cpi_once'] for r in res), 'steady-state CPI <= one-call CPI')
+    check(by['find']['blocks'] >= 3 and by['dot3']['blocks'] == 1, f"blocks: find {by['find']['blocks']}, dot3 {by['dot3']['blocks']}")
+
+
 def test_calibration(out):
     for t in ('qemu-system-aarch64', 'aarch64-linux-gnu-gcc', 'llvm-mca', 'pkg-config'):
         if not shutil.which(t):
@@ -144,6 +165,7 @@ def main():
     try:
         test_dataflow()
         test_sim(out)
+        test_funcmodel(out)
         test_calibration(out)
     finally:
         if not keep:

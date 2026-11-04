@@ -100,6 +100,8 @@ def disasm(pc, code):
 def mca_text(ins_list):
     lines = []
     for _, mn, ops, _ins in ins_list:
+        if mn in ('udf', 'brk', 'hlt'):  # padding and traps: never executed on the priced path; llvm-mca rejects them
+            continue
         if BRANCH_RE.match(mn):
             parts = [x.strip() for x in ops.split(',')]
             parts[-1] = 'L0'
@@ -213,9 +215,15 @@ class MCA:
         return out, ''
 
     def cycles(self, blocks):
-        """blocks: {key: [lines]} -> {key: cycles}; failing blocks are retried alone, then without the lines that
-        llvm-mca rejects (reported as None if nothing is left)"""
-        todo = {k: v for k, v in blocks.items() if k not in self.cache and v}
+        """blocks: {name: [lines]} -> {name: cycles per iteration}; the cache is keyed by the text (and the iteration
+        count), so names are free; failing blocks are retried alone, then without the lines llvm-mca rejects
+        (None if nothing is left)"""
+        sfx = '' if self.it == 300 else f'@{self.it}'
+        hkey = {n: hashlib.sha1('\n'.join(v).encode()).hexdigest()[:20] + sfx for n, v in blocks.items()}
+        todo = {}
+        for n, v in blocks.items():
+            if v and hkey[n] not in self.cache:
+                todo[hkey[n]] = v
         keys = list(todo)
         for i in range(0, len(keys), 400):
             chunk = {k: todo[k] for k in keys[i:i + 400]}
@@ -234,7 +242,7 @@ class MCA:
                         res.update(r)
             for k in chunk:
                 self.cache[k] = res.get(k)
-        return {k: self.cache.get(k) for k in blocks}
+        return {n: self.cache.get(hkey[n]) for n in blocks}
 
 
 # ---------------------------------------------------------------- symbols
