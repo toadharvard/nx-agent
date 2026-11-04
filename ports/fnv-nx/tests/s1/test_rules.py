@@ -612,6 +612,38 @@ check('STAND1 drops the stand-ins of tagged addresses', got,
        'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b); /* fnv-nx STAND1 */', '/* fnv-nx STAND1: V::Make is'],
       ['__declspec(noinline) V*\n/*', 'FUN_00632ec0::FUN_00632ec0()\n{}'])
 
+# ---- STAND2 (an address another unit defines; only units without auto-inlining, only non-inline, non-virtual)
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_od, _o2 = ['/MT', '/Od', '/Oy-', '/GS'], ['/MT', '/O2', '/GS']
+_syms = {'?Clear@G@@QAEX_N@Z': '0x00845000', '?Reset@G@@QAEXXZ': '0x00644000', '?Free@@YAHH@Z': '0x00845100',
+         '?Keep@@YAHH@Z': '0x00845100', '?Loc@@YAHH@Z': '0x00845100', '?Vir@G@@UAEXXZ': '0x00845200',
+         '?Mine@G@@QAEXXZ': '0x00644100', '?Two@G@@QAEXH@Z': '0x00845000', '?Two@G@@QAEXM@Z': '0x00644100'}
+_json.dump({'units': [
+    {'source': 'src/staging/u.cpp', 'flags': _od, 'symbols': _syms,
+     'functions': [{'address': '0x00644000'}, {'address': '0x00644100'}]},
+    {'source': 'src/staging/o2.cpp', 'flags': _o2, 'symbols': _syms, 'functions': []},
+    {'source': 'src/staging/other.cpp', 'flags': _od, 'symbols': {},
+     'functions': [{'address': '0x00845000'}, {'address': '0x00845100'}, {'address': '0x00845200'}]}]},
+    open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_STAND2_SRC = ('struct G\n{\n    int* p;\n    void Clear(bool);\n    void Reset();\n    virtual void Vir();\n    void Mine();\n'
+               '    void Two(int);\n    void Two(float);\n};\nvoid G::Clear(bool b)\n{\n    delete[] p;\n}\n'
+               'int Free(int a)\n{\n    return a;\n}\ninline int Keep(int a)\n{\n    return a;\n}\n'
+               'static int Loc(int a)\n{\n    return a;\n}\nvoid G::Vir()\n{\n}\nvoid G::Mine()\n{\n}\n'
+               'void G::Two(int)\n{\n}\n// @fnv 0x00644000\nvoid G::Reset()\n{\n    p = 0;\n    Clear(true);\n}\n')
+_saved = s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+got = run(s1.r_stand_in_definitions_elsewhere, _STAND2_SRC, os.path.join(_s, 'src', 'staging', 'u.cpp'))
+got_o2 = run(s1.r_stand_in_definitions_elsewhere, _STAND2_SRC, os.path.join(_s, 'src', 'staging', 'o2.cpp'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+check('STAND2 drops a stand-in of an address another unit defines (/Od)', got,
+      ['/* fnv-nx STAND2: G::Clear is the function at the tagged address */\n', 'int Free(int a); /* fnv-nx STAND2 */',
+       'inline int Keep(int a)\n{', 'static int Loc(int a)\n{', 'void G::Vir()\n{', 'void G::Mine()\n{',
+       'void G::Two(int)\n{', 'void G::Reset()\n{\n    p = 0;\n    Clear(true);'],
+      ['delete[] p'])
+check('STAND2 leaves units MSVC compiled with auto-inlining', got_o2, ['delete[] p', 'int Free(int a)\n{'], ['STAND2'])
+check('STAND2 keeps the line count', 'lines %d' % got.count('\n'), ['lines %d' % _STAND2_SRC.count('\n')])
+
 # ---- STR1 uses the declaration in scope
 got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(&str_01082ab8); }\nnamespace N {\n'
           'extern char str_01082ab8;\nvoid h() { g(&str_01082ab8); }\n}\nextern "C" char str_a0000000[], str_b0000000[],\n'
