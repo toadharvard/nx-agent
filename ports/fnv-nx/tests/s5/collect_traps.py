@@ -51,7 +51,11 @@ def symbols(elf):
 def namer(elf):
     addrs, names = symbols(elf)
 
+    lo = next((x for x in addrs if x >= 0x10000000), 0)   # the guest's link base region
+
     def sym(a):
+        if a < lo and 0x05000000 <= a < 0x10000000:   # a runtime address of a relocated guest (emu_guest.py places
+            a = a - 0x05000000 + (lo & ~0xFFFFFF)       # it at 0x05000000): back to the link address
         i = bisect.bisect_right(addrs, a) - 1
         if i < 0 or a - addrs[i] > 0x100000:
             return f"{a:#x}", ""
