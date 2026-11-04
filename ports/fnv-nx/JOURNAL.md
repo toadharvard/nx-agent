@@ -3018,3 +3018,25 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - Both are blocked from reading the private repo: add_repo was refused in their sessions.
   - `.claude/settings.json` now allows add_repo for sessions started after b49aa77 (owner's explicit permission).
   - S4 moved from a stuck PENDING cloud session to a local agent, which can read the link data.
+
+### J-0137 | 2026-11-04 | stream: S13b-causes | status: wip | parent: J-0133
+
+* **did** - S13b `54d0dbd`..`965e963`, merged:
+  - `tools/difffuzz/causes.py` classifies divergences from the saved records, and reads native callees from the link's
+    `fixed/<unit>.o`;
+  - a POLICY table: cause -> by-design / artifact / real-bug / triage, with an owner;
+  - an `fnvnx-causes` block in every fuzz report, merged across shards.
+  - Self-test: 0 failures. The harness core is unchanged.
+* **measured** - 25 caches (1-26of26; 22of26 does not exist): 32,215 functions ok, 5,994 diverging.
+  - Unclassified: **2,066 -> 725**. Hard functions: **3,375 -> 2,836**.
+  - Largest new artefact: new-null, 178 of the 293 native near-null faults. An intercepted allocator returns its
+    canned 0, and GCC drops MSVC's null test after a throwing new. Harness fix: canned allocator results become heap
+    addresses.
+  - Real bugs, by owner:
+    - S1: falloff? 147 functions (animation, tesobjectcell, modelloader); native-null-read 111; signedness 26;
+      native-trap 7; float 18.
+    - S1b: uninit-arm 175; native-garbage-arg 131 (modelloader); callee-saved 5.
+    - S2c: native-address 108; native-stub-data 68; split-global 23 (tile.cpp).
+  - Triage still open: oracle-fault 404, call-flow 965.
+* **next** - Publish the full hand-off lists to the private repo. Make allocators return non-null in the harness
+  (S13). The owners take their lists.
