@@ -5,7 +5,7 @@ Everything here reads a saved divergence record (<campaign>/div/<addr>-<n>.json:
 `symbol`, `case`) and nothing else: no replay, no emulator, no decomp. It runs downstream of the harness (fuzz.py,
 classify.py, runner.py are not touched) and keeps their interface: a record's cause is still one string from the
 same vocabulary, `report.reclassify` calls `refine` only where it would otherwise answer `unclassified`, `call-flow`
-or `signedness?`.
+or `signedness?`, or the oracle-model tag `oracle-vcall` (HINT_REFINABLE).
 
     causes.py summary <campaign dir>... [--recheck-tag t] [--out causes.json]
         one row per cause: divergences, functions, functions whose worst cause it is, verdict class, owner, why
@@ -117,6 +117,17 @@ POLICY = {
                                                       'runs (preloaded or followed) while the native calls it out of '
                                                       'line and the harness intercepts it: no side effects natively'),
     'no-native-entry': ('artifact', 'S13', False, 'the native image has no entry for the function (link subset)'),
+    'vcall-garbage':  ('artifact', 'S13', False, 'both machines call a word of memory the case did not plant (no '
+                                                 'code there on either side): an object without a vftable, each '
+                                                 'machine reading its own slot of garbage (Itanium has one destructor '
+                                                 'slot more); invalid input for the exe'),
+    'vcall-stub-alias': ('artifact', 'S13', False, 'the same garbage call target on both machines: a word in the '
+                                                   'AArch64 stub range that the native trace names as the code stub\'s '
+                                                   'original address (word - 0x08000000) or name:<hex>, the oracle as '
+                                                   'the word itself (runner.compare should not count it)'),
+    'oracle-private-address': ('artifact', 'S13', False, 'the oracle faults on a garbage address in its own private '
+                                                          'range (0x0e000000: GDT/TEB/stubs) that the native machine '
+                                                          'maps as background'),
     # --- real bugs -----------------------------------------------------------------------------------------------
     'uninit-arm':     ('real-bug', 'S1b', True, 'the native result depends on garbage: an argument slot the caller '
                                                 'never wrote (ABI pop-mismatch) or an uninitialised local'),
@@ -134,6 +145,10 @@ POLICY = {
     'after-native-undefined': ('real-bug', 'S1', True, 'the function calls a C++ name the link binds to nothing '
                                                        '(native-undefined): the native side gets a canned result '
                                                        'where the oracle runs the body; fix the name, then re-fuzz'),
+    'native-empty-callee': ('real-bug', 'S1', True, 'only the oracle faults, and the native calls a function its '
+                                                    'own object defines as a bare ret (a decomp stub of an exe '
+                                                    'function or an empty destructor): the exe\'s work there, which '
+                                                    'reads memory, is skipped natively'),
     'native-trap':    ('real-bug', 'S1', True, 'the native executes a trap (FALL1 __builtin_trap or GCC '
                                                'unreachable) on a path where the exe returns'),
     'layout-offset':  ('real-bug', 'S1', True, 'a pointer into the same object at another offset (a few words): a '
@@ -381,6 +396,95 @@ def _rule_count(d, tx, ta):
     return None
 
 
+# ------------------------------------------------- oracle-vcall / oracle-fault split (difffuzz-13 vftable planting)
+#
+# classify.py gives oracle-vcall to every call-target the runner marked vcall='unplanted' (the oracle's target is
+# neither a direct callee nor a planted slot) and to every oracle-only fault it finds next to an indirect call or
+# at an unmapped pc; causes.py's _rule_error leaves the other oracle-only data faults at oracle-fault. These rules
+# split what the record shows; what they cannot split keeps its cause.
+
+HINT_REFINABLE = {'oracle-vcall'}        # probe causes refine() still splits (report.reclassify hands them over)
+
+
+def _code_target(t):
+    """Is call target `t` (a trace string) code on some machine: an exe .text address, an import, a named stub,
+    or the AArch64 private range (stubs, image, synthesized vtables)?"""
+    if t.startswith(('imp:', 'name:')):
+        return True
+    try:
+        v = int(t, 16)
+    except ValueError:
+        return True
+    return _in(v, TEXT) or _in(v, A64_PRIV)
+
+
+def _stub_alias(x, a):
+    """The native trace names the garbage word the oracle called: a word in the code-stub range traced as its
+    original address (word - 0x08000000), one in the named-stub range as name:<hex>."""
+    try:
+        vx = int(x, 16)
+    except ValueError:
+        return False
+    if not _in(vx, A64_STUBS):
+        return False
+    return a == 'name:%x' % vx or a == '%08x' % (vx - A64_STUBS[0])
+
+
+def _rule_vcall(rec):
+    d = rec.get('_now') or rec.get('divergence') or {}
+    if d.get('kind') != 'call-target':
+        return _rule_oracle_fault(d, rec) if d.get('kind') == 'error' else None
+    x, a = str(d.get('x86') or ''), str(d.get('arm') or '')
+    if any(str(t).startswith('name:__s13_vtpad_') for t in [a] + list(d.get('arm_trace') or [])):
+        # the native call went through a padding slot past the native vtable the link pairs with the planted vftable
+        # (vtmodel.py): classify.py's own vptr-unpaired, shadowed there by its earlier unplanted test
+        return 'vptr-unpaired'
+    if _stub_alias(x, a):
+        return 'vcall-stub-alias'
+    if a.startswith('name:_Z') and not (rec.get('case') or {}).get('vptrs') and \
+            _unbound_name(rec.get('source'), rec.get('address'), a[5:]) is not False:
+        # no vptr was planted (so not a slot of a synthesized vtable): the native calls a C++ name that neither its
+        # object defines nor the link binds (GCC devirtualised it, or the decomp calls it directly); it traps there
+        return 'native-undefined'
+    if not _code_target(x) and not _code_target(a):
+        return 'vcall-garbage'
+    return None
+
+
+def _unbound_name(source, addr, name):
+    """True when neither the native object of `source` defines `name` nor the address map binds it, False when one
+    does, None without the object or the map (callers fall back to the record alone)."""
+    try:
+        if native_callees(source, int(addr or '0', 16)) is None:
+            return None
+    except (TypeError, ValueError):
+        return None
+    _load_addrmap()
+    if not _LINKSYM:
+        return None
+    path = os.path.join(_obj_dir(), source.replace('/', '_') + '.o')
+    return name not in (_OBJ_CACHE.get(path) or {}).get('_defined', set()) and name not in _BOUND
+
+
+def _rule_oracle_fault(d, rec):
+    """An oracle-only fault (oracle-vcall error or oracle-fault): a garbage pointer into the oracle's own private
+    range, a word read across 4 GiB, or a native function that calls an empty local stub where the oracle works."""
+    if d.get('arm') is not None:
+        return None
+    fx = _fault_addr(d.get('x86'))
+    if fx and _in(fx[1], X86_PRIV):
+        return 'oracle-private-address'
+    if fx and fx[0] in ('r', 'w') and fx[1] >= 0xfffffffd:
+        return 'ilp32-pointer'         # a dword access at a near-null pointer minus a few bytes, wrapped past 4 GiB
+    try:
+        em = empty_callees(rec.get('source'), int(rec.get('address') or '0', 16))
+    except (TypeError, ValueError):
+        em = None
+    if em and (fx or str(d.get('x86') or '').startswith('fault:')):
+        return 'native-empty-callee'
+    return None
+
+
 # --------------------------------------------------------------------- native object facts (optional, static)
 #
 # Where the link's rewritten objects are at hand (config.LINK/fixed/<unit>.o on a farm, or FNVNX_CAUSES_OBJ), a rule
@@ -476,7 +580,37 @@ def _scan_object(path):
             for lo, hi, a in spans:
                 out.setdefault(a, set())
         out['_defined'] = {sy.name for sy in syms if isinstance(sy['st_shndx'], int) and sy.name}
+        out['_empty'] = _empty_functions(e, syms)
     return out
+
+
+A64_RET = 0xd65f03c0
+
+
+def _empty_functions(e, syms):
+    """Names of the functions the object defines whose first instruction is `ret` (an empty body)."""
+    out, data = set(), {}
+    for sy in syms:
+        if sy['st_info']['type'] != 'STT_FUNC' or not isinstance(sy['st_shndx'], int) or not sy.name:
+            continue
+        i = sy['st_shndx']
+        if i not in data:
+            sec = e.get_section(i)
+            data[i] = sec.data() if sec['sh_type'] == 'SHT_PROGBITS' else b''
+        v = sy['st_value']
+        if v + 4 <= len(data[i]) and struct.unpack_from('<I', data[i], v)[0] == A64_RET:
+            out.add(sy.name)
+    return out
+
+
+def empty_callees(source, addr):
+    """Direct callees of the native function `addr` that its own object defines with an empty body (a bare `ret`):
+    decomp stubs standing in for exe code. None without the object."""
+    cs = native_callees(source, addr)
+    if cs is None:
+        return None
+    path = os.path.join(_obj_dir(), source.replace('/', '_') + '.o')
+    return sorted(cs & (_OBJ_CACHE.get(path) or {}).get('_empty', set()))
 
 
 def unbound_callees(source, addr):
@@ -642,7 +776,10 @@ REFINABLE = (None, 'unclassified', 'call-flow', 'signedness?')
 
 def refine(rec, cause=None):
     """The record-level cause of a divergence the probes left at `cause` (unclassified / call-flow / signedness?),
-    or `cause` itself when no rule applies. Never overrides a probe's definite cause."""
+    or `cause` itself when no rule applies. Never overrides a probe's definite cause; oracle-vcall (HINT_REFINABLE,
+    the runner's vcall tag or the fault probe, not a decision) is split by _rule_vcall."""
+    if cause in HINT_REFINABLE:
+        return _rule_vcall(rec) or cause
     if cause not in REFINABLE:
         return _with_effects(rec, cause)
     d = (rec.get('_now') or rec.get('divergence') or {})
@@ -652,6 +789,8 @@ def refine(rec, cause=None):
         got = _rule_error(d)
         if got == 'native-null-read' and _calls_allocator(rec):
             got = 'new-null'
+        elif got == 'oracle-fault':
+            got = _rule_oracle_fault(d, rec) or got
     elif k == 'call-args':
         got = _rule_call_args(d)
     elif k == 'return':

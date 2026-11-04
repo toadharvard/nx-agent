@@ -228,7 +228,8 @@ planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that a
 ## Cause refinement and verdict policy (`causes.py`, S13b)
 
 `report.reclassify` hands what the probes left at `unclassified`, `call-flow` or `signedness?` to `causes.refine`,
-rules on the saved record alone (no replay; a probe's definite cause is never overridden):
+rules on the saved record alone (no replay; a probe's definite cause is never overridden; `oracle-vcall`, a tag of
+the runner and a fault probe rather than a decision, is split too, `causes.HINT_REFINABLE`):
 
 | record shape | cause | class |
 |---|---|---|
@@ -250,6 +251,14 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 | `no-native-entry` | `no-native-entry` | artifact |
 | oracle-only data fault in the AArch64 private range | `oracle-native-address` | artifact (a native address leaked to the x86 machine) |
 | oracle-only data fault | `oracle-fault` | triage |
+| oracle-only fault (`oracle-fault`, or an `oracle-vcall` error) at a garbage address in the x86 private range 0x0e000000 | `oracle-private-address` | artifact (the native machine maps that range as background) |
+| ... a dword access at 0xfffffffd..0xffffffff (a near-null pointer minus a few bytes, wrapped past 4 GiB) | `ilp32-pointer` | by-design |
+| ... and the native function calls a function its own object defines as a bare `ret` (decomp stub, empty destructor) | `native-empty-callee` | real-bug S1 (the exe's work there is skipped natively) |
+| `oracle-vcall` call-target (`vcall: unplanted`): the native trace passes a `__s13_vtpad_` slot | `vptr-unpaired` | real-bug S2c, soft (classify.py tests `unplanted` first) |
+| ... the oracle calls a garbage word in the AArch64 stub range, the native trace names that word (word - 0x08000000, or `name:<hex>`) | `vcall-stub-alias` | artifact (one call, two spellings) |
+| ... the native calls a C++ name nothing defines or binds, no vptr planted | `native-undefined` | real-bug S1 |
+| ... neither target is code on either machine (not .text, an import, a named stub or the AArch64 private range) | `vcall-garbage` | artifact (an object with no vftable: invalid input) |
+| ... anything else (the native calls an exe function directly while the oracle reads unplanted memory; oracle-only faults near an indirect call or at an unmapped pc) | `oracle-vcall` | artifact (kept) |
 | call-target: native calls a named stub `name:_Z...` | `native-undefined` | real-bug S1/S2c (fallback without the link's providers) |
 | call-target: oracle calls an import, native jumps to the IAT slot address | `import-slot-called` | real-bug S2c |
 | call-target: the native function never names the oracle's callee (from its object) | `native-inlined` | triage |
