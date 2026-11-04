@@ -763,6 +763,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 rq_.qual[:-1] != dq_.qual[:-1]:
                             target = MSVC_ENTRY_SYM % addr
                             stats['msvc_entry_refs'] += 1
+                    if nd.get('msvc_entry') and target == ADDR_SYM % addr and \
+                            slotfill2.other_class_entry(isig, itanium(nd['sym'].name)):   # S2c-vt2
+                        target = MSVC_ENTRY_SYM % addr
+                        stats['msvc_entry_refs_itanium'] += 1
                     defdecl = nd['msvc']
                     cast = None
                     if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:

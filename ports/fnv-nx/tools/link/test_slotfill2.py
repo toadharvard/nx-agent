@@ -114,6 +114,15 @@ def main():
     check(tf4('_ZN1Y2m0Eb', 0x407000)[0] == ADDR % 0x407000, 'a plain slot (bool) -> the "constructor" (bool)')
     check(tf4('_ZN1Y2m1Ev', 0x407000)[0] == ADDR % 0x407000, 'a placeholder slot () -> it too (reads more)')
     check(tf4('_ZN1Y2m2Ef', 0x407000)[0] is None, 'a float slot against a bool stays a gap')
+    dem5 = {'_ZN3CVB4FUN_Ei': 'CVB::FUN_(int)', '_ZN7CVShell4FUN_Ei': 'CVShell::FUN_(int)',
+            '_ZN7CVShell3getEi': 'CVShell::get(int)'}
+    p5 = lambda n: sigs.parse_itanium(n, dem5[n])
+    check(slotfill2.other_class_entry(p5('_ZN3CVB4FUN_Ei'), p5('_ZN7CVShell4FUN_Ei')),
+          'a reference through the base class with the same function name enters through the thunk')
+    check(not slotfill2.other_class_entry(p5('_ZN7CVShell4FUN_Ei'), p5('_ZN7CVShell4FUN_Ei')),
+          'the definition\'s own name keeps the primary entry')
+    check(not slotfill2.other_class_entry(p5('_ZN3CVB4FUN_Ei'), p5('_ZN7CVShell3getEi')),
+          'another function name: not decided here')
     shift_test()
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0

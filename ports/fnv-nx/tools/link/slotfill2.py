@@ -433,3 +433,14 @@ def shift_fixed(out, fixed):
         k += bool(m)
         n += m
     return k, n, bad
+
+
+def other_class_entry(isig, dsig):
+    """A code reference to an address MSVC enters at a secondary base, named through another class than the
+    definition's but with the same function name (`IslandRemovalCallback::FUN_00d64a20` for
+    `IslandWorldRemoval::FUN_00d64a20`; the base class's vtable slot `CVB::FUN_008805f0` for `CVShell::...`): the
+    caller holds the subobject, as the x86 caller did, so it enters through the thunk. The Itanium form of resolve's
+    rule on MSVC declarations, for references that carry none (tiers name-addr, unit/exact of a #vtables object)."""
+    q, dq = isig.qual or [], dsig.qual or []
+    return (not isig.variant and not dsig.variant and len(q) > 1 and len(dq) > 1 and q[-1] == dq[-1]
+            and q[:-1] != dq[:-1])
