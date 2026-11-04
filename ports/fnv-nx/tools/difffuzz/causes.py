@@ -17,6 +17,7 @@ or `signedness?`, or the oracle-model tag `oracle-vcall` (HINT_REFINABLE).
     causes.py explain <div.json>...
         the refined cause of each record and the rule that gave it
     causes.py handoffs <campaign dir>... --out-dir d [--recheck-tag t] [--effects e.jsonl] [--ref-prefix p]
+                       [--ref-by-head]
         the per-owner lists: handoffs_<owner>.tsv (real-bug), triage_<owner>.tsv, harness_<owner>.tsv (artifacts
         with an owner), one row per counted divergence: owner, cause, address, unit, reproducer
         (<ref-prefix><campaign dir name>:div/<file>, default prefix fuzz/cache/), first effect; and index.tsv
@@ -128,20 +129,28 @@ POLICY = {
     'oracle-private-address': ('artifact', 'S13', False, 'the oracle faults on a garbage address in its own private '
                                                           'range (0x0e000000: GDT/TEB/stubs) that the native machine '
                                                           'maps as background'),
-    'ctor-this':      ('artifact', 'S13', False, 'one side uses the block a game allocator returned, the other the '
-                                                 'canned result of the next intercepted call (the constructor run on '
-                                                 'that block): the real constructor returns this, the canned result '
-                                                 'is random'),
-    'canned-this':    ('artifact', 'S13', False, 'the oracle passes the canned eax of an earlier intercepted call as a '
-                                                 'pointer where the native passes its own frame temporary: the callee '
-                                                 'returns its result/this pointer (MSVC aggregate return, operator=), '
-                                                 'the harness gives it a random result'),
-    'native-wild-private': ('artifact', 'S13', False, 'random background: a code pointer read from background bytes '
-                                                      'lands in the AArch64 private range; x86 intercepts it as a '
-                                                      'wild call, AArch64 executes its private memory (fault:x)'),
-    'stub-normalized': ('artifact', 'S13', False, 'a stored data word with top byte 0x08 (a canned or background '
-                                                  'value) that arm64emu rewrites as a code-stub pointer to its '
-                                                  'original address (top byte 0x00): only that byte differs'),
+    'ctor-this':      ('triage', 'S13b', True, 'one side uses the block a game allocator returned, the other the '
+                                               'canned result of a later intercepted call. A harness artefact '
+                                               'when that call is the constructor on the block (it returns this), '
+                                               'a real bug when the native drops a factory/Init result; the record '
+                                               'names neither the later call nor its this (V1 A2): needs a replay '
+                                               'or a canned-this harness fix'),
+    'canned-this':    ('triage', 'S13b', True, 'the oracle passes the canned eax of an earlier intercepted call as a '
+                                               'pointer where the native passes its own frame temporary: a callee '
+                                               'that returns its result pointer (harness gives a random eax), or a '
+                                               'native declaration returning by value (hidden-pointer ABI mismatch, '
+                                               'S2c); the record does not show the earlier call\'s arguments (V1 '
+                                               'A3)'),
+    'native-wild-private': ('triage', 'S13b', True, 'random background: the native executes its AArch64 private '
+                                                    'range (fault:x), the oracle makes no error. A random code '
+                                                    'pointer x86 intercepts as a wild call, or a native call '
+                                                    'through a wrong vtable slot; the record cannot tell them '
+                                                    'apart (V1 A4 = the rule\'s own shape)'),
+    'stub-normalized': ('artifact', 'S13', False, 'every differing byte lies in a 4-byte window where the oracle '
+                                                  'stored a word in the code-stub range [0x08000000, 0x09000000) '
+                                                  'and the native has exactly that word - 0x08000000: what '
+                                                  'arm64emu._codeptr does to any such stored word (data '
+                                                  'included); a flag bit 0x08 elsewhere is not this (V1 A1)'),
     'thunk-binding':  ('real-bug', 'S2c', True, 'the original address is an override\'s MSVC entry (this = the '
                                                 'secondary-base subobject); the link binds __fnv_<addr> to the GCC '
                                                 'primary entry (this = the full object), not its _ZThn<d>_ thunk'),
@@ -1307,6 +1316,21 @@ def _garbage_words(seed, side):
     return _GARBAGE_CACHE[key]
 
 
+CODE_STUB, NAMED_STUB = 0x08000000, 0x09000000   # a64image (duplicated: this module needs no emulator imports)
+
+
+def _stub_rewrite(bx, ba, diff):
+    """True when every differing byte lies in a 4-byte window whose oracle word w is in [CODE_STUB, NAMED_STUB) and
+    whose native word is exactly w - CODE_STUB: the rewrite arm64emu._codeptr applies to any stored word in that
+    range (on a 1-byte sliding window), and nothing else."""
+    covered = set()
+    for i in range(0, len(bx) - 3):
+        w, n = int.from_bytes(bx[i:i + 4], 'little'), int.from_bytes(ba[i:i + 4], 'little')
+        if CODE_STUB <= w < NAMED_STUB and n == w - CODE_STUB:
+            covered.update(range(i, i + 4))
+    return bool(diff) and all(i in covered for i in diff)
+
+
 def _rule_unclassified(d, rec, k):
     """Shapes of records no other rule took (stream S13b, bucket `unclassified`)."""
     case = rec.get('case') or {}
@@ -1326,9 +1350,7 @@ def _rule_unclassified(d, rec, k):
     if k == 'mem-write':
         bx, ba = bytes.fromhex(d['x86']), bytes.fromhex(d['arm'])
         diff = [i for i in range(min(len(bx), len(ba))) if bx[i] != ba[i]]
-        if diff and len(bx) == len(ba) and all(bx[i] == 0x08 and ba[i] == 0 for i in diff):
-            # the top byte of a stored word in the code-stub range 0x08xxxxxx: arm64emu rewrites it to the
-            # "original address" (0x00xxxxxx) although the bytes are data
+        if diff and len(bx) == len(ba) and _stub_rewrite(bx, ba, diff):
             return 'stub-normalized'
     if k == 'return' or k == 'mem-write':
         if vx is not None and va is not None and vx != va and _ctor_pair(case, vx, va, 64):
@@ -1543,9 +1565,11 @@ HANDOFF_FILES = (('real-bug', 'handoffs'), ('triage', 'triage'), ('artifact', 'h
 HANDOFF_COLUMNS = ('owner', 'cause', 'address', 'unit', 'reproducer', 'first effect')
 
 
-def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/'):
+def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/', by_head=False):
     """{(file stem, owner): [row]} for every counted divergence whose cause has an owner and is not by design;
-    rows are HANDOFF_COLUMNS tuples, sorted by cause, address and reproducer."""
+    rows are HANDOFF_COLUMNS tuples, sorted by cause, address and reproducer. With by_head, the reproducer names
+    the per-head branch of the head that fuzzed the function (results `commit`: fuzz/<head12>/<dir name>), which
+    the farms never rewrite, instead of the rolling cache branch."""
     prefix = dict(HANDOFF_FILES)
     out = collections.defaultdict(list)
     for d in dirs:
@@ -1558,17 +1582,20 @@ def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/'):
             if cls not in prefix or owner in ('-', ''):
                 continue
             e = EFFECTS.get(rec['_file']) or {}
-            out[(prefix[cls], owner)].append((owner, rec['_cause'], rec['address'], rec.get('source') or '',
-                                              '%s%s:div/%s' % (ref_prefix, name, rec['_file']), e.get('first') or ''))
+            head = str((results.get(rec['address']) or {}).get('commit') or '')[:12]
+            ref = ('fuzz/%s/%s:div/%s' % (head, name, rec['_file']) if by_head and head else
+                   '%s%s:div/%s' % (ref_prefix, name, rec['_file']))
+            out[(prefix[cls], owner)].append((owner, rec['_cause'], rec['address'], rec.get('source') or '', ref,
+                                              e.get('first') or ''))
     for rows in out.values():
         rows.sort(key=lambda r: (r[1], r[2], r[4]))
     return dict(out)
 
 
-def write_handoffs(dirs, out_dir, tag='', ref_prefix='fuzz/cache/'):
+def write_handoffs(dirs, out_dir, tag='', ref_prefix='fuzz/cache/', by_head=False):
     """Write the per-owner TSVs and index.tsv (file, class, owner, rows, functions, causes); returns the index."""
     os.makedirs(out_dir, exist_ok=True)
-    groups = handoff_rows(dirs, tag, ref_prefix)
+    groups = handoff_rows(dirs, tag, ref_prefix, by_head)
     cls_of = {stem: cls for cls, stem in HANDOFF_FILES}
     index = []
     for (stem, owner), rows in sorted(groups.items()):
@@ -1606,11 +1633,13 @@ def main(argv=None):
     h.add_argument('--recheck-tag', default='')
     h.add_argument('--effects', action='append', default=[], help='difffuzz.py effects output (JSON lines)')
     h.add_argument('--ref-prefix', default='fuzz/cache/', help='reproducer = <prefix><dir name>:div/<file>')
+    h.add_argument('--ref-by-head', action='store_true',
+                   help='reproducer = fuzz/<head12 of the results row>/<dir name>:div/<file> (stable branch)')
     a = ap.parse_args(argv)
     if a.cmd in ('summary', 'handoffs') and a.effects:
         load_effects(a.effects)
     if a.cmd == 'handoffs':
-        for row in write_handoffs(a.dirs, a.out_dir, a.recheck_tag, a.ref_prefix):
+        for row in write_handoffs(a.dirs, a.out_dir, a.recheck_tag, a.ref_prefix, a.ref_by_head):
             print('%-22s %-9s %-5s rows %5d fn %5d  %s' % row)
         return 0
     if a.cmd in ('summary', 'merge'):

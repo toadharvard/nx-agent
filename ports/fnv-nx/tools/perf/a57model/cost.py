@@ -100,6 +100,8 @@ def disasm(pc, code):
 def mca_text(ins_list):
     lines = []
     for _, mn, ops, _ins in ins_list:
+        if mn in ('udf', 'brk', 'hlt'):  # padding and traps: never executed on the priced path; llvm-mca rejects them
+            continue
         if BRANCH_RE.match(mn):
             parts = [x.strip() for x in ops.split(',')]
             parts[-1] = 'L0'
@@ -174,6 +176,64 @@ def dependent_loads(ins_list):
     return dep, memchain
 
 
+# Cortex-A57 r1p0 and later reduce the latency of ASIMD integer multiply (ARM Cortex-A57 Software Optimization
+# Guide UAN 0015B, 3.14 note 4: 'N/M' = r0pX / r1p0). llvm-mca's A57 model has the r0pX numbers; the Tegra X1's A57 is
+# r1p1 (MIDR variant 1, revision 1). Q-form 6 -> 5, D-form 5 -> 4.
+R1_MUL = {'mul', 'pmul', 'sqdmulh', 'sqrdmulh'}
+Q_ARR = re.compile(r'\.(4s|8h|16b)\b')
+D_ARR = re.compile(r'\.(2s|4h|8b)\b')
+
+
+def r1_latency(mn, ops):
+    if mn not in R1_MUL or not re.search(r'\bv\d+\.', ops):
+        return None
+    if Q_ARR.search(ops):
+        return 5
+    if D_ARR.search(ops):
+        return 4
+    return None
+
+
+# Divides and square roots are iterative on the A57 and their latency depends on the operands (ARM Cortex-A57
+# Software Optimization Guide 3.5, 3.8, 3.15): [lowest, highest]. llvm-mca prices the highest. No published
+# measurement narrows them, so a latency-bound chain is priced at the middle and carries +- half the range as a band.
+DIV_RANGE = {('sdiv', 'w'): (4, 20), ('udiv', 'w'): (4, 20), ('sdiv', 'x'): (4, 36), ('udiv', 'x'): (4, 36),
+             ('fdiv', 's'): (7, 17), ('fsqrt', 's'): (7, 17), ('fdiv', 'd'): (7, 32), ('fsqrt', 'd'): (7, 32),
+             ('fdiv', '2s'): (7, 17), ('fdiv', '4s'): (14, 34), ('fdiv', '2d'): (14, 64),
+             ('fsqrt', '2s'): (7, 17), ('fsqrt', '4s'): (14, 34), ('fsqrt', '2d'): (14, 64)}
+
+
+def div_range(mn, ops):
+    if mn not in ('sdiv', 'udiv', 'fdiv', 'fsqrt'):
+        return None
+    m = re.search(r'\bv\d+\.(2s|4s|2d)\b', ops)
+    if m:
+        return DIV_RANGE.get((mn, m.group(1)))
+    m = re.match(r'\s*([wxsd])\d+', ops)
+    return DIV_RANGE.get((mn, m.group(1))) if m else None
+
+
+def chain_per_iteration(ins_list, lats):
+    """loop-carried dependency chain of the block as a loop: cycles per iteration, from register dataflow with
+    the given per-instruction latencies (two passes, the second minus the first)"""
+    ready = {}
+    ends = []
+    for _pass in range(3):
+        top = 0.0
+        for (addr, mn, ops, ins), lat in zip(ins_list, lats):
+            try:
+                rd, wr = ins.regs_access()
+            except Exception:
+                continue
+            start = max([ready.get(_regname(r), 0.0) for r in rd] or [0.0])
+            end = start + lat
+            for r in wr:
+                ready[_regname(r)] = end
+            top = max(top, end)
+        ends.append(max(ready.values() or [0.0]))
+    return max(0.0, ends[2] - ends[1])
+
+
 class MCA:
     def __init__(self, cache_path=None, iterations=300):
         self.cache_path = cache_path
@@ -212,10 +272,30 @@ class MCA:
                 out[keys[0]] = int(m.group(1)) / self.it
         return out, ''
 
+    def info(self, lines):
+        """per-instruction latencies llvm-mca assumes for one block (its instruction-info table)"""
+        k = hashlib.sha1('\n'.join(lines).encode()).hexdigest()[:20] + '@info'
+        if k not in self.cache:
+            p = subprocess.run(['llvm-mca', '-mtriple=aarch64', '-mcpu=cortex-a57', '-iterations=1',
+                                '-resource-pressure=false'], input='\n'.join(lines) + '\n',
+                               capture_output=True, text=True)
+            lat = []
+            if not p.returncode:
+                for m in re.finditer(r'^\s*(\d+)\s+(\d+)\s+(\d+\.\d+)', p.stdout.split('Instructions:')[-1], re.M):
+                    lat.append(int(m.group(2)))
+            self.cache[k] = lat if len(lat) == len(lines) else None
+        return self.cache[k]
+
     def cycles(self, blocks):
-        """blocks: {key: [lines]} -> {key: cycles}; failing blocks are retried alone, then without the lines that
-        llvm-mca rejects (reported as None if nothing is left)"""
-        todo = {k: v for k, v in blocks.items() if k not in self.cache and v}
+        """blocks: {name: [lines]} -> {name: cycles per iteration}; the cache is keyed by the text (and the iteration
+        count), so names are free; failing blocks are retried alone, then without the lines llvm-mca rejects
+        (None if nothing is left)"""
+        sfx = '' if self.it == 300 else f'@{self.it}'
+        hkey = {n: hashlib.sha1('\n'.join(v).encode()).hexdigest()[:20] + sfx for n, v in blocks.items()}
+        todo = {}
+        for n, v in blocks.items():
+            if v and hkey[n] not in self.cache:
+                todo[hkey[n]] = v
         keys = list(todo)
         for i in range(0, len(keys), 400):
             chunk = {k: todo[k] for k in keys[i:i + 400]}
@@ -234,7 +314,7 @@ class MCA:
                         res.update(r)
             for k in chunk:
                 self.cache[k] = res.get(k)
-        return {k: self.cache.get(k) for k in blocks}
+        return {n: self.cache.get(hkey[n]) for n in blocks}
 
 
 # ---------------------------------------------------------------- symbols
@@ -322,7 +402,26 @@ def price(region, params, clock, mca, syms=None):
             funcs[f]['unpriced_insns'] += b['count'] * b['n']
             per = b['n'] / 0.8  # the old flat model, for what llvm-mca could not read
         per = max(per, math.ceil(max(nm, 1) / width)) if nm else per
+        il = [x for x in dis[(b['pc'], b['n'])] if x[1] not in ('udf', 'brk', 'hlt')]
+        band = 0.0
+        if any(r1_latency(x[1], x[2]) or div_range(x[1], x[2]) for x in il):
+            lat0 = mca.info(lines_of[k])
+            if lat0:
+                floor = math.ceil(max(nm, 1) / width)
+                lat1 = [r1_latency(x[1], x[2]) or l0 for x, l0 in zip(il, lat0)]
+                c0, c1 = chain_per_iteration(il, lat0), chain_per_iteration(il, lat1)
+                if c0 > c1 and per <= 1.1 * c0:   # latency-bound on the chain: the shorter latencies shorten it
+                    per = max(per - (c0 - c1), floor)
+                rng = [div_range(x[1], x[2]) for x in il]
+                if any(rng) and per <= 1.1 * c1:
+                    lmid = [(r[0] + r[1]) / 2 if r else l for r, l in zip(rng, lat1)]
+                    llo = [r[0] if r else l for r, l in zip(rng, lat1)]
+                    cm, cl = chain_per_iteration(il, lmid), chain_per_iteration(il, llo)
+                    top = per
+                    per = max(per - (c1 - cm), floor)
+                    band = max(0.0, (top - max(top - (c1 - cl), floor)) / 2)
         row = funcs[f]
+        row['div_band'] += b['count'] * band
         row['insns'] += b['count'] * b['n']
         row['core'] += b['count'] * per
         row['branch'] += b['mispred'] * c['mispredict'] + b['btb_l2'] * c['btb_l2_bubble'] + \

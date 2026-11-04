@@ -11,9 +11,14 @@
 # and says so. FARM_APT=1 installs the apt and pip packages (root).
 # Inputs: the newest branch link/<L12> (L = <commit> or an ancestor, $PERF_LINK_DEPTH commits back, default 300)
 # whose files include guest/fnvnx.elf (tools/farm/full_job.sh publishes them), and that link's boot/synth.exe, the
-# image the full farm booted; PERF_IMAGE=player boots the owner's FalloutNV.exe instead (gamedata/exe, agent-only).
+# image the full farm booted; PERF_IMAGE=player (or a link without synth.exe) boots the owner's FalloutNV.exe
+# (gamedata/exe, agent-only) instead.
 # Workload: from the first guest instruction to the first entry of $PERF_STOP (default WinMain, __fnv_0086a850);
 # PERF_START / PERF_STOP name any two symbols (e.g. one frame of the main loop once the boot reaches it).
+# Also: the per-frame function rows of PERF.md 11.4 (tools/perf/a57model/hot_rows.json) priced statically on that
+# guest (funcmodel.py) -> frame_hotspots[] and frame_coverage; and the hotspot_functions rows of
+# tools/perf/budget_model.json (S15-simd's metric), overrides priced on tools/link/overrides' code -> per_call_cycles[];
+# and the 3-core frame model of budget_model.json's scenarios with those prices (mtmodel.py) -> frame_model.
 # Outputs: <report.md> (numbers and function names only) and <report>.json = fnvnx-perf/1 (hotspots[]), which
 # runner.sh publishes next to it as <head12>-perf.json on reports/<farm>. About 10 minutes (the emulated boot with
 # the cache model, ~0.7 M instructions/s). Exit 0 once the report is written; 3 when no guest link exists.
@@ -73,11 +78,11 @@ L12=${LCOMMIT:0:12}; L=$W/link-$L12
 log "guest of link/$L12"
 python3 -I "$P/toolchain/tools/elf2nso.py" "$L/guest/fnvnx.elf" "$W/guest-$L12.nso" >/dev/null
 IMAGE=$L/boot/synth.exe; NOTE_IMAGE="the link's boot/synth.exe (S14's synthesized image, as the full farm booted)"
-if [ "${PERF_IMAGE:-synth}" = player ]; then
+if [ "${PERF_IMAGE:-synth}" = player ] || [ ! -f "$IMAGE" ]; then   # the owner's exe when asked or when the link has no synth.exe
 	job_gamedata
-	[ -n "$GAME_EXE" ] && { IMAGE=$GAME_EXE; NOTE_IMAGE=$NOTE_EXE; }
+	if [ -n "$GAME_EXE" ]; then IMAGE=$GAME_EXE; NOTE_IMAGE=$NOTE_EXE; fi
 fi
-[ -f "$IMAGE" ] || { IMAGE=""; NOTE_IMAGE="no image"; }
+[ -f "$IMAGE" ] || { IMAGE=""; NOTE_IMAGE="no image (the guest's empty image)"; }
 
 # --- calibration (the error bar) -------------------------------------------------------------------------------------
 CAL=$W/calib-$C12.json; NOTE_CAL="ran"
@@ -105,7 +110,18 @@ timeout "${PERF_TIMEOUT:-3000}" nice python3 -I "$M/uctrace.py" "$W/guest-$L12.n
 	${IMAGE:+--file "fnvnx/game/FalloutNV.exe=$IMAGE"} > "$W/uctrace.log" 2>&1 || log "uctrace exited $?"
 rm -rf "$ROOT"
 [ -f "$W/stats-$C12.txt" ] || fail_report 1 "uctrace wrote no statistics: $(tail -1 "$W/uctrace.log")"
+OVA=()   # S15-simd's overrides as one ELF, so their rows are priced on the override's code
+if bash "$P/tools/link/overrides/build.sh" "$W/ov" > /dev/null 2>&1 && \
+		aarch64-linux-gnu-ld -m aarch64linux32 -e 0 --unresolved-symbols=ignore-all -o "$W/ov/ov.elf" "$W"/ov/*.o 2>/dev/null; then
+	OVA=(--override-elf "$W/ov/ov.elf")
+fi
+python3 -I "$M/funcmodel.py" --elf "$L/guest/fnvnx.elf" --rows "$M/hot_rows.json" --calib "$CAL" \
+	--budget-model "$P/tools/perf/budget_model.json" "${OVA[@]}" \
+	--json "$W/funcs-$C12.json" --mca-cache "$W/mca-cache.json" > "$W/funcmodel.log" 2>&1 || log "funcmodel exited $?"
+python3 -I "$M/mtmodel.py" --funcs "$W/funcs-$C12.json" --json "$W/mt-$C12.json" > "$W/mtmodel.log" 2>&1 \
+	|| log "mtmodel exited $?"
 python3 -I "$M/perf_report.py" "$W/stats-$C12.txt" --elf "$L/guest/fnvnx.elf" --out "$JSON" --md "$W/body.md" \
+	--funcs "$W/funcs-$C12.json" --mt "$W/mt-$C12.json" \
 	--calib "$CAL" --head "$C12" --link "$L12" --workload "boot to ${PERF_START:-start} .. $STOP, ${NOTE_IMAGE%% (*}" \
 	--mca-cache "$W/mca-cache.json" > /dev/null
 {
