@@ -254,8 +254,9 @@ the image vftables, §R2), code in `render/native/n1/`:
   method table: AddRef/Release, GetType, GetLevelCount, GetLevelDesc, LOD; LockRect and GetSurfaceLevel refuse, the
   native path has no CPU access). The engine stores it as its D3D texture. Cube and volume textures (0x00ee6e16,
   0x00ee6e10) are not replaced yet (menus do not use them).
-* **State cache:** NiDX9RenderState set/get of render and sampler states, the blend setters, and texture binding
-  (slots 55-57: SetTexture / GetTexture / ClearTextureUsage) -> `nx::StateTracker`.
+* **State cache:** NiDX9RenderState set/get of render, texture stage and sampler states, the blend setters, sampler
+  restore and texture binding (slots 55-57: SetTexture / GetTexture / ClearTextureUsage): the engine's functions on
+  the engine object's cache, the device call -> `nx::StateTracker` (§2.5).
 * **Shader construction:** TileShader CreateVertexShaders / CreatePixelShaders / CreateConstantMaps and
   BSShaderNoLighting::InitializeShaderData are no-ops.
 * **Lockable textures (fonts):** fonts are tile geometry (`Font::CreateTextShape`, 0x00a14a20: an NiTriShape with a
@@ -287,6 +288,59 @@ engine layout (checker-textured background, a green button at material alpha 0.5
 alpha-tested text tile) rendered only through the stubs, with textures created through the D3DX overrides, plus
 the menu-background effect over a rendered target; the RenderEffect dispatch for MENUBG with a tone texture made and
 filled through the lockable (font) path; stencil REPLACE/EQUAL, texture scroll and the tile scissor rectangle.
+
+### 2.5 D3D9 state emulation (D21: the class, not value by value)
+
+The native path must hold exactly the state a D3D9 device would hold after the engine's calls, and answer the engine's
+own state cache exactly as the engine's code does. Three layers, each with one owner:
+
+* **D3D9 defaults** (`front/d3d9_state.h`): `nx_d3d9_default_rs` / `_rs_device` / `_samp` / `_tss` - the D3D9
+  documentation's value of every D3DRENDERSTATETYPE, D3DSAMPLERSTATETYPE and D3DTEXTURESTAGESTATETYPE; Nine's
+  `nine_state.c` where the documentation names none. Where they differ from Nine: POINTSIZE_MAX 64.0 (Nine: the
+  caps' MaxPointSize), ZENABLE TRUE with an automatic depth-stencil surface (Nine: always FALSE). The table is
+  `test_default_table` in `tests/s6n/test_d3d9_state.c` (every state, all eight stages).
+* **The device state** (`nx::StateTracker`, `n1/renderer.h`): render states; sampler states of all 21 D3D9 samplers
+  (0-15, D3DDMAPSAMPLER, D3DVERTEXTEXTURESAMPLER0-3, Nine's numbering `nx_d3d9_sampler_index`); texture stage states
+  (8 stages); textures; float / int / bool shader constants with D3D9's register files (vs 256 F, ps 224 F, 16 I,
+  16 B; out of range = INVALIDCALL and no change; BOOL nonzero = TRUE) and the def'd-constant rule
+  (`nx_d3d9_shader_defs` reads def / defi / defb from the token stream, `EffectiveConstants*` puts them over the set
+  values, `Get*Constant*` keeps returning the application's); vertex declaration and FVF (SetFVF(0) is a no-op, an
+  application declaration has FVF 0); 16 streams with their frequency (default 1, D3D9's argument checks); indices;
+  shaders; four render targets and the depth-stencil surface, with SetRenderTarget(0) resetting the viewport to
+  (0, 0, w, h, 0, 1) and the scissor rectangle to the target; viewport; scissor rectangle; six user clip planes
+  (into the translator's dynamic state). `Reset(autoDepthStencil, w, h)` is the device after CreateDevice.
+* **The engine's cache** (`n1/engine_stubs.h`, `NiDX9RenderStateLayout`): the overridden NiDX9RenderState slots are
+  the engine's functions with the device call replaced by the tracker, on the cache inside the engine object, because
+  engine code that stays reads and writes the same fields: the defaults passes (slot 22 render states: current and
+  saved; slot 47: texture stage states' saved field only, sampler states' saved field then slot 51), ClearTextures
+  (slot 54 zeroes the texture cache without the device) and the inline render-state restores (set the saved value
+  through slot 26). Semantics, each a check in the n1 self-test (`test_cache_semantics`):
+  * every current value starts as 0x7FFFFFFF (the constructor), so the first set of a state reaches the device;
+  * SetRenderState: a locked state ignores the call; an unlocked one takes the call's lock argument (SetRenderState
+    never clears a lock); the device sees the value only when it changes. SetBlendFunc / SetAlphaBlendEnable ignore
+    locks. The third argument (Gamebryo's bSave) is unused: the engine saves nothing per call;
+  * the cache holds 8 texture stage types (COLOROP..ALPHAARG2, BUMPENVMAT00, TEXTURETRANSFORMFLAGS) and 5 sampler
+    types (ADDRESSU, ADDRESSV, MAGFILTER, MINFILTER, MIPFILTER). A set of another type is dropped (it never reaches
+    the device), a get of one returns 0. Texture stage gets return the cache, which the defaults pass leaves unknown;
+  * RestoreSamplerState re-sets the saved field (the defaults pass's value) through slot 51.
+* **The engine's direct device calls** reach the tracker through `engine::NativeDevice`: an object with the
+  IDirect3DDevice9 method table whose state methods (render / sampler / texture stage states, textures, shaders,
+  constants, declaration / FVF, streams and frequency, indices, targets, viewport, scissor, clip planes and their
+  Get*) record into the tracker. The defaults passes are such callers: without it, the engine's own defaults
+  (those that differ from D3D9's) never reach the native state. The other methods answer
+  D3DERR_INVALIDCALL and are counted.
+
+`tests/s6n/test_d3d9_state_table.py --out <n1 out> [--exe FalloutNV.exe]` runs a defaults pass through the native
+device and the stubs and checks every state of its tables in the tracker and the cache, and restore after a draw.
+With `--exe` the tables are the exe's own (read at run time, never stored), the NiDX9RenderState vftable rows, the
+cache offsets and the cached-type bounds are checked against the layout, and the number of engine defaults that
+differ from D3D9's is printed.
+
+Not emulated yet: fixed-function transforms, lights and material, state blocks, palettes, N-patch mode, software
+vertex processing, gamma ramp (NativeDevice: INVALIDCALL, counted). Not wired yet: the device creation path does not
+hand the engine `CreateNativeDevice()` (Direct3DCreate9 / IDirect3D9::CreateDevice need a native replacement), and
+`Renderer::Init` resets the tracker without the automatic depth-stencil (ZENABLE FALSE until the engine sets it);
+`Renderer::Render` takes viewport and scissor from the renderer, not from the tracker's device state.
 
 ## 3. Native renderer design on deko3d
 
