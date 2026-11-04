@@ -60,6 +60,8 @@
   "path": "causes_all.json"
  },
  "fuzz_min_coverage": 0.9,
+ "_player_exe_doc": "the sha256 the gamedata/exe checksum line for FalloutNV.exe must give (fixture: made up)",
+ "player_exe_sha256": "abababababababababababababababababababababababababababababababab",
  "boot_milestones": [
   "winmain",
   "renderer_init",

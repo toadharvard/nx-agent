@@ -23,6 +23,7 @@ class names and report paths only: no prepared source, no unit text, no game dat
 """
 import argparse
 import json
+import math
 import os
 import re
 import statistics
@@ -191,6 +192,12 @@ def failed_report(text):
     return bool(re.match(r'# \S+ \S+ FAILED', text or ''))
 
 
+def shard_of(d, n):
+    """a sharded report counts only as shard k of exactly n, 1 <= k <= n: "shard 3/2" is no shard of 2, so it can
+    neither stand in for a missing one nor make the count of reported shards look complete"""
+    return d['n'] == n and 1 <= d['k'] <= n
+
+
 def parse_census(text):
     m = re.search(r'units: (\d+)\s+clean: (\d+)\s+failing: (\d+)', text)
     if not m:
@@ -296,10 +303,23 @@ def parse_static(text):
     return d
 
 
-def parse_fuzz(text):
-    m = re.search(r'^# fuzz \S+ shard (\d+)/(\d+)', text, re.M)
+def fuzz_summary(text):
+    """the report's ```json fnvnx-fuzz-summary``` block (tools/farm/fuzz_job.sh, the same object as the
+    <head12>-fuzz.json beside it); None when absent, {} when present but unreadable"""
+    m = re.search(r'^```json fnvnx-fuzz-summary\n(.*?)\n```', text or '', re.M | re.S)
     if not m:
         return None
+    try:
+        d = json.loads(m.group(1))
+    except ValueError:
+        return {}
+    return d if isinstance(d, dict) and d.get('format') == 'fnvnx-fuzz-summary/1' else {}
+
+
+def parse_fuzz(text):
+    m = re.search(r'^# fuzz \S+ shard (\d+)/(\d+)(.*)$', text, re.M)
+    if not m or 'HARNESS BROKEN' in m.group(3):
+        return None         # a broken harness's verdicts are not meaningful (fuzz_job.sh says so in the title)
     d = dict(k=int(m.group(1)), n=int(m.group(2)), catalogued=first(r'functions catalogued (\d+)', text),
              shard=first(r'in this shard (\d+)', text), no_native=first(r'no native object (\d+)', text),
              not_modelled=first(r'control flow not modelled[^)]*\) (\d+)', text),
@@ -315,6 +335,20 @@ def parse_fuzz(text):
         if mm:
             d['hard'].append((mm.group(2), mm.group(3), mm.group(5)))
     d['causes'] = causes_block(text)
+    d['with_obj'] = (d['shard'] or 0) - (d['no_native'] or 0)
+    d['status'] = None
+    sm = fuzz_summary(text)
+    if sm is not None:
+        # fnvnx-fuzz-summary/1: it must describe this shard, and a harness-broken run is no evidence
+        fn = dct(sm.get('functions'))
+        if not sm or (sm.get('shard'), sm.get('shards')) != (d['k'], d['n']) or sm.get('status') == 'harness-broken':
+            return None
+        if isinstance(fn.get('with_native_object'), int) and isinstance(fn.get('verdicts'), int):
+            d['with_obj'], d['verdicts'] = fn['with_native_object'], fn['verdicts']
+        if isinstance(fn.get('not_modelled'), int):
+            d['not_modelled'] = fn['not_modelled']
+        d['status'] = sm.get('status')
+        d['summary_commit'] = sm.get('commit')
     return d
 
 
@@ -353,18 +387,34 @@ def parse_frameprof(text):
         return None
     if not isinstance(res, list):
         return None
-    frames = [r['instructions'] for r in res if str(r.get('label', '')).startswith('frame ')]
+    res = [r for r in res if isinstance(r, dict)]
+    ins = lambda r: r.get('instructions')
+    # a frame or a phase is a measurement only with a positive instruction count: 0, a negative or a missing count
+    # is a broken profile (no frame time is ever derived from it), listed in `bad`
+    bad = ['%s: %r' % (str(r.get('label', '?'))[:40], ins(r)) for r in res if not posnum(ins(r))]
+    frames = [ins(r) for r in res if str(r.get('label', '')).startswith('frame ')]
     to_winmain, seen = 0, False
     for r in res:
-        to_winmain += r.get('instructions', 0)
+        to_winmain += ins(r) if isnum(ins(r)) else 0
         if re.search(r'until (__fnv_0086a850|WinMain)', str(r.get('label', ''))):
             seen = True
             break
-    return dict(frames=frames, to_winmain=to_winmain if seen else None, total=sum(r.get('instructions', 0) for r in res))
+    return dict(frames=frames, to_winmain=to_winmain if seen else None, bad=bad,
+                total=sum(ins(r) for r in res if isnum(ins(r))))
 
 
 def isnum(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def posnum(v):
+    """a finite number > 0: a time, an instruction count, a budget fraction"""
+    return isnum(v) and v > 0
+
+
+def dct(v):
+    """v when it is a JSON object, else {}: a producer's file of the wrong shape reads as empty, never crashes"""
+    return v if isinstance(v, dict) else {}
 
 
 def bound(v, key='gate'):
@@ -372,6 +422,41 @@ def bound(v, key='gate'):
     if isinstance(v, dict):
         return v.get(key, v.get('hi'))
     return v
+
+
+def bad_bounds(v, what):
+    """why a render-report value (a number or a {lo, hi, gate} range) is not a plausible time: [] when it is"""
+    if v is None:
+        return []
+    vals = v if isinstance(v, dict) else {'value': v}
+    bad = ['%s.%s %r' % (what, k, x) for k, x in vals.items() if k in ('lo', 'hi', 'gate', 'mid', 'value')
+           and not posnum(x)]
+    if not bad and isinstance(v, dict) and isnum(v.get('lo')) and isnum(v.get('hi')) and v['lo'] > v['hi']:
+        bad.append('%s lo %s > hi %s' % (what, v['lo'], v['hi']))
+    return bad
+
+
+def render_insane(j):
+    """why the render report's summary is not a measurement: every frame time it gives (frame_ms main / render,
+    lo, hi, gate) must be a positive finite number with lo <= hi, and every budget fraction positive. A report that
+    contradicts itself cannot pass a gate through its other numbers. [] when plausible"""
+    bad = []
+    fm = j.get('frame_ms')
+    if fm is not None and not isinstance(fm, dict):
+        bad.append('frame_ms %r' % (fm,))
+    for k, v in dct(fm).items():
+        bad += bad_bounds(v, 'frame_ms.' + k)
+    tbf = j.get('targets_budget_fraction')
+    if tbf is not None and not isinstance(tbf, dict):
+        bad.append('targets_budget_fraction %r' % (tbf,))
+    for fps, row in dct(tbf).items():
+        if not isinstance(row, dict):
+            bad.append('targets_budget_fraction.%s %r' % (fps, row))
+            continue
+        # clock keys ("1.02") are what the gate reads; other numeric keys (gpu_*, frame_*) must still be positive
+        bad += ['targets_budget_fraction.%s.%s %r' % (fps, k, v) for k, v in row.items()
+                if (re.fullmatch(r'\d+(\.\d+)?', str(k)) or isinstance(v, (int, float))) and not posnum(v)]
+    return bad
 
 
 def fmt_ms(v):
@@ -546,9 +631,10 @@ class Card:
     def link_json(self, branch, path):
         t = self.store.read(branch, path) if branch else None
         try:
-            return json.loads(t) if t else None
+            d = json.loads(t) if t else None
         except ValueError:
             return None
+        return d if isinstance(d, dict) else None       # meta.json and boot/milestones.json are JSON objects
 
     # ---- gates
     def compile_gates(self):
@@ -564,7 +650,7 @@ class Card:
                         'no census report on reports/farm1', rank=12)
         n = self.th['compile_shards']
         shards = {}
-        for farm, (d, s) in self.newest('farm', r'-compile\.md$', parse_compile, lambda d: d['n'] == n).items():
+        for farm, (d, s) in self.newest('farm', r'-compile\.md$', parse_compile, lambda d: shard_of(d, n)).items():
             if d['k'] not in shards or (s['published'] or 0) > (shards[d['k']][1]['published'] or 0):
                 shards[d['k']] = (d, s)
         if len(shards) == n:
@@ -674,7 +760,7 @@ class Card:
     def equiv_gates(self):
         n = self.th['equiv_shards']
         shards = {}
-        for farm, (d, s) in self.newest('eq', r'-equiv\.md$', parse_equiv, lambda d: d['n'] == n).items():
+        for farm, (d, s) in self.newest('eq', r'-equiv\.md$', parse_equiv, lambda d: shard_of(d, n)).items():
             if d['k'] not in shards or (s['published'] or 0) > (shards[d['k']][1]['published'] or 0):
                 shards[d['k']] = (d, s)
         srcs = [v[1] for _, v in sorted(shards.items())]
@@ -712,7 +798,7 @@ class Card:
     def static_gates(self):
         n = self.th['static_shards']
         shards = {}
-        for farm, (d, s) in self.newest('st', r'-static\.md$', parse_static, lambda d: d['n'] == n).items():
+        for farm, (d, s) in self.newest('st', r'-static\.md$', parse_static, lambda d: shard_of(d, n)).items():
             if d['k'] not in shards or (s['published'] or 0) > (shards[d['k']][1]['published'] or 0):
                 shards[d['k']] = (d, s)
         srcs = [v[1] for _, v in sorted(shards.items())]
@@ -752,7 +838,7 @@ class Card:
     def fuzz_gates(self):
         n = self.th['fuzz_shards']
         shards = {}
-        for farm, (d, s) in self.newest('fz', r'-fuzz\.md$', parse_fuzz, lambda d: d['n'] == n).items():
+        for farm, (d, s) in self.newest('fz', r'-fuzz\.md$', parse_fuzz, lambda d: shard_of(d, n)).items():
             if d['k'] not in shards or (s['published'] or 0) > (shards[d['k']][1]['published'] or 0):
                 shards[d['k']] = (d, s)
         srcs = [v[1] for _, v in sorted(shards.items())]
@@ -760,15 +846,22 @@ class Card:
         if not self.fuzz_causes_gates(shards, n):
             self.fuzz_table_gate(shards, srcs, missing, n)
         if shards:
-            with_obj = sum((d['shard'] or 0) - (d['no_native'] or 0) for d, _ in shards.values())
+            with_obj = sum(d['with_obj'] for d, _ in shards.values())
             ver = sum(d['verdicts'] or 0 for d, _ in shards.values())
             nm = sum(d['not_modelled'] or 0 for d, _ in shards.values())
-            cov = ver / with_obj if with_obj else 0
+            cov = ver / with_obj if with_obj > 0 else 0
             want = self.th.get('fuzz_min_coverage', 0.9)
+            summ = sorted(k for k, (d, _) in shards.items() if d.get('status'))
+            part = sorted(k for k, (d, _) in shards.items() if d.get('status') == 'partial')
+            note = '%d not modelled (indirect control flow); %d of %d shards reported' % (nm, len(shards), n)
+            if missing:
+                note += ' (missing: %s)' % ','.join(map(str, missing))
+            note += '; fnvnx-fuzz-summary/1 from %d shards' % len(summ)
+            if part:
+                note += ', partial (pending functions): %s' % ','.join(map(str, part))
             self.gate('fuzz.coverage', 'Fuzz', 'S13: functions with a verdict / functions with a native object',
                       '%.1f %% (%d/%d)' % (100 * cov, ver, with_obj), '>= %.0f %%, all %d shards' % (100 * want, n),
-                      PASS if cov >= want and not missing else FAIL, srcs,
-                      '%d not modelled (indirect control flow); %d of %d shards reported' % (nm, len(shards), n), rank=19)
+                      PASS if cov >= want and not missing and ver <= with_obj else FAIL, srcs, note, rank=19)
         else:
             self.nodata('fuzz.coverage', 'Fuzz', 'S13 coverage', '>= 90 %', 'no fuzz report', rank=19)
 
@@ -872,6 +965,27 @@ class Card:
                   rank=19, required=False)
         return True
 
+    def player_exe(self):
+        """(sha256 of the player's FalloutNV.exe, why not) from gamedata/exe's checksum file: only its line for the
+        file FalloutNV.exe counts (a line for another file proves nothing about the exe, J-0135 G1), and with
+        thresholds player_exe_sha256 that line must name the pinned GOG 1.4.0.525(a) exe"""
+        text = self.store.read('gamedata/exe', 'FalloutNV.exe.sha256')
+        if not text:
+            return None, 'gamedata/exe not readable'
+        sums = {}
+        for l in text.splitlines():
+            m = re.match(r'\s*([0-9a-fA-F]{64})\s+\*?(\S.*?)\s*$', l)
+            if m:
+                sums.setdefault(m.group(2), m.group(1).lower())
+        want = sums.get('FalloutNV.exe')
+        if not want:
+            return None, 'gamedata/exe/FalloutNV.exe.sha256 has no line for FalloutNV.exe (names: %s)' % (
+                ', '.join(sorted(sums)) or 'none')
+        pin = str(self.th.get('player_exe_sha256') or '').lower()
+        if pin and want != pin:
+            return None, 'gamedata/exe holds another exe (%s.., pinned %s..)' % (want[:8], pin[:8])
+        return want, None
+
     def boot_gates(self):
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
         names = self.th['boot_milestones']
@@ -885,16 +999,36 @@ class Card:
         d, s = fb[0]
         br = self.link_branch(d['_text_commit'])
         meta = self.link_json(br, 'meta.json') or {}
-        want = (self.store.read('gamedata/exe', 'FalloutNV.exe.sha256') or '').split()
-        want = want[0] if want else None
+        stage = d['stages'].get('boot')
+        if stage not in ('ok', 'warn'):
+            # the newest full build has no boot of its own: what link/<c12> still holds may come from another run
+            # (published before link_job cleared build/boot, J-0135), so nothing of it counts
+            why = ('the boot stage of this full build failed' if stage == 'fail' else
+                   'this full build did not run the boot (stage %s)' % (stage or 'missing'))
+            st = FAIL if stage == 'fail' else NODATA
+            self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe',
+                      'no (boot stage %s)' % stage if stage == 'fail' else None, 'yes', st, s, why, rank=1)
+            for i, m in enumerate(names):
+                self.gate('boot.' + m, 'Emulated boot', 'milestone: ' + m, 'no' if stage == 'fail' else None,
+                          'reached on the real exe', st, s, why, rank=2 + i)
+            self.gate('boot.init_skips', 'Emulated boot', 'static initializers skipped after a fault', None, '0',
+                      NODATA, s, why, rank=6)
+            return
+        want, why_not = self.player_exe()
         got = meta.get('boot_image_sha256')
+        got = got.lower() if isinstance(got, str) else None
         reached = self.milestones(br, meta, d)
         label = self.boot_info.get('image') or meta.get('boot_image')     # S5: "player exe" | "synthesized" | none
-        if want and got:
+        if got and want:
             real = got == want
             self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes' if real else
                       'no (%s)' % ('synthesized image' if 'synth' in (d.get('image') or '') else 'another image'), 'yes',
                       PASS if real else FAIL, s, 'image sha256 %s.., exe %s..' % (got[:8], want[:8]), rank=1)
+        elif got:
+            # an image hash that cannot be checked: neither it nor a label stands in for the check
+            real = None
+            self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
+                        'image sha256 %s.. not checked: %s' % (got[:8], why_not), rank=1, sources=[s])
         elif label in ('player exe', 'synthesized'):
             # no hash to compare: S5's image label (boot/milestones.json "image", meta.json boot_image)
             real = label == 'player exe'
@@ -910,8 +1044,8 @@ class Card:
         else:
             real = None
             self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
-                        'no image hash in meta.json' if want else 'gamedata/exe not readable', rank=1, sources=[s])
-        stub = self.boot_info.get('stub') or {}
+                        'no image hash in meta.json', rank=1, sources=[s])
+        stub = dct(self.boot_info.get('stub'))
         for i, m in enumerate(names):
             r = reached.get(m)
             if r is None:
@@ -919,7 +1053,8 @@ class Card:
                             'no machine-readable milestone `%s` yet (S5)' % m, rank=2 + i, sources=[s])
                 continue
             ok = bool(r) and real is True
-            note = '' if real else 'on the synthesized image only' if r else ''
+            note = '' if real else 'on the synthesized image only' if r and real is False else \
+                'the image is not checked' if r else ''
             if not r and stub.get(m):
                 note = 'the stub-fault boot reaches it (known faults stubbed: not the guest\'s own progress)'
             elif not r and m == next((x for x in names if not reached.get(x)), None) and self.boot_info.get('stop'):
@@ -931,31 +1066,40 @@ class Card:
                   NODATA if sk is None else PASS if sk == 0 else FAIL, s, (d.get('stop') or '')[:120], rank=6)
 
     def milestones(self, br, meta, d):
-        """S5's machine-readable milestones: boot/milestones.json (fnvnx-boot-milestones/1, tests/s5/boot_milestones.py:
-        the raw boot's {name: true|false|null} at the top level, "stub" for the stub-fault boot, plus image,
-        milestone, boot_peak_heap_bytes, stop; null is not measured), meta.json boot_<name>, or
-        `fnvnx milestone: <name>` lines in boot/summary.txt; WinMain also from the report"""
+        """S5's machine-readable milestones, by precedence: boot/milestones.json (fnvnx-boot-milestones/1,
+        tests/s5/boot_milestones.py: the raw boot's {name: true|false|null} at the top level, "stub" for the
+        stub-fault boot, plus image, milestone, boot_peak_heap_bytes, stop; null is not measured) decides every
+        milestone it gives; meta.json boot_<name> and `fnvnx milestone: <name>` lines in boot/summary.txt only fill
+        what it leaves out (a summary line never overrides a false); WinMain also from the report"""
         out = {}
+        names = self.th['boot_milestones']
+        given = set()                       # milestones milestones.json speaks about, even as null (not measured)
         mj = self.link_json(br, 'boot/milestones.json') if br else None
-        if isinstance(mj, dict):
+        if mj is not None:
             top = mj['milestones'] if isinstance(mj.get('milestones'), dict) else mj
-            for k in self.th['boot_milestones']:
-                v = top.get(k, top.get(k.replace('_', '-')))
-                if isinstance(v, (bool, int)):
-                    out[k] = int(bool(v))
+            for k in names:
+                for key in (k, k.replace('_', '-')):
+                    if key in top:
+                        v = top[key]
+                        given.add(k)
+                        if isinstance(v, bool) or v in (0, 1):
+                            out[k] = int(bool(v))
+                        break
             self.boot_info = dict(image=mj.get('image'), last=mj.get('milestone'), stop=mj.get('stop'),
                                   peak=mj.get('boot_peak_heap_bytes'),
                                   stub=mj['stub'] if isinstance(mj.get('stub'), dict) else None)
-        for k in self.th['boot_milestones']:
-            if 'boot_' + k in meta and k not in out:
-                out[k] = int(bool(meta['boot_' + k]))
+        for k in names:
+            v = meta.get('boot_' + k)
+            if k not in given and k not in out and (isinstance(v, bool) or v in (0, 1)):
+                out[k] = int(bool(v))
         summ = self.store.read(br, 'boot/summary.txt') if br else None
         if summ:
             for m in re.findall(r'fnvnx milestone: (\w+)', summ):
-                out[m] = 1
-            if 'winmain' not in out and 'fnvnx boot: calling WinMain' in summ:
+                if m in names and m not in given and m not in out:
+                    out[m] = 1
+            if 'winmain' not in given and 'winmain' not in out and 'fnvnx boot: calling WinMain' in summ:
                 out['winmain'] = 1
-        if 'winmain' not in out and d.get('winmain') is not None:
+        if 'winmain' not in given and 'winmain' not in out and d.get('winmain') is not None:
             out['winmain'] = d['winmain']
         return out
 
@@ -972,19 +1116,44 @@ class Card:
             return
         t, br, path = max(hits)
         try:
-            g = json.loads(self.store.read(br, path))
+            g = json.loads(self.store.read(br, path) or '')
         except ValueError:
             g = None
+        title = 'S16: scenes matching the reference'
         if not isinstance(g, dict) or not isinstance(g.get('scenes'), list):
-            self.nodata('frames.compare', 'Frame and scene comparison', 'S16: scenes matching the reference',
-                        'all scenes', 'unreadable gate file', rank=5)
+            self.nodata('frames.compare', 'Frame and scene comparison', title, 'all scenes', 'unreadable gate file',
+                        rank=5)
             return
-        sc = g['scenes']
-        ok = sum(1 for x in sc if x.get('pass'))
-        self.gate('frames.compare', 'Frame and scene comparison', 'S16: scenes matching the reference',
-                  '%d/%d' % (ok, len(sc)), 'all scenes', PASS if sc and ok == len(sc) else FAIL,
-                  self.src(br, path, g.get('commit'), t), ', '.join(x.get('name', '?') for x in sc if not x.get('pass')),
-                  rank=5)
+        sc = [x for x in g['scenes'] if isinstance(x, dict)]
+        note = []
+        if g.get('format') == 'fnvnx-gate/1':
+            # S16's own gate file (tools/compare/compare.py): scenes[].status, candidate.commit / kind, a top-level
+            # status that must agree with the scenes
+            cand = dct(g.get('candidate'))
+            commit = cand.get('commit')
+            name = lambda x: str(x.get('id') or x.get('name') or '?')
+            passed = lambda x: x.get('status') == 'pass'
+            kinds = self.th.get('frames', {}).get('candidate_kinds', ['port'])
+            if cand.get('kind') not in kinds:
+                self.nodata('frames.compare', 'Frame and scene comparison', title, 'all scenes',
+                            'the candidate run is "%s", not the port (%s)' % (cand.get('kind'), '/'.join(kinds)),
+                            rank=5, sources=[self.src(br, path, commit, t)])
+                return
+            top_ok = g.get('status') == 'pass'
+            if not top_ok:
+                note.append('gate status %s' % g.get('status'))
+        else:
+            # R0's first format: scenes[].pass (a JSON true, nothing else) and a top-level commit
+            commit, top_ok = g.get('commit'), True
+            name = lambda x: str(x.get('name') or '?')
+            passed = lambda x: x.get('pass') is True
+        ok = sum(1 for x in sc if passed(x))
+        good = bool(sc) and ok == len(sc) == len(g['scenes']) and top_ok
+        if len(sc) != len(g['scenes']):
+            note.append('%d malformed scene entries' % (len(g['scenes']) - len(sc)))
+        note += ['%s %s' % (name(x), x.get('status', '')) if 'status' in x else name(x) for x in sc if not passed(x)]
+        self.gate('frames.compare', 'Frame and scene comparison', title, '%d/%d' % (ok, len(g['scenes'])),
+                  'all scenes', PASS if good else FAIL, self.src(br, path, commit, t), ', '.join(note), rank=5)
 
     def perf_gates(self):
         p = self.th['perf']
@@ -1000,10 +1169,15 @@ class Card:
             prof = parse_frameprof(self.store.read(br, path) or '')
             m = re.match(r'([0-9a-f]{12})-', os.path.basename(path))
             ps = self.src(br, path, m.group(1) if m else None, t)
+        broken = 'broken frameprof run (not a measurement): %s' % short_list(prof['bad'], 4) if prof and prof['bad'] \
+            else None
         for clk in p['clocks']:
             gid, req = 'perf.frame.' + clk['name'], clk.get('required', True)
             title = 'main-thread frame time, worst / median (%s clock %.3f GHz)' % (clk['name'], clk['hz'] / 1e9)
-            if prof and prof['frames']:
+            if broken:
+                self.nodata(gid, 'Performance', title, self.fps_threshold(), broken, rank=22, sources=[ps],
+                            required=req)
+            elif prof and prof['frames']:
                 ms = sorted(i / (p['ipc'] * clk['hz']) * 1000 for i in prof['frames'])
                 worst, med = ms[-1], statistics.median(ms)
                 lv, name, st = self.fps_levels(worst, med)
@@ -1017,7 +1191,10 @@ class Card:
                             required=req)
         bc = next((c for c in p['clocks'] if c['name'] == p.get('boot_clock')), p['clocks'][0])
         title = 'estimated device time from start to WinMain (%s clock)' % bc['name']
-        if prof and prof['to_winmain'] is not None:
+        if broken:
+            self.nodata('perf.boot', 'Performance', title, '<= %.1f s' % p['boot_to_winmain_s'], broken, rank=21,
+                        sources=[ps])
+        elif prof and prof['to_winmain'] is not None:
             secs = [(c['name'], prof['to_winmain'] / p['ipc'] / c['hz']) for c in p['clocks']]
             sec = dict(secs)[bc['name']]
             self.gate('perf.boot', 'Performance', title, '%.2f s' % sec, '<= %.1f s' % p['boot_to_winmain_s'],
@@ -1098,7 +1275,12 @@ class Card:
             title = 'render perf: renderer CPU share of the frame, worst thread (%s clock %.3f GHz)' % (
                 clk['name'], clk['hz'] / 1e9)
             thr = 'renderer <= %.0f %% of the frame (RENDER_NATIVE 9.4) at: %s' % (100 * share, self.fps_threshold())
-            fr, how = self.render_fractions(j, clk) if isinstance(j, dict) else (None, None)
+            insane = render_insane(j) if isinstance(j, dict) else []
+            fr, how = self.render_fractions(j, clk) if isinstance(j, dict) and not insane else (None, None)
+            if insane:
+                self.nodata(gid, 'Performance', title, thr, 'the render report is not a plausible measurement: %s'
+                            % short_list(insane, 4), rank=22, sources=[src] if src else None, required=req)
+                continue
             if not fr:
                 why = ('no render perf report (%s:%s) yet' % (where, rp.get('path')) if not r.get('text') else
                        'unreadable summary block' if not isinstance(j, dict) else
@@ -1157,26 +1339,27 @@ class Card:
     def gpu_gates(self, full, src, where):
         rp = self.th.get('render_perf', {})
         mix = rp.get('gpu_mix', 'mix_hi')
-        gpu = (full or {}).get('gpu') if isinstance((full or {}).get('gpu'), dict) else {}
-        sm = (gpu.get('summary_ms') or {}).get(mix) or {}
+        gpu = dct(dct(full).get('gpu'))
+        sm = dct(dct(gpu.get('summary_ms')).get(mix))
         for cfg in rp.get('gpu', []):
             name, req = cfg['name'], cfg.get('required', False)
             title = 'GPU frame time, %s (model, %s)' % (name.replace('_', ' '), mix)
             row = next((sm[k] for k in [name] + cfg.get('aliases', []) if k in sm), None)
             lo = row.get(cfg.get('lo', 'eff_1.0')) if isinstance(row, dict) else None
             hi = row.get(cfg.get('hi', 'eff_0.6')) if isinstance(row, dict) else None
-            if not (isnum(lo) and isnum(hi)):
+            if not (posnum(lo) and posnum(hi) and lo <= hi):
                 self.nodata('perf.gpu.' + name, 'Performance', title, self.fps_threshold(),
-                            'no gpu.summary_ms.%s.%s in the render report (%s)' % (mix, name, where), rank=22,
-                            sources=[src] if src else None, required=req)
+                            ('no gpu.summary_ms.%s.%s in the render report (%s)' % (mix, name, where)
+                             if lo is None and hi is None else 'gpu.summary_ms.%s.%s is not a plausible time (%r - %r)'
+                             % (mix, name, lo, hi)), rank=22, sources=[src] if src else None, required=req)
                 continue
             lv, lname, st = self.fps_levels(hi, hi)
-            tg = (gpu.get('targets') or {})
+            tg = dct(gpu.get('targets'))
             self.gate('perf.gpu.' + name, 'Performance', title, '%.1f - %.1f ms' % (lo, hi), self.fps_threshold(), st,
                       src, '%s; judged on the efficiency-0.6 bound; model, not measured (RENDER_PERF.md section 9); '
                       'report: %s' % (self.fps_note(lv, lname), ', '.join(
-                          '%s fps %s' % (k, next(((tg.get(k) or {})[a] for a in [name] + cfg.get('aliases', [])
-                                                 if a in (tg.get(k) or {})), '?')) for k in sorted(tg))), rank=22,
+                          '%s fps %s' % (k, next((dct(tg.get(k))[a] for a in [name] + cfg.get('aliases', [])
+                                                 if a in dct(tg.get(k))), '?')) for k in sorted(tg))), rank=22,
                       required=req, levels=dict(lv, level=lname))
 
     def budget_gate(self):
