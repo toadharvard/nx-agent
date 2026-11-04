@@ -94,6 +94,7 @@ CLASSES = {
     'ENUM1': 'neutral',         # enum X; -> enum X : int; (+ its definitions): MSVC's underlying type spelled out
     'ANON1': 'platform',        # names an unnamed struct defined in a return type (MSVC decorates the name)
     'STL1': 'platform',        # fnvnx_msvcstl.h: MSVC <xutility> internals (_SCL_SECURE_VALIDATE, _Ptr_cat) for libstdc++
+    'STL2': 'platform',        # fnvnx_vc9.h: VC9's containers in their x86 layout for units using real <string>/<vector>/<map>
     'SPEC3': 'neutral',         # namespace qualification of names in specializations written inside a namespace
     'LEX1': 'neutral',          # MSVC token spellings (i64 suffixes, 0xae-0x34, "C"enum) -> standard ones
     'STD1': 'platform',         # a decomp `struct std { static float abs(float); }` -> <cmath>'s std::abs

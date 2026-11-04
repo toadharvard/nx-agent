@@ -137,6 +137,26 @@ check('DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched', 
 got = prepare.r_platform_protos('/x/src/w.cpp', 'extern "C" size_t __cdecl wcslen(const wchar_t* s);\nint g();\n', Counter())
 check('DECL1 a <wchar.h> prototype becomes the header', got, ['#include <wchar.h> /* fnv-nx DECL1 */\nint g();'], ['wcslen'])
 
+# ---- STL2: units with the real container headers use the VC9-layout shim
+_stl2 = ('// std::string in a comment\n#include <string>\n#include <vector>\nnamespace std {\ntemplate <> class allocator<E>\n'
+         '{ typedef size_t size_type; };\n}\nstruct S { std::string s; ::std::vector<int> v; };\n'
+         'const char* n = "std::string";\nvoid f() { stdext::unchecked_copy(a, b, c); x::std::y z; }\n')
+got = run(s1.r_vc9_containers, _stl2)
+check('STL2 includes fnvnx_vc9.h in place of the container headers, line count kept', got,
+      ['#include "fnvnx_vc9.h" /* fnv-nx STL2 */\n/* fnv-nx STL2: #include <vector> */\n'], ['#include <string>'])
+check('STL2 spells std / ::std / stdext as fnvnx_vc9 in code, not in comments, strings or nested names', got,
+      ['struct S { fnvnx_vc9::string s; ::fnvnx_vc9::vector<int> v; };', 'fnvnx_vc9::stdext::unchecked_copy(',
+       '// std::string in a comment', '"std::string"', 'x::std::y z;', 'namespace fnvnx_vc9 {'])
+check('STL2 size_t in the unit\'s own namespace std is MSVC\'s (unsigned int)', got, ['typedef _Sizet size_type;'])
+check('STL2 line count kept', str(got.count('\n') == _stl2.count('\n')), ['True'])
+check('STL2 leaves a unit without the real container headers', run(s1.r_vc9_containers,
+      '#include "rstd.h"\nstd::string s;\n'), ['std::string s;'], ['fnvnx_vc9'])
+got = s1.r_specialization_decls('/x/src/speedtree/projectedshadow_ob1_variant.cpp',
+      'void a();\n#include "h.h"\n#include <memory>\ntemplate <class T> struct B;\nvoid g() {}\n'
+      'template <> X<char>::X(int);\n', Counter())
+check('SPEC1 never prefixes a preprocessor line: after the directives that follow its anchor', got,
+      ['#include <memory>\ntemplate <> X<char>::X(int); /* fnv-nx SPEC1 */ template <class T> struct B;'])
+
 # ---- MATH1
 check('MATH1 drops a decomp copy of float sqrt(float)',
       run(s1.r_math_overloads, 'inline float __cdecl sqrt(float _X)\n{\n    return sqrtf(_X);\n}\n'), ['#include <math.h>'],

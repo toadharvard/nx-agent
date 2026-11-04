@@ -1021,6 +1021,12 @@ def r_specialization_decls(path, text, stats):
                                                      ' const' if m.group(9) else '', ' FNVNX_KEEP' if keep else '')
         nl = text.find('\n', p0)
         if nl < 0 or nl >= m.start(): continue
+        # not into a preprocessor line: after the directives that follow p0 (`#include <memory>` under an include)
+        while re.match(r'[ \t]*#', text[nl + 1:nl + 80]):
+            nxt = text.find('\n', nl + 1)
+            if nxt < 0 or nxt >= m.start(): break
+            nl = nxt
+        if re.match(r'[ \t]*#', text[nl + 1:nl + 80]): continue
         # names of the declaration that are not declared yet at that point get a forward declaration when the file
         # declares them as a class / struct at file scope; otherwise the declaration is not moved
         fwd, unknown = [], False
@@ -2197,6 +2203,56 @@ def r_incomplete_pointee_dtors(path, text, stats):
     if not out: return text
     stats['DTOR1'] += len(out)
     return text[:lead_end] + ' '.join(out) + ' /* fnv-nx DTOR1 */ ' + text[lead_end:]
+
+# ---------------------------------------------------------------------------------------------------------- STL2
+#
+# Seven units use the real MSVC 2008 <string> / <vector> / <map> (the `_std` variants, tesobject_ob1_nogf,
+# the speedtree units, bsfacegenmanager_ob1, blk_00b20000_od_ob1_rtm). Their game structs hold those containers
+# (speedtree's leaf: a string at +0x14 and the next member at +0x30; tesobject's El: string, int, vector = 0x38, the
+# element size 0x00abfa90 divides by), and four of them program against the library's internals (_Mybase,
+# _Vector_val, _Buy, _Myptr, _Mylast, _Make_iter, _String_val, stdext::unchecked_copy, _Allocate). libstdc++'s
+# containers have other sizes (string 24, vector 12) and none of those internals. STL2 spells such a unit's `std` as
+# `fnvnx_vc9`, the namespace of shim/include/fnvnx_vc9.h (VC9's containers in their x86 release layout: string 28,
+# vector 24, map 32; every other std name is libstdc++'s through a using-directive), `stdext` as
+# `fnvnx_vc9::stdext`, and includes that header in place of the first container header. Code only: comments and
+# strings keep their text. Units with their own copies of these classes do not include the real headers.
+
+STL2_HEADERS = re.compile(r'^[ \t]*#[ \t]*include[ \t]*<(?:string|vector|map|xstring|xtree|xmemory|xutility)>[^\n]*$',
+                          re.M)
+STL2_CODE_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)', re.S)
+STL2_NAME = re.compile(r'(?<![\w:])(::\s*)?\b(std|stdext)\b(?=\s*::)|\bnamespace\s+std\b')
+
+def r_vc9_containers(path, text, stats):
+    """STL2: `std` -> `fnvnx_vc9` and fnvnx_vc9.h for the STL headers in a unit that uses MSVC's containers (above)."""
+    if not path.endswith('.cpp') or '#' not in text or 'include' not in text: return text
+    if not STL2_HEADERS.search(text): return text
+    masked = set()
+    for m in STL2_CODE_MASK.finditer(text):
+        masked.update(range(m.start(), m.end()))
+    out, pos, n = [], 0, 0
+    for m in STL2_NAME.finditer(text):
+        if m.start() in masked: continue
+        if m.group(0).startswith('namespace'):
+            new = 'namespace fnvnx_vc9'
+        else:
+            new = (m.group(1) or '') + ('fnvnx_vc9' if m.group(2) == 'std' else 'fnvnx_vc9::stdext')
+        out.append(text[pos:m.start()]); out.append(new); pos = m.end(); n += 1
+    out.append(text[pos:])
+    text = ''.join(out)
+    # the unit's own code in namespace std (allocator<El>) meant MSVC's size_t, unsigned int: VC9's _Sizet
+    for m in reversed(list(re.finditer(r'\bnamespace fnvnx_vc9\s*\{', text))):
+        end = prepare.match_brace(text, m.end() - 1)
+        body, k = re.subn(r'(?<![\w:])size_t\b', '_Sizet', text[m.end():end])
+        text = text[:m.end()] + body + text[end:]; n += k
+    first = [True]
+    def header(m):
+        if first[0]:
+            first[0] = False
+            return '#include "fnvnx_vc9.h" /* fnv-nx STL2 */'
+        return '/* fnv-nx STL2: %s */' % m.group(0).strip()
+    text = STL2_HEADERS.sub(header, text)
+    stats['STL2'] += 1 + n
+    return text
 
 # ---------------------------------------------------------------------------------------------------------- STL1
 #
@@ -3620,7 +3676,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
