@@ -47,7 +47,12 @@ CONFIG = [
     ('ALLOW_UNPINNED', '0', '1: a checkout at another commit than tools/fetch.sh pins is a warning, not a failure'),
     ('FNVNX_TC', '', 'fnvnx-a64 prefix (toolchain/gcc/build.sh output); empty: $DEVKITPRO/devkitA64 or build it'),
     ('DEVKITPRO', '', 'DEVKITPRO tree with libnx (toolchain/devkita64/setup.sh output)'),
-    ('TC_DL', '', 'only to build the toolchain: directory with the binutils/gcc/newlib tarballs'),
+    ('TC_DL', 'auto', 'how fnvnx-a64 + DEVKITPRO are built when FNVNX_TC / DEVKITPRO are not given: auto = fetch '
+                      'the pinned sources (toolchain/sources.sh) and build them in build/toolchain; a directory = the '
+                      'binutils/gcc/newlib tarballs from there; none = never build'),
+    ('CROSS', 'auto', 'the aarch64-linux-gnu tools: auto = the system\'s when they are the pinned Ubuntu build, else '
+                      'unpack the pinned packages (toolchain/cross/setup.sh) into build/toolchain/cross; pinned = '
+                      'always those; system = whatever is on PATH'),
     ('JOBS', str(os.cpu_count() or 4), 'parallel jobs'),
     ('GAME_CXX', 'standin', 'compiler of the game units: standin (aarch64-linux-gnu-g++, the compiler of every '
                             'measured link and boot so far), tc (fnvnx-a64 g++), auto (tc when the toolchain is '
@@ -65,7 +70,8 @@ CONFIG = [
                         'archive snapshot); in a checkout it must equal HEAD'),
     ('CENSUS', '1', '0: skip the -fsyntax-only census'),
     ('OVERRIDE', '', 'fnvlink resolve --override table (native replacements)'),
-    ('EXTERN_TEXT', '', 'fnvlink resolve --extern-text list (S4 addr_ids.txt)'),
+    ('EXTERN_TEXT', 'auto', 'fnvlink resolve --extern-text list: auto = made from the tree\'s units.json by '
+                            'tools/pipeline/extern_text.py (S4\'s addr_ids.txt), none = off, or a file'),
     ('MSVC_OBJS', '', 'fnvlink resolve --msvc-objs: pristine MSVC 2008 objects (S11) for S2b\'s vtable slots'),
     ('UNITS_RENAMES', '', 'fnvlink resolve --units-renames table (empty: fnvlink\'s default, the port\'s '
                           'patches/units_renames.tsv; none: off)'),
@@ -74,11 +80,15 @@ CONFIG = [
                            'tools/pipeline/guest_link.py'),
     ('GAME_NEW', 'runtime', 'global operator new/delete of the guest (toolchain/game/build.sh GAME_NEW): runtime '
                             '(malloc stand-ins) or game (the game objects\' own)'),
-    ('VORBIS', '', 'libogg/libvorbis ILP32 prefix for the guest link (S5 script only)'),
+    ('VORBIS', 'auto', 'libogg/libvorbis ILP32 prefix for the guest link (S5 script only): auto = built by the '
+                       'toolchain stage (toolchain/vorbis/build.sh), none = without, or a prefix'),
     ('BOOT', '0', '1: the boot stage (emulated boot of the game guest + boot frontier) runs with `all`; it also runs '
                   'when named as a goal (make boot)'),
-    ('BOOT_IMAGE', '', 'data image for the emulated boot (sdmc:/fnvnx/game/FalloutNV.exe), e.g. S14\'s synthesized '
-                       'exe; empty: no image (all-zero data)'),
+    ('BOOT_IMAGE', 'auto', 'data image for the emulated boot (sdmc:/fnvnx/game/FalloutNV.exe): auto = S14\'s '
+                           'synthesized image when PRISTINE_OBJS is given, else none; none = no image (all-zero '
+                           'data); or an exe file'),
+    ('PRISTINE_OBJS', '', 'MSVC 2008 objects of the pristine decomp (S11, tools/equiv: u<index>.obj), for S14\'s '
+                          'synthesized data image (loader/synth/synth_image.py)'),
     ('BOOT_CENSUS', '', 'census units.tsv the frontier reports the current compile status from (empty: this '
                         'build\'s census when it ran)'),
     ('NINE', '0', '1: Gallium Nine (render/nine) in the host module; 0: no D3D9 backend in the host (null device)'),
@@ -361,6 +371,7 @@ class Build:
         self.recs = {}
         self.ran = []
         self.explicit = set()      # stage goals named on the command line (make boot)
+        self.cross_bin = False     # set by the toolchain stage while it runs; False: take its record
         self.run_id = time.strftime('%Y%m%d-%H%M%S', time.gmtime())
         self.head = port_head(cfg)  # the commit every tree-derived output must be prepared from (J-0054)
         os.makedirs(self.out, exist_ok=True)
@@ -412,8 +423,10 @@ class Build:
         if dkp:
             e['DEVKITPRO'] = dkp
             path = os.path.join(dkp, 'tools', 'bin') + ':' + path
-        if self.cfg.get('CROSS_BIN'):
-            path = os.path.abspath(self.cfg['CROSS_BIN']) + ':' + path
+        cb = self.cfg.get('CROSS_BIN') or (self.cross_bin if self.cross_bin is not False
+                                           else self.art('toolchain', 'cross_bin'))
+        if cb:
+            path = os.path.abspath(cb) + ':' + path
         e['PATH'] = path
         ext = self.art('fetch', 'ext')
         if ext:
@@ -627,8 +640,160 @@ def stat_id(path):
         return (path, None)
 
 
+def cross_pins():
+    """toolchain/cross/packages.tsv -> {package: version}."""
+    pins = {}
+    for line in open(os.path.join(ROOT, 'toolchain', 'cross', 'packages.tsv')):
+        p = line.rstrip('\n').split('\t')
+        if len(p) >= 5 and not p[0].startswith('#'):
+            pins[p[0]] = p[1]
+    return pins
+
+
+def cross_pin_matches(b, path_prefix=None):
+    """Whether the aarch64-linux-gnu tools on PATH are the pinned Ubuntu builds (g++ version string, ld 2.42) ->
+    (bool, g++ version line)."""
+    gxx = shutil.which('aarch64-linux-gnu-g++', path=path_prefix) if path_prefix else b.which('aarch64-linux-gnu-g++')
+    if not gxx:
+        return False, None
+    pins = cross_pins()
+    rc, out = b.capture([gxx, '--version'])
+    first = out.splitlines()[0] if not rc and out else ''
+    want_gcc = '(Ubuntu %s)' % pins['g++-13-aarch64-linux-gnu'].split('cross')[0]
+    ld = os.path.join(os.path.dirname(gxx), 'aarch64-linux-gnu-ld')
+    rc, lout = b.capture([ld if os.path.exists(ld) else 'aarch64-linux-gnu-ld', '--version'])
+    want_ld = ' %s' % pins['binutils-aarch64-linux-gnu'].split('-')[0]
+    ok = want_gcc in first and not rc and want_ld in (lout.splitlines() or [''])[0]
+    return ok, first
+
+
+def provide_cross(b, r, d):
+    """The aarch64-linux-gnu tools (decomp compile, fnvlink): CROSS_BIN when given; CROSS=system: whatever is on
+    PATH; CROSS=pinned, or CROSS=auto when PATH has no tools of the pinned Ubuntu build: toolchain/cross/setup.sh
+    into build/toolchain/cross (the pinned packages, unpacked without root). -> the bin dir put first on PATH, or
+    None."""
+    mode = b.cfg['CROSS']
+    if b.cfg['CROSS_BIN']:
+        r['cross'] = 'CROSS_BIN'
+        return os.path.abspath(b.cfg['CROSS_BIN'])
+    if mode == 'system':
+        r['cross'] = 'system (CROSS=system)'
+        return None
+    if mode == 'auto':
+        b.cross_bin = None                          # the host's own PATH
+        ok, ver = cross_pin_matches(b)
+        if ok:
+            r['cross'] = 'system, the pinned build (%s)' % ver
+            return None
+        r.note('the aarch64-linux-gnu tools on PATH are not the pinned build (%s): unpacking the pinned packages'
+               % (ver or 'none'))
+    out = os.path.join(d, 'cross')
+    b.say('toolchain: pinned AArch64 cross tools (toolchain/cross/setup.sh)')
+    b.sh(['bash', os.path.join(ROOT, 'toolchain', 'cross', 'setup.sh'), out], r['log'], check=True, timeout=3600)
+    r['cross'] = 'pinned packages in %s' % b.rel(out)
+    return os.path.join(out, 'bin')
+
+
+def build_id(*paths, extra=()):
+    return sha(tree_hash(*paths), list(extra))
+
+
+def read_id(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def provide_fnvnx_a64(b, r, d):
+    """fnvnx-a64 and the DEVKITPRO tree: FNVNX_TC / DEVKITPRO when given (never modified); else the ones this
+    build dir holds when they were built by the current scripts; else, unless TC_DL=none, built here: the pinned
+    sources (toolchain/sources.sh, or TC_DL=<dir> with the tarballs), toolchain/gcc/build.sh (~45 min on 4 cores),
+    toolchain/devkita64/setup.sh with the pinned libnx. -> (prefix, devkitpro)."""
+    log = r['log']
+    prefix, dkp = b.cfg['FNVNX_TC'], b.cfg['DEVKITPRO']
+    if not prefix and dkp and os.path.isdir(os.path.join(dkp, 'devkitA64')):
+        prefix = os.path.realpath(os.path.join(dkp, 'devkitA64'))
+        r.note('FNVNX_TC taken from $DEVKITPRO/devkitA64')
+    own_prefix, own_dkp = os.path.join(d, 'prefix'), os.path.join(d, 'dkp')
+    src = os.path.join(d, 'src')
+    tc_id = build_id('toolchain/gcc/build.sh', 'toolchain/sources.sh')
+    ext = b.art('fetch', 'ext') or os.path.join(ROOT, 'ext')
+    dkp_id = build_id('toolchain/devkita64', 'toolchain/tools', extra=[tc_id, read_git_head(os.path.join(ext, 'libnx'))])
+
+    def built(path, want):
+        return read_id(os.path.join(path, '.fnvnx-build-id')) == want
+
+    may_build = b.cfg['TC_DL'] != 'none'
+    if not prefix and built(own_prefix, tc_id):
+        prefix = own_prefix
+    if not prefix and may_build:
+        dl = os.path.abspath(b.cfg['TC_DL']) if b.cfg['TC_DL'] not in ('', 'auto') else os.path.join(d, 'dl')
+        b.say('toolchain: fnvnx-a64 sources (toolchain/sources.sh)')
+        b.sh(['bash', os.path.join(ROOT, 'toolchain', 'sources.sh'), dl, src], log, check=True, timeout=3600)
+        work = os.path.join(d, 'work')
+        shutil.rmtree(work, ignore_errors=True)       # its step stamps belong to the previous scripts
+        shutil.rmtree(own_prefix, ignore_errors=True)
+        b.say('toolchain: building fnvnx-a64 (toolchain/gcc/build.sh, ~45 min on 4 cores)')
+        b.sh(['bash', os.path.join(ROOT, 'toolchain', 'gcc', 'build.sh'), dl, work, own_prefix,
+              os.path.join(src, 'buildscripts')], log, check=True, timeout=6 * 3600)
+        with open(os.path.join(own_prefix, '.fnvnx-build-id'), 'w') as f:
+            f.write(tc_id + '\n')
+        remove_work(b, r, [work], 'the fnvnx-a64 build tree')
+        prefix = own_prefix
+        r.note('fnvnx-a64 built in %s' % b.rel(own_prefix))
+    if not dkp and built(own_dkp, dkp_id):
+        dkp = own_dkp
+    if not dkp and prefix and prefix != own_prefix:
+        # setup.sh copies devkitPro's make rules into the prefix: never into one we were given
+        r.note('FNVNX_TC given without DEVKITPRO: set DEVKITPRO (toolchain/devkita64/setup.sh), or give neither')
+    elif not dkp and prefix and may_build:
+        rules = os.path.join(src, 'devkita64-rules')
+        if not os.path.isdir(rules):
+            b.sh(['bash', os.path.join(ROOT, 'toolchain', 'sources.sh'), os.path.join(d, 'dl'), src], log, check=True,
+                 timeout=3600)
+        if not os.path.isdir(os.path.join(ext, 'libnx')):
+            raise StageError('the DEVKITPRO tree needs the pinned libnx checkout in %s (tools/fetch.sh)' % ext)
+        shutil.rmtree(own_dkp, ignore_errors=True)
+        b.say('toolchain: DEVKITPRO tree + libnx (toolchain/devkita64/setup.sh)')
+        b.sh(['bash', os.path.join(ROOT, 'toolchain', 'devkita64', 'setup.sh'), prefix, os.path.join(ext, 'libnx'),
+              rules, own_dkp], log, check=True, timeout=3600)
+        with open(os.path.join(own_dkp, '.fnvnx-build-id'), 'w') as f:
+            f.write(dkp_id + '\n')
+        dkp = own_dkp
+    return prefix, dkp
+
+
+def provide_vorbis(b, r, d, dkp):
+    """libogg/libvorbis for the guest (platform/audio/vorbisfile.cpp): VORBIS=<prefix> when given, none: without;
+    auto: toolchain/vorbis/build.sh into build/toolchain/vorbis (pinned git tags, a few files with fnvnx-a64)."""
+    v = b.cfg['VORBIS']
+    if v == 'none':
+        return None
+    if v and v != 'auto':
+        return os.path.abspath(v)
+    if not dkp:
+        r.note('VORBIS=auto needs DEVKITPRO: the guest links without Ogg Vorbis')
+        return None
+    out, work = os.path.join(d, 'vorbis'), os.path.join(d, 'vorbis-work')
+    vid = build_id('toolchain/vorbis', extra=[dkp])
+    f = os.path.join(out, '.fnvnx-build-id')
+    if read_id(f) == vid:
+        return out
+    shutil.rmtree(out, ignore_errors=True)
+    b.say('toolchain: Ogg Vorbis for the guest (toolchain/vorbis/build.sh)')
+    b.sh(['bash', os.path.join(ROOT, 'toolchain', 'vorbis', 'build.sh'), work, out], r['log'],
+         env=b.env({'DEVKITPRO': dkp}), check=True, timeout=3600)
+    with open(f, 'w') as fh:
+        fh.write(vid + '\n')
+    remove_work(b, r, [work], 'the Ogg Vorbis sources')
+    return out
+
+
 class Toolchain(Stage):
     name = 'toolchain'
+    soft = ('fetch',)       # the pinned libnx for the DEVKITPRO tree it may build
 
     def fingerprint(self, b):
         # every tool the stage checks, by resolved path and (size, mtime): a reinstalled or removed package reruns it
@@ -636,51 +801,29 @@ class Toolchain(Stage):
         prefix = b.cfg['FNVNX_TC'] or (os.path.join(b.cfg['DEVKITPRO'], 'devkitA64') if b.cfg['DEVKITPRO'] else '')
         own = os.path.join(b.out, 'toolchain')
         keys = [os.path.join(prefix, 'bin', 'aarch64-none-elf-gcc'), os.path.join(prefix, 'bin', 'aarch64-none-elf-g++'),
-                os.path.join(own, 'prefix', 'bin', 'aarch64-none-elf-gcc')]
+                os.path.join(own, 'prefix', 'bin', 'aarch64-none-elf-gcc'), os.path.join(own, 'cross', '.setup-id')]
         if b.cfg['DEVKITPRO']:
             keys += [os.path.join(b.cfg['DEVKITPRO'], r_) for r_ in ('libnx/lib/libnx.a', 'libnx/switch.specs')]
+        saved, b.cross_bin = b.cross_bin, None      # the host's own PATH (CROSS=auto decides from it)
         tools = [b.which(t) for t, _, _ in HOST_TOOLS] + [b.which('llvm-undname-18')]
+        b.cross_bin = saved
         gc = b.cfg['GAME_CXX']
-        return ['toolchain-v2', [b.cfg[k] for k in ('FNVNX_TC', 'DEVKITPRO', 'TC_DL', 'GAME_CXX', 'CROSS_BIN',
-                                                    'MIN_FREE_GB')],
+        return ['toolchain-v3', [b.cfg[k] for k in ('FNVNX_TC', 'DEVKITPRO', 'TC_DL', 'GAME_CXX', 'CROSS_BIN', 'CROSS',
+                                                    'VORBIS', 'MIN_FREE_GB')],
+                tree_hash('toolchain/cross', 'toolchain/sources.sh', 'toolchain/gcc', 'toolchain/devkita64',
+                          'toolchain/vorbis'), up_id(b, 'fetch'),
                 [stat_id(os.path.realpath(k)) for k in keys], [stat_id(os.path.realpath(t)) if t else None for t in tools],
                 gc not in ('auto', 'tc', 'standin') and stat_id(b.which(shlex.split(gc)[0]) if gc else None),
-                importlib.util.find_spec('unicorn') is not None]
+                importlib.util.find_spec('unicorn') is not None, importlib.util.find_spec('elftools') is not None]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'toolchain', 'toolchain.env'))
 
     def run(self, b, r):
-        log = r['log']
         d = b.sdir('toolchain')
-        prefix = b.cfg['FNVNX_TC']
-        dkp = b.cfg['DEVKITPRO']
-        if not prefix and dkp and os.path.isdir(os.path.join(dkp, 'devkitA64')):
-            prefix = os.path.realpath(os.path.join(dkp, 'devkitA64'))
-            r.note('FNVNX_TC taken from $DEVKITPRO/devkitA64')
-        own_prefix, own_dkp = os.path.join(d, 'prefix'), os.path.join(d, 'dkp')
-        if not prefix and os.path.isfile(os.path.join(own_prefix, 'bin', 'aarch64-none-elf-gcc')):
-            prefix = own_prefix
-        if not prefix and b.cfg['TC_DL']:
-            ext = b.art('fetch', 'ext') or os.path.join(ROOT, 'ext')
-            bs = os.path.join(ext, 'buildscripts')
-            if not os.path.isdir(bs):
-                raise StageError('building the toolchain needs %s (git clone '
-                                 'https://github.com/devkitPro/buildscripts)' % bs)
-            b.say('toolchain: building fnvnx-a64 (toolchain/gcc/build.sh, ~45 min)')
-            b.sh(['bash', os.path.join(ROOT, 'toolchain', 'gcc', 'build.sh'), b.cfg['TC_DL'],
-                  os.path.join(d, 'work'), own_prefix, bs], log, check=True)
-            prefix = own_prefix
-        if not dkp and os.path.isfile(os.path.join(own_dkp, 'libnx', 'lib', 'libnx.a')):
-            dkp = own_dkp
-        if not dkp and prefix:
-            ext = b.art('fetch', 'ext') or os.path.join(ROOT, 'ext')
-            rules = os.path.join(ext, 'devkita64-rules')
-            if os.path.isdir(rules) and os.path.isdir(os.path.join(ext, 'libnx')) and b.cfg['TC_DL']:
-                b.say('toolchain: DEVKITPRO tree + libnx (toolchain/devkita64/setup.sh)')
-                b.sh(['bash', os.path.join(ROOT, 'toolchain', 'devkita64', 'setup.sh'), prefix,
-                      os.path.join(ext, 'libnx'), rules, own_dkp], log, check=True)
-                dkp = own_dkp
+        b.cross_bin = cross_bin = provide_cross(b, r, d)
+        prefix, dkp = provide_fnvnx_a64(b, r, d)
+        vorbis = provide_vorbis(b, r, d, dkp)
         checks = []   # (item, value, state)
 
         def chk(item, value, good, required=True):
@@ -703,7 +846,7 @@ class Toolchain(Stage):
                 p = p.strip()
                 chk('ilp32 ' + lib, p, os.path.isabs(p) and os.path.isfile(p))
         else:
-            chk('fnvnx-a64 prefix', 'set FNVNX_TC or DEVKITPRO (or TC_DL to build it)', False)
+            chk('fnvnx-a64 prefix', 'set FNVNX_TC or DEVKITPRO (TC_DL=none stops the stage from building it)', False)
         if dkp:
             dkp = os.path.realpath(dkp)
             for rel in ('libnx/lib/libnx.a', 'libnx/switch.specs', 'libnx/include/switch.h'):
@@ -739,6 +882,14 @@ class Toolchain(Stage):
         gver = out.splitlines()[0] if not rc and out else None
         chk('GAME_CXX (%s)' % kind, game_cxx or '-', bool(gver))
         r.metric('game_cxx', '%s: %s' % (kind, gver))
+        if kind == 'standin':
+            pinned, _ = cross_pin_matches(b)
+            r.metric('cross_pinned', int(pinned))
+            if not pinned:
+                r.note('the standin compiler is not the pinned Ubuntu build (toolchain/cross/packages.tsv): objects '
+                       'may differ from other machines\' (CROSS=auto unpacks the pinned one)')
+                r['status'] = 'warn'
+        r.metric('vorbis', 1 if vorbis else 0)
 
         free = free_bytes(b.out)
         r.metric('disk_free_gib', round(free / 2**30, 1))
@@ -756,15 +907,18 @@ class Toolchain(Stage):
                 f.write('%s=%s\n' % (k, shlex.quote(v or '')))
         r.artifact('prefix', prefix)
         r.artifact('devkitpro', dkp)
+        r.artifact('cross_bin', cross_bin)
+        r.artifact('vorbis', vorbis)
         r.artifact('game_cxx', game_cxx)
         r.artifact('game_cxx_kind', kind)
         r['game_cxx_id'] = sha(game_cxx, gver)
-        r['output_id'] = sha(prefix, dkp, game_cxx, gver, [c for c in checks])
+        r['output_id'] = sha(prefix, dkp, game_cxx, gver, [c for c in checks], vorbis)
         missing_req = [c[0] for c in checks if c[2] == 'MISSING']
         missing_opt = [c[0] for c in checks if c[2] == 'missing']
         r.metric('tc_missing_required', len(missing_req))
         r.metric('tc_missing_optional', len(missing_opt))
-        r['summary'] = 'prefix %s, DEVKITPRO %s, GAME_CXX %s' % (prefix or '-', dkp or '-', kind)
+        r['summary'] = 'prefix %s, DEVKITPRO %s, GAME_CXX %s, cross tools: %s, vorbis %s' % (
+            prefix or '-', dkp or '-', kind, r.get('cross', '-'), b.rel(vorbis) or 'none')
         if missing_opt:
             r.note('optional tools missing: ' + ', '.join(missing_opt))
         if missing_req:
@@ -1330,6 +1484,13 @@ def link_tool_inputs(b):
             b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
 
 
+def extern_text_id(b):
+    et = b.cfg['EXTERN_TEXT']
+    if et == 'auto':
+        return 'auto:' + (file_hash(os.path.join(HERE, 'extern_text.py')) or '')
+    return et if et in ('', 'none') else file_hash(os.path.abspath(et))
+
+
 def msvc_objs_id(b):
     d = b.cfg['MSVC_OBJS']
     if not d:
@@ -1426,7 +1587,7 @@ class Link(Stage):
 
     def fingerprint(self, b):
         return ['link-v3', link_tool_inputs(b), up_id(b, 'compile'), up_id(b, 'prepare'),
-                file_hash(b.cfg['OVERRIDE']), file_hash(b.cfg['EXTERN_TEXT']), msvc_objs_id(b), game_cxx_id(b)]
+                file_hash(b.cfg['OVERRIDE']), extern_text_id(b), msvc_objs_id(b), game_cxx_id(b)]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'link', 'out', 'aliases.ld'))
@@ -1440,14 +1601,21 @@ class Link(Stage):
         units_json = os.path.join(tree, 'build', 'units.json')
         objects = b.art('compile', 'objects')
         args = [units_json, objects, out]
-        for opt, key in (('--override', 'OVERRIDE'), ('--extern-text', 'EXTERN_TEXT'), ('--msvc-objs', 'MSVC_OBJS'),
-                         ('--units-renames', 'UNITS_RENAMES')):
+        et = b.cfg['EXTERN_TEXT']
+        if et == 'auto':
+            # S4's addr_ids.txt, made from the tree's units.json (identical to S4's file for the f11/f12 tree)
+            et = os.path.join(d, 'extern_text.txt')
+            b.sh([PY, '-I', os.path.join(HERE, 'extern_text.py'), units_json, et], r['log'], check=True)
+            r.metric('link_extern_text_addrs', sum(1 for _ in open(et)))
+        if et and et != 'none':
+            args += ['--extern-text', os.path.abspath(et)]
+        else:
+            r.note('EXTERN_TEXT=none: the referenced .text addresses without a definition get no E entries (the '
+                   'hand flow passes S4\'s addr_ids.txt)')
+        for opt, key in (('--override', 'OVERRIDE'), ('--msvc-objs', 'MSVC_OBJS'), ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:
                 args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
         r['resolve_options'] = [b.rel(a) for a in args[3:]]
-        if not b.cfg['EXTERN_TEXT']:
-            r.note('no EXTERN_TEXT: the hand flow passes S4\'s addr_ids.txt (--extern-text); without it the '
-                   'referenced .text addresses without a definition get no E entries')
         seed_link_out(b, r, out)
         obj = os.path.join(b.out, 'compile', 'obj')
         units = [l.split('\t', 1)[0] for l in open(objects, errors='surrogateescape') if l.strip()]
@@ -1574,7 +1742,7 @@ class Guest(Stage):
                 tree_hash('tools/pipeline/undef.py', 'toolchain/game', 'toolchain/guest', 'toolchain/include',
                           'toolchain/tools', 'platform', 'loader', 'startup', 'shim/include', 'tests/s5/dynbrk.py'),
                 tree_hash('render/nine') if b.cfg['NINE'] == '1' else '',
-                up_id(b, 'link'), up_id(b, 'toolchain'), b.cfg['NINE'], b.cfg['VORBIS'], b.cfg['GAME_NEW'],
+                up_id(b, 'link'), up_id(b, 'toolchain'), b.cfg['NINE'], b.art('toolchain', 'vorbis'), b.cfg['GAME_NEW'],
                 b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
 
     def outputs_present(self, b):
@@ -1611,11 +1779,13 @@ class Guest(Stage):
         b.say('guest: ILP32 guest link via %s' % r['method'])
         argv = ([PY, '-I', scr] if scr.endswith('.py') else ['bash', scr]) + [lout, fixed,
                                                                           os.path.join(d, 'nine') if nine_game else d]
-        if b.cfg['VORBIS'] and not scr.endswith('.py'):
+        vorbis = b.art('toolchain', 'vorbis')        # VORBIS: a prefix, built by the toolchain stage, or none
+        r['vorbis'] = vorbis
+        if vorbis and not scr.endswith('.py'):
             if nine_game:
-                extra['VORBIS'] = b.cfg['VORBIS']
+                extra['VORBIS'] = vorbis
             else:
-                argv.append(b.cfg['VORBIS'])
+                argv.append(vorbis)
         rc = b.sh(argv, r['log'], env=b.env(extra), timeout=7200)
         if prod != d:
             for n in ('fnvnx.elf', 'guest.nso', 'undefined.txt', 'fnvnx.map'):
@@ -1700,6 +1870,66 @@ class Guest(Stage):
 
 # ------------------------------------------------------------------------------------------------------ 8 boot
 
+def synth_inputs_id(b):
+    """What S14's synthesized image depends on: the generator, S4's import names, the pristine units.json and the
+    MSVC objects (by listing)."""
+    po = b.cfg['PRISTINE_OBJS']
+    if not po:
+        return ''
+    po = os.path.abspath(po)
+    objs = sorted(os.path.join(po, n) for n in os.listdir(po) if n.endswith('.obj')) if os.path.isdir(po) else []
+    return sha(tree_hash('loader/synth', 'platform/win32/imports.tsv'), listing_id(objs),
+               file_hash(os.path.join(b.art('fetch', 'decomp') or '', 'build', 'units.json')))
+
+
+def boot_image(b, r, d):
+    """The data image of the emulated boot: BOOT_IMAGE=<exe>; auto: S14's synthesized image
+    (loader/synth/synth_image.py over S11's pristine MSVC objects, PRISTINE_OBJS) when the objects are there, else
+    none; none: no image (the boot maps an all-zero data window). -> path or None."""
+    img = b.cfg['BOOT_IMAGE']
+    if img in ('none', ''):
+        return None
+    if img != 'auto':
+        return os.path.abspath(img)
+    po = b.cfg['PRISTINE_OBJS']
+    if not po or not os.path.isdir(po):
+        r.note('BOOT_IMAGE=auto: no PRISTINE_OBJS (S11\'s MSVC 2008 objects of the pristine decomp, tools/equiv), so '
+               'no synthesized data image: the boot runs on the all-zero image')
+        return None
+    sd = os.path.join(d, 'synth')
+    os.makedirs(sd, exist_ok=True)
+    out = os.path.join(sd, 'synth.exe')
+    idf = os.path.join(sd, 'inputs.id')
+    want = synth_inputs_id(b)
+    if os.path.isfile(out) and read_id(idf) == want:
+        return out
+    for n in ('synth.exe', 'phase1.pickle', 'inputs.id'):
+        if os.path.exists(os.path.join(sd, n)):
+            os.remove(os.path.join(sd, n))
+    b.say('boot: S14 synthesized data image (loader/synth/synth_image.py)')
+    slog = os.path.join(sd, 'synth.log')
+    open(slog, 'w').close()
+    rc = b.sh([PY, '-I', os.path.join(ROOT, 'loader', 'synth', 'synth_image.py'),
+               '--units', os.path.join(b.art('fetch', 'decomp'), 'build', 'units.json'), '--objdir', os.path.abspath(po),
+               '--imports', os.path.join(ROOT, 'platform', 'win32', 'imports.tsv'), '--out', out,
+               '--summary', os.path.join(sd, 'summary.txt'), '--report', os.path.join(sd, 'report.json'),
+               '--missing', os.path.join(sd, 'missing.tsv'), '--cache', os.path.join(sd, 'phase1.pickle')],
+              slog, cwd=ROOT, timeout=7200)
+    if rc or not os.path.isfile(out):
+        r.note('synth_image.py exited %d (build/boot/synth/synth.log): the boot runs on the all-zero image' % rc)
+        r['status'] = 'warn'
+        return None
+    with open(idf, 'w') as f:
+        f.write(want + '\n')
+    m = re.search(r'objects (\d+): (\d+) items placed', open(slog, errors='replace').read())
+    if m:
+        r.metric('synth_objects', int(m.group(1)))
+        r.metric('synth_items_placed', int(m.group(2)))
+    if os.path.exists(os.path.join(sd, 'phase1.pickle')):
+        os.remove(os.path.join(sd, 'phase1.pickle'))      # the object scan cache: large, and rebuilt when needed
+    return out
+
+
 class Boot(Stage):
     """S5's emulated boot of the game guest (tests/s5/emu_guest.py: traced boot without the player's exe, faulting
     static initializers skipped) and the boot frontier (tests/s5/frontier.py: every untranslated address the boot
@@ -1714,9 +1944,10 @@ class Boot(Stage):
 
     def fingerprint(self, b):
         img, bc = b.cfg['BOOT_IMAGE'], b.cfg['BOOT_CENSUS']
-        return ['boot-v1', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
+        return ['boot-v2', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
                                      'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
-                up_id(b, 'guest'), file_hash(os.path.abspath(img)) if img else '',
+                up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
+                synth_inputs_id(b) if img == 'auto' else '',
                 file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT']]
 
     def outputs_present(self, b):
@@ -1735,9 +1966,10 @@ class Boot(Stage):
         os.makedirs(root)
         argv = [PY, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_guest.py'), nso, '--elf', elf, '--skip-faulting-init',
                 '--expect', 'fnvnx boot: calling WinMain', '--root', root]
-        if b.cfg['BOOT_IMAGE']:
-            argv += ['--file', 'fnvnx/game/FalloutNV.exe=' + os.path.abspath(b.cfg['BOOT_IMAGE'])]
-            r.note('data image: %s' % b.cfg['BOOT_IMAGE'])
+        image = boot_image(b, r, d)
+        r['image'] = b.rel(image) if image else 'none (all-zero data image)'
+        if image:
+            argv += ['--file', 'fnvnx/game/FalloutNV.exe=' + image]
         elog = os.path.join(d, 'emu.log')
         open(elog, 'w').close()
         tmo = int(b.cfg['EMU_TIMEOUT'])
@@ -1756,6 +1988,18 @@ class Boot(Stage):
         r.metric('boot_trap_keys', len(table))
         r.metric('boot_trap_hits', sum(int(t[2]) for t in table if len(t) > 2 and t[2].isdigit()))
         r['stop'] = stop
+        # the fault that stopped the boot (the last trace block: pc, lr, call frames) and the skipped initializers
+        # grouped by fault (tests/s5/emu_guest.py skip-summary lines)
+        starts = [i for i, l in enumerate(lines) if l.startswith('== trace (fault')]
+        fault = []
+        if starts:
+            fault = [lines[starts[-1]].strip()]
+            for l in lines[starts[-1] + 1:starts[-1] + 12]:
+                if not re.match(r'\s+(pc|lr|#\d+|S10 )', l):
+                    break
+                fault.append(l.strip())
+        r['fault'] = fault
+        r['skip_summary'] = [l.split('\t')[1:] for l in lines if l.startswith('skip-summary\t')][:30]
         r['milestones'] = list(dict.fromkeys(l.strip() for l in lines if not l.startswith('$ ') and re.search(
             r'fnvnx boot: (?!trap|initializer #|import )', l)))[:40]
         if rc == 124:
@@ -2324,7 +2568,7 @@ def execute(b, targets):
 
 def parse_args(argv):
     cfg = {k: os.environ.get(k, d) or d for k, d, _ in CONFIG}
-    for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'TC_DL', 'OVERRIDE', 'EXTERN_TEXT', 'VORBIS', 'NINE_SRC', 'FORCE'):
+    for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'OVERRIDE', 'NINE_SRC', 'FORCE'):
         cfg[k] = os.environ.get(k, '')
     targets = []
     for a in argv:

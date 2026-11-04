@@ -58,7 +58,8 @@ def snapshot(b, stages):
             'config': {k: b.cfg.get(k, '') for k in (
                 'NINE', 'PROGRAM_ID', 'GAME_CXX', 'CROSS_BIN', 'OPT', 'JOBS', 'EXT', 'FNVNX_TC', 'DEVKITPRO',
                 'GUEST_LINK', 'GAME_NEW', 'CENSUS', 'TESTS', 'OVERRIDE', 'EXTERN_TEXT', 'MSVC_OBJS', 'UNITS_RENAMES',
-                'LINK_SEED', 'UNITS', 'PREPARED', 'FORCE_STALE', 'BOOT', 'BOOT_IMAGE', 'BOOT_CENSUS')},
+                'LINK_SEED', 'UNITS', 'PREPARED', 'FORCE_STALE', 'BOOT', 'BOOT_IMAGE', 'BOOT_CENSUS', 'CROSS', 'TC_DL',
+                'VORBIS', 'PRISTINE_OBJS')},
             'head': b.head, 'prepared_from': b.rec('prepare').get('prepared_from'),
             'stages': {}, 'metrics': {}, 'tests': {}}
     for s in stages:
@@ -146,9 +147,9 @@ def render(b, stages, snap, prev):
                  c['NINE'], c['PROGRAM_ID'], c['GAME_CXX'], c['OPT'], c['JOBS'], c['GUEST_LINK'], c['GAME_NEW'],
                  c['EXT'] or 'ext/ (fetch.sh)', R('toolchain').get('artifacts', {}).get('prefix') or '-',
                  R('toolchain').get('artifacts', {}).get('devkitpro') or '-',
-                 ''.join('; %s `%s`' % (k, c[k]) for k in ('CROSS_BIN', 'UNITS', 'PREPARED', 'EXTERN_TEXT',
-                                                           'MSVC_OBJS', 'UNITS_RENAMES', 'LINK_SEED', 'OVERRIDE',
-                                                           'BOOT_IMAGE') if c.get(k))
+                 ''.join('; %s `%s`' % (k, c[k]) for k in ('CROSS', 'CROSS_BIN', 'TC_DL', 'VORBIS', 'UNITS', 'PREPARED',
+                                                           'EXTERN_TEXT', 'MSVC_OBJS', 'UNITS_RENAMES', 'LINK_SEED',
+                                                           'OVERRIDE', 'BOOT_IMAGE', 'PRISTINE_OBJS') if c.get(k))
                  + ('; **FORCE_STALE=1**' if c.get('FORCE_STALE') == '1' else '')))
     L.append('')
     # ---- provenance (J-0054)
@@ -201,8 +202,9 @@ def render(b, stages, snap, prev):
         L.append('')
     t = R('toolchain')
     if t.get('metrics'):
-        L.append('Toolchain: %s; game units compiled with %s.%s' % (
-            t['metrics'].get('tc_gcc'), t['metrics'].get('game_cxx'),
+        L.append('Toolchain: %s; game units compiled with %s (cross tools: %s); Ogg Vorbis %s.%s' % (
+            t['metrics'].get('tc_gcc'), t['metrics'].get('game_cxx'), t.get('cross', '-'),
+            rel(t.get('artifacts', {}).get('vorbis')) if t.get('artifacts', {}).get('vorbis') else 'none',
             (' Notes: ' + ' '.join(t.get('notes', []))) if t.get('notes') else ''))
         L.append('')
     # ---- census / compile
@@ -329,6 +331,8 @@ def render(b, stages, snap, prev):
     bo = R('boot')
     if bo.get('status') not in (None, 'never', 'disabled'):
         L.append('## Emulated boot and boot frontier (S5)')
+        L.append('')
+        L.append('Data image: %s.' % bo.get('image', '-'))
         L.append('')
         L.append('%s. Stop: `%s`. Trapped keys %s (%s hits), initializers skipped after a fault %s. Frontier '
                  '(`build/boot/frontier.txt`, `.tsv`, `_units.tsv`): %s untranslated keys, %s hits, %s units%s.' % (
