@@ -2500,3 +2500,17 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
     convention (oracle gap); 00bc2360 Emitter, a field read as a pointer versus embedded storage (S1 layout, not
     confirmed); 006041d0 open.
   - Self-test: 0 failures.
+
+### J-0114 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0113
+
+* **did** - S13 `8fcc60a`, `89d9647`: classification only, so no verdict or HARNESS change and no re-fuzz.
+  - New oracle-gap cause `oracle-vcall`: the oracle faults at an indirect call through a fuzzed object that the
+    native never makes (a devirtualised call). 4 of 16 sampled oracle-only faults fall here.
+  - New soft cause `local-static`: native reads of the unit's own .bss that touch only function-local statics and
+    their guards. MSVC's guard lives in the image and holds fuzzed bytes; GCC's sits in .bss and is 0. This was
+    reported as `split-global` before. 68 call-target divergences at 40b2cb5 follow this pattern (native calls
+    0x00a00940 first).
+  - Self-test: 0 failures.
+* **found** - Two harness items for the next HARNESS bump: the oracle needs an x86 `_byteswap_ulong` builtin (6
+  divergences), and folded `dynamic_cast` (4). For S2c: NiFixedString's `operator const char*` stays an unbound name
+  in bsfacegenmanager 00650ea0, while the oracle calls 0x00a5ff10. In the game build it would hit a trap stub.
