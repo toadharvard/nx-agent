@@ -24,6 +24,10 @@ that does not show what the gate claims, or when a producer's real output can ne
   R11 S5's real milestones.json: raw boot reached winmain only, the stub boot reached first_cell
                                                              boot.first_cell must not pass
   R12 boot/summary.txt says "fnvnx milestone: first_cell", milestones.json says first_cell false
+  R16 frame budget at the stock clock as tools/perf/frame_budget.py writes it for a typical frame of 12-16 ms and a
+      worst frame of 18-25 ms: stretch_60 (the gate's target since a506770) is judged on the typical frame, so it
+      says pass                                              perf.budget.stock must not pass (J-0150: 60 fps on the
+                                                             worst frame)
                                                              boot.first_cell must not pass
 """
 import io
@@ -201,4 +205,27 @@ def r15(w):
 
 
 case('R15 checksum file names FalloutNV.exe twice, differently', r15, must_not_pass('boot.real_exe'))
+
+
+# R16: the budget's verdicts exactly as frame_budget.py computes them (targets of docs/PERF_budget.json, its verdict()
+# and its rule `f = frame if t['kind'] == 'stretch' else worst`)
+def r16(w):
+    sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'perf'))
+    import frame_budget
+    src = open(frame_budget.__file__).read()
+    assert "f = frame if t['kind'] == 'stretch' else worst" in src, 'frame_budget.py changed: R16 needs a new look'
+    model = json.load(open(os.path.join(HERE, '..', '..', 'docs', 'PERF_budget.json')))
+    frame, worst = {'lo': 12.0, 'mid': 14.0, 'hi': 16.0}, {'lo': 18.0, 'mid': 22.0, 'hi': 25.0}
+    verdicts = {t['id']: frame_budget.verdict(*((frame if t['kind'] == 'stretch' else worst)[k] for k in ('lo', 'hi')),
+                                              t['ms']) for t in model['targets']}
+    level = 'pass_45' if worst['mid'] <= 22.2 else 'pass_30'
+    level = 'stretch_60' if level == 'pass_45' and frame['mid'] <= 16.7 else level
+
+    def edit(d):
+        d['scenarios'][0]['results']['1020'].update(frame_ms=frame, worst_frame_ms=worst, verdicts=verdicts,
+                                                    level=level)
+    w.edit_json('reports/prof1/%s-frame-budget.json' % C, edit)
+
+
+case('R16 60 fps budget judged on the typical frame, worst frame 25 ms', r16, must_not_pass('perf.budget.stock'))
 sys.exit(FAIL)

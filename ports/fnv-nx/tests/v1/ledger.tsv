@@ -40,3 +40,4 @@ S13-FZTREE-F1	S13	a01a297	a01a297	refuted	-	test_s13_tools.py	fuzz_job: t/<L12> 
 S6B-CENSUS	S6b	283fe49	283fe49	confirmed	-	test_s13_tools.py	census counts sum (translated + failed, cause table, unique); s6b_centroid 23/23 (K1; K2 note: malformed package counted)
 NXR-H1	render	2686fc6	fc7713a	refuted	-	test_nx_render_robust.py	nx_render bounds every size of .nxcap: a SUBM Draw with 0x7fffffff instances is not bounded (hangs > 120 s; .nxd9 skips draws over 4 M vertices)
 R0-GATES	R0	450c5d6	450c5d6	confirmed	-	test_ready_adversarial.py	resolved gates tree: R1-R15 all ok on the integration head (R13, R14 fixed)
+R0-R16	R0	a506770	a506770	refuted	-	test_ready_adversarial.py	perf.budget gates 60 fps on stretch_60, which frame_budget.py judges on the typical frame: a 25 ms worst frame passes (J-0150 wants the worst frame)
