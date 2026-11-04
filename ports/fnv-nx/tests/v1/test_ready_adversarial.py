@@ -31,8 +31,8 @@ Round 2 (V1, J-0147 follow-up) and R0's own additions:
   R14  a try farm's all-pass S16 file, newer than S16's                  frames.compare must not pass
   R14b, R14c the same for frameprof and the frame budget (R0)           perf.frame.boost / perf.budget.boost
   R15  the checksum file names FalloutNV.exe twice, another exe first   boot.real_exe must not pass
-  R16  (V1) frame budget at the stock clock as tools/perf/frame_budget.py writes it for a typical frame of 12-16 ms
-       and a worst frame of 18-25 ms: stretch_60 is judged on the typical frame and says pass
+  R16  (V1) frame budget at the stock clock with a typical frame of 12-16 ms, a worst frame of 18-25 ms, and verdicts
+       that say pass for 60 fps (stretch_60 as the J-0132 model judged it, on the typical frame; target_60)
                                                              perf.budget.stock must not pass (J-0150: worst frame)
 """
 import io
@@ -247,23 +247,16 @@ case('R14c try farm frame budget newer than the merged one', r14c,
      must_not_pass('perf.budget.stock', 'perf.budget.boost'))
 
 
-# R16: the budget's verdicts exactly as frame_budget.py computes them (targets of docs/PERF_budget.json, its verdict()
-# and its rule `f = frame if t['kind'] == 'stretch' else worst`)
+# R16: a budget result whose verdicts all say pass for 60 fps (as the J-0132 model wrote them: stretch_60 judged on
+# the typical frame) while its own worst frame is 18-25 ms. The gate must judge the worst frame itself (J-0150),
+# whatever the producer's verdict names say.
 def r16(w):
-    sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'perf'))
-    import frame_budget
-    src = open(frame_budget.__file__).read()
-    assert "f = frame if t['kind'] == 'stretch' else worst" in src, 'frame_budget.py changed: R16 needs a new look'
-    model = json.load(open(os.path.join(HERE, '..', '..', 'docs', 'PERF_budget.json')))
     frame, worst = {'lo': 12.0, 'mid': 14.0, 'hi': 16.0}, {'lo': 18.0, 'mid': 22.0, 'hi': 25.0}
-    verdicts = {t['id']: frame_budget.verdict(*((frame if t['kind'] == 'stretch' else worst)[k] for k in ('lo', 'hi')),
-                                              t['ms']) for t in model['targets']}
-    level = 'pass_45' if worst['mid'] <= 22.2 else 'pass_30'
-    level = 'stretch_60' if level == 'pass_45' and frame['mid'] <= 16.7 else level
+    verdicts = {'fail_below_30': 'pass', 'pass_45': 'uncertain', 'stretch_60': 'pass', 'target_60': 'pass'}
 
     def edit(d):
         d['scenarios'][0]['results']['1020'].update(frame_ms=frame, worst_frame_ms=worst, verdicts=verdicts,
-                                                    level=level)
+                                                    level='target_60')
     w.edit_json('reports/prof1/%s-frame-budget.json' % C, edit)
 
 

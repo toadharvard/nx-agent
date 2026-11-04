@@ -55,7 +55,7 @@ CLASSES = {
     'UNIT1': 'neutral', 'KEEP1': 'neutral', 'IFX1': 'neutral', 'SAL1': 'neutral', 'CSX1': 'neutral',
     'DECL2': 'neutral', 'EXC1': 'neutral', 'NEW2': 'neutral', 'CTOR1': 'neutral', 'LINK1': 'neutral',
     'GOTO1': 'neutral', 'SDK1': 'layout', 'STR1': 'neutral', 'INTL1': 'platform', 'CALL1': 'neutral',
-    'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout',
+    'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout', 'EBO1': 'layout',
     'ASM1': 'platform', 'ASM2': 'platform', 'ASM4': 'platform',
     'NATIVE1': 'platform',      # drop_native_units in prepare.py (not a text rule)
     # classified by the orchestrator (J-0051) from each rule's docstring; the S11 gate confirms or refutes:
@@ -73,6 +73,11 @@ CLASSES = {
     'RREF1': 'neutral',         # fnvnx_lvalue around temporaries passed to non-const reference parameters
     'TPL1': 'neutral',          # this-> for members of dependent bases used by plain name (MSVC had no two-phase lookup)
     'TPL2': 'neutral',          # forward declarations of a namespace's function templates (MSVC's lookup)
+    'TPL3': 'neutral',          # forward declarations of templates called qualified / with template args before definition
+    'TYPN1': 'neutral',         # `typename` before a dependent library type member (MSVC took it as a type)
+    'INST1': 'neutral',         # `unsigned int` -> C<..>::size_type in an explicit member instantiation (same member)
+    'COPY1': 'neutral',         # B(o) -> B(static_cast<const B&>(o)) in a copy ctor: the copy ctor MSVC chose
+    'DECL3': 'neutral',         # a unit's own `typedef _iobuf FILE` / `typedef __int64 fpos_t`: the MSVC types themselves
     'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
     'DTOR1': 'neutral',         # declares NiPointer<T>::~NiPointer() specializations for pointees the unit never completes
     'VTBL1': 'platform',        # full MSVC-order virtual interface for listed stand-ins (BSNiAllocator), slots forward
@@ -91,6 +96,7 @@ CLASSES = {
     'ENUM1': 'neutral',         # enum X; -> enum X : int; (+ its definitions): MSVC's underlying type spelled out
     'ANON1': 'platform',        # names an unnamed struct defined in a return type (MSVC decorates the name)
     'STL1': 'platform',        # fnvnx_msvcstl.h: MSVC <xutility> internals (_SCL_SECURE_VALIDATE, _Ptr_cat) for libstdc++
+    'STL2': 'platform',        # fnvnx_vc9.h: VC9's containers in their x86 layout for units using real <string>/<vector>/<map>
     'SPEC3': 'neutral',         # namespace qualification of names in specializations written inside a namespace
     'LEX1': 'neutral',          # MSVC token spellings (i64 suffixes, 0xae-0x34, "C"enum) -> standard ones
     'STD1': 'platform',         # a decomp `struct std { static float abs(float); }` -> <cmath>'s std::abs

@@ -92,7 +92,7 @@ void __libnx_initheap(void) {
 
 /* ---- logging ------------------------------------------------------------------------------------------- */
 /* Build with -DFNVNX_HOST_NO_CONSOLE when graphics owns the display (render/nine): no libnx text console;
- * output goes to sdmc:/fnvnx/host.log and svcOutputDebugString only. */
+ * output goes to sdmc:/switch/fnv/host.log and svcOutputDebugString only. */
 #ifdef FNVNX_HOST_NO_CONSOLE
 #define consoleInit(x) ((void)0)
 #define consoleUpdate(x) ((void)0)

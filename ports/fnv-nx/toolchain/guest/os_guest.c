@@ -14,6 +14,7 @@
 
 #include "fnvnx/guest.h"
 #include "fnvnx/hostapi.h"
+#include "fnvnx/sdlayout.h"
 
 static int64_t hs(uint64_t v) { return (int64_t)v; }
 
@@ -123,7 +124,7 @@ int os_thread_suspend(os_thread *t) { (void)t; return -1; }
 int os_thread_resume(os_thread *t) { (void)t; return -1; }
 void os_thread_exit(void) { fnvnx_thread_exit(NULL); }
 /* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
- * (sdmc:/fnvnx/fnvnx.ini boost_loading=0) turns it off */
+ * (sdmc:/switch/fnv/fnvnx.ini boost_loading=0) turns it off */
 _Static_assert(OS_ROLE_AUDIO == FNVNX_ROLE_AUDIO, "platform/os/os.h OS_ROLE_AUDIO = hostapi.h FNVNX_ROLE_AUDIO");
 void os_cpu_boost(int fast_load) {
     if (!fnvnx_host->ext_call) return;
@@ -146,7 +147,7 @@ uint64_t os_monotonic_ns(void) {
 }
 uint64_t os_cycle_counter(void) {
     uint64_t v;
-    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(v));
+    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(v));   /* CNTVCT_EL0 traps at EL0 on Horizon (NX1 check 3) */
     return v;
 }
 int64_t os_wall_time_us(void) { return hs(fnvnx_hcall0(fnvnx_host->wall_time_us)); }
@@ -220,7 +221,18 @@ void os_dir_close(os_dir *d) {
     fnvnx_hcall1(fnvnx_host->fs_dir_close, d->h);
     free(d);
 }
-int os_fs_case_insensitive(void) { return 1; }   /* FAT32/exFAT SD card */
+/* FAT32/exFAT on the SD card fold case, but that is a property of Horizon's fs, not checked on hardware yet (NX1):
+ * probe it once with the guest's own file. guest.nso found under its exact name but not as GUEST.NSO -> case-sensitive,
+ * and path.cpp resolves every component against the directory (slower, correct). Without guest.nso under the root
+ * (the emulator's sdmc tree) the SD behaviour is assumed. */
+int os_fs_case_insensitive(void) {
+    static int folds = -1;
+    if (folds < 0) {
+        os_stat_t st;
+        folds = os_stat(FNVNX_SD_GUEST, &st) != 0 || os_stat(FNVNX_SD_DIR "/GUEST.NSO", &st) == 0;
+    }
+    return folds;
+}
 
 /* ---- virtual memory: carved from the guest heap (committed and zeroed at reserve time).
  * A fixed hint is not supported (the S3 data window is mapped by the loader, not through this). */
@@ -235,6 +247,7 @@ int os_vm_commit(void *addr, size_t size) { (void)addr; (void)size; return 0; }
 int os_vm_decommit(void *addr, size_t size) { memset(addr, 0, size); return 0; }
 int os_vm_release(void *addr, size_t size) { (void)size; free(addr); return 0; }
 
-/* One SD directory for everything of the port: guest.nso and host.log (host.c), game/ (FalloutNV.exe and Data/;
- * the game's C:/FalloutNV, read by boot.cpp too), user/ (C:/Users/Player: My Games/FalloutNV, saves). */
-const char *os_default_root(void) { return "sdmc:/fnvnx"; }
+/* One SD directory for everything of the port (fnvnx/sdlayout.h): fnv.nro, guest.nso and the logs, the game's
+ * C:/FalloutNV itself (FalloutNV.exe and Data/, read by boot.cpp too), user/ (C:/Users/Player: My Games/FalloutNV,
+ * saves). */
+const char *os_default_root(void) { return FNVNX_SD_DIR; }

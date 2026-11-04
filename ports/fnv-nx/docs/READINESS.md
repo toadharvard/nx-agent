@@ -104,6 +104,31 @@ job publishes it per integration head (`reports/gates1/<c12>-gates.md` / `.json`
 - **Frame target.** The frame rows use `thresholds.json` `scorecard`: 60 fps at 720p handheld at the 1.02 GHz retail
   clock (J-0150), the same target as the frame gates.
 
+## Trend and regressions (fnvnx-trend/1)
+
+Merges into the integration branch are fast and do not run every test first, so the scorecard has to catch what
+they break.
+- **Trend.** Every scored head appends one entry `{head, generated, metrics: {<row id>: {gap, value, from, to}}}`
+  (`from`/`to`: the oldest and newest source commit of the row). The gates job keeps the list in its JSON sidecar
+  (`trend`, `trend_format: fnvnx-trend/1`) on the private repo, `reports/gates1/<c12>-gates.json`. Each run reads
+  the newest sidecar of `thresholds.json` `trend.farm` and appends. A re-score of the same head that changes nothing
+  replaces the last entry. The newest `trend.keep` (400) entries are kept.
+- **Row ids.** compile.errors, link.undefined, link.traps, abi.rows, fuzz.hard, fuzz.s13, equiv.diffs,
+  boot.milestones, render.scenes, frame.budget, frame.gpu.
+- **Regressions.** A row whose gap rises from one entry to the next (`rose`), or whose measurement is lost (`lost`:
+  a number before, none now), is a regression. It carries the range to bisect: from the earlier entry's oldest
+  source commit to the later entry's newest, and the two heads. It stays open until a later entry is back at or
+  below its `before`. The md report lists the open ones under "Regressions"; the JSON has them all
+  (`regressions`).
+- **Stale passes.** A stale pass does not count as a pass (counts: `stale`, not `pass`). A pass is stale when:
+  - its source is more than `max_commits_behind` behind, or not on the head's history;
+  - the farm published a newer report of the same job that FAILED or does not parse (`superseded_by`). The row
+    of that stage is then not measured (`lost`), since its number is an older run's;
+  - it is overdue: its source is behind the head and was published more than `report_due_s` (12 h) before the
+    newest publish time.
+- **Tests.** `python3 -I tests/gates/test_trend.py`, a synthetic set of regressions and stale passes. Its metric is
+  `undetected N, false alarms M`, both 0.
+
 ## The gates
 
 | id | what | source | threshold | why that threshold |

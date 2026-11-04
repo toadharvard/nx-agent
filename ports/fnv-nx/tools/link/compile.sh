@@ -13,6 +13,10 @@
 # -march/-mtune as the guest build (toolchain/game/build.sh). No hardening defaults of the distro compiler: Ubuntu's
 # gcc enables -fstack-protector-strong and -fstack-clash-protection, and outline atomics call libgcc helpers
 # (S15, docs/PERF.md: -4.7 % instructions and -32 % GOT loads in hot units). None of them is a semantics flag.
+# -U_FORTIFY_SOURCE: Ubuntu's gcc predefines _FORTIFY_SOURCE=3, which turns memcpy/memset/sprintf/strcpy into the
+# glibc checking variants __*_chk (114 references in link c0d6c71516f6): they abort where MSVC 2008's CRT wrote past
+# an object the exe tolerated, the runtime would have to provide them, and the fuzz harness saw unbound names
+# (S1-fuzzB). Unlike the flags above it does change what a program does, towards the exe's behaviour.
 # -ffile-prefix-map: __FILE__ and other recorded paths do not depend on where the tree lives, so objects built on
 # different machines from the same tree are byte-identical (tools/farm/).
 # Objects are derived from the decomp: local output only, never committed.
@@ -25,7 +29,7 @@ CC=${CC:-aarch64-linux-gnu-gcc}
 SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
 OPT=${OPT:--O2}
 FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -ffp-contract=off -fPIC -fpermissive -Werror=return-type -Wno-narrowing -fmax-errors=20
-       -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection -mno-outline-atomics
+       -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection -mno-outline-atomics -U_FORTIFY_SOURCE
        -ffile-prefix-map="$TREE"/= -ffile-prefix-map="$HERE"/=fnv-nx/ -ffile-prefix-map="$SSE2NEON"/=sse2neon/
        -include "$HERE/shim/include/fnvnx_compat.h" -I"$HERE/shim/include" -I"$SSE2NEON" -I"$TREE/include")
 # FTOI2 (S12, docs/STATIC_CHECKS.md): the fnvnx_ftoi plugin rewrites every float -> integer conversion into MSVC 2008's
@@ -46,17 +50,19 @@ ORDER_ARGS=${ORDER_ARGS:-rtl}
 # ORDER_REFCOUNT=weak: refcount sites of InterlockedIncrement/Decrement relaxed / release (docs/ORDERING.md
 # "Refcounts"); full keeps x86 lock semantics everywhere (A/B, or a suspected refcount ordering bug).
 ORDER_REFCOUNT=${ORDER_REFCOUNT:-weak}
-# ORDER_OBJECT=first|last (ORDER-OBJECT: a member call's object before or after its arguments) and
-# ORDER_OPERATOR=cpp17|rtl (ORDER-OPERATOR: overloaded <<, >>, [], ->* left to right as C++17, or like any MSVC call);
-# docs/ORDERING.md, tests/s12/order/evalorder.cpp. ORDER_OBJECT=last is the build: MSVC's thiscall pushes the arguments
-# and loads ecx last, and the decomp (byte-matched against MSVC) has calls that work only that way. ORDER_OPERATOR=rtl:
-# MSVC 2008 predates C++17 and compiles an overloaded operator as a plain call (arguments pushed right to left).
-# S11's MSVC run of evalorder.cpp confirms both; first / cpp17 are GCC's own order, for A/B.
-ORDER_OBJECT=${ORDER_OBJECT:-last}
+# ORDER_OBJECT / ORDER_OPERATOR / ORDER_ASSIGN: evaluation order as MSVC 2008 x86, per shape, from S11's recorded
+# MSVC runs (tests/s11/order/order.msvc, all five configurations; docs/ORDERING.md "Evaluation order"):
+#   ORDER_OBJECT=msvc    a direct member call (member operators too) evaluates its arguments, then the object; a
+#                        virtual call the object first; a call through a pointer to member the arguments first
+#   ORDER_OPERATOR=rtl   an overloaded <<, >>, [], ->* is a plain call: operands right to left (C++17: left to right)
+#   ORDER_ASSIGN=msvc    a built-in compound assignment evaluates its left operand first (C++17: the right one)
+# first / cpp17 / cpp17 are GCC's own order, for A/B only.
+ORDER_OBJECT=${ORDER_OBJECT:-msvc}
 ORDER_OPERATOR=${ORDER_OPERATOR:-rtl}
+ORDER_ASSIGN=${ORDER_ASSIGN:-msvc}
 FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS"
         -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
-        -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR")
+        -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR" -fplugin-arg-fnvnx_order-assign="$ORDER_ASSIGN")
 if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
 # ORDER_KEYS: the whole program's key list (docs/ORDERING.md "Whole-program keys"): every field and global that some
 # unit hands to Interlocked* (directly or through a forwarder) or polls in a wait-only loop. Their plain accesses are
@@ -124,6 +130,11 @@ done
 export CC CFLAGS_STR="${CFLAGS[*]}"
 jq -r '.units[] | [.source, ([.flags[]? | select(startswith("/D")) | "-D" + .[2:]] | join(" "))] | @tsv' \
   "$TREE/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
+# Objects are kept only while the flags (the order options included), the plugins and the shim headers stay the
+# same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
+objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
+            xargs -0 cat) | sha256sum | cut -c1-16)
+if [ "$(cat "$OUT/.objstamp" 2>/dev/null)" != "$objstamp" ]; then rm -f "$OUT"/*.o; echo "$objstamp" > "$OUT/.objstamp"; fi
 
 compile_one() {
   local src=$1 base

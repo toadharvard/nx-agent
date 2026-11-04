@@ -367,7 +367,9 @@
   {
    "id": "placed",
    "name": "as built: the placement plus the levers that are in the build (barrier_relax)",
-   "levers": ["barrier_relax"]
+   "levers": [
+    "barrier_relax"
+   ]
   },
   {
    "id": "plan45",
@@ -514,8 +516,8 @@
    "subsystem": "render accumulation",
    "role": "main",
    "per_call_insn": [
-    82,
-    82
+    54,
+    54
    ],
    "per_call_basis": "M",
    "calls": [
@@ -523,7 +525,7 @@
     5000
    ],
    "calls_note": "geometry passes registered per frame (1.2-1.6 per draw) [E]",
-   "per_call_note": "70 + 12 A64 instructions (1.84x and 0.48x the x86 counts)"
+   "per_call_note": "42 + 12 A64 instructions on link 0bd144db1464 (dyncount, 15 and 8 clean cases; 1.11x and 0.48x the x86 counts); 70 + 12 (1.84x) on an older link. An override measured 42 -> 44 (S15-simd, dropped): the common path is frame setup"
   },
   {
    "id": "fn_gsk",
@@ -531,8 +533,8 @@
    "subsystem": "havok",
    "role": "main",
    "per_call_insn": [
-    571,
-    571
+    539,
+    539
    ],
    "per_call_basis": "M",
    "calls": [
@@ -540,7 +542,7 @@
     2000
    ],
    "calls_note": "convex pair queries per step: character controller casts, contact points [E]",
-   "per_call_note": "292 + 119 + 73 + 95 = 579 A64 instructions exclusive on link 0bd144db1464 [M] (600 on an older link); 571 with fnvnx_sse_fast.h's two-source _mm_shuffle_ps sequences (S15-simd, unit_ab.sh: 290 + 119 + 70 + 92, oracle agreement unchanged)"
+   "per_call_note": "292 + 119 + 73 + 95 = 579 A64 instructions exclusive on link 0bd144db1464 [M] (600 on an older link); fnvnx_sse_fast.h (S15-simd, unit_ab.sh, oracle agreement unchanged): two-source _mm_shuffle_ps -> 571, scalar _mm_rsqrt_ss / _mm_add_ss / _mm_set_ss / _mm_load_ss -> 275 + 114 + 70 + 80 = 539"
   },
   {
    "id": "fn_interlocked",

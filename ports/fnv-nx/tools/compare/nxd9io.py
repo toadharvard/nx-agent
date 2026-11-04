@@ -6,7 +6,7 @@ render/native/capture/d3d9cap.h), plus S16's extension records (tools/compare/RE
     w = nxd9io.Writer(path); w.rec('DEV ', struct.pack(...)); w.close()
     nxd9io.py stat <file.nxd9>                              counts per tag, frames, draws, bytes per tag
 
-A journal from the capture layer (d9cap.c, *.nxd9j) has the same record syntax and magic "NXD9J\\0\\0\\1".
+A journal from the capture layer (d3d9/d9cap.c) is plain NXD9 (magic "NXD9\\0\\0\\0\\1"); JMAGIC is still read.
 """
 import mmap, struct, sys
 

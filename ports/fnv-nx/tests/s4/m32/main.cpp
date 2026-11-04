@@ -7,6 +7,7 @@
  *                              no export; prints "iat: <missing> of <slots> slots have no export" (S4's metric) */
 #include "../s4_test.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 
 int s4_failures, s4_checks;
@@ -30,8 +31,13 @@ void s4_write_file(const char *win_path, const char *data)
 extern "C" void fnvnx_d3d9_register(void) __attribute__((weak));   /* the null device's d3d9.dll module */
 extern "C" void fnvnx_audio_input_register(void);
 
+/* platform/win32/iat_calls.cpp: decomp names of calls through an import slot */
+extern "C" const struct fnvnx_iat_call { const char *name; uint32_t slot; const char *dll, *import; } fnvnx_iat_calls[];
+
 static int iat(const char *path)
 {
+    static struct { unsigned slot; char dll[128], what[256]; } seen[1024];
+    int nseen = 0;
     FILE *f = fopen(path, "r");
     if (!f) {
         perror(path);
@@ -44,6 +50,12 @@ static int iat(const char *path)
         if (sscanf(line, "%31s %127s %255s", slot, dll, what) != 3)
             continue;
         slots++;
+        if (nseen < 1024) {
+            seen[nseen].slot = (unsigned)strtoul(slot, NULL, 16);
+            snprintf(seen[nseen].dll, sizeof seen[0].dll, "%s", dll);
+            snprintf(seen[nseen].what, sizeof seen[0].what, "%s", what);
+            nseen++;
+        }
         void *p = what[0] == '#' ? fnvnx_win32_lookup_import(dll, NULL, (unsigned)strtoul(what + 1, NULL, 10))
                                  : fnvnx_win32_lookup_import(dll, what, FNVNX_IMPORT_BY_NAME);
         if (!p) {
@@ -53,7 +65,19 @@ static int iat(const char *path)
     }
     fclose(f);
     printf("iat: %d of %d slots have no export\n", missing, slots);
-    return 0;
+    int rows = 0, bad = 0;
+    for (const fnvnx_iat_call *c = fnvnx_iat_calls; c->name; c++, rows++) {
+        int ok = 0;
+        for (int i = 0; i < nseen; i++)
+            if (seen[i].slot == c->slot)
+                ok = !strcmp(seen[i].dll, c->dll) && !strcmp(seen[i].what, c->import);
+        if (!ok) {
+            bad++;
+            printf("iat-call mismatch\t%s\t%#x\t%s!%s\n", c->name, c->slot, c->dll, c->import);
+        }
+    }
+    printf("iat-calls: %d rows, %d not matching the exe's import directory\n", rows, bad);
+    return bad ? 1 : 0;
 }
 
 int main(int argc, char **argv)
