@@ -13,11 +13,11 @@ S13B-C2	S13b	0111901	f636994	fixed	60b538e	test_s13b_callee_store.py	oracle-call
 S13B-C3	S13b	0111901	f636994	fixed	60b538e	test_s13b_callee_store.py	oracle-callee-store is an artifact: x86-only-store classed artifact
 UBO-U3	render	a16a489	6d305cd	fixed	a9374a6	test_nxgpu_ubo_cache.py	nxgpu UBO bind cache: slot & 3 aliases slots 4-15 onto 0-3
 SORT-T1	render	f280eb4	1b0665e	fixed	a9374a6	test_sort_radix.py	SortPackets radix: function-level static hist is not reentrant (two-thread recording)
-S5-W2	S5	-	-	fixed	e170aeb	test_s5_milestone_store.py	store watch: 64-bit str at want-4
-S5-W6	S5	-	-	fixed	e170aeb	test_s5_milestone_store.py	store watch: the pointer at A as the upper word
-S5-W7	S5	-	-	fixed	e170aeb	test_s5_milestone_store.py	store watch: a store to the old object after the pointer moved
-R0-R13	R0	58d1dfb	-	refuted	-	test_ready_adversarial.py	ready.py: boot.real_exe passes on contradicting image labels with no hash (also at bcbbf03)
-R0-R14	R0	58d1dfb	-	refuted	-	test_ready_adversarial.py	ready.py: frames_gate reads try-farm reports (unmerged heads) (also at bcbbf03)
+S5-W2	S5	e170aeb	aa082aa	fixed	e170aeb	test_s5_milestone_store.py	store watch: 64-bit str at want-4
+S5-W6	S5	e170aeb	aa082aa	fixed	e170aeb	test_s5_milestone_store.py	store watch: the pointer at A as the upper word
+S5-W7	S5	e170aeb	aa082aa	fixed	e170aeb	test_s5_milestone_store.py	store watch: a store to the old object after the pointer moved
+R0-R13	R0	58d1dfb	82805db	fixed	450c5d6	test_ready_adversarial.py	ready.py: boot.real_exe passes on contradicting image labels with no hash (also at bcbbf03)
+R0-R14	R0	58d1dfb	82805db	fixed	450c5d6	test_ready_adversarial.py	ready.py: frames_gate reads try-farm reports (unmerged heads) (also at bcbbf03)
 NXR-BOUNDS	render	44adf6c	fc7713a	fixed	fc7713a	test_nx_render_robust.py	nx_render survives malformed .nxd9/.nxcap (D1-D7, C1-C6, mutations)
 FTOI2-EN	S1-STL	-	-	partial	-	test_ftoi_fuzz.py	FTOI2 float->int matches x86 for enums (7,970 conversions differ: enums take the unsigned path)
 FTOI2-CVTSS	S1-STL	-	-	partial	-	test_ftoi_fuzz.py	sse2neon _mm_cvtss_si32 out of range gives 0x7fffffff, x86 gives INT_MIN (2,333 inputs)
@@ -39,3 +39,4 @@ S13-RENAMES-R1	S13	545e0c5	545e0c5	refuted	-	test_s13_tools.py	a def row of unit
 S13-FZTREE-F1	S13	a01a297	a01a297	refuted	-	test_s13_tools.py	fuzz_job: t/<L12> whose hash differs from the link's recorded tree is rejected, then taken by the fallback wait unchecked
 S6B-CENSUS	S6b	283fe49	283fe49	confirmed	-	test_s13_tools.py	census counts sum (translated + failed, cause table, unique); s6b_centroid 23/23 (K1; K2 note: malformed package counted)
 NXR-H1	render	2686fc6	fc7713a	refuted	-	test_nx_render_robust.py	nx_render bounds every size of .nxcap: a SUBM Draw with 0x7fffffff instances is not bounded (hangs > 120 s; .nxd9 skips draws over 4 M vertices)
+R0-GATES	R0	450c5d6	450c5d6	confirmed	-	test_ready_adversarial.py	resolved gates tree: R1-R15 all ok on the integration head (R13, R14 fixed)
