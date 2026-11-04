@@ -237,6 +237,7 @@ class Arm64Engine:
     def _on_write(self, uc, access, address, size, value, r):
         if size >= 4:
             # code pointers anywhere in the stored bytes (tables of initializers are not always word aligned)
+            value &= (1 << (8 * size)) - 1
             b = bytearray(value.to_bytes(size, 'little'))
             i, changed = 0, False
             while i + 4 <= size:

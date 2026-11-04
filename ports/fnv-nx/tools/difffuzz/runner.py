@@ -267,7 +267,7 @@ class Pair:
             rx, ra, d = self._run(case, max_steps)
             if not d or d['kind'] != 'call-target' or self.adapted >= 16:
                 return rx, ra, d
-            x = int(d['x86'], 16) if not d['x86'].startswith('name:') else None
+            x = int(d['x86'], 16) if not d['x86'].startswith(('name:', 'imp:')) else None
             get = getattr(self.target, 'oracle_code', None)
             got = get(x) if (get and x is not None and x not in self.target.x86_code) else None
             if not got:
