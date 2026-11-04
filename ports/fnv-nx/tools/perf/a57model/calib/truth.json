@@ -1,0 +1,233 @@
+{
+ "schema": "fnvnx-a57truth/1",
+ "about": "Published Cortex-A57 numbers the model must reproduce on calib/bench.c. kind: cpu = cycles per unit; bpc = bytes per cycle; mbps = MB/s at clock; diff = (cycles per unit of a) - (cycles per unit of b), divided by scale. role: fit = a parameter in params.json (or a rule in cost.py) was set from this point, or the model's value echoes a parameter set from the same published number (V1 P0-E1/E2) (its error is ~0 by construction and it is reported apart); check = independent of every parameter. CC = Chips and Cheese, 'Cortex A57, Nintendo Switch's CPU', 2023-12-12 (Switch, Linux, 1.785 GHz); 7CPU = 7-cpu.com/cpu/Cortex-A57.html; PTS = Phoronix Test Suite results quoted in dev.to/jeikabu/nvidia-jetson-nano-1250 (Jetson Nano 1.43 GHz, Jetson TX1 1.73 GHz, both LPDDR4-3200).",
+ "points": [
+  {
+   "name": "l1_latency",
+   "kernel": "chase_4k",
+   "kind": "cpu",
+   "value": 4,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: 4-cycle L1D load-to-use"
+  },
+  {
+   "name": "l1_latency_indexed",
+   "kernel": "chase_4k_idx",
+   "kind": "cpu",
+   "value": 5,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: 'four cycle latency, or 5 cycles for indexed addressing' (ldr x0, [x2, x0] chain); llvm-mca and ARM's optimization guide (AArch64 register offset) say 4"
+  },
+  {
+   "name": "l2_latency",
+   "kernel": "chase_96k",
+   "kind": "cpu",
+   "value": 22,
+   "clock": 1.785,
+   "role": "fit",
+   "src": "CC: 22-cycle L2 load-to-use (fit: cost.l2_lat is this number; V1 P0-E1: the model echoes it)"
+  },
+  {
+   "name": "l2_latency_tlb",
+   "kernel": "chase_1m5",
+   "kind": "cpu",
+   "value": 52,
+   "clock": 1.785,
+   "role": "check",
+   "tol": 0.15,
+   "src": "CC: over 50 cycles at L2 sizes once the L2 TLB is used (4 KB pages)"
+  },
+  {
+   "name": "dram_latency",
+   "kernel": "chase_64m",
+   "kind": "cpu",
+   "value": 250,
+   "clock": 1.785,
+   "role": "fit",
+   "src": "CC: about 250 cycles (fit: cost.dram_ns)"
+  },
+  {
+   "name": "add_latency",
+   "kernel": "add_chain",
+   "kind": "cpu",
+   "value": 1,
+   "clock": 1.785,
+   "role": "check",
+   "src": "TRM / CC: simple integer ALU 1 cycle"
+  },
+  {
+   "name": "mul64_latency",
+   "kernel": "mul64_chain",
+   "kind": "cpu",
+   "value": 5,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: 64-bit multiply 5 cycles"
+  },
+  {
+   "name": "fma_latency",
+   "kernel": "fmla_chain",
+   "kind": "cpu",
+   "value": 10,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: FMA 10-cycle latency"
+  },
+  {
+   "name": "fma_throughput",
+   "kernel": "fmla_tput",
+   "kind": "cpu",
+   "value": 1,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: 128-bit FMA 1 per cycle"
+  },
+  {
+   "name": "vadd_latency",
+   "kernel": "vadd_chain",
+   "kind": "cpu",
+   "value": 3,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: vector integer add 3 cycles"
+  },
+  {
+   "name": "vmul_latency",
+   "kernel": "vmul_chain",
+   "kind": "cpu",
+   "value": 4,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: vector integer multiply 4 cycles"
+  },
+  {
+   "name": "vmul_throughput",
+   "kernel": "vmul_tput",
+   "kind": "cpu",
+   "value": 2,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: 128-bit integer multiply 1 per 2 cycles"
+  },
+  {
+   "name": "stlf_latency",
+   "kernel": "stlf_chain",
+   "kind": "cpu",
+   "value": 7,
+   "clock": 1.785,
+   "role": "fit",
+   "src": "CC: store-to-load forwarding ~7 cycles per str+ldr pair on the chain (fit: the memory-chain rule in cost.py, stlf_lat - 1)"
+  },
+  {
+   "name": "l1_bandwidth",
+   "kernel": "bw_l1_16k",
+   "kind": "bpc",
+   "value": 15.69,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: ~28 GB/s L1D read at 1.785 GHz"
+  },
+  {
+   "name": "l2_bandwidth",
+   "kernel": "bw_l2_1m",
+   "kind": "bpc",
+   "value": 8,
+   "clock": 1.785,
+   "role": "fit",
+   "src": "CC: ~8 B/cycle from L2, one core (fit: cost.l2_bytes_per_cycle)"
+  },
+  {
+   "name": "memcpy_nano",
+   "kernel": "memcpy_8m",
+   "kind": "mbps",
+   "value": 3504,
+   "clock": 1.43,
+   "role": "fit",
+   "src": "PTS tinymembench memcpy, Jetson Nano (fit: cost.dram_mlp_lines)"
+  },
+  {
+   "name": "memcpy_tx1",
+   "kernel": "memcpy_8m",
+   "kind": "mbps",
+   "value": 3862,
+   "clock": 1.73,
+   "role": "check",
+   "src": "PTS tinymembench memcpy, Jetson TX1"
+  },
+  {
+   "name": "mispredict_penalty",
+   "kernel": "branch_random",
+   "minus": "branch_zero",
+   "kind": "diff",
+   "scale": 0.5,
+   "value": 17.5,
+   "clock": 1.785,
+   "role": "fit",
+   "src": "7CPU: 16-19 cycles (fit: cost.mispredict); 50 % of the random branches mispredict"
+  },
+  {
+   "name": "taken_l1btb",
+   "kernel": "taken_32",
+   "kind": "cpu",
+   "value": 1,
+   "clock": 1.785,
+   "role": "check",
+   "src": "CC: 64-entry L1 BTB, 1 cycle per taken branch"
+  },
+  {
+   "name": "taken_l2btb",
+   "kernel": "taken_1024",
+   "kind": "cpu",
+   "value": 2,
+   "clock": 1.785,
+   "role": "fit",
+   "src": "CC: L2 BTB, 2 cycles per taken branch (fit: cost.btb_l2_bubble is set from the same sentence; V1 P0-E2)"
+  }
+ ],
+ "predictions": [
+  {
+   "name": "dot_l1",
+   "kernel": "dot_l1",
+   "units": "per float",
+   "note": "no published number; bound by 1 load per cycle (CC): 4 ldp q per 16 floats = 8 load cycles -> 0.5 cycles per float"
+  },
+  {
+   "name": "mat4_scalar",
+   "kernel": "mat4_scalar",
+   "units": "per 4x4 product",
+   "note": "no published number"
+  },
+  {
+   "name": "ilk_inline",
+   "kernel": "ilk_inline",
+   "units": "per InterlockedIncrement",
+   "note": "PERF.md 6.7 asks for the dmb ish cost; no published A57 number (H1/B9 measure it on device)"
+  },
+  {
+   "name": "ilk_after_store",
+   "kernel": "ilk_after_store",
+   "units": "per InterlockedIncrement after a store",
+   "note": "as ilk_inline"
+  },
+  {
+   "name": "fdiv_s_chain",
+   "kernel": "fdiv_s_chain",
+   "units": "per fdiv s",
+   "note": "ARM optimization guide: 7-17 cycles, data-dependent; no published measurement. The model prices mid-range on a latency-bound chain, with a +-half-range band (cost.py DIV_RANGE)"
+  },
+  {
+   "name": "fdiv_d_chain",
+   "kernel": "fdiv_d_chain",
+   "units": "per fdiv d",
+   "note": "guide: 7-32"
+  },
+  {
+   "name": "sdiv_w_chain",
+   "kernel": "sdiv_w_chain",
+   "units": "per sdiv w",
+   "note": "guide: 4-20"
+  }
+ ]
+}

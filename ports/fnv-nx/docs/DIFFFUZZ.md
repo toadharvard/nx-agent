@@ -190,7 +190,109 @@ its functions' keys (`fnkeys.py`), so only those units are fuzzed again: 9,669 o
 on that tree, no HARNESS bump; a later change of a unit's rows refreshes that unit only. 0x00eacd00 and 0x00a89b00
 (S1b's two XINC1 call-args artefacts) are ok on link c0d6c71516f6. Test: `tests/s13/test_renames.py`.
 
-**difffuzz-12 (J-0138).** The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
+**difffuzz-14: scoped harness changes (fnkeys.CHANGES, SCOPED = d14; HARNESS stays difffuzz-13).** A harness
+change whose effect is confined to identifiable functions no longer bumps HARNESS (a full refresh of all 66,141
+keyed functions). It is a `CHANGES` row that says in words what it invalidates and decides it with `selects` (static
+facts: the target's MSVC name, the original addresses its oracle code calls through the same-unit functions it runs
+for real, the names and absolute addresses its native code and what it reaches in its object refer to: the key of
+a selected function gets the change's tag) and `recheck` (a saved divergence it explains differently: fuzzcache.py
+`todo` sends that verdict back once; rows record the `changes` they were fuzzed under). `fnkeys.py explain
+<targets> <catalog> [<cache>...]` counts them; the farms stop for a newer HARNESS or SCOPED on the integration head.
+On link c0d6c71516f6 (all 26 caches):
+| change | what it does | invalidates |
+|---|---|---|
+| d14-dtor | an MSVC deleting destructor target `??_G` / `??_E` (this, flags) runs with flags = 1 only (`runner.deleting_flags`: the Itanium D0 it stands for always deletes; flags 0 has no native counterpart), and its return value (this vs void) is not compared, so the stores are (S1-fuzzq: 41 `falloff?` records "x86 0 calls, native 1") | 103 keys |
+| d14-noreturn | `_CxxThrowException` 0x00ec7894, `std::_Xlen` 0x00ec30b0, `exit`, and the imports ExitProcess/ExitThread/RaiseException... on the oracle; `__cxa_throw`, `__cxa_rethrow`, `fnvnx_cxx_throw_exception`, `__cxa_throw_bad_array_new_length`, `std::__throw_*`, `__cxa_pure_virtual`, `abort`, `exit`... natively (or a code stub of a listed CRT address): the call is traced, then the run ends on that machine (`Result.noreturn`; result and callee-saved registers not compared, earlier stores are). The native throws map to 0x00ec7894 (compared by target only); `__cxa_allocate_exception` is a builtin returning a private block (MSVC builds the object in its stack frame; neither is compared). Before, the canned return ran into GCC's udf after the call (exc:1: 00b43490, 00a63ae0, 00e89460) | 555 keys |
+| d14-math | the CRT math as builtins with C99 / IEEE results on both machines is S1-fuzzB's `libcalls.CRT_MATH` / `crt_math` (37b1157: log10 no longer through `fyl2x`, which Unicorn leaves undone for x <= 0, so log10(0) gave 0.0: S1-fuzzq 0082ffd0); this change adds the CRT addresses of docs/RUNTIME.md beside the link's provider rows and the `_CIpow/_CIfmod/_CIexp/_CIatan/_CIasin/_CIacos/_CItan` x87-stack forms, run through a stub that spills ST1/ST0 into a cdecl call of the same builtin. Of the 54 cached records whose traces touch these, 36 no longer reproduce, 18 diverge later | 317 keys |
+| d14-vslot | a native call of a vtable slot the link filled with its trap (`fnvnx_vslot_trap` brk #0xf5, `fnvnx_special_trap` #0xf6, via `__fnvnx_vtrap_<X>`, which loads x1 = "virtual function defined nowhere: <name> (slot k of <_ZTV>)") is the error `trap:<stub>:<text>` and the cause `native-undefined` (classify.py), not S1's native-trap: S1-fuzzq's "exc:7 at shared PCs" (0x0a069914 in 54 functions of highprocess.cpp) are each unit's trap stub | 175 cached records rechecked |
+
+**difffuzz-15 (d15-vcall, SCOPED = d15).** The largest artifact class, `oracle-vcall` (2,439 divergences in 2,195
+functions over the 26 caches), had two harness causes. (1) An intercepted x86 callee of unknown convention (a call
+through a pointer the case filled: no oracle code, no declaration) popped 0 bytes; where the MSVC caller does not
+clean up (stdcall/thiscall callee), esp stayed off by the arguments and the oracle returned to an argument word
+(`fault:x:00000000`; e.g. 00cf75f0: `allocator->vtbl[4](p, n)` twice). `Pair._learn_pop` now searches, for up to 3
+such call sites jointly, the pushes before each site (most first, then 0) for a clean run: no fault, a balanced
+stack at the target's return (`Result.esp_ok`), every intercepted call returning into loaded oracle code (a wrong
+count returns to an argument word, which then reads as a wild call); the counts are kept per call site for later
+cases. (2) An oracle call through memory the case did not plant (neither a direct target of the oracle code nor a
+planted vftable slot) ended the comparison; its callee is unknown and each machine reads its own slot layout from
+the fuzz bytes, so it now matches whatever the native calls at that index (both get the same canned result) and the
+later calls and the rest are compared. A planted slot or a direct target is compared as before. On a random sample
+of 120 cached oracle-vcall records (link c0d6c71516f6): 65 no longer reproduce (5 before), 31 still end on the oracle
+(15 reads, 11 executes, 5 unplanted call-targets after an oracle fault), 24 now reach an ordinary comparison
+(call-target 9, mem-write 6, call-count 5, ...). d15-vcall selects the functions whose oracle closure makes an
+indirect call: 14,448 of 66,141 keys. Test: `tests/s13/test_d15.py` (9 checks).
+
+**difffuzz-16 (thread-local variables; catalog version 2).** The 835 functions with a native object the harness
+did not fuzz on link c0d6c71516f6 (coverage 98.76 %) all had SECREL relocations, 1,994 of them to 32 MSVC
+`__declspec(thread)` variables (memory contexts, allocator tags, per-thread script data). units.json gives those
+variables image addresses in the exe's .tls template, which starts at 0x01272000 (`?__tls_index@@3PAEA`), so a SECREL
+is the variable's offset from there (`coffobj.TLS_IMAGE_START`). On the oracle, fs:[0x2c] (`__tls_array`) points to a
+slot array in the TEB page whose slot 0 is a zeroed private block (`x86emu.TLS_*`, not compared, like the native
+`tpidr_el0` block), and `__tls_index` (0x0126fd98) is pinned to 0. Catalog rows carry `cv`; fuzz_job rebuilds a
+cached catalog of an older version (about a minute). 40 such functions fuzzed locally: all 40 get a verdict, 18
+without a divergence; the divergences are ordinary causes (TlsGetValue/TlsAlloc call shapes among them), none in the
+TLS block. A function whose closure reaches one of them gets a new oracle hash (it runs that callee for real now), so
+keys refresh without a CHANGES row. Test: `tests/s13/test_d16.py`.
+
+**difffuzz-17 (d17-statics, SCOPED = d17).** `local-static` (599 artifact divergences, 298 functions) came from
+comparing a function-local static only on the oracle: MSVC keeps it at an image address with a guard bit word, GCC as
+`_ZZ<function>E<len><name>` in the unit's .bss with a guard byte, never compared, and with a random background the
+oracle's guard was often already set while the native one was not. `engine.static_pairs` pairs a static by its
+function (the native names at the function's entry; the function's address from units.json `functions`) and its
+name; the oracle's value and its MSVC guard word are pinned to 0 (GCC's .bss starts zero), the native stores into
+the pair count as stores at the oracle address (`Arm64Engine._on_static_write`), its reads are no longer private
+reads, and the guards (an implementation detail on both sides) are not compared (`compare(ignore=...)`). Unpaired
+statics keep the soft `local-static`. Random sample of 60 cached local-static records: 41 gone, 3 still
+local-static, 16 reach a later comparison (several are initialisation differences: the oracle's static has a
+constant initialiser where GCC runs a guarded one and registers an atexit destructor). d17-statics selects the
+functions whose oracle closure refers to a local static or guard, or whose native code names one: 3,713 keys.
+Test: `tests/s13/test_d17.py`.
+
+**difffuzz-18 (d18-uninit, SCOPED = d18).** `uninit-both` (578 artifact divergences) is the probe's verdict that
+both machines' results change with the planted garbage: both read uninitialised state (the decomp's own reads MSVC
+also makes), but each from its own frame layout, so the two read different garbage. The probe now runs the case once
+more with `world.UNIFORM`: every planted garbage word is 0 on both machines (stack fill, non-argument and clobbered
+registers). `uniform: agree` means nothing else differs: fuzz.py keeps no record of it (`uninit_dropped` counts them;
+after 3 of one kind that kind is not probed again for the function) and goes on fuzzing; otherwise `uniform` names
+the divergence that remains and the record stays uninit-both. Random sample of 40 cached records (triage on link
+c0d6c71516f6): 17 agree, 18 still differ, 4 gone, 1 call-flow; 8 of the agreeing functions fuzzed again: all 8 with no
+divergence. d18-uninit rechecks every cached uninit-both verdict once. Test: `tests/s13/test_d18.py`.
+
+**difffuzz-19: a full refresh (HARNESS = difffuzz-19, orchestrator-approved in S1-fuzzB-002).** S1-fuzzB's untyped
+float results (`x86emu.x87_result_use`), its CRT_MATH builtins and engine's preference for a decorated spelling
+change verdicts that no key reflects, so every key changes once; the scoped rows d14..d18 are folded into it (their
+`changes` tags still go into the rows, so later partial refreshes keep working). It also carries three changes:
+- a call nothing describes (neither the definition nor the calling unit's declaration: wild and unplanted indirect
+  calls) gets a canned result whose low byte is 0/1 on both machines (`world.canned_kind` -> `untyped`): the call
+  site may test it as a bool, MSVC `al`, GCC bit 0 (S1-fuzzA: 17 native-null-read records; S13b's hypothesis for
+  the 413 native-early-exit records at indirect calls through fuzzed memory);
+- the native entry of an override of a secondary base's virtual is the link's `__fnvnx_msvc_<addr>` (GCC's
+  `_ZThn<d>_` thunk; S2c thisadj, 79 addresses on link c0d6c71516f6), where MSVC enters it with `this` at that base;
+- a call through a `__s13_vtpad_` slot is `vptr-unpaired` before the `unplanted` test makes it `oracle-vcall`
+  (S13b);
+- an intercepted constructor `??0`, or a member function returning a pointer or reference to its own class,
+  returns `this` on both machines (`world.returns_this`; before, only the oracle's constructors did, and the
+  native got a canned word: S13b ctor-this 79, canned-this 32). Random sample of 40 of those 119 cached records:
+  26 gone; most of the rest are results through a hidden pointer of callees no declaration describes;
+- the parts of each machine's private range it never uses are plain background there, as on the other machine,
+  and a jump there is a wild call (`world.A64_HOLES` / `X86_HOLES`, and per unit image `Arm64Engine.holes`: code
+  stubs outside .text, named stubs above the last one assigned, the space after the image). The same garbage
+  address faulted on one machine only (S13b native-wild-private 52, oracle-private-address 6; S1-fuzzB
+  native-private-address 5). Of S1-fuzzB's 7 records, 5 are gone. Used stub pages still fault as data, so
+  native-stub-data (S2c) stays visible;
+- a fault on one machine is compared after the calls both made before it: a differing call in the common prefix is
+  reported first (`runner.compare`). A native call through a vtpad slot where the oracle called the exe's slot and
+  then faulted on the canned result was an oracle-side error (oracle-vcall), and is now the call-target that
+  classify files as vptr-unpaired (S2c). A fresh vtable-copy stub for a slot function another object defines is
+  that function's original address (`vtmodel.native_addrs`, the link's addrmap F rows), not an anonymous stub.
+  120-record oracle-vcall sample with all of difffuzz-19: 70 gone, oracle-side errors 26 -> 17, 5 vtpad
+  call-targets.
+Test: `tests/s13/test_d19.py`.
+
+Test: `tests/s13/test_d14.py` (30 checks). Metric: `tools/difffuzz/metric.py` (artifact-class divergences + functions not fuzzable + unpublished shards, from reports/fz<k>, the newest layout only).
+
+**difffuzz-12 (J-0138). The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
 names libcalls.EQUIV maps to them) return a fresh heap block (`world.alloc_result`, HEAP + 2 MiB + 4 KiB k), never
 the canned 0: GCC drops the null test after a throwing new that MSVC keeps (S13b `new-null`, 178 farm records). A
 machine's own private range faults when unmapped; the other machine's is plain background, so a garbage pointer
@@ -225,6 +327,18 @@ is that import, as on x86.
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
 
+**Float results of untyped calls and CRT math (S1-fuzzB, after difffuzz-13; verdicts refreshed by difffuzz-19).** An intercepted call whose callee
+nothing types (a wild or unplanted indirect call, a CRT name with only a C spelling in the unit's symbols) always
+leaves the canned bytes in v0 natively; the oracle now gets the same value in ST0 when the code the call returns to
+consumes ST0 (`x86emu.x87_result_use`: fst/fstp m32 -> f32, m64 -> f64, x87 arithmetic; the caller's cleanup and
+epilogue are stepped over, and a `ret` takes the fuzzed function's own result kind). Before, the oracle read an
+empty x87 stack (0.0) and the native the canned bytes: 12 of the 21 actor.cpp float divergences. A unit's symbols
+prefer a decorated spelling for an address (`?FUN_00eca920@@YANN@Z` over `_FUN_00eca920`). The CRT's double
+functions the link gives libm providers (log, log10, exp, pow, atan2, tan, atan, asin, acos, fmod, floor, ceil,
+sin, cos: `libcalls.CRT_MATH`) run as builtins on both machines with C99 results at the domain edges (log(0) =
+-inf, log(-1) = NaN, pow poles and overflow, signed zeros of floor/ceil); the x87 `fyl2x` stub for log10 gave 0.0
+for log10(0) under Unicorn. Replayed on link c0d6c71516f6: float records 51 -> 20 still diverging (2 gone before).
+
 ## Cause refinement and verdict policy (`causes.py`, S13b)
 
 `report.reclassify` hands what the probes left at `unclassified`, `call-flow` or `signedness?` to `causes.refine`,
@@ -234,51 +348,57 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | record shape | cause | class |
 |---|---|---|
 | native `exc:N` (brk/udf), oracle returns | `native-trap` | real-bug S1 (FALL1 trap / GCC unreachable on a path the exe takes) |
+| ... and the instruction at that pc of the unit image (`FNVNX_CAUSES_A64`, default the run's a64 directory) is the link's `fnvnx_vslot_trap` / `fnvnx_special_trap` (`brk #0xf5` / `#0xf6`) | `vslot-trap` | real-bug S2c (a virtual defined nowhere; the exe vftable has a function in that slot) |
 | native `stack-protector` | `stack-protector` | real-bug S1 |
 | native data fault below 64 KiB, oracle fine | `native-null-read` | real-bug S1 |
-| ... and the native function calls a game allocator (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0; from `fixed/<unit>.o` or `FNVNX_CAUSES_OBJ`) | `new-null` | artifact (canned null from an allocator: GCC drops MSVC's null test after a throwing new) |
+| ... and the native function calls a game allocator (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0; from `fixed/<unit>.o` or `FNVNX_CAUSES_OBJ`) and the case holds a canned result below 0x10000 (an allocator null; since difffuzz-12 allocators return heap blocks) | `new-null` | retired (S13b audit): since difffuzz-12 the allocators return heap blocks, so a canned 0 is another call's valid result and the native null access is `native-null-read` (real bug S1) |
 | native data access in the stub range; stub address passed/stored | `native-stub-data` | real-bug S2c |
 | native image address where the oracle has an image-window one (arg, result, store) | `native-address` | real-bug S2c (unrebound variable/table; check the pointee for literals) |
 | call argument the runner marked `arm_garbage` | `native-garbage-arg` | real-bug S1b |
 | `sret` argument differs | `sret-mismatch` | real-bug S1b |
-| float argument within tolerance / NaN on both | `x87-precision` / `nan-bits` | by-design |
-| float result equal to the oracle's unrounded x87 value | `x87-precision` | by-design |
-| pointer to a pinned-pool literal (0x02f00000) vs the native .rodata copy: argument / result / store | `literal-arg` / `literal-ret` / `literal-store` | artifact |
-| both sides store image vftables (link `out/addrmap.tsv` kind V, or `FNVNX_CAUSES_ADDRMAP`), different ones: in a destructor / elsewhere | `vptr-store` / `vptr-differs` | by-design / triage S2c |
-| result of a `??_G` / `??_E` deleting destructor (MSVC returns this, Itanium D0 is void) | `deleting-dtor-ret` | by-design |
-| pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
+| float argument within tolerance (both values normal, same sign) / NaN on both with one side the machine's generated NaN (x87 0xffc00000, AArch64 0x7fc00000) | `x87-precision` / `nan-bits` | by-design (0.0 vs a denormal, +0 vs -0, NaN-shaped ints stay open: S13b audit) |
+| float result equal to the oracle's unrounded x87 value, which differs from its rounded one | `x87-precision` | by-design |
+| pointer to a pinned-pool literal (0x02f00000) vs the native .rodata copy: argument / result / store | `literal-arg` / `literal-ret` / `literal-store` | literal-ret: artifact (only a pool literal vs a native image address whose x86 pointee is unreadable); literal-arg / literal-store: triage S13b (the strings differ, or stores never compare the pointees: a wrong literal looks the same; S13b audit). A native return of a named-stub address is `native-stub-data` (S2c) |
+| both sides store image vftables (link `out/addrmap.tsv` kind V, or `FNVNX_CAUSES_ADDRMAP`), different ones | `vptr-differs` | triage S2c (in a destructor too: that the two vftables share the class chain needs the exe's RTTI, S13b audit) |
+| result of a `??_G` / `??_E` deleting destructor (MSVC returns this, Itanium D0 is void) | `deleting-dtor-ret` | triage S13 (the difference is by design, but runner.compare stops there and never compares the destructor body; until the harness skips that return) |
+| call-count of a `??_G` fuzzed with flags bit 0 clear: the native makes the oracle's calls plus deallocator calls only (D0 always frees) | `deleting-dtor-flags` (report.py, S1-fuzzB) | triage S13 (by design, but the difference hides the destructor body; see the causes.py row) |
+| call-count, the oracle makes no call, the native's first / a later call is a named stub | `native-undefined` / `after-native-undefined` | real-bug S2c/S2d (was `falloff?`) |
+| call-count, the oracle makes no call, the native calls addresses only | `falloff?` | real-bug S1 |
+| probe `signedness` on a by-design shape (the top bit is a float sign, a bool byte, INT_MIN, the top of the address space): float argument within tolerance / bool result 1 vs another nonzero byte / x86 #DE / native access across 4 GiB | `x87-precision` / `bool-repr` / `division` / `ilp32-pointer` | by-design |
+| pointer result with an unreadable pointee on one side, the oracle a pool literal and the native an image address | `literal-ret` | artifact (any other pointer result stays open; S13b audit) |
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
-| `no-native-entry` | `no-native-entry` | artifact |
-| oracle-only data fault in the AArch64 private range | `oracle-native-address` | artifact (a native address leaked to the x86 machine) |
+| `no-native-entry` | `no-native-entry` | artifact only when the address map names another unit's object defining it (the image subset left it out); otherwise `native-undefined` (real bug S1, S13b audit) |
+| oracle-only data fault in the AArch64 private range | `oracle-native-address` |  triage S13b (S13b audit: no record evidence separates the harness from a real bug) |
 | oracle-only data fault | `oracle-fault` | triage |
-| oracle-only fault (`oracle-fault`, or an `oracle-vcall` error) at a garbage address in the x86 private range 0x0e000000 | `oracle-private-address` | artifact (the native machine maps that range as background) |
-| ... a dword access at 0xfffffffd..0xffffffff (a near-null pointer minus a few bytes, wrapped past 4 GiB) | `ilp32-pointer` | by-design |
+| oracle-only fault (`oracle-fault`, or an `oracle-vcall` error) at a garbage address in the x86 private range 0x0e000000 | `oracle-private-address` |  triage S13b (S13b audit: no record evidence separates the harness from a real bug) |
+| ... a dword access at 0xfffffffd..0xffffffff, oracle only | `oracle-fault` | triage (the native may never have made the access; S13b audit) |
+| probe `ilp32-pointer` (the native touched >= 4 GiB, the oracle did not fault) where the address mod 2^32 is memory the oracle maps (image, pool, case buffers, heap, stack) | `ilp32-wrap` | real-bug S1 (a base plus a wrapping 32-bit index: GCC ILP32 forms the address in 64 bits on an integer-constant base, tests/s13/ilp32_wrap); near null or unmapped stays `ilp32-pointer` |
 | ... and the native function calls a function its own object defines as a bare `ret` (decomp stub, empty destructor) | `native-empty-callee` | real-bug S1 (the exe's work there is skipped natively) |
 | `oracle-vcall` call-target (`vcall: unplanted`): the native trace passes a `__s13_vtpad_` slot | `vptr-unpaired` | real-bug S2c, soft (classify.py tests `unplanted` first) |
-| ... the oracle calls a garbage word in the AArch64 stub range, the native trace names that word (word - 0x08000000, or `name:<hex>`) | `vcall-stub-alias` | artifact (one call, two spellings) |
+| ... the oracle calls a garbage word in the AArch64 stub range, the native trace names that word (word - 0x08000000, or `name:<hex>`) | `vcall-stub-alias` |  triage S13 (S13b audit: no record evidence separates the harness from a real bug) |
 | ... the native calls a C++ name nothing defines or binds, no vptr planted | `native-undefined` | real-bug S1 |
-| ... neither target is code on either machine (not .text, an import, a named stub or the AArch64 private range) | `vcall-garbage` | artifact (an object with no vftable: invalid input) |
+| ... neither target is code on either machine (not .text, an import, a named stub or the AArch64 private range) | `vcall-garbage` |  triage S13b (S13b audit: no record evidence separates the harness from a real bug) |
 | ... anything else (the native calls an exe function directly while the oracle reads unplanted memory; oracle-only faults near an indirect call or at an unmapped pc) | `oracle-vcall` | artifact (kept) |
 | call-target: native calls a named stub `name:_Z...` | `native-undefined` | real-bug S1/S2c (fallback without the link's providers) |
 | call-target: oracle calls an import, native jumps to the IAT slot address | `import-slot-called` | real-bug S2c |
 | call-target: the native function never names the oracle's callee (from its object) | `native-inlined` | triage |
 | one side's store covers bytes the other leaves | `store-width` / `x86-only-store` / `native-only-store` | triage |
 | native calls a prefix of the oracle's calls / the oracle's calls and more | `native-early-exit` / `native-extra-calls` | triage |
-| only for records that would stay `unclassified`: one side has the block a game allocator returned (`world.alloc_result(j)`), the other the canned result of a later call `m > j` (argument, result or stored word) | `ctor-this` | artifact (the constructor run on the block returns this; its canned result is random) |
-| pointer argument: the oracle's is the canned eax of an earlier intercepted call, the native's is in its own stack frame | `canned-this` | artifact (a callee returning its result/this pointer: MSVC aggregate return, `operator=`; canned eax is random) |
+| only for records that would stay `unclassified`: one side has the block a game allocator returned (`world.alloc_result(j)`), the other the canned result of a later call `m > j` (argument, result or stored word) | `ctor-this` | triage S13b (harness artefact when the later call is the constructor on the block, real bug when the native drops a factory/Init result: the record names neither; V1 A2) |
+| pointer argument: the oracle's is the canned eax of an earlier intercepted call, the native's is in its own stack frame | `canned-this` | triage S13b (a callee returning its result pointer, or a by-value declaration in the native: the record lacks the earlier call's arguments; V1 A3) |
 | `this`/pointer argument `d` bytes below the first buffer on the oracle side (pinned-pool range) and the buffer on the native side, the native object has a `_ZThn<d>_` thunk for the function or a direct callee | `thunk-binding` | real-bug S2c (`__fnv_<addr>` bound to the GCC primary entry, not the secondary-base thunk the MSVC entry corresponds to); without the thunk `layout-offset` |
 | call argument (I32/F32/F64) the native passes equal to the canned result of the call just before, the oracle another value | `native-stale-result` | real-bug S1b (an argument the native caller never set: its declaration of the callee differs) |
-| native `fault:x` in the AArch64 private range, oracle fine, case background `rand` | `native-wild-private` | artifact (a random code pointer: x86 intercepts it as a wild call, AArch64 executes its private range) |
-| first differing store: only bytes where the oracle has `0x08` and the native `0x00` | `stub-normalized` | artifact (arm64emu `_codeptr` rewrites any stored word in `0x08000000..0x09000000`, data included) |
+| native `fault:x` in the AArch64 private range, oracle fine, case background `rand` | `native-wild-private` | triage S13b (a random code pointer, or a wrong vtable slot: indistinguishable in the record; V1 A4) |
+| first differing store: every differing byte in a 4-byte window where the oracle word w is in [0x08000000, 0x09000000) and the native word is exactly w - 0x08000000 (`causes._stub_rewrite`) | `stub-normalized` | artifact (arm64emu `_codeptr` rewrites any such stored word, data included; a 0x08 flag byte elsewhere stays open, V1 A1) |
 | stored / returned word that is one of the planted garbage words (`world.garbage_words`): both / native / oracle | `uninit-both` / `uninit-arm` / `uninit-x86` | artifact / real-bug S1b / by-design |
 | native 0 where the oracle has a value; the native function or a direct callee in its unit is `mov w0, #0; ret` | `native-zero-stub` | real-bug S1 (a placeholder body) |
 | call flow, the native function's own body is `ret` / return-a-constant (or it calls such a decomp-local `..FUN_<X>..` stand-in for an original X another object defines) and the oracle makes calls | `native-empty-body` | real-bug S1 |
 | the oracle's first missing call is CRT `_atexit` (0x00ec658f), the native function names no `fnvnx_xc_atexit` / `atexit` | `dyninit-no-atexit` | real-bug S10 (soft: the destructor is lost at exit only) |
-| `??_G` / `??_E` called with flags bit 0 clear; the native (D0) makes the oracle's calls plus deallocator calls only | `deleting-dtor-flags` | by-design |
-| the function takes a class by value (`AGG:` parameter); the oracle's calls after the native stops are deallocators only | `byvalue-arg-dtor` | by-design (MSVC: callee destroys, Itanium: caller) |
+| `??_G` / `??_E` called with flags bit 0 clear; the native (D0) makes the oracle's calls plus deallocator calls only | `deleting-dtor-flags` | triage S13 (by design, but the call-count difference hides the destructor body; until the harness runs D1 for flags 0) |
+| the function takes a class by value (`AGG:` parameter); the oracle's calls after the native stops are deallocators only | `byvalue-arg-dtor` | triage S13 (by design only for a non-trivial native destructor, and the difference hides the return and writes; until the harness drops the trailing argument frees) |
 | call-target: the native calls an image-window (data) address where the oracle calls a function | `native-calls-data` | real-bug S1 (virtual slot past a decomp class's shorter vtable) |
-| call-target: oracle an unnamed CRT entry (addrmap E, x87 `_CI*`) or `f`, native the libm (float) function; `sprintf` vs `__sprintf_chk`; `atof` vs `strtod` | `libc-variant` | artifact (libcalls.X86 / FAMILY lack the pair) |
-| the oracle's missing callee X is defined by the native function's own object and called by it (runs natively, intercepted on x86) | `oracle-callee-unloaded` | artifact (X not in the oracle's code set); never over an unbound name |
+| call-target: oracle an unnamed CRT entry (addrmap E, x87 `_CI*`) or `f`, native the libm (float) function; `sprintf` vs `__sprintf_chk`; `atof` vs `strtod` | `libc-variant` | artifact; for an unnamed CRT entry only the matching C function or its float form by the table causes.CI_ENTRIES (_CIacos vs cos is another function, S13b audit) |
+| the oracle's callee X is defined by the native function's own object and called by it (runs natively, intercepted on x86), **and** the native's calls from the divergence on include a call X reaches that leaves the unit and the caller does not make itself (`causes.native_ran`: evidence the native ran X) | `oracle-callee-unloaded` | artifact (X not in the oracle's code set); never over an unbound name; an early exit before X, or X with no traced call, stays `native-early-exit` / `call-flow` (V1 tests/v1/test_s13b_callee_unloaded.py U1/U2); call-target only, and the evidence call must not be reachable through another unit-local callee (S13b audit U4) |
 | the oracle frees (free / delete / Deallocate), the native goes straight on to the oracle's next call (or returns) and reaches no deallocator through its own object | `native-missing-free` | real-bug S1 |
 | call-target: native indirect call to a non-code address where the oracle calls a .text function | `native-vcall-oracle-direct` | triage |
 
@@ -290,7 +410,7 @@ outside the function (a callee the oracle runs, the native calls out of line and
 map (`causes.function_at`) that the native calls out of line through `__fnv_<addr>` or its link name and that its own
 object does not define (the unit's own functions run natively). Never for `native-inlined`, `native-early-exit` or
 `x86-only-store` (`causes.NOT_INTERCEPTED`: the native never made the call or ran the callee's code itself; V1
-tests/v1/test_s13b_callee_store.py C1-C3); without the object or the map the record stays in triage. A triage record in a function that calls a C++ name neither its object defines nor
+tests/v1/test_s13b_callee_store.py C1-C3); without the object or the map the record stays in triage. The record must also be a call-count / call-target record whose native trace holds that callee more often than the oracle's (the oracle runs it untraced, and calls are compared before writes: any other kind means the native never made the call; S13b audit C5). A triage record in a function that calls a C++ name neither its object defines nor
 the address map binds -> `after-native-undefined` (real-bug S1: the native side got a canned result).
 
 `causes.POLICY` gives every cause a class (by-design, artifact, real-bug, triage), an owner and a reason;
@@ -301,7 +421,7 @@ five example reproducers, plus `functions_by_class` (each diverging function by 
 for R0. `causes.py merge <reports/fz<k> .md | causes.json>... --out all.json` adds the shards up
 (classes from this checkout's policy). Input layout (any campaign or `fuzz/cache/<k>of<N>` checkout): `results.jsonl`
 (address, source, status; only `ok` rows count), `div/<addr>-<n>.json` (divergence, hint, case), optional
-`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. `causes.py handoffs <dirs> --out-dir d [--effects e.jsonl]` writes the owners' lists, one row per counted divergence (owner, cause, address, unit, reproducer `fuzz/cache/<k>of<N>:div/<file>`, first effect): `handoffs_<owner>.tsv` (real-bug), `triage_<owner>.tsv`, `harness_<owner>.tsv` (artifacts with an owner) and `index.tsv`; they go to the private repository, never here. The object rules need pyelftools: without it the summary's `native_objects.reader` is `unavailable` and a warning is printed. Test: `tests/s13/test_causes.py`.
+`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. `causes.py handoffs <dirs> --out-dir d [--effects e.jsonl]` writes the owners' lists, one row per counted divergence (owner, cause, address, unit, reproducer `fuzz/cache/<k>of<N>:div/<file>`, first effect): `handoffs_<owner>.tsv` (real-bug), `triage_<owner>.tsv`, `harness_<owner>.tsv` (artifacts with an owner) and `index.tsv`. With `--ref-by-head` the reproducer is `fuzz/<head12>/<k>of<N>:div/<file>`, the branch of the head that fuzzed the function (results `commit`), which the farms never rewrite (the rolling `fuzz/cache/` branches are force-updated on every re-fuzz); they go to the private repository, never here. The object rules need pyelftools: without it the summary's `native_objects.reader` is `unavailable` and a warning is printed. Test: `tests/s13/test_causes.py`.
 
 ## Lockstep (`lockstep.py`, D14)
 
@@ -362,5 +482,5 @@ pointee (the native literal has another address): reported under `unclassified`.
 ## Limits
 
 Indirect calls (vtable calls through fuzzed objects) are not modelled yet (functions with indirect calls are left
-out); TLS (`SECREL`) relocations leave a function unresolved; callee side effects through pointer arguments are not
-modelled (canned results only); x87 transcendental helpers beyond sin/cos/sqrt are intercepted, not executed.
+out); callee side effects through pointer arguments are not
+modelled (canned results only); x87 transcendental helpers beyond the d14-math set are intercepted, not executed.

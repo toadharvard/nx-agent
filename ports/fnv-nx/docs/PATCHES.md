@@ -43,6 +43,8 @@ methods are named after their callee's address (`FUN_<addr>`), so S2's name-addr
 | `xinc1/xinc_enum.py`, `analyze.py`, `gen.py` | round-2 pipeline: x86-inconsistent references of a link run -> callers in the pristine objects -> ecx at each reference (`ecxflow.py`) -> candidate XINC1 patches for shapes A/B/C, the rest listed for reading by hand; `preserves.py ADDR`: does a function keep ecx / edx at every return |
 | `pop/popscan.py ABI OUT` | every `pop-mismatch` pair of a link run read against the pristine objects: per call site the callee's real words (`ret N`), the words its code reads, and for a callee that takes more than its declaration pushes, the earlier call of the same caller that the missing words were pushed for (stack simulated with every direct callee's real pop count); families `more`, `conv-only`, `fewer-unread`, `fewer-donor`, `fewer-other`, `nocaller` |
 | `pop/popgen.py POP ABI OUTDIR [--exclude SRC,..]` | candidate patches for the `fewer-donor` chains `D(.., x).R(..)` -> `D(..).R(.., x)` with overloads declared next to the decomp's; everything not mechanical goes to `OUTDIR/manual.tsv` with the reason |
+| `pop/popdis.py ADDR.. [--pop POP]` | a caller's x86 code from the pristine objects with every relocation resolved, each call's real pop count and the stack words the callee reads, and popscan's rows for it: what a hand-written pop patch is read from |
+| `pop/fuzztriage.py HANDOFFS ABI POP OUT` | S1b's rows of S13b's fuzz hand-off list (`uninit-arm`, `native-garbage-arg`, `callee-saved`) classified by the link's ABI rows and popscan: patched, pop-caller, pop-callee, bridge-callee / bridge-self (S2c's bridge gaps), xinc-callee, other |
 | `pop/abiclass.py ABI POP OUT` | S1b verdict for every unexplained x86-inconsistent and manual pair of a link run, with the call distance of the calling function from the boot roots (WinMain 0x0086a850 and the dynamic initializers) |
 | `test_ftol.py` | FTOL1's inline `fnvnx_ftol2_sse` equals `cvttsd2si` on 48 values (qemu-aarch64 against the host's SSE2), stays inline, compiles for ILP32 |
 | `gcc_check.py DECOMP BASE_TREE WORK` | patched files prepared with all rules into an overlay of a prepared tree, compiled with the census flags before/after; reports new errors and errors on patched lines |
@@ -233,6 +235,13 @@ braces.
 
 - `xinc1_pop_gen.s1b`: 173 callers, 292 calls, 97 files. MSVC: all 191 site functions identical; GCC census: no
   new errors.
+- Nested spelling `R(.., D(a.., x..), ..)` -> `R(.., D(a..), x.., ..)`: D's call is a whole argument of R, and the
+  words pushed for D follow D's result on R's stack (the boot callers 0x00448420 / 0x0086c010 by hand had this shape).
+  Regenerated `xinc1_pop_gen.s1b` (`popgen.py --exclude <the three> --skip-patched patches`): caller sites 169 -> 222,
+  files 97 -> 123 (39 files touched). MSVC: all 4,990 functions of the 39 units identical; GCC census 0 -> 0;
+  units_renames +116. abiclass at link/31971038913d: fix-donor 471 -> 408 pairs, fix-other 352 -> 348, patched 233 ->
+  301. A moved parameter named like one of the receiver's keeps its type only; a moved class-template parameter
+  declared after the receiver's class is left manual.
   `flameprojectile.cpp`, `highprocess.cpp` and `tesrace.cpp` are left out: their hunks overlap other patches.
 - `xinc1_pop_boot.s1b` (by hand): WinMain's per-frame body 0x0086ff70 (distance 2 from WinMain; four getter/receiver
   pairs and the nested `0x00874b90(0x004e3270(core, 0x004dc310(), 0))`, which is
@@ -333,3 +342,29 @@ stays unresolved (S2's trap) until the exe's vftable gives the address. No slot 
 | `0x010a24fc` | NiStandardAllocator (FUN_00aa2200) | 0 (scalar deleting destructor), 9 | nistandardallocator.cpp (360 source path of 0x00aa3090..0x00aa3560): 1-6 in slot order with BSNiAllocator's signatures, 3 calls 1 and 2 itself; 7 = 0x00aa3430 creates the small-object allocator (Initialize), 8 = 0x00aa3460 deletes it (Shutdown) |
 | `0x0109bf4c` | A660A0Map, the NiStream loader map DAT_011f4784 (FUN_00a660a0) | 1-6: KeyToHashIndex, IsKeysEqual, SetValue, ClearValue, NewItem, DeleteItem (Gamebryo's NiTMapBase order; SetAt 0x00a642a0 calls 1-3) | slot 0 only, the destructor the decomp declares; no unit binds 0x0109bf4c with more slots, and the decomp's string-map slot functions belong to other vftables |
 | `0x0101772c`, `0x0104e6ac`, `0x01082ed8`, FUN_004de530's | INISettingCollection-like setting collections | all ten (no traps added; S5) | none yet: the decomp's interface is the 10-slot INISettingCollection of `src/bsmain/setting_declarations.h`: 0 scalar deleting destructor, 1 Add, 2 Remove, 3 GetViewerStrings, 4 WriteSetting, 5 ReadSetting, 6 Open, 7 Close, 8 WriteAllSettings, 9 ReadAllSettings |
+
+## Patch class MT1: gated Switch behaviour changes (mt_cull; decided by the orchestrator, S15-threads)
+
+**Purpose.** Every other class here restores what MSVC built from the decomp (byte parity). MT1 changes behaviour on
+purpose. It makes the engine's 360-era multithreaded culling path (`bMTRendering:Display`, docs/PERF.md 6.8) work
+on the PC code, so cull and accumulation can leave the main thread. The changes:
+* each accumulator built with two batch renderers while MT is on (FUN_0086c160, the shadow-accumulator pool in
+  bsshadermanager, teswater x2);
+* per-thread current-accumulator globals (`DAT_011f95ec`, `DAT_011f4748+8`);
+* BSFadeNode registration through the culler's accumulator instead of the global.
+
+**Gate.**
+* Switch build only, and every MT1 hunk is behind the engine's own flag (`DAT_011f94b4`, the copy of bMTRendering).
+* Off by default: ini.cpp's Switch defaults do not set bMTRendering until the checks below pass.
+* With `bMTRendering=0` the output must be byte-identical to the build without MT1. The fuzz / equivalence farms keep
+  running with it off.
+
+**Checks, in place of the MSVC byte check** (MT1 hunks are exempt from `msvc_check.py`; S1b adds the
+"exempt, gated" class to the .s1b tooling):
+1. GCC census clean on every patched unit.
+2. tests/s15 mtqemu on the real culling and accumulator objects (not the `stages` protocol model).
+3. The hb.c race checker: no race on the accumulators, batch renderers or the current-accumulator globals.
+4. Frame equivalence: the same scene with MT1 on and with it off gives the same accumulator contents and the same
+   draw list.
+
+**Owners.** S1b owns patches/ and the tooling; S15-threads writes the MT1 patches and their tests.

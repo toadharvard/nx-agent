@@ -73,6 +73,14 @@ CONFIG = [
     ('CENSUS', '1', '0: skip the -fsyntax-only census'),
     ('OVERRIDE', 'auto', 'fnvlink resolve --override table (native replacements): auto = the port\'s own, built by '
                          'tools/link/overrides/build.sh in the link stage; none = off; or a table'),
+    ('LINK_OVERRIDES', 'auto', 'native replacements by name, added to OVERRIDE\'s: render = render/native/overrides.tsv '
+                               'with --override-lib libnxrender.a (RENDER_LIB; the guest links the archive, the engine\'s '
+                               'D3D9 entry points go to the native renderer); auto = render when the toolchain stage '
+                               'has DEVKITPRO and fnvnx-a64 (a build that links a guest: the full build), else none; '
+                               'none = the pristine path (fuzz, equivalence, the link farm)'),
+    ('RENDER_LIB', '', 'libnxrender.a for LINK_OVERRIDES=render; empty: built by render/native/n1/build.sh in the link '
+                       'stage with the toolchain stage\'s DEVKITPRO and fnvnx-a64 and UAM (the environment\'s, else '
+                       'toolchain/uam/build.sh, cached next to the link stage)'),
     ('EXTERN_TEXT', 'auto', 'fnvlink resolve --extern-text list: auto = made from the tree\'s units.json by '
                             'tools/pipeline/extern_text.py (S4\'s addr_ids.txt), none = off, or a file'),
     ('MSVC_OBJS', '', 'fnvlink resolve --msvc-objs: pristine MSVC 2008 objects (S11) for S2b\'s vtable slots'),
@@ -90,7 +98,7 @@ CONFIG = [
                        'toolchain stage (toolchain/vorbis/build.sh), none = without, or a prefix'),
     ('BOOT', '0', '1: the boot stage (emulated boot of the game guest + boot frontier) runs with `all`; it also runs '
                   'when named as a goal (make boot)'),
-    ('BOOT_IMAGE', 'auto', 'data image for the emulated boot (sdmc:/fnvnx/game/FalloutNV.exe): auto = S14\'s '
+    ('BOOT_IMAGE', 'auto', 'data image for the emulated boot (sdmc:/switch/fnv/FalloutNV.exe): auto = S14\'s '
                            'synthesized image when PRISTINE_OBJS is given, else none; none = no image (all-zero '
                            'data); or an exe file'),
     ('PRISTINE_OBJS', '', 'MSVC 2008 objects of the pristine decomp (S11, tools/equiv: u<index>.obj), for S14\'s '
@@ -98,8 +106,12 @@ CONFIG = [
     ('BOOT_CENSUS', '', 'census units.tsv the frontier reports the current compile status from (empty: this '
                         'build\'s census when it ran)'),
     ('NINE', '0', '1: Gallium Nine (render/nine) in the host module; 0: no D3D9 backend in the host (null device)'),
+    ('HOST_BACKEND', 'native', 'host module: native = host.c without console + the native deko3d renderer (render/native/host, '
+                       'toolchain/host/build_native.sh; owner decision); plain = host.c with its text console (opt-in); '
+                       'NINE=1 overrides both with the Nine host'),
     ('NINE_SRC', '', 'directory holding mesa/ and libdrm_nouveau/ checkouts to copy instead of cloning'),
-    ('PROGRAM_ID', '0100000000000000', 'title whose exefs is overridden (SD path atmosphere/contents/<id>/)'),
+    ('PROGRAM_ID', '0100000000000000', 'program id written into main.npdm; ldr replaces it with the title the launcher '
+                                       'fnv.nro restarts, so the placeholder is fine (NX1)'),
     ('TESTS', 'all', 'comma list of test suites to run (names in docs/BUILD.md), all, or none'),
     ('EMU_TIMEOUT', '3000', 'seconds for the emulated boot of the game guest (boot stage)'),
     ('EMU_BUDGET', '6000000000', 'instructions per scheduling slice of the emulated boot (S5\'s value for game boots: '
@@ -1540,6 +1552,15 @@ def link_tool_inputs(b):
             b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
 
 
+def override_id(b):
+    """OVERRIDE in the Link fingerprint: auto and off are values (their sources are in link_tool_inputs), a table is
+    its content (V1 OVR-F1: file_hash of `auto` and `none` was None for both, so switching never relinked)."""
+    v = b.cfg['OVERRIDE']
+    if v in ('auto', 'none', ''):
+        return 'override:' + (v or 'none')
+    return file_hash(os.path.abspath(v))
+
+
 def extern_text_id(b):
     et = b.cfg['EXTERN_TEXT']
     if et == 'auto':
@@ -1556,9 +1577,80 @@ def msvc_objs_id(b, key='MSVC_OBJS'):
 
 
 def link_exe(b):
-    """The player's exe fnvlink bodies reads (S2d exe-addr): FNVNX_EXE, else a BOOT_IMAGE file, else ''."""
+    """The player's FalloutNV.exe for the link (S2c's resolve --exe: image vftables paired by its RTTI class, slot
+    fill; S2d's bodies --exe exe-addr): FNVNX_EXE, else a BOOT_IMAGE that is a file; '' when there is none.
+    Agent-only data (D3): it is read, never copied into the build's outputs."""
     exe = os.environ.get('FNVNX_EXE') or (b.cfg['BOOT_IMAGE'] if os.path.isfile(b.cfg['BOOT_IMAGE']) else '')
     return os.path.abspath(exe) if exe and os.path.isfile(exe) else ''
+
+
+RENDER_LIB_SOURCES = ('render/native/front', 'render/native/capture', 'render/native/n1', 'render/native/include',
+                      'render/native/shaders', 'toolchain/include', 'toolchain/guest')
+
+
+def link_overrides_mode(b):
+    """LINK_OVERRIDES resolved: render or none. auto: render when the toolchain stage provides DEVKITPRO and
+    fnvnx-a64 (the full build: its guest needs the native renderer, the boot stops at renderer init without it),
+    none otherwise (TC_DL=none: the link farm, fuzz and equivalence take the pristine path)."""
+    lo = b.cfg['LINK_OVERRIDES'] or 'none'
+    if lo == 'auto':
+        return 'render' if b.art('toolchain', 'devkitpro') and b.art('toolchain', 'prefix') else 'none'
+    return lo
+
+
+def link_overrides(b):
+    """(table, archive, id for the fingerprint) of LINK_OVERRIDES: render -> S6n's render/native/overrides.tsv and
+    libnxrender.a (RENDER_LIB, else '' = built by the stage from RENDER_LIB_SOURCES); empty -> ('', '', ...). They
+    are added to OVERRIDE's rows (override_id)."""
+    lo = link_overrides_mode(b)
+    if lo == 'none':
+        return ('', '', 'link-overrides:none')
+    if lo != 'render':
+        raise StageError('LINK_OVERRIDES=%s: only render (or empty) is known' % lo)
+    tsv = os.path.join(ROOT, 'render', 'native', 'overrides.tsv')
+    lib = os.path.abspath(b.cfg['RENDER_LIB']) if b.cfg['RENDER_LIB'] else ''
+    return (tsv, lib, 'render:%s:%s' % (file_hash(tsv), file_hash(lib) if lib else
+                                       'built:' + tree_hash(*RENDER_LIB_SOURCES)))
+
+
+def build_render_lib(b, r, d):
+    """libnxrender.a for LINK_OVERRIDES=render without RENDER_LIB: render/native/n1/build.sh <d>/render-n1 with the
+    toolchain stage's DEVKITPRO and fnvnx-a64 and the environment's UAM (render/native/env.sh --print)."""
+    dkp, prefix, uam = b.art('toolchain', 'devkitpro'), b.art('toolchain', 'prefix'), os.environ.get('UAM', '')
+    if not dkp or not prefix:
+        raise StageError('LINK_OVERRIDES=render needs RENDER_LIB=<libnxrender.a>, or the toolchain stage\'s DEVKITPRO '
+                         'and fnvnx-a64 to build it (LINK_OVERRIDES=none: the pristine path)')
+    if not uam or not os.access(uam, os.X_OK):
+        # no render machine environment (the farms): build uam at its pin once per container, in a cache every build
+        # directory of the container shares ($FNVNX_TOOL_CACHE, default ~/.cache/fnvnx; toolchain/uam/build.sh stamps
+        # the pin); only a failed build is an error
+        up = os.path.join(os.environ.get('FNVNX_TOOL_CACHE') or os.path.join(os.path.expanduser('~'), '.cache', 'fnvnx'),
+                          'uam')
+        b.say('link: uam (toolchain/uam/build.sh, once per container)')
+        if b.sh(['bash', os.path.join(ROOT, 'toolchain', 'uam', 'build.sh'), up], r['log'], timeout=3600):
+            raise StageError('LINK_OVERRIDES=render: building uam failed (toolchain/uam/build.sh, see %s)' % b.rel(r['log']))
+        uam = os.path.join(up, 'bin', 'uam')
+    out = os.path.join(d, 'render-n1')
+    b.say('link: libnxrender.a (render/native/n1/build.sh)')
+    path = os.pathsep.join([os.path.join(dkp, 'tools', 'bin'), os.path.join(prefix, 'bin'), os.environ.get('PATH', '')])
+    b.sh(['bash', os.path.join(ROOT, 'render', 'native', 'n1', 'build.sh'), out], r['log'],
+         env=b.env({'DEVKITPRO': dkp, 'UAM': uam, 'PATH': path}), check=True, timeout=3600)
+    lib = os.path.join(out, 'libnxrender.a')
+    with open(lib + '.abi', 'w') as f:   # the nxgpu ABI it was built against (NX1: the package checks host == guest)
+        f.write(file_hash(GPU_ABI_H) + '\n')
+    return lib
+
+
+GPU_ABI_H = os.path.join(ROOT, 'render', 'native', 'include', 'nx', 'gpu_abi.h')
+
+
+def render_lib_abi(lib):
+    """The gpu_abi.h hash a libnxrender.a was built against: its <lib>.abi sidecar (build_render_lib writes it), else
+    'unknown' (an external RENDER_LIB without one: its ABI cannot be shown to match the host's)"""
+    try:
+        return open(lib + '.abi').read().strip() or 'unknown'
+    except OSError:
+        return 'unknown'
 
 
 def objects_map(objects_tsv):
@@ -1603,8 +1695,8 @@ class Link(Stage):
 
     def fingerprint(self, b):
         return ['link-v3', link_tool_inputs(b), up_id(b, 'compile'), up_id(b, 'prepare'),
-                file_hash(b.cfg['OVERRIDE']), extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
-                game_cxx_id(b), 'exe:%s' % file_hash(link_exe(b))]
+                override_id(b), link_overrides(b)[2], extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
+                game_cxx_id(b), 'exe:%s' % (file_hash(link_exe(b)) or 'none')]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'link', 'out', 'aliases.ld'))
@@ -1629,22 +1721,57 @@ class Link(Stage):
         else:
             r.note('EXTERN_TEXT=none: the referenced .text addresses without a definition get no E entries (the '
                    'hand flow passes S4\'s addr_ids.txt)')
+        ov_tsv = ''
         if b.cfg['OVERRIDE'] == 'auto':
             # the port's native replacements (tools/link/overrides: the variadic logger 0x00703c00, ...); their
             # sources are in link_tool_inputs (tools/link)
             ovd = os.path.join(d, 'overrides')
             b.sh(['bash', os.path.join(ROOT, 'tools', 'link', 'overrides', 'build.sh'), ovd], r['log'],
                  env=b.env(), check=True)
-            args += ['--override', os.path.join(ovd, 'override.tsv')]
+            ov_tsv = os.path.join(ovd, 'override.tsv')
         elif b.cfg['OVERRIDE'] not in ('', 'none'):
-            args += ['--override', os.path.abspath(b.cfg['OVERRIDE'])]
+            ov_tsv = os.path.abspath(b.cfg['OVERRIDE'])
+        # LINK_OVERRIDES=render: S6n's table and libnxrender.a, added to OVERRIDE's rows (fnvlink reads one table);
+        # the guest stage links the archive (apply copies only objects into fixed/)
+        rv_tsv, rv_lib, _ = link_overrides(b)
+        if rv_tsv:
+            rv_lib = rv_lib or build_render_lib(b, r, d)
+            if not os.path.isfile(rv_lib):
+                raise StageError('LINK_OVERRIDES=render: no %s' % rv_lib)
+            r.artifact('override_lib', rv_lib)
+            r['render_abi'] = render_lib_abi(rv_lib)
+            both = os.path.join(d, 'overrides_all.tsv')
+            with open(both, 'w', encoding='utf-8', errors='surrogateescape') as f:
+                for t_ in (ov_tsv, rv_tsv):
+                    if t_:
+                        f.write(open(t_, encoding='utf-8', errors='surrogateescape').read().rstrip('\n') + '\n')
+            args += ['--override', both, '--override-lib', rv_lib]
+        elif ov_tsv:
+            args += ['--override', ov_tsv]
+        r['link_overrides'] = (b.cfg['OVERRIDE'] or 'none') + ('+render' if rv_tsv else '')
         for opt, key in (('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
                          ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:
                 args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
-        r['resolve_options'] = [b.rel(a) for a in args[3:]]
+        # S2c: the player's exe (RTTI pairing and slot fill); --exe none keeps resolve off FNVNX_EXE / PLAYER_EXE
+        # when the stage has no exe, so the fingerprint says what was used
+        exe = link_exe(b)
+        args += ['--exe', exe or 'none']
+        r.metric('link_exe', 1 if exe else 0)
+        r['resolve_options'] = [b.rel(a) if a != exe else '<player exe>' for a in args[3:]]
         seed_link_out(b, r, out)
-        env = b.env({'CXX': probe_cxx(b, d)})
+        # the whole-program ordering keys (S12, docs/ORDERING.md) for the code the link emits (vtables.py slot
+        # functions, bodies.py bodies: compile.sh --print-flags): ORDER_KEYS (link_job.sh: keys_job's k/<c12>),
+        # else computed here like compile.sh does (KEYS_ONLY=1, cached per unit in <link>/keys)
+        keys = os.environ.get('ORDER_KEYS', '')
+        if not keys:
+            kd = os.path.join(d, 'keys')
+            b.say('link: whole-program ordering keys (compile.sh KEYS_ONLY=1, cached)')
+            b.sh(['bash', os.path.join(ROOT, 'tools', 'link', 'compile.sh'), tree, kd, '', str(b.jobs)], r['log'],
+                 env=b.env({'KEYS_ONLY': '1', 'CXX': probe_cxx(b, d)}), check=True)
+            keys = os.path.join(kd, 'order.keys')
+        r['order_keys'] = b.rel(keys) if keys != 'unit' else 'unit'
+        env = b.env({'CXX': probe_cxx(b, d), 'ORDER_KEYS': keys})
         log = r['log']
 
         def resolve(n):
@@ -1822,6 +1949,7 @@ class Guest(Stage):
                           'toolchain/tools', 'platform', 'loader', 'startup', 'shim/include', 'tests/s5/dynbrk.py'),
                 tree_hash('render/nine') if b.cfg['NINE'] == '1' else '',
                 up_id(b, 'link'), up_id(b, 'toolchain'), b.cfg['NINE'], b.art('toolchain', 'vorbis'), b.cfg['GAME_NEW'],
+                file_hash(b.art('link', 'override_lib')),
                 b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
 
     def outputs_present(self, b):
@@ -1841,6 +1969,10 @@ class Guest(Stage):
         extra = {'FNVNX_TC': b.art('toolchain', 'prefix'), 'D3D9': 'external' if b.cfg['NINE'] == '1' else 'null',
                  'GAME_NEW': b.cfg['GAME_NEW']}
         r['d3d9'], r['game_new'] = extra['D3D9'], extra['GAME_NEW']
+        olib = b.art('link', 'override_lib')
+        if olib:   # LINK_OVERRIDES=render: the replacements' archive (the fixed objects reference its symbols)
+            extra['EXTRA_OBJS'] = (os.environ.get('EXTRA_OBJS', '') + ' ' + olib).strip()
+            r['override_lib'] = b.rel(olib)
         nine_game = scr == nine_game_script()
         prod = d                       # where the script leaves fnvnx.elf / guest.nso / undefined.txt
         if nine_game:
@@ -2050,7 +2182,7 @@ class Boot(Stage):
         image = boot_image(b, r, d)
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'
         if image:
-            argv += ['--file', 'fnvnx/game/FalloutNV.exe=' + image]
+            argv += ['--file', 'switch/fnv/FalloutNV.exe=' + image]
         elog = os.path.join(d, 'emu.log')
         open(elog, 'w').close()
         tmo = int(b.cfg['EMU_TIMEOUT'])
@@ -2210,9 +2342,11 @@ class Host(Stage):
     soft = ('nine',)
 
     def fingerprint(self, b):
-        return ['host-v2', tree_hash('toolchain/host', 'toolchain/include', 'toolchain/npdm', 'toolchain/tools',
-                                     'tests/s5/hello', 'startup'),
+        return ['host-v3', tree_hash('toolchain/host', 'toolchain/include', 'toolchain/npdm', 'toolchain/tools',
+                                     'tests/s5/hello', 'startup', 'toolchain/deko3d'),
                 tree_hash('render/nine') if b.cfg['NINE'] == '1' else '',
+                tree_hash('render/native/host', 'render/native/front', 'render/native/include')
+                if b.cfg['HOST_BACKEND'] == 'native' and b.cfg['NINE'] != '1' else '', b.cfg['HOST_BACKEND'],
                 up_id(b, 'toolchain'), b.cfg['NINE'], up_id(b, 'nine') if b.cfg['NINE'] == '1' else '',
                 b.cfg['PROGRAM_ID']]
 
@@ -2235,6 +2369,16 @@ class Host(Stage):
             b.sh(['bash', os.path.join(ROOT, 'render', 'nine', 'switch_host.sh'), nh], r['log'],
                  env=b.env({'NINE': b.art('nine', 'work')}), check=True)
             shutil.copyfile(os.path.join(nh, 'host.elf'), os.path.join(d, 'host.elf'))
+        elif b.cfg['HOST_BACKEND'] == 'native':
+            b.say('host: native renderer host module (toolchain/host/build_native.sh, deko3d)')
+            # libdeko3d at its pins, cached across builds next to the host stage (toolchain/deko3d/build.sh)
+            b.sh(['bash', os.path.join(ROOT, 'toolchain', 'host', 'build_native.sh'), os.path.join(d, 'native'),
+                  os.path.join(d, 'deko3d')], r['log'], check=True, timeout=1800)
+            r['method'] = 'NX1 toolchain/host/build_native.sh (host.c -DFNVNX_HOST_NO_CONSOLE + render/native/host + deko3d)'
+            r['gpu_abi'] = file_hash(GPU_ABI_H)   # the guest's libnxrender.a must be built against the same header
+            shutil.copyfile(os.path.join(d, 'native', 'host.elf'), os.path.join(d, 'host.elf'))
+        elif b.cfg['HOST_BACKEND'] != 'plain':
+            raise StageError('HOST_BACKEND must be native or plain, got %r' % b.cfg['HOST_BACKEND'])
         else:
             hb = os.path.join(d, 's5-hello')
             b.say('host: LP64 host module (tests/s5/hello/build.sh recipe)')
@@ -2254,29 +2398,32 @@ class Host(Stage):
             r.metric('host_%s_bytes' % n.replace('.', '_'), os.path.getsize(os.path.join(d, n)))
         r['output_id'] = sha(file_hash(os.path.join(d, 'main')), file_hash(os.path.join(d, 'main.npdm')))
         r['summary'] = '%s; main (NSO) %s, main.npdm %s' % (
-            'Nine' if b.cfg['NINE'] == '1' else 'no D3D9 backend', human(os.path.getsize(os.path.join(d, 'main'))),
+            'Nine' if b.cfg['NINE'] == '1' else 'native renderer (deko3d)' if b.cfg['HOST_BACKEND'] == 'native'
+            else 'plain host, no GPU backend', human(os.path.getsize(os.path.join(d, 'main'))),
             human(os.path.getsize(os.path.join(d, 'main.npdm'))))
 
 
 # -------------------------------------------------------------------------------------------------- 11 package
 
 class Package(Stage):
+    """The SD tree of NX1 (toolchain/include/fnvnx/sdlayout.h): switch/fnv/{fnv.nro, fnv-exefs.nsp, guest.nso}. fnv.nro
+    is the launcher (toolchain/nro/build.sh); started by title takeover it installs fnv-exefs.nsp as the override of
+    that title and restarts it, so the package holds no program id. Then tests/s5/check_package.py and the NX1
+    device-readiness checks (tests/nx1/run.py) on the tree."""
     name = 'package'
     deps = ('host',)
     soft = ('guest',)
     prov = ('guest',)      # only when the guest is packaged
 
     def fingerprint(self, b):
-        return ['package-v1', up_id(b, 'host'), up_id(b, 'guest'), b.cfg['PROGRAM_ID'], tree_hash('toolchain/tools')]
+        return ['package-v2', up_id(b, 'host'), up_id(b, 'guest'), b.cfg['PROGRAM_ID'], tree_hash('toolchain/tools'),
+                tree_hash('toolchain/nro', 'toolchain/include', 'tests/nx1', 'tests/s5/check_package.py')]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'package', 'exefs.nsp'))
 
     def run(self, b, r):
         d = b.sdir('package')
-        pid = b.cfg['PROGRAM_ID'].lower()
-        if not re.fullmatch(r'[0-9a-f]{16}', pid):
-            raise StageError('PROGRAM_ID must be 16 hex digits, got %r' % pid)
         shutil.rmtree(os.path.join(d, 'sd'), ignore_errors=True)
         tools = os.path.join(ROOT, 'toolchain', 'tools')
         hd = b.sdir('host')
@@ -2285,29 +2432,72 @@ class Package(Stage):
               'main.npdm=' + os.path.join(hd, 'main.npdm')], r['log'], check=True)
         rc, lst = b.capture([PY, '-I', os.path.join(tools, 'build_pfs0.py'), '--list', nsp])
         r['pfs0'] = lst.splitlines()[:6]
+        # the launcher (and the switch-tools reference packer for check 1's round trip, ~20 s, best effort)
+        nd = os.path.join(d, 'nro')
+        ref = os.path.join(d, 'ref')
+        ref_bin = os.path.join(ref, 'bin')
+        if b.sh(['bash', os.path.join(ROOT, 'tests', 'nx1', 'ref_tools.sh'), ref], r['log'], timeout=300):
+            r.note('tests/nx1/ref_tools.sh failed: check 1 runs without the switch-tools round trip')
+            ref_bin = None
+        # the commit this package is built from: the NRO's NACP version and the stage record carry it, and
+        # full_job.sh's publish_nro refuses to label any other package nro/<commit12> (V1 NX1 P1)
+        r['port_commit'] = b.head
+        nro_rc = b.sh(['bash', os.path.join(ROOT, 'toolchain', 'nro', 'build.sh'), nd] + ([b.head[:12]] if b.head else []),
+                      r['log'],
+                      env=b.env({'NX1_REF_BIN': ref_bin}), timeout=600)
+        nro = os.path.join(nd, 'fnv.nro')
+        if nro_rc or not os.path.isfile(nro):
+            r.note('toolchain/nro/build.sh exited %d: no fnv.nro' % nro_rc)
+            r['status'] = 'warn'
+            nro = None
         sd = os.path.join(d, 'sd')
-        cdir = os.path.join(sd, 'atmosphere', 'contents', pid)
-        os.makedirs(cdir)
-        shutil.copyfile(nsp, os.path.join(cdir, 'exefs.nsp'))
-        os.makedirs(os.path.join(sd, 'fnvnx'))
+        fnv = os.path.join(sd, 'switch', 'fnv')
+        os.makedirs(fnv)
+        shutil.copyfile(nsp, os.path.join(fnv, 'fnv-exefs.nsp'))
+        if nro:
+            shutil.copyfile(nro, os.path.join(fnv, 'fnv.nro'))
         gnso = b.art('guest', 'guest.nso') if b.ok('guest') else None
         if gnso and os.path.isfile(gnso):
-            shutil.copyfile(gnso, os.path.join(sd, 'fnvnx', 'guest.nso'))
+            shutil.copyfile(gnso, os.path.join(fnv, 'guest.nso'))
+        with open(os.path.join(fnv, 'README.txt'), 'w') as f:
+            f.write('fnv-nx: copy your own FalloutNV.exe and Data/ folder into this folder (sdmc:/switch/fnv/).\n'
+                    'Start: hold R while starting any installed game, then pick fnv-nx in hbmenu.\n'
+                    'Logs for a bug report: launcher.log, host.log, crash.log in this folder.\n')
         files = []
         for dp, _, fn in os.walk(sd):
             for n in sorted(fn):
                 p = os.path.join(dp, n)
                 files.append((os.path.relpath(p, sd), os.path.getsize(p)))
         r['sd_files'] = files
+        gelf = b.art('guest', 'fnvnx.elf') if b.ok('guest') else None
+        argv = [PY, '-I', os.path.join(ROOT, 'tests', 's5', 'check_package.py'), sd]
+        if gelf and os.path.isfile(gelf):
+            argv += ['--elf', gelf]
+        r['check_package_rc'] = b.sh(argv, r['log'], timeout=600)
+        r.metric('check_package_rc', r['check_package_rc'])
+        nx1 = os.path.join(d, 'nx1.json')
+        argv = [PY, '-I', os.path.join(ROOT, 'tests', 'nx1', 'run.py'), '--build', b.out, '--json', nx1]
+        if ref_bin:
+            argv += ['--ref-bin', ref_bin]
+        b.sh(argv, r['log'], timeout=1200)
+        try:
+            nj = json.load(open(nx1))
+            r.metric('nx1_open', nj['open'])
+            r['nx1'] = [(c['n'], c['check'], c['status'], c['note'][:160]) for c in nj['checks']]
+            r.artifact('nx1.json', nx1)
+        except (OSError, ValueError, KeyError):
+            r.note('tests/nx1/run.py wrote no nx1.json')
         r.metric('package_exefs_bytes', os.path.getsize(nsp))
         r.metric('package_sd_bytes', sum(s for _, s in files))
         r.artifact('exefs.nsp', nsp)
         r.artifact('sd', sd)
-        r['output_id'] = sha(file_hash(nsp), file_hash(gnso))
-        r['summary'] = 'exefs.nsp %s; SD tree %s (%d files) for program id %s' % (
-            human(os.path.getsize(nsp)), human(sum(s for _, s in files)), len(files), pid)
-        if pid == '0100000000000000':
-            r.note('PROGRAM_ID is the placeholder 0100000000000000: set PROGRAM_ID=<installed title> for hardware')
+        if nro:
+            r.artifact('nro', nd)
+        r['output_id'] = sha(file_hash(nsp), file_hash(gnso), file_hash(nro))
+        r['summary'] = 'SD tree switch/fnv %s (%d files); fnv.nro %s; check_package exit %d; nx1 open %s' % (
+            human(sum(s for _, s in files)), len(files), human(os.path.getsize(nro)) if nro else 'MISSING',
+            r['check_package_rc'], r.get('metrics', {}).get('nx1_open', '?'))
+        if r['check_package_rc']:
             r['status'] = 'warn'
         if not gnso:
             r.note('no guest.nso (guest stage did not succeed): SD tree holds the host only')
@@ -2662,6 +2852,8 @@ def parse_args(argv):
     cfg = {k: os.environ.get(k, d) or d for k, d, _ in CONFIG}
     for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'NINE_SRC', 'FORCE'):
         cfg[k] = os.environ.get(k, '')
+    if 'OVERRIDE' in os.environ:   # an empty OVERRIDE turns the overrides off, as documented (V1 OVR-E1)
+        cfg['OVERRIDE'] = os.environ['OVERRIDE']
     targets = []
     for a in argv:
         if '=' in a and re.match(r'^[A-Z_][A-Z0-9_]*=', a):

@@ -24,7 +24,8 @@ int nx_replay(const NxGpuApi* api, const uint8_t* d, size_t size, NxReplayStats*
     if (size < 8 || memcmp(d, "NXCAP\0\0\1", 8)) FAIL("not a capture");
     // .nxcap is outside input (a console capture): every size is checked in 64 bits against its record and these
     // bounds before it is allocated, copied or handed to the backend; ids are range-checked before any table lookup.
-    enum : uint32_t { kMax = 4096, kMaxMem = 256u << 20, kMaxDim = 8192, kMaxTexels = 4096u * 4096u };
+    enum : uint32_t { kMax = 4096, kMaxMem = 256u << 20, kMaxDim = 8192, kMaxTexels = 4096u * 4096u,
+                      kMaxDrawVerts = 1u << 22, kMaxInstances = 1u << 16 };
     static constexpr uint64_t kMaxResident = 1ull << 30;
     static uint32_t memMap[257], memSize[257], imgMap[kMax + 2], smpMap[kMax + 1], shMap[kMax + 1];
     static uint8_t* memBuf[257];
@@ -130,6 +131,12 @@ int nx_replay(const NxGpuApi* api, const uint8_t* d, size_t size, NxReplayStats*
                 case NxOp_BeginPass: if (argc >= 2) { a[0] = img(a[0]); a[1] = img(a[1]); } break;
                 case NxOp_BindUbo: if (argc >= 3) a[2] = mem(a[2]); break;
                 case NxOp_BindVtx: case NxOp_BindIdx: if (argc >= 1) a[0] = mem(a[0]); break;
+                case NxOp_Draw: case NxOp_DrawIndexed:   // the same bounds as NXD9 draws (8.4); V1 H1 hung on 0x7fffffff instances
+                    if (argc >= 3 && (a[1] > kMaxDrawVerts || a[2] > kMaxInstances || (uint64_t)a[1] * a[2] > kMaxDrawVerts)) {
+                        const uint32_t nvx = a[1], ninst = a[2];
+                        free(w); FAIL("SUBM: draw at word %u: %u vertices x %u instances over the limit", i, nvx, ninst);
+                    }
+                    break;
                 case NxOp_BindTextures:
                     for (uint32_t t = 0; argc >= 3 && t < a[2] && 3 + t < argc; t++) {
                         uint32_t hd = a[3 + t], img = hd & 0xFFFFF, smp = hd >> 20;

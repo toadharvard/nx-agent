@@ -46,11 +46,15 @@ CASES = [
      'extern "C" void br_va_stack(int, int, int, int, int, int, int, int, int, int);\n'
      'static int t_va_stack() { br_va_stack(1, 1, 1, 1, 1, 1, 1, 1, 1, 2); return g_t == 1 + 36 + 18 ? 0 : 1; }'),
     # doubles and 64-bit integers in the tail
-    ('va_wide', '?u@@YAXHN_J@Z', '?u@@YAXHZZ', 'same',
+    ('va_wide', '?u@@YAXHNN@Z', '?u@@YAXHZZ', 'same',
      'extern "C" double g_u; double g_u; extern "C" void def_va_wide(int a0, ...) { va_list a; va_start(a, a0);'
-     ' double d = va_arg(a, double); long long q = va_arg(a, long long); va_end(a); g_u = a0 + d + (double)q; }',
-     'extern "C" void br_va_wide(int, double, long long);\n'
-     'static int t_va_wide() { br_va_wide(1, 0.5, 1LL << 40); return g_u == 1.5 + 1099511627776.0 ? 0 : 1; }'),
+     ' double d = va_arg(a, double); double e = va_arg(a, double); va_end(a); g_u = a0 + d + e; }',
+     'extern "C" void br_va_wide(int, double, double);\n'
+     'static int t_va_wide() { br_va_wide(1, 0.5, 0.25); return g_u == 1.75 ? 0 : 1; }'),
+    # V2 VA3/VA4: widths that differ from the body's va_arg are manual
+    ('va_w8', '?q@@YAXH_J@Z', '?q@@YAXHZZ', 'manual', '', ''),
+    ('va_w4', '?r@@YAXHHH@Z', '?r@@YAXHZZ', 'manual', '', ''),
+    ('va_esc', '?e@@YAXHH@Z', '?e@@YAXHZZ', 'manual', '', ''),
     # both variadic, a named bool against an int: extended in place, the anonymous part passes through
     ('va_both', '?g@@YAHH_NPBDZZ', '?g@@YAHHHPBDZZ', 'bridge',
      'extern "C" int def_va_both(int a0, int b, const char *s, ...) { va_list a; va_start(a, s);'
@@ -63,23 +67,23 @@ CASES = [
      ' g_h = a0 + va_arg(a, int); va_end(a); }',
      'extern "C" void br_va_narrow(int, int);   // the short travels with junk above bit 15\n'
      'static int t_va_narrow() { br_va_narrow(10, 0x5ffff); return g_h == 9 ? 0 : 1; }'),
-    # the decomp's unprototyped declaration `int f(...)` against a fixed definition: integers and pointers
-    ('unproto', '?p@@YAHZZ', '?p@@YAXPBDH@Z', 'same',
-     'extern "C" int g_p; int g_p; extern "C" void def_unproto(const char *s, int n) { g_p = (s[0] == \'k\') + n; }',
-     'extern "C" int br_unproto(...);\n'
-     'static int t_unproto() { br_unproto("k", 41); return g_p == 42 ? 0 : 1; }'),
-    # both variadic, the definition names two of the reference's anonymous arguments
-    ('va_more', '?q@@YAHPADZZ', '?q@@YAHPADHPBDZZ', 'same',
-     'extern "C" int def_va_more(char *d, int n, const char *f, ...) { va_list a; va_start(a, f);'
-     ' int x = va_arg(a, int); va_end(a); d[0] = f[0]; return n + x; }',
-     'extern "C" int br_va_more(char *, ...);\n'
-     'static int t_va_more() { char b[2] = {0, 0}; return br_va_more(b, 40, "z", 2) == 42 && b[0] == \'z\' ? 0 : 1; }'),
+    # definition parameters in the reference's anonymous part: the call site's types decide (V1 VA-U1..U4: a long
+    # long, a double, a struct by value or a struct { float } give other words on x86 than registers on AArch64)
+    ('unproto', '?p@@YAHZZ', '?p@@YAXPBDH@Z', 'manual', '', ''),
+    ('va_more', '?q@@YAHPADZZ', '?q@@YAHPADHPBDZZ', 'manual', '', ''),
     # not bridgeable without the call site's types or another convention
     ('unproto_double', '?p2@@YAHZZ', '?p2@@YAXN@Z', 'manual', '', ''),
     ('va_float', '?k@@YAXHM@Z', '?k@@YAXHZZ', 'manual', '', ''),
     ('va_beyond', '?d@@YAXPBDZZ', '?d@@YAXPBD0@Z', 'manual', '', ''),
     ('va_stdcall', '?s@@YGXH@Z', '?s@@YAXHZZ', 'manual', '', ''),
 ]
+
+
+# what vacall records of each variadic definition's body (fnvnx_vacall VADEF): the va_arg types, or 'none' / 'escape'
+VA_READS = {'va_def': ('reads', ('P',)), 'va_stack': ('reads', ('I32',)), 'va_wide': ('reads', ('F64', 'F64')),
+            'va_both': ('reads', ('I32',)), 'va_narrow': ('reads', ('I32',)), 'va_more': ('reads', ('I32',)),
+            'va_w8': ('reads', ('I32', 'I32')), 'va_w4': ('reads', ('I64',)), 'va_esc': ('escape',),
+            'va_float': ('reads', ('F64',))}
 
 
 def main():
@@ -89,7 +93,7 @@ def main():
     asm, defs, checks, calls = ['    .text'], [], [], []
     for name, rm, dm, want, cdef, ccheck in CASES:
         rs, ds = sigs.parse_msvc(rm, dem[rm]), sigs.parse_msvc(dm, dem[dm])
-        v = abi.compare(rs, ds)
+        v = abi.compare(rs, ds, va_reads=VA_READS.get(name))
         if v.kind != want:
             print('FAIL %s: verdict %s (want %s) %s %s' % (name, v.kind, want, v.classes, v.notes))
             fails += 1

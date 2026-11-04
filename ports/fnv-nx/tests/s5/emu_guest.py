@@ -39,8 +39,12 @@ from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM6
 PAGE = 0x1000
 HOST_PAGE = 0x3F000000          # host API table + stubs (below 4 GiB, as every address in a 32-bit AS)
 STACKS_TOP, STACK_SIZE, MAX_THREADS = 0x3E000000, 0x40000, 32
-HEAP_BASE, HEAP_SIZE = 0x30000000, 0x4000000
-HEAP_BASE_ALT = 0x34000000      # when the guest itself runs at 0x30000000 (a pinned guest at its link base)
+# The guest heap. On the console the host gives the guest all memory but its own 64 MiB (toolchain/host/host.c), and
+# the game's MemoryManager reserves its heaps up front (MemoryHeaps of 200 and 64 MiB: VirtualAlloc, carved from
+# the guest heap by os_vm_reserve), so 64 MiB here stopped the boot in InitializeHeaps. 1 GiB above the stacks and
+# the host page keeps every guest pointer below 2 GiB.
+HEAP_BASE, HEAP_SIZE = 0x40000000, 0x40000000
+HEAP_BASE_ALT = 0x34000000      # when the guest itself overlaps HEAP_BASE (not with the default bases)
 RETURN_ADDR = HOST_PAGE + 0xFF0         # main thread returns here
 THREAD_END = HOST_PAGE + 0xFF8          # created threads return here
 TICK_FREQ = 19_200_000
@@ -70,7 +74,15 @@ def neg(e):
 # places threads exactly like host_v2.inc; each thread's (role, ideal core, mask, priority) is printed at the end.
 _PLACEMENT = None
 
-STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]"
+STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]|standin"
+STANDINS = os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
+TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this")   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
+
+
+def fault_table_options(path):
+    """the TABLE_OPTIONS lines of a --stub-faults table"""
+    return {line.split("#", 1)[0].split()[0] for line in open(path)
+            if line.split("#", 1)[0].split() and line.split("#", 1)[0].split()[0] in TABLE_OPTIONS}
 
 
 def parse_fault_table(path):
@@ -81,6 +93,10 @@ def parse_fault_table(path):
         f = line.split("#", 1)[0].split()
         if not f:
             continue
+        if f[0] in TABLE_OPTIONS:
+            if len(f) != 1:
+                raise ValueError(f"{path}:{k}: {f[0]} takes no arguments")
+            continue
         if f[0] == "before-winmain":   # before-winmain <function> [x0]
             if len(f) not in (2, 3):
                 raise ValueError(f"{path}:{k}: before-winmain <function> [x0]")
@@ -88,9 +104,45 @@ def parse_fault_table(path):
             continue
         action = f[1] if len(f) > 1 else "return0"
         if len(f) > 2 or not re.fullmatch(STUB_ACTIONS, action):
-            raise ValueError(f"{path}:{k}: <function> [return0 | return-this | malloc:xN | use-malloc:xN]")
+            raise ValueError(f"{path}:{k}: <function> [return0 | return-this | malloc:xN | use-malloc:xN | standin]")
         stubs.append((f[0], action))
     return stubs, pre
+
+
+def exe_slot_plan(slots, exe_slots, natives):
+    """Which trap slots of one native vtable (address point) take the function the exe's vftable names.
+    slots: [(kind 'trap' | 'native', mangled name, link address)] in slot order; exe_slots: the exe vftable's
+    targets (original addresses); natives: {original address: link address} (address map kind F).
+    GCC's slot k is the exe's slot k, except that a virtual destructor takes two slots (complete D1/D2, deleting
+    D0) where MSVC has one (the scalar deleting destructor): slots after the pair are the exe's k - 1, and the pair
+    itself is left (different calling contract). The native slots that are functions check the mapping: when more
+    of them sit in a nearby exe slot (up to 3 away) than in their own, the vtable is left whole. Another function
+    in the exe's slot alone is no evidence: the exe folds identical functions (one empty body serves many slots).
+    Returns ([(k, link address)], 'ok' | 'dtor' | 'misaligned')."""
+    d = next((k for k in range(len(slots) - 1) if re.search(r"D[12]Ev$", slots[k][1])
+              and re.search(r"D0Ev$", slots[k + 1][1])), None)
+
+    def exe_index(k):
+        if d is None or k < d:
+            return k
+        return None if k <= d + 1 else k - 1
+    agree = shifted = 0
+    for k, (kind, _, addr) in enumerate(slots):
+        e = exe_index(k)
+        if kind != "native" or e is None or e >= len(exe_slots):
+            continue
+        if natives.get(exe_slots[e]) == addr:
+            agree += 1
+        elif any(natives.get(exe_slots[j]) == addr for j in range(max(0, e - 3), min(len(exe_slots), e + 4))):
+            shifted += 1   # the function is in a nearby exe slot: the mapping is off there
+    if shifted > agree:
+        return [], "misaligned"
+    fills = []
+    for k, (kind, _, addr) in enumerate(slots):
+        e = exe_index(k)
+        if kind == "trap" and e is not None and e < len(exe_slots) and exe_slots[e] in natives:
+            fills.append((k, natives[exe_slots[e]]))
+    return fills, "ok" if d is None else "dtor"
 
 
 MILESTONES = os.path.join(HERE, "milestones.txt")
@@ -141,13 +193,15 @@ def win32_to_horizon_prio(prio):
 
 def place(cpu, seq, prio, core3=False):
     """fnvnx_place_ex(): thread_create's cpu argument -> (role name, ideal core, mask, Horizon priority); core3: the
-    core 3 opt-in (sdmc:/fnvnx/fnvnx.ini core3=1, --core3)"""
+    core 3 opt-in (sdmc:/switch/fnv/fnvnx.ini core3=1, --core3)"""
     prio = prio - (1 << 64) if prio >> 63 else prio
     table = placement_table()
     if cpu & ~0xFF == 0x100 and (cpu & 0xFF) in table:
         role = cpu & 0xFF
     elif cpu >> 63 or cpu & ~0xFF:
         role = 0
+    elif cpu >= 32 or not ((0xF if core3 else 0x7) >> cpu & 1):
+        role = 0   # a core that is not ours: the default row (placement.h, NX1)
     else:
         return ("explicit", cpu, 1 << (cpu & 31), win32_to_horizon_prio(prio))
     name, ideal, mask, hp, mask3 = table[role]
@@ -161,10 +215,10 @@ def place(cpu, seq, prio, core3=False):
 def cpu_spec(spec, ideal, mask):
     """fnvnx_cpu_spec(): thread_set_cpu's spec applied to (ideal, mask)"""
     if not spec >> 63:
-        return spec & 31, 1 << (spec & 31)
+        return (spec, 1 << spec) if spec < 3 else (ideal, mask)   # not an application core: unchanged (NX1)
     m, want = (spec >> 8) & 7, spec & 0xFF
     mask = m or mask
-    if want != 0xFF and want < 32:
+    if want != 0xFF and want < 3:
         ideal = want
     elif not mask >> ideal & 1:
         ideal = next(c for c in range(32) if mask >> c & 1)
@@ -685,18 +739,353 @@ class Emu:
     def install_fault_stubs(self, path):
         self.stub_guards, self.stubbed, self.stub_returns = {}, [], set()
         stubs, self.pre_calls = parse_fault_table(path)
-        names, actions = [n for n, _ in stubs], dict(stubs)
+        names, actions = [n for n, a in stubs if a != "standin"], dict(stubs)
+        self.standin_names = [n for n, a in stubs if a == "standin"]
         for n in names:
             a = self.code_addr(n)
             if a is None:
                 print(f"   stub-faults: {n}: not in the link")
                 continue
             self.uc.hook_add(UC_HOOK_CODE, self.on_stub_entry, user_data=(n, actions[n]), begin=a, end=a)
-        print(f"   stub-faults: {len(names)} functions stubbed, {len(self.pre_calls)} called before WinMain")
+        print(f"   stub-faults: {len(names)} functions stubbed, {len(self.standin_names)} replaced by standins.c, "
+              f"{len(self.pre_calls)} called before WinMain")
         winmain = self.code_addr("0x0086a850")
         if self.pre_calls and winmain is not None:
             self.pre_ctx = None
             self.uc.hook_add(UC_HOOK_CODE, self.on_winmain_entry, begin=winmain, end=winmain)
+
+    # -- exe vftable slots (--exe-vtables, or the line 'exe-vtables' of the --stub-faults table): a stand-in for the
+    # link filling native vtable slots from the exe's vftables (S2c). A native vtable the address map binds to an exe
+    # vftable (kind V: exe address, link symbol, address point offset) keeps a trap stub (__fnvnx_vtrap_*) in every
+    # slot whose virtual the decomp declares but defines nowhere; the exe's vftable names the function in that slot,
+    # and when the address map has a native for that address (kind F), the slot gets it (exe_slot_plan below).
+    # Applied once at __libc_init_array, after the guest's self-relocation and before any initializer.
+    def install_exe_vtables(self, addrmap, exe, elf):
+        import subprocess
+        sys.path.insert(0, os.path.join(HERE, "..", "..", "loader", "tools"))
+        import fnvnx_pe
+        img = fnvnx_pe.Image(fnvnx_pe.PE(open(exe, "rb").read()))
+        objs = {}
+        out = subprocess.run(["aarch64-linux-gnu-nm", "-S", "--defined-only", elf], capture_output=True,
+                             text=True).stdout
+        for line in out.splitlines():
+            f = line.split()
+            if len(f) == 4 and f[3].startswith("_ZTV"):
+                objs.setdefault(f[3], (int(f[0], 16), int(f[1], 16)))
+        F, V = {}, []
+        for line in open(addrmap):
+            f = line.rstrip("\n").split("\t")
+            if len(f) > 6 and f[1] == "F" and f[2] in self.code_syms:
+                F[int(f[0], 16)] = self.code_syms[f[2]]
+            elif len(f) > 6 and f[1] == "V" and f[2] in objs:
+                V.append((int(f[0], 16), f[2], int(f[6] or 0)))
+        self.exe_vt = (img, objs, F, V)
+        self.got = None
+        out = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", elf], capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            if "] .got " in line:
+                f = line.split("]", 1)[1].split()
+                self.got = (int(f[2], 16), int(f[4], 16))
+        init = self.code_addr("__libc_init_array")
+        self.uc.hook_add(UC_HOOK_CODE, self.on_exe_vtables, begin=init, end=init)
+
+    # -- --inject OBJ: an ILP32 relocatable object (e.g. a guest-side stand-in such as toolchain/game/heap_standin.c,
+    # compiled with aarch64-linux-gnu-gcc -mabi=ilp32 -O2 -c) mapped after the guest image, its calls bound to the
+    # guest's symbols; each global function it defines whose guest symbol is a trap stub of an undefined symbol
+    # (build.sh's traps: ... b __fnvnx_undef_trap) is redirected there. A real definition in the guest wins, as the
+    # object's weak definitions would at link time, except for the names in override (the 'standin' lines of the
+    # fault table), whose guest definitions are replaced. Tests a guest-side fix on a farm guest without a relink.
+    def install_inject(self, obj, elf, override=()):
+        import subprocess
+        d = open(obj, "rb").read()
+        if d[:5] != b"\x7fELF\x01":
+            raise SystemExit(f"--inject {obj}: not an ELF32 (ILP32) object")
+        shoff, = struct.unpack_from("<I", d, 0x20)
+        shentsize, shnum, shstrndx = struct.unpack_from("<HHH", d, 0x2E)
+        sh = [struct.unpack_from("<IIIIIIIIII", d, shoff + i * shentsize) for i in range(shnum)]
+        shname = lambda i: d[sh[shstrndx][4] + sh[i][0]:].split(b"\0")[0].decode()
+        place = getattr(self, "inject_place", (self.base + self.size + 0x1FFFF) & ~0xFFFF)
+        layout, blob = {}, bytearray()
+        for i, h in enumerate(sh):   # SHF_ALLOC sections: PROGBITS copied, NOBITS zeroed
+            if h[2] & 2 and h[1] in (1, 8) and h[5] and shname(i) != ".eh_frame":   # no unwinding into it
+                off = (len(blob) + max(h[8], 1) - 1) & ~(max(h[8], 1) - 1)
+                blob += b"\0" * (off - len(blob)) + (d[h[4]:h[4] + h[5]] if h[1] == 1 else b"\0" * h[5])
+                layout[i] = place + off
+        symtab = next(i for i, h in enumerate(sh) if h[1] == 2)
+        strs = sh[sh[symtab][6]][4]
+        syms = []
+        for k in range(sh[symtab][5] // 16):
+            name_off, value, _, info, _, shndx = struct.unpack_from("<IIIBBH", d, sh[symtab][4] + 16 * k)
+            syms.append((d[strs + name_off:].split(b"\0")[0].decode(), value, info, shndx))
+        out = subprocess.run(["aarch64-linux-gnu-nm", "--defined-only", elf], capture_output=True, text=True).stdout
+        guest = {}
+        for line in out.splitlines():
+            f = line.split()
+            if len(f) == 3:
+                a = int(f[0], 16)
+                guest.setdefault(f[2], a - self.link_base + self.base if self.relocatable and f[1] not in "aA" else a)
+
+        def addr_of(k):
+            name, value, info, shndx = syms[k]
+            if shndx in layout:
+                return layout[shndx] + value
+            if name not in guest:
+                raise SystemExit(f"--inject {obj}: {name} is not in the guest")
+            return guest[name]
+        for i, h in enumerate(sh):   # SHT_RELA against a placed section
+            if h[1] != 4 or h[7] not in layout:
+                continue
+            for r in range(h[5] // 12):
+                off, info, add = struct.unpack_from("<IIi", d, h[4] + 12 * r)
+                typ, S, P = info & 0xFF, addr_of(info >> 8) + add, layout[h[7]] + off
+                at = P - place
+                (w,) = struct.unpack_from("<I", blob, at)
+                if typ in (20, 21):   # R_AARCH64_P32_JUMP26, _CALL26
+                    disp = (S - P) >> 2
+                    if not -(1 << 25) <= disp < (1 << 25):
+                        raise SystemExit(f"--inject {obj}: branch to {S:#x} out of range")
+                    w = (w & 0xFC000000) | (disp & 0x3FFFFFF)
+                elif typ == 1:          # R_AARCH64_P32_ABS32
+                    w = S & 0xFFFFFFFF
+                elif typ == 11:         # R_AARCH64_P32_ADR_PREL_PG_HI21
+                    pg = ((S & ~0xFFF) - (P & ~0xFFF)) >> 12
+                    w = (w & 0x9F00001F) | ((pg & 3) << 29) | (((pg >> 2) & 0x7FFFF) << 5)
+                elif typ == 12:         # R_AARCH64_P32_ADD_ABS_LO12_NC
+                    w = (w & 0xFFC003FF) | ((S & 0xFFF) << 10)
+                else:
+                    raise SystemExit(f"--inject {obj}: relocation type {typ} not supported")
+                struct.pack_into("<I", blob, at, w)
+        self.uc.mem_map(place, (len(blob) + 0xFFFF) & ~0xFFFF, UC_PROT_ALL)
+        self.uc.mem_write(place, bytes(blob))
+        trap = guest.get("__fnvnx_undef_trap")
+        redirected = []
+        for name, value, info, shndx in syms:
+            if info >> 4 not in (1, 2) or info & 0xF != 2 or shndx not in layout or name not in guest:
+                continue
+            g = guest[name]
+            words = struct.unpack("<4I", bytes(self.uc.mem_read(g, 16)))
+            is_trap = any(w & 0xFC000000 == 0x14000000 and trap is not None
+                          and g + 4 * j + ((((w & 0x3FFFFFF) ^ 0x2000000) - 0x2000000) << 2) == trap
+                          for j, w in enumerate(words))
+            if not is_trap and name not in override:
+                continue
+            disp = (layout[shndx] + value - g) >> 2
+            self.uc.mem_write(g, struct.pack("<I", 0x14000000 | (disp & 0x3FFFFFF)))
+            redirected.append(name)
+        print(f"   inject: {os.path.basename(obj)} at {place:#x} ({len(blob)} bytes); redirected: "
+              + (", ".join(redirected) or "none"))
+        missing = set(override) - set(redirected)
+        if missing:
+            print(f"   inject: {os.path.basename(obj)} lacks, or the guest lacks: {', '.join(sorted(missing))}")
+        self.inject_place = place + ((len(blob) + 0xFFFF) & ~0xFFFF)
+
+    # -- --watch: who writes a range (a freed object's vptr, a global); the last 200 writes are printed at the stop
+    def install_watch(self, addr, size):
+        import collections
+        if not hasattr(self, "watch_log"):
+            self.watch_log = collections.deque(maxlen=200)
+            self.watch_n = 0
+
+        def on_write(uc, access, a, n, value, _):
+            self.watch_n += 1
+            pc, lr = uc.reg_read(UC_ARM64_REG_PC), uc.reg_read(UC_ARM64_REG_LR)
+            self.watch_log.append((self.watch_n, a, n, value & (1 << 8 * n) - 1, pc, lr))
+        self.uc.hook_add(UC_HOOK_MEM_WRITE, on_write, begin=addr, end=addr + size - 1)
+
+    def watch_lines(self):
+        return [f"watch\t#{k}\t{a:#010x}\t{n}\t{v:#x}\tpc {self.sym(pc)}\tlr {self.sym(lr)}"
+                for k, a, n, v, pc, lr in getattr(self, "watch_log", ())]
+
+    def slot_name(self, link_addr):
+        """('trap', mangled name of the virtual) for a trap stub (adrp x1; add x1; b fnvnx_vslot_trap, text
+        'virtual function defined nowhere: <name> (slot ...)'), ('native', name) for a function, None otherwise"""
+        i = self._bisect(self.sym_addrs, link_addr) - 1
+        if i < 0 or self.sym_addrs[i] != link_addr:
+            return None
+        names = self.sym_names[i]
+        if not any(n.startswith("__fnvnx_vtrap_") for n in names):
+            return ("native", next((n for n in names if not n.startswith("__fnv_")), names[0]))
+        rt = link_addr - self.link_base + self.base if self.relocatable else link_addr
+        adrp, add = struct.unpack("<II", self.uc.mem_read(rt, 8))
+        if adrp & 0x9F00001F != 0x90000001 or add & 0xFFC003FF != 0x91000021:
+            return ("trap", "")
+        imm = ((adrp >> 29) & 3 | ((adrp >> 5) & 0x7FFFF) << 2)
+        imm = imm - (1 << 21) if imm >> 20 else imm
+        text = (rt & ~0xFFF) + (imm << 12) + ((add >> 10) & 0xFFF)
+        s = bytes(self.uc.mem_read(text, 200)).split(b"\0")[0].decode("latin-1")
+        m = re.match(r"virtual function defined nowhere: (\S+)", s)
+        return ("trap", m.group(1) if m else "")
+
+    def on_exe_vtables(self, uc, addr, size, _):
+        """the first __libc_init_array: the guest has relocated itself; fill the trap slots"""
+        if getattr(self, "exe_vt", None) is None:
+            return
+        img, objs, F, V = self.exe_vt
+        self.exe_vt = None
+        rt = (lambda v: v - self.link_base + self.base) if self.relocatable else (lambda v: v)
+        link = (lambda v: v - self.base + self.link_base) if self.relocatable else (lambda v: v)
+        import collections
+        st = collections.Counter()
+        if self.relocatable and self.got:
+            # GOT entries of absolute aliases: aliases.ld defines a vtable's address point as `sym + 8`, which GNU
+            # ld makes absolute (no RELATIVE relocation), so after the self-relocation the entry still holds the
+            # link address (S2c: LD_FEATURE("SANE_EXPR") keeps such expressions section-relative)
+            g, n = self.got
+            words = struct.unpack(f"<{n // 4}I", bytes(uc.mem_read(rt(g), n)))
+            lo, hi = self.link_base, self.link_base + self.size
+            for i, w in enumerate(words):
+                if lo <= w < hi:
+                    uc.mem_write(rt(g) + 4 * i, struct.pack("<I", rt(w) & 0xFFFFFFFF))
+                    st["got absolute"] += 1
+        self.vt_bound = {}   # runtime address point -> (exe vftable, its slot targets, runtime end of the native vtable)
+        self.vt_F = F
+        for exe_vt, sym, off in V:
+            a, size = objs[sym]
+            exe_slots = img.vtable_slots(exe_vt)
+            self.vt_bound[rt(a + off) & 0xFFFFFFFF] = (exe_vt, exe_slots, rt(a + size) & 0xFFFFFFFF)
+            n = max(0, (size - off) // 4)
+            words = struct.unpack(f"<{n}I", bytes(uc.mem_read(rt(a + off), 4 * n))) if n else ()
+            slots = []
+            for w in words:   # the slots of this address point end at the next non-function word
+                sn = self.slot_name(link(w) & 0xFFFFFFFF)
+                if sn is None:
+                    break
+                slots.append((sn[0], sn[1], link(w) & 0xFFFFFFFF))
+            fills, status = exe_slot_plan(slots, exe_slots, F)
+            st["vtables"] += 1
+            st["vtables " + status] += 1
+            st["trap slots"] += sum(1 for s in slots if s[0] == "trap")
+            for k, nat in fills:
+                uc.mem_write(rt(a + off + 4 * k), struct.pack("<I", rt(nat) & 0xFFFFFFFF))
+            st["filled"] += len(fills)
+        self.extend_short_vtables(uc, objs, V, img, F, rt, st)
+        self.exe_vt_stats = dict(st)
+        print("   exe-vtables: %d bound vtables (%d aligned with the exe's, %d with a destructor pair, %d left: "
+              "their native slots disagree with the exe's): %d of %d trap slots filled from the exe's vftable"
+              % (st["vtables"], st["vtables ok"], st["vtables dtor"], st["vtables misaligned"], st["filled"],
+                 st["trap slots"]))
+        if st["got absolute"]:
+            print("   exe-vtables: %d GOT entries of absolute aliases (link addresses) relocated" % st["got absolute"])
+
+    VT_EXT_BASE, VT_EXT_SIZE = 0x0E000000, 0x00400000   # extended vtable copies (below the heap, above the image)
+
+    def extend_short_vtables(self, uc, objs, V, img, F, rt, st):
+        """A native vtable bound to an exe vftable that has more slots than it does (the decomp declares fewer
+        virtuals) ends early: a call through slot k past its end reads the next object, often another vtable's
+        function (no fault: the wrong virtual runs, e.g. MessageHandler's slot 5 ran FUN_00c3db60's deleting
+        destructor). A hand-written image vptr store (`= &DAT_<vftable>`) goes through the GOT entry of the
+        __fnv_<vftable> alias, and its object is called by exe slot index. So each short vtable gets a copy, mapped
+        here: its prefix and native slots, then for every slot k past them the native of the exe's slot k (0 when
+        there is none: a null call, diagnosed); the GOT entries holding its address point now hold the copy's.
+        References that do not go through the GOT (adrp/add in the class's own constructor) keep the native vtable;
+        vslot_past_end covers those calls when the word read is not code."""
+        if not self.got:
+            return
+        g, n = self.got
+        got_words = struct.unpack(f"<{n // 4}I", bytes(uc.mem_read(rt(g), n)))
+        got_at = {}
+        for i, w in enumerate(got_words):
+            got_at.setdefault(w, []).append(rt(g) + 4 * i)
+        uc.mem_map(self.VT_EXT_BASE, self.VT_EXT_SIZE, UC_PROT_READ | UC_PROT_WRITE)
+        at = self.VT_EXT_BASE
+        for exe_vt, sym, off in V:
+            a, size = objs[sym]
+            point = rt(a + off) & 0xFFFFFFFF
+            n_nat = max(0, (size - off) // 4)
+            exe_slots = self.vt_bound[point][1]
+            refs = got_at.get(point, [])
+            if n_nat >= len(exe_slots) or not refs:
+                continue
+            new = bytearray(uc.mem_read(rt(a), off + 4 * n_nat))
+            for k in range(n_nat, len(exe_slots)):
+                nat = F.get(exe_slots[k])
+                new += struct.pack("<I", rt(nat) & 0xFFFFFFFF if nat is not None else 0)
+                st["slots added" if nat is not None else "slots added as null"] += 1
+            if at + len(new) > self.VT_EXT_BASE + self.VT_EXT_SIZE:
+                st["vtables not extended (region full)"] += 1
+                continue
+            uc.mem_write(at, bytes(new))
+            self.vt_ext_copies = getattr(self, "vt_ext_copies", []) + [(at, at + len(new), sym)]
+            for r in refs:
+                uc.mem_write(r, struct.pack("<I", at + off))
+            st["vtables extended"] += 1
+            st["GOT entries redirected"] += len(refs)
+            self.vt_bound[at + off] = (exe_vt, exe_slots, at + len(new))
+            at = (at + len(new) + 7) & ~7
+        print("   exe-vtables: %d short vtables extended to the exe's slot count (%d slots added, %d null), %d GOT "
+              "entries redirected to the copies" % (st["vtables extended"], st["slots added"],
+                                                     st["slots added as null"], st["GOT entries redirected"]))
+
+    def collect_trap(self):
+        """--collect-traps (collect-all boot, as linhost --collect-traps): at fnvnx_vslot_trap (virtual function
+        defined nowhere) return 0 to the caller, at fnvnx_special_trap (constructor/destructor defined nowhere) return
+        this; print each distinct (kind, caller, text) once as 'linhost: collect<TAB>kind<TAB>caller<TAB>text'
+        (tests/s5/collect_traps.py reads both)."""
+        text = self.trap_text()
+        if not text:
+            return False
+        uc = self.uc
+        special = " fnvnx_special_trap+0x0" in self.sym(uc.reg_read(UC_ARM64_REG_PC))
+        lr = uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF
+        link = lr - self.base + self.link_base if self.relocatable and self.base <= lr < self.base + self.size else lr
+        seen = self.__dict__.setdefault("collect_seen", set())
+        key = (special, link, text)
+        if key not in seen:
+            seen.add(key)
+            print(f"linhost: collect\t{'special' if special else 'vslot'}\t{link:#x}\t{text}\t#{len(seen)}")
+        if not special:
+            uc.reg_write(UC_ARM64_REG_X0, 0)
+        uc.reg_write(UC_ARM64_REG_PC, lr)
+        return True
+
+    def vslot_past_end(self, err):
+        """exe-vtables, at a fetch fault: a virtual call through slot k of a native vtable bound to an exe vftable,
+        where k is past the native vtable's end (the decomp declares fewer virtuals than the exe has: the word read
+        is the next object's typeinfo or data). Such a call comes from code that indexes the exe's vftable (a cast
+        call in the decomp), so the exe's slot k is the target: returns the runtime address of its native, or None.
+        Stand-in for S2c sizing native vtables to the exe's vftable."""
+        if not getattr(self, "vt_bound", None) or "fetch" not in err.lower():
+            return None
+        m = re.search(r"\| vslot (\d+) of native vtable (0x[0-9a-f]+)$", self.null_call())
+        if m:
+            k, base = int(m.group(1)), int(m.group(2), 16)
+        else:   # a tail call (br): a register holds the vptr whose slot past the end is the faulting pc
+            pc = self.uc.reg_read(UC_ARM64_REG_PC) & 0xFFFFFFFF
+            k = base = None
+            for i in range(18):
+                v = self.xreg(i) & 0xFFFFFFFF
+                b = self.vt_bound.get(v)
+                if b is None:
+                    continue
+                for j in range(max(0, (b[2] - v) // 4), len(b[1])):
+                    try:
+                        (w,) = struct.unpack("<I", self.uc.mem_read(v + 4 * j, 4))
+                    except UcError:
+                        break
+                    if w == pc:
+                        k, base = j, v
+                        break
+                if k is not None:
+                    break
+            if k is None:
+                return None
+        b = self.vt_bound.get(base)
+        if b is None or base + 4 * k < b[2] or k >= len(b[1]) or b[1][k] not in self.vt_F:
+            return None
+        nat = self.vt_F[b[1][k]]
+        rt = nat - self.link_base + self.base if self.relocatable else nat
+        import collections
+        self.vt_past = getattr(self, "vt_past", collections.Counter())
+        key = (b[0], k, self.sym(rt).split(" ", 1)[-1])
+        if not self.vt_past[key]:
+            print(f"   exe-vtables: slot {k} past the end of native vtable {base:#010x} (exe {b[0]:#010x}): "
+                  f"continued at {key[2]}")
+        self.vt_past[key] += 1
+        return rt & 0xFFFFFFFF
+
+    def vt_past_lines(self):
+        return [f"vslot-past-end\t{n}\t{e:#010x}\t{k}\t{f}"
+                for (e, k, f), n in getattr(self, "vt_past", {}).items()]
 
     def on_winmain_entry(self, uc, addr, size, _):
         """WinMain's first instruction: run the before-winmain calls one after the other, each returning to this
@@ -743,6 +1132,89 @@ class Emu:
         if lr not in self.stub_returns:   # the guard ends when its call returns (also after a tail call)
             self.stub_returns.add(lr)
             uc.hook_add(UC_HOOK_CODE, self.on_stub_return, begin=lr, end=lr)
+
+    def alloc_near(self, size):
+        """an RWX block after the guest image and the --inject objects, in branch range of the guest's code"""
+        place = getattr(self, "inject_place", (self.base + self.size + 0x1FFFF) & ~0xFFFF)
+        n = (size + 0xFFFF) & ~0xFFFF
+        self.uc.mem_map(place, n, UC_PROT_ALL)
+        self.inject_place = place + n
+        return place
+
+    def install_ctor_this(self, addrmap, elf):
+        """table option ctor-returns-this: every native the address map binds as a constructor (kind C: an MSVC
+        constructor, which returns this and is often called as a function, e.g. `value = p->FUN_00aa2200()`) returns
+        the x0 it came in with. An Itanium constructor returns void, so its callers never read x0: safe for all.
+        Stand-in for S2c's constructor bridges returning this. Patched into the code (a hook per constructor made
+        the translation crawl): the first instruction branches to a trampoline,
+            stp x0, x30, [sp, #-16]! ; adr x30, 1f ; <first instruction> ; b <constructor + 4>
+            1: ldp x0, x30, [sp], #16 ; ret
+        x30 already points into the trampoline when the first instruction runs, so a prologue's `stp x29, x30`
+        saves the trampoline's return. Left alone: a PC-relative first instruction, and constructors that may take
+        stack arguments (more than 6 parameters after this: the trampoline moves sp)."""
+        import subprocess
+        rows = []
+        for line in open(addrmap):
+            f = line.rstrip("\n").split("\t")
+            if len(f) > 3 and f[1] == "C":
+                name = f[3] if f[3] in self.code_syms else f[2]
+                if name in self.code_syms:
+                    rows.append(name)
+        rows = sorted(set(rows), key=lambda n: self.code_syms[n])
+        dem = subprocess.run(["aarch64-linux-gnu-c++filt"], input="\n".join(rows), capture_output=True,
+                             text=True).stdout.splitlines()
+
+        def nparams(d):
+            if "(" not in d:
+                return 99
+            args, depth, n = d[d.index("(") + 1:d.rindex(")")], 0, 0
+            if args.strip() in ("", "void"):
+                return 0
+            for ch in args:
+                depth += ch in "<(["
+                depth -= ch in ">)]"
+                n += ch == "," and depth == 0
+            return n + 1
+
+        def pc_relative(w):   # adr/adrp, b/bl, b.cond, cbz/cbnz, tbz/tbnz, ldr literal
+            return ((w & 0x1F000000) == 0x10000000 or (w & 0x7C000000) == 0x14000000
+                    or (w & 0xFF000010) == 0x54000000 or (w & 0x7E000000) in (0x34000000, 0x36000000)
+                    or (w & 0x3B000000) == 0x18000000)
+
+        tramp = self.alloc_near(24 * len(rows))
+        done = skipped = 0
+        for k, name in enumerate(rows):
+            a = self.code_syms[name]
+            rt = a - self.link_base + self.base if self.relocatable else a
+            (w,) = struct.unpack("<I", self.uc.mem_read(rt, 4))
+            t = tramp + 24 * done
+            if (w & 0x9F000000) == 0x90000000:   # adrp: the same page from the trampoline
+                imm = ((w >> 29) & 3) | (((w >> 5) & 0x7FFFF) << 2)
+                imm -= (1 << 21) if imm >> 20 else 0
+                pg = ((rt & ~0xFFF) + (imm << 12) - ((t + 8) & ~0xFFF)) >> 12
+                w = (w & 0x9F00001F) | ((pg & 3) << 29) | (((pg >> 2) & 0x7FFFF) << 5)
+            elif (w & 0xFC000000) == 0x14000000:   # b (a constructor that tail-calls another)
+                off = (((w & 0x3FFFFFF) ^ 0x2000000) - 0x2000000) << 2
+                w = 0x14000000 | (((rt + off - (t + 8)) >> 2) & 0x3FFFFFF)
+            elif pc_relative(w):
+                skipped += 1
+                continue
+            if nparams(dem[k] if k < len(dem) else "") > 6:
+                skipped += 1
+                continue
+            back = ((rt + 4) - (t + 12)) >> 2
+            code = struct.pack("<6I",
+                               0xA9BF7BE0,                                   # stp x0, x30, [sp, #-16]!
+                               0x10000000 | (((12 >> 2) & 0x7FFFF) << 5) | 30,   # adr x30, t+16 (pc t+4)
+                               w,
+                               0x14000000 | (back & 0x3FFFFFF),              # b ctor+4
+                               0xA8C17BE0,                                   # ldp x0, x30, [sp], #16
+                               0xD65F03C0)                                   # ret
+            self.uc.mem_write(t, code)
+            self.uc.mem_write(rt, struct.pack("<I", 0x14000000 | (((t - rt) >> 2) & 0x3FFFFFF)))
+            done += 1
+        print(f"   ctor-returns-this: {done} of {len(rows)} constructors (address map kind C) return this "
+              f"({skipped} left: PC-relative first instruction or stack arguments)")
 
     def on_this_return(self, uc, addr, size, _):
         tid = self.cur.tid if self.cur else 1
@@ -969,14 +1441,21 @@ class Emu:
             "initializers_skipped": len(getattr(self, "skipped", None) or []),
             "stubbed_faults": len(getattr(self, "stubbed", [])),
             "host_calls": self.calls, "threads": len(self.threads),
+            "exe_vtables": getattr(self, "exe_vt_stats", None),
+            "vslot_past_end_calls": sum(getattr(self, "vt_past", {}).values()),
             "peak_heap_bytes": self.heap_high_water(),
         }
 
     def heap_high_water(self):
         """bytes from the start of the guest heap (the host's malloc arena, mapped zeroed) to its last non-zero byte:
         the most the boot's heap ever reached, as far as memory it wrote shows (R0's boot_peak_heap_bytes)"""
+        chunk = 0x1000000
         try:
-            return len(bytes(self.uc.mem_read(self.heap, HEAP_SIZE)).rstrip(b"\0"))
+            for off in range(HEAP_SIZE - chunk, -1, -chunk):   # from the top: most of 1 GiB is never touched
+                b = bytes(self.uc.mem_read(self.heap + off, chunk)).rstrip(b"\0")
+                if b:
+                    return off + len(b)
+            return 0
         except UcError:
             return None
 
@@ -1016,6 +1495,11 @@ class Emu:
     def sym(self, a):
         if not getattr(self, "sym_addrs", None):
             return f"{a:#x}"
+        ext = getattr(self, "vt_ext_copies", None)
+        if ext and self.VT_EXT_BASE <= a < self.VT_EXT_BASE + self.VT_EXT_SIZE:   # exe-vtables' extended copies
+            j = self._bisect([c[0] for c in ext], a) - 1
+            if j >= 0 and a < ext[j][1]:
+                return f"{a:#x} (extended copy of {ext[j][2]})+{a - ext[j][0]:#x}"
         if self.base <= a < self.base + self.size:   # runtime -> link address (relocatable guest)
             a = a - self.base + self.link_base
         i = self._bisect(self.sym_addrs, a) - 1
@@ -1114,6 +1598,17 @@ class Emu:
             try:
                 uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
             except UcError as e:
+                if getattr(self, "collect_traps", False) and self.collect_trap():
+                    t.result = uc.reg_read(UC_ARM64_REG_X0)
+                    t.ctx, t.state, t.resume_pc = uc.context_save(), "ready", uc.reg_read(UC_ARM64_REG_PC)
+                    self.cur = None
+                    continue
+                past = self.vslot_past_end(str(e))
+                if past is not None:   # exe-vtables: the exe's slot past the native vtable's end
+                    t.result = uc.reg_read(UC_ARM64_REG_X0)
+                    t.ctx, t.state, t.resume_pc = uc.context_save(), "ready", past
+                    self.cur = None
+                    continue
                 stub = self.stub_fault(t.tid, str(e))
                 if stub is not None:   # a known fault: the stubbed function returns and the thread goes on
                     t.ctx, t.state = uc.context_save(), "ready"
@@ -1170,7 +1665,18 @@ def main(argv):
                     "when a fault happens below them, e.g. tests/s5/known_faults.txt; needs --elf")
     ap.add_argument("--milestones", metavar="FILE", default=MILESTONES,
                     help="boot milestones to watch (default tests/s5/milestones.txt; 'none': none); needs --elf")
+    ap.add_argument("--addrmap", metavar="TSV", help="the link's out/addrmap.tsv (for exe-vtables)")
+    ap.add_argument("--exe-vtables", action="store_true",
+                    help="fill the trap slots of native vtables from the exe's vftables (needs --elf, --addrmap and "
+                    "the exe as --file switch/fnv/FalloutNV.exe=PATH); also the line 'exe-vtables' of --stub-faults")
     ap.add_argument("--summary-json", metavar="FILE", help="write the machine-readable boot summary here")
+    ap.add_argument("--inject", action="append", default=[], metavar="OBJ",
+                    help="map an ILP32 object (a guest-side stand-in) after the guest; trap stubs of the functions it "
+                    "defines branch to it (needs --elf)")
+    ap.add_argument("--collect-traps", action="store_true",
+                    help="collect-all boot: vslot/constructor traps return to their caller and are listed once each")
+    ap.add_argument("--watch", action="append", default=[], metavar="ADDR[:SIZE]",
+                    help="log every guest write to ADDR..ADDR+SIZE (default 4) with pc, lr and the value")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
@@ -1189,9 +1695,29 @@ def main(argv):
             emu.install_guards()
         if a.stub_faults:
             emu.install_fault_stubs(a.stub_faults)
+        if a.exe_vtables or a.stub_faults and "exe-vtables" in fault_table_options(a.stub_faults):
+            exe = [src for name, _, src in (f.partition("=") for f in a.file) if name.lower().endswith(".exe")]
+            if not a.addrmap or not exe:
+                print("   exe-vtables: off (needs --addrmap and the exe as --file)")
+            else:
+                emu.install_exe_vtables(a.addrmap, exe[0], a.elf)
         if a.milestones and a.milestones != "none":
             emu.install_milestones(a.milestones)
     emu.miles = getattr(emu, "miles", {})
+    if a.stub_faults and a.addrmap and "ctor-returns-this" in fault_table_options(a.stub_faults):
+        emu.install_ctor_this(a.addrmap, a.elf)
+    emu.collect_traps = a.collect_traps
+    for obj in a.inject:
+        emu.install_inject(obj, a.elf)
+    if getattr(emu, "standin_names", None):
+        import subprocess
+        obj = os.path.join(tempfile.mkdtemp(prefix="fnvnx-standins-"), "standins.o")
+        subprocess.run(["aarch64-linux-gnu-gcc", "-mabi=ilp32", "-O2", "-fno-asynchronous-unwind-tables", "-c",
+                        STANDINS, "-o", obj], check=True)
+        emu.install_inject(obj, a.elf, override=emu.standin_names)
+    for spec in a.watch:
+        addr, _, n = spec.partition(":")
+        emu.install_watch(int(addr, 0), int(n, 0) if n else 4)
 
     def write_summary(stop, rc=None):
         if a.summary_json:
@@ -1229,7 +1755,7 @@ def main(argv):
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
         for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
-                     + emu.milestone_lines()):
+                     + emu.milestone_lines() + emu.vt_past_lines() + emu.watch_lines()):
             print(line)
         print(f"STOPPED: {why}")
         write_summary(f"STOPPED: {why}")
@@ -1252,7 +1778,7 @@ def main(argv):
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
     for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
-                 + emu.milestone_lines()):
+                 + emu.milestone_lines() + emu.vt_past_lines() + emu.watch_lines()):
         print(line)
     ok = rc == 0 and a.expect in out and tp_ok
     write_summary(f"guest returned {rc:#x}", rc)

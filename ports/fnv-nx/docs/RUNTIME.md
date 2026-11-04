@@ -925,3 +925,55 @@ Clean under ASan+UBSan and TSan; all platform sources parse under ILP32 with the
   virtual-base copy constructors (`properties & 4`) are called without MSVC's extra flag.
 * `iword`/`pword`/`register_callback`, `locale(const char*)`, `_Locimp::_Addfac` and the other libcpmt entry
   points the game does not reference; `cout`/`cerr` are constructed but not usable (no native vftables).
+
+## S4c: import slots and trap names (the S4 metric)
+
+The metric (owner rule, J-0137 on): the guest's S4-owned trap stubs plus the exe's import slots that have no export
+at boot; target 0. Measured locally, without a guest link (that is a farm job, D17):
+
+* **trap names** - `tests/s4/trapcheck.sh <traps.txt> [addrmap.tsv]` compiles platform/win32, platform/crt,
+  render/nine/d3dx and the null device as `toolchain/game/build.sh` does (ILP32, `aarch64-linux-gnu-g++`) and lists the
+  S4-owned names of a guest's trap list (`tools/pipeline/undef.py` classes `win32_import`, `crt_msvc`, `libc_glibc`,
+  the Bink names) that are still undefined. The trap list is the guest link's `undefined.txt`, or the functions of
+  `fnvnx.elf` whose fourth instruction branches to `__fnvnx_undef_trap`. full1 `31971038913d`: 43 S4 names.
+* **IAT** - `make -C tests/s4 iat EXE=<FalloutNV.exe>`: `tests/s4/iat/pe_imports.py` lists the exe's 280 slots
+  (name or `#ordinal`); the `-m32` binary (`make -C tests/s4 m32`: platform/ + S7 + d3dx + the null device built for
+  i386, the game's data model) resolves each one as `boot.cpp` does - after `fnvnx_audio_input_register` and
+  `fnvnx_d3d9_register` - with `fnvnx_win32_lookup_import(dll, name, ordinal)`, and prints the slots without an
+  export. full1 baseline 124 of 280.
+
+| change | trap names | IAT slots |
+|---|---:|---:|
+| baseline (full1 `31971038913d`) | 43 | 124 |
+| `D3DPERF_SetOptions` from null_d3d9.cpp's d3d9.dll module (already on the integration branch) | 42 | 123 |
+| D3DX in the D3D9=null guest (`toolchain/game/build.sh`), `d3dx9_38` exports by weak reference | 19 | 98 |
+| binkw32 stub (`bink.cpp`) | 10 | 89 |
+| CRT names (`platform/crt/msvc_names.c`) | 0 | 89 |
+| GalaxyWrp = steam_api, ordinals (WSOCK32, XINPUT1_3, DSOUND), `libvorbisfile.dll` | 0 | 48 |
+| winmm mmio (`mmio.cpp`) | 0 | 41 |
+| the exe CRT's kernel32 imports, GetUserNameA, GetClassLongA (`crt_kernel32.cpp`) | 0 | 0 |
+
+Decisions:
+
+* **Bink**: movies are skipped. `BinkOpen` returns NULL (`ERROR_FILE_NOT_FOUND`); the engine logs "Could not open %s
+  for playback" and goes on as for a deleted `.bik`. The other entry points are NULL-safe no-ops;
+  `BinkSetSoundSystem` reports success. The IAT's stdcall decorations (`_BinkOpen@8` ...) and the plain names are
+  exported.
+* **D3DX** is linked into the null-D3D9 guest with render/nine/game/build.sh's flags; the external (Nine) guest
+  already gets it through `EXTRA_OBJS`, so it is not added there twice. `D3DXSaveTextureToFileA` (screenshot path)
+  is a weak fallback that fails with `D3DERR_INVALIDCALL`.
+* **FreeBlockImp** is not data: the decomp's `call [0x010b7eb0]` reads a `.rdata` vtable word holding `0x00cb9cb0`,
+  `mov ecx, 0x011f6238; jmp 0x00aa4060` = `MemoryManager::Deallocate` on the global heap = FormHeap_Free
+  (`0x00401030`), which the stand-in now calls.
+* **Ordinals**: Winsock 1.1's numbering for wsock32 (10 `inet_addr`, 11 `inet_ntoa`, 12 `ioctlsocket`; ws2_32
+  orders those differently and is not imported by ordinal); xinput1_3 #2/#3/#4/#5; dsound #1/#2/#11.
+* **mmio**: positions come from `lDiskOffset` after every message (the game's procedure returns 0 from
+  `MMIOM_SEEK`), `SEEK_CUR` is sent as `SEEK_SET`, `mmioAdvance(MMIO_READ)` at EOF returns 0 with
+  `pchNext == pchEndRead`, allocated buffers have a zeroed guard byte. No installable I/O procedures.
+* **kernel32 for the exe's CRT** (`crt_kernel32.cpp`, its header comment has the details): en-US, LCID 0x0409, ANSI
+  and OEM code page both 1252 (one table; OEM 437 would matter only to console code); conversions for 1252 and UTF-8
+  with the Windows size conventions; standard handles are pseudo handles whose output goes to the debug log (a GUI
+  process on Windows would lose it); the environment starts empty; GetTimeZoneInformation's Bias follows
+  GetLocalTime's offset. `kernel32.dll` and `user32.dll` are registered modules: MSVC 2008's `_mtinit` fails when
+  `GetModuleHandleW(L"KERNEL32.DLL")` is NULL; GetProcAddress on them uses the export table (FlsAlloc/EncodePointer
+  are absent, so the CRT uses plain TLS).

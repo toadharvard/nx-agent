@@ -6,7 +6,9 @@
   2 rows differ from the link because the replay reads layouts without the tree's POD check. The next farm link confirms the
   figures. That link also re-probes every layout, because of the pod2 rule.
 * **did** - Bridge-gap pairs, measured as S1b's abiclass BRIDGE pairs (unique src/address/reference):
-  **2,221 -> 32** (replayed with the tree; 58 without it). The commits:
+  **2,221 -> 35** (replayed with the tree). It reached 32, then V1 refuted the e2dbe73 rule (VA-U1..U4) and the
+  figure went back to 70. Per-call-site types (vacall, below) bring it to 35. V2's va_arg-width check (VA2-VA4) then raises it to an
+  honest 75. Format literals (below) bring it to 57. The commits:
   - `e0ed8d5` The synthesized vtable/body objects (`<host>#vtables`) asked for layouts under their own name. 985
     probe rows failed and 1,283 manual rows were never decided on bytes. They now use the host unit. 2,221 -> 943.
   - `0750425` Variadic pairs (`abi.varargs_check`). AArch64 Linux passes anonymous arguments like named ones. A
@@ -52,6 +54,76 @@
     ran without the exe, so that class never bound anything. S2d's `74e3a4a` (link_job FNVNX_EXE) is not merged
     yet. The per-function list is on the private branch `reports/s2c-abi` (`native_undefined.tsv`, for S2d; `s2c_records.tsv` groups the vptr rows for S2c-vt and S13). The other 121 functions call nothing undefined: their names went to
     trap stubs, or the record is older than the link.
+* **did (fuzz/causes/0bd144db1464, S2c 1,186 rows)** - These are vptr-unpaired 677, native-stub-data 448,
+  native-address 111, thunk-binding 11 and split-global 8. vptr-unpaired is S2c-vt's.
+  - **thunk-binding 11**, fixed by the commit "thisadj". MSVC enters an override of a secondary base's virtual with
+    `this` at that base. The exe's vftables show which addresses (`tools/link/thisadj.py`, COL offset d > 0
+    only). The 11 rows' `this` offsets of 24, 60, 136, 164 and 168 match the exe exactly. The address map now
+    names `__fnvnx_msvc_<addr>`, aliased to GCC's `_ZThn<d>_` thunk, for the 79 such addresses on
+    link/c0d6c71516f6 that have one. `__fnv_<addr>` stays the primary entry for native callers.
+  - **For S13**: the harness enters a function at `__fnv_<addr>`. For these 79 addresses it should enter at the
+    address map's link symbol, otherwise the rows remain.
+  - **For the orchestrator**: resolve reads the exe through FNVNX_EXE / PLAYER_EXE (S2d's link_job wiring).
+  - native-stub-data 448 and native-address 111 are not grouped yet on these heads.
+
+* **V1 refutations, fixed (commit "V1 VA-U...")**
+  - VA-U1..U4: an `int f(...)` call site's long long, double, struct by value or struct{float} gives other words
+    than the integer definition reads. Definition parameters taken from anonymous words are manual again.
+  - ABI-R1: a pointer with several cv-qualifiers was not recognized.
+  - OVR-F1: the Link fingerprint now differs between auto, none and a table.
+  - OVR-E1: an empty OVERRIDE means off.
+  - RPL-B1: abireplay strips `#bodiesN`.
+  - V1's test_s2c_s4_batch.py now reports "refuted: none" here.
+
+* **did (vacall)** - Variadic references are decided by their call sites, as the orchestrator asked.
+  - The plugin `tools/link/vacall/fnvnx_vacall.so` (-fsyntax-only, in `fnvlink.py probe`) records each call's argument
+    classes after promotion.
+  - When all calls of the reference in a unit agree, resolve 2 compares the definition with that fixed signature
+    and bridges it, with abi2 bytes for a double or long long read as two ints. The bridge key includes the
+    call-site signature.
+  - test_vacall.py: V1's shapes plus mixed and disagreeing call sites, 4 pairs executed under qemu.
+  - Replay: 13 units, 26 s, 70 -> 35.
+  - Left: call sites that disagree (per-site bridges would need relocation retargeting), aggregates by value, and
+    2 unrecorded units.
+  - **For the orchestrator**: the link farm needs gcc-13-plugin-dev-aarch64-linux-gnu. Without it, vacall prints
+    "no plugin" and those pairs stay manual.
+
+* **V2 VA2-VA4, fixed** - A fixed reference against a variadic definition was `same` whenever the tail was
+  int, pointer or double, but the body's va_arg widths are in neither signature.
+  - The plugin now records each variadic definition (`VADEF`: none / escape / its va_arg classes).
+  - The tail must share one width class with every va_arg; otherwise the pair is manual. Without a record it is
+    manual too.
+  - Replay: 35 -> 75. The 40 newly manual pairs are callers whose definition formats through vsnprintf: the
+    0x00703c00 override 15, 0x00406d00 13, plus 0x00a305b0, 0x00aa0020 and others. The format string decides those
+    widths.
+  - V2's test_s2c_varargs.py: 3 ok. V1's batch: refuted none.
+
+* **did (format literals)** - This is for the callers of definitions that forward their va_list to vsnprintf, as
+  the orchestrator asked.
+  - The plugin records each call's string-literal arguments for the requested callees (`FMT` lines).
+  - `vacall.parse_format` reads MSVC printf conversions.
+  - Exact widths at every site need no bridge. One shared regrouping (two ints read as `%lld` or `%f`) gets an abi2
+    bridge keyed by the conversions.
+  - The 0x00703c00 override declares `va=escape` (overrides.tsv column 5, carried by build.sh).
+  - Replay: 75 -> 57 (109 units recorded).
+  - Left: 0x00406d00's 13 callers pass a computed format.
+  - test_vacall: %s, %lld and %f executed under qemu, a non-literal format and disagreeing sites manual. Without
+    the bridges, 4 checks fail.
+
+* **V2 T1 (thisadj), fixed** - A member reference through another class than the definition's (a shell declared
+  at the subobject) now binds to `__fnvnx_msvc_<addr>`. At link-head that is 4 addresses and 7 references, e.g.
+  0x008d4870 -> 0x008805f0. V2's test_s2c_thisadj.py: ok; test_bindings has the same check.
+
+* **V2 X2 (text-addr), fixed** - A char label whose address the unit passes to a call stays extern-text (a trap),
+  never the raw x86 address. The case was 0x00c1d8b0 `_atexit(&UNK_00fdd3b0)`, the static's x86 exit thunk.
+  Arrays and labels stored as data keep the value. test_bindings has the case.
+  - As the orchestrator asked, the callback is bound natively: `xexit.py` decodes the exe's exit thunk into a
+    native stand-in. 0x00fdd3b0 is a NiPointer static's release: refcount at +4, DeleteThis is native slot 2.
+  - Rows left to trap: none on link/c0d6c71516f6; UNK_00fdd3b0 is the only callback label. stats.txt lists any
+    that remain.
+  - test_xexit executes both shapes under qemu by calling the stub directly; the freestanding harness has no
+    exit().
+
 * **measured** - abireplay on link/c0d6c71516f6 with the override table: rows bridge 4,732, manual 79, same 1,995,
   x86-inconsistent 3,276 (before: bridge 4,183, manual 2,632, x86-inconsistent 3,267). The 9 new x86-inconsistent
   rows are pairs that were `manual` before and are now decided on bytes.
