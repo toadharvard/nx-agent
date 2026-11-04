@@ -252,6 +252,8 @@ def test_policy():
     check(report.reclassify(b) == 'signedness', 'an unsigned char result 01 vs 80 stays signedness')
     e = rec(dict(kind='error', x86=None, arm='fault:r:fffffffe'), 'signedness')
     check(report.reclassify(e) == 'ilp32-pointer', 'signedness probe on a native access across 4 GiB')
+    c = rec(dict(kind='call-target', index=1, x86='00aa3e40', arm='name:_ZN3Foo3BarEv'), 'signedness')
+    check(report.reclassify(c) == 'native-undefined', 'signedness probe on a call of a named stub: native-undefined')
     e = rec(dict(kind='error', x86=None, arm='fault:r:00000010'), 'signedness')
     check(report.reclassify(e) == 'signedness', 'a native near-null read keeps the probe cause')
 
