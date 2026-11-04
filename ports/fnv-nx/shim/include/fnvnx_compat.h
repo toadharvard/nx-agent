@@ -122,6 +122,11 @@ inline __attribute__((always_inline)) unsigned long _exception_code(void) { retu
  * temporary in fnvnx_lvalue, which hands back the same object (alive to the end of the full expression). */
 #ifdef __cplusplus
 template <class T> inline T &fnvnx_lvalue(T &&t) { return t; }
+/* RSTR1 (tools/rules/s1_compile.py): a restrict-qualified local pointer passed to a `const X&` parameter. MSVC binds
+ * the reference to the local and ignores __restrict; GCC keeps the qualifier and refuses. fnvnx_unrestrict hands
+ * back the same object as an unqualified pointer lvalue. */
+template <class T> inline T *&fnvnx_unrestrict(T *__restrict &p) { return *(T **)&p; }
+template <class T> inline T *const &fnvnx_unrestrict(T *__restrict const &p) { return *(T *const *)&p; }
 #endif
 
 /* MSVC's va_list is a char*; the decomp passes va_lists through char* / void* parameters. prepare.py VA1 wraps

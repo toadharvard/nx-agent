@@ -3647,5 +3647,151 @@ def rename_std_definitions(out_root, stats, files=None):
 
 POST.append(rename_std_definitions)
 
-REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions]
+# ---------------------------------------------------------------------------------------------------------- COND1
+#
+# `c ? false : x.f(a)` where f returns a class G that converts both ways with bool (`G(bool)` and `operator bool()`),
+# a stand-in for a byte-sized boolean result: GCC refuses the conditional ("operands to '?:' have different types
+# 'bool' and 'G' ... each type can be converted to the other"); MSVC accepted it. Both readings give the same value
+# where the conditional is used as a condition: G(false) converts back to false, and G g to bool g. COND1 writes the
+# conversion to bool on the G operand: `c ? false : (bool)(x.f(a))`. Only where the other operand is the literal
+# `true` / `false`, the G operand ends in a call of a name the unit declares returning G with as many parameters as
+# the call has arguments, and every declaration of that name with that many parameters returns a class with an
+# `operator bool()` (hkgpmesh.cpp: GateE10 and S_e1ce10_Bool, both one-byte boolean results; the cast is the same
+# conversion for either).
+
+COND1_CLASS = re.compile(r'\b(?:struct|class)\s+([A-Za-z_]\w*)\s*(?::[^{;]*)?\{')
+COND1_LIT = re.compile(r'\?\s*(false|true)\s*:(?!:)')
+
+def _cond1_arity(args):
+    args = args.strip()
+    if not args or args == 'void': return 0
+    depth, n = 0, 1
+    for ch in args:
+        if ch in '(<[{': depth += 1
+        elif ch in ')>]}': depth -= 1
+        elif ch == ',' and depth == 0: n += 1
+    return n
+
+def _cond1_operand_end(text, i):
+    """End of the conditional's third operand starting at i (stops at `)`, `,`, `;` or `?`/`:` at depth 0)."""
+    depth = 0
+    for k in range(i, len(text)):
+        ch = text[k]
+        if ch in '([{': depth += 1
+        elif ch in ')]}':
+            if depth == 0: return k
+            depth -= 1
+        elif depth == 0 and ch in ',;?:': return k
+    return len(text)
+
+def r_conditional_bool_gates(path, text, stats):
+    """COND1: `c ? false : x.f(a)` with f returning a class G convertible both ways with bool -> `c ? false :
+    (bool)(x.f(a))` (see above)."""
+    if '?' not in text or 'operator bool' not in text and '#include' not in text: return text
+    if not COND1_LIT.search(text): return text
+    unit = '\n'.join(t for _, t in _closure(path, text)) if '#include' in text else COMMENT.sub(' ', text)
+    gates, booly = set(), set()                    # classes G(bool) + operator bool; classes with operator bool
+    for m in COND1_CLASS.finditer(unit):
+        g = m.group(1)
+        body = unit[m.end() - 1:prepare.match_brace(unit, m.end() - 1)]
+        if re.search(r'\boperator\s+bool\s*\(\s*\)', body):
+            booly.add(g)
+            if re.search(r'\b%s\s*\(\s*bool\b' % g, body): gates.add(g)
+    if not gates: return text
+    rets = {}                                      # (name, arity) -> {return type}
+    for m in re.finditer(r'(?:^|[;{}\s])((?:const\s+)?[A-Za-z_]\w*[\s*&]*?)\s*\b([A-Za-z_]\w*)\s*\(([^()]*)\)\s*'
+                         r'(?:const\s*)?[;{]', unit):
+        rets.setdefault((m.group(2), _cond1_arity(m.group(3))), set()).add(m.group(1).strip())
+    out, pos = [], 0
+    for m in COND1_LIT.finditer(text):
+        if m.start() < pos: continue
+        a = m.end()
+        while a < len(text) and text[a] in ' \t\n': a += 1
+        b = _cond1_operand_end(text, a)
+        x = text[a:b].rstrip()
+        call = None
+        for cm in re.finditer(r'\b([A-Za-z_]\w*)\s*\(', x):
+            if _call_end(x, cm.end() - 1) == len(x): call = cm; break
+        if call is None: continue
+        args = x[call.end():len(x) - 1]
+        r = rets.get((call.group(1), _cond1_arity(args)), set())
+        if not r & gates or not r <= booly: continue
+        out.append(text[pos:a]); out.append('(bool)(' + x + ')'); pos = a + len(x)
+        stats['COND1'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- RSTR1
+#
+# A function-local `T* __restrict v` passed by name to a parameter `const X&` (hkpsavecontactpointsutil.cpp:
+# `hkArray<Struct0x20*>::AddBack(const T& val)` called with a restrict-qualified local). MSVC ignores __restrict for
+# reference binding and binds the reference to the local itself; GCC keeps the qualifier on the lvalue and refuses
+# ("binding reference of type 'T* const&' to 'T* __restrict__' discards qualifiers"). RSTR1 writes the argument as
+# fnvnx_unrestrict(v): under GCC the same object as a T* lvalue (fnvnx_compat.h), under MSVC `(v)`
+# (fnvnx_equiv_fi.h), so the reference still binds the local. Only arguments that are exactly the variable, of a
+# call whose name the unit declares with a `const ...&` parameter at that position.
+
+RSTR1_DECL = re.compile(r'\*\s*__restrict(?:__)?\s+([A-Za-z_]\w*)\s*(?=[=;,)])')
+RSTR1_PROTO = re.compile(r'\b([A-Za-z_]\w*)\s*\(([^()]*)\)\s*(?:const\s*)?[;{]')
+
+def _rstr1_params(params):
+    out, depth, cur = [], 0, ''
+    for ch in params:
+        if ch in '(<[': depth += 1
+        elif ch in ')>]': depth -= 1
+        if ch == ',' and depth == 0: out.append(cur); cur = ''
+        else: cur += ch
+    out.append(cur)
+    return [x.strip() for x in out]
+
+def _rstr1_call(text, i):
+    """(callee name, argument index) of the argument starting after text[i] (`(` or `,`), or None."""
+    depth, k, idx = 0, i, 0
+    while k >= 0:
+        ch = text[k]
+        if ch in ')]': depth += 1
+        elif ch in '([':
+            if depth == 0:
+                if ch != '(': return None
+                m = re.search(r'([A-Za-z_]\w*)\s*$', text[max(0, k - 200):k])
+                return (m.group(1), idx) if m else None
+            depth -= 1
+        elif ch == ',' and depth == 0 and k != i: idx += 1
+        elif ch in ';{}' and depth == 0: return None
+        k -= 1
+    return None
+
+def r_restrict_reference_args(path, text, stats):
+    """RSTR1: a restrict-qualified local passed to a `const X&` parameter -> fnvnx_unrestrict(v) (see above)."""
+    if '__restrict' not in text or not path.endswith('.cpp'): return text
+    decls = [m for m in RSTR1_DECL.finditer(text)]
+    if not decls: return text
+    unit = '\n'.join(t for _, t in _closure(path, text)) if '#include' in text else COMMENT.sub(' ', text)
+    cref = {}                                      # name -> {parameter index taking a const reference}
+    for m in RSTR1_PROTO.finditer(unit):
+        for j, prm in enumerate(_rstr1_params(m.group(2))):
+            if re.match(r'const\b[^&*]*&(?!&)', prm): cref.setdefault(m.group(1), set()).add(j)
+    spans = prepare.scope_spans(text)
+    funcs = [(o, c) for o, c, k, _ in spans if k == 'function']
+    edits = set()
+    for d in decls:
+        body = [(o, c) for o, c in funcs if o < d.start() < c]
+        if not body: continue
+        end = min(c for o, c in body)
+        v = d.group(1)
+        for u in re.finditer(r'([(,])\s*(%s)\s*(?=[),])' % re.escape(v), text[:end]):
+            if u.start() < d.end(): continue
+            call = _rstr1_call(text, u.start(1))
+            if call and call[1] in cref.get(call[0], ()): edits.add((u.start(2), u.end(2)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b in sorted(edits):
+        out.append(text[pos:a]); out.append('fnvnx_unrestrict(' + text[a:b] + ')'); pos = b
+        stats['RSTR1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
+              r_conditional_bool_gates, r_restrict_reference_args]
 RULES += REFS_RULES

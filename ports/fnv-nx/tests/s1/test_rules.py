@@ -968,6 +968,35 @@ check('STD2 POST hook renames the definition\'s recipe symbol only', _json.dumps
       ['"?fnvnx_std_abs@@YANM@Z"', '"?f@@YAHH@Z"', '"?abs@std@@YANM@Z": "0x00401000"'])
 _shutil.rmtree(_s2, ignore_errors=True)
 
+# ---- S1-refs: COND1 (`c ? false : f()` with f returning a class convertible both ways with bool), RSTR1
+_G = ('struct Gate { char v; Gate() {} Gate(bool b) : v(b) {} operator bool() const { return v != 0; } };\n'
+      'struct Only { char v; operator bool() const { return v != 0; } };\n'
+      'struct N { Gate test(float e) const; int other(float e) const; Only probe(float e) const; };\n')
+check('COND1 the gate operand of `? false :` gets the bool conversion',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->test(0.5f)) g(); }\n'),
+      ['!n ? false : (bool)(n->test(0.5f))) g();'])
+check('COND1 a call returning int stays',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->other(0.5f)) g(); }\n'),
+      [], ['(bool)('])
+check('COND1 a class without a bool constructor (no ambiguity) stays',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->probe(0.5f)) g(); }\n'),
+      [], ['(bool)('])
+check('COND1 an operand that does not end in the call stays',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { int x = !n ? false : n->test(0.5f) + 1; }\n'),
+      [], ['(bool)('])
+_R = ('template <class T> struct Arr { void AddBack(const T& v); void Set(int i, T* p); };\n'
+      'struct S { int a; };\n')
+check('RSTR1 restrict local passed to a const T& parameter',
+      run(s1.r_restrict_reference_args, _R + 'void f(Arr<S*>* o) {\n    S* __restrict c = new S();\n'
+          '    o->AddBack(c);\n    o->Set(0, c);\n}\n'),
+      ['o->AddBack(fnvnx_unrestrict(c));', 'o->Set(0, c);'])
+check('RSTR1 a plain local stays',
+      run(s1.r_restrict_reference_args, _R + 'void f(Arr<S*>* o) {\n    S* __restrict d = 0;\n    S* c = 0;\n'
+          '    o->AddBack(c);\n}\n'), [], ['fnvnx_unrestrict'])
+check('RSTR1 a use outside the declaring function stays',
+      run(s1.r_restrict_reference_args, _R + 'void f() { S* __restrict c = 0; }\nvoid h(Arr<S*>* o, S* c) '
+          '{ o->AddBack(c); }\n'), [], ['fnvnx_unrestrict'])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''
