@@ -332,7 +332,7 @@ def emit_empty(rows):
 
 # compile.sh's code-generation flags (layout.flags has the semantics flags only): emitted bodies are game code
 CODEGEN = ('-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-fno-stack-protector', '-fno-stack-clash-protection',
-           '-mno-outline-atomics')
+           '-mno-outline-atomics', '-U_FORTIFY_SOURCE')
 
 
 def ftoi_plugin(bdir):
