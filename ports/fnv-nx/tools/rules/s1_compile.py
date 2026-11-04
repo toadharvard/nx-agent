@@ -2093,6 +2093,70 @@ def r_function_named_classes(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- ANON2
+#
+# The decomp nests an anonymous struct in an anonymous union whose members have constructors, a destructor or a copy
+# assignment (ExtraSave::Extra's `String activationText`, NiPoint3Interpolator's `NiPoint3 m_kValue`). MSVC took that
+# and, as for any union member, never ran those functions for it; GCC refuses such members in an anonymous aggregate.
+# ANON2 declares the member as raw storage of the same size and alignment
+# (`alignas(String) unsigned char activationText[sizeof(String)];`) and every use of it in the file as the object
+# that storage holds (`(*(String*)(slot->activationText)).FUN_004048e0()`): same bytes, same calls, and, as before,
+# no implicit construction or destruction. Only a member whose name the file declares nowhere else is handled.
+
+ANON_UNION = re.compile(r'\bunion\s*\{')
+ANON_MEMBER = re.compile(r'^([ \t]*)([A-Za-z_][\w:]*(?:\s*<[^<>;{}]*>)?)\s+([A-Za-z_]\w*)\s*;', re.M)
+
+def r_anonymous_aggregate_members(path, text, stats):
+    """ANON2: raw storage for class members with special functions in an anonymous struct of an anonymous union."""
+    if 'union' not in text or not ANON_UNION.search(text): return text
+    spans = None
+    edits = []                                             # (start, end, replacement)
+    for u in ANON_UNION.finditer(text):
+        uo = u.end() - 1
+        uc = prepare.match_brace(text, uo)
+        for s in re.finditer(r'\bstruct\s*\{', text[uo + 1:uc - 1]):
+            so = uo + 1 + s.end() - 1
+            sc = prepare.match_brace(text, so)
+            if spans is None: spans = prepare.scope_spans(text)
+            # the struct must be a direct member of this union
+            if max((sp[0] for sp in spans if sp[0] < so < sp[1]), default=None) != uo: continue
+            flat = _flat_body(text, so, sc)
+            for m in ANON_MEMBER.finditer(flat):
+                ty, name = m.group(2), m.group(3)
+                base = ty.split('<')[0].strip()
+                if base in CXX_KEYWORDS or base in ('unsigned', 'signed', 'const'): continue
+                special = False
+                for d in re.finditer(CLASS_DEF % re.escape(base), text):
+                    body = text[d.end():prepare.match_brace(text, d.end() - 1)]
+                    if re.search(r'~\s*%s\s*\(|\boperator\s*=\s*\(|(?<![\w~:])%s\s*\(' % (re.escape(base), re.escape(base)), body):
+                        special = True
+                if not special: continue
+                decls = re.findall(r'[\w>\*&]\s+\**%s\s*(?:\[[^\]]*\])?\s*[;=,)]' % re.escape(name), COMMENT.sub(' ', text))
+                if len(decls) != 1: continue               # the name means something else elsewhere in the file
+                dm = re.search(r'\b%s\s+%s\s*;' % (re.escape(ty).replace(r'\ ', r'\s*'), re.escape(name)), text[so:sc])
+                if not dm: continue
+                at = so + dm.start()
+                edits.append((at, so + dm.end(), 'alignas(%s) unsigned char %s[sizeof(%s)]; /* fnv-nx ANON2 */' % (ty, name, ty)))
+                for use in re.finditer(r'(?<![\w~])%s\b' % re.escape(name), text):
+                    if at <= use.start() < so + dm.end(): continue
+                    before = text[max(0, use.start() - 2):use.start()]
+                    if before.endswith('::'): continue
+                    if before.endswith('.') or before.endswith('->'):
+                        dot = use.start() - (1 if before.endswith('.') else 2)
+                        start = prepare.operand_start(text, dot)
+                        if start >= dot: continue
+                        edits.append((start, use.end(), '(*(%s*)(%s))' % (ty, text[start:use.end()])))
+                    else:
+                        edits.append((use.start(), use.end(), '(*(%s*)(%s))' % (ty, name)))
+                stats['ANON2'] += 1
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(r); pos = b
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2117,5 +2181,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout]

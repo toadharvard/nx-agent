@@ -73,6 +73,7 @@ CLASSES = {
     'TPL2': 'neutral',          # forward declarations of a namespace's function templates (MSVC's lookup)
     'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
     'DTOR1': 'neutral',         # declares NiPointer<T>::~NiPointer() specializations for pointees the unit never completes
+    'ANON2': 'platform',        # raw storage for members with special functions in an anonymous struct of a union
     'ELAB1': 'neutral',         # `struct X` for type uses of a class named like a platform function
     'ENUM1': 'neutral',         # enum X; -> enum X : int; (+ its definitions): MSVC's underlying type spelled out
     'ANON1': 'platform',        # names an unnamed struct defined in a return type (MSVC decorates the name)

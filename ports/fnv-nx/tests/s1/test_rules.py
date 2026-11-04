@@ -323,6 +323,15 @@ check('TAIL1 names the last base without its access specifier',
           'struct E : B, public T<int, char>\n{\n    int y;\n};\n'),
       ['{ FNVNX_MSVC_BASE_END(NiMemObject)', '{ FNVNX_MSVC_BASE_END(T<int, char>)'], ['(public'])
 
+# ---- ANON2
+got = run(s1.r_anonymous_aggregate_members,
+          'struct String\n{\n    char* text;\n    ~String();\n    unsigned int Len();\n};\nstruct Extra\n{\n    union\n    {\n'
+          '        struct\n        {\n            int value;\n            String activationText;\n        };\n        int other;\n'
+          '    };\n};\nvoid f(Extra* slot) { if (slot->activationText.Len()) slot->value = 0; }\n')
+check('ANON2 raw storage for a member with a destructor in an anonymous struct of a union', got,
+      ['alignas(String) unsigned char activationText[sizeof(String)]; /* fnv-nx ANON2 */',
+       'if ((*(String*)(slot->activationText)).Len())', 'int value;'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
