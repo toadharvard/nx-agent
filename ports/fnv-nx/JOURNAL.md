@@ -910,3 +910,20 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - full recompile with today's rules (GAME1, XINC1, compat.h) + link (~1.5 h at 2 workers); S13 recheck of
   split-global, GAME1, sized-delete divergences; confirm 0x00401030 and 0x00aa1460 free into one heap; implicit
   ctor/dtor emission (1,442).
+
+### J-0046 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0043,J-0045
+
+* **did** - prepare.py runs stream modules' `POST` hooks: S1b's `units_renames.tsv` now reaches the prepared
+  `build/units.json` (35 definitions, 72 reference names). STATIC1: file-static and namespace-scope `const` variables
+  whose name a unit binds to an image data address get external linkage (127 files / 644 edits). FALL1:
+  `__builtin_trap()` at the end of non-void functions without a final return / throw / noreturn call, empty bodies
+  included (462 / 12,004). `FNVNX_KEEP` (every `// @fnv` definition) is now `used, noinline`, so local duplicates are
+  never inlined past the by-address binding. Census runs with `-Werror=return-type -Wno-narrowing` instead of `-w`
+  (orchestrator aligned `tools/link/compile.sh` to the same set). Scope-parser head window starts at a line boundary
+  (half comments had turned class heads into function heads; TAIL1 27,576 -> 27,968 class heads).
+* **found** - 103 addresses are defined more than once with an inline copy (234 copies). 0 return-type errors after
+  FALL1; `HasValidTriangle`-style ends now trap instead of falling into the next function. tests/s4 (67 / 1,949) and
+  tests/s7 (16 / 304) still pass with the new compat header (orchestrator).
+* **metrics** - census_units=2978 census_clean=2749 census_errors=1673
+* **next** - S2: rebind STATIC1's external copies (now one strong definition per including object) to their image
+  address; S1b: replace FALL1 traps where the x86 code shows a returned value; full recompile + link; S13 recheck.
