@@ -1,14 +1,16 @@
 /*
  * sdp2dksh - thin CLI over libfnvnx_shaders.
  *
- *   sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] PACKAGE.sdp...   translate every entry
+ *   sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--no-variants] [--strict] PACKAGE.sdp...   translate every entry
  *   sdp2dksh [-o DIR] [--glsl] --blob FILE...                         translate raw bytecode files
  *   sdp2dksh --list PACKAGE.sdp                                       list entries
  *   sdp2dksh --ctab [--blob] FILE...                                  dump constant tables (TSV)
  *   sdp2dksh --pack OUT.sdp NAME=FILE...                              build a package (tests)
  *
  * Output per unique bytecode (deduplicated by hash): DIR/<hash>.dksh, DIR/<hash>.json
- * (reflection), DIR/<hash>.glsl with --glsl; DIR/index.tsv lists every entry with its stats.
+ * (reflection), DIR/<hash>.glsl with --glsl; pixel programs with a D3D9 epilogue also
+ * DIR/<hash>__e0.dksh, __ea, __ef (compile-time epilogue variants; --no-variants skips them).
+ * DIR/index.tsv lists every entry with its stats (dk_instr_e0/_ea/_ef: the variants, "-" when none).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,18 +37,24 @@ static int spit(const char *path, const void *p, size_t n)
     return (fclose(f) == 0 && ok) ? 0 : -1;
 }
 
+typedef struct { uint64_t h; char *row; int ok; char *err; } seen_t;   /* row: the index columns after the name */
 typedef struct { const char *dir; uint32_t flags; int strict; FILE *index; int total, ok, fail, dup;
-                 uint64_t *seen; size_t nseen, capseen; } ctx_t;
+                 seen_t *seen; size_t nseen, capseen; } ctx_t;
 
-static int seen(ctx_t *c, uint64_t h)
+static seen_t *seen(ctx_t *c, uint64_t h)
 {
-    for (size_t i = 0; i < c->nseen; i++) if (c->seen[i] == h) return 1;
+    for (size_t i = 0; i < c->nseen; i++) if (c->seen[i].h == h) return &c->seen[i];
+    return NULL;
+}
+
+static void remember(ctx_t *c, uint64_t h, const char *row, int ok, const char *err)
+{
     if (c->nseen == c->capseen) {
         c->capseen = c->capseen ? c->capseen * 2 : 256;
-        c->seen = (uint64_t *)realloc(c->seen, c->capseen * sizeof(uint64_t));
+        c->seen = (seen_t *)realloc(c->seen, c->capseen * sizeof(seen_t));
     }
-    c->seen[c->nseen++] = h;
-    return 0;
+    seen_t *s = &c->seen[c->nseen++];
+    s->h = h; s->row = strdup(row); s->ok = ok; s->err = strdup(err);
 }
 
 static void one(ctx_t *c, const char *pkg, const char *name, const void *bc, size_t n)
@@ -55,19 +63,33 @@ static void one(ctx_t *c, const char *pkg, const char *name, const void *bc, siz
     fnvnx_shader_result r;
     c->total++;
     uint64_t h = fnvnx_shader_hash(bc, n);
-    int dup = seen(c, h);
+    const seen_t *s = seen(c, h);
+    if (s) {   /* identical bytecode: the first translation's row */
+        c->dup++;
+        if (s->ok) c->ok++; else { c->fail++; fprintf(stderr, "FAIL %s:%s: %s\n", pkg, name, s->err); }
+        fprintf(c->index, "%016llx\t%s\t%s\t%s\n", (unsigned long long)h, pkg, name, s->row);
+        return;
+    }
     fnvnx_shader_translate(bc, n, &o, &r);
     char path[4096];
-    if (!dup) {
-        if (r.dksh) { snprintf(path, sizeof path, "%s/%016llx.dksh", c->dir, (unsigned long long)h); spit(path, r.dksh, r.dksh_size); }
-        if (r.reflection_json) { snprintf(path, sizeof path, "%s/%016llx.json", c->dir, (unsigned long long)h); spit(path, r.reflection_json, strlen(r.reflection_json)); }
-        if (r.glsl) { snprintf(path, sizeof path, "%s/%016llx.glsl", c->dir, (unsigned long long)h); spit(path, r.glsl, strlen(r.glsl)); }
-    } else c->dup++;
+    if (r.dksh) { snprintf(path, sizeof path, "%s/%016llx.dksh", c->dir, (unsigned long long)h); spit(path, r.dksh, r.dksh_size); }
+    for (int k = 0; k < r.num_variants; k++) {
+        snprintf(path, sizeof path, "%s/%016llx%s.dksh", c->dir, (unsigned long long)h, fnvnx_epi_suffix[k]);
+        spit(path, r.variants[k].dksh, r.variants[k].dksh_size);
+    }
+    if (r.reflection_json) { snprintf(path, sizeof path, "%s/%016llx.json", c->dir, (unsigned long long)h); spit(path, r.reflection_json, strlen(r.reflection_json)); }
+    if (r.glsl) { snprintf(path, sizeof path, "%s/%016llx.glsl", c->dir, (unsigned long long)h); spit(path, r.glsl, strlen(r.glsl)); }
     if (r.ok) c->ok++; else { c->fail++; fprintf(stderr, "FAIL %s:%s: %s\n", pkg, name, r.error); }
-    fprintf(c->index, "%016llx\t%s\t%s\t%s_%d_%d\t%s\t%u\t%u\t%u\t%u\t%u\t%s\n", (unsigned long long)h, pkg, name,
-            r.stage == FNVNX_STAGE_VERTEX ? "vs" : r.stage == FNVNX_STAGE_PIXEL ? "ps" : "??", r.major, r.minor,
-            r.ok ? "ok" : "fail", r.stats.d3d_instructions, r.stats.glsl_statements, r.stats.dk_instructions,
-            r.stats.dk_gprs, r.stats.dk_code_size, r.ok ? "" : r.error);
+    char row[2048], v[3][16];
+    for (int k = 0; k < FNVNX_EPI_COUNT; k++)
+        if (k < r.num_variants && r.ok) snprintf(v[k], sizeof v[k], "%u", r.variants[k].stats.dk_instructions);
+        else snprintf(v[k], sizeof v[k], "-");
+    snprintf(row, sizeof row, "%s_%d_%d\t%s\t%u\t%u\t%u\t%u\t%u\t%s\t%s\t%s\t%s",
+             r.stage == FNVNX_STAGE_VERTEX ? "vs" : r.stage == FNVNX_STAGE_PIXEL ? "ps" : "??", r.major, r.minor,
+             r.ok ? "ok" : "fail", r.stats.d3d_instructions, r.stats.glsl_statements, r.stats.dk_instructions,
+             r.stats.dk_gprs, r.stats.dk_code_size, r.ok ? "" : r.error, v[0], v[1], v[2]);
+    fprintf(c->index, "%016llx\t%s\t%s\t%s\n", (unsigned long long)h, pkg, name, row);
+    remember(c, h, row, r.ok, r.error);
     fnvnx_shader_result_free(&r);
 }
 
@@ -86,7 +108,7 @@ static void ctab_one(const char *pkg, const char *name, const void *bc, size_t n
 
 static int usage(void)
 {
-    fprintf(stderr, "usage: sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] PACKAGE.sdp...\n"
+    fprintf(stderr, "usage: sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--no-variants] [--strict] PACKAGE.sdp...\n"
                     "       sdp2dksh [-o DIR] [--glsl] --blob FILE...\n"
                     "       sdp2dksh --list PACKAGE.sdp\n"
                     "       sdp2dksh --ctab [--blob] FILE...\n"
@@ -123,6 +145,7 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "-o") && i + 1 < argc) c.dir = argv[++i];
         else if (!strcmp(argv[i], "--glsl")) c.flags |= FNVNX_SHADER_KEEP_GLSL;
         else if (!strcmp(argv[i], "--no-dksh")) c.flags |= FNVNX_SHADER_NO_DKSH;
+        else if (!strcmp(argv[i], "--no-variants")) c.flags |= FNVNX_SHADER_NO_VARIANTS;
         else if (!strcmp(argv[i], "--strict")) c.strict = 1;
         else if (!strcmp(argv[i], "--blob")) blob = 1;
         else if (!strcmp(argv[i], "--list")) list = 1;
@@ -136,7 +159,8 @@ int main(int argc, char **argv)
         char p[4096]; snprintf(p, sizeof p, "%s/index.tsv", c.dir);
         c.index = fopen(p, "w");
         if (!c.index) { fprintf(stderr, "cannot write %s\n", p); return 1; }
-        fprintf(c.index, "hash\tpackage\tname\tmodel\tstatus\td3d_instr\tglsl_stmts\tdk_instr\tdk_gprs\tdk_code\terror\n");
+        fprintf(c.index, "hash\tpackage\tname\tmodel\tstatus\td3d_instr\tglsl_stmts\tdk_instr\tdk_gprs\tdk_code\terror"
+                         "\tdk_instr_e0\tdk_instr_ea\tdk_instr_ef\n");
     }
     int bad = 0;
     for (; i < argc; i++) {
@@ -159,6 +183,7 @@ int main(int argc, char **argv)
         fclose(c.index);
         printf("sdp2dksh: %d shaders, %d ok, %d failed, %d duplicates\n", c.total, c.ok, c.fail, c.dup);
     }
+    for (size_t k = 0; k < c.nseen; k++) { free(c.seen[k].row); free(c.seen[k].err); }
     free(c.seen);
     return bad ? 1 : (c.strict && c.fail) ? 1 : 0;
 }

@@ -301,7 +301,7 @@ def main():
              'bad_px': None, 'detail': ''}
         programs.append(e)
         if status != 'ok':
-            e['status'] = 'translate_fail'; e['detail'] = (rest[-1] if rest else '')[:200]; continue
+            e['status'] = 'translate_fail'; e['detail'] = (rest[5] if len(rest) > 5 else '')[:200]; continue
         if shard and int(h, 16) % shard[1] != shard[0]:
             e['status'] = 'other_shard'; continue
         if h in byhash: continue

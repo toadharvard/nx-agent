@@ -41,6 +41,11 @@ fetch() { # name url pin [patch]
 }
 
 mkdir -p "$DEPS"
+# configure steps are quiet, but their output is shown when they fail (set -e would exit without a word)
+quiet() { # log command...
+    local log="$1"; shift
+    "$@" > "$log" 2>&1 || { echo "build.sh: failed: $* (log $log):" >&2; tail -n 40 "$log" >&2; exit 1; }
+}
 fetch mojoshader "$MOJO_URL" "$MOJO_PIN" "$HERE/mojoshader.patch"
 fetch uam "$UAM_URL" "$UAM_PIN" "$HERE/uam.patch"
 # test-only patch: predication prefix and SM1 relative addressing (both missing upstream)
@@ -48,19 +53,20 @@ fetch uam "$UAM_URL" "$UAM_PIN" "$HERE/uam.patch"
 
 # MojoShader: static, only the profiles we use (glsl, glsles, glsles3 -> glsldk, bytecode).
 # PROFILE_GLSLES3 has no OPTION() upstream and defaults to off: set it explicitly.
-cmake -S "$DEPS/mojoshader" -B "$DEPS/mojoshader/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+quiet "$DEPS/mojoshader-cmake.log" cmake -S "$DEPS/mojoshader" -B "$DEPS/mojoshader/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DPROFILE_D3D=OFF -DPROFILE_HLSL=OFF -DPROFILE_ARB1=OFF -DPROFILE_ARB1_NV=OFF -DPROFILE_METAL=OFF \
-    -DPROFILE_SPIRV=OFF -DPROFILE_GLSPIRV=OFF -DPROFILE_GLSL120=OFF -DPROFILE_GLSLES=ON -DPROFILE_GLSLES3=ON -DEFFECT_SUPPORT=OFF >/dev/null
+    -DPROFILE_SPIRV=OFF -DPROFILE_GLSPIRV=OFF -DPROFILE_GLSL120=OFF -DPROFILE_GLSLES=ON -DPROFILE_GLSLES3=ON -DEFFECT_SUPPORT=OFF
 ninja -C "$DEPS/mojoshader/build" mojoshader
 
 # uam: static library target added by uam.patch.
 if [[ ! -f "$DEPS/uam/build/build.ninja" ]]; then
-    meson setup "$DEPS/uam/build" "$DEPS/uam" --buildtype=release >/dev/null
+    # uam.patch avoids meson features newer than 1.3 (Ubuntu 24.04's meson is 1.3.2)
+    quiet "$DEPS/uam-meson-setup.log" meson setup "$DEPS/uam/build" "$DEPS/uam" --buildtype=release
 fi
 ninja -C "$DEPS/uam/build" libuam.a uam
 
-cmake -S "$HERE" -B "$OUT" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DFNVNX_DEPS="$DEPS" -DFNVNX_SHADERS_TESTS=$TESTS >/dev/null
+quiet "$OUT.cmake.log" cmake -S "$HERE" -B "$OUT" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DFNVNX_DEPS="$DEPS" -DFNVNX_SHADERS_TESTS=$TESTS
 ninja -C "$OUT"
 echo "built: $OUT/sdp2dksh $OUT/libfnvnx_shaders.a"

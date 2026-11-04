@@ -120,8 +120,27 @@ def main():
     ex = "skipped"
     if not a.no_exec and all(os.path.exists(os.path.join(a.v6n_bin, x)) for x in ("v6n_nine", "v6n_gl")):
         ex = "pass" if run_exec(asm, tool, a.out, a.v6n_bin) else "FAIL"
-    print("shaders_tests=%d shaders_pass=%d unit=%s exec=%s" % (len(tests), npass, "pass" if unit_ok else "FAIL", ex))
-    return 0 if npass == len(tests) and unit_ok and ex != "FAIL" else 1
+    det = determinism(tool, tests, rows, a.out)
+    print("shaders_tests=%d shaders_pass=%d unit=%s exec=%s determinism=%s" % (len(tests), npass, "pass" if unit_ok else "FAIL",
+                                                                          ex, "pass" if not det else "FAIL (%s)" % ", ".join(det)))
+    return 0 if npass == len(tests) and unit_ok and ex != "FAIL" and not det else 1
+
+def determinism(tool, tests, rows, out):
+    """every DKSH (and epilogue variant) of the corpus, translated in one process above, must be byte-identical when
+    its program is translated alone (uam once read uninitialised scheduling data: the result depended on what the
+    process had compiled before)"""
+    bad = []
+    for t in tests:
+        r = rows.get(t["name"])
+        if not t.get("asm_ok") or not r or r["status"] != "ok":
+            continue
+        od = os.path.join(out, "alone", t["name"]); shutil.rmtree(od, ignore_errors=True); os.makedirs(od)
+        subprocess.run([tool, "-o", od, "--blob", t["bin"]], capture_output=True)
+        for f in sorted(glob.glob(os.path.join(r["dir"], r["hash"] + "*.dksh"))):
+            g = os.path.join(od, os.path.basename(f))
+            if not os.path.exists(g) or open(f, "rb").read() != open(g, "rb").read():
+                bad.append(os.path.basename(f).replace(r["hash"], t["name"]))
+    return bad
 
 def run_exec(asm, tool, out, v6n_bin):
     src = os.path.join(HERE, "exec"); work = os.path.join(out, "exec")

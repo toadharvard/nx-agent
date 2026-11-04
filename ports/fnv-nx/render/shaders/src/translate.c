@@ -50,6 +50,19 @@ int fnvnx_dksh_validate(const void *dksh, size_t n, fnvnx_shader_stage stage, ch
     return 0;
 }
 
+const char *const fnvnx_epi_suffix[FNVNX_EPI_COUNT] = { "__e0", "__ea", "__ef" };
+
+/* the GLSL with "#define"s inserted after its #version line */
+static char *with_defines(const char *glsl, const char *defs)
+{
+    const char *nl = strchr(glsl, '\n');
+    size_t a = nl ? (size_t)(nl - glsl) + 1 : 0, d = strlen(defs), n = strlen(glsl);
+    char *o = (char *)malloc(n + d + 1);
+    if (!o) return NULL;
+    memcpy(o, glsl, a); memcpy(o + a, defs, d); memcpy(o + a + d, glsl + a, n - a + 1);
+    return o;
+}
+
 int fnvnx_shader_translate(const void *bc, size_t n, const fnvnx_shader_opts *opts, fnvnx_shader_result *r)
 {
     static const fnvnx_shader_opts defaults = { 0, NULL };
@@ -81,6 +94,23 @@ int fnvnx_shader_translate(const void *bc, size_t n, const fnvnx_shader_opts *op
         r->stats.dk_instructions = dk.instr; r->stats.dk_gprs = dk.gprs;
         r->stats.dk_code_size = dk.code; r->stats.dk_constbuf1_size = dk.cb1;
         if (fnvnx_dksh_validate(r->dksh, r->dksh_size, r->stage, r->error, sizeof r->error)) goto done;
+        if (r->stage == FNVNX_STAGE_PIXEL && !(opts->flags & FNVNX_SHADER_NO_VARIANTS) && strstr(glsl, "#ifndef DK_NO_ALPHA")) {
+            static const char *const defs[FNVNX_EPI_COUNT] = {
+                "#define DK_NO_ALPHA\n#define DK_NO_FOG\n", "#define DK_NO_FOG\n", "#define DK_NO_ALPHA\n" };
+            for (int k = 0; k < FNVNX_EPI_COUNT; k++) {
+                char *v = with_defines(glsl, defs[k]);
+                if (!v) { snprintf(r->error, sizeof r->error, "out of memory"); goto done; }
+                int e = fnvnx_dk_compile(r->stage, v, &dk, r->error, sizeof r->error);
+                free(v);
+                if (e) goto done;
+                r->variants[k].dksh = dk.dksh; r->variants[k].dksh_size = dk.size;
+                r->variants[k].stats = r->stats;
+                r->variants[k].stats.dk_instructions = dk.instr; r->variants[k].stats.dk_gprs = dk.gprs;
+                r->variants[k].stats.dk_code_size = dk.code; r->variants[k].stats.dk_constbuf1_size = dk.cb1;
+                r->num_variants = k + 1;
+                if (fnvnx_dksh_validate(dk.dksh, dk.size, r->stage, r->error, sizeof r->error)) goto done;
+            }
+        }
     }
     r->ok = 1;
 done:
@@ -93,4 +123,6 @@ void fnvnx_shader_result_free(fnvnx_shader_result *r)
 {
     free(r->dksh); free(r->glsl); free(r->reflection_json);
     r->dksh = NULL; r->glsl = NULL; r->reflection_json = NULL;
+    for (int k = 0; k < FNVNX_EPI_COUNT; k++) { free(r->variants[k].dksh); r->variants[k].dksh = NULL; }
+    r->num_variants = 0;
 }

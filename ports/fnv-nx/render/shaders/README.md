@@ -102,6 +102,11 @@ All in the `glsldk` profile (other MojoShader profiles unchanged); unit + execut
   it, no def: the GLSL and the overlay) and V6n's `tests/v6n/run.sh vs_reladdr_def`.
 * **Colour saturation** (P2): vs < 3.0 `oD0`/`oD1` (and `oFog`) clamped to [0, 1] in the epilogue, written
   components only (the registers are write-only, so this equals clamping each write).
+* **pow at 0** (V6n `ps_pow_zero`, 653 programs / 129 unique in the package fuzz): D3D9 `pow` is powf(|x|, y)
+  (Nine; wined3d: exp(y log x) with log(0) = -FLT_MAX): pow(0, 0) = 1, pow(0, y < 0) = +inf, pow(0, y > 0) = 0,
+  where GLSL pow() is undefined (llvmpipe and Maxwell give 0 or NaN). `vs_dk_pow` / `ps_dk_pow` (float..vec4)
+  select on x == 0, branch-free. Cost on real019 (class averages, Maxwell instructions): SLS pso +0.6 %, SM pso
+  (SM3 lighting) +1.3 %, SM3LL +1.0 %, WATER +7.8 %; handheld 720p 32.60 -> 32.69 ms.
 * **Numerics** (P3, P4), as Nine gives them on a driver without `TGSI_MUL_ZERO_WINS` (softpipe):
   `log`/`logp` = max(-FLT_MAX, log2|x|), `rcp` clamped to +-FLT_MAX/2 (rcp(+-0) = +-FLT_MAX/2), `rsq` =
   min(FLT_MAX, 1/sqrt|x|), `nrm` = v * min(FLT_MAX, rsq(dot3(v))) (3-component length also for a .w write mask;
