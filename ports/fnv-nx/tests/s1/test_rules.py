@@ -94,6 +94,86 @@ got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> clas
 check('TPL2 forward-declares a namespace function template used earlier', got,
       ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'])
 
+# ---- S1-STL (blk_00ac0000): TPL2 specializations, TPL3, TYPN1, INST1, COPY1, DECL3
+got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> class A\n{\n  public:\n    void d(T* p)\n'
+          '    {\n        D(p);\n    }\n};\ntemplate <> inline void D<int>(int* p)\n{\n}\n'
+          'template <class T> inline void D(T* p)\n{\n    p->~T();\n}\n}\n')
+check('TPL2 declares the primary, not the explicit specialization', got,
+      ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'], ['void D<int>(int* p); /* fnv-nx TPL2'])
+got = run(s1.r_forward_template_calls, 'namespace N {\nstruct S { void m(int* a) { ::N::cp(a, a); } };\n'
+          'template <class T> inline T* cp(T* a, T* b) { return a; }\n}\n')
+check('TPL3 (B) declares a namespace template called qualified before its definition', got,
+      ['namespace N { template <class T> inline T* cp(T* a, T* b); } /* fnv-nx TPL3 */ namespace N {'])
+got = run(s1.r_forward_template_calls, 'namespace N {\nstruct S { void m(int* a) { ::N::cp(a, Later()); } };\n'
+          'struct Later {};\ntemplate <class T> inline T* cp(T* a, Later b) { return a; }\n}\n')
+check('TPL3 (B) leaves a signature that names a type not seen yet', got, (), ['fnv-nx TPL3'])
+got = run(s1.r_dependent_typenames, 'namespace N {\ntemplate <class _Iter> void f(_Iter a)\n'
+          '{ g(a, _Iter_cat<iterator_traits<_Iter>::iterator_category>()); }\n}\n')
+check('TYPN1 adds typename before a dependent library type member in a template argument', got,
+      ['_Iter_cat<typename iterator_traits<_Iter>::iterator_category>()'])
+got = run(s1.r_dependent_typenames, 'template <class _Iter> void f(_Iter a) { g(h<iterator_traits<int>::value_type>()); }\n')
+check('TYPN1 leaves a non-dependent qualified name', got, (), ['typename'])
+_inst = ('namespace other {\ntemplate <class T> class vector { public: void ins(const T* w, unsigned int n, const T& v); };\n}\n'
+         'namespace rstd {\ntemplate <class T> class vector\n{\n  public:\n    typedef unsigned int size_type;\n'
+         '    void ins(const T* w, size_type n, const T& v);\n};\n}\n')
+got = run(s1.r_instantiation_size_types, _inst + 'template void rstd::vector<int>::ins(const int*, unsigned int,\n'
+          '                                     const int&);\n')
+check('INST1 size_type from the class template of the qualifier\'s namespace (not the first `vector`)', got,
+      ['template void rstd::vector<int>::ins(const int*, rstd::vector<int>::size_type, const int&);'])
+got = run(s1.r_instantiation_size_types, _inst + 'template void other::vector<int>::ins(const int*, unsigned int, const int&);\n')
+check('INST1 leaves a member declared with unsigned int', got,
+      ['template void other::vector<int>::ins(const int*, unsigned int, const int&);'], ['::size_type, const int&'])
+got = run(s1.r_copy_ctor_base_casts, 'struct A { int a; };\nstruct B : A { B(const B& o); B(A a); };\n'
+          'struct X : B { X(const X& o); };\nX::X(const X& o) : B(o) {}\n')
+check('COPY1 casts to the base whose constructor also takes its own base by value', got,
+      ['X::X(const X& o) : B(static_cast<const B&>(o)) {}'])
+got = run(s1.r_copy_ctor_base_casts, 'struct A { int a; };\nstruct B : A { B(const B& o); };\n'
+          'struct X : B { X(const X& o); };\nX::X(const X& o) : B(o) {}\n')
+check('COPY1 leaves a base with only its copy constructor', got, ['X::X(const X& o) : B(o) {}'])
+got = run(prepare.r_crt_typedefs, 'typedef _iobuf FILE;\ntypedef __int64 fpos_t;\nFILE* f; fpos_t p; const char* s = "FILE";\n')
+check('DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched', got,
+      ['_iobuf* f; fnvnx_msvc_fpos_t p;', 'typedef __int64 fnvnx_msvc_fpos_t;', '"FILE"'], ['typedef _iobuf FILE'])
+
+got = prepare.r_platform_protos('/x/src/w.cpp', 'extern "C" size_t __cdecl wcslen(const wchar_t* s);\nint g();\n', Counter())
+check('DECL1 a <wchar.h> prototype becomes the header', got, ['#include <wchar.h> /* fnv-nx DECL1 */\nint g();'], ['wcslen'])
+
+# ---- STL2: units with the real container headers use the VC9-layout shim
+_stl2 = ('// std::string in a comment\n#include <string>\n#include <vector>\nnamespace std {\ntemplate <> class allocator<E>\n'
+         '{ typedef size_t size_type; };\n}\nstruct S { std::string s; ::std::vector<int> v; };\n'
+         'const char* n = "std::string";\nvoid f() { stdext::unchecked_copy(a, b, c); x::std::y z; }\n')
+got = run(s1.r_vc9_containers, _stl2)
+check('STL2 includes fnvnx_vc9.h in place of the container headers, line count kept', got,
+      ['#include "fnvnx_vc9.h" /* fnv-nx STL2 */\n/* fnv-nx STL2: #include <vector> */\n'], ['#include <string>'])
+check('STL2 spells std / ::std / stdext as fnvnx_vc9 in code, not in comments, strings or nested names', got,
+      ['struct S { fnvnx_vc9::string s; ::fnvnx_vc9::vector<int> v; };', 'fnvnx_vc9::stdext::unchecked_copy(',
+       '// std::string in a comment', '"std::string"', 'x::std::y z;', 'namespace fnvnx_vc9 {'])
+check('STL2 size_t in the unit\'s own namespace std is MSVC\'s (unsigned int)', got, ['typedef _Sizet size_type;'])
+check('STL2 line count kept', str(got.count('\n') == _stl2.count('\n')), ['True'])
+check('STL2 leaves a unit without the real container headers', run(s1.r_vc9_containers,
+      '#include "rstd.h"\nstd::string s;\n'), ['std::string s;'], ['fnvnx_vc9'])
+got = s1.r_specialization_decls('/x/src/speedtree/projectedshadow_ob1_variant.cpp',
+      'void a();\n#include "h.h"\n#include <memory>\ntemplate <class T> struct B;\nvoid g() {}\n'
+      'template <> X<char>::X(int);\n', Counter())
+check('SPEC1 never prefixes a preprocessor line: after the directives that follow its anchor', got,
+      ['#include <memory>\ntemplate <> X<char>::X(int); /* fnv-nx SPEC1 */ template <class T> struct B;'])
+
+got = run(s1.r_dependent_base_members, 'template <class T> struct V\n{\n    struct A {};\n    struct CI\n    {\n'
+          '        A* aux;\n        T* ptr;\n    };\n    struct I : CI\n    {\n'
+          '        I& operator+=(int n) { if (!aux) f(); ptr += n; return *this; }\n        void g(int ptr) { ptr = 1; }\n'
+          '    };\n};\nstruct P { int q; };\nstruct O : P { void h() { q = 1; } };\n')
+check('TPL1-NESTED this-> for members of a sibling member class used as base in a class template', got,
+      ['if (!this->aux) f(); this->ptr += n;', 'void g(int ptr) { ptr = 1; }', 'void h() { q = 1; }'])
+
+# ---- EBO1: MSVC gives the empty base optimization to the first of two empty bases only
+_ebo = ('struct A\n{\n    void f();\n};\nstruct B\n{\n    static void* operator new(unsigned int);\n};\n'
+        'namespace n { struct B { int x; }; }\nstruct D : A, B\n{ FNVNX_MSVC_BASE_END(B)\n    unsigned char m[19];\n    D();\n};\n'
+        'struct E : A, B\n{\n    E();\n};\nstruct V { virtual ~V(); };\nstruct F : A, V\n{\n    int x;\n};\n')
+got = run(s1.r_msvc_empty_bases, _ebo)
+check('EBO1 a class with two empty bases starts its members at 1 (the base in another namespace ignored)', got,
+      ['struct D : A, B\n{ char fnvnx_msvc_ebo; /* fnv-nx EBO1 */ FNVNX_MSVC_BASE_END(B)'])
+check('EBO1 leaves a class without data and one with a non-empty base', got,
+      ['struct E : A, B\n{\n    E();', 'struct F : A, V\n{\n    int x;'])
+
 # ---- MATH1
 check('MATH1 drops a decomp copy of float sqrt(float)',
       run(s1.r_math_overloads, 'inline float __cdecl sqrt(float _X)\n{\n    return sqrtf(_X);\n}\n'), ['#include <math.h>'],
