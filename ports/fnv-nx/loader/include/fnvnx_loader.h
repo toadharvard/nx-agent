@@ -257,6 +257,8 @@ typedef struct fnvnx_fixup {
 } fnvnx_fixup;
 
 #define FNVNX_SCAN_NO_RELOCS  1u   /* ignore img->relocs even if loaded */
+#define FNVNX_SCAN_NO_INDEX   2u   /* plain searches instead of the scan's bitmaps and page indices (same list;
+                                     for tests and before/after comparisons) */
 typedef struct fnvnx_scan_opts {
     const uint32_t *vtable_hints;  /* original VAs of vftables, sorted, may be NULL */
     uint32_t nhints;
