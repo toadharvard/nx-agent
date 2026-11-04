@@ -198,7 +198,8 @@
    ],
    "basis": "E",
    "phase": "scene graph",
-   "subsystem": "animation"
+   "subsystem": "animation",
+   "ai2_path": 1.0
   },
   {
    "id": "havok_ai",
@@ -210,7 +211,8 @@
    ],
    "basis": "E",
    "phase": "havok",
-   "subsystem": "havok"
+   "subsystem": "havok",
+   "ai2_path": 1.0
   },
   {
    "id": "game_logic",
@@ -238,7 +240,8 @@
     "ai-linear-1": 0.5,
     "ai-linear-2": 0.5
    },
-   "subsystem": "ai"
+   "subsystem": "ai",
+   "ai2_path": 0.5
   },
   {
    "id": "background",
@@ -383,6 +386,21 @@
    "basis": "E",
    "needs_hardware": false,
    "status": "proposed (S15), override rows like spinlock_0040fba0"
+  },
+  {
+   "id": "havok_mt",
+   "name": "Havok's multithreaded simulation (iSimType=4, iNumThreads:HAVOK 2): the step's job-parallel part on the Havok pool instead of AI linear thread 2 alone",
+   "moves": {
+    "havok_ai": [
+     0.3,
+     0.45
+    ]
+   },
+   "from": "ai-linear",
+   "to": "game",
+   "basis": "E",
+   "needs_hardware": true,
+   "status": "linked natively (PERF.md 6.9); iSimType=4 selects it (FUN_00c661d0); the step must stay on one thread (CreateObjects keys the pool on the stepping thread id, 6.10); off until mtqemu past WinMain"
   }
  ],
  "scenarios": [
@@ -399,7 +417,8 @@
    "levers": [
     "mt_cull",
     "havok_workers",
-    "threaded_anim"
+    "threaded_anim",
+    "havok_mt"
    ]
   },
   {
@@ -411,7 +430,8 @@
     "threaded_anim",
     "render_f2f4",
     "barrier_relax",
-    "neon_math"
+    "neon_math",
+    "havok_mt"
    ]
   },
   {
@@ -425,7 +445,8 @@
     "barrier_relax",
     "neon_math",
     "instancing",
-    "core3"
+    "core3",
+    "havok_mt"
    ]
   }
  ],
