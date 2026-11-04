@@ -10,6 +10,8 @@ against the binding state an uncached backend leaves (every NxOp_BindUbo bound):
   U2  slot 0 -> X, slot 1 -> Y, slot 0 -> X: the hardware state equals the uncached one
   U3  slot 0 -> X, slot 4 -> Y (deko3d has 16 UBO slots per stage; gpu_abi.h does not limit the slot), slot 0 -> Y
   U4  slot 0 -> X with size 256, then the same address with size 512
+  U5  slot 15 and slot 0 kept apart; vertex slot 15 rebound to the same range: skipped (6 hardware binds)
+The cache declarations (uboAddr/uboSize) are taken from nxgpu.c itself, not copied into the harness.
 A sequence is a DEFECT when the GPU's bound (address, size) for any stage/slot differs from the uncached backend's.
   python3 -I tests/v1/test_nxgpu_ubo_cache.py   -> one line per case, exit 1 when any shows a defect
 """
@@ -42,8 +44,7 @@ static int run(const uint32_t (*ops)[5], int n, int check_uncached) {
     memset(hw, 0, sizeof hw); memset(hwsz, 0, sizeof hwsz); memset(ref, 0, sizeof ref); memset(refsz, 0, sizeof refsz);
     nbinds = 0;
     DkCmdBuf cb = 0;
-    DkGpuAddr uboAddr[2][4] = {{0}};
-    uint32_t uboSize[2][4] = {{0}};
+@DECL@
     for (int i = 0; i < n; i++) {
         const uint32_t* a = ops[i]; uint32_t argc = 5;
         for (int s = 0; s < 2; s++) if (a[0] & (1u << s)) { ref[s][a[1] & 15] = mem_addr(a[2], a[3]); refsz[s][a[1] & 15] = a[4]; }
@@ -71,6 +72,9 @@ int main(void) {
                              b ? ": the slot 0 bind is skipped (slot 4 wrote the cache entry of slot 4 & 3 = 0)" : ""); fails += b;
     static const uint32_t u4[][5] = {{2, 2, 7, 0, 256}, {2, 2, 7, 0, 512}};
     b = run(u4, 2, 1); printf("U4: %s - same address, larger size\n", b ? "DEFECT" : "ok"); fails += b;
+    static const uint32_t u5[][5] = {{3, 15, 7, 0, 256}, {3, 0, 7, 256, 256}, {3, 15, 7, 256, 256}, {1, 15, 7, 256, 256}};
+    b = run(u5, 4, 1); printf("U5: %s - slot 15 X, slot 0 Y, slot 15 Y, vertex slot 15 Y again: %d binds\n",
+                             b || nbinds != 6 ? "DEFECT" : "ok", nbinds); fails += b || nbinds != 6;
     return fails ? 1 : 0;
 }
 '''
@@ -82,11 +86,16 @@ def main():
     if not m:
         print('the NxOp_BindUbo case is not found in nxgpu.c')
         return 1
+    # the cache arrays as nxgpu.c declares them (a harness copy of the old [2][4] made the fixed code overflow it)
+    decl = re.findall(r'^[ \t]*(?:DkGpuAddr|uint32_t)[ \t]+ubo(?:Addr|Size)\[[^;]*;', src, re.M)
+    if len(decl) != 2:
+        print('the uboAddr/uboSize declarations are not found in nxgpu.c: %r' % decl)
+        return 1
     work = tempfile.mkdtemp(prefix='v1-ubo-')   # raises when it cannot: never an empty or relative path
     try:
         c = os.path.join(work, 'h.c')
         with open(c, 'w') as f:
-            f.write(HARNESS.replace('@CASE@', m.group(0)))
+            f.write(HARNESS.replace('@CASE@', m.group(0)).replace('@DECL@', '\n'.join(decl)))
         exe = os.path.join(work, 'h')
         r = subprocess.run(['gcc', '-O1', '-Wno-unused', '-o', exe, c], capture_output=True, text=True)
         if r.returncode:
