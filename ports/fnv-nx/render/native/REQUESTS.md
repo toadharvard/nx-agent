@@ -29,26 +29,15 @@ addresses in `N1_PLAN.md` §2.
 
 Test: `test_r2_vftable_dump` (expects `render/native/vftables.tsv` with slots 95-111 of NiDX9Renderer).
 
-**Status (S6n, round 3): not settleable locally; fallback taken.** MSVC 2008 SP1 was set up with
-`tools/equiv/setup_msvc.sh` and the four units that define the target classes' code were compiled to pristine
-objects outside the repository (niconsolerenderer.cpp, niconsolepersistentsrctexturerendererdata.cpp, tileshader.cpp,
-bsshadernolighting.cpp). Then `python3 -I loader/synth/vftable_dump.py NiDX9Renderer NiDX9RenderState TileShader
-BSShaderNoLighting --units ext/fnv_decomp/build/units.json --objdir <objs> --decomp ext/fnv_decomp --out
-render/native/vftables.tsv` (gitignored) gives:
-- BSShaderNoLighting: 72 slots from its MSVC object (settled).
-- NiDX9Renderer: no object emits `??_7NiDX9Renderer@@6B@`. The decomp spells the renderer `GraphicsRenderer` or as
-  per-function anonymous shells (`Rend74`, `E6F310Renderer`, ...), so the dump falls back to the decomp declaration:
-  143 slots, all `needs-exe`, and that declaration disagrees with the call-site slots (it puts SetBackgroundColor at
-  105 and GetBackgroundColor at 107, while 107 is the NiTriShape render from 0x00a745c0).
-- NiDX9RenderState and TileShader: unknown (no object, no usable declaration).
-
-Fallback: overrides.tsv now binds the NiDX9Renderer entry points by implementation address (0x00e74f40,
-0x00e69660, 0x00e7ccd0, 0x00e6f310, 0x00e6eea0, identified from the decomp bodies and, for 0x00e6eea0, its
-"NiDX9Renderer::BeginUsingRenderTargetGroup" log string), so they need no vftable. The virtuals with no known
-implementation address (slots 99, 100, 102, 107, 108) stay vslot rows marked N1-pending. Still needed from the side
-with the executable: the image address of NiDX9Renderer's vftable (its constructor stores it), plus those of
-NiDX9RenderState and TileShader, for a `vftables.tsv` built from the image (`tools/link/vslots.py`).
-`test_r2_vftable_dump` stays failing until then.
+**Status (S6n, round 4): done locally from the user's own exe.** `python3 -I render/native/tools/exe_vftables.py
+<FalloutNV.exe> NiDX9Renderer NiDX9RenderState TileShader BSShaderNoLighting --units ext/fnv_decomp/build/units.json
+--anchor TileShader=0x00bca760 --anchor BSShaderNoLighting=0x00bc9a50` writes the gitignored `vftables.tsv`
+(NiDX9Renderer and NiDX9RenderState from RTTI; the two BSShader classes have none and are found from an anchor slot
+plus the constructor's vptr store). It settles the slots: 95-102 as expected except 97 (Do_DisplayFrame is the
+engine's deferred-release function, not the Present at 0x00e7ccd0), and 107 = 108 (one function for shapes and
+strips). overrides.tsv now binds every row by address and records the slot as `vft=<class>:<slot>`, which
+`tests/s6n/test_overrides.py` checks against the dump when it exists. The round-3 MSVC-object attempt (no object
+emits `??_7NiDX9Renderer@@6B@`) is superseded. `test_r2_vftable_dump` passes where the dump exists.
 
 ## R3. Prepare rule NATIVE1: drop units
 
