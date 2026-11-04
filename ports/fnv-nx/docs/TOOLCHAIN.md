@@ -153,6 +153,12 @@ toolchain/gcc/build.sh dl build/tc /opt/fnvnx-a64 ext/buildscripts
 toolchain/devkita64/setup.sh /opt/fnvnx-a64 ext/libnx ext/devkita64-rules /opt/fnvnx-dkp   # DEVKITPRO + libnx
 ```
 
+The pipeline does the same from pinned sources (`tools/pipeline/build.py` toolchain stage, `TC_DL=auto`):
+`toolchain/sources.sh <dl> <src>` fetches the three tarballs (SHA-256 checked) and checks out buildscripts and
+devkita64-rules at fixed commits. The AArch64 Linux cross compiler the decomp units are compiled with (GCC 13.3.0 of
+Ubuntu 24.04, `-mabi=ilp32 -c`, glibc headers) is unpacked from pinned Ubuntu packages by `toolchain/cross/setup.sh
+<prefix>` (`toolchain/cross/packages.tsv`; no root) when the host's is not that build.
+
 `setup.sh` makes a `DEVKITPRO`-shaped tree (`devkitA64/` -> the prefix, `tools/bin/` with the Python packers and
 `bin2s`) and builds stock libnx into it with its own Makefile (`-Werror`, clean), so `switch.specs`/`switch.ld`
 are used unchanged for the host.

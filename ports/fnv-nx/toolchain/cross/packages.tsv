@@ -1,0 +1,21 @@
+# Ubuntu 24.04 (noble) packages of the AArch64 cross tools that compile the decomp units and run the link
+# (toolchain/cross/setup.sh). target: always unpacked; hostlib: unpacked only when the host lacks the library.
+# package	version	role	pool path (archive.ubuntu.com/ubuntu/ or a snapshot.ubuntu.com mirror)	sha256
+gcc-13-aarch64-linux-gnu-base	13.3.0-6ubuntu2~24.04.1cross1	target	pool/main/g/gcc-13-cross/gcc-13-aarch64-linux-gnu-base_13.3.0-6ubuntu2~24.04.1cross1_amd64.deb	2246058ef9d122c26c9ae9b2ab6843d2504806e68e45c7842dd30dda15e94723
+cpp-13-aarch64-linux-gnu	13.3.0-6ubuntu2~24.04.1cross1	target	pool/main/g/gcc-13-cross/cpp-13-aarch64-linux-gnu_13.3.0-6ubuntu2~24.04.1cross1_amd64.deb	6aafe2a7820e497263d871519326dc3e5bcecc0583cc49852c05abda8c1d2e55
+gcc-13-aarch64-linux-gnu	13.3.0-6ubuntu2~24.04.1cross1	target	pool/main/g/gcc-13-cross/gcc-13-aarch64-linux-gnu_13.3.0-6ubuntu2~24.04.1cross1_amd64.deb	154d549389d13010bc0ef2e89c7870e22c4193afa69335f8e57c5fc891e75578
+g++-13-aarch64-linux-gnu	13.3.0-6ubuntu2~24.04.1cross1	target	pool/main/g/gcc-13-cross/g++-13-aarch64-linux-gnu_13.3.0-6ubuntu2~24.04.1cross1_amd64.deb	aa6dcef263e296de40464b7a31cd5f6f8f93e2c407874dc07b176dd2e7e87650
+libgcc-13-dev-arm64-cross	13.3.0-6ubuntu2~24.04.1cross1	target	pool/main/g/gcc-13-cross/libgcc-13-dev-arm64-cross_13.3.0-6ubuntu2~24.04.1cross1_all.deb	eda9d79e18170fd46ee0ed62aa391f52bfe8c1a336d53162f2e1c0a675af548f
+libstdc++-13-dev-arm64-cross	13.3.0-6ubuntu2~24.04.1cross1	target	pool/main/g/gcc-13-cross/libstdc++-13-dev-arm64-cross_13.3.0-6ubuntu2~24.04.1cross1_all.deb	6682425bf6b14a00036684fb338a59a9c5ff89187d0feca5898cc8b0eaa1abfd
+libc6-dev-arm64-cross	2.39-0ubuntu8cross1	target	pool/main/c/cross-toolchain-base/libc6-dev-arm64-cross_2.39-0ubuntu8cross1_all.deb	04c6956de42669a53e620ad04a32475ea0bd4325808c227bf5ba52498f0d3f90
+libc6-arm64-cross	2.39-0ubuntu8cross1	target	pool/main/c/cross-toolchain-base/libc6-arm64-cross_2.39-0ubuntu8cross1_all.deb	76547cb8a4d7f057e23dcade45a17fc0f3d5c2fa0d3ff125bca56f7c4ecd7a07
+linux-libc-dev-arm64-cross	6.8.0-25.25cross1	target	pool/main/c/cross-toolchain-base/linux-libc-dev-arm64-cross_6.8.0-25.25cross1_all.deb	6a5a00b8ba8de66862e05493def87a5cbbb23b949601e45a5e3cbde56505cb6b
+binutils-aarch64-linux-gnu	2.42-4ubuntu2.10	target	pool/main/b/binutils/binutils-aarch64-linux-gnu_2.42-4ubuntu2.10_amd64.deb	6bb25a05c50681e240b453f6572d8066f2358dee984d0ff1dbcd08852642adf2
+libisl23	0.26-3build1.1	hostlib	pool/main/i/isl/libisl23_0.26-3build1.1_amd64.deb	4e040926e50fb961fae9bf95660189d468336a4a17bc321872c434fc8f777e7f
+libmpc3	1.3.1-1build1.1	hostlib	pool/main/m/mpclib3/libmpc3_1.3.1-1build1.1_amd64.deb	cebe6098bb3d66fdacac9dc6fe406a651216d9c00f27c3f9c159d15d96cdf864
+libmpfr6	4.2.1-1build1.1	hostlib	pool/main/m/mpfr4/libmpfr6_4.2.1-1build1.1_amd64.deb	aebc1c8b69a1f98bb43dfc268daecd181116dbf40b13ee4e822eb4bdd52b493a
+libgmp10	2:6.3.0+dfsg-2ubuntu6.1	hostlib	pool/main/g/gmp/libgmp10_6.3.0+dfsg-2ubuntu6.1_amd64.deb	285f8a505dfa8e1b33f357a9d8d3477ad35bf18c0b34771a6df4c25923f3ae0d
+libzstd1	1.5.5+dfsg2-2build1.1	hostlib	pool/main/libz/libzstd/libzstd1_1.5.5+dfsg2-2build1.1_amd64.deb	dfcf25061e07aad7efd3f4f880ba5ad4d4d09ebe7fc8cc77ab6b8a161d6d4727
+zlib1g	1:1.3.dfsg-3.1ubuntu2.3	hostlib	pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2.3_amd64.deb	376249c8de139568221dbb242318cc8cb8f02299e3a62b7432948e1754fbddf9
+libjansson4	2.14-2build2	hostlib	pool/main/j/jansson/libjansson4_2.14-2build2_amd64.deb	0cf79113f5d193ce9af2be2ff4b2c3b30dd4e55a0b6c47f7d28f6c849ff3aa60
+libsframe1	2.42-4ubuntu2.10	hostlib	pool/main/b/binutils/libsframe1_2.42-4ubuntu2.10_amd64.deb	72093fb456864db55f1352bfa5e952a94f7abaff64e71dff1fbf001db1984564
