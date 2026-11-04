@@ -11,16 +11,20 @@
 # Scene ids and their console scripts: tools/compare/scenes.json. Output per scene: <out>/<scene>/frame_<n>.png,
 # <out>/<scene>/console.txt (scof output), <out>/<scene>/run.json (timings, versions, ini hash).
 # Needs: wine (32-bit, wine32:i386), xvfb, xdotool, x11-apps (xwd), imagemagick (convert), python3.
-# Env: S16_W/S16_H (default 1280x720), S16_BOOT_S (seconds to the main menu, default 150),
+# Env: S16_SCENES (scene list, default scenes.json), S16_D9CAP (d3d9.dll of d9cap), S16_STOP_AFTER_FRAMES,
+#      S16_PCI_DEVICE (WineD3D's PCI device id, setup; default 000006cd, 00000193 = GeForce 8800 for SM3),
+#      S16_W/S16_H (default 1280x720), S16_BOOT_S (seconds to the main menu, default 150),
 #      S16_SETTLE_S (seconds after a scene script before capture, default 60), S16_DISPLAY (default :77).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+SCN=${S16_SCENES:-$HERE/scenes.json}   # the scene list (the sweep passes its own: cells.py scene)
 W=${S16_W:-1280}; H=${S16_H:-720}
 DISP=${S16_DISPLAY:-:77}
 
 wenv() {  # wenv <work dir>: the environment every wine call of this tool runs in
 	export WINEPREFIX=$1/pfx WINEARCH=win32 WINEDEBUG=${WINEDEBUG:--all}
-	export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d"
+	# S16_D9CAP=<d3d9.dll>: d9cap beside the exe journals the D3D9 stream (S16_CAPTURE, S16_CAPTURE_FRAMES, S16_CAPTURE_MAX_MB)
+	export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d${S16_D9CAP:+;d3d9=n,b}"
 	export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe MESA_GL_VERSION_OVERRIDE=${MESA_GL_VERSION_OVERRIDE:-}
 	[ -z "$MESA_GL_VERSION_OVERRIDE" ] && unset MESA_GL_VERSION_OVERRIDE
 	export LP_NUM_THREADS=${LP_NUM_THREADS:-$(nproc)}
@@ -40,7 +44,7 @@ mirror_data() {  # mirror_data <game dir> <prefix game dir>: Data/ as symlinks, 
 	# Data: only the load order of scenes.json. A .nam file makes the game load its add-on even when plugins.txt
 	# leaves it out (S5-data: "Caravan Pack items added to inventory"), so no .nam, no master outside "plugins",
 	# and no BSA named after such a master ("DeadMoney - Main.bsa"). Update.bsa and "Fallout - *.bsa" are base game.
-	local keep; keep=$(python3 -I -c 'import json,sys; print("\n".join(p.lower() for p in json.load(open(sys.argv[1]))["plugins"]))' "$HERE/scenes.json")
+	local keep; keep=$(python3 -I -c 'import json,sys; print("\n".join(p.lower() for p in json.load(open(sys.argv[1]))["plugins"]))' "$SCN")
 	find "$g/Data" -maxdepth 1 -type l -delete
 	for f in "$game"/Data/*; do
 		local b l stem; b=$(basename "$f"); l=$(echo "$b" | tr 'A-Z' 'a-z')
@@ -78,7 +82,7 @@ REGEDIT4
 "renderer"="gl"
 "VideoMemorySize"="1024"
 "VideoPciVendorID"=dword:000010de
-"VideoPciDeviceID"=dword:000006cd
+"VideoPciDeviceID"=dword:${S16_PCI_DEVICE:-000006cd}
 
 [HKEY_LOCAL_MACHINE\\Software\\Bethesda Softworks\\FalloutNV]
 "Installed Path"="C:\\\\FNV\\\\"
@@ -87,7 +91,7 @@ EOF
 	# load order: the base game only (scenes.json "plugins"); the same plugins.txt is given to our guest
 	local ad="$work/pfx/drive_c/users/$(id -un)/AppData/Local/FalloutNV"; mkdir -p "$ad"
 	python3 -I -c 'import json,sys; print("\r\n".join(json.load(open(sys.argv[1]))["plugins"]), end="\r\n")' \
-		"$HERE/scenes.json" >"$ad/plugins.txt"
+		"$SCN" >"$ad/plugins.txt"
 	python3 -I "$HERE/ref_ini.py" "$game/Fallout_default.ini" "$(docs_dir "$work")" --width "$W" --height "$H"
 	echo "setup: $work ($(du -sh "$work/pfx" | cut -f1))"
 }
@@ -110,11 +114,12 @@ cmd_run() {
 	local g; g=$(game_dir "$work")
 	# the scene's console script becomes .txt files in the game directory, run with `bat`, one per wait:<s> chunk
 	rm -f "$g"/s16_"$scene"_*.txt "$g"/s16_console_*.txt
-	local plan; plan=$(python3 -I "$HERE/scenes.py" chunks "$HERE/scenes.json" "$scene" "$g" "s16_$scene") || return 2
-	python3 -I "$HERE/scenes.py" state "$HERE/scenes.json" "$scene" "$g" "s16_$scene"
+	local plan; plan=$(python3 -I "$HERE/scenes.py" chunks "$SCN" "$scene" "$g" "s16_$scene") || return 2
+	python3 -I "$HERE/scenes.py" state "$SCN" "$scene" "$g" "s16_$scene"
 	python3 -I "$HERE/ref_ini.py" "$g/Fallout_default.ini" "$(docs_dir "$work")" --width "$W" --height "$H" >"$out/ini.txt"
-	local frames; frames=$(python3 -I "$HERE/scenes.py" get "$HERE/scenes.json" "$scene" frames)
-	local menu; menu=$(python3 -I "$HERE/scenes.py" get "$HERE/scenes.json" "$scene" menu)
+	local frames; frames=$(python3 -I "$HERE/scenes.py" get "$SCN" "$scene" frames)
+	local menu; menu=$(python3 -I "$HERE/scenes.py" get "$SCN" "$scene" menu)
+	if [ -n "${S16_D9CAP:-}" ]; then cp -f "$S16_D9CAP" "$g/d3d9.dll"; else rm -f "$g/d3d9.dll"; fi
 	xstart
 	local t0; t0=$(date +%s)
 	(cd "$g" && exec wine FalloutNV.exe >"$out/wine.log" 2>&1) &
@@ -129,6 +134,8 @@ cmd_run() {
 	fi
 	local i
 	for i in $(seq 0 $((frames - 1))); do shot "$out/frame_$i.png"; sleep "${S16_FRAME_GAP_S:-5}"; done
+	# S16_STOP_AFTER_FRAMES=1 (S5-data): end the game right after the shots, so a d9cap journal ends on the scene
+	if [ "${S16_STOP_AFTER_FRAMES:-0}" = 1 ]; then wineserver -k 2>/dev/null; sleep 2; menu=1; fi
 	if [ "$menu" != 1 ]; then
 		console "bat s16_${scene}_state"; sleep 10
 		shot "$out/after_state.png"
@@ -158,5 +165,5 @@ case "${1:-}" in
 	mirror) shift; mkdir -p "$2/Data"; mirror_data "$@" ;;   # tests: the Data mirror alone
 	run) shift; cmd_run "$@" ;;
 	versions) cmd_versions ;;
-	*) sed -n '2,15p' "$0"; exit 2 ;;
+	*) sed -n '2,18p' "$0"; exit 2 ;;
 esac

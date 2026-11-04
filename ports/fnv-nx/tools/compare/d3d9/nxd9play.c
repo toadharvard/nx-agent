@@ -5,6 +5,7 @@
  *
  *   nxd9play.exe <file.nxd9> -o <dir> [--per-draw] [--until-draw N] [--frame F] [--frames A-B]
  *
+ *   --per-draw-at a,b,... is --per-draw for those draws only (of the --frame frame): a bisection's probes.
  *   --draw-stats <tsv> writes, for each draw of the frames --frame selects (all without it): frame, draw, render
  *   target 0's width, height and D3DFORMAT, and the number of its pixels the draw changed (-1 when the target cannot
  *   be read back): the reference's coverage, for the GPU model. <dir>/frames.tsv gives each frame's execution time
@@ -127,6 +128,7 @@ static IDirect3DSurface9 *backbuf, *autods;
 static uint32_t W, H, frame_no, draw_no, in_scene;
 static const char *outdir; static int per_draw; static long until_draw = -1, only_frame = -1;
 static long png_first = 0, png_last = -1;
+static char *per_draw_at;          /* --per-draw-at a,b,...: dump only these draws of the --frame frame (a bisection's probes) */
 static FILE *draw_stats;            /* --draw-stats <tsv>: pixels each draw changes on render target 0 (frames per --frame) */
 static FILE *frame_times;           /* <dir>/frames.tsv: frame, ms (execution of the frame's records, PNG writes excluded) */
 static LARGE_INTEGER qpf, t_frame0; static double png_ms;   /* --frames A-B: write f<frame>.png only for A..B (B -1: to the end) */
@@ -309,9 +311,14 @@ static int draw_allowed(void) {
     return !(until_draw >= 0 && frame_selected() && (long)draw_no > until_draw);
 }
 static int stats_frame(void) { return only_frame < 0 || (long)frame_no == only_frame; }
+static int probe_draw(void) {
+    if (!per_draw_at) return 1;
+    char key[16]; snprintf(key, sizeof key, ",%u,", draw_no);
+    return strstr(per_draw_at, key) != NULL;
+}
 static void after_draw(void) {
     draw_stat();
-    if (per_draw && frame_selected()) {
+    if (per_draw && frame_selected() && probe_draw()) {
         IDirect3DSurface9 *rt = NULL; char p[1024];
         if (SUCCEEDED(IDirect3DDevice9_GetRenderTarget(dev, 0, &rt))) {
             snprintf(p, sizeof p, "%s/f%05u_d%05u.png", outdir, frame_no, draw_no);
@@ -562,6 +569,10 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--per-draw")) per_draw = 1;
         else if (!strcmp(argv[i], "--until-draw") && i + 1 < argc) until_draw = atol(argv[++i]);
         else if (!strcmp(argv[i], "--frame") && i + 1 < argc) only_frame = atol(argv[++i]);
+        else if (!strcmp(argv[i], "--per-draw-at") && i + 1 < argc) {
+            size_t n = strlen(argv[++i]); per_draw_at = malloc(n + 3); per_draw = 1;
+            per_draw_at[0] = ','; memcpy(per_draw_at + 1, argv[i], n); per_draw_at[n + 1] = ','; per_draw_at[n + 2] = 0;
+        }
         else if (!strcmp(argv[i], "--draw-stats") && i + 1 < argc) {
             draw_stats = fopen(argv[++i], "w");
             if (!draw_stats) { fprintf(stderr, "nxd9play: cannot write %s\n", argv[i]); return 2; }

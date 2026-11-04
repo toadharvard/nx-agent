@@ -36,7 +36,29 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, 'render', 'verify', 'shaders'))
 sys.path.insert(0, os.path.join(ROOT, 'render', 'verify'))
 import nxd9io
-from synth import RS, SS, A8R8G8B8, fbits, mips, checker, gradient
+from synth import RS, SS, A8R8G8B8, DXT1, fbits, mips, checker, gradient, dxt1
+
+# parameter sets (--variant): one is applied to every program of a build; the sweep runs several per program
+VARIANTS = {
+    'base':  {},
+    'zero':  {'const': 'zero'},                     # every non-matrix float constant 0
+    'neg':   {'const': 'neg'},                      # constants in [-1, 0]
+    'large': {'const': 'large'},                    # constants in [-1000, 1000]
+    'dxt':   {'tex': 'dxt1'},                       # the 2D textures as DXT1 (with mips)
+    'atest': {'rs': {'ALPHATESTENABLE': 1, 'ALPHAREF': 128, 'ALPHAFUNC': 5}},    # alpha test GREATER 128
+    'fog':   {'rs': {'FOGENABLE': 1, 'FOGTABLEMODE': 3, 'FOGCOLOR': 0xff8040c0}, 'fog': True},   # linear table fog
+}
+VARIANT = {'v': VARIANTS['base']}
+SHARD = {'k': 1, 'n': 1}   # --shard k/N: the programs whose hash % N == k - 1
+
+
+def cval(r, lo, hi):
+    """one constant component under the variant's range (VS matrices are set apart and stay identity)"""
+    m = VARIANT['v'].get('const')
+    if m == 'zero': return 0.0
+    if m == 'neg': return r.uniform(-1, 0)
+    if m == 'large': return r.uniform(-1000, 1000)
+    return r.uniform(lo, hi)
 
 FORMAT = 'fnvnx-perm/1'
 USAGE = {'POSITION': 0, 'BLENDWEIGHT': 1, 'BLENDINDICES': 2, 'NORMAL': 3, 'PSIZE': 4, 'TEXCOORD': 5, 'TANGENT': 6,
@@ -82,13 +104,20 @@ class Capture:
         a, b, faces = tex
         sz = 64
         lv = 7
-        self.w.rec('TEX ', struct.pack('<6I', 1, A8R8G8B8, sz, sz, lv, 0) +
-                   b''.join(struct.pack('<I', len(l)) + l for l in tex_levels(a, sz, sz, lv)))
-        self.w.rec('TEX ', struct.pack('<6I', 2, A8R8G8B8, sz, sz, lv, 0) +
-                   b''.join(struct.pack('<I', len(l)) + l for l in tex_levels(b, sz, sz, lv)))
+        for tid, px in ((1, a), (2, b)):
+            if VARIANT['v'].get('tex') == 'dxt1':
+                ls = [dxt1(m, max(1, sz >> i), max(1, sz >> i)) for i, m in enumerate(tex_levels(px, sz, sz, lv))]
+                self.w.rec('TEX ', struct.pack('<6I', tid, DXT1, sz, sz, lv, 0) + b''.join(struct.pack('<I', len(l)) + l for l in ls))
+            else:
+                self.w.rec('TEX ', struct.pack('<6I', tid, A8R8G8B8, sz, sz, lv, 0) +
+                           b''.join(struct.pack('<I', len(l)) + l for l in tex_levels(px, sz, sz, lv)))
         cube = b''.join(bytes(f) for f in faces)
         self.w.rec('TEX ', struct.pack('<6I', 3, A8R8G8B8, 16, 16, 1, 2) + struct.pack('<I', len(cube)) + cube)
         self.w.u32('RS  ', RS['CULLMODE'], 1)
+        for k, v in VARIANT['v'].get('rs', {}).items():
+            self.w.u32('RS  ', RS[k], v)
+        if VARIANT['v'].get('fog'):
+            self.w.u32('RS  ', RS['FOGSTART'], fbits(0.2)); self.w.u32('RS  ', RS['FOGEND'], fbits(0.8))
         self.w.u32('RS  ', 7, 0)     # ZENABLE false: no depth buffer
         self.w.u32('RS  ', RS['ZWRITEENABLE'], 0)
         for s in range(16):
@@ -169,7 +198,7 @@ def ps_job(j, r):
         verts += struct.pack('<4f2I2f', *p[:4], c0, c1, *p[4:])
     vsc = {k: [r.uniform(-1, 1) for _ in range(4)] for k in range(1, 16)}
     vsc[1] = [r.uniform(0.5, 2), r.uniform(-1, 1), r.uniform(-1, 1), r.uniform(0.5, 2)]
-    psc = {c['reg']: [r.uniform(0, 1) for _ in range(4)] for c in j.get('constants', []) if c['set'] == 'float'}
+    psc = {c['reg']: [cval(r, 0, 1) for _ in range(4)] for c in j.get('constants', []) if c['set'] == 'float'}
     samplers = {s['reg']: (3 if s['type'] == 'cube' else 1 + (s['reg'] & 1)) for s in j.get('samplers', [])}
     return elems, 32, verts, [0, 1, 2, 0, 2, 3], vsc, psc, samplers
 
@@ -208,7 +237,7 @@ def vs_job(j, r, glsl=''):
         for gx in range(2):
             a, b, c, d = gy * 3 + gx, gy * 3 + gx + 1, gy * 3 + gx + 3, gy * 3 + gx + 4
             idx += [a, b, c, b, d, c]
-    vsc = {k: [r.uniform(-1, 1) for _ in range(4)] for k in range(256)}   # every register: relative reads included
+    vsc = {k: [cval(r, -1, 1) for _ in range(4)] for k in range(256)}   # every register: relative reads included
     for c in j.get('ctab', []):   # matrices: identity rows (bones, ModelViewProj, ...), z scaled into (0, 1)
         if c.get('set') == 'float' and c.get('class', '').startswith('matrix'):
             rows = max(1, c.get('rows', 4))
@@ -225,17 +254,24 @@ def vs_job(j, r, glsl=''):
     return elems, off, verts, idx, vsc
 
 
-def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=None):
+def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=None, variant='base'):
+    VARIANT['v'] = VARIANTS[variant]
     PERTURB['eps'], PERTURB['rng'] = perturb, random.Random(0x5160)
     os.makedirs(out, exist_ok=True)
     tex = make_textures()
-    man = {'format': FORMAT, 'package': os.path.basename(sdp), 'size': size, 'perturb': perturb, 'captures': {}, 'skipped': []}
+    sdps = sdp if isinstance(sdp, list) else [sdp]
+    man = {'format': FORMAT, 'package': ','.join(os.path.basename(x) for x in sdps), 'size': size, 'perturb': perturb, 'variant': variant,
+           'captures': {}, 'skipped': []}
     from sdpfuzz import extract, combo_ps
-    progs = extract(sdp)
+    progs = {}
+    for x in sdps:   # several packages: every program, named <package stem>:<name> past the first package (the same
+        stem = os.path.splitext(os.path.basename(x))[0]   # name differs in bytecode between packages); deduplicated by hash below
+        for n, bc in extract(x).items():
+            progs[n if x == sdps[0] else f'{stem}:{n}'] = bc
     with tempfile.TemporaryDirectory() as work:
         tr = os.path.join(work, 'tr')
         os.makedirs(tr)
-        r = subprocess.run([sdp2, '-o', tr, '--glsl', '--no-dksh', sdp], capture_output=True, text=True)
+        r = subprocess.run([sdp2, '-o', tr, '--glsl', '--no-dksh'] + sdps, capture_output=True, text=True)
         drv = {}
         for m in ('drv2', 'drv3'):
             bc = assemble(asm, os.path.join(ROOT, 'tests', 'v6n', 'shaders', m + '.vsa'), work, m)
@@ -245,6 +281,7 @@ def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=No
             bc = progs[name]
             h = '%016x' % nxd9io.fnv1a64(bc)
             if only and h not in only and name not in only: continue
+            if SHARD['n'] > 1 and int(h, 16) % SHARD['n'] != SHARD['k'] - 1: continue
             if h in seen: continue
             seen.add(h)
             jp, gp = os.path.join(tr, h + '.json'), os.path.join(tr, h + '.glsl')
@@ -291,18 +328,23 @@ def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=No
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('cmd', choices=['build'])
-    ap.add_argument('--sdp', required=True); ap.add_argument('--asm', required=True)
+    ap.add_argument('--sdp', required=True, action='append', help='a shader package (repeat for several)')
+    ap.add_argument('--asm', required=True)
+    ap.add_argument('--shard', help='k/N: only the programs whose hash %% N == k - 1')
     ap.add_argument('--sdp2dksh', required=True); ap.add_argument('--out', required=True)
     ap.add_argument('--per-capture', type=int, default=64); ap.add_argument('--size', type=int, default=96)
     ap.add_argument('--only'); ap.add_argument('--programs')
+    ap.add_argument('--variant', default='base', choices=sorted(VARIANTS), help='parameter set (VARIANTS)')
     ap.add_argument('--salts', help='JSON {hash: salt}: another seed for those programs (permcover.py)')
     ap.add_argument('--perturb', type=float, default=0.0, help='scale every float input by 1 + eps * u (conditioning run)')
     a = ap.parse_args()
     only = set(a.only.split(',')) if a.only else None
     if a.programs:
         only = (only or set()) | {l.strip() for l in open(a.programs) if l.strip() and not l.startswith('#')}
+    if a.shard:
+        SHARD['k'], SHARD['n'] = map(int, a.shard.split('/'))
     m = build(a.sdp, a.asm, a.sdp2dksh, a.out, a.per_capture, a.size, only, a.perturb,
-              json.load(open(a.salts)) if a.salts else None)
+              json.load(open(a.salts)) if a.salts else None, a.variant)
     print(f"perm: {m['programs']} programs in {len(m['captures'])} captures, {len(m['skipped'])} skipped")
     return 0
 
