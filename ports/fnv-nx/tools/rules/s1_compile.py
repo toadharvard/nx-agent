@@ -2157,6 +2157,36 @@ def r_anonymous_aggregate_members(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- INC1
+#
+# MSVC looks a quoted #include up in the including file's directory first, and on Windows file names are not case
+# sensitive: in src/fallout/ai/actor.cpp `#include "Actor.h"` is the unit header src/fallout/ai/actor.h. On the
+# target the case-sensitive lookup misses it there and takes include/Actor.h, the canonical class header, which
+# lacks the declarations the unit was written against (actor.cpp, playercharacter.cpp, bgsentrypoint.cpp, the
+# nimain *_types headers: 41 includes). INC1 spells such an include as the file in the including directory is
+# spelled: the header MSVC read.
+
+INC_QUOTED = re.compile(r'^([ \t]*#[ \t]*include[ \t]*")([^"]+)(")', re.M)
+_DIR_LISTING = {}
+
+def r_include_case(path, text, stats):
+    """INC1: a quoted #include that names, up to case, a file in the including directory -> that file (see above)."""
+    if '#include' not in text: return text
+    here = os.path.dirname(os.path.abspath(path))
+    def sub(m):
+        inc = m.group(2)
+        full = os.path.normpath(os.path.join(here, inc))
+        if os.path.isfile(full): return m.group(0)
+        d, b = os.path.split(full)
+        if d not in _DIR_LISTING:
+            try: _DIR_LISTING[d] = {f.lower(): f for f in os.listdir(d)}
+            except OSError: _DIR_LISTING[d] = {}
+        real = _DIR_LISTING[d].get(b.lower())
+        if not real: return m.group(0)
+        stats['INC1'] += 1
+        return m.group(1) + os.path.join(os.path.dirname(inc), real).replace(os.sep, '/') + m.group(3)
+    return INC_QUOTED.sub(sub, text)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2181,5 +2211,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout]

@@ -332,6 +332,14 @@ check('ANON2 raw storage for a member with a destructor in an anonymous struct o
       ['alignas(String) unsigned char activationText[sizeof(String)]; /* fnv-nx ANON2 */',
        'if ((*(String*)(slot->activationText)).Len())', 'int value;'])
 
+# ---- INC1
+_i = tempfile.mkdtemp()
+os.makedirs(os.path.join(_i, 'src', 'ai'))
+open(os.path.join(_i, 'src', 'ai', 'actor.h'), 'w').write('// unit header\n')
+check('INC1 spells an include as the local file is spelled',
+      run(s1.r_include_case, '#include "Actor.h"\n#include "Other.h"\n#include <Windows.h>\n', os.path.join(_i, 'src', 'ai', 'actor.cpp')),
+      ['#include "actor.h"', '#include "Other.h"', '#include <Windows.h>'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
