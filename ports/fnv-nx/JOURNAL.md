@@ -2849,3 +2849,16 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   | V1 | verification (D14) | TAIL1, stage_after, loader SizeOfImage, job_gamedata, FTOI2, fastcall non-POD |
   - The farms (census, compile, link, full, static, eq, fuzz x26) keep running on the head as before.
 * **next** - Each stream's own entry, with `parent: J-0129`.
+
+### J-0130 | 2026-11-04 | stream: orchestration,S6n-native-render | status: wip | parent: J-0129
+
+* **correction** - S6n-native-render is the separate render machine, not a local agent. It works on branch
+  `claude/port-nsw-render`; its last report is render-006, selfcheck PASS.
+  - It was blocked on three things: R2 vftable addresses from FalloutNV.exe, the `shaderpackage*.sdp` files, and a
+    console run.
+  - The local duplicate started in J-0129 was stopped before it committed anything.
+* **did** - The owner's 16 `Data/Shaders/shaderpackage*.sdp` files and a SHA256SUMS file are on the private branch
+  `gamedata/shaders`, next to `gamedata/exe` and `gamedata/gog`. The render machine has these branches, and it is
+  asked for a "render a captured frame or scene to PNG" host entry point for S16-compare.
+* **next** - Render machine: R2 from the exe, the shader packages, then that entry point. The console run waits for
+  a solid build.
