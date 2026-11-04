@@ -270,7 +270,7 @@
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "not traced whether bhkWorld uses the MT simulation (PERF.md 6.4)"
+   "status": "MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the pool is made in the unreconstructed EnsureObjectsCreated (PERF.md 6.9)"
   },
   {
    "id": "threaded_anim",
@@ -284,7 +284,7 @@
    "to": "ai-linear",
    "basis": "E",
    "needs_hardware": false,
-   "status": "PC default on (hearsay names); runs on the AI linear threads"
+   "status": "bUseThreaded* named from the exe (defaults 0, PC ini 1; ini.cpp sets 1); readers not reconstructed; queued controller updates return to main after the 0x008c7990 join, plain cross-thread fields in the hand-off (PERF.md 6.9): not counted until an mtqemu case of the protocol passes"
   },
   {
    "id": "instancing",
