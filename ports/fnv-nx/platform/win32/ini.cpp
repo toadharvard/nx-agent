@@ -251,6 +251,8 @@ const PortDefault k_port_defaults[] = {
     {"General", "bUseThreadedMorpher", "1"},
     {"General", "bUseThreadedParticleSystem", "1"},
     {"General", "bUseThreadedTempEffects", "1"},
+    /* not bMTRendering:Display: on the PC code the worker would share main's batch renderer and index a NULL second
+     * one (docs/PERF.md 6.8); it needs port code first. */
 };
 
 /* the base name of an ini path, lower case */
