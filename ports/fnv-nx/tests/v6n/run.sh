@@ -48,6 +48,18 @@ defect() {   # name -> 0 when the defect is fixed (test passes)
 	border_swizzle) py "$V/pixdiff.py" --target s6ngl "$T/defects/border_swizzle.scene" ;;
 	y_fill_bias) local r=0; py "$V/pixdiff.py" --target s6ngl "$T/defects/y_fill_bias.scene" || r=1
 		py "$V/rastercheck.py" v6n_s6ngl || r=1; return $r ;;
+	screen_space_halfpixel)
+		local S=${S6N_TESTS:-$ROOT/build/v6n/s6n-tests} N=$ROOT/render/native
+		make -s -C "$ROOT/tests/s6n" n1 OUT="$S" > /dev/null || return 2
+		g++ -std=c++17 -O1 -I"$N/include" -I"$N/front" -I"$N/n1" -I"$S/shaders" -I"$S" -o "$S/v6n_ssh" "$T/defects/screen_space_halfpixel.cpp" \
+			"$N/n1/renderer.cpp" "$S/front.o" "$S/nxgl.o" "$S/gpu_dispatch.o" "$S/d3d9_state_s.o" "$S/nx_shaders.o" -lEGL -lm || return 2
+		"$S/v6n_ssh" ;;
+	camera_port_rounding)
+		local S=${S6N_TESTS:-$ROOT/build/v6n/s6n-tests} N=$ROOT/render/native
+		make -s -C "$ROOT/tests/s6n" n1 OUT="$S" > /dev/null || return 2
+		g++ -std=c++17 -O1 -I"$N/include" -I"$N/front" -I"$N/n1" -I"$S/shaders" -I"$S" -o "$S/v6n_cpr" "$T/defects/camera_port_rounding.cpp" \
+			"$N/n1/renderer.cpp" "$S/front.o" "$S/nxgl.o" "$S/gpu_dispatch.o" "$S/d3d9_state_s.o" "$S/nx_shaders.o" -lEGL -lm || return 2
+		"$S/v6n_cpr" ;;
 	*) echo "unknown defect $1"; return 2 ;;
 	esac
 }
