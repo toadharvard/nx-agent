@@ -48,6 +48,8 @@ def match_brace(text, open_at):
 # `union __declspec(intrin_type) __declspec(align(16)) __m128 {...}`, also spelled as a struct (`{ float x, y, z, w; }`)
 INTRIN_UNION = re.compile(r'(?:typedef\s+)?(?:union|struct)\s+(?:__declspec\([^)]*\(?[^)]*\)?\)\s*)*(__m128[id]?|__m64)\b[^;{]*\{')
 
+INTRIN_ELABORATED = re.compile(r'\b(?:union|struct)\s+(__m128[id]?|__m64)\b(?!\s*\{)(?=\s*[\w\*&;,)])')
+
 def r_sse_local_types(path, text, stats):
     """SSE1: drop local copies of the MSVC <xmmintrin.h> vector unions (or structs); the global sse2neon type is used
     instead."""
@@ -60,7 +62,20 @@ def r_sse_local_types(path, text, stats):
         out.append(text[pos:m.start()]); out.append('/* fnv-nx SSE1: local %s removed */' % m.group(1)); pos = end
         stats['SSE1'] += 1
     out.append(text[pos:])
-    return ''.join(out)
+    text = ''.join(out)
+    # elaborated references to those types (`typedef union __m128 hkQuadReal;`): the global type is a typedef
+    if 'union __m' in text or 'struct __m' in text:
+        text, n0 = re.subn(r'\b(?:union|struct)\s+(?:__m128[id]?|__m64)\s*;', '', text)    # forward declarations
+        text, n = INTRIN_ELABORATED.subn(r'\1', text)
+        n += n0
+        stats['SSE1'] += n
+    # MSVC's union initializer of a __m128 (first member m128_f32[4]): `= {{a, b, c, d}}` -> the vector's `{a, b, c, d}`
+    if '{{' in text.replace(' ', '') and '__m128' in text:
+        names = ['__m128'] + re.findall(r'\btypedef\s+(?:const\s+)?__m128\s+(\w+)\s*;', text)
+        init = re.compile(r'\b((?:%s)\s+\w+\s*=\s*)\{\s*\{([^{}]*)\}\s*\}' % '|'.join(names))
+        text, n = init.subn(r'\1{\2}', text)
+        stats['SSE1'] += n
+    return text
 
 # one prototype; several may share a line (`extern"C"__m128 _mm_load_ss(float const*_A);extern"C"void ...`)
 MM_PROTO = re.compile(r'(?:^|(?<=[;{}]))[ \t]*(?:extern\s*(?:"C"\s*)?)?(?:static\s+)?(?:inline\s+)?(?:const\s+)?(?:::)?(?:\w+::)*'
@@ -281,10 +296,14 @@ def platform_names():
 PLATFORM = None
 # path -> {name: indices of the reference parameters of the decomp prototype DECL1 dropped} (CALL1 passes addresses)
 DECL1_REFS = {}
-PROTO = re.compile(r'^[ \t]*(?:extern\s+"C"\s+)?(?:__declspec\(\w+\)\s+)?(?:static\s+)?(?:inline\s+)?'
+PROTO = re.compile(r'^[ \t]*(?:extern\s+"C"\s+)?(?:__declspec\(\w+\)\s+)*(?:static\s+)?(?:inline\s+)?'
                    r'[A-Za-z_][\w \t\*&:<>,]*?[\s\*&](?:(?:__cdecl|__stdcall|__fastcall|WINAPI|__declspec\(\w+\))\s*)*'
-                   r'(\w+|operator\s+(?:new|delete)(?:\s*\[\s*\])?)\s*\([^;{}]*\)\s*(?:throw\s*\([^)]*\)\s*)?;[ \t]*$',
+                   r'(\w+|operator\s+(?:new|delete)(?:\s*\[\s*\])?)\s*\([^;{}]*\)\s*(?:throw\s*\([^)]*\)\s*)?;[ \t]*(?://[^\n]*)?$',
                    re.M)
+
+# the head of a prototype that goes on on the next line (`extern "C" __declspec(dllimport) HANDLE` / `__stdcall f(...);`)
+PROTO_HEAD = re.compile(r'[ \t]*(?:extern\s+"C"\s+)?(?:__declspec\(\w+\)\s+)*'
+                        r'(?!(?:return|else|case|goto|public|private|protected|typedef)\b)[A-Za-z_]\w*(?:[ \t]*[\*&]+)?[ \t]*\n$')
 
 def r_platform_protos(path, text, stats):
     """DECL1: drop the decomp's own prototypes of CRT / Win32 functions (and namespace-scope operator new/delete)
@@ -318,8 +337,12 @@ def r_platform_protos(path, text, stats):
             ps = re.search(r'\(([^;{}]*)\)', text[m.end(1):m.end()]).group(1).split(',')
             refs = [i for i, p in enumerate(ps) if re.search(r'&(?!&)', p)]
             if refs: DECL1_REFS.setdefault(path, {})[name] = refs
-        nl = '\n' * m.group(0).count('\n')
-        out.append(text[pos:m.start()])
+        start = m.start()
+        if start > 0 and text[start - 1] == '\n':          # `extern "C" __declspec(dllimport) HANDLE` on the line above
+            ls = text.rfind('\n', 0, start - 1) + 1
+            if ls >= pos and PROTO_HEAD.match(text, ls, start): start = ls
+        nl = '\n' * text.count('\n', start, m.end())
+        out.append(text[pos:start])
         # in a namespace N other than std the name must stay visible as N::name (a local template or overload
         # would hide the global one): a using-declaration of the platform function takes the prototype's place
         alias = ('using ::%s; ' % name if not is_op and name not in MACRO_NAMES and spaces

@@ -119,6 +119,12 @@ got = run(s1.r_msvc_tokens, 'extern"C"enum E { A };\nchar pad[0xae-0x34];\nlong 
           'inline __forceinline void f();\n')
 check('LEX1 MSVC token spellings', got, ['extern"C" enum', '0xae -0x34', '0xff00ffffULL', '5LL', '\n__forceinline void f'],
       ['ui64', 'inline __forceinline'])
+check('LEX1 functional casts to multi-word types',
+      run(s1.r_msvc_tokens, 'void f() {\n    key = unsigned long(-1);\n    return key != unsigned long(-1);\n'
+          '    p = reinterpret_cast<void*>(unsigned int(id));\n    construct(n, unsigned int());\n'
+          '    unsigned long (*fp)(int) = 0;\n}\n'),
+      ['key = ((unsigned long)(-1));', 'key != ((unsigned long)(-1));', 'reinterpret_cast<void*>(((unsigned int)(id)))',
+       'construct(n, ((unsigned int)(0)));', 'unsigned long (*fp)(int) = 0;'])
 check('LEX1 strings and comments untouched', run(s1.r_msvc_tokens, 'const char* s = "0xae-1 5i64"; // 0x1e+2\n'),
       ['"0xae-1 5i64"', '// 0x1e+2'])
 
@@ -200,6 +206,17 @@ check('TPL1 this-> for dependent base members', got,
       ['  this->own(0,count);', 'if(this->size>0) this->data[0]', 'int cap=this->capacity; extra=cap;',
        'void f(int size) { this->data[size]=T(); other.size=1; }', 'static void g() { int capacity=0; }',
        'void Arr<T>::h() { this->capacity = 0; }'], ['this->extra', 'this->value', 'this->size]'])
+check('TPL1 base with nested template arguments',
+      run(s1.r_dependent_base_members, 'template <class T, class A> class Arr\n{\n  public:\n    T* m_pBase;\n'
+          '    unsigned short m_usMaxSize, m_usSize;\n};\ntemplate <class T> class Prim : public Arr<T, Alloc<T> >\n{\n'
+          '  public:\n    void SetAt(unsigned int i)\n    {\n        if (i >= m_usSize) m_usSize = i + 1;\n    }\n};\n'),
+      ['if (i >= this->m_usSize) this->m_usSize = i + 1;'])
+with open(os.path.join(_d, 'src', 'lb.h'), 'w') as _h:
+    _h.write('template <class A, class T> class ListBase\n{\n  public:\n    T* m_pkHead;\n    unsigned int m_uiCount;\n};\n')
+check('TPL1 dependent base defined in an included header',
+      run(s1.r_dependent_base_members, '#include "lb.h"\ntemplate <class T> class PList : public ListBase<int, T>\n{\n'
+          '  public:\n    PList()\n    {\n        m_pkHead = 0;\n    }\n};\n', os.path.join(_d, 'src', 'pl.h')),
+      ['        this->m_pkHead = 0;'])
 check('TPL1 non-dependent base: untouched',
       run(s1.r_dependent_base_members, 'struct Base { int size; };\ntemplate<class T> struct D : Base {\n'
           ' void f() { size = 0; }\n};\n'), (), ['this->'])
@@ -233,6 +250,53 @@ check('SSE1 local struct __m128 removed',
 check('ANON1 names an unnamed struct in a return type',
       run(s1.r_anonymous_return_types, 'struct G\n{\n    struct\n    {\n        float f;\n    }* Float();\n};\n'),
       ['struct fnvnx_anon_Float {', 'fnvnx_anon_Float* Float('], ['}* Float'])
+
+# ---- ENUM1
+_e = tempfile.mkdtemp()
+os.makedirs(os.path.join(_e, 'src'))
+with open(os.path.join(_e, 'src', 'a.h'), 'w') as _h:
+    _h.write('enum DIALOGUE_TYPE;\nenum WIDE;\nenum WIDE { W = 0x80000000 };\n')
+s1._OPAQUE_NAMES = None
+got = run(s1.r_opaque_enums, 'enum DIALOGUE_TYPE;\nenum DIALOGUE_TYPE\n{\n    A = 0\n};\nenum WIDE;\nenum Other { B };\n',
+          os.path.join(_e, 'src', 'b.cpp'))
+s1._OPAQUE_NAMES = None
+check('ENUM1 opaque enum gets int as its base, and so does its definition', got,
+      ['enum DIALOGUE_TYPE : int;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE;', 'enum Other { B };'])
+
+# ---- DECL1 with a trailing comment
+check('DECL1 drops a CRT prototype that ends in a // comment',
+      prepare.r_platform_protos('/x/src/a.h', 'extern "C" char* __cdecl strchr(const char*, int);  // CRT strchr (x)\n',
+                                Counter()), ['#include <string.h> /* fnv-nx DECL1 */'], ['__cdecl strchr'])
+
+check('SSE1 elaborated __m128 references',
+      prepare.r_sse_local_types('x.cpp', 'typedef union __m128 hkQuadReal;\nvoid f(struct __m128* p);\n', Counter()),
+      ['typedef __m128 hkQuadReal;', 'void f(__m128* p);'])
+
+check('DECL1 drops a prototype whose head is on the line above',
+      prepare.r_platform_protos('/x/src/a.cpp', 'int a;\nextern "C" __declspec(dllimport) HANDLE\n    __stdcall CreateThread(void*, '
+                                'unsigned long, LPTHREAD_START_ROUTINE, void*, unsigned long, unsigned long*);\nvoid g();\n',
+                                Counter()), ['int a;\n#include "fnvnx_win32.h" /* fnv-nx DECL1 */\n\nvoid g();'], ['HANDLE'])
+
+# ---- ELAB1
+check('ELAB1 elaborated uses of a class named like a Win32 function',
+      run(s1.r_function_named_classes, 'struct HeapAlloc\n{\n    int n;\n};\nvoid f(HeapAlloc* a, HeapAlloc& b);\n'
+          'void* g() { return HeapAlloc(0, 0, 4); }\n'),
+      ['void f(struct HeapAlloc* a, struct HeapAlloc& b);', 'return HeapAlloc(0, 0, 4);', 'struct HeapAlloc\n{'])
+
+check('DECL1 drops a prototype with several __declspec',
+      prepare.r_platform_protos('/x/src/a.h', 'extern "C" __declspec(dllimport) __declspec(nothrow) __declspec(noalias) long '
+                                '__stdcall InterlockedIncrement(long*);\n', Counter()),
+      ['#include "fnvnx_win32.h" /* fnv-nx DECL1 */'], ['noalias'])
+
+check('SSE1 MSVC union initializer of a __m128',
+      prepare.r_sse_local_types('x.cpp', 'typedef __m128 Quad;\nstatic const __m128 a = {{-0.0f, 1.0f, 2.0f, 3.0f}};\n'
+                                'static const Quad b = { { 0.5f, 0.5f, 0.5f, 0.5f } };\n', Counter()),
+      ['__m128 a = {-0.0f, 1.0f, 2.0f, 3.0f};', 'Quad b = { 0.5f, 0.5f, 0.5f, 0.5f };'])
+
+check('ELAB1 renames a typedef named like a Win32 function',
+      run(s1.r_function_named_classes, 'typedef unsigned int(__fastcall* VirtualQuery)(void* object);\n'
+          'unsigned int f(void* p) { return ((VirtualQuery)(*(void***)p)[3])(p); }\n'),
+      ['(__fastcall* fnvnx_t_VirtualQuery)(void* object);', '((fnvnx_t_VirtualQuery)(*(void***)p)[3])(p)'])
 
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')

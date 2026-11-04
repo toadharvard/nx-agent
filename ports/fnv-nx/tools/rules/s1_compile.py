@@ -149,7 +149,7 @@ def r_sal_attributes(path, text, stats):
 
 SDK_TAGS = ('tagRECT tagPOINT tagSIZE _FILETIME _SYSTEMTIME _GUID _RTL_CRITICAL_SECTION _LARGE_INTEGER _ULARGE_INTEGER '
             '_OVERLAPPED _WIN32_FIND_DATAA _SYSTEM_INFO tagMSG tagPALETTEENTRY _LUID _RGNDATA tagBITMAPFILEHEADER '
-            'tagBITMAPINFOHEADER _iobuf _MEMORYSTATUS').split()
+            'tagBITMAPINFOHEADER _iobuf _MEMORYSTATUS CRITICAL_SECTION').split()   # CRITICAL_SECTION: a struct copy of the PC type
 SDK_TYPEDEFS = {n: '"fnvnx_win32.h"' for n in '''DWORD BOOL BYTE WORD LONG UINT HANDLE HRESULT LPVOID ULONG_PTR
     DWORD_PTR WPARAM LPARAM LRESULT HINSTANCE HMODULE HWND HHOOK HKEY HDC HICON HMENU HBRUSH HFONT HBITMAP HCURSOR
     UINT_PTR LONG_PTR INT_PTR ATOM COLORREF LPSTR LPCSTR'''.split()}
@@ -1236,7 +1236,7 @@ def r_duplicate_int_overloads(path, text, stats):
     for m in prepare.PROTO.finditer(text):
         name = m.group(1)
         if name.startswith('operator'): continue
-        decl = m.group(0)
+        decl = re.sub(r'\s*//[^\n]*$', '', m.group(0))   # PROTO takes a trailing // comment along
         at = decl.index('(', decl.index(name) + len(name))
         params = _split_args(decl[at + 1:decl.rindex(')')])
         if spans is None: spans = prepare.scope_spans(text)
@@ -1432,15 +1432,36 @@ def r_specialization_prefix(path, text, stats):
 # directly followed by + or - (`char pad2[0xae-0x34]`: one pp-number in standard C++, a subtraction to MSVC) and a
 # string literal directly followed by an identifier (`extern"C"enum`: a C++11 user-defined literal). LEX1 writes the
 # standard spelling of the same tokens: `LL` / `ULL`, a space before the sign, a space after the literal. It also
-# drops the `inline` MSVC accepted next to `__forceinline` (an inline specifier itself on the target).
+# drops the `inline` MSVC accepted next to `__forceinline` (an inline specifier itself on the target), and writes a
+# functional cast to a multi-word type (`unsigned long(-1)`) as the C-style cast of that type.
 
 LEX_TOKENS = re.compile(r'("(?:\\.|[^"\\\n])*")(?=[A-Za-z_])|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|'
                         r'/\*.*?(?:\*/|\Z)|(?<![\w.])(0[xX][0-9a-fA-F]*[eE])(?=[+-])|'
                         r'(?<![\w.])((?:0[xX][0-9a-fA-F]+|\d+))([uU]?)[iI]64\b', re.S)
 
+# a functional cast to a multi-word type (`key = unsigned long(-1);`, `reinterpret_cast<void*>(unsigned int(id))`), which
+# MSVC takes and C++ does not: written as the C-style cast of the same type, `((unsigned long)(-1))`
+MULTIWORD_CAST = re.compile(r'(?:(?<=[=(,!?:<>+\-*/%&|^~\[{;])|(?<=\breturn))(\s*)'
+                            r'((?:unsigned|signed)\s+(?:long\s+long|long|int|short|char)(?:\s+int)?|long\s+(?:long|double|int)|'
+                            r'short\s+int)\s*\((?!\s*[\*&])')
+
+def _multiword_casts(text, stats):
+    out, pos = [], 0
+    for m in MULTIWORD_CAST.finditer(text):
+        if m.start() < pos: continue
+        close = _call_end(text, m.end() - 1)
+        arg = text[m.end():close - 1].strip() or '0'
+        out.append(text[pos:m.start()]); out.append('%s((%s)(%s))' % (m.group(1), re.sub(r'\s+', ' ', m.group(2)), arg))
+        pos = close
+        stats['LEX1'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
 def r_msvc_tokens(path, text, stats):
     """LEX1: MSVC-only token spellings -> standard ones (see above)."""
-    if '"' not in text and 'i64' not in text and 'I64' not in text and not re.search(r'0[xX][0-9a-fA-F]*[eE][+-]', text):
+    if not any(k in text for k in ('"', 'i64', 'I64', 'unsigned', 'signed', 'long', 'short', '__forceinline')) and \
+            not re.search(r'0[xX][0-9a-fA-F]*[eE][+-]', text):
         return text
     out, pos = [], 0
     for m in LEX_TOKENS.finditer(text):
@@ -1456,6 +1477,8 @@ def r_msvc_tokens(path, text, stats):
     if out:
         out.append(text[pos:])
         text = ''.join(out)
+    if 'unsigned' in text or 'long' in text or 'signed' in text:
+        text = _multiword_casts(text, stats)
     if '__forceinline' in text:
         text, n = re.subn(r'^([ \t]*(?:static\s+)?)(?:inline\s+__forceinline|__forceinline\s+inline)\b',
                           lambda m: m.group(1) + '__forceinline', text, flags=re.M)
@@ -1726,14 +1749,27 @@ def _members(flat, own_name):
               and not re.match(r'^[A-Z][A-Z0-9_]*$', v)}
     return values, types
 
+def _split_bases(bases):
+    """a base clause split at its top-level commas (template argument lists nest)"""
+    out, depth, cur = [], 0, ''
+    for c in bases:
+        if c in '<([': depth += 1
+        elif c in '>)]': depth -= 1
+        if c == ',' and depth == 0: out.append(cur); cur = ''
+        else: cur += c
+    out.append(cur)
+    return out
+
 def _base_specs(bases):
     """[(name, template arguments or None)] of a base clause."""
     out = []
-    for b in _split_args(bases):
+    for b in _split_bases(bases):
         b = re.sub(r'\b(?:public|protected|private|virtual)\b', '', b).strip()
         m = re.match(r'(?:::)?([A-Za-z_]\w*)\s*(?:<(.*)>)?\s*$', b, re.S)
         if m: out.append((m.group(1), m.group(2)))
     return out
+
+_TPL1_SPANS = {}
 
 def r_dependent_base_members(path, text, stats):
     """TPL1: `this->` in front of the members of a dependent base used by plain name in a class template (see above)."""
@@ -1776,6 +1812,28 @@ def r_dependent_base_members(path, text, stats):
                     vals |= bv; types |= bt
         cache[key] = (vals, types)
         return cache[key]
+    closure, inc = [], {}
+    def included_members(name, depth=0):
+        """(values, types) of the file-scope definitions of class `name` in the local headers the file includes"""
+        if name in inc: return inc[name]
+        inc[name] = (set(), set())
+        if depth > 8 or '#include' not in text: return inc[name]
+        if not closure: closure.extend(_closure(path, text)[1:] or [None])
+        vals, types = set(), set()
+        for ft in closure:
+            if ft is None or name not in ft[1]: continue
+            f, t = ft
+            for m in re.finditer(r'\b(?:struct|class)\s+%s\s*(?::\s*([^{};]*))?\{' % re.escape(name), t):
+                if f not in _TPL1_SPANS: _TPL1_SPANS[f] = prepare.scope_spans(t)
+                if prepare.scope_chain(_TPL1_SPANS[f], m.start()): continue
+                o = m.end() - 1
+                v, ty = _members(_flat_body(t, o, prepare.match_brace(t, o)), name)
+                vals |= v; types |= ty
+                for bname, _ in _base_specs(m.group(1) or ''):
+                    bv, bt = included_members(bname, depth + 1)
+                    vals |= bv; types |= bt
+        inc[name] = (vals, types)
+        return inc[name]
     fixes = {}                                             # class open -> names to qualify
     for name, defs in classes.items():
         for d in defs:
@@ -1784,8 +1842,12 @@ def r_dependent_base_members(path, text, stats):
             dep, dep_types = set(), set()
             for bname, args in _base_specs(bases):
                 if args is None or not set(re.findall(r'[A-Za-z_]\w*', args)) & params: continue
-                for bd in visible(bname, scope):
+                found = visible(bname, scope)
+                for bd in found:
                     v, t = members_of(bd)
+                    dep |= v; dep_types |= t
+                if not found:                              # the base template lives in an included header
+                    v, t = included_members(bname)
                     dep |= v; dep_types |= t
             own_v, own_t = _members(_flat_body(text, o, c), name)
             names = dep - dep_types - own_v - own_t - params - {name}
@@ -1916,6 +1978,105 @@ def r_anonymous_return_types(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- ENUM1
+#
+# The decomp forward-declares enums (`enum DIALOGUE_TYPE;`, `enum ENUM_FORM_ID;`, ActorValue's `enum Index;`), which
+# MSVC accepts because every unscoped enum has the underlying type int there. Standard C++ allows an opaque enum
+# declaration only with a fixed underlying type. ENUM1 writes MSVC's type out, `enum X : int;`, and gives every
+# definition of such an enum in the decomp the same base (`enum X : int {`), so declaration and definition agree.
+# (GCC would otherwise pick unsigned int for an enum without negative values; int is what MSVC used.) An enum with an
+# enumerator outside int's range keeps its definition and its declarations unchanged.
+
+OPAQUE_ENUM = re.compile(r'^([ \t]*(?:typedef\s+)?enum\s+([A-Za-z_]\w*))(\s*;)', re.M)
+ENUM_DEF = re.compile(r'\benum\s+([A-Za-z_]\w*)(\s*)\{')
+_OPAQUE_NAMES = None
+
+def _opaque_enum_names(path):
+    """names the decomp declares as opaque enums anywhere, minus those with a definition that int cannot hold"""
+    global _OPAQUE_NAMES
+    if _OPAQUE_NAMES is not None: return _OPAQUE_NAMES
+    root, names, texts = _roots(path), set(), []
+    for d in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(root, d)):
+            for f in fs:
+                if not f.endswith(('.h', '.cpp', '.inl', '.hpp', '.c')): continue
+                with open(os.path.join(dp, f), encoding='utf-8', errors='surrogateescape') as h: t = h.read()
+                if 'enum' not in t: continue
+                found = [m.group(2) for m in OPAQUE_ENUM.finditer(t)]
+                names.update(found)
+                texts.append(t)
+    wide = set()
+    for t in texts:
+        for m in ENUM_DEF.finditer(t):
+            if m.group(1) not in names: continue
+            body = t[m.end():t.find('}', m.end())]
+            for v in re.findall(r'=\s*(-?\s*(?:0[xX][0-9a-fA-F]+|\d+))[uUlL]*', body):
+                n = int(v.replace(' ', ''), 0)
+                if not -2 ** 31 <= n < 2 ** 31: wide.add(m.group(1))
+    _OPAQUE_NAMES = names - wide
+    return _OPAQUE_NAMES
+
+def r_opaque_enums(path, text, stats):
+    """ENUM1: `enum X;` -> `enum X : int;`, and `enum X {` -> `enum X : int {` for those names (see above)."""
+    if 'enum' not in text: return text
+    names = _opaque_enum_names(path)
+    if not names: return text
+    def decl(m):
+        if m.group(2) not in names: return m.group(0)
+        stats['ENUM1'] += 1
+        return m.group(1) + ' : int' + m.group(3)
+    def defn(m):
+        if m.group(1) not in names: return m.group(0)
+        stats['ENUM1'] += 1
+        return 'enum %s : int%s{' % (m.group(1), m.group(2) or ' ')
+    text = OPAQUE_ENUM.sub(decl, text)
+    return ENUM_DEF.sub(defn, text)
+
+# ---------------------------------------------------------------------------------------------------------- ELAB1
+#
+# Some units name a class after a Win32 / CRT function (`struct HeapAlloc { ... }` in blk_00e60000: the decomp's
+# heap view). Where the platform header declares the function in the same scope, the function hides the class name
+# and `HeapAlloc* alloc` no longer names a type (MSVC saw no such function: the unit did not include the SDK).
+# ELAB1 writes the uses of the class name as a type in elaborated form, `struct HeapAlloc* alloc`: the same class,
+# the same symbols (an elaborated specifier changes no mangled name).
+
+ELAB_DEF = re.compile(r'^[ \t]*(struct|class)\s+([A-Za-z_]\w*)\s*(?::[^;{}]*)?\{', re.M)
+
+FNPTR_TYPEDEF = re.compile(r'^[ \t]*typedef\s+[^;{}()]*\(\s*(?:__\w+\s*)?\*\s*([A-Za-z_]\w*)\s*\)\s*\([^;{}]*\)\s*;', re.M)
+
+def r_function_named_classes(path, text, stats):
+    """ELAB1: `struct X` in front of the type uses of a file-scope class named like a platform function; a file-scope
+    typedef of such a name (`typedef unsigned int(__fastcall* VirtualQuery)(void*)`, a slot type) is renamed
+    fnvnx_t_<name> in the file (a typedef name is in no symbol)."""
+    if 'struct' not in text and 'class' not in text and 'typedef' not in text: return text
+    if prepare.PLATFORM is None: prepare.PLATFORM = prepare.platform_names()
+    spans = None
+    tds = set()
+    for m in FNPTR_TYPEDEF.finditer(text):
+        if m.group(1) not in prepare.PLATFORM: continue
+        if spans is None: spans = prepare.scope_spans(text)
+        if not prepare.scope_chain(spans, m.start()): tds.add(m.group(1))
+    if tds:
+        text, n = re.subn(r'(?<![\w:.>~])(%s)\b(?!\s*\()' % '|'.join(sorted(tds)), r'fnvnx_t_\1', text)
+        stats['ELAB1'] += n
+        spans = None
+    found = {}
+    for m in ELAB_DEF.finditer(text):
+        if m.group(2) not in prepare.PLATFORM: continue
+        if spans is None: spans = prepare.scope_spans(text)
+        if prepare.scope_chain(spans, m.start()): continue
+        found[m.group(2)] = m.group(1)
+    if not found: return text
+    use = re.compile(r'(?<![\w:.>~])(%s)\b(?=\s*(?:[\*&]|[A-Za-z_]))' % '|'.join(sorted(found, key=len, reverse=True)))
+    out, pos = [], 0
+    for m in use.finditer(text):
+        before = text[max(0, m.start() - 12):m.start()]
+        if re.search(r'\b(?:struct|class|union|enum|typename)\s+$', before): continue
+        out.append(text[pos:m.start()]); out.append(found[m.group(1)] + ' '); pos = m.start()
+        stats['ELAB1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -1940,5 +2101,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout]

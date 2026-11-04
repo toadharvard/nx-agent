@@ -49,11 +49,13 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, ha
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
 | `DTOR1` | neutral | declares `template <> NiPointer<T>::~NiPointer();` after a unit's includes for member pointees T it never completes (with DecRefCount): GCC's key-function vtable would instantiate it | MSVC never instantiated it in those units |
+| `ELAB1` | neutral | type uses of a file-scope class named like a Win32/CRT function (`struct HeapAlloc`) spelled elaborated: `struct HeapAlloc* p` | same type, same symbols |
+| `ENUM1` | neutral | opaque `enum X;` -> `enum X : int;` and every definition of those enums -> `enum X : int {` | int is MSVC's underlying type of every unscoped enum |
 | `ANON1` | platform | names an unnamed struct defined in a member function's return type (`struct fnvnx_anon_Float {...}; fnvnx_anon_Float* Float();`) | same layout; MSVC's decorated name of the function changes (`<unnamed-tag>`) |
 | `STL1` | platform | includes `fnvnx_msvcstl.h` (MSVC 2008 `<xutility>` internals: `_SCL_SECURE_VALIDATE`, `std::_Checked_base`, `std::_Ptr_cat`, iterator tags) where a unit uses them | MSVC's own header defines them; the gate builds with it |
 | `SPEC3` | neutral | qualifies the names a namespace declares in the body of an explicit class specialization written inside it (`fnv_x::T* p`) | the names MSVC's lookup found |
-| `LEX1` | neutral | MSVC token spellings: `i64`/`ui64` suffixes -> `LL`/`ULL`, `0xae-0x34` -> `0xae -0x34`, `"C"enum` -> `"C" enum` | same tokens as MSVC lexed them |
-| `STD1` | neutral | a decomp `struct std { static float abs(float); }` (the std namespace of the headers) -> the same declarations in `namespace std` | `std::abs(float)` is fabsf (0x00408840) either way |
+| `LEX1` | neutral | MSVC token spellings: `i64`/`ui64` suffixes -> `LL`/`ULL`, `0xae-0x34` -> `0xae -0x34`, `"C"enum` -> `"C" enum`, `inline __forceinline` -> `__forceinline`, `unsigned long(-1)` -> `((unsigned long)(-1))` | same tokens as MSVC lexed them |
+| `STD1` | platform | a decomp `struct std { static float abs(float); }` (the std namespace of the headers) -> `#include <cmath>`: the calls reach the standard `std::abs(float)` | MSVC called the out-of-line copy at 0x00408840 (fabsf) |
 | `SPEC2` | neutral | `template <>` on the decomp's member definitions of class template specializations (5 files) | MSVC accepts both spellings |
 | `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
 | `ALLOC1` | platform | drops untagged file-scope replacements of the global operator new/delete; the game's are bound by address | target only |
