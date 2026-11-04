@@ -73,6 +73,10 @@ def test_rules():
           'native-garbage-arg', 'native garbage argument')
     check(refined(dict(kind='call-args', arg='sret', cls='P', x86=w(0x03000000), arm=w(0)))
           == 'sret-mismatch', 'hidden result pointer differs')
+    check(refined(dict(kind='call-args', arg='this', cls='P', x86=w(0x06effff0), arm=w(0x03002000))) ==
+          'arg-stack-vs-object', 'stack temporary vs the object')
+    check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x03002000), arm=w(0x03001000))) ==
+          'arg-other-buffer', 'another argument buffer')
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(5), arm=w(7))) == 'unclassified',
           'plain int argument difference stays open')
     # return values
@@ -105,6 +109,17 @@ def test_rules():
                        arm_trace=['00401100', '00401200']), 'call-flow') == 'native-extra-calls', 'native calls more')
     check(refined(dict(kind='call-target', index=0, x86='00401100', arm='00401200'), 'call-flow') == 'call-flow',
           'call-target mismatch stays call-flow')
+    # native null write after an intercepted allocator (static callee facts, faked here)
+    real = causes.native_callees
+    try:
+        causes.native_callees = lambda src, a: {'__fnv_00aa13e0', '__fnv_00a57640'} if a == 0x00401000 else set()
+        check(refined(dict(kind='error', x86=None, arm='fault:w:00000000')) == 'new-null',
+              'null store after an allocator call: new-null')
+        check(causes.refine(rec(dict(kind='error', x86=None, arm='fault:w:00000000'), addr='00402000'),
+                            'unclassified') == 'native-null-read', 'null store without an allocator: native-null-read')
+    finally:
+        causes.native_callees = real
+    check(causes.native_callees('src/none.cpp', 0x00401000) is None, 'no object: no callee facts')
     # a definite probe cause is never overridden
     check(causes.refine(rec(dict(kind='error', x86=None, arm='exc:1@0'), 'uninit-arm'), 'uninit-arm') == 'uninit-arm',
           'probe cause kept')

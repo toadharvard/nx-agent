@@ -183,6 +183,7 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 | native `exc:N` (brk/udf), oracle returns | `native-trap` | real-bug S1 (FALL1 trap / GCC unreachable on a path the exe takes) |
 | native `stack-protector` | `stack-protector` | real-bug S1 |
 | native data fault below 64 KiB, oracle fine | `native-null-read` | real-bug S1 |
+| ... and the native function calls a game allocator (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0; from `fixed/<unit>.o` or `FNVNX_CAUSES_OBJ`) | `new-null` | artifact (canned null from an allocator: GCC drops MSVC's null test after a throwing new) |
 | native data access in the stub range; stub address passed/stored | `native-stub-data` | real-bug S2c |
 | native image address where the oracle has an image-window one (arg, result, store) | `native-address` | real-bug S2c (unrebound variable/table; check the pointee for literals) |
 | call argument the runner marked `arm_garbage` | `native-garbage-arg` | real-bug S1b |
