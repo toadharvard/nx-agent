@@ -80,8 +80,9 @@ def main():
     de = fnvlink.batch_demangle(fnvlink.UNDNAME, e2)
     SE = {n: sigs.parse_msvc(n, de[n]) for n in e2}
     v = abi.compare(SE['?e@@YG_NPAX@Z'], SE['?e@@YI_NPAUB@@HPAUO@@@Z'])
-    check(v.kind == 'x86-inconsistent' and 'ecx-not-passed' in v.classes,
-          'stdcall f(void*) -> fastcall(ecx, edx, X): %s %s' % (v.kind, v.classes))
+    check(v.kind == 'x86-inconsistent' and 'ecx-not-passed' in v.classes and v.moves == [(('x', 2), ('x', 0), 'P', 'P')],
+          'stdcall f(void*) -> fastcall(ecx, edx, X): %s %s %s (the passed argument still moves)' % (v.kind, v.classes,
+                                                                                                   v.moves))
     # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
     # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
     src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'
