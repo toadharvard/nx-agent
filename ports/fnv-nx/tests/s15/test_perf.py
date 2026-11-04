@@ -82,6 +82,58 @@ def test_attribution(tmp):
     check(at.subsystem(lab, orig, obj) == 'platform-win32', 'Interlocked -> platform-win32')
 
 
+def test_budget(tmp):
+    import json
+    import frame_budget
+    model = json.load(open(os.path.join(HERE, '..', '..', 'tools', 'perf', 'budget_model.json')))
+    b = frame_budget.build(model)
+    check(b['schema'] == 'fnvnx-frame-budget/1', 'budget: schema')
+    check(abs(b['budget_minsn']['1020']['pass_45'] - 18.1) < 0.1 and abs(b['budget_minsn']['1785']['pass_45'] - 31.7) < 0.1,
+          'budget: 45 fps per-core budget 18.1 M at 1020 MHz, 31.7 M at 1785 MHz (IPC 0.8)')
+    want = {'%s@%d' % (s['id'], c) for s in model['scenarios'] for c in (1020, 1785)}
+    check(set(b['gates']) == want and all(v in ('fail', 'pass_30', 'pass_45', 'stretch_60') for v in b['gates'].values()),
+          'budget: a level per scenario and clock (%d)' % len(b['gates']))
+    placed = {s['id']: s for s in b['scenarios']}
+    main_items = set(placed['placed']['cores']['0']['items'])
+    check('renderer_worker' in placed['placed']['cores']['1']['items'] and 'renderer_worker' not in main_items
+          and 'ai_process_lists' not in main_items and 'scene_update_cull' in main_items,
+          'budget: render worker on core 1, AI off core 0, cull on core 0 without levers')
+    check('3' not in placed['placed']['cores'] and '3' in placed['plan60']['cores'], 'budget: core 3 only with the opt-in')
+    check(placed['plan45']['main_minsn']['mid'] < placed['placed']['main_minsn']['mid'], 'budget: plan45 moves work off main')
+    r = placed['placed']['results']['1020']
+    check(r['frame_ms']['lo'] <= r['frame_ms']['mid'] <= r['frame_ms']['hi'] and r['critical_core'] == 0,
+          'budget: lo <= mid <= hi, main thread critical')
+    # a measured profile: 3 frames, main + one AI linear thread
+    prof = [{'label': 'until main', 'instructions': 5000000, 'subsystems': {}, 'threads': {'1': {'role': 'main', 'instructions': 5000000}}}]
+    for n, (m, ai) in enumerate(((10e6, 4e6), (12e6, 5e6), (11e6, 6e6))):
+        prof.append({'label': 'frame %d (x)' % (n + 1), 'instructions': m + ai, 'subsystems': {'havok': m / 2},
+                     'threads': {'1': {'role': 'main', 'instructions': m}, '5': {'role': 'ai-linear-1', 'instructions': ai}}})
+    bm = frame_budget.build(model, [prof])
+    sc = {s['id']: s for s in bm['scenarios']}['placed']
+    fp = bm['measured']['frameprof']
+    check(fp['used'] and fp['frames'] == 3 and len(fp['boot']) == 1, 'budget: frameprof frames used, boot interval listed')
+    items0 = sc['cores']['0']['items']
+    check(abs(items0.get('measured_main', 0) - 11.0) < 1e-6 and 'scene_update_cull' not in items0,
+          'budget: measured main median 11.0 M replaces the modeled main items')
+    rep = {'schema': 'fnvnx-render-cost/1', 'draws': 1000, 'per_draw_insn': {'main': [100, 100], 'worker': [2000, 2000]},
+           'gpu_ms': {'720p_docked': [30, 40]}, 'basis': 'M'}
+    br = frame_budget.build(model, None, rep)
+    scr = {s['id']: s for s in br['scenarios']}['placed']
+    check(abs(scr['cores']['0']['items']['renderer_main'] - 0.1) < 1e-6 and scr['results']['1785']['frame_ms']['lo'] >= 30,
+          'budget: render report replaces the renderer items, GPU time bounds the frame')
+    check(scr['results']['1785']['verdicts']['pass_45'] == 'fail', 'budget: a 30-40 ms GPU fails 45 fps')
+
+    class E:
+        threads = {}
+    import frameprof
+
+    class T:
+        place = ('ai-linear-1', 2, 6, 0x2c)
+    E.threads = {1: object(), 5: T()}
+    check(frameprof.Prof.thread_info(E, 1) == ('main', 0, 1) and frameprof.Prof.thread_info(E, 5) == ('ai-linear-1', 2, 6),
+          'frameprof: thread roles from the emulated placement')
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix='s15-')
     try:
@@ -91,6 +143,7 @@ def main():
         else:
             print('skip census tests: no AArch64 cross gcc')
         test_attribution(tmp)
+        test_budget(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('%d failed' % len(FAIL))

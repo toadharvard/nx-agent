@@ -52,6 +52,8 @@ at 720p **[E]**; section 9 lists the tests.
 
 ## 2. The budget
 
+(The 30 fps target of this section is superseded by 45 fps stable / 60 fps stretch, J-0132: section 11.)
+
 * Cortex-A57 at 1.02 GHz: 34.0 M cycles per 33.3 ms frame per core; games get cores 0-2 (core 3 is the system's;
   `os_horizon.c` returns 3 from `os_cpu_count`).
 * **IPC assumption 0.8** (range 0.6-1.0) for this engine's code. Source: public SPEC CPU2006 integer results for
@@ -383,5 +385,104 @@ Minimal set for the first run (each a guest under the S5 host, timed with `svcGe
 | `setting_names.py <exe> <decomp>` | names of the setting objects from the player's exe (untested without the exe) |
 | `tso_scan.py <decomp> [--tsv]` | spin-lock releases by plain store (inline copies of 0x0040fba0) and references to the override (6.5) |
 | `tests/s15/test_mtqemu.py` | builds and runs the QEMU multicore check (6.6) |
+| `frame_budget.py [--frameprof J] [--render J] --out J` | the whole-frame budget per core, clock and target for the gates (section 11), from `budget_model.json` |
 
 All of them print counts and names only; their outputs over decomp-derived objects stay in local scratch space.
+
+## 11. 45 / 60 fps: the frame budget and the plan
+
+Targets (owner, J-0132; they supersede the 30 fps of section 2): **45 fps stable** (worst frame 22.2 ms) is the
+goal, **60 fps** (16.7 ms, may be unstable) the stretch, **below 30 fps** (33.3 ms) a fail. Both CPU clocks count:
+1020 MHz stock and 1785 MHz, which the owner can set on their console.
+
+### 11.1 The budget file (`tools/perf/frame_budget.py` -> `fnvnx-frame-budget/1`)
+
+One JSON for the readiness gates (R0, `tools/gates/`): `frame_budget.py [--frameprof prof.json] [--render
+report.json] --out budget.json`. The committed `docs/PERF_budget.json` is the model alone (no measurement yet).
+`gates` holds one level per scenario and clock (`fail`, `pass_30`, `pass_45`, `stretch_60`); each scenario's
+`results.<clock>.verdicts` says per target `pass` (even the pessimistic case fits), `fail` (even the optimistic
+case does not) or `uncertain`. Schema in the tool's docstring.
+
+* **Inputs.** `tools/perf/budget_model.json`: the work items of one exterior Mojave frame with the native renderer
+  (instructions per frame as [lo, hi], each with the thread role that runs it), the levers, the scenarios and the
+  assumptions. Each measurement replaces model items:
+  - `--frameprof`: frameprof's JSON, which now counts instructions per emulated thread with its placement role
+    (`threads` per interval). Frame intervals replace the CPU items by the measured per-role counts (median, min,
+    max). Boot intervals are listed under `measured.frameprof.boot` until the boot reaches the main loop;
+  - `--render`: the render machine's report, `fnvnx-render-cost/1` (per-draw or per-frame instructions of the
+    renderer's main-thread and worker sides, draws, GPU ms; the format is in the tool). It replaces the two renderer
+    items, and the GPU time bounds the frame.
+* **Placement.** Read from `toolchain/host/placement.h` (the same parser as the emulator): fixed-core roles first
+  (main on core 0, render worker on core 1), then each role's work spread over its mask onto the least loaded core,
+  as the scheduler balances inside a mask. Core 3 only in scenarios with the `core3` lever.
+* **Frame time** = the largest core's time (the main thread waits for the AI linear threads at 0x008c7990, so the
+  slowest core is the critical path), or the GPU's if larger. The worst frame is the mean times
+  `worst_frame_factor`; floor and goal targets are checked on the worst frame, the stretch on the mean.
+
+**Assumptions** (all explicit in the JSON, each with a range; lo case = least work, highest IPC):
+
+| assumption | value | range | basis |
+|---|---|---|---|
+| IPC of engine code on the A57 | 0.8 | 0.6-1.0 | [E] (section 2); B1 measures it |
+| clocks | 1020, 1785 MHz | | [M] (Switch CPU) |
+| application cores | 3 (+ core 3 opt-in) | | [M] |
+| efficiency of work moved off main | 0.85 | 0.7-0.95 | [E] cold caches, hand-off waits |
+| hand-offs on main per frame | 0.3 M instructions | 0.1-0.6 M | [E]; B3 |
+| worst frame / mean frame | 1.25 | 1.1-1.5 | [E] streaming, AI bursts, Havok contacts |
+
+**Per-core budget** [E] (one core, IPC 0.8, `budget_minsn`; in brackets the mean frame that keeps the worst frame
+inside the target at the 1.25 factor):
+
+| target | frame | 1020 MHz | 1785 MHz |
+|---|---|---:|---:|
+| 30 fps (floor) | 33.3 ms | 27.2 M (21.7) | 47.5 M (38.0) |
+| 45 fps (goal) | 22.2 ms | 18.1 M (14.5) | 31.7 M (25.4) |
+| 60 fps (stretch) | 16.7 ms | 13.6 M | 23.9 M |
+
+### 11.2 Where the main thread's work goes [E]
+
+Model items (M instructions per frame, exterior, ~2,500 draws, native renderer):
+
+| item | thread | M instructions | movable by |
+|---|---|---:|---|
+| scene graph update + cull | main | 4-9 | `mt_cull`: 40-60 % to cores 1-2 |
+| engine render accumulation (accumulator, batch renderer, shadow-scene lights) | main | 1.5-4 | `mt_cull`: 50-70 %; `instancing`: -10-20 % |
+| native renderer, main side (300-1,000 per draw) | main | 0.75-2.5 | `instancing`: -30-50 % |
+| animation | main | 2-4 | `threaded_anim`: 20-40 % to the AI linear threads |
+| Havok step + character controllers | main | 2-5 | `havok_workers`: 30-50 % to cores 1-2 |
+| input, menus, sky, scripts, UI | main | 1-3 | - |
+| hand-offs | main | 0.1-0.6 | - |
+| AI process lists, detection, actor updates | AI linear 1 + 2 (cores 2, 1) | 3-8 | already off main (iNumHWThreads=3) |
+| renderer submission worker (300-1,200 per draw) | render worker (core 1) | 0.75-3 | `instancing` |
+| tasklets, IO, audio | mask 0b110 (0b1110 with core 3) | 1-3 | `core3` |
+
+Main thread total **19.7 M (11.3-28.1)** as placed today, inside the 10-20 M of J-0132 at the mid point.
+
+### 11.3 The plan, ranked by main-thread time moved
+
+| rank | lever | main thread saving (mid) | status | needs hardware |
+|---|---|---:|---|---|
+| 1 | AI on the AI linear task threads (cores 2 and 1) | 5.5 M | in: PC default path, placement done (S5) | B2: do they really run in parallel with main |
+| 2 | **cull and accumulation on cores 1-2** (`mt_cull`: the 360's Rendering Task Thread 2, 23 stage records per frame) | 4.9 M | off on PC; its TLS fix is in (S5), its stage protocol passes mtqemu (6.6); setting 0x011c710c; needs the culling task's shared state checked for TSO reliance (6.5) | yes: stability of a 360-only path, the hand-off cost per stage |
+| 3 | Havok worker pool (`havok_workers`) | 1.4 M | not traced whether bhkWorld uses the MT simulation | yes |
+| 4 | threaded morpher/particles/blood (`threaded_anim`) | 0.9 M | PC defaults on (hearsay names) | no (PC path) |
+| 5 | instancing / sorted packets in the native renderer | 0.8 M main, 0.8 M worker | S6n plan | no (the render machine measures) |
+| 6 | core 3 for background roles | frees 1-3 M on cores 1-2 | S5 opt-in, off by default | yes: what the system runs on core 3 |
+| - | clock 1785 MHz | x1.75 on every core | owner's console setting | no |
+
+**Result** (`docs/PERF_budget.json`; frame = critical core; mid with the lo-hi range; level by the mid case):
+
+| scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
+|---|---:|---|---|---|---|
+| placed (no lever) | 19.7 (11.3-28.1) | 24.1 (11.1-45.9) / 30.1 | pass_30 | 13.8 (6.4-26.2) / 17.2 | stretch_60 |
+| plan45 (mt_cull, havok_workers, threaded_anim) | 12.5 (6.1-20.2) | 15.3 (6.0-33.0) / 19.1 | stretch_60 | 8.7 (3.4-18.9) / 10.9 | stretch_60 |
+| plan60 (+ instancing, core 3) | 11.7 (5.6-19.2) | 14.3 (5.5-31.4) / 17.9 | stretch_60 | 8.2 (3.2-18.0) / 10.2 | stretch_60 |
+
+Reading it: **45 fps at stock clock needs the main thread under ~14.5 M mean** (worst frame 22.2 ms at the 1.25
+factor). As placed, the mid case is 19.7 M: 30 fps at 1020 MHz, 45-60 fps only at 1785 MHz. With cull and
+accumulation on cores 1-2 plus the Havok pool, the mid case is 12.5 M and meets 45 fps at 1020 MHz, with cores 1-2
+at 8.9 M each (headroom left). Every verdict is still `uncertain` because the ranges combine a 2.5x spread of work
+with a 1.7x spread of IPC: the two measurements that close it are frameprof on a real frame (work, [M] per thread,
+as soon as S5's boot reaches the main loop) and B1 on hardware (IPC). 60 fps at stock clock needs the plan60 levers
+and the low half of the IPC range; at 1785 MHz the mid case meets it in every scenario. GPU time is not in the
+model until the render machine's report gives it (J-0132: 60 fps at 720p docked likely needs dynamic resolution).
