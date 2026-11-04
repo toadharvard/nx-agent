@@ -142,6 +142,7 @@ job_gamedata() { # the owner's FalloutNV.exe (private branch gamedata/exe, fetch
 		GAME_EXE=$f; NOTE_EXE="the player's FalloutNV.exe (gamedata/exe, sha256 ${want:0:12})"
 	elif [ -f "$gd/.done" ]; then
 		NOTE_EXE="player exe refused: not a regular file with sha256 ${want:0:12} (S14's synthesized image)"
+		rm -f "$gd/.done"   # V1 G4: fetch again next job, so a corrected branch is taken (a refusal is never cached)
 	fi
 	return 0
 }

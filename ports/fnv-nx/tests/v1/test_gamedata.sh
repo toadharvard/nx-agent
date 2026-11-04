@@ -5,12 +5,15 @@
 #   G1  the branch's checksum file lists another file only: is FalloutNV.exe checked at all?
 #   G2  the branch holds a different exe with its own matching checksum (nothing pins 1.4.0.525's hash)
 #   G3  FalloutNV.exe on the branch is a symbolic link out of the gamedata directory
+#   G4  the branch first holds a wrong exe (a bad upload), then the owner corrects it: is the corrected exe ever
+#       taken, or does the refused fetch stay cached (.done) for good?
 #   L1  publish_link after a boot on the exe, with a copy of the exe left in boot/sdmc (a boot killed before its
 #       cleanup) and in boot/stub: tests/v1/scan_gamedata_leak.py over link/<commit12>
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 LIB=$HERE/../../tools/farm/lib_job.sh
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d) && [ -d "$T" ] || { echo "mktemp failed"; exit 2; }   # never run with T="" (writes under /)
+trap 'rm -rf "$T"' EXIT
 g() { git -c user.name=t -c user.email=t@t "$@"; }
 fail=0
 say() { echo "$1: $2"; case "$2" in ok*) ;; *) fail=1 ;; esac; }
@@ -40,6 +43,16 @@ branch g3 "ln -s '$T/outside.bin' FalloutNV.exe; sha256sum FalloutNV.exe > Fallo
 ARTIFACTS=$T/a-g3 FARM_HOME=$T/h3; job_gamedata 2>/dev/null
 if [ -n "$GAME_EXE" ] && [ -L "$GAME_EXE" ]; then say G3 "ACCEPTED: FalloutNV.exe is a symbolic link to $(readlink "$GAME_EXE" | sed "s|$T|\$T|")"
 else say G3 "ok (refused)"; fi
+# G4
+branch g4 "printf MZtruncated > FalloutNV.exe"
+export FARM_EXE_SHA256; FARM_EXE_SHA256=$(sha256sum "$T/fake.exe" | cut -d' ' -f1)
+ARTIFACTS=$T/a-g4 FARM_HOME=$T/h4; job_gamedata 2>/dev/null; first=$GAME_EXE
+(cd "$T/r-g4" && cp "$T/fake.exe" FalloutNV.exe && g commit -qam corrected)
+ARTIFACTS=$T/a-g4 FARM_HOME=$T/h4; job_gamedata 2>/dev/null
+if [ -z "$first" ] && [ -z "$GAME_EXE" ]; then say G4 "STUCK: the corrected exe is never taken ($NOTE_EXE): .done was kept for the refused fetch"
+elif [ -n "$first" ]; then say G4 "ACCEPTED: the wrong exe was taken"
+else say G4 "ok (refused, then the corrected exe taken)"; fi
+unset FARM_EXE_SHA256
 
 # L1: the real publish_link, a local artifacts repository
 git init -q --bare "$T/origin.git"; g clone -q "$T/origin.git" "$T/artifacts" 2>/dev/null
