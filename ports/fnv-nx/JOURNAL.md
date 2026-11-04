@@ -3189,3 +3189,11 @@ The owner moves the work to another session or account (quota). Resume with docs
   - Game data is agent-only, on the private `gamedata/*` branches. The GOG token in `gamedata/gog` may be stale; the
     owner logs in again when needed.
   - `.claude/settings.json` allows add_repo.
+
+### J-0144 | 2026-11-04 | stream: S12,S2d,render | status: wip | parent: J-0143
+
+* **merged** - Three cloud branches.
+  - S12 `52cb478`: Interlocked* are inline, and refcounts are weakened only on the exact pattern (ORDER_REFCOUNT=weak by default, =full to compare). 110 increments relaxed, 220 decrements release with an acquire on the zero path, 201 sites kept full. Estimated saving about 3.6 ms per frame at 1.02 GHz [E], to be confirmed on the device (B1).
+  - S2d `bfc3a1b`: the exe-addr class, 389 names bound from the exe rel32 calls. Still missing: 1,219, of which 331 exist in the exe only inline (gaps for S3). The link needs FNVNX_EXE.
+  - Render machine `443daf3`: hotspot top-10 on the synthetic mix. Handheld 720p fails at 1.05 of the 45 fps budget, GPU-bound at 23.3 ms. The top two items are the lit pass (32.7 %) and image space + UI (31.8 %), both dominated by the runtime shader epilogue; S6n is on them. The renderer CPU top item is SortPackets at 3.74 ms (65,536-bucket radix).
+* **next** - Wire FNVNX_EXE into link_job via job_gamedata. P6n needs the prepared/pristine objects (private repo `c/<c12>/*of4`, `msvc/pristine/87eb9373a0bb`) to count the engine D3D9 path.
