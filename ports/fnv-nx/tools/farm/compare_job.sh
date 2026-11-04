@@ -12,6 +12,8 @@
 #   permutations    perm.py on gamedata/shaders' shaderpackage019 (COMPARE_SDP) -> the same, plus the reference of
 #                   the --perturb 1e-5 captures (conditioning floor) -> permreport (pass / over / ill / vacuous);
 #                   seeds of programs that drew nothing come from permcover.py, cached in $FARM_HOME/compare/salts-*
+#   coverage gate   (D21) per-draw runs of the synthetic and game sets on both sides -> drawgate.py: passing draws /
+#                   all draws, skipped draws, by family and by class of each frame's first divergence
 #   game captures   when private gamedata/captures exists: real-game NXD9 recorded with d9cap (empty GLSL, so the
 #                   candidate gets --shaders from every package of gamedata/shaders) -> the same verdicts
 # Report: <report.md> with numbers, the metric lines and the program classes. Sidecar <report>.json
@@ -207,6 +209,21 @@ for n, s in sets.items():
         L.append('  |---|---|---|---|---|')
         for mo, c in s['by_model'].items():
             L.append(f"  | {mo} | " + ' | '.join(str(c.get(k, 0)) for k in ('pass', 'over', 'ill', 'vacuous')) + ' |')
+dg = load(os.path.join(run, 'drawgate', 'drawgate.json'))
+if dg:
+    out['drawgate'] = {k: dg[k] for k in ('draws', 'pass', 'fail', 'skipped', 'pass_fraction', 'by_set', 'by_family',
+                                          'first_divergence_by_class')}
+    out['drawgate']['first_divergences'] = [{k: f[k] for k in ('set', 'capture', 'frame', 'draw', 'family', 'class',
+                                                                 'why', 'vs_name', 'ps_name')} for f in dg['first_divergences']]
+    json.dump(out, open(js, 'w'), indent=1)
+    L += ['', '## Render coverage gate (D21)', '',
+          f"- **coverage**: {dg['pass']}/{dg['draws']} draws pass ({dg['pass_fraction']}), {dg['skipped']} skipped; first divergences "
+          + (', '.join(f'{k} {v}' for k, v in sorted(dg['first_divergence_by_class'].items())) or 'none'), '',
+          '| family | pass | fail | skipped |', '|---|---|---|---|']
+    for fam, c in sorted(dg['by_family'].items(), key=lambda x: -sum(x[1].values())):
+        L.append(f"| {fam} | {c.get('pass', 0)} | {c.get('fail', 0)} | {c.get('skipped', 0) + c.get('unaligned', 0)} |")
+    L += [''] + [f"- first divergence {f['set']}/{f['capture']} f{f['frame']} d{f['draw']}: **{f['class']}** ({f['why']}); "
+                 f"{f['vs_name']} + {f['ps_name']}" for f in dg['first_divergences']]
 L += ['', '## Notes', ''] + [f'- {x}' for x in notes] + ['', '```json fnvnx-compare', json.dumps(out, indent=1), '```']
 open(rep, 'w').write('\n'.join(L) + '\n')
 EOF
@@ -257,6 +274,29 @@ if [ -n "$GAMECAPS" ] && [ -n "$SDP" ] && deadline_ok 900; then
 	CAND_SHADERS=$GLSL run_set game "$GAMECAPS"
 elif [ -n "$GAMECAPS" ]; then
 	NOTES+=("game captures skipped: no shader packages or FARM_DEADLINE")
+fi
+# ---- the render coverage gate (D21): every draw of the synthetic and game sets, per-draw on both sides -------------
+perdraw() {   # perdraw <set> <capture dir> [candidate --shaders dir]
+	local o=$W/run/$1/pd to=${COMPARE_TIMEOUT_S:-1500}
+	rm -rf "$o"; mkdir -p "$o"
+	python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$o/ref" --timeout "$to" \
+		"$2"/*.nxd9 -- --per-draw >"$o/ref.log" 2>&1 || NOTES+=("$1: per-draw reference exit $?")
+	python3 -I "$CMP/replay.py" cand --bin "$NXR/nx_render" --out "$o/cand" --timeout "$to" ${3:+--shaders "$3"} \
+		"$2"/*.nxd9 -- --per-draw >"$o/cand.log" 2>&1 || NOTES+=("$1: per-draw candidate exit $?")
+	DG_SETS+=(--set "$1=$2:$o/ref:$o/cand")
+}
+DG_SETS=()
+if deadline_ok 600; then
+	log "coverage gate"
+	perdraw synthetic "$W/caps/synthetic"
+	[ -n "${GAMECAPS:-}" ] && perdraw game "$GAMECAPS" "${GLSL:-}"
+	[ -f "$W/run/perm/perm/permreport.json" ] && DG_SETS+=(--set perm=:: --perm "$W/run/perm/perm/permreport.json")
+	DG_SDP=(); for f in "$W"/gamedata-shaders/shaderpackage*.sdp; do [ -f "$f" ] && DG_SDP+=(--sdp "$f"); done
+	python3 -I "$CMP/drawgate.py" "${DG_SETS[@]}" "${DG_SDP[@]}" --out "$W/run/drawgate" >"$W/run/drawgate.log" 2>&1 ||
+		NOTES+=("drawgate failed (log $W/run/drawgate.log)")
+	rm -rf "$W"/run/*/pd   # the per-draw images (hundreds of MB, game-derived) are not kept
+else
+	NOTES+=("coverage gate skipped: FARM_DEADLINE")
 fi
 write_report
 log "done: $(grep -c '^- \*\*' "$REPORT") sets ($(( $(date +%s) - T0 )) s)"
