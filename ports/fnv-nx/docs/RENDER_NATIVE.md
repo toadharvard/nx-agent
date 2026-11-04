@@ -593,7 +593,7 @@ sdp2dksh -o <dir> --glsl shaderpackage*.sdp                       # S6b (render/
 python3 -I render/native/tools/nxsp_pack.py <dir> translated.nxsp --names shaderpackage019.sdp --check [--glsl]
 ```
 
-The console reads `fnvshd:/translated.nxsp` (next to NX1's `shaders.nxsp`) into memory and hands it to
+The console reads `sdmc:/switch/fnv/translated.nxsp` (`FNVNX_SD_TRANSLATED`, sdlayout.h; the owner copies it next to the game: it is made from the player's files, so it can never be inside fnv.nro's RomFS, unlike NX1's `shaders.nxsp` for our own shaders) into memory and hands it to
 `nx::TranslatedStore::Load`; `Renderer::SetTranslatedStore` binds it. Container: NX1's NXSP v1
 (`toolchain/nro/shaderpack.py`):
 

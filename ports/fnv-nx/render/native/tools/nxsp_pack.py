@@ -14,7 +14,8 @@ version 1, count, index offset, data offset, u8[12] pack id (sha256[:12] of inde
                    (mask = 4 hex digits: the VS input locations, fnvnx_dk_layout.h), blob = DKSH
   translated-glsl  only with --glsl (host / emulator packs; never on the console): the GLSL, NUL-terminated
   translated-name  with --names <package>: name = the program's name in that package, variant = its hash, size 0
-The console reads it from fnvshd:/translated.nxsp. --check (the package check): every program in <dir>/index.tsv has
+The console reads it from sdmc:/switch/fnv/translated.nxsp (FNVNX_SD_TRANSLATED; made from the player's files,
+so never inside fnv.nro's RomFS). --check (the package check): every program in <dir>/index.tsv has
 status ok and a DKSH; exit 1 with the list otherwise. The output is derived from the game's shaders: it stays on the
 player's machine / the private artifacts, never in this repository."""
 import argparse, hashlib, json, os, struct, sys, zlib
@@ -23,7 +24,7 @@ LOC_OF = {('POSITION', 0): 0, ('BLENDWEIGHT', 0): 1, ('BLENDINDICES', 0): 2, ('N
           ('COLOR', 1): 5, ('TANGENT', 0): 14, ('BINORMAL', 0): 15}
 for _k in range(8):
     LOC_OF[('TEXCOORD', _k)] = 6 + _k
-PACK_PATH = 'fnvshd:/translated.nxsp'
+PACK_PATH = 'sdmc:/switch/fnv/translated.nxsp'   # FNVNX_SD_TRANSLATED (toolchain/include/fnvnx/sdlayout.h)
 
 
 def main():

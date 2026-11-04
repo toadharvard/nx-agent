@@ -80,7 +80,7 @@ def build_pack(shaders) -> tuple[bytes, bytes]:
 
 def pack_rows(rows) -> tuple[bytes, bytes]:
     """NXSP v1 of [(name, family, variant, stage, blob)] in the given order -> (pack, pack id). Also the format of
-    the game's shaders_nx.pak (shaders_nx.py: name = the bytecode hash)."""
+    the game's translated.nxsp (render/native/tools/nxsp_pack.py)."""
     idx_off, n = 32, len(rows)
     data_off = (idx_off + n * ENTRY + 255) & ~255
     index, data = bytearray(), bytearray()

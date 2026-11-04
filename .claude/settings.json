@@ -1,6 +1,7 @@
 {
   "permissions": {
     "allow": [
+      "Bash",
       "mcp__claude-code-remote__add_repo",
       "mcp__claude-code-remote__send_message",
       "mcp__claude-code-remote__list_sessions",

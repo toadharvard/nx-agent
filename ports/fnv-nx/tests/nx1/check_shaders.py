@@ -2,7 +2,7 @@
 """NX1 check 9: no shader is compiled on the console (owner rule).
 
     check_shaders.py [--nro fnv.nro] [--guest-elf fnvnx.elf] [--host-elf host.elf] [--ref-bin <switch-tools bin>]
-                     [--game-pak shaders_nx.pak --game-sdp Data/Shaders]   (or $FNVNX_GAME_SHADERS_PAK, $FNVNX_GAME_SHADERS)
+                     [--game-pak translated.nxsp --game-sdp Data/Shaders]   (or $FNVNX_GAME_SHADERS_PAK, $FNVNX_GAME_SHADERS)
 
 METRIC of this check: shaders compiled at run time = 0, and DKSH coverage of every variant the renderer requests.
   pack      fnv.nro's asset RomFS (romfs.py, byte-checked against switch-tools build_romfs with --ref-bin) holds
@@ -16,8 +16,9 @@ METRIC of this check: shaders compiled at run time = 0, and DKSH coverage of eve
   compiler  no shader compiler in the guest or the host (no uam/glslang/SPIR-V/GLSL symbols); the device backend's
             shader_create (render/native/host/nxgpu.c) accepts DKSH only;
   game      the game's own D3D9 shaders are translated at install time from the owner's shaderpackage*.sdp by
-            sdp2dksh (D6) into the owner's local shaders_nx.pak by toolchain/nro/shaders_nx.py (game.packer: it exists
-            and passes tests/nx1/test_shaders_nx.py); that file and the .sdp never enter nx-agent (git). Given the
+            sdp2dksh (D6) into the owner's local translated.nxsp by toolchain/nro/shaders_nx.py, which drives the
+            render machine's render/native/tools/nxsp_pack.py (game.packer: shaders_nx.py passes
+            tests/nx1/test_shaders_nx.py with that packer); that file and the .sdp never enter nx-agent (git). Given the
             owner's pack and packages (on the owner's side only), game.coverage checks every program in them has a
             DKSH of its stage in the pack (shaders_nx.py --verify), and game.outside_repo that neither is in nx-agent.
 """
@@ -139,7 +140,7 @@ def check(nro_path, guest_elf, host_elf, ref_bin, game_pak=None, game_sdp=None) 
     c.ok("compiler.backend_dksh_only", sc is not None and "0x48534B44" in sc.group(1) and "glsl" not in sc.group(1),
          "the device backend's shader_create does not insist on DKSH")
     tracked = subprocess.run(["git", "-C", ROOT, "ls-files"], capture_output=True, text=True).stdout.splitlines()
-    leaked = [f for f in tracked if re.search(r'(^|/)shaders_nx\.pak$|shaderpackage\d*\.sdp$', f, re.I)]
+    leaked = [f for f in tracked if re.search(r'(^|/)shaders_nx\.pak$|translated\.nxsp$|shaderpackage\d*\.sdp$', f, re.I)]
     c.ok("game.not_in_git", not leaked, f"the owner's shader files are tracked in nx-agent: {leaked}")
     packer = os.path.join(ROOT, "toolchain", "nro", "shaders_nx.py")
     t = subprocess.run([sys.executable, "-I", os.path.join(HERE, "test_shaders_nx.py")], capture_output=True, text=True,
