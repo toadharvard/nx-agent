@@ -488,6 +488,36 @@ got = run(s1.r_goto_crossed_scopes, 'int f(int n)\n{\n    Obj o(n);\n    if (n) 
           '    return n;\n}\n')
 check('GOTO2 leaves declarations before the goto alone', got, ['    Obj o(n);\n    if (n) goto out;'], ['{ '])
 
+# ---- ANON3
+got = run(s1.r_local_anonymous_unions, 'void f(E* e)\n{\n    for (;;)\n    {\n        union\n        {\n            Stream st;\n'
+          '            struct\n            {\n                Body *a, *b;\n                float w[2];\n            };\n'
+          '        };\n        st.read(e); g(a, b, w[1]);\n    }\n}\nstruct K { union { int i; struct { short lo, hi; }; }; };\n')
+check('ANON3 puts a local anonymous union with an anonymous struct in a struct, same lines', got,
+      ['        struct fnvnx_anon_u0 { union\n', '        }; } fnvnx_anon_v0; decltype(fnvnx_anon_v0.a)& a = fnvnx_anon_v0.a; '
+       'decltype(fnvnx_anon_v0.b)& b = fnvnx_anon_v0.b; decltype(fnvnx_anon_v0.w)& w = fnvnx_anon_v0.w; '
+       'decltype(fnvnx_anon_v0.st)& st = fnvnx_anon_v0.st;\n        st.read(e);',
+       'struct K { union { int i; struct { short lo, hi; }; }; };'])
+check('ANON3 leaves a local anonymous union without an anonymous struct',
+      run(s1.r_local_anonymous_unions, 'void f() { union { int i; float x; }; i = 1; }\n'), ['void f() { union { int i;'],
+      ['fnvnx_anon'])
+
+# ---- MSCV1
+import shutil as _shutil
+_m = tempfile.mkdtemp()
+os.makedirs(os.path.join(_m, 'src'))
+os.makedirs(os.path.join(_m, 'build'))
+with open(os.path.join(_m, 'build', 'units.json'), 'w') as _h:
+    _h.write(_json.dumps({'units': [{'source': 'src/a.cpp', 'compiler': 'rtm'}, {'source': 'src/b.cpp', 'compiler': 'sp1'}]}))
+_src = '#if _MSC_VER >= 1500\nint v;\n#endif\nint f() { if (_MSC_FULL_VER >= 150030729) return 1; return _MSC_VER; } // _MSC_VER\n'
+check('MSCV1 an rtm unit sees cl 15.00.21022 in code, #if lines and comments stay',
+      run(s1.r_msc_version_values, _src, os.path.join(_m, 'src', 'a.cpp')),
+      ['#if _MSC_VER >= 1500\n', 'if (150021022 >= 150030729) return 1; return 1500; } // _MSC_VER'])
+check('MSCV1 an sp1 unit sees cl 15.00.30729', run(s1.r_msc_version_values, _src, os.path.join(_m, 'src', 'b.cpp')),
+      ['if (150030729 >= 150030729)'])
+check('MSCV1 a file that is no unit is left alone', run(s1.r_msc_version_values, _src, os.path.join(_m, 'src', 'c.h')),
+      ['if (_MSC_FULL_VER >= 150030729)'])
+_shutil.rmtree(_m, ignore_errors=True)
+
 # ---- QUAD1
 _q = ('struct __declspec(align(16)) PQ { float x, y, z, w; operator __m128() const { return *(const __m128*)this; } };\n'
       'class SR { public: SR(const __m128& v) { m = v; } SR(float f); private: PQ m; };\n'

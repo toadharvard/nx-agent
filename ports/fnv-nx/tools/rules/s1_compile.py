@@ -523,6 +523,39 @@ def r_goto_crossed_scopes(path, text, stats):
         text = new
     return text
 
+# ---------------------------------------------------------------------------------------------------------- MSCV1
+#
+# The decomp tests the compiler's version in code, not only in #if: `if (_MSC_FULL_VER >= 150030729)`. The value is
+# the one of the compiler build/units.json names for the unit (the decomp README: sp1 cl 15.00.30729.01, rtm
+# 15.00.21022.08, vc8 14.00.50727.762), so the branch MSVC compiled is the one we compile.
+
+MSC_VERSIONS = {'sp1': ('1500', '150030729'), 'rtm': ('1500', '150021022'), 'vc8': ('1400', '140050727')}
+MSC_IN_CODE = re.compile(r'^(?![ \t]*#).*\b_MSC_(?:FULL_)?VER\b', re.M)
+_unit_compilers = {}
+
+def _unit_compiler(path):
+    root, uj = prepare._units_json(path)
+    if not uj: return None
+    if uj not in _unit_compilers:
+        import json
+        with open(uj, encoding='utf-8') as f:
+            _unit_compilers[uj] = {u.get('source'): u.get('compiler') for u in json.load(f).get('units', [])}
+    return _unit_compilers[uj].get(os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/'))
+
+def r_msc_version_values(path, text, stats):
+    """MSCV1: `_MSC_FULL_VER` / `_MSC_VER` used in code (not in a preprocessor line) -> the value of the compiler
+    build/units.json gives the unit (sp1, rtm or vc8); left alone where the file is no unit or none is given."""
+    if '_MSC_' not in text or not MSC_IN_CODE.search(text): return text
+    ver = MSC_VERSIONS.get(_unit_compiler(path))
+    if not ver: return text
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    out, pos = [], 0
+    for m in re.finditer(r'\b_MSC_(FULL_)?VER\b', masked):
+        out.append(text[pos:m.start()]); out.append(ver[1] if m.group(1) else ver[0]); pos = m.end()
+        stats['MSCV1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- QUAD1
 #
 # A decomp class of four floats that converts to __m128 (`operator __m128() const`), returned by a function whose
@@ -2401,6 +2434,65 @@ def r_function_named_classes(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- ANON3
+#
+# An anonymous union declared in a function body with an anonymous struct in it (`union { Stream s; struct { T* a;
+# T* b; }; };`): GCC takes an anonymous struct only inside a named class. The union goes into a local struct
+# of its own, one object of it, and a reference of each member's name to that member, so the code goes on using the
+# plain names on the same storage and layout.
+
+ANON3_DECOR = re.compile(r'__declspec\s*\((?:[^()]|\([^()]*\))*\)|alignas\s*\([^()]*\)')
+
+def _anon3_members(masked, o, c, spans):
+    """Member names of the union body masked[o+1:c]: its own declarations and those of its anonymous structs;
+    None when a member is something else (a function, a named nested type, a bit-field)."""
+    body, names, pos = [], [], o + 1
+    inner = [sp for sp in spans if o < sp[0] and sp[1] < c]
+    for so, sc, sk, sh in inner:
+        if so < pos: continue
+        if sk != 'class' or ANON3_DECOR.sub('', sh).strip() != 'struct' or not re.match(r'\s*;', masked[sc + 1:]):
+            return None
+        sub = _anon3_members(masked, so, sc, spans)
+        if sub is None: return None
+        names += sub
+        body.append(masked[pos:masked.rfind('struct', 0, so)]); pos = masked.index(';', sc) + 1
+    body.append(masked[pos:c])
+    for stmt in ''.join(body).split(';'):
+        if not stmt.strip(): continue
+        if re.search(r'[(){}:]', stmt.replace('::', '')): return None
+        for d in _split_args(re.sub(r'^\s*(?:[A-Za-z_][\w:]*(?:\s*<[^;{}]*>)?\s*)', '', stmt) if ',' in stmt else stmt):
+            m = re.search(r'([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*$', d)
+            if not m: return None
+            names.append(m.group(1))
+    return names
+
+def r_local_anonymous_unions(path, text, stats):
+    """ANON3: `union { ... struct { ... }; ... };` in a function body -> `struct fnvnx_anon_uN { union ... }; }
+    fnvnx_anon_vN; decltype(fnvnx_anon_vN.m)& m = fnvnx_anon_vN.m; ...` (same line count)."""
+    if 'union' not in text or 'struct' not in text: return text
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    spans = prepare.scope_spans(masked)
+    edits, n = [], 0
+    for o, c, k, h in spans:
+        if k != 'class' or ANON3_DECOR.sub('', h).strip() != 'union': continue
+        tail = re.match(r'\s*;', masked[c + 1:])
+        chain = prepare.scope_chain(spans, o)
+        if not tail or not chain or chain[-1][0] not in ('function', 'other') or \
+                'function' not in [ck for ck, _ in chain]: continue
+        if not any(sp[2] == 'class' and o < sp[0] and sp[1] < c for sp in spans): continue
+        names = _anon3_members(masked, o, c, spans)
+        if not names: continue
+        u = masked.rfind('union', 0, o)
+        v = 'fnvnx_anon_v%d' % n
+        refs = ' '.join('decltype(%s.%s)& %s = %s.%s;' % (v, m, m, v, m) for m in names)
+        edits.append((u, 'struct fnvnx_anon_u%d { ' % n))
+        edits.append((c + 1 + tail.end(), ' } %s; %s' % (v, refs)))
+        n += 1
+        stats['ANON3'] += 1
+    for at, s in sorted(edits, reverse=True):
+        text = text[:at] + s + text[at:]
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- ANON2
 #
 # The decomp nests an anonymous struct in an anonymous union whose members have constructors, a destructor or a copy
@@ -3245,5 +3337,5 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]

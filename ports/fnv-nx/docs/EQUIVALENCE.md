@@ -153,6 +153,7 @@ above (round 8).
 | `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars | as is |
 | `GOTO2` | neutral (claim) | a forward goto across an initialized class object / reference / aggregate into its scope: `const float& a = f(x);` -> `float a; a = f(x);` for an f returning float by value; `{ ` ... `} ` around the crossed declarations before a label of their block when nothing they declare is named after it; or the label's straight `...; return e;` tail (names not declared in the function) cloned into each crossing goto | the path that jumped never used the crossed objects; scopes end earlier, a cloned tail is the same statements |
 | `QUAD1` | neutral | `return q;` -> `return (__m128)q;` where q's class converts to `__m128` and the function's return class is constructible from `__m128` only: MSVC chained both user-defined conversions | the same conversion operator and constructor, the first written out |
+| `MSCV1` | neutral | `_MSC_FULL_VER` / `_MSC_VER` in code (not in `#if`) -> the value of the compiler build/units.json gives the unit: sp1 150030729 / 1500, rtm 150021022 / 1500, vc8 140050727 / 1400 | the constant that compiler substituted |
 | `STR1` | neutral | `&arr` and `arr` are the same address | as is |
 | `CALL1` | neutral | the cast is the conversion the dropped prototype made implicitly | real SDK parameter types |
 | `RCAST1` | neutral | `fnvnx_lvalue` returns the temporary itself | `fnvnx_lvalue(x)` = `(x)` |
@@ -178,6 +179,7 @@ above (round 8).
 | `PTR1` | neutral | `f > 0` / `p > 0` -> `!= 0` and `<= 0` -> `== 0` for a function name or a local pointer | MSVC's unsigned compare of the address gives the same result |
 | `INC1` | neutral | a quoted `#include` that names, up to case, a file in the including directory is spelled as that file (`"Actor.h"` -> `"actor.h"`) | the header MSVC opened (directory of the includer first, names without case) |
 | `ANON2` | platform | a member with a constructor / destructor / copy assignment in an anonymous struct of an anonymous union becomes raw storage of its size and alignment, its uses `(*(T*)(x.m))` | same bytes and calls; MSVC never ran those functions for a union member either |
+| `ANON3` | platform | an anonymous union in a function body with an anonymous struct in it -> `struct fnvnx_anon_uN { union {...}; } fnvnx_anon_vN;` and `decltype(v.m)& m = v.m;` for each member (GCC takes an anonymous struct only inside a named class) | same storage and layout under the same names; MSVC's code may keep the references |
 | `ELAB1` | neutral | type uses of a file-scope class named like a Win32/CRT function (`struct HeapAlloc`) spelled elaborated: `struct HeapAlloc* p` | same type, same symbols |
 | `ENUM1` | neutral | opaque `enum X;` -> `enum X : int;` and every definition of those enums -> `enum X : int {` | int is MSVC's underlying type of every unscoped enum |
 | `ANON1` | platform | names an unnamed struct defined in a member function's return type (`struct fnvnx_anon_Float {...}; fnvnx_anon_Float* Float();`) | same layout; MSVC's decorated name of the function changes (`<unnamed-tag>`) |
