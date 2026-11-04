@@ -142,14 +142,72 @@ class ReadyTest(unittest.TestCase):
         card = self.world.run()
         hard, cov = self.gate(card, 'fuzz.hard'), self.gate(card, 'fuzz.coverage')
         self.assertEqual(hard['status'], 'no-data')
-        self.assertIn('shards without a 2-shard report: 2', hard['note'])
+        self.assertIn('shards not covered: 2', hard['note'])
         self.assertEqual(cov['status'], 'fail')
 
-    def test_fuzz_hard_divergence_not_by_design(self):
-        self.world.sub('reports/fz1/%s-fuzz.md' % C, '| x87-precision |', '| call-flow |')
+    def set_causes(self, k, causes, path=None):
+        """replace the fnvnx-causes block of fz<k>'s report: causes = {cause: (verdict, divergences, worst_of)}"""
+        rel = path or 'reports/fz%d/%s-fuzz.md' % (k, C)
+        t = self.world.read(rel)
+        blk = dict(format='fnvnx-causes/1', causes={c: dict(verdict=v, divergences=n, functions=w, worst_of=w)
+                                                    for c, (v, n, w) in causes.items()})
+        i = t.index('```json fnvnx-causes')
+        self.world.write(rel, t[:i] + '```json fnvnx-causes\n%s\n```\n' % json.dumps(blk))
+
+    def test_fuzz_table_without_causes_block(self):
+        rel = 'reports/fz1/%s-fuzz.md' % C
+        t = self.world.read(rel)
+        self.world.write(rel, t[:t.index('## Causes by verdict class')].replace('| x87-precision |', '| call-flow |'))
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, '```json fnvnx-causes', '```text')
         g = self.gate(self.world.run(), 'fuzz.hard')
         self.assertEqual((g['status'], g['value']), ('fail', 1))
         self.assertIn('call-flow 1', g['note'])
+        self.assertIn('no fnvnx-causes block', g['note'])
+
+    def test_fuzz_counts_real_bug_and_triage_only(self):
+        self.set_causes(1, {'x87-precision': ('by-design', 5, 4), 'new-null': ('artifact', 3, 3),
+                            'native-undefined': ('real-bug', 2, 2)})
+        self.set_causes(2, {'call-flow': ('triage', 4, 3), 'nan-bits': ('by-design', 9, 9)})
+        card = self.world.run()
+        g = self.gate(card, 'fuzz.hard')
+        self.assertEqual((g['status'], g['value']), ('fail', 5))        # 2 real-bug + 3 triage functions
+        self.assertEqual(g['by_class'], {'by-design': 13, 'artifact': 3, 'real-bug': 2, 'triage': 3})
+        self.assertEqual(g['owners'], {'S1': 2, 'S13b': 3})
+        self.assertIn('6 divergences', g['note'])
+        a = self.gate(card, 'fuzz.artifacts')
+        self.assertEqual((a['value'], a['status'], a['required']), (3, 'fail', False))
+
+    def test_fuzz_artifacts_and_by_design_do_not_block(self):
+        self.set_causes(1, {'new-null': ('artifact', 3, 3), 'x87-precision': ('by-design', 1, 1)})
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'fuzz.hard')['status'], 'pass')
+        self.assertEqual(card['verdict'], 'READY')
+        self.assertNotIn('fuzz.artifacts', card['blockers'])
+
+    def test_fuzz_policy_of_the_checkout_decides(self):
+        # the report called split-global by-design; this checkout's causes.py POLICY says real-bug (S2c)
+        self.set_causes(1, {'split-global': ('by-design', 1, 1)})
+        g = self.gate(self.world.run(), 'fuzz.hard')
+        self.assertEqual((g['status'], g['value'], g['owners']), ('fail', 1, {'S2c': 1}))
+
+    def test_fuzz_unknown_cause_is_triage(self):
+        self.set_causes(2, {'brand-new': ('by-design', 1, 1)})
+        self.assertEqual(self.gate(self.world.run(), 'fuzz.hard')['value'], 1)
+
+    def test_fuzz_s13b_summary_when_it_covers_more_shards(self):
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'shard 2/2', 'shard 2/32')
+        summ = dict(format='fnvnx-causes/1', campaigns=['/x/data/c1', '/x/data/c2'],
+                    causes={'native-undefined': dict(verdict='real-bug', divergences=7, functions=6, worst_of=6)})
+        self.world.write('reports/s13b-causes/causes_all.json', summ, published=self.world.latest() + 60)
+        g = self.gate(self.world.run(), 'fuzz.hard')
+        self.assertEqual((g['status'], g['value']), ('fail', 6))
+        self.assertIn("S13b's campaign summary, 2 of 2 shards", g['note'])
+        self.assertEqual(g['sources'][0]['path'], 'causes_all.json')
+        self.assertTrue(g['sources'][0]['behind'] is None)               # no commit in the summary
+        # the reports win as soon as they cover as many shards
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'shard 2/32', 'shard 2/2')
+        g = self.gate(self.world.run(), 'fuzz.hard')
+        self.assertEqual((g['status'], g['value']), ('pass', 0))
 
     # ---- distances
     def test_old_pass_is_stale(self):
@@ -217,6 +275,19 @@ class ReadyTest(unittest.TestCase):
         g = self.gate(self.world.run(), 'static.hazards')
         self.assertEqual((g['status'], g['value']), ('fail', 1))
         self.assertIn('BARRIER 1', g['note'])
+
+    def test_static_class_closed_by_the_build_config(self):
+        # tools/static/report.py's CLOSED (build_closures() reads compile.sh): closed while the plugin is loaded
+        rel = 'reports/st1/%s-static.md' % C
+        self.world.sub(rel, 'src/b.cpp 20 F2S\n', 'src/b.cpp 20 F2S\nsrc/d.cpp 40 VOLATILE-DECL\n')
+        g = self.gate(self.world.run(), 'static.hazards')
+        self.assertEqual(g['status'], 'pass')
+        self.assertIn('VOLATILE-DECL', g['closed'])
+        self.assertIn('VOLATILE-DECL 1', g['note'])
+        self.world.write('tools/link/compile.sh', '#!/bin/sh\n# loads -fplugin=fnvnx_ftoi\n', port=True)
+        g = self.gate(self.world.run(), 'static.hazards')
+        self.assertEqual((g['status'], g['value']), ('fail', 1))
+        self.assertIn('top open: VOLATILE-DECL 1', g['note'])
 
     def test_static_doc_key_is_not_a_class(self):
         th = json.loads(self.world.read('thresholds.json', port=True))

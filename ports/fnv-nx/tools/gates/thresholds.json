@@ -49,6 +49,16 @@
  "fuzz_by_design_causes": {
   "x87-precision": "result within tolerance of x87 80-bit intermediates; AArch64 has IEEE single/double only"
  },
+ "_fuzz_by_design_doc": "used only for fuzz reports without an fnvnx-causes block; with one, tools/difffuzz/causes.py POLICY decides",
+ "fuzz_hard_classes": [
+  "real-bug",
+  "triage"
+ ],
+ "fuzz_causes": {
+  "_doc": "S13b's whole-campaign summary (causes.py summary over the fuzz caches); fuzz.hard takes it when it covers more shards than the reports' fnvnx-causes blocks",
+  "branch": "reports/s13b-causes",
+  "path": "causes_all.json"
+ },
  "fuzz_min_coverage": 0.9,
  "boot_milestones": [
   "winmain",
