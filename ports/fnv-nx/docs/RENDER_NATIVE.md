@@ -447,6 +447,9 @@ verifier: [`render/native/CLAIMS.md`](../render/native/CLAIMS.md).
 | shaders | `render/native/shaders/*.glsl`, `build.py` | one GLSL 4.60 source per shader (`// nx-variants:` builds define sets) -> DKSH (uam) + GL text in one generated C table; `d3d9_epilogue.glsl` (fog, alpha test); N1 families `tile` and `nolight` (blocks in `include/nx/families.h`) |
 | N0 scenes | `render/native/n0/`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | 13 scenes with CPU-computed conformance checks (incl. exact D3D9 coverage); host runner, ILP32 Switch guest, the same guest under Unicorn (`tests/s6n/emu_n0.py`) |
 | N1 plan | `render/native/N1_PLAN.md`, `overrides.tsv`, `REQUESTS.md` | renderer entry points with slot evidence, override rows, linker/prepare requests with failing tests |
+| N1 core | `render/native/n1/` (`renderer.{h,cpp}`, `selftest.cpp`, `build.sh` -> `libnxrender.a`) | nx::Renderer (frame, target group, camera virtuals) and the record-only nx::StateTracker; self-test on GL and as the ILP32 guest |
+| capture / replay | `render/native/capture/` | CaptureBackend (guest and host) records streams + bound memory; `replay_gl` replays a capture on the host and compares readbacks |
+| N2 families | `render/native/shaders/{lit,depth,land,sky}.*.glsl` | SM3 lit (8 lights, specular), depth (ZONLY/DEPTHMAP), land (4 layers), sky; scenes with CPU checks |
 | environment | `render/native/env.sh`, `render/native/switch/build.sh` | rebuild toolchain/libnx/deko3d/uam; build the Switch package |
 
 ### 7.2 The backend split
