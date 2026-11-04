@@ -368,10 +368,14 @@ CRT_HEADERS = {
 }
 CRT_NAMES = [n for v in CRT_HEADERS.values() for n in v.split()]
 # stdio functions S4b implements on MSVC's struct _iobuf (platform/crt/fnvnx_iobuf.h): a decomp prototype of one of
-# these that takes or returns _iobuf* is replaced by that header (its C++ overloads take _iobuf*)
+# these that takes or returns _iobuf* is replaced by that header (its C++ overloads take _iobuf*). fopen has libc's
+# parameters, so no overload can return _iobuf*: its prototype is replaced by "fnvnx_iobuf_fopen.h", that header plus
+# `#define fopen fnvnx_iob_fopen` for the rest of the unit (fnvnx_iob_fopen is the provider of the CRT fopen that
+# units.json binds, platform/crt/crt_symbols.tsv; DECL1-FOPEN)
 IOBUF_NAMES = set('''_fclose_nolock _fdopen _fileno _fseeki64 _fsopen _ftelli64 clearerr fclose feof ferror fflush fgetc
-    fgetpos fgets fopen_s fprintf fputc fputs fread fseek fsetpos ftell fwrite getc putc rewind setvbuf ungetc vfprintf
-    __iob_func'''.split())
+    fgetpos fgets fopen fopen_s fprintf fputc fputs fread fseek fsetpos ftell fwrite getc putc rewind setvbuf ungetc
+    vfprintf __iob_func'''.split())
+IOBUF_MACRO = {'fopen': '"fnvnx_iobuf_fopen.h"'}
 MACRO_NAMES = {'_alloca'}     # macros on the target (fnvnx_compat.h): no using-declaration possible
 
 OWN_STD = re.compile(r'\b(?:class|struct)\s+(?:exception|bad_alloc|bad_cast|type_info)\s*[:{]')
@@ -602,7 +606,8 @@ def r_platform_protos(path, text, stats):
             params = re.search(r'\(([^;{}]*)\)', m.group(0)[m.group(0).index('operator'):]).group(1)
             hdr = new_header(text) if PLACEMENT_PARAMS.match(params) else ''
         elif name in IOBUF_NAMES and '_iobuf' in m.group(0):
-            hdr = '"fnvnx_iobuf.h"'
+            hdr = IOBUF_MACRO.get(name, '"fnvnx_iobuf.h"')
+            if name in IOBUF_MACRO: stats['DECL1-FOPEN'] += 1
         else:
             hdr = PLATFORM[name]
         if not is_op:

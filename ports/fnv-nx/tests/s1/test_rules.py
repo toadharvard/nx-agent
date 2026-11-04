@@ -827,6 +827,26 @@ check('SSE2 drops (_mm_x)(...) prototypes, SSE4 unqualified using-declarations o
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
 
+# ---- DECL1-FOPEN: an _iobuf fopen prototype gives way to the shim's fopen -> fnvnx_iob_fopen (S1-crt)
+_fo = prepare.r_platform_protos('/x/src/a.h', 'struct _iobuf;\nextern "C" _iobuf* fopen(const char*, const char*);\n'
+                                'extern "C" int fclose(_iobuf*);\nvoid g();\n', Counter())
+check('DECL1-FOPEN _iobuf fopen -> fnvnx_iobuf_fopen.h, same lines', _fo,
+      ['struct _iobuf;\n#include "fnvnx_iobuf_fopen.h" /* fnv-nx DECL1 */\n#include "fnvnx_iobuf.h" /* fnv-nx DECL1 */\n'
+       'void g();'], ['fopen(const'])
+check('DECL1-FOPEN a fopen prototype without _iobuf is left alone',
+      prepare.r_platform_protos('/x/src/a.cpp', 'extern "C" void* __cdecl fopen(const char*, const char*);\n', Counter()),
+      ['void* __cdecl fopen(const char*, const char*);'], ['fnv-nx'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _fc = os.path.join(tempfile.mkdtemp(), 'fo.cpp')
+    open(_fc, 'w').write(_fo + '#include <fstream>\n#include <type_traits>\n'
+                         'static_assert(std::is_same<decltype(fopen("a", "rb")), _iobuf*>::value, "the game FILE");\n'
+                         'static_assert(std::is_same<decltype(std::fopen("a", "rb")), _iobuf*>::value, "std:: too");\n'
+                         'static_assert(std::is_same<decltype(::freopen("a", "rb", stdin)), FILE*>::value, "libc");\n'
+                         'int h(const char* p) { _iobuf* f = fopen(p, "rb"); return f ? fclose(f) : -1; }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror',
+                          '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _fc], capture_output=True, text=True)
+    check('DECL1-FOPEN output compiles: fopen and std::fopen are the _iobuf one', _r.stderr or 'ok', ['ok'])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''
