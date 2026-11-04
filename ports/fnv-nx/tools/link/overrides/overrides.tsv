@@ -6,3 +6,4 @@
 00a6e330	fnvnx_slerp_00a6e330	slerp_00a6e330.c	?Slerp@NiQuaternion@@QAEXMABV1@0@Z
 00a7fdd0	fnvnx_nibound_update_00a7fdd0	nibound_update_00a7fdd0.c	?Update@NiBound@@QAEXABV1@ABVNiTransform@@@Z
 00a588a0	fnvnx_mat3_tmul_00a588a0	mat3_tmul_00a588a0.c	?FUN_00a588a0@Matrix3A588@@QBE?AV1@ABV1@@Z
+00a6df40	fnvnx_quat_from_matrix_00a6df40	quat_from_matrix_00a6df40.c	?FromRotationMatrix@NiQuaternion@@QAEXABVThreeByThreeMatrix@@@Z

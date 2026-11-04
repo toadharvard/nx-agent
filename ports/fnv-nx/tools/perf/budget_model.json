@@ -497,15 +497,16 @@
    "subsystem": "animation",
    "role": "main",
    "per_call_insn": [
-    103,
-    103
+    77,
+    77
    ],
    "per_call_basis": "M",
    "calls": [
     500,
     3000
    ],
-   "calls_note": "[E]"
+   "calls_note": "[E]",
+   "per_call_note": "override fnvnx_quat_from_matrix_00a6df40 (S15-simd: no frame, no volatile reload, no pointer array): 89 -> 77 A64 instructions per call (override_ab.py, link 0bd144db1464, 13 cases, agreement 13 -> 13); 103 was an older link"
   },
   {
    "id": "fn_pass_bucket",

@@ -729,8 +729,11 @@ override:
 | NiQuaternion::Slerp 0x00a6e330 (+ 0x00a6dc30, 0x00a4ff00 inlined) | `slerp_00a6e330.c` | 134 -> 88 | 9/16 -> 9/16 | 7.745 -> 7.430 |
 | NiBound::Update 0x00a7fdd0 | `nibound_update_00a7fdd0.c` (one `ld3` gives the rotation's columns) | 46 -> 19 | 15/16 -> 15/16 | 7.430 -> 6.660 (both rows) |
 | NiMatrix3 transpose product 0x00a588a0 (in UpdateWorldData's row) | `mat3_tmul_00a588a0.c` | 64 -> 39 | 13/16 -> 13/16 | |
+| NiQuaternion::FromRotationMatrix 0x00a6df40 | `quat_from_matrix_00a6df40.c` (no frame, volatile reload or pointer array; errno of a negative root set after the stores) | 89 -> 77 (model: 103, older link) | 13/13 -> 13/13 | 6.660 -> 6.603 |
+| BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | | - |
 
-(Link 0bd144db1464, tree t/0bd144db1464, oracle msvc/pristine/87eb9373a0bb, 8 seeds x zero/random background.
+Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no
+outline atomics); the A/B numbers above are with them. (Link 0bd144db1464, tree t/0bd144db1464, oracle msvc/pristine/87eb9373a0bb, 8 seeds x zero/random background.
 The agreement count is the same before and after; the per-case outputs are checked bit for bit by run.py.)
 The override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch of either must update it too.
 The NiBound::Update row's MSVC signature is the one four pristine objects reference; one object (u2763) declares
