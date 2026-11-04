@@ -269,6 +269,7 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | oracle-only data fault | `oracle-fault` | triage |
 | oracle-only fault (`oracle-fault`, or an `oracle-vcall` error) at a garbage address in the x86 private range 0x0e000000 | `oracle-private-address` |  triage S13b (S13b audit: no record evidence separates the harness from a real bug) |
 | ... a dword access at 0xfffffffd..0xffffffff, oracle only | `oracle-fault` | triage (the native may never have made the access; S13b audit) |
+| probe `ilp32-pointer` (the native touched >= 4 GiB, the oracle did not fault) where the address mod 2^32 is memory the oracle maps (image, pool, case buffers, heap, stack) | `ilp32-wrap` | real-bug S1 (a base plus a wrapping 32-bit index: GCC ILP32 forms the address in 64 bits on an integer-constant base, tests/s13/ilp32_wrap); near null or unmapped stays `ilp32-pointer` |
 | ... and the native function calls a function its own object defines as a bare `ret` (decomp stub, empty destructor) | `native-empty-callee` | real-bug S1 (the exe's work there is skipped natively) |
 | `oracle-vcall` call-target (`vcall: unplanted`): the native trace passes a `__s13_vtpad_` slot | `vptr-unpaired` | real-bug S2c, soft (classify.py tests `unplanted` first) |
 | ... the oracle calls a garbage word in the AArch64 stub range, the native trace names that word (word - 0x08000000, or `name:<hex>`) | `vcall-stub-alias` |  triage S13 (S13b audit: no record evidence separates the harness from a real bug) |
