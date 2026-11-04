@@ -6,6 +6,7 @@
 #   wine_ref.sh setup <game dir> <work dir>              prefix, symlink mirror, ini files (idempotent)
 #   wine_ref.sh run   <work dir> <scene id> <out dir>    boot, drive the console, capture frames + scene state
 #   wine_ref.sh versions                                 the exact versions of every piece (for the report)
+#   wine_ref.sh mirror <game dir> <dir>                  only the Data/ mirror (base load order, no .nam/DLC)
 #
 # Scene ids and their console scripts: tools/compare/scenes.json. Output per scene: <out>/<scene>/frame_<n>.png,
 # <out>/<scene>/console.txt (scof output), <out>/<scene>/run.json (timings, versions, ini hash).
@@ -34,6 +35,26 @@ xstart() {  # a private X server for the run
 game_dir() { echo "$1/pfx/drive_c/FNV"; }
 docs_dir() { echo "$1/pfx/drive_c/users/$(id -un)/Documents/My Games/FalloutNV"; }
 
+mirror_data() {  # mirror_data <game dir> <prefix game dir>: Data/ as symlinks, the base game's load order only
+	local game=$1 g=$2
+	# Data: only the load order of scenes.json. A .nam file makes the game load its add-on even when plugins.txt
+	# leaves it out (S5-data: "Caravan Pack items added to inventory"), so no .nam, no master outside "plugins",
+	# and no BSA named after such a master ("DeadMoney - Main.bsa"). Update.bsa and "Fallout - *.bsa" are base game.
+	local keep; keep=$(python3 -I -c 'import json,sys; print("\n".join(p.lower() for p in json.load(open(sys.argv[1]))["plugins"]))' "$HERE/scenes.json")
+	find "$g/Data" -maxdepth 1 -type l -delete
+	for f in "$game"/Data/*; do
+		local b l stem; b=$(basename "$f"); l=$(echo "$b" | tr 'A-Z' 'a-z')
+		case "$l" in
+			*.nam) continue ;;
+			*.esm|*.esp) grep -qx "$l" <<<"$keep" || continue ;;
+			*.bsa)
+				stem=${l%% - *}; stem=${stem%.bsa}
+				case "$stem" in fallout|update) ;; *) grep -qx "$stem.esm" <<<"$keep" || grep -qx "$stem.esp" <<<"$keep" || continue ;; esac ;;
+		esac
+		ln -sfn "$f" "$g/Data/$b"
+	done
+}
+
 cmd_setup() {
 	local game=${1:?game dir} work=${2:?work dir}
 	game=$(cd "$game" && pwd); mkdir -p "$work"; work=$(cd "$work" && pwd)
@@ -45,7 +66,7 @@ cmd_setup() {
 	# the mirror: every top-level file and every Data entry a symlink; our own files are real files beside them
 	local g; g=$(game_dir "$work"); mkdir -p "$g/Data"
 	for f in "$game"/*; do [ "$(basename "$f")" = Data ] || ln -sfn "$f" "$g/$(basename "$f")"; done
-	for f in "$game"/Data/*; do ln -sfn "$f" "$g/Data/$(basename "$f")"; done
+	mirror_data "$game" "$g"
 	# no audio device in a container: Wine's null driver; the game's own install key (GOG layout)
 	cat >"$work/s16.reg" <<EOF
 REGEDIT4
@@ -134,6 +155,7 @@ cmd_versions() {
 
 case "${1:-}" in
 	setup) shift; cmd_setup "$@" ;;
+	mirror) shift; mkdir -p "$2/Data"; mirror_data "$@" ;;   # tests: the Data mirror alone
 	run) shift; cmd_run "$@" ;;
 	versions) cmd_versions ;;
 	*) sed -n '2,15p' "$0"; exit 2 ;;

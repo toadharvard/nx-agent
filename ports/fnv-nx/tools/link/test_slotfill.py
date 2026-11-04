@@ -30,6 +30,14 @@ rest; its exe vftable holds the same bodies. Checks:
 * Vk::kz, whose exe body is `xor eax, eax; ret` and which no unit compiles, gets the native stub `return 0`;
 * Vk::kp, whose exe slot is the CRT's `_purecall` (a provider row of S4's crt_symbols.tsv), binds to the
   platform's `_purecall`;
+* Vk::kq, a placeholder `virtual void kq();` whose exe body is the free cdecl `qbody(int)` (the x86 code reads the
+  first stack argument, which a thiscall caller passes after this), goes through a bridge x0 <- x1;
+* S2::s2 (defined nowhere) in M's secondary vtable, where the exe's M {for S2} vftable holds an adjustor thunk
+  (`sub ecx, 8; jmp M::s2body`) and the native vtable's offset-to-top is -8, gets `sub w0, w0, #8; b __fnv_<a>`;
+* a reference that uses the result of the constructor at 0x00401130 (MSVC returns this) binds to a stub that calls
+  the C1 and returns this, and the address map's C row names that stub (S5 s5-002 item 4);
+* Dd's D1, defined nowhere (MSVC folded ~Dd into ??_GDd, which the unit binds to a (this, flags) function), is
+  `??_G(this, 0)` through the flag stub (S1-refs-004);
 * vtmetric.py counts what is left: trap slots 6 (c, d, e in both vtables), 2 of them with a native at the exe slot
   (c: the abi gap).
 """
@@ -60,7 +68,14 @@ struct Vd { virtual int g(); virtual ~Vd(); int z; };      // key function g; ~V
 struct Gd { virtual ~Gd(); int w; };
 struct Vp { virtual int h(); virtual void v00(); int u; }; // v00: a placeholder for the exe's ??_G
 struct Sh { virtual int p() { return 5; } int s; };         // a shell: its exe vftable has two slots more
-struct Vk { virtual int kk(); virtual int k(int); virtual int kz(); virtual int kp(); int t; };  // k: stdcall kbody(int); kz: return 0
+struct Vk { virtual int kk(); virtual int k(int); virtual int kz(); virtual int kp(); virtual void kq(); int t; };
+void qbody(int);   // kq's body: a free cdecl function taking the slot's first (undeclared) argument
+struct Dd { ~Dd(); void *FUN_00401140(unsigned); int w; };   // ~Dd defined nowhere: MSVC folded it into ??_G
+struct Ct { Ct(); int v; };                          // an MSVC constructor returns this
+struct CtShell { void *FUN_00401130(); };             // a unit that calls it for its result
+struct S1 { virtual int s1(); int a; };
+struct S2 { virtual int s2(); int b; };          // s2 defined nowhere
+struct M : S1, S2 { int s1() override; int s2body(); int c; };   // the exe's M overrides s2 (as M::s2body)  // k: stdcall kbody(int); kz: return 0
 int kbody(int);
 '''
 SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nint Der::a() { return 2; }\n'
@@ -70,6 +85,11 @@ SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nin
                     'Gd::~Gd() {}\nint Vp::h() { return 4; }\nVd *mk_vd() { return new Vd; }\n'
                     'Gd *mk_gd() { return new Gd; }\nVp *mk_vp() { return new Vp; }\nSh *mk_sh() { return new Sh; }\n'
                     'int Vk::kk() { return 6; }\nint kbody(int q) { return q + 1; }\nVk *mk_vk() { return new Vk; }\n'
+                    'int g_q;\nvoid qbody(int q) { g_q = q; }\n'
+                    'int S1::s1() { return 1; }\nint M::s1() { return 2; }\nint M::s2body() { return c; }\n'
+                    'M *mk_m() { return new M; }\n'
+                    'Ct::Ct() { v = 7; }\nvoid *use_ct(CtShell *p) { return p->FUN_00401130(); }\n'
+                    'void *Dd::FUN_00401140(unsigned f) { return f ? this : 0; }\nvoid del_dd(Dd *p) { delete p; }\n'
                     'Vb *mk_vb() { return new Vb; }\nDer *mk_der() { return new Der; }\n'}
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 8}   # noqa: E731
 
@@ -90,7 +110,7 @@ def run(cmd, **kw):
 
 def build_exe(rd, where):
     td = {n: rd.put(struct.pack('<II', 0x0101d000, 0) + n.encode() + b'\0')
-          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@')}
+          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@')}
 
     def chd(names):
         bs = [rd.words(td[n], 0, 0, 0xffffffff, 0, 0x40, 0) for n in names]
@@ -111,7 +131,13 @@ def build_exe(rd, where):
     where['Vp'] = vft('.?AVVp@@', chd(['.?AVVp@@']), [0x401090, 0x401098])
     # Sh: p, then Shell::impl's address and an address no compiled unit defines
     where['Sh'] = vft('.?AVSh@@', chd(['.?AVSh@@']), [0x4010b0, 0x401020, 0x401060])
-    where['Vk'] = vft('.?AVVk@@', chd(['.?AVVk@@']), [0x4010c0, 0x4010c8, 0x4010d0, 0x4010e0])   # kp: _purecall
+    where['Vk'] = vft('.?AVVk@@', chd(['.?AVVk@@']), [0x4010c0, 0x4010c8, 0x4010d0, 0x4010e0, 0x4010f0])
+    hm = chd(['.?AUM@@'])
+    where['M'] = vft('.?AUM@@', hm, [0x401120])
+    col = rd.words(0, 8, 0, td['.?AUM@@'], hm)   # M's vftable {for S2} at +8: an adjustor thunk at 0x401110
+    rd.words(col)
+    where['M2'] = rd.here()
+    rd.words(0x401110)
     rd.words(0)
 
 
@@ -121,7 +147,9 @@ def main():
         exe = os.path.join(t, 'Synthetic.exe')
         where = {}
         # .text: int3, except Vk::kz's body at 0x4010d0, `xor eax, eax; ret` (no unit defines it)
-        test_exevft.make_pe(exe, lambda rd: build_exe(rd, where), {0x4010d0: b'\x33\xc0\xc3'})
+        test_exevft.make_pe(exe, lambda rd: build_exe(rd, where), {
+            0x4010d0: b'\x33\xc0\xc3',                              # xor eax, eax; ret
+            0x401110: b'\x83\xe9\x08\xe9' + (0x401100 - 0x401118).to_bytes(4, 'little', signed=True)})  # sub ecx, 8; jmp
         tree = os.path.join(t, 'tree')
         os.makedirs(os.path.join(tree, 'include'))
         open(os.path.join(tree, 'include', 'h.h'), 'w').write(HEADER)
@@ -140,10 +168,15 @@ def main():
                 F(0x401040, '?a@Der@@UAEHXZ'), F(0x401070, '?mk_vb@@YAPAUVb@@XZ'), F(0x401078, '?mk_der@@YAPAUDer@@XZ'),
                 F(0x401080, '?g@Vd@@UAEHXZ'), F(0x401088, '?del@Shell@@QAEPAXI@Z'), F(0x401090, '?h@Vp@@UAEHXZ'),
                 F(0x401098, '??_GGd@@UAEPAXI@Z'), F(0x4010a0, '??1Gd@@UAE@XZ'), F(0x401028, '?impl4@Shell@@QAEHXZ'),
-                F(0x4010c0, '?kk@Vk@@UAEHXZ'), F(0x4010c8, '?kbody@@YGHH@Z')],
+                F(0x4010c0, '?kk@Vk@@UAEHXZ'), F(0x4010c8, '?kbody@@YGHH@Z'), F(0x4010f0, '?qbody@@YAXH@Z'),
+                F(0x401120, '?s1@M@@UAEHXZ'), F(0x401100, '?s2body@M@@QAEHXZ'), F(0x401128, '?s1@S1@@UAEHXZ'),
+                F(0x401130, '??0Ct@@QAE@XZ'), F(0x401138, '?use_ct@@YAPAXPAUCtShell@@@Z'),
+                F(0x401140, '?FUN_00401140@Dd@@QAEPAXI@Z'), F(0x401148, '?del_dd@@YAXPAUDd@@@Z')],
              'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der'],
                          '??_7Vd@@6B@': '0x%08x' % where['Vd'], '??_7Vp@@6B@': '0x%08x' % where['Vp'],
-                         '??_7Sh@@6B@': '0x%08x' % where['Sh'], '??_7Vk@@6B@': '0x%08x' % where['Vk']}},
+                         '??_7Sh@@6B@': '0x%08x' % where['Sh'], '??_7Vk@@6B@': '0x%08x' % where['Vk'],
+                         '??_7M@@6BS1@@@': '0x%08x' % where['M'], '??_7M@@6BS2@@@': '0x%08x' % where['M2'],
+                         '?FUN_00401130@CtShell@@QAEPAXXZ': '0x00401130', '??_GDd@@QAEPAXI@Z': '0x00401140'}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
                 F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {}},
         ]}
@@ -212,6 +245,27 @@ def main():
         rp = refs.get('_ZN2Vk2kpEv')
         check(rp is not None and rp[2] == 'vslot-exe' and rp[5] == '_purecall',
               'kp (the exe slot is _purecall, a CRT provider) -> the platform\'s _purecall: %s' % (rp,))
+        rq = refs.get('_ZN2Vk2kqEv')
+        check(rq is not None and rq[5].startswith('__fnvnx_br_004010f0_') and
+              ('%s:\n    mov x0, x1\n    b __fnv_004010f0' % rq[5]) in bridges_,
+              'kq (a placeholder slot; its body is the free cdecl qbody(int)) through a bridge x0 <- x1: %s' % (rq,))
+        rs2 = refs.get('_ZN2S22s2Ev')
+        check(rs2 is not None and rs2[5] == '__fnvnx_vadj_00401110' and
+              '__fnvnx_vadj_00401110:\n    sub w0, w0, #8\n    b __fnv_00401100' in bridges_,
+              'S2::s2 in M\'s secondary vtable: the exe\'s adjustor thunk (sub ecx, 8; jmp M::s2body) -> '
+              'sub w0, w0, #8; b __fnv_00401100: %s' % (rs2,))
+        rc = refs.get('_ZN7CtShell12FUN_00401130Ev')
+        check(rc is not None and rc[5] == '__fnvnx_cthis_00401130' and
+              '__fnvnx_cthis_00401130:\n    stp x29, x30, [sp, #-32]!\n    mov x29, sp\n    str x0, [sp, #16]\n'
+              '    bl __fnv_00401130\n    ldr x0, [sp, #16]' in bridges_,
+              'a reference using the constructor 0x00401130\'s result -> the stub returning this: %s' % (rc,))
+        crow = {l.split('\t')[0]: l.split('\t') for l in open(os.path.join(out, 'addrmap.tsv'))
+                if not l.startswith('#')}.get('00401130', [''] * 6)
+        check(crow[1] == 'C' and crow[2] == '__fnvnx_cthis_00401130', 'the C row names the stub: %s' % (crow,))
+        rd = refs.get('_ZN2DdD1Ev')
+        check(rd is not None and rd[2] == 'dtor-by-deldtor' and rd[5] == '__fnvnx_vflag_00401140_0',
+              'Dd\'s D1 (defined nowhere; the unit binds ??_GDd to a (this, flags) function) -> ??_G(this, 0): %s'
+              % (rd,))
         rk = refs.get('_ZN2Vk1kEi')
         check(rk is not None and rk[2] == 'vslot-exe' and rk[5].startswith('__fnvnx_br_004010c8_') and
               ('%s:\n    mov x0, x1\n    b __fnv_004010c8' % rk[5]) in bridges_,
@@ -240,8 +294,8 @@ def main():
               'vtmetric: 7 trap slots left (Sh\'s extension holds one), 2 with a native at the exe slot, no short '
               'primary (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
-        check(st0['trap-slots'] == 16 and st0['trap-native-at-exe'] == 11 and st0['primary-shorter'] == 1,
-              'vtmetric without the fill: 16 / 11, Sh short (%s)'
+        check(st0['trap-slots'] == 18 and st0['trap-native-at-exe'] == 12 and st0['primary-shorter'] == 1,
+              'vtmetric without the fill: 18 / 12, Sh short (%s)'
               % dict(st0))
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0

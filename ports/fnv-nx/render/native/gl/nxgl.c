@@ -659,9 +659,11 @@ static void bind_layout(uint32_t lay) {
             case NxAttr_Float16: type = GL_HALF_FLOAT; norm = GL_FALSE; break;
             default: type = GL_FLOAT; norm = GL_FALSE; break;
             }
-            p_glVertexAttribFormat(i, c, type, norm, l->l.attr[i].offset);
-            p_glVertexAttribBinding(i, 0);
-            p_glEnableVertexAttribArray(i);
+            GLuint loc = l->l.attr[i].location ? (GLuint)(l->l.attr[i].location - 1) : i;
+            if (loc > 15) continue;
+            p_glVertexAttribFormat(loc, c, type, norm, l->l.attr[i].offset);
+            p_glVertexAttribBinding(loc, 0);
+            p_glEnableVertexAttribArray(loc);
         }
     }
     p_glBindVertexArray(l->vao);

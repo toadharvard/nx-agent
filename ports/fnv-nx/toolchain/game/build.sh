@@ -28,7 +28,7 @@ case "${GUEST:-pie}" in
 	*) echo "GUEST must be pie or fixed"; exit 1 ;;
 esac
 COMMON="$ARCH -O2 -g -ffunction-sections -fdata-sections -frounding-math -fshort-wchar -w"
-PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/startup/guest"
+PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/startup/guest -I$ROOT/ext/minimp3"   # minimp3: platform/audio/dshow.cpp (tools/fetch.sh)
 VFLAGS=""
 if [ -n "$VORBIS" ]; then VFLAGS="-DFNVNX_HAVE_VORBIS -I$VORBIS/include"; fi
 rm -rf "$OUT/obj"; mkdir -p "$OUT/obj"
@@ -55,7 +55,7 @@ SRCS+=("$TC/guest/os_guest.c" "$TC/guest/platform_glue.cpp" "$TC/game/boot.cpp")
 # object set operator new is a stub returning 0 (tesregiondatagrass.cpp) and new[] ends in the untranslated
 # MemoryManager::Allocate (0x00aa3e40, a trap), so every `new` in the guest (platform/ and libstdc++ included)
 # returned NULL. GAME_NEW=runtime (default): the game objects' definitions are weakened (objlist.py) and
-# global_new.cpp (malloc/free) provides them, plus weak malloc stand-ins for the game's own heap entry points
+# global_new.cpp provides them (MemoryManager::Allocate/Deallocate once the image is mapped, malloc/free before), plus weak stand-ins for the game's own heap entry points
 # that have no native definition yet (heap_standin.c: FormHeap_Allocate, MemoryManager::Allocate);
 # GAME_NEW=game: the game's own.
 case "${GAME_NEW:-runtime}" in

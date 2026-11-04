@@ -7,11 +7,14 @@
 #
 #   tests/s5/farm_boot.sh <commit> <out dir> [image]
 #
-# image: the FalloutNV.exe the guest maps. Default: $FNVNX_IMAGE, else the link's boot/synth.exe (S14's synthesized
+# image: the FalloutNV.exe the guest maps (put at switch/fnv/, NX1's SD layout, and at fnvnx/game/, where guests
+# linked before NX1 look for it). Default: $FNVNX_IMAGE, else the link's boot/synth.exe (S14's synthesized
 # image as the farm made it), else none (the empty image). Boots ($FARM_BOOTS, default "raw slots stub"), all with
 # --skip-faulting-init: raw; slots, raw plus the exe's vftable slots in the native vtables' trap slots
 # (--exe-vtables, the stand-in for S2c's link fix; needs the image); and stub with the known-fault table
-# (--stub-faults tests/s5/known_faults.txt, docs/TOOLCHAIN.md section 18).
+# (--stub-faults tests/s5/known_faults.txt, docs/TOOLCHAIN.md section 18). slots and stub also map
+# toolchain/game/heap_standin.c, compiled here (--inject; aarch64-linux-gnu-gcc), so a guest linked before a weak
+# stand-in there was added boots as a new link would; a guest that has the function keeps its own.
 #
 # Output in <out dir>. It must be outside the repository, because everything there is derived from the decomp:
 #   link/              the fetched link outputs (not with FARM_LINK_DIR)
@@ -38,10 +41,18 @@
 #   FARM_NATIVE_RENDER  a dir with tests/s5/native_render_inject.sh's outputs (nxrender_inject.o, libnxgl.so): every
 #                   boot runs on the native renderer's engine path (tests/s5/native_render.py --native-render --gpu,
 #                   the stand-in for a LINK_OVERRIDES=render link), its frames as PNG in <out dir>/frames_<boot>/
+#   FARM_GAME       a game install (FalloutNV.exe, Data/, Fallout_default.ini), mounted in place at the guest's
+#                   sdmc:/switch/fnv (emu_guest.py --game, tests/s5/datapath.py); its FalloutNV.exe is the default image.
+#                   Without it the image alone is copied to sdmc:/switch/fnv. Never inside the repository.
 #   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 6000000000)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
 set -euo pipefail
 COMMIT=${1:?commit}; OUT=${2:?out dir}; IMAGE=${3:-${FNVNX_IMAGE:-}}
+GAME=${FARM_GAME:-}
+if [ -n "$GAME" ]; then
+  GAME=$(cd "$GAME" && pwd)
+  [ -n "$IMAGE" ] || IMAGE=$GAME/FalloutNV.exe
+fi
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PY=${PY:-python3}
@@ -55,6 +66,20 @@ BOOTS=${FARM_BOOTS:-raw slots stub}
 EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-6000000000}
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
+# The real install by default (orchestrator: every farm boots on the real Data/): when no FARM_GAME is given and the
+# image is none or the owner's exe, tools/gamedata_fetch.sh assembles it from the private repository into
+# FARM_GAMEDATA_DIR (default $FARM_HOME/gamedata; cached: nothing is fetched while the branches stay put).
+# FARM_GAMEDATA=0 turns it off; a failed fetch leaves the boot as it was (image only).
+OWNER_EXE_SHA=${FNVNX_EXE_SHA256:-89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe}
+if [ -z "$GAME" ] && [ "${FARM_GAMEDATA:-1}" != 0 ] &&
+   { [ -z "$IMAGE" ] || [ "$(sha256sum "$IMAGE" | cut -c1-64)" = "$OWNER_EXE_SHA" ]; }; then
+  GD=${FARM_GAMEDATA_DIR:-${FARM_HOME:-$HOME/fnvnx-farm}/gamedata}
+  if bash "$ROOT/tools/gamedata_fetch.sh" "$GD" > "$OUT/gamedata_fetch.log" 2>&1; then
+    GAME=$GD; IMAGE=$GD/FalloutNV.exe
+  else
+    echo "farm_boot: no real install (tools/gamedata_fetch.sh failed, see $OUT/gamedata_fetch.log): image only" >&2
+  fi
+fi
 if TOP=$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null); then
   case "$OUT/" in "$TOP"/*) echo "farm_boot: $OUT is inside the repository; the outputs are decomp-derived" >&2; exit 1 ;; esac
 fi
@@ -128,6 +153,32 @@ fi
 # --- boots ----------------------------------------------------------------------------------------------------------
 ADDRMAP=""
 [ -f "$LINK/out/addrmap.tsv" ] && ADDRMAP=$LINK/out/addrmap.tsv
+IMGARG=()
+if [ -n "$GAME" ]; then
+  IMGARG=(--game "$GAME")
+  [ "$IMAGE" -ef "$GAME/FalloutNV.exe" ] || { echo "farm_boot: FARM_GAME has its own FalloutNV.exe; give no image" >&2; exit 1; }
+elif [ -n "$IMAGE" ]; then
+  IMGARG=(--file "switch/fnv/FalloutNV.exe=$IMAGE")
+fi
+INJECT=()
+if command -v aarch64-linux-gnu-gcc > /dev/null \
+    && aarch64-linux-gnu-gcc -mabi=ilp32 -O2 -fno-asynchronous-unwind-tables -c "$ROOT/toolchain/game/heap_standin.c" \
+       -o "$OUT/heap_standin.o" 2> "$OUT/heap_standin.log"; then
+  INJECT=(--inject "$OUT/heap_standin.o")
+else
+  log "heap_standin.c not compiled (aarch64-linux-gnu-gcc): slots and stub boot without it"
+fi
+# The exe's ini files next to it (fnv-nx-build gamedata/exe: Fallout_default.ini, low/medium/high/VeryHigh.ini; the
+# game copies Fallout_default.ini to My Games/FalloutNV/FALLOUT.INI and stops in WinMain without it). They go where
+# the exe goes. Nothing is placed for the synthesized image.
+GAMEFILES=()
+if [ -n "$IMAGE" ] && [ -z "$GAME" ]; then   # with FARM_GAME the install's own inis are mounted with it
+  for f in "$(dirname "$IMAGE")"/*.ini; do
+    [ -f "$f" ] || continue
+    b=$(basename "$f")
+    GAMEFILES+=(--file "switch/fnv/$b=$f" --file "fnvnx/game/$b=$f")
+  done
+fi
 EMU=("$HERE/emu_guest.py"); NR=${FARM_NATIVE_RENDER:-}
 [ -n "$NR" ] && EMU=("$HERE/native_render.py" --native-render "$NR/nxrender_inject.o" --gpu "$NR/libnxgl.so")
 boot() {   # boot <tag> [extra emu_guest.py args]
@@ -138,7 +189,7 @@ boot() {   # boot <tag> [extra emu_guest.py args]
   [ -n "$NR" ] && NR_ARGS=(--frames "$OUT/frames_$tag")
   rm -rf "$root"; mkdir -p "$root"
   timeout "$EMU_TIMEOUT" nice "$PY" -I "${EMU[@]}" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" "${NR_ARGS[@]}" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE"} \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" "${IMGARG[@]}" "${GAMEFILES[@]}" \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"
@@ -153,8 +204,8 @@ boot() {   # boot <tag> [extra emu_guest.py args]
 for tag in $BOOTS; do
   case "$tag" in
     raw) boot raw ;;
-    slots) boot slots --exe-vtables ;;
-    stub) boot stub --stub-faults "$HERE/known_faults.txt" ;;
+    slots) boot slots --exe-vtables "${INJECT[@]}" ;;
+    stub) boot stub --stub-faults "$HERE/known_faults.txt" "${INJECT[@]}" ;;
     *) echo "farm_boot: unknown boot '$tag' (FARM_BOOTS: raw slots stub)" >&2; exit 1 ;;
   esac
 done
@@ -167,19 +218,24 @@ done
   else
     echo "- image: none (the empty image)"
   fi
+  if [ -n "$GAME" ]; then
+    echo "- game install: $GAME$( [ -f "$GAME/SYNTHETIC" ] && echo ' (synthetic install, tests/s5/synth_install.py: not the game data)')"
+  fi
   echo "- undefined symbols: $UNDEF"
   [ -f "$LINK/boot/summary.txt" ] && echo "- the farm's raw boot: $(grep -h '^STOPPED' "$LINK/boot/summary.txt" | head -1)"
   for tag in $BOOTS; do
     L=$OUT/emu_$tag.log
     echo
     echo "## boot $tag (exit $(cat "$OUT/emu_$tag.rc"))"
-    grep -h "exe-vtables:\|memory manager after construction\|memory manager before WinMain\|static initialisers done\|initializers skipped\|calling WinMain\|WinMain returned\|stub-faults:\|before-winmain:" "$L" || true
+    grep -h "exe-vtables:\|inject:\|memory manager after construction\|memory manager before WinMain\|static initialisers done\|initializers skipped\|calling WinMain\|WinMain returned\|stub-faults:\|before-winmain:" "$L" || true
     grep -h "^stubbed-fault\|^replaced-call\|^vslot-past-end" "$L" | cut -f1-5 | head -25 || true
     grep -h "^skip-summary" "$L" | cut -f1-4 | head -8 || true
     sed -n '/^== trace/,/^   #4 /p' "$L" | head -14
     grep -h "^STOPPED\|^deadlock" "$L" || echo "(no stop line: timeout or normal end, see emu_$tag.log)"
     grep -h "^   \[fnvnx\] \(MessageBox\|ExitProcess\)" "$L" | sort -u | head -5 || true
     grep -h "^milestone	" "$L" | cut -f2-4 | tr '\t' ' ' | sed 's/^/game milestone /' || true
+    grep -h "^data-counts	" "$L" | tr '\t' ' ' || true
+    grep -h "^file-fault	" "$L" | head -10 | tr '\t' ' ' || true
     grep -h "^native-render	\|^gpu	\|^gpu-frame	\|native-render: \|fnvnx native renderer: " "$L" | tr '\t' ' ' | head -20 || true
     if [ -f "$OUT/frontier_$tag.txt" ]; then echo; echo "### frontier ($tag boot)"; head -12 "$OUT/frontier_$tag.txt"; fi
   done

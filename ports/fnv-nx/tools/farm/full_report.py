@@ -258,6 +258,9 @@ def main(argv):
         L.append('- fnv.nro in the SD tree: %s' % ('yes' if any(n.endswith('fnv.nro') for n, _ in pk['sd_files']) else 'NO'))
     if pk.get('check_package_rc') is not None:
         L.append('- check_package: exit %d' % pk['check_package_rc'])
+    if pk.get('metrics', {}).get('ilp32_wrap_64bit') is not None:
+        L.append('- toolchain ilp32_wrap (tests/s13/ilp32_wrap, fnvnx-a64, build flags): %s constant-base address '
+                 'forms do not wrap at 2^32' % fmt(pk['metrics']['ilp32_wrap_64bit']))
     if pk.get('nx1'):
         L.append('- nx1: open device-readiness checks = %s of %d (tests/nx1/run.py)' % (
             fmt(pk.get('metrics', {}).get('nx1_open')), len(pk['nx1'])))

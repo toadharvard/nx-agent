@@ -14,7 +14,8 @@ extern "C" {
  * PS tile / tile_alphamap (ALPHAMAP) / tile_vc (VC) - the engine's three VS and three PS (TILE1000-1002). */
 /* Family ids (NxOp_Marker PASS tag, b). */
 enum NxFamilyId { NxFam_None = 0, NxFam_Tile = 1, NxFam_NoLight = 2, NxFam_Lit = 3, NxFam_Depth = 4, NxFam_Land = 5,
-                  NxFam_Sky = 6, NxFam_ImageSpace = 7 };
+                  NxFam_Sky = 6, NxFam_ImageSpace = 7,
+                  NxFam_Translated = 8 /* the game's own programs, translated (n1/translated.h) */ };
 
 typedef struct NxMenuBgDraw {   /* shaders/menubg.*.glsl */
     float luma[4];          /* luminance weights (rgb) */

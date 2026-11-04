@@ -3,6 +3,7 @@
 Each rule is fn(path, text, stats) -> text (see tools/rules/README.md); ids are cited in the journal.
 """
 import bisect
+import collections
 import os
 import re
 import sys
@@ -1560,7 +1561,7 @@ def r_image_statics(path, text, stats):
 
 FALL_SKIP_RET = re.compile(r'^(?:extern\s*"C\+?\+?"\s*|(?:FNVNX_KEEP|inline|static|virtual|explicit|extern|constexpr|'
                            r'__forceinline|__inline|friend)\s+|template\s*<[^{};]*>\s*)+')
-FALL_DECLARATOR = re.compile(r'((?:::)?(?:[A-Za-z_]\w*(?:\s*<[^<>;{}()]*(?:<[^<>;{}()]*>)?[^<>;{}()]*>)?\s*::\s*)*'
+FALL_DECLARATOR = re.compile(r'((?:::)?(?:[A-Za-z_]\w*(?:\s*<(?:[^<>;{}()]|<(?:[^<>;{}()]|<[^<>;{}()]*>)*>)*>)?\s*::\s*)*'
                              r'(?:~?[A-Za-z_]\w*|operator\s*(?:\(\)|[^\s(]+)))\s*\(')
 FALL_END = re.compile(r'(?:\breturn\b[^;]*;|\bthrow\b[^;]*;|__builtin_trap\s*\(\s*\)\s*;|__builtin_unreachable\s*\(\s*\)\s*;|'
                       r'\b(?:abort|exit|_exit|ExitProcess|ExitThread|terminate|_CxxThrowException|__CxxThrowException|'
@@ -3488,6 +3489,60 @@ def _stand3_maybe_virtual(text, cls, name):
         return False
     return bool(re.search(r'\bvirtual\b[^;{}()]*\b%s\s*\(' % re.escape(name), text))
 
+STAND3_BUILTIN = {'char': 'D', 'signed char': 'C', 'unsigned char': 'E', 'short': 'F', 'unsigned short': 'G',
+                  'int': 'H', 'unsigned int': 'I', 'unsigned': 'I', 'long': 'J', 'unsigned long': 'K', 'float': 'M',
+                  'double': 'N', 'bool': '_N', '__int64': '_J', 'unsigned __int64': '_K', 'void': 'X',
+                  'wchar_t': '_W'}
+
+def _stand3_param_codes(params):
+    """MSVC's encoding of a parameter list of builtin types and pointers / references to them (`int, const char*` ->
+    `HPBD`), None when a parameter is anything else (a class type, a typedef, a function pointer, an array, `...`).
+    MSVC abbreviates a repeated multi-character type to a back-reference digit, so lists with a repeated pointer
+    or reference type are not encoded either."""
+    if params in ('', 'void'): return ''
+    out, seen = [], set()
+    for p in _split_args(params):
+        p = re.sub(r'=.*$', '', p).strip()
+        m = re.fullmatch(r'((?:const\s+|volatile\s+)*)((?:unsigned\s+|signed\s+)?(?:__int64|char|short|int|long|float|'
+                         r'double|bool|void|wchar_t)|unsigned)((?:\s*const)?)\s*([*&]?)\s*(?:const\s*)?(?:[A-Za-z_]\w*)?', p)
+        if not m: return None
+        base = re.sub(r'\s+', ' ', m.group(2)).strip()
+        code = STAND3_BUILTIN.get(base)
+        if code is None or (code == 'X' and not m.group(4)): return None
+        cq = bool(m.group(1).strip()) or bool(m.group(3).strip())
+        if m.group(4):
+            code = {'*': 'PA', '&': 'AA'}[m.group(4)][0] + ('B' if cq else 'A') + code
+            if code in seen: return None
+            seen.add(code)
+        out.append(code)
+    return ''.join(out)
+
+def _stand3_overloads(text, spans, pos, name, in_class, cls):
+    """Declarations and definitions of `name` in the scope that holds the definition at `pos`: the class body for an
+    in-class member, the body of class `cls` for an out-of-class one (0 when the unit does not define it), the
+    enclosing namespace scope for a free function."""
+    pat = re.compile(r'(?<![\w.>:~])%s\s*\(' % re.escape(name))
+    if in_class:
+        body = next(((o, c) for o, c, k, _ in reversed([sp for sp in spans if sp[0] < pos < sp[1]]) if k == 'class'), None)
+    elif cls:
+        cm = re.search(r'\b(?:class|struct)\s+%s\b[^;{()]*\{' % re.escape(cls), text)
+        body = (cm.end() - 1, prepare.match_brace(text, cm.end() - 1) - 1) if cm else None
+        if body is None: return 0
+    else:
+        body = None
+    n = 0
+    for mm in pat.finditer(text):
+        at = mm.start()
+        if body is not None:
+            if not body[0] < at < body[1]: continue
+            inner = [sp for sp in spans if sp[0] < at < sp[1] and body[0] <= sp[0] and sp[0] != body[0]]
+            if inner: continue                            # inside a member's body or a nested class
+        else:
+            if any(k != 'namespace' for k, _ in prepare.scope_chain(spans, at)): continue
+        if re.search(r'[=(,!&|+\-*/?:<>]\s*$|\breturn\s*$|\.\s*$|->\s*$', text[max(0, at - 40):at]): continue   # a call
+        n += 1
+    return n
+
 def r_inline_stand_ins(path, text, stats):
     """STAND3: drop untagged inline bodies of an /Od unit without inlining flags whose MSVC name binds the address of
     a decompiled function (see above): in-class definitions become declarations, out-of-class ones go, free ones keep
@@ -3537,8 +3592,25 @@ def r_inline_stand_ins(path, text, stats):
             if not cls or name[1:] != cls: continue
             prefix = '??1' + '@'.join(scope) + '@@'
         else: prefix = '?' + '@'.join([name] + scope) + '@@'
-        addrs = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
-        if len(addrs) != 1 or not addrs <= decompiled: continue
+        # the definition's own spelling, not an overload's (V2 O1/O2: tesworldspace `NiPoint2() {}` took the address of
+        # the bound NiPoint2(float, float)). A spelling agrees with the definition on an empty parameter list (`XZ`),
+        # on const (`QBE` / `QAE`) and, when every parameter is a builtin type or a pointer / reference to one, on the
+        # encoded parameters; exactly one spelling must agree, and with a class-type parameter the name must have no
+        # other declaration in its scope
+        params = re.sub(r'\s+', ' ', m.group(3) or '').strip()
+        tail = text[m.end(3) + 1:m.end() - 1]
+        is_const = bool(re.match(r'\s*const\b', tail))
+        enc = _stand3_param_codes(params)
+        def agrees(k):
+            if (params in ('', 'void')) != k.endswith('XZ'): return False
+            if cls and not name.startswith('~') and name != cls and \
+                    k[len(prefix) + 1:len(prefix) + 2] != ('B' if is_const else 'A'): return False
+            return enc is None or params in ('', 'void') or k.endswith(enc + '@Z')
+        spell = [k for k in syms if k.startswith(prefix) and agrees(k)]
+        if len(spell) != 1: continue
+        if enc is None and _stand3_overloads(text, spans, m.start(), name, in_class, cls) != 1: continue
+        addrs = {int(syms[spell[0]], 16)}
+        if not addrs <= decompiled: continue
         if cls and _stand3_maybe_virtual(text, cls, name): continue
         o = m.end() - 1
         c = prepare.match_brace(text, o)
@@ -4651,7 +4723,218 @@ def r_forceinline_declarations(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- EBO2
+#
+# A class C that introduces its own vfptr (it declares a virtual function; its only base is not polymorphic) with an
+# empty base B: MSVC puts the vfptr at 0 and B after it, at +4; the Itanium ABI puts the empty B at offset 0, under the
+# vptr. The members of C are at the same offsets either way (B takes no room), but B's address differs. That matters
+# for the decomp's method-only stand-ins (effectitemlist.cpp: `struct EffectItemList : BSSimpleList_Standin { virtual
+# ~EffectItemList(); int m_iEffectCount; }` whose base methods are bound to BSSimpleList's code in the exe): the exe
+# passes this+4 to them (0x00405fe0 -> IsEmpty 0x008256d0; the pristine unit matches the exe byte for byte), the build
+# passed this+0, the vptr, as the list (S13b layout-offset). EBO2 writes FNVNX_EBO2 first in B's body: under GCC a
+# zero-length array (B is no longer empty, still 0 bytes, so it goes after the vptr and the members keep their
+# offsets), empty under MSVC. Only where B is defined in the file without bases and without data or virtual
+# functions, every class of the file that derives from B has it as its only base, at least one of them introduces a
+# vfptr, and B is never used as an object (its name only as a base, in `B*` / `B&`, `B::`, or in its own body): the
+# zero size changes nothing else. Only in .cpp files (a header's other includers are not seen).
+
+FNVNX_EBO2_USE = re.compile(r'\s*(?:[*&]|::|\))')
+
+def r_vfptr_empty_base(path, text, stats):
+    """EBO2: FNVNX_EBO2 in an empty base B of a class introducing its own vfptr: B after the vptr, as MSVC (above)."""
+    if 'virtual' not in text or ':' not in text or not path.endswith('.cpp'): return text
+    defs, derived = {}, collections.defaultdict(list)
+    for m in EBO_CLASS.finditer(text):
+        defs.setdefault(m.group(1), []).append(m)
+        if m.group(2):
+            for b in _split_bases(m.group(2)):
+                b = re.sub(r'^(?:(?:public|protected|private)\s+)+', '', b).strip()
+                derived[b].append(m)
+    edits = []
+    for b, ms in derived.items():
+        if not re.match(r'^[A-Za-z_]\w*$', b) or len(defs.get(b, ())) != 1: continue
+        bd = defs[b][0]
+        if bd.group(2): continue                                          # B has bases of its own
+        bo = bd.end() - 1
+        bc = prepare.match_brace(text, bo)
+        if not _ebo_empty_class(text, bo, bc): continue
+        intro = False
+        for m in ms:
+            if len(_split_bases(m.group(2))) != 1 or re.search(r'\bvirtual\b', m.group(2)): break
+            o = m.end() - 1
+            if re.search(r'\bvirtual\b', _flat_body(text, o, prepare.match_brace(text, o))): intro = True
+        else:
+            if not intro: continue
+            heads = {mm.start() for mm in ms} | {bd.start()}
+            bad = False
+            for u in re.finditer(r'(?<![\w~:])%s\b' % re.escape(b), text):
+                if bo < u.start() < bc: continue                          # B's own body (its constructors)
+                pre = text[max(0, u.start() - 40):u.start()]
+                if any(h <= u.start() < h + 400 and text.find('{', h) > u.start() for h in heads): continue
+                if FNVNX_EBO2_USE.match(text, u.end()): continue           # B*, B&, B::, (B)
+                if re.search(r'(?:class|struct)\s+$', pre): continue       # a forward declaration / elaborated use
+                bad = True; break
+            if bad: continue
+            edits.append(bo + 1)
+    if not edits: return text
+    for at in sorted(edits, reverse=True):
+        text = text[:at] + ' FNVNX_EBO2 /* fnv-nx EBO2 */' + text[at:]
+    stats['EBO2'] += len(edits)
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- REC1
+#
+# Bodies the decomp lacks (D20): a function of the exe that no unit defines (MemoryHeap's constructor 0x00aa78a0 and
+# destructor 0x00aa7930: the default heaps stayed raw memory, S5-boot) is reconstructed against the exe and accepted
+# only when tools/build_and_match.py gives all bytes equal. The reconstruction is exe-derived, so it lives only in the
+# private artifacts repository (fnv-nx-build branch recon/<unit>), never here. REC1 applies what a prepare run is
+# given: FNVNX_RECON names a directory holding recon.json files (one per recon, in subdirectories or at its top):
+#   {"format": "fnvnx-recon/1", "unit": <source>, "decomp_commit": <sha>, "append": <file next to recon.json>,
+#    "functions": [{address, symbol, size}], "symbols": {decorated name: address}}
+# The text rule appends the body to its unit; the POST hook add_recon_definitions adds the functions and symbols to
+# the prepared build/units.json. A recon whose decomp_commit is not the checkout's, or whose addresses a unit already
+# defines, is skipped (REC1-STALE / REC1-DUP). Without FNVNX_RECON (or with no recon in it) REC1 does nothing.
+
+def _recon_entries(path):
+    """[(recon dict, directory)] valid for the decomp checkout that holds path (cached on the prepare module:
+    equiv.py loads the stream modules twice and keeps the first copy's POST hook)."""
+    got = prepare.__dict__.get('_fnvnx_recon')
+    if got is not None: return got
+    import json, subprocess
+    _RECON = prepare.__dict__['_fnvnx_recon'] = []
+    top = os.environ.get('FNVNX_RECON')
+    if not top or not os.path.isdir(top): return _RECON
+    root, uj = prepare._units_json(path)
+    head = None
+    if root:
+        try:
+            head = subprocess.run(['git', '-C', root, 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                                  timeout=30).stdout.strip() or None
+        except (OSError, subprocess.SubprocessError):
+            head = None
+    defined = set()
+    if uj:
+        for u in json.load(open(uj))['units']:
+            defined.update(f['address'] for f in u.get('functions', []))
+    files = sorted(os.path.join(dp, 'recon.json') for dp, _, ns in os.walk(top) if 'recon.json' in ns)
+    for f in files:
+        try:
+            r = json.load(open(f))
+        except (OSError, ValueError):
+            continue
+        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not r.get('append'): continue
+        if head and r.get('decomp_commit') and r['decomp_commit'] != head:
+            r['_skip'] = 'REC1-STALE'
+        elif any(fn.get('address') in defined for fn in r.get('functions', [])):
+            r['_skip'] = 'REC1-DUP'
+        _RECON.append((r, os.path.dirname(f)))
+    return _RECON
+
+def r_recon_bodies(path, text, stats):
+    """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""
+    if not os.environ.get('FNVNX_RECON') or not path.endswith(('.cpp', '.c')): return text
+    entries = _recon_entries(path)
+    if not entries: return text
+    root, _ = prepare._units_json(path)
+    if not root: return text
+    src = os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/')
+    for r, d in entries:
+        if r['unit'] != src: continue
+        if r.get('_skip'):
+            stats[r['_skip']] += 1; continue
+        body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
+        text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
+        if not text.endswith('\n'): text += '\n'
+        stats['REC1'] += len(r.get('functions', []))
+        r['_applied'] = True
+    return text
+
+def add_recon_definitions(out_root, stats, files=None):
+    """POST hook: REC1's recipe entries (functions and symbols) in <out_root>/build/units.json."""
+    import json
+    _RECON = prepare.__dict__.get('_fnvnx_recon')
+    if not _RECON or not any(r.get('_applied') for r, _ in _RECON): return
+    p = os.path.join(out_root, 'build', 'units.json')
+    if not os.path.exists(p): return
+    data = json.load(open(p))
+    n = 0
+    for r, _ in _RECON:
+        if not r.get('_applied'): continue
+        for u in data['units']:
+            if u['source'] != r['unit']: continue
+            have = {f['address'] for f in u['functions']}
+            for fn in r.get('functions', []):
+                if fn['address'] not in have:
+                    u['functions'].append(dict(fn)); n += 1
+            for k, v in r.get('symbols', {}).items():
+                u.setdefault('symbols', {}).setdefault(k, v)
+    if n:
+        stats['REC1-DEF'] += n
+        json.dump(data, open(p, 'w'))
+        if files is not None: files['REC1-DEF'] += 1
+
+POST.append(add_recon_definitions)
+
+# ---------------------------------------------------------------------------------------------------------- HUNIT1
+#
+# A header unit (nitarray_h_unit.cpp) exists only to make MSVC emit the COMDATs of class-template members its recipe
+# lists (NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*>>::SetAt 0x0096ae90, SetAtGrow 0x00470000,
+# SetSize 0x0096ad30): it calls them through a null pointer in NiTArray_UnitReference. MSVC /Od emitted each one. GCC
+# at -O2 inlines the calls, so SetAt and SetAtGrow were emitted nowhere and their addresses had no native definition
+# (S5-boot collect-all: 0x0096ae90, 1,238 trap hits from FUN_0096a850's constructor). An `used` attribute cannot
+# help: the unit instantiates the class (a sizeof check) before the members' definitions, and GCC does not attach a
+# later definition's attributes to it. HUNIT1 appends explicit instantiation definitions of exactly those members,
+# which emits them (weak) as MSVC did. Neutral: under MSVC an explicit instantiation of members the unit already
+# emits changes nothing (S11 gate). Sites: HUNIT1_SITES.
+
+HUNIT1_SITES = [
+    ('gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp',
+     'template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAt(unsigned int, '
+     'ActorCombatGroup*&);\n'
+     'template unsigned int NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAtGrow(unsigned int, '
+     'ActorCombatGroup*&);\n'
+     'template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetSize(unsigned int);\n'),
+]
+
+def r_header_unit_instantiations(path, text, stats):
+    """HUNIT1: explicit instantiations of the class-template members a header unit's recipe lists (see above)."""
+    rel = path.replace(os.sep, '/')
+    for unit, inst in HUNIT1_SITES:
+        if rel.endswith('/' + unit) and 'fnv-nx HUNIT1' not in text:
+            text = text.rstrip('\n') + '\n\n/* fnv-nx HUNIT1: the members the recipe lists, emitted as MSVC did */\n' + inst
+            stats['HUNIT1'] += inst.count('template ')
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- XC2
+#
+# XC1 (S10, startup/tools/dyninit_rewrite.py) gives every ??__E dynamic initializer of the generated units its own
+# extern "C" __fnvnx_dyninit_<addr>, which the link maps to the address and the startup runner calls in the image's
+# order. A hand-written unit can spell one as a plain copy-initialization, which XC1 does not see (it rewrites
+# generated/ only): nipoint3_console.cpp's `NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;` is
+# ??__EgNiPoint3StartupDst@@YAXXZ at 0x00a62110 (the 17-dword copy; the decomp's tag sits on the line above), which
+# InitializeGameSystems calls directly (S5-boot collect-all: "decomp body exists, not in the link"). GCC made it an
+# anonymous local static initializer, so the address had no native definition. XC2 writes XC1's form for the sites
+# of XC2_SITES: the object becomes `extern` (the recipe binds it to its image address, 0x011f4600) and the copy
+# becomes __fnvnx_dyninit_<addr>. Same line. Platform, like XC1.
+
+XC2_SITES = [
+    ('gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp',
+     'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;',
+     'extern NiPoint3StartupTable gNiPoint3StartupDst; extern "C" void __fnvnx_dyninit_00a62110(void) '
+     '{ gNiPoint3StartupDst = gNiPoint3StartupSrc; } /* fnv-nx XC2: ??__EgNiPoint3StartupDst 0x00a62110 */'),
+]
+
+def r_handwritten_dyninit(path, text, stats):
+    """XC2: XC1's extern + __fnvnx_dyninit_<addr> form for hand-written dynamic initializers (XC2_SITES, above)."""
+    rel = path.replace(os.sep, '/')
+    for unit, old, new in XC2_SITES:
+        if rel.endswith('/' + unit) and text.count(old) == 1:
+            text = text.replace(old, new)
+            stats['XC2'] += 1
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
-              r_namespace_crt_calls, r_forceinline_declarations]
+              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
+              r_header_unit_instantiations, r_handwritten_dyninit]
 RULES += REFS_RULES

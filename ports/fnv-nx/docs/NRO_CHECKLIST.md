@@ -14,6 +14,10 @@ One page. Do the steps in order; the first two blocks are once. Takes about 15 m
 1. Copy `sd/switch/fnv/` to the SD card as `/switch/fnv/` (it holds `fnv.nro`, `fnv-exefs.nsp`, `guest.nso`).
 2. Copy your `FalloutNV.exe` into `/switch/fnv/`.
 3. Copy your whole `Data` folder into `/switch/fnv/`, so you have `/switch/fnv/Data/FalloutNV.esm` and the `.bsa` files.
+   Build the game's shaders for the console once, from your `Data/Shaders` on the computer (Linux or an agent
+   container; nx-agent checkout, `ports/fnv-nx`): `python3 toolchain/nro/shaders_nx.py <Data/Shaders> -o
+   shaders_nx.pak`, then copy `shaders_nx.pak` into `/switch/fnv/`. It is made from your game files: keep it to
+   yourself. Without it, `host.log` says `game shaders: ... missing`.
 
 ## Start
 
