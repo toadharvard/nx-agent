@@ -104,3 +104,173 @@ selected through non-`Add` paths (their own render calls) and are covered by the
 Static VS/PS bindings were found for 69 SLS passes (the remaining SLS passes take their shaders from setup
 helpers that the line scanner does not follow; the pass-space table marks them, the capture/replay of §6 closes
 the gap at run time).
+
+## 3. The method
+
+### 3.1 Two levels
+
+| level | what is compared | tool |
+|---|---|---|
+| state | S6n's translator (`render/native/front/d3d9_state.c`) against Nine's own conversion functions (`nine_pipe.c`: `nine_convert_dsa_state`, `_rasterizer_state`, `_blend_state`, `_sampler_state`, compiled from the pinned Mesa 20.1 tree), field by field in Nine's pipe terms | `render/verify/statediff/statediff.c` |
+| pixel | a scene rendered by the oracle and by a target, read back (colour, depth, stencil) and compared per pixel | `render/verify/pixdiff.py`, `fuzz/fuzz.py`, `claims.py`, `rastercheck.py`, `shaders/parity.py` |
+
+The state level is cheap (1M cases/s) and exact. The pixel level checks what the state level cannot: the
+backend contract of `nx/state.h` (winding, y orientation, tie rules, half-z, swizzles, sRGB views, border colour)
+and the fixed-function and shader paths.
+
+### 3.2 Scenes and the adapter
+
+A scene is a text file (format in the header of `render/verify/scene/scene.c`): target size and formats, Clear,
+render/sampler/stage states by D3D9 name, textures from deterministic generators in D3D memory layout, viewport,
+scissor, projection, pixel shaders (`ps BYTECODE GLSL`, `psc`), and DrawPrimitiveUP batches of
+XYZRHW|XYZ + DIFFUSE + SPECULAR + TEX1 vertices. The scene runner calls one implementation of
+`render/verify/v6n_target.h` (D3D9-level calls) and writes a `.v6nd` read-back. It forks one child per scene, so a
+driver crash costs one scene.
+
+| executable | implementation |
+|---|---|
+| `v6n_nine` (the oracle) | `IDirect3DDevice9` on S6c's host Nine (`render/nine/host/*`, `gate/gate_winsys.c`), softpipe; colour via `GetRenderTargetData` + `LockRect`, depth/stencil from the surface's pipe resource after the CSMT queue drained and the context flushed. Two local softpipe fixes (§5, O3 and O5) are linked as override objects; `v6n_nine_stock` is the unpatched build. |
+| `v6n_gl` | S6n's translator + V6n's GL 4.5 executor of the `nx/state.h` contract (llvmpipe, EGL surfaceless) + V6n's fixed-function model of `nine_ff.c`; `V6N_MUTANT=<name>` breaks one rule (trap mutants) |
+| `v6n_s6ngl` | S6n's own GL backend `render/native/gl/nxgl.c` through `NxGpuApi` and its command stream, with S6n's translator and S6n's `d3d9_epilogue.glsl`; V6n supplies only the FF model shaders |
+
+### 3.3 Thresholds (`render/verify/cmp.py`)
+
+* 8-bit colour: |ref - test| <= 2/255 per channel (alpha only when the target has alpha); R5G6B5: 1 step.
+* float colour: |ref - test| <= 1e-3 * max(1, |ref|); NaN equals NaN.
+* stencil: exact.
+* depth: D24 within 8 LSB (4.8e-7), D16 within 2 LSB. Both rasterizers set up the depth plane and interpolate
+  in float32 in a different order and convert differently (softpipe truncates, llvmpipe rounds). Measured: constant
+  depth 1 LSB, sloped depth up to 6 LSB (D24) / 2 LSB (D16). Every depth trap (half-z, bias scaling, viewport
+  MinZ/MaxZ, write masks) moves depth by at least 2^16 LSB, so the tolerance cannot hide one.
+* coverage: exact against `raster_ref.py` (rational edge functions, D3D9 top-left rule, integer pixel centres).
+
+### 3.4 Trap mutants
+
+Each mutant breaks one D3D9 -> modern-API rule; the comparison must flag it.
+
+* State level (`statediff/mutants.py`, textual mutations of a copy of S6n's `d3d9_state.c`): BOTHSRCALPHA fix-up,
+  alpha-factor table, non-separate alpha factors, separate alpha op, ZFUNC off by one, depth write with EQUAL,
+  stencil INCR/INCRSAT swap, two-sided CCW ops, cull winding, flat from Gouraud, ALPHAREF/256, fog on ps 3,
+  EXP/EXP2 swap, BLENDFACTOR ARGB order, border ARGB order, MIPFILTER NONE keeping bias, MIRRORONCE as MIRROR,
+  cube not clamped, POINT min filter, MAXMIPLEVEL ignored, COLORWRITEENABLE1 from 0, scissor flag, point size
+  clamp: **23/23 killed** (300k cases each).
+* Pixel level (`V6N_MUTANT`, one trap scene each in `tests/v6n/traps/`): cull winding, depth write ignored, EQUAL as
+  LEQUAL, BOTHSRCALPHA, separate alpha, missing half-z clip control, MIPFILTER NONE LOD, MIRRORONCE, border ARGB,
+  blend-constant order, sRGB write blending, fog EXP/EXP2, linear fog clamp, ALPHAREF/256, ATI2 swizzle,
+  A4R4G4B4 / L8 / A8 / A8L8 swizzles, provoking vertex, two-sided stencil faces, colour-mask bit order, half-pixel
+  viewport offset, clear vs scissor, clear vs colour mask, unbound texture colour, RHW z through MinZ/MaxZ, RHW
+  vertex fog source, specular alpha, upper-left origin tie rule: **31/31 killed**, and the unmutated target matches
+  Nine on all 31 scenes. Two more are checked analytically (§5): D24 bias scale and X8 destination alpha (2/2).
+
+### 3.5 Fuzzer and minimiser (`render/verify/fuzz/fuzz.py`)
+
+Random scenes biased to the traps: blend factor/op tables incl. BOTH*, BLENDFACTOR, separate alpha; depth funcs and
+writes incl. EQUAL/NEVER and ZENABLE=2; stencil with two-sided ops and masks; cull; flat shading; alpha test at
+refs 0/127/128/255; fog table/vertex modes; sRGB write; specular; TFACTOR; scissor; viewports with MinZ/MaxZ;
+stage 0/1 combiners (17 ops, modifiers); samplers (5 address modes, border, filters, MAXMIPLEVEL, sRGB read);
+21 texture formats; RHW quads/triangles on a 1/16 px grid with rhw 0.25..2 and clip-space triangles; 8-bit and
+float targets; D24S8/D24X8/D16/none. A mismatch is minimised (ddmin over scene lines with the draw groups and
+textures kept, then vertex values simplified) and written as a text reproducer. Excluded on purpose, each with
+its reason in the fuzzer header: the oracle deviations of §5, anisotropic filtering, trilinear and LOD bias
+(implementation LOD precision), lines/points/wireframe, DOTPRODUCT3 as ALPHAOP (undefined), texel-boundary point
+sampling and ties on clipped edges (implementation-defined).
+
+Fuzzing found no S6n translator defect. It did find, and triage fixed, gaps in V6n's FF model (DOTPRODUCT3 alpha
+replicate, Nine's per-op saturation, RHW vertices ignoring the viewport, D3D9 Clear validation) and the oracle
+bugs O4-O7 (§5). Results: §4.
+
+### 3.6 Shader parity (`render/verify/shaders/parity.py`)
+
+Built on S6b's tools (`render/shaders/build.sh --tests`: SM1-3 assembler `s6b_asm`, `sdp2dksh` with MojoShader's
+`glsldk` profile and uam). For every pixel shader of the given `shaderpackage*.sdp` (the player's files; none are
+in the repo) or of the synthetic corpus `tests/v6n/shaders/corpus.v6ns` (`--selftest`): `sdp2dksh --glsl`
+translates it; the bytecode runs on Nine, S6b's GLSL runs on V6n's GL target under the layout contract
+(`fnvnx_dk_layout.h`: UBO 0 constants, UBO 2 driver fog/alpha, varyings by usage), with random c0..c7 and a
+textured quad, plus a perspective table-fog scene. Inputs the harness does not drive are reported per shader.
+Vertex shaders are translated and validated only. Self-test: 7 shaders (ps_1_1, ps_2_0 arithmetic/exp/log/pow/nrm/
+texkill, ps_3_0 vPos): **6 match pixel-exactly, 1 mismatch** = finding P1 (§7).
+
+## 4. Results (2026-11-04)
+
+| check | result |
+|---|---|
+| statediff, 6M + 2M random state vectors | 0 mismatches (outside deviation D1: S6n bias units / Nine-softpipe = 2.000) |
+| state trap mutants | 23/23 killed |
+| pixel trap mutants (`v6n_gl`) | 31/31 killed; unmutated 31/31 match |
+| format conformance, 31 formats x (point, border+bilinear) | 62/62 match on `v6n_gl` (after S6n's border_swizzle fix) |
+| S6n's GL backend (`v6n_s6ngl`) on conformance + traps | 77 match; the rest are API gaps (RGBA8-only read-back, no sub-rect Clear) or the y_fill_bias defect |
+| coverage vs exact D3D9 rule, 240 random triangles | `v6n_gl` 0 wrong px; oracle 3 px (float ties); stock softpipe 6628 px; S6n backend 204 px before its fix |
+| analytic claims | C40 D24 and D16 depth bias pass; O1 X8 destination alpha passes |
+| fuzzing, `v6n_gl` | 1,900 cases over 5 seeds during triage; final generator: 600 cases, 595 match, 5 unclassified (committed in `tests/v6n/repro/`) |
+| fuzzing, `v6n_s6ngl` (after S6n's y_fill_bias fix) | 300 cases, 287 match; 8 differ only in fixed-function table fog (S6n's epilogue implements Nine's programmable-PS fog depth z*w, Nine's FF path uses window z: expected, the engine draws with shaders), 5 in the unclassified class above; before the fix the same generator gave 33 mismatches, mostly single edge pixels |
+| shader parity self-test | 6/7 match, 1 finding (P1) |
+
+### 4.1 Rasterization finding
+
+On Mesa GL the edge tie rule follows the clip-control origin (`st_atom_rasterizer.c` flips `bottom_edge_rule` for
+GL_UPPER_LEFT), so neither `glClipControl(GL_UPPER_LEFT)` nor "lower-left + flip on read-back" gives D3D9's
+top-left rule on image-top edges, and a constant sub-pixel bias only fixes horizontal ties. What works is to render
+"upside down": GL_LOWER_LEFT origin, y negated in the vertex shader, viewport and scissor y used as is, GL row 0 =
+image row 0, GL_CCW front face. V6n's executor does this and is exact on 240 triangles; S6n adopted it (521ffaf).
+deko3d's `DkDeviceFlags_OriginUpperLeft` makes the hardware use the D3D-style rule directly; the on-device plan
+(§8) re-checks it.
+
+## 5. Oracle deviations and fixes
+
+| id | what | handling |
+|---|---|---|
+| D1 | DEPTHBIAS: Nine-on-softpipe passes DEPTHBIAS x 2^23 without UNITS_UNSCALED: about half the bias on D24, 128x on D16 (clamps to 1.0) | S6n's D3D9 units are right; checked analytically (`claims.py`), excluded from fuzzing |
+| O1 | X8R8G8B8 DESTALPHA: softpipe reads the stored X byte when a depth buffer is bound | analytic check (D3D9 reads 1.0); fuzzer drops DESTALPHA on X8 |
+| O2 | V8U8 -128 decodes to -128/127 on softpipe | conformance seed avoids it; V8U8 not fuzzed |
+| O3 | softpipe span setup truncates edge x for `half_pixel_center = 0` (D3D9 centres): every slanted edge with fractional x is off by a pixel | **fixed in the oracle**: patched copy of `sp_setup.c` (left/right = ceil), linked ahead of `libsoftpipe.a`; proven by `rastercheck.py` (6628 -> 3 px). Affects S6c's host gate too, not the Switch (nouveau). |
+| O4 | Nine FF with an unbound texture read only by alpha arguments, or a stage-1 op without a texture, crashes softpipe (NULL sampler view) | fuzzer always binds the textures it uses; the unbound-texture colour is a trap scene |
+| O5 | softpipe applies the blend factors before MIN/MAX | **fixed in the oracle** (`sp_quad_blend.c` override): D3D9, GL and NV hardware ignore them |
+| O6 | softpipe runs the stencil test without a stencil buffer (D24X8, D16) | fuzzer enables stencil on D24S8 only (GL and D3D9: test passes) |
+| O7 | Nine's FF samples a stage texture only when an argument names TA_TEXTURE: BLENDTEXTUREALPHA without one blends with alpha 0 | fuzzer adds a TA_TEXTURE argument to those stages |
+| A1 | RHW vertices and the viewport: Nine's window-space path neither transforms nor clips them | V6n's FF model follows the oracle; D3D9 hardware behaviour should be confirmed on device (§8) |
+| A2 | SRGBTEXTURE on R5G6B5 and other formats S6n has no sRGB view for: Mesa decodes (B5G6R5_SRGB), S6n does not | caps-dependent in D3D9; fuzzer restricts sRGB read to formats with an sRGB view on both |
+
+## 6. Scene-level capture/replay plan
+
+Static analysis (§2) cannot resolve every pass that is selected through tables or non-`Add` paths. The scene-level
+plan closes that gap with S6n's capture/replay (RENDER_NATIVE.md §7, N1):
+
+1. Capture, on the Nine path (D6, the reference that ships), one frame per test location: every D3D9 call with
+   its state vector and resources (`render/nine` proxy layer is the hook: one host call per D3D call).
+2. Convert each draw to a V6n scene (states, textures as data, vertex/index buffers, VS/PS bytecode + S6b GLSL);
+   the scene format grows a `vs`/`vb`/`ib` command for indexed shader draws.
+3. Replay on `v6n_nine` and on S6n's native path for the same pass id; compare per draw with the thresholds of
+   §3.3 and per frame after all draws. The pass id of each draw comes from the native renderer's family dispatch
+   and is joined with `build/v6n/pass_space.tsv`, so coverage is reported per pass id: reached / matched / differs.
+4. The pass-space table defines "all situations": a pass id is verified when at least one captured draw of it
+   matches; unreached ids are listed per family.
+
+## 7. Findings for other streams
+
+| id | stream | finding |
+|---|---|---|
+| P1 | S6b (shader translation, parity reference) | MojoShader `glsldk` PS epilogue computes table-fog depth as `gl_FragCoord.z`; Nine (`nine_shader.c` shader_add_ps_fog_stage) and S6n's `d3d9_epilogue.glsl` use z * w (z / gl_FragCoord.w). They differ on any perspective geometry: corpus shader `fog_linear`, 247 px, up to 75/255. |
+| O3 | S6c (host gate) | stock softpipe is not a D3D9-exact rasterizer (O3), so gate images with slanted edges are off by up to a pixel per edge |
+
+## 8. On-device conformance plan and how to rerun
+
+On device (deko3d), the same scenes run through S6n's deko3d backend with the N0/N1 guest; read-back is RGBA8 and,
+once S6n adds it, depth/stencil. Order: (1) the 31 trap scenes and 62 format scenes against the goldens produced
+here by the oracle; (2) `rastercheck` triangles (exact reference, no oracle needed) to confirm the tie rule with
+`DkDeviceFlags_OriginUpperLeft`; (3) analytic claims C40 and O1; (4) A1 and A2 against Nine-on-nouveau on the same
+device, which settles the two D3D9 ambiguities; (5) capture/replay frames (§6).
+
+Rerun everything (host):
+
+```sh
+render/nine/build.sh /home/user/work/v6n/nine 2 host                  # host Nine + softpipe (once, ~455 steps)
+NINE=/home/user/work/v6n/nine render/verify/build.sh                    # build/v6n/bin: statediff, v6n_nine(_stock), v6n_gl, v6n_s6ngl
+python3 -I render/verify/enum/pass_names.py ext/fnv_decomp build/v6n   # §1
+python3 -I render/verify/enum/pass_space.py ext/fnv_decomp build/v6n   # §2
+python3 -I render/verify/gen_scenes.py tests/v6n                       # regenerate trap + format scenes
+tests/v6n/run.sh                                                       # selfcheck + defect tests
+python3 -I render/verify/fuzz/fuzz.py -n 600 -s 5 [--target s6ngl]    # fuzzing, reproducers -> tests/v6n/repro
+python3 -I render/verify/fuzz/fuzz.py -n 150 --sensitivity            # random cases killing each mutant
+FNVNX_SHADERS_BUILD=... render/shaders/build.sh --tests                # S6b tools
+FNVNX_SHADERS_BUILD=... python3 -I render/verify/shaders/parity.py --selftest | PATH/shaderpackage*.sdp
+```
