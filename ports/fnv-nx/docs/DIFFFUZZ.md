@@ -203,6 +203,18 @@ is that import, as on x86.
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
 
+**Float results of untyped calls and CRT math (S1-fuzzB, after difffuzz-13).** An intercepted call whose callee
+nothing types (a wild or unplanted indirect call, a CRT name with only a C spelling in the unit's symbols) always
+leaves the canned bytes in v0 natively; the oracle now gets the same value in ST0 when the code the call returns to
+consumes ST0 (`x86emu.x87_result_use`: fst/fstp m32 -> f32, m64 -> f64, x87 arithmetic; the caller's cleanup and
+epilogue are stepped over, and a `ret` takes the fuzzed function's own result kind). Before, the oracle read an
+empty x87 stack (0.0) and the native the canned bytes: 12 of the 21 actor.cpp float divergences. A unit's symbols
+prefer a decorated spelling for an address (`?FUN_00eca920@@YANN@Z` over `_FUN_00eca920`). The CRT's double
+functions the link gives libm providers (log, log10, exp, pow, atan2, tan, atan, asin, acos, fmod, floor, ceil,
+sin, cos: `libcalls.CRT_MATH`) run as builtins on both machines with C99 results at the domain edges (log(0) =
+-inf, log(-1) = NaN, pow poles and overflow, signed zeros of floor/ceil); the x87 `fyl2x` stub for log10 gave 0.0
+for log10(0) under Unicorn. Replayed on link c0d6c71516f6: float records 51 -> 20 still diverging (2 gone before).
+
 ## Cause refinement and verdict policy (`causes.py`, S13b)
 
 `report.reclassify` hands what the probes left at `unclassified`, `call-flow` or `signedness?` to `causes.refine`,
@@ -223,6 +235,9 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 | pointer to a pinned-pool literal (0x02f00000) vs the native .rodata copy: argument / result / store | `literal-arg` / `literal-ret` / `literal-store` | artifact |
 | both sides store image vftables (link `out/addrmap.tsv` kind V, or `FNVNX_CAUSES_ADDRMAP`), different ones: in a destructor / elsewhere | `vptr-store` / `vptr-differs` | by-design / triage S2c |
 | result of a `??_G` / `??_E` deleting destructor (MSVC returns this, Itanium D0 is void) | `deleting-dtor-ret` | by-design |
+| call-count of a `??_G` fuzzed with flags bit 0 clear: the native makes the oracle's calls plus deallocator calls only (D0 always frees) | `dtor-flags` | artifact (S13: fuzz `??_G` with flags & 1, or pair flags 0 with D1) |
+| call-count, the oracle makes no call, the native's first / a later call is a named stub | `native-undefined` / `after-native-undefined` | real-bug S2c/S2d (was `falloff?`) |
+| call-count, the oracle makes no call, the native calls addresses only | `falloff?` | real-bug S1 |
 | pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
 | `no-native-entry` | `no-native-entry` | artifact |
