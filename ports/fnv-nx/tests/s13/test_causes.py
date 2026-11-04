@@ -272,9 +272,42 @@ def test_summary():
         check(causes.merge([nob])['shards'] == 0, 'a report without the block is skipped')
 
 
+def test_object_reader():
+    """Without pyelftools the object rules are off: the reader says so instead of passing silently."""
+    import io
+    saved = {k: v for k, v in sys.modules.items() if k == 'elftools' or k.startswith('elftools.')}
+    stats, cache, err = dict(causes.OBJ_STATS), dict(causes._OBJ_CACHE), sys.stderr
+    try:
+        for k in saved:
+            del sys.modules[k]
+        sys.modules['elftools'] = None              # import elftools.* raises ImportError
+        causes.OBJ_STATS.update(reader=None, scanned=0, missing=0)
+        causes._OBJ_CACHE.clear()
+        sys.stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, 'src_t.cpp.o'), 'wb').write(b'\x7fELF')
+            open(os.path.join(d, 'src_u.cpp.o'), 'wb').write(b'\x7fELF')
+            os.environ['FNVNX_CAUSES_OBJ'] = d
+            check(causes.native_callees('src/t.cpp', 0x00401000) is None, 'no reader: no callees')
+            causes.native_callees('src/u.cpp', 0x00401000)
+            causes.native_callees('src/missing.cpp', 0x00401000)
+            check(causes.OBJ_STATS['reader'] == 'unavailable' and causes.OBJ_STATS['scanned'] == 0 and
+                  causes.OBJ_STATS['missing'] == 1, 'reader state: unavailable, one object missing')
+            check('pyelftools is not installed' in sys.stderr.getvalue(), 'missing reader warns on stderr')
+            check(sys.stderr.getvalue().count('is not installed') == 1, 'it warns once')
+    finally:
+        sys.stderr = err
+        os.environ.pop('FNVNX_CAUSES_OBJ', None)
+        del sys.modules['elftools']
+        sys.modules.update(saved)
+        causes.OBJ_STATS.clear(); causes.OBJ_STATS.update(stats)
+        causes._OBJ_CACHE.clear(); causes._OBJ_CACHE.update(cache)
+
+
 if __name__ == '__main__':
     test_rules()
     test_policy()
     test_summary()
+    test_object_reader()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)
