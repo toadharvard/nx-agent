@@ -3105,3 +3105,27 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - CPU: sort cost, UBO ring, sampler re-translation, constant slices, instancing, two-thread recording.
   - The gate reads `targets_budget_fraction`: share of the whole frame, not the renderer alone. The target is 45 fps
     stable at 720p handheld.
+
+### J-0141 | 2026-11-04 | stream: S1b-patches | status: wip | parent: J-0135
+
+* **did** - S1b `5b94e1a` fixes the pop-mismatch chain family. The decomp hands a receiver's trailing stack arguments
+  to the getter before it (`D(.., x)->R()`), so the native R reads registers nobody set.
+  - `tests/s1b/pop/popscan.py` checks every pop-mismatch call site against the pristine MSVC objects.
+  - `popgen.py` moves those words to the call that pops them, and declares the overloads.
+  - `xinc1_pop_gen.s1b`: 173 callers, 292 calls, 97 files.
+  - `xinc1_pop_boot.s1b`: WinMain's per-frame body 0x0086ff70, plus 0x00877430 and 0x00871a50.
+  - Checks: MSVC identical on 194 functions, the GCC census clean, units_renames +359 rows. tests/s1: 0 failed;
+    tests/s11: ok.
+* **measured** - On link/31971038913d.
+  - popscan: 2,136 pairs over 2,939 calls.
+  - The ABI's unexplained x86-inconsistent rows: 1,875, which is 1,262 pairs.
+  - By class: fix-donor 481, fix-other 352, patched 222 (they drop at the next link), ecx 179, benign 101.
+  - The 2,221 manual pairs are bridge-gap shapes (varargs, by-value aggregates, struct results), for S2c.
+  - Within 4 calls of the boot roots: 53 fix-donor and 17 fix-other callers.
+* **found** - Of S13b's 131 native-garbage-arg functions, 30 are fixed by this patch and 52 are still open.
+  - The XINC1 call-args divergences at 0x00a89b00 and 0x00eacd00 are harness artifacts. The oracle keeps the
+    pristine stdcall signature of a function that S1b made a member.
+* **next** - The 420 hand-written callers, the two distance-1 boot callers first (0x00448420, 0x0086c010). Then
+  uninit-arm, callee-saved and 0x00b61220.
+  - To S13: the `def` rows of units_renames.
+  - To R0: accept abiclass's `patched` and `benign` verdicts as explained.
