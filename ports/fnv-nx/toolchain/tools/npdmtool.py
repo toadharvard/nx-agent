@@ -270,6 +270,8 @@ def dump_npdm(buf: bytes) -> dict:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dump", action="store_true")
+    ap.add_argument("--program-id", help="0x...: the title the exefs override replaces; sets the ACI0 program id "
+                    "and narrows the ACID range to it")
     ap.add_argument("input")
     ap.add_argument("output", nargs="?")
     a = ap.parse_args(argv)
@@ -289,7 +291,11 @@ def main(argv: list[str]) -> int:
     if not a.output:
         ap.error("output path required")
     with open(a.input) as f:
-        npdm = build_npdm(json.load(f))
+        j = json.load(f)
+    if a.program_id:
+        pid = f"{int(a.program_id, 16):#018x}"
+        j["program_id"] = j["program_id_range_min"] = j["program_id_range_max"] = pid
+    npdm = build_npdm(j)
     with open(a.output, "wb") as f:
         f.write(npdm)
     print(f"{a.output}: {len(npdm)} bytes")

@@ -212,4 +212,6 @@ int os_vm_commit(void *addr, size_t size) { (void)addr; (void)size; return 0; }
 int os_vm_decommit(void *addr, size_t size) { memset(addr, 0, size); return 0; }
 int os_vm_release(void *addr, size_t size) { (void)size; free(addr); return 0; }
 
-const char *os_default_root(void) { return "sdmc:/fnv-nx"; }
+/* One SD directory for everything of the port: guest.nso and host.log (host.c), game/ (FalloutNV.exe and Data/;
+ * the game's C:/FalloutNV, read by boot.cpp too), user/ (C:/Users/Player: My Games/FalloutNV, saves). */
+const char *os_default_root(void) { return "sdmc:/fnvnx"; }

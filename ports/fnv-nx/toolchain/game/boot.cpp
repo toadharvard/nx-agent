@@ -29,7 +29,7 @@ void *fnvnx_win32_lookup_export(const char *dll, const char *name);
 int __fnv_0086a850(unsigned, unsigned, unsigned, unsigned) __attribute__((weak));   /* WinMain */
 }
 
-static const char *k_exe = "sdmc:/fnvnx/game/FalloutNV.exe";
+static const char *k_exe = "sdmc:/fnvnx/game/FalloutNV.exe";   /* = os_default_root() + /game, i.e. C:\FalloutNV */
 
 /* Trap statistics, one record per distinct trapped symbol (key = its name string) or image code pointer / IAT slot
  * (key = the original address): hits, global order of the first hit, the caller of the first hit and whether it
