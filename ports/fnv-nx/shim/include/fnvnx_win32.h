@@ -559,6 +559,30 @@ BOOL SwapMouseButton(BOOL);
 HHOOK SetWindowsHookExA(int, HOOKPROC, HINSTANCE, DWORD);
 BOOL UnhookWindowsHookEx(HHOOK);
 LRESULT CallNextHookEx(HHOOK, int, WPARAM, LPARAM);
+/* SendInput's records (winuser.h; 28 bytes, as on x86) */
+typedef struct tagMOUSEINPUT { LONG dx, dy; DWORD mouseData, dwFlags, time; ULONG_PTR dwExtraInfo; } MOUSEINPUT, *PMOUSEINPUT,
+    *LPMOUSEINPUT;
+typedef struct tagKEYBDINPUT { WORD wVk, wScan; DWORD dwFlags, time; ULONG_PTR dwExtraInfo; } KEYBDINPUT, *PKEYBDINPUT,
+    *LPKEYBDINPUT;
+typedef struct tagHARDWAREINPUT { DWORD uMsg; WORD wParamL, wParamH; } HARDWAREINPUT, *PHARDWAREINPUT, *LPHARDWAREINPUT;
+typedef struct tagINPUT {
+    DWORD type;
+    union { MOUSEINPUT mi; KEYBDINPUT ki; HARDWAREINPUT hi; };
+} INPUT, *PINPUT, *LPINPUT;
+#define INPUT_MOUSE 0
+#define INPUT_KEYBOARD 1
+#define INPUT_HARDWARE 2
+#define MOUSEEVENTF_MOVE 0x0001
+#define MOUSEEVENTF_LEFTDOWN 0x0002
+#define MOUSEEVENTF_LEFTUP 0x0004
+#define MOUSEEVENTF_RIGHTDOWN 0x0008
+#define MOUSEEVENTF_RIGHTUP 0x0010
+#define MOUSEEVENTF_MIDDLEDOWN 0x0020
+#define MOUSEEVENTF_MIDDLEUP 0x0040
+#define MOUSEEVENTF_WHEEL 0x0800
+#define MOUSEEVENTF_ABSOLUTE 0x8000
+#define KEYEVENTF_EXTENDEDKEY 0x0001
+#define KEYEVENTF_KEYUP 0x0002
 UINT SendInput(UINT, void *, int);
 BOOL SetWindowTextA(HWND, LPCSTR);
 BOOL EnumChildWindows(HWND, WNDENUMPROC, LPARAM);
@@ -686,6 +710,7 @@ inline BOOL QueryPerformanceFrequency(unsigned long long *p) { return QueryPerfo
 #if defined(__ILP32__) || defined(_WIN32)   /* the SDK sizes hold for 32-bit targets (host tests run LP64) */
 static_assert(sizeof(BITMAPFILEHEADER) == 14 && sizeof(BITMAPINFOHEADER) == 40 && sizeof(LUID) == 8, "SDK layout");
 static_assert(sizeof(CRITICAL_SECTION) == 24 && sizeof(LARGE_INTEGER) == 8 && sizeof(SYSTEM_INFO) == 36, "SDK layout");
+static_assert(sizeof(INPUT) == 28 && sizeof(MOUSEINPUT) == 24, "SDK layout");
 #endif
 #endif
 #endif
