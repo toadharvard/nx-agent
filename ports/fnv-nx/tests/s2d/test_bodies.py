@@ -256,6 +256,20 @@ class T(unittest.TestCase):
         ik = {k for t, k in i.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.relaxed_keys(i)}
         self.assertTrue(mk & ik)
 
+    def test_star_operators_pair(self):
+        """operator* / operator*= end in '*' as well: they parse and pair (the matrix and vector products of
+        NiTransform::operator*); a function returning a function pointer still does not parse as a function."""
+        cases = [('??DM@@QBE?AV0@ABV0@@Z', '_ZNK1MmlERKS_'), ('??XM@@QAEAAV0@M@Z', '_ZN1MmLEf')]
+        dm = fnvlink.batch_demangle(fnvlink.UNDNAME, [m for m, _ in cases] + ['?f@@YAP6AXXZH@Z'])
+        di = fnvlink.batch_demangle(fnvlink.CXXFILT, [i for _, i in cases])
+        for ms, it in cases:
+            m, i = sigs.parse_msvc(ms, dm[ms]), sigs.parse_itanium(it, di[it])
+            self.assertEqual(m.kind, 'func', ms)
+            mk = {k for t, k in m.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.def_keys(m)}
+            ik = {k for t, k in i.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.relaxed_keys(i)}
+            self.assertTrue(mk & ik, ms)
+        self.assertNotEqual(sigs.parse_msvc('?f@@YAP6AXXZH@Z', dm['?f@@YAP6AXXZH@Z']).kind, 'func')
+
     @unittest.skipUnless(shutil.which('aarch64-linux-gnu-as') and shutil.which('aarch64-linux-gnu-ld'),
                          'needs the aarch64 binutils')
     def test_fuzz_image_links_vcall_stubs(self):
@@ -277,6 +291,79 @@ class T(unittest.TestCase):
                                check=True)
             img = a64image.build_many(['src/u.cpp'], d, os.path.join(d, 'w'), 'u')
         self.assertFalse([n for n in img.stubs.values() if n.startswith('__fnvnx_bdvc_')])
+
+    def test_gdel_pass(self):
+        """gdel: a D1 bound to its class's ??_G when the native build defines that address as a member function
+        taking (unsigned int); a D2 only without virtual bases (no _ZTT of the class known); no member of that
+        shape at the address -> unchanged."""
+        units = {'units': [{'source': 'src/g.cpp', 'functions': [
+            {'symbol': '??_GDel@@UAEPAXI@Z', 'address': '00405000'},
+            {'symbol': '?Kill@FUN_00405000@@QAEPAXI@Z', 'address': '00405000'},
+            {'symbol': '??_GVb@@UAEPAXI@Z', 'address': '00406000'},
+            {'symbol': '?Kill@FUN_00406000@@QAEPAXI@Z', 'address': '00406000'},
+            {'symbol': '??_GOdd@@UAEPAXI@Z', 'address': '00407000'},
+            {'symbol': '?Run@FUN_00407000@@QAEXXZ', 'address': '00407000'}], 'symbols': {}}]}
+        native = {0x00405000: 'F', 0x00406000: 'F', 0x00407000: 'F'}
+        names = ['_ZN3DelD1Ev', '_ZN3DelD2Ev', '_ZN2VbD2Ev', '_ZN2VbD1Ev', '_ZN3OddD1Ev']
+        with tempfile.TemporaryDirectory() as d:
+            uj = os.path.join(d, 'units.json')
+            json.dump(units, open(uj, 'w'))
+            u = fnvlink.load_units(uj)
+            ms = fnvlink.DemangleCache(os.path.join(d, 'msvc.tsv'), fnvlink.UNDNAME)
+            msvc, itanium = tables({f['symbol'] for f in units['units'][0]['functions']}, names)
+            rows = [bodies.Row(n, 'special-default', None, None, 'src/g.cpp', 'dtor', 'src/g.cpp') for n in names]
+            got = {r.name: r for r in bodies.gdel_pass(rows, u, native, itanium, msvc, ms, known={'_ZTT2Vb'})}
+        self.assertEqual((got['_ZN3DelD1Ev'].cls, got['_ZN3DelD1Ev'].target), ('gdel', '__fnvnx_bdgd_00405000'))
+        self.assertEqual(got['_ZN3DelD2Ev'].cls, 'gdel')
+        self.assertEqual(got['_ZN2VbD2Ev'].cls, 'special-default')     # virtual bases: D2 is not ??_G
+        self.assertEqual(got['_ZN2VbD1Ev'].cls, 'gdel')
+        self.assertEqual(got['_ZN3OddD1Ev'].cls, 'special-default')    # no (unsigned int) member at the address
+        self.assertEqual(bodies.vtt_name('_ZN2ns3FooD2Ev'), '_ZTTN2ns3FooE')
+
+    @unittest.skipUnless(shutil.which('qemu-aarch64') and shutil.which('aarch64-linux-gnu-gcc'),
+                         'needs qemu-aarch64 and the aarch64 cross compiler')
+    def test_gdel_stub_qemu(self):
+        """The gdel stub under qemu: the ??_G stand-in sees the same this and flags 0, whatever w1 held (the
+        stub's code is the same under LP64, which qemu-user runs)."""
+        import subprocess
+        c = r"""
+#include <stdio.h>
+void *seen_this; unsigned seen_flags = 99;
+void *__fnv_00405000(void *self, unsigned flags) { seen_this = self; seen_flags = flags; return self; }
+void __fnvnx_bdgd_00405000(void *self);
+void call(void *p, unsigned junk);
+int main(void) { int obj; call(&obj, 1); printf("%d %u\n", seen_this == (void *)&obj, seen_flags); return 0; }
+"""
+        asm = bodies.emit_gdel({0x00405000}) + '.globl call\ncall: b __fnvnx_bdgd_00405000\n'   # w1 = 1 on entry
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, 'm.c'), 'w').write(c)
+            open(os.path.join(d, 's.S'), 'w').write(asm)
+            subprocess.run(['aarch64-linux-gnu-gcc', '-static', '-O1', os.path.join(d, 'm.c'), os.path.join(d, 's.S'),
+                            '-o', os.path.join(d, 'm')], check=True)
+            r = subprocess.run(['qemu-aarch64', os.path.join(d, 'm')], capture_output=True, text=True, check=True)
+        self.assertEqual(r.stdout.strip(), '1 0')
+
+    @unittest.skipUnless(shutil.which(vtables.CXX), 'needs the aarch64 cross compiler')
+    def test_print_flags_stdout_is_flags_only(self):
+        """compile.sh --print-flags (layout.game_flags: the flags of every synthesized body) prints flags only on
+        stdout. The order-keys line went there too, every game-flags compile failed, and the bodies step lost
+        special-default and msvc-inline (1,329 names 'host does not compile')."""
+        import subprocess
+        with tempfile.TemporaryDirectory() as d:
+            tree, work = os.path.join(d, 'tree'), os.path.join(d, 'work')
+            os.makedirs(os.path.join(tree, 'src'))
+            os.makedirs(os.path.join(tree, 'build'))
+            os.makedirs(os.path.join(tree, 'include'))
+            open(os.path.join(tree, 'src', 'a.cpp'), 'w').write('struct S { volatile int v; }; int f(S *s) { return s->v; }\n')
+            json.dump({'units': [{'source': 'src/a.cpp', 'functions': [], 'symbols': {}}]},
+                      open(os.path.join(tree, 'build', 'units.json'), 'w'))
+            r = subprocess.run(['bash', os.path.join(HERE, '..', '..', 'tools', 'link', 'compile.sh'), '--print-flags',
+                                tree, work], capture_output=True, text=True, timeout=900)
+        self.assertEqual(r.returncode, 0, r.stderr[-500:])
+        lines = r.stdout.split('\n')[:-1]
+        self.assertIn('-c', lines)
+        bad = [x for i, x in enumerate(lines) if not x.startswith('-') and not (i and lines[i - 1] == '-include')]
+        self.assertEqual(bad, [])
 
 def coff(funcs, externs, data=None):
     """Minimal i386 COFF: one COMDAT code section per function {name: (bytes, {offset: callee})}; data: the same

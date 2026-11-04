@@ -28,6 +28,10 @@ in this order (first that applies):
    pointer-to-member constant `&C::f` (ARM-style Itanium ABI: vtable byte offset, 2 * this adjustment + 1) and
    a stub `__fnvnx_bdvc_<hash>` adjusts `this`, loads the slot from the object's vptr and tail-calls it. Not
    when the unit's pristine object references the MSVC name itself: a qualified call `B::f()`.
+4b. `gdel` - a D1 (or a D2 of a class without virtual bases) that would be missing or `= default`, whose class has
+   one scalar deleting destructor ??_G at an address the native build defines as a member function taking
+   (unsigned int flags): MSVC folded the destructor's body into ??_G and calls that. A stub calls it with flags 0
+   (destroy, do not free). After `exe-addr`: an address of the destructor itself wins.
 5. `special-default` - a constructor without parameters, a copy constructor, a destructor or a copy assignment of
    a class (not a template) that no pristine object defines: MSVC inlined it everywhere, and the decomp declares it
    without a body. Synthesized as the out-of-line `= default` definition in the referencing unit (the implicit
@@ -508,14 +512,32 @@ class Pe:
                 self.code.append((self.base + va, roff, rsize))
 
     def find_unique(self, body, masked):
-        """The one address in a code section whose bytes equal body outside the offsets in masked, else None."""
-        pat = re.compile(b''.join(b'.' if j in masked else re.escape(body[j:j + 1]) for j in range(len(body))), re.S)
+        """The one address in a code section whose bytes equal body outside the offsets in masked, else None.
+        Candidates come from a literal search of body's longest unmasked run, then each is compared in full."""
+        runs, run = [], None   # the unmasked runs [a, b)
+        for j in range(len(body) + 1):
+            if j < len(body) and j not in masked:
+                run = j if run is None else run
+            elif run is not None:
+                runs.append((run, j))
+                run = None
+        if not runs:
+            return None
+        lo, hi = max(runs, key=lambda r: r[1] - r[0])
+        if hi - lo < 4:
+            return None
+        lit = body[lo:hi]
         hits = []
         for va, roff, rsize in self.code:
-            for m in pat.finditer(self.data, roff, roff + rsize):
-                hits.append(va + m.start() - roff)
-                if len(hits) > 1:
-                    return None
+            end = roff + rsize
+            at = self.data.find(lit, roff + lo, end)
+            while at >= 0:
+                start = at - lo
+                if start + len(body) <= end and all(self.data[start + a:start + b] == body[a:b] for a, b in runs):
+                    hits.append(va + start - roff)
+                    if len(hits) > 1:
+                        return None
+                at = self.data.find(lit, at + 1, end)
         return hits[0] if hits else None
 
     def read(self, va, n):
@@ -724,6 +746,90 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
     return out
 
 
+GDEL_SYM = '__fnvnx_bdgd_%08x'
+
+
+def vtt_name(name):
+    """_ZTT of the class of an Itanium D1/D2 name (its VTT: the class has virtual bases), None if not simply nested."""
+    m = re.match(r'^_ZN((?:\d+[A-Za-z_]\w*)+)D[12]Ev$', name)
+    if not m:
+        return None
+    parts = re.findall(r'(\d+)', m.group(1))
+    return '_ZTT' + (m.group(1) if len(parts) == 1 else 'N%sE' % m.group(1))
+
+
+def gdel_pass(rows, units, native, itanium, msvc, ms, known=()):
+    """`gdel`: a D1 (a D2 too when the class has no virtual bases: no _ZTT of it in known) still missing or about to
+    get `= default`, whose class has one scalar deleting destructor ??_G at an address the native build defines as a
+    member function (this, unsigned int flags): MSVC folded the destructor's body into ??_G, which is
+    `this->~C(); if (flags & 1) delete this; return this`. Bound to a stub that calls it with flags 0 (destroy, do
+    not free)."""
+    gaddr = collections.defaultdict(set)   # ??_G name -> addresses
+    names_at = collections.defaultdict(set)
+    for u in units.values():
+        for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
+            if a in native:
+                names_at[a].add(n)
+                if n.startswith('??_G'):
+                    gaddr[n].add(a)
+    ms.need(set(gaddr) | {n for ns in names_at.values() for n in ns if n.startswith('?')})
+    bycls = collections.defaultdict(set)
+    for n, a_ in gaddr.items():
+        m = re.search(r"(?:__thiscall )?(\S+)::`scalar deleting dtor'", ms[n] or '')
+        if m:
+            bycls[sigs.canon_type(m.group(1))] |= a_
+
+    def flags_member(a):
+        for n in names_at.get(a, ()):
+            if n.startswith('?') and not n.startswith('??_'):
+                d = msvc(n)
+                if d.kind == 'func' and d.member and d.params is not None and len(d.params) == 1 and \
+                        re.match(r'^(unsigned )?int$', d.params[0]):
+                    return n
+        return None
+    known = set(known)
+    out = []
+    for r in rows:
+        isg = itanium(r.name)
+        if r.cls not in ('missing', 'special-default') or isg.variant not in ('D1', 'D2'):
+            out.append(r)
+            continue
+        if isg.variant == 'D2' and (vtt_name(r.name) is None or vtt_name(r.name) in known):
+            out.append(r)
+            continue
+        cands = bycls.get('::'.join(isg.qual[:-1]), set())
+        a = next(iter(cands)) if len(cands) == 1 else None
+        fm = flags_member(a) if a is not None and native.get(a) == 'F' else None
+        if fm is None:
+            out.append(r)
+            continue
+        out.append(r._replace(cls='gdel', addr=a, target=GDEL_SYM % a, host=None,
+                              note='??_G at %08x (%s) with flags 0; was %s' % (a, fm, r.cls)))
+    return out
+
+
+def allms_itanium(out):
+    """The VTT names (_ZTT...) any unit references (refs.tsv): their classes have virtual bases."""
+    path = os.path.join(out, 'refs.tsv')
+    got = set()
+    if os.path.exists(path):
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.split('\t', 2)
+            if len(f) > 1 and f[1].startswith('_ZTT'):
+                got.add(f[1])
+    return got
+
+
+def emit_gdel(addrs):
+    """AArch64 ILP32 stubs: w1 = 0 (flags: do not free), tail call of the ??_G's native definition."""
+    out = ['// GENERATED by tools/link/bodies.py: D1/D2 bound to the scalar deleting destructor with flags 0', '.text']
+    for a in sorted(addrs):
+        sym = GDEL_SYM % a
+        out += ['.globl %s' % sym, '.type %s, %%function' % sym, '.p2align 2', '%s:' % sym,
+                '    mov w1, #0', '    b %s' % (ADDR_SYM % a), '.size %s, .-%s' % (sym, sym)]
+    return '\n'.join(out) + '\n'
+
+
 def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synth=True, exe_path=None):
     import fnvlink
     units_json = units_json or os.path.join(tree, 'build', 'units.json')
@@ -765,6 +871,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
 
     if msvc_objs and exe_path:
         rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms)
+    if synth:   # its stubs are emitted with the synthesized objects
+        rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
 
     synth_rows, failed, vnotes = [], {}, {}
     if synth:
@@ -837,6 +945,15 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 rows = [r._replace(cls='vcall', target=vtargets[r.name][0],
                                    note='slot byte %d, this +%d' % vtargets[r.name][1:]) if r.name in vtargets
                         else r for r in rows]
+        gd = [r for r in rows if r.cls == 'gdel']
+        if gd:
+            s_path, o_path = os.path.join(bdir, 'gdel.S'), os.path.join(bdir, 'zz_bd_gdel.o')
+            open(s_path, 'w').write(emit_gdel({r.addr for r in gd}))
+            as_ = os.environ.get('AS', 'aarch64-linux-gnu-as')
+            if subprocess.run([as_, '-mabi=ilp32', s_path, '-o', o_path], capture_output=True).returncode == 0:
+                synth_rows.append((sorted(gd[0].units.split(','))[0] if gd[0].units else unit_names[0], o_path, len(gd)))
+            else:
+                failed.update({r.name: 'synth-failed (as)' for r in gd})
         empty = [r for r in rows if r.cls == 'msvc-empty']
         if empty:
             s_path, o_path = os.path.join(bdir, 'empty.S'), os.path.join(bdir, 'zz_bd_empty.o')
@@ -860,7 +977,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     with open(os.path.join(bdir, 'bind.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\tclass\ttarget\n')
         for r in rows:
-            if r.cls in ('addr', 'exe-addr', 'vcall'):
+            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel'):
                 f.write('%s\t%s\t%s\n' % (r.name, r.cls, r.target))
     with open(os.path.join(bdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#host_unit\tobject\tnames\n')
@@ -870,7 +987,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
-              for k in ('addr', 'exe-addr', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default', 'missing')]
+              for k in ('addr', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default',
+                        'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))
