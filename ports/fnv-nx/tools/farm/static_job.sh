@@ -140,8 +140,9 @@ else TC="FAILED: $( { grep -m1 -E 'error|fatal' "$WORK/probe.log" || tail -1 "$W
 OUT=$WORK/out-$K-of-$N
 GLOG=$WORK/gate-$K-of-$N.log
 mkdir -p "$OUT"
-if ! bash "$P/tools/static/build.sh" "$OUT" > "$WORK/fnvcheck-build.log" 2>&1; then
-  { echo "- fnvcheck does not build (tools/static/build.sh), so the clang passes cannot run"
+brc=0; bash "$P/tools/static/build.sh" "$OUT" > "$WORK/fnvcheck-build.log" 2>&1 || brc=$?
+if [ "$brc" -ne 0 ]; then
+  { echo "- fnvcheck does not build (tools/static/build.sh exit $brc), so the clang passes cannot run"
     echo "- llvm: $("$LLVM/bin/llvm-config" --version 2>&1 | head -1), shared mode: $("$LLVM/bin/llvm-config" --shared-mode 2>&1 | head -1)"
     echo; echo '```'; { grep -m8 -E 'missing|error|fatal|cannot|No such' "$WORK/fnvcheck-build.log" || true
                         tail -5 "$WORK/fnvcheck-build.log"; } | san | cut -c1-240; echo '```'; } > "$WORK/fail.md"
