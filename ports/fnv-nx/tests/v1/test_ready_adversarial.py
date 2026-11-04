@@ -111,7 +111,7 @@ def render(w, fm):
 
 # R4, R5
 case('R4 render frame_ms negative', lambda w: render(w, {'main': -1.0, 'render': -1.0}),
-     must_not_pass('perf.render.boost'))
+     must_not_pass('perf.render.stock', 'perf.render.boost'))     # J-0150: the stock clock counts
 case('R5 render frame_ms 0', lambda w: render(w, {'main': 0, 'render': 0}), lambda g: '')
 
 # R6
@@ -237,6 +237,8 @@ def r14c(w):
     w.write('reports/try3of4/aaaaaaaaaaaa-frame-budget.json', good, published=w.latest() + 60)
 
 
-case('R14b try farm frameprof newer than the merged one', r14b, must_not_pass('perf.frame.boost'))
-case('R14c try farm frame budget newer than the merged one', r14c, must_not_pass('perf.budget.boost'))
+case('R14b try farm frameprof newer than the merged one', r14b,
+     must_not_pass('perf.frame.stock', 'perf.frame.boost'))
+case('R14c try farm frame budget newer than the merged one', r14c,
+     must_not_pass('perf.budget.stock', 'perf.budget.boost'))
 sys.exit(FAIL)

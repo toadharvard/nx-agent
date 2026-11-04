@@ -4,11 +4,11 @@
  "scenarios": [
   {"id": "placed", "name": "placement as implemented, no lever", "levers": [],
    "results": {
-    "1020": {"worst_frame_ms": {"lo": 12.0, "mid": 25.0, "hi": 40.0}, "critical_core": 0,
-             "verdicts": {"fail_below_30": "uncertain", "pass_45": "uncertain", "stretch_60": "uncertain"},
-             "level": "pass_30"},
-    "1785": {"worst_frame_ms": {"lo": 7.0, "mid": 12.0, "hi": 20.0}, "critical_core": 0,
-             "verdicts": {"fail_below_30": "pass", "pass_45": "pass", "stretch_60": "uncertain"},
+    "1020": {"worst_frame_ms": {"lo": 7.0, "mid": 12.0, "hi": 16.0}, "critical_core": 0,
+             "verdicts": {"fail_below_30": "pass", "pass_45": "pass", "stretch_60": "pass"},
+             "level": "stretch_60"},
+    "1785": {"worst_frame_ms": {"lo": 4.0, "mid": 7.0, "hi": 9.5}, "critical_core": 0,
+             "verdicts": {"fail_below_30": "pass", "pass_45": "pass", "stretch_60": "pass"},
              "level": "stretch_60"}}},
   {"id": "plan45", "name": "45 fps plan", "levers": ["mt_cull"],
    "results": {

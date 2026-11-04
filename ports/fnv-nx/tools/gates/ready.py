@@ -657,23 +657,26 @@ class Card:
     # ---- frame-rate levels (thresholds perf.fps, perf.clocks)
     def fps_threshold(self):
         f = self.th['perf']['fps']
-        return 'floor %d fps (%.1f ms); target %d fps stable (%.1f ms, worst frame); stretch %d fps (%.1f ms, median)' % (
-            f['floor'], 1000.0 / f['floor'], f['target'], 1000.0 / f['target'], f['stretch'], 1000.0 / f['stretch'])
+        return 'target %d fps (%.1f ms, worst frame); floor %d fps (%.1f ms); %d fps (%.1f ms) informational' % (
+            f['target'], 1000.0 / f['target'], f['floor'], 1000.0 / f['floor'], f['info'], 1000.0 / f['info'])
 
-    def fps_levels(self, worst_ms, median_ms):
-        """{floor, target, stretch: bool}, the level name, and the status: pass only at the target"""
+    @staticmethod
+    def level_name(lv):
+        return ('fail' if not lv['floor'] else 'below info' if not lv['info'] else
+                'below target' if not lv['target'] else 'target')
+
+    def fps_levels(self, worst_ms, median_ms=None):
+        """{floor, info, target: bool}, the level name, and the status: pass only at the target. Every level is
+        judged on the worst frame (J-0150: 60 fps whole frame at the 1.02 GHz retail clock)"""
         f = self.th['perf']['fps']
-        lv = dict(floor=worst_ms <= 1000.0 / f['floor'], target=worst_ms <= 1000.0 / f['target'],
-                  stretch=median_ms <= 1000.0 / f['stretch'])
-        name = ('fail' if not lv['floor'] else 'below target' if not lv['target'] else
-                'stretch' if lv['stretch'] else 'target')
-        return lv, name, PASS if lv['target'] else FAIL
+        lv = {k: worst_ms <= 1000.0 / f[k] for k in ('floor', 'info', 'target')}
+        return lv, self.level_name(lv), PASS if lv['target'] else FAIL
 
     def fps_note(self, lv, name):
         f = self.th['perf']['fps']
-        return 'level %s: floor %d fps %s, target %d fps stable %s, stretch %d fps %s' % (
-            name, f['floor'], 'yes' if lv['floor'] else 'NO', f['target'], 'yes' if lv['target'] else 'no',
-            f['stretch'], 'yes' if lv['stretch'] else 'no')
+        return 'level %s: target %d fps %s, floor %d fps %s, %d fps (informational) %s' % (
+            name, f['target'], 'yes' if lv['target'] else 'no', f['floor'], 'yes' if lv['floor'] else 'NO',
+            f['info'], 'yes' if lv['info'] else 'no')
 
     # ---- link branch helpers
     def link_branch(self, commit):
@@ -1474,10 +1477,8 @@ class Card:
                        'neither targets_budget_fraction nor frame_ms.main/render in the summary')
                 self.nodata(gid, 'Performance', title, thr, why, rank=22, sources=[src] if src else None, required=req)
                 continue
-            lv = dict(floor=fr[f['floor']] <= share, target=fr[f['target']] <= share,
-                      stretch=fr[f['stretch']] <= share)
-            name = ('fail' if not lv['floor'] else 'below target' if not lv['target'] else
-                    'stretch' if lv['stretch'] else 'target')
+            lv = {k: fr[f[k]] <= share for k in ('floor', 'info', 'target')}
+            name = self.level_name(lv)
             ms = fr[f['target']] * 1000.0 / f['target']
             self.gate(gid, 'Performance', title, '%.0f %% of the %d fps frame (%.1f ms)' % (
                 100 * fr[f['target']], f['target'], ms), thr, PASS if lv['target'] else FAIL, src,
@@ -1489,7 +1490,7 @@ class Card:
     def render_fractions(self, j, clk):
         """{fps: the renderer's worst thread / that target's frame} at clk, and where the numbers came from"""
         f = self.th['perf']['fps']
-        want = [f['floor'], f['target'], f['stretch']]
+        want = sorted({f['floor'], f['info'], f['target']})
         tbf = j.get('targets_budget_fraction')
         if isinstance(tbf, dict):
             out = {}
@@ -1556,7 +1557,7 @@ class Card:
         target: pass (the hi case fits) counts only with a measurement in the inputs (frameprof or the render report);
         a model-only pass, or uncertain (lo fits, hi does not), is no-data; fail (even the lo case misses) fails."""
         bt = self.th['perf'].get('budget', {})
-        scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'pass_45')
+        scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'stretch_60')
         doc, src = None, None
         hits = []
         for br in self.report_branches():
@@ -1590,7 +1591,7 @@ class Card:
         for clk in self.th['perf']['clocks']:
             gid, req = 'perf.budget.' + clk['name'], clk.get('required', True)
             title = 'S15 whole-frame CPU budget, scenario %s (%s clock %.3f GHz)' % (scen_id, clk['name'], clk['hz'] / 1e9)
-            thr = 'verdict %s = pass (hi case fits) on a measured frame' % target
+            thr = 'verdict %s = pass on a measured frame' % target
             s = scen.get(scen_id)
             res = ((s or {}).get('results') or {}).get(str(int(round(clk['hz'] / 1e6))))
             if not isinstance(res, dict):

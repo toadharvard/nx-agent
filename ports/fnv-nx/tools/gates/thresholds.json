@@ -84,31 +84,31 @@
   ]
  },
  "perf": {
-  "_doc": "frame-rate levels set by the owner (J-0132): below 30 fps fails; 45 fps stable is the target (worst frame); 60 fps is the stretch, even if unstable (median frame). Each frame gate is evaluated at every clock; only clocks with required=true count for the verdict, the others are reported as informative",
+  "_doc": "frame-rate levels (owner decision J-0150, replacing J-0132): the target is 60 fps, a 16.7 ms whole frame, at the 1.02 GHz retail clock and 720p handheld, judged on the worst frame; below 30 fps is a fail; 45 fps is kept as an informational level only. Each frame gate is evaluated at every clock; only clocks with required=true count for the verdict (stock), the boost clock is informative",
   "ipc": 0.8,
   "clocks": [
    {
     "name": "stock",
     "hz": 1020000000,
-    "required": false
+    "required": true
    },
    {
     "name": "boost",
     "hz": 1785000000,
-    "required": true
+    "required": false
    }
   ],
   "fps": {
    "floor": 30,
-   "target": 45,
-   "stretch": 60
+   "info": 45,
+   "target": 60
   },
   "boot_to_winmain_s": 3.0,
   "boot_clock": "stock",
   "budget": {
-   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock",
+   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock (stretch_60: the mid worst frame <= 16.7 ms, J-0150)",
    "scenario": "placed",
-   "target": "pass_45",
+   "target": "stretch_60",
    "model": "docs/PERF_budget.json"
   }
  },
@@ -142,7 +142,7 @@
   ]
  },
  "scorecard": {
-  "_doc": "the honest scorecard's frame rows (ready.py scorecard()): the orchestrator's target for the whole project, 60 fps at 720p handheld at the 1.02 GHz retail clock. The gates keep J-0132's levels (perf.fps); these rows show the gap to this target",
+  "_doc": "the honest scorecard's frame rows (ready.py scorecard()): 60 fps at 720p handheld at the 1.02 GHz retail clock (J-0150), the same target as the frame gates (perf.fps)",
   "frame_fps": 60,
   "frame_clock": "stock",
   "gpu_config": "handheld_720p"

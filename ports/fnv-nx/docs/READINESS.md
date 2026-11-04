@@ -102,8 +102,7 @@ job publishes it per integration head (`reports/gates1/<c12>-gates.md` / `.json`
 
 - **gap** is how far the value is from its target (0 = done); `-` means no farm measures it yet (no-data).
 - **Frame target.** The frame rows use `thresholds.json` `scorecard`: 60 fps at 720p handheld at the 1.02 GHz retail
-  clock, the orchestrator's target for the project. The frame *gates* keep the owner's J-0132 levels (45 fps
-  target on the boost clock), so the fixture world can be READY while its frame rows are open.
+  clock (J-0150), the same target as the frame gates.
 
 ## The gates
 
@@ -129,56 +128,56 @@ job publishes it per integration head (`reports/gates1/<c12>-gates.md` / `.json`
 | boot.winmain, boot.renderer_init, boot.main_menu, boot.first_frame, boot.first_cell | boot milestones on the real exe | `link/<c12>/boot/milestones.json`, see the formats below | reached | the first launch has to reach the first cell; a null milestone is no-data, the stub-fault boot never counts |
 | boot.init_skips | static initializers skipped after a fault | full report | 0 | each one is a global left unconstructed |
 | frames.compare | S16 scenes matching the reference | `reports/<farm>/<c12>-frames.json`: S16's `fnvnx-gate/1` or R0's first format | all scenes, gate status pass, candidate kind `port` | a scene that differs from the reference renders wrong |
-| perf.frame.stock / perf.frame.boost | main-thread frame time from frameprof | `reports/<farm>/<c12>-frameprof.json` | three levels, below | J-0132 |
+| perf.frame.stock / perf.frame.boost | main-thread frame time from frameprof | `reports/<farm>/<c12>-frameprof.json` | 60 fps worst frame at 1.02 GHz, below | J-0150 |
 | perf.boot | estimated device time to WinMain (stock clock) | same | <= 3 s | a black screen longer than this reads as a hang |
 | perf.memory | peak guest heap / heap the guest can have | `meta.json` `boot_peak_heap_bytes` | <= 75 % of 1984 MiB | headroom for fragmentation and the cells after the first one |
 | perf.cores | core placement | `toolchain/host/placement.h`, `toolchain/npdm/fnvnx-app.json` in the checkout | main on core 0, workers on 1-2, core 3 opt-in and off | PERF.md placement table |
 | perf.render.stock / perf.render.boost | render machine: the renderer's worst thread as a share of each target's frame | `render/native/perf/report.json`, summary `targets_budget_fraction` (hi bound) | <= 20 % of the frame at the target | RENDER_NATIVE.md 9.4: render thread 4.5 of 22.2 ms, packet build 4.0 ms |
 | perf.gpu.docked_720p / handheld_720p / handheld_540p | GPU frame time of the render machine's model | same report, `gpu.summary_ms.mix_hi` | three levels, informative | a model with no measured anchor (RENDER_PERF.md section 9) |
-| perf.budget.stock / perf.budget.boost | S15 whole-frame CPU budget, scenario `placed` | `reports/<farm>/<c12>-frame-budget.json`, else `docs/PERF_budget.json` | `pass_45` verdict pass on a measured frame | PERF.md section 11; a model-only or uncertain verdict is no-data |
+| perf.budget.stock / perf.budget.boost | S15 whole-frame CPU budget, scenario `placed` | `reports/<farm>/<c12>-frame-budget.json`, else `docs/PERF_budget.json` | `stretch_60` verdict pass on a measured frame (mid worst frame <= 16.7 ms) | PERF.md section 11; a model-only or uncertain verdict is no-data |
 | package.exefs | exefs = main + main.npdm, guest.nso on the SD tree | full report | yes | Atmosphere's exefs override layout |
 | package.program_id | program id of an installed title | full report | not 0100000000000000 | the override needs a title that is installed |
 | package.pic | guest PC-relative absolute references | full report | 0 | the guest must be relocatable (D9) |
 | package.check | `tests/s5/check_package.py` on the package | `meta.json` `check_package_rc`, or `check_package: exit N` in the full report | exit 0 | the package checks that do not need a console |
 
-## Frame-rate levels (J-0132)
+## Frame-rate levels (J-0150)
 
-The owner's targets:
-- below 30 fps is a fail;
-- 45 fps stable is the target;
-- 60 fps is the stretch, even if unstable.
+The owner's target (J-0150, replacing J-0132's 45 fps target and 60 fps stretch): **60 fps, a 16.7 ms whole frame,
+at the 1.02 GHz retail clock and 720p handheld**. Below 30 fps is a fail. 45 fps stays as an informational level only.
 
-`thresholds.json` `perf.fps` holds the three levels, and `perf.clocks` the two CPU clocks: 1.02 GHz stock and
-1.785 GHz boost. Each frame gate exists once per clock.
+`thresholds.json` `perf.fps` holds the levels (`floor`, `info`, `target`), and `perf.clocks` the two CPU clocks:
+1.02 GHz stock and 1.785 GHz boost. Each frame gate exists once per clock.
 
 | level | frame | judged on | 1.02 GHz, IPC 0.8 | 1.785 GHz, IPC 0.8 |
 |---|---|---|---|---|
-| floor 30 fps | 33.3 ms | worst frame | ~27 M instructions | ~48 M |
-| target 45 fps stable | 22.2 ms | worst frame | ~18 M | ~32 M |
-| stretch 60 fps | 16.7 ms | median frame | ~14 M | ~24 M |
+| target 60 fps | 16.7 ms | worst frame | ~14 M instructions | ~24 M |
+| floor 30 fps | 33.3 ms | worst frame | ~27 M | ~48 M |
+| 45 fps (informational) | 22.2 ms | worst frame | ~18 M | ~32 M |
 
-- **Status.** A frame gate passes only at the target. Its note gives all three levels (`floor yes, target no,
-  stretch no`), and the JSON gives `levels: {floor, target, stretch, level}`.
-- **Level names.** The level reads *fail* (under the floor), *below target*, *target* or *stretch*.
+- **Status.** A frame gate passes only at the target. Its note gives every level (`target 60 fps no, floor 30 fps yes,
+  45 fps (informational) yes`), and the JSON gives `levels: {floor, info, target, level}`.
+- **Level names.** The level reads *fail* (under the floor), *below info* (under 45 fps), *below target* or
+  *target*.
+- **Every level on the worst frame.** A median frame at 60 fps no longer counts: one slow frame misses the target.
 - **Main thread.** `perf.frame.<clock>` converts frameprof's main-thread instructions per frame to time at
   that clock and `perf.ipc`.
 - **Render machine.** `perf.render.<clock>` reads the summary's `targets_budget_fraction`: the slower of the main
-  side and the render thread, hi bound (IPC 0.6 at 1.02 GHz, mix_hi), divided by each target's frame time.
+  side and the render thread, hi bound (IPC 0.6 at 1.02 GHz, mix_hi), divided by each level's frame time.
   - Its `targets` verdicts are not used: they compare the renderer alone with the whole frame, while the owner's
-    targets are for the whole frame.
+    target is for the whole frame.
   - The renderer has a share of the frame, `render_perf.max_budget_fraction` (0.2, from RENDER_NATIVE.md 9.4). A
     level is met when the renderer fits its share of that level's frame.
   - A report without the fractions gives them from `frame_ms` (gate values), scaled from the lowest
     `assumptions.clock_ghz`.
-- **GPU.** `perf.gpu.<config>` judges the efficiency-0.6 bound of the model's mix_hi frame against the three levels.
+- **GPU.** `perf.gpu.<config>` judges the efficiency-0.6 bound of the model's mix_hi frame against the levels.
   It is informative (`render_perf.gpu[].required`) until a console run measures the GPU.
 - **Whole frame (S15).** `perf.budget.<clock>` takes the scenario as the build is placed today (`perf.budget`), not a
   plan.
-  - Its `pass_45` verdict passes only when the budget's inputs hold a measurement (frameprof or the render report).
-  - `uncertain` (the lo case fits, the hi case does not) and a model-only pass are no-data; `fail` fails.
-- **Which clock counts.** The owner's console can raise the clock, so the boost clock counts for the verdict
-  (`required: true`). The stock clock is reported as informative (`required: false`). Set the stock clock to
-  `required: true` to demand the target at stock.
+  - Its `stretch_60` verdict (the mid worst frame within 16.7 ms) passes only when the budget's inputs hold a
+    measurement (frameprof or the render report).
+  - `uncertain` and a model-only pass are no-data; `fail` fails.
+- **Which clock counts.** The stock clock, 1.02 GHz (`required: true`). The boost clock is reported as informative
+  (`required: false`).
 
 ## ABI verdicts of S1b (J-0141)
 

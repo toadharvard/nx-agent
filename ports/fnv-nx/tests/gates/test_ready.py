@@ -441,10 +441,11 @@ class ReadyTest(unittest.TestCase):
         for r in card['scorecard'][:9]:
             self.assertEqual((r['gap'], r['status']), (0, 'done'), r)
             self.assertTrue(r['sources'], r)
-        # the frame rows are judged against the orchestrator's 60 fps at 1.02 GHz, not J-0132's gate levels
-        fb = card['scorecard'][9]
-        self.assertEqual((fb['target'], fb['unit'], fb['status']), (16.7, 'ms', 'open'))
-        self.assertAlmostEqual(fb['gap'], fb['value'] - 16.7, places=1)
+        # the frame rows: 60 fps at 1.02 GHz (J-0150); the S15 budget fits (12.0 ms), the GPU model does not
+        fb, gpu = card['scorecard'][9], card['scorecard'][10]
+        self.assertEqual((fb['value'], fb['target'], fb['unit'], fb['gap'], fb['status']), (12.0, 16.7, 'ms', 0, 'done'))
+        self.assertEqual((gpu['value'], gpu['status']), (24.8, 'open'))
+        self.assertAlmostEqual(gpu['gap'], 24.8 - 16.7, places=1)
         self.assertEqual(card['verdict'], 'READY')
         # a census with errors, an S11 diff, a missing S16 file
         self.world.sub('reports/farm1/%s-census.md' % C, 'errors total: 0', 'errors total: 3')
@@ -532,104 +533,119 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual((g['status'], g['value'], g['note']), ('fail', '1/2', 'first_cell'))
 
     # ---- performance: three levels, two clocks
+
     def test_frame_levels_per_clock(self):
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.frame.stock'), self.gate(card, 'perf.frame.boost')
-        # 21 M instructions at IPC 0.8: 25.7 ms at 1.02 GHz, 14.7 ms at 1.785 GHz
-        self.assertEqual(stock['levels'], dict(floor=True, target=False, stretch=False, level='below target'))
-        self.assertEqual(boost['levels'], dict(floor=True, target=True, stretch=True, level='stretch'))
-        self.assertEqual((stock['status'], stock['required']), ('fail', False))
-        self.assertEqual((boost['status'], boost['required']), ('pass', True))
-        self.assertIn('fail, informative', card['md'])
-        self.assertNotIn('perf.frame.stock', card['blockers'])
+        # 11 M instructions at IPC 0.8: 13.5 ms at 1.02 GHz, 7.7 ms at 1.785 GHz; J-0150: 60 fps at the stock clock
+        self.assertEqual(stock['levels'], dict(floor=True, info=True, target=True, level='target'))
+        self.assertEqual(boost['levels'], dict(floor=True, info=True, target=True, level='target'))
+        self.assertEqual((stock['status'], stock['required']), ('pass', True))
+        self.assertEqual((boost['status'], boost['required']), ('pass', False))
+        self.assertEqual(card['verdict'], 'READY')
+        # 15 M: 18.4 ms at 1.02 GHz misses 60 fps there (counts), 10.5 ms at 1.785 GHz (informative)
+        self.world.write('reports/prof1/%s-frameprof.json' % C, [dict(label='frame 1', instructions=15000000)])
+        card = self.world.run()
+        stock, boost = self.gate(card, 'perf.frame.stock'), self.gate(card, 'perf.frame.boost')
+        self.assertEqual((stock['status'], stock['levels']['level']), ('fail', 'below target'))
+        self.assertEqual(boost['status'], 'pass')
+        self.assertIn('perf.frame.stock', card['blockers'])
+        self.assertNotIn('perf.frame.boost', card['blockers'])
 
     def test_frame_below_floor(self):
         self.world.write('reports/prof1/%s-frameprof.json' % C,
                          [dict(label='frame 1', instructions=20000000), dict(label='frame 2', instructions=60000000)])
         card = self.world.run()
-        boost = self.gate(card, 'perf.frame.boost')
-        self.assertEqual(boost['levels']['level'], 'fail')             # 42 ms worst at 1.785 GHz
-        self.assertEqual(boost['status'], 'fail')
-        self.assertIn('perf.frame.boost', card['blockers'])
+        stock = self.gate(card, 'perf.frame.stock')
+        self.assertEqual(stock['levels']['level'], 'fail')             # 73.5 ms worst at 1.02 GHz
+        self.assertEqual(stock['status'], 'fail')
+        self.assertIn('perf.frame.stock', card['blockers'])
         self.assertEqual(self.gate(card, 'perf.boot')['status'], 'no-data')
 
-    def test_stretch_on_median_even_if_unstable(self):
-        # worst frame 25.2 ms (below the 45 fps target), median 11.2 ms (60 fps reached)
-        frames = [dict(label='frame %d' % i, instructions=16000000) for i in range(9)]
-        frames.append(dict(label='frame 9', instructions=36000000))
+    def test_worst_frame_decides_not_the_median(self):
+        # J-0150: 60 fps on the worst frame; nine frames at 9.8 ms and one at 19.6 ms (1.02 GHz) miss it
+        frames = [dict(label='frame %d' % i, instructions=8000000) for i in range(9)]
+        frames.append(dict(label='frame 9', instructions=16000000))
         self.world.write('reports/prof1/%s-frameprof.json' % C, frames)
-        lv = self.gate(self.world.run(), 'perf.frame.boost')['levels']
-        self.assertEqual(lv, dict(floor=True, target=False, stretch=True, level='below target'))
+        g = self.gate(self.world.run(), 'perf.frame.stock')
+        self.assertEqual(g['levels'], dict(floor=True, info=True, target=False, level='below target'))
+        self.assertEqual(g['status'], 'fail')
 
     def test_render_share_per_clock(self):
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.render.stock'), self.gate(card, 'perf.render.boost')
-        # renderer share of the frame (max_budget_fraction 0.2): stock 18 / 27 / 36 %, boost 10 / 15.5 / 19 %
-        self.assertEqual(stock['levels'], dict(floor=True, target=False, stretch=False, level='below target'))
-        self.assertEqual(boost['levels'], dict(floor=True, target=True, stretch=True, level='stretch'))
-        self.assertTrue(boost['value'].startswith('16 % of the 45 fps frame (3.4 ms)'), boost['value'])
-        self.assertEqual((stock['required'], boost['required']), (False, True))
+        # renderer share of the frame (max_budget_fraction 0.2): stock 6 / 9 / 12 %, boost 3.5 / 5 / 7 %
+        self.assertEqual(stock['levels'], dict(floor=True, info=True, target=True, level='target'))
+        self.assertEqual(boost['levels'], dict(floor=True, info=True, target=True, level='target'))
+        self.assertTrue(stock['value'].startswith('12 % of the 60 fps frame (2.0 ms)'), stock['value'])
+        self.assertEqual((stock['required'], boost['required']), (True, False))
 
     def test_render_uses_budget_fraction_not_targets(self):
         # `targets` says pass (the renderer alone against the whole frame); the share of the frame decides
-        self.world.edit_json('_render/report.json', lambda d: d['summary']['targets_budget_fraction']['45'].update(
-            {'1.785': 0.273}))
+        self.world.edit_json('_render/report.json', lambda d: d['summary']['targets_budget_fraction']['60'].update(
+            {'1.02': 0.273}))
         card = self.world.run()
-        g = self.gate(card, 'perf.render.boost')
+        g = self.gate(card, 'perf.render.stock')
         self.assertEqual((g['status'], g['levels']['level']), ('fail', 'below target'))
-        self.assertIn('perf.render.boost', card['blockers'])
+        self.assertIn('perf.render.stock', card['blockers'])
 
     def test_render_fractions_from_frame_ms(self):
         # no targets_budget_fraction: the gate (hi) values, measured at the lowest clock of assumptions.clock_ghz
         self.world.edit_json('_render/report.json', lambda d: d['summary'].pop('targets_budget_fraction'))
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.render.stock'), self.gate(card, 'perf.render.boost')
-        self.assertEqual(stock['levels']['level'], 'below target')      # 6.0 ms: 18 % of 33.3, 27 % of 22.2
-        self.assertEqual(boost['levels']['level'], 'target')            # 3.4 ms: 15 % of 22.2, 21 % of 16.7
-        self.assertIn('frame_ms gate values', boost['note'])
+        self.assertEqual(stock['levels']['level'], 'target')            # 2.0 ms: 12 % of 16.7
+        self.assertEqual(boost['levels']['level'], 'target')            # 1.1 ms at 1.785 GHz
+        self.assertIn('frame_ms gate values', stock['note'])
+        self.world.edit_json('_render/report.json', lambda d: d['summary']['frame_ms'].update(main=4.0))
+        # 4.0 ms: 24 % of 16.7 (no), 18 % of 22.2, 12 % of 33.3
+        self.assertEqual(self.gate(self.world.run(), 'perf.render.stock')['levels']['level'], 'below target')
         self.world.edit_json('_render/report.json', lambda d: d['summary']['frame_ms'].update(main=40.0, render=20.0))
-        self.assertEqual(self.gate(self.world.run(), 'perf.render.boost')['levels']['level'], 'fail')
+        self.assertEqual(self.gate(self.world.run(), 'perf.render.stock')['levels']['level'], 'fail')
 
     def test_gpu_model_is_informative(self):
         card = self.world.run()
         dock, hh = self.gate(card, 'perf.gpu.docked_720p'), self.gate(card, 'perf.gpu.handheld_720p')
-        self.assertEqual((dock['value'], dock['levels']['level']), ('7.4 - 12.4 ms', 'stretch'))
-        self.assertEqual((hh['status'], hh['levels']['level'], hh['required']), ('fail', 'below target', False))
-        self.assertEqual(self.gate(card, 'perf.gpu.handheld_540p')['levels']['level'], 'stretch')
+        self.assertEqual((dock['value'], dock['levels']['level']), ('7.4 - 12.4 ms', 'target'))
+        # 24.8 ms: above 30 fps, below the informational 45 fps, far from 60
+        self.assertEqual((hh['status'], hh['levels']['level'], hh['required']), ('fail', 'below info', False))
+        self.assertEqual(self.gate(card, 'perf.gpu.handheld_540p')['levels']['level'], 'target')
         self.assertEqual(card['verdict'], 'READY')
         self.assertIn('model, not measured', hh['note'])
-
     def test_render_top_level_block_and_missing_file(self):
         s = json.loads(self.world.read('_render/report.json'))['summary']
         self.world.write('_render/report.json', s)
-        self.assertEqual(self.gate(self.world.run(), 'perf.render.boost')['status'], 'pass')
+        self.assertEqual(self.gate(self.world.run(), 'perf.render.stock')['status'], 'pass')
         self.world.remove('_render/report.json')
         card = self.world.run()
-        g = self.gate(card, 'perf.render.boost')
+        g = self.gate(card, 'perf.render.stock')
         self.assertEqual(g['status'], 'no-data')
         self.assertIn('no render perf report', g['note'])
-        self.assertIn('perf.render.boost', card['missing'])
+        self.assertIn('perf.render.stock', card['missing'])
 
     def test_frame_budget_per_clock(self):
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.budget.stock'), self.gate(card, 'perf.budget.boost')
-        self.assertEqual((boost['status'], boost['level']), ('pass', 'stretch_60'))
-        self.assertEqual((stock['status'], stock['required']), ('no-data', False))   # uncertain at 1020 MHz
-        self.assertIn('needs a measured frame', stock['note'])
-        self.assertIn('plan45 stretch_60', boost['note'])
+        self.assertEqual((stock['status'], stock['level'], stock['required']), ('pass', 'stretch_60', True))
+        self.assertEqual((boost['status'], boost['required']), ('pass', False))
+        self.assertIn('plan45 stretch_60', stock['note'])
+        self.world.edit_json('reports/prof1/%s-frame-budget.json' % C, lambda d: d['scenarios'][0]['results'][
+            '1020']['verdicts'].update(stretch_60='uncertain'))
+        g = self.gate(self.world.run(), 'perf.budget.stock')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('needs a measured frame', g['note'])
 
     def test_frame_budget_fail_and_model_only(self):
         rel = 'reports/prof1/%s-frame-budget.json' % C
-        self.world.edit_json(rel, lambda d: d['scenarios'][0]['results']['1785']['verdicts'].update(pass_45='fail'))
+        self.world.edit_json(rel, lambda d: d['scenarios'][0]['results']['1020']['verdicts'].update(stretch_60='fail'))
         card = self.world.run()
-        self.assertEqual(self.gate(card, 'perf.budget.boost')['status'], 'fail')
+        self.assertEqual(self.gate(card, 'perf.budget.stock')['status'], 'fail')
         self.assertEqual(card['verdict'], 'NOT READY')
-        self.world.edit_json(rel, lambda d: (d['scenarios'][0]['results']['1785']['verdicts'].update(pass_45='pass'),
+        self.world.edit_json(rel, lambda d: (d['scenarios'][0]['results']['1020']['verdicts'].update(stretch_60='pass'),
                                              d['inputs'].update(frameprof=False)))
-        g = self.gate(self.world.run(), 'perf.budget.boost')
+        g = self.gate(self.world.run(), 'perf.budget.stock')
         self.assertEqual(g['status'], 'no-data')
         self.assertIn('model only', g['note'])
-
     def test_frame_budget_from_the_checkout_model(self):
         self.world.remove('reports/prof1/%s-frame-budget.json' % C)
         self.assertEqual(self.gate(self.world.run(), 'perf.budget.boost')['note'], 'no fnvnx-frame-budget/1 file')
