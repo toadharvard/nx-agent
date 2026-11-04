@@ -2769,3 +2769,26 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - It builds, but under qemu-aarch64 it prints nothing in 300 s, and PERF.md 6.5/6.6 and the overrides.tsv row were
     never written. Not merged.
 * **next** - full1's boot on fa88387's own guest (due ~11:30). The fuzz farms take FTOI2 objects with the next link.
+
+### J-0126 | 2026-11-04 | stream: S5-boot,S1-compile | status: wip | parent: J-0125
+
+* **measured** - Census at ff0fd85 (farm1): **2,935 of 2,978 clean, 43 failing, 144 errors** (was 2,932/46, 312
+  errors).
+* **measured** - full1 on fa88387, its own guest (3,811 undefined symbols bound to traps, was 4,423), boot on S14's
+  synthesized image.
+  - WinMain is entered. The old fetch fault in MemoryManager FUN_00aa3e40 is gone: the call now reaches a clean trap,
+    "virtual function defined nowhere: `_ZN12FUN_00aa74002v2Ev` (slot 2 of `_ZTV12FUN_00aa7400`)".
+  - The stub-fault boot (known faults stubbed, the memory manager on malloc) runs further into WinMain. Its path is
+    0x0086a850+0x3f8, then PathList FUN_00afdda0, then `BSSimpleArray<NavMeshInfo*>::Add`, then
+    `FUN_00761540_cls::FUN_00761540`. There, slot 1 of image vtable 0x010472d0 is 0.
+* **found** - Both stops are image vftable slots that only the player's FalloutNV.exe can fill.
+  - The decomp declares `FUN_00aa7400 : HeapBlockBase` with the single virtual `v00`. The 14-slot vftable shape comes
+    from the image, but the slot targets beyond the declared ones are not in the MSVC build of the pristine decomp.
+  - The same holds for 0x010472d0. Per the J-0118 decision, these stay traps: binding them by analogy is not
+    evidence.
+  - The boot frontier on the synthesized image is now at the real executable (D3/S3, D12's "still needs the exe").
+* **next** - The owner's game data. The download needs HTTPS on 443 or wider network access for this environment
+  (J-0123).
+  - Meanwhile, S1 on the compile tail (43 units).
+  - Then a boot that also stubs image-vtable slots without a target, to see the frontier past them (S5's
+    known_faults path).
