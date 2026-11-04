@@ -473,7 +473,54 @@ class Emu:
         self.sym_names = [by_addr[a] for a in self.sym_addrs]
         self._bisect = bisect.bisect_right
 
-    def skip_summary(self, top=25):
+    def xreg(self, i):
+        import unicorn.arm64_const as c
+        return self.uc.reg_read(getattr(c, f"UC_ARM64_REG_X{i}")) if i < 31 else 0
+
+    def null_call(self):
+        """At a fetch fault from address 0: where the call came from and where the null was loaded from.
+        Returns '<caller> | <what>' with what = 'vslot <k> of vtable <addr> (this <x0>)' for a virtual call
+        (the vptr of the object in x0 is the table the slot came from), 'loaded from <addr>' for a function
+        pointer read from memory, or 'via br (tail call)' when the call site cannot be seen."""
+        uc = self.uc
+        lr = uc.reg_read(UC_ARM64_REG_LR)
+        try:
+            (call,) = struct.unpack("<I", uc.mem_read(lr - 4, 4))
+        except UcError:
+            return f"{lr:#x} | ?"
+        caller = re.sub(r"^0x[0-9a-f]+ ", "", self.sym(lr - 4))
+        if call & 0xFFFFFC1F != 0xD63F0000:   # not blr xN: the null came through br / ret
+            return f"{caller} | via br (tail call) or return"
+        n = (call >> 5) & 31
+        for back in range(2, 12):
+            try:
+                (w,) = struct.unpack("<I", uc.mem_read(lr - 4 * back, 4))
+            except UcError:
+                break
+            if w & 0xFFC00000 == 0xB9400000 and w & 31 == n:   # ldr wN, [xM, #imm]
+                m, imm = (w >> 5) & 31, ((w >> 10) & 0xFFF) * 4
+                base = self.xreg(m) & 0xFFFFFFFF
+                this = self.xreg(0) & 0xFFFFFFFF
+                try:
+                    (vptr,) = struct.unpack("<I", uc.mem_read(this, 4)) if this else (None,)
+                except UcError:
+                    vptr = None
+                if m == n and vptr is not None:   # ldr wN, [xN, #imm]: the base is gone; a virtual call reads
+                    try:                          # the slot from this's vptr, check that one
+                        (slot,) = struct.unpack("<I", uc.mem_read(vptr + imm, 4))
+                    except UcError:
+                        slot = None
+                    if slot == 0:
+                        base = vptr
+                where = "image" if 0x00400000 <= base < 0x02100000 else "native"
+                if vptr == base:
+                    return f"{caller} | vslot {imm // 4} of {where} vtable {base:#010x}"
+                return f"{caller} | loaded from {where} {base + imm:#010x}"
+            if (w & 31) == n and w & 0x1F000000 in (0x11000000, 0x0B000000, 0x2A000000):   # add/orr/mov into xN
+                break
+        return f"{caller} | register x{n} (source not found)"
+
+    def skip_summary(self, top=60):
         """All skipped initializers grouped by (fault, faulting function):
         skip-summary <count> <fault> <faulting function> <first initializer>"""
         import collections
@@ -488,7 +535,13 @@ class Emu:
                     site = f"brk #{(w >> 5) & 0xFFFF:#x} " + site
             except UcError:
                 pass
-            key = (re.sub(r" \(UC_ERR_\w+\)", "", err), site)
+            err = re.sub(r" \(UC_ERR_\w+\)", "", err)
+            if " | " in err:   # null call: group by its call site and pointer source instead of pc 0
+                err, site = err.split(" | ", 1)
+                init_fn = re.sub(r"\+0x[0-9a-f]+$", "", self.sym(init).split(" ", 1)[-1])
+                site = re.sub(r"^" + re.escape(init_fn) + r"\+0x[0-9a-f]+", "(in the initializer itself)", site)
+                site = re.sub(r"(\]|\w)\+0x[0-9a-f]+ \|", r"\1 |", site)
+            key = (err, site)
             groups[key] += 1
             first.setdefault(key, self.sym(init).split(" ", 1)[-1])
         return [f"skip-summary\t{n}\t{k[0]}\t{k[1]}\t{first[k]}" for k, n in groups.most_common(top)]
@@ -650,7 +703,10 @@ class Emu:
                 g = getattr(self, "guard", {}).pop(t.tid, None)
                 if g is not None and len(self.skipped) < getattr(self, "max_skips", 100000):
                     pc = uc.reg_read(UC_ARM64_REG_PC)
-                    self.skipped.append((g[2], pc, str(e)))
+                    why = str(e)
+                    if pc == 0:   # a call through a null pointer: name its call site and the pointer's source
+                        why += " | " + self.null_call()
+                    self.skipped.append((g[2], pc, why))
                     if len(self.skipped) <= 30:
                         print(f"   skipped initializer {self.sym(g[2])}: {e} at {self.sym(pc)}")
                     uc.context_restore(g[0])

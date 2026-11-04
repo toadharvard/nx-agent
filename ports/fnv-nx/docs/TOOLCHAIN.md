@@ -669,6 +669,45 @@ the units. Frontier against fresh8's compile logs and S1's census c18 (2,869 cle
   `blk_00c20000_od_ob1_variant.cpp` (1). Empty image: 116 keys, 3,291 hits, 32 units (27 failed, 23 clean in c18).
   It stops at WinMain's first IAT call, as before.
 
+## 14. Triage of the initializer skips that are not the memory manager (f11 guest, S14 image)
+
+Tooling: `emu_guest.py` classifies every call through a null pointer at the moment it faults. It records the call
+site (the `blr` before LR) and where the null came from: `vslot k of image|native vtable V` when the object in x0
+has V as its vptr, `loaded from <addr>` otherwise. `mktraps.py` now gives undefined **data** zero-filled writable
+storage (`.bss`, 4 KiB each, listed in `traps.S.data.txt`) instead of a code stub. A name counts as data when no
+object calls it (no CALL26/JUMP26) and its name is not a function's. f11: 7,065 trap stubs, 242 data stubs.
+
+**767 calls through a null function pointer**, all of them `AddSetting` (vslot 1) on a setting collection:
+
+| calls | collection, and where its vptr comes from | owner |
+|---:|---|---|
+| 736 | `INISettingCollection` singleton (pointer 0x011f96a0, made by `SettingT<INISettingCollection>::EnsureCollection`). Its vptr is the **image** vftable 0x0101772c, written by hand in `FUN_0044f600_class::InitializeVtbl` (`unmapped/setting.cpp`, `DAT_0101772c`). No unit defines a polymorphic class for it, so S2 keeps the image address. The S14 image has zeros there (S14 `missing.tsv`: `0x0101772c missing rdata`); a real exe would hold MSVC slot pointers for S3 to translate. Callers: the `FUN_0044f440` (417) and `FUN_0045cf30` (253) setting constructors, and 65 generated `Setting_01017720_011f96a0` constructors (`setting_eh_initializers.cpp`). One more (`FUN_00877f10`) goes through the image vftable 0x01082ed8 (`blk_00860000_od.cpp`, also a hand-written vptr). | S1/S2: a native class with the MSVC slot order for these hand-written vptr stores (S2 rebinds a vftable address that a unit names as a vftable); S14: no source for the slots |
+| 31 | `INIPrefSettingCollection` (`FUN_004de4a0` -> `new FUN_004de530`, `blk_004c0000_od.cpp`). Its **native** vtable `_ZTV12FUN_004de530` has one slot: the unit's local stand-in `struct INISettingCollection { virtual void v0(); }` declares a single virtual, so slot 1 reads past the vtable (a zero). Callers: `FUN_00709f00` 14, `FUN_00719c00` 6, generated 6, `FUN_004de370` 5. | S1: the stand-in needs the collection's full virtual interface (or the shared declaration) |
+
+None of them is an untranslated image code address, an undefined `__fnv_`, or a bug in the initializer generator.
+
+**338 writes into `.text`** (`RegisterFloatKeyOps` 00a26e20: 337, `FUN_00a28cb0`: 1). These are not the exe's
+`.text`. The targets, `g_apfnA26E20CurvesCopy` and `FUN_00a28cb0_aTable11`, are variables the units declare but
+nothing defines. mktraps.py used to make them code stubs in the guest's read-only text. With data stubs, the 338
+skips are gone (2,889 -> 2,551 skipped), and `RegisterFloatKeyOps` / `FUN_00a28cb0` run to the end and fill their
+other tables, which S2 did bind. The real fix is in S2: units.json gives these names image addresses (MSVC
+`?g_apfnA26E20CurvesCopy@@3PAP6AXPAX@ZA` -> 0x011f3d20, `?FUN_00a28cb0_aTable0..11@@3PAP6AXXZA` -> 0x011f3b00..
+0x011f3dd0, all image `.bss`, writable and zero in S14's image). Yet S2's `refs.tsv` lists them `unresolved`. The
+GCC side declares an array (`BA26E20Func g_apfnA26E20CurvesCopy[]`) where the MSVC name encodes a pointer. 56 of the
+242 data stubs have an image address under the same identifier in units.json (setting values like
+`fMorphStartDistanceMult` among them). Each such stub is private storage that other units never see.
+
+**105 null reads in constructors**: the same `AddSetting` pattern, with a null collection object or vptr:
+
+| reads | why | owner |
+|---:|---|---|
+| 43 (`FUN_004a4a40` 21, `FUN_004de2f0` 15, `FUN_0045d060` 7) | the collection getter 0x0045d180 is untranslated (`blk_00440000_od.cpp`, failed in fresh8, clean in c18): the trap returns 0 | next S2 run |
+| 60 (`FUN_00633000` 46, `FUN_00632ee0` 14) | `FUN_00632e30` makes the collection with `new FUN_00632ec0`, which binds to an empty constructor of a global-namespace stand-in `struct FUN_00632ec0 { char m_data[0x114]; }` without `@fnv`. The real constructor 0x00632ec0 is `fnv_00632ec0::FUN_00632ec0` in the same unit (`blk_00620000_od.cpp`), so the vptr stays 0. Fixed, it would store the image vftable 0x0104e6ac by hand, the 736 case again | S1: one class per address (the stand-in shadows the annotated one) |
+| 1 + 1 | `FUN_00aa13e0` (memory manager); `FUN_0096d020` reads `*__fnv_00403e20()`, untranslated | memory manager / S1 |
+
+None is an initialization-order dependency on an earlier skipped initializer. None needs an image value S14 could
+supply, apart from the vftables above.
+
 ## 7. Not yet done / untested
 
 * Nothing has run on hardware. Untested: ldr accepting the 64-bit + `32BitNoReserved` NPDM as an application

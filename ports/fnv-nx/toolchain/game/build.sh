@@ -108,7 +108,8 @@ grep -o "undefined reference to \`[^']*'" "$OUT/link1.log" | sed "s/undefined re
 c++filt < "$OUT/undefined.txt" > "$OUT/undefined_demangled.txt"
 echo "undefined symbols: $(wc -l < "$OUT/undefined.txt")"
 # pass 2: bind every undefined symbol to a named trap
-python3 -I "$HERE/mktraps.py" "$OUT/undefined.txt" "$OUT/traps.S"
+python3 -I "$HERE/mktraps.py" "$OUT/undefined.txt" "$OUT/traps.S" --readelf aarch64-none-elf-readelf \
+	--cxxfilt aarch64-none-elf-c++filt --objects @"$OUT/game_objects.list" "$OUT"/obj/*.o
 aarch64-none-elf-gcc $ARCH -c "$OUT/traps.S" -o "$OUT/traps.o"
 link "$OUT/traps.o" > "$OUT/link2.log" 2>&1 || { tail -20 "$OUT/link2.log"; exit 1; }
 # Position-dependent code: objects that address an absolute image symbol PC-relatively (S2 rebinds data a unit
