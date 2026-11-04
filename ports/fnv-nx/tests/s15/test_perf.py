@@ -165,6 +165,12 @@ def test_budget(tmp):
     ov = bo['measured']['overrides']
     check(ov['rows'] and abs(ov['rows'][0]['delta_minsn_mid'] - (10 - 40) * 2000 / 1e6) < 1e-6,
           'budget: an override row corrects its subsystem by (after - before) x calls')
+    # content presets: the base preset scales nothing; a smaller fade multiplier scales the cull down
+    import content_presets
+    fbase, _ = content_presets.factors(model['content'], 'base')
+    fa, _ = content_presets.factors(model['content'], 'switch_a')
+    check(all(abs(v - 1) < 1e-9 for v in fbase.values()) and fa['cull'] < 1 and fa['render_accumulation'] < 1,
+          'content: base preset is the model, switch_a scales cull and accumulation down')
     q = b['queue']
     check(q and q[0]['rank'] == 1 and all(q[i]['gain_main_minsn']['mid'] >= q[i + 1]['gain_main_minsn']['mid']
                                           for i in range(len(q) - 1)), 'hotspots: queue ranked by main-thread gain')
