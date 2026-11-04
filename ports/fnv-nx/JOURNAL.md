@@ -1164,3 +1164,18 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   function. Both checked by syntax-only compiles; orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
 * **next** - S2c fresh full run f13 from this head; S5 boot on f13; S1: census c19, extradatalist, playercharacter,
   actor.
+
+### J-0061 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0041,J-0060
+
+* **decided** - (user) Resume the paused streams S9, S12, S14 and V1 as light agents next to the five heavy ones
+  (S1, S2c, S5, S11, S13). Light means: one process at a time under `nice -n 19`, no full-tree prepare, compile or link,
+  under 500 MB of new scratch each, other streams' scratch read-only. The capacity rule of J-0041 (one heavy job per
+  agent, about 5 heavy at once) stays.
+* **did** - Opened rounds:
+  - S9: make the committed pipeline the real flow (S2c's driver, S5 guest and boot), with provenance checks;
+    verified on a 30-unit subset against f12.
+  - S12: static gate on the current tree, cross-checked with S13's divergence causes.
+  - S14: synth image coverage, self-consistency checks, and the memory-manager globals the boot needs.
+  - V1: adversarial verification of S2c's link claims C1-C5 (by-address binding, bridges, ecx-not-passed,
+    vftables/D0/D1, -fPIC rebinding).
+* **next** - Merge each round with its verification. S2c f13 is the critical path, then the S5 boot.
