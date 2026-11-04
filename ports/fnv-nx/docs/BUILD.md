@@ -286,6 +286,7 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `PRISTINE_OBJS` | | S11's MSVC 2008 objects of the pristine decomp (`u<index>.obj`) for the synthesized image. |
 | `BOOT_CENSUS` | | Census `units.tsv` the frontier takes the current compile status from (default: this build's census). |
 | `NINE` | 0 | 0: no D3D9 backend in the host. The guest links D3D9 as `null` (S5's null device when its script is used; the adapter links none). 1: the `nine` stage, the Nine host link and the guest proxy (`D3D9=external`). |
+| `HOST_BACKEND` | native | The host module: `native` = host.c with `-DFNVNX_HOST_NO_CONSOLE` + the native deko3d renderer (`render/native/host`, `toolchain/host/build_native.sh`, libdeko3d pinned by `toolchain/deko3d/build.sh`; owner decision, NX1); `plain` = host.c with its text console (opt-in). `NINE=1` overrides both. |
 | `NINE_SRC` | | Directory with `mesa/` and `libdrm_nouveau/` checkouts. They are copied instead of cloned. |
 | `PROGRAM_ID` | 0100000000000000 | Title id for the SD path. The placeholder makes `package` a warning. |
 | `TESTS` | all | Comma list of suite names, `all` or `none`. |

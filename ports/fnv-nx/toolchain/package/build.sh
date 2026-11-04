@@ -8,7 +8,9 @@
 # The player adds FalloutNV.exe and Data/ to sdmc:/switch/fnv/ (docs/NRO_CHECKLIST.md).
 #
 #   DEVKITPRO=<S5 dkp> toolchain/package/build.sh <game guest.nso> <out dir> [program id] [guest ELF]
-#   HOST=plain (default): toolchain/host/host.c with its text console + sdmc:/switch/fnv/host.log (D3D9=null guests)
+#   HOST=native (default; owner decision): host.c without console + the native deko3d renderer
+#     (toolchain/host/build_native.sh: render/native/host, libdeko3d from toolchain/deko3d/build.sh)
+#   HOST=plain (opt-in): toolchain/host/host.c with its text console + sdmc:/switch/fnv/host.log (D3D9=null guests)
 #   HOST=nine NINE=<render/nine/build.sh work dir>: the Gallium Nine host (render/nine/switch_host.sh; guests linked
 #     with D3D9=external and the Nine proxy, render/nine/game/build.sh)
 #   The program id only fills the NPDM (ldr rewrites it to the launched title's); the default placeholder is fine.
@@ -27,7 +29,12 @@ export PATH=$DEVKITPRO/tools/bin:$DEVKITPRO/devkitA64/bin:$PATH
 PY="python3 -I"
 H=$OUT/host; mkdir -p "$H"
 
-case "${HOST:-plain}" in
+case "${HOST:-native}" in
+native)
+	"$TC/host/build_native.sh" "$H/native" "${DEKO3D:-$H/deko3d}" >/dev/null
+	cp "$H/native/host.elf" "$H/host.elf"
+	$PY "$TC/tools/elf2nso.py" "$H/host.elf" "$H/main" >/dev/null
+	;;
 plain)
 	CPU="-march=armv8-a+crc+crypto -mtune=cortex-a57"
 	HOST_ARCH="$CPU -mtp=soft -fPIE"
@@ -45,7 +52,7 @@ nine)
 	: "${NINE:?set NINE to the work dir of render/nine/build.sh}"
 	"$ROOT/render/nine/switch_host.sh" "$H" >/dev/null
 	;;
-*) echo "HOST must be plain or nine"; exit 1 ;;
+*) echo "HOST must be native, plain or nine"; exit 1 ;;
 esac
 $PY "$TC/tools/npdmtool.py" --program-id "0x$TID" "$TC/npdm/fnvnx-app.json" "$H/main.npdm" >/dev/null
 $PY "$TC/tools/build_pfs0.py" "$H/exefs.nsp" main="$H/main" main.npdm="$H/main.npdm" >/dev/null
@@ -64,7 +71,7 @@ Start: hold R while starting any installed game, then pick fnv-nx in hbmenu (doc
 Logs for a bug report: launcher.log, host.log, crash.log in this folder.
 TXT
 {
-	echo "# fnv-nx Switch package: HOST=${HOST:-plain}, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	echo "# fnv-nx Switch package: HOST=${HOST:-native}, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	echo "# copy sd/ to the root of the SD card; add FalloutNV.exe and Data/ to sdmc:/switch/fnv/"
 	(cd "$OUT/sd" && find . -type f | sort | while read -r f; do
 		printf '%s\t%s\t%s\n' "${f#./}" "$(stat -c %s "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
