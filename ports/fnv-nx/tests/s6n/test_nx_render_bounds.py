@@ -80,10 +80,10 @@ CASES = [
      {1}, 'memory range 0'),
     ('B32 SUBM range +4095 4 bytes (block end)', 'nxcap', CAP + rec('MEMC', 1, 4096, 0)
      + rec('SUBM', 0, 0, 0, 1, 1, 4094, 4, raw=b'\0' * 4), {1}, 'outside its block'),
-    ('B33 SUBM BindUbo memory id 0xFFFFFFFF', 'nxcap', CAP + rec('SUBM', 0, 0, 6, 6 | 5 << 16, 1, 0, 0xFFFFFFFF, 0, 16, 0),
+    ('B33 SUBM BindUbo memory id 0xFFFFFFFF', 'nxcap', CAP + rec('SUBM', 0, 0, 6, 7 | 5 << 16, 1, 0, 0xFFFFFFFF, 0, 16, 0),
      {0, 1}, None),
     ('B34 SUBM BindTextures image id past the table', 'nxcap', CAP
-     + rec('SUBM', 0, 0, 5, 0x9 | 4 << 16, 1, 0, 1, 0xFFFFF, 0), {0, 1}, None),
+     + rec('SUBM', 0, 0, 5, 10 | 4 << 16, 1, 0, 1, 0xFFFFF, 0), {0, 1}, None),
     ('B35 RDBK short record', 'nxcap', CAP + rec('RDBK', 0, 0), {1}, 'RDBK record'),
     ('B36 RDBK 0xFFFFFFFF x 2', 'nxcap', CAP + rec_raw('RDBK', RB.pack(0, 0, 0, 0xFFFFFFFF, 2, 0, 0, 0, 0) + b'\0' * 4),
      {1}, 'RDBK'),
@@ -91,6 +91,12 @@ CASES = [
      {0}, None),
     ('B38 RDBK pixel bytes past the record', 'nxcap', CAP + rec_raw('RDBK', RB.pack(0, 0, 0, 1, 1, 0, 0, 0, 0)
      + struct.pack('<I', 0x1000)), {1}, 'past its record'),
+    ('B39 SUBM Draw 0x7fffffff instances (V1 H1 hang)', 'nxcap', CAP
+     + rec('SUBM', 0, 0, 7, 11 | 5 << 16, 4, 3, 0x7FFFFFFF, 0, 0, 0, 0), {1}, 'over the limit'),
+    ('B40 SUBM DrawIndexed 0xFFFFFFFF indices', 'nxcap', CAP
+     + rec('SUBM', 0, 0, 8, 12 | 6 << 16, 4, 0xFFFFFFFF, 1, 0, 0, 0, 0, 0), {1}, 'over the limit'),
+    ('B41 SUBM Draw 65536 instances x 65 vertices (product)', 'nxcap', CAP
+     + rec('SUBM', 0, 0, 7, 11 | 5 << 16, 4, 65, 65536, 0, 0, 0, 0), {1}, 'over the limit'),
 ]
 
 

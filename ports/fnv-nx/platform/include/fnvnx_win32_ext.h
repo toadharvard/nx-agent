@@ -53,6 +53,11 @@ void fnvnx_path_reset(const char *root);        /* default mounts under root (NU
  * Win32 error code (ERROR_PATH_NOT_FOUND when a directory component is missing and !for_create...). */
 DWORD fnvnx_path_map(const char *win_path, char *host, size_t host_size);
 void fnvnx_set_command_line(int argc, char **argv);
+/* the first run's profile files the PC launcher writes (platform/win32/profile.cpp); a mask of what it made */
+#define FNVNX_PROFILE_INI 1u      /* My Games\FalloutNV\Fallout.ini from Fallout_default.ini */
+#define FNVNX_PROFILE_PREFS 2u    /* My Games\FalloutNV\FalloutPrefs.ini: a preset + the Switch's display */
+#define FNVNX_PROFILE_PLUGINS 4u  /* AppData\Local\FalloutNV\plugins.txt: the masters Data\ holds */
+unsigned fnvnx_first_run_profile(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
 void fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
 void *fnvnx_tls_block(void);                     /* this thread's block; what fs:[0x2c][0] points at */

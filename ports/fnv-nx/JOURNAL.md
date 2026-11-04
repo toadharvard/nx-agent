@@ -3365,3 +3365,55 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - S1-fuzzq: the old hand-off paths are stale after difffuzz-13. The real queue is rebuilt from the caches.
 * **next** - The hourly check-in merges only metric-reducing, tested commits. Resume fz9-26 on the next link. Add a
   gates farm once R0 delivers gates_job.sh.
+
+### J-0151 | 2026-11-04 | stream: orchestration (hourly) | status: wip | parent: J-0150
+
+* **metrics** - Numbers in brackets are stream-local and not yet confirmed on a farm.
+
+  | stage | now | at J-0149 | source |
+  |---|---|---|---|
+  | census failing units / errors | 20 / 67 (S1-refs local: 7 / 46) | 43 / 144 | farm1 @1b3ac903, S1-refs-002 |
+  | full1 compile, units excluded from the image | 74 | - | full1 |
+  | link undefined names | 2,911 | 4,427 | link1 @06857911 |
+  | guest symbols on trap stubs | 3,811 | 3,551 (old guest) | full1 |
+  | bridge-gap pairs | [32] | 2,221 | S2c-abi abireplay |
+  | S4 traps + IAT slots without export | [0] | 167 | S4 trapcheck/iat |
+  | ordering open sites | 0 | 548 | S12; V1 K2/K3/K6/K10 fixed |
+  | fuzz triage rows (S13b) | 1,969 | 2,477 | S13b on 18 d13 caches |
+  | fuzz artifacts / coverage | 4,023 / 92.4 % | - | gates1; S13's metric.py is not trusted (V1 M1-M3) |
+  | shaders untranslated | 0 | 4,630 | render S6b |
+  | CPU worst frame at 1.02 GHz | 35.15 ms | 36.4 ms | S15-threads; target 16.7 ms |
+  | S15-simd top-20 hotspot cycles | [6.09 M] | 7.75 M | S15-simd-001 |
+  | renderer, 60 fps budget share | main 0.66, render 0.53, GPU 1.40 | - | render P6n; the GPU fails 60 fps |
+  | boot | winmain; renderer-init exit (D3D9.DLL) | trap 0x00aa7400 | S5 |
+  | gates1 scorecard | 5 pass / 17 fail / 11 no-data | - | gates1 @ea74a90c |
+  | V1 metric | 53 (38 unverified + 15 refutations) | - | v1_metric.py |
+
+* **merged** - About 75 commits this hour.
+  - S12: W-UNINIT, ORDER_OBJECT=last, ORDER_OPERATOR=rtl, and the K-fixes. S11 is checking object/operator against MSVC.
+  - S13b: the causes splits; oracle-callee-unloaded now needs trace evidence (V1 U1/U2).
+  - S2c-abi: variadics, import-slot, split-global, text-addr.
+  - S2d: the vcall class, and FNVNX_EXE into link_job.
+  - S4: the queue complete.
+  - S1-refs: STD2, COND1, RSTR1, NEW5, NSCALL1.
+  - S1-fuzzA: STAND3. S1-fuzzB: STAND2.
+  - S15-simd: NEON overrides for Slerp, FromRotationMatrix, NiBound::Update, the cull worker and UpdateWorldLoc.
+  - S15-threads: J-0148 closed, target_60 as a worst-frame target.
+  - R0: R13-R16, the scorecard and the J-0150 levels.
+  - render: .nxd9/.nxcap bounds, the P6n engine-path count, S6b census.
+  - P0: the A57 model.
+  - NX1: the launcher and the NRO format check.
+  - S16: the Wine reference and permutation captures.
+  - S5-boot: the exe-vtables stand-in. S5-data: the store watch.
+  - V1: the ledger and new tests.
+* **decided** - Merges use two steps: a clean cherry-pick, then a 3-way adoption of the stream's own files. A branch with a still-conflicting file is skipped whole; its stream merges integration and resolves. Pending that: S2c-vt (slot fill), S1-STL (STL2, blk_00ac0000 18 -> 0), S1-fuzzB, S11, NX1 checks 2-5, S5-data, V1, S15-threads, S13b.
+* **found**
+  - The engine's own D3D9 path costs 14.0 ms/frame. The native renderer replaces it; 1.04 ms of it stays on main.
+  - 60 fps fails on the GPU model (23.3 ms), not the CPU front.
+  - bMTRendering is unsafe in the PC code. Havok MT is iSimType=4.
+  - plan60 reaches only 45 fps at 1.02 GHz, about 3 M main-thread instructions short.
+* **farms**
+  - keys1 restarted for the new key format.
+  - st1-st4 and gates1 run. fz1-fz4 run; fz5-fz26 are paused for the slot cap.
+  - The farms trail the integration head by about 70-80 commits.
+* **next** - S2c-vt's slot fill (boot critical path), S1-refs on full1's 74 excluded units, the GPU hotspots (render), R0's regression detector.

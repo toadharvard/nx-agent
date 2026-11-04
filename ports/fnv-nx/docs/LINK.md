@@ -333,6 +333,23 @@ Two bridge divergences are not ABI-model errors:
   below). The
   first-fault difference in that function (x86 0, AArch64 0x18) is argument evaluation order.
 
+### MSVC entries at a secondary base (`thisadj.py`, S2c-abi)
+
+MSVC 2008 compiles an override of a virtual function that a non-primary base introduces with `this` pointing at
+that base subobject. Callers that hold the full object reach it through an adjustor thunk. GCC compiles the same
+function for the full object and emits a `_ZThn<d>_` thunk for the secondary vtable. The exe's vftables tell the
+two apart. Such a function's address is a slot only of vftables whose complete object locator has offset d > 0,
+never of a primary one. The player's exe has 823 of them (`FNVNX_EXE` / `PLAYER_EXE`; `FNVNX_SECONDARY_ENTRIES`, a
+tsv `address<TAB>d`, stands in for tests).
+
+For each one whose native object defines the thunk, the address map's entry names `__fnvnx_msvc_<addr>`. aliases.ld
+defines that symbol as the thunk, so image code pointers rewritten through the map (vftable words, function tables)
+pass through the thunk, as do x86-convention callers. `__fnv_<addr>` stays the primary entry, because the units' own
+references pass the full object. On link/c0d6c71516f6 79 addresses have a thunk. 461 have none: the decomp defines
+them on a shell class that is the subobject itself, so `this` already agrees. 283 have no native definition.
+S13b's `thunk-binding` rows (11 on link/0bd144db1464, `this` off by 24, 60, 136, 164, 168) are this case. The
+harness has to enter through the map's link symbol to see the fix.
+
 ## Overrides (`resolve --override <tsv>`, for native replacements, J-0015)
 
 The table (tab-separated, `#` comments) lists `address`, `native symbol`, then the object or archive that defines it
