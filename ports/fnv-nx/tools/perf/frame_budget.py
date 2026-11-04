@@ -291,7 +291,11 @@ def build(model, profs=None, render=None):
         out['budget_mean_minsn'][str(clk)] = {
             t['id']: round(t['ms'] / wff['value'] * clk * 1e3 * ipc['value'] / 1e6, 2)
             for t in targets}
+    # every plan starts from the build: the 'placed' scenario's levers are in all scenarios (V1 B2: plan45 left out
+    # barrier_relax)
+    built_ids = next((list(sc['levers']) for sc in model['scenarios'] if sc['id'] == 'placed'), [])
     for sc in model['scenarios']:
+        sc = dict(sc, levers=built_ids + [lid for lid in sc['levers'] if lid not in built_ids])
         work, core3 = scenario_work(items, levers, sc)
         cases = place_work(work, placement, core3, effs)
         cores = sorted(c for c in range(4) if any(cases[k][0][c] for k in range(3)))
