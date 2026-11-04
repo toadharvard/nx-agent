@@ -1042,6 +1042,44 @@ check('RCAST1 a reference cast spelled in a comment: untouched',
 check('RCAST1 `//` inside a string literal does not hide the cast after it',
       run(s1.r_ref_cast_temporaries, 'g("a//b", (const M&)h(n));\n'), ['(const M&)fnvnx_lvalue(h(n))'])
 _shutil.rmtree(_c, ignore_errors=True)
+# ---- S1-refs: NSCALL1 (a namespace's own prototype of a CRT name, called unqualified) and DUPINT1-RET (units.json)
+_s3 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s3, 'build')); os.makedirs(os.path.join(_s3, 'src'))
+_json.dump({'units': [
+    {'source': 'src/n.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00401100'}},
+    {'source': 'src/g.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00401100',
+                                        '?strcpy_s@@YAHPADIPBD@Z': '0x00401100'}},
+    {'source': 'src/d.cpp', 'symbols': {'_Fmt': '0x00401200', '?Fmt@@YAPADPADIPBDZZ': '0x00401200',
+                                        '_Pick': '0x00401300', '?Pick@@YAHPAXE@Z': '0x00401300'}}]},
+           open(os.path.join(_s3, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+_n = ('namespace ns1 {\nint strcpy_s(char* d, unsigned int n, const char* s);\n'
+      'struct Name { operator const char*() const; };\n'
+      'void f(char* b, const Name& k)\n{\n    strcpy_s(b, 260, k);\n    if (!strcpy_s(b, 4, "abc")) return;\n'
+      '    // strcpy_s(b, 1, k) in a comment\n}\n}\n')
+check('NSCALL1 unqualified calls of N\'s own CRT prototype -> N::name',
+      run(s1.r_namespace_crt_calls, _n, os.path.join(_s3, 'src', 'n.cpp')),
+      ['ns1::strcpy_s(b, 260, k);', '!ns1::strcpy_s(b, 4, "abc")', 'int strcpy_s(char* d',
+       '// strcpy_s(b, 1, k) in a comment'], ['ns1::ns1::'])
+check('NSCALL1 the unit also binds the global spelling: untouched',
+      run(s1.r_namespace_crt_calls, _n, os.path.join(_s3, 'src', 'g.cpp')), [], ['ns1::strcpy_s'])
+check('NSCALL1 a class member of that name: untouched',
+      run(s1.r_namespace_crt_calls, _n.replace('struct Name {', 'struct Name { int strcpy_s(char*, int);'),
+          os.path.join(_s3, 'src', 'n.cpp')), [], ['ns1::strcpy_s'])
+_d = ('extern "C" int __cdecl Fmt(char* b, int n, const char* f, ...);\n'
+      'char* __cdecl Fmt(char* d, unsigned int n, const char* f, ...);\n'
+      'void g(char* b, size_t n)\n{\n    Fmt(b, n + 1, "%d", 1);\n    if (n) Fmt(b, n, "x"); else Fmt(b, 2, "y");\n}\n')
+check('DUPINT1-RET other return type, results unused: later prototype dropped',
+      run(s1.r_duplicate_int_overloads, _d, os.path.join(_s3, 'src', 'd.cpp')),
+      ['extern "C" int __cdecl Fmt(char* b, int n', '/* fnv-nx DUPINT1 */'], ['char* __cdecl Fmt'])
+check('DUPINT1-RET a call uses the result: untouched',
+      run(s1.r_duplicate_int_overloads, _d.replace('    Fmt(b, n + 1', '    char* p = Fmt(b, n + 1'),
+          os.path.join(_s3, 'src', 'd.cpp')), ['char* __cdecl Fmt'], ['fnv-nx DUPINT1'])
+check('DUPINT1-RET a narrower integer parameter: untouched',
+      run(s1.r_duplicate_int_overloads, 'extern "C" void Pick(void* p, int n);\nint Pick(void* p, unsigned char n);\n'
+          'void h(void* p) { Pick(p, 1); }\n', os.path.join(_s3, 'src', 'd.cpp')), ['int Pick('], ['fnv-nx DUPINT1'])
+s1._UNIT_SYMBOLS = _saved
+_shutil.rmtree(_s3, ignore_errors=True)
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)

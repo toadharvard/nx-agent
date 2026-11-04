@@ -110,6 +110,7 @@ CLASSES = {
     'COND1': 'neutral',         # `c ? false : f()` with f returning a bool gate class -> `c ? false : (bool)(f())`
     'RSTR1': 'neutral',         # restrict local passed to a const X& parameter -> fnvnx_unrestrict(v) ((v) under MSVC)
     'NEW5': 'neutral',          # FNVNX_GLOBAL_DELETE in a class whose only scalar delete is the placement form (MSVC: empty)
+    'NSCALL1': 'neutral',       # unqualified call of N's own CRT-named prototype (bound only in N) -> N::name(
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
@@ -123,7 +124,7 @@ S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 # group; a group that explains a difference is split into its rules. KEEP1 is inert under MSVC (FNVNX_KEEP is empty)
 # and is not tried. A rule of the gated set in no group is tried as a group of its own.
 DEFAULT_GROUPS = {
-    'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1 STD2',
+    'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1 STD2 NSCALL1',
     'newdel': 'NEW1 NEW2 NEW3 NEW4 NEW5 CTOR1',
     'EXC1': 'EXC1',
     'link': 'LINK1 STATIC1 BIND1',
