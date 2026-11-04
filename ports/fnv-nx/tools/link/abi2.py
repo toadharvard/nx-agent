@@ -173,6 +173,7 @@ class Plan:
         self.dret = self.rret = None
         self.def_sret_from = None   # ref label whose pointer receives the definition's hidden result
         self.ret_conv = False
+        self.ret_fcvt = None      # (definition class, reference class): float <-> double result
 
 
 def compare(ref, dfn, lay_ref, lay_def):
@@ -242,6 +243,9 @@ def compare(ref, dfn, lay_ref, lay_def):
             p.notes.append('reference reads a result the definition does not produce')
         elif hidden_result(ref, rret) and not hidden_result(dfn, dret):
             pass  # the reference's buffer feeds an explicit definition parameter (refsret piece)
+        elif rret.cls in ('F32', 'F64') and dret.cls in ('F32', 'F64') and rret.cls != dret.cls:
+            p.ret_fcvt = (dret.cls, rret.cls)   # a numeric conversion, not a byte copy (V1 defect 2)
+            p.classes.append('ret-float-width')
         else:
             for vo in range(min(rret.size, dret.size)):
                 if locate(rr, vo)[:2] != (locate(dr, vo) or (None, None, 0))[:2]:
@@ -250,7 +254,7 @@ def compare(ref, dfn, lay_ref, lay_def):
                 p.classes.append('result-moves')
     if not x86_ok:
         p.kind = 'x86-inconsistent'
-    elif not identity or p.ret_conv or p.def_sret_from is not None:
+    elif not identity or p.ret_conv or p.ret_fcvt or p.def_sret_from is not None:
         p.kind = 'bridge'
         if any(src == ('refsret',) for ps in p.pieces.values() for _, src, _, _ in ps) and rret is None:
             p.kind = 'x86-inconsistent'; p.notes.append('result buffer of a void reference')
@@ -416,7 +420,7 @@ def emit(name, target, p, comment):
     refsret = any(src == ('refsret',) for ps in p.pieces.values() for _, src, _, _ in ps)
     tail = (not any(c[0] == 'stk' or (c[0] == 'mem' and l not in passthru)
                     for l, ch in p.dch.items() if l in p.pieces for _, c, _, _ in ch)
-            and not p.ret_conv and p.def_sret_from is None and not (refsret and not ref_ind))
+            and not p.ret_conv and not p.ret_fcvt and p.def_sret_from is None and not (refsret and not ref_ind))
     if tail:
         a.addr('x10', FP); a('ldp x29, x30, [x10]'); a('add sp, sp, #%d' % frame); a('b %s' % target)
     else:
@@ -430,6 +434,8 @@ def emit(name, target, p, comment):
                 src_base(cont, co, 'x9'); a('ldr w9, [x9]'); a.addr('x10', R)
                 a.copy('x9', 'x10', p.dret.size)
             src_base(cont, co, 'x9'); a('ldr w0, [x9]')  # MSVC returns the buffer pointer
+        elif p.ret_fcvt:
+            a('fcvt d0, s0' if p.ret_fcvt[0] == 'F32' else 'fcvt s0, d0')
         elif p.ret_conv or refsret:
             if p.ret_conv and not def_ind:
                 a.addr('x10', R); _store_ret(a, a64_ret(p.dret), 'x10')

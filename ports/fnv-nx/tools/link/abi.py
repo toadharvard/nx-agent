@@ -255,6 +255,14 @@ def compare(ref, dfn):
                 v.kind = 'manual'
         else:
             v.classes.append('ret-aggregate'); v.kind = 'manual'
+    elif rr == dr == 'v0' and ret_class(ref) != ret_class(dfn):
+        # float vs double result (V1 defect 2): x86 hands the value over exactly in st(0); AArch64 would read d0 where
+        # the callee wrote s0 - convert after the call (long double is binary128 here: manual)
+        v.classes.append('ret-float-width')
+        if {ret_class(ref), ret_class(dfn)} == {'F32', 'F64'}:
+            v.ret_fix = ('fcvt', ret_class(dfn), ret_class(ref))
+        else:
+            v.kind = 'manual'
     if not x86_ok:
         v.kind = 'x86-inconsistent'
         return v
@@ -353,9 +361,13 @@ def emit_bridge(name, target, verdict, comment):
              '    .p2align 2', '    .globl %s' % name, '    .type %s, %%function' % name, '%s:' % name]
     lines += ['    ' + _move(*m) for m in sequentialize(verdict.moves)]
     if verdict.ret_fix:
-        frm, to = verdict.ret_fix
-        lines += ['    stp x29, x30, [sp, #-16]!', '    mov x29, sp', '    bl %s' % target,
-                  '    fmov s0, w0' if to == 'v0' else '    fmov w0, s0', '    ldp x29, x30, [sp], #16', '    ret']
+        if verdict.ret_fix[0] == 'fcvt':   # the definition's float width -> the reference's
+            fix = '    fcvt d0, s0' if verdict.ret_fix[1] == 'F32' else '    fcvt s0, d0'
+        else:
+            frm, to = verdict.ret_fix
+            fix = '    fmov s0, w0' if to == 'v0' else '    fmov w0, s0'
+        lines += ['    stp x29, x30, [sp, #-16]!', '    mov x29, sp', '    bl %s' % target, fix,
+                  '    ldp x29, x30, [sp], #16', '    ret']
     else:
         lines.append('    b %s' % target)
     lines.append('    .size %s, .-%s' % (name, name))

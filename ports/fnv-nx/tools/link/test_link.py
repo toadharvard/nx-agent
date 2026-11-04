@@ -97,6 +97,18 @@ def main():
     check(pb2 is not None and pb2.kind == 'bridge' and any(src == ('refsret',) for ps in pb2.pieces.values()
                                                            for _, src, _, _ in ps),
           'explicit buffer <- the reference\'s hidden one (first stack word): %s' % (pb2 and pb2.kind))
+    # V1 defect 2 (adversarial_abi C1/C2): a float result read as a double and back - one register file, but the
+    # value has to be converted (x86 hands it over exactly in st(0))
+    fw = ['?h@@YANXZ', '?h@@YAMXZ']
+    dw = fnvlink.batch_demangle(fnvlink.UNDNAME, fw)
+    rd, rf = sigs.parse_msvc(fw[0], dw[fw[0]]), sigs.parse_msvc(fw[1], dw[fw[1]])
+    for ref_, def_, ins in ((rd, rf, 'fcvt d0, s0'), (rf, rd, 'fcvt s0, d0')):
+        v_ = abi.compare(ref_, def_)
+        asm_ = abi.emit_bridge('br', 'tgt', v_, 'c') if v_.kind == 'bridge' else ''
+        p_ = abi2.compare(ref_, def_, lambda t: None, lambda t: None)
+        asm2 = abi2.emit('br', 'tgt', p_, 'c') if p_ is not None and p_.kind == 'bridge' else ''
+        check(v_.kind == 'bridge' and 'ret-float-width' in v_.classes and ins in asm_ and ins in (asm2 or ''),
+              'float/double result converted (%s): %s %s' % (ins, v_.kind, v_.classes))
     # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
     # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
     src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'
