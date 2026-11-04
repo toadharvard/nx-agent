@@ -7,7 +7,14 @@ Rules:
   `__fnvnx_msvc_<a>`, an alias of GCC's `_ZThn<d>_` thunk). The native slot of a secondary vtable passes the
   subobject too, so binding it to `__fnv_<a>` (the full-object entry) hands the definition a `this` that is d bytes
   too high. When every vtable naming the slot has offset-to-top -d, the slot binds to `__fnvnx_msvc_<a>` instead.
+* **Fastcall deleting destructors** (`fastcall_dtor`): GCC's D0 / D1 slot where the exe's ??_G is the decomp's
+  `__fastcall f(this, int, flags)` goes through `__fnvnx_vflag3_<a>_<f>` (w2 = flags).
+* **Enum parameters** (`enum_params`): the slot's Itanium parameter types that the MSVC side spells `enum X` are
+  ints, not unknown types, for slot_abi and the x86 model.
 """
+import copy
+import os
+import re
 
 
 def secondary_entry(target_for, native, addr_sym, entry_sym, stats=None):
@@ -66,4 +73,42 @@ def fastcall_dtor(target_for, native, itanium, msvc, classify, stubs, addr_sym, 
         if stats is not None:
             stats['fastcall_dtor'] += 1
         return name, 'fastcall flags stub (%d)' % fl
+    return wrapped
+
+
+ENUM_RE = re.compile(r'\benum ([A-Za-z_][\w:]*)')
+
+
+def msvc_enums(out):
+    """Names the MSVC side spells `enum X` (the demangle cache of resolve: cache/msvc.tsv)."""
+    names = set()
+    try:
+        for line in open(os.path.join(out, 'cache', 'msvc.tsv'), encoding='utf-8', errors='surrogateescape'):
+            names.update(ENUM_RE.findall(line))
+    except OSError:
+        pass
+    return names
+
+
+def enum_params(itanium, enums, stats=None):
+    """Wrap the Itanium signature reader for the slot fill: a parameter whose type the MSVC side declares as an enum
+    (`ActorValue::Index`, `ANIM_GROUP_ENUM`) is spelled `enum X`, so abi.classify gives it MSVC's and GCC's int
+    (I32) instead of an unknown type. The Itanium name carries no class/enum keyword; without this the slot's
+    enum arguments never match the definitions' `int` (slot_abi `aggregate or varargs argument n differs`)."""
+    cache = {}
+
+    def wrapped(n):
+        if n in cache:
+            return cache[n]
+        s = itanium(n)
+        ps = s.raw_params
+        if ps and any(p in enums for p in ps):
+            s = copy.copy(s)
+            s.raw_params = ['enum ' + p if p in enums else p for p in ps]
+            if s.params is not None:
+                s.params = ['enum ' + p if p in enums else p for p in s.params]
+            if stats is not None:
+                stats['enum_param_sigs'] += 1
+        cache[n] = s
+        return s
     return wrapped

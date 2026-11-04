@@ -54,6 +54,13 @@ def main():
     check(t0 == '__fnvnx_vflag3_00404000_1' and 'mov w2, #1' in stubs[t0], 'D0 -> flags 1 in w2 (%s)' % t0)
     check(t1 == '__fnvnx_vflag3_00404000_0' and 'mov w2, #0' in stubs[t1], 'D1 -> flags 0 in w2 (%s)' % t1)
     check(tf2('_ZN1XD0Ev', 0x405000)[0] is None, 'a cdecl (this, int, flags) stand-in stays a gap')
+    # enum parameters: the Itanium spelling has no keyword; the MSVC side's `enum X` makes them ints
+    dem3 = {'_ZN1B3getEN10ActorValue5IndexE': 'B::get(ActorValue::Index)', '_ZN1B3setE5Point': 'B::set(Point)'}
+    it3 = slotfill2.enum_params(lambda n: sigs.parse_itanium(n, dem3[n]), {'ActorValue::Index'}, st)
+    s3 = it3('_ZN1B3getEN10ActorValue5IndexE')
+    check(s3.raw_params == ['enum ActorValue::Index'] and abi.classify(s3.raw_params[0]) == 'I32',
+          'an MSVC enum parameter classifies as I32 (%s)' % s3.raw_params)
+    check(it3('_ZN1B3setE5Point').raw_params == ['Point'], 'other types are left alone')
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 
