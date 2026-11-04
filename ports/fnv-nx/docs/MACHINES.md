@@ -9,7 +9,7 @@ nothing but this git repository. This file is the protocol between them.
 |---|---|---|---|
 | orchestrator (the original session) | `claude/port-nsw-un6t9s` (integration branch) | `JOURNAL.md`, `docs/ARCHITECTURE.md`, `tools/rules/`, `tools/link/`, `tools/equiv/equiv.py` classes, everything not listed for another machine; merges every other branch after verification (D14) | - |
 | farm runners | `claude/port-nsw-farm<N>` | `ports/fnv-nx/reports/farm<N>/` (text reports of the jobs in `tools/farm/`) | everything else: runners run jobs, they do not develop |
-| render | `claude/port-nsw-render` | `render/native/`, `docs/RENDER_NATIVE.md`, `docs/RENDER_VERIFY.md`, render tests (`tests/s6n/`, `tests/v6n/`) | the integration branch, `JOURNAL.md`, rules, linker |
+| render | `claude/port-nsw-render` | `render/native/`, `render/verify/`, `docs/RENDER_NATIVE.md`, `docs/RENDER_VERIFY.md`, render tests (`tests/s6n/`, `tests/v6n/`) | the integration branch, `JOURNAL.md`, rules, linker |
 
 When a machine needs a change in files it does not own (e.g. an `--override` feature in the linker, a prepare rule),
 it describes it, with a failing test where possible, in its inbox note (below). The owner makes the change.

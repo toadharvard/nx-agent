@@ -1922,3 +1922,144 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   COL.
 * **next** - Render machine: N1 wiring with R1 (S2c, J-0092) and R3 (S1 NATIVE1, J-0093). Slot targets come from
   the exe later.
+
+### J-0095 | 2026-11-04 | stream: S6n-native-render | status: wip | parent: J-0015,J-0064,J-0066
+
+* **did** - Round N0 on the render machine (commits `617d4a9`..`0046d1f` on `claude/port-nsw-render`):
+  - `render/native/env.sh` rebuilds the environment from source, idempotent: devkitA64 gcc 15.2 with ILP32
+    multilibs (~45 min at -j2), libnx, dekotools, libdeko3d `373bfd4`, uam `5a5afc2`.
+  - Pure C99 D3D9 state translator `front/d3d9_state.{h,c}` (+ `include/nx/state.h`), `extern "C"`, mirroring
+    Nine 20.1: render state 4 x u64, dynamic values, shader bits, 16-byte sampler state, D3DFORMAT -> format +
+    swizzle, and `nx_d3d9_convert` (texel expansion for A8/L8/A8L8/L16/A2R10G10B10/ATI1).
+  - Front generalised: 12-word DefineState with the full state; ops for scissor, stencil ref, blend constant, depth
+    bias, 6-value viewport; shaders from `{stage, dksh, glsl}`; texture handle = image | sampler<<20; readback.
+    Guest -> host through `ext_call` module 10 (`nxgpu_dispatch()`); the obsolete `host/nx_host.c` is replaced by
+    `host/nxgpu_host.c`.
+  - GL 4.5 reference backend `gl/nxgl.c` (EGL surfaceless, llvmpipe): `GL_LOWER_LEFT` + y negated in the VS,
+    `GL_ZERO_TO_ONE`, first-vertex provoking, sRGB views + `GL_FRAMEBUFFER_SRGB`; shim rewrites `#version`, maps
+    bindings to stage*16+slot, renames UBO blocks per stage.
+  - deko3d backend `host/nxgpu.c` rewritten for the new ABI; compiles and links.
+  - `shaders/build.py`: one GLSL source -> DKSH + GL text, with variants; 18 shaders (N0, D3D9 epilogue for fog and
+    alpha test, `tile` and `nolight` families), all compile with uam.
+  - 13 N0 scenes (`n0/`: textured, sorted, instanced, cull, blend, stencil, sampler, format, epilogue, border, tile,
+    raster_a, raster_b) with goldens in `tests/s6n/golden/`; `switch/build.sh` builds exefs.nsp + guest.nso (not
+    committed) that writes readbacks to `sdmc:/fnvnx/n0/out/`.
+  - The ILP32 guest runs under Unicorn with nxgpu calls forwarded to the GL backend: bit-identical to the goldens.
+  - N1 groundwork: `N1_PLAN.md`, `overrides.tsv` (19 rows, all `N1-pending`, some `vslot:` rows), `REQUESTS.md`
+    R1-R3 with failing tests; claims C1-C65 in `CLAIMS.md` for V6n.
+  - Fixed the two defects V6n filed as failing tests: `border_swizzle` (a view swizzle also swizzles the border
+    colour) and `y_fill_bias` (the 1/256 px bias fixed only horizontal-edge ties).
+* **found** - `0x00bcb180` is the geometry-decal shader, not the tile shader; TILE is true pass id 757 (consistent
+  with V6n's finding that the header's pass enum is wrong for FNV).
+* **found** - Deviation D1 (documented): depth bias follows D3D9 (DEPTHBIAS x 2^24 for D24), about twice what
+  Nine-on-softpipe applies.
+* **verified** - The render machine re-ran it at `0046d1f`: `make -C tests/s6n` 527 + 33 checks, 0 failed;
+  `make -C tests/s6n scenes` 13/13 goldens bit-exact; `tests/v6n/run.sh defects` y_fill_bias 0 wrong px,
+  border_swizzle match. V6n's own verification of the full claim list is still running.
+* **metrics** - translator_checks=527 front_checks=33 n0_scenes=13 scene_checks=31500 goldens_exact=13/13
+  shaders=18 claims=C1-C65 v6n_defects_filed=2 v6n_defects_fixed=2 console_runs=0
+* **request** - Orchestrator, from `render/native/REQUESTS.md` (`python3 -I tests/s6n/test_requests.py` fails until
+  done):
+  - R1: `fnvlink.py resolve --override render/native/overrides.tsv` with free-text column 3,
+    `vslot:<vftable>:<slot>` rows and `--override-lib <archive>`;
+  - R2: an image vftable dump (`render/native/vftables.tsv`) for NiDX9Renderer, NiDX9RenderState, TileShader and
+    BSShaderNoLighting;
+  - R3: prepare rule NATIVE1 that drops whole units listed in `render/native/drop_units.txt`.
+* **note** - V6n's tools live in `render/verify/` (where its pre-move WIP was), which MACHINES.md does not list for
+  the render machine yet.
+* **next** - A console run of the N0 package (`scenes.py --compare <sd out> --tol 2`). It checks the deko3d front
+  face, the fill-rule ties, the A4R4G4B4 swizzle and the border swizzle on Maxwell, none of which has run on hardware
+  yet. Then N1 once R1/R2 land: `libnxrender.a`, renderer frame/target/camera virtuals, record-only
+  NiDX9RenderState, TileShader path to the menu. Then N2 (lit SM3, depth, land, sky).
+
+### J-0096 | 2026-11-04 | stream: S6n-native-render | status: wip | parent: render-001
+
+* **did** - N1 core, capture/replay and the first N2 families (commits `afe06b6`..`9fa54d4`):
+  - `render/native/n1/` builds `libnxrender.a` and `n1_test.nso` (`n1/build.sh`):
+    - `nx::Renderer` implements the frame, target and camera virtuals: Do_BeginFrame, Do_EndFrame (submits with
+      present), Do_DisplayFrame, Do_ClearBuffer, Do_SetCameraData, Do_SetScreenSpaceCameraData and
+      Do_Begin/EndUsingRenderTargetGroup. `Render()` turns a draw into a packet.
+    - `nx::StateTracker` is a record-only NiDX9RenderState. It keeps Gamebryo's save/restore and resolves through
+      the translator only when something changed; sampler objects are cached.
+  - `render/native/capture/`: `CaptureBackend` wraps any backend, in the guest or on the host, and records
+    resources, every stream and the bound memory ranges. `replay_gl` replays a capture and compares readbacks. On the
+    console, the N0 guest writes `sdmc:/fnvnx/n0/out/n0.nxcap` for replay on the host.
+  - N2 shader families `lit` (SM3 path, up to 8 lights, specular variant), `depth` (ZONLY/DEPTHMAP), `land` (base +
+    3 vertex-weighted layers) and `sky`, with scenes and goldens; the package holds 30 shaders.
+  - Claims C66-C69 added to `CLAIMS.md`.
+* **found** - Two assumptions are still unverified: the Gamebryo screen-space convention ((0,0) at the top left, y
+  down) and the semantics of the tile, nolight, lit, land and sky families. Both wait for the engine and the parity
+  harness. A partial-rect ClearBuffer currently clears the whole target.
+* **verified** - Re-run by the render machine at `9fa54d4`: translator 527/0, front 33/0, scenes 31,618 checks,
+  0 failed, 17/17 goldens bit-exact; capture replay 17 frames, 0 readbacks differ; N1 renderer 36/0. The S6n report
+  also gives the ILP32 guest under Unicorn: 17/17 goldens, replay 0 differ, N1 36/0 (not re-run here).
+* **metrics** - scenes=17 scene_checks=31618 shaders=30 replay_frames=17 replay_diffs=0 n1_checks=36
+  claims=C1-C69 console_runs=0
+* **next** - Still blocked on R1-R3 (render-001) for the engine stubs and the TileShader `RenderShape` wiring. A
+  console run settles the deko3d traps and gives the first real capture. Then the parity harness for the families,
+  then N2 skinning, depth pre-pass order and per-pass packet counters.
+
+### J-0097 | 2026-11-04 | stream: V6n-render | status: wip | parent: J-0064,J-0066
+
+* **found** - The decomp's `eBSSMPassEnum` header is wrong for FNV. The true numbering has **759 ids**. Its anchors
+  are the binary's own pass-name function (FUN_00b4f9d0, 742 cases) and code anchors: COUNT 0x2f7, Lighting30
+  `pass - 376`, blood splatter 0x2f0+flag = 752/753, the accumulator render groups ending at 753. FIRST_ALPHA_PASS is
+  **568**, not 494 (the batch renderer excludes 0x238..0x23e). The header's blocks map to true ids at offsets +0..+86,
+  and its "unused" block 673..755 is live passes. RENDER_NATIVE.md §1.3 (756/667/494, family ranges) is therefore
+  wrong. The method is in `docs/RENDER_VERIFY.md` §1; the table stays in `build/v6n`.
+* **did** - The verifier's tool set (`render/verify/`, tests in `tests/v6n/`, `docs/RENDER_VERIFY.md`), commits
+  `58d34f4`..`60bc556`:
+  - `enum/pass_space.py`: emitted x configured x render groups. It scans 347 `ShaderPassList::Add` sites and resolves
+    346. Output stays in build/ only.
+  - `statediff`: S6n's `d3d9_state.c` against Nine 20.1's own `nine_pipe.c` on random state vectors, plus 23 trap
+    mutants of the translator.
+  - Pixel level:
+    - oracle `v6n_nine` (Nine on softpipe; colour/depth/stencil read back);
+    - V6n's own GL 4.5 executor `v6n_gl`;
+    - `v6n_s6ngl`, S6n's backend driven through NxGpuApi;
+    - exact D3D9 top-left coverage reference `raster_ref.py`;
+    - 31 pixel trap mutants, 62 format conformance scenes.
+  - Thresholds: 2/255 on 8-bit targets, 1e-3 relative on float, stencil exact, depth 8 LSB on D24 and 2 LSB on D16.
+    Measured float32 setup differences reach 6/2 LSB, and every depth trap moves depth by >= 2^16 LSB.
+  - `fuzz/fuzz.py`: a trap-biased render-state fuzzer with a minimiser; text reproducers in `tests/v6n/repro/`.
+  - `shaders/parity.py`: the shader parity harness on S6b's assembler and sdp2dksh. It takes the player's
+    `shaderpackage*.sdp`, or `--selftest`.
+  - Two defects in S6n filed as failing tests, `border_swizzle` and `y_fill_bias`. S6n fixed both (`17077d6`,
+    `521ffaf`) and V6n re-verified them.
+* **found** - Stock softpipe is not D3D9-exact as an oracle:
+  - Its span setup truncates edge x for D3D9 pixel centres (6,628 wrong px). The oracle links a patched
+    `sp_setup.c` ahead of the library; S6c's Nine build is untouched and the stock build is kept as `v6n_nine_stock`.
+    S6c's host gate is affected by this; the Switch path (nouveau) is not.
+  - It applies blend factors before MIN/MAX. Also patched in the oracle.
+  - Worked around in the fuzzer instead: X8 destination alpha with depth, V8U8 -128, unbound fixed-function sampler
+    crashes, stencil test without a stencil buffer, texture-alpha blends without a texture argument.
+  - Two D3D9 ambiguities are left for the device: RHW vertices vs the viewport, and sRGB reads on R5G6B5-like
+    formats.
+* **found** - Finding P1 for S6b: its GLSL epilogue uses `gl_FragCoord.z` as table-fog depth, while Nine and S6n use
+  z x w. 6 of 7 synthetic shaders in the parity self-test match pixel-exactly; the seventh is this case.
+* **found** - On Mesa GL the edge tie rule follows the clip-control origin, so a y-down backend needs LOWER_LEFT with
+  y negated in the VS. S6n adopted this.
+* **verified** - Re-run by the render machine at the merge with the integration branch (`9359ce3`), after
+  `render/verify/build.sh`: `tests/v6n/run.sh` rc 0, "selfcheck PASS, open defects: none". Raster: `v6n_gl` and
+  `v6n_s6ngl` 0 wrong px, oracle 3 px. Analytic checks c40_depthbias_d24/d16 and o1_x8_dst_alpha PASS. The 5
+  committed reproducers are still unclassified and listed as such. Also `make -C tests/s6n scenes`: 17/17 goldens
+  bit-exact.
+* **metrics** - true_pass_ids=759 declared=758 named=742 configured=637 emitted=439 in_render_group=753
+  reachable=395 first_alpha_pass=568 add_sites=347 add_sites_resolved=346 statediff_vectors=8000000
+  statediff_mismatches=0 translator_mutants_caught=23/23 pixel_mutants_caught=31/31 format_scenes=62/62
+  fuzz_v6ngl=595/600 fuzz_s6ngl=287/300 (8 fixed-function table fog, out of scope; 5 unclassified)
+  random_mutant_kill=26/33 parity_selftest=6/7 defects_filed=2 defects_open=0
+* **claims** - S6n claims checked:
+  - FAIL: RENDER_NATIVE.md §1.3 pass enum.
+  - FAIL, then fixed: C30/C32 border colour, C59 / the nx/state.h viewport coverage claim.
+  - PASS: C1-C31, C33, C18/C40 (depth bias, D3D9 units), C32/C34 (formats incl. texel conversion), C24 (fog depth).
+* **note** - The render machine could not rebase `claude/port-nsw-render`: the force-push needed after a rebase was
+  refused in this session. It merged `claude/port-nsw-un6t9s` into the branch instead (`9359ce3`). The tree is
+  identical to the tested rebase. R1-R3 (render-001) still fail after the merge (`tests/s6n/test_requests.py`: 1
+  error, 2 failures), although the integration branch now reads `render/native/drop_units.txt` (7d1efb5).
+* **next** - Scene-level capture/replay joined with `build/v6n/pass_space.tsv` (RENDER_VERIFY §6). This needs VS/IB
+  commands in the scene format and S6n's N1 capture fed to the Nine path. Then a pixel-shader path plus float/depth
+  read-back for `v6n_s6ngl` (S6n's API has neither today), `parity.py` on the player's `.sdp` files, classification
+  of the 5 reproducers, and on-device conformance (RENDER_VERIFY §8). S6n corrects RENDER_NATIVE.md §1.3 (render
+  machine file) next round. Orchestrator: decide whether `render/verify/` and `tests/v6n/` go into MACHINES.md's ownership table for the
+  render machine.
