@@ -329,6 +329,22 @@ class T02Runtime(unittest.TestCase):
         r = run([exe])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_unaligned_size_of_image(self):
+        """SizeOfImage that ends mid-page (the GOG FalloutNV.exe: 0x010089e4) loads, rounded up as Windows does."""
+        d = bytearray(rd(syn('plain.exe')))
+        pe_off = struct.unpack_from('<I', d, 0x3c)[0]
+        nsec, optsize = struct.unpack_from('<H', d, pe_off + 6)[0], struct.unpack_from('<H', d, pe_off + 20)[0]
+        sh = pe_off + 24 + optsize + 40 * (nsec - 1)                      # the last section header
+        vsize, rva = struct.unpack_from('<II', d, sh + 8)
+        aligned = struct.unpack_from('<I', d, pe_off + 24 + 56)[0]
+        struct.pack_into('<I', d, sh + 8, vsize - 0x1c)                  # its end moves into the page
+        struct.pack_into('<I', d, pe_off + 24 + 56, rva + vsize - 0x1c)
+        self.assertTrue((rva + vsize - 0x1c) & 0xfff)
+        wr(syn('unaligned.exe'), d)
+        self.assertEqual(PE(bytes(d)).size_of_image, aligned)
+        r = loadcheck('hints', exe='unaligned.exe')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_window_and_protection(self):
         r = loadcheck('hints', '--window', '0x00400000:0x01200000')       # .tls/.bss/.rsrc do not fit
         self.assertEqual(r.returncode, 5)
