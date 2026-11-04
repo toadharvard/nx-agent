@@ -24,6 +24,7 @@ import libcalls
 
 PAGE = world.PAGE
 TLS_BASE, TLS_SIZE = 0x0b900000, 0x00010000   # inside the AArch64 private range (faults as data elsewhere)
+MAX_CALLS = 20000                             # intercepted calls per run (each costs no step)
 XR = [A.UC_ARM64_REG_X0 + i for i in range(29)] + [A.UC_ARM64_REG_X29, A.UC_ARM64_REG_X30]
 VR = [A.UC_ARM64_REG_V0 + i for i in range(32)]
 STUB_LO, STUB_HI = a64image.CODE_STUB, a64image.NAMED_STUB + 0x00800000
@@ -293,6 +294,12 @@ class Arm64Engine:
     def _on_wild(self, uc, address, size, user):
         """Execution reached memory that holds no native code (an indirect call through a planted pointer, or a
         jump to an original .text address): an intercepted call of that address, as on x86."""
+        if address == (uc.reg_read(A.UC_ARM64_REG_LR) & 0xffffffff):
+            # a `ret` to a garbage return address: "returning" from the intercepted call would land on it again,
+            # forever, without executing an instruction (the step limit never fires): a fault
+            self._fault = 'fault:x:%08x' % address
+            uc.emu_stop()
+            return
         self._on_stub(uc, address, size, user, wild=True)
 
     def _on_stub(self, uc, address, size, user, wild=False):
@@ -317,6 +324,10 @@ class Arm64Engine:
         if name == '__stack_chk_fail':
             self._fault = 'stack-protector'; uc.emu_stop(); return
         k = len(r.calls)
+        if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
+            self._fault = 'timeout'
+            uc.emu_stop()
+            return
         sp = uc.reg_read(A.UC_ARM64_REG_SP)
         try:
             stk = bytes(uc.mem_read(sp, 64))

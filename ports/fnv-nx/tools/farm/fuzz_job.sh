@@ -27,6 +27,10 @@
 # fuzz/cache/<k>of<N> of the artifacts repository (results.jsonl + div/), pushed after every $FUZZ_CHUNK (200)
 # functions, so a recreated machine continues from it; a new shard count is seeded from the existing caches.
 # $FUZZ_BUDGET=<seconds> stops after the chunk that reaches it (the rest is "pending", done by the next run).
+# A wall-clock watchdog per chunk (function count x 3 x TIME + 30 s / JOBS, x2) kills a hung chunk; its unfinished
+# functions are recorded as run:timeout and fuzzed again by the next run. After each chunk the job looks at the
+# integration head ($FUZZ_HEAD_BRANCH): when its fnkeys.HARNESS differs from this checkout's, it stops and reports,
+# so the runner moves to the newest head.
 # Resumable: a rerun with the same arguments continues after the last finished function.
 # Output: <report.md> (counts new this head and cumulative, verdicts by stream and cause for both, the cumulative hard
 # divergences as address, cause, stream, unit) and this head's reproducers on branch fuzz/<commit12>/<k>of<N>.
@@ -352,14 +356,35 @@ mkdir -p "$RUN/camp"; touch "$RUN/camp/results.jsonl"
 (cd "$DF" && $PY fuzzcache.py dropcrash "$RUN/camp") >> "$RUN/merge.log"
 rm -f "$RUN"/chunk.*
 split -l "$CHUNK" -d -a 4 "$RUN/todo.jsonl" "$RUN/chunk."
+HEAD_BRANCH=${FUZZ_HEAD_BRANCH:-claude/port-nsw-un6t9s}
+harness_of() { sed -n "s/^HARNESS = '\(.*\)'/\1/p"; }
+MY_HARNESS=$(harness_of < "$DF/fnkeys.py")
 for c in "$RUN"/chunk.*; do
   [ -s "$c" ] || continue
-  log "fuzz $(basename "$c"): $(wc -l < "$c") functions ($JOBS jobs, $ITERS executions / ${TIME}s per function)"
-  (cd "$DF" && nice $PY difffuzz.py fuzz "$c" --out "$RUN/camp" --iters "$ITERS" --time "$TIME" \
-    --jobs "$JOBS" --resume >> "$RUN/fuzz.log" 2>&1)
+  nf=$(wc -l < "$c")
+  # watchdog: a harness hang costs this chunk, not the shard. Per function at most TIME s of fuzzing plus setup,
+  # minimisation and classification (~3 x TIME + 30 s), JOBS in parallel, x2 margin.
+  wd=$(( (nf * (3 * ${TIME%.*} + 30) / JOBS + 1) * 2 + 120 ))
+  log "fuzz $(basename "$c"): $nf functions ($JOBS jobs, $ITERS executions / ${TIME}s per function, watchdog ${wd}s)"
+  rc=0
+  (cd "$DF" && timeout -k 30 "$wd" nice $PY difffuzz.py fuzz "$c" --out "$RUN/camp" --iters "$ITERS" \
+    --time "$TIME" --jobs "$JOBS" --resume >> "$RUN/fuzz.log" 2>&1) || rc=$?
+  if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+    # the chunk's unfinished functions become harness failures (run:timeout): fuzzed again by the next run
+    log "watchdog fired after ${wd}s on $(basename "$c")"
+    (cd "$DF" && $PY fuzzcache.py timeouts "$RUN/camp" "$c") >> "$RUN/merge.log"
+  fi
   (cd "$DF" && $PY fuzzcache.py merge "$CACHE" "$RUN/camp" "$RUN/keys.json" "$COMMIT") >> "$RUN/merge.log"
   cache_commit "$C12 shard $K/$N: $(basename "$c")"
   if [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - t1)) -ge "$BUDGET" ]; then log "time budget reached"; break; fi
+  # a newer harness on the integration head (HARNESS bumped) makes these verdicts stale: stop after this chunk
+  # and report, so the runner starts again at the newest head instead of finishing a pass that is thrown away
+  if git -C "$REPO" fetch -q origin "$HEAD_BRANCH" 2>/dev/null; then
+    new_h=$(git -C "$REPO" show "FETCH_HEAD:ports/fnv-nx/tools/difffuzz/fnkeys.py" 2>/dev/null | harness_of)
+    if [ -n "$new_h" ] && [ "$new_h" != "$MY_HARNESS" ]; then
+      log "integration head has harness $new_h (this run: $MY_HARNESS): stopping after $(basename "$c")"; break
+    fi
+  fi
 done
 cache_commit "$C12 shard $K/$N"
 t2=$(date +%s)

@@ -34,6 +34,7 @@ FLD_VAL = 0x0e005800
 BUILTIN_STUB = 0x0e006000   # x87 helper code (_ftol2, _CIsqrt, ...) and its scratch slots
 BUILTIN_SLOT = 0x0e006800
 FPCW_MSVC = 0x027f
+MAX_CALLS = 20000           # intercepted calls per run (each costs no step)
 REGS = {'eax': UC_X86_REG_EAX, 'ecx': UC_X86_REG_ECX, 'edx': UC_X86_REG_EDX, 'ebx': UC_X86_REG_EBX,
         'esi': UC_X86_REG_ESI, 'edi': UC_X86_REG_EDI}          # MSVC CRT default: 53-bit precision, round to nearest, exceptions masked
 
@@ -248,6 +249,10 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_EIP, address)
             return
         k = len(r.calls)
+        if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
+            self._fault = 'timeout'
+            uc.emu_stop()
+            return
         r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr,
                             {n: uc.reg_read(REGS[n]) for n in ('eax', 'ebx', 'esi', 'edi')}))
         rb = case.ret_bytes(k)
