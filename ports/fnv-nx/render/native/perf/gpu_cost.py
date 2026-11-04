@@ -22,7 +22,8 @@ beyond the overdraw factor, no cross-family overlap, no CPU/GPU sync stalls.
 """
 import json, os, re, struct, subprocess, sys
 
-LIGHTS = 3                  # active lights per lit draw (sun + 2 point lights; the shader caps at 8)
+LIGHTS = 5                  # active lights per lit draw: the sun + 4 point lights (an FNV exterior object near a
+                            # settlement; interiors use up to the shader's 8; V1's sensitivity runs: 1+4, 1+8)
 TEX_COST = 1.5              # TMU cycles per texture instruction (bilinear 1, trilinear 2: mixed)
 EFF = (1.0, 0.6)            # SM issue efficiency (ALU and TMU): 1.0 = peak (lo estimate), 0.6 = latency/occupancy bound (hi)
 GPU = {"name": "Tegra X1 GM20B", "sm": 2, "lanes": 256, "tmu": 16, "rop": 16, "dram_gbs": 25.6, "dram_eff": 0.6,
@@ -70,7 +71,28 @@ MODEL = {
 # binds for the same D3D9 state; a permutation missing from the package falls back to the shader without it.
 # PERMUTATIONS = False models the runtime shaders only (the model before the permutations existed).
 PERMUTATIONS = True
-LIT_PERMUTATION = {"lit.frag": "lit_d1p2.frag", "lit_spec.frag": "lit_spec_d1p2.frag"}
+LIT_PERMUTATION = {"lit.frag": "lit_d1p4.frag", "lit_spec.frag": "lit_spec_d1p4.frag"}   # LIGHTS = 1 + 4
+# Early-z. Overdraw is the layers rasterized per covered pixel. A depth-writing draw without discard is rejected
+# before shading where an earlier draw is in front: in the renderer's state-sorted order depths are random, so of k
+# layers the expected number shaded is the harmonic number H(k) (H(1) = 1, H(2) = 1.5, H(3) = 1.83; linear between).
+# A draw that discards (alpha test) loses early-z: all its layers are shaded (and it rejects nothing after it, which
+# the model ignores). Depth-only, test-only and blended families shade every layer. EARLY_Z = False: every layer
+# shaded (the model before).
+EARLY_Z = False
+
+
+def harmonic(k):
+    if k <= 1.0:
+        return k
+    n = int(k); h = sum(1.0 / i for i in range(1, n + 1))
+    return h + (k - n) / (n + 1)
+
+
+def shaded_layers(m, alpha_share):
+    k = m["overdraw"]
+    if not EARLY_Z or m.get("depth", 0) < 2 or m.get("depth_only") or m.get("blend"):
+        return k
+    return alpha_share * k + (1.0 - alpha_share) * harmonic(k)
 RS_ALPHATESTENABLE, RS_FOGENABLE = 15, 28
 
 
@@ -288,7 +310,9 @@ def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
         else:
             bound = bound_shaders(tab, m, epi.get(fam, {}))
             vs, ps = tab[m["vs"]], mix_stats(tab, bound)
-        px = target_px(m, p) * m["coverage"] * m["overdraw"]
+        mix = epi.get(fam, {})
+        at_share = sum(n for (a, _f), n in mix.items() if a) / max(1, sum(mix.values()))
+        px = target_px(m, p) * m["coverage"] * shaded_layers(m, at_share)
         alu = ps["alu_slots"] / GPU["lanes"] / eff
         texc = ps["tex"] * TEX_COST / GPU["tmu"] / eff
         rop = 1.0 / (2 * GPU["rop"]) if m.get("depth_only") else 1.0 / GPU["rop"]
@@ -304,6 +328,7 @@ def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
                      "ps": (bound[0][0] if bound else m["ps"]) if not shader_map else shader_map[fam][1],
                      "ps_mix": [[n, round(f, 3)] for n, f in bound] if bound else None, "ps_alu_slots": round(ps["alu_slots"], 1),
                      "stand_in": (fam in STAND_IN) if not shader_map else False,
+                     "alpha_tested_share": round(at_share, 3), "shaded_layers": round(shaded_layers(m, at_share), 3),
                      "shader_source": ("native stand-in: " + STAND_IN[fam] if fam in STAND_IN else "native family shader")
                                       if not shader_map else "the game's programs (shaderpackage019 via sdp2dksh), class average",
                      "target_format": None if m.get("depth_only") else fmts[m["target"]]}
@@ -338,11 +363,11 @@ def main():
         real_tab = real_table(real)
         tab.update(real_tab)
         draws = {f["name"]: f["draws"][1] for f in gen_stream.FAMILIES}
-        scenes["real019_mix_hi"] = [scene(tab, draws, c, e, fmts, REAL_MAP) for c in PRESETS for e in EFF]
+        scenes["real019_mix_hi"] = [scene(tab, draws, c, e, fmts, REAL_MAP, epi=epis["hi"]) for c in PRESETS for e in EFF]
     res = {"method": __doc__.strip().split("\n\n", 2)[2], "assumptions": {"lights": LIGHTS, "tex_cost": TEX_COST, "efficiency": EFF, "gpu": GPU,
            "presets": PRESETS, "target_formats": fmts, "format_bytes": FORMAT_BYTES, "z_compress": Z_COMPRESS,
            "tex_bytes": TEX_BYTES, "fp16_rate": FP16_RATE, "families": MODEL, "permutations": PERMUTATIONS,
-           "lit_permutation": LIT_PERMUTATION, "stand_in": STAND_IN,
+           "lit_permutation": LIT_PERMUTATION, "stand_in": STAND_IN, "early_z": EARLY_Z,
            "epilogue_mix_hi": {f: {"at%d_fog%d" % k: n for k, n in v.items()} for f, v in epis["hi"].items()},
            "real_map": REAL_MAP if real_tab else None}, "shaders": tab, "scenes": scenes}
     json.dump(res, open(out, "w"), indent=1)
