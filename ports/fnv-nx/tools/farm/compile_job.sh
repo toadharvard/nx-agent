@@ -71,7 +71,9 @@ ok=$(grep -c $'\tok$' "$OBJ/objects.tsv" || true); fail=$(grep -c $'\tfail$' "$O
 if [ ! -d "$ARTIFACTS/.git" ]; then git clone -q https://github.com/toadharvard/fnv-nx-build "$ARTIFACTS"; fi
 B=shard-${K}of${N}
 cd "$ARTIFACTS"
-git fetch -q origin "$B" 2>/dev/null && git checkout -q -B "$B" "origin/$B" || git checkout -q --orphan "$B"
+if git fetch -q origin "+refs/heads/$B:refs/remotes/origin/$B" 2>/dev/null; then git checkout -q -B "$B" "origin/$B"
+elif git rev-parse -q --verify "refs/heads/$B" >/dev/null; then git checkout -q "$B"
+else git checkout -q --orphan "$B"; fi
 git rm -rq --cached . 2>/dev/null || true
 rm -rf obj objects.tsv meta.json; mkdir -p obj
 while IFS=$'\t' read -r src o st; do
