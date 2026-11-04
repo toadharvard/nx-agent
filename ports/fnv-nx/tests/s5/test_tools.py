@@ -355,6 +355,23 @@ class MilestoneTest(unittest.TestCase):
         self.assertIsNone(sw(0x102, 2, 0xFFFF, 0x100))                                # partial store
         self.assertIsNone(sw(0x0FC, 8, 1, 0x100 + 4))                                 # does not cover it
 
+    def test_r0_milestones_file(self):
+        sys.path.insert(0, HERE)
+        import boot_milestones
+        with tempfile.TemporaryDirectory() as t:
+            raw = os.path.join(t, "raw.json")
+            _write(raw, json.dumps({"milestone": "winmain", "peak_heap_bytes": 4096, "milestones": [
+                {"name": n, "reached": n == "winmain"} for n in boot_milestones.KEYS],
+                "stop": {"reason": "STOPPED: x", "messages": []}}).encode())
+            out = os.path.join(t, "milestones.json")
+            boot_milestones.main([out, raw, os.path.join(t, "missing.json"), "--image", "player exe"])
+            doc = json.loads(_read(out))
+        self.assertEqual({k: doc[k] for k in ("winmain", "main_menu", "first_frame", "first_cell")},
+                         {"winmain": True, "main_menu": False, "first_frame": False, "first_cell": False})
+        self.assertEqual((doc["renderer_init"], doc["milestone"], doc["boot_peak_heap_bytes"], doc["image"]),
+                         (False, "winmain", 4096, "player exe"))
+        self.assertIsNone(doc["stub"]["winmain"])   # no summary: unknown, not false
+
     def test_report_without_stop_line(self):
         sys.path.insert(0, os.path.join(HERE, "..", "..", "tools", "farm"))
         import full_report

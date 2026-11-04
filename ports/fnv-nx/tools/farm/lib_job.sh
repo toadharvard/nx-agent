@@ -214,6 +214,12 @@ EOF
 					[ -f "$bd/boot/stub/$f" ] && cp "$bd/boot/stub/$f" boot/stub/
 				done
 			fi
+			# R0's milestones file (J-0131): the raw boot's milestones at the top, the stub boot's under "stub"
+			if [ -f boot/boot_summary.json ]; then
+				python3 -I "$P/tests/s5/boot_milestones.py" boot/milestones.json boot/boot_summary.json \
+					${GAME_EXE:+--image "player exe"} $([ -f boot/stub/boot_summary_stub.json ] && echo boot/stub/boot_summary_stub.json) \
+					|| rm -f boot/milestones.json
+			fi
 		fi
 		# V1-link's audits of this link (full_job.sh 4d): report, tables and logs, about 1 MB
 		[ -d "$bd/v1" ] && cp -r "$bd/v1" v1

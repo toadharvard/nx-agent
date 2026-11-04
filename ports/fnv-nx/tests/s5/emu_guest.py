@@ -214,7 +214,7 @@ class Emu:
         map_seg(ro, UC_PROT_READ)
         map_seg(data, UC_PROT_READ | UC_PROT_WRITE, data["bss"])
         uc.mem_map(STACKS_TOP - STACK_SIZE * MAX_THREADS, STACK_SIZE * MAX_THREADS, UC_PROT_READ | UC_PROT_WRITE)
-        heap = HEAP_BASE if base >= HEAP_BASE + HEAP_SIZE or base + size <= HEAP_BASE else HEAP_BASE_ALT
+        heap = self.heap = HEAP_BASE if base >= HEAP_BASE + HEAP_SIZE or base + size <= HEAP_BASE else HEAP_BASE_ALT
         uc.mem_map(heap, HEAP_SIZE, UC_PROT_READ | UC_PROT_WRITE)
         uc.mem_map(HOST_PAGE, PAGE, UC_PROT_ALL)
         self.stubs = {HOST_PAGE + 0x800 + 4 * i: name for i, name in enumerate(SLOTS)}
@@ -951,7 +951,16 @@ class Emu:
             "initializers_skipped": len(getattr(self, "skipped", None) or []),
             "stubbed_faults": len(getattr(self, "stubbed", [])),
             "host_calls": self.calls, "threads": len(self.threads),
+            "peak_heap_bytes": self.heap_high_water(),
         }
+
+    def heap_high_water(self):
+        """bytes from the start of the guest heap (the host's malloc arena, mapped zeroed) to its last non-zero byte:
+        the most the boot's heap ever reached, as far as memory it wrote shows (R0's boot_peak_heap_bytes)"""
+        try:
+            return len(bytes(self.uc.mem_read(self.heap, HEAP_SIZE)).rstrip(b"\0"))
+        except UcError:
+            return None
 
     # -- guarded initializer calls (--skip-faulting-init): every indirect call (blr) made by the initializer
     # runners is a checkpoint; a fault below one restores the registers of the call and returns 0 from it, so a
