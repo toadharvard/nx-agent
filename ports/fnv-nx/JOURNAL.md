@@ -811,3 +811,27 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   with `tools/fetch.sh`, `toolchain/gcc/build.sh` (or the S9 pipeline), `tools/equiv/README.md` (MSVC), then resume
   streams with verification per D14; first: merge-verify GAME1 with S11 and S13, finish S2c/S2b link on J-0034
   objects, S9 cold run.
+
+### J-0042 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0029,J-0034,J-0041
+
+* **did** - Slot functions of synthesized vtables emitted from their host units (only for vtables compiled objects
+  reference), trap stubs `fnvnx_vslot_trap` (class + slot) for virtuals defined nowhere; S3 loader reads V as VTABLE,
+  kind-G adapter uses `fnvnx_addrmap_deldtors`; E entries bound to S4b providers and IAT-slot imports (never libc by
+  name); native TLS block for `__declspec(thread)`; hand-written vptr stores rebound to native address points;
+  `jmp [IAT]` thunks bound to the import (0x00ee6df2 -> D3DXVec3TransformNormal, 0x00ee6e04 ->
+  D3DXMatrixRotationYawPitchRoll); narrow-argument extension bridges (J-0034 char recheck); versioned, resumable runs.
+  Fresh J-0034 object set compiled, resolved, applied, trial-linked. Fixed an exponential regex in sigs.py that hung
+  resolve (72138c1, merged as 7a40bd1).
+* **found** - 2,729 objects / 2,978 units (249 fail); **WinMain** (0x0086a850, misc/main.cpp) and XC1 (6,265
+  `__fnvnx_dyninit_` + 4,692 `__fnvnx_dynexit_`) in the set. Trial link: **8,741 undefined** (4,859 `__fnv_` of units
+  not compiled, 1,605 C++ unresolved, 1,442 implicit ctors/dtors GCC calls where MSVC did not, 148 extern-text without
+  provider, 106 typeinfo/thunk/vtable, 202 C names, 276 platform/import symbols this link leaves out, 103 runtime /
+  other), **0 multiple definitions**. Address map F 52,363, C 1,768, X 1,009, G 88 (all D1+D0), V 1,943 (all checked),
+  E 4,449. ABI: 1,817 bridges (450 narrow-extend), 931 manual, 481 x86-inconsistent (S1b XINC1 not yet in this set).
+  Native data defs at image addresses fell 6,361 -> 161 (XC1 globals are extern, built in place). 373 TLS refs to 23
+  image `.tls` addresses, all native.
+* **decided** - TLS stays native (one block laid out like the image `.tls`; S4 copies the template per thread).
+* **metrics** - link_objects=2729 link_trial_undefined=8741 link_trial_multidef=0 link_addrmap_V=1943 link_bridges=1817
+  link_traps=7602 link_tls_refs=373
+* **next** - S2b MSVC vftable slots to replace traps (`FNVNX_MSVC_OBJS`); implicit ctor/dtor emission (1,442); S1b
+  XINC1 in the object set; V1 + S13 verification (D14).
