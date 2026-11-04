@@ -264,6 +264,20 @@ above (round 8).
 | `ASM1` `ASM2` `ASM4` | platform | x87 / rdtsc / cpuid asm -> portable helpers (docs/ASM.md has their own checks) | - |
 | `NATIVE1` | platform | units leave the build (native renderer, D6) | - |
 
+## Gate of the rules after `0685791` (local, single units)
+
+Sites: each rule applied by itself to every decomp file; units by include closure (a superset of the real sites).
+
+| rules | units | result |
+|---|---:|---|
+| GOTO2, QUAD1, MSCV1, RREF1-CLASS, RREF2, ADDR1 (`c1039e7`) | 447 | no differing function and no failing unit beyond the `0685791` gate's (all explained above) |
+| TPL3, INST1, TYPN1, COPY1 (S1-STL, `6318d13`) | 1 | blk_00ac0000_od_ob1 compiles (with TPL2's specialization fix): 4 functions differ, identical with `/EHs-c-` (EH-only) |
+| STAND2, STAND3 (platform, `6318d13`) | 133 | the neutral set with and without them: the same differing functions and statuses in every unit whose source they change (a removed stand-in only changes which definition the bound name reaches) |
+| bsshader units with `_ReadWriteBarrier` | 10 | all compile under the stand-ins; bsshader.cpp identical, the rest EXC1 EH-only |
+
+LANE1 and ANON3 are platform rules that only rewrite what other platform rules (SSE1) or GCC need; the neutral gate
+leaves them out.
+
 ## Evaluation order: ORDER-OBJECT and ORDER-OPERATOR (for S12)
 
 `tools/equiv/order_check.py` compiles `tests/s11/order/order.cpp` (27 cases, ours) with MSVC 2008 SP1 and RTM in the
