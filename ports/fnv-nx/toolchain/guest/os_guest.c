@@ -147,7 +147,7 @@ uint64_t os_monotonic_ns(void) {
 }
 uint64_t os_cycle_counter(void) {
     uint64_t v;
-    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(v));
+    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(v));   /* CNTVCT_EL0 traps at EL0 on Horizon (NX1 check 3) */
     return v;
 }
 int64_t os_wall_time_us(void) { return hs(fnvnx_hcall0(fnvnx_host->wall_time_us)); }

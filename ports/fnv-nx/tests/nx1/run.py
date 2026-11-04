@@ -95,7 +95,8 @@ def not_yet(what):
 CHECKS = [
     (1, "nro", check_nro),
     (2, "memory", not_yet("peak heap + image + GPU pools vs the title-takeover budget, applet refusal")),
-    (3, "svc", not_yet("svc / IPC allowlist, forbidden instructions")),
+    (3, "svc", script("check_svc.py", lambda a: ["--guest-elf", a.guest_elf], lambda a: ["--host-elf", a.host_elf],
+                      lambda a: ["--nro-elf", a.nro_elf], need=["guest_elf", "host_elf", "nro_elf"])),
     (4, "threads", script("check_threads.py", lambda a: ["--host-elf", a.host_elf] if a.host_elf else [])),
     (5, "fs", script("check_fs.py", lambda a: ["--sd", a.sd], need=["sd"])),
     (6, "gpu", not_yet("display init/present 720p/1080p, shader cache path")),
