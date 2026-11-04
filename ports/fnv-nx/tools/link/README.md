@@ -30,6 +30,7 @@ SSE2NEON=ext/sse2neon tools/link/compile.sh $T $O   # [units.list] [jobs]; write
 tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L
 tools/link/fnvlink.py probe $L $T                   # layouts of the aggregates + synthesized vtables; resolve again
 tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L [--override o.tsv] [--extern-text s4.txt] \
+    [--override-lib libnxrender.a]                 # override symbols from an archive (render/native/overrides.tsv)
     [--msvc-objs $S11/obj/pristine]                # vtable slots through the MSVC vftables (u<index>.obj)
                                                     # [--msvc-code $S11/obj/pristine] only the definitions' ecx
                                                     # reads (ecx-not-passed verdicts; also with --msvc-objs)

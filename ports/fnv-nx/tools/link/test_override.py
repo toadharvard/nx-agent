@@ -124,6 +124,48 @@ def main():
         dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', elf])
         calls = [l for l in dis.splitlines() if '\tbl\t' in l or '\tb\t' in l]
         check(sum(('\t%x <' % nx_f) in l for l in calls) >= 2, 'callers of f branch to nx_f: %s' % calls)
+
+        # render-001 R1 (S6n's render/native/overrides.tsv): free-text column 3, symbols from --override-lib, rows
+        # marked N1-pending skipped, a symbol the library lacks refused, vslot rows need the MSVC vftables
+        lib = os.path.join(t, 'native', 'libnx.a')
+        run(['aarch64-linux-gnu-ar', 'rcs', lib, objs['native/over.cpp']])
+        with open(os.path.join(t, 'render.tsv'), 'w') as f:
+            f.write('# address\tsymbol\tABI / notes\n'
+                    '00401000\tnx_f\tint nx_f(int): the native f\n'
+                    '00401100\tnx_planned\tthiscall(this) -> int; N1-pending\n'
+                    '00401500\tnx_missing\tnot built yet\n'
+                    'vslot:??_7K@@6B@:0\tnx_v\tthiscall(this) -> int; slot 0 of K\n')
+        out2, fixed2 = os.path.join(t, 'out2'), os.path.join(t, 'fixed2')
+        run([sys.executable, FNVLINK, 'resolve', os.path.join(t, 'units.json'), os.path.join(t, 'objects.tsv'), out2,
+             '--override', os.path.join(t, 'render.tsv'), '--override-lib', lib, '--crt-symbols', 'none', '--imports',
+             'none'])
+        stats = open(os.path.join(out2, 'stats.txt')).read()
+        check('override rows: needs --msvc-objs' not in stats and 'not in --override-lib 1' in stats and
+              'pending 1' in stats and 'vslot needs --msvc-objs (the vftable contents) 1' in stats,
+              'override row counts: %s' % [l for l in stats.splitlines() if 'override' in l])
+        check(open(os.path.join(out2, 'overrides.list')).read().split() == [lib], 'the library is the override object')
+        run([sys.executable, FNVLINK, 'apply', out2, fixed2])
+        run([sys.executable, FNVLINK, 'check', out2, fixed2])
+        sym2 = {}
+        for line in run(['aarch64-linux-gnu-nm', os.path.join(out2, 'trial.elf')]).splitlines():
+            f = line.split()
+            if len(f) == 3:
+                sym2[f[2]] = int(f[0], 16)
+        check(sym2.get('nx_f') is not None and sym2.get('__fnv_00401000') == sym2.get('nx_f'),
+              'address symbol -> override from the library')
+        check(sym2.get('__fnv_00401500') not in (None, sym2.get('nx_log')), 'refused row leaves the decomp definition')
+        # a vslot row resolves through the image vftable's slot (vslots.MsvcIndex.table), checked for its range
+        import types
+        sys.path.insert(0, HERE)
+        import fnvlink
+        ix = types.SimpleNamespace(gref={'??_7K@@6B@': {0x00e00000}},
+                                   table=lambda a: [(0x00401100, [], {})] if a == 0x00e00000 else [])
+        vsb = types.SimpleNamespace(ix=ix)
+        check(fnvlink.vslot_address(vsb, ('vslot', '??_7K@@6B@', 0)) == (0x00401100, ''), 'vslot -> slot address')
+        check(fnvlink.vslot_address(vsb, ('vslot', '??_7K@@6B@', 3))[0] is None, 'vslot beyond the vftable refused')
+        check(fnvlink.vslot_address(vsb, ('vslot', '00e00000', 0)) == (0x00401100, ''), 'vslot by vftable address')
+        check(fnvlink.load_overrides(os.path.join(t, 'render.tsv'))[3][0] == ('vslot', '??_7K@@6B@', 0),
+              'vslot row key')
     print('ok' if ok else 'FAILED')
     sys.exit(0 if ok else 1)
 

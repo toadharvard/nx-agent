@@ -286,8 +286,19 @@ Two bridge divergences are not ABI-model errors:
 
 ## Overrides (`resolve --override <tsv>`, for native replacements, J-0015)
 
-The table (tab-separated, `#` comments) lists `address`, `native symbol`, `object or archive`. An override takes
-precedence over the decomp definition at that address:
+The table (tab-separated, `#` comments) lists `address`, `native symbol`, then the object or archive that defines it
+or free text (the native signature, notes), and an optional MSVC-decorated signature. An override takes precedence
+over the decomp definition at that address. For S6n's `render/native/overrides.tsv` (render-001 R1):
+
+* `address` may be `vslot:<vftable>:<slot>`: the MSVC vftable symbol (or its hex address) and a slot index. The row
+  stands for the function the image vftable holds in that slot. That function comes from the joined MSVC vftables
+  (`vslots.MsvcIndex.table`, so the row needs `--msvc-objs`) and is checked for the slot's existence and for an
+  agreed target. The override then replaces that function at its address, everywhere, like an address row;
+* `--override-lib <archive>` (S6n's `libnxrender.a`) defines the symbols of the rows whose column 3 is not an
+  object path. A row whose symbol the archive's index lacks is refused and logged. The archive goes into the link
+  (`overrides.list`, copied by `apply`), and the linker pulls only the members the overrides need;
+* rows whose notes say `N1-pending` (planned, not built) are skipped. `stats.txt` counts pending, refused and vslot
+  rows (`override rows: ...`).
 
 * every by-address reference binds to it (`__fnv_<addr> = <symbol>;` in `aliases.ld`); the address map entry names
   it, so S3 rewrites image code pointers and vftables to it;
@@ -311,7 +322,8 @@ the console (`ConsoleManager::Print`, 0x0071d0a0) with `%` doubled and no argume
 `shadowed.tsv` reports, per shadowed definition: the decomp declaration, native name and unit, the override, units
 that hold an inline (COMDAT) copy, and units that name the address in units.json but whose object no longer
 references it - their callers were inlined or dropped by GCC and keep running the decomp body (rewrite or rebuild
-those callers). Test: `test_override.py` (vtable slot, same-object call and alias call land on the override).
+those callers). Test: `test_override.py` (vtable slot, same-object call and alias call land on the override; the
+render table's free text, library, pending, refused and vslot rows).
 
 `resolve --extern-text <list>` adds S4's list of referenced `.text` addresses without definition (`addr_ids.txt`:
 `0x<addr> names...`) as `E` entries.

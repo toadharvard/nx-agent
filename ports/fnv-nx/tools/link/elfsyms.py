@@ -5,6 +5,7 @@ symbols(path) -> list of Sym(name, value, size, type, bind, shndx, section, comd
   shndx 0 == undefined; section is the section name ('' for undefined/absolute/common); comdat is True when the
   section belongs to a COMDAT group (inline functions, template instances: any copy may be the one kept).
 """
+import os
 import struct
 from collections import namedtuple
 
@@ -55,6 +56,37 @@ def symbols(path):
             sec = names[shndx] if 0 < shndx < len(names) else ''
             out.append(Sym(cstr(stroff + nm), value, size, TYPES.get(info & 15, str(info & 15)),
                            BINDS.get(info >> 4, str(info >> 4)), shndx, sec, shndx in comdat))
+    return out
+
+
+def archive_symbols(path):
+    """Global symbols an ar archive defines, from its symbol index (`/`, the System V / GNU layout ar and llvm-ar
+    write; `/SYM64/` too), else from each ELF member's symbol table. A missing file reads as no symbols."""
+    if not path or not os.path.isfile(path):
+        return set()
+    data = open(path, 'rb').read()
+    if not data.startswith(b'!<arch>\n'):
+        return {s.name for s in symbols(path) if s.shndx and s.bind in ('global', 'weak')}
+    out, off, members = set(), 8, []
+    while off + 60 <= len(data):
+        name = data[off:off + 16].decode('latin-1').strip()
+        size = int(data[off + 48:off + 58].decode('latin-1').strip() or 0)
+        body = data[off + 60:off + 60 + size]
+        if name in ('/', '/SYM64/'):
+            w = 4 if name == '/' else 8
+            n = int.from_bytes(body[:w], 'big')
+            for nm in body[w + w * n:].split(b'\0')[:n]:
+                out.add(nm.decode('utf-8', 'surrogateescape'))
+        elif not name.startswith('//'):
+            members.append(body)
+        off += 60 + size + (size & 1)
+    if not out:
+        import tempfile
+        for body in members:
+            if body[:4] == b'\x7fELF':
+                with tempfile.NamedTemporaryFile(suffix='.o') as t:
+                    t.write(body); t.flush()
+                    out |= {s.name for s in symbols(t.name) if s.shndx and s.bind in ('global', 'weak')}
     return out
 
 

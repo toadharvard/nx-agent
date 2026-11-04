@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """fnvlink.py - link the decomp's units by original address (ARCHITECTURE.md D4; docs/LINK.md).
 
-    fnvlink.py resolve <units.json> <objects.tsv> <out dir> [--override <tsv>] [--extern-text <list>]
+    fnvlink.py resolve <units.json> <objects.tsv> <out dir> [--override <tsv>] [--override-lib <archive>]
+                       [--extern-text <list>]
                        [--crt-symbols <tsv|none>] [--imports <tsv|none>]
                                                               # mapping, address map, ABI report, bridges
                                                               # (S4's provider tables: platform/ of this tree)
@@ -243,7 +244,7 @@ def kind_of_addr(a):
     return 'data' if DATA_START <= a < DATA_END + 0x1000 else ('text' if a < DATA_START else 'other')
 
 
-def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None,
+def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None, override_lib=None,
             units_renames=None):
     """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
     this tree, 'none': not used)."""
@@ -400,10 +401,37 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     def_stats['startup-' + m.group(1)] += 1
 
     # ---- overrides: a native implementation replaces the decomp definition at an address (docs/LINK.md)
+    # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS);
+    # also the image vftables a vslot override row names
+    vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
     shadowed = {}
     osigs = load_override_sigs(override)   # optional 4th column: the override's own MSVC-decorated signature
     ms.need(osigs.values())
-    for a, osym, oobj in load_overrides(override):
+    pending = override_pending(override)
+    stats_ov = collections.Counter()
+    lib_syms = elfsyms.archive_symbols(override_lib) if override_lib else None
+    ov_rows = []
+    for key, osym, oobj in load_overrides(override, override_lib):
+        if key in pending:
+            stats_ov['pending'] += 1
+            continue
+        if lib_syms is not None and oobj == override_lib and osym not in lib_syms:
+            stats_ov['not in --override-lib'] += 1
+            log('override %s: %s is not defined in %s' % (key, osym, override_lib))
+            continue
+        if isinstance(key, tuple):
+            a, why = vslot_address(vsb, key)
+            if a is None:
+                stats_ov['vslot ' + why] += 1
+                log('override %s:%s:%d: %s' % (key + (why,)))
+                continue
+            stats_ov['vslot rows'] += 1
+            if key in osigs:
+                osigs[a] = osigs[key]
+        else:
+            a = key
+        ov_rows.append((a, osym, oobj))
+    for a, osym, oobj in ov_rows:
         old = native.get(a)
         if old is not None:
             shadowed[a] = old
@@ -532,7 +560,6 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                        for _, (si, typ, _) in o_.rel(i_).items() if typ in (21, 20)}   # P32
         return called_cache[u_.source]
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
-    vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
     ecx_use = msvc_code_use(units_json, ms, msvc)
     for u in have:
         idx = KeyIndex()
@@ -839,7 +866,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 'inline_copies_in\tinlined_or_dropped_in\tnotes\n')
         for r in shadow_rows:
             f.write('\t'.join(r) + '\n')
-    stats['overrides'] = len(load_overrides(override))
+    stats['overrides'] = len(ov_rows)
+    with open(os.path.join(out, 'overrides.list'), 'w') as f:
+        for obj in sorted({o for _, _, o in ov_rows if o}):
+            f.write(obj + '\n')
     stats['shadowed'] = len(shadow_rows)
     stats['shadow_inlined_units'] = sum(1 for r in shadow_rows if r[7])
     for u in have:
@@ -1006,6 +1036,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             f.write('%08x\t%s\t%s\n' % (a, name, src))
     lines += ['', 'overrides: %d, shadowing a compiled decomp definition: %d (with possibly inlined callers in other '
               'units: %d; shadowed.tsv)' % (stats['overrides'], stats['shadowed'], stats['shadow_inlined_units'])]
+    if stats_ov:
+        lines += ['override rows: ' + ', '.join('%s %d' % kv for kv in sorted(stats_ov.items()))]
     lines += ['', 'variables defined natively at a data-image address: %d (%d copies in objects whose unit does not '
               'name the address: STATIC1 header variables)' % (len(data_defs), stats['rebound_copies']),
               'address map entries by kind: %s' % ' '.join('%s=%d' % kv for kv in sorted(amap_kinds.items())),
@@ -1312,16 +1344,67 @@ def find_import_thunks(native, units, iat, import_syms, gdef, gref, anydef, msvc
     return out
 
 
-def load_overrides(path):
-    """Override table: address (hex), native symbol, object or archive[, MSVC signature]; '#' comments,
-    tab-separated."""
+def override_key(text):
+    """An override row's first column: a hex address, or `vslot:<vftable>:<slot>` (the MSVC vftable symbol or its
+    hex address, the slot index) for the function an image vftable holds in that slot -> int or ('vslot', vftable,
+    slot)."""
+    if text.startswith('vslot:'):
+        vft, _, slot = text[6:].rpartition(':')
+        return ('vslot', vft, int(slot, 0))
+    return int(text, 16)
+
+
+def vslot_address(vsb, key):
+    """(address, '') of the function an image vftable holds in a slot, from the MSVC vftables (vslots.MsvcIndex:
+    resolve --msvc-objs), or (None, why)."""
+    _, vft, slot = key
+    if vsb is None:
+        return None, 'needs --msvc-objs (the vftable contents)'
+    if re.match(r'^(0x)?[0-9a-fA-F]+$', vft):
+        a = int(vft, 16)
+    else:
+        addrs = vsb.ix.gref.get(vft, set())
+        if len(addrs) != 1:
+            return None, 'vftable %s' % ('ambiguous' if addrs else 'not named by units.json')
+        a = next(iter(addrs))
+    tab = vsb.ix.table(a)
+    if not tab:
+        return None, 'no MSVC object emits the vftable at %08x' % a
+    if slot >= len(tab):
+        return None, 'slot beyond the vftable (%d slots)' % len(tab)
+    if tab[slot][0] is None:
+        return None, 'slot target undecided (views disagree)'
+    return tab[slot][0], ''
+
+
+def is_object_path(text):
+    return text.endswith(('.o', '.a', '.obj')) or (os.sep in text and os.path.isfile(text))
+
+
+def load_overrides(path, lib=None):
+    """Override table (tab-separated, '#' comments): address or vslot:<vftable>:<slot>, native symbol, then either
+    the object or archive that defines it or free text (the native signature, notes: render/native/overrides.tsv),
+    [an MSVC-decorated signature for the references]. -> [(address or ('vslot', vftable, slot), symbol, object)]:
+    the object is column 3 when it names one, else `lib` (--override-lib), else None."""
     out = []
     if path:
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
             f = line.rstrip('\n').split('\t')
-            if line.startswith('#') or len(f) < 3:
+            if line.startswith('#') or len(f) < 2 or not f[0].strip():
                 continue
-            out.append((int(f[0], 16), f[1], f[2]))
+            obj = f[2] if len(f) > 2 and is_object_path(f[2]) else lib
+            out.append((override_key(f[0]), f[1], obj))
+    return out
+
+
+def override_pending(path):
+    """Keys of the rows whose notes say N1-pending (S6n: the symbol is planned, not built yet)."""
+    out = set()
+    if path:
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) > 2 and 'N1-pending' in '\t'.join(f[2:]):
+                out.add(override_key(f[0]))
     return out
 
 
@@ -1377,8 +1460,8 @@ def load_override_sigs(path):
     if path:
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
             f = line.rstrip('\n').split('\t')
-            if not line.startswith('#') and len(f) >= 4 and f[3]:
-                out[int(f[0], 16)] = f[3]
+            if not line.startswith('#') and len(f) >= 4 and re.match(r'^[?@_][^\s]*$', f[3]):
+                out[override_key(f[0])] = f[3]
     return out
 
 
@@ -2052,16 +2135,13 @@ def main():
         argv, opts = [], {}
         it_ = iter(sys.argv[2:])
         for x in it_:
-            if x in ('--override', '--extern-text', '--crt-symbols', '--imports', '--units-renames'):
+            if x in ('--override', '--override-lib', '--extern-text', '--crt-symbols', '--imports', '--units-renames'):
                 opts[x[2:].replace('-', '_')] = next(it_)
             else:
                 argv.append(x)
         resolve(*argv[:3], override=opts.get('override'), extern_list=opts.get('extern_text'),
                 crt_symbols=opts.get('crt_symbols'), imports=opts.get('imports'),
-                units_renames=opts.get('units_renames'))
-        with open(os.path.join(argv[2], 'overrides.list'), 'w') as f:
-            for _, _, obj in load_overrides(opts.get('override')):
-                f.write(obj + '\n')
+                units_renames=opts.get('units_renames'), override_lib=opts.get('override_lib'))
     elif cmd in ('probe', 'vtables'):
         jobs = int(sys.argv[4]) if len(sys.argv) > 4 else os.cpu_count()
         if cmd == 'probe':
