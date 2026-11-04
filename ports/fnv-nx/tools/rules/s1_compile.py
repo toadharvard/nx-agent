@@ -3,6 +3,7 @@
 Each rule is fn(path, text, stats) -> text (see tools/rules/README.md); ids are cited in the journal.
 """
 import bisect
+import collections
 import os
 import re
 import sys
@@ -4645,7 +4646,67 @@ def r_forceinline_declarations(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- EBO2
+#
+# A class C that introduces its own vfptr (it declares a virtual function; its only base is not polymorphic) with an
+# empty base B: MSVC puts the vfptr at 0 and B after it, at +4; the Itanium ABI puts the empty B at offset 0, under the
+# vptr. The members of C are at the same offsets either way (B takes no room), but B's address differs. That matters
+# for the decomp's method-only stand-ins (effectitemlist.cpp: `struct EffectItemList : BSSimpleList_Standin { virtual
+# ~EffectItemList(); int m_iEffectCount; }` whose base methods are bound to BSSimpleList's code in the exe): the exe
+# passes this+4 to them (0x00405fe0 -> IsEmpty 0x008256d0; the pristine unit matches the exe byte for byte), the build
+# passed this+0, the vptr, as the list (S13b layout-offset). EBO2 writes FNVNX_EBO2 first in B's body: under GCC a
+# zero-length array (B is no longer empty, still 0 bytes, so it goes after the vptr and the members keep their
+# offsets), empty under MSVC. Only where B is defined in the file without bases and without data or virtual
+# functions, every class of the file that derives from B has it as its only base, at least one of them introduces a
+# vfptr, and B is never used as an object (its name only as a base, in `B*` / `B&`, `B::`, or in its own body): the
+# zero size changes nothing else.
+
+FNVNX_EBO2_USE = re.compile(r'\s*(?:[*&]|::|\))')
+
+def r_vfptr_empty_base(path, text, stats):
+    """EBO2: FNVNX_EBO2 in an empty base B of a class introducing its own vfptr: B after the vptr, as MSVC (above)."""
+    if 'virtual' not in text or ':' not in text: return text
+    spans = None
+    defs, derived = {}, collections.defaultdict(list)
+    for m in EBO_CLASS.finditer(text):
+        defs.setdefault(m.group(1), []).append(m)
+        if m.group(2):
+            for b in _split_bases(m.group(2)):
+                b = re.sub(r'^(?:(?:public|protected|private)\s+)+', '', b).strip()
+                derived[b].append(m)
+    edits = []
+    for b, ms in derived.items():
+        if not re.match(r'^[A-Za-z_]\w*$', b) or len(defs.get(b, ())) != 1: continue
+        bd = defs[b][0]
+        if bd.group(2): continue                                          # B has bases of its own
+        bo = bd.end() - 1
+        bc = prepare.match_brace(text, bo)
+        if not _ebo_empty_class(text, bo, bc): continue
+        intro = False
+        for m in ms:
+            if len(_split_bases(m.group(2))) != 1 or re.search(r'\bvirtual\b', m.group(2)): break
+            o = m.end() - 1
+            if re.search(r'\bvirtual\b', _flat_body(text, o, prepare.match_brace(text, o))): intro = True
+        else:
+            if not intro: continue
+            heads = {mm.start() for mm in ms} | {bd.start()}
+            bad = False
+            for u in re.finditer(r'(?<![\w~:])%s\b' % re.escape(b), text):
+                if bo < u.start() < bc: continue                          # B's own body (its constructors)
+                pre = text[max(0, u.start() - 40):u.start()]
+                if any(h <= u.start() < h + 400 and text.find('{', h) > u.start() for h in heads): continue
+                if FNVNX_EBO2_USE.match(text, u.end()): continue           # B*, B&, B::, (B)
+                if re.search(r'(?:class|struct)\s+$', pre): continue       # a forward declaration / elaborated use
+                bad = True; break
+            if bad: continue
+            edits.append(bo + 1)
+    if not edits: return text
+    for at in sorted(edits, reverse=True):
+        text = text[:at] + ' FNVNX_EBO2 /* fnv-nx EBO2 */' + text[at:]
+    stats['EBO2'] += len(edits)
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
-              r_namespace_crt_calls, r_forceinline_declarations]
+              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base]
 RULES += REFS_RULES

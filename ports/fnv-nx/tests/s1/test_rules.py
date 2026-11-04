@@ -1288,6 +1288,34 @@ check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overlo
 check('FINL1 headers are left alone',
       run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
 
+# ---- S1-refs: EBO2 (an empty base of a class that introduces its own vfptr goes after the vptr, as in MSVC)
+_E = ('struct Lst\n{\n    bool IsEmpty();\n    Lst* Next();\n};\n'
+      'struct Holder : public Lst\n{\n    virtual ~Holder();\n    int m_iCount;\n};\n'
+      'struct Plain : public Lst\n{\n    int x;\n};\n'
+      'bool f(Holder* h) { return ((Lst*)h)->IsEmpty() || h->Next() == 0; }\n')
+_eo = run(s1.r_vfptr_empty_base, _E)
+check('EBO2 FNVNX_EBO2 first in the empty base of a class introducing a vfptr', _eo,
+      ['struct Lst\n{ FNVNX_EBO2 /* fnv-nx EBO2 */\n'], ['struct Holder : public Lst\n{ FNVNX'])
+check('EBO2 a base used as an object is left alone',
+      run(s1.r_vfptr_empty_base, _E + 'Lst g_list;\n'), [], ['FNVNX_EBO2'])
+check('EBO2 no class introducing a vfptr: nothing',
+      run(s1.r_vfptr_empty_base, _E.replace('virtual ~Holder();', '~Holder();')), [], ['FNVNX_EBO2'])
+check('EBO2 a base with data: nothing',
+      run(s1.r_vfptr_empty_base, _E.replace('bool IsEmpty();', 'int head;\n    bool IsEmpty();')), [], ['FNVNX_EBO2'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _cE = os.path.join(tempfile.mkdtemp(), 'e2.cpp')
+    _mE = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_EBO2 ')]
+    open(_cE, 'w').write('#include <stddef.h>\n' + ''.join(_mE) + _eo +
+                         'Holder::~Holder() {}\nstatic Holder g_h;\nstatic_assert(sizeof(Holder) == 8, "size");\n'
+                         'static_assert(sizeof(Plain) == 4, "plain");\n'
+                         'int off() { return (int)((char*)(Lst*)&g_h - (char*)&g_h); }\n'
+                         'static_assert(offsetof(Holder, m_iCount) == 4, "count");\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', _cE],
+                         capture_output=True, text=True)
+    check('EBO2 output: the base after the vptr (+4), members and sizes unchanged (ILP32)',
+          _r.stderr or _r.stdout, ['mov\tw0, 4'], ['error'])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''
