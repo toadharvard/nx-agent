@@ -147,6 +147,11 @@ def main():
         v3 = abi.compare(sigs.parse_msvc(rn, d3[rn]), c3) if c3 is not None else None
         check(v3 is not None and v3.kind == 'same', 'C-named %s against %s: %s' % (
             cn, d3[rn], c3 and (c3.raw_ret, c3.raw_params, v3.kind, v3.classes)))
+    # V1 R4-2 (adversarial_cname c10): a __declspec(noreturn) / __attribute__((...)) declaration is read too
+    cdn = fnvlink.CDecls('extern "C" __declspec(noreturn) void __cdecl FUN_00c100e0(int a);\n'
+                         'extern "C" __attribute__((noreturn)) void FUN_00c100f0(void);\n')
+    check(cdn.find('FUN_00c100e0') == [('void', ['int'])] and cdn.find('FUN_00c100f0') == [('void', [])],
+          'noreturn declarations: %s %s' % (cdn.find('FUN_00c100e0'), cdn.find('FUN_00c100f0')))
     check(cd3.find('FUN_00c10040') == [] and cd3.find('FUN_00c10050') == [],
           'calls and class members are not declarations: %s %s' % (cd3.find('FUN_00c10040'), cd3.find('FUN_00c10050')))
     # R3-1: undeclared, a stdcall/fastcall name is compared through integer parameters with the other side's own

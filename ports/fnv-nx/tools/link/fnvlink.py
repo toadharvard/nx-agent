@@ -1784,8 +1784,11 @@ TYPE_WORDS = {'int', 'char', 'short', 'long', 'float', 'double', 'void', 'bool',
               'volatile', 'struct', 'class', 'union', 'enum', '__int64', 'wchar_t'}
 CODE_NOISE = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|^[ \t]*#(?:[^\n]*\\\n)*[^\n]*',
                         re.S | re.M)
+# specifiers before a declaration's result type; __declspec(...) / __attribute__((...)) end in a parenthesis, so no
+# word boundary after them (V1 R4-2: `__declspec(noreturn) void f();` was not read)
 DECL_SPEC = re.compile(r'\b(?:extern|static|inline|__inline|__forceinline|virtual|friend|FNVNX_KEEP|WINAPI|CALLBACK|'
-                       r'__declspec\s*\([^()]*\)|__(?:cdecl|stdcall|fastcall|thiscall))\b')
+                       r'__(?:cdecl|stdcall|fastcall|thiscall))\b|\b__declspec\s*\([^()]*\)'
+                       r'|\b__attribute__\s*\(\([^()]*(?:\([^()]*\)[^()]*)*\)\)')
 NOT_A_TYPE = {'return', 'else', 'case', 'goto', 'throw', 'new', 'delete', 'sizeof', 'do', 'typedef', 'if', 'while',
               'for', 'switch', 'using', 'operator', 'co_return', 'default'}
 
