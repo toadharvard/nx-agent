@@ -1557,7 +1557,7 @@ class Card:
         target: pass (the hi case fits) counts only with a measurement in the inputs (frameprof or the render report);
         a model-only pass, or uncertain (lo fits, hi does not), is no-data; fail (even the lo case misses) fails."""
         bt = self.th['perf'].get('budget', {})
-        scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'stretch_60')
+        scen_id, target = bt.get('scenario', 'placed'), bt.get('target', 'target_60')
         doc, src = None, None
         hits = []
         for br in self.report_branches():
@@ -1591,7 +1591,8 @@ class Card:
         for clk in self.th['perf']['clocks']:
             gid, req = 'perf.budget.' + clk['name'], clk.get('required', True)
             title = 'S15 whole-frame CPU budget, scenario %s (%s clock %.3f GHz)' % (scen_id, clk['name'], clk['hz'] / 1e9)
-            thr = 'verdict %s = pass on a measured frame' % target
+            tms = round(1000.0 / self.th['perf']['fps']['target'], 1)
+            thr = 'worst frame <= %.1f ms (hi case) on a measured frame' % tms
             s = scen.get(scen_id)
             res = ((s or {}).get('results') or {}).get(str(int(round(clk['hz'] / 1e6))))
             if not isinstance(res, dict):
@@ -1599,16 +1600,21 @@ class Card:
                             'no scenario %s at %d MHz' % (scen_id, clk['hz'] / 1e6), rank=22,
                             sources=[src] if src else None, required=req)
                 continue
-            v = (res.get('verdicts') or {}).get(target)
-            wf = res.get('worst_frame_ms') or {}
+            # J-0150 / V1 R16: the gate judges the worst frame itself against the target's frame time; S15's own
+            # verdicts (a stretch target is judged on the typical frame) are shown, never used
+            wf = dct(res.get('worst_frame_ms'))
+            lo, hi = wf.get('lo'), wf.get('hi')
+            v = (None if not (posnum(lo) and posnum(hi) and lo <= hi) else
+                 'pass' if hi <= tms else 'fail' if lo > tms else 'uncertain')
             others = ', '.join('%s %s' % (k, (((x.get('results') or {}).get(str(int(round(clk['hz'] / 1e6)))) or {})
                                              .get('level', '?'))) for k, x in scen.items() if k != scen_id)
-            note = 'verdicts %s; level (mid case) %s; critical core %s; inputs: %s; other scenarios: %s' % (
-                ', '.join('%s %s' % kv for kv in (res.get('verdicts') or {}).items()), res.get('level'),
+            note = 'worst frame against %.1f ms: %s; S15 verdicts (not used) %s; level (mid case) %s; critical core %s; inputs: %s; other scenarios: %s' % (
+                tms, v or 'no worst_frame_ms', ', '.join('%s %s' % kv for kv in dct(res.get('verdicts')).items()),
+                res.get('level'),
                 res.get('critical_core'), '+'.join(measured) or 'the model alone [E]', others or '-')
             st = FAIL if v == 'fail' else PASS if v == 'pass' and measured else NODATA
             if st == NODATA:
-                note = ('%s: %s; ' % (target, v or 'missing') + ('needs a measured frame (frameprof on the main loop, '
+                note = ('worst frame %s; ' % (v or 'missing') + ('needs a measured frame (frameprof on the main loop, '
                         'B1 on hardware)' if v != 'pass' else 'model only, needs a measurement') + '; ' + note)
             self.gate(gid, 'Performance', title, 'worst frame %s ms mid (%s - %s)' % (
                 wf.get('mid', '?'), wf.get('lo', '?'), wf.get('hi', '?')), thr, st, src, note, rank=22, required=req,

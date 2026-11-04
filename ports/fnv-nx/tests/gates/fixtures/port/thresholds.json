@@ -100,9 +100,9 @@
   "boot_to_winmain_s": 3.0,
   "boot_clock": "stock",
   "budget": {
-   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock (stretch_60: the mid worst frame <= 16.7 ms, J-0150)",
+   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock (target_60: the mid worst frame <= 16.7 ms, J-0150)",
    "scenario": "placed",
-   "target": "stretch_60",
+   "target": "target_60",
    "model": "docs/PERF_budget.json"
   }
  },

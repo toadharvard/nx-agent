@@ -52,7 +52,7 @@ at 720p **[E]**; section 9 lists the tests.
 
 ## 2. The budget
 
-(The 30 fps target of this section is superseded by 45 fps stable / 60 fps stretch, J-0132: section 11.)
+(The 30 fps target of this section is superseded by 60 fps stable, J-0150: section 11.)
 
 * Cortex-A57 at 1.02 GHz: 34.0 M cycles per 33.3 ms frame per core; games get cores 0-2 (core 3 is the system's;
   `os_horizon.c` returns 3 from `os_cpu_count`).
@@ -520,8 +520,9 @@ All of them print counts and names only; their outputs over decomp-derived objec
 
 ## 11. 45 / 60 fps: the frame budget and the plan
 
-Targets (owner, J-0132; they supersede the 30 fps of section 2): **45 fps stable** (worst frame 22.2 ms) is the
-goal, **60 fps** (16.7 ms, may be unstable) the stretch, **below 30 fps** (33.3 ms) a fail. Both CPU clocks count:
+Targets (owner, J-0150; they supersede J-0132's 45 fps goal and 60 fps stretch): **60 fps stable** (`target_60`:
+the worst frame at or under 16.7 ms at the 1.02 GHz stock clock) is the target, 45 fps (22.2 ms) is informational,
+**below 30 fps** (33.3 ms) a fail. Both CPU clocks count:
 1020 MHz stock and 1785 MHz, which the owner can set on their console.
 
 ### 11.1 The budget file (`tools/perf/frame_budget.py` -> `fnvnx-frame-budget/1`)
@@ -535,7 +536,7 @@ docked 720p GPU [E]) and frameprof of the boot on the owner's exe (section 4; bo
 tools/perf/frame_budget.py --frameprof boot-prof.json --render render/native/perf/report.json --out docs/PERF_budget.json
 ```
 
-`gates` holds one level per scenario and clock (`fail`, `pass_30`, `pass_45`, `stretch_60`); each scenario's
+`gates` holds one level per scenario and clock (`fail`, `pass_30`, `pass_45`, `target_60`; all on the worst frame, J-0150); each scenario's
 `results.<clock>.verdicts` says per target `pass` (even the pessimistic case fits), `fail` (even the optimistic
 case does not) or `uncertain`. Schema in the tool's docstring.
 
@@ -554,7 +555,7 @@ case does not) or `uncertain`. Schema in the tool's docstring.
   as the scheduler balances inside a mask. Core 3 only in scenarios with the `core3` lever.
 * **Frame time** = the largest core's time (the main thread waits for the AI linear threads at 0x008c7990, so the
   slowest core is the critical path), or the GPU's if larger. The worst frame is the mean times
-  `worst_frame_factor`; floor and goal targets are checked on the worst frame, the stretch on the mean.
+  `worst_frame_factor`; every target is checked on the worst frame.
 
 **Assumptions** (all explicit in the JSON, each with a range; lo case = least work, highest IPC):
 
@@ -573,8 +574,8 @@ inside the target at the 1.25 factor):
 | target | frame | 1020 MHz | 1785 MHz |
 |---|---|---:|---:|
 | 30 fps (floor) | 33.3 ms | 27.2 M (21.7) | 47.5 M (38.0) |
-| 45 fps (goal) | 22.2 ms | 18.1 M (14.5) | 31.7 M (25.4) |
-| 60 fps (stretch) | 16.7 ms | 13.6 M | 23.9 M |
+| 45 fps (informational) | 22.2 ms | 18.1 M (14.5) | 31.7 M (25.4) |
+| 60 fps stable (`target_60`, worst frame) | 16.7 ms | 13.6 M (10.9 M mean) | 23.9 M (19.1 M mean) |
 
 ### 11.2 Where the main thread's work goes
 
@@ -614,21 +615,20 @@ measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked 
 | - | clock 1785 MHz | x1.75 on every core | owner's console setting | no |
 
 **Result** (`docs/PERF_budget.json`; frame = critical core, here always core 0, or the GPU if larger; mid with the
-lo-hi range; level by the mid case):
+lo-hi range; level by the mid **worst** frame, J-0150: `target_60` = worst frame <= 16.7 ms, `pass_45` informational):
 
 | scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
 |---|---:|---|---|---|---|
-| placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.2 | **fail** | 16.1 (7.3-31.0) / 20.1 | stretch_60 |
-| plan45 (mt_cull, havok_workers, threaded_anim) | 17.2 (8.5-27.0) | 21.1 (8.4-44.1) / 26.4 | pass_30 | 12.1 (7.1-25.2) / 15.1 | stretch_60 |
-| plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | **pass_45** | 9.9 (7.1-22.0) / 12.4 | stretch_60 |
-| plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | stretch_60 | 9.7 (7.1-20.6) / 12.1 | stretch_60 |
+| placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.2 | **fail** | 16.1 (7.3-31.0) / 20.1 | pass_45 |
+| plan45 (mt_cull, havok_workers, threaded_anim) | 17.2 (8.5-27.0) | 21.1 (8.4-44.1) / 26.4 | pass_30 | 12.1 (7.1-25.2) / 15.1 | target_60 |
+| plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | pass_45 | 9.9 (7.1-22.0) / 12.4 | target_60 |
+| plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | pass_45 | 9.8 (7.1-20.6) / 12.3 | target_60 |
 
-Reading it: **45 fps at stock clock needs the main thread under ~14.5 M mean** (worst frame 22.2 ms at the 1.25
-factor). With the measured renderer, the placed mid case (23.8 M) misses even 30 fps on its worst frame at
-1020 MHz, and the earlier plan45 now only reaches 30 fps there. 45 fps at 1020 MHz needs plan45b: the three
-threading levers plus the next three rows of the queue (11.5), 14.1 M mid, worst frame 21.7 ms. At 1785 MHz the mid
-case meets 60 fps from plan45 on (placed: 45 fps). Every verdict is still `uncertain` (2.6x spread of work, 1.7x of
-IPC); the lo end of the 1785 MHz cases is the docked 720p GPU estimate (7.05 ms) now that the render report gives it.
+Reading it (owner's target J-0150: 60 fps stable, worst frame <= 16.7 ms at 1.02 GHz): **that needs the main thread
+under ~10.9 M mean** (`budget_mean_minsn.1020.target_60`, at the 1.25 worst-frame factor and IPC 0.8). No plan
+reaches it yet: plan60 (12.9 M) lands at a 19.8 ms worst frame, about 3 M short. The as-built mid case (22.9 M)
+misses even 30 fps at 1020 MHz. At 1785 MHz plan45 already meets the target. Every verdict is still `uncertain`
+(2.6x spread of work, 1.7x of IPC).
 The two measurements that close it stay frameprof on a real frame and B1 (IPC) on hardware.
 
 ### 11.4 Hotspots (`hotspots[]` in `fnvnx-frame-budget/1`)
