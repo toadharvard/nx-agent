@@ -2,7 +2,7 @@
 """NX1 check 6: the native renderer's device integration (owner decision: the native deko3d path is the target;
 Gallium Nine is not checked). The render machine owns render/native; this checks how it meets the console.
 
-    check_gpu.py [--host-elf host.elf]
+    check_gpu.py [--host-elf host.elf] [--guest-elf fnvnx.elf] [--build <full build dir>]
 
   init     nxgpu_init (render/native/host/nxgpu.c): dkDeviceCreate with a debug callback; every object it creates
            (memory blocks, queue, swapchain, command buffers, the render thread) is checked before use, so a failed
@@ -18,11 +18,17 @@ Gallium Nine is not checked). The render machine owns render/native; this checks
   paths    every sdmc: path of the native host inside FNVNX_SD_DIR;
   console  nothing desktop-only (GLX/WGL/X11/SDL/EGL-X11, /dev/dri, DISPLAY);
   package  (with --host-elf) the packaged host is the native one (dkDeviceCreate) and built without libnx's text
-           console (FNVNX_HOST_NO_CONSOLE: the console and deko3d would both take the default window).
+           console (FNVNX_HOST_NO_CONSOLE: the console and deko3d would both take the default window);
+  path     the guest-to-host render path: the guest's front (render/native/front/front.cpp nx::GpuBackend) refuses a
+           host whose NXGPU_MAGIC/NXGPU_VERSION differ; the ext module id is the host's only user of it; (with
+           --guest-elf) the packaged guest links the native front (LINK_OVERRIDES=render, libnxrender.a); (with
+           --build) the guest's libnxrender.a and the host were built against the same gpu_abi.h (the link stage's
+           render_abi, from the archive's .abi sidecar, equals the host stage's gpu_abi).
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -53,7 +59,7 @@ def body(text, fn):
 
 
 def cexpr(expr: str, defs: dict[str, int]) -> int | None:
-    e = re.sub(r'(\d+)u\b', r'\1', expr)
+    e = re.sub(r'\b(0[xX][0-9a-fA-F]+|\d+)[uU]?[lL]{0,2}\b', r'\1', expr)
     e = re.sub(r'\b[A-Z_][A-Z0-9_]*\b', lambda m: str(defs.get(m.group(0), "None")), e)
     if "None" in e or re.search(r'[^0-9xa-fA-F+\-*/()<>\s&~|]', e):
         return None
@@ -63,7 +69,14 @@ def cexpr(expr: str, defs: dict[str, int]) -> int | None:
         return None
 
 
-def check(host_elf) -> Checks:
+def stage_rec(build, name):
+    try:
+        return json.load(open(os.path.join(build, name, "stage.json")))
+    except (OSError, ValueError):
+        return {}
+
+
+def check(host_elf, guest_elf=None, build=None) -> Checks:
     c = Checks()
     sd = parse_layout()["FNVNX_SD_DIR"]
     files = {}
@@ -95,20 +108,31 @@ def check(host_elf) -> Checks:
     print(f"info native output {size}; docked: {'operation mode' if docked else 'VI scales the 720p images'}")
     c.ok("present.calls", "dkQueueAcquireImage" in gpu and "dkQueuePresentImage" in gpu, "no acquire/present pair")
 
-    defs = {k: int(v.replace("u", ""), 0) for k, v in re.findall(r'#define\s+(\w+)\s+\(?(\d+u?)\)?\s', gpu)}
-    for k, v in re.findall(r'#define\s+(\w+)\s+\((\d+u?\s*<<\s*\d+)\)', gpu):
-        defs[k] = cexpr(v, defs) or 0
+    # every object-like #define's whole body, evaluated in order (a later define may use an earlier one); a body that
+    # is not a constant expression stays out, and a pool that uses it is unknown (V1 NX1-G3: (600u * 1024 * 1024)
+    # was read as 600)
+    defs: dict[str, int] = {}
+    for k, v in re.findall(r'^#define[ \t]+([A-Z_][A-Z0-9_]*)[ \t]+([^\n]+)$', gpu, re.M):
+        val = cexpr(v.strip(), defs)
+        if val is not None:
+            defs[k] = val
     fb = cexpr("1280 * 720 * 4 * 3", {}) if size == (1280, 720) else (size[0] * size[1] * 4 * 3 if size else 0)
-    pool, parts = fb, [f"framebuffers {fb / MIB:.1f}"]
+    pool, parts, unknown = fb, [f"framebuffers {fb / MIB:.1f}"], []
+    desc = re.search(r'uint32_t\s+descSize\s*=\s*([^;]+);', init)
     for m in re.finditer(r'host_block\(([^,]+),', init):
         expr = m.group(1).strip()
         if "fbSize" in expr:
             continue
         v = cexpr(expr, defs)
-        if v is None and expr == "descSize":
+        if v is None and expr == "descSize" and desc:   # NX_MAX_IMAGES/SAMPLERS * descriptor sizes: bounded at 64 KiB
             v = 64 << 10
-        pool += v or 0
-        parts.append(f"{expr} {(v or 0) / MIB:.1f}")
+        if v is None:
+            unknown.append(expr)
+            continue
+        pool += v
+        parts.append(f"{expr} {v / MIB:.1f}")
+    c.ok("pools.known", not unknown, f"GPU pool sizes that cannot be evaluated: {unknown} (a pool of unknown size cannot "
+         "be shown to fit)")
     heap = re.search(r'#define\s+NXGPU_HOST_HEAP_MIB\s+(\d+)', host)
     heap = int(heap.group(1)) * MIB if heap else 0
     c.ok("pools.fit", heap and pool + 64 * MIB <= heap, f"GPU pools {pool / MIB:.0f} MiB + 64 MiB > host heap {heap >> 20} MiB")
@@ -120,8 +144,37 @@ def check(host_elf) -> Checks:
     c.ok("paths.inside", not stray, "; ".join(stray[:4]))
     bad = [f"{p}: {m.group(0)}" for p, s in files.items() for rx in DESKTOP for m in re.finditer(rx, s)]
     c.ok("console.only", not bad, "; ".join(bad[:4]))
+    # the guest-to-host path
+    def read_or_empty(*rel):   # a missing source is a failed item below, never a crash that hides the other results
+        try:
+            return open(os.path.join(ROOT, *rel), errors="replace").read()
+        except OSError:
+            return ""
+    front = strip_comments(read_or_empty("render", "native", "front", "front.cpp"))
+    gb = body(front, "GpuBackend")
+    c.ok("path.handshake", "NXGPU_MAGIC" in gb and "NXGPU_VERSION" in gb,
+         "the guest front does not refuse a host with another nxgpu ABI (magic/version)")
+    abi = read_or_empty("render", "native", "include", "nx", "gpu_abi.h")
+    mod = re.search(r'#define\s+NXGPU_EXT_MODULE\s+(\d+)u', abi)
+    hostapi = read_or_empty("toolchain", "include", "fnvnx", "hostapi.h")
+    others = {int(v) for v in re.findall(r'#define\s+FNVNX_EXT_\w+\s+(\d+)u', hostapi)} | {9}   # 9: Nine's module
+    c.ok("path.module_id", mod is not None and int(mod.group(1)) not in others,
+         f"NXGPU_EXT_MODULE {mod.group(1) if mod else None} collides with another ext module {sorted(others)}")
+    nm = shutil.which("aarch64-linux-gnu-nm") or shutil.which("nm")
+    if guest_elf:
+        gsyms = subprocess.run([nm, guest_elf], capture_output=True, text=True, errors="replace").stdout if nm else ""
+        c.ok("path.guest_front", "2nx10GpuBackend" in gsyms, "the packaged guest links no native front (nx::GpuBackend): "
+             "the game never calls the renderer; the full build needs LINK_OVERRIDES=render (libnxrender.a)")
+    else:
+        c.ok("path.guest_front", False, "no guest ELF: whether the guest links the native renderer is unknown")
+    if build:
+        link, host_r = stage_rec(build, "link"), stage_rec(build, "host")
+        ra, ha = link.get("render_abi"), host_r.get("gpu_abi")
+        c.ok("path.abi", ra and ha and ra == ha, f"guest libnxrender.a ABI {ra or 'none (no LINK_OVERRIDES=render)'} "
+             f"vs host gpu_abi.h {ha or 'none (not the native host)'}")
+    else:
+        c.ok("path.abi", False, "no build directory: the guest's and the host's nxgpu ABI cannot be compared")
     if host_elf:
-        nm = shutil.which("aarch64-linux-gnu-nm") or shutil.which("nm")
         syms = subprocess.run([nm, host_elf], capture_output=True, text=True, errors="replace").stdout if nm else ""
         native = "dkDeviceCreate" in syms
         c.ok("package.native", native, "the packaged host is not the native renderer's (HOST=plain draws nothing; the "
@@ -137,8 +190,10 @@ def check(host_elf) -> Checks:
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--host-elf")
+    ap.add_argument("--guest-elf")
+    ap.add_argument("--build")
     a = ap.parse_args(argv)
-    c = check(a.host_elf)
+    c = check(a.host_elf, a.guest_elf, a.build)
     c.print()
     print(f"gpu: {sum(r[1] for r in c.rows)}/{len(c.rows)} pass -> {'PASS' if c.passed else 'FAIL'}")
     return 0 if c.passed else 1

@@ -53,6 +53,16 @@ class Xvfb:
         except subprocess.TimeoutExpired: self.p.kill()
 
 
+def prefix_lock(prefix):
+    """one Wine user of a prefix at a time: a run ends with `wineserver -k`, which kills a concurrent run's
+    processes in the same prefix (seen: a d9cap test failing beside a compare run). Held while the file is open."""
+    import fcntl
+    os.makedirs(prefix, exist_ok=True)
+    f = open(os.path.join(os.path.realpath(prefix), '.s16-replay.lock'), 'w')   # realpath: symlinked prefixes share it
+    fcntl.flock(f, fcntl.LOCK_EX)
+    return f
+
+
 def counters(d):
     p = os.path.join(d, 'summary.txt')
     return open(p).read().strip() if os.path.isfile(p) else ''
@@ -101,6 +111,7 @@ def main():
     meta['lp_threads'] = os.environ.get('LP_NUM_THREADS', '')
     if a.side == 'ref':
         if not (a.exe and a.prefix): ap.error('ref needs --exe and --prefix')
+        lock = prefix_lock(a.prefix)  # noqa: F841 (held until exit)
         x = Xvfb()
         try:
             env = wine_env(a.prefix, x.display)

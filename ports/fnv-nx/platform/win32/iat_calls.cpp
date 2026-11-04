@@ -5,6 +5,10 @@
  * as trap stubs. Each one here does what the original does: it loads the slot (which the boot's import binding
  * filled with the native export, platform/win32/exports.cpp) and branches to it with the caller's arguments
  * untouched. The units pass the import's arguments in order (checked at the call sites).
+ * They are code because every reference the compiled units make is a call (R_AARCH64_P32_CALL26 on link
+ * 06857911f5ab), and S2's address map binds the exe's `jmp [slot]` thunks (0x00ee6dbc, 0x00ee6e2e, 0x00ee820a) to
+ * them as functions; a unit that read the slot as a pointer goes through __fnv_<slot> (the slot itself) instead.
+ * tests/s4/iat_calls_check.sh <link fixed/> fails if a unit ever references one of these names as data.
  *
  * The table names slot, DLL and import; `make -C tests/s4 iat EXE=...` checks every row against the exe's import
  * directory. The thunks are AArch64 only (the guest); host builds get the table. */

@@ -304,6 +304,7 @@ def _fuzz_body(out, item, opts, uc, pair, target, src, addr, t0):
         zv = world.Case(seed=1, vptrs={a: vs[0] for a, vs in gen.vt.items()})
         queue.insert(1, zv)
     i = 0
+    dropped = {}
     while i < iters and (not tlimit or time.time() - t0 < tlimit):
         case = queue.pop() if queue else (gen.mutate(random.Random(i).choice(corpus)) if corpus and
                                           gen.r.random() < 0.8 else gen.fresh())
@@ -334,6 +335,14 @@ def _fuzz_body(out, item, opts, uc, pair, target, src, addr, t0):
         mdiv = mdiv or div
         hint = classify.hint(pair, target, mcase, mdiv, fn, opts['max_steps'])
         out['execs'] += hint.pop('_runs', 0)
+        if hint.get('uniform') == 'agree':
+            # both machines read garbage and agree when it is the same: not a difference of the port
+            # (difffuzz-18); after 3 such cases of one kind that kind is not probed again for this function
+            out['uninit_dropped'] = out.get('uninit_dropped', 0) + 1
+            dropped[sig] = dropped.get(sig, 0) + 1
+            if dropped[sig] >= 3:
+                sigs[sig] = None
+            continue
         rec = dict(source=src, address=item['address'], symbol=item.get('symbol'), conv=out['conv'], divergence=mdiv,
                    hint=hint, case=mcase.to_json(), found_at=i)
         os.makedirs(os.path.join(opts['out'], 'div'), exist_ok=True)
@@ -342,7 +351,7 @@ def _fuzz_body(out, item, opts, uc, pair, target, src, addr, t0):
         sigs[sig] = path
         out['divergences'].append(dict(kind=sig, cause=hint.get('cause'), file=os.path.basename(path),
                                        soft=bool(mdiv.get('soft'))))
-        if len(sigs) >= 3:
+        if sum(1 for v in sigs.values() if v) >= 3:
             break
     out['coverage'] = len(cov)
     out['corpus'] = len(corpus)

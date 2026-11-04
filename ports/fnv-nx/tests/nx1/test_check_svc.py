@@ -24,6 +24,14 @@ CASES = [  # (encoding, expected kind or None, what)
     (0xD53B4400, None, "mrs x0, fpcr"), (0xD51B4420, None, "msr fpsr, x0"), (0xD53B4200, None, "mrs x0, nzcv"),
     (0xD53B00E0, None, "mrs x0, dczid_el0"), (0xD53B4220, "bad", "mrs x0, daif"),
     (0x8B020020, None, "add x0, x1, x2"), (0x94000000, None, "bl"),
+    # newer than ARMv8.0: UNDEFINED on the Cortex-A57 (encodings from GNU as -march=armv8.5-a+...)
+    (0xD50B7C20, "bad", "dc cvap, x0 (v8.2)"), (0xB8220020, "bad", "ldadd w2, w0, [x1] (v8.1 LSE)"),
+    (0xC8E0FC41, "bad", "casal x0, x1, [x2] (v8.1 LSE)"), (0xF8218040, "bad", "swp x1, x0, [x2] (v8.1 LSE)"),
+    (0xB8BFC020, "bad", "ldapr w0, [x1] (v8.3 RCpc)"), (0x1EE22820, "bad", "fadd h0, h1, h2 (v8.2 FP16)"),
+    (0x4E421420, "bad", "fadd v0.8h, v1.8h, v2.8h (v8.2 FP16)"), (0xD65F0BFF, "bad", "retaa (v8.3 PAuth)"),
+    (0x1EE24020, None, "fcvt s0, h1 (v8.0)"), (0x1E23C020, None, "fcvt h0, s1 (v8.0)"),
+    (0x88DFFC20, None, "ldar w0, [x1] (v8.0)"), (0xC89FFC20, None, "stlr x0, [x1] (v8.0)"),
+    (0xD503233F, None, "paciasp (hint, a NOP on v8.0)"), (0xD65F03C0, None, "ret"),
 ]
 
 

@@ -4,9 +4,10 @@
  * P[i][j] = (A[0][i] B[0][j] + A[1][i] B[1][j]) + A[2][i] B[2][j]: row i of the product is a sum of B's rows, each
  * scaled by one element of A's column i. Per row: a multiply by element, then two multiply + add pairs over the
  * row's lanes, in the decomp's order, float operations, no fused multiply-add (build.sh: -ffp-contract=off).
- * Bit-identical lane by lane for every non-NaN result (tests/s15/simd/mat3_test.c); 27 fmul + 18 fadd become 9 + 6. A NaN result is a NaN, but its sign and payload may differ from the decomp's
- * compiled code: when two NaN operands meet, AArch64 returns the first one, and GCC commutes operands freely in
- * either build (V1, SL1). The tests accept any NaN for any NaN; PERF.md 11.6 says why no new difference arises.
+ * Bit-identical lane by lane for every non-NaN result (tests/s15/simd/mat3_test.c); 27 fmul + 18 fadd become 9 + 6.
+ * A NaN result is a NaN, but its sign and payload may differ from the decomp's compiled code: when two NaN
+ * operands meet, AArch64 returns the first one, and GCC commutes operands freely in either build (V1, SL1).
+ * The tests accept any NaN for any NaN; PERF.md 11.6 says why no new difference arises.
  *
  * ABI as GCC compiles the decomp's member: this in x0, kMat in x1, the 36-byte result through x8. The last row of
  * each input is loaded as 8 + 4 bytes (no read past the 36 bytes). Every input is read before the first store. */
