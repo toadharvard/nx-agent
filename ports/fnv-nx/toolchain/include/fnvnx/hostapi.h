@@ -109,6 +109,12 @@ typedef struct FnvnxHostApi {
 #define FNVNX_PLAT_CPU_BOOST 1u   /* (mode: 0 normal, 1 fast load) -> 0 set, 1 off by the platform config (boost_loading) */
 #define FNVNX_PLAT_THREAD_ACTIVITY 2u   /* (host thread id != 0, paused 0/1) -> 0, or the Horizon result of svcSetThreadActivity */
 #define FNVNX_PLAT_MESSAGE 3u           /* (caption, text: guest strings) -> 0 after the player closed the dialog, or the applet's result */
+/* VirtualAlloc's address space (toolchain/host/host_vm.inc): reserve (hint or 0, size) -> address or 0; commit /
+ * decommit (address, size) -> 0 or a Horizon result; release (address) -> 0 or a result */
+#define FNVNX_PLAT_VM_RESERVE 4u
+#define FNVNX_PLAT_VM_COMMIT 5u
+#define FNVNX_PLAT_VM_DECOMMIT 6u
+#define FNVNX_PLAT_VM_RELEASE 7u
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
  * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */

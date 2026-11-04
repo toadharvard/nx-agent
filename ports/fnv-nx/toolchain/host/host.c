@@ -186,6 +186,7 @@ static void set_cpu_boost(int mode) {
     if (R_SUCCEEDED(rc)) g_boost = mode;
 }
 #include "host_message.inc"
+#include "host_vm.inc"
 static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
     if (fn == FNVNX_PLAT_CPU_BOOST && nargs >= 1) {
         if (!g_cfg.boost_loading) return 1;
@@ -194,6 +195,10 @@ static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) 
     }
     if (fn == FNVNX_PLAT_THREAD_ACTIVITY && nargs >= 2) return h_thread_activity(args[0], args[1]);
     if (fn == FNVNX_PLAT_MESSAGE && nargs >= 2) return host_show_message((const char *)args[0], (const char *)args[1]);
+    if (fn == FNVNX_PLAT_VM_RESERVE && nargs >= 2) return host_vm_reserve(args[0], args[1]);
+    if (fn == FNVNX_PLAT_VM_COMMIT && nargs >= 2) return host_vm_commit(args[0], args[1]);
+    if (fn == FNVNX_PLAT_VM_DECOMMIT && nargs >= 2) return host_vm_decommit(args[0], args[1]);
+    if (fn == FNVNX_PLAT_VM_RELEASE && nargs >= 1) return host_vm_release(args[0]);
     return FNVNX_EXT_NO_MODULE;
 }
 
