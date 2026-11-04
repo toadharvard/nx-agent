@@ -16,8 +16,9 @@
  *    until the first non-digit; an empty or missing value returns the default;
  *  - a file name without a directory refers to the Windows directory (C:\Windows\name).
  *
- * Switch defaults (port_default below, docs/PERF.md 6.4): for Fallout.ini and Fallout_default.ini only, a key the
- * file does not have reads as the port's value instead of the caller's default. The engine reads its settings one
+ * Switch defaults (port_default below, docs/PERF.md 6.4, 11.7): for Fallout.ini and Fallout_default.ini (and
+ * FalloutPrefs.ini for the content preset's keys), a key the file does not have reads as the port's value instead of
+ * the caller's default. The engine reads its settings one
  * key at a time, so this sets the Switch value of a setting whose compiled default is the PC's; a key the player
  * writes in the file always wins, and `bPortDefaults=0` in the file's [fnvnx] section turns the table off. Key and
  * section listings are the file's alone.
@@ -242,15 +243,30 @@ DWORD copy_value(const std::string &v, LPSTR buf, DWORD size)
 
 /* The Switch values of engine settings (section, key, value). Each row names what it turns on and why it is safe:
  * docs/PERF.md 6.4 and 11. */
+enum { INI_ENGINE = 1, INI_PREFS = 2 };   /* Fallout.ini / Fallout_default.ini, FalloutPrefs.ini */
 struct PortDefault {
     const char *sec, *key, *val;
+    unsigned files;
 };
 const PortDefault k_port_defaults[] = {
     /* threaded_anim: morph, particle and temporary-effect updates through the packed task queue, which the AI linear
      * task threads drain (cores 2 and 1). The exe's defaults are 0; the PC's Fallout_default.ini turns them on. */
-    {"General", "bUseThreadedMorpher", "1"},
-    {"General", "bUseThreadedParticleSystem", "1"},
-    {"General", "bUseThreadedTempEffects", "1"},
+    {"General", "bUseThreadedMorpher", "1", INI_ENGINE},
+    {"General", "bUseThreadedParticleSystem", "1", INI_ENGINE},
+    {"General", "bUseThreadedTempEffects", "1", INI_ENGINE},
+    /* D20 Switch content preset switch_b (S15-simd; docs/PERF.md 11.7, tools/perf/budget_model.json content.presets):
+     * fade distances, actor shadows, grass density and reach, decals. The engine's preferences collection reads these
+     * from FalloutPrefs.ini (which the PC launcher writes); a player's value in either file wins. uGridsToLoad stays
+     * the engine's 5. Sections as the exe names the settings (`fLODFadeOutMultObjects:LOD`, ...). */
+    {"LOD", "fLODFadeOutMultObjects", "3.0000", INI_ENGINE | INI_PREFS},
+    {"LOD", "fLODFadeOutMultItems", "1.5000", INI_ENGINE | INI_PREFS},
+    {"LOD", "fLODFadeOutMultActors", "1.5000", INI_ENGINE | INI_PREFS},
+    {"Display", "iActorShadowCountExt", "0", INI_ENGINE | INI_PREFS},
+    {"Display", "iActorShadowCountInt", "1", INI_ENGINE | INI_PREFS},
+    {"Grass", "iMinGrassSize", "160", INI_ENGINE | INI_PREFS},
+    {"Grass", "fGrassMaxStartFadeDistance", "2500.0000", INI_ENGINE | INI_PREFS},
+    {"Display", "iMaxDecalsPerFrame", "3", INI_ENGINE | INI_PREFS},
+    {"Display", "iMaxSkinDecalsPerFrame", "1", INI_ENGINE | INI_PREFS},
     /* not bMTRendering:Display: on the PC code the worker would share main's batch renderer and index a NULL second
      * one (docs/PERF.md 6.8); it needs port code first. */
 };
@@ -329,11 +345,13 @@ DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, D
 const char *port_default(const IniFile *f, const char *file, const char *sec, const char *key)
 {
     std::string base = ini_base(file);
-    if (base != "fallout.ini" && base != "fallout_default.ini")
+    unsigned kind = base == "fallout.ini" || base == "fallout_default.ini" ? INI_ENGINE
+                  : base == "falloutprefs.ini" ? INI_PREFS : 0;
+    if (!kind)
         return NULL;
     const PortDefault *hit = NULL;
     for (const PortDefault &d : k_port_defaults)
-        if (!w32_stricmp(d.sec, sec) && !w32_stricmp(d.key, key))
+        if ((d.files & kind) && !w32_stricmp(d.sec, sec) && !w32_stricmp(d.key, key))
             hit = &d;
     if (!hit)
         return NULL;

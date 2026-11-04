@@ -1,5 +1,6 @@
 /* test_ini.cpp - GetPrivateProfile* / WritePrivateProfile* semantics on a Fallout.ini-like file. */
 #include "s4_test.h"
+#include <stdlib.h>
 
 static const char INI[] = "C:\\Users\\Player\\Documents\\My Games\\FalloutNV\\Fallout.ini";
 
@@ -163,4 +164,40 @@ TEST(ini_port_defaults)
     CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedParticleSystem", 7, INI), 7);
     CHECK(WritePrivateProfileStringA("fnvnx", "bPortDefaults", "1", INI));
     CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedParticleSystem", 7, INI), 1);
+}
+
+/* D20 content preset switch_b: the settings read after load equal the preset unless the player's file has them */
+TEST(ini_port_defaults_switch_b)
+{
+    const char *prefs = "C:\\Users\\Player\\Documents\\My Games\\FalloutNV\\FalloutPrefs.ini";
+    struct { const char *sec, *key, *want; } k[] = {
+        {"LOD", "fLODFadeOutMultObjects", "3.0000"}, {"LOD", "fLODFadeOutMultItems", "1.5000"},
+        {"LOD", "fLODFadeOutMultActors", "1.5000"}, {"Display", "iActorShadowCountExt", "0"},
+        {"Display", "iActorShadowCountInt", "1"}, {"Grass", "iMinGrassSize", "160"},
+        {"Grass", "fGrassMaxStartFadeDistance", "2500.0000"}, {"Display", "iMaxDecalsPerFrame", "3"},
+        {"Display", "iMaxSkinDecalsPerFrame", "1"},
+    };
+    int applied = 0;
+    for (auto &e : k) {
+        char b[64];
+        GetPrivateProfileStringA(e.sec, e.key, "pc", b, sizeof b, prefs);
+        applied += !strcmp(b, e.want);
+        CHECK_STR(b, e.want);
+        GetPrivateProfileStringA(e.sec, e.key, "pc", b, sizeof b, "C:\\FalloutNV\\Fallout.ini");
+        CHECK_STR(b, e.want);
+    }
+    CHECK_EQ(applied, 9);
+    CHECK(atof("2500.0000") == 2500.0 && atoi("160") == 160);   /* the engine parses them */
+    /* uGridsToLoad is not in the preset: the caller's (engine's) default */
+    CHECK_EQ(GetPrivateProfileIntA("General", "uGridsToLoad", 5, prefs), 5);
+    CHECK_EQ(GetPrivateProfileIntA("General", "uGridsToLoad", 5, "C:\\FalloutNV\\Fallout.ini"), 5);
+    /* the threaded rows stay the engine ini's */
+    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedMorpher", 7, prefs), 7);
+    /* an explicit value in the player's FalloutPrefs.ini wins */
+    CHECK(WritePrivateProfileStringA("Grass", "iMinGrassSize", "80", prefs));
+    CHECK_EQ(GetPrivateProfileIntA("Grass", "iMinGrassSize", 1, prefs), 80);
+    CHECK(WritePrivateProfileStringA("Grass", "iMinGrassSize", NULL, prefs));   /* delete: the preset again */
+    CHECK_EQ(GetPrivateProfileIntA("Grass", "iMinGrassSize", 1, prefs), 160);
+    /* another file is not touched */
+    CHECK_EQ(GetPrivateProfileIntA("Grass", "iMinGrassSize", 1, "C:\\FalloutNV\\Other.ini"), 1);
 }
