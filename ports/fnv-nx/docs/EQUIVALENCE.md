@@ -27,6 +27,29 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md`: compiler setup, installer
 Every pristine unit that compiles has every one of its recipe functions in its object at exactly the recipe size
 (68,456 functions): the oracle builds what the decomp claims.
 
+## Unexplained differences (S11's metric)
+
+`tools/equiv/explain.py` matches every differing function and every no-build unit of the eq1..eq6 shard reports
+(`explain.py --git <artifacts clone>`, or the report files) against the explanation classes in
+`tools/equiv/explained.tsv` and S1b's by-design table (docs/PATCHES.md). What no class covers is the metric; the
+target is 0. A class names the mechanism and where it is documented here; a row matches by kind, attributed rule,
+unit, address or first error.
+
+At `0685791` (all six shards): 1,068 differing functions and 78 no-build units, of which **32 functions and 28 units
+are unexplained**.
+
+| class | functions | units | |
+|---|---:|---:|---|
+| EH-ONLY | 777 | | identical with `/EHs-c-` on both sides |
+| CRT-WRAPPER | 159 | | DECL1 / sdk retargets: the CRT function where the exe calls the game's forwarding wrapper |
+| PLACEMENT-NULLCHECK | 58 | | CTOR1 by design |
+| EXTERN-RELOAD | 25 | | STATIC1 |
+| S1B-BYDESIGN | 12 | | PATCHES.md |
+| ANON1-DECORATION, STD1-FABSF, GLOBAL-NEW, DECOMP-BUGFIX | 5 | | rule rows below |
+| LIBSTDCXX-STD-ABS, SDK-FULL-NAMES, PERMISSIVE-CONVERSION, MSVC-FLOAT-MATH | | 43 | Not comparable (below) |
+| MSVC-OPAQUE-ENUM | | 7 | ENUM1 |
+| unexplained | 32 | 28 | |
+
 ## Verdicts per rule
 
 Leave-one-out attribution (method below). `eh` / `retarget` / `code`: kinds of the differing functions the rule
