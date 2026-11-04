@@ -30,4 +30,10 @@ python3 -I "$P/passes.py" "$W/s6ncap/cap/n0.nxcap" --all --json "$W/out/n0.passe
 # deko3d host-side recording under Unicorn (perf/dk/), when it builds
 rm -f "$W/out/dk_record.json"
 "$P/dk/build.sh" "$W/dk" && python3 -I "$P/dk/count.py" "$W" "$W/out/dk_record.json"
+# the engine's own D3D9 path on the prepared objects (RENDER_PERF.md §13; seconds), when the local inputs exist:
+# ENGINE_OBJ (c/<c12> obj/ of all shards), ENGINE_LINK (a link's out/), ENGINE_SPEC[_LO,_HI] (local path specs)
+if [ -n "${ENGINE_SPEC:-}" ] && [ -d "${ENGINE_OBJ:-}" ] && [ -d "${ENGINE_LINK:-}" ]; then
+	for v in "" _lo _hi; do s="ENGINE_SPEC${v^^}"; [ -f "${!s:-}" ] || continue
+		python3 -I "$P/engine_path.py" "$ENGINE_OBJ" "$ENGINE_LINK" "${!s}" "$W/out/engine_path$v.json" >/dev/null; done
+fi
 python3 -I "$P/report.py" "$W" "$P/report.json"

@@ -1,0 +1,60 @@
+# V1 ledger (D14): one row per claim checked, or per refutation case. Read by tools/verify/v1_metric.py.
+# verdict: confirmed | refuted | partial | fixed | unverified
+#   refuted / partial = an open refutation (the test still fails on the owner's newest head)
+#   fixed             = the owner's fix was re-verified with the same test (closed)
+# merged: the integration commit that carries the claim, or - when it is not merged
+# fix: the commit that fixed a refutation (re-verified), or -
+id	stream	commit	merged	verdict	fix	test	claim
+S1B-POP-BOOT	S1b	afb2d2d	20af359	confirmed	-	test_s1b_pop_boot.py	xinc1_pop_boot: 0x00448420 / 0x0086c010 donor words (read from the exe: rets, reads, push order)
+S2C-POD2	S2c	ab73364	ad93b38	confirmed	-	test_fastcall_nonpod.py	layout.py MSVC 2008 POD predicate: 0 of 24 kinds differ
+S1REFS	S1-refs	c1039e7	c1039e7	confirmed	-	test_s1refs.py	RREF1-CLASS, RREF2, ADDR1 neutral and LANE1 platform: same meaning as MSVC (L1-L3, A1-A2, P1, C1)
+S13B-C1	S13b	0111901	f636994	fixed	60b538e	test_s13b_callee_store.py	oracle-callee-store is an artifact: native-inlined callee classed artifact
+S13B-C2	S13b	0111901	f636994	fixed	60b538e	test_s13b_callee_store.py	oracle-callee-store is an artifact: native-early-exit classed artifact
+S13B-C3	S13b	0111901	f636994	fixed	60b538e	test_s13b_callee_store.py	oracle-callee-store is an artifact: x86-only-store classed artifact
+UBO-U3	render	a16a489	6d305cd	fixed	a9374a6	test_nxgpu_ubo_cache.py	nxgpu UBO bind cache: slot & 3 aliases slots 4-15 onto 0-3
+SORT-T1	render	f280eb4	1b0665e	fixed	a9374a6	test_sort_radix.py	SortPackets radix: function-level static hist is not reentrant (two-thread recording)
+S5-W2	S5	e170aeb	aa082aa	fixed	e170aeb	test_s5_milestone_store.py	store watch: 64-bit str at want-4
+S5-W6	S5	e170aeb	aa082aa	fixed	e170aeb	test_s5_milestone_store.py	store watch: the pointer at A as the upper word
+S5-W7	S5	e170aeb	aa082aa	fixed	e170aeb	test_s5_milestone_store.py	store watch: a store to the old object after the pointer moved
+R0-R13	R0	58d1dfb	82805db	fixed	450c5d6	test_ready_adversarial.py	ready.py: boot.real_exe passes on contradicting image labels with no hash (also at bcbbf03)
+R0-R14	R0	58d1dfb	82805db	fixed	450c5d6	test_ready_adversarial.py	ready.py: frames_gate reads try-farm reports (unmerged heads) (also at bcbbf03)
+NXR-BOUNDS	render	44adf6c	fc7713a	fixed	fc7713a	test_nx_render_robust.py	nx_render survives malformed .nxd9/.nxcap (D1-D7, C1-C6, mutations)
+FTOI2-EN	S1-STL	-	-	partial	-	test_ftoi_fuzz.py	FTOI2 float->int matches x86 for enums (7,970 conversions differ: enums take the unsigned path)
+FTOI2-CVTSS	S1-STL	-	-	partial	-	test_ftoi_fuzz.py	sse2neon _mm_cvtss_si32 out of range gives 0x7fffffff, x86 gives INT_MIN (2,333 inputs)
+S13B-FIX	S13b	60b538e	60b538e	confirmed	-	test_s13b_callee_store.py	oracle-callee-store only with evidence of interception (C1-C3 now triage; the positive case in tests/s13/test_causes.py)
+S6N-T1U3	render	a9374a6	a9374a6	confirmed	-	test_nxgpu_ubo_cache.py	per-call hist (T1 ok; stacks >= 64 KiB, os_horizon.c) and uboAddr[2][16] (U1-U5 ok; 6d305cd fails U3, U5)
+S13-METRIC-M1	S13	7af7f55	441b732	refuted	-	test_s13_metric.py	metric.py: a shard whose branch is missing counts 1 and drops its artifacts and not-fuzzable counts
+S13-METRIC-M2	S13	7af7f55	441b732	refuted	-	test_s13_metric.py	metric.py: a shard whose only report is FAILED counts 1 and drops its counts
+S13-METRIC-M3	S13	7af7f55	441b732	refuted	-	test_s13_metric.py	metric.py: pending functions (deadline, changed keys) are counted in no term
+S12-KEYS-K2	S12	f241f21	f241f21	fixed	8c18138	test_s12_keys.py	whole-program keys: a forwarder defined in one unit and called with &obj.m in another puts no key in the list (each unit sees only half), the plain store stays str
+S12-KEYS-K3	S12	f241f21	f241f21	fixed	8c18138	test_s12_keys.py	whole-program keys: an Interlocked operand passed through a local pointer (p = &o->m; InterlockedCompareExchange(p, ..)) is never discovered, stores to o->m stay str
+S12-KEYS-K6	S12	f241f21	f241f21	fixed	8c18138	test_s12_keys.py	POLL-PLAIN: a struct copy over a keyed (polled) field is a plain str, no stlr/dmb
+S12-KEYS-K10	S12	f241f21	f241f21	fixed	8c18138	test_s12_keys.py	compile.sh order.keys: per-unit key cache is invalidated only by the unit source mtime, a changed tree header leaves a stale key list
+S12-OBJOP	S12	3426547	3426547	confirmed	-	test_s12_keys.py	object=first/operator=cpp17 defaults byte-identical; object=last operator=rtl give MSVC push order (direct, virtual, nested, <<, []) under qemu, direct calls stay direct
+S13B-SCRIPT	S13b	69a378e	69a378e	confirmed	-	test_s13_tools.py	causes.py as a script is one module with report.reclassify's: summary/handoffs --effects apply (E1)
+S13B-HANDOFF	S13b	ab7e255	ab7e255	confirmed	-	test_s13_tools.py	handoffs rows per owned cause equal summary divergences; index sums; by-design, non-ok and gone dropped (H1)
+S13B-OBJREAD	S13b	62b7ab4	62b7ab4	confirmed	-	test_s13_tools.py	without pyelftools causes.py warns once and the summary says reader unavailable (O1; O2 note: merge drops native_objects)
+S13-VTPAIRS	S13	61fd136	61fd136	confirmed	-	test_s13_tools.py	kind-V pair short only for n < s, native() and pairs() agree (V1; V2 note: vbase/vcall words count as slots)
+S13-RENAMES-R1	S13	545e0c5	545e0c5	refuted	-	test_s13_tools.py	a def row of unit A changes the callee convention (tree_def) every caller unit uses; only A's keys refresh, callers keep stale verdicts
+S13-FZTREE-F1	S13	a01a297	a01a297	refuted	-	test_s13_tools.py	fuzz_job: t/<L12> whose hash differs from the link's recorded tree is rejected, then taken by the fallback wait unchecked
+S6B-CENSUS	S6b	283fe49	283fe49	confirmed	-	test_s13_tools.py	census counts sum (translated + failed, cause table, unique); s6b_centroid 23/23 (K1; K2 note: malformed package counted)
+NXR-H1	render	2686fc6	fc7713a	refuted	-	test_nx_render_robust.py	nx_render bounds every size of .nxcap: a SUBM Draw with 0x7fffffff instances is not bounded (hangs > 120 s; .nxd9 skips draws over 4 M vertices)
+R0-GATES	R0	450c5d6	450c5d6	confirmed	-	test_ready_adversarial.py	resolved gates tree: R1-R15 all ok on the integration head (R13, R14 fixed)
+R0-R16	R0	a506770	a506770	fixed	2bce418	test_ready_adversarial.py	perf.budget gates 60 fps on stretch_60, which frame_budget.py judges on the typical frame: a 25 ms worst frame passes (J-0150 wants the worst frame)
+S13B-UNLOADED-U1	S13b	a93f5e6	a93f5e6	refuted	-	test_s13b_callee_unloaded.py	oracle-callee-unloaded (artifact) on static evidence only: a native that returned before a unit-local X with no traced call gets the artifact label
+S13B-UNLOADED-U2	S13b	a93f5e6	a93f5e6	refuted	-	test_s13b_callee_unloaded.py	oracle-callee-unloaded although X's native body calls Y and the native trace has no Y: the native never ran X
+S13B-VSPLIT	S13b	82be13c	82be13c	confirmed	-	test_s13b_callee_unloaded.py	oracle-vcall/oracle-fault split: records move artifact -> artifact (vcall-garbage, vcall-stub-alias) or -> real-bug (native-empty-callee); triage -> artifact only for an oracle-only fault in the oracle's private range (rule read; counts not re-derived)
+S12-KEYS-FIX	S12	8c18138	8c18138	confirmed	-	test_s12_keys.py	whole-program keys fixed: K1-K7c and K10 ok through keys_merge.py (K8 pointer alias, K9 Sleep poll stay notes outside the claim)
+S12-UNINIT-U1	S12	1634ca7	1634ca7	refuted	-	test_s12_order_close.py	aggregate local (SRA after the pass) still folds an uninitialized read to a constant (return 1)
+S12-UNINIT-U2	S12	1634ca7	1634ca7	refuted	-	test_s12_order_close.py	address-taken local (int *p = &x, promoted) still folds (return 1); ORDERING.md says GCC does not fold it
+S12-UNINIT-U3	S12	1634ca7	1634ca7	refuted	-	test_s12_order_close.py	one-element array local still folds (return 1)
+S12-OBJ-C2v	S12	29a1bde	29a1bde	refuted	-	test_s12_order_close.py	object=last evaluates a virtual call's object after the argument (ao); recorded MSVC oa in 5 of 5 configurations: a regression from the old default
+S12-OBJ-C4	S12	29a1bde	29a1bde	refuted	-	test_s12_order_close.py	compile.sh keeps objects built with ORDER_OBJECT=first when the defaults change (mtime check only)
+S12-OP-C2a	S12	a2ced7f	a2ced7f	refuted	-	test_s12_order_close.py	"S11's MSVC run confirms both" is false: addassign-builtin MSVC pa, build ap (and obj-virtual)
+S11-OC-C1	S11	ff320bf	ff320bf	refuted	-	test_s12_order_close.py	order_check's build variant omits compile.sh's object=/operator=, so --strict checks the old order
+S11-OC-T2	S11	ff320bf	ff320bf	refuted	-	test_s12_order_close.py	a case with no MSVC log (or 1 of 5 configurations) passes --strict (no-msvc / same)
+S11-OC2-T1	S11	e713657	e713657	refuted	-	test_s12_order_close.py	--strict without --gcc exits 0 with no GCC evidence
+S11-EX-E1	S11	5468b6b	5468b6b	refuted	-	test_s12_order_close.py	explain.py: a FAILED or missing shard adds nothing and no warning (unexplained 2 -> 1)
+S11-EX-E2	S11	5468b6b	5468b6b	refuted	-	test_s12_order_close.py	rule-wide explained rows (EXTERN-RELOAD, PLACEMENT-NULLCHECK, GLOBAL-NEW, CRT-WRAPPER) explain any new difference of that rule
+R0-R16-FIX	R0	2bce418	2bce418	confirmed	-	test_ready_adversarial.py	perf.budget judges worst_frame_ms against 16.7 ms itself: R16 ok on head, PASSES on a506770
+S15-TARGET60	S15-threads	d994f1e	d994f1e	confirmed	-	test_ready_adversarial.py	frame_budget.py judges every target on the worst frame; target_60 is kind goal at 16.7 ms (code read; R16 ok on head)

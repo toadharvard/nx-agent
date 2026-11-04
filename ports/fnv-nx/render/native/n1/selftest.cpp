@@ -86,6 +86,45 @@ void test_tracker(T& t, StateTracker& st) {
             (int)st.GetSamplerState(0, 1));
 }
 
+// per-stage sampler cache (P6n F4): translated again only after a change of that stage's states or texture kind
+void test_sampler_cache(T& t, Backend* be, StateTracker& st) {
+    st.Reset();
+    NxD3D9Texture k; memset(&k, 0, sizeof k); k.format = 21;   // A8R8G8B8
+    st.SetTexture(0, 7, k); st.SetTexture(1, 9, k);
+    uint32_t h[2], h2[2];
+    uint32_t n0 = st.samplerTranslations();
+    st.Handles(be, h, 2);
+    t.Check(st.samplerTranslations() == n0 + 2, "sampler cache: first use translates each stage");
+    // the engine re-sets every stage's sampler states before each draw: same values -> no new translation
+    st.SetSamplerState(0, 5, st.GetSamplerState(0, 5)); st.SetSamplerState(1, 1, st.GetSamplerState(1, 1));
+    const uint32_t n2 = st.samplerTranslations();
+    st.Handles(be, h2, 2);
+    t.Check(st.samplerTranslations() == n2 && h2[0] == h[0] && h2[1] == h[1],
+            "sampler cache: redundant sets do not translate again");
+    st.SetTexture(0, 8, k);
+    st.Handles(be, h2, 2);
+    t.Check(st.samplerTranslations() == n2 && (h2[0] & 0xFFFFFu) == 8 && (h2[0] >> 20) == (h[0] >> 20),
+            "sampler cache: another image of the same kind keeps the sampler, takes the image");
+    st.SetSamplerState(1, 1, 3);   // ADDRESSU clamp on stage 1
+    st.Handles(be, h2, 2);
+    t.Check(st.samplerTranslations() == n2 + 1 && h2[1] != h[1], "sampler cache: a changed state translates that stage only");
+    k.format = 113;   // A16B16G16R16F: another kind
+    st.SetTexture(0, 8, k);
+    st.Handles(be, h2, 2);
+    t.Check(st.samplerTranslations() == n2 + 2, "sampler cache: another texture kind translates the stage");
+    st.SetSamplerState(1, 1, 1);
+    st.Handles(be, h2, 2);
+    t.Check(h2[1] == h[1], "sampler cache: back to the first states, the first sampler");
+    // texture generation (Render reuses the previous texture block while it is unchanged)
+    const uint32_t g0 = st.textureGeneration();
+    st.SetTexture(0, 8, k); st.SetSamplerState(1, 1, 1);
+    t.Check(st.textureGeneration() == g0, "texture generation: redundant sets keep it");
+    st.SetTexture(0, 9, k);
+    const uint32_t g1 = st.textureGeneration();
+    st.SetSamplerState(1, 2, 3);
+    t.Check(g1 != g0 && st.textureGeneration() != g1, "texture generation: a new image or sampler state changes it");
+}
+
 uint16_t shader(Backend* be, const char* name, uint32_t stage) {
     int i = nx_shader_find(name, stage);
     if (i < 0) return 0;
@@ -122,6 +161,7 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(r.Init(be, W, H, back, depth), "renderer init");
     t.Check(Renderer::Get() == &r, "Renderer::Get");
     test_tracker(t, r.state());
+    test_sampler_cache(t, be, r.state());
     r.state().Reset();
     static const int kGroupKey = 0;   // stands for an engine NiRenderTargetGroup*
     t.Check(r.RegisterTargetGroup(&kGroupKey, menu, 0, W, H), "register group");
@@ -248,6 +288,15 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(ers->GetRenderState(19) == 5 && ers->GetRenderState(20) == 6, "stub: SetBlendFunc");
     ers->SetSamplerState(0, 5, 1, 0);    // MAGFILTER POINT
     t.Check(ers->GetSamplerState(0, 5) == 1, "stub: Set/GetSamplerState");
+    ers->RestoreSamplerState(0, 5);
+    t.Check(ers->GetSamplerState(0, 5) == 1, "stub: RestoreSamplerState returns to the saved default (POINT)",
+            (int)ers->GetSamplerState(0, 5));
+    // slot 48/49 are texture stage states: recorded, never sampler states
+    t.Check(ers->GetTextureStageState(0, 1) == 4 && ers->GetTextureStageState(1, 1) == 1,
+            "stub: texture stage state defaults (COLOROP MODULATE / DISABLE)");
+    ers->SetTextureStageState(0, 5, 3, 0);   // ALPHAARG1 = D3DTA_TFACTOR: type 5 is MAGFILTER as a sampler state
+    t.Check(ers->GetTextureStageState(0, 5) == 3 && ers->GetSamplerState(0, 5) == 1,
+            "stub: SetTextureStageState does not touch the sampler states");
 
     // synthetic engine geometry (interop layout of engine_stubs.h) in an arena; embedded pointers are offsets
     static uint8_t arena[2048] __attribute__((aligned(16)));

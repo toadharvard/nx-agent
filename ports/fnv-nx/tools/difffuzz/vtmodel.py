@@ -13,7 +13,7 @@ The native address point is a copy of the paired vtable synthesized in the AArch
 group's words up to the end of that vtable, read from the defining object in the link's fixed/, each relocated slot
 resolved for this image (its own definition, CODE_STUB + X for `__fnv_<X>`, a named stub that names the original
 address, or a fresh named stub), padded to the exe's slot count with `__s13_vtpad_<V>_<k>` stubs where the link's
-native vtable is shorter (a pairing gap: classify.py vptr-unpaired).
+native vtable is shorter (a pairing gap: classify.py vptr-unpaired; `python3 vtmodel.py pairs` counts them per link).
 
 Sources: the exe (FNVNX_EXE, read only, never copied: RTTI complete object locators give every vftable with its
 class, offset and hierarchy; the slots are the .text words from V on), addrmap.tsv kind V rows and fixed/ objects,
@@ -235,6 +235,8 @@ class Model:
         self._groups = {}
         self._alias = None
         self.short = set()                                # V paired with a native vtable shorter than the exe's
+                                                          # (fewer slots than V: an Itanium pair has as many, or one
+                                                          # more with a virtual destructor)
 
     def candidates(self, cls):
         """Image vftables to plant in an object of static class `cls`: its own primary vftable (the decomp's name
@@ -360,7 +362,7 @@ class Model:
                 b += struct.pack('<I', (resolve(w) if isinstance(w, str) else (w or 0)) & 0xffffffff)
             for k in range(n, n + pad):
                 b += struct.pack('<I', resolve('__s13_vtpad_%08x_%d' % (v, k)))
-            if pad:
+            if n < len(self.slots(v)):         # a pairing gap; the one or two spare slots past an exact pair are not
                 self.short.add(v)
             mem[cur] = bytes(b)
             done[v] = ap[v] = cur + apoff
@@ -386,3 +388,50 @@ def arg_classes(conv):
         if m and v.is_ptr:
             out[v.label] = m.group(1)
     return out
+
+
+def pairs(model):
+    """{(primary, verdict): count} of the kind-V pairs, verdict by the native slot count n against the exe's s:
+    short (n < s: a pairing gap, padded, calls through the gap are vptr-unpaired), exact (n = s, or s + 1 for the
+    Itanium destructor pair), longer (n > s + 1), no-group (the row's vtable is not in fixed/); plus up to 20
+    examples of short primary pairs."""
+    c, ex = collections.Counter(), []
+    for v, e in sorted(model.exe.vft.items()):
+        if v not in model.rows:
+            continue
+        prim = e['off'] == 0
+        sym, obj, apoff = model.rows[v]
+        g = model.group(sym, obj)
+        if g is None:
+            c[(prim, 'no-group')] += 1
+            continue
+        n, s_ = native_slots(g[0], apoff), len(e['slots'])
+        k = 'short' if n < s_ else ('exact' if n <= s_ + 1 else 'longer')
+        c[(prim, k)] += 1
+        if k == 'short' and prim and len(ex) < 20:
+            ex.append('%08x %s: %d native slots of %d (%s in %s)' % (v, e['cls'], n, s_, sym, obj))
+    return c, ex
+
+
+def main(argv):
+    """vtmodel.py pairs: how the link's kind-V rows pair the exe's vftables (needs FNVNX_EXE)."""
+    if argv[:1] != ['pairs']:
+        print(main.__doc__)
+        return 2
+    units = json.load(open(config.DECOMP / 'build/units.json'))['units']
+    m = Model(str(config.LINK), str(config.WORK / 'vt'), units)
+    if m.exe is None:
+        print('no exe (FNVNX_EXE)')
+        return 1
+    c, ex = pairs(m)
+    for prim in (True, False):
+        tot = sum(n for (p, _), n in c.items() if p == prim)
+        print('%s: %d paired: %s' % ('primary' if prim else 'secondary', tot,
+              ', '.join('%s %d' % (k, c[(prim, k)]) for k in ('short', 'exact', 'longer', 'no-group'))))
+    for x in ex:
+        print('  short ' + x)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

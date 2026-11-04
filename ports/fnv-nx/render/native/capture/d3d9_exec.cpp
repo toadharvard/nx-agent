@@ -20,7 +20,8 @@ uint32_t U(const uint8_t* p, uint32_t i) { uint32_t v; memcpy(&v, p + 4 * i, 4);
 float F(const uint8_t* p, uint32_t i) { float v; memcpy(&v, p + 4 * i, 4); return v; }
 uint32_t FB(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 
-struct Tex { uint32_t image = 0, format = 0, w = 0, h = 0, levels = 1, flags = 0; vector<vector<uint8_t>> data; };
+struct Tex { uint32_t image = 0, format = 0, w = 0, h = 0, levels = 1, flags = 0; bool cube = false;
+             vector<vector<uint8_t>> data; };   // cube: each level holds its six faces (D3DCUBEMAP_FACES order)
 struct Surf { uint32_t kind = 0, format = 0, w = 0, h = 0, tex = 0, image = 0; };
 struct Buf { vector<uint8_t> data; uint32_t format = 0; };
 struct Elem { uint16_t stream, offset; uint8_t type, method, usage, index; };
@@ -74,6 +75,7 @@ vector<Decl> Decls(const string& s) {
         if (e == string::npos || (nl != string::npos && nl < e)) continue;
         Decl d; d.at = p; d.end = e; d.loc = atoi(s.c_str() + q);
         size_t r = s.find(')', q);
+        if (r == string::npos || r > e) continue;
         string rest = s.substr(r + 1, e - r - 1);
         // tokens: in/out [qualifiers] type name
         vector<string> tok;
@@ -110,15 +112,24 @@ public:
     std::map<std::string, uint32_t> samplers;
     bool passOpen = false; uint32_t passColor = 0, passDepth = 0, frameNo = 0;
 
+    // Input limits (docs/RENDER_NATIVE.md 8.3): NXD9 is outside input, so every size is checked in 64 bits against
+    // its record and against these bounds before anything is allocated or copied.
+    enum : uint32_t { kMaxDim = 8192, kMaxTexels = 4096u * 4096u, kMaxLevels = 14, kMaxBuf = 64u << 20,
+                      kMaxDeclElems = 64, kMaxVerts = 1u << 22 };
+    static constexpr uint64_t kMaxResident = 1ull << 30;   // all buffer and texture bytes the file may make us hold
+    uint64_t resident = 0;
+    bool Charge(uint64_t bytes) { if (bytes > kMaxResident - resident) return false; resident += bytes; return true; }
+    static bool DimsOk(uint32_t w, uint32_t h) { return w && h && w <= kMaxDim && h <= kMaxDim && (uint64_t)w * h <= kMaxTexels; }
+
     bool Fail(const char* fmt, const char* a = "") { snprintf(err, errlen, fmt, a); return false; }
     void Skip(const char* why) {
         st->skipped++;
         if (!st->firstSkip[0]) snprintf(st->firstSkip, sizeof st->firstSkip, "frame %u draw %u: %s", frameNo, st->draws, why);
     }
     void* Alloc(uint32_t n, uint32_t* off) {
-        uint32_t at = (arenaHead + 255) & ~255u;
+        uint64_t at = ((uint64_t)arenaHead + 255) & ~255ull;
         if (at + n > kArena) return nullptr;
-        arenaHead = at + n; *off = at;
+        arenaHead = (uint32_t)(at + n); *off = (uint32_t)at;
         return arena + at;
     }
 
@@ -137,18 +148,29 @@ public:
     }
 
     uint32_t MakeImage(uint32_t d3dfmt, uint32_t w, uint32_t h, uint32_t levels, uint32_t flags,
-                       const vector<vector<uint8_t>>* data) {
+                       const vector<vector<uint8_t>>* data, bool cube = false) {
         NxFormatInfo fi = nx_d3d9_format(d3dfmt);
         if (fi.format == NxFmt_None) return 0;
         NxImageDesc d; memset(&d, 0, sizeof d);
+        if (cube) flags |= NxImg_Cube;
         d.width = (uint16_t)w; d.height = (uint16_t)h; d.format = fi.format; d.mips = (uint8_t)levels; d.flags = (uint8_t)flags;
         d.swizzle = NXIMG_SWIZZLE(fi.swizzle[0], fi.swizzle[1], fi.swizzle[2], fi.swizzle[3]);
         vector<uint8_t> all, conv;
         if (data) {
-            for (auto& l : *data) all.insert(all.end(), l.begin(), l.end());
+            if (!cube) {
+                for (auto& l : *data) all.insert(all.end(), l.begin(), l.end());
+            } else {
+                // NXD9 holds each level's six faces together; the backend and nx_d3d9_convert take face-major data
+                for (uint32_t f = 0; f < 6; f++)
+                    for (auto& l : *data) {
+                        const size_t fb = l.size() / 6;
+                        all.insert(all.end(), l.begin() + f * fb, l.begin() + (f + 1) * fb);
+                    }
+            }
             if (fi.flags & NXFMT_CONVERT) {
-                conv.resize(nx_d3d9_converted_size(d3dfmt, w, h, levels, 1) + 16);
-                uint32_t n = nx_d3d9_convert(d3dfmt, w, h, levels, 1, all.data(), (uint32_t)all.size(), conv.data(), (uint32_t)conv.size());
+                const uint32_t faces = cube ? 6 : 1;
+                conv.resize(nx_d3d9_converted_size(d3dfmt, w, h, levels, faces) + 16);
+                uint32_t n = nx_d3d9_convert(d3dfmt, w, h, levels, faces, all.data(), (uint32_t)all.size(), conv.data(), (uint32_t)conv.size());
                 if (!n) return 0;
                 conv.resize(n); all.swap(conv);
             }
@@ -187,9 +209,10 @@ public:
         return it != surf.end() ? it->second.format : 0;
     }
 
-    void Clear(const uint8_t* p, uint32_t n) {
-        if (n < 20) return;
+    bool Clear(const uint8_t* p, uint32_t n) {
+        if (n < 20) return true;
         uint32_t flags = U(p, 0), color = U(p, 1), stencil = U(p, 3), nr = U(p, 4);
+        if (nr > (n - 20) / 16) return Fail("CLR rect count");
         float z = F(p, 2);
         BeginPassIfNeeded();
         // D3D9: the viewport, intersected with the scissor rect while SCISSORTESTENABLE, and with each rect
@@ -201,7 +224,7 @@ public:
         uint32_t count = nr ? nr : 1;
         for (uint32_t i = 0; i < count; i++) {
             int32_t a1 = x1, b1 = y1, a2 = x2, b2 = y2;
-            if (nr && n >= 20 + 16 * (i + 1)) {
+            if (nr) {
                 int32_t r[4]; memcpy(r, p + 20 + 16 * i, 16);
                 a1 = a1 > r[0] ? a1 : r[0]; b1 = b1 > r[1] ? b1 : r[1]; a2 = a2 < r[2] ? a2 : r[2]; b2 = b2 < r[3] ? b2 : r[3];
             }
@@ -213,6 +236,7 @@ public:
             a[4] = (uint32_t)a1; a[5] = (uint32_t)b1; a[6] = (uint32_t)(a2 - a1); a[7] = (uint32_t)(b2 - b1);
             st->clears++;
         }
+        return true;
     }
 
     // VS GLSL with its inputs moved to the compact attribute indices of this declaration and outputs added for the
@@ -273,13 +297,15 @@ public:
         }
         uint32_t prim = U(p, 0), count = indexed ? U(p, 5) : U(p, 2);
         static const uint8_t kPrim[7] = {0, NxPrim_Points, NxPrim_Lines, NxPrim_LineStrip, NxPrim_Triangles, NxPrim_TriStrip, NxPrim_TriFan};
-        uint32_t verts;
+        uint64_t verts64;
         switch (prim) {
-        case 1: verts = count; break;  case 2: verts = 2 * count; break;  case 3: verts = count + 1; break;
-        case 4: verts = 3 * count; break;  case 5: case 6: verts = count + 2; break;
+        case 1: verts64 = count; break;  case 2: verts64 = 2ull * count; break;  case 3: verts64 = count + 1ull; break;
+        case 4: verts64 = 3ull * count; break;  case 5: case 6: verts64 = count + 2ull; break;
         default: Skip("primitive type"); return true;
         }
         if (!count) return true;
+        if (verts64 > kMaxVerts) { Skip("primitive count over the limit"); return true; }
+        uint32_t verts = (uint32_t)verts64;
         // program for (vs, ps) with this declaration's attribute order
         auto key = std::make_pair(curVS, curPS);
         auto ak = std::make_pair(curVS * 65599u + curPS, curDecl);
@@ -307,12 +333,13 @@ public:
         uint32_t nv = indexed ? U(p, 3) : verts;
         uint32_t stride = 16 * (uint32_t)el.size();
         if (el.empty()) { Skip("no usable vertex elements"); return true; }
+        if (nv > kMaxVerts) { Skip("vertex count over the limit"); return true; }
         uint32_t vOff, iOff = 0;
         float* out = (float*)Alloc(nv * stride, &vOff);
         if (!out) return Fail("frame arena full (128 MiB)");
         for (uint32_t i = 0; i < nv; i++)
             for (size_t k = 0; k < el.size(); k++) {
-                size_t at = (size_t)strmOff + (size_t)(first + i) * strmStride + el[k]->offset;
+                uint64_t at = (uint64_t)strmOff + (uint64_t)(uint32_t)(first + i) * strmStride + el[k]->offset;
                 if (at + ElemBytes(el[k]->type) <= b.data.size()) Decode(el[k]->type, b.data.data() + at, out + (i * el.size() + k) * 4);
                 else { float* o = out + (i * el.size() + k) * 4; o[0] = o[1] = o[2] = 0; o[3] = 1; }
             }
@@ -324,7 +351,7 @@ public:
             idx = (uint32_t*)Alloc(verts * 4, &iOff);
             if (!idx) return Fail("frame arena full (128 MiB)");
             for (uint32_t i = 0; i < verts; i++) {
-                size_t at = (size_t)(start + i) * isz;
+                uint64_t at = ((uint64_t)start + i) * isz;
                 uint32_t v = 0;
                 if (at + isz <= ii->second.data.size()) memcpy(&v, ii->second.data.data() + at, isz);
                 v = v >= minIdx ? v - minIdx : 0;
@@ -385,7 +412,7 @@ public:
             NxD3D9Texture tk = {0, 0, 0, 0, 0};
             uint32_t image = 0;
             auto ti = stex[s] ? tex.find(stex[s]) : tex.end();
-            if (ti != tex.end()) { tk.format = ti->second.format; image = ti->second.image; }
+            if (ti != tex.end()) { tk.format = ti->second.format; tk.cube = ti->second.cube; image = ti->second.image; }
             NxSamplerState ss; nx_d3d9_sampler(samp[s], &tk, &ss);
             string k((const char*)&ss, sizeof ss);
             auto si = samplers.find(k);
@@ -427,7 +454,7 @@ public:
         while (at + 8 <= size) {
             uint32_t tag, len;
             memcpy(&tag, d + at, 4); memcpy(&len, d + at + 4, 4);
-            if (at + 8 + len > size) return Fail("truncated record");
+            if ((uint64_t)len > size - at - 8) return Fail("truncated record");
             const uint8_t* p = d + at + 8;
             at += 8 + ((len + 3) & ~3u);
             if (!Record(tag, p, len)) return false;
@@ -440,6 +467,7 @@ public:
         case kD9Device: {
             if (n < 16) return Fail("DEV");
             W = U(p, 0); H = U(p, 1);
+            if (!DimsOk(W, H) || W > 4096 || H > 4096) return Fail("DEV size");
             vp = {0, 0, W, H, 0.0f, 1.0f}; sc = {0, 0, (int32_t)W, (int32_t)H};
             backImage = MakeImage(U(p, 2) ? U(p, 2) : 21, W, H, 1, NxImg_RenderTarget, nullptr);
             if (U(p, 3)) { autoDepthFmt = U(p, 3); autoDepth = MakeImage(autoDepthFmt, W, H, 1, NxImg_RenderTarget | NxImg_Depth, nullptr); }
@@ -449,15 +477,23 @@ public:
         case kD9Texture: {
             if (n < 24) return Fail("TEX");
             Tex t; t.format = U(p, 1); t.w = U(p, 2); t.h = U(p, 3); t.levels = U(p, 4) ? U(p, 4) : 1; t.flags = U(p, 5);
-            uint32_t q = 24;
+            if (!DimsOk(t.w, t.h) || t.levels > kMaxLevels) return Fail("TEX size");
+            uint64_t q = 24;
             for (uint32_t l = 0; l < t.levels && q + 4 <= n; l++) {
                 uint32_t b = U(p + q, 0);
-                t.data.emplace_back(p + q + 4, p + q + 4 + (q + 4 + b <= n ? b : 0));
-                q += 4 + ((b + 3) & ~3u);
+                if (q + 4 + b > n) return Fail("TEX level bytes");
+                if (!Charge(b)) return Fail("TEX: input exceeds the resident limit");
+                t.data.emplace_back(p + q + 4, p + q + 4 + b);
+                q += 4 + (((uint64_t)b + 3) & ~3ull);
             }
-            if (t.flags & 2) break;   // cube: unsupported (sampled as no texture)
             bool rt = t.flags & 1;
-            t.image = MakeImage(t.format, t.w, t.h, rt ? 1 : t.levels, rt ? NxImg_RenderTarget : 0, rt ? nullptr : &t.data);
+            if ((t.flags & 2) && rt) break;   // cube render target: unsupported (sampled as no texture)
+            t.cube = (t.flags & 2) != 0;
+            if (t.cube) {
+                if (t.w != t.h) return Fail("TEX: cube texture not square");
+                for (auto& l : t.data) if (l.size() % 6) return Fail("TEX: cube level bytes not six faces");
+            }
+            t.image = MakeImage(t.format, t.w, t.h, rt ? 1 : t.levels, rt ? NxImg_RenderTarget : 0, rt ? nullptr : &t.data, t.cube);
             st->textures++;
             tex[U(p, 0)] = t;
             break;
@@ -467,15 +503,31 @@ public:
             auto it = tex.find(U(p, 0));
             if (it == tex.end() || (it->second.flags & 1) || U(p, 1) >= it->second.data.size()) break;
             uint32_t b = U(p, 2);
-            if (12 + b > n) return Fail("TEXU");
+            if (12 + (uint64_t)b > n) return Fail("TEXU");
+            if (!Charge(b)) return Fail("TEXU: input exceeds the resident limit");
+            if (it->second.cube && b % 6) return Fail("TEXU: cube level bytes not six faces");
             it->second.data[U(p, 1)].assign(p + 12, p + 12 + b);
             // images are immutable in NxGpuApi: a new image with the new contents
-            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data);
+            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data, it->second.cube);
+            break;
+        }
+        case kD9TexCube: {   // one face of one level of a cube texture (LockRect on a cube face)
+            if (n < 16) return Fail("TEXC");
+            auto it = tex.find(U(p, 0));
+            uint32_t face = U(p, 1), level = U(p, 2), b = U(p, 3);
+            if (16 + (uint64_t)b > n) return Fail("TEXC");
+            if (it == tex.end() || !it->second.cube || face >= 6 || level >= it->second.data.size()) break;
+            vector<uint8_t>& l = it->second.data[level];
+            const size_t fb = l.size() / 6;
+            if (b != fb) return Fail("TEXC: face bytes differ from the level's");
+            memcpy(l.data() + face * fb, p + 16, b);
+            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data, true);
             break;
         }
         case kD9Surface: {
             if (n < 24) return Fail("SURF");
             Surf s; s.kind = U(p, 1); s.format = U(p, 2); s.w = U(p, 3); s.h = U(p, 4); s.tex = U(p, 5);
+            if (!DimsOk(s.w, s.h)) return Fail("SURF size");
             auto ti = s.tex ? tex.find(s.tex) : tex.end();
             if (ti != tex.end()) s.image = ti->second.image;
             else s.image = MakeImage(s.format, s.w, s.h, 1, s.kind == 2 ? NxImg_RenderTarget | NxImg_Depth : NxImg_RenderTarget, nullptr);
@@ -484,6 +536,8 @@ public:
         }
         case kD9VBuffer: case kD9IBuffer: {
             if (n < 8) return Fail("VB/IB");
+            if (U(p, 1) > kMaxBuf) return Fail("VB/IB size");
+            if (!Charge(U(p, 1))) return Fail("VB/IB: input exceeds the resident limit");
             Buf b; b.data.assign(U(p, 1), 0); b.format = tag == kD9IBuffer && n >= 12 ? U(p, 2) : 0;
             (tag == kD9VBuffer ? vb : ib)[U(p, 0)] = b;
             break;
@@ -493,15 +547,22 @@ public:
             auto& m = tag == kD9VBData ? vb : ib;
             auto it = m.find(U(p, 0));
             uint32_t off = U(p, 1), b = U(p, 2);
-            if (it == m.end() || 12 + b > n) break;
-            if (off + b > it->second.data.size()) it->second.data.resize(off + b);
+            if (12 + (uint64_t)b > n) return Fail("VBU/IBU bytes");
+            if (it == m.end()) break;
+            uint64_t end = (uint64_t)off + b;
+            if (end > kMaxBuf) return Fail("VBU/IBU range");
+            if (end > it->second.data.size()) {
+                if (!Charge(end - it->second.data.size())) return Fail("VBU/IBU: input exceeds the resident limit");
+                it->second.data.resize(end);
+            }
             memcpy(it->second.data.data() + off, p + 12, b);
             break;
         }
         case kD9Decl: {
             if (n < 8) return Fail("DECL");
-            vector<Elem> v(U(p, 1));
-            if (8 + 8 * v.size() > n) return Fail("DECL");
+            uint32_t cnt = U(p, 1);
+            if (cnt > kMaxDeclElems || 8 + 8 * (uint64_t)cnt > n) return Fail("DECL");
+            vector<Elem> v(cnt);
             memcpy(v.data(), p + 8, 8 * v.size());
             decls[U(p, 0)] = v;
             break;
@@ -509,10 +570,12 @@ public:
         case kD9VShader: case kD9PShader: {
             if (n < 16) return Fail("VSH/PSH");
             uint32_t bc = U(p, 3);
-            if (16 + bc + 4 > n) return Fail("VSH/PSH");
+            if (16 + (uint64_t)bc + 4 > n) return Fail("VSH/PSH");
             Shader s;
             if (bc >= 4) s.version = U(p + 16, 0) & 0xFFFF;
-            uint32_t q = 16 + ((bc + 3) & ~3u), gl = U(p + q, 0);
+            uint64_t q = 16 + (((uint64_t)bc + 3) & ~3ull);
+            if (q + 4 > n) return Fail("VSH/PSH glsl");
+            uint32_t gl = U(p + q, 0);
             if (q + 4 + gl > n) return Fail("VSH/PSH glsl");
             s.glsl.assign((const char*)p + q + 4, gl);
             if (!LoadGlsl(s, U(p, 1), U(p, 2))) {
@@ -532,21 +595,21 @@ public:
             if (n < 8) return Fail("CF");
             uint32_t s = U(p, 0), c = U(p, 1);
             float (*dst)[4] = tag == kD9VSConstF ? vsc : psc;
-            for (uint32_t i = 0; i < c && s + i < 256 && 8 + 16 * (i + 1) <= n; i++) memcpy(dst[s + i], p + 8 + 16 * i, 16);
+            for (uint32_t i = 0; s < 256 && i < c && s + i < 256 && 8 + 16 * ((uint64_t)i + 1) <= n; i++) memcpy(dst[s + i], p + 8 + 16 * i, 16);
             break;
         }
         case kD9VSConstI: case kD9PSConstI: {
             if (n < 8) return Fail("CI");
             uint32_t s = U(p, 0), c = U(p, 1);
             int32_t (*dst)[4] = tag == kD9VSConstI ? vsi : psi;
-            for (uint32_t i = 0; i < c && s + i < 16 && 8 + 16 * (i + 1) <= n; i++) memcpy(dst[s + i], p + 8 + 16 * i, 16);
+            for (uint32_t i = 0; s < 16 && i < c && s + i < 16 && 8 + 16 * ((uint64_t)i + 1) <= n; i++) memcpy(dst[s + i], p + 8 + 16 * i, 16);
             break;
         }
         case kD9VSConstB: case kD9PSConstB: {
             if (n < 8) return Fail("CB");
             uint32_t s = U(p, 0), c = U(p, 1);
             uint32_t* dst = tag == kD9VSConstB ? vsb : psb;
-            for (uint32_t i = 0; i < c && s + i < 16 && 8 + 4 * (i + 1) <= n; i++) dst[s + i] = U(p, 2 + i) ? 1 : 0;
+            for (uint32_t i = 0; s < 16 && i < c && s + i < 16 && 8 + 4 * ((uint64_t)i + 1) <= n; i++) dst[s + i] = U(p, 2 + i) ? 1 : 0;
             break;
         }
         case kD9SetDecl: if (n >= 4) curDecl = U(p, 0); break;
@@ -565,7 +628,7 @@ public:
         case kD9SetDS: if (n >= 4) ds = U(p, 0); break;
         case kD9Viewport: if (n >= 24) memcpy(&vp, p, 24); break;
         case kD9Scissor: if (n >= 16) memcpy(&sc, p, 16); break;
-        case kD9Clear: Clear(p, n); break;
+        case kD9Clear: return Clear(p, n);
         case kD9Draw: return Draw(false, p, n);
         case kD9DrawIdx: return Draw(true, p, n);
         case kD9Present: return Present();

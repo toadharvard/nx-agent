@@ -18,6 +18,10 @@ Design, formats and measurements: [`../../docs/LINK.md`](../../docs/LINK.md).
 | `test_bridges.py` | Runs generated bridges under qemu-aarch64 (hand-written declarations). |
 | `test_bindings.py` | CRT/library providers, IAT slots by api, thread-local variables, hand-written vptr stores. |
 | `test_startup.py` | `__fnvnx_dyninit_`/`_dynexit_` address entries and the game-only `__cxa_atexit` rename. |
+| `exevft.py` | The player's exe vftables through MSVC RTTI (class, COL offset, slots), the minus-one slot rule (S2c-vt, `resolve --exe`). |
+| `vtmetric.py` | S2c-vt's metric on a finished link: trap slots against the exe's, short and mispaired vftables (read-only). |
+| `test_exevft.py` | exevft on a synthetic PE (COL decoys, cache, the minus-one rule). |
+| `test_slotfill.py` | End-to-end slot fill from a synthetic exe: resolve --exe, apply, trial link, vtmetric. |
 | `test_vtables.py` | Secondary/synthesized vtables and the `??_G` D1/D0 table against GCC's own output and the linked image. |
 | `test_vslots.py` | Slot order and binding on hand-written classes compiled by MSVC 2008 (Wine) and GCC; image-slot stubs under qemu. |
 | `elfsyms.py` | ELF symbol tables, vtable-slot relocations, renaming undefined symbols (many old names -> one new). |
@@ -46,6 +50,7 @@ python3 tools/link/test_link.py; python3 tools/link/test_bridges.py   # need SSE
 python3 tools/link/test_override.py; python3 tools/link/test_vtables.py; python3 tools/link/test_startup.py
 FNV_DECOMP=... FNV_MSVC9_ROOT=... FNV_MSVC9_PREFIX=... python3 tools/link/test_vslots.py   # MSVC 2008 under Wine
 python3 tools/link/test_bindings.py
+python3 tools/link/test_exevft.py; python3 tools/link/test_slotfill.py   # the second needs SSE2NEON
 ```
 
 Needs `llvm-undname` (or `llvm-undname-18`; `apt install llvm-18`), `c++filt`, and binutils/gcc for

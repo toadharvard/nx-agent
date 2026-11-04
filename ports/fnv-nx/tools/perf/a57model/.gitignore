@@ -1,0 +1,3 @@
+build/
+qemu-hdr/
+__pycache__/

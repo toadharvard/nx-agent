@@ -16,7 +16,22 @@
  *                   closed while they run, so each drops its object's last reference itself (a self thread_free);
  *                   the host must free those records at their end (J-0129: linhost self-joined, host_v2.inc freed
  *                   the libnx Thread under the running thread), and 120 threads need the 64 slots reused.
- *                   Not checked by hb (calls the __real_ Win32 functions). */
+ *                   Not checked by hb (calls the __real_ Win32 functions).
+ *   placement       PERF.md 6.3 on host threads: main on core 0, a game thread on mask 0b110, and
+ *                   SetThreadAffinityMask / SetThreadIdealProcessor / SetThreadPriority on another thread's handle,
+ *                   before its start (CREATE_SUSPENDED) and while it runs; each thread reads its own affinity with
+ *                   sched_getaffinity (qemu-user passes it to the host kernel). Priorities are advisory under CFS:
+ *                   only that the calls succeed is checked.
+ *   ilk-count, ilk-refs   the inlined Interlocked* of fnvnx_win32.h (ilk_mt.cpp)
+ *   ilk-cost        benchmark B9 (ilk_cost.cpp, uninstrumented): ns per Interlocked operation, plain / LL-SC / inline /
+ *                   call / with a store in flight / shared by 2 threads; checks only the counts
+ *   litmus-order    S12's litmus test (tests/s12/order/litmus.cpp via litmus_mt.cpp) built with the fnvnx_order
+ *                   plugin: no bad outcome; mp2, lock and ref without a race. mp1's scratch store after the release is
+ *                   a value race by design (either value is accepted), so its races are printed, not judged. ref is
+ *                   S12's refcount protocol under the plugin's refcount=weak (relaxed increment, release decrement,
+ *                   acquire fence on the path to 0): hb.c models the fence, so a missing acquire shows as a race.
+ *   litmus-plain    the same without the plugin: the checker must report races in mp2 and lock (their volatile
+ *                   hand-offs are plain accesses for GCC). */
 #include "fnvnx_win32_ext.h"
 #include "fnvnx/hostapi.h"
 
@@ -39,6 +54,7 @@ static void result(const char *name, bool ok, const char *detail)
     printf("mtq: %s %s %s\n", name, ok ? "ok" : "FAIL", detail);
     if (!ok) g_fail++;
 }
+extern "C" void mtq_result(const char *name, int ok, const char *detail) { result(name, ok != 0, detail); }
 
 /* ---- parallel */
 static const uint64_t WORK = 40000000;
@@ -269,6 +285,116 @@ static void t_detach(void)
     result("detach", made == DETACH_BATCH * DETACH_BATCHES && ended == made, d);
 }
 
+/* ---- placement */
+static unsigned my_affinity(void)
+{
+    unsigned long long m = 0;
+    register long x0 __asm__("x0") = 0;                  /* this thread */
+    register long x1 __asm__("x1") = sizeof m;
+    register long x2 __asm__("x2") = (long)(uintptr_t)&m;
+    register long x8 __asm__("x8") = 123;                /* sched_getaffinity */
+    __asm__ volatile("svc 0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x8) : "memory");
+    return x0 < 0 ? 0xFFFFFFFFu : (unsigned)(m & 0xF);
+}
+static HANDLE g_pl_moved, g_pl_seen;
+static volatile LONG g_pl_first, g_pl_second;
+static DWORD place_thread(LPVOID)
+{
+    InterlockedExchange(&g_pl_first, (LONG)my_affinity());
+    SetEvent(g_pl_seen);
+    WaitForSingleObject(g_pl_moved, INFINITE);           /* main changes this thread's mask from outside */
+    InterlockedExchange(&g_pl_second, (LONG)my_affinity());
+    return 0;
+}
+static void t_placement(void)
+{
+    char d[200];
+    unsigned m_main = my_affinity();
+    g_pl_seen = CreateEventA(NULL, FALSE, FALSE, NULL);
+    g_pl_moved = CreateEventA(NULL, FALSE, FALSE, NULL);
+    /* 1: a game thread as placed (row game: mask 0b110), then moved by main through its handle */
+    HANDLE a = CreateThread(NULL, 0, place_thread, NULL, 0, NULL);
+    WaitForSingleObject(g_pl_seen, INFINITE);
+    unsigned game_first = (unsigned)g_pl_first;
+    BOOL pr = SetThreadPriority(a, THREAD_PRIORITY_ABOVE_NORMAL);
+    SetThreadAffinityMask(a, 0x4);
+    SetEvent(g_pl_moved);
+    WaitForSingleObject(a, INFINITE);
+    unsigned game_moved = (unsigned)g_pl_second;
+    CloseHandle(a);
+    /* 2: created suspended: the mask set before the first ResumeThread holds from its first instruction */
+    HANDLE b = CreateThread(NULL, 0, place_thread, NULL, CREATE_SUSPENDED, NULL);
+    SetThreadAffinityMask(b, 0x2);
+    SetThreadIdealProcessor(b, 1);
+    BOOL pr2 = SetThreadPriority(b, THREAD_PRIORITY_BELOW_NORMAL);
+    ResumeThread(b);
+    WaitForSingleObject(g_pl_seen, INFINITE);
+    unsigned susp_first = (unsigned)g_pl_first;
+    SetThreadIdealProcessor(b, 2);                        /* an ideal core outside the mask joins it */
+    SetEvent(g_pl_moved);
+    WaitForSingleObject(b, INFINITE);
+    unsigned susp_ideal = (unsigned)g_pl_second;
+    CloseHandle(b);
+    CloseHandle(g_pl_seen);
+    CloseHandle(g_pl_moved);
+    snprintf(d, sizeof d, "main 0x%x (want 0x1), game 0x%x (want 0x6), moved 0x%x (want 0x4), suspended 0x%x (want 0x2), "
+             "ideal 2 joins 0x%x (want 0x6), priority calls %d %d", m_main, game_first, game_moved, susp_first,
+             susp_ideal, pr, pr2);
+    result("placement", m_main == 0x1 && game_first == 0x6 && game_moved == 0x4 && susp_first == 0x2 &&
+                        susp_ideal == 0x6 && pr && pr2, d);
+}
+
+/* ---- litmus (S12) */
+extern "C" {
+extern int litmus_available;
+extern char litmus_out[];
+void litmus_begin(void);
+int litmus_main_order(void);
+int litmus_main_plain(void);
+void ilk_tests(void);
+void ilk_cost(void);
+}
+struct LitRow { unsigned rounds, bad, races; };
+static bool lit_row(const char *out, const char *test, LitRow *r)
+{
+    for (const char *p = out; *p; ) {
+        const char *t = test, *q = p;
+        while (*t && *q == *t) { t++; q++; }
+        if (!*t && *q == ' ') {
+            unsigned v[3] = {0, 0, 0};
+            for (int i = 0; i < 3; i++) {
+                while (*q && *q != '=' && *q != '\n') q++;
+                if (*q != '=') return false;
+                q++;
+                while (*q >= '0' && *q <= '9') v[i] = v[i] * 10 + (unsigned)(*q++ - '0');
+            }
+            *r = LitRow{v[0], v[1], v[2]};
+            return true;
+        }
+        while (*p && *p != '\n') p++;
+        if (*p) p++;
+    }
+    return false;
+}
+static void t_litmus(const char *name, int (*fn)(void), bool order)
+{
+    char d[160];
+    if (!litmus_available) { printf("mtq: %s skip (no fnvnx_order plugin here)\n", name); return; }
+    litmus_begin();
+    fn();
+    LitRow m1, m2, lk, rf;
+    bool got = lit_row(litmus_out, "mp1", &m1) && lit_row(litmus_out, "mp2", &m2) && lit_row(litmus_out, "lock", &lk) &&
+               lit_row(litmus_out, "ref", &rf);
+    if (!got) { result(name, false, "no result lines"); return; }
+    snprintf(d, sizeof d, "rounds %u: bad mp1 %u mp2 %u lock %u ref %u; races mp1 %u mp2 %u lock %u ref %u", m2.rounds,
+             m1.bad, m2.bad, lk.bad, rf.bad, m1.races, m2.races, lk.races, rf.races);
+    if (order)
+        result(name, m1.bad == 0 && m2.bad == 0 && lk.bad == 0 && rf.bad == 0 && m2.races == 0 && lk.races == 0 &&
+                     rf.races == 0, d);
+    else
+        result(name, m2.races > 0 && lk.races > 0, d);
+}
+
 extern "C" int mtq_main(void)
 {
     printf("mtq: guest up, %u cores reported\n", (unsigned)fnvnx_hcall0(fnvnx_host->cpu_count));
@@ -279,6 +405,11 @@ extern "C" int mtq_main(void)
     t_spin("spin-override", 1);
     t_unsync();
     t_detach();
+    t_placement();
+    ilk_tests();
+    ilk_cost();
+    t_litmus("litmus-order", litmus_main_order, true);
+    t_litmus("litmus-plain", litmus_main_plain, false);
     printf("mtq: done, %d failed\n", g_fail);
     return g_fail;
 }
