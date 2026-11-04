@@ -1,6 +1,8 @@
 """classify.py - root-cause hints for one minimised divergence (probes + the oracle's instruction mix).
 
 Causes (first that applies):
+  x86-custom-cc   the oracle reads a register its declared convention does not pass (MSVC whole-program custom
+                  convention, e.g. a pointer in eax): an oracle-model gap, not a port bug
   split-global    the native function reaches its unit's own copy of an image variable (S2 rebinding bypassed by a
                   section-relative relocation) while the oracle uses the image copy
   nan-bits        only NaN payload/sign differ (x87 real indefinite vs AArch64 default NaN)
@@ -33,6 +35,43 @@ CS = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 
 def mnemonics(fn):
     return {i.mnemonic for i in CS.disasm(fn['code'], fn['address'])}
+
+
+CSD = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+CSD.detail = True
+GPR = {'eax', 'ecx', 'edx', 'ebx', 'esi', 'edi', 'ax', 'al', 'ah', 'cx', 'cl', 'ch', 'dx', 'dl', 'dh', 'bx', 'bl', 'bh',
+       'si', 'di'}
+BASE = {'ax': 'eax', 'al': 'eax', 'ah': 'eax', 'cx': 'ecx', 'cl': 'ecx', 'ch': 'ecx', 'dx': 'edx', 'dl': 'edx',
+        'dh': 'edx', 'bx': 'ebx', 'bl': 'ebx', 'bh': 'ebx', 'si': 'esi', 'di': 'edi'}
+
+
+def entry_register_reads(fn, conv):
+    """Registers the oracle function reads before writing them on its entry path (straight line up to the first
+    branch), excluding those its declared convention passes (ecx/edx) and the callee-saved pushes: a register
+    argument MSVC's whole-program optimisation added (a custom convention units.json does not record)."""
+    passed = {sp for _, sp, _, _ in conv.x86 if sp in ('ecx', 'edx')}
+    written, reads = set(), set()
+    for ins in CSD.disasm(fn['code'], fn['address']):
+        if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
+            continue                  # saving a callee-saved register / reserving a slot is not a use
+        if ins.mnemonic in ('xor', 'sub') and len(ins.operands) == 2 and ins.op_str.split(', ')[0] == \
+                ins.op_str.split(', ')[-1]:
+            written.add(BASE.get(ins.op_str.split(', ')[0], ins.op_str.split(', ')[0]))
+            continue
+        try:
+            rr, ww = ins.regs_access()
+        except capstone.CsError:
+            break
+        for r in rr:
+            n = BASE.get(ins.reg_name(r), ins.reg_name(r))
+            if n in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi') and n not in written and n not in passed:
+                reads.add(n)
+        for r in ww:
+            written.add(BASE.get(ins.reg_name(r), ins.reg_name(r)))
+        if capstone.CS_GRP_JUMP in ins.groups or capstone.CS_GRP_CALL in ins.groups or \
+                capstone.CS_GRP_RET in ins.groups:
+            break
+    return sorted(reads)
 
 
 def _outcome(r):
@@ -76,6 +115,9 @@ def hint(pair, target, case, div, fn, max_steps):
     k = div['kind']
     if k == 'local-static':
         h['cause'] = 'local-static'; return h
+    regs = entry_register_reads(fn, target.conv)
+    if regs:
+        h['cause'] = 'x86-custom-cc'; h['regs'] = regs; return h
     src = getattr(target, 'source', None)
     if src and k in ('return', 'mem-write', 'call-args', 'error'):
         obj = config.LINK / 'fixed' / config.obj_name(src)

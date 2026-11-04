@@ -216,7 +216,8 @@ def fuzz_one(item, opts):
     import classify
     src, addr = item['source'], int(item['address'], 16)
     out = dict(source=src, address=item['address'], symbol=item.get('symbol'), unit=item.get('unit'),
-               size=item.get('size'), kind=item.get('kind'), execs=0, divergences=[], status='ok')
+               size=item.get('size'), kind=item.get('kind'), tag=item.get('tag'), execs=0, divergences=[],
+               status='ok')
     t0 = time.time()
     try:
         uc = unit_cache()
