@@ -12,8 +12,14 @@
 * thread-local variables at image .tls addresses (two units, two names, one address; a native definition at
   another): TLS references to slots of one native TLS block, never to an absolute image address;
 * image vftable addresses stored into vptrs by hand: V entries (named vftable; class of the storing constructor) and
-  the data symbol bound to the native address point.
+  the data symbol bound to the native address point;
+* split globals (S13): a variable defined at an image address by the unit itself (-O2: section anchors) - its own
+  functions, its static initializer and a pointer in its data reach the rebound symbol, not `.data + off`;
+* GAME1 (fnvnx_game_<name>): looked up by the unit's own name (a game function, another import's slot);
+* GCC's global operator new/delete -> the game's, by the MSVC names the units bind (sized delete: the sized one);
+* S1b units_renames.tsv: applied to a unit whose source carries the patch, not to an unpatched one.
 """
+import collections
 import json
 import os
 import subprocess
@@ -35,8 +41,9 @@ CRT = ('# address\tclass\tidentification\thow\tunits\tsrc_files\tprovider\n'
 IMPORTS = ('# iat_slot\tdll\tapi\tunits\tother_decomp_names\tprovider\n'
            '0x00fdf004\tadvapi32\tRegCloseKey\t2\tEnterCriticalSection\tS4 platform/win32\n'
            '0x00fdf100\td3dx9_38\tD3DXMatrixRotationYawPitchRoll\t1\t-\tS6\n'
-           '0x00fdf108\td3dx9_38\tD3DXVec3Normalize\t1\t-\tS6\n')   # 0x00fdf104: in the span, unlisted
-EXPORTS = ('const exp g_exports[] = { E("advapi32", RegCloseKey),\n'
+           '0x00fdf108\td3dx9_38\tD3DXVec3Normalize\t1\t-\tS6\n'   # 0x00fdf104: in the span, unlisted
+           '0x00fdf008\tkernel32\tInterlockedIncrement\t1\tEnterCriticalSection\tS4 platform/win32\n')
+EXPORTS = ('const exp g_exports[] = { E("advapi32", RegCloseKey), E("kernel32", InterlockedIncrement),\n'
            '    { "ws2_32", "closesocket", (void *)&fnvnx_ws2_closesocket } };\n')
 SRC = {
     'src/a.cpp': 'extern "C" int FUN_00ec1000(char *, unsigned, const char *);\n'
@@ -63,7 +70,28 @@ SRC = {
                  'struct Dt { virtual int h(); ~Dt(); };\nint Dt::h() { return 3; }\n'
                  'extern "C" char DAT_01000800[], DAT_01000810[];\n'
                  'Dt::~Dt() { *(void **)this = DAT_01000800; *(void **)this = DAT_01000810; }\n',
+    'src/r.cpp': 'struct RTTI { const char *name; RTTI(const char *n); };\n'      # split globals (compiled -O2)
+                 '__attribute__((noinline)) RTTI::RTTI(const char *n) : name(n) {}\n'
+                 'RTTI ms_kRTTI("Seq");\nconst RTTI *GetRTTI() { return &ms_kRTTI; }\n'
+                 'int g_count = 5;\nint *g_pcount = &g_count;\nint bump() { return ++g_count; }\n',
+    'src/g.cpp': 'unsigned long fnvnx_game_GetCurrentThreadId();\n'                # GAME1 spellings
+                 'extern "C" void fnvnx_game_EnterCriticalSection(void *);\nvoid fnvnx_game_Sleep(unsigned long);\n'
+                 'int game_calls(void *p) { fnvnx_game_EnterCriticalSection(p); fnvnx_game_Sleep(1); '
+                 'return (int)fnvnx_game_GetCurrentThreadId(); }\n',
+    'src/h.cpp': 'unsigned long FUN_00830470() { return 7; }\nvoid FUN_00401410(unsigned long) {}\n'
+                 'void *FUN_00402000(unsigned n) { return (void *)n; }\nvoid FUN_00402030(void *) {}\n'
+                 'void FUN_00aa1460(void *, unsigned) {}\n',
+    'src/n.cpp': 'struct Obj { int a, b; };\nObj *mk_obj() { return new Obj(); }\nvoid del_obj(Obj *p) { delete p; }\n'
+                 'int *mk_arr(int n) { return new int[n]; }\nvoid del_arr(int *p) { delete[] p; }\n',
+    'src/x.cpp': '/* fnv-nx XINC1: test */ struct FUN_00403000_s1b { void FUN_00403000(int); };\n'   # patched
+                 'void FUN_00403000_s1b::FUN_00403000(int) {}\n'
+                 'void call_x(FUN_00403000_s1b *p) { p->FUN_00403000(1); }\n',
+    'src/z.cpp': 'void FUN_00404000(int) {}\n',                                   # not patched: keeps its name
 }
+RENAMES = ('# source\tkind\taddress\told MSVC name\tnew MSVC name\n'
+           'src/x.cpp\tdef\t0x00403000\t?FUN_00403000@@YGXH@Z\t?FUN_00403000@FUN_00403000_s1b@@QAEXH@Z\n'
+           'src/x.cpp\tref\t0x00403000\t?FUN_00403000@@YGXH@Z\t?FUN_00403000@FUN_00403000_s1b@@QAEXH@Z\n'
+           'src/z.cpp\tdef\t0x00404000\t?FUN_00404000@@YAXH@Z\t?FUN_00404000@FUN_00404000_s1b@@QAEXH@Z\n')
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 16}   # noqa: E731
 F6 = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 6}   # noqa: E731
 UNITS = {'units': [
@@ -85,9 +113,50 @@ UNITS = {'units': [
      'symbols': {'?t_otherName@@3HA': '0x01272010', '_DAT_01000600': '0x01000600', '_DAT_01000700': '0x01000700',
                  '??_7Named@@6B@': '0x01000700', '_DAT_01000800': '0x01000800', '_DAT_01000810': '0x01000810',
                  '_FUN_00ee6df2': '0x00ee6df2'}},
+    {'source': 'src/r.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x401200, '??0RTTI@@QAE@PBD@Z'), F(0x401210, '?GetRTTI@@YAPBURTTI@@XZ'), F(0x401220, '?bump@@YAHXZ')],
+     'symbols': {'?ms_kRTTI@@3URTTI@@A': '0x01000a00', '?g_count@@3HA': '0x01000a10',
+                 '?g_pcount@@3PAHA': '0x01000a20'}},
+    {'source': 'src/g.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401400, '?game_calls@@YAHPAX@Z')],
+     'symbols': {'?GetCurrentThreadId@@YGKXZ': '0x00830470', '__imp__EnterCriticalSection@4': '0x00fdf008',
+                 '?Sleep@@YGXK@Z': '0x00401410'}},
+    {'source': 'src/h.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x830470, '?FUN_00830470@@YAKXZ'), F(0x401410, '?FUN_00401410@@YAXK@Z'),
+        F(0x402000, '?FUN_00402000@@YAPAXI@Z'), F(0x402030, '?FUN_00402030@@YAXPAX@Z'),
+        F(0xaa1460, '?FUN_00aa1460@@YAXPAXI@Z')],
+     'symbols': {'??3@YAXPAXI@Z': '0x00aa1460'}},
+    {'source': 'src/n.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x401500, '?mk_obj@@YAPAUObj@@XZ'), F(0x401510, '?del_obj@@YAXPAUObj@@@Z'),
+        F(0x401520, '?mk_arr@@YAPAHH@Z'), F(0x401530, '?del_arr@@YAXPAH@Z')],
+     'symbols': {'??2@YAPAXI@Z': '0x00402000', '??3@YAXPAX@Z': '0x00402030', '??_U@YAPAXI@Z': '0x00402000',
+                 '??_V@YAXPAX@Z': '0x00402030'}},
+    {'source': 'src/x.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x403000, '?FUN_00403000@@YGXH@Z'), F(0x403010, '?call_x@@YAXPAUFUN_00403000_s1b@@@Z')],
+     'symbols': {}},
+    {'source': 'src/z.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x404000, '?FUN_00404000@@YAXH@Z')],
+     'symbols': {}},
 ]}
 
 ok = True
+
+
+def local_refs_into(path, names):
+    """relocations of allocated sections that reach one of the defined symbols `names` through a local symbol"""
+    o = vtables.Obj(path)
+    rng = collections.defaultdict(list)
+    for s_ in o.syms:
+        if s_[0] in names and s_[5]:
+            rng[s_[5]].append((s_[1], s_[1] + max(1, s_[2])))
+    n = 0
+    for i in range(len(o.secnames)):
+        if not o.secs[i][2] & 2:   # allocated sections only (debug info keeps section-relative references)
+            continue
+        for off, (si, _, add) in o.rel(i).items():
+            s_ = o.syms[si]
+            if s_[4] == 0 and s_[5] in rng and s_[0] not in names:   # local (binding 0), same section
+                at = (0 if s_[3] == 3 else s_[1]) + add
+                n += any(lo <= at < hi for lo, hi in rng[s_[5]])
+    return n
 
 
 def check(cond, what):
@@ -115,7 +184,7 @@ def main():
             os.makedirs(os.path.dirname(p), exist_ok=True)
             open(p, 'w').write(text)
             objs[rel] = os.path.join(t, rel.replace('/', '_') + '.o')
-            run([CXX, '-mabi=ilp32', '-O1', '-c', p, '-o', objs[rel]])
+            run([CXX, '-mabi=ilp32', '-O2' if rel == 'src/r.cpp' else '-O1', '-c', p, '-o', objs[rel]])
         units = os.path.join(tree, 'build', 'units.json')
         json.dump(UNITS, open(units, 'w'))
         with open(os.path.join(t, 'objects.tsv'), 'w') as f:
@@ -123,11 +192,14 @@ def main():
                 f.write('%s\t%s\tok\n' % (rel, objs[rel]))
         plat = os.path.join(t, 'platform')
         os.makedirs(plat)
-        for name, text in (('crt_symbols.tsv', CRT), ('imports.tsv', IMPORTS), ('exports.cpp', EXPORTS)):
+        for name, text in (('crt_symbols.tsv', CRT), ('imports.tsv', IMPORTS), ('exports.cpp', EXPORTS),
+                           ('units_renames.tsv', RENAMES)):
             open(os.path.join(plat, name), 'w').write(text)
+        r_before = local_refs_into(objs['src/r.cpp'], ('ms_kRTTI', 'g_count', 'g_pcount'))
         out, fixed = os.path.join(t, 'out'), os.path.join(t, 'fixed')
         run([sys.executable, FNVLINK, 'resolve', units, os.path.join(t, 'objects.tsv'), out, '--crt-symbols',
-             os.path.join(plat, 'crt_symbols.tsv'), '--imports', os.path.join(plat, 'imports.tsv')])
+             os.path.join(plat, 'crt_symbols.tsv'), '--imports', os.path.join(plat, 'imports.tsv'),
+             '--units-renames', os.path.join(plat, 'units_renames.tsv')])
         refs = {(r[0], r[1]): r for r in (l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'refs.tsv'))
                                           if not l.startswith('#'))}
         rows = {int(r[0], 16): r for r in (l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'addrmap.tsv'))
@@ -156,6 +228,24 @@ def main():
         check('__fnv_01000600 = _ZTV4Poly + 8;' in ld and '__fnv_01000700 = _ZTV5Named + 8;' in ld,
               'vptr data symbols bound to the native address points')
         check('__fnv_01272010' not in ld and '__fnv_01272020' not in ld, 'no absolute TLS address')
+        g = 'src/g.cpp'
+        for name, want in (('_Z29fnvnx_game_GetCurrentThreadIdv', '__fnv_00830470'),
+                           ('fnvnx_game_EnterCriticalSection', 'InterlockedIncrement'),
+                           ('_Z16fnvnx_game_Sleepm', '__fnv_00401410')):
+            check(refs.get((g, name), [''] * 6)[5] == want, 'GAME1 %s -> %s: %s' % (name, want, refs.get((g, name))))
+        n_ = 'src/n.cpp'
+        for name, want in (('_Znwm', '__fnv_00402000'), ('_ZdlPvm', '__fnv_00aa1460'), ('_Znam', '__fnv_00402000'),
+                           ('_ZdaPv', '__fnv_00402030')):
+            check(refs.get((n_, name), [''] * 6)[5] == want, 'game allocator %s -> %s: %s' % (name, want,
+                                                                                       refs.get((n_, name))))
+        check(rows.get(0x403000, [''] * 4)[1:4] == ['F', '__fnv_00403000', '_ZN16FUN_00403000_s1b12FUN_00403000Ei'],
+              'S1b-renamed definition matched: %s' % rows.get(0x403000))
+        check(refs.get(('src/x.cpp', '_ZN16FUN_00403000_s1b12FUN_00403000Ei'), [''] * 6)[5] in ('', '__fnv_00403000'),
+              'S1b-renamed reference: %s' % refs.get(('src/x.cpp', '_ZN16FUN_00403000_s1b12FUN_00403000Ei')))
+        check(rows.get(0x404000, [''] * 4)[1:4] == ['F', '__fnv_00404000', '_Z12FUN_00404000i'],
+              'unpatched unit keeps its name: %s' % rows.get(0x404000))
+        dd = {l.split('\t')[1] for l in open(os.path.join(out, 'data_defs.tsv'))}
+        check({'ms_kRTTI', 'g_count', 'g_pcount'} <= dd, 'split-global variables are data defs: %s' % sorted(dd))
         run([sys.executable, FNVLINK, 'apply', out, fixed])
         run([sys.executable, FNVLINK, 'check', out, fixed])
         t_o = vtables.Obj(os.path.join(fixed, os.path.basename(objs['src/t.cpp'])))
@@ -164,6 +254,19 @@ def main():
                    if call_t[1] <= off < call_t[1] + call_t[2]}
         check('FUN_00ee6df2' not in t_o.defs and 'D3DXVec3TransformNormal' in targets,
               'the thunk\'s own unit calls the import: %s' % sorted(targets))
+        r_obj = os.path.join(fixed, os.path.basename(objs['src/r.cpp']))
+        check(r_before > 0, 'the -O2 unit reaches its variables through local symbols (%d relocations)' % r_before)
+        check(local_refs_into(r_obj, ('__fnv_01000a00', '__fnv_01000a10', '__fnv_01000a20')) == 0,
+              'no local-symbol reference into a rebound variable after apply')
+        r_o = vtables.Obj(r_obj)
+        by = collections.defaultdict(set)
+        for i, sec in enumerate(r_o.secnames):
+            for off, (si, _, _) in r_o.rel(i).items():
+                by[sec].add(r_o.syms[si][0])
+        check('__fnv_01000a00' in set().union(*(v for k, v in by.items() if k.startswith('.text'))),
+              'GetRTTI / the static initializer reach __fnv_01000a00: %s' % dict(by))
+        check('__fnv_01000a10' in set().union(*(v for k, v in by.items() if k.startswith('.data'))),
+              'g_pcount points at __fnv_01000a10: %s' % dict(by))
         log = open(os.path.join(out, 'trial_link.log')).read()
         check('multiple definition' not in log and 'TLS' not in log and 'relocation' not in log,
               'trial link: %s' % log[:2000])
@@ -174,6 +277,7 @@ def main():
         check(sym.get('__fnvnx_tls_01272020', (0, -1))[1] - sym.get('__fnvnx_tls_image', (0, 0))[1] == 0x20,
               'TLS slot offset in the block')
         check(sym.get('__fnv_01000600', (0, -1))[1] == sym.get('_ZTV4Poly', (0, 0))[1] + 8, 'linked vptr value')
+        check(sym.get('__fnv_01000a00', (0, -1))[1] == 0x01000a00, 'rebound variable at its image address')
     print('ok' if ok else 'FAILED')
     sys.exit(0 if ok else 1)
 

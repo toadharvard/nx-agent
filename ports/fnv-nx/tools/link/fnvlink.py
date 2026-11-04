@@ -5,6 +5,8 @@
                        [--crt-symbols <tsv|none>] [--imports <tsv|none>]
                                                               # mapping, address map, ABI report, bridges
                                                               # (S4's provider tables: platform/ of this tree)
+                       [--units-renames <tsv|none>]           # S1b's patches/units_renames.tsv (default: this
+                                                              # tree's; patched units only)
                        [--msvc-objs <dir>]                    # vtable slots via the MSVC vftables (vslots.py)
     fnvlink.py probe   <out dir> <prepared tree> [jobs]        # layouts of the aggregates resolve asked for, and
                                                               # the synthesized vtables/typeinfo (vtables.py;
@@ -17,6 +19,7 @@ objects.tsv: source<TAB>object path<TAB>ok|fail (tools/link/compile.sh writes it
 Everything written to <out dir> is derived from the decomp: local output only, never committed.
 """
 import collections
+import copy
 import hashlib
 import json
 import os
@@ -59,6 +62,25 @@ DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup n
 # renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
 GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit'}
 ADDR_IN_NAME = re.compile(r'^(?:DAT|FUN|g|UNK|PTR)_([0-9a-f]{8})$')
+# prepare rule GAME1 (D13): a Win32-looking name a unit binds to game code is spelled fnvnx_game_<name>; the unit's
+# recipe still names it <name>, so the lookup strips the prefix (the unit's binding decides: game code or an IAT slot)
+GAME_PREFIX = 'fnvnx_game_'
+# the global operator new/delete GCC calls -> the game's, by the MSVC names the units bind (S13: the game allocator,
+# never the platform's): Itanium name -> MSVC names to try, in order (sized forms: the game's sized delete)
+NEWDEL = {'_Znwm': ('??2@YAPAXI@Z',), '_Znwj': ('??2@YAPAXI@Z',),
+          '_Znam': ('??_U@YAPAXI@Z', '??2@YAPAXI@Z'), '_Znaj': ('??_U@YAPAXI@Z', '??2@YAPAXI@Z'),
+          '_ZdlPv': ('??3@YAXPAX@Z',), '_ZdaPv': ('??_V@YAXPAX@Z', '??3@YAXPAX@Z'),
+          '_ZdlPvm': ('??3@YAXPAXI@Z', '??3@YAXPAX@Z'), '_ZdlPvj': ('??3@YAXPAXI@Z', '??3@YAXPAX@Z'),
+          '_ZdaPvm': ('??3@YAXPAXI@Z', '??_V@YAXPAX@Z', '??3@YAXPAX@Z'),
+          '_ZdaPvj': ('??3@YAXPAXI@Z', '??_V@YAXPAX@Z', '??3@YAXPAX@Z')}
+# other operator new/delete forms (placement, class-like extra parameters) are decomp declarations: resolved like any
+# other name, not as runtime; the nothrow / aligned forms stay runtime
+NEWDEL_ANY = re.compile(r'^_Z(?:n[wa]|d[la])')
+NEWDEL_STD = re.compile(r'^_Z(?:n[wa][jm]|d[la]Pv[jm]?)(?:RKSt9nothrow_t|St11align_val_t)*$')
+# S1b (patches/units_renames.tsv): MSVC names of the definitions and references a patch changes; applied by resolve to
+# the units whose prepared source carries the patch, when prepare has not rewritten units.json yet
+UNITS_RENAMES = os.path.normpath(os.path.join(HERE, '..', '..', 'patches', 'units_renames.tsv'))
+S1B_MARK = re.compile(r'fnv-nx (?:XINC1|FTOL1|DBUG1)\b')
 
 
 def log(*a):
@@ -129,10 +151,54 @@ class Unit:
         self.source, self.defs, self.refs, self.obj, self.host, self.sizes = source, [], {}, None, None, {}
 
 
-def load_units(path):
-    """units.json -> {source: Unit}; sources listed twice (built with two flag sets) are merged."""
+def load_renames(path, tree):
+    """patches/units_renames.tsv rows (source, kind, address, old, new) of the units whose prepared source under
+    `tree` carries an S1b patch marker (a unit compiled without the patch keeps its old names)."""
+    if not path or path == 'none' or not os.path.exists(path):
+        return []
+    rows, patched = [], {}
+    for line in open(path, encoding='utf-8'):
+        if line.startswith('#') or not line.strip():
+            continue
+        f = line.rstrip('\n').split('\t')
+        if len(f) < 5:
+            continue
+        if f[0] not in patched:
+            p = os.path.join(tree, f[0])
+            patched[f[0]] = os.path.exists(p) and bool(
+                S1B_MARK.search(open(p, encoding='utf-8', errors='surrogateescape').read()))
+        if patched[f[0]]:
+            rows.append(tuple(f[:5]))
+    return rows
+
+
+def apply_renames(data, rows, stats):
+    """S1b's units.json fix (tools/rules/s1b_patches.py fix_units_data), in memory: 'def' rows rename a recipe
+    function's symbol, 'ref' rows add a reference name. Idempotent: a units.json prepare already fixed is unchanged."""
+    by_src = collections.defaultdict(list)
+    for r in rows:
+        by_src[r[0]].append(r)
+    for u in data['units']:
+        for src, kind, addr, old, new in by_src.get(u['source'], []):
+            if kind == 'def':
+                for fn in u['functions']:
+                    if int(fn['address'], 16) == int(addr, 16) and fn['symbol'] == old:
+                        fn['symbol'] = new
+                        stats['units_renames_def'] += 1
+            elif kind == 'ref' and new not in u['symbols']:
+                u['symbols'][new] = addr
+                stats['units_renames_ref'] += 1
+    return data
+
+
+def load_units(path, renames=None, stats=None):
+    """units.json -> {source: Unit}; sources listed twice (built with two flag sets) are merged. renames: rows of
+    load_renames, applied first."""
     units = {}
-    for u in json.load(open(path))['units']:
+    data = json.load(open(path))
+    if renames:
+        apply_renames(data, renames, stats if stats is not None else collections.Counter())
+    for u in data['units']:
         unit = units.setdefault(u['source'], Unit(u['source']))
         for fn in u['functions']:
             a = int(fn['address'], 16)
@@ -174,12 +240,16 @@ def kind_of_addr(a):
     return 'data' if DATA_START <= a < DATA_END + 0x1000 else ('text' if a < DATA_START else 'other')
 
 
-def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None):
+def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None,
+            units_renames=None):
     """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
     this tree, 'none': not used)."""
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
     os.makedirs(os.path.join(out, 'objcopy'), exist_ok=True)
-    units = load_units(units_json)
+    pre_stats = collections.Counter()
+    tree = os.path.dirname(os.path.dirname(os.path.abspath(units_json)))   # <tree>/build/units.json
+    renames = load_renames(UNITS_RENAMES if units_renames is None else units_renames, tree)
+    units = load_units(units_json, renames, pre_stats)
     for line in open(objects_tsv):
         f = line.rstrip('\n').split('\t')
         if len(f) >= 3 and f[2] == 'ok' and f[0] in units:
@@ -327,8 +397,24 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     probe_req = set()
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
-    stats = collections.Counter()
+    stats = collections.Counter(pre_stats)
     byclass = collections.Counter()
+    # the game's operator new/delete for GCC's global forms: the unit's own binding of the MSVC name, else the one
+    # most units use
+    newdel_votes = collections.defaultdict(collections.Counter)
+    for u_ in units.values():
+        for n_, a_ in u_.refs.items():
+            if n_.startswith(('??2@', '??3@', '??_U@', '??_V@')):
+                newdel_votes[n_][a_] += 1
+
+    def newdel_addr(u_, un_):
+        for mn in NEWDEL.get(un_, ()):
+            src_ = units.get(u_.host or u_.source)
+            if src_ is not None and mn in src_.refs:
+                return src_.refs[mn], mn
+            if newdel_votes.get(mn):
+                return newdel_votes[mn].most_common(1)[0][0], mn
+        return None, None
     bridges, abi_rows, abi_classes = {}, [], collections.Counter()
     traps = {}       # trap stub -> (slot symbol defined nowhere, (vtable, slot) where first seen)
     pair_classes = collections.Counter()
@@ -376,7 +462,19 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for un in undefs:
             stats['refs'] += 1
             isig = itanium(un)
-            cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc)
+            if isig.qual and isig.qual[-1].startswith(GAME_PREFIX):   # GAME1: the unit's own name for it
+                g = copy.copy(isig)
+                g.qual = isig.qual[:-1] + [isig.qual[-1][len(GAME_PREFIX):]]
+                isig = g
+                stats['game1_refs'] += 1
+            na, nm = newdel_addr(u, un) if un in NEWDEL else (None, None)
+            if na is not None:   # GCC's global operator new/delete -> the game's allocator
+                cls, tier, addr, target, note = 'addr', 'game/newdel', na, None, nm
+                stats['newdel_refs'] += 1
+            else:
+                cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc)
+            if cls != 'unresolved' and isig.qual and un.find(GAME_PREFIX) >= 0:
+                stats['game1_resolved'] += 1
             if un in vslots and vsb is not None:
                 cls, tier, addr, target, note = vsb.classify(u.host or u.source, u.obj, un, isig, native, def_at,
                                                              (cls, tier, addr, target, note))
@@ -580,6 +678,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         with open(os.path.join(out, 'objcopy', base + '.undefine'), 'w', encoding='utf-8',
                   errors='surrogateescape') as f:   # definitions apply turns into references (import thunks)
             f.write(''.join(n + '\n' for n in sorted(thunk_undef.get(u.source, {}))))
+        with open(os.path.join(out, 'objcopy', base + '.rebind'), 'w', encoding='utf-8',
+                  errors='surrogateescape') as f:   # rebound variables: apply retargets the object's own references
+            f.write(''.join(n + '\n' for n in sorted(set(dd.values()))))
 
     # ---- vftables
     # image vftables (primary `vftable' and secondary `vftable'{for `B'}) -> address point of the Itanium vtable of
@@ -704,6 +805,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'import references bound by IAT slot (imports.tsv + exports.cpp): %d of %d'
               % (stats['imports_bound'], byclass['import']),
               'import thunks bound to their import instead of the compiled decomp body: %d' % stats['import_thunks'],
+              'GAME1 names (fnvnx_game_*) looked up by the unit\'s own name: %d references, %d resolved'
+              % (stats['game1_refs'], stats['game1_resolved']),
+              'operator new/delete references bound to the game\'s allocator: %d' % stats['newdel_refs'],
+              'S1b units_renames.tsv applied: %d definitions renamed, %d reference names added'
+              % (stats['units_renames_def'], stats['units_renames_ref']),
               'image vftable addresses stored into vptrs by hand: %d, bound to a native address point: %d '
               '(hand_vptrs.tsv)' % (stats['hand_vptr_addrs'], stats['hand_vptr_rebound']),
               'thread-local references bound to the native TLS block: %d (%d image .tls addresses, %d native '
@@ -1012,7 +1118,7 @@ def disambiguate_defs(names, m, itanium):
 
 def classify_ref(un, isig, idx, gdef, gref, anydef, msvc):
     """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller)."""
-    if RUNTIME.match(un):
+    if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)):
         return 'runtime', None, None, None, None
     if isig.kind == 'special':
         return ('native' if un in anydef else 'special-unresolved'), None, None, None, isig.special
@@ -1190,6 +1296,7 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, pr
 def apply(out, fixed):
     os.makedirs(fixed, exist_ok=True)
     n = 0
+    retargeted, retarget_objs = 0, 0
     for name in sorted(os.listdir(os.path.join(out, 'objcopy'))):
         if not name.endswith('.args'):
             continue
@@ -1211,15 +1318,29 @@ def apply(out, fixed):
             for line in f:
                 old, new = line.split()
                 mapping[old] = new
+        temps = []
+        # split globals (S13): GAS resolves the defining object's own references to a variable as `.bss + off`, so
+        # renaming and weakening it would miss that object (and its static initializer would build a private
+        # copy): those relocations are pointed at the rebound symbol first
+        rb = os.path.join(out, 'objcopy', base + '.rebind')
+        rebind = set(open(rb, encoding='utf-8', errors='surrogateescape').read().split()) if os.path.exists(rb) \
+            else set()
+        if rebind:
+            k = elfsyms.retarget_local_relocs(obj, dst + '.rb', rebind)
+            retargeted += k
+            retarget_objs += bool(k)
+            obj = dst + '.rb'
+            temps.append(obj)
         und = os.path.join(out, 'objcopy', base + '.undefine')
         names = set(open(und, encoding='utf-8', errors='surrogateescape').read().split()) if os.path.exists(und) \
             else set()
         if names:
             elfsyms.undefine_symbols(obj, dst + '.und', names)
             obj = dst + '.und'
+            temps.append(obj)
         elfsyms.rename_undefined(obj, dst, mapping)
-        if names:
-            os.remove(obj)
+        for t in temps:
+            os.remove(t)
         n += 1
     ov = os.path.join(out, 'overrides.list')
     if os.path.exists(ov):
@@ -1235,6 +1356,8 @@ def apply(out, fixed):
     if r.returncode:
         log('cc addrmap.c failed: ' + r.stderr[:2000])
     print('objects rewritten: %d' % n)
+    print('own references to rebound variables retargeted: %d relocations in %d objects' % (retargeted,
+                                                                                            retarget_objs))
 
 
 def check(out, fixed):
@@ -1280,12 +1403,13 @@ def main():
         argv, opts = [], {}
         it_ = iter(sys.argv[2:])
         for x in it_:
-            if x in ('--override', '--extern-text', '--crt-symbols', '--imports'):
+            if x in ('--override', '--extern-text', '--crt-symbols', '--imports', '--units-renames'):
                 opts[x[2:].replace('-', '_')] = next(it_)
             else:
                 argv.append(x)
         resolve(*argv[:3], override=opts.get('override'), extern_list=opts.get('extern_text'),
-                crt_symbols=opts.get('crt_symbols'), imports=opts.get('imports'))
+                crt_symbols=opts.get('crt_symbols'), imports=opts.get('imports'),
+                units_renames=opts.get('units_renames'))
         with open(os.path.join(argv[2], 'overrides.list'), 'w') as f:
             for _, _, obj in load_overrides(opts.get('override')):
                 f.write(obj + '\n')

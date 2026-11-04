@@ -137,6 +137,56 @@ def undefine_symbols(src, dst, names):
     return n
 
 
+def retarget_local_relocs(src, dst, names):
+    """Copy ELF32 object src to dst with every relocation that reaches one of the defined symbols `names` through a
+    local symbol (GAS writes same-object references to a global as `.bss + off` / `.data + off`, or relative to a
+    local label) rewritten to name that symbol, addend adjusted: once the variable is rebound (apply renames and
+    weakens it, aliases.ld defines it), the defining object's own code and data follow it too. Relocations of
+    non-allocated sections (debug info) are left alone. Returns the number of relocations rewritten."""
+    data = bytearray(open(src, 'rb').read())
+    if data[4] != 1:
+        raise ValueError('%s: ELF32 only' % src)
+    shoff, = struct.unpack_from('<I', data, 0x20)
+    shentsize, shnum, _ = struct.unpack_from('<HHH', data, 0x2e)
+    secs = [struct.unpack_from('<IIIIIIIIII', data, shoff + i * shentsize) for i in range(shnum)]
+    n = 0
+    for si, s in enumerate(secs):
+        if s[1] != SHT_SYMTAB:
+            continue
+        stroff = secs[s[6]][4]
+        syms = []   # index -> (value, shndx, local, type)
+        ranges = {}   # shndx -> [(lo, hi, index, value)]
+        for k in range(s[5] // 16):
+            o = s[4] + k * 16
+            nm, value, size, info, _, shndx = struct.unpack_from('<IIIBBH', data, o)
+            syms.append((value, shndx, info >> 4 == 0, info & 15))
+            if k and 0 < shndx < 0xff00 and info >> 4 in (1, 2):
+                name = data[stroff + nm:data.index(b'\0', stroff + nm)].decode('utf-8', 'surrogateescape')
+                if name in names:
+                    ranges.setdefault(shndx, []).append((value, value + max(1, size), k, value))
+        if not ranges:
+            continue
+        for r in secs:
+            if r[1] != 4 or r[6] != si or not secs[r[7]][2] & 2:   # SHT_RELA of this symtab, allocated target
+                continue
+            for o in range(r[4], r[4] + r[5] - 11, 12):
+                info, addend = struct.unpack_from('<Ii', data, o + 4)
+                k = info >> 8
+                if k >= len(syms):
+                    continue
+                value, shndx, local, typ = syms[k]
+                if not local or typ == 4 or shndx not in ranges:   # globals already go by name; never STT_FILE
+                    continue
+                at = (value if typ != 3 else 0) + addend
+                for lo, hi, idx, vval in ranges[shndx]:
+                    if lo <= at < hi:
+                        struct.pack_into('<Ii', data, o + 4, (idx << 8) | (info & 0xff), at - vval)
+                        n += 1
+                        break
+    open(dst, 'wb').write(data)
+    return n
+
+
 def vtable_slot_refs(path):
     """Names of the symbols that relocations inside a vtable object (_ZTV*) point at: {symbol name: count}.
     These references come from virtual-function slots, not from code, so units.json never lists them."""
