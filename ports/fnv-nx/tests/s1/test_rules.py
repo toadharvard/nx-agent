@@ -93,6 +93,11 @@ got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> clas
           '    {\n        D(p);\n    }\n};\ntemplate <class T> inline void D(T* p)\n{\n    p->~T();\n}\n}\n')
 check('TPL2 forward-declares a namespace function template used earlier', got,
       ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'])
+got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> class A\n{\n  public:\n    void d(T* p)\n'
+          '    {\n        D(p);\n    }\n};\ntemplate <class T> inline void D(T* p)\n{\n    p->~T();\n}\n'
+          'template <> inline void D(char*)\n{\n}\n}\n')
+check('TPL2 never forward-declares an explicit specialization (template <>) ahead of its primary', got,
+      ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'], ['template <> inline void D(char*);'])
 
 # ---- S1-STL (blk_00ac0000): TPL2 specializations, TPL3, TYPN1, INST1, COPY1, DECL3
 got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> class A\n{\n  public:\n    void d(T* p)\n'

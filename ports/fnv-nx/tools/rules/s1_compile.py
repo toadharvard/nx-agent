@@ -1841,6 +1841,7 @@ def r_namespace_template_decls(path, text, stats):
             if not m.group(2).strip(): continue        # `template <>`: an explicit specialization needs its primary first
             name = m.group(5)
             if not re.search(r'(?<![\w.>:~])%s\s*\(' % re.escape(name), block[:m.start()]): continue
+            if not m.group(2).strip(): continue          # `template <>`: an explicit specialization needs its primary first
             tparams = set(re.findall(r'(?:class|typename)\s+(\w+)', m.group(2)))
             words = set(re.findall(r'[A-Za-z_]\w*', m.group(4) + ' ' + m.group(6)))
             params = _split_args(m.group(6))
