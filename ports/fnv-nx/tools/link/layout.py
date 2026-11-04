@@ -6,7 +6,8 @@ reference (larger than 16 bytes, or not trivially copyable / destructible - Itan
 by name inside the unit that declares it, so the probe is a translation unit that includes the unit's source and,
 per type, emits
 
-    extern "C" const unsigned __fnvnx_lay_<i>[4] = {sizeof(T), alignof(T), trivial-for-calls, __is_empty(T)};
+    extern "C" const unsigned __fnvnx_lay_<i>[5] = {sizeof(T), alignof(T), trivial-for-calls, __is_empty(T),
+                                                    MSVC C++03 POD};
     extern "C" void __fnvnx_pas_<i>(T a) { __fnvnx_sink((void *)&a); }
 
 The constants are read back from the object. Passing the address of `a` on makes GCC spill the registers it arrived in,
@@ -15,7 +16,11 @@ nothing else in that function touches SIMD registers. A type that does not compi
 recompiled without it.
 
 layouts.tsv: unit, type, size, align, trivial, empty, class (G1/G2: general registers, H<n>x<w>: n SIMD elements of
-w bytes, IND: by reference), one line per probed (unit, type); a size of -1 marks a type the probe could not name.
+w bytes, IND: by reference), unit content key, MSVC C++03 POD; one line per probed (unit, type); a size of -1 marks a
+type the probe could not name. The POD bit decides how MSVC returns a free function's 1/2/4/8-byte aggregate (in
+eax:edx only for a C++03 POD: no user constructor, destructor or copy assignment, no base class, no virtual function,
+no private or protected data member - __is_pod and __is_aggregate and no direct base); Itanium's trivial-for-calls
+does not tell (V1 A1/A2: a trivially copyable struct with a user constructor comes back through a hidden buffer).
 """
 import collections
 import concurrent.futures
@@ -32,7 +37,7 @@ CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.dirname(os.path.dirname(HERE))
 
-Layout = collections.namedtuple('Layout', 'size align trivial empty cls')
+Layout = collections.namedtuple('Layout', 'size align trivial empty cls pod', defaults=(None,))   # pod: None unknown
 
 
 SEMANTICS = ['-frounding-math', '-fsigned-char', '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks',
@@ -51,14 +56,17 @@ def flags(tree):
 def probe_source(unit_path, types):
     lines = ['#include "%s"' % unit_path,
              'extern "C" void __fnvnx_sink(void *);',
+             '#include <tr2/type_traits>',
              'namespace __fnvnx_probe { template <class T> constexpr unsigned triv() '
-             '{ return __is_trivially_copyable(T) && __has_trivial_destructor(T); } }']
+             '{ return __is_trivially_copyable(T) && __has_trivial_destructor(T); } '
+             'template <class T> constexpr unsigned pod() '
+             '{ return __is_pod(T) && __is_aggregate(T) && std::tr2::direct_bases<T>::type::empty::value; } }']
     first = len(lines) + 1
     for i, t in enumerate(types):
         q = '::' + t
-        lines.append('extern "C" const unsigned __fnvnx_lay_%d[4] = {sizeof(%s), alignof(%s), '
-                     '__fnvnx_probe::triv<%s>(), __is_empty(%s)}; extern "C" void __fnvnx_pas_%d(%s a) '
-                     '{ __fnvnx_sink((void *)&a); }' % (i, q, q, q, q, i, q))
+        lines.append('extern "C" const unsigned __fnvnx_lay_%d[5] = {sizeof(%s), alignof(%s), '
+                     '__fnvnx_probe::triv<%s>(), __is_empty(%s), __fnvnx_probe::pod<%s>()}; '
+                     'extern "C" void __fnvnx_pas_%d(%s a) { __fnvnx_sink((void *)&a); }' % (i, q, q, q, q, q, i, q))
     return '\n'.join(lines) + '\n', first
 
 
@@ -135,8 +143,8 @@ def probe_unit(tree, workdir, unit, types):
             simd = simd_use(obj)
             for i, t in enumerate(alive):
                 w = words.get('__fnvnx_lay_%d' % i)
-                if w:
-                    res[t] = Layout(w[0], w[1], w[2], w[3], classify(w[0], w[1], w[2], w[3], simd.get(i)))
+                if w and len(w) >= 5:
+                    res[t] = Layout(w[0], w[1], w[2], w[3], classify(w[0], w[1], w[2], w[3], simd.get(i)), w[4])
             break
         bad = {int(n) - first for n in re.findall(r'%s:(\d+):\d+: error' % re.escape(os.path.basename(src)),
                                                   r.stderr)}
@@ -192,7 +200,7 @@ def unit_key(tree, unit):
 
 def load(path, tree=None):
     """layouts.tsv -> {(unit, type): Layout or None}; with tree, rows whose unit content key differs (or that have
-    none: older files) are left out."""
+    none, or no POD column: older files) are left out."""
     lay = {}
     if os.path.exists(path):
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
@@ -201,9 +209,10 @@ def load(path, tree=None):
             f = line.rstrip('\n').split('\t')
             if len(f) < 7:
                 continue
-            if tree is not None and (len(f) < 8 or f[7] != unit_key(tree, f[0])):
+            if tree is not None and (len(f) < 9 or f[7] != unit_key(tree, f[0])):
                 continue
-            lay[(f[0], f[1])] = None if f[2] == '-1' else Layout(int(f[2]), int(f[3]), int(f[4]), int(f[5]), f[6])
+            pod = int(f[8]) if len(f) > 8 and f[8] in ('0', '1') else None
+            lay[(f[0], f[1])] = None if f[2] == '-1' else Layout(int(f[2]), int(f[3]), int(f[4]), int(f[5]), f[6], pod)
     return lay
 
 
@@ -227,12 +236,13 @@ def run(out, tree, jobs=4):
             for t, l in f.result().items():
                 lay[(futs[f], t)] = l
     with open(path, 'w', encoding='utf-8', errors='surrogateescape') as f:
-        f.write('#unit\ttype\tsize\talign\ttrivial\tempty\tclass\tunit content key\n')
+        f.write('#unit\ttype\tsize\talign\ttrivial\tempty\tclass\tunit content key\tmsvc pod\n')
         for (u, t), l in sorted(lay.items()):
             if l is None:
-                f.write('%s\t%s\t-1\t0\t0\t0\t?\t%s\n' % (u, t, unit_key(tree, u)))
+                f.write('%s\t%s\t-1\t0\t0\t0\t?\t%s\t?\n' % (u, t, unit_key(tree, u)))
             else:
-                f.write('%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\n' % (u, t, *l, unit_key(tree, u)))
+                f.write('%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\n' % (u, t, *l[:5], unit_key(tree, u),
+                                                                 '?' if l.pod is None else l.pod))
     got = sum(1 for l in lay.values() if l)
     print('layouts: %d known, %d not nameable' % (got, len(lay) - got))
     print('classes:', dict(collections.Counter(l.cls for l in lay.values() if l)))

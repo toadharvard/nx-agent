@@ -5,7 +5,7 @@ and the two declarations disagree about it. With the layouts of those aggregates
 trivial for calls, AArch64 class G1/G2/H<n>x<w>/IND), every parameter becomes a run of bytes:
 
 * x86 (MSVC): each value has a location (ecx, edx, stack offset) and a size; aggregate results use a hidden
-  buffer pointer (always for members, for free functions unless a trivial 1/2/4/8-byte aggregate, which comes back in
+  buffer pointer (always for members, for free functions unless a 1/2/4/8-byte C++03 POD, which comes back in
   eax:edx). A definition value takes its bytes from whatever reference values overlap its x86 location - one
   reference value may feed several definition values and the other way round (a 16-byte struct vs four ints).
 * AArch64 (AAPCS64, ILP32): each value is a list of chunks (value offset, container, container offset, length) with
@@ -32,10 +32,11 @@ class Unknown(Exception):
 
 
 class Val:
-    __slots__ = ('label', 'cls', 'size', 'kind', 'align', 'trivial')
+    __slots__ = ('label', 'cls', 'size', 'kind', 'align', 'trivial', 'pod')
 
-    def __init__(self, label, cls, size, kind, align=4, trivial=1):
+    def __init__(self, label, cls, size, kind, align=4, trivial=1, pod=None):
         self.label, self.cls, self.size, self.kind, self.align, self.trivial = label, cls, size, kind, align, trivial
+        self.pod = pod   # MSVC C++03 POD (layout probe), None unknown
 
 
 def agg_name(cls):
@@ -49,7 +50,7 @@ def value(label, cls, lay):
         lt = lay(agg_name(cls))
         if lt is None:
             raise Unknown(cls)
-        return Val(label, cls, lt.size, lt.cls, lt.align, lt.trivial)
+        return Val(label, cls, lt.size, lt.cls, lt.align, lt.trivial, getattr(lt, 'pod', None))
     raise Unknown(cls)  # varargs, long double, member pointers, untagged names
 
 
@@ -61,8 +62,13 @@ def values(sig, lay):
 
 
 def hidden_result(sig, ret):
-    return ret is not None and ret.cls.startswith('AGG:') and (
-        sig.member or not (ret.trivial and ret.size in (1, 2, 4, 8)))
+    """MSVC x86: an aggregate result goes through a hidden buffer for a member function always, for a free function
+    unless it is a 1/2/4/8-byte C++03 POD (V1 A1/A2: a user constructor makes it a buffer though Itanium calls it
+    trivial); Itanium triviality stands in when the probe gave no POD bit."""
+    if ret is None or not ret.cls.startswith('AGG:'):
+        return False
+    regs = ret.trivial if ret.pod is None else ret.pod
+    return sig.member or not (regs and ret.size in (1, 2, 4, 8))
 
 
 def x86(sig, vals, ret):

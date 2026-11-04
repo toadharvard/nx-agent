@@ -303,13 +303,19 @@ those callers). Test: `test_override.py` (vtable slot, same-object call and alia
 
 For every pair that the class-level model above cannot settle, the aggregates passed or returned by value are
 measured in the unit that declares them: a probe translation unit includes the unit's source and, per type, emits
-`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible) and `__is_empty` as constants (read
-back from the object), and a function taking the type by value whose spills show the SIMD registers it arrives in.
+`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible), `__is_empty` and MSVC's C++03 POD bit
+(`__is_pod`, `__is_aggregate` and no direct base: no user constructor, destructor or copy assignment, no private
+member, no virtual function) as constants (read back from the object), and a function taking the type by value
+whose spills show the SIMD registers it arrives in. `layouts.tsv` rows carry the unit content key (column 8) and
+the POD bit (column 9); a row without either is probed again.
 Class: `G1`/`G2` (one/two general registers), `H<n>x<w>` (HFA/HVA: n SIMD registers of w bytes), `IND` (by
 reference: over 16 bytes or not trivial for calls). Types the probe cannot name are dropped and stay `manual`.
 
 `abi2` then works on bytes: MSVC x86 locations with sizes (hidden result pointer always for members, for free
-functions unless a trivial 1/2/4/8-byte aggregate), AArch64 chunks per value (x/v registers, incoming stack, memory
+functions unless a 1/2/4/8-byte C++03 POD - V1 adversarial A1/A2: `struct C4 { int a; C4() {} }` is trivial for
+Itanium but MSVC returns it through the buffer, so `C4 f()` against `void f(C4 *)` is an `sret-explicit` bridge, not
+`same`; on three large units 56 of 202 probed types are such small trivially copyable non-PODs), AArch64 chunks per
+value (x/v registers, incoming stack, memory
 behind a pointer or x8). Each definition value collects its bytes from the overlapping reference values; when every
 chunk finds its bytes in the same container at the same offset and the results agree, the pair is `same`
 (differently named but layout-identical aggregates, a 4-byte struct vs an int, an HFA vs separate floats).

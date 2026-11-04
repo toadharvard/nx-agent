@@ -222,18 +222,36 @@ struct E {};
 template <class T> struct Ptr { T *p; };
 struct M { float a[4]; };
 struct D4 { double a, b, c, d; };
+struct C4 { int a; C4() {} };
+struct B4 : A { };
+class Q4 { int a; public: int get() const { return a; } };
 '''
     with tempfile.TemporaryDirectory() as tree:
         os.makedirs(os.path.join(tree, 'src')); os.makedirs(os.path.join(tree, 'include'))
         open(os.path.join(tree, 'src', 'u.cpp'), 'w').write(unit)
         got = layout.probe_unit(tree, tree, 'src/u.cpp', ['A', 'F3', 'Big', 'NT', 'V', 'ns::P', 'E', 'Ptr<A>',
-                                                          'Nope', 'M', 'D4'])
+                                                          'Nope', 'M', 'D4', 'C4', 'B4', 'Q4'])
         want = {'A': (4, 'G1'), 'F3': (12, 'H3x4'), 'Big': (32, 'IND'), 'NT': (4, 'IND'), 'V': (16, 'H2x8'),
                 'ns::P': (16, 'G2'), 'E': (1, 'G1'), 'Ptr<A>': (4, 'G1'), 'M': (16, 'H4x4'), 'D4': (32, 'H4x8')}
         for t, (size, cls) in want.items():
             g = got.get(t)
             check(g is not None and (g.size, g.cls) == (size, cls), 'layout %s: %s (want %s %s)' % (t, g, size, cls))
         check(got.get('Nope') is None, 'unnameable type dropped')
+        # MSVC C++03 POD (V1 A1/A2): a user constructor, a base class or a private member make a buffer return
+        pods = {t: got[t].pod for t in ('A', 'ns::P', 'C4', 'B4', 'Q4', 'NT') if got.get(t)}
+        check(pods == {'A': 1, 'ns::P': 1, 'C4': 0, 'B4': 0, 'Q4': 0, 'NT': 0} and got['C4'].trivial == 1,
+              'MSVC POD bits: %s (C4 trivial %s)' % (pods, got.get('C4') and got['C4'].trivial))
+    # V1 adversarial A1/A2: `C4 f()` vs `void f(C4 *)` - MSVC returns the non-POD C4 through the hidden buffer, so
+    # the reference's out pointer is the definition's buffer (sret-explicit bridge), not 'same'
+    na = ['?f@@YAXPAUC4@@@Z', '?f@@YA?AUC4@@XZ']
+    da = fnvlink.batch_demangle(fnvlink.UNDNAME, na)
+    SA = {n: sigs.parse_msvc(n, da[n]) for n in na}
+    for pod, want_kind in ((0, 'bridge'), (1, 'same')):
+        lc = layout.Layout(4, 4, 1, 0, 'G1', pod)
+        for r, d_ in ((na[0], na[1]), (na[1], na[0])):
+            pa = abi2.compare(SA[r], SA[d_], lambda t: lc if t == 'C4' else None, lambda t: lc if t == 'C4' else None)
+            check(pa is not None and pa.kind == want_kind and (pod or 'sret-explicit' in pa.classes),
+                  'C4 pod=%d %s -> %s: %s' % (pod, da[r], da[d_], pa and (pa.kind, pa.classes)))
 
     # V1 c3_ecx (FP-dead, TP-this-dead): ecx-not-passed / this-not-passed is decided on the definition's x86 code.
     # A hand-made i386 COFF object stands in for a pristine MSVC unit (u0.obj): six functions, one relocation
