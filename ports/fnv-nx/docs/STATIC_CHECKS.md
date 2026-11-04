@@ -138,11 +138,15 @@ The authoritative table with counts is `report.md` of a run; the classes are def
 * **argument order (ORDER-ARGS, ORDER-OBJECT, ORDER-OPERATOR)**. **per-site**. MSVC evaluates call arguments right
   to left, GCC left to right. Rows tagged `stream` (reads, random numbers, iterators in two arguments), `same-callee`
   or `same-object` come first; getters with a visible side-effect-free body are not counted. Fix: hoist the
-  arguments into locals in MSVC order. A GCC plugin that gimplifies side-effecting scalar arguments right to left
-  would fix the whole class (compiler support, not started). ORDER-BINOP (both operands of a built-in operator) is
+  arguments into locals in MSVC order. **Closed by the fnvnx_order plugin (`args=rtl`, S12-ordering,
+  [ORDERING.md](ORDERING.md)):** every call's scalar arguments are evaluated right to left; tests/s12/order args.cpp
+  matches GCC x86-32 on 9 call shapes. ORDER-OBJECT and ORDER-OPERATOR stay open. ORDER-BINOP (both operands of a built-in operator) is
   unspecified on both compilers; it is listed, not judged.
 * **volatile and memory ordering (VOLATILE-DECL, POLL-VOLATILE, POLL-PLAIN, ATOMIC-*, BARRIER)**. MSVC's volatile
-  accesses are acquire/release and x86 is TSO; on AArch64 GCC gives neither.
+  accesses are acquire/release and x86 is TSO; on AArch64 GCC gives neither. **Closed by S12-ordering**
+  ([ORDERING.md](ORDERING.md)): the fnvnx_order plugin (volatile = ldar/stlr, Interlocked operands ordered), the
+  barrier header (dmb ish / ishld / ishst), Interlocked* with a trailing dmb ish and a split lock for misaligned
+  operands. POLL-PLAIN stays per-site. The bullets below are the analysis that led there.
   * `_ReadWriteBarrier` / `_ReadBarrier` / `_WriteBarrier`: **header**. In `fnvnx_compat.h` they become
     `__atomic_thread_fence(__ATOMIC_SEQ_CST)`, `__ATOMIC_ACQUIRE` and `__ATOMIC_RELEASE` (`dmb ish` / `dmb ishld`)
     instead of an empty asm. Still open at 0c630cf and at the branch head: the shim keeps the empty asm, and the 436 f8
@@ -301,16 +305,16 @@ coverage. The classes added in this round have no earlier count.
 | W-LOOP-UB | 1 | 1 -> 2 | 2 | open: `-fno-aggressive-loop-optimizations` not adopted |
 | F2U | 135 | 75 -> 75 | 152 | open: the fnvnx_ftoi plugin closes it once compile.sh loads it; never fuzzed |
 | F2S | 792 | 432 -> 432 | 536 | open: NaN / out of int32 give 0x80000000 on x86 (S13 0x00a1b450); the fnvnx_ftoi plugin closes it once compile.sh loads it |
-| ORDER-ARGS / -OBJECT / -OPERATOR | 1,018 / 578 / 53 | 441 / 270 / 24, unchanged | 897 / 490 / 47 | open (per-site; ORDER1 or a plugin) |
+| ORDER-ARGS / -OBJECT / -OPERATOR | 1,018 / 578 / 53 | 441 / 270 / 24, unchanged | 897 / 490 / 47 | ORDER-ARGS closed: fnvnx_order args=rtl (ORDERING.md); -OBJECT / -OPERATOR open |
 | ORDER-BINOP / -ASSIGN | 1,046 / 17 | 470 / 4, unchanged | 831 / 51 | listed (unspecified on both) |
-| VOLATILE-DECL / BARRIER / POLL-* | 146 / 15 / 5 | 41 / 5 / 3, unchanged | 928 / 197 / 5 | open: barrier header not adopted (no `dmb` in the objects) |
-| ATOMIC-USE / ATOMIC-PLAIN-STORE | 148 / - | 42 / 0 -> 1 | 165 / 3 | open (ATOM1) |
+| VOLATILE-DECL / BARRIER / POLL-* | 146 / 15 / 5 | 41 / 5 / 3, unchanged | 928 / 197 / 5 | closed: fnvnx_order + barrier header (ORDERING.md); POLL-PLAIN open |
+| ATOMIC-USE / ATOMIC-PLAIN-STORE | 148 / - | 42 / 0 -> 1 | 165 / 3 | ATOMIC-USE closed (fully ordered Interlocked, in-unit operands); PLAIN-STORE closed with ORDER_KEYS |
 | ENUM-UNSIGNED | 14 | 5 -> 5 | 6 | open: S1's ENUM1 excludes these by design (ENUM2) |
 | P2I-SIGNED | 16 | 5 -> 5 | 12 | runtime (S5 heap below 2 GiB) |
 | SHIFT64-VAR | 2 | - | 10 | open (per-site) |
 | W-NONPOD-VARARGS / VA-STRUCT / VA-ADDR-PARAM | 451 / 2 / 12 | 84 / - / 4, unchanged | 231 / 2 / 7 | open (per-site) |
 | W-CAST-FN | 58 | 33 -> 32 | 78 | review |
-| TLS | 73 | 30 -> 30 | 206 | runtime (S2/S5) |
+| TLS | 73 | 30 -> 30 | 206 | closed: S2 tls binding + fs:[0x2c][0] hook share one block per thread |
 | ALIGN-IGNORED (new) | - | - | 22 | **open, real**: ALIGN1 |
 | LAYOUT-ALIGN-IGNORED (new) | - | - | 21 | **open, real**: ALIGN1 |
 | LAYOUT-BITFIELD / -EMPTY-BASE | - | - | 2 / 3 | open (per-site where a byte image depends on it) |
@@ -387,8 +391,7 @@ What follows:
 | S1 (rule) | **ALIGN1**: `__declspec(align(n))` after the class key when no declarator follows | ALIGN-IGNORED, LAYOUT-ALIGN-IGNORED | real layout differences confirmed by GCC (probe, layouts.cpp); 22 roots in the sample |
 | S1 (rule) | **ENUM2**: `enum E : int` for the ENUM-BITFIELD / ENUM-UNSIGNED lists, `(int)` casts on enumerators above INT_MAX | ENUM-* | ENUM1 leaves these out by design |
 | S1 (compile.sh) | **FTOI2**: load the fnvnx_ftoi plugin - `-fplugin="$(bash "$HERE/toolchain/ftoi/build.sh" "$OUT/.ftoi")"` in FLAGS (build hosts: `gcc-13-plugin-dev-aarch64-linux-gnu`; compile_job.sh's flags hash should include `toolchain/ftoi/fnvnx_ftoi.cc`). The gate follows on its own (gcc_warn.sh loads the plugin when compile.sh names toolchain/ftoi; static_job.sh installs the headers) | F2S, F2U, F2S64, F2U64 (every float -> integer conversion; 1,975 in the MSVC objects) | tests/s12 ftoi 810/810 against x86; S13 0x00a1b450 |
-| S1 (rule) | **ATOM1** for ATOMIC-PLAIN-STORE (3 sites, `m_uiRefCount`) | ATOMIC-PLAIN-STORE | not fuzzed yet |
-| S1 (header) | `_ReadWriteBarrier` / `_ReadBarrier` / `_WriteBarrier` as fences | BARRIER | 0 `dmb` in the f8 objects |
+| S12-ordering (done) | fnvnx_order plugin, barrier header, Interlocked* (supersedes ATOM1 and the barrier proposal) | VOLATILE-DECL, POLL-VOLATILE, BARRIER, ORDER-ARGS, ATOMIC-* | tests/s12/order; ORDERING.md |
 | S1/S2 (flags) | `-fwrapv-pointer -fno-finite-loops -fno-aggressive-loop-optimizations` | pointer overflow, forward progress, W-LOOP-UB | facts (`fixed:` lines) |
 | S1b (patch) | **RET1** for the 8 reachable FALL1 traps (HasValidTriangle and 7 more, list above) | W-RETURN residue | `brk` kept in the f8 objects |
 | S1 (rule, conditional) | **BOOL1** where a BOOL-PUN byte is a flag byte or counter typed `bool` | BOOL-PUN | 2 bool-repr hits; soft otherwise |
