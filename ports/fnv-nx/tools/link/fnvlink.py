@@ -65,6 +65,7 @@ RUNTIME = re.compile(r'^(?:__cxa_\w+|_Unwind_\w+|__gxx_personality_v0|__stack_ch
 ADDR_SYM = '__fnv_%08x'
 TRAP_SYM = '__fnvnx_vtrap_%08x'   # slot of a virtual function defined nowhere -> fnvnx_vslot_trap(this, text)
 TLS_SYM = '__fnvnx_tls_%08x'      # thread-local variable at an image .tls address: slot of the native TLS block
+TEXTADDR_SYM = '__fnvnx_textaddr_%08x'   # a variable at a .text address nothing defines: absolute, the x86 value
 XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
 # renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
@@ -512,6 +513,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     per_obj = {}
     used_addr = set()
     data_defs, tls_defs, tls_addrs = [], [], set()
+    text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
     exports = load_exports(EXPORTS if imports is None else (os.path.join(os.path.dirname(imports), 'exports.cpp')
                                                              if imports != 'none' else None))
     providers, crt_classes = load_providers(CRT_SYMBOLS if crt_symbols is None else
@@ -809,6 +811,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     cls = 'code-pending' if not du.obj else 'code-defmissing'
                     target = ADDR_SYM % addr
                     used_addr.add(addr)
+                elif ak == 'text' and note and re.search(r'@@3[QD]', note) and msvc(note).kind == 'data' and \
+                        un not in called_syms(u):
+                    # a variable the decomp places at a .text address nothing defines (the generated initializers'
+                    # `extern const char g_011c5a4c_arg1[]` at 0x00a00000: an immediate the generator took for an
+                    # address): the code uses its address, which on x86 is that number - an absolute symbol there
+                    # gives the native code the same value (S2c-abi, S13b native-stub-data). Only arrays (`@@3Q`)
+                    # and char labels (`@@3D`, `&FUN_00a00000`), whose address is all the code uses; an `int` at
+                    # 0x00000065 stays extern-text
+                    cls = 'text-addr'; target = TEXTADDR_SYM % addr
+                    text_addrs.add(addr)
                 elif ak == 'text':
                     cls = 'extern-text'; target = None
                     extern_text[addr].add(un)
@@ -875,6 +887,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- per object objcopy args: renames, address symbols for the definitions it holds, localize duplicates
     alias_lines, localize = [], collections.defaultdict(list)
+    alias_lines += ['%s = 0x%08x;' % (TEXTADDR_SYM % a, a) for a in sorted(text_addrs)]
     for name, srcs in strong.items():
         if len(srcs) > 1:
             for s in sorted(srcs)[1:]:
@@ -1165,7 +1178,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
-                                         'code-defmissing', 'extern-text', 'import', 'provider', 'tls'))
+                                         'code-defmissing', 'extern-text', 'text-addr', 'import', 'provider', 'tls'))
     with open(os.path.join(out, 'extern_text.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a in sorted(extern_text):
             f.write('%08x\t%s\n' % (a, ' '.join(sorted(extern_text[a]))))
