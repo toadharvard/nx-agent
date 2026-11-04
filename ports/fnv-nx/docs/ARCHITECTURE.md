@@ -197,6 +197,17 @@ agents queue the next item instead of waiting, and verify their own change with 
   only when it matches and is not slower.
 - Link/boot/runtime: whole classes (all .inl bodies, all short vtables, all services of a DLL), not trap by trap.
 
+### D22. Virtual destructor slots against MSVC vftables (orchestrator)
+
+- MSVC has one deleting-destructor slot (??_G(flags)); GCC has two (D1, D0). The link maps them by the minus-one
+  slot rule: GCC's D1/D0 pair stands where MSVC's single slot is, and every later slot shifts by one.
+- Class-wide rule (S1, with S2c-vt's vtable sizing): when a decomp class's first declared virtual is a placeholder
+  and its paired exe vftable's slot 0 is a deleting destructor, the class declares `virtual ~C()` instead of the
+  placeholder. Then the GCC layout matches the minus-one rule for the class and for every caller that declares
+  the same hierarchy (HashTableBase/NiTMap family, NiTStringTemplateMap and the rest).
+- Modelling every virtual destructor as an MSVC ??_G slot in GCC is rejected: it changes what GCC's delete
+  expressions call.
+
 ## Legal
 
 The decomp grants no licence. This directory contains only our own code: tools, shims, the platform layer and docs.
