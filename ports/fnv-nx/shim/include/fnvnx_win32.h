@@ -5,6 +5,10 @@
  */
 #ifndef FNVNX_WIN32_H
 #define FNVNX_WIN32_H
+/* the SDK's own packing (8, MSVC's default), whatever region includes this header: DECL1 / DECL2 put the include
+ * where the decomp's prototype or SDK type was, 16 times inside the #pragma pack(push, 4) of its generated layout
+ * headers (S11: LARGE_INTEGER, ULARGE_INTEGER, MEMORYSTATUSEX came out 4-aligned there) */
+#pragma pack(push, 8)
 /* the SDK's own include guards: the decomp's generated layout headers (include/_FILETIME.h, _RTL_CRITICAL_SECTION.h,
  * _ULARGE_INTEGER.h, _WIN32_FIND_DATAA.h) skip their copies when the SDK came first - their copies carry Xbox 360
  * layouts (big-endian FILETIME / ULARGE_INTEGER halves, 28-byte RTL_CRITICAL_SECTION), the PC SDK ones are below. */
@@ -713,4 +717,5 @@ static_assert(sizeof(CRITICAL_SECTION) == 24 && sizeof(LARGE_INTEGER) == 8 && si
 static_assert(sizeof(INPUT) == 28 && sizeof(MOUSEINPUT) == 24, "SDK layout");
 #endif
 #endif
+#pragma pack(pop)
 #endif

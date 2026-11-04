@@ -519,6 +519,18 @@ check('NATIVE1 drops listed units and glob matches, reports the addresses no ove
       ["['src/a.cpp'] 2 [12363776]"])
 check('NATIVE1 with no list file drops nothing', repr(native1.load_list(os.path.join(_d, 'none.txt'))), ['[]'])
 
+# ---- shim packing: fnvnx_win32.h included inside a decomp #pragma pack(push, 4) region (DECL1 / DECL2, 16 sites)
+import shutil as _shutil, subprocess as _subprocess
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _pk = os.path.join(tempfile.mkdtemp(), 'pk.cpp')
+    open(_pk, 'w').write('#pragma pack(push, 4)\n#include "fnvnx_win32.h"\nstruct Inner { int a; LARGE_INTEGER b; };\n'
+                         '#pragma pack(pop)\nstatic_assert(alignof(LARGE_INTEGER) == 8 && alignof(ULARGE_INTEGER) == 8 && '
+                         'alignof(MEMORYSTATUSEX) == 8 && sizeof(MEMORYSTATUSEX) == 64, "SDK packing");\n'
+                         'static_assert(__builtin_offsetof(Inner, b) == 4, "the region packs its own structs");\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only',
+                          '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _pk], capture_output=True, text=True)
+    check('fnvnx_win32.h keeps the SDK packing inside a pack(4) region', _r.stderr or 'ok', ['ok'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
