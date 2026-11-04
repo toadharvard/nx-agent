@@ -293,8 +293,9 @@ Only the main-scene split runs concurrently:
   overlap main's rewrites of the current-accumulator globals.
 * For record 21 both threads set those globals to `m_88`, which main points them at just before; both setters skip
   an unchanged value (`FUN_00b54ac0`, NiPointer assignment in `FUN_004dc540`).
-* `m_88` gets a second batch renderer (`fnvnx_mt1_batches()`, shim/include/fnvnx_mt1.h). It reads the INI setting
-  object, because WinMain builds the accumulators before the renderer copies the setting.
+* `m_88` gets a second batch renderer (count 2 behind `FNVNX_MT1_ON`). The gate, `fnvnx_mt1_on()` in
+  toolchain/game/boot.cpp, reads the INI setting object, because WinMain builds the accumulators before the renderer
+  copies the setting.
 * Fade nodes register through the same accumulator with the worker's TLS index, i.e. into renderer 1.
 * With `bMTRendering=0` both hunks do what the PC code does.
 
