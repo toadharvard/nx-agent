@@ -708,6 +708,71 @@ GCC side declares an array (`BA26E20Func g_apfnA26E20CurvesCopy[]`) where the MS
 None is an initialization-order dependency on an earlier skipped initializer. None needs an image value S14 could
 supply, apart from the vftables above.
 
+## 15. First hardware run (checklist)
+
+**Package.** `toolchain/package/build.sh` (D8) builds the SD tree, and `tests/s5/check_package.py` must PASS on it:
+- PFS0;
+- NPDM: is_64_bit + 32BitNoReserved, the program id and ACID range, kernel capabilities including every SVC the
+  host uses;
+- the host NSO;
+- the guest NSO header and the host loader's placement rules;
+- the guest ELF32: PIE, PT_LOAD outside 0x00400000..0x02100000, only P32_RELATIVE/NONE relocations;
+- `--emulate`: the guest loads, relocates and starts under Unicorn.
+
+Both f11 packages pass: `HOST=plain` (D3D9=null guest, text console) and `HOST=nine` (D3D9=external guest +
+Gallium Nine host, `NINE=` the render/nine work dir; no console, log file only).
+
+```
+DEVKITPRO=<dkp> toolchain/game/build.sh <S2 out> <S2 fixed> <g> <vorbis>          # D3D9=null guest
+DEVKITPRO=<dkp> toolchain/package/build.sh <g>/guest.nso <pkg> <program id> <g>/fnvnx.elf
+#  Nine: GUEST_ONLY=1 render/nine/game/build.sh <S2 out> <S2 fixed> <n>, then
+#  HOST=nine NINE=<dir> toolchain/package/build.sh <n>/game/guest.nso <pkg> <program id> <n>/game/fnvnx.elf
+```
+
+**What to install** (Atmosphère with exefs overrides; nothing is published or installed by the build):
+1. Choose an installed application whose normal launch can be given up for the test, and read its 16-digit
+   program id (`nxctl app` while it runs, as in section 6). Build the package with that id; the NPDM carries it.
+2. Copy `<pkg>/sd/` to the root of the card: `atmosphere/contents/<program id>/exefs.nsp` and `fnvnx/guest.nso`.
+   `<pkg>/MANIFEST.txt` lists their sizes and SHA-256.
+3. Game files: `sdmc:/fnvnx/game/FalloutNV.exe` (1.4.0.525, not SteamStub-wrapped: the boot says "SteamStub-wrapped"
+   otherwise) and `sdmc:/fnvnx/game/Data/` (the .esm/.bsa files). `C:\FalloutNV` is `sdmc:/fnvnx/game`; the profile
+   (`My Games/FalloutNV`, Fallout.ini, saves) is `sdmc:/fnvnx/user`. Without the exe the guest boots in trace mode
+   with an empty data image.
+4. Launch the title from HOME without holding R. Clean up afterwards by deleting
+   `atmosphere/contents/<program id>/exefs.nsp`.
+
+**Expected log**, `sdmc:/fnvnx/host.log` (flushed line by line; HOST=plain also shows it on screen):
+```
+fnvnx host: LP64 sizeof(void*)=8, address space 32BitNoReserved, host image ...
+  region ... / memory total ... guest heap ...
+  original image range 0x00400000..0x02100000 (data window from 0x00fdf000): free (region at ...)
+fnvnx host: guest sdmc:/fnvnx/guest.nso mapped at 0x0......., 0x155f000 bytes     (first free range above 0x02100000)
+fnvnx boot: early init (before the game's static initialisers)
+fnvnx boot: sdmc:/fnvnx/game/FalloutNV.exe: image base 0x400000, N sections
+fnvnx boot: imports: N slots, M resolved, K unresolved     (+ one "import dll!name: no export" line each)
+fnvnx boot: IAT ...; code pointers: ... found, ... applied, ... trapped, ... mismatched
+fnvnx boot: memory manager: constructor 0x00aa3880 has no native definition, game heap not initialised
+fnvnx boot: running GCC initialisers, then the game's in original order (S10 xc)
+fnvnx boot: trap #1: unresolved ...                          (each distinct missing function once, up to 200)
+```
+**Expected stop with today's objects.** The hardware has no `--skip-faulting-init`, so the first faulting game
+initializer ends the process. The emulator shows which one: `__fnvnx_dyninit_00f35430` reading through the
+uninitialised memory-manager pointer in `FUN_00aa1070`+0x54. The app then closes with an Atmosphère crash report.
+This first run checks that ldr accepts the NPDM/NSO, that the host starts in 32BitNoReserved with the window free,
+and that the guest is mapped, relocated and running. It also checks the exe load, IAT binding, code-pointer fixups,
+the GCC initializers, and the start of the game's initializers. Getting past them needs the memory-manager units
+(next S2 run).
+
+**Fetching the results.** `nxctl get sdmc:/fnvnx/host.log ./host.log` (or the SD card in a reader), and the crash
+report: `nxctl ls sdmc:/atmosphere/crash_reports/`, then get the newest `<timestamp>_<program id>.log`. To turn a
+guest PC from it into a symbol, use the base of the "mapped at" line:
+`aarch64-none-elf-addr2line -f -C -e <g>/fnvnx.elf $((PC - base + 0x30000000))`.
+**Failure signs:**
+- back at HOME / an error at launch: ldr rejected the package. Rerun `check_package.py`; check the program id
+  matches the installed title.
+- `guest load failed: ...` in the log: the host's loader names the step; "occupied" means relaunch.
+- no log at all: the host did not start, see the crash report.
+
 ## 7. Not yet done / untested
 
 * Nothing has run on hardware. Untested: ldr accepting the 64-bit + `32BitNoReserved` NPDM as an application
