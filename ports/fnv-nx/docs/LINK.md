@@ -392,6 +392,37 @@ undefined names** (7,430 `__fnv_` of uncompiled units, 1,513 C++ by name, 417 ru
 import symbols the platform objects define), 0 multiple definitions; linked text 6.1 -> 7.7 MB (1.1 MB synthesized
 vtables, typeinfo and emitted slot functions, 0.6 MB trap stubs and bridges).
 
+### Fifth round (fresh object set with the J-0034 flags; S2c)
+
+Tree prepared with the current S1/S8 rules and S10's XC1 rewrite, compiled with J-0034's `compile.sh`: 2,729
+objects of 2,978 units (249 fail), including WinMain (`FUN_0086a850`, `src/fallout/misc/main.cpp`) and the 6,265
+`__fnvnx_dyninit_` / 4,692 `__fnvnx_dynexit_` functions (`F` entries at their original addresses). 182,276
+references; with the 733 synthesized vtable objects of the probe, 276,801, 229,769 of them resolved by address.
+Probe (22 minutes on 2 workers): 2,346 classes requested, 3,174 vtables and 3,080 typeinfos synthesized, 346
+thunks, 641 slot functions emitted from 375 host units, 3,566 slot functions no object defines. References: `code`
+116,394, `data` 72,210, `code-pending` 32,927, `vslot-unresolved` 16,401 (7,602 trap stubs), `provider` 1,928 (208
+CRT addresses), `extern-text` 764, `import` 1,348 (1,306 bound by IAT slot), `tls` 373 (23 image `.tls` addresses,
+154 native definitions folded into the block; none bound to an absolute address). ABI: 1,817 bridges (450 references
+with `narrow-extend`), 931 manual, 481 x86-inconsistent. Hand-written vptr stores: 1,344 image addresses, 724 bound
+to a native address point. Only 161 variables are defined natively at a data-image address (6,361 before) and 672
+duplicate strong names are localized (4,514): XC1 makes the generated globals `extern`, constructed in place at
+their image addresses. Import thunks: `0x00ee6df2` -> `D3DXVec3TransformNormal`, `0x00ee6e04` ->
+`D3DXMatrixRotationYawPitchRoll` (`F` entries naming the import). Address map: F 52,363, C 1,768, X 1,009, G 88
+(all with D1 and D0), V 1,943 (every one checked in the linked image), E 4,449. Trial link of 3,464 objects:
+0 multiple definitions, **8,741 undefined names**, by the class resolve gave their references:
+
+| Undefined names | Count | |
+|---|---:|---|
+| `__fnv_` | 4,859 | addresses of units not compiled yet |
+| C++ `unresolved` | 1,605 | no address, no definition |
+| C++ `unresolved-ctor-dtor` | 1,442 | implicit ctors/dtors GCC calls where MSVC did not |
+| C++ `extern-text` | 148 | `.text` addresses no unit defines and S4 has no provider for |
+| C++ `special-unresolved` | 106 | typeinfo 48, non-virtual thunks 31, vtables 27 no object emits |
+| C++ runtime / other | 28 | libstdc++ names (21), names bound in one object and not in another (7) |
+| C `unresolved` | 202 | C names and decomp data no unit defines |
+| platform `provider` / `import` | 276 | defined by S4's platform objects (162) and the import layer (114), not in this link |
+| C runtime / other | 75 | `extern-text` data 27, GCC runtime 24, others 24 |
+
 ## Open problems
 
 * **Virtual functions behind native vtables** (6,088 refs before the synthesized vtables, 11,668 with them): GCC
