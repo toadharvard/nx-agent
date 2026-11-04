@@ -132,7 +132,8 @@ fetch_captures() {   # real-game NXD9 captures recorded with d9cap (private game
 		if [ -n "$want" ] && [ "$(sha256sum "$gd/$n" | cut -d' ' -f1)" != "$want" ]; then
 			NOTES+=("game capture $n: sha256 differs from the README, skipped"); continue
 		fi
-		ln -sf "$gd/$n" "$W/caps/game/$n"
+		# 8.3 conformance (nxd9norm.py: d9cap's empty managed-texture levels get their size), the same file for both sides
+		python3 -I "$CMP/nxd9norm.py" "$gd/$n" "$W/caps/game/$n" >/dev/null || { NOTES+=("game capture $n: nxd9norm failed"); continue; }
 	done
 	if ls "$W/caps/game"/*.nxd9 >/dev/null 2>&1; then
 		GAMECAPS=$W/caps/game
