@@ -240,6 +240,8 @@ def rec(s):
 lm = rec('link').get('metrics', {})
 import hashlib
 img = os.environ.get('BOOT_EXE') or os.path.join(bd, 'boot', 'synth', 'synth.exe')   # the player's exe or S14's image
+# V1: only a boot of this link ran on an image (link_job.sh drops the old boot/; a failed guest has no boot record)
+booted = rec('boot').get('status') in ('ok', 'warn') and os.path.isfile(img)
 def milestone(f):   # S5's boot summary (tests/s5/emu_guest.py --summary-json): the last game milestone reached
     try:
         return json.load(open(os.path.join(bd, 'boot', f))).get('milestone')
@@ -252,10 +254,10 @@ print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
                   'link': {k[5:]: v for k, v in lm.items() if k.startswith('link_')},
                   'guest_undefined': rec('guest').get('metrics', {}).get('guest_undefined'),
                   'boot_winmain': rec('boot').get('metrics', {}).get('boot_winmain'), 'boot_stop': rec('boot').get('stop'),
-                  'boot_image_sha256': hashlib.sha256(open(img, 'rb').read()).hexdigest() if os.path.isfile(img) else None,
+                  'boot_image_sha256': hashlib.sha256(open(img, 'rb').read()).hexdigest() if booted else None,
                   'boot_stub_stop': next((l for l in reversed(stub_lines) if l.startswith('STOPPED')), None),
                   'boot_stub_winmain': int(any('fnvnx boot: calling WinMain' in l for l in stub_lines)) if stub_lines else None,
-                  'boot_image': 'player exe' if os.environ.get('BOOT_EXE') else 'synthesized' if os.path.isfile(img) else None,
+                  'boot_image': ('player exe' if os.environ.get('BOOT_EXE') else 'synthesized') if booted else None,
                   'boot_milestone': milestone('boot_summary.json'),
                   'boot_stub_milestone': milestone(os.path.join('stub', 'boot_summary_stub.json'))},
                  indent=1, sort_keys=True))
