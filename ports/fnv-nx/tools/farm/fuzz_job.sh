@@ -9,13 +9,15 @@
 #              branch msvc/pristine/<decomp12> of the private artifacts repository; if that branch does not exist
 #              yet, built here (Wine + Visual C++ 2008 Express SP1/RTM unpacked from Microsoft's ISOs,
 #              tools/equiv/README.md; tools/equiv/setup_msvc.sh when present) and published there once.
-#   candidate  AArch64 objects of <commit> from the compile farms (tools/farm/fetch_objs.sh, branches
-#              c/<commit12>/<i>of<M>; M is the shard count all of whose shards exist, or $OBJ_SHARDS).
-#   link       the link step's outputs for those objects (tools/link: resolve, probe, resolve, apply), from branch
-#              link/<commit12>: out/{aliases.ld,refs.tsv,abi.tsv,addrmap.tsv,layouts.tsv,cache/msvc.tsv} and
-#              fixed/*.o. No job in this directory publishes it yet: without it the script stops with exit 3 and
-#              says so in the report. $FUZZ_LINK_DIR=<dir with out/ and fixed/> uses a local link instead.
-#   tree       the prepared tree of <commit> (tools/prepare.py, as compile_job.sh makes it).
+#   link       the link farm's outputs (tools/farm/link_job.sh publishes branch link/<commit12>: out/, fixed/*.o,
+#              meta.json; history on link-head) of the newest commit L that is an ancestor of <commit> or <commit>
+#              itself (the link farm publishes only the heads it gets to), searched $FUZZ_LINK_DEPTH (300) commits
+#              back and waited for up to $FUZZ_LINK_WAIT s (default 1800), else exit 3. Everything else follows
+#              L, so the native side is exactly what that link linked: its rewritten objects (fixed/; meta.json
+#              objects_commit names the compile farms' commit they came from), its tree (prepare farm, branch
+#              t/<L12> or the rolling tree with the same prepare inputs: tools/farm/fetch_tree.sh) and L's tools
+#              and pins (worktree src-<L12>: decomp, sse2neon). The report names L. $FUZZ_LINK_DIR=<dir with out/
+#              and fixed/> (and $FUZZ_LINK_COMMIT) uses a local link instead.
 # Campaign: every catalogued oracle function whose unit has both objects and whose control flow the harness models
 # (no indirect calls or jumps, no unresolved relocations: counted as "not modelled"), shard = crc32(unit source)
 # mod N + 1 (a unit's functions stay together: its native image is linked once), at most $ITERS executions and $TIME seconds per function (defaults 40 and 8), $JOBS processes, under nice.
@@ -35,7 +37,8 @@
 # from the decomp: they go only to that private repository, never to nx-agent. The report holds counts, addresses,
 # unit names and causes only.
 # Local inputs: FUZZ_X86OBJ=<dir of u<i>.obj> seeds the oracle cache (and publishes it when the branch is missing);
-# FUZZ_OBJ_DIR, FUZZ_TREE, FUZZ_LINK_DIR, FUZZ_EXT use local candidate objects, tree, link, external checkouts.
+# FUZZ_TREE, FUZZ_LINK_DIR, FUZZ_EXT use a local tree, link, external checkouts; ARTIFACTS_URL another artifacts
+# remote (a local stand-in for tests).
 # Testing: FUZZ_LIMIT=<n> fuzzes the first n targets of the shard; FUZZ_PUBLISH=0 skips every push.
 set -euo pipefail
 COMMIT=${1:?commit}; K=${2:?k}; N=${3:?N}; REPORT=${4:?report.md}
@@ -127,9 +130,51 @@ setup_msvc_inline() {   # <dest>: the decomp README's "Compilers without Windows
   echo "export FNV_MSVC9_ROOT=$dest/msvc/sp1 FNV_MSVC9_RTM_ROOT=$dest/msvc/rtm FNV_MSVC9_PREFIX=$dest/wineprefix"
 }
 
-# --- the commit's sources, the decomp, Python modules ------------------------------------------------------------
-SRC=$FARM_HOME/src-$C12
-[ -d "$SRC" ] || git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" >/dev/null
+# --- the link: newest link/<L12> on <commit> or an ancestor --------------------------------------------------------
+find_link() {   # -> full hash of the newest commit among <commit> and its ancestors with a branch link/<commit12>
+  local have c
+  have=$(git ls-remote "$ARTIFACTS_URL" 'refs/heads/link/*' 2>/dev/null \
+         | sed -n 's|.*refs/heads/link/\([0-9a-f]\{12\}\)$|\1|p')
+  [ -n "$have" ] || return 0
+  for c in $(git -C "$REPO" rev-list --max-count="${FUZZ_LINK_DEPTH:-300}" "$COMMIT"); do
+    if grep -qx "${c:0:12}" <<<"$have"; then echo "$c"; return 0; fi
+  done
+}
+if [ -n "${FUZZ_LINK_DIR:-}" ]; then
+  LINK=$FUZZ_LINK_DIR; LCOMMIT=$(git -C "$REPO" rev-parse "${FUZZ_LINK_COMMIT:-$COMMIT}^{commit}")
+  NOTE_LINK="local link $LINK (commit ${LCOMMIT:0:12})"
+else
+  end=$(( $(date +%s) + ${FUZZ_LINK_WAIT:-1800} ))
+  LCOMMIT=$(find_link)
+  while [ -z "$LCOMMIT" ]; do
+    [ "$(date +%s)" -lt "$end" ] || fail_report 3 "no link/<commit12> for $C12 or an ancestor within \
+${FUZZ_LINK_DEPTH:-300} commits after waiting ${FUZZ_LINK_WAIT:-1800}s (tools/farm/link_job.sh publishes them)"
+    log "waiting for a link of $C12 or an ancestor"
+    sleep 60
+    LCOMMIT=$(find_link)
+  done
+  LINK=$FARM_HOME/link-${LCOMMIT:0:12}
+  if [ ! -f "$LINK/.done" ]; then
+    fetch_branch "link/${LCOMMIT:0:12}" "$LINK" || fail_report 3 "link/${LCOMMIT:0:12} could not be fetched"
+    touch "$LINK/.done"
+  fi
+  NOTE_LINK="link/${LCOMMIT:0:12}"
+fi
+L12=${LCOMMIT:0:12}
+OBJ_COMMIT=$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("objects_commit") or "")
+except (OSError, ValueError): print("")' "$LINK/meta.json")
+NOTE_LINK="$NOTE_LINK: $([ "$LCOMMIT" = "$(git -C "$REPO" rev-parse "$COMMIT^{commit}")" ] && echo "this commit" \
+  || echo "ancestor ${L12} ($(git -C "$REPO" rev-list --count "$LCOMMIT..$COMMIT") commits back)")\
+${OBJ_COMMIT:+, objects of ${OBJ_COMMIT:0:12}}"
+for f in out/aliases.ld out/refs.tsv out/abi.tsv out/addrmap.tsv fixed/zz_bridges.o; do
+  [ -e "$LINK/$f" ] || fail_report 3 "$NOTE_LINK lacks $f"
+done
+log "link: $NOTE_LINK"
+
+# --- the link commit's sources, the decomp, Python modules ---------------------------------------------------------
+SRC=$FARM_HOME/src-$L12
+[ -d "$SRC" ] || git -C "$REPO" worktree add --detach "$SRC" "$LCOMMIT" >/dev/null
 P=$SRC/ports/fnv-nx
 bash "$P/tools/fetch.sh" "$EXT" >/dev/null
 DECOMP=$EXT/fnv_decomp
@@ -182,46 +227,20 @@ if [ ! -f "$ORACLE/.done" ]; then
 fi
 NX86=$(ls "$ORACLE/obj" | grep -c '\.obj$' || true)
 
-# --- prepared tree, candidate objects, link outputs -----------------------------------------------------------------
-if [ -n "${FUZZ_TREE:-}" ]; then TREE=$FUZZ_TREE
-elif [ -f "$FARM_HOME/compile-$C12/tree.done" ]; then TREE=$FARM_HOME/compile-$C12/tree   # a compile job's
+# --- the link's tree; its objects are its fixed/ (the rewritten objects difffuzz links unit by unit) --------------
+if [ -n "${FUZZ_TREE:-}" ]; then TREE=$FUZZ_TREE; NOTE_TREE="local tree $TREE"
 else
-  TREE=$RUN/tree
-  if [ ! -f "$RUN/tree.done" ]; then
-    log "prepare"
-    rm -rf "$TREE"; python3 "$P/tools/prepare.py" "$DECOMP" "$TREE" > "$RUN/prepare.log" 2>&1
-    touch "$RUN/tree.done"
+  TREE=$FARM_HOME/tree-$L12
+  if [ ! -f "$TREE.done" ]; then
+    th=$(ARTIFACTS=$ARTIFACTS REPO=$REPO FARM_HOME=$FARM_HOME bash "$HERE/fetch_tree.sh" "$LCOMMIT" "$TREE" \
+         "${FUZZ_TREE_WAIT:-1800}" 2> "$RUN/fetch_tree.log") \
+      || fail_report 3 "no prepared tree for the link commit $L12 (see fetch_tree.log)"
+    echo "$th" > "$TREE.done"
   fi
+  NOTE_TREE="prepare farm tree of $L12 (tree hash $(cat "$TREE.done"))"
 fi
-if [ -n "${FUZZ_OBJ_DIR:-}" ]; then OBJ=$FUZZ_OBJ_DIR
-else
-  OBJ=$FARM_HOME/objs-$C12
-  if [ ! -f "$OBJ/.done" ]; then
-    M=${OBJ_SHARDS:-}
-    if [ -z "$M" ]; then
-      M=$(git ls-remote "$ARTIFACTS_URL" "refs/heads/c/$C12/*" | sed -n 's|.*/\([0-9]*\)of\([0-9]*\)$|\2|p' \
-          | sort | uniq -c | awk '$1 == $2 {print $2}' | sort -n | head -1)
-    fi
-    [ -n "$M" ] || fail_report 2 "no complete set of compile shards c/$C12/*of<M> in the artifacts repository yet"
-    log "candidate objects: $M compile shards"
-    ARTIFACTS=$ARTIFACTS bash "$HERE/fetch_objs.sh" "$COMMIT" "$M" "$OBJ" "$TREE" > "$RUN/fetch_objs.log"
-    touch "$OBJ/.done"
-  fi
-fi
-if [ -n "${FUZZ_LINK_DIR:-}" ]; then LINK=$FUZZ_LINK_DIR
-else
-  LINK=$FARM_HOME/link-$C12
-  if [ ! -f "$LINK/.done" ]; then
-    fetch_branch "link/$C12" "$LINK" || fail_report 3 "no link outputs for $C12 (branch link/$C12 of the artifacts \
-repository: out/ and fixed/ of tools/link resolve, probe, resolve, apply); a link job has to publish them first"
-    touch "$LINK/.done"
-  fi
-fi
-for f in out/aliases.ld out/refs.tsv out/abi.tsv out/addrmap.tsv fixed/zz_bridges.o; do
-  [ -e "$LINK/$f" ] || fail_report 3 "link outputs for $C12 lack $f"
-done
 
-export FNVNX_DECOMP=$DECOMP FNVNX_X86OBJ=$ORACLE/obj FNVNX_TREE=$TREE FNVNX_A64OBJ=$OBJ FNVNX_DFLINK=$LINK
+export FNVNX_DECOMP=$DECOMP FNVNX_X86OBJ=$ORACLE/obj FNVNX_TREE=$TREE FNVNX_A64OBJ=$LINK/fixed FNVNX_DFLINK=$LINK
 export FNVNX_DFWORK=$RUN/work FNVNX_DFA64=$RUN/a64 SSE2NEON=$EXT/sse2neon
 unset FNVNX_DFPROFILE
 mkdir -p "$RUN/work"
@@ -335,7 +354,7 @@ cache_commit "$C12 shard $K/$N"
 t2=$(date +%s)
 
 # --- attribution, verdicts of this head and cumulative, report -----------------------------------------------------
-ATT=$FARM_HOME/attrib-$C12          # stream attribution, once per commit (every shard on this machine shares it)
+ATT=$FARM_HOME/attrib-$L12          # stream attribution, once per link (every shard on this machine shares it)
 mkdir -p "$ATT"
 if [ ! -s "$ATT/rules.json" ] || [ ! -s "$ATT/bridges.json" ]; then
   log "attribution (prepare rules, bridges)"
@@ -354,9 +373,9 @@ done
 t3=$(date +%s)
 
 $PY - "$RUN" "$REPORT" "$COMMIT" "$D12" "$K" "$N" "$NX86" "$ITERS" "$TIME" "$JOBS" "$((t1-t0))" "$((t2-t1))" \
-  "$((t3-t2))" <<'EOF'
+  "$((t3-t2))" "$NOTE_LINK" "$NOTE_TREE" <<'EOF'
 import collections, json, os, sys
-run, report, commit, d12, k, n, nx86, iters, tm, jobs, ts, tf, tr = sys.argv[1:]
+run, report, commit, d12, k, n, nx86, iters, tm, jobs, ts, tf, tr, note_link, note_tree = sys.argv[1:]
 counts = json.load(open(os.path.join(run, 'targets.json')))
 st = json.load(open(os.path.join(run, 'status.json')))
 
@@ -379,6 +398,7 @@ hard = [l.rstrip('\n').split('\t') for l in open(os.path.join(run, 'hard_cum.tsv
     if os.path.exists(os.path.join(run, 'hard_cum.tsv')) else []
 out = ['# fuzz %s shard %s/%s' % (commit[:12], k, n), '',
        '- commit %s, decomp %s, oracle: %s MSVC 2008 objects of the pristine decomp' % (commit, d12, nx86),
+       '- link: %s; tree: %s' % (note_link, note_tree),
        '- functions catalogued %d; in this shard %d: no native object %d, control flow not modelled (indirect '
        'calls/jumps, unresolved relocations) %d, fuzzable %d (no native definition in the link: %d)' % (
            counts['catalogued'], counts['shard'], counts['no_native_object'], counts['not_modelled'],
