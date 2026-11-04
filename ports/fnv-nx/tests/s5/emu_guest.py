@@ -771,8 +771,31 @@ class Emu:
             elif len(f) > 6 and f[1] == "V" and f[2] in objs:
                 V.append((int(f[0], 16), f[2], int(f[6] or 0)))
         self.exe_vt = (img, objs, F, V)
+        self.got = None
+        out = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", elf], capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            if "] .got " in line:
+                f = line.split("]", 1)[1].split()
+                self.got = (int(f[2], 16), int(f[4], 16))
         init = self.code_addr("__libc_init_array")
         self.uc.hook_add(UC_HOOK_CODE, self.on_exe_vtables, begin=init, end=init)
+
+    # -- --watch: who writes a range (a freed object's vptr, a global); the last 200 writes are printed at the stop
+    def install_watch(self, addr, size):
+        import collections
+        if not hasattr(self, "watch_log"):
+            self.watch_log = collections.deque(maxlen=200)
+            self.watch_n = 0
+
+        def on_write(uc, access, a, n, value, _):
+            self.watch_n += 1
+            pc, lr = uc.reg_read(UC_ARM64_REG_PC), uc.reg_read(UC_ARM64_REG_LR)
+            self.watch_log.append((self.watch_n, a, n, value & (1 << 8 * n) - 1, pc, lr))
+        self.uc.hook_add(UC_HOOK_MEM_WRITE, on_write, begin=addr, end=addr + size - 1)
+
+    def watch_lines(self):
+        return [f"watch\t#{k}\t{a:#010x}\t{n}\t{v:#x}\tpc {self.sym(pc)}\tlr {self.sym(lr)}"
+                for k, a, n, v, pc, lr in getattr(self, "watch_log", ())]
 
     def slot_name(self, link_addr):
         """('trap', mangled name of the virtual) for a trap stub (adrp x1; add x1; b fnvnx_vslot_trap, text
@@ -804,9 +827,23 @@ class Emu:
         link = (lambda v: v - self.base + self.link_base) if self.relocatable else (lambda v: v)
         import collections
         st = collections.Counter()
+        if self.relocatable and self.got:
+            # GOT entries of absolute aliases: aliases.ld defines a vtable's address point as `sym + 8`, which GNU
+            # ld makes absolute (no RELATIVE relocation), so after the self-relocation the entry still holds the
+            # link address (S2c: LD_FEATURE("SANE_EXPR") keeps such expressions section-relative)
+            g, n = self.got
+            words = struct.unpack(f"<{n // 4}I", bytes(uc.mem_read(rt(g), n)))
+            lo, hi = self.link_base, self.link_base + self.size
+            for i, w in enumerate(words):
+                if lo <= w < hi:
+                    uc.mem_write(rt(g) + 4 * i, struct.pack("<I", rt(w) & 0xFFFFFFFF))
+                    st["got absolute"] += 1
+        self.vt_bound = {}   # runtime address point -> (exe vftable, its slot targets, runtime end of the native vtable)
+        self.vt_F = F
         for exe_vt, sym, off in V:
             a, size = objs[sym]
             exe_slots = img.vtable_slots(exe_vt)
+            self.vt_bound[rt(a + off) & 0xFFFFFFFF] = (exe_vt, exe_slots, rt(a + size) & 0xFFFFFFFF)
             n = max(0, (size - off) // 4)
             words = struct.unpack(f"<{n}I", bytes(uc.mem_read(rt(a + off), 4 * n))) if n else ()
             slots = []
@@ -827,6 +864,38 @@ class Emu:
               "their native slots disagree with the exe's): %d of %d trap slots filled from the exe's vftable"
               % (st["vtables"], st["vtables ok"], st["vtables dtor"], st["vtables misaligned"], st["filled"],
                  st["trap slots"]))
+        if st["got absolute"]:
+            print("   exe-vtables: %d GOT entries of absolute aliases (link addresses) relocated" % st["got absolute"])
+
+    def vslot_past_end(self, err):
+        """exe-vtables, at a fetch fault: a virtual call through slot k of a native vtable bound to an exe vftable,
+        where k is past the native vtable's end (the decomp declares fewer virtuals than the exe has: the word read
+        is the next object's typeinfo or data). Such a call comes from code that indexes the exe's vftable (a cast
+        call in the decomp), so the exe's slot k is the target: returns the runtime address of its native, or None.
+        Stand-in for S2c sizing native vtables to the exe's vftable."""
+        if not getattr(self, "vt_bound", None) or "fetch" not in err.lower():
+            return None
+        m = re.search(r"\| vslot (\d+) of native vtable (0x[0-9a-f]+)$", self.null_call())
+        if not m:
+            return None
+        k, base = int(m.group(1)), int(m.group(2), 16)
+        b = self.vt_bound.get(base)
+        if b is None or base + 4 * k < b[2] or k >= len(b[1]) or b[1][k] not in self.vt_F:
+            return None
+        nat = self.vt_F[b[1][k]]
+        rt = nat - self.link_base + self.base if self.relocatable else nat
+        import collections
+        self.vt_past = getattr(self, "vt_past", collections.Counter())
+        key = (b[0], k, self.sym(rt).split(" ", 1)[-1])
+        if not self.vt_past[key]:
+            print(f"   exe-vtables: slot {k} past the end of native vtable {base:#010x} (exe {b[0]:#010x}): "
+                  f"continued at {key[2]}")
+        self.vt_past[key] += 1
+        return rt & 0xFFFFFFFF
+
+    def vt_past_lines(self):
+        return [f"vslot-past-end\t{n}\t{e:#010x}\t{k}\t{f}"
+                for (e, k, f), n in getattr(self, "vt_past", {}).items()]
 
     def on_winmain_entry(self, uc, addr, size, _):
         """WinMain's first instruction: run the before-winmain calls one after the other, each returning to this
@@ -1084,6 +1153,7 @@ class Emu:
             "stubbed_faults": len(getattr(self, "stubbed", [])),
             "host_calls": self.calls, "threads": len(self.threads),
             "exe_vtables": getattr(self, "exe_vt_stats", None),
+            "vslot_past_end_calls": sum(getattr(self, "vt_past", {}).values()),
             "peak_heap_bytes": self.heap_high_water(),
         }
 
@@ -1229,6 +1299,12 @@ class Emu:
             try:
                 uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
             except UcError as e:
+                past = self.vslot_past_end(str(e))
+                if past is not None:   # exe-vtables: the exe's slot past the native vtable's end
+                    t.result = uc.reg_read(UC_ARM64_REG_X0)
+                    t.ctx, t.state, t.resume_pc = uc.context_save(), "ready", past
+                    self.cur = None
+                    continue
                 stub = self.stub_fault(t.tid, str(e))
                 if stub is not None:   # a known fault: the stubbed function returns and the thread goes on
                     t.ctx, t.state = uc.context_save(), "ready"
@@ -1290,6 +1366,8 @@ def main(argv):
                     help="fill the trap slots of native vtables from the exe's vftables (needs --elf, --addrmap and "
                     "the exe as --file fnvnx/game/FalloutNV.exe=PATH); also the line 'exe-vtables' of --stub-faults")
     ap.add_argument("--summary-json", metavar="FILE", help="write the machine-readable boot summary here")
+    ap.add_argument("--watch", action="append", default=[], metavar="ADDR[:SIZE]",
+                    help="log every guest write to ADDR..ADDR+SIZE (default 4) with pc, lr and the value")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
@@ -1317,6 +1395,9 @@ def main(argv):
         if a.milestones and a.milestones != "none":
             emu.install_milestones(a.milestones)
     emu.miles = getattr(emu, "miles", {})
+    for spec in a.watch:
+        addr, _, n = spec.partition(":")
+        emu.install_watch(int(addr, 0), int(n, 0) if n else 4)
 
     def write_summary(stop, rc=None):
         if a.summary_json:
@@ -1354,7 +1435,7 @@ def main(argv):
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
         for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
-                     + emu.milestone_lines()):
+                     + emu.milestone_lines() + emu.vt_past_lines() + emu.watch_lines()):
             print(line)
         print(f"STOPPED: {why}")
         write_summary(f"STOPPED: {why}")
@@ -1377,7 +1458,7 @@ def main(argv):
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
     for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
-                 + emu.milestone_lines()):
+                 + emu.milestone_lines() + emu.vt_past_lines() + emu.watch_lines()):
         print(line)
     ok = rc == 0 and a.expect in out and tp_ok
     write_summary(f"guest returned {rc:#x}", rc)

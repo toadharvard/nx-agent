@@ -167,7 +167,7 @@ done
     echo
     echo "## boot $tag (exit $(cat "$OUT/emu_$tag.rc"))"
     grep -h "exe-vtables:\|memory manager after construction\|memory manager before WinMain\|static initialisers done\|initializers skipped\|calling WinMain\|WinMain returned\|stub-faults:\|before-winmain:" "$L" || true
-    grep -h "^stubbed-fault\|^replaced-call" "$L" | cut -f1-4 | head -25 || true
+    grep -h "^stubbed-fault\|^replaced-call\|^vslot-past-end" "$L" | cut -f1-5 | head -25 || true
     grep -h "^skip-summary" "$L" | cut -f1-4 | head -8 || true
     sed -n '/^== trace/,/^   #4 /p' "$L" | head -14
     grep -h "^STOPPED\|^deadlock" "$L" || echo "(no stop line: timeout or normal end, see emu_$tag.log)"
