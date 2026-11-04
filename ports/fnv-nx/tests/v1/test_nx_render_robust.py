@@ -12,6 +12,8 @@ ASan reports exit 99, UBSan 98. Targeted cases (synthetic bytes, built here) fir
 each seed (u32 words set to boundary values, truncation), one input file rewritten in place (no per-iteration
 copies). One line per case; exit 1 when any case crashes or hangs. Seeds: tests/s6n/test_nx_render.py's t.nxd9 and
 n0.nxcap (make -C tests/s6n nx_render writes them under OUT/nx_render_test).
+H1 (per .nxcap seed): the seed's first SUBM Draw op with 0x7fffffff instances must end in exit 1 or 3 within --timeout
+(.nxd9 skips draws over 4 M vertices; RENDER_NATIVE.md 8.4 sets no draw bound for .nxcap).
 """
 import argparse
 import os
@@ -125,6 +127,26 @@ def main(argv):
     for seed in a.seed:
         kind = 'nxcap' if seed.endswith('.nxcap') else 'd3d9'
         data = open(seed, 'rb').read()
+        if kind == 'nxcap':
+            # H1: the first SUBM Draw op (word 0x0005000b: op 0x0b, 5 arguments; first, vertices, instances = 1) of
+            # the seed with 0x7fffffff instances. .nxd9 skips draws over 4 M vertices (RENDER_NATIVE.md 8.4); .nxcap
+            # has no such bound, so a 2^31-instance draw must end in exit 1 or 3, not run for minutes.
+            at = -1
+            for k in range(0, len(data) - 24, 4):
+                w = struct.unpack_from('<6I', data, k)
+                if w[0] == 0x0005000b and 0 < w[2] <= 0x10000 and w[3] == 1:
+                    at = k + 12
+                    break
+            if at < 0:
+                print('H1 %s: skip (no 5-argument Draw op with 1 instance)' % os.path.basename(seed))
+            else:
+                h = bytearray(data)
+                struct.pack_into('<I', h, at, 0x7fffffff)
+                with open(inp, 'wb') as f:
+                    f.write(h)
+                v = verdict(*run(a.bin, kind, inp, out, a.timeout))
+                bad |= not v.startswith('ok')
+                print('H1 %s Draw instances 0x7fffffff at %d: %s' % (os.path.basename(seed), at, v), flush=True)
         crashes = {}
         for it in range(a.iters):
             m = mutate(data, rng, 8)

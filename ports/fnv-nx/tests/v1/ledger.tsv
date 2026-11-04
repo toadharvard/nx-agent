@@ -18,7 +18,7 @@ S5-W6	S5	-	-	fixed	e170aeb	test_s5_milestone_store.py	store watch: the pointer a
 S5-W7	S5	-	-	fixed	e170aeb	test_s5_milestone_store.py	store watch: a store to the old object after the pointer moved
 R0-R13	R0	58d1dfb	-	refuted	-	test_ready_adversarial.py	ready.py: boot.real_exe passes on contradicting image labels with no hash (also at bcbbf03)
 R0-R14	R0	58d1dfb	-	refuted	-	test_ready_adversarial.py	ready.py: frames_gate reads try-farm reports (unmerged heads) (also at bcbbf03)
-NXR-BOUNDS	render	44adf6c	-	partial	-	test_nx_render_robust.py	nx_render survives malformed .nxd9/.nxcap (D1-D7, C1-C6, mutations)
+NXR-BOUNDS	render	44adf6c	fc7713a	fixed	fc7713a	test_nx_render_robust.py	nx_render survives malformed .nxd9/.nxcap (D1-D7, C1-C6, mutations)
 FTOI2-EN	S1-STL	-	-	partial	-	test_ftoi_fuzz.py	FTOI2 float->int matches x86 for enums (7,970 conversions differ: enums take the unsigned path)
 FTOI2-CVTSS	S1-STL	-	-	partial	-	test_ftoi_fuzz.py	sse2neon _mm_cvtss_si32 out of range gives 0x7fffffff, x86 gives INT_MIN (2,333 inputs)
 S13B-FIX	S13b	60b538e	60b538e	confirmed	-	test_s13b_callee_store.py	oracle-callee-store only with evidence of interception (C1-C3 now triage; the positive case in tests/s13/test_causes.py)
@@ -31,3 +31,11 @@ S12-KEYS-K3	S12	f241f21	f241f21	refuted	-	test_s12_keys.py	whole-program keys: a
 S12-KEYS-K6	S12	f241f21	f241f21	refuted	-	test_s12_keys.py	POLL-PLAIN: a struct copy over a keyed (polled) field is a plain str, no stlr/dmb
 S12-KEYS-K10	S12	f241f21	f241f21	refuted	-	test_s12_keys.py	compile.sh order.keys: per-unit key cache is invalidated only by the unit source mtime, a changed tree header leaves a stale key list
 S12-OBJOP	S12	3426547	3426547	confirmed	-	test_s12_keys.py	object=first/operator=cpp17 defaults byte-identical; object=last operator=rtl give MSVC push order (direct, virtual, nested, <<, []) under qemu, direct calls stay direct
+S13B-SCRIPT	S13b	69a378e	69a378e	confirmed	-	test_s13_tools.py	causes.py as a script is one module with report.reclassify's: summary/handoffs --effects apply (E1)
+S13B-HANDOFF	S13b	ab7e255	ab7e255	confirmed	-	test_s13_tools.py	handoffs rows per owned cause equal summary divergences; index sums; by-design, non-ok and gone dropped (H1)
+S13B-OBJREAD	S13b	62b7ab4	62b7ab4	confirmed	-	test_s13_tools.py	without pyelftools causes.py warns once and the summary says reader unavailable (O1; O2 note: merge drops native_objects)
+S13-VTPAIRS	S13	61fd136	61fd136	confirmed	-	test_s13_tools.py	kind-V pair short only for n < s, native() and pairs() agree (V1; V2 note: vbase/vcall words count as slots)
+S13-RENAMES-R1	S13	545e0c5	545e0c5	refuted	-	test_s13_tools.py	a def row of unit A changes the callee convention (tree_def) every caller unit uses; only A's keys refresh, callers keep stale verdicts
+S13-FZTREE-F1	S13	a01a297	a01a297	refuted	-	test_s13_tools.py	fuzz_job: t/<L12> whose hash differs from the link's recorded tree is rejected, then taken by the fallback wait unchecked
+S6B-CENSUS	S6b	283fe49	283fe49	confirmed	-	test_s13_tools.py	census counts sum (translated + failed, cause table, unique); s6b_centroid 23/23 (K1; K2 note: malformed package counted)
+NXR-H1	render	2686fc6	fc7713a	refuted	-	test_nx_render_robust.py	nx_render bounds every size of .nxcap: a SUBM Draw with 0x7fffffff instances is not bounded (hangs > 120 s; .nxd9 skips draws over 4 M vertices)
