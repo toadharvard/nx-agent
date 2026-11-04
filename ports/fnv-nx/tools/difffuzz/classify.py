@@ -110,6 +110,30 @@ def image_vftables():
     return _VFT
 
 
+def oracle_vcall(pair, case, max_steps):
+    """The oracle faulted on an indirect call through a fuzzed object (loading its vptr or slot, or calling the
+    loaded address) that the native code never makes (GCC devirtualised it, or the call is on a path it does not
+    take with these canned results). Indirect calls are not modelled: an oracle gap."""
+    import capstone
+    from unicorn.x86_const import UC_X86_REG_EIP
+    rx, _, _ = pair.run(case, max_steps)
+    if not str(rx.error or '').startswith('fault:'):
+        return False
+    uc = pair.xe.uc
+    pc = uc.reg_read(UC_X86_REG_EIP)
+    try:
+        code = bytes(uc.mem_read(pc, 24))
+    except Exception:  # noqa: BLE001
+        return str(rx.error).startswith('fault:x:')     # the call itself jumped to an unmapped address
+    cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    for i, ins in enumerate(cs.disasm(code, pc)):
+        if i >= 4:
+            break
+        if ins.mnemonic == 'call' and not ins.op_str.startswith('0x'):
+            return True                                 # call [reg+N] / call reg within a few instructions
+    return False
+
+
 def msvc_inlined(target, div):
     """The native code calls X out of line where the oracle runs X's body inline (MSVC inlined it; the oracle's
     next call is one X itself makes): the native side would have to run X too. An oracle-model gap."""
@@ -167,6 +191,9 @@ def hint(pair, target, case, div, fn, max_steps):
             h['cause'] = 'division'; return h
         if 'ilp32-high' in str(div.get('arm')):
             h['cause'] = 'ilp32-pointer'; return h
+        if str(div.get('x86', '')).startswith('fault:') and div.get('arm') is None and oracle_vcall(pair, case,
+                                                                                                    max_steps):
+            h['cause'] = 'oracle-vcall'; return h
     if k == 'callee-saved':
         h['cause'] = 'callee-saved'; return h
     # determinism probes: only garbage changes (stack fill, non-argument registers, argument padding)

@@ -23,7 +23,7 @@ import config
 
 SOFT_CAUSES = {'local-static', 'vptr-store', 'bool-repr', 'ilp32-pointer', 'division', 'uninit-x86', 'nan-bits',
                'call-order', 'array-new-check'}
-HARNESS_CAUSES = {'x86-custom-cc', 'msvc-inlined', 'runtime-equiv'}     # oracle-model gaps: neither hard nor soft, reported apart
+HARNESS_CAUSES = {'x86-custom-cc', 'msvc-inlined', 'runtime-equiv', 'oracle-vcall'}     # oracle-model gaps: neither hard nor soft, reported apart
 LINK_CAUSES = {'split-global', 'call-args', 'callee-saved'}
 
 
