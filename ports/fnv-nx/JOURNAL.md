@@ -1255,3 +1255,31 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
     a scene-level and on-device plan in docs/RENDER_VERIFY.md.
 * **next** - Merge each with its verification. Parity against the original shaders needs the player's
   Data/Shaders/shaderpackage*.sdp.
+
+### J-0065 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0062,J-0064
+
+* **did** - Hardware-ready package (D8), built from the f11 guest. `toolchain/package/build.sh` builds the SD tree:
+  - the exefs override: host `main` + `main.npdm` for the chosen program id;
+  - `fnvnx/guest.nso`;
+  - a MANIFEST with SHA-256 sums.
+
+  Two variants: `HOST=plain` (D3D9=null guest, console) and `HOST=nine` (Gallium Nine host).
+  `tests/s5/check_package.py` checks:
+  - PFS0;
+  - NPDM: is_64_bit, 32BitNoReserved, program id inside the ACID range, decoded kernel capabilities including the
+    30 SVCs the host needs;
+  - the host NSO, and the guest NSO header against the host loader's placement rules;
+  - the guest ELF32: PIE, PT_LOAD outside the data window, only P32_RELATIVE/NONE relocations;
+  - with `--emulate`, the guest load under Unicorn.
+
+  Other changes: `npdmtool --program-id` writes the overridden title's id; the guest's file root is `sdmc:/fnvnx` for
+  everything. TOOLCHAIN.md section 15 is the first-hardware-run checklist: install, game files, expected `host.log`,
+  expected stop, fetching the log and the crash report. The orchestrator re-ran `check_package.py` on both packages:
+  PASS, 0 failed checks.
+* **found** - Hardware has no skip-and-continue like the emulator. With today's objects a hardware run ends at the
+  first faulting initializer (`__fnvnx_dyninit_00f35430`, FUN_00aa1070+0x54). It would still validate the loader, host
+  start, guest mapping and relocation, exe load, IAT binding, code-pointer fix-up and the start of the initializers.
+  The LP64 host itself is not exercised off-hardware; its placement logic is checked only through a Python mirror.
+* **metrics** - pkg_null_exefs=137954 pkg_nine_exefs=2472312 guest_nso=11222465 package_checks_failed=0
+* **next** - S5: guest + boot + package on f13. A first hardware run is useful once the memory-manager initializers
+  pass, since it confirms the host/loader path.
