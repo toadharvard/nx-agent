@@ -57,7 +57,8 @@ def cmd_todo(cache, targets, keys, out, counts_out):
             c['no_key'] += 1
             continue
         r = rows.get(t['address'])
-        if r is not None and r.get('key') == k:
+        # 'crash:<exception>' is the harness failing on that function, not a verdict: fuzz it again
+        if r is not None and r.get('key') == k and not str(r.get('status', '')).startswith('crash:'):
             c['up_to_date'] += 1
         elif r is not None:
             c['changed'] += 1

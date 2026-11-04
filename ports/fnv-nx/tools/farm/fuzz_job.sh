@@ -180,16 +180,25 @@ bash "$P/tools/fetch.sh" "$EXT" >/dev/null
 DECOMP=$EXT/fnv_decomp
 D12=$(git -C "$DECOMP" rev-parse HEAD | cut -c1-12)
 PY=python3
-if ! python3 -c 'import unicorn, capstone' 2>/dev/null; then
+PYMODS='import unicorn, capstone, elftools'          # the harness's imports (check_rebind.py needs pyelftools)
+PIPS="unicorn==2.1.4 capstone==5.0.9 pyelftools==0.33"
+if ! python3 -c "$PYMODS" 2>/dev/null; then
   if [ ! -x "$FARM_HOME/venv/bin/python3" ]; then
     python3 -m venv "$FARM_HOME/venv" 2>/dev/null || { rm -rf "$FARM_HOME/venv"; }
   fi
   if [ -x "$FARM_HOME/venv/bin/python3" ]; then
     PY=$FARM_HOME/venv/bin/python3
-    $PY -c 'import unicorn, capstone' 2>/dev/null || $PY -m pip install -q unicorn==2.1.4 capstone==5.0.9
+    # shellcheck disable=SC2086
+    $PY -c "$PYMODS" 2>/dev/null || $PY -m pip install -q $PIPS
   else
-    python3 -m pip install -q --user --break-system-packages unicorn==2.1.4 capstone==5.0.9
+    # shellcheck disable=SC2086
+    python3 -m pip install -q --user --break-system-packages $PIPS
   fi
+fi
+# Preflight: every module the harness imports must load here, or each function would come back as one harness
+# exception ("crash:ModuleNotFoundError") instead of a verdict.
+if ! (cd "$P/tools/difffuzz" && $PY -c 'import fuzz, classify, check_rebind' ) > "$FARM_HOME/fuzz-preflight.log" 2>&1; then
+  echo "fuzz harness does not load on this host ($PY):"; tail -5 "$FARM_HOME/fuzz-preflight.log"; exit 1
 fi
 
 # --- oracle: MSVC 2008 objects of the pristine decomp --------------------------------------------------------------

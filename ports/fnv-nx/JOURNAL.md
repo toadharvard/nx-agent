@@ -2077,3 +2077,30 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   them; no farm restart is needed.
 * **next** - The first `link/<commit12>` from link1, then the full1 boot, then the first fuzz verdicts from the 32
   shards.
+
+### J-0099 | 2026-11-04 | stream: farms | status: wip | parent: J-0098
+
+* **measured** - The first farm link, `link/9a0243c7eabe` (link1, after the FARM_APT fix):
+  - 3,718 objects of 3,801 units; 376,189 undefined references, 322,881 resolved by address.
+  - Trial link: 3,720 objects, 5,080 undefined names (f13: 6,121), 0 multiple definitions. Of the undefined names, 3,762
+    are C++ by name, 714 are `__fnv_` (definition not compiled yet), 604 runtime/C/platform.
+  - 0 bypassing references.
+  - Seconds: resolve 141, probe 1,253 (vtables 1,004, 4 jobs), resolve 2 185, apply 20, trial link 9.
+* **measured** - The first farm boot (full1, same link, synthesized image):
+  - The static initialisers complete with 240 trap hits (6 distinct); imports 164/204 resolved; code pointers 684
+    applied, 720 trapped, 0 mismatched.
+  - The boot calls WinMain, then stops at a fetch from non-executable memory. The faulting chain is FUN_0086a850 ->
+    FUN_00c3bd30 -> FUN_00c3c460 -> `MemoryManagerStandIn::FUN_00aa3e40`+0xac. The memory manager's options, holder
+    and once flags are all 0 before WinMain. This is the next boot frontier for S5.
+* **found** - The 26 fuzz shards that reported at 9a0243c fuzzed 1,022 functions each, and every one was
+  `crash:ModuleNotFoundError` with 0 executions. The harness's `check_rebind.py` imports pyelftools, but fuzz_job's
+  venv installed only unicorn and capstone. The cache also kept these crashes as verdicts under an unchanged key, so
+  the next head would have reused them.
+* **did** - Three changes:
+  - fuzz_job.sh installs pyelftools in the venv and checks the harness's own imports before the campaign; it fails
+    loudly when they do not load.
+  - fuzzcache.py `todo` treats a cached `crash:<exception>` as stale, so the poisoned caches refresh at the next head
+    without a HARNESS bump.
+  - Checked on a 3-row cache: crash re-fuzzed, ok reused, new fuzzed.
+* **next** - The first real fuzz verdicts from the 32 shards. S5 takes the WinMain fault. V1 audits the farm link.
+  fz27-fz32 have not reported yet.
