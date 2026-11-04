@@ -629,20 +629,21 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual((stock['status'], stock['level'], stock['required']), ('pass', 'stretch_60', True))
         self.assertEqual((boost['status'], boost['required']), ('pass', False))
         self.assertIn('plan45 stretch_60', stock['note'])
+        # lo fits 16.7 ms, hi does not: uncertain, whatever S15's verdicts say
         self.world.edit_json('reports/prof1/%s-frame-budget.json' % C, lambda d: d['scenarios'][0]['results'][
-            '1020']['verdicts'].update(stretch_60='uncertain'))
+            '1020']['worst_frame_ms'].update(lo=12.0, mid=15.0, hi=20.0))
         g = self.gate(self.world.run(), 'perf.budget.stock')
         self.assertEqual(g['status'], 'no-data')
         self.assertIn('needs a measured frame', g['note'])
 
     def test_frame_budget_fail_and_model_only(self):
         rel = 'reports/prof1/%s-frame-budget.json' % C
-        self.world.edit_json(rel, lambda d: d['scenarios'][0]['results']['1020']['verdicts'].update(stretch_60='fail'))
+        wf = lambda **k: lambda d: d['scenarios'][0]['results']['1020']['worst_frame_ms'].update(**k)
+        self.world.edit_json(rel, wf(lo=18.0, mid=22.0, hi=25.0))       # even the lo case misses 16.7 ms
         card = self.world.run()
         self.assertEqual(self.gate(card, 'perf.budget.stock')['status'], 'fail')
         self.assertEqual(card['verdict'], 'NOT READY')
-        self.world.edit_json(rel, lambda d: (d['scenarios'][0]['results']['1020']['verdicts'].update(stretch_60='pass'),
-                                             d['inputs'].update(frameprof=False)))
+        self.world.edit_json(rel, lambda d: (wf(lo=7.0, mid=12.0, hi=16.0)(d), d['inputs'].update(frameprof=False)))
         g = self.gate(self.world.run(), 'perf.budget.stock')
         self.assertEqual(g['status'], 'no-data')
         self.assertIn('model only', g['note'])
