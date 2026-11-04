@@ -1,0 +1,12 @@
+# S2c-vt (claude/fnv-s2c) owns the slot fill for these classes: S5-boot's boot-path list and the
+# collect-all trap batch (reports/s5-traps). One native vtable class per line (Itanium spelling as in _ZTV<len><name>).
+# S2c-vt2 (claude/fnv-s2c-vt2) takes every other class. S1-refs' __fnvnx_bdvc rows stay with S2c-vt too.
+FUN_00aa7400
+FUN_00aa8410
+BSThread
+FUN_004de530
+INIPrefSettingCollection
+INISettingCollection
+FUN_00c3bda0_Class
+NiTMap_S
+fnv_00486a00::FUN_00486a00
