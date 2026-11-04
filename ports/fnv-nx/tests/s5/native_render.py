@@ -52,6 +52,11 @@ ABS32, PREL32, ADR_PG, ADD_LO12, LDST8, LDST16, LDST32, LDST64, LDST128, TSTBR14
 LDST_SHIFT = {LDST8: 0, LDST16: 1, LDST32: 2, LDST64: 3, LDST128: 4}
 
 
+# names Ubuntu's glibc headers give standard C functions (C23 redirections) -> the guest's newlib names
+GLIBC_ALIASES = {"__isoc23_strtol": "strtol", "__isoc23_strtoul": "strtoul", "__isoc23_strtoll": "strtoll",
+                 "__isoc23_strtoull": "strtoull", "__isoc23_sscanf": "sscanf", "__isoc23_vsscanf": "vsscanf"}
+
+
 class ObjError(Exception):
     pass
 
@@ -97,6 +102,8 @@ def link_object(data, place, resolve):
         if shndx == 0xFFF1:   # SHN_ABS
             return value
         a = resolve(name)
+        if a is None and name in GLIBC_ALIASES:   # glibc's header redirections of the same C functions
+            a = resolve(GLIBC_ALIASES[name])
         if a is None:
             if info >> 4 == 2:   # weak undefined
                 return 0

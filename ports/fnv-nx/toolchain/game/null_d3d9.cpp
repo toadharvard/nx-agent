@@ -36,7 +36,7 @@ struct NullBase {
     virtual ~NullBase() { free(buf); }
 };
 
-extern "C" HRESULT fnvnx_d3d9_device_created(const void *present_params) __attribute__((weak));
+extern "C" HRESULT fnvnx_d3d9_device_created(const void *present_params, void *device) __attribute__((weak));
 
 struct Null_IDirect3D9;
 struct Null_IDirect3DVolume9;
@@ -702,7 +702,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9::CreateDevice(UINT Adapter, D3DDEVTYPE
     (void)pPresentationParameters;
     (void)ppReturnedDeviceInterface;
     if (ppReturnedDeviceInterface) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppReturnedDeviceInterface = o; }
-    if (ppReturnedDeviceInterface && *ppReturnedDeviceInterface && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(pPresentationParameters);
+    if (ppReturnedDeviceInterface && *ppReturnedDeviceInterface && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(pPresentationParameters, *ppReturnedDeviceInterface);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolume9::GetDevice(struct IDirect3DDevice9** ppDevice) {
@@ -2080,7 +2080,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::CreateDevice(UINT Adapter, D3DDEVTY
     (void)pPresentationParameters;
     (void)ppReturnedDeviceInterface;
     if (ppReturnedDeviceInterface) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppReturnedDeviceInterface = o; }
-    if (ppReturnedDeviceInterface && *ppReturnedDeviceInterface && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(pPresentationParameters);
+    if (ppReturnedDeviceInterface && *ppReturnedDeviceInterface && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(pPresentationParameters, *ppReturnedDeviceInterface);
     return S_OK;
 }
 UINT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterModeCountEx(UINT adapter_idx, const D3DDISPLAYMODEFILTER * filter) {
@@ -2110,7 +2110,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::CreateDeviceEx(UINT adapter_idx, D3
     (void)mode;
     (void)device;
     if (device) { auto *o = new Null_IDirect3DDevice9Ex(); o->inherit(this);  *device = o; }
-    if (device && *device && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(parameters);
+    if (device && *device && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(parameters, *device);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterLUID(UINT adapter_idx, LUID * luid) {

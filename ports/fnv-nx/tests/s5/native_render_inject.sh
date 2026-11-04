@@ -25,7 +25,10 @@ GF="-O2 -g -ffp-contract=off -ffunction-sections -fdata-sections -fno-asynchrono
  -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -I$ROOT/toolchain/include -I$N/include -I$N/front -I$N/n1 -I$OUT/shaders"
 GXX="$GF -std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics"
 mkdir -p "$OUT/obj"
-for s in front/front.cpp capture/capture.cpp n1/renderer.cpp n1/engine_stubs.cpp n1/engine_textures.cpp; do
+# libnxrender's C++ sources as render/native/n1/build.sh lists them (its `for s in ...; do` line)
+SRCS=$(sed -n 's/^for s in \(.*\); do .*/\1/p' "$N/n1/build.sh" | head -1)
+[ -n "$SRCS" ] || { echo "native_render_inject.sh: no source list in render/native/n1/build.sh" >&2; exit 1; }
+for s in $SRCS; do
 	$CXX $GA $GXX -c "$N/$s" -o "$OUT/obj/$(basename "${s%.*}").o"
 done
 $CC $GA $GF -std=gnu11 -c "$N/front/d3d9_state.c" -o "$OUT/obj/d3d9_state.o"
@@ -39,6 +42,7 @@ $CXX $GA -O2 -g -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tab
 	-USTDMETHODCALLTYPE -include "$ROOT/shim/include/fnvnx_compat.h" -I"${SSE2NEON:-$ROOT/ext/sse2neon}" \
 	-fms-extensions -fpermissive -I"$ROOT/platform/include" -iquote "$ROOT/shim/include" -I"$ROOT/shim/include" \
 	-I"$ROOT/platform/crt" -I"$ROOT/toolchain/include" -c "$ROOT/toolchain/game/null_d3d9.cpp" -o "$OUT/obj/null_d3d9.o"
+$CXX $GA $GXX -c "$HERE/native_render_shims.cpp" -o "$OUT/obj/native_render_shims.o"
 # S5-menu's boot stand-ins (tests/s5/menu_standins.c: each replaces the guest function of its name)
 $CC $GA $GF -std=gnu11 -c "$HERE/menu_standins.c" -o "$OUT/obj/menu_standins.o"
 $LD -m aarch64linux32 -r -o "$OUT/nxrender_inject.o" "$OUT"/obj/*.o
