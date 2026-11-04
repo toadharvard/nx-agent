@@ -182,6 +182,7 @@ EOF
 				cp "$bd/boot/synth/synth.exe" boot/synth.exe
 				[ -f "$bd/boot/synth/summary.txt" ] && cp "$bd/boot/synth/summary.txt" boot/synth_summary.txt
 			fi
+			for f in hand_vptrs.tsv hand_vptrs_sites.tsv hand_vptrs.txt; do [ -f "$bd/boot/$f" ] && cp "$bd/boot/$f" boot/; done
 			if [ -d "$bd/boot/stub" ]; then
 				mkdir -p boot/stub
 				for f in summary.txt emu_stub.log frontier_stub.txt frontier_stub.tsv; do

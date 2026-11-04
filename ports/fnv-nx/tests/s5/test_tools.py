@@ -305,5 +305,47 @@ class FaultTableTest(unittest.TestCase):
                              ([("InitHolder", "return0"), ("0x00aa1070", "use-malloc:x0")], [("0x00a8a5f0", 16)]))
 
 
+class HandVptrsTest(unittest.TestCase):
+    """tests/s5/hand_vptrs.py on a two-unit tree: store forms, binding and rule (no ELF: no native-vtable rules)."""
+
+    def test_rules(self):
+        src = (
+            "// @fnv 0x00401000\n"
+            "FNVNX_KEEP A::A() { *(int*)this = (int)&DAT_01011000; }\n"          # image-bound, class A -> S1:virtuals
+            "struct Q { int* vtable; Q() { vtable = &DAT_01011100; } };\n"       # inline ctor member store, bound -> ok
+            "void Free(void* p) { *(void**)p = (void*)&DAT_01011200; }\n"       # free function, deref -> S1:class
+            "void B::B() { *(const char**)this = \"@K@\"; m_x = &DAT_01011300; }\n"   # literal; m_x not a vptr
+            "void C::C() { *(int*)((char*)this + 8) = (int)&DAT_01011400; }\n"  # secondary, V entry -> S2:mapped
+            "void D::f() { *(int*)this = (int)&DAT_00401234; }\n")              # .text address: not a vptr
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(os.path.join(t, "tree", "build"))
+            os.makedirs(os.path.join(t, "tree", "src"))
+            os.makedirs(os.path.join(t, "link", "out"))
+            with open(os.path.join(t, "tree", "src", "u.cpp"), "w") as f:
+                f.write(src)
+            with open(os.path.join(t, "tree", "build", "units.json"), "w") as f:
+                json.dump({"units": [{"source": "src/u.cpp", "symbols": {}}]}, f)
+            with open(os.path.join(t, "link", "out", "aliases.ld"), "w") as f:
+                f.write("__fnv_01011000 = 0x01011000;\n__fnv_01011100 = _ZTV1Q + 8;\n__fnv_01011200 = 0x01011200;\n"
+                        "__fnv_01011400 = 0x01011400;\n")
+            with open(os.path.join(t, "link", "out", "addrmap.tsv"), "w") as f:
+                f.write("01011400\tV\t_ZTV1C\t_ZTV1C\tu.o\tsecondary\t8\t\t\n")
+            r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "hand_vptrs.py"), "--tree", os.path.join(t, "tree"),
+                                "--link", os.path.join(t, "link"), "--out", os.path.join(t, "hv")],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(os.path.join(t, "hv.tsv")) as f:
+                rows = {l.split("\t")[0]: l.rstrip("\n").split("\t") for l in f if not l.startswith("#")}
+            self.assertEqual(rows["01011000"][2], "S1:virtuals")
+            self.assertEqual(rows["01011000"][7], "A")
+            self.assertEqual(rows["01011100"][2], "ok")
+            self.assertEqual(rows["01011100"][7], "Q")
+            self.assertEqual(rows["01011200"][2:4], ["S1:class", "deref"])
+            self.assertEqual(rows["01011400"][2:4], ["S2:mapped", "this+N"])
+            self.assertEqual(rows[""][2], "literal")
+            self.assertNotIn("01011300", rows)
+            self.assertNotIn("00401234", rows)
+
+
 if __name__ == "__main__":
     unittest.main()

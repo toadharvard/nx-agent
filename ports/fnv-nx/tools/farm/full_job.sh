@@ -102,6 +102,17 @@ if [ $rc -ne 2 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" 
 		|| log "farm_boot.sh (stub boot) exited $?"
 	ls -1t "$F"/stub_boot-*.log | tail -n +6 | xargs -r rm -f
 fi
+# 4c. S5's work list of hand-stored image vptrs (tests/s5/hand_vptrs.py): each vptr store of an image vftable
+# address in the prepared tree, how this link binds it and the rule that fixes it, boot-hit addresses first;
+# published as boot/hand_vptrs*.tsv. About a minute.
+rm -f "$F/build/boot/hand_vptrs.tsv" "$F/build/boot/hand_vptrs_sites.tsv"
+if [ -n "$TREE" ] && [ -f "$F/build/link/out/aliases.ld" ] && [ -d "$F/build/boot" ]; then
+	HV=(--tree "$TREE" --link "$F/build/link" --out "$F/build/boot/hand_vptrs")
+	[ -f "$F/build/guest/fnvnx.elf" ] && HV+=(--elf "$F/build/guest/fnvnx.elf")
+	for l in "$F/build/boot/emu.log" "$STUB/emu_stub.log"; do [ -f "$l" ] && HV+=(--boot "$l"); done
+	"${PY:-python3}" -I "$P/tests/s5/hand_vptrs.py" "${HV[@]}" > "$F/build/boot/hand_vptrs.txt" 2>&1 \
+		|| log "hand_vptrs.py exited $?"
+fi
 t1=$(date +%s)
 
 # 5. Report, then the link outputs again with the guest ELF and the boot reports.

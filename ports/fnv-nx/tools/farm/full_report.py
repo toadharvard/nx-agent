@@ -64,6 +64,10 @@ def stub_boot(bd, clean):
         L.append('')
         L += table(['stubbed', 'count', 'function', 'fault'],
                    [(r[0].split('-')[0], r[1], clean(r[2], 50), clean(r[3] if len(r) > 3 else '', 60)) for r in rows[:20]])
+    hv = os.path.join(bd, 'boot', 'hand_vptrs.txt')   # tests/s5/hand_vptrs.py's summary: counts only
+    if os.path.isfile(hv):
+        L += ['', 'Hand-stored image vptrs (tests/s5/hand_vptrs.py; the list is boot/hand_vptrs.tsv of link/<commit12>):',
+              '', '```'] + [clean(l.rstrip(), 160) for l in open(hv, errors='replace')][:12] + ['```']
     fr = os.path.join(bd, 'boot', 'stub', 'frontier_stub.txt')
     if os.path.isfile(fr):
         first = next((l for l in open(fr, errors='replace') if 'untranslated keys hit' in l), '')
