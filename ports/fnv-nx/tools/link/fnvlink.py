@@ -452,6 +452,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
     shadowed = {}
     osigs = load_override_sigs(override)   # optional 4th column: the override's own MSVC-decorated signature
+    ova = load_override_va(override)       # optional 5th column: va=none|escape of a variadic override
     ms.need(osigs.values())
     pending = override_pending(override)
     stats_ov = collections.Counter()
@@ -754,12 +755,28 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 stats['cast_refs'] += 1
                         if rs.kind == 'func' and ds.kind == 'func':
                             va_r = None   # what a variadic definition's body reads with va_arg (vacall VADEF, V2)
-                            if nd['unit'] is not None and any(p_.strip() == '...' for p_ in ds.raw_params or ()):
+                            if nd['unit'] is None and addr in ova:
+                                va_r = ova[addr]
+                                vacall_req.add((u.host or u.source, un))   # format literals of its callers
+                            elif nd['unit'] is not None and any(p_.strip() == '...' for p_ in ds.raw_params or ()):
                                 vacall_req.add((nd['unit'], nd['sym'].name))
+                                vacall_req.add((u.host or u.source, un))   # its format literals, in the same probe
                                 defs_ = vacall.load_defs(out, nd['unit'])
                                 va_r = defs_.get(nd['sym'].name) if defs_ else None
                             v = abi.compare(rs, ds, va_reads=va_r)
                             va_key = None
+                            if va_r == ('escape',) and v.kind == 'manual' and 'varargs' in v.classes:
+                                # the definition hands its va_list to vsnprintf: the call sites' format literals
+                                # decide what it reads (vacall.decide_format)
+                                fhost = u.host or u.source
+                                vacall_req.add((fhost, un))
+                                fm_ = vacall.load_fmts(out, fhost)
+                                v3_, suf_, st_ = vacall.decide_format(rs, ds, fm_.get(un) if fm_ else None)
+                                stats[st_] += 1
+                                if v3_ is not None:
+                                    v = v3_
+                                    if suf_:
+                                        va_key = refdecl + suf_
                             if vacall.needs(v):
                                 # the definition reads the reference's anonymous arguments: the call sites' own
                                 # argument types decide (vacall.py, V1 VA-U1..U4)
@@ -1247,6 +1264,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'sites disagree, %d units not recorded yet (vacall_requests.tsv: %d)' % (
                   stats['vacall_decided'], stats['vacall_not_bridgeable'], stats['vacall_sites_disagree'],
                   stats['vacall_unrecorded'], len(vacall_req))]
+    lines += ['', 'calls into vsnprintf-forwarding definitions decided by their format literals: %d exact, %d bridged, '
+              '%d non-literal or not modelled, %d sites disagree, %d not bridgeable' % (
+                  stats['format_exact'], stats['format_bridged'], stats['format_unknown'],
+                  stats['format_sites_disagree'], stats['format_not_bridgeable'])]
     lines += ['', 'MSVC entries at a secondary base (exe vftables, thisadj.py): %d addresses; the map names the '
               '_ZThn thunk for %d, %d without a thunk' % (stats['msvc_entry_exe'], stats['msvc_entry_thunks'],
                                                          stats['msvc_entry_no_thunk'])]
@@ -1750,6 +1771,18 @@ def load_override_sigs(path):
             f = line.rstrip('\n').split('\t')
             if not line.startswith('#') and len(f) >= 4 and re.match(r'^[?@_][^\s]*$', f[3]):
                 out[override_key(f[0])] = f[3]
+    return out
+
+
+def load_override_va(path):
+    """Override table rows with a 5th column `va=<none|escape>`: {address: va_reads} of a variadic override (what
+    its body does with the anonymous arguments, abi.va_reads_check; the plugin does not read the C sources)."""
+    out = {}
+    if path:
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 5 and f[4].startswith('va='):
+                out[override_key(f[0])] = (f[4][3:],)
     return out
 
 

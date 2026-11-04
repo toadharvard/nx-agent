@@ -490,7 +490,7 @@ def va_reads_check(tail, va_reads):
     va_arg; mixed classes would need the read order, which loops and branches hide."""
     if va_reads is None:
         return 'the definition\'s va_arg types are unknown (no vacall record of its body)'
-    if va_reads[0] == 'none':
+    if va_reads[0] in ('none', 'exact'):   # exact: every call site's format checked word by word (vacall)
         return None
     if va_reads[0] != 'reads':
         return 'the definition hands its va_list to another function: the widths it reads are unknown'
