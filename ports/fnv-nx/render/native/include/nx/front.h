@@ -97,10 +97,17 @@ private:
 
 // ---- draw packets and the sorter ----------------------------------------------------------------------------
 // Sort key, high to low: pass(8) | layer(4) | state id(16) | texture block(16) | depth(16) | spare(4).
+// Opaque draws (layer 0) of a pass are ordered by a coarse depth bucket first (the top kDepthBucketBits of the depth
+// key, front to back), then by state and textures inside the bucket: early-z then rejects most hidden fragments
+// (P6n GPU model: shaded layers per pixel H(k) in state order -> near 1 with 4 buckets) while state changes stay
+// grouped inside a bucket. Other layers keep (state, textures, depth). State ids fit 12 bits (StateCache::kMaxStates).
+enum { kDepthBucketBits = 2 };
 inline uint64_t SortKey(uint8_t pass, uint8_t layer, uint16_t state, uint16_t tex, uint16_t depth) {
-    return ((uint64_t)pass << 56) | ((uint64_t)(layer & 15) << 52) | ((uint64_t)state << 36) |
+    const uint64_t bucket = (layer & 15) == 0 ? (uint64_t)(depth >> (16 - kDepthBucketBits)) : 0;
+    return ((uint64_t)pass << 56) | ((uint64_t)(layer & 15) << 52) | (bucket << 48) | ((uint64_t)(state & 0xFFF) << 36) |
            ((uint64_t)tex << 20) | ((uint64_t)depth << 4);
 }
+static_assert(StateCache::kMaxStates < 4096, "state ids must fit the sort key's 12 bits");
 
 // Dynamic values a draw may need beyond its state id. Packet.dyn = 0 means the pass defaults (NxOp_BeginPass).
 struct DynRec {
@@ -179,6 +186,12 @@ public:
     // Engine pass id + family of a draw packet: encoded as NxOp_Marker (NX_MARKER_PASS) before the first draw of each
     // run of draws with the same tag in a pass. family 0 = untagged.
     void Tag(const Packet* p, uint16_t enginePass, uint16_t family);
+    // A translated draw (the game's own programs, S6b layout): its constants are a bundle at `offset` of memory block
+    // `block` (kTrans* below: per stage c[256], i[16] + b[16], driver), bound after the per-draw slice; the pass
+    // constants (slot 0) and the epilogue (fragment slot 2) are bound again before the next native draw.
+    void SetTranslated(const Packet* p, uint32_t block, uint32_t offset);
+    enum : uint32_t { kTransVsC = 0, kTransVsIB = 4096, kTransVsDrv = 4608, kTransPsC = 4864, kTransPsIB = 8960,
+                      kTransPsDrv = 9472, kTransBytes = 9984, kTransVsDrvSize = 64, kTransPsDrvSize = 320 };
     // Sorts, encodes (with redundant-bind elimination) and submits. stats may be 0.
     void Finish(StateCache& sc, NxFrameStats* stats, bool present = false);
     Ring& ubo() { return ubo_; }
@@ -200,6 +213,8 @@ private:
     uint64_t* keys_ = nullptr; uint64_t* ktmp_ = nullptr;
     uint32_t* tex_ = nullptr;
     uint32_t* tags_ = nullptr;                                   // per packet: pass id | family << 16, 0 = none
+    uint32_t* trans_ = nullptr;                                  // per packet: 1 + bundle offset, 0 = native draw
+    uint32_t* transBlk_ = nullptr;                               // per packet: the bundle's memory block
     DynRec* dyn_ = nullptr;
     uint32_t* words_[2] = {nullptr, nullptr};                    // double-buffered: the backend may read N-1
     Encoder enc_;

@@ -1,0 +1,9 @@
+// V6n defect ps_pow_zero (synthetic, for S6b): D3D9 pow = exp(src1 * log(src0)) with log(0) = -FLT_MAX, so
+// pow(0, 0) = 1 and pow(0, y < 0) = +inf (Nine on softpipe: powf, the same values). GLSL pow(x, y) is undefined
+// for x = 0, y <= 0 (llvmpipe and Maxwell give 0). c7 = (0, -0.5, 0.5, 1) comes from the constant buffer.
+ps_2_0
+pow r0.x, c7.x, c7.x
+pow r0.y, c7.x, c7.y
+pow r0.z, c7.x, c7.z
+mov r0.w, c7.w
+mov oC0, r0

@@ -227,9 +227,11 @@ bool Frame::Init(Backend* be, uint32_t uboBytes, uint32_t uboSize) {
     keys_ = (uint64_t*)malloc(kMaxPackets * 8); ktmp_ = (uint64_t*)malloc(kMaxPackets * 8);
     tex_ = (uint32_t*)malloc(kMaxTex * 4);
     tags_ = (uint32_t*)malloc(kMaxPackets * 4);
+    trans_ = (uint32_t*)malloc(kMaxPackets * 4);
+    transBlk_ = (uint32_t*)malloc(kMaxPackets * 4);
     dyn_ = (DynRec*)malloc(kMaxDyn * sizeof(DynRec));
     words_[0] = (uint32_t*)malloc(kWords * 4); words_[1] = (uint32_t*)malloc(kWords * 4);
-    if (!packets_ || !order_ || !tmp_ || !keys_ || !ktmp_ || !tex_ || !tags_ || !dyn_ || !words_[0] || !words_[1]) return false;
+    if (!packets_ || !order_ || !tmp_ || !keys_ || !ktmp_ || !tex_ || !tags_ || !trans_ || !transBlk_ || !dyn_ || !words_[0] || !words_[1]) return false;
     return ubo_.Init(be, uboBytes);
 }
 
@@ -267,6 +269,7 @@ uint16_t Frame::AddDyn(const DynRec& d) {
 Packet* Frame::Emit() {
     if (nPackets_ >= kMaxPackets) return nullptr;
     tags_[nPackets_] = 0;
+    trans_[nPackets_] = 0;
     Packet* p = &packets_[nPackets_++];
     memset(p, 0, sizeof *p);
     return p;
@@ -299,6 +302,11 @@ bool Frame::Clear(uint8_t pass, uint8_t layer, uint16_t depthKey, uint32_t flags
 void Frame::Tag(const Packet* p, uint16_t enginePass, uint16_t family) {
     uint32_t i = (uint32_t)(p - packets_);
     if (i < nPackets_) tags_[i] = family ? ((uint32_t)enginePass | (uint32_t)family << 16) : 0;
+}
+
+void Frame::SetTranslated(const Packet* p, uint32_t block, uint32_t offset) {
+    uint32_t i = (uint32_t)(p - packets_);
+    if (i < nPackets_) { trans_[i] = offset + 1; transBlk_[i] = block; }
 }
 
 void Frame::SetEpilogue(Packet* p, const NxEpilogue& e) {
@@ -341,6 +349,7 @@ void Frame::Finish(StateCache& sc, NxFrameStats* stats, bool present) {
         // Redundant-bind elimination: every bind is compared with the last value encoded in this pass.
         uint32_t curState = 0, curTex = ~0u, curTexN = 0, curVtxB = 0, curVtxO = ~0u, curIdxB = 0, curIdxO = ~0u;
         uint32_t curEpi = 0, curTag = 0, curDyn = ~0u;   // curDyn: dyn record id whose values `cur` holds
+        bool slot0Lost = false;                           // a translated draw rebound slot 0 (and 1, fragment 2)
         for (; i < nPackets_ && (keys_[i] >> 56) == pass; i++) {
             const Packet& p = packets_[order_[i]];
             if (p.prim != kClearPrim && tags_[order_[i]] != curTag) {
@@ -401,6 +410,14 @@ void Frame::Finish(StateCache& sc, NxFrameStats* stats, bool present) {
                 a = enc_.Op(NxOp_BindIdx, 4); a[0] = p.idxBlock; a[1] = p.idxOffset; a[2] = p.idxSize; a[3] = p.idxType;
                 curIdxB = p.idxBlock; curIdxO = p.idxOffset;
             }
+            const uint32_t tr = trans_[order_[i]];
+            if (!tr && slot0Lost) {   // back to a native draw: the pass constants again
+                if (passUboSize_[pass]) {
+                    a = enc_.Op(NxOp_BindUbo, 5);
+                    a[0] = 3; a[1] = 0; a[2] = ubo_.block(); a[3] = passUbo_[pass]; a[4] = passUboSize_[pass];
+                }
+                slot0Lost = false;
+            }
             // bind the epilogue block on a change of contents (blocks of equal contents are interchangeable)
             if (p.epi && p.epi != curEpi &&
                 (!curEpi || memcmp(ubo_.cpu() + p.epi - 1, ubo_.cpu() + curEpi - 1, sizeof(NxEpilogue)))) {
@@ -410,6 +427,16 @@ void Frame::Finish(StateCache& sc, NxFrameStats* stats, bool present) {
             }
             a = enc_.Op(NxOp_BindUbo, 5);  // per-draw slice; the backend turns this into one 'bind UBO' method
             a[0] = 3; a[1] = 1; a[2] = ubo_.block(); a[3] = p.uboOffset; a[4] = uboSize_;
+            if (tr) {   // the translated program's UBOs 0-2 of both stages (fnvnx_dk_layout.h)
+                static const uint32_t kB[6][4] = {{1, 0, kTransVsC, 4096}, {1, 1, kTransVsIB, 512},
+                                                  {1, 2, kTransVsDrv, kTransVsDrvSize}, {2, 0, kTransPsC, 4096},
+                                                  {2, 1, kTransPsIB, 512}, {2, 2, kTransPsDrv, kTransPsDrvSize}};
+                for (int k = 0; k < 6; k++) {
+                    a = enc_.Op(NxOp_BindUbo, 5);
+                    a[0] = kB[k][0]; a[1] = kB[k][1]; a[2] = transBlk_[order_[i]]; a[3] = tr - 1 + kB[k][2]; a[4] = kB[k][3];
+                }
+                slot0Lost = true; curEpi = 0;
+            }
             uint32_t inst = p.instances ? p.instances : 1;
             if (p.idxBlock) {
                 a = enc_.Op(NxOp_DrawIndexed, 6);
