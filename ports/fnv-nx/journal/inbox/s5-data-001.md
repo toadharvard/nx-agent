@@ -57,7 +57,20 @@ onto the integration branch.
   - os_guest.c and boot.cpp are only syntax-checked, with the Linux cross g++. The ILP32 devkitA64 build is farm
     work (full1).
   - The `game_dir=` parser passed 7 cases in a scratch harness.
-* **blocked (orchestrator)** - The full Data/ is not in this container.
+* **did (real Data/, owner login)** - The owner logged in to GOG from this session. I exchanged the login code for a
+  Galaxy token, which stays only in this container: it was not pushed to gamedata/gog.
+  - lgogdownloader 3.12 also wants the website login, so I downloaded through the GOG API directly: products/1454587428,
+    installer_windows_en 1.4.0.525(a), 3 files.
+  - All three md5s match GOG's checksum files. innoextract unpacked 9.5 GB to /home/user/gamedata/game-full
+    (agent-only), and FalloutNV.exe's sha256 89e70204...dd0fe matches.
+  - The download script refreshes the token. CDN transfers were cut once per 4 GB file and resumed with -C -.
+* **measured (real install)** - `FARM_GAME=/home/user/gamedata/game-full`, stub boot of link 31971038913d's guest:
+  - winmain and ini-read are reached, the latter on the real Fallout_default.ini. bsa is 0/6: the six SArchiveList
+    archives, Fallout - Textures/Textures2/Meshes/Voices1/Sound/Misc. masters 0/1. 40 file faults (13 distinct, all ENOENT).
+  - The boot stops at renderer init, the same as on the synthetic install. The real data changes nothing before
+    D3D9, and the guest wrote nothing into the install folder.
+  - This guest predates profile.cpp, so the 28 FalloutPrefs.ini stats are still there.
+* **was blocked (resolved by the owner's login)** - The full Data/ was not in this container.
   - The token on `gamedata/gog` is stale: lgogdownloader 3.12 (the Ubuntu package) says "Unable to read email and
     password". J-0149 says the refreshed token was not pushed.
   - Building lgogdownloader from source was refused by this session's permission check.
@@ -66,8 +79,9 @@ onto the integration branch.
     this session can fetch.
   - Meanwhile I use the exe and the synthetic install.
 * **next (S5-data)**
-  1. With the real Data/: `FARM_GAME=<install> tests/s5/farm_boot.sh <c12> <out>`, then walk ini-read through
-     masters-loaded (queue 3: BSA open and read, ESM parse).
+  1. The real Data/ is here (/home/user/gamedata/game-full). Walk archive-list through masters-loaded (queue 3:
+     BSA open and read, ESM parse) as soon as a guest gets past renderer init: S5-boot's D3D9.DLL fix or a
+     D3D9=null guest (full1).
   2. Measure profile.cpp directly on the farm's next guest build (full1). Expected: 11 file faults.
   3. renderer-init: wait for S5-boot's D3D9.DLL fix, or boot a guest linked with D3D9=null, to reach archive-list.
   4. V1's new W9/W10/W13 (stlr, ldaxr/stlxr stores; integration e9e1981) pass on this branch as well, so there is
