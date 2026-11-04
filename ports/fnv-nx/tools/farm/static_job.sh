@@ -29,7 +29,8 @@
 #
 # Overrides for a machine that already has the inputs (e.g. a light test on a development machine, where a
 # full-tree prepare is not allowed): FARM_SRC=<checkout at <commit>> (no worktree), FARM_EXT=<dir> (used as it is,
-# no fetch), STATIC_TREE=<prepared tree> (read-only), SHIM=<dir> (run.sh: the shim of the tree's commit).
+# no fetch), STATIC_TREE=<prepared tree> (read-only), SHIM=<dir> (run.sh: the shim of the tree's commit),
+# STATIC_PREPARE=0 (fail instead of preparing when fetch_tree.sh has no tree).
 set -euo pipefail
 COMMIT=${1:?commit}; K=${2:?k}; N=${3:?N}; REPORT=${4:?report.md}
 [ "$K" -ge 1 ] && [ "$K" -le "$N" ] || { echo "static_job.sh: need 1 <= k <= N" >&2; exit 2; }
@@ -94,6 +95,7 @@ else
     else
       why=$(tail -1 "$WORK/fetch_tree.log" | san | cut -c1-160)
       rm -rf "$TREE"
+      [ "${STATIC_PREPARE:-1}" = 1 ] || { echo "static_job.sh: no tree from fetch_tree.sh ($why), STATIC_PREPARE=0" >&2; exit 2; }
       python3 "$P/tools/prepare.py" "$EXT/fnv_decomp" "$TREE" > "$WORK/prepare.log" 2>&1
       echo "prepare.py (fetch_tree.sh: $why)" > "$WORK/tree.from"
     fi
