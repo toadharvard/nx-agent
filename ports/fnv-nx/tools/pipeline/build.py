@@ -64,6 +64,8 @@ CONFIG = [
                   'compile handle, so the link and guest see only those; empty: every unit'),
     ('PREPARED', '', 'an existing prepared tree to adopt (read only) instead of running tools/prepare.py; its '
                      'prepared_from.txt (in the tree or next to it) gives its provenance'),
+    ('OBJECTS', '', 'objects.tsv of objects another job compiled from that tree (the compile farms: '
+                    'tools/farm/fetch_objs.sh), used in place instead of compiling'),
     ('FORCE_STALE', '0', '1: stages consume inputs prepared from another commit than the current head (recorded as '
                          'stale, status warn); 0: they refuse them'),
     ('PORT_COMMIT', '', 'commit (40 hex digits) of ports/fnv-nx when it is a copy without git metadata (a git '
@@ -735,8 +737,13 @@ def provide_fnvnx_a64(b, r, d):
         b.say('toolchain: fnvnx-a64 sources (toolchain/sources.sh)')
         b.sh(['bash', os.path.join(ROOT, 'toolchain', 'sources.sh'), dl, src], log, check=True, timeout=3600)
         work = os.path.join(d, 'work')
-        shutil.rmtree(work, ignore_errors=True)       # its step stamps belong to the previous scripts
-        shutil.rmtree(own_prefix, ignore_errors=True)
+        if read_id(os.path.join(work, '.fnvnx-build-id')) != tc_id:
+            # its step stamps belong to other scripts: start over; the same scripts resume after an interruption
+            shutil.rmtree(work, ignore_errors=True)
+            shutil.rmtree(own_prefix, ignore_errors=True)
+            os.makedirs(work)
+            with open(os.path.join(work, '.fnvnx-build-id'), 'w') as f:
+                f.write(tc_id + '\n')
         b.say('toolchain: building fnvnx-a64 (toolchain/gcc/build.sh, ~45 min on 4 cores)')
         b.sh(['bash', os.path.join(ROOT, 'toolchain', 'gcc', 'build.sh'), dl, work, own_prefix,
               os.path.join(src, 'buildscripts')], log, check=True, timeout=6 * 3600)
@@ -1272,19 +1279,62 @@ class Compile(Stage):
     prov = ('prepare',)
 
     def fingerprint(self, b):
+        if b.cfg['OBJECTS']:
+            src = os.path.abspath(b.cfg['OBJECTS'])
+            return ['compile-adopt-v1', src, file_hash(src), up_id(b, 'prepare'), b.units_filter()[1]]
         return ['compile-v3', file_hash(os.path.join(ROOT, 'tools', 'link', 'compile.sh')),
                 script_flags(os.path.join(ROOT, 'tools', 'link', 'compile.sh')), up_id(b, 'prepare'),
                 game_cxx_id(b), b.cfg['OPT'], tree_hash('shim/include'),
                 b.rec('fetch').get('metrics', {}).get('pin_sse2neon'), b.units_filter()[1]]
 
     def outputs_present(self, b):
-        return os.path.isfile(os.path.join(b.out, 'compile', 'objects.tsv'))
+        p = os.path.join(b.out, 'compile', 'objects.tsv')
+        return os.path.isfile(p) and all(o is None or os.path.isfile(o) for o in objects_map(p).values())
+
+    def adopt(self, b, r, d, tree, src):
+        """OBJECTS=<objects.tsv>: objects another job compiled from this tree (the compile farms:
+        tools/farm/fetch_objs.sh checks they were compiled from exactly this tree), read in place."""
+        given = objects_map(src)
+        units = selected_units(b, tree, r)
+        ok, failed = [], []
+        with open(os.path.join(d, 'objects.tsv'), 'w', errors='surrogateescape') as f:
+            for u in units:
+                o = given.get(u)
+                st = 'ok' if o and os.path.isfile(o) and object_intact(o) else 'fail'
+                (ok if st == 'ok' else failed).append(u)
+                f.write('%s\t%s\t%s\n' % (u, o or unit_base(os.path.dirname(src), u) + '.o', st))
+        with open(os.path.join(d, 'failed.tsv'), 'w', errors='surrogateescape') as f:
+            f.write('# source\terrors\tfirst error\n')
+            for u in failed:
+                log = os.path.join(os.path.dirname(src), u.replace('/', '_') + '.log')
+                errs = [l for l in open(log, errors='replace')] if os.path.isfile(log) else []
+                errs = [l for l in errs if ': error:' in l or 'fatal error:' in l]
+                first = re.sub(r'^[^:]+:\d+:\d+:\s*(fatal )?error:\s*', '', errs[0].strip())[:200] if errs else \
+                    ('(not in %s)' % b.rel(src) if u not in given else '(no error line)')
+                f.write('%s\t%d\t%s\n' % (u, len(errs), first))
+        r['adopted'] = src
+        r.metric('compile_units', len(units))
+        r.metric('compile_ok', len(ok))
+        r.metric('compile_failed', len(failed))
+        r.metric('compile_built_now', 0)
+        r.metric('compile_obj_mib', round(sum(os.path.getsize(given[u]) for u in ok) / 2**20, 1))
+        r.artifact('objects', os.path.join(d, 'objects.tsv'))
+        r.artifact('failed', os.path.join(d, 'failed.tsv'))
+        r['output_id'] = sha([(u, file_hash(given[u])) for u in ok])
+        r['summary'] = '%d/%d units -> objects adopted from %s, %d failed (listed, excluded)' % (
+            len(ok), len(units), b.rel(src), len(failed))
+        if not ok:
+            raise StageError('no object in %s' % src)
+        if failed:
+            r['status'] = 'warn'
 
     def run(self, b, r):
         d = b.sdir('compile')
+        tree = b.art('prepare', 'tree')
+        if b.cfg['OBJECTS']:
+            return self.adopt(b, r, d, tree, os.path.abspath(b.cfg['OBJECTS']))
         obj = os.path.join(d, 'obj')
         os.makedirs(obj, exist_ok=True)
-        tree = b.art('prepare', 'tree')
         cxx = game_cxx(b)
         flags = script_flags(os.path.join(ROOT, 'tools', 'link', 'compile.sh'))
         r['flags'] = flags
@@ -1501,15 +1551,23 @@ def msvc_objs_id(b):
     return sha(d, listing_id([os.path.join(d, n) for n in os.listdir(d)]) if os.path.isdir(d) else None)
 
 
-def unit_identity(obj, tree, src):
-    """What a unit's layout probe depends on, cheaply: its object (rebuilt whenever its source or a header in its
-    .o.d changed), else its source file."""
-    for p, tag in ((unit_base(obj, src) + '.o', 'o'), (os.path.join(tree, src), 's')):
-        try:
-            st = os.stat(p)
-            return '%s:%d:%d' % (tag, st.st_size, st.st_mtime_ns)
-        except OSError:
-            pass
+def objects_map(objects_tsv):
+    """compile.sh / fetch_objs.sh objects.tsv -> {unit: object path or None when it failed}."""
+    m = {}
+    for line in open(objects_tsv, errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if len(f) >= 3:
+            m[f[0]] = f[1] if f[2] == 'ok' else None
+    return m
+
+
+def unit_identity(objs, tree, src):
+    """What a unit's layout probe depends on: its object's content (the object changes whenever its source or a
+    header changed), else its source file's content. Content, not mtime: objects fetched from the compile farms
+    carry the publishing commit's time."""
+    for p, tag in ((objs.get(src), 'o'), (os.path.join(tree, src), 's')):
+        if p and os.path.isfile(p):
+            return '%s:%d:%s' % (tag, os.path.getsize(p), file_hash(p))
     return None
 
 
@@ -1619,9 +1677,8 @@ class Link(Stage):
                 args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
         r['resolve_options'] = [b.rel(a) for a in args[3:]]
         seed_link_out(b, r, out)
-        obj = os.path.join(b.out, 'compile', 'obj')
-        units = [l.split('\t', 1)[0] for l in open(objects, errors='surrogateescape') if l.strip()]
-        remember = invalidate_link_caches(b, r, out, tree, obj, units)
+        objs = objects_map(objects)
+        remember = invalidate_link_caches(b, r, out, tree, objs, sorted(objs))
         env = b.env({'CXX': probe_cxx(b, d)})
         log = r['log']
 
@@ -1630,14 +1687,23 @@ class Link(Stage):
             # objects of units that no longer compile (S2 interface gap; S2c's driver starts every run in a new dir)
             shutil.rmtree(os.path.join(out, 'objcopy'), ignore_errors=True)
             b.say('link: fnvlink resolve %d' % n)
+            t = time.time()
             b.sh([PY, '-I', fl, 'resolve'] + args, log, env=env, check=True)
+            r.metric('link_resolve%d_s' % n, round(time.time() - t, 1))
             shutil.copyfile(os.path.join(out, 'stats.txt'), os.path.join(d, 'resolve%d.stats.txt' % n))
 
         # S2c's order: resolve (asks for layouts and vtables), probe (layouts + synthesized vtables/typeinfo),
         # resolve again with both, apply, trial link
         resolve(1)
-        b.say('link: fnvlink probe (aggregate layouts, synthesized vtables)')
+        b.say('link: fnvlink probe (aggregate layouts, synthesized vtables; %d jobs)' % b.jobs)
+        t = time.time()
         rc = b.sh([PY, '-I', fl, 'probe', out, tree, b.jobs], log, env=env)
+        r.metric('link_probe_s', round(time.time() - t, 1))
+        r.metric('link_probe_jobs', b.jobs)
+        mm = re.findall(r'probe: (\d+) units, (\d+) types \((\d+) cached\)', open(log, errors='replace').read())
+        if mm:
+            r.metric('link_probe_units', int(mm[-1][0]))
+            r.metric('link_probe_types', int(mm[-1][1]))
         if rc:
             r.note('probe exited %d; resolve 2 uses the layouts and vtables it left' % rc)
         resolve(2)
@@ -1645,13 +1711,17 @@ class Link(Stage):
         b.say('link: fnvlink apply')
         alog = os.path.join(d, 'apply.log')
         open(alog, 'w').close()
+        t = time.time()
         b.sh([PY, '-I', fl, 'apply', out, fixed], alog, env=env, check=True)
+        r.metric('link_apply_s', round(time.time() - t, 1))
         afail = [line.strip() for line in open(alog, errors='replace')
                  if line.startswith(('objcopy failed', 'as failed', 'cc addrmap.c failed'))]
         b.say('link: fnvlink check (trial link)')
         clog = os.path.join(d, 'check.txt')
         open(clog, 'w').close()
+        t = time.time()
         b.sh([PY, '-I', fl, 'check', out, fixed], clog, env=env, check=True)
+        r.metric('link_check_s', round(time.time() - t, 1))
         remember()
         # S13's split-global check on the rewritten objects (part of S2c's run summary): want 0
         rb = os.path.join(d, 'check_rebind.txt')
@@ -1685,6 +1755,9 @@ class Link(Stage):
             f.write('decomp %s; tree %s (%s); linked with port %s\n' % (
                 pf.get('decomp_commit') or 'unknown', pf.get('tree'), pf.get('mode'), b.head or 'unknown'))
             f.write(''.join(open(os.path.join(out, 'stats.txt')).readlines()[:3]))
+            mt = r.get('metrics', {})
+            f.write('seconds: resolve 1 %s, probe %s (%s jobs), resolve 2 %s, apply %s, trial link %s\n' % tuple(
+                mt.get('link_%s' % k) for k in ('resolve1_s', 'probe_s', 'probe_jobs', 'resolve2_s', 'apply_s', 'check_s')))
             f.write(''.join(l + '\n' for l in ctext.splitlines() if l.strip() and not l.startswith(('$ ', '[exit'))))
             if mm:
                 f.write(mm.group(0) + '\n')

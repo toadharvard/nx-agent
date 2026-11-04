@@ -173,7 +173,10 @@ Still machine-specific (not made by the pipeline):
   more while GCC builds (its build tree is removed afterwards), and 1-2 GB per full build.
 * The player's game files (the real data image, assets): never on these machines.
 
-`tools/farm/full_job.sh <commit> <report.md>` is the farm job for this (`tools/farm/README.md`).
+`tools/farm/full_job.sh <commit> <report.md>` is the farm job for this (`tools/farm/README.md`). On the farms it
+takes the prepare farm's tree (`PREPARED`) and the compile farms' objects (`OBJECTS`) instead of preparing and
+compiling, and publishes the link outputs as branch `link/<commit12>` of the private artifacts repository for the
+fuzz farms.
 
 ## The hand flow and the pipeline
 
@@ -268,6 +271,7 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `OPT` | -O2 | compile.sh `$OPT`. |
 | `UNITS` | | List file of units for census and compile (see "Subset run"); empty: every unit. |
 | `PREPARED` | | Adopt this prepared tree (read only) instead of running prepare; its provenance is read from `prepared_from.txt` / `.json` next to it or in it. |
+| `OBJECTS` | | `objects.tsv` of objects another job compiled from that tree (the compile farms, `tools/farm/fetch_objs.sh`, which checks the tree hash), used in place instead of compiling. |
 | `FORCE_STALE` | 0 | 1: consume inputs prepared from another commit than the head (recorded, `warn`). |
 | `PORT_COMMIT` | | The commit of a ports/fnv-nx copy without git metadata. In a checkout it must equal HEAD. |
 | `CENSUS` | 1 | 0 skips the census. |
@@ -288,6 +292,7 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `PROGRAM_ID` | 0100000000000000 | Title id for the SD path. The placeholder makes `package` a warning. |
 | `TESTS` | all | Comma list of suite names, `all` or `none`. |
 | `EMU_TIMEOUT` | 3000 | Seconds for the emulated boot (S5's value). |
+| `EMU_BUDGET` | 6000000000 | Instructions per scheduling slice of the emulated boot (S5's value for game boots: the loader's code pointer scan of a synthesized image needs billions; with the default 400 million the subset boot stopped inside it). |
 | `JOBS` | nproc | Parallel jobs (compile, census, probe, guest link). `JOBS=1` with `nice -n 19` is a light run. |
 | `BUILD_DIR` | build | Output root. |
 | `FORCE` | | Stages to rerun. |
