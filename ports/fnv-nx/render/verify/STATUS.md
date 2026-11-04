@@ -59,14 +59,16 @@ tests/v6n/run.sh
 | C60 shim | PASS in use (S6b GLSL compiled through it, 6/7 parity like V6n's executor) |
 | C63 tile family | structure consistent with the decomp (VS plain/TEXSCROLL/VC with TexScroll in c4; PS plain/ALPHAMAP/VC with tintcolor c0); pixel semantics provisional, need TILE1000-1002 |
 | C65 radix sort / SortKey | PASS (property test, 4000 random sets) |
-| C66 capture/replay | host: reproduced and PASS under mutation (5/5 corruptions flagged); guest half pending C62 |
+| C66 capture/replay | PASS: LP64 host capture and the ILP32 guest capture (Unicorn) both replay with 0 differing read-backs, and 5/5 corruption kinds are flagged on each |
 | C68 N1 camera | view/projection agree with the engine (0x00e6c780); **FAIL** -> defects `screen_space_halfpixel`, `camera_port_rounding` |
 | C69 N2 families | provisional semantics; not falsifiable without the SLS/SM3 shaders (parity harness ready, pass_space.tsv names the binaries per pass) |
 | C41, C42 (sRGB views; D3 no native D32) | consistent with Nine's tables (L8/A8L8 sRGB, L16/V8U8 none) and exercised by the conformance + fuzz sRGB restriction A2; D3 is a declared deviation, not falsified |
 | C70 ABI v3 read-back formats | PASS in use: `v6n_s6ngl` reads RGBA32F for float targets and Depth32F/Stencil8 for depth-stencil; 104/104 committed scenes and 380/400 fuzz cases match Nine (the rest classified, none a read-back error) |
 | C71 NxOp_Clear rectangles | PASS in use (V6n clears viewport ∩ scissor through it, as D3D9 Clear requires; trap `clear_ignores_scissor` matches); its sRGB rule differs from Nine -> defect `clear_srgb` |
 | C72 C pixel-shader harness | not used by V6n (V6n drives NxGpuApi through its own adapter); note: uv = x/W at integer centres puts point-sampled texel boundaries on pixel centres when the texture is W wide (same root as `screen_space_halfpixel`), so harness goldens are sensitive to sub-ulp filtering differences |
-| C61, C62 | pending: toolchain being built from source (render/native/env.sh) to run the ILP32 guest under Unicorn |
+| C61 | reproduced: toolchain built from source with render/native/env.sh, switch/build.sh links guest.nso, host.elf and exefs.nsp; not run on hardware (nor by V6n) |
+| C62 | reproduced: the ILP32 guest under Unicorn gives 17/17 scene images equal to the goldens (max diff 0) |
+| C68 guest half | `n1/build.sh` + `make n1emu`: 45 checks, 0 failed under Unicorn (the claim says 36; S6n's selftest has grown) |
 
 ## Defects filed (tests/v6n/DEFECTS.md)
 - `border_swizzle`: fixed by S6n, verified.

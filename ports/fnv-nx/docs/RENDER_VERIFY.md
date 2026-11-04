@@ -211,7 +211,7 @@ texkill, ps_3_0 vPos): **6 match pixel-exactly, 1 mismatch** = finding P1 (§7).
 | VS + PS + indexed draw (`vsscenes.py`, 2 scenes: affine + tint, perspective w + COLOR0/COLOR1 + two indexed draws under ZFUNC GREATER) | both match Nine on `v6n_gl` and on `v6n_s6ngl` (S6b VS GLSL through S6n's shim, layout 2 = S6b attribute locations, D3DCOLOR uploaded as RGBA bytes, NxOp_BindIdx/DrawIndexed; removing the colour swap is caught by both scenes); trap `vs_posfix_halfpixel` (S6b's posfix half-pixel shift on top of the +0.5 viewport) caught, 174 px |
 | C54 MAXMIPLEVEL / mip selection (`tests/v6n/claims/c54_*`) | 8/8 scenes match Nine on both targets |
 | C65 radix sort (`tests/v6n/claims/c65_sort.cpp`) | 4000 random packet sets identical to std::stable_sort, SortKey packing exact: PASS |
-| C66 capture/replay (`render/verify/capture/nxcap.py mutate`) | S6n's `replay_gl` reproduced (17 frames, 0 differ) and flags all 5 corruption kinds (vertex, UBO, state word, texel, recorded read-back) |
+| C66 capture/replay (`render/verify/capture/nxcap.py mutate`) | S6n's `replay_gl` reproduced (17 frames, 0 differ) and flags all 5 corruption kinds (vertex, UBO, state word, texel, recorded read-back) ; the same holds for the ILP32 guest's capture under Unicorn (C62 reproduced: 17/17 scenes equal to the goldens; `tests/v6n/run.sh` with GUEST=...) |
 | N1 camera vs the engine (decomp 0x00e6c780, 0x00e6cf40) | projection and view agree; **defects** `screen_space_halfpixel` (half-pixel and z/9999 missing) and `camera_port_rounding` (rounding vs truncation) |
 
 ### 4.1 Rasterization finding

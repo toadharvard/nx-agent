@@ -36,6 +36,12 @@ selfcheck() {
 		n=$(py "$V/capture/nxcap.py" mutate "$S6N_TESTS/cap/n0.nxcap" --replay "$S6N_TESTS/replay_gl" | grep -c "rc=1")
 		echo "$n/5 capture mutants flagged"; [ "$n" = 5 ] || bad=1
 	else echo "skipped: make -C tests/s6n capture OUT=<dir>, then S6N_TESTS=<dir>"; fi
+	echo "== C62 / C66 guest half: the ILP32 guest under Unicorn (GUEST=<switch/build.sh out>/guest/guest.nso)"
+	if [ -n "${S6N_TESTS:-}" ] && [ -n "${GUEST:-}" ] && [ -f "$GUEST" ]; then
+		make -s -C "$ROOT/tests/s6n" emu GUEST="$GUEST" OUT="$S6N_TESTS" 2>&1 | grep -E "golden comparison|replay:" || bad=1
+		n=$(py "$V/capture/nxcap.py" mutate "$S6N_TESTS/emu/fnvnx/n0/out/n0.nxcap" --replay "$S6N_TESTS/replay_gl" | grep -c "rc=1")
+		echo "$n/5 guest-capture mutants flagged"; [ "$n" = 5 ] || bad=1
+	else echo "skipped: source <(render/native/env.sh --print); render/native/switch/build.sh <dir>; GUEST=<dir>/guest/guest.nso"; fi
 	for m in d24_bias_scale x8_dst_alpha; do
 		py "$V/claims.py" --mutant $m > /dev/null && { echo "claim check missed mutant $m"; bad=1; }
 	done
