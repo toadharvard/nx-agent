@@ -192,9 +192,13 @@ def x86_args(sig, ptys, rt):
     elif sig.cc == 'fastcall':
         if sig.member:
             raise Skip('fastcall member')
-        if hidden:
-            stk('sret', 4)          # oracle: the hidden pointer is the first stack word, not ecx
         regs = ['ecx', 'edx']
+        if hidden and not rt.lay.pod:
+            # MSVC 2008 cl /O2 (S1b a9fbc1b; V1 tests/v1/test_fastcall_nonpod.py): a non-POD's hidden pointer is ecx
+            # and the arguments move one place
+            out.append(('sret', regs.pop(0), 4))
+        elif hidden:
+            stk('sret', 4)          # oracle: a POD's hidden pointer is the first stack word, not ecx
         for lab, t in vals:
             if regs and t.kind in ('int', 'bool', 'ptr') and t.size <= 4:
                 out.append((lab, regs.pop(0), t.size))

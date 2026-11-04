@@ -7,7 +7,7 @@ x86 model (MSVC 2008 oracle). No decomp content: all names are made up.
 
 Fix 1 (__fastcall hidden result = first stack word): fastcall aggregates of 4/8/12/16/24 bytes, HFAs, {float},
 {double}, a 64-bit first parameter, three register-class parameters, both directions, and the non-POD 8-byte result
-(MSVC: hidden buffer; that one is the older BUG-A and expected to fail).
+(MSVC: hidden buffer in ecx, the arguments one place on; S1b a9fbc1b).
 Fix 2 (float vs double result): through conventions with argument moves, aggregate parameters (abi2 path), NaN /
 infinity / denormal edge values, and long double (binary128 under GCC: must not be 'same' with float or double).
 ecx-not-passed moves: the stack arguments the reference does pass still reach the definition.
@@ -47,7 +47,13 @@ CASES = [
     ('F1-12-def-explicit', 'pass', '?n@@YIPAUP12@@HHPAU1@HH@Z', '?n@@YI?AUP12@@HHHH@Z'),
     ('F1-24-both-fastcall', 'pass', '?o@@YI?AUP24@@HH@Z', '?o@@YIXHHPAUP24@@@Z'),
     ('F1-8-member-vs-regs', 'inconsistent', '?l@T@@QAE?AUP8@@H@Z', '?l@@YI?AUP8@@PAUT@@HH@Z'),
-    ('F1-8-nonpod-hidden', 'known', '?k@@YIXHHPAUC8@@@Z', '?k@@YI?AUC8@@HH@Z'),
+    # MSVC 2008 puts a non-POD's fastcall result buffer in ecx and moves the arguments (S1b a9fbc1b, J-0119; V1
+    # tests/v1/test_fastcall_nonpod.py). `void k2(C8 *, int, int)` passes the buffer where `C8 k2(int, int)` reads it.
+    # `void k(int, int, C8 *)` hands its first int to the buffer pointer, as x86 would (sret-explicit routes it and the
+    # run passes); open for S2c: sret-explicit takes a non-pointer parameter as the buffer (the mirror of
+    # result-buffer-not-written)
+    ('F1-8-nonpod-hidden', 'pass', '?k@@YIXHHPAUC8@@@Z', '?k@@YI?AUC8@@HH@Z'),
+    ('F1-8-nonpod-ecx', 'pass', '?k2@@YIXPAUC8@@HH@Z', '?k2@@YI?AUC8@@HH@Z'),
     ('F2-member-fastcall', 'pass', '?n2@T@@QAENXZ', '?n2@@YIMPAUT@@@Z'),
     ('F2-moves-and-width', 'pass', '?o2@T@@QAENH@Z', '?o2@@YIMPAUT@@HH@Z'),
     ('F2-narrow-from-double', 'pass', '?o3@T@@QAEMH@Z', '?o3@@YINPAUT@@HH@Z'),
