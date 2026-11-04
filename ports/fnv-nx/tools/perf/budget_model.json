@@ -648,10 +648,11 @@
    "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
    "gain_main_minsn": [
     1.4,
-    4.05
+    3.64
    ],
    "owner": "S15/S5",
-   "needs_hardware": true
+   "needs_hardware": true,
+   "gain_note": "the mt_cull lever moves 70-90 % of the cull: lo 0.7 x 2.00, hi 0.9 x 4.04 M, the cull item (3.54-11.36) plus S15-simd's override correction (lo (49-306) x 6,000, hi (67-433) x 20,000); was 0.7 x 2 .. 0.9 x 4.5"
   },
   "scene-graph update": {
    "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",

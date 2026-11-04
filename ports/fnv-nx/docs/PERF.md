@@ -768,7 +768,7 @@ override:
 | sphere/plane classification 0x004b6100 (per active plane of the cull) | `sphere_plane_004b6100.c` | 38 -> 19 behind the plane, 21 in front or straddling (V1 PL1) | 16/16 -> 16/16 | (with the next row) |
 | culling worker 0x00a694e0 (+ bound getter 0x0043d450, 0x004b6100, 0x004b6160, 0x004b6190 inlined) | `cull_worker_00a694e0.c`: two `ld4` give the six planes as lanes, behind/front masks by lane | per object with 4-6 active planes 224-330 -> 49-67 (static paths; harness: early exit only, 12 -> 10) | 8/8 -> 8/8 | 6.563 -> 9.927 (row re-measured) -> 6.368 |
 | NiAVObject::UpdateWorldLoc 0x00a68bf0 (+ NiTransform compose 0x0062c250 and its four helpers inlined) | `update_world_loc_00a68bf0.c` | copy paths 13 -> 14; compose 23 + an unresolved operator* (> 100) -> 47 | 11/16 -> 12/16 | 6.368 -> 6.088 |
-| Havok GSK (same four) | `fnvnx_sse_fast.h`: `_mm_rsqrt_ss` on lane 0 only (15 -> 10), `_mm_add_ss` as fadd s + ins (3 -> 2; lanes 1-3 now a's bits as on x86, sse2neon added 0.0), `_mm_set_ss` / `_mm_load_ss` as `fmov s` / `ldr s` (2 -> 1) | 571 -> 539 | same | 6.088 -> 6.044 |
+| Havok GSK (same four) | `fnvnx_sse_fast.h`: `_mm_rsqrt_ss` on lane 0 only (15 -> 10; the same bits except the NaN of a negative input, which can be -qNaN as on x86 where sse2neon gives +qNaN, V1 SS2), `_mm_add_ss` as fadd s + ins (3 -> 2; lanes 1-3 now a's bits as on x86, sse2neon added 0.0), `_mm_set_ss` / `_mm_load_ss` as `fmov s` / `ldr s` (2 -> 1) | 571 -> 539 | same | 6.088 -> 6.044 |
 | BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | 15/15, 8/8 | 6.044 -> 5.913 (model row re-measured 82 -> 54, no code) |
 
 Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no
@@ -1028,4 +1028,6 @@ measured per-call cost wins. The item is now the rest of the cull (1.7-2.7 M [E]
 number of objects tested per frame stays the open estimate; frameprof on a real frame settles it.
 Worst frame, placed, mid, at 1.02 GHz (--render report.json, --perf perf1 004d29413190): 34.9 ms before; 41.3 ms
 with the cull reconciled and no override counted; 34.3 ms with the overrides (-7.0 ms, most of it the culling
-worker).
+worker). Corrections move with the item they correct (`follows`): a lever that moves 70-90 % of the cull to cores
+1-2 moves the same share of the override's saving, and so does an A57 price. With that, plan45b is 22.4 ms without
+the overrides and 20.6 ms with them. A first version left the corrections on main and gave 16.0 ms, which was wrong.
