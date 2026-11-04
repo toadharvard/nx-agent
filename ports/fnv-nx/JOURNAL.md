@@ -1013,3 +1013,23 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   classes are dropped by rule (evidence: this entry). Assigned to S1.
 * **metrics** - s1b_sites=90 xinc1_pairs=68 xinc1_msvc_identical=62 ftol1_sites=17 ret1_sites=11 units_renames=119
   fall1_real_sites=861
+
+### J-0052 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0048,J-0051
+
+* **did** - Boot-frontier rules: DUPINT1 (duplicate prototypes of one address differing only in integer parameter
+  types, 38 files / 49), NEW4 (`<new>` where placement new is used, 32), ALLOC1 (untagged file-scope replacements of
+  the global operator new/delete dropped, 66 / 100 - orchestrator sampled them: the decomp's inline reconstructions of
+  the game allocator, e.g. `operator new[] -> ((MemoryManager*)&DAT_011f6238)->Allocate(n)`; S2c binds GCC's global
+  new/delete to the game's 0x00401000/0x00401030/0x00aa1460 instead), DECL1 `using ::name` for namespace copies of CRT
+  prototypes bound to the CRT address, DECL2 window types and callback typedefs, LINK1 function-pointer variables,
+  RCAST1 / CTOR1 widened, NEW2 `__forceinline`, UNIT1 EnumChildWindows callback. D15 implemented: CS28 removed,
+  CSX1 drops the 130 Xbox 360 critical-section size/offset asserts that fail with the 24-byte PC CRITICAL_SECTION
+  (RecursiveLock, BSThread, IO_Thread, AbstractHeap, NiCriticalSection and 4 embedding classes; all 8 affected units
+  compile). FALL1 judges the last top-level statement (1,171 traps). `tests/s1/test_rules.py` (21 cases incl. the
+  `extern "C"` regression). S11 classes updated (CSX1, DUPINT1, NEW4 neutral; ALLOC1 platform; CS28 removed).
+* **found** - WinMain's units blk_00ae0000 / blk_00c20000 / blk_004a0000 and nicontrollermanager now compile; memory
+  manager units still fail (blk_00aa0000_od_ob1_variant 2 errors, middlehighprocess 5). S2b's 75 check-differs slots
+  are ~12 missing derived overrides + ~60 destructor slots: a (class, method, address) table with S2b, not a text rule.
+* **metrics** - census_units=2978 census_clean=2759 census_errors=1635
+* **next** - memory manager units, SPEC1 placement, `template<>` for members of class template specializations,
+  actormover; S11 MSVC gate on CSX1/DUPINT1/NEW4 units; S2c full recompile with today's rules.
