@@ -236,7 +236,8 @@ static void s_clear(V6nTarget* t, uint32_t flags, uint32_t color, float z, uint3
     if (x2 > t->w) x2 = t->w; if (y2 > t->h) y2 = t->h;
     if (x2 <= x1 || y2 <= y1) return;
     uint32_t rgba = ((color >> 16) & 0xFF) | (color & 0xFF00) | (color & 0xFF) << 16 | (color & 0xFF000000u);
-    uint32_t a[8] = {flags & 7, rgba, fb(z), s & 0xFF, (uint32_t)x1, (uint32_t)y1, (uint32_t)(x2 - x1), (uint32_t)(y2 - y1)};
+    /* ABI v3 NxClear_Srgb: D3D9 / Nine clear through the sRGB view while SRGBWRITEENABLE (194) is set */
+    uint32_t a[8] = {(flags & 7) | (t->rs[194] ? (uint32_t)NxClear_Srgb : 0u), rgba, fb(z), s & 0xFF, (uint32_t)x1, (uint32_t)y1, (uint32_t)(x2 - x1), (uint32_t)(y2 - y1)};
     emit(t, NxOp_Clear, a, 8);
 }
 static void s_rs(V6nTarget* t, uint32_t st, uint32_t v) { if (st < NXD3D_RS_COUNT) t->rs[st] = v; }

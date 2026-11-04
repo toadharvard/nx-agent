@@ -587,7 +587,8 @@ static void begin_pass(const uint32_t* a) {
 static void clear_rect(const uint32_t* a) {
     p_glEnable(GL_SCISSOR_TEST);
     p_glScissor((GLint)a[4], (GLint)a[5], (GLsizei)a[6], (GLsizei)a[7]);
-    p_glDisable(GL_FRAMEBUFFER_SRGB);
+    /* targets are attached through their sRGB view when they have one: GL_FRAMEBUFFER_SRGB encodes the clear */
+    if (a[0] & NxClear_Srgb) p_glEnable(GL_FRAMEBUFFER_SRGB); else p_glDisable(GL_FRAMEBUFFER_SRGB);
     if (a[0] & 1) {
         p_glColorMaski(0, 1, 1, 1, 1);
         float c[4] = {(a[1] & 255) / 255.0f, (a[1] >> 8 & 255) / 255.0f, (a[1] >> 16 & 255) / 255.0f, (a[1] >> 24) / 255.0f};

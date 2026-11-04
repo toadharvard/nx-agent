@@ -60,9 +60,10 @@ void test_math(T& t) {
     t.Check(fabsf(o[0] - 1) < 1e-5f && fabsf(o[1] - 1) < 1e-5f && fabsf(o[2] - 48.0f / 98.0f) < 1e-5f && o[3] == 1,
             "camera: ortho");
     float s[16], e[4] = {0.25f, 0.75f, 0.5f, 1};
-    ScreenSpaceProjection(s);
-    xform(s, e, o);
-    t.Check(o[0] == -0.5f && o[1] == -0.5f && o[2] == 0.5f, "screen space: (0.25, 0.75) -> (-0.5, -0.5)");
+    ScreenSpaceProjection(s, 128, 96);
+    xform(s, e, o);   // the engine's half-pixel correction: window (x*W - 0.5, y*H - 0.5); z/9999
+    t.Check(fabsf(o[0] - (-0.5f - 1.0f / 128)) < 1e-6f && fabsf(o[1] - (-0.5f + 1.0f / 96)) < 1e-6f &&
+            fabsf(o[2] - 0.5f / 9999.0f) < 1e-9f, "screen space: (0.25, 0.75) -> (-0.5 - 1/W, -0.5 + 1/H, z/9999)");
 }
 
 void test_tracker(T& t, StateTracker& st) {

@@ -143,7 +143,9 @@ private:
 // D3D9 matrices (column-major for GLSL) as NiDX9Renderer builds them; exposed for tests.
 void CameraView(const NiPoint3f& loc, const NiPoint3f& dir, const NiPoint3f& up, const NiPoint3f& right, float out[16]);
 void CameraProjection(const NiFrustumF& f, float out[16]);
-void ScreenSpaceProjection(float out[16]);   // x, y in [0,1] (y down), z -> z: Gamebryo screen space
+// Gamebryo screen space (x, y in [0,1], y down) of a w x h target, with the engine's D3D9 half-pixel correction and
+// z/9999 (0x00e6cf40). The defaults are the game's 1280x720 back buffer; nx::Renderer always passes its target size.
+void ScreenSpaceProjection(float out[16], uint32_t w = 1280, uint32_t h = 720);
 
 } // namespace nx
 #endif

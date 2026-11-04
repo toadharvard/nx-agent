@@ -97,10 +97,23 @@ void CameraProjection(const NiFrustumF& f, float m[16]) {
     }
 }
 
-void ScreenSpaceProjection(float m[16]) {
+void ScreenSpaceProjection(float m[16], uint32_t w, uint32_t h) {
+    // The engine's screen-space camera (0x00e6cf40): view (x - 0.5, 0.5 - y, z + 1) times proj (2x - 1/W, 2y + 1/H,
+    // (z - 1)/9999), i.e. clip = (2x - 1 - 1/W, 1 - 2y + 1/H, z/9999): Gamebryo's D3D9 half-pixel correction.
+    // N1 keeps view = identity in screen space and folds both into this matrix.
     ident(m);
-    m[0] = 2; m[12] = -1;     // x [0,1] -> [-1,1]
-    m[5] = -2; m[13] = 1;     // y [0,1] (down) -> [1,-1]
+    m[0] = 2; m[12] = -1.0f - 1.0f / (float)w;     // x [0,1] -> [-1,1], half a pixel left
+    m[5] = -2; m[13] = 1.0f + 1.0f / (float)h;     // y [0,1] (down) -> [1,-1], half a pixel up
+    m[10] = 1.0f / 9999.0f; m[14] = 0;            // screen z in the 1..9999 camera range
+}
+
+// The engine's viewport from a port rectangle (0x00e6c780, 0x00e6cf40): truncation, not rounding.
+static NxD3D9Viewport PortViewport(const NiRectF& p, uint32_t w, uint32_t h) {
+    NxD3D9Viewport v;
+    v.X = (uint32_t)(p.left * (float)w); v.Y = (uint32_t)((1.0f - p.top) * (float)h);
+    v.Width = (uint32_t)((p.right - p.left) * (float)w); v.Height = (uint32_t)((p.top - p.bottom) * (float)h);
+    v.MinZ = 0.0f; v.MaxZ = 1.0f;
+    return v;
 }
 
 // ---- Renderer --------------------------------------------------------------------------------------------------
@@ -115,7 +128,7 @@ bool Renderer::Init(Backend* be, uint32_t w, uint32_t h, uint32_t backbuffer, ui
     state_.Reset();
     nGroups_ = 0;
     groups_[nGroups_++] = {nullptr, backbuffer, depth, w, h};
-    ident(view_); ScreenSpaceProjection(proj_);
+    ident(view_); ScreenSpaceProjection(proj_, w, h);
     vp_ = {0, 0, w, h, 0.0f, 1.0f};
     return true;
 }
@@ -186,12 +199,14 @@ void Renderer::Do_ClearBuffer(const NiRectF* rect, uint32_t mode) {
         if (x1 > (int32_t)g->w) x1 = (int32_t)g->w;
         if (y1 > (int32_t)g->h) y1 = (int32_t)g->h;
     }
-    if (x0 == 0 && y0 == 0 && x1 == (int32_t)g->w && y1 == (int32_t)g->h) { OpenPass(mode); return; }   // a pass load
+    // D3D9 / Nine clear the colour through the sRGB view while SRGBWRITEENABLE (194) is set: always an NxOp_Clear then
+    const bool srgb = (mode & CLEAR_BACKBUFFER) && state_.GetRenderState(194) != 0;
+    if (!srgb && x0 == 0 && y0 == 0 && x1 == (int32_t)g->w && y1 == (int32_t)g->h) { OpenPass(mode); return; }   // a pass load
     if (x1 <= x0 || y1 <= y0) return;
     OpenPass(0);   // a new pass keeps the order against earlier draws; the clear sorts first in it (layer 0, key 0)
     if (!passOpen_) return;
     uint32_t flags = (mode & CLEAR_BACKBUFFER ? 1u : 0u) | (mode & CLEAR_ZBUFFER && g->depth ? 2u : 0u) |
-                     (mode & CLEAR_STENCIL && g->depth ? 4u : 0u);
+                     (mode & CLEAR_STENCIL && g->depth ? 4u : 0u) | (srgb ? (uint32_t)NxClear_Srgb : 0u);
     uint32_t rgba = (uint32_t)u8_(bg_[0]) | (uint32_t)u8_(bg_[1]) << 8 | (uint32_t)u8_(bg_[2]) << 16 | (uint32_t)u8_(bg_[3]) << 24;
     frame_.Clear((uint8_t)pass_, 0, 0, flags, rgba, clearDepth_, clearStencil_, (uint32_t)x0, (uint32_t)y0,
                  (uint32_t)(x1 - x0), (uint32_t)(y1 - y0));
@@ -202,20 +217,15 @@ void Renderer::Do_SetCameraData(const NiPoint3f& loc, const NiPoint3f& dir, cons
     CameraView(loc, dir, up, right, view_);
     CameraProjection(f, proj_);
     const Group* g = cur_ ? cur_ : &groups_[0];
-    vp_.X = (uint32_t)(port.left * g->w + 0.5f); vp_.Y = (uint32_t)((1.0f - port.top) * g->h + 0.5f);
-    vp_.Width = (uint32_t)((port.right - port.left) * g->w + 0.5f); vp_.Height = (uint32_t)((port.top - port.bottom) * g->h + 0.5f);
-    vp_.MinZ = 0.0f; vp_.MaxZ = 1.0f;
+    vp_ = PortViewport(port, g->w, g->h);
 }
 
 void Renderer::Do_SetScreenSpaceCameraData(const NiRectF* port) {
-    ident(view_);
-    ScreenSpaceProjection(proj_);
     const Group* g = cur_ ? cur_ : &groups_[0];
-    NiRectF full = {0, 1, 1, 0};
-    const NiRectF& p = port ? *port : full;
-    vp_.X = (uint32_t)(p.left * g->w + 0.5f); vp_.Y = (uint32_t)((1.0f - p.top) * g->h + 0.5f);
-    vp_.Width = (uint32_t)((p.right - p.left) * g->w + 0.5f); vp_.Height = (uint32_t)((p.top - p.bottom) * g->h + 0.5f);
-    vp_.MinZ = 0.0f; vp_.MaxZ = 1.0f;
+    ident(view_);
+    ScreenSpaceProjection(proj_, g->w, g->h);
+    if (port) vp_ = PortViewport(*port, g->w, g->h);
+    else vp_ = {0, 0, g->w, g->h, 0.0f, 1.0f};
 }
 
 bool Renderer::Do_BeginUsingRenderTargetGroup(const void* group, uint32_t clearMode) {

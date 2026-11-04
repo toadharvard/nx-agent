@@ -103,11 +103,14 @@ enum NxOp {
     NxOp_StencilRef,    /* ref (both faces; until the next BindState) */
     NxOp_BlendConst,    /* r, g, b, a (float bits) */
     NxOp_DepthBias,     /* units, slope, clamp (float bits; units as NxDynamicState.depthBiasUnits) */
-    NxOp_Clear,         /* flags (1 colour, 2 depth, 4 stencil), RGBA8 (R low), depth f32, stencil, x, y, w, h (pixels,
-                           top-left origin): clears that rectangle of the pass's targets; ignores the bound state's
-                           masks, scissor and sRGB bit (v3) */
+    NxOp_Clear,         /* flags (NxClear_*: 1 colour, 2 depth, 4 stencil, 8 sRGB), RGBA8 (R low), depth f32, stencil,
+                           x, y, w, h (pixels, top-left origin): clears that rectangle of the pass's targets; ignores
+                           the bound state's masks and scissor (v3). With NxClear_Srgb the colour goes through the
+                           target's sRGB view when it has one (D3D9 Clear under SRGBWRITEENABLE, Nine
+                           nine_context_clear_fb): 0x80 is stored as 188 */
     NxOp_Count
 };
+enum NxClearFlags { NxClear_Color = 1, NxClear_Depth = 2, NxClear_Stencil = 4, NxClear_Srgb = 8 };
 enum NxPrim { NxPrim_Triangles = 0, NxPrim_TriStrip = 1, NxPrim_Lines = 2, NxPrim_LineStrip = 3, NxPrim_Points = 4,
               NxPrim_TriFan = 5 };
 

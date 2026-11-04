@@ -62,6 +62,15 @@ int main(void) {
     CHECK(nxh_readback(&h, NxRb_RGBA32F, 0, 0, 32, 16, f, sizeof f) == 0);
     p = f + (5 * 32 + 7) * 4;
     CHECK(fabsf(p[2] - 0.125f) < 2e-3f && fabsf(p[0] - 0.5f * 7.0f / 32) < 2e-3f && fabsf(p[3] - (0.25f + 0.5f)) < 2e-3f);
+    /* NxClear_Srgb (D3D9 Clear under SRGBWRITEENABLE): an RGBA8 target is cleared through its sRGB view */
+    static NxHarness h8;
+    CHECK(nxh_init(&h8, api, 8, 8, NxFmt_RGBA8, 0) == 0);
+    CHECK(nxh_clear(&h8, NxClear_Color, 0xFF808080u, 0, 0, 0, 0, 8, 8) == 0);
+    CHECK(nxh_clear(&h8, NxClear_Color | NxClear_Srgb, 0xFF808080u, 0, 0, 0, 0, 4, 8) == 0);
+    static uint8_t c8[8 * 8 * 4];
+    CHECK(nxh_readback(&h8, NxRb_RGBA8, 0, 0, 8, 8, c8, sizeof c8) == 0);
+    CHECK(c8[(2 * 8 + 1) * 4] == 188 && c8[(2 * 8 + 1) * 4 + 3] == 255);   /* sRGB: 128 -> 188, alpha linear */
+    CHECK(c8[(2 * 8 + 6) * 4] == 128);                                      /* plain clear */
     printf("harness: %d checks, %d failed\n", g_checks, g_fail);
     nxgl_destroy();
     return g_fail != 0;

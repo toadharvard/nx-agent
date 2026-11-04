@@ -597,7 +597,11 @@ static void record(DkCmdBuf cb, const NxSubmit* s, NxFrameStats* st) {
                 dkCmdBufSetScissors(cb, 0, &r, 1);
                 if ((a[0] & 1) && ps.haveColor) {
                     float c[4] = {(a[1] & 255) / 255.0f, (a[1] >> 8 & 255) / 255.0f, (a[1] >> 16 & 255) / 255.0f, (a[1] >> 24) / 255.0f};
+                    int srgb = (a[0] & NxClear_Srgb) && ps.colorId && g.img[ps.colorId].srgbView;
+                    int was = ps.srgbBound;
+                    if (srgb != was) bind_targets(cb, &ps, srgb);   /* clear through the sRGB view, as Nine does */
                     dkCmdBufClearColor(cb, 0, DkColorMask_RGBA, c);
+                    if (srgb != was) bind_targets(cb, &ps, was);
                 }
                 if ((a[0] & 6) && ps.haveDepth) {
                     float z; memcpy(&z, &a[2], 4);
