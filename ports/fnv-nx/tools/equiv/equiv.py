@@ -107,20 +107,21 @@ CLASSES = {
     'RREF2': 'neutral',         # fnvnx_lvalue around T(args) passed to a member operator taking a non-const T&
     'ADDR1': 'neutral',         # &_mm_f(args) -> &fnvnx_lvalue(_mm_f(args)): the temporary MSVC took the address of
     'LANE1': 'platform',        # &((T*)&(v)) (SSE1 lane array, address taken) -> ((T(*)[n])&(v))
+    'STD2': 'neutral',          # file-scope `R std::f(..)` definition -> fnvnx_std_f (+ its recipe symbol, POST hook)
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
 # POST hooks (prepare.STREAM_POST, by function name) -> the rule (or 's1b': S1b's units.json renames, which belong to
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
-POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b'}
+POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
 # Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
 # group; a group that explains a difference is split into its rules. KEEP1 is inert under MSVC (FNVNX_KEEP is empty)
 # and is not tried. A rule of the gated set in no group is tried as a group of its own.
 DEFAULT_GROUPS = {
-    'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1',
+    'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1 STD2',
     'newdel': 'NEW1 NEW2 NEW3 NEW4 CTOR1',
     'EXC1': 'EXC1',
     'link': 'LINK1 STATIC1 BIND1',

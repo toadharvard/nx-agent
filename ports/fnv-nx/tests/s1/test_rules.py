@@ -941,6 +941,33 @@ check('LANE1 address of the lane array',
 check('LANE1 a lane\'s address stays',
       run(s1.r_lane_array_address, 'void f(S s) { g(&((float*)&(s.v))[1]); }\n'), ['&((float*)&(s.v))[1]'], ['(*)['])
 
+# ---- S1-refs: STD2 (a unit's own `std::` definition renamed, with its recipe symbol)
+import json as _json
+_s2 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s2, 'build')); os.makedirs(os.path.join(_s2, 'src'))
+_json.dump({'units': [{'source': 'src/g.cpp', 'functions': [
+    {'address': '0x00401000', 'symbol': '?abs@std@@YANM@Z', 'size': 20},
+    {'address': '0x00401020', 'symbol': '?f@@YAHH@Z', 'size': 8}], 'symbols': {}},
+    {'source': 'src/h.cpp', 'functions': [{'address': '0x00401040', 'symbol': '?g@@YAHH@Z', 'size': 8}],
+     'symbols': {'?abs@std@@YANM@Z': '0x00401000'}}]}, open(os.path.join(_s2, 'build', 'units.json'), 'w'))
+s1._STD2_FNS = None; s1.STD2_RENAMES.clear()
+_g = ('// @fnv 0x00401000\nFNVNX_KEEP double std::abs(float value)\n{\n    return value < 0 ? -value : value;\n}\n'
+      '// @fnv 0x00401020\nint f(int x) { return (int)std::abs((float)x); }\n')
+_o = run(s1.r_std_definitions, _g, os.path.join(_s2, 'src', 'g.cpp'))
+check('STD2 file-scope std:: definition the recipe decorates in std -> fnvnx_std_',
+      _o, ['FNVNX_KEEP double fnvnx_std_abs(float value)', 'return (int)std::abs((float)x);'], ['double std::abs'])
+check('STD2 a unit whose recipe has no std:: definition is untouched',
+      run(s1.r_std_definitions, _g.replace('0x00401000', '0x00401060'), os.path.join(_s2, 'src', 'h.cpp')),
+      ['double std::abs(float value)'], ['fnvnx_std_'])
+check('STD2 a member definition in a class scope is not at file scope',
+      run(s1.r_std_definitions, 'struct S {\n// @fnv 0x00401000\ndouble std::abs(float v) { return v; }\n};\n',
+          os.path.join(_s2, 'src', 'g.cpp')), [], ['fnvnx_std_'])
+s1.rename_std_definitions(_s2, Counter())
+_u = _json.load(open(os.path.join(_s2, 'build', 'units.json')))['units']
+check('STD2 POST hook renames the definition\'s recipe symbol only', _json.dumps(_u),
+      ['"?fnvnx_std_abs@@YANM@Z"', '"?f@@YAHH@Z"', '"?abs@std@@YANM@Z": "0x00401000"'])
+_shutil.rmtree(_s2, ignore_errors=True)
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''
