@@ -709,6 +709,14 @@ model's cycles per call (`per_call_cycles`, P0-perfmodel) once one exists. The c
 profiles frames, so the metric moves with the per-call cost, which is what this stream changes. Every commit states
 `metric: <before> -> <after>`.
 
+**Shim changes** (sse2neon replacements in `shim/include/fnvnx_sse_fast.h`) are measured with
+`tools/perf/unit_ab.sh`: the unit compiled by the checkout, relinked alone by S2's resolve + apply
+(`a64prep.py link`), on the harness. The one-unit relink reproduces the farm link's counts and agreement for the
+unit's own functions. `_mm_shuffle_ps`: GCC 13 emits one permute or tbl with a literal mask. The literal is often
+shared and the register copy is not always needed, so a tbl costs about 2.3 instructions in hkpgsk. Replacing
+the single-source 0xc9 / 0xd2 by asm made GSK worse (585 / 591), because the asm blocks GCC's merging of
+neighbouring permutes. Only the two-source forms pay.
+
 **Method.** A hot function is replaced at its address by a native override (`tools/link/overrides/`, a row of
 `overrides.tsv`, bound by `fnvlink.py resolve --override` like the spin lock's). The override does the decomp's
 arithmetic operation by operation, in the same order and precision (float stays float, double stays double, sums in
@@ -730,6 +738,7 @@ override:
 | NiBound::Update 0x00a7fdd0 | `nibound_update_00a7fdd0.c` (one `ld3` gives the rotation's columns) | 46 -> 19 | 15/16 -> 15/16 | 7.430 -> 6.660 (both rows) |
 | NiMatrix3 transpose product 0x00a588a0 (in UpdateWorldData's row) | `mat3_tmul_00a588a0.c` | 64 -> 39 | 13/16 -> 13/16 | |
 | NiQuaternion::FromRotationMatrix 0x00a6df40 | `quat_from_matrix_00a6df40.c` (no frame, volatile reload or pointer array; errno of a negative root set after the stores) | 89 -> 77 (model: 103, older link) | 13/13 -> 13/13 | 6.660 -> 6.603 |
+| Havok GSK 0x00da8fb0, 0x00da8390, 0x00da8500, 0x00da8820 | `shim/include/fnvnx_sse_fast.h`: two-source `_mm_shuffle_ps` 0x00/0x55/0xaa/0xff/0xc4/0xd4 as 2-instruction asm sequences instead of tbl + literal | 579 -> 571 (model: 600, older link) | 16+11+9+0 -> same | 6.603 -> 6.563 |
 | BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | | - |
 
 Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no

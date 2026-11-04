@@ -531,8 +531,8 @@
    "subsystem": "havok",
    "role": "main",
    "per_call_insn": [
-    600,
-    600
+    571,
+    571
    ],
    "per_call_basis": "M",
    "calls": [
@@ -540,7 +540,7 @@
     2000
    ],
    "calls_note": "convex pair queries per step: character controller casts, contact points [E]",
-   "per_call_note": "303 + 119 + 72 + 109 A64 instructions exclusive [M]"
+   "per_call_note": "292 + 119 + 73 + 95 = 579 A64 instructions exclusive on link 0bd144db1464 [M] (600 on an older link); 571 with fnvnx_sse_fast.h's two-source _mm_shuffle_ps sequences (S15-simd, unit_ab.sh: 290 + 119 + 70 + 92, oracle agreement unchanged)"
   },
   {
    "id": "fn_interlocked",

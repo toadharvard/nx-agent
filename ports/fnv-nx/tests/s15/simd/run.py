@@ -60,7 +60,8 @@ def main():
         return 0
     flags = build_flags()
     fail = []
-    sel = sys.argv[1:] or sorted(KERNELS)
+    sel_given = sys.argv[1:]
+    sel = [k for k in sel_given if k in KERNELS] if sel_given else sorted(KERNELS)
     with tempfile.TemporaryDirectory() as tmp:
         for k in sel:
             src, sym = KERNELS[k]
@@ -84,6 +85,22 @@ def main():
                                                                          static_count(o32, sym)))
             if r.returncode:
                 fail.append(k)
+        if not sel_given or 'shuffle' in sel_given:
+            exe = os.path.join(tmp, 'shuffle')
+            cxx = CC.replace('gcc', 'g++')
+            r = subprocess.run([cxx, '-static', '-O2', '-std=gnu++17', '-ffp-contract=off',
+                                '-I' + os.path.join(PORT, 'shim', 'include'),
+                                '-I' + os.environ.get('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon')),
+                                os.path.join(HERE, 'shuffle_test.cpp'), '-o', exe], capture_output=True, text=True)
+            if r.returncode:
+                print('FAIL shuffle: test build\n%s' % r.stderr[-3000:])
+                fail.append('shuffle')
+            else:
+                r = subprocess.run([QEMU, exe], capture_output=True, text=True, timeout=600)
+                print(r.stdout.rstrip())
+                print('%s shuffle (shim/include/fnvnx_sse_fast.h)' % ('ok  ' if r.returncode == 0 else 'FAIL'))
+                if r.returncode:
+                    fail.append('shuffle')
     print('%d failed' % len(fail))
     return 1 if fail else 0
 
