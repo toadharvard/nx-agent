@@ -184,6 +184,7 @@ public:
     Ring& ubo() { return ubo_; }
     uint32_t encodedWords() const { return enc_.size(); }
     uint32_t stateBindsEncoded() const { return stateBinds_; }
+    uint32_t textureWords() const { return nTex_; }   // texture handles stored this frame
     uint32_t packets() const { return nPackets_; }
     const uint32_t* encodedData() const { return enc_.data(); }
 private:
