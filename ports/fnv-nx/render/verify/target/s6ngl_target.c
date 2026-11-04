@@ -41,6 +41,28 @@ static const char* VS =
     "  }\n"
     "  vDiff = d; vDiffF = d; vSpec = s; vSpecF = s; vUV = aUV;\n"
     "}\n";
+/* VS for programmable PS (S6b's layout contract: COLOR0/1 at 0/1, TEXCOORD0 at 2 as (u, v, 0, 1), fog at 18) */
+static const char* VS_PS =
+    "#version 460\n"
+    "layout(location=0) in vec4 aPos; layout(location=1) in vec4 aDiff; layout(location=2) in vec4 aSpec;\n"
+    "layout(location=3) in vec2 aUV;\n"
+    "layout(std140, binding=0) uniform V { vec4 vp; mat4 proj; ivec4 mode; vec4 fogp; };\n"
+    "layout(location=0) out vec4 oD0; layout(location=1) out vec4 oD1; layout(location=2) out vec4 oT0;\n"
+    "layout(location=18) out vec4 oFog;\n"
+    "void main() {\n"
+    "  vec4 d = aDiff.bgra, s = aSpec.bgra; float f;\n"
+    "  if (mode.x != 0) {\n"
+    "    float w = 1.0 / aPos.w;\n"
+    "    vec2 ndc = vec2((aPos.x - vp.x) * 2.0 / vp.z - 1.0, 1.0 - (aPos.y - vp.y) * 2.0 / vp.w);\n"
+    "    gl_Position = vec4(ndc * w, aPos.z * w, w); f = s.a;\n"
+    "  } else {\n"
+    "    gl_Position = proj * vec4(aPos.xyz, 1.0); float z = abs(aPos.z);\n"
+    "    if (mode.y == 1) f = exp2(-(z * fogp.z) * 1.442695);\n"
+    "    else if (mode.y == 2) { float t = z * fogp.z; f = exp2(-(t * t) * 1.442695); }\n"
+    "    else if (mode.y == 3) f = clamp((fogp.x - z) * fogp.y, 0.0, 1.0); else f = s.a;\n"
+    "  }\n"
+    "  oD0 = d; oD1 = s; oT0 = vec4(aUV, 0.0, 1.0); oFog = vec4(f);\n"
+    "}\n";
 static const char* FS_HEAD =
     "#version 460\n";
 static const char* FS_BODY =
@@ -101,6 +123,7 @@ struct V6nTarget {
     uint32_t texfmt[2];
     NxD3D9Viewport vp; NxD3D9Rect sc; float proj[16];
     int err; uint32_t white;
+    uint32_t vs_ps, ps, ps_version; float psc[256][4];   /* programmable PS: S6b's GLSL through S6n's shim */
     V6nReadback rb;
 };
 static int g_live;
@@ -245,11 +268,11 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     uint32_t n = vcount(prim, count);
     if ((int)n > nv || t->err) return 0;
     NxD3D9Input in; memset(&in, 0, sizeof in);
-    in.rs = t->rs; in.ps_version = 0; in.depth_format = t->dsf; in.viewport = t->vp; in.scissor = t->sc;
+    in.rs = t->rs; in.ps_version = t->ps ? t->ps_version : 0; in.depth_format = t->dsf; in.viewport = t->vp; in.scissor = t->sc;
     NxRenderState st; NxDynamicState dyn; uint32_t sb;
     nx_d3d9_translate(&in, &st, &dyn, &sb);
     uint32_t id = t->nextState++;
-    uint32_t ds[12] = {id, t->vs, t->fs, 1};
+    uint32_t ds[12] = {id, t->ps ? t->vs_ps : t->vs, t->ps ? t->ps : t->fs, 1};
     for (int i = 0; i < 4; i++) { ds[4 + 2 * i] = (uint32_t)st.w[i]; ds[5 + 2 * i] = (uint32_t)(st.w[i] >> 32); }
     if (!rhw || 1) emit(t, NxOp_DefineState, ds, 12);
     emit(t, NxOp_BindState, &id, 1);
@@ -287,6 +310,17 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     o = put(t, &vu, sizeof vu); { uint32_t a[5] = {1, 0, t->mem, o, sizeof vu}; emit(t, NxOp_BindUbo, a, 5); }
     o = put(t, &fu, sizeof fu); { uint32_t a[5] = {2, 0, t->mem, o, sizeof fu}; emit(t, NxOp_BindUbo, a, 5); }
     o = put(t, &ep, sizeof ep); { uint32_t a[5] = {2, 2, t->mem, o, sizeof ep}; emit(t, NxOp_BindUbo, a, 5); }
+    if (t->ps) {   /* layout contract: fragment UBO 0 = c#, UBO 2 = driver (fog mode/start/end/density, alpha test) */
+        struct { float fogcolor[4], fog[4]; int32_t alpha[4]; float alpharef[4], texbem[16][4]; } drv;
+        memset(&drv, 0, sizeof drv);
+        memcpy(drv.fogcolor, dyn.fogColor, 16);
+        drv.fog[0] = fogmode == NxFog_Vertex ? 1.0f : fogmode == NxFog_Exp ? 2.0f : fogmode == NxFog_Exp2 ? 3.0f : fogmode == NxFog_Linear ? 4.0f : 0.0f;
+        memcpy(&drv.fog[1], &t->rs[36], 4); memcpy(&drv.fog[2], &t->rs[37], 4); memcpy(&drv.fog[3], &t->rs[38], 4);
+        drv.alpha[0] = ((sb >> NXSB_ALPHATEST) & 1) ? (int)((sb >> NXSB_ALPHAFUNC) & 7) + 1 : 0;
+        drv.alpharef[0] = dyn.alphaRef;
+        o = put(t, t->psc, sizeof t->psc); { uint32_t a[5] = {2, 0, t->mem, o, sizeof t->psc}; emit(t, NxOp_BindUbo, a, 5); }
+        o = put(t, &drv, sizeof drv); { uint32_t a[5] = {2, 2, t->mem, o, sizeof drv}; emit(t, NxOp_BindUbo, a, 5); }
+    }
     o = put(t, v, n * sizeof *v); { uint32_t a[3] = {t->mem, o, n * (uint32_t)sizeof *v}; emit(t, NxOp_BindVtx, a, 3); }
     uint32_t th[5] = {NxStage_Fragment, 0, 2, 0, 0};
     for (int s = 0; s < 2; s++) {
@@ -323,5 +357,15 @@ static int s_readback(V6nTarget* t, V6nReadback* out) {
     *out = *o;
     return 1;
 }
+static int s_psh(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
+    if (!bc) { t->ps = 0; return 1; }
+    if (!glsl || n < 1) return 0;
+    if (!t->vs_ps) t->vs_ps = shader(t->api, NxStage_Vertex, VS_PS);
+    t->ps = shader(t->api, NxStage_Fragment, glsl);   /* nxgl_shim_glsl: version, bindings, block names */
+    t->ps_version = bc[0] & 0xFFFF;
+    if (!t->vs_ps || !t->ps) { fprintf(stderr, "s6n-gl: %s\n", nxgl_last_error()); t->ps = 0; return 0; }
+    return 1;
+}
+static void s_psc(V6nTarget* t, uint32_t reg, const float v[4]) { if (reg < 256) memcpy(t->psc[reg], v, 16); }
 const V6nOps v6n_target_ops = {"s6n-nxgl", s_begin, s_end, s_clear, s_rs, s_samp, s_tss, s_tex, s_notex, s_vp,
-                               s_scissor, s_proj, s_draw, s_readback, NULL, NULL};   /* no PS path yet */
+                               s_scissor, s_proj, s_draw, s_readback, s_psh, s_psc};

@@ -4,7 +4,8 @@
 #   python3 -I render/verify/shaders/parity.py --selftest            synthetic corpus tests/v6n/shaders/corpus.v6ns
 #   python3 -I render/verify/shaders/parity.py PATH/shaderpackage*.sdp  the player's packages (not in the repo)
 #   options: --tools DIR (s6b_asm, sdp2dksh; default $FNVNX_SHADERS_BUILD or render/shaders/build/host)
-#            --bin DIR (v6n_nine, v6n_gl), --work DIR, --max N (pixel shaders per package), --seeds K
+#            --bin DIR (v6n_nine, v6n_gl), --work DIR, --max N (pixel shaders per package), --seeds K,
+#            --target gl|s6ngl (V6n's GL executor, or S6n's GL backend: S6b's GLSL through nxgl_shim_glsl)
 #
 # Per pixel shader: sdp2dksh translates it (front end + GLSL); the shader then draws the same scenes on the oracle
 # (Nine executes the D3D9 bytecode on softpipe) and on V6n's GL target (executes S6b's GLSL under the layout
@@ -51,7 +52,7 @@ def main():
     a = sys.argv[1:]
     tools = os.environ.get('FNVNX_SHADERS_BUILD', os.path.join(ROOT, 'render/shaders/build/host'))
     bindir = os.path.join(ROOT, 'build/v6n/bin'); work = os.path.join(ROOT, 'build/v6n/parity')
-    selftest = False; pk = []; maxn = 100000; seeds = 2
+    selftest = False; pk = []; maxn = 100000; seeds = 2; target = 'gl'
     i = 0
     while i < len(a):
         if a[i] == '--selftest': selftest = True; i += 1
@@ -60,6 +61,7 @@ def main():
         elif a[i] == '--work': work = a[i + 1]; i += 2
         elif a[i] == '--max': maxn = int(a[i + 1]); i += 2
         elif a[i] == '--seeds': seeds = int(a[i + 1]); i += 2
+        elif a[i] == '--target': target = a[i + 1]; i += 2   # gl (V6n's executor) or s6ngl (S6n's backend + shim)
         else: pk.append(os.path.abspath(a[i])); i += 1
     asm, sdp2 = os.path.join(tools, 's6b_asm'), os.path.join(tools, 'sdp2dksh')
     for t in (sdp2,) + ((asm,) if selftest else ()):
@@ -112,10 +114,10 @@ def main():
             open(sc, 'w').write(scene_text(name, binp, os.path.join(tr, h + '.glsl'), sd + 1, opts.get(name, [])))
             scenes.append(sc); meta[sc] = (name, model, undriven)
     if scenes:
-        nd, gd = os.path.join(work, 'nine'), os.path.join(work, 'gl')
+        nd, gd = os.path.join(work, 'nine'), os.path.join(work, target)
         for d in (nd, gd): os.makedirs(d, exist_ok=True)
         subprocess.run([os.path.join(bindir, 'v6n_nine'), '-q', '-o', nd] + scenes, capture_output=True)
-        subprocess.run([os.path.join(bindir, 'v6n_gl'), '-q', '-o', gd] + scenes, capture_output=True)
+        subprocess.run([os.path.join(bindir, 'v6n_' + target), '-q', '-o', gd] + scenes, capture_output=True)
         per = {}
         for sc in scenes:
             b = os.path.basename(sc)[:-6] + '.v6nd'
