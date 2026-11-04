@@ -35,8 +35,11 @@ Defects: `tests/v6n/DEFECTS.md`. One command: `tests/v6n/run.sh` (needs the host
 - whole-package fuzz (sdpfuzz.py, 16 packages, 4 seeds): first run 11,161 translated, 2,775 fail. Re-run on S6b
   65b35e8 (all 15,791 translate, P2-P5 fixed): 1,697 fail with the old harness; after V6n's harness fixes
   (cube samplers driven, oracle NaN not compared = O10, probe seeded by name and repeated for failures)
-  **1,015 fail** (180 unique): 653 `ps_pow_zero` + 184 `vs_reladdr_def` (S6b, filed below), 178 open (29 unique,
-  not yet classified). Buckets with before/after: RENDER_VERIFY.md §4.0a. Results in build/ (schema §3.7).
+  1,015 fail; with VS coverage read from stencil (SKYSTARS pins depth to 1.0) **999 fail** (178 unique), all
+  classified: 653 `ps_pow_zero` + 216 `vs_reladdr_def` (S6b, filed below; DISTTREE and PARTICLE confirmed as
+  vs_reladdr_def), 118 (24 unique) ill-conditioned random inputs at point-sampled lookups (harness input
+  limitation, no translator rule), 12 (1) implementation-defined VS edge ties below 1/256 px. Buckets with
+  before/after: RENDER_VERIFY.md §4.0a. Results in build/ (schema §3.7).
 
 ## Defects filed for S6b (translator), from the package parity fuzz
 Synthetic handwritten shaders, no game data: `tests/v6n/defects/shaders/`, one scene each, run by
@@ -45,7 +48,7 @@ Details and expected values in `tests/v6n/DEFECTS.md`.
 | defect | what | expected (Nine) vs S6b | parity failures it explains |
 |---|---|---|---|
 | `ps_pow_zero` | `pow` with x = 0, y <= 0: GLSL pow is undefined there; D3D9 pow = exp(y log x) with log(0) = -FLT_MAX gives pow(0, 0) = 1, pow(0, y < 0) = +inf | (255, 255, 0) vs (0, 0, 0) | 653 programs (129 unique): SLS / PAR / WATER / SM3 specular PS |
-| `vs_reladdr_def` | relative read through a CTAB-declared array (ARRAYBASE path) bypasses `dk_relc()`: def'd constants in reach read the buffer | (.25 .5 .75 1) vs (0 0 0 1) | 184 programs (22 unique): GRASS instancing VS |
+| `vs_reladdr_def` | relative read through a CTAB-declared array (ARRAYBASE path) bypasses `dk_relc()`: def'd constants in reach read the buffer | (.0625 .25 .5625 1) vs (0 0 0 1); both `ARRAYBASE + a0` and `(ARRAYBASE + k) + a0` | 216 programs (24 unique): GRASS instancing VS, DISTTREE, PARTICLE |
 | `ps_texkill_w` | ps_2_0+ `texkill` tests xyz only; D3D9 / Nine / wined3d test xyzw | clear colour vs drawn | 0 (random inputs do not reach it) |
 
 ## Rebuild
@@ -102,7 +105,8 @@ tests/v6n/run.sh
 - PS path for `v6n_s6ngl`: done (S6b GLSL through shader_create); float/depth/stencil read-back: done (ABI v3).
   VS + indexed draws on `v6n_s6ngl`: done (2 VS scenes match Nine on both targets).
 - Run parity.py on the player's .sdp packages: done as sdpfuzz.py (above).
-- Classify the 178 open parity failures (RENDER_VERIFY.md §4.0a): 20 unique PS with 1-10 px per seed (computed
-  point-sampled lookups in WATER / SM3), 4 large PS (WATER002/009/010/020), 5 VS (DISTTREE, PARTICLE, SKYSTARS x2
-  coverage; SM3007 depth). Re-run the package fuzz when S6b lands ps_pow_zero / vs_reladdr_def.
+- Classify the 178 open parity failures: done (RENDER_VERIFY.md §4.0a). Open harness question: inputs that keep
+  point-sampled lookups well-conditioned (projective w and parallax denominators away from 0) without hiding
+  translator differences; a 1e-3 discontinuity probe and bilinear filtering were measured and rejected (§4.0a).
+- Re-run the package fuzz when S6b lands ps_pow_zero / vs_reladdr_def (expected: 869 fewer failures).
 - Fuzz reproducers: classified (1 FF-model gap fixed, 4 implementation-defined in tests/v6n/repro/impl_defined).

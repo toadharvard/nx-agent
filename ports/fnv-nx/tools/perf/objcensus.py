@@ -155,6 +155,8 @@ def disasm_mix(obj, shndx, cs, mix, fmix=None, ranges=None):
             cats.append('branch')
         if m in ('dmb', 'dsb', 'isb'):
             cats.append('barrier')
+        if m.startswith(('ldar', 'stlr', 'ldapr')):
+            cats.append('acqrel')                # ordering: S12's volatile acquire loads / release stores
         if m in ('ldaxr', 'ldxr', 'stlxr', 'stxr', 'ldaxrb', 'stlxrb', 'ldaxrh', 'stlxrh'):
             cats.append('exclusive')
         if m in ('paciasp', 'autiasp', 'bti', 'hint', 'pacibsp', 'autibsp'):
