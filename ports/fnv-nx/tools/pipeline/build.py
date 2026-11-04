@@ -1621,10 +1621,15 @@ def build_render_lib(b, r, d):
         raise StageError('LINK_OVERRIDES=render needs RENDER_LIB=<libnxrender.a>, or the toolchain stage\'s DEVKITPRO '
                          'and fnvnx-a64 to build it (LINK_OVERRIDES=none: the pristine path)')
     if not uam or not os.access(uam, os.X_OK):
-        b.say('link: uam for the renderer\'s shaders (toolchain/uam/build.sh, cached)')
-        uo = os.path.join(os.path.dirname(d), 'uam')
-        b.sh(['bash', os.path.join(ROOT, 'toolchain', 'uam', 'build.sh'), uo], r['log'], check=True, timeout=3600)
-        uam = os.path.join(uo, 'bin', 'uam')
+        # no render machine environment (the farms): build uam at its pin once per container, in a cache every build
+        # directory of the container shares ($FNVNX_TOOL_CACHE, default ~/.cache/fnvnx; toolchain/uam/build.sh stamps
+        # the pin); only a failed build is an error
+        up = os.path.join(os.environ.get('FNVNX_TOOL_CACHE') or os.path.join(os.path.expanduser('~'), '.cache', 'fnvnx'),
+                          'uam')
+        b.say('link: uam (toolchain/uam/build.sh, once per container)')
+        if b.sh(['bash', os.path.join(ROOT, 'toolchain', 'uam', 'build.sh'), up], r['log'], timeout=3600):
+            raise StageError('LINK_OVERRIDES=render: building uam failed (toolchain/uam/build.sh, see %s)' % b.rel(r['log']))
+        uam = os.path.join(up, 'bin', 'uam')
     out = os.path.join(d, 'render-n1')
     b.say('link: libnxrender.a (render/native/n1/build.sh)')
     path = os.pathsep.join([os.path.join(dkp, 'tools', 'bin'), os.path.join(prefix, 'bin'), os.environ.get('PATH', '')])

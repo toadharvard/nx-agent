@@ -136,13 +136,24 @@ if command -v aarch64-linux-gnu-gcc > /dev/null \
 else
   log "heap_standin.c not compiled (aarch64-linux-gnu-gcc): slots and stub boot without it"
 fi
+# The exe's ini files next to it (fnv-nx-build gamedata/exe: Fallout_default.ini, low/medium/high/VeryHigh.ini; the
+# game copies Fallout_default.ini to My Games/FalloutNV/FALLOUT.INI and stops in WinMain without it). They go where
+# the exe goes. Nothing is placed for the synthesized image.
+GAMEFILES=()
+if [ -n "$IMAGE" ]; then
+  for f in "$(dirname "$IMAGE")"/*.ini; do
+    [ -f "$f" ] || continue
+    b=$(basename "$f")
+    GAMEFILES+=(--file "switch/fnv/$b=$f" --file "fnvnx/game/$b=$f")
+  done
+fi
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift
   log "boot $tag"
   local rc=0 root=$OUT/sdmc-$tag
   rm -rf "$root"; mkdir -p "$root"
   timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE" --file "fnvnx/game/FalloutNV.exe=$IMAGE"} \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE" --file "fnvnx/game/FalloutNV.exe=$IMAGE"} "${GAMEFILES[@]}" \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"
