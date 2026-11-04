@@ -1,9 +1,11 @@
 {
  "schema": "fnvnx-a57calib/1",
- "check_mape_pct": 3.07,
+ "check_mape_pct": 4.8,
  "check_max_pct": 25.03,
- "fit_mape_pct": 0.04,
- "flat_check_mape_pct": 64.03,
+ "check_rms_pct": 9.27,
+ "check_points": 13,
+ "fit_mape_pct": 0.13,
+ "flat_check_mape_pct": 63.74,
  "points": [
   {
    "name": "l1_latency",
@@ -18,25 +20,37 @@
    "src": "CC: 4-cycle L1D load-to-use"
   },
   {
+   "name": "l1_latency_indexed",
+   "kernel": "chase_4k_idx",
+   "role": "check",
+   "truth": 5,
+   "model": 4.002936333333334,
+   "flat": 1.875,
+   "err": 0.19941273333333315,
+   "flat_err": 0.625,
+   "clock": 1.785,
+   "src": "CC: 'four cycle latency, or 5 cycles for indexed addressing' (ldr x0, [x2, x0] chain); llvm-mca and ARM's optimization guide (AArch64 register offset) say 4"
+  },
+  {
    "name": "l2_latency",
    "kernel": "chase_96k",
-   "role": "check",
+   "role": "fit",
    "truth": 22,
    "model": 22.001763333333333,
    "flat": 1.56265625,
    "err": 8.015151515149522e-05,
    "flat_err": 0.9289701704545454,
    "clock": 1.785,
-   "src": "CC: 22-cycle L2 load-to-use (cost.l2_lat is the same published number; the check is the simulator: no L1 hits, no TLB misses for 24 pages)"
+   "src": "CC: 22-cycle L2 load-to-use (fit: cost.l2_lat is this number; V1 P0-E1: the model echoes it)"
   },
   {
    "name": "l2_latency_tlb",
    "kernel": "chase_1m5",
    "role": "check",
    "truth": 52,
-   "model": 40.428763333333336,
+   "model": 40.40826333333334,
    "flat": 1.56265625,
-   "err": 0.07252378205128202,
+   "err": 0.07291801282051275,
    "flat_err": 0.8199489182692307,
    "clock": 1.785,
    "src": "CC: over 50 cycles at L2 sizes once the L2 TLB is used (4 KB pages)"
@@ -46,9 +60,9 @@
    "kernel": "chase_64m",
    "role": "fit",
    "truth": 250,
-   "model": 250.02077666666665,
+   "model": 249.99777666666665,
    "flat": 1.5628125,
-   "err": 8.310666666659472e-05,
+   "err": 8.893333333389819e-06,
    "flat_err": 0.99374875,
    "clock": 1.785,
    "src": "CC: about 250 cycles (fit: cost.dram_ns)"
@@ -70,9 +84,9 @@
    "kernel": "mul64_chain",
    "role": "check",
    "truth": 5,
-   "model": 5.00196875,
+   "model": 5.00210625,
    "flat": 1.562515625,
-   "err": 0.0003937499999999261,
+   "err": 0.00042124999999995085,
    "flat_err": 0.687496875,
    "clock": 1.785,
    "src": "CC: 64-bit multiply 5 cycles"
@@ -82,9 +96,9 @@
    "kernel": "fmla_chain",
    "role": "check",
    "truth": 10,
-   "model": 10.000658750000001,
+   "model": 10.00052125,
    "flat": 1.562421875,
-   "err": 6.587500000012624e-05,
+   "err": 5.2125000000025065e-05,
    "flat_err": 0.8437578125,
    "clock": 1.785,
    "src": "CC: FMA 10-cycle latency"
@@ -94,9 +108,9 @@
    "kernel": "fmla_tput",
    "role": "check",
    "truth": 1,
-   "model": 1.00489175,
+   "model": 1.0047542500000002,
    "flat": 1.562421875,
-   "err": 0.0048917500000000835,
+   "err": 0.004754250000000182,
    "flat_err": 0.5624218750000001,
    "clock": 1.785,
    "src": "CC: 128-bit FMA 1 per cycle"
@@ -106,9 +120,9 @@
    "kernel": "vadd_chain",
    "role": "check",
    "truth": 3,
-   "model": 3.00135875,
+   "model": 3.00122125,
    "flat": 1.562421875,
-   "err": 0.0004529166666666917,
+   "err": 0.0004070833333333172,
    "flat_err": 0.47919270833333333,
    "clock": 1.785,
    "src": "CC: vector integer add 3 cycles"
@@ -118,9 +132,9 @@
    "kernel": "vmul_chain",
    "role": "check",
    "truth": 4,
-   "model": 5.00115875,
+   "model": 5.00102125,
    "flat": 1.562421875,
-   "err": 0.2502896875,
+   "err": 0.2502553125,
    "flat_err": 0.60939453125,
    "clock": 1.785,
    "src": "CC: vector integer multiply 4 cycles"
@@ -130,10 +144,10 @@
    "kernel": "vmul_tput",
    "role": "check",
    "truth": 2,
-   "model": 2.0032205833333334,
-   "flat": 1.562578125,
-   "err": 0.0016102916666667078,
-   "flat_err": 0.21871093750000004,
+   "model": 2.0057780416666664,
+   "flat": 1.5625625,
+   "err": 0.0028890208333332,
+   "flat_err": 0.21871874999999996,
    "clock": 1.785,
    "src": "CC: 128-bit integer multiply 1 per 2 cycles"
   },
@@ -178,10 +192,10 @@
    "kernel": "memcpy_8m",
    "role": "fit",
    "truth": 3504,
-   "model": 3503.9302812119417,
-   "flat": 9151.851625940666,
-   "err": 1.9896914400186436e-05,
-   "flat_err": 1.611829801923706,
+   "model": 3503.9169156454336,
+   "flat": 9151.860353693333,
+   "err": 2.371128840364757e-05,
+   "flat_err": 1.6118322927207,
    "clock": 1.43,
    "src": "PTS tinymembench memcpy, Jetson Nano (fit: cost.dram_mlp_lines)"
   },
@@ -190,10 +204,10 @@
    "kernel": "memcpy_8m",
    "role": "check",
    "truth": 3862,
-   "model": 3708.406016618262,
-   "flat": 11071.82049851563,
-   "err": 0.03977058088600152,
-   "flat_err": 1.866861858755989,
+   "model": 3708.391871089306,
+   "flat": 11071.83105726536,
+   "err": 0.03977424363301248,
+   "flat_err": 1.8668645927667946,
    "clock": 1.73,
    "src": "PTS tinymembench memcpy, Jetson TX1"
   },
@@ -202,10 +216,10 @@
    "kernel": "branch_random",
    "role": "fit",
    "truth": 17.5,
-   "model": 17.51669683333333,
-   "flat": 1.2559375,
-   "err": 0.0009541047619046188,
-   "flat_err": 0.9282321428571427,
+   "model": 17.524904333333332,
+   "flat": 1.2555625,
+   "err": 0.001423104761904678,
+   "flat_err": 0.9282535714285715,
    "clock": 1.785,
    "src": "7CPU: 16-19 cycles (fit: cost.mispredict); 50 % of the random branches mispredict"
   },
@@ -214,9 +228,9 @@
    "kernel": "taken_32",
    "role": "check",
    "truth": 1,
-   "model": 1.0478338541666667,
+   "model": 1.0478338541666665,
    "flat": 1.3291015625,
-   "err": 0.047833854166666745,
+   "err": 0.04783385416666652,
    "flat_err": 0.3291015625,
    "clock": 1.785,
    "src": "CC: 64-entry L1 BTB, 1 cycle per taken branch"
@@ -224,21 +238,21 @@
   {
    "name": "taken_l2btb",
    "kernel": "taken_1024",
-   "role": "check",
+   "role": "fit",
    "truth": 2,
-   "model": 2.0144727376302085,
+   "model": 2.0134148763020834,
    "flat": 1.252587890625,
-   "err": 0.007236368815104255,
+   "err": 0.006707438151041689,
    "flat_err": 0.37370605468749996,
    "clock": 1.785,
-   "src": "CC: L2 BTB (2-4K entries), 2 cycles per taken branch"
+   "src": "CC: L2 BTB, 2 cycles per taken branch (fit: cost.btb_l2_bubble is set from the same sentence; V1 P0-E2)"
   }
  ],
  "predictions": [
   {
    "name": "dot_l1",
    "units": "per float",
-   "cycles": 0.6382749674479168,
+   "cycles": 0.6382212565104167,
    "flat": 0.786688232421875,
    "note": "no published number; bound by 1 load per cycle (CC): 4 ldp q per 16 floats = 8 load cycles -> 0.5 cycles per float"
   },
@@ -259,9 +273,30 @@
   {
    "name": "ilk_after_store",
    "units": "per InterlockedIncrement after a store",
-   "cycles": 13.046446666666666,
-   "flat": 9.9999375,
+   "cycles": 13.045934166666665,
+   "flat": 10.0,
    "note": "as ilk_inline"
+  },
+  {
+   "name": "fdiv_s_chain",
+   "units": "per fdiv s",
+   "cycles": 11.993211250000002,
+   "flat": 1.7178125,
+   "note": "ARM optimization guide: 7-17 cycles, data-dependent; no published measurement. The model prices mid-range on a latency-bound chain, with a +-half-range band (cost.py DIV_RANGE)"
+  },
+  {
+   "name": "fdiv_d_chain",
+   "units": "per fdiv d",
+   "cycles": 19.504186249999997,
+   "flat": 1.7178125,
+   "note": "guide: 7-32"
+  },
+  {
+   "name": "sdiv_w_chain",
+   "units": "per sdiv w",
+   "cycles": 11.99366,
+   "flat": 1.71765625,
+   "note": "guide: 4-20"
   }
  ]
 }

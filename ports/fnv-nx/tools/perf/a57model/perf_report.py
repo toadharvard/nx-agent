@@ -69,14 +69,16 @@ def main(argv=None):
         with open(a.calib) as f:
             calib = json.load(f)
         err = calib.get('check_mape_pct')
-    e = (err or 0) / 100
+    bar = calib.get('check_rms_pct', err)   # the error bar of a row: the RMS of the check errors
+    e = (bar or 0) / 100
     tot_c = t1['cycles'] or 1
     rows = []
     for name, r in sorted(f1.items(), key=lambda kv: -kv[1]['cycles'])[:a.top]:
         c1, c2 = r['cycles'], f2[name]['cycles']
         rows.append({
             'function': name, 'orig': syms.original(name), 'instructions': int(r['insns']),
-            'cycles_est': round(c1), 'cycles_lo': round(c1 * (1 - e)), 'cycles_hi': round(c1 * (1 + e)),
+            'cycles_est': round(c1), 'cycles_lo': round(max(0, c1 * (1 - e) - r.get('div_band', 0))),
+            'cycles_hi': round(c1 * (1 + e) + r.get('div_band', 0)), 'div_band': round(r.get('div_band', 0)),
             'ms_1020': round(c1 / 1.02e6, 4), 'ms_1785': round(c2 / 1.785e6, 4),
             'cache_misses': {'l1d': int(r['l1d_miss']), 'l2': int(r['l2_miss']), 'l1i': 0},
             'mispredicts': int(r['mispred']), 'ipc': round(r['insns'] / c1, 3) if c1 else 0,
@@ -93,10 +95,12 @@ def main(argv=None):
     out = {
         'schema': 'fnvnx-perf/1', 'head': a.head, 'link': a.link, 'workload': a.workload,
         'model': {'method': 'a57sim (QEMU TCG plugin / Unicorn) + llvm-mca -mcpu=cortex-a57, docs/PERF.md 12',
-                  'check_mape_pct': err, 'check_max_pct': calib.get('check_max_pct'),
+                  'check_mape_pct': err, 'check_rms_pct': bar, 'check_max_pct': calib.get('check_max_pct'),
+                  'check_points': calib.get('check_points'),
                   'flat_check_mape_pct': calib.get('flat_check_mape_pct'),
-                  'note': 'the error bar is the calibration error on published A57 microbenchmarks; on compiled game '
-                          'code the composition error is larger and not yet measured on hardware'},
+                  'note': 'cycles_lo/hi: the RMS of the calibration check errors (independent published A57 points, '
+                          'V1 P0-E1/E2) plus the divide band (divides priced mid-range); on compiled game code the '
+                          'composition error is larger and not yet measured on hardware'},
         'totals': {'instructions': int(t1['insns']), 'cycles_1020': round(t1['cycles']),
                    'ms_1020': round(t1['cycles'] / 1.02e6, 3), 'ms_1785': round(t2['cycles'] / 1.785e6, 3),
                    'ipc_1020': round(t1['insns'] / tot_c, 3), 'coverage_pct': round(100 * priced / max(t1['insns'], 1), 2),
@@ -124,7 +128,7 @@ def main(argv=None):
              f"- main thread: {T['instructions']:,} instructions, {T['cycles_1020']:,} cycles, IPC {T['ipc_1020']}, "
              f"{T['ms_1020']} ms at 1.02 GHz, {T['ms_1785']} ms at 1.785 GHz; stopped: {T['stopped']}",
              f"- coverage: {T['coverage_pct']} % of the main thread's instructions priced by llvm-mca",
-             f"- model error (calibration, check points): {err} % mean, max {calib.get('check_max_pct')} % "
+             f"- model error (calibration, {calib.get('check_points')} independent check points): {err} % mean, RMS {bar} %, max {calib.get('check_max_pct')} % "
              f"(flat IPC 0.8: {calib.get('flat_check_mape_pct')} %)",
              f"- cycles at 1.02 GHz: core {T['breakdown_1020']['core']:,}, branch {T['breakdown_1020']['branch']:,}, "
              f"ifetch {T['breakdown_1020']['ifetch']:,}, memory latency {T['breakdown_1020']['memlat']:,}", '',

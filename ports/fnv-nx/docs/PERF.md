@@ -849,36 +849,51 @@ measured error bar. Every optimization stream reads its output (fnvnx-perf/1, 12
 
 ### 12.2 Calibration: the error bar (`calibrate.py`, `calib/truth.json`, result in `calib/last.json`)
 
-19 published Cortex-A57 numbers, reproduced by kernels in `calib/bench.c` (bare metal, inline assembly where the
-sequence matters) at the clock of the publication. 5 points set a parameter (fit); 14 are independent (check). The
-METRIC is the mean absolute error over the check points. Before: the flat IPC 0.8 on the same points.
+20 published Cortex-A57 numbers, reproduced by kernels in `calib/bench.c` (bare metal, inline assembly where the
+sequence matters) at the clock of the publication. 7 are **fit**: a parameter or rule was set from them, or the model's
+value echoes a parameter set from the same published number (V1 P0-E1/E2: `l2_latency` is `cost.l2_lat`,
+`taken_l2btb` is 1 + `btb_l2_bubble`; `tests/v1/test_a57_calib_circular.py`). 13 are **check**: independent of every
+parameter. The METRIC is the mean absolute error over the check points. Before: the flat IPC 0.8 on the same points.
 
 | point | role | published | model | error % | flat IPC 0.8 |
 |---|---|---:|---:|---:|---:|
 | L1 load-to-use (chase 4 KB), cycles | check | 4 | 4.00 | 0.0 | 1.56 |
-| L2 load-to-use (chase 96 KB, 24 pages) | check | 22 | 22.00 | 0.0 | 1.56 |
+| L1 load-to-use, indexed (`ldr x0, [x2, x0]`) | check | 5 | **4.00** | **19.9** | 1.88 |
+| L2 load-to-use (chase 96 KB, 24 pages) | fit | 22 | 22.00 | 0.0 | 1.56 |
 | L2 with L2-TLB misses (chase 1.5 MB), "over 50", tol. 15 % | check | 52 | 40.4 | 7.3 | 1.56 |
 | DRAM (chase 64 MB) at 1.785 GHz | fit | 250 | 250.0 | 0.0 | 1.56 |
 | add / mul64 / fmla / vadd latency | check | 1 / 5 / 10 / 3 | 1 / 5 / 10 / 3 | 0-0.2 | 1.56 |
 | fmla .4s throughput, cycles each | check | 1 | 1.00 | 0.5 | 1.56 |
 | mul .4s latency | check | 4 | **5.00** | **25.0** | 1.56 |
-| mul .4s throughput | check | 2 | 2.00 | 0.2 | 1.56 |
+| mul .4s throughput | check | 2 | 2.01 | 0.3 | 1.56 |
 | store-to-load forwarding chain | fit | 7 | 7.00 | 0.0 | 2.81 |
 | L1D read, B/cycle | check | 15.69 | 15.65 | 0.2 | 14.54 |
 | L2 read, B/cycle | fit | 8 | 8.00 | 0.0 | 14.63 |
 | memcpy 8 MB, MB/s, Jetson Nano 1.43 GHz | fit | 3504 | 3504 | 0.0 | 9152 |
 | memcpy 8 MB, MB/s, Jetson TX1 1.73 GHz | check | 3862 | 3708 | 4.0 | 11072 |
 | mispredict penalty (random - zero branches) | fit | 17.5 | 17.5 | 0.1 | 1.26 |
-| taken branch, L1 BTB / L2 BTB | check | 1 / 2 | 1.05 / 2.01 | 4.8 / 0.7 | 1.33 / 1.25 |
+| taken branch, L1 BTB | check | 1 | 1.05 | 4.8 | 1.33 |
+| taken branch, L2 BTB | fit | 2 | 2.01 | 0.7 | 1.25 |
 
-**Error: 3.1 % mean over the 14 check points (max 25 %), against 64.0 % for the flat IPC 0.8 (max 187 %).** The
-largest miss is ASIMD integer `mul .4s`: 5 cycles in the model, 4 measured. llvm-mca's A57 model has the r0pX
-latencies (Q-form 6, D-form 5); ARM's Cortex-A57 Software Optimization Guide (UAN 0015B, 3.14 note 4) gives 5 and 4
-from r1p0 on, and the Tegra X1's A57 is r1p1. llvm-mca takes no latency overrides, so cost.py corrects a block whose
-loop-carried chain is the bound: it recomputes the chain with the r1p0 latencies (register dataflow, `r1_latency`)
-and subtracts the difference, never below ceil(n/3). (Before this correction: 4.9 %, max 50 %.) Sources: Chips
-and Cheese, "Cortex A57, Nintendo Switch's CPU" (2023, on a Switch at 1.785 GHz); 7-cpu.com Cortex-A57 (mispredict
-16-19 cycles, DRAM = 60 cycles + n ns); Phoronix Test Suite tinymembench on Jetson Nano and TX1.
+**Error: 4.8 % mean over the 13 independent check points (RMS 9.3 %, max 25 %), against 63.7 % for the flat IPC
+0.8 (max 187 %).** The hotspot rows carry the RMS as their bar (cycles_lo/hi). History: 4.9 % over 14 points
+(6e0a34b) counted two circular points (V1 P0-E1/E2; over the honest 12 that was at least 5.7 %); the r1p0 multiply
+latencies below took it to 3.5 % over those 12; the new indexed-load check adds a real 20 % miss: 4.8 % over 13.
+The two large misses:
+* `mul .4s`: 5 cycles in the model, 4 measured. llvm-mca's A57 model has the r0pX latencies (Q-form 6, D-form 5);
+  ARM's Cortex-A57 Software Optimization Guide (UAN 0015B, 3.14 note 4) gives 5 and 4 from r1p0 on, and the Tegra
+  X1's A57 is r1p1. llvm-mca takes no latency overrides, so cost.py corrects a block whose loop-carried chain is the
+  bound: it recomputes the chain with the r1p0 latencies (register dataflow, `r1_latency`) and subtracts the
+  difference, never below ceil(n/3).
+* the indexed load: Chips and Cheese measured 5 cycles; llvm-mca and ARM's guide (AArch64 register-offset loads) say
+  4. Not corrected: the two sources disagree and only one measured.
+
+Divides and square roots (V1: "no point covers divides") are iterative and data-dependent: ARM's guide gives
+`sdiv`/`udiv` W 4-20, X 4-36, `fdiv`/`fsqrt` S 7-17, D 7-32 (ASIMD .4s 14-34, .2d 14-64), and llvm-mca prices the top of
+each range. No published measurement narrows them, so a latency-bound chain is priced at the middle (fdiv s 12,
+fdiv d 19.5, sdiv w 12 cycles; `calibrate.py` lists them as predictions) and the half range is carried as
+`div_band` into cycles_lo/hi. Not covered by any check: a direction-predictor accuracy test (the mispredict penalty
+is a fit, and no published A57 number gives pattern capacity), and mixed code (12.2 below).
 
 What the error bar covers and what it does not:
 * It covers the parts one at a time: latencies, throughputs, bandwidths, prediction, the miss model. It does not yet
@@ -926,17 +941,17 @@ data in L1, branches predicted, callees excluded.
 | row (11.4) | M insns / frame | CPI steady - one call | cycles per call | ms at 1.02 GHz |
 |---|---:|---|---|---|
 | Interlocked refcounts (calibration kernel ilk_inline) | 1.8 | 1.63 | 13 | 2.88 |
-| culling per object 0x00a694e0 | 0.91 | 1.04 - 2.49 | 52 - 224 | 0.93 - 2.22 |
+| culling per object 0x00a694e0 + classification 0x004b6100 | 0.91 | 1.04 - 3.43 | 52 - 308 | 0.93 - 3.06 |
 | NiQuaternion::Slerp 0x00a6e330 | 0.78 | 0.90 - 2.10 | 116 - 273 | 0.69 - 1.60 |
 | NiBound::Update 0x00a7fdd0 | 0.72 | 0.39 - 0.91 | 18 - 41 | 0.28 - 0.64 |
-| UpdateWorldData + NiMatrix3 product | 0.68 | 0.53 - 0.77 | 37 - 77 | 0.35 - 0.51 |
-| Havok GSK 0x00da8fb0 | 0.66 | 1.05 - 1.34 | 629 - 805 | 0.68 - 0.87 |
+| UpdateWorldData 0x00a68c60 + UpdateWorldLoc 0x00a68bf0 | 0.68 | 1.36 - 2.78 | 95 - 278 | 0.90 - 1.86 |
+| Havok GSK (0x00da8fb0, 8390, 8500, 8820) | 0.66 | 1.11 - 1.45 | 668 - 869 | 0.72 - 0.94 |
 | FindPassBucket + FindBucketIndex | 0.31 | 0.83 - 2.02 | 68 - 166 | 0.25 - 0.61 |
 | FromRotationMatrix 0x00a6df40 | 0.18 | 0.88 - 0.98 | 90 - 100 | 0.15 - 0.17 |
 | NiNode UpdateTransformAndBounds / UpdateDownwardPass | 0.16 | 0.99 - 1.46 | 19 - 88 | 0.16 - 0.23 |
 
 Coverage of the main thread's 23.8 M instructions per frame (J-0148) with an A57 price: **0 % -> 26 % (6.2 M)**,
-6.4-9.7 ms at 1.02 GHz for those rows against 7.6 ms at IPC 0.8. The math leaves (NiBound::Update, the matrix
+7.0-11.9 ms at 1.02 GHz for those rows against 7.6 ms at IPC 0.8 (rows' functions as S15-simd corrected them). The math leaves (NiBound::Update, the matrix
 product) run at IPC 1.1-2.6, above 0.8; the refcount operations and the branchy per-object cull run below it.
 The rest of the frame's main thread gets its price when frameprof's frames run under `uctrace.py`.
 
@@ -955,7 +970,7 @@ With link 06857911f5ab's guest and the overrides at 304901c, mid values [model]:
 |---|---:|---:|---|---|
 | fn_interlocked | 30 | 49 | 1.63 | calibration kernel; the dmb drain is not priced (12.2) |
 | fn_cull_test (override) | 58 | 100 | 1.07 - 2.21 | |
-| fn_slerp (override) | 88 | 207 | 2.05 - 2.66 | inlined sqrt and divide: latency-bound |
+| fn_slerp (override) | 88 | 207 | 2.05 - 2.66 | latency-bound: the decomp's serial float/double chain (S15-simd) |
 | fn_gsk | 571 | 731 | 1.11 - 1.45 | |
 | fn_nibound_update (override) | 19 | 33 | 0.85 - 2.58 | the `ld3` is slow; the decomp's 52 instructions price 20-39 |
 | fn_pass_bucket | 82 | 116 | 0.83 - 2.01 | |
@@ -964,8 +979,8 @@ With link 06857911f5ab's guest and the overrides at 304901c, mid values [model]:
 | fn_quat_from_matrix (override) | 77 | 80 | 0.77 - 1.30 | |
 
 The metric with these prices: **7.88 M cycles per frame (7.72 ms at 1.02 GHz)**, against 6.09 M at IPC 0.8. The
-rows that override math with long-latency operations (Slerp) or with multi-register loads (`ld3`) save fewer cycles
-than instructions; A/B rows should be compared in cycles from now on.
+rows whose code is one serial floating-point chain (Slerp) or uses multi-register loads (`ld3`) save fewer cycles than
+instructions. S15-simd now compares A/B rows in cycles (11.6) and dropped the NiBound and matrix-product overrides.
 
 ### 12.7 The 3-core frame model (`mtmodel.py`, fnvnx-mtframe/1)
 

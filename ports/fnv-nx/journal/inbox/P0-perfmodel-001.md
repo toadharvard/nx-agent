@@ -11,9 +11,16 @@
     Switch's A57, 7-cpu, PTS tinymembench on Jetson Nano/TX1); 5 are fits, 14 checks.
   - `perf_report.py` writes fnvnx-perf/1 (`totals`, `hotspots[]`, `frame_hotspots[]`); `funcmodel.py` prices named
     guest functions statically; `tools/farm/perf_job.sh` is the farm job.
-* **measured** - METRIC (mean error over the 14 check points): **64.0 % (flat IPC 0.8) -> 4.9 % -> 3.1 %**, max 25 %.
-  The step to 3.1 %: llvm-mca's A57 model has r0pX ASIMD multiply latencies. ARM's optimization guide gives one cycle
-  less from r1p0, and the Tegra X1's A57 is r1p1, so cost.py corrects latency-bound chains.
+* **measured** - METRIC (mean error over the independent check points): **63.7 % (flat IPC 0.8) -> 4.8 %** over 13
+  points, RMS 9.3 %, max 25 %.
+  - V1 P0-E1/E2 accepted. l2_latency and taken_l2btb echoed their own parameters, so they are now fit points. Over
+    the remaining 12 the error was 5.7 % before the r1p0 fix and 3.5 % after it.
+  - r1p0 fix: llvm-mca's A57 model has r0pX ASIMD multiply latencies; ARM's optimization guide gives one cycle less
+    from r1p0, and the Tegra X1's A57 is r1p1. cost.py corrects latency-bound chains.
+  - New independent check: C&C's 5-cycle indexed load. llvm-mca and ARM's guide say 4, so it shows a real 20 % miss
+    and stays uncorrected.
+  - Divides: no published measurement exists. They are priced mid-range on latency-bound chains, with the half range
+    carried as div_band into cycles_lo/hi. The hotspot bar is the RMS.
   - Boot to WinMain, link fa883870e756 guest on its synth.exe: 62.2 M main-thread instructions, IPC 1.36, 44.8 ms at
     1.02 GHz (flat: 76.2 ms). fnvnx_scan_codeptrs 32 % (162,772 mispredicts).
   - perf_job.sh end to end on this branch (link 06857911f5ab, which has no boot/synth.exe, so no image): 18.7 M
