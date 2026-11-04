@@ -1138,6 +1138,14 @@ uGridsToLoad 5, fLODFadeOutMultObjects 5.0, Items 3.0, Actors 2.5, iActorShadowC
 | switch_b | fade x 3 / 1.5 / 1.5; actor shadows 0 / 1; iMinGrassSize 160; grass fade 2500; decals 3 / 1 |
 | switch_b_g3 | switch_b with uGridsToLoad 3. It breaks scripted events and AI packages that expect loaded cells, so it is shown as the bound only, not proposed |
 
+**Base (D20 as now worded):** the default settings are Fallout_default.ini as shipped, with the exe's values only
+where it is silent. The preset `base` is that ini: fLODFadeOutMultActors 6 and iActorShadowCountInt 2, where the
+exe's defaults are 2.5 and 4; the other keys agree. The exe's own defaults are kept as `exe_defaults`. The presets
+scale relative to `base`, so with the ini's actor fade of 6 they save more than the table below, which was
+computed on the exe's 2.5. The current figures (placed, mid, 1.02 GHz): base 26.4 ms, exe_defaults 25.8, switch_a
+21.4, switch_b 18.8, switch_b_g3 15.9 (`content_presets.py`). The work items themselves are taken to describe
+`base`; no measurement ties them to either fade.
+
 **Calibration of the work items (asked by the orchestrator).** No ini. The items are code-path estimates
 (sections 3 and 5): the per-draw costs times RENDER_NATIVE.md 3.7's draw table, which assumes uGridsToLoad 5 (25
 cells) and 2-4 shadow lights. Those match the exe's defaults (5; iActorShadowCountExt 2, Int 4), and the table names
