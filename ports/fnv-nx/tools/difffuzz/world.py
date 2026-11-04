@@ -38,6 +38,13 @@ SENTINEL = 0x0f000000
 MAX = 1 << 32
 
 
+# where neither machine has code: a jump there is an indirect call through a pointer the case planted (a vtable
+# slot of a fuzzed object); both machines treat it as an intercepted call of that address instead of executing the
+# world's bytes (x86: plus .text outside the loaded code, which x86emu already intercepts; AArch64: .text too)
+WILD_X86 = ((NULL_END, TEXT[0]), (TEXT[1], 0x0e000000), (0x0e100000, SENTINEL), (SENTINEL + PAGE, MAX))
+WILD_A64 = ((NULL_END, 0x08000000), (0x0c000000, SENTINEL), (SENTINEL + PAGE, MAX))
+
+
 def page_of(a):
     return a & ~(PAGE - 1)
 

@@ -163,6 +163,8 @@ class X86Engine:
                          end=world.TEXT[1] - 1)
         hb2 = uc.hook_add(UC_HOOK_BLOCK, self._on_import, user_data=(case, r), begin=libcalls.IMPORT_BASE,
                           end=libcalls.IMPORT_BASE + libcalls.IMPORT_MAX * 16 - 1)
+        hwild = [uc.hook_add(UC_HOOK_BLOCK, self._on_wild, user_data=(case, r), begin=lo, end=hi - 1)
+                 for lo, hi in world.WILD_X86]
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
                for lo, hi in world.COMPARED]
         start = start if start is not None else next(iter(self.text_funcs))
@@ -174,6 +176,8 @@ class X86Engine:
         finally:
             uc.hook_del(hb)
             uc.hook_del(hb2)
+            for h in hwild:
+                uc.hook_del(h)
             for h in hws:
                 uc.hook_del(h)
         eip = uc.reg_read(UC_X86_REG_EIP)
@@ -277,6 +281,10 @@ class X86Engine:
             return
         uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
         uc.reg_write(UC_X86_REG_EIP, retaddr)
+
+    def _on_wild(self, uc, address, size, user):
+        """Execution reached memory that holds no code: an indirect call through a planted pointer."""
+        self._on_block(uc, address, size, user)
 
     def _callee_conv(self, address):
         f = getattr(self.callee_info, 'conv', None)

@@ -138,6 +138,8 @@ class Arm64Engine:
         self._ensure(world.SENTINEL, 4)
         saved = [uc.reg_read(XR[i]) for i in range(19, 30)] + [uc.reg_read(A.UC_ARM64_REG_SP)]
         hs = uc.hook_add(UC_HOOK_BLOCK, self._on_stub, user_data=(case, r), begin=STUB_LO, end=STUB_HI - 1)
+        hwild = [uc.hook_add(UC_HOOK_BLOCK, self._on_wild, user_data=(case, r), begin=lo, end=hi - 1)
+                 for lo, hi in world.WILD_A64]
         hc = uc.hook_add(UC_HOOK_BLOCK, self._on_cov, user_data=r, begin=a64image.A64_BASE,
                          end=max(self.image.end, a64image.A64_BASE + 4) - 1)
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
@@ -152,7 +154,7 @@ class Arm64Engine:
         except UcError as e:
             r.error = self._fault or 'fault:uc:%s' % e
         finally:
-            for h in [hs, hc] + hws:
+            for h in [hs, hc] + hws + hwild:
                 uc.hook_del(h)
         pc = uc.reg_read(A.UC_ARM64_REG_PC)
         if r.error is None and self._fault:
@@ -268,9 +270,16 @@ class Arm64Engine:
     def _on_cov(self, uc, address, size, r):
         r.blocks.add(address)
 
-    def _on_stub(self, uc, address, size, user):
+    def _on_wild(self, uc, address, size, user):
+        """Execution reached memory that holds no native code (an indirect call through a planted pointer, or a
+        jump to an original .text address): an intercepted call of that address, as on x86."""
+        self._on_stub(uc, address, size, user, wild=True)
+
+    def _on_stub(self, uc, address, size, user, wild=False):
         case, r = user
-        if address < a64image.NAMED_STUB:
+        if wild:
+            target, name = address, None
+        elif address < a64image.NAMED_STUB:
             target = address - a64image.CODE_STUB
             name = None
         else:
