@@ -388,7 +388,9 @@ class X86Engine:
             ext = bytes(uc.mem_read(FRET, 10))
             return bytes(uc.mem_read(FRET + 16, conv.ret.size)), ext
         if k == 'sret':
-            return bytes(uc.mem_read(placement.get('sret', RESULT_BUF), conv.ret.size)), None
+            p = placement.get('sret', RESULT_BUF)
+            self._ensure(p, conv.ret.size)          # a result buffer the function never touched is still a page
+            return bytes(uc.mem_read(p, conv.ret.size)), None
         return None, None
 
 

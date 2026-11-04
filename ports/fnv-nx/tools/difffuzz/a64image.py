@@ -15,6 +15,8 @@ import json
 import os
 import re
 import struct
+import contextlib
+import fcntl
 import subprocess
 import sys
 
@@ -106,14 +108,29 @@ class Image:
                 self.syms.setdefault(s.name, s.value)
 
 
+@contextlib.contextmanager
+def _locked(path):
+    """Exclusive lock on <path>.lock: the fuzzer's worker processes build a unit image once, never concurrently
+    (a reader saw a half-written ELF: struct.error / IndexError at setup)."""
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    with open(path + '.lock', 'w') as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
 def helpers_object(workdir):
     """a64helpers.cpp compiled once (ILP32, -O2): the platform iterators the native objects call by name."""
     src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'a64helpers.cpp')
     obj = os.path.join(workdir, 'zz_s13_helpers.o')
-    if not os.path.exists(obj) or os.path.getmtime(obj) < os.path.getmtime(src):
-        os.makedirs(workdir, exist_ok=True)
-        subprocess.run([os.environ.get('CXX', 'aarch64-linux-gnu-g++'), '-mabi=ilp32', '-O2', '-fno-exceptions',
-                        '-fno-stack-protector', '-c', src, '-o', obj], check=True)
+    with _locked(obj):
+        if not os.path.exists(obj) or os.path.getmtime(obj) < os.path.getmtime(src):
+            os.makedirs(workdir, exist_ok=True)
+            subprocess.run([os.environ.get('CXX', 'aarch64-linux-gnu-g++'), '-mabi=ilp32', '-O2', '-fno-exceptions',
+                            '-fno-stack-protector', '-c', src, '-o', obj + '.tmp'], check=True)
+            os.replace(obj + '.tmp', obj)
     return obj
 
 
@@ -124,6 +141,12 @@ def build(source, linkdir, workdir):
 
 def build_many(sources, linkdir, workdir, name):
     """Link the rewritten objects of several units into one image (lockstep runs of a call tree)."""
+    os.makedirs(workdir, exist_ok=True)
+    with _locked(os.path.join(workdir, name)):
+        return _build_many(sources, linkdir, workdir, name)
+
+
+def _build_many(sources, linkdir, workdir, name):
     fixed = os.path.join(linkdir, 'fixed')
     units = []
     for source in sources:
@@ -191,12 +214,18 @@ def build_many(sources, linkdir, workdir, name):
         f.write('\n'.join(lines) + '\n')
     with open(base + '.layout.ld', 'w') as f:
         f.write(LAYOUT % A64_BASE)
+    if os.path.exists(elf + '.tmp'):
+        os.remove(elf + '.tmp')
     r = subprocess.run([LD, '-m', 'aarch64linux32', '--no-demangle', '-static', '--noinhibit-exec',
-                        '--defsym=__dso_handle=0', '-e', '0', '-T', base + '.layout.ld', '-o', elf, base + '.stubs.ld', *objs],
+                        '--defsym=__dso_handle=0', '-e', '0', '-T', base + '.layout.ld', '-o', elf + '.tmp',
+                        base + '.stubs.ld', *objs],
                        capture_output=True, text=True, errors='surrogateescape')
     open(base + '.ld.log', 'w').write(r.stderr)
-    if not os.path.exists(elf):
+    if not os.path.exists(elf + '.tmp'):
         raise RuntimeError('link failed: %s' % r.stderr[:2000])
-    json.dump(dict(stubs={str(a): n for a, n in stubs.items()}, info=info, version=LINK_VERSION,
-                   sources=sorted(sources)), open(meta, 'w'))
+    os.replace(elf + '.tmp', elf)
+    with open(meta + '.tmp', 'w') as f:
+        json.dump(dict(stubs={str(a): n for a, n in stubs.items()}, info=info, version=LINK_VERSION,
+                       sources=sorted(sources)), f)
+    os.replace(meta + '.tmp', meta)
     return Image(elf, stubs, info)

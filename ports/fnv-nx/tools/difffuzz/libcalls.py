@@ -21,7 +21,7 @@ X86 = {
     0x0043b9d0: 'strchr', 0x00ec6e30: 'strrchr', 0x00ec7750: 'strstr', 0x00ec67aa: 'tolower', 0x00eca7f4: 'toupper',
     0x00404dc0: 'stricmp', 0x00ec68e4: 'stricmp', 0x00ec7ec0: 'strnicmp', 0x00ec8a19: 'strncmp', 0x00ecdb00: 'wcslen',
     0x00ec408c: 'cookie', 0x00ec5ec0: 'chkstk', 0x00ec8660: 'chkstk',
-    0x00ec62f6: 'ftol2', 0x00ec62c0: 'ftol2',
+    0x00ec62f6: 'ftol2', 0x00ec62c0: 'ftol2_sse',
     0x00ec6040: 'CIsqrt', 0x00eca0a0: 'CIsin', 0x00ec9f70: 'CIcos', 0x00ec6cde: 'fabs', 0x00ec6054: 'sqrt',
     0x00ecbc80: 'log10',
     0x00ecc300: 'allmul', 0x00ecc250: 'alldiv', 0x00ec7810: 'allshl', 0x00ec77e0: 'allshr',
@@ -29,7 +29,7 @@ X86 = {
 }
 # x86 helpers that run as x86 code from a private stub page (each its own slot: some call back into game code)
 STUB_SLOT = {'ftol2': 0, 'CIsqrt': 1, 'CIsin': 2, 'CIcos': 3, 'fabs': 4, 'sqrt': 5, 'ehvec_ctor': 6, 'ehvec_dtor': 7,
-             'log10': 8}
+             'log10': 8, 'ftol2_sse': 9}
 CRT_ADDR = {}
 for _a, _n in X86.items():
     CRT_ADDR.setdefault(_n, _a)
@@ -191,6 +191,11 @@ def x87_stub(name, slot):
     if name == 'ftol2':     # truncate ST0 to int64 in edx:eax and pop (MSVC _ftol2 semantics)
         return (b'\xd9\x3d' + s + b'\x66\xa1' + s + b'\x80\xcc\x0c' + b'\x66\xa3' + s2 + b'\xd9\x2d' + s2 +
                 b'\xdf\x3d' + s8 + b'\xd9\x2d' + s + b'\xa1' + s8 + b'\x8b\x15' + s12 + b'\xc3')
+    if name == 'ftol2_sse':
+        # __ftol2_sse with ___sse2_available = 1 (every PC the game runs on): fstp qword [esp]; cvttsd2si eax, that
+        # (int32 truncation: NaN and out of range give 0x80000000; __ftol2's x87 path would give the low dword of
+        # the int64 conversion)
+        return b'\x83\xec\x08' + b'\xdd\x1c\x24' + b'\xf2\x0f\x2c\x04\x24' + b'\x83\xc4\x08' + b'\xc3'
     if name == 'CIsqrt':
         return b'\xd9\xfa\xc3'
     if name == 'CIsin':

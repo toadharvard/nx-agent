@@ -48,6 +48,14 @@ def divs_of(d, addr):
     return sorted(glob.glob(os.path.join(d, 'div', '%s-*.json' % addr)))
 
 
+VERDICT_SETUP = ('setup:Unsupported', 'setup:KeyError', 'setup:ValueError')   # deterministic: no function to fuzz
+
+
+def harness_failure(r):
+    st = str(r.get('status', ''))
+    return st.startswith(('crash:', 'run:')) or (st.startswith('setup:') and st not in VERDICT_SETUP)
+
+
 def cmd_todo(cache, targets, keys, out, counts_out):
     rows, keys = load_rows(cache), json.load(open(keys))
     stale, new, c = [], [], dict(shard=0, no_key=0, up_to_date=0, changed=0, new=0)
@@ -59,8 +67,9 @@ def cmd_todo(cache, targets, keys, out, counts_out):
             c['no_key'] += 1
             continue
         r = rows.get(t['address'])
-        # 'crash:<exception>' is the harness failing on that function, not a verdict: fuzz it again
-        if r is not None and r.get('key') == k and not str(r.get('status', '')).startswith('crash:'):
+        # a harness failure on that function (crash:*, run:*, a setup error other than an unsupported
+        # signature or a missing definition) is not a verdict: fuzz it again
+        if r is not None and r.get('key') == k and not harness_failure(r):
             c['up_to_date'] += 1
         elif r is not None:
             c['changed'] += 1
@@ -121,7 +130,7 @@ def cmd_status(cache, targets, keys, commit, out):
         k, r = keys.get(a), rows.get(a)
         if k is None:
             c['no_key'] += 1
-        elif r is not None and str(r.get('status', '')).startswith('crash:'):
+        elif r is not None and harness_failure(r):
             c['crashed'] += 1                     # a harness exception, fuzzed again by the next run
         elif r is not None and r.get('key') == k:
             c['fuzzed_this_head' if r.get('commit') == commit else 'reused'] += 1
@@ -133,7 +142,7 @@ def cmd_status(cache, targets, keys, commit, out):
 
 def cmd_dropcrash(camp):
     rows = load_rows(camp)
-    keep = {a: r for a, r in rows.items() if not str(r.get('status', '')).startswith('crash:')}
+    keep = {a: r for a, r in rows.items() if not harness_failure(r)}
     if len(keep) != len(rows):
         save_rows(camp, keep)
     print('dropped %d crashed functions' % (len(rows) - len(keep)))

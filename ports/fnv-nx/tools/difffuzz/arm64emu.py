@@ -383,6 +383,7 @@ class Arm64Engine:
                 b = (uc.reg_read(VR[cont[1]]) & ((1 << 128) - 1)).to_bytes(16, 'little')
             elif cont == ('mem', 'x8'):
                 import x86emu
+                self._ensure(placement.get('sret', x86emu.RESULT_BUF) + voff, ln)
                 b = bytes(uc.mem_read(placement.get('sret', x86emu.RESULT_BUF) + voff, ln))
                 coff = 0
             else:
