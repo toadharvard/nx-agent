@@ -223,6 +223,12 @@ class/struct/union/enum tags, which Itanium names do not.
     AArch64 register counts. A `char`/`short`/`bool` there is extended in place (`narrow-extend`);
   * both variadic: the named parts are compared like fixed ones and the anonymous parts must start at the same
     place;
+  * definition parameters in the reference's anonymous part, when the reference names nothing (`int f(...)`, the
+    decomp's unprototyped declaration) or the definition is variadic too (0x00406d00 `(char *, ...)` against
+    `(char *, int, const char *, ...)`): 32-bit integers and pointers only. x86 worked, so the call site pushed a
+    4-byte word there, which is never a float (a variadic caller promotes it to double); its integer or pointer
+    takes the register the definition reads. A fixed definition behind named reference parameters is a decompiled
+    stack walk (0x00703c00): `manual`;
   * a callee-pop side (stdcall/thiscall/fastcall) with stack arguments against a variadic (cdecl) one moved esp on
     x86: `manual`.
   Pairs decided this way carry the class `varargs-tail`. Test: `test_varargs.py` (verdicts, and the `same` and

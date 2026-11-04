@@ -63,7 +63,19 @@ CASES = [
      ' g_h = a0 + va_arg(a, int); va_end(a); }',
      'extern "C" void br_va_narrow(int, int);   // the short travels with junk above bit 15\n'
      'static int t_va_narrow() { br_va_narrow(10, 0x5ffff); return g_h == 9 ? 0 : 1; }'),
+    # the decomp's unprototyped declaration `int f(...)` against a fixed definition: integers and pointers
+    ('unproto', '?p@@YAHZZ', '?p@@YAXPBDH@Z', 'same',
+     'extern "C" int g_p; int g_p; extern "C" void def_unproto(const char *s, int n) { g_p = (s[0] == \'k\') + n; }',
+     'extern "C" int br_unproto(...);\n'
+     'static int t_unproto() { br_unproto("k", 41); return g_p == 42 ? 0 : 1; }'),
+    # both variadic, the definition names two of the reference's anonymous arguments
+    ('va_more', '?q@@YAHPADZZ', '?q@@YAHPADHPBDZZ', 'same',
+     'extern "C" int def_va_more(char *d, int n, const char *f, ...) { va_list a; va_start(a, f);'
+     ' int x = va_arg(a, int); va_end(a); d[0] = f[0]; return n + x; }',
+     'extern "C" int br_va_more(char *, ...);\n'
+     'static int t_va_more() { char b[2] = {0, 0}; return br_va_more(b, 40, "z", 2) == 42 && b[0] == \'z\' ? 0 : 1; }'),
     # not bridgeable without the call site's types or another convention
+    ('unproto_double', '?p2@@YAHZZ', '?p2@@YAXN@Z', 'manual', '', ''),
     ('va_float', '?k@@YAXHM@Z', '?k@@YAXHZZ', 'manual', '', ''),
     ('va_beyond', '?d@@YAXPBDZZ', '?d@@YAXPBD0@Z', 'manual', '', ''),
     ('va_stdcall', '?s@@YGXH@Z', '?s@@YAXHZZ', 'manual', '', ''),
