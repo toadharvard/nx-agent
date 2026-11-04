@@ -108,6 +108,9 @@ POLICY = {
                                                       'runs (preloaded or followed) while the native calls it out of '
                                                       'line and the harness intercepts it: no side effects natively'),
     'no-native-entry': ('artifact', 'S13', False, 'the native image has no entry for the function (link subset)'),
+    'dtor-flags':     ('artifact', 'S13', False, 'an MSVC deleting destructor ??_G fuzzed with flags bit 0 clear '
+                                                 '(destroy only) against the Itanium D0, which always frees: fuzz '
+                                                 '??_G with flags & 1 or pair flags 0 with D1'),
     # --- real bugs -----------------------------------------------------------------------------------------------
     'uninit-arm':     ('real-bug', 'S1b', True, 'the native result depends on garbage: an argument slot the caller '
                                                 'never wrote (ABI pop-mismatch) or an uninitialised local'),

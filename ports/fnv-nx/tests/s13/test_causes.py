@@ -224,6 +224,24 @@ def test_policy():
           'report.reclassify applies the record rules')
     check(report.reclassify(rec(dict(kind='return', x86=w(1), arm=w(2)), 'bool-repr')) == 'bool-repr',
           'report.reclassify keeps a probe cause')
+    g = rec(dict(kind='call-count', x86=0, arm=1, x86_trace=[], arm_trace=['00aa1460']), 'call-flow')
+    g['symbol'] = '??_GFoo@@UAEPAXI@Z'
+    g['case'] = {'args': {'p0': '00000000'}}
+    check(report.reclassify(g) == 'dtor-flags', '??_G with flags 0: the native D0 frees, the oracle does not')
+    g['case'] = {'args': {'p0': '01000000'}}
+    check(report.reclassify(g) == 'falloff?', '??_G with flags 1 that frees only natively stays falloff?')
+    g = rec(dict(kind='call-count', x86=1, arm=3, x86_trace=['00401234'], arm_trace=['00401234', '00401030',
+                                                                                       '00555555']), 'call-flow')
+    g['symbol'] = '??_GFoo@@UAEPAXI@Z'
+    check(report.reclassify(g) != 'dtor-flags', '??_G: an extra call that is not a deallocator is not dtor-flags')
+    n = rec(dict(kind='call-count', x86=0, arm=2, x86_trace=[], arm_trace=['name:_ZNK3FooIcEcvPKcEv', '0043b4a0']),
+            'call-flow')
+    check(report.reclassify(n) == 'native-undefined', 'oracle no calls, native first calls a named stub')
+    n = rec(dict(kind='call-count', x86=0, arm=2, x86_trace=[], arm_trace=['00559450', 'name:_ZNK3FooIcEcvPKcEv']),
+            'call-flow')
+    check(report.reclassify(n) == 'after-native-undefined', 'oracle no calls, a later native call is a named stub')
+    n = rec(dict(kind='call-count', x86=0, arm=1, x86_trace=[], arm_trace=['00559450']), 'call-flow')
+    check(report.reclassify(n) == 'falloff?', 'oracle no calls, native calls an address: falloff?')
 
 
 def test_summary():
