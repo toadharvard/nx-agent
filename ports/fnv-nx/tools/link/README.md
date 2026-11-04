@@ -11,11 +11,13 @@ Design, formats and measurements: [`../../docs/LINK.md`](../../docs/LINK.md).
 | `layout.py` | Per-unit probe: size/align/trivial/empty and AAPCS64 class of by-value aggregates. |
 | `abi2.py` | Byte-level verdict with layouts and the general (frame-based) bridge generator. |
 | `vtables.py` | Image vftables (primary and `{for B}`) -> Itanium address points; synthesized vtables/typeinfo for classes no object emits. |
+| `vslots.py` | GCC vtable slots bound through the MSVC 2008 vftables of the pristine decomp (`--msvc-objs`): static targets or stubs through the image slot; `validate` against the x86 code. |
 | `test_override.py` | End-to-end `--override` test (three hand-written units). |
 | `test_bridges.py` | Runs generated bridges under qemu-aarch64 (hand-written declarations). |
 | `test_bindings.py` | CRT/library providers, IAT slots by api, thread-local variables, hand-written vptr stores. |
 | `test_startup.py` | `__fnvnx_dyninit_`/`_dynexit_` address entries and the game-only `__cxa_atexit` rename. |
 | `test_vtables.py` | Secondary/synthesized vtables and the `??_G` D1/D0 table against GCC's own output and the linked image. |
+| `test_vslots.py` | Slot order and binding on hand-written classes compiled by MSVC 2008 (Wine) and GCC; image-slot stubs under qemu. |
 | `elfsyms.py` | ELF symbol tables, vtable-slot relocations, renaming undefined symbols (many old names -> one new). |
 | `fnvnx_addrmap.h` | Runtime form of the address map (`addrmap.c` is generated). |
 | `test_link.py` | Self-test on hand-written names (no decomp content). |
@@ -26,7 +28,8 @@ tools/prepare.py ext/fnv_decomp $T
 SSE2NEON=ext/sse2neon tools/link/compile.sh $T $O   # [units.list] [jobs]; writes $O/objects.tsv
 tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L
 tools/link/fnvlink.py probe $L $T                   # layouts of the aggregates + synthesized vtables; resolve again
-tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L [--override o.tsv] [--extern-text s4.txt]
+tools/link/fnvlink.py resolve $T/build/units.json $O/objects.tsv $L [--override o.tsv] [--extern-text s4.txt] \
+    [--msvc-objs $S11/obj/pristine]                # vtable slots through the MSVC vftables (u<index>.obj)
                                                     # [--crt-symbols t.tsv|none] [--imports t.tsv|none]
                                                     # [--units-renames t.tsv|none] (S1b, patched units only)
 tools/link/fnvlink.py apply $L $L/fixed             # renamed objects (own references of rebound variables
@@ -34,6 +37,7 @@ tools/link/fnvlink.py apply $L $L/fixed             # renamed objects (own refer
 tools/link/fnvlink.py check $L $L/fixed             # trial link with aliases.ld; what is still undefined
 python3 tools/link/test_link.py; python3 tools/link/test_bridges.py   # need SSE2NEON; qemu-user for the second
 python3 tools/link/test_override.py; python3 tools/link/test_vtables.py; python3 tools/link/test_startup.py
+FNV_DECOMP=... FNV_MSVC9_ROOT=... FNV_MSVC9_PREFIX=... python3 tools/link/test_vslots.py   # MSVC 2008 under Wine
 python3 tools/link/test_bindings.py
 ```
 

@@ -74,6 +74,8 @@ only needs to remember which steps finished.
 | `out/abi.tsv` | Every reference whose declaration passes arguments differently from the definition: verdict, classes, register moves, notes, both demangled declarations. |
 | `out/bridges.S` | Generated bridge thunks (AArch64 asm, ILP32), the trap stubs and the native TLS block (below). |
 | `__fnvnx_vtrap_<hash8>` | Trap stub for a virtual function defined nowhere (`vslot-unresolved`): `fnvnx_vslot_trap(this, "virtual function defined nowhere: <name> (slot k of _ZTV...)")`; the weak default in `bridges.S` is a `brk`, the platform may define a reporting one. |
+| `__fnvnx_vslot_<vftable8>_<k>[_d0\|_d1]` | Stub for a GCC vtable slot through slot *k* of an image vftable (`vslot-image`, `--msvc-objs`, section "Vtable slots"): tail call through the loader-rewritten word, flags 1/0 for D0/D1. |
+| `out/vslots.tsv`, `out/vslots_stats.txt` | Per undefined slot symbol (and implicit D1/D2) the outcome of the MSVC-vftable binding; the counts. |
 | `__fnvnx_tls_<addr8>`, `__fnvnx_tls_image` | Slot of the image `.tls` address `<addr8>` in the native TLS block `__fnvnx_tls_image` (layout of the image's `.tls` template; `__fnvnx_tls_image_orig` / `_size` give its range). |
 | `out/hand_vptrs.tsv` | Image vftable addresses the sources store into vptrs by hand: how they are mapped, the native vtable, the units and storing classes. |
 | `out/extern_text.tsv` | `.text` addresses referenced but defined by no unit (CRT, thunks; stream S4), with the names used. |
@@ -279,6 +281,89 @@ virtual functions declared but defined nowhere (and without an address) their mi
 `vslot-unresolved`, and resolve binds such slots, in GCC's vtables and synthesized ones, to trap stubs (above)
 instead of leaving the link undefined.
 
+## Vtable slots through the MSVC vftables (`vslots.py`, D12)
+
+`resolve --msvc-objs <dir>` (or `FNVNX_MSVC_OBJS`): `<dir>/u<index>.obj` are the pristine decomp's units compiled
+by MSVC 2008 (tools/equiv; index = position in units.json). Every object that needs a vftable emits it, `??_7C@@6B@`
+or ``C::`vftable'{for `B'}``, as a COMDAT behind its CompleteObjectLocator (COL: the vfptr's offset in the complete
+object), one `DIR32` relocation per slot naming the MSVC function. Slot targets are followed through `??_E` -> `??_G`
+(weak external) and adjustor thunks (`sub ecx, n; jmp f`, by the jump's relocation).
+
+**Views and the join.** Each vftable is one *view*; units.json gives its image address (the unit's binding of the
+`??_7` name, else the one address all units give it). Views at one address are one image vftable. A view's slot
+target gets an address from the unit's own names (`def`, `ref`), then units.json's definitions or references of the
+same decorated name when unique (`gdef`, `gref`), last a `FUN_<addr>` name (`name-addr`: a local class's override
+keeps the name of the slot it overrides, so it ranks last). Per slot of the image vftable the candidate of the
+view's own class (an override declared by that class) beats an inherited one, then the tier, then the number of
+views; equal-ranked candidates that disagree are a *disagreement* (no static target).
+
+**Pairing (Itanium order -> MSVC order).** A GCC vtable of class C at offset-to-top -o pairs with the MSVC view of
+C whose COL offset is o: the unit's own view first (same declarations), else the views of other units if they stand
+for one image vftable. Inside, GCC's D1 + D0 pair with MSVC's one deleting destructor; other slots pair by signature
+(sigs.py keys exact, l1, l2, then name + parameter count when unique), the rest by position after the destructor
+expansion. MSVC 2008, checked in test_vslots.py: the overloads one class introduces sit together at the position of
+the first, in reverse declaration order (`f(int); g(); f(double); ~Ov(); f(char *)` -> `f(char *), f(double),
+f(int), g, ??_E`); a derived class's new overloads of a base name are not merged into the base's group; Itanium has
+an extra primary-vtable slot for an overrider of a secondary base's function (MSVC reaches it only through the
+secondary vftable).
+
+**Binding.** For an undefined symbol that a vtable of the object names and that resolve left `unresolved`,
+`ambiguous` or bound by a loose tier (`arity`/`name`: these pick the wrong overload, e.g. `k(char *)` -> `k(int)`),
+and for unresolved implicit D1/D2 (GCC calls a base destructor MSVC inlined): its uses in the object decide (one
+symbol stands for all its relocations). All in one image vftable slot: that slot's static target if known, else
+the slot itself; several classes: a static target they agree on, else the declaring class's vtable, else the most
+common. No usable vtable: the declaring class's MSVC vftable, slot found by signature. A static target becomes the
+native definition at the address (`addr` class, ABI check against the slot's MSVC declaration; D0 -> `__fnv_<G>`,
+D1/D2 -> `__fnv_<G>_D1` of a `??_G`). Otherwise the symbol becomes `__fnvnx_vslot_<vftable>_<k>[_d0|_d1]` (class
+`vslot-image`, in `bridges.S`): load the word at vftable + 4k, which the S3 loader has rewritten to the native
+definition, to the deleting-destructor adapter (`(this, flags)`: D0 passes 1, D1/D2 0 in w1; the adapter takes D1
+from `fnvnx_addrmap_deldtors`, never from the object's vtable, so the stubs cannot recurse) or to a trap reporting the
+original address; a word still inside the image's `.text` (not rewritten) goes to `fnvnx_vslot_trap(this, text)`.
+A slot is only called through its own vtable, so an image slot is exact even where a unit's declaration misses an
+override. Strict bindings are only compared (`check: ...` in `vslots_stats.txt`). `vslots.tsv`: per symbol the
+outcome, static target, image vftable, pairing, MSVC slot and declaration, candidate addresses.
+
+**Validation** (`vslots.py validate <units.json> <msvc objdir> <out>/vslots.tsv`, needs capstone): A. the declared
+slot's stack bytes (abi.py's x86 model) against the `ret N` of every static target; B. virtual calls `call [vptr+off]`
+through `this` (followed through register copies and stack slots written once) in the thiscall members of classes
+whose primary vftable the unit emits: pushed bytes since the prologue or previous call, against the declared slot and
+the joined slot's target.
+
+### Measurements (J-0042 inputs: fresh3 tree, 2,729 objects + 733 synthesized vtable objects)
+
+MSVC side: 2,987 objects, 6,639 vftable views (all with a COL), 4,295 with an image address, 2,326 image vftables
+(1,248 seen by several units), 13,795 image slots: static target known for 1,980, 4 disagreements (deleting
+destructors two units claim for one vftable). View slot targets: def 329, ref 793, gdef 520, gref 2,451, name-addr 678,
+pure 1,228, named nowhere 17,424 - the decomp names the bodies of most virtuals under other (shell) names, so the
+image slot, not a static address, is what most bindings rest on. Pairing: 4,748 GCC vtables with the unit's own
+view, 197 with another unit's, 2,016 without any MSVC view; slots paired exact 17,718, l1 1, arity 3, dtor 5,240,
+position 383, unpaired 651; 38 slots MSVC orders differently from the expanded Itanium position.
+
+| | before | with `--msvc-objs` |
+|---|---:|---:|
+| `vslot-unresolved` references (trap stubs) | 16,401 (7,602) | 7,296 (4,797) |
+| `vslot-image` (references through an image slot; stubs) | - | 8,996 (7,260) |
+| slot references bound statically (`code`, `code-pending`) | - | 189 |
+| `unresolved-ctor-dtor` | 2,396 | 2,315 (15 static, 66 image) |
+| loose-tier bindings replaced | - | 14 |
+| trial link undefined names | 8,746 | 8,704 |
+
+Remaining traps (7,296 references): 6,251 have no pairing - their vtable's class has no MSVC view at all (4,832;
+the unit stores the vptr by hand or never constructs the class in matched code, e.g. `LowProcess`,
+`MiddleLowProcess`, `TESReputation`; 1,417 of them local/shell classes), and the declaring class has none either;
+1,022 are paired with a view whose vftable name units.json does not bind (no image address); 22 pair a non-destructor
+slot with a `??_G` (the unit's declaration lacks the virtual destructor); 1 is pure in MSVC's view. Implicit
+destructors: 2,149 of 2,230 D1/D2 belong to classes without a view with a destructor slot.
+
+Checks: of the slot symbols resolve bound strictly by name, 1,587 have the same static target through the vftables,
+2,282 none, 75 another: the derived class's image slot holds an override the unit's declaration does not have (e.g.
+`TESForm::ClearData` in a `TESNPC` vtable, whose slot is `TESNPC::ClearData`); those vtables call the base function
+(a source issue, `check-differs` rows). Validation A: 197 of 199 static targets pop exactly the declared stack bytes
+(2 placeholder declarations `virtual void vfn_10(void)` of functions taking arguments, e.g. `BSFile::SetEndianSwap
+(bool)`), and 73 of 75 `check-differs` targets. B: 197 `this`-based virtual call sites; where the joined slot's target
+is known (74) it pops the declared bytes in 74; push counting matches the declaration at 114 of 184 (nested calls'
+arguments pushed earlier), and there all known targets (10) match the pushes.
+
 ## Platform, imports, thread-locals and hand-written vptrs
 
 * **CRT and library code** (S4b, RUNTIME.md): a reference to a `.text` address no unit defines that S4's
@@ -463,15 +548,19 @@ definitions matched exactly).
 
 ## Open problems
 
-* **Virtual functions behind native vtables** (6,088 refs before the synthesized vtables, 11,668 with them): GCC
-  emits vtables whose slots name the decomp's `Unk_xx` virtuals; units.json has no address for them because MSVC
-  vtables live in `.rdata`. Resolution: slot *k* of `_ZTV<Class>` -> the MSVC `??_7<Class>@@6B@` address (when some unit names
-  it) -> dword *k'* read from the player's `FalloutNV.exe` (D3: allowed locally, never stored) -> code address ->
-  `__fnv_`. Needs the image reader of S3 and the Itanium/MSVC slot correspondence (two destructor slots vs one,
-  RTTI/offset-to-top header).
-* **Trapped slots**: 4,650 virtual functions are defined nowhere (or belong to vtables only the address map uses)
-  and trap when called; the image vftable slots (previous item, S2b) can bind most of them. Emitted host code keeps
-  local copies of the unit's `static` functions and data it reaches (none of its globals: those bind to the host).
+* **Virtual functions behind native vtables**: the Itanium/MSVC slot correspondence and the image vftable slots
+  (section "Vtable slots", `--msvc-objs`) bind 9,105 of the 16,401 trapped slot references, nearly all through
+  stubs that read the loaded image's slot. Left: 6,251 slots of classes no MSVC object emits a vftable for, 1,022 of
+  views without an image address. Both need the class's image vftable without a `??_7` name: by its RTTI
+  (TypeDescriptor `.?AV<C>@@` -> COL -> vftable, which S3's scanner already lists) at load time or from the player's
+  exe at link time (D3), plus MSVC's slot order for such classes (a `/d1reportSingleClassLayout<C>` probe on a unit
+  that sees the class, as the GCC probe does for vtables).
+* **Missed overrides**: 75 strictly bound slots name a base function where the image vftable has the derived class's
+  override (`check-differs` in `vslots.tsv`); the slot could be retargeted per relocation to the image slot, or the
+  unit's declaration fixed (S1). 22 slot-0 pairings show declarations without the virtual destructor.
+* **Trapped slots**: 4,797 virtual functions (7,296 references) are still defined nowhere and trap when called.
+  Emitted host code keeps local copies of the unit's `static` functions and data it reaches (none of its globals:
+  those bind to the host).
 * **Hand-written vftable references**: only stores are rebound (292 addresses); a raw MSVC-index read through such a
   data symbol now reads the Itanium vtable, so S1's raw-index calls must go through `FNVNX_MSVC_VCALL` (D7 point 4).
   294 stored addresses have no native class (ios_base / basic_ios / ostream: S4b's runtime has no vtable for them).
