@@ -463,8 +463,8 @@ static void record(DkCmdBuf cb, const NxSubmit* s, NxFrameStats* st) {
     uint16_t cur[BK_COUNT] = {0};
     uint32_t curState = 0;
     /* uniform buffers bound in this command list, per stage and slot: a bind of the same range is skipped */
-    DkGpuAddr uboAddr[2][4] = {{0}};
-    uint32_t uboSize[2][4] = {{0}};
+    DkGpuAddr uboAddr[2][16] = {{0}};   /* per stage and slot (V1 U3: slots 4-15 aliased slot & 3) */
+    uint32_t uboSize[2][16] = {{0}};
     int slot = -1;
     PassState ps;
     memset(&ps, 0, sizeof ps);
@@ -551,11 +551,12 @@ static void record(DkCmdBuf cb, const NxSubmit* s, NxFrameStats* st) {
         case NxOp_BindUbo: {
             if (argc < 5) break;
             DkGpuAddr ad = mem_addr(a[2], a[3]);
-            const uint32_t sl = a[1] & 3;
-            if ((a[0] & 1) && (uboAddr[0][sl] != ad || uboSize[0][sl] != a[4] || a[1] > 3)) {
+            if (a[1] >= 16) break;   /* deko3d has 16 uniform buffer slots per stage */
+            const uint32_t sl = a[1];
+            if ((a[0] & 1) && (uboAddr[0][sl] != ad || uboSize[0][sl] != a[4])) {
                 dkCmdBufBindUniformBuffer(cb, DkStage_Vertex, a[1], ad, a[4]); uboAddr[0][sl] = ad; uboSize[0][sl] = a[4];
             }
-            if ((a[0] & 2) && (uboAddr[1][sl] != ad || uboSize[1][sl] != a[4] || a[1] > 3)) {
+            if ((a[0] & 2) && (uboAddr[1][sl] != ad || uboSize[1][sl] != a[4])) {
                 dkCmdBufBindUniformBuffer(cb, DkStage_Fragment, a[1], ad, a[4]); uboAddr[1][sl] = ad; uboSize[1][sl] = a[4];
             }
             break;
