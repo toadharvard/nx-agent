@@ -13,9 +13,9 @@ S13B-C2	S13b	0111901	f636994	refuted	-	test_s13b_callee_store.py	oracle-callee-s
 S13B-C3	S13b	0111901	f636994	refuted	-	test_s13b_callee_store.py	oracle-callee-store is an artifact: x86-only-store classed artifact
 UBO-U3	render	a16a489	6d305cd	partial	-	test_nxgpu_ubo_cache.py	nxgpu UBO bind cache: slot & 3 aliases slots 4-15 onto 0-3
 SORT-T1	render	f280eb4	1b0665e	partial	-	test_sort_radix.py	SortPackets radix: function-level static hist is not reentrant (two-thread recording)
-S5-W2	S5	-	-	partial	-	test_s5_milestone_store.py	store watch: 64-bit str at want-4
-S5-W6	S5	-	-	partial	-	test_s5_milestone_store.py	store watch: the pointer at A as the upper word
-S5-W7	S5	-	-	partial	-	test_s5_milestone_store.py	store watch: a store to the old object after the pointer moved
+S5-W2	S5	-	-	fixed	e170aeb	test_s5_milestone_store.py	store watch: 64-bit str at want-4
+S5-W6	S5	-	-	fixed	e170aeb	test_s5_milestone_store.py	store watch: the pointer at A as the upper word
+S5-W7	S5	-	-	fixed	e170aeb	test_s5_milestone_store.py	store watch: a store to the old object after the pointer moved
 R0-R13	R0	58d1dfb	-	refuted	-	test_ready_adversarial.py	ready.py: boot.real_exe passes on contradicting image labels with no hash (also at bcbbf03)
 R0-R14	R0	58d1dfb	-	refuted	-	test_ready_adversarial.py	ready.py: frames_gate reads try-farm reports (unmerged heads) (also at bcbbf03)
 NXR-BOUNDS	render	44adf6c	-	partial	-	test_nx_render_robust.py	nx_render survives malformed .nxd9/.nxcap (D1-D7, C1-C6, mutations)
