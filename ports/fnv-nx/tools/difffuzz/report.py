@@ -95,7 +95,8 @@ def _signedness_by_design(rec):
     shapes whose cause is by design, the top bit being a float sign, a bool byte, INT_MIN or the top of the address
     space: a float argument within the x87 tolerance (x87-precision / nan-bits), a bool result with the oracle's
     truth value in another byte (bool-repr), x86 #DE where AArch64 divides (division), a native access that
-    crosses 4 GiB where the x86 address wraps (ilp32-pointer). None otherwise: the probe's cause stands."""
+    crosses 4 GiB where the x86 address wraps (ilp32-pointer). And a first difference that is a native call of a named
+    stub is native-undefined (S2c / S2d), whatever the probe saw. None otherwise: the probe's cause stands."""
     d = rec.get('_now') or rec.get('divergence') or {}
     k = d.get('kind')
     if k == 'call-args' and d.get('cls') in ('F32', 'F64') and _causes is not None:
@@ -109,6 +110,8 @@ def _signedness_by_design(rec):
             bx = ba = b''
         if len(bx) == 1 and len(ba) == 1 and bx[0] in (0, 1) and ba[0] not in (0, 1) and bx[0] == 1:
             return 'bool-repr'
+    if k == 'call-target' and str(d.get('arm') or '').startswith('name:'):
+        return 'native-undefined'           # not by design: the first difference is a call of an unbound name
     if k == 'error' and d.get('x86') in ('div0', 'exc:0') and not d.get('arm'):
         return 'division'
     if k == 'error' and not d.get('x86') and str(d.get('arm') or '').startswith(('fault:r:', 'fault:w:')):
