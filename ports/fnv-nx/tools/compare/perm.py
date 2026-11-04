@@ -171,7 +171,7 @@ def ps_job(j, r):
     vsc[1] = [r.uniform(0.5, 2), r.uniform(-1, 1), r.uniform(-1, 1), r.uniform(0.5, 2)]
     psc = {c['reg']: [r.uniform(0, 1) for _ in range(4)] for c in j.get('constants', []) if c['set'] == 'float'}
     samplers = {s['reg']: (3 if s['type'] == 'cube' else 1 + (s['reg'] & 1)) for s in j.get('samplers', [])}
-    return elems, 28, verts, [0, 1, 2, 0, 2, 3], vsc, psc, samplers
+    return elems, 32, verts, [0, 1, 2, 0, 2, 3], vsc, psc, samplers
 
 
 def vs_job(j, r, glsl=''):
