@@ -185,6 +185,7 @@ static void set_cpu_boost(int mode) {
     logf_("fnvnx host: cpu boost %s%s\n", mode ? "FastLoad" : "Normal", R_FAILED(rc) ? " (FAILED)" : "");
     if (R_SUCCEEDED(rc)) g_boost = mode;
 }
+#include "host_message.inc"
 static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
     if (fn == FNVNX_PLAT_CPU_BOOST && nargs >= 1) {
         if (!g_cfg.boost_loading) return 1;
@@ -192,6 +193,7 @@ static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) 
         return 0;
     }
     if (fn == FNVNX_PLAT_THREAD_ACTIVITY && nargs >= 2) return h_thread_activity(args[0], args[1]);
+    if (fn == FNVNX_PLAT_MESSAGE && nargs >= 2) return host_show_message((const char *)args[0], (const char *)args[1]);
     return FNVNX_EXT_NO_MODULE;
 }
 

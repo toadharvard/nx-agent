@@ -138,6 +138,12 @@ void os_cpu_boost(int fast_load) {
     uint64_t arg[1] = {fast_load ? 1u : 0u};
     fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_CPU_BOOST, FNVNX_ADDR(arg), 1);
 }
+/* the host's error applet (toolchain/host/host_message.inc) */
+void os_show_message(const char *caption, const char *text) {
+    if (!fnvnx_host->ext_call) return;
+    uint64_t arg[2] = {FNVNX_ADDR(caption ? caption : ""), FNVNX_ADDR(text ? text : "")};
+    fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_MESSAGE, FNVNX_ADDR(arg), 2);
+}
 void os_yield(void) { fnvnx_yield(); }
 void os_sleep_ns(uint64_t ns) { fnvnx_hcall1(fnvnx_host->sleep_ns, ns); }
 

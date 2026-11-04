@@ -69,6 +69,9 @@ os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int p
 /* CPU boost for loading: 1 = fast load (Switch: appletSetCpuBoostMode FastLoad, CPU 1785 MHz, GPU at its minimum),
  * 0 = normal. The host may refuse (platform config boost_loading=0); a no-op on other backends. */
 void os_cpu_boost(int fast_load);
+/* A system dialog with the caption, the text and an OK button, blocking until it is closed (MessageBoxA): the
+ * Switch's error applet; a no-op where the platform has none (the caller logs the text). */
+void os_show_message(const char *caption, const char *text);
 int os_thread_start(os_thread *t);
 int os_thread_join(os_thread *t);           /* waits for exit; does not free */
 void os_thread_free(os_thread *t);          /* after join, or to detach a running thread */

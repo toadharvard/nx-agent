@@ -18,6 +18,7 @@
 #include <switch/kernel/svc.h>
 #include <switch/kernel/thread.h>
 #include <switch/services/applet.h>
+#include <switch/applets/error.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -214,6 +215,16 @@ int os_thread_resume(os_thread *t)
 void os_thread_exit(void) { threadExit(); }
 void os_cpu_boost(int fast_load) {
     appletSetCpuBoostMode(fast_load ? ApmCpuBoostMode_FastLoad : ApmCpuBoostMode_Normal);
+}
+
+void os_show_message(const char *caption, const char *text)
+{
+    char dlg[512], full[2048];
+    snprintf(dlg, sizeof dlg, "%s\n%.*s", caption ? caption : "", (int)strcspn(text ? text : "", "\r\n"), text ? text : "");
+    snprintf(full, sizeof full, "%s\n\n%s", caption ? caption : "", text ? text : "");
+    ErrorApplicationConfig c;
+    if (R_SUCCEEDED(errorApplicationCreate(&c, dlg, full)))
+        errorApplicationShow(&c);
 }
 
 void os_yield(void) { svcSleepThread(0); } /* 0 = yield to threads of the same priority */
