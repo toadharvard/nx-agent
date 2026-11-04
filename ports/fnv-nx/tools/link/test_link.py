@@ -11,6 +11,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import abi      # noqa: E402
 import abi2     # noqa: E402
+import elfsyms  # noqa: E402
 import fnvlink  # noqa: E402
 import layout   # noqa: E402
 import sigs     # noqa: E402
@@ -229,6 +230,32 @@ struct D4 { double a, b, c, d; };
             g = got.get(t)
             check(g is not None and (g.size, g.cls) == (size, cls), 'layout %s: %s (want %s %s)' % (t, g, size, cls))
         check(got.get('Nope') is None, 'unnameable type dropped')
+
+    # V1 defect C4 (tools/verify/v1_link/repro_typeinfo_mix.py): two units reconstruct C with different bases; the
+    # one that sorts first only names C's typeinfo, the other has the vtable. The linker kept the first typeinfo
+    # (one base, 12 bytes) next to the second unit's vtable (two bases): the typeinfo must be the vtable unit's
+    ti_a = ('#include <typeinfo>\nstruct B1 { virtual ~B1() {} int x; };\n'
+            'struct C : B1 { virtual void f() {} int y; };\nconst std::type_info &ti_from_a() { return typeid(C); }\n')
+    ti_b = ('struct B1 { virtual ~B1() {} int x; };\nstruct B2 { virtual void g() {} int z; };\n'
+            'struct C : B1, B2 { virtual void f() {} int y; };\nC *make_c() { return new C; }\n')
+    with tempfile.TemporaryDirectory() as tmp:
+        fixed = os.path.join(tmp, 'fixed')
+        os.makedirs(fixed)
+        for name, text in (('a_view.cpp', ti_a), ('b_vtable.cpp', ti_b)):
+            open(os.path.join(tmp, name), 'w').write(text)
+            r = subprocess.run([fnvlink.CC, '-x', 'c++', '-mabi=ilp32', '-O2', '-fPIC', '-c', os.path.join(tmp, name),
+                                '-o', os.path.join(fixed, name + '.o')], capture_output=True, text=True)
+            check(r.returncode == 0, 'typeinfo units compile: ' + r.stderr[:300])
+        rows, cnt = fnvlink.pair_typeinfo(fixed)
+        check([r[:4] for r in rows] == [('1C', 'b_vtable.cpp.o', 'a_view.cpp.o', 'a_view.cpp.o')] and
+              cnt['undefined'] == 1, 'typeinfo pairing: %s %s' % (rows, dict(cnt)))
+        elf = os.path.join(tmp, 'trial.elf')
+        subprocess.run([fnvlink.LD, '-m', 'aarch64linux32', '--noinhibit-exec', '-e', '0', '-o', elf,
+                        *sorted(os.path.join(fixed, n) for n in os.listdir(fixed))], capture_output=True)
+        ti = [s for s in (elfsyms.symbols(elf) if os.path.exists(elf) else []) if s.name == '_ZTI1C' and s.shndx]
+        check(len(ti) == 1 and ti[0].size == 32, 'kept typeinfo of C is the vtable unit\'s (two bases, 32 bytes): %s'
+              % [(s.size, s.bind) for s in ti])
+        check(fnvlink.pair_typeinfo(fixed)[0] == [], 'typeinfo pairing is idempotent')
 
     print('ok' if ok else 'FAILED')
     sys.exit(0 if ok else 1)

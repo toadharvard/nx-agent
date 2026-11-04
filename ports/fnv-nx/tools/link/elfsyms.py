@@ -114,7 +114,10 @@ def rename_undefined(src, dst, mapping):
 def undefine_symbols(src, dst, names):
     """Copy ELF32 object src to dst with the global definitions of `names` turned into undefined symbols (st_shndx
     0, value and size 0, NOTYPE): the object's own references to them then go through the undefined symbol, which
-    rename_undefined can redirect. The bodies stay, unreferenced. Returns the number of symbols changed."""
+    rename_undefined can redirect. The bodies stay, unreferenced. A COMDAT group whose signature is one of these
+    symbols (an inline function, a typeinfo) stops being COMDAT: the linker keeps the first group of a signature in
+    link order and drops the others, so the emptied group would otherwise discard the definition its references
+    are meant to reach. Returns the number of symbols changed."""
     data = bytearray(open(src, 'rb').read())
     if data[4] != 1:
         raise ValueError('%s: ELF32 only' % src)
@@ -122,10 +125,11 @@ def undefine_symbols(src, dst, names):
     shentsize, shnum, _ = struct.unpack_from('<HHH', data, 0x2e)
     secs = [struct.unpack_from('<IIIIIIIIII', data, shoff + i * shentsize) for i in range(shnum)]
     n = 0
-    for s in secs:
+    for si, s in enumerate(secs):
         if s[1] != SHT_SYMTAB:
             continue
         stroff = secs[s[6]][4]
+        changed = set()
         for k in range(1, s[5] // 16):
             o = s[4] + k * 16
             nm, _, _, info, _, shndx = struct.unpack_from('<IIIBBH', data, o)
@@ -133,6 +137,11 @@ def undefine_symbols(src, dst, names):
             if name in names and shndx and info >> 4 in (1, 2):
                 struct.pack_into('<IIBBH', data, o + 4, 0, 0, (info >> 4) << 4, 0, 0)
                 n += 1
+                changed.add(k)
+        for g in secs:
+            if g[1] == SHT_GROUP and g[6] == si and g[7] in changed and g[5] >= 4:
+                flags, = struct.unpack_from('<I', data, g[4])
+                struct.pack_into('<I', data, g[4], flags & ~1)   # GRP_COMDAT off: a plain group, always kept
     open(dst, 'wb').write(data)
     return n
 

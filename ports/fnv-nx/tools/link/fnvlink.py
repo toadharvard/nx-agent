@@ -1737,6 +1737,60 @@ def apply(out, fixed):
     print('own data pointers to rebound variables retargeted: %d relocations in %d objects; code references '
           'through a local symbol left (want 0, compile.sh -fPIC): %d in %d objects' % (retargeted, retarget_objs,
                                                                                       left, left_objs))
+    rows, cnt = pair_typeinfo(fixed)
+    with open(os.path.join(out, 'typeinfo_pairs.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#class\tvtable object (kept)\ttypeinfo object the linker would have kept\ttypeinfo definitions '
+                'turned into references\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    print('typeinfo kept with its vtable (V1 C4): %d classes whose first typeinfo copy came from another object than '
+          'the kept vtable, %d typeinfo definitions turned into references (typeinfo_pairs.tsv); vtable object '
+          'defines no typeinfo: %d' % (len(rows), cnt['undefined'], cnt['vtable object defines no typeinfo']))
+
+
+def kept_def(defs):
+    """GNU ld's pick among [(object, strong)] in link order: the first strong definition, else the first copy."""
+    return next((d for d in defs if d[1]), defs[0])
+
+
+def pair_typeinfo(fixed):
+    """Keep each class's typeinfo from the object whose vtable is kept (V1 defect C4). Units reconstruct one class
+    with different bases; vtable and typeinfo are separate weak COMDAT groups (_ZTV<C>, _ZTI<C>) and the linker keeps
+    the first copy of each in link order independently, so the kept vtable's offset-to-top words could name a base
+    the kept typeinfo lacks (__dynamic_cast to it fails). The typeinfo definitions of the objects that link before
+    the vtable's object become references (elfsyms.undefine_symbols, their group no longer COMDAT): every typeid and
+    every derived class's base list then reaches the vtable object's copy. Link order is `check`'s (sorted names).
+    -> ([(class, vtable object, replaced typeinfo object, objects changed)], Counter)."""
+    objs = sorted(n for n in os.listdir(fixed) if n.endswith('.o'))
+    vt, ti = collections.defaultdict(list), collections.defaultdict(list)
+    for n in objs:
+        for s in elfsyms.symbols(os.path.join(fixed, n)):
+            if s.shndx and s.bind in ('global', 'weak') and s.name.startswith(('_ZTV', '_ZTI')):
+                (vt if s.name[3] == 'V' else ti)[s.name[4:]].append((n, s.bind == 'global'))
+    order = {n: k for k, n in enumerate(objs)}
+    undef, rows, cnt = collections.defaultdict(set), [], collections.Counter()
+    for cls, vdefs in sorted(vt.items()):
+        tdefs = ti.get(cls)
+        if not tdefs:
+            continue
+        kv, kt = kept_def(vdefs), kept_def(tdefs)
+        if kv[0] == kt[0]:
+            continue
+        if not any(o == kv[0] for o, _ in tdefs):
+            cnt['vtable object defines no typeinfo'] += 1
+            continue
+        if kt[1] and not dict(tdefs)[kv[0]]:
+            cnt['a strong typeinfo elsewhere'] += 1   # a key function's unit: leave it to the linker
+            continue
+        before = sorted({o for o, _ in tdefs if order[o] < order[kv[0]]})
+        for o in before:
+            undef[o].add('_ZTI' + cls)
+        rows.append((cls, kv[0], kt[0], ' '.join(before)))
+    for o, names in sorted(undef.items()):
+        p = os.path.join(fixed, o)
+        cnt['undefined'] += elfsyms.undefine_symbols(p, p + '.ti', names)
+        os.replace(p + '.ti', p)
+    return rows, cnt
 
 
 def check(out, fixed):
