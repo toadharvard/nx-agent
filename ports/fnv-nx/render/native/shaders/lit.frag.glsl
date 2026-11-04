@@ -5,6 +5,9 @@
 // Static light permutations (RENDER_NATIVE.md §4.4): lit[_spec]_d<D>p<P> with NX_LIT_DIR = D (light 0 directional)
 // and NX_LIT_POINTS = P point lights after it, unrolled with no per-light branch; nx::Renderer orders the lights and
 // pads with zero-colour lights. Without them, the dynamic loop over count.x lights of either type.
+// The permutations read per-draw values nx::Renderer prepares in the slice (no per-pixel work on constants): the
+// directional light's posRange.xyz is the unit vector towards the light (-normalize(direction)), a point light's
+// posRange.w is 1 / range^2.
 // Precision (§4.4): positions and the specular power stay highp; unit vectors, attenuation and the colour sums are
 // marked mediump (fp16-safe within 1/255), which uam's TGSI path does not use yet.
 // nx-variants: -= spec=SPECULAR d0p1=NX_LIT_DIR=0,NX_LIT_POINTS=1 d0p2=NX_LIT_DIR=0,NX_LIT_POINTS=2 d0p4=NX_LIT_DIR=0,NX_LIT_POINTS=4 d0p8=NX_LIT_DIR=0,NX_LIT_POINTS=8 d1p0=NX_LIT_DIR=1,NX_LIT_POINTS=0 d1p1=NX_LIT_DIR=1,NX_LIT_POINTS=1 d1p2=NX_LIT_DIR=1,NX_LIT_POINTS=2 d1p4=NX_LIT_DIR=1,NX_LIT_POINTS=4 d1p8=NX_LIT_DIR=1,NX_LIT_POINTS=7 spec_d0p1=SPECULAR,NX_LIT_DIR=0,NX_LIT_POINTS=1 spec_d0p2=SPECULAR,NX_LIT_DIR=0,NX_LIT_POINTS=2 spec_d0p4=SPECULAR,NX_LIT_DIR=0,NX_LIT_POINTS=4 spec_d0p8=SPECULAR,NX_LIT_DIR=0,NX_LIT_POINTS=8 spec_d1p0=SPECULAR,NX_LIT_DIR=1,NX_LIT_POINTS=0 spec_d1p1=SPECULAR,NX_LIT_DIR=1,NX_LIT_POINTS=1 spec_d1p2=SPECULAR,NX_LIT_DIR=1,NX_LIT_POINTS=2 spec_d1p4=SPECULAR,NX_LIT_DIR=1,NX_LIT_POINTS=4 spec_d1p8=SPECULAR,NX_LIT_DIR=1,NX_LIT_POINTS=7
@@ -33,8 +36,13 @@ void nx_light(mediump vec3 n, mediump vec3 v, mediump vec3 l, mediump float att,
 void nx_point(mediump vec3 n, mediump vec3 v, int i) {
     vec3 dv = d.lights[i].posRange.xyz - inWorld;                       // highp: world positions
     float d2 = dot(dv, dv);
+#ifdef NX_LIT_POINTS
+    float a = d2 * d.lights[i].posRange.w;                              // prepared: w = 1 / range^2
+#else
     float r = d.lights[i].posRange.w;
-    nx_light(n, v, dv * inversesqrt(max(d2, 1e-12)), clamp(1.0 - d2 / (r * r), 0.0, 1.0), d.lights[i].color.rgb);
+    float a = d2 / (r * r);
+#endif
+    nx_light(n, v, dv * inversesqrt(max(d2, 1e-12)), clamp(1.0 - a, 0.0, 1.0), d.lights[i].color.rgb);
 }
 void main() {
     vec4 t = texture(tex, inUv);
@@ -43,7 +51,7 @@ void main() {
     nxLight = d.ambient.rgb; nxSpec = vec3(0.0);
 #ifdef NX_LIT_POINTS
 #if NX_LIT_DIR
-    nx_light(n, v, -normalize(d.lights[0].posRange.xyz), 1.0, d.lights[0].color.rgb);
+    nx_light(n, v, d.lights[0].posRange.xyz, 1.0, d.lights[0].color.rgb);   // prepared: unit, towards the light
 #endif
     for (int i = 0; i < NX_LIT_POINTS; i++) nx_point(n, v, NX_LIT_DIR + i);
 #else

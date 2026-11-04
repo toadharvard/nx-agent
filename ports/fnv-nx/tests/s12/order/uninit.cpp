@@ -18,3 +18,17 @@ void branch() { int flag; if (flag) sink(1); }
 // written locals and parameters are untouched
 // expect: add\tw0, w0, 1
 int plain(int a) { int y = a + 1; return y; }
+// memory locals (V1's U1-U3): SRA / register promotion after the SSA pass must not see an undefined value
+struct S2 { int a; int b; };
+// expect: cmp\tw0, 0
+// keep-expect: mov\tw0, 1
+int agg(int c) { S2 s; if (c) s.a = 5; return s.a == 5; }
+// expect: cmp\tw0, 0
+// keep-expect: mov\tw0, 1
+int addr(int c) { int x; int *p = &x; if (c) *p = 5; return x == 5; }
+// expect: cmp\tw0, 0
+// keep-expect: mov\tw0, 1
+int arr1(int c) { int a[1]; if (c) a[0] = 5; return a[0] == 5; }
+// a fully written local costs nothing: the zero store is dead
+// reject: str
+int fullw(int c) { S2 s; s.a = c; s.b = 1; return s.a + s.b; }

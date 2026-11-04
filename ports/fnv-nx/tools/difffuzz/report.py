@@ -18,6 +18,7 @@ import collections
 import glob
 import json
 import os
+import re
 
 import config
 
@@ -54,6 +55,75 @@ def _custom_cc(rec):
         return []
 
 
+DEALLOCATORS = {'00401030', '00aa1460', '00aa4060', '00ecd291'}     # operator delete, sized delete, Deallocate, free
+
+
+def _call_count_cause(rec, d):
+    """A call-count divergence explained by the record alone:
+    - `deleting-dtor-flags` (causes.py, S13b): an MSVC deleting destructor ??_G fuzzed with flags bit 0 clear
+      (destroy, do not free) makes the oracle's calls; the native ??_G is the Itanium D0, which always frees: the
+      native makes the same calls plus deallocator calls only (natively such a call reaches D1). Decided here
+      because the falloff? fallback below came first;
+    - `native-undefined` / `after-native-undefined`: the oracle makes no call while the native's first call /
+      a later call goes to a named stub (a C++ name the link binds to nothing): the native ran on a canned result
+      where the oracle ran the body (S2c / S2d bind the name)."""
+    tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    if not isinstance(tx, list) or not isinstance(ta, list):
+        return None
+    if (rec.get('symbol') or '').startswith('??_G') and ta[:len(tx)] == tx and len(ta) > len(tx) and \
+            all(str(t) in DEALLOCATORS for t in ta[len(tx):]):
+        try:
+            flags = int.from_bytes(bytes.fromhex(((rec.get('case') or {}).get('args') or {}).get('p0') or '00')[:4],
+                                   'little')
+        except ValueError:
+            flags = 1
+        if not flags & 1:
+            return 'deleting-dtor-flags'
+    if d.get('x86') == 0 and ta:
+        if str(ta[0]).startswith('name:'):
+            return 'native-undefined'
+        if any(str(t).startswith('name:') for t in ta):
+            return 'after-native-undefined'
+    return None
+
+
+BOOL_RESULT = re.compile(r'@@(?:Y[AGI]|[A-Z][A-Z0-9][AEGI]?)_N')     # MSVC decorated name returning bool
+
+
+def _signedness_by_design(rec):
+    """The top-bit probe (`signedness`: clearing a top bit of an input byte removes the divergence) also fires on
+    shapes whose cause is by design, the top bit being a float sign, a bool byte, INT_MIN or the top of the address
+    space: a float argument within the x87 tolerance (x87-precision / nan-bits), a bool result with the oracle's
+    truth value in another byte (bool-repr), x86 #DE where AArch64 divides (division), a native access that
+    crosses 4 GiB where the x86 address wraps (ilp32-pointer). And a first difference that is a native call of a named
+    stub is native-undefined (S2c / S2d), whatever the probe saw. None otherwise: the probe's cause stands."""
+    d = rec.get('_now') or rec.get('divergence') or {}
+    k = d.get('kind')
+    if k == 'call-args' and d.get('cls') in ('F32', 'F64') and _causes is not None:
+        got = _causes._rule_call_args(d)
+        if got in ('x87-precision', 'nan-bits'):
+            return got
+    if k == 'return' and BOOL_RESULT.search(rec.get('symbol') or ''):
+        try:
+            bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+        except ValueError:
+            bx = ba = b''
+        if len(bx) == 1 and len(ba) == 1 and bx[0] in (0, 1) and ba[0] not in (0, 1) and bx[0] == 1:
+            return 'bool-repr'
+    if k == 'call-target' and str(d.get('arm') or '').startswith('name:'):
+        return 'native-undefined'           # not by design: the first difference is a call of an unbound name
+    if k == 'error' and d.get('x86') in ('div0', 'exc:0') and not d.get('arm'):
+        return 'division'
+    if k == 'error' and not d.get('x86') and str(d.get('arm') or '').startswith(('fault:r:', 'fault:w:')):
+        try:
+            a = int(str(d['arm']).split(':')[2], 16)
+        except (ValueError, IndexError):
+            a = 0
+        if a >= 0xfffffff0:
+            return 'ilp32-pointer'
+    return None
+
+
 def reclassify(rec):
     """Static re-classification of a saved divergence (causes added after the record was written)."""
     global _UC
@@ -61,6 +131,10 @@ def reclassify(rec):
     cause = hint.get('cause')
     if cause != 'local-static' and _custom_cc(rec):
         return 'x86-custom-cc'
+    if cause == 'signedness':
+        got = _signedness_by_design(rec)
+        if got:
+            return got
     if cause not in (None, 'unclassified', 'call-flow', 'signedness?'):
         if _causes is not None and cause in _causes.HINT_REFINABLE:
             return _causes.refine(rec, cause)   # oracle-vcall: a tag, split by the record (causes._rule_vcall)
@@ -115,6 +189,10 @@ def reclassify(rec):
                 return 'vptr-unpaired'
         except Exception:  # noqa: BLE001
             pass
+    if d['kind'] == 'call-count':
+        got = _call_count_cause(rec, d)
+        if got:
+            return got
     if d['kind'] == 'call-count' and d.get('x86') == 0:
         return 'falloff?'
     if d['kind'] == 'call-args' and d.get('cls') in ('I32', 'P'):

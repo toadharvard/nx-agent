@@ -225,6 +225,18 @@ is that import, as on x86.
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
 
+**Float results of untyped calls and CRT math (S1-fuzzB, after difffuzz-13).** An intercepted call whose callee
+nothing types (a wild or unplanted indirect call, a CRT name with only a C spelling in the unit's symbols) always
+leaves the canned bytes in v0 natively; the oracle now gets the same value in ST0 when the code the call returns to
+consumes ST0 (`x86emu.x87_result_use`: fst/fstp m32 -> f32, m64 -> f64, x87 arithmetic; the caller's cleanup and
+epilogue are stepped over, and a `ret` takes the fuzzed function's own result kind). Before, the oracle read an
+empty x87 stack (0.0) and the native the canned bytes: 12 of the 21 actor.cpp float divergences. A unit's symbols
+prefer a decorated spelling for an address (`?FUN_00eca920@@YANN@Z` over `_FUN_00eca920`). The CRT's double
+functions the link gives libm providers (log, log10, exp, pow, atan2, tan, atan, asin, acos, fmod, floor, ceil,
+sin, cos: `libcalls.CRT_MATH`) run as builtins on both machines with C99 results at the domain edges (log(0) =
+-inf, log(-1) = NaN, pow poles and overflow, signed zeros of floor/ceil); the x87 `fyl2x` stub for log10 gave 0.0
+for log10(0) under Unicorn. Replayed on link c0d6c71516f6: float records 51 -> 20 still diverging (2 gone before).
+
 ## Cause refinement and verdict policy (`causes.py`, S13b)
 
 `report.reclassify` hands what the probes left at `unclassified`, `call-flow` or `signedness?` to `causes.refine`,
@@ -246,7 +258,11 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | pointer to a pinned-pool literal (0x02f00000) vs the native .rodata copy: argument / result / store | `literal-arg` / `literal-ret` / `literal-store` | literal-ret: artifact (only a pool literal vs a native image address whose x86 pointee is unreadable); literal-arg / literal-store: triage S13b (the strings differ, or stores never compare the pointees: a wrong literal looks the same; S13b audit). A native return of a named-stub address is `native-stub-data` (S2c) |
 | both sides store image vftables (link `out/addrmap.tsv` kind V, or `FNVNX_CAUSES_ADDRMAP`), different ones | `vptr-differs` | triage S2c (in a destructor too: that the two vftables share the class chain needs the exe's RTTI, S13b audit) |
 | result of a `??_G` / `??_E` deleting destructor (MSVC returns this, Itanium D0 is void) | `deleting-dtor-ret` | triage S13 (the difference is by design, but runner.compare stops there and never compares the destructor body; until the harness skips that return) |
-| pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
+| call-count of a `??_G` fuzzed with flags bit 0 clear: the native makes the oracle's calls plus deallocator calls only (D0 always frees) | `deleting-dtor-flags` (report.py, S1-fuzzB) | triage S13 (by design, but the difference hides the destructor body; see the causes.py row) |
+| call-count, the oracle makes no call, the native's first / a later call is a named stub | `native-undefined` / `after-native-undefined` | real-bug S2c/S2d (was `falloff?`) |
+| call-count, the oracle makes no call, the native calls addresses only | `falloff?` | real-bug S1 |
+| probe `signedness` on a by-design shape (the top bit is a float sign, a bool byte, INT_MIN, the top of the address space): float argument within tolerance / bool result 1 vs another nonzero byte / x86 #DE / native access across 4 GiB | `x87-precision` / `bool-repr` / `division` / `ilp32-pointer` | by-design |
+| pointer result with an unreadable pointee on one side, the oracle a pool literal and the native an image address | `literal-ret` | artifact (any other pointer result stays open; S13b audit) |
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
 | `no-native-entry` | `no-native-entry` | artifact only when the address map names another unit's object defining it (the image subset left it out); otherwise `native-undefined` (real bug S1, S13b audit) |
 | oracle-only data fault in the AArch64 private range | `oracle-native-address` |  triage S13b (S13b audit: no record evidence separates the harness from a real bug) |

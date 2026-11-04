@@ -39,7 +39,7 @@ $PY "$TC/tools/elf2nso.py" guest.elf guest.nso
 
 # host: the Nine host module (render/nine/switch_host.sh)
 "$R/switch_host.sh" "$OUT"
-mkdir -p "sd/atmosphere/contents/$TID" sd/fnvnx
+mkdir -p "sd/atmosphere/contents/$TID" sd/switch/fnv
 cp exefs.nsp "sd/atmosphere/contents/$TID/exefs.nsp"
-cp guest.nso sd/fnvnx/guest.nso
-echo "built $OUT/sd: atmosphere/contents/$TID/exefs.nsp, fnvnx/guest.nso"
+cp guest.nso sd/switch/fnv/guest.nso
+echo "built $OUT/sd: atmosphere/contents/$TID/exefs.nsp, switch/fnv/guest.nso"
