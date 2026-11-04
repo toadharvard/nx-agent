@@ -191,11 +191,12 @@ class Native:
         self.fixed = os.path.join(linkdir, 'fixed')
         self.absolute = load_aliases(os.path.join(linkdir, 'out', 'aliases.ld'))
         self.bridges = {}
-        bp = os.path.join(self.fixed, 'zz_bridges.o')
-        if os.path.exists(bp):
-            o = Obj(bp)
-            for sec, lo, hi, name in o.functions():
-                self.bridges[name] = self._own(o, sec, lo, hi, {})[0]
+        for bn in ('zz_bridges.o', 'zz_bd_vcall.o'):   # S2 bridges, S2d's vcall stubs: both linked into every image
+            bp = os.path.join(self.fixed, bn)
+            if os.path.exists(bp):
+                o = Obj(bp)
+                for sec, lo, hi, name in o.functions():
+                    self.bridges[name] = self._own(o, sec, lo, hi, {})[0]
 
     def _target(self, o, k, addend):
         name, value, size, typ, bind, shndx = o.syms[k]
