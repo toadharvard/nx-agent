@@ -242,21 +242,21 @@
  "levers": [
   {
    "id": "mt_cull",
-   "name": "cull and accumulation on cores 1-2 (the 360's Rendering Task Thread 2 path: 23 stage records a frame)",
+   "name": "cull and accumulation of the main-scene split on Rendering Task Thread 2 (MT1: record 21, the worker culls leftList2 while main culls the rest)",
    "moves": {
     "cull": [
-     0.7,
-     0.9
+     0.15,
+     0.35
     ],
     "render_accumulation": [
-     0.5,
-     0.7
+     0.15,
+     0.35
     ]
    },
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "bMTRendering:Display (0x011c710c) is unsafe on the PC code: accumulators are built with one batch renderer, the worker indexes a NULL second one and shares main's; current-accumulator globals shared (PERF.md 6.8). Needs port code; TLS fix done (S5 31cdca3), stage protocol modelled (mtqemu stages)"
+   "status": "MT1 patches/mt1_cull.s1b (main accumulator with 2 batch renderers, only record 21 on the worker; PERF.md 6.8), off by default (bMTRendering=0); moves: half of the main-scene pass, which is part of the cull (shadow, water and interface passes stay on main); needs the S1b MT1 class, mtqemu on the real objects past WinMain, the race checker and frame equivalence"
   },
   {
    "id": "havok_workers",
@@ -367,7 +367,9 @@
   {
    "id": "placed",
    "name": "as built: the placement plus the levers that are in the build (barrier_relax)",
-   "levers": ["barrier_relax"]
+   "levers": [
+    "barrier_relax"
+   ]
   },
   {
    "id": "plan45",
@@ -562,10 +564,10 @@
  ],
  "fixes": {
   "cull": {
-   "fix": "mt_cull: culling on cores 1-2 (the 360's Rendering Task Thread 2, setting 0x011c710c); its stage protocol passes mtqemu",
+   "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
-    1.4,
-    4.05
+    0.3,
+    1.575
    ],
    "owner": "S15/S5",
    "needs_hardware": true
@@ -580,10 +582,10 @@
    "needs_hardware": false
   },
   "render accumulation": {
-   "fix": "mt_cull moves 50-70 % with the cull; instancing -10-20 %",
+   "fix": "moves with mt_cull (MT1: the worker registers its half into the main accumulator's second batch renderer); instancing",
    "gain_main_minsn": [
-    0.75,
-    2.8
+    0.225,
+    1.4
    ],
    "owner": "S6n/S15",
    "needs_hardware": true
