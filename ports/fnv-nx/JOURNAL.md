@@ -1283,3 +1283,20 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - pkg_null_exefs=137954 pkg_nine_exefs=2472312 guest_nso=11222465 package_checks_failed=0
 * **next** - S5: guest + boot + package on f13. A first hardware run is useful once the memory-manager initializers
   pass, since it confirms the host/loader path.
+
+### J-0066 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0064
+
+* **decided** - (user) The native-renderer streams S6n and V6n move to a dedicated cloud session ("render machine",
+  branch `claude/port-nsw-render`); docs/MACHINES.md holds the protocol (branches, ownership, journal inbox, no
+  decomp-derived content in git). The local S6n and V6n agents are stopped after hand-over. Total agents stay the
+  same and CPU load here drops.
+* **did** - Merged V6n's WIP pass-space exploration scripts (`render/verify/enum/`). Committed both hand-over notes
+  (`render/native/handover/`): Nine's D3D9 state semantics to mirror, the N0 next steps, how the decomp encodes the
+  pass space.
+* **found** - (V6n, unconfirmed) The decomp's `eBSSMPassEnum` header seems not to match the pass ids the code uses:
+  blood splatter emits 752/753 where the header has 666/667, Lighting30 indexes `pass - 376`, the SLS pass arrays
+  hold 759 entries, and 30 emitted ids fall in the header's "unused" range. RENDER_NATIVE.md's 756/667/494 figures
+  are in doubt.
+* **metrics** - add_sites=435 add_literal_sites=320 distinct_literal_pass_ids=286 header_unused_range_ids_emitted=30
+* **next** - The render machine continues N0 (S6n) and the enumerator and oracle (V6n), starting with the real pass
+  numbering.
