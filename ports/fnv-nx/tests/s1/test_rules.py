@@ -531,6 +531,27 @@ if _shutil.which('aarch64-linux-gnu-g++'):
                           '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _pk], capture_output=True, text=True)
     check('fnvnx_win32.h keeps the SDK packing inside a pack(4) region', _r.stderr or 'ok', ['ok'])
 
+# ---- STATIC1 namespace statics (S13: bound by their plain name; roulettemenu, hudmainmenu)
+_n = tempfile.mkdtemp()
+os.makedirs(os.path.join(_n, 'src')); os.makedirs(os.path.join(_n, 'build'))
+_json.dump({'units': [{'source': 'src/r.cpp', 'symbols': {
+    '_s_fSpinTime': '0x011da904', '_s_iLastState': '0x011a081c', '_s_szName': '0x01080000', '_g_pInst': '0x011d96c0',
+    '?g_pInst@@3PAUH@@A': '0x011d96c0', '?g_pInst@fnv_1@@3PAUH@@A': '0x011d96c0', '_s_kList': '0x011d0000'}}]},
+           open(os.path.join(_n, 'build', 'units.json'), 'w'))
+_src = ('struct H;\nstruct L { L(); };\nextern H* g_pInst;\nstatic H* g_pInst;\nnamespace fnv_1 {\nextern H* g_pInst;\n}\n'
+        'namespace fnv_007bd2a0 {\nstatic float s_fSpinTime;\nstatic int s_iLastState = 4;\n'
+        'static const char s_szName[] = "x";\nstatic H* g_pInst;\nstatic L s_kList;\nvoid f() { s_fSpinTime = 1; }\n}\n')
+open(os.path.join(_n, 'src', 'r.cpp'), 'w').write(_src)
+_saved = (s1._IMAGE_NAMES, dict(s1._IMAGE_CNAMES), dict(s1._IMAGE_ADDRS))
+s1._IMAGE_NAMES = None; s1._IMAGE_CNAMES.clear(); s1._IMAGE_ADDRS.clear()
+got = run(s1.r_image_statics, _src, os.path.join(_n, 'src', 'r.cpp'))
+s1._IMAGE_NAMES = _saved[0]; s1._IMAGE_CNAMES.clear(); s1._IMAGE_CNAMES.update(_saved[1])
+s1._IMAGE_ADDRS.clear(); s1._IMAGE_ADDRS.update(_saved[2])
+check('STATIC1 gives namespace statics bound by their plain name C linkage (image variables declared only)', got,
+      ['extern "C" { extern float s_fSpinTime; }', 'extern "C" { int s_iLastState = 4; }',
+       'extern "C" { extern const char s_szName[] = "x"; }', 'extern "C" { extern H* g_pInst; }',
+       'extern "C" { L s_kList; }', 'H* g_pInst;\nnamespace fnv_1', 'void f() { s_fSpinTime = 1; }'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

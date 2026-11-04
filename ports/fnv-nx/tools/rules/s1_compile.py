@@ -1004,6 +1004,12 @@ def r_complete_views(path, text, stats):
 # of unknown size). Only names that a unit including the file binds to an image data address (`?name@@3...` /
 # `_name` in its units.json symbols) at file scope are touched, and for the unsized arrays also address names
 # (`DAT_<address>`, which the link binds by the address in the name).
+# A namespace-scope static (`namespace fnv_007bd2a0 { static float s_fSpinTime; }`, S13: 77 with an image address,
+# three of them uninitialised and written, so the private copy diverges for real: HUDMainMenu's instance pointer
+# 0x011d96c0, roulettemenu's s_fSpinTime / s_bValidBet 0x011da904 / 0x011da900) is bound under its plain name
+# (`_s_fSpinTime`), the way the link binds a C name: STATIC1 gives it C linkage where it stands,
+# `extern "C" { float s_fSpinTime; }` (a const one `extern "C" { extern const ... }`), so the definition is the
+# image's variable under that name. Only a name the file declares once.
 
 STATIC_DEF = re.compile(r'^([ \t]*)static\s+(?!inline\b)((?:const\s+|volatile\s+)*[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)'
                         r'\s*(?:\[[^\]]*\]\s*)*(?:=|;|\(|\{))', re.M)
@@ -1015,6 +1021,9 @@ UNSIZED_ADDR = re.compile(r'\b(?:DAT|g|UNK|PTR)_[0-9a-f]{8}\s*\[\s*\]\s*;')
 CONST_DEF = re.compile(r'^([ \t]*)(const\s+[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)\s*(?:\[[^\]]*\]\s*)*=)', re.M)
 DATA_NAME = re.compile(r'^\?(\w+)@@3')
 _IMAGE_NAMES = None
+_IMAGE_CNAMES = {}       # file -> names a unit including it binds to an image data address as `_name` (a C name)
+_IMAGE_ADDRS = {}        # file -> {('c' | 'g', name): {addresses}}: `_name` / `?name@...@3...` (decorated) bindings
+NOT_A_TYPE = {'return', 'case', 'goto', 'else', 'delete', 'throw', 'new', 'sizeof', 'typedef', 'using'}
 
 def _image_bound_names(path):
     """{absolute file: {name}} of global variables bound to image data addresses by a unit that includes it."""
@@ -1031,12 +1040,15 @@ def _image_bound_names(path):
             with open(f, encoding='utf-8', errors='surrogateescape') as h: texts[f] = h.read()
         return texts[f]
     for u in json.load(open(uj))['units']:
-        names = set()
+        names, cnames, addrs = set(), set(), {}
         for n, a in u.get('symbols', {}).items():
             if not 0x00fdf000 <= int(a, 16) < 0x02100000: continue
+            q = re.match(r'^\?(\w+)@[\w@]*?@3', n)                # any decorated variable, namespaced too
+            if q: addrs.setdefault(('g', q.group(1)), set()).add(int(a, 16))
             m = DATA_NAME.match(n)
             if m: names.add(m.group(1))
-            elif n.startswith('_') and n[1:].isidentifier(): names.add(n[1:])
+            elif n.startswith('_') and n[1:].isidentifier():
+                names.add(n[1:]); cnames.add(n[1:]); addrs.setdefault(('c', n[1:]), set()).add(int(a, 16))
         if not names: continue
         todo, seen = [os.path.normpath(os.path.join(root, u['source']))], set()
         while todo:
@@ -1046,16 +1058,56 @@ def _image_bound_names(path):
             t = text(f)
             if 'static' in t or 'const' in t:
                 _IMAGE_NAMES.setdefault(f, set()).update(names)
+                if cnames:
+                    _IMAGE_CNAMES.setdefault(f, set()).update(cnames)
+                    fa = _IMAGE_ADDRS.setdefault(f, {})
+                    for k, v in addrs.items(): fa.setdefault(k, set()).update(v)
             for i in inc.findall(t):
                 for base in (os.path.dirname(f), os.path.join(root, 'include')):
                     g = os.path.normpath(os.path.join(base, i))
                     if os.path.isfile(g): todo.append(g); break
     return _IMAGE_NAMES
 
+def _decl_end(text, i):
+    """Index of the ';' that ends the declaration whose declarator text[i] follows (brackets, strings skipped)."""
+    depth = 0
+    for t in re.finditer(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/|[(){}\[\];]', text[i:], re.S):
+        c = t.group()
+        if c in '({[': depth += 1
+        elif c in ')}]': depth -= 1
+        elif c == ';' and depth == 0: return i + t.start()
+        if depth < 0: return None
+    return None
+
+SCALAR_WORDS = set('volatile unsigned signed short long int char bool float double __int64 wchar_t BOOL BYTE WORD DWORD '
+                   'UInt8 UInt16 UInt32 SInt32 hkUint8 hkUint16 hkUint32 hkInt32 hkReal'.split())
+
+def _declared_once(text, name, spans, addrs, image=False):
+    """True when the namespace static `name` is the file's only declaration of that name that its C name could
+    meet: class members do not count, nor an `extern` declaration where every decorated binding of the name
+    (`?name@@3...`, `?name@ns@@3...`) is the C name's one address (the same variable)."""
+    bare = COMMENT.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
+    n = 0
+    for m in re.finditer(r'(\w+|[>\*&])\s+\**%s\s*(?:\[[^\]]*\]\s*)*[;=,(\[{]' % re.escape(name), bare):
+        if m.group(1) in NOT_A_TYPE: continue
+        chain = prepare.scope_chain(spans, m.start())
+        if chain and chain[-1][0] == 'class': continue
+        if chain and chain[-1][0] == 'function': return False      # a local of that name
+        line = bare[bare.rfind('\n', 0, m.start()) + 1:m.end()]
+        same = len(addrs.get(('c', name), ())) == 1 and addrs.get(('g', name), addrs[('c', name)]) == addrs[('c', name)]
+        if same and all(k == 'namespace' for k, _ in chain):
+            if re.match(r'\s*extern\b(?!\s*")', line) and '=' not in line: continue
+            if image and not re.search(r'=\s*$', line): continue   # declared only: another definition is the same one
+        n += 1
+    return n == 1 or image and n == 0
+
 def r_image_statics(path, text, stats):
-    """STATIC1: file-static / internal const variables bound to image addresses get external linkage (see above)."""
+    """STATIC1: file-static / internal const variables bound to image addresses get external linkage, a namespace
+    static bound by its plain name C linkage (see above)."""
     if 'static' not in text and 'const' not in text: return text
-    names = _image_bound_names(path).get(os.path.normpath(os.path.abspath(path))) or set()
+    key = os.path.normpath(os.path.abspath(path))
+    names = _image_bound_names(path).get(key) or set()
+    cnames = _IMAGE_CNAMES.get(key) or set()
     if not names and not UNSIZED_ADDR.search(text): return text
     spans, edits = None, {}
     for rx, kind in ((UNSIZED_DECL, 'unsized'), (STATIC_DEF, 'static'), (CONST_DEF, 'const')):
@@ -1064,7 +1116,24 @@ def r_image_statics(path, text, stats):
             if m.group(3) not in names and not (kind == 'unsized' and ADDR_NAME.match(m.group(3))): continue
             if kind == 'const' and re.search(r'\bextern\b', text[text.rfind('\n', 0, m.start()) + 1:m.start()]): continue
             if spans is None: spans = prepare.scope_spans(text)
-            if any(k != 'extern' for k, _ in prepare.scope_chain(spans, m.start())): continue
+            chain = prepare.scope_chain(spans, m.start())
+            if any(k != 'extern' for k, _ in chain):
+                # a namespace static bound by its plain name: C linkage where it stands
+                if kind == 'unsized' or m.group(3) not in cnames or any(k not in ('namespace', 'extern') for k, _ in chain):
+                    continue
+                end = _decl_end(text, m.end() - 1) if text[m.end() - 1] != ';' else m.end() - 1
+                if end is None or '#' in text[m.end():end]: continue
+                decl = text[m.start(2):end + 1]
+                const = kind == 'const' or decl.startswith('const')
+                # an uninitialised scalar / pointer is the image's variable: declared, not defined (the image holds it,
+                # and a definition elsewhere in the file of the same C name, a STATIC1 global, is the same one)
+                ty = text[m.start(2):m.start(3)]
+                image = (text[m.end() - 1] == ';' and not const and
+                         ('*' in ty or set(re.findall(r'\w+', ty)) <= SCALAR_WORDS))
+                if not _declared_once(text, m.group(3), spans, _IMAGE_ADDRS.get(key, {}), image): continue
+                edits[m.start()] = (m.start(), end + 1, m.group(1) + 'extern "C" { ' + ('extern ' if const or image else '')
+                                    + decl + ' }')
+                continue
             new = m.group(1) + ('' if kind == 'static' else 'extern ') + m.group(2)
             edits[m.start()] = (m.start(), m.end(), new)
     if not edits: return text

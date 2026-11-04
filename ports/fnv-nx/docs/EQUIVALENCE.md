@@ -122,7 +122,7 @@ above (round 8).
 | `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
 | `CTOR1` | neutral | explicit constructor call = placement new of the same class at the same address | real `<new>` |
 | `LINK1` | neutral | C and C++ linkage of a global variable name the same symbol under Itanium | data names bound by variable name |
-| `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables | variable bound by the recipe's address |
+| `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables; a namespace static bound by its plain name (`_s_fSpinTime`) gets C linkage in place, an uninitialised scalar / pointer one declared only (the image's variable) | variable bound by the recipe's address |
 | `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars | as is |
 | `STR1` | neutral | `&arr` and `arr` are the same address | as is |
 | `CALL1` | neutral | the cast is the conversion the dropped prototype made implicitly | real SDK parameter types |
