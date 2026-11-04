@@ -1603,9 +1603,19 @@ def build_render_lib(b, r, d):
     """libnxrender.a for LINK_OVERRIDES=render without RENDER_LIB: render/native/n1/build.sh <d>/render-n1 with the
     toolchain stage's DEVKITPRO and fnvnx-a64 and the environment's UAM (render/native/env.sh --print)."""
     dkp, prefix, uam = b.art('toolchain', 'devkitpro'), b.art('toolchain', 'prefix'), os.environ.get('UAM', '')
-    if not dkp or not prefix or not uam or not os.access(uam, os.X_OK):
+    if not dkp or not prefix:
         raise StageError('LINK_OVERRIDES=render needs RENDER_LIB=<libnxrender.a>, or the toolchain stage\'s DEVKITPRO '
-                         'and fnvnx-a64 plus UAM=<uam> (render/native/env.sh) to build it')
+                         'and fnvnx-a64 to build it')
+    if not uam or not os.access(uam, os.X_OK):
+        # no render machine environment (the farms): build uam at its pin once per container, in a cache every build
+        # directory of the container shares ($FNVNX_TOOL_CACHE, default ~/.cache/fnvnx; toolchain/uam/build.sh stamps
+        # the pin); only a failed build is an error
+        up = os.path.join(os.environ.get('FNVNX_TOOL_CACHE') or os.path.join(os.path.expanduser('~'), '.cache', 'fnvnx'),
+                          'uam')
+        b.say('link: uam (toolchain/uam/build.sh, once per container)')
+        if b.sh(['bash', os.path.join(ROOT, 'toolchain', 'uam', 'build.sh'), up], r['log'], timeout=3600):
+            raise StageError('LINK_OVERRIDES=render: building uam failed (toolchain/uam/build.sh, see %s)' % b.rel(r['log']))
+        uam = os.path.join(up, 'bin', 'uam')
     out = os.path.join(d, 'render-n1')
     b.say('link: libnxrender.a (render/native/n1/build.sh)')
     path = os.pathsep.join([os.path.join(dkp, 'tools', 'bin'), os.path.join(prefix, 'bin'), os.environ.get('PATH', '')])
