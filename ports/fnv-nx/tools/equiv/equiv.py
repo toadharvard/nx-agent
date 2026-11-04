@@ -289,6 +289,10 @@ class Resolver:
                     if orig in syms or orig in self.names:
                         syms[n] = syms.get(orig) or hex(self.names[orig]); how['game'] += 1
                         continue
+                    alts = {v for k, v in syms.items() if key_free(k) == key_free(orig)}   # the type's key changed
+                    if len({int(v, 16) for v in alts}) == 1:
+                        syms[n] = next(iter(alts)); how['game'] += 1
+                        continue
                 for k, what in ((var_key(n), 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
                     if k and len(self.by_key.get(k, ())) == 1:
                         syms[n] = hex(next(iter(self.by_key[k]))); how[what] += 1
