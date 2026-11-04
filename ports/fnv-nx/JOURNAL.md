@@ -2205,3 +2205,21 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **measured** - Early difffuzz-5 numbers from the 32-shard caches at aedcf24 (partial): 8,261 functions, 7,118 ok,
   1,123 setup failures (1,072 of them the race). 1,553 functions diverge: call-flow 778, unclassified 757, bool-repr
   126, uninit-both 122, split-global 106, uninit-arm 98.
+
+### J-0104 | 2026-11-04 | stream: S11-equivalence | status: wip | parent: J-0091,J-0093
+
+* **found** - Every eq shard has exited rc=1 at every head since BIND1 (093be50 / 23e0f0a). eq2-6 were not stuck; they
+  failed the same way. `equiv.py prepare`'s allow-list check rejected S1's BIND1 POST hook ("rules outside the
+  allow-list edited the tree"). The message went only to prepare.log, and `set -e` ended the job silently.
+* **did** - S11 `eab6fc0`:
+  - BIND1 is neutral (a pseudo-rule in the link group). POST hooks run only for allowed rules, once each.
+  - tests/s11 fails on a POST hook that has no rule, so the next one shows up in tests rather than on the farms.
+  - equiv_job.sh prints the step, command, exit status and the last 40 lines of the step's log on any failure.
+  - `fnvnx_cmath/` is on the MSVC include path of prepared trees, as a synced copy with its own include root. The rest
+    of `shim/include` stays off it, because it would shadow the CRT/SDK headers.
+  - tests/s11: ok.
+* **measured** - DECL1 math re-gated at 357bc06 (27 functions plus activeeffect): 18 identical (Calendar and
+  activeeffect among them), 3 CRT bindings, 3 from `using ::fabs;`, 3 x87 differences left to the farms.
+  - The `using ::fabs;` case: in units that include `<math.h>`, it pulls in the `float fabs(float)` overload that the
+    namespace's own C declaration hid, so `fabs(f)` rounds through float. This is for S1: keep the namespace's C
+    declaration.
