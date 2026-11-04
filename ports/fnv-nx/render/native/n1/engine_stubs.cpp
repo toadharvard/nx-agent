@@ -59,7 +59,8 @@ static void TssDefaults() {
         t[4] = s ? 1 : 2;          // ALPHAOP: SELECTARG1 on stage 0, DISABLE after
         t[5] = 2; t[6] = 1;        // ALPHAARG1 TEXTURE, ALPHAARG2 CURRENT
         t[11] = s;                 // TEXCOORDINDEX
-        t[26] = 1;                 // RESULTARG CURRENT
+        t[26] = 1; t[27] = 1;      // COLORARG0, ALPHAARG0: CURRENT
+        t[28] = 1;                 // RESULTARG: CURRENT (V1 O3: 26 is COLORARG0, not RESULTARG)
     }
     g_tssInit = true;
 }
