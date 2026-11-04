@@ -15,16 +15,17 @@ python3 "$N/shaders/build.py" "$OUT/shaders" --uam "$UAM" >/dev/null
 GA="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec"
 GF="-O2 -g -Wall -Wextra -Werror -ffp-contract=off -ffunction-sections -fdata-sections -I$TC/include -I$N/include -I$N/front -I$N/n1 -I$OUT/shaders"
 GXX="$GF -std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics"
-for s in front/front.cpp capture/capture.cpp n1/renderer.cpp n1/engine_stubs.cpp n1/engine_textures.cpp; do $CXX $GA $GXX -c "$N/$s" -o "$OUT/obj/$(basename "${s%.*}").o"; done
+for s in front/front.cpp capture/capture.cpp n1/renderer.cpp n1/passes.cpp n1/engine_stubs.cpp n1/engine_textures.cpp; do $CXX $GA $GXX -c "$N/$s" -o "$OUT/obj/$(basename "${s%.*}").o"; done
 $CC $GA $GF -std=gnu11 -c "$N/front/d3d9_state.c" -o "$OUT/obj/d3d9_state.o"
 $CC $GA $GF -std=gnu11 -Wno-error -c "$OUT/shaders/nx_shaders.c" -o "$OUT/obj/nx_shaders.o"
 rm -f "$OUT/libnxrender.a"
-aarch64-none-elf-ar rcs "$OUT/libnxrender.a" "$OUT"/obj/{front,capture,renderer,engine_stubs,engine_textures,d3d9_state,nx_shaders}.o
+aarch64-none-elf-ar rcs "$OUT/libnxrender.a" "$OUT"/obj/{front,capture,renderer,passes,engine_stubs,engine_textures,d3d9_state,nx_shaders}.o
 # self-test guest
 "$TC/guest/build.sh" "$OUT/rt" >/dev/null
 $CXX $GA $GXX -c "$N/n1/selftest.cpp" -o "$OUT/obj/selftest.o"
+$CXX $GA $GXX -c "$N/n1/selftest_world.cpp" -o "$OUT/obj/selftest_world.o"
 $CXX $GA $GXX -c "$N/n1/guest_test.cpp" -o "$OUT/obj/guest_test.o"
-$CXX $GA -specs="$TC/guest/guest_pie.specs" "$OUT/rt/crt0.o" "$OUT/obj/selftest.o" "$OUT/obj/guest_test.o" -L"$OUT" -lnxrender \
+$CXX $GA -specs="$TC/guest/guest_pie.specs" "$OUT/rt/crt0.o" "$OUT/obj/selftest.o" "$OUT/obj/selftest_world.o" "$OUT/obj/guest_test.o" -L"$OUT" -lnxrender \
 	-L"$OUT/rt" -Wl,--whole-archive -lfnvnx-guest -Wl,--no-whole-archive -lm -o "$OUT/n1_test.elf"
 python3 -I "$TC/tools/elf2nso.py" "$OUT/n1_test.elf" "$OUT/n1_test.nso" >/dev/null
 ls -la "$OUT/libnxrender.a" "$OUT/n1_test.nso"

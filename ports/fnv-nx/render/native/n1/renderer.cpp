@@ -194,6 +194,7 @@ bool Renderer::Do_BeginFrame() {
     frame_.Begin(frameNo_);
     geomRing_.BeginFrame(frameNo_);
     inFrame_ = true;
+    memset(&stats_, 0, sizeof stats_);
     cur_ = nullptr; passOpen_ = false; pass_ = -1;
     return true;
 }
@@ -202,6 +203,7 @@ bool Renderer::Do_EndFrame() {
     if (!inFrame_) return false;
     frame_.Finish(sc_, nullptr, true);
     lastBinds_ = frame_.stateBindsEncoded();
+    lastStats_ = stats_;
     frameNo_++;
     inFrame_ = false; passOpen_ = false;
     return true;

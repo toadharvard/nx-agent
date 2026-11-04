@@ -11,6 +11,7 @@
 
 #include "nx/front.h"
 #include "d3d9_state.h"
+#include "passes.h"
 
 namespace nx {
 
@@ -171,6 +172,9 @@ public:
     bool RenderMenuBackground(uint32_t scene, uint32_t sceneFmt, uint32_t w, uint32_t h, uint32_t tone, uint32_t toneFmt,
                               const float luma[3], float blend, float alpha);
     uint32_t geometryDraws() const { return geomDraws_; }
+    // Engine-path draw accounting (passes.h): the frame being recorded, and the last frame Do_EndFrame finished.
+    DrawStats& stats() { return stats_; }
+    const DrawStats& lastFrameStats() const { return lastStats_; }
 
     StateTracker& state() { return state_; }
     StateCache& cache() { return sc_; }
@@ -208,6 +212,7 @@ private:
     uint8_t epiOf_[kEpiIds] = {};
     Ring geomRing_;
     uint32_t white_ = 0, geomDraws_ = 0;
+    DrawStats stats_ = {}, lastStats_ = {};
     uint16_t geomVsScroll_ = 0, geomVsPlain_ = 0, geomVsPlainScroll_ = 0, geomPsPlain_ = 0, geomPsAlphaMap_ = 0;
     uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0, bgVs_ = 0, bgPs_ = 0, bgLayout_ = 0;
     StateCache sc_;

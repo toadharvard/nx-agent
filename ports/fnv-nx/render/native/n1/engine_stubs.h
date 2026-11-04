@@ -110,6 +110,13 @@ void SetGuestBase(uintptr_t base);
 uintptr_t GuestBase();
 uint32_t GuestAddress(const void* p);   // p - GuestBase() (the 32-bit value an engine pointer field holds)
 uint32_t SkippedGeometry();         // skinned / unreadable geometry the stub did not draw
+// The engine's current render pass (see engine_stubs.cpp): pointers to the 32-bit pass id and RenderPass* globals.
+// The native build binds the data image's (BindImagePassGlobals: 0x011f91e4 / 0x011f91e0); tests bind their own.
+// Unbound, every draw has pass 0 (routed as the N1 menu path did: tile family).
+void BindPassGlobals(const uint32_t* passId, const uint32_t* renderPass);
+void BindImagePassGlobals();
+// The RenderPass of the draw of `geometry` (0 when none is current or it names another geometry) and its pass id.
+const uint8_t* CurrentRenderPass(const void* geometry, uint16_t* passId);
 
 } // namespace engine
 } // namespace nx

@@ -23,13 +23,54 @@ void NiDX9Renderer::Do_SetCameraData(const NiPoint3f* loc, const NiPoint3f* dir,
 }
 void NiDX9Renderer::Do_SetScreenSpaceCameraData(const NiRectF* port) { if (R()) R()->Do_SetScreenSpaceCameraData(port); }
 
+extern uintptr_t g_guestBase;
 static uint32_t g_skipped = 0;
-void NiDX9Renderer::Do_RenderGeometry(const void* geometry) {
-    Renderer::GeomView g;
-    if (!R() || !ReadGeometry(geometry, &g)) { g_skipped++; return; }
-    if (!R()->RenderGeometry(g)) g_skipped++;
-}
 uint32_t SkippedGeometry() { return g_skipped; }
+
+// ---- the engine's current render pass ------------------------------------------------------------------------------
+// FUN_00b994f0 (the batch renderer's per-pass draw) stores the pass id (DAT_011f91e4) and the
+// BSShaderProperty::RenderPass (DAT_011f91e0: +0 geometry, +4 u16 pass, +9 light count, +0xC ShadowSceneLight**) before
+// the geometry reaches Do_RenderShape. A pass counts for a draw only when its RenderPass names that geometry (a menu
+// drawn outside the accumulator would otherwise inherit the last world pass).
+static const uint32_t* g_passId = nullptr;
+static const uint32_t* g_renderPass = nullptr;
+void BindPassGlobals(const uint32_t* passId, const uint32_t* renderPass) { g_passId = passId; g_renderPass = renderPass; }
+void BindImagePassGlobals() {
+    BindPassGlobals((const uint32_t*)(g_guestBase + 0x011f91e4u), (const uint32_t*)(g_guestBase + 0x011f91e0u));
+}
+const uint8_t* CurrentRenderPass(const void* geometry, uint16_t* passId) {
+    *passId = 0;
+    if (!g_passId || !g_renderPass || !*g_renderPass) return nullptr;
+    const uint8_t* rp = (const uint8_t*)(g_guestBase + *g_renderPass);
+    uint32_t geo; memcpy(&geo, rp, 4);
+    if (geo != GuestAddress(geometry)) return nullptr;
+    uint16_t id; memcpy(&id, rp + 4, 2);
+    *passId = id ? id : (uint16_t)*g_passId;
+    return rp;
+}
+
+void NiDX9Renderer::Do_RenderGeometry(const void* geometry) {
+    Renderer* r = R();
+    if (!r) { g_skipped++; return; }
+    DrawStats& st = r->stats();
+    st.engineDraws++;
+    uint16_t passId = 0;
+    CurrentRenderPass(geometry, &passId);
+    const PassInfo pi = RoutePass(passId);
+    Renderer::GeomView g;
+    if (!ReadGeometry(geometry, &g)) {
+        const uint8_t* geo = (const uint8_t*)geometry;
+        uint32_t skin = 0;
+        if (geo) memcpy(&skin, geo + 0xBC, 4);
+        st.skipped[skin ? Skip_Skinned : Skip_Unreadable]++;
+        g_skipped++;
+        return;
+    }
+    if (!r->RenderGeometry(g)) { st.skipped[Skip_Submit]++; g_skipped++; return; }
+    // drawn with the tile family: right only for menus (TILE, or no pass known)
+    if (pi.route == Route_Tile || pi.route == Route_Legacy) st.native[pi.route]++;
+    else st.misrendered++;
+}
 
 // ---- render-state cache --------------------------------------------------------------------------------------
 static uint8_t g_rsLock[NXD3D_RS_COUNT];
@@ -171,20 +212,22 @@ void ImageSpaceManager::RenderEffect(int32_t effect, void*, void* src, void* dst
     const uint8_t* self = (const uint8_t*)this;
     const uint8_t* list = r && effect >= 0 ? GP(U32(self, 0x08)) : nullptr;
     const uint8_t* fx = list ? GP(U32(list, 4 * (uint32_t)effect)) : nullptr;
-    if (!fx || effect != kEffectMenuBg) { g_isSkipped++; return; }
+    if (r) r->stats().engineDraws++;
+    if (!fx || effect != kEffectMenuBg) { g_isSkipped++; if (r) r->stats().skipped[Skip_ImageSpace]++; return; }
     uint32_t scene = 0, w = 0, h = 0;
-    if (!r->GroupColor(src, &scene, &w, &h)) { g_isSkipped++; return; }
+    if (!r->GroupColor(src, &scene, &w, &h)) { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; return; }
     NativeTexture* tone = nullptr;
     if (const uint8_t* ist = GP(U32(fx, 0x58)))
         if (const uint8_t* tex = GP(U32(ist, 4))) tone = FindNativeTexture(GP(U32(tex, 0x24)), 0x80);
     float blend; memcpy(&blend, fx + 0x5C, 4);
-    if (!tone) { g_isSkipped++; return; }
+    if (!tone) { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; return; }
     static const float kLuma[3] = {0.299f, 0.587f, 0.114f};   // Rec. 601 (the effect's vertex constant)
     const bool switchTarget = dst != nullptr;
-    if (switchTarget && !r->Do_BeginUsingRenderTargetGroup(dst, 0)) { g_isSkipped++; return; }
+    if (switchTarget && !r->Do_BeginUsingRenderTargetGroup(dst, 0)) { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; return; }
     bool ok = r->RenderMenuBackground(scene, 21, w, h, tone->image, tone->d3dfmt, kLuma, blend, 1.0f);
     if (switchTarget) r->Do_EndUsingRenderTargetGroup();
-    if (ok) g_isNative++; else g_isSkipped++;
+    if (ok) { g_isNative++; r->stats().native[Route_ImageSpace]++; }
+    else { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; }
 }
 
 } // namespace engine
