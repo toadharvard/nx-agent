@@ -1588,8 +1588,9 @@ def r_falloff_traps(path, text, stats):
 # `char* NiSprintf(char*, unsigned int, const char*, ...)`, both bound to 0x00a305b0) when no call of that name in
 # the unit uses the returned value: every mention of the name outside its prototypes is a call that is a whole
 # expression statement (after `;`, `{`, `}`, `else` or the `)` of an if / while / for), and the parameters that differ
-# are 32-bit integers on both sides (int / unsigned int / size_t / long ...). The callee and the argument bits are the
-# same, and the return register is ignored either way (DUPINT1-RET).
+# are 32-bit integers on both sides (int / unsigned int / size_t / long ...), and both return types are void, an
+# integer or a pointer (a class returned by value passes a hidden result pointer, which would shift the arguments).
+# The callee and the argument bits are the same, and the return register is ignored either way (DUPINT1-RET).
 
 INT_TYPES = re.compile(r'^(?:(?:const|volatile|signed|unsigned|short|long|int|char|__int8|__int16|__int32|__int64|'
                        r'size_t|DWORD|UINT|INT|LONG|ULONG|WORD|BYTE|BOOL)\s*)+$')
@@ -1688,6 +1689,10 @@ def r_duplicate_int_overloads(path, text, stats):
         if len(addrs) != 1: continue
         if sigs[0][1] != sigs[1][1]:
             if a == b or not _results_unused(text, name): continue
+            # both results in a register (void, integer, pointer): a class returned by value has a hidden result
+            # pointer, which would shift the arguments (V1 D2)
+            if not all(r == 'void' or INT_TYPES.match(r) or re.search(r'[*]\s*(?:const\s*)?$', r) for r in (sigs[0][1], sigs[1][1])):
+                continue
             if not all(x == y or (INT32_TYPES.match(x) and INT32_TYPES.match(y)) for x, y in zip(a, b)): continue
             stats['DUPINT1-RET'] += 1
         drops += [m for types, ret, m in decls if types == b]
@@ -3945,7 +3950,8 @@ POST.append(rename_std_definitions)
 # `c ? G(false) : x.f(a)`. Only where the other operand is the literal `true` / `false`, the G operand ends in a
 # call of a name the unit declares returning G with as many parameters as the call has arguments, and every
 # declaration of that name with that many parameters returns a class with an `operator bool()`, exactly one of them
-# with a bool constructor (hkgpmesh.cpp: GateE10, and S_e1ce10_Bool without one).
+# with a non-explicit bool constructor (hkgpmesh.cpp: GateE10, and S_e1ce10_Bool without one; with an explicit one
+# the conditional is bool), and the G operand is a postfix expression ending in that call (`!x.f(a)` is bool).
 
 COND1_CLASS = re.compile(r'\b(?:struct|class)\s+([A-Za-z_]\w*)\s*(?::[^{;]*)?\{')
 COND1_LIT = re.compile(r'\?\s*(false|true)\s*:(?!:)')
@@ -3984,7 +3990,8 @@ def r_conditional_bool_gates(path, text, stats):
         body = unit[m.end() - 1:prepare.match_brace(unit, m.end() - 1)]
         if re.search(r'\boperator\s+bool\s*\(\s*\)', body):
             booly.add(g)
-            if re.search(r'\b%s\s*\(\s*bool\b' % g, body): gates.add(g)
+            if re.search(r'(?<!explicit )(?<!explicit)\b%s\s*\(\s*bool\b' % g, re.sub(r'\bexplicit\s+', 'explicit ', body)):
+                gates.add(g)                       # an explicit G(bool) makes the conditional bool (V1 C2)
     if not gates: return text
     rets = {}                                      # (name, arity) -> {return type}
     for m in re.finditer(r'(?:^|[;{}\s])((?:const\s+)?[A-Za-z_]\w*[\s*&]*?)\s*\b([A-Za-z_]\w*)\s*\(([^()]*)\)\s*'
@@ -4001,6 +4008,11 @@ def r_conditional_bool_gates(path, text, stats):
         for cm in re.finditer(r'\b([A-Za-z_]\w*)\s*\(', x):
             if _call_end(x, cm.end() - 1) == len(x): call = cm; break
         if call is None: continue
+        # the operand is a postfix expression ending in the call (`x.f(a)`, `p->q.f(a)`, `f(a)`), not `!x.f(a)` or
+        # `a + x.f(a)`, whose type is not G (V1 C3)
+        if not re.match(r'^(?:::)?(?:[A-Za-z_]\w*(?:<[^<>;{}()]*>)?\s*(?:\[[^\[\]]*\]\s*)*(?:\.|->|::)\s*)*$',
+                        x[:call.start()]):
+            continue
         args = x[call.end():len(x) - 1]
         r = rets.get((call.group(1), _cond1_arity(args)), set())
         if len(r & gates) != 1 or not r <= booly: continue
@@ -4099,6 +4111,7 @@ def r_restrict_reference_args(path, text, stats):
 
 NEW5_DELETE = re.compile(r'\boperator\s+delete\s*(\[\s*\])?\s*\(([^;{}()]*)\)')
 NEW5_PLACEMENT = re.compile(r'^\s*void\s*\*\s*\w*\s*,\s*void\s*\*\s*\w*\s*$')
+NEW5_NEW = re.compile(r'\boperator\s+new\s*\(\s*(?:std::)?(?:size_t|unsigned(?:\s+int)?)(?:\s+[A-Za-z_]\w*)?\s*\)')
 NEW5_HEAD = re.compile(r'^(class|struct)\s+(?:\w+\s+)*?([A-Za-z_]\w*)\s*(:(?!:).*)?$', re.S)
 
 def r_placement_only_delete(path, text, stats):
@@ -4122,12 +4135,23 @@ def r_placement_only_delete(path, text, stats):
         hm = NEW5_HEAD.match(head)
         if not hm or hm.group(3): continue                                   # no base classes
         if not re.search(r'\bvirtual\s+~\s*%s\s*\(' % re.escape(hm.group(2)), text[o:c]): continue
+        # the class's own non-placement operator new (TexMap's from g_memoryManager): MSVC found no matching delete
+        # for it (C4291), so a throwing constructor frees nothing; with FNVNX_GLOBAL_DELETE GCC would free through it
+        # (V1 N2). FNVNX_NEW5_TAG makes that operator new a placement form under GCC (a defaulted tag parameter; empty
+        # under MSVC), which has no matching delete: nothing is freed, as on MSVC. Only an inline one (its decorated
+        # name is bound nowhere); a class whose operator new has no body here is left as it is.
+        tags, ok = [], True
+        for nm in NEW5_NEW.finditer(text, o, c):
+            if not re.match(r'\s*\{', text[nm.end():]): ok = False; break
+            tags.append((nm.end() - 1, ' FNVNX_NEW5_TAG'))
+        if not ok: continue
+        inserts += tags
         inserts.append((o + 1, ' public: FNVNX_GLOBAL_DELETE private:' if hm.group(1) == 'class'
                         else ' FNVNX_GLOBAL_DELETE'))
     if not inserts: return text
     out, pos = [], 0
     for at, s in sorted(inserts):
-        out.append(text[pos:at]); out.append(s + ' /* fnv-nx NEW5 */'); pos = at
+        out.append(text[pos:at]); out.append(s + ('' if s == ' FNVNX_NEW5_TAG' else ' /* fnv-nx NEW5 */')); pos = at
         stats['NEW5'] += 1
     out.append(text[pos:])
     return ''.join(out)
