@@ -823,8 +823,10 @@ src/havok/unplaced/cellmopp_o2_variant.cpp	ref	0x00ca5080	?FUN_00ca5080@@YAXXZ	?
 src/imagespaceshaderblur_h_unit.cpp	ref	0x00c03a20	?FUN_00c03a20@@YAXXZ	?FUN_00c03a20@FUN_00b8e420_s1b@@QAEXXZ
 src/imagespaceshaderblur_h_unit.cpp	ref	0x00c03a20	?FUN_00c03a20@@YAXXZ	?FUN_00c03a20@FUN_00b8eaa0_s1b@@QAEXXZ
 src/imagespaceshaderblur_h_unit.cpp	ref	0x00c03a20	?FUN_00c03a20@@YAXXZ	?FUN_00c03a20@FUN_00b8ec40_s1b@@QAEXXZ
+src/staging/blk_00440000_od.cpp	ref	0x0044ac40	?FUN_0044ac40@GlobalManager@fnv_00448420@@QAEXPAX@Z	?FUN_0044ac40@GlobalManager@fnv_00448420@@QAEXPAXH@Z
 src/staging/blk_00440000_od.cpp	ref	0x0053a5e0	?FUN_0053a5e0@TESObjectLAND@@QAEPAUVector3@@XZ	?FUN_0053a5e0@TESObjectLAND@@QAEPAUVector3@@PBUVector2@@@Z
 src/staging/blk_00440000_od.cpp	ref	0x00546fb0	?GetLandscape@FakeCell@@QAEPAUTESObjectLAND@@PBUVector2@@@Z	?GetLandscape@FakeCell@@QAEPAUTESObjectLAND@@XZ
+src/staging/blk_00440000_od.cpp	ref	0x00559450	?FUN_00559450@ItemObj@fnv_00448420@@QAEPAXH@Z	?FUN_00559450@ItemObj@fnv_00448420@@QAEPAXXZ
 src/staging/blk_00480000_od.cpp	ref	0x004280f0	??BChangeFlags0048@@QBE_NXZ	?FUN_004280f0@ChangeFlags0048@@QBE_NI@Z
 src/staging/blk_00480000_od.cpp	ref	0x00428110	?GetChangeFlags@SaveFormBuf0048@@QAE?AVChangeFlags0048@@I@Z	?GetChangeFlags@SaveFormBuf0048@@QAE?AVChangeFlags0048@@XZ
 src/staging/blk_004e0000_od.cpp	ref	0x004f35b0	?FUN_004f35b0@MidX@@QAEPAURDLItem@@XZ	?FUN_004f35b0@MidX@@QAEPAURDLItem@@H@Z
@@ -851,6 +853,9 @@ src/staging/blk_00800000_o2_od_oy_noo2_variant.cpp	ref	0x004ae750	?FUN_004ae750@
 src/staging/blk_00800000_o2_od_oy_noo2_variant.cpp	ref	0x0081f1e0	?ApplyVirtualCall@ImpactResult@@QAEXXZ	?ApplyVirtualCall@ImpactResult@@QAEXPAUImpactVector@@0@Z
 src/staging/blk_00840000_od.cpp	ref	0x00846d20	?FUN_00846d20@ItemRef@@QAEIXZ	?FUN_00846d20@ItemRef@@QAEII@Z
 src/staging/blk_00840000_od.cpp	ref	0x0084e3a0	?FUN_0084e3a0@ItemManager@@QAEPAUItemRef@@I@Z	?FUN_0084e3a0@ItemManager@@QAEPAUItemRef@@XZ
+src/staging/blk_00860000_od.cpp	ref	0x004e3270	?Factory_004e3270@@YGPAUChainNode_004ebbc0@@HM@Z	?Factory_004e3270@@YGPAUChainNode_004ebbc0@@XZ
+src/staging/blk_00860000_od.cpp	ref	0x004ebbc0	?Next@ChainNode_004ebbc0@@QAEPAUChainLeaf_005b9f80@@XZ	?Next@ChainNode_004ebbc0@@QAEPAUChainLeaf_005b9f80@@H@Z
+src/staging/blk_00860000_od.cpp	ref	0x005b9f80	?Run@ChainLeaf_005b9f80@@QAEXXZ	?Run@ChainLeaf_005b9f80@@QAEXM@Z
 src/staging/blk_00860000_od.cpp	ref	0x00877720	?B@Obj@fnv_0086a0a0@@QAEPAUInner@2@H@Z	?B@Obj@fnv_0086a0a0@@QAEPAUInner@2@XZ
 src/staging/blk_00860000_od.cpp	ref	0x00a23c00	?C@Inner@fnv_0086a0a0@@QAEXXZ	?C@Inner@fnv_0086a0a0@@QAEXH@Z
 src/staging/blk_008c0000_o2_od_oy_noo2_variant.cpp	ref	0x004ae750	?FUN_004ae750@ObjectD0020@@QAEPAUResultD0020@@ABUVecD0020@@0@Z	?FUN_004ae750@ObjectD0020@@QAEPAUResultD0020@@XZ
