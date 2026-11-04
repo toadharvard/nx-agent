@@ -4,9 +4,9 @@
  * filled with traps, the address map (an FNVAMAP1 blob instead of S2's linked table: same entries, natives 0),
  * fnvnx_scan_codeptrs twice (count, then fill, as the boot) and fnvnx_fixups_apply at medium confidence.
  *
- *   sdmc:/fnvnx/game/FalloutNV.exe     the image (a player's exe or loader/synth's shell)
- *   sdmc:/fnvnx/game/addrmap.bin       the address map blob (loader/tools/fnvnx_formats.py AddrMap.to_bin)
- *   sdmc:/fnvnx/game/hints.txt         optional vftable hints, one original VA per line (hex)
+ *   sdmc:/switch/fnv/FalloutNV.exe     the image (a player's exe or loader/synth's shell)
+ *   sdmc:/switch/fnv/addrmap.bin       the address map blob (loader/tools/fnvnx_formats.py AddrMap.to_bin)
+ *   sdmc:/switch/fnv/hints.txt         optional vftable hints, one original VA per line (hex)
  *
  * Built by loader/bench/build.sh; prints the scan statistics loadcheck prints, so runs compare line by line. */
 #include <inttypes.h>
@@ -74,7 +74,7 @@ int main(void) {
     void *mblob;
     char *htxt;
     int rc;
-    g_fd = os_file_open("sdmc:/fnvnx/game/FalloutNV.exe", OS_O_READ);
+    g_fd = os_file_open("sdmc:/switch/fnv/FalloutNV.exe", OS_O_READ);
     if (g_fd < 0) { printf("scanbench: no image\n"); return 2; }
     os_file_fstat(g_fd, &st);
     if ((rc = fnvnx_pe_open(&pe, &os, (uint32_t)st.size))) { printf("scanbench: pe_open %d\n", rc); return 2; }
@@ -90,9 +90,9 @@ int main(void) {
         for (a = lo; a + 4 <= hi; a += 4)
             if (*(uint32_t *)(uintptr_t)a == 0) *(uint32_t *)(uintptr_t)a = fnvnx_trap_value(NULL, a);
     }
-    mblob = slurp("sdmc:/fnvnx/game/addrmap.bin", &msize);
+    mblob = slurp("sdmc:/switch/fnv/addrmap.bin", &msize);
     if (!mblob || (rc = fnvnx_codemap_from_blob(&map, mblob, msize))) { printf("scanbench: no address map\n"); return 2; }
-    htxt = (char *)slurp("sdmc:/fnvnx/game/hints.txt", &hsize);
+    htxt = (char *)slurp("sdmc:/switch/fnv/hints.txt", &hsize);
     if (htxt) {   /* loadcheck's format: one original VA per line, '#' lines are comments */
         char *p = htxt;
         while (*p && so.nhints < 65536) {

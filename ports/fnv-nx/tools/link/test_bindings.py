@@ -451,7 +451,7 @@ def main():
               sym.get('__fnvnx_msvc_00401580', (0, -1))[1] == sym.get('_ZThn8_N1D2fbEi', (0, -2))[1] and
               sym.get('__fnv_00401580', (0, -1))[1] == sym.get('_ZN1D2fbEi', (0, -2))[1],
               'secondary-base override: the map names the thunk, __fnv_ stays the primary entry: %s %s' % (
-                  rows.get(0x401300), rows.get(0x401310)))
+                  rows.get(0x401580), rows.get(0x401590)))
         r_ = refs.get(('src/ta.cpp', 'g_011c5a4c_arg1'), [''] * 6)
         check(r_[2] == 'text-addr' and sym.get('__fnvnx_textaddr_00a00000', (0, -1))[1] == 0x00a00000,
               'a variable at an undefined .text address -> absolute symbol there: %s %s' % (

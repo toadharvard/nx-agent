@@ -131,7 +131,7 @@ boot() {   # boot <tag> [extra emu_guest.py args]
   local rc=0 root=$OUT/sdmc-$tag
   rm -rf "$root"; mkdir -p "$root"
   timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "fnvnx/game/FalloutNV.exe=$IMAGE"} \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE"} \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"

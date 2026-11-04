@@ -6,7 +6,8 @@
   2 rows differ from the link because the replay reads layouts without the tree's POD check. The next farm link confirms the
   figures. That link also re-probes every layout, because of the pod2 rule.
 * **did** - Bridge-gap pairs, measured as S1b's abiclass BRIDGE pairs (unique src/address/reference):
-  **2,221 -> 32** (replayed with the tree; 58 without it). The commits:
+  **2,221 -> 35** (replayed with the tree). It reached 32, then V1 refuted the e2dbe73 rule (VA-U1..U4) and the
+  figure went back to 70. Per-call-site types (vacall, below) bring it to 35. The commits:
   - `e0ed8d5` The synthesized vtable/body objects (`<host>#vtables`) asked for layouts under their own name. 985
     probe rows failed and 1,283 manual rows were never decided on bytes. They now use the host unit. 2,221 -> 943.
   - `0750425` Variadic pairs (`abi.varargs_check`). AArch64 Linux passes anonymous arguments like named ones. A
@@ -63,6 +64,28 @@
     address map's link symbol, otherwise the rows remain.
   - **For the orchestrator**: resolve reads the exe through FNVNX_EXE / PLAYER_EXE (S2d's link_job wiring).
   - native-stub-data 448 and native-address 111 are not grouped yet on these heads.
+
+* **V1 refutations, fixed (commit "V1 VA-U...")**
+  - VA-U1..U4: an `int f(...)` call site's long long, double, struct by value or struct{float} gives other words
+    than the integer definition reads. Definition parameters taken from anonymous words are manual again.
+  - ABI-R1: a pointer with several cv-qualifiers was not recognized.
+  - OVR-F1: the Link fingerprint now differs between auto, none and a table.
+  - OVR-E1: an empty OVERRIDE means off.
+  - RPL-B1: abireplay strips `#bodiesN`.
+  - V1's test_s2c_s4_batch.py now reports "refuted: none" here.
+
+* **did (vacall)** - Variadic references are decided by their call sites, as the orchestrator asked.
+  - The plugin `tools/link/vacall/fnvnx_vacall.so` (-fsyntax-only, in `fnvlink.py probe`) records each call's argument
+    classes after promotion.
+  - When all calls of the reference in a unit agree, resolve 2 compares the definition with that fixed signature
+    and bridges it, with abi2 bytes for a double or long long read as two ints. The bridge key includes the
+    call-site signature.
+  - test_vacall.py: V1's shapes plus mixed and disagreeing call sites, 4 pairs executed under qemu.
+  - Replay: 13 units, 26 s, 70 -> 35.
+  - Left: call sites that disagree (per-site bridges would need relocation retargeting), aggregates by value, and
+    2 unrecorded units.
+  - **For the orchestrator**: the link farm needs gcc-13-plugin-dev-aarch64-linux-gnu. Without it, vacall prints
+    "no plugin" and those pairs stay manual.
 
 * **measured** - abireplay on link/c0d6c71516f6 with the override table: rows bridge 4,732, manual 79, same 1,995,
   x86-inconsistent 3,276 (before: bridge 4,183, manual 2,632, x86-inconsistent 3,267). The 9 new x86-inconsistent

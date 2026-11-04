@@ -1,5 +1,5 @@
 /* S5 hello world: ILP32 guest code calling into LP64 libnx through the host API.
- * Prints to the host console (and sdmc:/fnvnx/host.log), uses svcOutputDebugString and svcSleepThread
+ * Prints to the host console (and sdmc:/switch/fnv/host.log), uses svcOutputDebugString and svcSleepThread
  * through the host, and checks what this milestone has to prove: ILP32 data model, self-relocated pointers,
  * TLS on TPIDR_EL0, newlib (printf/malloc) working in ILP32. */
 #include <stdint.h>

@@ -14,7 +14,7 @@ SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
 export CXX DECOMP OUT HERE SSE2NEON
 mkdir -p "$OUT/logs"
 
-FLAGS=(-mabi=ilp32 -std=gnu++17 -fsyntax-only -fms-extensions -fshort-wchar -fpermissive -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -ffp-contract=off
+FLAGS=(-mabi=ilp32 -std=gnu++17 -fsyntax-only -fms-extensions -fshort-wchar -fpermissive -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -ffp-contract=off -U_FORTIFY_SOURCE
        -Werror=return-type -Wno-narrowing -fmax-errors=200 -include "$HERE/shim/include/fnvnx_compat.h"
        -I"$HERE/shim/include" -I"$SSE2NEON" -I"$DECOMP/include")
 export FLAGS_STR="${FLAGS[*]}"

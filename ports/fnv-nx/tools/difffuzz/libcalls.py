@@ -29,7 +29,7 @@ X86 = {
 }
 # x86 helpers that run as x86 code from a private stub page (each its own slot: some call back into game code)
 STUB_SLOT = {'ftol2': 0, 'CIsqrt': 1, 'CIsin': 2, 'CIcos': 3, 'fabs': 4, 'sqrt': 5, 'ehvec_ctor': 6, 'ehvec_dtor': 7,
-             'log10': 8, 'ftol2_sse': 9, 'bswap': 10, 'rtdyncast': 11}
+             'ftol2_sse': 9, 'bswap': 10, 'rtdyncast': 11}
 CRT_ADDR = {}
 for _a, _n in X86.items():
     CRT_ADDR.setdefault(_n, _a)
@@ -41,6 +41,10 @@ A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp'
             '_strnicmp': 'strnicmp', 'sqrt': 'sqrt', 'sqrtf': 'sqrtf', 'sin': 'sin', 'sinf': 'sinf', 'cos': 'cos',
             'cosf': 'cosf', 'fabs': 'fabs', 'fabsf': 'fabsf', 'log10': 'log10', 'log10f': 'log10f',
             'sincos': 'sincos', 'sincosf': 'sincosf',
+            'log': 'log', 'logf': 'logf', 'exp': 'exp', 'expf': 'expf', 'pow': 'pow', 'powf': 'powf',
+            'atan2': 'atan2', 'atan2f': 'atan2f', 'tan': 'tan', 'tanf': 'tanf', 'atan': 'atan', 'atanf': 'atanf',
+            'asin': 'asin', 'asinf': 'asinf', 'acos': 'acos', 'acosf': 'acosf', 'fmod': 'fmod', 'fmodf': 'fmodf',
+            'floor': 'floor', 'floorf': 'floorf', 'ceil': 'ceil', 'ceilf': 'ceilf',
             'fnvnx_byteswap_ulong': 'bswap', '__builtin_bswap32': 'bswap',
             'fnvnx_rt_dynamic_cast': 'rtdyncast', '__dynamic_cast': 'rtdyncast',
             '_memcpy': 'memcpy', '_memmove': 'memmove',
@@ -181,15 +185,72 @@ def run(name, m, a):
 
 
 def run_float(name, x):
+    if name in CRT_MATH:
+        return crt_math(name, (x,))
     f = {'sqrt': math.sqrt, 'sqrtf': math.sqrt, 'sin': math.sin, 'sinf': math.sin, 'cos': math.cos,
-         'cosf': math.cos, 'fabs': abs, 'fabsf': abs, 'log10': math.log10, 'log10f': math.log10}[name]
+         'cosf': math.cos, 'fabs': abs, 'fabsf': abs}[name]
     try:
         return f(x)
     except (ValueError, OverflowError):
         return float('nan')
 
 
+# The CRT's double functions (cdecl, double arguments on the stack, result in ST0; natively libm with v0/v1 -> v0),
+# run as builtins on both machines with C99 / IEEE 754 results at the domain edges (log(0) = -inf, log(-1) = NaN,
+# pow(0, -1) = inf, exp(1000) = inf): the oracle's x87 code and glibc agree there, Python raises. A name ending in
+# `f` is the float variant (native only). name -> number of arguments.
+CRT_MATH = {'log': 1, 'log10': 1, 'exp': 1, 'tan': 1, 'atan': 1, 'asin': 1, 'acos': 1, 'floor': 1, 'ceil': 1,
+            'sin': 1, 'cos': 1, 'pow': 2, 'atan2': 2, 'fmod': 2}
+CRT_MATH.update({n + 'f': k for n, k in list(CRT_MATH.items())})
+
+
+def _odd_int(y):
+    return math.isfinite(y) and y == int(y) and int(y) % 2 == 1
+
+
+def crt_math(name, args):
+    """C99 result of libm function `name` (CRT_MATH) for Python floats `args`."""
+    n = name[:-1] if name.endswith('f') and name[:-1] in CRT_MATH else name
+    x = args[0]
+    y = args[1] if len(args) > 1 else 0.0
+    inf, nan = float('inf'), float('nan')
+    if n in ('log', 'log10'):
+        if math.isnan(x) or x < 0:
+            return nan
+        if x == 0:
+            return -inf
+        if x == inf:
+            return inf
+        return math.log(x) if n == 'log' else math.log10(x)
+    if n == 'exp':
+        try:
+            return math.exp(x)
+        except OverflowError:
+            return inf
+    if n in ('floor', 'ceil'):
+        if not math.isfinite(x):
+            return x
+        v = float(math.floor(x) if n == 'floor' else math.ceil(x))
+        return math.copysign(v, x) if v == 0 else v
+    if n == 'pow':
+        try:
+            return math.pow(x, y)
+        except OverflowError:
+            return -inf if x < 0 and _odd_int(y) else inf
+        except ValueError:
+            if x == 0 and y < 0:
+                return math.copysign(inf, x) if _odd_int(y) else inf
+            return nan
+    f = {'tan': math.tan, 'atan': math.atan, 'asin': math.asin, 'acos': math.acos, 'sin': math.sin,
+         'cos': math.cos, 'atan2': math.atan2, 'fmod': math.fmod}[n]
+    try:
+        return f(*args[:CRT_MATH[n]])
+    except (ValueError, OverflowError):
+        return nan
+
+
 FLOAT_NAMES = {'sqrt', 'sqrtf', 'sin', 'sinf', 'cos', 'cosf', 'fabs', 'fabsf', 'log10', 'log10f'}
+FLOAT_NAMES |= set(CRT_MATH)
 
 
 # x86 helpers that run as real x87 code from a private stub page: name -> bytes(slot address) (each ends in ret)
@@ -220,8 +281,6 @@ def x87_stub(name, slot):
         return b'\xdd\x44\x24\x04\xd9\xe1\xc3'
     if name == 'sqrt':
         return b'\xdd\x44\x24\x04\xd9\xfa\xc3'
-    if name == 'log10':     # cdecl double -> ST0: fldlg2; fld qword [esp+4]; fyl2x
-        return b'\xd9\xec\xdd\x44\x24\x04\xd9\xf1\xc3'
     if name == 'ehvec_ctor':  # stdcall (ptr, size, count, ctor, dtor): ctor(ptr + i*size) for i in 0..count-1
         return bytes.fromhex('558bec565753' '8b7508' '8b7d10' '85ff' '7e0b' '8bce' 'ff5514' '03750c' '4f' 'ebf1'
                              '5b5f5e5d' 'c21400')

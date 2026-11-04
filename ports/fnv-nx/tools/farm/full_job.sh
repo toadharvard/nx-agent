@@ -43,6 +43,12 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 t0=$(date +%s)
 
 host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools
+# NX1's package checks (tests/nx1): switch-tools elf2nro needs lz4.h, the host device test qemu-user, the libnx
+# syntax check newlib's headers. Libraries are not commands, so host_check cannot see them.
+if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/include/newlib ] || ! command -v qemu-aarch64 >/dev/null; }; then
+	apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends liblz4-dev libnewlib-dev qemu-user \
+		|| echo "full_job.sh: NX1 packages not installed; checks 1 and 7 report incomplete"
+fi
 job_sources "$REPO"
 F=$FARM_HOME/full; mkdir -p "$F"
 
