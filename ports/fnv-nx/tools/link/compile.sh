@@ -48,10 +48,11 @@ ORDER_REFCOUNT=${ORDER_REFCOUNT:-weak}
 # ORDER_OBJECT=first|last (ORDER-OBJECT: a member call's object before or after its arguments) and
 # ORDER_OPERATOR=cpp17|rtl (ORDER-OPERATOR: overloaded <<, >>, [], ->* left to right as C++17, or like any MSVC call);
 # docs/ORDERING.md, tests/s12/order/evalorder.cpp. ORDER_OBJECT=last is the build: MSVC's thiscall pushes the arguments
-# and loads ecx last, and the decomp (byte-matched against MSVC) has calls that work only that way. ORDER_OPERATOR
-# stays cpp17 until S11's MSVC run of evalorder.cpp decides it.
+# and loads ecx last, and the decomp (byte-matched against MSVC) has calls that work only that way. ORDER_OPERATOR=rtl:
+# MSVC 2008 predates C++17 and compiles an overloaded operator as a plain call (arguments pushed right to left).
+# S11's MSVC run of evalorder.cpp confirms both; first / cpp17 are GCC's own order, for A/B.
 ORDER_OBJECT=${ORDER_OBJECT:-last}
-ORDER_OPERATOR=${ORDER_OPERATOR:-cpp17}
+ORDER_OPERATOR=${ORDER_OPERATOR:-rtl}
 FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS"
         -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
         -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR")

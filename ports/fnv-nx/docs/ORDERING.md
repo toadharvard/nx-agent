@@ -245,8 +245,10 @@ not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B
   read, gone with object=last). Measured on 131 units: 27 objects change, -0.06 % instructions, no compiler error.
   S11's MSVC run of evalorder.cpp confirms it; if it disagrees, the default goes back.
 * **ORDER-OPERATOR** (C++17 fixes `<<`, `>>`, `[]`, `->*` left to right and `=`, `@=` right to left for overloaded
-  operators; MSVC 2008 evaluates an overloaded operator like any call): the plugin leaves `CALL_EXPR_ORDERED_ARGS`
-  calls alone. `-fstrong-eval-order=some` is the candidate flag; it needs S11's gate.
+  operators; MSVC 2008 evaluates an overloaded operator like any call). **compile.sh builds with `operator=rtl`**
+  (`ORDER_OPERATOR=cpp17` for A/B): MSVC 2008 predates C++17, and an overloaded operator is a plain call whose
+  arguments it pushes right to left, the same behaviour ORDER-ARGS relies on. Measured on 131 units: no object
+  changes. S11's MSVC run of evalorder.cpp confirms it.
 
 Both are switchable now, with defaults that keep the order above (the objects are byte-identical with and without
 the two arguments; run.py checks it on evalorder.cpp and units.cpp). `-fplugin-arg-fnvnx_order-object=last` (default
