@@ -140,14 +140,24 @@ print('yes' if good and (complete or mode == 'always') else 'no')
 EOF
 )
 	[ "$ok" = yes ] || { NOTE_PUB="not published: the link failed, is stale or covers a UNITS subset"; return 0; }
-	if (
+	# The subshell runs as a plain statement so that its set -e holds (inside `if ( ... )` bash ignores it), and it
+	# refuses to touch any checkout but the artifacts worktree: a failed `cd` must never commit elsewhere.
+	local prc
+	set +e
+	(
 		set -e
 		git -C "$ARTIFACTS" worktree prune
-		if [ ! -e "$wt/.git" ]; then   # an empty worktree of the artifacts repository on an orphan branch
+		if [ ! -e "$wt/.git" ]; then   # a worktree of the artifacts repository on that branch, nothing checked out
 			rm -rf "$wt"
-			git -C "$ARTIFACTS" worktree add -q -f --orphan -B "$rb" "$wt"
+			if git -C "$ARTIFACTS" rev-parse -q --verify "refs/heads/$rb" >/dev/null; then
+				git -C "$ARTIFACTS" worktree add -q -f -f --no-checkout "$wt" "$rb"
+			else
+				git -C "$ARTIFACTS" worktree add -q -f --orphan -b "$rb" "$wt"
+			fi
 		fi
-		cd "$wt"
+		cd "$wt" || exit 1
+		[ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ] || exit 1
+		[ "$(git rev-parse --git-common-dir | xargs realpath)" = "$(git -C "$ARTIFACTS" rev-parse --git-common-dir | (cd "$ARTIFACTS" && xargs realpath))" ] || exit 1
 		git rm -rqf --cached . >/dev/null 2>&1 || true
 		rm -rf out fixed guest boot summary.txt report.md meta.json
 		mkdir -p out/cache fixed
@@ -180,7 +190,7 @@ print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
                   'boot_winmain': rec('boot').get('metrics', {}).get('boot_winmain'), 'boot_stop': rec('boot').get('stop')},
                  indent=1, sort_keys=True))
 EOF
-		git add -A .
+		git add -f -A .
 		# the new commit's parent is the newest publish of any link farm, so a push sends only what changed
 		if git fetch -q origin "+refs/heads/$rb:refs/remotes/origin/$rb" 2>/dev/null; then
 			git reset -q --soft "refs/remotes/origin/$rb"
@@ -191,6 +201,9 @@ EOF
 			sleep $((i * 5))
 		done
 		git ls-remote origin "refs/heads/link/$C12" | grep -q .
-	); then NOTE_PUB="published: branch link/$C12 (history on link-head)"
+	)
+	prc=$?
+	set -e
+	if [ $prc -eq 0 ]; then NOTE_PUB="published: branch link/$C12 (history on link-head)"
 	else NOTE_PUB="publishing link/$C12 FAILED"; fi
 }
