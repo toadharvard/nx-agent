@@ -5,7 +5,7 @@
 #   DEVKITPRO=<dir from toolchain/devkita64/setup.sh> tests/s5/hello/build.sh <out dir> [program id]
 #
 # Output: <out>/exefs.nsp (main + main.npdm), <out>/guest.nso, the intermediate ELFs, and an SD tree
-# <out>/sd/{atmosphere/contents/<program id>/exefs.nsp, fnvnx/guest.nso} ready to copy.
+# <out>/sd/{atmosphere/contents/<program id>/exefs.nsp, switch/fnv/guest.nso} ready to copy.
 set -euo pipefail
 : "${DEVKITPRO:?set DEVKITPRO (toolchain/devkita64/setup.sh)}"
 OUT=$(mkdir -p "$1" && realpath "$1"); TID=${2:-0100000000000000}
@@ -44,7 +44,7 @@ $PY "$TC/tools/elf2nso.py" host.elf main
 $PY "$TC/tools/elf2nso.py" guest.elf guest.nso
 $PY "$TC/tools/npdmtool.py" "$TC/npdm/fnvnx-app.json" main.npdm
 $PY "$TC/tools/build_pfs0.py" exefs.nsp main=main main.npdm=main.npdm
-mkdir -p "sd/atmosphere/contents/$TID" sd/fnvnx
+mkdir -p "sd/atmosphere/contents/$TID" sd/switch/fnv
 cp exefs.nsp "sd/atmosphere/contents/$TID/exefs.nsp"
-cp guest.nso sd/fnvnx/guest.nso
-echo "built $OUT/sd: atmosphere/contents/$TID/exefs.nsp, fnvnx/guest.nso"
+cp guest.nso sd/switch/fnv/guest.nso
+echo "built $OUT/sd: atmosphere/contents/$TID/exefs.nsp, switch/fnv/guest.nso"

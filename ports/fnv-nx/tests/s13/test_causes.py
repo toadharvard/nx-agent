@@ -254,6 +254,38 @@ def test_policy():
           'report.reclassify applies the record rules')
     check(report.reclassify(rec(dict(kind='return', x86=w(1), arm=w(2)), 'bool-repr')) == 'bool-repr',
           'report.reclassify keeps a probe cause')
+    g = rec(dict(kind='call-count', x86=0, arm=1, x86_trace=[], arm_trace=['00aa1460']), 'call-flow')
+    g['symbol'] = '??_GFoo@@UAEPAXI@Z'
+    g['case'] = {'args': {'p0': '00000000'}}
+    check(report.reclassify(g) == 'deleting-dtor-flags', '??_G with flags 0: the native D0 frees, the oracle does not')
+    g['case'] = {'args': {'p0': '01000000'}}
+    check(report.reclassify(g) == 'falloff?', '??_G with flags 1 that frees only natively stays falloff?')
+    g = rec(dict(kind='call-count', x86=1, arm=3, x86_trace=['00401234'], arm_trace=['00401234', '00401030',
+                                                                                       '00555555']), 'call-flow')
+    g['symbol'] = '??_GFoo@@UAEPAXI@Z'
+    check(report.reclassify(g) != 'deleting-dtor-flags', '??_G: an extra call that is not a deallocator is not dtor-flags')
+    n = rec(dict(kind='call-count', x86=0, arm=2, x86_trace=[], arm_trace=['name:_ZNK3FooIcEcvPKcEv', '0043b4a0']),
+            'call-flow')
+    check(report.reclassify(n) == 'native-undefined', 'oracle no calls, native first calls a named stub')
+    n = rec(dict(kind='call-count', x86=0, arm=2, x86_trace=[], arm_trace=['00559450', 'name:_ZNK3FooIcEcvPKcEv']),
+            'call-flow')
+    check(report.reclassify(n) == 'after-native-undefined', 'oracle no calls, a later native call is a named stub')
+    n = rec(dict(kind='call-count', x86=0, arm=1, x86_trace=[], arm_trace=['00559450']), 'call-flow')
+    check(report.reclassify(n) == 'falloff?', 'oracle no calls, native calls an address: falloff?')
+    a = rec(dict(kind='call-args', arg='p0', cls='F32', x86=f32(0.88138), arm=w(struct.unpack('<I', struct.pack(
+        '<f', 0.88138))[0] + 1)), 'signedness')
+    check(report.reclassify(a) == 'x87-precision', 'signedness probe on a 1-ulp float argument: x87-precision')
+    b = rec(dict(kind='return', x86='01', arm='80'), 'signedness')
+    b['symbol'] = '?f@@YA_NXZ'
+    check(report.reclassify(b) == 'bool-repr', 'signedness probe on a bool result byte 0x80: bool-repr')
+    b['symbol'] = '?f@@YAEXZ'
+    check(report.reclassify(b) == 'signedness', 'an unsigned char result 01 vs 80 stays signedness')
+    e = rec(dict(kind='error', x86=None, arm='fault:r:fffffffe'), 'signedness')
+    check(report.reclassify(e) == 'ilp32-pointer', 'signedness probe on a native access across 4 GiB')
+    c = rec(dict(kind='call-target', index=1, x86='00aa3e40', arm='name:_ZN3Foo3BarEv'), 'signedness')
+    check(report.reclassify(c) == 'native-undefined', 'signedness probe on a call of a named stub: native-undefined')
+    e = rec(dict(kind='error', x86=None, arm='fault:r:00000010'), 'signedness')
+    check(report.reclassify(e) == 'signedness', 'a native near-null read keeps the probe cause')
 
 
 def test_summary():
@@ -603,8 +635,21 @@ def test_callflow():
         check(cf(tgt('00ec623a', 'name:__strcpy_chk')) != 'libc-variant', 'sprintf vs __strcpy_chk: not a variant')
         check(cf(tgt('00401200', '9e684216')) == 'native-vcall-oracle-direct', 'native wild call, oracle direct')
         bodies['__fnv_00401100'] = (BL_RET, {'__fnv_00401100'})
+        # oracle-callee-unloaded needs the native trace to show the native ran X: a call X makes out of the unit
+        check(cf(tgt('00401100', '00401300')) != 'oracle-callee-unloaded',
+              'X reaches no traced call: no evidence the native ran it, no artefact (V1 U1)')
+        causes.native_reaches = lambda src, n: {'__fnv_00401100', '__fnv_00401300'}
         check(cf(tgt('00401100', '00401300')) == 'oracle-callee-unloaded',
-              'oracle intercepts a callee the native object runs: oracle-callee-unloaded')
+              'oracle intercepts a callee the native ran (its traced call is in the native trace)')
+        real_cs = causes.native_callees
+        causes.native_callees = lambda src, a: real_cs(src, a) | {'__fnv_00401300'}
+        check(cf(tgt('00401100', '00401300')) != 'oracle-callee-unloaded',
+              'the caller calls Y itself: Y in the trace proves nothing about X')
+        causes.native_callees = real_cs
+        check(cf(tgt('00401100', '00401400')) != 'oracle-callee-unloaded',
+              'X\'s traced call missing from the native trace: the native never ran X (V1 U2)')
+        check(cf(dict(kind='call-count', x86=1, arm=0, x86_trace=['00401100'], arm_trace=[])) == 'native-early-exit',
+              'an early exit before X stays native-early-exit')
         causes.unbound_callees = lambda src, a: ['_ZN3Bar3getEv']
         check(cf(tgt('00401100', '00401300')) == 'after-native-undefined',
               'an artifact shape never hides an unbound C++ name')

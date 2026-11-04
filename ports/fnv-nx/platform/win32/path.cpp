@@ -6,8 +6,9 @@
  *                                         AppData\Local\FalloutNV\ (plugins.txt)
  *     any other X:\...                    <root>/drive_x/... (sandboxed, nothing escapes the root)
  * mounted on the host as
- *     <root>/game  <root>/user  <root>/drive_<x>
- * with <root> = sdmc:/fnv-nx on the Switch and $FNVNX_ROOT (default ./fnvnx-root) on the host.
+ *     <root>  <root>/user  <root>/drive_<x>
+ * with <root> = sdmc:/switch/fnv on the Switch (toolchain/include/fnvnx/sdlayout.h: the player copies FalloutNV.exe
+ * and Data/ there, next to fnv.nro, as in a PC install) and $FNVNX_ROOT (default ./fnvnx-root) on the host.
  *
  * Normalisation follows Win32: '/' and '\' both separate, "." and ".." are resolved lexically (".." stops at the
  * drive root), empty components collapse, trailing dots/spaces of a component are dropped, relative and
@@ -193,9 +194,8 @@ extern "C" void fnvnx_path_reset(const char *root)
     strcpy(g_cwd, GAME_DIR);
     os_unlock(&g_path_lock);
     char h[W32_PATH_MAX + 64];
-    snprintf(h, sizeof h, "%s/game", g_root);
-    mkdirs(h);
-    fnvnx_path_mount(GAME_DIR, h);
+    mkdirs(g_root);
+    fnvnx_path_mount(GAME_DIR, g_root);   /* the install is the root itself: <root>/FalloutNV.exe, <root>/Data */
     snprintf(h, sizeof h, "%s/user", g_root);
     fnvnx_path_mount(USER_DIR, h);
     /* the profile folders the game writes to must exist */

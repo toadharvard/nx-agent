@@ -615,12 +615,12 @@ measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked 
 | - | clock 1785 MHz | x1.75 on every core | owner's console setting | no |
 
 **Result** (`docs/PERF_budget.json`; frame = critical core, here always core 0, or the GPU if larger; mid with the
-lo-hi range; level by the mid **worst** frame, J-0150: `target_60` = worst frame <= 16.7 ms, `pass_45` informational):
+lo-hi range; every plan includes the built levers (`placed`'s); level by the mid **worst** frame, J-0150: `target_60` = worst frame <= 16.7 ms, `pass_45` informational):
 
 | scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
 |---|---:|---|---|---|---|
 | placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.2 | **fail** | 16.1 (7.3-31.0) / 20.1 | pass_45 |
-| plan45 (mt_cull, havok_workers, threaded_anim) | 17.2 (8.5-27.0) | 21.1 (8.4-44.1) / 26.4 | pass_30 | 12.1 (7.1-25.2) / 15.1 | target_60 |
+| plan45 (mt_cull, havok_workers, threaded_anim; + built barrier_relax) | 16.4 (8.4-25.7) | 20.1 (8.2-42.0) / 25.1 | pass_30 | 11.5 (7.1-24.0) / 14.3 | target_60 |
 | plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | pass_45 | 9.9 (7.1-22.0) / 12.4 | target_60 |
 | plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | pass_45 | 9.8 (7.1-20.6) / 12.3 | target_60 |
 

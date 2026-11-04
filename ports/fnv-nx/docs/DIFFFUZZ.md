@@ -225,6 +225,18 @@ is that import, as on x86.
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
 
+**Float results of untyped calls and CRT math (S1-fuzzB, after difffuzz-13).** An intercepted call whose callee
+nothing types (a wild or unplanted indirect call, a CRT name with only a C spelling in the unit's symbols) always
+leaves the canned bytes in v0 natively; the oracle now gets the same value in ST0 when the code the call returns to
+consumes ST0 (`x86emu.x87_result_use`: fst/fstp m32 -> f32, m64 -> f64, x87 arithmetic; the caller's cleanup and
+epilogue are stepped over, and a `ret` takes the fuzzed function's own result kind). Before, the oracle read an
+empty x87 stack (0.0) and the native the canned bytes: 12 of the 21 actor.cpp float divergences. A unit's symbols
+prefer a decorated spelling for an address (`?FUN_00eca920@@YANN@Z` over `_FUN_00eca920`). The CRT's double
+functions the link gives libm providers (log, log10, exp, pow, atan2, tan, atan, asin, acos, fmod, floor, ceil,
+sin, cos: `libcalls.CRT_MATH`) run as builtins on both machines with C99 results at the domain edges (log(0) =
+-inf, log(-1) = NaN, pow poles and overflow, signed zeros of floor/ceil); the x87 `fyl2x` stub for log10 gave 0.0
+for log10(0) under Unicorn. Replayed on link c0d6c71516f6: float records 51 -> 20 still diverging (2 gone before).
+
 ## Cause refinement and verdict policy (`causes.py`, S13b)
 
 `report.reclassify` hands what the probes left at `unclassified`, `call-flow` or `signedness?` to `causes.refine`,
@@ -246,6 +258,10 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | pointer to a pinned-pool literal (0x02f00000) vs the native .rodata copy: argument / result / store | `literal-arg` / `literal-ret` / `literal-store` | artifact |
 | both sides store image vftables (link `out/addrmap.tsv` kind V, or `FNVNX_CAUSES_ADDRMAP`), different ones: in a destructor / elsewhere | `vptr-store` / `vptr-differs` | by-design / triage S2c |
 | result of a `??_G` / `??_E` deleting destructor (MSVC returns this, Itanium D0 is void) | `deleting-dtor-ret` | by-design |
+| call-count of a `??_G` fuzzed with flags bit 0 clear: the native makes the oracle's calls plus deallocator calls only (D0 always frees) | `dtor-flags` | artifact (S13: fuzz `??_G` with flags & 1, or pair flags 0 with D1) |
+| call-count, the oracle makes no call, the native's first / a later call is a named stub | `native-undefined` / `after-native-undefined` | real-bug S2c/S2d (was `falloff?`) |
+| call-count, the oracle makes no call, the native calls addresses only | `falloff?` | real-bug S1 |
+| probe `signedness` on a by-design shape (the top bit is a float sign, a bool byte, INT_MIN, the top of the address space): float argument within tolerance / bool result 1 vs another nonzero byte / x86 #DE / native access across 4 GiB | `x87-precision` / `bool-repr` / `division` / `ilp32-pointer` | by-design |
 | pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
 | `no-native-entry` | `no-native-entry` | artifact |
@@ -278,7 +294,7 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | the function takes a class by value (`AGG:` parameter); the oracle's calls after the native stops are deallocators only | `byvalue-arg-dtor` | by-design (MSVC: callee destroys, Itanium: caller) |
 | call-target: the native calls an image-window (data) address where the oracle calls a function | `native-calls-data` | real-bug S1 (virtual slot past a decomp class's shorter vtable) |
 | call-target: oracle an unnamed CRT entry (addrmap E, x87 `_CI*`) or `f`, native the libm (float) function; `sprintf` vs `__sprintf_chk`; `atof` vs `strtod` | `libc-variant` | artifact (libcalls.X86 / FAMILY lack the pair) |
-| the oracle's missing callee X is defined by the native function's own object and called by it (runs natively, intercepted on x86) | `oracle-callee-unloaded` | artifact (X not in the oracle's code set); never over an unbound name |
+| the oracle's callee X is defined by the native function's own object and called by it (runs natively, intercepted on x86), **and** the native's calls from the divergence on include a call X reaches that leaves the unit and the caller does not make itself (`causes.native_ran`: evidence the native ran X) | `oracle-callee-unloaded` | artifact (X not in the oracle's code set); never over an unbound name; an early exit before X, or X with no traced call, stays `native-early-exit` / `call-flow` (V1 tests/v1/test_s13b_callee_unloaded.py U1/U2) |
 | the oracle frees (free / delete / Deallocate), the native goes straight on to the oracle's next call (or returns) and reaches no deallocator through its own object | `native-missing-free` | real-bug S1 |
 | call-target: native indirect call to a non-code address where the oracle calls a .text function | `native-vcall-oracle-direct` | triage |
 

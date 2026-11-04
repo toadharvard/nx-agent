@@ -45,6 +45,8 @@ import sigs     # noqa: E402
 import vtables  # noqa: E402
 import vslots as msvc_vslots  # noqa: E402  (`vslots` is a local name in resolve)
 import bodies   # noqa: E402  (S2d: declared-only functions)
+import thisadj  # noqa: E402  (S2c-abi: MSVC entries of secondary-base overrides)
+import vacall   # noqa: E402  (S2c-abi: call-site argument types of variadic references)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
 DATA_END = 0x0200c612
@@ -65,6 +67,7 @@ RUNTIME = re.compile(r'^(?:__cxa_\w+|_Unwind_\w+|__gxx_personality_v0|__stack_ch
 ADDR_SYM = '__fnv_%08x'
 TRAP_SYM = '__fnvnx_vtrap_%08x'   # slot of a virtual function defined nowhere -> fnvnx_vslot_trap(this, text)
 TLS_SYM = '__fnvnx_tls_%08x'      # thread-local variable at an image .tls address: slot of the native TLS block
+MSVC_ENTRY_SYM = '__fnvnx_msvc_%08x'   # MSVC's entry of an override that takes `this` at a secondary base: the thunk
 TEXTADDR_SYM = '__fnvnx_textaddr_%08x'   # a variable at a .text address nothing defines: absolute, the x86 value
 XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
@@ -482,9 +485,29 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         native[a] = dict(unit=None, sym=elfsyms.Sym(osym, 0, 0, 'func', 'global', 1, '', False), variants={},
                          tier='override', msvc=msv, override=oobj)
 
+    # ---- S2c-abi: overrides of a secondary base's virtual, which MSVC enters with `this` at that base (thisadj.py):
+    # image code pointers to the address reach GCC's _ZThn<d>_ thunk, the units' own references the primary entry
+    sec_entries = thisadj.from_env()
+    syms_by_obj = {}
+    for a, d in sorted(sec_entries.items()):
+        nd = native.get(a)
+        if nd is None or nd['unit'] is None:
+            continue
+        tn = thisadj.thunk_name(nd['sym'].name, d)
+        if nd['unit'] not in syms_by_obj:
+            syms_by_obj[nd['unit']] = {x.name: x for x in objsyms.get(nd['unit'], ()) if x.shndx != 0}
+        th = syms_by_obj[nd['unit']].get(tn) if tn else None
+        if th is not None and th.bind != 'local':
+            nd['msvc_entry'] = (th.name, d)
+            pre_stats['msvc_entry_thunks'] += 1
+        else:
+            pre_stats['msvc_entry_no_thunk'] += 1
+    pre_stats['msvc_entry_exe'] = len(sec_entries)
+
     # ---- references
     layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
     probe_req = set()
+    vacall_req = set()   # (unit, undefined symbol) of variadic references whose call sites decide (vacall.py)
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
     stats = collections.Counter(pre_stats)
@@ -731,6 +754,18 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 stats['cast_refs'] += 1
                         if rs.kind == 'func' and ds.kind == 'func':
                             v = abi.compare(rs, ds)
+                            va_key = None
+                            if vacall.needs(v):
+                                # the definition reads the reference's anonymous arguments: the call sites' own
+                                # argument types decide (vacall.py, V1 VA-U1..U4)
+                                vhost = u.host or u.source
+                                vacall_req.add((vhost, un))
+                                calls_ = vacall.load(out, vhost)
+                                v2_, vs_, seq_, st_ = vacall.decide(rs, ds, calls_.get(un) if calls_ else None)
+                                stats[st_] += 1
+                                if v2_ is not None:
+                                    v, rs = v2_, vs_
+                                    va_key = '%s|va %s' % (refdecl, ','.join(seq_))
                             ecx_dead = False
                             if v.kind == 'x86-inconsistent' and ecx_use is not None and (
                                     'ecx-not-passed' in v.classes or 'this not passed by the reference' in v.notes):
@@ -774,6 +809,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                                  ['%s<-%s' % (d, s) for d, s, _, _ in v.moves] or []),
                                                  '; '.join(v.notes), ms[refdecl] or '', ms[defdecl] or ''))
                                 bkey = refdecl_key if cast and not cast_note else refdecl
+                                if va_key:   # one bridge per call-site signature (vacall)
+                                    bkey = va_key
                                 # an x86-inconsistent ecx-not-passed or pop-mismatch pair still gets the moves of the
                                 # arguments the reference does pass (the definition's ecx parameter is often unused:
                                 # 0x00bbbe30, 0x00a75ec0; a callee popping other stack bytes than the caller pushed
@@ -915,6 +952,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             tls_addrs.add(a)
     defs_by_unit = collections.defaultdict(list)
     for a, nd in native.items():
+        if nd.get('msvc_entry'):
+            alias_lines.append('%s = %s;' % (MSVC_ENTRY_SYM % a, nd['msvc_entry'][0]))
         if nd['unit'] is None:
             alias_lines.append('%s = %s;' % (ADDR_SYM % a, nd['sym'].name))
         else:
@@ -1162,6 +1201,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for r in abi_rows:
             f.write('\t'.join(r) + '\n')
 
+    with open(os.path.join(out, 'vacall_requests.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        for unit_, un_ in sorted(vacall_req):
+            f.write('%s\t%s\n' % (unit_, un_))
     with open(os.path.join(out, 'probe_requests.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for unit, t in sorted(probe_req):
             f.write('%s\t%s\n' % (unit, t))
@@ -1196,6 +1238,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'units: %d; shadowed.tsv)' % (stats['overrides'], stats['shadowed'], stats['shadow_inlined_units'])]
     if stats_ov:
         lines += ['override rows: ' + ', '.join('%s %d' % kv for kv in sorted(stats_ov.items()))]
+    lines += ['', 'variadic references decided by their call sites (vacall.py): %d decided, %d not bridgeable, %d call '
+              'sites disagree, %d units not recorded yet (vacall_requests.tsv: %d)' % (
+                  stats['vacall_decided'], stats['vacall_not_bridgeable'], stats['vacall_sites_disagree'],
+                  stats['vacall_unrecorded'], len(vacall_req))]
+    lines += ['', 'MSVC entries at a secondary base (exe vftables, thisadj.py): %d addresses; the map names the '
+              '_ZThn thunk for %d, %d without a thunk' % (stats['msvc_entry_exe'], stats['msvc_entry_thunks'],
+                                                         stats['msvc_entry_no_thunk'])]
     lines += ['', 'variables defined natively at a data-image address: %d (%d copies in objects whose unit does not '
               'name the address: STATIC1 header variables; %d second definitions of an address in one object)'
               % (len(data_defs), stats['rebound_copies'], stats['data_defs_same_address']),
@@ -2197,6 +2246,12 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, pr
             obj = os.path.basename(nd['override'])
         else:
             obj = os.path.basename(units[nd['unit']].obj)
+        if nd.get('msvc_entry'):
+            # MSVC enters it with this at the base subobject d (thisadj.py): the map names the thunk's alias
+            th, d = nd['msvc_entry']
+            rows.append((a, kind, MSVC_ENTRY_SYM % a, th, obj, (note + '; ' if note else '') +
+                         'msvc this = base subobject +%d: the _ZThn thunk' % d, str(d), d1l, d1n))
+            continue
         rows.append((a, kind, ADDR_SYM % a, nd['sym'].name, obj, note, '', d1l, d1n))
     for a, (zname, off, obj, note) in sorted((vtables or {}).items()):
         if a not in native:
@@ -2540,6 +2595,7 @@ def main():
         jobs = int(sys.argv[4]) if len(sys.argv) > 4 else os.cpu_count()
         if cmd == 'probe':
             layout.run(sys.argv[2], sys.argv[3], jobs)
+            vacall.run(sys.argv[2], sys.argv[3], jobs)
         if os.path.exists(os.path.join(sys.argv[2], 'vtable_requests.tsv')) and \
                 (cmd == 'vtables' or not os.environ.get('FNVNX_NO_VTABLES')):
             vtables.run(sys.argv[2], sys.argv[3], jobs)

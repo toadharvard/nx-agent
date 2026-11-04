@@ -223,12 +223,21 @@ class/struct/union/enum tags, which Itanium names do not.
     AArch64 register counts. A `char`/`short`/`bool` there is extended in place (`narrow-extend`);
   * both variadic: the named parts are compared like fixed ones and the anonymous parts must start at the same
     place;
-  * definition parameters in the reference's anonymous part, when the reference names nothing (`int f(...)`, the
-    decomp's unprototyped declaration) or the definition is variadic too (0x00406d00 `(char *, ...)` against
-    `(char *, int, const char *, ...)`): 32-bit integers and pointers only. x86 worked, so the call site pushed a
-    4-byte word there, which is never a float (a variadic caller promotes it to double); its integer or pointer
-    takes the register the definition reads. A fixed definition behind named reference parameters is a decompiled
-    stack walk (0x00703c00): `manual`;
+  * definition parameters in the reference's anonymous part are decided **by the call sites** (`vacall.py`). Resolve 1
+    lists the units (`vacall_requests.tsv`). `fnvlink.py probe` parses them with `-fsyntax-only` and the plugin
+    `tools/link/vacall/fnvnx_vacall.so`, which records each call's argument classes after the default promotions
+    (`out/vacalls/<unit>.tsv`). When every call of the reference in the unit passes the same classes, resolve 2
+    compares the definition with that fixed signature: no bridge, a register bridge, or an abi2 byte bridge (a double
+    or long long read as two ints). The bridge is keyed by the call-site signature. Calls that disagree,
+    aggregates by value and units not recorded yet stay `manual`. For a variadic definition only the words its
+    named parameters read must agree; 0x00406d00's snprintf-like callers pass any number of arguments. Test:
+    `test_vacall.py` covers V1's shapes end to end (plugin, decision, qemu run). On link/c0d6c71516f6, replayed with
+    its tree: 13 units recorded in 26 s, bridge-gap pairs 70 -> 35.
+  * without the call sites, such pairs are `manual`. Their x86 words come from the call site's
+    argument types. A long long or a double is two words on x86 and one register on AArch64. A struct by value is
+    several words, or a pointer. A struct { float } goes in an s register. V1 refuted (VA-U1..U4) an earlier rule
+    that let 32-bit integer/pointer definition parameters of `int f(...)` through. A fixed definition behind named
+    reference parameters is often a decompiled stack walk (0x00703c00);
   * a callee-pop side (stdcall/thiscall/fastcall) with stack arguments against a variadic (cdecl) one moved esp on
     x86: `manual`.
   Pairs decided this way carry the class `varargs-tail`. Test: `test_varargs.py` (verdicts, and the `same` and
@@ -332,6 +341,23 @@ Two bridge divergences are not ABI-model errors:
   (varargs) is the right verdict; the fix is the native variadic replacement in `tools/link/overrides/` (Overrides,
   below). The
   first-fault difference in that function (x86 0, AArch64 0x18) is argument evaluation order.
+
+### MSVC entries at a secondary base (`thisadj.py`, S2c-abi)
+
+MSVC 2008 compiles an override of a virtual function that a non-primary base introduces with `this` pointing at
+that base subobject. Callers that hold the full object reach it through an adjustor thunk. GCC compiles the same
+function for the full object and emits a `_ZThn<d>_` thunk for the secondary vtable. The exe's vftables tell the
+two apart. Such a function's address is a slot only of vftables whose complete object locator has offset d > 0,
+never of a primary one. The player's exe has 823 of them (`FNVNX_EXE` / `PLAYER_EXE`; `FNVNX_SECONDARY_ENTRIES`, a
+tsv `address<TAB>d`, stands in for tests).
+
+For each one whose native object defines the thunk, the address map's entry names `__fnvnx_msvc_<addr>`. aliases.ld
+defines that symbol as the thunk, so image code pointers rewritten through the map (vftable words, function tables)
+pass through the thunk, as do x86-convention callers. `__fnv_<addr>` stays the primary entry, because the units' own
+references pass the full object. On link/c0d6c71516f6 79 addresses have a thunk. 461 have none: the decomp defines
+them on a shell class that is the subobject itself, so `this` already agrees. 283 have no native definition.
+S13b's `thunk-binding` rows (11 on link/0bd144db1464, `this` off by 24, 60, 136, 164, 168) are this case. The
+harness has to enter through the map's link symbol to see the fix.
 
 ## Overrides (`resolve --override <tsv>`, for native replacements, J-0015)
 
