@@ -26,12 +26,49 @@ optimizers see.
 | hazard (static class) | mechanism | where |
 |---|---|---|
 | volatile access (VOLATILE-DECL, POLL-VOLATILE) | load of a naturally aligned 1/2/4/8-byte volatile scalar -> `__atomic_load_n(ACQUIRE)` = `ldar`/`ldarh`/`ldarb`; store -> `__atomic_store_n(RELEASE)` = `stlr*`. Bit-fields, packed or misaligned fields (ldar faults on misalignment) and aggregates keep their volatile access with `dmb ishld` after a load and `dmb ish` before a store. Automatic variables whose address is never taken are left alone. | plugin, GIMPLE pass after `cfg` |
-| plain access to an Interlocked operand (ATOMIC-USE, ATOMIC-PLAIN-STORE) | every field or variable whose address the unit passes to `Interlocked*` / `_Interlocked*` is ordered like a volatile in the whole unit (the plain `m_uiRefCount = 0` release). Operands that only another unit hands to Interlocked are reached with `-fplugin-arg-fnvnx_order-keys=<file>`, the gate's `clang/atomic.keys` (`field Class::member` / `var name`). | plugin (PRE_GENERICIZE discovery) |
+| plain access to an Interlocked operand (ATOMIC-USE, ATOMIC-PLAIN-STORE) | every field or variable whose address any unit of the program passes to `Interlocked*` / `_Interlocked*`, directly or through a forwarder (`void inc(long &x) { InterlockedIncrement(&x); }`, also forwarders of forwarders), is ordered like a volatile in every unit (the plain `m_uiRefCount = 0` release). Its own operands a unit finds itself; the others come from the whole-program key list (below), which compile.sh passes by default. | plugin (PRE_GENERICIZE discovery) + key list |
+| plain poll (POLL-PLAIN) | a loop whose condition only reads fields or non-const globals (no call, no side effect) and whose body only waits (empty, `Sleep`, `SleepEx`, `SwitchToThread`, `YieldProcessor`, `_mm_pause`, `WaitFor*`, `fnvnx_yield`): the polled fields and variables are ordered like volatiles, the load in the loop becomes `ldar` (GCC can no longer hoist it out of an empty spin), and through the key list every store to them in any unit becomes `stlr` (the writer publishes what it wrote before the flag). The same pattern as the gate's POLL-PLAIN. | plugin + key list |
 | Interlocked* (ATOMIC-USE) | x86 `lock` is a full barrier; a SEQ_CST `ldaxr/stlxr` loop is not (a later plain load can pass it). Each function now ends with `dmb ish`, as GCC's `__sync` builtins and Linux's fully ordered atomics do; inline in fnvnx_win32.h. Refcount sites only: relaxed increment / release decrement (below, "Refcounts"). | `fnvnx_win32.h`, `platform/win32/sync.cpp`, plugin |
 | Interlocked on a misaligned operand (ATOMIC-UNALIGNED) | `lock` is atomic on a split operand; `ldaxr` faults. A misaligned operand goes through one global spin lock (one `tst` + branch on the aligned path). | `platform/win32/sync.cpp` |
 | `_ReadWriteBarrier`, `_ReadBarrier`, `_WriteBarrier`, `MemoryBarrier` (BARRIER) | x86 TSO at a compiler barrier: `dmb ish` (the cheapest single barrier that covers TSO; it also orders store -> load), `dmb ishld` (load -> load, load -> store), `dmb ishst` (store -> store); `MemoryBarrier` `dmb ish`; `YieldProcessor` `yield`. | `shim/include/fnvnx_compat.h` |
 | argument order (ORDER-ARGS) | before a body is lowered, every call or constructor call with a side-effecting argument and another non-constant one gets its scalar arguments as SAVE_EXPRs, and its first argument becomes the chain `(s_n, ..., s_2, s_1)`. GCC evaluates the first argument first, so all are evaluated last to first, while the call node itself (return slot, constructor) stays as it is. Calls with a side-effecting class-type argument are left alone (counted). `this` and the callee expression stay first (ORDER-OBJECT, below). | plugin (PRE_GENERICIZE) |
 | TLS | already unified: S2 binds every `__declspec(thread)` reference to its slot in one native block `__fnvnx_tls_image` laid out like the image's `.tls` template, and `fs:[0x2c][0]` (`__readfsdword`, platform/win32/thread.cpp) is that same block through `fnvnx_image_tls_hook` (toolchain/game/boot.cpp). So both access styles of the 1,021 thread-local declarations and the 15 explicit `fs:[0x2c]` sites see one variable per thread. | S2 + S4 + boot (no change) |
+
+### Whole-program keys (ATOMIC-PLAIN-STORE, POLL-PLAIN)
+
+A plain store in unit B to a field that unit A hands to InterlockedCompareExchange is the release half of A's lock
+(x86: every store is a release). B cannot see that from its own text, so the ordering needs the whole program:
+
+* **Discovery.** `-fplugin-arg-fnvnx_order-discover=<file>` writes the unit's keys: its Interlocked operands (also
+  through forwarders, and through a local pointer set from `&obj.m`) and its polled fields and globals, as
+  `field Class::member` / `var name`, sorted. It also writes the facts another unit completes: `fwd <fn> <i>` (a
+  public or inline function that hands its parameter i to Interlocked*), `pcall` (passes a parameter on) and
+  `call <fn> <i> <key>` (binds a field to a parameter of a function defined elsewhere). It runs at PLUGIN_FINISH,
+  so it works under `-fsyntax-only`.
+* **Merge.** `toolchain/order/keys_merge.py` resolves forwarders over all units to a fixed point (a forwarder defined
+  in unit A and called in unit B makes B's operand a key) and writes the `field` / `var` lines.
+* **The list.** `tools/link/compile.sh` has `ORDER_KEYS=${ORDER_KEYS:-<obj dir>/order.keys}` and keeps that file
+  current itself: a syntax-only discovery pass over **all** units of units.json, not only the units it is asked to
+  compile, cached per unit in `<obj dir>/.keys/`: a unit is discovered again when it, or any header it includes (its
+  `.d` file from the last discovery), is newer, and every unit when the plugin, the shim headers or the flags change. So a
+  shard, or a one-unit compile, sees the same list as the full build. The file is replaced only when its content
+  changes; objects older than it are rebuilt. A missing `ORDER_KEYS=<file>` is an error, never a silent fallback.
+  `ORDER_KEYS=unit` (in-unit discovery only) is for A/B runs and quick checks, never a build that runs. `KEYS_ONLY=1`
+  writes the list and stops.
+* **Farm.** `tools/farm/keys_job.sh` (runner job `keys`) computes the list once per commit and publishes it as
+  `k/<commit12>` (with tree hash and inputs hash, `tools/farm/keys_inputs.sh`) in the private artifacts repository.
+  `compile_job.sh` takes it when tree and inputs match (waiting `KEYS_WAIT`, default 30 min) and computes the same
+  list itself otherwise; the list is part of its FLAGS_HASH, so every shard compiles with the same list and a changed
+  list rebuilds the shard. The list is derived from the decomp and never goes into nx-agent.
+* **Matching.** By record name and member name (`Class::member`, unqualified) and by variable name, as the gate's
+  `atomic.keys`, which the plugin also reads. A name shared by two records or two statics orders both: over-ordering
+  costs a few `ldar`/`stlr`, it does not change meaning. Members of unnamed records are ordered only in-unit.
+* **Record copies.** A load or store of a whole record (or array of records) that contains a keyed field, such as
+  `*p = *n` over a polled flag, keeps its plain access with fences (`dmb ish` before the store, `dmb ishld` after
+  the load), like a packed field.
+* **Not covered:** a store through a pointer alias (`int *q = &w->done; *q = 1`) and a poll without a loop
+  condition (`for (;;) { if (g) break; Sleep(0); }`); V1's K8 / K9 notes.
+* **Cost of the pass:** about 0.6 CPU seconds per unit, a census of the tree without code generation.
 
 Modes for A/B measurements only (compile.sh `ORDER_MODE=off|tso`, `ORDER_ARGS=ltr`); `off` also selects the
 compiler-only barriers (`-DFNVNX_COMPILER_BARRIERS=1`). Neither is a valid build: the program's semantics are
@@ -84,7 +121,8 @@ the rule off.
 the data races that TSO happened to make work. It is measured below. Its cost is far beyond the budget (45 fps,
 PERF.md / J-0132). The engine's cross-thread protocols go through volatile flags, Interlocked, critical sections,
 events and semaphores (all ordered now), so `volatile` is the contract. A protocol on plain memory that only TSO made
-work (POLL-PLAIN, 5 sites in the f8 sample) stays a per-site class.
+work is the POLL-PLAIN pattern (5 sites in the f8 sample), ordered by the plain-poll rule above; a protocol on plain
+memory that does not have that shape (a flag tested in an `if` inside a loop that also works) stays unordered.
 
 ### Why barriers become real fences
 
@@ -189,13 +227,56 @@ Hot units only (40): the build is -0.02 % (12 ldar, 14 stlr, 4 dmb), and full TS
 * `-ftrivial-auto-var-init=zero` is not adopted: it costs +1.2 % (memsets of local buffers on every call) and does not
   change the W-UNINIT folding.
 
+## Uninitialized locals (W-UNINIT): `uninit=zero`
+
+The decomp reads locals it never wrote: matching devices such as `unsigned char qq; f(qq);`, a struct copied from an
+unwritten one, a flag passed through. MSVC passed whatever the register or stack slot held. GCC treats the value as
+undefined and folds through it (`int x; if (c) x = 5; return x == 5;` becomes `return 1`).
+
+A second pass of fnvnx_order, `fnvnx_uninit`, runs right after SSA is built (before GCC's own early uninit
+warning and before every optimizer). It replaces each use of the default definition of a local scalar (a read
+before any write on some path) with the constant 0: one fixed value, a valid stand-in for the junk, and no
+undefined value left. Parameters, the result, memory (addressable) locals, virtual operands and asm operands are
+not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B only).
+
+* tests/s12/order uninit.cpp: the fold above is gone with the pass and present with `keep` (the test bites); no
+  `-Wuninitialized` warning is left.
+* On the 11 W-UNINIT sites of the newest static report (shard 3), GCC's own warnings go from 11 to 0. The static
+  gate loads the same plugin (gcc_warn.sh), so its W-UNINIT count follows.
+* One of them is a member call whose object pointer is assigned inside its own argument list
+  (`obj->f(..., obj = X, ...)`): the decomp compiles to the original only if MSVC evaluates the object after the
+  arguments. With `object=last` the read is initialized. That is evidence for ORDER-OBJECT (below), for S11.
+
 ## Open, not closed by this
 
-* **ORDER-OBJECT** (`get()->f(a())`): GCC evaluates the object expression first (C++17), MSVC 2008 probably last. Not
-  confirmed against MSVC here, so the plugin keeps GCC's order; S11's MSVC builds can decide it.
-* **ORDER-OPERATOR** (C++17 fixes `<<`, `>>`, `=`, `[]` left to right for overloaded operators; MSVC 2008 did right
-  to left): the plugin leaves `CALL_EXPR_ORDERED_ARGS` calls alone. `-fstrong-eval-order=some` is the candidate
-  flag; it needs S11's gate.
-* **POLL-PLAIN**: protocols on plain memory that only TSO made work; per site, as before.
-* **W-UNINIT**: per site. GCC 13's `-ftrivial-auto-var-init=zero` does not stop it from folding an uninitialized
-  scalar path away (re-checked here), and it memsets every large local buffer on every call.
+* **ORDER-OBJECT** (`get()->f(a())`): GCC evaluates the object expression first (C++17), MSVC 2008 last.
+  **compile.sh builds with `object=last`** (`ORDER_OBJECT=first` for A/B). Evidence: MSVC's thiscall pushes the
+  arguments and loads ecx last, and the byte-matched decomp has a call whose object pointer is assigned inside its
+  own argument list (`obj->f(..., obj = X, ...)`), which only works with the object last (GCC: an uninitialized
+  read, gone with object=last). Measured on 131 units: 27 objects change, -0.06 % instructions, no compiler error.
+  S11's MSVC run of evalorder.cpp confirms it; if it disagrees, the default goes back.
+* **ORDER-OPERATOR** (C++17 fixes `<<`, `>>`, `[]`, `->*` left to right and `=`, `@=` right to left for overloaded
+  operators; MSVC 2008 evaluates an overloaded operator like any call). **compile.sh builds with `operator=rtl`**
+  (`ORDER_OPERATOR=cpp17` for A/B): MSVC 2008 predates C++17, and an overloaded operator is a plain call whose
+  arguments it pushes right to left, the same behaviour ORDER-ARGS relies on. Measured on 131 units: no object
+  changes. S11's MSVC run of evalorder.cpp confirms it.
+
+Both are switchable now, with defaults that keep the order above (the objects are byte-identical with and without
+the two arguments; run.py checks it on evalorder.cpp and units.cpp). `-fplugin-arg-fnvnx_order-object=last` (default
+`first`) evaluates a member call's arguments right to left, then its object, then the callee, where the object and
+an argument can see each other: a direct call's `this` becomes the last element of the argument chain (the call
+stays direct), a virtual call gets the chain in front of its `OBJ_TYPE_REF` object, so the vtable load comes after
+the arguments too. Constructors, destructors and calls through a pointer to member keep the object first.
+`-fplugin-arg-fnvnx_order-operator=rtl` (default `cpp17`) clears `CALL_EXPR_ORDERED_ARGS` and orders those calls
+like any other (a free operator's left operand included, a member operator's object as `object=` says);
+`=` and `@=` stay as they are, right operand first, which is MSVC's push order too. `tests/s12/order/evalorder.cpp`
+(11 cases: direct and virtual member calls, a slot return, `<<` / `>>` chains, `[]`, `=`, `+=`, `-=`) is plain
+C++03 and builds with `cl /O2 /EHsc evalorder.cpp`. `evalorder.gcc.expect` is the defaults' output,
+`evalorder.msvc-guess.expect` that of `object=last operator=rtl`; run.py checks both and that they differ. The
+defaults stay until S11 runs evalorder.cpp under MSVC 2008 x86: its output becomes `evalorder.msvc.expect` (run.py
+then says which of the two it matches), and the build (compile.sh) follows that.
+* **POLL-PLAIN** beyond the wait-only loop shape (closed above): a flag tested inside a loop that does other work, or
+  a pointer published with a plain store and read without a poll, is still a data race the A57 can break; such a
+  site needs its field made volatile or keyed (a `field Class::member` line in a key file passed as ORDER_KEYS).
+* **W-UNINIT** in memory: an addressable local or an aggregate read before it is written keeps whatever the stack
+  held; GCC does not fold such a load as undefined, so it is left alone (scalars: closed by `uninit=zero`, above).

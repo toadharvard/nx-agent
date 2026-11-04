@@ -831,6 +831,23 @@ the PS are fine. A converter should still emit everything; nx_render reports wha
 
 Size limits: 4096x4096 images, 128 MiB of per-frame vertex/index/constant copies, 4 M command words per frame.
 
+### 8.4 Input limits (malformed files)
+
+Both formats are outside input (S16's converter, console captures), so both readers check every size against its
+record in 64 bits, and against fixed bounds, before they allocate, copy or call the backend. A file that breaks a
+rule ends in exit 1 with a message that names the record (J-0147, V1). Ids out of a table's range map to 0 (no
+resource) and do not fail.
+
+| | limit |
+|---|---|
+| both | a record's length never runs past the file |
+| `.nxd9` | DEV at most 4096x4096; TEX and SURF at most 8192 on a side and 16 M texels, at most 14 levels; VB/IB at most 64 MiB, VBU/IBU ranges inside 64 MiB; DECL at most 64 elements; CLR rect count fits the record; draws over 4 M vertices are skipped (exit 3); buffers and texture levels together at most 1 GiB |
+| `.nxcap` | MEMC ids 0-256, each defined once, 1 byte to 256 MiB, at most 1 GiB in all; IMGC at most 8192 on a side and 16 M texels, at most 14 mips, `data_size` inside the record; SUBM: words, memory ranges and each op's arguments inside the record, ranges inside their block, Draw/DrawIndexed at most 4 M vertices and 65,536 instances, and at most 4 M vertices times instances; RDBK at most 8192 on a side, pixel bytes inside the record |
+
+Tests: `make -C tests/s6n nx_render_robust` builds nx_render with ASan and UBSan, then runs
+`tests/s6n/test_nx_render_bounds.py` (38 cases, one per limit) and V1's `tests/v1/test_nx_render_robust.py` (13
+cases, plus `ITERS` mutations of the two `nx_render` test captures, 300 by default).
+
 ## 9. Frame-rate targets, dynamic resolution and presets
 
 Targets set by the owner: **45 fps stable** (22.2 ms) is the main target, **60 fps** (16.7 ms) the stretch, below
