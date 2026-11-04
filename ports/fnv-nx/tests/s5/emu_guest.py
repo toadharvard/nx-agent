@@ -71,6 +71,13 @@ def neg(e):
 _PLACEMENT = None
 
 STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]"
+TABLE_OPTIONS = ("exe-vtables",)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
+
+
+def fault_table_options(path):
+    """the TABLE_OPTIONS lines of a --stub-faults table"""
+    return {line.split("#", 1)[0].split()[0] for line in open(path)
+            if line.split("#", 1)[0].split() and line.split("#", 1)[0].split()[0] in TABLE_OPTIONS}
 
 
 def parse_fault_table(path):
@@ -80,6 +87,10 @@ def parse_fault_table(path):
     for k, line in enumerate(open(path), 1):
         f = line.split("#", 1)[0].split()
         if not f:
+            continue
+        if f[0] in TABLE_OPTIONS:
+            if len(f) != 1:
+                raise ValueError(f"{path}:{k}: {f[0]} takes no arguments")
             continue
         if f[0] == "before-winmain":   # before-winmain <function> [x0]
             if len(f) not in (2, 3):
@@ -91,6 +102,42 @@ def parse_fault_table(path):
             raise ValueError(f"{path}:{k}: <function> [return0 | return-this | malloc:xN | use-malloc:xN]")
         stubs.append((f[0], action))
     return stubs, pre
+
+
+def exe_slot_plan(slots, exe_slots, natives):
+    """Which trap slots of one native vtable (address point) take the function the exe's vftable names.
+    slots: [(kind 'trap' | 'native', mangled name, link address)] in slot order; exe_slots: the exe vftable's
+    targets (original addresses); natives: {original address: link address} (address map kind F).
+    GCC's slot k is the exe's slot k, except that a virtual destructor takes two slots (complete D1/D2, deleting
+    D0) where MSVC has one (the scalar deleting destructor): slots after the pair are the exe's k - 1, and the pair
+    itself is left (different calling contract). The native slots that are functions check the mapping: when more
+    of them sit in a nearby exe slot (up to 3 away) than in their own, the vtable is left whole. Another function
+    in the exe's slot alone is no evidence: the exe folds identical functions (one empty body serves many slots).
+    Returns ([(k, link address)], 'ok' | 'dtor' | 'misaligned')."""
+    d = next((k for k in range(len(slots) - 1) if re.search(r"D[12]Ev$", slots[k][1])
+              and re.search(r"D0Ev$", slots[k + 1][1])), None)
+
+    def exe_index(k):
+        if d is None or k < d:
+            return k
+        return None if k <= d + 1 else k - 1
+    agree = shifted = 0
+    for k, (kind, _, addr) in enumerate(slots):
+        e = exe_index(k)
+        if kind != "native" or e is None or e >= len(exe_slots):
+            continue
+        if natives.get(exe_slots[e]) == addr:
+            agree += 1
+        elif any(natives.get(exe_slots[j]) == addr for j in range(max(0, e - 3), min(len(exe_slots), e + 4))):
+            shifted += 1   # the function is in a nearby exe slot: the mapping is off there
+    if shifted > agree:
+        return [], "misaligned"
+    fills = []
+    for k, (kind, _, addr) in enumerate(slots):
+        e = exe_index(k)
+        if kind == "trap" and e is not None and e < len(exe_slots) and exe_slots[e] in natives:
+            fills.append((k, natives[exe_slots[e]]))
+    return fills, "ok" if d is None else "dtor"
 
 
 MILESTONES = os.path.join(HERE, "milestones.txt")
@@ -698,6 +745,89 @@ class Emu:
             self.pre_ctx = None
             self.uc.hook_add(UC_HOOK_CODE, self.on_winmain_entry, begin=winmain, end=winmain)
 
+    # -- exe vftable slots (--exe-vtables, or the line 'exe-vtables' of the --stub-faults table): a stand-in for the
+    # link filling native vtable slots from the exe's vftables (S2c). A native vtable the address map binds to an exe
+    # vftable (kind V: exe address, link symbol, address point offset) keeps a trap stub (__fnvnx_vtrap_*) in every
+    # slot whose virtual the decomp declares but defines nowhere; the exe's vftable names the function in that slot,
+    # and when the address map has a native for that address (kind F), the slot gets it (exe_slot_plan below).
+    # Applied once at __libc_init_array, after the guest's self-relocation and before any initializer.
+    def install_exe_vtables(self, addrmap, exe, elf):
+        import subprocess
+        sys.path.insert(0, os.path.join(HERE, "..", "..", "loader", "tools"))
+        import fnvnx_pe
+        img = fnvnx_pe.Image(fnvnx_pe.PE(open(exe, "rb").read()))
+        objs = {}
+        out = subprocess.run(["aarch64-linux-gnu-nm", "-S", "--defined-only", elf], capture_output=True,
+                             text=True).stdout
+        for line in out.splitlines():
+            f = line.split()
+            if len(f) == 4 and f[3].startswith("_ZTV"):
+                objs.setdefault(f[3], (int(f[0], 16), int(f[1], 16)))
+        F, V = {}, []
+        for line in open(addrmap):
+            f = line.rstrip("\n").split("\t")
+            if len(f) > 6 and f[1] == "F" and f[2] in self.code_syms:
+                F[int(f[0], 16)] = self.code_syms[f[2]]
+            elif len(f) > 6 and f[1] == "V" and f[2] in objs:
+                V.append((int(f[0], 16), f[2], int(f[6] or 0)))
+        self.exe_vt = (img, objs, F, V)
+        init = self.code_addr("__libc_init_array")
+        self.uc.hook_add(UC_HOOK_CODE, self.on_exe_vtables, begin=init, end=init)
+
+    def slot_name(self, link_addr):
+        """('trap', mangled name of the virtual) for a trap stub (adrp x1; add x1; b fnvnx_vslot_trap, text
+        'virtual function defined nowhere: <name> (slot ...)'), ('native', name) for a function, None otherwise"""
+        i = self._bisect(self.sym_addrs, link_addr) - 1
+        if i < 0 or self.sym_addrs[i] != link_addr:
+            return None
+        names = self.sym_names[i]
+        if not any(n.startswith("__fnvnx_vtrap_") for n in names):
+            return ("native", next((n for n in names if not n.startswith("__fnv_")), names[0]))
+        rt = link_addr - self.link_base + self.base if self.relocatable else link_addr
+        adrp, add = struct.unpack("<II", self.uc.mem_read(rt, 8))
+        if adrp & 0x9F00001F != 0x90000001 or add & 0xFFC003FF != 0x91000021:
+            return ("trap", "")
+        imm = ((adrp >> 29) & 3 | ((adrp >> 5) & 0x7FFFF) << 2)
+        imm = imm - (1 << 21) if imm >> 20 else imm
+        text = (rt & ~0xFFF) + (imm << 12) + ((add >> 10) & 0xFFF)
+        s = bytes(self.uc.mem_read(text, 200)).split(b"\0")[0].decode("latin-1")
+        m = re.match(r"virtual function defined nowhere: (\S+)", s)
+        return ("trap", m.group(1) if m else "")
+
+    def on_exe_vtables(self, uc, addr, size, _):
+        """the first __libc_init_array: the guest has relocated itself; fill the trap slots"""
+        if getattr(self, "exe_vt", None) is None:
+            return
+        img, objs, F, V = self.exe_vt
+        self.exe_vt = None
+        rt = (lambda v: v - self.link_base + self.base) if self.relocatable else (lambda v: v)
+        link = (lambda v: v - self.base + self.link_base) if self.relocatable else (lambda v: v)
+        import collections
+        st = collections.Counter()
+        for exe_vt, sym, off in V:
+            a, size = objs[sym]
+            exe_slots = img.vtable_slots(exe_vt)
+            n = max(0, (size - off) // 4)
+            words = struct.unpack(f"<{n}I", bytes(uc.mem_read(rt(a + off), 4 * n))) if n else ()
+            slots = []
+            for w in words:   # the slots of this address point end at the next non-function word
+                sn = self.slot_name(link(w) & 0xFFFFFFFF)
+                if sn is None:
+                    break
+                slots.append((sn[0], sn[1], link(w) & 0xFFFFFFFF))
+            fills, status = exe_slot_plan(slots, exe_slots, F)
+            st["vtables"] += 1
+            st["vtables " + status] += 1
+            st["trap slots"] += sum(1 for s in slots if s[0] == "trap")
+            for k, nat in fills:
+                uc.mem_write(rt(a + off + 4 * k), struct.pack("<I", rt(nat) & 0xFFFFFFFF))
+            st["filled"] += len(fills)
+        self.exe_vt_stats = dict(st)
+        print("   exe-vtables: %d bound vtables (%d aligned with the exe's, %d with a destructor pair, %d left: "
+              "their native slots disagree with the exe's): %d of %d trap slots filled from the exe's vftable"
+              % (st["vtables"], st["vtables ok"], st["vtables dtor"], st["vtables misaligned"], st["filled"],
+                 st["trap slots"]))
+
     def on_winmain_entry(self, uc, addr, size, _):
         """WinMain's first instruction: run the before-winmain calls one after the other, each returning to this
         address, then restore WinMain's arguments and go on."""
@@ -953,6 +1083,7 @@ class Emu:
             "initializers_skipped": len(getattr(self, "skipped", None) or []),
             "stubbed_faults": len(getattr(self, "stubbed", [])),
             "host_calls": self.calls, "threads": len(self.threads),
+            "exe_vtables": getattr(self, "exe_vt_stats", None),
             "peak_heap_bytes": self.heap_high_water(),
         }
 
@@ -1154,6 +1285,10 @@ def main(argv):
                     "when a fault happens below them, e.g. tests/s5/known_faults.txt; needs --elf")
     ap.add_argument("--milestones", metavar="FILE", default=MILESTONES,
                     help="boot milestones to watch (default tests/s5/milestones.txt; 'none': none); needs --elf")
+    ap.add_argument("--addrmap", metavar="TSV", help="the link's out/addrmap.tsv (for exe-vtables)")
+    ap.add_argument("--exe-vtables", action="store_true",
+                    help="fill the trap slots of native vtables from the exe's vftables (needs --elf, --addrmap and "
+                    "the exe as --file fnvnx/game/FalloutNV.exe=PATH); also the line 'exe-vtables' of --stub-faults")
     ap.add_argument("--summary-json", metavar="FILE", help="write the machine-readable boot summary here")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
@@ -1173,6 +1308,12 @@ def main(argv):
             emu.install_guards()
         if a.stub_faults:
             emu.install_fault_stubs(a.stub_faults)
+        if a.exe_vtables or a.stub_faults and "exe-vtables" in fault_table_options(a.stub_faults):
+            exe = [src for name, _, src in (f.partition("=") for f in a.file) if name.lower().endswith(".exe")]
+            if not a.addrmap or not exe:
+                print("   exe-vtables: off (needs --addrmap and the exe as --file)")
+            else:
+                emu.install_exe_vtables(a.addrmap, exe[0], a.elf)
         if a.milestones and a.milestones != "none":
             emu.install_milestones(a.milestones)
     emu.miles = getattr(emu, "miles", {})
