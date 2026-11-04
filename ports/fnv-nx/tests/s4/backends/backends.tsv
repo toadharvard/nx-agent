@@ -281,7 +281,7 @@ wsock32	#57 gethostname	policy	platform/win32/services.cpp	no network	Winsock fa
 wsock32	#9 htons	policy	platform/win32/services.cpp	no network	Winsock fails cleanly (WSAStartup WSASYSNOTREADY)
 xinput1_3	#2 XInputGetState	device	platform/input/xinput.cpp	host HID pads (host_v3.inc padUpdate/vibration)	
 xinput1_3	#3 XInputSetState	device	platform/input/xinput.cpp	host HID pads (host_v3.inc padUpdate/vibration)	
-dsound	IDirectSoundBuffer8::SetFX / IDirectSoundFXI3DL2Reverb	open	platform/audio/dsound.cpp	parameters stored	no reverb DSP in the mixer (docs/AUDIO_INPUT.md)
+dsound	IDirectSoundBuffer8::SetFX / IDirectSoundFXI3DL2Reverb	device	platform/audio/dsound.cpp	I3DL2 reverb DSP in the mixer per voice (platform/audio/reverb.cpp), presets for SetPreset	the game cycles SetPreset (0x00af194f); tests: s7 test_reverb.cpp (decay, HF ratio, reflections, bounds, DirectSound path)
 dsound	IDirectSoundBuffer8 (Play/Stop/Lock/Unlock/SetVolume/SetPan/SetFrequency/GetCurrentPosition)	device	platform/audio/dsound.cpp	guest mixer -> host audren	
 dsound	IDirectSound3DBuffer / IDirectSound3DListener	device	platform/audio/ds3d.cpp	distance, cone, doppler in the mixer	
 dinput8	IDirectInputDevice8 (keyboard, mouse: GetDeviceState/GetDeviceData/Acquire)	device	platform/input/dinput.cpp	host HID keyboard/mouse/touch	
