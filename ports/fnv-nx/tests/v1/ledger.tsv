@@ -58,3 +58,25 @@ S11-EX-E1	S11	5468b6b	5468b6b	refuted	-	test_s12_order_close.py	explain.py: a FA
 S11-EX-E2	S11	5468b6b	5468b6b	refuted	-	test_s12_order_close.py	rule-wide explained rows (EXTERN-RELOAD, PLACEMENT-NULLCHECK, GLOBAL-NEW, CRT-WRAPPER) explain any new difference of that rule
 R0-R16-FIX	R0	2bce418	2bce418	confirmed	-	test_ready_adversarial.py	perf.budget judges worst_frame_ms against 16.7 ms itself: R16 ok on head, PASSES on a506770
 S15-TARGET60	S15-threads	d994f1e	d994f1e	confirmed	-	test_ready_adversarial.py	frame_budget.py judges every target on the worst frame; target_60 is kind goal at 16.7 ms (code read; R16 ok on head)
+S2C-RESTRICT-R1	S2c-abi	8e9ad7a	8e9ad7a	refuted	-	test_s2c_s4_batch.py	int *const volatile __restrict (SIAH) classifies ?:int *; its pair with int * stays manual aggregate-param (one qualifier only)
+S2C-VAUNPROTO-U1	S2c-abi	e2dbe73	e2dbe73	refuted	-	test_s2c_s4_batch.py	unprototyped int f(...) vs (int,int) ruled same: a long long argument, the ILP32 definition reads other values
+S2C-VAUNPROTO-U2	S2c-abi	e2dbe73	e2dbe73	refuted	-	test_s2c_s4_batch.py	f(...) vs (int,int) ruled same: a double argument goes in d0
+S2C-VAUNPROTO-U3	S2c-abi	e2dbe73	e2dbe73	refuted	-	test_s2c_s4_batch.py	f(...) vs (int x5) ruled same: a 20-byte struct is passed by pointer
+S2C-VAUNPROTO-U4	S2c-abi	e2dbe73	e2dbe73	refuted	-	test_s2c_s4_batch.py	f(...) vs (int) ruled same: struct{float} goes in s0 (HFA)
+S2C-VACHECK	S2c-abi	0750425	0750425	confirmed	-	test_s2c_s4_batch.py	anonymous variadic arguments passed like named ones on AArch64 Linux (test_varargs 8 ok)
+S2C-OVRAUTO-F1	S2c-abi	94a3d29	94a3d29	refuted	-	test_s2c_s4_batch.py	Link fingerprint equal for OVERRIDE=auto and none (file_hash of a non-file is None): switching keeps the cached link
+S2C-OVRAUTO-E1	S2c-abi	94a3d29	94a3d29	refuted	-	test_s2c_s4_batch.py	an empty OVERRIDE in build.py env becomes auto, not off
+S2C-HOSTLAY-B1	S2c-abi	e0ed8d5	e0ed8d5	refuted	-	test_s2c_s4_batch.py	abireplay strips #vtables but not #bodiesN: a body row stays manual where the same vtable row becomes bridge
+S2D-VCALL	S2d	944515f	944515f	confirmed	-	test_s2c_s4_batch.py	a vftable slot is not a direct call (tests/s2d 15 OK)
+S2D-LINKEXE	S2d	009bab5	009bab5	confirmed	-	test_s2c_s4_batch.py	link fingerprint follows the exe content (test_link_exe.sh not run: no rsync)
+S4-BINK	S4	afe8f43	afe8f43	confirmed	-	test_s2c_s4_batch.py	BinkOpen returns NULL: the exe's one call site 0xec0c2f is null-tested; the update path is guarded
+S4-D3DX	S4	0c08b8d	0c08b8d	confirmed	-	test_s2c_s4_batch.py	D3DX in the null guest: 35 names, C linkage, ILP32; 24 of 25 imports, a weak fallback for the last
+S4-IAT	S4	b72b749	b72b749	confirmed	-	test_s2c_s4_batch.py	IAT metric: 280 slots, per-DLL counts, lookup = boot path, no dropped lines (code read; m32 not run: no lib32)
+S1REFS-NEW5-N2	S1-refs	5e8816f	5e8816f	refuted	-	test_s1refs_b.py	class operator new(size_t) + placement-only delete: a throwing ctor frees the pool block via ::operator delete; MSVC (C4291) frees nothing
+S1REFS-TPL1	S1-refs	56e41cc	56e41cc	confirmed	-	test_s1refs_b.py	TPL1 header template member: base member over a global, local kept; RCAST1 after a comment
+S1REFS-DUPINT1RET-D2	S1-refs	e39da35	e39da35	refuted	-	test_s1refs_b.py	DUPINT1-RET may keep a prototype returning a class by value: hidden result pointer shifts the arguments (latent: the decomp's 3 pairs return int, char*, void, void*)
+S1REFS-COND1RSTR1	S1-refs	e3465bd	e3465bd	confirmed	-	test_s1refs_b.py	RSTR1 binds the restrict local itself; its COND1 form superseded by 5279bb5
+S1REFS-COND1-C2	S1-refs	5279bb5	5279bb5	refuted	-	test_s1refs_b.py	COND1: an explicit G(bool) still passes the gate, ?: becomes G and h(G) is called where MSVC calls h(bool)
+S1REFS-COND1-C3	S1-refs	5279bb5	5279bb5	refuted	-	test_s1refs_b.py	COND1: c ? false : !x.f(1) gets G(false) against bool, a GCC error on input that compiled
+S1REFS-STD2	S1-refs	0a0c0cc	0a0c0cc	confirmed	-	test_s1refs_b.py	std::abs(float) rename: units.json symbol, link double-to-float bridge for float callers, same-unit caller value
+S1FUZZB-STAND2	S1-fuzzB	57fe267	57fe267	confirmed	-	test_s1refs_b.py	STAND2: the /Od stand-in call reaches the other unit's body; /O2 and inline stand-ins untouched
