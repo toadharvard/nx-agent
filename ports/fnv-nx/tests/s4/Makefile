@@ -80,13 +80,13 @@ iat: $(M32OUT)/s4_m32
 	python3 -I $(HERE)/iat/pe_imports.py "$(EXE)" > $(M32OUT)/imports.txt
 	rm -rf $(M32OUT)/root && FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32 --iat $(M32OUT)/imports.txt
 
-# ---- device backends: the inventory (tests/s4/device/backends.tsv, metric device-open) and the qemu-aarch64 tests
+# ---- device backends: the inventory (tests/s4/backends/backends.tsv, metric device-open) and the qemu-aarch64 tests
 # of the host-side pieces. With EXE=, the inventory is checked against every import of the exe.
 device:
 	@if [ -n "$(EXE)" ]; then $(MAKE) --no-print-directory iat EXE="$(EXE)" > /dev/null; \
-		python3 -I $(HERE)/device/check_backends.py --imports $(M32OUT)/imports.txt --list; \
-	else python3 -I $(HERE)/device/check_backends.py --list; fi
-	$(HERE)/device/run_qemu.sh $(OUT)-device
+		python3 -I $(HERE)/backends/check_backends.py --imports $(M32OUT)/imports.txt --list; \
+	else python3 -I $(HERE)/backends/check_backends.py --list; fi
+	$(HERE)/backends/run_qemu.sh $(OUT)-device
 
 # ---- AArch64 ILP32 syntax check (the game's data model)
 XCC ?= aarch64-linux-gnu-gcc
