@@ -1,7 +1,7 @@
 {
  "schema": "fnv-nx P6n report v1 (docs/RENDER_PERF.md \u00a75)",
  "summary": {
-  "commit": "93d782cb24b9aab9f21018450481f4a2266dfeef",
+  "commit": "60e98b92e79c5903c85613c9c33a21538be70b20",
   "per_draw_us": {
    "native": {
     "lo": 1.671,
@@ -26,6 +26,8 @@
     "gate": 8.864
    }
   },
+  "per_draw_us_rule": "CPU per draw over a whole frame (fixed per-frame costs included), mix_lo and mix_hi: lo = IPC 1.0 at 1.785 GHz, hi = gate = IPC 0.6 at 1.02 GHz. native = front (StateTracker, translator, packet build, sort, encode) + deko3d recording (nxgpu.c record + libdeko3d); nine = st/nine without any pipe driver (nouveau's validation and push-buffer work is NOT in it), x86-64 count scaled to AArch64",
+  "frame_ms_rule": "mix_hi (3710 draws) at 1.02 GHz for hi/gate (IPC 0.6; main adds the store term), mix_lo (1490 draws) at 1.785 GHz IPC 1.0 for lo. main = packet build (engine-side StateTracker + Renderer::Render); render = Frame::Finish + deko3d recording",
   "assumptions": {
    "ipc": {
     "lo": 0.6,
