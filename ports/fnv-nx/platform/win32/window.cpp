@@ -291,6 +291,42 @@ extern "C" HCURSOR LoadCursorA(HINSTANCE i, LPCSTR n) { W32_UNUSED(i); W32_UNUSE
 extern "C" HGDIOBJ GetStockObject(int i) { W32_UNUSED(i); return (HGDIOBJ)&g_res_dummy[2]; }
 extern "C" BOOL DeleteObject(HGDIOBJ o) { return o != NULL; }
 
+/* IAT slots named in round 5 of S5 (imports.tsv): window text/class, the display device list, common controls */
+extern "C" int GetWindowTextA(HWND h, LPSTR out, int n)
+{
+    struct window *w = wnd(h);
+    if (!out || n <= 0) return 0;
+    snprintf(out, (size_t)n, "%s", w ? w->title : "");
+    return (int)strlen(out);
+}
+extern "C" int GetClassNameA(HWND h, LPSTR out, int n)
+{
+    struct window *w = wnd(h);
+    if (!out || n <= 0 || !w) return 0;
+    snprintf(out, (size_t)n, "%s", w->cls);
+    return (int)strlen(out);
+}
+/* DISPLAY_DEVICEA: one primary display attached to the desktop */
+struct fnvnx_display_device { DWORD cb; char name[32], string[128]; DWORD flags; char id[128], key[128]; };
+extern "C" BOOL EnumDisplayDevicesA(LPCSTR dev, DWORD i, void *out, DWORD flags)
+{
+    struct fnvnx_display_device *d = (struct fnvnx_display_device *)out;
+    W32_UNUSED(flags);
+    if (dev || i != 0 || !d || d->cb < sizeof *d) return FALSE;
+    memset((char *)d + sizeof d->cb, 0, sizeof *d - sizeof d->cb);
+    snprintf(d->name, sizeof d->name, "\\\\.\\DISPLAY1");
+    snprintf(d->string, sizeof d->string, "fnv-nx display");
+    d->flags = 0x1 /* ATTACHED_TO_DESKTOP */ | 0x4 /* PRIMARY_DEVICE */;
+    return TRUE;
+}
+extern "C" BOOL InitCommonControlsEx(const void *icc) { return icc != NULL; }
+extern "C" void *ImageList_LoadImageA(HINSTANCE i, LPCSTR bmp, int cx, int grow, DWORD mask, UINT type, UINT f)
+{
+    W32_UNUSED(i); W32_UNUSED(bmp); W32_UNUSED(cx); W32_UNUSED(grow); W32_UNUSED(mask); W32_UNUSED(type); W32_UNUSED(f);
+    return NULL;   /* no resources: the caller's image list stays empty */
+}
+extern "C" BOOL ImageList_Destroy(void *l) { return l != NULL; }
+
 /* ---- message boxes: logged; the answer is the default button */
 static fnvnx_msgbox_hook g_msgbox_hook;
 extern "C" void fnvnx_set_msgbox_hook(fnvnx_msgbox_hook h) { g_msgbox_hook = h; }

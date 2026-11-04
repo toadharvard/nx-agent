@@ -39,6 +39,7 @@ PAGE = 0x1000
 HOST_PAGE = 0x3F000000          # host API table + stubs (below 4 GiB, as every address in a 32-bit AS)
 STACKS_TOP, STACK_SIZE, MAX_THREADS = 0x3E000000, 0x40000, 32
 HEAP_BASE, HEAP_SIZE = 0x30000000, 0x4000000
+HEAP_BASE_ALT = 0x34000000      # when the guest itself runs at 0x30000000 (a pinned guest at its link base)
 RETURN_ADDR = HOST_PAGE + 0xFF0         # main thread returns here
 THREAD_END = HOST_PAGE + 0xFF8          # created threads return here
 TICK_FREQ = 19_200_000
@@ -87,8 +88,11 @@ class Emu:
         if size != align(data["dst"] + data["size"] + data["bss"]):
             raise SystemExit(f"guest header size {size:#x} does not match the NSO")
         self.relocatable, self.link_base = bool(gflags & 1), link_base
+        self.pinned = bool(gflags & 2)   # position-dependent code inside: runs only at its link base (elf2nso --pin)
         # a relocatable guest goes where the host finds room (here: deliberately not its link base)
-        base = (load_base or 0x05000000) if self.relocatable else link_base
+        base = (load_base or 0x05000000) if self.relocatable and not self.pinned else link_base
+        if self.pinned and load_base and load_base != link_base:
+            raise SystemExit(f"pinned guest: it runs only at its link base {link_base:#x}")
         if base < 0x200000 or base + size > 0x40000000 or (base < 0x02100000 and base + size > 0x00400000):
             raise SystemExit(f"guest link range {base:#x}..{base + size:#x} not allowed")
         self.base, self.size, self.root, self.verbose = base, size, root, verbose
@@ -106,11 +110,12 @@ class Emu:
         map_seg(ro, UC_PROT_READ)
         map_seg(data, UC_PROT_READ | UC_PROT_WRITE, data["bss"])
         uc.mem_map(STACKS_TOP - STACK_SIZE * MAX_THREADS, STACK_SIZE * MAX_THREADS, UC_PROT_READ | UC_PROT_WRITE)
-        uc.mem_map(HEAP_BASE, HEAP_SIZE, UC_PROT_READ | UC_PROT_WRITE)
+        heap = HEAP_BASE if base >= HEAP_BASE + HEAP_SIZE or base + size <= HEAP_BASE else HEAP_BASE_ALT
+        uc.mem_map(heap, HEAP_SIZE, UC_PROT_READ | UC_PROT_WRITE)
         uc.mem_map(HOST_PAGE, PAGE, UC_PROT_ALL)
         self.stubs = {HOST_PAGE + 0x800 + 4 * i: name for i, name in enumerate(SLOTS)}
         api = struct.pack("<IIII", 0x48584E46, 3, API_SIZE, 0)
-        api += struct.pack("<QQQQ", base, size, HEAP_BASE, HEAP_SIZE)
+        api += struct.pack("<QQQQ", base, size, heap, HEAP_SIZE)
         api += b"".join(struct.pack("<Q", a) for a in self.stubs)
         assert len(api) == API_SIZE
         uc.mem_write(HOST_PAGE, api)
@@ -458,7 +463,7 @@ class Emu:
         self.data_syms = {}
         for line in out.splitlines():
             f = line.split()
-            if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current",):
+            if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current", "fnvnx_trap_stats"):
                 self.data_syms[f[2]] = int(f[0], 16)
             if len(f) == 3 and f[1] in "tTwW":
                 a = int(f[0], 16)
@@ -466,6 +471,36 @@ class Emu:
         self.sym_addrs = sorted(by_addr)
         self.sym_names = [by_addr[a] for a in self.sym_addrs]
         self._bisect = bisect.bisect_right
+
+    def trap_table(self):
+        """Lines of the guest's trap statistics (toolchain/game/boot.cpp fnvnx_trap_stats) in first-hit order:
+        trap-table <seq> <hits> <init|winmain> <sym|ptr|iat> <name or orig address> <caller of the first hit>."""
+        a = getattr(self, "data_syms", {}).get("fnvnx_trap_stats")
+        if a is None:
+            return []
+        a = a - self.link_base + self.base if self.relocatable else a
+        magic, n, cap, seq = struct.unpack("<4I", self.uc.mem_read(a, 16))
+        if magic != 0x54564E46 or cap > 1 << 16:
+            return []
+        raw = self.uc.mem_read(a + 16, cap * 24)
+        recs = []
+        for i in range(cap):
+            key, kind, hits, first, caller, phase = struct.unpack_from("<6I", raw, i * 24)
+            if hits:
+                recs.append((first, hits, phase, kind, key, caller))
+        out = [f"== trap table: {len(recs)} keys, {seq} hits"]
+        for first, hits, phase, kind, key, caller in sorted(recs):
+            if kind == 0:
+                try:
+                    name = self.rs(key)
+                except UcError:
+                    name = f"?{key:#x}"
+            else:
+                name = f"{key:#010x}"
+            k = ("sym", "ptr", "iat")[kind] if kind < 3 else str(kind)
+            who = self.sym(caller) if caller else "-"
+            out.append(f"trap-table\t{first}\t{hits}\t{'winmain' if phase else 'init'}\t{k}\t{name}\t{who}")
+        return out
 
     # -- guarded initializer calls (--skip-faulting-init): every indirect call (blr) made by the initializer
     # runners is a checkpoint; a fault below one restores the registers of the call and returns 0 from it, so a
@@ -645,6 +680,8 @@ def main(argv):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
+        for line in emu.trap_table():
+            print(line)
         print(f"STOPPED: {why}")
         return 1
     try:
@@ -657,13 +694,15 @@ def main(argv):
         return stopped(f"host stand-in error: {e!r}")
     out = emu.console.decode(errors="replace")
     tp_ok = getattr(emu, "tp_after", None) == 0xDEAD0000
-    print(f"== guest at {emu.base:#010x} (link base {emu.link_base:#x}, {'relocatable' if emu.relocatable else 'fixed'}): rc={rc:#x} host_calls={emu.calls} threads={len(emu.threads)} "
+    print(f"== guest at {emu.base:#010x} (link base {emu.link_base:#x}, {('pinned' if emu.pinned else 'relocatable') if emu.relocatable else 'fixed'}): rc={rc:#x} host_calls={emu.calls} threads={len(emu.threads)} "
           f"switches={emu.ctx_switches} blocking_waits={emu.addr_waits} tpidr_el0 restored={tp_ok}")
     for line in emu.debug:
         print(f"   [debug] {line}")
     if getattr(emu, "skipped", None) is not None:
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
+    for line in emu.trap_table():
+        print(line)
     ok = rc == 0 and a.expect in out and tp_ok
     print("PASS" if ok else "FAIL")
     if not a.root:

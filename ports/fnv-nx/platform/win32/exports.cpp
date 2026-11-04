@@ -30,6 +30,13 @@ void *SteamFriends(void);
 void *SteamUtils(void);
 void *SteamApps(void);
 void *SteamUserStats(void);
+/* window.cpp, not in the shim headers */
+int GetWindowTextA(HWND, LPSTR, int);
+int GetClassNameA(HWND, LPSTR, int);
+BOOL EnumDisplayDevicesA(LPCSTR, DWORD, void *, DWORD);
+BOOL InitCommonControlsEx(const void *);
+void *ImageList_LoadImageA(HINSTANCE, LPCSTR, int, int, DWORD, UINT, UINT);
+BOOL ImageList_Destroy(void *);
 }
 
 namespace {
@@ -75,7 +82,8 @@ const exp g_exports[] = {
     U(ScreenToClient), U(SendInput), U(SendMessageA), U(SetCapture), U(SetCursorPos), U(SetFocus),
     U(SetForegroundWindow), U(SetWindowLongA), U(SetWindowPos), U(SetWindowTextA), U(SetWindowsHookExA),
     U(ShowCursor), U(ShowWindow), U(SwapMouseButton), U(TranslateMessage), U(UnhookWindowsHookEx),
-    U(UpdateWindow),
+    U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA),
+    E("comctl32", InitCommonControlsEx), E("comctl32", ImageList_LoadImageA), E("comctl32", ImageList_Destroy),
     E("gdi32", GetStockObject), E("gdi32", DeleteObject),
     E("advapi32", RegCloseKey), E("advapi32", RegCreateKeyExA), E("advapi32", RegOpenKeyExA),
     E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA),

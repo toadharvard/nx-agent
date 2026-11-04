@@ -33,12 +33,15 @@ FLAG_TEXT_HASH, FLAG_RO_HASH, FLAG_DATA_HASH = 8, 16, 32
 GUEST_MAGIC = 0x47584E46   # "FNXG" at text + 8 (toolchain/guest/crt0.s)
 
 
-def patch_guest_header(text: bytes, base: int, span: int, relocatable: bool) -> bytes:
-    """fnv-nx guest: fill crt0's +16 link base, +20 page-aligned size, +24 flags (bit 0 relocatable)."""
+def patch_guest_header(text: bytes, base: int, span: int, relocatable: bool, pinned: bool = False) -> bytes:
+    """fnv-nx guest: fill crt0's +16 link base, +20 page-aligned size, +24 flags (bit 0 relocatable, bit 1 pinned:
+    the code holds position-dependent references, e.g. PC-relative ones to absolute symbols, so the host must
+    map it at its link base)."""
     if len(text) < 32 or struct.unpack_from("<I", text, 8)[0] != GUEST_MAGIC:
         return text
     b = bytearray(text)
-    struct.pack_into("<III", b, 16, base, (span + PAGE - 1) & ~(PAGE - 1), 1 if relocatable else 0)
+    flags = (1 if relocatable else 0) | (2 if pinned else 0)
+    struct.pack_into("<III", b, 16, base, (span + PAGE - 1) & ~(PAGE - 1), flags)
     return bytes(b)
 
 
@@ -49,7 +52,7 @@ def is_pie(elf: nxelf.Elf) -> bool:
     return bool(elf.dynamic().get(0x6FFFFFFB, 0) & 0x08000000)   # DT_FLAGS_1 & DF_1_PIE
 
 
-def build_nso(elf: nxelf.Elf, compress: bool = True) -> bytes:
+def build_nso(elf: nxelf.Elf, compress: bool = True, pinned: bool = False) -> bytes:
     loads = elf.loads()
     if len(loads) != 3:
         raise nxelf.ElfError(f"expected exactly 3 PT_LOAD segments (text, rodata, data), found {len(loads)}")
@@ -79,7 +82,7 @@ def build_nso(elf: nxelf.Elf, compress: bool = True) -> bytes:
     for i, p in enumerate((text, ro, data)):
         raw = elf.segment_bytes(p)
         if i == 0:
-            raw = patch_guest_header(raw, base, data.vaddr + data.memsz - base, is_pie(elf))
+            raw = patch_guest_header(raw, base, data.vaddr + data.memsz - base, is_pie(elf), pinned)
         hashes.append(hashlib.sha256(raw).digest())
         blob = lz4block.compress(raw) if compress else raw
         blobs.append(blob)
@@ -123,6 +126,8 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--no-compress", action="store_true", help="store segments uncompressed")
     ap.add_argument("--dump", action="store_true", help="print an NSO's header and verify its hashes")
+    ap.add_argument("--pin", action="store_true",
+                    help="fnv-nx guest: set header flag bit 1, the host must map the guest at its link base")
     ap.add_argument("input")
     ap.add_argument("output", nargs="?")
     a = ap.parse_args(argv)
@@ -137,7 +142,7 @@ def main(argv: list[str]) -> int:
     if not a.output:
         ap.error("output path required")
     elf = nxelf.read(a.input)
-    nso = build_nso(elf, compress=not a.no_compress)
+    nso = build_nso(elf, compress=not a.no_compress, pinned=a.pin)
     with open(a.output, "wb") as f:
         f.write(nso)
     kind = "ELF32/ILP32" if not elf.is64 else "ELF64/LP64"

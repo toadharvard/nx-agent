@@ -31,10 +31,40 @@ int __fnv_0086a850(unsigned, unsigned, unsigned, unsigned) __attribute__((weak))
 
 static const char *k_exe = "sdmc:/fnvnx/game/FalloutNV.exe";
 
+/* Trap statistics, one record per distinct trapped symbol (key = its name string) or image code pointer / IAT slot
+ * (key = the original address): hits, global order of the first hit, the caller of the first hit and whether it
+ * came before or inside WinMain. tests/s5/emu_guest.py prints the table at the end of a run (it finds it by this
+ * symbol name; layout: u32 magic "FNVT", n, cap, seq, then cap records of 6 u32), tests/s5/frontier.py turns
+ * it into S1's priority list. */
+#define FNVNX_TRAP_REC 8192u   /* power of two, open addressing on the key */
+struct fnvnx_trap_rec { uint32_t key, kind, hits, first_seq, first_caller, phase; };
+struct fnvnx_trap_table {
+    uint32_t magic, n, cap, seq;
+    fnvnx_trap_rec rec[FNVNX_TRAP_REC];
+};
+extern "C" { fnvnx_trap_table fnvnx_trap_stats = {0x54564e46u, 0, FNVNX_TRAP_REC, 0, {}}; }
+static uint32_t g_trap_phase;   /* 0: before WinMain, 1: inside it */
+/* kind 0: symbol, 1: image code pointer, 2: IAT slot. Returns true on the first hit of this key. */
+static bool trap_count(uint32_t key, uint32_t kind, uint32_t caller) {
+    fnvnx_trap_table &t = fnvnx_trap_stats;
+    uint32_t h = (key * 2654435761u) & (FNVNX_TRAP_REC - 1);
+    t.seq++;
+    for (uint32_t i = 0; i < FNVNX_TRAP_REC; i++, h = (h + 1) & (FNVNX_TRAP_REC - 1)) {
+        fnvnx_trap_rec &r = t.rec[h];
+        if (r.hits && r.key == key && r.kind == kind) { r.hits++; return false; }
+        if (!r.hits) {
+            if (t.n == FNVNX_TRAP_REC - 1) return false;   /* full: stop recording new keys */
+            r = {key, kind, 1, t.seq, caller, g_trap_phase};
+            t.n++;
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Unresolved-symbol traps. FNVNX_TRAPS_FATAL builds stop at the first one; the default logs each distinct
  * name once and returns 0 to the caller, so the boot goes as far as it can (results are best effort). */
 static unsigned g_trap_hits, g_trap_distinct;
-static const char *g_trap_seen[512];
 extern "C" uint64_t __fnvnx_undef_trap(const char *name, uintptr_t lr) {
     g_trap_hits++;
 #ifdef FNVNX_TRAPS_FATAL
@@ -42,9 +72,7 @@ extern "C" uint64_t __fnvnx_undef_trap(const char *name, uintptr_t lr) {
     fflush(stdout);
     exit(0xE1);
 #else
-    for (unsigned i = 0; i < g_trap_distinct && i < 512; i++)
-        if (g_trap_seen[i] == name) return 0;
-    if (g_trap_distinct < 512) g_trap_seen[g_trap_distinct] = name;
+    if (!trap_count((uint32_t)(uintptr_t)name, 0, (uint32_t)lr)) return 0;
     g_trap_distinct++;
     if (g_trap_distinct <= 200)
         printf("fnvnx boot: trap #%u: unresolved %s (caller %#" PRIxPTR "), returning 0\n", g_trap_distinct, name, lr);
@@ -63,7 +91,8 @@ static void report_trap(uint32_t orig) {
     fflush(stdout);
     exit(0xE2);
 #else
-    if (++g_ptrtrap_hits <= 100)
+    bool iat = orig >= g_iat_lo && orig < g_iat_hi;
+    if (trap_count(orig, iat ? 2 : 1, 0) && ++g_ptrtrap_hits <= 100)
         printf("fnvnx boot: trap: %s %#010" PRIx32 " has no native implementation, returning 0\n", what, orig);
 #endif
 }
@@ -224,9 +253,35 @@ extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers 
         return 3;
     }
     printf("fnvnx boot: calling WinMain\n");
+    g_trap_phase = 1;
     int r = __fnv_0086a850(0x00400000u, 0, (unsigned)(uintptr_t)"", 1 /* SW_SHOWNORMAL */);
     printf("fnvnx boot: WinMain returned %d\n", r);
     return r;
+}
+
+/* The game's MemoryManager object (0x011f6238) is constructed before any of the game's own initializers: its
+ * constructor 0x00aa3880 sets up the heaps and, through 0x00866690 -> 0x00aa2020, Gamebryo's memory-manager pointer
+ * 0x011f6080 that the allocator 0x00aa1070 of the very first setting initializers (0x00f35430..) dereferences. No
+ * decompiled code calls the constructor: the initializer that does is not in the decomp (an undecompiled entry
+ * ahead of the .text$yc group, docs/TOOLCHAIN.md section 11). Stand in for it, in the same place (before every game
+ * initializer), once the constructor has a native definition; until then the game heap stays uninitialised. */
+static void construct_memory_manager(void) {
+    const uint32_t ctor = 0x00aa3880u, self = 0x011f6238u;
+    if (!g_image_mapped) return;   /* trace mode: no IAT, the constructor calls GlobalMemoryStatusEx */
+    unsigned lo = 0, hi = fnvnx_addrmap_count;
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (fnvnx_addrmap[mid].orig < ctor) lo = mid + 1; else hi = mid;
+    }
+    void *fn = lo < fnvnx_addrmap_count && fnvnx_addrmap[lo].orig == ctor &&
+               (fnvnx_addrmap_kinds[lo] == 'F' || fnvnx_addrmap_kinds[lo] == 'C') ? fnvnx_addrmap[lo].native : nullptr;
+    if (!fn) {
+        printf("fnvnx boot: memory manager: constructor %#010" PRIx32 " has no native definition, game heap not "
+               "initialised\n", ctor);
+        return;
+    }
+    ((void (*)(void *))fn)((void *)(uintptr_t)self);
+    printf("fnvnx boot: memory manager constructed at %#010" PRIx32 " (%#010" PRIx32 ")\n", self, ctor);
 }
 
 /* first static initialiser (priority 101 runs before the default-priority ones of the game) */
@@ -242,5 +297,6 @@ __attribute__((constructor(101))) static void boot_banner(void) {
         fflush(stdout);
         exit(2);
     }
+    construct_memory_manager();
     printf("fnvnx boot: running GCC initialisers, then the game's in original order (S10 xc)\n");
 }

@@ -198,15 +198,16 @@ class NsoTest(unittest.TestCase):
 
     def test_guest_header_patch(self):
         # an fnv-nx guest (FNXG at text+8) gets link base, page-aligned size and the relocatable flag at +16..+24
-        for etype, reloc in ((2, 0), (3, 1)):
+        # (bit 0), and --pin sets bit 1 (the host must use the link base)
+        for etype, pinned, want in ((2, False, 0), (3, False, 1), (3, True, 3)):
             b = bytearray(tiny_elf(False, base=0x30000000))
             struct.pack_into("<H", b, 16, etype)
             text_off = struct.unpack_from("<I", b, 52 + 4)[0]
             struct.pack_into("<I", b, text_off + 8, elf2nso.GUEST_MAGIC)
-            info = elf2nso.parse_nso(elf2nso.build_nso(nxelf.Elf(bytes(b))))
+            info = elf2nso.parse_nso(elf2nso.build_nso(nxelf.Elf(bytes(b)), pinned=pinned))
             self.assertTrue(all(s["hash_ok"] for s in info["segments"]))
             base, size, flags = struct.unpack_from("<III", info["segments"][0]["bytes"], 16)
-            self.assertEqual((base, size, flags), (0x30000000, 0x3000, reloc))
+            self.assertEqual((base, size, flags), (0x30000000, 0x3000, want))
 
     def test_rejects_bad_layout(self):
         b = bytearray(tiny_elf(False))

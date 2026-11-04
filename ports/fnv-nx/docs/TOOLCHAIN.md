@@ -482,6 +482,122 @@ game's setting constructors: `FUN_00404920` -> `FUN_00aa1070` loads the heap poi
 memory manager is never initialized) and calls through it. The other 4 write `RegisterFloatKeyOps` tables that a
 unit defines in `.text` (S1/S2, already reported in round 3).
 
+## 11. Round 5: boot frontier, IAT names, the memory manager, pinned guest (J-0044 follow-up)
+
+### Boot frontier (`tests/s5/frontier.py`)
+
+`boot.cpp` keeps one record per trapped key in `fnvnx_trap_stats` (a symbol name, or the original address of an
+image code pointer or IAT slot): hits, global order of the first hit, the first caller, and the phase (`init`
+before WinMain, `winmain` inside it). `emu_guest.py` prints the table at the end of every run as `trap-table`
+lines. `frontier.py` maps each key to its original address (`__fnv_<addr>`, otherwise S2's address map by native
+name), to the units of `units.json` that define the address, to the compile status of the linked object set
+(compile.sh `objects.tsv`, repeatable for incremental sets; the first error is read from the unit's `.log`), and to
+the unit's current census result (census.sh `units.tsv`, e.g. S1's latest). For a name without an address it falls
+back to the unit of the first caller: its `[orig]` address, or, with `--map`, the object the caller's code came
+from in the guest link map.
+
+```
+python3 -I tests/s5/frontier.py <emu log> --addrmap <S2 out>/addrmap.tsv --units <tree>/build/units.json \
+    --objects <obj>/objects.tsv [--objects <obj2>/objects.tsv] --census <census>/units.tsv \
+    --map <out>/fnvnx.map --out <prefix>
+```
+
+Outputs: `<prefix>.tsv`, one row per key in first-hit order (rank, seq, hits, phase, kind, key, orig, class,
+units, link, census, caller, caller_units). `<prefix>_units.tsv` has one row per unit (first rank, keys, hits,
+link status, census errors, first error), which is S1's priority list. A summary goes to stdout: classes, the first N
+in boot order, the top N by hits, units in boot order, initializer faults by faulting function, and the stop. The
+reports hold decomp names and stay in scratch space; only the tool and the format are committed.
+
+### Pinned guest: position-dependent code in a relocatable link
+
+The S14 boot with the named IAT got further and then stopped on a write to 0xd61c7270 in `strcpy_s`, called from
+`BGSSaveLoadManager::GetSaveDirectory`. The destination came from `FUN_004dc110`, which is `adrp x0, 0x11c7000;
+add x0, x0, #0x26c` in the object, relocated as `R_AARCH64_P32_ADR_PREL_PG_HI21 __fnv_011c726c`. S2 rebinds data a
+unit defines to aliases.ld's absolute `__fnv_<addr>`, but GCC addressed it PC-relatively. At a load base other than
+the link base the PC moves and the absolute target does not, so 0x011c7270 - 0x2b000000 = 0xd61c7270. In the
+current object set, **200 such relocations in 87 objects (83 symbols)** are right only at the link address. GOT
+loads of absolute symbols are fine, because runtime.c's relocator leaves values outside its own range alone.
+
+* `toolchain/game/pcrel_abs.py` lists them (`<out>/pcrel_abs.tsv`). build.sh, with `PIN=auto` (the default), then
+  sets guest header flag bit 1 (**pinned**) through `elf2nso.py --pin`. `PIN=yes|no` forces it either way.
+* `host.c`: a pinned relocatable guest is mapped at its link base (0x30000000) or not at all ("occupied;
+  relaunch"). Its self-relocation then has slide 0.
+* `emu_guest.py`: a pinned guest runs at its link base, and its emulated heap moves to 0x34000000.
+* The real fix is S2's: such references should go through the GOT or a `movz/movk` pair. Until then the
+  relocatable design (section 9) holds only at the link base.
+
+### IAT slots named (`platform/win32/imports.tsv`, `exports.cpp`, `window.cpp`)
+
+The decomp reaches 27 IAT slots only through `DAT_`/`g_pfn` names, not `__imp_`, so S4's table missed them; 22 are
+now named from the call sites, the declared type and the DLL run each slot sits in:
+
+* comctl32 `ImageList_Destroy` / `ImageList_LoadImageA` / `InitCommonControlsEx` (0x00fdf01c..024);
+* kernel32 `InterlockedExchange` (0x0e4), `GetFileSizeEx` (0x13c, was `?`), `OutputDebugStringA` (0x16c);
+* shell32 `SHGetFolderPathA` (0x274);
+* user32 `UpdateWindow` (0x284), `DestroyWindow` (0x290, probable), `LoadCursorA` (0x2a0), `GetClientRect` (0x2bc),
+  `GetWindowTextA` (0x2cc), `GetClassNameA` (0x2d0), `EnumDisplayDevicesA` (0x2f0);
+* winmm `mmioOpenA`..`mmioAdvance` (0x318..0x330, not implemented);
+* d3dx9 `D3DXVec3TransformNormal` (0x420) and `D3DXMatrixInverse` (0x428) (S6).
+
+0x00fdf0e0 `CoCreateGuid` moves to ole32 so that it resolves. It sits inside the kernel32 run (between WriteFile and
+ExitProcess), so the real exe's import directory may name it differently; the note in the table says so. New exports:
+`GetWindowTextA`, `GetClassNameA`, `EnumDisplayDevicesA` (one primary display), and the three comctl32 functions
+(stubs). Still unnamed: 0x00fdf138 (FlushFileBuffers or SetEndOfFile), 0x00fdf2ec (user32, 2 args), 0x00fdf37c/380/398
+(CRT-area data), 0x00fdf3d4/3f0 (d3dx9).
+
+### The game memory manager
+
+* Who sets the heap pointer 0x011f6080: in the MSVC-built pristine objects (S11, `objdump -M intel`) the only store
+  is in `InitHolder` = 0x00aa2020 (`blk_00aa0000_o2.cpp`), which allocates 4 bytes from the MemoryManager at
+  0x011f6238 (`FUN_00aa3e40`) and stores the result there. Every other reference reads it (nimemorydefines,
+  nimemobject).
+* The chain above it is 0x00aa2020 <- `InitializeGlobal` 0x00866690 (`blk_00860000_od.cpp`) <- the MemoryManager
+  constructor 0x00aa3880 (`blk_00aa0000_od_ob1_variant.cpp`: memory check, `FUN_00aa39c0`, `InitializeGlobal`,
+  `FUN_00aa58d0`).
+* Nothing in the decomp calls 0x00aa3880. No unit references it, and no function of the initializer group refers
+  to it or to 0x011f6238.
+* It must still run first: the very first setting initializers (0x00f35430..) allocate through `FUN_00aa1070`,
+  which dereferences 0x011f6080. So the constructor is called by an **initializer the decomp lacks**. In XCU address
+  order the only room left is the undecompiled 448 bytes 0x00f34cf0..0x00f34eb0 ahead of the group's first function;
+  otherwise it is an XCC/XCL/XI entry.
+* Translatable? Not yet. The constructor's unit fails to compile (9 errors; first: `conflicting declaration of
+  'void (* DAT_00fdf05c)(void*)' with 'C' linkage`, plus `redefinition of operator new(size_t, void*)`).
+  `FUN_00aa3e40` is in the same unit. FormHeap_Allocate 0x00401000 is in `middlehighprocess.cpp`, which also fails
+  (7 errors, ambiguous `memcpy` overloads).
+* Boot path: `boot.cpp construct_memory_manager()` stands in for the missing initializer. Before every game
+  initializer it looks up 0x00aa3880 in S2's address map and, if it has a native definition, calls it on 0x011f6238.
+  Today it logs "constructor 0x00aa3880 has no native definition".
+
+### Emulated boot, round 5
+
+Inputs: S2c's `latest` = run f5 (fresh3 objects plus 54 recompiled units, 3,464 objects). Guest: 8,190 undefined
+symbols, 19 MiB, relocatable and **pinned**. Run with `--skip-faulting-init --budget 6000000000`, on the empty image
+and on the S14 image re-synthesized with the new imports.tsv (204 IAT slots in its import directory, was 181).
+Frontier against S2c's compile logs and S1's census c13.
+
+| | empty image | S14 image |
+|---|---|---|
+| imports | none (trace mode) | 204 slots, 164 bound, 40 unresolved (Bink, D3DX/D3DPERF for S6, winmm mmio) |
+| static init | 17,191 / 17,191 initializers called, 2,886 skipped after a fault | 17,191 called, 2,885 skipped |
+| frontier | 130 keys, 3,688 hits, 37 units (31 failed at link) | 138 keys, 3,697 hits; 128 keys before WinMain, 10 inside; 41 units (34 failed at link, 1 of them clean in S1's c13: `unmapped/threadsafestructures.cpp`) |
+| WinMain | entered; stops at its first IAT call (empty IAT) | entered; past `GetSaveDirectory` (SHGetFolderPathA bound); stops at WinMain+0x1cc: `FUN_008526c0` -> untranslated 0x00af3020 (`blk_00ae0000_od.cpp`, 13 errors) returns 0, NULL `this` |
+
+Most hits come from the dyninit loops of `actormover.cpp` (0x0040e0b0, 1,786 hits, 9 errors), `nitarray_h_unit.cpp`
+(0x0096ae90, 1,000), `nicontrollermanager.cpp` (0x00a2d610, 329) and the `GlobalObject*_0045cfe0` constructors
+that `generated/global_object_initializers*.cpp` call (234 together, declared only). WinMain's own frontier, in
+order: `blk_00c20000_od.cpp` (7 keys, 5 errors: `conflicting declaration 'typedef long unsigned int WPARAM'`),
+`blk_004a0000_od.cpp` (0x004b4a30; `no matching function for call to 'operator new(sizetype, char*)'`), MSVC's
+`std::StandardLibrarySingletonObject` constructor (platform/crt), then 0x00af3020.
+
+### Stub operator new: a prepare rule for S1
+
+The four global allocation functions the game objects define (round 4) carry no `// @fnv` address. They are TU-local
+scaffolding, not original code. The original's are 0x00401000 / 0x00401030 (`??2@YAPAXI@Z` / `??3@YAXPAX@Z`, which
+390 / 95 units reference by address), and S2 binds those by address anyway. S1's NEW2 keeps file-scope replacements
+on purpose. A rule that drops file-scope definitions of the replaceable global allocation functions that lack
+`@fnv` fixes this at the source for every consumer. `GAME_NEW=runtime` then has nothing to weaken, but stays
+as a guard.
+
 ## 7. Not yet done / untested
 
 * Nothing has run on hardware. Untested: ldr accepting the 64-bit + `32BitNoReserved` NPDM as an application

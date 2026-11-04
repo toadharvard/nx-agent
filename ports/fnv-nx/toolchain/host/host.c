@@ -310,7 +310,10 @@ static bool load_guest(const char *path, u64 *out_base, u64 *out_size) {
     if (w[2] != FNVNX_GUEST_MAGIC || w[3] != FNVNX_HOSTAPI_VERSION) FAIL("not an fnv-nx guest (ABI %u)\n", w[3]);
     if (w[5] != img_size) FAIL("guest header size %#x != image %#lx\n", w[5], img_size);
     bool relocatable = w[6] & 1;
-    u64 base = relocatable ? pick_guest_base(img_size) : w[4];
+    /* bit 1, pinned: the guest relocates itself but also holds position-dependent references (PC-relative ones to
+     * absolute image symbols, toolchain/game/build.sh counts them), so it goes at its link base or nowhere */
+    bool pinned = relocatable && (w[6] & 2);
+    u64 base = relocatable && !pinned ? pick_guest_base(img_size) : w[4];
     if (!base) FAIL("no free %#lx bytes in the small map for the relocatable guest\n", img_size);
     if (base & 0xFFF || base < 0x200000 || base + img_size > FNVNX_SMALL_MAP_END ||
         (base < FNVNX_RESERVED_END && base + img_size > FNVNX_RESERVED_START))

@@ -5,6 +5,9 @@
 0x00fdf00c	advapi32	RegOpenKeyExA	3	-	S4 platform/win32
 0x00fdf010	advapi32	RegSetValueExA	1	-	S4 platform/win32
 0x00fdf014	kernel32?	GetComputerNameA	1	-	S4 platform/win32
+0x00fdf01c	comctl32	ImageList_Destroy	1	DAT_00fdf01c	S4 platform/win32; S5: frees the list 0x00fdf020 made, comctl32 run with 0x00fdf024
+0x00fdf020	comctl32	ImageList_LoadImageA	1	DAT_00fdf020	S4 platform/win32; S5: 7 args (hinst, 180, 16, 1, CLR_DEFAULT, IMAGE_BITMAP, 0)
+0x00fdf024	comctl32	InitCommonControlsEx	1	DAT_00fdf024	S4 platform/win32; S5: INITCOMMONCONTROLSEX* argument
 0x00fdf02c	dinput8	DirectInput8Create	1	-	S7
 0x00fdf034	dsound	DirectSoundCreate8	1	-	S7
 0x00fdf03c	gdi32	GetStockObject	1	-	S4 platform/win32
@@ -46,7 +49,8 @@
 0x00fdf0d4	kernel32	DeleteFileA	6	-	S4 platform/win32
 0x00fdf0d8	kernel32	GetSystemTime	1	-	S4 platform/win32
 0x00fdf0dc	kernel32	WriteFile	1	-	S4 platform/win32
-0x00fdf0e0	kernel32	CoCreateGuid	1	-	S4 platform/win32
+0x00fdf0e0	ole32	CoCreateGuid	1	-	S4 platform/win32; the slot lies inside the kernel32 run (WriteFile..ExitProcess): check the exe's import directory
+0x00fdf0e4	kernel32	InterlockedExchange	2	DAT_00fdf0e4	S4 platform/win32; S5: LONG (volatile LONG*, LONG)
 0x00fdf0ec	kernel32	ExitProcess	2	-	S4 platform/win32
 0x00fdf0f0	kernel32	IsDebuggerPresent	1	-	S4 platform/win32
 0x00fdf0f4	kernel32	GetCommandLineW	1	-	S4 platform/win32
@@ -64,7 +68,7 @@
 0x00fdf12c	kernel32	SetThreadIdealProcessor	1	-	S4 platform/win32
 0x00fdf130	kernel32	InitializeCriticalSectionAndSpinCount	1	-	S4 platform/win32
 0x00fdf134	kernel32	SystemTimeToTzSpecificLocalTime	1	-	S4 platform/win32
-0x00fdf13c	kernel32	? (decomp: GO)	1	GO	resolve name from the exe import directory
+0x00fdf13c	kernel32	GetFileSizeEx	1	GO	S4 platform/win32; S5: unit getfilesizeex.cpp, 2 args
 0x00fdf140	kernel32	SetFilePointerEx	1	-	S4 platform/win32
 0x00fdf144	kernel32	GlobalMemoryStatus	1	-	S4 platform/win32
 0x00fdf148	kernel32	ExitThread	2	-	S4 platform/win32
@@ -75,6 +79,7 @@
 0x00fdf160	kernel32	GetFileAttributesA	2	-	S4 platform/win32
 0x00fdf164	kernel32	GetPrivateProfileStringA	3	-	S4 platform/win32
 0x00fdf168	kernel32	GetExitCodeThread	2	-	S4 platform/win32
+0x00fdf16c	kernel32	OutputDebugStringA	1	DAT_00fdf16c	S4 platform/win32; S5: void (const char*), used as OutputDebugString
 0x00fdf174	kernel32	RtlUnwind	1	-	S4 platform/win32
 0x00fdf1b0	kernel32	TryEnterCriticalSection	2	fnv_Import_TryEnterCriticalSection	S4 platform/win32
 0x00fdf1b4	kernel32	ReleaseSemaphore	11	-	S4 platform/win32
@@ -87,22 +92,29 @@
 0x00fdf1d0	kernel32	GetCurrentThreadId	16	-	S4 platform/win32
 0x00fdf1ec	kernel32	InterlockedExchangeAdd	3	DAT_00fdf1ec	S4 platform/win32
 0x00fdf270	shell32	CommandLineToArgvW	1	-	S4 platform/win32
+0x00fdf274	shell32	SHGetFolderPathA	1	DAT_00fdf274	S4 platform/win32; S5: (HWND, CSIDL_LOCAL_APPDATA, NULL, 0, path) in GetSaveDirectory
 0x00fdf278	shell32	ShellExecuteA	2	-	S4 platform/win32
 0x00fdf280	user32	LoadIconA	1	-	S4 platform/win32
+0x00fdf284	user32	UpdateWindow	2	DAT_00fdf284	S4 platform/win32; S5: called after ShowWindow(window, 10)
 0x00fdf288	user32	ShowWindow	1	-	S4 platform/win32
 0x00fdf28c	user32	SendMessageA	3	-	S4 platform/win32
+0x00fdf290	user32	DestroyWindow	1	DAT_00fdf290	S4 platform/win32; S5: frees two window handles in a destructor (probable)
 0x00fdf294	user32	DispatchMessageA	3	-	S4 platform/win32
 0x00fdf298	user32	TranslateMessage	3	-	S4 platform/win32
 0x00fdf29c	user32	PeekMessageA	3	-	S4 platform/win32
+0x00fdf2a0	user32	LoadCursorA	1	DAT_00fdf2a0	S4 platform/win32; S5: WNDCLASS.hCursor = (0, IDC_ARROW)
 0x00fdf2a4	user32	SetWindowPos	3	IMP_fdf2a4	S4 platform/win32
 0x00fdf2a8	user32	GetWindow	1	-	S4 platform/win32
 0x00fdf2ac	user32	ShowCursor	2	-	S4 platform/win32
 0x00fdf2b0	user32	GetSystemMetrics	3	IMP_fdf2b0	S4 platform/win32
 0x00fdf2b4	user32	RegisterClassA	1	-	S4 platform/win32
 0x00fdf2b8	user32	CreateWindowExA	2	IMP_fdf2b8	S4 platform/win32
+0x00fdf2bc	user32	GetClientRect	1	DAT_00fdf2bc	S4 platform/win32; S5: sizes a child window to the parent's client area
 0x00fdf2c0	user32	GetDoubleClickTime	1	-	S4 platform/win32
 0x00fdf2c4	user32	SwapMouseButton	1	-	S4 platform/win32
 0x00fdf2c8	user32	UnhookWindowsHookEx	1	-	S4 platform/win32
+0x00fdf2cc	user32	GetWindowTextA	1	g_pfnC3C2B0GetWindowText	S4 platform/win32
+0x00fdf2d0	user32	GetClassNameA	1	g_pfnC3C2B0GetClassName	S4 platform/win32
 0x00fdf2d4	user32	SendInput	1	-	S4 platform/win32
 0x00fdf2d8	user32	SetWindowsHookExA	1	-	S4 platform/win32
 0x00fdf2dc	user32	SetWindowTextA	2	-	S4 platform/win32
@@ -110,6 +122,7 @@
 0x00fdf2e4	user32	EnumChildWindows	1	-	S4 platform/win32
 0x00fdf2e8	user32	GetWindowLongA	2	IMP_fdf2e8	S4 platform/win32
 0x00fdf2ec	user32	? (user32; decomp: IMP_fdf2ec)	1	IMP_fdf2ec	resolve name from the exe import directory
+0x00fdf2f0	user32	EnumDisplayDevicesA	1	DAT_00fdf2f0	S4 platform/win32; S5: (LPCSTR, DWORD, DISPLAY_DEVICEA*, DWORD)
 0x00fdf2f4	user32	MessageBoxA	4	-	S4 platform/win32
 0x00fdf2f8	user32	AdjustWindowRectEx	1	-	S4 platform/win32
 0x00fdf2fc	user32	GetForegroundWindow	3	GetActiveWindow	S4 platform/win32
@@ -118,6 +131,13 @@
 0x00fdf308	user32	GetAsyncKeyState	1	-	S4 platform/win32
 0x00fdf30c	user32	CallNextHookEx	1	-	S4 platform/win32
 0x00fdf310	user32	AdjustWindowRect	2	IMP_fdf310	S4 platform/win32
+0x00fdf318	winmm	mmioOpenA	1	xmmioOpen	S7 (mmio wave reading); not implemented
+0x00fdf31c	winmm	mmioDescend	1	xmmioDescend	S7 (mmio wave reading); not implemented
+0x00fdf320	winmm	mmioClose	1	xmmioClose	S7 (mmio wave reading); not implemented
+0x00fdf324	winmm	mmioRead	1	xmmioRead	S7 (mmio wave reading); not implemented
+0x00fdf328	winmm	mmioAscend	1	xmmioAscend	S7 (mmio wave reading); not implemented
+0x00fdf32c	winmm	mmioGetInfo	1	xmmioGetInfo	S7 (mmio wave reading); not implemented
+0x00fdf330	winmm	mmioAdvance	1	xmmioAdvance	S7 (mmio wave reading); not implemented
 0x00fdf334	winmm	timeGetTime	1	-	S4 platform/win32
 0x00fdf364	ws2_32	WSAStartup	1	-	S4 platform/win32
 0x00fdf368	ws2_32	gethostname	1	-	S4 platform/win32
@@ -157,7 +177,9 @@
 0x00fdf414	d3dx9_38	D3DXVec3TransformCoord	1	-	S6
 0x00fdf418	d3dx9_38	D3DXPlaneTransform	1	-	S6
 0x00fdf41c	d3dx9_38	D3DXVec3Normalize	1	-	S6
+0x00fdf420	d3dx9_38	D3DXVec3TransformNormal	1	g_D3DXVec3TransformNormal	S6
 0x00fdf424	d3dx9_38	D3DXMatrixMultiply	1	-	S6
+0x00fdf428	d3dx9_38	D3DXMatrixInverse	1	__imp__D3DXMatrixInverse	S6
 0x00fdf42c	d3dx9_38	D3DXMatrixTranspose	1	-	S6
 0x00fdf430	d3dx9_38	D3DXPlaneNormalize	1	-	S6
 0x00fdf438	vorbisfile	ov_open_callbacks	1	FUN_00fdf438	S7 (libvorbisfile)

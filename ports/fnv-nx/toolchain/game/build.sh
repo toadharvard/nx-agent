@@ -111,7 +111,21 @@ echo "undefined symbols: $(wc -l < "$OUT/undefined.txt")"
 python3 -I "$HERE/mktraps.py" "$OUT/undefined.txt" "$OUT/traps.S"
 aarch64-none-elf-gcc $ARCH -c "$OUT/traps.S" -o "$OUT/traps.o"
 link "$OUT/traps.o" > "$OUT/link2.log" 2>&1 || { tail -20 "$OUT/link2.log"; exit 1; }
-python3 -I "$TC/tools/elf2nso.py" "$OUT/fnvnx.elf" "$OUT/guest.nso"
+# Position-dependent code: objects that address an absolute image symbol PC-relatively (S2 rebinds data a unit
+# defines to aliases.ld's absolute __fnv_<addr>, the adrp stays) are right only at the link address. PIN=auto
+# (default) pins the guest when there are any (elf2nso --pin: the host maps it at its link base), yes/no force it.
+PINFLAG=""
+if [ "${GUEST:-pie}" = pie ]; then
+	python3 -I "$HERE/pcrel_abs.py" "$OUT/fnvnx.elf" aarch64-none-elf-readelf aarch64-none-elf-nm \
+		@"$OUT/game_objects.list" "$OUT"/obj/*.o --out "$OUT/pcrel_abs.tsv" | tee "$OUT/pcrel_abs.log"
+	case "${PIN:-auto}" in
+		auto) grep -q "symbols: 0 in" "$OUT/pcrel_abs.log" || PINFLAG=--pin ;;
+		yes) PINFLAG=--pin ;;
+		no) ;;
+		*) echo "PIN must be auto, yes or no"; exit 1 ;;
+	esac
+fi
+python3 -I "$TC/tools/elf2nso.py" $PINFLAG "$OUT/fnvnx.elf" "$OUT/guest.nso"
 python3 -I "$HERE/undef_report.py" "$OUT/undefined.txt" "$S2/addrmap.tsv" > "$OUT/undefined_report.txt"
 head -16 "$OUT/undefined_report.txt"
 python3 -I - "$OUT/guest.nso" <<'EOF'
@@ -120,6 +134,7 @@ sys.path.insert(0, __import__("os").environ["FNVNX_TOOLCHAIN"] + "/tools")
 import elf2nso
 t = elf2nso.parse_nso(open(sys.argv[1], "rb").read())["segments"][0]["bytes"]
 base, size, flags = struct.unpack_from("<III", t, 16)
-print(f"guest: link base {base:#x}, {size:#x} bytes ({size >> 20} MiB) incl. bss, {'relocatable' if flags & 1 else 'fixed'}")
+kind = ("relocatable, pinned to its link base" if flags & 2 else "relocatable") if flags & 1 else "fixed"
+print(f"guest: link base {base:#x}, {size:#x} bytes ({size >> 20} MiB) incl. bss, {kind}")
 EOF
 echo "linked $OUT/fnvnx.elf -> $OUT/guest.nso"
