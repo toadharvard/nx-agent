@@ -3001,3 +3001,20 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
       this job's guest and boot, at the cost of a guest rebuild (~95 s) per full job.
     - tests/v1/test_publish_stale.sh mocks publish_link without link_job.sh, so V1 must retarget it.
   - J-0123 TAIL1 typename: **open**. tests/v1/test_tail1_typename.py fails 7 cases; this goes to S1.
+
+### J-0136 | 2026-11-04 | stream: orchestration | status: wip | parent: J-0135
+
+* **did** - docs/HANDOFF.md: how to resume the project in another account or session when this one runs out of
+  quota. It covers:
+  - what lives where (both repositories);
+  - the account setup (GitHub connect, environment);
+  - the orchestrator's resume prompt;
+  - the farm table with its prompt and hourly check-ins;
+  - the render machine;
+  - the game data on a new machine (gamedata/* branches, exe sha256, GOG token).
+  - It names no session ids.
+* **did** - Merged the cloud streams S13b (causes.py, fnvnx-causes JSON in every fuzz report) and S2d (bodies.py +
+  resolve hook), as d6062e4.
+  - Both are blocked from reading the private repo: add_repo was refused in their sessions.
+  - `.claude/settings.json` now allows add_repo for sessions started after b49aa77 (owner's explicit permission).
+  - S4 moved from a stuck PENDING cloud session to a local agent, which can read the link data.
