@@ -199,6 +199,33 @@ def r_sdk_types(path, text, stats):
     out.append(text[pos:])
     return ''.join('#include %s /* fnv-nx DECL2 */\n' % h for h in top) + ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- COM1
+#
+# A unit that defines its own `struct IUnknown {...}` (bsshader.cpp, for its D3DX buffer / constant-table
+# stand-ins) declares the COM base with its own parameter types (`int QueryInterface(void*, void**)`, not pure), and
+# its interfaces redeclare those methods with the same types. DECL2 cannot give way to the platform's IUnknown
+# (fnvnx_win32.h, `HRESULT QueryInterface(REFIID, void**) = 0`): the redeclarations would no longer override it,
+# QueryInterface would get a new slot behind GetBufferSize, and every slot of ID3DXConstantTable would move by one.
+# So the unit's copy keeps its slots under its own name: every IUnknown of that file is renamed (types only, the
+# unit has no function with IUnknown in its signature, so no decoration the recipe binds changes).
+
+COM_OWN = re.compile(r'^[ \t]*(?:typedef\s+)?(?:struct|class)\s+IUnknown\s*\{', re.M)
+COM_NAME = 'fnvnx_unit_IUnknown'
+
+def r_own_iunknown(path, text, stats):
+    """COM1: rename a unit's own copy of the COM base IUnknown (defined in that file) and its uses there."""
+    if 'IUnknown' not in text: return text
+    m = COM_OWN.search(text)
+    if not m or prepare.scope_chain(prepare.scope_spans(text), m.start()): return text
+    out, pos = [], 0
+    for u in re.finditer(r'(?<![\w.>:~])IUnknown\b', text):
+        line = text[text.rfind('\n', 0, u.start()) + 1:u.start()]
+        if '//' in line or line.lstrip().startswith('#'): continue
+        out.append(text[pos:u.start()]); out.append(COM_NAME); pos = u.end()
+        stats['COM1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- EXC1
 
 DYN_EXC_SPEC = re.compile(r'(\)\s*(?:const\s*)?(?:volatile\s*)?)throw\s*\(\s*(?:\.\.\.)?\s*\)')
@@ -3342,5 +3369,5 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]

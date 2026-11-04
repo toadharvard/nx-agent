@@ -863,6 +863,27 @@ if _shutil.which('aarch64-linux-gnu-g++'):
                           '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _cc], capture_output=True, text=True)
     check('DECL2 critical-section output compiles; CRITICAL_SECTION is 24 bytes', _r.stderr or 'ok', ['ok'])
 
+# ---- COM1: a unit's own IUnknown keeps its slots under its own name (S1-crt, bsshader)
+_com = ('struct IUnknown\n{\n    virtual int QueryInterface(void*, void**);\n    virtual unsigned long AddRef();\n'
+        '    virtual unsigned long Release();\n};\ntypedef char _sizecheck_IUnknown[sizeof(IUnknown) == 4 ? 1 : -1];\n'
+        'struct ID3DXBuffer : public IUnknown\n{\n    virtual void* GetBufferPointer();\n'
+        '    virtual int QueryInterface(void*, void**);\n};\n// IUnknown in a comment\n')
+_comg = run(s1.r_own_iunknown, _com)
+check('COM1 renames the own IUnknown, its base use and sizeof', _comg,
+      ['struct fnvnx_unit_IUnknown\n{', '_sizecheck_IUnknown[sizeof(fnvnx_unit_IUnknown)',
+       ': public fnvnx_unit_IUnknown\n', '// IUnknown in a comment'], ['struct IUnknown', 'public IUnknown'])
+check('COM1 leaves a unit without its own IUnknown alone',
+      run(s1.r_own_iunknown, 'struct IDirect3D9;\nvoid f(IUnknown* p);\n'), ['void f(IUnknown* p);'], ['fnvnx_unit'])
+check('COM1 leaves an IUnknown nested in a namespace alone',
+      run(s1.r_own_iunknown, 'namespace N {\nstruct IUnknown\n{\n};\n}\n'), ['struct IUnknown'], ['fnvnx_unit'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _ci = os.path.join(tempfile.mkdtemp(), 'com.cpp')
+    open(_ci, 'w').write('#include "fnvnx_win32.h"\n' + _comg +
+                         'void* g(ID3DXBuffer* b, IUnknown* u) { b->Release(); u->Release(); return b->GetBufferPointer(); }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror',
+                          '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _ci], capture_output=True, text=True)
+    check('COM1 output compiles next to the platform IUnknown', _r.stderr or 'ok', ['ok'])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''

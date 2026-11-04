@@ -144,6 +144,7 @@ above (round 8).
 | `SAL1` | neutral | attribute-syntax SAL annotations have no code meaning | as is |
 | `CSX1` | neutral (claim) | drops the decomp's Xbox 360 critical-section asserts (D15, J-0051); asserts emit no code | as is |
 | `DECL2` | neutral (claim) | the SDK's definition of the type replaces the decomp's copy | real SDK |
+| `COM1` | neutral | renames a unit's own copy of IUnknown (bsshader: the decomp's parameter types, its slots); no signature with it | as is |
 | `EXC1` | neutral (claim) | MSVC 2008 never enforced `throw()`; but it is an optimizer hint there | as is |
 | `NEW2` | neutral | `<new>` defines the placement forms identically | real `<new>` |
 | `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |

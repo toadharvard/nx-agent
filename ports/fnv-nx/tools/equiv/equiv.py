@@ -60,6 +60,7 @@ CLASSES = {
     'NATIVE1': 'platform',      # drop_native_units in prepare.py (not a text rule)
     # classified by the orchestrator (J-0051) from each rule's docstring; the S11 gate confirms or refutes:
     'GAME1': 'neutral',         # renames a unit's own declaration + call sites; binding by address unchanged
+    'COM1': 'neutral',          # renames a unit's own IUnknown copy (types only; the decomp's vtable slots kept)
     'SPEC1': 'neutral',         # early template<> declarations
     'STATIC1': 'neutral',       # internal -> external linkage of image-bound variables (MSVC may inline less)
     'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
