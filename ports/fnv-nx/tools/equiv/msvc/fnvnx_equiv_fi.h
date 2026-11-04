@@ -31,4 +31,9 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_MSVC_BASE_END(...) fnvnx_int_of_align<__alignof(__VA_ARGS__)>::type : 0;
 #endif
 
+/* FTOL1 (S1b): fnvnx_ftol2(x) is the x87 _ftol2_sse of x; under MSVC the cast compiles to exactly that call */
+#ifndef fnvnx_ftol2
+#define fnvnx_ftol2(x) ((__int64)(x))
+#endif
+
 #endif

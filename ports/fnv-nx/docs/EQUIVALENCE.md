@@ -45,6 +45,16 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, ha
 | `CS28` | layout | 28-byte slot = PC CRITICAL_SECTION + 4 bytes where the decomp asserts 28 | real SDK + `FNVNX_CS28` |
 | `SDK1` | layout | the PC SDK definitions win over the decomp's guarded copies (Xbox 360 layouts) | real SDK |
 | `TAIL1` | layout | GCC must not reuse a base's tail padding; MSVC never does | zero-width bit-field, as on the target |
+| `GAME1` | neutral | renames a unit's own Win32-named game declaration and its call sites; the address binding is unchanged | same code, other symbol name |
+| `SPEC1` | neutral | early `template<>` declarations of member specializations | declarations only |
+| `STATIC1` | neutral | internal -> external linkage of image-bound variables | may change MSVC inlining; the gate decides |
+| `XINC1` | neutral | caller declarations corrected from the x86 code (S1b) | 62/66 identical, 4 differ by an ecx reload |
+| `RET1` | neutral | `return <trailing stmt>` where MSVC's code is identical (S1b) | identical by construction |
+| `DBUG1` | neutral | per-site debug fixes (no sites yet) | - |
+| `XC1` | platform | dynamic initializers become extern + `__fnvnx_dyninit_<addr>` run by S10 | target only |
+| `VA1` | platform | MSVC `char*` va_lists -> real `va_list` | target only |
+| `FALL1` | platform | `__builtin_trap()` at fall-off ends of non-void functions | GCC only |
+| `FTOL1` | platform | `fnvnx_ftol2(expr)` for arg-less `_ftol2_sse` calls; neutral with `fnvnx_ftol2(x) = (__int64)(x)` under MSVC | S1b: 1,535/1,535 identical |
 | `INTL1` | platform | edits only the decomp's non-MSVC branch (`#else` of `_MSC_VER`) | invisible to MSVC |
 | `ASM1` `ASM2` `ASM4` | platform | x87 / rdtsc / cpuid asm -> portable helpers (docs/ASM.md has their own checks) | - |
 | `NATIVE1` | platform | units leave the build (native renderer, D6) | - |

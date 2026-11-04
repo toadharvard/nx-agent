@@ -57,6 +57,17 @@ CLASSES = {
     'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout',
     'ASM1': 'platform', 'ASM2': 'platform', 'ASM4': 'platform',
     'NATIVE1': 'platform',      # drop_native_units in prepare.py (not a text rule)
+    # classified by the orchestrator (J-0051) from each rule's docstring; the S11 gate confirms or refutes:
+    'GAME1': 'neutral',         # renames a unit's own declaration + call sites; binding by address unchanged
+    'SPEC1': 'neutral',         # early template<> declarations
+    'STATIC1': 'neutral',       # internal -> external linkage of image-bound variables (MSVC may inline less)
+    'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
+    'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
+    'DBUG1': 'neutral',         # no sites
+    'XC1': 'platform',          # dynamic initializers -> extern + __fnvnx_dyninit_<addr> (S10 runner order)
+    'VA1': 'platform',          # MSVC char* va_list -> real va_list
+    'FALL1': 'platform',        # __builtin_trap() at fall-off ends (GCC only)
+    'FTOL1': 'platform',        # fnvnx_ftol2(expr): neutral with #define fnvnx_ftol2(x) ((__int64)(x)) under MSVC
 }
 PSEUDO = {'NATIVE1': 'drop_native_units'}
 RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+)\b')

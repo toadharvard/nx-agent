@@ -987,3 +987,29 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   template brackets is rejected. Full prepare: FALL1 354 files / 875 edits (was 885), 0 in the reported constructors,
   0 in `src/generated/`.
 * **metrics** - fall1_files=354 fall1_edits=875 fall1_generated=0
+
+### J-0051 | 2026-11-04 | stream: S1b-patches | status: wip | parent: J-0036,J-0046,J-0050
+
+* **did** - Per-site patch rules in `tools/rules/s1b_patches.py` (XINC1, FTOL1, DBUG1, RET1; `patches/*.s1b` keyed by
+  file + `// @fnv` address with the x86 evidence per site; `units_renames.tsv`, 119 rows, applied by prepare's POST
+  hook); `tests/s1b` (hunks apply to pristine and prepared text; patched pristine units under MSVC 2008 vs S11's
+  pristine objects; GCC census flags before/after); `docs/PATCHES.md`. FTOL1: the 17 real arg-less
+  `_ftol2_sse`/`_CIsqrt` calls in 10 units get their x87 operand back (the decomp declared the float-returning callee
+  `void`: Tile::GetFloat 0x00a011b0 x6, GetDistanceToReference 0x005723b0 x2, floor 0x00406cc0, ...); three sites had
+  pushed arguments attributed to the neighbouring call (inventorymenu, sleepwaitmenu) - moved. RET1: 11 FALL1 sites
+  whose x86 result is the trailing statement (5 with the callee's `bool` return restored). Orchestrator classified the
+  ten new rule ids in S11's table and `docs/EQUIVALENCE.md` (FTOL1 neutral under MSVC with
+  `fnvnx_ftol2(x) = (__int64)(x)`); `tests/s11` green.
+* **found** - MSVC identity: XINC1 62/66 functions (4 differ only by an ecx reload: the exe used whole-program register
+  allocation), FTOL1 1,535/1,535, RET1 1,395/1,395; GCC: no new errors. 861 real FALL1 sites: 419 unreachable ends,
+  ~220 without an evident value, 177 without `@fnv`, 75 empty bodies. **CRITICAL_SECTION on PC is 24 bytes with no
+  tail**: BSThread ctor initialises the CS at +4 and zeroes +0x1c..+0x2c (handle +0x1c, GetCurrentThread +0x20, thread
+  ids +0x24/+0x28, started +0x2c -> size 0x30); AbstractHeap stores its size as 0x20f0 with the lock as its last 0x18
+  bytes; RecursiveLock::Leave = LeaveCriticalSection(this). The decomp's 28-byte CS and the layouts asserted with it
+  (RecursiveLock 0x28, BSThread 0x40, IO_Thread 0x40, AbstractHeap 0x2100) are Xbox 360; CS28 keeps wrong sizes (an
+  AbstractHeap built in place at its image address would write 16 bytes past its PC size).
+* **decided** - D15 (supersedes the CS28 part of J-0025): game structures follow the PC layout proven by the x86
+  code; CS28 is replaced by the plain 24-byte CRITICAL_SECTION and the decomp's Xbox-only size asserts for these
+  classes are dropped by rule (evidence: this entry). Assigned to S1.
+* **metrics** - s1b_sites=90 xinc1_pairs=68 xinc1_msvc_identical=62 ftol1_sites=17 ret1_sites=11 units_renames=119
+  fall1_real_sites=861
