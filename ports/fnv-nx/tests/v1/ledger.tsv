@@ -101,8 +101,8 @@ S13B-UNCL-A1	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	
 S13B-UNCL-A2	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	ctor-this (artifact) labels a native that drops p->Init()'s result and returns p
 S13B-UNCL-A3	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	canned-this (artifact) labels a by-value declaration mismatch (native passes &tmp)
 S13B-UNCL-A4	S13b	524ab2e	524ab2e	refuted	-	test_s13b_unclassified_artifacts.py	native-wild-private (artifact) labels a wrong-slot vcall while x86 made the right call
-NX1-P1	NX1	ac00629	ac00629	refuted	-	test_nx1_publish_nro.sh	host stage fails, package not run: publish_nro ships the previous job's fnv.nro as nro/<new commit>
-NX1-P2	NX1	ac00629	ac00629	refuted	-	test_nx1_publish_nro.sh	a rejected push is reported published when the branch already exists
+NX1-P1	NX1	ac00629	ac00629	fixed	8e2c191	test_nx1_publish_nro.sh	host stage fails, package not run: publish_nro ships the previous job's fnv.nro as nro/<new commit>
+NX1-P2	NX1	ac00629	ac00629	fixed	8e2c191	test_nx1_publish_nro.sh	a rejected push is reported published when the branch already exists
 S5DATA-PROFILE	S5-data	e601246	e601246	confirmed	-	tests/s4/test_profile.cpp	first-run profile files (tests/s4: 95 tests, 0 failed); the game also copies Fallout_default.ini itself (0x00876ad0)
 S5-ADOPT	S5	352c315	352c315	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 7bfec755 lossless: 5 stream files equal or every stream line kept
 S16-ADOPT	S16	6a5c605	6a5c605	confirmed	-	test_adopt_lossless.py	adopt of fnv-s16 ce6d1272 lossless: 12 stream files equal

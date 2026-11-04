@@ -21,6 +21,7 @@ T=$(mktemp -d) && [ -d "$T" ] || { echo "mktemp failed"; exit 2; }   # never run
 g() { git -c user.name=t -c user.email=t@invalid "$@"; }
 bad=0
 NEW=aaaaaaaaaaaa
+OLD=bbbbbbbbbbbb
 
 setup() {  # fresh origin + artifacts clone + build dir per case
 	rm -rf "$T/origin.git" "$T/art" "$T/farm" "$T/bd"
@@ -30,15 +31,20 @@ setup() {  # fresh origin + artifacts clone + build dir per case
 	g -C "$T/art" remote add origin "$T/origin.git"
 	mkdir -p "$T/farm" "$T/bd/package/sd/switch/fnv" "$T/bd/host"
 }
-stage() {  # stage <name> <status>
-	mkdir -p "$T/bd/$1"; printf '{"stage": "%s", "status": "%s"}\n' "$1" "$2" > "$T/bd/$1/stage.json"
+stage() {  # stage <name> <status> [port_commit]: since 8e2c191 the package record names the commit it built
+	mkdir -p "$T/bd/$1"
+	if [ -n "${3:-}" ]; then
+		printf '{"stage": "%s", "status": "%s", "port_commit": "%s"}\n' "$1" "$2" "$3" > "$T/bd/$1/stage.json"
+	else
+		printf '{"stage": "%s", "status": "%s"}\n' "$1" "$2" > "$T/bd/$1/stage.json"
+	fi
 }
 publish() {  # -> NOTE_NRO
 	(
 		export FARM_HOME=$T/farm ARTIFACTS=$T/art C12=$NEW FARM_APT=0 FARM_PUBLISH=auto
 		# shellcheck disable=SC1091
 		. "$PORT/tools/farm/lib_job.sh"
-		publish_nro "$T/bd" >/dev/null 2>&1
+		publish_nro "$T/bd" >"$T/publish.log" 2>&1 || true
 		echo "$NOTE_NRO"
 	)
 }
@@ -49,14 +55,14 @@ say() {  # say <case> <defect 0|1> <text>
 
 # K1 control
 setup
-stage host ok; sleep 1; stage package ok
+stage host ok; sleep 1; stage package ok "$NEW"
 echo NEW > "$T/bd/package/sd/switch/fnv/fnv.nro"
 note=$(publish)
 [ "$(remote_nro)" = NEW ] && say K1 0 "fresh package published ($note)" || say K1 1 "control failed: '$note', remote '$(remote_nro)'"
 
 # P1: OLD's package left in the build dir, NEW's host stage failed, package stage never ran
 setup
-stage package ok; echo OLD > "$T/bd/package/sd/switch/fnv/fnv.nro"   # OLD job's leftovers
+stage package ok "$OLD"; echo OLD > "$T/bd/package/sd/switch/fnv/fnv.nro"   # OLD job's leftovers
 sleep 1; stage host fail                                                # this job
 note=$(publish)
 got=$(remote_nro)
@@ -65,16 +71,17 @@ got=$(remote_nro)
 
 # P2: push rejected, an older nro/NEW already on the remote
 setup
-stage host ok; sleep 1; stage package ok
+stage host ok; sleep 1; stage package ok "$NEW"
 echo EARLIER > "$T/bd/package/sd/switch/fnv/fnv.nro"
 publish >/dev/null
+[ "$(remote_nro)" = EARLIER ] || { echo "P2: setup - the earlier nro/$NEW did not land ('$(remote_nro)')"; bad=$((bad + 1)); }
 printf '#!/bin/sh\nexit 1\n' > "$T/origin.git/hooks/pre-receive"; chmod +x "$T/origin.git/hooks/pre-receive"
-echo NEW > "$T/bd/package/sd/switch/fnv/fnv.nro"; stage package ok
+echo NEW > "$T/bd/package/sd/switch/fnv/fnv.nro"; stage package ok "$NEW"   # stamped: P2 reaches the push
 note=$(publish)
 got=$(remote_nro)
 case "$note" in
 published*) [ "$got" != NEW ] && say P2 1 "push rejected, remote still '$got', yet NOTE_NRO='$note'" \
 	|| say P2 0 "remote updated ($note)" ;;
-*) say P2 0 "failure reported ('$note')" ;;
+*) say P2 0 "failure reported ('$note'; remote '$got'; last log line: $(grep -v '^$' "$T/publish.log" | tail -1 | cut -c1-120))" ;;
 esac
 exit $((bad > 0))
