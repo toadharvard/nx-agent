@@ -1,7 +1,7 @@
 /* register.cpp - hooks S7's DLL replacements into the runtime (S4):
  *   modules  dsound, dinput8, xinput1_3 (also xinput1_4/9_1_0 aliases), vorbisfile (also libvorbisfile,
  *            the IAT's name)  -> LoadLibrary/GetProcAddress
- *   COM      CLSID_DirectSound8, CLSID_DirectSound, CLSID_DirectInput8              -> CoCreateInstance
+ *   COM      CLSID_DirectSound8, CLSID_DirectSound, CLSID_DirectInput8, CLSID_FilterGraph              -> CoCreateInstance
  *   IAT      fnvnx_audio_input_lookup_export(dll, name) for the loader's import resolution (the S4 export
  *            table, fnvnx_win32_lookup_export, does not consult registered modules; see AUDIO_INPUT.md).
  * Runs from a static constructor and is idempotent. */
@@ -19,6 +19,7 @@
 extern "C" {
 HRESULT fnvnx_dsound_com_factory(const GUID *iid, void **out);
 HRESULT fnvnx_dinput_com_factory(const GUID *iid, void **out);
+HRESULT fnvnx_dshow_com_factory(const GUID *iid, void **out);   /* platform/audio/dshow.cpp */
 int fnvnx_ov_open_callbacks();
 int fnvnx_ov_clear();
 int fnvnx_ov_info();
@@ -107,6 +108,8 @@ extern "C" void fnvnx_audio_input_register(void)
     fnvnx_register_com_class(&CLSID_DirectSound8, fnvnx_dsound_com_factory);
     fnvnx_register_com_class(&CLSID_DirectSound, fnvnx_dsound_com_factory);
     fnvnx_register_com_class(&CLSID_DirectInput8, fnvnx_dinput_com_factory);
+    static const GUID clsid_filter_graph = {0xe436ebb3, 0x524f, 0x11ce, {0x9f, 0x53, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70}};
+    fnvnx_register_com_class(&clsid_filter_graph, fnvnx_dshow_com_factory);   /* DirectShow: the game's music */
 }
 
 __attribute__((constructor(FNVNX_INIT_MODULES))) static void fnvnx_audio_input_ctor(void) { fnvnx_audio_input_register(); }

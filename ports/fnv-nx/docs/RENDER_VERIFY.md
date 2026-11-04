@@ -209,7 +209,8 @@ holds it. Inputs are random per seed:
   new: D3D9 vertex declarations on Nine, `fnvnx_dk_attrib_location` on GL); every float constant random except the
   CTAB matrix whose name contains "Proj" (near identity, so the 3x3 grid of 8 triangles stays inside the target); a
   generated PS writes a random linear combination of every COLOR / TEXCOORD output (only the components the VS
-  writes; vs < 3.0 colours saturated in the PS) to an A32B32G32R32F target; D24S8 depth checks oPos.z.
+  writes; vs < 3.0 colours saturated in the PS) to an A32B32G32R32F target; D24S8 depth checks oPos.z; coverage is
+  marked in stencil (ALWAYS / REPLACE 1), since a VS may pin depth to the clear value 1.0 (z = w).
 
 Verdict per seed, against cmp.py's thresholds (2/255; float 1e-3 relative; depth 8 LSB), widened per pixel by 0.1 x
 the oracle's own change when every input is perturbed by 1e-5 (a stability probe: float32 rounding is ~1e-7, so a
@@ -254,7 +255,9 @@ largest |difference| over compared pixels (8-bit steps for pixel programs, float
 | shader parity self-test | 6/7 match on `v6n_gl` and on `v6n_s6ngl` (S6b GLSL through S6n's shim; ps_3_0 vPos matches under its y negation), 1 finding (P1) |
 | VS + PS + indexed draw (`vsscenes.py`, 2 scenes: affine + tint, perspective w + COLOR0/COLOR1 + two indexed draws under ZFUNC GREATER) | both match Nine on `v6n_gl` and on `v6n_s6ngl` (S6b VS GLSL through S6n's shim, layout 2 = S6b attribute locations, D3DCOLOR uploaded as RGBA bytes, NxOp_BindIdx/DrawIndexed; removing the colour swap is caught by both scenes); trap `vs_posfix_halfpixel` (S6b's posfix half-pixel shift on top of the +0.5 viewport) caught, 174 px |
 | whole-package fuzz, the player's 16 packages (§3.7, 4 seeds, `v6n_gl`), first run (S6b before 8975dc6) | 15,791 programs, 11,161 translated (P5: 4,614 centroid, 16 relative addressing), 8,386 pass, **2,775 fail** (2,257 D3D9 numerics P2-P4, 128 undriven cube samplers, 154 oracle NaN, 236 open) |
-| whole-package fuzz, re-run (S6b 8975dc6/65b35e8: P2-P5 fixed, all 15,791 translate) | same harness: **1,697 fail** (320 unique): 1,312 open, 229 undriven cube, 156 oracle NaN. After V6n's harness fixes (cube samplers driven, oracle NaN not compared (O10), name-seeded and repeated stability probe): **14,776 pass, 1,015 fail** (180 unique of 1,809). Every remaining failure by root cause in §4.0a. |
+| whole-package fuzz, re-run (S6b 8975dc6/65b35e8: P2-P5 fixed, all 15,791 translate) | same harness: **1,697 fail** (320 unique): 1,312 open, 229 undriven cube, 156 oracle NaN. After V6n's harness fixes (cube samplers driven, oracle NaN not compared (O10), name-seeded and repeated stability probe): **14,776 pass, 1,015 fail** (180 unique of 1,809); with VS coverage from stencil (ea79634) **999 fail** (178 unique):
+869 S6b defects (`ps_pow_zero` 653, `vs_reladdr_def` 216), 118 ill-conditioned random inputs at point-sampled lookups,
+12 implementation-defined edge ties. Every failure by root cause in §4.0a. |
 | C63 / C69 families vs the originals (`tests/v6n/claims/c69_families.py`, FNVNX_SDP) | 12 cases: tile, tile scroll offset, nolight tex / texvc / vc match; **7 differ, filed as defects**: tile_texscroll_scale, tile_alphamap, tile_vc, nolight_falloff_curve, sky_vertex_weights, land_light, depth_alphatest. lit not checked (the SM3 lighting PS do not translate and their LightData layout needs the decomp's Lighting30 setup) |
 | C54 MAXMIPLEVEL / mip selection (`tests/v6n/claims/c54_*`) | 8/8 scenes match Nine on both targets |
 | C65 radix sort (`tests/v6n/claims/c65_sort.cpp`) | 4000 random packet sets identical to std::stable_sort, SortKey packing exact: PASS |
@@ -292,21 +295,21 @@ Method: per-instruction bisection of game programs (each prefix of the program w
 float target, Nine vs S6b's GLSL; local tooling, results not committed), then one V6n-side fix per suspected cause
 applied to every failing program's GLSL to count what it explains. Buckets are exclusive.
 
-| root cause | owner | 1st run (2,775) | re-run, old harness | now | how |
-|---|---|---|---|---|---|
-| translator: D3D9 numerics P2-P4 | S6b | 2,257 | 0 | 0 | fixed by S6b 8975dc6 |
-| translator: unsupported centroid / relative addressing P5 | S6b | 4,630 not translated | 0 | 0 | fixed by S6b 8975dc6; the 4,614 centroid programs now run, 3,843 pass; none of the remaining failures changes with `interpolateAtCentroid` removed |
-| translator: `ps_pow_zero` (pow(0, y <= 0)) | S6b | inside "open" | 653 (129) | 653 (129) | defect filed, synthetic test |
-| translator: `vs_reladdr_def` (CTAB array misses def'd constants) | S6b | inside "open" | 184 (22) | 184 (22) | defect filed, synthetic test |
-| translator: `ps_texkill_w` (texkill xyz only) | S6b | - | 0 | 0 | defect filed (random inputs do not reach it) |
-| oracle: softpipe keeps NaN through `_sat` (O10) | V6n harness | inside "open" / oracle NaN | 431 | 0 | NaN channels not compared |
-| harness gap: cube samplers undriven | V6n harness | 128 | 229 (27) | 0 | `texcube`; all 229 pass |
-| harness bug: probe seeded by path | V6n harness | - | +-41 flips | 0 | seeded by name |
-| tolerance: ill-conditioned inputs one probe misses | V6n harness | - | 64 (4) | 0 | 3 probe patterns |
-| open, pixel: 1-10 px per seed | not classified | - | | 97 (20) | WATER / SM3 / SM3LL ps_2_x and ps_3_0, mostly computed point-sampled lookups; 23 of them also have oracle NaN pixels |
-| open, pixel: large | not classified | - | | 21 (4) | WATER002, WATER009, WATER010 (ps_3_0), WATER020 |
-| open, vertex | not classified | - | | 60 (5) | coverage: DISTTREE, PARTICLE, SKYSTARS vs_2_0 / vs_3_0; depth: SM3007 VS (1 px) |
-| **total** | | **2,775** | **1,697** | **1,015** | |
+| root cause | owner | 1st run (2,775) | re-run, old harness | 911ba8f | now | how |
+|---|---|---|---|---|---|---|
+| translator: D3D9 numerics P2-P4 | S6b | 2,257 | 0 | 0 | 0 | fixed by S6b 8975dc6 |
+| translator: unsupported centroid / relative addressing P5 | S6b | 4,630 not translated | 0 | 0 | 0 | fixed by S6b 8975dc6; the 4,614 centroid programs now run, 3,843 pass; none of the remaining failures changes with `interpolateAtCentroid` removed |
+| translator: `ps_pow_zero` (pow(0, y <= 0)) | S6b | inside "open" | 653 (129) | 653 (129) | 653 (129) | defect filed, synthetic test |
+| translator: `vs_reladdr_def` (CTAB array misses def'd constants) | S6b | inside "open" | 216 (24) | 184 (22) | 216 (24) | defect filed, synthetic test; 32 more (DISTTREE, PARTICLE) were in "open": the `(ARRAYBASE + k)` form |
+| translator: `ps_texkill_w` (texkill xyz only) | S6b | - | 0 | 0 | 0 | defect filed (random inputs do not reach it) |
+| oracle: softpipe keeps NaN through `_sat` (O10) | V6n harness | inside "open" / oracle NaN | 431 | 0 | 0 | NaN channels not compared |
+| harness gap: cube samplers undriven | V6n harness | 128 | 229 (27) | 0 | 0 | `texcube`; all 229 pass |
+| harness bug: probe seeded by path | V6n harness | - | +-41 flips | 0 | 0 | seeded by name |
+| tolerance: ill-conditioned inputs one probe misses | V6n harness | - | 64 (4) | 0 | 0 | 3 probe patterns |
+| harness bug: VS coverage read from depth (z = w pins depth to the clear value) | V6n harness | - | 16 (2) | 16 (2) | 0 | coverage marked in stencil (SKYSTARS) |
+| implementation-defined: pixel centres < 1/256 px from a VS triangle edge | - | - | 12 (1) | 12 (1) | 12 (1) | SM3007 VS, one seed: 3 px within 0.0008 px of shared edges (GL rasterizers snap to 1/256 px); not excluded: a larger coverage probe would hide depth errors |
+| ill-conditioned random inputs at point-sampled lookups | V6n harness (inputs) | - | 118 (24) | 118 (24) | 118 (24) | bisected: the first difference is a texld/texldp in 17 of 24 (checked: projective w = 0.0036, coordinates ~700 texels out, so float rounding picks the texel), a parallax loop with rcp of near-zero values in 6 (SM3 / SM3LL ps_3_0), pow in 1 (WATER026); 23 programs also have oracle-NaN pixels. No translator rule found. Not fixed: a 1e-3 discontinuity probe skipped up to 248 of 256 px, and bilinear filtering makes 84 of 138 passing programs fail (llvmpipe vs softpipe filter precision) |
+| **total** | | **2,775** | **1,697** | **1,015** | **999** | |
 
 The "re-run, old harness" column splits the 1,697 of the old harness by the cause found since (the 41 path-seeded
 flips are inside the open count of that run); its rows do not add up to 1,697 exactly for that reason.
@@ -401,7 +404,7 @@ Blocked, with what unblocks it:
 | P4 | S6b | `nrm` of a zero vector: GLSL normalize -> NaN, Nine 0 (`p4_nrm_zero`); rcp(0) / rsq(0) = 1e38 vs Nine's 2^127. D3D9 leaves both implementation-defined; listed because they dominate the random-input fuzz |
 | P5 | S6b | 4,614 of 15,791 programs (4,164 ps_2_x, 450 ps_3_0; 966 unique) do not translate: MojoShader glsldk rejects the `centroid` modifier (`centroid unsupported in glsl profile`); 16 vs_2_0 fail on relative addressing of an indeterminate array. Fixed by S6b 8975dc6 (centroid inputs read with `interpolateAtCentroid()`; relative addressing through the UBO): S6b's census (`tests/s6b/census.py`) translates all 15,791 (0 failures). Re-run by V6n: the 4,614 centroid programs run, 3,843 pass; no remaining failure depends on centroid (§4.0a) |
 | P6 | S6b | defect `ps_pow_zero`: pow(0, 0) = 1 and pow(0, y < 0) = +inf in D3D9 (exp(y log x), log(0) = -FLT_MAX) and Nine; S6b's `pow(abs(x), y)` gives 0. 653 failing programs (129 unique). Test `tests/v6n/defects/shaders/ps_pow_zero.psa` |
-| P7 | S6b | defect `vs_reladdr_def`: relative reads through a CTAB-declared array use MojoShader's ARRAYBASE path, bypass `dk_relc()` and miss the def'd constants. 184 failing programs (22 unique, instancing VS). Test `tests/v6n/defects/shaders/vs_reladdr_def.vsa` |
+| P7 | S6b | defect `vs_reladdr_def`: relative reads through a CTAB-declared array use MojoShader's ARRAYBASE path, bypass `dk_relc()` and miss the def'd constants, for the array's first register and for later ones (`(ARRAYBASE + k) + a0`). 216 failing programs (24 unique: instancing VS, DISTTREE, PARTICLE). Test `tests/v6n/defects/shaders/vs_reladdr_def.vsa` |
 | P8 | S6b | defect `ps_texkill_w`: ps_2_0+ texkill tests xyz only (D3D9, Nine, wined3d: xyzw). Test `tests/v6n/defects/shaders/ps_texkill_w.psa` |
 | O8/O9 | oracle | O9: softpipe's clipper drops pixel centres on the x = -w / y = w clip planes (D3D9 row 0 / column 0) for clipped triangles whose w varies; llvmpipe (guard band) and D3D9 hardware keep them. Vertex-program fuzz skips row 0 / column 0 |
 | E1 | exe | the ShadowLight pass array `DAT_011fdff8[759]` (and the Lighting30 shader table `DAT_01200c48`, TileShader constants at `DAT_01202198`) lie in the zero-filled tail of the 1.4.0.525 executable's .data (raw size 0x40200 of 0xeea9c): filled at run time, so the static configured-vs-emitted question of §2 cannot be settled from the file; it needs a run (capture of §6) |

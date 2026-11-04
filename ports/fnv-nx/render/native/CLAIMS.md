@@ -1,3 +1,63 @@
+# render/native: family claims and behaviour claims
+
+## Family claims (who works on which shader family)
+
+The render machine (branch `claude/port-nsw-render`) owns render/native's integration. That covers the frame and
+pass structure in `n1/renderer.cpp`, the family dispatch table, `overrides.tsv`, `include/nx/families.h`, the
+**Translated** path (each pass that has no finished native family runs the game's own program through S6b's
+sdp2dksh on deko3d), the skip counters (skipped engine draws = 0), and the scene check against the real captures
+(fnv-nx-build `gamedata/captures`: menu_11640, docmitchell_13000).
+
+A family stream claims a row by setting `owner` and `status` on its own branch and telling the render machine. The
+render machine merges it.
+
+**Order of work (owner rule D21, ARCHITECTURE.md: coverage first, then optimisation).**
+1. Coverage (render machine). The general path draws every program correctly:
+   - Translated for every family;
+   - exact D3D9 state emulation as a class: every render, sampler and texture-stage state with its D3D9 or engine
+     default and save/restore, constants, vertex formats and render targets.
+   Metric: skipped draws = 0, and every capture scene passing (menu, docmitchell, and S5-data's new ones).
+2. Only after that, family by family: hand-written GLSL, then GPU tuning. Each step is measured against
+   Translated on the captures, at equal pixels and lower GPU time.
+Until step 1 holds, family streams (render-lit, render-land, render-veg, G1-gpu) work on correctness and measurement:
+- the family's parity on the captures;
+- defects in the Translated path or the state emulation, with failing tests;
+- cost-model accuracy.
+They do not switch families to native.
+
+Rules for family streams:
+- Block structs may live in the stream's own header (e.g. `n1/veg_families.h`) until the render machine takes
+  them into `families.h`.
+- Family code lives in your family's files: `shaders/<family>*.glsl`, a family module under `n1/`, and the
+  family's scenes and tests under `tests/s6n/`.
+- You may add or change only your family's row in the dispatch table, and only your family's override rows.
+- Any other change to renderer.cpp, overrides.tsv or families.h goes to the render machine as a request with a
+  failing test.
+- A family switches from Translated to native only when it passes the scene check against Translated on the
+  captures (equal pixels within the RENDER_NATIVE §4 tolerances) and costs no more GPU time (real019 and the
+  captures).
+
+| family | engine passes / classes (RENDER_NATIVE §1.3) | native GLSL | path today | owner | status |
+|---|---|---|---|---|---|
+| UI tile | TileShader | tile, tile_vc, tile_scroll, tile_alphamap, text | native | render machine | done (V6n c69 TILE1000-1002) |
+| nolight | BSShaderNoLighting, PSYS strips | nolight* | native | render machine | done (c69 NOLIGHT004) |
+| image space: menuBG | ImageSpaceManager menuBG | menubg | native | render machine | done |
+| lit: statics | SLS, Lighting30 (ADTS/ADT/AD/DIFFUSEPT/SPECULAR/TEXTURE, 3XLIGHTING) | lit, lit_spec, light/epilogue permutations | skipped -> Translated | render-lit | open |
+| lit: actors (skinned, facegen, hair, eye) | SLS SKIN, Lighting30 skin variants | lit + SKIN (started) | skipped -> Translated | render-lit | open |
+| land | LAND*, LANDAD, LANDLO | land, land_lit | skipped -> Translated | render-land | open |
+| LOD (land, objects, trees) | DISTLOD, LOD land | - | skipped -> Translated | render-land | open |
+| sky | SKY* (quad, clouds, stars, moon, sun) | sky | skipped -> Translated | render-land | open |
+| water | WATER*, wading, interior, LOD water | - | skipped -> Translated | render-land | open |
+| depth / shadow | ZONLY, DEPTHMAP, 3XDEPTH*, GRASS_SHADOW, shadow maps | depth, depth_at | skipped -> Translated | render-land | open |
+| image space: world chain | HDR, bloom/blur, DOF, radial blur, sunbeams, refraction, cinematic, VATS, night vision, ... | - | skipped -> Translated | render-land | open |
+| trees | SpeedTree branch/frond/leaf/billboard | - | skipped -> Translated | render-veg | open |
+| grass | GRASS* | - | skipped -> Translated | render-veg | open |
+| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - | skipped -> Translated | render-veg | open |
+| GPU cost model and pass structure | render/native/perf (gpu_cost.py, gen_stream.py, report.*), pass order, early-z, sorting | - | - | G1-gpu (with the render machine's perf work) | open |
+
+"skipped -> Translated": this pass is skipped today, and the render machine's Translated path, now in progress, will
+draw it. A claim replaces that with native.
+
 # S6n claims (native renderer) - for the verifier
 
 Each claim is a statement about behaviour. "Backed by" names the code and the test that shows it; run the tests

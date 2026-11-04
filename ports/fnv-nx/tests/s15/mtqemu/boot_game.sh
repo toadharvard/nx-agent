@@ -7,6 +7,9 @@
 #   work dir:      outside the repository: linhost, the sdmc root and boot.log go there
 # Env: TIMEOUT (seconds, default 300), EXPECT (default the WinMain line), QEMU (default qemu-aarch64; empty: native),
 #      HEAP_MIB (default 64, as emu_guest.py). Exit 0 when the line was reached.
+#      GAMEDATA_DIR: when the exe is the owner's (sha256) and has no Data/ beside it, tools/gamedata_fetch.sh assembles
+#      the real install there from the private repository (default $HOME/fnvnx-gamedata; cached) and the boot uses it.
+#      GAMEDATA=0 turns that off.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 [ $# -eq 3 ] || { echo "usage: $0 <fnvnx.elf> <FalloutNV.exe> <work dir>" >&2; exit 2; }
@@ -19,6 +22,15 @@ COLLECT=${COLLECT:-0}   # 1: collect-all boot (linhost --collect-traps): vslot/c
 if [ "$COLLECT" = 1 ]; then EXPECT=${EXPECT-}; else EXPECT=${EXPECT:-fnvnx boot: calling WinMain}; fi
 QEMU=${QEMU-qemu-aarch64}
 HEAP_MIB=${HEAP_MIB:-64}
+OWNER_EXE_SHA=${FNVNX_EXE_SHA256:-89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe}
+if [ "${GAMEDATA:-1}" != 0 ] && [ ! -d "$(dirname "$EXE")/Data" ] && [ "$(sha256sum "$EXE" | cut -c1-64)" = "$OWNER_EXE_SHA" ]; then
+  GD=${GAMEDATA_DIR:-$HOME/fnvnx-gamedata}
+  if bash "$HERE/../../../tools/gamedata_fetch.sh" "$GD" > "$WORK/gamedata_fetch.log" 2>&1; then
+    EXE=$(readlink -f "$GD/FalloutNV.exe")
+  else
+    echo "boot_game: no real install (see $WORK/gamedata_fetch.log): exe only" >&2
+  fi
+fi
 
 bash "$HERE/build.sh" "$WORK/build" > "$WORK/build.log" 2>&1 || { tail -20 "$WORK/build.log" >&2; exit 2; }
 mkdir -p "$WORK/sdmc/fnvnx/game"

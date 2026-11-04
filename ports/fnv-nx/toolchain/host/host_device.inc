@@ -34,6 +34,47 @@ static void remove_launcher_override(void) {
           r2 ? "FAILED" : "ok");
 }
 
+/* ---- the precompiled shader pack ------------------------------------------------------------------------- */
+/* fnv.nro's RomFS holds shaders.nxsp, the native renderer's DKSH (toolchain/nro/shaderpack.py); the guest's shader
+ * table reads it as fnvshd:/shaders.nxsp through the host file calls. Nothing is compiled on the console: without
+ * the pack the renderer has no shaders (NX1 check 9). Returns 0 when mounted. */
+static int mount_shader_pack(void) {
+    FILE *f = fopen(FNVNX_SD_NRO, "rb");
+    unsigned char h[0x80], a[0x38];
+    u32 size = 0;
+    u64 off = 0, len = 0;
+    int ok = f && fread(h, 1, sizeof h, f) == sizeof h && !memcmp(h + 0x10, "NRO0", 4);
+    if (ok) {
+        memcpy(&size, h + 0x18, 4);
+        ok = !fseek(f, size, SEEK_SET) && fread(a, 1, sizeof a, f) == sizeof a && !memcmp(a, "ASET", 4);
+    }
+    if (ok) {
+        memcpy(&off, a + 8 + 32, 8);   /* AssetSection romfs {offset, size} after icon and nacp */
+        memcpy(&len, a + 8 + 40, 8);
+        ok = len != 0;
+    }
+    if (f) fclose(f);
+    Result rc = ok ? romfsMountFromFsdev(FNVNX_SD_NRO, (u64)size + off, "fnvshd") : MAKERESULT(Module_Libnx, LibnxError_NotFound);
+    logf_("fnvnx host: shader pack: %s %s\n", FNVNX_SD_NRO, R_SUCCEEDED(rc) ? "RomFS mounted as fnvshd:" :
+          "has no RomFS: the renderer gets no shaders (nothing is compiled on the console)");
+    /* the game's own shaders (shaders_nx.py on the owner's side): an NXSP v1 next to the game, read by the
+     * translated path; absent or broken, the game's programs get no DKSH and nothing is compiled either */
+    unsigned char g[32];
+    u32 gn = 0;
+    f = fopen(FNVNX_SD_SHADERS_NX, "rb");
+    int gok = f && fread(g, 1, sizeof g, f) == sizeof g && !memcmp(g, "NXSP", 4) && g[4] == 1;
+    if (gok) memcpy(&gn, g + 8, 4);
+    if (f) fclose(f);
+    if (gok)
+        logf_("fnvnx host: game shaders: %s, %u precompiled programs, pack id %02x%02x%02x%02x...\n",
+              FNVNX_SD_SHADERS_NX, gn, g[20], g[21], g[22], g[23]);
+    else
+        logf_("fnvnx host: game shaders: %s %s: the game's own shaders are unavailable (build it with "
+              "toolchain/nro/shaders_nx.py from Data/Shaders; nothing is compiled on the console)\n",
+              FNVNX_SD_SHADERS_NX, f ? "is not an NXSP v1 pack" : "missing");
+    return R_SUCCEEDED(rc) ? 0 : 1;
+}
+
 /* ---- start refusals ------------------------------------------------------------------------------------- */
 /* 0 when the process may run the game; otherwise the reason was logged. */
 static int device_preflight(void) {
