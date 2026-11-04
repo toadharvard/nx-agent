@@ -838,14 +838,15 @@
     "uGridsToLoad": 5,
     "fLODFadeOutMultObjects": 5.0,
     "fLODFadeOutMultItems": 3.0,
-    "fLODFadeOutMultActors": 2.5,
+    "fLODFadeOutMultActors": 6.0,
     "iActorShadowCountExt": 2,
-    "iActorShadowCountInt": 4,
+    "iActorShadowCountInt": 2,
     "bShadowsOnGrass": 0,
     "iMinGrassSize": 80,
     "fGrassMaxStartFadeDistance": 7000.0,
     "iMaxDecalsPerFrame": 10,
-    "iMaxSkinDecalsPerFrame": 3
+    "iMaxSkinDecalsPerFrame": 3,
+    "note": "D20 default settings: Fallout_default.ini as shipped (gamedata/exe, ini.sha256), the exe's values only where the ini is silent; differs from the exe defaults in fLODFadeOutMultActors 6 (exe 2.5) and iActorShadowCountInt 2 (exe 4)"
    },
    "switch_a": {
     "fLODFadeOutMultObjects": 4.0,
@@ -881,6 +882,19 @@
     "iMaxDecalsPerFrame": 3,
     "iMaxSkinDecalsPerFrame": 1,
     "risk": "uGridsToLoad below 5 is known to break scripted events and AI packages that expect loaded cells; listed to show the bound, not as a proposal"
+   },
+   "exe_defaults": {
+    "uGridsToLoad": 5,
+    "fLODFadeOutMultObjects": 5.0,
+    "fLODFadeOutMultItems": 3.0,
+    "fLODFadeOutMultActors": 2.5,
+    "iActorShadowCountExt": 2,
+    "iActorShadowCountInt": 4,
+    "bShadowsOnGrass": 0,
+    "iMinGrassSize": 80,
+    "fGrassMaxStartFadeDistance": 7000.0,
+    "iMaxDecalsPerFrame": 10,
+    "iMaxSkinDecalsPerFrame": 3
    }
   }
  }
