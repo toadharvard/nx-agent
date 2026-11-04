@@ -21,7 +21,8 @@ import os
 
 import config
 
-SOFT_CAUSES = {'local-static', 'vptr-store', 'bool-repr', 'ilp32-pointer', 'division', 'uninit-x86', 'nan-bits'}
+SOFT_CAUSES = {'local-static', 'vptr-store', 'bool-repr', 'ilp32-pointer', 'division', 'uninit-x86', 'nan-bits',
+               'call-order'}
 HARNESS_CAUSES = {'x86-custom-cc'}     # oracle-model gaps: neither hard nor soft, reported apart
 LINK_CAUSES = {'split-global', 'call-args', 'callee-saved'}
 
@@ -87,6 +88,9 @@ def reclassify(rec):
             pass
     if d['kind'] == 'call-count' and d.get('x86') == 0:
         return 'falloff?'
+    if d['kind'] == 'call-target' and d.get('x86_next') and d.get('x86_next') == d.get('arm') and \
+            d.get('arm_next') == d.get('x86'):
+        return 'call-order'      # two adjacent calls swapped: C++ leaves the evaluation order of operands open
     return cause or 'unclassified'
 
 

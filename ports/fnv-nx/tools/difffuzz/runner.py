@@ -198,7 +198,9 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     for i in range(min(len(tx), len(ta))):
         if tx[i] != ta[i]:
             return dict(kind='call-target', index=i, x86=_hex(tx[i]), arm=_hex(ta[i]),
-                        x86_trace=[_hex(t) for t in tx[:i + 1]], arm_trace=[_hex(t) for t in ta[:i + 1]])
+                        x86_trace=[_hex(t) for t in tx[:i + 1]], arm_trace=[_hex(t) for t in ta[:i + 1]],
+                        x86_next=_hex(tx[i + 1]) if i + 1 < len(tx) else None,
+                        arm_next=_hex(ta[i + 1]) if i + 1 < len(ta) else None)
     if ex is not None:
         return None   # both faulted after the same calls
     if len(tx) != len(ta):
@@ -300,6 +302,8 @@ class Pair:
             if not d or d['kind'] != 'call-target' or self.adapted >= 16:
                 return rx, ra, d
             x = int(d['x86'], 16) if not d['x86'].startswith(('name:', 'imp:')) else None
+            if x is not None and x in getattr(self.target, 'arm_out', ()):
+                return rx, ra, d        # the native calls X out of line too: the calls differ in order, not inlining
             get = getattr(self.target, 'oracle_code', None)
             got = get(x) if (get and x is not None and x not in self.target.x86_code) else None
             if not got:

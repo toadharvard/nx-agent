@@ -194,8 +194,14 @@ class UnitCache:
         statics = self.local_statics()
         code = {orig_addr: fn['code']}
         if self.unit_closed:
+            # a function of the unit that the native object does not define and calls through its code stub
+            # (`__fnv_<X>` bound to CODE_STUB + X: defined in another object, e.g. moved by S1b) runs out of line
+            # natively, so the oracle calls it out of line too (an intercepted call on both machines)
+            native_def = set(img.entries.values())
+            external = {a for a in xu.funcs if a not in native_def and
+                        img.syms.get('__fnv_%08x' % a) == a64image.CODE_STUB + a}
             for a, f in xu.funcs.items():
-                if not f['unresolved']:
+                if not f['unresolved'] and a not in external:
                     code[a] = f['code']
         t = runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
                           statics)
@@ -205,6 +211,8 @@ class UnitCache:
         t.vtables = self.vtable_map(img)
         t.followed = self.preload(code, img, source)
         t.x86_code = code
+        # functions the native unit calls out of line (code stubs): never "inlined natively" (runner adaptive follow)
+        t.arm_out = self.arm_called(img, source) - set(img.entries.values())
 
         def oracle_code(addr):
             """(code, literals of its unit) of an oracle function, or None."""

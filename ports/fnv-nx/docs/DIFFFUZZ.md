@@ -126,6 +126,13 @@ byte read with another value, the final stores that differ (with both pcs), wher
 comes from (a load, a stack or native image address, a stub, planted garbage, a constant), and the last
 instructions of both machines before that point.
 
+**Unit membership (difffuzz-6).** A function of the oracle's unit that the native object does not define and calls
+through its code stub (defined in another object, e.g. moved by S1b) is intercepted on the oracle side too, not run
+for real. Adaptive follow never loads a function the native unit calls out of line: a call-target mismatch there
+is an order difference, not inlining. Two adjacent calls in swapped order (`x86_next`/`arm_next` of a call-target
+divergence) are the soft cause `call-order`: C++ leaves the evaluation order of operands open (S13 00740980:
+`SetField628(FUN_00740960() + 1)` next to `FUN_00740940()`).
+
 **Wild calls.** A jump to memory without code on either machine (an indirect call through a pointer the case
 planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that address on both machines
 (`world.WILD_X86` / `WILD_A64`), never an execution of the world's bytes.
