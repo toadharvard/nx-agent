@@ -308,6 +308,7 @@ def pe(base, text_va, text):
     struct.pack_into('<H', d, 0x80 + 20, 0xe0)
     struct.pack_into('<I', d, 0x80 + 24 + 28, base)
     struct.pack_into('<8sIIII', d, 0x80 + 24 + 0xe0, b'.text', len(text), text_va - base, len(text), 0x400)
+    struct.pack_into('<I', d, 0x80 + 24 + 0xe0 + 36, 0x60000020)   # code, execute, read
     return bytes(d) + text
 
 
@@ -357,6 +358,31 @@ class Exe(unittest.TestCase):
                 fo.write(pe(0x400000, 0x401000, bytes(text)))
             got = bodies.exe_call_targets(d, 0, {'functions': [{'symbol': '?f@@YAXXZ', 'address': '%x' % F}]},
                                           {'?g@@YAXXZ'}, bodies.Pe(os.path.join(d, 'x.exe')))
+        self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}})
+
+    def test_exe_standalone_copy(self):
+        """search=True: a function units.json does not list and no placed function reaches is placed where its bytes
+        (relocations masked) occur once in the exe's code; a body shorter than SEARCH_MIN is not."""
+        import struct
+        f = b'\x55\x8b\xec\x6a\x01\x6a\x02\xe8\0\0\0\0\x83\xc4\x08\x5d\xc3'   # 17 bytes: call ?g
+        short = b'\xe8\0\0\0\0\xc3'                                                   # call ?k; ret
+        obj = coff({'?f@@YAXXZ': (f, {8: '?g@@YAXXZ'}), '?s@@YAXXZ': (short, {1: '?k@@YAXXZ'})},
+                   ['?g@@YAXXZ', '?k@@YAXXZ'])
+        F, G, K = 0x401030, 0x4010a0, 0x4010c0
+        text = bytearray(b'\xcc' * 0x100)
+        text[0x30:0x30 + len(f)] = f
+        struct.pack_into('<i', text, 0x38, G - (F + 12))
+        text[0x60:0x60 + len(short)] = short
+        struct.pack_into('<i', text, 0x61, K - (0x401060 + 5))
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            exe = bodies.Pe(os.path.join(d, 'x.exe'))
+            args = (d, 0, {'functions': []}, {'?g@@YAXXZ', '?k@@YAXXZ'}, exe)
+            self.assertEqual(dict(bodies.exe_call_targets(*args)), {})
+            got = bodies.exe_call_targets(*args, search=True)
         self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}})
 
     def test_code_only_externs(self):

@@ -125,6 +125,13 @@ def cmd_todo(cache, targets, keys, out, counts_out):
     print(c)
 
 
+def shard_of(cache):
+    """The shard name a cache directory stands for (`fuzzcache-7of26` or `7of26` -> `7of26`): the per-head branch
+    the farm publishes a run's reproducers on is fuzz/<commit12>/<shard>."""
+    n = os.path.basename(os.path.normpath(cache))
+    return n[len('fuzzcache-'):] if n.startswith('fuzzcache-') else n
+
+
 def cmd_merge(cache, camp, keys, commit):
     rows, keys = load_rows(cache), json.load(open(keys))
     tags = change_tags()
@@ -138,7 +145,8 @@ def cmd_merge(cache, camp, keys, commit):
             os.remove(p)
         for p in divs_of(camp, a):
             shutil.copy(p, os.path.join(cache, 'div', os.path.basename(p)))
-        r = dict(r, key=keys[a], commit=commit, changes=tags)     # the scoped changes this verdict saw
+        # the scoped changes this verdict saw; shard: where this head published the reproducer
+        r = dict(r, key=keys[a], commit=commit, changes=tags, shard=shard_of(cache))
         rows[a] = r
         n += 1
     save_rows(cache, rows)
@@ -218,7 +226,7 @@ def cmd_seed(cache, targets, others):
             # a harness failure is no verdict to reuse (the 32-shard caches held only crash:ModuleNotFoundError
             # rows of 9a0243c: seeding them made every new 26-shard cache start with a backlog of failures)
             if a in want and a not in rows and not harness_failure(r):
-                rows[a] = r
+                rows[a] = dict(r, shard=r.get('shard') or shard_of(o))   # it stays published under its source shard
                 for p in divs_of(o, a):
                     shutil.copy(p, os.path.join(cache, 'div', os.path.basename(p)))
                 n += 1

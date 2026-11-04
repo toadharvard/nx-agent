@@ -87,6 +87,35 @@ def stub_boot(bd, clean):
     return L
 
 
+TREE_STAGES = ['prepare', 'census', 'compile', 'link', 'guest', 'boot', 'nine', 'host', 'package', 'tests']
+
+
+def provenance_failures(R, commit, since=None):
+    """Why the build's records are not this commit's build (empty: PASS). A tree-derived record must be prepared from
+    `commit` (prepared_from.port_commit), never another commit's (the 097cdd1504c8 report showed 06857911's tree,
+    objects and link as "cached"), and when `since` (the job's start, build.py run_id format) is given, every record
+    of a stage after fetch/toolchain must have been written or confirmed (cached_at) by a make run of this job."""
+    out = []
+    if not commit or commit == '?':
+        return ['no --commit given']
+    for s in TREE_STAGES:
+        r = R.get(s) or {}
+        if not r or r.get('status') in (None, 'disabled', 'skipped'):
+            continue
+        pc = (r.get('prepared_from') or {}).get('port_commit')
+        if s == 'prepare' or r.get('prepared_from'):
+            if not pc:
+                out.append('%s: no provenance record' % s)
+            elif not (pc.startswith(commit) or commit.startswith(pc)):
+                out.append('%s: prepared from %s, not %s' % (s, pc[:12], commit[:12]))
+        if r.get('stale'):
+            out.append('%s: stale (%s)' % (s, r['stale']))
+        when = max(str(r.get('run_id') or ''), str(r.get('cached_at') or ''))
+        if since and when < since:
+            out.append('%s: record of an earlier run (%s), not this job\'s' % (s, when or 'no run id'))
+    return out
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('build')
@@ -96,6 +125,8 @@ def main(argv):
     ap.add_argument('--seconds', type=float)
     ap.add_argument('--hide', nargs='*', default=[])
     ap.add_argument('--inputs', nargs='*', default=[], help='lines describing where the inputs came from')
+    ap.add_argument('--since', help='the job\'s start (UTC, %%Y%%m%%d-%%H%%M%%S): records older than it are not this '
+                    'build\'s')
     a = ap.parse_args(argv)
     bd = os.path.abspath(a.build)
     hides = sorted([(os.path.abspath(p), '$' + n) for n, p in (h.split('=', 1) for h in a.hide if '=' in h)],
@@ -135,6 +166,15 @@ def main(argv):
     L.append('- every tree-derived stage from that tree: %s' % ('yes' if not stale and not other else
                                                                'NO (stale: %s; other commits: %s)' % (
                                                                    ', '.join(stale) or '-', ', '.join(other) or '-')))
+    pfail = provenance_failures(R, a.commit, a.since)
+    L.append('- provenance: %s' % ('PASS (every tree-derived stage prepared from `%s`%s)' % (
+        a.commit[:12], ', by this job' if a.since else '') if not pfail else
+        'FAIL: ' + '; '.join(clean(x, 120) for x in pfail[:8])))
+    L.append('- compiler of the game units: %s' % clean(t.get('metrics', {}).get('game_cxx') or 'unknown'))
+    co_ad = R['compile'].get('adopted')
+    L.append('- compile: %s' % ('objects adopted from %s' % clean(co_ad) if co_ad else
+                                ('compiled by this build' if R['compile'].get('ran') else
+                                 'cached from an earlier run of this build directory')))
     L.append('')
     L.append('## Stages')
     L.append('')
@@ -258,6 +298,9 @@ def main(argv):
         L.append('- fnv.nro in the SD tree: %s' % ('yes' if any(n.endswith('fnv.nro') for n, _ in pk['sd_files']) else 'NO'))
     if pk.get('check_package_rc') is not None:
         L.append('- check_package: exit %d' % pk['check_package_rc'])
+    if pk.get('metrics', {}).get('ilp32_wrap_64bit') is not None:
+        L.append('- toolchain ilp32_wrap (tests/s13/ilp32_wrap, fnvnx-a64, build flags): %s constant-base address '
+                 'forms do not wrap at 2^32' % fmt(pk['metrics']['ilp32_wrap_64bit']))
     if pk.get('nx1'):
         L.append('- nx1: open device-readiness checks = %s of %d (tests/nx1/run.py)' % (
             fmt(pk.get('metrics', {}).get('nx1_open')), len(pk['nx1'])))

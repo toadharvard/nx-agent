@@ -29,6 +29,11 @@
 #define FNVNX_SD_LAUNCH_LOG FNVNX_SD_DIR "/launcher.log"
 /* "<program id hex16>\n": the override the launcher installed, removed by the host (or by the launcher's Y). */
 #define FNVNX_SD_MARKER    FNVNX_SD_DIR "/override.txt"
+/* the game's own shaders, precompiled at install time by toolchain/nro/shaders_nx.py (the render machine's
+ * nxsp_pack.py over sdp2dksh) from the player's Data/Shaders: translated.nxsp, NXSP v1 by bytecode hash
+ * (RENDER_NATIVE.md 4.5, check 9). Made from the player's files, so on the card next to the game, never in the
+ * farm-built fnv.nro's RomFS; the guest reads it into nx::TranslatedStore. */
+#define FNVNX_SD_TRANSLATED FNVNX_SD_DIR "/translated.nxsp"
 /* The same paths without the device prefix, as fsFs* calls take them (crash handler: no newlib there). */
 #define FNVNX_FS_CRASH_LOG "/switch/fnv/crash.log"
 #define FNVNX_FS_MARKER    "/switch/fnv/override.txt"
@@ -39,7 +44,7 @@
  * tests/s5/datapath.py (S5-data) keeps these on the card, tests/nx1/check_fs.py checks the list covers every
  * FNVNX_SD_* above. drive_* = drive_<x> for any other Windows drive (path.cpp). */
 #define FNVNX_SD_PORT_NAMES "fnv.nro fnv-exefs.nsp guest.nso fnvnx.ini user drive_* host.log crash.log launcher.log " \
-                            "override.txt README.txt nxgpu.log"
+                            "override.txt README.txt nxgpu.log translated.nxsp translated.json"
 
 /* Memory the game process needs from the application pool (docs/NRO.md, check 2): the 32BitNoReserved heap region
  * is 2 GiB, so the host takes at most that; below FNVNX_MIN_APP_MEMORY the launcher and the host refuse to start. */

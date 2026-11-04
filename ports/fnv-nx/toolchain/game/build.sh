@@ -21,6 +21,8 @@ TC=$FNVNX_TOOLCHAIN; ROOT=$(cd "$TC/.." && pwd); P=$ROOT/platform
 export PATH=$DEVKITPRO/devkitA64/bin:$PATH
 JOBS=${JOBS:-$(nproc)}
 SSE2NEON=${SSE2NEON:-$ROOT/ext/sse2neon}
+# the pinned checkouts live next to each other (tools/fetch.sh: $EXT on the farms, ext/ in a checkout)
+MINIMP3=${MINIMP3:-$(dirname "$SSE2NEON")/minimp3}
 ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec -fsigned-char"
 case "${GUEST:-pie}" in
 	pie) SPECS="$TC/guest/guest_pie.specs"; BASEFLAG="" ;;
@@ -28,7 +30,7 @@ case "${GUEST:-pie}" in
 	*) echo "GUEST must be pie or fixed"; exit 1 ;;
 esac
 COMMON="$ARCH -O2 -g -ffunction-sections -fdata-sections -frounding-math -fshort-wchar -w"
-PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/startup/guest"
+PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/startup/guest -I$MINIMP3"   # minimp3: platform/audio/dshow.cpp (tools/fetch.sh)
 VFLAGS=""
 if [ -n "$VORBIS" ]; then VFLAGS="-DFNVNX_HAVE_VORBIS -I$VORBIS/include"; fi
 rm -rf "$OUT/obj"; mkdir -p "$OUT/obj"
@@ -74,8 +76,20 @@ esac
 SRCS+=("$ROOT"/loader/src/*.c)
 # S10 startup: initializer runner and the MSVC onexit table, plus the generated table (as objects: xc.c
 # references the table weakly, an archive member would not be pulled)
+# XCGEN_EXE=<the owner's FalloutNV.exe>: natives for the exe initializers the decomp lacks (startup/tools/mkxcgen.py,
+# straight-line shapes translated from the exe; local output). They are weak __fnvnx_dyninit_<addr>, so mkxctab
+# lists them and a real definition from a unit wins.
+XCGEN_OBJ=()
+if [ -n "${XCGEN_EXE:-}" ]; then
+	mkdir -p "$OUT/obj"
+	aarch64-none-elf-nm "$FIXED"/*.o > "$OUT/fixed.nm" 2>/dev/null || true
+	python3 -I "$ROOT/startup/tools/mkxcgen.py" --exe "$XCGEN_EXE" --addrmap "$S2/addrmap.tsv" --nm "$OUT/fixed.nm" \
+		--out "$OUT/xcgen.c" --tsv "$OUT/xcgen.tsv" || exit 1
+	aarch64-none-elf-gcc $COMMON -std=gnu11 -c "$OUT/xcgen.c" -o "$OUT/obj/out_xcgen.c.o" || exit 1
+	XCGEN_OBJ=("$OUT/obj/out_xcgen.c.o")
+fi
 python3 -I "$ROOT/startup/tools/mkxctab.py" --out "$OUT/xctab.c" --tsv "$OUT/xctab.tsv" --addrmap "$S2/addrmap.tsv" \
-	"$FIXED"/*.o > "$OUT/mkxctab.log" 2>&1 || { tail -5 "$OUT/mkxctab.log"; exit 1; }
+	"$FIXED"/*.o "${XCGEN_OBJ[@]}" > "$OUT/mkxctab.log" 2>&1 || { tail -5 "$OUT/mkxctab.log"; exit 1; }
 tail -3 "$OUT/mkxctab.log"
 SRCS+=("$ROOT/startup/guest/xc.c" "$ROOT/startup/guest/onexit.c" "$OUT/xctab.c")
 for f in "${SRCS[@]}"; do

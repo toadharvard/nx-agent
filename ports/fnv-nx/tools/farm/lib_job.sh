@@ -157,8 +157,12 @@ stage_after() {  # stage_after <build dir> <stage> <earlier stage>: <stage> ende
 	stage_ok "$1" "$2" && [ -f "$1/$3/stage.json" ] && ! [ "$1/$2/stage.json" -ot "$1/$3/stage.json" ]
 }
 
+# FARM_VARIANT=<v> (an A/B build of the same head, e.g. GAME_CXX=tc): publishes go to link/<commit12>-<v>,
+# link-head-<v> and nro/<commit12>-<v>, so they never replace the default build's branches nor enter the history the
+# fuzz farms read (link-head)
+VSUF=${FARM_VARIANT:+-$FARM_VARIANT}
 publish_link() { # publish_link <build dir>: link/<commit12> + the rolling branch link-head, for the fuzz farms
-	local bd=$1 wt=$FARM_HOME/link-wt rb=link-head ok
+	local bd=$1 wt=$FARM_HOME/link-wt$VSUF rb=link-head$VSUF ok
 	local pub=${FARM_PUBLISH:-auto}
 	[ "$pub" = 0 ] && { NOTE_PUB="not published (FARM_PUBLISH=0)"; return 0; }
 	ok=$(python3 -I - "$bd" "$COMMIT" "$pub" <<'EOF'
@@ -201,6 +205,14 @@ EOF
 		for f in slot_fill.tsv slot_gaps.tsv; do [ -f "$bd/link/out/$f" ] && cp "$bd/link/out/$f" out/; done
 		cp "$bd/link/out/cache/msvc.tsv" out/cache/
 		rsync -a --exclude probe/ "$bd/link/out/vtables/" out/vtables/   # the synthesized vtables, not the probe work dir
+		# S2d's tables (bodies.tsv: every trapped name's class and evidence; bind.tsv, synth.tsv, stats.txt), so a relink
+		# or S3 reads them from the publish; the synthesized objects are in fixed/ already, the work dir stays local
+		if [ -d "$bd/link/out/bodies" ]; then
+			mkdir -p out/bodies
+			for f in bodies.tsv bind.tsv synth.tsv stats.txt; do
+				[ -f "$bd/link/out/bodies/$f" ] && cp "$bd/link/out/bodies/$f" out/bodies/
+			done
+		fi
 		cp "$bd"/link/fixed/*.o fixed/
 		cp "$bd/link/summary.txt" summary.txt
 		# the guest and the boots only when they were built on this link (full_job.sh publishes twice: link_job.sh's
@@ -231,9 +243,15 @@ EOF
 		# V1-link's audits of this link (full_job.sh 4d): report, tables and logs, about 1 MB
 		[ -d "$bd/v1" ] && cp -r "$bd/v1" v1
 		cp "$REPORT" report.md
-		BOOT_EXE=${GAME_EXE:-} python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" > meta.json <<'EOF'
+		BOOT_EXE=${GAME_EXE:-} python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" "$P" > meta.json <<'EOF'
 import json, os, sys
-bd, commit, tree, objs, objs_commit = sys.argv[1:6]
+bd, commit, tree, objs, objs_commit, port = sys.argv[1:7]
+sys.path.insert(0, os.path.join(port, 'tools', 'farm'))
+try:
+    import full_report
+    prov = full_report.provenance_failures({s: full_report.rec(bd, s) for s in full_report.STAGES}, commit)
+except Exception as ex:   # an older tree without the function
+    prov = ['provenance not checked: %s' % ex]
 def rec(s):
     try:
         return json.load(open(os.path.join(bd, s, 'stage.json')))
@@ -265,7 +283,14 @@ print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
                   # NX1: the package checks (tests/s5/check_package.py, tests/nx1/run.py) of the package stage
                   'check_package_rc': rec('package').get('check_package_rc'),
                   'nx1_open': rec('package').get('metrics', {}).get('nx1_open'),
-                  'nx1_checks': rec('package').get('nx1')},
+                  'nx1_checks': rec('package').get('nx1'),
+                  # every tree-derived stage prepared from this commit (full_report.provenance_failures): [] = PASS
+                  'provenance_ok': not prov, 'provenance_failures': prov,
+                  # the A/B numbers (tools/farm/ab_compare.py): the compiler and what it gave
+                  'game_cxx': rec('toolchain').get('metrics', {}).get('game_cxx'),
+                  'census': {k[7:]: v for k, v in rec('census').get('metrics', {}).items() if k.startswith('census_')},
+                  'compile': {k[8:]: v for k, v in rec('compile').get('metrics', {}).items()
+                              if k.startswith('compile_')}},
                  indent=1, sort_keys=True))
 EOF
 		git add -f -A .
@@ -275,22 +300,22 @@ EOF
 		fi
 		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 link outputs" || true
 		for i in 1 2 3; do  # one ref per push: the proxy drops combined pushes now and then
-			git push -q -f origin "$rb" 2>/dev/null && git push -q -f origin "HEAD:refs/heads/link/$C12" 2>/dev/null && break
+			git push -q -f origin "$rb" 2>/dev/null && git push -q -f origin "HEAD:refs/heads/link/$C12$VSUF" 2>/dev/null && break
 			sleep $((i * 5))
 		done
-		git ls-remote origin "refs/heads/link/$C12" | grep -q .
+		git ls-remote origin "refs/heads/link/$C12$VSUF" | grep -q .
 	)
 	prc=$?
 	set -e
-	if [ $prc -eq 0 ]; then NOTE_PUB="published: branch link/$C12 (history on link-head)"
-	else NOTE_PUB="publishing link/$C12 FAILED"; fi
+	if [ $prc -eq 0 ]; then NOTE_PUB="published: branch link/$C12$VSUF (history on link-head$VSUF)"
+	else NOTE_PUB="publishing link/$C12$VSUF FAILED"; fi
 }
 
 publish_nro() { # publish_nro <build dir>: the device package (NX1) on the private branch nro/<commit12>, one orphan
 	# commit per head: sd/ (switch/fnv: fnv.nro, fnv-exefs.nsp, guest.nso, README.txt), nro/fnv.elf + map (symbols of
 	# the launcher), host/host.elf + map, nx1.json, MANIFEST.txt. It holds game-derived code (the guest), so it goes to
 	# the private artifacts repository only, never to nx-agent. The guest ELF is on link/<commit12> already.
-	local bd=$1 wt=$FARM_HOME/nro-wt br=nro/$C12
+	local bd=$1 wt=$FARM_HOME/nro-wt$VSUF br=nro/$C12$VSUF
 	[ "${FARM_PUBLISH:-auto}" = 0 ] && { NOTE_NRO="not published (FARM_PUBLISH=0)"; return 0; }
 	[ -f "$bd/package/sd/switch/fnv/fnv.nro" ] || { NOTE_NRO="not published: no fnv.nro in the package"; return 0; }
 	# provenance (V1 NX1 P1): the build directory is reused across jobs, so a package left by an earlier commit must

@@ -187,6 +187,11 @@ agents queue the next item instead of waiting, and verify their own change with 
 - No settings presets (owner). The 60 fps target is met at the exe's own default settings, through code: the
   port's own overhead (bridges, thunks, ordering, ILP32, compiler flags) and the game's hot code (threading per
   D19, algorithms). tools/perf/content_presets.py stays a model of how cost scales with content, not a default.
+- "Default settings" means what the shipped game uses with no player change: Fallout_default.ini as installed
+  (e.g. shadow maps 1024), with the exe's built-in values only for keys that file does not set. The CPU and GPU
+  models both use that one set.
+- The GPU metric follows the programs the real game binds in the capture scenes (the packages our driver's caps
+  select), not a fixed package: the cost of the captured frames' draw lists.
 
 ### D21. Coverage first, then optimization (owner)
 
@@ -196,6 +201,17 @@ agents queue the next item instead of waiting, and verify their own change with 
   skipped draws = 0 and all capture scenes passing; hand-written GLSL and GPU tuning follow, and a family switches
   only when it matches and is not slower.
 - Link/boot/runtime: whole classes (all .inl bodies, all short vtables, all services of a DLL), not trap by trap.
+
+### D22. Virtual destructor slots against MSVC vftables (orchestrator)
+
+- MSVC has one deleting-destructor slot (??_G(flags)); GCC has two (D1, D0). The link maps them by the minus-one
+  slot rule: GCC's D1/D0 pair stands where MSVC's single slot is, and every later slot shifts by one.
+- Class-wide rule (S1, with S2c-vt's vtable sizing): when a decomp class's first declared virtual is a placeholder
+  and its paired exe vftable's slot 0 is a deleting destructor, the class declares `virtual ~C()` instead of the
+  placeholder. Then the GCC layout matches the minus-one rule for the class and for every caller that declares
+  the same hierarchy (HashTableBase/NiTMap family, NiTStringTemplateMap and the rest).
+- Modelling every virtual destructor as an MSVC ??_G slot in GCC is rejected: it changes what GCC's delete
+  expressions call.
 
 ## Legal
 

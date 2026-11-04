@@ -172,6 +172,39 @@ def enclosing_arg(seg, ds, de, rn):
     return (k, re_, idx)
 
 
+GAP = re.compile(r'^(?:[\s)\]*]|\.|->|\+\s*(?:0x[0-9a-fA-F]+|\d+)|%s|\(\s*\))*$' % ID)
+
+
+class _Reach:
+    """re.match-like result of reach_receiver: end() is the index after the receiver's '(' in `rest`."""
+    def __init__(self, end):
+        self._e = end
+
+    def end(self):
+        return self._e
+
+
+NOREACH = set()       # files generated without reach_receiver (an overload clash with it; see main)
+CURRENT = [None]
+
+
+def reach_receiver(rest, rn):
+    """The receiver R further along D's result: casts, dereferences, a constant offset, member access or calls
+    without arguments between D's ')' and `.R(` / `->R(` (`((T*)x->D(a))->R()`, `static_cast<T*>(X.D(a))->R()`,
+    `D(a)->B()->R()`). x86: none of them pushes or pops a word, so the words pushed for D stay for R (popscan's stack
+    simulation names D the donor of R). Same statement, no comma or other argument between."""
+    if CURRENT[0] in NOREACH:
+        return None
+    for m in re.finditer(r'(?:\.|->)\s*%s\s*\(' % re.escape(rn), rest):
+        gap = rest[:m.start()]
+        if re.search(r'[;{},]', gap):
+            return None
+        if GAP.match(gap):
+            return _Reach(m.end())
+        return None
+    return None
+
+
 def find_chains(seg, dn, rn):
     """[(start, end of `dn(...)`, args text, receiver start or None, receiver args span)] in seg."""
     out = []
@@ -186,6 +219,8 @@ def find_chains(seg, dn, rn):
             out.append((m.start(), e, seg[p + 1:e - 1], None if not nx else 'member', None))
             continue
         mm = re.match(r'\s*(?:\.|->)\s*%s\s*\(' % re.escape(rn), rest)
+        if not mm:
+            mm = reach_receiver(rest, rn)
         if not mm:
             nest = enclosing_arg(seg, m.start(), e, rn)
             if nest is not None:
@@ -351,7 +386,9 @@ def main():
     ap.add_argument('--name', default='gen')
     ap.add_argument('--skip-patched', metavar='DIR',
                     help='leave out callers that are sites of a patch file in DIR other than xinc1_pop_<name>.s1b')
+    ap.add_argument('--noreach', default='', help='files generated without the reach rule (set automatically)')
     a = ap.parse_args()
+    NOREACH.update(filter(None, a.noreach.split('|')))
     owned = set()
     if a.skip_patched:
         for fn in sorted(os.listdir(a.skip_patched)):
@@ -396,6 +433,7 @@ def main():
         if src not in texts:
             texts[src] = open(os.path.join(D, src), encoding='utf-8', errors='surrogateescape').read()
         text = texts[src]
+        CURRENT[0] = src
         w = fn_window(text, int(caller, 16))
         if w is None:
             manual.append((src, caller, '-', 'no @fnv tag'))
@@ -650,6 +688,11 @@ def main():
                 newt = newt[:es - s] + r + newt[ee - s:]
             out_sites.append((src, owner[2] if owner else 'file', (text[s:e], newt),
                               sum(1 for x in g['ed'] if x[3] is not None and x[2] and not x[2].startswith(' /*'))))
+    # a file whose new (reach) chains clash with its overloads loses every caller: generate it again without them
+    clash = {r[0] for r in manual if r[3] == 'overload clash'} - NOREACH
+    if clash:
+        argv = [x for x in sys.argv if not x.startswith('--noreach')]
+        os.execv(sys.executable, [sys.executable] + argv + ['--noreach=' + '|'.join(sorted(NOREACH | clash))])
     # write: one site per (file, owner), hunks in text order
     texts_out = []
     merged = collections.OrderedDict()
