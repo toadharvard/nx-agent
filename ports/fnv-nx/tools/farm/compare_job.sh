@@ -115,6 +115,7 @@ fetch_shaders() {   # gamedata/shaders (agent-only), checked against its SHA256S
 
 fetch_captures() {   # real-game NXD9 captures recorded with d9cap (private gamedata/captures, agent-only) -> GAMECAPS
 	GAMECAPS=""
+	rm -rf "$W/run/game" "$W/caps/game"   # V1 GC-1: a run without captures must not report an earlier run's game set
 	local gd=$W/gamedata-captures
 	[ -n "${ARTIFACTS:-}" ] || return 0
 	if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/gamedata/captures:refs/remotes/origin/gamedata/captures" 2>/dev/null; then
@@ -179,6 +180,33 @@ run_set() {   # run_set <name> <capture dir> [perturbed capture dir]
 	fi
 }
 
+# ---- the render coverage gate (D21): every draw of the synthetic and game sets, per-draw on both sides -------------
+perdraw() {   # perdraw <set> <capture dir> [candidate --shaders dir]
+	local o=$W/run/$1/pd to=${COMPARE_TIMEOUT_S:-1500}
+	rm -rf "$o"; mkdir -p "$o"
+	python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$o/ref" --timeout "$to" \
+		"$2"/*.nxd9 -- --per-draw >"$o/ref.log" 2>&1 || NOTES+=("$1: per-draw reference exit $?")
+	python3 -I "$CMP/replay.py" cand --bin "$NXR/nx_render" --out "$o/cand" --timeout "$to" ${3:+--shaders "$3"} \
+		"$2"/*.nxd9 -- --per-draw >"$o/cand.log" 2>&1 || NOTES+=("$1: per-draw candidate exit $?")
+	DG_SETS+=(--set "$1=$2:$o/ref:$o/cand")
+}
+coverage_gate() {
+	rm -rf "$W/run/drawgate"   # V1 GC-1: never an earlier run's gate
+	if [ ! -f "${BIN:-}/nxd9play.exe" ] || [ ! -x "${NXR:-}/nx_render" ] || [ ! -d "$W/caps/synthetic" ]; then
+		NOTES+=("coverage gate: not run (no reference renderer, candidate or synthetic captures)"); return 0
+	fi
+	if ! deadline_ok 600; then NOTES+=("coverage gate skipped: FARM_DEADLINE"); return 0; fi
+	log "coverage gate"
+	DG_SETS=()
+	perdraw synthetic "$W/caps/synthetic"
+	[ -n "${GAMECAPS:-}" ] && perdraw game "$GAMECAPS" "${GLSL:-}"
+	[ -f "$W/run/perm/perm/permreport.json" ] && DG_SETS+=(--set perm=:: --perm "$W/run/perm/perm/permreport.json")
+	local f; DG_SDP=(); for f in "$W"/gamedata-shaders/shaderpackage*.sdp; do [ -f "$f" ] && DG_SDP+=(--sdp "$f"); done
+	python3 -I "$CMP/drawgate.py" "${DG_SETS[@]}" "${DG_SDP[@]}" --out "$W/run/drawgate" >"$W/run/drawgate.log" 2>&1 ||
+		NOTES+=("drawgate failed (log $W/run/drawgate.log)")
+	rm -rf "$W"/run/*/pd   # the per-draw images (hundreds of MB, game-derived) are not kept
+}
+
 write_report() {
 	python3 -I - "$W/run" "$REPORT" "$JSON" "$COMMIT" "${CAND:-}" "$(( $(date +%s) - T0 ))" "${NOTES[@]}" <<'EOF'
 import json, os, subprocess, sys
@@ -234,6 +262,7 @@ open(rep, 'w').write('\n'.join(L) + '\n')
 EOF
 }
 
+rm -rf "$W/run"   # V1 GC-1: every set and the gate are this run's
 setup_host
 build_shader_tools
 build_nxd9play
@@ -282,29 +311,7 @@ if [ -n "$GAMECAPS" ] && [ -n "$SDP" ] && deadline_ok 900; then
 elif [ -n "$GAMECAPS" ]; then
 	NOTES+=("game captures skipped: no shader packages or FARM_DEADLINE")
 fi
-# ---- the render coverage gate (D21): every draw of the synthetic and game sets, per-draw on both sides -------------
-perdraw() {   # perdraw <set> <capture dir> [candidate --shaders dir]
-	local o=$W/run/$1/pd to=${COMPARE_TIMEOUT_S:-1500}
-	rm -rf "$o"; mkdir -p "$o"
-	python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$o/ref" --timeout "$to" \
-		"$2"/*.nxd9 -- --per-draw >"$o/ref.log" 2>&1 || NOTES+=("$1: per-draw reference exit $?")
-	python3 -I "$CMP/replay.py" cand --bin "$NXR/nx_render" --out "$o/cand" --timeout "$to" ${3:+--shaders "$3"} \
-		"$2"/*.nxd9 -- --per-draw >"$o/cand.log" 2>&1 || NOTES+=("$1: per-draw candidate exit $?")
-	DG_SETS+=(--set "$1=$2:$o/ref:$o/cand")
-}
-DG_SETS=()
-if deadline_ok 600; then
-	log "coverage gate"
-	perdraw synthetic "$W/caps/synthetic"
-	[ -n "${GAMECAPS:-}" ] && perdraw game "$GAMECAPS" "${GLSL:-}"
-	[ -f "$W/run/perm/perm/permreport.json" ] && DG_SETS+=(--set perm=:: --perm "$W/run/perm/perm/permreport.json")
-	DG_SDP=(); for f in "$W"/gamedata-shaders/shaderpackage*.sdp; do [ -f "$f" ] && DG_SDP+=(--sdp "$f"); done
-	python3 -I "$CMP/drawgate.py" "${DG_SETS[@]}" "${DG_SDP[@]}" --out "$W/run/drawgate" >"$W/run/drawgate.log" 2>&1 ||
-		NOTES+=("drawgate failed (log $W/run/drawgate.log)")
-	rm -rf "$W"/run/*/pd   # the per-draw images (hundreds of MB, game-derived) are not kept
-else
-	NOTES+=("coverage gate skipped: FARM_DEADLINE")
-fi
+coverage_gate
 write_report
 log "done: $(grep -c '^- \*\*' "$REPORT") sets ($(( $(date +%s) - T0 )) s)"
 echo "$REPORT"
