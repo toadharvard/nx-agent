@@ -3472,3 +3472,22 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
 | CPU worst frame (model, defaults) | 34.3 ms placed; plan60 23.4 ms |
 | GPU real019 | 27.22 ms handheld |
 | gates1 | 1 pass / 17 fail / 11 no-data / 4 stale (last scorecard) |
+
+### J-0154 | 2026-11-04 | stream: orchestration | status: paused | parent: J-0153
+
+* **paused (owner)** - Every agent is paused to save quota; the project is not shelved. Integration head at the
+  pause: fa5b9c50 plus this entry. Every scheduled check-in is disabled (orchestrator, farms, stream reminders). Every
+  stream was told to push its unfinished work as a WIP commit to its own branch and stop.
+* **build** - The full-build farms full1-full5 run one last build of the head (full_job builds the head itself since
+  438f7c11; XCGEN_EXE since 84aaa80a) and publish link/<c12>, nro/<c12> and reports/full*. They do not restart.
+* **not adopted at the pause** (each stream merges integration on resume): G1-gpu, S1-layout, S13, S15-scene,
+  S2d-bodies, S5-menu.
+* **decisions this round** - D20 (default settings = Fallout_default.ini; no presets; recon/ in the private repo),
+  D21 (coverage first, then optimization), D22 (virtual ~C() for placeholder first virtuals paired with an exe
+  deleting destructor). The farms may stop an outdated runner (owner order); every Bash is allowed in settings.
+* **state** - Render: the general path passes the scene check on menu (98 dB) and docmitchell (83 dB), 0 skipped;
+  R4 was the image exhaustion in d3d9_exec (render-land). Native families: lit 27/27, post 27/27, grass, leaves,
+  particles, decals ready behind Translated. GPU real019 22.06 ms (G1). CPU plan60 16.57 ms in the model
+  (S15-scene). Boot: WinMain -> renderer init blocked by NiTMap slot order (D22). Fuzz: 8 shards (fz1-fz8).
+* **resume order** - full farms' reports first; then D22 (S1-refs, S2c-vt), the collect-all boot on the new guest
+  (S5-boot, S5-menu), the unadopted branches above, SM3 captures (S5-data), per-program references (S16).
