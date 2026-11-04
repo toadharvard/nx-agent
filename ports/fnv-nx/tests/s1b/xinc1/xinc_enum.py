@@ -45,6 +45,9 @@ for (src, addr, refms), f in rows.items():
         if refms in names:
             names = {refms}
         obj = '%s/obj/pristine/u%d.obj' % (S11, i)
+        if not os.path.exists(obj):
+            res.append((src, str(i), addr, f[6], '-', '-', '-', 'noobj', '', '', f[3], f[4], f[9], f[10]))
+            continue
         if i not in coffs:
             coffs[i] = Coff(obj)
         coff = coffs[i]
