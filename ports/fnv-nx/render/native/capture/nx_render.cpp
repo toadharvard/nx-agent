@@ -2,7 +2,7 @@
 // on the GL reference backend to PNG (docs/RENDER_NATIVE.md §8). Used by S16-compare for reference comparisons.
 //
 //   nx_render nxcap <file.nxcap> -o <dir> [--per-draw] [--until-draw N] [--frame F]
-//   nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--per-draw] [--until-draw N] [--frame F]
+//   nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--native <dir>] [--per-draw] [--until-draw N] [--frame F]
 //   nx_render scene <name|all>   -o <dir> [--per-draw] [--until-draw N]
 //
 // Output names (stable): f<frame %05u>.png per present (nxcap: SUBM with present; d3d9: PRES; scene: f00000.png
@@ -91,17 +91,18 @@ void Summary(const char* text) {
 }
 int Usage() {
     fprintf(stderr, "usage: nx_render nxcap <file.nxcap> | d3d9 <file.nxd9> | scene <name|all>  -o <dir> "
-                    "[--shaders <dir>] [--per-draw] [--until-draw N] [--frame F]\n");
+                    "[--shaders <dir>] [--native <dir>] [--per-draw] [--until-draw N] [--frame F]\n");
     return 2;
 }
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc < 3) return Usage();
-    const char* mode = argv[1]; const char* in = argv[2]; const char* shaders = nullptr;
+    const char* mode = argv[1]; const char* in = argv[2]; const char* shaders = nullptr; const char* nativeDir = nullptr;
     for (int i = 3; i < argc; i++) {
         if (!strcmp(argv[i], "-o") && i + 1 < argc) g_out = argv[++i];
         else if (!strcmp(argv[i], "--shaders") && i + 1 < argc) shaders = argv[++i];
+        else if (!strcmp(argv[i], "--native") && i + 1 < argc) nativeDir = argv[++i];
         else if (!strcmp(argv[i], "--per-draw")) g_perDraw = true;
         else if (!strcmp(argv[i], "--until-draw") && i + 1 < argc) g_until = atol(argv[++i]);
         else if (!strcmp(argv[i], "--frame") && i + 1 < argc) g_onlyFrame = atol(argv[++i]);
@@ -129,10 +130,16 @@ int main(int argc, char** argv) {
         struct H { static void P(void* u, uint32_t f, uint32_t img) { OnPresent(u, f, img); g_frame = f + 1; nxgl_set_draw_hook(DrawHook, nullptr); } };
         g_frame = 0; nxgl_set_draw_hook(DrawHook, nullptr);
         NxD9Stats st;
+        nx_d3d9_native_dir(nativeDir);
         if (nx_d3d9_run(api, d.data(), d.size(), shaders, H::P, nullptr, &st, err, sizeof err)) { fprintf(stderr, "nx_render: %s\n", err); return 1; }
         snprintf(sum, sizeof sum, "nx_render d3d9: frames %u, draws %u, skipped %u, clears %u, programs %u, textures %u, images %u%s%s\n",
                  st.frames, st.draws, st.skipped, st.clears, st.shaders, st.textures, g_images,
                  st.skipped ? "; first skip: " : "", st.firstSkip);
+        if (nativeDir) {    // native path: shaders and draws that ran our hand-written GLSL instead of the translation
+            size_t l = strlen(sum);
+            if (l && sum[l - 1] == '\n') sum[--l] = 0;
+            snprintf(sum + l, sizeof sum - l, "; native shaders %u, native draws %u\n", st.nativeShaders, st.nativeDraws);
+        }
         rc = st.skipped ? 3 : 0;
     } else if (!strcmp(mode, "scene")) {
         nx::Backend* be = nx::GpuBackend(api);

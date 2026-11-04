@@ -819,7 +819,7 @@ source <(render/native/env.sh --print)
 make -C tests/s6n /tmp/fnvnx-s6n-tests/nx_render     # binary (OUT=<dir> to place it elsewhere)
 make -C tests/s6n nx_render                          # its test (tests/s6n/test_nx_render.py)
 
-nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--per-draw] [--until-draw N] [--frame F]
+nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--native <dir>] [--per-draw] [--until-draw N] [--frame F]
 nx_render nxcap <file.nxcap> -o <dir> [--per-draw] [--until-draw N] [--frame F]
 nx_render scene <name|all>   -o <dir> [--per-draw] [--until-draw N]
 ```
@@ -833,6 +833,12 @@ Needs a Mesa/EGL GL 4.5 context (surfaceless; llvmpipe is fine). `<dir>` is crea
 | `f<frame>_d<draw %05u>.png` | `--per-draw`: after each draw, the colour target of that draw's pass; draw = index of the draw in the frame's submit, counting backend draws (skipped NXD9 draws are not counted) |
 | `<scene>.png`, `<scene>_d<draw>.png` | scene mode (160x120; identical to `tests/s6n/golden/<scene>.png`) |
 | `summary.txt` | the counters line also printed on stdout; for NXD9 the first skipped draw and why |
+
+`--native <dir>` (render-land): `<hash>.glsl` there is our hand-written shader for the original of that hash and
+replaces the translation; `summary.txt` adds `native shaders N, native draws M` (draws whose VS and PS are both
+native). The directory is laid out locally by `render/native/tools/native_dir.py` from `shaders/native.tsv` (keyed by
+the original's name, checked against its constant table) and the player's packages; `tools/nxd9_census.py` counts
+a capture's draws per family and on the native path, `tools/parity_png.py` compares two output directories.
 
 `--until-draw N` stops drawing after draw N of each frame (the frame image then holds draws 0..N; clears and later
 passes still run). `--frame F` restricts `--per-draw` and `--until-draw` to frame F. Together they localise a
@@ -922,6 +928,12 @@ from FOGENABLE / FOGTABLEMODE (vertex fog when the table mode is NONE; none for 
 FOGCOLOR, alpha test = ALPHAFUNC when ALPHATESTENABLE, ALPHAREF / 255); all render states through
 `nx_d3d9_translate` (blend, depth, stencil, raster, sRGB write, bias, scissor); sampler states through
 `nx_d3d9_sampler` (sRGB view when SRGBTEXTURE); render-target textures and surfaces, the auto depth surface.
+
+Sampled textures get their image when a draw binds them after a TEX, TEXU or TEXC (one image per change seen by a
+draw, not per record): NxGpuApi images are immutable and never freed, and d9cap's captures fill managed textures
+level by level, so making an image per TEXU ran past `NX_MAX_IMAGES` (4096) on docmitchell_13000 and the textures
+made after that sampled as none (S16 R4: the black frame; render-land). A texture whose image cannot be made skips
+the draw (`texture image not created`).
 
 Skipped and counted (exit code 3): fixed-function draws (no VS or no PS), FVF draws (no declaration), POSITIONT,
 streams other than 0 (instancing), cube render targets (sampled as none; cube textures with contents are sampled since S16 R2), vertex textures. Varyings the VS writes beyond
