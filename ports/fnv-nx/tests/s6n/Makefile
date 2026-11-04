@@ -109,6 +109,7 @@ $(OUT)/test_n1_gl: $(N1SRC) $(wildcard $(N1)/*.h) $(N1)/selftest.cpp $(N1)/selft
 
 n1: $(OUT)/test_n1_gl
 	$(OUT)/test_n1_gl
+	python3 -I test_d3d9_state_table.py --out $(OUT) $(if $(EXE),--exe $(EXE))
 
 .PHONY: n1
 

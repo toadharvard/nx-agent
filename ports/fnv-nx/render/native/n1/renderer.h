@@ -23,22 +23,80 @@ struct NiRectF { float left, right, top, bottom; };          // NiRect<float>; v
 struct NiFrustumF { float left, right, top, bottom, nearZ, farZ; bool ortho; };
 static_assert(sizeof(NiPoint3f) == 12 && sizeof(NiRectF) == 16 && sizeof(NiFrustumF) == 28, "Gamebryo layouts");
 
-// ---- record-only NiDX9RenderState -----------------------------------------------------------------------------
+// ---- record-only NiDX9RenderState / the D3D9 device state ------------------------------------------------------
+// The state a D3D9 device holds, recorded with the device's semantics (docs/RENDER_NATIVE.md §2.5): render, sampler
+// and texture stage states, textures, shader constants (float / int / bool, with the shaders' def'd constants
+// applied by EffectiveConstantsF/I/B), vertex declaration / FVF, streams with their frequency, index buffer, shaders,
+// render targets and depth-stencil (SetRenderTarget(0) resets viewport and scissor rectangle to the target), viewport,
+// scissor rectangle, user clip planes (into the translator). Defaults: D3D9's (nx_d3d9_default_*). Objects (shaders,
+// declarations, buffers, surfaces) are opaque pointers: the tracker records them, it never dereferences them.
+// Samplers are D3D9 sampler numbers: 0..15, D3DDMAPSAMPLER (256), D3DVERTEXTEXTURESAMPLER0..3 (257..260).
 class StateTracker {
 public:
-    enum { kStages = 16 };
-    void Reset();                                                  // Nine/D3D9 defaults, nothing saved
+    enum { kStages = 16, kSamplers = NXD3D_SAMPLERS, kTssStages = 8, kStreams = 16, kRTs = 4,
+           kVsConstF = 256, kPsConstF = 224, kConstI = 16, kConstB = 16 };
+    // D3D9 defaults, nothing saved. autoDepthStencil: the device has an automatic depth-stencil surface (ZENABLE
+    // TRUE); w x h: its back buffer (the initial viewport and scissor rectangle; 0 x 0 when unknown).
+    void Reset(bool autoDepthStencil = false, uint32_t w = 0, uint32_t h = 0);
     void SetRenderState(uint32_t state, uint32_t value, bool save = false);
     uint32_t GetRenderState(uint32_t state) const { return state < NXD3D_RS_COUNT ? rs_[state] : 0; }
     void RestoreRenderState(uint32_t state);                       // value saved by the last SetRenderState(.., true)
-    void SetSamplerState(uint32_t stage, uint32_t type, uint32_t value, bool save = false);
-    uint32_t GetSamplerState(uint32_t stage, uint32_t type) const;
-    void RestoreSamplerState(uint32_t stage, uint32_t type);
-    // The texture bound to a stage: image id (0 = none), its D3DFORMAT and kind, for the sampler translation.
-    void SetTexture(uint32_t stage, uint32_t image, const NxD3D9Texture& kind);
-    uint32_t Texture(uint32_t stage) const { return stage < kStages ? image_[stage] : 0; }
-    NxD3D9Texture TextureKind(uint32_t stage) const { return stage < kStages ? kind_[stage] : NxD3D9Texture{0, 0, 0, 0, 0}; }
+    void SetSamplerState(uint32_t sampler, uint32_t type, uint32_t value, bool save = false);
+    uint32_t GetSamplerState(uint32_t sampler, uint32_t type) const;
+    void RestoreSamplerState(uint32_t sampler, uint32_t type);
+    void SetTextureStageState(uint32_t stage, uint32_t type, uint32_t value);   // stages 0..7, types 1..32
+    uint32_t GetTextureStageState(uint32_t stage, uint32_t type) const;
+    // The texture bound to a sampler: image id (0 = none), its D3DFORMAT and kind, for the sampler translation.
+    void SetTexture(uint32_t sampler, uint32_t image, const NxD3D9Texture& kind);
+    uint32_t Texture(uint32_t sampler) const { int i = nx_d3d9_sampler_index(sampler); return i >= 0 ? image_[i] : 0; }
+    NxD3D9Texture TextureKind(uint32_t sampler) const {
+        int i = nx_d3d9_sampler_index(sampler);
+        return i >= 0 ? kind_[i] : NxD3D9Texture{0, 0, 0, 0, 0};
+    }
     void SetPixelShaderVersion(uint32_t v) { psVersion_ = v; dirty_ = true; }
+
+    // ---- shader constants: false (D3DERR_INVALIDCALL, nothing changed) when start + count passes the register file
+    bool SetShaderConstantF(bool ps, uint32_t start, const float* data, uint32_t count);
+    bool GetShaderConstantF(bool ps, uint32_t start, float* data, uint32_t count) const;
+    bool SetShaderConstantI(bool ps, uint32_t start, const int32_t* data, uint32_t count);
+    bool GetShaderConstantI(bool ps, uint32_t start, int32_t* data, uint32_t count) const;
+    bool SetShaderConstantB(bool ps, uint32_t start, const uint32_t* data, uint32_t count);   // BOOL: != 0 -> TRUE (1)
+    bool GetShaderConstantB(bool ps, uint32_t start, uint32_t* data, uint32_t count) const;
+    // What the shader reads: the set registers with its def / defi / defb constants in place (D3D9: a def'd register
+    // ignores the application's value while that shader runs; Get*Constant still returns the application's).
+    // defs: from nx_d3d9_shader_defs (0 / ndefs = 0: none). Registers 0..n-1 are written.
+    void EffectiveConstantsF(bool ps, const NxD3D9Def* defs, uint32_t ndefs, float (*out)[4], uint32_t n) const;
+    void EffectiveConstantsI(bool ps, const NxD3D9Def* defs, uint32_t ndefs, int32_t (*out)[4], uint32_t n) const;
+    void EffectiveConstantsB(bool ps, const NxD3D9Def* defs, uint32_t ndefs, uint32_t* out, uint32_t n) const;
+    uint32_t constantGeneration(bool ps) const { return constGen_[ps]; }   // changes with every constant change
+
+    // ---- shaders, vertex input
+    void SetShader(bool ps, const void* shader) { shader_[ps] = shader; }
+    const void* Shader(bool ps) const { return shader_[ps]; }
+    void SetVertexDeclaration(const void* decl) { decl_ = decl; fvf_ = 0; }   // an application declaration: FVF 0
+    void SetFVF(uint32_t fvf) { if (fvf) { fvf_ = fvf; decl_ = nullptr; } }  // 0 is ignored (D3D_OK; Nine, Wine)
+    const void* VertexDeclaration() const { return decl_; }       // 0 after SetFVF (the FVF's own declaration)
+    uint32_t FVF() const { return fvf_; }
+    bool SetStreamSource(uint32_t stream, const void* vb, uint32_t offset, uint32_t stride);
+    bool SetStreamSourceFreq(uint32_t stream, uint32_t setting);   // D3D9's checks; default 1
+    struct Stream { const void* vb; uint32_t offset, stride, freq; };
+    Stream GetStream(uint32_t stream) const { return stream < kStreams ? stream_[stream] : Stream{nullptr, 0, 0, 0}; }
+    void SetIndices(const void* ib) { indices_ = ib; }
+    const void* Indices() const { return indices_; }
+
+    // ---- targets, viewport, scissor rectangle, clip planes
+    // index 0 needs a target and resets the viewport to (0, 0, w, h, 0, 1) and the scissor rectangle to (0, 0, w, h)
+    bool SetRenderTarget(uint32_t index, const void* surface, uint32_t w, uint32_t h);
+    const void* RenderTarget(uint32_t index) const { return index < kRTs ? rt_[index] : nullptr; }
+    void SetDepthStencilSurface(const void* ds) { ds_ = ds; }
+    const void* DepthStencilSurface() const { return ds_; }
+    void SetViewport(const NxD3D9Viewport& vp) { viewport_ = vp; }
+    const NxD3D9Viewport& Viewport() const { return viewport_; }
+    void SetScissorRect(const NxD3D9Rect& r) { scissorRect_ = r; }
+    const NxD3D9Rect& ScissorRect() const { return scissorRect_; }
+    bool SetClipPlane(uint32_t index, const float plane[4]);      // D3DMAXUSERCLIPPLANES = 6; into Resolve's dyn
+    bool GetClipPlane(uint32_t index, float plane[4]) const;
+
     // Translates what is recorded (only when something changed). viewport/scissor in D3D9 pixels.
     struct Resolved {
         NxRenderState rs;
@@ -56,9 +114,24 @@ public:
     const uint32_t* rs() const { return rs_; }
 private:
     uint32_t rs_[NXD3D_RS_COUNT], rsSaved_[NXD3D_RS_COUNT];
-    uint32_t samp_[kStages][NXD3D_SAMP_COUNT], sampSaved_[kStages][NXD3D_SAMP_COUNT];
-    uint32_t image_[kStages];
-    NxD3D9Texture kind_[kStages];
+    uint32_t samp_[kSamplers][NXD3D_SAMP_COUNT], sampSaved_[kSamplers][NXD3D_SAMP_COUNT];
+    uint32_t tss_[kTssStages][NXD3D_TSS_COUNT];
+    uint32_t image_[kSamplers];
+    NxD3D9Texture kind_[kSamplers];
+    float constF_[2][kVsConstF][4];
+    int32_t constI_[2][kConstI][4];
+    uint32_t constB_[2][kConstB];
+    uint32_t constGen_[2] = {1, 1};
+    const void* shader_[2] = {nullptr, nullptr};
+    const void* decl_ = nullptr;
+    uint32_t fvf_ = 0;
+    Stream stream_[kStreams];
+    const void* indices_ = nullptr;
+    const void* rt_[kRTs] = {};
+    const void* ds_ = nullptr;
+    NxD3D9Viewport viewport_ = {0, 0, 0, 0, 0.0f, 1.0f};
+    NxD3D9Rect scissorRect_ = {0, 0, 0, 0};
+    float clip_[NXD3D_MAX_CLIP][4];
     uint32_t psVersion_ = 0x0200;
     bool dirty_ = true;
     NxD3D9Viewport lastVp_;
@@ -70,9 +143,9 @@ private:
     uint32_t smpId_[kSamplerCache], nSmp_ = 0;
     // per stage: the translated sampler of the current sampler states + texture kind (P6n F4: re-translated only
     // after a SetSamplerState that changes a value, a restore, or a texture of another kind)
-    uint32_t stageSmp_[kStages] = {};      // sampler id, 0 = not translated since the last change
-    bool stageSrgb_[kStages] = {};
-    uint8_t srgbClass_[kStages] = {};      // of kind_[s].format: 1 sRGB-capable D3D format, 2 has an sRGB view
+    uint32_t stageSmp_[kSamplers] = {};    // sampler id, 0 = not translated since the last change
+    bool stageSrgb_[kSamplers] = {};
+    uint8_t srgbClass_[kSamplers] = {};    // of kind_[s].format: 1 sRGB-capable D3D format, 2 has an sRGB view
     uint32_t smpTranslations_ = 0;
     uint32_t texGen_ = 1;
     bool handlesComplete_ = false;
@@ -102,8 +175,11 @@ public:
     void SetBackgroundColor(float r, float g, float b, float a);
     void SetDepthClear(float z) { clearDepth_ = z; }
     void SetStencilClear(uint32_t s) { clearStencil_ = s; }
-    // IDirect3DDevice9::SetScissorRect equivalent (used while D3DRS_SCISSORTESTENABLE is set); 0 = whole target
-    void SetScissorRect(const NxD3D9Rect* r) { scissorSet_ = r != nullptr; if (r) scissor_ = *r; }
+    // IDirect3DDevice9::SetScissorRect (the tracker's; used while D3DRS_SCISSORTESTENABLE is set); 0 = whole target
+    void SetScissorRect(const NxD3D9Rect* r) {
+        const Group* g = cur_ ? cur_ : &groups_[0];
+        state_.SetScissorRect(r ? *r : NxD3D9Rect{0, 0, (int32_t)g->w, (int32_t)g->h});
+    }
     // Native description of an engine NiRenderTargetGroup (0 = the default group: back buffer + depth).
     bool RegisterTargetGroup(const void* group, uint32_t color, uint32_t depth, uint32_t width, uint32_t height);
     // The colour image and size of a registered group (engine render targets: BSRenderedTexture / target groups).
@@ -209,7 +285,7 @@ public:
     // Matrices of the current camera (column-major, clip = proj * view * world; D3D9 clip space).
     const float* view() const { return view_; }
     const float* proj() const { return proj_; }
-    const NxD3D9Viewport& viewport() const { return vp_; }
+    const NxD3D9Viewport& viewport() const { return state_.Viewport(); }
     uint32_t frameNumber() const { return frameNo_; }
     uint32_t lastStateBinds() const { return lastBinds_; }
     bool inFrame() const { return inFrame_; }

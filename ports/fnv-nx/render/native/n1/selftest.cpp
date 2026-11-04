@@ -143,6 +143,155 @@ void Samp_point(Renderer& r) {   // stage 0: point filtering, clamp (texel-exact
 }
 
 uint8_t u8(float v) { v = v < 0 ? 0 : v > 1 ? 1 : v; return (uint8_t)(v * 255.0f + 0.5f); }
+// The D3D9 device state the tracker records (renderer.h) and the IDirect3DDevice9 layout over it (NativeDevice).
+void test_device_state(T& t, StateTracker& st) {
+    st.Reset(true, 640, 480);
+    t.Check(st.GetRenderState(RS_ZENABLE) == 1 && st.GetRenderState(166) == 0x42800000u,
+            "device defaults: ZENABLE TRUE with an auto depth-stencil, POINTSIZE_MAX 64");
+    t.Check(st.Viewport().Width == 640 && st.Viewport().MaxZ == 1.0f && st.ScissorRect().bottom == 480,
+            "device defaults: viewport and scissor rectangle cover the back buffer");
+    // vertex samplers and the displacement map sampler have the sampler defaults and their own states
+    t.Check(st.GetSamplerState(257, 5) == 1 && st.GetSamplerState(260, 10) == 1 && st.GetSamplerState(256, 1) == 1,
+            "vertex / dmap samplers: D3D9 defaults");
+    st.SetSamplerState(257, 5, 2);
+    t.Check(st.GetSamplerState(257, 5) == 2 && st.GetSamplerState(1, 5) == 1 && st.GetSamplerState(16, 5) == 0,
+            "vertex sampler 0 is its own sampler, 16 is none");
+    // constants: register file bounds, BOOL normalisation, def'd constants win while the shader runs
+    const float c4[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    float g[8] = {};
+    t.Check(st.SetShaderConstantF(false, 254, c4, 2) && !st.SetShaderConstantF(false, 255, c4, 2) &&
+            !st.SetShaderConstantF(true, 223, c4, 2) && st.SetShaderConstantF(true, 222, c4, 2),
+            "constants F: vs 256, ps 224 registers");
+    t.Check(st.GetShaderConstantF(false, 254, g, 2) && g[0] == 1 && g[7] == 8, "constants F: get");
+    const uint32_t b[3] = {0, 7, 0xFFFFFFFFu};
+    uint32_t gb[3] = {};
+    t.Check(st.SetShaderConstantB(true, 13, b, 3) && st.GetShaderConstantB(true, 13, gb, 3) && gb[0] == 0 && gb[1] == 1 &&
+            gb[2] == 1 && !st.SetShaderConstantB(true, 14, b, 3), "constants B: 16 registers, nonzero -> TRUE");
+    const int32_t iv[4] = {3, 0, 1, 0};
+    int32_t gi[4] = {};
+    t.Check(st.SetShaderConstantI(false, 15, iv, 1) && st.GetShaderConstantI(false, 15, gi, 1) && gi[0] == 3 &&
+            !st.SetShaderConstantI(false, 16, iv, 1), "constants I: 16 registers");
+    const float app[4] = {9, 9, 9, 9};
+    st.SetShaderConstantF(true, 3, app, 1);
+    NxD3D9Def def; memset(&def, 0, sizeof def);
+    def.file = 0; def.reg = 3; memcpy(def.v, c4, 16);
+    float eff[8][4];
+    st.EffectiveConstantsF(true, &def, 1, eff, 8);
+    t.Check(eff[3][0] == 1 && eff[3][3] == 4, "def'd constant: the shader's value wins");
+    t.Check(st.GetShaderConstantF(true, 3, g, 1) && g[0] == 9, "def'd constant: Get returns the application's");
+    // vertex input, streams
+    static const int kDecl = 0, kVb = 0;
+    st.SetVertexDeclaration(&kDecl);
+    t.Check(st.VertexDeclaration() == &kDecl && st.FVF() == 0, "declaration: set, FVF 0");
+    st.SetFVF(0);
+    t.Check(st.VertexDeclaration() == &kDecl, "SetFVF(0) changes nothing");
+    st.SetFVF(0x142);
+    t.Check(st.FVF() == 0x142 && !st.VertexDeclaration(), "SetFVF: the FVF's declaration");
+    t.Check(st.GetStream(3).freq == 1, "stream frequency default 1");
+    t.Check(!st.SetStreamSourceFreq(0, 2u << 30 | 1) && !st.SetStreamSourceFreq(1, 3u << 30 | 1) && !st.SetStreamSourceFreq(1, 0) &&
+            st.SetStreamSourceFreq(0, 1u << 30 | 4) && st.SetStreamSourceFreq(1, 2u << 30 | 1) && st.GetStream(1).freq == (2u << 30 | 1),
+            "stream frequency: D3D9's checks (instance data not on stream 0, not both, not 0)");
+    t.Check(st.SetStreamSource(2, &kVb, 16, 32) && st.GetStream(2).vb == &kVb && st.GetStream(2).stride == 32 &&
+            !st.SetStreamSource(16, &kVb, 0, 0), "stream source");
+    // render targets: index 0 resets viewport and scissor rectangle
+    NxD3D9Viewport vp = {10, 20, 30, 40, 0.25f, 0.5f};
+    st.SetViewport(vp);
+    NxD3D9Rect sr = {1, 2, 3, 4};
+    st.SetScissorRect(sr);
+    static const int kRt = 0, kRt1 = 0;
+    t.Check(st.SetRenderTarget(1, &kRt1, 64, 64) && st.Viewport().X == 10 && st.ScissorRect().left == 1,
+            "SetRenderTarget(1): viewport and scissor rectangle unchanged");
+    t.Check(!st.SetRenderTarget(0, nullptr, 0, 0) && !st.SetRenderTarget(4, &kRt, 1, 1), "SetRenderTarget: 0 needs a target, 4 targets");
+    t.Check(st.SetRenderTarget(0, &kRt, 256, 128) && st.Viewport().X == 0 && st.Viewport().Width == 256 &&
+            st.Viewport().MinZ == 0.0f && st.Viewport().MaxZ == 1.0f && st.ScissorRect().right == 256 && st.ScissorRect().bottom == 128,
+            "SetRenderTarget(0): viewport (0, 0, w, h, 0, 1), scissor rectangle (0, 0, w, h)");
+    // clip planes reach the translator
+    const float pl[4] = {0, 1, 0, -2};
+    t.Check(st.SetClipPlane(5, pl) && !st.SetClipPlane(6, pl), "clip planes: 6");
+    NxD3D9Viewport v2 = {0, 0, 8, 8, 0, 1};
+    NxD3D9Rect s2 = {0, 0, 8, 8};
+    t.Check(st.Resolve(v2, s2, 0).dyn.clipPlane[5][3] == -2.0f, "clip plane into the dynamic state");
+
+    // the same through the IDirect3DDevice9 method table
+    engine::NativeDevice* d = engine::CreateNativeDevice();
+    typedef uintptr_t Wd;
+    const Wd* vt = d->vtbl;
+    st.Reset();
+    ((int32_t(*)(void*, uint32_t, uint32_t))vt[57])(d, 168, 7);
+    uint32_t v = 0;
+    ((int32_t(*)(void*, uint32_t, uint32_t*))vt[58])(d, 168, &v);
+    t.Check(st.GetRenderState(168) == 7 && v == 7, "device: Set/GetRenderState");
+    ((int32_t(*)(void*, uint32_t, uint32_t, uint32_t))vt[69])(d, 258, 6, 2);
+    t.Check(st.GetSamplerState(258, 6) == 2, "device: SetSamplerState(D3DVERTEXTEXTURESAMPLER1)");
+    t.Check(((int32_t(*)(void*, uint32_t, uint32_t, uint32_t))vt[69])(d, 300, 6, 2) != 0, "device: an invalid sampler fails");
+    ((int32_t(*)(void*, uint32_t, uint32_t, uint32_t))vt[67])(d, 1, 1, 4);
+    t.Check(st.GetTextureStageState(1, 1) == 4, "device: SetTextureStageState");
+    ((int32_t(*)(void*, uint32_t, const float*, uint32_t))vt[109])(d, 0, c4, 2);
+    t.Check(st.GetShaderConstantF(true, 1, g, 1) && g[0] == 5, "device: SetPixelShaderConstantF");
+    ((int32_t(*)(void*, uint32_t, uint32_t))vt[102])(d, 1, 2u << 30 | 1);
+    t.Check(st.GetStream(1).freq == (2u << 30 | 1), "device: SetStreamSourceFreq");
+    ((int32_t(*)(void*, const NxD3D9Viewport*))vt[47])(d, &vp);
+    NxD3D9Viewport gv;
+    ((int32_t(*)(void*, NxD3D9Viewport*))vt[48])(d, &gv);
+    t.Check(gv.Y == 20 && gv.MaxZ == 0.5f, "device: Set/GetViewport");
+    const uint32_t before = engine::NativeDeviceUnhandled(81);
+    t.Check(((int32_t(*)(void*))vt[81])(d) != 0 && engine::NativeDeviceUnhandled(81) == before + 1,
+            "device: an unhandled method (DrawPrimitive) fails and is counted");
+}
+
+// The overridden NiDX9RenderState slots against the engine's semantics, every state of every kind
+// (NiDX9RenderStateLayout in engine_stubs.h).
+void test_cache_semantics(T& t, StateTracker& st) {
+    typedef engine::NiDX9RenderStateLayout L;
+    static uint64_t mem[L::kSize / 8];
+    L::Construct(mem, nullptr);
+    engine::NiDX9RenderState* e = (engine::NiDX9RenderState*)(void*)mem;
+    st.Reset();
+    int bad = 0;
+    for (uint32_t s = 0; s < 256; s++) {   // render states: unknown, set, lock, restore
+        bad += e->GetRenderState(s) != L::kUnknown;
+        e->SetRenderState(s, 5, 0, 0);
+        bad += e->GetRenderState(s) != 5 || (s < NXD3D_RS_COUNT && st.GetRenderState(s) != 5);
+        e->SetRenderState(s, 6, 0, 1);     // takes the lock
+        e->SetRenderState(s, 7, 0, 0);
+        bad += e->GetRenderState(s) != 6;
+    }
+    t.Check(!bad, "cache: every render state - unknown, set, locked by the call's lock argument", bad);
+    e->SetBlendFunc(9, 10, 0, 0); e->SetAlphaBlendEnable(1, 0, 0);
+    t.Check(e->GetRenderState(19) == 9 && e->GetRenderState(20) == 10 && e->GetRenderState(27) == 1 && st.GetRenderState(27) == 1,
+            "cache: SetBlendFunc / SetAlphaBlendEnable ignore the lock");
+    bad = 0;
+    for (uint32_t ty = 0; ty < NXD3D_TSS_COUNT; ty++) {
+        const bool cached = L::TssSlot(ty) >= 0;
+        const uint32_t dev = st.GetTextureStageState(3, ty);
+        e->SetTextureStageState(3, ty, 77, 0);
+        bad += cached ? (e->GetTextureStageState(3, ty) != 77 || st.GetTextureStageState(3, ty) != 77)
+                      : (e->GetTextureStageState(3, ty) != 0 || st.GetTextureStageState(3, ty) != dev);
+    }
+    const bool tssTypes = L::TssSlot(1) == 0 && L::TssSlot(7) == 6 && L::TssSlot(24) == 7 && L::TssSlot(11) < 0 && L::TssSlot(26) < 0;
+    t.Check(!bad && tssTypes, "cache: texture stage types 1-7 and 24 are cached and reach the device, others are dropped", bad);
+    bad = 0;
+    for (uint32_t ty = 0; ty < NXD3D_SAMP_COUNT; ty++) {
+        const int k = L::SampSlot(ty);
+        const uint32_t dev = st.GetSamplerState(2, ty);
+        if (k >= 0) ((uint32_t*)((uint8_t*)mem + L::kSamp))[2 * (2 * L::kSampPerStage + (uint32_t)k) + 1] = 40 + ty;   // saved
+        e->SetSamplerState(2, ty, 88, 0);
+        bad += k >= 0 ? (e->GetSamplerState(2, ty) != 88 || st.GetSamplerState(2, ty) != 88)
+                      : (e->GetSamplerState(2, ty) != 0 || st.GetSamplerState(2, ty) != dev);
+        e->RestoreSamplerState(2, ty);
+        bad += k >= 0 ? (e->GetSamplerState(2, ty) != 40 + ty || st.GetSamplerState(2, ty) != 40 + ty)
+                      : st.GetSamplerState(2, ty) != dev;
+    }
+    t.Check(!bad, "cache: sampler types ADDRESSU/V, MAG/MIN/MIPFILTER cached, set and restored to the saved value; others dropped", bad);
+    // textures: the engine's ClearTextures (slot 54, not overridden) zeroes the cache without the device
+    static const int kTex = 0;
+    e->SetTexture(4, (void*)&kTex);
+    t.Check(e->GetTexture(4) == &kTex, "cache: SetTexture / GetTexture");
+    memset((uint8_t*)mem + L::kTex, 0, 64);
+    t.Check(e->GetTexture(4) == nullptr, "cache: GetTexture after the engine's ClearTextures");
+    st.Reset();
+}
+
 }  // namespace
 
 int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
@@ -160,8 +309,12 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(back && menu && depth, "targets");
     t.Check(r.Init(be, W, H, back, depth), "renderer init");
     t.Check(Renderer::Get() == &r, "Renderer::Get");
+    t.Check(r.state().GetRenderState(RS_ZENABLE) == 1 && r.state().Viewport().Width == W && r.state().ScissorRect().bottom == H,
+            "Init: the device after CreateDevice (ZENABLE TRUE with the depth buffer, full-target viewport and scissor)");
     test_tracker(t, r.state());
     test_sampler_cache(t, be, r.state());
+    test_device_state(t, r.state());
+    test_cache_semantics(t, r.state());
     r.state().Reset();
     static const int kGroupKey = 0;   // stands for an engine NiRenderTargetGroup*
     t.Check(r.RegisterTargetGroup(&kGroupKey, menu, 0, W, H), "register group");
@@ -273,9 +426,28 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(p[0] == 255 && q[1] == 255, "partial ClearBuffer: rectangle edges x = 96, y = 48", p[0], q[1]);
     t.Check(r.frameNumber() == 1 && r.lastStateBinds() >= 2, "one frame, states bound", (int)r.frameNumber(), (int)r.lastStateBinds());
 
-    // frame 2 through the engine-facing override stubs (the engine's `this` is opaque, never dereferenced)
+    // frame 2 through the engine-facing override stubs. The renderer's `this` is opaque; the render-state stubs keep
+    // the engine's cache in theirs: an object as the engine constructs it, through its (native) device the defaults
+    // passes of slots 22 / 47 with synthetic tables (engine_stubs.h, NiDX9RenderStateLayout)
     engine::NiDX9Renderer* eng = (engine::NiDX9Renderer*)(void*)&kGroupKey;
-    engine::NiDX9RenderState* ers = (engine::NiDX9RenderState*)(void*)&kGroupKey;
+    static uint64_t ersMem[engine::NiDX9RenderStateLayout::kSize / 8];
+    engine::NativeDevice* dev = engine::CreateNativeDevice();
+    engine::NiDX9RenderStateLayout::Construct(ersMem, dev);
+    engine::NiDX9RenderState* ers = (engine::NiDX9RenderState*)(void*)ersMem;
+    const uint32_t kU = engine::NiDX9RenderStateLayout::kUnknown;
+    t.Check(ers->GetRenderState(RS_ALPHABLENDENABLE) == kU && ers->GetSamplerState(0, 5) == kU && ers->GetTextureStageState(0, 1) == kU,
+            "stub: before the defaults passes the cache is unknown (0x7FFFFFFF)");
+    {
+        static const uint32_t rsDef[] = {165, 5, 26, 0, 0xFFFFFFFFu};                   // DEBUGMONITORTOKEN 5, DITHER 0
+        static const uint32_t tssDef[] = {1, 4, 2, 2, 4, 2, 0xFFFFFFFFu};              // COLOROP, COLORARG1, ALPHAOP
+        static const uint32_t sampDef[] = {5, 1, 1, 2, 0xFFFFFFFFu};                    // MAGFILTER POINT, ADDRESSU MIRROR
+        engine::NiDX9RenderStateLayout::DefaultsPass(ersMem, dev, rsDef, tssDef, 2, sampDef, 2);
+    }
+    t.Check(r.state().GetRenderState(165) == 5 && ers->GetRenderState(165) == 5,
+            "defaults pass: render states reach the tracker through the native device");
+    t.Check(ers->GetTextureStageState(0, 1) == kU && r.state().GetTextureStageState(0, 1) == 4 && r.state().GetTextureStageState(1, 1) == 1,
+            "defaults pass: texture stage defaults go to the device only (the cache stays unknown), DISABLE above stage 0");
+    t.Check(ers->GetSamplerState(1, 1) == 2 && r.state().GetSamplerState(1, 1) == 2, "defaults pass: sampler states");
     ers->SetRenderState(RS_ALPHABLENDENABLE, 1, 0, 0);
     t.Check(r.state().GetRenderState(RS_ALPHABLENDENABLE) == 1 && ers->GetRenderState(RS_ALPHABLENDENABLE) == 1,
             "stub: SetRenderState reaches the StateTracker");
@@ -284,27 +456,32 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     ers->SetRenderState(28, 0, 0, 1);    // FOGENABLE 0, locked
     ers->SetRenderState(28, 1, 0, 0);    // ignored while locked
     t.Check(ers->GetRenderState(28) == 0, "stub: a locked render state ignores later sets");
+    ers->SetRenderState(26, 1, 0, 0);
+    ers->RestoreRenderState(26);         // the engine's restore: SetRenderState(saved by the defaults pass)
+    t.Check(ers->GetRenderState(26) == 0 && r.state().GetRenderState(26) == 0, "stub: a render state restores the defaults pass's value");
     ers->SetBlendFunc(5, 6, 0, 0);
     t.Check(ers->GetRenderState(19) == 5 && ers->GetRenderState(20) == 6, "stub: SetBlendFunc");
-    ers->SetSamplerState(0, 5, 1, 0);    // MAGFILTER POINT
-    t.Check(ers->GetSamplerState(0, 5) == 1, "stub: Set/GetSamplerState");
+    ers->SetSamplerState(0, 5, 2, 0);    // MAGFILTER LINEAR
+    t.Check(ers->GetSamplerState(0, 5) == 2, "stub: Set/GetSamplerState");
     ers->RestoreSamplerState(0, 5);
-    t.Check(ers->GetSamplerState(0, 5) == 1, "stub: RestoreSamplerState returns to the saved default (POINT)",
-            (int)ers->GetSamplerState(0, 5));
-    ers->SetSamplerState(1, 1, 3, 0);    // ADDRESSU CLAMP by the defaults pass (D3D9's default is WRAP)
+    t.Check(ers->GetSamplerState(0, 5) == 1 && r.state().GetSamplerState(0, 5) == 1,
+            "stub: RestoreSamplerState returns to the saved default (POINT)", (int)ers->GetSamplerState(0, 5));
     ers->SetSamplerState(1, 1, 1, 0);    // a draw sets WRAP
     ers->RestoreSamplerState(1, 1);
-    t.Check(ers->GetSamplerState(1, 1) == 3, "stub: RestoreSamplerState re-sets the engine's saved value, not D3D9's (V1 O2)",
+    t.Check(ers->GetSamplerState(1, 1) == 2, "stub: RestoreSamplerState re-sets the engine's saved value, not D3D9's (V1 O2)",
             (int)ers->GetSamplerState(1, 1));
-    t.Check(ers->GetTextureStageState(2, 26) == 1 && ers->GetTextureStageState(2, 27) == 1 && ers->GetTextureStageState(2, 28) == 1,
-            "stub: COLORARG0 / ALPHAARG0 / RESULTARG default to D3DTA_CURRENT (V1 O3)");
+    ers->SetSamplerState(0, 10, 8, 0);   // MAXANISOTROPY: not in the engine's cache, dropped
+    t.Check(ers->GetSamplerState(0, 10) == 0 && r.state().GetSamplerState(0, 10) == 1,
+            "stub: a sampler type the engine does not cache never reaches the device");
+    t.Check(r.state().GetTextureStageState(2, 26) == 1 && r.state().GetTextureStageState(2, 27) == 1 &&
+            r.state().GetTextureStageState(2, 28) == 1, "tracker: COLORARG0 / ALPHAARG0 / RESULTARG default to D3DTA_CURRENT (V1 O3)");
+    ers->SetTextureStageState(0, 26, 3, 0);  // COLORARG0: not in the engine's cache, dropped
+    t.Check(ers->GetTextureStageState(0, 26) == 0 && r.state().GetTextureStageState(0, 26) == 1,
+            "stub: a texture stage type the engine does not cache never reaches the device");
     // slot 48/49 are texture stage states: recorded, never sampler states
-    t.Check(ers->GetTextureStageState(0, 1) == 4 && ers->GetTextureStageState(1, 1) == 1,
-            "stub: texture stage state defaults (COLOROP MODULATE / DISABLE)");
     ers->SetTextureStageState(0, 5, 3, 0);   // ALPHAARG1 = D3DTA_TFACTOR: type 5 is MAGFILTER as a sampler state
-    t.Check(ers->GetTextureStageState(0, 5) == 3 && ers->GetSamplerState(0, 5) == 1,
+    t.Check(ers->GetTextureStageState(0, 5) == 3 && r.state().GetTextureStageState(0, 5) == 3 && ers->GetSamplerState(0, 5) == 1,
             "stub: SetTextureStageState does not touch the sampler states");
-
     // synthetic engine geometry (interop layout of engine_stubs.h) in an arena; embedded pointers are offsets
     static uint8_t arena[2048] __attribute__((aligned(16)));
     memset(arena, 0, sizeof arena);

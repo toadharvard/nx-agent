@@ -472,7 +472,114 @@ static void test_convert(void) {
     CHECKEQ(nx_d3d9_converted_size(50, 4, 4, 3, 6), (16 + 4 + 1) * 4 * 6);    /* mips and faces */
 }
 
+/* ---- the D3D9 default table: every D3DRENDERSTATETYPE, D3DSAMPLERSTATETYPE and D3DTEXTURESTAGESTATETYPE ---------
+ * Values from the D3D9 documentation (D3DRENDERSTATETYPE, D3DSAMPLERSTATETYPE, D3DTEXTURESTAGESTATETYPE); where the
+ * documentation leaves a value to the implementation, Nine's nine_state.c. Columns: state, documented default. */
+static const uint32_t kRsDoc[][2] = {
+    {7, 0} /* ZENABLE: D3DZB_FALSE without an auto depth-stencil (test_default_table checks TRUE with one) */,
+    {8, 3} /* FILLMODE SOLID */, {9, 2} /* SHADEMODE GOURAUD */, {14, 1} /* ZWRITEENABLE */, {15, 0} /* ALPHATESTENABLE */,
+    {16, 1} /* LASTPIXEL */, {19, 2} /* SRCBLEND ONE */, {20, 1} /* DESTBLEND ZERO */, {22, 3} /* CULLMODE CCW */,
+    {23, 4} /* ZFUNC LESSEQUAL */, {24, 0} /* ALPHAREF */, {25, 8} /* ALPHAFUNC ALWAYS */, {26, 0} /* DITHERENABLE */,
+    {27, 0} /* ALPHABLENDENABLE */, {28, 0} /* FOGENABLE */, {29, 0} /* SPECULARENABLE */, {34, 0} /* FOGCOLOR */,
+    {35, 0} /* FOGTABLEMODE NONE */, {36, 0} /* FOGSTART 0.0 */, {37, 0x3F800000} /* FOGEND 1.0 */,
+    {38, 0x3F800000} /* FOGDENSITY 1.0 */, {48, 0} /* RANGEFOGENABLE */, {52, 0} /* STENCILENABLE */,
+    {53, 1} /* STENCILFAIL KEEP */, {54, 1} /* STENCILZFAIL KEEP */, {55, 1} /* STENCILPASS KEEP */,
+    {56, 8} /* STENCILFUNC ALWAYS */, {57, 0} /* STENCILREF */, {58, 0xFFFFFFFF} /* STENCILMASK */,
+    {59, 0xFFFFFFFF} /* STENCILWRITEMASK */, {60, 0xFFFFFFFF} /* TEXTUREFACTOR opaque white */,
+    {128, 0}, {129, 0}, {130, 0}, {131, 0}, {132, 0}, {133, 0}, {134, 0}, {135, 0} /* WRAP0..7 */,
+    {136, 1} /* CLIPPING */, {137, 1} /* LIGHTING */, {139, 0} /* AMBIENT */, {140, 0} /* FOGVERTEXMODE NONE */,
+    {141, 1} /* COLORVERTEX */, {142, 1} /* LOCALVIEWER */, {143, 0} /* NORMALIZENORMALS */,
+    {145, 1} /* DIFFUSEMATERIALSOURCE COLOR1 */, {146, 2} /* SPECULARMATERIALSOURCE COLOR2 */,
+    {147, 0} /* AMBIENTMATERIALSOURCE MATERIAL */, {148, 0} /* EMISSIVEMATERIALSOURCE MATERIAL */,
+    {151, 0} /* VERTEXBLEND DISABLE */, {152, 0} /* CLIPPLANEENABLE */, {154, 0x3F800000} /* POINTSIZE 1.0 */,
+    {155, 0x3F800000} /* POINTSIZE_MIN 1.0 */, {156, 0} /* POINTSPRITEENABLE */, {157, 0} /* POINTSCALEENABLE */,
+    {158, 0x3F800000} /* POINTSCALE_A 1.0 */, {159, 0} /* POINTSCALE_B */, {160, 0} /* POINTSCALE_C */,
+    {161, 1} /* MULTISAMPLEANTIALIAS */, {162, 0xFFFFFFFF} /* MULTISAMPLEMASK */, {163, 0} /* PATCHEDGESTYLE DISCRETE */,
+    {165, 0xDEADCAFE} /* DEBUGMONITORTOKEN: not documented, Nine's */, {166, 0x42800000} /* POINTSIZE_MAX 64.0 */,
+    {167, 0} /* INDEXEDVERTEXBLENDENABLE */, {168, 0xF} /* COLORWRITEENABLE */, {170, 0} /* TWEENFACTOR 0.0 */,
+    {171, 1} /* BLENDOP ADD */, {172, 3} /* POSITIONDEGREE CUBIC */, {173, 1} /* NORMALDEGREE LINEAR */,
+    {174, 0} /* SCISSORTESTENABLE */, {175, 0} /* SLOPESCALEDEPTHBIAS */, {176, 0} /* ANTIALIASEDLINEENABLE */,
+    {178, 0x3F800000} /* MINTESSELLATIONLEVEL 1.0 */, {179, 0x3F800000} /* MAXTESSELLATIONLEVEL 1.0 */,
+    {180, 0} /* ADAPTIVETESS_X */, {181, 0} /* ADAPTIVETESS_Y */, {182, 0x3F800000} /* ADAPTIVETESS_Z 1.0 */,
+    {183, 0} /* ADAPTIVETESS_W */, {184, 0} /* ENABLEADAPTIVETESSELLATION */, {185, 0} /* TWOSIDEDSTENCILMODE */,
+    {186, 1} /* CCW_STENCILFAIL KEEP */, {187, 1} /* CCW_STENCILZFAIL KEEP */, {188, 1} /* CCW_STENCILPASS KEEP */,
+    {189, 8} /* CCW_STENCILFUNC ALWAYS */, {190, 0xF}, {191, 0xF}, {192, 0xF} /* COLORWRITEENABLE1..3 */,
+    {193, 0xFFFFFFFF} /* BLENDFACTOR */, {194, 0} /* SRGBWRITEENABLE */, {195, 0} /* DEPTHBIAS */,
+    {198, 0}, {199, 0}, {200, 0}, {201, 0}, {202, 0}, {203, 0}, {204, 0}, {205, 0} /* WRAP8..15 */,
+    {206, 0} /* SEPARATEALPHABLENDENABLE */, {207, 2} /* SRCBLENDALPHA ONE */, {208, 1} /* DESTBLENDALPHA ZERO */,
+    {209, 1} /* BLENDOPALPHA ADD */,
+};
+static const uint32_t kSampDoc[NXD3D_SAMP_COUNT] = {
+    0, 1, 1, 1 /* ADDRESSU/V/W WRAP */, 0 /* BORDERCOLOR */, 1, 1 /* MAG/MINFILTER POINT */, 0 /* MIPFILTER NONE */,
+    0 /* MIPMAPLODBIAS */, 0 /* MAXMIPLEVEL */, 1 /* MAXANISOTROPY */, 0 /* SRGBTEXTURE */, 0 /* ELEMENTINDEX */,
+    0 /* DMAPOFFSET */,
+};
+/* texture stage states: {type, stage 0, stages 1..7}; TEXCOORDINDEX (11) is the stage number */
+static const uint32_t kTssDoc[][3] = {
+    {1, 4, 1} /* COLOROP MODULATE / DISABLE */, {2, 2, 2} /* COLORARG1 TEXTURE */, {3, 1, 1} /* COLORARG2 CURRENT */,
+    {4, 2, 1} /* ALPHAOP SELECTARG1 / DISABLE */, {5, 2, 2} /* ALPHAARG1 TEXTURE */, {6, 1, 1} /* ALPHAARG2 CURRENT */,
+    {7, 0, 0}, {8, 0, 0}, {9, 0, 0}, {10, 0, 0} /* BUMPENVMAT00..11 */, {22, 0, 0} /* BUMPENVLSCALE */,
+    {23, 0, 0} /* BUMPENVLOFFSET */, {24, 0, 0} /* TEXTURETRANSFORMFLAGS DISABLE */, {26, 1, 1} /* COLORARG0 CURRENT */,
+    {27, 1, 1} /* ALPHAARG0 CURRENT */, {28, 1, 1} /* RESULTARG CURRENT */, {32, 0, 0} /* CONSTANT */,
+};
+
+static void test_default_table(void) {
+    uint32_t d[NXD3D_RS_COUNT], seen[NXD3D_RS_COUNT] = {0};
+    nx_d3d9_default_rs(d);
+    for (unsigned i = 0; i < sizeof kRsDoc / sizeof kRsDoc[0]; i++) {
+        const uint32_t s = kRsDoc[i][0];
+        seen[s] = 1;
+        if (d[s] != kRsDoc[i][1]) { g_fail++; printf("FAIL default render state %u = 0x%x, D3D9 0x%x\n", s, d[s], kRsDoc[i][1]); }
+        g_checks++;
+    }
+    for (unsigned s = 0; s < NXD3D_RS_COUNT; s++) if (!seen[s]) CHECKEQ(d[s], 0);   /* not a D3D9 render state */
+    nx_d3d9_default_rs_device(d, 1); CHECKEQ(d[ZENABLE], 1);                      /* D3DZB_TRUE with an auto depth */
+    nx_d3d9_default_rs_device(d, 0); CHECKEQ(d[ZENABLE], 0);
+    uint32_t s[NXD3D_SAMP_COUNT];
+    nx_d3d9_default_samp(s);
+    for (unsigned t = 1; t < NXD3D_SAMP_COUNT; t++) CHECKEQ(s[t], kSampDoc[t]);
+    for (uint32_t st = 0; st < 8; st++) {
+        uint32_t t[NXD3D_TSS_COUNT], want[NXD3D_TSS_COUNT] = {0};
+        nx_d3d9_default_tss(t, st);
+        for (unsigned i = 0; i < sizeof kTssDoc / sizeof kTssDoc[0]; i++) want[kTssDoc[i][0]] = kTssDoc[i][st ? 2 : 1];
+        want[11] = st;
+        for (unsigned k = 0; k < NXD3D_TSS_COUNT; k++)
+            if (t[k] != want[k]) { g_fail++; printf("FAIL default texture stage %u state %u = %u, D3D9 %u\n", st, k, t[k], want[k]); }
+        g_checks += NXD3D_TSS_COUNT;
+    }
+    /* sampler numbers: 0..15, D3DDMAPSAMPLER, D3DVERTEXTEXTURESAMPLER0..3 (Nine's order) */
+    CHECKEQ(nx_d3d9_sampler_index(0), 0); CHECKEQ(nx_d3d9_sampler_index(15), 15); CHECKEQ(nx_d3d9_sampler_index(16), -1);
+    CHECKEQ(nx_d3d9_sampler_index(256), 16); CHECKEQ(nx_d3d9_sampler_index(257), 17); CHECKEQ(nx_d3d9_sampler_index(260), 20);
+    CHECKEQ(nx_d3d9_sampler_index(261), -1); CHECKEQ(nx_d3d9_sampler_index(255), -1);
+}
+
+/* def / defi / defb of a shader token stream */
+static void test_shader_defs(void) {
+    NxD3D9Def d[4];
+    const uint32_t one = fbits(1.0f), half = fbits(0.5f);
+    /* ps_3_0: comment (2 dwords), def c5 = (1, .5, 0, 1), defi i2 = (3, 4, 5, 6), defb b7 = TRUE, mov, end */
+    const uint32_t ps3[] = {0xFFFF0300u, 0x0002FFFEu, 0x11111111u, 0x22222222u,
+                            0x05000051u, 0xA00F0005u, one, half, 0, one,
+                            0x05000052u, 0xF00F0002u, 3, 4, 5, 6,
+                            0x02000053u, 0xE00F0007u, 1,
+                            0x02000001u, 0x800F0800u, 0xA0E40005u, 0x0000FFFFu};
+    CHECKEQ(nx_d3d9_shader_defs(ps3, sizeof ps3 / 4, d, 4), 3);
+    CHECK(d[0].file == 0 && d[0].reg == 5 && d[0].v[0] == one && d[0].v[1] == half && d[0].v[3] == one);
+    CHECK(d[1].file == 1 && d[1].reg == 2 && d[1].v[0] == 3 && d[1].v[3] == 6);
+    CHECK(d[2].file == 2 && d[2].reg == 7 && d[2].v[0] == 1);
+    CHECKEQ(nx_d3d9_shader_defs(ps3, sizeof ps3 / 4, d, 1), 3);                   /* counts past cap */
+    CHECKEQ(nx_d3d9_shader_defs(ps3, sizeof ps3 / 4 - 1, d, 4), -1);              /* no END */
+    CHECKEQ(nx_d3d9_shader_defs(ps3, 7, d, 4), -1);                               /* cut inside def */
+    /* ps_1_1: def c0 (no length bits), then tex t0 stops the scan (later defs are not allowed there) */
+    const uint32_t ps1[] = {0xFFFF0101u, 0x00000051u, 0xA00F0000u, one, one, one, one, 0x00000042u, 0xB00F0000u, 0x0000FFFFu};
+    CHECKEQ(nx_d3d9_shader_defs(ps1, sizeof ps1 / 4, d, 4), 1);
+    CHECK(d[0].file == 0 && d[0].reg == 0 && d[0].v[2] == one);
+    const uint32_t bad[] = {0x12345678u, 0x0000FFFFu};
+    CHECKEQ(nx_d3d9_shader_defs(bad, 2, d, 4), -1);
+}
+
 int main(void) {
+    test_default_table(); test_shader_defs();
     test_defaults(); test_zenable(); test_zfunc(); test_zwriteenable(); test_stencilenable(); test_stencilops();
     test_twosidedstencil(); test_stencilmasks_ref(); test_alphablendenable(); test_srcblend_destblend_tables();
     test_blendop(); test_separatealphablend(); test_bothsrcalpha(); test_colorwriteenable(); test_blendfactor();
