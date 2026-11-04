@@ -34,9 +34,9 @@ Rules for family streams:
 | water | WATER*, wading, interior, LOD water | - | skipped -> Translated | render-land | open |
 | depth / shadow | ZONLY, DEPTHMAP, 3XDEPTH*, GRASS_SHADOW, shadow maps | depth, depth_at | skipped -> Translated | render-land | open |
 | image space: world chain | HDR, bloom/blur, DOF, radial blur, sunbeams, refraction, cinematic, VATS, night vision, ... | - | skipped -> Translated | render-land | open |
-| trees | SpeedTree branch/frond/leaf/billboard | - | skipped -> Translated | unclaimed | open |
-| grass | GRASS* | - | skipped -> Translated | unclaimed | open |
-| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - | skipped -> Translated | unclaimed | open |
+| trees | SpeedTree branch/frond/leaf/billboard | tree* (planned) | skipped -> Translated | render-veg | open |
+| grass | GRASS* | grass* | skipped -> Translated | render-veg | open |
+| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - (planned) | skipped -> Translated | render-veg | open |
 | GPU cost model and pass structure | render/native/perf (gpu_cost.py, gen_stream.py, report.*), pass order, early-z, sorting | - | - | G1-gpu (with the render machine's perf work) | open |
 
 "skipped -> Translated": this pass is skipped today, and the render machine's Translated path, now in progress, will
