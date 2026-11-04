@@ -86,12 +86,12 @@ S15T-WEAK	S15-threads	35fe02d	35fe02d	confirmed	-	test_weak_interlocked.py	guest
 S15T-HAVOK	S15-threads	b5c0f19	b5c0f19	confirmed	-	test_budget_built_levers.py	Havok MT is iSimType=4 (FUN_00c661d0 maps 4 -> 3); the setting name not checked against the exe
 S15T-MTR	S15-threads	af36244	af36244	confirmed	-	test_budget_built_levers.py	bMTRendering unsafe on the PC code: second accumulator renderer only for count 2, no modulo on the batch index
 S15T-INI	S15-threads	4364484	4364484	confirmed	-	test_ini_port_defaults.py	port ini defaults only for absent keys, case-insensitive, GetPrivateProfileString lengths (I1-I3)
-S15T-BUILT-B2	S15-threads	40a8d98	40a8d98	refuted	-	test_budget_built_levers.py	plan45 omits the built lever barrier_relax: with it the model-only plan45@1020 goes pass_30 -> pass_45
-S15S-SLERP-SL1	S15-simd	f0861e2	f0861e2	refuted	-	test_slerp_decomp.py	NEON Slerp claims the decomp's result to the bit, NaN included: 199 NaN-input cases give a NaN of another sign (144,000 others bit-identical)
+S15T-BUILT-B2	S15-threads	40a8d98	40a8d98	fixed	e04253d	test_budget_built_levers.py	plan45 omits the built lever barrier_relax: with it the model-only plan45@1020 goes pass_30 -> pass_45
+S15S-SLERP-SL1	S15-simd	f0861e2	f0861e2	fixed	5a03d41	test_slerp_decomp.py	NEON Slerp claims the decomp's result to the bit, NaN included: 199 NaN-input cases give a NaN of another sign (144,000 others bit-identical)
 S15S-METRIC	S15-simd	b7a4022	b7a4022	confirmed	-	test_slerp_decomp.py	hotspot metric labelled [E]; note: the 7.745 baseline used a stale 130, not the measured 134
-GATES-FZ-R16a	gates	82805db	82805db	refuted	-	test_ready_fuzz_shards.py	fnvnx-fuzz-summary per shard: shard 1 at 18/10 masks shard 2 at 0/10, fuzz.coverage passes 90 % (text and summary)
-NX1-NRO-N2	NX1	5256786	5256786	refuted	-	test_nx1_nro.py	check_nro passes a RELATIVE relocation into rodata, which hbloader maps read-only (header offsets ok, N1)
-S15-MTQEMU-B1	S15-threads	79481ab	79481ab	refuted	-	test_weak_interlocked.py	tests/s15/mtqemu/build.sh no longer links after S4 79481ab: handles.cpp needs w32_is_std_handle from crt_kernel32.cpp, not in build.sh
+GATES-FZ-R16a	gates	82805db	82805db	fixed	02272b0	test_ready_fuzz_shards.py	fnvnx-fuzz-summary per shard: shard 1 at 18/10 masks shard 2 at 0/10, fuzz.coverage passes 90 % (text and summary)
+NX1-NRO-N2	NX1	5256786	5256786	fixed	9a5390b	test_nx1_nro.py	check_nro passes a RELATIVE relocation into rodata, which hbloader maps read-only (header offsets ok, N1)
+S15-MTQEMU-B1	S15-threads	79481ab	79481ab	fixed	e04253d	test_weak_interlocked.py	tests/s15/mtqemu/build.sh no longer links after S4 79481ab: handles.cpp needs w32_is_std_handle from crt_kernel32.cpp, not in build.sh
 NXR-H1-FIX	render	e0485fc	e0485fc	confirmed	-	test_nx_render_robust.py	.nxcap draws bounded by vertices x instances: H1 exit 1 (ASan build of the head), D1-D7/C1-C6 and 1,000 mutations each of t.nxd9 and n0.nxcap clean
 P0-E1	P0-perfmodel	6e0a34b	6e0a34b	refuted	-	test_a57_calib_circular.py	calibration check point l2_latency echoes cost.l2_lat (22/30/40 in, out); truth.json calls check points independent
 P0-E2	P0-perfmodel	6e0a34b	6e0a34b	refuted	-	test_a57_calib_circular.py	check point taken_l2btb echoes 1 + btb_l2_bubble; without E1/E2 the claimed 4.9 % over 14 points is >= 5.7 % over 12
@@ -106,4 +106,8 @@ NX1-P2	NX1	ac00629	ac00629	refuted	-	test_nx1_publish_nro.sh	a rejected push is 
 S5DATA-PROFILE	S5-data	e601246	e601246	confirmed	-	tests/s4/test_profile.cpp	first-run profile files (tests/s4: 95 tests, 0 failed); the game also copies Fallout_default.ini itself (0x00876ad0)
 S5-ADOPT	S5	352c315	352c315	confirmed	-	test_adopt_lossless.py	adopt of fnv-s5 7bfec755 lossless: 5 stream files equal or every stream line kept
 S16-ADOPT	S16	6a5c605	6a5c605	confirmed	-	test_adopt_lossless.py	adopt of fnv-s16 ce6d1272 lossless: 12 stream files equal
-P6N-GPUPERM	P6n	5f8952b	2f5880c	confirmed	-	test_p6n_gpu_permutations.py	GPU model binds the permutations Render binds (permutations_ on by default; d1p2 for 1+2 lights; e0/ea/ef/runtime), light loop unrolled (G1, G2). 10.25 ms stays model-only: 1+4 lights 11.67, 1+8 14.13 ms (G3); no real captures
+P6N-GPUPERM	P6n	5f8952b	d71bbcf	confirmed	-	test_p6n_gpu_permutations.py	GPU model binds the permutations Render binds (permutations_ on by default; d1p2 for 1+2 lights; e0/ea/ef/runtime), light loop unrolled (G1, G2). 10.25 ms stays model-only: 1+4 lights 11.67, 1+8 14.13 ms (G3); no real captures
+NX1-N2-FIX	NX1	9a5390b	9a5390b	confirmed	-	test_nx1_nro.py	check 1: relocations must target the RW segment: N1-N3 ok
+S15S-SL1-FIX	S15-simd	5a03d41	5a03d41	confirmed	-	test_slerp_decomp.py	NaN claim corrected (Slerp, NiBound, matrix product): non-NaN results to the bit, a NaN result a NaN; 199 payload-only differences, none beyond
+S15T-B2-FIX	S15-threads	e04253d	e04253d	confirmed	-	test_budget_built_levers.py	every plan includes the built levers (frame_budget.build adds placed's); mtqemu links again (w32_std_stub.cpp): B1, B2, W1-W3 ok; 40a8d98 fails B2
+GATES-R16-FIX	gates	02272b0	02272b0	confirmed	-	test_ready_fuzz_shards.py	fuzz.coverage per shard, capped: 18/10 + 0/10 fails at 50 %; R16a, R16b, R17 ok

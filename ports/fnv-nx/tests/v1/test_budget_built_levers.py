@@ -39,16 +39,22 @@ def main():
     built = set(next(s for s in model['scenarios'] if s['id'] == 'placed')['levers'])
     lacking = {s['id']: sorted(built - set(s['levers'])) for s in model['scenarios'] if s['id'] != 'placed'}
     lacking = {k: v for k, v in lacking.items() if v}
-    detail = ''
+    detail, changed = '', False
     if lacking:
         m2 = copy.deepcopy(model)
         for s in m2['scenarios']:
             s['levers'] = list(s['levers']) + lacking.get(s['id'], [])
         a, b = frame_budget.build(model), frame_budget.build(m2)
         lv = lambda o, sid: next(s for s in o['scenarios'] if s['id'] == sid)['results']['1020']['level']  # noqa
-        detail = '; model-only level @1020 as committed -> with the built levers: ' + ', '.join(
+        changed = any(lv(a, k) != lv(b, k) or next(s for s in a['scenarios'] if s['id'] == k)['results']['1020'][
+            'worst_frame_ms'] != next(s for s in b['scenarios'] if s['id'] == k)['results']['1020']['worst_frame_ms']
+            for k in lacking)
+        detail = '; model-only level @1020 as built -> with the built levers listed: ' + ', '.join(
             '%s %s -> %s' % (k, lv(a, k), lv(b, k)) for k in lacking)
-    case('B2', not lacking, 'scenarios without the built levers: %s%s' % (lacking, detail))
+    # the defect is a plan costed without a lever the build has. Since e04253d frame_budget.build() adds the
+    # 'placed' levers to every scenario itself, so a model file that lists fewer gives the same result
+    case('B2', not lacking or not changed, 'scenarios listing fewer than the built levers: %s%s%s' % (
+        lacking, detail, ' (build() adds them: same result)' if lacking and not changed else ''))
     print('%d defects' % BAD)
     return 1 if BAD else 0
 

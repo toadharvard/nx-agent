@@ -170,10 +170,21 @@ def main(argv):
     bad += res['a64'].returncode != 0
     m = re.search(r'(\d+) differ only in a NaN payload', res['a64'].stderr)
     nanpl = int(m.group(1)) if m else -1
-    print('ok  ' if nanpl == 0 else 'FAIL', 'SL1 slerp_00a6e330.c\'s header: "the decomp\'s [result] to the bit for every '
-          'input, NaN and infinity included": %d cases with NaN inputs give a NaN of another sign or payload than the decomp'
-          % nanpl)
-    bad += nanpl != 0
+    # SL1 checks the claim the override's header makes. Up to 5a03d41 it said "to the bit ..., NaN included"; since
+    # then: every non-NaN result to the bit, a NaN result a NaN whose sign and payload may differ. A payload-only
+    # difference ("differ only in a NaN payload") refutes the first wording and is what the second one allows.
+    hdr = open(os.path.join(PORT, 'tools', 'link', 'overrides', 'slerp_00a6e330.c')).read().split('*/', 1)[0]
+    nan_bits = re.search(r'NaN\s+and\s+infinity\s+included', hdr) is not None
+    if nan_bits:
+        ok_sl1 = nanpl == 0
+        text = '"to the bit for every input, NaN and infinity included": %d cases with NaN inputs give a NaN of ' \
+               'another sign or payload' % nanpl
+    else:
+        ok_sl1 = nanpl >= 0 and res['a64'].returncode == 0
+        text = '"every non-NaN result to the bit, a NaN result a NaN": %d payload-only NaN differences, none beyond ' \
+               '(the bit-for-bit line above)' % nanpl
+    print('ok  ' if ok_sl1 else 'FAIL', 'SL1 slerp_00a6e330.c\'s header claim ' + text)
+    bad += not ok_sl1
     la = res['a64'].stdout.split('\n')
     for tag, modes in (('sse', '012345'), ('x87', '012345'), ('x87', '012')):
         lb = res[tag].stdout.split('\n')
