@@ -40,13 +40,17 @@ DEFAULT_IMPORTS = os.path.join(HERE, "..", "..", "platform", "win32", "imports.t
 
 def read_log(path):
     """-> (records [(seq, hits, phase, kind, key, caller)], has_counts, faults, stop)"""
-    recs, fallback, faults, stop = [], [], [], []
+    recs, fallback, faults, stop, skips = [], [], [], [], []
     phase = "init"
     lines = open(path, errors="replace").read().splitlines()
     for i, l in enumerate(lines):
         if l.startswith("trap-table\t"):
             f = l.split("\t")
             recs.append((int(f[1]), int(f[2]), f[3], f[4], f[5], f[6] if len(f) > 6 else "-"))
+            continue
+        if l.startswith("skip-summary\t"):   # every skipped initializer, grouped (emu_guest.py)
+            f = l.split("\t")
+            skips.append((int(f[1]), f[2], f[3], f[4] if len(f) > 4 else ""))
             continue
         if "fnvnx boot: calling WinMain" in l:
             phase = "winmain"
@@ -65,6 +69,8 @@ def read_log(path):
             stop = [l] + [x for x in lines[i + 1:i + 10] if x.strip().startswith(("pc", "lr", "#", "S10"))]
         if l.startswith("STOPPED") or l in ("PASS", "FAIL"):
             stop.append(l)
+    if skips:   # the complete grouping replaces the first 30 printed skip lines
+        faults = [(f"{n} x", why, site + " (first: " + first + ")") for n, why, site, first in skips]
     if recs:
         return sorted(recs), True, faults, stop
     return fallback, False, faults, stop
@@ -243,6 +249,8 @@ def main(argv):
             return "no unit defines it (not decompiled)"
         sts = [objects.get(u[0], ("?", ""))[0] for u in us]
         if objects and all(s != "ok" for s in sts):
+            if census and all(census.get(u[0], (1, ""))[0] == 0 for u in us):
+                return "defining unit failed in the linked set, clean in the census now (needs a fresh S2 run)"
             return "defining unit failed to compile"
         if objects and any(s == "ok" for s in sts):
             return "defining unit compiled, function not in the link (S2 binding or not emitted)"
@@ -321,7 +329,13 @@ def main(argv):
         ce, cerr = census.get(name, ("", ""))
         print(f"  #{p['first']:<4} {p['keys']:3} keys {p['hits']:6} hits  {u[:64]:64} {st:4} "
               f"{(str(ce) + ' errors') if ce != '' else ''} {(cerr or err)[:80]}")
-    if faults:
+    if faults and faults[0][0].endswith(" x"):
+        print("\ninitializers skipped after a fault, by fault and faulting function (all of them):")
+        for n, why, site in faults[:15]:
+            m = re.search(r"\[orig ([0-9a-f]{8})\]", site)
+            us = sorted({u[0] for u in units_at(int(m.group(1), 16))[0]}) if m else []
+            print(f"  {n:>8}  {why[:34]:34} {site[:110]}" + (f"  <- {','.join(us)[:60]}" if us else ""))
+    elif faults:
         fs = collections.Counter(re.sub(r"\+0x[0-9a-f]+$", "", f[2]) for f in faults)
         print(f"\ninitializer faults (printed: {len(faults)}), by faulting function:")
         for k, n in fs.most_common(8):

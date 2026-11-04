@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import struct
 import sys
@@ -472,6 +473,26 @@ class Emu:
         self.sym_names = [by_addr[a] for a in self.sym_addrs]
         self._bisect = bisect.bisect_right
 
+    def skip_summary(self, top=25):
+        """All skipped initializers grouped by (fault, faulting function):
+        skip-summary <count> <fault> <faulting function> <first initializer>"""
+        import collections
+        groups, first = collections.Counter(), {}
+        for init, pc, err in getattr(self, "skipped", None) or []:
+            site = re.sub(r"\+0x[0-9a-f]+$", "", self.sym(pc).split(" ", 1)[-1])
+            if site == re.sub(r"\+0x[0-9a-f]+$", "", self.sym(init).split(" ", 1)[-1]):
+                site = "(in the initializer itself)"
+            try:
+                (w,) = struct.unpack("<I", self.uc.mem_read(pc, 4))
+                if w & 0xFFE0001F == 0xD4200000:   # brk #imm: __builtin_trap()
+                    site = f"brk #{(w >> 5) & 0xFFFF:#x} " + site
+            except UcError:
+                pass
+            key = (re.sub(r" \(UC_ERR_\w+\)", "", err), site)
+            groups[key] += 1
+            first.setdefault(key, self.sym(init).split(" ", 1)[-1])
+        return [f"skip-summary\t{n}\t{k[0]}\t{k[1]}\t{first[k]}" for k, n in groups.most_common(top)]
+
     def trap_table(self):
         """Lines of the guest's trap statistics (toolchain/game/boot.cpp fnvnx_trap_stats) in first-hit order:
         trap-table <seq> <hits> <init|winmain> <sym|ptr|iat> <name or orig address> <caller of the first hit>."""
@@ -629,7 +650,7 @@ class Emu:
                 g = getattr(self, "guard", {}).pop(t.tid, None)
                 if g is not None and len(self.skipped) < getattr(self, "max_skips", 100000):
                     pc = uc.reg_read(UC_ARM64_REG_PC)
-                    self.skipped.append((g[2], pc))
+                    self.skipped.append((g[2], pc, str(e)))
                     if len(self.skipped) <= 30:
                         print(f"   skipped initializer {self.sym(g[2])}: {e} at {self.sym(pc)}")
                     uc.context_restore(g[0])
@@ -680,7 +701,7 @@ def main(argv):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
-        for line in emu.trap_table():
+        for line in emu.skip_summary() + emu.trap_table():
             print(line)
         print(f"STOPPED: {why}")
         return 1
@@ -701,7 +722,7 @@ def main(argv):
     if getattr(emu, "skipped", None) is not None:
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
-    for line in emu.trap_table():
+    for line in emu.skip_summary() + emu.trap_table():
         print(line)
     ok = rc == 0 and a.expect in out and tp_ok
     print("PASS" if ok else "FAIL")
