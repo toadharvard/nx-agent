@@ -16,6 +16,10 @@ or `signedness?`.
         by tools/farm/fuzz_job.sh) or a causes_cum.json; one fnvnx-causes/1 for all shards (examples dropped)
     causes.py explain <div.json>...
         the refined cause of each record and the rule that gave it
+    causes.py handoffs <campaign dir>... --out-dir d [--recheck-tag t] [--effects e.jsonl] [--ref-prefix p]
+        the per-owner lists: handoffs_<owner>.tsv (real-bug), triage_<owner>.tsv, harness_<owner>.tsv (artifacts
+        with an owner), one row per counted divergence: owner, cause, address, unit, reproducer
+        (<ref-prefix><campaign dir name>:div/<file>, default prefix fuzz/cache/), first effect; and index.tsv
 
 Input layout of a campaign or fuzz cache directory (fuzz.py / fuzzcache.py; branch fuzz/cache/<k>of<N>):
     results.jsonl          one row per function: address, source (unit), status ('ok' is fuzzed; setup:*, run:*,
@@ -747,6 +751,54 @@ def merge(paths):
     return tot
 
 
+HANDOFF_FILES = (('real-bug', 'handoffs'), ('triage', 'triage'), ('artifact', 'harness'))
+HANDOFF_COLUMNS = ('owner', 'cause', 'address', 'unit', 'reproducer', 'first effect')
+
+
+def handoff_rows(dirs, tag='', ref_prefix='fuzz/cache/'):
+    """{(file stem, owner): [row]} for every counted divergence whose cause has an owner and is not by design;
+    rows are HANDOFF_COLUMNS tuples, sorted by cause, address and reproducer."""
+    prefix = dict(HANDOFF_FILES)
+    out = collections.defaultdict(list)
+    for d in dirs:
+        results, divs = _load_campaign(d, tag)
+        name = os.path.basename(os.path.normpath(d))
+        for rec in divs:
+            if results.get(rec['address'], {}).get('status', 'ok') != 'ok':
+                continue
+            cls, owner = policy(rec['_cause'])[:2]
+            if cls not in prefix or owner in ('-', ''):
+                continue
+            e = EFFECTS.get(rec['_file']) or {}
+            out[(prefix[cls], owner)].append((owner, rec['_cause'], rec['address'], rec.get('source') or '',
+                                              '%s%s:div/%s' % (ref_prefix, name, rec['_file']), e.get('first') or ''))
+    for rows in out.values():
+        rows.sort(key=lambda r: (r[1], r[2], r[4]))
+    return dict(out)
+
+
+def write_handoffs(dirs, out_dir, tag='', ref_prefix='fuzz/cache/'):
+    """Write the per-owner TSVs and index.tsv (file, class, owner, rows, functions, causes); returns the index."""
+    os.makedirs(out_dir, exist_ok=True)
+    groups = handoff_rows(dirs, tag, ref_prefix)
+    cls_of = {stem: cls for cls, stem in HANDOFF_FILES}
+    index = []
+    for (stem, owner), rows in sorted(groups.items()):
+        fn = '%s_%s.tsv' % (stem, owner)
+        with open(os.path.join(out_dir, fn), 'w') as f:
+            f.write('\t'.join(HANDOFF_COLUMNS) + '\n')
+            for r in rows:
+                f.write('\t'.join(r) + '\n')
+        cs = collections.Counter(r[1] for r in rows)
+        index.append((fn, cls_of[stem], owner, len(rows), len({r[2] for r in rows}),
+                      ', '.join('%s %d' % kv for kv in sorted(cs.items(), key=lambda kv: (-kv[1], kv[0])))))
+    with open(os.path.join(out_dir, 'index.tsv'), 'w') as f:
+        f.write('file\tclass\towner\trows\tfunctions\tcauses\n')
+        for row in index:
+            f.write('\t'.join(str(x) for x in row) + '\n')
+    return index
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -760,9 +812,19 @@ def main(argv=None):
     m.add_argument('--out', default='')
     e = sub.add_parser('explain')
     e.add_argument('files', nargs='+')
+    h = sub.add_parser('handoffs')
+    h.add_argument('dirs', nargs='+')
+    h.add_argument('--out-dir', required=True)
+    h.add_argument('--recheck-tag', default='')
+    h.add_argument('--effects', action='append', default=[], help='difffuzz.py effects output (JSON lines)')
+    h.add_argument('--ref-prefix', default='fuzz/cache/', help='reproducer = <prefix><dir name>:div/<file>')
     a = ap.parse_args(argv)
-    if a.cmd == 'summary' and a.effects:
+    if a.cmd in ('summary', 'handoffs') and a.effects:
         load_effects(a.effects)
+    if a.cmd == 'handoffs':
+        for row in write_handoffs(a.dirs, a.out_dir, a.recheck_tag, a.ref_prefix):
+            print('%-22s %-9s %-5s rows %5d fn %5d  %s' % row)
+        return 0
     if a.cmd in ('summary', 'merge'):
         out = summarize(a.dirs, a.recheck_tag) if a.cmd == 'summary' else merge(a.files)
         txt = json.dumps(out, indent=1, sort_keys=True)
