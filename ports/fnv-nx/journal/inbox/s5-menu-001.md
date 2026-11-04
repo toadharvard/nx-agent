@@ -39,8 +39,8 @@ install (tests/s5/synth_install.py) and the stub table. Each boot takes 25-60 s 
      - Without it the D3D format list 0x0126f0f8 is empty, the adapter has 0 modes, and the boot fails with
        "Failed to initialize renderer. Your display doesn't support the selected resolution."
      - Stand-in: four `before-winmain` lines in known_faults.txt.
-     - Shapes of the 537: 199 frame-pointer bodies, 71 push/call, many FPU constant stores; the reproducer is the
-       classification script in this note's commit message.
+     - The list and its shapes: `tests/s5/xc_missing.py <exe> <addrmap> --thunks` (on 06857911f5ab: 199
+       frame-pointer bodies, 71 push/call, many x87 constant stores, 5 thunks).
      - **S1/S2d**: natives for them. **S2c/S10**: synthesize the thunk shape at link time, and have mkxctab or
        the boot report the missing count.
   3. NiD3DShaderProgramFactory::RegisterCreator 0x00e93e70 -> NiTStringTemplateMap::SetAt 0x00a642a0 calls
