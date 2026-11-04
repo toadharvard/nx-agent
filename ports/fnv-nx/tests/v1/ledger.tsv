@@ -120,3 +120,21 @@ S15S-QUAT	S15-simd	7c4e9db	7c4e9db	confirmed	-	test_s15simd_decomp.py	FromRotati
 S15S-QUAT-ROW	S15-simd	beb2ba6	beb2ba6	confirmed	-	test_s15simd_decomp.py	89 -> 77 per call is the largest-diagonal path (76-77); the trace > 0 path is 34 (decomp 47): the row overstates the cost (note QF1)
 S15S-BOUNDMAT	S15-simd	314a221	314a221	confirmed	-	test_s15simd_decomp.py	NiBound::Update and 0x00a588a0 = the decomp; only NaN sign/payload differs
 S15S-BOUNDMAT-ROW	S15-simd	1c74384	1c74384	confirmed	-	test_s15simd_decomp.py	NiBound 19, mat3 39 per call; the before 46 reproduces without plugins, 52 with the order plugin
+NX1-G1	NX1	785d700	785d700	refuted	-	test_nx1_checks.py	check 6 passes a package on a native host.elf alone; the default full build links the guest with D3D9=null and no render overrides, so nothing calls nxgpu (black screen)
+NX1-G3	NX1	78d75b2	78d75b2	refuted	-	test_nx1_checks.py	a pool written (600u * 1024 * 1024) is read as 600 bytes: pools.fit passes 849 MiB of pools in a 512 MiB heap
+NX1-S1	NX1	e6c895f	e6c895f	refuted	-	test_nx1_checks.py	dc cvap (ARMv8.2 FEAT_DPB, UNDEFINED on the Cortex-A57) is allowlisted
+NX1-S2	NX1	e6c895f	e6c895f	refuted	-	test_nx1_checks.py	ldadd, casal, swp, ldapr and fadd h (ARMv8.1+, UNDEFINED on the A57) pass the instruction scan
+NX1-S5	NX1	e6c895f	e6c895f	refuted	-	test_nx1_checks.py	pm:shell, named by the commit as a failing system-only name, is never matched (the service pattern allows 4 characters after the colon)
+NX1-S3	NX1	e89ee89	e89ee89	refuted	-	test_nx1_checks.py	unreviewed service names outside the scan corpus (spsm, psc:m) are dropped, not failed
+NX1-EXIT-P1	NX1	6c432f0	6c432f0	refuted	-	test_nx1_checks.py	"orderly exit on HOME close": nothing calls appletLockExit, so AM terminates the process and cleanup_for_exit / exit(0) never run (from libnx applet.h; not tested on hardware)
+S15S-SS2	S15-simd	8fc5af8	8fc5af8	refuted	-	test_s15_sse_scalar.py	scalar _mm_rsqrt_ss etc. claim sse2neon's bits: same at -O2/-O3; at -O0 rsqrt_ss of a negative gives ffc00000 where sse2neon gives 7fc00000 (x86 gives ffc00000 too: harmless for the oracle)
+NX1-H1	NX1	c203030	c203030	confirmed	-	test_nx1_checks.py	HOST_BACKEND=native by default, package HOST=native
+NX1-M1	NX1	3db7366	3db7366	confirmed	-	test_nx1_checks.py	check 2 accepts a 100 MiB first-cell budget; refuses 1400 MiB, main-menu only and a 1 GiB address space
+NX1-T1	NX1	023421d	023421d	confirmed	-	test_nx1_checks.py	the encoded NPDM main thread stack is 0x400000
+NX1-T2	NX1	d9462c7	d9462c7	confirmed	-	test_nx1_checks.py	placement and cpu_spec stay on cores 0-2
+NX1-F1	NX1	bc92651	bc92651	confirmed	-	test_nx1_checks.py	check 5 accepts the package tree and refuses Data/ (check_fs 21/21)
+NX1-C1	NX1	8a726fd	8a726fd	confirmed	-	test_nx1_checks.py	first-run checklist passes, fails without the hold-R step
+NX1-L1	NX1	57907a2	57907a2	confirmed	-	test_nx1_checks.py	lenient decoding: Latin-1 tool output with exit 1 stays a fail
+GATES-TR	gates	e446506	e446506	confirmed	-	test_gates_trend.py	fnvnx-trend/1: rise, lost, missing head, creep, re-score and direction all detected; no false alarm
+GATES-D18	gates	21867b6	21867b6	confirmed	-	test_gates_trend.py	thresholds implement D18: 60 fps worst frame, stock 1.02 GHz, handheld_720p (note: perf.budget at 16.7 ms, perf.frame at 16.667 ms)
+S15S-PB	S15-simd	e8891c1	e8891c1	confirmed	-	test_s15_pass_bucket.py	82 -> 54 with no code change: the stack protector dropped from compile.sh (2be012c) explains 68 -> 53 static; same x86 path (~38 on both links)
