@@ -2332,6 +2332,9 @@ def r_msvc_library_internals(path, text, stats):
 # out of it), of names the base declares as members (its bases' too, as far as the file defines them) and that the
 # class itself, the function's parameters or its locals do not declare: the members MSVC found. Type names,
 # enumerators and macros are left alone, and so are static member functions and friends.
+# TPL1-NESTED: the same for a class nested in a class template (no template head of its own) whose base is another
+# member class of that template (speedtree's hand-written vector: `struct Iterator : ConstIterator` using `aux`,
+# `ptr`): that base is a member of the current instantiation, which GCC does not search either.
 
 TPL1_CLASS = re.compile(r'\btemplate\s*<((?:[^<>]|<[^<>]*>)*)>\s*(?:struct|class)\s+'
                         r'(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)?([A-Za-z_]\w*)\s*(?::\s*([^{};]*))?\{')
@@ -2456,12 +2459,23 @@ def r_dependent_base_members(path, text, stats):
         inc[name] = (vals, types)
         return inc[name]
     fixes = {}                                             # class open -> names to qualify
+    templates = [(d[0], d[1], d[3]) for v in classes.values() for d in v if d[3]]
     for name, defs in classes.items():
         for d in defs:
             o, c, bases, params, scope, _ = d
-            if not params or not bases: continue
+            if not bases: continue
+            # a class nested in a class template: a base that is another member class of that template is a member
+            # of the current instantiation, as dependent as a base naming the parameters (TPL1-NESTED)
+            outer = [(to, tc, tp) for to, tc, tp in templates if to < o < tc]
+            if not params and not outer: continue
             dep, dep_types = set(), set()
             for bname, args in _base_specs(bases):
+                if not params:
+                    nested = [bd for bd in visible(bname, scope) if any(to < bd[0] < tc for to, tc, _ in outer)]
+                    for bd in nested:
+                        v, ty = members_of(bd)
+                        dep |= v; dep_types |= ty
+                    continue
                 if args is None or not set(re.findall(r'[A-Za-z_]\w*', args)) & params: continue
                 found = visible(bname, scope)
                 for bd in found:
@@ -2473,6 +2487,7 @@ def r_dependent_base_members(path, text, stats):
             own_v, own_t = _members(_flat_body(text, o, c), name)
             names = dep - dep_types - own_v - own_t - params - {name}
             if names: fixes[o] = (name, names)
+            if names and not params: stats['TPL1-NESTED'] += 1
     if not fixes: return text
     bodies = []                                            # (body open, body close, head, names)
     for fo, fc, k, h in spans:

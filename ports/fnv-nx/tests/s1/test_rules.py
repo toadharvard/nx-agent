@@ -157,6 +157,13 @@ got = s1.r_specialization_decls('/x/src/speedtree/projectedshadow_ob1_variant.cp
 check('SPEC1 never prefixes a preprocessor line: after the directives that follow its anchor', got,
       ['#include <memory>\ntemplate <> X<char>::X(int); /* fnv-nx SPEC1 */ template <class T> struct B;'])
 
+got = run(s1.r_dependent_base_members, 'template <class T> struct V\n{\n    struct A {};\n    struct CI\n    {\n'
+          '        A* aux;\n        T* ptr;\n    };\n    struct I : CI\n    {\n'
+          '        I& operator+=(int n) { if (!aux) f(); ptr += n; return *this; }\n        void g(int ptr) { ptr = 1; }\n'
+          '    };\n};\nstruct P { int q; };\nstruct O : P { void h() { q = 1; } };\n')
+check('TPL1-NESTED this-> for members of a sibling member class used as base in a class template', got,
+      ['if (!this->aux) f(); this->ptr += n;', 'void g(int ptr) { ptr = 1; }', 'void h() { q = 1; }'])
+
 # ---- MATH1
 check('MATH1 drops a decomp copy of float sqrt(float)',
       run(s1.r_math_overloads, 'inline float __cdecl sqrt(float _X)\n{\n    return sqrtf(_X);\n}\n'), ['#include <math.h>'],
