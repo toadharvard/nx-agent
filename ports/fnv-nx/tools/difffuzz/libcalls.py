@@ -46,9 +46,12 @@ A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp'
             '__cxa_guard_acquire': 'guard_acquire', '__cxa_guard_release': 'guard_release',
             '__cxa_guard_abort': 'guard_abort'})
 
-# sized operator delete(void*, unsigned) is the game's own deallocator (??3@YAXPAXI@Z -> 0x00aa1460), unsized
-# delete 0x00401030: GCC's sized forms stand for the former (S2 keeps them as runtime names: the real link binds them
-# to the platform's delete, see docs/DIFFFUZZ.md findings)
+# sized operator delete(void*, unsigned) is the game's ??3@YAXPAXI@Z at 0x00aa1460, unsized delete 0x00401030; GCC's
+# sized forms stand for the former. Both free into the same heap (read from the MSVC objects): 0x00401030 ->
+# MemoryManager::Deallocate (0x00aa4060) on g_memoryManager (0x011f6238); 0x00aa1460 -> slot 2 of the NiAllocator at
+# *(0x011f6080), a BSNiAllocator installed by InitializeGlobal (0x00866690) / _InitHolder (0x00aa2020), whose
+# deallocate (0x00aa22b0) calls the same MemoryManager::Deallocate on g_memoryManager (after an alignment adjustment
+# for allocation type 10 only; 0x00aa1460 passes type 3). Slot 2 = 0x00aa22b0 is inferred from its signature.
 EQUIV = {'_Znwm': 0x00401000, '_Znwj': 0x00401000, '_Znam': 0x00401000, '_Znaj': 0x00401000,
          '_ZdlPv': 0x00401030, '_ZdlPvm': 0x00aa1460, '_ZdlPvj': 0x00aa1460, '_ZdaPv': 0x00401030,
          '_ZdaPvm': 0x00aa1460, '_ZdaPvj': 0x00aa1460, '__dynamic_cast': 0x00ec43fb}

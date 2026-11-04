@@ -28,6 +28,10 @@ FAMILIES = [
     ('STR1', re.compile(r'& str_[0-9a-f]{8}')),
     ('CALL1', re.compile(r'\( (?:LP|LPC|P)[A-Z]\w* \)')),
     ('RCAST1', re.compile(r'\( \w+ & \)|\bfnvnx_lvalue\b')),
+    ('GAME1', re.compile(r'\bfnvnx_game_\w+')),
+    ('XINC1', re.compile(r'\w+_s1b\b')),
+    ('FALL1', re.compile(r'\b__builtin_trap\b')),
+    ('FTOL1', re.compile(r'\bfnvnx_ftol\w*|\bfnvnx_x87_\w+')),
     ('XC1', re.compile(r'__fnvnx_dyn(?:init|exit)_|\bfnvnx_xc_atexit\b|\bfnvnx_dyn_tag\b')),
     ('VCALL', re.compile(r'\bFNVNX_MSVC_VCALL\b')),
     ('FNVNX', re.compile(r'\bfnvnx_(?!lvalue|xc_atexit|dyn_tag|asm|rdtsc)\w+|\bFNVNX_(?!MSVC_VCALL|KEEP)\w+')),
@@ -117,6 +121,16 @@ def cmd_rules(out):
             stats['changed'] += 1
             for f in fams:
                 stats[f] += 1
+    # S1b per-site patches: exact attribution from the patch files (`@@ RULE source 0xaddr`)
+    pdir = config.PORT / 'patches'
+    for p in sorted(pdir.glob('*.s1b')) if pdir.exists() else []:
+        for line in open(p, encoding='utf-8', errors='replace'):
+            f = line.split()
+            if len(f) >= 4 and f[0] == '@@' and f[3].startswith('0x'):
+                key = '%08x' % int(f[3], 16)
+                ent = res.setdefault(key, dict(changed=True, rules=[]))
+                ent['rules'] = sorted(set(r for r in ent['rules'] if r != 'other') | {f[1]})
+                stats['site:' + f[1]] += 1
     json.dump(dict(functions=res, stats=stats), open(out, 'w'))
     print(dict(stats))
 
