@@ -7,27 +7,27 @@
   figures. That link also re-probes every layout, because of the pod2 rule.
 * **did** - Bridge-gap pairs, measured as S1b's abiclass BRIDGE pairs (unique src/address/reference):
   **2,221 -> 32** (replayed with the tree; 58 without it). The commits:
-  - `c9ea866` The synthesized vtable/body objects (`<host>#vtables`) asked for layouts under their own name. 985
+  - `e0ed8d5` The synthesized vtable/body objects (`<host>#vtables`) asked for layouts under their own name. 985
     probe rows failed and 1,283 manual rows were never decided on bytes. They now use the host unit. 2,221 -> 943.
-  - `8a8a6c8` Variadic pairs (`abi.varargs_check`). AArch64 Linux passes anonymous arguments like named ones. A
+  - `0750425` Variadic pairs (`abi.varargs_check`). AArch64 Linux passes anonymous arguments like named ones. A
     variadic reference needs no bridge when the definition reads only named parameters: the retail loggers
     0x005b5e40, 0x0040fbe0, 0x00a29680 and 0x00c3c220 are `return 0`. A variadic definition needs none when the
     reference's tail is integers, pointers or doubles. Narrow tails are extended in place. 943 -> 246.
-  - `15be800` The link stage builds and passes the port's own overrides by default (`OVERRIDE=auto`, through
+  - `94a3d29` The link stage builds and passes the port's own overrides by default (`OVERRIDE=auto`, through
     `tools/link/overrides/build.sh`). Before, farm links ran without the 0x00703c00 logger replacement. 246 -> 100.
-  - `505c184` Unprototyped `int f(...)` references, and both-variadic pairs where the definition names more: 32-bit
+  - `e2dbe73` Unprototyped `int f(...)` references, and both-variadic pairs where the definition names more: 32-bit
     integer and pointer parameters taken from the anonymous words. 100 -> 65.
-  - `4bbb171` `T *__restrict` was classified as an unknown type. It is now a pointer (0x00a6dbd0 Negate and 3 more).
+  - `8e9ad7a` `T *__restrict` was classified as an unknown type. It is now a pointer (0x00a6dbd0 Negate and 3 more).
     65 -> 58.
   - Tests that run under qemu-aarch64: `test_varargs.py` has 12 verdicts and 8 executed pairs; dropping the
     extensions fails 2. `test_bridges.py` executes 9 bridges, one new. `test_bridges.execute` is shared.
 * **did (S13b hand-offs)** - S2c's rows in `reports/s13b-causes`:
-  - **import-slot-called 11 -> 0** (`e3db828`, comment fixed in the next commit). The rows were VirtualAlloc and
+  - **import-slot-called 11 -> 0** (`4d723fb`; its comment is fixed in db26c31, whose message cites the pre-rebase id e3db828). The rows were VirtualAlloc and
     VirtualFree (c10) and EnterCriticalSection (c11). resolve binds these calls to the API, and the harness traces
     the native API at its IAT slot address. That is `runtime-equiv`, as report.py already said. A slot of another
-    import stays `import-slot-called`. Correction: e3db828's message names only VirtualAlloc and VirtualFree.
+    import stays `import-slot-called`. Correction: 4d723fb's message names only VirtualAlloc and VirtualFree.
   - **split-global 35** breaks down as follows:
-    - 3 are real link bugs, fixed in `d40c0c5`. tesform.cpp defines `DAT_011c54cc` and
+    - 3 are real link bugs, fixed in `a8a32dd`. tesform.cpp defines `DAT_011c54cc` and
       `fnv_00485a70::DAT_011c54cc` (and 011c54d0) in one object. objcopy renames one old name per new name, so the
       second stayed a strong private `.bss` copy. It is now `__fnv_<addr>_d<n>`, defined as the address symbol in
       aliases.ld. test_bindings has a check that fails without the fix. On link/c0d6c71516f6 only tesform shows this.
@@ -41,7 +41,7 @@
       (exe_pair, synthesis) and S13 (compare against the V map). I did not touch vtable code.
     - 21 are native reads of a named data stub (an unbound variable).
     - 3 are `??__E` initializers passing a stub as the second argument of GlobalObject2 0x0045cfe0. They are fixed
-      in `75dbabc` (`text-addr`). The generated initializers pass immediates as arrays placed at the number
+      in `d38ce7e` (`text-addr`). The generated initializers pass immediates as arrays placed at the number
       (`g_011c5a4c_arg1` at 0x00a00000, `g_011d3450_arg1` at 0x006e6e6e). Such an array or char label now binds to
       an absolute symbol at that address, which is the x86 value. 11 unit references on link/c0d6c71516f6. The
       metric goes from 70 to 67.
