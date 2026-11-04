@@ -465,6 +465,72 @@ def test_vcall_split():
           causes.policy('vcall-garbage')[:2] == ('artifact', 'S13'), 'vcall split classes')
 
 
+def test_unclassified_shapes():
+    """The bucket rules for records no other rule took: canned results, thunks, wild calls, garbage, stubs."""
+    def r(div, case, cause='unclassified'):
+        x = rec(div, cause)
+        x['case'] = case
+        return causes.refine(x, cause)
+    canned = '5e1f2a77' + '00' * 12            # call 1 returns 0x772a1f5e (made up)
+    case = dict(seed=12345, bg='zero', rets=['00' * 16, canned])
+    blk = causes._alloc_result(0)              # the block call 0 (an allocator) returned
+    check(r(dict(kind='call-args', arg='p0', cls='P', x86=w(0x772a1f5e), arm=w(blk), index=2), case) == 'ctor-this',
+          'oracle passes the constructor\'s canned result, native the allocator block: ctor-this')
+    check(r(dict(kind='return', x86=w(blk), arm=w(0x772a1f5e)), case) == 'ctor-this',
+          'returns the allocator block vs the constructor\'s canned result: ctor-this')
+    check(r(dict(kind='mem-write', addr='03000010', ndiff=4, x86=w(0x772a1f5e, 0), arm=w(blk, 0), only_x86=0,
+                 only_arm=0), case) == 'ctor-this', 'stores the constructor result vs the block: ctor-this')
+    check(r(dict(kind='call-args', arg='p0', cls='P', x86=w(0x772a1f5e), arm=w(blk), index=1), case) ==
+          'unclassified', 'the canned result of a later call does not count')
+    check(r(dict(kind='call-args', arg='this', cls='P', x86=w(0x772a1f5e), arm=w(0x06effff0), index=2), case) ==
+          'canned-this', 'oracle uses an earlier canned eax as this, native its frame temporary: canned-this')
+    check(r(dict(kind='call-args', arg='this', cls='P', x86=w(0x772a1f5f), arm=w(0x06effff0), index=2), case) ==
+          'unclassified', 'a pointer that is no canned result stays open')
+    check(r(dict(kind='call-args', arg='p1', cls='F32', x86=f32(0.5), arm=w(0x772a1f5e), index=2), case) ==
+          'native-stale-result', 'native passes the previous call\'s result register: native-stale-result')
+    check(r(dict(kind='call-args', arg='p1', cls='F32', x86=f32(0.5), arm=w(0x772a1f5e), index=3), case) ==
+          'unclassified', 'a result of an older call is not the stale register')
+    # wild jumps into the AArch64 private range on the random background
+    check(r(dict(kind='error', x86=None, arm='fault:x:0a123457'), dict(seed=1, bg='rand')) ==
+          'native-wild-private', 'random background: native jumps into its private range: native-wild-private')
+    check(r(dict(kind='error', x86=None, arm='fault:x:0a123457'), dict(seed=1, bg='zero')) == 'unclassified',
+          'the same on the zero background stays open')
+    # a stored word with top byte 0x08 normalised as a code stub pointer
+    check(r(dict(kind='mem-write', addr='03000013', ndiff=1, x86='11223308aabbccdd', arm='11223300aabbccdd',
+                 only_x86=0, only_arm=0), case) == 'stub-normalized', 'only a 0x08 byte cleared: stub-normalized')
+    check(r(dict(kind='mem-write', addr='03000013', ndiff=1, x86='11223309aabbccdd', arm='11223300aabbccdd',
+                 only_x86=0, only_arm=0), case) == 'unclassified', 'another byte value stays open')
+    # planted garbage stored / returned
+    gx = sorted(causes._garbage_words(777, 'x86'))[5]
+    ga = sorted(causes._garbage_words(777, 'a64'))[5]
+    gcase = dict(seed=777, bg='zero')
+    check(r(dict(kind='mem-write', addr='03000020', ndiff=4, x86=w(gx, 0), arm=w(ga, 0), only_x86=0, only_arm=0),
+            gcase) == 'uninit-both', 'both store their own garbage: uninit-both')
+    check(r(dict(kind='return', x86=w(0x1234), arm=w(ga)), gcase) == 'uninit-arm', 'native returns garbage: uninit-arm')
+    check(r(dict(kind='return', x86=w(gx), arm=w(0x1234)), gcase) == 'uninit-x86', 'oracle returns garbage: uninit-x86')
+    # native object facts (stubbed): this-adjusting thunks and placeholder bodies
+    facts, callees = causes._object_facts, causes.native_callees
+    try:
+        causes._object_facts = lambda src: ({'__fnv_00401000': {0x38}}, {'_ZN1T4zeroEv'})
+        causes.native_callees = lambda src, a: {'_ZN1T4zeroEv'}
+        check(r(dict(kind='call-args', arg='this', cls='P', x86=w(0x02ffffc8), arm=w(0x03000000), index=0), case) ==
+              'thunk-binding', 'this - 0x38 where the native has a _ZThn56_ thunk: thunk-binding')
+        check(r(dict(kind='call-args', arg='this', cls='P', x86=w(0x02fffff0), arm=w(0x03000000), index=0), case) ==
+              'layout-offset', 'this - 0x10 without such a thunk: layout-offset')
+        check(r(dict(kind='return', x86=w(5), arm=w(0)), case) == 'native-zero-stub',
+              'native returns 0 and calls a `mov w0, #0; ret` body: native-zero-stub')
+        causes._object_facts = lambda src: ({}, set())
+        check(r(dict(kind='return', x86=w(5), arm=w(0)), case) == 'unclassified', 'no placeholder body: open')
+    finally:
+        causes._object_facts, causes.native_callees = facts, callees
+    # a probe's cause is never overridden, and only what would stay unclassified is taken
+    check(r(dict(kind='call-args', arg='p0', cls='P', x86=w(0x772a1f5e), arm=w(blk), index=2), case, 'call-flow') ==
+          'call-flow', 'the bucket rules leave call-flow alone')
+    for c in ('ctor-this', 'canned-this', 'native-wild-private', 'stub-normalized', 'thunk-binding',
+              'native-stale-result', 'native-zero-stub'):
+        check(c in causes.POLICY, 'policy row for %s' % c)
+
+
 if __name__ == '__main__':
     test_rules()
     test_vcall_split()
@@ -473,5 +539,6 @@ if __name__ == '__main__':
     test_object_reader()
     test_handoffs()
     test_cli_effects()
+    test_unclassified_shapes()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)

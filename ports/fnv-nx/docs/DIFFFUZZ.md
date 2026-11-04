@@ -264,6 +264,14 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | call-target: the native function never names the oracle's callee (from its object) | `native-inlined` | triage |
 | one side's store covers bytes the other leaves | `store-width` / `x86-only-store` / `native-only-store` | triage |
 | native calls a prefix of the oracle's calls / the oracle's calls and more | `native-early-exit` / `native-extra-calls` | triage |
+| only for records that would stay `unclassified`: one side has the block a game allocator returned (`world.alloc_result(j)`), the other the canned result of a later call `m > j` (argument, result or stored word) | `ctor-this` | artifact (the constructor run on the block returns this; its canned result is random) |
+| pointer argument: the oracle's is the canned eax of an earlier intercepted call, the native's is in its own stack frame | `canned-this` | artifact (a callee returning its result/this pointer: MSVC aggregate return, `operator=`; canned eax is random) |
+| `this`/pointer argument `d` bytes below the first buffer on the oracle side (pinned-pool range) and the buffer on the native side, the native object has a `_ZThn<d>_` thunk for the function or a direct callee | `thunk-binding` | real-bug S2c (`__fnv_<addr>` bound to the GCC primary entry, not the secondary-base thunk the MSVC entry corresponds to); without the thunk `layout-offset` |
+| call argument (I32/F32/F64) the native passes equal to the canned result of the call just before, the oracle another value | `native-stale-result` | real-bug S1b (an argument the native caller never set: its declaration of the callee differs) |
+| native `fault:x` in the AArch64 private range, oracle fine, case background `rand` | `native-wild-private` | artifact (a random code pointer: x86 intercepts it as a wild call, AArch64 executes its private range) |
+| first differing store: only bytes where the oracle has `0x08` and the native `0x00` | `stub-normalized` | artifact (arm64emu `_codeptr` rewrites any stored word in `0x08000000..0x09000000`, data included) |
+| stored / returned word that is one of the planted garbage words (`world.garbage_words`): both / native / oracle | `uninit-both` / `uninit-arm` / `uninit-x86` | artifact / real-bug S1b / by-design |
+| native 0 where the oracle has a value; the native function or a direct callee in its unit is `mov w0, #0; ret` | `native-zero-stub` | real-bug S1 (a placeholder body) |
 
 With `summary --effects <difffuzz.py effects output>`, a record still in triage is refined by its first effect:
 `width` -> `field-width` (real-bug S1), an image vftable stored where the native stores its own `_ZTV` address

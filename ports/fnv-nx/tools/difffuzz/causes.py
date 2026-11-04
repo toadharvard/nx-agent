@@ -128,6 +128,30 @@ POLICY = {
     'oracle-private-address': ('artifact', 'S13', False, 'the oracle faults on a garbage address in its own private '
                                                           'range (0x0e000000: GDT/TEB/stubs) that the native machine '
                                                           'maps as background'),
+    'ctor-this':      ('artifact', 'S13', False, 'one side uses the block a game allocator returned, the other the '
+                                                 'canned result of the next intercepted call (the constructor run on '
+                                                 'that block): the real constructor returns this, the canned result '
+                                                 'is random'),
+    'canned-this':    ('artifact', 'S13', False, 'the oracle passes the canned eax of an earlier intercepted call as a '
+                                                 'pointer where the native passes its own frame temporary: the callee '
+                                                 'returns its result/this pointer (MSVC aggregate return, operator=), '
+                                                 'the harness gives it a random result'),
+    'native-wild-private': ('artifact', 'S13', False, 'random background: a code pointer read from background bytes '
+                                                      'lands in the AArch64 private range; x86 intercepts it as a '
+                                                      'wild call, AArch64 executes its private memory (fault:x)'),
+    'stub-normalized': ('artifact', 'S13', False, 'a stored data word with top byte 0x08 (a canned or background '
+                                                  'value) that arm64emu rewrites as a code-stub pointer to its '
+                                                  'original address (top byte 0x00): only that byte differs'),
+    'thunk-binding':  ('real-bug', 'S2c', True, 'the original address is an override\'s MSVC entry (this = the '
+                                                'secondary-base subobject); the link binds __fnv_<addr> to the GCC '
+                                                'primary entry (this = the full object), not its _ZThn<d>_ thunk'),
+    'native-zero-stub': ('real-bug', 'S1', True, 'the native has 0 where the oracle has a value, and the native '
+                                                 'function or a direct callee in its unit is a placeholder body '
+                                                 '`mov w0, #0; ret` (a stand-in the port never filled in)'),
+    'native-stale-result': ('real-bug', 'S1b', True, 'the native passes the previous intercepted call\'s result '
+                                                     'register (x0/v0 unchanged) where the oracle passes another '
+                                                     'value: an argument the native caller never set (its '
+                                                     'declaration of the callee differs from the definition)'),
     # --- real bugs -----------------------------------------------------------------------------------------------
     'uninit-arm':     ('real-bug', 'S1b', True, 'the native result depends on garbage: an argument slot the caller '
                                                 'never wrote (ABI pop-mismatch) or an uninitialised local'),
@@ -770,6 +794,202 @@ def _rule_effects(e, rec=None, cause=None):
     return None
 
 
+# ------------------------------------------------------- unclassified shapes: canned results, thunks, wild calls
+#
+# The harness's canned values are a function of the record's case (world.py, duplicated here): the k-th intercepted
+# call returns case.ret_bytes(k) (eax / x0 / v0), a game allocator alloc_result(k) instead.
+
+ALLOC_BASE = HEAP[0] + 0x200000
+
+
+def _alloc_result(k):
+    return ALLOC_BASE + 0x1000 * (k % 0x400) + 0x10
+
+
+def _ret_bytes(case, k):
+    rets = case.get('rets') or []
+    if k < len(rets) and rets[k] is not None:
+        return bytes.fromhex(rets[k]).ljust(16, b'\0')
+    import random
+    r = random.Random(((case.get('seed') or 0) * 1000003 + k) & 0xffffffff)
+    return bytes(r.getrandbits(8) for _ in range(16))
+
+
+def _canned_word(case, v, upto=64):
+    """Indices k < upto whose canned result word (eax / x0) is v."""
+    return [k for k in range(upto) if struct.unpack_from('<I', _ret_bytes(case, k))[0] == v]
+
+
+def _alloc_index(v, upto=64):
+    for k in range(upto):
+        if _alloc_result(k) == v:
+            return k
+    return None
+
+
+def _ctor_pair(case, vx, va, limit):
+    """One side is the allocator block of call j, the other the canned result of a later call m < limit."""
+    for a, b in ((vx, va), (va, vx)):
+        j = _alloc_index(a)
+        if j is not None and any(j < m < limit for m in _canned_word(case, b, limit)):
+            return True
+    return False
+
+
+_FACTS_CACHE = {}
+_ZERO_BODIES = {struct.pack('<II', 0x52800000, 0xd65f03c0), struct.pack('<II', 0x2a1f03e0, 0xd65f03c0)}
+
+
+def _object_facts(source):
+    """(thunks, zero) of one native object: thunks {__fnv_<addr>: set of this-adjustments d of the _ZThn<d>_ thunks
+    of the function at that address}, zero {names of functions whose whole body is `mov w0, #0; ret`}; None without
+    the object or pyelftools."""
+    d = _obj_dir()
+    if not d or not source:
+        return None
+    path = os.path.join(d, source.replace('/', '_') + '.o')
+    if path in _FACTS_CACHE:
+        return _FACTS_CACHE[path]
+    out = None
+    if os.path.exists(path):
+        try:
+            from elftools.elf.elffile import ELFFile
+        except ImportError:
+            ELFFile = None
+        if ELFFile is not None:
+            import re
+            thunks_of, zero = {}, set()
+            with open(path, 'rb') as f:
+                e = ELFFile(f)
+                st = e.get_section_by_name('.symtab')
+                syms = [s for s in st.iter_symbols() if isinstance(s['st_shndx'], int) and s.name] if st else []
+                at = collections.defaultdict(set)
+                for s in syms:
+                    at[(s['st_shndx'], s['st_value'])].add(s.name)
+                for s in syms:
+                    if s['st_info']['type'] == 'STT_FUNC' and s['st_size'] == 8:
+                        body = e.get_section(s['st_shndx']).data()[s['st_value']:s['st_value'] + 8]
+                        if body in _ZERO_BODIES:
+                            zero |= at[(s['st_shndx'], s['st_value'])]
+            thunks = collections.defaultdict(set)
+            for s in syms:
+                m = re.match(r'_ZThn(\d+)_N(.+)$', s.name)
+                if m:
+                    thunks['_ZN' + m.group(2)].add(int(m.group(1)))
+            for names in at.values():
+                for n in names:
+                    if n.startswith('__fnv_'):
+                        ds = set().union(*(thunks.get(o, set()) for o in names))
+                        if ds:
+                            thunks_of[n] = ds
+            out = (thunks_of, zero)
+    _FACTS_CACHE[path] = out
+    return out
+
+
+def _own_and_callees(rec):
+    """{__fnv_<addr>} | the native function's direct callees, or None without the object."""
+    try:
+        cs = native_callees(rec.get('source'), int(rec.get('address') or '0', 16))
+    except ValueError:
+        return None
+    if cs is None:
+        return None
+    return {'__fnv_' + str(rec.get('address') or '')} | set(cs)
+
+
+_GARBAGE_CACHE = {}
+
+
+def _garbage_words(seed, side):
+    """world.garbage_words (duplicated): the words the harness plants as garbage on one machine for a case."""
+    key = (seed, side)
+    if key not in _GARBAGE_CACHE:
+        import random
+
+        def g32(k):
+            return random.Random((seed * 7919 + k * 104729) & 0xffffffff).getrandbits(32)
+        if side == 'x86':
+            g = {g32(i) for i in range(7)} | {g32(100 + k) for k in range(64)}
+            fill = random.Random(seed ^ 0x5a5a5a5a).randbytes(0x1000)
+        else:
+            g = {g32(200 + i) for i in range(31)} | {g32(300 + i) for i in range(31)} | \
+                {g32(400 + i) for i in range(32)} | {g32(600 + i + 32 * k) for k in range(64) for i in range(1, 18)}
+            fill = random.Random((seed ^ 0xa5) ^ 0x5a5a5a5a).randbytes(0x1000)
+        g.update(struct.unpack_from('<I', fill, o)[0] for o in range(0, len(fill) - 3))
+        g.discard(0)
+        if len(_GARBAGE_CACHE) > 16:
+            _GARBAGE_CACHE.clear()
+        _GARBAGE_CACHE[key] = g
+    return _GARBAGE_CACHE[key]
+
+
+def _rule_unclassified(d, rec, k):
+    """Shapes of records no other rule took (stream S13b, bucket `unclassified`)."""
+    case = rec.get('case') or {}
+    if k == 'error':
+        a = d.get('arm')
+        fa = _fault_addr(a) if d.get('x86') is None else None
+        if fa and fa[0] == 'x' and _in(fa[1], A64_PRIV) and case.get('bg') == 'rand':
+            return 'native-wild-private'
+        return None
+    if k not in ('return', 'mem-write', 'call-args') or not isinstance(d.get('x86'), str) or \
+            not isinstance(d.get('arm'), str):
+        return None
+    try:
+        vx, va = _word(d['x86']), _word(d['arm'])
+    except ValueError:
+        return None
+    if k == 'mem-write':
+        bx, ba = bytes.fromhex(d['x86']), bytes.fromhex(d['arm'])
+        diff = [i for i in range(min(len(bx), len(ba))) if bx[i] != ba[i]]
+        if diff and len(bx) == len(ba) and all(bx[i] == 0x08 and ba[i] == 0 for i in diff):
+            # the top byte of a stored word in the code-stub range 0x08xxxxxx: arm64emu rewrites it to the
+            # "original address" (0x00xxxxxx) although the bytes are data
+            return 'stub-normalized'
+    if k == 'return' or k == 'mem-write':
+        if vx is not None and va is not None and vx != va and _ctor_pair(case, vx, va, 64):
+            return 'ctor-this'
+        if vx is not None and va is not None and vx != va and case.get('seed') is not None:
+            # a stored / returned word that is one of the garbage words the harness planted on that machine
+            gx, ga = vx in _garbage_words(case['seed'], 'x86'), va in _garbage_words(case['seed'], 'a64')
+            if gx or ga:
+                return 'uninit-both' if gx and ga else ('uninit-x86' if gx else 'uninit-arm')
+    if k in ('return', 'call-args') and not bytes.fromhex(d['arm']).strip(b'\0') and \
+            bytes.fromhex(d['x86']).strip(b'\0'):
+        # the native has 0 where the oracle has a value: the native function, or a direct callee in its unit, is a
+        # placeholder body `mov w0, #0; ret`
+        facts = _object_facts(rec.get('source'))
+        if facts and facts[1] & (_own_and_callees(rec) or set()):
+            return 'native-zero-stub'
+    if k == 'return' or k == 'mem-write':
+        return None
+    if k != 'call-args':
+        return None
+    idx = d.get('index') or 0
+    cls = d.get('cls')
+    if cls in ('P', 'I32') and vx is not None and va is not None:
+        if _ctor_pair(case, vx, va, idx):
+            return 'ctor-this'
+        if cls == 'P' and _in(va, STACK) and any(m < idx for m in _canned_word(case, vx, idx)):
+            return 'canned-this'
+        off = (va - vx) & 0xffffffff
+        if _in(va, BUFS) and _in(vx, LIT_POOL) and 0 < off <= 0x400 and off % 4 == 0:
+            # the same object at another offset across the buffer start (this - d): an override's secondary-base
+            # entry when the native has a this-adjusting thunk by d for the function or a direct callee
+            th = (_object_facts(rec.get('source')) or ({}, set()))[0]
+            if any(off in th.get(n, ()) for n in _own_and_callees(rec) or ()):
+                return 'thunk-binding'
+            return 'layout-offset'
+    if cls in ('I32', 'F32', 'F64') and idx > 0:
+        n = 8 if cls == 'F64' else 4
+        bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+        prev = _ret_bytes(case, idx - 1)[:n]
+        if len(ba) == n and ba == prev and bx != prev:
+            return 'native-stale-result'
+    return None
+
+
 TRIAGE_REFINABLE = {c for c, v in POLICY.items() if v[0] == 'triage'}
 REFINABLE = (None, 'unclassified', 'call-flow', 'signedness?')
 
@@ -799,6 +1019,8 @@ def refine(rec, cause=None):
         got = _rule_mem_write(d, rec)
     elif k in ('call-count', 'call-target'):
         got = _rule_calls(d, rec)
+    if got is None and cause in (None, 'unclassified') and _with_effects(rec, 'unclassified') == 'unclassified':
+        got = _rule_unclassified(d, rec, k)      # only what would stay unclassified (S13b bucket rules)
     if got is None:
         got = cause or 'unclassified'
     return _with_effects(rec, got)
