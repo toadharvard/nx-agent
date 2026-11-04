@@ -1,0 +1,83 @@
+// V6n synthetic pixel-shader corpus for the shader parity harness (authored for this project, no game content).
+// "=== name [scene options]" starts a shader; options: fog (linear table fog, perspective quad), persp (RHW 0.5..2)
+=== tex_mod_mad
+ps_2_0
+def c1, 0.5, 0.25, 1.0, 1.0
+dcl t0.xy
+dcl v0
+dcl_2d s0
+texld r0, t0, s0
+mul r0, r0, v0
+mad r0, r0, c0, c1
+mov oC0, r0
+=== arith
+ps_2_0
+def c4, 0.5, 2.0, -1.0, 0.125
+dcl t0.xy
+dcl v0
+dcl_2d s0
+texld r0, t0, s0
+dp3 r1.x, r0, c0
+rcp r1.y, c4.y
+rsq r1.z, c4.y
+mul r1.w, r1.x, r1.y
+add r6, r0, -c4.x
+cmp r2, r6, r0, -r0
+lrp r3, v0.w, r2, c1
+max r3, r3, c4.w
+min r3, r3, c4.x
+frc r4, r0
+add r3.xy, r3, r4
+abs r5, c2
+mad_sat r0, r3, r5, r1
+mov oC0, r0
+=== explog
+ps_2_0
+def c4, 0.5, 2.0, 0.25, 1.0
+dcl t0.xy
+dcl_2d s0
+texld r0, t0, s0
+exp r1.x, r0.x
+log r1.y, r0.y
+pow r1.z, r0.z, c4.y
+nrm r2.xyz, r0
+mul r1.xyz, r1, c4.z
+mov r1.w, r2.x
+mov_sat oC0, r1
+=== texkill
+ps_2_0
+def c4, -0.5, -0.5, -0.5, 0
+dcl t0
+dcl v0
+dcl_2d s0
+texld r0, t0, s0
+add r1, r0, c4
+texkill r1
+mov oC0, v0
+=== ps11_modulate
+ps_1_1
+tex t0
+mul r0, t0, v0
+=== ps30_vpos
+ps_3_0
+def c4, 0.0625, 0.0625, 0, 1
+dcl vPos.xy
+dcl_texcoord0 v0.xy
+dcl_color0 v1
+dcl_2d s0
+mov r0, c4
+mul r0.xy, vPos, c4
+texld r1, v0, s0
+mad r0, r1, c4.z, r0.xyww
+add r0, r0, v1
+mov oC0, r0
+// fog_linear: table fog on a perspective quad; Nine (and S6n's epilogue) take depth = z * w, S6b's GLSL epilogue
+// takes gl_FragCoord.z (finding for S6b, RENDER_VERIFY.md section 7)
+=== fog_linear fog
+ps_2_0
+dcl t0.xy
+dcl v0
+dcl_2d s0
+texld r0, t0, s0
+mul r0, r0, v0
+mov oC0, r0

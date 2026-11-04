@@ -1,5 +1,5 @@
 // fnv-nx native renderer, front end (stream S6n, RENDER_NATIVE.md §3). Runs in the ILP32 guest; also builds
-// LP64 for host unit tests. Freestanding C++: no exceptions, RTTI, STL or global constructors.
+// LP64 for host programs (GL backend tests). Freestanding C++: no exceptions, RTTI, STL or global constructors.
 #ifndef FNVNX_NX_FRONT_H
 #define FNVNX_NX_FRONT_H
 
@@ -9,20 +9,24 @@
 
 namespace nx {
 
-// ---- backend calls (hostcalls in the guest, a recorder in unit tests) -----------------------------------------
+// ---- backend calls --------------------------------------------------------------------------------------------
 struct Backend {
     virtual uint32_t MemCreate(const NxMemBlockDesc& d) = 0;
     virtual uint64_t MemGpuAddr(uint32_t id) = 0;
-    virtual uint64_t ImageCreate(const NxImageDesc& d) = 0;     // (id << 32) | handle
-    virtual uint32_t ShaderCreate(const void* dksh, uint32_t size, uint32_t stage) = 0;
+    virtual uint32_t ImageCreate(const NxImageDesc& d) = 0;
+    virtual uint32_t SamplerCreate(const NxSamplerState& s) = 0;
+    virtual uint32_t ShaderCreate(const NxShaderDesc& d) = 0;
     virtual void Submit(const NxSubmit& s) = 0;
     virtual void WaitFrame(uint32_t frame) = 0;
-    virtual uint32_t FramesInFlight() const = 0;
-    virtual void Size(uint32_t* w, uint32_t* h) const = 0;
+    virtual bool Readback(const NxReadback& r) = 0;
+    virtual void Shutdown() = 0;
+    virtual const NxGpuInfo& Info() const = 0;
 };
 
-// Backend over the NxGpuApi host table (guest only).
-Backend* HostBackend(const NxGpuApi* api);
+// The backend behind an NxGpuApi. In the ILP32 guest pass api = 0: calls go through S5's ext_call slot to the host
+// module's NXGPU_EXT_MODULE. In LP64 programs api is the backend's table (nxgl_create(), nxgpu_init()).
+// Returns 0 if the backend does not answer. Placement-constructed in a static buffer (one per process).
+Backend* GpuBackend(const NxGpuApi* api);
 
 // ---- persistent mapped ring ---------------------------------------------------------------------------------
 // One caller-backed memory block split into frames_in_flight regions. Alloc is a bump pointer in the current
@@ -40,27 +44,32 @@ private:
     Backend* be_ = nullptr;
     uint8_t* cpu_ = nullptr;
     uint32_t block_ = 0, region_ = 0, regionStart_ = 0, head_ = 0, frames_ = 0;
-    uint32_t lastFrame_ = 0;
     bool started_ = false;
 };
 
-// ---- render state ---------------------------------------------------------------------------------------------
-struct BlendDesc { uint8_t enable, src, dst, op; };            // op: 0 add
-struct DepthDesc { uint8_t test, write, func; };
-uint64_t PackState(const BlendDesc& b, const DepthDesc& d, uint8_t cull, uint8_t colorMask);
+// One caller-backed block, bump-allocated (vertex/index data that lives as long as the program).
+class StaticBuffer {
+public:
+    bool Init(Backend* be, uint32_t bytes);
+    void* Alloc(uint32_t size, uint32_t align, uint32_t* offset);
+    uint32_t block() const { return block_; }
+private:
+    uint8_t* cpu_ = nullptr;
+    uint32_t block_ = 0, size_ = 0, head_ = 0;
+};
 
-// (shader pair, render-state word, vertex layout) -> 16-bit state id. New ids are defined in the command stream
-// once (the backend builds and caches the deko3d state blocks then); afterwards a draw only names the id.
+// ---- render state ---------------------------------------------------------------------------------------------
+// (shader pair, NxRenderState, vertex layout) -> 16-bit state id. New ids are defined in the command stream once
+// (the backend builds and caches its state objects then); afterwards a draw only names the id.
 class StateCache {
 public:
     enum { kMaxStates = 1024, kMaxLayouts = 64 };
     uint16_t Layout(const NxVtxLayout& l);                       // 1.., deduplicated
-    uint16_t State(uint16_t vs, uint16_t ps, uint16_t layout, uint64_t word);
-    // Emits the Define ops of everything created since the last call into the encoder.
-    void FlushDefines(class Encoder& e);
+    uint16_t State(uint16_t vs, uint16_t ps, uint16_t layout, const NxRenderState& rs);   // 1.., 0 when full
+    void FlushDefines(class Encoder& e);                          // Define ops of everything new since the last call
     uint32_t states() const { return nStates_; }
 private:
-    struct Entry { uint64_t word; uint16_t vs, ps, layout, id; };
+    struct Entry { NxRenderState rs; uint16_t vs, ps, layout, id; };
     Entry states_[kMaxStates];
     NxVtxLayout layouts_[kMaxLayouts + 1];
     uint32_t nStates_ = 0, nLayouts_ = 0, flushedStates_ = 0, flushedLayouts_ = 0;
@@ -79,7 +88,7 @@ private:
     uint32_t* w_ = nullptr;
     uint32_t cap_ = 0, n_ = 0;
     bool overflow_ = false;
-    uint32_t dummy_[48];
+    uint32_t dummy_[64];
 };
 
 // ---- draw packets and the sorter ----------------------------------------------------------------------------
@@ -89,68 +98,92 @@ inline uint64_t SortKey(uint8_t pass, uint8_t layer, uint16_t state, uint16_t te
            ((uint64_t)tex << 20) | ((uint64_t)depth << 4);
 }
 
-struct Packet {                  // 48 bytes
+// Dynamic values a draw may need beyond its state id. Packet.dyn = 0 means the pass defaults (NxOp_BeginPass).
+struct DynRec {
+    NxViewport viewport;
+    NxScissor scissor;
+    float blendConstant[4];
+    float biasUnits, biasSlope;
+    uint32_t stencilRef;         // kStateRef = the bound state's ref
+    enum : uint32_t { kStateRef = 0xFFFFFFFFu };
+};
+void DefaultDyn(DynRec* d, uint32_t width, uint32_t height);
+// From the translator's output (viewport, scissor, blend constant, depth bias, stencil ref).
+void DynFromD3D9(DynRec* d, const NxDynamicState& s);
+
+struct Packet {                  // 64 bytes
     uint64_t key;
     uint16_t state, texCount;
-    uint32_t texBlock;           // index of the first handle in the frame's texture-handle array
+    uint16_t texBlock;           // first handle in the frame's texture-handle array (fragment stage, slots 0..)
+    uint16_t dyn;                // DynRec index (Frame::AddDyn), 0 = pass defaults
     uint32_t vtxBlock, vtxOffset, vtxSize;
-    uint32_t uboOffset;          // per-draw constants in the UBO ring (size fixed per frame: uboSize)
-    uint32_t first, count;       // vertex range (non-indexed in N0)
-    uint16_t instances, prim;
-    uint32_t pad;
+    uint32_t idxBlock, idxOffset, idxSize;   // idxBlock 0: not indexed
+    uint32_t uboOffset;          // per-draw constants in the UBO ring (size fixed per frame), both stages slot 1
+    uint32_t first, count;       // vertex or index range
+    int32_t baseVertex;
+    uint16_t instances;
+    uint8_t prim, idxType;       // NxPrim; 0 u16, 1 u32
+    uint32_t epi;                // 1 + UBO ring offset of an NxEpilogue block (fragment slot 2), 0 = none
 };
+static_assert(sizeof(Packet) == 64, "Packet");
 
-// LSD radix sort of (key, index) pairs, 16 bits per pass, skips passes whose digit is constant.
+// LSD radix sort of (key, index) pairs, 16 bits per pass, skips passes whose digit is constant. Stable.
 void SortPackets(const Packet* p, uint32_t n, uint32_t* order, uint32_t* tmp, uint64_t* keys, uint64_t* ktmp);
 
 // ---- frame graph ------------------------------------------------------------------------------------------------
-enum { kSwapchain = 0 };
 struct PassDesc {
-    uint32_t color;              // image id or kSwapchain
+    uint32_t color;              // image id (0 = swapchain)
     uint32_t depth;              // image id or 0
-    uint32_t clearFlags;         // 1 color, 2 depth
-    uint32_t clearColor;         // RGBA8
+    uint32_t clearFlags;         // 1 color, 2 depth, 4 stencil
+    uint32_t clearColor;         // RGBA8, R in the low byte
     float clearDepth;
+    uint32_t clearStencil;
     uint16_t width, height;
-    uint8_t sampledAfter;        // 1: color is sampled by a later pass (barrier after the pass)
+    uint8_t sampledAfter;        // 1: colour is sampled by a later pass (barrier after the pass)
 };
 
 // ---- frame: packets of all passes, sorted and encoded at Finish ---------------------------------------------
 class Frame {
 public:
-    enum { kMaxPackets = 8192, kMaxPasses = 16, kMaxTex = 16384, kWords = 256 * 1024 };
+    enum { kMaxPackets = 8192, kMaxPasses = 16, kMaxTex = 16384, kMaxDyn = 4096, kWords = 256 * 1024 };
     bool Init(Backend* be, uint32_t uboBytes, uint32_t uboSize);
     void Begin(uint32_t frame);
-    uint8_t AddPass(const PassDesc& p);                          // returns the pass index used in sort keys
+    uint8_t AddPass(const PassDesc& p);                          // pass index used in sort keys
     uint32_t AddTextures(const uint32_t* handles, uint32_t n);
-    Packet* Emit();                                              // 0 when full
+    uint16_t AddDyn(const DynRec& d);                            // 1.. (a repeat of the last one is shared)
+    Packet* Emit();                                              // zeroed packet, 0 when full
     void* Constants(uint32_t* offset);                           // per-draw UBO slice (uboSize bytes)
-    void* PassConstants(uint8_t pass, uint32_t size);            // bound at slot 0 for the whole pass
+    void* PassConstants(uint8_t pass, uint32_t size);            // bound at slot 0, both stages, for the pass
+    // The D3D9 epilogue block for a packet (sets p->epi); 0 when the ring is full.
+    NxEpilogue* Epilogue(Packet* p);
     // Sorts, encodes (with redundant-bind elimination) and submits. stats may be 0.
-    void Finish(StateCache& sc, NxFrameStats* stats);
+    void Finish(StateCache& sc, NxFrameStats* stats, bool present = false);
     Ring& ubo() { return ubo_; }
     uint32_t encodedWords() const { return enc_.size(); }
     uint32_t stateBindsEncoded() const { return stateBinds_; }
     uint32_t packets() const { return nPackets_; }
+    const uint32_t* encodedData() const { return enc_.data(); }
 private:
     Backend* be_ = nullptr;
     Ring ubo_;
     uint32_t uboSize_ = 0, frame_ = 0;
     PassDesc passes_[kMaxPasses];
     uint32_t passUbo_[kMaxPasses], passUboSize_[kMaxPasses];
-    uint32_t nPasses_ = 0, nPackets_ = 0, nTex_ = 0, stateBinds_ = 0;
+    uint32_t nPasses_ = 0, nPackets_ = 0, nTex_ = 0, nDyn_ = 0, stateBinds_ = 0;
     Packet* packets_ = nullptr;
     uint32_t* order_ = nullptr; uint32_t* tmp_ = nullptr;
     uint64_t* keys_ = nullptr; uint64_t* ktmp_ = nullptr;
     uint32_t* tex_ = nullptr;
-    uint32_t* words_[2] = {nullptr, nullptr};                    // double-buffered: render thread reads N-1
+    DynRec* dyn_ = nullptr;
+    uint32_t* words_[2] = {nullptr, nullptr};                    // double-buffered: the backend may read N-1
     Encoder enc_;
 };
 
 // ---- DDS ---------------------------------------------------------------------------------------------------------
-// Parses a DDS file in memory (DXT1/3/5, A8R8G8B8, X8R8G8B8, L8, A8L8; 2D, mips) into an NxImageDesc whose data
-// points into the file. Returns false for anything else (cube/volume come in N2).
-bool ParseDDS(const void* file, uint32_t size, NxImageDesc* out);
+// Parses a DDS file in memory (2D, mips) into an NxImageDesc whose data points into the file; the format goes
+// through nx_d3d9_format() (D3DFMT from the FOURCC or the bit masks: A8R8G8B8, X8R8G8B8, A8B8G8R8, R5G6B5,
+// A1R5G5B5, X1R5G5B5, A4R4G4B4, L8, A8, A8L8, V8U8, DXT1-5, ATI1, ATI2). Returns false for anything else.
+bool ParseDDS(const void* file, uint32_t size, NxImageDesc* out, uint32_t* d3dFormat = nullptr);
 
 } // namespace nx
 

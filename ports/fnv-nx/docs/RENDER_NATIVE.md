@@ -428,3 +428,104 @@ image + vtable rewrite), S4 (boot), S5 (toolchain/deko3d linkage).
 * `render/native/include/nx/` - interfaces only (no implementation yet): packet, pipeline state, frame graph,
   rings, family.
 * `render/native/tools/d3d_boundary.py <decomp>` - groups S6's D3D call-site scan by subsystem (§1.9).
+
+## 7. N0: what exists (2026-11-04)
+
+Status, commands and numbers: [`render/native/STATUS.md`](../render/native/STATUS.md); testable claims for the
+verifier: [`render/native/CLAIMS.md`](../render/native/CLAIMS.md).
+
+### 7.1 Pieces
+
+| layer | files | role |
+|---|---|---|
+| state encoding | `render/native/include/nx/state.h` | backend-neutral `NxRenderState` (4 x u64), `NxDynamicState`, shader bits, `NxSamplerState` (16 B), `NxFormat`/`NxFormatInfo`, `NxEpilogue` |
+| D3D9 translator | `render/native/front/d3d9_state.{h,c}` | pure C99: D3D9 render/sampler states and formats -> the encoding above, mirroring Gallium Nine 20.1 |
+| boundary | `render/native/include/nx/gpu_abi.h`, `front/gpu_dispatch.c` | `NxGpuApi` table, command stream ops, ext_call module 10 |
+| front | `render/native/include/nx/front.h`, `front/front.cpp` | rings, state cache (16-bit ids), radix-sorted packets, frame/pass encoding with redundant-bind elimination, dynamic records (viewport, scissor, blend constant, depth bias, stencil ref), DDS |
+| GL reference backend | `render/native/gl/nxgl.{h,c}` | desktop GL 4.5 core over EGL surfaceless (Mesa llvmpipe), host only |
+| deko3d backend | `render/native/host/nxgpu.{h,c}`, `host/nxgpu_host.c` | LP64 in the Switch host module; captured state blocks, render thread |
+| shaders | `render/native/shaders/*.glsl`, `build.py` | one GLSL 4.60 source per shader (`// nx-variants:` builds define sets) -> DKSH (uam) + GL text in one generated C table; `d3d9_epilogue.glsl` (fog, alpha test); N1 families `tile` and `nolight` (blocks in `include/nx/families.h`) |
+| N0 scenes | `render/native/n0/`, `tests/s6n/scenes.py`, `tests/s6n/golden/` | 13 scenes with CPU-computed conformance checks (incl. exact D3D9 coverage); host runner, ILP32 Switch guest, the same guest under Unicorn (`tests/s6n/emu_n0.py`) |
+| N1 plan | `render/native/N1_PLAN.md`, `overrides.tsv`, `REQUESTS.md` | renderer entry points with slot evidence, override rows, linker/prepare requests with failing tests |
+| N1 core | `render/native/n1/` (`renderer.{h,cpp}`, `selftest.cpp`, `build.sh` -> `libnxrender.a`) | nx::Renderer (frame, target group, camera virtuals) and the record-only nx::StateTracker; self-test on GL and as the ILP32 guest |
+| capture / replay | `render/native/capture/` | CaptureBackend (guest and host) records streams + bound memory; `replay_gl` replays a capture on the host and compares readbacks |
+| N2 families | `render/native/shaders/{lit,depth,land,sky}.*.glsl` | SM3 lit (8 lights, specular), depth (ZONLY/DEPTHMAP), land (4 layers), sky; scenes with CPU checks |
+| environment | `render/native/env.sh`, `render/native/switch/build.sh` | rebuild toolchain/libnx/deko3d/uam; build the Switch package |
+
+### 7.2 The backend split
+
+The front never calls a graphics API. It builds an `NxRenderState` per draw (from D3D9 states through the
+translator, or directly), interns (shader pair, state, layout) into a 16-bit state id, and emits 64-byte packets.
+`Frame::Finish` sorts them (pass | layer | state | texture block | depth) and encodes one command stream; the
+backend replays it. Both backends take the same stream and the same `NxGpuApi` calls:
+
+* **deko3d** (`nxgpu.c`): each distinct w[0] (blend + write masks), w[1] low half (depth-stencil ops) and w[2]
+  (rasterizer) is captured once into Maxwell command words and replayed on BindState; stencil masks/ref, blend
+  constant, depth bias, viewport and scissor are dynamic (`dkCmdBufSet*`); sRGB write rebinds the render target
+  through its sRGB view; device flags DepthZeroToOne | OriginUpperLeft | YAxisPointsUp (the D3D conventions).
+* **GL** (`nxgl.c`): the same state applied with GL calls (diffed per word); `glClipControl(GL_LOWER_LEFT,
+  GL_ZERO_TO_ONE)` with the vertex shader's y negated (framebuffer row 0 = image top, D3D9 tie rule), first-vertex provoking vertex, GL binding = stage x 16 + deko3d slot (shim on the GLSL text,
+  `#version 460` -> `#version 450 core` because llvmpipe stops at 4.50), sRGB texture views + `GL_FRAMEBUFFER_SRGB`,
+  caller-backed memory copied into GL buffers when a bind is replayed. Synchronous; readback by `glReadPixels`.
+* In the ILP32 guest the front reaches the backend through S5's `ext_call` (module `NXGPU_EXT_MODULE` = 10,
+  `nxgpu_host.c` registers it like Nine's module 9); LP64 programs call `nxgpu_dispatch()` directly.
+* Texture handle = image id | sampler id << 20 (`dkMakeTextureHandle`) on both. Images whose format has an sRGB
+  view reserve id + 1 for it.
+
+### 7.3 Verification
+
+* Translator: one unit test per state (`make -C tests/s6n`, 527 checks).
+* Scenes on GL: every scene evaluates checks whose expected values are computed on the CPU from the D3D9 rules
+  (blend equation, stencil arithmetic, wrap modes, mip selection, channel rules, fog formulas, exact coverage),
+  31500 checks, and is compared bit-exactly with its golden PNG (`make -C tests/s6n scenes`).
+* The ILP32 guest build of the same scenes runs under Unicorn with nxgpu forwarded to the GL backend and matches
+  the goldens bit-exactly (`make -C tests/s6n emu GUEST=...`).
+* The same scene code builds as the ILP32 Switch guest (`switch/build.sh`); on the console it writes the readbacks
+  to `sdmc:/fnvnx/n0/out/`, which `tests/s6n/scenes.py --compare <dir> --tol N` checks against the GL goldens.
+* V6n's oracle (Nine on softpipe, `render/verify/`) drives the translator API (§7.5) directly.
+
+### 7.4 Traps (each has a check or a stated rule)
+
+| trap | rule | where |
+|---|---|---|
+| D3D9 pixel centres are integers (Nine: `half_pixel_center = 0`) | NxViewport = D3D viewport + 0.5 for +0.5-centre rasterizers; `gl_FragCoord.xy` = VPOS + 0.5 | translator, C25/C59 |
+| GL tie rule with GL_UPPER_LEFT is not D3D9's (horizontal and slanted edges; a viewport bias fixes only horizontal ones) | GL backend: GL_LOWER_LEFT + `gl_Position.y` negated by the shim; llvmpipe then follows the top-left rule exactly (V6n defect y_fill_bias) | `nxgl.c`, C59 |
+| front face | "front" = CW on screen in y-down space; GL: `glFrontFace(GL_CCW)` in its y-up space (measured); deko3d: `DkFrontFace_CW` (to confirm) | scene `cull` |
+| depth write with EQUAL/NEVER | forced off (Nine) | C4 |
+| BOTHSRCALPHA / non-separate alpha | Nine's fix-ups and alpha table | C9, C12 |
+| depth bias units | D3D9 units x 2^24 (D24) / 2^16 (D16); Nine-on-softpipe applies about half (oracle quirk, D1) | C18, C40 |
+| MIPFILTER NONE | ignores LOD bias and MAXMIPLEVEL | C26, scene `sampler` |
+| cube textures | always clamp-to-edge | C29 |
+| view swizzles also swizzle the BORDER colour | no format uses a channel-moving swizzle: A8/L8/A8L8/L16/A2R10G10B10/ATI1 are expanded on upload (`nx_d3d9_convert`) | C32, C34, C35 |
+| ATI2 | X/Y swapped (basetexture9.c) | C32 |
+| sRGB write | sRGB view of the render target; clears are not encoded | `nxgl.c`, `nxgpu.c` |
+| X8 render targets read dst alpha 1 | BGRX8/RGBX8 stored as GL_RGB8 / deko3d *X8 formats | `nxgl.c` |
+| flat shading | GL cannot switch interpolation per state: families use `flat` qualifiers | STATUS.md |
+| llvmpipe GLSL 4.50 | version rewrite in the shim | C60 |
+
+### 7.5 C API for the verifier
+
+Everything V6n needs is in two headers, both plain C with `extern "C"`:
+
+* `render/native/include/nx/state.h` - encodings. Field positions are the `NXRS_*` shift macros; read a field with
+  `NXRS_GET(word, shift, bits)`. Enums: `NxCompare` (= D3DCMP - 1), `NxStencilOp` (= D3DSTENCILOP - 1),
+  `NxBlendFactor` (GL meaning), `NxBlendOp` (= D3DBLENDOP - 1), `NxCull` (on-screen winding), `NxFill`, `NxFog`,
+  `NxWrap`, `NxMipFilter`, `NxFormat` (memory layouts listed), `NxSwizzle`.
+* `render/native/front/d3d9_state.h` - the translator. Rules and deviations are listed in its header comment.
+
+```c
+uint32_t rs[NXD3D_RS_COUNT]; nx_d3d9_default_rs(rs);          /* then set states by D3DRENDERSTATETYPE */
+NxD3D9Input in = {rs, ps_version, depth_d3dfmt, viewport, scissor, clip_planes};
+NxRenderState st; NxDynamicState dyn; uint32_t shaderBits;
+nx_d3d9_translate(&in, &st, &dyn, &shaderBits);                  /* any output may be NULL */
+uint32_t samp[NXD3D_SAMP_COUNT]; nx_d3d9_default_samp(samp);
+NxD3D9Texture tex = {d3dfmt, is_cube, is_shadow, managed_lod};
+NxSamplerState ss; nx_d3d9_sampler(samp, &tex, &ss);
+NxFormatInfo fi = nx_d3d9_format(d3dfmt);                         /* native format, view swizzle, flags */
+if (fi.flags & NXFMT_CONVERT) n = nx_d3d9_convert(d3dfmt, w, h, mips, faces, src, srcSize, dst, dstCap);
+NxEpilogue e; nx_epilogue_fill(&e, &dyn, shaderBits);             /* fragment UBO slot 2 of every shader */
+```
+
+Units: blend constant, fog colour and border are colour channels in [0,1] (byte / 255); `alphaRef` = ALPHAREF /
+255 unclamped; `depthBiasUnits` is in GL `glPolygonOffset` units (r = 2^-24 for D24); viewport in pixels for a
++0.5-centre rasterizer; scissor in pixels, top-left origin; sampler `minLod`/`maxLod` in mip levels.
