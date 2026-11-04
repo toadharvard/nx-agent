@@ -864,6 +864,22 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for r in hand_rows:
             f.write('\t'.join(r) + '\n')
     stats['hand_vptr_addrs'], stats['hand_vptr_rebound'] = len(hand), len(rebind)
+    # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
+    # FUN_00404950's, ...): the map can give one native vtable; every class's own is listed, so a native vptr store
+    # can be traced back to its image vftable (S13's vtable-store comparison)
+    named = collections.defaultdict(set)
+    for (n_, a_), (cls_, base_, _) in vnames.items():
+        if base_ is None:
+            named[a_].add(cls_)
+    with open(os.path.join(out, 'vftable_aliases.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#address\tclass\tnative vtable\taddress point\tin the address map\n')
+        for a_ in sorted(x for x in named if len(named[x]) > 1 and x in vmap):
+            for cls_ in sorted(named[a_]):
+                z = sorted(by_cls.get(cls_, []))
+                pts = vtables.address_points(rtti.ents(z[0]) or []) if z else []
+                f.write('%08x\t%s\t%s\t%s\t%s\n' % (a_, cls_, z[0] if z else '', pts[0][0] if pts else '',
+                                                    'yes' if z and vmap[a_][0] == z[0] else 'no'))
+                stats['vftable_aliases'] += 1
 
     # ---- data addresses: absolute symbols at the original address (the data image is mapped there, D3)
     with open(os.path.join(out, 'aliases.ld'), 'w') as f:
@@ -961,6 +977,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               % (stats['units_renames_def'], stats['units_renames_ref']),
               'image vftable addresses stored into vptrs by hand: %d, bound to a native address point: %d '
               '(hand_vptrs.tsv)' % (stats['hand_vptr_addrs'], stats['hand_vptr_rebound']),
+              'classes sharing a primary image vftable (MSVC folded; vftable_aliases.tsv): %d rows'
+              % stats['vftable_aliases'],
               'thread-local references bound to the native TLS block: %d (%d image .tls addresses, %d native '
               'definitions folded in)' % (byclass['tls'], len(tls_addrs), len(tls_defs)),
               'aggregate layouts known: %d (probe_requests.tsv: %d)' % (len(layouts), len(probe_req)), '',
@@ -978,6 +996,10 @@ VPTR_LHS = re.compile(r'(?i)(?:^|[^\w])(?:\w*_)?(?:vptr|vtbl|vtable|vftable|vfpt
 DEREF_LHS = re.compile(r'^\s*\*\s*(?:\(\s*[\w\s:]+\*\s*\*\s*\)|reinterpret_cast\s*<[^<>]*\*\s*\*\s*>)\s*\(?\s*\w+\s*\)?\s*$'
                        r'|^\s*\(\s*\(\s*[\w\s:]+\*\s*\*\s*\)\s*\w+\s*\)\s*\[\s*0\s*\]\s*$')
 FUNC_HDR = re.compile(r'^[^\n;{}#]*?\b((?:\w+\s*::\s*)*\w+)\s*::\s*~?\w+\s*\([^;{}]*\)\s*(?:const\s*)?\{', re.M)
+# a free function defined at column 0: a function head without a class (S13: a vptr store in the free function
+# InitLargePrimitiveArray after FUN_00404920's constructor was credited to FUN_00404920)
+FREE_HDR = re.compile(r'^(?![ \t]|//)(?![^\n;{}#(]*::)[^\n;{}#(]*?\b(?!(?:if|for|while|switch|catch|return)\b)\w+\s*'
+                      r'\([^;{}]*\)\s*(?:const\s*)?\{', re.M)
 
 
 def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
@@ -1002,7 +1024,8 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
         if not names:
             continue
         text = open(path, encoding='utf-8', errors='surrogateescape').read()
-        heads = [(m.start(), m.group(1)) for m in FUNC_HDR.finditer(text)]
+        heads = sorted([(m.start(), m.group(1)) for m in FUNC_HDR.finditer(text)] +
+                       [(m.start(), None) for m in FREE_HDR.finditer(text)], key=lambda h: h[0])
         pos = 0
         for stmt in text.split(';'):
             start, pos = pos, pos + len(stmt) + 1
