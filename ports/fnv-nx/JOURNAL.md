@@ -1056,3 +1056,21 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   link_ctor_dtor_left=769 link_ctor_dtor_traps=1023 link_static1_copies=62 link_split_global=0
 * **next** - S5 game guest + emulated boot on f10 (relocatable again); S13 recheck on the -fPIC objects; S1 bodies
   for the 769 normal-path ctors/dtors.
+
+### J-0054 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0048,J-0053
+
+* **did** - Game guest from S2c's f10 (-fPIC objects): 7,502 undefined (was 8,190); `pcrel_abs.py` finds 0
+  PC-relative references to absolute symbols, so the guest is **relocatable again** (no pin; 20 MiB). Emulator groups
+  every skipped initializer by fault (`skip-summary`); frontier.py marks units that failed in the linked set but are
+  clean in S1's census ("needs a fresh S2 run").
+* **found** - Boot unchanged: WinMain entered, first fault at WinMain+0x1c8 (untranslated 0x00af3020 -> NULL this).
+  Cause: **f10's tree was prepared before S1 round 7 (J-0052) and the FALL1 initializer fix (J-0049)** - WinMain's
+  units still fail there, and 3,718 XC1 dyninit functions end in FALL1's trap (6,603 initializers skipped, was
+  2,885; objects constructed, atexit registrations lost). Other skips: 1,675 memory manager (FUN_00aa1070), 767 null
+  function pointers, 337 RegisterFloatKeyOps writes into `.text`. Frontier: 6 units only need a fresh S2 run
+  (nicontrollermanager, blk_004a0000_od, blk_00c20000_od, nifloatinterpolator, magicshaderhiteffect, blk_00ae0000_od);
+  still failing in census by hits: actormover (1,786), nitarray_h_unit (1,001), blk_00de0000_o2, actor, blk_00440000_od,
+  modelloader, blk_006e0000_od, ...
+* **decided** - Every link run states the branch commit its tree was prepared from; boot runs use only links
+  prepared from the current branch head (orchestrator).
+* **metrics** - game_undefined=7502 pcrel_abs_image=0 frontier_keys=138 init_skips=6603 boot_reached=WinMain+0x1c8
