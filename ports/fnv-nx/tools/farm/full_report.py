@@ -49,6 +49,7 @@ def main(argv):
     ap.add_argument('--make-rc', default='?')
     ap.add_argument('--seconds', type=float)
     ap.add_argument('--hide', nargs='*', default=[])
+    ap.add_argument('--inputs', nargs='*', default=[], help='lines describing where the inputs came from')
     a = ap.parse_args(argv)
     bd = os.path.abspath(a.build)
     hides = sorted([(os.path.abspath(p), '$' + n) for n, p in (h.split('=', 1) for h in a.hide if '=' in h)],
@@ -68,6 +69,8 @@ def main(argv):
     pf = R['prepare'].get('prepared_from') or {}
     L.append('- commit: `%s`; make exit %s%s' % (a.commit, a.make_rc,
                                                  '; %.0f min' % (a.seconds / 60) if a.seconds else ''))
+    for line in a.inputs:
+        L.append('- ' + clean(line, 300))
     L.append('- pins: ' + ', '.join('%s `%s`' % (k[4:], v) for k, v in sorted(R['fetch'].get('metrics', {}).items())
                                     if k.startswith('pin_')))
     t = R['toolchain']
