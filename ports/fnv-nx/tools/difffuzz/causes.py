@@ -94,6 +94,9 @@ POLICY = {
                                                  'returned (GCC drops the null test after a throwing operator new, '
                                                  'MSVC 2008 keeps it); the game\'s allocators never return null: '
                                                  'canned allocator results should be heap addresses'),
+    'oracle-native-address': ('artifact', 'S13', False, 'the oracle dereferences an address in the AArch64 '
+                                                          'private range (stubs/native image): a native address '
+                                                          'leaked to the x86 machine through the harness'),
     'no-native-entry': ('artifact', 'S13', False, 'the native image has no entry for the function (link subset)'),
     # --- real bugs -----------------------------------------------------------------------------------------------
     'uninit-arm':     ('real-bug', 'S1b', True, 'the native result depends on garbage: an argument slot the caller '
@@ -212,6 +215,8 @@ def _rule_error(d):
         if x.startswith('exc:3') or x == 'exc:3':
             return 'oracle-trap'
         fx = _fault_addr(x)
+        if fx and fx[0] in ('r', 'w') and _in(fx[1], A64_PRIV):
+            return 'oracle-native-address'
         if fx and fx[0] in ('r', 'w'):
             return 'oracle-fault'
     return None

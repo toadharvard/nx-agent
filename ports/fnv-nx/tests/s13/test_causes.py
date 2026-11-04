@@ -60,6 +60,8 @@ def test_rules():
     check(refined(dict(kind='error', x86='exc:3', arm=None)) == 'oracle-trap', 'oracle runs into int3 filler')
     check(refined(dict(kind='error', x86='fault:r:00000004', arm=None)) == 'oracle-fault', 'oracle-only data fault')
     check(refined(dict(kind='error', x86=None, arm='no-native-entry')) == 'no-native-entry', 'no native entry')
+    check(refined(dict(kind='error', x86='fault:r:0be1aab8', arm=None)) == 'oracle-native-address',
+          'oracle dereferences a native address')
     # call arguments
     check(refined(dict(kind='call-args', arg='p1', cls='F32', x86=f32(1.0), arm=f32(1.0000001))) == 'x87-precision',
           'float argument 1 ulp apart: x87-precision')
