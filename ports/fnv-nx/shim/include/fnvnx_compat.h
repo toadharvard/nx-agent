@@ -226,4 +226,7 @@ extern "C" void _operator_delete_sized(void *, __SIZE_TYPE__);
 #define FNVNX_ASM_FNV_HELPERS
 #include "fnvnx_asm.h"
 
+/* patch class MT1: the gate of the multithreaded-culling changes (docs/PATCHES.md) */
+#include "fnvnx_mt1.h"
+
 #endif
