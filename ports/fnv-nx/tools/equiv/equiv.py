@@ -143,6 +143,14 @@ def cmd_prepare(a):
     prepare = load_prepare()
     if 'NATIVE1' not in allow:
         prepare.drop_native_units = lambda *args, **kw: None
+    if not allow & {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}:     # S1b's units.json renames belong to its patches
+        load_stream = prepare.load_stream_rules
+
+        def no_post():
+            rules = load_stream()
+            prepare.STREAM_POST[:] = []
+            return rules
+        prepare.load_stream_rules = no_post
     os.environ['FNVNX_PREPARE_SKIP'] = ','.join(skip)
     out = Path(a.out)
     if out.exists():
@@ -156,7 +164,11 @@ def cmd_prepare(a):
     (out / 'equiv_rules.txt').write_text(','.join(sorted(allow)) + '\n')
     stats = (out / 'prepare_stats.tsv').read_text().split('\n')
     edited = {l.split('\t')[0] for l in stats if l.strip() and not l.split('\t')[2].startswith('0 ')}
-    stray = sorted(edited - allow - {'ASM3', 'ASM-LEFT'})
+    # counters that belong to a rule (ASM3 to ASM2/ASM4, <RULE>-MISS / -LEFT, S1b's units.json renames)
+    s1b = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
+    own = {k for k in edited if k.split('-')[0] in allow or k == 'ASM3' and allow & {'ASM2', 'ASM4'}
+           or k.startswith('UNITS-') and allow & s1b}
+    stray = sorted(edited - allow - own)
     if stray:
         raise SystemExit('equiv.py: rules outside the allow-list edited the tree: %s' % ', '.join(stray))
 
@@ -214,6 +226,7 @@ def key_free(name):
 
 
 SG_LITERAL = re.compile(r'^\$SG\d+$')
+GAME_PREFIX = 'fnvnx_game_'
 
 
 class Resolver:
@@ -271,6 +284,11 @@ class Resolver:
                 if n in self.names and not SG_LITERAL.match(n):
                     syms[n] = hex(self.names[n]); how['recipe'] += 1
                     continue
+                if GAME_PREFIX in n:        # GAME1: fnvnx_game_X is the decomp's X (S2 binds it by the unit's address)
+                    orig = n.replace(GAME_PREFIX, '')
+                    if orig in syms or orig in self.names:
+                        syms[n] = syms.get(orig) or hex(self.names[orig]); how['game'] += 1
+                        continue
                 for k, what in ((var_key(n), 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
                     if k and len(self.by_key.get(k, ())) == 1:
                         syms[n] = hex(next(iter(self.by_key[k]))); how[what] += 1
@@ -424,7 +442,7 @@ def select_units(spec, units, only=None):
 class Fingerprinter:
     """compare_builds.fingerprint with the decomp's names (strict) and with Resolver's extra bindings."""
 
-    def __init__(self, decomp):
+    def __init__(self, decomp, tree=None):
         self.cb = decomp_tools(decomp)
         from compare import Coff
         from build_and_match import recipe_names
@@ -433,10 +451,35 @@ class Fingerprinter:
         self.names = recipe_names(self.units)
         self.resolver = Resolver(self.units, self.names)
         self.names_nolit = {k: v for k, v in self.names.items() if not SG_LITERAL.match(k)}
+        # a prepared tree's own recipe (S1b renames decorations of patched definitions and references): same units,
+        # same addresses, other names - used where the pristine name is not in the object
+        self.alt = None
+        if tree is not None and Path(tree, 'equiv_rules.txt').exists() and Path(tree, 'build/units.json').exists():
+            alt = json.loads(Path(tree, 'build/units.json').read_text())['units']
+            if len(alt) == len(self.units) and alt != self.units:
+                self.alt = alt
+
+    def unit_for(self, i, coff):
+        """The pristine recipe entry of unit i, with the prepared recipe's names where only those are in the object."""
+        unit = self.units[i]
+        if self.alt is None or self.alt[i] == unit:
+            return unit
+        alt = self.alt[i]
+        by_addr = {f['address']: f for f in alt['functions']}
+        fns = []
+        for fn in unit['functions']:
+            other = by_addr.get(fn['address'])
+            if other and other['symbol'] != fn['symbol'] and fn['symbol'] not in coff.by_name \
+                    and other['symbol'] in coff.by_name:
+                fn = dict(fn, symbol=other['symbol'])
+            fns.append(fn)
+        syms = dict(alt.get('symbols', {}))
+        syms.update(unit.get('symbols', {}))
+        return dict(unit, functions=fns, symbols=syms)
 
     def row(self, i, obj):
-        unit = self.units[i]
         coff = self.Coff(obj)
+        unit = self.unit_for(i, coff)
         ext, how = self.resolver.extend(coff, unit)
         strict = self.cb.fingerprint(obj, unit, self.names)
         fp = self.cb.fingerprint(obj, ext, self.names_nolit)
@@ -491,7 +534,7 @@ def append_rows(out, rows_iter, total):
 
 
 def cmd_build(a):
-    fpr = Fingerprinter(a.decomp)
+    fpr = Fingerprinter(a.decomp, a.tree)
     units = fpr.units
     tree = Path(a.tree).resolve()
     sel = select_units(a.units, units, a.only)
@@ -537,7 +580,7 @@ def cmd_build(a):
 def cmd_refp(a):
     """Fingerprint again from the objects a build kept (--objdir), e.g. after a change to Resolver: rows of units that
     did not compile are copied over."""
-    fpr = Fingerprinter(a.decomp)
+    fpr = Fingerprinter(a.decomp, a.tree)
     old = load_rows(a.old)
     out = Path(a.out)
     out.unlink(missing_ok=True)
@@ -693,7 +736,7 @@ def cmd_attribute(a):
     B does not compile: rebuild it with SPEC minus one rule (and minus each --group), for each rule that edits a file
     in the unit's include closure. A differing function that becomes identical to A when rule R is left out is
     attributed to R; a unit that compiles without R did not compile because of R."""
-    fpr = Fingerprinter(a.decomp)
+    fpr = Fingerprinter(a.decomp, a.tree)
     cb, units = fpr.cb, fpr.units
     A, B = load_rows(a.a), load_rows(a.b)
     allow = resolve_spec(a.rules)
@@ -977,7 +1020,7 @@ def main():
     p.add_argument('--lean', action='store_true', help='prepared trees: the stand-in <windows.h> with '
                    'WIN32_LEAN_AND_MEAN (retry of units the full SDK breaks)')
     p = sub.add_parser('refp'); p.add_argument('decomp'); p.add_argument('old'); p.add_argument('objdir')
-    p.add_argument('--out', required=True)
+    p.add_argument('--out', required=True); p.add_argument('--tree', help='the prepared tree the objects come from')
     p = sub.add_parser('compare'); p.add_argument('a'); p.add_argument('b'); p.add_argument('--out')
     p = sub.add_parser('show'); p.add_argument('decomp'); p.add_argument('tree_a'); p.add_argument('tree_b')
     p.add_argument('--unit', type=int, required=True); p.add_argument('--fn', help='addresses, comma-separated')
