@@ -726,7 +726,7 @@ by lane. In-unit callees are inlined into the override, so the frame, the call a
 override:
 
 * `tests/s15/simd/run.py`: the override against a scalar reference in the decomp's order, bit for bit (any NaN
-  matches any NaN: with two NaN operands the payload depends on operand order, which GCC commutes freely), on
+  matches any NaN: with two NaN operands the payload and sign depend on operand order, which GCC commutes freely), on
   random, unit-length and edge inputs, aliasing included, under qemu-aarch64; and the ILP32 object builds;
 * `tools/perf/override_ab.py <source>:<addr> --override <c> --native <sym>`: the same fuzzed cases of S13's harness
   on the link and on a copy whose unit object binds the function to the override: A64 instructions per call, and
@@ -743,12 +743,12 @@ override:
 | culling worker 0x00a694e0 (+ bound getter 0x0043d450, 0x004b6100, 0x004b6160, 0x004b6190 inlined) | `cull_worker_00a694e0.c`: two `ld4` give the six planes as lanes, behind/front masks by lane | per object with 4-6 active planes 224-330 -> 49-67 (static paths; harness: early exit only, 12 -> 10) | 8/8 -> 8/8 | 6.563 -> 9.927 (row re-measured) -> 6.368 |
 | NiAVObject::UpdateWorldLoc 0x00a68bf0 (+ NiTransform compose 0x0062c250 and its four helpers inlined) | `update_world_loc_00a68bf0.c` | copy paths 13 -> 14; compose 23 + an unresolved operator* (> 100) -> 47 | 11/16 -> 12/16 | 6.368 -> 6.088 |
 | Havok GSK (same four) | `fnvnx_sse_fast.h`: `_mm_rsqrt_ss` on lane 0 only (15 -> 10), `_mm_add_ss` as fadd s + ins (3 -> 2; lanes 1-3 now a's bits as on x86, sse2neon added 0.0), `_mm_set_ss` / `_mm_load_ss` as `fmov s` / `ldr s` (2 -> 1) | 571 -> 539 | same | 6.088 -> 6.044 |
-| BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | | - |
+| BSBatchRenderer::FindPassBucket 0x00b9a090 + FindBucketIndex 0x00b98ae0 | dropped: 42 -> 44 (the common path is frame setup either way) | 42 + 12 (the 1.84x of section 7 is out of date: 1.11x and 0.48x now) | 15/15, 8/8 | 6.044 -> 5.913 (model row re-measured 82 -> 54, no code) |
 
 Overrides are built with compile.sh's code-generation flags (build.sh: -march/-mtune, no stack protector, no
 outline atomics); the A/B numbers above are with them. (Link 0bd144db1464, tree t/0bd144db1464, oracle msvc/pristine/87eb9373a0bb, 8 seeds x zero/random background.
 The agreement count is the same before and after; the per-case outputs are checked bit for bit by run.py.)
-The override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch of either must update it too.
+The Slerp override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch of either must update it too.
 The NiBound::Update row's MSVC signature is the one four pristine objects reference; one object (u2763) declares
 `?Update@NiBound@@QAEXABU1@ABUNiTransformDummy@@@Z` (struct spellings): if the link's ABI check rejects that
 reference, it needs a bridge-free second spelling (inbox note).
@@ -763,3 +763,13 @@ which calls ThreeByThreeMatrix::operator*(matrix) and operator*(point). The link
 (`out/refs.tsv`; 0x0062c250 is `code-defmissing`). The override no longer calls them. Other callers of operator*
 still do. The NiMatrix3 transpose product 0x00a588a0 (override above) is not on this path: the 25 instructions it
 saves were counted in fn_world_transform until this row was re-measured.
+**NaN results (V1 SL1).** "Bit-identical" in the Slerp, NiBound and matrix-product overrides covers every non-NaN
+result. A NaN result is a NaN, but its sign and payload can differ from the decomp's compiled code: V1 found 199
+of 144,000 Slerp cases with NaN inputs that return a NaN of the other sign. When two NaN operands meet, AArch64
+returns the first, and GCC commutes the operands of a commutative operation in either build, so the decomp's own
+code has no stable rule to match. No new kind of difference from x86 arises. Every NaN that GCC's code for the
+decomp creates is AArch64's default NaN (+qNaN 0x7fc00000), where x86 creates -qNaN (0xffc00000, x87 and SSE
+alike), so the port's NaN signs already differ from the exe wherever a NaN is created. A NaN's sign or payload is
+visible only through a bit-level read (an integer view, signbit, copysign), never through arithmetic or
+comparisons. Whether any caller of these three functions does such a read on a NaN has not been checked. The
+quat_from_matrix, xform, cull and sphere_plane tests compare exact bits or integer results.

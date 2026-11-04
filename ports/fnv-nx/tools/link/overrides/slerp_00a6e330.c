@@ -11,9 +11,11 @@
  * every float operation is a float operation there too, every double one a double, the sums are summed in the
  * decomp's order (lane extracts, never a pairwise tree beyond the first pair, which is the same a + b), no
  * fused multiply-add (build.sh: -ffp-contract=off). Only independent per-component operations share a NEON
- * instruction (b - a, x w, + a; the squares; the scale), which is bit-identical lane by lane. The result is the
- * decomp's to the bit for every input, NaN and infinity included (tests/s15/simd/test_slerp.py checks it on
- * random and edge inputs against a scalar reference in the same order).
+ * instruction (b - a, x w, + a; the squares; the scale), which is bit-identical lane by lane. Every non-NaN result,
+ * infinities included, is the decomp's to the bit (tests/s15/simd/slerp_test.c, random and edge inputs, against a
+ * scalar reference in the same order; V1's tests/v1/test_slerp_decomp.py against the decomp's own bodies).
+ * A NaN result is a NaN, but its sign and payload may differ from the decomp's compiled code: when two NaN
+ * operands meet, AArch64 returns the first one, and GCC commutes operands freely in either build (V1, SL1). The tests accept any NaN for any NaN; PERF.md 11.6 says why no new difference arises.
  *
  * The four constants are read from the image, as the decomp does: 0x0109c9d0 / 0x0109c9d8 (doubles of the weight)
  * and 0x011f3fec / 0x011f3ff0 (floats of the normalisation, written by a static initializer at run time).
