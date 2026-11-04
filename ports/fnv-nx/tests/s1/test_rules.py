@@ -160,6 +160,18 @@ check('NEW1 size parameter -> size_t, reference parameter kept',
       prepare.r_newdel_size('x.cpp', 'static void* operator new[](unsigned int size, unsigned int& total);\n', Counter()),
       ['operator new[](size_t size, unsigned int& total)'])
 
+# ---- DTOR1
+DTOR1_HEAD = 'template <class T> class NiPointer\n{\n    T* m_pObject;\n    ~NiPointer()\n    {\n        if (m_pObject)\n            m_pObject->DecRefCount();\n    }\n};\nclass Qa;\nclass Ra;\nclass Sa;\nnamespace N { class Qa : public Base {}; }\nclass Base { void DecRefCount(); };\nclass Ra : public Base {};\nclass Sa { void DecRefCount(); };\nstruct B { virtual void k(); NiPointer<Qa> q; NiPointer<Ra> r; NiPointer<Sa> s; };\n'
+import tempfile
+_d = tempfile.mkdtemp()
+os.makedirs(os.path.join(_d, 'src'))
+with open(os.path.join(_d, 'src', 'b.h'), 'w') as _h: _h.write(DTOR1_HEAD)
+_unit = os.path.join(_d, 'src', 'b.cpp')
+check('DTOR1 needs code after the includes', run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n', _unit), (), ['DTOR1'])
+got = run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n// k\nvoid B::k() {}\n', _unit)
+check('DTOR1 declares the destructor for a pointee never completed at file scope', got,
+      ['template <> NiPointer<Qa>::~NiPointer(); /* fnv-nx DTOR1 */'], ['NiPointer<Ra>::~', 'NiPointer<Sa>::~'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

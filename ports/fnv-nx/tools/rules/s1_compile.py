@@ -1543,6 +1543,93 @@ def r_namespace_specializations(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- DTOR1
+#
+# GCC emits a class's vtable where its key function (the first virtual member not defined in the class) is defined,
+# and with it the implicit virtual destructor, which destroys every member: a `NiPointer<QueuedFile>` member
+# instantiates NiPointer<QueuedFile>::~NiPointer(), whose body calls m_pObject->DecRefCount() and so needs a complete
+# QueuedFile with that member. MSVC emits a vtable where an object is constructed and never needed that destructor in
+# these units (middlehighprocess, tileimage, grenadeprojectile, skytexturemanager...), where the pointee is only
+# forward-declared, or declared without DecRefCount, in the whole unit. DTOR1 declares the explicit specialization
+# `template <> NiPointer<T>::~NiPointer();` for each such T in front of the unit's first line of code, after its
+# includes: nothing in the unit instantiates the destructor then, and a use of it is a call of the game's destructor
+# (the link binds it like any other declared function, e.g. ??1?$NiPointer@VQueuedFile@@@@QAE@XZ -> 0x0044cbf0).
+
+NIPTR_MEMBER = re.compile(r'\bNiPointer\s*<\s*([A-Za-z_]\w*)\s*>\s*[A-Za-z_]\w*\s*(?:\[[^\]]*\]\s*)?;')
+NIPTR_DTOR = re.compile(r'~NiPointer\s*\(\s*\)\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*DecRefCount')
+_CLOSURE_CACHE = {}
+
+def _closure(path, text):
+    """[(file, text)] of the text and every local header it includes, transitively (comments removed)."""
+    root, out, todo, done = _roots(path), [(path, COMMENT.sub(' ', text))], [(path, text)], set()
+    while todo:
+        fpath, ftext = todo.pop()
+        for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', ftext, re.M):
+            f = _resolve(inc, os.path.dirname(fpath), root)
+            if not f or f in done: continue
+            done.add(f)
+            if f not in _CLOSURE_CACHE:
+                with open(f, encoding='utf-8', errors='surrogateescape') as h: t2 = h.read()
+                _CLOSURE_CACHE[f] = (t2, COMMENT.sub(' ', t2))
+            t2, bare = _CLOSURE_CACHE[f]
+            out.append((f, bare))
+            todo.append((f, t2))
+    return out
+
+def r_incomplete_pointee_dtors(path, text, stats):
+    """DTOR1: explicit specialization declarations of NiPointer<T>::~NiPointer() for member pointees T the unit never
+    completes with a DecRefCount (see above)."""
+    if not path.endswith('.cpp') or '#include' not in text: return text
+    # the unit's first line of code at file scope, after its leading includes
+    lines, pos, lead_end = text.split('\n'), 0, None
+    for line in lines:
+        s = line.strip()
+        if s.startswith('#'):
+            if not re.match(r'#\s*(?:include|pragma)\b', s): return text      # conditional prologue: leave it
+        elif s and not s.startswith('//'):
+            lead_end = pos; break
+        pos += len(line) + 1
+    if lead_end is None: return text
+    whole = _closure(path, text)
+    alltext = '\n'.join(t for _, t in whole)
+    if 'NiPointer' not in alltext or not NIPTR_DTOR.search(alltext): return text
+    lead = '\n'.join(t for _, t in _closure(path, text[:lead_end]))
+    if not NIPTR_DTOR.search(lead): return text
+    spans = {}
+    def defs(name):
+        """[(base clause, body)] of the file-scope definitions of class `name` in the unit"""
+        found = []
+        for f, t in whole:
+            if name not in t: continue
+            for d in re.finditer(CLASS_DEF % re.escape(name), t):
+                if f not in spans: spans[f] = prepare.scope_spans(t)
+                if any(k != 'extern' for k, _ in prepare.scope_chain(spans[f], d.start())): continue
+                found.append((d.group(1) or '', t[d.end():prepare.match_brace(t, d.end() - 1)]))
+        return found
+    def refcounted(name, depth=0):
+        """True when a file-scope definition of `name` (or of a base) declares DecRefCount; None when unknown"""
+        if depth > 8: return None
+        for bases, body in defs(name):
+            if re.search(r'\bDecRefCount\b', body): return True
+            for b in re.findall(r'([A-Za-z_][\w:<>, ]*?)\s*(?:,|$)', re.sub(r'\b(?:public|protected|private|virtual)\b', '',
+                                                                       bases.lstrip(':'))):
+                b = b.strip()
+                if not re.match(r'^[A-Za-z_]\w*$', b): return None      # a template or qualified base: unknown
+                r = refcounted(b, depth + 1)
+                if r is not False: return r
+        return False
+    out = []
+    for t in sorted(set(NIPTR_MEMBER.findall(alltext))):
+        if TEMPLATE_PARAM_LIKE.match(t) or re.search(r'\btemplate\s*<\s*>\s*(?:class|struct)\s+NiPointer\s*<\s*%s\s*>' % t,
+                                                     alltext):
+            continue
+        if not re.search(r'^[ \t]*(?:class|struct)\s+%s\s*;' % t, lead, re.M): continue    # declared before the code
+        if refcounted(t) is not False: continue
+        out.append('template <> NiPointer<%s>::~NiPointer();' % t)
+    if not out: return text
+    stats['DTOR1'] += len(out)
+    return text[:lead_end] + ' '.join(out) + ' /* fnv-nx DTOR1 */ ' + text[lead_end:]
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -1564,5 +1651,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_math_overloads, r_falloff_traps,
+RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout]
