@@ -24,11 +24,16 @@ clang_env_setup() {
     printf '#include "%s/include/%s.h"\n' "$res" "$h" > "$out/clang/inc/$h.h"
   done
   printf '#include "%s/include/immintrin.h"\n' "$res" > "$out/clang/inc/sse2neon.h"
-  # the real force-include minus its target guards; __int128 does not exist on i686 (same alignment, 16)
-  sed -e '/^#error/d' \
+  # the real force-include minus its target guards; __int128 does not exist on i686 (same alignment, 16); the shim's
+  # NEON-written MMX intrinsics (fnvnx_mmx.h) stay out: clang's x86 headers define them, as they stand in for sse2neon
+  # (an error in a force-included header would also switch off clang's flow warnings in every unit)
+  sed -e '/^#error/d' -e 's|^#include "fnvnx_mmx.h".*$|/* fnvnx_mmx.h: clang'"'"'s own mmintrin.h (tools/static/clang_env.sh) */|' \
       -e 's/typedef unsigned __int128 type;/typedef unsigned int type __attribute__((aligned(16)));/' \
       -E -e 's/^inline __attribute__\(\(always_inline\)\) void (_ReadWriteBarrier|_ReadBarrier|_WriteBarrier)\(void\) \{.*\}$/void \1(void); \/* clang: MS builtin *\//' \
-      "$shim/fnvnx_compat.h" > "$out/clang/gnu/fnvnx_compat.h"
+      "$shim/fnvnx_compat.h" |
+    # definitions of functions clang knows as MS builtins (-fms-extensions) become declarations, as the barriers above
+    perl -0777 -pe 's/inline __attribute__\(\(always_inline\)\) ([^;{}]*?\b(?:__debugbreak|_rotl|_rotr|_exception_code)\([^)]*\))\s*\{[^{}]*\}/$1; \/* clang: MS builtin *\//g' \
+    > "$out/clang/gnu/fnvnx_compat.h"
   CLANG_COMMON=(-std=gnu++17 -fsyntax-only -ferror-limit=0 -fno-color-diagnostics -fno-caret-diagnostics
                 -fshort-wchar -fsigned-char -I"$out/clang/inc" -I"$shim")
   CLANG_MSVC=(--target=i686-pc-windows-msvc -fms-extensions -fms-compatibility -fms-compatibility-version=19.00
