@@ -1554,6 +1554,14 @@ def msvc_objs_id(b, key='MSVC_OBJS'):
     return sha(d, listing_id([os.path.join(d, n) for n in os.listdir(d)]) if os.path.isdir(d) else None)
 
 
+def link_exe(b):
+    """The player's FalloutNV.exe for the link (S2c's resolve --exe: image vftables paired by its RTTI class, slot
+    fill; S2d's bodies --exe): FNVNX_EXE, else a BOOT_IMAGE that is a file; '' when there is none. Agent-only data
+    (D3): it is read, never copied into the build's outputs."""
+    exe = os.environ.get('FNVNX_EXE') or (b.cfg['BOOT_IMAGE'] if os.path.isfile(b.cfg['BOOT_IMAGE']) else '')
+    return os.path.abspath(exe) if exe and os.path.isfile(exe) else ''
+
+
 def objects_map(objects_tsv):
     """compile.sh / fetch_objs.sh objects.tsv -> {unit: object path or None when it failed}."""
     m = {}
@@ -1597,7 +1605,7 @@ class Link(Stage):
     def fingerprint(self, b):
         return ['link-v3', link_tool_inputs(b), up_id(b, 'compile'), up_id(b, 'prepare'),
                 file_hash(b.cfg['OVERRIDE']), extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
-                game_cxx_id(b)]
+                game_cxx_id(b), 'exe:%s' % (file_hash(link_exe(b)) or 'none')]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'link', 'out', 'aliases.ld'))
@@ -1626,7 +1634,12 @@ class Link(Stage):
                          ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:
                 args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
-        r['resolve_options'] = [b.rel(a) for a in args[3:]]
+        # S2c: the player's exe (RTTI pairing and slot fill); --exe none keeps resolve off FNVNX_EXE / PLAYER_EXE
+        # when the stage has no exe, so the fingerprint says what was used
+        exe = link_exe(b)
+        args += ['--exe', exe or 'none']
+        r.metric('link_exe', 1 if exe else 0)
+        r['resolve_options'] = [b.rel(a) if a != exe else '<player exe>' for a in args[3:]]
         seed_link_out(b, r, out)
         env = b.env({'CXX': probe_cxx(b, d)})
         log = r['log']
@@ -1679,7 +1692,7 @@ class Link(Stage):
             t = time.time()
             pr = b.cfg['MSVC_OBJS'] or b.cfg['MSVC_CODE']
             # the player's exe (FNVNX_EXE, else a BOOT_IMAGE file): addresses of the calls the pristine objects make
-            exe = os.environ.get('FNVNX_EXE') or (b.cfg['BOOT_IMAGE'] if os.path.isfile(b.cfg['BOOT_IMAGE']) else '')
+            exe = link_exe(b)
             brc = b.sh([PY, '-I', fl, 'bodies', out, tree, '--jobs', str(b.jobs)]
                        + (['--msvc-objs', os.path.abspath(pr)] if pr and pr != 'none' else [])
                        + (['--exe', os.path.abspath(exe)] if exe else []), log, env=env)

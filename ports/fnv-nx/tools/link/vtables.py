@@ -361,14 +361,19 @@ def spelling(text, canon_type, split_qual):
 
 
 def load_synth(out):
-    """synth.tsv -> [(host unit, object path)] for the objects that exist."""
+    """synth.tsv -> [(host unit, object path)] for the objects that exist. A path that does not exist is looked
+    for in this out dir's vtables/ under its own name: an out dir seeded from another machine's run (LINK_SEED, a
+    published link's out/vtables) lists that machine's absolute paths."""
     path = os.path.join(out, 'vtables', 'synth.tsv')
     res = []
     if os.path.exists(path):
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
             f = line.rstrip('\n').split('\t')
-            if not line.startswith('#') and len(f) >= 2 and os.path.exists(f[1]):
-                res.append((f[0], f[1]))
+            if line.startswith('#') or len(f) < 2:
+                continue
+            p = f[1] if os.path.exists(f[1]) else os.path.join(out, 'vtables', os.path.basename(f[1]))
+            if os.path.exists(p):
+                res.append((f[0], p))
     return res
 
 

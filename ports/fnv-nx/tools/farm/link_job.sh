@@ -29,7 +29,8 @@
 # Published when the link is complete and prepared from <commit> (FARM_PUBLISH=always also publishes a UNITS
 # subset, for tests against a local ARTIFACTS remote; 0 never), as branch link/<commit12> of the private artifacts
 # repository toadharvard/fnv-nx-build (branches only: the session proxy refuses tags and ref deletions):
-#   out/{aliases.ld,refs.tsv,abi.tsv,addrmap.tsv,layouts.tsv,typeinfo_pairs.tsv,cache/msvc.tsv,vtables/}
+#   out/{aliases.ld,refs.tsv,abi.tsv,addrmap.tsv,layouts.tsv,typeinfo_pairs.tsv,slot_fill.tsv,slot_gaps.tsv,
+#   cache/msvc.tsv,vtables/}
 #   (vtables/ without the probe work dir; typeinfo_pairs.tsv from apply, in check's link order)
 #   fixed/*.o   summary.txt   report.md   meta.json
 # The rolling branch with the history of every publish is link-head: a branch named `link` cannot exist next to
@@ -61,7 +62,11 @@ job_sources "$REPO"
 LB=${LINK_BUILD:-$FARM_HOME/link/build}
 job_inputs "$(dirname "$LB")"
 job_pristine
-log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR"
+# S2c: the player's exe (private branch gamedata/exe, sha256 checked; agent-only, never published): resolve pairs the
+# image vftables by its RTTI class and fills trapped vtable slots from it, bodies binds exe-addr calls (S2d)
+job_gamedata
+if [ -n "$GAME_EXE" ]; then export FNVNX_EXE=$GAME_EXE; else unset FNVNX_EXE; fi
+log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; exe: $NOTE_EXE"
 printf 'TREE=%q\nOBJS=%q\nOBJ_COMMIT=%q\nNOTE_TREE=%q\nNOTE_OBJS=%q\n' "$TREE" "$OBJS" "$OBJ_COMMIT" "$NOTE_TREE" "$NOTE_OBJS" \
 	> "$(dirname "$LB")/inputs-$C12.env"     # for full_job.sh, which builds on this link
 ARGS=(TC_DL=none VORBIS=none)          # the link needs only the cross tools, not fnvnx-a64
@@ -85,16 +90,16 @@ fi
 t1=$(date +%s)
 
 # Report: the summary numbers.
-python3 -I - "$LB" "$COMMIT" "$rc" $((t1 - t0)) "$NOTE_TREE" "$NOTE_OBJS" "$NOTE_FAIL" "$NOTE_PR" > "$REPORT" <<'EOF'
+python3 -I - "$LB" "$COMMIT" "$rc" $((t1 - t0)) "$NOTE_TREE" "$NOTE_OBJS" "$NOTE_FAIL" "$NOTE_PR" "$NOTE_EXE" > "$REPORT" <<'EOF'
 import json, os, sys
-bd, commit, rc, secs, tree, objs, fail, pristine = sys.argv[1:9]
+bd, commit, rc, secs, tree, objs, fail, pristine, exe = sys.argv[1:10]
 def rec(s):
     try:
         return json.load(open(os.path.join(bd, s, 'stage.json')))
     except (OSError, ValueError):
         return {}
 L = ['# link %s' % commit[:12], '', '- commit: `%s`; make exit %s; %.0f min' % (commit, rc, int(secs) / 60.0),
-     '- tree: ' + tree, '- objects: ' + objs, '- resolve --msvc-code: ' + pristine]
+     '- tree: ' + tree, '- objects: ' + objs, '- resolve --msvc-code: ' + pristine, '- resolve --exe: ' + exe]
 if fail:
     L.append('- ' + fail)
 pf = rec('prepare').get('prepared_from') or {}

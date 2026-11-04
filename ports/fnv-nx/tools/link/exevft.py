@@ -19,6 +19,7 @@ The exe is the player's own (agent-only, D3): it is read, never copied, and the 
 local only). Same scan as tools/difffuzz/vtmodel.py (S13), which reads RTTI class names only.
 """
 import collections
+import re
 import json
 import os
 import struct
@@ -120,3 +121,30 @@ def load(path, cache):
         json.dump(dict(key=key, vft={str(v): list(e) for v, e in got.items()}), f)
     os.replace(cache + '.tmp', cache)
     return got
+
+
+# ---- GCC vtable slot k -> exe vftable slot j (the slot fill, docs/LINK.md "Vftables from the player's exe")
+
+D1_SLOT = re.compile(r'(D[12]Ev$|_D[12]$|_d1$)')
+D0_SLOT = re.compile(r'(D0Ev$|_d0$)')
+
+
+def dtor_pos(names, words=None):
+    """Index of D1 in GCC's destructor pair (D1 then D0) among one vtable's slot symbols, or None. names: the slot
+    symbols (Itanium names, or their address-bound forms `__fnv_<a>_D1`, `__fnvnx_vslot_*_d1|_d0`; None for a
+    slot without a relocation). An abstract class's pair is two adjacent zero words (words: the slot words)."""
+    for i in range(len(names) - 1):
+        a, b = names[i], names[i + 1]
+        if a and b and D1_SLOT.search(a) and D0_SLOT.search(b):
+            return i
+    if words is not None:
+        for i in range(len(names) - 1):
+            if names[i] is None and names[i + 1] is None and words[i] == 0 and words[i + 1] == 0:
+                return i
+    return None
+
+
+def exe_slot_index(k, d):
+    """The minus-one rule: MSVC has one deleting destructor where GCC has D1 and D0 (at d, d + 1), so GCC slot k
+    is exe slot k up to D1, D0 shares D1's slot, and every later slot is one lower."""
+    return k if d is None or k <= d else k - 1
