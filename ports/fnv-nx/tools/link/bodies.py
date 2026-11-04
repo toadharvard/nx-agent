@@ -4,12 +4,16 @@ functions").
 The decomp's headers declare many functions without a body: in the MSVC build they were inlined bodies, compiler-
 generated special members, or definitions in another unit under another decorated name or class shell. GCC calls
 them out of line, so after `resolve` they stay `unresolved` / `unresolved-ctor-dtor` (or `ctor-dtor-trap`), and the
-guest link binds them to trap stubs. `fnvlink.py bodies out/ tree/ [--msvc-objs DIR]` classifies every such name,
+guest link binds them to trap stubs. `fnvlink.py bodies out/ tree/ [--msvc-objs DIR] [--exe EXE]` classifies every such name,
 in this order (first that applies):
 
 1. `addr` - the same function at an original address under another name: the Itanium name, with class shells
    (`X_shell`) and then namespaces relaxed, matches MSVC names of exactly one address the native build
    defines (`addrmap.tsv` F/C/X; never a G: a deleting destructor is not a D1). Bound to `__fnv_<addr>`.
+1b. `exe-addr` (`--exe`, the player's FalloutNV.exe) - the referencing unit's pristine object calls the MSVC name:
+   every pristine object's calls of it (REL32 in functions placed by units.json, or at the address a placed
+   function's call reaches, bytes checked against the exe) give one native address of the right kind and shape
+   (`exe_pass`). Checked before the synthesized classes: an address beats `= default`.
 2. `msvc-empty` - a pristine MSVC object (`<dir>/u<index>.obj`, S11) defines the function (COMDAT code) and its x86
    body is only `ret` / `ret N` / `mov eax, ecx; ret[ N]` (a constructor returning this): an AArch64 `ret` stub
    under the Itanium name.
@@ -491,6 +495,82 @@ def pristine_externs(objdir, i):
     return {s.name for s in c.syms.values() if s.secnum == 0 and s.storage == 2 and s.name.startswith('?')}
 
 
+# ---------------------------------------------------------------------------------------------------- exe calls
+
+class Pe:
+    """FalloutNV.exe: bytes at a virtual address (section table only)."""
+
+    def __init__(self, path):
+        import struct
+        d = self.data = open(path, 'rb').read()
+        pe, = struct.unpack_from('<I', d, 0x3c)
+        nsec, = struct.unpack_from('<H', d, pe + 6)
+        opt, = struct.unpack_from('<H', d, pe + 20)
+        self.base, = struct.unpack_from('<I', d, pe + 24 + 28)
+        self.secs = []
+        for k in range(nsec):
+            o = pe + 24 + opt + 40 * k
+            vsize, va, rsize, roff = struct.unpack_from('<IIII', d, o + 8)
+            self.secs.append((self.base + va, max(vsize, rsize), roff, rsize))
+
+    def read(self, va, n):
+        for start, size, roff, rsize in self.secs:
+            if start <= va and va + n <= start + min(size, rsize):
+                return self.data[roff + va - start:roff + va - start + n]
+        return None
+
+
+def exe_call_targets(objdir, i, unit, wanted, exe):
+    """Original addresses the pristine object of unit i calls the MSVC names in wanted at. Functions are placed
+    by units.json, then by following REL32 calls from placed functions (a COMDAT units.json does not list, such as
+    `NiPointer<T>::operator=`, at the address the exe's call reaches); a function counts as placed only where its
+    x86 bytes equal the exe's outside relocations. At each REL32 relocation naming a wanted name in a placed
+    function, the exe's displacement gives the target. -> {msvc name: {target address: number of sites}}."""
+    import struct
+    import vslots
+    p = os.path.join(objdir, 'u%d.obj' % i)
+    if not os.path.exists(p) or not wanted:
+        return {}
+    c = vslots.Coff(p)
+    funcs = {}   # defined code symbol -> (section, start, body)
+    for name, si in c.defs.items():
+        sy = c.syms[si]
+        if sy.secnum > 0 and c.secs[sy.secnum].flags & IMAGE_SCN_CNT_CODE and sy.storage in (2, 3):
+            ends = [v for v, _ in c.symbols_in(sy.secnum) if v > sy.value]
+            data = c.section_bytes(sy.secnum)
+            funcs[name] = (sy.secnum, sy.value, data[sy.value:min(ends) if ends else len(data)])
+    todo = [(f['symbol'], int(f['address'], 16)) for f in unit['functions'] if f['symbol'] in funcs]
+    placed = {}
+    out = collections.defaultdict(collections.Counter)
+    while todo:
+        fname, a = todo.pop()
+        if fname in placed:
+            continue
+        sec, start, body = funcs[fname]
+        img = exe.read(a, len(body))
+        if img is None or not body:
+            continue
+        rel = {off - start: v for off, v in c.relocs(sec).items() if 0 <= off - start < len(body)}
+        mask, fixed = bytearray(body), bytearray(img)
+        for k in rel:
+            for j in range(k, min(k + 4, len(body))):
+                mask[j] = fixed[j] = 0
+        if bytes(mask) != bytes(fixed):
+            continue   # not the exe's code byte for byte here: none of its sites is trusted
+        placed[fname] = a
+        for k, (sn, typ) in rel.items():
+            if typ != 0x14 or k > len(body) - 4:   # IMAGE_REL_I386_REL32
+                continue
+            disp, = struct.unpack_from('<i', img, k)
+            addend, = struct.unpack_from('<i', body, k)
+            t = (a + k + 4 + disp - addend) & 0xffffffff
+            if sn in wanted:
+                out[sn][t] += 1
+            elif sn in funcs and sn not in placed:
+                todo.append((sn, t))
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------- run
 
 def load_bind(out):
@@ -517,7 +597,100 @@ def load_synth(out):
     return res
 
 
-def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synth=True):
+def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms):
+    """`exe-addr`: a name still missing (or about to get a synthesized special member) whose MSVC counterpart the
+    referencing unit's pristine object calls: bound to the address the exe's call at that site reaches, when every
+    site agrees and the native build defines it with the right kind."""
+    exe = Pe(exe_path)
+    udata = json.load(open(units_json))['units']
+    idx_of = collections.defaultdict(list)
+    for i_, n_ in enumerate(unit_names):
+        idx_of[n_].append(i_)
+    cand = [r for r in rows if r.cls in ('missing', 'special-default') and r.units]
+    need = {i_ for r in cand for u_ in r.units.split(',') for i_ in idx_of.get(u_, ())}
+    ext = {i_: pristine_externs(msvc_objs, i_) for i_ in need}
+    ms.need({n_ for e_ in ext.values() for n_ in e_})
+    mkeys = {}
+    for e_ in ext.values():
+        for m_ in e_:
+            if m_ not in mkeys:
+                sg = msvc(m_)
+                mkeys[m_] = {k for t, k in sg.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in def_keys(sg)}
+    pairs = collections.defaultdict(lambda: collections.defaultdict(set))   # unit index -> msvc name -> names
+    for r in cand:
+        isg = itanium(r.name)
+        keys = {k for t, k in isg.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in relaxed_keys(isg)}
+        for u_ in r.units.split(','):
+            for i_ in idx_of.get(u_, ()):
+                for m_ in ext[i_]:
+                    if keys & mkeys[m_]:
+                        pairs[i_][m_].add(r.name)
+    def_names = collections.defaultdict(set)   # address -> MSVC names defined there
+    for u_ in udata:
+        for f_ in u_['functions']:
+            def_names[int(f_['address'], 16)].add(f_['symbol'])
+    ms.need({n_ for ns_ in def_names.values() for n_ in ns_ if n_.startswith('?')})
+
+    def shape_ok(ref, a):
+        """The MSVC definition at a and the pristine reference ref: as many parameters, both member functions or
+        both not, the same calling convention (no ABI bridge is made for these bindings; resolve compares only the
+        names it binds itself)."""
+        rs = msvc(ref)
+        if rs.kind != 'func' or rs.params is None:
+            return False
+        member = bool(rs.member)
+        rparams = [p_ for p_ in rs.params if p_ != '...']
+        for n_ in def_names.get(a, ()):
+            d_ = msvc(n_) if n_.startswith('?') else None
+            if d_ is None or d_.kind != 'func' or d_.params is None:
+                continue
+            dparams = [p_ for p_ in d_.params if p_ != '...']
+            if len(dparams) == len(rparams) and bool(d_.member) == member and d_.cc == rs.cc:
+                return True
+        return False
+    seen = collections.defaultdict(collections.Counter)   # Itanium name -> {address: sites}
+    via = {}
+    by_m = collections.defaultdict(set)   # MSVC name -> Itanium names it stands for
+    for mp in pairs.values():
+        for m_, ns_ in mp.items():
+            by_m[m_] |= ns_
+    # every pristine object: the referencing unit's own call is often in a COMDAT the exe dropped (MSVC inlined it
+    # into callers, maybe in other units, whose calls of the same name the exe keeps)
+    for i_ in range(len(udata)):
+        for m_, tg in exe_call_targets(msvc_objs, i_, udata[i_], set(by_m), exe).items():
+            for n in by_m[m_]:
+                seen[n].update(tg)
+                via.setdefault(n, m_)
+    out = []
+    for r in rows:
+        tg = seen.get(r.name)
+        if not tg:
+            out.append(r)
+            continue
+        isg = itanium(r.name)
+        want = VARIANT_KIND.get(isg.variant, 'F') if isg.variant else 'F'
+        if len(tg) != 1:
+            out.append(r._replace(note=r.note + '; exe calls %s' % ','.join('%08x' % a for a in sorted(tg)[:4])))
+            continue
+        (a, nsite), = tg.items()
+        if isg.variant in ('C1', 'C2', 'D1', 'D2') and native.get(a) == 'F' and shape_ok(via[r.name], a):
+            want = 'F'   # the decomp defines the constructor/destructor's address as a member function (FUN_...)
+        if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a):
+            out.append(r._replace(note=r.note + '; exe calls %08x (signature shape differs: %s)' % (
+                a, ' / '.join(sorted(def_names.get(a, ()))[:2]))))
+            continue
+        if native.get(a) != want or isg.variant == 'D0':
+            out.append(r._replace(note=r.note + '; exe calls %08x (%s)' % (
+                a, 'native kind %s' % native[a] if a in native else 'not compiled natively')))
+            continue
+        out.append(r._replace(cls='exe-addr', addr=a, target=ADDR_SYM % a, host=None,
+                              note='%s called at %d site(s) in the exe' % (via[r.name], nsite) +
+                              (' (%s bound to the complete-object definition)' % isg.variant
+                               if isg.variant in ('C2', 'D2') else '')))
+    return out
+
+
+def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synth=True, exe_path=None):
     import fnvlink
     units_json = units_json or os.path.join(tree, 'build', 'units.json')
     bdir = os.path.join(out, 'bodies')
@@ -555,6 +728,9 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         return msig[n]
     cl = Classifier(units, native, msvc, itanium, bodies, unit_names)
     rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
+
+    if msvc_objs and exe_path:
+        rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms)
 
     synth_rows, failed, vnotes = [], {}, {}
     if synth:
@@ -648,7 +824,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     with open(os.path.join(bdir, 'bind.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\tclass\ttarget\n')
         for r in rows:
-            if r.cls in ('addr', 'vcall'):
+            if r.cls in ('addr', 'exe-addr', 'vcall'):
                 f.write('%s\t%s\t%s\n' % (r.name, r.cls, r.target))
     with open(os.path.join(bdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#host_unit\tobject\tnames\n')
@@ -658,7 +834,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
-              for k in ('addr', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default', 'missing')]
+              for k in ('addr', 'exe-addr', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default', 'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))
@@ -668,16 +844,18 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
 
 
 def main(argv):
-    """fnvlink.py bodies out/ tree/ [--msvc-objs DIR] [--names undefined.txt] [--units units.json] [--jobs N]
+    """fnvlink.py bodies out/ tree/ [--msvc-objs DIR] [--exe FalloutNV.exe | $FNVNX_EXE] [--names undefined.txt]
+    [--units units.json] [--jobs N]
     [--no-synth]"""
     pos, opts = [], {}
     it_ = iter(argv)
     for x in it_:
-        if x in ('--msvc-objs', '--names', '--units', '--jobs'):
+        if x in ('--msvc-objs', '--names', '--units', '--jobs', '--exe'):
             opts[x[2:]] = next(it_)
         elif x == '--no-synth':
             opts['no-synth'] = True
         else:
             pos.append(x)
     run(pos[0], pos[1], msvc_objs=opts.get('msvc-objs'), names_txt=opts.get('names'), units_json=opts.get('units'),
-        jobs=int(opts.get('jobs', os.cpu_count() or 4)), synth=not opts.get('no-synth'))
+        jobs=int(opts.get('jobs', os.cpu_count() or 4)), synth=not opts.get('no-synth'),
+        exe_path=opts.get('exe') or os.environ.get('FNVNX_EXE'))

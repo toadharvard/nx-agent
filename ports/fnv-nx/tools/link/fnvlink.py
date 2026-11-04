@@ -15,7 +15,7 @@
                                                               # the synthesized vtables/typeinfo (vtables.py;
                                                               # FNVNX_NO_VTABLES=1 skips them); then resolve again
     fnvlink.py vtables <out dir> <prepared tree> [jobs]        # only the vtable/typeinfo synthesis
-    fnvlink.py bodies  <out dir> <prepared tree> [--msvc-objs <dir>] [--names <undefined.txt>] [--no-synth]
+    fnvlink.py bodies  <out dir> <prepared tree> [--msvc-objs <dir>] [--exe <exe>] [--names <undefined.txt>] [--no-synth]
                                                               # declared-only functions (bodies.py): bound by
                                                               # address or synthesized; then resolve again
     fnvlink.py apply   <out dir> <fixed dir>                   # objcopy every object with its generated args

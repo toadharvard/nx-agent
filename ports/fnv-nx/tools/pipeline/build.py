@@ -1678,15 +1678,18 @@ class Link(Stage):
             b.say('link: fnvlink bodies (declared-only functions; %d jobs)' % b.jobs)
             t = time.time()
             pr = b.cfg['MSVC_OBJS'] or b.cfg['MSVC_CODE']
+            # the player's exe (FNVNX_EXE, else a BOOT_IMAGE file): addresses of the calls the pristine objects make
+            exe = os.environ.get('FNVNX_EXE') or (b.cfg['BOOT_IMAGE'] if os.path.isfile(b.cfg['BOOT_IMAGE']) else '')
             brc = b.sh([PY, '-I', fl, 'bodies', out, tree, '--jobs', str(b.jobs)]
-                       + (['--msvc-objs', os.path.abspath(pr)] if pr and pr != 'none' else []), log, env=env)
+                       + (['--msvc-objs', os.path.abspath(pr)] if pr and pr != 'none' else [])
+                       + (['--exe', os.path.abspath(exe)] if exe else []), log, env=env)
             r.metric('link_bodies_s', round(time.time() - t, 1))
             bst = os.path.join(out, 'bodies', 'stats.txt')
             if brc:
                 r.note('bodies exited %d; resolve 2 uses what it left' % brc)
             elif os.path.exists(bst):
                 for line in open(bst):
-                    mm = re.match(r'(addr|vcall|msvc-empty|msvc-inline|special-default|missing)\s+(\d+)', line)
+                    mm = re.match(r'(addr|exe-addr|vcall|msvc-empty|msvc-inline|special-default|missing)\s+(\d+)', line)
                     if mm:
                         r.metric('link_bodies_' + mm.group(1).replace('-', '_'), int(mm.group(2)))
         # ---- end S2d

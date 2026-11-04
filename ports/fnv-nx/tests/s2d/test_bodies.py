@@ -221,5 +221,84 @@ class T(unittest.TestCase):
         self.assertEqual(why['_ZN1A2naEi'], 'not virtual')
 
 
+def coff(funcs, externs):
+    """Minimal i386 COFF: one COMDAT code section per function {name: (bytes, {offset: callee})}."""
+    import struct
+    names = list(funcs)
+    syms, strtab = [], bytearray(4)
+
+    def sname(n):
+        if len(n) <= 8:
+            return n.encode().ljust(8, b'\0')
+        off = len(strtab)
+        strtab.extend(n.encode() + b'\0')
+        return struct.pack('<II', 0, off)
+    order = names + list(externs)
+    idx = {n: i for i, n in enumerate(order)}
+    hdr_end = 20 + 40 * len(names)
+    secs, raw, pos = [], bytearray(), hdr_end
+    for k, n in enumerate(names):
+        code, calls = funcs[n]
+        data_off = pos
+        raw += code
+        pos += len(code)
+        rel_off = pos
+        for off, callee in sorted(calls.items()):
+            raw += struct.pack('<IIH', off, idx[callee], 0x14)
+            pos += 10
+        secs.append(struct.pack('<8sIIIIIIHHI', b'.text$%d' % k, 0, 0, len(code), data_off, rel_off, 0,
+                                len(calls), 0, 0x60501020))
+    symptr = pos
+    for n in order:
+        sec = names.index(n) + 1 if n in funcs else 0
+        syms.append(sname(n) + struct.pack('<IhHBB', 0, sec, 0x20, 2, 0))
+    struct.pack_into('<I', strtab, 0, len(strtab))
+    head = struct.pack('<HHIIIHH', 0x14c, len(names), 0, symptr, len(order), 0, 0)
+    return head + b''.join(secs) + bytes(raw) + b''.join(syms) + bytes(strtab)
+
+
+def pe(base, text_va, text):
+    import struct
+    d = bytearray(0x400)
+    struct.pack_into('<I', d, 0x3c, 0x80)
+    d[0x80:0x84] = b'PE\0\0'
+    struct.pack_into('<HH', d, 0x84, 0x14c, 1)
+    struct.pack_into('<H', d, 0x80 + 20, 0xe0)
+    struct.pack_into('<I', d, 0x80 + 24 + 28, base)
+    struct.pack_into('<8sIIII', d, 0x80 + 24 + 0xe0, b'.text', len(text), text_va - base, len(text), 0x400)
+    return bytes(d) + text
+
+
+class Exe(unittest.TestCase):
+    def test_exe_call_targets(self):
+        """A placed function's REL32 call gives the target; a COMDAT reached from it is placed by that call and
+        its own call counts; a function whose bytes differ from the exe gives nothing."""
+        import struct
+        f = b'\x55\xe8\0\0\0\0\xe8\0\0\0\0\x5d\xc3'            # push ebp; call ?h; call ?g; pop ebp; ret
+        h = b'\xe8\0\0\0\0\xc3'                                    # COMDAT ?h: call ?k; ret
+        bad = b'\x90\xe8\0\0\0\0\xc3'
+        obj = coff({'?f@@YAXXZ': (f, {2: '?h@@YAXXZ', 7: '?g@@YAXXZ'}), '?h@@YAXXZ': (h, {1: '?k@@YAXXZ'}),
+                    '?b@@YAXXZ': (bad, {2: '?g@@YAXXZ'})}, ['?g@@YAXXZ', '?k@@YAXXZ'])
+        text = bytearray(0x100)
+        F, H, G, K, B = 0x401000, 0x401040, 0x401080, 0x4010c0, 0x401020
+        text[0:len(f)] = f
+        struct.pack_into('<i', text, 2, H - (F + 6))
+        struct.pack_into('<i', text, 7, G - (F + 11))
+        text[0x40:0x40 + len(h)] = h
+        struct.pack_into('<i', text, 0x41, K - (H + 5))
+        text[0x20:0x20 + len(bad)] = b'\xcc' * len(bad)              # ?b is not the exe's code
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            unit = {'functions': [{'symbol': '?f@@YAXXZ', 'address': '%x' % F},
+                                  {'symbol': '?b@@YAXXZ', 'address': '%x' % B}]}
+            exe = bodies.Pe(os.path.join(d, 'x.exe'))
+            self.assertEqual(exe.read(F, 2), b'\x55\xe8')
+            got = bodies.exe_call_targets(d, 0, unit, {'?g@@YAXXZ', '?k@@YAXXZ'}, exe)
+        self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}, '?k@@YAXXZ': {K: 1}})
+
+
 if __name__ == '__main__':
     unittest.main()
