@@ -10,6 +10,9 @@
 # through a section anchor; the link rebinds it to its image address (an absolute symbol), and an anchor-relative or
 # PC-relative access would miss it or tie the guest to its link address (docs/LINK.md, "Split globals"). Not
 # -fno-semantic-interposition: it calls a unit's own functions through local aliases, past the by-address binding.
+# -march/-mtune as the guest build (toolchain/game/build.sh). No hardening defaults of the distro compiler: Ubuntu's
+# gcc enables -fstack-protector-strong and -fstack-clash-protection, and outline atomics call libgcc helpers
+# (S15, docs/PERF.md: -4.7 % instructions and -32 % GOT loads in hot units). None of them is a semantics flag.
 # -ffile-prefix-map: __FILE__ and other recorded paths do not depend on where the tree lives, so objects built on
 # different machines from the same tree are byte-identical (tools/farm/).
 # Objects are derived from the decomp: local output only, never committed.
@@ -21,6 +24,7 @@ CXX=${CXX:-aarch64-linux-gnu-g++}
 SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
 OPT=${OPT:--O2}
 FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -ffp-contract=off -fPIC -fpermissive -Werror=return-type -Wno-narrowing -fmax-errors=20
+       -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection -mno-outline-atomics
        -ffile-prefix-map="$TREE"/= -ffile-prefix-map="$HERE"/=fnv-nx/ -ffile-prefix-map="$SSE2NEON"/=sse2neon/
        -include "$HERE/shim/include/fnvnx_compat.h" -I"$HERE/shim/include" -I"$SSE2NEON" -I"$TREE/include")
 export CXX TREE OUT FLAGS_STR="${FLAGS[*]}"
