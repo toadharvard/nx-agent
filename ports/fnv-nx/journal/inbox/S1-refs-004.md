@@ -75,3 +75,34 @@
   - Decomp-wide: 143 edits in 127 .cpp units, 0 -> 0 -O2 errors in them.
   - Of the 20 layout-offset rows it covers effectitemlist's 3 and fires in blk_00720000_od and
     blk_00c40000_od_ob1_variant_rtm_variant (1 row each). The rest are other layout causes, next on the list.
+* **S5-boot's three wrong decomp bodies (s5-002.md)**
+  - 0x00c3c460 `new MH(false)` with an empty `MH::MH`: **already fixed** by STAND2 (S1-fuzzB 57fe267) in the current
+    rules. STAND2 drops the untagged local `MH::MH(bool) {}`, and the recipe binds `??0MH@@QAE@_N@Z` to 0x00c3bcf0
+    (MessageHandler's constructor). With the current link code, GCC's `_ZN2MHC1Eb` / `C2Eb` resolve to 0x00c3bcf0
+    in the unit's index. S5 measured on older guests. Its stand-in for 0x00c3c460 in tests/s5/standins.c can go
+    after a boot on a guest linked from a tree with STAND2.
+  - 0x00aa3cc0 CreateMemoryPool: **not a wrong body**.
+    - Evidence: tools/build_and_match.py with the exe on the pristine src/bscore/memorymanager.cpp gives 21 / 21
+      functions and 2,371 / 2,371 bytes, including 0x00aa3cc0.
+    - Why MSVC matches: the unit's `delete pnewPool` reaches MemoryManager::Deallocate because
+      memorymanager_memory.h defines the game's global `operator new` / `operator delete` inline
+      (`g_memoryManager.Allocate` / `.Deallocate`), and MSVC inlines them.
+    - Why the guest differs: ALLOC1 has to drop those inline replacements for GCC, so the guest's `delete` is
+      whatever global delete the guest links: free under GAME_NEW=runtime (toolchain/game/global_new.cpp), or the
+      NiFree S5 saw.
+    - The faithful fix is guest-wide, for S5 / toolchain: global new / delete (and the array and sized forms) =
+      MemoryManager::Allocate (0x00aa3e40) / Deallocate (0x00aa4060), the definition every decomp unit inlines.
+      S5's boot shows the game's allocators now work. The stand-in can go then.
+  - 0x00aa78a0 MemoryHeap::MemoryHeap: **missing from the decomp**. No unit's recipe has 0x00aa78a0; it is the gap
+    between 0x00aa7870 + 17 and ReserveAndCommitMemory 0x00aa79a0. 0x00aa7930, a second MemoryHeap constructor
+    (it calls 0x00aa8ea0 and sets +0x20f1 = 1), is missing too.
+    - S1-refs wrote a reconstruction and checked it: added to src/bscore/memoryheap.cpp (a namespaced
+      AbstractHeap base with a virtual destructor and the constructor), with the recipe entry
+      `??0MemoryHeap@fnv_00aa78a0@@QAE@IIPBD_N@Z` (0x00aa78a0, 136 bytes) and bindings for 0x00aa8ca0, 0x00aa8dd0,
+      0x010a28fc, its __ehhandler 0x00f1eda8 and ___security_cookie 0x011c16bc. build_and_match then gives
+      18 / 18 functions and 1,144 / 1,144 bytes against the exe.
+    - **Not committed.** Writing the reconstructed body into this public repository was refused by the session's
+      permission check (provenance: the code is derived from the exe). It stays in the S1-refs container only.
+    - Decision needed (owner / orchestrator): where reconstructed bodies of functions the decomp lacks may live. For
+      example, the private artifacts repository, with a rule that applies them when present, or upstream in the
+      decomp. Until then, heap_standin.c stays.

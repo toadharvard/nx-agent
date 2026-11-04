@@ -757,13 +757,42 @@
  "content": {
   "note": "content lever (S15-simd, PERF.md 11.7; tools/perf/content_presets.py): Switch INI presets of existing settings only. base = FalloutNV.exe 1.4.0.525's own defaults, read from the settings' static initializers [M]; the work items are taken to describe a frame at base [E: to verify with frameprof per preset]. Shares and the scaling rules are estimates [E].",
   "shares": {
-   "visible": {
-    "objects": 0.7,
-    "items": 0.1,
-    "actors": 0.1,
-    "grass": 0.1
+   "note": "draw sources and their mid counts per Mojave exterior frame from RENDER_NATIVE.md 3.7 (code-path estimates at uGrids 5 and 2-4 shadow lights, i.e. the exe defaults); items taken as 10 % of the static-object draws [E]; each source scales with the setting that governs it, the rest is constant",
+   "draws": {
+    "objects": 1044,
+    "items": 116,
+    "land": 125,
+    "distant_lod": 150,
+    "trees": 300,
+    "grass": 200,
+    "actors": 125,
+    "shadows": 200,
+    "water": 200,
+    "particles": 100,
+    "image_space_ui": 40
    },
-   "shadow_of_draws": 0.15,
+   "scales_with": {
+    "objects": "objects",
+    "items": "items",
+    "land": "loaded",
+    "distant_lod": "const",
+    "trees": "const",
+    "grass": "grass",
+    "actors": "actors",
+    "shadows": "shadow",
+    "water": "const",
+    "particles": "const",
+    "image_space_ui": "const"
+   },
+   "cull_sources": [
+    "objects",
+    "items",
+    "land",
+    "trees",
+    "grass",
+    "actors",
+    "particles"
+   ],
    "grass_shadow_actor_equiv": 2.0,
    "cull_traversal": 0.3,
    "scene_loaded": 0.5

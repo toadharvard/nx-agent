@@ -1061,30 +1061,40 @@ uGridsToLoad 5, fLODFadeOutMultObjects 5.0, Items 3.0, Actors 2.5, iActorShadowC
 | switch_b | fade x 3 / 1.5 / 1.5; actor shadows 0 / 1; iMinGrassSize 160; grass fade 2500; decals 3 / 1 |
 | switch_b_g3 | switch_b with uGridsToLoad 3. It breaks scripted events and AI packages that expect loaded cells, so it is shown as the bound only, not proposed |
 
+**Calibration of the work items (asked by the orchestrator).** No ini. The items are code-path estimates
+(sections 3 and 5): the per-draw costs times RENDER_NATIVE.md 3.7's draw table, which assumes uGridsToLoad 5 (25
+cells) and 2-4 shadow lights. Those match the exe's defaults (5; iActorShadowCountExt 2, Int 4), and the table names
+no fade multiplier. So `base` = the exe's defaults, and no PC High/Ultra ini, is the consistent reading. A frameprof
+frame at base is still the first measurement to take.
+
 **Scaling [E].**
-- Visible references of a class grow with the square of its fade multiplier, capped by the loaded area
-  ((uGridsToLoad'/5)^2).
-- Grass grows with (80 / iMinGrassSize)^2 x (fade'/7000)^2.
-- V weights the classes: objects 0.70, items 0.10, actors 0.10, grass 0.10.
-- Each shadowed actor is a shadow pass: 15 % of draws at base.
-- cull = 0.30 x loaded + 0.70 x V; accumulation and both renderer sides = draws; scene update = 0.5 x loaded +
-  0.5 x V.
-- Animation, AI and Havok are unchanged: high process is set by distance to the player, not by fade.
-- S15-simd's override corrections scale with their item.
+- Draws: RENDER_NATIVE 3.7's sources at their mid counts. Statics 1,044 and items 116 (items taken as 10 % of
+  statics) scale with their fade multiplier squared, capped by the loaded area. Land (125) scales with the loaded
+  area. Grass (200) scales with spacing and fade. Actors (125) scale with their fade. Shadow maps (200) scale with
+  the shadowed-actor count. Distant LOD, trees, water reflection, particles and image space + UI (790 together) are
+  constant.
+- Cull = 0.30 x loaded + 0.70 x V, where V is the same scaling over the scene sources.
+- Accumulation and both renderer sides scale with draws. Scene update = 0.5 x loaded + 0.5 x V.
+- Animation, AI and Havok are unchanged.
+- An earlier version weighted only objects/items/actors/grass (0.7 / 0.1 / 0.1 / 0.1) with shadows as 15 %. It
+  treated almost every draw as scalable, and overstated the saving.
 
 | preset | scale cull / accumulation + renderer / scene update | worst frame, ms at 1.02 GHz, mid (lo-hi): placed | plan45b | plan60 |
 |---|---|---|---|---|
 | base | 1.00 / 1.00 / 1.00 | 34.3 (6.1-97.4) | 25.2 (6.1-80.7) | 23.4 (6.1-77.1) |
-| switch_a | 0.70 / 0.53 / 0.79 | 27.3 (6.1-76.7) | 20.1 (6.1-63.6) | 19.1 (6.1-61.7) |
-| switch_b | 0.52 / 0.27 / 0.66 | 23.3 (6.1-64.9) | 17.2 (6.1-53.8) | 16.7 (6.1-52.8) |
-| switch_b_g3 | 0.33 / 0.27 / 0.34 | 20.9 (6.1-56.5) | 15.2 (6.1-46.4) | 14.8 (6.1-45.5) |
+| switch_a | 0.77 / 0.71 / 0.84 | 29.6 (6.1-83.2) | 21.8 (6.1-68.8) | 20.4 (6.1-66.3) |
+| switch_b | 0.64 / 0.53 / 0.74 | 26.8 (6.1-74.7) | 19.7 (6.1-61.8) | 18.7 (6.1-60.0) |
+| switch_b_g3 | 0.42 / 0.50 / 0.40 | 23.9 (6.1-64.6) | 17.4 (6.1-53.1) | 16.5 (6.1-51.4) |
 
-(--render render/native/perf/report.json, --perf perf1 004d29413190; the lo end is the docked 720p GPU estimate.)
+(--render render/native/perf/report.json, --perf perf1 004d29413190, mt_cull at MT1's 15-35 %.)
 
-**Reading it** (mt_cull at MT1's 15-35 %). switch_b just meets 60 fps stable at plan60 (16.7 ms) and misses it at
-plan45b (17.2 ms). switch_a does not meet it (19.1 ms). Only switch_b_g3 is clearly under (14.8 / 15.2 ms), and it
-gives up uGridsToLoad 5. A preset between switch_b and switch_b_g3 is needed, or more threading. Every figure is the
-model's mid case. The hi end stays far above the target until frameprof measures a frame.
+**Reading it.** No preset that keeps uGridsToLoad 5 meets 16.7 ms in the model. switch_b with plan60 is at 18.7 ms.
+Only switch_b_g3 gets there (16.5 ms at plan60), and it gives up 5 grids. What is left after the content cut is
+mostly work these settings do not touch:
+- distant LOD, trees, water reflection, particles and UI: 30 % of draws;
+- animation, AI and Havok.
+Next levers: the tree LOD / water reflection settings (fTreeLOD*-style, bUseWaterReflections-style), counted the
+same way, and more threading of the remaining main items.
 
 **Open.**
 - The work items are taken to describe a frame at the base settings, i.e. the exe's defaults. A PC player's ini
