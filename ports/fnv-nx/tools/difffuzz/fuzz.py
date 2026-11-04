@@ -141,12 +141,13 @@ def _rets(r, bufs):
     return struct.pack('<II', w & 0xffffffff, r.getrandbits(32)) + struct.pack('<d', r.choice(FLT_EDGES))
 
 
-def minimise(pair, case, kind, max_steps, budget=120):
-    """Greedy reduction keeping the divergence kind."""
+def minimise(pair, case, kind, max_steps, budget=120, seconds=20.0):
+    """Greedy reduction keeping the divergence kind (at most `budget` runs / `seconds`)."""
     runs = [0]
+    t_end = time.time() + seconds
 
     def same(c):
-        if runs[0] >= budget:
+        if runs[0] >= budget or time.time() > t_end:
             return False
         runs[0] += 1
         _, _, d = pair.run(c, max_steps)

@@ -298,6 +298,8 @@ class X86Engine:
             v = libcalls.run(name, libcalls.Mem(uc, r.writes, self._ensure), words)
         except KeyError:
             return False
+        except libcalls.TooLong:
+            self._fault = 'fault:libcall-length'; uc.emu_stop(); return True
         uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff)
         uc.reg_write(UC_X86_REG_ESP, esp + 4); uc.reg_write(UC_X86_REG_EIP, ret)
         return True

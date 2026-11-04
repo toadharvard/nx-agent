@@ -85,14 +85,23 @@ def _cmp(a, b):
     return (a > b) - (a < b)
 
 
+MAX_LEN = 1 << 20     # a length beyond this is a wild call: both machines fault the same way
+
+
+class TooLong(Exception):
+    pass
+
+
 def run(name, m, a):
     """Integer/pointer builtins: name, Mem, args (ints) -> result (int)."""
+    if name in ('memcpy', 'memmove', 'memset', 'memcmp', 'strncpy') and (a[2] & 0xffffffff) > MAX_LEN:
+        raise TooLong(name)
     if name in ('memcpy', 'memmove'):
-        m.write(a[0], m.read(a[1], a[2] & 0xffffff)); return a[0]
+        m.write(a[0], m.read(a[1], a[2])); return a[0]
     if name == 'memset':
-        m.write(a[0], bytes([a[1] & 0xff]) * (a[2] & 0xffffff)); return a[0]
+        m.write(a[0], bytes([a[1] & 0xff]) * a[2]); return a[0]
     if name == 'memcmp':
-        x, y = m.read(a[0], a[2] & 0xffffff), m.read(a[1], a[2] & 0xffffff)
+        x, y = m.read(a[0], a[2]), m.read(a[1], a[2])
         for p, q in zip(x, y):
             if p != q:
                 return (p - q) & 0xffffffff

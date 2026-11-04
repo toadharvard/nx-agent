@@ -277,7 +277,10 @@ class Arm64Engine:
             uc.reg_write(VR[0], out)
         else:
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
-            v = libcalls.run(bname, libcalls.Mem(uc, r.writes, self._ensure), args)
+            try:
+                v = libcalls.run(bname, libcalls.Mem(uc, r.writes, self._ensure), args)
+            except libcalls.TooLong:
+                self._fault = 'fault:libcall-length'; uc.emu_stop(); return True
             uc.reg_write(XR[0], v & 0xffffffff)
         uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
         return True
