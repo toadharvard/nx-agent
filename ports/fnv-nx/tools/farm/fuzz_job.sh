@@ -17,11 +17,17 @@
 #              says so in the report. $FUZZ_LINK_DIR=<dir with out/ and fixed/> uses a local link instead.
 #   tree       the prepared tree of <commit> (tools/prepare.py, as compile_job.sh makes it).
 # Campaign: every catalogued oracle function whose unit has both objects and whose control flow the harness models
-# (no indirect calls or jumps, no unresolved relocations: counted as "not modelled"), shard = crc32(address) mod N
-# + 1, at most $ITERS executions and $TIME seconds per function (defaults 40 and 8), $JOBS processes, under nice.
+# (no indirect calls or jumps, no unresolved relocations: counted as "not modelled"), shard = crc32(unit source)
+# mod N + 1 (a unit's functions stay together: its native image is linked once), at most $ITERS executions and $TIME seconds per function (defaults 40 and 8), $JOBS processes, under nice.
+# Incremental across heads: each verdict is cached with the function's key (tools/difffuzz/fnkeys.py: oracle code,
+# native code and relocations of the function and of what it reaches in its unit and the bridges, harness
+# version); a head fuzzes only functions whose key changed, then those never fuzzed. The cache of a shard is branch
+# fuzz/cache/<k>of<N> of the artifacts repository (results.jsonl + div/), pushed after every $FUZZ_CHUNK (200)
+# functions, so a recreated machine continues from it; a new shard count is seeded from the existing caches.
+# $FUZZ_BUDGET=<seconds> stops after the chunk that reaches it (the rest is "pending", done by the next run).
 # Resumable: a rerun with the same arguments continues after the last finished function.
-# Output: <report.md> (counts, verdicts by stream and cause, the hard divergences as address, cause, stream, unit)
-# and the reproducers (div/*.json, results.jsonl) on branch fuzz/<commit12>/<k>of<N> of the artifacts repository.
+# Output: <report.md> (counts new this head and cumulative, verdicts by stream and cause for both, the cumulative hard
+# divergences as address, cause, stream, unit) and this head's reproducers on branch fuzz/<commit12>/<k>of<N>.
 #
 # Needs: git, python3 with venv or pip, g++-aarch64-linux-gnu, binutils-aarch64-linux-gnu; to build the oracle:
 # root or sudo (apt: wine wine32:i386 p7zip-full cabextract msitools), curl, about 4 GB of free disk while unpacking.
@@ -223,7 +229,7 @@ t1=$(date +%s)
 
 # --- targets: catalog (per decomp commit), modelled functions with both objects, this shard ------------------------
 CAT=$FARM_HOME/catalog-$D12.jsonl
-if [ ! -s "$CAT" ]; then
+if [ ! -s "$CAT" ] || ! head -1 "$CAT" | grep -q '"ohash"'; then
   log "catalog"
   (cd "$DF" && nice $PY catalog.py --out "$CAT.tmp" > "$RUN/catalog.log" 2>&1) && mv "$CAT.tmp" "$CAT"
 fi
@@ -239,7 +245,7 @@ for line in open(cat):
     if 'error' in r:
         continue
     counts['catalogued'] += 1
-    if zlib.crc32(r['address'].encode()) % n != k - 1:
+    if zlib.crc32(r['source'].encode()) % n != k - 1:     # whole units: each unit image is built by one shard
         continue
     counts['shard'] += 1
     s = r['source']
@@ -268,11 +274,67 @@ EOF
 ) > "$RUN/targets.log"
 log "targets: $(cat "$RUN/targets.json")"
 
-# --- campaign, attribution, report ---------------------------------------------------------------------------------
-log "fuzz ($JOBS jobs, $ITERS executions / ${TIME}s per function)"
-(cd "$DF" && nice $PY difffuzz.py fuzz "$RUN/targets.jsonl" --out "$RUN/camp" --iters "$ITERS" --time "$TIME" \
-  --jobs "$JOBS" --resume > "$RUN/fuzz.log" 2>&1)
+# --- function keys and the verdict cache ---------------------------------------------------------------------------
+# A verdict stays valid while the function's key (fnkeys.py: oracle code, native code and relocations of it and of
+# what it reaches in its unit and the bridges, harness version) is unchanged. The cache of shard k of N lives on
+# branch fuzz/cache/<k>of<N> (this machine is its only writer); a new shard cache is seeded from the caches of any
+# other shard count, so changing N keeps the verdicts.
+(cd "$DF" && $PY fnkeys.py "$RUN/targets.jsonl" "$CAT" "$RUN/keys.json" > "$RUN/keys.log" 2>&1)
+CACHE=$FARM_HOME/fuzzcache-${K}of${N}
+CB=fuzz/cache/${K}of${N}
+if [ ! -d "$CACHE/.git" ]; then
+  rm -rf "$CACHE"; mkdir -p "$CACHE"
+  git -C "$CACHE" init -q
+  git -C "$CACHE" remote add origin "$ARTIFACTS_URL"
+  if git -C "$CACHE" fetch -q origin "+refs/heads/$CB:refs/remotes/origin/$CB" 2>/dev/null; then
+    git -C "$CACHE" checkout -q -B cache "origin/$CB"
+    log "cache: $CB fetched"
+  else
+    git -C "$CACHE" checkout -q -b cache
+    others=()
+    for b in $(git ls-remote "$ARTIFACTS_URL" 'refs/heads/fuzz/cache/*' 2>/dev/null | awk '{print $2}' \
+               | sed 's|^refs/heads/||'); do
+      d=$FARM_HOME/cache-seed/${b//\//_}
+      if fetch_branch "$b" "$d"; then others+=("$d"); fi
+    done
+    if [ ${#others[@]} -gt 0 ]; then
+      (cd "$DF" && $PY fuzzcache.py seed "$CACHE" "$RUN/targets.jsonl" "${others[@]}") > "$RUN/seed.log"
+    fi
+    log "cache: $CB is new, seeded from ${#others[@]} other shard caches"
+  fi
+fi
+cache_commit() {  # cache_commit <message>
+  git -C "$CACHE" add -A
+  git -C "$CACHE" -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$1" >/dev/null || true
+  [ "$PUBLISH" = 1 ] || return 0
+  for i in 1 2 3; do
+    git -C "$CACHE" push -q -f origin "HEAD:refs/heads/$CB" 2>/dev/null && return 0
+    sleep $((i * 10))
+  done
+  echo "fuzz_job: push of $CB failed (kept locally, pushed with the next chunk)" >&2
+}
+(cd "$DF" && $PY fuzzcache.py todo "$CACHE" "$RUN/targets.jsonl" "$RUN/keys.json" "$RUN/todo.jsonl" \
+  "$RUN/todo.json") > "$RUN/todo.log"
+log "cache: $(cat "$RUN/todo.json")"
+
+# --- campaign over the changed and new functions, in chunks (cache merged and pushed after each) ----------------
+CHUNK=${FUZZ_CHUNK:-200}; BUDGET=${FUZZ_BUDGET:-0}
+mkdir -p "$RUN/camp"; touch "$RUN/camp/results.jsonl"
+rm -f "$RUN"/chunk.*
+split -l "$CHUNK" -d -a 4 "$RUN/todo.jsonl" "$RUN/chunk."
+for c in "$RUN"/chunk.*; do
+  [ -s "$c" ] || continue
+  log "fuzz $(basename "$c"): $(wc -l < "$c") functions ($JOBS jobs, $ITERS executions / ${TIME}s per function)"
+  (cd "$DF" && nice $PY difffuzz.py fuzz "$c" --out "$RUN/camp" --iters "$ITERS" --time "$TIME" \
+    --jobs "$JOBS" --resume >> "$RUN/fuzz.log" 2>&1)
+  (cd "$DF" && $PY fuzzcache.py merge "$CACHE" "$RUN/camp" "$RUN/keys.json" "$COMMIT") >> "$RUN/merge.log"
+  cache_commit "$C12 shard $K/$N: $(basename "$c")"
+  if [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - t1)) -ge "$BUDGET" ]; then log "time budget reached"; break; fi
+done
+cache_commit "$C12 shard $K/$N"
 t2=$(date +%s)
+
+# --- attribution, verdicts of this head and cumulative, report -----------------------------------------------------
 ATT=$FARM_HOME/attrib-$C12          # stream attribution, once per commit (every shard on this machine shares it)
 mkdir -p "$ATT"
 if [ ! -s "$ATT/rules.json" ] || [ ! -s "$ATT/bridges.json" ]; then
@@ -281,8 +343,14 @@ if [ ! -s "$ATT/rules.json" ] || [ ! -s "$ATT/bridges.json" ]; then
     && nice $PY attrib.py bridges "$ATT/bridges.json.tmp" >> "$ATT/attrib.log" 2>&1 \
     && mv "$ATT/rules.json.tmp" "$ATT/rules.json" && mv "$ATT/bridges.json.tmp" "$ATT/bridges.json") || true
 fi
-(cd "$DF" && $PY report.py "$RUN/camp" --rules "$ATT/rules.json" --bridges "$ATT/bridges.json" \
-  --out "$RUN/verdicts" --hard-tsv "$RUN/hard.tsv" > "$RUN/report.log" 2>&1)
+(cd "$DF" && $PY fuzzcache.py view "$CACHE" "$RUN/targets.jsonl" "$RUN/keys.json" "$RUN/cum" \
+  && $PY fuzzcache.py status "$CACHE" "$RUN/targets.jsonl" "$RUN/keys.json" "$COMMIT" "$RUN/status.json") \
+  > "$RUN/view.log"
+for v in new cum; do
+  d=$RUN/camp; [ $v = cum ] && d=$RUN/cum
+  (cd "$DF" && $PY report.py "$d" --rules "$ATT/rules.json" --bridges "$ATT/bridges.json" \
+    --out "$RUN/verdicts_$v" --hard-tsv "$RUN/hard_$v.tsv" > "$RUN/report_$v.log" 2>&1)
+done
 t3=$(date +%s)
 
 $PY - "$RUN" "$REPORT" "$COMMIT" "$D12" "$K" "$N" "$NX86" "$ITERS" "$TIME" "$JOBS" "$((t1-t0))" "$((t2-t1))" \
@@ -290,40 +358,58 @@ $PY - "$RUN" "$REPORT" "$COMMIT" "$D12" "$K" "$N" "$NX86" "$ITERS" "$TIME" "$JOB
 import collections, json, os, sys
 run, report, commit, d12, k, n, nx86, iters, tm, jobs, ts, tf, tr = sys.argv[1:]
 counts = json.load(open(os.path.join(run, 'targets.json')))
-status = collections.Counter()
-execs = 0
-for line in open(os.path.join(run, 'camp', 'results.jsonl')):
-    r = json.loads(line)
-    status[r.get('status', '?').split(':')[0]] += 1
-    execs += r.get('execs', 0)
-md = open(os.path.join(run, 'verdicts.md')).read().split('\n## ')[0].strip().split('\n')
-hard = [l.rstrip('\n').split('\t') for l in open(os.path.join(run, 'hard.tsv'))] if os.path.exists(
-    os.path.join(run, 'hard.tsv')) else []
+st = json.load(open(os.path.join(run, 'status.json')))
+
+
+def rows(d):
+    p = os.path.join(run, d, 'results.jsonl')
+    return [json.loads(l) for l in open(p) if l.strip()] if os.path.exists(p) else []
+
+
+def table(v):
+    md = open(os.path.join(run, 'verdicts_%s.md' % v)).read().split('\n## ')[0].strip().split('\n')
+    return md[2:]
+
+
+new, cum = rows('camp'), rows('cum')
+fresh = {r['address'] for r in new}
+status = collections.Counter(r.get('status', '?').split(':')[0] for r in new)
+execs = sum(r.get('execs', 0) for r in new)
+hard = [l.rstrip('\n').split('\t') for l in open(os.path.join(run, 'hard_cum.tsv'))] \
+    if os.path.exists(os.path.join(run, 'hard_cum.tsv')) else []
 out = ['# fuzz %s shard %s/%s' % (commit[:12], k, n), '',
        '- commit %s, decomp %s, oracle: %s MSVC 2008 objects of the pristine decomp' % (commit, d12, nx86),
        '- functions catalogued %d; in this shard %d: no native object %d, control flow not modelled (indirect '
-       'calls/jumps, unresolved relocations) %d, fuzzed %d' % (counts['catalogued'], counts['shard'],
-                                                              counts['no_native_object'], counts['not_modelled'],
-                                                              counts['targets']),
-       '- results: %s; executions %d (at most %s and %ss per function, %s jobs)' % (
-           ', '.join('%s %d' % kv for kv in status.most_common()), execs, iters, tm, jobs),
+       'calls/jumps, unresolved relocations) %d, fuzzable %d (no native definition in the link: %d)' % (
+           counts['catalogued'], counts['shard'], counts['no_native_object'], counts['not_modelled'],
+           counts['targets'], st['no_key']),
+       '- this head: fuzzed %d, verdict reused from an earlier head (key unchanged) %d, pending %d (key changed %d, '
+       'never fuzzed %d)' % (st['fuzzed_this_head'], st['reused'], st['pending_changed'] + st['pending_new'],
+                             st['pending_changed'], st['pending_new']),
+       '- fuzzed this head: %s; executions %d (at most %s and %ss per function, %s jobs)' % (
+           ', '.join('%s %d' % kv for kv in status.most_common()) or 'none', execs, iters, tm, jobs),
+       '- cumulative (verdicts valid for this head): %d functions' % len(cum),
        '- time: inputs %ss, fuzz %ss, report %ss' % (ts, tf, tr),
-       '- reproducers: branch fuzz/%s/%sof%s of the artifacts repository' % (commit[:12], k, n), '']
-out += ['## Verdicts', ''] + md[2:] + ['']
-out += ['## Hard divergences (%d in %d functions)' % (len(hard), len({row[0] for row in hard})), '',
-        '| address | cause | stream | kind | unit |', '|---|---|---|---|---|']
-out += ['| %s |' % ' | '.join(row) for row in hard]
+       '- reproducers: branch fuzz/cache/%sof%s (all), fuzz/%s/%sof%s (this head) of the artifacts repository' % (
+           k, n, commit[:12], k, n), '']
+out += ['## Verdicts, new this head', ''] + table('new') + ['']
+out += ['## Verdicts, cumulative', ''] + table('cum') + ['']
+out += ['## Hard divergences, cumulative (%d in %d functions; * = fuzzed this head)' % (
+    len(hard), len({row[0] for row in hard})), '', '| address | cause | stream | kind | unit |', '|---|---|---|---|---|']
+out += ['| %s%s | %s |' % (row[0], '*' if row[0] in fresh else '', ' | '.join(row[1:])) for row in hard]
 open(report, 'w').write('\n'.join(out) + '\n')
-print('\n'.join(out[:8]))
+print('\n'.join(out[:10]))
 EOF
 
-# --- reproducers ---------------------------------------------------------------------------------------------------
-PUB=$RUN/pub; rm -rf "$PUB"; mkdir -p "$PUB"
-cp "$RUN/camp/results.jsonl" "$RUN/targets.json" "$PUB/"
-[ -d "$RUN/camp/div" ] && cp -a "$RUN/camp/div" "$PUB/div"
-cp "$RUN/hard.tsv" "$PUB/" 2>/dev/null || true
-printf '{"commit": "%s", "decomp": "%s", "shard": %s, "shards": %s, "iters": %s, "time": %s}\n' \
-  "$COMMIT" "$D12" "$K" "$N" "$ITERS" "$TIME" > "$PUB/meta.json"
-publish "fuzz/$C12/${K}of${N}" "$PUB" "$C12 fuzz shard $K/$N" || true
-rm -rf "$PUB"
+# --- this head's reproducers ---------------------------------------------------------------------------------------
+if [ -s "$RUN/camp/results.jsonl" ]; then
+  PUB=$RUN/pub; rm -rf "$PUB"; mkdir -p "$PUB"
+  cp "$RUN/camp/results.jsonl" "$RUN/targets.json" "$RUN/todo.json" "$PUB/"
+  [ -d "$RUN/camp/div" ] && cp -a "$RUN/camp/div" "$PUB/div"
+  cp "$RUN/hard_new.tsv" "$PUB/" 2>/dev/null || true
+  printf '{"commit": "%s", "decomp": "%s", "shard": %s, "shards": %s, "iters": %s, "time": %s}\n' \
+    "$COMMIT" "$D12" "$K" "$N" "$ITERS" "$TIME" > "$PUB/meta.json"
+  publish "fuzz/$C12/${K}of${N}" "$PUB" "$C12 fuzz shard $K/$N" || true
+  rm -rf "$PUB"
+fi
 log "done: $REPORT"

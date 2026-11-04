@@ -149,6 +149,16 @@ FNVNX_DFPROFILE=<profile> python3 difffuzz.py triage <dir> --tag f11 --only uncl
 FNVNX_DFPROFILE=<profile> python3 difffuzz.py lockstep <dyninit addr> --out <dir>
 ```
 
+## Farms (D17)
+
+Whole-decomp campaigns run on farm machines: `tools/farm/fuzz_job.sh <commit> <k> <N> <report.md>` (header: inputs,
+artifacts branches). Shard = crc32(unit source) mod N. Incremental: `fnkeys.py` gives each function a key (oracle
+code and that of the same-unit functions it calls, from `catalog.py`'s `ohash`; the rewritten AArch64 function's
+bytes and relocations, targets named by what they resolve to, plus every function of its object it reaches and the
+bridges it calls; `fnkeys.HARNESS`, bumped when the harness changes verdicts). `fuzzcache.py` keeps one verdict row
+and the reproducers per function on branch `fuzz/cache/<k>of<N>`; a head fuzzes only the functions whose key
+changed, then those never fuzzed, and reports both this head's and the cumulative verdicts.
+
 ## Oracle gaps
 
 `x86-custom-cc`: MSVC's whole-program optimisation gave some static functions (many in Havok) a register convention

@@ -7,6 +7,7 @@ function), indirect calls, tail jumps out of the function, x87 / SSE instruction
 unresolved relocations. The campaign uses it to pick leaf functions first.
 """
 import argparse
+import hashlib
 import json
 import sys
 
@@ -68,8 +69,24 @@ def main():
             except Exception as e:  # noqa: BLE001
                 print('unit %d: %s' % (i, e), file=sys.stderr)
                 continue
+            rows = {addr: analyse(fn) for addr, fn in img.funcs.items()}
+            own = {addr: hashlib.sha1(fn['code']).hexdigest() for addr, fn in img.funcs.items()}
+            ohash = {}
+            for addr in rows:
+                # oracle hash: the relocated code and that of the same-unit functions it reaches by direct calls
+                # and tail jumps (they run for real); fnkeys.py combines it with the native side's hash
+                seen, todo = {addr}, [addr]
+                while todo:
+                    g = rows[todo.pop()]
+                    for t in g['calls'] + g['tails']:
+                        if t in rows and t not in seen:
+                            seen.add(t)
+                            todo.append(t)
+                ohash[addr] = hashlib.sha1('|'.join([own[addr]] + sorted(own[t] for t in seen - {addr}))
+                                           .encode()).hexdigest()[:20]
             for addr, fn in sorted(img.funcs.items()):
-                r = analyse(fn)
+                r = rows[addr]
+                r['ohash'] = ohash[addr]
                 r.update(unit=i, source=u['source'], address='%08x' % addr, size=fn['size'], symbol=fn['symbol'],
                          unresolved=len(fn['unresolved']),
                          data_refs=sorted({t for _, k, t, _ in fn['relocs'] if t is not None and t >= 0x00fdf000}))
