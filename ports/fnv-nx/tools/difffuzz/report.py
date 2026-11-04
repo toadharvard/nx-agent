@@ -123,6 +123,7 @@ def main():
     ap.add_argument('--out', default=str(config.WORK / 'report'))
     ap.add_argument('--recheck-tag', default='', help='use <dir>/recheck_<tag>.jsonl (a replay on other objects)')
     ap.add_argument('--targets', action='append', default=[], help='target lists whose `tag` field groups rows')
+    ap.add_argument('--hard-tsv', default='', help='write the hard divergences: address, cause, streams, kind, unit')
     a = ap.parse_args()
     rules = json.load(open(a.rules))['functions'] if os.path.exists(a.rules) else {}
     bridges = json.load(open(a.bridges)) if os.path.exists(a.bridges) else {}
@@ -159,12 +160,18 @@ def main():
         by_fn[rec['address']].append(rec)
     table = collections.defaultdict(lambda: dict(functions=0, execs=0, hard=0, soft=0, harness=0, setup=0,
                                                  causes=collections.Counter()))
+    hard_rows = []
     for addr, r in results.items():
         tags = streams_of(r, rules, bridges, ttags) + ['ALL']
         recs = by_fn.get(addr, [])
         for d in recs:
             if d['_cause'] in LINK_CAUSES and 'S2-link' not in tags:
                 tags.append('S2-link')
+        if r.get('status') == 'ok':
+            for d in recs:
+                if d['_cause'] not in SOFT_CAUSES | HARNESS_CAUSES and not d['divergence'].get('soft'):
+                    hard_rows.append((addr, d['_cause'], ','.join(t for t in tags if t != 'ALL'),
+                                      (d.get('_now') or d['divergence']).get('kind', ''), r.get('source', '')))
         for t in tags:
             row = table[t]
             if r.get('status') != 'ok':
@@ -206,6 +213,10 @@ def main():
                                                                        'target')})[:240]))
         lines.append('')
     open(a.out + '.md', 'w').write('\n'.join(lines) + '\n')
+    if a.hard_tsv:
+        with open(a.hard_tsv, 'w') as f:
+            for row in sorted(set(hard_rows)):
+                f.write('\t'.join(row) + '\n')
     json.dump({t: dict(v, causes=dict(v['causes'])) for t, v in table.items()}, open(a.out + '.json', 'w'),
               indent=1)
     print('\n'.join(lines[:4 + len(order)]))
