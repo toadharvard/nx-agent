@@ -951,6 +951,7 @@ at boot; target 0. Measured locally, without a guest link (that is a farm job, D
 | CRT names (`platform/crt/msvc_names.c`) | 0 | 89 |
 | GalaxyWrp = steam_api, ordinals (WSOCK32, XINPUT1_3, DSOUND), `libvorbisfile.dll` | 0 | 48 |
 | winmm mmio (`mmio.cpp`) | 0 | 41 |
+| the exe CRT's kernel32 imports, GetUserNameA, GetClassLongA (`crt_kernel32.cpp`) | 0 | 0 |
 
 Decisions:
 
@@ -969,3 +970,10 @@ Decisions:
 * **mmio**: positions come from `lDiskOffset` after every message (the game's procedure returns 0 from
   `MMIOM_SEEK`), `SEEK_CUR` is sent as `SEEK_SET`, `mmioAdvance(MMIO_READ)` at EOF returns 0 with
   `pchNext == pchEndRead`, allocated buffers have a zeroed guard byte. No installable I/O procedures.
+* **kernel32 for the exe's CRT** (`crt_kernel32.cpp`, its header comment has the details): en-US, LCID 0x0409, ANSI
+  and OEM code page both 1252 (one table; OEM 437 would matter only to console code); conversions for 1252 and UTF-8
+  with the Windows size conventions; standard handles are pseudo handles whose output goes to the debug log (a GUI
+  process on Windows would lose it); the environment starts empty; GetTimeZoneInformation's Bias follows
+  GetLocalTime's offset. `kernel32.dll` and `user32.dll` are registered modules: MSVC 2008's `_mtinit` fails when
+  `GetModuleHandleW(L"KERNEL32.DLL")` is NULL; GetProcAddress on them uses the export table (FlsAlloc/EncodePointer
+  are absent, so the CRT uses plain TLS).
