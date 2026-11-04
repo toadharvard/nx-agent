@@ -4711,6 +4711,60 @@ def r_vfptr_empty_base(path, text, stats):
     stats['EBO2'] += len(edits)
     return text
 
+# ---------------------------------------------------------------------------------------------------------- EBO3
+#
+# An empty base that is not the first base (S1-layout, S13b layout-offset). In `struct Node : NodeBase0, NodeBase16
+# {}` with NodeBase0 four ints and NodeBase16 empty, MSVC 2008 puts NodeBase16 after NodeBase0, at +0x10
+# (/d1reportSingleClassLayout: sizeof(Node) 16, the base at 16), the Itanium ABI at 0. bgszonetargetlistener.cpp
+# 0x0061ff30 calls NodeBase16's method bound to the exe (0x006207a0) with node+0x10 on x86 and node+0 natively; the
+# pristine unit matches the exe. EBO3 writes FNVNX_EBO2 first in that base's body (GCC: a zero-length array, so the
+# base is not empty, still 0 bytes, and goes after the bases before it; empty under MSVC). Only where the base E is
+# defined in the .cpp without bases, data or virtual functions, it follows a base of the same class that is defined
+# in the file and not empty (two empty bases are EBO1's), no class has E as a virtual base, and E is never used as an object (EBO2's
+# test: its name only as a base, in `E*` / `E&`, `E::`, or in its own body), so the zero size changes nothing else.
+
+def r_later_empty_base(path, text, stats):
+    """EBO3: FNVNX_EBO2 in an empty base that follows a non-empty base: after the bases before it, as MSVC (above)."""
+    if ',' not in text or ':' not in text or not path.endswith('.cpp'): return text
+    defs, uses = {}, collections.defaultdict(list)
+    for m in EBO_CLASS.finditer(text):
+        defs.setdefault(m.group(1), []).append(m)
+        if m.group(2):
+            bs = [re.sub(r'^(?:(?:public|protected|private|virtual)\s+)+', '', b).strip() for b in _split_bases(m.group(2))]
+            for i, b in enumerate(bs): uses[b].append((m, i, bs))
+    def empty(b):
+        if not re.match(r'^[A-Za-z_]\w*$', b) or len(defs.get(b, ())) != 1: return None
+        bd = defs[b][0]
+        if bd.group(2): return None
+        bo = bd.end() - 1
+        bc = prepare.match_brace(text, bo)
+        if 'FNVNX_EBO2' in text[bo:bc]: return None
+        return (bd, bo, bc) if _ebo_empty_class(text, bo, bc) else None
+    edits = []
+    for b, us in sorted(uses.items()):
+        e = empty(b)
+        if e is None: continue
+        bd, bo, bc = e
+        if any(re.search(r'\bvirtual\b', m.group(2)) for m, _, _ in us): continue
+        if not any(i > 0 and any(len(defs.get(x, ())) == 1 and empty(x) is None for x in bs[:i]) for m, i, bs in us):
+            continue                                                      # no earlier base of the file that has data
+        heads = {mm.start() for mm, _, _ in us} | {bd.start()}
+        bad = False
+        for u in re.finditer(r'(?<![\w~:])%s\b' % re.escape(b), text):
+            if bo < u.start() < bc: continue
+            pre = text[max(0, u.start() - 40):u.start()]
+            if any(h <= u.start() < h + 400 and text.find('{', h) > u.start() for h in heads): continue
+            if FNVNX_EBO2_USE.match(text, u.end()): continue
+            if re.search(r'(?:class|struct)\s+$', pre): continue
+            bad = True; break
+        if bad: continue
+        edits.append(bo + 1)
+    if not edits: return text
+    for at in sorted(edits, reverse=True):
+        text = text[:at] + ' FNVNX_EBO2 /* fnv-nx EBO3 */' + text[at:]
+    stats['EBO3'] += len(edits)
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- IDTOR1
 #
 # An implicit destructor the recipe binds (S1-layout, S13b layout-offset). A class C that declares no destructor but
@@ -4777,5 +4831,5 @@ def r_implicit_bound_destructors(path, text, stats):
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base,
-              r_implicit_bound_destructors]
+              r_later_empty_base, r_implicit_bound_destructors]
 RULES += REFS_RULES
