@@ -304,6 +304,16 @@ static void construct_memory_manager(void) {
     printf("fnvnx boot: memory manager constructed at %#010" PRIx32 " (%#010" PRIx32 ")\n", self, ctor);
 }
 
+/* The gate of patch class MT1 (docs/PATCHES.md, docs/PERF.md 6.8): FNVNX_MT1_ON in fnvnx_compat.h calls this. It is
+ * bMTRendering:Display, read from the INI setting object at 0x011c710c (its value at +4, after the vtable), not
+ * from the engine's copy DAT_011f94b4: WinMain builds the accumulators (FUN_0086c160) before the renderer init
+ * (FUN_004da670) copies the setting, and the gate must say the same at both. The setting is 0 unless the player's
+ * Fallout.ini sets it (ini.cpp's Switch defaults leave it out), so MT1 stays off by default. */
+extern "C" int fnvnx_mt1_on(void)
+{
+    return *(volatile const uint8_t *)(uintptr_t)(0x011c710cu + 4u) != 0;
+}
+
 /* The memory manager's globals, to compare with x86 (S14): after the constructor, InitializeGlobal 0x00866690 has
  * set the options 0x011f6118 (new FUN_00aa21d0(new BSNiAllocator)) and run InitHolder once (holder 0x011f6080), the
  * run-once flag 0x011f6229 is still 0; WinMain's FUN_00aa20b0(0) then keeps those options (0x011f610d stays 0, the
