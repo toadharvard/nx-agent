@@ -194,6 +194,14 @@ def build_report(spec, raw, prof, ovf, dk, work):
     rep = {
         "schema": "fnv-nx P6n report v1 (docs/RENDER_PERF.md §5)",
         "summary": {"commit": commit, "per_draw_us": per_draw, "frame_ms": frame_ms,
+                    "per_draw_us_rule": "CPU per draw over a whole frame (fixed per-frame costs included), mix_lo and "
+                                        "mix_hi: lo = IPC 1.0 at 1.785 GHz, hi = gate = IPC 0.6 at 1.02 GHz. native = "
+                                        "front (StateTracker, translator, packet build, sort, encode) + deko3d recording "
+                                        "(nxgpu.c record + libdeko3d); nine = st/nine without any pipe driver (nouveau's "
+                                        "validation and push-buffer work is NOT in it), x86-64 count scaled to AArch64",
+                    "frame_ms_rule": "mix_hi (3710 draws) at 1.02 GHz for hi/gate (IPC 0.6; main adds the store term), "
+                                     "mix_lo (1490 draws) at 1.785 GHz IPC 1.0 for lo. main = packet build (engine-side "
+                                     "StateTracker + Renderer::Render); render = Frame::Finish + deko3d recording",
                     "assumptions": {"ipc": {"lo": IPC[0], "hi": IPC[1]}, "clock_ghz": list(CLOCKS_GHZ),
                                     "gate_value": "gate = hi = IPC 0.6 at 1.02 GHz, mix_hi (+ memory term on main)"},
                     "targets": targets, "targets_budget_fraction": budget_fraction,
