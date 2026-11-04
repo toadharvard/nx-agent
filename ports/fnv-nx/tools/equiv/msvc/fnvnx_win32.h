@@ -18,6 +18,8 @@
  *    the key mismatch (-fpermissive) and the shim's union is that type; MSVC rejects it (C2011) and decorates the
  *    key, so here the SDK's union keeps its typedef names under another tag and _ULARGE_INTEGER is a class with the
  *    SDK union's members and layout;
+ *  - object-like SDK macros the shim does not define (winerror.h's ERROR_* codes, `small`, `hyper`, `Yield`,
+ *    `_FILETIME_`) are undefined again: the decomp defines enumerators and types of those names;
  *  - FNVNX_CS28 (rule CS28).
  */
 #ifndef FNVNX_EQUIV_WIN32_H
@@ -54,12 +56,16 @@
 #undef RegCreateKeyExA
 #undef CoCreateInstance
 #include "fnvnx_equiv_unaw.h"       /* generated: #undef of every SDK function-name macro */
+#include "fnvnx_equiv_winerror.h"   /* generated: #undef of winerror.h's ERROR_* macros */
 #undef min
 #undef max
-#ifdef FNVNX_EQUIV_LEAN
+/* object-like SDK macros the target shim does not have, which the decomp uses as its own names: rpcndr.h's
+ * `#define small char` / `hyper` (members and locals called `small`), winbase.h's `#define Yield()` (the decomp's
+ * `void __cdecl Yield(unsigned long);`), wtypes.h's include guard `_FILETIME_` (a decomp struct of that name) */
 #undef small
 #undef hyper
-#endif
+#undef Yield
+#undef _FILETIME_
 /* winnt.h includes <ctype.h>; the target shim includes no CRT header, and MSVC's _tolower / _toupper macros break
  * the decomp's own prototypes of those names. */
 #undef _tolower
