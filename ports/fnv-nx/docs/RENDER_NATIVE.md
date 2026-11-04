@@ -788,7 +788,8 @@ exactly like the D3D9 calls they stand for. Unknown tags are skipped.
 | tag | payload | D3D9 call |
 |---|---|---|
 | `DEV ` | u32 width, height, back-buffer D3DFORMAT, auto depth-stencil D3DFORMAT (0 none) | CreateDevice / Reset |
-| `TEX ` | u32 id, D3DFORMAT, width, height, levels, flags (1 render target, 2 cube), then per level u32 bytes + the level's texels, tightly packed rows (BCn: 4x4 blocks), padded to 4; render targets: levels with 0 bytes | CreateTexture (+ initial contents) |
+| `TEX ` | u32 id, D3DFORMAT, width, height, levels, flags (1 render target, 2 cube), then per level u32 bytes + the level's texels, tightly packed rows (BCn: 4x4 blocks), padded to 4; cube: each level's bytes hold its six faces one after another in D3DCUBEMAP_FACES order (square, bytes a multiple of 6); render targets: levels with 0 bytes | CreateTexture / CreateCubeTexture (+ initial contents) |
+| `TEXC` | u32 cube texture id, face (D3DCUBEMAP_FACES), level, bytes, the face's texels (bytes = the level's bytes / 6) | LockRect on a cube face |
 | `TEXU` | u32 id, level, bytes, texels | LockRect/UnlockRect, UpdateTexture, UpdateSurface |
 | `SURF` | u32 id, kind (1 colour, 2 depth-stencil), D3DFORMAT, width, height, texture id (render-target texture whose level 0 this is, else 0) | GetSurfaceLevel, CreateRenderTarget, CreateDepthStencilSurface |
 | `VB  ` / `IB  ` | u32 id, size; IB adds format (101 INDEX16, 102 INDEX32) | CreateVertexBuffer / CreateIndexBuffer |
@@ -826,7 +827,7 @@ FOGCOLOR, alpha test = ALPHAFUNC when ALPHATESTENABLE, ALPHAREF / 255); all rend
 `nx_d3d9_sampler` (sRGB view when SRGBTEXTURE); render-target textures and surfaces, the auto depth surface.
 
 Skipped and counted (exit code 3): fixed-function draws (no VS or no PS), FVF draws (no declaration), POSITIONT,
-streams other than 0 (instancing), cube textures (sampled as none), vertex textures. Varyings the VS writes beyond
+streams other than 0 (instancing), cube render targets (sampled as none; cube textures with contents are sampled since S16 R2), vertex textures. Varyings the VS writes beyond
 the PS are fine. A converter should still emit everything; nx_render reports what it skipped.
 
 Size limits: 4096x4096 images, 128 MiB of per-frame vertex/index/constant copies, 4 M command words per frame.
@@ -845,7 +846,7 @@ resource) and do not fail.
 | `.nxcap` | MEMC ids 0-256, each defined once, 1 byte to 256 MiB, at most 1 GiB in all; IMGC at most 8192 on a side and 16 M texels, at most 14 mips, `data_size` inside the record; SUBM: words, memory ranges and each op's arguments inside the record, ranges inside their block, Draw/DrawIndexed at most 4 M vertices and 65,536 instances, and at most 4 M vertices times instances; RDBK at most 8192 on a side, pixel bytes inside the record |
 
 Tests: `make -C tests/s6n nx_render_robust` builds nx_render with ASan and UBSan, then runs
-`tests/s6n/test_nx_render_bounds.py` (38 cases, one per limit) and V1's `tests/v1/test_nx_render_robust.py` (13
+`tests/s6n/test_nx_render_bounds.py` (43 cases, one per limit) and V1's `tests/v1/test_nx_render_robust.py` (13
 cases, plus `ITERS` mutations of the two `nx_render` test captures, 300 by default).
 
 ## 9. Frame-rate targets, dynamic resolution and presets
