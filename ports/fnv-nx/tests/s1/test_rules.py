@@ -438,6 +438,38 @@ check('GOTO1 also splits SSE vectors, const scalars (dropping their const) and p
       ['int n; n = h->n;', '__m128 ang; ang = _mm_load_ss(&h->f);', 'const ns::Hdr* hd; hd = h->hd;',
        'static const int k = 3;'])
 
+# ---- GOTO2
+got = run(s1.r_goto_crossed_scopes, 'int f(const P* p, int n)\n{\n    if (n < 2) goto out;\n    Cmp cmp = {0};\n'
+          '    Vec& v = p->v;\n    sort(p, n, cmp, v);\nout:\n    return n;\n}\n')
+check('GOTO2 (b) closes the crossed scopes before the label', got,
+      ['    { Cmp cmp = {0};\n    Vec& v = p->v;\n    sort(p, n, cmp, v);\n} out:\n    return n;'])
+got = run(s1.r_goto_crossed_scopes, 'int f(const P* p, int n)\n{\n    if (n < 2) goto out;\n    Cmp cmp = {0};\n'
+          '    sort(p, n, cmp);\nout:\n    return cmp.k + n;\n}\n')
+check('GOTO2 (b) keeps a scope that is used after the label', got, ['    Cmp cmp = {0};\n'], ['{ Cmp'])
+got = run(s1.r_goto_crossed_scopes, 'static float dot(V a, V b) { return a.x * b.x; }\n'
+          'bool f(V a, V b, float r)\n{\n    if (r < 0) goto miss;\n    const float& d = dot(a, b);\n'
+          '    if (d > r) { miss: return false; }\n    return d < 2 * r;\n}\n')
+check('GOTO2 (a) copies a const scalar reference to a by-value result', got, ['float d; d = dot(a, b);'],
+      ['const float&'])
+got = run(s1.r_goto_crossed_scopes, 'static const float& dot(V a, V b);\n'
+          'bool f(V a, V b, float r)\n{\n    if (r < 0) goto miss;\n    const float& d = dot(a, b);\n'
+          '    if (d > r) { miss: return false; }\n    return d < 2 * r;\n}\n')
+check('GOTO2 (a) leaves a reference to a returned reference', got, ['const float& d = dot(a, b);'])
+got = run(s1.r_goto_crossed_scopes, 'R* f(R* res, const S* s, int op)\n{\n    switch (op) {\n'
+          '    case 1: if (s->lo > 3) goto reject; break;\n    case 2: {\n        Res a(false), b(false);\n'
+          '        if (s->hi) { a = g(s); } else { reject: res->v = 0; return res; }\n        res->v = a.v | b.v;\n'
+          '    }\n    }\n    return res;\n}\n')
+check('GOTO2 (c) clones a straight return tail into the crossing goto', got,
+      ['case 1: if (s->lo > 3) { res->v = 0; return res; } break;', 'reject: res->v = 0; return res;'], ['goto reject'])
+got = run(s1.r_goto_crossed_scopes, 'R* f(R* res, const S* s, int op)\n{\n    R* tmp = 0;\n    switch (op) {\n'
+          '    case 1: if (s->lo > 3) goto reject; break;\n    case 2: {\n        Res a(false), b(false);\n'
+          '        if (s->hi) { a = g(s); } else { reject: tmp->v = 0; return tmp; }\n        res->v = a.v | b.v;\n'
+          '    }\n    }\n    return res;\n}\n')
+check('GOTO2 (c) does not clone a tail that names a local', got, ['goto reject;'])
+got = run(s1.r_goto_crossed_scopes, 'int f(int n)\n{\n    Obj o(n);\n    if (n) goto out;\n    o.run();\nout:\n'
+          '    return n;\n}\n')
+check('GOTO2 leaves declarations before the goto alone', got, ['    Obj o(n);\n    if (n) goto out;'], ['{ '])
+
 # ---- TAIL1
 check('TAIL1 writes typename in front of a qualified (possibly dependent) base',
       run(s1.r_msvc_base_layout, 'template <class V, class B> struct T : public List<V, B>::Item\n{\n    int a;\n};\n'

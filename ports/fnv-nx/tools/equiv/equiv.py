@@ -98,6 +98,7 @@ CLASSES = {
     'BIND1': 'neutral',         # POST hook: units.json binds a stand-in member the unit uses to the exe's address
     'FRIEND1': 'neutral',       # `class X;` in front of a class whose `friend class X;` MSVC made visible
     'INIT1': 'platform',        # a static object whose initializer the exe has and the decomp lacks (NiMainSDM)
+    'GOTO2': 'neutral',         # forward gotos across class / reference initializations: scope closed, copy or tail clone
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
@@ -117,7 +118,7 @@ DEFAULT_GROUPS = {
     'link': 'LINK1 STATIC1 BIND1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
     'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
-    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RCAST1 GOTO1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
+    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RCAST1 GOTO1 GOTO2 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
     'plat': 'STL1 STD1 ANON1 ANON2',
 }
 RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+)\b')

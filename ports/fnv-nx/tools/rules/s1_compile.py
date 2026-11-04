@@ -394,6 +394,135 @@ def r_goto_scalar_inits(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- GOTO2
+#
+# A forward goto that crosses a declaration with an initializer into its scope (a class object, a reference, an
+# aggregate: what GOTO1's split cannot help). MSVC let it through - the object is just not constructed on that path,
+# and the code after the label never uses it there - GCC refuses it even with -fpermissive. Three shapes, each kept
+# to cases where the meaning provably stays (lines are kept):
+#  (a) a const scalar reference to the value of a function the unit declares as returning that scalar by value,
+#      `const float& a = f(x);` -> `float a; a = f(x);` (the reference named a const temporary of that value);
+#  (b) the label is in the declaration's own block, and nothing declared in that block between the first crossed
+#      declaration and the label is named after the label in the block: `{ ` before that declaration and `} ` before
+#      the label end those scopes before the label, so the jump enters none of them;
+#  (c) the label starts a straight tail `L: s1; ... return e;` (no braces, no other label) whose names are not
+#      declared in the function (parameters, members, globals): each crossing `goto L;` -> `{ s1; ... return e; }`.
+
+GOTO_KW = frozenset('return goto delete throw else case default new typedef using break continue do sizeof if while '
+                    'for switch try catch operator public private protected static_cast reinterpret_cast const_cast '
+                    'dynamic_cast struct class union enum const volatile static register this true false'.split())
+GOTO_DECL = re.compile(r'((?:(?:const|volatile|static|register|struct|class|union|enum|unsigned|signed|short|long)\s+)*'
+                       r'(?:::\s*)?([A-Za-z_]\w*)(?:\s*::\s*[A-Za-z_]\w*)*(?:\s*<[^;{}()]*>)?(?:\s+const)?)'
+                       r'(?=\s*[\*&]+\s*(?:const\s+)?[A-Za-z_]|\s+(?:const\s+)?[A-Za-z_])')
+GOTO_DECLARATOR = re.compile(r'^\s*([\*&\s]*)(?:const\s+)?([A-Za-z_]\w*)\s*(\S?)', re.S)
+GOTO_LABEL = re.compile(r'(?:[;{}]|^)\s*([A-Za-z_]\w*)[ \t]*:(?!:)', re.M)
+GOTO_STARTS = re.compile(r'[;{}]|(?<!:):(?!:)|\bfor\s*\(')
+GOTO_STMT = re.compile(r'\bgoto\s+([A-Za-z_]\w*)\s*;')
+GOTO_SCALAR = r'(?:(?:unsigned|signed)\s+)?(?:bool|char|short|int|long(?:\s+long)?|float|double|unsigned|hkReal)'
+GOTO_CREF = re.compile(r'^const\s+(%s)\s*&\s*([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*(\(.*\))\s*;$' % GOTO_SCALAR, re.S)
+CXX_WORDS = GOTO_KW | frozenset('int char short long float double bool void unsigned signed auto inline'.split())
+
+def _goto_decls(masked, o, c):
+    """Declarations of the function body masked[o:c]: [(start, type end, end after ';', [(name, has init, is ref)],
+    is static)]; also for-init declarations (start -1, so they never count as crossed)."""
+    starts = [o + 1] + [m.end() for m in GOTO_STARTS.finditer(masked, o + 1, c)]
+    out = []
+    for s in starts:
+        s += len(masked[s:c]) - len(masked[s:c].lstrip())
+        m = GOTO_DECL.match(masked, s)
+        if not m or m.group(2) in GOTO_KW or m.group(1).split()[-1] in GOTO_KW - {'const'}: continue
+        depth, e = 0, m.end(1)
+        while e < c:
+            ch = masked[e]
+            if ch in '([{': depth += 1
+            elif ch in ')]}':
+                if depth == 0: break
+                depth -= 1
+            elif ch == ';' and depth == 0: break
+            e += 1
+        if e >= c or masked[e] != ';': continue
+        decls = []
+        for d in _split_args(masked[m.end(1):e]):
+            dm = GOTO_DECLARATOR.match(d)
+            if not dm or dm.group(2) in CXX_WORDS: decls = None; break
+            decls.append((dm.group(2), dm.group(3) in ('=', '(', '{'), '&' in dm.group(1)))
+        if decls:
+            for_init = re.search(r'\bfor\s*\(\s*$', masked[o:s])
+            out.append((-1 if for_init else s, m.end(1), e + 1, decls,
+                        bool(re.match(r'(?:\w+\s+)*static\b', m.group(1)))))
+    return out
+
+def _goto_fix(text, stats, skip):
+    """One GOTO2 edit in `text` (the first crossing it can fix), or None."""
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    spans = prepare.scope_spans(masked)
+    funcs, last = [], -1
+    for sp in spans:
+        if sp[2] == 'function' and sp[0] > last:
+            funcs.append(sp); last = sp[1]
+    for o, c, _, _ in funcs:
+        if not GOTO_STMT.search(masked, o, c): continue
+        blocks = [sp for sp in spans if o <= sp[0] and sp[1] <= c and sp[2] not in ('init', 'class', 'enum')]
+        def block(p): return max((sp for sp in blocks if sp[0] < p < sp[1]), key=lambda sp: sp[0])
+        gotos = [(m.start(), m.end(), m.group(1)) for m in GOTO_STMT.finditer(masked, o, c)]
+        targets = {g[2] for g in gotos}
+        labels = [(m.start(1), m.end(), m.group(1)) for m in GOTO_LABEL.finditer(masked, o + 1, c)
+                  if m.group(1) in targets and m.group(1) not in GOTO_KW]
+        decls = _goto_decls(masked, o, c)
+        local = {n for d in decls for n, _, _ in d[3]}
+        for lp, le, name in labels:
+            lb = block(lp)
+            crossing = [d for d in decls if d[0] >= 0 and not d[4] and d[0] < lp and any(i or r for _, i, r in d[3])
+                        and block(d[0])[0] < lp < block(d[0])[1]
+                        and any(g[0] < d[0] and g[2] == name for g in gotos)]
+            for d in crossing:
+                key = (name, masked[d[0]:d[2]])
+                if key in skip: continue
+                s, te, e, dl, _ = d
+                # (a) const scalar reference to a by-value scalar result
+                cm = GOTO_CREF.match(text[s:e])
+                if cm and len(dl) == 1:
+                    rets = re.findall(r'\b(%s)\s*(&?)\s*(?:(?:__cdecl|__stdcall|__fastcall|__thiscall)\s+)?%s\s*\('
+                                      % (GOTO_SCALAR, re.escape(cm.group(3))), masked)
+                    if rets and all(not r for _, r in rets) and \
+                            not re.search(r'[\w>]\s*&\s*(?:\w+::)*%s\s*\(' % re.escape(cm.group(3)), masked):
+                        stats['GOTO2'] += 1
+                        return text[:s] + '%s %s; %s = %s%s;' % (cm.group(1), cm.group(2), cm.group(2), cm.group(3),
+                                                               cm.group(4)) + text[e:]
+                db = block(s)
+                # (b) close the crossed scopes before the label
+                if lb == db:
+                    names = {n for d2 in decls if d2[0] >= s and d2[2] <= lp and block(d2[0]) == db for n, _, _ in d2[3]}
+                    if not re.search(r'\b(?:%s)\b' % '|'.join(sorted(names)), masked[le:db[1]]):
+                        stats['GOTO2'] += 1
+                        return text[:s] + '{ ' + text[s:lp] + '} ' + text[lp:]
+                # (c) the label's straight tail cloned into each crossing goto
+                tail = re.match(r'(?:[^;{}:]*;){0,3}?\s*return\b[^;{}:]*;', masked[le:db[1]])
+                if tail and text[le:le + tail.end()] == masked[le:le + tail.end()]:
+                    t = text[le:le + tail.end()]
+                    words = re.findall(r'(?<![\w:])([A-Za-z_]\w*)\b(?!\s*::)', re.sub(r'(?:\.|->)\s*\w+', ' ', t))
+                    if not re.search(r'\bgoto\b', t) and not (set(words) - CXX_WORDS) & local:
+                        clone = '{ %s }' % re.sub(r'\s*\n\s*', ' ', t.strip())
+                        for g0, g1, gn in reversed(gotos):
+                            if gn == name and g0 < s: text = text[:g0] + clone + text[g1:]
+                        stats['GOTO2'] += 1
+                        return text
+                skip.add(key)
+    return None
+
+def r_goto_crossed_scopes(path, text, stats):
+    """GOTO2: forward gotos that cross a declaration with an initializer of a class, reference or aggregate (see
+    above): (a) `const float& a = f(x);` -> `float a; a = f(x);` for a by-value scalar f, (b) `{ ` ... `} ` around
+    the crossed declarations before a label of their block, when nothing they declare is named after the label,
+    (c) the label's straight `...; return e;` tail cloned into each crossing goto."""
+    if 'goto' not in text: return text
+    skip = set()
+    for _ in range(64):
+        new = _goto_fix(text, stats, skip)
+        if new is None: break
+        text = new
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- SDK1
 
 SDK_GUARD = re.compile(r'^([ \t]*#[ \t]*ifndef[ \t]+_WIN(?:DEF|NT|BASE)_\b)', re.M)
@@ -3072,5 +3201,5 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]
