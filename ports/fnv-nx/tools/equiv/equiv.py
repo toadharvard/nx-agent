@@ -283,6 +283,13 @@ def key_free(name):
 
 
 SG_LITERAL = re.compile(r'^\$SG\d+$')
+
+
+def literal_bytes(b):
+    """A string literal's bytes up to the next symbol of its section, without the zero padding in front of that
+    symbol: one terminator kept (`""` is b'\\0' whether 1 or 3 padding bytes follow it; MSVC places the next
+    literal at an offset that depends on the unit's other literals)."""
+    return b.rstrip(b'\0') + b'\0'
 GAME_PREFIX = 'fnvnx_game_'
 
 
@@ -316,7 +323,7 @@ class Resolver:
             if x['section'] > 0 and SG_LITERAL.match(x['name']):
                 data = coff.sections[x['section']]['data']
                 end = min([v for v in starts[x['section']] if v > x['value']] or [len(data)])
-                syms[x['name']] = hex(0x100000000 | int(hashlib.sha1(data[x['value']:end]).hexdigest()[:8], 16))
+                syms[x['name']] = hex(0x100000000 | int(hashlib.sha1(literal_bytes(data[x['value']:end])).hexdigest()[:8], 16))
                 how['literal'] += 1
         defined = {}
         for s in coff.symbols.values():
@@ -610,7 +617,8 @@ class Fingerprinter:
     @staticmethod
     def targets(coff, ext):
         """address -> [[offset, symbol name, bound address or None]] for every relocation to an undefined symbol in
-        the function (what a call or data reference reaches; for reports, the digests decide)."""
+        the function (what a call or data reference reaches; for reports, the digests decide), and [offset, name,
+        LOCAL] for one to a C++ function the object defines itself (an inline overload of MSVC's headers)."""
         out = {}
         syms = ext.get('symbols', {})
         for fn in ext['functions']:
@@ -625,9 +633,11 @@ class Fingerprinter:
             end = min(later) if later else len(sec['data'])
             rows = []
             for o, ix, _ in sec['relocs']:
-                if start <= o < end and coff.symbols[ix]['section'] == 0:
-                    n = coff.symbols[ix]['name']
-                    rows.append([o - start, n, syms.get(n)])
+                x = coff.symbols[ix]
+                if start <= o < end and x['section'] == 0:
+                    rows.append([o - start, x['name'], syms.get(x['name'])])
+                elif start <= o < end and x['type'] & 0x20 and x['name'].startswith('?'):
+                    rows.append([o - start, x['name'], LOCAL])   # a C++ function the object defines (inline)
             out[fn['address']] = rows
         return out
 
@@ -1042,13 +1052,27 @@ def attributed(row, k, failed=False):
     return (single or names or ['(interaction)'])[0]
 
 
+LOCAL = -1      # Fingerprinter.targets: the relocation reaches a function defined in the object
+hexa_local = '0x%08x' % LOCAL
+
+
+def retarget_pairs(rt):
+    """compare_rows' retargets of one function -> 'A>B,...' (distinct pairs, sorted): A is the pristine side's
+    bound address (or its symbol when unbound), B the prepared side's symbol name (its address when it has one)."""
+    pairs = set()
+    for _, na, va, nb, vb in rt:
+        a = na if va in (None, LOCAL, hexa_local) else va
+        pairs.add('%s>%s' % (a, nb if nb else vb))
+    return ','.join(sorted(pairs)) or '-'
+
+
 def cmd_report(a):
     """Markdown report of a gate: BASE (pristine) vs HEAD (prepared), with --attr (equiv.py attribute rows) and --eh
     (both sides built with --eh-off) when given. Numbers, unit names, addresses and short diagnostics only."""
     A, B = load_rows(a.base), load_rows(a.head)
     attr = load_rows(a.attr) if a.attr and Path(a.attr).exists() else {}
     eha, ehb = (load_rows(a.eh[0]), load_rows(a.eh[1])) if a.eh else ({}, {})
-    st, kinds, table, lines, fails = Counter(), Counter(), {}, [], []
+    st, kinds, table, lines, fails, rts = Counter(), Counter(), {}, [], [], []
     nfun = Counter()
     for i in sorted(set(A) & set(B)):
         c = compare_rows(A[i], B[i])
@@ -1071,6 +1095,8 @@ def cmd_report(a):
             rule = attributed(attr[i], k) if i in attr else '-'
             table.setdefault(rule, Counter())[kind] += 1
             lines.append('%s  %s  %s  %s' % (B[i]['source'], k, kind, rule))
+            if kind == 'retarget':
+                rts.append('%s  %s  %s' % (B[i]['source'], k, retarget_pairs(c['retargets'].get(k, []))))
     out = ['# MSVC equivalence gate%s' % (' - ' + a.title if a.title else ''), '']
     out.append('- units: %d compared; %d identical, %d differ, %d prepared side does not compile, %d pristine '
                'does not compile' % (sum(st.values()), st['identical'], st['differs'], st['does-not-compile'],
@@ -1087,6 +1113,8 @@ def cmd_report(a):
             'function identical (the unit compile).', '']
     out += ['## Differing functions (unit, address, kind, rule)', '', '```'] + lines + ['```', '']
     out += ['## Units the prepared side does not compile (unit, rule, first error)', '', '```'] + fails + ['```', '']
+    out += ['## Retargets (unit, address, pristine binding>prepared binding of each relocation that moved)', '',
+            '```'] + rts + ['```', '']
     Path(a.out).write_text('\n'.join(out) + '\n')
     print('\n'.join(out[:4 + len(table) + 4]))
 

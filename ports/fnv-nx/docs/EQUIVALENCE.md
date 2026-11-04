@@ -50,6 +50,15 @@ are unexplained**.
 | MSVC-OPAQUE-ENUM | | 7 | ENUM1 |
 | unexplained | 32 | 28 | |
 
+Retargets are explained by evidence: shard reports list, per retarget, each relocation that moved as `pristine
+binding>prepared binding` (`## Retargets`), and a retarget is explained only when every pair is a `wrapper` row of
+explained.tsv (CRT-WRAPPER: the game's forwarding wrappers 0x00403d30 memset, 0x00406d30 / 0x00404d80 strcpy_s,
+0x00406d50 strcat_s, 0x00401460 memcpy, 0x00404dc0 _stricmp, and the CRT's own 0x00ec44d0 memcpy / 0x00eca590 tan
+bound by a C++ name; CRT-INLINE: the inline C++ overload of MSVC's header that the object defines, `strchr(char*,
+int)`, `abs(float)`, placement `operator new`; DECORATION: the same entity under another MSVC decoration). All 168
+retargets of the gate's 112 retarget units have such pairs at `c1039e7` (local). Literal digests drop the zero padding
+in front of the next symbol: `""` was `00` on one side and `00 00` on the other (blk_00c40000_od_ob1 0x00c44280).
+
 ## Verdicts per rule
 
 Leave-one-out attribution (method below). `eh` / `retarget` / `code`: kinds of the differing functions the rule
