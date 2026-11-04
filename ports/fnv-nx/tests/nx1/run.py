@@ -2,7 +2,7 @@
 """NX1 device-readiness checks: everything that can fail on a real Switch, checked without one.
 
     python3 -I tests/nx1/run.py [--build <full build dir>] [--sd <SD tree>] [--nro <fnv.nro> --nro-elf <elf>]
-                                [--guest-elf <fnvnx.elf>] [--host-elf <host.elf>] [--boot-meta <meta.json>]
+                                [--guest-elf <fnvnx.elf>] [--host-elf <host.elf>] [--boot-json <boot_summary.json>]
                                 [--ref-bin <dir>] [--json out.json] [--only N[,N]]
 
 METRIC (stream NX1-nro): the number of checks that are not `pass`. A check is `open` when its script does not
@@ -10,7 +10,7 @@ exist yet or its input artifact is missing, and `fail` when it ran and found a p
 pass. `--build` fills the artifact paths from a full build directory (tools/farm/full_job.sh layout:
 package/sd, package/nro, guest/fnvnx.elf, package/host/host.elf, boot/).
 
-Checks (docs/NRO.md has the details and the thresholds):
+Checks (docs/NRO.md has the details and the thresholds; each is tests/nx1/check_*.py):
   1 nro       NRO header, MOD0, NACP, icon (tests/nx1/check_nro.py) and the switch-tools round trip
   2 memory    peak heap + image + GPU pools within the title-takeover budget; applet mode refused
   3 svc       every svc / IPC service on the homebrew allowlist; no forbidden instructions
@@ -45,13 +45,13 @@ class Art:
         self.nro_elf = pick(a.nro_elf, "package/nro/fnv.elf")
         self.guest_elf = pick(a.guest_elf, "guest/fnvnx.elf")
         self.host_elf = pick(a.host_elf, "package/host/host.elf", "host/host.elf")
-        self.boot_meta = pick(a.boot_meta, "boot/meta.json", "meta.json")
+        self.boot_json = pick(a.boot_json, "boot/boot_summary.json")
         self.ref_bin = a.ref_bin or os.environ.get("NX1_REF_BIN")
         self.root = ROOT
 
 
 def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", cwd=ROOT)
     return r.returncode, r.stdout + r.stderr
 
 
@@ -71,25 +71,44 @@ def check_nro(art: Art):
     return ("pass" if rc == 0 else "fail"), (last if rc == 0 else "; ".join(fails[:5]))
 
 
+def script(name, *args, need=None):
+    """A check script of tests/nx1: pass when it exits 0; its last line is the note."""
+    def fn(art):
+        missing = [k for k in (need or []) if not getattr(art, k)]
+        if missing:
+            return "open", "input missing: " + ", ".join(missing)
+        argv = PY + [os.path.join(HERE, name)]
+        for a in args:
+            v = a(art) if callable(a) else a
+            argv += v if isinstance(v, list) else [v]
+        rc, out = run(argv)
+        lines = out.strip().splitlines()
+        fails = [l for l in lines if l.startswith("FAIL")]
+        return ("pass", lines[-1] if lines else "") if rc == 0 else ("fail", "; ".join(fails[:4]) or (lines[-1] if lines else f"rc {rc}"))
+    return fn
+
+
 def not_yet(what):
     return lambda art: ("open", f"no check script yet: {what}")
 
 
 CHECKS = [
     (1, "nro", check_nro),
-    (2, "memory", not_yet("peak heap + image + GPU pools vs the title-takeover budget, applet refusal")),
-    (3, "svc", not_yet("svc / IPC allowlist, forbidden instructions")),
-    (4, "threads", not_yet("core masks, priorities, stacks")),
-    (5, "fs", not_yet("SD layout, case-insensitive paths, writable save/INI")),
-    (6, "gpu", not_yet("display init/present 720p/1080p, shader cache path")),
-    (7, "platform", not_yet("HID, audio, suspend/resume, exit, crash log")),
-    (8, "checklist", not_yet("owner checklist")),
+    (2, "memory", script("check_mem.py", lambda a: ["--guest-elf", a.guest_elf], lambda a: ["--boot-json", a.boot_json],
+                         need=["guest_elf", "boot_json"])),
+    (3, "svc", script("check_svc.py", lambda a: ["--guest-elf", a.guest_elf], lambda a: ["--host-elf", a.host_elf],
+                      lambda a: ["--nro-elf", a.nro_elf], need=["guest_elf", "host_elf", "nro_elf"])),
+    (4, "threads", script("check_threads.py", lambda a: ["--host-elf", a.host_elf] if a.host_elf else [])),
+    (5, "fs", script("check_fs.py", lambda a: ["--sd", a.sd], need=["sd"])),
+    (6, "gpu", script("check_gpu.py", lambda a: ["--host-elf", a.host_elf] if a.host_elf else [])),
+    (7, "platform", script("check_platform.py")),
+    (8, "checklist", script("check_checklist.py")),
 ]
 
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    for o in ("build", "sd", "nro", "nro-elf", "guest-elf", "host-elf", "boot-meta", "ref-bin", "json", "only"):
+    for o in ("build", "sd", "nro", "nro-elf", "guest-elf", "host-elf", "boot-json", "ref-bin", "json", "only"):
         ap.add_argument("--" + o)
     a = ap.parse_args(argv)
     art = Art(a)

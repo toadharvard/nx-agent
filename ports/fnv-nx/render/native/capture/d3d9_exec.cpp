@@ -20,7 +20,8 @@ uint32_t U(const uint8_t* p, uint32_t i) { uint32_t v; memcpy(&v, p + 4 * i, 4);
 float F(const uint8_t* p, uint32_t i) { float v; memcpy(&v, p + 4 * i, 4); return v; }
 uint32_t FB(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 
-struct Tex { uint32_t image = 0, format = 0, w = 0, h = 0, levels = 1, flags = 0; vector<vector<uint8_t>> data; };
+struct Tex { uint32_t image = 0, format = 0, w = 0, h = 0, levels = 1, flags = 0; bool cube = false;
+             vector<vector<uint8_t>> data; };   // cube: each level holds its six faces (D3DCUBEMAP_FACES order)
 struct Surf { uint32_t kind = 0, format = 0, w = 0, h = 0, tex = 0, image = 0; };
 struct Buf { vector<uint8_t> data; uint32_t format = 0; };
 struct Elem { uint16_t stream, offset; uint8_t type, method, usage, index; };
@@ -147,18 +148,29 @@ public:
     }
 
     uint32_t MakeImage(uint32_t d3dfmt, uint32_t w, uint32_t h, uint32_t levels, uint32_t flags,
-                       const vector<vector<uint8_t>>* data) {
+                       const vector<vector<uint8_t>>* data, bool cube = false) {
         NxFormatInfo fi = nx_d3d9_format(d3dfmt);
         if (fi.format == NxFmt_None) return 0;
         NxImageDesc d; memset(&d, 0, sizeof d);
+        if (cube) flags |= NxImg_Cube;
         d.width = (uint16_t)w; d.height = (uint16_t)h; d.format = fi.format; d.mips = (uint8_t)levels; d.flags = (uint8_t)flags;
         d.swizzle = NXIMG_SWIZZLE(fi.swizzle[0], fi.swizzle[1], fi.swizzle[2], fi.swizzle[3]);
         vector<uint8_t> all, conv;
         if (data) {
-            for (auto& l : *data) all.insert(all.end(), l.begin(), l.end());
+            if (!cube) {
+                for (auto& l : *data) all.insert(all.end(), l.begin(), l.end());
+            } else {
+                // NXD9 holds each level's six faces together; the backend and nx_d3d9_convert take face-major data
+                for (uint32_t f = 0; f < 6; f++)
+                    for (auto& l : *data) {
+                        const size_t fb = l.size() / 6;
+                        all.insert(all.end(), l.begin() + f * fb, l.begin() + (f + 1) * fb);
+                    }
+            }
             if (fi.flags & NXFMT_CONVERT) {
-                conv.resize(nx_d3d9_converted_size(d3dfmt, w, h, levels, 1) + 16);
-                uint32_t n = nx_d3d9_convert(d3dfmt, w, h, levels, 1, all.data(), (uint32_t)all.size(), conv.data(), (uint32_t)conv.size());
+                const uint32_t faces = cube ? 6 : 1;
+                conv.resize(nx_d3d9_converted_size(d3dfmt, w, h, levels, faces) + 16);
+                uint32_t n = nx_d3d9_convert(d3dfmt, w, h, levels, faces, all.data(), (uint32_t)all.size(), conv.data(), (uint32_t)conv.size());
                 if (!n) return 0;
                 conv.resize(n); all.swap(conv);
             }
@@ -400,7 +412,7 @@ public:
             NxD3D9Texture tk = {0, 0, 0, 0, 0};
             uint32_t image = 0;
             auto ti = stex[s] ? tex.find(stex[s]) : tex.end();
-            if (ti != tex.end()) { tk.format = ti->second.format; image = ti->second.image; }
+            if (ti != tex.end()) { tk.format = ti->second.format; tk.cube = ti->second.cube; image = ti->second.image; }
             NxSamplerState ss; nx_d3d9_sampler(samp[s], &tk, &ss);
             string k((const char*)&ss, sizeof ss);
             auto si = samplers.find(k);
@@ -474,9 +486,14 @@ public:
                 t.data.emplace_back(p + q + 4, p + q + 4 + b);
                 q += 4 + (((uint64_t)b + 3) & ~3ull);
             }
-            if (t.flags & 2) break;   // cube: unsupported (sampled as no texture)
             bool rt = t.flags & 1;
-            t.image = MakeImage(t.format, t.w, t.h, rt ? 1 : t.levels, rt ? NxImg_RenderTarget : 0, rt ? nullptr : &t.data);
+            if ((t.flags & 2) && rt) break;   // cube render target: unsupported (sampled as no texture)
+            t.cube = (t.flags & 2) != 0;
+            if (t.cube) {
+                if (t.w != t.h) return Fail("TEX: cube texture not square");
+                for (auto& l : t.data) if (l.size() % 6) return Fail("TEX: cube level bytes not six faces");
+            }
+            t.image = MakeImage(t.format, t.w, t.h, rt ? 1 : t.levels, rt ? NxImg_RenderTarget : 0, rt ? nullptr : &t.data, t.cube);
             st->textures++;
             tex[U(p, 0)] = t;
             break;
@@ -488,9 +505,23 @@ public:
             uint32_t b = U(p, 2);
             if (12 + (uint64_t)b > n) return Fail("TEXU");
             if (!Charge(b)) return Fail("TEXU: input exceeds the resident limit");
+            if (it->second.cube && b % 6) return Fail("TEXU: cube level bytes not six faces");
             it->second.data[U(p, 1)].assign(p + 12, p + 12 + b);
             // images are immutable in NxGpuApi: a new image with the new contents
-            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data);
+            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data, it->second.cube);
+            break;
+        }
+        case kD9TexCube: {   // one face of one level of a cube texture (LockRect on a cube face)
+            if (n < 16) return Fail("TEXC");
+            auto it = tex.find(U(p, 0));
+            uint32_t face = U(p, 1), level = U(p, 2), b = U(p, 3);
+            if (16 + (uint64_t)b > n) return Fail("TEXC");
+            if (it == tex.end() || !it->second.cube || face >= 6 || level >= it->second.data.size()) break;
+            vector<uint8_t>& l = it->second.data[level];
+            const size_t fb = l.size() / 6;
+            if (b != fb) return Fail("TEXC: face bytes differ from the level's");
+            memcpy(l.data() + face * fb, p + 16, b);
+            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data, true);
             break;
         }
         case kD9Surface: {

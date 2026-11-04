@@ -485,6 +485,18 @@ the permutation uses it. Image space (`menubg`) never had an epilogue. Maxwell c
 The permutations are the same source with the branches folded, so results are identical (all scenes, the N1
 self-test and V6n's c69 cases unchanged). The N0 scenes still use the full runtime shaders (they exercise it).
 
+**Alpha compare without a switch (C98).** uam's GLSL front end (Mesa's GLSL IR to TGSI, no NIR) keeps a `switch` as
+a loop of one test per case even when the selector is a compile-time constant, so every alpha-tested shader carried
+seven tests and their bookkeeping. `nx_compare` now treats NxCompare as the bit set it is (1 LESS, 2 EQUAL, 4 GREATER):
+`(func & mask) != 0 || func >= 7 || (unordered && func == 5)`, equal to the switch for every function with ordered and
+NaN operands. Maxwell instructions: lit_spec_d1p2__ea 249 -> 222, nolight_tex__ea 80 -> 35, tex / nolight_tex with
+the runtime epilogue 131 -> 104.
+
+**Which shader P6n's GPU model costs.** `perf/gpu_cost.py` costs each family with what `Render` binds: the static
+light permutation for the model's 1 directional + 2 point lights, then the epilogue permutation for the family's
+(alpha test, fog) mix, replayed from the synthetic stream's D3D9 state (`epilogue_mix`). Before this round (P6n: "GPU model binds the renderer's ... permutations") it costed the
+runtime base shaders, so §4.3 and §4.4 never showed in its numbers.
+
 ### 4.4 lit pass: static light permutations and the fp16 analysis (P6n hotspot 2)
 
 **Permutations.** `lit[_spec]_d<D>p<P>` (D = 1: light 0 is the directional light; P = 1, 2, 4, 8 point lights,
@@ -507,6 +519,12 @@ light, which is how P6n's ~411 instructions per pixel arise):
 Results are unchanged: the N1 self-test draws 1 directional + 2 point lights (given point first) through the
 dynamic and the static shader, identical within 1/255 (exact on GL); the `lit` scene and its golden are unchanged
 (the point-light maths now uses `dot(dv, dv)` and `inversesqrt`, the same values).
+
+**Prepared per-draw values (C99).** The permutations read two values `Render` computes once per draw while it
+orders the lights into the slice: the directional light's `posRange.xyz` is the unit vector towards the light
+(-normalize(direction)) and every point light's `posRange.w` is 1 / range^2 (padding lights: 1). No fragment
+normalizes a constant or divides by range^2 any more: lit_spec_d1p2__e0 201 -> 179, lit_spec_d1p8__e0 419 -> 394
+Maxwell instructions. The dynamic shader keeps the D3D-style values (direction, range).
 
 **fp16 precision analysis** (what may run at half precision without visible change on 8-bit targets):
 
@@ -788,7 +806,8 @@ exactly like the D3D9 calls they stand for. Unknown tags are skipped.
 | tag | payload | D3D9 call |
 |---|---|---|
 | `DEV ` | u32 width, height, back-buffer D3DFORMAT, auto depth-stencil D3DFORMAT (0 none) | CreateDevice / Reset |
-| `TEX ` | u32 id, D3DFORMAT, width, height, levels, flags (1 render target, 2 cube), then per level u32 bytes + the level's texels, tightly packed rows (BCn: 4x4 blocks), padded to 4; render targets: levels with 0 bytes | CreateTexture (+ initial contents) |
+| `TEX ` | u32 id, D3DFORMAT, width, height, levels, flags (1 render target, 2 cube), then per level u32 bytes + the level's texels, tightly packed rows (BCn: 4x4 blocks), padded to 4; cube: each level's bytes hold its six faces one after another in D3DCUBEMAP_FACES order (square, bytes a multiple of 6); render targets: levels with 0 bytes | CreateTexture / CreateCubeTexture (+ initial contents) |
+| `TEXC` | u32 cube texture id, face (D3DCUBEMAP_FACES), level, bytes, the face's texels (bytes = the level's bytes / 6) | LockRect on a cube face |
 | `TEXU` | u32 id, level, bytes, texels | LockRect/UnlockRect, UpdateTexture, UpdateSurface |
 | `SURF` | u32 id, kind (1 colour, 2 depth-stencil), D3DFORMAT, width, height, texture id (render-target texture whose level 0 this is, else 0) | GetSurfaceLevel, CreateRenderTarget, CreateDepthStencilSurface |
 | `VB  ` / `IB  ` | u32 id, size; IB adds format (101 INDEX16, 102 INDEX32) | CreateVertexBuffer / CreateIndexBuffer |
@@ -826,7 +845,7 @@ FOGCOLOR, alpha test = ALPHAFUNC when ALPHATESTENABLE, ALPHAREF / 255); all rend
 `nx_d3d9_sampler` (sRGB view when SRGBTEXTURE); render-target textures and surfaces, the auto depth surface.
 
 Skipped and counted (exit code 3): fixed-function draws (no VS or no PS), FVF draws (no declaration), POSITIONT,
-streams other than 0 (instancing), cube textures (sampled as none), vertex textures. Varyings the VS writes beyond
+streams other than 0 (instancing), cube render targets (sampled as none; cube textures with contents are sampled since S16 R2), vertex textures. Varyings the VS writes beyond
 the PS are fine. A converter should still emit everything; nx_render reports what it skipped.
 
 Size limits: 4096x4096 images, 128 MiB of per-frame vertex/index/constant copies, 4 M command words per frame.
@@ -845,7 +864,7 @@ resource) and do not fail.
 | `.nxcap` | MEMC ids 0-256, each defined once, 1 byte to 256 MiB, at most 1 GiB in all; IMGC at most 8192 on a side and 16 M texels, at most 14 mips, `data_size` inside the record; SUBM: words, memory ranges and each op's arguments inside the record, ranges inside their block, Draw/DrawIndexed at most 4 M vertices and 65,536 instances, and at most 4 M vertices times instances; RDBK at most 8192 on a side, pixel bytes inside the record |
 
 Tests: `make -C tests/s6n nx_render_robust` builds nx_render with ASan and UBSan, then runs
-`tests/s6n/test_nx_render_bounds.py` (38 cases, one per limit) and V1's `tests/v1/test_nx_render_robust.py` (13
+`tests/s6n/test_nx_render_bounds.py` (43 cases, one per limit) and V1's `tests/v1/test_nx_render_robust.py` (13
 cases, plus `ITERS` mutations of the two `nx_render` test captures, 300 by default).
 
 ## 9. Frame-rate targets, dynamic resolution and presets

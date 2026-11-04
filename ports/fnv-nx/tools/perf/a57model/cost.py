@@ -240,29 +240,47 @@ class MCA:
 # ---------------------------------------------------------------- symbols
 
 class Symbols:
+    """nm -n of the guest ELF: per address the display name (the first non-alias name) and the original
+    FalloutNV.exe address (S2's __fnv_<addr> alias at the same address), if any"""
     def __init__(self, elfs):
-        self.addrs, self.names = [], []
+        self.addrs, self.names, self.orig = [], [], []
         rows = []
         for e in elfs or []:
             p = subprocess.run(['nm', '-n', '--defined-only', e], capture_output=True, text=True)
-            if p.returncode:
+            if p.returncode or not p.stdout:
                 p = subprocess.run(['aarch64-linux-gnu-nm', '-n', '--defined-only', e], capture_output=True, text=True)
             for ln in p.stdout.splitlines():
                 parts = ln.split()
-                if len(parts) >= 3 and parts[1] in 'tTwW':
+                if len(parts) >= 3 and parts[1] in 'tTwW' and not parts[2].startswith('$'):
                     rows.append((int(parts[0], 16), parts[2]))
         rows.sort()
         for a, n in rows:
+            fnv = re.match(r'^__fnv_([0-9a-f]{8})$', n)
             if self.addrs and self.addrs[-1] == a:
-                if n.startswith('__fnv_') or self.names[-1].startswith('$'):
-                    self.names[-1] = n if not self.names[-1].startswith('__fnv_') else self.names[-1]
+                if fnv and not self.orig[-1]:
+                    self.orig[-1] = '0x' + fnv.group(1)
+                elif not fnv and self.names[-1].startswith('__fnv_'):
+                    self.names[-1] = n
                 continue
             self.addrs.append(a)
             self.names.append(n)
+            self.orig.append('0x' + fnv.group(1) if fnv else '')
+
+    def _i(self, pc):
+        return bisect.bisect_right(self.addrs, pc) - 1
 
     def name(self, pc):
-        i = bisect.bisect_right(self.addrs, pc) - 1
+        i = self._i(pc)
         return self.names[i] if i >= 0 else f'0x{pc:x}'
+
+    def original(self, name_or_pc):
+        if isinstance(name_or_pc, int):
+            i = self._i(name_or_pc)
+            return self.orig[i] if i >= 0 else ''
+        try:
+            return self.orig[self.names.index(name_or_pc)]
+        except ValueError:
+            return ''
 
 
 # ---------------------------------------------------------------- pricing
@@ -298,11 +316,12 @@ def price(region, params, clock, mca, syms=None):
         k = keys[(b['pc'], b['n'])]
         nm = len(dis[(b['pc'], b['n'])])
         per = cyc.get(k)
+        f = syms.name(b['pc']) if syms else 'all'
         if per is None:
             unpriced += b['count'] * b['n']
+            funcs[f]['unpriced_insns'] += b['count'] * b['n']
             per = b['n'] / 0.8  # the old flat model, for what llvm-mca could not read
         per = max(per, math.ceil(max(nm, 1) / width)) if nm else per
-        f = syms.name(b['pc']) if syms else 'all'
         row = funcs[f]
         row['insns'] += b['count'] * b['n']
         row['core'] += b['count'] * per
@@ -347,6 +366,15 @@ def price(region, params, clock, mca, syms=None):
             tot[k2] += v
     tot['unpriced_insns'] = unpriced
     return funcs, tot
+
+
+def bound_of(row):
+    """what limits a function: bandwidth, memory latency, front end (branches, fetch) or the core"""
+    if row.get('bw_bound'):
+        return 'bandwidth'
+    parts = {'core': row.get('core', 0), 'memory': row.get('memlat', 0),
+             'frontend': row.get('branch', 0) + row.get('ifetch', 0)}
+    return max(parts, key=parts.get)
 
 
 def main(argv=None):

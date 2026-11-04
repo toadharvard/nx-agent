@@ -220,7 +220,7 @@ def _bucket(cls):
     return cls
 
 
-def compare(ref, dfn, ecx_unused=False):
+def compare(ref, dfn, ecx_unused=False, va_reads=None):
     """Verdict for a call through declaration `ref` to the function defined as `dfn` (both MSVC Sigs). ecx_unused:
     the definition's x86 code never uses the incoming ecx (fnvlink reads the pristine MSVC object), so a `this` or
     ecx parameter the reference does not pass is a dead register on x86, not an inconsistency."""
@@ -232,7 +232,7 @@ def compare(ref, dfn, ecx_unused=False):
     rvar = next((loc for _, c, loc in rx if c == 'VARARGS'), None)   # x86 offset of the anonymous arguments
     dvar = next((loc for _, c, loc in dx if c == 'VARARGS'), None)
     if rvar is not None or dvar is not None:
-        why, anon = varargs_check(ref, dfn, rx, dx, rvar, dvar)
+        why, anon = varargs_check(ref, dfn, rx, dx, rvar, dvar, va_reads)
         if why is not None:
             v.kind = 'manual'; v.classes.append('varargs'); v.notes.append(why)
             return v
@@ -397,7 +397,7 @@ def _a64_used(locs):
 VA_TAIL = ('I8', 'I16', 'I32', 'I64', 'P', 'F64')
 
 
-def varargs_check(ref, dfn, rx, dx, rvar, dvar):
+def varargs_check(ref, dfn, rx, dx, rvar, dvar, va_reads=None):
     """None when a pair with a variadic side passes the same bytes on both machines, else why not (S2c-abi).
 
     On AArch64 Linux (AAPCS64, unlike Apple's variant) anonymous arguments take the next registers and stack slots
@@ -455,6 +455,10 @@ def varargs_check(ref, dfn, rx, dx, rvar, dvar):
         for lab, cls, loc in tail:
             if cls not in VA_TAIL:
                 return '%s (%s) read with va_arg: not an integer, pointer or double' % (lab, cls), ()
+        if tail:
+            why = va_reads_check([c for _, c, _ in tail], va_reads)
+            if why:
+                return why, ()
         if rvar is not None and _words(rvar) is not None and not tail and not anon and _words(rvar) != _words(dvar):
             return 'the anonymous arguments start at other offsets', ()
         # AArch64: where va_arg starts (the definition's named parameters) must be where the reference's tail starts
@@ -473,6 +477,28 @@ def varargs_check(ref, dfn, rx, dx, rvar, dvar):
         if ur is None or ud is None or ur != ud:
             return 'the anonymous arguments start in other AArch64 registers', ()
     return None, tuple(anon)
+
+
+VA_WIDTH = {'I8': 'w4', 'I16': 'w4', 'I32': 'w4', 'P': 'w4', 'I64': 'w8i', 'F64': 'w8f'}
+
+
+def va_reads_check(tail, va_reads):
+    """None when the reference's tail classes agree with what the variadic definition's body reads, else why not
+    (V2 VA2-VA4: the va_arg widths are in neither signature). va_reads: None unknown; ('none',) the body never calls
+    va_start; ('escape',) its va_list goes to another function (vsnprintf: the format decides); ('reads', classes)
+    its va_arg types. Agreement: one width class (4-byte words, 8-byte integers, doubles) for the tail and every
+    va_arg; mixed classes would need the read order, which loops and branches hide."""
+    if va_reads is None:
+        return 'the definition\'s va_arg types are unknown (no vacall record of its body)'
+    if va_reads[0] in ('none', 'exact'):   # exact: every call site's format checked word by word (vacall)
+        return None
+    if va_reads[0] != 'reads':
+        return 'the definition hands its va_list to another function: the widths it reads are unknown'
+    want = {VA_WIDTH.get(c, '?') for c in va_reads[1]}
+    got = {VA_WIDTH.get(c, '?') for c in tail}
+    if len(want) == 1 and want == got and '?' not in want:
+        return None
+    return 'the reference passes %s where the body reads va_arg %s' % ('/'.join(sorted(got)), '/'.join(sorted(want)))
 
 
 def _before_anon(lab, dnamed, anon):
