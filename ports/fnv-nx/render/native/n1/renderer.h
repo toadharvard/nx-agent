@@ -224,6 +224,8 @@ private:
     uint32_t lastResolve_ = ~0u, lastStFrameKey_ = 0;
     uint16_t lastVs_ = 0, lastPsSt_ = 0, lastLayout_ = 0, lastSt_ = 0;
     uint32_t lastTexGen_ = 0, lastTexN_ = 0, lastTexFrame_ = ~0u, lastTb_ = 0, lastTexCount_ = 0;
+    uint32_t lastEpiResolve_ = ~0u, lastEpiFrame_ = ~0u, lastEpiBlock_ = 0;
+    uint16_t lastDynId_ = 0;
     float bg_[4] = {0, 0, 0, 1};
     float clearDepth_ = 1.0f;
     uint32_t clearStencil_ = 0;
