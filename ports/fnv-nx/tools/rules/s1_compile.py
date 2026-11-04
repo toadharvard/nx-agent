@@ -2842,6 +2842,11 @@ def r_pointer_zero_compares(path, text, stats):
         declared_other = re.search(r'\b(?:int|unsigned|short|char|long|float|double|bool|__int64|DWORD|UINT|size_t)\s+%s\b'
                                    % re.escape(name), local)
         if declared_other: continue
+        # `*p > 0` with `T* p` compares the pointee, a scalar (signed for `int* p`: `<= 0` is not `== 0`); the
+        # compare is the pointer's only through `**` (PTR1-DEREF)
+        if is_ptr and re.search(r'(?<![\w)\]])\*\s*$', text[max(0, m.start() - 4):m.start()]) \
+                and is_ptr.group(0).count('*') == 1:
+            continue
         if not is_ptr and not (name in funcs and not re.search(r'[\w\*&>]\s+%s\s*[=;,\[]' % re.escape(name), local)):
             continue
         out.append(text[pos:m.start(2)]); out.append('!=' if m.group(2) == '>' else '=='); pos = m.end(2)
