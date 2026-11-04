@@ -2927,3 +2927,22 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - S15: a "45/60 fps" plan in PERF.md;
   - render machine (S6n/P6n): per-target verdicts in render/native/perf/report.json, plus dynamic resolution and a
     handheld preset in RENDER_NATIVE.md.
+
+### J-0133 | 2026-11-04 | stream: orchestration,S1-compile | status: wip | parent: J-0132
+
+* **did** - Merged S1's STL1 AUX (`7ef5168`, J-0124 option a) and the TAIL1 typename fix (`3197103`). tests/s1: 0
+  failed. tests/s11: ok.
+* **did** - The compile tail (43 units, 144 errors at bd37e22) is split across four parallel agents, each owning
+  its own units. Singles may become small `patches/` hunks (D2) instead of general rules.
+  | agent | class |
+  |---|---|
+  | S1 | MSVC STL internals: blk_00ac0000 (28), the `_std` variants, speedtree, tesobject |
+  | S1-m128 | `__m128` as a union, goto across initialization (Havok, ~14 units) |
+  | S1-refs | non-const references to temporaries, MSVC overload resolution, singles (~15) |
+  | S1-crt | CRT/Win32 redeclarations: `fopen`, `FindFirstFileA`, `_RTL_CRITICAL_SECTION_DEBUG` |
+* **found** - New cloud containers stay PENDING because about 50 sessions are already running: 26 fz, 6 eq, 4 st,
+  4 try, 5 compile, prep, link1, full1, the render machine, the orchestrator.
+  - S4-runtime is created and waits for a slot: the 603 runtime names, 40 imports, D3DX, mmio, Bink. Branch
+    `claude/fnv-s4-runtime`.
+  - Also queued for cloud containers: S12-ordering, S2d-link-bodies, S13b-fuzz-causes.
+  - The owner decides which farms to pause; the proposal is st1-st4, then fuzz 26 -> 18 shards.
