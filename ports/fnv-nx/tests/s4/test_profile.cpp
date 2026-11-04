@@ -1,5 +1,5 @@
-/* test_profile.cpp - platform/win32/profile.cpp: the first run's profile files (the PC launcher's job), on
- * synthetic install files written here. */
+/* test_profile.cpp - platform/win32/profile.cpp: the first run's profile files, as the PC launcher writes them
+ * (observed under Wine on the owner's install, profile.cpp's header), on synthetic install files written here. */
 #include "s4_test.h"
 
 #include <stdio.h>
@@ -22,7 +22,7 @@ static std::string get(const char *win)
     HANDLE h = CreateFileA(win, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE)
         return "(missing)";
-    char buf[4096];
+    char buf[8192];
     DWORD got = 0;
     ReadFile(h, buf, sizeof buf, &got, NULL);
     CloseHandle(h);
@@ -30,49 +30,45 @@ static std::string get(const char *win)
 }
 
 #define PROF "C:\\Users\\Player\\Documents\\My Games\\FalloutNV\\"
-#define PLUG "C:\\Users\\Player\\AppData\\Local\\FalloutNV\\plugins.txt"
+#define LOCAL "C:\\Users\\Player\\AppData\\Local\\FalloutNV\\"
+
+static void clean(void)
+{
+    for (const char *f : {PROF "Fallout.ini", PROF "FalloutPrefs.ini", LOCAL "plugins.txt", LOCAL "NVDLCList.txt",
+                          "C:\\FalloutNV\\Fallout_default.ini", "C:\\FalloutNV\\Medium.ini"})
+        DeleteFileA(f);
+}
 
 TEST(first_run_profile)
 {
-    DeleteFileA(PROF "Fallout.ini");
-    DeleteFileA(PROF "FalloutPrefs.ini");
-    DeleteFileA(PLUG);
-    CreateDirectoryA("C:\\FalloutNV\\Data", NULL);
-    /* nothing to copy from: only the display keys and no plugins.txt (no master in Data) */
-    CHECK(fnvnx_first_run_profile() == FNVNX_PROFILE_PREFS);
-    CHECK(GetPrivateProfileIntA("Display", "iSize W", 0, PROF "FalloutPrefs.ini") == 1280);
-    CHECK(get(PLUG) == "(missing)");
-    DeleteFileA(PROF "FalloutPrefs.ini");
-
-    put("C:\\FalloutNV\\Fallout_default.ini", "[General]\r\nsTestKey=synthetic\r\n");
-    put("C:\\FalloutNV\\Low.ini", "[Display]\r\niSize W=640\r\nfSynth=1\r\n");
-    put("C:\\FalloutNV\\Medium.ini", "[Display]\r\niSize W=1024\r\niSize H=768\r\nfSynth=2\r\n");
-    put("C:\\FalloutNV\\Data\\FalloutNV.esm", "TES4");
-    put("C:\\FalloutNV\\Data\\HonestHearts.esm", "TES4");
-    put("C:\\FalloutNV\\Data\\DeadMoney.esm", "TES4");
-    put("C:\\FalloutNV\\Data\\Unofficial.esm", "TES4");
+    clean();
+    const char *def = "[General]\r\nsTestKey=synthetic\r\n[Display]\r\nbFull Screen=1\r\niAdapter=0\r\n[Controls]\r\nfX=1\r\n";
+    put("C:\\FalloutNV\\Fallout_default.ini", def);
+    put("C:\\FalloutNV\\Medium.ini", "[Display]\r\nfSynth=2\r\n");   /* a preset: the launcher's first run ignores it */
     CHECK(fnvnx_first_run_profile() == (FNVNX_PROFILE_INI | FNVNX_PROFILE_PREFS | FNVNX_PROFILE_PLUGINS));
-    CHECK(get(PROF "Fallout.ini") == "[General]\r\nsTestKey=synthetic\r\n");
-    char v[64];
-    GetPrivateProfileStringA("Display", "fSynth", "", v, sizeof v, PROF "FalloutPrefs.ini");
-    CHECK_STR(v, "2");                                                         /* Medium.ini first */
-    CHECK(GetPrivateProfileIntA("Display", "iSize W", 0, PROF "FalloutPrefs.ini") == 1280);
+    CHECK(get(PROF "Fallout.ini") == def);                                       /* a byte copy */
+    char v[256];
+    GetPrivateProfileStringA("Display", "sD3DDevice", "", v, sizeof v, PROF "FalloutPrefs.ini");
+    CHECK(strstr(v, "fnv-nx null D3D9 device") != NULL);                         /* no d3d9 module here: the null name */
+    std::string prefs = get(PROF "FalloutPrefs.ini");
+    CHECK(prefs.find("sD3DDevice=\"fnv-nx null D3D9 device\"") != std::string::npos);   /* quoted, as the launcher */
+    CHECK(prefs.find("fSynth") == std::string::npos);                            /* no preset */
+    GetPrivateProfileStringA("General", "sTestKey", "", v, sizeof v, PROF "FalloutPrefs.ini");
+    CHECK_STR(v, "synthetic");                                                   /* the rest is Fallout_default.ini */
+    GetPrivateProfileStringA("Controls", "fX", "", v, sizeof v, PROF "FalloutPrefs.ini");
+    CHECK_STR(v, "1");
+    CHECK(GetPrivateProfileIntA("Display", "iSize W", 0, PROF "FalloutPrefs.ini") == 1280);   /* the Switch's screen */
     CHECK(GetPrivateProfileIntA("Display", "iSize H", 0, PROF "FalloutPrefs.ini") == 720);
-    CHECK(GetPrivateProfileIntA("Display", "bFull Screen", 0, PROF "FalloutPrefs.ini") == 1);
-    CHECK(get(PLUG) == "FalloutNV.esm\r\nDeadMoney.esm\r\nHonestHearts.esm\r\n");  /* release order, known only */
+    CHECK(get(LOCAL "plugins.txt") == "");                                       /* empty, as the launcher's */
+    CHECK(get(LOCAL "NVDLCList.txt") == "");
 
     /* the player's own files win: a second run makes nothing */
     put(PROF "Fallout.ini", "[General]\r\nmine=1\r\n");
     CHECK(fnvnx_first_run_profile() == 0);
     CHECK(get(PROF "Fallout.ini") == "[General]\r\nmine=1\r\n");
-
-    DeleteFileA(PROF "Fallout.ini");
-    DeleteFileA(PROF "FalloutPrefs.ini");
-    DeleteFileA(PLUG);
-    for (const char *f : {"Fallout_default.ini", "Low.ini", "Medium.ini", "Data\\FalloutNV.esm", "Data\\HonestHearts.esm",
-                          "Data\\DeadMoney.esm", "Data\\Unofficial.esm"}) {
-        char p[260];
-        snprintf(p, sizeof p, "C:\\FalloutNV\\%s", f);
-        DeleteFileA(p);
-    }
+    /* without the install's Fallout_default.ini nothing can be copied: only the empty load-order files */
+    clean();
+    CHECK(fnvnx_first_run_profile() == FNVNX_PROFILE_PLUGINS);
+    CHECK(get(PROF "FalloutPrefs.ini") == "(missing)");
+    clean();
 }
