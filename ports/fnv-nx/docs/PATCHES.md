@@ -233,6 +233,13 @@ braces.
 
 - `xinc1_pop_gen.s1b`: 173 callers, 292 calls, 97 files. MSVC: all 191 site functions identical; GCC census: no
   new errors.
+- Nested spelling `R(.., D(a.., x..), ..)` -> `R(.., D(a..), x.., ..)`: D's call is a whole argument of R, and the
+  words pushed for D follow D's result on R's stack (the boot callers 0x00448420 / 0x0086c010 by hand had this shape).
+  Regenerated `xinc1_pop_gen.s1b` (`popgen.py --exclude <the three> --skip-patched patches`): caller sites 169 -> 222,
+  files 97 -> 123 (39 files touched). MSVC: all 4,990 functions of the 39 units identical; GCC census 0 -> 0;
+  units_renames +116. abiclass at link/31971038913d: fix-donor 471 -> 408 pairs, fix-other 352 -> 348, patched 233 ->
+  301. A moved parameter named like one of the receiver's keeps its type only; a moved class-template parameter
+  declared after the receiver's class is left manual.
   `flameprojectile.cpp`, `highprocess.cpp` and `tesrace.cpp` are left out: their hunks overlap other patches.
 - `xinc1_pop_boot.s1b` (by hand): WinMain's per-frame body 0x0086ff70 (distance 2 from WinMain; four getter/receiver
   pairs and the nested `0x00874b90(0x004e3270(core, 0x004dc310(), 0))`, which is
