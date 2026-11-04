@@ -305,6 +305,14 @@ evidence in the record or a replay, else the record goes on to the other probes:
 - `call-order`, `bool-repr`, `uninit-*` and `array-new-check` rest on the record (two adjacent calls swapped in
   both traces; a replay; the native's own overflow throw), `msvc-inlined` on the oracle code (adaptive follow loads
   the callee whenever its oracle code exists; what stays is the case without it).
+**Coverage first (owner rule D21).** `runner.compare` no longer ends at a by-design or harness-made difference: it
+keeps the first one (`soft`), goes on with the rest of the function (calls, arguments, result, stores, callee-saved
+registers) and returns a hard difference found later, else the soft one. Covered: two adjacent calls in swapped
+order (call-order; their arguments compared crosswise), NaN-on-both call arguments (nan-bits), a bool result with the
+same truth value (bool-repr), a float result within the tolerance, stores only to function-local statics
+(local-static); earlier: the deleting-destructor flags and result (d14), unplanted oracle calls (d15), trailing frees
+of by-value aggregates and stub-range garbage calls (audit). Test: `tests/s13/test_audit.py`.
+
 Dynamic evidence for causes.py: every divergence carries `arm_entered`, the original addresses of the unit's
 functions whose native entry the run executed (up to 64; S13b's oracle-callee-unloaded can rest on it instead of a
 traced call the callee makes).
