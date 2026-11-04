@@ -18,6 +18,12 @@ REL32, DIR32, DIR32NB, SECREL = 0x14, 0x06, 0x07, 0x0B
 IMAGE_SCN_CNT_CODE, IMAGE_SCN_CNT_UNINIT = 0x20, 0x80
 IMAGE_SCN_MEM_WRITE = 0x80000000
 LITERAL_POOL = 0x02f00000      # synthetic addresses of literals units.json does not name (world.py: background range)
+# Thread-local variables (difffuzz-16): units.json gives them image addresses in the exe's .tls template, which
+# starts at 0x01272000 (the unit symbol ?__tls_index@@3PAEA there); a SECREL relocation is the variable's offset
+# from that start. The code reaches the block through fs:[__tls_array = 0x2c][__tls_index] (x86emu.TLS_*), and
+# __tls_index (0x0126fd98, units.json) is pinned to 0.
+TLS_IMAGE_START = 0x01272000
+TLS_INDEX = 0x0126fd98
 _POOL_NEXT = LITERAL_POOL
 
 
@@ -149,7 +155,12 @@ class UnitImage:
                 if t is not None:
                     struct.pack_into('<I', code, rel, t if kind == DIR32 else (t - 0x400000) & 0xffffffff)
             elif kind == SECREL:
-                t = None   # thread-local offsets need the exe's .tls: unsupported
+                addend, = struct.unpack_from('<I', code, rel)
+                v = self.resolve(tsym, addend)
+                t = None if v is None else (v - TLS_IMAGE_START) & 0xffffffff
+                if t is not None:
+                    struct.pack_into('<I', code, rel, t)
+                    self.uses_tls = True
             else:
                 t = None
             if t is None:
@@ -163,6 +174,8 @@ class UnitImage:
         string literals ($SG, ??_C@), __real@/__xmm@ constants, other symbols defined in non-writable data sections
         that have a mapped address. These are pinned in the shared world."""
         out = {a: b for a, b in self.synthetic.values()}
+        if getattr(self, 'uses_tls', False):
+            out[self.mappings.get('__tls_index', TLS_INDEX)] = b'\0\0\0\0'    # the image's only TLS slot: 0
         for f in self.funcs.values():
             for rel, kind, t, name in f['relocs']:
                 if t is None or kind != DIR32:

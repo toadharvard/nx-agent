@@ -177,6 +177,19 @@ def uninit_codegen(scratch, plugin):
     check('uninitialized' in r.stderr, 'uninit keep: GCC warns (the test bites)')
 
 
+def v2_shapes(scratch):
+    """V2's call shapes outside S11's table (tests/v2/test_s12_order_shapes.py, MSVC SP1 /O2 and /Od recorded there),
+    built with compile.sh's own flags: every counted case must agree"""
+    t = os.path.join(PORT, 'tests', 'v2', 'test_s12_order_shapes.py')
+    if not os.path.exists(t) or not shutil.which('qemu-aarch64'):
+        print('skip v2 shapes: needs tests/v2/test_s12_order_shapes.py and qemu-aarch64')
+        return
+    r = subprocess.run([sys.executable, '-I', t], capture_output=True, text=True, timeout=900)
+    bad = [l for l in r.stdout.splitlines() if l.startswith(('FAIL', 'DEFECT')) or ' DEFECT ' in l]
+    check(r.returncode == 0 and not bad, "v2 shapes: compile.sh's order matches MSVC on V2's shapes (%s)"
+          % (bad or r.stdout.strip().splitlines()[-1:]))
+
+
 def msvc_table(scratch, plugin):
     """S11's recorded MSVC 2008 order (tests/s11/order/order.msvc, five configurations) against order.cpp built with
     compile.sh's ORDER_OBJECT / ORDER_OPERATOR / ORDER_ASSIGN defaults: every case MSVC agrees on must match"""
@@ -524,6 +537,8 @@ def main():
     args_order(scratch, plugin)
     eval_codegen(scratch, plugin)
     eval_order(scratch, plugin)
+    msvc_table(scratch, plugin)
+    v2_shapes(scratch)
     litmus(scratch, plugin)
     print('%d failed' % len(FAIL))
     return 1 if FAIL else 0
