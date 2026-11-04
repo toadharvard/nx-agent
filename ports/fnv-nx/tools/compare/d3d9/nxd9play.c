@@ -3,7 +3,11 @@
  * llvmpipe: the reference side of every frame comparison. Its outputs are named like nx_render's, so the same
  * comparison reads both:
  *
- *   nxd9play.exe <file.nxd9> -o <dir> [--per-draw] [--until-draw N] [--frame F]
+ *   nxd9play.exe <file.nxd9> -o <dir> [--per-draw] [--until-draw N] [--frame F] [--frames A-B]
+ *
+ *   --frames A-B writes f<frame>.png only for frames A..B (A- to the end, A alone: that frame); every frame is still
+ *   executed. --frame F only restricts --per-draw and --until-draw: it does not limit the PNGs (a long journal
+ *   writes one PNG per frame without --frames).
  *
  *   <dir>/f<frame %05u>.png          the back buffer at each PRES
  *   <dir>/f<frame>_d<draw %05u>.png  --per-draw: render target 0 after each draw (every draw counts: nothing is skipped)
@@ -117,6 +121,7 @@ static IDirect3D9 *d3d; static IDirect3DDevice9 *dev; static HWND hwnd;
 static IDirect3DSurface9 *backbuf, *autods;
 static uint32_t W, H, frame_no, draw_no, in_scene;
 static const char *outdir; static int per_draw; static long until_draw = -1, only_frame = -1;
+static long png_first = 0, png_last = -1;   /* --frames A-B: write f<frame>.png only for A..B (B -1: to the end) */
 static unsigned long n_draws, n_failed_calls, n_records, n_unknown, n_ext;
 static char first_err[256];
 
@@ -468,8 +473,10 @@ static int record(uint32_t tag, const uint8_t *p, uint32_t n) {
     case TAG('P', 'R', 'E', 'S'): {
         char path[1024];
         scene_off();
-        snprintf(path, sizeof path, "%s/f%05u.png", outdir, frame_no);
-        dump_surface(backbuf, path);
+        if ((long)frame_no >= png_first && (png_last < 0 || (long)frame_no <= png_last)) {
+            snprintf(path, sizeof path, "%s/f%05u.png", outdir, frame_no);
+            dump_surface(backbuf, path);
+        }
         note(IDirect3DDevice9_Present(dev, NULL, NULL, NULL, NULL), "Present");
         frame_no++; draw_no = 0;
         return 1;
@@ -487,6 +494,10 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--per-draw")) per_draw = 1;
         else if (!strcmp(argv[i], "--until-draw") && i + 1 < argc) until_draw = atol(argv[++i]);
         else if (!strcmp(argv[i], "--frame") && i + 1 < argc) only_frame = atol(argv[++i]);
+        else if (!strcmp(argv[i], "--frames") && i + 1 < argc) {
+            char *e; png_first = strtol(argv[++i], &e, 10);
+            png_last = *e == '-' && e[1] ? strtol(e + 1, NULL, 10) : (*e == '-' ? -1 : png_first);
+        }
         else if (!in && argv[i][0] != '-') in = argv[i];
         else { in = NULL; break; }
     }
