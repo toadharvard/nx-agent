@@ -124,19 +124,24 @@ fetch_captures() {   # real-game NXD9 captures recorded with d9cap (private game
 			git -C "$ARTIFACTS" archive "$c" | tar -x -C "$gd" && echo "$c" >"$gd/.rev"
 		fi
 	fi
-	# .nxd9 or .nxd9.xz; when the branch's README lists a sha256 for the .nxd9, it must match (else skipped)
+	# .nxd9 or .nxd9.xz, at any depth; each is measured under its path in the branch (menu/f.nxd9 -> menu_f.nxd9),
+	# so equal file names in different directories stay apart (V1 GC-3). When the README lists a sha256 for the
+	# .nxd9, it must match (else skipped, with a note).
 	mkdir -p "$W/caps/game"; rm -f "$W/caps/game"/*.nxd9
-	local f n want
-	for f in $(find "$gd" -name '*.nxd9' -o -name '*.nxd9.xz' | sort); do
-		n=$(basename "${f%.xz}")
+	local f rel n flat want
+	while IFS= read -r f; do
+		rel=${f#"$gd"/}; n=${rel%.xz}; flat=${n//\//_}
 		case "$f" in *.xz) [ -f "$gd/$n" ] || xz -dkc "$f" >"$gd/$n" || { NOTES+=("game capture $n: xz failed"); continue; } ;; esac
 		want=$(grep -o "| $(basename "$f") |.*" "$gd/README.md" 2>/dev/null | grep -oE '[0-9a-f]{64}' | head -1)
 		if [ -n "$want" ] && [ "$(sha256sum "$gd/$n" | cut -d' ' -f1)" != "$want" ]; then
 			NOTES+=("game capture $n: sha256 differs from the README, skipped"); continue
 		fi
-		# 8.3 conformance (nxd9norm.py: d9cap's empty managed-texture levels get their size), the same file for both sides
-		python3 -I "$CMP/nxd9norm.py" "$gd/$n" "$W/caps/game/$n" >/dev/null || { NOTES+=("game capture $n: nxd9norm failed"); continue; }
-	done
+		[ -e "$W/caps/game/$flat" ] && { NOTES+=("game capture $n: name $flat taken twice, skipped"); continue; }
+		# 8.3 conformance (nxd9norm.py: d9cap's empty managed-texture levels get their size), the same file for both
+		# sides. A file nxd9norm cannot read is measured as it is: it then fails visibly, never silently drops out.
+		python3 -I "$CMP/nxd9norm.py" "$gd/$n" "$W/caps/game/$flat" >/dev/null 2>&1 ||
+			{ cp "$gd/$n" "$W/caps/game/$flat"; NOTES+=("game capture $n: nxd9norm failed, measured as recorded"); }
+	done < <(find "$gd" \( -name '*.nxd9' -o -name '*.nxd9.xz' \) -not -path "$gd/.git/*" | sort | awk '{k=$0; sub(/\.xz$/, "", k); if (!(k in s)) {s[k]=1; print}}')
 	if ls "$W/caps/game"/*.nxd9 >/dev/null 2>&1; then
 		GAMECAPS=$W/caps/game
 		NOTES+=("game captures: $(ls "$GAMECAPS" | wc -l) from gamedata/captures at $(cut -c1-12 "$gd/.rev")")
