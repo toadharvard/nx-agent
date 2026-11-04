@@ -1750,15 +1750,65 @@ def r_incomplete_pointee_dtors(path, text, stats):
 # A few units call internals of the MSVC 2008 C++ library by name (robertdavies_random: _SCL_SECURE_VALIDATE,
 # std::_Checked_base, std::_Ptr_cat, the checked-copy iterator tags of <xutility>). STL1 includes
 # shim/include/fnvnx_msvcstl.h, which defines them as <xutility> does, in a unit that uses them without defining them.
+#
+# A unit that derives a container of its own from std::_Container_base_aux_alloc_real (blk_00b20000_od_ob1_rtm: MSVC
+# vector<void*>'s copy constructor written against <vector>'s _SECURE_SCL internals) gets the header's AUX part too
+# (`#define FNVNX_MSVCSTL_AUX` in front: the container base and its proxy, _Destroy_range,
+# stdext::unchecked_uninitialized_copy, the checked vector iterators). Such a unit builds `std::vector<T>::
+# const_iterator(ptr, container)`, which libstdc++'s iterators cannot take: STL1 spells `std::vector<T[, A]>::
+# const_iterator` / `::iterator` as MSVC's own names of those types there, `std::_Vector_const_iterator<T, A>` /
+# `std::_Vector_iterator<T, A>` (A = std::allocator<T> by default; the same types under MSVC). Units with their own
+# copy of these classes (blk_00ac0000 and the speedtree units define them) are left alone.
 
 STL_USE = re.compile(r'\b_SCL_SECURE_VALIDATE(?:_RANGE)?\s*\(|\bstd\s*::\s*(?:_Checked_base|_Ptr_cat|'
                      r'_Range_checked_iterator_tag|_Nonscalar_ptr_iterator_tag|_Scalar_ptr_iterator_tag|'
                      r'_Unchecked_iterator_tag)\b')
+STL_AUX_USE = re.compile(r'\bstd\s*::\s*_Container_base_aux_alloc_real\s*<')
+STL_AUX_OWN = re.compile(r'\b(?:class|struct)\s+(?:_Container_base_aux(?:_alloc_real)?|_Aux_cont|_Vector_const_iterator|'
+                         r'_Range_checked_iterator_tag)\b\s*[:{<]|\bnamespace\s+stdext\b')
+STL_VECTOR = re.compile(r'(?:::\s*)?\bstd\s*::\s*vector\s*<')
+
+def _template_args(s):
+    """Top-level template arguments of the text between '<' and its '>'."""
+    out, depth, cur = [], 0, ''
+    for c in s:
+        if c in '<([': depth += 1
+        elif c in '>)]': depth -= 1
+        if c == ',' and depth == 0: out.append(cur.strip()); cur = ''
+        else: cur += c
+    out.append(cur.strip())
+    return out
+
+def _stl_vector_iterators(text):
+    """`std::vector<T[, A]>::const_iterator` / `::iterator` -> `::std::_Vector_const_iterator<T, A>` /
+    `::std::_Vector_iterator<T, A>` (see above). Returns (text, edits)."""
+    out, pos, n = [], 0, 0
+    for m in STL_VECTOR.finditer(text):
+        if m.start() < pos: continue
+        lt = text.index('<', m.start())
+        end = _angle_end(text, lt)
+        if end < 0: continue
+        it = re.match(r'\s*::\s*(const_iterator|iterator)\b', text[end:])
+        if not it: continue
+        args = _template_args(text[lt + 1:end - 1])
+        if len(args) == 1: args.append('::std::allocator< %s >' % args[0])
+        if len(args) != 2 or not all(args): continue
+        name = '_Vector_const_iterator' if it.group(1) == 'const_iterator' else '_Vector_iterator'
+        out.append(text[pos:m.start()] + '::std::%s< %s, %s >' % (name, args[0], args[1]))
+        pos = end + it.end()
+        n += 1
+    return ''.join(out) + text[pos:], n
 
 def r_msvc_library_internals(path, text, stats):
-    """STL1: `#include "fnvnx_msvcstl.h"` on top of a unit that uses MSVC library internals (see above)."""
-    if '_S' not in text and 'std' not in text: return text
-    if not STL_USE.search(COMMENT.sub(' ', text)): return text
+    """STL1: `#include "fnvnx_msvcstl.h"` on top of a unit that uses MSVC library internals; the AUX part and MSVC's
+    vector iterator names in a unit that derives from std::_Container_base_aux_alloc_real (see above)."""
+    if '_S' not in text and 'std' not in text and '_C' not in text: return text
+    code = COMMENT.sub(' ', text)
+    if STL_AUX_USE.search(code) and not STL_AUX_OWN.search(code):
+        text, n = _stl_vector_iterators(text)
+        stats['STL1'] += 1 + n
+        return '#define FNVNX_MSVCSTL_AUX 1 /* fnv-nx STL1 */\n#include "fnvnx_msvcstl.h"\n' + text
+    if not STL_USE.search(code): return text
     if re.search(r'#\s*define\s+_SCL_SECURE_VALIDATE\b|\bstruct\s+_Range_checked_iterator_tag\b', text): return text
     stats['STL1'] += 1
     return '#include "fnvnx_msvcstl.h" /* fnv-nx STL1 */\n' + text

@@ -253,6 +253,24 @@ check('STL1 MSVC library internals get fnvnx_msvcstl.h',
 check('STL1 a unit with its own copies: untouched',
       run(s1.r_msvc_library_internals, '#define _SCL_SECURE_VALIDATE(c) (void)0\nvoid f(int* p) { _SCL_SECURE_VALIDATE(p); }\n'),
       (), ['fnvnx_msvcstl.h'])
+_STL1_AUX = ('#include <vector>\nstruct Store : std::_Container_base_aux_alloc_real< std::allocator<int*> > {\n'
+             '    typedef ::std::vector<int*>::const_iterator CIt;\n    typedef std::vector<int*, std::allocator<int*> >::iterator It;\n'
+             '    typedef std::vector<std::pair<int, int> >::const_iterator PIt;\n'
+             '    std::allocator<int*> _Alval;\n    int** first; int** last; int** limit;\n'
+             '    Store(std::allocator<int*> a) : std::_Container_base_aux_alloc_real< std::allocator<int*> >(a), _Alval(a) {}\n'
+             '    CIt begin() const { return CIt(first, this); }\n'
+             '    int** copy(CIt a, CIt b, int** out) { return stdext::unchecked_uninitialized_copy(a, b, out, _Alval); }\n'
+             '    void destroy() { std::_Destroy_range(first, last, _Alval); }\n};\nstd::vector<int> plain;\n')
+got = run(s1.r_msvc_library_internals, _STL1_AUX)
+check('STL1 AUX: a container derived from _Container_base_aux_alloc_real gets the AUX part and MSVC iterator names', got,
+      ['#define FNVNX_MSVCSTL_AUX 1 /* fnv-nx STL1 */\n#include "fnvnx_msvcstl.h"\n#include <vector>\n',
+       'typedef ::std::_Vector_const_iterator< int*, ::std::allocator< int* > > CIt;',
+       'typedef ::std::_Vector_iterator< int*, std::allocator<int*> > It;',
+       'typedef ::std::_Vector_const_iterator< std::pair<int, int>, ::std::allocator< std::pair<int, int> > > PIt;',
+       'std::vector<int> plain;'])
+check('STL1 AUX: a unit with its own _Container_base_aux copy gets no AUX part',
+      run(s1.r_msvc_library_internals, 'namespace std { class _Container_base_aux { }; }\n' + _STL1_AUX), (),
+      ['FNVNX_MSVCSTL_AUX', '_Vector_const_iterator<'])
 
 # ---- SAL1 class attributes
 check('SAL1 drops the attributes of the annotation classes',
@@ -619,7 +637,7 @@ check('NATIVE1 drops listed units and glob matches, reports the addresses no ove
 check('NATIVE1 with no list file drops nothing', repr(native1.load_list(os.path.join(_d, 'none.txt'))), ['[]'])
 
 # ---- shim packing: fnvnx_win32.h included inside a decomp #pragma pack(push, 4) region (DECL1 / DECL2, 16 sites)
-import shutil as _shutil, subprocess as _subprocess
+import re, shutil as _shutil, subprocess as _subprocess
 if _shutil.which('aarch64-linux-gnu-g++'):
     _pk = os.path.join(tempfile.mkdtemp(), 'pk.cpp')
     open(_pk, 'w').write('#pragma pack(push, 4)\n#include "fnvnx_win32.h"\nstruct Inner { int a; LARGE_INTEGER b; };\n'
@@ -629,6 +647,26 @@ if _shutil.which('aarch64-linux-gnu-g++'):
     _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only',
                           '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _pk], capture_output=True, text=True)
     check('fnvnx_win32.h keeps the SDK packing inside a pack(4) region', _r.stderr or 'ok', ['ok'])
+    # STL1 AUX: the rule's output compiles against the shim, with MSVC's x86 vector layout (TAIL1's base end by hand)
+    _sa = os.path.join(tempfile.mkdtemp(), 'stl1aux.cpp')
+    _compat = open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h')).read()
+    _base_end = re.search(r'template <unsigned A> struct fnvnx_int_of_align;.*?#define FNVNX_MSVC_BASE_END[^\n]*\n',
+                          _compat, re.S).group(0)    # the compat header's macro (the whole header needs sse2neon)
+    open(_sa, 'w').write(_base_end + run(s1.r_msvc_library_internals, _STL1_AUX.replace(
+        '{\n    typedef ::std', '{ FNVNX_MSVC_BASE_END(std::_Container_base_aux_alloc_real< std::allocator<int*> >)\n    typedef ::std', 1))
+        + '#pragma GCC diagnostic ignored "-Winvalid-offsetof"\n'
+          'static_assert(sizeof(std::_Container_base_aux_alloc_real< std::allocator<int*> >) == 8 && '
+          '__builtin_offsetof(Store, _Alval) == 8 && __builtin_offsetof(Store, first) == 12 && '
+          '__builtin_offsetof(Store, last) == 16 && __builtin_offsetof(Store, limit) == 20, "MSVC vector layout");\n'
+          'static_assert(sizeof(Store::CIt) == 8 && __builtin_offsetof(Store::CIt, _Myptr) == 4, "_Myaux, _Myptr");\n'
+          'int** g(Store& s, Store::CIt e, std::vector<int>* q, std::allocator<std::vector<int> >& a) {\n'
+          '    s.destroy(); std::_Destroy_range(q, q + 1, a);\n'
+          '    std::_Vector_iterator<std::vector<int>, std::allocator<std::vector<int> > > i(q, 0);\n'
+          '    stdext::unchecked_uninitialized_copy(i, i + 1, q + 2, a);\n'
+          '    return s.copy(s.begin(), e, s.first); }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror',
+                          '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _sa], capture_output=True, text=True)
+    check('STL1 AUX compiles against fnvnx_msvcstl.h with MSVC x86 layouts', _r.stderr or 'ok', ['ok'])
 
 # ---- STATIC1 namespace statics (S13: bound by their plain name; roulettemenu, hudmainmenu)
 _n = tempfile.mkdtemp()
