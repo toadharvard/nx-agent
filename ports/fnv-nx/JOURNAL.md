@@ -3243,3 +3243,17 @@ The owner moves the work to another session or account (quota). Resume with docs
   - FTOI2: **partial**. An enum with only non-negative enumerators takes the unsigned path; MSVC enums are int. Fix via TYPE_LANG_FLAG_5; it forces a full recompile, which is the owner's call.
   - fastcall non-POD: the ecx rule is confirmed. layout.py's POD bit is wrong for 3 of 24 kinds; proposed predicate __is_aggregate && no base && trivial dtor && trivially assignable -> S2c.
 * **owner action** - A V1 test ran with an empty mktemp and wrote synthetic files under `/` (12:48-12:49): /a-g1 /a-g2 /a-g3 /artifacts /build /fake.exe /farm /origin.git /outside.bin /pub /r-g1 /r-g2 /r-g3 /report.md. They are not removed: check what they are before deleting. The tests now stop when mktemp fails.
+
+### J-0148 | 2026-11-04 | stream: S15-perf | status: wip | parent: J-0147
+
+* **merged** - S15 `4c785dd` only (PERF.md: hotspot top-10, the optimization queue, section 6.7 on Interlocked cost, the first-hardware set H1-H4; PERF_budget.json).
+* **NOT merged** - `d909c82` (Interlocked inlining, mtqemu ilk/placement/litmus cases) and `42e9fa5` (hotspots[]/queue[] in fnvnx-frame-budget/1) conflict with S12's inlining `52cb478`. Both edit fnvnx_win32.h/sync.cpp. Both commits are on the private branch `wip/afe99a646b20` (push_wip). Merge them by hand in the new session: S12's inline version plus the refcount rule wins; keep S15's tests and the frame-budget changes.
+* **measured (S15)**
+  - Boot on the owner's exe (fa88 guest): 242.6 M instructions to WinMain, then the vslot trap at 0x00aa7400. The loader is 212 M of that (0.26 s at 1.02 GHz).
+  - Litmus under the race checker: with the plugin, 0 bad.
+  - Placement on host threads: ok.
+* **estimated (S15)** - Main thread as placed: 23.8 M instructions, worst frame 36.4 ms at 1.02 GHz, which **fails 30 fps**.
+  - plan45b (mt_cull, Havok workers, threaded animation, render F2-F4, relaxed refcount increments, NEON math) reaches 14.1 M, worst frame 21.7 ms: 45 fps at 1.02 GHz.
+  - 60 fps at 1.785 GHz from plan45 on.
+  - The queue, ranked by main-thread saving: mt_cull 2.7 M, accumulation 1.8 M, render F2-F4 1.75 M, Havok workers 1.55 M, threaded animation + NEON Slerp 1.15 M.
+  - Hardware tests need Linux on an A57 (the Switch under L4T, or a Jetson TX1/Nano).
