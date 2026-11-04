@@ -210,6 +210,9 @@ def compare(ref, dfn, lay_ref, lay_def):
             if lab == 'this':
                 x86_ok = False; p.notes.append('this not passed by the reference')
                 p.classes.append('this-not-passed')
+            elif space == 'ecx':   # the x86 callee reads the caller's ecx (abi.compare, 'ecx-not-passed')
+                x86_ok = False; p.notes.append('%s (ecx) not passed by the reference' % lab)
+                p.classes.append('ecx-not-passed')
             elif space == 'edx':
                 p.notes.append('%s: edx dummy' % lab); p.classes.append('edx-dummy')
             else:

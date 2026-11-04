@@ -197,6 +197,14 @@ def compare(ref, dfn):
             if lab == 'this':
                 x86_ok = False
                 v.notes.append('this not passed by the reference')
+            elif loc == 'ecx':
+                # a register parameter the reference does not pass: the x86 callee reads whatever the caller left in
+                # ecx (its own `this` in a member function) - not junk, a declaration that only works on x86 (S13:
+                # stdcall f(void*) referenced, fastcall f(p0 /*ecx*/, edx dummy, p2) defined); the S1b patch decides
+                x86_ok = False
+                v.notes.append('%s (ecx) not passed by the reference: the x86 callee reads the caller\'s ecx' % lab)
+                if 'ecx-not-passed' not in v.classes:
+                    v.classes.append('ecx-not-passed')
             elif loc == 'edx':  # __fastcall f(T*, int edx_dummy, ...) defined, called as T::f(...): edx is junk
                 v.notes.append('%s: edx dummy not passed' % lab)
                 if 'edx-dummy' not in v.classes:

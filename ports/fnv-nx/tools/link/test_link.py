@@ -74,6 +74,17 @@ def main():
     check(v.kind == 'bridge' and v.moves == [(('x', 1), ('v', 0), 'I32', 'F32')], 'float -> int: %s' % v.moves)
     v = abi.compare(S['?k@@YAXPAVFoo@@@Z'], S['?h@Foo@@QAEHXZ'])
     check(v.kind == 'x86-inconsistent', 'cdecl k(Foo*) vs thiscall: %s' % v.kind)
+    # S13: stdcall f(void*) referenced, fastcall f(p0 /*ecx*/, edx dummy, p2) defined - the x86 callee reads the
+    # caller's ecx as p0: x86-inconsistent (S1b), not a bridge leaving x0 = the reference's argument
+    e2 = ['?e@@YG_NPAX@Z', '?e@@YI_NPAUB@@HPAUO@@@Z', '?e@M@@QAE_NPAU1@@Z']
+    de = fnvlink.batch_demangle(fnvlink.UNDNAME, e2)
+    SE = {n: sigs.parse_msvc(n, de[n]) for n in e2}
+    v = abi.compare(SE['?e@@YG_NPAX@Z'], SE['?e@@YI_NPAUB@@HPAUO@@@Z'])
+    check(v.kind == 'x86-inconsistent' and 'ecx-not-passed' in v.classes,
+          'stdcall f(void*) -> fastcall(ecx, edx, X): %s %s' % (v.kind, v.classes))
+    v = abi.compare(SE['?e@M@@QAE_NPAU1@@Z'], SE['?e@@YI_NPAUB@@HPAUO@@@Z'])
+    check(v.kind == 'bridge' and 'edx-dummy' in v.classes, 'thiscall M::f(M*) -> the same: %s %s'
+          % (v.kind, v.classes))
 
     v = abi.compare(S['?s@Foo@@QAE?AUVec@@M@Z'], S['?s@Foo@@QAEPAUVec@@PAU2@M@Z'])
     check(v.kind == 'manual' and 'sret-explicit' in v.classes, 'hidden vs explicit return buffer: %s %s'
