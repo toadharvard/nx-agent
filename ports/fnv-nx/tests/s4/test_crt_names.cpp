@@ -51,3 +51,29 @@ TEST(crt_msvc_names)
     CHECK_EQ(__isoc23_strtol("0x10", NULL, 0), 16);
     FreeBlockImp(NULL);   /* no game heap linked: a no-op, as on NULL */
 }
+
+extern "C" {
+long long __emul(int, int);
+unsigned long long __emulu(unsigned, unsigned);
+void __movsd(unsigned long *, const unsigned long *, size_t);
+void __movsb(unsigned char *, const unsigned char *, size_t);
+void *xmemcpy(void *, const void *, size_t);
+void __debugbreak(void);
+}
+
+TEST(crt_msvc_intrinsics_out_of_line)
+{
+    CHECK(__emul(0x66666667, -25) == (long long)0x66666667 * -25);
+    CHECK((int)(__emul(0x66666667, 1234) >> 34) == 123);   /* the division by 10 the Havok splitter does */
+    CHECK(__emulu(0xffffffffu, 2u) == 0x1fffffffeull);
+    uint32_t w[6] = {1, 2, 3, 4, 5, 6};
+    __movsd((unsigned long *)(void *)(w + 1), (const unsigned long *)(void *)w, 4);   /* overlapping, forward */
+    CHECK(w[1] == 1 && w[2] == 1 && w[3] == 1 && w[4] == 1 && w[5] == 6);
+    unsigned char b[5] = {'a', 'b', 'c', 'd', 'e'};
+    __movsb(b, b + 1, 3);
+    CHECK(!memcmp(b, "bcdde", 5));
+    char x[4] = {0};
+    CHECK(xmemcpy(x, "hi!", 4) == x);
+    CHECK_STR(x, "hi!");
+    __debugbreak();   /* logged, then goes on */
+}
