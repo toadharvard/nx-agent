@@ -37,6 +37,9 @@ def main():
     rows = [l.rstrip('\n').split('\t') for l in open(os.path.join(a.dir, 'index.tsv'))][1:]
     progs, names, bad = {}, [], []
     for r in rows:
+        if len(r) < 5:   # a truncated index line (an interrupted sdp2dksh run)
+            bad.append('%s (truncated index.tsv line)' % '\t'.join(r)[:60])
+            continue
         h, pkg, name, model, status = r[0], r[1], r[2], r[3], r[4]
         dk = os.path.join(a.dir, h + '.dksh')
         blob = open(dk, 'rb').read() if os.path.exists(dk) else b''
