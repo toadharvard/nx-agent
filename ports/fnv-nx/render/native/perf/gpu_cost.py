@@ -80,20 +80,48 @@ LIT_PERMUTATION = {"lit.frag": "lit_d1p4.frag", "lit_spec.frag": "lit_spec_d1p4.
 # blended families shade every layer. EARLY_Z = False: every layer
 # shaded (the model before).
 EARLY_Z = True
+# The renderer orders opaque draws (layer 0) by DEPTH_BUCKETS coarse depth buckets, front to back, then by state
+# (nx/front.h SortKey, kDepthBucketBits): of k layers with uniform random depths, the fragments in nearer buckets are
+# drawn first and those inside a bucket in random order. shaded(k, B) is that expectation (exact Monte Carlo with a
+# fixed seed for integer k, linear between); B = 1 is state order, shaded(k, 1) = H(k).
+DEPTH_BUCKETS = 4
 
 
-def harmonic(k):
+def _shaded_table(buckets, nmax=8, trials=20000):
+    import random
+    rnd = random.Random(12345)
+    tab = [0.0, 1.0]
+    for n in range(2, nmax + 1):
+        tot = 0
+        for _ in range(trials):
+            d = [rnd.random() for _ in range(n)]
+            order = sorted(range(n), key=lambda i: (int(d[i] * buckets), rnd.random()))
+            near = 2.0
+            for i in order:
+                if d[i] < near:
+                    tot += 1; near = d[i]
+        tab.append(tot / trials)
+    return tab
+
+
+_SHADED = {}
+
+
+def harmonic(k, buckets=1):
     if k <= 1.0:
         return k
-    n = int(k); h = sum(1.0 / i for i in range(1, n + 1))
-    return h + (k - n) / (n + 1)
+    if buckets not in _SHADED:
+        _SHADED[buckets] = _shaded_table(buckets)
+    t = _SHADED[buckets]
+    n = min(int(k), len(t) - 2)
+    return t[n] + (k - n) * (t[n + 1] - t[n])
 
 
 def shaded_layers(m, alpha_share):
     k = m["overdraw"]
     if not EARLY_Z or m.get("depth", 0) < 2 or m.get("blend"):
         return k
-    return alpha_share * k + (1.0 - alpha_share) * harmonic(k)
+    return alpha_share * k + (1.0 - alpha_share) * harmonic(k, DEPTH_BUCKETS)
 RS_ALPHATESTENABLE, RS_FOGENABLE = 15, 28
 
 
@@ -370,7 +398,7 @@ def main():
     res = {"method": __doc__.strip().split("\n\n", 2)[2], "assumptions": {"lights": LIGHTS, "tex_cost": TEX_COST, "efficiency": EFF, "gpu": GPU,
            "presets": PRESETS, "target_formats": fmts, "format_bytes": FORMAT_BYTES, "z_compress": Z_COMPRESS,
            "tex_bytes": TEX_BYTES, "fp16_rate": FP16_RATE, "families": MODEL, "permutations": PERMUTATIONS,
-           "lit_permutation": LIT_PERMUTATION, "stand_in": STAND_IN, "early_z": EARLY_Z,
+           "lit_permutation": LIT_PERMUTATION, "stand_in": STAND_IN, "early_z": EARLY_Z, "depth_buckets": DEPTH_BUCKETS,
            "epilogue_mix_hi": {f: {"at%d_fog%d" % k: n for k, n in v.items()} for f, v in epis["hi"].items()},
            "real_map": REAL_MAP if real_tab else None}, "shaders": tab, "scenes": scenes}
     json.dump(res, open(out, "w"), indent=1)
