@@ -75,5 +75,39 @@ if r.returncode == 0:
     check('throw()' not in a and 'extern "C" int DAT' in a and 'FNVNX_KEEP' not in a, 'only EXC1 applied: %r' % a)
     check((OUT / 'mini_out' / 'equiv_rules.txt').read_text().strip() == 'EXC1', 'equiv_rules.txt')
 
+# 6. merge_reports: two shard reports and a FAILED one sum up, per rule and per kind
+spec = importlib.util.spec_from_file_location('merge_reports', EQ.parent / 'merge_reports.py')
+mr = importlib.util.module_from_spec(spec); spec.loader.exec_module(mr)
+shard = '''# MSVC equivalence gate - abc123 shard %d/3
+
+- units: %d compared; %d identical, %d differ, %d prepared side does not compile, 0 pristine does not compile
+- functions: 50 compared, 3 differ (EH-only 2, retarget 0, code 1)
+
+| rule | eh | retarget | code | no-build |
+|---|---:|---:|---:|---:|
+| EXC1 | 2 | 0 | 0 | 0 |
+| ENUM1 | 0 | 0 | 1 | %d |
+
+## Differing functions (unit, address, kind, rule)
+
+```
+src/s%d.cpp  0x00401000  eh  EXC1
+```
+
+## Units the prepared side does not compile (unit, rule, first error)
+
+```
+%s```
+'''
+r1 = mr.parse(shard % (1, 4, 2, 1, 1, 1, 1, 'src/x.cpp  ENUM1  C2059 syntax error\n'), 'eq1')
+r2 = mr.parse(shard % (2, 3, 2, 1, 0, 0, 2, ''), 'eq2')
+r3 = mr.parse('# equiv abc123 FAILED (rc 1)\n\n```\nT start equiv 3 3 at abc123\nFileNotFoundError: x\n```\n', 'eq3')
+check(r1['shard'] == 1 and r1['units']['no-build'] == 1 and r1['table']['ENUM1']['no-build'] == 1
+      and len(r1['nobuild']) == 1 and r3['failed'] and r3['shard'] == 3, 'merge_reports parse: %s %s' % (r1, r3))
+m = mr.merge([r1, r2, r3])
+check('(2 of 3 shards)' in m and '- units: 7 compared; 4 identical, 2 differ, 1 prepared' in m
+      and '| EXC1 | 4 | 0 | 0 | 0 | 4 |' in m and '| ENUM1 | 0 | 0 | 2 | 1 | 3 |' in m
+      and 'shards without a report: 3' in m and 'eq3: FAILED - `FileNotFoundError: x`' in m, 'merge_reports: %s' % m)
+
 print('test_equiv: %d failures' % len(fails))
 sys.exit(1 if fails else 0)

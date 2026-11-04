@@ -64,9 +64,39 @@ bytes (`m_ulThreadOwner` 0x1C -> 0x18, `m_uiLockCount` 0x20 -> 0x1C) and `Graphi
 RecursiveLock (D15's evidence) show no code difference in the units that compile, but `RecursiveLock` also shrinks
 (40 -> 36) and `BSShaderAccumulator` (896 -> 888).
 
+**D15 is fixed by CSX2** (J-0073; checked at `3b5ea62`, neutral set + CSX2). Five of the eight units are identical,
+now with `niconsolerenderer_h_unit.cpp`: `GraphicsRenderer::BeginUsingRenderTargetGroup` reads `+0x200` / `+0x208`
+again. The other three (bsshaderaccumulator, nid3dshader, nidefaultavobjectpalette: two functions each) differ only
+in EH code and are identical with `/EHs-c-` (EXC1, as before). Layouts: `GraphicsRenderer` and
+`BSShaderAccumulator` (896) are as in pristine. `NiCriticalSection` (128) and `RecursiveLock` keep pristine's size
+and member offsets, plus one line, the 4-byte tail member at +24 (`m_kCriticalSection_fnvnx_tail`,
+`CriticalSection_fnvnx_tail`).
+
+## Round 8 (S1 rules after `8fff58b`)
+
+The eq farms gate every integration head: `tools/farm/equiv_job.sh` runs on each of six shards, and
+`tools/equiv/merge_reports.py` merges the shard reports into the per-rule table. A local preview at `c6658af`
+(J-0067; neutral set + FTOL1 + STL1, STD1, ANON1, ANON2, all units) gave 2,349 identical, 548 differing (1,061 of
+59,049 functions) and 90 no-build units (97 at `8fff58b`). Against `8fff58b`, 8 functions newly differ and none are
+newly identical. 11 units newly fail: 7 are ENUM1 (by design, see below), 1 is ANON2 (`nipoint3interpolator`,
+reported to S1), and 3 are not attributed yet (bgsdecalmanager, extradatalist, tesaiform).
+
+**ENUM1 under MSVC 2008: by design.** MSVC 2008 has no opaque enum declarations. It accepts `enum X : int { ... }`
+as an extension, but it rejects `enum X : int;` (C2059 `syntax error : ';'`, in the `_decls.h` of inventorymenu x3,
+packagedatadialogue x3, tesaiform_o2). These units are counted as not comparable (below), not against ENUM1. The
+definitions ENUM1 rewrites are compared wherever the unit compiles.
+
+**INC1, header check.** INC1 has 68 units with a site. For each, the headers MSVC opens (pristine, `/showIncludes`,
+names resolved on disk without case) are compared with the headers GCC opens for the target (`-M -MG`, census
+flags). With INC1, GCC opens exactly MSVC's `src/` and `include/` headers in all 68 units. Without it, 32 units
+differ: MSVC opens 194 headers GCC does not (`mobileobject.h` 24 units, `NiPoint3.h` 17, `actor.h` 11, ...), and GCC
+opens 78 that MSVC does not (`include/MobileObject.h` and similar canonical copies). This is what INC1 claims, so the
+remaining question is code, which the gate answers.
+
 ## Classification
 
-Rules of S1 round 8 (`RREF1` ... `SPEC2`, after `8fff58b`) are classified (orchestrator, J-0058) but not gated yet.
+Rules of S1 round 8 (`RREF1` ... `SPEC2`, after `8fff58b`) are classified (orchestrator, J-0058). Their gate is
+above (round 8).
 
 * **neutral** - claims to change spelling only, on any target. Compared on all units: expected identical.
 * **layout** - changes a layout on purpose (for GCC) or swaps in another definition of a type. MSVC class layouts
@@ -186,7 +216,8 @@ MSVC 2008 with the real SDK cannot express some of what the target accepts; thos
 against a rule: `std::abs` after DECL1 (libstdc++'s C headers export into `std`, MSVC's do not; 29 units), names the
 full SDK defines that the target shim does not (`RequestLocation` in winioctl.h, `vc_attributes`, `_MEMORYSTATUS`,
 `IUnknown`, `PCH`), MSVC's `float` math overloads colliding with the decomp's own (`fabsf`, `cosf`, `sqrt(float)`),
-and `-fpermissive` conversions (`HANDLE` -> integer). The `vc8` unit needs VC 2005 SP1.
+and `-fpermissive` conversions (`HANDLE` -> integer), and ENUM1's opaque declarations `enum X : int;` (C++11; MSVC
+2008 parses the enum base only on a definition: 7 units). The `vc8` unit needs VC 2005 SP1.
 
 What only the target can show: that GCC's layout equals MSVC's (TAIL1's purpose) needs a GCC-side comparison; MSVC
 shows that the TAIL1 construct is inert.

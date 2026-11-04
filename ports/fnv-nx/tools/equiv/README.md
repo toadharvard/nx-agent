@@ -65,6 +65,7 @@ recipe functions in them is present in its object with exactly the recipe size (
     equiv.py summarize BASE.jsonl HEAD.jsonl --without NAME=FP.jsonl... [--eh A B]   per-rule table from leave-out runs
     equiv.py layouts DECOMP OBJDIR_A OBJDIR_B [--show CLASS,..]    MSVC class layouts of two --layout builds
     equiv.py report BASE.jsonl HEAD.jsonl --out R.md [--attr A.jsonl] [--eh A B]   markdown report of a gate
+    merge_reports.py R1.md R2.md ... | --git CLONE [--farms eq1,..] [--commit C12]   one summary of shard reports
 
 Prepared trees get `msvc/fnvnx_*.h` (MSVC meanings of the fnv-nx shim headers: the real SDK / CRT; `--lean` builds
 the stand-in `<windows.h>` with WIN32_LEAN_AND_MEAN) and `/FI msvc/fnvnx_equiv_compat.h`; both sides get
