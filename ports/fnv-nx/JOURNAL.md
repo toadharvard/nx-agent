@@ -2246,3 +2246,24 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **measured** - farm1 census at 23e0f0a: 2,908/2,978 clean, 70 failing, 385 errors. The next census should be about
   2,911. The largest class left is decomp `_mm_*` prototypes whose return type is a typedef (about 15 Havok units,
   about 100 errors).
+
+### J-0106 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0105
+
+* **did** - S1 `ea92c84` VLIT1 (new, platform): the decompiler had printed slot 0 of a vftable as a 1-3 character string
+  literal stored as a vptr. VLIT1 replaces such a literal with the vftable address from the unit's `$SG` binding.
+  - 4 sites rewritten, among them GameSettingCollection `"@K@"` -> 0x0101212c (boot: 3,454 skipped setting
+    initializers), plus teshealthform, pathsmootherpov and pathingrequestoptimallocation.
+  - 41 sites listed as `VLIT1-LIST`. Their units have no `$SG` binding, or several bindings or literals, and the
+    literal-to-`$SG` mapping needs the exe.
+* **did** - S1 `e82e698` SSE2: local `_mm_*` prototypes whose return type is the decomp's own name for `__m128`
+  (hkQuadReal, ClosestPointQuad, ...) are dropped.
+  - 7 units affected, about 18 errors fewer; boxbox_rtm and angulardashpot_rtm now compile.
+  - Left: `extern "C" ::hkQuadReal _mm_load_ps(...)` in hkpworld_rtm_variant, and `using _mm_add_ps;` of names that
+    sse2neon defines as macros.
+  - tests/s1: 0 failed. tests/s11: ok.
+* **found** - Nothing in the decomp calls the NiMainSDM constructor 0x00a8a5f0.
+  - In Gamebryo every unit that includes NiMain.h has a static NiMainSDM, so the exe calls it from many dynamic
+    initializers. The decomp has none of them.
+  - The fix is an INIT rule, waiting on S5 to say how native static initializers are ordered against WinMain.
+* **next** - S1: the A660A0Map VTBL1 entry (NiTMapBase: 0 dtor, 1 KeyToHashIndex, 2 IsKeysEqual, 3 SetValue,
+  4 ClearValue, 5 NewItem, 6 DeleteItem), the NiMainSDM INIT rule, and the two SSE2 forms.
