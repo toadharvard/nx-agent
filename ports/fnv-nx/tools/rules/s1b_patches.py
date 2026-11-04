@@ -184,7 +184,8 @@ def r_ftol1(path, text, stats):
 
 def r_dbug1(path, text, stats):
     """DBUG1: decomp bugs MSVC tolerated (S4b, J-0030): an 8-byte local type whose constructor writes 12 bytes,
-    ThrowInfo objects passed by value instead of by address, one SpeedTree exception class across units
+    ThrowInfo objects passed by value instead of by address, one SpeedTree exception class across units, a Win32
+    import declared with fewer parameters than the API whose missing argument the x86 code left on the stack
     (patches/dbug1_*.s1b)."""
     return apply_sites(path, text, stats, 'DBUG1')
 

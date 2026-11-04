@@ -51,7 +51,7 @@ explains; `no-build`: units that compile under MSVC without the rule but not wit
 | `CSX1` | | | | | asserts only, no code; but see D15 below. |
 | `DUPINT1` `LINK1` `NEW1` `NEW3` `RET1` `SPEC1` `RCAST1` `TYPEID1` `SAL1` | | | | | **identical** in every unit they touch. |
 | `KEEP1` | | | | | inert by construction under MSVC (`FNVNX_KEEP` is empty). |
-| `DBUG1` | | | | | no sites. |
+| `DBUG1` | | | | | one site (0x00b01510, `patches/dbug1_crt.s1b`): identical under tests/s1b/msvc_check.py. |
 | two or more rules together | 102 | 13 | 6 | 21 | explained only by leaving out a group or a pair of groups: the EH-only ones are EXC1 with NEW2 / CTOR1 or two NEWDEL rules; the retargets are CRT wrappers (DECL1 with DECL2 / CALL1) and `FUN_00ee6de6` (declared with the SDK's global `tagRECT` instead of the namespace's: a decoration the recipe does not bind); code: `GraphicsRenderer::BeginUsingRenderTargetGroup` (D15, below) and 5 functions; no-build: stand-in limits. |
 
 **D15 (CS28 removed, CSX1) is refuted by the matched code.** Of the eight critical-section units, four are identical
@@ -190,7 +190,7 @@ above (round 8).
 | `SPEC2` | neutral | `template <>` on the decomp's member definitions of class template specializations (5 files) | MSVC accepts both spellings |
 | `XINC1` | neutral (claim) | caller declarations corrected from the x86 code (S1b) | as is |
 | `RET1` | neutral | `return <trailing stmt>` where MSVC's code is identical (S1b) | as is |
-| `DBUG1` | neutral | per-site debug fixes (no sites) | - |
+| `DBUG1` | neutral | per-site decomp-bug fixes (S1b; one site, identical) | as is |
 | `FTOL1` | platform | `fnvnx_ftol2(expr)` for arg-less `_ftol2_sse` calls | `fnvnx_ftol2(x)` = `(__int64)(x)` (gated anyway) |
 | `SDK1` | layout | the PC SDK definitions win over the decomp's guarded copies (Xbox 360 layouts) | real SDK |
 | `TAIL1` | layout | GCC must not reuse a base's tail padding; MSVC never does | zero-width bit-field, as on the target |

@@ -64,7 +64,7 @@ CLASSES = {
     'STATIC1': 'neutral',       # internal -> external linkage of image-bound variables (MSVC may inline less)
     'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
     'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
-    'DBUG1': 'neutral',         # no sites
+    'DBUG1': 'neutral',         # decomp-bug fixes per site (S1-crt 0x00b01510: identical)
     'XC1': 'platform',          # dynamic initializers -> extern + __fnvnx_dyninit_<addr> (S10 runner order)
     'VA1': 'platform',          # MSVC char* va_list -> real va_list
     'FALL1': 'platform',        # __builtin_trap() at fall-off ends (GCC only)

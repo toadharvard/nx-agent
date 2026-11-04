@@ -66,7 +66,7 @@ inline.
 | FTOL1 exact | the 17 sites now call the inline `fnvnx_ftol2_sse` (was the out-of-line int64 `fnvnx_ftol2`); 5 casts in 0x00a1b450 / 0x006912a0 (`ftol1_casts.s1b`) | whole units identical (11 units, 1,690 functions) | NaN / out of int32 -> 0x80000000 as on an SSE2 PC |
 | RET1 | 11 functions | identical (whole units, 1,395 functions) | 6 trailing statements, 5 with the callee's return type restored |
 | RET1 round 2 | 6 functions S12 found trapping (`ret1_fall1_r2.s1b`) | 4 identical, 2 differ by design | 3 made void, 1 callee return restored, 2 return the x86 eax |
-| DBUG1 | 0 | - | the S4b items were merged by S1 (`FUN_00ec78f1_t` 12 bytes, J-0041) |
+| DBUG1 | 1 (`dbug1_crt.s1b`) | identical (whole unit, 64 functions) | the S4b items were merged by S1 (`FUN_00ec78f1_t` 12 bytes, J-0041); S1-crt: 0x00b01510 calls FindFirstFileA with the find data the x86 code left on the stack (one-parameter decomp declaration of the two-parameter import) |
 
 **XINC1 patterns.** (a) `jmp <callee>` forwarders declared `void f()`: they hand ecx and the caller's stack
 arguments to a thiscall callee, so they are thiscall members with the callee's parameters and result (22 pairs).
