@@ -1005,7 +1005,7 @@ the host unit with no prelude (`vtables.compile_probe(prelude='')`): `<typeinfo>
 `std::exception` does not compile. Tests: `tests/s2d/test_bodies.py`.
 
 The farm link gets the exe from `link_job.sh` (`job_gamedata` -> `FNVNX_EXE`); the link stage's fingerprint holds its
-sha256. On link c0d6c71516f6 (relink of its out/): 4,425 undefined without bodies, 2,836 with. The 1,342 names left
+sha256. On link c0d6c71516f6 (relink of its out/): 4,425 undefined without bodies, 2,474 with. The 1,002 names left
 `missing` are listed by gap class on the private branch `s2d/gaps/<link12>` (agent-only).
 
 ## Open problems
