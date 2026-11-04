@@ -57,7 +57,7 @@ before-winmain _ZN18FUN_00a8a5f0_class12FUN_00a8a5f0Ev 0x011f4414    # 0x00fb56c
 before-winmain _ZN13NiPixelFormatC1Ev 0x011f4600                     # 0x00fb5860
 before-winmain _ZN7NiPlaneC1Ev 0x011f9604                            # 0x00fb97d0
 0x00e93e70            # NiD3DShaderProgramFactory::RegisterCreator, from NiDX9Renderer's library Init 0x00e91dc0 (NiInit):
-                      # its map's SetAt (0x00a642a0, nitstringmap.inl) calls KeyToHashIndex/IsKeysEqual as slots 2/3,
-                      # the exe's layout, on a native vtable in GCC's (D1/D0 at 0/1): slot 3 runs FUN_00e93470 with
-                      # SetAt's arguments and strlen(0) faults (S2c: one slot layout per exe class, s5-002 item 4).
-                      # The creators are the D3D shader-program loaders, which the native renderer does not use
+                      # the decomp binds its map's SetAt to another instantiation, 0x00a642a0 (the exe calls 0x00e93d80;
+                      # reports/s5-traps: S1-refs), whose slots 2/3 on this map's vtable run FUN_00e93470 with SetAt's
+                      # arguments: strlen(0). The creators are the D3D shader-program loaders; the native renderer's
+                      # translated path identifies programs by the hooked device instead
