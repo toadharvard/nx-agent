@@ -75,4 +75,6 @@ Prepared trees get `msvc/fnvnx_*.h` (MSVC meanings of the fnv-nx shim headers: t
 the stand-in `<windows.h>` with WIN32_LEAN_AND_MEAN) and `/FI msvc/fnvnx_equiv_compat.h`; both sides get
 `/FI msvc/fnvnx_equiv_fi.h` (macros only). A prepared tree's own build/units.json (S1b renames) is used where the
 pristine name of a function is not in its object. `fnvnx_equiv_unaw.h` is generated from the SDK in use into
-`~/.cache/fnvnx-equiv/` (never committed).
+`~/.cache/fnvnx-equiv/` (never committed). Prepared trees also get `/I ~/.cache/fnvnx-equiv/cmath-<port>/`, an include
+root holding only a copy of `shim/include/fnvnx_cmath/` (DECL1's one-function C math headers; each has an `_MSC_VER`
+branch), kept equal to the shim on every build: the rest of shim/include must not shadow MSVC's headers.

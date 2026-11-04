@@ -27,6 +27,11 @@ check(all(r[3] in ('neutral', 'layout', 'platform') for r in table),
       'unclassified rules: %s (add them to CLASSES in tools/equiv/equiv.py and docs/EQUIVALENCE.md)'
       % [r[0] for r in table if r[3] not in ('neutral', 'layout', 'platform')])
 check(len(set(ids)) == len(ids), 'duplicate rule ids')
+# a stream module's POST hook edits the prepared tree too: the gate must know which rule it is (a hook it does not
+# know runs always and fails `equiv.py prepare`'s allow-list check, as BIND1 did on every farm)
+hooks = {h.__name__ for h in eq.load_prepare().STREAM_POST}
+check(hooks <= set(eq.POST_RULES), 'POST hooks without a rule in POST_RULES (tools/equiv/equiv.py): %s'
+      % sorted(hooks - set(eq.POST_RULES)))
 check(len({r[1] for r in table}) == len(table), 'duplicate rule function names (FNVNX_PREPARE_SKIP selects by name)')
 check(not set(eq.CLASSES) - set(ids), 'classified ids that no rule has: %s' % sorted(set(eq.CLASSES) - set(ids)))
 doc = (EQ.parent.parent.parent / 'docs' / 'EQUIVALENCE.md').read_text()
@@ -108,6 +113,24 @@ m = mr.merge([r1, r2, r3])
 check('(2 of 3 shards)' in m and '- units: 7 compared; 4 identical, 2 differ, 1 prepared' in m
       and '| EXC1 | 4 | 0 | 0 | 0 | 4 |' in m and '| ENUM1 | 0 | 0 | 2 | 1 | 3 |' in m
       and 'shards without a report: 3' in m and 'eq3: FAILED - `FileNotFoundError: x`' in m, 'merge_reports: %s' % m)
+
+# 7. DECL1's fnvnx_cmath/ headers reach MSVC (prepared trees get /I cmath_dir()): the include root holds exactly the
+#    shim's headers, byte for byte, and nothing else of shim/include; each has the MSVC declaration
+os.environ['XDG_CACHE_HOME'] = str(OUT / 'cache')
+shim = eq.CMATH
+names = sorted(f.name for f in shim.glob('*.h'))
+check(len(names) > 20, 'shim/include/fnvnx_cmath: %d headers' % len(names))
+d = eq.cmath_dir()
+(d / 'fnvnx_cmath' / 'stale.h').write_text('x')
+(d / 'fnvnx_cmath' / names[0]).write_text('old')
+d = eq.cmath_dir()
+check([p.name for p in d.iterdir()] == ['fnvnx_cmath'], 'cmath root holds only fnvnx_cmath/: %s' % list(d.iterdir()))
+check(sorted(f.name for f in (d / 'fnvnx_cmath').iterdir()) == names
+      and all((d / 'fnvnx_cmath' / n).read_bytes() == (shim / n).read_bytes() for n in names), 'cmath copy in sync')
+for n in names:
+    t = (shim / n).read_text()
+    if not ('defined(_MSC_VER)' in t and '__cdecl %s(' % n[:-2] in t):
+        check(False, 'fnvnx_cmath/%s: no MSVC (_MSC_VER, __cdecl) declaration' % n)
 
 print('test_equiv: %d failures' % len(fails))
 sys.exit(1 if fails else 0)

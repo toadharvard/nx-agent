@@ -31,14 +31,28 @@
 # addresses, short diagnostics.
 # Environment: FARM_HOME (~/fnvnx-farm), JOBS (nproc), NICE (10), EQUIV_RULES, ARTIFACTS ($FARM_HOME/artifacts-equiv);
 # EQUIV_PRISTINE_DIR=<dir with obj/u<i>.obj> uses a local pristine build and touches no artifacts.
-set -euo pipefail
+# A failure prints its reason on stdout (the farm runner reports only its log tail): the step, the command, the exit
+# status and the last lines of that step's log ($FARM_HOME/logs/, $FARM_HOME/equiv-<commit12>/).
+set -eEuo pipefail
+STEP=start; STEP_LOG=
+step() { STEP=$1; STEP_LOG=${2:-}; }    # names the running step and its log for fail()
+fail() {
+  trap - ERR
+  echo "equiv_job: FAILED in step '$STEP' (exit $1, line $2): $3"
+  if [ -n "$STEP_LOG" ] && [ -s "$STEP_LOG" ]; then
+    echo "equiv_job: last lines of $STEP_LOG:"; tail -n 40 "$STEP_LOG" | cut -c1-400
+  fi
+  exit "$1"
+}
+trap 'fail $? $LINENO "$BASH_COMMAND"' ERR
 REPO=$(cd "$(dirname "$0")/../../../.." && pwd)
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
 ARTIFACTS=${ARTIFACTS:-$FARM_HOME/artifacts-equiv}
 JOBS=${JOBS:-$(nproc)}; NICE=${NICE:-10}
 RULES=${EQUIV_RULES:-neutral,FTOL1,STL1,STD1,ANON1,ANON2}
 EXT=$FARM_HOME/ext
-mkdir -p "$FARM_HOME"
+LOGS=$FARM_HOME/logs
+mkdir -p "$FARM_HOME" "$LOGS"
 artifacts() {   # refs are fetched one by one: the repository also holds every link shard
   if [ ! -d "$ARTIFACTS/.git" ]; then
     git init -q "$ARTIFACTS"; git -C "$ARTIFACTS" remote add origin https://github.com/toadharvard/fnv-nx-build
@@ -56,7 +70,7 @@ publish() {  # <dir> <branch> <message>: commit the dir's content as the branch'
     && parent=(-p "refs/remotes/origin/$br")
   commit=$(git -C "$ARTIFACTS" -c user.name=fnv-nx-farm -c user.email=farm@invalid commit-tree "$tree" "${parent[@]}" -m "$msg")
   for i in 1 2 3; do git -C "$ARTIFACTS" push -q -f origin "$commit:refs/heads/$br" 2>/dev/null && return 0; sleep $((i * 5)); done
-  echo "equiv_job: push of $br failed" >&2; return 1
+  echo "equiv_job: push of $br failed (continuing)"; return 1
 }
 fetch_ref() {  # <branch> -> local ref name, or fail
   git -C "$ARTIFACTS" fetch -q origin "+refs/heads/$1:refs/remotes/origin/$1" 2>/dev/null && echo "refs/remotes/origin/$1"
@@ -79,7 +93,9 @@ compilers() {  # <port dir>: step 1; exports FNV_MSVC9_ROOT, FNV_MSVC9_RTM_ROOT,
         && touch "$FARM_HOME/msvc9/toolchain.remote"
     fi
   fi
-  envline=$(bash "$1/tools/equiv/setup_msvc.sh" "$FARM_HOME/msvc9" | tail -1)
+  step compilers "$LOGS/setup_msvc.log"
+  bash "$1/tools/equiv/setup_msvc.sh" "$FARM_HOME/msvc9" > "$STEP_LOG" 2>&1
+  envline=$(tail -1 "$STEP_LOG")
   eval "$envline"
   export FNV_MSVC9_ROOT FNV_MSVC9_RTM_ROOT FNV_MSVC9_PREFIX WINEDEBUG=-all
   if [ -z "${EQUIV_PRISTINE_DIR:-}" ] && [ ! -f "$FARM_HOME/msvc9/toolchain.remote" ]; then
@@ -118,9 +134,11 @@ fi
 COMMIT=${1:?commit}; K=${2:?k}; N=${3:?N}; REPORT=${4:?report.md}
 C12=${COMMIT:0:12}
 SRC=$FARM_HOME/src-$C12
-[ -d "$SRC" ] || git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" >/dev/null
+step checkout "$LOGS/checkout.log"
+if [ ! -d "$SRC" ]; then git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" > "$STEP_LOG" 2>&1; fi
 P=$SRC/ports/fnv-nx
-bash "$P/tools/fetch.sh" "$EXT" >/dev/null
+step fetch "$LOGS/fetch.log"
+bash "$P/tools/fetch.sh" "$EXT" > "$STEP_LOG" 2>&1
 DECOMP=$EXT/fnv_decomp
 D12=$(git -C "$DECOMP" rev-parse HEAD | cut -c1-12)
 t0=$(date +%s)
@@ -130,6 +148,7 @@ compilers "$P"
 EQ=(nice -n "$NICE" python3 "$P/tools/equiv/equiv.py")
 
 # 2. pristine objects of this shard
+step pristine "$LOGS/pristine.log"; : > "$STEP_LOG"
 PR=${EQUIV_PRISTINE_DIR:-$FARM_HOME/pristine-$D12}; mkdir -p "$PR/obj"
 SHARD=shard:$K/$N
 python3 -c 'import json,sys,zlib
@@ -143,14 +162,16 @@ have_all() {   # the objects of this shard are there (units that failed in prist
   for i in "${MINE[@]}"; do [ -f "$PR/obj/u$i.obj" ] || return 1; done   # MINE leaves out the vc8 unit
 }
 if [ -n "${EQUIV_PRISTINE_DIR:-}" ]; then
-  have_all || { echo "equiv_job: $PR lacks units of shard $K/$N" >&2; exit 1; }
+  have_all || { echo "equiv_job: FAILED in step 'pristine': $PR lacks units of shard $K/$N"; exit 1; }
 elif ! have_all; then
   artifacts
   if ref=$(fetch_ref "msvc/pristine/$D12"); then
-    git -C "$ARTIFACTS" archive "$ref" obj | tar -x -C "$PR"; touch "$PR/full.done"
+    git -C "$ARTIFACTS" archive "$ref" obj 2>> "$STEP_LOG" | tar -x -C "$PR" 2>> "$STEP_LOG"; touch "$PR/full.done"
   elif ref=$(fetch_ref "msvc/pristine-part/$D12/${K}of$N"); then
-    git -C "$ARTIFACTS" archive "$ref" obj | tar -x -C "$PR"; touch "$PR/part-$K-of-$N.done"
+    git -C "$ARTIFACTS" archive "$ref" obj 2>> "$STEP_LOG" | tar -x -C "$PR" 2>> "$STEP_LOG"
+    touch "$PR/part-$K-of-$N.done"
   else
+    step pristine-build "$PR/build-$K-of-$N.log"
     "${EQ[@]}" build "$DECOMP" "$DECOMP" --out "$PR/rows-$K-of-$N.jsonl" --units "$SHARD" --objdir "$PR/obj" \
       --jobs "$JOBS" > "$PR/build-$K-of-$N.log" 2>&1
     PART=$FARM_HOME/stage-part-$K-of-$N; rm -rf "$PART"; mkdir -p "$PART/obj"
@@ -161,6 +182,7 @@ elif ! have_all; then
   fi
 fi
 # every part there and no full branch yet: assemble it once
+step pristine-assemble "$LOGS/pristine.log"
 if [ -z "${EQUIV_PRISTINE_DIR:-}" ] && ! remote_has "msvc/pristine/$D12"; then
   parts=$(git -C "$ARTIFACTS" ls-remote origin "refs/heads/msvc/pristine-part/$D12/*of$N" | wc -l)
   if [ "$parts" = "$N" ]; then
@@ -178,32 +200,41 @@ fi
 t1=$(date +%s)
 
 # 3. prepared tree, shard build, comparison
-for d in "$FARM_HOME"/equiv-*; do [ -d "$d" ] && [ "${d##*/equiv-}" != "$C12" ] && rm -rf "$d/tree"; done
+for d in "$FARM_HOME"/equiv-*; do
+  if [ -d "$d" ] && [ "${d##*/equiv-}" != "$C12" ]; then rm -rf "$d/tree"; fi
+done
 W=$FARM_HOME/equiv-$C12; WK=$W/$K-of-$N; mkdir -p "$WK"
+step prepare "$W/prepare.log"
 if [ ! -f "$W/tree.done" ]; then
-  rm -rf "$W/tree"; "${EQ[@]}" prepare "$DECOMP" "$W/tree" --rules "$RULES" > "$W/prepare.log" 2>&1; touch "$W/tree.done"
+  rm -rf "$W/tree"; "${EQ[@]}" prepare "$DECOMP" "$W/tree" --rules "$RULES" > "$STEP_LOG" 2>&1; touch "$W/tree.done"
 fi
 # the pristine rows from the objects (a published branch may carry no rows.jsonl; a unit without an object failed)
-"${EQ[@]}" refp "$DECOMP" - "$PR/obj" --units "$SHARD" --out "$WK/base.jsonl" > /dev/null
-"${EQ[@]}" build "$DECOMP" "$W/tree" --out "$WK/head.jsonl" --units "$SHARD" --objdir "$WK/obj" --jobs "$JOBS" > "$WK/build.log" 2>&1
-"${EQ[@]}" compare "$WK/base.jsonl" "$WK/head.jsonl" --out "$WK/cmp.json" > /dev/null
+step refp "$WK/refp.log"
+"${EQ[@]}" refp "$DECOMP" - "$PR/obj" --units "$SHARD" --out "$WK/base.jsonl" > "$STEP_LOG" 2>&1
+step build "$WK/build.log"
+"${EQ[@]}" build "$DECOMP" "$W/tree" --out "$WK/head.jsonl" --units "$SHARD" --objdir "$WK/obj" --jobs "$JOBS" > "$STEP_LOG" 2>&1
+step compare "$WK/compare.log"
+"${EQ[@]}" compare "$WK/base.jsonl" "$WK/head.jsonl" --out "$WK/cmp.json" > "$STEP_LOG" 2>&1
 python3 -c 'import json,sys
 d=json.load(open(sys.argv[1]))["units"]
 json.dump(dict(units=sorted(int(k) for k,v in d.items() if v["status"]=="differs")), open(sys.argv[2],"w"))' "$WK/cmp.json" "$WK/differ.json"
 t2=$(date +%s)
 
 # EH-only: the differing units without C++ exception handling on both sides
-"${EQ[@]}" build "$DECOMP" "$DECOMP" --out "$WK/eh_base.jsonl" --units "$WK/differ.json" --eh-off --jobs "$JOBS" > /dev/null 2>&1
-"${EQ[@]}" build "$DECOMP" "$W/tree" --out "$WK/eh_head.jsonl" --units "$WK/differ.json" --eh-off --jobs "$JOBS" > /dev/null 2>&1
+step eh-off "$WK/eh.log"
+"${EQ[@]}" build "$DECOMP" "$DECOMP" --out "$WK/eh_base.jsonl" --units "$WK/differ.json" --eh-off --jobs "$JOBS" > "$STEP_LOG" 2>&1
+"${EQ[@]}" build "$DECOMP" "$W/tree" --out "$WK/eh_head.jsonl" --units "$WK/differ.json" --eh-off --jobs "$JOBS" >> "$STEP_LOG" 2>&1
 # attribution by rule
+step attribute "$WK/attr.log"
 "${EQ[@]}" attribute "$DECOMP" "$W/tree" "$WK/base.jsonl" "$WK/head.jsonl" --rules "$RULES" --out "$WK/attr.jsonl" \
-  --failed --hier --default-groups --units "$SHARD" --workdir "$WK" --jobs "$JOBS" > "$WK/attr.log" 2>&1
+  --failed --hier --default-groups --units "$SHARD" --workdir "$WK" --jobs "$JOBS" > "$STEP_LOG" 2>&1
 t3=$(date +%s)
 
 # 4. report
+step report "$WK/report.log"
 mkdir -p "$(dirname "$REPORT")"
 "${EQ[@]}" report "$WK/base.jsonl" "$WK/head.jsonl" --attr "$WK/attr.jsonl" --eh "$WK/eh_base.jsonl" "$WK/eh_head.jsonl" \
-  --title "$C12 shard $K/$N" --out "$REPORT" > /dev/null
+  --title "$C12 shard $K/$N" --out "$REPORT" > "$STEP_LOG" 2>&1
 {
   echo
   echo "## Run"

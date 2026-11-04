@@ -40,6 +40,7 @@ PORT = HERE.parent.parent
 SHIM = HERE / 'msvc'
 FORCE_INCLUDE = SHIM / 'fnvnx_equiv_fi.h'          # both sides
 COMPAT_INCLUDE = SHIM / 'fnvnx_equiv_compat.h'  # prepared trees only (stands in for fnvnx_compat.h)
+CMATH = PORT / 'shim/include/fnvnx_cmath'           # DECL1's one-function C math headers (an _MSC_VER branch each)
 
 # ---------------------------------------------------------------------------------------------------------- rules
 
@@ -92,8 +93,15 @@ CLASSES = {
     'NEW4': 'neutral',          # adds <new> where placement new is used
     'ALLOC1': 'platform',       # drops untagged TU-local replacements of the global operator new/delete
     'FTOL1': 'platform',        # fnvnx_ftol2(expr): neutral with #define fnvnx_ftol2(x) ((__int64)(x)) under MSVC
+    'BIND1': 'neutral',         # POST hook: units.json binds a stand-in member the unit uses to the exe's address
 }
-PSEUDO = {'NATIVE1': 'drop_native_units'}
+# rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
+PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
+# POST hooks (prepare.STREAM_POST, by function name) -> the rule (or 's1b': S1b's units.json renames, which belong to
+# its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
+# stats then fail the allow-list check until they are classified here)
+POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b'}
+S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
 # Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
 # group; a group that explains a difference is split into its rules. KEEP1 is inert under MSVC (FNVNX_KEEP is empty)
@@ -102,7 +110,7 @@ DEFAULT_GROUPS = {
     'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1',
     'newdel': 'NEW1 NEW2 NEW3 NEW4 CTOR1',
     'EXC1': 'EXC1',
-    'link': 'LINK1 STATIC1',
+    'link': 'LINK1 STATIC1 BIND1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
     'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
     'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RCAST1 GOTO1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
@@ -129,6 +137,12 @@ def rule_table():
                     doc.split('\n')[0]))
     out.append(('NATIVE1', PSEUDO['NATIVE1'], 'prepare', CLASSES['NATIVE1'], 'units in render/native/drop_units.txt '
                 'leave build/units.json'))
+    hooks = {h.__name__: h for h in prepare.STREAM_POST}
+    for rid, name in PSEUDO.items():
+        if name in hooks:
+            doc = (hooks[name].__doc__ or '').strip()
+            out.append((rid, name, hooks[name].__module__.replace('fnvnx_rules_', 'rules/'), CLASSES.get(rid, '?'),
+                        doc.split('\n')[0]))
     return out
 
 
@@ -162,14 +176,20 @@ def cmd_prepare(a):
     prepare = load_prepare()
     if 'NATIVE1' not in allow:
         prepare.drop_native_units = lambda *args, **kw: None
-    if not allow & {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}:     # S1b's units.json renames belong to its patches
-        load_stream = prepare.load_stream_rules
+    load_stream = prepare.load_stream_rules
 
-        def no_post():
-            rules = load_stream()
-            prepare.STREAM_POST[:] = []
-            return rules
-        prepare.load_stream_rules = no_post
+    def allowed_post():     # POST hooks of allowed rules only, each once (every load appends the modules' hooks)
+        rules = load_stream()
+        keep, seen = [], set()
+        for h in prepare.STREAM_POST:
+            rid, key = POST_RULES.get(h.__name__), (h.__module__, h.__name__)
+            if key in seen or rid == 's1b' and not allow & S1B or rid not in (None, 's1b') and rid not in allow:
+                continue
+            seen.add(key)
+            keep.append(h)
+        prepare.STREAM_POST[:] = keep
+        return rules
+    prepare.load_stream_rules = allowed_post
     os.environ['FNVNX_PREPARE_SKIP'] = ','.join(skip)
     out = Path(a.out)
     if out.exists():
@@ -184,9 +204,8 @@ def cmd_prepare(a):
     stats = (out / 'prepare_stats.tsv').read_text().split('\n')
     edited = {l.split('\t')[0] for l in stats if l.strip() and not l.split('\t')[2].startswith('0 ')}
     # counters that belong to a rule (ASM3 to ASM2/ASM4, <RULE>-MISS / -LEFT, S1b's units.json renames)
-    s1b = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
     own = {k for k in edited if k.split('-')[0] in allow or k == 'ASM3' and allow & {'ASM2', 'ASM4'}
-           or k.startswith('UNITS-') and allow & s1b}
+           or k.startswith('UNITS-') and allow & S1B}
     stray = sorted(edited - allow - own)
     if stray:
         raise SystemExit('equiv.py: rules outside the allow-list edited the tree: %s' % ', '.join(stray))
@@ -396,6 +415,31 @@ def gen_dir():
     return d
 
 
+_cmath_lock = threading.Lock()
+
+
+def cmath_dir():
+    """An include root that holds only the shim's fnvnx_cmath/ (DECL1 includes "fnvnx_cmath/floor.h" in place of a
+    dropped C math prototype; each header has an _MSC_VER branch): the rest of shim/include must not shadow MSVC's
+    CRT / SDK headers. A copy of the port's directory, kept equal to it (per port checkout, files replaced
+    atomically)."""
+    with _cmath_lock:
+        d = gen_dir() / ('cmath-' + hashlib.sha1(str(PORT).encode()).hexdigest()[:12])
+        dst = d / 'fnvnx_cmath'
+        dst.mkdir(parents=True, exist_ok=True)
+        want = {f.name: f.read_bytes() for f in CMATH.glob('*.h')} if CMATH.is_dir() else {}
+        for f in dst.iterdir():
+            if f.name not in want:
+                f.unlink()
+        for name, data in want.items():
+            t = dst / name
+            if not t.exists() or t.read_bytes() != data:
+                tmp = dst / ('.%s.%d' % (name, os.getpid()))
+                tmp.write_bytes(data)
+                os.replace(tmp, t)
+        return d
+
+
 LAYOUT_LINE = re.compile(r'^\s*(\d*)\s*((?:\|\s*)+)(.*)$')   # on normalized lines: '20|name', '|+--- (base class X)'
 
 
@@ -459,7 +503,7 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
         flags = [f for f in flags if not f.upper().startswith('/EH')] + ['/EHs-c-']
     args += flags + ([] if plain else ['/I' + str(SHIM), '/I' + str(gen_dir()), '/FI', str(FORCE_INCLUDE)])
     if not plain and (tree / 'equiv_rules.txt').exists():      # a tree from `equiv.py prepare`
-        args += ['/FI', str(COMPAT_INCLUDE)] + (['/DFNVNX_EQUIV_LEAN=1'] if lean else [])
+        args += ['/I' + str(cmath_dir()), '/FI', str(COMPAT_INCLUDE)] + (['/DFNVNX_EQUIV_LEAN=1'] if lean else [])
     if layout:      # /w: no diagnostics interleaved with the report (no effect on code)
         args += ['/d1reportAllClassLayout', '/w']
     args += ['/I' + str(tree / 'include'), str(tree / unit['source']), '/Fo' + str(obj)]
