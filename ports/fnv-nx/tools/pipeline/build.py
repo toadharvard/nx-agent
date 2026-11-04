@@ -1019,7 +1019,7 @@ class Census(Stage):
                     'cat "$c.log"; echo $rc > "$c.done"; exit $rc\n' % (
                         shlex.quote(cache), ' '.join(shlex.quote(x) for x in shlex.split(game_cxx(b)))))
         os.chmod(wrapper, 0o755)
-        b.say('census: -fsyntax-only of %s (%s; %d results kept from an interrupted run)' % (
+        b.say('census: -fsyntax-only of %s (%s; %d unit results already in the census cache)' % (
             'the UNITS subset' if b.cfg['UNITS'] else 'every unit', os.path.basename(game_cxx(b)), done))
         r.metric('census_resumed_units', done)
         tree = b.art('prepare', 'tree')
@@ -1512,7 +1512,7 @@ class Link(Stage):
             f.write('decomp %s; tree %s (%s); linked with port %s\n' % (
                 pf.get('decomp_commit') or 'unknown', pf.get('tree'), pf.get('mode'), b.head or 'unknown'))
             f.write(''.join(open(os.path.join(out, 'stats.txt')).readlines()[:3]))
-            f.write(ctext.strip() + '\n')
+            f.write(''.join(l + '\n' for l in ctext.splitlines() if l.strip() and not l.startswith(('$ ', '[exit'))))
             if mm:
                 f.write(mm.group(0) + '\n')
         for k in ('aliases.ld', 'addrmap.tsv', 'refs.tsv', 'abi.tsv', 'stats.txt', 'bridges.S'):
