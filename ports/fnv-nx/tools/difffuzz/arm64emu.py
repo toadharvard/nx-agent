@@ -67,6 +67,9 @@ class Arm64Engine:
                     uc.mem_map(p, PAGE, UC_PROT_ALL)
                     self.mapped.add(p)
             uc.mem_write(base, data)
+        uc.mem_map(a64image.STACK_GUARD, PAGE, UC_PROT_READ)
+        uc.mem_write(a64image.STACK_GUARD, struct.pack('<Q', 0x5ca1ab1e0ddba11))
+        self.mapped.add(a64image.STACK_GUARD)
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._on_unmapped)
         uc.hook_add(UC_HOOK_INTR, self._on_intr)
         self._fault = None

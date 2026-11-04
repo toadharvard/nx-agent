@@ -28,7 +28,8 @@ A64_BASE = 0x0A000000
 CODE_STUB = 0x08000000        # + original code address (0x00400000..0x00fdf000)
 NAMED_STUB = 0x09000000       # + 16 * k
 NAMED_STUB_MAX = 0x00800000 // 16
-LINK_VERSION = 3              # bump when the stub/alias rules change (invalidates cached unit images)
+STACK_GUARD = 0x0b800000      # page holding the stack protector canary (mapped by the AArch64 engine)
+LINK_VERSION = 4              # bump when the stub/alias rules change (invalidates cached unit images)
 ADDR_SYM = re.compile(r'^__fnv_([0-9a-f]{8})(?:_(C[0-9]|D[0-9]))?$')
 LAYOUT = """
 SECTIONS {
@@ -158,6 +159,9 @@ def build_many(sources, linkdir, workdir, name):
     stubs, k = {}, 0
     info = dict(code_stubs=0, named_stubs=0, data_abs=0)
     for n in sorted(undef - defined):
+        if n == '__stack_chk_guard':          # -fstack-protector (distribution GCC default): a real canary word
+            lines.append('%s = 0x%08x;' % (n, STACK_GUARD))
+            continue
         m = ADDR_SYM.match(n)
         if m and not m.group(2):
             a = int(m.group(1), 16)
