@@ -53,6 +53,12 @@ if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/incl
 fi
 job_sources "$REPO"
 F=$FARM_HOME/full; mkdir -p "$F"
+# the reconstructed bodies (D20, branches recon/*) for S1-refs' rule REC1, exported for every prepare this job runs
+# (link_job.sh and make's prepare stage when no farm tree is adopted); none is not an error
+# shellcheck source=recon.sh
+. "$HERE/recon.sh"
+fetch_recon "$ARTIFACTS" "$F/recon"
+log "recon: $RECON_NOTE"
 
 # 1. The toolchain, shared by the commits that build it the same way.
 TCID=$(cat "$P"/toolchain/sources.sh "$P"/toolchain/gcc/build.sh "$P"/toolchain/devkita64/* "$P"/toolchain/cross/* \

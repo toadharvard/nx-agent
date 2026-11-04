@@ -18,6 +18,11 @@ CONVERGENCE (owner rule):
 - Every commit body states `metric: <before> -> <after>`.
 - Each commit must reduce the metric, or be a named prerequisite that says which reduction it enables.
 - Never trade one error class for an unmeasured one. Run tests/s1 and tests/s11 whenever you touch rules, and always run your stream's tests.
+- Coverage first, then optimization (owner). Close a problem as a class with one general mechanism that covers every
+  instance (all families, all units, all slots, all services) before you tune any single instance. Example for
+  render: every program draws correctly through the general path (Translated + correct D3D9 state emulation),
+  skipped draws = 0 and the scenes match the captures; only then hand-written GLSL and GPU tuning, family by family.
+  A one-off fix for one instance is acceptable only when no class exists, and the commit says so.
 - When your queue is empty, take the largest remaining bucket of your metric.
 - Targets: 60 fps at 720p handheld, at the 1.02 GHz retail CPU clock; parity with the original game, both in translation (fuzz/equivalence) and in rendering.
 
