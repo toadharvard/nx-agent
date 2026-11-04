@@ -230,6 +230,48 @@ Object layouts of replaced classes stay the decomp's (the 3,171 `static_assert`s
 reads fields directly (e.g. `BSShaderProperty` subclasses read renderer/shader-manager globals; `fallout` reads
 `NiDX9Renderer` fields for the screen size). New state goes in side structures reached from one reused pointer field.
 
+### 2.4 The N1 menu path as wired (round 5)
+
+What the native build replaces for the main menu, all rows in `render/native/overrides.tsv` (slots checked against
+the image vftables, §R2), code in `render/native/n1/`:
+
+* **Frame, targets, camera:** `NiDX9Renderer` slots 95, 96, 98-102 and the Present at 0x00e7ccd0 (`engine_stubs.cpp`
+  -> `nx::Renderer`). Slot 97 (`Do_DisplayFrame`, deferred releases) stays the engine's.
+* **Geometry:** slots 107/108 (one function, 0x00e744b0) -> `engine::ReadGeometry` -> `Renderer::RenderGeometry`.
+  The engine's shader pipeline for the draw (TileShader pass setup, constant maps) is not reached; the draw uses the
+  tile family with what the geometry's properties say:
+  * NiPropertyState at geometry +0x9C: NiAlphaProperty (+0x9C; flags: blend, src/dst function, alpha test and its
+    function, ref) -> D3D9 ALPHABLENDENABLE / SRCBLEND / DESTBLEND / ALPHATESTENABLE / ALPHAFUNC / ALPHAREF for that
+    draw (restored after it); NiMaterialProperty (+0xA4) alpha; the shader property (+0xA8) as a
+    TileShaderProperty: texture +0x60, tint rgb +0x68, alpha +0x78 -> tint = (rgb, alpha x material alpha);
+  * texture: TileShaderProperty texture -> NiTexture renderer data (+0x24) -> the NativeTexture pointer in it
+    (found by scanning the renderer data's dwords for a live NativeTexture, so its field offset is not needed);
+    without one, the state tracker's stage 0, else a white texel.
+* **Textures:** `NiDX9SourceTextureData::LoadFromFilename` (0x00e68a80) stays; the two D3DX calls it makes are
+  replaced (`engine_textures.cpp`): `D3DXGetImageInfoFromFileInMemory` (0x00ee6e22) answers from the DDS header,
+  `D3DXCreateTextureFromFileInMemory` (0x00ee6e1c) creates the native image (`ParseDDS`, `nx_d3d9_format`,
+  NXFMT_CONVERT expansion) and returns a **NativeTexture**: an object laid out as an IDirect3DTexture9 (22-slot
+  method table: AddRef/Release, GetType, GetLevelCount, GetLevelDesc, LOD; LockRect and GetSurfaceLevel refuse, the
+  native path has no CPU access). The engine stores it as its D3D texture. Cube and volume textures (0x00ee6e16,
+  0x00ee6e10) are not replaced yet (menus do not use them).
+* **State cache:** NiDX9RenderState set/get of render and sampler states, the blend setters, and texture binding
+  (slots 55-57: SetTexture / GetTexture / ClearTextureUsage) -> `nx::StateTracker`.
+* **Shader construction:** TileShader CreateVertexShaders / CreatePixelShaders / CreateConstantMaps and
+  BSShaderNoLighting::InitializeShaderData are no-ops.
+* **Menu background:** the effect itself is native (`Renderer::RenderMenuBackground`, family `menubg`: scene
+  luminance through the tone texture `sepia.dds`, mixed by the effect's constant, output alpha) and matches the
+  game's ISMENUBG shader formula (checked locally against the S6b translation of the user's shader package: 63 of
+  64 pixels within 2/255, one at a tone-texel boundary). Its row (0x00c04730, ImageSpaceEffectMenuBackground::Setup)
+  stays pending: the image-space manager's effect dispatch is the next seam to override, after which Setup can
+  hand the sepia texture to the native effect.
+* **Not native yet:** skinned geometry, texture scrolling (TileShaderProperty +0x7C..), the tile scissor rect and
+  stencil flags (+0x9C, NiStencilProperty), fonts if they are not tile geometry, the image-space chain.
+
+Tested on GL and as the ILP32 guest by the N1 self-test (76 checks): a synthetic menu of three tiles built in
+engine layout (checker-textured background, a green button at material alpha 0.5 blended with SRCALPHA, an
+alpha-tested text tile) rendered only through the stubs, with textures created through the D3DX overrides, plus
+the menu-background effect over a rendered target.
+
 ## 3. Native renderer design on deko3d
 
 ### 3.1 Memory and the ILP32 boundary

@@ -29,6 +29,12 @@
 00e88830	_ZN2nx6engine16NiDX9RenderState19SetAlphaBlendEnableEmmm	thiscall(this, enable, unused, unused): ALPHABLENDENABLE; vft=NiDX9RenderState:24
 00e88930	_ZN2nx6engine16NiDX9RenderState15SetSamplerStateEmmmm	thiscall(this, stage, type, value, unused); vft=NiDX9RenderState:48
 00e88980	_ZN2nx6engine16NiDX9RenderState15GetSamplerStateEmm	thiscall(this, stage, type) -> value; vft=NiDX9RenderState:49
+00e88a20	_ZN2nx6engine16NiDX9RenderState10SetTextureEmPv	thiscall(this, stage, IDirect3DBaseTexture9*): a NativeTexture -> its image on the tracker stage; vft=NiDX9RenderState:55
+00e88a50	_ZN2nx6engine16NiDX9RenderState10GetTextureEm	thiscall(this, stage) -> texture; vft=NiDX9RenderState:56
+00e88a60	_ZN2nx6engine16NiDX9RenderState17ClearTextureUsageEPv	thiscall(this, texture): unbinds it from every stage; vft=NiDX9RenderState:57
+# ---- engine textures: the D3DX calls of NiDX9SourceTextureData::LoadFromFilename (0x00e68a80) -> NativeTexture ----
+00ee6e22	_ZN2nx6engine32D3DXGetImageInfoFromFileInMemoryEPKvmPm	stdcall(data, size, D3DXIMAGE_INFO*) -> HRESULT: from the DDS header (ParseDDS)
+00ee6e1c	_ZN2nx6engine33D3DXCreateTextureFromFileInMemoryEPvPKvmPS1_	stdcall(device, data, size, IDirect3DTexture9**) -> HRESULT: native image + NativeTexture (n1/engine_textures.cpp)
 # ---- TileShader / BSShaderNoLighting: no HLSL compile or constant maps natively (Do_RenderGeometry draws the tile family) ----
 00bca0d0	_ZN2nx6engine10TileShader19CreateVertexShadersEv	thiscall: no-op; vft=TileShader:80
 00bca240	_ZN2nx6engine10TileShader18CreatePixelShadersEv	thiscall: no-op; vft=TileShader:81
@@ -39,4 +45,4 @@
 00bca980	_ZN2nx10TileFamily12UpdateMaterialEPKv	thiscall(TileShaderS*, const NiPropertyState*); vft=TileShader:31; N1-pending (unreached)
 00bc9a50	_ZN2nx13NoLightFamily17PrepareShaderPassEPKv	thiscall(BSShaderNoLighting*, const NiPropertyState*); N1-pending (unreached)
 # ---- image space: menu background (needs the image-space path, N1b) ----
-00c04730	_ZN2nx9ImageSpace12MenuBgSetupEPvS1_	thiscall(ImageSpaceEffectMenuBackground*, ImageSpaceManager*, ImageSpaceEffectParam*); N1-pending
+00c04730	_ZN2nx9ImageSpace12MenuBgSetupEPvS1_	thiscall(ImageSpaceEffectMenuBackground*, ImageSpaceManager*, ImageSpaceEffectParam*); the native effect is Renderer::RenderMenuBackground (menubg family); N1-pending until the image-space manager's effect dispatch is overridden

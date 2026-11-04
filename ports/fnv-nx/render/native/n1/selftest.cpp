@@ -98,6 +98,11 @@ uint16_t shader(Backend* be, const char* name, uint32_t stage) {
 
 struct TileVtx { float x, y, z, u, v; uint32_t rgba; };
 
+void Samp_point(Renderer& r) {   // stage 0: point filtering, clamp (texel-exact checks)
+    r.state().SetSamplerState(0, 5, 1); r.state().SetSamplerState(0, 6, 1); r.state().SetSamplerState(0, 7, 0);
+    r.state().SetSamplerState(0, 1, 3); r.state().SetSamplerState(0, 2, 3);
+}
+
 uint8_t u8(float v) { v = v < 0 ? 0 : v > 1 ? 1 : v; return (uint8_t)(v * 255.0f + 0.5f); }
 }  // namespace
 
@@ -297,6 +302,123 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     p = px(10, 63); q = px(31, 55);   // y1 = 0.65 * 96 = 62.4 -> rows 48..62; x1 = 32
     const uint8_t* q2 = px(32, 55);
     t.Check(p[0] == 0 && q[0] == 255 && q2[0] == 0, "geometry: shape edges (row 63 and column 32 outside)", p[0], q2[0]);
+
+    // ---- frame 3: a synthetic menu through the stubs, with engine textures (D3DX overrides -> NativeTexture),
+    // TileShaderProperty tint, NiMaterialProperty alpha and NiAlphaProperty blend / alpha test -------------------
+    {
+        static uint8_t eng3[4096] __attribute__((aligned(16)));
+        memset(eng3, 0, sizeof eng3);
+        uintptr_t a0 = (uintptr_t)eng3, a1 = (uintptr_t)engine::NativeTexturePool();
+        engine::SetGuestBase((a0 < a1 ? a0 : a1) - 64);   // below both: no object sits at guest address 0
+        auto ga = [&](const void* q) { return engine::GuestAddress(q); };
+        auto w32 = [&](uint32_t o, uint32_t v) { memcpy(eng3 + o, &v, 4); };
+        auto w16 = [&](uint32_t o, uint16_t v) { memcpy(eng3 + o, &v, 2); };
+        auto wf = [&](uint32_t o, const float* f, int n) { memcpy(eng3 + o, f, 4 * n); };
+        // DDS files (A8R8G8B8): a 2x2 red/blue checker and a 2x2 with alpha 255 left, 0 right (white)
+        static uint8_t dds[2][128 + 16];
+        static const uint32_t texels[2][4] = {{0xFFFF0000u, 0xFF0000FFu, 0xFF0000FFu, 0xFFFF0000u},
+                                              {0xFFFFFFFFu, 0x00FFFFFFu, 0xFFFFFFFFu, 0x00FFFFFFu}};
+        for (int i = 0; i < 2; i++) {
+            uint8_t* f = dds[i];
+            memset(f, 0, 128);
+            const uint32_t hdr[] = {0x20534444u, 124, 0x1007, 2, 2, 8, 0, 1};
+            memcpy(f, hdr, sizeof hdr);
+            const uint32_t pf[] = {32, 0x41, 0, 32, 0xFF0000u, 0xFF00u, 0xFFu, 0xFF000000u, 0x1000};
+            memcpy(f + 76, pf, sizeof pf);
+            memcpy(f + 128, texels[i], 16);
+        }
+        uint32_t info[7] = {};
+        t.Check(engine::D3DXGetImageInfoFromFileInMemory(dds[0], sizeof dds[0], info) == 0 && info[0] == 2 && info[1] == 2 &&
+                info[4] == 21 && info[5] == 3 && info[6] == 4, "D3DX image info from the DDS header");
+        void* tx[2] = {nullptr, nullptr};
+        t.Check(engine::D3DXCreateTextureFromFileInMemory(nullptr, dds[0], sizeof dds[0], &tx[0]) == 0 &&
+                engine::D3DXCreateTextureFromFileInMemory(nullptr, dds[1], sizeof dds[1], &tx[1]) == 0 && tx[0] && tx[1],
+                "D3DX create texture -> NativeTexture");
+        // the IDirect3DTexture9 methods the engine may call, through the method table (slot 13 GetLevelCount,
+        // 17 GetLevelDesc, 1 AddRef, 2 Release)
+        engine::NativeTexture* nt = engine::NativeTextureFromPointer(tx[0]);
+        typedef uint32_t (*Fn0)(void*);
+        typedef int32_t (*FnDesc)(void*, uint32_t, uint32_t*);
+        uint32_t desc[8] = {};
+        t.Check(nt && ((Fn0)nt->vtbl[13])(tx[0]) == 1 && ((FnDesc)nt->vtbl[17])(tx[0], 0, desc) == 0 && desc[0] == 21 &&
+                desc[6] == 2 && desc[7] == 2 && ((Fn0)nt->vtbl[1])(tx[0]) == 2 && ((Fn0)nt->vtbl[2])(tx[0]) == 1,
+                "NativeTexture method table: GetLevelCount, GetLevelDesc, AddRef, Release");
+        // NiTexture (+0x24 renderer data) and renderer data holding the texture pointer at +0x10
+        const uint32_t kTex0 = 3200, kRd0 = 3264, kTex1 = 3328, kRd1 = 3392;
+        w32(kTex0 + 0x24, ga(eng3 + kRd0)); w32(kRd0 + 0x10, ga(tx[0]));
+        w32(kTex1 + 0x24, ga(eng3 + kRd1)); w32(kRd1 + 0x10, ga(tx[1]));
+        auto tile = [&](uint32_t geo, uint32_t data, uint32_t verts, float x0, float y0, float x1, float y1,
+                        uint32_t shp, uint32_t tex, const float tint[4], uint32_t mat, float matAlpha,
+                        uint32_t alp, uint16_t alphaFlags, uint8_t ref) {
+            const float rot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}, one = 1;
+            wf(geo + 0x68, rot, 9); wf(geo + 0x68 + 48, &one, 1);
+            w32(geo + 0xB8, ga(eng3 + data));
+            w16(data + 0x08, 4); w32(data + 0x20, ga(eng3 + verts)); w32(data + 0x2C, ga(eng3 + verts + 48));
+            w16(data + 0x40, 2); w32(data + 0x44, 6); w32(data + 0x48, ga(eng3 + verts + 80));
+            const float pos[12] = {x0, y0, 0.5f, x1, y0, 0.5f, x0, y1, 0.5f, x1, y1, 0.5f};
+            const float uv[8] = {0, 0, 1, 0, 0, 1, 1, 1};
+            wf(verts, pos, 12); wf(verts + 48, uv, 8);
+            const uint16_t list[6] = {0, 1, 2, 2, 1, 3};
+            memcpy(eng3 + verts + 80, list, sizeof list);
+            w32(geo + 0xA8, ga(eng3 + shp)); w32(shp + 0x60, tex ? ga(eng3 + tex) : 0);
+            wf(shp + 0x68, tint, 3); wf(shp + 0x78, &tint[3], 1);
+            if (mat) { w32(geo + 0xA4, ga(eng3 + mat)); wf(mat + 0x3C, &matAlpha, 1); }
+            if (alp) { w32(geo + 0x9C, ga(eng3 + alp)); w16(alp + 0x18, alphaFlags); eng3[alp + 0x1A] = ref; }
+        };
+        const float white[4] = {1, 1, 1, 1}, green[4] = {0, 1, 0, 1};
+        tile(0, 256, 384, 0.0f, 0.0f, 1.0f, 1.0f, 512, kTex0, white, 0, 1, 0, 0, 0);            // background: checker
+        tile(704, 960, 1088, 0.25f, 0.25f, 0.5f, 0.5f, 1216, 0, green, 1376, 0.5f,             // button: green, alpha
+             1440, (uint16_t)(1 | 6 << 1 | 7 << 5), 0);                                           //  0.5, SRCALPHA blend
+        tile(1536, 1792, 1920, 0.5f, 0.75f, 1.0f, 1.0f, 2048, kTex1, white, 0, 1,                // text: alpha test
+             2240, (uint16_t)(1 << 9 | 4 << 10), 128);                                            //  GREATER 128
+        Renderer::GeomView gv3;
+        t.Check(engine::ReadGeometry(eng3 + 0, &gv3) && gv3.image == engine::NativeTextureFromPointer(tx[0])->image,
+                "interop: the tile's NiTexture -> renderer data -> NativeTexture");
+        t.Check(engine::ReadGeometry(eng3 + 704, &gv3) && gv3.hasAlpha && fabsf(gv3.tint[3] - 0.5f) < 1e-6f && gv3.tint[1] == 1,
+                "interop: tint and material alpha, alpha property");
+        r.state().SetTexture(0, 0, kind);
+        ers->SetTexture(0, tx[1]);
+        t.Check(ers->GetTexture(0) == tx[1] && r.state().Texture(0) == engine::NativeTextureFromPointer(tx[1])->image,
+                "stub: SetTexture binds the native image");
+        ers->ClearTextureUsage(tx[1]);
+        t.Check(ers->GetTexture(0) == nullptr && r.state().Texture(0) == 0, "stub: ClearTextureUsage");
+        Samp_point(r);
+        t.Check(eng->Do_BeginFrame(), "frame 3: BeginFrame");
+        r.SetBackgroundColor(0, 0, 0, 1);
+        t.Check(eng->Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "frame 3: BeginUsing");
+        eng->Do_SetScreenSpaceCameraData(nullptr);
+        r.SetEnginePass(757, NxFam_Tile);
+        eng->Do_RenderGeometry(eng3 + 0);
+        eng->Do_RenderGeometry(eng3 + 704);
+        eng->Do_RenderGeometry(eng3 + 1536);
+        r.SetEnginePass(0, NxFam_None);
+        t.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame(), "frame 3: End");
+        t.Check(be->Readback(rb), "frame 3: readback");
+        p = px(16, 12); q = px(80, 12);   // checker 2x2 over 128x96: texel (0,0) red, (1,0) blue
+        t.Check(p[0] == 255 && p[2] == 0 && q[0] == 0 && q[2] == 255, "menu: background texture (checker)", p[0], q[2]);
+        p = px(40, 30);                   // button over the red texel: 0.5 x green + 0.5 x red
+        t.Check(abs(p[0] - 128) <= 1 && abs(p[1] - 128) <= 1 && p[2] == 0, "menu: button tint x material alpha blended", p[0], p[1]);
+        p = px(80, 84); q = px(112, 84);  // text tile: left texel alpha 255 (white), right alpha 0 (discarded: red)
+        t.Check(p[0] == 255 && p[1] == 255 && p[2] == 255 && q[0] == 255 && q[1] == 0 && q[2] == 0,
+                "menu: alpha-tested text tile", p[1], q[1]);
+        t.Check(r.state().GetRenderState(27) == 0 && r.state().GetRenderState(15) == 0, "alpha states restored after the draw");
+
+        // ---- menu background image-space effect over frame 1's menu target: tone 1x1 (200, 100, 50), blend 0.5
+        static const uint32_t toneTexel = 0xFFC86432u;   // ARGB
+        NxImageDesc td2;
+        memset(&td2, 0, sizeof td2);
+        td2.width = 1; td2.height = 1; td2.format = NxFmt_BGRA8; td2.data = FNVNX_ADDR_(&toneTexel); td2.data_size = 4;
+        uint32_t tone = be->ImageCreate(td2);
+        const float luma[3] = {0.299f, 0.587f, 0.114f};
+        t.Check(eng->Do_BeginFrame() && eng->Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "frame 4: begin");
+        t.Check(r.RenderMenuBackground(menu, 21, W, H, tone, 21, luma, 0.5f, 1.0f), "RenderMenuBackground");
+        t.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame(), "frame 4: end");
+        t.Check(be->Readback(rb), "frame 4: readback");
+        p = px(4, 90);   // menu background colour (64, 128, 191) mixed half with the tone
+        t.Check(abs(p[0] - 132) <= 2 && abs(p[1] - 114) <= 2 && abs(p[2] - 121) <= 2, "menubg: scene x tone mix", p[0], p[2]);
+        p = px(40, 60);  // the menu's opaque red quad: (255, 0, 0) -> (228, 50, 25)
+        t.Check(abs(p[0] - 228) <= 2 && abs(p[1] - 50) <= 2 && abs(p[2] - 25) <= 2, "menubg: second sample", p[0], p[1]);
+    }
     *checks = t.checks;
     return t.fails;
 }

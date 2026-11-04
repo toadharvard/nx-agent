@@ -50,6 +50,19 @@ void NiDX9RenderState::SetSamplerState(uint32_t st, uint32_t t, uint32_t v, uint
     if (R()) R()->state().SetSamplerState(st, t, v);
 }
 uint32_t NiDX9RenderState::GetSamplerState(uint32_t st, uint32_t t) { return R() ? R()->state().GetSamplerState(st, t) : 0; }
+static void* g_tex[16];
+void NiDX9RenderState::SetTexture(uint32_t stage, void* texture) {
+    if (stage >= 16 || g_tex[stage] == texture) return;
+    g_tex[stage] = texture;
+    NativeTexture* t = NativeTextureFromPointer(texture);
+    NxD3D9Texture kind = {t ? t->d3dfmt : 0, 0, 0, 0, 0};
+    if (R()) R()->state().SetTexture(stage, t ? t->image : 0, kind);
+}
+void* NiDX9RenderState::GetTexture(uint32_t stage) { return stage < 16 ? g_tex[stage] : nullptr; }
+void NiDX9RenderState::ClearTextureUsage(void* texture) {
+    if (!texture) return;
+    for (uint32_t s = 0; s < 16; s++) if (g_tex[s] == texture) SetTexture(s, nullptr);
+}
 void NiDX9RenderState::RestoreRenderState(uint32_t s) { if (R()) R()->state().RestoreRenderState(s); }
 void NiDX9RenderState::RestoreSamplerState(uint32_t st, uint32_t t) { if (R()) R()->state().RestoreSamplerState(st, t); }
 
@@ -60,8 +73,10 @@ void TileShader::CreateConstantMaps() {}
 void BSShaderNoLighting::InitializeShaderData() {}
 
 // ---- geometry interop ------------------------------------------------------------------------------------------
-static uintptr_t g_guestBase = 0;
+uintptr_t g_guestBase = 0;
 void SetGuestBase(uintptr_t base) { g_guestBase = base; }
+uintptr_t GuestBase() { return g_guestBase; }
+uint32_t GuestAddress(const void* p) { return p ? (uint32_t)((uintptr_t)p - g_guestBase) : 0; }
 
 static inline uint32_t U32(const uint8_t* p, uint32_t o) { uint32_t v; memcpy(&v, p + o, 4); return v; }
 static inline uint16_t U16(const uint8_t* p, uint32_t o) { uint16_t v; memcpy(&v, p + o, 2); return v; }
@@ -72,8 +87,7 @@ bool ReadGeometry(const void* geometry, Renderer::GeomView* out) {
     if (!geo) return false;
     const uint8_t* data = GP(U32(geo, 0xB8));
     if (!data || U32(geo, 0xBC)) return false;            // no model data, or skinned (not in N1)
-    Renderer::GeomView g;
-    memset(&g, 0, sizeof g);
+    Renderer::GeomView g{};
     memcpy(g.rot, geo + 0x68, 36); memcpy(g.trans, geo + 0x68 + 36, 12); memcpy(&g.scale, geo + 0x68 + 48, 4);
     g.vertices = U16(data, 0x08);
     g.pos = (const float*)GP(U32(data, 0x20));
@@ -93,6 +107,21 @@ bool ReadGeometry(const void* geometry, Renderer::GeomView* out) {
         if (!g.stripCount || !g.stripLengths || !g.strips) return false;
     }
     g.tint[0] = g.tint[1] = g.tint[2] = g.tint[3] = 1.0f;
+    // NiAlphaProperty: flags bit 0 blend, 1-4 src, 5-8 dst (NiAlphaProperty::AlphaFunction), 9 test, 10-12 test func
+    if (const uint8_t* ap = GP(U32(geo, 0x9C))) {
+        g.alphaFlags = U16(ap, 0x18); g.alphaRef = ap[0x1A]; g.hasAlpha = true;
+    }
+    float matAlpha = 1.0f;
+    if (const uint8_t* mp = GP(U32(geo, 0xA4))) memcpy(&matAlpha, mp + 0x3C, 4);
+    if (const uint8_t* sp = GP(U32(geo, 0xA8))) {   // TileShaderProperty
+        memcpy(g.tint, sp + 0x68, 12);
+        float a; memcpy(&a, sp + 0x78, 4);
+        g.tint[3] = a * matAlpha;
+        if (const uint8_t* tex = GP(U32(sp, 0x60)))
+            if (NativeTexture* t = FindNativeTexture(GP(U32(tex, 0x24)), 0x40)) { g.image = t->image; g.d3dfmt = t->d3dfmt; }
+    } else {
+        g.tint[3] = matAlpha;
+    }
     *out = g;
     return true;
 }

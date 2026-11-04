@@ -372,9 +372,30 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     Mul(proj_, view_, vp);
     Mul(vp, world, u.wvp);
     memcpy(u.tint, g.tint, 16);
-    const bool untextured = state_.Texture(0) == 0;
+    // texture: the geometry's own (tile property), else the tracker's stage 0, else a white texel
     static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};   // D3DFMT_A8R8G8B8 2D
-    if (untextured) state_.SetTexture(0, white_, kWhiteKind);
+    const uint32_t prevTex = state_.Texture(0);
+    const NxD3D9Texture prevKind = state_.TextureKind(0);
+    const bool swapTex = g.image || prevTex == 0;
+    if (g.image) { NxD3D9Texture k = {g.d3dfmt, 0, 0, 0, 0}; state_.SetTexture(0, g.image, k); }
+    else if (!prevTex) state_.SetTexture(0, white_, kWhiteKind);
+    // NiAlphaProperty -> D3D9 blend and alpha-test states for this draw (the engine pipeline that would set them is
+    // replaced); NiAlphaProperty::AlphaFunction -> D3DBLEND, TestFunction -> D3DCMPFUNC
+    static const uint8_t kBlend[16] = {2, 1, 3, 4, 9, 10, 5, 6, 7, 8, 11, 2, 2, 2, 2, 2};
+    static const uint8_t kCmp[8] = {8, 2, 3, 4, 5, 6, 7, 1};
+    enum { RS_ALPHATEST = 15, RS_SRC = 19, RS_DST = 20, RS_REF = 24, RS_FUNC = 25, RS_BLEND = 27 };
+    static const uint8_t kSaved[6] = {RS_ALPHATEST, RS_SRC, RS_DST, RS_REF, RS_FUNC, RS_BLEND};
+    uint32_t saved[6];
+    for (int i = 0; i < 6; i++) saved[i] = state_.GetRenderState(kSaved[i]);
+    if (g.hasAlpha) {
+        const uint32_t f = g.alphaFlags;
+        state_.SetRenderState(RS_BLEND, f & 1);
+        state_.SetRenderState(RS_SRC, kBlend[(f >> 1) & 15]);
+        state_.SetRenderState(RS_DST, kBlend[(f >> 5) & 15]);
+        state_.SetRenderState(RS_ALPHATEST, (f >> 9) & 1);
+        state_.SetRenderState(RS_FUNC, kCmp[(f >> 10) & 7]);
+        state_.SetRenderState(RS_REF, g.alphaRef);
+    }
     Draw d;
     memset(&d, 0, sizeof d);
     d.vs = geomVs_; d.ps = geomPs_; d.layout = geomLayout_; d.prim = NxPrim_Triangles;
@@ -382,8 +403,44 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     d.idxBlock = geomRing_.block(); d.idxOffset = iOff; d.idxSize = n * 2; d.idxType = 0;
     d.count = n; d.textures = 1; d.ubo = &u; d.uboSize = sizeof u;
     bool ok = Render(d);
-    if (untextured) state_.SetTexture(0, 0, kWhiteKind);
+    if (swapTex) state_.SetTexture(0, prevTex, prevKind);
+    if (g.hasAlpha) for (int i = 0; i < 6; i++) state_.SetRenderState(kSaved[i], saved[i]);
     if (ok) geomDraws_++;
+    return ok;
+}
+
+bool Renderer::RenderMenuBackground(uint32_t scene, uint32_t sceneFmt, uint32_t w, uint32_t h, uint32_t tone,
+                                    uint32_t toneFmt, const float luma[3], float blend, float alpha) {
+    if (!inFrame_ || !scene || !tone || !w || !h) return false;
+    if (!bgVs_) {
+        bgVs_ = BlobShader(be_, "menubg", NxStage_Vertex);
+        bgPs_ = BlobShader(be_, "menubg", NxStage_Fragment);
+        NxVtxLayout ll;
+        memset(&ll, 0, sizeof ll);
+        bgLayout_ = sc_.Layout(ll);
+        if (!bgVs_ || !bgPs_ || !bgLayout_) return false;
+    }
+    NxMenuBgDraw u;
+    memset(&u, 0, sizeof u);
+    u.luma[0] = luma[0]; u.luma[1] = luma[1]; u.luma[2] = luma[2];
+    u.params[0] = blend; u.params[1] = alpha;
+    u.uvXform[0] = 1; u.uvXform[1] = 1; u.uvXform[2] = 0.5f / (float)w; u.uvXform[3] = 0.5f / (float)h;
+    // stages 0 (scene) and 1 (tone): bilinear, clamped (ImageSpaceEffect FILTER_BILERP)
+    const uint32_t t0 = state_.Texture(0), t1 = state_.Texture(1);
+    const NxD3D9Texture k0 = state_.TextureKind(0), k1 = state_.TextureKind(1);
+    uint32_t s[2][4];
+    static const uint8_t kTypes[4] = {1, 2, 5, 6};   // ADDRESSU, ADDRESSV, MAGFILTER, MINFILTER
+    for (int st = 0; st < 2; st++)
+        for (int i = 0; i < 4; i++) { s[st][i] = state_.GetSamplerState(st, kTypes[i]); state_.SetSamplerState(st, kTypes[i], i < 2 ? 3 : 2); }
+    NxD3D9Texture ks = {sceneFmt, 0, 0, 0, 0}, kt = {toneFmt, 0, 0, 0, 0};
+    state_.SetTexture(0, scene, ks); state_.SetTexture(1, tone, kt);
+    Draw d;
+    memset(&d, 0, sizeof d);
+    d.vs = bgVs_; d.ps = bgPs_; d.layout = bgLayout_; d.prim = NxPrim_Triangles; d.count = 3; d.textures = 2;
+    d.ubo = &u; d.uboSize = sizeof u; d.family = NxFam_ImageSpace; d.enginePass = 758;
+    bool ok = Render(d);
+    state_.SetTexture(0, t0, k0); state_.SetTexture(1, t1, k1);
+    for (int st = 0; st < 2; st++) for (int i = 0; i < 4; i++) state_.SetSamplerState(st, kTypes[i], s[st][i]);
     return ok;
 }
 
