@@ -149,7 +149,12 @@ def r_sal_attributes(path, text, stats):
 
 SDK_TAGS = ('tagRECT tagPOINT tagSIZE _FILETIME _SYSTEMTIME _GUID _RTL_CRITICAL_SECTION _LARGE_INTEGER _ULARGE_INTEGER '
             '_OVERLAPPED _WIN32_FIND_DATAA _SYSTEM_INFO tagMSG tagPALETTEENTRY _LUID _RGNDATA tagBITMAPFILEHEADER '
-            'tagBITMAPINFOHEADER _iobuf _MEMORYSTATUS CRITICAL_SECTION').split()   # CRITICAL_SECTION: a struct copy of the PC type
+            'tagBITMAPINFOHEADER _iobuf _MEMORYSTATUS CRITICAL_SECTION _RTL_CRITICAL_SECTION_DEBUG').split()
+# CRITICAL_SECTION: a struct copy of the PC type. _RTL_CRITICAL_SECTION_DEBUG: the decomp's SDK copy of
+# hkpcpuworldgetclosestpointsjob merges winnt.h's two records into `typedef struct _RTL_CRITICAL_SECTION_DEBUG {...}
+# RTL_CRITICAL_SECTION, *PRTL_CRITICAL_SECTION;` (so its CRITICAL_SECTION was the 32-byte debug record under MSVC);
+# dropped, the unit's CRITICAL_SECTION is the platform's 24-byte PC section (D15; no assert of the unit sizes it, so
+# neither CSX1 nor CSX2 applies, and no code of the unit reads the holder's layout)
 SDK_TYPEDEFS = {n: '"fnvnx_win32.h"' for n in '''DWORD BOOL BYTE WORD LONG UINT HANDLE HRESULT LPVOID ULONG_PTR
     DWORD_PTR WPARAM LPARAM LRESULT HINSTANCE HMODULE HWND HHOOK HKEY HDC HICON HMENU HBRUSH HFONT HBITMAP HCURSOR
     UINT_PTR LONG_PTR INT_PTR ATOM COLORREF LPSTR LPCSTR'''.split()}

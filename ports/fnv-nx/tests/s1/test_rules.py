@@ -847,6 +847,22 @@ if _shutil.which('aarch64-linux-gnu-g++'):
                           '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _fc], capture_output=True, text=True)
     check('DECL1-FOPEN output compiles: fopen and std::fopen are the _iobuf one', _r.stderr or 'ok', ['ok'])
 
+# ---- DECL2 the decomp's merged SDK record `struct _RTL_CRITICAL_SECTION_DEBUG {...} RTL_CRITICAL_SECTION` (S1-crt)
+_cs = ('extern "C"{\ntypedef struct _RTL_CRITICAL_SECTION_DEBUG{\nWORD Type;\nstruct _RTL_CRITICAL_SECTION*CriticalSection;\n'
+       'DWORD Flags;\n}RTL_CRITICAL_SECTION,*PRTL_CRITICAL_SECTION;\ntypedef RTL_CRITICAL_SECTION CRITICAL_SECTION;}\n'
+       'class Lock { CRITICAL_SECTION m_kSection; };\n')
+_csg = run(s1.r_sdk_types, _cs)
+check('DECL2 drops a _RTL_CRITICAL_SECTION_DEBUG copy named RTL_CRITICAL_SECTION, same lines', _csg,
+      ['#include "fnvnx_win32.h" /* fnv-nx DECL2 */\nextern "C"{\n/* fnv-nx DECL2 */\n\n\n\n\n'
+       'typedef RTL_CRITICAL_SECTION CRITICAL_SECTION;}'], ['WORD Type'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _cc = os.path.join(tempfile.mkdtemp(), 'cs.cpp')
+    open(_cc, 'w').write(_csg + 'static_assert(sizeof(Lock) == 24, "the PC section (D15)");\n'
+                         'RTL_CRITICAL_SECTION_DEBUG* d; PRTL_CRITICAL_SECTION_DEBUG e = d;\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror',
+                          '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _cc], capture_output=True, text=True)
+    check('DECL2 critical-section output compiles; CRITICAL_SECTION is 24 bytes', _r.stderr or 'ok', ['ok'])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''

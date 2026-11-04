@@ -147,7 +147,7 @@ typedef struct _SYSTEMTIME {
 } SYSTEMTIME, *PSYSTEMTIME, *LPSYSTEMTIME;
 
 /* ---- synchronization (winbase.h); layout of the 32-bit SDK, 24 bytes */
-typedef struct _RTL_CRITICAL_SECTION_DEBUG *PRTL_CRITICAL_SECTION_DEBUG;
+typedef struct _RTL_CRITICAL_SECTION_DEBUG RTL_CRITICAL_SECTION_DEBUG, *PRTL_CRITICAL_SECTION_DEBUG;
 typedef struct _RTL_CRITICAL_SECTION {
     PRTL_CRITICAL_SECTION_DEBUG DebugInfo;
     LONG LockCount;
