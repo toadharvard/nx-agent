@@ -66,6 +66,8 @@ EXT=${FUZZ_EXT:-$FARM_HOME/ext}
 RUN=$FARM_HOME/fuzz-$C12-${K}of${N}
 mkdir -p "$FARM_HOME" "$RUN" "$(dirname "$REPORT")"
 REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
+# shellcheck source=lib_job.sh
+. "$HERE/lib_job.sh"                 # job_gamedata (the player's exe, J-0128 / V1); its log() is replaced below
 log() { echo "== $(date +%T) $*"; }
 t0=$(date +%s)
 
@@ -260,6 +262,13 @@ else
   NOTE_TREE="prepare farm tree of $L12 (tree hash $(cat "$TREE.done"))"
 fi
 
+# --- the player's FalloutNV.exe (private branch gamedata/exe, sha256 pinned, lib_job.sh): its RTTI vftables are the
+# objects' vptrs on the oracle (tools/difffuzz/vtmodel.py). Read only, never copied into a published branch or a
+# report; without it virtual calls are not modelled. FARM_REAL_EXE=0 leaves it out.
+[ -d "$ARTIFACTS/.git" ] || git clone -q --no-checkout "$ARTIFACTS_URL" "$ARTIFACTS"
+job_gamedata
+log "exe: $NOTE_EXE"
+export FNVNX_EXE=$GAME_EXE
 export FNVNX_DECOMP=$DECOMP FNVNX_X86OBJ=$ORACLE/obj FNVNX_TREE=$TREE FNVNX_A64OBJ=$LINK/fixed FNVNX_DFLINK=$LINK
 export FNVNX_DFWORK=$RUN/work FNVNX_DFA64=$RUN/a64 SSE2NEON=$EXT/sse2neon
 unset FNVNX_DFPROFILE
@@ -431,9 +440,9 @@ done
 t3=$(date +%s)
 
 $PY - "$RUN" "$REPORT" "$COMMIT" "$D12" "$K" "$N" "$NX86" "$ITERS" "$TIME" "$JOBS" "$((t1-t0))" "$((t2-t1))" \
-  "$((t3-t2))" "$NOTE_LINK" "$NOTE_TREE" <<'EOF'
+  "$((t3-t2))" "$NOTE_LINK" "$NOTE_TREE" "$NOTE_EXE" <<'EOF'
 import collections, json, os, sys
-run, report, commit, d12, k, n, nx86, iters, tm, jobs, ts, tf, tr, note_link, note_tree = sys.argv[1:]
+run, report, commit, d12, k, n, nx86, iters, tm, jobs, ts, tf, tr, note_link, note_tree, note_exe = sys.argv[1:]
 counts = json.load(open(os.path.join(run, 'targets.json')))
 st = json.load(open(os.path.join(run, 'status.json')))
 
@@ -466,7 +475,7 @@ hard = [l.rstrip('\n').split('\t') for l in open(os.path.join(run, 'hard_cum.tsv
     if os.path.exists(os.path.join(run, 'hard_cum.tsv')) else []
 out = ['# fuzz %s shard %s/%s%s' % (commit[:12], k, n, ' - HARNESS BROKEN' if broken else '')] + banner + ['',
        '- commit %s, decomp %s, oracle: %s MSVC 2008 objects of the pristine decomp' % (commit, d12, nx86),
-       '- link: %s; tree: %s' % (note_link, note_tree),
+       '- link: %s; tree: %s; exe: %s' % (note_link, note_tree, note_exe),
        '- functions catalogued %d; in this shard %d: no native object %d, control flow not modelled (indirect '
        'calls/jumps, unresolved relocations) %d, fuzzable %d (no native definition in the link: %d)' % (
            counts['catalogued'], counts['shard'], counts['no_native_object'], counts['not_modelled'],
