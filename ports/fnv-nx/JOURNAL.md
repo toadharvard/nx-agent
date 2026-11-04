@@ -1614,3 +1614,28 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - farms_running=12 (prep, farm1 census, farm2-5 compile 1-4/4, eq1-6 equiv 1-6/6) render_machine=1
 * **next** - S2c and S5 consume farm objects. Farms still to come: fuzz (S13), static gate (S12), full build + boot
   (S9).
+
+### J-0078 | 2026-11-04 | stream: S1-rules | status: wip | parent: J-0072,J-0073
+
+* **did** - ALIGN1: `__declspec(align(n))` written in front of the class key of a definition or forward
+  declaration moves behind it, where GCC applies it to the type as MSVC does. 198 edits in 114 files; for example,
+  S_A goes from 36 to 48 bytes and Buf from 56 to 64. ENUM2: an enum with an enumerator literal in [2^31, 2^32)
+  becomes `enum E : int`, with `(int)` on those literals, so CHANGE_SCRIPT_VARIABLES 0x80000000 is INT_MIN as in
+  MSVC. 55 edits in 50 files. ANON2 now also converts uses in files that include the declaring header, which fixes
+  nipoint3interpolator.cpp. Restored 23 rule test sections that a CSX2 commit had removed by mistake. The
+  orchestrator re-ran tests/s1 (0 failed) and tests/s11 (ok).
+* **found** - The decomp has no enum bit-fields. S12's LAYOUT-ALIGN-IGNORED rows for D212D0Obj and hkpMotionStub are
+  not ALIGN-IGNORED: MSVC pads a vfptr to 16 bytes when the class has 16-aligned members, and the decomp names those
+  fields by the game's offsets, so the GCC layout already matches the game. This is a gate artefact, not a port
+  bug.
+
+### J-0079 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0077
+
+* **found** - Even when created with the private repository as their source, farm sessions were stopped by the
+  auto-mode classifier when they ran a script from a cloned repository. Tools pre-approved at session creation did
+  not lift the block.
+* **decided** - (user) The artifacts repository's `main` branch holds `farm/start.sh` and a narrow
+  `.claude/settings.json` allow rule: exactly `bash /home/user/fnv-nx-build/farm/start.sh:*`, apt-get, pgrep, tail
+  and the farm's send_later check-ins. The rule was set at the owner's request. start.sh brings the public nx-agent
+  checkout to the integration head and runs its runner.sh; artifacts go to a separate clone at
+  `$FARM_HOME/artifacts`. Farms are recreated with `source_revision: main`.
