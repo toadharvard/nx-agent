@@ -34,7 +34,7 @@ want=$(printf '%s\n' "${BUILD_FLAGS[@]}" | sort -u)
 have=$(script_flags "$HERE/tools/link/compile.sh" | sort -u)
 if [ "$want" != "$have" ]; then
   echo "run.sh: tools/static/flags.sh BUILD_FLAGS and tools/link/compile.sh differ - update flags.sh:" >&2
-  diff <(echo "$want") <(echo "$have") | sed -n 's/^</  only in flags.sh:  /p; s/^>/  only in compile.sh:/p' >&2
+  diff <(echo "$want") <(echo "$have") | sed -n 's/^</  only in flags.sh:  /p; s/^>/  only in compile.sh:/p' >&2 || true
   exit 2
 fi
 census=$(script_flags "$HERE/tools/census.sh")

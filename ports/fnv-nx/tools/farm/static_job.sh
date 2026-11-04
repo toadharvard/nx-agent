@@ -103,7 +103,7 @@ sort -u -o "$TSV" "$TSV"
   echo
   echo "- commit: \`$COMMIT\`"
   echo "- units in the shard: $(wc -l < "$LIST"); prepare: $((t1-t0)) s, gate: $((t2-t1)) s, jobs: $JOBS, host: $(nproc) CPUs"
-  echo "- gate exit code: $rc (1: a class above tools/static/baseline.tsv)"
+  echo "- gate exit code: $rc (0 ok, 1 a class above tools/static/baseline.tsv, 2 the gate could not run: see steps)"
   echo "- steps:"
   echo; echo '```'
   grep -E '^(gcc|clang (gnu|msvc|atomic)|layouts|probe|report|gate|run\.sh)[: ]' "$WORK/gate-$K-of-$N.log" \
@@ -122,3 +122,4 @@ sort -u -o "$TSV" "$TSV"
   echo '```'
 } > "$REPORT"
 echo "$REPORT"
+[ "$rc" -lt 2 ] || exit "$rc"     # the report says why; a class above the baseline is a result, not a job failure

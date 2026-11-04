@@ -12,10 +12,11 @@ SYNTAX_ONLY_EXEMPT=(-fPIC -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack
                     -mno-outline-atomics)
 
 # script_flags <build script>: the compiler flags of the script's FLAGS=(...) array, without -c / -fsyntax-only, $OPT,
-# -o, -fmax-errors=N and the -include / -I paths (one per line)
+# -o, -fmax-errors=N, the -include / -I paths and -ffile-prefix-map (it only rewrites recorded paths, so objects do
+# not depend on where the tree lives: tools/farm/) - one per line
 script_flags() {
   sed -n '/^FLAGS=(/,/)$/p' "$1" | tr -s ' \t' '\n\n' | sed -e 's/^FLAGS=(//' -e 's/)$//' |
-    grep -E '^-' | grep -vE '^(-c|-fsyntax-only|-o|-include|-I.*|-fmax-errors=.*)$' || true
+    grep -E '^-' | grep -vE '^(-c|-fsyntax-only|-o|-include|-I.*|-fmax-errors=.*|-ffile-prefix-map=.*)$' || true
 }
 
 # GCC warnings that point at code whose meaning differs between MSVC x86 and GCC AArch64 ILP32, or at UB that
