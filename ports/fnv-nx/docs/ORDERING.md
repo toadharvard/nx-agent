@@ -245,40 +245,34 @@ not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B
   `-Wuninitialized` warning is left.
 * On the 11 W-UNINIT sites of the newest static report (shard 3), GCC's own warnings go from 11 to 0. The static
   gate loads the same plugin (gcc_warn.sh), so its W-UNINIT count follows.
+* Memory locals (V1's U1-U3): an aggregate, an address-taken scalar or a small array becomes a register only after
+  SRA or address-taken promotion, later than the SSA pass. Before SSA, every such local of at most 64 bytes that the
+  function reads gets `x = {}` at its entry (dead-store elimination removes it where a write always comes first),
+  and its end-of-scope clobbers are dropped, so a loop-body local keeps its value across iterations like MSVC's
+  stack slot (U5: 21, as MSVC).
 * One of them is a member call whose object pointer is assigned inside its own argument list
   (`obj->f(..., obj = X, ...)`): the decomp compiles to the original only if MSVC evaluates the object after the
   arguments. With `object=last` the read is initialized. That is evidence for ORDER-OBJECT (below), for S11.
 
 ## Open, not closed by this
 
-* **ORDER-OBJECT** (`get()->f(a())`): GCC evaluates the object expression first (C++17), MSVC 2008 last.
-  **compile.sh builds with `object=last`** (`ORDER_OBJECT=first` for A/B). Evidence: MSVC's thiscall pushes the
-  arguments and loads ecx last, and the byte-matched decomp has a call whose object pointer is assigned inside its
-  own argument list (`obj->f(..., obj = X, ...)`), which only works with the object last (GCC: an uninitialized
-  read, gone with object=last). Measured on 131 units: 27 objects change, -0.06 % instructions, no compiler error.
-  S11's MSVC run of evalorder.cpp confirms it; if it disagrees, the default goes back.
-* **ORDER-OPERATOR** (C++17 fixes `<<`, `>>`, `[]`, `->*` left to right and `=`, `@=` right to left for overloaded
-  operators; MSVC 2008 evaluates an overloaded operator like any call). **compile.sh builds with `operator=rtl`**
-  (`ORDER_OPERATOR=cpp17` for A/B): MSVC 2008 predates C++17, and an overloaded operator is a plain call whose
-  arguments it pushes right to left, the same behaviour ORDER-ARGS relies on. Measured on 131 units: no object
-  changes. S11's MSVC run of evalorder.cpp confirms it.
-
-Both are switchable now, with defaults that keep the order above (the objects are byte-identical with and without
-the two arguments; run.py checks it on evalorder.cpp and units.cpp). `-fplugin-arg-fnvnx_order-object=last` (default
-`first`) evaluates a member call's arguments right to left, then its object, then the callee, where the object and
-an argument can see each other: a direct call's `this` becomes the last element of the argument chain (the call
-stays direct), a virtual call gets the chain in front of its `OBJ_TYPE_REF` object, so the vtable load comes after
-the arguments too. Constructors, destructors and calls through a pointer to member keep the object first.
-`-fplugin-arg-fnvnx_order-operator=rtl` (default `cpp17`) clears `CALL_EXPR_ORDERED_ARGS` and orders those calls
-like any other (a free operator's left operand included, a member operator's object as `object=` says);
-`=` and `@=` stay as they are, right operand first, which is MSVC's push order too. `tests/s12/order/evalorder.cpp`
-(11 cases: direct and virtual member calls, a slot return, `<<` / `>>` chains, `[]`, `=`, `+=`, `-=`) is plain
-C++03 and builds with `cl /O2 /EHsc evalorder.cpp`. `evalorder.gcc.expect` is the defaults' output,
-`evalorder.msvc-guess.expect` that of `object=last operator=rtl`; run.py checks both and that they differ. The
-defaults stay until S11 runs evalorder.cpp under MSVC 2008 x86: its output becomes `evalorder.msvc.expect` (run.py
-then says which of the two it matches), and the build (compile.sh) follows that.
+* **ORDER-OBJECT / ORDER-OPERATOR / ORDER-ASSIGN: per shape, from MSVC.** S11 recorded MSVC 2008 (SP1 and RTM, /O2,
+  /O2 /Ob1, /Od) on `tests/s11/order/order.cpp`; compile.sh follows every case the five configurations agree on:
+  | shape | MSVC 2008 | compile.sh |
+  |---|---|---|
+  | direct member call `obj()->f(a())`, `(*obj()).f`, `ref().f`, chains, member operators (`<<` `>>` `[]` `+` `==` `()`) | arguments, then the object | `ORDER_OBJECT=msvc` |
+  | virtual call `obj()->vf(a())` | object first | `ORDER_OBJECT=msvc` (GCC's order) |
+  | static member through an object | object first | GCC's order |
+  | pointer to member `(obj()->*pmf())(a())` | arguments first (/O2: `aom`) | `ORDER_OBJECT=msvc` |
+  | free overloaded operator `y << a()`, `y + a()`, `a() - y` | right to left, as any call | `ORDER_OPERATOR=rtl` |
+  | member / free `=`, `+=` (overloaded) | right operand, then the object | GCC's order already |
+  | built-in compound assignment `*p() += a()` | left operand first | `ORDER_ASSIGN=msvc` |
+  | built-in `*p() = a()`, `a[i()] = b()` | differs between /O2 and /Od | GCC's order (= /Od) |
+  `tests/s12/order/run.py` builds order.cpp with compile.sh's defaults under qemu and checks every agreed case. The
+  earlier blanket `object=last` was wrong for virtual calls (V1's C2v) and is now only an A/B mode; compile.sh rebuilds
+  its objects when any of these options changes (V1's C4).
 * **POLL-PLAIN** beyond the wait-only loop shape (closed above): a flag tested inside a loop that does other work, or
   a pointer published with a plain store and read without a poll, is still a data race the A57 can break; such a
   site needs its field made volatile or keyed (a `field Class::member` line in a key file passed as ORDER_KEYS).
-* **W-UNINIT** in memory: an addressable local or an aggregate read before it is written keeps whatever the stack
-  held; GCC does not fold such a load as undefined, so it is left alone (scalars: closed by `uninit=zero`, above).
+* **W-UNINIT** in memory locals above 64 bytes: a buffer read before it is written keeps whatever the stack held.
+  GCC does not scalarize such a buffer, so it does not fold its loads as undefined.
