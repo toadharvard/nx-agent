@@ -457,6 +457,7 @@ class Card:
         self.store, self.hist, self.th, self.port = store, hist, th, port
         self.render = render or {}      # load_render(): text, branch, path, hist (distances on the render branch)
         self.gates = []
+        self.boot_info = {}             # S5's boot/milestones.json beyond the milestones: image, peak heap, stub
         self.maxb = th.get('max_commits_behind', 25)
 
     # ---- sources
@@ -870,11 +871,19 @@ class Card:
         want = (self.store.read('gamedata/exe', 'FalloutNV.exe.sha256') or '').split()
         want = want[0] if want else None
         got = meta.get('boot_image_sha256')
+        reached = self.milestones(br, meta, d)
+        label = self.boot_info.get('image') or meta.get('boot_image')     # S5: "player exe" | "synthesized" | none
         if want and got:
             real = got == want
             self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes' if real else
                       'no (%s)' % ('synthesized image' if 'synth' in (d.get('image') or '') else 'another image'), 'yes',
                       PASS if real else FAIL, s, 'image sha256 %s.., exe %s..' % (got[:8], want[:8]), rank=1)
+        elif label in ('player exe', 'synthesized'):
+            # no hash to compare: S5's image label (boot/milestones.json "image", meta.json boot_image)
+            real = label == 'player exe'
+            self.gate('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe',
+                      'yes' if real else 'no (synthesized image)', 'yes', PASS if real else FAIL, s,
+                      'image "%s" (S5 label; no image hash to check)' % label, rank=1)
         elif 'synth' in (d.get('image') or ''):
             # no hash to compare (link/<c12> not kept), but the report names the synthesized image
             real = False
@@ -885,7 +894,7 @@ class Card:
             real = None
             self.nodata('boot.real_exe', 'Emulated boot', 'boot ran on the player\'s FalloutNV.exe', 'yes',
                         'no image hash in meta.json' if want else 'gamedata/exe not readable', rank=1, sources=[s])
-        reached = self.milestones(br, meta, d)
+        stub = self.boot_info.get('stub') or {}
         for i, m in enumerate(names):
             r = reached.get(m)
             if r is None:
@@ -894,6 +903,10 @@ class Card:
                 continue
             ok = bool(r) and real is True
             note = '' if real else 'on the synthesized image only' if r else ''
+            if not r and stub.get(m):
+                note = 'the stub-fault boot reaches it (known faults stubbed: not the guest\'s own progress)'
+            elif not r and m == next((x for x in names if not reached.get(x)), None) and self.boot_info.get('stop'):
+                note = 'raw boot stops: %s' % str(self.boot_info['stop'])[:120]
             self.gate('boot.' + m, 'Emulated boot', 'milestone: ' + m, 'yes' if r else 'no', 'reached on the real exe',
                       PASS if ok else FAIL, s, note, rank=2 + i)
         sk = d.get('init_skips')
@@ -901,13 +914,21 @@ class Card:
                   NODATA if sk is None else PASS if sk == 0 else FAIL, s, (d.get('stop') or '')[:120], rank=6)
 
     def milestones(self, br, meta, d):
-        """S5's machine-readable milestones: boot/milestones.json ({name: 0|1}), meta.json boot_<name>, or
+        """S5's machine-readable milestones: boot/milestones.json (fnvnx-boot-milestones/1, tests/s5/boot_milestones.py:
+        the raw boot's {name: true|false|null} at the top level, "stub" for the stub-fault boot, plus image,
+        milestone, boot_peak_heap_bytes, stop; null is not measured), meta.json boot_<name>, or
         `fnvnx milestone: <name>` lines in boot/summary.txt; WinMain also from the report"""
         out = {}
         mj = self.link_json(br, 'boot/milestones.json') if br else None
         if isinstance(mj, dict):
-            for k, v in (mj.get('milestones', mj) or {}).items():
-                out[k] = int(bool(v))
+            top = mj['milestones'] if isinstance(mj.get('milestones'), dict) else mj
+            for k in self.th['boot_milestones']:
+                v = top.get(k, top.get(k.replace('_', '-')))
+                if isinstance(v, (bool, int)):
+                    out[k] = int(bool(v))
+            self.boot_info = dict(image=mj.get('image'), last=mj.get('milestone'), stop=mj.get('stop'),
+                                  peak=mj.get('boot_peak_heap_bytes'),
+                                  stub=mj['stub'] if isinstance(mj.get('stub'), dict) else None)
         for k in self.th['boot_milestones']:
             if 'boot_' + k in meta and k not in out:
                 out[k] = int(bool(meta['boot_' + k]))
@@ -993,6 +1014,8 @@ class Card:
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
         meta = self.link_json(self.link_branch(fb[0][0]['_text_commit']), 'meta.json') if fb else None
         peak = (meta or {}).get('boot_peak_heap_bytes')
+        if peak is None:
+            peak = self.boot_info.get('peak')          # S5's boot/milestones.json
         if peak is not None:
             frac = peak / avail
             self.gate('perf.memory', 'Performance', 'peak guest memory / memory the guest can have',

@@ -305,6 +305,7 @@ class ReadyTest(unittest.TestCase):
     def test_synthesized_image_named_in_the_report(self):
         # no link/<c12> kept, so no hash: the report's data image line decides
         self.world.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_image_sha256'))
+        self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d.update(image=None))
         self.assertEqual(self.gate(self.world.run(), 'boot.real_exe')['status'], 'no-data')
         self.world.sub('reports/full1/%s-full.md' % C, "data image: the owner's FalloutNV.exe",
                        'data image: $FARM_HOME/full/build/boot/synth/synth.exe')
@@ -331,6 +332,38 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual(self.gate(card, 'boot.first_frame')['status'], 'fail')
         self.assertEqual(self.gate(card, 'boot.first_cell')['status'], 'no-data')
         self.assertIn('boot.first_cell', card['missing'])
+
+    def test_milestones_s5_format(self):
+        # tests/s5/boot_milestones.py: null is not measured, false is not reached; the stub boot is not progress
+        def edit(d):
+            d.update(first_frame=False, first_cell=None, stop='fault at pc=0x1234 / UC_ERR_FETCH_UNMAPPED')
+            d['stub'].update(first_frame=True)
+        self.world.edit_json('link/%s/boot/milestones.json' % C, edit)
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'boot.renderer_init')['status'], 'pass')
+        ff = self.gate(card, 'boot.first_frame')
+        self.assertEqual((ff['status'], ff['value']), ('fail', 'no'))
+        self.assertIn('stub-fault boot reaches it', ff['note'])
+        self.assertEqual(self.gate(card, 'boot.first_cell')['status'], 'no-data')
+        for gid in card['by_id']:
+            self.assertNotIn(gid, ('boot.schema', 'boot.stub', 'boot.image', 'boot.stop'))
+        self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d['stub'].update(first_frame=False))
+        self.assertIn('raw boot stops: fault at pc=0x1234', self.gate(self.world.run(), 'boot.first_frame')['note'])
+
+    def test_image_label_without_a_hash(self):
+        self.world.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_image_sha256'))
+        g = self.gate(self.world.run(), 'boot.real_exe')
+        self.assertEqual(g['status'], 'pass')
+        self.assertIn('S5 label', g['note'])
+        self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d.update(image='synthesized'))
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'boot.real_exe')['status'], 'fail')
+        self.assertEqual(self.gate(card, 'boot.main_menu')['status'], 'fail')
+
+    def test_peak_heap_from_milestones(self):
+        self.world.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_peak_heap_bytes'))
+        self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d.update(boot_peak_heap_bytes=1900 << 20))
+        self.assertEqual(self.gate(self.world.run(), 'perf.memory')['status'], 'fail')
 
     def test_milestones_from_summary_lines(self):
         self.world.remove('link/%s/boot/milestones.json' % C)

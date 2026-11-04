@@ -62,6 +62,7 @@
  "fuzz_min_coverage": 0.9,
  "boot_milestones": [
   "winmain",
+  "renderer_init",
   "main_menu",
   "first_frame",
   "first_cell"

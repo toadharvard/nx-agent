@@ -1,6 +1,22 @@
 {
- "winmain": 1,
- "main_menu": 1,
- "first_frame": 1,
- "first_cell": 1
+ "boot_peak_heap_bytes": 1073741824,
+ "first_cell": true,
+ "first_frame": true,
+ "image": "player exe",
+ "main_menu": true,
+ "milestone": "first-cell",
+ "renderer_init": true,
+ "schema": "fnvnx-boot-milestones/1",
+ "stop": "exit / the game quit by itself",
+ "stub": {
+  "boot_peak_heap_bytes": 1073741824,
+  "first_cell": true,
+  "first_frame": true,
+  "main_menu": true,
+  "milestone": "first-cell",
+  "renderer_init": true,
+  "stop": "exit",
+  "winmain": true
+ },
+ "winmain": true
 }
