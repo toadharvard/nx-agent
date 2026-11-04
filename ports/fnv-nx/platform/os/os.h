@@ -13,6 +13,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* ---- static-constructor priorities of the guest. toolchain/guest/guest.ld runs prioritized constructors first
+ * (lowest number first; GCC reserves 0-100), then those of the runtime libraries (libstdc++, newlib), then the rest
+ * in link order, which includes every game unit's. So the platform's constructors and the game boot
+ * (toolchain/game/boot.cpp) come before any game static, which may use them (toolchain/game/init_order.py checks
+ * the linked order). */
+#define FNVNX_INIT_CLOCK 101    /* clock bases: clock(), GetTickCount */
+#define FNVNX_INIT_MODULES 103  /* module and COM class registrations (audio, input) */
+#define FNVNX_INIT_BOOT 110     /* the game boot: data image, memory manager (toolchain/game/boot.cpp) */
+
 #ifdef __cplusplus
 extern "C" {
 #endif

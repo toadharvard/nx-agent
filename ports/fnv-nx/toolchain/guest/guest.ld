@@ -93,6 +93,17 @@ SECTIONS
 	{
 		PROVIDE_HIDDEN( __init_array_start = . );
 		KEEP( *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*)) )
+		/* the runtime libraries' unprioritized constructors (libstdc++'s exception pools, newlib's stack guard)
+		 * before everyone else's, so a game unit's static constructor may throw or call the C library
+		 * (platform/os/os.h FNVNX_INIT_*, toolchain/game/init_order.py; one input section per KEEP, and `+` is no pattern character: ??) */
+		KEEP( *crtbegin*.o(.init_array .ctors) )
+		KEEP( *libstdc??.a:*(.init_array .ctors) )
+		KEEP( *libsupc??.a:*(.init_array .ctors) )
+		KEEP( *libc.a:*(.init_array .ctors) )
+		KEEP( *libg.a:*(.init_array .ctors) )
+		KEEP( *libm.a:*(.init_array .ctors) )
+		KEEP( *libgcc*.a:*(.init_array .ctors) )
+		KEEP( *libsysbase.a:*(.init_array .ctors) )
 		KEEP( *(.init_array .ctors) )
 		PROVIDE_HIDDEN( __init_array_end = . );
 	} :data

@@ -305,6 +305,54 @@ class FaultTableTest(unittest.TestCase):
                              ([("InitHolder", "return0"), ("0x00aa1070", "use-malloc:x0")], [("0x00a8a5f0", 16)]))
 
 
+class InitOrderTest(unittest.TestCase):
+    """toolchain/game/init_order.py: no game unit's static constructor before the platform's, the runtime libraries'
+    or the boot's (the order toolchain/guest/guest.ld and platform/os/os.h FNVNX_INIT_* give)."""
+
+    MAP = (".text           0x30000000     0x100\n"
+           ".init_array     0x3177c000       0x{size:x}\n"
+           "                0x3177c000                        PROVIDE (__init_array_start = .)\n"
+           " *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*))\n"
+           " .init_array.00101\n"
+           "                0x3177c000        0x4 /b/obj/platform_crt_heap.c.o\n"
+           " .init_array.00110\n"
+           "                0x3177c004        0x4 /b/obj/toolchain_game_boot.cpp.o\n"
+           " *(.init_array .ctors)\n"
+           "{rest}"
+           "                0x3177c0f0                        PROVIDE (__init_array_end = .)\n"
+           "\n.fini_array     0x3177c04c        0xc\n"
+           " .fini_array    0x3177c04c        0x4 /b/obj/late_platform.cpp.o\n")
+
+    def run_map(self, rest, size):
+        sys.path.insert(0, os.path.join(HERE, "..", "..", "toolchain", "game"))
+        import init_order
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "fnvnx.map")
+            with open(p, "w") as f:
+                f.write(self.MAP.format(size=size, rest=rest))
+            lst = os.path.join(t, "game_objects.list")
+            with open(lst, "w") as f:
+                f.write('"/s2/fixed/src_a.cpp.o"\n"/s2/fixed/src_b.cpp.o"\n')
+            return init_order.check(init_order.init_array_entries(p), init_order.read_game_list(lst))
+
+    def test_good(self):
+        rest = (" .init_array    0x3177c008        0x4 /tc/lib/crtbegin.o\n"
+                " .init_array    0x3177c00c        0x4 /tc/lib/libstdc++.a(eh_alloc.o)\n"
+                " .init_array    0x3177c010        0x8 /s2/fixed/src_a.cpp.o\n")
+        rows, bad = self.run_map(rest, 0x18)
+        self.assertEqual([r[1] for r in rows], ["own", "own", "runtime", "runtime", "game", "game"])
+        self.assertEqual(rows[0][2], "00101")
+        self.assertEqual(bad, [])
+
+    def test_platform_after_game(self):
+        rest = (" .init_array    0x3177c008        0x4 /s2/fixed/src_b.cpp.o\n"
+                " .init_array    0x3177c00c        0x4 /b/obj/platform_win32_time.cpp.o\n"
+                " .init_array    0x3177c010        0x4 /tc/lib/libc.a(libc_a-stack_protector.o)\n")
+        rows, bad = self.run_map(rest, 0x14)
+        self.assertEqual([(r[1], os.path.basename(r[3])) for r in bad],
+                         [("own", "platform_win32_time.cpp.o"), ("runtime", "libc.a(libc_a-stack_protector.o)")])
+
+
 class HandVptrsTest(unittest.TestCase):
     """tests/s5/hand_vptrs.py on a two-unit tree: store forms, binding and rule (no ELF: no native-vtable rules)."""
 

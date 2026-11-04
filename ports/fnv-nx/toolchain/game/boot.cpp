@@ -335,8 +335,9 @@ static int thread_role(void *start, void *arg) {
 /* fs:[0x2c][0] of the calling thread = its __fnvnx_tls_image, the block S2 binds __declspec(thread) data to */
 static void *image_tls_block(void) { return (void *)__fnvnx_tls_image; }
 
-/* first static initialiser (priority 101 runs before the default-priority ones of the game) */
-__attribute__((constructor(101))) static void boot_banner(void) {
+/* After the platform's own constructors (clocks 101, module registrations 103) and before every game unit's
+ * (unprioritized): FNVNX_INIT_BOOT, platform/os/os.h; toolchain/game/init_order.py checks the order. */
+__attribute__((constructor(110))) static void boot_banner(void) {
     /* The game's own static initialisers (default priority) read and write the data image, so the image must
      * be mapped and bound before them: do the platform + loader steps here. */
     printf("fnvnx boot: early init (before the game's static initialisers)\n");

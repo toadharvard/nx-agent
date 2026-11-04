@@ -977,7 +977,7 @@ those vftables can a hand vptr into the image work at all.
 2. `__libc_init_array()` (`runtime.c:199`): `.preinit_array`, `_init`, then `.init_array`. `toolchain/guest/guest.ld:95-96`
    orders it: prioritized entries first, then the rest in link order. On the 9a0243c7eabe guest it has 19 entries:
    - `register_fini`;
-   - `boot_banner`, `constructor(101)` (`toolchain/game/boot.cpp:339`): it maps the data image (`load_image`, :349)
+   - `boot_banner`, `constructor(101)` (now 110, see below) (`toolchain/game/boot.cpp:339`): it maps the data image (`load_image`, :349)
      and constructs the memory manager (:353);
    - `frame_dummy`;
    - eight game-unit `_GLOBAL__sub_I_*` (e.g. `blk_009e0000_o2.cpp`, `nipoint3_console.cpp`);
@@ -993,9 +993,23 @@ What that means for the INIT fix:
 - A native C++ static in a staging unit (rule XC1 rewrites only the 14 generated units) runs in step 2. That is after
   the image is mapped and the memory manager constructed, before every game initializer, and before WinMain. So the
   NiMainSDM fix works there.
-- One caveat: game-unit constructors run before the platform's and libstdc++'s own constructors. A game static must
-  not use the clock, the profile functions or exceptions. If one ever has to, give the platform's constructors a
-  priority (102..) or link the platform objects first.
+- The ordering gap is closed (round after J-0109). `.init_array` of the f13 guest now runs:
+  1. newlib's `__call_atexit`;
+  2. the platform at its priorities, from `platform/os/os.h` `FNVNX_INIT_*`: clocks 101 (`heap.c` `clock_init`,
+     `time.cpp` `time_init`), module/COM registrations 103 (`input/register.cpp`);
+  3. `boot_banner` 110;
+  4. the runtime libraries' unprioritized constructors (crtbegin, libstdc++ `eh_alloc`/`eh_globals`, newlib's
+     stack guard), which `toolchain/guest/guest.ld` now places ahead of the rest. It needs one input section per
+     `KEEP`, and `libstdc??.a`, because `+` is not a pattern character;
+  5. the game units' constructors.
+
+  The MSVC ctype table (`cpplib.cpp` `g_ctype`) is now `constexpr`, so it is constant-initialized and has no
+  constructor. The ini cache (`ini.cpp`) is built on first use. So a game static may use the clock, the ini
+  functions, the character tables, the registered modules and exceptions.
+  `toolchain/game/init_order.py` checks the linked order from the map, and `build.sh` fails the link if a
+  platform, runtime or boot constructor comes after a game one (test: `InitOrderTest`). On f13 the result is
+  `17 constructors: 5 runtime, 4 own, 8 game`. Both boots are unchanged: raw WinMain+0x1d0 with 4,340 skips, stub
+  WinMain+0x43c with 4,326. The S4 host suite passes (70 tests).
 - Drop `before-winmain 0x00a8a5f0` from `known_faults.txt` when the rule lands.
 
 **Hand-stored image vptrs** (`tests/s5/hand_vptrs.py`; rules in its docstring).

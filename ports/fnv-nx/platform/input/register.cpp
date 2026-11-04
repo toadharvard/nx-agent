@@ -10,6 +10,7 @@
 #include "fnvnx_win32_ext.h"
 
 #include "input.h"
+#include "../os/os.h"   /* FNVNX_INIT_MODULES */
 
 #include <string.h>
 #include <strings.h>
@@ -106,4 +107,4 @@ extern "C" void fnvnx_audio_input_register(void)
     fnvnx_register_com_class(&CLSID_DirectInput8, fnvnx_dinput_com_factory);
 }
 
-__attribute__((constructor)) static void fnvnx_audio_input_ctor(void) { fnvnx_audio_input_register(); }
+__attribute__((constructor(FNVNX_INIT_MODULES))) static void fnvnx_audio_input_ctor(void) { fnvnx_audio_input_register(); }
