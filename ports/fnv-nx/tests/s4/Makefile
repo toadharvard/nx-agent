@@ -50,14 +50,21 @@ test: $(OUT)/s4_tests
 M32OUT := $(OUT)-m32
 M32FLAGS := -m32 -idirafter /usr/include/x86_64-linux-gnu $(FLAGS) -I$(ROOT)/shim/include
 M32_CXX := $(PLAT_CXX) $(wildcard $(P)/audio/*.cpp) $(wildcard $(P)/input/*.cpp)   # input_horizon.cpp: host no-op pump
-M32_D3DX := $(wildcard $(ROOT)/render/nine/d3dx/*.cpp)
+# the D3D9=null guest's D3D side (toolchain/game/build.sh): D3DX and the null device (d3d9.dll module)
+M32_D3D := $(wildcard $(ROOT)/render/nine/d3dx/*.cpp) $(ROOT)/toolchain/game/null_d3d9.cpp
 M32_TEST := $(wildcard $(HERE)/m32/*.cpp)
-M32_OBJS := $(patsubst $(ROOT)/%,$(M32OUT)/%.o,$(PLAT_C) $(M32_CXX) $(M32_D3DX) $(M32_TEST))
+M32_OBJS := $(patsubst $(ROOT)/%,$(M32OUT)/%.o,$(PLAT_C) $(M32_CXX) $(M32_D3D) $(M32_TEST))
+M32_D3DFLAGS := -std=gnu++17 -m32 -idirafter /usr/include/x86_64-linux-gnu -g -O1 -frounding-math -Wall -fshort-wchar \
+	-include $(HERE)/m32/compat_m32.h -I$(ROOT)/shim/include -I$(ROOT)/toolchain/include -I$(P)/include
 $(M32OUT)/render/nine/d3dx/%.cpp.o: $(ROOT)/render/nine/d3dx/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -std=gnu++17 -m32 -idirafter /usr/include/x86_64-linux-gnu -g -O1 -frounding-math -Wall -fshort-wchar \
-		-fno-exceptions -fno-rtti -include $(HERE)/m32/compat_m32.h -I$(ROOT)/shim/include -I$(ROOT)/toolchain/include \
-		-c $< -o $@
+	$(CXX) $(M32_D3DFLAGS) -fno-exceptions -fno-rtti -c $< -o $@
+$(M32OUT)/toolchain/game/null_d3d9.cpp.o: $(ROOT)/toolchain/game/null_d3d9.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(M32_D3DFLAGS) -w -fms-extensions -fpermissive -c $< -o $@
+$(M32OUT)/tests/s4/m32/%.cpp.o: $(HERE)/m32/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -std=gnu++17 $(M32FLAGS) -include $(HERE)/m32/compat_m32.h -c $< -o $@
 $(M32OUT)/%.c.o: $(ROOT)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(M32FLAGS) -c $< -o $@
