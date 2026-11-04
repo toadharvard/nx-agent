@@ -245,7 +245,7 @@ def _call_end(text, open_at):
             if depth == 0: return i + 1
     return len(text)
 
-CTOR_CALL = re.compile(r'(\.|->)\s*((?:::)?(?:\w+(?:<[^<>;{}()]*>)?::)*?)(\w+(?:<[^<>;{}()]*>)?)::(\w+)\s*\(')
+CTOR_CALL = re.compile(r'(\.|->)[ \t]*((?:::)?(?:\w+(?:<[^<>;{}()]*>)?::)*?)(\w+(?:<[^<>;{}()]*>)?)::(\w+)\s*\(')
 
 def r_ctor_calls(path, text, stats):
     """CTOR1: explicit constructor calls (MSVC extension) p->A::A(args) / o.A::A(args) -> placement new
@@ -254,6 +254,7 @@ def r_ctor_calls(path, text, stats):
     out, pos, n = [], 0, 0
     for m in CTOR_CALL.finditer(text):
         if re.sub(r'<.*', '', m.group(3)) != m.group(4): continue          # A::A / A<T>::A
+        if '//' in text[text.rfind('\n', 0, m.start()) + 1:m.start()]: continue   # in a comment
         s = prepare.operand_start(text, m.start())
         if s >= m.start() or s < pos: continue
         expr = text[s:m.start()].strip()

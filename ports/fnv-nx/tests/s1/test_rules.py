@@ -90,6 +90,9 @@ check('CTOR1 explicit constructor call of a template class',
       run(s1.r_ctor_calls, 'void f() { ((std::vector<char>*)this)->std::vector<char>::vector(); }\n'),
       ['::new ((void*)(std::vector<char>*)(((std::vector<char>*)this))) std::vector<char>()'])
 
+check('CTOR1 a constructor definition after a comment ending in "." is not a call',
+      run(s1.r_ctor_calls, '// see the matcher checks.\nA::A(int x)\n    : m(x)\n{}\n'), ['A::A(int x)'], ['::new'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
