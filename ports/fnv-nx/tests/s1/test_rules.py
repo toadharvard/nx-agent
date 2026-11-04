@@ -884,6 +884,31 @@ if _shutil.which('aarch64-linux-gnu-g++'):
                           '-I' + os.path.join(HERE, '..', '..', 'shim', 'include'), _ci], capture_output=True, text=True)
     check('COM1 output compiles next to the platform IUnknown', _r.stderr or 'ok', ['ok'])
 
+# ---- S1-refs: RREF1-CLASS, RREF2, ADDR1, LANE1
+_rc = ('struct V { int x; };\nstruct R\n{\n    int Read(void* p, V& v);\n    int Use(int n);\n};\n'
+       'struct Other\n{\n    int Read(void* p, V* v);\n};\nV Make();\n'
+       'int R::Use(int n)\n{\n    return Read(0, Make());\n}\n')
+check('RREF1-CLASS an unqualified call in R:: takes R\'s own declarations',
+      run(s1.r_temporaries_to_references, _rc), ['Read(0, fnvnx_lvalue(Make()))'])
+check('RREF1-CLASS a free function with a pointer overload elsewhere stays',
+      run(s1.r_temporaries_to_references, _rc.replace('int R::Use(int n)', 'int Use2(int n)')), [], ['fnvnx_lvalue'])
+_r2 = ('struct E\n{\n    E(int v) { m = v; }\n    bool operator!=(E& o) { return m != o.m; }\n    int m;\n};\n'
+       'bool f(E* p) { return p[0] != E(0); }\n')
+check('RREF2 a temporary for a non-const reference operator parameter',
+      run(s1.r_operator_temporaries, _r2), ['p[0] != fnvnx_lvalue(E(0))'])
+check('RREF2 a const reference operator: unchanged',
+      run(s1.r_operator_temporaries, _r2.replace('operator!=(E& o)', 'operator!=(const E& o)')), [], ['fnvnx_lvalue'])
+check('ADDR1 address of an intrinsic result after a pointer cast',
+      run(s1.r_address_of_temporaries, 'void f(__m128 a) { g((const V*)&_mm_andnot_ps(a, a)); }\n'),
+      ['(const V*)&fnvnx_lvalue(_mm_andnot_ps(a, a))'])
+check('ADDR1 binary & with an intrinsic: unchanged',
+      run(s1.r_address_of_temporaries, 'int f(__m128 a) { return (x) & _mm_movemask_ps(a); }\n'), [], ['fnvnx_lvalue'])
+check('LANE1 address of the lane array',
+      run(s1.r_lane_array_address, 'void f(S s) { g(((&((float*)&(s.v)))[0])); h((0)[&((float*)&(s.v))]); }\n'),
+      ['((float(*)[sizeof(s.v) / sizeof(float)])&(s.v))'], ['&((float*)&(s.v))'])
+check('LANE1 a lane\'s address stays',
+      run(s1.r_lane_array_address, 'void f(S s) { g(&((float*)&(s.v))[1]); }\n'), ['&((float*)&(s.v))[1]'], ['(*)['])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''
