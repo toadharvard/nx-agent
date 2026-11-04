@@ -99,6 +99,14 @@ check('MATH1 drops a decomp copy of float sqrt(float)',
       run(s1.r_math_overloads, 'inline float __cdecl sqrt(float _X)\n{\n    return sqrtf(_X);\n}\n'), ['#include <math.h>'],
       ['return sqrtf'])
 
+check('MATH1 in a namespace that takes the C fabs: the copy goes',
+      run(s1.r_math_overloads, 'namespace N {\nusing ::fabs; /* fnv-nx DECL1 */\ninline float fabs(float f)\n{\n'
+          '    return (float)fabs((double)f);\n}\nfloat g(float x) { return fabs(x); }\n}\n'),
+      ['/* fnv-nx MATH1 */', 'float g(float x)'], ['(float)fabs((double)f)', '#include <math.h>'])
+check('MATH1 in a namespace of its own: the overload stays',
+      run(s1.r_math_overloads, 'namespace N {\ninline float fabs(float f)\n{\n    return f < 0 ? -f : f;\n}\n}\n'),
+      ['return f < 0 ? -f : f;'], ['MATH1'])
+
 # ---- CTOR1
 check('CTOR1 explicit constructor call of a template class',
       run(s1.r_ctor_calls, 'void f() { ((std::vector<char>*)this)->std::vector<char>::vector(); }\n'),
