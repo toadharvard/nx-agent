@@ -186,7 +186,12 @@ def main():
             print('  %08x %-16s %-40s ecx=%s edx=%s\n      ref %s\n      def %s' % (a, v, c[:40], cu, du,
                                                                          dem.get(ref) or ref,
                                                                          ' | '.join(dem.get(x) or x for x in d.split('|'))))
-    return 0
+    # a failing status for findings on linked (compiled) pairs: missed ecx reads, flags where ecx is dead, real
+    # edx parameters behind an edx-dummy ('push' and 'pass' need a look at the code: push ecx may reserve a slot,
+    # a tail call may hand edx to a callee that ignores it)
+    bad = [k for k in buckets if not k.endswith('(pending)') and
+           (k.startswith('FN-read') or k == 'FP-dead' or k == 'TP-this-dead' or k == 'EDX-read')]
+    return 1 if bad else 0
 
 
 if __name__ == '__main__':

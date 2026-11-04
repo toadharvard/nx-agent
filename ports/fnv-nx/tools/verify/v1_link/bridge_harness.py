@@ -270,7 +270,9 @@ def rand_val(t, rng, edge):
         v = edges[edge % 4] if edge is not None and edge < 4 else rng.getrandbits(8 * t.size)
         return v.to_bytes(t.size, 'little')
     if t.kind == 'ptr':
-        return rng.getrandbits(32).to_bytes(4, 'little')
+        # distinct 16-byte aligned addresses inside qemu_ilp32's zeroed arena: valid memory, so a bridge that routes
+        # a result to the wrong pointer is reported as a wrong result (out buffer / result bytes), not a crash
+        return (qemu_ilp32.POOL + (rng.randrange(0, (qemu_ilp32.POOL_SIZE - 4096) // 16) * 16)).to_bytes(4, 'little')
     if t.kind == 'f32':
         edges = [0x80000000, 0x00000001, 0x7f800000, 0x7fc12345, 0x3fc00000]
         return (edges[edge % 5] if edge is not None and edge < 5 else rng.getrandbits(32)).to_bytes(4, 'little')
@@ -319,7 +321,9 @@ def run_case(ref_name, def_name, layouts_ref, layouts_def, bridge_asm, work, see
         else:
             b = rvals[lab]
             vb = list(b) + [None] * ((size + 3) // 4 * 4 - len(b))
-            if loc == def_sret_loc and rtys[lab].kind == 'ptr':
+            if loc == def_sret_loc and size == 4 and rtys[lab].kind in ('ptr', 'int', 'f32'):
+                # the definition's hidden result pointer is this reference value on x86: give it the bits of a
+                # real buffer's address (whatever its declared type), so the bridge's routing can be checked
                 out_param = lab
                 vb = ['OUT'] * 4
         if loc in regs:
@@ -424,7 +428,7 @@ def run_case(ref_name, def_name, layouts_ref, layouts_def, bridge_asm, work, see
     init, call_args = [], []
     for lab, c, t in r_ct:
         if lab == out_param:
-            init.append('void *%s_v = v1_outbuf;' % lab)
+            init.append('%s %s_v; { void *pp = v1_outbuf; memcpy(&%s_v, &pp, 4); }' % (c, lab, lab))
         else:
             init.append('%s %s_v; { unsigned char b[] = %s; memcpy(&%s_v, b, sizeof b); }' % (c, lab, cinit(rvals[lab]), lab))
         call_args.append('%s_v' % lab)

@@ -161,6 +161,16 @@ def t_c5(work):
     check(bool(kinds & {'anchor', 'direct'}), 'c5: a renamed static reached through its section is found (%s)' % kinds)
     check(not any(r[5] == '__fnv_01234570' and r[0] in ('anchor', 'direct') for r in rows),
           'c5: a renamed global reached through the GOT is not flagged')
+    src2 = os.path.join(d, 'p.c')
+    open(src2, 'w').write('extern int __fnv_01234580; int g(void) { return __fnv_01234580; }\n')
+    o3 = os.path.join(d, 'p.o')
+    subprocess.run([qemu_ilp32.CC, '-mabi=ilp32', '-O2', '-fno-pic', '-c', src2, '-o', o3], check=True)
+    rows, _, _ = c5_pic.scan_object(o3)
+    check(any(r[0] == 'pcrel-image' for r in rows), 'c5: a PC-relative reference to an image symbol is found')
+    o4 = os.path.join(d, 'p_pic.o')
+    subprocess.run([qemu_ilp32.CC, '-mabi=ilp32', '-O2', '-fPIC', '-c', src2, '-o', o4], check=True)
+    rows, _, _ = c5_pic.scan_object(o4)
+    check(not any(r[0] == 'pcrel-image' for r in rows), 'c5: the same reference with -fPIC goes through the GOT')
 
 
 def main():

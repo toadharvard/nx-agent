@@ -93,6 +93,14 @@ def follow(code, off, base_reg, base_val, limit=96):
 def scan_object(path):
     o = elf32.Obj(path)
     rows = []
+    # PC-relative code references to an absolute image-address symbol (only valid at one link address, J-0048)
+    for r in o.rels:
+        m = REB.match(r.sym.name or '')
+        if m and r.sym.shndx == 'SHN_UNDEF' and IMG_LO <= int(m.group(1), 16) < IMG_HI and \
+                r.type in ('ADR_PREL_PG_HI21', 'ADR_PREL_LO21', 'LD_PREL_LO19', 'PREL32', 'PREL16') and \
+                not r.sym.name.startswith('__fnvnx_tls_'):
+            rows.append(('pcrel-image', os.path.basename(path), '%s+%#x' % (o.secname(r.sec), r.offset), r.type,
+                         r.sym.name, '', ''))
     reb = {}            # (shndx, value) -> (name, size)
     for s in o.syms:
         m = REB.match(s.name or '')
@@ -265,7 +273,7 @@ def main():
     print('findings:', dict(c))
     print('variables a unit binds to an image address and its original object defines: %d; not rebound: %d'
           % (n_bound, n_missed))
-    return 1 if c.get('direct') or c.get('anchor') or n_missed else 0
+    return 1 if c.get('direct') or c.get('anchor') or c.get('pcrel-image') or n_missed else 0
 
 
 if __name__ == '__main__':

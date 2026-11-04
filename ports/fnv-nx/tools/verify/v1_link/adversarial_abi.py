@@ -5,7 +5,18 @@ the MSVC x86 semantics the oracle established. No decomp content: all names are 
 
     python3 adversarial_abi.py [work dir]
 
-Cases marked 'control' must pass; the others are the BUG-A / BUG-B / BUG-C reproducers (docs/VERIFY_V1_LINK.md)."""
+Cases marked 'control' must pass; the 'bug' cases reproduce three defects of the code under test (exit 1 while any
+of them still fails, 2 when a control fails):
+
+  A  MSVC returns a free function's 1/2/4/8-byte aggregate in edx:eax only for a C++03 POD (oracle: a user
+     constructor -> hidden buffer); abi2 decides by Itanium triviality, so `C4 f()` vs `void f(C4 *)` is 'same'.
+  B  __fastcall with a hidden result: MSVC passes the buffer as the first stack word and keeps ecx/edx for the
+     arguments (oracle); abi2's bridge puts it in place of the first register argument. Real in f12: all 25
+     bridged references of 0x0056fa00 (a __fastcall function returning a 36-byte aggregate, referenced from
+     thiscall members) store the result over *this and never into the caller's buffer (c2_bridges.py with
+     V1_SELECT=fastcall-agg).
+  C  float vs double results are 'same' (one register file): x86 converts exactly through st(0), AArch64 reads d0
+     where the callee wrote s0. Real in f12: 130 pairs / 190 references bound directly (c2_shapes.py)."""
 import os
 import sys
 import tempfile
@@ -43,7 +54,7 @@ def main():
     work = sys.argv[1] if len(sys.argv) > 1 else tempfile.mkdtemp(prefix='v1_adv_')
     names = sorted({c[2] for c in CASES} | {c[3] for c in CASES})
     dem = bh.undname(names)
-    bad_controls = 0
+    bad_controls = bugs = 0
     for cid, role, ref, dfn, lays in CASES:
         tl = {k: v[:4] for k, v in lays.items()}
         hl = {k: bh.Lay(v[0], v[1], v[2], v[3], v[4]) for k, v in lays.items()}
@@ -55,10 +66,13 @@ def main():
             st, notes = 'skip ' + str(e), []
         if role == 'control' and st != 'pass':
             bad_controls += 1
+        if role == 'bug' and st != 'pass':
+            bugs += 1
         print('%-40s %-9s tool=%-16s %-40s -> %s %s' % (cid, role, kind, ','.join(classes)[:40], st,
                                                       ('[' + '; '.join(notes) + ']') if notes else ''))
         print('      ref: %s\n      def: %s' % (dem[ref], dem[dfn]))
-    return 1 if bad_controls else 0
+    print('controls failing: %d; defect reproducers failing (defect present): %d' % (bad_controls, bugs))
+    return 2 if bad_controls else (1 if bugs else 0)
 
 
 if __name__ == '__main__':
