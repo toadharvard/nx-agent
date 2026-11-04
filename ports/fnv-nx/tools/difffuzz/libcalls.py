@@ -54,15 +54,17 @@ A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp'
 # for allocation type 10 only; 0x00aa1460 passes type 3). Slot 2 = 0x00aa22b0 is inferred from its signature.
 EQUIV = {'_Znwm': 0x00401000, '_Znwj': 0x00401000, '_Znam': 0x00401000, '_Znaj': 0x00401000,
          '_ZdlPv': 0x00401030, '_ZdlPvm': 0x00aa1460, '_ZdlPvj': 0x00aa1460, '_ZdaPv': 0x00401030,
-         '_ZdaPvm': 0x00aa1460, '_ZdaPvj': 0x00aa1460, '__dynamic_cast': 0x00ec43fb}
-NO_ARGS = {0x00401000, 0x00401030, 0x00aa1460, 0x00ec43fb}    # traced, compared by target only
+         '_ZdaPvm': 0x00aa1460, '_ZdaPvj': 0x00aa1460, '__dynamic_cast': 0x00ec43fb,
+         # registration of a static destructor: CRT _atexit in the oracle, XC1's onexit table natively
+         'fnvnx_xc_atexit': 0x00ec658f, 'atexit': 0x00ec658f, 'fnvnx_xc_cxa_atexit': 0x00ec658f}
+NO_ARGS = {0x00401000, 0x00401030, 0x00aa1460, 0x00ec43fb, 0x00ec658f}    # traced, compared by target only
 
 
 class Mem:
     """Memory access for builtins: reads via the engine, writes recorded as program stores."""
 
-    def __init__(self, uc, writes, ensure):
-        self.uc, self.writes, self.ensure = uc, writes, ensure
+    def __init__(self, uc, writes, ensure, norm=None):
+        self.uc, self.writes, self.ensure, self.norm = uc, writes, ensure, norm
 
     def read(self, a, n):
         if n <= 0:
@@ -75,6 +77,8 @@ class Mem:
             return
         self.ensure(a, len(b))
         self.uc.mem_write(a, b)
+        if self.norm:
+            b = self.norm(bytes(b))        # what the stored values stand for (native code pointers -> originals)
         for i, x in enumerate(b):
             if any(lo <= a + i < hi for lo, hi in world.COMPARED):   # like the machines' write hooks
                 self.writes[a + i] = x

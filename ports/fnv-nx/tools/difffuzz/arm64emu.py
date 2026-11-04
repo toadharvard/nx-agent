@@ -212,7 +212,44 @@ class Arm64Engine:
             uc.mem_write(sp, bytes(frame))
         uc.reg_write(A.UC_ARM64_REG_SP, sp)
 
+    def _codeptr(self, v):
+        """A native code address stored as data stands for its original address (S3 maps image code pointers to
+        native ones): a code stub (unlinked callee) or a native entry of the image."""
+        if a64image.CODE_STUB <= v < a64image.NAMED_STUB:
+            return v - a64image.CODE_STUB
+        return self.image.entries.get(v, v)
+
+    def _norm_bytes(self, b):
+        b = bytearray(b)
+        i = 0
+        while i + 4 <= len(b):
+            w = int.from_bytes(b[i:i + 4], 'little')
+            n = self._codeptr(w)
+            if n == w and self.vtables:
+                n = self.vtables.get(w, w)
+            if n != w:
+                b[i:i + 4] = n.to_bytes(4, 'little')
+                i += 4
+            else:
+                i += 1
+        return bytes(b)
+
     def _on_write(self, uc, access, address, size, value, r):
+        if size >= 4:
+            # code pointers anywhere in the stored bytes (tables of initializers are not always word aligned)
+            b = bytearray(value.to_bytes(size, 'little'))
+            i, changed = 0, False
+            while i + 4 <= size:
+                w = int.from_bytes(b[i:i + 4], 'little')
+                n = self._codeptr(w)
+                if n != w:
+                    b[i:i + 4] = n.to_bytes(4, 'little')
+                    changed = True
+                    i += 4
+                else:
+                    i += 1
+            if changed:
+                value = int.from_bytes(bytes(b), 'little')
         vt = self.vtables
         if vt and size in (4, 8):
             # a native vtable address point stored into an object stands for the image vftable (D7)
@@ -261,7 +298,7 @@ class Arm64Engine:
     def _builtin(self, uc, name, target, r):
         if name and libcalls.import_name(name)[0] in libcalls.IMPORT_BUILTINS:
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
-            v = libcalls.run_import(libcalls.import_name(name)[0], libcalls.Mem(uc, r.writes, self._ensure), args)
+            v = libcalls.run_import(libcalls.import_name(name)[0], libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
             uc.reg_write(XR[0], v & 0xffffffff)
             uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
             return True
@@ -284,7 +321,7 @@ class Arm64Engine:
         else:
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
             try:
-                v = libcalls.run(bname, libcalls.Mem(uc, r.writes, self._ensure), args)
+                v = libcalls.run(bname, libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
             except libcalls.TooLong:
                 self._fault = 'fault:libcall-length'; uc.emu_stop(); return True
             uc.reg_write(XR[0], v & 0xffffffff)
