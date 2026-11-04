@@ -59,6 +59,6 @@
 * **next** - Scene-level capture/replay joined with `build/v6n/pass_space.tsv` (RENDER_VERIFY §6). This needs VS/IB
   commands in the scene format and S6n's N1 capture fed to the Nine path. Then a pixel-shader path plus float/depth
   read-back for `v6n_s6ngl` (S6n's API has neither today), `parity.py` on the player's `.sdp` files, classification
-  of the 5 reproducers, and on-device conformance (RENDER_VERIFY §8). Orchestrator: correct RENDER_NATIVE.md §1.3
-  in the docs, and decide whether `render/verify/` and `tests/v6n/` go into MACHINES.md's ownership table for the
+  of the 5 reproducers, and on-device conformance (RENDER_VERIFY §8). S6n corrects RENDER_NATIVE.md §1.3 (render
+  machine file) next round. Orchestrator: decide whether `render/verify/` and `tests/v6n/` go into MACHINES.md's ownership table for the
   render machine.
