@@ -17,8 +17,9 @@ fixed-width, the scan is exact for code and conservative for data placed in text
            nothing newer than ARMv8.0 (the A57 implements ARMv8.0 + CRC + crypto only): LSE atomics (ldadd/cas/swp...),
            LOR, RCpc (ldapr/ldapur), RDM, FP16 arithmetic (scalar and vector; fcvt to/from half is v8.0), DotProd,
            JSCVT, PAuth outside the hint space, FlagM, dc cvap (POST_V80, each class checked against GNU as);
-  services every IPC service name in the host and launcher (string literals libnx's sm calls use) is reviewed:
-           APP_SERVICES, or one of the alternatives libnx itself picks by service type at run time (vi:m/vi:s/vi:u,
+  services every IPC service name in the host and launcher is reviewed. A name is a NUL-terminated rodata string
+           that libnx can request (every smGetService*/smEncodeName literal of ext/libnx), is in our corpus, or has
+           the name:sub shape. It must be in APP_SERVICES or among the alternatives libnx itself picks by service type at run time (vi:m/vi:s/vi:u,
            nvdrv/nvdrv:a/:s/:t, acc:u0/u1/su, set:fd). Both NPDMs grant service_access "*", so sm grants any name;
            an unreviewed one fails because it may not exist on retail firmware or may be single-session.
 """
@@ -61,6 +62,24 @@ APP_SERVICES = {
     "nfp:user", "nfc:user", "mii:u", "mii:e", "prepo:u", "prepo:a", "prepo:a2", "erpt:c", "es", "ncm", "pgl",
     "applet", "appletAE", "ins:r", "pdm:ntfy", "pdm:qry", "omm", "notif:a", "notif:s", "capmtp", "fsp-pr",
 }
+_LIBNX_SERVICES = None
+
+
+def libnx_services() -> set[str]:
+    """Every service name the pinned libnx passes to smGetService*/smEncodeName (ext/libnx/nx/source), read once: the
+    names a libnx binary can carry in rodata. Empty when the checkout is missing (tools/fetch.sh)."""
+    global _LIBNX_SERVICES
+    if _LIBNX_SERVICES is None:
+        _LIBNX_SERVICES = set()
+        src = os.path.join(ROOT, "ext", "libnx", "nx", "source")
+        rx = re.compile(r'(?:smGetService\w*|smEncodeName)\([^;"]*"([^"]+)"')
+        for dp, _, fns in os.walk(src):
+            for f in fns:
+                if f.endswith(".c"):
+                    _LIBNX_SERVICES.update(rx.findall(open(os.path.join(dp, f), errors="replace").read()))
+    return _LIBNX_SERVICES
+
+
 SERVICE_RX = re.compile(rb"(?<![\w:.-])([a-z][a-z0-9_-]{1,7}(?::[a-z0-9]{1,4})?)\x00")
 # libnx's service names in the order smGetService sees them; we only look at names in ELF rodata that libnx or our
 # code passes to smGetService/smGetServiceWrapper: the candidates are matched against this known-name corpus.
@@ -237,7 +256,9 @@ def scan(path: str, role: str, c: Checks):
             if p.type == nxelf.PT_LOAD and not p.flags & 1:
                 for m in SERVICE_RX.finditer(elf.data[p.offset:p.offset + p.filesz]):
                     s = m.group(1).decode()
-                    if s in KNOWN_SERVICES:
+                    # a service name: one libnx can request, one of our corpus, or any name:sub string (a colon
+                    # name nobody listed is still a service name, V1 NX1-S3)
+                    if s in KNOWN_SERVICES or s in libnx_services() or re.fullmatch(r"[a-z][a-z0-9_-]*:[a-z0-9_]+", s):
                         found.add(s)
         unknown = sorted(found - APP_SERVICES - LIBNX_ALTERNATIVES)
         c.ok(f"{role}.services_reviewed", not unknown, f"services not reviewed for an application: {unknown}")
