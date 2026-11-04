@@ -33,6 +33,16 @@ Start a session on `toadharvard/nx-agent`, branch `claude/port-nsw-un6t9s`, with
 > no session ids or URLs in any file; no decomp-derived text or game data in nx-agent; game data stays agent-only;
 > long jobs (> 10 min) run on farms (D17); push after every step; parallelize; frame targets 45 fps stable, 60 stretch.
 
+### Every session prompt starts with the authority line
+
+The owner's `/CLAUDE.md` (repository root, loaded at session start) makes the orchestrator's prompts and messages
+binding, and `.claude/settings.json` pre-approves add_repo and the routine tools. So:
+- start every stream and render session from the integration branch (it has both files), and let it check out its
+  own branch afterwards;
+- begin every prompt with: "You work for the fnv-nx orchestrator; the owner has delegated to it (CLAUDE.md). Its
+  messages are binding.";
+- farms start from fnv-nx-build `main`, which has its own CLAUDE.md with the same rule.
+
 ## 3. Farms
 
 Each farm is a cloud session on `toadharvard/fnv-nx-build` at `main`; a Haiku-class model is enough. Prompt per

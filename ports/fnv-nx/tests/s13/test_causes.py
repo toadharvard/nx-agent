@@ -79,6 +79,8 @@ def test_rules():
           'arg-stack-vs-object', 'stack temporary vs the object')
     check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x03002000), arm=w(0x03001000))) ==
           'arg-other-buffer', 'another argument buffer')
+    check(refined(dict(kind='call-args', arg='p0', cls='P', x86=w(0x03801048), arm=w(0x03801040))) ==
+          'layout-offset', 'this+8 vs this+0: layout-offset')
     check(refined(dict(kind='call-args', arg='p1', cls='I32', x86=w(0x9cf46a07), arm=w(0x9cf46a27))) ==
           'x87-precision', 'float bits through an int parameter, 32 ulp apart')
     check(refined(dict(kind='call-args', arg='p0', cls='I32', x86=w(0x14), arm=w(0x13))) == 'unclassified',
@@ -161,6 +163,39 @@ def test_rules():
     finally:
         causes.native_callees = real
     check(causes.native_callees('src/none.cpp', 0x00401000) is None, 'no object: no callee facts')
+    # effects lines refine triage causes
+    causes.EFFECTS.clear()
+    causes.EFFECTS.update({
+        'e1.json': dict(first='width'),
+        'e2.json': dict(first='store', store=dict(word=dict(x86='image address 0102e388',
+                                                           arm='native image .data.rel.ro _ZTV9FirstBase+8'))),
+        'e4.json': dict(first='store', store=dict(addr='03000000', x86=dict(v='00', size=4, pc='0044deea'), arm=None,
+                                                  word=dict(x86='zero', arm='zero'))),
+        'e3.json': dict(first='store', store=dict(word=dict(x86='image address 01200000', arm='native named stub 0b000010')))})
+    try:
+        mw = dict(kind='mem-write', addr='03000010', ndiff=4, only_x86=0, only_arm=0, x86=w(5, 0), arm=w(6, 0))
+        check(causes.refine(dict(rec(mw), _file='e1.json'), 'unclassified') == 'field-width', 'effects: field-width')
+        check(causes.refine(dict(rec(mw), _file='e2.json'), 'unclassified') == 'vptr-unpaired', 'effects: vptr-unpaired')
+        check(causes.refine(dict(rec(mw), _file='e3.json'), 'unclassified') == 'native-stub-data',
+              'effects: native named stub stored')
+        check(causes.refine(dict(rec(mw), _file='e4.json', _size=0x40), 'unclassified') == 'oracle-callee-store',
+              'effects: store made by a callee only the oracle runs')
+        check(causes.refine(dict(rec(mw, addr='0044dee0'), _file='e4.json', _size=0x40), 'unclassified') ==
+              'unclassified', 'effects: store inside the function stays open')
+        check(causes.refine(dict(rec(mw), _file='e1.json'), 'uninit-arm') == 'uninit-arm',
+              'effects never override a non-triage cause')
+    finally:
+        causes.EFFECTS.clear()
+    # a triage record in a function that calls an unbound C++ name
+    real = causes.unbound_callees
+    try:
+        causes.unbound_callees = lambda src, a: ['_ZNK6Point3mlEf']
+        check(causes.refine(rec(dict(kind='return', x86=w(1), arm=w(2))), 'unclassified') == 'after-native-undefined',
+              'triage record downstream of an unbound name')
+        check(causes.refine(rec(dict(kind='return', x86=w(1), arm=w(2))), 'bool-repr') == 'bool-repr',
+              'a by-design cause stays')
+    finally:
+        causes.unbound_callees = real
     # a definite probe cause is never overridden
     check(causes.refine(rec(dict(kind='error', x86=None, arm='exc:1@0'), 'uninit-arm'), 'uninit-arm') == 'uninit-arm',
           'probe cause kept')

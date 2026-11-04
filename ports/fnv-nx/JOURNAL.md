@@ -3257,3 +3257,36 @@ The owner moves the work to another session or account (quota). Resume with docs
   - 60 fps at 1.785 GHz from plan45 on.
   - The queue, ranked by main-thread saving: mt_cull 2.7 M, accumulation 1.8 M, render F2-F4 1.75 M, Havok workers 1.55 M, threaded animation + NEON Slerp 1.15 M.
   - Hardware tests need Linux on an A57 (the Switch under L4T, or a Jetson TX1/Nano).
+
+### J-0149 | 2026-11-04 | stream: orchestration (resume),S1-crt,S13b-causes,S6n-native-render | status: wip | parent: J-0148
+
+The project resumed in a new account. Done along docs/HANDOFF.md.
+
+* **did (farms)** - All 44 farms run again, each with an hourly check-in task bound to its session.
+  - On Haiku: prep, farm1, farm2-5 (compile k/4), link1, eq1-6, try1of4-try4of4, fz1-26.
+  - On Opus: full1 (it builds and boots).
+  - st1-st4 stay paused (J-0134).
+  - `push_wip.sh 120` runs on the orchestrator.
+  - Setup needs `apt-get update` first: a fresh image's package index is stale.
+* **did (streams)** - The cloud streams run on Opus: render machine (claude/port-nsw-render), S2d, S12 and S13b. They
+  attach the private repo themselves.
+  - Local worktree agents (Opus): S1-STL, S1-refs, S1-fuzzq (the S1 real-bug queue), S1b, S2c, S4, S5, S11, S13,
+    S15, S16, R0 and V1.
+  - The shared local brief lives outside git. Pinned externals are in a shared ext directory (tools/fetch.sh).
+* **did (game data)** - The owner logged in to GOG again (browser login). lgogdownloader was built from source at
+  98dcbd7, and the installer downloaded and unpacked with innoextract.
+  - FalloutNV.exe sha256 89e70204...dd0fe matches GOG 1.4.0.525(a). The full Data/ (9.5 GB) is in the
+    orchestrator's container, agent-only.
+  - The refreshed token was not pushed to `gamedata/gog`: the session's permission check refused it. The branch
+    still holds the stale token.
+* **merged**
+  - COM1 f3ca74a as 0685791 (J-0146 correction). The RULES conflict was resolved onto the current order. tests/s1:
+    0 failed.
+  - S13b aa77579..0111901: layout-offset, effects.py kwargs, triage refinement, after-native-undefined,
+    oracle-callee-store. tests/s13 (causes, difffuzz, fuzzcache): 0 failures.
+  - Render f37af7a, f280eb4, a16a489: the fp16 finding, SortPackets as an 8-bit-digit radix, UBO binds only on
+    change. tests/s6n: d3d9_state 527/0, front 53/0, harness 29/0.
+  - test_overrides and test_requests fail the same way before and after the merge: they need local artifacts
+    (vftables.tsv, ext/fnv_decomp/build/units.json, libnxrender.a).
+* **next** - The S15 agent hand-merges d909c82 and 42e9fa5 (J-0148). Merge each stream as it reports. Restart
+  st1-st4 when S12 says its whole-program fix has landed. Start a gates farm once R0's gates_job.sh is merged.
