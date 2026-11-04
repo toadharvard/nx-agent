@@ -417,6 +417,23 @@ def _narrower(wide, narrow):
     return 0 < k < len(wide) and narrow[:k] == wide[:k]
 
 
+_IAT = None
+
+
+def iat_names():
+    """{IAT slot address: api name} from platform/win32/imports.tsv (S4)."""
+    global _IAT
+    if _IAT is None:
+        _IAT = {}
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'platform', 'win32', 'imports.tsv')
+        if os.path.exists(p):
+            for line in open(p, encoding='utf-8', errors='replace'):
+                f = line.rstrip('\n').split('\t')
+                if len(f) >= 3 and f[0].startswith('0x'):
+                    _IAT[int(f[0], 16)] = f[2]
+    return _IAT
+
+
 def _rule_calls(d, rec=None):
     tx, ta = d.get('x86_trace'), d.get('arm_trace')
     if d.get('kind') == 'call-target':
@@ -428,6 +445,11 @@ def _rule_calls(d, rec=None):
         if x.startswith('imp:'):
             try:
                 if _in(int(a, 16), WINDOW):
+                    # the link binds a call of an import to the api (fnvlink `import`), and the harness gives the
+                    # native api symbol the address of its IAT slot (engine.iat_names): the same import is the
+                    # same call (S2c-abi: all 11 rows of reports/s13b-causes were VirtualAlloc/VirtualFree)
+                    if iat_names().get(int(a, 16)) == x[4:]:
+                        return 'runtime-equiv'
                     return 'import-slot-called'
             except ValueError:
                 pass
