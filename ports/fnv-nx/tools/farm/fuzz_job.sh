@@ -270,7 +270,8 @@ note = m.get('tree') or ''
 h = re.search(r'tree hash ([0-9a-f]{8,})', note)
 print(h.group(1) if h else '')
 c = re.search(r'published for ([0-9a-f]{7,40})', note)
-for x in (c.group(1) if c else '', m.get('objects_commit') or ''):
+# the objects commit's tree only with a recorded hash to check it against (V1 F2)
+for x in (c.group(1) if c else '', (m.get('objects_commit') or '') if h else ''):
     if x:
         print(x)
 EOF
@@ -294,6 +295,10 @@ EOF
       th=$(ARTIFACTS=$ARTIFACTS REPO=$REPO FARM_HOME=$FARM_HOME bash "$HERE/fetch_tree.sh" "$LCOMMIT" "$TREE" \
            "${FUZZ_TREE_WAIT:-1800}" 2>> "$RUN/fetch_tree.log") \
         || fail_report 3 "no prepared tree for the link commit $L12, the tree it records or its objects commit (see fetch_tree.log)"
+      # the tree waited for is checked like the candidates (V1 F1: a mismatched t/<L12> was taken here)
+      if [ -n "$want_th" ] && [ "${th:0:${#want_th}}" != "$want_th" ] && [ "${want_th:0:${#th}}" != "$th" ]; then
+        fail_report 3 "the prepared tree of $L12 has hash $th, the link was made on $want_th (see fetch_tree.log)"
+      fi
       TREE_FROM=$LCOMMIT
     fi
     echo "$th ${TREE_FROM:0:12}" > "$TREE.done"
@@ -313,11 +318,20 @@ export FNVNX_DECOMP=$DECOMP FNVNX_X86OBJ=$ORACLE/obj FNVNX_TREE=$TREE FNVNX_A64O
 export FNVNX_DFWORK=$RUN/work FNVNX_DFA64=$RUN/a64 SSE2NEON=$EXT/sse2neon
 unset FNVNX_DFPROFILE
 mkdir -p "$RUN/work"
+# FUZZ_SETUP_ONLY=<file> (tools/farm/audit_job.sh): stop here, with every input in place, and write them as a harness
+# profile (FNVNX_DFPROFILE format, KEY=VALUE) plus the python and the link it names; no fuzzing, no report, no push.
+if [ -n "${FUZZ_SETUP_ONLY:-}" ]; then
+  { for v in FNVNX_EXE FNVNX_DECOMP FNVNX_X86OBJ FNVNX_TREE FNVNX_A64OBJ FNVNX_DFLINK FNVNX_DFWORK FNVNX_DFA64 SSE2NEON; do
+      echo "$v=${!v}"; done
+    echo "FNVNX_AUDIT_PY=$PY"; echo "FNVNX_AUDIT_LINK=$NOTE_LINK"; echo "FNVNX_AUDIT_SRC=$P"; } > "$FUZZ_SETUP_ONLY"
+  exit 0
+fi
 t1=$(date +%s)
 
 # --- targets: catalog (per decomp commit), modelled functions with both objects, this shard ------------------------
 CAT=$FARM_HOME/catalog-$D12.jsonl
-if [ ! -s "$CAT" ] || ! head -1 "$CAT" | grep -q '"ohash"'; then
+CATV=$(sed -n 's/^CATALOG_VERSION = \([0-9]*\)/\1/p' "$DF/catalog.py")
+if [ ! -s "$CAT" ] || ! head -1 "$CAT" | grep -q "\"cv\": $CATV[,}]"; then
   log "catalog"
   (cd "$DF" && nice $PY catalog.py --out "$CAT.tmp" > "$RUN/catalog.log" 2>&1) && mv "$CAT.tmp" "$CAT"
 fi
@@ -422,7 +436,9 @@ mkdir -p "$RUN/camp"; touch "$RUN/camp/results.jsonl"
 rm -f "$RUN"/chunk.* "$RUN/stop.txt"
 split -l "$CHUNK" -d -a 4 "$RUN/todo.jsonl" "$RUN/chunk."
 HEAD_BRANCH=${FUZZ_HEAD_BRANCH:-claude/port-nsw-un6t9s}
-harness_of() { sed -n "s/^HARNESS = '\(.*\)'/\1/p"; }
+# HARNESS (a full refresh) and SCOPED (the newest scoped change, fnkeys.CHANGES): either one differing on the
+# integration head makes this run's verdicts stale for some functions
+harness_of() { sed -n "s/^\(HARNESS\|SCOPED\) = '\(.*\)'/\2/p" | paste -sd+; }
 MY_HARNESS=$(harness_of < "$DF/fnkeys.py"); export MY_HARNESS
 for c in "$RUN"/chunk.*; do
   [ -s "$c" ] || continue

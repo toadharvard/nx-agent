@@ -740,10 +740,13 @@ DEVKITPRO=<dkp> toolchain/package/build.sh <g>/guest.nso <pkg> <program id> <g>/
    program id (`nxctl app` while it runs, as in section 6). Build the package with that id; the NPDM carries it.
 2. Copy `<pkg>/sd/` to the root of the card: `atmosphere/contents/<program id>/exefs.nsp` and `fnvnx/guest.nso`.
    `<pkg>/MANIFEST.txt` lists their sizes and SHA-256.
-3. Game files: `sdmc:/fnvnx/game/FalloutNV.exe` (1.4.0.525, not SteamStub-wrapped: the boot says "SteamStub-wrapped"
-   otherwise) and `sdmc:/fnvnx/game/Data/` (the .esm/.bsa files). `C:\FalloutNV` is `sdmc:/fnvnx/game`; the profile
-   (`My Games/FalloutNV`, Fallout.ini, saves) is `sdmc:/fnvnx/user`. Without the exe the guest boots in trace mode
-   with an empty data image.
+3. Game files: the install folder of the player's game, as it is on the PC, goes to `sdmc:/switch/fnv/`:
+   `FalloutNV.exe` (1.4.0.525, not SteamStub-wrapped: the boot says "SteamStub-wrapped" otherwise),
+   `Fallout_default.ini` and `Data/` (the .esm/.bsa files). `C:\FalloutNV` is `sdmc:/switch/fnv` itself (path.cpp
+   mounts it at the root). The profile
+   (`My Games/FalloutNV`, Fallout.ini, saves) is `sdmc:/switch/fnv/user`. It is one folder for the port and the
+   game, as in NX1's `toolchain/include/fnvnx/sdlayout.h`. Guests built before this layout read
+   `sdmc:/fnvnx/game` and `sdmc:/fnvnx/user`. Without the exe the guest boots in trace mode with an empty data image.
 4. Launch the title from HOME without holding R. Clean up afterwards by deleting
    `atmosphere/contents/<program id>/exefs.nsp`.
 
@@ -754,7 +757,7 @@ fnvnx host: LP64 sizeof(void*)=8, address space 32BitNoReserved, host image ...
   original image range 0x00400000..0x02100000 (data window from 0x00fdf000): free (region at ...)
 fnvnx host: guest sdmc:/fnvnx/guest.nso mapped at 0x0......., 0x155f000 bytes     (first free range above 0x02100000)
 fnvnx boot: early init (before the game's static initialisers)
-fnvnx boot: sdmc:/fnvnx/game/FalloutNV.exe: image base 0x400000, N sections
+fnvnx boot: sdmc:/switch/fnv/FalloutNV.exe: image base 0x400000, N sections
 fnvnx boot: imports: N slots, M resolved, K unresolved     (+ one "import dll!name: no export" line each)
 fnvnx boot: IAT ...; code pointers: ... found, ... applied, ... trapped, ... mismatched
 fnvnx boot: memory manager: constructor 0x00aa3880 has no native definition, game heap not initialised
@@ -1121,10 +1124,17 @@ Who writes what:
 **Booting locally on the player's data** (the data never leaves this machine):
 
 ```
-mkdir -p <sdmc>/fnvnx && ln -s <game dir> <sdmc>/fnvnx/game        # FalloutNV.exe and Data/
 python3 -I tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init --root <sdmc> \
-    --budget 6000000000 [--stub-faults tests/s5/known_faults.txt] --summary-json boot.json
+    --game <game dir> --budget 6000000000 [--stub-faults tests/s5/known_faults.txt] --summary-json boot.json
 ```
+
+`--game` mounts the install (FalloutNV.exe, Fallout_default.ini, Data/) in place at the guest's `sdmc:/switch/fnv`
+and the older `sdmc:/fnvnx/game`. The port's own entries there (user/, fnvnx.ini, guest.nso, the logs) stay in
+`--root`; without it both are `<sdmc>/fnvnx/game`. Paths fold case as on the SD card
+(`tests/s5/datapath.py`). `farm_boot.sh` takes the same as `FARM_GAME=<game dir>`. The data milestones (`data` lines
+of `tests/s5/milestones.txt`: ini-read, archive-list, bsa-opened, esm-header, masters-loaded) and the file faults
+(`data-counts`, `file-fault` lines; `data` and `file_faults` in the summary JSON) come from the guest's host file
+calls.
 
 **First boots on FalloutNV.exe 1.4.0.525 (GOG)**, guest of fa88387. That guest predates 8b24dc6, so its pe_open
 check of SizeOfImage was patched by hand for this analysis. That guest also predates INIT1, so its stub table adds

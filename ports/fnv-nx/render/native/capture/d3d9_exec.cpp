@@ -518,9 +518,14 @@ public:
             if (16 + (uint64_t)b > n) return Fail("TEXC");
             if (it == tex.end() || !it->second.cube || face >= 6 || level >= it->second.data.size()) break;
             vector<uint8_t>& l = it->second.data[level];
-            const size_t fb = l.size() / 6;
-            if (b != fb) return Fail("TEXC: face bytes differ from the level's");
-            memcpy(l.data() + face * fb, p + 16, b);
+            // a cube created without contents (levels of 0 bytes) is filled face by face: the first TEXC of a level
+            // sizes it to six faces of this size
+            if (l.size() != 6 * (size_t)b) {
+                if (!l.empty()) return Fail("TEXC: face bytes differ from the level's");
+                if (!Charge(6ull * b)) return Fail("TEXC: input exceeds the resident limit");
+                l.assign(6 * (size_t)b, 0);
+            }
+            memcpy(l.data() + face * (size_t)b, p + 16, b);
             it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data, true);
             break;
         }

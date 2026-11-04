@@ -117,6 +117,21 @@ class CapGate(unittest.TestCase):
             self.assertEqual(y['status'], 'unstable')
 
 
+class WineRefMirror(unittest.TestCase):
+    def test_base_load_order_only(self):
+        """the Data mirror leaves out .nam files, masters outside scenes.json's plugins and their BSAs (a .nam loads
+        its add-on even when plugins.txt leaves it out); the base game's BSAs stay"""
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(f'{t}/game/Data')
+            for n in ('FalloutNV.esm', 'DeadMoney.esm', 'CaravanPack.esm', 'CaravanPack.nam', 'DEADMONEY.NAM',
+                      'Fallout - Textures.bsa', 'Update.bsa', 'DeadMoney - Main.bsa', 'CaravanPack - Main.bsa'):
+                open(f'{t}/game/Data/{n}', 'w').close()
+            r = subprocess.run(['bash', os.path.join(TOOLS, 'wine_ref.sh'), 'mirror', f'{t}/game', f'{t}/m'],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(sorted(os.listdir(f'{t}/m/Data')), ['Fallout - Textures.bsa', 'FalloutNV.esm', 'Update.bsa'])
+
+
 class Synth(unittest.TestCase):
     def test_list(self):
         p = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'synth.py'), 'list'], capture_output=True, text=True)
@@ -180,6 +195,12 @@ class EndToEnd(unittest.TestCase):
                    f'{t}/cand', '--out', f'{t}/gate')
             g = json.load(open(f'{t}/gate/capgate.json'))
             self.assertEqual(g['summary']['metric']['floor_max_abs'], 0, 'the Wine reference must repeat itself')
+            # --frames limits the PNGs (a long journal otherwise writes one per frame), every frame still runs
+            r = py(os.path.join(TOOLS, 'replay.py'), 'ref', '--exe', f'{b}/nxd9play.exe', '--prefix', f'{b}/pfx',
+                   '--out', f'{t}/only1', os.path.join(t, 'syn', 'texture.nxd9'), '--', '--frames', '1')
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(sorted(f for f in os.listdir(f'{t}/only1/texture') if f.endswith('.png')), ['f00001.png'])
+            self.assertEqual(open(f'{t}/only1/texture/f00001.png', 'rb').read(), open(f'{t}/ref1/texture/f00001.png', 'rb').read())
 
 
 if __name__ == '__main__':

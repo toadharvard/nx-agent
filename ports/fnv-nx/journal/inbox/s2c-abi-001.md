@@ -117,6 +117,12 @@
 * **V2 X2 (text-addr), fixed** - A char label whose address the unit passes to a call stays extern-text (a trap),
   never the raw x86 address. The case was 0x00c1d8b0 `_atexit(&UNK_00fdd3b0)`, the static's x86 exit thunk.
   Arrays and labels stored as data keep the value. test_bindings has the case.
+  - As the orchestrator asked, the callback is bound natively: `xexit.py` decodes the exe's exit thunk into a
+    native stand-in. 0x00fdd3b0 is a NiPointer static's release: refcount at +4, DeleteThis is native slot 2.
+  - Rows left to trap: none on link/c0d6c71516f6; UNK_00fdd3b0 is the only callback label. stats.txt lists any
+    that remain.
+  - test_xexit executes both shapes under qemu by calling the stub directly; the freestanding harness has no
+    exit().
 
 * **measured** - abireplay on link/c0d6c71516f6 with the override table: rows bridge 4,732, manual 79, same 1,995,
   x86-inconsistent 3,276 (before: bridge 4,183, manual 2,632, x86-inconsistent 3,267). The 9 new x86-inconsistent

@@ -13,6 +13,9 @@ pairs with a native vtable (kind `V`):
   `trap-symbols` - the distinct trap stubs behind them, `trap-symbols-unpaired` - trap stubs no paired vtable calls.
 * `primary-shorter` - primary vftables whose native vtable has fewer slots than the exe's (GCC's two destructor
   slots count as MSVC's one);
+* `secondary-full-entry` (S2c-vt2) - secondary vftable slots bound to `__fnv_<a>` where the exe slot's function is
+  one MSVC enters with `this` at that secondary base (the map's entry is `__fnvnx_msvc_<a>`): `this` arrives d bytes
+  off; not part of `metric`;
 * `mispaired-primary` / `mispaired-secondary` - vftables whose native vtable is another class than the exe's RTTI
   class, where the native class is itself an RTTI class of the exe (by name, after demangling both sides; shells
   such as `FUN_<addr>` or the decomp's local reconstructions, which name no RTTI class, are not counted).
@@ -42,6 +45,7 @@ import vtables   # noqa: E402
 
 NATIVE_KINDS = ('F', 'C', 'X', 'G')
 TRAP = '__fnvnx_vtrap_'
+MSVC_ENTRY = set()   # addresses whose map entry is __fnvnx_msvc_<a> (read_addrmap)
 def obj_name(source):
     return source.replace('/', '_') + '.o'
 
@@ -57,6 +61,8 @@ def read_addrmap(path):
         a = int(f[0], 16)
         if f[1] in NATIVE_KINDS and f[2]:
             native[a] = f[1]
+            if f[2] == '__fnvnx_msvc_%08x' % a:   # MSVC enters it with this at a secondary base (thisadj.py)
+                MSVC_ENTRY.add(a)
         elif f[1] == 'V':
             vrows[a] = (f[2], f[4], f[5], int(f[6]) if len(f) > 6 and f[6] else 8)
     return native, vrows
@@ -141,6 +147,14 @@ def measure(link, exe, rows_path=None):
         elif nmsvc < len(e.slots) and e.td:   # a vftable without RTTI has no reliable end (exevft.plain_vftables)
             st['%s-shorter' % kind] += 1
         for k, ent in enumerate(slot_ents):
+            if kind == 'secondary' and e is not None and (ent.sym or '').startswith('__fnv_'):
+                # S2c-vt2: a secondary slot bound to the full-object entry of a function MSVC enters at this base
+                j = exevft.exe_slot_index(k, d)
+                a = e.slots[j] if j < len(e.slots) else None
+                if a in MSVC_ENTRY and ent.sym == '__fnv_%08x' % a:
+                    st['secondary-full-entry'] += 1
+                    rows.append(('%08x' % v, z, str(k), str(j), '%08x' % a, native.get(a, ''), ent.sym,
+                                 'secondary-full-entry'))
             if not (ent.sym or '').startswith(TRAP):
                 continue
             trap_paired.add(ent.sym)

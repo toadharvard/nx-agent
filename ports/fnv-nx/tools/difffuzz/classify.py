@@ -75,6 +75,39 @@ def entry_register_reads(fn, conv):
     return reads          # in first-read order
 
 
+def is_dtor_name(sym):
+    """An MSVC destructor (??1, ??_G, ??_E) or an Itanium one (D0/D1/D2 at the end of a nested name)."""
+    import re
+    return sym.startswith(('??1', '??_G', '??_E')) or bool(re.search(r'D[012]Ev$', sym))
+
+
+def indefinite_word(x86_hex, arm_hex):
+    """An aligned 32-bit word of the x86 value is 0x80000000 (x87/SSE integer indefinite) where the native word
+    differs (difffuzz-19: was a substring test for '80000000' / '0000008' anywhere in the hex)."""
+    try:
+        bx, ba = bytes.fromhex(x86_hex or ''), bytes.fromhex(arm_hex or '')
+    except ValueError:
+        return False
+    for o in range(0, len(bx) - 3, 4):
+        if bx[o:o + 4] == b'\0\0\0\x80' and ba[o:o + 4] != bx[o:o + 4]:
+            return True
+    return False
+
+
+def _static_only_store(div, target):
+    """The record's own evidence for local-static: a mem-write whose differing bytes are all oracle-only stores to
+    the unit's function-local statics, or one extra native call followed by the oracle's call there (the native's
+    guarded initializer; V2 C1); the runner's `local-static` kind covers the rest."""
+    if div.get('kind') == 'call-target' and div.get('x86') and div.get('arm_next') == div.get('x86') and \
+            div.get('x86_next') != div.get('arm'):     # (x86_next == arm too: two calls swapped, V2 L1)
+        return True     # the native makes one extra call (its own static's guarded initializer), then the oracle's
+    if div.get('kind') != 'mem-write' or div.get('only_x86') != div.get('ndiff'):
+        return False
+    st = getattr(target, 'local_statics', None)
+    addrs = [int(a, 16) for a in div.get('addrs') or ()]
+    return bool(addrs) and st is not None and all(a in st for a in addrs)
+
+
 def _outcome(r):
     return (r.error, r.ret, tuple(c.target for c in r.calls), tuple(sorted(r.writes.items())))
 
@@ -160,24 +193,42 @@ def hint(pair, target, case, div, fn, max_steps):
     k = div['kind']
     if k == 'local-static':
         h['cause'] = 'local-static'; return h
+    if k == 'error' and str(div.get('arm') or '').startswith('trap:'):
+        # the native called a vtable slot the link filled with its trap stub (a virtual defined nowhere,
+        # arm64emu.TRAPS): the native calls a name the link binds to nothing (difffuzz-14)
+        h['cause'] = 'native-undefined'; h['trap'] = div['arm'][5:]; return h
     if div.get('bool_repr'):
         h['cause'] = 'bool-repr'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
+    if k in ('call-target', 'call-count') and any(str(x).startswith('name:__s13_vtpad_')
+                                                  for x in [div.get('arm')] + list(div.get('arm_trace') or [])):
+        # the native call went through a slot past the native vtable the link pairs with the planted vftable
+        # (vtmodel.py padding): a pairing gap of S2c, not this function's behaviour; tested
+        # before `unplanted`, which would file it as oracle-vcall (S13b)
+        h['cause'] = 'vptr-unpaired'; return h
     if k == 'call-target' and div.get('vcall') == 'unplanted':
         # an indirect call through memory the case did not plant (an object's vptr the fuzzer filled with bytes):
         # each machine reads its own slot layout (Itanium has two destructor slots), not a port divergence
         h['cause'] = 'oracle-vcall'; return h
-    if k in ('call-target', 'call-count') and any(str(x).startswith('name:__s13_vtpad_')
-                                                  for x in [div.get('arm')] + list(div.get('arm_trace') or [])):
-        # the native call went through a slot past the native vtable the link pairs with the planted vftable
-        # (vtmodel.py padding): a pairing gap of S2c, not this function's behaviour
-        h['cause'] = 'vptr-unpaired'; return h
     if k == 'call-target' and msvc_inlined(target, div):
         h['cause'] = 'msvc-inlined'; return h
     regs = entry_register_reads(fn, target.conv)
     if regs:
-        h['cause'] = 'x86-custom-cc'; h['regs'] = regs; return h
+        # the modelled custom convention (Conv.with_registers) passed fuzz.py's garbage gate for the function; this
+        # case is an oracle gap only when its own oracle outcome still depends on the planted garbage (difffuzz-19:
+        # every divergence of such a function was x86-custom-cc, 206 records, real causes among them)
+        h['regs'] = regs
+        dep = True
+        if case is not None and pair is not None and case.bg == 'zero':
+            b0 = case.copy(); b0.rets = [case.ret_bytes(i) for i in range(max(8, len(case.rets)))]
+            b1 = b0.copy(); b1.seed = case.seed ^ 0x2468ace1
+            r0, _, _ = pair.run(b0, max_steps)
+            r1, _, _ = pair.run(b1, max_steps)
+            h['_runs'] += 2
+            dep = _outcome(r0) != _outcome(r1)
+        if dep:
+            h['cause'] = 'x86-custom-cc'; return h
     src = getattr(target, 'source', None)
     if src and k in ('return', 'mem-write', 'call-args', 'error'):
         obj = config.LINK / 'fixed' / config.obj_name(src)
@@ -185,7 +236,10 @@ def hint(pair, target, case, div, fn, max_steps):
             hits = check_rebind.bypassing_functions(str(obj)).get(target.orig_addr)
             if hits:
                 h['cause'] = 'split-global'; h['vars'] = hits; return h
-    if div.get('arm_local_static'):
+    if div.get('arm_local_static') and _static_only_store(div, target):
+        # evidence in the record: every differing byte is an oracle-only store into a function-local static the
+        # native keeps in its .bss (S13b audit, V2 L1: the flag alone filed 344 call/error records, among them a
+        # swapped call pair, as local-static)
         h['cause'] = 'local-static'; return h
     if div.get('arm_private_reads') and k in ('return', 'mem-write', 'call-args', 'error', 'call-target'):
         h['cause'] = 'split-global'; h['note'] = 'native code read its unit-local data'; return h
@@ -196,7 +250,10 @@ def hint(pair, target, case, div, fn, max_steps):
     if k == 'mem-write' and div.get('only_x86') == div.get('ndiff') and div.get('ndiff', 0) <= 4:
         w = int.from_bytes(bytes.fromhex(div['x86'])[:4], 'little')
         if w in image_vftables():
-            h['cause'] = 'vptr-store'; return h
+            # the dead vptr store GCC drops is a destructor's; elsewhere (InitFromSource, Clone...) it is a
+            # difference to look at (S13b audit)
+            sym = getattr(getattr(target, 'conv', None), 'name', '') or ''
+            h['cause'] = 'vptr-store' if is_dtor_name(sym) else 'vptr-differs'; return h
     if k == 'error':
         if div.get('x86') == 'div0':
             h['cause'] = 'division'; return h
@@ -218,11 +275,21 @@ def hint(pair, target, case, div, fn, max_steps):
         ux, ua = _outcome(rx0) != _outcome(rx1), _outcome(ra0) != _outcome(ra1)
         if ux or ua:
             h['cause'] = 'uninit-x86' if ux and not ua else 'uninit-arm' if ua and not ux else 'uninit-both'
+            if ux and ua:
+                # both machines read garbage: the same garbage (all zero) on both tells whether anything else
+                # differs (difffuzz-18). 'agree': nothing does, fuzz.py keeps no record of it
+                world.UNIFORM = True
+                try:
+                    _, _, du = pair.run(base, max_steps)
+                finally:
+                    world.UNIFORM = False
+                h['_runs'] += 1
+                h['uniform'] = 'agree' if du is None else du.get('kind')
             return h
     if k in ('return', 'mem-write'):
         fl = div.get('float') or div.get('float_word')
         conv_ops = {'fistp', 'fist', 'cvttss2si', 'cvttsd2si', 'cvtss2si', 'cvtsd2si', 'fisttp'}
-        if (mn & conv_ops) and ('80000000' in str(div.get('x86')) or '0000008' in str(div.get('x86'))):
+        if (mn & conv_ops) and indefinite_word(div.get('x86'), div.get('arm')):
             h['cause'] = 'float->int'; return h
         if fl:
             if fl.get('tolerant'):

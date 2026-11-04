@@ -53,6 +53,11 @@ check('FALL1 FNV_FORCEINLINE void member: no trap',
       (), [TRAP])
 check('FALL1 constructor after access label: no trap',
       run(s1.r_falloff_traps, 'class B\n{\n  public:\n    B(bool b)\n    {\n        v = b;\n    }\n};\n'), (), [TRAP])
+check('FALL1 void member of a class template with two nested template arguments: no trap',
+      run(s1.r_falloff_traps, 'FNVNX_KEEP void L<A<unsigned int>,P<B> >::AddTail(const P<B>& e)\n{\n    n = 1;\n}\n'),
+      (), [TRAP])
+check('FALL1 int member of the same template: trap',
+      run(s1.r_falloff_traps, 'int L<A<unsigned int>,P<B> >::Count()\n{\n    n = 1;\n}\n'), [TRAP])
 check('FALL1 ends in return: no trap',
       run(s1.r_falloff_traps, 'int f()\n{\n    return 3;\n}\n'), (), [TRAP])
 check('FALL1 class with declarations only, after a long comment: no trap',
@@ -1309,6 +1314,92 @@ check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overlo
            'static __forceinline void d(X* x, int n, Pod);'])
 check('FINL1 headers are left alone',
       run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
+
+# ---- S1-refs: EBO2 (an empty base of a class that introduces its own vfptr goes after the vptr, as in MSVC)
+_E = ('struct Lst\n{\n    bool IsEmpty();\n    Lst* Next();\n};\n'
+      'struct Holder : public Lst\n{\n    virtual ~Holder();\n    int m_iCount;\n};\n'
+      'struct Plain : public Lst\n{\n    int x;\n};\n'
+      'bool f(Holder* h) { return ((Lst*)h)->IsEmpty() || h->Next() == 0; }\n')
+_eo = run(s1.r_vfptr_empty_base, _E)
+check('EBO2 FNVNX_EBO2 first in the empty base of a class introducing a vfptr', _eo,
+      ['struct Lst\n{ FNVNX_EBO2 /* fnv-nx EBO2 */\n'], ['struct Holder : public Lst\n{ FNVNX'])
+check('EBO2 a base used as an object is left alone',
+      run(s1.r_vfptr_empty_base, _E + 'Lst g_list;\n'), [], ['FNVNX_EBO2'])
+check('EBO2 no class introducing a vfptr: nothing',
+      run(s1.r_vfptr_empty_base, _E.replace('virtual ~Holder();', '~Holder();')), [], ['FNVNX_EBO2'])
+check('EBO2 headers are left alone',
+      run(s1.r_vfptr_empty_base, _E, '/nonexistent/src/x.h'), [], ['FNVNX_EBO2'])
+check('EBO2 a base with data: nothing',
+      run(s1.r_vfptr_empty_base, _E.replace('bool IsEmpty();', 'int head;\n    bool IsEmpty();')), [], ['FNVNX_EBO2'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _cE = os.path.join(tempfile.mkdtemp(), 'e2.cpp')
+    _mE = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_EBO2 ')]
+    open(_cE, 'w').write('#include <stddef.h>\n' + ''.join(_mE) + _eo +
+                         'Holder::~Holder() {}\nstatic Holder g_h;\nstatic_assert(sizeof(Holder) == 8, "size");\n'
+                         'static_assert(sizeof(Plain) == 4, "plain");\n'
+                         'int off() { return (int)((char*)(Lst*)&g_h - (char*)&g_h); }\n'
+                         'static_assert(offsetof(Holder, m_iCount) == 4, "count");\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', _cE],
+                         capture_output=True, text=True)
+    check('EBO2 output: the base after the vptr (+4), members and sizes unchanged (ILP32)',
+          _r.stderr or _r.stdout, ['mov\tw0, 4'], ['error'])
+
+# ---- S1-refs: REC1 (D20: reconstructed bodies from a recon directory, applied only when FNVNX_RECON is given)
+_rc = tempfile.mkdtemp()
+os.makedirs(os.path.join(_rc, 'dec', 'build')); os.makedirs(os.path.join(_rc, 'dec', 'src'))
+os.makedirs(os.path.join(_rc, 'recon', 'r1'))
+_json.dump({'units': [{'source': 'src/h.cpp', 'functions': [{'address': '0x00401000', 'symbol': '?f@@YAXXZ', 'size': 8}],
+                       'symbols': {}}]}, open(os.path.join(_rc, 'dec', 'build', 'units.json'), 'w'))
+_json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/h.cpp', 'append': 'body.cpp',
+            'functions': [{'address': '0x00401010', 'symbol': '??0H@@QAE@XZ', 'size': 16}],
+            'symbols': {'?Init@H@@QAEXXZ': '0x00401100'}}, open(os.path.join(_rc, 'recon', 'r1', 'recon.json'), 'w'))
+open(os.path.join(_rc, 'recon', 'r1', 'body.cpp'), 'w').write('struct H { H(); void Init(); };\n// @fnv 0x00401010\nH::H() { Init(); }\n')
+_hp = os.path.join(_rc, 'dec', 'src', 'h.cpp')
+prepare.__dict__['_fnvnx_recon'] = None
+os.environ.pop('FNVNX_RECON', None)
+check('REC1 without FNVNX_RECON: nothing', run(s1.r_recon_bodies, '// @fnv 0x00401000\nvoid f() {}\n', _hp), [], ['REC1'])
+os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon')
+prepare.__dict__['_fnvnx_recon'] = None
+_ro = run(s1.r_recon_bodies, '// @fnv 0x00401000\nvoid f() {}\n', _hp)
+check('REC1 appends the unit\'s reconstructed body', _ro, ['void f() {}', 'fnv-nx REC1', 'H::H() { Init(); }'])
+check('REC1 other units untouched', run(s1.r_recon_bodies, 'int g;\n', os.path.join(_rc, 'dec', 'src', 'o.cpp')),
+      [], ['REC1'])
+s1.add_recon_definitions(os.path.join(_rc, 'dec'), Counter())
+_ru = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'][0]
+check('REC1 POST hook adds the recipe entry and bindings', _json.dumps(_ru),
+      ['"??0H@@QAE@XZ"', '"?Init@H@@QAEXXZ": "0x00401100"', '"?f@@YAXXZ"'])
+# a recon of an address a unit already defines (the decomp gained it) is skipped
+_json.dump({'units': [{'source': 'src/h.cpp', 'functions': [{'address': '0x00401010', 'symbol': '??0H@@QAE@XZ', 'size': 16}],
+                       'symbols': {}}]}, open(os.path.join(_rc, 'dec', 'build', 'units.json'), 'w'))
+prepare.__dict__['_fnvnx_recon'] = None
+_st = Counter()
+_ro2 = s1.r_recon_bodies(_hp, 'void f() {}\n', _st)
+check('REC1 an address the recipe already defines: skipped (REC1-DUP)', _ro2 + str(dict(_st)), ['REC1-DUP'], ['H::H()'])
+os.environ.pop('FNVNX_RECON', None)
+prepare.__dict__['_fnvnx_recon'] = None
+_shutil.rmtree(_rc, ignore_errors=True)
+
+# ---- S1-refs: HUNIT1 (explicit instantiations of a header unit's listed template members)
+_hu = run(s1.r_header_unit_instantiations, '#include "nitarray.inl"\nvoid NiTArray_UnitReference() {}\n',
+          '/nonexistent/src/gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp')
+check('HUNIT1 the listed members are explicitly instantiated', _hu,
+      ['template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAt(unsigned int, ActorCombatGroup*&);',
+       'fnv-nx HUNIT1'])
+check('HUNIT1 once only', str(run(s1.r_header_unit_instantiations, _hu,
+      '/nonexistent/src/gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp').count('fnv-nx HUNIT1')), ['1'])
+check('HUNIT1 other units untouched', run(s1.r_header_unit_instantiations, 'int x;\n', '/nonexistent/src/x_h_unit.cpp'),
+      [], ['HUNIT1'])
+
+# ---- S1-refs: XC2 (a hand-written dynamic initializer in XC1's form)
+_x2 = run(s1.r_handwritten_dyninit, 'struct NiPoint3StartupTable { int data[17]; };\nNiPoint3StartupTable gNiPoint3StartupSrc;\n'
+          'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
+          '/nonexistent/src/gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp')
+check('XC2 the copy-initialization becomes extern + __fnvnx_dyninit_<addr>', _x2,
+      ['extern NiPoint3StartupTable gNiPoint3StartupDst;', 'extern "C" void __fnvnx_dyninit_00a62110(void)'],
+      ['gNiPoint3StartupDst = gNiPoint3StartupSrc;\n'])
+check('XC2 other units untouched', run(s1.r_handwritten_dyninit, 'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
+      '/nonexistent/src/x.cpp'), [], ['XC2'])
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)

@@ -5,7 +5,9 @@ from fnkeys.py and `commit`, the head it was fuzzed on) and div/<addr>-<n>.json 
 
     fuzzcache.py todo  <cache> <targets.jsonl> <keys.json> <out todo.jsonl> <out counts.json>
         targets whose key changed (first), that the cache does not hold yet, then earlier harness failures (last);
-        targets without a key (no native definition in the link) are counted, not fuzzed
+        targets without a key (no native definition in the link) are counted, not fuzzed; a cached verdict whose
+        saved divergence a scoped harness change made after it explains differently (fnkeys.CHANGES recheck) goes
+        with the changed ones (`recheck`)
     fuzzcache.py merge <cache> <campaign> <keys.json> <commit>
         the campaign's finished functions replace their cache rows and reproducers
     fuzzcache.py view  <cache> <targets.jsonl> <keys.json> <out dir>
@@ -59,9 +61,37 @@ def harness_failure(r):
     return st.startswith(('crash:', 'run:')) or (st.startswith('setup:') and st not in VERDICT_SETUP)
 
 
+def change_tags():
+    import fnkeys
+    return [c.tag for c in fnkeys.CHANGES]
+
+
+def recheck_due(cache, changes=None, rows=None):
+    """Addresses of cached verdicts a scoped change wants fuzzed again: the row was fuzzed before the change (its
+    `changes` lacks the tag) and one of its saved divergences matches the change's recheck predicate."""
+    import fnkeys
+    changes = [c for c in (fnkeys.CHANGES if changes is None else changes) if c.recheck is not None]
+    rows = load_rows(cache) if rows is None else rows
+    due = set()
+    for a, r in rows.items():
+        todo = [c for c in changes if c.tag not in (r.get('changes') or ())]
+        if not todo or harness_failure(r):
+            continue
+        for p in divs_of(cache, a):
+            try:
+                rec = json.load(open(p))
+            except (OSError, ValueError):
+                continue
+            if any(c.recheck(rec) for c in todo):
+                due.add(a)
+                break
+    return due
+
+
 def cmd_todo(cache, targets, keys, out, counts_out):
     rows, keys = load_rows(cache), json.load(open(keys))
-    stale, new, retry, c = [], [], [], dict(shard=0, no_key=0, up_to_date=0, changed=0, new=0, retry=0)
+    due = recheck_due(cache, rows=rows)
+    stale, new, retry, c = [], [], [], dict(shard=0, no_key=0, up_to_date=0, changed=0, new=0, retry=0, recheck=0)
     for line in open(targets):
         t = json.loads(line)
         c['shard'] += 1
@@ -72,7 +102,10 @@ def cmd_todo(cache, targets, keys, out, counts_out):
         r = rows.get(t['address'])
         # a harness failure on that function (crash:*, run:*, a setup error other than an unsupported
         # signature or a missing definition) is not a verdict: fuzz it again
-        if r is not None and r.get('key') == k and not harness_failure(r):
+        if r is not None and r.get('key') == k and not harness_failure(r) and t['address'] in due:
+            c['recheck'] += 1
+            stale.append(t)
+        elif r is not None and r.get('key') == k and not harness_failure(r):
             c['up_to_date'] += 1
         elif r is not None and harness_failure(r):
             c['retry'] += 1
@@ -92,18 +125,28 @@ def cmd_todo(cache, targets, keys, out, counts_out):
     print(c)
 
 
+def shard_of(cache):
+    """The shard name a cache directory stands for (`fuzzcache-7of26` or `7of26` -> `7of26`): the per-head branch
+    the farm publishes a run's reproducers on is fuzz/<commit12>/<shard>."""
+    n = os.path.basename(os.path.normpath(cache))
+    return n[len('fuzzcache-'):] if n.startswith('fuzzcache-') else n
+
+
 def cmd_merge(cache, camp, keys, commit):
     rows, keys = load_rows(cache), json.load(open(keys))
+    tags = change_tags()
     os.makedirs(os.path.join(cache, 'div'), exist_ok=True)
     n = 0
     for a, r in load_rows(camp).items():
-        if a not in keys or (a in rows and rows[a].get('key') == keys[a] and rows[a].get('commit') == commit):
+        if a not in keys or (a in rows and rows[a].get('key') == keys[a] and rows[a].get('commit') == commit
+                             and rows[a].get('changes') == tags):
             continue
         for p in divs_of(cache, a):
             os.remove(p)
         for p in divs_of(camp, a):
             shutil.copy(p, os.path.join(cache, 'div', os.path.basename(p)))
-        r = dict(r, key=keys[a], commit=commit)
+        # the scoped changes this verdict saw; shard: where this head published the reproducer
+        r = dict(r, key=keys[a], commit=commit, changes=tags, shard=shard_of(cache))
         rows[a] = r
         n += 1
     save_rows(cache, rows)
@@ -131,6 +174,7 @@ def cmd_status(cache, targets, keys, commit, out):
     """Where this head stands: fuzzed on this head, verdict reused from an earlier head (key unchanged), pending
     (key changed or never fuzzed), no key."""
     rows, keys = load_rows(cache), json.load(open(keys))
+    due = recheck_due(cache, rows=rows)
     c = dict(shard=0, no_key=0, fuzzed_this_head=0, reused=0, pending_changed=0, pending_new=0, crashed=0)
     for line in open(targets):
         a = json.loads(line)['address']
@@ -140,6 +184,8 @@ def cmd_status(cache, targets, keys, commit, out):
             c['no_key'] += 1
         elif r is not None and harness_failure(r):
             c['crashed'] += 1                     # a harness exception, fuzzed again by the next run
+        elif r is not None and r.get('key') == k and a in due:
+            c['pending_changed'] += 1             # a scoped harness change wants this verdict again (recheck)
         elif r is not None and r.get('key') == k:
             c['fuzzed_this_head' if r.get('commit') == commit else 'reused'] += 1
         else:
@@ -180,7 +226,7 @@ def cmd_seed(cache, targets, others):
             # a harness failure is no verdict to reuse (the 32-shard caches held only crash:ModuleNotFoundError
             # rows of 9a0243c: seeding them made every new 26-shard cache start with a backlog of failures)
             if a in want and a not in rows and not harness_failure(r):
-                rows[a] = r
+                rows[a] = dict(r, shard=r.get('shard') or shard_of(o))   # it stays published under its source shard
                 for p in divs_of(o, a):
                     shutil.copy(p, os.path.join(cache, 'div', os.path.basename(p)))
                 n += 1

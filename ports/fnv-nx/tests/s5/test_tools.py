@@ -294,12 +294,23 @@ class FaultTableTest(unittest.TestCase):
         sys.path.insert(0, HERE)
         import emu_guest
         stubs, pre = emu_guest.parse_fault_table(os.path.join(HERE, "known_faults.txt"))
-        self.assertIn(("0x00aa3e40", "use-malloc:x1"), stubs)
+        self.assertNotIn("0x00aa3e40", [n for n, _ in stubs])   # MemoryManager::Allocate runs on the game's heaps
         self.assertNotIn("0x00a8a5f0", [f for f, _ in pre])   # NiMainSDM: S1's INIT1 static calls it now
         names = [n for n, _ in stubs]
         self.assertEqual(len(names), len(set(names)), "a function listed twice")
         for n in names:
             self.assertRegex(n, r"^(0x[0-9a-f]{8}|[A-Za-z_]\w*)$")
+
+    def test_standins_defined(self):
+        """every 'standin' line names a function tests/s5/standins.c defines (by its asm label)"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        stubs, _ = emu_guest.parse_fault_table(os.path.join(HERE, "known_faults.txt"))
+        src = open(emu_guest.STANDINS).read()
+        names = [n for n, a in stubs if a == "standin"]
+        self.assertTrue(names)
+        for n in names:
+            self.assertRegex(src, r'\b\w+\(void\) __asm__\("%s"\);|__asm__\("%s"\)' % (re.escape(n), re.escape(n)))
 
     def test_bad_lines(self):
         sys.path.insert(0, HERE)
@@ -392,7 +403,8 @@ class MilestoneTest(unittest.TestCase):
         import emu_guest
         rows = emu_guest.parse_milestones(emu_guest.MILESTONES)
         names = list(dict.fromkeys(n for n, _, _ in rows))
-        self.assertEqual(names, ["winmain", "renderer-init", "main-menu", "first-frame", "first-cell"])
+        self.assertEqual(names, ["winmain", "ini-read", "renderer-init", "archive-list", "bsa-opened", "esm-header",
+                                 "masters-loaded", "main-menu", "first-frame", "first-cell"])
         self.assertIn(("winmain", "call", "0x0086a850"), rows)
         self.assertIn(("first-cell", "store", "*0x011dea3c+0x40"), rows)
         rx = dict((n, re.compile(t[3:])) for n, k, t in rows if t.startswith("re:"))
