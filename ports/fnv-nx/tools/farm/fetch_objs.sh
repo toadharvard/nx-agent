@@ -15,8 +15,8 @@ C12=${COMMIT:0:12}
 want=""; [ -n "$TREE" ] && want=$(bash "$HERE/tree_hash.sh" "$TREE")
 : > "$OUT/objects.tsv"
 for k in $(seq 1 "$N"); do
-  tag="c-$C12-${k}of${N}"
-  git -C "$ARTIFACTS" fetch -q origin "refs/tags/$tag:refs/tags/$tag" || { echo "missing $tag" >&2; exit 1; }
+  tag="refs/remotes/origin/c/$C12/${k}of${N}"
+  git -C "$ARTIFACTS" fetch -q origin "+refs/heads/c/$C12/${k}of${N}:$tag" || { echo "missing c/$C12/${k}of${N}" >&2; exit 1; }
   meta=$(git -C "$ARTIFACTS" show "$tag:meta.json")
   got=$(python3 -c 'import json,sys; m=json.loads(sys.argv[1]); print(m["commit"], m["tree_hash"])' "$meta")
   [ "${got%% *}" = "$COMMIT" ] || { echo "$tag: commit ${got%% *} != $COMMIT" >&2; exit 1; }

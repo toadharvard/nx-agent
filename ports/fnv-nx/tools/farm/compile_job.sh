@@ -10,11 +10,13 @@
 #
 # Artifacts: $ARTIFACTS (default $FARM_HOME/artifacts, a clone of the private repository
 # toadharvard/fnv-nx-build). Branch `shard-<k>of<N>` keeps its history, so a push uploads only objects that changed.
-# Every publish is tagged `c-<commit12>-<k>of<N>`. Each publish holds:
+# Every publish is also pushed as branch `c/<commit12>/<k>of<N>` (branches, not tags: the session git proxy refuses
+# tag pushes). Each publish holds:
 #   obj/*.o
 #   obj/*.log            for units that failed
 #   objects.tsv          source, object path relative to the shard root, status
 #   meta.json            commit, decomp commit, shard, compiler, flags, counts, tree hash
+# Needs: git, python3, jq, rsync, g++-aarch64-linux-gnu; the artifacts repository attached to the session (push).
 # Objects are derived from the decomp. They go only to that private repository, never to nx-agent, which is public.
 set -euo pipefail
 COMMIT=${1:?commit}; K=${2:?k}; N=${3:?N}; REPORT=${4:-}
@@ -35,19 +37,33 @@ bash "$P/tools/fetch.sh" "$EXT" >/dev/null
 t0=$(date +%s)
 if [ ! -f "$WORK/tree.done" ]; then
   rm -rf "$WORK"; mkdir -p "$WORK"
+  rm -rf "$FARM_HOME"/compile-*/tree 2>/dev/null || true   # older per-commit trees; the persistent copy stays
   python3 "$P/tools/prepare.py" "$EXT/fnv_decomp" "$WORK/tree" > "$WORK/prepare.log" 2>&1
   touch "$WORK/tree.done"
 fi
 TREE_HASH=$(bash "$P/tools/farm/tree_hash.sh" "$WORK/tree")
 t1=$(date +%s)
 
-# Shard list: every unit with its prepared source size, largest first, dealt round-robin.
-jq -r '.units[].source' "$WORK/tree/build/units.json" | sort -u \
-  | while read -r s; do printf '%s\t%s\n' "$(stat -c %s "$WORK/tree/$s" 2>/dev/null || echo 0)" "$s"; done \
-  | sort -t$'\t' -k1,1nr -k2,2 | awk -F'\t' -v k="$K" -v n="$N" '(NR-1)%n==k-1 {print $2}' > "$WORK/shard.list"
+# Shard list: a unit belongs to shard (crc32(path) mod N) + 1, so assignment does not move when sizes change.
+jq -r '.units[].source' "$WORK/tree/build/units.json" | sort -u | python3 -c '
+import sys, zlib
+k, n = int(sys.argv[1]), int(sys.argv[2])
+for line in sys.stdin:
+    u = line.rstrip("\n")
+    if zlib.crc32(u.encode()) % n == k - 1: print(u)' "$K" "$N" > "$WORK/shard.list"
 
-OBJ=$WORK/obj-$K-of-$N
-SSE2NEON=$EXT/sse2neon bash "$P/tools/link/compile.sh" "$WORK/tree" "$OBJ" "$WORK/shard.list" "$JOBS" > "$WORK/compile-$K.log" 2>&1
+# Incremental: a persistent copy of the tree that only changed files touch (rsync -c), and persistent objects.
+# compile.sh rebuilds a unit whose source is newer than its object. A change to anything that is not a unit
+# source (headers, units.json), to the flags (compile.sh, shim, sse2neon) or to the compiler rebuilds the shard.
+PT=$FARM_HOME/tree; OBJ=$FARM_HOME/obj-$K-of-$N; mkdir -p "$PT" "$OBJ"
+FLAGS_HASH=$( (cat "$P/tools/link/compile.sh"; find "$P/shim/include" -type f -print0 | LC_ALL=C sort -z | xargs -0 cat; \
+  git -C "$EXT/sse2neon" rev-parse HEAD; aarch64-linux-gnu-g++ --version | head -1) | sha256sum | cut -c1-16)
+rsync -rc --delete --out-format='%n' "$WORK/tree/" "$PT/" > "$WORK/changed.txt"
+grep -v '/$' "$WORK/changed.txt" | grep -vxF -f "$WORK/shard.list" | grep -v '^src/.*\.\(cpp\|c\)$' > "$WORK/changed_other.txt" || true
+if [ -s "$WORK/changed_other.txt" ] || [ "$(cat "$OBJ/.flags" 2>/dev/null)" != "$FLAGS_HASH" ]; then
+  rm -f "$OBJ"/*.o "$OBJ"/*.log; echo "$FLAGS_HASH" > "$OBJ/.flags"; FULL=1
+else FULL=0; fi
+SSE2NEON=$EXT/sse2neon bash "$P/tools/link/compile.sh" "$PT" "$OBJ" "$WORK/shard.list" "$JOBS" > "$WORK/compile-$K.log" 2>&1
 t2=$(date +%s)
 ok=$(grep -c $'\tok$' "$OBJ/objects.tsv" || true); fail=$(grep -c $'\tfail$' "$OBJ/objects.tsv" || true)
 
@@ -68,17 +84,21 @@ CXXV=$(aarch64-linux-gnu-g++ --version | head -1)
 cat > meta.json <<EOF
 {"commit": "$COMMIT", "decomp_commit": "$DECOMP_COMMIT", "shard": $K, "shards": $N, "tree_hash": "$TREE_HASH",
  "compiler": "$CXXV", "ok": $ok, "fail": $fail,
- "prepare_s": $((t1-t0)), "compile_s": $((t2-t1)), "jobs": $JOBS}
+ "prepare_s": $((t1-t0)), "compile_s": $((t2-t1)), "jobs": $JOBS, "full_rebuild": $FULL,
+ "changed_files": $(grep -vc '/$' "$WORK/changed.txt" || true)}
 EOF
 git add -A obj objects.tsv meta.json
 git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 shard $K/$N: $ok ok, $fail failed" || true
-git tag -f "c-$C12-${K}of${N}" >/dev/null
-git push -q -f origin "$B" "refs/tags/c-$C12-${K}of${N}"
+for i in 1 2 3; do  # one ref per push: the proxy drops combined pushes now and then
+  git push -q -f origin "$B" 2>/dev/null && git push -q -f origin "HEAD:refs/heads/c/$C12/${K}of${N}" 2>/dev/null && break
+  sleep $((i * 5))
+done
+git ls-remote origin "refs/heads/c/$C12/${K}of${N}" | grep -q . || { echo "publish failed" >&2; exit 1; }
 cd - >/dev/null
 
 if [ -n "$REPORT" ]; then
   mkdir -p "$(dirname "$REPORT")"
-  printf '# compile %s shard %s/%s\n\n- ok %s, failed %s\n- prepare %ss, compile %ss, jobs %s\n- tree hash %s\n- tag c-%s-%sof%s in toadharvard/fnv-nx-build\n' \
+  printf '# compile %s shard %s/%s\n\n- ok %s, failed %s\n- prepare %ss, compile %ss, jobs %s\n- tree hash %s\n- branch c/%s/%sof%s in toadharvard/fnv-nx-build\n' \
     "$C12" "$K" "$N" "$ok" "$fail" "$((t1-t0))" "$((t2-t1))" "$JOBS" "$TREE_HASH" "$C12" "$K" "$N" > "$REPORT"
 fi
 echo "shard $K/$N: $ok ok, $fail failed"
