@@ -22,6 +22,7 @@ import os
 import re
 import statistics
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -73,6 +74,8 @@ def main():
     ap.add_argument('--max-steps', type=int, default=400000)
     ap.add_argument('--max-funcs', type=int, default=0)
     ap.add_argument('--tsv')
+    ap.add_argument('--deadline', type=float, default=0, help='stop starting functions after this many seconds')
+    ap.add_argument('--summary', help='fnvnx-overhead-audit/1 JSON: totals of the shard')
     a = ap.parse_args()
     k, n = map(int, a.shard.split('/'))
     funcs = [f for i, f in enumerate(unit_functions(a.units)) if i % n == k - 1]
@@ -81,7 +84,11 @@ def main():
     uc = engine.UnitCache(str(config.LINK), str(config.A64WORK))
     mca, mca1 = cost.MCA(None), cost.MCA(None, iterations=1)
     rows = []
+    t0 = time.time()
     for source, addr, sym in funcs:
+        if a.deadline and time.time() - t0 > a.deadline:
+            rows.append(dict(source=source, addr=addr, sym=sym, note='pending (deadline)'))
+            continue
         try:
             BRIDGE[:] = bridge_range(uc.arm_image(source))
             rs = dyncount.run_target(uc, source, addr, a.seeds, a.max_steps)
@@ -123,6 +130,19 @@ def main():
     for r in ranked[:40]:
         print('%-44s 0x%08x %6d %6d %6.2f %8.1f %6.2f' % (r['sym'][-44:], r['addr'], r['x86'], r['a64'],
                                                           (r['cpi'] + r['cpi1']) / 2, r['cyc'], r['cyc'] / r['x86']))
+    if a.summary:
+        cl = [r for r in rows if 'x86' in r]
+        tot = {k: sum(r[k] for r in cl) for k in ('x86', 'a64', 'br')}
+        tot['cycles'] = sum(r['cyc'] for r in cl if r.get('cyc'))
+        json.dump({'schema': 'fnvnx-overhead-audit/1', 'units': a.units, 'shard': a.shard, 'functions': len(rows),
+                   'clean': len(cl), 'pending': sum(1 for r in rows if r.get('note', '').startswith('pending')),
+                   'x86_insns': tot['x86'], 'a64_insns': tot['a64'], 'a64_in_bridges': tot['br'],
+                   'a64_cycles_mid': round(tot['cycles'], 1),
+                   'top_excess': [{'addr': '0x%08x' % r['addr'], 'source': r['source'], 'x86': r['x86'],
+                                   'a64': r['a64'], 'bridges': r['br'], 'cycles': round(r['cyc'], 1)}
+                                  for r in sorted((r for r in cl if r.get('cyc')),
+                                                  key=lambda r: -(r['cyc'] - r['x86']))[:30]]},
+                  open(a.summary, 'w'), indent=1)
     print('functions: %d, priced: %d, no clean case / setup: %d' % (
         len(rows), len(ranked), sum(1 for r in rows if 'note' in r)))
 
