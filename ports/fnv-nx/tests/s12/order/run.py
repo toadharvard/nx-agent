@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
@@ -185,13 +186,24 @@ def wholeprog(scratch, plugin):
            '-I' + sse, '-I' + HERE, '-fplugin=' + plugin, '-w']
     a, b = os.path.join(HERE, 'wholeprog_a.cpp'), os.path.join(HERE, 'wholeprog_b.cpp')
     keys = os.path.join(scratch, 'wholeprog.keys')
-    if os.path.exists(keys):
-        os.unlink(keys)
-    r = subprocess.run(['aarch64-linux-gnu-g++'] + [f for f in BUILD if f != '-O2'] + inc +
-                       ['-fsyntax-only', '-fplugin-arg-fnvnx_order-discover=' + keys, a], capture_output=True, text=True)
-    check(r.returncode == 0 and os.path.exists(keys), 'wholeprog: syntax-only discovery of unit A (%s)' % r.stderr[-300:])
-    if r.returncode or not os.path.exists(keys):
-        return
+    parts = []
+    for u in (a, os.path.join(HERE, 'wholeprog_c.cpp')):
+        k = os.path.join(scratch, os.path.basename(u) + '.keys')
+        if os.path.exists(k):
+            os.unlink(k)
+        r = subprocess.run(['aarch64-linux-gnu-g++'] + [f for f in BUILD if f != '-O2'] + inc +
+                           ['-fsyntax-only', '-fplugin-arg-fnvnx_order-discover=' + k, u], capture_output=True, text=True)
+        check(r.returncode == 0 and os.path.exists(k), 'wholeprog: syntax-only discovery of %s (%s)'
+              % (os.path.basename(u), r.stderr[-300:]))
+        if r.returncode or not os.path.exists(k):
+            return
+        parts.append(k)
+    # the merge compile.sh runs: a forwarder in A, its call in C
+    r = subprocess.run([sys.executable, os.path.join(PORT, 'toolchain', 'order', 'keys_merge.py')] + parts,
+                       capture_output=True, text=True)
+    open(keys, 'w').write(r.stdout)
+    union = sorted({l for p in parts for l in open(p).read().splitlines() if l.startswith(('field ', 'var '))})
+    check('field Obj::m_xcount' not in union, 'wholeprog: no single unit knows Obj::m_xcount (the merge bites)')
     got = open(keys).read().splitlines()
     want = sorted(l.split('discover:', 1)[1].strip() for l in open(a) if '// discover:' in l)
     check(got == want, 'wholeprog: discovered keys of unit A = %s (want %s)' % (got, want))
@@ -232,10 +244,10 @@ def compile_sh_keys(scratch):
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(os.path.join(tree, 'build'))
     os.makedirs(os.path.join(tree, 'include'))
-    for f in ('wholeprog_a.cpp', 'wholeprog_b.cpp'):
+    for f in ('wholeprog_a.cpp', 'wholeprog_b.cpp', 'wholeprog_c.cpp'):
         shutil.copy(os.path.join(HERE, f), os.path.join(tree, f))
     shutil.copy(os.path.join(HERE, 'wholeprog.h'), os.path.join(tree, 'include', 'wholeprog.h'))
-    json.dump({'units': [{'source': 'wholeprog_a.cpp'}, {'source': 'wholeprog_b.cpp'}]},
+    json.dump({'units': [{'source': 'wholeprog_a.cpp'}, {'source': 'wholeprog_b.cpp'}, {'source': 'wholeprog_c.cpp'}]},
               open(os.path.join(tree, 'build', 'units.json'), 'w'))
     shard = os.path.join(scratch, 'cs_shard.list')
     open(shard, 'w').write('wholeprog_b.cpp\n')
@@ -270,6 +282,14 @@ def compile_sh_keys(scratch):
     r = run(out)
     check(r.returncode == 0 and os.path.getmtime(os.path.join(out, 'wholeprog_b.cpp.o')) == mt and
           os.path.getmtime(keys) <= mt, 'compile.sh keys: a second run keeps the object and the key list')
+    # a header the units include changes (no unit source does): the per-unit cache must notice (its .d files)
+    time.sleep(1.1)
+    with open(os.path.join(tree, 'include', 'wholeprog.h'), 'a') as f:
+        f.write('inline void hdr_lock(Worker *w) { InterlockedIncrement((volatile LONG *)&w->m_result); }\n')
+    r = run(out, {'KEYS_ONLY': '1'})
+    got = open(keys).read().splitlines() if os.path.exists(keys) else []
+    check(r.returncode == 0 and 'field Worker::m_result' in got,
+          'compile.sh keys: a changed header refreshes the cached discovery (Worker::m_result in order.keys)')
     r = run(out + '_unit', {'ORDER_KEYS': 'unit'})
     m = re.search(r'<_Z6unlockP3Obj>:\n(.*?)\n\n', disasm(out + '_unit'), re.S)
     check(r.returncode == 0 and bool(m) and '\tstlr\t' not in m.group(1),
