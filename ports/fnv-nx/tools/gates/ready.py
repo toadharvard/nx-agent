@@ -361,6 +361,21 @@ def parse_frameprof(text):
     return dict(frames=frames, to_winmain=to_winmain if seen else None, total=sum(r.get('instructions', 0) for r in res))
 
 
+def isnum(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def bound(v, key='gate'):
+    """a render-report value: a number, or a range {lo, hi, gate}; the gate value (= hi) by default"""
+    if isinstance(v, dict):
+        return v.get(key, v.get('hi'))
+    return v
+
+
+def fmt_ms(v):
+    return '%.2f' % v if isnum(v) else '?'
+
+
 def placement_check(port):
     """core placement from toolchain/host/placement.h and the NPDM: main on core 0, workers on 1-2, core 3 opt-in"""
     ph = os.path.join(port, 'toolchain', 'host', 'placement.h')
@@ -1038,20 +1053,33 @@ class Card:
                       '; '.join(pc['problems']) or '%d roles checked' % pc['roles'], rank=24)
 
     def render_gate(self):
-        """the render machine's summary block: the slower of the main and render threads, per clock, against the
-        frame-rate levels; times are scaled from the report's assumptions.clock_ghz (CPU-bound submission)"""
+        """the render machine's report (docs/RENDER_PERF.md section 5): the renderer's CPU share of each frame-rate
+        target's budget, and the GPU model.
+
+        perf.render.<clock>: the renderer's worst thread (main side or render thread) as a fraction of the frame
+        budget, `targets_budget_fraction` of the summary (hi bound: IPC 0.6, mix_hi). Its `targets` verdicts are not
+        used: they compare the renderer alone with the whole frame, while the owner's targets are for the whole frame.
+        The renderer has a share of the frame (RENDER_NATIVE.md section 9.4: render thread 4.5 of 22.2 ms, 3.5 of
+        16.7 ms; packet build 4.0 / 3.0 ms on main), thresholds render_perf.max_budget_fraction. A level is met when
+        the renderer fits its share of that target's frame. A report without the fractions gives them from
+        frame_ms (gate = hi), scaled from the clock it was measured at.
+
+        perf.gpu.<config>: the GPU frame time of the report's model (gpu.summary_ms.<mix>.<config>, efficiency 1.0 -
+        0.6; the 0.6 bound is judged) against the frame-rate levels. A model with no measured anchor: informative
+        unless thresholds render_perf.gpu says otherwise."""
         rp, p = self.th.get('render_perf', {}), self.th['perf']
         r = self.render
-        where = 'nx-agent:%s' % (r.get('branch') or rp.get('branch', '?'))
+        where = r.get('branch') or rp.get('branch', '?')
+        where = where if where.startswith('nx-agent') else 'nx-agent:%s' % where
         try:
-            j = json.loads(r['text']) if r.get('text') else None
+            full = json.loads(r['text']) if r.get('text') else None
         except ValueError:
-            j = None
+            full = None
+        j = full
         if isinstance(j, dict) and not isinstance(j.get('frame_ms'), dict) and isinstance(j.get('summary'), dict):
             j = j['summary']
-        fm = j.get('frame_ms') if isinstance(j, dict) else None
-        vals = [fm.get('main'), fm.get('render')] if isinstance(fm, dict) else [None]
-        ok = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in vals)
+        share = rp.get('max_budget_fraction', 0.2)
+        f = p['fps']
         src, note0 = None, ''
         if isinstance(j, dict):
             c = str(j.get('commit') or '')
@@ -1059,31 +1087,94 @@ class Card:
             b = h.behind(c) if h and c else None
             src = dict(branch=where, path=r.get('path') or rp.get('path'), commit=c[:12], behind=b, published=None,
                        stale=b is None or b > self.maxb)
-            pd, asm = j.get('per_draw_us') or {}, j.get('assumptions') or {}
-            note0 = 'per draw: native %s us, Nine %s us; measured at IPC %s, %s GHz' % (
-                pd.get('native', '?'), pd.get('nine', '?'), asm.get('ipc', '?'), asm.get('clock_ghz', '?'))
+            pd, fm = j.get('per_draw_us') or {}, j.get('frame_ms') or {}
+            note0 = 'per draw: native %s us, Nine %s us; frame main %s ms, render %s ms (gate = hi: %s)' % (
+                fmt_ms(bound(pd.get('native'))), fmt_ms(bound(pd.get('nine'))), fmt_ms(bound(fm.get('main'))),
+                fmt_ms(bound(fm.get('render'))), (j.get('assumptions') or {}).get('gate_value') or 'as given')
         for clk in p['clocks']:
             gid, req = 'perf.render.' + clk['name'], clk.get('required', True)
-            title = 'render perf: frame time, main / render thread (%s clock %.3f GHz)' % (clk['name'], clk['hz'] / 1e9)
-            if not ok:
+            title = 'render perf: renderer CPU share of the frame, worst thread (%s clock %.3f GHz)' % (
+                clk['name'], clk['hz'] / 1e9)
+            thr = 'renderer <= %.0f %% of the frame (RENDER_NATIVE 9.4) at: %s' % (100 * share, self.fps_threshold())
+            fr, how = self.render_fractions(j, clk) if isinstance(j, dict) else (None, None)
+            if not fr:
                 why = ('no render perf report (%s:%s) yet' % (where, rp.get('path')) if not r.get('text') else
-                       'unreadable summary block' if not isinstance(j, dict) else 'frame_ms.main/render missing')
-                self.nodata(gid, 'Performance', title, self.fps_threshold(), why, rank=22,
+                       'unreadable summary block' if not isinstance(j, dict) else
+                       'neither targets_budget_fraction nor frame_ms.main/render in the summary')
+                self.nodata(gid, 'Performance', title, thr, why, rank=22, sources=[src] if src else None, required=req)
+                continue
+            lv = dict(floor=fr[f['floor']] <= share, target=fr[f['target']] <= share,
+                      stretch=fr[f['stretch']] <= share)
+            name = ('fail' if not lv['floor'] else 'below target' if not lv['target'] else
+                    'stretch' if lv['stretch'] else 'target')
+            ms = fr[f['target']] * 1000.0 / f['target']
+            self.gate(gid, 'Performance', title, '%.0f %% of the %d fps frame (%.1f ms)' % (
+                100 * fr[f['target']], f['target'], ms), thr, PASS if lv['target'] else FAIL, src,
+                      '%s; fractions %s (%s); %s' % (
+                          self.fps_note(lv, name), ', '.join('%d fps %.0f %%' % (k, 100 * fr[k]) for k in sorted(fr)),
+                          how, note0), rank=22, required=req, levels=dict(lv, level=name), fractions=fr)
+        self.gpu_gates(full if isinstance(full, dict) else None, src, where)
+
+    def render_fractions(self, j, clk):
+        """{fps: the renderer's worst thread / that target's frame} at clk, and where the numbers came from"""
+        f = self.th['perf']['fps']
+        want = [f['floor'], f['target'], f['stretch']]
+        tbf = j.get('targets_budget_fraction')
+        if isinstance(tbf, dict):
+            out = {}
+            for fps in want:
+                row = tbf.get(str(fps)) or tbf.get(fps)
+                if not isinstance(row, dict):
+                    break
+                ks = {float(k): v for k, v in row.items() if isnum(v) and re.fullmatch(r'\d+(\.\d+)?', str(k))}
+                if not ks:
+                    break
+                hit = next((v for k, v in ks.items() if abs(k * 1e9 - clk['hz']) < 1e6), None)
+                if hit is None:                     # another clock: scale the lowest clock's fraction (CPU-bound)
+                    k0 = min(ks)
+                    hit = ks[k0] * k0 * 1e9 / clk['hz']
+                out[fps] = float(hit)
+            if len(out) == len(want):
+                return out, 'targets_budget_fraction, hi bound'
+        fm = j.get('frame_ms')
+        if not isinstance(fm, dict):
+            return None, None
+        m, rr = bound(fm.get('main')), bound(fm.get('render'))
+        if not (isnum(m) and isnum(rr)):
+            return None, None
+        ghz = (j.get('assumptions') or {}).get('clock_ghz')
+        if isinstance(ghz, list):
+            ghz = min((g for g in ghz if isnum(g)), default=None)   # the hi bound is measured at the lowest clock
+        how = 'frame_ms gate values'
+        if not (isnum(ghz) and ghz > 0):
+            ghz = self.th['perf']['clocks'][0]['hz'] / 1e9
+            how += '; no assumptions.clock_ghz: taken as measured at the %s clock' % self.th['perf']['clocks'][0]['name']
+        worst = max(m, rr) * float(ghz) * 1e9 / clk['hz']
+        return {fps: worst / (1000.0 / fps) for fps in want}, how
+
+    def gpu_gates(self, full, src, where):
+        rp = self.th.get('render_perf', {})
+        mix = rp.get('gpu_mix', 'mix_hi')
+        gpu = (full or {}).get('gpu') if isinstance((full or {}).get('gpu'), dict) else {}
+        sm = (gpu.get('summary_ms') or {}).get(mix) or {}
+        for cfg in rp.get('gpu', []):
+            name, req = cfg['name'], cfg.get('required', False)
+            title = 'GPU frame time, %s (model, %s)' % (name.replace('_', ' '), mix)
+            row = sm.get(name)
+            lo = row.get(cfg.get('lo', 'eff_1.0')) if isinstance(row, dict) else None
+            hi = row.get(cfg.get('hi', 'eff_0.6')) if isinstance(row, dict) else None
+            if not (isnum(lo) and isnum(hi)):
+                self.nodata('perf.gpu.' + name, 'Performance', title, self.fps_threshold(),
+                            'no gpu.summary_ms.%s.%s in the render report (%s)' % (mix, name, where), rank=22,
                             sources=[src] if src else None, required=req)
                 continue
-            ghz = (j.get('assumptions') or {}).get('clock_ghz')
-            note = note0
-            if isinstance(ghz, (int, float)) and ghz > 0:
-                scale = float(ghz) * 1e9 / clk['hz']
-            else:
-                scale = p['clocks'][0]['hz'] / clk['hz']
-                note += '; no assumptions.clock_ghz: taken as measured at the %s clock' % p['clocks'][0]['name']
-            m, rr = vals[0] * scale, vals[1] * scale
-            worst = max(m, rr)
-            lv, name, st = self.fps_levels(worst, worst)
-            self.gate(gid, 'Performance', title, '%.1f / %.1f ms (%.0f fps)' % (m, rr, 1000 / worst),
-                      self.fps_threshold(), st, src, '%s; %s' % (self.fps_note(lv, name), note), rank=22,
-                      required=req, levels=dict(lv, level=name))
+            lv, lname, st = self.fps_levels(hi, hi)
+            tg = (gpu.get('targets') or {})
+            self.gate('perf.gpu.' + name, 'Performance', title, '%.1f - %.1f ms' % (lo, hi), self.fps_threshold(), st,
+                      src, '%s; judged on the efficiency-0.6 bound; model, not measured (RENDER_PERF.md section 9); '
+                      'report: %s' % (self.fps_note(lv, lname), ', '.join(
+                          '%s fps %s' % (k, (tg.get(k) or {}).get(name, '?')) for k in sorted(tg))), rank=22,
+                      required=req, levels=dict(lv, level=lname))
 
     def package_gates(self):
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
@@ -1227,9 +1318,10 @@ def markdown(head, gates, risks, generated):
     return '\n'.join(L) + '\n'
 
 
-def load_render(th, port, fetch=False, fixtures=None, table=None):
+def load_render(th, port, fetch=False, fixtures=None, table=None, head=None):
     """the render machine's perf report: from <fixtures>/_render/report.json, else from the render branch of this
-    repository (`git fetch origin <branch>` with --fetch; then refs/remotes/origin/<branch>:<path>)"""
+    repository (`git fetch origin <branch>` with --fetch; then refs/remotes/origin/<branch>:<path>), else the copy
+    merged into this checkout (distances then count on the integration head)"""
     rp = th.get('render_perf', {})
     br, path = rp.get('branch', 'claude/port-nsw-render'), rp.get('path')
     if fixtures:
@@ -1242,8 +1334,13 @@ def load_render(th, port, fetch=False, fixtures=None, table=None):
     ref = 'refs/remotes/origin/' + br
     tip = g('rev-parse', '--verify', '-q', ref).stdout.strip()
     r = g('show', '%s:%s' % (ref, path)) if tip and path else None
-    return dict(text=r.stdout if r is not None and r.returncode == 0 else None, branch=br, path=path,
-                hist=History(head=tip, repo=port) if tip else None)
+    if r is not None and r.returncode == 0:
+        return dict(text=r.stdout, branch=br, path=path, hist=History(head=tip, repo=port))
+    rel = re.sub(r'^ports/fnv-nx/', '', path or '')
+    f = os.path.join(port, rel) if rel else ''
+    if f and os.path.isfile(f):
+        return dict(text=readf(f), branch='nx-agent (checkout)', path=rel, hist=History(head=head, repo=port))
+    return dict(text=None, branch=br, path=path, hist=None)
 
 
 def main(argv):
@@ -1271,7 +1368,7 @@ def main(argv):
         if a.fetch:
             store.fetch()
         hist = History(head=a.head, repo=a.port)
-    render = load_render(th, a.port, a.fetch, a.fixtures, hist.table)
+    render = load_render(th, a.port, a.fetch, a.fixtures, hist.table, None if a.fixtures else hist.head)
     card = Card(store, hist, th, port=a.port, render=render).run()
     risks = json.loads(readf(a.risks)) if os.path.isfile(a.risks) else []
     gen = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())

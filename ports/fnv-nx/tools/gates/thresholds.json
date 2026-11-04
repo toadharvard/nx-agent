@@ -96,8 +96,24 @@
   "max_use_fraction": 0.75
  },
  "render_perf": {
-  "_doc": "render machine summary (docs/RENDER_PERF.md on that branch): {commit, per_draw_us: {native, nine}, frame_ms: {main, render}, assumptions: {ipc, clock_ghz}}; the frame time is the slower of the main and render threads, scaled from assumptions.clock_ghz to each perf clock, against the perf.fps levels",
+  "_doc": "render machine report (docs/RENDER_PERF.md section 5). perf.render.<clock>: summary.targets_budget_fraction (the renderer's worst thread / the target's frame, hi bound = IPC 0.6, mix_hi; not summary.targets, which compares the renderer alone with the whole frame) against max_budget_fraction, the renderer's share of the frame (RENDER_NATIVE.md 9.4: render thread 4.5 of 22.2 ms, 3.5 of 16.7 ms); without the fractions, from frame_ms gate values scaled from assumptions.clock_ghz. perf.gpu.<config>: gpu.summary_ms.<gpu_mix>.<config>, efficiency 1.0 (lo) - 0.6 (hi, judged), a model with no measured anchor, so informative until required is set",
   "branch": "claude/port-nsw-render",
-  "path": "ports/fnv-nx/render/native/perf/report.json"
+  "path": "ports/fnv-nx/render/native/perf/report.json",
+  "max_budget_fraction": 0.2,
+  "gpu_mix": "mix_hi",
+  "gpu": [
+   {
+    "name": "docked_720p",
+    "required": false
+   },
+   {
+    "name": "handheld_720p",
+    "required": false
+   },
+   {
+    "name": "handheld_540p",
+    "required": false
+   }
+  ]
  }
 }
