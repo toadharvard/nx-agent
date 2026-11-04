@@ -4711,7 +4711,71 @@ def r_vfptr_empty_base(path, text, stats):
     stats['EBO2'] += len(edits)
     return text
 
+# ---------------------------------------------------------------------------------------------------------- IDTOR1
+#
+# An implicit destructor the recipe binds (S1-layout, S13b layout-offset). A class C that declares no destructor but
+# has a member with one gets an implicit, non-trivial `C::~C`. MSVC 2008 emits it as a COMDAT and calls it by name;
+# the recipe binds that name to the exe function the call went to (extradataobjects.cpp `struct List_009e03e0 { int
+# dummy; void RemoveAll(); ListX m_uiX; }`: `??1List_009e03e0@fnv_00434dc0@@QAE@XZ` -> 0x0046ffb0, BSSimpleList's
+# destructor, which receives the list at this+0xc; build_and_match: 293 / 293 functions). GCC defines the implicit
+# destructor itself, inline, from the decomp's placeholder members: it destroys `m_uiX` at this+0x10 (the exe passes
+# this+0xc to 0x0046ffb0, the native this+0x10 to `ListX::~ListX`), so the exe's destructor never runs. IDTOR1
+# writes FNVNX_IDTOR1(C) at the end of C's body: under GCC `public: ~C();` (body-less), so GCC calls C's D1 by name
+# and the link binds it to the exe's address, as for MSVC; empty under MSVC, whose implicit destructor already is that
+# call (a real declaration there would renumber the unit's $SG string literals the recipe binds). Only: a .cpp; C defined once at namespace or class scope (no template, no local class, no
+# anonymous namespace) that declares no `~C` in its body; the unit binds `??1C@<scopes>@@QAE@XZ` (the
+# non-virtual form: a virtual one would be an implicit override's vtable slot) to one address some unit decompiles.
+
+def r_implicit_bound_destructors(path, text, stats):
+    """IDTOR1: declare `~C();` in a class whose implicit destructor the recipe binds to a decompiled address (above)."""
+    if not path.endswith('.cpp') or 'struct' not in text and 'class' not in text: return text
+    syms = _unit_symbols(path)
+    if not syms or not any(k.startswith('??1') and k.endswith('@@QAE@XZ') for k in syms): return text
+    decompiled = _all_unit_functions(path)
+    spans = prepare.scope_spans(text)
+    cands, seen = [], collections.Counter()
+    for o, c, k, h in spans:
+        if k != 'class': continue
+        bare = prepare.HEAD_DECOR.sub(' ', h).strip()
+        if re.match(r'\s*template\b', bare) or re.search(r'\btemplate\s*<', bare): continue
+        cm = re.match(r'(?:typedef\s+)?(?:class|struct)\s+([A-Za-z_]\w*)\s*(?::(?!:)|$)', bare)
+        if not cm: continue
+        chain = prepare.scope_chain(spans, o)
+        scope, ok = [], True
+        for kk, hh in chain:
+            if kk == 'namespace':
+                n = hh.split()[-1]
+                if n == 'namespace': ok = False; break                   # anonymous namespace
+                scope.append(n)
+            elif kk == 'class':
+                hb = prepare.HEAD_DECOR.sub(' ', hh).strip()
+                if re.search(r'\btemplate\b', hb): ok = False; break
+                hm = re.match(r'(?:typedef\s+)?(?:class|struct|union)\s+([A-Za-z_]\w*)', hb)
+                if not hm: ok = False; break
+                scope.append(hm.group(1))
+            else:
+                ok = False; break
+        if not ok: continue
+        name = cm.group(1)
+        key = '??1' + '@'.join([name] + list(reversed(scope))) + '@@QAE@XZ'
+        seen[key] += 1
+        cands.append((key, name, o, c, bare.startswith('class') or bare.startswith('typedef class')))
+    edits = []
+    for key, name, o, c, is_class in cands:
+        if seen[key] != 1 or key not in syms: continue
+        try: a = int(syms[key], 16)
+        except ValueError: continue
+        if a not in decompiled: continue
+        if re.search(r'~\s*%s\s*\(' % re.escape(name), text[o:c]): continue   # a destructor of its own
+        edits.append((c, ' FNVNX_IDTOR1(%s) /* fnv-nx IDTOR1 0x%08x */\n' % (name, a)))
+    if not edits: return text
+    for at, ins in sorted(edits, reverse=True):
+        text = text[:at] + ins + text[at:]
+    stats['IDTOR1'] += len(edits)
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
-              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base]
+              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base,
+              r_implicit_bound_destructors]
 RULES += REFS_RULES
