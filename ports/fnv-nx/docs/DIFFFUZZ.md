@@ -261,6 +261,7 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | call-count of a `??_G` fuzzed with flags bit 0 clear: the native makes the oracle's calls plus deallocator calls only (D0 always frees) | `dtor-flags` | artifact (S13: fuzz `??_G` with flags & 1, or pair flags 0 with D1) |
 | call-count, the oracle makes no call, the native's first / a later call is a named stub | `native-undefined` / `after-native-undefined` | real-bug S2c/S2d (was `falloff?`) |
 | call-count, the oracle makes no call, the native calls addresses only | `falloff?` | real-bug S1 |
+| probe `signedness` on a by-design shape (the top bit is a float sign, a bool byte, INT_MIN, the top of the address space): float argument within tolerance / bool result 1 vs another nonzero byte / x86 #DE / native access across 4 GiB | `x87-precision` / `bool-repr` / `division` / `ilp32-pointer` | by-design |
 | pointer result with an unreadable pointee on one side | `literal-ret` | artifact |
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
 | `no-native-entry` | `no-native-entry` | artifact |
