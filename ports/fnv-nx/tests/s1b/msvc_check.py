@@ -51,7 +51,7 @@ def overlay(decomp, work, files):
         src = Path(decomp, rel)
         text = src.read_text(encoding='utf-8', errors='surrogateescape')
         stats = __import__('collections').Counter()
-        for rule in ('XINC1', 'FTOL1', 'DBUG1'):
+        for rule in ('XINC1', 'FTOL1', 'DBUG1', 'RET1'):
             text = s1b_patches.apply_sites(str(src), text, stats, rule, report)
         dst = tree / rel
         if dst.is_symlink() or dst.exists():
@@ -149,10 +149,17 @@ def main():
     ap.add_argument('--all-functions', action='store_true', help='report every function of the units, not only sites')
     ap.add_argument('--jobs', type=int, default=2)
     ap.add_argument('--reuse', action='store_true', help='compare objects already in WORK/obj (no compile)')
+    ap.add_argument('--patches', help='patch directory to use instead of patches/ (candidate sets)')
+    ap.add_argument('--report', help='write per-function results as JSON lines here')
     a = ap.parse_args()
     decomp, work = Path(a.decomp).resolve(), Path(a.work).resolve()
     work.mkdir(parents=True, exist_ok=True)
-    sites = s1b_patches.load_sites()
+    if a.patches:
+        s1b_patches.SITES = s1b_patches.load_sites(a.patches)
+        s1b_patches.BY_FILE = {}
+        for s in s1b_patches.SITES:
+            s1b_patches.BY_FILE.setdefault(s.path, []).append(s)
+    sites = s1b_patches.SITES
     files = sorted({s.path for s in sites})
     if a.only:
         files = [f for f in files if f in a.only.split(',')]
@@ -182,12 +189,18 @@ def main():
     with ThreadPoolExecutor(a.jobs) as pool:
         for i, u, res, out in pool.map(one, jobs):
             if res is None:
+                if a.report:
+                    with open(a.report, 'a') as rf:
+                        rf.write(json.dumps(dict(unit=i, source=u['source'], status='compile-failed', error=out[-6000:])) + '\n')
                 print('COMPILE-FAILED u%d %s\n%s' % (i, u['source'], out[-2500:]))
                 summary[i] = 'compile-failed'
                 continue
             fns, ren, eh = res
             all_renames += ren
             for addr, st in sorted(fns.items()):
+                if a.report:
+                    with open(a.report, 'a') as rf:
+                        rf.write(json.dumps(dict(unit=i, source=u['source'], addr=addr, status=st)) + '\n')
                 print('%-9s u%-5d %s %s%s' % (st, i, addr, u['source'], '' if eh else ' (eh differs)'))
                 summary.setdefault(st, 0)
                 summary[st] += 1

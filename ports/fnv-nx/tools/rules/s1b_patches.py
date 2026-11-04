@@ -8,7 +8,7 @@ keyed by file and `// @fnv` address, with the evidence next to it.
 
 Patch file format (UTF-8 text):
 
-    @@ <RULE> <source path> <0x address | file>      one site; RULE is XINC1, FTOL1 or DBUG1
+    @@ <RULE> <source path> <0x address | file>      one site; RULE is XINC1, FTOL1, DBUG1 or RET1
     # evidence ...                                    at least one line: what the x86 code shows
     <<<                                               a hunk: old text (verbatim, from the decomp) ...
     ...
@@ -189,7 +189,15 @@ def r_dbug1(path, text, stats):
     return apply_sites(path, text, stats, 'DBUG1')
 
 
-RULES = [r_xinc1, r_ftol1, r_dbug1]
+def r_ret1(path, text, stats):
+    """RET1: the evident return of non-void functions that end without one (patches/ret1_*.s1b): the trailing
+    expression statement on each fall-through path becomes `return <it>;` where MSVC compiles that to the same code,
+    i.e. the x86 function already returned that value (eax / ST0 left by it); prepare's FALL1 trap stays behind it,
+    unreachable."""
+    return apply_sites(path, text, stats, 'RET1')
+
+
+RULES = [r_xinc1, r_ftol1, r_dbug1, r_ret1]
 
 # ---------------------------------------------------------------------------------------------------------- units.json
 
