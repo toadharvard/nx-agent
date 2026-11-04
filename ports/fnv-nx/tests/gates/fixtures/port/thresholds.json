@@ -18,6 +18,14 @@
  "abi_explained_classes": [
   "pop-mismatch"
  ],
+ "_abi_verdicts_doc": "S1b's tests/s1b/pop/abiclass.py verdicts that explain an x86-inconsistent pair (J-0141): patched (the caller is an S1b site at the head that the link did not have yet: the next link drops the row) and benign-* (no native effect: extra words ignored, words never read, no call, only who pops differs). Tables: the gates job's --abiclass dir, else link/<c12>/out/abiclass.tsv",
+ "abi_explained_verdicts": [
+  "patched",
+  "benign-more",
+  "benign-unread",
+  "benign-nocall",
+  "benign-conv"
+ ],
  "static_closed": {
   "_doc": "a non-benign S12 class counts as closed only while its fix is present in this checkout (file + regex)",
   "F2S": {

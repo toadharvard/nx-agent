@@ -66,11 +66,11 @@ class World:
     def latest(self):
         return max(json.loads(self.read('_published.json')).values())
 
-    def run(self):
+    def run(self, *extra):
         out = os.path.join(self.tmp, 'card.json')
         md = os.path.join(self.tmp, 'card.md')
         rc = ready.main(['--fixtures', self.w, '--port', self.p, '--thresholds', self.path('thresholds.json', True),
-                         '--head', C, '--json', out, '--md', md])
+                         '--head', C, '--json', out, '--md', md, *extra])
         assert rc == 0
         card = json.loads(readf(out))
         card['by_id'] = {g['id']: g for g in card['gates']}
@@ -259,6 +259,64 @@ class ReadyTest(unittest.TestCase):
         g = self.gate(card, 'abi.x86_inconsistent')
         self.assertEqual(g['status'], 'pass')
         self.assertEqual(g['sources'][0]['branch'], 'link/' + C)
+
+    def abiclass_world(self):
+        """five open pairs, abiclass verdicts for four; S1b sites src/b.cpp 0x500000 (head only) and src/c.cpp
+        0x600000 (head and the link's commit)"""
+        rows = ''.join('%s\t0x0040%d000\tcallee%d\tref%d\t0\tx86-inconsistent\tpop-mismatch(4),ref-passes-fewer\n'
+                       % (u, i, i, i) for i, u in enumerate(('src/a.cpp', 'src/b.cpp#vtables', 'src/c.cpp', 'src/d.cpp',
+                                                             'src/e.cpp'), 3))
+        self.world.write('link/%s/out/abi.tsv' % C, self.world.read('link/%s/out/abi.tsv' % C) + rows)
+        tab = '#verdict\tboot\tsrc\tcaller\tcallee\tref_msvc\tabi_verdict\tclasses\n'
+        for v, u, i, caller in (('benign-more', 'src/a.cpp', 3, '00450000'), ('patched', 'src/b.cpp', 4, '00500000'),
+                                ('benign-unread', 'src/b.cpp', 4, '00510000'),
+                                ('patched', 'src/c.cpp', 5, '00600000'), ('fix-donor', 'src/d.cpp', 6, '00700000')):
+            tab += '%s\t2\t%s\t%s\tcallee%d\tref%d\tx86-inconsistent\tpop-mismatch,ref-passes-fewer\n' % (
+                v, u, caller, i, i)
+        self.world.write('link/%s/out/abiclass.tsv' % C, tab)
+        self.world.write('patches/x.s1b', '@@ XINC1 src/b.cpp 0x00500000\n+x\n@@ XINC1 src/c.cpp 0x00600000\n+y\n',
+                         port=True)
+        self.world.write('_patches/%s/x.s1b' % C, '@@ XINC1 src/c.cpp 0x00600000\n+y\n')
+
+    def test_abiclass_patched_and_benign_explain(self):
+        self.abiclass_world()
+        g = self.gate(self.world.run(), 'abi.x86_inconsistent')
+        self.assertEqual((g['status'], g['value']), ('fail', 3))        # c (patch already in the link), d, e
+        self.assertEqual(g['abiclass'], {'benign-more': 1, 'patched': 1, 'patched-in-link': 1, 'fix-donor': 1,
+                                         'no-verdict': 1})
+        self.assertIn('2 by S1b abiclass verdicts (benign-more 1, patched 1)', g['note'])
+        self.assertIn('open by abiclass verdict: fix-donor 1, no-verdict 1, patched-in-link 1', g['note'])
+        self.assertEqual(g['sources'][1]['path'], 'out/abiclass.tsv')
+        # the head dropped b's hunk: its verdict is stale; the link's patches unknown: unverified
+        self.world.write('patches/x.s1b', '@@ XINC1 src/c.cpp 0x00600000\n+y\n', port=True)
+        self.assertEqual(self.gate(self.world.run(), 'abi.x86_inconsistent')['abiclass'].get('patched-gone'), 1)
+        self.world.write('patches/x.s1b', '@@ XINC1 src/b.cpp 0x00500000\n+x\n', port=True)
+        shutil.rmtree(self.world.path('_patches'))
+        self.assertEqual(self.gate(self.world.run(), 'abi.x86_inconsistent')['abiclass'].get('patched-unverified'), 1)
+
+    def test_abiclass_all_explained_passes(self):
+        self.abiclass_world()
+        self.world.sub('link/%s/out/abi.tsv' % C, 'src/c.cpp', 'src/a.cpp')
+        t = self.world.read('link/%s/out/abi.tsv' % C)
+        self.world.write('link/%s/out/abi.tsv' % C, ''.join(l + '\n' for l in t.splitlines()
+                                                           if 'src/d.cpp' not in l and 'src/e.cpp' not in l))
+        self.world.sub('link/%s/out/abiclass.tsv' % C, 'patched\t2\tsrc/c.cpp\t00600000',
+                       'benign-conv\t2\tsrc/a.cpp\t00600000')
+        card = self.world.run()
+        g = self.gate(card, 'abi.x86_inconsistent')
+        self.assertEqual((g['status'], g['value']), ('pass', 0), g['note'])
+        self.assertEqual(card['verdict'], 'READY')
+
+    def test_abiclass_dir_of_the_gates_job(self):
+        self.abiclass_world()
+        d = os.path.join(self.world.tmp, 'abiclass')
+        os.makedirs(d)
+        writef(os.path.join(d, C + '.tsv'), '#verdict\tboot\tsrc\tcaller\tcallee\tref_msvc\tabi_verdict\tclasses\n')
+        g = self.gate(self.world.run('--abiclass', d), 'abi.x86_inconsistent')
+        self.assertEqual((g['value'], g['abiclass']), (5, {'no-verdict': 5}))
+        self.assertEqual(g['sources'][1]['branch'], 'gates job')
+        self.world.edit_json('thresholds.json', lambda t: t.pop('abi_explained_verdicts'), port=True)
+        self.assertIn('abi_explained_verdicts not set', self.gate(self.world.run(), 'abi.x86_inconsistent')['note'])
 
     # ---- S11 / S12
     def test_equiv_by_design_comes_from_patches(self):

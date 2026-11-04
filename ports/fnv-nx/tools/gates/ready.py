@@ -149,6 +149,25 @@ class History:
         r = subprocess.run(['git', '-C', self.repo, *a], capture_output=True, text=True)
         return r.stdout.strip() if r.returncode == 0 else None
 
+    patch_root = None           # fixtures: <dir>/<commit12>/*.s1b stands for patches/ at that commit
+
+    def patch_sites(self, commit):
+        """the S1b sites (src, caller address) of patches/*.s1b at commit; None when that commit is unknown"""
+        if not commit:
+            return None
+        if self.table is not None:
+            d = os.path.join(self.patch_root or '', commit[:12])
+            if not (self.patch_root and os.path.isdir(d)):
+                return None
+            return patch_sites(readf(os.path.join(d, f)) for f in sorted(os.listdir(d)) if f.endswith('.s1b'))
+        c = self._git('rev-parse', '--verify', '-q', commit + '^{commit}')
+        if not c:
+            return None
+        names = self._git('ls-tree', '--name-only', c, 'patches/')
+        if names is None:
+            return None
+        return patch_sites(self._git('show', '%s:./%s' % (c, n)) or '' for n in names.split() if n.endswith('.s1b'))
+
     def behind(self, commit):
         if not commit:
             return None
@@ -170,6 +189,34 @@ class History:
 
 
 # ------------------------------------------------------------------------------------------------- parsers
+
+def patch_sites(texts):
+    """(src, caller address) of every `@@ RULE src 0xADDR` hunk (patches/*.s1b, as tests/s1b/pop/abiclass.py)"""
+    out = set()
+    for t in texts:
+        for m in re.finditer(r'^@@ \w+ (\S+) (0x[0-9a-fA-F]+)', t or '', re.M):
+            out.add((m.group(1), int(m.group(2), 16)))
+    return out
+
+
+ABICLASS_RANK = ['fix-other', 'fix-donor', 'ecx', 'bridge-gap', 'other', 'patched', 'benign-more', 'benign-unread',
+                 'benign-nocall', 'benign-conv']        # tests/s1b/pop/abiclass.py: a pair's verdict is its worst call's
+
+
+def parse_abiclass(text):
+    """S1b's abiclass.py table (#verdict boot src caller callee ref_msvc abi_verdict classes) -> {(abi verdict,
+    src, callee, ref): [(verdict, caller address or None)]}; None when it is not that table"""
+    if not text or not text.startswith('#verdict\tboot\tsrc\tcaller'):
+        return None
+    out = {}
+    for l in text.splitlines()[1:]:
+        f = l.split('\t')
+        if len(f) < 8 or l.startswith('#'):
+            continue
+        caller = int(f[3], 16) if re.fullmatch(r'[0-9a-fA-F]+', f[3]) else None
+        out.setdefault((f[6], f[2], f[4], f[5]), []).append((f[0], caller))
+    return out
+
 
 def num(s):
     return int(s.replace(',', '').replace(' ', ''))
@@ -555,12 +602,13 @@ def fuzz_policy(port):
 # ------------------------------------------------------------------------------------------------- scorecard
 
 class Card:
-    def __init__(self, store, hist, th, port=PORT, render=None):
+    def __init__(self, store, hist, th, port=PORT, render=None, abiclass_dir=None):
         self.store, self.hist, self.th, self.port = store, hist, th, port
         self.render = render or {}      # load_render(): text, branch, path, hist (distances on the render branch)
         self.gates = []
         self.boot_info = {}             # S5's boot/milestones.json beyond the milestones: image, peak heap, stub
         self.maxb = th.get('max_commits_behind', 25)
+        self.abiclass_dir = abiclass_dir        # the gates job's abiclass tables, <c12>.tsv (decomp-derived: never published)
 
     # ---- sources
     def src(self, branch, path, commit, published=None):
@@ -734,6 +782,7 @@ class Card:
             xinc = [r for r in rows if len(r) > 6 and r[5] == 'x86-inconsistent']
             un = [r for r in xinc if not set(re.sub(r'\([^)]*\)', '', r[6]).split(',')) <= explained]
             manual = [r for r in rows if len(r) > 6 and r[5] == 'manual']
+            un, by_verdict, ac_src, ac_note = self.abiclass_explained(br, un)
             cl = {}
             for r in un:
                 for c in re.sub(r'\([^)]*\)', '', r[6]).split(','):
@@ -741,10 +790,18 @@ class Card:
                         cl[c] = cl.get(c, 0) + 1
             top = ', '.join('%s %d' % kv for kv in sorted(cl.items(), key=lambda x: -x[1])[:5])
             asrc = dict(s, branch=br, path='out/abi.tsv')
+            by_class = len(xinc) - len(un) - sum(v for k, v in by_verdict.items() if k in self.abi_verdicts())
             self.gate('abi.x86_inconsistent', 'ABI', 'S2 x86-inconsistent pairs not explained',
-                      len(un), '0', PASS if not un else FAIL, asrc,
-                      '%d x86-inconsistent, %d explained (classes %s only); open: %s' % (
-                          len(xinc), len(xinc) - len(un), '+'.join(sorted(explained)) or '-', top), rank=6)
+                      len(un), '0', PASS if not un else FAIL, [asrc] + ([ac_src] if ac_src else []),
+                      '%d x86-inconsistent; explained: %d by class (%s), %d by S1b abiclass verdicts (%s); open: %s; '
+                      'open by abiclass verdict: %s' % (
+                          len(xinc), by_class, '+'.join(sorted(explained)) or '-',
+                          sum(v for k, v in by_verdict.items() if k in self.abi_verdicts()),
+                          ac_note or ', '.join('%s %d' % (k, by_verdict[k]) for k in sorted(by_verdict)
+                                               if k in self.abi_verdicts()) or 'none', top,
+                          ', '.join('%s %d' % kv for kv in sorted(by_verdict.items(), key=lambda x: (-x[1], x[0]))
+                                    if kv[0] not in self.abi_verdicts()) or '-'),
+                      rank=6, abiclass=by_verdict)
             self.gate('abi.manual', 'ABI', 'S2 pairs with a manual verdict (no automatic bridge)', len(manual), '0',
                       PASS if not manual else FAIL, asrc, rank=7)
         elif L and L.get('x86_inconsistent') is not None:
@@ -756,6 +813,57 @@ class Card:
         else:
             self.nodata('abi.x86_inconsistent', 'ABI', 'S2 x86-inconsistent pairs not explained', '0', 'no link', rank=6)
             self.nodata('abi.manual', 'ABI', 'S2 pairs with a manual verdict', '0', 'no link', rank=7)
+
+    def abi_verdicts(self):
+        """abiclass verdicts that explain a pair (thresholds abi_explained_verdicts; S1b, J-0141)"""
+        return set(self.th.get('abi_explained_verdicts', []))
+
+    def abiclass_explained(self, br, un):
+        """(rows still open, {verdict: rows}, source, note): S1b's abiclass.py table for this link
+        (<--abiclass dir>/<c12>.tsv from the gates job, else link/<c12>/out/abiclass.tsv) explains a row when every
+        call of its pair has a verdict of abi_explained_verdicts. `patched` holds only while the site is an S1b hunk
+        at the head and was not yet one at the link's commit: a site the link already had and whose row is still
+        there was not fixed by its patch (patched-in-link); a site the head no longer has is patched-gone; with the
+        link commit's patches unknown, patched-unverified. Rows the table does not cover: no-verdict"""
+        ok = self.abi_verdicts()
+        if not ok or not br:
+            return un, {}, None, 'abi_explained_verdicts not set' if not ok else None
+        c12 = br[5:]
+        text, src = None, None
+        f = os.path.join(self.abiclass_dir, c12 + '.tsv') if self.abiclass_dir else None
+        if f and os.path.isfile(f):
+            text = readf(f)
+            src = dict(branch='gates job', path='S1b abiclass.py of link/%s at the head' % c12,
+                       commit=(self.hist.head or '')[:12], behind=0, published=None, stale=False)
+        elif self.store.exists(br, 'out/abiclass.tsv'):
+            text = self.store.read(br, 'out/abiclass.tsv')
+            src = self.src(br, 'out/abiclass.tsv', c12)
+        tbl = parse_abiclass(text)
+        if tbl is None:
+            return un, {}, None, 'no abiclass table for %s' % br
+        head_sites = patch_sites(readf(os.path.join(self.port, 'patches', n))
+                                 for n in sorted(os.listdir(os.path.join(self.port, 'patches')))
+                                 if n.endswith('.s1b')) if os.path.isdir(os.path.join(self.port, 'patches')) else set()
+        link_sites = self.hist.patch_sites(c12)
+        rest, by = [], {}
+        for r in un:
+            calls = tbl.get((r[5], r[0].replace('#vtables', ''), r[2], r[3]))
+            vs = []
+            for v, caller in calls or []:
+                site = (r[0].replace('#vtables', ''), caller)
+                if v == 'patched':
+                    v = ('patched-gone' if site not in head_sites else 'patched-unverified' if link_sites is None
+                         else 'patched-in-link' if site in link_sites else v)
+                vs.append(v)
+            # a pair counts by its worst call (abiclass's rank; patched-gone / -in-link / -unverified rank first)
+            rank = lambda v: ABICLASS_RANK.index(v) if v in ABICLASS_RANK else -1
+            if vs and all(v in ok for v in vs):
+                worst = min(vs, key=rank)
+            else:
+                worst = min((v for v in vs if v not in ok), key=rank) if vs else 'no-verdict'
+                rest.append(r)
+            by[worst] = by.get(worst, 0) + 1
+        return rest, by, src, None
 
     def equiv_gates(self):
         n = self.th['equiv_shards']
@@ -1516,7 +1624,7 @@ def fmt_src(srcs):
     if None in bs and known:
         worst += ', %d not on the head\'s history' % bs.count(None)
     farms = sorted(set(s['branch'].split('/')[-1] for s in srcs), key=lambda f: (re.sub(r'\d+$', '', f),
-                                                                                 int(re.sub(r'^\D*', '', f) or 0)))
+                                                                                 int(re.search(r'\d*$', f).group() or 0)))
     commits = sorted(set(s['commit'] for s in srcs))
     return '%d reports (%s) @%s (%s)' % (len(srcs), short_list(farms), short_list(commits, 3), worst)
 
@@ -1603,6 +1711,7 @@ def main(argv):
     ap.add_argument('--port', default=PORT, help='ports/fnv-nx checkout at the head (placement, PATCHES.md, ...)')
     ap.add_argument('--thresholds', default=os.path.join(HERE, 'thresholds.json'))
     ap.add_argument('--risks', default=os.path.join(HERE, 'hardware_risks.json'))
+    ap.add_argument('--abiclass', help='directory of S1b abiclass.py tables, <link c12>.tsv (tools/farm/gates_job.sh)')
     ap.add_argument('--md')
     ap.add_argument('--json')
     a = ap.parse_args(argv)
@@ -1611,6 +1720,7 @@ def main(argv):
         store = DirStore(a.fixtures)
         cj = os.path.join(a.fixtures, '_commits.json')
         hist = History(head=a.head or 'fixture', table=json.loads(readf(cj)) if os.path.isfile(cj) else {})
+        hist.patch_root = os.path.join(a.fixtures, '_patches')
     else:
         gd = a.artifacts or os.environ.get('ARTIFACTS') or '/home/user/fnv-nx-build'
         if os.path.isdir(os.path.join(gd, '.git')):
@@ -1620,7 +1730,7 @@ def main(argv):
             store.fetch()
         hist = History(head=a.head, repo=a.port)
     render = load_render(th, a.port, a.fetch, a.fixtures, hist.table, None if a.fixtures else hist.head)
-    card = Card(store, hist, th, port=a.port, render=render).run()
+    card = Card(store, hist, th, port=a.port, render=render, abiclass_dir=a.abiclass).run()
     risks = json.loads(readf(a.risks)) if os.path.isfile(a.risks) else []
     gen = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     md = markdown(hist.head, card.gates, risks, gen)
