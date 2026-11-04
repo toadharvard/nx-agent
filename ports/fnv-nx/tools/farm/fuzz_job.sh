@@ -209,7 +209,7 @@ if ! python3 -c "$PYMODS" 2>/dev/null; then
 fi
 # Preflight: every module the harness imports must load here, or each function would come back as one harness
 # exception ("crash:ModuleNotFoundError") instead of a verdict.
-if ! (cd "$DF" && $PY -c 'import fuzz, classify, check_rebind, fnkeys, fuzzcache, effects' ) \
+if ! (cd "$DF" && $PY -c 'import fuzz, classify, check_rebind, fnkeys, fuzzcache, effects, vtmodel' ) \
     > "$FARM_HOME/fuzz-preflight.log" 2>&1; then
   echo "fuzz harness does not load on this host ($PY):"; tail -5 "$FARM_HOME/fuzz-preflight.log"; exit 1
 fi
@@ -283,9 +283,13 @@ if [ ! -s "$CAT" ] || ! head -1 "$CAT" | grep -q '"ohash"'; then
 fi
 (cd "$DF" && $PY - "$CAT" "$K" "$N" "${FUZZ_LIMIT:-0}" "$RUN/targets.jsonl" "$RUN/targets.json" <<'EOF'
 import json, sys, zlib
-import config
+import config, vtmodel
 cat, k, n, limit, out, summary = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6]
-counts = dict(catalogued=0, shard=0, no_native_object=0, not_modelled=0, targets=0)
+# difffuzz-13: indirect calls and jumps are modelled with the player's exe (vptrs from its vftables, vtmodel.py);
+# tail jumps and in-function switch tables always were (an intercepted call / the oracle's own relocated table)
+vcalls = vtmodel.exe_path() is not None
+counts = dict(catalogued=0, shard=0, no_native_object=0, not_modelled=0, not_modelled_unresolved=0,
+              not_modelled_indirect=0, indirect=0, targets=0, vtable_model=vcalls)
 have = {}
 rows = []
 for line in open(cat):
@@ -302,10 +306,12 @@ for line in open(cat):
     if not have[s]:
         counts['no_native_object'] += 1
         continue
-    if r['unresolved'] or r['indirect'] or r['tails']:
+    if r['unresolved'] or (r['indirect'] and not vcalls):
         counts['not_modelled'] += 1
+        counts['not_modelled_unresolved' if r['unresolved'] else 'not_modelled_indirect'] += 1
         continue
-    ncalls = len(r['calls'])
+    counts['indirect'] += bool(r['indirect'])
+    ncalls = len(r['calls']) + len(r['tails']) + r['indirect']
     rows.append(dict(unit=r['unit'], source=s, address=r['address'], symbol=r['symbol'], size=r['size'],
                      calls=r['calls'], x87=r['x87'], sse=r['sse'], fs=r['fs'],
                      kind='leaf' if ncalls == 0 else 'calls%d' % ncalls))
@@ -476,8 +482,8 @@ hard = [l.rstrip('\n').split('\t') for l in open(os.path.join(run, 'hard_cum.tsv
 out = ['# fuzz %s shard %s/%s%s' % (commit[:12], k, n, ' - HARNESS BROKEN' if broken else '')] + banner + ['',
        '- commit %s, decomp %s, oracle: %s MSVC 2008 objects of the pristine decomp' % (commit, d12, nx86),
        '- link: %s; tree: %s; exe: %s' % (note_link, note_tree, note_exe),
-       '- functions catalogued %d; in this shard %d: no native object %d, control flow not modelled (indirect '
-       'calls/jumps, unresolved relocations) %d, fuzzable %d (no native definition in the link: %d)' % (
+       '- functions catalogued %d; in this shard %d: no native object %d, control flow not modelled (unresolved '
+       'relocations, indirect calls without the player\'s exe) %d, fuzzable %d (no native definition in the link: %d)' % (
            counts['catalogued'], counts['shard'], counts['no_native_object'], counts['not_modelled'],
            counts['targets'], st['no_key']),
        '- this head: fuzzed %d, verdict reused from an earlier head (key unchanged) %d, pending %d (key changed %d, '

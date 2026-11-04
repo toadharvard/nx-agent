@@ -295,6 +295,7 @@ class UnitCache:
         t.oracle_callees = self.oracle_callees
         t.custom_cc = list(getattr(cv, 'custom', []) or [])
         t.vtables = self.vtable_map(img)
+        self.plant_model(t, cv, img, orig_addr)
         t.followed = self.preload(code, img, source)
         t.x86_code = code
 
@@ -317,6 +318,49 @@ class UnitCache:
             if xu2 is not xu and any(a in code for a in xu2.funcs):
                 t.extra_pinned.update(xu2.literal_bytes())
         return t
+
+    def vt_model(self):
+        """The vtable model (vtmodel.Model) of this link, or None without the player's exe (FNVNX_EXE)."""
+        if getattr(self, '_vtm', False) is False:
+            import vtmodel
+            self._vtm = vtmodel.Model(str(config.LINK), str(config.WORK / 'vt'), self.units) \
+                if vtmodel.exe_path() else None
+        return self._vtm
+
+    def plant_model(self, t, cv, img, orig_addr):
+        """What the fuzzer plants for the target (difffuzz-13): t.vt_cands {label: [image vftable]} for `this` and
+        class pointer parameters, t.vt_ap {V: native address point in this image}, t.vt_mem (synthesized native
+        vtable groups), t.vt_pins {V: the exe's slot words}, t.vt_slots (every planted slot's original address)."""
+        t.vt_cands, t.vt_ap, t.vt_mem, t.vt_pins, t.vt_slots = {}, {}, {}, {}, set()
+        m = self.vt_model()
+        if m is None:
+            return
+        import vtmodel
+        cands = {}
+        for lab, cls in vtmodel.arg_classes(cv).items():
+            vs = m.candidates(cls)
+            if lab == 'this':
+                vs += [v for v in m.for_function(orig_addr) if v not in vs]
+            if vs:
+                cands[lab] = vs
+        if 'this' not in cands and any(v.label == 'this' for v in cv.vals):
+            vs = m.for_function(orig_addr)
+            if vs:
+                cands['this'] = vs
+        allv = sorted({v for vs in cands.values() for v in vs})
+        if not allv:
+            return
+        ap, mem, stubs = m.native(allv, img, t.stub_orig)
+        img.stubs.update(stubs)
+        cands = {lab: [v for v in vs if v in ap] for lab, vs in cands.items()}
+        t.vt_cands = {lab: vs for lab, vs in cands.items() if vs}
+        used = sorted({v for vs in t.vt_cands.values() for v in vs})
+        t.vt_ap = {v: ap[v] for v in used}
+        t.vt_mem = mem
+        t.vt_pins = m.x86_pins(used)
+        t.vt_slots = {a for v in used for a in m.slots(v)}
+        for v, a in t.vt_ap.items():
+            t.vtables.setdefault(a & 0xffffffff, v)
 
     def import_stubs(self):
         """{stub index: (name, stdcall bytes)} for every IAT slot units.json names (one name per slot: the most
@@ -484,4 +528,6 @@ class UnitCache:
         pin = dict(self.iat_pins())
         pin.update(getattr(t, 'extra_pinned', {}))
         pin.update(self.pinned(source, orig_addr))
+        for v, b in getattr(t, 'vt_pins', {}).items():
+            pin[v] = b               # the exe's slot words win over a unit's recovered copy of the vftable
         return runner.Pair(t, pin), t

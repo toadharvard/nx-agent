@@ -53,7 +53,7 @@ class Result:
 
 
 class Arm64Engine:
-    def __init__(self, world_obj, image, stub_orig, vtables=None):
+    def __init__(self, world_obj, image, stub_orig, vtables=None, vt_mem=None):
         self.vtables = vtables or {}
         self.callee_conv = None          # original address -> Conv of the callee definition (set by runner.Pair)
         self.iat_names = {}              # IAT slot -> import name (set by runner.Pair)
@@ -80,6 +80,14 @@ class Arm64Engine:
         uc.mem_map(a64image.STACK_GUARD, PAGE, UC_PROT_READ)
         uc.mem_write(a64image.STACK_GUARD, struct.pack('<Q', 0x5ca1ab1e0ddba11))
         self.mapped.add(a64image.STACK_GUARD)
+        # native vtable groups synthesized for planted vptrs (vtmodel.py: classes whose _ZTV the unit image does not
+        # define), read only, in the private range
+        for base, data in sorted((vt_mem or {}).items()):
+            for p in range(world.page_of(base), base + len(data), PAGE):
+                if p not in self.mapped:
+                    uc.mem_map(p, PAGE, UC_PROT_READ)
+                    self.mapped.add(p)
+            uc.mem_write(base, data)
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._on_unmapped)
         uc.hook_add(UC_HOOK_INTR, self._on_intr)
         self._fault = None
@@ -88,7 +96,7 @@ class Arm64Engine:
         if page in self.mapped:
             return
         self.uc.mem_map(page, PAGE, prot)
-        self.uc.mem_write(page, self.world.page(page))
+        self.uc.mem_write(page, self.world.page_a64(page))
         self.mapped.add(page)
         self.dynamic.add(page)
 

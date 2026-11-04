@@ -149,6 +149,25 @@ definition and the calling unit's declaration of it: a reference result (`T&`) i
 its oracle code (`ret N`) when known, not from its declaration (a declaration with a parameter too many or too few
 left the oracle's esp off by 4: `fault:x:00000000`).
 
+**Virtual calls (difffuzz-13, vtmodel.py, J-0138).** With the player's exe (`FNVNX_EXE`; the farms take it through
+`job_gamedata`) an object the fuzzer gives a class gets a planted vptr (`Case.vptrs`): `this` of a member function
+and pointer / reference parameters to a class, at offset 0 of their buffer. The class's vftables come from the
+exe's RTTI (complete object locators: class, offset, hierarchy), by the decomp's `??_7C@@6B@` name of the class,
+the RTTI class name, or (for decomp shell classes) the vftables whose slots hold the function itself, plus up to 6
+classes derived at offset 0. x86 reads the vftable V there, its slots pinned to the exe's words (original
+addresses); AArch64 reads the native address point the kind-V row pairs with V: a copy of that Itanium vtable in
+the private range 0x0bc00000, its relocated slots resolved for the unit image (the unit's own definition,
+`CODE_STUB + X` for `__fnv_<X>`, the named stub of a D0/D1 that names the `??_G`). A virtual call is then a call
+event of the same original address on both machines, compared like a direct one; an MSVC deleting destructor
+`??_G(this, flags)` compares `this` only (the flags are D0 / D1 natively). Where the link pairs V with a native
+vtable shorter than the exe's (decomp shell classes), the copy is padded with `__s13_vtpad_<V>_<k>` stubs: a call
+through one is `vptr-unpaired` (soft, S2c). A differing call that is neither a direct target of the oracle code
+nor a planted slot went through memory the case did not plant (`vcall: unplanted`): `oracle-vcall`, an oracle gap.
+The farms fuzz functions with indirect calls and jumps only with the exe (`not_modelled_indirect` without it);
+tail jumps and in-function switch tables (relocated with the oracle code) are fuzzed always. Shard 26 on link
+aedcf24: targets / functions with a native object 64.4 % -> 98.4 % (21 functions with unresolved relocations
+remain); of 110 newly fuzzed functions 106 have a verdict (16 hard, 6 soft, 19 oracle gap).
+
 **difffuzz-12 (J-0138).** The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
 names libcalls.EQUIV maps to them) return a fresh heap block (`world.alloc_result`, HEAP + 2 MiB + 4 KiB k), never
 the canned 0: GCC drops the null test after a throwing new that MSVC keeps (S13b `new-null`, 178 farm records). A

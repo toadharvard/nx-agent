@@ -88,15 +88,17 @@ def effective(writes, w):
 class Case:
     """One input. args: {label: bytes}; mem: {addr: bytes} overlays; rets: [bytes8] per outgoing call index (the k-th
     intercepted call returns rets[k] if present, else bytes derived from the seed); bg: 'zero' | 'rand'; pad: bytes
-    used for the unused bytes of argument slots (None: sign/zero extension)."""
-    __slots__ = ('seed', 'args', 'mem', 'rets', 'bg', 'pad')
+    used for the unused bytes of argument slots (None: sign/zero extension); vptrs: {addr: image vftable} planted
+    object vptrs (difffuzz-13, vtmodel.py): x86 reads the vftable there, AArch64 the paired native address point."""
+    __slots__ = ('seed', 'args', 'mem', 'rets', 'bg', 'pad', 'vptrs')
 
-    def __init__(self, seed=0, args=None, mem=None, rets=None, bg='zero', pad=None):
+    def __init__(self, seed=0, args=None, mem=None, rets=None, bg='zero', pad=None, vptrs=None):
         self.seed, self.args, self.mem, self.rets, self.bg, self.pad = seed, dict(args or {}), dict(mem or {}), \
             list(rets or []), bg, pad
+        self.vptrs = dict(vptrs or {})
 
     def copy(self):
-        return Case(self.seed, self.args, self.mem, self.rets, self.bg, self.pad)
+        return Case(self.seed, self.args, self.mem, self.rets, self.bg, self.pad, self.vptrs)
 
     def ret_bytes(self, k):
         if k < len(self.rets) and self.rets[k] is not None:
@@ -105,17 +107,21 @@ class Case:
         return bytes(r.getrandbits(8) for _ in range(16))
 
     def to_json(self):
-        return dict(seed=self.seed, bg=self.bg, pad=self.pad.hex() if self.pad else None,
-                    args={k: v.hex() for k, v in self.args.items()},
-                    mem={'%08x' % a: v.hex() for a, v in sorted(self.mem.items())},
-                    rets=[r.hex() if r is not None else None for r in self.rets])
+        d = dict(seed=self.seed, bg=self.bg, pad=self.pad.hex() if self.pad else None,
+                 args={k: v.hex() for k, v in self.args.items()},
+                 mem={'%08x' % a: v.hex() for a, v in sorted(self.mem.items())},
+                 rets=[r.hex() if r is not None else None for r in self.rets])
+        if self.vptrs:
+            d['vptrs'] = {'%08x' % a: '%08x' % v for a, v in sorted(self.vptrs.items())}
+        return d
 
     @staticmethod
     def from_json(d):
         return Case(d['seed'], {k: bytes.fromhex(v) for k, v in d['args'].items()},
                     {int(a, 16): bytes.fromhex(v) for a, v in d['mem'].items()},
                     [bytes.fromhex(r) if r else None for r in d.get('rets', [])], d.get('bg', 'zero'),
-                    bytes.fromhex(d['pad']) if d.get('pad') else None)
+                    bytes.fromhex(d['pad']) if d.get('pad') else None,
+                    {int(a, 16): int(v, 16) for a, v in (d.get('vptrs') or {}).items()})
 
 
 class World:
@@ -127,6 +133,8 @@ class World:
         self.pinned = pinned            # {addr: bytes}
         self._ov = None
         self._pages = {}
+        self._a64 = {}
+        self.a64_vptrs = {}             # {addr: native address point} for case.vptrs (set by runner.Pair)
 
     def _overlay_pages(self):
         if self._ov is None:
@@ -145,6 +153,19 @@ class World:
         got = self._pages[p] = self._make_page(p)
         return got
 
+    def page_a64(self, p):
+        """The page as the AArch64 machine first sees it: a planted vptr holds the native address point."""
+        if not self.a64_vptrs:
+            return self.page(p)
+        got = self._a64.get(p)
+        if got is None:
+            b = bytearray(self.page(p))
+            for a, ap in self.a64_vptrs.items():
+                if p <= a and a + 4 <= p + PAGE:
+                    struct.pack_into('<I', b, a - p, ap)
+            got = self._a64[p] = bytes(b)
+        return got
+
     def _make_page(self, p):
         if TEXT[0] <= p < TEXT[1]:
             data = bytearray(b'\xcc' * PAGE)
@@ -155,6 +176,9 @@ class World:
         for a, b in self._overlay_pages().get(p, ()):
             lo, hi = max(a, p), min(a + len(b), p + PAGE)
             data[lo - p:hi - p] = b[lo - a:hi - a]
+        for a, v in self.case.vptrs.items():
+            if p <= a and a + 4 <= p + PAGE:
+                struct.pack_into('<I', data, a - p, v)
         return bytes(data)
 
     def initial(self, a, n):

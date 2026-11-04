@@ -74,6 +74,13 @@ class Gen:
         self.r = random.Random(seed)
         self.bufs = [a for _, a in target.buffers()]
         self.globals = globals_
+        # objects with a class: {buffer address: [image vftables]} (vtmodel.py; empty without the player's exe)
+        place = dict(target.buffers())
+        self.vt = {place[lab]: vs for lab, vs in (getattr(target, 'vt_cands', None) or {}).items() if lab in place}
+
+    def _vptr(self, vs):
+        """The class's own vftable half of the time, else one of its derived classes."""
+        return vs[0] if len(vs) == 1 or self.r.random() < 0.5 else self.r.choice(vs)
 
     def fresh(self):
         r = self.r
@@ -88,6 +95,9 @@ class Gen:
             if r.random() < 0.7:
                 c.mem[g] = _rand_buffer(r, self.bufs, GLOBAL_LEN)
         c.rets = [_rets(r, self.bufs) for _ in range(8)]
+        for a, vs in self.vt.items():
+            if r.random() < 0.85:
+                c.vptrs[a] = self._vptr(vs)
         return c
 
     def mutate(self, c):
@@ -119,6 +129,12 @@ class Gen:
                 else:
                     b[i:i + 4] = struct.pack('<f', r.choice(FLT_EDGES))
                 c.mem[a] = bytes(b)
+            elif what < 0.85 and self.vt:
+                a = r.choice(list(self.vt))
+                if a in c.vptrs and r.random() < 0.2:
+                    del c.vptrs[a]
+                else:
+                    c.vptrs[a] = self._vptr(self.vt[a])
             elif what < 0.9:
                 k = r.randrange(8)
                 while len(c.rets) <= k:
@@ -162,6 +178,10 @@ def minimise(pair, case, kind, max_steps, budget=120, seconds=20.0):
         best = trial
     for a in list(best.mem):
         trial = best.copy(); del trial.mem[a]
+        if same(trial):
+            best = trial
+    for a in list(best.vptrs):
+        trial = best.copy(); del trial.vptrs[a]
         if same(trial):
             best = trial
     for lab in list(best.args):
@@ -280,6 +300,9 @@ def _fuzz_body(out, item, opts, uc, pair, target, src, addr, t0):
     iters, tlimit = opts['iters'], opts['time']
     zero = world.Case(seed=1)
     queue = [zero] + [gen.fresh() for _ in range(3)]
+    if gen.vt:                                   # the zero world with every object of its own class
+        zv = world.Case(seed=1, vptrs={a: vs[0] for a, vs in gen.vt.items()})
+        queue.insert(1, zv)
     i = 0
     while i < iters and (not tlimit or time.time() - t0 < tlimit):
         case = queue.pop() if queue else (gen.mutate(random.Random(i).choice(corpus)) if corpus and

@@ -21,7 +21,16 @@ import sys
 
 import config
 
-HARNESS = 'difffuzz-12'
+HARNESS = 'difffuzz-13'
+
+
+def harness_tag():
+    """HARNESS plus the vtable model's input: verdicts with the player's exe (vptrs planted, vtmodel.py) and without
+    it differ, so a farm that gains or loses the exe fuzzes again."""
+    import vtmodel
+    return HARNESS + ('+exe' if vtmodel.exe_path() else '')
+
+
 ADDR = re.compile(r'^__fnv_([0-9a-f]{8})$')
 CALLS = {282, 283}               # R_AARCH64_JUMP26 / CALL26 (ELF32 ILP32 uses the same numbers)
 SHF_EXEC = 4
@@ -177,7 +186,7 @@ def main():
         n = per_unit[t['source']].get(t['address'])
         o = ohash.get(t['address'])
         if n and o:
-            keys[t['address']] = hashlib.sha1(('%s|%s|%s' % (HARNESS, o, n)).encode()).hexdigest()[:20]
+            keys[t['address']] = hashlib.sha1(('%s|%s|%s' % (harness_tag(), o, n)).encode()).hexdigest()[:20]
     json.dump(keys, open(out, 'w'))
     print('%d keys (%d units)' % (len(keys), len(per_unit)))
 
