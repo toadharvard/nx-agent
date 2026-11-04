@@ -46,7 +46,9 @@ On a case-sensitive card, path.cpp resolves each component against the directory
 
 ## Build and publish
 
-The pipeline's `package` stage (tools/pipeline/build.py) makes the SD tree, `toolchain/nro/build.sh` (libnx;
+The host stage builds the native renderer's host by default (`HOST_BACKEND=native`: host.c without console,
+render/native/host, libdeko3d 373bfd4 with dekodef from dekotools c15523c, `toolchain/deko3d/build.sh`); `plain` is
+opt-in. The pipeline's `package` stage (tools/pipeline/build.py) makes the SD tree, `toolchain/nro/build.sh` (libnx;
 `elf2nro.py` with the NACP and `toolchain/nro/icon.jpg`), `tests/s5/check_package.py` and `tests/nx1/run.py`.
 `tools/farm/full_job.sh` publishes `sd/`, the launcher's and host's ELFs and maps, and `nx1.json` to the **private**
 branch `nro/<commit12>` of fnv-nx-build (`publish_nro`). The package holds game-derived code (the guest), so it never
