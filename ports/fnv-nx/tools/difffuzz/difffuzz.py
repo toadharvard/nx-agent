@@ -128,6 +128,29 @@ def cmd_triage(a):
     print('triaged')
 
 
+def cmd_effects(a):
+    """First differing instruction-level effect of saved divergences (effects.py): one JSON line per file."""
+    import effects
+    uc = _cache()
+    files = list(a.files)
+    if a.list:
+        files += [x.strip() for x in open(a.list) if x.strip()]
+    out = open(a.out, 'w') if a.out else sys.stdout
+    for p in files:
+        rec = json.load(open(p))
+        try:
+            addr = int(rec['address'], 16)
+            pair, t = uc.pair(rec['source'], addr)
+            case = world.Case.from_json(rec['case'])
+            _, _, div = pair.run(case)
+            r = effects.analyse(pair, t, case, div)
+        except Exception as e:  # noqa: BLE001
+            r = dict(first='error', error=str(e)[:200])
+        r.update(file=p, address=rec['address'], symbol=rec['symbol'])
+        out.write(json.dumps(r) + '\n')
+        out.flush()
+
+
 def cmd_lockstep(a):
     import lockstep
     lockstep.run(a)
@@ -149,6 +172,8 @@ def main():
     p = sub.add_parser('triage'); p.add_argument('dirs', nargs='+'); p.add_argument('--tag', default='')
     p.add_argument('--all', action='store_true'); p.add_argument('--reads', action='store_true')
     p.add_argument('--only', default='', help='only records whose current cause is this'); p.set_defaults(fn=cmd_triage)
+    p = sub.add_parser('effects'); p.add_argument('files', nargs='*'); p.add_argument('--list', default='')
+    p.add_argument('--out', default=''); p.set_defaults(fn=cmd_effects)
     p = sub.add_parser('lockstep'); p.add_argument('addr'); p.add_argument('--source', default=None)
     p.add_argument('--bg', default='zero'); p.add_argument('--out', default=str(config.WORK / 'lockstep'))
     p.add_argument('--max-steps', type=int, default=2000000); p.add_argument('--depth', type=int, default=64)
