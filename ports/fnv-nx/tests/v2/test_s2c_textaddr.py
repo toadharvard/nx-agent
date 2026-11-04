@@ -8,8 +8,9 @@ there, and every such reference must be a data use.
     (skip without them: both are decomp-derived and stay in scratch)
 
   X1  no `@@3Q` / `@@3D` extern-text or text-addr reference names an address some unit defines as a function
-  X2  no such label is a callback: its unit's source never passes `&label` to atexit / _onexit (FNVNX_DECOMP: the
-      decomp checkout). Fails at decomp 87eb9373: blk_00c00000_o2.cpp 0x00c1d8b0 calls
+  X2  a label whose unit passes `&label` to atexit / _onexit is one fnvlink.label_is_argument keeps extern-text
+      (fd686ae; FNVNX_DECOMP: the decomp checkout). The refs.tsv read here may predate fd686ae, so the rule is
+      asked directly. Fails at decomp 87eb9373: blk_00c00000_o2.cpp 0x00c1d8b0 calls
       `FUN_00ec658f(&UNK_00fdd3b0)` (0x00ec658f = _atexit), and 0x00fdd3b0 is x86 code (the static's exit thunk):
       bound absolute, the native atexit table gets an x86 address and exit jumps into it
 """
@@ -17,6 +18,9 @@ import json
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'tools', 'link'))
+import fnvlink  # noqa: E402
 
 
 def main():
@@ -40,7 +44,9 @@ def main():
         text = open(p, errors='replace').read() if os.path.isfile(p) else ''
         for f in atexit_names:
             if re.search(r'\b%s\s*\(\s*&\s*%s\b' % (re.escape(f), re.escape(name)), text):
-                other.append((src, name, '%08x' % a))
+                # the link's own test since fd686ae: a label passed to a call keeps the extern-text trap
+                if not (hasattr(fnvlink, 'label_is_argument') and fnvlink.label_is_argument(dec, src, name, {})):
+                    other.append((src, name, '%08x' % a))
     fails = 0
     for case, ok, what in (('X1', not code, '%d references, at a function start: %s' % (len(rows), code[:5])),
                            ('X2', not other, 'labels passed to atexit: %s' % other[:5])):
