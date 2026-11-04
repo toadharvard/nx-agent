@@ -300,7 +300,8 @@ def r_platform_protos(path, text, stats):
         if any(k not in ('namespace', 'extern') for k, _ in chain): continue
         spaces = [re.sub(r'\s+', ' ', h) for k, h in chain if k == 'namespace']
         c_linkage = 'extern "C"' in m.group(0) or any(k == 'extern' and '"C"' in h for k, h in chain)
-        if not is_op and spaces and spaces != ['namespace std'] and not c_linkage: continue
+        if (not is_op and spaces and spaces != ['namespace std'] and not c_linkage
+                and not cxx_copy_is_crt(path, name)): continue
         if is_op:   # the usual forms are declared implicitly in every unit; placement forms come from <new>
             params = re.search(r'\(([^;{}]*)\)', m.group(0)[m.group(0).index('operator'):]).group(1)
             hdr = new_header(text) if PLACEMENT_PARAMS.match(params) else ''
@@ -353,6 +354,31 @@ IAT_RANGE = (0x00fdf000, 0x00fe0000)
 _DECO = [re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$'), re.compile(r'^__imp_\?([A-Za-z_]\w*)@@Y'),
          re.compile(r'^\?([A-Za-z_]\w*)@@Y'), re.compile(r'^@([A-Za-z_]\w*)@\d+$'),
          re.compile(r'^_([A-Za-z_]\w*?)(?:@\d+)?$')]
+
+_CRT_BINDINGS = None
+
+def cxx_copy_is_crt(path, name):
+    """True when the unit of `path` binds a namespace-qualified C++ spelling of the CRT function `name`
+    (`?memcpy@fnv_00914c60@@...`) to an address that is that CRT function's (an address some unit binds `_name`
+    to): the decomp's namespace copy of the prototype is then the CRT function itself (D13)."""
+    global _CRT_BINDINGS
+    if PLATFORM is None or PLATFORM.get(name) == '"fnvnx_win32.h"': return False
+    if _CRT_BINDINGS is None:
+        import json
+        _CRT_BINDINGS = ({}, {})
+        root, uj = _units_json(path)
+        if uj:
+            for u in json.load(open(uj))['units']:
+                syms = u.get('symbols', {})
+                _CRT_BINDINGS[1][os.path.normpath(os.path.join(root, u['source']))] = syms
+                for k, v in syms.items():
+                    m = re.match(r'^_([A-Za-z_]\w*?)(?:@\d+)?$', k)
+                    if m and not IAT_RANGE[0] <= int(v, 16) < IAT_RANGE[1]:
+                        _CRT_BINDINGS[0].setdefault(m.group(1), set()).add(int(v, 16))
+    syms = _CRT_BINDINGS[1].get(os.path.normpath(os.path.abspath(path)))
+    if not syms: return False
+    addrs = {int(v, 16) for k, v in syms.items() if re.match(r'^\?%s@\w+@@' % re.escape(name), k)}
+    return bool(addrs) and addrs <= _CRT_BINDINGS[0].get(name, set())
 
 def _units_json(path):
     d = os.path.dirname(os.path.abspath(path))

@@ -143,10 +143,15 @@ def r_sal_attributes(path, text, stats):
 SDK_TAGS = ('tagRECT tagPOINT tagSIZE _FILETIME _SYSTEMTIME _GUID _RTL_CRITICAL_SECTION _LARGE_INTEGER _ULARGE_INTEGER '
             '_OVERLAPPED _WIN32_FIND_DATAA _SYSTEM_INFO tagMSG tagPALETTEENTRY _LUID _RGNDATA tagBITMAPFILEHEADER '
             'tagBITMAPINFOHEADER _iobuf').split()
-SDK_TYPEDEFS = {n: '"fnvnx_win32.h"' for n in 'DWORD BOOL BYTE WORD LONG UINT HANDLE HRESULT LPVOID ULONG_PTR DWORD_PTR'.split()}
+SDK_TYPEDEFS = {n: '"fnvnx_win32.h"' for n in '''DWORD BOOL BYTE WORD LONG UINT HANDLE HRESULT LPVOID ULONG_PTR
+    DWORD_PTR WPARAM LPARAM LRESULT HINSTANCE HMODULE HWND HHOOK HKEY HDC HICON HMENU HBRUSH HFONT HBITMAP HCURSOR
+    UINT_PTR LONG_PTR INT_PTR ATOM COLORREF LPSTR LPCSTR'''.split()}
 SDK_TYPEDEFS.update({'size_t': '<stddef.h>', 'ptrdiff_t': '<stddef.h>', 'va_list': '<stdarg.h>'})
 SDK_STRUCT = re.compile(r'^[ \t]*(typedef\s+)?(?:struct|class|union)\s+(%s)\s*\{' % '|'.join(SDK_TAGS), re.M)
 SDK_TYPEDEF = re.compile(r'^[ \t]*typedef\s+[\w \t\*]+?[\s\*](%s)\s*;[ \t]*$' % '|'.join(SDK_TYPEDEFS), re.M)
+SDK_CALLBACKS = 'HOOKPROC WNDPROC WNDENUMPROC FARPROC LPTHREAD_START_ROUTINE'.split()
+SDK_FNTYPEDEF = re.compile(r'^[ \t]*typedef\s+[\w \t\*]+?\(\s*(?:__stdcall\s*|CALLBACK\s*|WINAPI\s*)?\*\s*(%s)\s*\)'
+                           r'\s*\([^;{}]*\)\s*;[ \t]*$' % '|'.join(SDK_CALLBACKS), re.M)
 SDK_DECLARATORS = re.compile(r'^[\s\w\*,]*$')
 
 def r_sdk_types(path, text, stats):
@@ -162,6 +167,8 @@ def r_sdk_types(path, text, stats):
         found.append((m.start(), end + tail.end(), '"fnvnx_iobuf.h"' if m.group(2) == '_iobuf' else '"fnvnx_win32.h"'))
     for m in SDK_TYPEDEF.finditer(text):
         found.append((m.start(), m.end(), SDK_TYPEDEFS[m.group(1)]))
+    for m in SDK_FNTYPEDEF.finditer(text):
+        found.append((m.start(), m.end(), '"fnvnx_win32.h"'))
     if not found: return text
     spans, out, pos, have, top = prepare.scope_spans(text), [], 0, set(), []
     for s, e, hdr in sorted(found):
@@ -195,7 +202,8 @@ def r_exception_specs(path, text, stats):
 # ---------------------------------------------------------------------------------------------------------- NEW2
 
 NEWDEL_DEF = re.compile(
-    r'^[ \t]*(?:static\s+)?(?:inline\s+)?(?:void\s*\*|void)\s*(?:__cdecl\s+)?operator\s+(?:new|delete)\s*(?:\[\s*\])?\s*'
+    r'^[ \t]*(?:static\s+)?(?:inline\s+|__forceinline\s+|FNV_FORCEINLINE\s+)?(?:void\s*\*|void)\s*(?:__cdecl\s+)?'
+    r'operator\s+(?:new|delete)\s*(?:\[\s*\])?\s*'
     r'\(([^;{}()]*)\)\s*\{', re.M)
 def r_placement_new(path, text, stats):
     """NEW2: drop the decomp's own inline definitions of operator new / delete outside classes where they are not
@@ -237,7 +245,7 @@ def _call_end(text, open_at):
             if depth == 0: return i + 1
     return len(text)
 
-CTOR_CALL = re.compile(r'(\.|->)\s*((?:::)?(?:\w+::)*?)(\w+)::(\3)\s*\(')
+CTOR_CALL = re.compile(r'(\.|->)\s*((?:::)?(?:\w+(?:<[^<>;{}()]*>)?::)*?)(\w+(?:<[^<>;{}()]*>)?)::(\w+)\s*\(')
 
 def r_ctor_calls(path, text, stats):
     """CTOR1: explicit constructor calls (MSVC extension) p->A::A(args) / o.A::A(args) -> placement new
@@ -245,6 +253,7 @@ def r_ctor_calls(path, text, stats):
     if '::' not in text: return text
     out, pos, n = [], 0, 0
     for m in CTOR_CALL.finditer(text):
+        if re.sub(r'<.*', '', m.group(3)) != m.group(4): continue          # A::A / A<T>::A
         s = prepare.operand_start(text, m.start())
         if s >= m.start() or s < pos: continue
         expr = text[s:m.start()].strip()
@@ -304,6 +313,8 @@ def r_msvc_base_layout(path, text, stats):
 # ---------------------------------------------------------------------------------------------------------- LINK1
 
 C_DATA_DECL = re.compile(r'^([ \t]*extern)\s+"C"(\s+[\w \t\*&:<>,]*?[\s\*&]\w+(?:\s*\[[^\]]*\])*\s*;)', re.M)
+C_FNPTR_DECL = re.compile(r'^([ \t]*extern)\s+"C"(\s*[\w \t\*&:<>,]*?\(\s*(?:__\w+\s*)?\*\s*(?:DAT|PTR|g)_\w+\s*\)\s*\([^;{}]*\)\s*;)',
+                          re.M)
 
 def r_c_data_linkage(path, text, stats):
     """LINK1: `extern "C" T DAT_x;` at file scope -> `extern T DAT_x;`. The decomp declares the same image variable
@@ -311,8 +322,9 @@ def r_c_data_linkage(path, text, stats):
     name the same symbol under the Itanium ABI (no mangling), so nothing changes for the link."""
     if 'extern "C"' not in text: return text
     spans, out, pos = None, [], 0
-    for m in C_DATA_DECL.finditer(text):
-        if '(' in m.group(2): continue
+    for m in sorted(list(C_DATA_DECL.finditer(text)) + list(C_FNPTR_DECL.finditer(text)), key=lambda x: x.start()):
+        if m.start() < pos: continue
+        if '(' in m.group(2) and not C_FNPTR_DECL.match(m.group(0)): continue
         if spans is None: spans = prepare.scope_spans(text)
         if prepare.scope_chain(spans, m.start()): continue
         out.append(text[pos:m.start()]); out.append(m.group(1) + m.group(2)); pos = m.end()
@@ -500,7 +512,30 @@ def r_win32_call_args(path, text, stats):
 # ---------------------------------------------------------------------------------------------------------- RCAST1
 
 REF_CAST_CALL = re.compile(r'\(\s*((?:const\s+)?(?:volatile\s+)?(?:::)?[A-Za-z_][\w:<>, \t\*]*?&)\s*\)\s*'
-                           r'(?=(?:::)?[A-Za-z_][\w:]*\s*\()')
+                           r'(?=(?:::)?[A-Za-z_])')
+
+def _postfix_end(text, i):
+    """End of the postfix expression starting at text[i] (a name, then (...), [...], .name, ->name), and whether its
+    last part is a call."""
+    m = re.match(r'(?:::)?[A-Za-z_]\w*(?:\s*::\s*~?[A-Za-z_]\w*)*', text[i:])
+    if not m: return i, False
+    j, call = i + m.end(), False
+    while True:
+        k = j
+        while k < len(text) and text[k] in ' \t': k += 1
+        if k < len(text) and text[k] == '(':
+            j, call = _call_end(text, k), True
+        elif k < len(text) and text[k] == '[':
+            depth, k2 = 0, k
+            while k2 < len(text):
+                depth += (text[k2] == '[') - (text[k2] == ']')
+                k2 += 1
+                if depth == 0: break
+            j, call = k2, False
+        else:
+            mm = re.match(r'\s*(?:\.|->)\s*~?[A-Za-z_]\w*', text[k:])
+            if not mm: return j, call
+            j, call = k + mm.end(), False
 
 def r_ref_cast_temporaries(path, text, stats):
     """RCAST1: `(T&)f(args)` where f(args) is a temporary (a functional cast or a call returning by value) ->
@@ -511,9 +546,8 @@ def r_ref_cast_temporaries(path, text, stats):
     out, pos = [], 0
     for m in REF_CAST_CALL.finditer(text):
         if m.start() < pos: continue
-        open_at = text.index('(', m.end())
-        close = _call_end(text, open_at)
-        if re.match(r'\s*(?:\.|->|\[|\()', text[close:]): continue   # the cast applies to a longer postfix
+        close, call = _postfix_end(text, m.end())
+        if not call: continue                                         # an lvalue (a name, a member, an element)
         out.append(text[pos:m.end()]); out.append('fnvnx_lvalue(' + text[m.end():close] + ')'); pos = close
         stats['RCAST1'] += 1
     out.append(text[pos:])
@@ -586,6 +620,10 @@ UNIT_RENAMES = {
     # SpeedTree: the stack object handed to the std::exception constructor (FUN_00ec78f1) is declared 8 bytes, but
     # that constructor writes 12 (vfptr, _m_what, _m_doFree; S4b): without the third member the write runs past
     # the object on the stack.
+    # blk_00c20000: FindFirstNonCancelButton is declared twice (C3C2B0HWND, long) / (void*, int); the decomp's own
+    # EnumChildWindows prototype (dropped by DECL1) took int (__stdcall*)(void*, int), which picked the second
+    'staging/blk_00c20000_od.cpp': [(r'EnumChildWindows\(owner, FindFirstNonCancelButton,',
+                                     r'EnumChildWindows(owner, (int(__stdcall*)(void*, int))FindFirstNonCancelButton,')],
     'speedtree/frondengine.cpp': [(r'(struct FUN_00ec78f1_t\s*\{\s*int m0;\s*int m4;)', r'\1 int m8; /* fnv-nx UNIT1 */')],
     'speedtree/frondengine_ob1_variant.cpp': [(r'(struct FUN_00ec78f1_t\s*\{\s*int m0;\s*int m4;)',
                                                r'\1 int m8; /* fnv-nx UNIT1 */')],
@@ -1006,6 +1044,112 @@ def r_falloff_traps(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- DUPINT1
+#
+# The decomp sometimes declares the same function twice in one unit, differing only in an integer parameter's type
+# (`_fnv_zlib_memset(void*, int, unsigned int)` and `(void*, int, int)`), and the recipe binds both decorations to
+# one address. On MSVC size_t is unsigned int, so `sizeof` arguments matched one of them exactly; on AArch64 ILP32
+# size_t is unsigned long and the call is ambiguous. DUPINT1 keeps the first declaration and drops the later ones of
+# the same name, arity and scope when they differ only in integer types and every decorated spelling of that name
+# in the unit's units.json symbols binds the same address: the calls reach the same function with the same bits.
+
+INT_TYPES = re.compile(r'^(?:(?:const|volatile|signed|unsigned|short|long|int|char|__int8|__int16|__int32|__int64|'
+                       r'size_t|DWORD|UINT|INT|LONG|ULONG|WORD|BYTE|BOOL)\s*)+$')
+_UNIT_SYMBOLS = None
+
+def _unit_symbols(path):
+    """{absolute unit source: {decorated name: address}}"""
+    global _UNIT_SYMBOLS
+    if _UNIT_SYMBOLS is None:
+        import json
+        _UNIT_SYMBOLS = {}
+        root, uj = prepare._units_json(path)
+        if uj:
+            for u in json.load(open(uj))['units']:
+                _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = u.get('symbols', {})
+    return _UNIT_SYMBOLS.get(os.path.normpath(os.path.abspath(path)))
+
+def _param_type(p):
+    p = re.sub(r'=.*', '', p).strip()
+    ids = re.findall(r'[A-Za-z_]\w*', p)
+    if len(ids) > 1 and not re.search(r'[\*&]\s*$', p) and ids[-1] not in ('int', 'long', 'short', 'char', 'unsigned'):
+        p = p[:p.rfind(ids[-1])]                          # drop the parameter name
+    return re.sub(r'\s+', ' ', p).strip()
+
+def r_duplicate_int_overloads(path, text, stats):
+    """DUPINT1: drop later integer-only-different duplicate prototypes bound to one address (see above)."""
+    syms = _unit_symbols(path)
+    if not syms: return text
+    seen, spans, out, pos = {}, None, [], 0
+    for m in prepare.PROTO.finditer(text):
+        name = m.group(1)
+        if name.startswith('operator'): continue
+        decl = m.group(0)
+        params = _split_args(decl[decl.index('(', decl.index(name) + len(name)) + 1:decl.rindex(')')])
+        if spans is None: spans = prepare.scope_spans(text)
+        chain = tuple(h for k, h in prepare.scope_chain(spans, m.start()))
+        if any(k not in ('namespace', 'extern') for k, _ in prepare.scope_chain(spans, m.start())): continue
+        types = [_param_type(p) for p in params]
+        key = (name, len(types), chain)
+        prev = seen.get(key)
+        if prev is None:
+            seen[key] = types
+            continue
+        if prev == types: continue
+        if not all(a == b or (INT_TYPES.match(a) and INT_TYPES.match(b)) for a, b in zip(prev, types)): continue
+        addrs = {a for k, a in syms.items() if re.match(r'^\?%s@@' % re.escape(name), k)}
+        if len(addrs) != 1: continue
+        out.append(text[pos:m.start()]); out.append('/* fnv-nx DUPINT1 */' + '\n' * decl.count('\n')); pos = m.end()
+        stats['DUPINT1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- NEW4
+
+PLACEMENT_USE = re.compile(r'(?<![\w.>])(?:::\s*)?new\s*\((?!\s*\))')
+
+def r_placement_include(path, text, stats):
+    """NEW4: a file that uses placement new (`new (p) T`) without a declaration of it gets <new> (or fnvnx_new.h where
+    it carries its own MSVC std::exception) on top. MSVC declared the placement form through its own headers."""
+    if 'new' not in text or not PLACEMENT_USE.search(text): return text
+    if re.search(r'#\s*include\s*[<"](?:new|fnvnx_new\.h)[>"]', text) or re.search(r'operator\s+new\s*\([^;{})]*,\s*void\s*\*', text):
+        return text
+    stats['NEW4'] += 1
+    return '#include %s /* fnv-nx NEW4 */\n' % prepare.new_header(text) + text
+
+# ---------------------------------------------------------------------------------------------------------- ALLOC1
+#
+# The game's global allocation functions are its own (0x00401000 operator new, 0x00401030 operator delete, ...) and the
+# link binds every call to them by address. A unit that defines a replaceable global allocation function without an
+# `// @fnv` tag carries a stand-in the original never had in that object; under GCC it would replace the global
+# operator for the whole program. ALLOC1 drops such definitions (all forms: new/new[]/delete/delete[], sized,
+# nothrow); placement forms are NEW2's.
+
+ALLOC_DEF = re.compile(r'^[ \t]*(?:FNVNX_KEEP\s+)?(?:static\s+)?(?:inline\s+|__forceinline\s+|FNV_FORCEINLINE\s+)?'
+                       r'(?:void\s*\*|void)\s*(?:__cdecl\s+)?operator\s+(?:new|delete)\s*(?:\[\s*\])?\s*'
+                       r'\(([^;{}()]*)\)\s*(?:noexcept|throw\s*\(\s*\))?\s*\{', re.M)
+_SIZE_T = r'(?:(?:std::)?size_t|__SIZE_TYPE__|unsigned(?:\s+(?:int|long))?)\s*\w*'
+REPLACEABLE_PARAMS = re.compile(r'^\s*(?:%s|void\s*\*\s*\w*(?:\s*,\s*%s)?)\s*(?:,\s*const\s+(?:std::)?nothrow_t\s*&\s*\w*)?\s*$'
+                                % (_SIZE_T, _SIZE_T))
+FNV_TAG_BEFORE = re.compile(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$')
+
+def r_global_allocators(path, text, stats):
+    """ALLOC1: drop untagged file-scope definitions of the replaceable global allocation functions (see above)."""
+    if 'operator' not in text: return text
+    spans, out, pos = None, [], 0
+    for m in ALLOC_DEF.finditer(text):
+        if m.start() < pos: continue
+        if not REPLACEABLE_PARAMS.match(m.group(1)): continue  # only operator new(size), delete(void*[, size])
+        if FNV_TAG_BEFORE.search(text[max(0, m.start() - 600):m.start()]): continue
+        if spans is None: spans = prepare.scope_spans(text)
+        if any(k != 'extern' for k, _ in prepare.scope_chain(spans, m.start())): continue
+        end = prepare.match_brace(text, m.end() - 1)
+        out.append(text[pos:m.start()]); out.append('/* fnv-nx ALLOC1 */' + '\n' * text.count('\n', m.start(), end))
+        pos = end
+        stats['ALLOC1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -1025,5 +1169,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_keep_definitions, r_if_exists, r_sal_attributes, r_cs28_members, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list, r_image_statics, r_falloff_traps,
+RULES = [r_unit_renames, r_global_allocators, r_keep_definitions, r_if_exists, r_sal_attributes, r_cs28_members, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_falloff_traps,
          r_msvc_base_layout]
