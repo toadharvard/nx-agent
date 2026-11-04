@@ -1013,11 +1013,13 @@ def cmd_show(a):
             if not ok:
                 print(text[-3000:]); return
             objs.append((obj, Coff(obj)))
+        names_b = {f['address']: f['symbol']
+                   for f in Fingerprinter(a.decomp, a.tree_b).unit_for(a.unit, objs[1][1])['functions']}
         for fn in unit['functions']:
             if want and fn['address'] not in want:
                 continue
             da = disassemble(objs[0][0], objs[0][1], fn['symbol'])
-            db = disassemble(objs[1][0], objs[1][1], fn['symbol'])
+            db = disassemble(objs[1][0], objs[1][1], names_b.get(fn['address'], fn['symbol']))
             if da == db and want is None:
                 continue
             print('==== %s %s' % (fn['address'], fn['symbol']))
