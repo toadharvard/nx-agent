@@ -23,6 +23,7 @@
 * destructors defined nowhere that GCC calls where MSVC did not: one reached only by a constructor's exception
   cleanup -> trap stub; one at the end of a scope (normal code) stays undefined; one of a class sharing its deleting
   destructor (??_G address) with a class whose destructor is compiled -> that destructor;
+* a direct call of an IAT slot's address (a decomp dllimport function GCC calls with bl) -> the slot's api;
 * STATIC1 header variables: two objects define the same variable, only one unit's recipe names its address - both
   copies are rebound (none localized), the second object's own references included.
 """
@@ -100,6 +101,7 @@ SRC = {
                  'void FUN_00403000_s1b::FUN_00403000(int) {}\n'
                  'void call_x(FUN_00403000_s1b *p) { p->FUN_00403000(1); }\n',
     'src/z.cpp': 'void FUN_00404000(int) {}\n',                                   # not patched: keeps its name
+    'src/c2.cpp': 'extern "C" void FUN_00fdf008(void *);\nvoid call_iat(void *p) { FUN_00fdf008(p); }\n',
     'src/s1.cpp': 'int g_hdr = 3;\nint get_hdr1() { return g_hdr; }\n',             # STATIC1 copies (-O2)
     'src/s2.cpp': 'int g_hdr = 3;\nint get_hdr2() { return g_hdr + 1; }\n',
     'src/e.cpp': 'struct BaseX { BaseX(); ~BaseX(); int a; };\nstruct Mem { Mem(); ~Mem(); };\n'   # defined nowhere
@@ -143,7 +145,10 @@ UNITS = {'units': [
                  '?Sleep@@YGXK@Z': '0x00401410',
                  '__imp_?LeaveCriticalSection@@YGXPAUCS@@@Z': '0x00fdf00c'}},
     {'source': 'src/l.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401600, '?plain_leave@@YAXPAX@Z')],
-     'symbols': {'__imp__LeaveCriticalSection@4': '0x00fdf010'}},     # the real slot, in another unit
+     'symbols': {'__imp__LeaveCriticalSection@4': '0x00fdf010',      # the real slot, in another unit
+                 '?FUN_00fdf008@@3P6GXPAX@ZA': '0x00fdf008'}},        # the slot as a function-pointer variable
+    {'source': 'src/c2.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401900, '?call_iat@@YAXPAX@Z')],
+     'symbols': {}},
     {'source': 'src/h.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x830470, '?FUN_00830470@@YAKXZ'), F(0x401410, '?FUN_00401410@@YAXK@Z'),
         F(0x402000, '?FUN_00402000@@YAPAXI@Z'), F(0x402030, '?FUN_00402030@@YAXPAX@Z'),
@@ -282,6 +287,8 @@ def main():
               'S1b-renamed reference: %s' % refs.get(('src/x.cpp', '_ZN16FUN_00403000_s1b12FUN_00403000Ei')))
         check(rows.get(0x404000, [''] * 4)[1:4] == ['F', '__fnv_00404000', '_Z12FUN_00404000i'],
               'unpatched unit keeps its name: %s' % rows.get(0x404000))
+        r_ = refs.get(('src/c2.cpp', 'FUN_00fdf008'), [''] * 6)
+        check(r_[2] == 'import' and r_[5] == 'InterlockedIncrement', 'call of an IAT slot address -> its api: %s' % r_)
         e_ = 'src/e.cpp'
         r_ = refs.get((e_, '_ZN5BaseXD2Ev'), [''] * 6)
         check(r_[2] == 'ctor-dtor-trap' and r_[5].startswith('__fnvnx_xtrap_'), 'cleanup-only dtor -> trap: %s' % r_)

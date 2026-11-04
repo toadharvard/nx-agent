@@ -480,6 +480,15 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         return got.pop() if len(got) == 1 else None
     xtraps = {}      # trap stub -> (ctor/dtor defined nowhere, why)
     unwind_cache = {}
+    called_cache = {}
+
+    def called_syms(u_):
+        """Undefined symbols the object calls or branches to (CALL26 / JUMP26)."""
+        if u_.source not in called_cache:
+            o_ = vtables.Obj(u_.obj)
+            called_cache[u_.source] = {o_.syms[si][0] for i_ in range(len(o_.secs)) if o_.secs[i_][2] & 4
+                                       for _, (si, typ, _) in o_.rel(i_).items() if typ in (21, 20)}   # P32
+        return called_cache[u_.source]
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
     vsb = msvc_vslots.from_env(units_json, itanium, msvc, lambda ns: (ms.need(ns), {n: ms[n] for n in ns})[1])
     for u in have:
@@ -522,6 +531,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 ak = kind_of_addr(addr)
                 if ak == 'data' and un in tls_undef:   # thread-local: native TLS in the image's .tls layout
                     cls = 'tls'; target = TLS_SYM % addr; tls_addrs.add(addr)
+                elif ak == 'data' and addr in iat and un in called_syms(u):
+                    # called at an IAT slot's address (a decomp `__declspec(dllimport)` function GCC calls directly):
+                    # the call goes to the slot's api, never into the image's IAT data
+                    cls = 'import'; target = import_syms.get(addr) or iat[addr][1]
+                    stats['iat_calls'] += 1
                 elif ak == 'data':
                     cls = 'data'; target = ADDR_SYM % addr; used_addr.add(addr)
                 elif addr in native:
@@ -882,6 +896,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'import references bound by IAT slot (imports.tsv + exports.cpp): %d of %d'
               % (stats['imports_bound'], byclass['import']),
               'import thunks bound to their import instead of the compiled decomp body: %d' % stats['import_thunks'],
+              'calls of an IAT slot address bound to its import: %d' % stats['iat_calls'],
               'GAME1 names (fnvnx_game_*) looked up by the unit\'s own name: %d references, %d resolved'
               % (stats['game1_refs'], stats['game1_resolved']),
               'operator new/delete references bound to the game\'s allocator: %d' % stats['newdel_refs'],
