@@ -1,7 +1,8 @@
 // fnv-nx native renderer, N1: the engine-facing override stubs (n1/engine_stubs.cpp, render/native/overrides.tsv).
 // Each class stands for an engine class; the stubs are thiscall members with the signatures of the decomp
-// functions they replace. `this` is the engine object: the renderer / render-state / shader stubs never
-// dereference it; the geometry stub reads the geometry it is given through the interop layout below.
+// functions they replace. `this` is the engine object: the renderer / shader stubs never dereference it; the
+// render-state stubs keep the engine's cache in it and the geometry stub reads the geometry it is given, both through
+// the interop layouts below.
 #pragma once
 #include "renderer.h"
 
@@ -21,8 +22,45 @@ struct NiDX9Renderer {
     void Do_RenderGeometry(const void* geometry);                         // 0x00e744b0, slots 107 + 108
 };
 
-// NiDX9RenderState (the state cache): record-only, forwarded to nx::StateTracker. The engine's lock byte per
-// render state (set by SetRenderState's last argument, blocks later sets) is kept here.
+// NiDX9RenderState (the state cache). The stubs are the engine's own functions with the device call replaced by
+// nx::StateTracker (docs/RENDER_NATIVE.md §2.5): they read and write the cache in the engine object, so the engine
+// code that stays (the defaults passes, ClearTextures, inline restores) and the stubs see one cache. Layout (the
+// object the engine constructs; NiDX9RenderStateLayout below):
+//   +0x120  render states [256] {current, saved}: SetRenderState / SetBlendFunc / SetAlphaBlendEnable write current
+//           and reach the device only when it changes; the saved value is the defaults pass's (the engine restores a
+//           render state by setting the saved value through SetRenderState).
+//   +0x920  lock bytes [256]: SetRenderState of a locked state does nothing; an unlocked one takes the call's lock
+//           argument (so a lock is never cleared by SetRenderState). SetBlendFunc / SetAlphaBlendEnable ignore locks.
+//   +0xA20  texture stage states [16][8] {current, saved}, +0xE20 sampler states [16][5] {current, saved}: the cache
+//           holds only some types (kTssTypes / kSampTypes); a set of another type is dropped (it never reaches the
+//           device), a get of one returns 0. Restore re-sets the saved sampler value (the defaults pass writes it).
+//   +0x10A0 textures [16]: SetTexture reaches the device when the stage's texture changes; ClearTextureUsage unbinds
+//           a texture from every stage that has it.
+// The constructor fills every current value with kUnknown, so the first set of each state reaches the device; the
+// 4th (render state: 3rd) argument of every setter is unused, as in the engine. Stage numbers above 15 are dropped.
+struct NiDX9RenderStateLayout {
+    enum : uint32_t {
+        kRs = 0x120, kRsLock = 0x920, kTss = 0xA20, kSamp = 0xE20, kTex = 0x10A0, kDevice = 0x10F8,
+        kRsCount = 256, kTssPerStage = 8, kSampPerStage = 5, kStages = 16, kSize = 0x1140,
+        kUnknown = 0x7FFFFFFFu,
+    };
+    // cache slot of a type, -1: not cached. Texture stage: COLOROP..ALPHAARG2, BUMPENVMAT00, TEXTURETRANSFORMFLAGS;
+    // sampler: ADDRESSU, ADDRESSV, MAGFILTER, MINFILTER, MIPFILTER.
+    static int TssSlot(uint32_t type);
+    static int SampSlot(uint32_t type);
+    // Test support: a zeroed kSize-byte object as the engine's constructor leaves the caches (every current value
+    // kUnknown, no locks, no textures); device: the device pointer it holds (0 for none).
+    static void Construct(void* object, void* device);
+    // Test support: what the engine's defaults passes do, for tests without the engine. Slot 22: every (state, value)
+    // of rs (ends at state 0xFFFFFFFF) into current and saved, then the device. Slot 47: per stage < tssStages, every
+    // (type, value) of tss into the saved field only and the device (COLOROP / ALPHAOP 1 = DISABLE above stage 0,
+    // TEXCOORDINDEX = stage); per stage < sampStages, every (type, value) of samp into the saved field, then slot 51,
+    // then the device. The device is `device` (a NativeDevice); tables may be 0. (The engine's pass also writes the
+    // adjusted COLOROP / ALPHAOP / TEXCOORDINDEX back into its table, so a second pass sets DISABLE on stage 0 too;
+    // the const tables here do not reproduce that, the engine's own slot 47 does.)
+    static void DefaultsPass(void* object, void* device, const uint32_t* rs, const uint32_t* tss, uint32_t tssStages,
+                             const uint32_t* samp, uint32_t sampStages);
+};
 struct NiDX9RenderState {
     void SetRenderState(uint32_t state, uint32_t value, uint32_t unused, uint8_t lock);   // 0x00e88780, slot 26
     uint32_t GetRenderState(uint32_t state);                                              // 0x00e88860, slot 27
@@ -37,10 +75,27 @@ struct NiDX9RenderState {
     void SetTexture(uint32_t stage, void* texture);                                       // 0x00e88a20, slot 55
     void* GetTexture(uint32_t stage);                                                     // 0x00e88a50, slot 56
     void ClearTextureUsage(void* texture);                                                // 0x00e88a60, slot 57
-    void RestoreRenderState(uint32_t state);                                              // (no row)
+    void RestoreRenderState(uint32_t state);   // (no row: the engine does it inline) SetRenderState(state, saved)
     void RestoreSamplerState(uint32_t stage, uint32_t type);                              // 0x00e91120, slot 53
 };
 
+// ---- the D3D9 device as the engine sees it (state only) -------------------------------------------------------------
+// An object with the IDirect3DDevice9 method-table layout (119 methods) whose state methods record into the
+// process's nx::StateTracker with the device's semantics: render / sampler / texture stage states, textures (a
+// NativeTexture -> its image), shaders, constants F/I/B, vertex declaration and FVF, streams and their frequency,
+// indices, render targets (SetRenderTarget(0): viewport and scissor rectangle reset to the target's size, read with
+// the surface's GetDesc), depth-stencil surface, viewport, scissor rectangle, clip planes, and the Get* of each.
+// Engine code that talks to the device directly instead of through the cache (NiDX9RenderState's defaults passes:
+// slot 22 render states, slot 47 texture stage and sampler states) reaches the tracker through it. Every other
+// method (resource creation, draws, Present, fixed-function transforms / lights / material, state blocks) answers
+// D3DERR_INVALIDCALL and is counted per method (NativeDeviceUnhandled).
+struct NativeDevice {
+    const uintptr_t* vtbl;
+    uint32_t magic, refs;
+    enum : uint32_t { kMagic = 0x5645444Eu, kMethods = 119 };   // "NDEV"
+};
+NativeDevice* CreateNativeDevice();                     // one per process (the engine has one device)
+uint32_t NativeDeviceUnhandled(uint32_t method);        // calls of an unhandled method so far
 // ImageSpaceManager::RenderEffect (0x00b97550): the effect dispatch. Menu effects run natively; the others are
 // counted and skipped until their families exist. Interop: manager +0x08 the effect array; EFFECT_MENUBG (15) is an
 // ImageSpaceEffectMenuBackground: +0x58 ImageSpaceTexture* (its NiTexture at +4), +0x5C blend amount (float).

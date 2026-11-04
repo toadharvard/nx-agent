@@ -10,13 +10,22 @@
 namespace nx {
 
 // ---- StateTracker ------------------------------------------------------------------------------------------------
-void StateTracker::Reset() {
-    nx_d3d9_default_rs(rs_);
+void StateTracker::Reset(bool autoDepthStencil, uint32_t w, uint32_t h) {
+    nx_d3d9_default_rs_device(rs_, autoDepthStencil);
     memcpy(rsSaved_, rs_, sizeof rs_);
-    for (int s = 0; s < kStages; s++) { nx_d3d9_default_samp(samp_[s]); image_[s] = 0; memset(&kind_[s], 0, sizeof kind_[s]); }
+    for (int s = 0; s < kSamplers; s++) { nx_d3d9_default_samp(samp_[s]); image_[s] = 0; memset(&kind_[s], 0, sizeof kind_[s]); }
+    for (uint32_t s = 0; s < kTssStages; s++) nx_d3d9_default_tss(tss_[s], s);
     memset(srgbClass_, 0, sizeof srgbClass_);   // format 0: no sRGB
     memcpy(sampSaved_, samp_, sizeof samp_);
     memset(stageSmp_, 0, sizeof stageSmp_);
+    memset(constF_, 0, sizeof constF_); memset(constI_, 0, sizeof constI_); memset(constB_, 0, sizeof constB_);
+    constGen_[0]++; constGen_[1]++;
+    shader_[0] = shader_[1] = nullptr; decl_ = nullptr; fvf_ = 0; indices_ = nullptr;
+    for (auto& st : stream_) st = Stream{nullptr, 0, 0, 1};
+    memset(rt_, 0, sizeof rt_); ds_ = nullptr;
+    viewport_ = NxD3D9Viewport{0, 0, w, h, 0.0f, 1.0f};
+    scissorRect_ = NxD3D9Rect{0, 0, (int32_t)w, (int32_t)h};
+    memset(clip_, 0, sizeof clip_);
     texGen_++;
     psVersion_ = 0x0200;
     dirty_ = true;
@@ -30,28 +39,128 @@ void StateTracker::SetRenderState(uint32_t state, uint32_t value, bool save) {
 void StateTracker::RestoreRenderState(uint32_t state) {
     if (state < NXD3D_RS_COUNT) SetRenderState(state, rsSaved_[state]);
 }
-void StateTracker::SetSamplerState(uint32_t stage, uint32_t type, uint32_t value, bool save) {
-    if (stage >= kStages || type >= NXD3D_SAMP_COUNT) return;
-    if (save) sampSaved_[stage][type] = samp_[stage][type];
-    if (samp_[stage][type] != value) { samp_[stage][type] = value; stageSmp_[stage] = 0; texGen_++; }
+void StateTracker::SetSamplerState(uint32_t sampler, uint32_t type, uint32_t value, bool save) {
+    const int i = nx_d3d9_sampler_index(sampler);
+    if (i < 0 || type >= NXD3D_SAMP_COUNT) return;
+    if (save) sampSaved_[i][type] = samp_[i][type];
+    if (samp_[i][type] != value) { samp_[i][type] = value; stageSmp_[i] = 0; texGen_++; }
 }
-uint32_t StateTracker::GetSamplerState(uint32_t stage, uint32_t type) const {
-    return stage < kStages && type < NXD3D_SAMP_COUNT ? samp_[stage][type] : 0;
+uint32_t StateTracker::GetSamplerState(uint32_t sampler, uint32_t type) const {
+    const int i = nx_d3d9_sampler_index(sampler);
+    return i >= 0 && type < NXD3D_SAMP_COUNT ? samp_[i][type] : 0;
 }
-void StateTracker::RestoreSamplerState(uint32_t stage, uint32_t type) {
-    if (stage < kStages && type < NXD3D_SAMP_COUNT) SetSamplerState(stage, type, sampSaved_[stage][type]);
+void StateTracker::RestoreSamplerState(uint32_t sampler, uint32_t type) {
+    const int i = nx_d3d9_sampler_index(sampler);
+    if (i >= 0 && type < NXD3D_SAMP_COUNT) SetSamplerState(sampler, type, sampSaved_[i][type]);
 }
-void StateTracker::SetTexture(uint32_t stage, uint32_t image, const NxD3D9Texture& kind) {
-    if (stage >= kStages) return;
-    if (image_[stage] != image) { image_[stage] = image; texGen_++; }
-    NxD3D9Texture& k = kind_[stage];
-    if (k.cube != kind.cube || k.shadow != kind.shadow || k.managed_lod != kind.managed_lod) { stageSmp_[stage] = 0; texGen_++; }
+void StateTracker::SetTextureStageState(uint32_t stage, uint32_t type, uint32_t value) {
+    if (stage < kTssStages && type < NXD3D_TSS_COUNT) tss_[stage][type] = value;
+}
+uint32_t StateTracker::GetTextureStageState(uint32_t stage, uint32_t type) const {
+    return stage < kTssStages && type < NXD3D_TSS_COUNT ? tss_[stage][type] : 0;
+}
+void StateTracker::SetTexture(uint32_t sampler, uint32_t image, const NxD3D9Texture& kind) {
+    const int s = nx_d3d9_sampler_index(sampler);
+    if (s < 0) return;
+    if (image_[s] != image) { image_[s] = image; texGen_++; }
+    NxD3D9Texture& k = kind_[s];
+    if (k.cube != kind.cube || k.shadow != kind.shadow || k.managed_lod != kind.managed_lod) { stageSmp_[s] = 0; texGen_++; }
     if (k.format != kind.format) {   // the format matters to the sampler only through its sRGB capability
         const NxFormatInfo fi = nx_d3d9_format(kind.format);
         const uint8_t c = (uint8_t)((fi.flags & NXFMT_SRGB ? 1 : 0) | (nx_format_has_srgb(fi.format) ? 2 : 0));
-        if (c != srgbClass_[stage]) { srgbClass_[stage] = c; stageSmp_[stage] = 0; texGen_++; }
+        if (c != srgbClass_[s]) { srgbClass_[s] = c; stageSmp_[s] = 0; texGen_++; }
     }
     k = kind;
+}
+
+// ---- shader constants (D3D9 / Nine: start + count within the register file, else INVALIDCALL and no change) -------
+static bool ConstRange(uint32_t start, uint32_t count, uint32_t size) { return start < size && count <= size - start; }
+bool StateTracker::SetShaderConstantF(bool ps, uint32_t start, const float* d, uint32_t count) {
+    if (!d || !ConstRange(start, count, ps ? kPsConstF : kVsConstF)) return false;
+    if (memcmp(constF_[ps][start], d, 16u * count)) { memcpy(constF_[ps][start], d, 16u * count); constGen_[ps]++; }
+    return true;
+}
+bool StateTracker::GetShaderConstantF(bool ps, uint32_t start, float* d, uint32_t count) const {
+    if (!d || !ConstRange(start, count, ps ? kPsConstF : kVsConstF)) return false;
+    memcpy(d, constF_[ps][start], 16u * count);
+    return true;
+}
+bool StateTracker::SetShaderConstantI(bool ps, uint32_t start, const int32_t* d, uint32_t count) {
+    if (!d || !ConstRange(start, count, kConstI)) return false;
+    if (memcmp(constI_[ps][start], d, 16u * count)) { memcpy(constI_[ps][start], d, 16u * count); constGen_[ps]++; }
+    return true;
+}
+bool StateTracker::GetShaderConstantI(bool ps, uint32_t start, int32_t* d, uint32_t count) const {
+    if (!d || !ConstRange(start, count, kConstI)) return false;
+    memcpy(d, constI_[ps][start], 16u * count);
+    return true;
+}
+bool StateTracker::SetShaderConstantB(bool ps, uint32_t start, const uint32_t* d, uint32_t count) {
+    if (!d || !ConstRange(start, count, kConstB)) return false;
+    for (uint32_t i = 0; i < count; i++) {
+        const uint32_t v = d[i] ? 1u : 0u;
+        if (constB_[ps][start + i] != v) { constB_[ps][start + i] = v; constGen_[ps]++; }
+    }
+    return true;
+}
+bool StateTracker::GetShaderConstantB(bool ps, uint32_t start, uint32_t* d, uint32_t count) const {
+    if (!d || !ConstRange(start, count, kConstB)) return false;
+    memcpy(d, constB_[ps] + start, 4u * count);
+    return true;
+}
+void StateTracker::EffectiveConstantsF(bool ps, const NxD3D9Def* defs, uint32_t nd, float (*out)[4], uint32_t n) const {
+    const uint32_t size = ps ? kPsConstF : kVsConstF;
+    for (uint32_t r = 0; r < n; r++) {
+        if (r < size) memcpy(out[r], constF_[ps][r], 16); else memset(out[r], 0, 16);
+    }
+    for (uint32_t i = 0; defs && i < nd; i++)
+        if (defs[i].file == 0 && defs[i].reg < n) memcpy(out[defs[i].reg], defs[i].v, 16);
+}
+void StateTracker::EffectiveConstantsI(bool ps, const NxD3D9Def* defs, uint32_t nd, int32_t (*out)[4], uint32_t n) const {
+    for (uint32_t r = 0; r < n; r++) {
+        if (r < kConstI) memcpy(out[r], constI_[ps][r], 16); else memset(out[r], 0, 16);
+    }
+    for (uint32_t i = 0; defs && i < nd; i++)
+        if (defs[i].file == 1 && defs[i].reg < n) memcpy(out[defs[i].reg], defs[i].v, 16);
+}
+void StateTracker::EffectiveConstantsB(bool ps, const NxD3D9Def* defs, uint32_t nd, uint32_t* out, uint32_t n) const {
+    for (uint32_t r = 0; r < n; r++) out[r] = r < kConstB ? constB_[ps][r] : 0;
+    for (uint32_t i = 0; defs && i < nd; i++)
+        if (defs[i].file == 2 && defs[i].reg < n) out[defs[i].reg] = defs[i].v[0] ? 1u : 0u;
+}
+
+// ---- streams, targets, clip planes (Nine's checks) ----------------------------------------------------------------
+bool StateTracker::SetStreamSource(uint32_t stream, const void* vb, uint32_t offset, uint32_t stride) {
+    if (stream >= kStreams) return false;
+    stream_[stream].vb = vb; stream_[stream].offset = offset; stream_[stream].stride = stride;
+    return true;
+}
+bool StateTracker::SetStreamSourceFreq(uint32_t stream, uint32_t setting) {
+    const uint32_t kIndexed = 1u << 30, kInstance = 2u << 30;   // D3DSTREAMSOURCE_INDEXEDDATA / _INSTANCEDATA
+    if (stream >= kStreams || !setting || (stream == 0 && (setting & kInstance)) ||
+        ((setting & kInstance) && (setting & kIndexed)))
+        return false;
+    stream_[stream].freq = setting;
+    return true;
+}
+bool StateTracker::SetRenderTarget(uint32_t index, const void* surface, uint32_t w, uint32_t h) {
+    if (index >= kRTs || (index == 0 && !surface)) return false;
+    if (index == 0) {
+        viewport_ = NxD3D9Viewport{0, 0, w, h, 0.0f, 1.0f};
+        scissorRect_ = NxD3D9Rect{0, 0, (int32_t)w, (int32_t)h};
+    }
+    rt_[index] = surface;
+    return true;
+}
+bool StateTracker::SetClipPlane(uint32_t index, const float plane[4]) {
+    if (index >= NXD3D_MAX_CLIP || !plane) return false;
+    if (memcmp(clip_[index], plane, 16)) { memcpy(clip_[index], plane, 16); dirty_ = true; }
+    return true;
+}
+bool StateTracker::GetClipPlane(uint32_t index, float plane[4]) const {
+    if (index >= NXD3D_MAX_CLIP || !plane) return false;
+    memcpy(plane, clip_[index], 16);
+    return true;
 }
 
 const StateTracker::Resolved& StateTracker::Resolve(const NxD3D9Viewport& vp, const NxD3D9Rect& sc, uint32_t depthFormat) {
@@ -60,6 +169,7 @@ const StateTracker::Resolved& StateTracker::Resolve(const NxD3D9Viewport& vp, co
     NxD3D9Input in;
     memset(&in, 0, sizeof in);
     in.rs = rs_; in.ps_version = psVersion_; in.depth_format = depthFormat; in.viewport = vp; in.scissor = sc;
+    in.clip_planes = clip_;
     nx_d3d9_translate(&in, &out_.rs, &out_.dyn, &out_.shaderBits);
     lastVp_ = vp; lastSc_ = sc; lastDepth_ = depthFormat; dirty_ = false;
     resolves_++;

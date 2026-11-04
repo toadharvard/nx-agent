@@ -108,6 +108,7 @@ $(OUT)/test_n1_gl: $(N1)/renderer.cpp $(N1)/engine_stubs.cpp $(N1)/engine_textur
 
 n1: $(OUT)/test_n1_gl
 	$(OUT)/test_n1_gl
+	python3 -I test_d3d9_state_table.py --out $(OUT) $(if $(EXE),--exe $(EXE))
 
 .PHONY: n1
 
