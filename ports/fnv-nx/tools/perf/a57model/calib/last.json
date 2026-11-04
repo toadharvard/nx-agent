@@ -1,7 +1,7 @@
 {
  "schema": "fnvnx-a57calib/1",
- "check_mape_pct": 4.86,
- "check_max_pct": 50.03,
+ "check_mape_pct": 3.07,
+ "check_max_pct": 25.03,
  "fit_mape_pct": 0.04,
  "flat_check_mape_pct": 64.03,
  "points": [
@@ -118,9 +118,9 @@
    "kernel": "vmul_chain",
    "role": "check",
    "truth": 4,
-   "model": 6.00105875,
+   "model": 5.00115875,
    "flat": 1.562421875,
-   "err": 0.5002646875000001,
+   "err": 0.2502896875,
    "flat_err": 0.60939453125,
    "clock": 1.785,
    "src": "CC: vector integer multiply 4 cycles"

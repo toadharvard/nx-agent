@@ -783,7 +783,7 @@ measured error bar. Every optimization stream reads its output (fnvnx-perf/1, 12
   predictor, 512 indirect targets, 32-entry return stack, 64-entry L1 BTB and 4K L2 BTB. It counts events; it does
   not keep time.
 * **Prices** (`cost.py`). Each block: `llvm-mca -mcpu=cortex-a57` over the block as a loop body (steady-state cycles
-  per iteration), at least ceil(n/3). Front end: 17.5 cycles per mispredict, +1 for a target from the L2 BTB, +4 for a
+  per iteration), at least ceil(n/3), with the r1p0 ASIMD multiply latencies (12.2). Front end: 17.5 cycles per mispredict, +1 for a target from the L2 BTB, +4 for a
   BTB miss, 11 per L1I miss. Loads: a load whose address depends on a loaded value (static dataflow over its block,
   loop-carried) pays each miss in full (L2 22 cycles, DRAM 60 cycles + 90 ns, L2 TLB +20, walk +30); any other pays
   once per miss group (the misses within 60 instructions, up to 6). Store-to-load forwarding 7 cycles. Stores pay
@@ -804,7 +804,7 @@ METRIC is the mean absolute error over the check points. Before: the flat IPC 0.
 | DRAM (chase 64 MB) at 1.785 GHz | fit | 250 | 250.0 | 0.0 | 1.56 |
 | add / mul64 / fmla / vadd latency | check | 1 / 5 / 10 / 3 | 1 / 5 / 10 / 3 | 0-0.2 | 1.56 |
 | fmla .4s throughput, cycles each | check | 1 | 1.00 | 0.5 | 1.56 |
-| mul .4s latency | check | 4 | **6.00** | **50.0** | 1.56 |
+| mul .4s latency | check | 4 | **5.00** | **25.0** | 1.56 |
 | mul .4s throughput | check | 2 | 2.00 | 0.2 | 1.56 |
 | store-to-load forwarding chain | fit | 7 | 7.00 | 0.0 | 2.81 |
 | L1D read, B/cycle | check | 15.69 | 15.65 | 0.2 | 14.54 |
@@ -814,8 +814,12 @@ METRIC is the mean absolute error over the check points. Before: the flat IPC 0.
 | mispredict penalty (random - zero branches) | fit | 17.5 | 17.5 | 0.1 | 1.26 |
 | taken branch, L1 BTB / L2 BTB | check | 1 / 2 | 1.05 / 2.01 | 4.8 / 0.7 | 1.33 / 1.25 |
 
-**Error: 4.9 % mean over the 14 check points (max 50 %), against 64.0 % for the flat IPC 0.8 (max 187 %).** The one
-large miss is llvm-mca's latency for ASIMD integer `mul .4s` (6 cycles; Chips and Cheese measured 4). Sources: Chips
+**Error: 3.1 % mean over the 14 check points (max 25 %), against 64.0 % for the flat IPC 0.8 (max 187 %).** The
+largest miss is ASIMD integer `mul .4s`: 5 cycles in the model, 4 measured. llvm-mca's A57 model has the r0pX
+latencies (Q-form 6, D-form 5); ARM's Cortex-A57 Software Optimization Guide (UAN 0015B, 3.14 note 4) gives 5 and 4
+from r1p0 on, and the Tegra X1's A57 is r1p1. llvm-mca takes no latency overrides, so cost.py corrects a block whose
+loop-carried chain is the bound: it recomputes the chain with the r1p0 latencies (register dataflow, `r1_latency`)
+and subtracts the difference, never below ceil(n/3). (Before this correction: 4.9 %, max 50 %.) Sources: Chips
 and Cheese, "Cortex A57, Nintendo Switch's CPU" (2023, on a Switch at 1.785 GHz); 7-cpu.com Cortex-A57 (mispredict
 16-19 cycles, DRAM = 60 cycles + n ns); Phoronix Test Suite tinymembench on Jetson Nano and TX1.
 

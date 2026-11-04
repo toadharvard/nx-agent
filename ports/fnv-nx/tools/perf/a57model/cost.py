@@ -176,6 +176,45 @@ def dependent_loads(ins_list):
     return dep, memchain
 
 
+# Cortex-A57 r1p0 and later reduce the latency of ASIMD integer multiply (ARM Cortex-A57 Software Optimization
+# Guide UAN 0015B, 3.14 note 4: 'N/M' = r0pX / r1p0). llvm-mca's A57 model has the r0pX numbers; the Tegra X1's A57 is
+# r1p1 (MIDR variant 1, revision 1). Q-form 6 -> 5, D-form 5 -> 4.
+R1_MUL = {'mul', 'pmul', 'sqdmulh', 'sqrdmulh'}
+Q_ARR = re.compile(r'\.(4s|8h|16b)\b')
+D_ARR = re.compile(r'\.(2s|4h|8b)\b')
+
+
+def r1_latency(mn, ops):
+    if mn not in R1_MUL or not re.search(r'\bv\d+\.', ops):
+        return None
+    if Q_ARR.search(ops):
+        return 5
+    if D_ARR.search(ops):
+        return 4
+    return None
+
+
+def chain_per_iteration(ins_list, lats):
+    """loop-carried dependency chain of the block as a loop: cycles per iteration, from register dataflow with
+    the given per-instruction latencies (two passes, the second minus the first)"""
+    ready = {}
+    ends = []
+    for _pass in range(3):
+        top = 0.0
+        for (addr, mn, ops, ins), lat in zip(ins_list, lats):
+            try:
+                rd, wr = ins.regs_access()
+            except Exception:
+                continue
+            start = max([ready.get(_regname(r), 0.0) for r in rd] or [0.0])
+            end = start + lat
+            for r in wr:
+                ready[_regname(r)] = end
+            top = max(top, end)
+        ends.append(max(ready.values() or [0.0]))
+    return max(0.0, ends[2] - ends[1])
+
+
 class MCA:
     def __init__(self, cache_path=None, iterations=300):
         self.cache_path = cache_path
@@ -213,6 +252,20 @@ class MCA:
             if m:
                 out[keys[0]] = int(m.group(1)) / self.it
         return out, ''
+
+    def info(self, lines):
+        """per-instruction latencies llvm-mca assumes for one block (its instruction-info table)"""
+        k = hashlib.sha1('\n'.join(lines).encode()).hexdigest()[:20] + '@info'
+        if k not in self.cache:
+            p = subprocess.run(['llvm-mca', '-mtriple=aarch64', '-mcpu=cortex-a57', '-iterations=1',
+                                '-resource-pressure=false'], input='\n'.join(lines) + '\n',
+                               capture_output=True, text=True)
+            lat = []
+            if not p.returncode:
+                for m in re.finditer(r'^\s*(\d+)\s+(\d+)\s+(\d+\.\d+)', p.stdout.split('Instructions:')[-1], re.M):
+                    lat.append(int(m.group(2)))
+            self.cache[k] = lat if len(lat) == len(lines) else None
+        return self.cache[k]
 
     def cycles(self, blocks):
         """blocks: {name: [lines]} -> {name: cycles per iteration}; the cache is keyed by the text (and the iteration
@@ -330,6 +383,14 @@ def price(region, params, clock, mca, syms=None):
             funcs[f]['unpriced_insns'] += b['count'] * b['n']
             per = b['n'] / 0.8  # the old flat model, for what llvm-mca could not read
         per = max(per, math.ceil(max(nm, 1) / width)) if nm else per
+        il = [x for x in dis[(b['pc'], b['n'])] if x[1] not in ('udf', 'brk', 'hlt')]
+        if any(r1_latency(x[1], x[2]) for x in il):
+            lat0 = mca.info(lines_of[k])
+            if lat0:
+                lat1 = [r1_latency(x[1], x[2]) or l0 for x, l0 in zip(il, lat0)]
+                c0, c1 = chain_per_iteration(il, lat0), chain_per_iteration(il, lat1)
+                if c0 > c1 and per <= 1.1 * c0:   # latency-bound on the chain: the shorter latencies shorten it
+                    per = max(per - (c0 - c1), math.ceil(max(nm, 1) / width))
         row = funcs[f]
         row['insns'] += b['count'] * b['n']
         row['core'] += b['count'] * per

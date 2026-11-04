@@ -11,8 +11,9 @@
     Switch's A57, 7-cpu, PTS tinymembench on Jetson Nano/TX1); 5 are fits, 14 checks.
   - `perf_report.py` writes fnvnx-perf/1 (`totals`, `hotspots[]`, `frame_hotspots[]`); `funcmodel.py` prices named
     guest functions statically; `tools/farm/perf_job.sh` is the farm job.
-* **measured** - METRIC (mean error over the 14 check points): **64.0 % (flat IPC 0.8) -> 4.9 %**, max 50 % (llvm-mca
-  prices ASIMD `mul .4s` at 6 cycles; measured 4).
+* **measured** - METRIC (mean error over the 14 check points): **64.0 % (flat IPC 0.8) -> 4.9 % -> 3.1 %**, max 25 %.
+  The step to 3.1 %: llvm-mca's A57 model has r0pX ASIMD multiply latencies. ARM's optimization guide gives one cycle
+  less from r1p0, and the Tegra X1's A57 is r1p1, so cost.py corrects latency-bound chains.
   - Boot to WinMain, link fa883870e756 guest on its synth.exe: 62.2 M main-thread instructions, IPC 1.36, 44.8 ms at
     1.02 GHz (flat: 76.2 ms). fnvnx_scan_codeptrs 32 % (162,772 mispredicts).
   - perf_job.sh end to end on this branch (link 06857911f5ab, which has no boot/synth.exe, so no image): 18.7 M

@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = os.path.join(HERE, '..', '..', 'tools', 'perf', 'a57model')
 sys.path.insert(0, MODEL)
 sys.path.insert(0, os.path.join(MODEL, '..'))
-LIMIT_CHECK = 6.0  # % mean absolute error over the check points; lower it as the model improves
+LIMIT_CHECK = 4.0  # % mean absolute error over the check points; lower it as the model improves
 LIMIT_FIT = 2.0
 
 fails = []
