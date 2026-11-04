@@ -1067,6 +1067,8 @@ class Emu:
                         break
                 if k is not None:
                     break
+            if k is None:   # the vptr register was reused: the slot offset from the call site's ldr, the vptr from
+                k, base = self.vcall_by_object()   # a register holding an object of a bound vtable
             if k is None:
                 return None
         b = self.vt_bound.get(base)
@@ -1082,6 +1084,41 @@ class Emu:
                   f"continued at {key[2]}")
         self.vt_past[key] += 1
         return rt & 0xFFFFFFFF
+
+    def vcall_by_object(self):
+        """(slot, vptr) for a blr whose register came from `ldr wN, [xM, #imm]` a few instructions back (xM may since
+        be reused): the slot is imm/4, the vptr that of the first register holding an object whose vptr is a bound
+        vtable shorter than slot; (None, None) otherwise"""
+        uc = self.uc
+        lr = uc.reg_read(UC_ARM64_REG_LR)
+        try:
+            (call,) = struct.unpack("<I", uc.mem_read(lr - 4, 4))
+        except UcError:
+            return None, None
+        if call & 0xFFFFFC1F != 0xD63F0000:
+            return None, None
+        n, imm = (call >> 5) & 31, None
+        for back in range(2, 16):
+            try:
+                (w,) = struct.unpack("<I", uc.mem_read(lr - 4 * back, 4))
+            except UcError:
+                break
+            if w & 0xFFC00000 == 0xB9400000 and w & 31 == n:
+                imm = ((w >> 10) & 0xFFF) * 4
+                break
+        if imm is None:
+            return None, None
+        k = imm // 4
+        for i in list(range(19, 29)) + list(range(0, 18)):
+            v = self.xreg(i) & 0xFFFFFFFF
+            try:
+                (vp,) = struct.unpack("<I", uc.mem_read(v, 4))
+            except UcError:
+                continue
+            b = self.vt_bound.get(vp)
+            if b is not None and vp + 4 * k >= b[2] and k < len(b[1]):
+                return k, vp
+        return None, None
 
     def vt_past_lines(self):
         return [f"vslot-past-end\t{n}\t{e:#010x}\t{k}\t{f}"
@@ -1697,6 +1734,8 @@ def main(argv):
             emu.install_fault_stubs(a.stub_faults)
         if a.exe_vtables or a.stub_faults and "exe-vtables" in fault_table_options(a.stub_faults):
             exe = [src for name, _, src in (f.partition("=") for f in a.file) if name.lower().endswith(".exe")]
+            exe += [p for p in (os.path.join(root, d, "FalloutNV.exe") for d in ("switch/fnv", "fnvnx/game"))
+                    if os.path.exists(p)]   # a game install mounted with --root
             if not a.addrmap or not exe:
                 print("   exe-vtables: off (needs --addrmap and the exe as --file)")
             else:
