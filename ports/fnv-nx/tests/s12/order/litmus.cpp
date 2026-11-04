@@ -6,7 +6,8 @@
 // Freestanding: no libc; the threads come from raw clone() (litmus_rt.S).
 #include "fnvnx_win32.h"   // the inline Interlocked* and refcount helpers, as decomp units see them
 extern "C" {
-LONG fnvnx_interlocked_slow(int, volatile LONG *, LONG, LONG) { return 0; }   // operands here are aligned
+__attribute__((weak)) LONG fnvnx_interlocked_slow(int, volatile LONG *, LONG, LONG) { return 0; }   // operands here
+// are aligned; weak: in S15's mtqemu guest platform/win32/sync.cpp defines the real one
 void v1_puts(const char *);
 int lt_spawn(void (*fn)(void *), void *arg, void *stack_top);
 void lt_exit_group(int);
@@ -21,7 +22,10 @@ static void put_num(const char *k, unsigned long v) {
   v1_puts(b + i);
 }
 
-enum { ROUNDS = 20000, NTHREADS = 8 };
+#ifndef LITMUS_ROUNDS   // S15's mtqemu runs it with fewer rounds under its race checker (tests/s15/mtqemu)
+#define LITMUS_ROUNDS 20000
+#endif
+enum { ROUNDS = LITMUS_ROUNDS, NTHREADS = 8 };
 alignas(16) static char g_stacks[NTHREADS][64 * 1024];
 static volatile int g_running;   // threads still running (decremented with an atomic, polled volatile)
 
