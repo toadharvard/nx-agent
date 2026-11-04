@@ -109,6 +109,20 @@ def main():
         asm2 = abi2.emit('br', 'tgt', p_, 'c') if p_ is not None and p_.kind == 'bridge' else ''
         check(v_.kind == 'bridge' and 'ret-float-width' in v_.classes and ins in asm_ and ins in (asm2 or ''),
               'float/double result converted (%s): %s %s' % (ins, v_.kind, v_.classes))
+    # V1 defect 3 (repro_cname_abi): a C-named definition (@f@16) is compared too - its parameter types from the
+    # defining unit's source - and gets the edx-dummy bridge its C++-named twin gets
+    src_c = ('#define __fastcall\nstruct T { int v; };\nextern "C" void __fastcall FUN_00c0ffee(T *self, void *edx_dummy, '
+             'int a, int b) { self->v = a * 7 + b; }\n')
+    cs = fnvlink.c_name_sig(sigs.parse_msvc('@FUN_00c0ffee@16', None), src_c)
+    hn = ['?FUN_00c0ffee@H@@QAEXHH@Z']
+    hr = sigs.parse_msvc(hn[0], fnvlink.batch_demangle(fnvlink.UNDNAME, hn)[hn[0]])
+    vc = abi.compare(hr, cs) if cs is not None else None
+    check(vc is not None and vc.kind == 'bridge' and 'edx-dummy' in vc.classes and
+          sorted(vc.moves) == [(('x', 2), ('x', 1), 'I32', 'I32'), (('x', 3), ('x', 2), 'I32', 'I32')],
+          'C-named fastcall definition compared: %s' % ((vc and (vc.kind, vc.classes, vc.moves)),))
+    cf = fnvlink.c_name_sig(sigs.parse_msvc('_FUN_00c10000@8', None), '')   # nothing declared: N/4 integers
+    check(cf is not None and cf.cc == 'stdcall' and len(cf.raw_params) == 2, 'stdcall fallback by its byte count')
+    check(fnvlink.c_name_sig(sigs.parse_msvc('_FUN_00c10010', None), '') is None, 'cdecl, undeclared: unknown')
     # S13: GetOrLoadXML calls the fastcall-declared FUN_00a0c900 through a __thiscall cast; the definition is the
     # thiscall member (const char*, int): the cast decides (no bridge), the declaration would move the 3rd argument
     src = ('void __fastcall FUN_00a0c900(void*, const char*, MenuValueDescriptor*);\n'

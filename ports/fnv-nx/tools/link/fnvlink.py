@@ -487,6 +487,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     xtraps = {}      # trap stub -> (ctor/dtor defined nowhere, why)
     unwind_cache = {}
     cast_cache = {}
+    text_cache = {}
+
+    def source_text(src_):
+        if src_ not in text_cache:
+            p_ = os.path.join(tree, src_.split('#')[0])
+            text_cache[src_] = open(p_, encoding='utf-8', errors='surrogateescape').read() if os.path.exists(p_) else ''
+        return text_cache[src_]
 
     def casts_of(u_):
         if u_.source not in cast_cache:
@@ -574,6 +581,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                         cast = casts_of(u).get(isig.qual[-1])
                     if refdecl and (refdecl != defdecl or cast):
                         rs, ds = msvc(refdecl), msvc(defdecl)
+                        # an undecorated C name carries no parameter types: read them from its unit's source
+                        if rs.kind == 'cname' and rs.special is None:
+                            rs = c_name_sig(rs, source_text(u.host or u.source)) or rs
+                            stats['cname_ref_' + ('compared' if rs.kind == 'func' else 'unknown')] += 1
+                        if ds.kind == 'cname' and ds.special is None and nd['unit']:
+                            ds = c_name_sig(ds, source_text(nd['unit'])) or ds
+                            stats['cname_def_' + ('compared' if ds.kind == 'func' else 'unknown')] += 1
                         cast_note = None
                         if cast and ds.kind == 'func':
                             # the unit calls the name through a cast to another function-pointer type: the cast's
@@ -968,6 +982,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'calls of an IAT slot address bound to its import: %d' % stats['iat_calls'],
               'data references bound by identifier only (another scope or decorated type): %d; identifiers at several '
               'addresses (left ambiguous): %d' % (stats['ident_addr'], stats['ident_ambiguous']),
+              'C-named declarations compared from their unit\'s source: %d references, %d definitions; without a usable '
+              'declaration: %d / %d' % (stats['cname_ref_compared'], stats['cname_def_compared'],
+                                         stats['cname_ref_unknown'], stats['cname_def_unknown']),
               'references called through a cast to another function type (the cast decides): %d, conflicting casts '
               'or direct calls (x86-inconsistent): %d' % (stats['cast_refs'], stats['cast_conflicts']),
               'GAME1 names (fnvnx_game_*) looked up by the unit\'s own name: %d references, %d resolved'
@@ -1432,6 +1449,42 @@ def cast_sig(cc, ret, params, name):
     sig.raw_params = [norm(x) for x in ps]
     sig.params = list(sig.raw_params)
     return sig
+
+
+TYPE_WORDS = {'int', 'char', 'short', 'long', 'float', 'double', 'void', 'bool', 'unsigned', 'signed', 'const',
+              'volatile', 'struct', 'class', 'union', 'enum', '__int64', 'wchar_t'}
+
+
+def param_type(p):
+    """'T *self' -> 'T *', 'int a' -> 'int', 'unsigned int' -> 'unsigned int', 'char buf[8]' -> 'char *'."""
+    p = ' '.join(p.split())
+    m = re.match(r'^(.*?[\s\*&])([A-Za-z_]\w*)\s*(\[[^\]]*\])?$', p)
+    if m and m.group(2) not in TYPE_WORDS and m.group(1).strip() and m.group(1).strip() not in ('const', 'volatile'):
+        return m.group(1).strip() + (' *' if m.group(3) else '')
+    return p
+
+
+def c_name_sig(csig, text):
+    """MSVC-model Sig for an undecorated C name (@f@N fastcall, _f@N stdcall, _f cdecl; V1 defect 3: those pairs were
+    never compared) from its declaration or definition in a unit's source: the parameter types the decoration does
+    not carry. A declaration whose x86 argument bytes disagree with N is skipped; without one, N/4 four-byte
+    integers stand in for stdcall/fastcall; None when nothing is known (a cdecl name nobody declares)."""
+    name, cc, nbytes = csig.qual[-1], csig.cc or 'cdecl', csig.stack_bytes
+    rx = re.compile(r'(?P<ret>\b[A-Za-z_][\w\s\*&:]*?)\s*\b(?:__(?P<cc>cdecl|stdcall|fastcall|thiscall)\s+)?'
+                    + re.escape(name) + r'\s*\((?P<params>[^()]*)\)\s*(?:const\s*)?[;{]')
+    for m in rx.finditer(text or ''):
+        ret = ' '.join(m.group('ret').split()[-3:])
+        ret = re.sub(r'^(?:extern|static|inline|FNVNX_KEEP|__declspec\(\w+\))\s+', '', ret)
+        ps = [param_type(x) for x in split_top(m.group('params'))]
+        sig = cast_sig(cc, ret, ', '.join(ps), name)
+        if nbytes is not None:
+            got = sum(abi.X86_SIZE.get(c, 4) for _, c in abi.params_of(sig))
+            if got != nbytes:
+                continue
+        return sig
+    if nbytes is None:
+        return None
+    return cast_sig(cc, 'int', ', '.join(['int'] * (nbytes // 4)) or 'void', name)
 
 
 def unit_casts(text):
