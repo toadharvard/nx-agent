@@ -86,6 +86,37 @@ void test_tracker(T& t, StateTracker& st) {
             (int)st.GetSamplerState(0, 1));
 }
 
+// per-stage sampler cache (P6n F4): translated again only after a change of that stage's states or texture kind
+void test_sampler_cache(T& t, Backend* be, StateTracker& st) {
+    st.Reset();
+    NxD3D9Texture k; memset(&k, 0, sizeof k); k.format = 21;   // A8R8G8B8
+    st.SetTexture(0, 7, k); st.SetTexture(1, 9, k);
+    uint32_t h[2], h2[2];
+    uint32_t n0 = st.samplerTranslations();
+    st.Handles(be, h, 2);
+    t.Check(st.samplerTranslations() == n0 + 2, "sampler cache: first use translates each stage");
+    // the engine re-sets every stage's sampler states before each draw: same values -> no new translation
+    st.SetSamplerState(0, 5, st.GetSamplerState(0, 5)); st.SetSamplerState(1, 1, st.GetSamplerState(1, 1));
+    const uint32_t n2 = st.samplerTranslations();
+    st.Handles(be, h2, 2);
+    t.Check(st.samplerTranslations() == n2 && h2[0] == h[0] && h2[1] == h[1],
+            "sampler cache: redundant sets do not translate again");
+    st.SetTexture(0, 8, k);
+    st.Handles(be, h2, 2);
+    t.Check(st.samplerTranslations() == n2 && (h2[0] & 0xFFFFFu) == 8 && (h2[0] >> 20) == (h[0] >> 20),
+            "sampler cache: another image of the same kind keeps the sampler, takes the image");
+    st.SetSamplerState(1, 1, 3);   // ADDRESSU clamp on stage 1
+    st.Handles(be, h2, 2);
+    t.Check(st.samplerTranslations() == n2 + 1 && h2[1] != h[1], "sampler cache: a changed state translates that stage only");
+    k.format = 113;   // A16B16G16R16F: another kind
+    st.SetTexture(0, 8, k);
+    st.Handles(be, h2, 2);
+    t.Check(st.samplerTranslations() == n2 + 2, "sampler cache: another texture kind translates the stage");
+    st.SetSamplerState(1, 1, 1);
+    st.Handles(be, h2, 2);
+    t.Check(h2[1] == h[1], "sampler cache: back to the first states, the first sampler");
+}
+
 uint16_t shader(Backend* be, const char* name, uint32_t stage) {
     int i = nx_shader_find(name, stage);
     if (i < 0) return 0;
@@ -122,6 +153,7 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(r.Init(be, W, H, back, depth), "renderer init");
     t.Check(Renderer::Get() == &r, "Renderer::Get");
     test_tracker(t, r.state());
+    test_sampler_cache(t, be, r.state());
     r.state().Reset();
     static const int kGroupKey = 0;   // stands for an engine NiRenderTargetGroup*
     t.Check(r.RegisterTargetGroup(&kGroupKey, menu, 0, W, H), "register group");

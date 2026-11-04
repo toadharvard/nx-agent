@@ -46,6 +46,7 @@ public:
     // Texture handles of stages 0..n-1 (sampler objects created through be and cached by NxSamplerState).
     uint32_t Handles(Backend* be, uint32_t* out, uint32_t n);
     uint32_t resolves() const { return resolves_; }
+    uint32_t samplerTranslations() const { return smpTranslations_; }   // nx_d3d9_sampler calls so far
     const uint32_t* rs() const { return rs_; }
 private:
     uint32_t rs_[NXD3D_RS_COUNT], rsSaved_[NXD3D_RS_COUNT];
@@ -61,6 +62,12 @@ private:
     enum { kSamplerCache = 128 };
     NxSamplerState smpKey_[kSamplerCache];
     uint32_t smpId_[kSamplerCache], nSmp_ = 0;
+    // per stage: the translated sampler of the current sampler states + texture kind (P6n F4: re-translated only
+    // after a SetSamplerState that changes a value, a restore, or a texture of another kind)
+    uint32_t stageSmp_[kStages] = {};      // sampler id, 0 = not translated since the last change
+    bool stageSrgb_[kStages] = {};
+    uint8_t srgbClass_[kStages] = {};      // of kind_[s].format: 1 sRGB-capable D3D format, 2 has an sRGB view
+    uint32_t smpTranslations_ = 0;
 };
 
 // ---- the renderer ----------------------------------------------------------------------------------------------
