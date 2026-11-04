@@ -382,10 +382,14 @@ itself, its gate and its checks are described by S15-threads). `tools/rules/s1b_
   objects. `tools/equiv/equiv.py` classifies MT1 as `platform`: no neutral MSVC build applies it. prepare (the Switch
   build) runs `r_mt1` after the other S1b rules. `gcc_check.py` and `test_patches.py` cover MT1 like any class.
 * Files: `patches/mt1_*.s1b`, sites `@@ MT1 <path> <0xaddr|file>`, the same format and evidence rule as the others.
-* Every MT1 hunk is behind `FNVNX_MT1_ON`. `shim/include/fnvnx_compat.h`, which the Switch build force-includes,
-  declares `fnvnx_mt1_on()` weak and defines the macro as `fnvnx_mt1_on != 0 && fnvnx_mt1_on() != 0`. While nothing
-  defines `fnvnx_mt1_on()`, the gate is off. S15 defines it in the platform layer to read the engine's copy of
-  bMTRendering (`DAT_011f94b4`).
+* Every MT1 hunk is behind `FNVNX_MT1_ON`. Its one definition is in `shim/include/fnvnx_mt1.h`, which
+  `fnvnx_compat.h` (force-included by the Switch build) includes. S1b owns both headers and the format; S15-threads
+  writes the patches.
+  - `fnvnx_mt1_on()` is declared weak; the macro is `fnvnx_mt1_on != 0 && fnvnx_mt1_on() != 0`.
+  - `toolchain/game/boot.cpp` defines it to read the INI setting object (0x011c710c + 4). WinMain builds the
+    accumulators before the renderer copies the setting into `DAT_011f94b4`.
+  - Where nothing defines `fnvnx_mt1_on()` (fuzz harness, unit tests), the gate is off.
+  - The port functions MT1 hunks call are declared there too, also weak (`fnvnx_mt1_wait_cell_update`).
 * Hunk modes (the `===` line), MT1 only:
   | mode | emitted | check |
   |---|---|---|
@@ -393,6 +397,13 @@ itself, its gate and its checks are described by S15-threads). `tools/rules/s1b_
   | `=== guarded` | the new text as written | it must test `FNVNX_MT1_ON` itself |
   | `=== inert` | the new text as written | it only adds text: the old text occurs in it verbatim (declarations the gated code uses) |
   A mode on a byte-parity class, or an unknown mode, is a parse error.
-* Test: `tests/s1b/test_mt1.py`. It covers parsing and emission, the refusals, the MSVC exemption, the equiv class,
-  and prepare's rule list. It also compiles and runs emitted code with the gate block: the decomp's path while
-  `fnvnx_mt1_on()` is undefined, the MT1 path once it returns 1.
+* Test: `tests/s1b/test_mt1.py`. It covers:
+  - parsing and emission, the refusals, the MSVC exemption, the equiv class, and prepare's rule list;
+  - `FNVNX_MT1_ON` defined exactly once in the port, in fnvnx_mt1.h, which compat.h includes;
+  - a compile and run of emitted code with the real header: the decomp's path while `fnvnx_mt1_on()` is undefined,
+    the MT1 path once it returns 1;
+  - with `DECOMP`, every committed MT1 hunk applying once.
+  - Guard, with `DECOMP` and `FNVNX_BASE_TREE` (a prepared tree, e.g. a farm `t/<c12>`): the real prepared unit of
+    every `mt1_*.s1b` site is compiled with the census flags, with and without `r_mt1`. Any new error fails, so a
+    port function declared only in a header the unit does not include is caught here, not by the build (checked by
+    removing `fnvnx_mt1_wait_cell_update`'s declaration: main.cpp fails).

@@ -161,6 +161,63 @@ if cxx:
 else:
     print('skip: no host g++ for the compile/run check')
 
+# 8: guard - the real prepared units of every patches/mt1_*.s1b, compiled with the census flags ------------------------
+# With DECOMP and FNVNX_BASE_TREE (a prepared tree, e.g. a farm t/<c12>): each unit is prepared with every rule and
+# with every rule but r_mt1, both compiled -fsyntax-only with gcc_check's census flags in an overlay of the base
+# tree. Every MT1 hunk must apply once in the prepared text, and the MT1 build must have no error the build without
+# it lacks (a port function declared only in a header the unit does not include, a gate typo, a hunk that breaks the
+# syntax). Skipped without the two variables or the cross compiler.
+dec = os.environ.get('DECOMP')
+real = [x for x in sp.load_sites() if x.rule in sp.GATED]
+if dec and real:                     # 7: every committed MT1 hunk applies exactly once to the pristine text
+    for path in sorted({x.path for x in real}):
+        text = open(os.path.join(dec, path), encoding='utf-8', errors='surrogateescape').read()
+        st, rep = Counter(), []
+        sp.apply_sites(os.path.join(dec, path), text, st, 'MT1', rep)
+        want = sum(len(x.hunks) for x in real if x.path == path)
+        check(st['MT1'] == want and not rep, '%s: %d of %d MT1 hunks applied on the pristine text (%s)'
+              % (path, st['MT1'], want, '; '.join(rep)[:200]))
+base = os.environ.get('FNVNX_BASE_TREE')
+if dec and real and base and shutil.which(os.environ.get('CXX', 'aarch64-linux-gnu-g++')):
+    import gcc_check  # noqa: E402
+    import prepare  # noqa: E402
+    rules = prepare.RULES + prepare.load_stream_rules()
+    nomt1 = [r for r in rules if r.__name__ != 'r_mt1']
+    sse = os.environ.get('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
+    d = tempfile.mkdtemp()
+    try:
+        from pathlib import Path  # noqa: E402
+        trees = {}
+        for tag in ('mt1', 'nomt1'):
+            t = Path(d) / tag
+            t.mkdir()
+            for sub in ('src', 'include', 'build'):
+                if os.path.isdir(os.path.join(base, sub)):
+                    subprocess.run(['cp', '-rs', os.path.abspath(os.path.join(base, sub)), str(t / sub)], check=True)
+            trees[tag] = t
+        for path in sorted({x.path for x in real}):
+            want = sum(len(x.hunks) for x in real if x.path == path)
+            errs = {}
+            for tag, rl in (('mt1', rules), ('nomt1', nomt1)):
+                text, st = gcc_check.prepared(os.path.join(dec, path), rl)
+                if tag == 'mt1':
+                    check(st['MT1'] == want and not st['MT1-MISS'],
+                          '%s: %d of %d MT1 hunks applied in the prepared text' % (path, st['MT1'], want))
+                dst = trees[tag] / path
+                if dst.is_symlink() or dst.exists():
+                    dst.unlink()
+                dst.write_text(text, encoding='utf-8', errors='surrogateescape')
+                errs[tag] = gcc_check.compile_errors(trees[tag], path, sse)
+            bare = lambda e: re.sub(r'^([^:]+):\d+:\d+:', r'\1:', e)
+            new = [e for e in errs['mt1'] if bare(e) not in {bare(x) for x in errs['nomt1']}]
+            check(not new, '%s: the MT1 build has %d new census errors: %s' % (path, len(new), '; '.join(new)[:400]))
+            print('mt1 guard: %s: %d hunks, census errors %d without MT1, %d with, %d new'
+                  % (path, want, len(errs['nomt1']), len(errs['mt1']), len(new)))
+    finally:
+        shutil.rmtree(d)
+elif dec and real:
+    print('skip: guard needs FNVNX_BASE_TREE (a prepared tree) and the cross compiler')
+
 for f in fails:
     print('FAIL', f)
 print('test_mt1: %d failures' % len(fails))

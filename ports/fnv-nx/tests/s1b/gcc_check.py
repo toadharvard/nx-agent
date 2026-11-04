@@ -63,7 +63,7 @@ def main():
         for d in ('src', 'include', 'build'):
             subprocess.run(['cp', '-rs', str(base / d), str(tree / d)], check=True)
     rules = prepare.RULES + prepare.load_stream_rules()
-    s1b = {'r_xinc1', 'r_ftol1', 'r_dbug1', 'r_ret1'}
+    s1b = {'r_xinc1', 'r_ftol1', 'r_dbug1', 'r_ret1', 'r_mt1'}
     without = [r for r in rules if r.__name__ not in s1b]
     for rel in files:
         text, stats = prepared(str(decomp / rel), rules)
@@ -74,7 +74,7 @@ def main():
         ref, _ = prepared(str(decomp / rel), without)
         sm = difflib.SequenceMatcher(None, ref.split('\n'), text.split('\n'), autojunk=False)
         changed = {j + 1 for op, _, _, j1, j2 in sm.get_opcodes() if op != 'equal' for j in range(j1, j2)}
-        print('%-90s applied %s missed %s' % (rel, sum(v for k, v in stats.items() if k in ('XINC1', 'FTOL1', 'DBUG1', 'RET1')),
+        print('%-90s applied %s missed %s' % (rel, sum(v for k, v in stats.items() if k in ('XINC1', 'FTOL1', 'DBUG1', 'RET1', 'MT1')),
               sum(v for k, v in stats.items() if k.endswith('-MISS'))), flush=True)
         (work / (rel.replace('/', '_') + '.lines')).write_text(' '.join(map(str, sorted(changed))))
 

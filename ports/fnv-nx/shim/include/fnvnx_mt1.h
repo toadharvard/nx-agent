@@ -17,11 +17,12 @@ extern "C"
 int fnvnx_mt1_on(void) __attribute__((weak));
 #define FNVNX_MT1_ON (fnvnx_mt1_on != 0 && fnvnx_mt1_on() != 0)
 
-/* The batch-renderer count of the main scene's accumulator: 2 with MT culling, else 1 (the PC value). */
-#define FNVNX_MT1_INLINE static inline __attribute__((always_inline))   /* a macro: prepare.py's name scan reads lines */
-FNVNX_MT1_INLINE unsigned int fnvnx_mt1_batches(void)
-{
-    return FNVNX_MT1_ON ? 2u : 1u;
-}
+/* The port functions MT1 hunks call (toolchain/game/boot.cpp defines them with fnvnx_mt1_on). Weak like the gate,
+ * so an image without them still links; every call sits behind FNVNX_MT1_ON, which is off there. */
+#ifdef __cplusplus
+extern "C"
+#endif
+void fnvnx_mt1_wait_cell_update(void) __attribute__((weak));   /* mt1_cull_sync.s1b, docs/PERF.md 6.11: main waits
+                                                                 * for this frame's cell update on AI linear thread 2 */
 
 #endif
