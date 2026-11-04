@@ -49,17 +49,19 @@ ORDER_ARGS=${ORDER_ARGS:-rtl}
 # ORDER_REFCOUNT=weak: refcount sites of InterlockedIncrement/Decrement relaxed / release (docs/ORDERING.md
 # "Refcounts"); full keeps x86 lock semantics everywhere (A/B, or a suspected refcount ordering bug).
 ORDER_REFCOUNT=${ORDER_REFCOUNT:-weak}
-# ORDER_OBJECT=first|last (ORDER-OBJECT: a member call's object before or after its arguments) and
-# ORDER_OPERATOR=cpp17|rtl (ORDER-OPERATOR: overloaded <<, >>, [], ->* left to right as C++17, or like any MSVC call);
-# docs/ORDERING.md, tests/s12/order/evalorder.cpp. ORDER_OBJECT=last is the build: MSVC's thiscall pushes the arguments
-# and loads ecx last, and the decomp (byte-matched against MSVC) has calls that work only that way. ORDER_OPERATOR=rtl:
-# MSVC 2008 predates C++17 and compiles an overloaded operator as a plain call (arguments pushed right to left).
-# S11's MSVC run of evalorder.cpp confirms both; first / cpp17 are GCC's own order, for A/B.
-ORDER_OBJECT=${ORDER_OBJECT:-first}   # reverted to first pending S12+S11: V1 C2v (virtual calls: MSVC object first, 5 of 5)
-ORDER_OPERATOR=${ORDER_OPERATOR:-cpp17}   # reverted to cpp17 pending S12+S11: V1 C2a (addassign-builtin: MSVC pa)
+# ORDER_OBJECT / ORDER_OPERATOR / ORDER_ASSIGN: evaluation order as MSVC 2008 x86, per shape, from S11's recorded
+# MSVC runs (tests/s11/order/order.msvc, all five configurations; docs/ORDERING.md "Evaluation order"):
+#   ORDER_OBJECT=msvc    a direct member call (member operators too) evaluates its arguments, then the object; a
+#                        virtual call the object first; a call through a pointer to member the arguments first
+#   ORDER_OPERATOR=rtl   an overloaded <<, >>, [], ->* is a plain call: operands right to left (C++17: left to right)
+#   ORDER_ASSIGN=msvc    a built-in compound assignment evaluates its left operand first (C++17: the right one)
+# first / cpp17 / cpp17 are GCC's own order, for A/B only.
+ORDER_OBJECT=${ORDER_OBJECT:-msvc}
+ORDER_OPERATOR=${ORDER_OPERATOR:-rtl}
+ORDER_ASSIGN=${ORDER_ASSIGN:-msvc}
 FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS"
         -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
-        -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR")
+        -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR" -fplugin-arg-fnvnx_order-assign="$ORDER_ASSIGN")
 if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
 # ORDER_KEYS: the whole program's key list (docs/ORDERING.md "Whole-program keys"): every field and global that some
 # unit hands to Interlocked* (directly or through a forwarder) or polls in a wait-only loop. Their plain accesses are
@@ -114,6 +116,12 @@ elif [ "$ORDER_KEYS" != unit ] && [ ! -f "$ORDER_KEYS" ]; then
   exit 2
 fi
 if [ "${KEYS_ONLY:-0}" = 1 ]; then exit 0; fi
+
+# Objects are kept only while the flags (the order options included), the plugins and the shim headers stay the
+# same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
+objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
+            xargs -0 cat) | sha256sum | cut -c1-16)
+if [ "$(cat "$OUT/.objstamp" 2>/dev/null)" != "$objstamp" ]; then rm -f "$OUT"/*.o; echo "$objstamp" > "$OUT/.objstamp"; fi
 
 compile_one() {
   local src=$1 base

@@ -6,3 +6,5 @@ void AtomicIncX(LONG &x);   // a forwarder defined in unit A, called only in uni
 struct Worker { int m_bDone; int m_bReady; int m_result; };
 extern int g_go;
 extern int g_other;
+extern int g_brk;
+extern int g_brk2;

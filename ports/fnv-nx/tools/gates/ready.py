@@ -989,22 +989,46 @@ class Card:
         if not self.fuzz_causes_gates(shards, n):
             self.fuzz_table_gate(shards, srcs, missing, n)
         if shards:
-            with_obj = sum(d['with_obj'] for d, _ in shards.values())
-            ver = sum(d['verdicts'] or 0 for d, _ in shards.values())
+            # per shard (V1 R16/R17): a shard's verdicts count up to its own functions with a native object, a shard
+            # without a positive count of such functions is broken, and every shard must reach the threshold on its
+            # own, so no surplus of one shard hides the gap of another
+            want = self.th.get('fuzz_min_coverage', 0.9)
+            per, broken, over = {}, [], []
+            for k, (d, _) in sorted(shards.items()):
+                wo, v = d.get('with_obj'), d.get('verdicts') or 0
+                if not isinstance(wo, int) or wo <= 0 or not isinstance(v, int) or v < 0:
+                    broken.append(k)
+                    continue
+                if v > wo:
+                    over.append(k)
+                per[k] = (min(v, wo), wo)
+            with_obj = sum(wo for _, wo in per.values())
+            ver = sum(v for v, _ in per.values())
             nm = sum(d['not_modelled'] or 0 for d, _ in shards.values())
             cov = ver / with_obj if with_obj > 0 else 0
-            want = self.th.get('fuzz_min_coverage', 0.9)
+            low = sorted(k for k, (v, wo) in per.items() if v / wo < want)
+            worst = min(per, key=lambda k: per[k][0] / per[k][1]) if per else None
             summ = sorted(k for k, (d, _) in shards.items() if d.get('status'))
             part = sorted(k for k, (d, _) in shards.items() if d.get('status') == 'partial')
             note = '%d not modelled (indirect control flow); %d of %d shards reported' % (nm, len(shards), n)
             if missing:
                 note += ' (missing: %s)' % ','.join(map(str, missing))
+            if worst is not None:
+                note += '; lowest shard %d: %.1f %%' % (worst, 100.0 * per[worst][0] / per[worst][1])
+            if low:
+                note += '; shards below %.0f %%: %s' % (100 * want, ','.join(map(str, low)))
+            if broken:
+                note += '; shards with no positive function count: %s' % ','.join(map(str, broken))
+            if over:
+                note += '; shards with more verdicts than functions (capped): %s' % ','.join(map(str, over))
             note += '; fnvnx-fuzz-summary/1 from %d shards' % len(summ)
             if part:
                 note += ', partial (pending functions): %s' % ','.join(map(str, part))
+            ok = per and not missing and not broken and not low and not over
             self.gate('fuzz.coverage', 'Fuzz', 'S13: functions with a verdict / functions with a native object',
-                      '%.1f %% (%d/%d)' % (100 * cov, ver, with_obj), '>= %.0f %%, all %d shards' % (100 * want, n),
-                      PASS if cov >= want and not missing and ver <= with_obj else FAIL, srcs, note, rank=19)
+                      '%.1f %% (%d/%d)' % (100 * cov, ver, with_obj), '>= %.0f %% in every one of %d shards' % (
+                          100 * want, n), PASS if ok else FAIL, srcs, note, rank=19,
+                      per_shard={str(k): [v, wo] for k, (v, wo) in per.items()})
         else:
             self.nodata('fuzz.coverage', 'Fuzz', 'S13 coverage', '>= 90 %', 'no fuzz report', rank=19)
         self.s13_metric_gate(n)

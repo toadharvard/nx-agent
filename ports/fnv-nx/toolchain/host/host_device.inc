@@ -97,7 +97,13 @@ static void pump_main(void *arg) {
         if (!appletMainLoop()) {   /* "Close software" from HOME, or a system shutdown */
             g_pump_alive = 0;
             cleanup_for_exit("the system asked the application to exit");
-            svcExitProcess();
+            if (g_log) {
+                fclose(g_log);
+                g_log = NULL;
+            }
+            /* exit(), not svcExitProcess: libnx's exit path ends with ISelfController::Exit for an NSO
+             * application (applet.c _appletExitProcess), the orderly exit AM expects after an ExitRequest */
+            exit(0);
         }
         svcSleepThread(16000000);   /* ~60 Hz; appletMainLoop returns at once when no message is pending */
     }

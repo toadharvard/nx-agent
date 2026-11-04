@@ -9,7 +9,7 @@
  * Core 3 opt-in (off by default until S15's model and the hardware say otherwise): with it, the background roles
  * (IO/background loading, audio, tasklets, the "game" row of everything else) take mask3, which includes core 3. The
  * main thread, the render worker, the AI linear threads and the loading screen stay on cores 0-2. The switch is
- * FNVNX_CORE3_DEFAULT at build time and `core3=` in sdmc:/fnvnx/fnvnx.ini at run time (toolchain/host/host.c). */
+ * FNVNX_CORE3_DEFAULT at build time and `core3=` in sdmc:/switch/fnv/fnvnx.ini at run time (toolchain/host/host.c). */
 #ifndef FNVNX_PLACEMENT_H
 #define FNVNX_PLACEMENT_H
 
@@ -54,10 +54,13 @@ static inline int fnvnx_win32_to_horizon_prio(int64_t prio) {   /* Win32: higher
 static inline int fnvnx_place_ex(uint64_t cpu, unsigned seq, int64_t win32_prio, int core3, int *ideal, uint32_t *mask,
                                  int *prio) {
     int role;
+    uint32_t allowed = core3 ? FNVNX_APP_CORES_CORE3 : FNVNX_APP_CORES;
     if ((cpu & ~0xFFull) == 0x100 && (cpu & 0xFF) < FNVNX_ROLE_COUNT)
         role = (int)(cpu & 0xFF);
     else if ((int64_t)cpu < 0 || (cpu & ~0xFFull))
         role = FNVNX_ROLE_DEFAULT;
+    else if (cpu >= 32 || !(allowed >> cpu & 1))
+        role = FNVNX_ROLE_DEFAULT;   /* a core that is not ours (the engine counts Xbox's 6 or a PC's cores): NX1 */
     else {
         *ideal = (int)cpu;
         *mask = 1u << (cpu & 31);
@@ -86,14 +89,19 @@ static inline int fnvnx_place(uint64_t cpu, unsigned seq, int64_t win32_prio, in
 /* thread_set_cpu's spec -> ideal core and mask, given the thread's current ones (svcGetThreadCoreMask) */
 static inline void fnvnx_cpu_spec(uint64_t spec, int cur_ideal, uint32_t cur_mask, int *ideal, uint32_t *mask) {
     if (!(spec >> 63)) {                       /* one core: SetThreadAffinityMask with one bit */
-        *ideal = (int)(spec & 31);
-        *mask = 1u << *ideal;
+        if (spec < 32 && (FNVNX_APP_CORES >> spec & 1)) {
+            *ideal = (int)spec;
+            *mask = 1u << *ideal;
+        } else {                               /* not an application core: the placement stays (NX1) */
+            *ideal = cur_ideal;
+            *mask = cur_mask;
+        }
         return;
     }
     uint32_t m = (uint32_t)(spec >> 8) & FNVNX_APP_CORES;
     unsigned id = (unsigned)(spec & 0xFF);
     *mask = m ? m : cur_mask;
-    if (id != FNVNX_CPU_KEEP && id < 32)
+    if (id != FNVNX_CPU_KEEP && id < 32 && (FNVNX_APP_CORES >> id & 1))
         *ideal = (int)id;
     else if (*mask >> cur_ideal & 1)
         *ideal = cur_ideal;
