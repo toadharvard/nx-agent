@@ -11,6 +11,7 @@ EQ="$ROOT/tools/equiv/equiv.py"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 
 python3 "$HERE/test_equiv.py" "$EQ" "$OUT"
+python3 "$HERE/test_explain.py"
 mkdir -p "$OUT/dl"; python3 "$HERE/test_download.py" "$ROOT/tools/equiv/setup_msvc.sh" "$OUT/dl"
 # evaluation order (S12 ORDER-OBJECT / ORDER-OPERATOR): recorded MSVC results; the GCC side when the host can build it
 GCC_ORDER=
