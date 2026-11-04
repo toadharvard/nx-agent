@@ -34,6 +34,7 @@ public:
     // The texture bound to a stage: image id (0 = none), its D3DFORMAT and kind, for the sampler translation.
     void SetTexture(uint32_t stage, uint32_t image, const NxD3D9Texture& kind);
     uint32_t Texture(uint32_t stage) const { return stage < kStages ? image_[stage] : 0; }
+    NxD3D9Texture TextureKind(uint32_t stage) const { return stage < kStages ? kind_[stage] : NxD3D9Texture{0, 0, 0, 0, 0}; }
     void SetPixelShaderVersion(uint32_t v) { psVersion_ = v; dirty_ = true; }
     // Translates what is recorded (only when something changed). viewport/scissor in D3D9 pixels.
     struct Resolved {
@@ -125,8 +126,16 @@ public:
         const uint16_t* strips;
         uint32_t stripCount;
         float tint[4];
+        uint32_t image = 0, d3dfmt = 0;  // texture (0: the state tracker's stage 0, else a white texel)
+        bool hasAlpha = false;           // NiAlphaProperty present: blend / alpha test from alphaFlags / alphaRef
+        uint16_t alphaFlags = 0;
+        uint8_t alphaRef = 0;
     };
     bool RenderGeometry(const GeomView& g);
+    // Menu background image-space effect (menubg family): the scene image toned through a lookup texture, drawn over
+    // the current pass with the tracked blend state. scene: w x h image; tone: lookup image (D3DFORMATs for sRGB).
+    bool RenderMenuBackground(uint32_t scene, uint32_t sceneFmt, uint32_t w, uint32_t h, uint32_t tone, uint32_t toneFmt,
+                              const float luma[3], float blend, float alpha);
     uint32_t geometryDraws() const { return geomDraws_; }
 
     StateTracker& state() { return state_; }
@@ -149,7 +158,7 @@ private:
     uint16_t curPass_ = 0, curFamily_ = 0;
     Ring geomRing_;
     uint32_t white_ = 0, geomDraws_ = 0;
-    uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0;
+    uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0, bgVs_ = 0, bgPs_ = 0, bgLayout_ = 0;
     StateCache sc_;
     Frame frame_;
     StateTracker state_;

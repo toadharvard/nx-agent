@@ -1,0 +1,4903 @@
+{
+ "schema": "fnv-nx P6n report v1 (docs/RENDER_PERF.md \u00a75)",
+ "summary": {
+  "commit": "43dac22f4a0085c7d5c9634a14a09524d5b9e477",
+  "per_draw_us": {
+   "native": {
+    "lo": 1.363,
+    "hi": 5.311,
+    "gate": 5.311
+   },
+   "nine": {
+    "lo": 1.254,
+    "hi": 3.803,
+    "gate": 3.803
+   }
+  },
+  "frame_ms": {
+   "main": {
+    "lo": 1.312,
+    "hi": 10.028,
+    "gate": 10.028
+   },
+   "render": {
+    "lo": 1.401,
+    "hi": 5.527,
+    "gate": 5.527
+   }
+  },
+  "assumptions": {
+   "ipc": {
+    "lo": 0.6,
+    "hi": 1.0
+   },
+   "clock_ghz": [
+    1.02,
+    1.785
+   ],
+   "gate_value": "gate = hi = IPC 0.6 at 1.02 GHz, mix_hi (+ memory term on main)"
+  },
+  "targets": {
+   "30": {
+    "1.02": "pass",
+    "1.785": "pass"
+   },
+   "45": {
+    "1.02": "pass",
+    "1.785": "pass"
+   },
+   "60": {
+    "1.02": "pass",
+    "1.785": "pass"
+   }
+  },
+  "targets_rule": "CPU verdict: max(main hi, render hi) of mix_hi at IPC 0.6 (the low IPC bound decides) <= 33.3/22.2/16.7 ms; covers the renderer only (engine update/cull/accumulation not measured); GPU time is a separate estimate (gpu.targets)",
+  "render_backend_counted": false
+ },
+ "families": {
+  "shadow": {
+   "draws": {
+    "lo": 100,
+    "hi": 300
+   },
+   "measured_draws": 300,
+   "instr_per_draw": {
+    "main": 755.4,
+    "render": 6694.6,
+    "total": 7450.0
+   },
+   "x64": {
+    "native_per_draw": 9884.5,
+    "nine_per_draw": 1383.2,
+    "nine_over_native": 0.14
+   },
+   "params": {
+    "fam": 4,
+    "draws": [
+     100,
+     300
+    ],
+    "tex": 1,
+    "tex_p": 0.2,
+    "rs": 6,
+    "p_mat": 0.05,
+    "p_tex": 0.2,
+    "p_sh": 0.1,
+    "p_geo": 0.95,
+    "vs": 64,
+    "ps": 0,
+    "shaders": 2,
+    "mats": 2,
+    "targets": [
+     "shadow0",
+     "shadow1",
+     "shadow2"
+    ],
+    "per_target": -1,
+    "layer": 0
+   }
+  },
+  "water_refl": {
+   "draws": {
+    "lo": 100,
+    "hi": 300
+   },
+   "measured_draws": 300,
+   "instr_per_draw": {
+    "main": 1440.7,
+    "render": 5133.6,
+    "total": 6574.3
+   },
+   "x64": {
+    "native_per_draw": 8414.1,
+    "nine_per_draw": 2457.0,
+    "nine_over_native": 0.29
+   },
+   "params": {
+    "fam": 3,
+    "draws": [
+     100,
+     300
+    ],
+    "tex": 2,
+    "tex_p": 1.0,
+    "rs": 12,
+    "p_mat": 0.15,
+    "p_tex": 0.8,
+    "p_sh": 0.2,
+    "p_geo": 0.95,
+    "vs": 128,
+    "ps": 32,
+    "shaders": 10,
+    "mats": 4,
+    "targets": [
+     "refl"
+    ],
+    "per_target": 0,
+    "layer": 0
+   }
+  },
+  "lit": {
+   "draws": {
+    "lo": 720,
+    "hi": 1600
+   },
+   "measured_draws": 1600,
+   "instr_per_draw": {
+    "main": 1739.0,
+    "render": 1274.5,
+    "total": 3013.4
+   },
+   "x64": {
+    "native_per_draw": 3422.4,
+    "nine_per_draw": 2979.7,
+    "nine_over_native": 0.87
+   },
+   "params": {
+    "fam": 3,
+    "draws": [
+     720,
+     1600
+    ],
+    "tex": 3,
+    "tex_p": 1.0,
+    "rs": 14,
+    "p_mat": 0.2,
+    "p_tex": 0.85,
+    "p_sh": 0.25,
+    "p_geo": 0.95,
+    "vs": 192,
+    "ps": 64,
+    "shaders": 24,
+    "mats": 6,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   }
+  },
+  "land": {
+   "draws": {
+    "lo": 100,
+    "hi": 150
+   },
+   "measured_draws": 150,
+   "instr_per_draw": {
+    "main": 2348.6,
+    "render": 9898.2,
+    "total": 12246.9
+   },
+   "x64": {
+    "native_per_draw": 15947.7,
+    "nine_per_draw": 4153.1,
+    "nine_over_native": 0.26
+   },
+   "params": {
+    "fam": 5,
+    "draws": [
+     100,
+     150
+    ],
+    "tex": 6,
+    "tex_p": 1.0,
+    "rs": 10,
+    "p_mat": 0.05,
+    "p_tex": 1.0,
+    "p_sh": 0.3,
+    "p_geo": 1.0,
+    "vs": 96,
+    "ps": 32,
+    "shaders": 6,
+    "mats": 2,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   }
+  },
+  "lod": {
+   "draws": {
+    "lo": 100,
+    "hi": 200
+   },
+   "measured_draws": 200,
+   "instr_per_draw": {
+    "main": 1325.8,
+    "render": 7488.9,
+    "total": 8814.7
+   },
+   "x64": {
+    "native_per_draw": 11576.8,
+    "nine_per_draw": 1843.8,
+    "nine_over_native": 0.16
+   },
+   "params": {
+    "fam": 3,
+    "draws": [
+     100,
+     200
+    ],
+    "tex": 2,
+    "tex_p": 1.0,
+    "rs": 8,
+    "p_mat": 0.05,
+    "p_tex": 0.5,
+    "p_sh": 0.1,
+    "p_geo": 1.0,
+    "vs": 80,
+    "ps": 16,
+    "shaders": 3,
+    "mats": 2,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   }
+  },
+  "trees": {
+   "draws": {
+    "lo": 150,
+    "hi": 450
+   },
+   "measured_draws": 450,
+   "instr_per_draw": {
+    "main": 1421.3,
+    "render": 3528.0,
+    "total": 4949.3
+   },
+   "x64": {
+    "native_per_draw": 6220.4,
+    "nine_per_draw": 2084.6,
+    "nine_over_native": 0.34
+   },
+   "params": {
+    "fam": 3,
+    "draws": [
+     150,
+     450
+    ],
+    "tex": 2,
+    "tex_p": 1.0,
+    "rs": 10,
+    "p_mat": 0.33,
+    "p_tex": 0.4,
+    "p_sh": 0.33,
+    "p_geo": 0.7,
+    "vs": 112,
+    "ps": 16,
+    "shaders": 3,
+    "mats": 3,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   }
+  },
+  "grass": {
+   "draws": {
+    "lo": 100,
+    "hi": 300
+   },
+   "measured_draws": 300,
+   "instr_per_draw": {
+    "main": 1054.6,
+    "render": 5077.7,
+    "total": 6132.3
+   },
+   "x64": {
+    "native_per_draw": 7984.3,
+    "nine_per_draw": 1036.8,
+    "nine_over_native": 0.13
+   },
+   "params": {
+    "fam": 2,
+    "draws": [
+     100,
+     300
+    ],
+    "tex": 1,
+    "tex_p": 1.0,
+    "rs": 8,
+    "p_mat": 0.02,
+    "p_tex": 0.1,
+    "p_sh": 0.05,
+    "p_geo": 0.5,
+    "vs": 48,
+    "ps": 16,
+    "shaders": 2,
+    "mats": 1,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   }
+  },
+  "actors": {
+   "draws": {
+    "lo": 50,
+    "hi": 200
+   },
+   "measured_draws": 200,
+   "instr_per_draw": {
+    "main": 1724.5,
+    "render": 7507.6,
+    "total": 9232.1
+   },
+   "x64": {
+    "native_per_draw": 11984.4,
+    "nine_per_draw": 2746.8,
+    "nine_over_native": 0.23
+   },
+   "params": {
+    "fam": 3,
+    "draws": [
+     50,
+     200
+    ],
+    "tex": 3,
+    "tex_p": 1.0,
+    "rs": 14,
+    "p_mat": 0.2,
+    "p_tex": 0.7,
+    "p_sh": 0.3,
+    "p_geo": 1.0,
+    "vs": 192,
+    "ps": 64,
+    "shaders": 6,
+    "mats": 3,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   }
+  },
+  "particles": {
+   "draws": {
+    "lo": 50,
+    "hi": 150
+   },
+   "measured_draws": 150,
+   "instr_per_draw": {
+    "main": 1242.9,
+    "render": 9871.1,
+    "total": 11113.9
+   },
+   "x64": {
+    "native_per_draw": 14779.9,
+    "nine_per_draw": 2106.6,
+    "nine_over_native": 0.14
+   },
+   "params": {
+    "fam": 2,
+    "draws": [
+     50,
+     150
+    ],
+    "tex": 1,
+    "tex_p": 1.0,
+    "rs": 12,
+    "p_mat": 0.5,
+    "p_tex": 0.4,
+    "p_sh": 0.3,
+    "p_geo": 1.0,
+    "vs": 64,
+    "ps": 16,
+    "shaders": 4,
+    "mats": 4,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 1
+   }
+  },
+  "imagespace_ui": {
+   "draws": {
+    "lo": 20,
+    "hi": 60
+   },
+   "measured_draws": 60,
+   "instr_per_draw": {
+    "main": 1565.0,
+    "render": 32122.5,
+    "total": 33687.6
+   },
+   "x64": {
+    "native_per_draw": 45773.8,
+    "nine_per_draw": 3496.6,
+    "nine_over_native": 0.08
+   },
+   "params": {
+    "fam": 7,
+    "draws": [
+     20,
+     60
+    ],
+    "tex": 2,
+    "tex_p": 1.0,
+    "rs": 10,
+    "p_mat": 0.6,
+    "p_tex": 1.0,
+    "p_sh": 0.7,
+    "p_geo": 0.3,
+    "vs": 16,
+    "ps": 64,
+    "shaders": 12,
+    "mats": 5,
+    "targets": [
+     "is0",
+     "is1",
+     "is2",
+     "is3",
+     "main"
+    ],
+    "per_target": 6,
+    "layer": 1
+   }
+  }
+ },
+ "frame": {
+  "mix_lo": {
+   "draws": 1490,
+   "instr": {
+    "main": 2341582,
+    "render_front": 2501057,
+    "render_backend": null,
+    "render": 2501057
+   },
+   "ms": {
+    "1.02": {
+     "main": {
+      "lo": 2.296,
+      "hi": 4.148
+     },
+     "render": {
+      "lo": 2.452,
+      "hi": 4.087
+     }
+    },
+    "1.785": {
+     "main": {
+      "lo": 1.312,
+      "hi": 2.508
+     },
+     "render": {
+      "lo": 1.401,
+      "hi": 2.335
+     }
+    }
+   },
+   "memory_term_ms": 0.322,
+   "x64": {
+    "native": 5676286,
+    "nine": 3871520,
+    "ratio_nine_over_native": 0.68,
+    "nine_driver_excluded": 242062123
+   }
+  },
+  "mix_hi": {
+   "draws": 3710,
+   "instr": {
+    "main": 5646948,
+    "render_front": 3382459,
+    "render_backend": null,
+    "render": 3382459
+   },
+   "ms": {
+    "1.02": {
+     "main": {
+      "lo": 5.536,
+      "hi": 10.028
+     },
+     "render": {
+      "lo": 3.316,
+      "hi": 5.527
+     }
+    },
+    "1.785": {
+     "main": {
+      "lo": 3.164,
+      "hi": 6.074
+     },
+     "render": {
+      "lo": 1.895,
+      "hi": 3.158
+     }
+    }
+   },
+   "memory_term_ms": 0.801,
+   "x64": {
+    "native": 10079149,
+    "nine": 9266375,
+    "ratio_nine_over_native": 0.92,
+    "nine_driver_excluded": 411075757
+   }
+  }
+ },
+ "fixed_per_frame_instr": {
+  "main": 104,
+  "render": 187
+ },
+ "profile_mix_hi_a64": {
+  "main": 3013698,
+  "nx::SortPackets(nx::Packet const*, unsigned long, unsigned long*, unsigned long*, unsigned long long*, unsigned long long*)": 2291497,
+  "nx::Frame::Finish(nx::StateCache&, NxFrameStats*, bool)": 892638,
+  "nx::Renderer::Render(nx::Renderer::Draw const&)": 661825,
+  "nx_d3d9_sampler": 618170,
+  "nx::StateTracker::SetSamplerState(unsigned long, unsigned long, unsigned long, bool)": 574015,
+  "nx::StateTracker::SetRenderState(unsigned long, unsigned long, bool)": 481883,
+  "nx::StateTracker::Handles(nx::Backend*, unsigned long*, unsigned long)": 432766,
+  "nx::StateCache::State(unsigned short, unsigned short, unsigned short, NxRenderState const&)": 319892,
+  "memcmp": 279816,
+  "memmove": 275338,
+  "memset": 251108,
+  "nx::StateTracker::Resolve(NxD3D9Viewport const&, NxD3D9Rect const&, unsigned long)": 155187,
+  "nx::StateTracker::SetTexture(unsigned long, unsigned long, NxD3D9Texture const&)": 114803,
+  "nx::Frame::AddTextures(unsigned long const*, unsigned long)": 107389,
+  "nx::Frame::AddDyn(nx::DynRec const&)": 85456,
+  "nx_d3d9_translate": 69316,
+  "nx::Frame::Epilogue(nx::Packet*)": 66780,
+  "nx::Frame::Emit()": 63070,
+  "nx::Frame::Constants(unsigned long*)": 63070,
+  "nx::Frame::Tag(nx::Packet const*, unsigned short, unsigned short)": 59360,
+  "nx::Encoder::Op(unsigned long, unsigned long)": 57574,
+  "nx::DynFromD3D9(nx::DynRec*, NxDynamicState const&)": 55650,
+  "nx_d3d9_blend_word": 27304,
+  "nx_d3d9_raster_word": 23478,
+  "nx_d3d9_depth_stencil_word": 9179,
+  "nx_d3d9_shader_bits": 7809,
+  "nx_d3d9_bias_scale": 7711,
+  "nx::Renderer::OpenPass(unsigned long)": 1860,
+  "nx::Renderer::Do_BeginUsingRenderTargetGroup(void const*, unsigned long)": 1186
+ },
+ "ring_overflow_at_3_frames_in_flight": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 10908 failed 222 | last frame: packets 3710 words 119795 state_binds 288 states 291 samplers 1",
+ "nine": {
+  "method": "x86-64 callgrind, same .nxd3d stream through both paths: native front (null backend, -O2) vs Gallium Nine 20.1 st/nine (+cso, u_upload, util, libc it calls; release -O3) with every call into softpipe (state objects, draw module, rasterizer, flush) excluded (perf/cg_split.py); CSMT off (softpipe lacks PIPE_CAP_BUFFER_MAP_PERSISTENT_COHERENT); the engine's D3D9 redundancy filter (NiDX9RenderState) modelled and counted on the Nine side",
+  "ratio_same_isa": {
+   "mix_lo": 0.68,
+   "mix_hi": 0.92
+  },
+  "per_family_ratio": {
+   "shadow": 0.14,
+   "water_refl": 0.29,
+   "lit": 0.87,
+   "land": 0.26,
+   "lod": 0.16,
+   "trees": 0.34,
+   "grass": 0.13,
+   "actors": 0.23,
+   "particles": 0.14,
+   "imagespace_ui": 0.08
+  },
+  "a64_over_x64_native": 0.896,
+  "nine_a64_estimate_instr": {
+   "mix_lo": 3468302,
+   "mix_hi": 8301283
+  },
+  "nine_a64_estimate_rule": "x86-64 Nine count x (native a64 / native x86-64): assumes Nine's code has the same instruction ratio between the ISAs as the front; not measured",
+  "top_self_mix_hi": [
+   [
+    "main",
+    4065108
+   ],
+   [
+    "__memcpy_avx_unaligned_erms",
+    2791353
+   ],
+   [
+    "nine_update_state",
+    1959859
+   ],
+   [
+    "nine_context_set_texture",
+    653504
+   ],
+   [
+    "NineDevice9_SetTexture",
+    619356
+   ],
+   [
+    "util_format_description",
+    504350
+   ],
+   [
+    "NineDevice9_DrawIndexedPrimitive",
+    389550
+   ],
+   [
+    "__memcmp_avx2_movbe",
+    319168
+   ],
+   [
+    "nine_context_draw_indexed_primitive",
+    300510
+   ],
+   [
+    "NineDevice9_SetStreamSource",
+    300111
+   ],
+   [
+    "cso_set_sampler_views",
+    290206
+   ],
+   [
+    "NineDevice9_SetVertexShaderConstantF",
+    255990
+   ]
+  ],
+  "driver_entries_mix_hi": [
+   [
+    "softpipe_set_framebuffer_state",
+    273975112
+   ],
+   [
+    "softpipe_draw_vbo",
+    97181523
+   ],
+   [
+    "softpipe_bind_vs_state",
+    3932104
+   ],
+   [
+    "softpipe_set_sampler_views",
+    1817996
+   ],
+   [
+    "softpipe_set_vertex_buffers",
+    1061683
+   ],
+   [
+    "softpipe_transfer_map",
+    735172
+   ],
+   [
+    "softpipe_set_constant_buffer",
+    250906
+   ],
+   [
+    "softpipe_transfer_unmap",
+    218852
+   ]
+  ]
+ },
+ "gpu": {
+  "model": "Per DKSH: registers (DkshProgramHeader.num_gprs), Maxwell instructions (code words that are not scheduling words,\nnot uam's NOP / \"BRA $\" padding), and from uam's TGSI (-t): static instruction count, texture instructions, and a\ndynamic estimate (the light loop of lit*.frag run LIGHTS times; every other TGSI loop is a compiled switch and runs\nonce; both arms of every IF are counted, so branchy epilogues are upper bounds). maxwell_dyn = maxwell_static x\ntgsi_dyn / tgsi_static.\n\nScene model (MODEL below, every number is copied into the JSON): per family, covered pixels = target pixels x\ncoverage x overdraw; fragment time = pixels x max(ALU: maxwell_dyn / 256 lanes, TEX: tex x TEX_COST / 16 TMUs,\nROP: 1 / 16 (depth-only 1 / 32)) / clock, ALU and TEX divided by an issue efficiency (EFF: 1.0 and 0.6 give the\nlo/hi estimate); vertex time = draws x vertices x vs maxwell_dyn / 256 / clock; frame\ntime = max(sum over families, DRAM traffic / (25.6 GB/s x efficiency)). No caches, no early-z rejection benefit\nbeyond the overdraw factor, no cross-family overlap, no CPU/GPU sync stalls.",
+  "assumptions": {
+   "lights": 3,
+   "tex_cost": 1.5,
+   "efficiency": [
+    1.0,
+    0.6
+   ],
+   "gpu": {
+    "name": "Tegra X1 GM20B",
+    "sm": 2,
+    "lanes": 256,
+    "tmu": 16,
+    "rop": 16,
+    "dram_gbs": 25.6,
+    "dram_eff": 0.6,
+    "clocks_mhz": {
+     "docked": 768.0,
+     "handheld": 384.0,
+     "handheld_boost": 460.8
+    }
+   },
+   "configs": [
+    [
+     "docked_720p",
+     "docked",
+     1280,
+     720
+    ],
+    [
+     "docked_1080p",
+     "docked",
+     1920,
+     1080
+    ],
+    [
+     "handheld_720p",
+     "handheld",
+     1280,
+     720
+    ],
+    [
+     "handheld_540p",
+     "handheld",
+     960,
+     540
+    ]
+   ],
+   "families": {
+    "shadow": {
+     "vs": "depth.vert",
+     "ps": "depth.frag",
+     "target": [
+      1024,
+      1024,
+      3
+     ],
+     "coverage": 0.6,
+     "overdraw": 1.5,
+     "verts": 600,
+     "bpp": 6,
+     "depth_only": true
+    },
+    "water_refl": {
+     "vs": "lit.vert",
+     "ps": "lit.frag",
+     "scale": 0.25,
+     "coverage": 0.8,
+     "overdraw": 1.5,
+     "verts": 400,
+     "bpp": 12
+    },
+    "lit": {
+     "vs": "lit.vert",
+     "ps": "lit_spec.frag",
+     "coverage": 0.55,
+     "overdraw": 1.8,
+     "verts": 600,
+     "bpp": 12
+    },
+    "land": {
+     "vs": "land.vert",
+     "ps": "land.frag",
+     "coverage": 0.45,
+     "overdraw": 1.2,
+     "verts": 1089,
+     "bpp": 14
+    },
+    "lod": {
+     "vs": "lit.vert",
+     "ps": "lit.frag",
+     "coverage": 0.15,
+     "overdraw": 1.2,
+     "verts": 400,
+     "bpp": 12
+    },
+    "trees": {
+     "vs": "lit.vert",
+     "ps": "lit.frag",
+     "coverage": 0.15,
+     "overdraw": 2.5,
+     "verts": 300,
+     "bpp": 12
+    },
+    "grass": {
+     "vs": "nolight_tex.vert",
+     "ps": "nolight_tex.frag",
+     "coverage": 0.2,
+     "overdraw": 3.0,
+     "verts": 2000,
+     "bpp": 10
+    },
+    "actors": {
+     "vs": "lit_vc.vert",
+     "ps": "lit_spec.frag",
+     "coverage": 0.05,
+     "overdraw": 1.3,
+     "verts": 1500,
+     "bpp": 12
+    },
+    "sky": {
+     "vs": "sky.vert",
+     "ps": "sky_clouds.frag",
+     "coverage": 0.35,
+     "overdraw": 1.0,
+     "verts": 500,
+     "bpp": 8,
+     "draws": [
+      4,
+      6
+     ]
+    },
+    "particles": {
+     "vs": "nolight_texvc.vert",
+     "ps": "nolight_tex.frag",
+     "coverage": 0.1,
+     "overdraw": 4.0,
+     "verts": 200,
+     "bpp": 12
+    },
+    "imagespace_ui": {
+     "vs": "quad.vert",
+     "ps": "tex.frag",
+     "coverage": 3.5,
+     "overdraw": 1.0,
+     "verts": 4,
+     "bpp": 12
+    }
+   }
+  },
+  "shaders": {
+   "depth.frag": {
+    "gprs": 4,
+    "code_bytes": 256,
+    "maxwell_static": 11,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 1,
+    "tgsi_dyn": 1.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 11.0
+   },
+   "depth.vert": {
+    "gprs": 8,
+    "code_bytes": 512,
+    "maxwell_static": 35,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 6,
+    "tgsi_dyn": 6.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 35.0
+   },
+   "depth_out.frag": {
+    "gprs": 4,
+    "code_bytes": 256,
+    "maxwell_static": 10,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 3,
+    "tgsi_dyn": 3.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 10.0
+   },
+   "land.frag": {
+    "gprs": 17,
+    "code_bytes": 1792,
+    "maxwell_static": 151,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 139,
+    "tgsi_dyn": 137.0,
+    "tex": 4,
+    "light_loops": 0,
+    "maxwell_dyn": 148.8
+   },
+   "land.vert": {
+    "gprs": 8,
+    "code_bytes": 512,
+    "maxwell_static": 32,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 10,
+    "tgsi_dyn": 10.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 32.0
+   },
+   "lit.frag": {
+    "gprs": 20,
+    "code_bytes": 2304,
+    "maxwell_static": 201,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 200,
+    "tgsi_dyn": 316.0,
+    "tex": 1,
+    "light_loops": 1,
+    "maxwell_dyn": 317.6
+   },
+   "lit.vert": {
+    "gprs": 12,
+    "code_bytes": 768,
+    "maxwell_static": 56,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 17,
+    "tgsi_dyn": 17.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 56.0
+   },
+   "lit_spec.frag": {
+    "gprs": 26,
+    "code_bytes": 2816,
+    "maxwell_static": 250,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 227,
+    "tgsi_dyn": 373.0,
+    "tex": 1,
+    "light_loops": 1,
+    "maxwell_dyn": 410.8
+   },
+   "lit_vc.vert": {
+    "gprs": 12,
+    "code_bytes": 768,
+    "maxwell_static": 59,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 17,
+    "tgsi_dyn": 17.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 59.0
+   },
+   "nolight_col.frag": {
+    "gprs": 7,
+    "code_bytes": 1536,
+    "maxwell_static": 127,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 121,
+    "tgsi_dyn": 119.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 124.9
+   },
+   "nolight_tex.frag": {
+    "gprs": 7,
+    "code_bytes": 1536,
+    "maxwell_static": 131,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 123,
+    "tgsi_dyn": 121.0,
+    "tex": 1,
+    "light_loops": 0,
+    "maxwell_dyn": 128.9
+   },
+   "nolight_tex.vert": {
+    "gprs": 8,
+    "code_bytes": 512,
+    "maxwell_static": 33,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 9,
+    "tgsi_dyn": 9.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 33.0
+   },
+   "nolight_texfall.vert": {
+    "gprs": 16,
+    "code_bytes": 1024,
+    "maxwell_static": 83,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 28,
+    "tgsi_dyn": 28.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 83.0
+   },
+   "nolight_texvc.vert": {
+    "gprs": 12,
+    "code_bytes": 512,
+    "maxwell_static": 34,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 10,
+    "tgsi_dyn": 10.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 34.0
+   },
+   "nolight_texvcfall.vert": {
+    "gprs": 17,
+    "code_bytes": 1024,
+    "maxwell_static": 79,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 29,
+    "tgsi_dyn": 29.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 79.0
+   },
+   "nolight_vc.vert": {
+    "gprs": 12,
+    "code_bytes": 512,
+    "maxwell_static": 34,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 10,
+    "tgsi_dyn": 10.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 34.0
+   },
+   "quad.vert": {
+    "gprs": 12,
+    "code_bytes": 768,
+    "maxwell_static": 55,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 29,
+    "tgsi_dyn": 29.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 55.0
+   },
+   "sky.frag": {
+    "gprs": 7,
+    "code_bytes": 1792,
+    "maxwell_static": 155,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 137,
+    "tgsi_dyn": 135.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 152.7
+   },
+   "sky.vert": {
+    "gprs": 9,
+    "code_bytes": 512,
+    "maxwell_static": 33,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 10,
+    "tgsi_dyn": 10.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 33.0
+   },
+   "sky_clouds.frag": {
+    "gprs": 9,
+    "code_bytes": 1792,
+    "maxwell_static": 153,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 144,
+    "tgsi_dyn": 142.0,
+    "tex": 1,
+    "light_loops": 0,
+    "maxwell_dyn": 150.9
+   },
+   "solid.frag": {
+    "gprs": 7,
+    "code_bytes": 1536,
+    "maxwell_static": 127,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 121,
+    "tgsi_dyn": 119.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 124.9
+   },
+   "tex.frag": {
+    "gprs": 7,
+    "code_bytes": 1536,
+    "maxwell_static": 131,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 123,
+    "tgsi_dyn": 121.0,
+    "tex": 1,
+    "light_loops": 0,
+    "maxwell_dyn": 128.9
+   },
+   "text.frag": {
+    "gprs": 6,
+    "code_bytes": 1536,
+    "maxwell_static": 131,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 126,
+    "tgsi_dyn": 124.0,
+    "tex": 1,
+    "light_loops": 0,
+    "maxwell_dyn": 128.9
+   },
+   "tile.frag": {
+    "gprs": 7,
+    "code_bytes": 1536,
+    "maxwell_static": 127,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 124,
+    "tgsi_dyn": 122.0,
+    "tex": 1,
+    "light_loops": 0,
+    "maxwell_dyn": 125.0
+   },
+   "tile.vert": {
+    "gprs": 8,
+    "code_bytes": 512,
+    "maxwell_static": 35,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 8,
+    "tgsi_dyn": 8.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 35.0
+   },
+   "tile_alphamap.frag": {
+    "gprs": 6,
+    "code_bytes": 1536,
+    "maxwell_static": 130,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 128,
+    "tgsi_dyn": 126.0,
+    "tex": 1,
+    "light_loops": 0,
+    "maxwell_dyn": 128.0
+   },
+   "tile_scroll.vert": {
+    "gprs": 8,
+    "code_bytes": 512,
+    "maxwell_static": 31,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 9,
+    "tgsi_dyn": 9.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 31.0
+   },
+   "tile_vc.frag": {
+    "gprs": 7,
+    "code_bytes": 1536,
+    "maxwell_static": 129,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 125,
+    "tgsi_dyn": 123.0,
+    "tex": 1,
+    "light_loops": 0,
+    "maxwell_dyn": 126.9
+   },
+   "tile_vc.vert": {
+    "gprs": 8,
+    "code_bytes": 512,
+    "maxwell_static": 32,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 8,
+    "tgsi_dyn": 8.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 32.0
+   },
+   "tri.vert": {
+    "gprs": 4,
+    "code_bytes": 256,
+    "maxwell_static": 10,
+    "scratch_per_warp": 0,
+    "occupancy_warps_per_sm": 64,
+    "tgsi_static": 4,
+    "tgsi_dyn": 4.0,
+    "tex": 0,
+    "light_loops": 0,
+    "maxwell_dyn": 10.0
+   }
+  },
+  "scenes": {
+   "mix_lo": [
+    {
+     "config": "docked_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 768.0,
+     "efficiency": 1.0,
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.158,
+       "vertex_ms": 0.011,
+       "ms": 0.169,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 276480,
+       "bound": "alu",
+       "frag_ms": 0.447,
+       "vertex_ms": 0.011,
+       "ms": 0.458,
+       "dram_mb": 3.32
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 1.906,
+       "vertex_ms": 0.123,
+       "ms": 2.029,
+       "dram_mb": 10.95
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 0.377,
+       "vertex_ms": 0.018,
+       "ms": 0.394,
+       "dram_mb": 6.97
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.268,
+       "vertex_ms": 0.011,
+       "ms": 0.279,
+       "dram_mb": 1.99
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 0.558,
+       "vertex_ms": 0.013,
+       "ms": 0.571,
+       "dram_mb": 4.15
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 0.363,
+       "vertex_ms": 0.034,
+       "ms": 0.396,
+       "dram_mb": 5.53
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.125,
+       "vertex_ms": 0.023,
+       "ms": 0.148,
+       "dram_mb": 0.72
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.248,
+       "vertex_ms": 0.001,
+       "ms": 0.248,
+       "dram_mb": 2.58
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.242,
+       "vertex_ms": 0.002,
+       "ms": 0.243,
+       "dram_mb": 4.42
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 2.115,
+       "vertex_ms": 0.0,
+       "ms": 2.115,
+       "dram_mb": 38.71
+      }
+     },
+     "compute_ms": 7.05,
+     "dram_ms": 6.27,
+     "frame_ms": 7.05,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 768.0,
+     "efficiency": 0.6,
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.264,
+       "vertex_ms": 0.018,
+       "ms": 0.282,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 276480,
+       "bound": "alu",
+       "frag_ms": 0.744,
+       "vertex_ms": 0.019,
+       "ms": 0.763,
+       "dram_mb": 3.32
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 3.177,
+       "vertex_ms": 0.205,
+       "ms": 3.382,
+       "dram_mb": 10.95
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 0.628,
+       "vertex_ms": 0.03,
+       "ms": 0.657,
+       "dram_mb": 6.97
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.447,
+       "vertex_ms": 0.019,
+       "ms": 0.466,
+       "dram_mb": 1.99
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 0.93,
+       "vertex_ms": 0.021,
+       "ms": 0.952,
+       "dram_mb": 4.15
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 0.604,
+       "vertex_ms": 0.056,
+       "ms": 0.66,
+       "dram_mb": 5.53
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.209,
+       "vertex_ms": 0.038,
+       "ms": 0.246,
+       "dram_mb": 0.72
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.413,
+       "vertex_ms": 0.001,
+       "ms": 0.413,
+       "dram_mb": 2.58
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.403,
+       "vertex_ms": 0.003,
+       "ms": 0.406,
+       "dram_mb": 4.42
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 3.525,
+       "vertex_ms": 0.0,
+       "ms": 3.525,
+       "dram_mb": 38.71
+      }
+     },
+     "compute_ms": 11.75,
+     "dram_ms": 6.27,
+     "frame_ms": 11.75,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
+     "efficiency": 1.0,
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.158,
+       "vertex_ms": 0.011,
+       "ms": 0.169,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 622080,
+       "bound": "alu",
+       "frag_ms": 1.005,
+       "vertex_ms": 0.011,
+       "ms": 1.016,
+       "dram_mb": 7.46
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 4.289,
+       "vertex_ms": 0.123,
+       "ms": 4.412,
+       "dram_mb": 24.63
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 0.847,
+       "vertex_ms": 0.018,
+       "ms": 0.865,
+       "dram_mb": 15.68
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 0.603,
+       "vertex_ms": 0.011,
+       "ms": 0.614,
+       "dram_mb": 4.48
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 1.256,
+       "vertex_ms": 0.013,
+       "ms": 1.269,
+       "dram_mb": 9.33
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 0.816,
+       "vertex_ms": 0.034,
+       "ms": 0.849,
+       "dram_mb": 12.44
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.282,
+       "vertex_ms": 0.023,
+       "ms": 0.304,
+       "dram_mb": 1.62
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.557,
+       "vertex_ms": 0.001,
+       "ms": 0.558,
+       "dram_mb": 5.81
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.544,
+       "vertex_ms": 0.002,
+       "ms": 0.546,
+       "dram_mb": 9.95
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 4.758,
+       "vertex_ms": 0.0,
+       "ms": 4.758,
+       "dram_mb": 87.09
+      }
+     },
+     "compute_ms": 15.36,
+     "dram_ms": 12.73,
+     "frame_ms": 15.36,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
+     "efficiency": 0.6,
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.264,
+       "vertex_ms": 0.018,
+       "ms": 0.282,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 622080,
+       "bound": "alu",
+       "frag_ms": 1.675,
+       "vertex_ms": 0.019,
+       "ms": 1.694,
+       "dram_mb": 7.46
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 7.149,
+       "vertex_ms": 0.205,
+       "ms": 7.354,
+       "dram_mb": 24.63
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 1.412,
+       "vertex_ms": 0.03,
+       "ms": 1.442,
+       "dram_mb": 15.68
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 1.005,
+       "vertex_ms": 0.019,
+       "ms": 1.024,
+       "dram_mb": 4.48
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 2.094,
+       "vertex_ms": 0.021,
+       "ms": 2.115,
+       "dram_mb": 9.33
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 1.359,
+       "vertex_ms": 0.056,
+       "ms": 1.415,
+       "dram_mb": 12.44
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.469,
+       "vertex_ms": 0.038,
+       "ms": 0.507,
+       "dram_mb": 1.62
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.928,
+       "vertex_ms": 0.001,
+       "ms": 0.929,
+       "dram_mb": 5.81
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.906,
+       "vertex_ms": 0.003,
+       "ms": 0.909,
+       "dram_mb": 9.95
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 7.93,
+       "vertex_ms": 0.0,
+       "ms": 7.93,
+       "dram_mb": 87.09
+      }
+     },
+     "compute_ms": 25.6,
+     "dram_ms": 12.73,
+     "frame_ms": 25.6,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 384.0,
+     "efficiency": 1.0,
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.317,
+       "vertex_ms": 0.021,
+       "ms": 0.338,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 276480,
+       "bound": "alu",
+       "frag_ms": 0.893,
+       "vertex_ms": 0.023,
+       "ms": 0.916,
+       "dram_mb": 3.32
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 3.813,
+       "vertex_ms": 0.246,
+       "ms": 4.059,
+       "dram_mb": 10.95
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 0.753,
+       "vertex_ms": 0.035,
+       "ms": 0.789,
+       "dram_mb": 6.97
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.536,
+       "vertex_ms": 0.023,
+       "ms": 0.559,
+       "dram_mb": 1.99
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 1.117,
+       "vertex_ms": 0.026,
+       "ms": 1.142,
+       "dram_mb": 4.15
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 0.725,
+       "vertex_ms": 0.067,
+       "ms": 0.792,
+       "dram_mb": 5.53
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.25,
+       "vertex_ms": 0.045,
+       "ms": 0.295,
+       "dram_mb": 0.72
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.495,
+       "vertex_ms": 0.001,
+       "ms": 0.496,
+       "dram_mb": 2.58
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.483,
+       "vertex_ms": 0.003,
+       "ms": 0.487,
+       "dram_mb": 4.42
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 4.23,
+       "vertex_ms": 0.0,
+       "ms": 4.23,
+       "dram_mb": 38.71
+      }
+     },
+     "compute_ms": 14.1,
+     "dram_ms": 6.27,
+     "frame_ms": 14.1,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 384.0,
+     "efficiency": 0.6,
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.528,
+       "vertex_ms": 0.036,
+       "ms": 0.564,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 276480,
+       "bound": "alu",
+       "frag_ms": 1.489,
+       "vertex_ms": 0.038,
+       "ms": 1.527,
+       "dram_mb": 3.32
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 6.355,
+       "vertex_ms": 0.41,
+       "ms": 6.765,
+       "dram_mb": 10.95
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 1.256,
+       "vertex_ms": 0.059,
+       "ms": 1.315,
+       "dram_mb": 6.97
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.893,
+       "vertex_ms": 0.038,
+       "ms": 0.931,
+       "dram_mb": 1.99
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 1.861,
+       "vertex_ms": 0.043,
+       "ms": 1.904,
+       "dram_mb": 4.15
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 1.208,
+       "vertex_ms": 0.112,
+       "ms": 1.32,
+       "dram_mb": 5.53
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.417,
+       "vertex_ms": 0.075,
+       "ms": 0.492,
+       "dram_mb": 0.72
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.825,
+       "vertex_ms": 0.002,
+       "ms": 0.827,
+       "dram_mb": 2.58
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.806,
+       "vertex_ms": 0.006,
+       "ms": 0.811,
+       "dram_mb": 4.42
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 7.049,
+       "vertex_ms": 0.0,
+       "ms": 7.049,
+       "dram_mb": 38.71
+      }
+     },
+     "compute_ms": 23.5,
+     "dram_ms": 6.27,
+     "frame_ms": 23.5,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_540p",
+     "width": 960,
+     "height": 540,
+     "gpu_mhz": 384.0,
+     "efficiency": 1.0,
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.317,
+       "vertex_ms": 0.021,
+       "ms": 0.338,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 155520,
+       "bound": "alu",
+       "frag_ms": 0.502,
+       "vertex_ms": 0.023,
+       "ms": 0.525,
+       "dram_mb": 1.87
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 513216,
+       "bound": "alu",
+       "frag_ms": 2.145,
+       "vertex_ms": 0.246,
+       "ms": 2.391,
+       "dram_mb": 6.16
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 279936,
+       "bound": "alu",
+       "frag_ms": 0.424,
+       "vertex_ms": 0.035,
+       "ms": 0.459,
+       "dram_mb": 3.92
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 93312,
+       "bound": "alu",
+       "frag_ms": 0.301,
+       "vertex_ms": 0.023,
+       "ms": 0.324,
+       "dram_mb": 1.12
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 194400,
+       "bound": "alu",
+       "frag_ms": 0.628,
+       "vertex_ms": 0.026,
+       "ms": 0.654,
+       "dram_mb": 2.33
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 311040,
+       "bound": "alu",
+       "frag_ms": 0.408,
+       "vertex_ms": 0.067,
+       "ms": 0.475,
+       "dram_mb": 3.11
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 33696,
+       "bound": "alu",
+       "frag_ms": 0.141,
+       "vertex_ms": 0.045,
+       "ms": 0.186,
+       "dram_mb": 0.4
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 181440,
+       "bound": "alu",
+       "frag_ms": 0.279,
+       "vertex_ms": 0.001,
+       "ms": 0.28,
+       "dram_mb": 1.45
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 207360,
+       "bound": "alu",
+       "frag_ms": 0.272,
+       "vertex_ms": 0.003,
+       "ms": 0.275,
+       "dram_mb": 2.49
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 1814400,
+       "bound": "alu",
+       "frag_ms": 2.379,
+       "vertex_ms": 0.0,
+       "ms": 2.379,
+       "dram_mb": 21.77
+      }
+     },
+     "compute_ms": 8.29,
+     "dram_ms": 4.01,
+     "frame_ms": 8.29,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_540p",
+     "width": 960,
+     "height": 540,
+     "gpu_mhz": 384.0,
+     "efficiency": 0.6,
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.528,
+       "vertex_ms": 0.036,
+       "ms": 0.564,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 155520,
+       "bound": "alu",
+       "frag_ms": 0.837,
+       "vertex_ms": 0.038,
+       "ms": 0.875,
+       "dram_mb": 1.87
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 513216,
+       "bound": "alu",
+       "frag_ms": 3.574,
+       "vertex_ms": 0.41,
+       "ms": 3.985,
+       "dram_mb": 6.16
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 279936,
+       "bound": "alu",
+       "frag_ms": 0.706,
+       "vertex_ms": 0.059,
+       "ms": 0.765,
+       "dram_mb": 3.92
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 93312,
+       "bound": "alu",
+       "frag_ms": 0.502,
+       "vertex_ms": 0.038,
+       "ms": 0.54,
+       "dram_mb": 1.12
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 194400,
+       "bound": "alu",
+       "frag_ms": 1.047,
+       "vertex_ms": 0.043,
+       "ms": 1.09,
+       "dram_mb": 2.33
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 311040,
+       "bound": "alu",
+       "frag_ms": 0.68,
+       "vertex_ms": 0.112,
+       "ms": 0.792,
+       "dram_mb": 3.11
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 33696,
+       "bound": "alu",
+       "frag_ms": 0.235,
+       "vertex_ms": 0.075,
+       "ms": 0.31,
+       "dram_mb": 0.4
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 181440,
+       "bound": "alu",
+       "frag_ms": 0.464,
+       "vertex_ms": 0.002,
+       "ms": 0.466,
+       "dram_mb": 1.45
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 207360,
+       "bound": "alu",
+       "frag_ms": 0.453,
+       "vertex_ms": 0.006,
+       "ms": 0.459,
+       "dram_mb": 2.49
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 1814400,
+       "bound": "alu",
+       "frag_ms": 3.965,
+       "vertex_ms": 0.0,
+       "ms": 3.965,
+       "dram_mb": 21.77
+      }
+     },
+     "compute_ms": 13.81,
+     "dram_ms": 4.01,
+     "frame_ms": 13.81,
+     "bound": "compute"
+    }
+   ],
+   "mix_hi": [
+    {
+     "config": "docked_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 768.0,
+     "efficiency": 1.0,
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.158,
+       "vertex_ms": 0.032,
+       "ms": 0.19,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 276480,
+       "bound": "alu",
+       "frag_ms": 0.447,
+       "vertex_ms": 0.034,
+       "ms": 0.481,
+       "dram_mb": 3.32
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 1.906,
+       "vertex_ms": 0.273,
+       "ms": 2.18,
+       "dram_mb": 10.95
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 0.377,
+       "vertex_ms": 0.027,
+       "ms": 0.403,
+       "dram_mb": 6.97
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.268,
+       "vertex_ms": 0.023,
+       "ms": 0.291,
+       "dram_mb": 1.99
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 0.558,
+       "vertex_ms": 0.038,
+       "ms": 0.597,
+       "dram_mb": 4.15
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 0.363,
+       "vertex_ms": 0.101,
+       "ms": 0.463,
+       "dram_mb": 5.53
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.125,
+       "vertex_ms": 0.09,
+       "ms": 0.215,
+       "dram_mb": 0.72
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.248,
+       "vertex_ms": 0.001,
+       "ms": 0.248,
+       "dram_mb": 2.58
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.242,
+       "vertex_ms": 0.005,
+       "ms": 0.247,
+       "dram_mb": 4.42
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 2.115,
+       "vertex_ms": 0.0,
+       "ms": 2.115,
+       "dram_mb": 38.71
+      }
+     },
+     "compute_ms": 7.43,
+     "dram_ms": 6.27,
+     "frame_ms": 7.43,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 768.0,
+     "efficiency": 0.6,
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.264,
+       "vertex_ms": 0.053,
+       "ms": 0.317,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 276480,
+       "bound": "alu",
+       "frag_ms": 0.744,
+       "vertex_ms": 0.057,
+       "ms": 0.801,
+       "dram_mb": 3.32
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 3.177,
+       "vertex_ms": 0.456,
+       "ms": 3.633,
+       "dram_mb": 10.95
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 0.628,
+       "vertex_ms": 0.044,
+       "ms": 0.672,
+       "dram_mb": 6.97
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.447,
+       "vertex_ms": 0.038,
+       "ms": 0.485,
+       "dram_mb": 1.99
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 0.93,
+       "vertex_ms": 0.064,
+       "ms": 0.995,
+       "dram_mb": 4.15
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 0.604,
+       "vertex_ms": 0.168,
+       "ms": 0.772,
+       "dram_mb": 5.53
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.209,
+       "vertex_ms": 0.15,
+       "ms": 0.359,
+       "dram_mb": 0.72
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.413,
+       "vertex_ms": 0.001,
+       "ms": 0.413,
+       "dram_mb": 2.58
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.403,
+       "vertex_ms": 0.009,
+       "ms": 0.411,
+       "dram_mb": 4.42
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 3.525,
+       "vertex_ms": 0.0,
+       "ms": 3.525,
+       "dram_mb": 38.71
+      }
+     },
+     "compute_ms": 12.38,
+     "dram_ms": 6.27,
+     "frame_ms": 12.38,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
+     "efficiency": 1.0,
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.158,
+       "vertex_ms": 0.032,
+       "ms": 0.19,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 622080,
+       "bound": "alu",
+       "frag_ms": 1.005,
+       "vertex_ms": 0.034,
+       "ms": 1.039,
+       "dram_mb": 7.46
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 4.289,
+       "vertex_ms": 0.273,
+       "ms": 4.563,
+       "dram_mb": 24.63
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 0.847,
+       "vertex_ms": 0.027,
+       "ms": 0.874,
+       "dram_mb": 15.68
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 0.603,
+       "vertex_ms": 0.023,
+       "ms": 0.626,
+       "dram_mb": 4.48
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 1.256,
+       "vertex_ms": 0.038,
+       "ms": 1.295,
+       "dram_mb": 9.33
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 0.816,
+       "vertex_ms": 0.101,
+       "ms": 0.916,
+       "dram_mb": 12.44
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.282,
+       "vertex_ms": 0.09,
+       "ms": 0.372,
+       "dram_mb": 1.62
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.557,
+       "vertex_ms": 0.001,
+       "ms": 0.558,
+       "dram_mb": 5.81
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.544,
+       "vertex_ms": 0.005,
+       "ms": 0.549,
+       "dram_mb": 9.95
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 4.758,
+       "vertex_ms": 0.0,
+       "ms": 4.758,
+       "dram_mb": 87.09
+      }
+     },
+     "compute_ms": 15.74,
+     "dram_ms": 12.73,
+     "frame_ms": 15.74,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
+     "efficiency": 0.6,
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.264,
+       "vertex_ms": 0.053,
+       "ms": 0.317,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 622080,
+       "bound": "alu",
+       "frag_ms": 1.675,
+       "vertex_ms": 0.057,
+       "ms": 1.732,
+       "dram_mb": 7.46
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 7.149,
+       "vertex_ms": 0.456,
+       "ms": 7.605,
+       "dram_mb": 24.63
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 1.412,
+       "vertex_ms": 0.044,
+       "ms": 1.457,
+       "dram_mb": 15.68
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 1.005,
+       "vertex_ms": 0.038,
+       "ms": 1.043,
+       "dram_mb": 4.48
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 2.094,
+       "vertex_ms": 0.064,
+       "ms": 2.158,
+       "dram_mb": 9.33
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 1.359,
+       "vertex_ms": 0.168,
+       "ms": 1.527,
+       "dram_mb": 12.44
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.469,
+       "vertex_ms": 0.15,
+       "ms": 0.619,
+       "dram_mb": 1.62
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.928,
+       "vertex_ms": 0.001,
+       "ms": 0.929,
+       "dram_mb": 5.81
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.906,
+       "vertex_ms": 0.009,
+       "ms": 0.915,
+       "dram_mb": 9.95
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 7.93,
+       "vertex_ms": 0.0,
+       "ms": 7.93,
+       "dram_mb": 87.09
+      }
+     },
+     "compute_ms": 26.23,
+     "dram_ms": 12.73,
+     "frame_ms": 26.23,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 384.0,
+     "efficiency": 1.0,
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.317,
+       "vertex_ms": 0.064,
+       "ms": 0.381,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 276480,
+       "bound": "alu",
+       "frag_ms": 0.893,
+       "vertex_ms": 0.068,
+       "ms": 0.962,
+       "dram_mb": 3.32
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 3.813,
+       "vertex_ms": 0.547,
+       "ms": 4.36,
+       "dram_mb": 10.95
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 0.753,
+       "vertex_ms": 0.053,
+       "ms": 0.806,
+       "dram_mb": 6.97
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.536,
+       "vertex_ms": 0.046,
+       "ms": 0.582,
+       "dram_mb": 1.99
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 1.117,
+       "vertex_ms": 0.077,
+       "ms": 1.193,
+       "dram_mb": 4.15
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 0.725,
+       "vertex_ms": 0.201,
+       "ms": 0.926,
+       "dram_mb": 5.53
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.25,
+       "vertex_ms": 0.18,
+       "ms": 0.43,
+       "dram_mb": 0.72
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.495,
+       "vertex_ms": 0.001,
+       "ms": 0.496,
+       "dram_mb": 2.58
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.483,
+       "vertex_ms": 0.01,
+       "ms": 0.494,
+       "dram_mb": 4.42
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 4.23,
+       "vertex_ms": 0.0,
+       "ms": 4.23,
+       "dram_mb": 38.71
+      }
+     },
+     "compute_ms": 14.86,
+     "dram_ms": 6.27,
+     "frame_ms": 14.86,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 384.0,
+     "efficiency": 0.6,
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.528,
+       "vertex_ms": 0.107,
+       "ms": 0.635,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 276480,
+       "bound": "alu",
+       "frag_ms": 1.489,
+       "vertex_ms": 0.114,
+       "ms": 1.603,
+       "dram_mb": 3.32
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 6.355,
+       "vertex_ms": 0.911,
+       "ms": 7.266,
+       "dram_mb": 10.95
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 1.256,
+       "vertex_ms": 0.089,
+       "ms": 1.344,
+       "dram_mb": 6.97
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.893,
+       "vertex_ms": 0.076,
+       "ms": 0.969,
+       "dram_mb": 1.99
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 1.861,
+       "vertex_ms": 0.128,
+       "ms": 1.989,
+       "dram_mb": 4.15
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 1.208,
+       "vertex_ms": 0.336,
+       "ms": 1.544,
+       "dram_mb": 5.53
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.417,
+       "vertex_ms": 0.3,
+       "ms": 0.717,
+       "dram_mb": 0.72
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.825,
+       "vertex_ms": 0.002,
+       "ms": 0.827,
+       "dram_mb": 2.58
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.806,
+       "vertex_ms": 0.017,
+       "ms": 0.823,
+       "dram_mb": 4.42
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 7.049,
+       "vertex_ms": 0.0,
+       "ms": 7.049,
+       "dram_mb": 38.71
+      }
+     },
+     "compute_ms": 24.77,
+     "dram_ms": 6.27,
+     "frame_ms": 24.77,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_540p",
+     "width": 960,
+     "height": 540,
+     "gpu_mhz": 384.0,
+     "efficiency": 1.0,
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.317,
+       "vertex_ms": 0.064,
+       "ms": 0.381,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 155520,
+       "bound": "alu",
+       "frag_ms": 0.502,
+       "vertex_ms": 0.068,
+       "ms": 0.571,
+       "dram_mb": 1.87
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 513216,
+       "bound": "alu",
+       "frag_ms": 2.145,
+       "vertex_ms": 0.547,
+       "ms": 2.692,
+       "dram_mb": 6.16
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 279936,
+       "bound": "alu",
+       "frag_ms": 0.424,
+       "vertex_ms": 0.053,
+       "ms": 0.477,
+       "dram_mb": 3.92
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 93312,
+       "bound": "alu",
+       "frag_ms": 0.301,
+       "vertex_ms": 0.046,
+       "ms": 0.347,
+       "dram_mb": 1.12
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 194400,
+       "bound": "alu",
+       "frag_ms": 0.628,
+       "vertex_ms": 0.077,
+       "ms": 0.705,
+       "dram_mb": 2.33
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 311040,
+       "bound": "alu",
+       "frag_ms": 0.408,
+       "vertex_ms": 0.201,
+       "ms": 0.609,
+       "dram_mb": 3.11
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 33696,
+       "bound": "alu",
+       "frag_ms": 0.141,
+       "vertex_ms": 0.18,
+       "ms": 0.321,
+       "dram_mb": 0.4
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 181440,
+       "bound": "alu",
+       "frag_ms": 0.279,
+       "vertex_ms": 0.001,
+       "ms": 0.28,
+       "dram_mb": 1.45
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 207360,
+       "bound": "alu",
+       "frag_ms": 0.272,
+       "vertex_ms": 0.01,
+       "ms": 0.282,
+       "dram_mb": 2.49
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 1814400,
+       "bound": "alu",
+       "frag_ms": 2.379,
+       "vertex_ms": 0.0,
+       "ms": 2.379,
+       "dram_mb": 21.77
+      }
+     },
+     "compute_ms": 9.04,
+     "dram_ms": 4.01,
+     "frame_ms": 9.04,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_540p",
+     "width": 960,
+     "height": 540,
+     "gpu_mhz": 384.0,
+     "efficiency": 0.6,
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.528,
+       "vertex_ms": 0.107,
+       "ms": 0.635,
+       "dram_mb": 16.99
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 155520,
+       "bound": "alu",
+       "frag_ms": 0.837,
+       "vertex_ms": 0.114,
+       "ms": 0.951,
+       "dram_mb": 1.87
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 513216,
+       "bound": "alu",
+       "frag_ms": 3.574,
+       "vertex_ms": 0.911,
+       "ms": 4.486,
+       "dram_mb": 6.16
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 279936,
+       "bound": "alu",
+       "frag_ms": 0.706,
+       "vertex_ms": 0.089,
+       "ms": 0.795,
+       "dram_mb": 3.92
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 93312,
+       "bound": "alu",
+       "frag_ms": 0.502,
+       "vertex_ms": 0.076,
+       "ms": 0.578,
+       "dram_mb": 1.12
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 194400,
+       "bound": "alu",
+       "frag_ms": 1.047,
+       "vertex_ms": 0.128,
+       "ms": 1.175,
+       "dram_mb": 2.33
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 311040,
+       "bound": "alu",
+       "frag_ms": 0.68,
+       "vertex_ms": 0.336,
+       "ms": 1.015,
+       "dram_mb": 3.11
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 33696,
+       "bound": "alu",
+       "frag_ms": 0.235,
+       "vertex_ms": 0.3,
+       "ms": 0.535,
+       "dram_mb": 0.4
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 181440,
+       "bound": "alu",
+       "frag_ms": 0.464,
+       "vertex_ms": 0.002,
+       "ms": 0.466,
+       "dram_mb": 1.45
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 207360,
+       "bound": "alu",
+       "frag_ms": 0.453,
+       "vertex_ms": 0.017,
+       "ms": 0.47,
+       "dram_mb": 2.49
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 1814400,
+       "bound": "alu",
+       "frag_ms": 3.965,
+       "vertex_ms": 0.0,
+       "ms": 3.965,
+       "dram_mb": 21.77
+      }
+     },
+     "compute_ms": 15.07,
+     "dram_ms": 4.01,
+     "frame_ms": 15.07,
+     "bound": "compute"
+    }
+   ]
+  },
+  "summary_ms": {
+   "mix_lo": {
+    "docked_720p": {
+     "eff_1.0": 7.05,
+     "eff_0.6": 11.75
+    },
+    "docked_1080p": {
+     "eff_1.0": 15.36,
+     "eff_0.6": 25.6
+    },
+    "handheld_720p": {
+     "eff_1.0": 14.1,
+     "eff_0.6": 23.5
+    },
+    "handheld_540p": {
+     "eff_1.0": 8.29,
+     "eff_0.6": 13.81
+    }
+   },
+   "mix_hi": {
+    "docked_720p": {
+     "eff_1.0": 7.43,
+     "eff_0.6": 12.38
+    },
+    "docked_1080p": {
+     "eff_1.0": 15.74,
+     "eff_0.6": 26.23
+    },
+    "handheld_720p": {
+     "eff_1.0": 14.86,
+     "eff_0.6": 24.77
+    },
+    "handheld_540p": {
+     "eff_1.0": 9.04,
+     "eff_0.6": 15.07
+    }
+   }
+  },
+  "targets": {
+   "30": {
+    "docked_720p": "pass",
+    "docked_1080p": "pass",
+    "handheld_720p": "pass",
+    "handheld_540p": "pass"
+   },
+   "45": {
+    "docked_720p": "pass",
+    "docked_1080p": "pass_at_peak_only",
+    "handheld_720p": "pass_at_peak_only",
+    "handheld_540p": "pass"
+   },
+   "60": {
+    "docked_720p": "pass",
+    "docked_1080p": "pass_at_peak_only",
+    "handheld_720p": "pass_at_peak_only",
+    "handheld_540p": "pass"
+   }
+  }
+ },
+ "passes": {
+  "mix_lo": {
+   "frame": 2,
+   "defines": 3,
+   "passes": [
+    {
+     "graph_pass": 0,
+     "engine_pass": 900,
+     "family": 4,
+     "family_name": "depth",
+     "packets": 34,
+     "draws": 34,
+     "clears": 0,
+     "state_binds": 4,
+     "tex_binds": 1,
+     "tex_handles": 1,
+     "ubo_binds": 69,
+     "ubo_bytes": 26368,
+     "vtx_binds": 33,
+     "idx_binds": 33,
+     "dyn": 0,
+     "words": 978
+    },
+    {
+     "graph_pass": 1,
+     "engine_pass": 900,
+     "family": 4,
+     "family_name": "depth",
+     "packets": 34,
+     "draws": 34,
+     "clears": 0,
+     "state_binds": 3,
+     "tex_binds": 2,
+     "tex_handles": 2,
+     "ubo_binds": 69,
+     "ubo_bytes": 26368,
+     "vtx_binds": 34,
+     "idx_binds": 34,
+     "dyn": 0,
+     "words": 990
+    },
+    {
+     "graph_pass": 2,
+     "engine_pass": 900,
+     "family": 4,
+     "family_name": "depth",
+     "packets": 32,
+     "draws": 32,
+     "clears": 0,
+     "state_binds": 6,
+     "tex_binds": 4,
+     "tex_handles": 4,
+     "ubo_binds": 65,
+     "ubo_bytes": 24832,
+     "vtx_binds": 31,
+     "idx_binds": 31,
+     "dyn": 0,
+     "words": 941
+    },
+    {
+     "graph_pass": 3,
+     "engine_pass": 901,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 100,
+     "draws": 100,
+     "clears": 0,
+     "state_binds": 21,
+     "tex_binds": 74,
+     "tex_handles": 148,
+     "ubo_binds": 201,
+     "ubo_bytes": 77056,
+     "vtx_binds": 96,
+     "idx_binds": 96,
+     "dyn": 0,
+     "words": 3272
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 902,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 720,
+     "draws": 720,
+     "clears": 0,
+     "state_binds": 84,
+     "tex_binds": 645,
+     "tex_handles": 1935,
+     "ubo_binds": 1441,
+     "ubo_bytes": 553216,
+     "vtx_binds": 694,
+     "idx_binds": 694,
+     "dyn": 0,
+     "words": 24628
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 903,
+     "family": 5,
+     "family_name": "land",
+     "packets": 100,
+     "draws": 100,
+     "clears": 0,
+     "state_binds": 17,
+     "tex_binds": 100,
+     "tex_handles": 600,
+     "ubo_binds": 200,
+     "ubo_bytes": 76800,
+     "vtx_binds": 99,
+     "idx_binds": 99,
+     "dyn": 0,
+     "words": 3829
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 904,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 100,
+     "draws": 100,
+     "clears": 0,
+     "state_binds": 10,
+     "tex_binds": 59,
+     "tex_handles": 118,
+     "ubo_binds": 200,
+     "ubo_bytes": 76800,
+     "vtx_binds": 99,
+     "idx_binds": 99,
+     "dyn": 0,
+     "words": 3169
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 905,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 150,
+     "draws": 150,
+     "clears": 0,
+     "state_binds": 12,
+     "tex_binds": 95,
+     "tex_handles": 190,
+     "ubo_binds": 300,
+     "ubo_bytes": 115200,
+     "vtx_binds": 135,
+     "idx_binds": 135,
+     "dyn": 0,
+     "words": 4663
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 906,
+     "family": 2,
+     "family_name": "nolight",
+     "packets": 100,
+     "draws": 100,
+     "clears": 0,
+     "state_binds": 2,
+     "tex_binds": 14,
+     "tex_handles": 14,
+     "ubo_binds": 200,
+     "ubo_bytes": 76800,
+     "vtx_binds": 80,
+     "idx_binds": 80,
+     "dyn": 0,
+     "words": 2698
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 907,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 50,
+     "draws": 50,
+     "clears": 0,
+     "state_binds": 14,
+     "tex_binds": 34,
+     "tex_handles": 102,
+     "ubo_binds": 100,
+     "ubo_bytes": 38400,
+     "vtx_binds": 50,
+     "idx_binds": 50,
+     "dyn": 0,
+     "words": 1670
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 908,
+     "family": 2,
+     "family_name": "nolight",
+     "packets": 50,
+     "draws": 50,
+     "clears": 0,
+     "state_binds": 11,
+     "tex_binds": 27,
+     "tex_handles": 27,
+     "ubo_binds": 100,
+     "ubo_bytes": 38400,
+     "vtx_binds": 48,
+     "idx_binds": 48,
+     "dyn": 0,
+     "words": 1544
+    },
+    {
+     "graph_pass": 5,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 4,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 2,
+     "idx_binds": 2,
+     "dyn": 0,
+     "words": 198
+    },
+    {
+     "graph_pass": 6,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 6,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 2,
+     "idx_binds": 2,
+     "dyn": 0,
+     "words": 202
+    },
+    {
+     "graph_pass": 7,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 6,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 5,
+     "idx_binds": 5,
+     "dyn": 0,
+     "words": 229
+    },
+    {
+     "graph_pass": 8,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 2,
+     "draws": 2,
+     "clears": 0,
+     "state_binds": 2,
+     "tex_binds": 2,
+     "tex_handles": 4,
+     "ubo_binds": 5,
+     "ubo_bytes": 1792,
+     "vtx_binds": 1,
+     "idx_binds": 1,
+     "dyn": 0,
+     "words": 85
+    }
+   ],
+   "total": {
+    "packets": 1490,
+    "draws": 1490,
+    "clears": 0,
+    "state_binds": 202,
+    "tex_binds": 1075,
+    "tex_handles": 3181,
+    "ubo_binds": 2989,
+    "ubo_bytes": 1146624,
+    "vtx_binds": 1409,
+    "idx_binds": 1409,
+    "dyn": 0,
+    "words": 49096
+   }
+  },
+  "mix_hi": {
+   "frame": 2,
+   "defines": 0,
+   "passes": [
+    {
+     "graph_pass": 0,
+     "engine_pass": 900,
+     "family": 4,
+     "family_name": "depth",
+     "packets": 100,
+     "draws": 100,
+     "clears": 0,
+     "state_binds": 8,
+     "tex_binds": 6,
+     "tex_handles": 6,
+     "ubo_binds": 201,
+     "ubo_bytes": 77056,
+     "vtx_binds": 98,
+     "idx_binds": 98,
+     "dyn": 0,
+     "words": 2850
+    },
+    {
+     "graph_pass": 1,
+     "engine_pass": 900,
+     "family": 4,
+     "family_name": "depth",
+     "packets": 100,
+     "draws": 100,
+     "clears": 0,
+     "state_binds": 10,
+     "tex_binds": 6,
+     "tex_handles": 6,
+     "ubo_binds": 201,
+     "ubo_bytes": 77056,
+     "vtx_binds": 100,
+     "idx_binds": 100,
+     "dyn": 0,
+     "words": 2872
+    },
+    {
+     "graph_pass": 2,
+     "engine_pass": 900,
+     "family": 4,
+     "family_name": "depth",
+     "packets": 100,
+     "draws": 100,
+     "clears": 0,
+     "state_binds": 13,
+     "tex_binds": 7,
+     "tex_handles": 7,
+     "ubo_binds": 201,
+     "ubo_bytes": 77056,
+     "vtx_binds": 94,
+     "idx_binds": 94,
+     "dyn": 0,
+     "words": 2829
+    },
+    {
+     "graph_pass": 3,
+     "engine_pass": 901,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 300,
+     "draws": 300,
+     "clears": 0,
+     "state_binds": 33,
+     "tex_binds": 255,
+     "tex_handles": 510,
+     "ubo_binds": 601,
+     "ubo_bytes": 230656,
+     "vtx_binds": 283,
+     "idx_binds": 283,
+     "dyn": 0,
+     "words": 9865
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 902,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 1600,
+     "draws": 1600,
+     "clears": 0,
+     "state_binds": 96,
+     "tex_binds": 1434,
+     "tex_handles": 4302,
+     "ubo_binds": 3201,
+     "ubo_bytes": 1229056,
+     "vtx_binds": 1515,
+     "idx_binds": 1515,
+     "dyn": 0,
+     "words": 54284
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 903,
+     "family": 5,
+     "family_name": "land",
+     "packets": 150,
+     "draws": 150,
+     "clears": 0,
+     "state_binds": 21,
+     "tex_binds": 150,
+     "tex_handles": 900,
+     "ubo_binds": 300,
+     "ubo_bytes": 115200,
+     "vtx_binds": 148,
+     "idx_binds": 148,
+     "dyn": 0,
+     "words": 5728
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 904,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 200,
+     "draws": 200,
+     "clears": 0,
+     "state_binds": 6,
+     "tex_binds": 113,
+     "tex_handles": 226,
+     "ubo_binds": 400,
+     "ubo_bytes": 153600,
+     "vtx_binds": 199,
+     "idx_binds": 199,
+     "dyn": 0,
+     "words": 6285
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 905,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 450,
+     "draws": 450,
+     "clears": 0,
+     "state_binds": 12,
+     "tex_binds": 288,
+     "tex_handles": 576,
+     "ubo_binds": 900,
+     "ubo_bytes": 345600,
+     "vtx_binds": 381,
+     "idx_binds": 381,
+     "dyn": 0,
+     "words": 13735
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 906,
+     "family": 2,
+     "family_name": "nolight",
+     "packets": 300,
+     "draws": 300,
+     "clears": 0,
+     "state_binds": 7,
+     "tex_binds": 33,
+     "tex_handles": 33,
+     "ubo_binds": 600,
+     "ubo_bytes": 230400,
+     "vtx_binds": 265,
+     "idx_binds": 265,
+     "dyn": 0,
+     "words": 8268
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 907,
+     "family": 3,
+     "family_name": "lit",
+     "packets": 200,
+     "draws": 200,
+     "clears": 0,
+     "state_binds": 23,
+     "tex_binds": 162,
+     "tex_handles": 486,
+     "ubo_binds": 400,
+     "ubo_bytes": 153600,
+     "vtx_binds": 196,
+     "idx_binds": 196,
+     "dyn": 0,
+     "words": 6748
+    },
+    {
+     "graph_pass": 4,
+     "engine_pass": 908,
+     "family": 2,
+     "family_name": "nolight",
+     "packets": 150,
+     "draws": 150,
+     "clears": 0,
+     "state_binds": 15,
+     "tex_binds": 103,
+     "tex_handles": 103,
+     "ubo_binds": 300,
+     "ubo_bytes": 115200,
+     "vtx_binds": 149,
+     "idx_binds": 149,
+     "dyn": 0,
+     "words": 4741
+    },
+    {
+     "graph_pass": 5,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 5,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 5,
+     "idx_binds": 5,
+     "dyn": 0,
+     "words": 227
+    },
+    {
+     "graph_pass": 6,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 3,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 3,
+     "idx_binds": 3,
+     "dyn": 0,
+     "words": 205
+    },
+    {
+     "graph_pass": 7,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 6,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 2,
+     "idx_binds": 2,
+     "dyn": 0,
+     "words": 202
+    },
+    {
+     "graph_pass": 8,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 5,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 5,
+     "idx_binds": 5,
+     "dyn": 0,
+     "words": 227
+    },
+    {
+     "graph_pass": 9,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 6,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 2,
+     "idx_binds": 2,
+     "dyn": 0,
+     "words": 200
+    },
+    {
+     "graph_pass": 10,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 3,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 3,
+     "idx_binds": 3,
+     "dyn": 0,
+     "words": 205
+    },
+    {
+     "graph_pass": 11,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 3,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 5,
+     "idx_binds": 5,
+     "dyn": 0,
+     "words": 223
+    },
+    {
+     "graph_pass": 12,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 5,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 1,
+     "idx_binds": 1,
+     "dyn": 0,
+     "words": 191
+    },
+    {
+     "graph_pass": 13,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 4,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 3,
+     "idx_binds": 3,
+     "dyn": 0,
+     "words": 207
+    },
+    {
+     "graph_pass": 14,
+     "engine_pass": 909,
+     "family": 7,
+     "family_name": "imagespace",
+     "packets": 6,
+     "draws": 6,
+     "clears": 0,
+     "state_binds": 4,
+     "tex_binds": 6,
+     "tex_handles": 12,
+     "ubo_binds": 13,
+     "ubo_bytes": 4864,
+     "vtx_binds": 2,
+     "idx_binds": 2,
+     "dyn": 0,
+     "words": 196
+    }
+   ],
+   "total": {
+    "packets": 3710,
+    "draws": 3710,
+    "clears": 0,
+    "state_binds": 288,
+    "tex_binds": 2617,
+    "tex_handles": 7275,
+    "ubo_binds": 7435,
+    "ubo_bytes": 2853120,
+    "vtx_binds": 3459,
+    "idx_binds": 3459,
+    "dyn": 0,
+    "words": 120288
+   }
+  },
+  "s6n_n0_capture": {
+   "capture": "/home/user/work/p6n/s6ncap/cap/n0.nxcap",
+   "frames": [
+    {
+     "frame": 0,
+     "defines": 6,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 4,
+       "draws": 4,
+       "clears": 0,
+       "state_binds": 2,
+       "tex_binds": 4,
+       "tex_handles": 4,
+       "ubo_binds": 9,
+       "ubo_bytes": 3328,
+       "vtx_binds": 1,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 116
+      }
+     ],
+     "total": {
+      "packets": 4,
+      "draws": 4,
+      "clears": 0,
+      "state_binds": 2,
+      "tex_binds": 4,
+      "tex_handles": 4,
+      "ubo_binds": 9,
+      "ubo_bytes": 3328,
+      "vtx_binds": 1,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 116
+     }
+    },
+    {
+     "frame": 1,
+     "defines": 3,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 28,
+       "draws": 28,
+       "clears": 0,
+       "state_binds": 3,
+       "tex_binds": 7,
+       "tex_handles": 7,
+       "ubo_binds": 57,
+       "ubo_bytes": 21760,
+       "vtx_binds": 1,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 565
+      }
+     ],
+     "total": {
+      "packets": 28,
+      "draws": 28,
+      "clears": 0,
+      "state_binds": 3,
+      "tex_binds": 7,
+      "tex_handles": 7,
+      "ubo_binds": 57,
+      "ubo_bytes": 21760,
+      "vtx_binds": 1,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 565
+     }
+    },
+    {
+     "frame": 2,
+     "defines": 1,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 1,
+       "draws": 1,
+       "clears": 0,
+       "state_binds": 1,
+       "tex_binds": 0,
+       "tex_handles": 0,
+       "ubo_binds": 3,
+       "ubo_bytes": 1024,
+       "vtx_binds": 1,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 40
+      }
+     ],
+     "total": {
+      "packets": 1,
+      "draws": 1,
+      "clears": 0,
+      "state_binds": 1,
+      "tex_binds": 0,
+      "tex_handles": 0,
+      "ubo_binds": 3,
+      "ubo_bytes": 1024,
+      "vtx_binds": 1,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 40
+     }
+    },
+    {
+     "frame": 3,
+     "defines": 3,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 3,
+       "draws": 3,
+       "clears": 0,
+       "state_binds": 3,
+       "tex_binds": 0,
+       "tex_handles": 0,
+       "ubo_binds": 7,
+       "ubo_bytes": 2560,
+       "vtx_binds": 3,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 88
+      }
+     ],
+     "total": {
+      "packets": 3,
+      "draws": 3,
+      "clears": 0,
+      "state_binds": 3,
+      "tex_binds": 0,
+      "tex_handles": 0,
+      "ubo_binds": 7,
+      "ubo_bytes": 2560,
+      "vtx_binds": 3,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 88
+     }
+    },
+    {
+     "frame": 4,
+     "defines": 10,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 12,
+       "draws": 12,
+       "clears": 0,
+       "state_binds": 12,
+       "tex_binds": 0,
+       "tex_handles": 0,
+       "ubo_binds": 25,
+       "ubo_bytes": 9472,
+       "vtx_binds": 1,
+       "idx_binds": 0,
+       "dyn": 2,
+       "words": 270
+      }
+     ],
+     "total": {
+      "packets": 12,
+      "draws": 12,
+      "clears": 0,
+      "state_binds": 12,
+      "tex_binds": 0,
+      "tex_handles": 0,
+      "ubo_binds": 25,
+      "ubo_bytes": 9472,
+      "vtx_binds": 1,
+      "idx_binds": 0,
+      "dyn": 2,
+      "words": 270
+     }
+    },
+    {
+     "frame": 5,
+     "defines": 4,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 5,
+       "draws": 5,
+       "clears": 0,
+       "state_binds": 3,
+       "tex_binds": 0,
+       "tex_handles": 0,
+       "ubo_binds": 11,
+       "ubo_bytes": 4096,
+       "vtx_binds": 1,
+       "idx_binds": 0,
+       "dyn": 3,
+       "words": 122
+      },
+      {
+       "graph_pass": 1,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 4,
+       "draws": 4,
+       "clears": 0,
+       "state_binds": 2,
+       "tex_binds": 0,
+       "tex_handles": 0,
+       "ubo_binds": 9,
+       "ubo_bytes": 3328,
+       "vtx_binds": 2,
+       "idx_binds": 0,
+       "dyn": 3,
+       "words": 106
+      }
+     ],
+     "total": {
+      "packets": 9,
+      "draws": 9,
+      "clears": 0,
+      "state_binds": 5,
+      "tex_binds": 0,
+      "tex_handles": 0,
+      "ubo_binds": 20,
+      "ubo_bytes": 7424,
+      "vtx_binds": 3,
+      "idx_binds": 0,
+      "dyn": 6,
+      "words": 228
+     }
+    },
+    {
+     "frame": 6,
+     "defines": 0,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 10,
+       "draws": 10,
+       "clears": 0,
+       "state_binds": 1,
+       "tex_binds": 10,
+       "tex_handles": 10,
+       "ubo_binds": 21,
+       "ubo_bytes": 7936,
+       "vtx_binds": 1,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 252
+      }
+     ],
+     "total": {
+      "packets": 10,
+      "draws": 10,
+      "clears": 0,
+      "state_binds": 1,
+      "tex_binds": 10,
+      "tex_handles": 10,
+      "ubo_binds": 21,
+      "ubo_bytes": 7936,
+      "vtx_binds": 1,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 252
+     }
+    },
+    {
+     "frame": 7,
+     "defines": 0,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 16,
+       "draws": 16,
+       "clears": 0,
+       "state_binds": 1,
+       "tex_binds": 16,
+       "tex_handles": 16,
+       "ubo_binds": 33,
+       "ubo_bytes": 12544,
+       "vtx_binds": 1,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 390
+      }
+     ],
+     "total": {
+      "packets": 16,
+      "draws": 16,
+      "clears": 0,
+      "state_binds": 1,
+      "tex_binds": 16,
+      "tex_handles": 16,
+      "ubo_binds": 33,
+      "ubo_bytes": 12544,
+      "vtx_binds": 1,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 390
+     }
+    },
+    {
+     "frame": 8,
+     "defines": 0,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 24,
+       "draws": 24,
+       "clears": 0,
+       "state_binds": 1,
+       "tex_binds": 0,
+       "tex_handles": 0,
+       "ubo_binds": 49,
+       "ubo_bytes": 18688,
+       "vtx_binds": 1,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 454
+      }
+     ],
+     "total": {
+      "packets": 24,
+      "draws": 24,
+      "clears": 0,
+      "state_binds": 1,
+      "tex_binds": 0,
+      "tex_handles": 0,
+      "ubo_binds": 49,
+      "ubo_bytes": 18688,
+      "vtx_binds": 1,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 454
+     }
+    },
+    {
+     "frame": 9,
+     "defines": 0,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 4,
+       "draws": 4,
+       "clears": 0,
+       "state_binds": 1,
+       "tex_binds": 4,
+       "tex_handles": 4,
+       "ubo_binds": 9,
+       "ubo_bytes": 3328,
+       "vtx_binds": 1,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 114
+      }
+     ],
+     "total": {
+      "packets": 4,
+      "draws": 4,
+      "clears": 0,
+      "state_binds": 1,
+      "tex_binds": 4,
+      "tex_handles": 4,
+      "ubo_binds": 9,
+      "ubo_bytes": 3328,
+      "vtx_binds": 1,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 114
+     }
+    },
+    {
+     "frame": 10,
+     "defines": 5,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 5,
+       "draws": 5,
+       "clears": 0,
+       "state_binds": 5,
+       "tex_binds": 1,
+       "tex_handles": 1,
+       "ubo_binds": 11,
+       "ubo_bytes": 4096,
+       "vtx_binds": 5,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 141
+      }
+     ],
+     "total": {
+      "packets": 5,
+      "draws": 5,
+      "clears": 0,
+      "state_binds": 5,
+      "tex_binds": 1,
+      "tex_handles": 1,
+      "ubo_binds": 11,
+      "ubo_bytes": 4096,
+      "vtx_binds": 5,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 141
+     }
+    },
+    {
+     "frame": 11,
+     "defines": 0,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 15,
+       "draws": 15,
+       "clears": 0,
+       "state_binds": 1,
+       "tex_binds": 0,
+       "tex_handles": 0,
+       "ubo_binds": 31,
+       "ubo_bytes": 11776,
+       "vtx_binds": 15,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 348
+      }
+     ],
+     "total": {
+      "packets": 15,
+      "draws": 15,
+      "clears": 0,
+      "state_binds": 1,
+      "tex_binds": 0,
+      "tex_handles": 0,
+      "ubo_binds": 31,
+      "ubo_bytes": 11776,
+      "vtx_binds": 15,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 348
+     }
+    },
+    {
+     "frame": 12,
+     "defines": 0,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 15,
+       "draws": 15,
+       "clears": 0,
+       "state_binds": 1,
+       "tex_binds": 0,
+       "tex_handles": 0,
+       "ubo_binds": 31,
+       "ubo_bytes": 11776,
+       "vtx_binds": 15,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 348
+      }
+     ],
+     "total": {
+      "packets": 15,
+      "draws": 15,
+      "clears": 0,
+      "state_binds": 1,
+      "tex_binds": 0,
+      "tex_handles": 0,
+      "ubo_binds": 31,
+      "ubo_bytes": 11776,
+      "vtx_binds": 15,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 348
+     }
+    },
+    {
+     "frame": 13,
+     "defines": 2,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 2,
+       "draws": 2,
+       "clears": 0,
+       "state_binds": 2,
+       "tex_binds": 1,
+       "tex_handles": 1,
+       "ubo_binds": 5,
+       "ubo_bytes": 1792,
+       "vtx_binds": 2,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 69
+      }
+     ],
+     "total": {
+      "packets": 2,
+      "draws": 2,
+      "clears": 0,
+      "state_binds": 2,
+      "tex_binds": 1,
+      "tex_handles": 1,
+      "ubo_binds": 5,
+      "ubo_bytes": 1792,
+      "vtx_binds": 2,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 69
+     }
+    },
+    {
+     "frame": 14,
+     "defines": 3,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 5,
+       "draws": 5,
+       "clears": 0,
+       "state_binds": 3,
+       "tex_binds": 0,
+       "tex_handles": 0,
+       "ubo_binds": 11,
+       "ubo_bytes": 4096,
+       "vtx_binds": 5,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 132
+      }
+     ],
+     "total": {
+      "packets": 5,
+      "draws": 5,
+      "clears": 0,
+      "state_binds": 3,
+      "tex_binds": 0,
+      "tex_handles": 0,
+      "ubo_binds": 11,
+      "ubo_bytes": 4096,
+      "vtx_binds": 5,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 132
+     }
+    },
+    {
+     "frame": 15,
+     "defines": 1,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 5,
+       "draws": 5,
+       "clears": 0,
+       "state_binds": 1,
+       "tex_binds": 1,
+       "tex_handles": 4,
+       "ubo_binds": 11,
+       "ubo_bytes": 4096,
+       "vtx_binds": 5,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 136
+      }
+     ],
+     "total": {
+      "packets": 5,
+      "draws": 5,
+      "clears": 0,
+      "state_binds": 1,
+      "tex_binds": 1,
+      "tex_handles": 4,
+      "ubo_binds": 11,
+      "ubo_bytes": 4096,
+      "vtx_binds": 5,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 136
+     }
+    },
+    {
+     "frame": 16,
+     "defines": 2,
+     "passes": [
+      {
+       "graph_pass": 0,
+       "engine_pass": null,
+       "family": 0,
+       "family_name": "none",
+       "packets": 2,
+       "draws": 2,
+       "clears": 0,
+       "state_binds": 2,
+       "tex_binds": 1,
+       "tex_handles": 1,
+       "ubo_binds": 5,
+       "ubo_bytes": 1792,
+       "vtx_binds": 2,
+       "idx_binds": 0,
+       "dyn": 0,
+       "words": 69
+      }
+     ],
+     "total": {
+      "packets": 2,
+      "draws": 2,
+      "clears": 0,
+      "state_binds": 2,
+      "tex_binds": 1,
+      "tex_handles": 1,
+      "ubo_binds": 5,
+      "ubo_bytes": 1792,
+      "vtx_binds": 2,
+      "idx_binds": 0,
+      "dyn": 0,
+      "words": 69
+     }
+    }
+   ]
+  }
+ },
+ "backend_record": null,
+ "assumptions": {
+  "ipc": [
+   0.6,
+   1.0
+  ],
+  "clock_ghz": [
+   1.02,
+   1.785
+  ],
+  "frames_in_flight": 2,
+  "store_gbs": 4.0,
+  "bytes_per_draw_memory_term": 864,
+  "targets_ms": {
+   "30": 33.3,
+   "45": 22.2,
+   "60": 16.7
+  },
+  "stream_frames": 3,
+  "measured_frame": "last (warm caches, same draws as frame 0)",
+  "mix": [
+   {
+    "name": "shadow",
+    "fam": 4,
+    "draws": [
+     100,
+     300
+    ],
+    "tex": 1,
+    "tex_p": 0.2,
+    "rs": 6,
+    "p_mat": 0.05,
+    "p_tex": 0.2,
+    "p_sh": 0.1,
+    "p_geo": 0.95,
+    "vs": 64,
+    "ps": 0,
+    "shaders": 2,
+    "mats": 2,
+    "targets": [
+     "shadow0",
+     "shadow1",
+     "shadow2"
+    ],
+    "per_target": -1,
+    "layer": 0
+   },
+   {
+    "name": "water_refl",
+    "fam": 3,
+    "draws": [
+     100,
+     300
+    ],
+    "tex": 2,
+    "tex_p": 1.0,
+    "rs": 12,
+    "p_mat": 0.15,
+    "p_tex": 0.8,
+    "p_sh": 0.2,
+    "p_geo": 0.95,
+    "vs": 128,
+    "ps": 32,
+    "shaders": 10,
+    "mats": 4,
+    "targets": [
+     "refl"
+    ],
+    "per_target": 0,
+    "layer": 0
+   },
+   {
+    "name": "lit",
+    "fam": 3,
+    "draws": [
+     720,
+     1600
+    ],
+    "tex": 3,
+    "tex_p": 1.0,
+    "rs": 14,
+    "p_mat": 0.2,
+    "p_tex": 0.85,
+    "p_sh": 0.25,
+    "p_geo": 0.95,
+    "vs": 192,
+    "ps": 64,
+    "shaders": 24,
+    "mats": 6,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   },
+   {
+    "name": "land",
+    "fam": 5,
+    "draws": [
+     100,
+     150
+    ],
+    "tex": 6,
+    "tex_p": 1.0,
+    "rs": 10,
+    "p_mat": 0.05,
+    "p_tex": 1.0,
+    "p_sh": 0.3,
+    "p_geo": 1.0,
+    "vs": 96,
+    "ps": 32,
+    "shaders": 6,
+    "mats": 2,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   },
+   {
+    "name": "lod",
+    "fam": 3,
+    "draws": [
+     100,
+     200
+    ],
+    "tex": 2,
+    "tex_p": 1.0,
+    "rs": 8,
+    "p_mat": 0.05,
+    "p_tex": 0.5,
+    "p_sh": 0.1,
+    "p_geo": 1.0,
+    "vs": 80,
+    "ps": 16,
+    "shaders": 3,
+    "mats": 2,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   },
+   {
+    "name": "trees",
+    "fam": 3,
+    "draws": [
+     150,
+     450
+    ],
+    "tex": 2,
+    "tex_p": 1.0,
+    "rs": 10,
+    "p_mat": 0.33,
+    "p_tex": 0.4,
+    "p_sh": 0.33,
+    "p_geo": 0.7,
+    "vs": 112,
+    "ps": 16,
+    "shaders": 3,
+    "mats": 3,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   },
+   {
+    "name": "grass",
+    "fam": 2,
+    "draws": [
+     100,
+     300
+    ],
+    "tex": 1,
+    "tex_p": 1.0,
+    "rs": 8,
+    "p_mat": 0.02,
+    "p_tex": 0.1,
+    "p_sh": 0.05,
+    "p_geo": 0.5,
+    "vs": 48,
+    "ps": 16,
+    "shaders": 2,
+    "mats": 1,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   },
+   {
+    "name": "actors",
+    "fam": 3,
+    "draws": [
+     50,
+     200
+    ],
+    "tex": 3,
+    "tex_p": 1.0,
+    "rs": 14,
+    "p_mat": 0.2,
+    "p_tex": 0.7,
+    "p_sh": 0.3,
+    "p_geo": 1.0,
+    "vs": 192,
+    "ps": 64,
+    "shaders": 6,
+    "mats": 3,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 0
+   },
+   {
+    "name": "particles",
+    "fam": 2,
+    "draws": [
+     50,
+     150
+    ],
+    "tex": 1,
+    "tex_p": 1.0,
+    "rs": 12,
+    "p_mat": 0.5,
+    "p_tex": 0.4,
+    "p_sh": 0.3,
+    "p_geo": 1.0,
+    "vs": 64,
+    "ps": 16,
+    "shaders": 4,
+    "mats": 4,
+    "targets": [
+     "main"
+    ],
+    "per_target": 0,
+    "layer": 1
+   },
+   {
+    "name": "imagespace_ui",
+    "fam": 7,
+    "draws": [
+     20,
+     60
+    ],
+    "tex": 2,
+    "tex_p": 1.0,
+    "rs": 10,
+    "p_mat": 0.6,
+    "p_tex": 1.0,
+    "p_sh": 0.7,
+    "p_geo": 0.3,
+    "vs": 16,
+    "ps": 64,
+    "shaders": 12,
+    "mats": 5,
+    "targets": [
+     "is0",
+     "is1",
+     "is2",
+     "is3",
+     "main"
+    ],
+    "per_target": 6,
+    "layer": 1
+   }
+  ],
+  "targets": {
+   "main": [
+    1280,
+    720,
+    22,
+    1
+   ],
+   "shadow0": [
+    1024,
+    1024,
+    21,
+    1
+   ],
+   "shadow1": [
+    1024,
+    1024,
+    21,
+    1
+   ],
+   "shadow2": [
+    1024,
+    1024,
+    21,
+    1
+   ],
+   "refl": [
+    640,
+    360,
+    21,
+    1
+   ],
+   "is0": [
+    640,
+    360,
+    21,
+    0
+   ],
+   "is1": [
+    320,
+    180,
+    21,
+    0
+   ],
+   "is2": [
+    160,
+    90,
+    21,
+    0
+   ],
+   "is3": [
+    1280,
+    720,
+    21,
+    0
+   ]
+  },
+  "materials": [
+   [
+    1,
+    1,
+    0,
+    2,
+    1,
+    3,
+    4,
+    0,
+    8,
+    0,
+    1,
+    0,
+    15,
+    1,
+    0,
+    0,
+    4286611584
+   ],
+   [
+    1,
+    1,
+    1,
+    2,
+    1,
+    3,
+    4,
+    128,
+    7,
+    0,
+    1,
+    0,
+    15,
+    1,
+    0,
+    0,
+    4286611584
+   ],
+   [
+    1,
+    0,
+    0,
+    5,
+    6,
+    3,
+    4,
+    0,
+    8,
+    1,
+    1,
+    0,
+    15,
+    1,
+    0,
+    0,
+    4286611584
+   ],
+   [
+    1,
+    0,
+    0,
+    2,
+    2,
+    1,
+    4,
+    0,
+    8,
+    1,
+    0,
+    0,
+    7,
+    1,
+    0,
+    0,
+    4286611584
+   ],
+   [
+    1,
+    0,
+    0,
+    5,
+    6,
+    3,
+    4,
+    0,
+    8,
+    1,
+    1,
+    0,
+    15,
+    1,
+    3019898880,
+    1065353216,
+    4286611584
+   ],
+   [
+    0,
+    0,
+    0,
+    2,
+    1,
+    1,
+    8,
+    0,
+    8,
+    0,
+    0,
+    0,
+    15,
+    1,
+    0,
+    0,
+    4278190080
+   ]
+  ],
+  "rs_order": [
+   7,
+   14,
+   15,
+   19,
+   20,
+   22,
+   23,
+   24,
+   25,
+   27,
+   28,
+   52,
+   168,
+   171,
+   195,
+   175,
+   34
+  ],
+  "sampler_states_per_stage": [
+   [
+    1,
+    1
+   ],
+   [
+    2,
+    1
+   ],
+   [
+    5,
+    2
+   ],
+   [
+    6,
+    2
+   ],
+   [
+    7,
+    2
+   ]
+  ],
+  "cache_misses": "not modelled by the counter; the IPC range is meant to cover L1 misses of the front's tables, the hi estimate of the main thread adds a streaming-store term (bytes_per_draw_memory_term / store_gbs)",
+  "a64_counter": "Unicorn UC_HOOK_BLOCK, size/4 per basic block; ILP32 guest -O2 -mtune=cortex-a57; stream decoder subtracted (dry run)",
+  "not_counted": "engine code (update, cull, accumulation, NiDX9RenderState callers, constant-map walk), the family code that would fill per-draw constants (the stream hands ready blocks), skinning palettes, dynamic vertex data, the deko3d backend's recording (host/nxgpu.c + libdeko3d)"
+ }
+}

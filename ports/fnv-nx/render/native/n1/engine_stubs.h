@@ -30,6 +30,9 @@ struct NiDX9RenderState {
     void SetAlphaBlendEnable(uint32_t enable, uint32_t unused1, uint32_t unused2);        // 0x00e88830, slot 24
     void SetSamplerState(uint32_t stage, uint32_t type, uint32_t value, uint32_t unused); // 0x00e88930, slot 48
     uint32_t GetSamplerState(uint32_t stage, uint32_t type);                              // 0x00e88980, slot 49
+    void SetTexture(uint32_t stage, void* texture);                                       // 0x00e88a20, slot 55
+    void* GetTexture(uint32_t stage);                                                     // 0x00e88a50, slot 56
+    void ClearTextureUsage(void* texture);                                                // 0x00e88a60, slot 57
     void RestoreRenderState(uint32_t state);                                              // (no row)
     void RestoreSamplerState(uint32_t stage, uint32_t type);                              // (no row)
 };
@@ -44,14 +47,37 @@ struct BSShaderNoLighting {
     void InitializeShaderData();    // 0x00bc5c40
 };
 
+// ---- engine textures (n1/engine_textures.cpp) ---------------------------------------------------------------------
+// A native texture handed to the engine where it expects an IDirect3DTexture9 (method-table layout of that
+// interface; GetLevelDesc / GetLevelCount / AddRef / Release answer, CPU access is refused).
+struct NativeTexture {
+    const uintptr_t* vtbl;
+    uint32_t magic, refs, image, d3dfmt, lod;
+    uint16_t w, h, levels, pad;
+    enum : uint32_t { kMagic = 0x5854584Eu };   // "NXTX"
+};
+int32_t D3DXGetImageInfoFromFileInMemory(const void* data, uint32_t size, uint32_t* info);              // 0x00ee6e22
+int32_t D3DXCreateTextureFromFileInMemory(void* device, const void* data, uint32_t size, void** out);  // 0x00ee6e1c
+NativeTexture* CreateNativeTexture(const void* dds, uint32_t size);
+NativeTexture* NativeTextureFromPointer(const void* p);           // 0 unless p is a live NativeTexture
+NativeTexture* FindNativeTexture(const void* rendererData, uint32_t bytes);   // first NativeTexture pointer in it
+const void* NativeTexturePool();
+uint32_t NativeTexturesLive();
+uint32_t NativeTexturesCreated();
+
 // Interop: reads an engine NiTriShape / NiTriStrips into a Renderer::GeomView. Offsets are those the engine code
 // uses (NiAVObject world transform +0x68; NiGeometry model data +0xB8, skin instance +0xBC; NiGeometryData
 // vertex count +0x08, vertices +0x20, colours +0x28, uv sets +0x2C; NiTriBasedGeomData triangles +0x40;
 // NiTriShapeData list length +0x44, list +0x48; NiTriStripsData strips +0x44, lengths +0x48, lists +0x4C).
 // Embedded pointers are 32-bit guest addresses; guestBase (0 in the guest) lets a 64-bit host test map them.
 // Returns false (nothing drawable: no data, skinned, empty) without touching out.
+// Properties (NiPropertyState at +0x9C): NiAlphaProperty +0x9C (flags +0x18, ref +0x1A), NiMaterialProperty +0xA4
+// (alpha +0x3C), the shader property +0xA8 read as a TileShaderProperty (texture +0x60, tint rgb +0x68, alpha
+// +0x78); its NiTexture's renderer data (+0x24) holds the NativeTexture.
 bool ReadGeometry(const void* geometry, Renderer::GeomView* out);
 void SetGuestBase(uintptr_t base);
+uintptr_t GuestBase();
+uint32_t GuestAddress(const void* p);   // p - GuestBase() (the 32-bit value an engine pointer field holds)
 uint32_t SkippedGeometry();         // skinned / unreadable geometry the stub did not draw
 
 } // namespace engine
