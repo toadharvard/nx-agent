@@ -133,6 +133,12 @@ result touches. Entries stay `wip` until both pass; a verifier finding reopens t
 Where the decomp carries Xbox-only size asserts, the layout proven by the x86 code wins: CRITICAL_SECTION is the
 plain 24-byte PC structure (CSX1), and those asserts are dropped by rule.
 
+**Reopened (J-0067).** The principle stands, but the conclusion is wrong for `NiCriticalSection` and the classes
+that hold it. In the MSVC build of the pristine decomp, `GraphicsRenderer::BeginUsingRenderTargetGroup` reads
+`+0x200`/`+0x208`, and with the 24-byte layout we read `+0x1f4`/`+0x1fc`. The x86 code needs 4 more bytes for each
+critical section: `NiCriticalSection` 128 instead of 124, `m_ulThreadOwner` at 0x1C. S1 locates those 4 bytes from
+the x86 code and fixes the class; S11 re-gates.
+
 ### D16. Decomp objects are compiled `-fPIC` (J-0053)
 
 GCC at -O2 reaches several variables a unit defines from one section anchor with immediate offsets and no

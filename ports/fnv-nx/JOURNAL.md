@@ -1300,3 +1300,40 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - add_sites=435 add_literal_sites=320 distinct_literal_pass_ids=286 header_unused_range_ids_emitted=30
 * **next** - The render machine continues N0 (S6n) and the enumerator and oracle (V6n), starting with the real pass
   numbering.
+
+### J-0067 | 2026-11-04 | stream: S11-equivalence | status: wip | parent: J-0037,J-0051,J-0052
+
+* **did** - Ran the MSVC 2008 gate of the 8fff58b rule set (the neutral rules plus FTOL1) on all 2,988 units:
+  - attribution by leaving out groups of rules, single rules and pairs of groups;
+  - `/EHs-c-` builds of the units that differ;
+  - MSVC class layouts of 238 units.
+  The tool now binds names as the link does: prepared recipes with S1b renames, GAME1 names, STATIC1 definitions,
+  literals. New commands: `summarize`, `layouts`, `--lean`. Orchestrator re-ran tests/s11: ok.
+* **found** - 2,348 of the 2,890 units that compile on both sides are identical. 1,045 of 59,122 functions differ:
+  - **EH-only, 754:** EXC1 562, NEW2 55, CTOR1 31, combinations of rules.
+  - **Retargets, 177:** DECL1 calls the CRT directly instead of the game's forwarding wrappers (153); FTOL1
+    `_ftol2_sse` -> `_ftol2` (9).
+  - **Code, 114:**
+    - CTOR1 placement-new null checks (60);
+    - **DECL1 `<math.h>` float/double overloads (27)**, e.g. GetGameHoursPassed now passes a double to the game's
+      `_floor`;
+    - STATIC1 reloads (15), XINC1 ecx (4), NEW4 allocator (1), UNIT1 SpeedTree fix (1), joint (6).
+  - **No build under MSVC, 97:** DECL1 65 (mostly MSVC-only limits), GOTO1 3 (fixed upstream), STR1 2 (a string
+    declared as both array and scalar), other single rules 6, joint 21.
+  - **GAME1 (D13) confirmed:** the DECL1 rebinding units are identical again.
+  - **TAIL1:** 0 of 18,269 class layouts differ.
+  - **D15 refuted for NiCriticalSection:** with the 24-byte CRITICAL_SECTION, `NiCriticalSection` is 124 bytes where
+    the x86 code needs 128. GraphicsRenderer (3 of them) reads +0x1f4 where the exe reads +0x200; RecursiveLock
+    40 -> 36, BSShaderAccumulator 896 -> 888.
+  - DECL1/DECL2 insert SDK includes inside the decomp's `#pragma pack(push, 4)` (16 sites): 59 SDK structs shrink
+    under MSVC, and the shim's LARGE_INTEGER is 4-aligned in those units on the target.
+* **decided** - EH-only differences, and retargets to forwarding wrappers with the same bytes, count as equivalent.
+  D15 is reopened (ARCHITECTURE.md).
+* **metrics** - equiv_units_identical=2348 equiv_units_differ=542 equiv_functions_differ=1045 equiv_eh_only=754
+  equiv_retarget=177 equiv_code=114 equiv_no_build=97 tail1_layout_classes=18269 tail1_layout_differ=0
+* **next** - S1:
+  - NiCriticalSection +4 bytes, placed where the x86 code proves them;
+  - STR1 uses the declaration in scope;
+  - DECL1 math overloads keep the decomp's float/double;
+  - the shim's SDK headers set their own packing.
+  S11 gates S1 round 8 and re-checks D15.
