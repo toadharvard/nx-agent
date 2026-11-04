@@ -35,7 +35,8 @@ static inline __attribute__((always_inline)) float32x4_t fnvnx_shuf2_bcast(float
 }
 static inline __attribute__((always_inline)) float32x4_t fnvnx_shuf2_c4(float32x4_t a, float32x4_t b)
 {   /* a0 a1 b0 b3 */
-    float32x4_t r;
+    float32x4_t r;   /* early-clobber pair: 3 instructions when the result must be returned in v0 (V1 SH1); split into
+                        two asm statements it measured worse inlined in GSK (539 -> 541), so it stays one */
     __asm__("zip1 %0.2d, %1.2d, %2.2d\n\tmov %0.s[3], %2.s[3]" : "=&w"(r) : "w"(a), "w"(b));
     return r;
 }
