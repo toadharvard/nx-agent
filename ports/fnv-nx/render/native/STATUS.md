@@ -27,6 +27,8 @@ binutils 2.45.1, newlib 4.6.0, multilibs lp64/pic/ilp32/ilp32-pic), libnx (ext/l
 | ILP32 guest under emulation | `tests/s6n/emu_n0.py` (S5 emu host + ext module 10 -> GL backend) | `make -C tests/s6n emu GUEST=...` | 780 checks pass, 11/11 images bit-identical to the goldens |
 | environment | `env.sh` | rebuilt here | ok |
 
+| N1 groundwork | `N1_PLAN.md` (entry points, slots with evidence, families), `overrides.tsv` (19 rows, all N1-pending), `REQUESTS.md` (R1 --override table + vslot rows, R2 vftable dump, R3 NATIVE1) | `python3 -I tests/s6n/test_requests.py` | 3 tests, failing until R1-R3 are done (by design) |
+
 Commands:
 
 ```sh

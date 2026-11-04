@@ -1,0 +1,31 @@
+# fnv-nx native renderer (S6n): native replacements of decomp functions, consumed by
+#   tools/link/fnvlink.py resolve --override render/native/overrides.tsv   (feature request R1 in REQUESTS.md)
+# Columns (tab-separated): address <TAB> our symbol <TAB> ABI / notes
+#   address: hex function address, or vslot:<MSVC vftable symbol>:<slot index> for a virtual whose implementation
+#            address the image vftable holds (R1b: the linker reads the slot and treats the row as that address).
+# Rows marked "N1-pending" are the plan of docs: render/native/N1_PLAN.md; the symbols do not exist yet, so the
+# orchestrator must not enable this table before the N1 objects are built (R1c: --override-lib).
+#
+# ---- NiDX9Renderer (NiRenderer protected virtuals). Slots confirmed by decomp call sites, see N1_PLAN.md §2 ----
+vslot:??_7NiDX9Renderer@@6B@:98	_ZN2nx8Renderer14Do_ClearBufferEPKvj	thiscall(this, const NiRect<float>* rect, unsigned mode); slot from 0x007148c0 ("ClearBuffer"); N1-pending
+vslot:??_7NiDX9Renderer@@6B@:99	_ZN2nx8Renderer16Do_SetCameraDataEPKvS2_S2_S2_S2_S2_	thiscall(this, loc, dir, up, right, const NiFrustum&, const NiRect<float>& port); slot from 0x004e9c90 ("SetCameraData"); N1-pending
+vslot:??_7NiDX9Renderer@@6B@:100	_ZN2nx8Renderer27Do_SetScreenSpaceCameraDataEPKv	thiscall(this, const NiRect<float>* port); slot from 0x004a0dd0 ("SetScreenSpaceCameraData"); N1-pending
+vslot:??_7NiDX9Renderer@@6B@:107	_ZN2nx8Renderer14Do_RenderShapeEPv	thiscall(this, NiTriShape*); slot from 0x00a745c0 (NiTriShape render); N1-pending
+vslot:??_7NiDX9Renderer@@6B@:108	_ZN2nx8Renderer18Do_RenderTristripsEPv	thiscall(this, NiTriStrips*); slot from 0x00a71d30; N1-pending
+# inferred from Gamebryo 2.2's declaration order around the confirmed slots (to confirm with R2's vftable dump):
+vslot:??_7NiDX9Renderer@@6B@:95	_ZN2nx8Renderer13Do_BeginFrameEv	thiscall(this) -> bool; candidate implementation 0x00e74f40 (BeginScene); N1-pending, inferred
+vslot:??_7NiDX9Renderer@@6B@:96	_ZN2nx8Renderer11Do_EndFrameEv	thiscall(this) -> bool; candidate 0x00e69660 (EndScene); N1-pending, inferred
+vslot:??_7NiDX9Renderer@@6B@:97	_ZN2nx8Renderer15Do_DisplayFrameEv	thiscall(this) -> bool; candidate 0x00e7ccd0 (Present); N1-pending, inferred
+vslot:??_7NiDX9Renderer@@6B@:101	_ZN2nx8Renderer30Do_BeginUsingRenderTargetGroupEPvj	thiscall(this, NiRenderTargetGroup*, unsigned clear) -> bool; candidate 0x00e6eea0 (SetRenderTarget loop); N1-pending, inferred
+vslot:??_7NiDX9Renderer@@6B@:102	_ZN2nx8Renderer28Do_EndUsingRenderTargetGroupEv	thiscall(this) -> bool; N1-pending, inferred
+# ---- TileShader (menus): the render-time half (property/material code stays) ----
+00bca760	_ZN2nx10TileFamily14ApplyToRendererEPv	thiscall(PassShader*, RenderPassArg*): selects the tile VS/PS pair by pass + geometry flags -> tile family packet; N1-pending
+00bca980	_ZN2nx10TileFamily12UpdateMaterialEPKv	thiscall(TileShaderS*, const NiPropertyState*): tint, TexScroll, scissor rect, stencil flags -> NxTileDraw + DynRec; N1-pending
+00bcaff0	_ZN2nx10TileFamily18CreateConstantMapsEv	thiscall: no-op (no NiD3DShaderConstantMap in the native path); N1-pending
+00bca0d0	_ZN2nx10TileFamily19CreateVertexShadersEv	thiscall: binds the native tile VS variants (shaders/tile.vert.glsl) instead of compiling tile.v.hlsl; N1-pending
+00bca240	_ZN2nx10TileFamily18CreatePixelShadersEv	thiscall: binds the native tile PS variants instead of compiling tile.p.hlsl; N1-pending
+# ---- BSShaderNoLighting ----
+00bc9a50	_ZN2nx13NoLightFamily17PrepareShaderPassEPKv	thiscall(BSShaderNoLighting*, const NiPropertyState*): TEX/VC/FALLOFF variant + NxNoLightDraw; N1-pending
+00bc5c40	_ZN2nx13NoLightFamily18InitializeShaderDataEv	thiscall: native variants instead of NoLighting.v/p.hlsl; N1-pending
+# ---- image space: menu background ----
+00c04730	_ZN2nx9ImageSpace12MenuBgSetupEPvS1_	thiscall(ImageSpaceEffectMenuBackground*, ImageSpaceManager*, ImageSpaceEffectParam*); N1-pending
