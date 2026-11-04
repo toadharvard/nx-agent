@@ -24,6 +24,14 @@
 // of Interlocked* somewhere in the program; a plain x86 store to them is the release half of a lock (ATOMIC-PLAIN-
 // STORE), a plain load the acquire half.
 //
+// refcount=weak (default) | full: refcount sites of Interlocked* (docs/ORDERING.md "Refcounts"). A call is
+// redirected to fnvnx_win32.h's fnvnx_refcount_inc (relaxed) or fnvnx_refcount_dec (release, acquire fence when the
+// count reaches 0) only when all of these hold: the callee is InterlockedIncrement / InterlockedDecrement; its operand
+// is &<object>.<field> with the field's name in refcount_fields, a 32-bit integer, not a bit-field, aligned to 4 in
+// its record; an increment's result is discarded; a decrement's result is discarded or only compared with 0
+// (== 0, != 0, !, or an if condition); and the unit defines the helpers (it includes fnvnx_win32.h). Anything else
+// keeps the full x86 semantics of the inline Interlocked*.
+//
 // Interlocked operands of the unit itself are found without a key file: every field or variable whose address a
 // call of Interlocked* / _Interlocked* takes in any function of the unit is ordered in every function of the unit
 // (all bodies pass PLUGIN_PRE_GENERICIZE before the first one is lowered, so the order does not matter).
@@ -55,6 +63,7 @@
 #include "stringpool.h"
 #include "memmodel.h"
 #include "builtins.h"
+#include "tree-iterator.h"
 #include "cp/cp-tree.h"
 #include "diagnostic-core.h"
 #include "cfghooks.h"
@@ -74,6 +83,12 @@ struct counts { unsigned long ldar, stlr, fence_ld, fence_st; };
 static counts unit_total;
 static bool args_rtl = true;
 static unsigned long calls_reordered, calls_skipped;
+static bool refcount_weak = true;
+static tree refcount_inc_fn, refcount_dec_fn;            // fnvnx_win32.h helpers, seen at their PRE_GENERICIZE
+static unsigned long ilk_inc_weak, ilk_dec_weak, ilk_full;
+static const char *const refcount_fields[] = {
+    "m_uiRefCount", "m_iRefCount", "m_lRefCount", "m_lRef", "m_ref", "refCount", "refs", "references",
+    "referenceCount", "ref_count", "m_iObjectReferenceCount", "m_lObjectReferenceCount", nullptr};
 
 // ---- what counts as a shared volatile access
 
@@ -262,8 +277,10 @@ static const pass_data order_data = {
 static void finish(void *, void *) {
   if (verbose)
     inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr, %lu fenced loads, %lu fenced stores; "
-           "%lu calls with arguments right to left, %lu left (class-type argument with side effects)",
-           unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st, calls_reordered, calls_skipped);
+           "%lu calls with arguments right to left, %lu left (class-type argument with side effects); "
+           "Interlocked: %lu refcount increments relaxed, %lu refcount decrements release, %lu full",
+           unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st, calls_reordered, calls_skipped,
+           ilk_inc_weak, ilk_dec_weak, ilk_full);
 }
 
 // ---- argument order (args=rtl)
@@ -345,8 +362,86 @@ static void note_interlocked(tree call) {
   else if (TREE_CODE(r) == VAR_DECL) interlocked_decls.insert(r);
 }
 
+// ---- refcount sites (refcount=weak)
+
+static tree strip_value_casts(tree a) {
+  while (a && (CONVERT_EXPR_P(a) || TREE_CODE(a) == NON_LVALUE_EXPR || TREE_CODE(a) == VIEW_CONVERT_EXPR))
+    a = TREE_OPERAND(a, 0);
+  return a;
+}
+
+// 1 InterlockedIncrement, 2 InterlockedDecrement, 3 another Interlocked*, 0 none
+static int interlocked_kind(tree call) {
+  if (!call || TREE_CODE(call) != CALL_EXPR) return 0;
+  tree fn = get_callee_fndecl(call);
+  if (!fn || !DECL_NAME(fn)) return 0;
+  const char *n = IDENTIFIER_POINTER(DECL_NAME(fn));
+  if (!strcmp(n, "InterlockedIncrement")) return 1;
+  if (!strcmp(n, "InterlockedDecrement")) return 2;
+  return strncmp(n, "Interlocked", 11) && strncmp(n, "_Interlocked", 12) ? 0 : 3;
+}
+
+static bool refcount_operand(tree call) {
+  if (call_expr_nargs(call) != 1) return false;
+  tree a = strip_value_casts(CALL_EXPR_ARG(call, 0));
+  if (!a || TREE_CODE(a) != ADDR_EXPR) return false;
+  tree r = TREE_OPERAND(a, 0);
+  if (TREE_CODE(r) != COMPONENT_REF) return false;
+  tree f = TREE_OPERAND(r, 1), rec = DECL_CONTEXT(f);
+  if (!DECL_NAME(f) || DECL_BIT_FIELD(f) || DECL_PACKED(f) || DECL_ALIGN(f) < 32) return false;
+  if (TREE_CODE(TREE_TYPE(f)) != INTEGER_TYPE || TYPE_PRECISION(TREE_TYPE(f)) != 32) return false;
+  if (!rec || TYPE_PACKED(rec) || TYPE_ALIGN(rec) < 32) return false;
+  const char *n = IDENTIFIER_POINTER(DECL_NAME(f));
+  for (const char *const *k = refcount_fields; *k; k++)
+    if (!strcmp(n, *k)) return true;
+  return false;
+}
+
+// *slot holds a value used as `ctx`: 0 discarded, 1 compared with 0 / truth value
+static void refcount_site(tree *slot, int ctx) {
+  if (!refcount_weak || !refcount_inc_fn || !refcount_dec_fn) return;
+  tree call = strip_value_casts(*slot);
+  int k = interlocked_kind(call);
+  if (k != 1 && k != 2) return;
+  if (k == 1 && ctx != 0) return;          // an increment whose value matters is not the refcount pattern
+  if (!refcount_operand(call)) return;
+  note_interlocked(call);                  // its operand stays an Interlocked operand for the GIMPLE pass
+  tree fn = k == 1 ? refcount_inc_fn : refcount_dec_fn;
+  if (!useless_type_conversion_p(TREE_TYPE(TREE_TYPE(fn)), TREE_TYPE(call))) return;
+  CALL_EXPR_FN(call) = build_fold_addr_expr(fn);
+  TREE_USED(fn) = 1;
+  mark_used(fn);
+  (k == 1 ? ilk_inc_weak : ilk_dec_weak)++;
+}
+
+static void refcount_contexts(tree t) {
+  switch (TREE_CODE(t)) {
+    case EXPR_STMT: refcount_site(&EXPR_STMT_EXPR(t), 0); break;
+    case CLEANUP_POINT_EXPR: refcount_site(&TREE_OPERAND(t, 0), 0); break;
+    case COMPOUND_EXPR: refcount_site(&TREE_OPERAND(t, 0), 0); break;
+    case CONVERT_EXPR: case NOP_EXPR:
+      if (VOID_TYPE_P(TREE_TYPE(t))) refcount_site(&TREE_OPERAND(t, 0), 0);
+      break;
+    case STATEMENT_LIST:
+      for (tree_stmt_iterator i = tsi_start(t); !tsi_end_p(i); tsi_next(&i)) refcount_site(tsi_stmt_ptr(i), 0);
+      break;
+    case BIND_EXPR: refcount_site(&BIND_EXPR_BODY(t), 0); break;
+    case EQ_EXPR: case NE_EXPR:
+      if (integer_zerop(TREE_OPERAND(t, 1))) refcount_site(&TREE_OPERAND(t, 0), 1);
+      else if (integer_zerop(TREE_OPERAND(t, 0))) refcount_site(&TREE_OPERAND(t, 1), 1);
+      break;
+    case TRUTH_NOT_EXPR: refcount_site(&TREE_OPERAND(t, 0), 1); break;
+    case IF_STMT: refcount_site(&IF_COND(t), 1); break;
+    default: break;
+  }
+}
+
 static tree order_args_walk(tree *tp, int *, void *) {
-  if (TREE_CODE(*tp) == CALL_EXPR) note_interlocked(*tp);
+  refcount_contexts(*tp);
+  if (TREE_CODE(*tp) == CALL_EXPR) {
+    note_interlocked(*tp);
+    if (interlocked_kind(*tp)) ilk_full++;
+  }
   if (args_rtl && (TREE_CODE(*tp) == CALL_EXPR || TREE_CODE(*tp) == AGGR_INIT_EXPR)) reorder_call(*tp);
   return NULL_TREE;
 }
@@ -354,6 +449,11 @@ static tree order_args_walk(tree *tp, int *, void *) {
 static void pre_genericize(void *gcc_data, void *) {
   tree fndecl = (tree)gcc_data;
   if (!fndecl || TREE_CODE(fndecl) != FUNCTION_DECL || !DECL_SAVED_TREE(fndecl)) return;
+  if (DECL_NAME(fndecl)) {
+    const char *n = IDENTIFIER_POINTER(DECL_NAME(fndecl));
+    if (!strcmp(n, "fnvnx_refcount_inc")) { refcount_inc_fn = fndecl; return; }
+    if (!strcmp(n, "fnvnx_refcount_dec")) { refcount_dec_fn = fndecl; return; }
+  }
   // compiler and C library headers (arm_neon.h, <string>, ...) are not decomp code: their order is GCC's to keep
   if (in_system_header_at(DECL_SOURCE_LOCATION(fndecl))) return;
   walk_tree_without_duplicates(&DECL_SAVED_TREE(fndecl), order_args_walk, NULL);
@@ -393,7 +493,11 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
       else if (!strcmp(v, "off")) mode = MODE_OFF;
       else { error("%<fnvnx_order%>: unknown mode %s", v); return 1; }
     } else if (!strcmp(k, "keys") && v) read_keys(v);
-    else if (!strcmp(k, "args") && v) {
+    else if (!strcmp(k, "refcount") && v) {
+      if (!strcmp(v, "weak")) refcount_weak = true;
+      else if (!strcmp(v, "full")) refcount_weak = false;
+      else { error("%<fnvnx_order%>: unknown refcount mode %s", v); return 1; }
+    } else if (!strcmp(k, "args") && v) {
       if (!strcmp(v, "rtl")) args_rtl = true;
       else if (!strcmp(v, "ltr")) args_rtl = false;
       else { error("%<fnvnx_order%>: unknown argument order %s", v); return 1; }

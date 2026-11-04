@@ -42,7 +42,11 @@ ORDER_SO=$(CXX=$CXX bash "$HERE/toolchain/order/build.sh" "$OUT/.order") \
   || { echo "compile.sh: the fnvnx_order plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
 # ORDER_ARGS=rtl: call arguments evaluated right to left like MSVC x86 (ORDER-ARGS); ltr only for A/B measurements.
 ORDER_ARGS=${ORDER_ARGS:-rtl}
-FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS")
+# ORDER_REFCOUNT=weak: refcount sites of InterlockedIncrement/Decrement relaxed / release (docs/ORDERING.md
+# "Refcounts"); full keeps x86 lock semantics everywhere (A/B, or a suspected refcount ordering bug).
+ORDER_REFCOUNT=${ORDER_REFCOUNT:-weak}
+FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS"
+        -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT")
 if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
 # ORDER_KEYS=<file>: the static gate's clang/atomic.keys (fields and variables some unit hands to Interlocked*); their
 # plain accesses are ordered in every unit, not only in the units that call Interlocked on them themselves.

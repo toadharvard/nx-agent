@@ -74,6 +74,40 @@ def expectations(src):
     return out
 
 
+def refcount_codegen(scratch, plugin):
+    """refcount.cpp: per class of Interlocked* site, the code fnvnx_order and the inline Interlocked* give"""
+    src = os.path.join(HERE, 'refcount.cpp')
+    sse = os.environ.get('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
+    exp = expectations(src)
+    check(len(exp) > 30, 'refcount: %d expectations read from refcount.cpp' % len(exp))
+    for mode, extra in (('volatile', []), ('full', ['-fplugin-arg-fnvnx_order-refcount=full'])):
+        asm = os.path.join(scratch, 'refcount_%s.s' % mode)
+        cmd = (['aarch64-linux-gnu-g++'] + BUILD + ['-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
+               '-I' + os.path.join(PORT, 'shim', 'include'), '-I' + sse, '-fplugin=' + plugin,
+               '-fplugin-arg-fnvnx_order-verbose'] + extra + ['-w', '-S', '-o', asm, src])
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        check(r.returncode == 0, 'refcount %s: refcount.cpp compiles (%s)' % (mode, r.stderr.strip()[-300:]))
+        if r.returncode:
+            continue
+        m = re.search(r'(\d+) refcount increments relaxed, (\d+) refcount decrements release, (\d+) full', r.stderr)
+        got = tuple(int(x) for x in m.groups()) if m else None
+        want = (1, 3, 7) if mode == 'volatile' else (0, 0, 11)
+        check(got == want, 'refcount %s: classes inc-relaxed/dec-release/full = %s (want %s)' % (mode, got, want))
+        funcs = functions(open(asm).read())
+        for fn, m_, kind, rx in exp:
+            if m_ != mode:
+                continue
+            body = None
+            for k, v in funcs.items():
+                if re.match(r'_Z(N\d+NiRefObject)?%d%s' % (len(fn), re.escape(fn)), k):
+                    body = v
+            if body is None:
+                check(False, 'refcount %s: %s not found' % (mode, fn))
+                continue
+            hit = re.search(rx, body) is not None
+            check(hit == (kind == 'expect'), 'refcount %s: %s %s /%s/' % (mode, fn, kind, rx))
+
+
 def codegen(scratch, plugin):
     src = os.path.join(HERE, 'units.cpp')
     sse = os.environ.get('SSE2NEON', os.path.join(PORT, 'ext', 'sse2neon'))
@@ -166,8 +200,9 @@ def litmus(scratch, plugin):
     base = list(q.CXXFLAGS)
     flags = ['-fms-extensions', '-fno-strict-aliasing', '-fwrapv', '-mno-outline-atomics', '-mtune=cortex-a57']
     res = {}
-    for tag, extra in (('plain', []), ('order', ['-fplugin=' + plugin])):
-        q.CXXFLAGS = base + flags + extra
+    for tag, extra in (('plain', []), ('order', ['-fplugin=' + plugin]),
+                       ('order-full', ['-fplugin=' + plugin, '-fplugin-arg-fnvnx_order-refcount=full'])):
+        q.CXXFLAGS = base + flags + ['-I' + os.path.join(PORT, 'shim', 'include')] + extra
         try:
             exe = q.build([os.path.join(HERE, 'litmus.cpp'), os.path.join(HERE, 'litmus_rt.S')],
                           os.path.join(scratch, 'litmus_' + tag))
@@ -178,19 +213,21 @@ def litmus(scratch, plugin):
             q.CXXFLAGS = base
         rc, out = q.run(exe, timeout=300)
         rows = dict(re.findall(r'^(\w+) rounds=\d+ bad=(\d+)$', out, re.M))
-        check(rc == 0 and len(rows) == 3, 'litmus %s runs (rc %d, %r)' % (tag, rc, out[-200:]))
+        check(rc == 0 and len(rows) == 4, 'litmus %s runs (rc %d, %r)' % (tag, rc, out[-200:]))
         res[tag] = {k: int(v) for k, v in rows.items()}
         print('     litmus %s: %s' % (tag, out.strip().replace('\n', '; ')))
         if tag == 'order':
             dis = subprocess.run(['aarch64-linux-gnu-objdump', '-d', os.path.join(scratch, 'litmus_order.d',
                                   'prog32.elf')], capture_output=True, text=True).stdout
             for fn, need in (('mp1_publish', ['stlr']), ('mp1_consume', ['stlr', 'ldar']), ('mp2_take', ['ldar', 'stlr']),
-                             ('lock_add', ['stlr', 'ld[a]?xr'])):
+                             ('lock_add', ['stlr', 'ld[a]?xr']), ('ref_inc', ['ldxr', 'stxr']),
+                             ('ref_dec', ['ldxr', 'stlxr', 'dmb'])):
                 m = re.search(r'<_Z\d+%s[^>]*>:\n(.*?)\n\n' % fn, dis, re.S)
                 body = m.group(1) if m else ''
                 check(all(re.search(r'\t%s\t' % n, body) for n in need), 'litmus order: %s has %s' % (fn, need))
-    if 'order' in res:
-        check(all(v == 0 for v in res['order'].values()), 'litmus with the plugin: no bad outcome %s' % res['order'])
+    for tag in ('order', 'order-full'):
+        if tag in res:
+            check(all(v == 0 for v in res[tag].values()), 'litmus %s: no bad outcome %s' % (tag, res[tag]))
     if 'plain' in res:
         check(res['plain'].get('mp2', 0) > 0, 'litmus without the plugin: mp2 shows the stale read (the test bites)')
 
@@ -205,6 +242,7 @@ def main():
         return 1
     plugin = r.stdout.strip()
     codegen(scratch, plugin)
+    refcount_codegen(scratch, plugin)
     args_order(scratch, plugin)
     litmus(scratch, plugin)
     print('%d failed' % len(FAIL))

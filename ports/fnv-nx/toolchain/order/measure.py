@@ -17,7 +17,7 @@ import sys
 
 OBJDUMP = os.environ.get('OBJDUMP', 'aarch64-linux-gnu-objdump')
 CLASSES = [('ldar', r'^ldar[bh]?$'), ('stlr', r'^stlr[bh]?$'), ('dmb ish', None), ('dmb ishld', None),
-           ('dmb ishst', None), ('excl', r'^(ld[a]?xr|st[l]?xr)[bh]?$')]
+           ('dmb ishst', None), ('excl', r'^(ld[a]?xr|st[l]?xr)[bh]?$'), ('bl Interlocked', None)]
 
 
 def census(obj):
@@ -29,6 +29,8 @@ def census(obj):
             continue
         op, arg = m.group(1), m.group(2)
         c['insns'] += 1
+        if op == 'bl' and '<Interlocked' in line:
+            c['bl Interlocked'] += 1
         if op == 'dmb':
             c['dmb ' + arg.rstrip(',')] += 1
             continue
