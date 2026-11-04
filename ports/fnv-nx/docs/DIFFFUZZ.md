@@ -271,7 +271,7 @@ five example reproducers, plus `functions_by_class` (each diverging function by 
 for R0. `causes.py merge <reports/fz<k> .md | causes.json>... --out all.json` adds the shards up
 (classes from this checkout's policy). Input layout (any campaign or `fuzz/cache/<k>of<N>` checkout): `results.jsonl`
 (address, source, status; only `ok` rows count), `div/<addr>-<n>.json` (divergence, hint, case), optional
-`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. Test: `tests/s13/test_causes.py`.
+`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. `causes.py handoffs <dirs> --out-dir d [--effects e.jsonl]` writes the owners' lists, one row per counted divergence (owner, cause, address, unit, reproducer `fuzz/cache/<k>of<N>:div/<file>`, first effect): `handoffs_<owner>.tsv` (real-bug), `triage_<owner>.tsv`, `harness_<owner>.tsv` (artifacts with an owner) and `index.tsv`; they go to the private repository, never here. The object rules need pyelftools: without it the summary's `native_objects.reader` is `unavailable` and a warning is printed. Test: `tests/s13/test_causes.py`.
 
 ## Lockstep (`lockstep.py`, D14)
 

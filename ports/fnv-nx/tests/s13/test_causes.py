@@ -304,10 +304,47 @@ def test_object_reader():
         causes._OBJ_CACHE.clear(); causes._OBJ_CACHE.update(cache)
 
 
+def test_handoffs():
+    """Per-owner lists: real bugs, triage and owned artefacts get a row each, by-design causes none."""
+    with tempfile.TemporaryDirectory() as root:
+        d = os.path.join(root, '7of26')
+        os.makedirs(os.path.join(d, 'div'))
+        rows = [dict(address=a, source='src/t.cpp', status='ok') for a in ('00401000', '00402000', '00403000')]
+        rows.append(dict(address='00404000', source='src/t.cpp', status='setup:KeyError'))
+        open(os.path.join(d, 'results.jsonl'), 'w').write(''.join(json.dumps(r) + '\n' for r in rows))
+        recs = {'00401000-0.json': rec(dict(kind='error', x86=None, arm='exc:1@0'), addr='00401000'),
+                '00401000-1.json': rec(dict(kind='return', x86=w(1), arm=w(2)), 'bool-repr', addr='00401000'),
+                '00402000-0.json': rec(dict(kind='return', x86=w(1), arm=w(2)), addr='00402000'),
+                '00403000-0.json': rec(dict(kind='return', x86=w(1), arm=w(2)), 'local-static', addr='00403000'),
+                '00404000-0.json': rec(dict(kind='error', x86=None, arm='exc:1@0'), addr='00404000')}
+        for n, r in recs.items():
+            json.dump(r, open(os.path.join(d, 'div', n), 'w'))
+        eff = os.path.join(root, 'effects.jsonl')
+        open(eff, 'w').write(json.dumps(dict(file='/x/00402000-0.json', first='value')) + '\n')
+        out = os.path.join(root, 'ho')
+        saved = dict(causes.EFFECTS)
+        try:
+            causes.main(['handoffs', d, '--out-dir', out, '--effects', eff])
+        finally:
+            causes.EFFECTS.clear(); causes.EFFECTS.update(saved)
+        files = sorted(os.listdir(out))
+        check(files == ['handoffs_S1.tsv', 'harness_S13.tsv', 'index.tsv', 'triage_S13b.tsv'],
+              'one file per class and owner, none for by-design (%s)' % files)
+        s1 = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'handoffs_S1.tsv'))]
+        check(s1[0] == list(causes.HANDOFF_COLUMNS) and len(s1) == 2, 'S1 list: header and one row')
+        check(s1[1][:5] == ['S1', 'native-trap', '00401000', 'src/t.cpp', 'fuzz/cache/7of26:div/00401000-0.json'],
+              'row: owner, cause, address, unit, reproducer (setup function skipped)')
+        tr = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'triage_S13b.tsv'))]
+        check(tr[1][1] == 'unclassified' and tr[1][5] == 'value', 'triage row carries the first effect')
+        ix = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'index.tsv'))]
+        check(['harness_S13.tsv', 'artifact', 'S13', '1', '1', 'local-static 1'] in ix, 'index row per file')
+
+
 if __name__ == '__main__':
     test_rules()
     test_policy()
     test_summary()
     test_object_reader()
+    test_handoffs()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)
