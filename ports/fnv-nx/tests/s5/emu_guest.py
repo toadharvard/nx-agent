@@ -1025,9 +1025,28 @@ class Emu:
         if not getattr(self, "vt_bound", None) or "fetch" not in err.lower():
             return None
         m = re.search(r"\| vslot (\d+) of native vtable (0x[0-9a-f]+)$", self.null_call())
-        if not m:
-            return None
-        k, base = int(m.group(1)), int(m.group(2), 16)
+        if m:
+            k, base = int(m.group(1)), int(m.group(2), 16)
+        else:   # a tail call (br): a register holds the vptr whose slot past the end is the faulting pc
+            pc = self.uc.reg_read(UC_ARM64_REG_PC) & 0xFFFFFFFF
+            k = base = None
+            for i in range(18):
+                v = self.xreg(i) & 0xFFFFFFFF
+                b = self.vt_bound.get(v)
+                if b is None:
+                    continue
+                for j in range(max(0, (b[2] - v) // 4), len(b[1])):
+                    try:
+                        (w,) = struct.unpack("<I", self.uc.mem_read(v + 4 * j, 4))
+                    except UcError:
+                        break
+                    if w == pc:
+                        k, base = j, v
+                        break
+                if k is not None:
+                    break
+            if k is None:
+                return None
         b = self.vt_bound.get(base)
         if b is None or base + 4 * k < b[2] or k >= len(b[1]) or b[1][k] not in self.vt_F:
             return None
