@@ -38,10 +38,13 @@ A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp'
             '__cxa_guard_acquire': 'guard_acquire', '__cxa_guard_release': 'guard_release',
             '__cxa_guard_abort': 'guard_abort'})
 
+# sized operator delete(void*, unsigned) is the game's own deallocator (??3@YAXPAXI@Z -> 0x00aa1460), unsized
+# delete 0x00401030: GCC's sized forms stand for the former (S2 keeps them as runtime names: the real link binds them
+# to the platform's delete, see docs/DIFFFUZZ.md findings)
 EQUIV = {'_Znwm': 0x00401000, '_Znwj': 0x00401000, '_Znam': 0x00401000, '_Znaj': 0x00401000,
-         '_ZdlPv': 0x00401030, '_ZdlPvm': 0x00401030, '_ZdlPvj': 0x00401030, '_ZdaPv': 0x00401030,
-         '_ZdaPvm': 0x00401030, '_ZdaPvj': 0x00401030, '__dynamic_cast': 0x00ec43fb}
-NO_ARGS = {0x00401000, 0x00401030, 0x00ec43fb}    # traced, compared by target only
+         '_ZdlPv': 0x00401030, '_ZdlPvm': 0x00aa1460, '_ZdlPvj': 0x00aa1460, '_ZdaPv': 0x00401030,
+         '_ZdaPvm': 0x00aa1460, '_ZdaPvj': 0x00aa1460, '__dynamic_cast': 0x00ec43fb}
+NO_ARGS = {0x00401000, 0x00401030, 0x00aa1460, 0x00ec43fb}    # traced, compared by target only
 
 
 class Mem:
