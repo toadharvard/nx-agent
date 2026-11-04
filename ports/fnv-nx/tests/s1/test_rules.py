@@ -505,6 +505,20 @@ check('BIND1 binds the stand-in names once, in their unit only', repr(_data) + '
       ["'?Allocate@MemoryManagerAA3880@@QAEPAXI@Z': '0x00aa3e40'", "'?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A': '0x011f6238'",
        "'symbols': {}}]} 2", "'?x@@3HA': '0x1'"])
 
+# ---- NATIVE1 (render R3): the drop list's matching, shared by prepare's drop_native_units and tools/rules/native1.py
+_spec = importlib.util.spec_from_file_location('native1', os.path.join(HERE, '..', '..', 'tools', 'rules', 'native1.py'))
+native1 = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(native1)
+_d = tempfile.mkdtemp()
+open(os.path.join(_d, 'drop.txt'), 'w').write('# N1\nsrc/gamebryo2.2/corelibs/niconsolerenderer/*  # whole dir\nsrc/b.cpp\n')
+open(os.path.join(_d, 'ov.tsv'), 'w').write('# x\n00bca760\tnx_a\tthiscall\nvslot:??_7X@@6B@:3\tnx_b\t\n')
+_data = {'units': [{'source': 'src/a.cpp'}, {'source': 'src/gamebryo2.2/corelibs/niconsolerenderer/x.cpp',
+                    'functions': [{'address': '0x00bca760'}, {'address': '0x00bca800'}]}, {'source': 'src/b.cpp'}]}
+_kept, _gone = native1.drop_units(_data, native1.load_list(os.path.join(_d, 'drop.txt')))
+check('NATIVE1 drops listed units and glob matches, reports the addresses no override covers',
+      repr([u['source'] for u in _kept['units']]) + ' %d ' % len(_gone) + repr(native1.uncovered(_gone, os.path.join(_d, 'ov.tsv'))),
+      ["['src/a.cpp'] 2 [12363776]"])
+check('NATIVE1 with no list file drops nothing', repr(native1.load_list(os.path.join(_d, 'none.txt'))), ['[]'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

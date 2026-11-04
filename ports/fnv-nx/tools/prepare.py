@@ -706,21 +706,20 @@ def load_stream_rules():
 STREAM_POST = []
 
 def drop_native_units(out_root, stats, files):
-    """NATIVE1: units listed in render/native/drop_units.txt (one source path per line; D6, the native renderer
-    replaces them) leave the build list (<out>/build/units.json, which census.sh and the link step read)."""
-    import json
-    lst = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'render', 'native', 'drop_units.txt')
-    drop = set()
-    if os.path.exists(lst):
-        drop = {l.strip() for l in open(lst) if l.strip() and not l.startswith('#')}
+    """NATIVE1: units listed in render/native/drop_units.txt (source paths or glob patterns, `#` comments; D6, the
+    native renderer replaces them) leave the build list (<out>/build/units.json, which census.sh and the link step
+    read). The list is an input of prepare. The matching is tools/rules/native1.py's (also a command line tool)."""
+    import json, importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location('fnvnx_native1', os.path.join(here, 'rules', 'native1.py'))
+    native1 = importlib.util.module_from_spec(spec); spec.loader.exec_module(native1)
+    drop = native1.load_list(os.path.join(here, '..', 'render', 'native', 'drop_units.txt'))
     stats['NATIVE1'] += 0
     if not drop: return
     p = os.path.join(out_root, 'build', 'units.json')
-    data = json.load(open(p))
-    keep = [u for u in data['units'] if u.get('source') not in drop]
-    stats['NATIVE1'] += len(data['units']) - len(keep)
-    files['NATIVE1'] += len({u.get('source') for u in data['units']} & drop)
-    data['units'] = keep
+    data, gone = native1.drop_units(json.load(open(p)), drop)
+    stats['NATIVE1'] += len(gone)
+    files['NATIVE1'] += len({u.get('source') for u in gone})
     json.dump(data, open(p, 'w'))
 
 def main():
