@@ -3,3 +3,4 @@
 # address	native symbol	source (this directory)	MSVC signature the references are checked against
 00703c00	fnvnx_log_00703c00	log_00703c00.c	?FUN_00703c00@@YAHPBDZZ
 0040fba0	fnvnx_spin_unlock_0040fba0	spinlock_0040fba0.c	?FUN_0040fba0@RecursiveSpinLock@@QAEXXZ
+00a6e330	fnvnx_slerp_00a6e330	slerp_00a6e330.c	?Slerp@NiQuaternion@@QAEXMABV1@0@Z
