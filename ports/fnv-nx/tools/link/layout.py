@@ -72,7 +72,10 @@ def _game_flags(key, tree, workdir):
         r = subprocess.run(['bash', os.path.join(PORT, 'tools', 'link', 'compile.sh'), '--print-flags', tree, workdir],
                            capture_output=True, text=True)
         fl = r.stdout.split('\n')[:-1] if r.returncode == 0 else []
-        if not fl or '-c' not in fl:
+        if not fl or '-c' not in fl or any(not f.startswith('-') and (i == 0 or fl[i - 1] not in (
+                '-include', '-isystem', '-imacros', '-x')) for i, f in enumerate(fl)):
+            # every line is a flag: a stray message on stdout (compile.sh's keys step printed one) would become
+            # input files and fail every emitted compile
             raise SystemExit('compile.sh --print-flags failed (%s)' % (r.stderr.strip().splitlines() or ['?'])[-1])
         _GAME_FLAGS[key] = ['-fmax-errors=200' if f.startswith('-fmax-errors=') else f for f in fl]
     return _GAME_FLAGS[key]

@@ -35,7 +35,7 @@ import arm64emu  # noqa: E402
 import a64image  # noqa: E402
 
 CX = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-COUNT = {'x86': 0, 'a64': 0, 'x86_blocks': 0, 'a64_blocks': 0}
+COUNT = {'x86': 0, 'a64': 0, 'x86_blocks': 0, 'a64_blocks': 0, 'a64_bridge': 0}   # a64_bridge: set by overhead_audit.py
 _xcache = {}
 
 
@@ -84,7 +84,7 @@ def run_target(uc, source, addr, seeds, max_steps, bgs=('zero', 'rand')):
         except Exception as e:                  # noqa: BLE001 - one bad case must not stop the census
             rows.append(dict(seed=s, err='harness: %r' % e))
             continue
-        rows.append(dict(seed=s, x86=COUNT['x86'], a64=COUNT['a64'], err=rx.error or ra.error,
+        rows.append(dict(seed=s, x86=COUNT['x86'], a64=COUNT['a64'], a64_bridge=COUNT['a64_bridge'], err=rx.error or ra.error,
                          div=(div or {}).get('kind'), xcalls=len(rx.calls), acalls=len(ra.calls)))
     return rows
 

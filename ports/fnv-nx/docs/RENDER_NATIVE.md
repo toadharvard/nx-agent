@@ -80,7 +80,7 @@ section used the header).
 | `DistantLODShader` | `DISTLOD1/2%03i` 2+2 | `landlod` | ADT_OptLOD, LANDLO_A, LANDO_Am | distant land and object LOD |
 | `SkyShader` | `SKY*.vso/pso` 21 named binaries | `sky\sky[_quad]` | SKYBASEPRE, SKY, SKY_STARS/TEXTURE/CLOUDS/MOON_STARS_MASK (568-574, the first alpha passes), SKY_SUNGLARE | |
 | `WaterShader` | `WATER%03i.pso` 38, `WATER000-002.vso` | `water\2_ab\*` (water, waterhmap, displace, waterlighting) | WATER* 648-718 (accumulator group base 648: wading, interior, no-reflection/refraction/depth, Vc; 705 = WATER_NO_REFLECTIONS_Vc), WATER_LOD, WATER_DEPTH* 728-747 | |
-| `ParticleShader`, `PrecipitationShader` | `PAR2%03i` 20 VS, `PARTICLE.*`, `PRECIP%03i` 4+2 | `particle`, `precipitation` | PARTICLE, PARTICLE_PREPASS, PRECIPITATION_RAIN | GPU-side particle expansion |
+| `ParticleShader`, `PrecipitationShader` | `PARTICLE.*` (BSParticleShader), `NOLIGHTING_PSYS*`, `PRECIP%03i` 4+2 (`PAR2%03i` is ShadowLightShader's parallax set, not particles; render-veg) | `particle`, `precipitation` | PARTICLE, PARTICLE_PREPASS, PRECIPITATION_RAIN | GPU-side particle expansion |
 | `GeometryDecalShader` | `GDECAL[S].vso`, `GDECAL.pso` | `decal` | GEOMDECAL[_S] | skinned decals |
 | `BSShaderBloodSplatter` | `BS.*`, `BSF.*` | `BloodSplatter` | BLOOD_SPLATTER[_FLARE] | screen-space splats |
 | `BoltShader`, `BeamShader` | `BOLT.*`, `BEAM.*` | `bolt`, `beam` | BOLT, BEAM | |
@@ -123,7 +123,7 @@ colour, plus image-space `EFFECT_WATER_FFT` (8 shader steps: spectrum, butterfli
   `BSTreeNode`/`BSTreeModel`; three draws per tree (branch, frond, leaf) with per-tree wind/rotation constants;
   `BSDistantTreeShader` draws far trees as billboards.
 * **Particles**: `niparticle` simulates on the CPU, `NiParticles` geometry is uploaded each frame (dynamic group) and
-  expanded by `PAR2` VS (20 variants); `NOLIGHTING_PSYS*` for simple systems. `BSTempEffect*` (170 references)
+  expanded by `PARTICLE.vso` (BSParticleShader; `PAR2xxx` are ShadowLightShader PARALLAX programs, corrected by render-veg); `NOLIGHTING_PSYS*` for simple systems. `BSTempEffect*` (170 references)
   manages impact/temporary effects.
 * **Decals**: geometry decals (`GeometryDecalShader`, skinned and static) and `BSShaderBloodSplatter` (screen).
 
@@ -544,6 +544,85 @@ is rejected). Getting real fp16 needs a uam change (an fp16-aware path to the Ma
 `render/shaders/uam.patch` (S6b): request filed in the S6n report. Until then the permutations are the lit pass's
 gain, and V6n stays exact because the arithmetic is unchanged.
 
+### 4.5 The engine path: family dispatch, the translated path and the draw counters
+
+**Routing.** `Do_RenderShape` / `Do_RenderTristrips` (the `Do_RenderGeometry` override) read the engine's current
+pass: `FUN_00b994f0` stores the pass id (`DAT_011f91e4`) and the `BSShaderProperty::RenderPass` (`DAT_011f91e0`;
++0 geometry, +4 u16 pass, +9 light count, +0xC lights) before the geometry is drawn. The pass counts only when its
+RenderPass names the drawn geometry, so a menu drawn outside the accumulator never inherits the last world pass
+(`engine::BindPassGlobals`; the native build calls `BindImagePassGlobals`). `n1/passes.cpp` maps the binary's pass
+ids to routes; only ids whose family renders exactly the terms of the game's program get a native route (no
+parallax, glow, facegen, hair, shadow-sampling, multi-layer land or particle bits).
+
+**Dispatch table** (`engine::FamilyRows`, one row per route; family streams switch only their own row, CLAIMS.md):
+
+| row | default | engine-path draw |
+|---|---|---|
+| tile (TILE 757), menu path (no pass) | native | `Renderer::RenderGeometry` (tile family) |
+| image space | native for EFFECT_MENUBG | `RenderMenuBackground`; other effects are skipped (counted) |
+| nolight, lit, depth, land, sky | translated | none native yet (render-lit, render-land own them, D21: coverage first) |
+| every other pass id | translated | - |
+
+**The translated path.** The game's own VS/PS of the pass, translated by S6b's sdp2dksh, on the native renderer
+(`Renderer::RenderTranslated`): the program pair comes from the geometry's engine shader (NiGeometry +0xC0, a
+BSShader; +0x5C the current NiD3DPass; VS object +0x5C, PS object +0x44), identified by the D3D shader object the
+hooked device created (its bytecode hash) or else by the program's name (+0x0C). Constants are the translator's
+layout (`fnvnx_dk_layout.h`): per stage UBO 0 = `c[256]`, UBO 1 = `i[16]` + `b[16]` at byte 256 + 16n, UBO 2 =
+driver constants (VS posfix (0, 0, 1); PS fog colour / mode / range, alpha function and reference from the tracked
+render state). Their values: the register files the engine wrote through the device (the hooked
+`Set{Vertex,Pixel}ShaderConstant{F,I,B}`), overlaid with the pass's constant maps (VS map NiD3DPass +0x48, PS map
++0x34; entries in the NiTArray at +0x0C; entry key +0x0C, register +0x1C, count +0x20, data size +0x28, data +0x30):
+data-backed entries are copied, predefined matrices (`WorldViewProj`, `World`, `View`, `Proj`, `ViewProj`,
+`WorldView`, `...Transpose`: rows of the column-vector matrix) and `EyePos` are computed; any other predefined
+entry makes the draw `translatedPartial`. Vertex inputs are fed at their dk locations (POSITION 0, NORMAL 3, COLOR0
+4, TEXCOORD0 6, TANGENT 14, BINORMAL 15; other inputs read (0, 0, 0, 1)) through `NxVtxLayout.attr[].location`.
+Textures: the 16 tracker stages. `Frame::SetTranslated` binds the six UBOs after the per-draw slice and restores the
+pass constants for the next native draw. The engine layouts used here are the decomp's; they are unverified on a
+running engine (the n1 world frame builds them synthetically).
+
+**Device hook.** `engine::HookD3DDevice(device)` (or `HookRendererDevice(NiDX9Renderer*)`, device at +0x28C) swaps
+the device's method table for a copy: CreateVertexShader / CreatePixelShader (slots 91 / 106) record each shader
+object's bytecode hash, slots 94/96/98 and 109/111/113 keep the register files; every call still reaches the
+device behind. The native boot must call it before the renderer creates its shaders (request in the S6n report).
+
+**translated.nxsp** (the pack; NX1 check 9). Built on the player's side at install / build time, never compiled
+on the console, never committed (game-derived):
+
+```sh
+sdp2dksh -o <dir> --glsl shaderpackage*.sdp                       # S6b (render/shaders)
+python3 -I render/native/tools/nxsp_pack.py <dir> translated.nxsp --names shaderpackage019.sdp --check [--glsl]
+```
+
+The console reads `sdmc:/switch/fnv/translated.nxsp` (`FNVNX_SD_TRANSLATED`, sdlayout.h; the owner copies it next to the game: it is made from the player's files, so it can never be inside fnv.nro's RomFS, unlike NX1's `shaders.nxsp` for our own shaders) into memory and hands it to
+`nx::TranslatedStore::Load`; `Renderer::SetTranslatedStore` binds it. Container: NX1's NXSP v1
+(`toolchain/nro/shaderpack.py`):
+
+| part | layout |
+|---|---|
+| header (32 bytes) | `"NXSP"`, u32 version 1, u32 count, u32 index offset, u32 data offset, u8[12] pack id (sha256[:12] of index + data) |
+| index (count x 104 bytes) | char name[48], family[24], variant[16] (NUL-padded); u32 stage (0 vertex, 1 fragment), offset, size, crc32 of the blob |
+| data | blobs at 256-byte boundaries |
+
+| family | name | variant | blob |
+|---|---|---|---|
+| `translated` | the bytecode hash, `fnvnx_shader_hash` (FNV-1a 64 of the D3D9 bytecode up to and including END), 16 lowercase hex digits: **the index key** | `<vs\|ps>_<major>_<minor>/<mask>`, mask = 4 hex digits, the VS input locations read | the DKSH |
+| `translated-glsl` | the same hash (host / emulator packs only, `--glsl`) | - | the GLSL, NUL-terminated |
+| `translated-name` | the program's name in the package the engine loads (e.g. `SLS2001.vso`) | its hash | none (size 0) |
+
+`nxsp_pack.py --check` fails when any program sdp2dksh listed lacks a DKSH. At run time a program without DKSH is a
+skipped draw (`Skip_NoDksh`) on deko3d, never a compile; only the GL reference backend may create a program from
+GLSL, and every such create counts in `DrawStats.runtimeCompiles` (a failure on the console). The player's package
+019: 815 programs (354 vertex, 461 fragment), all with DKSH, 1007 names, 7.3 MB without GLSL.
+
+**Counters** (`nx::DrawStats`, `Renderer::stats()` / `lastFrameStats()`, per frame): engine draws (every
+Do_RenderShape / Do_RenderTristrips and every image-space RenderEffect), native by route, translated (and how
+many with an unevaluated constant-map entry), misrendered (drawn, but not by the family / program its pass needs),
+skipped by reason (no renderer, unreadable geometry, skinned, no translated program, no engine shader / pass,
+submit refused, image-space effect, no translated store, no DKSH), runtime compiles. The n1 world frame (28 passes
++ 3 effects through the stubs, GL and the ILP32 guest) measured: before this work 29 of 31 skipped or misrendered
+(25 drawn with the tile family); now 4 skipped (1 skinned geometry, 3 image-space effects), 25 translated, 2 tile.
+The real captures go through nx_render's D3D9 executor (§8), which runs the same translated programs.
+
 ### 4.1 N2 skinning (started)
 
 Gamebryo skins on the GPU per NiSkinPartition: each partition has its bone list (the palette), up to 4 weights and
@@ -560,6 +639,55 @@ skin-to-bone transforms, the bones' world transforms from NiSkinInstance's bone 
 
 Next: reading NiSkinInstance / NiSkinData / NiSkinPartition from engine objects into palettes and partition draws
 (Do_RenderGeometry's skinned branch, now skipped and counted), and the remaining families' SKIN variants.
+
+### 4.5 d9 families: hand-written programs on the engine's D3D9 interface (stream render-lit)
+
+The families of §4 take typed blocks (`nx/families.h`); the engine's lit passes, however, arrive as D3D9 programs
+with their constants in registers (an NXD9 capture, or the engine's NiD3D constant maps on the console). A **d9
+family** is hand-written GLSL that takes exactly those inputs - `vec4 c[256]` by register (UBO 0), the glsldk driver
+UBO 2 (`d9_epilogue.glsl`: alpha test, fixed-function fog), samplers by register, attributes by fnvnx_dk usage
+location (`render/shaders/include/fnvnx_dk_layout.h`) - so it replaces the translated program of a draw one for one,
+with no change to the engine side. Every variant is a package shader (`shaders/d9_*.glsl`, built by `build.py`
+into DKSH with uam: no compile at run time on the console); the translated program (`Family::Translated`) still
+draws everything a d9 family does not recognise.
+
+**Recognition by interface** (`capture/d3d9_families.{h,cpp}`). `nx_d9_classify` reads the program's shader model,
+its constant table (CTAB: names, register sets, registers, counts) and its `dcl` declarations; no program name, hash
+or game file is used or stored. A draw goes native when the vertex and pixel programs classify into one family and
+variant (`nx_d9_pair`). The registers the families read are fixed: the classifier requires each constant at the
+register the family reads (one register map in all 16 of the player's packages, measured).
+
+| family | vertex program interface | pixel program interface | variants | model |
+|---|---|---|---|---|
+| `d9_adts` (SLS ADTS10: SLS2020/2022/2025, SLS2029-2036) | vs_2_0; ModelViewProj c0, FogParam c14, FogColor c15, [EyePosition c16], fvars0 c17, LightData c25 x (1 + NPT); position, tangent, binormal, normal, uv0, colour0 | ps_2_x; AmbientColor c1, EmittanceColor c2, PSLightColor c3 x (1 + NPT), PSLightPosition c19 x NPT, Toggles c27, BaseMap s0, NormalMap s1; t0.. = 3 + NPT (4 + 2 NPT with specular) | `p2s` (2 points, specular), `p3`, `p5` | tangent-space normal map; directional + point lights (attenuation 1 - (d/r)^2, active count fvars0.z / EmittanceColor.w); specular clamp(N.H)^power x gloss, faded where N.L <= 0.2; ambient, vertex colour and fog toggles; the shader's alpha cut-off |
+| `d9_envmap` (SLS2050/2057) | vs_2_0; ModelViewProj c0, ObjToCubeSpace c8 x3, FogParam c14 | ps_2_x; AmbientColor c1, EnvToggles c27, NormalMap s0, EnvironmentCubeMap s1 (cube), CustomEnvMask s3 | 1 | cube reflection of the eye vector about the normal-mapped normal (tilt x 0.1), mask from the normal map's alpha or the custom mask, x (1 - fog) |
+| `d9_fogpass` (SLS1017/1030) | vs_2_0; ModelViewProj c0, FogParam c14, FogColor c15; position only | ps_2_x, no constants, only `mov oC0, v0` | 1 | colour = fog colour, alpha = fog factor |
+
+The SKIN* vertex programs have the ADTS constant table and inputs too, but other outputs; they never pair with an
+ADTS pixel program of the same light count and specular bit, so they stay translated.
+
+**Checks** (local: the captures, packages and images derive from the player's game):
+
+* `render/verify/shaders/d9_parity.py` renders each capture with `nx_render --families none` (all translated) and
+  `--families all`, reads the float colour target after every draw (`--per-draw --raw`) and compares every draw a
+  d9 family drew: max abs error and pixels off by more than 2/255 and 1e-3 relative, plus the pixels the draw wrote
+  (a check on draws that write nothing says nothing; `--force-visible` turns depth, stencil, blending and culling
+  off in both runs). It prints the METRIC: lit draws (pixel program SLS*/SM3*/SKIN*/HAIR* by the local index) on
+  the native path / all lit draws.
+* `render/verify/shaders/d9_synth.py` writes a synthetic NXD9 per package: each (vertex, pixel) pair on a
+  full-screen grid with random constants (light counts 0 .. 1 + NPT and fractional, translucent and opaque, all
+  toggles, fog), random frames (unit and not) and textures, into an A16B16G16R16F target.
+
+| input (2026-11-04) | lit draws native | adts | envmap | fogpass |
+|---|---|---|---|---|
+| docmitchell_13000 (3 frames) | 27 / 27 (was 0 / 27) | 21 draws, 2.97 M px written, max 1.5e-5, 0 bad | 3 draws, 0 px written (off-screen) | 3 draws, 0 px written (off-screen) |
+| menu_11640 | 0 / 0 (no lit draws) | | | |
+| synthetic, package 012, 4 seeds | 40 / 40 | 24 draws, max 4.9e-4, 0 bad | 8 draws, max 7.6e-6, 0 bad | 8 draws, max 4.9e-4, 0 bad |
+| synthetic, package 019, 8 seeds | 80 / 80 | 48 draws, max 9.8e-4, 0 bad | 16 draws, max 6.1e-5, 0 bad | 16 draws, max 4.9e-4, 0 bad |
+
+The residual is one fp16 ULP of the target (9.8e-4 between 1 and 2). Not covered yet: the Lighting30 (SM3, ps_3_0)
+programs of package 019 (skin, hair, eyes, parallax, shadowed lights), which the Wine captures do not use (the game
+picked package 012 there), and the console's engine path (the same programs reach it through NiD3D constant maps).
 
 ## 5. Recommendation
 
@@ -740,7 +868,7 @@ source <(render/native/env.sh --print)
 make -C tests/s6n /tmp/fnvnx-s6n-tests/nx_render     # binary (OUT=<dir> to place it elsewhere)
 make -C tests/s6n nx_render                          # its test (tests/s6n/test_nx_render.py)
 
-nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--per-draw] [--until-draw N] [--frame F]
+nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--native <dir>] [--per-draw] [--until-draw N] [--frame F]
 nx_render nxcap <file.nxcap> -o <dir> [--per-draw] [--until-draw N] [--frame F]
 nx_render scene <name|all>   -o <dir> [--per-draw] [--until-draw N]
 ```
@@ -754,6 +882,12 @@ Needs a Mesa/EGL GL 4.5 context (surfaceless; llvmpipe is fine). `<dir>` is crea
 | `f<frame>_d<draw %05u>.png` | `--per-draw`: after each draw, the colour target of that draw's pass; draw = index of the draw in the frame's submit, counting backend draws (skipped NXD9 draws are not counted) |
 | `<scene>.png`, `<scene>_d<draw>.png` | scene mode (160x120; identical to `tests/s6n/golden/<scene>.png`) |
 | `summary.txt` | the counters line also printed on stdout; for NXD9 the first skipped draw and why |
+
+`--native <dir>` (render-land): `<hash>.glsl` there is our hand-written shader for the original of that hash and
+replaces the translation; `summary.txt` adds `native shaders N, native draws M` (draws whose VS and PS are both
+native). The directory is laid out locally by `render/native/tools/native_dir.py` from `shaders/native.tsv` (keyed by
+the original's name, checked against its constant table) and the player's packages; `tools/nxd9_census.py` counts
+a capture's draws per family and on the native path, `tools/parity_png.py` compares two output directories.
 
 `--until-draw N` stops drawing after draw N of each frame (the frame image then holds draws 0..N; clears and later
 passes still run). `--frame F` restricts `--per-draw` and `--until-draw` to frame F. Together they localise a
@@ -843,6 +977,12 @@ from FOGENABLE / FOGTABLEMODE (vertex fog when the table mode is NONE; none for 
 FOGCOLOR, alpha test = ALPHAFUNC when ALPHATESTENABLE, ALPHAREF / 255); all render states through
 `nx_d3d9_translate` (blend, depth, stencil, raster, sRGB write, bias, scissor); sampler states through
 `nx_d3d9_sampler` (sRGB view when SRGBTEXTURE); render-target textures and surfaces, the auto depth surface.
+
+Sampled textures get their image when a draw binds them after a TEX, TEXU or TEXC (one image per change seen by a
+draw, not per record): NxGpuApi images are immutable and never freed, and d9cap's captures fill managed textures
+level by level, so making an image per TEXU ran past `NX_MAX_IMAGES` (4096) on docmitchell_13000 and the textures
+made after that sampled as none (S16 R4: the black frame; render-land). A texture whose image cannot be made skips
+the draw (`texture image not created`).
 
 Skipped and counted (exit code 3): fixed-function draws (no VS or no PS), FVF draws (no declaration), POSITIONT,
 streams other than 0 (instancing), cube render targets (sampled as none; cube textures with contents are sampled since S16 R2), vertex textures. Varyings the VS writes beyond

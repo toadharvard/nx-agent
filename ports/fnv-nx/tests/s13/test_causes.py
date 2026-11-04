@@ -424,6 +424,7 @@ def test_handoffs():
         check(s1[0] == list(causes.HANDOFF_COLUMNS) and len(s1) == 2, 'S1 list: header and one row')
         check(s1[1][:5] == ['S1', 'native-trap', '00401000', 'src/t.cpp', 'fuzz/cache/7of26:div/00401000-0.json'],
               'row: owner, cause, address, unit, reproducer (setup function skipped)')
+        check(s1[1][6] == 'control-flow', 'row: the D21 fix class of its cause')
         tr = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'triage_S13b.tsv'))]
         check(tr[1][1] == 'unclassified' and tr[1][5] == 'value', 'triage row carries the first effect')
         hd = os.path.join(root, 'hd')
@@ -437,6 +438,15 @@ def test_handoffs():
               'by head: the reproducer names the stable per-head branch (%s)' % s1h[1][4])
         tr2 = [l.rstrip('\n').split('\t') for l in open(os.path.join(hd, 'triage_S13b.tsv'))]
         check(tr2[1][4] == 'fuzz/cache/7of26:div/00402000-0.json', 'by head: a row without commit keeps the cache ref')
+        # a row seeded from another shard's cache keeps the branch its head published it on (V1 RH-2)
+        lines = open(os.path.join(d, 'results.jsonl')).read().splitlines()
+        lines[0] = json.dumps(dict(json.loads(lines[0]), shard='3of13'))
+        open(os.path.join(d, 'results.jsonl'), 'w').write('\n'.join(lines) + '\n')
+        hd2 = os.path.join(root, 'hd2')
+        causes.main(['handoffs', d, '--out-dir', hd2, '--ref-by-head'])
+        s1s = [l.rstrip('\n').split('\t') for l in open(os.path.join(hd2, 'handoffs_S1.tsv'))]
+        check(s1s[1][4] == 'fuzz/0123456789ab/3of13:div/00401000-0.json',
+              'by head: a seeded row names its source shard (%s)' % s1s[1][4])
         ix = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'index.tsv'))]
         check(['harness_S13.tsv', 'artifact', 'S13', '1', '1', 'local-static 1'] in ix, 'index row per file')
 
@@ -617,6 +627,19 @@ def test_unclassified_shapes():
     check(il('fault:r:ilp32-high:1011e6370', x86='fault:r:011e6370') == 'ilp32-pointer',
           'the oracle faulted too: not the wrap shape')
     check(causes.policy('ilp32-wrap')[:2] == ('real-bug', 'S1'), 'ilp32-wrap is a real bug for S1')
+    # thunk-binding in the case buffers (S1-layout): native this = oracle this + d, and the function has _ZThn<d>_
+    of, oc = causes._object_facts, causes._own_and_callees
+    try:
+        causes._own_and_callees = lambda r: {'__fnv_00401000'}
+        ta = dict(kind='call-args', arg='this', cls='P', x86=w(0x03000000), arm=w(0x0300000c), index=0)
+        causes._object_facts = lambda src: ({'__fnv_00401000': {12}}, set())
+        check(refined(ta) == 'thunk-binding', 'buffer this + d with a _ZThn<d>_ thunk: thunk-binding')
+        causes._object_facts = lambda src: ({'__fnv_00401000': {8}}, set())
+        check(refined(ta) == 'layout-offset', 'a thunk by another d: still layout-offset')
+        causes._object_facts = lambda src: ({}, set())
+        check(refined(ta) == 'layout-offset', 'no thunk: layout-offset')
+    finally:
+        causes._object_facts, causes._own_and_callees = of, oc
     for c in ('ctor-this', 'canned-this', 'native-wild-private'):
         check(causes.policy(c)[0] == 'triage', '%s is triage: the record cannot tell harness from bug (V1)' % c)
     for c in ('ctor-this', 'canned-this', 'native-wild-private', 'stub-normalized', 'thunk-binding',
@@ -728,6 +751,29 @@ def test_callflow():
         causes._VFT = causes._LINKSYM = None
 
 
+def test_fix_classes():
+    """D21: every real-bug cause is in exactly one fix class, whose owner is the cause's owner."""
+    real = {c for c, v in causes.POLICY.items() if v[0] == 'real-bug'}
+    listed = [c for v in causes.FIX_CLASSES.values() for c in v[2]]
+    check(sorted(listed) == sorted(set(listed)), 'no cause in two fix classes')
+    check(set(listed) == real, 'fix classes cover exactly the real-bug causes (missing %s, extra %s)' % (
+        sorted(real - set(listed)), sorted(set(listed) - real)))
+    bad = [c for c in listed if causes.policy(c)[1] != causes.FIX_CLASSES[causes.FIX_CLASS_OF[c]][0]]
+    check(not bad, 'cause owner = class owner (%s)' % bad)
+    rows = {'native-undefined': dict(divergences=3, functions=2, worst_of=2),
+            'after-native-undefined': dict(divergences=1, functions=1, worst_of=0),
+            'vptr-unpaired': dict(divergences=5, functions=4, worst_of=4)}
+    fc = causes.fix_classes(rows)
+    check(list(fc)[0] == 'vtables' and fc['vtables']['worst_of'] == 4, 'classes ordered by worst_of')
+    check(fc['callee-bodies']['divergences'] == 4 and fc['callee-bodies']['owner'] == 'S1', 'class sums its causes')
+    with tempfile.TemporaryDirectory() as d:
+        js = os.path.join(d, 'c.json'); out = os.path.join(d, 'classes.tsv')
+        json.dump(dict(causes=rows), open(js, 'w'))
+        causes.main(['classes', js, '--tsv', out])
+        t = [l.split('\t') for l in open(out).read().splitlines()]
+        check(t[0][0] == 'class' and t[1][:3] == ['vtables', 'S2c', '4'], 'classes.tsv: class, owner, worst_of')
+
+
 def test_link_traps():
     """exc:N at the link's trap stubs (brk #0xf5 / #0xf6 in the unit image) -> vslot-trap (S2c); another trap, a
     missing image or a pc outside it -> native-trap (S1-fuzzA-001)."""
@@ -770,6 +816,7 @@ if __name__ == '__main__':
     test_handoffs()
     test_cli_effects()
     test_unclassified_shapes()
+    test_fix_classes()
     test_link_traps()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)
