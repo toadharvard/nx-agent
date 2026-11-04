@@ -55,7 +55,7 @@ CLASSES = {
     'UNIT1': 'neutral', 'KEEP1': 'neutral', 'IFX1': 'neutral', 'SAL1': 'neutral', 'CSX1': 'neutral',
     'DECL2': 'neutral', 'EXC1': 'neutral', 'NEW2': 'neutral', 'CTOR1': 'neutral', 'LINK1': 'neutral',
     'GOTO1': 'neutral', 'SDK1': 'layout', 'STR1': 'neutral', 'INTL1': 'platform', 'CALL1': 'neutral',
-    'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout',
+    'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout', 'EBO1': 'layout',
     'ASM1': 'platform', 'ASM2': 'platform', 'ASM4': 'platform',
     'NATIVE1': 'platform',      # drop_native_units in prepare.py (not a text rule)
     # classified by the orchestrator (J-0051) from each rule's docstring; the S11 gate confirms or refutes:

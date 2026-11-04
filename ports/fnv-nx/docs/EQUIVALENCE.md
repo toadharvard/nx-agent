@@ -204,6 +204,7 @@ above (round 8).
 | `FTOL1` | platform | `fnvnx_ftol2(expr)` for arg-less `_ftol2_sse` calls | `fnvnx_ftol2(x)` = `(__int64)(x)` (gated anyway) |
 | `SDK1` | layout | the PC SDK definitions win over the decomp's guarded copies (Xbox 360 layouts) | real SDK |
 | `TAIL1` | layout | GCC must not reuse a base's tail padding; MSVC never does | zero-width bit-field, as on the target |
+| `EBO1` | layout | `char fnvnx_msvc_ebo;` first in a class with exactly two direct bases that are both empty in the unit (and data of its own): MSVC gives only the first empty base a zero size, so the members start at 1. 8 sites (FUN_00c612b0_Class x6, FUN_00c64de0, FUN_00c5da70); the exe allocates 0x14, 0x1c, 0xe0 for them (0x00c61510, 0x00c652c0, 0x00c5e4d0), GCC gave 0x13, 0x18, 0xdf | MSVC's layout of the class itself (not applied on the MSVC side) |
 | `INTL1` | platform | edits only the decomp's non-MSVC branch (`#else` of `_MSC_VER`) | invisible to MSVC |
 | `ALLOC1` | platform | drops untagged file-scope replacements of the global operator new/delete | target only |
 | `XC1` | platform | dynamic initializers become extern + `__fnvnx_dyninit_<addr>` run by S10 | target only |

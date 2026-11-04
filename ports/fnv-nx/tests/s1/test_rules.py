@@ -164,6 +164,16 @@ got = run(s1.r_dependent_base_members, 'template <class T> struct V\n{\n    stru
 check('TPL1-NESTED this-> for members of a sibling member class used as base in a class template', got,
       ['if (!this->aux) f(); this->ptr += n;', 'void g(int ptr) { ptr = 1; }', 'void h() { q = 1; }'])
 
+# ---- EBO1: MSVC gives the empty base optimization to the first of two empty bases only
+_ebo = ('struct A\n{\n    void f();\n};\nstruct B\n{\n    static void* operator new(unsigned int);\n};\n'
+        'namespace n { struct B { int x; }; }\nstruct D : A, B\n{ FNVNX_MSVC_BASE_END(B)\n    unsigned char m[19];\n    D();\n};\n'
+        'struct E : A, B\n{\n    E();\n};\nstruct V { virtual ~V(); };\nstruct F : A, V\n{\n    int x;\n};\n')
+got = run(s1.r_msvc_empty_bases, _ebo)
+check('EBO1 a class with two empty bases starts its members at 1 (the base in another namespace ignored)', got,
+      ['struct D : A, B\n{ char fnvnx_msvc_ebo; /* fnv-nx EBO1 */ FNVNX_MSVC_BASE_END(B)'])
+check('EBO1 leaves a class without data and one with a non-empty base', got,
+      ['struct E : A, B\n{\n    E();', 'struct F : A, V\n{\n    int x;'])
+
 # ---- MATH1
 check('MATH1 drops a decomp copy of float sqrt(float)',
       run(s1.r_math_overloads, 'inline float __cdecl sqrt(float _X)\n{\n    return sqrtf(_X);\n}\n'), ['#include <math.h>'],

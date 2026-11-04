@@ -364,6 +364,64 @@ def r_msvc_base_layout(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- EBO1
+#
+# MSVC gives the empty base class optimization only to the first of several empty bases: in `struct D : A, B
+# { char m[19]; }` with A and B empty, D's members start at offset 1 and sizeof(D) is 20; GCC puts both bases at 0
+# (sizeof 19). The game's code allocates and constructs MSVC's size: 0x00c61510 `new FUN_00c612b0_Class` asks
+# operator new for 0x14 and its constructor 0x00c612b0 writes up to +0x14; 0x00c652c0 `new FUN_00c64de0` (six ints)
+# asks for 0x1c (the ints at 4). EBO1 puts `char fnvnx_msvc_ebo;` first in the body of a class with exactly two
+# direct non-virtual bases that are both empty in the unit (no data members, nothing virtual, no bases) and that
+# has data members of its own: its members then start where MSVC's do. Other empty-base patterns are not rewritten
+# (S12's static checks report them; benign unless a size or offset reaches a byte image or an allocation).
+
+def _ebo_empty_class(text, o, c):
+    """True when the class body text[o..c] declares no data member and nothing virtual."""
+    flat = re.sub(r'\bFNVNX_MSVC_BASE_END\s*\((?:[^()]|\([^()]*\))*\)', ' ', _flat_body(text, o, c))   # TAIL1's (no `;`)
+    if re.search(r'\bvirtual\b', flat): return False
+    flat = re.sub(r'\((?:[^()]|\([^()]*\))*\)', '()', flat)
+    for st in re.split(r'[;{}]', flat):
+        st = re.sub(r'^\s*(?:(?:public|private|protected)\s*:\s*)+', '', st).strip()
+        if not st or '(' in st or re.match(r'(?:typedef|using|friend|template|enum|static|struct|class|union)\b', st):
+            continue
+        return False
+    return True
+
+EBO_CLASS = re.compile(r'(?<![<\w])(?:struct|class)\s+([A-Za-z_]\w*)\s*(?::\s*([^{};]*))?\{')
+
+def r_msvc_empty_bases(path, text, stats):
+    """EBO1: `char fnvnx_msvc_ebo;` first in a class whose two bases are both empty, as MSVC lays it out (above)."""
+    if ':' not in text or ',' not in text: return text
+    cands = [m for m in EBO_CLASS.finditer(text) if m.group(2) and ',' in m.group(2)]
+    if not cands: return text
+    spans = prepare.scope_spans(text)
+    heads = lambda pos: tuple(h for _, h in prepare.scope_chain(spans, pos))
+    defs = {}
+    for m in EBO_CLASS.finditer(text):
+        defs.setdefault(m.group(1), []).append((m.end() - 1, m.group(2), heads(m.start())))
+    def visible(name, scope):
+        """the definitions of `name` in the innermost enclosing scope that has one"""
+        ds = [d for d in defs.get(name, ()) if d[2] == scope[:len(d[2])]]
+        best = max((len(d[2]) for d in ds), default=-1)
+        return [d for d in ds if len(d[2]) == best]
+    edits = []
+    for m in cands:
+        bases = [re.sub(r'^(?:(?:public|protected|private)\s+)+', '', b).strip() for b in _split_bases(m.group(2))]
+        if len(bases) != 2 or any(re.search(r'\bvirtual\b|[<:]', b) for b in bases): continue
+        ok, scope = True, heads(m.start())
+        for b in bases:
+            d = visible(b, scope)
+            if len(d) != 1 or d[0][1]: ok = False; break               # one definition, no bases of its own
+            if not _ebo_empty_class(text, d[0][0], prepare.match_brace(text, d[0][0])): ok = False; break
+        o = m.end() - 1
+        if not ok or _ebo_empty_class(text, o, prepare.match_brace(text, o)): continue
+        edits.append(o + 1)
+    if not edits: return text
+    for at in reversed(edits):
+        text = text[:at] + ' char fnvnx_msvc_ebo; /* fnv-nx EBO1 */' + text[at:]
+    stats['EBO1'] += len(edits)
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- LINK1
 
 C_DATA_DECL = re.compile(r'^([ \t]*extern)\s+"C"(\s+[\w \t\*&:<>,]*?[\s\*&]\w+(?:\s*\[[^\]]*\])*'
@@ -3692,7 +3750,7 @@ def r_friend_class_visibility(path, text, stats):
     return ''.join(out)
 
 RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
-         r_msvc_base_layout, r_class_alignment, r_friend_class_visibility]
+         r_msvc_base_layout, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
 #
