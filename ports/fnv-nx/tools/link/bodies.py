@@ -1,0 +1,491 @@
+"""bodies.py - C++ functions GCC references that no unit defines (stream S2d-bodies; docs/LINK.md, "Declared-only
+functions").
+
+The decomp's headers declare many functions without a body: in the MSVC build they were inlined bodies, compiler-
+generated special members, or definitions in another unit under another decorated name or class shell. GCC calls
+them out of line, so after `resolve` they stay `unresolved` / `unresolved-ctor-dtor` (or `ctor-dtor-trap`), and the
+guest link binds them to trap stubs. `fnvlink.py bodies out/ tree/ [--msvc-objs DIR]` classifies every such name,
+in this order (first that applies):
+
+1. `addr` - the same function at an original address under another name: the Itanium name, with class shells
+   (`X_shell`, `X_<addr8>`) and then namespaces relaxed, matches MSVC names of exactly one address the native build
+   defines (`addrmap.tsv` F/C/X; never a G: a deleting destructor is not a D1). Bound to `__fnv_<addr>`.
+2. `msvc-empty` - a pristine MSVC object (`<dir>/u<index>.obj`, S11) defines the function (COMDAT code) and its x86
+   body is only `ret` / `ret N` / `mov eax, ecx; ret[ N]` (a constructor returning this): an AArch64 `ret` stub
+   under the Itanium name.
+3. `msvc-inline` - a pristine object defines a real body: that unit's source holds it (the objects are the decomp
+   compiled byte for byte), so the unit is compiled again with `-fkeep-inline-functions` and the wanted symbols are
+   kept (`vtables.gc_weaken`: everything else of the host is undefined first, then dropped). A body emitted under
+   a shell's name is renamed to the wanted one when the relaxed key pairs exactly one emitted symbol.
+4. `special-default` - a constructor without parameters, a copy constructor, a destructor or a copy assignment of
+   a class (not a template) that no pristine object defines: MSVC inlined it everywhere, and the decomp declares it
+   without a body. Synthesized as the out-of-line `= default` definition in the referencing unit (the implicit
+   member's semantics: bases and members constructed / copied / destroyed, D0/D1/D2 all emitted). Not a decomp
+   body: listed as such, and the MSVC code is the reference where a site misbehaves.
+5. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
+
+A synthesized item GCC refuses (member without default constructor, private base, ...) falls back to `missing`
+with the reason `synth-failed`.
+
+Output (`out/bodies/`, local: derived from the decomp, never committed): `bodies.tsv` (name, class, address,
+target, referencing units, note), `bind.tsv` (name -> address symbol, read by the next `resolve`), `stats.txt`,
+`synth.tsv` (host unit, object: linked by the next `resolve` as extra objects of the host, like
+`vtables/synth.tsv`), `<unit>.bd.o`, `zz_bd_empty.o`.
+"""
+import collections
+import json
+import os
+import re
+import subprocess
+import sys
+
+import sigs
+
+TRAPPED = ('unresolved', 'unresolved-ctor-dtor', 'ctor-dtor-trap')
+ADDR_SYM = '__fnv_%08x'
+SHELL = re.compile(r'(?:_shell|_Shell|_SHELL|_[0-9a-fA-F]{8})$')
+IMAGE_SCN_CNT_CODE, IMAGE_SCN_LNK_COMDAT = 0x20, 0x1000
+VARIANT_KIND = {'C1': 'C', 'C2': 'C', 'D1': 'X', 'D2': 'X'}   # addrmap kind an Itanium ctor/dtor variant may bind to
+
+
+# ---------------------------------------------------------------------------------------------------- inputs
+
+def load_trapped(refs_tsv, names_txt=None):
+    """refs.tsv rows still undefined after resolve -> {Itanium name: set(referencing units)}; names_txt (the guest
+    link's undefined.txt) adds names with no unit."""
+    out = collections.defaultdict(set)
+    if refs_tsv and os.path.exists(refs_tsv):
+        for line in open(refs_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if len(f) >= 3 and f[2] in TRAPPED and f[1].startswith('_Z'):
+                out[f[1]].add(f[0].split('#')[0])
+    if names_txt and os.path.exists(names_txt):
+        for line in open(names_txt, encoding='utf-8', errors='surrogateescape'):
+            n = line.strip()
+            if n.startswith('_Z') and not n.startswith(('_ZTV', '_ZTI', '_ZTS', '_ZTh', '_ZTv', '_ZTc', '_ZTT')):
+                out.setdefault(n, set())
+    return dict(out)
+
+
+def load_native(addrmap_tsv):
+    """addrmap.tsv -> {address: kind} of the code the native build defines (F, C, X, G)."""
+    nat = {}
+    if os.path.exists(addrmap_tsv):
+        for line in open(addrmap_tsv, encoding='utf-8', errors='surrogateescape'):
+            if line.startswith('#'):
+                continue
+            f = line.rstrip('\n').split('\t')
+            if len(f) >= 2 and f[1] in ('F', 'C', 'X', 'G'):
+                nat[int(f[0], 16)] = f[1]
+    return nat
+
+
+# ---------------------------------------------------------------------------------------------------- keys
+
+def norm(part):
+    return SHELL.sub('', part)
+
+
+def relaxed_keys(sig):
+    """(tier, key) strict -> loose for a parsed function name: class shells stripped, then namespaces dropped (the
+    innermost class kept). Parameters at sigs level 2 (cv and long/int spellings ignored)."""
+    if sig.kind != 'func' or sig.params is None or not sig.qual:
+        return []
+    p2 = tuple(sigs.canon_param(p, 2) for p in sig.params)
+    last = sig.qual[-1]
+    scope = tuple(norm(q) for q in sig.qual[:-1])
+    keys = [('shell', ('s', scope, last, p2))]
+    if len(scope) > 1:
+        keys.append(('scope', ('c', scope[-1], last, p2)))
+    return keys
+
+
+def special_of(isig):
+    """'ctor0' / 'copy' / 'dtor' / 'assign' / 'd0' for an Itanium special member we may synthesize, else None."""
+    if isig.kind != 'func' or len(isig.qual) < 2 or isig.params is None:
+        return None
+    cls = re.sub(r'<.*$', '', isig.qual[-2])
+    self_ref = [sigs.canon_param(p, 0) for p in isig.params] == ['%s const&' % isig.qual[-2]] or \
+        [sigs.canon_param(p, 0) for p in isig.params] == ['const %s&' % isig.qual[-2]]
+    last = isig.qual[-1]
+    if last == '{ctor}' and isig.variant in ('C1', 'C2'):
+        return 'ctor0' if not isig.params else ('copy' if self_ref else None)
+    if last == '{dtor}' and isig.variant in ('D1', 'D2'):
+        return 'dtor'
+    if last == '{dtor}' and isig.variant == 'D0':
+        return 'd0'
+    if last == 'operator=' and self_ref and cls:
+        return 'assign'
+    return None
+
+
+def class_spelling(isig):
+    """C++ spelling of the class of a member, None if it cannot be named out of line here (template, anonymous)."""
+    scope = isig.qual[:-1]
+    if not scope or any('<' in p or '{' in p or '`' in p or "'" in p or '(' in p for p in scope):
+        return None
+    return '::' + '::'.join(scope)
+
+
+def default_line(kind, isig):
+    sp = class_spelling(isig)
+    if sp is None:
+        return None
+    base = isig.qual[-2]
+    return {'ctor0': '%s::%s() = default;' % (sp, base),
+            'copy': '%s::%s(const %s &) = default;' % (sp, base, sp),
+            'dtor': '%s::~%s() = default;' % (sp, base),
+            'd0': '%s::~%s() = default;' % (sp, base),
+            'assign': '%s &%s::operator=(const %s &) = default;' % (sp, sp, sp)}[kind]
+
+
+# ---------------------------------------------------------------------------------------------------- x86 bodies
+
+def x86_empty(code):
+    """True for an x86 body that does nothing: `ret`, `ret N`, `mov eax, ecx` then one of them (this returned)."""
+    if code[:2] in (b'\x8b\xc1', b'\x89\xc8'):
+        code = code[2:]
+    return code == b'\xc3' or (len(code) == 3 and code[0] == 0xc2)
+
+
+def pristine_bodies(objdir, nunits, wanted_tokens):
+    """{MSVC name: (unit index, x86 bytes)} of the code COMDATs of every pristine object whose name holds one of
+    wanted_tokens (`?<name>@` / `??0<class>@` prefixes; a cheap filter before demangling)."""
+    import vslots
+    out = {}
+    for i in range(nunits):
+        p = os.path.join(objdir, 'u%d.obj' % i)
+        if not os.path.exists(p):
+            continue
+        try:
+            c = vslots.Coff(p)
+        except Exception:   # a damaged object must not stop the step
+            continue
+        for name, si in c.defs.items():
+            if not name.startswith('?') or name in out:
+                continue
+            if not (decoration_tokens(name) & wanted_tokens):
+                continue
+            s = c.syms[si]
+            sec = c.secs[s.secnum]
+            if not (sec.flags & IMAGE_SCN_CNT_CODE and sec.flags & IMAGE_SCN_LNK_COMDAT):
+                continue
+            ends = [v for v, n in c.symbols_in(s.secnum) if v > s.value]
+            data = c.section_bytes(s.secnum)
+            out[name] = (i, data[s.value:min(ends) if ends else len(data)])
+    return out
+
+
+def decoration_tokens(name):
+    """('n', name) and ('c', special code, class) tokens of an MSVC decorated name (pristine_bodies' filter)."""
+    m = re.match(r'^\?(\?[0-9A-Z_]|[^@?]+)@?([^@]*)', name)
+    if not m:
+        return set()
+    if m.group(1).startswith('?'):
+        return {('c', m.group(1), norm(m.group(2)))}
+    return {('n', m.group(1))}
+
+
+def tokens_for(isig):
+    """The decoration_tokens an MSVC name of the same function may have."""
+    if not isig.qual:
+        return set()
+    last = isig.qual[-1]
+    cls = norm(re.sub(r'<.*$', '', isig.qual[-2])) if len(isig.qual) > 1 else ''
+    code = {'{ctor}': '?0', '{dtor}': '?1', 'operator=': '?4'}.get(last)
+    if code:
+        return {('c', code, cls)}
+    return {('n', last)}
+
+
+# ---------------------------------------------------------------------------------------------------- classify
+
+Row = collections.namedtuple('Row', 'name cls addr target units note host')
+
+
+class Classifier:
+    """units: fnvlink.load_units(); native: load_native(); msvc(name) / itanium(name) -> sigs.Sig;
+    bodies: {MSVC name: (unit index, x86 bytes)} or None (no pristine objects); unit_names: [source] by index."""
+
+    def __init__(self, units, native, msvc, itanium, bodies=None, unit_names=()):
+        self.native, self.itanium, self.bodies, self.unit_names = native, itanium, bodies, list(unit_names)
+        self.idx = collections.defaultdict(lambda: collections.defaultdict(set))   # key -> {addr: {msvc names}}
+        for u in units.values():
+            for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
+                if a in native and n.startswith('?'):
+                    m = msvc(n)
+                    for _, k in relaxed_keys(m):
+                        self.idx[k][a].add(n)
+        self.bidx = collections.defaultdict(set)   # key -> {msvc names with a pristine body}
+        for n in bodies or {}:
+            m = msvc(n)
+            for _, k in [('exact', kk) for t, kk in m.keys() if t in ('exact', 'l1', 'l2')] + relaxed_keys(m):
+                self.bidx[k].add(n)
+
+    def by_address(self, isig):
+        want = VARIANT_KIND.get(isig.variant, 'F') if isig.variant else 'F'
+        if isig.variant == 'D0':
+            return None
+        for tier, k in relaxed_keys(isig):
+            cands = {a: ns for a, ns in self.idx.get(k, {}).items() if self.native.get(a) == want}
+            if len(cands) == 1:
+                (a, ns), = cands.items()
+                return tier, a, sorted(ns)[0]
+            if len(cands) > 1:
+                return 'ambiguous', None, ','.join('%08x' % a for a in sorted(cands)[:6])
+        return None
+
+    def msvc_body(self, isig):
+        if not self.bodies:
+            return None
+        keys = [kk for t, kk in isig.keys() if t in ('exact', 'l1', 'l2')] + [k for _, k in relaxed_keys(isig)]
+        for k in keys:
+            got = self.bidx.get(k)
+            if got:
+                n = sorted(got)[0]
+                return n, self.bodies[n]
+        return None
+
+    def classify(self, name, units_):
+        isig = self.itanium(name)
+        us = ','.join(sorted(units_))
+        if isig.kind != 'func':
+            return Row(name, 'missing', None, None, us, 'not a function (%s)' % isig.kind, None)
+        hit = self.by_address(isig)
+        amb = None
+        if hit and hit[0] != 'ambiguous':
+            tier, a, mn = hit
+            note = 'via %s %s' % (tier, mn) + (' (%s bound to the complete-object definition)' % isig.variant
+                                                if isig.variant in ('C2', 'D2') else '')
+            return Row(name, 'addr', a, ADDR_SYM % a, us, note, None)
+        if hit:
+            amb = 'addresses ' + hit[2]
+        mb = self.msvc_body(isig)
+        if mb:
+            mn, (ui, code) = mb
+            host = self.unit_names[ui] if ui < len(self.unit_names) else None
+            if x86_empty(code) and isig.variant != 'D0':
+                return Row(name, 'msvc-empty', None, None, us, '%s in u%d (%d bytes)' % (mn, ui, len(code)), host)
+            return Row(name, 'msvc-inline', None, None, us, '%s in u%d (%d bytes)' % (mn, ui, len(code)), host)
+        sk = special_of(isig)
+        if sk and default_line(sk, isig):
+            host = sorted(units_)[0] if units_ else None
+            if host:
+                return Row(name, 'special-default', None, None, us, sk + (' (no MSVC body to compare)'
+                                                                        if self.bodies is None else ''), host)
+        why = [amb] if amb else []
+        if sk and not default_line(sk, isig):
+            why.append('special member of a template or unnamed class')
+        elif sk:
+            why.append('special member without a referencing unit')
+        return Row(name, 'missing', None, None, us, '; '.join(why) or 'no definition, address or body', None)
+
+
+# ---------------------------------------------------------------------------------------------------- synthesis
+
+def emit_empty(rows):
+    """AArch64 `ret` stubs (weak) for the msvc-empty names."""
+    out = ['// GENERATED by tools/link/bodies.py: functions whose MSVC body does nothing', '    .text']
+    for i, r in enumerate(sorted(rows, key=lambda r: r.name)):
+        q = '"%s"' % r.name
+        out += ['    .section .text.fnvnx_bd_empty.%d,"ax",%%progbits' % i, '    .p2align 2', '    .weak ' + q,
+                '    .type %s, %%function' % q, q + ':', '    ret', '    .size %s, .-%s' % (q, q)]
+    return '\n'.join(out) + '\n'
+
+
+def synth_host(tree, work, host, rows, itanium, inline=False):
+    """Compile the host unit again with the `= default` lines (special-default) or with -fkeep-inline-functions
+    (msvc-inline); keep only the wanted symbols. -> (object path or None, {names defined}, {name: why failed})."""
+    import vtables
+    import layout
+    want = {r.name for r in rows}
+    items, failed = [], {}
+    if not inline:
+        for k, r in enumerate(sorted(rows, key=lambda r: r.name)):
+            line = default_line(special_of(itanium(r.name)), itanium(r.name))
+            if line in {it[2] for it in items}:
+                continue
+            items.append((k, 'bd', line))
+    else:
+        items.append((0, 'anchor', 'extern "C" void __fnvnx_bd_anchor() {}'))
+    flags = ('-O2', '-ffunction-sections', '-fdata-sections', *layout.PIC) + (('-fkeep-inline-functions',)
+                                                                             if inline else ())
+    obj, alive = vtables.compile_probe(tree, work, host, items, 'bdi' if inline else 'bd', flags)
+    if obj is None:
+        return None, set(), {n: 'synth-failed (host does not compile)' for n in want}
+    base = os.path.join(work, host.replace('/', '_') + ('.bdi' if inline else '.bd'))
+    clean = base + 's.o'
+    if not vtables.strip_init(obj.path, clean):
+        return None, set(), {n: 'synth-failed (objcopy)' for n in want}
+    o = vtables.Obj(clean)
+    defined = {n for n in o.defs if o.bind(n) != 'local'}
+    renames = {}
+    if inline:   # a body emitted under a shell's name: the relaxed key pairs it with the wanted name
+        byk = collections.defaultdict(set)
+        for n in defined:
+            if n.startswith('_Z') and n not in want:
+                for _, k in relaxed_keys(itanium(n)):
+                    byk[k].add(n)
+        for w in want - defined:
+            for _, k in relaxed_keys(itanium(w)):
+                if len(byk.get(k, ())) == 1:
+                    renames[next(iter(byk[k]))] = w
+                    break
+        if renames:
+            ren = base + 'r.o'
+            args = ['--redefine-sym=%s=%s' % kv for kv in sorted(renames.items())]
+            if subprocess.run([vtables.OBJCOPY, *args, clean, ren], capture_output=True).returncode == 0:
+                clean = ren
+                defined = (defined - set(renames)) | set(renames.values())
+    got = vtables.gc_weaken(clean, want & defined, base + '.x')
+    if not got:
+        return None, set(), {n: 'synth-failed (not emitted)' for n in want}
+    path, roots = got
+    for n in want - roots:
+        failed[n] = 'synth-failed (%s)' % ('not emitted by the host' if inline else 'GCC refused the = default')
+    return path, roots, failed
+
+
+# ---------------------------------------------------------------------------------------------------- run
+
+def load_bind(out):
+    """bodies/bind.tsv -> {Itanium name: (class, target)} for resolve (empty when the step never ran)."""
+    path = os.path.join(out, 'bodies', 'bind.tsv')
+    res = {}
+    if os.path.exists(path):
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 3:
+                res[f[0]] = ('body-' + f[1], f[2])
+    return res
+
+
+def load_synth(out):
+    """bodies/synth.tsv -> [(host unit, object path)] for the objects that exist."""
+    path = os.path.join(out, 'bodies', 'synth.tsv')
+    res = []
+    if os.path.exists(path):
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 2 and os.path.exists(f[1]):
+                res.append((f[0], f[1]))
+    return res
+
+
+def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synth=True):
+    import fnvlink
+    units_json = units_json or os.path.join(tree, 'build', 'units.json')
+    bdir = os.path.join(out, 'bodies')
+    os.makedirs(bdir, exist_ok=True)
+    os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
+    trapped = load_trapped(os.path.join(out, 'refs.tsv'), names_txt)
+    native = load_native(os.path.join(out, 'addrmap.tsv'))
+    units = fnvlink.load_units(units_json)
+    unit_names = [u['source'] for u in json.load(open(units_json))['units']]
+    ms = fnvlink.DemangleCache(os.path.join(out, 'cache', 'msvc.tsv'), fnvlink.UNDNAME)
+    it = fnvlink.DemangleCache(os.path.join(out, 'cache', 'itanium.tsv'), fnvlink.CXXFILT)
+    it.need(trapped)
+    isig = {}
+
+    def itanium(n):
+        if n not in isig:
+            if n not in it.map:
+                it.need([n])
+            isig[n] = sigs.parse_itanium(n, it[n])
+        return isig[n]
+    allms = {n for u in units.values() for n in list(u.refs) + [n for _, n in u.defs] if n.startswith('?')}
+    bodies = None
+    if msvc_objs:
+        toks = set()
+        for n in trapped:
+            toks |= tokens_for(itanium(n))
+        bodies = pristine_bodies(msvc_objs, len(unit_names), toks)
+        allms |= set(bodies)
+    ms.need(allms)
+    msig = {}
+
+    def msvc(n):
+        if n not in msig:
+            msig[n] = sigs.parse_msvc(n, ms[n])
+        return msig[n]
+    cl = Classifier(units, native, msvc, itanium, bodies, unit_names)
+    rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
+
+    synth_rows, failed = [], {}
+    if synth:
+        work = os.path.join(bdir, 'work')
+        os.makedirs(work, exist_ok=True)
+        by_host = collections.defaultdict(lambda: collections.defaultdict(list))
+        for r in rows:
+            if r.cls in ('special-default', 'msvc-inline') and r.host:
+                by_host[r.host][r.cls == 'msvc-inline'].append(r)
+        import concurrent.futures
+        jobs_ = [(h, inl, rs) for h, d in sorted(by_host.items()) for inl, rs in sorted(d.items())]
+
+        def one(job):
+            h, inl, rs = job
+            try:
+                return h, inl, synth_host(tree, work, h, rs, itanium, inl)
+            except Exception as e:   # one host must not stop the step
+                return h, inl, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
+        with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
+            for h, inl, (path, roots, fail) in ex.map(one, jobs_):
+                failed.update(fail)
+                if path:
+                    dst = os.path.join(bdir, 'zz_bd_%s%s.o' % (h.replace('/', '_'), '_i' if inl else ''))
+                    os.replace(path, dst)
+                    synth_rows.append((h, dst, len(roots)))
+        empty = [r for r in rows if r.cls == 'msvc-empty']
+        if empty:
+            s_path, o_path = os.path.join(bdir, 'empty.S'), os.path.join(bdir, 'zz_bd_empty.o')
+            open(s_path, 'w', encoding='utf-8', errors='surrogateescape').write(emit_empty(empty))
+            as_ = os.environ.get('AS', 'aarch64-linux-gnu-as')
+            if subprocess.run([as_, '-mabi=ilp32', s_path, '-o', o_path], capture_output=True).returncode == 0:
+                synth_rows.append((sorted(empty[0].units.split(','))[0] if empty[0].units else unit_names[0],
+                                   o_path, len(empty)))
+            else:
+                failed.update({r.name: 'synth-failed (as)' for r in empty})
+    rows = [r._replace(cls='missing', note=failed[r.name] + '; was ' + r.cls + ': ' + r.note)
+            if r.name in failed else r for r in rows]
+
+    with open(os.path.join(bdir, 'bodies.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#name\tclass\taddress\ttarget\tunits\tnote\thost\n')
+        for r in rows:
+            f.write('\t'.join([r.name, r.cls, '%08x' % r.addr if r.addr is not None else '', r.target or '',
+                               r.units, r.note, r.host or '']) + '\n')
+    with open(os.path.join(bdir, 'bind.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#name\tclass\ttarget\n')
+        for r in rows:
+            if r.cls == 'addr':
+                f.write('%s\taddr\t%s\n' % (r.name, r.target))
+    with open(os.path.join(bdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#host_unit\tobject\tnames\n')
+        for h, p, n in synth_rows:
+            f.write('%s\t%s\t%d\n' % (h, p, n))
+    st = collections.Counter(r.cls for r in rows)
+    special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
+    lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
+    lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
+              for k in ('addr', 'msvc-empty', 'msvc-inline', 'special-default', 'missing')]
+    lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
+                                                 else 'not given (--msvc-objs)'))
+    lines.append('synthesized objects: %d' % len(synth_rows))
+    open(os.path.join(bdir, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
+    print('\n'.join(lines), file=sys.stderr)
+    return rows
+
+
+def main(argv):
+    """fnvlink.py bodies out/ tree/ [--msvc-objs DIR] [--names undefined.txt] [--units units.json] [--jobs N]
+    [--no-synth]"""
+    pos, opts = [], {}
+    it_ = iter(argv)
+    for x in it_:
+        if x in ('--msvc-objs', '--names', '--units', '--jobs'):
+            opts[x[2:]] = next(it_)
+        elif x == '--no-synth':
+            opts['no-synth'] = True
+        else:
+            pos.append(x)
+    run(pos[0], pos[1], msvc_objs=opts.get('msvc-objs'), names_txt=opts.get('names'), units_json=opts.get('units'),
+        jobs=int(opts.get('jobs', os.cpu_count() or 4)), synth=not opts.get('no-synth'))
