@@ -16,16 +16,30 @@ if [ -z "${ARTIFACTS:-}" ]; then
 fi
 C12=${COMMIT:0:12}
 [ -d "$ARTIFACTS/.git" ] || git clone -q https://github.com/toadharvard/fnv-nx-build "$ARTIFACTS"
-ref=refs/remotes/origin/t/$C12
+# The prepare farm skips commits that land while it works, so the exact t/<commit12> may never exist. The rolling
+# `tree` branch is used instead when its commit has the same prepare inputs as <commit> (REPO: a clone holding both
+# commits, default the repository this script lives in).
+REPO=${REPO:-$(cd "$HERE/../../../.." && pwd)}
+INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim ports/fnv-nx/tools/fetch.sh)
 end=$(( $(date +%s) + WAIT ))
-until git -C "$ARTIFACTS" fetch -q origin "+refs/heads/t/$C12:$ref" 2>/dev/null; do
+ref=""
+while [ -z "$ref" ]; do
+  if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/t/$C12:refs/remotes/origin/t/$C12" 2>/dev/null; then
+    ref=refs/remotes/origin/t/$C12; break
+  fi
+  if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/tree:refs/remotes/origin/tree" 2>/dev/null; then
+    P=$(git -C "$ARTIFACTS" show refs/remotes/origin/tree:meta.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"])')
+    if git -C "$REPO" cat-file -e "$P^{commit}" 2>/dev/null && git -C "$REPO" diff --quiet "$P" "$COMMIT" -- "${INPUTS[@]}" 2>/dev/null; then
+      ref=refs/remotes/origin/tree; SAME_AS=$P; break
+    fi
+  fi
   [ "$(date +%s)" -lt "$end" ] || { echo "no prepared tree for $C12" >&2; exit 1; }
   sleep 30
 done
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/fnvnx-tree.XXXXXX")
 git -C "$ARTIFACTS" archive "$ref" tree | tar -x -C "$STAGE"
 want=$(git -C "$ARTIFACTS" show "$ref:meta.json" | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["commit"], m["tree_hash"])')
-[ "${want%% *}" = "$COMMIT" ] || { echo "t/$C12 is for ${want%% *}" >&2; exit 1; }
+[ "${want%% *}" = "$COMMIT" ] || [ "${want%% *}" = "${SAME_AS:-}" ] || { echo "tree is for ${want%% *}" >&2; exit 1; }
 got=$(bash "$HERE/tree_hash.sh" "$STAGE/tree")
 [ "$got" = "${want##* }" ] || { echo "tree hash $got != ${want##* }" >&2; exit 1; }
 mkdir -p "$DIR"
