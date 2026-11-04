@@ -530,7 +530,7 @@ index 319e3cb..c16565f 100644
      #if SUPPORT_PROFILE_GLSLES3
      else if (strcmp(profilestr, MOJOSHADER_PROFILE_GLSLES3) == 0)
      {
-@@ -591,6 +750,96 @@ void emit_GLSL_start(Context *ctx, const char *profilestr)
+@@ -591,6 +750,102 @@ void emit_GLSL_start(Context *ctx, const char *profilestr)
      ctx->indent++;
  } // emit_GLSL_start
  
@@ -595,6 +595,9 @@ index 319e3cb..c16565f 100644
 +        //  (1-8) select a nibble of 0xF6D43210 as the set of passing outcomes
 +        //  (NOTEQUAL and ALWAYS pass a NaN alpha, like a != r and the default);
 +        //  other values pass. A switch here costs ~47 more Maxwell instructions.
++        //  Each block sits in a preprocessor guard: libfnvnx_shaders compiles static
++        //  variants (FNVNX_SHADER_EPI_*) by defining DK_EPI_ALPHA / DK_EPI_FOG to 0 or 1.
++        output_line(ctx, "#if !defined(DK_EPI_ALPHA) || DK_EPI_ALPHA");
 +        output_line(ctx, "if (ps_drv_alpha.x != 0) {");
 +        ctx->indent++;
 +        output_line(ctx, "float dk_a = ps_oC0.a; float dk_r = ps_drv_alpharef.x; uint dk_k = uint(ps_drv_alpha.x - 1);");
@@ -604,11 +607,13 @@ index 319e3cb..c16565f 100644
 +        output_line(ctx, "if (!dk_pass) discard;");
 +        ctx->indent--;
 +        output_line(ctx, "}");
++        output_line(ctx, "#endif");
 +        if (!shader_version_atleast(ctx, 3, 0))
 +        {
 +            push_output(ctx, &ctx->globals);
 +            output_line(ctx, "layout(location = 18) in highp vec4 dk_fog_in;");
 +            pop_output(ctx);
++            output_line(ctx, "#if !defined(DK_EPI_FOG) || DK_EPI_FOG");
 +            output_line(ctx, "if (ps_drv_fog.x != 0.0) {");
 +            ctx->indent++;
 +            output_line(ctx, "float dk_d = gl_FragCoord.z; float dk_f;");
@@ -619,6 +624,7 @@ index 319e3cb..c16565f 100644
 +            output_line(ctx, "ps_oC0.rgb = mix(ps_drv_fogcolor.rgb, ps_oC0.rgb, clamp(dk_f, 0.0, 1.0));");
 +            ctx->indent--;
 +            output_line(ctx, "}");
++            output_line(ctx, "#endif");
 +        } // if
 +    } // else if
 +} // dk_epilogue

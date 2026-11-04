@@ -21,7 +21,7 @@ D3DFMT = {21: "A8R8G8B8", 22: "X8R8G8B8", 23: "R5G6B5", 31: "A2B10G10R10", 32: "
           0x34324E49: "INTZ", 0x5A574152: "RAWZ", 0x5A465544: "DF24", 0x36314644: "DF16", 50: "L8", 28: "A8",
           827611204: "DXT1", 861165636: "DXT3", 894720068: "DXT5"}
 RS = {7: "zenable", 14: "zwrite", 23: "zfunc", 15: "alphatest", 27: "blend", 168: "cwrite", 52: "stencil",
-      22: "cull", 24: "alpharef", 25: "alphafunc", 19: "srcblend", 20: "destblend", 206: "sepalpha"}
+      22: "cull", 28: "fog", 24: "alpharef", 25: "alphafunc", 19: "srcblend", 20: "destblend", 206: "sepalpha"}
 PRIM = {1: "points", 2: "lines", 3: "linestrip", 4: "tris", 5: "tristrip", 6: "trifan"}
 
 

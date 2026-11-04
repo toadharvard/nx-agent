@@ -212,10 +212,41 @@ REAL_IMAGESPACE = [
 HUD_UI, HUD_COVERAGE = ("TILE1000.pso", "RGBA8", True), 0.10
 
 
+EPI_TAGS = ("__e0", "__ea", "__ef")
+
+
+def real_ps(tab, cls, mix):
+    """draw-weighted pixel-shader cost of a real class under the family's (alpha test, fog) mix: the static
+    epilogue variant the D3D state selects (__e0 / __ea / __ef, the runtime program when both), as for the
+    native permutations; the runtime program alone when the translation has no variants"""
+    if "real:" + cls + "__e0" not in tab:
+        return tab["real:" + cls]
+    mix = mix or {(0, 0): 1}
+    tot = sum(mix.values())
+    sh = {}
+    for (at, fog), n in mix.items():
+        t = "__e0" if not at and not fog else "__ea" if at and not fog else "__ef" if fog and not at else ""
+        sh["real:" + cls + t] = sh.get("real:" + cls + t, 0) + n / tot
+    acc = {"alu_slots": 0.0, "tex": 0.0, "maxwell_dyn": 0.0}
+    for k, w in sh.items():
+        for x in acc:
+            acc[x] += tab[k][x] * w
+    return acc
+
+
 def real_table(sdir):
     """class -> averaged stats from sdp2dksh's index.tsv + reflection JSON (only programs that translated)"""
     import collections
     acc = collections.defaultdict(lambda: [0, 0.0, 0.0, 0.0])
+    # static epilogue variants (sdp2dksh --variants): hash -> {tag: (instr, gprs)}; a pixel shader without an
+    # epilogue has none and costs its base program in every variant
+    var = collections.defaultdict(dict)
+    vp = os.path.join(sdir, "variants.tsv")
+    if os.path.exists(vp):
+        for line in open(vp):
+            f = line.rstrip("\n").split("\t")
+            if f[0] != "hash" and len(f) >= 5 and f[2] == "ok":
+                var[f[0]][f[1]] = (int(f[3]), int(f[4]))
     for line in open(os.path.join(sdir, "index.tsv")):
         f = line.rstrip("\n").split("\t")
         if f[0] == "hash" or len(f) < 9 or f[4] != "ok":
@@ -232,6 +263,10 @@ def real_table(sdir):
         keys.append("=" + f[2])         # the program itself (REAL_IMAGESPACE)
         for k in keys:
             a = acc[k]; a[0] += 1; a[1] += int(f[7]); a[2] += int(f[8]); a[3] += tex
+            if var and ext == "pso":
+                for t in EPI_TAGS:
+                    ins, gp = var[f[0]].get(t, (int(f[7]), int(f[8])))
+                    a = acc[k + t]; a[0] += 1; a[1] += ins; a[2] += gp; a[3] += tex
     tab = {}
     for k, (n, ins, gprs, tex) in acc.items():
         d = ins / n
@@ -362,7 +397,7 @@ def real_imagespace(tab, p, hz, eff):
     t, b, rows = 0.0, 0.0, []
     for prog, w, h, fmt, blend in REAL_IMAGESPACE + [(HUD_UI[0], "hud", "hud", HUD_UI[1], HUD_UI[2])]:
         px = p["w"] * p["h"] * (HUD_COVERAGE if w == "hud" else 1.0) if w in ("full", "hud") else w * h
-        ps = tab["real:" + prog]
+        ps = tab.get("real:" + prog + "__e0", tab["real:" + prog])   # captured: alpha test and fog off
         s_, b_, bound = pass_cost(ps, px, fmt, blend, hz, eff)
         t += s_; b += b_
         rows.append([prog, round(px), fmt, bound, round(s_ * 1e3, 3)])
@@ -381,7 +416,7 @@ def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
         draws = mix_draws.get(fam, m.get("draws", (0, 0))[1])
         bound = None
         if shader_map:
-            vs, ps = tab["real:" + shader_map[fam][0]], tab["real:" + shader_map[fam][1]]
+            vs, ps = tab["real:" + shader_map[fam][0]], real_ps(tab, shader_map[fam][1], epi.get(fam, {}))
         else:
             bound = bound_shaders(tab, m, epi.get(fam, {}))
             vs, ps = tab[m["vs"]], mix_stats(tab, bound)
