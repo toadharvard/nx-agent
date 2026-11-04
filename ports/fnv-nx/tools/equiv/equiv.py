@@ -92,6 +92,20 @@ CLASSES = {
     'FTOL1': 'platform',        # fnvnx_ftol2(expr): neutral with #define fnvnx_ftol2(x) ((__int64)(x)) under MSVC
 }
 PSEUDO = {'NATIVE1': 'drop_native_units'}
+
+# Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
+# group; a group that explains a difference is split into its rules. KEEP1 is inert under MSVC (FNVNX_KEEP is empty)
+# and is not tried. A rule of the gated set in no group is tried as a group of its own.
+DEFAULT_GROUPS = {
+    'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1',
+    'newdel': 'NEW1 NEW2 NEW3 NEW4 CTOR1',
+    'EXC1': 'EXC1',
+    'link': 'LINK1 STATIC1',
+    's1b': 'XINC1 RET1 FTOL1 DBUG1',
+    'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
+    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RCAST1 GOTO1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
+    'plat': 'STL1 STD1 ANON1 ANON2',
+}
 RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+)\b')
 
 
@@ -452,8 +466,18 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
     return ok, r.stdout + r.stderr
 
 
+def shard_of(source, n):
+    """1-based shard of a unit source among n (crc32 of the path, as tools/farm/compile_job.sh)."""
+    import zlib
+    return zlib.crc32(source.encode()) % n + 1
+
+
 def select_units(spec, units, only=None):
-    if spec == 'all':
+    """'all', a JSON file ({"units": [...]} or a list), 'i,j,k', or 'shard:K/N' (stable hash split)."""
+    if spec.startswith('shard:'):
+        k, n = (int(x) for x in spec[6:].split('/'))
+        sel = [i for i, u in enumerate(units) if shard_of(u['source'], n) == k]
+    elif spec == 'all':
         sel = list(range(len(units)))
     elif os.path.exists(spec):
         data = json.loads(Path(spec).read_text())
@@ -773,10 +797,20 @@ def cmd_attribute(a):
         if (c['status'] == 'differs' or (a.failed and c['status'] == 'does-not-compile')) \
                 and (not a.only or a.only in units[i]['source']):
             todo.append((i, c))
+    if a.units:
+        keep = set(select_units(a.units, units))
+        todo = [(i, c) for i, c in todo if i in keep]
     if a.limit:
         todo = todo[:a.limit]
     cands = [] if a.hier else [(rid, {rid}) for rid in sorted(allow)]
-    for g in a.group or []:
+    groups = list(a.group or [])
+    if a.default_groups:
+        grouped = set()
+        for gname, ids in DEFAULT_GROUPS.items():
+            groups.append('%s=%s' % (gname, ','.join(ids.split())))
+            grouped.update(ids.split())
+        groups += ['%s=%s' % (r, r) for r in sorted(allow - grouped - {'KEEP1', 'NATIVE1'})]
+    for g in groups:
         gname, _, ids = g.partition('=')
         cands.append((gname, set(ids.split(',')) & allow))
     base = Path(a.tree).resolve()
@@ -921,6 +955,67 @@ def cmd_summarize(a):
             examples={'%s/%s' % k: v for k, v in examples.items()}, fails=fails_by), indent=0) + '\n')
 
 
+def attributed(row, k, failed=False):
+    """The rule (or group) an attribute row names for function k (or for the unit not compiling): the first single
+    rule that explains it, else the first group, else '(interaction)'."""
+    names = []
+    for name, v in row.get('by_rule', {}).items():
+        ok = v.get('compiles') and (v.get('identical') if failed else k in v.get('fixed', []))
+        if ok:
+            names.append(name)
+    single = [n for n in names if RULE_ID.fullmatch(n)]
+    return (single or names or ['(interaction)'])[0]
+
+
+def cmd_report(a):
+    """Markdown report of a gate: BASE (pristine) vs HEAD (prepared), with --attr (equiv.py attribute rows) and --eh
+    (both sides built with --eh-off) when given. Numbers, unit names, addresses and short diagnostics only."""
+    A, B = load_rows(a.base), load_rows(a.head)
+    attr = load_rows(a.attr) if a.attr and Path(a.attr).exists() else {}
+    eha, ehb = (load_rows(a.eh[0]), load_rows(a.eh[1])) if a.eh else ({}, {})
+    st, kinds, table, lines, fails = Counter(), Counter(), {}, [], []
+    nfun = Counter()
+    for i in sorted(set(A) & set(B)):
+        c = compare_rows(A[i], B[i])
+        st[c['status']] += 1
+        if c['status'] not in ('identical', 'differs'):
+            if c['status'] == 'does-not-compile':
+                rule = attributed(attr.get(i, {}), None, failed=True) if i in attr else '-'
+                table.setdefault(rule, Counter())['no-build'] += 1
+                f, code, msg = first_error(B[i].get('error', ''))
+                fails.append('%s  %s  %s %s' % (B[i]['source'], rule, code or '', (msg or '')[:100]))
+            continue
+        nfun['compared'] += c['functions']
+        nfun['differ'] += len(c['differ'])
+        ehc = compare_rows(eha[i], ehb[i]) if i in eha and i in ehb else None
+        for k in c['differ']:
+            kind = 'retarget' if k in c['same_bytes'] else (
+                'eh' if ehc is not None and ehc['status'] in ('identical', 'differs') and k not in ehc['differ']
+                else 'code')
+            kinds[kind] += 1
+            rule = attributed(attr[i], k) if i in attr else '-'
+            table.setdefault(rule, Counter())[kind] += 1
+            lines.append('%s  %s  %s  %s' % (B[i]['source'], k, kind, rule))
+    out = ['# MSVC equivalence gate%s' % (' - ' + a.title if a.title else ''), '']
+    out.append('- units: %d compared; %d identical, %d differ, %d prepared side does not compile, %d pristine '
+               'does not compile' % (sum(st.values()), st['identical'], st['differs'], st['does-not-compile'],
+                                     st['base-failed']))
+    out.append('- functions: %d compared, %d differ (EH-only %d, retarget %d, code %d%s)' % (
+        nfun['compared'], nfun['differ'], kinds['eh'], kinds['retarget'], kinds['code'],
+        '' if a.eh else '; EH-only not measured'))
+    out += ['', '| rule | eh | retarget | code | no-build |', '|---|---:|---:|---:|---:|']
+    for rule in sorted(table, key=lambda r: (r.startswith('(') or r == '-', r)):
+        t = table[rule]
+        out.append('| %s | %d | %d | %d | %d |' % (rule, t['eh'], t['retarget'], t['code'], t['no-build']))
+    out += ['', 'Kinds: eh = identical when both sides build with /EHs-c-; retarget = same code bytes, a relocation '
+            'reaches another address; code = the rest. Rule: the single rule (or group) whose leave-out makes the '
+            'function identical (the unit compile).', '']
+    out += ['## Differing functions (unit, address, kind, rule)', '', '```'] + lines + ['```', '']
+    out += ['## Units the prepared side does not compile (unit, rule, first error)', '', '```'] + fails + ['```', '']
+    Path(a.out).write_text('\n'.join(out) + '\n')
+    print('\n'.join(out[:4 + len(table) + 4]))
+
+
 DECORATED_FN = [re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$'), re.compile(r'^__imp_\?([A-Za-z_]\w*)@@Y'),
                 re.compile(r'^\?([A-Za-z_]\w*)@@Y'), re.compile(r'^@([A-Za-z_]\w*)@\d+$'),
                 re.compile(r'^_([A-Za-z_]\w*?)(?:@\d+)?$')]
@@ -1054,13 +1149,17 @@ def main():
     p = sub.add_parser('attribute'); p.add_argument('decomp'); p.add_argument('tree'); p.add_argument('a'); p.add_argument('b')
     p.add_argument('--rules', required=True, help='the rule set tree B was prepared with'); p.add_argument('--out', required=True)
     p.add_argument('--only'); p.add_argument('--limit', type=int); p.add_argument('--workdir')
+    p.add_argument('--units', help='only these units (as build --units)')
     p.add_argument('--group', action='append', help='NAME=ID,ID: also leave these rules out together')
     p.add_argument('--failed', action='store_true', help='also units B does not compile')
+    p.add_argument('--default-groups', action='store_true', help='the groups of DEFAULT_GROUPS (+ ungrouped rules)')
     p.add_argument('--hier', action='store_true', help='try only the --group sets first; split a group into its rules '
                    'when leaving it out fixes a function (or lets the unit compile)')
     p.add_argument('--jobs', type=int, default=os.cpu_count() or 2)
     p = sub.add_parser('errors'); p.add_argument('fp')
     p = sub.add_parser('bindings'); p.add_argument('decomp')
+    p = sub.add_parser('report'); p.add_argument('base'); p.add_argument('head'); p.add_argument('--out', required=True)
+    p.add_argument('--attr'); p.add_argument('--eh', nargs=2); p.add_argument('--title')
     p = sub.add_parser('layouts'); p.add_argument('decomp'); p.add_argument('a'); p.add_argument('b')
     p.add_argument('--units', default='all'); p.add_argument('--show'); p.add_argument('--out')
     p = sub.add_parser('summarize'); p.add_argument('base'); p.add_argument('head')
@@ -1069,7 +1168,8 @@ def main():
     p.add_argument('--examples', type=int, default=0)
     a = ap.parse_args()
     dict(rules=cmd_rules, prepare=cmd_prepare, plan=cmd_plan, build=cmd_build, compare=cmd_compare,
-         show=cmd_show, attribute=cmd_attribute, errors=cmd_errors, refp=cmd_refp, bindings=cmd_bindings, summarize=cmd_summarize, layouts=cmd_layouts)[a.command](a)
+         show=cmd_show, attribute=cmd_attribute, errors=cmd_errors, refp=cmd_refp, bindings=cmd_bindings, summarize=cmd_summarize, layouts=cmd_layouts,
+         report=cmd_report)[a.command](a)
 
 
 if __name__ == '__main__':

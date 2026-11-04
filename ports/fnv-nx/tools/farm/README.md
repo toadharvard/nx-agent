@@ -15,6 +15,7 @@ Development agents read the reports with
 |---|---|---|---|
 | full compile census | `census_job.sh <commit> <report.md>` | git, python3, jq, `g++-aarch64-linux-gnu` | counts, gained/lost against the previous report, failing units with their first error |
 | link objects, shard k of N | `compile_job.sh <commit> <k> <N> [report.md]` | + rsync; the private repository `toadharvard/fnv-nx-build` attached with push | objects on branch `c/<commit12>/<k>of<N>` of the artifacts repository (meta.json: commit, tree hash, counts) |
+| MSVC equivalence gate, shard k of N | `equiv_job.sh <commit> <k> <N> <report.md>` | root (installs Wine, VC 2008 SP1/RTM from Microsoft's ISOs, ~6 GB disk), curl; the artifacts repository with push | units identical / differ / no-build, differing functions by kind (EH-only, retarget, code) and rule, per-rule table (docs/EQUIVALENCE.md); pristine MSVC objects on branch `msvc/pristine/<decomp12>` (built once, as `msvc/pristine-part/<decomp12>/<k>of<N>` parts until all N exist) |
 
 Consumers collect a commit's objects with `tools/farm/fetch_objs.sh <commit> <N> <obj dir> [prepared tree]`. The
 result is the same layout as `tools/link/compile.sh` output (`objects.tsv` + objects). With a prepared tree, the
