@@ -66,6 +66,30 @@ def test_pure():
     c = world.Case(seed=7, args={'p0': b'\x80'}, mem={0x03000000: b'\x01\x02'}, rets=[b'\0' * 16], bg='rand')
     c2 = world.Case.from_json(c.to_json())
     check((c2.seed, c2.args, c2.mem, c2.bg) == (c.seed, c.args, c.mem, c.bg), 'case json round trip')
+    inf = float('inf')
+    cm = libcalls.crt_math
+    check(cm('log', (0.0,)) == -inf and cm('log10', (-0.0,)) == -inf and cm('log10', (1000.0,)) == 3.0,
+          'crt_math: log/log10 of 0 is -inf (C99), log10(1000) = 3')
+    check(cm('log', (-1.0,)) != cm('log', (-1.0,)), 'crt_math: log of a negative is NaN')
+    check(cm('pow', (0.0, -1.0)) == inf and cm('pow', (-0.0, -3.0)) == -inf and cm('pow', (10.0, 400.0)) == inf
+          and cm('pow', (-10.0, 401.0)) == -inf, 'crt_math: pow poles and overflow keep C99 signs')
+    check(cm('exp', (1000.0,)) == inf and cm('exp', (-1000.0,)) == 0.0, 'crt_math: exp overflow / underflow')
+    check(str(cm('ceil', (-0.5,))) == '-0.0' and cm('floor', (-0.5,)) == -1.0 and cm('floor', (inf,)) == inf,
+          'crt_math: floor/ceil keep signed zero and infinities')
+    check(cm('atan2', (1.0, 0.0)) == cm('atan', (inf,)) and cm('powf', (2.0, 3.0)) == 8.0,
+          'crt_math: atan2, float variants')
+    from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
+    xu = Uc(UC_ARCH_X86, UC_MODE_32)
+    xu.mem_map(0x1000, 0x1000)
+
+    def use(code, fret='int'):
+        xu.mem_write(0x1000, code + bytes(16))
+        return x86emu.x87_result_use(xu, 0x1000, fret)
+    check(use(b'\xd9\x5d\xfc') == 'f32' and use(b'\xdd\x5d\xf8') == 'f64', 'x87 use: fstp m32 / m64')
+    check(use(b'\x83\xc4\x08\xd9\x5d\xfc') == 'f32', 'x87 use: after the cdecl cleanup')
+    check(use(b'\x8b\xe5\x5d\xc3', 'f32') == 'f32' and use(b'\x8b\xe5\x5d\xc3') == 'int',
+          'x87 use: a ret returns the function\'s own result kind')
+    check(use(b'\x89\x45\xfc') == 'int' and use(b'\xd9\x45\xfc') == 'int', 'x87 use: mov / fld m32 do not use ST0')
     v = runner.float_verdict(4, struct.pack('<f', 1.0), struct.pack('<f', 1.0000001))
     check(v['tolerant'] and v['ulp'] == 1, 'float verdict: 1 ulp is tolerant')
     src = '// @fnv 0x00401000\nint f(int a) { if (a) { return 1; } return "}"[0]; }\n// @fnv 0x00401010\nint g() {}\n'

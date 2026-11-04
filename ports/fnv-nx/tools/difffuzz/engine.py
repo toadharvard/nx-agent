@@ -218,7 +218,11 @@ class UnitCache:
         refs = {}
         for _, u in self.by_source[source]:
             for n, a in u['symbols'].items():
-                refs.setdefault(int(a, 16), n)
+                # a decorated spelling first: it carries the type (`_FUN_00eca920` next to ?FUN_00eca920@@YANN@Z
+                # left the double result of CRT log unknown, so the oracle got no ST0)
+                cur = refs.get(int(a, 16))
+                if cur is None or (n.startswith('?') and not cur.startswith('?')):
+                    refs[int(a, 16)] = n
         for (src, a), n in self.tree_ref.items():     # the patched unit's own declaration (S1b `ref` rows)
             if src == source:
                 refs[a] = n
@@ -530,7 +534,8 @@ class UnitCache:
 
     def crt_builtins(self):
         """CRT addresses the link gives a native provider whose name is a harness builtin (memmove at 0x00ec7230,
-        ...): the oracle runs them as that builtin too, untraced, as the native code does. Added to libcalls.X86."""
+        the libm functions log, pow, exp, ... of libcalls.CRT_MATH): the oracle runs them as that builtin too,
+        untraced, as the native code does. Added to libcalls.X86."""
         if not getattr(self, '_crt_done', False):
             self._crt_done = True
             int_names = {'memcpy', 'memmove', 'memset', 'memcmp', 'strlen', 'wcslen', 'strcmp', 'stricmp', 'strncmp',
@@ -539,7 +544,7 @@ class UnitCache:
             self.providers()
             for name, addr in self._prov_rows:       # every address of a name (memmove: 0x00ec44d0, 0x00ec7230)
                 b = libcalls.A64.get(name)
-                if b in int_names and addr not in libcalls.X86:
+                if (b in int_names or b in libcalls.CRT_MATH and not b.endswith('f')) and addr not in libcalls.X86:
                     libcalls.X86[addr] = b
 
     def pair(self, source, orig_addr):
