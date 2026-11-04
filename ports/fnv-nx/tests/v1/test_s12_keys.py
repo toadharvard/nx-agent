@@ -10,7 +10,7 @@ object=last operator=rtl give MSVC's push order (arguments right to left, then t
 direct.
 
 Every case is our own synthetic code: unit A (and B) are run through discover=, their keys merged as compile.sh does
-(sort -u), unit C is compiled with that list, and C's aarch64 asm is read for stlr / ldar / dmb.
+(toolchain/order/keys_merge.py when the tree has it, else sort -u as compile.sh did), unit C is compiled with that list, and C's aarch64 asm is read for stlr / ldar / dmb.
   K1  control: A hands &o->m_lock to InterlockedCompareExchange, C's plain store is stlr
   K2  cross-unit forwarder: AtomicInc(long &) is defined in unit A, called with o->m_count only in unit B
   K3  Interlocked through a local pointer (`long *p = &o->m; InterlockedCompareExchange(p, 1, 0)`, the decompiler's
@@ -159,7 +159,19 @@ for u, src in (('a', UNIT_A), ('b', UNIT_B)):
         print('FAIL unit %s does not compile: %s' % (u, r.stderr[-400:]))
         sys.exit(1)
     keys |= set(open(os.path.join(WORK, u + '.keys')).read().splitlines())
-write(os.path.join(WORK, 'all.keys'), ''.join(k + '\n' for k in sorted(keys)))
+# the build's own merge: toolchain/order/keys_merge.py since 8c18138 (it resolves cross-unit forwarders); before
+# that, compile.sh merged and sorted the unit files, as `sort -u` does here
+MERGE = os.path.join(HERE, '..', '..', 'toolchain', 'order', 'keys_merge.py')
+if os.path.isfile(MERGE):
+    r = subprocess.run([sys.executable, '-I', MERGE, os.path.join(WORK, 'a.keys'), os.path.join(WORK, 'b.keys')],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print('FAIL keys_merge.py: %s' % r.stderr[-400:])
+        sys.exit(1)
+    write(os.path.join(WORK, 'all.keys'), r.stdout)
+    keys = set(r.stdout.splitlines())
+else:
+    write(os.path.join(WORK, 'all.keys'), ''.join(k + '\n' for k in sorted(keys)))
 write(os.path.join(WORK, 'c.cpp'), UNIT_C)
 r = gxx(['-fplugin-arg-fnvnx_order-keys=all.keys', '-S', '-o', 'c.s', 'c.cpp'])
 if r.returncode != 0:
