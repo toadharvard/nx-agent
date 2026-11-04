@@ -150,7 +150,8 @@ Top-level `summary` (what the R0 gate reads):
 
 ```
 "summary": {
-  "commit": "<git sha of the measured tree>",
+  "commit": "<git sha of the measured tree>", "render_native_tree": "<tree hash of render/native: survives rebases>",
+  "worktree_dirty": false,
   "per_draw_us": {"native": {"lo", "hi", "gate"}, "nine": {"lo", "hi", "gate"}},   // µs per draw, whole frame
   "frame_ms":    {"main": {"lo", "hi", "gate"}, "render": {"lo", "hi", "gate"}},   // ms per frame
   "assumptions": {"ipc": {"lo": 0.6, "hi": 1.0}, "clock_ghz": [1.02, 1.785], "gate_value": "..."},
@@ -168,7 +169,7 @@ Detailed sections:
 
 | key | content |
 |---|---|
-| `families.<f>` | `draws {lo, hi}`; `instr_per_draw {main, render, total, backend_record}` (AArch64, marginal in mix_hi); `x64 {native_per_draw, nine_per_draw, nine_over_native}`; `isolated` (family alone); `params` (the mix row) |
+| `families.<f>` | `draws {lo, hi}`; `instr_per_draw {main, render, total (front), backend_record, total_with_backend}` (AArch64, marginal in mix_hi); `x64 {native_per_draw, nine_per_draw, nine_over_native}`; `isolated` (family alone); `params` (the mix row) |
 | `frame.mix_lo` / `frame.mix_hi` | `draws`; `instr {main, render_front, render_backend, render}`; `ms.<clock> {main, render} {lo, hi}`; `memory_term_ms`; `x64 {native, nine, ratio_nine_over_native, nine_driver_excluded}` |
 | `fixed_per_frame_instr` | the empty frame (no packets) |
 | `profile_mix_hi_a64` | instructions per function in mix_hi's measured frame (guest; `main` = the stream decoder) |

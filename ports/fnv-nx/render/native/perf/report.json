@@ -1,7 +1,9 @@
 {
  "schema": "fnv-nx P6n report v1 (docs/RENDER_PERF.md \u00a75)",
  "summary": {
-  "commit": "60e98b92e79c5903c85613c9c33a21538be70b20",
+  "commit": "e02c871a80ea1b970ae9c30bd279c4a4797adae4",
+  "render_native_tree": "439efb38e628ddc78e86c953dd933fe9217a97fd",
+  "worktree_dirty": false,
   "per_draw_us": {
    "native": {
     "lo": 1.671,
@@ -80,7 +82,8 @@
     "main": 757.7,
     "render": 359.4,
     "total": 1117.0,
-    "backend_record": 524.4
+    "backend_record": 524.4,
+    "total_with_backend": 1641.4
    },
    "x64": {
     "native_per_draw": 1192.2,
@@ -132,7 +135,8 @@
     "main": 1438.7,
     "render": 410.2,
     "total": 1848.9,
-    "backend_record": 576.6
+    "backend_record": 576.6,
+    "total_with_backend": 2425.5
    },
    "x64": {
     "native_per_draw": 1921.6,
@@ -182,7 +186,8 @@
     "main": 1741.2,
     "render": 412.3,
     "total": 2153.4,
-    "backend_record": 561.9
+    "backend_record": 561.9,
+    "total_with_backend": 2715.3
    },
    "x64": {
     "native_per_draw": 2239.5,
@@ -232,7 +237,8 @@
     "main": 2339.0,
     "render": 419.4,
     "total": 2758.4,
-    "backend_record": 574.1
+    "backend_record": 574.1,
+    "total_with_backend": 3332.5
    },
    "x64": {
     "native_per_draw": 2887.2,
@@ -282,7 +288,8 @@
     "main": 1318.5,
     "render": 390.6,
     "total": 1709.2,
-    "backend_record": 526.5
+    "backend_record": 526.5,
+    "total_with_backend": 2235.7
    },
    "x64": {
     "native_per_draw": 1799.4,
@@ -332,7 +339,8 @@
     "main": 1412.1,
     "render": 387.6,
     "total": 1799.7,
-    "backend_record": 507.9
+    "backend_record": 507.9,
+    "total_with_backend": 2307.6
    },
    "x64": {
     "native_per_draw": 1902.6,
@@ -382,7 +390,8 @@
     "main": 1053.5,
     "render": 356.2,
     "total": 1409.7,
-    "backend_record": 462.8
+    "backend_record": 462.8,
+    "total_with_backend": 1872.5
    },
    "x64": {
     "native_per_draw": 1494.1,
@@ -432,7 +441,8 @@
     "main": 1733.9,
     "render": 409.4,
     "total": 2143.3,
-    "backend_record": 572.6
+    "backend_record": 572.6,
+    "total_with_backend": 2715.9
    },
    "x64": {
     "native_per_draw": 2230.4,
@@ -482,7 +492,8 @@
     "main": 1214.3,
     "render": 398.6,
     "total": 1612.9,
-    "backend_record": 557.7
+    "backend_record": 557.7,
+    "total_with_backend": 2170.6
    },
    "x64": {
     "native_per_draw": 1699.9,
@@ -532,7 +543,8 @@
     "main": 1566.2,
     "render": 448.5,
     "total": 2014.7,
-    "backend_record": 968.0
+    "backend_record": 968.0,
+    "total_with_backend": 2982.7
    },
    "x64": {
     "native_per_draw": 2129.0,
