@@ -80,10 +80,16 @@ def compare(ref, ref2, cand, out, diffs=False):
         fr, fc = frames(ref, c), frames(cand, c)
         if not fr or not fc:
             e['status'] = 'incomplete'; e['reasons'].append('no reference frames' if not fr else 'no candidate frames')
+            # a reference frame the candidate did not render counts as a frame over the threshold
+            e['frames'] = [{'frame': f[1:-4], 'metrics': {'error': 'missing in the candidate'}, 'floor': None,
+                            'pass': False, 'reasons': ['missing in the candidate']} for f in fr]
             res.append(e); continue
         for f in fr:
             if f not in fc:
-                e['reasons'].append(f'{f}: missing in the candidate'); e['missing'] = True; continue
+                e['reasons'].append(f'{f}: missing in the candidate'); e['missing'] = True
+                e['frames'].append({'frame': f[1:-4], 'metrics': {'error': 'missing in the candidate'}, 'floor': None,
+                                    'pass': False, 'reasons': ['missing in the candidate']})
+                continue
             floor = pair(ref, ref2, c, f) if ref2 and f in frames(ref2, c) else None
             m = pair(ref, cand, c, f)
             b = bounds(floor)
@@ -117,12 +123,33 @@ def compare(ref, ref2, cand, out, diffs=False):
     summ = {'captures': len(res), 'frames': sum(len(r['frames']) for r in res), 'pass': cnt('pass'),
             'fail': cnt('fail'), 'incomplete': cnt('incomplete'), 'unstable': cnt('unstable'),
             'frames_pass': sum(1 for r in res for x in r['frames'] if x['pass'])}
+    summ['metric'] = metric(res)
     status = 'fail' if summ['fail'] else ('incomplete' if summ['incomplete'] or summ['unstable'] or not res else 'pass')
     g = {'format': FORMAT, 'gate': 'S16-compare-captures', 'status': status,
          'generated': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
          'thresholds': THRESHOLDS, 'summary': summ, 'captures': res,
          'runs': {k: meta(v) for k, v in (('ref', ref), ('ref2', ref2), ('cand', cand)) if v}}
     return g
+
+
+def metric(res):
+    """S16's convergence metric (the number every commit body quotes): frames over the threshold, mean and max
+    per-pixel error (absolute 8-bit channel difference) of the candidate against the reference, and the same two
+    numbers for the noise floor (reference against its second run)."""
+    fr = [x for r in res for x in r['frames']]
+    ok = [x['metrics'] for x in fr if 'error' not in x['metrics']]
+    fl = [x['floor'] for x in fr if x['floor'] and 'error' not in x['floor']]
+    missing = sum(1 for r in res if r['status'] == 'incomplete')
+    return {'frames': len(fr), 'frames_over': sum(1 for x in fr if not x['pass']), 'captures_incomplete': missing,
+            'mean_abs': round(sum(m['mean_abs'] for m in ok) / len(ok), 5) if ok else None,
+            'max_abs': max((m['max_abs'] for m in ok), default=None),
+            'floor_mean_abs': round(sum(m['mean_abs'] for m in fl) / len(fl), 5) if fl else None,
+            'floor_max_abs': max((m['max_abs'] for m in fl), default=None)}
+
+
+def metric_line(m):
+    return (f"{m['frames_over']}/{m['frames']} over, mean {m['mean_abs']}, max {m['max_abs']} "
+            f"(floor mean {m['floor_mean_abs']}, max {m['floor_max_abs']}; incomplete {m['captures_incomplete']})")
 
 
 def meta(run):
@@ -139,6 +166,7 @@ def report(g):
     L = [f"# S16-compare captures: nx_render against nxd9play (Wine)", '',
          f"status **{g['status']}**: {s['pass']} pass, {s['fail']} fail, {s['incomplete']} incomplete, "
          f"{s['unstable']} unstable of {s['captures']} captures; {s['frames_pass']}/{s['frames']} frames pass.", '',
+         f"metric: {metric_line(s['metric'])}", '',
          '| capture | status | frames | worst PSNR | worst SSIM | worst FLIP | worst over8 | max abs | floor |',
          '|---|---|---|---|---|---|---|---|---|']
     for r in g['captures']:
@@ -161,7 +189,8 @@ def main():
     g = compare(a.ref, a.ref2, a.cand, a.out, a.diffs)
     json.dump(g, open(os.path.join(a.out, 'capgate.json'), 'w'), indent=1)
     open(os.path.join(a.out, 'capreport.md'), 'w').write(report(g))
-    print(f"{g['status']}: {g['summary']}")
+    print(f"{g['status']}: {g['summary']['pass']}/{g['summary']['captures']} captures pass; metric: "
+          f"{metric_line(g['summary']['metric'])}")
     return {'pass': 0, 'fail': 1, 'incomplete': 2}[g['status']]
 
 

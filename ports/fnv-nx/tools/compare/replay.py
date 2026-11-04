@@ -7,7 +7,9 @@ llvmpipe) and the candidate (nx_render d3d9, the native renderer on its GL backe
 
 <run dir>/<capture name>/f<frame %05u>.png and summary.txt per capture (the renderers' own names), plus
 <run dir>/run.json: per capture the exit code, seconds, and the renderer's counters line. Extra arguments for every
-capture after `--` (e.g. `-- --per-draw`). The reference needs wine (32-bit), Xvfb and Mesa's i386 llvmpipe; a
+capture after `--` (e.g. `-- --per-draw`). `--lp-threads N` sets llvmpipe's LP_NUM_THREADS for the run: the noise
+floor is two reference runs with different thread counts (S16 decision: 4 and 1), so it shows any rasterizer
+nondeterminism, not just a repeat. The reference needs wine (32-bit), Xvfb and Mesa's i386 llvmpipe; a
 private X server is started on a free display (S16_DISPLAY overrides) and stopped at the end. The prefix is created
 on first use (wineboot). Exit 0 when every capture rendered (nx_render's 3, "some draws skipped", counts as rendered).
 """
@@ -64,13 +66,17 @@ def run_all(caps, out, make_cmd, env=None, timeout=600):
         d = os.path.join(out, name)
         shutil.rmtree(d, ignore_errors=True)
         os.makedirs(d)
-        t0 = time.time()
-        try:
-            r = subprocess.run(make_cmd(c, d), env=env, capture_output=True, text=True, timeout=timeout)
-            rc, err = r.returncode, (r.stderr or '').strip().splitlines()[-3:]
-        except subprocess.TimeoutExpired:
-            rc, err = -1, ['timeout']
-        res[name] = {'rc': rc, 'seconds': round(time.time() - t0, 2), 'summary': counters(d),
+        t0, tries = time.time(), 0
+        while True:  # a signal exit (seen once under Wine: SIGKILL at teardown) is retried once, and recorded
+            tries += 1
+            try:
+                r = subprocess.run(make_cmd(c, d), env=env, capture_output=True, text=True, timeout=timeout)
+                rc, err = r.returncode, (r.stderr or '').strip().splitlines()[-3:]
+            except subprocess.TimeoutExpired:
+                rc, err = -1, ['timeout']
+            if rc >= 0 or tries > 1 or err == ['timeout']:
+                break
+        res[name] = {'rc': rc, 'tries': tries, 'seconds': round(time.time() - t0, 2), 'summary': counters(d),
                      'frames': len([f for f in os.listdir(d) if f.startswith('f') and f.endswith('.png') and '_d' not in f]),
                      'stderr': err if rc not in (0, 3) else []}
     return res
@@ -85,10 +91,14 @@ def main():
     ap.add_argument('side', choices=['ref', 'cand'])
     ap.add_argument('--exe'); ap.add_argument('--prefix'); ap.add_argument('--bin'); ap.add_argument('--shaders')
     ap.add_argument('--out', required=True); ap.add_argument('--timeout', type=int, default=600)
+    ap.add_argument('--lp-threads', type=int)
     ap.add_argument('captures', nargs='+')
     a = ap.parse_args(argv)
     caps = [os.path.abspath(c) for c in a.captures]
     meta = {'side': a.side, 'started': int(time.time())}
+    if a.lp_threads:
+        os.environ['LP_NUM_THREADS'] = str(a.lp_threads)
+    meta['lp_threads'] = os.environ.get('LP_NUM_THREADS', '')
     if a.side == 'ref':
         if not (a.exe and a.prefix): ap.error('ref needs --exe and --prefix')
         x = Xvfb()
@@ -107,7 +117,8 @@ def main():
     else:
         if not a.bin: ap.error('cand needs --bin')
         sh = ['--shaders', a.shaders] if a.shaders else []
-        res = run_all(caps, a.out, lambda c, d: [a.bin, 'd3d9', c, '-o', d] + sh + extra, None, a.timeout)
+        env = dict(os.environ, LIBGL_ALWAYS_SOFTWARE='1', GALLIUM_DRIVER='llvmpipe')
+        res = run_all(caps, a.out, lambda c, d: [a.bin, 'd3d9', c, '-o', d] + sh + extra, env, a.timeout)
         meta['versions'] = {'mesa': gl_version()}
     meta['captures'] = res
     json.dump(meta, open(os.path.join(a.out, 'run.json'), 'w'), indent=1)
