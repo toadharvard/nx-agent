@@ -24,6 +24,10 @@
       `_rtm_variant` agents, and blk_00ae0000_od_ob1.
     - Decomp-wide: 72 files / 402 edits. At -O2 those 72 units have 11 errors before and 0 after; none got worse.
       hkgpmesh had 3 more -O2-only errors, also gone.
+    - MSVC 2008, local gate on the 4 files with the most edits (37 / 25 / 25 / 21): 3 units are identical with
+      and without FINL1. The 4th, hkpcpuworldgetclosestpointsjob_gs_ehsc_nogs_noehsc_variant, does not compile
+      under MSVC on either side (C2371 'PBATTERY_REPORTING_SCALE' redefinition, an SDK clash that predates FINL1;
+      left for S11).
   - 618cfba, V1's refutations:
     - N2: NEW5 tags the class's own inline operator new(size_t) with `FNVNX_NEW5_TAG`. Under GCC that is a
       defaulted tag parameter, which makes it a placement form with no matching delete, so a throwing constructor
