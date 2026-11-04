@@ -92,7 +92,9 @@ setup() {
 	CELLW=$FARM_HOME/sweep/wine
 	S16_PCI_DEVICE=00000193 bash "$CMP/wine_ref.sh" setup "$GAME" "$CELLW" >"$S/wine_setup.log" 2>&1 || fail "wine_ref.sh setup"
 	PFX=$W/pfx
-	FAMILIES=1; "$NXR/nx_render" 2>&1 | grep -q -- '--families' || { FAMILIES=0; NOTES+=("this nx_render has no --families: that column is not measured"); }
+	# (its usage text exits 2: read it first, so pipefail does not turn a match into "absent")
+	local usage; usage=$("$NXR/nx_render" 2>&1 || true)
+	FAMILIES=1; grep -q -- '--families' <<<"$usage" || { FAMILIES=0; NOTES+=("this nx_render has no --families: that column is not measured"); }
 	NOTES+=("candidate nx_render at ${CAND:0:12}; reference nxd9play $(basename "$BIN"); shaders $(basename "$SHD")")
 }
 
@@ -204,8 +206,11 @@ setup
 game_ok() {   # the exe's own DLLs next to it (the published install may hold only the exe, the INIs and Data/)
 	local d missing=""
 	for d in GalaxyWrp.dll binkw32.dll libvorbisfile.dll; do [ -e "$GAME/$d" ] || missing="$missing $d"; done
-	[ -z "$missing" ] && return 0
-	NOTES+=("cells not run: the install lacks$missing (publish the exe's DLLs to gamedata/exe)"); return 1
+	if [ -n "$missing" ]; then NOTES+=("cells not run: the install lacks$missing (publish the exe's DLLs to gamedata/exe)"); return 1; fi
+	if [ -f "$GAME/dll.sha256" ] && ! (cd "$GAME" && sha256sum -c --quiet dll.sha256 >/dev/null 2>&1); then
+		NOTES+=("cells not run: the exe's DLLs differ from gamedata/exe's dll.sha256"); return 1
+	fi
+	return 0
 }
 [ "${SWEEP_CELLS:-1}" = 0 ] || { game_ok && cells; }
 summary

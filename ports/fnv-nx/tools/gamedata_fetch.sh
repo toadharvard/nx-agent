@@ -39,7 +39,14 @@ else
   mapfile -t slugs < <(git ls-remote "$URL" 'refs/heads/gamedata/data/*' | sed 's|.*refs/heads/gamedata/data/||')
 fi
 bad=0
+mkdir -p "$OUT/.gamedata_items"
 for slug in "${slugs[@]}"; do
+  # an item whose branch head has not moved since it was installed here is skipped (only the exe branch moved, say)
+  h=$(printf '%s\n' "$heads" | awk -v r="refs/heads/gamedata/data/$slug" '$2==r{print $1}')
+  if [ -n "$h" ] && [ "$(cat "$OUT/.gamedata_items/$slug" 2>/dev/null)" = "$h" ]; then
+    echo "gamedata_fetch: $slug unchanged ($h)"; continue
+  fi
+  rm -f "$OUT/.gamedata_items/$slug"
   c=$(fetch "gamedata/data/$slug") || { echo "gamedata_fetch: no branch gamedata/data/$slug" >&2; bad=1; continue; }
   d=$TMP/$slug; mkdir -p "$d"; git -C "$TMP" archive "$c" | tar -x -C "$d"
   name=$(awk -F'\t' '$1=="name"{print $2}' "$d/MANIFEST.tsv"); kind=$(awk -F'\t' '$1=="kind"{print $2}' "$d/MANIFEST.tsv")
@@ -53,6 +60,7 @@ for slug in "${slugs[@]}"; do
   if [ "$got" != "$want" ]; then echo "gamedata_fetch: $name: sha256 $got, manifest says $want" >&2; bad=1; continue; fi
   if [ "$kind" = tar ]; then tar -C "$OUT/Data" -xf "$d/whole"; else mv "$d/whole" "$OUT/Data/$name"; fi
   rm -rf "$d"
+  [ -n "$h" ] && echo "$h" > "$OUT/.gamedata_items/$slug"
   echo "gamedata_fetch: $name ok ($kind, sha256 $got)"
 done
 [ $bad = 0 ] || exit 1
