@@ -95,6 +95,8 @@ def decode_x86(cv, call):
             out[lab] = struct.pack('<I', call.args[0])[:size]
         elif space == 'edx':
             out[lab] = struct.pack('<I', call.args[1])[:size]
+        elif space in getattr(call, 'regs', {}):
+            out[lab] = struct.pack('<I', call.regs[space] & 0xffffffff)[:size]
         elif off + size <= len(stack):
             out[lab] = stack[off:off + size]
     return out
@@ -132,12 +134,15 @@ def _cstr(rd, p):
     return b[:i] if i >= 0 else None
 
 
-def compare_args(cv, cx, ca, rdx=None, rda=None):
+def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=()):
     """First logical argument the two sides pass differently to the same callee (pointers to their own stack
-    frames are equal by definition: the frames differ by design)."""
+    frames are equal by definition: the frames differ by design). skip: definition labels the caller does not pass
+    (S2's edx dummies); gx/ga: garbage words planted on each machine - an oracle argument that is oracle garbage is
+    noise (the original caller passed whatever its registers held), a native one that is native garbage while the
+    oracle's is not stays a divergence (marked arm_garbage)."""
     dx, da = decode_x86(cv, cx), decode_a64(cv, ca)
     for v in cv.vals:
-        if v.label not in dx or v.label not in da or v.kind not in ('gpr', 'fpr'):
+        if v.label not in dx or v.label not in da or v.kind not in ('gpr', 'fpr') or v.label in skip:
             continue
         bx, ba = dx[v.label][:v.size], da[v.label][:v.size]
         if v.cls == 'I8' and v.is_bool:
@@ -147,17 +152,23 @@ def compare_args(cv, cx, ca, rdx=None, rda=None):
         px, pa = struct.unpack('<I', bx.ljust(4, b'\0'))[0], struct.unpack('<I', ba.ljust(4, b'\0'))[0]
         if v.is_ptr and _in_stack(px) and _in_stack(pa):
             continue
+        if v.size == 4 and px in gx:
+            continue
         if v.is_ptr and rdx and rda and world.A64_PRIV[0] <= pa < world.A64_PRIV[1]:
             # a literal or constant the native unit keeps in its own .rodata, the oracle at its image address:
             # equal when the strings are
             sx, sa = _cstr(rdx, px), _cstr(rda, pa)
             if sx is not None and sx == sa:
                 continue
-        return dict(arg=v.label, cls=v.cls, x86=bx.hex(), arm=ba.hex())
+        d = dict(arg=v.label, cls=v.cls, x86=bx.hex(), arm=ba.hex())
+        if v.size == 4 and pa in ga:
+            d['arm_garbage'] = True
+        return d
     return None
 
 
-def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None):
+def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
+            garbage=None):
     ex, ea = rx.error, ra.error
     if ex == 'timeout' or ea == 'timeout':
         return None
@@ -179,7 +190,9 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             cv = callee_conv(cx.target) if cx.target >= 0 and cx.target not in libcalls.NO_ARGS else None
             if cv is None:
                 continue
-            d = compare_args(cv, cx, ca, readers[0], readers[1]) if readers else compare_args(cv, cx, ca)
+            skip = dummies(cx.target) if dummies else ()
+            d = compare_args(cv, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
+                             garbage[0] if garbage else (), garbage[1] if garbage else ())
             if d:
                 d.update(kind='call-args', index=i, target=_hex(cx.target), callee=cv.name)
                 return d
@@ -277,7 +290,9 @@ class Pair:
         ra = self.ae.run(self.target.conv, case, placement, self.target.orig_addr, max_steps=max_steps)
         d = compare(self.target.conv, rx, ra, w, placement.get('sret'), self.target.local_statics,
                                 getattr(self.target.callee_info, 'conv', None),
-                                (lambda a, n: _read(self.xe.uc, w, a, n), lambda a, n: _read(self.ae.uc, w, a, n)))
+                                (lambda a, n: _read(self.xe.uc, w, a, n), lambda a, n: _read(self.ae.uc, w, a, n)),
+                                getattr(self.target, 'dummies', None),
+                                (world.garbage_words(case.seed, 'x86'), world.garbage_words(case.seed, 'a64')))
         if d is not None and ra.private_reads:
             d['arm_private_reads'] = ra.private_reads
         return rx, ra, d

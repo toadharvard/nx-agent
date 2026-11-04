@@ -157,6 +157,36 @@ def stack_fill(seed, n):
     return random.Random(seed ^ 0x5a5a5a5a).randbytes(n)
 
 
+_GARBAGE = {}
+
+
+def garbage_words(seed, side):
+    """The 32-bit words the harness plants as garbage for a case on one machine ('x86' / 'a64'): non-argument
+    registers, registers clobbered by intercepted calls, the stack fill. An argument equal to one of them came from
+    uninitialised state on that machine."""
+    key = (seed, side)
+    got = _GARBAGE.get(key)
+    if got is None:
+        g = set()
+        if side == 'x86':
+            g.update(garbage32(seed, i) for i in range(7))
+            g.update(garbage32(seed, 100 + k) for k in range(64))
+            fill = stack_fill(seed, 0x1000)
+        else:
+            g.update(garbage32(seed, 200 + i) for i in range(31))
+            g.update(garbage32(seed, 300 + i) for i in range(31))
+            g.update(garbage32(seed, 400 + i) for i in range(32))
+            g.update(garbage32(seed, 600 + i + 32 * k) for k in range(64) for i in range(1, 18))
+            fill = stack_fill(seed ^ 0xa5, 0x1000)
+        g.update(struct.unpack_from('<I', fill, o)[0] for o in range(0, len(fill) - 3))
+        g.discard(0)
+        got = _GARBAGE[key] = g
+        if len(_GARBAGE) > 64:
+            _GARBAGE.clear()
+            _GARBAGE[key] = g
+    return got
+
+
 def garbage32(seed, k):
     return random.Random((seed * 7919 + k * 104729) & 0xffffffff).getrandbits(32)
 

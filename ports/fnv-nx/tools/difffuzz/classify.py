@@ -49,8 +49,8 @@ def entry_register_reads(fn, conv):
     """Registers the oracle function reads before writing them on its entry path (straight line up to the first
     branch), excluding those its declared convention passes (ecx/edx) and the callee-saved pushes: a register
     argument MSVC's whole-program optimisation added (a custom convention units.json does not record)."""
-    passed = {sp for _, sp, _, _ in conv.x86 if sp in ('ecx', 'edx')}
-    written, reads = set(), set()
+    passed = {sp for _, sp, _, _ in conv.x86 if sp in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi')}
+    written, reads = set(), []
     for ins in CSD.disasm(fn['code'], fn['address']):
         if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
             continue                  # saving a callee-saved register / reserving a slot is not a use
@@ -64,14 +64,15 @@ def entry_register_reads(fn, conv):
             break
         for r in rr:
             n = BASE.get(ins.reg_name(r), ins.reg_name(r))
-            if n in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi') and n not in written and n not in passed:
-                reads.add(n)
+            if n in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi') and n not in written and n not in passed and \
+                    n not in reads:
+                reads.append(n)
         for r in ww:
             written.add(BASE.get(ins.reg_name(r), ins.reg_name(r)))
         if capstone.CS_GRP_JUMP in ins.groups or capstone.CS_GRP_CALL in ins.groups or \
                 capstone.CS_GRP_RET in ins.groups:
             break
-    return sorted(reads)
+    return reads          # in first-read order
 
 
 def _outcome(r):

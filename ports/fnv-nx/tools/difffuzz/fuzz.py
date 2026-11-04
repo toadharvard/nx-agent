@@ -232,6 +232,20 @@ def fuzz_one(item, opts):
     globals_ = sorted({tg for _, k, tg, _ in fn['relocs'] if tg is not None and world.WINDOW[0] <= tg < world.WINDOW[1]
                        and tg not in pinned})
     gen = Gen(target, globals_, addr)
+    if getattr(target, 'custom_cc', None):
+        # a modelled MSVC custom register convention is accepted only when the oracle no longer depends on garbage:
+        # three cases, each run with two garbage seeds, must give the same x86 outcome
+        out['custom_cc'] = target.custom_cc
+        for _ in range(3):
+            c1 = gen.fresh(); c1.bg = 'zero'
+            c1.rets = [c1.ret_bytes(i) for i in range(8)]
+            c2 = c1.copy(); c2.seed = c1.seed ^ 0x2468ace1
+            r1, _, _ = pair.run(c1, opts['max_steps'])
+            r2, _, _ = pair.run(c2, opts['max_steps'])
+            out['execs'] += 2
+            if (r1.error, r1.ret, [c.target for c in r1.calls]) != (r2.error, r2.ret, [c.target for c in r2.calls]):
+                out['status'] = 'oracle-gap:custom-cc'
+                return out
     corpus, cov, sigs = [], set(), {}
     iters, tlimit = opts['iters'], opts['time']
     zero = world.Case(seed=1)

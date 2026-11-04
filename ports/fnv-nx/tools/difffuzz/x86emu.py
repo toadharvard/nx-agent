@@ -33,7 +33,9 @@ FLD_STUB = 0x0e005000       # `fld qword [FLD_VAL]; ret` for float results of in
 FLD_VAL = 0x0e005800
 BUILTIN_STUB = 0x0e006000   # x87 helper code (_ftol2, _CIsqrt, ...) and its scratch slots
 BUILTIN_SLOT = 0x0e006800
-FPCW_MSVC = 0x027f          # MSVC CRT default: 53-bit precision, round to nearest, exceptions masked
+FPCW_MSVC = 0x027f
+REGS = {'eax': UC_X86_REG_EAX, 'ecx': UC_X86_REG_ECX, 'edx': UC_X86_REG_EDX, 'ebx': UC_X86_REG_EBX,
+        'esi': UC_X86_REG_ESI, 'edi': UC_X86_REG_EDI}          # MSVC CRT default: 53-bit precision, round to nearest, exceptions masked
 
 
 def _desc(base, limit, access, flags=0xC):
@@ -42,10 +44,10 @@ def _desc(base, limit, access, flags=0xC):
 
 
 class Call:
-    __slots__ = ('target', 'args', 'ret_to')
+    __slots__ = ('target', 'args', 'ret_to', 'regs')
 
-    def __init__(self, target, args, ret_to):
-        self.target, self.args, self.ret_to = target, args, ret_to
+    def __init__(self, target, args, ret_to, regs=None):
+        self.target, self.args, self.ret_to, self.regs = target, args, ret_to, regs or {}
 
 
 class Result:
@@ -195,10 +197,8 @@ class X86Engine:
                 else:   # aggregate by value: its bytes on the stack
                     data = case.args.get(lab, b'').ljust(v.size, b'\0')[:v.size]
                     data = data.ljust((len(data) + 3) // 4 * 4, b'\0')
-            if space == 'ecx':
-                uc.reg_write(UC_X86_REG_ECX, world.u32(data))
-            elif space == 'edx':
-                uc.reg_write(UC_X86_REG_EDX, world.u32(data))
+            if space in REGS:
+                uc.reg_write(REGS[space], world.u32(data.ljust(4, b'\0')))
             else:
                 stack_items.append((off, data))
         frame = bytearray(max((o + len(d) for o, d in stack_items), default=0))
@@ -238,7 +238,8 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_EIP, address)
             return
         k = len(r.calls)
-        r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr))
+        r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr,
+                            {n: uc.reg_read(REGS[n]) for n in ('eax', 'ebx', 'esi', 'edi')}))
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
         pop, kind = info if info else (0, 'int')
