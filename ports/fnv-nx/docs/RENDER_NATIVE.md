@@ -38,13 +38,13 @@ So the render layer we would replace is about **2,300-3,400 functions** (named u
 2. **Accumulate.** `BSShaderAccumulator` (an `NiAccumulator`, 38 functions; `SetupDepth 0x00b65550`,
    `ClearActivePasses 0x00b65580`) asks each geometry's `BSShaderProperty` for its **render pass list**
    (`BSShaderProperty::ShaderPassList::Add 0x00ba9ee0`, `ShaderPassEntry 0x00ba8ec0`): one entry per pass, each
-   entry = (geometry, `eBSSMPassEnum` pass id, up to N lights, flags). The pass list is built by the property from its
+   entry = (geometry, pass id (true FNV numbering, §1.3), up to N lights, flags). The pass list is built by the property from its
    NIF flags (specular, skinned, vertex colours, parallax, facegen, env map, glow, ...), the lights assigned by
    `ShadowSceneNode`, fog and the shader level.
 3. **Batch.** `BSBatchRenderer` (43 functions; `FindPassBucket 0x00b9a090`, `FindBucketIndex 0x00b98ae0`) buckets the
    entries **by pass id**, then by texture/geometry group inside a bucket; alpha geometry is sorted by depth
    (`ComputeAlphaDepth`). The accumulator renders buckets in pass-id order: the pass enum *is* the render order
-   (z-only/depth first, opaque lighting, land, LOD, sky, alpha passes from `FIRST_ALPHA_PASS=494`, water,
+   (z-only/depth first, opaque lighting, land, LOD, sky, alpha passes from `FIRST_ALPHA_PASS` = 568 (true numbering, RENDER_VERIFY.md §1), water,
    precipitation, sun glare, blood splatter).
 4. **Draw.** For each bucket the owning `BSShader` (a `NiD3DShader`) runs Gamebryo's shader protocol: setup pass
    (pick VS/PS from the pass id, `NiD3DPass` render/sampler state through the `NiDX9RenderState` cache), update
@@ -62,31 +62,36 @@ Extra scene renders per frame: shadow maps (§1.4), water reflection (§1.5), th
 
 `BSShaderManager` loads one `shaderpackage%03i.sdp` by shader level (`etShaderLevel`: 1_X, 2_0, 2_A96, 2_B96, 2_A,
 2_B, 3_0) and each shader class fetches its blobs by name; the decomp also keeps each class's **developer table**
-(HLSL source + `#define`s per index), which documents every permutation. Pass enum: **756 values** (`eBSSMPassEnum`,
-`bsshader_shader_layout.h`), 667 live render passes + shadow volume/tile/image-space + 83 unused.
+(HLSL source + `#define`s per index), which documents every permutation. Pass ids: FNV uses
+**759 ids** (0 = disabled, 1..758; `COUNT` = 759), not the decomp header's `eBSSMPassEnum` (`bsshader_shader_layout.h`,
+756 values), which is an older/re-sorted list. The true ids come from the binary's pass-name function `FUN_00b4f9d0`
+(V6n, `render/verify/enum/pass_names.py`, docs/RENDER_VERIFY.md §1): `FIRST_ALPHA_PASS` = 568, TILE = 757,
+IMAGESPACE = 758; the header's "unused" block maps into live ranges. Only ZONLY..DEPTHMAP (1-19) and NOLIGHTING
+(65-87) have the same ids in both. Ranges below are true ids (correction of 2026-11-04; the first version of this
+section used the header).
 
 | class (family) | binaries it loads (count) | HLSL sources (dev table) | passes (examples) | notes |
 |---|---|---|---|---|
 | `ShadowLightShader` (SLS, the main per-pixel lighting) | `SLS1%03i.vso` 31, `SLS1S%03i.vso` 22, `SLS2%03i.vso` 103, `SLS1%03i.pso` 48, `SLS2%03i.pso` 160 (+`SLS2%03is%01i.pso` shadow-sample variants) | `ADTS`, `ADTS10`, `AD`, `DiffusePt`, `Specular`, `Texture`, `land`, `LandO`, `landlod`, `landlighting`, `decal`, `depthmap`, `SimpleShadow`, `WaterFog`, `EnvMap`, `renderNormals/Depth/Velocity`, `localMap` | ADTS* / ADT* (ambient+diffuse+texture+spec, 1/2/3/4/10 lights), AD2/AD3, DIFFUSEPT2/3, TEXTURE, 2x_SPECULAR*, LAND* (1-7 layers, `O4` 4-layer), ZONLY, DEPTHMAP, SIMPLESHADOW, FOG, ENVMAP | defines: `LIGHTS`/`MAXLIGHTS`/`NUM_PT_LIGHTS`, `SKIN`, `VC`, `SPECULAR`, `PROJ_SHADOW`/`SHADOWMAP`, `FOG`, `PARALLAX`, `FACEGENBLEND`, `HAIR`, `EYE`, `GLOW`, `MODELSPACENORM`, `LANDALPHA`, `TREE` |
-| `Lighting30Shader` (SM3 path) | `SM3%03i.pso` 50, `SM3LL%03i.pso`; VS from `SM3Lighting/SM3ZOnly/SM3DepthMap/SM3SimpleShadow` | `lighting\3x\*` | all `3X*` passes 306-409: 3XLIGHTING (+S/H/Px/Pxo/Fg/G/Vc/Spc/Shp), 3XZONLY, 3XDEPTHMAP, 3XENVMAP, 3XSILHOUETTE, 3XDEPTH/VELOCITY/LOCALMAP | the SM3 lighting loop does several lights in one pass |
-| `BSShaderNoLighting` | `NOLIGHT%03i.vso` 28, `NOLIGHT{MAT,TEX,TEXVC,TEXVCPMA,VCONLY,WF,WFAt}.pso` | `NoLighting` | NOLIGHTING* 66-87 (incl. particle-system strips, falloff) | effects, glow, UI-in-world |
-| `TallGrassShader` | `GRASS2%03i.vso` 24, `GRASS23x%03i.vso` 24, `GRASS2/23x %03i[TMS].pso` 4 each | `tallgrass\lowDetail/highDetail` | GRASS_* 20-59, 524-567 (dir only / 1 point light, vertex/fragment lit, shadow, `B`illboard) | instance data in per-batch constant arrays (`TallGrassGroup`: 16 B position+scale per instance) |
+| `Lighting30Shader` (SM3 path) | `SM3%03i.pso` 50, `SM3LL%03i.pso`; VS from `SM3Lighting/SM3ZOnly/SM3DepthMap/SM3SimpleShadow` | `lighting\3x\*` | all `3X*` passes 376-479 (+ the eight `3XWATER_DEPTH*` ids in 730-749): 3XLIGHTING (+S/H/Px/Pxo/Fg/G/Vc/Spc/Shp), 3XZONLY, 3XDEPTHMAP, 3XENVMAP, 3XSILHOUETTE, 3XDEPTH/VELOCITY/LOCALMAP | the SM3 lighting loop does several lights in one pass |
+| `BSShaderNoLighting` | `NOLIGHT%03i.vso` 28, `NOLIGHT{MAT,TEX,TEXVC,TEXVCPMA,VCONLY,WF,WFAt}.pso` | `NoLighting` | NOLIGHTING* 66-87 (same in the header; incl. particle-system strips, falloff) | effects, glow, UI-in-world |
+| `TallGrassShader` | `GRASS2%03i.vso` 24, `GRASS23x%03i.vso` 24, `GRASS2/23x %03i[TMS].pso` 4 each | `tallgrass\lowDetail/highDetail` | GRASS_* 22-61, 604-647 (dir only / 1 point light, vertex/fragment lit, shadow, `B`illboard) | instance data in per-batch constant arrays (`TallGrassGroup`: 16 B position+scale per instance) |
 | SpeedTree: `SpeedTreeBranchShader`/`FrondShader`/`LeafShader`, `BSDistantTreeShader` | `STB1%03i.vso` 10, `STB2%03i.vso` 20, `STB1%03i.pso`, `STFROND[2]%03i.*`, `DISTTREE[Sil].*` | `speedtree\frond`, `distanttree\DistantTree` | LEAVES_AD/ADPt, FRONDS, DISTANT_TREE_BASE/SILHOUETTE | leaf cards rotate in the VS (`STBB` billboard constants) |
 | `DistantLODShader` | `DISTLOD1/2%03i` 2+2 | `landlod` | ADT_OptLOD, LANDLO_A, LANDO_Am | distant land and object LOD |
-| `SkyShader` | `SKY*.vso/pso` 21 named binaries | `sky\sky[_quad]` | SKYBASEPRE, SKY, SKY_STARS/TEXTURE/CLOUDS/MOON_STARS_MASK, SKY_SUNGLARE | |
-| `WaterShader` | `WATER%03i.pso` 38, `WATER000-002.vso` | `water\2_ab\*` (water, waterhmap, displace, waterlighting) | WATER* 568-638 (wading, interior, no-reflection/refraction/depth, Vc), WATER_LOD, WATER_DEPTH* 642-665 | |
+| `SkyShader` | `SKY*.vso/pso` 21 named binaries | `sky\sky[_quad]` | SKYBASEPRE, SKY, SKY_STARS/TEXTURE/CLOUDS/MOON_STARS_MASK (568-574, the first alpha passes), SKY_SUNGLARE | |
+| `WaterShader` | `WATER%03i.pso` 38, `WATER000-002.vso` | `water\2_ab\*` (water, waterhmap, displace, waterlighting) | WATER* 648-718 (accumulator group base 648: wading, interior, no-reflection/refraction/depth, Vc; 705 = WATER_NO_REFLECTIONS_Vc), WATER_LOD, WATER_DEPTH* 728-747 | |
 | `ParticleShader`, `PrecipitationShader` | `PAR2%03i` 20 VS, `PARTICLE.*`, `PRECIP%03i` 4+2 | `particle`, `precipitation` | PARTICLE, PARTICLE_PREPASS, PRECIPITATION_RAIN | GPU-side particle expansion |
 | `GeometryDecalShader` | `GDECAL[S].vso`, `GDECAL.pso` | `decal` | GEOMDECAL[_S] | skinned decals |
 | `BSShaderBloodSplatter` | `BS.*`, `BSF.*` | `BloodSplatter` | BLOOD_SPLATTER[_FLARE] | screen-space splats |
 | `BoltShader`, `BeamShader` | `BOLT.*`, `BEAM.*` | `bolt`, `beam` | BOLT, BEAM | |
-| `VolumetricFogShader` | `VolumetricFog%03d` 2+2 | `vfog` | VFOG_* 519-523 | |
-| `TileShader` (UI) | `TILE1%03i` 3+3 | `tile` | TILE (671) | menus |
-| `ImageSpaceShader*` | `IS%s.vso/pso` (one per effect shader) | `imagespace\*` (base, copy, blur2, HDR*, DOF, radial blur, sunbeams, refraction, map, tv, noise, cinematic, scanlines, menuBG, motion blur, water FFT) | IMAGESPACE (672) | §1.7 |
+| `VolumetricFogShader` | `VolumetricFog%03d` 2+2 | `vfog` | VFOG_* 599-603 | |
+| `TileShader` (UI) | `TILE1%03i` 3+3 | `tile` | TILE (757) | menus |
+| `ImageSpaceShader*` | `IS%s.vso/pso` (one per effect shader) | `imagespace\*` (base, copy, blur2, HDR*, DOF, radial blur, sunbeams, refraction, map, tv, noise, cinematic, scanlines, menuBG, motion blur, water FFT) | IMAGESPACE (758) | §1.7 |
 | `NiD3DDefaultShader` (Gamebryo) | none (fixed function) | - | - | debug lines, fallback; `SetTransform`/`SetLight`/texture stages |
 
 57 distinct `#define` tokens appear in the developer tables (`SKIN` 80, `SM3` 41, `LIGHTS` 39, `VC` 38, `SPECULAR` 31,
 `TREE` 30, `PROJ_SHADOW` 29, `MAXLIGHTS` 25, `FOG` 15, `FACEGENBLEND` 10, `LANDALPHA` 10, `ENVMAP` 8, `PARALLAX` 4,
-...): the real permutation space is a handful of orthogonal bits per family, not 667 shaders.
+...): the real permutation space is a handful of orthogonal bits per family, not one shader per pass id.
 
 **Vertex formats.** Geometry comes from `NiGeometryData` streams (position, normal, binormal, tangent, colour, up to
 N UV sets) and `NiSkinPartition` partitions (4 weights + 4 bone indices, a bone palette per partition, skinning in
