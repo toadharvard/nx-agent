@@ -120,6 +120,7 @@ CLASSES = {
     'NEW5': 'neutral',          # FNVNX_GLOBAL_DELETE in a class whose only scalar delete is the placement form (MSVC: empty)
     'NSCALL1': 'neutral',       # unqualified call of N's own CRT-named prototype (bound only in N) -> N::name(
     'FINL1': 'neutral',         # __forceinline dropped from a body-less declaration the unit never defines (an ordinary call)
+    'EBO2': 'layout',          # FNVNX_EBO2 (empty under MSVC): an empty base of a class introducing a vfptr goes after the vptr
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
