@@ -2812,3 +2812,20 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - The first guest built at >= 8b24dc6 (full1), then the emulated boot on the real exe on this machine.
   - Game data cannot reach the farms through git. The owner chooses agent-only storage: their HTTPS server on 443,
     a private bucket with a read-only key in the environment, or the exe alone in the private artifacts repository.
+
+### J-0128 | 2026-11-04 | stream: farms,data | status: wip | parent: J-0127
+
+* **decided (owner)** - The owner's game copy and their GOG login may be shared with the agents. Speed matters more
+  here than keeping the login on one machine.
+* **did** - Two agent-only branches in the private artifacts repository. Neither is ever copied into this public
+  repository, a published link branch or a report.
+  - `gamedata/exe`: the owner's FalloutNV.exe plus a sha256 file.
+  - `gamedata/gog`: lgogdownloader's galaxy_tokens.json. A farm that needs `Data/` (9.4 GB) downloads it from GOG
+    itself instead of passing it through git.
+* **did** - lib_job.sh `job_gamedata`: fetches gamedata/exe once and checks its sha256. full_job.sh then boots on
+  `BOOT_IMAGE=<the exe>`, for both the raw and the stub-fault boot, instead of S14's synthesized image.
+  - No synth.exe is published beside such a boot.
+  - FARM_REAL_EXE=0 keeps the synthesized image.
+  - Test: tests/farm/test_job_gamedata.sh (ok).
+* **next** - full1's first job at a head with this and the J-0127 loader fix: the first emulated boot on the real exe.
+  It shows the frontier past the image-vftable traps of J-0126.

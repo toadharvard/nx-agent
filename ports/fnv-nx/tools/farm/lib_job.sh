@@ -124,6 +124,24 @@ job_pristine() { # S11's MSVC 2008 objects of the pristine decomp (branch msvc/p
 	NOTE_PR=${NOTE_PR:-no MSVC pristine objects}
 }
 
+job_gamedata() { # the owner's FalloutNV.exe (private branch gamedata/exe, fetched once, sha256 checked) -> GAME_EXE
+	# Agent-only data (J-0128): it is never copied into a published branch or a report. FARM_REAL_EXE=0: not used.
+	GAME_EXE=""
+	NOTE_EXE="no player exe (S14's synthesized image)"
+	[ "${FARM_REAL_EXE:-1}" = 0 ] && { NOTE_EXE="player exe not used (FARM_REAL_EXE=0)"; return 0; }
+	local gd=$FARM_HOME/gamedata
+	if [ ! -f "$gd/.done" ] && git -C "$ARTIFACTS" fetch -q origin \
+			"+refs/heads/gamedata/exe:refs/remotes/origin/gamedata/exe" 2>/dev/null; then
+		rm -rf "$gd"; mkdir -p "$gd"
+		if git -C "$ARTIFACTS" archive refs/remotes/origin/gamedata/exe | tar -x -C "$gd" \
+				&& (cd "$gd" && sha256sum -c --quiet FalloutNV.exe.sha256); then
+			touch "$gd/.done"
+		fi
+	fi
+	[ -f "$gd/.done" ] && { GAME_EXE=$gd/FalloutNV.exe; NOTE_EXE="the player's FalloutNV.exe (gamedata/exe)"; }
+	return 0
+}
+
 stage_ok() {     # stage_ok <build dir> <stage>: the stage ended ok or warn
 	python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status"))' "$1/$2/stage.json" 2>/dev/null \
 		| grep -qx 'ok\|warn'
