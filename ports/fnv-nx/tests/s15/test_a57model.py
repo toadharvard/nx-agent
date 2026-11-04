@@ -22,7 +22,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = os.path.join(HERE, '..', '..', 'tools', 'perf', 'a57model')
 sys.path.insert(0, MODEL)
-LIMIT_CHECK = 6.0  # % mean absolute error over the check points; lower it as the model improves
+sys.path.insert(0, os.path.join(MODEL, '..'))
+LIMIT_CHECK = 6.0  # 4.8 % over 13 independent points after V1 P0-E1/E2  # % mean absolute error over the check points; lower it as the model improves
 LIMIT_FIT = 2.0
 
 fails = []
@@ -57,6 +58,23 @@ def test_dataflow():
     check(0x100c in dep, 'load through a register computed from a load is dependent')
     check(0x1004 not in dep and 0x1010 not in dep, 'streaming and independent loads are not dependent')
     check(0x1018 in mc, 'reload of a spilled loaded value is a memory chain')
+
+
+def test_divides():
+    import cost
+    if cost.CS is None or not shutil.which('llvm-mca'):
+        print('skip divides: capstone or llvm-mca missing')
+        return
+    n = 1000
+    words = [0x1e211800] * 4 + [0xf1000421, 0x54ffff61]   # fdiv s0, s0, s1 x4; subs x1, x1, #1; b.ne
+    blk = dict(pc=0x1000, n=len(words), count=n, mispred=0, taken=n, btb_l2=0, btb_miss=0, icl1=0, icl2=0, itlb=0,
+               bytes=b''.join(w.to_bytes(4, 'little') for w in words))
+    reg = {'R': dict(icount=0, dram_rd=0, dram_wr=0, l2fill=0, blocks=0, accesses=0), 'B': [blk], 'M': []}
+    params = cost.load_params(os.path.join(MODEL, 'params.json'))
+    _f, tot = cost.price(reg, params, 1.02, cost.MCA(None))
+    per = tot['cycles'] / n / 4
+    check(abs(per - 12) < 0.6, f'fdiv s chain priced mid-range: {per:.2f} cycles (guide 7-17)')
+    check(abs(tot['div_band'] / n / 4 - 5) < 0.6, f"divide band +-{tot['div_band'] / n / 4:.2f} cycles (half of 7-17)")
 
 
 def test_sim(out):
@@ -115,6 +133,52 @@ def test_sim(out):
     check(m['pf_hit'] > 0.9 * m['count'], f"stride stream prefetched ({m['pf_hit']} of {m['count']} hit prefetched lines)")
 
 
+def test_funcmodel(out):
+    import cost
+    if cost.CS is None or not shutil.which('aarch64-linux-gnu-gcc') or not shutil.which('llvm-mca'):
+        print('skip funcmodel: capstone, aarch64-linux-gnu-gcc or llvm-mca missing')
+        return
+    src = os.path.join(out, 'f.c')
+    with open(src, 'w') as f:
+        f.write('float dot3(const float *a, const float *b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }\n'
+                'int find(const int *a, int n, int k) { for (int i = 0; i < n; i++) if (a[i] == k) return i; return -1; }\n'
+                'int main(void) { return 0; }\n')
+    elf = os.path.join(out, 'f.elf')
+    subprocess.run(['aarch64-linux-gnu-gcc', '-O2', '-mcpu=cortex-a57', '-nostdlib', '-static', '-e', 'main',
+                    '-o', elf, src], check=True)
+    import funcmodel
+    res = funcmodel.price_funcs(elf, ['dot3', 'find'], cost.MCA(None), cost.MCA(None, iterations=1))
+    by = {r['func']: r for r in res}
+    check(all(r['cpi'] and r['cpi_once'] for r in res), 'funcmodel prices both functions')
+    check(all(r['cpi'] <= r['cpi_once'] for r in res), 'steady-state CPI <= one-call CPI')
+    check(by['find']['blocks'] >= 3 and by['dot3']['blocks'] == 1, f"blocks: find {by['find']['blocks']}, dot3 {by['dot3']['blocks']}")
+
+
+def test_mtmodel():
+    try:
+        import mtmodel
+        import frame_budget
+    except Exception as e:  # noqa: BLE001
+        print(f'skip mtmodel: {e}')
+        return
+    with open(os.path.join(MODEL, '..', 'budget_model.json')) as f:
+        model = json.load(f)
+    flat = mtmodel.run(model, None, ['placed', 'plan45'], [1020], 15.0, True)
+    fb = frame_budget.build(model)
+    fbs = {s['id']: s for s in fb['scenarios']}
+    by = {s['id']: s for s in flat['scenarios']}
+    p_mt = by['placed']['results']['1020']['mid']['frame_ms']
+    p_fb = fbs['placed']['results']['1020']['frame_ms']['mid']
+    check(abs(p_mt - p_fb) <= 0.02 * p_fb, f'flat, no hand-offs: mtmodel {p_mt} ms = frame_budget {p_fb} ms')
+    q_mt = by['plan45']['results']['1020']['mid']['frame_ms']
+    q_fb = fbs['plan45']['results']['1020']['frame_ms']['mid']
+    check(q_mt >= q_fb, f'plan45: critical path {q_mt} ms >= water-fill {q_fb} ms')
+    t = [mtmodel.Thread('main', [0], 0), mtmodel.Thread('w', [1, 2], 2)]
+    t[0].ops = [('fork', 'k', 'w', 3000, 'x'), ('run', 1000, 'a'), ('join', 'k')]
+    end, _b, cores, wait, _t = mtmodel.simulate(t, 1000, 10)
+    check(abs(end - 13) <= 1 and abs(wait - 12) <= 1, f'fork/join: main ends at {end} us (13), waits {wait} us (12)')
+
+
 def test_calibration(out):
     for t in ('qemu-system-aarch64', 'aarch64-linux-gnu-gcc', 'llvm-mca', 'pkg-config'):
         if not shutil.which(t):
@@ -144,6 +208,9 @@ def main():
     try:
         test_dataflow()
         test_sim(out)
+        test_divides()
+        test_funcmodel(out)
+        test_mtmodel()
         test_calibration(out)
     finally:
         if not keep:

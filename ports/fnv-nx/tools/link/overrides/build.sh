@@ -11,10 +11,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$(mkdir -p "$1" && cd "$1" && pwd)
 CC=${CC:-aarch64-linux-gnu-gcc}
 : > "$OUT/override.tsv"
-while IFS=$'\t' read -r addr sym src sig; do
+while IFS=$'\t' read -r addr sym src sig va; do
   case "$addr" in ''|'#'*) continue ;; esac
   obj="$OUT/${src%.*}.o"
   $CC -mabi=ilp32 -O2 -fPIC -U_FORTIFY_SOURCE -std=gnu11 -Wall -ffp-contract=off -frounding-math -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection -mno-outline-atomics -c "$HERE/$src" -o "$obj"
-  printf '%s\t%s\t%s\t%s\n' "$addr" "$sym" "$obj" "$sig" >> "$OUT/override.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$addr" "$sym" "$obj" "$sig" "${va:-}" >> "$OUT/override.tsv"
 done < "$HERE/overrides.tsv"
 echo "overrides: $(grep -c . "$OUT/override.tsv" || true) -> $OUT/override.tsv"

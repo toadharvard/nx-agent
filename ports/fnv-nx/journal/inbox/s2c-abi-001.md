@@ -7,7 +7,8 @@
   figures. That link also re-probes every layout, because of the pod2 rule.
 * **did** - Bridge-gap pairs, measured as S1b's abiclass BRIDGE pairs (unique src/address/reference):
   **2,221 -> 35** (replayed with the tree). It reached 32, then V1 refuted the e2dbe73 rule (VA-U1..U4) and the
-  figure went back to 70. Per-call-site types (vacall, below) bring it to 35. The commits:
+  figure went back to 70. Per-call-site types (vacall, below) bring it to 35. V2's va_arg-width check (VA2-VA4) then raises it to an
+  honest 75. Format literals (below) bring it to 57. The commits:
   - `e0ed8d5` The synthesized vtable/body objects (`<host>#vtables`) asked for layouts under their own name. 985
     probe rows failed and 1,283 manual rows were never decided on bytes. They now use the host unit. 2,221 -> 943.
   - `0750425` Variadic pairs (`abi.varargs_check`). AArch64 Linux passes anonymous arguments like named ones. A
@@ -86,6 +87,32 @@
     2 unrecorded units.
   - **For the orchestrator**: the link farm needs gcc-13-plugin-dev-aarch64-linux-gnu. Without it, vacall prints
     "no plugin" and those pairs stay manual.
+
+* **V2 VA2-VA4, fixed** - A fixed reference against a variadic definition was `same` whenever the tail was
+  int, pointer or double, but the body's va_arg widths are in neither signature.
+  - The plugin now records each variadic definition (`VADEF`: none / escape / its va_arg classes).
+  - The tail must share one width class with every va_arg; otherwise the pair is manual. Without a record it is
+    manual too.
+  - Replay: 35 -> 75. The 40 newly manual pairs are callers whose definition formats through vsnprintf: the
+    0x00703c00 override 15, 0x00406d00 13, plus 0x00a305b0, 0x00aa0020 and others. The format string decides those
+    widths.
+  - V2's test_s2c_varargs.py: 3 ok. V1's batch: refuted none.
+
+* **did (format literals)** - This is for the callers of definitions that forward their va_list to vsnprintf, as
+  the orchestrator asked.
+  - The plugin records each call's string-literal arguments for the requested callees (`FMT` lines).
+  - `vacall.parse_format` reads MSVC printf conversions.
+  - Exact widths at every site need no bridge. One shared regrouping (two ints read as `%lld` or `%f`) gets an abi2
+    bridge keyed by the conversions.
+  - The 0x00703c00 override declares `va=escape` (overrides.tsv column 5, carried by build.sh).
+  - Replay: 75 -> 57 (109 units recorded).
+  - Left: 0x00406d00's 13 callers pass a computed format.
+  - test_vacall: %s, %lld and %f executed under qemu, a non-literal format and disagreeing sites manual. Without
+    the bridges, 4 checks fail.
+
+* **V2 T1 (thisadj), fixed** - A member reference through another class than the definition's (a shell declared
+  at the subobject) now binds to `__fnvnx_msvc_<addr>`. At link-head that is 4 addresses and 7 references, e.g.
+  0x008d4870 -> 0x008805f0. V2's test_s2c_thisadj.py: ok; test_bindings has the same check.
 
 * **measured** - abireplay on link/c0d6c71516f6 with the override table: rows bridge 4,732, manual 79, same 1,995,
   x86-inconsistent 3,276 (before: bridge 4,183, manual 2,632, x86-inconsistent 3,267). The 9 new x86-inconsistent
