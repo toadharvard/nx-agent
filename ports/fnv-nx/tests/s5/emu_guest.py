@@ -1010,6 +1010,8 @@ class Emu:
             uc.mem_write(at, bytes(new))
             self.vt_ext_copies = getattr(self, "vt_ext_copies", []) + [(at, at + len(new), sym)]
             moved[point] = at + off
+            if off:   # the vtable's start: code that loads the _ZTV symbol's GOT entry and adds the offset itself
+                moved.setdefault(rt(a) & 0xFFFFFFFF, at)
             st["vtables extended"] += 1
             self.vt_bound[at + off] = (exe_vt, exe_slots, at + len(new))
             at = (at + len(new) + 7) & ~7
