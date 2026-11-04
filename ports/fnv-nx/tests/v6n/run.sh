@@ -38,6 +38,14 @@ selfcheck() {
 	for m in d24_bias_scale x8_dst_alpha; do
 		py "$V/claims.py" --mutant $m > /dev/null && { echo "claim check missed mutant $m"; bad=1; }
 	done
+	echo "== S6n claim checks: C54 MAXMIPLEVEL / mip scenes vs Nine on both targets, C65 radix sort property test"
+	py "$V/pixdiff.py" "$T/claims" | tail -1; py "$V/pixdiff.py" --target s6ngl "$T/claims" | tail -1
+	py "$V/pixdiff.py" "$T/claims" > /dev/null || bad=1; py "$V/pixdiff.py" --target s6ngl "$T/claims" > /dev/null || bad=1
+	if make -s -C "$ROOT/tests/s6n" all OUT="${S6N_TESTS:-$ROOT/build/v6n/s6n-tests}" > /dev/null 2>&1; then
+		S=${S6N_TESTS:-$ROOT/build/v6n/s6n-tests}
+		g++ -std=c++17 -O2 -I"$ROOT/render/native/include" -I"$ROOT/render/native/front" -o "$S/v6n_c65" "$T/claims/c65_sort.cpp" \
+			"$S/front.o" "$S/gpu_dispatch.o" "$S/d3d9_state_s.o" -lm && "$S/v6n_c65" || bad=1
+	fi
 	echo "== repro corpus: tests/v6n/repro/*.scene must match (fixed model/harness gaps); repro/impl_defined/ is reported only"
 	if ls "$T/repro"/*.scene > /dev/null 2>&1; then py "$V/pixdiff.py" "$T/repro" || bad=1; fi
 	if ls "$T/repro/impl_defined"/*.scene > /dev/null 2>&1; then py "$V/pixdiff.py" "$T/repro/impl_defined" | tail -1; fi

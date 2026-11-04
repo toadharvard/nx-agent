@@ -48,13 +48,28 @@ tests/v6n/run.sh
 | C32/C34 formats incl. NXFMT_CONVERT | PASS (62/62 conformance scenes; 8-bit RTs also on S6n's backend) |
 | nx/state.h "NxViewport +0.5 makes a +0.5-centre rasterizer cover exactly the D3D9 pixels"; C59 | **FAIL** on GL (y bias) -> defect `y_fill_bias`, fixed by S6n 521ffaf, re-verified PASS |
 | C24 / d3d9_epilogue.glsl fog depth z/w (= Nine programmable path) | PASS by Nine's source; S6b's translator differs (P1) |
+| C35 border colour after the fix | PASS (defect test + 6 border conformance scenes) |
+| C50, C53, C56-C58, C64, C67 | reproduced with S6n's own tests (17 goldens bit-exact, 31618 scene checks, 38 N1 checks); C64 also independently by rastercheck (0 px) |
+| C51, C52, C55 | PASS independently (V6n trap + conformance scenes on S6n's backend vs Nine) |
+| C54 MAXMIPLEVEL / mip selection | PASS independently (8 scenes vs Nine, both targets) |
+| C59 rasterization after the fix | PASS (rastercheck 0 px on all grids) |
+| C60 shim | PASS in use (S6b GLSL compiled through it, 6/7 parity like V6n's executor) |
+| C63 tile family | structure consistent with the decomp (VS plain/TEXSCROLL/VC with TexScroll in c4; PS plain/ALPHAMAP/VC with tintcolor c0); pixel semantics provisional, need TILE1000-1002 |
+| C65 radix sort / SortKey | PASS (property test, 4000 random sets) |
+| C66 capture/replay | host: reproduced and PASS under mutation (5/5 corruptions flagged); guest half pending C62 |
+| C68 N1 camera | view/projection agree with the engine (0x00e6c780); **FAIL** -> defects `screen_space_halfpixel`, `camera_port_rounding` |
+| C69 N2 families | provisional semantics; not falsifiable without the SLS/SM3 shaders (parity harness ready, pass_space.tsv names the binaries per pass) |
+| C61, C62 | pending: toolchain being built from source (render/native/env.sh) to run the ILP32 guest under Unicorn |
 
 ## Defects filed (tests/v6n/DEFECTS.md)
 - `border_swizzle`: fixed by S6n, verified.
 - `y_fill_bias`: fixed by S6n, verified.
+- `screen_space_halfpixel`: open.
+- `camera_port_rounding`: open.
 
 ## Next
 - capture/replay (RENDER_VERIFY.md §6) once S6n's N1 capture is wired to the Nine path; shader draws with VS in
   the scene format (`vs`, `vb`, `ib`).
 - PS path for `v6n_s6ngl` (S6n's shader package families), float/depth read-back when S6n adds it.
-- Run parity.py on the player's .sdp packages; classify the 5 unclassified reproducers.
+- Run parity.py on the player's .sdp packages.
+- Fuzz reproducers: classified (1 FF-model gap fixed, 4 implementation-defined in tests/v6n/repro/impl_defined).
