@@ -415,6 +415,29 @@ can see a transform half-written (an NiTransform is 13 floats).
   pathing `FUN_006ebc50` (about 10-25 % of main).
 * This costs main time: the wait the race hid. The serial cull-after-step order is the real code limit (6.10).
 
+**The fix and its cost.** `patches/mt1_cull_sync.s1b` puts the wait at the top of `FUN_008706b0`: thread 2's event 6
+(`fnvnx_mt1_wait_cell_update()`, toolchain/game/boot.cpp). The event is manual-reset; `FUN_008c78c0` resets all 12 + 8
+with ResetEvent (x86 `call [0x00fdf1cc]` at 0x8c78ec / 0x8c7917) when main starts the AI threads. With one AI thread
+there is no wait, and the wait is bounded at 100 ms. It sits behind `FNVNX_MT1_ON`, off by default.
+
+Cost [E] (model items, mid):
+* Thread 2 reaches event 6 after thread 0's part up to its event 4 (~half the process lists, 2.75 M), the Havok step
+  (havok_ai 2.6 M) and the downward part of animation_ai (~0.9 M): ~6.25 M.
+* Main reaches `FUN_008706b0` after temp effects, sky, effect roots and pathing: ~1 M.
+* The wait is about 5.2 M on main, ~6.4 ms at 1020 MHz, ~8 ms on the worst frame (as built about 35 ms instead of
+  26.9).
+
+**Verdict: keep the PC behaviour by default.**
+* Tearing of a multi-word transform during the overlap is possible on x86 as well. TSO orders stores, it does not make
+  a 13-float write atomic, so the PC game ships with it.
+* What the A57 adds is reordering. That matters where a pointer is published before what it points to is written.
+* During this overlap the scene graph's structure does not change: attaches and detaches are queued as packed tasks
+  and drained on main after the join (main.cpp:3364-3365). The downward pass writes transforms and bounds in place.
+* So the residual race is the same class the PC has: a frame's cull may use a mix of this and last frame's
+  transforms.
+* The patch stays available behind the gate for an A/B on hardware, if artefacts show up. A cheaper fix, if one is
+  needed: cull from bounds copied at the end of the downward pass (one frame of latency, no wait).
+
 ### 6.5 Memory ordering: what x86 gave for free
 
 x86 is TSO: every store is a release and every load an acquire. AArch64 is not, so engine code that synchronises
@@ -1122,6 +1145,9 @@ from a version that left the corrections on main, and then from the old 70-90 % 
 
 ### 11.7 The content lever: Switch INI presets (stream S15-simd)
 
+**D20 (revised by the owner): no preset is a default.** The target is 16.7 ms at the exe's default settings,
+met in code. The rows below stay as a model of how the frame's cost scales with content, not as a setting to ship.
+
 Threading alone reaches 17.15 ms at best (S15-threads), above the 16.7 ms worst-frame target. The 360/PS3 versions
 cut content: fade distances, shadows, grass. `tools/perf/content_presets.py` models that with the game's own settings
 only (no code). The presets live in budget_model.json `content`. Each key is a static setting object of the exe
@@ -1135,33 +1161,103 @@ uGridsToLoad 5, fLODFadeOutMultObjects 5.0, Items 3.0, Actors 2.5, iActorShadowC
 | switch_b | fade x 3 / 1.5 / 1.5; actor shadows 0 / 1; iMinGrassSize 160; grass fade 2500; decals 3 / 1 |
 | switch_b_g3 | switch_b with uGridsToLoad 3. It breaks scripted events and AI packages that expect loaded cells, so it is shown as the bound only, not proposed |
 
+**Calibration of the work items (asked by the orchestrator).** No ini. The items are code-path estimates
+(sections 3 and 5): the per-draw costs times RENDER_NATIVE.md 3.7's draw table, which assumes uGridsToLoad 5 (25
+cells) and 2-4 shadow lights. Those match the exe's defaults (5; iActorShadowCountExt 2, Int 4), and the table names
+no fade multiplier. So `base` = the exe's defaults, and no PC High/Ultra ini, is the consistent reading. A frameprof
+frame at base is still the first measurement to take.
+
 **Scaling [E].**
-- Visible references of a class grow with the square of its fade multiplier, capped by the loaded area
-  ((uGridsToLoad'/5)^2).
-- Grass grows with (80 / iMinGrassSize)^2 x (fade'/7000)^2.
-- V weights the classes: objects 0.70, items 0.10, actors 0.10, grass 0.10.
-- Each shadowed actor is a shadow pass: 15 % of draws at base.
-- cull = 0.30 x loaded + 0.70 x V; accumulation and both renderer sides = draws; scene update = 0.5 x loaded +
-  0.5 x V.
-- Animation, AI and Havok are unchanged: high process is set by distance to the player, not by fade.
-- S15-simd's override corrections scale with their item.
+- Draws: RENDER_NATIVE 3.7's sources at their mid counts. Statics 1,044 and items 116 (items taken as 10 % of
+  statics) scale with their fade multiplier squared, capped by the loaded area. Land (125) scales with the loaded
+  area. Grass (200) scales with spacing and fade. Actors (125) scale with their fade. Shadow maps (200) scale with
+  the shadowed-actor count. Distant LOD, trees, water reflection, particles and image space + UI (790 together) are
+  constant.
+- Cull = 0.30 x loaded + 0.70 x V, where V is the same scaling over the scene sources.
+- Accumulation and both renderer sides scale with draws. Scene update = 0.5 x loaded + 0.5 x V.
+- Animation, AI and Havok are unchanged.
+- An earlier version weighted only objects/items/actors/grass (0.7 / 0.1 / 0.1 / 0.1) with shadows as 15 %. It
+  treated almost every draw as scalable, and overstated the saving.
 
 | preset | scale cull / accumulation + renderer / scene update | worst frame, ms at 1.02 GHz, mid (lo-hi): placed | plan45b | plan60 |
 |---|---|---|---|---|
-| base | 1.00 / 1.00 / 1.00 | 34.3 (6.1-97.4) | 25.2 (6.1-80.7) | 23.4 (6.1-77.1) |
-| switch_a | 0.70 / 0.53 / 0.79 | 27.3 (6.1-76.7) | 20.1 (6.1-63.6) | 19.1 (6.1-61.7) |
-| switch_b | 0.52 / 0.27 / 0.66 | 23.3 (6.1-64.9) | 17.2 (6.1-53.8) | 16.7 (6.1-52.8) |
-| switch_b_g3 | 0.33 / 0.27 / 0.34 | 20.9 (6.1-56.5) | 15.2 (6.1-46.4) | 14.8 (6.1-45.5) |
+| base | 1.00 / 1.00 / 1.00 | 27.5 (5.5-83.5) | 21.4 (5.6-70.9) | 19.5 (5.5-67.3) |
+| switch_a | 0.77 / 0.71 / 0.84 | 22.8 (5.5-69.2) | 17.9 (5.5-59.0) | 16.6 (5.5-56.5) |
+| switch_b | 0.64 / 0.53 / 0.74 | 19.9 (5.5-60.8) | 15.8 (5.5-52.0) | 14.9 (5.5-50.1) |
+| switch_b_g3 | 0.42 / 0.50 / 0.40 | 17.1 (5.5-50.7) | 13.6 (5.5-43.3) | 12.6 (5.5-41.5) |
 
-(--render render/native/perf/report.json, --perf perf1 004d29413190; the lo end is the docked 720p GPU estimate.)
+(--render render/native/perf/report.json, --perf perf1 004d29413190, mt_cull at MT1's 15-35 %.)
 
-**Reading it** (mt_cull at MT1's 15-35 %). switch_b just meets 60 fps stable at plan60 (16.7 ms) and misses it at
-plan45b (17.2 ms). switch_a does not meet it (19.1 ms). Only switch_b_g3 is clearly under (14.8 / 15.2 ms), and it
-gives up uGridsToLoad 5. A preset between switch_b and switch_b_g3 is needed, or more threading. Every figure is the
-model's mid case. The hi end stays far above the target until frameprof measures a frame.
+**Reading it** (integration 13bf8f77's model, S15-threads' items and levers). At the exe defaults the worst frame
+is 27.5 ms with no lever, 21.4 ms at plan45b and 19.5 ms at plan60. The overrides are counted in all three; without
+them the figures are 34.5 / 26.5 / 24.7 ms. Content scales the frame strongly: switch_b would be 15.8 / 14.9 ms.
+Under D20 that is the measure of the work fade, shadow and grass settings drive, which code has to remove at the
+default settings instead. What these settings do not touch (distant LOD, trees, water reflection, particles, UI:
+30 % of draws; animation, AI, Havok) stays as it is.
 
 **Open.**
 - The work items are taken to describe a frame at the base settings, i.e. the exe's defaults. A PC player's ini
   (High/Ultra) has longer fades, so if the items were estimated for those, the presets save more.
 - The shares and the square law are estimates. frameprof per preset on one scene replaces them.
 - Applying a preset is ini.cpp's `port_default` table (S15-threads / S4): no game code.
+
+### 11.8 Port-overhead audit (stream S15-simd; owner rule D21: coverage first, then fixes, largest class first)
+
+**Tools.**
+- `tools/perf/overhead_audit.py`: per function, x86 vs A64 instructions per call on S13's harness, the A64
+  instructions executed inside ABI bridges, and A57 cycles from P0's funcmodel.
+- `tools/farm/audit_job.sh <commit> <k> <N>`: the same over shard k of N of every unit, on a farm. It prepares its
+  inputs through `fuzz_job.sh` with `FUZZ_SETUP_ONLY`.
+- `tools/perf/objcensus.py --disasm`: the static classes, now including acquire/release.
+
+**Static classes, link defb010a2a1b** (all 4,324 objects, 4.74 M instructions):
+
+| class | count | share of instructions |
+|---|---|---|
+| GOT loads (127,624 of them image data) | 168,610 | 3.56 % |
+| ABI bridge call sites (5,843 units, 1,446 zz_vt) | 7,289 | - |
+| ILP32 re-zero-extension (`mov wN, wN`) | 44,397 | 0.9 % |
+| exclusives / barriers / acquire-release (ordering) | 11,942 / 9,575 / 4,193 | 0.3 / 0.2 / 0.1 % |
+| zz_vt_* synthesized objects (vtables.py) | 1.38 M | 29 % |
+| stack protector / outline atomics: only in zz_vt_* | 4,584 checks / 3,447 calls | - |
+
+**Dynamic, hot units** (link 0bd144db1464; 161 clean functions of ninode, nimatrix3*, nibound*, niquaternion,
+nicullingprocess, nitransform*, bsbatchrenderer, hkpgsk, nitransforminterpolator):
+- A64 runs 0.81x the x86 instructions, at 1.25 A57 cycles per x86 instruction.
+- Bridges are 6.0 % of the A64 instructions executed (497 of 8,222 per call). Four float/matrix callers account for
+  nearly all of it: 0x00a6dd50 264 of 437, 0x004b4880 78 of 117, 0x00a59540 / 0x00a59660 74 of 159-160 (sent to S2c-abi).
+- The other classes are priced per frame once audit_job.sh has covered every unit.
+
+### 11.9 Pricing methodology, fixed as a class (V1 v1-003: P1, S2, S1, CE1; D21)
+
+**The chain (S2).** llvm-mca's Total Cycles over 300 iterations treats a function as a loop, so each pass's inputs
+are the previous pass's results. That chains calls that do not feed each other and overstates latency-bound code
+(Slerp 244 chained, 162 with the chain broken). The steady figure is now llvm-mca's **Block RThroughput**: the
+resource bound, with independent calls overlapping. That is `cost.MCA(metric='rthroughput')`, and funcmodel's
+`cpi_tput`. A row's cycles per call are its measured instructions x [throughput CPI (lo), one-call CPI (hi)]: lo the
+best overlap, hi a cold single call. The truth lies between them; the metric takes the mid.
+
+**Stale prices (P1).** A row now stores its CPI (`cpi: {lo, hi}`), not cycles. hotspot_metric.py and frame_budget.py
+(apply_perf) compute the cycles from the row's current instructions per call. A re-measured count (pass bucket
+82 -> 54, GSK 571 -> 539) re-prices automatically. Rows without a CPI still take P0's report.
+
+**Decisions re-made on the new bounds** (cycles per call, lo / hi / mid):
+
+| function | decomp | override | verdict |
+|---|---|---|---|
+| Slerp (+ weight, normalisation) | 49 / 302 / 175 | 34 / 233 / 134 | better (-23 %): kept (S1's "steady +39 %" was the chained figure) |
+| NiBound::Update | 17.5 / 42 / 29.7 | 12.4 / 49 / 30.7 | tie (+3 %, inside 5.7 %): stays dropped; CE1 holds, worse only at one call |
+| NiMatrix3 transpose product | 23.7 / 39 / 31.4 | 19.1 / 42.1 / 30.6 | tie (-2.5 %): stays dropped |
+| FromRotationMatrix (slow path) | 49.8 / 86.3 / 68 | 50 / 99.6 / 75 | worse (+10 %): **row dropped** (overrides.tsv); the source stays |
+| culling worker + classification | (306-433 instructions at CPI 0.4-2.2) | 26.5 / 148 | better: kept |
+| UpdateWorldLoc | (compose > 100 instructions) | 8.3 / 57 | better: kept |
+
+**Two models, one set of items.** a57model/mtmodel.py scheduled the raw items, without the override corrections,
+so `tests/s15/test_a57model.py` saw mtmodel 24.92 ms against frame_budget 19.32 ms. A scheduler cannot run the
+negative correction items either. `frame_budget.corrected_items(model)` folds each correction into the item it
+follows (the same sums), and mtmodel takes its items from it. The two now agree; the test passes. Its calibration
+case is skipped here: no qemu-system-aarch64.
+
+**Result.** The metric (top hotspot functions, cycles per frame) is 6.715 M on the corrected method, against 7.808
+on the chained one, with no code change. The worst frame at the exe's defaults (frame_budget.py placed, mid, 1.02
+GHz, with the render report and perf1) is 26.5 ms, against 27.5 before.

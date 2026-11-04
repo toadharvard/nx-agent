@@ -11,7 +11,23 @@ sdp2dksh on deko3d), the skip counters (skipped engine draws = 0), and the scene
 A family stream claims a row by setting `owner` and `status` on its own branch and telling the render machine. The
 render machine merges it.
 
+**Order of work (owner rule D21, ARCHITECTURE.md: coverage first, then optimisation).**
+1. Coverage (render machine). The general path draws every program correctly:
+   - Translated for every family;
+   - exact D3D9 state emulation as a class: every render, sampler and texture-stage state with its D3D9 or engine
+     default and save/restore, constants, vertex formats and render targets.
+   Metric: skipped draws = 0, and every capture scene passing (menu, docmitchell, and S5-data's new ones).
+2. Only after that, family by family: hand-written GLSL, then GPU tuning. Each step is measured against
+   Translated on the captures, at equal pixels and lower GPU time.
+Until step 1 holds, family streams (render-lit, render-land, render-veg, G1-gpu) work on correctness and measurement:
+- the family's parity on the captures;
+- defects in the Translated path or the state emulation, with failing tests;
+- cost-model accuracy.
+They do not switch families to native.
+
 Rules for family streams:
+- Block structs may live in the stream's own header (e.g. `n1/veg_families.h`) until the render machine takes
+  them into `families.h`.
 - Family code lives in your family's files: `shaders/<family>*.glsl`, a family module under `n1/`, and the
   family's scenes and tests under `tests/s6n/`.
 - You may add or change only your family's row in the dispatch table, and only your family's override rows.
@@ -34,9 +50,9 @@ Rules for family streams:
 | water | WATER*, wading, interior, LOD water | - | skipped -> Translated | render-land | open |
 | depth / shadow | ZONLY, DEPTHMAP, 3XDEPTH*, GRASS_SHADOW, shadow maps | depth, depth_at | skipped -> Translated | render-land | open |
 | image space: world chain | HDR, bloom/blur, DOF, radial blur, sunbeams, refraction, cinematic, VATS, night vision, ... | - | skipped -> Translated | render-land | open |
-| trees | SpeedTree branch/frond/leaf/billboard | - | skipped -> Translated | unclaimed | open |
-| grass | GRASS* | - | skipped -> Translated | unclaimed | open |
-| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - | skipped -> Translated | unclaimed | open |
+| trees | SpeedTree branch/frond/leaf/billboard | - | skipped -> Translated | render-veg | open |
+| grass | GRASS* | - | skipped -> Translated | render-veg | open |
+| particles, precipitation, bolt, beam, decal, blood, vfog | per class | - | skipped -> Translated | render-veg | open |
 | GPU cost model and pass structure | render/native/perf (gpu_cost.py, gen_stream.py, report.*), pass order, early-z, sorting | - | - | G1-gpu (with the render machine's perf work) | open |
 
 "skipped -> Translated": this pass is skipped today, and the render machine's Translated path, now in progress, will
@@ -153,6 +169,16 @@ failed` and `golden comparison: 19 scenes match`). One scene: `python3 tests/s6n
 | C99 | The lit static light permutations read per-draw values `Renderer::Render` prepares in the slice: the directional light as the unit vector towards it and each point light's 1 / range^2, so no fragment normalizes a constant or divides by range^2; images within 1/255 of the dynamic shader (n1 selftest), lit_spec_d1p2__e0 201 -> 179 Maxwell instructions. | n1 selftest (static vs dynamic); scenes |
 | C100 | `Renderer::Render` reuses the previous draw's epilogue block and dynamic record while the tracker has not re-translated in the frame (both depend only on the resolved state), instead of filling, comparing and appending them per draw; mix_hi .nxcap byte-identical. | n1 selftest, scenes, capture replay, nx_render |
 | C61 | The deko3d backend (`host/nxgpu.c`), host module (`host/nxgpu_host.c`) and the ILP32 N0 guest compile and link with fnvnx-a64 + libdeko3d 373bfd4 (`render/native/switch/build.sh`). Not yet run on hardware. | switch/build.sh |
+
+## Stream claims (who writes which native family)
+
+Families are claimed here before work starts, so parallel streams do not write the same GLSL. A family not claimed
+stays with the render machine. The Translated path (S6b's translation of the original) covers a family until its
+native GLSL lands.
+
+| stream | branch | families | native GLSL (`shaders/`) |
+|---|---|---|---|
+| render-land | claude/fnv-render-land | terrain (LAND*, DISTLOD), sky (SKY*), water (WATER*, water FFT), depth / shadow map (ZONLY, DEPTHMAP, SM3ZOnly/SM3DepthMap/SM3SimpleShadow, shadow casters), post (image space: IS* - HDR, bloom/blur, copy, cinematic, DOF, radial blur, refraction, sunbeams, VATS, TV, noise, map) | `is_*.glsl`, `land*`, `sky*`, `water*`, `depth*` (draws mapped in `shaders/native.tsv`) |
 
 ## render-lit: d9 lit families (stream render-lit, branch claude/fnv-render-lit; RENDER_NATIVE.md §4.5)
 

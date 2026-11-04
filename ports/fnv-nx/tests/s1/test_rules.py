@@ -53,6 +53,11 @@ check('FALL1 FNV_FORCEINLINE void member: no trap',
       (), [TRAP])
 check('FALL1 constructor after access label: no trap',
       run(s1.r_falloff_traps, 'class B\n{\n  public:\n    B(bool b)\n    {\n        v = b;\n    }\n};\n'), (), [TRAP])
+check('FALL1 void member of a class template with two nested template arguments: no trap',
+      run(s1.r_falloff_traps, 'FNVNX_KEEP void L<A<unsigned int>,P<B> >::AddTail(const P<B>& e)\n{\n    n = 1;\n}\n'),
+      (), [TRAP])
+check('FALL1 int member of the same template: trap',
+      run(s1.r_falloff_traps, 'int L<A<unsigned int>,P<B> >::Count()\n{\n    n = 1;\n}\n'), [TRAP])
 check('FALL1 ends in return: no trap',
       run(s1.r_falloff_traps, 'int f()\n{\n    return 3;\n}\n'), (), [TRAP])
 check('FALL1 class with declarations only, after a long comment: no trap',
@@ -1374,6 +1379,27 @@ check('REC1 an address the recipe already defines: skipped (REC1-DUP)', _ro2 + s
 os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None
 _shutil.rmtree(_rc, ignore_errors=True)
+
+# ---- S1-refs: HUNIT1 (explicit instantiations of a header unit's listed template members)
+_hu = run(s1.r_header_unit_instantiations, '#include "nitarray.inl"\nvoid NiTArray_UnitReference() {}\n',
+          '/nonexistent/src/gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp')
+check('HUNIT1 the listed members are explicitly instantiated', _hu,
+      ['template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAt(unsigned int, ActorCombatGroup*&);',
+       'fnv-nx HUNIT1'])
+check('HUNIT1 once only', str(run(s1.r_header_unit_instantiations, _hu,
+      '/nonexistent/src/gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp').count('fnv-nx HUNIT1')), ['1'])
+check('HUNIT1 other units untouched', run(s1.r_header_unit_instantiations, 'int x;\n', '/nonexistent/src/x_h_unit.cpp'),
+      [], ['HUNIT1'])
+
+# ---- S1-refs: XC2 (a hand-written dynamic initializer in XC1's form)
+_x2 = run(s1.r_handwritten_dyninit, 'struct NiPoint3StartupTable { int data[17]; };\nNiPoint3StartupTable gNiPoint3StartupSrc;\n'
+          'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
+          '/nonexistent/src/gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp')
+check('XC2 the copy-initialization becomes extern + __fnvnx_dyninit_<addr>', _x2,
+      ['extern NiPoint3StartupTable gNiPoint3StartupDst;', 'extern "C" void __fnvnx_dyninit_00a62110(void)'],
+      ['gNiPoint3StartupDst = gNiPoint3StartupSrc;\n'])
+check('XC2 other units untouched', run(s1.r_handwritten_dyninit, 'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
+      '/nonexistent/src/x.cpp'), [], ['XC2'])
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)

@@ -2,6 +2,7 @@
 """NX1 check 9: no shader is compiled on the console (owner rule).
 
     check_shaders.py [--nro fnv.nro] [--guest-elf fnvnx.elf] [--host-elf host.elf] [--ref-bin <switch-tools bin>]
+                     [--game-pak shaders_nx.pak --game-sdp Data/Shaders]   (or $FNVNX_GAME_SHADERS_PAK, $FNVNX_GAME_SHADERS)
 
 METRIC of this check: shaders compiled at run time = 0, and DKSH coverage of every variant the renderer requests.
   pack      fnv.nro's asset RomFS (romfs.py, byte-checked against switch-tools build_romfs with --ref-bin) holds
@@ -15,8 +16,10 @@ METRIC of this check: shaders compiled at run time = 0, and DKSH coverage of eve
   compiler  no shader compiler in the guest or the host (no uam/glslang/SPIR-V/GLSL symbols); the device backend's
             shader_create (render/native/host/nxgpu.c) accepts DKSH only;
   game      the game's own D3D9 shaders are translated at install time from the owner's shaderpackage*.sdp by
-            sdp2dksh (D6) into the owner's local shaders_nx.pak; that file and the .sdp never enter nx-agent (git).
-            The install-time packer does not exist yet: the item fails until it does.
+            sdp2dksh (D6) into the owner's local shaders_nx.pak by toolchain/nro/shaders_nx.py (game.packer: it exists
+            and passes tests/nx1/test_shaders_nx.py); that file and the .sdp never enter nx-agent (git). Given the
+            owner's pack and packages (on the owner's side only), game.coverage checks every program in them has a
+            DKSH of its stage in the pack (shaders_nx.py --verify), and game.outside_repo that neither is in nx-agent.
 """
 from __future__ import annotations
 
@@ -80,7 +83,7 @@ def syms(nm, elf):
     return subprocess.run([nm, elf], capture_output=True, text=True, errors="replace").stdout if nm and elf else ""
 
 
-def check(nro_path, guest_elf, host_elf, ref_bin) -> Checks:
+def check(nro_path, guest_elf, host_elf, ref_bin, game_pak=None, game_sdp=None) -> Checks:
     c = Checks()
     pack = None
     if nro_path:
@@ -138,9 +141,21 @@ def check(nro_path, guest_elf, host_elf, ref_bin) -> Checks:
     tracked = subprocess.run(["git", "-C", ROOT, "ls-files"], capture_output=True, text=True).stdout.splitlines()
     leaked = [f for f in tracked if re.search(r'(^|/)shaders_nx\.pak$|shaderpackage\d*\.sdp$', f, re.I)]
     c.ok("game.not_in_git", not leaked, f"the owner's shader files are tracked in nx-agent: {leaked}")
-    packer = [os.path.join(ROOT, p) for p in ("tools/shaders/shaders_nx.py", "toolchain/nro/shaders_nx.py")]
-    c.ok("game.packer", any(os.path.isfile(p) for p in packer),
-         "the install-time packer for the game's shaders (sdp2dksh -> shaders_nx.pak, owner-local) does not exist yet")
+    packer = os.path.join(ROOT, "toolchain", "nro", "shaders_nx.py")
+    t = subprocess.run([sys.executable, "-I", os.path.join(HERE, "test_shaders_nx.py")], capture_output=True, text=True,
+                       errors="replace") if os.path.isfile(packer) else None
+    c.ok("game.packer", t is not None and t.returncode == 0,
+         "no install-time packer (toolchain/nro/shaders_nx.py)" if t is None else
+         "shaders_nx.py fails its test: " + (t.stdout + t.stderr).strip().splitlines()[-1][:160])
+    if game_pak or game_sdp:
+        r = subprocess.run([sys.executable, "-I", packer, "--verify", game_pak or "", game_sdp or ""],
+                           capture_output=True, text=True, errors="replace") if game_pak and game_sdp else None
+        c.ok("game.coverage", r is not None and r.returncode == 0,
+             "give both the pack and the packages" if r is None else (r.stdout + r.stderr).strip()[:200])
+        if r is not None:
+            print("info game: " + r.stdout.strip().splitlines()[0] if r.stdout.strip() else "info game: no output")
+        inside = [x for x in (game_pak, game_sdp) if x and os.path.realpath(x).startswith(ROOT + os.sep)]
+        c.ok("game.outside_repo", not inside, f"the owner's shader files are inside nx-agent: {inside}")
     return c
 
 
@@ -150,8 +165,10 @@ def main(argv):
     ap.add_argument("--guest-elf")
     ap.add_argument("--host-elf")
     ap.add_argument("--ref-bin")
+    ap.add_argument("--game-pak", default=os.environ.get("FNVNX_GAME_SHADERS_PAK"))
+    ap.add_argument("--game-sdp", default=os.environ.get("FNVNX_GAME_SHADERS"))
     a = ap.parse_args(argv)
-    c = check(a.nro, a.guest_elf, a.host_elf, a.ref_bin)
+    c = check(a.nro, a.guest_elf, a.host_elf, a.ref_bin, a.game_pak, a.game_sdp)
     c.print()
     print(f"shaders: {sum(r[1] for r in c.rows)}/{len(c.rows)} pass -> {'PASS' if c.passed else 'FAIL'}")
     return 0 if c.passed else 1

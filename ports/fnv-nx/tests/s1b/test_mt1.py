@@ -8,7 +8,8 @@ tooling. Synthetic patches and sources only (no decomp needed):
   4. MT1 sites are exempt from the MSVC byte check (msvc_sites), and equiv classifies MT1 as `platform` (never in
      a neutral MSVC build);
   5. prepare's rule list runs r_mt1 (the Switch build);
-  6. the emitted code compiles with the forced fnvnx_compat.h gate, and runs the decomp's path while nothing defines
+  5b. FNVNX_MT1_ON is defined exactly once in the port (shim/include/fnvnx_mt1.h), and fnvnx_compat.h includes it;
+  6. the emitted code compiles with fnvnx_mt1.h (included twice: guarded), and runs the decomp's path while nothing defines
      fnvnx_mt1_on() and the MT1 path once the platform defines it to return 1 (host g++; skipped if absent).
 """
 import os
@@ -119,6 +120,19 @@ check('msvc_sites(' in mc and 'MSVC_RULES' in mc, 'msvc_check.py checks byte-par
 # 5: prepare (the Switch build) runs it ---------------------------------------------------------------------------
 check(sp.r_mt1 in sp.RULES, 'r_mt1 is in the module RULES that prepare loads')
 
+# 5b: exactly one definition of the gate macro, in fnvnx_mt1.h, which fnvnx_compat.h includes ---------------------
+import re  # noqa: E402
+defs = []
+for top in ('shim', 'toolchain', 'tools', 'platform', 'render', 'loader', 'startup'):
+    for dp, _, names in os.walk(os.path.join(PORT, top)):
+        for n in names:
+            if n.endswith(('.h', '.hpp', '.c', '.cpp', '.inl')):
+                t = open(os.path.join(dp, n), encoding='utf-8', errors='replace').read()
+                defs += [os.path.relpath(os.path.join(dp, n), PORT)] * len(re.findall(r'^\s*#\s*define\s+FNVNX_MT1_ON\b', t, re.M))
+check(defs == ['shim/include/fnvnx_mt1.h'], 'FNVNX_MT1_ON defined exactly once, in fnvnx_mt1.h: %r' % defs)
+compat_t = open(os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h')).read()
+check(re.search(r'^#include "fnvnx_mt1.h"', compat_t, re.M) is not None, 'fnvnx_compat.h includes fnvnx_mt1.h')
+
 # 6: compile and run the emitted code -----------------------------------------------------------------------------
 cxx = shutil.which('g++')
 if cxx:
@@ -128,12 +142,11 @@ if cxx:
         main = body + '\nint main(){ int v = 1; return Count(&v); }\n'
         open(os.path.join(d, 'm.cpp'), 'w').write(main)
         open(os.path.join(d, 'on.cpp'), 'w').write('extern "C" int fnvnx_mt1_on(void) { return 1; }\n')
-        compat = os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h')
-        gate = open(compat).read()
-        i = gate.index('/* Patch class MT1')
-        j = gate.index('#define FNVNX_MT1_ON')
-        gate = gate[i:gate.index('\n', j) + 1]          # the gate block alone (the rest needs the port's headers)
-        open(os.path.join(d, 'gate.h'), 'w').write(gate)
+        gate = os.path.join(PORT, 'shim', 'include', 'fnvnx_mt1.h')     # the gate header, as compat includes it
+        main = '#include "fnvnx_compat_gate_check.h"\n' + main
+        open(os.path.join(d, 'fnvnx_compat_gate_check.h'), 'w').write('#include "%s"\n#include "%s"\n' % (gate, gate))
+        open(os.path.join(d, 'm.cpp'), 'w').write(main)
+        open(os.path.join(d, 'gate.h'), 'w').write('/* empty: the gate comes in through the header above */\n')
         for name, extra, want in (('off', [], 2), ('on', [os.path.join(d, 'on.cpp')], 101)):
             exe = os.path.join(d, name)
             r = subprocess.run([cxx, '-O2', '-include', os.path.join(d, 'gate.h'), os.path.join(d, 'm.cpp')] + extra +

@@ -12,11 +12,14 @@
 struct NxD9Stats {
     uint32_t frames, draws, skipped, clears, shaders, textures;
     char firstSkip[160];        // why the first skipped draw was skipped
-    uint32_t nativeDraws;       // draws whose programs a hand-written d9 family replaced (d3d9_families.h)
-    uint32_t familyDraws[8];    // by NxD9Family (0 = translated)
+    uint32_t nativeShaders;     // shaders taken from the native dir (nx_d3d9_native_dir)
+    uint32_t nativeDraws;       // draws (executed or skipped after the shader lookup) whose VS and PS are both native, or
+                                // executed with a d9 family (d3d9_families.h, nx_d3d9_set_families)
+    uint32_t familyDraws[8];    // executed draws by NxD9Family (0 = not a d9 family)
 };
 
-// Hand-written d9 families (d3d9_families.h): bit f enables NxD9Family f (default: all). With a family off, or for
+// Hand-written d9 families (d3d9_families.h): bit f enables NxD9Family f (default: none - every program translated,
+// until coverage holds, owner rule D21 / CLAIMS.md). With a family off, or for
 // a program no family recognises, the translated GLSL draws (Family::Translated).
 void nx_d3d9_set_families(uint32_t mask);
 // One line per draw to `log` (nullptr: off): frame, draw (NXD9 order), backend draw (-1 if skipped),
@@ -31,5 +34,9 @@ void nx_d3d9_set_force_visible(int on);
 int nx_d3d9_run(const NxGpuApi* api, const uint8_t* data, size_t size, const char* shaderDir,
                 void (*onPresent)(void* user, uint32_t frame, uint32_t image), void* user, NxD9Stats* stats,
                 char* err, size_t errlen);
+
+// Directory of hand-written replacements, <hash %016llx>.glsl (fnvnx_shader_hash of the original's bytecode); they
+// take precedence over the record's GLSL and --shaders. NULL (default) = translated originals only.
+void nx_d3d9_native_dir(const char* dir);
 
 #endif
