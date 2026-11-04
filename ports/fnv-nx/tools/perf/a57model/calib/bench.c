@@ -59,6 +59,24 @@ static void k_chase(const char *name, uint64_t bytes, uint64_t iters) {
   MARK_STOP();
 }
 
+/* indexed chase: the next offset is loaded with a register offset (ldr x0, [x2, x0]) */
+static void k_chase_idx(void) {
+  uint64_t n = 4096 / 64, it = 40000;
+  uint64_t *base = alloc(4096);
+  uint32_t *perm = alloc(n * 4);
+  for (uint64_t i = 0; i < n; i++) perm[i] = (uint32_t)i;
+  for (uint64_t i = n - 1; i > 0; i--) { uint64_t j = rnd() % (i + 1); uint32_t t = perm[i]; perm[i] = perm[j]; perm[j] = t; }
+  for (uint64_t i = 0; i < n; i++) base[perm[i] * 8] = perm[(i + 1) % n] * 64ull;
+  uint64_t off = perm[0] * 64ull, k = it;
+  __asm__ volatile("1: ldr %0, [%2, %0]\n ldr %0, [%2, %0]\n ldr %0, [%2, %0]\n ldr %0, [%2, %0]\n"
+                   " subs %1, %1, #4\n b.ne 1b\n" : "+r"(off), "+r"(k) : "r"(base) : "memory");
+  k = it;
+  kernel("chase_4k_idx", it); MARK_START();
+  __asm__ volatile("1: ldr %0, [%2, %0]\n ldr %0, [%2, %0]\n ldr %0, [%2, %0]\n ldr %0, [%2, %0]\n"
+                   " subs %1, %1, #4\n b.ne 1b\n" : "+r"(off), "+r"(k) : "r"(base) : "memory");
+  MARK_STOP();
+}
+
 /* ---- dependent chains and independent throughput, 8 instructions per loop iteration ---- */
 #define CHAIN8(ins) ins "\n" ins "\n" ins "\n" ins "\n" ins "\n" ins "\n" ins "\n" ins "\n"
 #define LOOP(body, iters, ...)                                                                                   \
@@ -89,6 +107,17 @@ static void k_alu(void) {
   LOOP("mul v0.4s, v16.4s, v17.4s\n mul v1.4s, v16.4s, v17.4s\n mul v2.4s, v16.4s, v17.4s\n"
        "mul v3.4s, v16.4s, v17.4s\n mul v4.4s, v16.4s, v17.4s\n mul v5.4s, v16.4s, v17.4s\n"
        "mul v6.4s, v16.4s, v17.4s\n mul v7.4s, v16.4s, v17.4s\n", it, "r"(0)); MARK_STOP();
+}
+
+/* divide chains (predictions: the latency is data-dependent; operands near 1) */
+static void k_div(void) {
+  uint64_t it = 8000;
+  kernel("fdiv_s_chain", it); MARK_START();
+  LOOP("fmov s1, #1.25\n" CHAIN8("fdiv s0, s0, s1"), it, "r"(0)); MARK_STOP();
+  kernel("fdiv_d_chain", it); MARK_START();
+  LOOP("fmov d1, #1.25\n" CHAIN8("fdiv d0, d0, d1"), it, "r"(0)); MARK_STOP();
+  kernel("sdiv_w_chain", it); MARK_START();
+  LOOP("mov w10, #3\n" CHAIN8("sdiv w9, w9, w10"), it, "r"(0)); MARK_STOP();
 }
 
 /* store-to-load forwarding: the loaded value feeds the next store's data */
@@ -205,6 +234,7 @@ static void k_ilk(void) {
 
 int main(void) {
   k_chase("chase_4k", 4096, 40000);
+  k_chase_idx();
   k_chase("chase_96k", 96 * 1024, 40000);
   k_chase("chase_1m5", 1536 * 1024, 40000);
   k_chase("chase_64m", 64u << 20, 20000);
@@ -217,6 +247,7 @@ int main(void) {
   k_taken();
   k_math();
   k_ilk();
+  k_div();
   put("done\n");
   return 0;
 }

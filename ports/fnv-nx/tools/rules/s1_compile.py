@@ -1846,6 +1846,7 @@ def r_namespace_template_decls(path, text, stats):
             if not m.group(2).strip(): continue        # `template <>`: an explicit specialization needs its primary first
             name = m.group(5)
             if not re.search(r'(?<![\w.>:~])%s\s*\(' % re.escape(name), block[:m.start()]): continue
+            if not m.group(2).strip(): continue          # `template <>`: an explicit specialization needs its primary first
             tparams = set(re.findall(r'(?:class|typename)\s+(\w+)', m.group(2)))
             words = set(re.findall(r'[A-Za-z_]\w*', m.group(4) + ' ' + m.group(6)))
             params = _split_args(m.group(6))
@@ -3321,6 +3322,11 @@ def r_pointer_zero_compares(path, text, stats):
         declared_other = re.search(r'\b(?:int|unsigned|short|char|long|float|double|bool|__int64|DWORD|UINT|size_t)\s+%s\b'
                                    % re.escape(name), local)
         if declared_other: continue
+        # `*p > 0` with `T* p` compares the pointee, a scalar (signed for `int* p`: `<= 0` is not `== 0`); the
+        # compare is the pointer's only through `**` (PTR1-DEREF)
+        if is_ptr and re.search(r'(?<![\w)\]])\*\s*$', text[max(0, m.start() - 4):m.start()]) \
+                and is_ptr.group(0).count('*') == 1:
+            continue
         if not is_ptr and not (name in funcs and not re.search(r'[\w\*&>]\s+%s\s*[=;,\[]' % re.escape(name), local)):
             continue
         out.append(text[pos:m.start(2)]); out.append('!=' if m.group(2) == '>' else '=='); pos = m.end(2)

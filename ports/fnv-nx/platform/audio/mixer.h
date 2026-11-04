@@ -58,6 +58,10 @@ int mixer_voice_looping(const mix_voice *v);
 uint32_t mixer_voice_play_cursor(const mix_voice *v);    /* bytes */
 uint32_t mixer_voice_write_cursor(const mix_voice *v);   /* bytes: play cursor + one period of lead, wrapped */
 void mixer_voice_set_cursor(mix_voice *v, uint32_t byte_offset);   /* rounded down to a frame */
+/* I3DL2 reverb on the voice (reverb.h; DirectSound SetFX): created on first use, parameters updated; NULL removes
+ * it. -1 when out of memory (the voice stays dry). */
+struct fnvnx_i3dl2;
+int mixer_voice_set_reverb(mix_voice *v, const struct fnvnx_i3dl2 *p);
 /* notifications: copied; offsets MIX_NOTIFY_STOP fire on stop/end of a one-shot. count 0 clears. */
 void mixer_voice_set_notify(mix_voice *v, const mix_notify *n, uint32_t count, mix_notify_fn fn, void *ctx);
 

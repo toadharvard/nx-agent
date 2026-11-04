@@ -50,6 +50,7 @@ import bodies   # noqa: E402  (S2d: declared-only functions)
 import exevft   # noqa: E402  (S2c: the player's exe vftables)
 import thisadj  # noqa: E402  (S2c-abi: MSVC entries of secondary-base overrides)
 import vacall   # noqa: E402  (S2c-abi: call-site argument types of variadic references)
+import xexit    # noqa: E402  (S2c-abi: native stand-ins of the exe's exit thunks)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
 DATA_END = 0x0200c612
@@ -71,6 +72,7 @@ ADDR_SYM = '__fnv_%08x'
 TRAP_SYM = '__fnvnx_vtrap_%08x'   # slot of a virtual function defined nowhere -> fnvnx_vslot_trap(this, text)
 TLS_SYM = '__fnvnx_tls_%08x'      # thread-local variable at an image .tls address: slot of the native TLS block
 MSVC_ENTRY_SYM = '__fnvnx_msvc_%08x'   # MSVC's entry of an override that takes `this` at a secondary base: the thunk
+XEXIT_SYM = '__fnvnx_xexit_%08x'   # native stand-in of an exe exit thunk a unit registers by address (xexit.py)
 TEXTADDR_SYM = '__fnvnx_textaddr_%08x'   # a variable at a .text address nothing defines: absolute, the x86 value
 XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
@@ -542,6 +544,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     used_addr = set()
     data_defs, tls_defs, tls_addrs = [], [], set()
     text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
+    label_cache = {}
+    xexit_left = set()   # callback labels whose exe thunk has no native stand-in (they trap)
     exports = load_exports(EXPORTS if imports is None else (os.path.join(os.path.dirname(imports), 'exports.cpp')
                                                              if imports != 'none' else None))
     providers, crt_classes = load_providers(CRT_SYMBOLS if crt_symbols is None else
@@ -883,14 +887,34 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     cls = 'code-pending' if not du.obj else 'code-defmissing'
                     target = ADDR_SYM % addr
                     used_addr.add(addr)
+                elif ak == 'text' and note and re.search(r'@@3D', note) and msvc(note).kind == 'data' and \
+                        un not in called_syms(u) and label_is_argument(
+                            tree, u.host or u.source, msvc(note).qual[-1] if msvc(note).qual else un, label_cache):
+                    # a char label whose address the unit passes to a call: a callback (atexit with the exe's exit
+                    # thunk, V2 X2). A thunk of a known shape becomes a native stand-in (xexit.py); else the trap
+                    exe_ = thisadj.exe_path()
+                    sh_ = xexit.decode(exe_, addr) if exe_ else None
+                    if sh_ is not None and (sh_[0] != 'thiscall' or sh_[2] in native):
+                        cls, target = 'text-callback', XEXIT_SYM % addr
+                        if target not in bridges:
+                            bridges[target] = xexit.emit(target, sh_, lambda a_: ADDR_SYM % a_)
+                            used_addr.update([sh_[1], sh_[2]] if sh_[0] == 'thiscall' else [sh_[1]])
+                        stats['xexit_' + sh_[0]] += 1
+                    else:
+                        cls = 'extern-text'; target = None
+                        extern_text[addr].add(un)
+                        xexit_left.add(addr)
                 elif ak == 'text' and note and re.search(r'@@3[QD]', note) and msvc(note).kind == 'data' and \
-                        un not in called_syms(u):
+                        un not in called_syms(u) and not (re.search(r'@@3D', note) and label_is_argument(
+                            tree, u.host or u.source, msvc(note).qual[-1] if msvc(note).qual else un, label_cache)):
                     # a variable the decomp places at a .text address nothing defines (the generated initializers'
                     # `extern const char g_011c5a4c_arg1[]` at 0x00a00000: an immediate the generator took for an
                     # address): the code uses its address, which on x86 is that number - an absolute symbol there
                     # gives the native code the same value (S2c-abi, S13b native-stub-data). Only arrays (`@@3Q`)
                     # and char labels (`@@3D`, `&FUN_00a00000`), whose address is all the code uses; an `int` at
-                    # 0x00000065 stays extern-text
+                    # 0x00000065 stays extern-text. A char label whose address the unit passes to a call may be a
+                    # callback (0x00c1d8b0: `FUN_00ec658f(&UNK_00fdd3b0)`, _atexit with the static's x86 exit thunk,
+                    # V2 X2): it stays extern-text (a trap), never the raw x86 address
                     cls = 'text-addr'; target = TEXTADDR_SYM % addr
                     text_addrs.add(addr)
                 elif ak == 'text':
@@ -1287,7 +1311,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
-                                         'code-defmissing', 'extern-text', 'text-addr', 'import', 'provider', 'tls'))
+                                         'code-defmissing', 'extern-text', 'text-addr', 'text-callback', 'import',
+                                         'provider', 'tls'))
     with open(os.path.join(out, 'extern_text.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a in sorted(extern_text):
             f.write('%08x\t%s\n' % (a, ' '.join(sorted(extern_text[a]))))
@@ -1313,6 +1338,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               '%d non-literal or not modelled, %d sites disagree, %d not bridgeable' % (
                   stats['format_exact'], stats['format_bridged'], stats['format_unknown'],
                   stats['format_sites_disagree'], stats['format_not_bridgeable'])]
+    lines += ['', 'exit callbacks registered by address (xexit.py): niptr %d, thiscall %d; left to trap: %s' % (
+        stats['xexit_niptr'], stats['xexit_thiscall'], ' '.join('%08x' % a for a in sorted(xexit_left)) or '-')]
     lines += ['', 'MSVC entries at a secondary base (exe vftables, thisadj.py): %d addresses; the map names the '
               '_ZThn thunk for %d, %d without a thunk; references through another class bound to the thunk: %d'
               % (stats['msvc_entry_exe'], stats['msvc_entry_thunks'], stats['msvc_entry_no_thunk'],
@@ -2616,6 +2643,18 @@ def int_words(t):
         return u + base + ' '
     return ' '.join(re.sub(r'\b(?:(?:unsigned|signed|short|long|int|char|__int8|__int16|__int32|__int64)\b\s*)+',
                            canon, t).split())
+
+
+def label_is_argument(tree, src_, name, cache):
+    """Does the unit's prepared source pass `&name` (a char label) to a call: an argument position, `(` or `,`
+    before it, a cast in between allowed? Then the label may be a callback (atexit with an x86 exit thunk, V2 X2)."""
+    src_ = src_.split('#')[0]
+    if src_ not in cache:
+        p = os.path.join(tree, src_)
+        cache[src_] = blank_noise(open(p, encoding='utf-8', errors='surrogateescape').read()) \
+            if os.path.isfile(p) else ''
+    text = cache[src_]
+    return re.search(r'[(,]\s*(?:\([^()]*\)\s*)*&\s*%s\b' % re.escape(name), text) is not None
 
 
 def unit_c_decls(tree, src_, cache):

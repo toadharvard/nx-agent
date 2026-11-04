@@ -1,5 +1,6 @@
 /* mixer.cpp - software mixer (see mixer.h). */
 #include "mixer.h"
+#include "reverb.h"
 #include "../os/os.h"
 
 #include <math.h>
@@ -21,6 +22,7 @@ struct mix_voice {
     uint32_t nnotify;
     mix_notify_fn notify_fn;
     void *notify_ctx;
+    fnvnx_reverb *reverb;   /* SetFX I3DL2: the voice's own reverb, before its gains */
 };
 
 static os_lock_t g_lock;
@@ -29,6 +31,8 @@ static uint32_t g_rate = 48000, g_chunk = 256;
 static float g_master = 1.0f;
 static float *g_scratch;
 static uint32_t g_scratch_frames;
+static float *g_fxbuf;   /* a voice with an effect renders here first (render runs under g_lock) */
+static uint32_t g_fxbuf_frames;
 
 void mixer_init(uint32_t out_rate, uint32_t chunk_frames)
 {
@@ -47,6 +51,9 @@ void mixer_shutdown(void)
     free(g_scratch);
     g_scratch = NULL;
     g_scratch_frames = 0;
+    free(g_fxbuf);
+    g_fxbuf = NULL;
+    g_fxbuf_frames = 0;
     os_unlock(&g_lock);
 }
 
@@ -105,6 +112,7 @@ void mixer_voice_destroy(mix_voice *v)
     if (v->prev) v->prev->next = v->next; else g_voices = v->next;
     if (v->next) v->next->prev = v->prev;
     os_unlock(&g_lock);
+    fnvnx_reverb_destroy(v->reverb);
     free(v->notify);
     free(v);
 }
@@ -266,12 +274,11 @@ static void fire_crossed(mix_voice *v, uint32_t a, uint32_t b, uint32_t wraps)
     }
 }
 
-static void mix_voice_into(mix_voice *v, float *out, uint32_t frames)
+static void mix_voice_into(mix_voice *v, float *out, uint32_t frames, float gl, float gr)
 {
     const uint64_t step = (uint64_t)((double)v->freq * v->doppler / g_rate * 4294967296.0);
     const uint64_t end = (uint64_t)v->frames << 32;
     const unsigned stereo = v->fmt.channels >= 2;
-    const float gl = v->gl * g_master, gr = v->gr * g_master;
     uint32_t a = play_bytes(v), wraps = 0;
     for (uint32_t i = 0; i < frames; i++) {
         uint32_t f = (uint32_t)(v->pos >> 32);
@@ -309,10 +316,53 @@ void mixer_render_f32(float *out, uint32_t frames)
 {
     memset(out, 0, (size_t)frames * MIX_OUT_CHANNELS * sizeof(float));
     os_lock(&g_lock);
-    for (mix_voice *v = g_voices; v; v = v->next)
-        if (v->playing && v->data && v->frames && v->freq)
-            mix_voice_into(v, out, frames);
+    for (mix_voice *v = g_voices; v; v = v->next) {
+        if (!(v->playing && v->data && v->frames && v->freq))
+            continue;
+        const float gl = v->gl * g_master, gr = v->gr * g_master;
+        if (!v->reverb) {
+            mix_voice_into(v, out, frames, gl, gr);
+            continue;
+        }
+        if (g_fxbuf_frames < frames) {
+            float *n = (float *)realloc(g_fxbuf, (size_t)frames * MIX_OUT_CHANNELS * sizeof(float));
+            if (!n) {
+                mix_voice_into(v, out, frames, gl, gr);   /* no memory: dry */
+                continue;
+            }
+            g_fxbuf = n;
+            g_fxbuf_frames = frames;
+        }
+        /* the effect runs on the buffer's signal; its volume and pan come after (DirectSound's FX chain).
+         * A voice that ends inside this call leaves zeros behind, which the effect's tail fills. */
+        memset(g_fxbuf, 0, (size_t)frames * MIX_OUT_CHANNELS * sizeof(float));
+        mix_voice_into(v, g_fxbuf, frames, 1.0f, 1.0f);
+        fnvnx_reverb_process(v->reverb, g_fxbuf, frames);
+        for (uint32_t i = 0; i < frames; i++) {
+            out[2 * i] += g_fxbuf[2 * i] * gl;
+            out[2 * i + 1] += g_fxbuf[2 * i + 1] * gr;
+        }
+    }
     os_unlock(&g_lock);
+}
+
+int mixer_voice_set_reverb(mix_voice *v, const fnvnx_i3dl2 *p)
+{
+    os_lock(&g_lock);
+    int rc = 0;
+    if (!p) {
+        fnvnx_reverb_destroy(v->reverb);
+        v->reverb = NULL;
+    } else {
+        if (!v->reverb)
+            v->reverb = fnvnx_reverb_create(g_rate);
+        if (v->reverb)
+            fnvnx_reverb_set(v->reverb, p);
+        else
+            rc = -1;
+    }
+    os_unlock(&g_lock);
+    return rc;
 }
 
 void mixer_render_s16(int16_t *out, uint32_t frames)

@@ -760,7 +760,14 @@ RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cac
   `__fnvnx_textaddr_<addr> = 0x<addr>;` (aliases.ld), so the native code passes the same number. Before, these were
   `extern-text` and reached a named stub (S13b native-stub-data: GlobalObject2 0x0045cfe0's second argument). On
   link/c0d6c71516f6 this applies to 11 references in units, plus their copies in the vtable objects. Other variables
-  at such addresses (an `int` at 0x00000065) stay `extern-text`.
+  at such addresses (an `int` at 0x00000065) stay `extern-text`, and so does a char label whose address the unit
+  passes to a call (`label_is_argument`, a scan of the prepared source). It may be a callback: 0x00c1d8b0 hands
+  `&UNK_00fdd3b0`, the static's x86 exit thunk, to `_atexit` (0x00ec658f, V2 X2). It never gets the raw x86 address. A
+  thunk of a known shape becomes a native stand-in, `__fnvnx_xexit_<addr>` (`xexit.py`, decoded from the player's
+  exe). `niptr` is a NiPointer static's release: decrement the refcount at +4 and, at 0, call native vtable slot
+  k + 1 for MSVC slot k (DeleteThis). `thiscall` is `mov ecx, imm; jmp T`: T's native definition with the static.
+  0x00fdd3b0 is `niptr`. A label without one keeps the trap; stats.txt lists them. Test: `test_xexit.py`, both
+  shapes executed under qemu. A label only stored as data (`m_pDatB = &FUN_00a00000`) keeps the value.
 * **Calls of an IAT slot's address**: a decomp `__declspec(dllimport)` function named after its slot
   (`FUN_00fdf1c0(void *)`) is called directly by GCC (`bl`); when its name binds to an IAT slot as data, a call of it
   binds to the slot's api (S4's implementation or the api name), never into the image's IAT words.

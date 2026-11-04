@@ -125,6 +125,10 @@ static u64 h_thread_set_priority(u64 id, u64 prio) {   /* id: any guest thread, 
     Handle th = id ? ((HostThread *)id)->t.handle : CUR_THREAD_HANDLE;
     return svcSetThreadPriority(th, win32_to_horizon_prio((s64)prio));
 }
+#include "host_thread_activity.inc"
+static u64 h_thread_activity(u64 id, u64 paused) {   /* id 0: the calling thread */
+    return host_thread_activity(id ? ((HostThread *)id)->t.handle : 0, id == 0, paused);
+}
 static u64 h_thread_set_cpu(u64 id, u64 spec) {
     Handle th = id ? ((HostThread *)id)->t.handle : CUR_THREAD_HANDLE;
     if ((spec >> 40) & 0x7FFFFFull) return 0;   /* -1 and other negative values: nothing to do */

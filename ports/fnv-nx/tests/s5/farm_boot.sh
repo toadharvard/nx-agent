@@ -7,11 +7,14 @@
 #
 #   tests/s5/farm_boot.sh <commit> <out dir> [image]
 #
-# image: the FalloutNV.exe the guest maps. Default: $FNVNX_IMAGE, else the link's boot/synth.exe (S14's synthesized
+# image: the FalloutNV.exe the guest maps (put at switch/fnv/, NX1's SD layout, and at fnvnx/game/, where guests
+# linked before NX1 look for it). Default: $FNVNX_IMAGE, else the link's boot/synth.exe (S14's synthesized
 # image as the farm made it), else none (the empty image). Boots ($FARM_BOOTS, default "raw slots stub"), all with
 # --skip-faulting-init: raw; slots, raw plus the exe's vftable slots in the native vtables' trap slots
 # (--exe-vtables, the stand-in for S2c's link fix; needs the image); and stub with the known-fault table
-# (--stub-faults tests/s5/known_faults.txt, docs/TOOLCHAIN.md section 18).
+# (--stub-faults tests/s5/known_faults.txt, docs/TOOLCHAIN.md section 18). slots and stub also map
+# toolchain/game/heap_standin.c, compiled here (--inject; aarch64-linux-gnu-gcc), so a guest linked before a weak
+# stand-in there was added boots as a new link would; a guest that has the function keeps its own.
 #
 # Output in <out dir>. It must be outside the repository, because everything there is derived from the decomp:
 #   link/              the fetched link outputs (not with FARM_LINK_DIR)
@@ -125,13 +128,21 @@ fi
 # --- boots ----------------------------------------------------------------------------------------------------------
 ADDRMAP=""
 [ -f "$LINK/out/addrmap.tsv" ] && ADDRMAP=$LINK/out/addrmap.tsv
+INJECT=()
+if command -v aarch64-linux-gnu-gcc > /dev/null \
+    && aarch64-linux-gnu-gcc -mabi=ilp32 -O2 -fno-asynchronous-unwind-tables -c "$ROOT/toolchain/game/heap_standin.c" \
+       -o "$OUT/heap_standin.o" 2> "$OUT/heap_standin.log"; then
+  INJECT=(--inject "$OUT/heap_standin.o")
+else
+  log "heap_standin.c not compiled (aarch64-linux-gnu-gcc): slots and stub boot without it"
+fi
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift
   log "boot $tag"
   local rc=0 root=$OUT/sdmc-$tag
   rm -rf "$root"; mkdir -p "$root"
   timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE"} \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE" --file "fnvnx/game/FalloutNV.exe=$IMAGE"} \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"
@@ -146,8 +157,8 @@ boot() {   # boot <tag> [extra emu_guest.py args]
 for tag in $BOOTS; do
   case "$tag" in
     raw) boot raw ;;
-    slots) boot slots --exe-vtables ;;
-    stub) boot stub --stub-faults "$HERE/known_faults.txt" ;;
+    slots) boot slots --exe-vtables "${INJECT[@]}" ;;
+    stub) boot stub --stub-faults "$HERE/known_faults.txt" "${INJECT[@]}" ;;
     *) echo "farm_boot: unknown boot '$tag' (FARM_BOOTS: raw slots stub)" >&2; exit 1 ;;
   esac
 done
@@ -166,7 +177,7 @@ done
     L=$OUT/emu_$tag.log
     echo
     echo "## boot $tag (exit $(cat "$OUT/emu_$tag.rc"))"
-    grep -h "exe-vtables:\|memory manager after construction\|memory manager before WinMain\|static initialisers done\|initializers skipped\|calling WinMain\|WinMain returned\|stub-faults:\|before-winmain:" "$L" || true
+    grep -h "exe-vtables:\|inject:\|memory manager after construction\|memory manager before WinMain\|static initialisers done\|initializers skipped\|calling WinMain\|WinMain returned\|stub-faults:\|before-winmain:" "$L" || true
     grep -h "^stubbed-fault\|^replaced-call\|^vslot-past-end" "$L" | cut -f1-5 | head -25 || true
     grep -h "^skip-summary" "$L" | cut -f1-4 | head -8 || true
     sed -n '/^== trace/,/^   #4 /p' "$L" | head -14
