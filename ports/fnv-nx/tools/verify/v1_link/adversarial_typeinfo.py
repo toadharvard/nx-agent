@@ -13,7 +13,8 @@ unit puts at +o, by name. Cases:
   t2b a third view that sorts after the vtable's object, reverse link order (its copy is left defined)
   t3 virtual inheritance: the vtable unit has D : W, virtual V; the other unit's D : virtual V only
   t4 nested: C : B in both units, B's second base differs; B's vtable kept from the other unit
-  t5 the vtable's object defines no typeinfo (as a synthesized vtable object can), another view does
+  t5 the vtable's object defines no typeinfo (synthesized vtable objects did before J-0102), another view does:
+     the pass cannot repair it and must report it ('vtable object defines no typeinfo'; c4_definers counts it)
 """
 import os
 import shutil
@@ -105,6 +106,7 @@ def check_image(elf, cls, want):
         a, off = q.pop(0)
         for b, o, virt, pub in (ti.bases(a) or []):
             n = ti.name_of(b)
+            n = n.split('.')[0] if n else n          # a local view copy _ZTI<B>.fnvnx_view names B
             if virt:
                 has_virtual = True       # its offset is a vbase-offset slot, not a constant
                 continue
@@ -158,6 +160,10 @@ def main():
         rows, cnt = fnvlink.pair_typeinfo(fixed)             # the code under test (apply's last pass)
         after = check_image(link(w, fixed, reverse), cls, want)
         ok = not after
+        if cid == 't5' and after and cnt.get('vtable object defines no typeinfo'):
+            # J-0102: synthesis now always emits the vtable's own typeinfo, so the state is not produced; where it
+            # still occurs the pass must say so (the farm audit checks that counter is 0)
+            ok = True
         bad += 0 if ok else 1
         print('%-6s %s %s: before %s | tool: %d classes %s | after: %s' % (
             'ok' if ok else 'BROKEN', cid, '(reverse link order)' if reverse else '', before or 'consistent',

@@ -134,10 +134,10 @@ def main():
             # "const Foo::`vftable'{for `B'}" -> Foo
             mcls = set()
             for n in vft.get(a, ()):
-                m = re.search(r"(\S+)::`vftable'", mdem.get(n, ''))
-                if m:
-                    mcls.add(v1names.tok_norm(m.group(1)))
-            icls = re.sub(r'^vtable for ', '', it)
+                t = mdem.get(n, '')
+                if "::`vftable'" in t:       # the class may be a template with blanks in its arguments
+                    mcls.add(v1names.tok_norm(re.sub(r'^const ', '', t.split("::`vftable'")[0])))
+            icls = v1names.tok_norm(re.sub(r'^vtable for ', '', it))
             if mcls and icls not in mcls and not any(m.split('::')[-1] == icls.split('::')[-1] for m in mcls):
                 probs.append('V class %s, MSVC names %s' % (icls, sorted(mcls)[:3]))
         elif native.startswith(('__fnvnx_dyninit_', '__fnvnx_dynexit_')):

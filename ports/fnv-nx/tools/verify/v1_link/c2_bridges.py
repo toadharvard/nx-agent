@@ -45,6 +45,37 @@ def load_bridges(path):
     return out
 
 
+def load_bridge_obj(path, work):
+    """{bridge symbol: {'obj', 'sym', 'target'}} from an assembled bridges object and, per bridge, the __fnv_
+    symbol its b/bl relocations name (its target)."""
+    import elf32
+    os.makedirs(work, exist_ok=True)
+    text = path                     # linked whole; qemu_ilp32's script discards its TLS block
+    o = elf32.Obj(path)
+    out = {}
+    # every other symbol the object needs lands on the harness's v1_trap (a near address: no branch out of range)
+    provide = os.path.join(work, 'zz_bridges_provide.ld')
+    with open(provide, 'w') as f:
+        for name in sorted({s.name for s in o.syms if s.name and s.shndx == 'SHN_UNDEF'}):
+            f.write('PROVIDE(%s = v1_trap);\n' % name)
+    syms = sorted((s for s in o.syms if s.name.startswith('__fnvnx_br_') and isinstance(s.shndx, int)),
+                  key=lambda s: (s.shndx, s.value))
+    rels = sorted((r for r in o.rels if r.type in ('JUMP26', 'CALL26')), key=lambda r: (r.sec, r.offset))
+    import bisect
+    keys = [(r.sec, r.offset) for r in rels]
+    for s in syms:
+        k = bisect.bisect_left(keys, (s.shndx, s.value))
+        tgt = None
+        while k < len(rels) and rels[k].sec == s.shndx and rels[k].offset < s.value + max(s.size, 4):
+            if rels[k].sym.name.startswith('__fnv_'):
+                tgt = rels[k].sym.name
+            k += 1
+        if tgt:
+            out[s.name] = {'obj': text, 'sym': s.name, 'target': tgt, 'provide': provide}
+    o.close()
+    return out
+
+
 def load_layouts(path):
     lay = collections.defaultdict(dict)
     if not os.path.exists(path):          # a link without the probe step: no aggregate layouts
@@ -55,7 +86,8 @@ def load_layouts(path):
         c = line.rstrip('\n').split('\t')
         if len(c) < 7 or c[2] == '-1':
             continue
-        lay[c[0]][c[1]] = (int(c[2]), int(c[3]), int(c[4]), c[6])
+        pod = (c[8] == '1') if len(c) > 8 and c[8] in ('0', '1') else None
+        lay[c[0]][c[1]] = (int(c[2]), int(c[3]), int(c[4]), c[6], pod)
     return lay
 
 
@@ -68,7 +100,11 @@ def main():
     targets = {}
     for c in v1pairs.load_refs(out_dir, classes=('code-bridge',)):
         targets[(c[0], c[1])] = c[5]
-    bridges = load_bridges(os.path.join(out_dir, 'bridges.S'))
+    if os.path.exists(os.path.join(out_dir, 'bridges.S')):
+        bridges = load_bridges(os.path.join(out_dir, 'bridges.S'))
+    else:   # a farm link publishes the assembled bridges only (fixed/zz_bridges.o): run those bytes
+        bridges = load_bridge_obj(os.path.join(os.path.dirname(os.path.abspath(out_dir)), 'fixed', 'zz_bridges.o'),
+                                  work)
     lays = load_layouts(os.path.join(out_dir, 'layouts.tsv'))
     dba = v1pairs.defs_by_addr(units_json)
     rows = [c for c in abi.values() if c[5] == 'bridge' and (c[0], c[1]) in targets]
@@ -114,9 +150,10 @@ def main():
         outcomes = set()
         notes = []
         detail = ''
-        for pod in (True, False):
-            hr = {t: bh.Lay(v[0], v[1], v[2], v[3], pod) for t, v in lref.items()}
-            hd = {t: bh.Lay(v[0], v[1], v[2], v[3], pod) for t, v in ldef.items()}
+        pod_known = all(v[4] is not None for v in list(lref.values()) + list(ldef.values()))
+        for pod in ((None,) if pod_known else (True, False)):
+            hr = {t: bh.Lay(v[0], v[1], v[2], v[3], v[4] if v[4] is not None else pod) for t, v in lref.items()}
+            hd = {t: bh.Lay(v[0], v[1], v[2], v[3], v[4] if v[4] is not None else pod) for t, v in ldef.items()}
             sts = []
             for seed in range(nseeds):
                 try:

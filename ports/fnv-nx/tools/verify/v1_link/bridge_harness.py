@@ -446,8 +446,18 @@ def run_case(ref_name, def_name, layouts_ref, layouts_def, bridge_asm, work, see
     with open(cpp, 'w') as f:
         f.write('\n'.join(src) + '\n')
     asm = os.path.join(work, 'bridge.S')
+    extra, ldf = (), ()
+    if isinstance(bridge_asm, dict):
+        # the bridge exactly as a link built it: {'obj': .text of the link's zz_bridges.o, 'sym': bridge symbol,
+        # 'target': the __fnv_ symbol it calls}; the caller's v1_ref is the bridge, its target is v1_def
+        extra = (bridge_asm['obj'],) + ((bridge_asm['provide'],) if bridge_asm.get('provide') else ())
+        ldf = ('--defsym=v1_ref=' + bridge_asm['sym'], '--defsym=%s=v1_def' % bridge_asm['target'],
+               '--unresolved-symbols=ignore-all', '--no-warn-mismatch')
+        bridge_asm = 'OBJ'
     with open(asm, 'w') as f:
-        if bridge_asm is None:
+        if bridge_asm == 'OBJ':
+            f.write('    .text\n')
+        elif bridge_asm is None:
             f.write('    .text\n    .globl v1_ref\n    .type v1_ref, %function\nv1_ref:\n    b v1_def\n')  # no register touched
         else:
             text = re.sub(r'//.*', '', bridge_asm)
@@ -455,7 +465,7 @@ def run_case(ref_name, def_name, layouts_ref, layouts_def, bridge_asm, work, see
             text = text.replace(name, 'v1_ref')
             text = re.sub(r'\b(b|bl)\s+(__fnv_[0-9a-f]{8}\w*|\w+)\s*$', r'\1 v1_def', text, flags=re.M)
             f.write('    .text\n' + text)
-    exe = qemu_ilp32.build([cpp, asm], os.path.join(work, 'case'))
+    exe = qemu_ilp32.build([cpp, asm], os.path.join(work, 'case'), extra_objs=extra, ld_flags=ldf)
     code, out = qemu_ilp32.run(exe)
     if code != 0:
         return 'FAIL exit %d' % code, notes

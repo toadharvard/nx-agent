@@ -84,6 +84,16 @@ class Coff:
         rel = {va - value: t for va, t in self.relocs(secno).items() if value <= va < end}
         return data[value:end], rel
 
+    def labels(self, name):
+        """{label symbol: offset from the function's start} of the static labels in the function's section
+        ($LN.. jump-table and case labels), for following MSVC switch tables."""
+        k = self.by_name.get(name)
+        if k is None:
+            return {}
+        value, secno = self.syms[k][1], self.syms[k][2]
+        return {s[0]: s[1] - value for s in self.syms if s and s[2] == secno and s[1] >= value and s[3] == 0
+                and s[4] in (3, 6) and not s[0].startswith('.')}   # $LN.. table labels are static (3), cases label (6)
+
 
 def _reads_writes(ins):
     try:
@@ -102,8 +112,12 @@ def _reads_writes(ins):
     return r, w
 
 
-def entry_reads(code, rel, conv_of):
-    """conv_of(symbol name) -> set of registers ('ecx', 'edx') that callee takes as parameters (or None: unknown)."""
+def entry_reads(code, rel, conv_of, labels=None, stack_words=None):
+    """conv_of(symbol name) -> set of registers ('ecx', 'edx') that callee takes as parameters (or None: unknown).
+    labels: {static label: offset} of the function (jump tables are followed through them).
+    stack_words(symbol name) -> number of 4-byte stack arguments the callee takes (None: unknown): a `push reg`
+    among the pushes that form a call's arguments counts as a read (the value is handed to the callee)."""
+    labels = labels or {}
     result = {'ecx': None, 'edx': None}
     insns = {}
     for ins in CS.disasm(code, 0):
@@ -114,12 +128,24 @@ def entry_reads(code, rel, conv_of):
     def note(reg, kind):
         if RANK[kind] > RANK[result[reg]]:
             result[reg] = kind
+    def table_targets(ins, target):
+        """Case offsets of a `jmp [idx*4 + table]` whose table is a label of this function."""
+        out = []
+        op = ins.operands[0] if ins.operands else None
+        if op is None or op.type != cx.X86_OP_MEM or target not in labels:
+            return None
+        k = labels[target] + (op.mem.disp & 0xffffffff if op.mem.disp else 0)
+        while k in rel and rel[k][0] in labels:
+            add = struct.unpack_from('<I', code, k)[0] if k + 4 <= len(code) else 0
+            out.append(labels[rel[k][0]] + add)
+            k += 4
+        return out
     seen = set()
-    work = [(0, frozenset(('ecx', 'edx')))]
+    work = [(0, frozenset(('ecx', 'edx')), ())]
     while work:
-        a, live = work.pop()
+        a, live, pushes = work.pop()
         while a is not None and a in insns:
-            key = (a, live)
+            key = (a, live, pushes)
             if key in seen:
                 break
             seen.add(key)
@@ -132,7 +158,27 @@ def entry_reads(code, rel, conv_of):
             for off in range(a, a + ins.size):
                 if off in rel:
                     target = rel[off][0]
+            if mn == 'jmp' and target is not None and target in labels:
+                cases = table_targets(ins, target)
+                for c in cases or []:
+                    work.append((c, live, pushes))
+                break
+            if mn == 'push':
+                op = ins.operands[0] if ins.operands else None
+                reg = next((x for x in live if op is not None and op.type == cx.X86_OP_REG and op.reg in SUB[x]),
+                           None)
+                pushes = pushes + (reg,)
+            elif mn in ('call',) or (mn == 'jmp' and target is not None):
+                pass
+            elif any(o.type == cx.X86_OP_REG and o.reg in (cx.X86_REG_ESP,) for o in ins.operands[:1]):
+                pushes = ()                          # esp adjusted: earlier pushes are not this call's arguments
             if mn == 'call' or (mn == 'jmp' and target is not None):
+                n = stack_words(target) if (stack_words and target is not None) else None
+                args = pushes if n is None else (pushes[-n:] if n else ())
+                for reg in set(x for x in args if x):
+                    if reg in live or True:
+                        note(reg, 'read')            # handed to the callee as a stack argument
+                pushes = ()
                 takes = conv_of(target) if target is not None else None
                 if target is None:
                     op = ins.operands[0] if ins.operands else None
@@ -171,6 +217,6 @@ def entry_reads(code, rel, conv_of):
             if mn.startswith('j') or mn.startswith('loop'):
                 op = ins.operands[0]
                 if op.type == cx.X86_OP_IMM:
-                    work.append((op.imm, live))
+                    work.append((op.imm, live, pushes))
             a = nxt[a]
     return result

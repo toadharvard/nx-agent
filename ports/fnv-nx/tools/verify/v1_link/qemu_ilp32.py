@@ -69,6 +69,7 @@ void v1_hex(const void *p, size_t n) { static const char h[] = "0123456789abcdef
     const unsigned char *b = p; for (size_t i = 0; i < n; i++) { buf[0] = h[b[i] >> 4]; buf[1] = h[b[i] & 15]; v1_write(buf, 2); } }
 void __cxa_pure_virtual(void) { v1_puts("pure virtual\n"); v1_sys(93, 99, 0, 0); }
 void abort(void) { v1_sys(93, 98, 0, 0); for (;;) {} }
+void v1_trap(void) { v1_puts("v1_trap: a symbol the test does not provide was called\n"); v1_sys(93, 97, 0, 0); }
 '''
 
 LDS = '''
@@ -77,7 +78,8 @@ SECTIONS {
   . = 0x%x;
   .all : { *(.text .text.*) *(.rodata .rodata.*) *(.data .data.*) *(.eh_frame*) *(.gcc_except_table*) }
   .bss (NOLOAD) : { *(.bss .bss.* COMMON) }
-  /DISCARD/ : { *(.note*) *(.comment) }
+  __v1_end = .;
+  /DISCARD/ : { *(.note*) *(.comment) *(.tbss .tbss.*) *(.tdata .tdata.*) }
 }
 ''' % BASE
 
@@ -93,7 +95,7 @@ def _run(cmd, **kw):
     return r
 
 
-def build(sources, out, extra_objs=()):
+def build(sources, out, extra_objs=(), ld_flags=()):
     work = out + '.d'
     os.makedirs(work, exist_ok=True)
     objs = []
@@ -114,7 +116,7 @@ def build(sources, out, extra_objs=()):
     with open(lds, 'w') as f:
         f.write(LDS)
     elf32 = os.path.join(work, 'prog32.elf')
-    _run([LD, '-m', 'aarch64linux32', '-static', '-T', lds, '-o', elf32, *objs, *extra_objs])
+    _run([LD, '-m', 'aarch64linux32', '-static', '-T', lds, *ld_flags, '-o', elf32, *objs, *extra_objs])
     flat = os.path.join(work, 'prog.bin')
     _run([OBJCOPY, '-O', 'binary', '-j', '.all', elf32, flat])
     syms = {}
@@ -123,7 +125,8 @@ def build(sources, out, extra_objs=()):
         if len(f) == 3:
             syms[f[2]] = int(f[0], 16)
     image = open(flat, 'rb').read()
-    memsz = syms['__v1_stack_end'] - BASE + 16 if '__v1_stack_end' in syms else len(image) + (2 << 20)
+    # everything up to the end of .bss (the harness's own arrays can sort after the stack)
+    memsz = syms['__v1_end'] - BASE + 16 if '__v1_end' in syms else len(image) + (2 << 20)
     memsz = max(memsz, len(image))
     hdr = 64 + 2 * 56
     off = 0x10000

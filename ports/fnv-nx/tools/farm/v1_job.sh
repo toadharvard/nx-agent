@@ -6,8 +6,9 @@
 #   tools/farm/v1_job.sh <commit> <report.md>
 #
 # Inputs, fetched when missing, cached under $FARM_HOME:
-#   link     branch link/<commit12> of the private artifacts repository: out/ (refs.tsv, abi.tsv, bridges.S,
-#            addrmap.tsv, layouts.tsv, objcopy/, aliases.ld; trial.elf when the link job publishes it) and fixed/*.o.
+#   link     branch link/<commit12> of the private artifacts repository: out/ (refs.tsv, abi.tsv, addrmap.tsv,
+#            aliases.ld; layouts.tsv, bridges.S, objcopy/, trial.elf when published) and fixed/*.o. Without bridges.S
+#            the bridges run from fixed/zz_bridges.o as assembled; without objcopy/ C5 maps objects by name.
 #            Without trial.elf, `fnvlink.py check` relinks it here. $V1_LINK_DIR=<dir with out/ and fixed/> instead.
 #   tree     the prepared tree of <commit> (fetch_tree.sh: branch t/<commit12>); $V1_TREE instead. Only
 #            build/units.json is read.
@@ -76,7 +77,7 @@ publish out/ and fixed/ first"
     touch "$LINK/.done"
   fi
 fi
-for f in out/refs.tsv out/abi.tsv out/bridges.S out/addrmap.tsv out/objcopy fixed/zz_bridges.o; do
+for f in out/refs.tsv out/abi.tsv out/addrmap.tsv out/aliases.ld fixed/zz_bridges.o; do   # bridges.S, objcopy/: optional
   [ -e "$LINK/$f" ] || fail_report 3 "link outputs for $C12 lack $f"
 done
 if [ ! -f "$LINK/out/trial.elf" ]; then
@@ -142,7 +143,8 @@ fi
 audit c4-vtables python3 "$V/c4_vtables.py" "$O/trial.elf" "$O/addrmap.tsv" "$F" "$RUN/c4-vtables/c4.tsv"
 audit c4-definers python3 "$V/c4_definers.py" --audit "$F" "$O/trial.elf" "$RUN/c4-definers/audit.tsv"
 audit c4-vtti python3 "$V/c4_vtti.py" "$O/trial.elf" "$RUN/c4-vtti/vtti.tsv"
-audit c5-pic python3 "$V/c5_pic.py" "$F" "$O/objcopy" "$UJ" "$RUN/c5-pic/c5.tsv"
+C5MAP=$O/objcopy; [ -d "$C5MAP" ] || C5MAP=$OBJ/objects.tsv     # farm links: original objects by name
+audit c5-pic python3 "$V/c5_pic.py" "$F" "$C5MAP" "$UJ" "$RUN/c5-pic/c5.tsv"
 
 # --- report (counts and statuses only) ------------------------------------------------------------------------------
 {
