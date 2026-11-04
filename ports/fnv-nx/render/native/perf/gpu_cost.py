@@ -154,9 +154,11 @@ def mix_stats(tab, shaders):
 # Real-like shader costs: the game's own programs (shaderpackage019.sdp, the SM3 package) translated by S6b's
 # sdp2dksh (MojoShader glsldk -> uam), averaged per shader class over the programs that translate. Used as the
 # D3D9-translation reference scene ("real019_"); family -> (vertex class, pixel class). Classes are name prefixes.
+# lod: DISTLOD's own pixel program. "SM pso" (the name prefix of SM3xxx / SM3LLxxx) is the SM3 per-pixel lighting
+# class, 50 programs, ~600-1,200 Maxwell instructions, which LOD meshes do not use.
 REAL_MAP = {
     "shadow": ("SLS vso", "SLS pso"), "water_refl": ("SLS vso", "SLS pso"), "lit": ("SLS vso", "SLS pso"),
-    "land": ("SLS vso", "SLS pso"), "lod": ("DISTLOD vso", "SM pso"), "trees": ("STB vso", "STB pso"),
+    "land": ("SLS vso", "SLS pso"), "lod": ("DISTLOD vso", "DISTLOD pso"), "trees": ("STB vso", "STB pso"),
     "grass": ("GRASS vso", "STLEAF pso"), "actors": ("SKIN vso", "SKIN pso"), "sky": ("SKY vso", "SKY pso"),
     "particles": ("PAR vso", "PARTICLE pso"), "imagespace_ui": ("ISBLUR vso", "IS pso"),
 }
