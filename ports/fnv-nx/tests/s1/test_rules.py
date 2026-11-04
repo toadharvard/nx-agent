@@ -1375,6 +1375,17 @@ os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None
 _shutil.rmtree(_rc, ignore_errors=True)
 
+# ---- S1-refs: HUNIT1 (explicit instantiations of a header unit's listed template members)
+_hu = run(s1.r_header_unit_instantiations, '#include "nitarray.inl"\nvoid NiTArray_UnitReference() {}\n',
+          '/nonexistent/src/gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp')
+check('HUNIT1 the listed members are explicitly instantiated', _hu,
+      ['template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAt(unsigned int, ActorCombatGroup*&);',
+       'fnv-nx HUNIT1'])
+check('HUNIT1 once only', str(run(s1.r_header_unit_instantiations, _hu,
+      '/nonexistent/src/gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp').count('fnv-nx HUNIT1')), ['1'])
+check('HUNIT1 other units untouched', run(s1.r_header_unit_instantiations, 'int x;\n', '/nonexistent/src/x_h_unit.cpp'),
+      [], ['HUNIT1'])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''

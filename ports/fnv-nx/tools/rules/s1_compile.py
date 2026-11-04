@@ -4804,7 +4804,38 @@ def add_recon_definitions(out_root, stats, files=None):
 
 POST.append(add_recon_definitions)
 
+# ---------------------------------------------------------------------------------------------------------- HUNIT1
+#
+# A header unit (nitarray_h_unit.cpp) exists only to make MSVC emit the COMDATs of class-template members its recipe
+# lists (NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*>>::SetAt 0x0096ae90, SetAtGrow 0x00470000,
+# SetSize 0x0096ad30): it calls them through a null pointer in NiTArray_UnitReference. MSVC /Od emitted each one. GCC
+# at -O2 inlines the calls, so SetAt and SetAtGrow were emitted nowhere and their addresses had no native definition
+# (S5-boot collect-all: 0x0096ae90, 1,238 trap hits from FUN_0096a850's constructor). An `used` attribute cannot
+# help: the unit instantiates the class (a sizeof check) before the members' definitions, and GCC does not attach a
+# later definition's attributes to it. HUNIT1 appends explicit instantiation definitions of exactly those members,
+# which emits them (weak) as MSVC did. Neutral: under MSVC an explicit instantiation of members the unit already
+# emits changes nothing (S11 gate). Sites: HUNIT1_SITES.
+
+HUNIT1_SITES = [
+    ('gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp',
+     'template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAt(unsigned int, '
+     'ActorCombatGroup*&);\n'
+     'template unsigned int NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAtGrow(unsigned int, '
+     'ActorCombatGroup*&);\n'
+     'template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetSize(unsigned int);\n'),
+]
+
+def r_header_unit_instantiations(path, text, stats):
+    """HUNIT1: explicit instantiations of the class-template members a header unit's recipe lists (see above)."""
+    rel = path.replace(os.sep, '/')
+    for unit, inst in HUNIT1_SITES:
+        if rel.endswith('/' + unit) and 'fnv-nx HUNIT1' not in text:
+            text = text.rstrip('\n') + '\n\n/* fnv-nx HUNIT1: the members the recipe lists, emitted as MSVC did */\n' + inst
+            stats['HUNIT1'] += inst.count('template ')
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
-              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies]
+              r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
+              r_header_unit_instantiations]
 RULES += REFS_RULES
