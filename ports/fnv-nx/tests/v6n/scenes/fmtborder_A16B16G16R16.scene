@@ -1,0 +1,26 @@
+# texture format A16B16G16R16: border colour + bilinear (gen_scenes.py)
+size 16 16
+rt A8R8G8B8
+ds NONE
+clear 7 0xff000000 1.0 0
+rs CULLMODE CULL_NONE
+tss 0 COLOROP TOP_SELECTARG1
+tss 0 COLORARG1 TA_DIFFUSE
+tss 0 ALPHAOP TOP_SELECTARG1
+tss 0 ALPHAARG1 TA_DIFFUSE
+tex 0 A16B16G16R16 8 8 1 hash 22
+samp 0 ADDRESSU TADDRESS_BORDER
+samp 0 ADDRESSV TADDRESS_BORDER
+samp 0 BORDERCOLOR 0x80ff4020
+tss 0 COLOROP TOP_SELECTARG1
+tss 0 COLORARG1 TA_TEXTURE
+tss 0 ALPHAOP TOP_SELECTARG1
+tss 0 ALPHAARG1 TA_TEXTURE
+mode rhw
+v 0 0 0.5 1 0xffffffff 0 -1 -1
+v 16 0 0.5 1 0xffffffff 0 2 -1
+v 0 16 0.5 1 0xffffffff 0 -1 2
+v 16 0 0.5 1 0xffffffff 0 2 -1
+v 16 16 0.5 1 0xffffffff 0 2 2
+v 0 16 0.5 1 0xffffffff 0 -1 2
+draw TRIANGLELIST 2

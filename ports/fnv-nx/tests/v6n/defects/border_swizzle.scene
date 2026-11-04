@@ -1,0 +1,53 @@
+# DEFECT border_swizzle (tests/v6n/DEFECTS.md): BORDER addressing on formats S6n emulates with a view swizzle.
+# Expected (Nine): the border colour 0x80ff4020 = RGBA (1, 0.25, 0.125, 0.5), with only Nine's 'missing channel
+# reads 1' rule (L8/L16: alpha 1). Four quadrants: A8, L8, A2R10G10B10, ATI1.
+size 16 16
+rt A8R8G8B8
+ds NONE
+clear 1 0xff000000 1.0 0
+rs CULLMODE CULL_NONE
+tss 0 COLOROP TOP_SELECTARG1
+tss 0 COLORARG1 TA_TEXTURE
+tss 0 ALPHAOP TOP_SELECTARG1
+tss 0 ALPHAARG1 TA_TEXTURE
+samp 0 ADDRESSU TADDRESS_BORDER
+samp 0 ADDRESSV TADDRESS_BORDER
+samp 0 BORDERCOLOR 0x80ff4020
+samp 0 MINFILTER TEXF_POINT
+samp 0 MAGFILTER TEXF_POINT
+tex 0 A8 8 8 1 hash 22
+mode rhw
+v 0 0 0.5 1 0xffffffff 0 -1 -1
+v 8 0 0.5 1 0xffffffff 0 2 -1
+v 0 8 0.5 1 0xffffffff 0 -1 2
+v 8 0 0.5 1 0xffffffff 0 2 -1
+v 8 8 0.5 1 0xffffffff 0 2 2
+v 0 8 0.5 1 0xffffffff 0 -1 2
+draw TRIANGLELIST 2
+tex 0 L8 8 8 1 hash 22
+mode rhw
+v 8 0 0.5 1 0xffffffff 0 -1 -1
+v 16 0 0.5 1 0xffffffff 0 2 -1
+v 8 8 0.5 1 0xffffffff 0 -1 2
+v 16 0 0.5 1 0xffffffff 0 2 -1
+v 16 8 0.5 1 0xffffffff 0 2 2
+v 8 8 0.5 1 0xffffffff 0 -1 2
+draw TRIANGLELIST 2
+tex 0 A2R10G10B10 8 8 1 hash 22
+mode rhw
+v 0 8 0.5 1 0xffffffff 0 -1 -1
+v 8 8 0.5 1 0xffffffff 0 2 -1
+v 0 16 0.5 1 0xffffffff 0 -1 2
+v 8 8 0.5 1 0xffffffff 0 2 -1
+v 8 16 0.5 1 0xffffffff 0 2 2
+v 0 16 0.5 1 0xffffffff 0 -1 2
+draw TRIANGLELIST 2
+tex 0 ATI1 8 8 1 hash 22
+mode rhw
+v 8 8 0.5 1 0xffffffff 0 -1 -1
+v 16 8 0.5 1 0xffffffff 0 2 -1
+v 8 16 0.5 1 0xffffffff 0 -1 2
+v 16 8 0.5 1 0xffffffff 0 2 -1
+v 16 16 0.5 1 0xffffffff 0 2 2
+v 8 16 0.5 1 0xffffffff 0 -1 2
+draw TRIANGLELIST 2

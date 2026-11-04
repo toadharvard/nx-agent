@@ -58,7 +58,7 @@ static const char* MUTANTS[] = {
     "clear_honors_mask",   /* colour clear masked by COLORWRITEENABLE */
     "x8_dst_alpha",        /* X8R8G8B8 target stored with alpha (DESTALPHA not 1) */
     "stencil_ref_unmasked",/* stencil compare without the read mask */
-    "no_texture_white",    /* unbound texture samples (1,1,1,1) instead of (0,0,0,1) */
+    "no_texture_black",    /* unbound texture samples (0,0,0,1) instead of Nine's (1,1,1,1) */
     "rhw_viewport_z",      /* pretransformed z mapped through MinZ/MaxZ */
     "fog_vertex_specular", /* vertex fog for RHW from diffuse alpha instead of specular alpha */
     "specular_alpha",      /* specular add also adds alpha */
@@ -105,7 +105,7 @@ static const char* FS =
     "layout(location=0) out vec4 oCol;\n"
     "uniform sampler2D uTex0; uniform sampler2D uTex1; uniform int uFlat;\n"
     "uniform ivec4 uStage[2]; uniform ivec4 uStageB[2];\n"   /* colorop, carg1, carg2, carg0 | alphaop, aarg1, aarg2, aarg0 */
-    "uniform vec4 uTFactor; uniform vec4 uConst[2]; uniform int uSpecular;\n"
+    "uniform vec4 uTFactor; uniform vec4 uConst[2]; uniform int uSpecular; uniform int uSpecA;\n"
     "uniform int uFogMode; uniform vec4 uFogColor; uniform vec3 uFogP; uniform int uFogW; uniform int uFogLinNoClamp;\n"
     "uniform int uAlphaTest; uniform int uAlphaFunc; uniform float uAlphaRef;\n"
     "vec4 D, S, T[2], CUR, TMP;\n"
@@ -127,6 +127,11 @@ static const char* FS =
     "  if (o == 25) return a0 + a1 * a2; if (o == 26) return mix(a2, a1, a0);\n"
     "  return a1;\n"
     "}\n"
+    /* nine_ff.c ps_do_ts_op: saturate except SELECTARG1/2, MODULATE, PREMODULATE, BLEND*ALPHA, BUMPENVMAP*, LERP */
+    "vec4 sat(int o, vec4 v) {\n"
+    "  if (o == 2 || o == 3 || o == 4 || o == 17 || o == 12 || o == 13 || o == 14 || o == 16 || o == 22 || o == 23 || o == 26) return v;\n"
+    "  return clamp(v, 0.0, 1.0);\n"
+    "}\n"
     "bool cmpf(int f, float a, float r) {\n"
     "  if (f == 0) return false; if (f == 1) return a < r; if (f == 2) return a == r; if (f == 3) return a <= r;\n"
     "  if (f == 4) return a > r; if (f == 5) return a != r; if (f == 6) return a >= r; return true;\n"
@@ -137,12 +142,12 @@ static const char* FS =
     "  CUR = D; TMP = vec4(0.0);\n"
     "  for (int s = 0; s < 2; s++) {\n"
     "    if (uStage[s].x == 1) break;\n"
-    "    vec3 c = clamp(op(uStage[s].x, arg(uStage[s].y, s), arg(uStage[s].z, s), arg(uStage[s].w, s), s).rgb, 0.0, 1.0);\n"
+    "    vec3 c = sat(uStage[s].x, op(uStage[s].x, arg(uStage[s].y, s), arg(uStage[s].z, s), arg(uStage[s].w, s), s)).rgb;\n"
     "    float a = uStageB[s].x == 1 ? CUR.a :\n"
-    "      clamp(op(uStageB[s].x, arg(uStageB[s].y, s), arg(uStageB[s].z, s), arg(uStageB[s].w, s), s).a, 0.0, 1.0);\n"
+    "      sat(uStageB[s].x, op(uStageB[s].x, arg(uStageB[s].y, s), arg(uStageB[s].z, s), arg(uStageB[s].w, s), s)).a;\n"
     "    CUR = vec4(c, a);\n"
     "  }\n"
-    "  if (uSpecular != 0) CUR.rgb += S.rgb;\n"
+    "  if (uSpecular != 0) { CUR.rgb += S.rgb; if (uSpecA != 0) CUR.a += S.a; }\n"
     "  if (uFogMode != 0) {\n"
     "    float f;\n"
     "    if (uFogMode == 4) f = vFog;\n"
@@ -396,7 +401,7 @@ static void g_proj(V6nTarget* t, const float m[16]) { memcpy(t->proj, m, sizeof 
 static void apply_sampler(V6nTarget* t, int s) {
     GLuint smp = t->sampler[s];
     glActiveTexture(GL_TEXTURE0 + s);
-    if (!t->has_tex[s]) { glBindTexture(GL_TEXTURE_2D, M("no_texture_white") ? g_white : g_black); glBindSampler(s, 0); return; }
+    if (!t->has_tex[s]) { glBindTexture(GL_TEXTURE_2D, M("no_texture_black") ? g_black : g_white); glBindSampler(s, 0); return; }
     Tex* x = &t->tex[s];
     NxD3D9Texture ti = {x->fmt, 0, 0, 0, 0};
     NxSamplerState ss; nx_d3d9_sampler(t->samp[s], &ti, &ss);
@@ -523,7 +528,7 @@ static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     glUniform1i(U("uAlphaFunc"), (sb >> NXSB_ALPHAFUNC) & 7);
     glUniform1f(U("uAlphaRef"), M("alpharef_256") ? (float)t->rs[24] / 256.0f : dyn.alphaRef);
     float tf[4]; nx_d3d9_color(t->rs[60], tf); glUniform4fv(U("uTFactor"), 1, tf);
-    glUniform1i(U("uSpecular"), t->rs[29] != 0);
+    glUniform1i(U("uSpecular"), t->rs[29] != 0); glUniform1i(U("uSpecA"), M("specular_alpha"));
     int stage[2][4], stageb[2][4]; float cst[2][4];
     for (int s = 0; s < 2; s++) {
         stage[s][0] = t->tss[s][1]; stage[s][1] = t->tss[s][2]; stage[s][2] = t->tss[s][3]; stage[s][3] = t->tss[s][26];
