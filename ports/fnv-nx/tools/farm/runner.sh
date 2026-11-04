@@ -90,7 +90,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     fi
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "$H" || { sleep 60; continue; }
   fi
-  H12=${H:0:12}; R=$FARM_HOME/out/$TAG$H12-$JOB.md; mkdir -p "$FARM_HOME/out"
+  H12=${H:0:12}; R=$FARM_HOME/out/$TAG$H12-$JOB.md; mkdir -p "$FARM_HOME/out"; rm -f "${R%.md}.json"
   J=$NX/ports/fnv-nx/tools/farm
   rm -f "${R%.md}.json"     # a sidecar is this run's or none
   log "start $JOB $* at $H12"
@@ -105,6 +105,9 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     { echo "# $JOB $H12 FAILED (rc $rc)"; echo; echo '```'; tail -40 "$LOG"; echo '```'; } > "$R"
     rm -f "${R%.md}.json"
   fi
+  # a job's machine-readable summary (<report>.json, e.g. fuzz_job.sh's fnvnx-fuzz-summary/1) goes first, its report
+  # second: a report on the branch always has its summary beside it when the job wrote one
+  [ -f "$R" ] && [ $rc -eq 0 ] && [ -f "${R%.md}.json" ] && publish_report "${R%.md}.json"
   [ -f "$R" ] && publish_report "$R"
   if [ "$WATCH" = wip ]; then echo "$H" >> "$FARM_HOME/$NAME.done"; else echo "$H" > "$LAST"; fi
   log "done $JOB at $H12 rc=$rc"

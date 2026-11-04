@@ -379,11 +379,11 @@ FUZZ_END=$(( FUZZ_END - ${FUZZ_REPORT_S:-900} ))
 log "fuzzing stops at $(date -u -d "@$FUZZ_END" +%T) UTC (report deadline)"
 mkdir -p "$RUN/camp"; touch "$RUN/camp/results.jsonl"
 (cd "$DF" && $PY fuzzcache.py dropcrash "$RUN/camp") >> "$RUN/merge.log"
-rm -f "$RUN"/chunk.*
+rm -f "$RUN"/chunk.* "$RUN/stop.txt"
 split -l "$CHUNK" -d -a 4 "$RUN/todo.jsonl" "$RUN/chunk."
 HEAD_BRANCH=${FUZZ_HEAD_BRANCH:-claude/port-nsw-un6t9s}
 harness_of() { sed -n "s/^HARNESS = '\(.*\)'/\1/p"; }
-MY_HARNESS=$(harness_of < "$DF/fnkeys.py")
+MY_HARNESS=$(harness_of < "$DF/fnkeys.py"); export MY_HARNESS
 for c in "$RUN"/chunk.*; do
   [ -s "$c" ] || continue
   nf=$(wc -l < "$c")
@@ -391,7 +391,9 @@ for c in "$RUN"/chunk.*; do
   # minimisation and classification (~3 x TIME + 30 s), JOBS in parallel, x2 margin.
   wd=$(( (nf * (3 * ${TIME%.*} + 30) / JOBS + 1) * 2 + 120 ))
   left=$(( FUZZ_END - $(date +%s) ))
-  if [ "$left" -lt 60 ]; then log "report deadline: $(basename "$c") and later chunks stay pending"; break; fi
+  if [ "$left" -lt 60 ]; then
+    log "report deadline: $(basename "$c") and later chunks stay pending"; echo deadline > "$RUN/stop.txt"; break
+  fi
   capped=0; if [ "$left" -lt "$wd" ]; then wd=$left; capped=1; fi
   log "fuzz $(basename "$c"): $nf functions ($JOBS jobs, $ITERS executions / ${TIME}s per function, watchdog ${wd}s)"
   rc=0
@@ -402,6 +404,7 @@ for c in "$RUN"/chunk.*; do
     log "report deadline reached during $(basename "$c")"
     (cd "$DF" && $PY fuzzcache.py merge "$CACHE" "$RUN/camp" "$RUN/keys.json" "$COMMIT") >> "$RUN/merge.log"
     cache_commit "$C12 shard $K/$N: $(basename "$c") (part)"
+    echo deadline > "$RUN/stop.txt"
     break
   fi
   if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
@@ -411,13 +414,14 @@ for c in "$RUN"/chunk.*; do
   fi
   (cd "$DF" && $PY fuzzcache.py merge "$CACHE" "$RUN/camp" "$RUN/keys.json" "$COMMIT") >> "$RUN/merge.log"
   cache_commit "$C12 shard $K/$N: $(basename "$c")"
-  if [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - t1)) -ge "$BUDGET" ]; then log "time budget reached"; break; fi
+  if [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - t1)) -ge "$BUDGET" ]; then log "time budget reached"; echo budget > "$RUN/stop.txt"; break; fi
   # a newer harness on the integration head (HARNESS bumped) makes these verdicts stale: stop after this chunk
   # and report, so the runner starts again at the newest head instead of finishing a pass that is thrown away
   if git -C "$REPO" fetch -q origin "$HEAD_BRANCH" 2>/dev/null; then
     new_h=$(git -C "$REPO" show "FETCH_HEAD:ports/fnv-nx/tools/difffuzz/fnkeys.py" 2>/dev/null | harness_of)
     if [ -n "$new_h" ] && [ "$new_h" != "$MY_HARNESS" ]; then
-      log "integration head has harness $new_h (this run: $MY_HARNESS): stopping after $(basename "$c")"; break
+      log "integration head has harness $new_h (this run: $MY_HARNESS): stopping after $(basename "$c")"
+      echo newer-harness > "$RUN/stop.txt"; break
     fi
   fi
 done
@@ -514,7 +518,34 @@ if os.path.exists(cp):
                 causes={c: {k_: r[k_] for k_ in ('verdict', 'owner', 'hard', 'divergences', 'functions', 'worst_of',
                                                   'kinds')} for c, r in cs['causes'].items()})
     out += ['', '```json fnvnx-causes', json.dumps(slim, sort_keys=True), '```']
+# the machine-readable summary for the R0 gates (fnvnx-fuzz-summary/1): <report>.json beside the report (runner.sh
+# publishes both) and the same object in the report's last block
+by = collections.Counter(r_[1] for r_ in hard)
+allrow = json.load(open(os.path.join(run, 'verdicts_cum.json'))).get('ALL', {}) \
+    if os.path.exists(os.path.join(run, 'verdicts_cum.json')) else {}
+with_obj = counts['shard'] - counts['no_native_object']
+stop = open(os.path.join(run, 'stop.txt')).read().strip() if os.path.exists(os.path.join(run, 'stop.txt')) else ''
+pending = st['pending_changed'] + st['pending_new']
+summary = dict(
+    format='fnvnx-fuzz-summary/1', commit=commit, decomp=d12, shard=int(k), shards=int(n), link=note_link,
+    exe=bool(counts.get('vtable_model')), harness=os.environ.get('MY_HARNESS', ''),
+    status='harness-broken' if broken else ('partial' if pending or stop else 'complete'), stopped=stop or None,
+    functions=dict(catalogued=counts['catalogued'], shard=counts['shard'], no_native_object=counts['no_native_object'],
+                   with_native_object=with_obj, not_modelled=counts['not_modelled'],
+                   not_modelled_unresolved=counts.get('not_modelled_unresolved'),
+                   not_modelled_indirect=counts.get('not_modelled_indirect'), targets=counts['targets'],
+                   no_native_definition=st['no_key'], verdicts=len(cum), fuzzed_this_head=st['fuzzed_this_head'],
+                   reused=st['reused'], pending=pending, harness_exception=st.get('crashed', 0)),
+    coverage_pct=round(100.0 * len(cum) / with_obj, 2) if with_obj else None,
+    targets_pct=round(100.0 * counts['targets'] / with_obj, 2) if with_obj else None,
+    hard=dict(divergences=len(hard), functions=len({r_[0] for r_ in hard}), by_cause=dict(by.most_common())),
+    verdicts=dict(ok=allrow.get('functions', 0), hard=allrow.get('hard', 0), soft=allrow.get('soft', 0),
+                  oracle_gap=allrow.get('harness', 0), not_set_up=allrow.get('setup', 0)),
+    divergences_by_cause=dict(collections.Counter(allrow.get('causes', {})).most_common()),
+    executions_this_head=execs)
+out += ['', '```json fnvnx-fuzz-summary', json.dumps(summary, sort_keys=True), '```']
 open(report, 'w').write('\n'.join(out) + '\n')
+json.dump(summary, open(os.path.splitext(report)[0] + '.json', 'w'), indent=1, sort_keys=True)
 print('\n'.join(out[:10]))
 EOF
 
@@ -525,6 +556,7 @@ if [ -s "$RUN/camp/results.jsonl" ]; then
   [ -d "$RUN/camp/div" ] && cp -a "$RUN/camp/div" "$PUB/div"
   cp "$RUN/hard_new.tsv" "$PUB/" 2>/dev/null || true
   cp "$RUN/causes_cum.json" "$PUB/" 2>/dev/null || true
+  cp "${REPORT%.md}.json" "$PUB/summary.json" 2>/dev/null || true
   printf '{"commit": "%s", "decomp": "%s", "shard": %s, "shards": %s, "iters": %s, "time": %s}\n' \
     "$COMMIT" "$D12" "$K" "$N" "$ITERS" "$TIME" > "$PUB/meta.json"
   publish "fuzz/$C12/${K}of${N}" "$PUB" "$C12 fuzz shard $K/$N" || true
