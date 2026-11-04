@@ -3417,3 +3417,25 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - st1-st4 and gates1 run. fz1-fz4 run; fz5-fz26 are paused for the slot cap.
   - The farms trail the integration head by about 70-80 commits.
 * **next** - S2c-vt's slot fill (boot critical path), S1-refs on full1's 74 excluded units, the GPU hotspots (render), R0's regression detector.
+
+### J-0152 | 2026-11-04 | stream: orchestration,S15-threads,S1b | status: wip | parent: J-0151
+
+* **decided (owner)** - D19: performance changes that cannot keep MSVC byte parity ship as patch class MT1.
+  - MT1 is Switch-only, behind a feature flag (bMTRendering), off by default.
+  - With the flag off the build is byte-identical to the parity build.
+  - Checks: census, mtqemu on the real objects, the race checker, and frame equivalence with the flag on and off.
+  - First user: mt_cull, 2.7 M + 1.8 M main-thread instructions, the largest CPU lever toward 60 fps.
+  - S1b adds the class to the patch tooling; S15-threads writes the patches.
+* **decided (owner)** - D18 (from J-0150) is recorded in ARCHITECTURE.md. The native renderer is the only target:
+  no further work on the Nine fallback.
+* **decided** - The refreshed GOG token is not pushed to gamedata/gog; the owner notes it expires anyway.
+  - S5-data holds the real install (GOG API download, md5-checked).
+  - S5-data produces the real-game NXD9 captures with S16's d9cap under Wine, on private branch gamedata/captures.
+  - S16 compares against those captures.
+* **reverted and re-landed** - S12's order defaults: reverted (3f7d5714) after V1's C2v/C2a, then re-landed per
+  MSVC shape (92f3b4d6): object=msvc, operator=rtl, assign=msvc. S11's order.msvc has 5 configurations; V2
+  re-verifies.
+* **verification** - V2 is added (compile, rules, ABI and link streams); V1 keeps the rest.
+  - The R0 regression detector is merged: trend per head, regressions with their commit ranges, and stale passes no
+    longer count.
+  - Scorecard: 1 pass / 17 fail / 11 no-data / 4 stale.
