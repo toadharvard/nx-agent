@@ -194,6 +194,9 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 | oracle `exc:3` (0xCC filler) | `oracle-trap` | artifact |
 | `no-native-entry` | `no-native-entry` | artifact |
 | oracle-only data fault | `oracle-fault` | triage |
+| call-target: native calls a named stub `name:_Z...` | `native-undefined` | real-bug S1/S2c (fallback without the link's providers) |
+| call-target: oracle calls an import, native jumps to the IAT slot address | `import-slot-called` | real-bug S2c |
+| call-target: the native function never names the oracle's callee (from its object) | `native-inlined` | triage |
 | one side's store covers bytes the other leaves | `store-width` / `x86-only-store` / `native-only-store` | triage |
 | native calls a prefix of the oracle's calls / the oracle's calls and more | `native-early-exit` / `native-extra-calls` | triage |
 

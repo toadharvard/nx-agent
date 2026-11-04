@@ -107,6 +107,19 @@ def test_rules():
                        arm_trace=['00401100']), 'call-flow') == 'native-early-exit', 'native stops early')
     check(refined(dict(kind='call-count', x86=1, arm=2, x86_trace=['00401100'],
                        arm_trace=['00401100', '00401200']), 'call-flow') == 'native-extra-calls', 'native calls more')
+    check(refined(dict(kind='call-target', index=0, x86='00406d30', arm='name:_ZNK10NiFixedStrcvPKcEv'),
+                  'call-flow') == 'native-undefined', 'native calls an unbound C++ name')
+    check(refined(dict(kind='call-target', index=0, x86='imp:VirtualFree', arm='00fdf10c'), 'call-flow') ==
+          'import-slot-called', 'native jumps to the IAT slot')
+    real = causes.native_callees
+    try:
+        causes.native_callees = lambda src, a: {'__fnv_00401200'}
+        check(refined(dict(kind='call-target', index=0, x86='00401100', arm='00401200'), 'call-flow') ==
+              'native-inlined', 'oracle callee the native never names: native-inlined')
+        check(refined(dict(kind='call-target', index=0, x86='00401200', arm='00401300'), 'call-flow') == 'call-flow',
+              'oracle callee the native names: stays call-flow')
+    finally:
+        causes.native_callees = real
     check(refined(dict(kind='call-target', index=0, x86='00401100', arm='00401200'), 'call-flow') == 'call-flow',
           'call-target mismatch stays call-flow')
     # native null write after an intercepted allocator (static callee facts, faked here)

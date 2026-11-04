@@ -139,6 +139,11 @@ POLICY = {
                                                     'aggregate passed differently (ABI)'),
     'arg-other-buffer': ('triage', 'S13b', True, 'the two sides pass different argument objects: another member '
                                                  'or parameter (layout / argument order)'),
+    'import-slot-called': ('real-bug', 'S2c', True, 'the oracle calls an import, the native jumps to the IAT slot '
+                                                    'address itself (the slot bound as code, not loaded through)'),
+    'native-inlined': ('triage', 'S13b', True, 'the oracle calls X, the native function never names X: GCC inlined '
+                                               'it (an oracle body the adaptive follow could not load) or the '
+                                               'native source does not make that call'),
     'unclassified':   ('triage', 'S13b', True, 'no rule matched'),
 }
 
@@ -288,8 +293,28 @@ def _narrower(wide, narrow):
     return 0 < k < len(wide) and narrow[:k] == wide[:k]
 
 
-def _rule_calls(d):
+def _rule_calls(d, rec=None):
     tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    if d.get('kind') == 'call-target':
+        x, a = str(d.get('x86') or ''), str(d.get('arm') or '')
+        if a.startswith('name:_Z'):
+            # the native calls a named stub: a C++ name the link binds to nothing (a provider would trace as its
+            # address); report.reclassify finds the same with the link's providers, this is the fallback without
+            return 'native-undefined'
+        if x.startswith('imp:'):
+            try:
+                if _in(int(a, 16), WINDOW):
+                    return 'import-slot-called'
+            except ValueError:
+                pass
+        if rec is not None and not x.startswith(('imp:', 'name:')):
+            cs = native_callees(rec.get('source'), int(rec.get('address') or '0', 16))
+            if cs is not None and '__fnv_' + x not in cs and not any(n.startswith('__fnv_' + x) for n in cs):
+                return 'native-inlined'
+    return _rule_count(d, tx, ta)
+
+
+def _rule_count(d, tx, ta):
     if d.get('kind') == 'call-count' and isinstance(tx, list) and isinstance(ta, list):
         if len(ta) < len(tx) and tx[:len(ta)] == ta:
             return 'native-early-exit'
@@ -412,7 +437,7 @@ def refine(rec, cause=None):
     elif k == 'mem-write':
         got = _rule_mem_write(d)
     elif k in ('call-count', 'call-target'):
-        got = _rule_calls(d)
+        got = _rule_calls(d, rec)
     if got is None:
         return cause or 'unclassified'
     # a probe that saw call-flow stays call-flow unless the record names something more specific
