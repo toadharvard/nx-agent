@@ -121,10 +121,12 @@ bool ReadGeometry(const void* geometry, Renderer::GeomView* out) {
         memcpy(g.tint, sp + 0x68, 12);
         float a; memcpy(&a, sp + 0x78, 4);
         g.tint[3] = a * matAlpha;
-        if (sp[0x91]) { g.hasScroll = true; memcpy(g.scroll, sp + 0x7C, 8); }          // TexScroll (x, y of 4)
+        if (sp[0x91]) { g.hasScroll = true; memcpy(g.scroll, sp + 0x7C, 16); }         // TexScroll: uv * zw + xy
         if (sp[0xAC]) { g.hasScissor = true; memcpy(&g.scissor, sp + 0x9C, 16); }     // NiRectI l, t, r, b
         if (const uint8_t* tex = GP(U32(sp, 0x60)))
             if (NativeTexture* t = FindNativeTexture(GP(U32(tex, 0x24)), 0x80)) { g.image = t->image; g.d3dfmt = t->d3dfmt; }
+        if (const uint8_t* am = GP(U32(sp, 0x64)))          // second texture: the alpha map (TILE1001)
+            if (NativeTexture* t = FindNativeTexture(GP(U32(am, 0x24)), 0x80)) { g.alphaMap = t->image; g.alphaMapFmt = t->d3dfmt; }
     } else {
         g.tint[3] = matAlpha;
     }

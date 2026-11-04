@@ -11,6 +11,46 @@ render/native/perf/run.sh [work dir]     # default /home/user/work/p6n; needs en
 Numbers below are from the run of 2026-11-04 (commit in `report.json` `summary.commit`). All inputs are synthetic
 (§2); the real game's D3D9 streams plug into the same tools (§7).
 
+## 0. Hotspots: what eats the 45 fps frame (top 10, kept current)
+
+The gate reads `summary.targets_budget_fraction` (§5). Owner's targets: 720p, dynamic resolution off, docked and
+handheld; **45 fps stable at 720p handheld** is the target. Current verdict at 45 fps (22.2 ms): docked 720p frame
+0.56 of the budget (pass); **handheld 720p 1.05 (fail), GPU-bound** (GPU model 23.3 ms; CPU renderer 10.0 ms).
+
+Input (until S16's NXD9 captures of the real game exist): the synthetic mix_hi frame (3,710 draws, §2); GPU with
+S6n's native shaders. Real-like cross-check: the same pass mix with the game's own shaderpackage019 programs
+(translated by S6b's sdp2dksh, class averages): 16.8 ms docked, 27.2 ms handheld. CPU ms: IPC 0.6 at 1.02 GHz
+(the CPU clock is the same docked and handheld); GPU ms: handheld 720p (384 MHz), issue efficiency 0.6. CPU threads
+and the GPU run in parallel, so shares of different resources do not add up to one frame; each says how much of
+the 22.2 ms that resource spends there. Full lists: `report.json` `hotspots` (CPU by function, by family/pass; GPU
+by pass and by shader program, docked and handheld, native and real019 shaders).
+
+| # | where | what | resource | ms | share of 22.2 ms | why / fix |
+|---|---|---|---|---|---|---|
+| 1 | GPU pass | lit (static objects, 1,600 draws) | GPU handheld | 7.27 | 32.7 % | ALU: lit_spec.frag ~411 instr/px (light loop x 3 + runtime D3D9 epilogue) on 0.9 Mpx; static fog/alpha permutations, fp16 lighting math, fewer lights per pixel |
+| 2 | GPU pass | image space + UI (3.5 full-screen equivalents) | GPU handheld | 7.05 | 31.8 % | ALU: the stand-in tex.frag is ~120 epilogue instructions of 129; image-space shaders need no fog/alpha test (epilogue-free permutation), then fp16 ROP/bandwidth bound |
+| 3 | CPU function | `nx::SortPackets` | CPU main+render (front) | 3.74 | 16.9 % | 65,536-entry radix tables x 4 digits, fixed ~1.9 M instr/frame; 8/11-bit digits or sort the 36 key bits that matter (F2) |
+| 4 | GPU pass | trees | GPU handheld | 1.99 | 9.0 % | ALU (lit.frag on alpha-tested leaves, overdraw 2.5) |
+| 5 | CPU function | `record` (nxgpu.c) | CPU render (backend) | 1.63 | 7.4 % | stream decode + per-op dispatch ~270 instr/draw; plus dkCmdBufBindUniformBuffers 0.84 ms below the top 10: bind per-draw slice + epilogue for 2 stages each draw |
+| 6 | GPU pass | grass | GPU handheld | 1.54 | 7.0 % | ALU + overdraw 3.0 (nolight_tex.frag, epilogue) |
+| 7 | CPU function | `nx::Frame::Finish` | CPU render (front) | 1.46 | 6.6 % | encode loop with per-draw memcmp of dyn records |
+| 8 | GPU pass | land | GPU handheld | 1.34 | 6.0 % | ALU (4 layers) |
+| 9 | CPU function | `nx::Renderer::Render` | CPU main | 1.08 | 4.9 % | fixed 512 B slice memset/copy + 256 B epilogue per draw (F3) |
+| 10 | CPU function | `nx_d3d9_sampler` | CPU main | 1.01 | 4.5 % | every stage's sampler translated on every draw (F4) |
+
+S6n takes the rows in order, one commit each; every commit is re-profiled and recorded in `report.json`
+`optimizations[]` (§5) by
+
+```sh
+python3 -I render/native/perf/opt_delta.py <commit> [--before <commit>] [--name <text>]   # ~1 min per new commit
+python3 -I render/native/perf/report.py /home/user/work/p6n render/native/perf/report.json --reuse
+```
+
+`opt_delta.py` checks each commit out as a detached worktree (`<work>/opt/trees/`), puts the current perf tools over
+its `render/native/perf`, and measures mix_hi: AArch64 instructions of main / render front / deko3d recording, the
+GPU model at docked and handheld 720p (the commit's shaders), the top functions. Baseline: 443daf3 (main 5.64 M,
+render 3.38 M + 2.04 M instructions; GPU 12.44 / 23.22 ms docked / handheld at efficiency 0.6).
+
 ## 1. What is counted
 
 ```
@@ -127,7 +167,17 @@ CPU per draw over a whole frame (fixed costs included): native **1.67 - 6.25 µs
 mix_hi at 1.02 GHz IPC 0.6: 4.9 µs). The §3.7 estimate for the native path (~1-2 µs/draw on each thread at 1.02 GHz)
 holds only at IPC 1.0 and the high draw count.
 
-### 4.3 Frame-rate targets (owner: 45 fps main, 60 stretch, < 30 fail)
+### 4.3 Frame-rate targets (owner: 45 fps main, 60 stretch, < 30 fail; 720p, dynres off)
+
+Gate field (`targets_budget_fraction`), mix_hi, conservative values (CPU IPC 0.6 at 1.02 GHz; GPU efficiency 0.6):
+
+| target | CPU renderer @1.02 | GPU docked 720p | GPU handheld 720p | **frame docked 720p** | **frame handheld 720p** |
+|---|---|---|---|---|---|
+| 30 fps (33.3 ms) | 0.30 | 0.38 | 0.70 | **0.38 pass** | **0.70 pass** |
+| 45 fps (22.2 ms) | 0.45 | 0.56 | 1.05 | **0.56 pass** | **1.05 fail** |
+| 60 fps (16.7 ms) | 0.60 | 0.75 | 1.40 | **0.75 pass** | **1.40 fail** |
+
+frame = max(CPU worst thread at 1.02 GHz, GPU) / budget. The CPU-only verdicts below are kept for reference.
 
 Verdict per target and clock from the measured renderer CPU time: max(main hi, render hi) of mix_hi, i.e. the
 **low IPC bound (0.6) decides**; both threads run in parallel (§3.6), so the larger one is the bound.
@@ -155,8 +205,11 @@ Top-level `summary` (what the R0 gate reads):
   "per_draw_us": {"native": {"lo", "hi", "gate"}, "nine": {"lo", "hi", "gate"}},   // µs per draw, whole frame
   "frame_ms":    {"main": {"lo", "hi", "gate"}, "render": {"lo", "hi", "gate"}},   // ms per frame
   "assumptions": {"ipc": {"lo": 0.6, "hi": 1.0}, "clock_ghz": [1.02, 1.785], "gate_value": "..."},
-  "targets": {"30": {"1.02": "pass|fail", "1.785": ...}, "45": {...}, "60": {...}},
-  "targets_budget_fraction": {"30": {"1.02": x, ...}, ...},   // worst thread / budget
+  "targets_budget_fraction": {"30": {"1.02", "1.785", "gpu_docked_720p", "gpu_handheld_720p",
+                                      "frame_docked_720p", "frame_handheld_720p"}, "45": {...}, "60": {...}},
+                                    // THE GATE FIELD: fraction of the budget, <= 1.0 passes (rule in
+                                    // targets_budget_fraction_rule); frame_<cfg> = max(CPU @1.02, GPU) / budget
+  "targets": {"30": {"1.02": "pass|fail", "1.785", "frame_docked_720p", "frame_handheld_720p"}, "45": {...}, "60": {...}},
   "targets_rule", "per_draw_us_rule", "frame_ms_rule": "<text>", "render_backend_counted": true
 }
 ```
@@ -169,6 +222,8 @@ Detailed sections:
 
 | key | content |
 |---|---|
+| `hotspots` | `top10` (ranked rows {kind, name, ms, share_of_22_2ms, ...}), `cpu_by_function` (front + deko3d backend symbols, mix_hi frame), `cpu_by_family_pass` (leave-one-out marginals incl. backend), `gpu_by_pass/<scene>/<cfg>`, `gpu_by_program/<scene>/<cfg>`, `gpu_frame_ms/<scene>/<cfg>` for scenes mix_hi (native shaders) and real019_mix_hi, cfg docked_720p / handheld_720p at efficiency 0.6; `input` |
+| `optimizations[]` | one entry per S6n optimisation commit: {commit, name, cpu_instr_delta_main, cpu_instr_delta_render, gpu_ms_docked_720p, gpu_ms_handheld_720p, before, after} (before/after: the summary numbers of the two measured trees); source `render/native/perf/optimizations.json` |
 | `families.<f>` | `draws {lo, hi}`; `instr_per_draw {main, render, total (front), backend_record, total_with_backend}` (AArch64, marginal in mix_hi); `x64 {native_per_draw, nine_per_draw, nine_over_native}`; `isolated` (family alone); `params` (the mix row) |
 | `frame.mix_lo` / `frame.mix_hi` | `draws`; `instr {main, render_front, render_backend, render}`; `ms.<clock> {main, render} {lo, hi}`; `memory_term_ms`; `x64 {native, nine, ratio_nine_over_native, nine_driver_excluded}` |
 | `fixed_per_frame_instr` | the empty frame (no packets) |
@@ -266,30 +321,38 @@ compiled switches (once); both IF arms counted (upper bound).
 | nolight_tex.frag, tex.frag (image space stand-in) | 7 | 131 | 129 | 1 |
 | sky_clouds.frag | 9 | 153 | 151 | 1 |
 
-Scene model (Tegra X1 GM20B: 256 FP32 lanes, 16 TMU, 16 ROP, 25.6 GB/s at 60 % efficiency; GPU 768 MHz docked,
-384 MHz handheld): per family pixels = target x coverage x overdraw (shadow 3 x 1024² x 0.6 x 1.5, lit 0.55 x 1.8,
+Scene model (Tegra X1 GM20B: 256 FP32 lanes (fp16x2 HFMA2/HADD2/HMUL2 at twice the rate: ALU slots count them
+at half cost; detected from the Maxwell code, register forms only, 0 in today's uam output), 16 TMU, 16 ROP (half
+rate on 64-bit colour targets), 25.6 GB/s at 60 % efficiency; GPU 768 MHz docked, 384 MHz handheld). Presets, dynres
+off: docked_720p (shadow 3 x 1024², reflection 512²) and handheld_720p (3 x 512², 256²) are the gate configs;
+docked_1080p and handheld_540p_dynres are informational. DRAM bytes per pixel from each pass's render-target format
+(`TARGET_FORMATS`: scene, reflection and image space RGBA16F as FNV's HDR path, depth D24S8; colour x2 when
+blending, depth x 0.5 compression, 0.5 B per texture fetch). S6n's target changes go into `gpu_cost.py`
+`TARGET_FORMATS` or an override file `render/native/perf/gpu_targets.json` (`{"formats": {"main": "R11G11B10F"}}`).
+Before these terms (first report) the frame was 7.4-12.4 / 14.9-24.8 ms docked/handheld 720p; now: per family pixels = target x coverage x overdraw (shadow 3 x 1024² x 0.6 x 1.5, lit 0.55 x 1.8,
 land 0.45 x 1.2, LOD 0.15 x 1.2, trees 0.15 x 2.5, grass 0.20 x 3.0, actors 0.05 x 1.3, sky 0.35, particles 0.10 x
 4.0, image space 3.5 full-screen equivalents, reflection at quarter size); fragment time = pixels x max(ALU = instr /
 256, TEX = tex x 1.5 / 16, ROP = 1/16) / clock / issue efficiency (1.0 or 0.6); vertex time = draws x vertices x VS
 instr / 256; frame = max(sum, DRAM traffic / bandwidth). No cache, latency or early-z modelling beyond those factors.
 
-| mix_hi | docked 720p | docked 1080p | handheld 720p | handheld 540p |
+| mix_hi (efficiency 1.0 - 0.6) | docked 720p | handheld 720p | docked 1080p | handheld 540p (dynres) |
 |---|---|---|---|---|
-| frame ms (efficiency 1.0 - 0.6) | 7.4 - 12.4 | 15.7 - 26.2 | 14.9 - 24.8 | 9.0 - 15.1 |
-| 30 fps (33.3) | pass | pass | pass | pass |
-| 45 fps (22.2) | pass | peak only | peak only | pass |
-| 60 fps (16.7) | pass | peak only | peak only | pass |
+| native shaders (S6n) | 7.5 - 12.5 | 14.0 - 23.3 | 15.2 - 25.4 | 8.6 - 14.3 |
+| game's shaders (real019, translated) | 10.1 - 16.8 | 16.3 - 27.2 | 16.2 - 27.0 | 12.1 - 20.1 |
+| 45 fps (22.2), native | pass | **fail** (pass at peak only) | peak only | pass |
+| 60 fps (16.7), native | pass | fail (peak only) | peak only | pass |
 
-(mix_lo: 7.1 - 11.8 / 15.4 - 25.6 / 14.1 - 23.5 / 8.3 - 13.8 ms.) At docked 720p, efficiency 0.6, the big items are
+(mix_lo native: 7.1 - 11.9 docked 720p, 13.2 - 22.0 handheld 720p.) At docked 720p, efficiency 0.6, the big items are
 lit 3.6 ms and image space 3.5 ms; every family is ALU-bound, mostly by the D3D9 epilogue (F5). Handheld at 720p
-needs RENDER_NATIVE §9.3's scaled scene (0.50-0.75) for 45 fps; docked 720p meets 60 by the model. The model has
+misses 45 fps by 5 % without dynamic resolution (the owner's gate), so rows 1-2 of §0 decide it; docked 720p meets 60
+by the model. The model has
 no measured anchor yet: the first console run's `NxFrameStats.gpu_us` replaces it.
 
 ## 10. Findings for S6n (render/native)
 
 | # | finding | measured cost | suggestion |
 |---|---|---|---|
-| F1 | `Renderer` reserves 512 B UBO + 256 B epilogue per draw in an 8 MiB ring split over `frames_in_flight`; at NXGPU_FRAMES = 3 a region holds 3,640 draws | mix_hi (3,710 draws) drops 74 draws per frame at 3 frames in flight (`ring_overflow_at_3_frames_in_flight`); measured at 2 | size the ring for 4-5 k draws x 3 frames, or allocate the slice at the family's real size (F3) |
+| F1 (fixed in f4c70ed: 0 dropped draws at 3 frames in flight, optimizations[]) | `Renderer` reserves 512 B UBO + 256 B epilogue per draw in an 8 MiB ring split over `frames_in_flight`; at NXGPU_FRAMES = 3 a region holds 3,640 draws | mix_hi (3,710 draws) drops 74 draws per frame at 3 frames in flight (`ring_overflow_at_3_frames_in_flight`); measured at 2 | size the ring for 4-5 k draws x 3 frames, or allocate the slice at the family's real size (F3) |
 | F2 | `SortPackets`: 16-bit LSD radix, 65,536-entry count table, memset + prefix sum per varying digit (4 here) | 2.29 M instructions per mix_hi frame (of 3.38 M in Finish), ~1.9 M fixed per frame; 256 KiB table is not L1-resident | 8-bit digits (or 11-bit), or sort only the 36 high bits (pass, layer, state, tex) and keep engine order inside; expected < 0.3 M |
 | F3 | `Render` clears and copies a fixed 512 B slice, writes a 256 B epilogue every draw | memset/memmove 0.53 M per mix_hi frame; 2.85 MB of UBO writes (the store term, 0.8 ms) | slice of the family's size (64-256 B); share the epilogue block while the dyn state is unchanged (as `AddDyn` does) |
 | F4 | `StateTracker::Handles` translates every stage's sampler (`nx_d3d9_sampler`) and searches the sampler cache linearly on every draw | 1.05 M per mix_hi frame (618 k + 433 k) | cache the translated sampler per stage, re-translate only when that stage's sampler state changed |

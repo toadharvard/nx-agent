@@ -297,8 +297,9 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     t.Check(p[2] == 255 && p[0] == 0 && q[0] == 255 && q[1] == 255 && q[2] == 0, "stub frame: clear + partial clear",
             p[2], q[1]);
     p = px(10, 55); q = px(40, 85);
-    t.Check(p[0] == 255 && p[1] == 0 && p[2] == 255, "geometry: triangle-list shape (magenta)", p[0], p[1]);
-    t.Check(q[0] == 0 && q[1] == 255 && q[2] == 255, "geometry: strip shape (cyan)", q[0], q[1]);
+    // tile_vc (TILE1002): the vertex colour's rgb is not used, its alpha is: white texel x white tint
+    t.Check(p[0] == 255 && p[1] == 255 && p[2] == 255, "geometry: triangle-list shape (tile_vc: texture x tint)", p[0], p[1]);
+    t.Check(q[0] == 255 && q[1] == 255 && q[2] == 255, "geometry: strip shape", q[0], q[1]);
     p = px(10, 63); q = px(31, 55);   // y1 = 0.65 * 96 = 62.4 -> rows 48..62; x1 = 32
     const uint8_t* q2 = px(32, 55);
     t.Check(p[0] == 0 && q[0] == 255 && q2[0] == 0, "geometry: shape edges (row 63 and column 32 outside)", p[0], q2[0]);
@@ -389,9 +390,12 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
         eng->Do_SetScreenSpaceCameraData(nullptr);
         r.SetEnginePass(757, NxFam_Tile);
         eng->Do_RenderGeometry(eng3 + 0);
+        const uint16_t psBg = r.lastPs();
         eng->Do_RenderGeometry(eng3 + 704);
         eng->Do_RenderGeometry(eng3 + 1536);
+        const uint16_t psText = r.lastPs();
         r.SetEnginePass(0, NxFam_None);
+        t.Check(psBg != 0 && psText != 0 && psBg != psText, "epilogue permutations: no-epilogue tile vs alpha-tested tile", psBg, psText);
         t.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame(), "frame 3: End");
         t.Check(be->Readback(rb), "frame 3: readback");
         p = px(16, 12); q = px(80, 12);   // checker 2x2 over 128x96: texel (0,0) red, (1,0) blue
@@ -479,7 +483,7 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
         tile(768, 1024, 1152, 0.0f, 0.0f, 1.0f, 1.0f, 1280, 0, green, 0, 1, 0, 0, 0);     // green where stencil == 1
         w32(768 + 0xAC, ga(eng3 + 1468)); w16(1468 + 0x18, (uint16_t)(1 | 2 << 12)); w32(1468 + 0x1C, 1); w32(1468 + 0x20, 0xFF);
         tile(1536, 1792, 1920, 0.5f, 0.0f, 1.0f, 0.5f, 2048, kTex0, white, 0, 1, 0, 0, 0); // checker scrolled by u + 0.5
-        eng3[2048 + 0x91] = 1; const float sc2[2] = {0.5f, 0.0f}; wf(2048 + 0x7C, sc2, 2);
+        eng3[2048 + 0x91] = 1; const float sc2[4] = {0.5f, 0.0f, 1.0f, 1.0f}; wf(2048 + 0x7C, sc2, 4);
         tile(2304, 2560, 2688, 0.0f, 0.0f, 1.0f, 1.0f, 2816, 0, red, 0, 1, 0, 0, 0);      // red, scissored
         eng3[2816 + 0xAC] = 1; const int32_t rect[4] = {100, 60, 110, 70}; memcpy(eng3 + 2816 + 0x9C, rect, 16);
         t.Check(eng->Do_BeginFrame() && eng->Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "frame 6: begin");

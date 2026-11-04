@@ -36,6 +36,7 @@ public:
     bool Readback(const NxReadback& r) override;
     void Shutdown() override;
     const NxGpuInfo& Info() const override { return info_; }
+    uint64_t ShaderGlsl(uint32_t id) const override { return inner_ ? inner_->ShaderGlsl(id) : 0; }
     uint32_t frames() const { return frames_; }
     uint64_t bytes() const { return bytes_; }
 private:

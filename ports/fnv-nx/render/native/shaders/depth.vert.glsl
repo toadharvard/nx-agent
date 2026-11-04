@@ -1,7 +1,8 @@
 #version 460
 // depth family, vertex stage. Block = NxDepthDraw (SKIN: NxDepthSkinDraw, palette as in lit.vert.glsl).
-// nx-variants: -= skin=SKIN
+// nx-variants: -= skin=SKIN at=ALPHATEST
 layout (location = 0) in vec3 inPos;
+layout (location = 1) in vec2 inUv;
 #ifdef SKIN
 layout (location = 4) in vec4 inWeights;
 layout (location = 5) in vec4 inIndices;
@@ -10,6 +11,7 @@ layout (std140, binding = 1) uniform DepthDraw { mat4 wvp; vec4 bones[96]; } d;
 layout (std140, binding = 1) uniform DepthDraw { mat4 wvp; } d;
 #endif
 layout (location = 0) out vec4 outClip;
+layout (location = 1) out vec2 outUv;
 void main() {
     vec3 pos = inPos;
 #ifdef SKIN
@@ -22,4 +24,5 @@ void main() {
 #endif
     gl_Position = d.wvp * vec4(pos, 1.0);
     outClip = gl_Position;
+    outUv = inUv;
 }

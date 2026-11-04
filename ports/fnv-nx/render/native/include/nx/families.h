@@ -65,15 +65,21 @@ typedef struct NxDepthSkinDraw { float wvp[16]; float bones[96][4]; } NxDepthSki
 
 /* land (LAND passes): a base texture plus up to 3 layers blended by per-vertex weights (attribute 3, xyz); the
  * vertex colour (attribute 2) modulates the result. Textures: slot 0 base, 1-3 layers. */
-typedef struct NxLandDraw { float wvp[16]; float uvScale[4]; } NxLandDraw;
+typedef struct NxLandDraw {
+    float wvp[16];
+    float uvScale[4];
+    float lightDir[4];      /* LIT (LANDAD): light direction, model space (LightData) */
+    float lightColor[4];    /* LIT: PSLightColor */
+    float ambient[4];       /* LIT: AmbientColor */
+} NxLandDraw;
 
 /* sky (SKY passes): colour from the view direction's elevation e = normalize(dir).z (Gamebryo z up):
  * c = mix(horizon, zenith, smoothstep(0, 1, max(e, 0) ^ (1/blend)) ) below the zenith, plus a cloud layer (sky_clouds:
  * texture 0, alpha-blended over the gradient with alpha x cloudAlpha). */
-typedef struct NxSkyDraw {
+typedef struct NxSkyDraw {   /* SKY.vso: vertex colour = weights of three blend colours */
     float wvp[16];
-    float zenith[4], horizon[4];
-    float params[4];        /* blend exponent, cloud alpha, uv scroll x, uv scroll y */
+    float blend0[4], blend1[4], blend2[4];   /* BlendColor c4-c6; alpha = vc.a x blend0.a */
+    float params[4];        /* far-plane z/w (0.9999), cloud alpha, uv scroll x, uv scroll y */
 } NxSkyDraw;
 
 #ifdef __cplusplus
@@ -85,5 +91,5 @@ typedef struct NxSkyDraw {
 NX_FAM_ASSERT_(sizeof(NxTileDraw) == 96, "NxTileDraw");
 NX_FAM_ASSERT_(sizeof(NxNoLightDraw) == 128, "NxNoLightDraw");
 NX_FAM_ASSERT_(sizeof(NxLitDraw) == 208 + 8 * 32, "NxLitDraw");
-NX_FAM_ASSERT_(sizeof(NxSkyDraw) == 112, "NxSkyDraw");
+NX_FAM_ASSERT_(sizeof(NxSkyDraw) == 128, "NxSkyDraw");
 #endif

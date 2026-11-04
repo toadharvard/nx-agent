@@ -744,7 +744,7 @@ void S_border(Ctx& c, Checks& k) {
 // ---- scene: tile (the menu family) -----------------------------------------------------------------------------------
 struct TileVtx { float x, y, z, u, v; uint32_t rgba; };
 void DrawTile(Ctx& c, const uint32_t* rs, int vs, int ps, float x, float y, float w, float h, const float tint[4],
-              const float scroll[2], uint32_t vc, uint32_t tex, uint8_t layer) {
+              const float scroll[2], uint32_t vc, uint32_t tex, uint8_t layer, uint32_t tex1 = 0) {
     NxDynamicState dyn;
     uint32_t sb;
     uint16_t st = StateFor(c, rs, c.vsTile[vs], c.psTile[ps], c.layTile, &dyn, &sb);
@@ -757,9 +757,11 @@ void DrawTile(Ctx& c, const uint32_t* rs, int vs, int ps, float x, float y, floa
         v[i].x = x + q[i][0] * w; v[i].y = y + q[i][1] * h; v[i].z = 0.5f; v[i].u = q[i][0]; v[i].v = q[i][1];
         v[i].rgba = vc;
     }
-    uint32_t tb = c.frame->AddTextures(&tex, 1);
+    const uint32_t texs[2] = {tex, tex1};
+    uint32_t nt = tex1 ? 2 : 1;
+    uint32_t tb = c.frame->AddTextures(texs, nt);
     p->key = nx::SortKey(0, layer, st, (uint16_t)tb, 0);
-    p->state = st; p->texCount = 1; p->texBlock = (uint16_t)tb;
+    p->state = st; p->texCount = (uint16_t)nt; p->texBlock = (uint16_t)tb;
     p->vtxBlock = c.vb->block(); p->vtxOffset = off; p->vtxSize = 4 * sizeof(TileVtx);
     p->prim = NxPrim_TriStrip; p->count = 4; p->instances = 1;
     NxTileDraw* u = (NxTileDraw*)c.frame->Constants(&p->uboOffset);
@@ -767,6 +769,7 @@ void DrawTile(Ctx& c, const uint32_t* rs, int vs, int ps, float x, float y, floa
     memset(u, 0, sizeof *u);
     // pixels (y down) -> D3D clip space, column-major
     u->wvp[0] = 2.0f / W; u->wvp[5] = -2.0f / H; u->wvp[10] = 1.0f; u->wvp[12] = -1.0f; u->wvp[13] = 1.0f; u->wvp[15] = 1.0f;
+    u->texScroll[2] = u->texScroll[3] = 1.0f;   // uv * zw + xy (TILE1001)
     if (scroll) { u->texScroll[0] = scroll[0]; u->texScroll[1] = scroll[1]; }
     memcpy(u->tint, tint, 16);
     Finish(c, p, dyn, sb, -1);
@@ -788,7 +791,11 @@ void S_tile(Ctx& c, Checks& k) {
     DrawTile(c, a.rs, 0, 0, 4, 4, 32, 32, tint, nullptr, 0, h, 0);                     // tile
     DrawTile(c, a.rs, 1, 0, 40, 4, 32, 32, tint, scroll, 0, h, 0);                     // tile_scroll vs
     DrawTile(c, a.rs, 2, 2, 76, 4, 32, 32, tint, nullptr, RGBA(255, 128, 64, 128), h, 0);   // tile_vc
-    DrawTile(c, a.rs, 0, 1, 112, 4, 32, 32, tint, nullptr, 0, h, 0);                   // tile_alphamap
+    static uint32_t amap = 0;   // alpha map: r = 0.5 (TILE1001 multiplies alpha by its red channel)
+    static const uint32_t amTexel = 0xFF80FFFFu;
+    if (!amap) amap = MakeTex(c, FMT_A8R8G8B8, 1, 1, 1, &amTexel, 4);
+    uint32_t ham = Handle(c, amap, FMT_A8R8G8B8, s);
+    DrawTile(c, a.rs, 1, 1, 112, 4, 32, 32, tint, nullptr, 0, h, 0, ham);             // tile_alphamap (scroll VS)
     // alpha blended over the background (menus: SRCALPHA/INVSRCALPHA)
     D3D b; b.rs[ALPHABLENDENABLE] = 1; b.rs[SRCBLEND] = B_SRCALPHA; b.rs[DESTBLEND] = B_INVSRCALPHA;
     DrawTile(c, b.rs, 0, 0, 4, 44, 32, 32, tint, nullptr, 0, h, 1);
@@ -801,10 +808,10 @@ void S_tile(Ctx& c, Checks& k) {
             uint32_t s2 = texels[((ty + 2) & 3) * 4 + ((tx + 1) & 3)];   // scrolled by (1, 2) texels, WRAP
             k.Add("tile_scroll: uv + TexScroll", 40 + px, 4 + py, u8((s2 >> 16 & 255) / 255.f * tint[0]),
                   u8((s2 >> 8 & 255) / 255.f * tint[1]), u8((s2 & 255) / 255.f * tint[2]), u8((s2 >> 24) / 255.f * tint[3]));
-            k.Add("tile_vc: texture x vertex colour x tint", 76 + px, 4 + py, u8(tr * 1.0f * tint[0]),
-                  u8(tg * (128 / 255.f) * tint[1]), u8(tbl * (64 / 255.f) * tint[2]), u8(ta * (128 / 255.f) * tint[3]));
-            k.Add("tile_alphamap: tint rgb, tint.a x texture.a", 112 + px, 4 + py, u8(tint[0]), u8(tint[1]), u8(tint[2]),
-                  u8(tint[3] * ta));
+            k.Add("tile_vc: rgb texture x tint, alpha texture x vertex alpha", 76 + px, 4 + py, u8(tr * tint[0]),
+                  u8(tg * tint[1]), u8(tbl * tint[2]), u8(ta * (128 / 255.f)));
+            k.Add("tile_alphamap: texture x tint, alpha x alpha map r", 112 + px, 4 + py, u8(tr * tint[0]), u8(tg * tint[1]),
+                  u8(tbl * tint[2]), u8(tint[3] * ta * (128 / 255.f)));
             float a = ta * tint[3];
             k.Add("tile: SRCALPHA blend over the background", 4 + px, 44 + py, u8(tr * tint[0] * a + 10 / 255.f * (1 - a)),
                   u8(tg * tint[1] * a + 20 / 255.f * (1 - a)), u8(tbl * tint[2] * a + 30 / 255.f * (1 - a)), 0, 1, 7);
@@ -1009,6 +1016,22 @@ void S_depth(Ctx& c, Checks& k) {
     DrawN2(c, eq.rs, c.vsDepth, c.psDepthOut, v, 4, NxPrim_TriStrip, &u, sizeof u, nullptr, 0, pass, 6);
     k.Add("ZONLY: no colour written, EQUAL pass fills it", 130, 30, u8(0.1f), u8(0.1f), u8(0.1f), u8(0.1f), 1);
     k.Add("ZONLY: EQUAL fails outside the depth-only quad", 104, 4, 0, 0, 0, 255, 0);
+    // ZONLY_At (depth_at): the diffuse alpha through the alpha test (GREATER 128) cuts the texture's holes out of the
+    // depth pass; a farther depth_out quad behind it (ZFUNC LESS) then shows only through the holes
+    static uint32_t chk = 0;
+    static const uint32_t ck[4] = {0xFFFFFFFFu, 0x00FFFFFFu, 0x00FFFFFFu, 0xFFFFFFFFu};
+    if (!chk) chk = MakeTex(c, FMT_A8R8G8B8, 2, 2, 1, ck, 16);
+    Samp pt;
+    uint32_t hc = Handle(c, chk, FMT_A8R8G8B8, pt);
+    D3D at; at.rs[ZENABLE] = 1; at.rs[ZFUNC] = CMP_LESS; at.rs[COLORWRITEENABLE] = 0;
+    at.rs[ALPHATESTENABLE] = 1; at.rs[ALPHAFUNC] = CMP_GREATER; at.rs[ALPHAREF] = 128;
+    QuadN2(v, 10, 96, 42, 116, -80, 0, 0, 0, 0);
+    DrawN2(c, at.rs, c.vsDepthAt, c.psDepthAt, v, 4, NxPrim_TriStrip, &u, sizeof u, &hc, 1, pass, 7);
+    D3D far; far.rs[ZENABLE] = 1; far.rs[ZFUNC] = CMP_LESS;
+    QuadN2(v, 10, 96, 42, 116, 0, 0, 0, 0, 0);
+    DrawN2(c, far.rs, c.vsDepth, c.psDepthOut, v, 4, NxPrim_TriStrip, &u, sizeof u, nullptr, 0, pass, 8);
+    k.Add("ZONLY_At: opaque texel keeps its depth (nothing behind shows)", 18, 100, 0, 0, 0, 255, 0);
+    k.Add("ZONLY_At: transparent texel is cut out (the quad behind shows)", 34, 100, u8(0.5f), u8(0.5f), u8(0.5f), u8(0.5f), 1);
     EndFrame(c);
 }
 
@@ -1042,9 +1065,49 @@ void S_land(Ctx& c, Checks& k) {
         k.Add("land: base + 3 layers by vertex weights x vertex colour", 22 + q * 39, 30, u8(e[0]), u8(e[1]), u8(e[2]), 255, 1);
     }
     // a weight gradient (golden only)
-    QuadN2(v, 4, 70, 156, 116, 0, RGBA(255, 255, 255, 255), 0, 0, 0);
+    QuadN2(v, 4, 70, 156, 100, 0, RGBA(255, 255, 255, 255), 0, 0, 0);
     v[1].nx = 1; v[2].ny = 1; v[3].nz = 1;
     DrawN2(c, a.rs, c.vsLand, c.psLand, v, 4, NxPrim_TriStrip, &u, sizeof u, h, 4, pass, 0);
+    // LANDAD (land_lit): base x vertex colour x clamp(N.L x light + ambient), flat normal map, L = (0, 0, 0.5)
+    static uint32_t nmap = 0, lbase = 0;
+    static const uint32_t nTexel = 0xFF8080FFu, bTexel = 0xFFCC9966u;   // ARGB: normal (0.5, 0.5, 1), base (.8, .6, .4)
+    if (!nmap) { nmap = MakeTex(c, FMT_A8R8G8B8, 1, 1, 1, &nTexel, 4); lbase = MakeTex(c, FMT_A8R8G8B8, 1, 1, 1, &bTexel, 4); }
+    uint32_t hl[5] = {Handle(c, lbase, FMT_A8R8G8B8, s), h[0], h[0], h[0], Handle(c, nmap, FMT_A8R8G8B8, s)};
+    NxLandDraw lu = u;
+    lu.lightDir[2] = 0.5f;
+    lu.lightColor[0] = lu.lightColor[1] = lu.lightColor[2] = 0.8f;
+    lu.ambient[0] = lu.ambient[1] = lu.ambient[2] = 0.2f;
+    struct VL { V36 b; float n[3], t[3], bi[3]; } lv[4];
+    QuadN2(v, 4, 104, 156, 118, 0, RGBA(255, 255, 255, 255), 0, 0, 0);
+    for (int i = 0; i < 4; i++) {
+        lv[i].b = v[i];
+        lv[i].n[0] = 0; lv[i].n[1] = 0; lv[i].n[2] = 1; lv[i].t[0] = 1; lv[i].t[1] = 0; lv[i].t[2] = 0;
+        lv[i].bi[0] = 0; lv[i].bi[1] = 1; lv[i].bi[2] = 0;
+    }
+    {
+        NxDynamicState dyn;
+        uint32_t sb;
+        uint16_t st = StateFor(c, a.rs, c.vsLandLit, c.psLandLit, c.layLandLit, &dyn, &sb);
+        uint32_t off;
+        VL* dst = (VL*)c.vb->Alloc(sizeof lv, 16, &off);
+        nx::Packet* p = c.frame->Emit();
+        if (dst && p) {
+            memcpy(dst, lv, sizeof lv);
+            uint32_t tb = c.frame->AddTextures(hl, 5);
+            p->key = nx::SortKey(pass, 0, st, (uint16_t)tb, 0);
+            p->state = st; p->texCount = 5; p->texBlock = (uint16_t)tb;
+            p->vtxBlock = c.vb->block(); p->vtxOffset = off; p->vtxSize = sizeof lv;
+            p->prim = NxPrim_TriStrip; p->count = 4; p->instances = 1;
+            void* ub = c.frame->Constants(&p->uboOffset);
+            if (ub) { memset(ub, 0, 512); memcpy(ub, &lu, sizeof lu); }
+            Finish(c, p, dyn, sb, -1);
+        }
+    }
+    const float nz = 1.0f * 2.0f - 1.0f, nxy = 128 / 255.f * 2.0f - 1.0f;
+    float ndl = (nxy * 0 + nxy * 0 + nz * 0.5f);
+    float lt = ndl * 0.8f + 0.2f;
+    (void)nxy;
+    k.Add("land_lit: base x vc x (N.L x light + ambient)", 80, 111, u8(0.8f * lt), u8(0.6f * lt), u8(0.4f * lt), 255, 1);
     EndFrame(c);
 }
 
@@ -1053,35 +1116,36 @@ void S_sky(Ctx& c, Checks& k) {
     static uint32_t cl[16];
     if (!cloud) { for (int i = 0; i < 16; i++) cl[i] = (uint32_t)(i * 16) << 24 | 0xF0F0F0u; cloud = MakeTex(c, FMT_A8R8G8B8, 4, 4, 1, cl, 64); }
     BeginFrame(c);
-    uint8_t pass = Pass(c, 1, RGBA(0, 0, 0, 255));
-    D3D a;
+    uint8_t pass = Pass(c, 1 | 2, RGBA(0, 0, 0, 255), true, 1.0f);
+    D3D a; a.rs[ZENABLE] = 1; a.rs[ZFUNC] = CMP_LESSEQUAL;
     NxSkyDraw u;
     memset(&u, 0, sizeof u);
-    // directions (x, 1, z): clip.x = x, clip.y = 2z - 1
-    u.wvp[0] = 1; u.wvp[9] = 2; u.wvp[13] = -1; u.wvp[15] = 1; u.wvp[10] = 0; u.wvp[14] = 0.5f;
-    const float zen[3] = {0.1f, 0.2f, 0.6f}, hor[3] = {0.8f, 0.7f, 0.5f};
-    memcpy(u.zenith, zen, 12); memcpy(u.horizon, hor, 12);
-    u.params[0] = 2.0f; u.params[1] = 0.5f;
+    PixelOrtho(u.wvp);
+    const float b0[4] = {0.8f, 0.6f, 0.2f, 1.0f}, b1[4] = {0.1f, 0.3f, 0.9f, 1.0f}, b2[4] = {0.0f, 0.5f, 0.1f, 1.0f};
+    memcpy(u.blend0, b0, 16); memcpy(u.blend1, b1, 16); memcpy(u.blend2, b2, 16);
+    u.params[0] = 0.9999f; u.params[1] = 0.5f;
+    // SKY.vso: the vertex colour weights the three blend colours (left quad: all blend0; right: a mix)
     V36 v[4];
-    memset(v, 0, sizeof v);
-    const float d[4][3] = {{-1, 1, 1}, {1, 1, 1}, {-1, 1, 0}, {1, 1, 0}};   // top row z = 1, bottom row z = 0
-    for (int i = 0; i < 4; i++) { v[i].x = d[i][0]; v[i].y = d[i][1]; v[i].z = d[i][2]; v[i].u = i & 1 ? 1.0f : 0.0f; v[i].v = i & 2 ? 1.0f : 0.0f; }
+    QuadN2(v, 0, 0, 80, 120, -50, RGBA(255, 0, 0, 255), 0, 0, 0);          // unpinned depth would be 0.25
     DrawN2(c, a.rs, c.vsSky, c.psSky, v, 4, NxPrim_TriStrip, &u, sizeof u, nullptr, 0, pass, 0);
-    for (int py = 3; py < H; py += 13)
-        for (int px = 3; px < 100; px += 19) {   // the clouds cover x >= 100
-            float x = 2.0f * px / W - 1.0f, z = 1.0f - (float)py / H;
-            float e = z / sqrtf(x * x + 1 + z * z);
-            float t = powf(e, 1.0f / u.params[0]);
-            float kk = t * t * (3 - 2 * t);
-            k.Add("sky: horizon-zenith gradient by elevation", px, py, u8(hor[0] + (zen[0] - hor[0]) * kk),
-                  u8(hor[1] + (zen[1] - hor[1]) * kk), u8(hor[2] + (zen[2] - hor[2]) * kk), 255, 2);
-        }
-    // clouds over the right half (golden only)
+    QuadN2(v, 80, 0, 160, 120, -50, RGBA(64, 128, 64, 128), 0, 0, 0);
+    DrawN2(c, a.rs, c.vsSky, c.psSky, v, 4, NxPrim_TriStrip, &u, sizeof u, nullptr, 0, pass, 0);
+    k.Add("sky: vertex colour (1, 0, 0) -> blend0", 10, 100, u8(b0[0]), u8(b0[1]), u8(b0[2]), 255, 1);
+    float e[3];
+    for (int ch = 0; ch < 3; ch++) e[ch] = b0[ch] * 64 / 255.f + b1[ch] * 128 / 255.f + b2[ch] * 64 / 255.f;
+    k.Add("sky: B0 x vc.r + B1 x vc.g + B2 x vc.b, alpha vc.a x B0.a", 120, 30, u8(e[0]), u8(e[1]), u8(e[2]), u8(128 / 255.f), 1);
+    // far plane: a quad at depth 0.5 with ZFUNC LESS passes over the sky (pinned to 0.9999, not its own 0.25)
+    NxDepthDraw du;
+    PixelOrtho(du.wvp);
+    D3D z; z.rs[ZENABLE] = 1; z.rs[ZFUNC] = CMP_LESS;
+    QuadN2(v, 30, 50, 50, 70, 0, 0, 0, 0, 0);
+    DrawN2(c, z.rs, c.vsDepth, c.psDepthOut, v, 4, NxPrim_TriStrip, &du, sizeof du, nullptr, 0, pass, 2);
+    k.Add("sky: on the far plane (a depth-0.5 quad passes ZFUNC LESS)", 40, 60, u8(0.5f), u8(0.5f), u8(0.5f), u8(0.5f), 1);
+    // clouds over the right part (golden only)
     Samp s; s.s[S_MINFILTER] = s.s[S_MAGFILTER] = 2;
     uint32_t h = Handle(c, cloud, FMT_A8R8G8B8, s);
-    D3D b;
-    for (int i = 0; i < 4; i++) if (v[i].x < 0) v[i].x = 0.25f;
-    DrawN2(c, b.rs, c.vsSky, c.psSkyClouds, v, 4, NxPrim_TriStrip, &u, sizeof u, &h, 1, pass, 1);
+    QuadN2(v, 100, 60, 160, 120, -50, RGBA(255, 0, 0, 255), 0, 0, 0);
+    DrawN2(c, a.rs, c.vsSky, c.psSkyClouds, v, 4, NxPrim_TriStrip, &u, sizeof u, &h, 1, pass, 1);
     EndFrame(c);
 }
 
@@ -1275,6 +1339,16 @@ bool Init(Ctx& c, nx::Backend* be, char* err, uint32_t errlen) {
     ln.attr[5].offset = 40; ln.attr[5].type = NxAttr_Unorm8; ln.attr[5].components = 4;
     c.layN2Skin = sc.Layout(ln);
     c.vsLitSkin = Shader(c, "lit_skin", 0); c.vsDepthSkin = Shader(c, "depth_skin", 0);
+    c.vsDepthAt = Shader(c, "depth_at", 0); c.psDepthAt = Shader(c, "depth_at", 1);
+    c.vsLandLit = Shader(c, "land_lit", 0); c.psLandLit = Shader(c, "land_lit", 1);
+    if (!c.vsDepthAt || !c.psDepthAt || !c.vsLandLit || !c.psLandLit) FAIL_("depth_at / land_lit shaders");
+    {
+        NxVtxLayout ll = ln;   // V36 + normal, tangent, binormal (LANDAD)
+        ll.count = 7; ll.stride = 72;
+        ll.attr[3].offset = 24; ll.attr[3].type = NxAttr_Float32; ll.attr[3].components = 3;
+        for (int a2 = 4; a2 < 7; a2++) { ll.attr[a2].offset = (uint8_t)(36 + 12 * (a2 - 4)); ll.attr[a2].type = NxAttr_Float32; ll.attr[a2].components = 3; }
+        c.layLandLit = sc.Layout(ll);
+    }
     if (!c.vsLitSkin || !c.vsDepthSkin) FAIL_("skin shaders");
     NxVtxLayout lq;
     memset(&lq, 0, sizeof lq);

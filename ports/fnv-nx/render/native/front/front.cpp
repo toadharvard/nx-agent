@@ -31,7 +31,14 @@ struct ApiBe final : Backend {
     uint32_t SamplerCreate(const NxSamplerState& s) override {
         return (uint32_t)Call(NXGPU_FN_SAMPLER_CREATE, FNVNX_ADDR_(&s));
     }
-    uint32_t ShaderCreate(const NxShaderDesc& d) override { return (uint32_t)Call(NXGPU_FN_SHADER_CREATE, FNVNX_ADDR_(&d)); }
+    uint32_t ShaderCreate(const NxShaderDesc& d) override {
+        uint32_t id = (uint32_t)Call(NXGPU_FN_SHADER_CREATE, FNVNX_ADDR_(&d));
+        if (id && id < kShaderTable) glsl_[id] = d.glsl;
+        return id;
+    }
+    uint64_t ShaderGlsl(uint32_t id) const override { return id < kShaderTable ? glsl_[id] : 0; }
+    enum { kShaderTable = 4096 };
+    uint64_t glsl_[kShaderTable] = {};
     void Submit(const NxSubmit& s) override { Call(NXGPU_FN_SUBMIT, FNVNX_ADDR_(&s)); }
     void WaitFrame(uint32_t f) override { Call(NXGPU_FN_WAIT_FRAME, f); }
     bool Readback(const NxReadback& r) override { return Call(NXGPU_FN_READBACK, FNVNX_ADDR_(&r)) == 0; }
@@ -200,6 +207,7 @@ void DynFromD3D9(DynRec* d, const NxDynamicState& s) {
 bool Frame::Init(Backend* be, uint32_t uboBytes, uint32_t uboSize) {
     be_ = be;
     uboSize_ = (uboSize + 255) & ~255u;  // UBO offsets must be 256-byte aligned on Maxwell
+    if (!uboBytes) uboBytes = UboBytesFor(kMaxPackets, uboSize_, be->Info().frames_in_flight ? be->Info().frames_in_flight : 2);
     packets_ = (Packet*)aligned_alloc_(64, kMaxPackets * sizeof(Packet));
     order_ = (uint32_t*)malloc(kMaxPackets * 4); tmp_ = (uint32_t*)malloc(kMaxPackets * 4);
     keys_ = (uint64_t*)malloc(kMaxPackets * 8); ktmp_ = (uint64_t*)malloc(kMaxPackets * 8);
@@ -212,6 +220,7 @@ bool Frame::Init(Backend* be, uint32_t uboBytes, uint32_t uboSize) {
 }
 
 void Frame::Begin(uint32_t frame) {
+    dropped_ = 0;
     frame_ = frame;
     nPasses_ = nPackets_ = nTex_ = nDyn_ = 0;
     ubo_.BeginFrame(frame);
@@ -248,7 +257,11 @@ Packet* Frame::Emit() {
     return p;
 }
 
-void* Frame::Constants(uint32_t* offset) { return ubo_.Alloc(uboSize_, 256, offset); }
+void* Frame::Constants(uint32_t* offset) {
+    void* p = ubo_.Alloc(uboSize_, 256, offset);
+    if (!p) dropped_++;
+    return p;
+}
 
 void* Frame::PassConstants(uint8_t pass, uint32_t size) {
     uint32_t off;
@@ -277,6 +290,7 @@ NxEpilogue* Frame::Epilogue(Packet* p) {
     uint32_t off;
     NxEpilogue* e = (NxEpilogue*)ubo_.Alloc(256, 256, &off);
     if (e) p->epi = off + 1;
+    else dropped_++;
     return e;
 }
 
