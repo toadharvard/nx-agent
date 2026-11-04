@@ -82,7 +82,7 @@ def r_sse_local_types(path, text, stats):
 MM_PROTO = re.compile(r'(?:^|(?<=[;{}]))[ \t]*(?:extern\s*(?:"C"\s*)?)?(?:static\s+)?(?:inline\s+)?(?:const\s+)?(?:::)?(?:\w+::)*'
                       r'(?:__m128[id]?|__m64|float|double|int|unsigned\s+int|void|'
                       r'(?!(?:return|else|case|throw|goto|delete|new|typedef|using|operator|sizeof)\b)[A-Za-z_]\w*)\s+'
-                      r'(?:__cdecl\s+)?_mm_\w+\s*\([^;{)]*\)\s*;[ \t]*', re.M)
+                      r'(?:__cdecl\s+)?(?:_mm_\w+|\(\s*_mm_\w+\s*\))\s*\([^;{)]*\)\s*;[ \t]*', re.M)   # also `(_mm_load_ps)(...)`
 EXTERN_C_BLOCK = re.compile(r'extern\s+"C"\s*\{')
 
 def r_sse_local_protos(path, text, stats):
@@ -171,7 +171,8 @@ QUALIFIED_SSE = re.compile(r'\b(?:\w+::)+(?=(?:__m128[id]?|__m64|_mm_\w+)\b)')
 
 GLOBAL_SSE = re.compile(r'(?<![\w>)\]:])::\s*(?=(?:__m128[id]?|__m64|_mm_\w+)\b)')
 PAREN_SSE = re.compile(r'\(\s*(_mm_\w+)\s*\)\s*\(')
-USING_SSE = re.compile(r'\busing\s+(?:::)?(?:\w+::)+(?:__m128[id]?|__m64|_mm_\w+)\s*;')
+# (also unqualified: `using ::_mm_add_ps;` the decomp wrote, or the same without `::`; sse2neon's macros have no name)
+USING_SSE = re.compile(r'\busing\s+(?:::)?(?:\w+::)*(?:__m128[id]?|__m64|_mm_\w+)\s*;')
 
 def r_sse_qualified(path, text, stats):
     """SSE4: N::__m128 / N::_mm_mul_ps (qualified names of the removed local copies) -> the global names;

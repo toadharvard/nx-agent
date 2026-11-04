@@ -592,6 +592,12 @@ got = prepare.r_sse_local_protos('/x/src/a.cpp', 'typedef __m128 ClosestPointQua
 check('SSE2 drops intrinsic prototypes with a typedef return type, keeps statements', got,
       ['typedef __m128 ClosestPointQuad;\n', '    return _mm_add_ps(a, a);'], ['_mm_shuffle_ps', '_mm_load_ps'])
 
+# ---- SSE2 parenthesized prototype names, SSE4 unqualified using-declarations
+got = prepare.r_sse_local_protos('/x/src/a.cpp', 'extern "C" ::hkQuadReal (_mm_load_ps)(const float*);\nint k;\n', Counter())
+got2 = prepare.r_sse_qualified('/x/src/a.cpp', 'namespace N {\nusing ::_mm_add_ps;\nusing _mm_mul_ps;\nusing ::hkpVehicleInstance;\n}\n', Counter())
+check('SSE2 drops (_mm_x)(...) prototypes, SSE4 unqualified using-declarations of intrinsics', got + got2,
+      ['int k;', 'using ::hkpVehicleInstance;'], ['_mm_load_ps', '_mm_add_ps', '_mm_mul_ps'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
