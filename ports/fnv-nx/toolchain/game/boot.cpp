@@ -243,6 +243,8 @@ static int load_image(void) {
     return 0;
 }
 
+static void memory_manager_state(const char *when);
+
 extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers it over main (a Havok unit defines main) */
     printf("fnvnx boot: static initialisers done, %u trap hits (%u distinct)\n", g_trap_hits, g_trap_distinct);
     printf("fnvnx boot: guest image linked at %p, address map %u entries\n", (void *)fnvnx_guest_main, fnvnx_addrmap_count);
@@ -252,6 +254,7 @@ extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers 
         printf("fnvnx boot: STOP: WinMain (0x0086a850) is not in the link (src/fallout/misc/main.cpp does not compile)\n");
         return 3;
     }
+    memory_manager_state("before WinMain");
     printf("fnvnx boot: calling WinMain\n");
     g_trap_phase = 1;
     int r = __fnv_0086a850(0x00400000u, 0, (unsigned)(uintptr_t)"", 1 /* SW_SHOWNORMAL */);
@@ -284,6 +287,18 @@ static void construct_memory_manager(void) {
     printf("fnvnx boot: memory manager constructed at %#010" PRIx32 " (%#010" PRIx32 ")\n", self, ctor);
 }
 
+/* The memory manager's globals, to compare with x86 (S14): after the constructor, InitializeGlobal 0x00866690 has
+ * set the options 0x011f6118 (new FUN_00aa21d0(new BSNiAllocator)) and run InitHolder once (holder 0x011f6080), the
+ * run-once flag 0x011f6229 is still 0; WinMain's FUN_00aa20b0(0) then keeps those options (0x011f610d stays 0, the
+ * default-options path FUN_00aa2200 sets it to 1) and runs InitHolder a second time. */
+static void memory_manager_state(const char *when) {
+    if (!g_image_mapped) return;
+    printf("fnvnx boot: memory manager %s: options [0x011f6118]=%#010" PRIx32 " holder [0x011f6080]=%#010" PRIx32
+           " once [0x011f6229]=%u default-options [0x011f610d]=%u\n", when,
+           *(volatile uint32_t *)(uintptr_t)0x011f6118u, *(volatile uint32_t *)(uintptr_t)0x011f6080u,
+           *(volatile uint8_t *)(uintptr_t)0x011f6229u, *(volatile uint8_t *)(uintptr_t)0x011f610du);
+}
+
 /* first static initialiser (priority 101 runs before the default-priority ones of the game) */
 __attribute__((constructor(101))) static void boot_banner(void) {
     /* The game's own static initialisers (default priority) read and write the data image, so the image must
@@ -298,5 +313,6 @@ __attribute__((constructor(101))) static void boot_banner(void) {
         exit(2);
     }
     construct_memory_manager();
+    memory_manager_state("after construction");
     printf("fnvnx boot: running GCC initialisers, then the game's in original order (S10 xc)\n");
 }

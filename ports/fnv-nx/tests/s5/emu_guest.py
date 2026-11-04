@@ -740,6 +740,8 @@ def main(argv):
     ap.add_argument("--skip-faulting-init", action="store_true",
                     help="trace mode: return 0 from an initializer that faults (needs --elf)")
     ap.add_argument("--budget", type=int, default=400_000_000, help="instructions per scheduling slice")
+    ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
+                    help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
     root = a.root or tempfile.mkdtemp(prefix="fnvnx-emu-")
     for spec in a.file:
@@ -753,11 +755,24 @@ def main(argv):
         emu.load_symbols(a.elf)
         if a.skip_faulting_init:
             emu.install_guards()
+    def peeks():
+        out = []
+        for spec in a.peek:
+            addr, _, n = spec.partition(":")
+            addr, n = int(addr, 0), int(n, 0) if n else 4
+            try:
+                b = bytes(emu.uc.mem_read(addr, n))
+                val = f"{int.from_bytes(b, 'little'):#x}" if n in (1, 2, 4, 8) else b.hex()
+            except UcError as e:
+                val = f"unreadable ({e})"
+            out.append(f"peek\t{addr:#010x}\t{n}\t{val}")
+        return out
+
     def stopped(why):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
-        for line in emu.skip_summary() + emu.trap_table():
+        for line in emu.skip_summary() + emu.trap_table() + peeks():
             print(line)
         print(f"STOPPED: {why}")
         return 1
@@ -778,7 +793,7 @@ def main(argv):
     if getattr(emu, "skipped", None) is not None:
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
-    for line in emu.skip_summary() + emu.trap_table():
+    for line in emu.skip_summary() + emu.trap_table() + peeks():
         print(line)
     ok = rc == 0 and a.expect in out and tp_ok
     print("PASS" if ok else "FAIL")
