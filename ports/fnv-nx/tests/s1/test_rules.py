@@ -499,6 +499,19 @@ check('VTBL1 the FUN_00aa7400 heap gets the AbstractHeap slots, same line count'
       ['virtual void v00(); /* fnv-nx VTBL1', 'virtual void v2();', 'virtual void v13(void* value); };', '\nint z;'])
 check('VTBL1 FUN_00aa7400 keeps the line count', str(got.count('\n')), ['8'])
 
+got = run(s1.r_stand_in_interfaces, 'class M : public MB\n{\n};\nclass A660A0Map : public A660A0MapBase\n{\n  public:\n'
+          '    __forceinline A660A0Map() throw() : A660A0MapBase(59)\n    {}\n    virtual ~A660A0Map();\n};\nint z;\n',
+          '/x/src/gamebryo2.2/corelibs/nimain/nistream.cpp')
+check('VTBL1 A660A0Map: NiTMapBase slots 1-6 after the destructor, declared only', got,
+      ['virtual ~A660A0Map(); /* fnv-nx VTBL1', 'virtual unsigned int KeyToHashIndex(const char* key) const; '
+       'virtual bool IsKeysEqual(const char* key1, const char* key2) const; virtual void SetValue(',
+       'virtual void ClearValue(void* item); virtual void* NewItem(); virtual void DeleteItem(void* item); };',
+       '\nint z;'], ['{ return', 'FUN_'])
+check('VTBL1 A660A0Map keeps the line count', str(got.count('\n')), ['11'])
+got = run(s1.r_stand_in_interfaces, 'class A660A0Map : public A660A0MapBase\n{\n    virtual ~A660A0Map();\n};\n',
+          '/x/src/gamebryo2.2/corelibs/nimain/nistream_rtm_variant.cpp')
+check('VTBL1 A660A0Map: only in nistream.cpp', got, [], ['VTBL1'])
+
 # ---- ALIGN1
 got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
           '__declspec(align(16))class H:public C\n{\n};\n__declspec(align(16))struct TAU32;\n'

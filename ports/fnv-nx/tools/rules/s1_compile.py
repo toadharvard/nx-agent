@@ -2601,6 +2601,26 @@ void* NiStandardAllocator::Allocate(unsigned int& size, unsigned int& alignment,
 VTBL1_NISTD_RX = re.compile(r'^struct NiStandardAllocator\s*\{\s*static void\* __cdecl operator new\((?:unsigned int|size_t)\);\s*'
                             r'virtual void func\(\);\s*\};', re.M)
 
+# A660A0Map (gamebryo2.2/corelibs/nimain/nistream.cpp, namespace fnv_00a660a0) is the NiStream loader map
+# DAT_011f4784 (Gamebryo's NiStream::ms_pkLoaders, a NiTStringPointerMap<CreateFunction>) that FUN_00a660a0 creates
+# with `new A660A0Map`, vftable 0x0109bf4c (units.json `??_7A660A0Map@fnv_00a660a0@@6B@`). The decomp declares only its
+# destructor, so the native vtable has D1/D0 and nothing else, while RegisterObjectLoader 0x00a64900 calls
+# NiTStringTemplateMap<...>::SetAt 0x00a642a0, which calls KeyToHashIndex, IsKeysEqual and SetValue through it
+# (Itanium slots 2-4 of nitstringmap_decls.h's NiTStringTemplateMap: D1, D0, then those three). The interface is
+# Gamebryo's NiTMapBase in MSVC order: 0 destructor, 1 KeyToHashIndex, 2 IsKeysEqual, 3 SetValue, 4 ClearValue,
+# 5 NewItem, 6 DeleteItem. No slot has a function in the decomp: 0x0109bf4c is bound by nistream.cpp only (and only
+# with that destructor), its base chain 0x0109bcc4 / 0x0109bca4 / 0x0109bc84 is written only by the destructors
+# 0x00a63850 / 0x00a63a20 of other maps, and the decomp's string-map slot definitions belong to other vftables
+# (NiTStringTemplateMap<.., int>::SetValue 0x00a1e770, Tile__MenuStringMap's case-insensitive 0x00a0d180 / 0x00a0d1b0,
+# NiTStringPointerMap<ShaderBufferRecord*> at 0x010af6cc). Folding by MSVC would make some of them the same code, but
+# that is analogy, not evidence: all six are declared only (vslot traps, unresolved until the exe's vftable gives
+# their addresses). The native vtable then has the slots SetAt calls, at the same Itanium positions as SetAt's
+# declaration. A660A0MapBase (0x0109bc84) keeps its one virtual: only construction and destruction use its vptr.
+A660A0_SLOTS = ('virtual unsigned int KeyToHashIndex(const char* key) const; '
+                'virtual bool IsKeysEqual(const char* key1, const char* key2) const; '
+                'virtual void SetValue(void* item, const char* key, void* value); virtual void ClearValue(void* item); '
+                'virtual void* NewItem(); virtual void DeleteItem(void* item);')
+
 VTBL1_SITES = [
     ('gamebryo2.2/corelibs/nimain/nigpuprogramcache.cpp', VTBL1_NISTD_RX, VTBL1_NISTD),
     ('gamebryo2.2/corelibs/nimain/nigpuprogramcache_rtm_variant.cpp', VTBL1_NISTD_RX, VTBL1_NISTD),
@@ -2615,6 +2635,13 @@ VTBL1_SITES = [
      r'\1 /* fnv-nx VTBL1: the AbstractHeap slots 1-13 */ virtual void v1(); virtual void v2(); virtual void v3(); '
      r'virtual void v4(); virtual void v5(); virtual void v6(); virtual void v7(); virtual void v8(); virtual void v9(); '
      r'virtual void v10(); virtual void v11(); virtual void v12(); virtual void v13(void* value);\2'),
+    # the NiStream loader map (DAT_011f4784, vftable 0x0109bf4c) FUN_00a660a0 creates: the decomp declares only the
+    # destructor, NiTStringTemplateMap::SetAt 0x00a642a0 (nitstringmap.inl) calls KeyToHashIndex, IsKeysEqual and
+    # SetValue through it (see A660A0_SLOTS above)
+    ('gamebryo2.2/corelibs/nimain/nistream.cpp',
+     re.compile(r'(\bclass A660A0Map : public A660A0MapBase\s*\{[^{}]*\{\s*\}\s*virtual ~A660A0Map\(\);)(\s*\};)'),
+     r'\1 /* fnv-nx VTBL1: NiTMapBase slots 1-6 in MSVC order, none in the decomp (vslot traps) */ ' + A660A0_SLOTS
+     + r'\2'),
     ('staging/blk_00aa0000_o2.cpp',
         re.compile(r'^struct FUN_00aa2230_BSNiAllocator\s*\{\s*virtual void m_virtual0\(\);\s*'
                    r'FUN_00aa2230_BSNiAllocator\(\);\s*\};', re.M),
