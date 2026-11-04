@@ -349,7 +349,8 @@ SCALAR_INIT = re.compile(r'^([ \t]*)((?:(?:unsigned|signed|volatile)\s+)*(?:bool
 def r_goto_scalar_inits(path, text, stats):
     """GOTO1: in functions that use goto, `T x = e;` (scalar or pointer T) -> `T x; x = e;` on the same line. MSVC
     lets a goto jump past such an initialization; C++ (and GCC even with -fpermissive) does not, but jumping past a
-    declaration without initializer is allowed, and for a scalar the split changes nothing."""
+    declaration without initializer is allowed, and for a scalar the split changes nothing. A declarator list is split
+    declarator by declarator, `T a = e1, b = e2;` -> `T a, b; a = e1; b = e2;` (the initializers keep their order)."""
     if 'goto' not in text: return text
     spans = [sp for sp in prepare.scope_spans(text) if sp[2] == 'function']
     edits = []
@@ -358,10 +359,14 @@ def r_goto_scalar_inits(path, text, stats):
         if not re.search(r'\bgoto\s+\w+\s*;', body): continue
         for m in SCALAR_INIT.finditer(text, o, c):
             t = m.group(2)
-            if re.match(r'(?:return|else|case|goto|delete|throw|typedef|using)\b', t) or ',' in m.group(4) and '(' not in m.group(4):
-                continue
-            name = m.group(3).lstrip('* \t')
-            edits.append((m.start(), m.end(), '%s%s %s; %s = %s;' % (m.group(1), t, m.group(3), name, m.group(4))))
+            if re.match(r'(?:return|else|case|goto|delete|throw|typedef|using)\b', t): continue
+            # a declarator list `float a = f(x), b = g(y);` -> `float a, b; a = f(x); b = g(y);` (same order)
+            parts = [re.match(r'^\s*(\**\s*[A-Za-z_]\w*)\s*(?:=\s*(\S.*?))?\s*$', d, re.S)
+                     for d in _split_args(m.group(3) + ' = ' + m.group(4))]
+            if not all(parts) or len(parts) > 1 and '<' in m.group(4): continue   # `f<a, b>(x)` may be split wrong
+            decl = ', '.join(p.group(1) for p in parts)
+            inits = ' '.join('%s = %s;' % (p.group(1).lstrip('* \t'), p.group(2)) for p in parts if p.group(2))
+            edits.append((m.start(), m.end(), '%s%s %s; %s' % (m.group(1), t, decl, inits)))
     if not edits: return text
     out, pos = [], 0
     for s, e, r in sorted(set(edits)):

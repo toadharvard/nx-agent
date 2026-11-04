@@ -303,6 +303,12 @@ check('ELAB1 renames a typedef named like a Win32 function',
           'unsigned int f(void* p) { return ((VirtualQuery)(*(void***)p)[3])(p); }\n'),
       ['(__fastcall* fnvnx_t_VirtualQuery)(void* object);', '((fnvnx_t_VirtualQuery)(*(void***)p)[3])(p)'])
 
+# ---- GOTO1
+got = run(s1.r_goto_scalar_inits, 'int f(V& v, int e)\n{\n    if (e) goto out;\n    {\n        float dw = v.d(3), di = v.d(e);\n'
+          '        int n = 4;\n        char *p = 0, *q = p;\n        return (int)(dw + di) + n + (p == q);\n    }\nout:\n    return 0;\n}\n')
+check('GOTO1 splits declarator lists declarator by declarator', got,
+      ['float dw, di; dw = v.d(3); di = v.d(e);', 'int n; n = 4;', 'char *p, *q; p = 0; q = p;'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
