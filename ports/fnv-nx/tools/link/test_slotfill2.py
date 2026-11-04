@@ -21,6 +21,40 @@ def check(cond, what):
         FAILS.append(what)
 
 
+def shift_test():
+    """The secondary-group shift on a compiled object (needs aarch64-linux-gnu-g++ and capstone)."""
+    import shutil
+    import struct
+    import subprocess
+    import tempfile
+    cxx = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
+    if not shutil.which(cxx):
+        print('skip shift test: no %s' % cxx)
+        return
+    src = ('struct A { virtual int a(); int x; };\nstruct B { virtual int b(); int y; };\n'
+           'struct M : A, B { M(); int a(); int b(); int z; };\nM::M() : z(1) {}\nint M::a() { return z; }\n'
+           'int M::b() { return -z; }\nM *mk() { return new M; }\n')
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, 'm.cpp'), 'w').write(src)
+        o = os.path.join(d, 'm.o')
+        subprocess.run([cxx, '-mabi=ilp32', '-fPIC', '-O1', '-c', os.path.join(d, 'm.cpp'), '-o', o], check=True)
+        # _ZTV1M: offset-to-top, typeinfo, M::a (primary), M::b (GCC appends the override), then B's group at byte 16: -8, typeinfo, thunk to M::b
+        patches, problems = slotfill2.shift_scan(o, {'_ZTV1M': (16, 8)})
+        check(not problems, 'shift: every reference is patchable (%s)' % problems)
+        adds = [v for _, k, v in patches if k == 'add']
+        check(adds and all(((w >> 10) & 0xfff) == 24 + 8 for w in adds),
+              'shift: the secondary address point add #24 becomes #32 (%s)' % [((w >> 10) & 0xfff) for w in adds])
+        before = open(o, 'rb').read()
+        n = slotfill2.shift_apply(o, {'_ZTV1M': (16, 8)})
+        after = open(o, 'rb').read()
+        check(n == len(patches) and before != after, 'shift: %d patches applied' % n)
+        ok, bad = slotfill2.shift_check({'_ZTV1M': (16, 8)}, [o])
+        check('_ZTV1M' in ok, 'shift_check accepts it (%s)' % bad)
+        words = ['w%d' % i for i in range(8)]
+        check(slotfill2.place_extra(words, ['e'], (12, 4), '_ZTV1M', d)[3] == 'e', 'place_extra: before the group')
+        check(slotfill2.shifted(20, (12, 4)) == 24 and slotfill2.shifted(8, (12, 4)) == 8, 'shifted address points')
+
+
 def main():
     native = {0x401000: {'msvc_entry': ('_ZThn8_N1M1fEv', 8)}, 0x402000: {}, 0x403000: {'msvc_entry': ('t', 12)}}
 
@@ -80,6 +114,7 @@ def main():
     check(tf4('_ZN1Y2m0Eb', 0x407000)[0] == ADDR % 0x407000, 'a plain slot (bool) -> the "constructor" (bool)')
     check(tf4('_ZN1Y2m1Ev', 0x407000)[0] == ADDR % 0x407000, 'a placeholder slot () -> it too (reads more)')
     check(tf4('_ZN1Y2m2Ef', 0x407000)[0] is None, 'a float slot against a bool stays a gap')
+    shift_test()
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 
