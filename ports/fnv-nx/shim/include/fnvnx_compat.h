@@ -68,9 +68,25 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+/* MSVC's barrier intrinsics only stop the compiler, but the x86 hardware under them is TSO: at such a point every
+ * earlier load is ordered before every later access, and every earlier store before every later store. AArch64 needs
+ * a real barrier for the same order (S12-ordering, docs/ORDERING.md): _ReadWriteBarrier dmb ish (store -> load is
+ * ordered too, which x86 does not do - the cheapest single barrier that covers TSO), _ReadBarrier dmb ishld (load ->
+ * load and load -> store), _WriteBarrier dmb ishst (store -> store). Volatile accesses get acquire/release from the
+ * fnvnx_order plugin (toolchain/order). FNVNX_COMPILER_BARRIERS=1 keeps the compiler-only barriers (A/B
+ * measurement only: not a valid multicore build). */
+#if defined(FNVNX_COMPILER_BARRIERS) && FNVNX_COMPILER_BARRIERS
 inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
 inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
 inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
+#else
+inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __volatile__("dmb ish" ::: "memory"); }
+inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("dmb ishld" ::: "memory"); }
+inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volatile__("dmb ishst" ::: "memory"); }
+#endif
+/* winnt.h MemoryBarrier (x86: a locked or, a full barrier) and YieldProcessor (pause) */
+inline __attribute__((always_inline)) void MemoryBarrier(void) { __asm__ __volatile__("dmb ish" ::: "memory"); }
+inline __attribute__((always_inline)) void YieldProcessor(void) { __asm__ __volatile__("yield" ::: "memory"); }
 inline __attribute__((always_inline)) void __debugbreak(void) { __builtin_trap(); }
 /* <stdlib.h> rotates (intrinsics on MSVC; the decomp declares some itself, extern "C" unsigned int _rotl(...)) */
 inline __attribute__((always_inline)) unsigned int _rotl(unsigned int v, int s)

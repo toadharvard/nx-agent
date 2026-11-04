@@ -107,25 +107,31 @@ extern "C" void LeaveCriticalSection(LPCRITICAL_SECTION cs)
 
 extern "C" void DeleteCriticalSection(LPCRITICAL_SECTION cs) { memset(cs, 0, sizeof *cs); }
 
-/* ---- Interlocked*: full barriers, as on x86 */
-extern "C" LONG InterlockedIncrement(volatile LONG *p) { return __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST); }
-extern "C" LONG InterlockedDecrement(volatile LONG *p) { return __atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST); }
-extern "C" LONG InterlockedExchange(volatile LONG *p, LONG v) { return __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST); }
-extern "C" LONG InterlockedExchangeAdd(volatile LONG *p, LONG v) { return __atomic_fetch_add(p, v, __ATOMIC_SEQ_CST); }
+/* ---- Interlocked*: full barriers, as on x86. A lock-prefixed instruction orders every earlier access before every
+ * later one, store -> load included. A SEQ_CST ldaxr/stlxr loop alone does not: a later plain load can be satisfied
+ * before the stlxr (and an earlier plain store) is visible. The trailing dmb ish makes the operation fully ordered,
+ * as GCC's __sync builtins and Linux's fully ordered atomics do (S12-ordering, docs/ORDERING.md). */
+#define W32_FULL(expr) ({ __typeof__(expr) r_ = (expr); __atomic_thread_fence(__ATOMIC_SEQ_CST); r_; })
+extern "C" LONG InterlockedIncrement(volatile LONG *p) { return W32_FULL(__atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST)); }
+extern "C" LONG InterlockedDecrement(volatile LONG *p) { return W32_FULL(__atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST)); }
+extern "C" LONG InterlockedExchange(volatile LONG *p, LONG v) { return W32_FULL(__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST)); }
+extern "C" LONG InterlockedExchangeAdd(volatile LONG *p, LONG v) { return W32_FULL(__atomic_fetch_add(p, v, __ATOMIC_SEQ_CST)); }
 
 extern "C" LONG InterlockedCompareExchange(volatile LONG *p, LONG xchg, LONG cmp)
 {
     __atomic_compare_exchange_n(p, &cmp, xchg, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     return cmp; /* the initial value either way */
 }
 
 extern "C" PVOID InterlockedCompareExchangePointer(PVOID volatile *p, PVOID xchg, PVOID cmp)
 {
     __atomic_compare_exchange_n(p, &cmp, xchg, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     return cmp;
 }
 
-extern "C" PVOID InterlockedExchangePointer(PVOID volatile *p, PVOID v) { return __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST); }
+extern "C" PVOID InterlockedExchangePointer(PVOID volatile *p, PVOID v) { return W32_FULL(__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST)); }
 
 /* ---- waitable objects */
 struct w32_event { struct w32_obj o; int manual, state; char *name; };
