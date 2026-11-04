@@ -272,6 +272,15 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | first differing store: only bytes where the oracle has `0x08` and the native `0x00` | `stub-normalized` | artifact (arm64emu `_codeptr` rewrites any stored word in `0x08000000..0x09000000`, data included) |
 | stored / returned word that is one of the planted garbage words (`world.garbage_words`): both / native / oracle | `uninit-both` / `uninit-arm` / `uninit-x86` | artifact / real-bug S1b / by-design |
 | native 0 where the oracle has a value; the native function or a direct callee in its unit is `mov w0, #0; ret` | `native-zero-stub` | real-bug S1 (a placeholder body) |
+| call flow, the native function's own body is `ret` / return-a-constant (or it calls such a decomp-local `..FUN_<X>..` stand-in for an original X another object defines) and the oracle makes calls | `native-empty-body` | real-bug S1 |
+| the oracle's first missing call is CRT `_atexit` (0x00ec658f), the native function names no `fnvnx_xc_atexit` / `atexit` | `dyninit-no-atexit` | real-bug S10 (soft: the destructor is lost at exit only) |
+| `??_G` / `??_E` called with flags bit 0 clear; the native (D0) makes the oracle's calls plus deallocator calls only | `deleting-dtor-flags` | by-design |
+| the function takes a class by value (`AGG:` parameter); the oracle's calls after the native stops are deallocators only | `byvalue-arg-dtor` | by-design (MSVC: callee destroys, Itanium: caller) |
+| call-target: the native calls an image-window (data) address where the oracle calls a function | `native-calls-data` | real-bug S1 (virtual slot past a decomp class's shorter vtable) |
+| call-target: oracle an unnamed CRT entry (addrmap E, x87 `_CI*`) or `f`, native the libm (float) function; `sprintf` vs `__sprintf_chk`; `atof` vs `strtod` | `libc-variant` | artifact (libcalls.X86 / FAMILY lack the pair) |
+| the oracle's missing callee X is defined by the native function's own object and called by it (runs natively, intercepted on x86) | `oracle-callee-unloaded` | artifact (X not in the oracle's code set); never over an unbound name |
+| the oracle frees (free / delete / Deallocate), the native goes straight on to the oracle's next call (or returns) and reaches no deallocator through its own object | `native-missing-free` | real-bug S1 |
+| call-target: native indirect call to a non-code address where the oracle calls a .text function | `native-vcall-oracle-direct` | triage |
 
 With `summary --effects <difffuzz.py effects output>`, a record still in triage is refined by its first effect:
 `width` -> `field-width` (real-bug S1), an image vftable stored where the native stores its own `_ZTV` address

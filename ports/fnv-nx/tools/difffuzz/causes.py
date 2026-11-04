@@ -216,6 +216,38 @@ POLICY = {
                                               'destructor: a vtable paired with the wrong vftable (kind-V row) or a '
                                               'constructor order difference'),
     'unclassified':   ('triage', 'S13b', True, 'no rule matched'),
+    # --- call-flow sub-shapes (_rule_callflow) -----------------------------------------------------------------------
+    'deleting-dtor-flags': ('by-design', '-', False, 'MSVC\'s deleting destructor (??_G/??_E) frees only when flags '
+                                                     'bit 0 is set (an explicit destructor call passes 0); the '
+                                                     'Itanium D0 at that address always frees: such a call reaches '
+                                                     'D1 natively'),
+    'byvalue-arg-dtor': ('by-design', '-', False, 'the function takes a class by value: MSVC destroys such an '
+                                                   'argument in the callee (the oracle\'s last calls free its '
+                                                   'buffer), the Itanium ABI in the caller'),
+    'libc-variant':   ('artifact', 'S13', False, 'the same C library function under another entry: an MSVC x87 '
+                                                 'intrinsic (_CIacos ...) or the double function vs libc or its '
+                                                 'float variant, sprintf vs GCC\'s fortified __sprintf_chk, atof vs '
+                                                 'strtod: libcalls.X86/FAMILY do not pair them'),
+    'oracle-callee-unloaded': ('artifact', 'S13', False, 'the oracle intercepts X (canned result) while the native '
+                                                         'object defines X and runs its body: X is not in the '
+                                                         'oracle\'s code set (unit membership / follow gap)'),
+    'dyninit-no-atexit': ('real-bug', 'S10', False, 'the dynamic initializer registers the object\'s destructor '
+                                                    'with atexit in the exe; the native initializer does not '
+                                                    '(no fnvnx_xc_atexit): the destructor never runs at exit'),
+    'native-empty-body': ('real-bug', 'S1', True, 'the native function, or a decomp-local stand-in it calls for an '
+                                                  'original function defined elsewhere, is an empty body (ret / '
+                                                  'return constant) where the exe runs code that makes calls'),
+    'native-calls-data': ('real-bug', 'S1', True, 'the native calls an image data address where the exe calls a '
+                                                  'function: a virtual slot read past the end of a decomp class\'s '
+                                                  'shorter vtable (or a data word called as code)'),
+    'native-missing-free': ('real-bug', 'S1', True, 'the exe frees a block here (CRT free / operator delete / '
+                                                    'MemoryManager::Deallocate) and the native function reaches no '
+                                                    'deallocator at all, and makes no other call in its place: the '
+                                                    'native source omits the free (a leak)'),
+    'native-vcall-oracle-direct': ('triage', 'S13b', True, 'the native makes an indirect call through fuzzed '
+                                                           'memory where the exe calls a function directly: '
+                                                           'a member the decomp made virtual, or a call MSVC '
+                                                           'devirtualised (equivalent on a real object)'),
 }
 
 CLASS_ORDER = ('real-bug', 'triage', 'artifact', 'by-design')
@@ -716,6 +748,315 @@ def _calls_allocator(rec):
     return bool(cs and cs & ALLOCATORS)
 
 
+# ------------------------------------------------------------------ call-flow sub-shapes (call-count / call-target)
+#
+# What the oracle calls and the native does not (or the other way round), decided from the two traces, the record's
+# case and the native object (function bodies, which names it defines). Each rule needs its static facts; without
+# the object or the address map it does not fire.
+
+ATEXIT = 0x00ec658f                         # CRT _atexit (libcalls.EQUIV: fnvnx_xc_atexit / atexit)
+ATEXIT_NAMES = {'fnvnx_xc_atexit', 'fnvnx_xc_cxa_atexit', 'atexit', '__cxa_atexit'}
+DEALLOCATORS = {0x00401030, 0x00aa1460, 0x00aa4060, 0x00ecd291}    # delete, sized delete, Deallocate, CRT free
+CRT_TEXT = (0x00ec3000, 0x00ee0000)         # libcmt inside the exe's .text
+MATH = {'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'exp', 'log', 'log10', 'pow', 'fmod', 'sqrt', 'floor',
+        'ceil', 'sinh', 'cosh', 'tanh', 'ldexp', 'frexp', 'modf'}
+LIBC_PAIRS = {('atof', 'strtod'), ('atoi', 'strtol'), ('atol', 'strtol')}
+_FUNCS = {}               # object path -> _obj_funcs tuple (None: no object)
+_CRT_E = None
+
+
+def _obj_path(source):
+    d = _obj_dir()
+    return os.path.join(d, source.replace('/', '_') + '.o') if d and source else None
+
+
+def _obj_funcs(source):
+    """(names -> (section, value, size), (section, value) -> names, section -> bytes, (section, value) -> called
+    names) of the native object, or None."""
+    p = _obj_path(source)
+    if p is None:
+        return None
+    if p not in _FUNCS:
+        _FUNCS[p] = None
+        try:
+            from elftools.elf.elffile import ELFFile
+            from elftools.elf.relocation import RelocationSection
+        except ImportError:
+            return None
+        if os.path.exists(p):
+            syms, at, code, calls = {}, collections.defaultdict(set), {}, collections.defaultdict(set)
+            with open(p, 'rb') as f:
+                e = ELFFile(f)
+                st = e.get_section_by_name('.symtab')
+                allsyms = list(st.iter_symbols()) if st is not None else []
+                for sy in allsyms:
+                    if sy.name and not sy.name.startswith('$') and isinstance(sy['st_shndx'], int) and \
+                            sy['st_info']['type'] in ('STT_FUNC', 'STT_NOTYPE'):
+                        k = (sy['st_shndx'], sy['st_value'])
+                        at[k].add(sy.name)
+                        old = syms.get(sy.name)
+                        syms[sy.name] = (k[0], k[1], max(sy['st_size'], old[2] if old else 0))
+                sized = {}
+                for n, (sh, v, sz) in syms.items():
+                    sized[(sh, v)] = max(sized.get((sh, v), 0), sz)
+                syms = {n: (sh, v, sized[(sh, v)]) for n, (sh, v, sz) in syms.items()}
+                spans = collections.defaultdict(list)
+                for (sh, v), sz in sized.items():
+                    if sz:
+                        spans[sh].append((v, v + sz))
+                for sh in spans:
+                    sec = e.get_section(sh)
+                    code[sh] = sec.data() if sec['sh_type'] == 'SHT_PROGBITS' else b''
+                for sec in e.iter_sections():
+                    if not isinstance(sec, RelocationSection) or sec['sh_info'] not in spans:
+                        continue
+                    for rel in sec.iter_relocations():
+                        if rel['r_info_type'] not in (20, 21, 282, 283):     # (P32_)JUMP26 / CALL26
+                            continue
+                        off, n = rel['r_offset'], allsyms[rel['r_info_sym']].name
+                        for lo, hi in spans[sec['sh_info']]:
+                            if lo <= off < hi and n:
+                                calls[(sec['sh_info'], lo)].add(n)
+            _FUNCS[p] = (syms, at, code, calls)
+    return _FUNCS[p]
+
+
+def native_reaches(source, name, depth=4):
+    """Every name the native function `name` calls directly or through functions its own object defines (a few
+    levels deep), or None without the object."""
+    t = _obj_funcs(source)
+    if t is None or name not in t[0]:
+        return None
+    out, todo, seen = set(), [name], set()
+    for _ in range(depth):
+        nxt = []
+        for n in todo:
+            k = t[0].get(n)
+            if k is None or k[:2] in seen:
+                continue
+            seen.add(k[:2])
+            for c in t[3].get(k[:2], ()):
+                if c not in out:
+                    out.add(c)
+                    nxt.append(c)
+        todo = nxt
+    return out
+
+
+def native_defines(source, name):
+    """True when the native object defines `name` (False: it does not; None: no object)."""
+    t = _obj_funcs(source)
+    return None if t is None else name in t[0]
+
+
+def native_body(source, name):
+    """(code bytes, names at the same address) of a function the native object defines, or None."""
+    t = _obj_funcs(source)
+    if t is None or name not in t[0]:
+        return None
+    sh, v, sz = t[0][name]
+    return t[2].get(sh, b'')[v:v + sz], t[1].get((sh, v), set())
+
+
+def _empty_body(code):
+    """`ret`, or constant moves into w0/x0/s0 then `ret`: a function that does nothing but return a constant."""
+    if not code or len(code) % 4 or len(code) > 12:
+        return False
+    ws = struct.unpack('<%dI' % (len(code) // 4), code)
+    if ws[-1] != 0xd65f03c0:
+        return False
+    for i in ws[:-1]:
+        if (i & 0x7f80001f) not in (0x52800000, 0x12800000) and i not in (0x2a1f03e0, 0xaa1f03e0, 0x1e2703e0):
+            return False                    # movz/movn w0|x0, #imm; mov w0|x0, wzr; fmov s0, wzr
+    return True
+
+
+_DEFS = None
+
+
+def link_definition(addr):
+    """(native symbol, object file) the address map binds original function `addr` to, or None."""
+    global _DEFS
+    if _DEFS is None:
+        _DEFS = {}
+        p = _addrmap_file()
+        if p and os.path.exists(p):
+            for line in open(p):
+                f = line.split('\t')
+                if len(f) > 4 and f[1] in ('F', 'X', 'C') and f[4].endswith('.o'):
+                    try:
+                        _DEFS[int(f[0], 16)] = (f[3] or f[2], f[4])
+                    except ValueError:
+                        pass
+    return _DEFS.get(addr)
+
+
+def _addrmap_file():
+    p = os.environ.get('FNVNX_CAUSES_ADDRMAP')
+    if not p:
+        try:
+            import config
+            p = str(config.LINK / 'out' / 'addrmap.tsv')
+        except Exception:  # noqa: BLE001
+            p = None
+    return p
+
+
+def crt_entries():
+    """Original addresses the link leaves to the CRT (address map kind E, 'CRT/thunk') inside the libcmt range."""
+    global _CRT_E
+    if _CRT_E is None:
+        _CRT_E = set()
+        p = _addrmap_file()
+        if p and os.path.exists(p):
+            for line in open(p):
+                f = line.split('\t')
+                if len(f) > 5 and f[1] == 'E' and 'CRT' in f[5]:
+                    try:
+                        a = int(f[0], 16)
+                    except ValueError:
+                        continue
+                    if _in(a, CRT_TEXT):
+                        _CRT_E.add(a)
+    return _CRT_E
+
+
+def _hex(t):
+    try:
+        return int(t, 16) if t and str(t)[:1].isdigit() else None
+    except ValueError:
+        return None
+
+
+def _target_name(t):
+    """C name a trace target stands for: 'name:<n>' or the link symbol of its address."""
+    t = str(t or '')
+    if t.startswith('name:'):
+        return t[5:]
+    a = _hex(t)
+    return link_symbol(a) if a is not None else None
+
+
+def _libc_variant(x, a):
+    xa = _hex(x)
+    if xa is None:
+        return False
+    n = _target_name(a)
+    if not n:
+        return False
+    base = n[2:-4] if n.startswith('__') and n.endswith('_chk') else None
+    m = link_symbol(xa)
+    if m is None:
+        # an unnamed CRT entry next to the C library (the x87 intrinsics _CIacos/_CIasin/...): GCC calls libm
+        return xa in crt_entries() and (n in MATH or (n.endswith('f') and n[:-1] in MATH))
+    if base is not None and base == m:
+        return True                                     # sprintf vs __sprintf_chk (_FORTIFY_SOURCE)
+    if m in MATH and n == m + 'f':
+        return True                                     # atan vs atanf
+    return (m, n) in LIBC_PAIRS
+
+
+def _missing_free(src, addr, xa):
+    """The oracle frees a block (CRT free, operator delete, MemoryManager::Deallocate) and the native function
+    reaches no deallocator at all, directly or through its own object's functions."""
+    if xa not in DEALLOCATORS:
+        return False
+    reach = native_reaches(src, '__fnv_%08x' % addr)
+    if reach is None:
+        return False
+    import libcalls
+    names = {'free', 'fnvnx_free'} | {n for n, b in libcalls.EQUIV.items() if b in DEALLOCATORS}
+    for b in DEALLOCATORS:
+        names.add('__fnv_%08x' % b)
+        for n in (link_symbol(b), (link_definition(b) or (None,))[0]):
+            if n:
+                names.add(n)
+    return not reach & names
+
+
+def _callflow(d, rec):
+    """_rule_callflow, except that an artifact or by-design shape never hides a function that calls an unbound C++
+    name (after-native-undefined stays the record's cause there: the canned result may be what differs)."""
+    got = _rule_callflow(d, rec)
+    if got and policy(got)[0] in ('artifact', 'by-design'):
+        try:
+            if unbound_callees(rec.get('source'), int(rec.get('address') or '0', 16)):
+                return None
+        except (ValueError, TypeError):
+            pass
+    return got
+
+
+def _rule_callflow(d, rec):
+    if rec is None:
+        return None
+    tx, ta = d.get('x86_trace') or [], d.get('arm_trace') or []
+    src = rec.get('source')
+    try:
+        addr = int(rec.get('address') or '0', 16)
+    except ValueError:
+        return None
+    k = d.get('kind')
+    if k == 'call-target':
+        x, a = d.get('x86'), d.get('arm')
+    elif k == 'call-count' and len(tx) > len(ta) and tx[:len(ta)] == ta:
+        x, a = tx[len(ta)], None                         # the first call the native does not make
+    elif k == 'call-count' and len(ta) > len(tx) and ta[:len(tx)] == tx:
+        x, a = None, ta[len(tx)]
+    else:
+        return None
+    me = native_body(src, '__fnv_%08x' % addr)
+    # the function itself is an empty body: whatever the oracle calls, the native makes no call
+    if x is not None and not ta and me is not None and _empty_body(me[0]):
+        return 'native-empty-body'
+    xa = _hex(x)
+    if xa == ATEXIT:
+        cs = native_callees(src, addr)
+        if cs is not None and not cs & ATEXIT_NAMES:
+            return 'dyninit-no-atexit'
+    if x is None and str(rec.get('symbol') or '').startswith(('??_G', '??_E')):
+        extra = [_hex(t) for t in ta[len(tx):]]
+        p0 = ((rec.get('case') or {}).get('args') or {}).get('p0') or ''
+        if extra and all(t in DEALLOCATORS for t in extra) and p0[:2] and not int(p0[:2], 16) & 1:
+            return 'deleting-dtor-flags'
+    aa = _hex(a)
+    if k == 'call-target' and aa is not None and _in(aa, WINDOW) and xa is not None and _in(xa, TEXT):
+        return 'native-calls-data'
+    if k == 'call-target' and _libc_variant(x, a):
+        return 'libc-variant'
+    if xa is not None and xa != addr and native_defines(src, '__fnv_%08x' % xa):
+        cs = native_callees(src, addr) or set()
+        if '__fnv_%08x' % xa in cs:
+            return 'oracle-callee-unloaded'
+    # a decomp-local stand-in for an original function defined elsewhere, with an empty body: tied to the divergence
+    # when the oracle calls that original where the native diverges, or when the native stops early
+    if x is not None:
+        for n in sorted(native_callees(src, addr) or ()):
+            if n.startswith('__fnv_') or 'FUN_' not in n:
+                continue
+            b = native_body(src, n)
+            if b is None or not _empty_body(b[0]) or any(m.startswith('__fnv_') for m in b[1]):
+                continue
+            for h in n.split('FUN_')[1:]:
+                o = _hex(h[:8]) if len(h) >= 8 else None
+                if o is not None and o != addr and (k == 'call-count' or o == xa) and link_symbol(o) and \
+                        native_defines(src, link_symbol(o)) is False:
+                    return 'native-empty-body'
+    # MSVC destroys an aggregate passed by value in the callee (its buffer freed on the way out), Itanium in the caller
+    if k == 'call-count' and a is None and 'AGG:' in str(rec.get('conv') or '').split('->')[0] and \
+            all(_hex(t) in DEALLOCATORS for t in tx[len(ta):]):
+        return 'byvalue-arg-dtor'
+    # the native skips a free the exe makes: it goes straight on to the oracle's next call, or returns right there
+    skip = (k == 'call-target' and a == d.get('x86_next')) or (k == 'call-count' and a is None and
+                                                               len(tx) == len(ta) + 1)
+    if skip and xa is not None and _missing_free(src, addr, xa):
+        return 'native-missing-free'
+    if k == 'call-target' and aa is not None and xa is not None and _in(xa, TEXT) and not _in(aa, TEXT) and \
+            not _in(aa, WINDOW) and not _in(aa, A64_PRIV):
+        return 'native-vcall-oracle-direct'
+    return None
+
+
 # ------------------------------------------------------------------ rules over `difffuzz.py effects` output
 #
 # `difffuzz.py effects --list <files> --out <effects.jsonl>` replays each record with every data access logged and
@@ -1019,6 +1360,8 @@ def refine(rec, cause=None):
         got = _rule_mem_write(d, rec)
     elif k in ('call-count', 'call-target'):
         got = _rule_calls(d, rec)
+        if got in (None, 'native-inlined', 'native-early-exit', 'native-extra-calls'):
+            got = _callflow(d, rec) or got
     if got is None and cause in (None, 'unclassified') and _with_effects(rec, 'unclassified') == 'unclassified':
         got = _rule_unclassified(d, rec, k)      # only what would stay unclassified (S13b bucket rules)
     if got is None:
