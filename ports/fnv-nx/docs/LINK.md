@@ -356,11 +356,16 @@ render table's free text, library, pending, refused and vslot rows).
 
 For every pair that the class-level model above cannot settle, the aggregates passed or returned by value are
 measured in the unit that declares them: a probe translation unit includes the unit's source and, per type, emits
-`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible), `__is_empty` and MSVC's C++03 POD bit
-(`__is_pod`, `__is_aggregate` and no direct base: no user constructor, destructor or copy assignment, no private
-member, no virtual function) as constants (read back from the object), and a function taking the type by value
-whose spills show the SIMD registers it arrives in. `layouts.tsv` rows carry the unit content key (column 8) and
-the POD bit (column 9); a row without either is probed again.
+`sizeof`, `alignof`, trivial-for-calls (trivially copyable and destructible), `__is_empty` and MSVC 2008's POD bit
+as constants (read back from the object), and a function taking the type by value whose spills show the SIMD
+registers it arrives in. The POD bit is V1's predicate, checked against MSVC 2008 on 24 kinds (J-0147,
+`tests/v1/test_fastcall_nonpod.py`): `__is_aggregate` (no user constructor, no private or protected data member, no
+virtual function), no direct base, a trivial destructor and a trivial copy assignment (`__is_trivially_assignable(T &,
+const T &)`; a reference member deletes it). A member's own user constructor or copy constructor does not count:
+MSVC returns such 8-byte structs in eax:edx, and the earlier `__is_pod && __is_aggregate && no base` called them
+non-POD (3 of the 24 kinds wrong, among them the fastcall buffer in ecx). `layouts.tsv` rows carry the unit content
+key (column 8), the POD bit (column 9) and the POD rule (column 10, `pod2`); a row without them, or of another rule,
+is probed again.
 Class: `G1`/`G2` (one/two general registers), `H<n>x<w>` (HFA/HVA: n SIMD registers of w bytes), `IND` (by
 reference: over 16 bytes or not trivial for calls). Types the probe cannot name are dropped and stay `manual`.
 
