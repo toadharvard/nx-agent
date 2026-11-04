@@ -12,8 +12,11 @@ preset (they need a scene); each is stated with the reason for its shape:
 
 * visible references: within the fade distance of their class, which is the class multiplier x a per-reference base
   distance; on the ground plane their number grows with the square of that distance, and never past the loaded area
-  (uGridsToLoad x uGridsToLoad cells). Per class c: v_c = min((m_c' / m_c)^2, loaded') with loaded' = (N'/N)^2.
-  V = sum over classes of share_c x v_c (shares: objects, items, actors, grass);
+  (uGridsToLoad x uGridsToLoad cells). Per class c: v_c = min((m_c' / m_c)^2, loaded') with loaded' = (N'/N)^2;
+* draws: RENDER_NATIVE.md 3.7's sources (statics, land, distant LOD, trees, grass, actors, shadow maps, water
+  reflection, particles, image space + UI) at their mid counts, each scaled by the setting that governs it (statics
+  and items by their fade, land by the loaded area, grass, actors, shadows) or constant; V, the objects the cull
+  tests, is the same over the scene sources;
 * grass: instances per area fall with the square of the grass spacing (iMinGrassSize), and the grass area with the
   square of fGrassMaxStartFadeDistance; bShadowsOnGrass adds grass to the shadow passes;
 * shadows: each shadowed actor (iActorShadowCountExt) adds a shadow pass over its geometry: a share of the
@@ -49,10 +52,13 @@ def factors(content, preset):
         'grass': min((base['iMinGrassSize'] / p['iMinGrassSize']) ** 2 *
                      (p['fGrassMaxStartFadeDistance'] / base['fGrassMaxStartFadeDistance']) ** 2, loaded),
     }
-    V = sum(sh['visible'][c] * v[c] for c in v)
     shadow = (p['iActorShadowCountExt'] + sh['grass_shadow_actor_equiv'] * p['bShadowsOnGrass']) / max(
         base['iActorShadowCountExt'] + sh['grass_shadow_actor_equiv'] * base['bShadowsOnGrass'], 1e-9)
-    draws = (1 - sh['shadow_of_draws']) * V + sh['shadow_of_draws'] * shadow * V
+    k = dict(v, loaded=loaded, shadow=shadow, const=1.0)
+    dr = sh['draws']
+    draws = sum(n * k[sh['scales_with'][s]] for s, n in dr.items()) / sum(dr.values())
+    cs = sh['cull_sources']
+    V = sum(dr[s] * k[sh['scales_with'][s]] for s in cs) / sum(dr[s] for s in cs)
     f = {
         'cull': sh['cull_traversal'] * loaded + (1 - sh['cull_traversal']) * V,
         'render_accumulation': draws,
@@ -60,7 +66,7 @@ def factors(content, preset):
         'renderer_worker': draws,
         'scene_update': sh['scene_loaded'] * loaded + (1 - sh['scene_loaded']) * V,
     }
-    return f, dict(v, loaded=loaded, V=V, shadow=shadow)
+    return f, dict(v, loaded=loaded, V=V, shadow=shadow, draws=draws)
 
 
 def run(model, render, perf, scenarios, content):
