@@ -43,6 +43,9 @@ def itanium_class(m):
 
 
 LOCAL_STATIC = re.compile(r'^\?(?:[^@?]+@\?\d+\?\?|\$S\d+@|\$TSS\d+@)')   # ?x@?1??f@@..., ?$S1@..., ?$TSS0@...
+# ?<var>@?<n>?<decorated function>@4<type>: a function-local static (value); ?$S<n>@ / ?$TSS<n>@: MSVC's guard word
+LOCAL_VALUE = re.compile(r'^\?([^@?$][^@?]*)@\?\d+\?(\?.+)@4[^@]*@?A$')
+LOCAL_GUARD = re.compile(r'^\?\$(?:S|TSS)\d+@\?\d+\?(\?.+)@4IA$')
 
 
 def dyninit_conv(symbol, source):
@@ -218,7 +221,11 @@ class UnitCache:
         refs = {}
         for _, u in self.by_source[source]:
             for n, a in u['symbols'].items():
-                refs.setdefault(int(a, 16), n)
+                # a decorated spelling first: it carries the type (`_FUN_00eca920` next to ?FUN_00eca920@@YANN@Z
+                # left the double result of CRT log unknown, so the oracle got no ST0)
+                cur = refs.get(int(a, 16))
+                if cur is None or (n.startswith('?') and not cur.startswith('?')):
+                    refs[int(a, 16)] = n
         for (src, a), n in self.tree_ref.items():     # the patched unit's own declaration (S1b `ref` rows)
             if src == source:
                 refs[a] = n
@@ -307,8 +314,16 @@ class UnitCache:
             for a, f in xu.funcs.items():
                 if not f['unresolved'] and a not in external:
                     code[a] = f['code']
+        pairs, guards = self.static_pairs(img)
+        paired = {o + k for _, o, n in pairs for k in range(n)}
         t = runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
-                          statics)
+                          statics - paired - guards)
+        t.static_pairs, t.static_guards = pairs, guards
+        t.extra_pinned = dict(getattr(t, 'extra_pinned', {}) or {})
+        for _, o, n in pairs:
+            t.extra_pinned[o] = bytes(n)
+        for g in guards:
+            t.extra_pinned[g] = b'\0'
         t.source = source
         t.imports = self.import_stubs()
         t.iat_names = self.iat_names()
@@ -332,8 +347,7 @@ class UnitCache:
         t.oracle_code = oracle_code
         dum = self.edx_dummies(source)
         t.dummies = lambda addr: dum.get(addr, ())
-        # literals of every unit that contributed preloaded code
-        t.extra_pinned = {}
+        # literals of every unit that contributed preloaded code (beside the zeroed local statics and guards)
         for xu2 in list(self._x86.values()):
             if xu2 is not xu and any(a in code for a in xu2.funcs):
                 t.extra_pinned.update(xu2.literal_bytes())
@@ -429,6 +443,55 @@ class UnitCache:
                             except ValueError:
                                 pass
         return self._abi.get(source, {})
+
+    def static_pairs(self, img):
+        """(pairs [(native address, oracle address, size)], oracle guard byte addresses) for the function-local
+        statics of the functions this unit image defines (difffuzz-17). MSVC keeps a local static at an image
+        address with a guard bit word, GCC keeps `_ZZ<function>E<len><name>` in the unit's .bss with its own guard
+        byte: a value pairs by its function (the native names at the function's entry) and name; both start zero
+        (the oracle's value and guard are pinned to 0, as GCC's .bss starts), the native stores are compared at the
+        oracle address, and the guards (an implementation detail on both sides) are never compared."""
+        key = img.elf
+        if getattr(self, '_static_pairs_key', None) == key:
+            return self._static_pairs_val
+        rev = {}
+        for n, a in img.syms.items():
+            rev.setdefault(a, []).append(n)
+        fn_names = {}
+        for na, orig in img.entries.items():
+            fn_names[orig] = [n for n in rev.get(na, ()) if n.startswith('_Z')]
+        if getattr(self, '_static_names', None) is None:
+            faddr, rows = {}, {}
+            for u in self.units:
+                for f in u.get('functions') or ():
+                    faddr.setdefault(f['symbol'], int(f['address'], 16))
+                for n, a in u['symbols'].items():
+                    if n.startswith('?'):
+                        faddr.setdefault(n, int(a, 16))
+                    if LOCAL_GUARD.match(n) or LOCAL_VALUE.match(n):
+                        rows.setdefault(n, a)
+            self._static_names = (faddr, rows)
+        faddr, rows = self._static_names
+        pairs, guards = [], set()
+        for n, a in rows.items():
+            if True:
+                g = LOCAL_GUARD.match(n)
+                if g and faddr.get(g.group(1)) in fn_names:
+                    guards.update(range(int(a, 16), int(a, 16) + 4))
+                    continue
+                m = LOCAL_VALUE.match(n)
+                if not m:
+                    continue
+                var, func = m.group(1), m.group(2)
+                fa = faddr.get(func)
+                for nn in fn_names.get(fa, ()):
+                    base = '_ZZ' + nn[2:] + 'E' + str(len(var)) + var
+                    cand = [x for x in (base, base + '_0') if x in img.syms]
+                    if cand and img.sizes.get(cand[0]):
+                        pairs.append((img.syms[cand[0]], int(a, 16), img.sizes[cand[0]]))
+                        break
+        self._static_pairs_key, self._static_pairs_val = key, (pairs, guards)
+        return pairs, guards
 
     def local_statics(self):
         """Byte addresses of every function-local static and guard any unit names (image-wide: followed callees of
@@ -530,7 +593,8 @@ class UnitCache:
 
     def crt_builtins(self):
         """CRT addresses the link gives a native provider whose name is a harness builtin (memmove at 0x00ec7230,
-        ...): the oracle runs them as that builtin too, untraced, as the native code does. Added to libcalls.X86."""
+        the libm functions log, pow, exp, ... of libcalls.CRT_MATH): the oracle runs them as that builtin too,
+        untraced, as the native code does. Added to libcalls.X86."""
         if not getattr(self, '_crt_done', False):
             self._crt_done = True
             int_names = {'memcpy', 'memmove', 'memset', 'memcmp', 'strlen', 'wcslen', 'strcmp', 'stricmp', 'strncmp',
@@ -539,7 +603,7 @@ class UnitCache:
             self.providers()
             for name, addr in self._prov_rows:       # every address of a name (memmove: 0x00ec44d0, 0x00ec7230)
                 b = libcalls.A64.get(name)
-                if b in int_names and addr not in libcalls.X86:
+                if (b in int_names or b in libcalls.CRT_MATH and not b.endswith('f')) and addr not in libcalls.X86:
                     libcalls.X86[addr] = b
 
     def pair(self, source, orig_addr):

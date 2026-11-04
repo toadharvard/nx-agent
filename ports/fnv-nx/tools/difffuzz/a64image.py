@@ -75,7 +75,7 @@ class Image:
     def __init__(self, elf, stubs, info):
         self.elf, self.stubs = elf, stubs
         self.info = info
-        self.segments, self.syms = [], {}
+        self.segments, self.syms, self.sizes = [], {}, {}
         self._read()
         self.entries = {}
         for n, a in self.syms.items():
@@ -106,6 +106,7 @@ class Image:
         for s in elfsyms.symbols(self.elf):
             if s.name and s.shndx != 0 and s.type not in ('section', 'file'):
                 self.syms.setdefault(s.name, s.value)
+                self.sizes.setdefault(s.name, s.size)
 
 
 @contextlib.contextmanager

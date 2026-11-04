@@ -26,6 +26,12 @@ import world
 PAGE = world.PAGE
 GDT = 0x0e000000
 TEB = 0x0e001000
+# thread-local storage (difffuzz-16): fs:[0x2c] -> the slot array at TLS_ARRAY (in the TEB page), slot 0 -> a zeroed
+# private block (not compared, like the native tpidr_el0 block); offsets from coffobj.TLS_IMAGE_START may be
+# negative (a decomp name below it), so the slot points into the middle of the block
+TLS_ARRAY = TEB + 0x100
+TLS_BLOCK, TLS_SIZE = 0x0e040000, 0x10000
+TLS_PTR = TLS_BLOCK + 0x4000
 STUBS = 0x0e002000          # epilogue stubs
 FRET = 0x0e003000           # float result slot (80-bit)
 RESULT_BUF = 0x0e004000     # default hidden result buffer
@@ -44,12 +50,52 @@ def _desc(base, limit, access, flags=0xC):
                        ((limit >> 16) & 0xf) | (flags << 4), (base >> 24) & 0xff)
 
 
+
+def x87_result_use(uc, retaddr, fret='int', depth=0):
+    """'f32' / 'f64' when the code the call returns to consumes ST0 (the caller takes a float result from the
+    callee), else 'int'. For an intercepted call whose callee nothing describes (a wild or unplanted indirect call,
+    a CRT name without a type): the native side always finds the canned bytes in v0, so the oracle gets the same
+    value in ST0 where it reads one. fst/fstp m32 -> f32, m64 -> f64; x87 arithmetic, fxch, fchs, fabs, fstp st(i)
+    -> f32; the caller's cleanup (add esp, pop) and epilogue (mov esp, ebp / leave / pop) are stepped over, and a
+    `ret` returns the fuzzed function's own result kind `fret` (a tail position)."""
+    if depth > 8:
+        return 'int'
+    try:
+        b = bytes(uc.mem_read(retaddr, 6))
+    except Exception:  # noqa: BLE001
+        return 'int'
+    skip = None
+    if b[:2] == b'\x83\xc4':
+        skip = 3
+    elif b[:2] == b'\x81\xc4':
+        skip = 6
+    elif b[:2] == b'\x8b\xe5':
+        skip = 2
+    elif b[0] in (0x59, 0x5b, 0x5d, 0x5e, 0x5f, 0xc9):     # pop ecx/ebx/ebp/esi/edi, leave
+        skip = 1
+    if skip:
+        return x87_result_use(uc, retaddr + skip, fret, depth + 1)
+    if b[0] in (0xc3, 0xc2):
+        return fret
+    b0, m = b[0], b[1]
+    if b0 == 0xd9 and m == 0xc0:          # fld st0 (the float epilogue stub): the store after it decides
+        nxt = x87_result_use(uc, retaddr + 2, fret, depth + 1)
+        return nxt if nxt != 'int' else 'f32'
+    mod, reg = m >> 6, (m >> 3) & 7
+    if b0 in (0xd9, 0xdd) and mod != 3 and reg in (2, 3):
+        return 'f64' if b0 == 0xdd else 'f32'
+    if b0 in (0xd8, 0xdc, 0xde) or (b0 == 0xd9 and (0xc8 <= m <= 0xcf or m in (0xe0, 0xe1))) or \
+            (b0 == 0xdd and 0xd8 <= m <= 0xdf):
+        return 'f32'
+    return 'int'
+
 class Call:
-    __slots__ = ('target', 'args', 'ret_to', 'regs', 'pushed')
+    __slots__ = ('target', 'args', 'ret_to', 'regs', 'pushed', 'pop_unknown')
 
     def __init__(self, target, args, ret_to, regs=None):
         self.target, self.args, self.ret_to, self.regs = target, args, ret_to, regs or {}
         self.pushed = None       # stack bytes the caller passed, when its code shows it
+        self.pop_unknown = False  # the callee's `ret N` is unknown (no oracle code, no declaration): pop_override
 
 
 class Result:
@@ -61,6 +107,8 @@ class Result:
         self.error = None        # None | 'timeout' | 'fault:...' | 'div0' | 'exc:...'
         self.blocks = set()
         self.saved_ok = True     # callee-saved registers preserved
+        self.noreturn = None            # the noreturn callee the run ended at (libcalls.NORETURN_X86)
+        self.esp_ok = None              # the target returned with esp = entry + 4 + its own ret N
 
 
 class X86Engine:
@@ -69,10 +117,13 @@ class X86Engine:
         follow(addr) -> oracle bytes of a function outside the unit to run for real instead of intercepting, or None."""
         self.follow = follow
         self.followed = set()
+        # {return address: bytes} the intercepted callee of an unknown convention pops (runner.Pair learns them)
+        self.pop_override = {}
         self.imports = imports or {}       # import stub index -> (name, stdcall bytes)
         self.world = world_obj
         self.text_funcs = text_funcs
         self.callee_info = callee_info or (lambda a: None)
+        self._fret = 'int'
         self.ranges = sorted((a, a + len(c)) for a, c in text_funcs.items())
         self._starts = [lo for lo, _ in self.ranges]
         self.mapped = set()
@@ -94,6 +145,9 @@ class X86Engine:
         uc.reg_write(UC_X86_REG_FS, 3 << 3)     # TEB: SEH chain head and self pointer
         uc.mem_write(TEB, struct.pack('<I', 0xffffffff) + struct.pack('<II', world.SP0 + 0x10000, world.STACK[0])
                      + b'\0' * 0xc + struct.pack('<I', TEB))
+        uc.mem_write(TEB + 0x2c, struct.pack('<I', TLS_ARRAY))
+        uc.mem_write(TLS_ARRAY, struct.pack('<I', TLS_PTR))
+        uc.mem_map(TLS_BLOCK, TLS_SIZE, UC_PROT_READ | UC_PROT_WRITE)
         uc.mem_write(FLD_STUB, b'\xdd\x05' + struct.pack('<I', FLD_VAL) + b'\xc3')
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._on_unmapped)
         uc.hook_add(UC_HOOK_INTR, self._on_intr)
@@ -146,6 +200,7 @@ class X86Engine:
             uc.mem_write(a, code)
         uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + world.stack_fill(case.seed, 0x1000))
         uc.mem_write(world.SP0, bytes(world.STACK[1] - world.SP0))
+        uc.mem_write(TLS_BLOCK, bytes(TLS_SIZE))
         # float epilogue: fld st0; fstp dword/qword [FRET+16] (the caller's rounding); fstp tbyte [FRET]; jmp SENTINEL
         st = b'\xd9\xc0' + (b'\xd9\x1d' if conv.ret is not None and conv.ret.size == 4 else b'\xdd\x1d') + \
             struct.pack('<I', FRET + 16) + b'\xdb\x3d' + struct.pack('<I', FRET)
@@ -155,6 +210,7 @@ class X86Engine:
         self._ensure(world.SENTINEL, 1)
         uc.reg_write(UC_X86_REG_FPCW, FPCW_MSVC)
         ret_stub = STUBS if conv.x86_ret == 'st0' else STUBS + 0x20
+        self._fret = ('f32' if conv.ret.size == 4 else 'f64') if conv.x86_ret == 'st0' else 'int'
         # garbage in every register that is not an argument (identical per seed)
         for i, reg in enumerate((UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EBX, UC_X86_REG_ESI,
                                  UC_X86_REG_EDI, UC_X86_REG_EBP)):
@@ -170,6 +226,7 @@ class X86Engine:
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
                for lo, hi in world.COMPARED]
         start = start if start is not None else next(iter(self.text_funcs))
+        esp0 = uc.reg_read(UC_X86_REG_ESP)
         self._fault = None
         try:
             uc.emu_start(start, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
@@ -185,9 +242,10 @@ class X86Engine:
         eip = uc.reg_read(UC_X86_REG_EIP)
         if r.error is None and self._fault:
             r.error = self._fault
-        if r.error is None and eip != world.SENTINEL:
+        if r.error is None and eip != world.SENTINEL and not r.noreturn:
             r.error = 'timeout'
-        if r.error is None:
+        if r.error is None and not r.noreturn:
+            r.esp_ok = uc.reg_read(UC_X86_REG_ESP) == (esp0 + 4 + conv.pop) & 0xffffffff
             r.ret, r.ret_ext = self._read_ret(conv, placement)
             now = [uc.reg_read(x) for x in (UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP)]
             r.saved_ok = now == saved
@@ -237,7 +295,7 @@ class X86Engine:
         bname = libcalls.X86.get(address)
         if bname is not None and self._builtin(uc, bname, esp, retaddr, words, r):
             return
-        code = self.follow(address) if self.follow else None
+        code = self.follow(address) if self.follow and address not in libcalls.NORETURN_X86 else None
         if code:
             # the native object never calls this address (GCC inlined it, typically a header inline function MSVC
             # called out of line): run the oracle's copy for real so both sides do the same work
@@ -257,25 +315,32 @@ class X86Engine:
         r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr,
                             {n: uc.reg_read(REGS[n]) for n in ('eax', 'ebx', 'esi', 'edi')}))
         r.calls[-1].pushed = self._pushed(uc, retaddr, address)
+        if address in libcalls.NORETURN_X86:
+            r.noreturn = libcalls.NORETURN_X86[address]   # the call never returns: the run ends here (difffuzz-14)
+            uc.emu_stop()
+            return
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
-        pop, kind = info if info else (0, 'int')
+        pop, kind = info if info else (self.pop_override.get(retaddr, 0), x87_result_use(uc, retaddr, self._fret))
+        if not info:
+            r.calls[-1].pop_unknown = True
         eax = world.u32(rb, 0)
         cv = self._callee_conv(address)
-        ck = world.canned_kind((cv, self._callee_conv(address, caller=True)))
+        ccv = self._callee_conv(address, caller=True)
+        ck = world.canned_kind((cv, ccv))
         if address in world.ALLOCATORS:
             eax = world.alloc_result(k)
+        elif world.returns_this((cv, ccv)):
+            eax = r.calls[-1].args[0]                  # this (ecx), as the native gets x0 (difffuzz-19)
         elif ck == 'ref':
             eax = world.ref_result(k)
-        elif ck == 'bool':
+        elif ck in ('bool', 'untyped'):
             eax = (eax & ~0xff) | (rb[0] & 1)          # a real bool result is 0/1 (MSVC tests al, GCC bit 0)
         if cv is not None and cv.hidden and cv.ret is not None:
             p = self._sret_of(cv, r.calls[-1])
             if p is not None:                          # the result in the caller's buffer, its address in eax
                 libcalls.Mem(uc, r.writes, self._ensure).write(p, world.result_bytes(case, k, cv.ret.size))
                 eax = p
-        elif cv is not None and (getattr(cv, 'name', '') or '').startswith('??0'):
-            eax = r.calls[-1].args[0]                  # an MSVC constructor returns this
         uc.reg_write(UC_X86_REG_EAX, eax)
         uc.reg_write(UC_X86_REG_EDX, world.u32(rb, 4))
         uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
@@ -354,6 +419,10 @@ class X86Engine:
             k = len(r.calls)
             r.calls.append(Call(libcalls.import_id(name), [uc.reg_read(UC_X86_REG_ECX),
                                                            uc.reg_read(UC_X86_REG_EDX)] + words, ret))
+            if name in libcalls.NORETURN_IMPORTS:
+                r.noreturn = name
+                uc.emu_stop()
+                return
             v = world.u32(case.ret_bytes(k), 0)
             uc.reg_write(UC_X86_REG_EDX, world.u32(case.ret_bytes(k), 4))
             uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
@@ -368,9 +437,13 @@ class X86Engine:
         if name == 'chkstk':                     # _chkstk/_alloca_probe: esp -= eax (probing is a no-op here)
             uc.reg_write(UC_X86_REG_ESP, (esp + 4 - uc.reg_read(UC_X86_REG_EAX)) & 0xffffffff)
             uc.reg_write(UC_X86_REG_EIP, ret); return True
+        if name in libcalls.CRT_MATH:            # cdecl double functions: doubles at [esp+4], [esp+12] -> ST0
+            xs = [struct.unpack('<d', bytes(uc.mem_read(esp + 4 + 8 * i, 8)))[0] for i in range(libcalls.CRT_MATH[name])]
+            uc.mem_write(FLD_VAL, struct.pack('<d', libcalls.crt_math(name, xs)))
+            uc.reg_write(UC_X86_REG_EIP, FLD_STUB); return True     # fld qword [FLD_VAL]; ret (to `ret`)
         stub = libcalls.x87_stub(name, BUILTIN_SLOT)
         if stub is not None:
-            at = BUILTIN_STUB + 0x80 * libcalls.STUB_SLOT[name]
+            at = BUILTIN_STUB + libcalls.STUB_SIZE * libcalls.STUB_SLOT[name]
             uc.mem_write(at, stub)
             uc.reg_write(UC_X86_REG_EIP, at); return True
         if name in ('allmul', 'alldiv'):         # stdcall (a_lo, a_hi, b_lo, b_hi) -> edx:eax, ret 16

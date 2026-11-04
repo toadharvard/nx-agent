@@ -18,6 +18,14 @@
  "abi_explained_classes": [
   "pop-mismatch"
  ],
+ "_abi_verdicts_doc": "S1b's tests/s1b/pop/abiclass.py verdicts that explain an x86-inconsistent pair (J-0141): patched (the caller is an S1b site at the head that the link did not have yet: the next link drops the row) and benign-* (no native effect: extra words ignored, words never read, no call, only who pops differs). Tables: the gates job's --abiclass dir, else link/<c12>/out/abiclass.tsv",
+ "abi_explained_verdicts": [
+  "patched",
+  "benign-more",
+  "benign-unread",
+  "benign-nocall",
+  "benign-conv"
+ ],
  "static_closed": {
   "_doc": "a non-benign S12 class counts as closed only while its fix is present in this checkout (file + regex)",
   "F2S": {
@@ -60,6 +68,8 @@
   "path": "causes_all.json"
  },
  "fuzz_min_coverage": 0.9,
+ "_player_exe_doc": "the sha256 the gamedata/exe checksum line for FalloutNV.exe must give (fixture: made up)",
+ "player_exe_sha256": "abababababababababababababababababababababababababababababababab",
  "boot_milestones": [
   "winmain",
   "renderer_init",
@@ -68,31 +78,31 @@
   "first_cell"
  ],
  "perf": {
-  "_doc": "frame-rate levels set by the owner (J-0132): below 30 fps fails; 45 fps stable is the target (worst frame); 60 fps is the stretch, even if unstable (median frame). Each frame gate is evaluated at every clock; only clocks with required=true count for the verdict, the others are reported as informative",
+  "_doc": "frame-rate levels (owner decision J-0150, replacing J-0132): the target is 60 fps, a 16.7 ms whole frame, at the 1.02 GHz retail clock and 720p handheld, judged on the worst frame; below 30 fps is a fail; 45 fps is kept as an informational level only. Each frame gate is evaluated at every clock; only clocks with required=true count for the verdict (stock), the boost clock is informative",
   "ipc": 0.8,
   "clocks": [
    {
     "name": "stock",
     "hz": 1020000000,
-    "required": false
+    "required": true
    },
    {
     "name": "boost",
     "hz": 1785000000,
-    "required": true
+    "required": false
    }
   ],
   "fps": {
    "floor": 30,
-   "target": 45,
-   "stretch": 60
+   "info": 45,
+   "target": 60
   },
   "boot_to_winmain_s": 3.0,
   "boot_clock": "stock",
   "budget": {
-   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock",
+   "_doc": "S15 whole-frame budget (fnvnx-frame-budget/1, tools/perf/frame_budget.py, docs/PERF.md 11): reports/<farm>/<c12>-frame-budget.json, else the checkout's model file; the scenario as the build is placed today, its verdict for the target per clock (target_60: the mid worst frame <= 16.7 ms, J-0150)",
    "scenario": "placed",
-   "target": "pass_45",
+   "target": "target_60",
    "model": "docs/PERF_budget.json"
   }
  },
@@ -124,5 +134,23 @@
     ]
    }
   ]
+ },
+ "scorecard": {
+  "_doc": "the honest scorecard's frame rows (ready.py scorecard()): 60 fps at 720p handheld at the 1.02 GHz retail clock (J-0150), the same target as the frame gates (perf.fps)",
+  "frame_fps": 60,
+  "frame_clock": "stock",
+  "gpu_config": "handheld_720p"
+ },
+ "fuzz_s13_metric": {
+  "_doc": "tools/difffuzz/metric.py as the scorecard's S13 row; trusted=false shows its value as no-data (set it to true once S13 fixes V1's findings)",
+  "trusted": true,
+  "why": "V1 refuted metric.py (M1-M3: a missing, FAILED-only or deadline-pending shard lowers the metric)"
+ },
+ "report_due_s": 43200,
+ "_report_due_s_doc": "a pass whose source is behind the head and older than this (s, against the newest publish time) is overdue: stale, not a pass",
+ "trend": {
+  "_doc": "fnvnx-trend/1: the gates job keeps the per-head scorecard history in its JSON sidecar (reports/<farm>/<c12>-gates.json, private repo); ready.py reads the newest one and appends",
+  "farm": "gates1",
+  "keep": 400
  }
 }

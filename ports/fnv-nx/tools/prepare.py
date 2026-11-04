@@ -363,6 +363,7 @@ CRT_HEADERS = {
     '<math.h>': 'fabs fabsf sqrt sqrtf sin sinf cos cosf tan tanf asin asinf acos acosf atan atanf atan2 atan2f exp '
                 'expf log logf log10 log10f pow powf floor floorf ceil ceilf fmod fmodf modf frexp ldexp',
     '<ctype.h>': 'toupper tolower isspace isdigit isalpha isalnum isupper islower',
+    '<wchar.h>': 'wmemcmp wmemcpy wmemmove wmemset wmemchr wcslen',
     '': '_alloca _ReadWriteBarrier _ReadBarrier _WriteBarrier _CxxThrowException operator_delete_sized '
           '_operator_delete_sized',   # in the force-included fnvnx_compat.h
 }
@@ -557,7 +558,7 @@ def r_platform_protos(path, text, stats):
     function's own declaration instead of the header, and the decomp's float overloads stay (see MATH_NAMES)."""
     global PLATFORM
     if PLATFORM is None: PLATFORM = platform_names()
-    spans, out, pos, have, top = None, [], 0, set(), []
+    spans, out, pos, have, top, kept = None, [], 0, set(), [], set()
     for m in PROTO.finditer(text):
         name = re.sub(r'\s+', ' ', m.group(1))
         is_op = name.startswith('operator')
@@ -573,7 +574,9 @@ def r_platform_protos(path, text, stats):
             stats['DECL1-MATHKEEP'] += 1             # the decomp's float / double types (see MATH_NAMES above)
             continue
         if (not is_op and spaces and spaces != ['namespace std'] and not c_linkage
-                and not cxx_copy_is_crt(path, name)): continue
+                and not cxx_copy_is_crt(path, name)):
+            kept.add(name)                           # N::name stays N's own function (DECL1-NSADL below)
+            continue
         if is_math and spaces != ['namespace std']:  # the C function, by itself (no <math.h> overloads)
             start = m.start()
             if start > 0 and text[start - 1] == '\n':
@@ -634,16 +637,88 @@ def r_platform_protos(path, text, stats):
         pos = m.end()
         stats['DECL1'] += 1
     out.append(text[pos:])
-    return ''.join('#include %s /* fnv-nx DECL1 */\n' % h for h in top) + ''.join(out)
+    text = ''.join('#include %s /* fnv-nx DECL1 */\n' % h for h in top) + ''.join(out)
+    return ns_own_calls(text, kept, stats) if kept and (have or top) else text
+
+NS_CALL_PREV = re.compile(r'(?:[(=,;{}!?:+\-|<\[]|\b(?:return|else|do|case))\s*$')
+
+def ns_own_calls(text, names, stats):
+    """DECL1-NSADL: in a namespace N (not std) that keeps its own C++ prototype of a platform name (N::strcpy_s,
+    bound to the game's wrapper), an unqualified call of that name becomes `(name)(args)`. The platform header DECL1
+    added declares ::name too, and argument-dependent lookup finds it through an argument whose class has a base in
+    the global namespace: `strcpy_s(buf, 260, fixedString)` is ambiguous on GCC and MSVC. The parenthesized name
+    turns argument-dependent lookup off, so the call reaches N::name, as it did in the decomp."""
+    spans = scope_spans(text)
+    edits = []
+    for o, c, k, h in spans:
+        if k != 'namespace' or re.sub(r'\s+', ' ', h) == 'namespace std':
+            continue
+        if any(o2 < o and c < c2 and k2 == 'namespace' for o2, c2, k2, _ in spans):
+            continue                                     # the outermost namespace covers its nested ones
+        body = text[o:c]
+        own = [n for n in names if re.search(r'^[ \t]*(?!extern\s+"C")[A-Za-z_][\w \t\*&:<>,]*?[\s\*&]%s\s*\([^;{}]*\)\s*;'
+                                            % re.escape(n), body, re.M)]
+        for n in own:
+            for m in re.finditer(r'(?<![\w:.>~])%s(?=\s*\()' % re.escape(n), text[o:c]):
+                at = o + m.start()
+                line = text.rfind('\n', 0, at) + 1
+                if '//' in text[line:at] or not NS_CALL_PREV.search(text[max(o, at - 40):at]):
+                    continue                             # a declaration (`int strcpy_s(`) or a comment
+                edits.append((at, at + len(n)))
+    for a, b in sorted(set(edits), reverse=True):
+        text = text[:a] + '(' + text[a:b] + ')' + text[b:]
+        stats['DECL1-NSADL'] += 1
+    return text
+
+# ---- DECL3: the decomp's own typedefs of C library types that the target defines differently
+#
+# A unit that carries its own <stdio.h> (`typedef _iobuf FILE;`, `typedef __int64 fpos_t;`) clashes with the target's
+# FILE (glibc's struct _IO_FILE) and fpos_t (a struct). Under MSVC FILE is _iobuf: the typedef goes and every FILE of
+# the unit is spelled _iobuf, so DECL1 then sees its stdio prototypes as the _iobuf functions of fnvnx_iobuf.h (S4b).
+# MSVC's fpos_t is __int64: the unit's typedef and its uses get the name fnvnx_msvc_fpos_t (the same type).
+CRT_TYPEDEF_FILE = re.compile(r'^[ \t]*typedef[ \t]+(?:struct[ \t]+)?_iobuf[ \t]+FILE[ \t]*;', re.M)
+CRT_TYPEDEF_FPOS = re.compile(r'^[ \t]*typedef[ \t]+(?:__int64|long[ \t]+long)[ \t]+fpos_t[ \t]*;', re.M)
+CRT_CODE_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)', re.S)
+
+def _rename_code_word(text, old, new):
+    """`old` -> `new` as a whole word outside comments and literals, not as a member (`.old`, `->old`)."""
+    masked = CRT_CODE_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+    out, pos, n = [], 0, 0
+    for m in re.finditer(r'(?<![\w.>])%s\b' % re.escape(old), masked):
+        out.append(text[pos:m.start()]); out.append(new); pos = m.end(); n += 1
+    out.append(text[pos:])
+    return ''.join(out), n
+
+def r_crt_typedefs(path, text, stats):
+    """DECL3: the unit's own FILE / fpos_t typedefs give way to the MSVC types they name (see above)."""
+    if 'FILE' in text:
+        m = CRT_TYPEDEF_FILE.search(text)
+        if m and not prepare_in_scope(text, m.start()):
+            text = text[:m.start()] + '/* fnv-nx DECL3: FILE is _iobuf */' + text[m.end():]
+            text, n = _rename_code_word(text, 'FILE', '_iobuf')
+            stats['DECL3'] += 1 + n
+    if 'fpos_t' in text:
+        m = CRT_TYPEDEF_FPOS.search(text)
+        if m and not prepare_in_scope(text, m.start()):
+            text, n = _rename_code_word(text, 'fpos_t', 'fnvnx_msvc_fpos_t')
+            stats['DECL3'] += n
+    return text
+
+def prepare_in_scope(text, pos):
+    """pos is inside a class, function or other non-namespace brace block."""
+    return any(k not in ('namespace', 'extern') for k, _ in scope_chain(scope_spans(text), pos))
 
 NEWDEL_PARAMS = re.compile(r'(\boperator\s+(?:new|delete)(?:\s*\[\s*\])?\s*\()([^;{}()]*)(\))')
 
 def r_newdel_size(path, text, stats):
-    """NEW1: operator new/delete size parameters spelled 'unsigned int' (MSVC x86 size_t) -> size_t. A parameter
-    passed by reference or pointer (`unsigned int& total`, an out parameter of a class operator new) is the caller's
-    unsigned int and keeps its type."""
+    """NEW1: operator new/delete size parameters spelled 'unsigned int' or plain 'unsigned' (MSVC x86 size_t) ->
+    size_t. A parameter passed by reference or pointer (`unsigned int& total`, an out parameter of a class operator
+    new) is the caller's unsigned int and keeps its type. (Plain `unsigned`: a class `operator delete[](void*,
+    unsigned)` is MSVC's usual sized deallocation function; spelled unsigned int on the target it is a placement form
+    and `delete[]` on the class finds no usual one.)"""
     def sub(m):
-        params = re.sub(r'\bunsigned\s+int\b(?!\s*[&*])', 'size_t', m.group(2))
+        params = re.sub(r'\bunsigned(?:\s+int)?\b(?!\s*(?:[&*]|(?:int|long|short|char|__int\d+)\b))', 'size_t',
+                        m.group(2))
         if params != m.group(2): stats['NEW1'] += 1
         return m.group(1) + params + m.group(3)
     return NEWDEL_PARAMS.sub(sub, text)
@@ -802,7 +877,7 @@ def r_game_bound_names(path, text, stats):
     return text
 
 RULES = [r_sse_local_types, r_sse_local_protos, r_sse_members, r_sse_qualified, r_game_bound_names,
-         r_platform_protos, r_newdel_size]
+         r_crt_typedefs, r_platform_protos, r_newdel_size]
 
 # ---------------------------------------------------------------------------------------------------------- driver
 
@@ -869,6 +944,9 @@ def main():
                 with open(d, 'w', encoding='utf-8', errors='surrogateescape') as f:
                     f.write(text)
     shutil.copytree(os.path.join(src_root, 'build'), os.path.join(out_root, 'build'), dirs_exist_ok=True)
+    # third_party/ (zlib 1.2.1: C units of units.json, compiled as C) is copied as it is: no rule edits it
+    if os.path.isdir(os.path.join(src_root, 'third_party')):
+        shutil.copytree(os.path.join(src_root, 'third_party'), os.path.join(out_root, 'third_party'), dirs_exist_ok=True)
     drop_native_units(out_root, stats, files)
     for hook in STREAM_POST:
         hook(out_root, stats, files)

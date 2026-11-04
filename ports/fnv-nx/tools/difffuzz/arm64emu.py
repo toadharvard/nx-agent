@@ -24,6 +24,7 @@ import libcalls
 
 PAGE = world.PAGE
 TLS_BASE, TLS_SIZE = 0x0b900000, 0x00010000   # inside the AArch64 private range (faults as data elsewhere)
+EXC_BASE, EXC_SIZE = 0x0b910000, 0x00010000   # __cxa_allocate_exception's object (libcalls.A64_EXC_OBJ), private
 MAX_CALLS = 20000                             # intercepted calls per run (each costs no step)
 XR = [A.UC_ARM64_REG_X0 + i for i in range(29)] + [A.UC_ARM64_REG_X29, A.UC_ARM64_REG_X30]
 VR = [A.UC_ARM64_REG_V0 + i for i in range(32)]
@@ -50,6 +51,7 @@ class Result:
         self.vptr_stores = 0
         self.private_reads = 0
         self.private_addrs = set()
+        self.noreturn = None            # the noreturn callee the run ended at (libcalls.noreturn_a64)
 
 
 class Arm64Engine:
@@ -77,6 +79,7 @@ class Arm64Engine:
         # thread-local storage: the native code reads [tpidr_el0 + offset] (the platform's thread_local state, GCC's
         # TLS model local-exec); a zeroed private block, not compared (the oracle has no such state)
         uc.mem_map(TLS_BASE, TLS_SIZE, UC_PROT_READ | UC_PROT_WRITE)
+        uc.mem_map(EXC_BASE, EXC_SIZE, UC_PROT_READ | UC_PROT_WRITE)
         uc.mem_map(a64image.STACK_GUARD, PAGE, UC_PROT_READ)
         uc.mem_write(a64image.STACK_GUARD, struct.pack('<Q', 0x5ca1ab1e0ddba11))
         self.mapped.add(a64image.STACK_GUARD)
@@ -90,6 +93,7 @@ class Arm64Engine:
             uc.mem_write(base, data)
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._on_unmapped)
         uc.hook_add(UC_HOOK_INTR, self._on_intr)
+        self._trap_pcs = None
         self._fault = None
 
     def _map(self, page, prot=UC_PROT_ALL):
@@ -124,13 +128,14 @@ class Arm64Engine:
             uc.mem_write(p, BRK * (PAGE // 4))
             self.mapped.add(p)
             return True
-        if STUB_LO <= address < STUB_HI and access == 21:     # UC_MEM_FETCH_UNMAPPED: a call into a stub
+        if STUB_LO <= address < STUB_HI and access == 21 and not any(lo <= address < hi for lo, hi in self.holes()):
+            # UC_MEM_FETCH_UNMAPPED: a call into a stub
             p = world.page_of(address)
             uc.mem_map(p, PAGE, UC_PROT_ALL)
             uc.mem_write(p, BRK * (PAGE // 4))
             self.mapped.add(p)
             return True
-        if not world.mappable(address, 'a64') or not world.mappable(address + size - 1, 'a64'):
+        if not self._mappable(address) or not self._mappable(address + size - 1):
             kind = {20: 'w', 21: 'x'}.get(access, 'r')
             self._fault = 'fault:%s:%08x' % (kind, address & 0xffffffff) if address < world.MAX else \
                 'fault:%s:ilp32-high:%x' % (kind, address)
@@ -138,11 +143,53 @@ class Arm64Engine:
         self._ensure(address, size)
         return True
 
+    def holes(self):
+        """The parts of the AArch64 private range this unit image leaves unused (world.A64_HOLES plus, per image,
+        code stubs outside .text, named stubs above the last one assigned, the space after the image): background
+        memory as on the oracle, and a wild call when executed (difffuzz-19)."""
+        if getattr(self, '_holes', None) is None:
+            import vtmodel
+            pg = lambda a: (a + PAGE - 1) & ~(PAGE - 1)          # noqa: E731
+            top = max([a for a in self.image.stubs if a < vtmodel.VT_STUBS] or [a64image.NAMED_STUB])
+            h = list(world.A64_HOLES) + [
+                (a64image.CODE_STUB, a64image.CODE_STUB + world.TEXT[0]),
+                (pg(a64image.CODE_STUB + world.TEXT[1]), a64image.NAMED_STUB),
+                (pg(top + 16), vtmodel.VT_STUBS),
+                (pg(max(self.image.end, a64image.A64_BASE)), TLS_BASE)]
+            self._holes = [(lo, hi) for lo, hi in h if lo < hi]
+        return self._holes
+
+    def _mappable(self, a):
+        return world.mappable(a, 'a64') or any(lo <= a < hi for lo, hi in self.holes())
+
+    # the link's trap stubs for vtable slots it cannot bind (fnvlink.py: __fnvnx_vtrap_<X> loads x1 = a text naming
+    # the class and slot, then `b fnvnx_vslot_trap`; special members -> fnvnx_special_trap; weak defaults: brk)
+    TRAPS = ('fnvnx_vslot_trap', 'fnvnx_special_trap')
+
     def _on_intr(self, uc, intno, data):
-        self._fault = 'exc:%d@%08x' % (intno, uc.reg_read(A.UC_ARM64_REG_PC))
+        pc = uc.reg_read(A.UC_ARM64_REG_PC)
+        if self._trap_pcs is None:
+            self._trap_pcs = {self.image.syms[n]: n for n in self.TRAPS if n in getattr(self.image, 'syms', {})}
+        name = self._trap_pcs.get(pc)
+        if name:
+            # a call of a virtual function the link binds to nothing (difffuzz-14; S1-fuzzq's exc:7 "at shared
+            # PCs": 0x0a069914 in 54 functions of one unit is that unit's fnvnx_vslot_trap)
+            try:
+                text = bytes(uc.mem_read(uc.reg_read(XR[1]) & 0xffffffff, 96)).split(b'\0')[0]
+                text = text.decode('ascii', 'replace')
+            except UcError:
+                text = '?'
+            self._fault = 'trap:%s:%s' % (name, text)
+        else:
+            self._fault = 'exc:%d@%08x' % (intno, pc)
         uc.emu_stop()
 
     def entry(self, orig_addr):
+        # an override of a secondary base's virtual: MSVC enters it with `this` at that base, so the native entry is
+        # the link's __fnvnx_msvc_<addr> (GCC's _ZThn<d>_ thunk), not __fnv_<addr> (S2c thisadj, difffuzz-19)
+        t = self.image.syms.get('__fnvnx_msvc_%08x' % orig_addr)
+        if t is not None:
+            return t
         return next((n for n, o in self.image.entries.items() if o == orig_addr), None)
 
     def run(self, conv, case, placement, orig_addr, max_steps=200000):
@@ -160,17 +207,23 @@ class Arm64Engine:
             uc.reg_write(VR[i], world.garbage32(case.seed, 400 + i) | (world.garbage32(case.seed, 500 + i) << 32))
         self._place_args(conv, case, placement, world.SP0 & ~0xf)
         uc.mem_write(TLS_BASE, bytes(TLS_SIZE))
+        uc.mem_write(EXC_BASE, bytes(EXC_SIZE))
         uc.reg_write(A.UC_ARM64_REG_TPIDR_EL0, TLS_BASE)
         uc.reg_write(A.UC_ARM64_REG_LR, world.SENTINEL)
         self._ensure(world.SENTINEL, 4)
         saved = [uc.reg_read(XR[i]) for i in range(19, 30)] + [uc.reg_read(A.UC_ARM64_REG_SP)]
         hs = uc.hook_add(UC_HOOK_BLOCK, self._on_stub, user_data=(case, r), begin=STUB_LO, end=STUB_HI - 1)
         hwild = [uc.hook_add(UC_HOOK_BLOCK, self._on_wild, user_data=(case, r), begin=lo, end=hi - 1)
-                 for lo, hi in world.WILD_A64]
+                 for lo, hi in tuple(world.WILD_A64) + tuple(self.holes())]
         hc = uc.hook_add(UC_HOOK_BLOCK, self._on_cov, user_data=r, begin=a64image.A64_BASE,
                          end=max(self.image.end, a64image.A64_BASE + 4) - 1)
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
                for lo, hi in world.COMPARED]
+        # function-local statics paired with the oracle's (engine.static_pairs, difffuzz-17): stores into the native
+        # copy count as stores at the oracle's address
+        for na, oa, n in getattr(self, 'static_pairs', ()):
+            hws.append(uc.hook_add(UC_HOOK_MEM_WRITE, self._on_static_write, user_data=(r, na, oa, n),
+                                   begin=na, end=na + n - 1))
         # reads of the unit image's own data (.data/.bss after .rodata): state the native code keeps outside the
         # image window (a unit-local copy of something the oracle reads at an original address)
         for lo, hi in getattr(self.image, 'private', ()):
@@ -186,9 +239,9 @@ class Arm64Engine:
         pc = uc.reg_read(A.UC_ARM64_REG_PC)
         if r.error is None and self._fault:
             r.error = self._fault
-        if r.error is None and pc != world.SENTINEL:
+        if r.error is None and pc != world.SENTINEL and not r.noreturn:
             r.error = 'timeout'
-        if r.error is None:
+        if r.error is None and not r.noreturn:
             r.ret = self._read_ret(conv, placement)
             now = [uc.reg_read(XR[i]) for i in range(19, 30)] + [uc.reg_read(A.UC_ARM64_REG_SP)]
             r.saved_ok = now == saved
@@ -291,7 +344,16 @@ class Arm64Engine:
         for i in range(size):
             r.writes[address + i] = (value >> (8 * i)) & 0xff
 
+    def _on_static_write(self, uc, access, address, size, value, data):
+        r, na, oa, n = data
+        b = (value & ((1 << (8 * size)) - 1)).to_bytes(size, 'little')
+        for i, x in enumerate(b):
+            if na <= address + i < na + n:
+                r.writes[oa + address + i - na] = x
+
     def _on_private_read(self, uc, access, address, size, value, r):
+        if any(na <= address < na + n for na, _, n in getattr(self, 'static_pairs', ())):
+            return                      # a paired local static: compared at the oracle's address instead
         r.private_reads += 1
         if len(r.private_addrs) < 32:
             r.private_addrs.add(address)
@@ -343,6 +405,10 @@ class Arm64Engine:
             stk = b''
         r.calls.append(Call(target, [uc.reg_read(XR[i]) for i in range(8)], [uc.reg_read(VR[i]) for i in range(8)],
                             uc.reg_read(A.UC_ARM64_REG_X8), stk))
+        if libcalls.noreturn_a64(name) or (name is None and target in libcalls.NORETURN_X86):
+            r.noreturn = name or libcalls.NORETURN_X86[target]   # never returns: the run ends here (difffuzz-14)
+            uc.emu_stop()
+            return
         rb = case.ret_bytes(k)
         x8 = uc.reg_read(A.UC_ARM64_REG_X8) & 0xffffffff
         for i in list(range(1, 18)):
@@ -365,9 +431,11 @@ class Arm64Engine:
         ck = world.canned_kind((cv, ccv))
         if target in world.ALLOCATORS:
             x0 = world.alloc_result(k)
+        elif world.returns_this((cv, ccv)):
+            x0 = r.calls[-1].args[0] & 0xffffffff      # this (x0), as the oracle gets ecx (difffuzz-19)
         elif ck == 'ref':
             x0 = world.ref_result(k)
-        elif ck == 'bool':
+        elif ck in ('bool', 'untyped'):
             x0 = (x0 & ~0xff) | (rb[0] & 1)            # a real bool result is 0/1
         uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
@@ -409,7 +477,13 @@ class Arm64Engine:
             m.write(uc.reg_read(XR[1]) & 0xffffffff, struct.pack('<f' if f else '<d', c))
             uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
             return True
-        if bname in libcalls.FLOAT_NAMES:
+        if bname in libcalls.CRT_MATH:                   # libm: v0 (, v1) -> v0, double or float (`f`)
+            f = bname.endswith('f') and bname[:-1] in libcalls.CRT_MATH
+            fmt, mask = ('<f', 0xffffffff) if f else ('<d', 2 ** 64 - 1)
+            xs = [struct.unpack(fmt, (uc.reg_read(VR[i]) & mask).to_bytes(4 if f else 8, 'little'))[0]
+                  for i in range(libcalls.CRT_MATH[bname])]
+            uc.reg_write(VR[0], int.from_bytes(struct.pack(fmt, libcalls.crt_math(bname, xs)), 'little'))
+        elif bname in libcalls.FLOAT_NAMES:
             v = uc.reg_read(VR[0])
             if bname.endswith('f'):
                 x = struct.unpack('<f', (v & 0xffffffff).to_bytes(4, 'little'))[0]

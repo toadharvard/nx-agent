@@ -97,8 +97,8 @@ they are checked by a probe TU with the census flags (`-mabi=ilp32 -include fnvn
   `(c - k*vl)/(c - k*vs)`, c = 343.3 m/s / distance factor, clamped [0.5, 2]. No HRTF.
 * `dsound.cpp` - IDirectSound8, IDirectSoundBuffer8 (primary: master volume, format request, listener),
   IDirectSound3DBuffer, IDirectSound3DListener (immediate/deferred + CommitDeferredSettings), IDirectSoundNotify,
-  DuplicateSoundBuffer (shared data), SetFX/GetObjectInPath with I3DL2/Waves parameter objects (**no reverb DSP
-  yet**), parameter validation and HRESULTs as on Windows (CONTROLUNAVAIL without the CTRL flag, BUFFERTOOSMALL,
+  DuplicateSoundBuffer (shared data), SetFX/GetObjectInPath with I3DL2/Waves parameter objects (the I3DL2 reverb
+  runs in the mixer, platform/audio/reverb.h; Waves: parameters only), parameter validation and HRESULTs as on Windows (CONTROLUNAVAIL without the CTRL flag, BUFFERTOOSMALL,
   PRIOLEVELNEEDED, ...). Software only: no `LOCHARDWARE` buffers.
 * `backend.{h,cpp}` - backends `manual` (tests), `null` and `wav:PATH` (host, real-time paced thread);
   `backend_audren.c` - Horizon: audren + audrv, one PCM16 stereo voice, 4 x 512-frame wave buffers (~43 ms).
@@ -160,7 +160,9 @@ syntax check of all S7 sources for AArch64 ILP32 (+ libnx files).
   with them.
 * S6: Bink audio (`BinkOpenDirectSound` with our IDirectSound8).
 * S3: verify the exe's GUID copies (`DAT_01100fa4`, `DAT_01100ed4`, `g_IID_*`) equal the SDK values used here.
-* Reverb DSP for SetFX (I3DL2), HRTF/surround: not implemented (parameters are stored).
+* HRTF/surround: not implemented. The I3DL2 reverb for SetFX runs in the mixer per voice (platform/audio/reverb.h:
+  room shelf, early taps, a 4-line FDN with decay_time / decay_hf_ratio; SetPreset uses the SDK's I3DL2 presets);
+  the Waves reverb keeps its parameters only.
 * Text entry: no software keyboard (swkbd) yet; WM_CHAR/VK key state is not fed from the USB keyboard
   (`fnvnx_set_key_state`/`fnvnx_post_message` hooks are available).
 * Touch taps press and release in the same pump: visible to buffered reads, not to `GetDeviceState` polling.

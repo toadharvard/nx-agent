@@ -342,5 +342,9 @@ extern "C" int MessageBoxA(HWND h, LPCSTR text, LPCSTR caption, UINT type)
         { IDYES, IDNO, IDCANCEL }, { IDYES, IDNO, IDNO }, { IDRETRY, IDCANCEL, IDCANCEL },
     };
     unsigned kind = type & 0xF, def = (type >> 8) & 0xF;
+    /* MB_OK / MB_OKCANCEL: the player sees it (the device's error applet, os_show_message) and the answer is OK;
+     * questions (retry, yes/no) take their default button without a dialog, as before */
+    if (kind <= 1)
+        os_show_message(caption ? caption : "", text ? text : "");
     return buttons[kind < 6 ? kind : 0][def < 3 ? def : 0];
 }

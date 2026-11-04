@@ -291,6 +291,13 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     ers->RestoreSamplerState(0, 5);
     t.Check(ers->GetSamplerState(0, 5) == 1, "stub: RestoreSamplerState returns to the saved default (POINT)",
             (int)ers->GetSamplerState(0, 5));
+    ers->SetSamplerState(1, 1, 3, 0);    // ADDRESSU CLAMP by the defaults pass (D3D9's default is WRAP)
+    ers->SetSamplerState(1, 1, 1, 0);    // a draw sets WRAP
+    ers->RestoreSamplerState(1, 1);
+    t.Check(ers->GetSamplerState(1, 1) == 3, "stub: RestoreSamplerState re-sets the engine's saved value, not D3D9's (V1 O2)",
+            (int)ers->GetSamplerState(1, 1));
+    t.Check(ers->GetTextureStageState(2, 26) == 1 && ers->GetTextureStageState(2, 27) == 1 && ers->GetTextureStageState(2, 28) == 1,
+            "stub: COLORARG0 / ALPHAARG0 / RESULTARG default to D3DTA_CURRENT (V1 O3)");
     // slot 48/49 are texture stage states: recorded, never sampler states
     t.Check(ers->GetTextureStageState(0, 1) == 4 && ers->GetTextureStageState(1, 1) == 1,
             "stub: texture stage state defaults (COLOROP MODULATE / DISABLE)");
