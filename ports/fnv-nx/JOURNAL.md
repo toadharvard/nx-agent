@@ -2422,3 +2422,49 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **did** - V1 `be8c781`, `70cee3a`, `442e5ea`: farm-link harness (it runs `fixed/zz_bridges.o` directly), POD bits,
   local typeinfo sizes, jump tables and definition-following in c3, cast-call bridges, and reproducers t6 and c10/c11.
 * **next** - S2c: R4-1 (check it against fa7d3f8 first), R4-2, R4-3. V1: run on a farm runner from now on (D17).
+
+### J-0112 | 2026-11-04 | stream: S1b-patches,S13-difffuzz | status: wip | parent: J-0100,J-0103
+
+* **did** - S1b `5903141` (XINC1 round 4 on link/aedcf247e999). Resolve now compares C-named references: 3,874
+  x86-inconsistent rows, of which 757 involve this, ecx, result pointers or casts.
+  - 75 callers patched in 59 files: 66 generated (gen.py reads `extern "C"` signatures), 9 by hand. MSVC: 74 identical,
+    1 by design.
+  - All 51 f13 hand-read callers and V1's C-named pairs are handled.
+* **did** - S1b `00c537b` (pattern d): 0x005762b0 rewritten (MSVC identical) and 0x00c90030 rewritten (2 bytes, by
+  design). 0x008133f0 and 0x009ab390 have been analysed and are left open. tests/s1b test_patches (568 sites, 1,097
+  hunks) and test_ftol pass.
+* **found** - Resolve gaps for S2c:
+  - Casts spelled with a typedef'd pointer type are missed (10 rows).
+  - `__declspec(noreturn)` C declarations are not parsed.
+  - A `__fastcall` hidden result in ecx is flagged `ecx-not-passed`, though it is consistent on x86.
+  - About 3,000 `pop-mismatch` rows have no owner yet.
+* **measured** - S13 first real fuzz triage: 11 of 26 shards at 9844d8d (difffuzz-6), 12,482 functions, 2,039 hard
+  before reclassification. About 350 further S0/S2 hard divergences are runtime equivalences that difffuzz-8 removes.
+
+  | stream | functions | still hard |
+  |---|---:|---:|
+  | S0-compile | 1,913 | 1,636 |
+  | S2-link | 1,478 | 1,317 |
+  | S1 FALL1 | 60 | 56 |
+  | S1b XINC1 | 20 | 18 |
+  | RCAST1 | 10 | 10 |
+  | SSE | 7 | 7 |
+  | RET1 | 6 | 6 |
+  | GOTO1 | 5 | 5 |
+
+  For S0/S2 the main causes are unclassified 946, call-flow 605, uninit-both 193, split-global 121.
+* **did** - S13 `4f38ed8`, `0352a75` (difffuzz-8, merged together, HARNESS bump):
+  - Calls to names the link gives a provider trace as the CRT address, and IAT calls as the import.
+  - operator new is treated as MemoryManager::Allocate, and the delete forms as CRT free.
+  - Adaptive follow is refined.
+  - The AArch64 machine gets a zeroed TLS block at tpidr_el0 (TLS reads used to fault at small addresses).
+  - New causes: `msvc-inlined`, `runtime-equiv`, and `array-new-check` (soft).
+  - Self-test: 0 failures.
+* **found** - Filed by S13:
+  - S1b/S2: 7 tesscriptfunctions callers pass fewer arguments than FUN_005accb0 takes.
+  - S1/S2c: 007a44e0 has a field-offset/this difference.
+  - S2c: 00505010 is missing a V pairing (TESCombatStyle vs image 0x010266e4).
+  - Split-global in listbox, mapmenu and recipemenu (recheck after STATIC1 7fc664f).
+  - FALL1: 004ff7e0 and 00c25f40 still trap on links older than 77b2693.
+  - Harness, open: about 160 oracle-only null dereferences from canned null results; about 330 native-only faults
+    (~40% were TLS, now fixed); devirtualised indirect calls.
