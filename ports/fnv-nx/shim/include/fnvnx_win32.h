@@ -74,6 +74,7 @@ typedef LONG_PTR LRESULT;
 
 typedef void *HANDLE;
 typedef HANDLE *PHANDLE, *LPHANDLE;
+typedef HANDLE HGLOBAL, HLOCAL;
 #define FNVNX_DECLARE_HANDLE(n) struct n##__ { int unused; }; typedef struct n##__ *n
 FNVNX_DECLARE_HANDLE(HWND);
 FNVNX_DECLARE_HANDLE(HINSTANCE);

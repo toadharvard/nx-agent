@@ -276,6 +276,8 @@ def platform_names():
     return names
 
 PLATFORM = None
+# path -> {name: indices of the reference parameters of the decomp prototype DECL1 dropped} (CALL1 passes addresses)
+DECL1_REFS = {}
 PROTO = re.compile(r'^[ \t]*(?:extern\s+"C"\s+)?(?:__declspec\(\w+\)\s+)?(?:static\s+)?(?:inline\s+)?'
                    r'[A-Za-z_][\w \t\*&:<>,]*?[\s\*&](?:(?:__cdecl|__stdcall|__fastcall|WINAPI|__declspec\(\w+\))\s*)*'
                    r'(\w+|operator\s+(?:new|delete)(?:\s*\[\s*\])?)\s*\([^;{}]*\)\s*(?:throw\s*\([^)]*\)\s*)?;[ \t]*$',
@@ -309,6 +311,10 @@ def r_platform_protos(path, text, stats):
             hdr = '"fnvnx_iobuf.h"'
         else:
             hdr = PLATFORM[name]
+        if not is_op:
+            ps = re.search(r'\(([^;{}]*)\)', text[m.end(1):m.end()]).group(1).split(',')
+            refs = [i for i, p in enumerate(ps) if re.search(r'&(?!&)', p)]
+            if refs: DECL1_REFS.setdefault(path, {})[name] = refs
         nl = '\n' * m.group(0).count('\n')
         out.append(text[pos:m.start()])
         # in a namespace N other than std the name must stay visible as N::name (a local template or overload
@@ -330,9 +336,11 @@ def r_platform_protos(path, text, stats):
 NEWDEL_PARAMS = re.compile(r'(\boperator\s+(?:new|delete)(?:\s*\[\s*\])?\s*\()([^;{}()]*)(\))')
 
 def r_newdel_size(path, text, stats):
-    """NEW1: operator new/delete size parameters spelled 'unsigned int' (MSVC x86 size_t) -> size_t."""
+    """NEW1: operator new/delete size parameters spelled 'unsigned int' (MSVC x86 size_t) -> size_t. A parameter
+    passed by reference or pointer (`unsigned int& total`, an out parameter of a class operator new) is the caller's
+    unsigned int and keeps its type."""
     def sub(m):
-        params = re.sub(r'\bunsigned\s+int\b', 'size_t', m.group(2))
+        params = re.sub(r'\bunsigned\s+int\b(?!\s*[&*])', 'size_t', m.group(2))
         if params != m.group(2): stats['NEW1'] += 1
         return m.group(1) + params + m.group(3)
     return NEWDEL_PARAMS.sub(sub, text)

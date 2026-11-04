@@ -114,6 +114,52 @@ got = run(s1.r_xbox_cs_asserts, 'FNV_STATIC_ASSERT(sizeof(RecursiveLock) == 0x28
 check('CSX1 drops the Xbox-only asserts, keeps the rest', got,
       ['offsetof(RecursiveLock, CriticalSection) == 0x0', 'CSX1'], ['== 0x28', '== 0x1C'])
 
+# ---- LEX1
+got = run(s1.r_msvc_tokens, 'extern"C"enum E { A };\nchar pad[0xae-0x34];\nlong long k = 0xff00ffffui64 + 5i64;\n'
+          'inline __forceinline void f();\n')
+check('LEX1 MSVC token spellings', got, ['extern"C" enum', '0xae -0x34', '0xff00ffffULL', '5LL', '\n__forceinline void f'],
+      ['ui64', 'inline __forceinline'])
+check('LEX1 strings and comments untouched', run(s1.r_msvc_tokens, 'const char* s = "0xae-1 5i64"; // 0x1e+2\n'),
+      ['"0xae-1 5i64"', '// 0x1e+2'])
+
+# ---- STD1
+got = run(s1.r_std_struct, 'struct std\n{\n    static float __cdecl abs(float v);\n};\nfloat g(float x) { return std::abs(x); }\n')
+check('STD1 decomp struct std -> <cmath>', got, ['#include <cmath> /* fnv-nx STD1 */\n\n\n', 'std::abs(x)'], ['struct std'])
+check('STD1 other members: untouched', run(s1.r_std_struct, 'struct std\n{\n    static int Make(int v);\n};\n'),
+      ['struct std'], ['<cmath>'])
+
+# ---- SPEC3
+got = run(s1.r_namespace_specializations, 'template <class T> class P { T* p; };\nclass R;\nnamespace N {\nclass R\n{\n};\n'
+          'template <> class P<R>\n{\n  public:\n    R* p;\n    P(R* q);\n    operator R*() const;\n    int R_count;\n};\n}\n')
+check('SPEC3 qualifies the namespace types in a specialization body', got,
+      ['template <> class P<R>', 'N::R* p;', 'P(N::R* q);', 'operator N::R*()', 'int R_count;'])
+check('SPEC3 specialization of a namespace template: untouched',
+      run(s1.r_namespace_specializations, 'namespace N {\nclass R;\ntemplate <class T> class P { T* p; };\n'
+          'template <> class P<R>\n{\n    R* p;\n};\n}\n'), ['    R* p;'], ['N::R'])
+
+# ---- STATIC1 unsized arrays of address names
+check('STATIC1 unsized DAT_ array becomes a declaration',
+      run(s1.r_image_statics, 'const void* DAT_010d0fc4[];\nconst void* local_table[];\n'),
+      ['extern const void* DAT_010d0fc4[];', '\nconst void* local_table[];'])
+
+# ---- RCAST1 named casts
+check('RCAST1 static_cast to a reference of an operator result',
+      run(s1.r_ref_cast_temporaries, 'v = static_cast<const D&>(a - b).Len();\nw = static_cast<const D&>(p->m).Len();\n'),
+      ['static_cast<const D&>(fnvnx_lvalue(a - b))', 'static_cast<const D&>(p->m)'])
+check('RCAST1 member operator call result',
+      run(s1.r_ref_cast_temporaries, 'x = ((Pt&)((Op*)&a)->operator-(b)).Length();\n'),
+      ['(Pt&)fnvnx_lvalue(((Op*)&a)->operator-(b))'])
+
+# ---- KEEP1 never in front of a statement
+check('KEEP1 tag in front of a statement: no FNVNX_KEEP',
+      run(s1.r_keep_definitions, 'bool f()\n{\n// @fnv 0x005c4940\n    if (x)\n        g();\n    return true;\n}\n'),
+      (), ['FNVNX_KEEP'])
+
+# ---- NEW1 keeps reference parameters
+check('NEW1 size parameter -> size_t, reference parameter kept',
+      prepare.r_newdel_size('x.cpp', 'static void* operator new[](unsigned int size, unsigned int& total);\n', Counter()),
+      ['operator new[](size_t size, unsigned int& total)'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

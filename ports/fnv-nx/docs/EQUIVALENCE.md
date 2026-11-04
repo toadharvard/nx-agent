@@ -46,6 +46,9 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, ha
 | `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address; same callee, same bits | as is |
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
+| `SPEC3` | neutral | qualifies the names a namespace declares in the body of an explicit class specialization written inside it (`fnv_x::T* p`) | the names MSVC's lookup found |
+| `LEX1` | neutral | MSVC token spellings: `i64`/`ui64` suffixes -> `LL`/`ULL`, `0xae-0x34` -> `0xae -0x34`, `"C"enum` -> `"C" enum` | same tokens as MSVC lexed them |
+| `STD1` | neutral | a decomp `struct std { static float abs(float); }` (the std namespace of the headers) -> the same declarations in `namespace std` | `std::abs(float)` is fabsf (0x00408840) either way |
 | `SPEC2` | neutral | `template <>` on the decomp's member definitions of class template specializations (5 files) | MSVC accepts both spellings |
 | `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
 | `ALLOC1` | platform | drops untagged file-scope replacements of the global operator new/delete; the game's are bound by address | target only |

@@ -420,7 +420,9 @@ def r_interlocked_fallbacks(path, text, stats):
 # (SystemInfo86*, Rect86*, int for a HANDLE, a local copy of _RTL_CRITICAL_SECTION...). Under MSVC each call passed
 # that value to the same import; with the SDK prototypes GCC refuses the conversions. CALL1 casts every argument
 # passed to a pointer parameter of a Win32 function to the SDK parameter type, which is what the decomp's own
-# prototype did implicitly (same bits; ILP32 pointers and ints are both 32-bit).
+# prototype did implicitly (same bits; ILP32 pointers and ints are both 32-bit). Where the dropped prototype took a
+# reference (`CoCreateInstance(const AudGuid& clsid, ...)`, as the C++ SDK does) the address of the argument is
+# passed (prepare.DECL1_REFS): what the reference passed.
 
 _W32_SIGS = None
 
@@ -501,10 +503,12 @@ def r_win32_call_args(path, text, stats):
         args = _split_args(text[m.end():close - 1])
         types = sigs[m.group(1)]
         if len(args) != len(types): continue
+        refs = getattr(prepare, 'DECL1_REFS', {}).get(path, {}).get(m.group(1), ())
         new = []
-        for a, t in zip(args, types):
+        for i, (a, t) in enumerate(zip(args, types)):
             if t is None or not a.strip(): new.append(a); continue
-            new.append(' (%s)(%s)' % (t, a.strip()) if new else '(%s)(%s)' % (t, a.strip()))
+            v = '&(%s)' % a.strip() if i in refs else '(%s)' % a.strip()
+            new.append(' (%s)%s' % (t, v) if new else '(%s)%s' % (t, v))
         out.append(text[pos:m.end()]); out.append(','.join(new)); out.append(')'); pos = close
         stats['CALL1'] += 1
     out.append(text[pos:])
@@ -537,22 +541,34 @@ def _postfix_end(text, i):
                 if depth == 0: break
             j, call = k2, False
         else:
-            mm = re.match(r'\s*(?:\.|->)\s*~?[A-Za-z_]\w*', text[k:])
+            mm = re.match(r'\s*(?:\.|->)\s*(?:operator\s*(?:\(\)|\[\]|[^\s\w(]+)(?=\s*\()|~?[A-Za-z_]\w*)', text[k:])
             if not mm: return j, call
             j, call = k + mm.end(), False
 
+NAMED_REF_CAST = re.compile(r'\b(?:static_cast|reinterpret_cast)\s*<\s*((?:const\s+)?(?:volatile\s+)?(?:::)?'
+                            r'[A-Za-z_][\w:<>, \t\*]*?&)\s*>\s*\(')
+LVALUE_LIKE = re.compile(r'^\s*(?:\*\s*)*(?:::)?[A-Za-z_]\w*(?:\s*(?:::|\.|->)\s*~?[A-Za-z_]\w*|\s*\[[^\[\]]*\])*\s*$')
+
 def r_ref_cast_temporaries(path, text, stats):
     """RCAST1: `(T&)f(args)` where f(args) is a temporary (a functional cast or a call returning by value) ->
-    `(T&)fnvnx_lvalue(f(args))`. MSVC binds a C-style reference cast to a temporary, which lives to the end of the
+    `(T&)fnvnx_lvalue(f(args))`, and the same for `static_cast<T&>(e)` / `reinterpret_cast<T&>(e)` of an operand
+    that is not a name, member or element. MSVC binds a reference cast to a temporary, which lives to the end of the
     full expression; fnvnx_lvalue (fnvnx_compat.h) returns the same object as an lvalue for that same lifetime.
-    A call that already returns an lvalue is returned unchanged."""
-    if '&)' not in text: return text
-    out, pos = [], 0
+    An operand that already is an lvalue is returned unchanged."""
+    if '&)' not in text and '&>' not in text and '& >' not in text: return text
+    edits = []
     for m in REF_CAST_CALL.finditer(text):
-        if m.start() < pos: continue
         close, call = _postfix_end(text, m.end())
         if not call: continue                                         # an lvalue (a name, a member, an element)
-        out.append(text[pos:m.end()]); out.append('fnvnx_lvalue(' + text[m.end():close] + ')'); pos = close
+        edits.append((m.end(), close))
+    for m in NAMED_REF_CAST.finditer(text):
+        close = _call_end(text, m.end() - 1)
+        if LVALUE_LIKE.match(text[m.end():close - 1]): continue
+        edits.append((m.end(), close - 1))
+    out, pos = [], 0
+    for a, b in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append('fnvnx_lvalue(' + text[a:b] + ')'); pos = b
         stats['RCAST1'] += 1
     out.append(text[pos:])
     return ''.join(out)
@@ -569,7 +585,8 @@ def r_ref_cast_temporaries(path, text, stats):
 #   RecursiveLock (0x28), BSThread (0x40), OEI::IO::IO_Thread (0x40), AbstractHeap (0x2100), NiCriticalSection
 #   (owner at 0x1C, lock count at 0x20) and the classes that embed one: BSShaderAccumulator, NiGlobalStringTable,
 #   NiRenderer, GraphicsRenderer (CSX1_ASSERTS below: class -> asserted members, 'sizeof' for the size).
-# Every other assert stays. The members keep their (PC) layout; nothing else changes.
+# The same goes for the member order of the Xbox 360 SDK's (big-endian) _FILETIME, which tesform's layout header
+# asserts. Every other assert stays. The members keep their (PC) layout; nothing else changes.
 
 CSX1_ASSERTS = {
     'AbstractHeap': 'sizeof'.split(),
@@ -613,6 +630,8 @@ CSX1_ASSERTS = {
     ).split(),
     'OEI::IO::IO_Thread': 'sizeof'.split(),
     'RecursiveLock': 'm_uiFirstValue m_uiRecursionCount m_uiSecondValue sizeof'.split(),
+    # not a critical section: the Xbox 360 SDK's big-endian _FILETIME puts dwHighDateTime first (PC: dwLowDateTime)
+    '_FILETIME': 'dwHighDateTime dwLowDateTime'.split(),
 }
 
 CSX1_LINE = re.compile(r'^[ \t]*\w*ASSERT\s*\(\s*(?:sizeof\s*\(\s*([\w:]+)\s*\)|offsetof\s*\(\s*([\w:]+)\s*,\s*([\w.\[\]]+)\s*\))'
@@ -625,7 +644,7 @@ def r_xbox_cs_asserts(path, text, stats):
         cls, member = (m.group(1), 'sizeof') if m.group(1) else (m.group(2), m.group(3))
         if member not in CSX1_ASSERTS.get(cls, ()): return m.group(0)
         stats['CSX1'] += 1
-        return '/* fnv-nx CSX1: Xbox 360 critical-section layout (D15) */'
+        return '/* fnv-nx CSX1: Xbox 360 layout (D15) */'
     return CSX1_LINE.sub(sub, text)
 
 # ---------------------------------------------------------------------------------------------------------- NEW3
@@ -994,11 +1013,19 @@ def r_complete_views(path, text, stats):
 # units.json binds its name to that address. GCC keeps such a variable local to the object, and the link step can
 # only rebind global symbols, so the unit would use a private copy while everything else sees the image's (S13:
 # fadermanager's s_faders at 0x011d8828). STATIC1 gives those variables external linkage: `static` is dropped, a
-# namespace-scope `const` definition gets `extern`. Only names that a unit including the file binds to an image data
-# address (`?name@@3...` / `_name` in its units.json symbols) at file scope are touched.
+# namespace-scope `const` definition gets `extern`, and so does an array of unknown size declared without `extern`
+# (`const void* DAT_010d0fc4[];`, which MSVC took as a reference to the image's table and GCC rejects as a definition
+# of unknown size). Only names that a unit including the file binds to an image data address (`?name@@3...` /
+# `_name` in its units.json symbols) at file scope are touched, and for the unsized arrays also address names
+# (`DAT_<address>`, which the link binds by the address in the name).
 
 STATIC_DEF = re.compile(r'^([ \t]*)static\s+(?!inline\b)((?:const\s+|volatile\s+)*[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)'
                         r'\s*(?:\[[^\]]*\]\s*)*(?:=|;|\(|\{))', re.M)
+UNSIZED_DECL = re.compile(r'^([ \t]*)(?:static\s+)?((?!(?:extern|typedef|friend|return)\b)(?:const\s+|volatile\s+)*'
+                          r'[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)\s*\[\s*\]\s*;)', re.M)
+# an address name (DAT_010cc0ec) is bound by its address whatever units.json lists (tools/link: ADDR_IN_NAME)
+ADDR_NAME = re.compile(r'^(?:DAT|g|UNK|PTR)_[0-9a-f]{8}$')
+UNSIZED_ADDR = re.compile(r'\b(?:DAT|g|UNK|PTR)_[0-9a-f]{8}\s*\[\s*\]\s*;')
 CONST_DEF = re.compile(r'^([ \t]*)(const\s+[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)\s*(?:\[[^\]]*\]\s*)*=)', re.M)
 DATA_NAME = re.compile(r'^\?(\w+)@@3')
 _IMAGE_NAMES = None
@@ -1042,20 +1069,21 @@ def _image_bound_names(path):
 def r_image_statics(path, text, stats):
     """STATIC1: file-static / internal const variables bound to image addresses get external linkage (see above)."""
     if 'static' not in text and 'const' not in text: return text
-    names = _image_bound_names(path).get(os.path.normpath(os.path.abspath(path)))
-    if not names: return text
-    spans, edits = None, []
-    for rx, kind in ((STATIC_DEF, 'static'), (CONST_DEF, 'const')):
+    names = _image_bound_names(path).get(os.path.normpath(os.path.abspath(path))) or set()
+    if not names and not UNSIZED_ADDR.search(text): return text
+    spans, edits = None, {}
+    for rx, kind in ((UNSIZED_DECL, 'unsized'), (STATIC_DEF, 'static'), (CONST_DEF, 'const')):
         for m in rx.finditer(text):
-            if m.group(3) not in names: continue
+            if m.start() in edits: continue
+            if m.group(3) not in names and not (kind == 'unsized' and ADDR_NAME.match(m.group(3))): continue
             if kind == 'const' and re.search(r'\bextern\b', text[text.rfind('\n', 0, m.start()) + 1:m.start()]): continue
             if spans is None: spans = prepare.scope_spans(text)
             if any(k != 'extern' for k, _ in prepare.scope_chain(spans, m.start())): continue
             new = m.group(1) + ('' if kind == 'static' else 'extern ') + m.group(2)
-            edits.append((m.start(), m.end(), new))
+            edits[m.start()] = (m.start(), m.end(), new)
     if not edits: return text
     out, pos = [], 0
-    for a, b, r in sorted(edits):
+    for a, b, r in sorted(edits.values()):
         if a < pos: continue
         out.append(text[pos:a]); out.append(r); pos = b
         stats['STATIC1'] += 1
@@ -1382,11 +1410,146 @@ def r_specialization_prefix(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- LEX1
+#
+# Tokens MSVC 2008 lexed its own way: the `i64` / `ui64` integer suffixes, a hex literal whose last digit is e/E
+# directly followed by + or - (`char pad2[0xae-0x34]`: one pp-number in standard C++, a subtraction to MSVC) and a
+# string literal directly followed by an identifier (`extern"C"enum`: a C++11 user-defined literal). LEX1 writes the
+# standard spelling of the same tokens: `LL` / `ULL`, a space before the sign, a space after the literal. It also
+# drops the `inline` MSVC accepted next to `__forceinline` (an inline specifier itself on the target).
+
+LEX_TOKENS = re.compile(r'("(?:\\.|[^"\\\n])*")(?=[A-Za-z_])|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|'
+                        r'/\*.*?(?:\*/|\Z)|(?<![\w.])(0[xX][0-9a-fA-F]*[eE])(?=[+-])|'
+                        r'(?<![\w.])((?:0[xX][0-9a-fA-F]+|\d+))([uU]?)[iI]64\b', re.S)
+
+def r_msvc_tokens(path, text, stats):
+    """LEX1: MSVC-only token spellings -> standard ones (see above)."""
+    if '"' not in text and 'i64' not in text and 'I64' not in text and not re.search(r'0[xX][0-9a-fA-F]*[eE][+-]', text):
+        return text
+    out, pos = [], 0
+    for m in LEX_TOKENS.finditer(text):
+        if m.group(1):
+            out.append(text[pos:m.end()]); out.append(' '); pos = m.end()
+        elif m.group(2):
+            out.append(text[pos:m.end()]); out.append(' '); pos = m.end()
+        elif m.group(3):
+            out.append(text[pos:m.start()]); out.append(m.group(3) + ('ULL' if m.group(4) else 'LL')); pos = m.end()
+        else:
+            continue
+        stats['LEX1'] += 1
+    if out:
+        out.append(text[pos:])
+        text = ''.join(out)
+    if '__forceinline' in text:
+        text, n = re.subn(r'^([ \t]*(?:static\s+)?)(?:inline\s+__forceinline|__forceinline\s+inline)\b',
+                          lambda m: m.group(1) + '__forceinline', text, flags=re.M)
+        stats['LEX1'] += n
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- STD1
+#
+# Three units declare the std::abs(float) they call as a static member of a file-scope `struct std` (units.json:
+# ?abs@std@@SAMM@Z -> 0x00408840, the game's fabsf, which 23 other units bind as ?abs@std@@YAMM@Z). Here `std` is the
+# namespace of the C++ headers, so the struct cannot be declared. STD1 replaces such a struct, when every member is
+# a <cmath> function, by `#include <cmath>`: the calls `std::abs(x)` then reach the standard overload, fabsf.
+
+STD_STRUCT = re.compile(r'^struct\s+std\s*\{((?:\s*static\s+[^;{}()]*\([^;{}()]*\)\s*;)+)\s*\}\s*;', re.M)
+STD_MATH = set('abs fabs sqrt floor ceil sin cos tan asin acos atan atan2 exp log log10 pow fmod'.split())
+
+def r_std_struct(path, text, stats):
+    """STD1: a decomp `struct std { static float abs(float); };` at file scope -> `#include <cmath>`."""
+    if 'struct std' not in text: return text
+    spans, out, pos = None, [], 0
+    for m in STD_STRUCT.finditer(text):
+        if spans is None: spans = prepare.scope_spans(text)
+        if prepare.scope_chain(spans, m.start()): continue
+        if not set(re.findall(r'(\w+)\s*\(', m.group(1))) <= STD_MATH: continue
+        out.append(text[pos:m.start()])
+        out.append('#include <cmath> /* fnv-nx STD1 */' + '\n' * m.group(0).count('\n')); pos = m.end()
+        stats['STD1'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
+# ---------------------------------------------------------------------------------------------------------- SPEC3
+#
+# The decomp writes explicit specializations of global class templates inside its per-function namespaces:
+#     namespace fnv_009dfa00 { class PathingRequest {...}; template <> class NiPointer<PathingRequest> { PathingRequest* p; }; }
+# MSVC looked the names in the body up from that namespace. GCC (-fpermissive) makes the specialization a member of
+# the template's namespace and looks them up there, so it finds the global forward declaration of the same name, or
+# nothing. SPEC3 qualifies the names in such a body that the enclosing namespace declares as types before it
+# (`fnv_009dfa00::PathingRequest* p`): the declarations MSVC found.
+
+SPEC3_HEAD = re.compile(r'\btemplate\s*<\s*>\s*(?:class|struct)\s+([A-Za-z_]\w*)\s*<')
+NS_TYPE_DECL = re.compile(r'\b(?:class|struct|union|enum)\s+(?:__declspec\s*\([^()]*(?:\([^()]*\))?[^()]*\)\s*)?'
+                          r'([A-Za-z_]\w*)(?=\s*(?:;|\{|:(?!:)))|\btypedef\b[^;{}]*?\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;')
+BODY_TOKENS = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)|\b[A-Za-z_]\w*\b', re.S)
+
+def _angle_end(text, at):
+    """Index just past the '>' closing the '<' at text[at] (parentheses nest, '->' is not a bracket)."""
+    depth, i, n = 0, at, len(text)
+    while i < n:
+        c = text[i]
+        if c in '<([': depth += 1
+        elif c in ')]': depth -= 1
+        elif c == '>' and text[i - 1] != '-':
+            depth -= 1
+            if depth == 0: return i + 1
+        elif c in ';{}': return -1
+        i += 1
+    return -1
+
+def r_namespace_specializations(path, text, stats):
+    """SPEC3: names in the body of an explicit class specialization written inside a namespace, which that namespace
+    declares as types, get the namespace's qualification (see above)."""
+    if 'namespace' not in text or not SPEC3_HEAD.search(text): return text
+    spans = prepare.scope_spans(text)
+    heads = lambda chain: [h for _, h in chain]
+    decls = {}                                           # namespace path -> [(pos, name)]
+    for m in NS_TYPE_DECL.finditer(text):
+        chain = prepare.scope_chain(spans, m.start())
+        if not chain or any(k != 'namespace' for k, _ in chain): continue
+        decls.setdefault(tuple(heads(chain)), []).append((m.start(), m.group(1) or m.group(2)))
+    edits = []
+    for m in SPEC3_HEAD.finditer(text):
+        chain = prepare.scope_chain(spans, m.start())
+        if not chain or any(k != 'namespace' for k, _ in chain): continue
+        key = tuple(heads(chain))
+        tmpl = m.group(1)
+        if re.search(r'\btemplate\s*<[^<>]*\w[^<>]*>\s*(?:class|struct)\s+' + tmpl + r'\b', text) and any(
+                tuple(heads(prepare.scope_chain(spans, p.start()))) == key
+                for p in re.finditer(r'\btemplate\s*<[^<>]*\w[^<>]*>\s*(?:class|struct)\s+' + tmpl + r'\b', text)):
+            continue                                     # the template is the namespace's own
+        end = _angle_end(text, m.end() - 1)
+        if end < 0: continue
+        brace = re.match(r'[^;{}]*\{', text[end:])
+        if not brace: continue
+        o = end + brace.end() - 1
+        c = prepare.match_brace(text, o)
+        names = {n for p, n in decls.get(key, ()) if p < m.start() and n != tmpl}
+        if not names: continue
+        qual = '::'.join(h.split()[-1] for h in key) + '::'
+        for t in BODY_TOKENS.finditer(text, o, c):
+            w = t.group()
+            if w not in names: continue
+            before = text[max(0, t.start() - 2):t.start()].rstrip()
+            if before.endswith(('::', '->', '.', '~')): continue
+            edits.append((t.start(), qual))
+    if not edits: return text
+    out, pos = [], 0
+    for at, q in sorted(set(edits)):
+        out.append(text[pos:at]); out.append(q); pos = at
+        stats['SPEC3'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
 KEEP_SKIP = re.compile(r'(?:#|//|/\*|template\b|extern\s*"C|namespace\b|typedef\b|using\b|struct\b|class\b|union\b|'
-                       r'enum\b|static_assert\b|FNV_STATIC_ASSERT\b|[{}])')
+                       r'enum\b|static_assert\b|FNV_STATIC_ASSERT\b|[{}]|'
+                       # a tag left in front of a statement inside a body
+                       r'(?:if|for|while|do|switch|return|else|goto|break|continue|case|default|try)\b)')
 
 def r_keep_definitions(path, text, stats):
     """KEEP1: FNVNX_KEEP (__attribute__((used))) in front of every declaration tagged `// @fnv 0x...`, so a definition
@@ -1401,5 +1564,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_math_overloads, r_falloff_traps,
+RULES = [r_unit_renames, r_msvc_tokens, r_std_struct, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_math_overloads, r_falloff_traps,
          r_msvc_base_layout]

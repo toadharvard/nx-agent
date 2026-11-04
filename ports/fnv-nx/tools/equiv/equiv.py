@@ -70,6 +70,9 @@ CLASSES = {
     'DUPINT1': 'neutral',       # one of two integer-only-different prototypes of one address (same callee)
     'TPL2': 'neutral',          # forward declarations of a namespace's function templates (MSVC's lookup)
     'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
+    'SPEC3': 'neutral',         # namespace qualification of names in specializations written inside a namespace
+    'LEX1': 'neutral',          # MSVC token spellings (i64 suffixes, 0xae-0x34, "C"enum) -> standard ones
+    'STD1': 'neutral',          # a decomp `struct std { static float abs(float); }` -> namespace std declarations
     'SPEC2': 'neutral',         # template<> on member definitions of class template specializations
     'NEW4': 'neutral',          # adds <new> where placement new is used
     'ALLOC1': 'platform',       # drops untagged TU-local replacements of the global operator new/delete
