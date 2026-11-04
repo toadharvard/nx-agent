@@ -3068,3 +3068,19 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **found** - The shared sse2neon checkout was gone from the scratch area; it is restored at the pin 2272251c.
 * **checked** - tests/s12/order: 0 failed. tests/s1: 0 failed. tests/s11: ok. Every compile shard rebuilds once
   (the plugin source is in FLAGS_HASH).
+
+### J-0139 | 2026-11-04 | stream: S12-ordering,S15-perf | status: wip | parent: J-0138
+
+* **measured (S12)** - With `toolchain/order/measure.py`, on 280 units in 5 configurations [M]:
+  | configuration | instructions | verdict |
+  |---|---|---|
+  | the build (volatile + right-to-left) | +0.12 % (hot units -0.02 %) | kept |
+  | full TSO | +20.9 % | rejected for 45 fps |
+  | -ftrivial-auto-var-init=zero | +1.2 % | rejected: does not fix W-UNINIT |
+  - Argument order: 81,410 calls are reordered and 256 are left, 230 of them in sse2neon. No size change.
+  - tests/s12/run.py runs the ordering tests as step 7.
+* **open, for S15 (its agent is not running)** - The trailing `dmb ish` of every Interlocked*: 332 sites, mostly
+  NiPointer refcounts. Estimate [E]: ~2.9 ms per frame at 1.02 GHz.
+  - Measure it on the device (PERF.md B1).
+  - Mitigation: inline Interlocked in fnvnx_win32.h.
+  - `tests/s12/order/litmus.cpp` goes into the first hardware run's set (PERF.md section 9).
