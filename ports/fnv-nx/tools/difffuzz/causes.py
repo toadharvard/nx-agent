@@ -496,6 +496,7 @@ def unbound_callees(source, addr):
 
 _VFT = None
 _LINKSYM = None
+_STARTS = []             # sorted original start addresses of every code entry in the address map (extents by bisect)
 _BOUND = set()           # every link_symbol / native_symbol the address map names
 
 
@@ -516,6 +517,7 @@ def _load_addrmap():
     global _VFT, _LINKSYM
     if _VFT is None or _LINKSYM is None:
         _VFT, _LINKSYM = set(), {}
+        del _STARTS[:]
         p = os.environ.get('FNVNX_CAUSES_ADDRMAP')
         if not p:
             try:
@@ -532,6 +534,8 @@ def _load_addrmap():
                     a = int(f[0], 16)
                 except ValueError:
                     continue
+                if f[1] in ('F', 'E', 'C', 'X') and TEXT[0] <= a < TEXT[1]:
+                    _STARTS.append(a)
                 if f[1] == 'V':
                     _VFT.add(a)
                 elif f[2]:
@@ -539,6 +543,7 @@ def _load_addrmap():
                 _BOUND.add(f[2])
                 if len(f) > 3:
                     _BOUND.add(f[3].split('\t', 1)[0])
+            _STARTS.sort()
 
 
 def _is_dtor(sym):
@@ -572,7 +577,38 @@ def load_effects(paths):
                     EFFECTS[os.path.basename(e['file'])] = e
 
 
-def _rule_effects(e, rec=None):
+def function_at(pc):
+    """Original start address of the code entry of the address map that contains `pc`, or None."""
+    import bisect
+    _load_addrmap()
+    i = bisect.bisect_right(_STARTS, pc) - 1
+    return _STARTS[i] if i >= 0 else None
+
+
+# causes whose shape says the native never made the call, or made it with its own code: a callee's store there is
+# the native's own defect, never the harness's interception (V1, tests/v1/test_s13b_callee_store.py C1-C3)
+NOT_INTERCEPTED = ('native-inlined', 'native-early-exit', 'x86-only-store')
+
+
+def intercepted_callee(rec, pc):
+    """The original callee containing x86 `pc` when the native calls it out of line through a name its own object
+    does not define (the harness runs the unit's own functions natively and intercepts only those calls), else
+    None. Without the native object or the address map there is no evidence: None."""
+    try:
+        addr = int((rec or {}).get('address') or '0', 16)
+    except ValueError:
+        return None
+    cs = native_callees((rec or {}).get('source'), addr)
+    callee = function_at(pc)
+    if not cs or callee is None or callee == addr:
+        return None
+    path = os.path.join(_obj_dir(), (rec.get('source') or '').replace('/', '_') + '.o')
+    defined = (_OBJ_CACHE.get(path) or {}).get('_defined', set())
+    names = {'__fnv_%08x' % callee, link_symbol(callee)} - {None, ''}
+    return callee if any(n in cs and n not in defined for n in names) else None
+
+
+def _rule_effects(e, rec=None, cause=None):
     f = e.get('first')
     if f == 'width':
         return 'field-width'
@@ -583,7 +619,8 @@ def _rule_effects(e, rec=None):
             pc = int(((st.get('x86') or {}).get('pc')) or '0', 16)
         except (TypeError, ValueError):
             a = n = pc = 0
-        if n and pc and not st.get('arm') and not a <= pc < a + n:
+        if (n and pc and not st.get('arm') and not a <= pc < a + n and cause not in NOT_INTERCEPTED
+                and intercepted_callee(rec, pc) is not None):
             return 'oracle-callee-store'      # the store is made by a callee the oracle runs, the native intercepts
         w = st.get('word') or {}
         x, a = str(w.get('x86') or ''), str(w.get('arm') or '')
@@ -632,7 +669,7 @@ def _with_effects(rec, cause):
     if cause not in TRIAGE_REFINABLE:
         return cause
     e = EFFECTS.get(os.path.basename(rec.get('_file') or rec.get('_p') or '')) if EFFECTS else None
-    got = _rule_effects(e, rec) if e else None
+    got = _rule_effects(e, rec, cause) if e else None
     if got:
         return got
     try:
