@@ -5,7 +5,7 @@
 
 Each <name>.vert.glsl / <name>.frag.glsl is one shader, or one per variant when the file has a line
     // nx-variants: <suffix>=<DEFINE>[,<DEFINE>...] <suffix>=...      (suffix "-" = no suffix, no defines: "-=")
-which builds <name>_<suffix> with "#define DEFINE 1" lines after #version. `#include "file"` lines are expanded
+which builds <name>_<suffix> with "#define DEFINE 1" lines after #version ("DEFINE=VALUE" defines a value). `#include "file"` lines are expanded
 textually (uam and GL have no include support). Outputs in <out dir>:
   <name>.<stage>.glsl   expanded GLSL 4.60 (deko3d flavour: per-stage binding slots)
   <name>.<stage>.dksh   uam output (only with --uam, or $UAM)
@@ -92,7 +92,8 @@ def main():
             text = "".join(lines)
             if defs:
                 i = text.index("\n", text.index("#version")) + 1
-                text = text[:i] + "".join("#define %s\n" % (d if " " in d else d + " 1") for d in defs) + text[i:]
+                text = text[:i] + "".join("#define %s\n" % (d if " " in d else d.replace("=", " ", 1) if "=" in d else d + " 1")
+                                          for d in defs) + text[i:]
             shaders.append(build_one(out, name, stage, text, uam))
 
     with open(os.path.join(out, "nx_shaders.h"), "w") as h:

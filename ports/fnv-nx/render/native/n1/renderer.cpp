@@ -261,8 +261,26 @@ bool Renderer::Render(const Draw& d) {
     uint16_t ps = d.ps;
     bool needEpi = true;
     if (d.ps && !EpiKnown(d.ps)) LearnEpilogueVariants(d.ps);
+    // lit family: static light permutation (directional first, points padded to 1/2/4/8 with zero-colour lights)
+    int litDir = -1, litPoints = 0, litPad = 0;
+    if (permutations_ && d.ps && d.ubo && d.uboSize >= sizeof(NxLitDraw) && (d.ps == litBase_[0] || d.ps == litBase_[1])) {
+        const NxLitDraw* L = (const NxLitDraw*)d.ubo;
+        const uint32_t n = L->lightCount < 8 ? L->lightCount : 8;
+        int dirs = 0;
+        for (uint32_t i = 0; i < n; i++) dirs += L->lights[i].color[3] > 0.5f;
+        if (dirs <= 1) {
+            static const int kPad[5] = {0, 1, 2, 4, 8};
+            const int pts = (int)n - dirs;
+            int pi = 0;
+            while (pi < 4 && kPad[pi] < pts) pi++;
+            uint16_t v = LitPermutation(d.ps == litBase_[1], dirs, pi);
+            if (v) { ps = v; litDir = dirs; litPoints = pts; litPad = kPad[pi] - (dirs && pi == 4 ? 1 : 0); }
+        }
+    }
+    const uint16_t epiBase = ps;
+    if (ps != d.ps && !EpiKnown(ps)) LearnEpilogueVariants(ps);
     for (uint32_t i = 0; i < nEpi_; i++)
-        if (epi_[i].base == d.ps) {
+        if (epi_[i].base == epiBase) {
             const bool at = (r.shaderBits >> NXSB_ALPHATEST) & 1, fog = ((r.shaderBits >> NXSB_FOG) & 7) != 0;
             const uint16_t v = !at && !fog ? epi_[i].e0 : at && !fog ? epi_[i].ea : !at && fog ? epi_[i].ef : 0;
             if (v) { ps = v; needEpi = at || fog; }
@@ -283,6 +301,16 @@ bool Renderer::Render(const Draw& d) {
     if (!u) return false;
     memset(u, 0, 512);
     if (d.ubo) memcpy(u, d.ubo, d.uboSize > 512 ? 512 : d.uboSize);
+    if (litDir >= 0) {   // the permutation's light order: [directional], points..., zero-colour padding
+        NxLitDraw* lu = (NxLitDraw*)u;
+        const NxLitDraw* L = (const NxLitDraw*)d.ubo;
+        const uint32_t n = L->lightCount < 8 ? L->lightCount : 8;
+        uint32_t o = 0;
+        for (uint32_t i = 0; i < n; i++) if (L->lights[i].color[3] > 0.5f) lu->lights[o++] = L->lights[i];
+        for (uint32_t i = 0; i < n; i++) if (!(L->lights[i].color[3] > 0.5f)) lu->lights[o++] = L->lights[i];
+        for (; o < (uint32_t)(litDir + litPad) && o < 8; o++) { memset(&lu->lights[o], 0, sizeof lu->lights[o]); lu->lights[o].posRange[3] = 1.0f; }
+        (void)litPoints;
+    }
     if (needEpi) {
         NxEpilogue* e = frame_.Epilogue(p);
         if (e) nx_epilogue_fill(e, &r.dyn, r.shaderBits);
@@ -327,6 +355,22 @@ void Renderer::LearnEpilogueVariants(uint16_t ps) {
     }
     if (e.e0 || e.ea || e.ef) epi_[nEpi_++] = e;
     else if (nNoEpi_ < sizeof noEpi_ / sizeof noEpi_[0]) noEpi_[nNoEpi_++] = ps;
+    if (blob >= 0 && !strcmp(nx_shader_blobs[blob].name, "lit")) litBase_[0] = ps;
+    if (blob >= 0 && !strcmp(nx_shader_blobs[blob].name, "lit_spec")) litBase_[1] = ps;
+}
+
+uint16_t Renderer::LitPermutation(int spec, int dir, int pi) {
+    uint16_t& v = litVar_[spec][dir][pi];
+    if (!v) {
+        static const int kPad[5] = {0, 1, 2, 4, 8};
+        int p = dir && pi == 4 ? 7 : kPad[pi];
+        char n[64];
+        if (!dir && !p) { v = 0xFFFF; return 0; }   // no lights: the dynamic shader (loop count 0) is as cheap
+        snprintf(n, sizeof n, "%s_d%dp%d", spec ? "lit_spec" : "lit", dir, pi == 4 ? 8 : p);
+        uint16_t id = BlobShader(be_, n, NxStage_Fragment);
+        v = id ? id : 0xFFFF;
+    }
+    return v == 0xFFFF ? 0 : v;
 }
 
 uint16_t Renderer::FragmentShader(const char* name) {

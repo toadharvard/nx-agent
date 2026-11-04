@@ -15,7 +15,7 @@ render/shaders/build.sh [--tests]        # clones pinned MojoShader + uam, appli
 build/host/sdp2dksh -o OUT [--glsl] shaderpackage*.sdp   # OUT/<hash>.dksh, <hash>.json, index.tsv
 build/host/sdp2dksh --ctab shaderpackage*.sdp            # TSV: package name hash constant set reg count class type rows columns elements
 build/host/sdp2dksh --list shaderpackage019.sdp
-tests/s6b/run.py                          # corpus + unit tests, prints the matrix
+tests/s6b/run.py                          # corpus + unit tests (+ exec scenes on V6n's oracle), prints the matrix
 ```
 
 Pins (build.sh): MojoShader `ad5dff8` (zlib), uam `5a5afc2` (Mesa-derived, MIT-style), and for tests
@@ -70,10 +70,40 @@ SDP reader/writer: `include/fnvnx_sdp.h`, format in [`SDP.md`](SDP.md).
 * ps_1_4 `texld` / `texcrd` (incl. `_dz`/`_dw`), vs_1_1 `mov a0` (float -> int, floor), ps_1_x `t#`
   inputs, vs < 3.0 `oFog`/`oPts` indices, `setp` write masks, the epilogue placement with subroutines.
 
+## D3D9 semantics fixed after V6n's whole-package fuzz (RENDER_VERIFY §7 P2-P5)
+
+All in the `glsldk` profile (other MojoShader profiles unchanged); unit + execution tests in `tests/s6b`.
+
+* **Centroid** (P5): `dcl_centroid t#/v#` (ps_2_x) and `dcl_<usage>_centroid v#` (ps_3_0) read the input once
+  with `interpolateAtCentroid()`: the same sampling as a `centroid in` declaration, which Mesa 25's GL linker (the
+  V6n parity target) rejects for some explicit-location inputs ("no matching output"). VS outputs need no
+  qualifier (GLSL >= 4.30, and deko3d compiles the stages separately).
+* **Relative addressing** (P5): `c[a0 + n]` outside every CTAB array, or without a CTAB, reads the constant UBO by
+  register through `vs_dk_relc(i)` (def'd values overlaid, as Nine/wined3d load them into the constant file;
+  out of range -> 0). vs_3_0 `v[a0/aL + n]` and ps_3_0 `v[aL + n]` read a copied input array (undeclared ->
+  (0,0,0,1) as Nine's `v_consecutive`); vs_3_0 `o[a0/aL + n]` writes `vs_o_arr`, copied to the outputs in the
+  epilogue (Nine 20.1 itself ignores the index on outputs: not executable against the oracle). The front end
+  (bytecode profile) accepts the same.
+* **Colour saturation** (P2): vs < 3.0 `oD0`/`oD1` (and `oFog`) clamped to [0, 1] in the epilogue, written
+  components only (the registers are write-only, so this equals clamping each write).
+* **Numerics** (P3, P4), as Nine gives them on a driver without `TGSI_MUL_ZERO_WINS` (softpipe):
+  `log`/`logp` = max(-FLT_MAX, log2|x|), `rcp` clamped to +-FLT_MAX/2 (rcp(+-0) = +-FLT_MAX/2), `rsq` =
+  min(FLT_MAX, 1/sqrt|x|), `nrm` = v * min(FLT_MAX, rsq(dot3(v))) (3-component length also for a .w write mask;
+  nrm(0) = 0). Zero is tested explicitly (llvmpipe's inversesqrt(0) is NaN). `min`/`max` are written as TGSI's
+  and D3D9's `a < b ? a : b` / `a > b ? a : b` (a NaN operand yields the second), not GLSL min()/max().
+* Also: `def` literals printed exactly (`%.9g`; upstream printed 9 fixed decimals, so 1e-30 became 0 and
+  1.2345678e-5 kept 5 digits), `loop aL, i#` runs i#.x times with any step (upstream's bound `aL < x + y` broke
+  step != 1 and never ended for step 0), vs_1_1 `expp` = TGSI EXP (2^floor, frac, 2^x, 1) as in Nine, vs_3_0
+  `FOG` output a vec4 varying at location 18 like vs < 3.0.
+* Not done: D3D9 hardware's `0 * anything = 0` (Nine enables it only with `TGSI_MUL_ZERO_WINS`; softpipe, the
+  oracle, does not have it, so matching hardware would move away from the oracle; on deko3d it would need
+  nouveau's `dnz` multiply flag through uam, not expressible in GLSL). GLSL compilers may reassociate
+  (`a*M + a*M` -> `a*(M+M)`), which the bytecode does not: visible only with FLT_MAX-sized values.
+
 ## Known gaps
 
 * MojoShader GLSL does not implement `texreg2rgb`, `texdp3tex`, `texdp3`, `texm3x2depth` (ps_1_2/1_3);
-  relative addressing of input registers; centroid; `setp` with scalar sources into a wider mask.
+  `setp` with scalar sources into a wider mask.
   Translation fails with a clear error (ps12_texdp3tex in the corpus checks this).
 * ps_1_x sampler types are not declared in the bytecode: `tex`/`texld` assume 2D (cube only where the
   opcode implies it). D3D picks the type from the bound texture; the front end needs a per-shader sampler
@@ -82,7 +112,8 @@ SDP reader/writer: `include/fnvnx_sdp.h`, format in [`SDP.md`](SDP.md).
   COLOR0-1, TEXCOORD0-7, TANGENT0, BINORMAL0 are mapped; other usages fail translation.
 * mojoshader_assembler (tests only) lacks predication and SM1 relative addressing (patched in
   `tests/s6b/mojoshader_assembler.patch`) and still rejects predicate swizzles and `breakp p0.x`.
-* Semantics are checked by compiling and by text expectations, not by executing: no GPU/reference run.
+* Semantics are checked by compiling, by text expectations and (when V6n's `build/v6n/bin` exists) by executing
+  `tests/s6b/exec` scenes on Nine vs V6n's GL executor; no deko3d run.
 * User clip planes (`gl_ClipDistance` from `SetClipPlane`), sRGB, point sprites and vertex-texture
   sampler numbering (D3DVERTEXTEXTURESAMPLER0 = 257) are front-end work, not in the profile yet.
 * uam reports GLSL errors on stderr only (the library returns a generic error).

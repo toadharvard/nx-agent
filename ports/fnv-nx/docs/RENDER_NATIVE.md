@@ -485,6 +485,47 @@ the permutation uses it. Image space (`menubg`) never had an epilogue. Maxwell c
 The permutations are the same source with the branches folded, so results are identical (all scenes, the N1
 self-test and V6n's c69 cases unchanged). The N0 scenes still use the full runtime shaders (they exercise it).
 
+### 4.4 lit pass: static light permutations and the fp16 analysis (P6n hotspot 2)
+
+**Permutations.** `lit[_spec]_d<D>p<P>` (D = 1: light 0 is the directional light; P = 1, 2, 4, 8 point lights,
+7 with a directional one) unroll the light loop with constant indices: no loop counter, no per-light type branch,
+and constant-bank operands instead of indexed UBO loads. `nx::Renderer::Render` picks the smallest permutation that
+holds the draw's lights (at most one directional), copies the lights into the slice in the permutation's order
+(directional first, then points, then zero-colour padding with range 1, which contributes exactly 0), and then the
+epilogue permutation of §4.3 on top. More than one directional light, or no lights, keeps the dynamic shader.
+Code (uam, approximate Maxwell instructions; the dynamic shader executes its ~110-instruction loop body once per
+light, which is how P6n's ~411 instructions per pixel arise):
+
+| shader | static size | executed for 1 directional + 2 points |
+|---|---|---|
+| lit_spec (dynamic, runtime epilogue) | ~270 | ~400 (loop x 3 + epilogue) |
+| lit_spec__e0 (dynamic loop) | ~174 | ~300 |
+| **lit_spec_d1p2__e0** | ~186 | **~186** |
+| lit_spec_d1p1__e0 / _d1p4__e0 | ~138 / ~276 | same as size |
+| lit_d1p2__e0 (no specular) | ~108 | ~108 |
+
+Results are unchanged: the N1 self-test draws 1 directional + 2 point lights (given point first) through the
+dynamic and the static shader, identical within 1/255 (exact on GL); the `lit` scene and its golden are unchanged
+(the point-light maths now uses `dot(dv, dv)` and `inversesqrt`, the same values).
+
+**fp16 precision analysis** (what may run at half precision without visible change on 8-bit targets):
+
+| quantity | range | fp16 error | verdict |
+|---|---|---|---|
+| world positions, `lightPos - world` | FNV worldspace up to ~10^5 units | ~32 units at 4x10^4, overflow at 65504 | **highp** |
+| N, L, V, H (unit vectors after normalisation) | [-1, 1] | 2^-11 ~ 4.9e-4 relative | mediump: N.L error ~1e-3, < 0.3/255 |
+| attenuation 1 - d^2/r^2 (d^2 computed highp) | [0, 1] | 4.9e-4 | mediump |
+| light / ambient sums (rgb) | 0 .. ~8 | 4.9e-4 relative, ~0.004 at 8 | mediump: < 1/255 after the clamp to [0, 1] in the output |
+| specular pow(N.H, power), power up to ~100 | [0, 1] | relative error x power: ~5 % at 100 | **highp** (mediump only for power <= 16: < 1/255) |
+| texture colour, vertex colour | [0, 1] | 4.9e-4 | mediump |
+
+The shader marks those quantities `mediump`. **Today that changes nothing:** desktop GL ignores precision
+qualifiers, and uam compiles GLSL through TGSI, which has no 16-bit types, so no FP16 (HFMA2) code is generated
+(checked: a `mediump` and a `highp` test shader produce identical Maxwell code; `GL_EXT_shader_explicit_arithmetic_types_float16`
+is rejected). Getting real fp16 needs a uam change (an fp16-aware path to the Maxwell backend), which belongs to
+`render/shaders/uam.patch` (S6b): request filed in the S6n report. Until then the permutations are the lit pass's
+gain, and V6n stays exact because the arithmetic is unchanged.
+
 ### 4.1 N2 skinning (started)
 
 Gamebryo skins on the GPU per NiSkinPartition: each partition has its bone list (the palette), up to 4 weights and

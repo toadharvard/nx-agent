@@ -1,0 +1,4 @@
+ps_3_0
+dcl_texcoord0 v0
+dcl_texcoord1_centroid v1
+add oC0, v0, v1

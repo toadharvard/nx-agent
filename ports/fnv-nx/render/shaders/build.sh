@@ -24,16 +24,18 @@ ASM_URL=https://github.com/icculus/mojoshader_assembler.git
 ASM_PIN=c4b96e2ff21afbbbb844d933fe96936e6aeeea3b    # 2026-08-31
 
 fetch() { # name url pin [patch]
-    local dir="$DEPS/$1"
+    local dir="$DEPS/$1" want=""
     if [[ ! -d "$dir/.git" ]]; then
         git clone -q "$2" "$dir"
     fi
-    if [[ "$(git -C "$dir" rev-parse HEAD)" != "$3" || -n "${4:-}" && ! -f "$dir/.fnvnx-patched" ]]; then
+    # the marker holds the hash of the applied patch, so an edited patch is re-applied
+    [[ -n "${4:-}" ]] && want="$(sha256sum "$4" | cut -d' ' -f1)"
+    if [[ "$(git -C "$dir" rev-parse HEAD)" != "$3" || "$(cat "$dir/.fnvnx-patched" 2>/dev/null)" != "$want" ]]; then
         git -C "$dir" checkout -q -f "$3"
         git -C "$dir" clean -qfdx -e build
         if [[ -n "${4:-}" ]]; then
             git -C "$dir" apply "$4"
-            touch "$dir/.fnvnx-patched"
+            echo "$want" > "$dir/.fnvnx-patched"
         fi
     fi
 }
