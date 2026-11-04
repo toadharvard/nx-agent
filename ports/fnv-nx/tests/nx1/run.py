@@ -2,7 +2,7 @@
 """NX1 device-readiness checks: everything that can fail on a real Switch, checked without one.
 
     python3 -I tests/nx1/run.py [--build <full build dir>] [--sd <SD tree>] [--nro <fnv.nro> --nro-elf <elf>]
-                                [--guest-elf <fnvnx.elf>] [--host-elf <host.elf>] [--boot-meta <meta.json>]
+                                [--guest-elf <fnvnx.elf>] [--host-elf <host.elf>] [--boot-json <boot_summary.json>]
                                 [--ref-bin <dir>] [--json out.json] [--only N[,N]]
 
 METRIC (stream NX1-nro): the number of checks that are not `pass`. A check is `open` when its script does not
@@ -45,7 +45,7 @@ class Art:
         self.nro_elf = pick(a.nro_elf, "package/nro/fnv.elf")
         self.guest_elf = pick(a.guest_elf, "guest/fnvnx.elf")
         self.host_elf = pick(a.host_elf, "package/host/host.elf", "host/host.elf")
-        self.boot_meta = pick(a.boot_meta, "boot/meta.json", "meta.json")
+        self.boot_json = pick(a.boot_json, "boot/boot_summary.json")
         self.ref_bin = a.ref_bin or os.environ.get("NX1_REF_BIN")
         self.root = ROOT
 
@@ -94,7 +94,8 @@ def not_yet(what):
 
 CHECKS = [
     (1, "nro", check_nro),
-    (2, "memory", not_yet("peak heap + image + GPU pools vs the title-takeover budget, applet refusal")),
+    (2, "memory", script("check_mem.py", lambda a: ["--guest-elf", a.guest_elf], lambda a: ["--boot-json", a.boot_json],
+                         need=["guest_elf", "boot_json"])),
     (3, "svc", script("check_svc.py", lambda a: ["--guest-elf", a.guest_elf], lambda a: ["--host-elf", a.host_elf],
                       lambda a: ["--nro-elf", a.nro_elf], need=["guest_elf", "host_elf", "nro_elf"])),
     (4, "threads", script("check_threads.py", lambda a: ["--host-elf", a.host_elf] if a.host_elf else [])),
@@ -107,7 +108,7 @@ CHECKS = [
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    for o in ("build", "sd", "nro", "nro-elf", "guest-elf", "host-elf", "boot-meta", "ref-bin", "json", "only"):
+    for o in ("build", "sd", "nro", "nro-elf", "guest-elf", "host-elf", "boot-json", "ref-bin", "json", "only"):
         ap.add_argument("--" + o)
     a = ap.parse_args(argv)
     art = Art(a)
