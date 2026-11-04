@@ -56,7 +56,8 @@ caches by copying `out/cache`, `out/layouts.tsv`, `out/vtables` of the previous 
 atomically (`ln -sfn run-N latest.tmp && mv -T latest.tmp latest`) once `check` has passed. Every step can be
 rerun after an interruption: `compile.sh` keeps up-to-date objects, the probe keeps its per-unit compiles
 (`probe/*.done.json`) and saves `cache.json` after each round, `apply` rewrites `fixed/` object by object; a driver
-only needs to remember which steps finished.
+only needs to remember which steps finished. Every run's summary states the branch commit its tree was prepared
+from (a tree prepared before a rules change silently lacks it: f10's tree predated S1 round 7).
 
 ## Symbols and files
 
@@ -609,6 +610,17 @@ objects: 0 multiple definitions, **8,027 undefined names**:
 | C `unresolved` | 202 | C names and decomp data no unit defines |
 | platform `provider` / `import` | 287 | defined by S4's platform objects (162) and the import layer (125), not in this link |
 | C runtime / other | 69 | `extern-text` data 28, GCC runtime 24, others 17 |
+
+### Ninth round (tree from branch commit 0c630cf: S1 round 7, FALL1 initializer fix; S2c)
+
+Prepared from `0c630cf` (FALL1 1,171 edits, was 12,004; units_renames 37 + 82), compiled: 2,748 objects of 2,978
+units (230 fail). WinMain's units `blk_00ae0000_od`, `blk_00c20000_od`, `blk_004a0000_od`, `nicontrollermanager`
+and `main.cpp` compile; 0x00af3020 (S5's boot frontier) is an F entry now. No `__fnvnx_dyninit_` / `_dynexit_`
+function contains a trap (6,265 / 4,692; in f10's tree every one did). 235,559 references resolved by address; G 95
+(all with D1 and D0); S13 `check_rebind.py` 0, S5 `pcrel_abs.py` 0 image symbols (59 `__dso_handle`, the trial
+link's `--defsym`). Trial link of 3,497 objects: 0 multiple definitions, **7,842 undefined names**: `__fnv_` 4,574,
+C++ 2,701 (`unresolved` 1,619, `unresolved-ctor-dtor` 779, `extern-text` 152, special 112, runtime / other 39),
+C / platform 567 (`unresolved` 203, `provider` 165, `import` 130, others 69).
 
 ## Open problems
 
