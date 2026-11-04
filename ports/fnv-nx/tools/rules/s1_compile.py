@@ -2,6 +2,7 @@
 
 Each rule is fn(path, text, stats) -> text (see tools/rules/README.md); ids are cited in the journal.
 """
+import bisect
 import os
 import re
 import sys
@@ -831,6 +832,9 @@ def _postfix_end(text, i):
             if not mm: return j, call
             j, call = k + mm.end(), False
 
+# comments, and the string / character literals that may hold `//` or `/*` (only the comments are used)
+_CODE_LEXEME = re.compile(r'"(?:\\.|[^"\\\n])*"|' + r"'(?:\\.|[^'\\\n])*'" + r'|//[^\n]*|/\*.*?\*/', re.S)
+
 NAMED_REF_CAST = re.compile(r'\b(?:static_cast|reinterpret_cast)\s*<\s*((?:const\s+)?(?:volatile\s+)?(?:::)?'
                             r'[A-Za-z_][\w:<>, \t\*]*?&)\s*>\s*\(')
 LVALUE_LIKE = re.compile(r'^\s*(?:\*\s*)*(?:::)?[A-Za-z_]\w*(?:\s*(?:::|\.|->)\s*~?[A-Za-z_]\w*|\s*\[[^\[\]]*\])*\s*$')
@@ -843,7 +847,14 @@ def r_ref_cast_temporaries(path, text, stats):
     An operand that already is an lvalue is returned unchanged."""
     if '&)' not in text and '&>' not in text and '& >' not in text: return text
     edits = []
+    # (a cast spelled in a comment is not code: `// f(const T&)` above a declaration `T();` is no cast of it)
+    comments = [c.span() for c in _CODE_LEXEME.finditer(text) if c.group().startswith('/')]
+    starts = [a for a, _ in comments]
+    def in_comment(i):
+        k = bisect.bisect_right(starts, i) - 1
+        return k >= 0 and i < comments[k][1]
     for m in REF_CAST_CALL.finditer(text):
+        if in_comment(m.start()): continue
         if re.search(r'[\w\)\]]\s*$', text[max(0, m.start() - 20):m.start()]) and not re.search(
                 r'\b(?:return|case|throw)\s*$', text[max(0, m.start() - 20):m.start()]):
             continue                                                  # a declarator (`void(__cdecl*&)(...)`), a call
@@ -854,6 +865,7 @@ def r_ref_cast_temporaries(path, text, stats):
         if not call: continue                                         # an lvalue (a name, a member, an element)
         edits.append((m.end(), close))
     for m in NAMED_REF_CAST.finditer(text):
+        if in_comment(m.start()): continue
         close = _call_end(text, m.end() - 1)
         if LVALUE_LIKE.match(text[m.end():close - 1]): continue
         edits.append((m.end(), close - 1))
@@ -955,7 +967,9 @@ def r_unit_renames(path, text, stats):
 # explicit specialization after implicit instantiation. The primary template only declares those members, so an
 # early declaration `template <> R T<A>::m(P);` gives exactly MSVC's meaning: SPEC1 puts one right after the primary
 # template's definition (when it is in the same file) or after the file's last #include before the definition, with
-# typedef names of the template arguments that are declared later in the file expanded.
+# typedef names of the template arguments that are declared later in the file expanded. A member defined through a
+# typedef name of the specialization (`typedef T<A> N;` ... `void N::m(...) { ... }`, T a class template of the
+# file) is the same member T<A>::m and gets the same declaration.
 
 SPEC_DEF = re.compile(r'^([ \t]*)(template\s*<\s*>\s*)?((?:FNVNX_KEEP\s+)?(?:(?:inline|static|virtual)\s+)*)'
                       r'((?:[\w:<>,\*& \t]+?[\s\*&])?)'                    # return type (none for constructors)
@@ -978,12 +992,48 @@ SPEC1_FILES = ('unmapped/threadsafestructures.cpp', 'bsmain/threadsafestructures
                'bsshader/shadowscenelight.cpp', 'fallout/ai/movement/actormover.cpp', 'bscore/bssimplearray.h',
                'speedtree/projectedshadow_ob1_variant.cpp')
 
+class _SpecVia:
+    """a member definition through a typedef name of a specialization, read like a SPEC_DEF match"""
+    def __init__(self, m, tmpl, args):
+        self._m, self._g = m, {5: tmpl, 6: args}
+    def start(self): return self._m.start()
+    def group(self, i): return self._g[i] if i in self._g else self._m.group({7: 5, 8: 6, 9: 7}.get(i, i))
+
+def _typedef_spec_defs(text):
+    """member definitions `N::m(...)` where the file declares `typedef T<A> N;` at the start of a line, T being a
+    class template the file defines: they define the members of the specialization T<A>, like SPEC_DEF's"""
+    out = []
+    for t in re.finditer(r'^[ \t]*typedef\s+([A-Za-z_]\w*)\s*<', text, re.M):
+        depth, i = 1, t.end()
+        while i < len(text) and depth:
+            if text[i] == '<': depth += 1
+            elif text[i] == '>': depth -= 1
+            elif text[i] in ';{}()': break
+            i += 1
+        if depth: continue
+        n = re.match(r'\s*([A-Za-z_]\w*)\s*;', text[i:])
+        if not n or not re.search(r'\btemplate\s*<[^{};]*>\s*(?:class|struct)\s+%s\s*(?::[^;{}]*)?\{'
+                                  % re.escape(t.group(1)), text[:t.start()]):
+            continue
+        args = re.sub(r'\s+', ' ', text[t.end():i - 1]).strip()
+        for m in re.finditer(r'^([ \t]*)(template\s*<\s*>\s*)?((?:FNVNX_KEEP\s+)?(?:(?:inline|static|virtual)\s+)*)'
+                             r'((?:[\w:<>,\*& \t]+?[\s\*&])?)\b%s\s*::\s*(~?\w+)\s*\(([^;{}]*)\)\s*(const\s*)?(?=[{;:])'
+                             % re.escape(n.group(1)), text[i:], re.M):
+            out.append(_SpecVia(_Shifted(m, i), t.group(1), args))
+    return out
+
+class _Shifted:
+    """a match of a slice text[off:], with positions in text"""
+    def __init__(self, m, off): self._m, self._off = m, off
+    def start(self): return self._m.start() + self._off
+    def group(self, i): return self._m.group(i)
+
 def r_specialization_decls(path, text, stats):
     """SPEC1: declare explicit specializations of class template members before their first use (see above)."""
-    if '>::' not in text or not path.replace(os.sep, '/').endswith(tuple('/src/' + f for f in SPEC1_FILES)):
+    if '::' not in text or not path.replace(os.sep, '/').endswith(tuple('/src/' + f for f in SPEC1_FILES)):
         return text
     spans, edits = None, []
-    for m in SPEC_DEF.finditer(text):
+    for m in sorted(list(SPEC_DEF.finditer(text)) + _typedef_spec_defs(text), key=lambda m: m.start()):
         tmpl, args, member = m.group(5), m.group(6).strip(), m.group(7)
         if tmpl in ('static_cast', 'reinterpret_cast', 'const_cast', 'dynamic_cast'): continue
         if not args or any(TEMPLATE_PARAM_LIKE.match(a) for a in args.split(',')): continue
@@ -1912,7 +1962,9 @@ def r_namespace_specializations(path, text, stats):
 # these units (middlehighprocess, tileimage, grenadeprojectile, skytexturemanager...), where the pointee is only
 # forward-declared, or declared without DecRefCount, in the whole unit. DTOR1 declares the explicit specialization
 # `template <> NiPointer<T>::~NiPointer();` for each such T in front of the unit's first line of code, after its
-# includes: nothing in the unit instantiates the destructor then, and a use of it is a call of the game's destructor
+# includes (at the end of a unit that is only includes, a header unit such as middlehighprocess_h_unit: GCC
+# instantiates the destructor at the end of the unit, so a declaration there comes before it): nothing in the unit
+# instantiates the destructor then, and a use of it is a call of the game's destructor
 # (the link binds it like any other declared function, e.g. ??1?$NiPointer@VQueuedFile@@@@QAE@XZ -> 0x0044cbf0).
 
 NIPTR_MEMBER = re.compile(r'\bNiPointer\s*<\s*([A-Za-z_]\w*)\s*>\s*[A-Za-z_]\w*\s*(?:\[[^\]]*\]\s*)?;')
@@ -1949,7 +2001,7 @@ def r_incomplete_pointee_dtors(path, text, stats):
         elif s and not s.startswith('//'):
             lead_end = pos; break
         pos += len(line) + 1
-    if lead_end is None: return text
+    if lead_end is None: lead_end = len(text)              # a unit of includes only (a header unit): after them
     whole = _closure(path, text)
     alltext = '\n'.join(t for _, t in whole)
     if 'NiPointer' not in alltext or not NIPTR_DTOR.search(alltext): return text
@@ -1992,6 +2044,7 @@ def r_incomplete_pointee_dtors(path, text, stats):
         out.append('template <> NiPointer<%s>::~NiPointer();' % t)
     if not out: return text
     stats['DTOR1'] += len(out)
+    if lead_end == len(text) and not text.endswith('\n'): text += '\n'; lead_end += 1
     return text[:lead_end] + ' '.join(out) + ' /* fnv-nx DTOR1 */ ' + text[lead_end:]
 
 # ---------------------------------------------------------------------------------------------------------- STL1
@@ -2071,7 +2124,10 @@ def r_msvc_library_internals(path, text, stats):
 # TPL1 writes `this->name` for the uses, in the member function bodies of such a class template (in the class or
 # out of it), of names the base declares as members (its bases' too, as far as the file defines them) and that the
 # class itself, the function's parameters or its locals do not declare: the members MSVC found. Type names,
-# enumerators and macros are left alone, and so are static member functions and friends.
+# enumerators and macros are left alone, and so are static member functions and friends. An out-of-class member
+# `template <class A, class T> R C<A, T>::f(...) { ... }` of a class template C that only an included header defines
+# (bsaudiodefines.h's NiTPointerListBase<A, T>::RemoveHead) gets the same, from that header's single definition of C
+# and its dependent bases; explicit and partial specializations (arguments other than the parameters) are left.
 
 TPL1_CLASS = re.compile(r'\btemplate\s*<((?:[^<>]|<[^<>]*>)*)>\s*(?:struct|class)\s+'
                         r'(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)?([A-Za-z_]\w*)\s*(?::\s*([^{};]*))?\{')
@@ -2134,7 +2190,7 @@ _TPL1_SPANS = {}
 
 def r_dependent_base_members(path, text, stats):
     """TPL1: `this->` in front of the members of a dependent base used by plain name in a class template (see above)."""
-    if 'template' not in text or not TPL1_CLASS.search(text): return text
+    if 'template' not in text or not (TPL1_CLASS.search(text) or TPL1_OUT_DEF.search(text)): return text
     spans = prepare.scope_spans(text)
     parent, stack = {}, []
     for sp in spans:                                       # innermost enclosing brace of every brace
@@ -2213,7 +2269,29 @@ def r_dependent_base_members(path, text, stats):
             own_v, own_t = _members(_flat_body(text, o, c), name)
             names = dep - dep_types - own_v - own_t - params - {name}
             if names: fixes[o] = (name, names)
-    if not fixes: return text
+    def included_template(name):
+        """names to qualify in an out-of-class member of class template `name` that only included headers define: the
+        members of its dependent bases, minus its own (None when not exactly one consistent such definition)"""
+        if '#include' not in text: return None
+        if not closure: closure.extend(_closure(path, text)[1:] or [None])
+        found = set()
+        for ft in closure:
+            if ft is None or name not in ft[1]: continue
+            f, t = ft
+            for m in TPL1_CLASS.finditer(t):
+                if m.group(2) != name: continue
+                if f not in _TPL1_SPANS: _TPL1_SPANS[f] = prepare.scope_spans(t)
+                if prepare.scope_chain(_TPL1_SPANS[f], m.start()): continue
+                o = m.end() - 1
+                ps = set(re.findall(r'(?:class|typename|int|unsigned|bool|short|long|char)\s+([A-Za-z_]\w*)', m.group(1)))
+                dep, dep_types = set(), set()
+                for bname, args in _base_specs(m.group(3) or ''):
+                    if args is None or not set(re.findall(r'[A-Za-z_]\w*', args)) & ps: continue
+                    v, ty = included_members(bname)
+                    dep |= v; dep_types |= ty
+                own_v, own_t = _members(_flat_body(t, o, prepare.match_brace(t, o)), name)
+                found.add(frozenset(dep - dep_types - own_v - own_t - ps - {name}))
+        return set(next(iter(found))) if len(found) == 1 and next(iter(found)) else None
     bodies = []                                            # (body open, body close, head, names)
     for fo, fc, k, h in spans:
         if k != 'function' or parent.get(fo) not in fixes: continue
@@ -2222,12 +2300,23 @@ def r_dependent_base_members(path, text, stats):
     by_name = {}
     for o, (name, names) in fixes.items(): by_name.setdefault(name, []).append(names)
     for m in TPL1_OUT_DEF.finditer(text):
-        if len(by_name.get(m.group(2), ())) != 1 or len(classes.get(m.group(2), ())) != 1: continue
+        if m.group(2) in classes:
+            if len(by_name.get(m.group(2), ())) != 1 or len(classes[m.group(2)]) != 1: continue
+            names = by_name[m.group(2)][0]
+        else:                                              # the class template lives in an included header
+            # only the member of the primary template, its own parameters as the arguments (not a specialization)
+            own = re.findall(r'(?:class|typename)\s+([A-Za-z_]\w*)\s*(?=[,>]|$)', m.group(1))
+            targs = re.search(r'<([^<>;{}]*)>\s*::\s*~?[A-Za-z_]\w*\s*\($', m.group())
+            if not own or not targs or [a.strip() for a in targs.group(1).split(',')] != own: continue
+            if prepare.scope_chain(spans, m.start()): continue
+            names = (included_template(m.group(2)) or set()) - set(own)
+            if not names: continue
         brace = re.match(r'[^;{}]*\{', text[m.end():])
         if not brace: continue
         fo = m.end() + brace.end() - 1
         if re.search(r'\b(?:static|friend)\b', text[m.start():fo]): continue
-        bodies.append((fo, prepare.match_brace(text, fo) - 1, text[m.start():fo], by_name[m.group(2)][0]))
+        bodies.append((fo, prepare.match_brace(text, fo) - 1, text[m.start():fo], names))
+    if not bodies: return text
     edits = set()
     for fo, fc, head, names in bodies:
         body = COMMENT.sub(' ', text[fo:fc])
