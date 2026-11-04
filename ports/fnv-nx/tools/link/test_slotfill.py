@@ -17,6 +17,9 @@ rest; its exe vftable holds the same bodies. Checks:
 * GCC's destructor pair counts as one MSVC slot (the minus-one rule: b is GCC slot 3, exe slot 2);
 * after apply the fixed object's vtable slot names `__fnv_00401020`, the trial link leaves it defined, and the
   stage without the exe (`--exe none`) keeps b a trap;
+* GCC's D1/D0 of Vd, whose exe ??_G is a decomp function taking the flags (Shell::del(unsigned)), go through flag
+  stubs (w1 = 0 / 1); Vp's placeholder slot v00 where the exe has Gd's ??_G goes through a stub that picks D0 or D1
+  by the caller's flags;
 * vtmetric.py counts what is left: trap slots 6 (c, d, e in both vtables), 2 of them with a native at the exe slot
   (c: the abi gap).
 """
@@ -41,11 +44,17 @@ HEADER = r'''#pragma once
 struct Vb { virtual ~Vb(); virtual int a(); virtual int b(); virtual int c(int); virtual int d(); virtual int f();
             virtual int e(); int x; };
 struct Der : Vb { int a() override; };
-struct Shell { int impl(); int impl2(float); int impl3(int, int); int y; };
+struct Shell { int impl(); int impl2(float); int impl3(int, int); void *del(unsigned); int y; };
+struct Vd { virtual int g(); virtual ~Vd(); int z; };      // key function g; ~Vd defined nowhere
+struct Gd { virtual ~Gd(); int w; };
+struct Vp { virtual int h(); virtual void v00(); int u; }; // v00: a placeholder for the exe's ??_G
 '''
 SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nint Der::a() { return 2; }\n'
                     'int Shell::impl() { return y; }\nint Shell::impl2(float p) { return (int)p; }\n'
                     'int Shell::impl3(int p, int q) { return p + q; }\n'
+                    'void *Shell::del(unsigned f) { return f ? this : 0; }\nint Vd::g() { return 3; }\n'
+                    'Gd::~Gd() {}\nint Vp::h() { return 4; }\nVd *mk_vd() { return new Vd; }\n'
+                    'Gd *mk_gd() { return new Gd; }\nVp *mk_vp() { return new Vp; }\n'
                     'Vb *mk_vb() { return new Vb; }\nDer *mk_der() { return new Der; }\n'}
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 8}   # noqa: E731
 
@@ -65,7 +74,8 @@ def run(cmd, **kw):
 
 
 def build_exe(rd, where):
-    td = {n: rd.put(struct.pack('<II', 0x0101d000, 0) + n.encode() + b'\0') for n in ('.?AVVb@@', '.?AVDer@@')}
+    td = {n: rd.put(struct.pack('<II', 0x0101d000, 0) + n.encode() + b'\0')
+          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@')}
 
     def chd(names):
         bs = [rd.words(td[n], 0, 0, 0xffffffff, 0, 0x40, 0) for n in names]
@@ -81,6 +91,9 @@ def build_exe(rd, where):
     where['Vb'] = vft('.?AVVb@@', chd(['.?AVVb@@']), [0x401008, 0x401010, 0x401020, 0x401030, 0x401060, 0x401038])
     where['Der'] = vft('.?AVDer@@', chd(['.?AVDer@@', '.?AVVb@@']),
                        [0x401050, 0x401040, 0x401020, 0x401030, 0x401060, 0x401038])
+    # Vd: its ??_G is the decomp's Shell::del(unsigned); Vp's placeholder v00 is Gd's ??_G
+    where['Vd'] = vft('.?AVVd@@', chd(['.?AVVd@@']), [0x401080, 0x401088])
+    where['Vp'] = vft('.?AVVp@@', chd(['.?AVVp@@']), [0x401090, 0x401098])
     rd.words(0)
 
 
@@ -104,8 +117,11 @@ def main():
             {'source': 'src/a.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
                 F(0x401000, '??1Vb@@UAE@XZ'), F(0x401008, '??_GVb@@UAEPAXI@Z'), F(0x401010, '?a@Vb@@UAEHXZ'),
                 F(0x401020, '?impl@Shell@@QAEHXZ'), F(0x401030, '?impl2@Shell@@QAEHM@Z'), F(0x401038, '?impl3@Shell@@QAEHHH@Z'),
-                F(0x401040, '?a@Der@@UAEHXZ'), F(0x401070, '?mk_vb@@YAPAUVb@@XZ'), F(0x401078, '?mk_der@@YAPAUDer@@XZ')],
-             'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der']}},
+                F(0x401040, '?a@Der@@UAEHXZ'), F(0x401070, '?mk_vb@@YAPAUVb@@XZ'), F(0x401078, '?mk_der@@YAPAUDer@@XZ'),
+                F(0x401080, '?g@Vd@@UAEHXZ'), F(0x401088, '?del@Shell@@QAEPAXI@Z'), F(0x401090, '?h@Vp@@UAEHXZ'),
+                F(0x401098, '??_GGd@@UAEPAXI@Z'), F(0x4010a0, '??1Gd@@UAE@XZ')],
+             'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der'],
+                         '??_7Vd@@6B@': '0x%08x' % where['Vd'], '??_7Vp@@6B@': '0x%08x' % where['Vp']}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
                 F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {}},
         ]}
@@ -145,13 +161,21 @@ def main():
         check(why.get('_ZN2Vb1eEv') == {'past the exe vftable\'s slots'}, 'e: past the slots %s' % why.get('_ZN2Vb1eEv'))
         fill = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'slot_fill.tsv')) if not l.startswith('#')]
         fb = {r[2]: r for r in fill}
-        check(set(fb) == {'_ZN2Vb1bEv', '_ZN2Vb1fEv'} and fb['_ZN2Vb1bEv'][5] == 'agree' and
+        check({'_ZN2Vb1bEv', '_ZN2Vb1fEv'} <= set(fb) and fb['_ZN2Vb1bEv'][5] == 'agree' and
               fb['_ZN2Vb1bEv'][6] == 'same' and '_ZTV2Vb+8:3' in fb['_ZN2Vb1bEv'][7] and
               '_ZTV3Der+8:3' in fb['_ZN2Vb1bEv'][7], 'slot_fill.tsv: b in both vtables, GCC slot 3 (exe slot 2): %s'
               % fill)
         check('_ZN2Vb1fEv' in fb and fb['_ZN2Vb1fEv'][4] == '__fnv_00401038' and
               fb['_ZN2Vb1fEv'][6].startswith('the definition reads more arguments'),
               'f (a placeholder declaration of a body with two arguments) bound and listed: %s' % fb.get('_ZN2Vb1fEv'))
+        for n, want in (('_ZN2VdD1Ev', '__fnvnx_vflag_00401088_0'), ('_ZN2VdD0Ev', '__fnvnx_vflag_00401088_1'),
+                        ('_ZN2Vp3v00Ev', '__fnvnx_vgdel_00401098')):
+            r = refs.get(n)
+            check(r is not None and r[2] == 'vslot-exe' and r[5] == want, '%s -> %s: %s' % (n, want, r))
+        bridges_ = open(os.path.join(out, 'bridges.S')).read()
+        check('__fnvnx_vflag_00401088_1:\n    mov w1, #1\n    b __fnv_00401088' in bridges_ and
+              '__fnvnx_vgdel_00401098:\n    tbz w1, #0, 1f\n    b __fnv_00401098\n1:  b __fnv_00401098_D1' in bridges_,
+              'flag and deleting-destructor stubs in bridges.S')
         o = vtables.Obj(os.path.join(fixed, 'src_a.cpp.o'))
         ents = o.ents('_ZTV2Vb')
         check(ents[2 + 3].sym == '__fnv_00401020', 'fixed object: Vb vtable slot 3 names __fnv_00401020 (%s)'
@@ -164,7 +188,7 @@ def main():
         check(st['trap-slots'] == 6 and st['trap-native-at-exe'] == 2,
               'vtmetric: 6 trap slots left, 2 with a native at the exe slot (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
-        check(st0['trap-slots'] == 10 and st0['trap-native-at-exe'] == 6, 'vtmetric without the fill: 10 / 6 (%s)'
+        check(st0['trap-slots'] == 13 and st0['trap-native-at-exe'] == 9, 'vtmetric without the fill: 13 / 9 (%s)'
               % dict(st0))
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0

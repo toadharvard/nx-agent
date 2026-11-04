@@ -597,8 +597,11 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   first pointer parameter, a free definition without parameters reads nothing). A definition that reads more
   arguments than the slot declares is bound and listed: callers reach a slot through their own class's
   declaration, and the decomp's shells declare placeholders (`FUN_00aa7400`: `virtual void v2();` for
-  `ZeroOverheadHeap::Allocate(unsigned, unsigned)`, the boot's first trap). A destructor slot binds only to a
-  destructor variant at the address.
+  `ZeroOverheadHeap::Allocate(unsigned, unsigned)`, the boot's first trap). A destructor slot binds to a
+  destructor variant at the address; where the decomp defines the exe's `??_G` as a plain function taking the
+  flags (`FUN_00c2a090(unsigned int)`), GCC's D0 / D1 go through `__fnvnx_vflag_<a>_1` / `_0` (w1 = flags, then
+  `b __fnv_<a>`); a placeholder slot (`virtual void v00();`) where the exe has a native `??_G` goes through
+  `__fnvnx_vgdel_<a>` (bit 0 of the caller's flags picks D0 or D1, as the kind-G adapter does).
 * Outputs: `slot_fill.tsv` (object, symbol, address, target, how chosen, ABI verdict, the uses), `slot_gaps.tsv`
   (trap slots left, per use, with the reason: no exe vftable, past the exe vftable's slots, not compiled, abi, kind
   differs, vtables disagree). Trap stubs no object uses any more are dropped. Both files are published with the

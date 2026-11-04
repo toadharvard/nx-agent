@@ -1122,7 +1122,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             rebind[a] = vmap[a][:2]
         # the slots of virtual functions defined nowhere: the native definition at the exe slot's address
         fill = exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out)
+                             canon_it, out, bridges)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
@@ -1515,7 +1515,36 @@ def slot_abi(isig, ds):
     return 'same' if len(dloc) == len(sloc) else 'the slot passes more'
 
 
-def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out):
+FLAG_SYM = '__fnvnx_vflag_%08x_%d'   # GCC destructor slot -> a decomp (this, flags) function at the exe slot
+GDEL_SYM = '__fnvnx_vgdel_%08x'      # placeholder slot -> the exe's ??_G (native D0 / D1 by the caller's flags)
+
+
+def flags_param(ds):
+    """The MSVC declaration takes the object and one integer (the deleting destructor's flags): a member with one
+    integer parameter, or a free function (pointer, integer)."""
+    if ds is None or ds.kind != 'func' or ds.raw_params is None:
+        return False
+    ps = [abi.classify(p) for p in ds.raw_params if p != 'void']
+    ints = ('I8', 'I16', 'I32')
+    if ds.member and not ds.static:
+        return len(ps) == 1 and ps[0] in ints
+    return len(ps) == 2 and ps[0] == 'P' and ps[1] in ints
+
+
+def emit_flag_stub(name, target, flags):
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
+                      '    mov w1, #%d' % flags, '    b %s' % target, '    .size %s, .-%s' % (name, name)]) + '\n'
+
+
+def emit_gdel_stub(name, d0, d1):
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
+                      '    tbz w1, #0, 1f', '    b %s' % d0, '1:  b %s' % d1, '    .size %s, .-%s' % (name, name)]) + '\n'
+
+
+def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
+                  stubs=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -1541,6 +1570,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                     zmap[(z, p)].add(v)
     trap_set = set(traps)
     rows, gaps, changed = [], [], {}
+    stubs = {} if stubs is None else stubs   # flag / deleting-destructor stubs -> their asm (bridges.S)
 
     def target_for(un, a):
         nd = native.get(a)
@@ -1549,6 +1579,21 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
         isig = itanium(un)
         dsym = nd['sym'].name
         dvar = sigs.itanium_variant(dsym)
+        ds = msvc(nd['msvc']) if nd.get('msvc') else None
+        if isig.variant and isig.variant.startswith('D') and dvar is None and flags_param(ds):
+            # GCC's D1/D0 where the decomp defines the exe's ??_G as a plain function taking the flags
+            # (`FUN_00c2a090(unsigned int)`): a stub passes them, 1 for D0 (delete), 0 for D1/D2
+            fl = 1 if isig.variant == 'D0' else 0
+            name = FLAG_SYM % (a, fl)
+            stubs.setdefault(name, emit_flag_stub(name, ADDR_SYM % a, fl))
+            return name, 'flags stub (%d)' % fl
+        if isig.variant is None and dvar == 'D0' and nd['variants'].get('D1') is not None:
+            # a placeholder slot (`virtual void v00();`) where the exe has the deleting destructor: callers pass the
+            # MSVC flags; bit 0 picks D0 (delete) or D1, as the kind-G adapter does
+            name = GDEL_SYM % a
+            d1 = ADDR_SYM % a + ('' if nd['variants']['D1'] is nd['sym'] else '_D1')
+            stubs.setdefault(name, emit_gdel_stub(name, ADDR_SYM % a, d1))
+            return name, 'deleting-destructor stub'
         if isig.variant or dvar:
             if not isig.variant or not dvar or not dvar.startswith('D') or not isig.variant.startswith('D'):
                 return None, 'kind differs (%s at the exe slot, %s in the vtable)' % (dvar or 'function',
@@ -1557,7 +1602,6 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             if vs is None:
                 return None, 'no %s at the address' % isig.variant
             return ADDR_SYM % a + ('' if vs is nd['sym'] else '_' + isig.variant), 'dtor'
-        ds = msvc(nd['msvc']) if nd.get('msvc') else None
         if ds is None or ds.kind != 'func' or ds.raw_params is None or isig.raw_params is None:
             return None, 'no declaration to compare'
         how = slot_abi(isig, ds)
@@ -1641,7 +1685,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 f = line.split('\t')
                 if len(f) >= 7 and f[2] == 'vslot-unresolved' and f[1] in hosts.get(f[0], {}):
                     t = hosts[f[0]][f[1]]
-                    f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', t[len('__fnv_'):len('__fnv_') + 8], t
+                    f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', re.search(r'_([0-9a-f]{8})', t).group(1), t
                     line = '\t'.join(f)
                     bound_refs += 1
                 fo.write(line)
