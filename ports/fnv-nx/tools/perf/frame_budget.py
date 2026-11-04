@@ -38,7 +38,8 @@ frame 16.7 ms). 'level' is the highest target the mid case meets. Output schema 
   hotspots[{rank, kind: subsystem|function|boot, id, name, subsystem, role, critical (runs on the main thread),
   basis (M|E), minsn{lo,mid,hi} (per frame; per boot for kind boot), ms{clock: {lo,mid,hi}} (IPC hi/mid/lo),
   share_45{clock: mid ms / 22.2 ms}, fix, gain_main_minsn[lo,hi], owner, needs_hardware, detail}],
-  queue[{rank, subsystem, fix, gain_main_minsn{lo,mid,hi}, gain_ms_45{clock: mid ms}, owner, needs_hardware}]
+  built_levers[...] (the 'placed' scenario's levers: in the build; hotspots and queue are after them, a fix marked
+  done leaves the queue), queue[{rank, subsystem, fix, gain_main_minsn{lo,mid,hi}, gain_ms_45{clock: mid ms}, owner, needs_hardware}]
 
 Hotspots (docs/PERF.md 11.4): subsystem rows are the frame's items by subsystem and thread role (frameprof's
 per-subsystem median of measured frames when there are any, else the model: [E] unless every item is measured);
@@ -327,7 +328,21 @@ def build(model, profs=None, render=None):
                                        'level': level}
             out['gates']['%s@%d' % (sc['id'], clk)] = level
         out['scenarios'].append(rs)
-    out['hotspots'], out['queue'] = hotspots(model, items, profs or [], clocks, (ipcs[2], ipc['value'], ipcs[0]))
+    # hotspots and the queue describe the build as it is: the items after the levers that are in it (the 'placed'
+    # scenario's), and no queue row for a fix that is done
+    built = next((sc for sc in model['scenarios'] if sc['id'] == 'placed'), {'levers': []})
+    hot_items = []
+    for it in items:
+        it = dict(it)
+        for lid in built['levers']:
+            if it['id'] in levers[lid].get('scales', {}):
+                flo, fhi = levers[lid]['scales'][it['id']]
+                md = it.get('mid', mid(it['minsn']))
+                it['minsn'] = [it['minsn'][0] * flo, it['minsn'][1] * fhi]
+                it['mid'] = md * mid((flo, fhi))
+        hot_items.append(it)
+    out['built_levers'] = list(built['levers'])
+    out['hotspots'], out['queue'] = hotspots(model, hot_items, profs or [], clocks, (ipcs[2], ipc['value'], ipcs[0]))
     return out
 
 
@@ -409,7 +424,7 @@ def hotspots(model, items, profs, clocks, ipcs):
     queue = []
     for sub, fx in fixes.items():
         g = fx.get('gain_main_minsn') or [0, 0]
-        if max(g) <= 0:
+        if max(g) <= 0 or fx.get('done'):
             continue
         gm = (g[0], mid(g), g[1])
         queue.append({'subsystem': sub, 'fix': fx.get('fix', ''), 'owner': fx.get('owner', ''),
