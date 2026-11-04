@@ -134,6 +134,13 @@ got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(
 check('STR1 rewrites only where the array is the declaration in scope', got,
       ['void f() { g(str_01082ab8); }', 'void h() { g(&str_01082ab8); }', 'g(str_c0000000); }'])
 
+# ---- VTBL1
+got = run(s1.r_stand_in_interfaces, 'int a;\nstruct FUN_00aa2230_BSNiAllocator\n{\n    virtual void m_virtual0();\n'
+          '    FUN_00aa2230_BSNiAllocator();\n};\nint b;\n', '/x/src/staging/blk_00aa0000_o2.cpp')
+check('VTBL1 BSNiAllocator gets its 10 slots, same line count', got,
+      ['virtual void* Allocate(', 'virtual void Slot9();', 'AllocateZeroedMemory(size, alignment', '}\n\n\n\n\nint b;'],
+      ['m_virtual0'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

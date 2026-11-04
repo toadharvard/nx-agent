@@ -73,6 +73,7 @@ CLASSES = {
     'TPL2': 'neutral',          # forward declarations of a namespace's function templates (MSVC's lookup)
     'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
     'DTOR1': 'neutral',         # declares NiPointer<T>::~NiPointer() specializations for pointees the unit never completes
+    'VTBL1': 'platform',        # full MSVC-order virtual interface for listed stand-ins (BSNiAllocator), slots forward
     'CSX2': 'neutral',          # the decomp's 28-byte critical sections keep their 28 bytes (D15 reopened, J-0067)
     'STAND1': 'platform',       # drops untagged stand-ins bound to a tagged definition's address (one function per address)
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed

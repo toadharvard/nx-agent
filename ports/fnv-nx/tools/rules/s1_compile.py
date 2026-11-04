@@ -2300,6 +2300,83 @@ def r_critical_section_tail(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- VTBL1
+#
+# A stand-in polymorphic class whose native vtable is too short for the slots the game calls through it. The
+# decomp declares BSNiAllocator (constructor 0x00aa2230, vftable 0x010a2528) with one virtual, so the native vtable
+# has one slot, while NiMemoryManager calls slot 1 (Allocate, FUN_00aa1070), slot 4 (FUN_00aa1130) and InitHolder
+# slot 7 (S14 r2: the vftable has 10 slots, bounded by the next COL word at 0x010a2550). VTBL1 gives the stand-in
+# the interface in MSVC slot order. The slot functions the decomp knows are its BSNiAllocator functions
+# (gamebryo2.2/corelibs/nisystem/bsniallocator.cpp, called through these slots with these signatures in
+# nimemorydefines.cpp): 0 scalar deleting destructor 0x00aa24a0, 1 Allocate 0x00aa2240, 2 Deallocate 0x00aa22b0
+# (S13), 3 Reallocate 0x00aa22f0, 4 aligned Allocate 0x00aa2370, 5 aligned Deallocate 0x00aa23e0, 6 aligned
+# Reallocate 0x00aa2420; each slot forwards to that function by its decomp name (the link binds it by address).
+# Slots 7-9 (7 is InitHolder's no-argument call) have no function in the decomp: declared only, they stay
+# unresolved until the exe gives their addresses.
+
+VTBL1_UNITS = {
+    'staging/blk_00aa0000_o2.cpp': (
+        re.compile(r'^struct FUN_00aa2230_BSNiAllocator\s*\{\s*virtual void m_virtual0\(\);\s*'
+                   r'FUN_00aa2230_BSNiAllocator\(\);\s*\};', re.M),
+        '''enum NiMemEventTypeAA2 { NI_MEM_EVENT_AA2_UNKNOWN };
+void* __stdcall AllocateZeroedMemory(unsigned int&, unsigned int&, NiMemEventTypeAA2, bool, const char*, int, const char*);
+struct BSNiAllocator { void FUN_00aa22b0(void* pvMemory, int aiAllocationType, unsigned int stSizeInBytes); };
+char* __stdcall ResizeHeapBlock(char*, int*, unsigned char*, int, int, int, int, int, int);
+unsigned int __stdcall AllocateAlignedBuffer(unsigned int*, unsigned char*, int, int, int, int, int);
+namespace fnv_00aa23e0 { void __stdcall FUN_00aa23e0(void* pvMemory, int aiAllocationType, unsigned int stSizeInBytes); }
+void* __stdcall FUN_00aa2420(void*, unsigned int&, unsigned char&, int, bool, unsigned int, const char*, int, const char*);
+namespace fnv_00aa24a0 { struct BSNiAllocator { void* Destroy(unsigned int); }; }
+struct FUN_00aa2230_BSNiAllocator   /* fnv-nx VTBL1: the 10 slots of the vftable at 0x010a2528 in MSVC order */
+{
+    virtual void* Destroy(unsigned int flags);   /* the key function: defined below, so the vtable is emitted here */
+    virtual void* Allocate(unsigned int& size, unsigned int& alignment, int event, bool accurate, const char* file,
+                           int line, const char* function)
+    {
+        return AllocateZeroedMemory(size, alignment, (NiMemEventTypeAA2)event, accurate, file, line, function);
+    }
+    virtual void Deallocate(void* p, int event, unsigned int size) { ((BSNiAllocator*)this)->FUN_00aa22b0(p, event, size); }
+    virtual void* Reallocate(void* p, unsigned int& size, unsigned char& alignment, int event, bool accurate,
+                             unsigned int current, const char* file, int line, const char* function)
+    {
+        return ResizeHeapBlock((char*)p, (int*)&size, &alignment, event, accurate, (int)current, (int)file, line,
+                               (int)function);
+    }
+    virtual void* AlignedAllocate(unsigned int& size, unsigned int& alignment, int event, bool accurate,
+                                  const char* file, int line, const char* function)
+    {
+        return (void*)AllocateAlignedBuffer(&size, (unsigned char*)&alignment, event, accurate, (int)file, line,
+                                            (int)function);
+    }
+    virtual void AlignedDeallocate(void* p, int event, unsigned int size) { fnv_00aa23e0::FUN_00aa23e0(p, event, size); }
+    virtual void* AlignedReallocate(void* p, unsigned int& size, unsigned char& alignment, int event, bool accurate,
+                                    unsigned int current, const char* file, int line, const char* function)
+    {
+        return FUN_00aa2420(p, size, alignment, event, accurate, current, file, line, function);
+    }
+    virtual void Slot7();   /* InitHolder's call (Initialize?): not in the decomp */
+    virtual void Slot8();   /* not in the decomp */
+    virtual void Slot9();   /* not in the decomp */
+    FUN_00aa2230_BSNiAllocator();
+};
+void* FUN_00aa2230_BSNiAllocator::Destroy(unsigned int flags)
+{
+    return ((fnv_00aa24a0::BSNiAllocator*)this)->Destroy(flags);
+}'''),
+}
+
+def r_stand_in_interfaces(path, text, stats):
+    """VTBL1: the full virtual interface, in MSVC slot order, for the stand-ins listed in VTBL1_UNITS (see above)."""
+    rel = path.replace(os.sep, '/')
+    for unit, (rx, body) in VTBL1_UNITS.items():
+        if not rel.endswith('/src/' + unit): continue
+        m = rx.search(text)
+        if not m: continue
+        # same line count: the replacement is longer, so it goes on the stand-in's lines joined up
+        nl = m.group(0).count('\n')
+        text = text[:m.start()] + body.replace('\n', ' ') + '\n' * nl + text[m.end():]
+        stats['VTBL1'] += 1
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2324,5 +2401,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout]
