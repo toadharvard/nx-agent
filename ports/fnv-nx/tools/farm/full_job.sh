@@ -19,7 +19,9 @@
 # Outputs: <report.md> (tools/farm/full_report.py: provenance, stage table, link counts, undefined names by class,
 # boot reached and first fault, skipped initializers by fault, frontier top 20, package check; numbers, unit names
 # and short diagnostics only), and link/<commit12> (link_job.sh's files + guest/fnvnx.elf,
-# boot/{summary.txt,frontier.txt,frontier.tsv,emu.log}). Exit 0 once the report is written.
+# boot/{summary.txt,frontier.txt,frontier.tsv,emu.log} of the raw boot, boot/stub/{summary.txt,emu_stub.log,
+# frontier_stub.txt,frontier_stub.tsv} of the stub-fault boot, boot/synth.exe + boot/synth_summary.txt: the data image
+# both booted on, its sha256 in meta.json). Exit 0 once the report is written.
 #
 # Needs: link_job.sh's, plus g++; for fnvnx-a64: libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex; python
 # unicorn; for TESTS=all also qemu-user, cmake, meson, ninja-build. FARM_APT=1 installs them (root).
@@ -84,6 +86,21 @@ if [ -n "$TREE" ] && [ -n "$OBJS" ]; then
 	ls -1t "$F"/make-*.log | tail -n +6 | xargs -r rm -f
 else
 	rc=2
+fi
+
+# 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the
+# known faults (docs/TOOLCHAIN.md section 18), so the frontier beyond them is published next to the raw boot's
+# (boot/stub/). tests/s5/farm_boot.sh FARM_BOOTS=stub on the pipeline's build directory; under a minute.
+STUB=$F/build/boot/stub
+rm -rf "$STUB"
+if [ $rc -ne 2 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" ]; then
+	log "stub-fault boot (tests/s5/farm_boot.sh)"
+	IMG=$F/build/boot/synth/synth.exe; [ -f "$IMG" ] || IMG=""
+	FARM_LINK_DIR=$F/build/link FARM_GUEST_DIR=$F/build/guest FARM_BOOTS=stub \
+		FARM_UNITS="${TREE:+$TREE/build/units.json}" PY="${PY:-python3}" EMU_TIMEOUT="${EMU_TIMEOUT:-3000}" \
+		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB" $IMG > "$F/stub_boot-$C12.log" 2>&1 \
+		|| log "farm_boot.sh (stub boot) exited $?"
+	ls -1t "$F"/stub_boot-*.log | tail -n +6 | xargs -r rm -f
 fi
 t1=$(date +%s)
 

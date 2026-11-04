@@ -177,6 +177,17 @@ EOF
 		if stage_ok "$bd" boot; then
 			mkdir -p boot
 			for f in summary.txt frontier.txt frontier.tsv emu.log; do [ -f "$bd/boot/$f" ] && cp "$bd/boot/$f" boot/; done
+			# the data image the boots ran on (S14's synthesized image) and S5's stub-fault boot (full_job.sh 4b)
+			if [ -f "$bd/boot/synth/synth.exe" ]; then
+				cp "$bd/boot/synth/synth.exe" boot/synth.exe
+				[ -f "$bd/boot/synth/summary.txt" ] && cp "$bd/boot/synth/summary.txt" boot/synth_summary.txt
+			fi
+			if [ -d "$bd/boot/stub" ]; then
+				mkdir -p boot/stub
+				for f in summary.txt emu_stub.log frontier_stub.txt frontier_stub.tsv; do
+					[ -f "$bd/boot/stub/$f" ] && cp "$bd/boot/stub/$f" boot/stub/
+				done
+			fi
 		fi
 		cp "$REPORT" report.md
 		python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" > meta.json <<'EOF'
@@ -188,11 +199,18 @@ def rec(s):
     except (OSError, ValueError):
         return {}
 lm = rec('link').get('metrics', {})
+import hashlib
+img = os.path.join(bd, 'boot', 'synth', 'synth.exe')
+stub = os.path.join(bd, 'boot', 'stub', 'emu_stub.log')
+stub_lines = open(stub, errors='replace').read().splitlines() if os.path.isfile(stub) else []
 print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
                   'prepared_from': rec('prepare').get('prepared_from'), 'tree': tree, 'objects': objs,
                   'link': {k[5:]: v for k, v in lm.items() if k.startswith('link_')},
                   'guest_undefined': rec('guest').get('metrics', {}).get('guest_undefined'),
-                  'boot_winmain': rec('boot').get('metrics', {}).get('boot_winmain'), 'boot_stop': rec('boot').get('stop')},
+                  'boot_winmain': rec('boot').get('metrics', {}).get('boot_winmain'), 'boot_stop': rec('boot').get('stop'),
+                  'boot_image_sha256': hashlib.sha256(open(img, 'rb').read()).hexdigest() if os.path.isfile(img) else None,
+                  'boot_stub_stop': next((l for l in reversed(stub_lines) if l.startswith('STOPPED')), None),
+                  'boot_stub_winmain': int(any('fnvnx boot: calling WinMain' in l for l in stub_lines)) if stub_lines else None},
                  indent=1, sort_keys=True))
 EOF
 		git add -f -A .
