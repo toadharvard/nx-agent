@@ -65,7 +65,8 @@ def portable(t):
 def ctype(t):
     """demangled type -> C++ spelling MSVC 2008 accepts"""
     t = t.replace('>>', '> >').replace('>>', '> >')
-    t = re.sub(r'\bunion (__m(?:64|128[di]?))\b', r'\1', t)      # SSE vector types are typedefs under GCC (sse2neon)
+    # SSE vector types are typedefs under GCC (sse2neon): spelled as the callers spell them, unqualified
+    t = re.sub(r'\b(?:struct |union |class )?(?:\w+::)*(__m(?:64|128[di]?))\b', r'\1', t)
     if '`' in t or "'" in t or '<unnamed' in t or '<lambda' in t:
         return None
     return t
