@@ -3596,5 +3596,262 @@
     ]
    ]
   }
+ },
+ {
+  "commit": "510c048e6eeea2444ab361edfc3f0f7162526a5b",
+  "name": "fnv-nx S6n: perf - opaque draws ordered front to back by a coarse depth bucket, state inside it",
+  "before_commit": "dc59b02f704bbbb393e11f9a928b74151bcfacf6",
+  "cpu_instr_delta_main": 22260,
+  "cpu_instr_delta_render": 287659,
+  "gpu_ms_docked_720p": [
+   5.49,
+   5.49
+  ],
+  "gpu_ms_handheld_720p": [
+   10.2,
+   10.2
+  ],
+  "failed_draws_at_3_frames_in_flight": [
+   0,
+   0
+  ],
+  "before": {
+   "commit": "dc59b02f704bbbb393e11f9a928b74151bcfacf6",
+   "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 99739 state_binds 283 states 326 samplers 1",
+   "main": 4838952,
+   "render_front": 1587743,
+   "render_backend": 1731019,
+   "failed_draws_per_frame_at_3_in_flight": 0,
+   "backend_draws": 3710,
+   "gpu_ms": {
+    "docked_720p_eff_1.0": 4.98,
+    "docked_720p_eff_0.6": 5.49,
+    "handheld_720p_eff_1.0": 6.12,
+    "handheld_720p_eff_0.6": 10.2
+   },
+   "top_front": [
+    [
+     "nx::Renderer::Render(nx::Renderer::Draw const&)",
+     865675
+    ],
+    [
+     "nx::SortPackets(nx::Packet const*, unsigned long, unsigned long*, unsigned long*, unsigned long long*, unsigned long long*)",
+     741699
+    ],
+    [
+     "nx::Frame::Finish(nx::StateCache&, NxFrameStats*, bool)",
+     741323
+    ],
+    [
+     "nx::StateTracker::SetSamplerState(unsigned long, unsigned long, unsigned long, bool)",
+     618170
+    ],
+    [
+     "nx::StateTracker::SetRenderState(unsigned long, unsigned long, bool)",
+     481358
+    ],
+    [
+     "nx::StateTracker::SetTexture(unsigned long, unsigned long, NxD3D9Texture const&) [clone .part.0]",
+     353057
+    ],
+    [
+     "memmove",
+     247007
+    ],
+    [
+     "nx::StateTracker::Handles(nx::Backend*, unsigned long*, unsigned long)",
+     213020
+    ],
+    [
+     "nx::StateTracker::Resolve(NxD3D9Viewport const&, NxD3D9Rect const&, unsigned long)",
+     154889
+    ],
+    [
+     "memset",
+     145994
+    ],
+    [
+     "nx::StateCache::State(unsigned short, unsigned short, unsigned short, NxRenderState const&)",
+     102437
+    ],
+    [
+     "nx::Renderer::EpiIndex(unsigned short)",
+     96460
+    ],
+    [
+     "memcmp",
+     80990
+    ],
+    [
+     "nx::Frame::AddTextures(unsigned long const*, unsigned long)",
+     80632
+    ],
+    [
+     "nx_d3d9_format",
+     75813
+    ]
+   ],
+   "top_backend": [
+    [
+     "record",
+     876597
+    ],
+    [
+     "dkCmdBufBindUniformBuffers",
+     353418
+    ],
+    [
+     "dkCmdBufBindVtxBuffers",
+     170569
+    ],
+    [
+     "dkCmdBufBindTextures",
+     114004
+    ],
+    [
+     "dkCmdBufBindIdxBuffer",
+     69620
+    ],
+    [
+     "dkCmdBufDrawIndexed",
+     63070
+    ],
+    [
+     "memmove",
+     54403
+    ],
+    [
+     "dkCmdBufReplayCmds",
+     15768
+    ],
+    [
+     "dk::detail::ImageInfo::fromImageView(DkImageView const*, unsigned int)",
+     2737
+    ],
+    [
+     "dkCmdBufBindRenderTargets",
+     2716
+    ]
+   ]
+  },
+  "after": {
+   "commit": "510c048e6eeea2444ab361edfc3f0f7162526a5b",
+   "result": "stream sdmc:/perf/stream.nxd3d dry 0 frames 3 draws 11130 failed 0 | last frame: packets 3710 words 105971 state_binds 811 states 326 samplers 1",
+   "main": 4861212,
+   "render_front": 1641261,
+   "render_backend": 1965160,
+   "failed_draws_per_frame_at_3_in_flight": 0,
+   "backend_draws": 3710,
+   "gpu_ms": {
+    "docked_720p_eff_1.0": 4.98,
+    "docked_720p_eff_0.6": 5.49,
+    "handheld_720p_eff_1.0": 6.12,
+    "handheld_720p_eff_0.6": 10.2
+   },
+   "top_front": [
+    [
+     "nx::Renderer::Render(nx::Renderer::Draw const&)",
+     887935
+    ],
+    [
+     "nx::Frame::Finish(nx::StateCache&, NxFrameStats*, bool)",
+     777233
+    ],
+    [
+     "nx::SortPackets(nx::Packet const*, unsigned long, unsigned long*, unsigned long*, unsigned long long*, unsigned long long*)",
+     741699
+    ],
+    [
+     "nx::StateTracker::SetSamplerState(unsigned long, unsigned long, unsigned long, bool)",
+     618170
+    ],
+    [
+     "nx::StateTracker::SetRenderState(unsigned long, unsigned long, bool)",
+     481358
+    ],
+    [
+     "nx::StateTracker::SetTexture(unsigned long, unsigned long, NxD3D9Texture const&) [clone .part.0]",
+     353057
+    ],
+    [
+     "memmove",
+     254979
+    ],
+    [
+     "nx::StateTracker::Handles(nx::Backend*, unsigned long*, unsigned long)",
+     213020
+    ],
+    [
+     "nx::StateTracker::Resolve(NxD3D9Viewport const&, NxD3D9Rect const&, unsigned long)",
+     154889
+    ],
+    [
+     "memset",
+     145994
+    ],
+    [
+     "nx::StateCache::State(unsigned short, unsigned short, unsigned short, NxRenderState const&)",
+     102437
+    ],
+    [
+     "nx::Renderer::EpiIndex(unsigned short)",
+     96460
+    ],
+    [
+     "memcmp",
+     80990
+    ],
+    [
+     "nx::Frame::AddTextures(unsigned long const*, unsigned long)",
+     80632
+    ],
+    [
+     "nx_d3d9_format",
+     75813
+    ]
+   ],
+   "top_backend": [
+    [
+     "record",
+     1010855
+    ],
+    [
+     "dkCmdBufBindUniformBuffers",
+     367172
+    ],
+    [
+     "dkCmdBufBindVtxBuffers",
+     173999
+    ],
+    [
+     "dkCmdBufBindTextures",
+     133276
+    ],
+    [
+     "memmove",
+     88110
+    ],
+    [
+     "dkCmdBufBindIdxBuffer",
+     71020
+    ],
+    [
+     "dkCmdBufDrawIndexed",
+     63070
+    ],
+    [
+     "dkCmdBufReplayCmds",
+     44088
+    ],
+    [
+     "dk::detail::ImageInfo::fromImageView(DkImageView const*, unsigned int)",
+     2737
+    ],
+    [
+     "dkCmdBufBindRenderTargets",
+     2716
+    ]
+   ]
+  }
  }
 ]
