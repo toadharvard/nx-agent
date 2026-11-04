@@ -1340,6 +1340,41 @@ if _shutil.which('aarch64-linux-gnu-g++'):
     check('EBO2 output: the base after the vptr (+4), members and sizes unchanged (ILP32)',
           _r.stderr or _r.stdout, ['mov\tw0, 4'], ['error'])
 
+# ---- S1-refs: REC1 (D20: reconstructed bodies from a recon directory, applied only when FNVNX_RECON is given)
+_rc = tempfile.mkdtemp()
+os.makedirs(os.path.join(_rc, 'dec', 'build')); os.makedirs(os.path.join(_rc, 'dec', 'src'))
+os.makedirs(os.path.join(_rc, 'recon', 'r1'))
+_json.dump({'units': [{'source': 'src/h.cpp', 'functions': [{'address': '0x00401000', 'symbol': '?f@@YAXXZ', 'size': 8}],
+                       'symbols': {}}]}, open(os.path.join(_rc, 'dec', 'build', 'units.json'), 'w'))
+_json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/h.cpp', 'append': 'body.cpp',
+            'functions': [{'address': '0x00401010', 'symbol': '??0H@@QAE@XZ', 'size': 16}],
+            'symbols': {'?Init@H@@QAEXXZ': '0x00401100'}}, open(os.path.join(_rc, 'recon', 'r1', 'recon.json'), 'w'))
+open(os.path.join(_rc, 'recon', 'r1', 'body.cpp'), 'w').write('struct H { H(); void Init(); };\n// @fnv 0x00401010\nH::H() { Init(); }\n')
+_hp = os.path.join(_rc, 'dec', 'src', 'h.cpp')
+prepare.__dict__['_fnvnx_recon'] = None
+os.environ.pop('FNVNX_RECON', None)
+check('REC1 without FNVNX_RECON: nothing', run(s1.r_recon_bodies, '// @fnv 0x00401000\nvoid f() {}\n', _hp), [], ['REC1'])
+os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon')
+prepare.__dict__['_fnvnx_recon'] = None
+_ro = run(s1.r_recon_bodies, '// @fnv 0x00401000\nvoid f() {}\n', _hp)
+check('REC1 appends the unit\'s reconstructed body', _ro, ['void f() {}', 'fnv-nx REC1', 'H::H() { Init(); }'])
+check('REC1 other units untouched', run(s1.r_recon_bodies, 'int g;\n', os.path.join(_rc, 'dec', 'src', 'o.cpp')),
+      [], ['REC1'])
+s1.add_recon_definitions(os.path.join(_rc, 'dec'), Counter())
+_ru = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'][0]
+check('REC1 POST hook adds the recipe entry and bindings', _json.dumps(_ru),
+      ['"??0H@@QAE@XZ"', '"?Init@H@@QAEXXZ": "0x00401100"', '"?f@@YAXXZ"'])
+# a recon of an address a unit already defines (the decomp gained it) is skipped
+_json.dump({'units': [{'source': 'src/h.cpp', 'functions': [{'address': '0x00401010', 'symbol': '??0H@@QAE@XZ', 'size': 16}],
+                       'symbols': {}}]}, open(os.path.join(_rc, 'dec', 'build', 'units.json'), 'w'))
+prepare.__dict__['_fnvnx_recon'] = None
+_st = Counter()
+_ro2 = s1.r_recon_bodies(_hp, 'void f() {}\n', _st)
+check('REC1 an address the recipe already defines: skipped (REC1-DUP)', _ro2 + str(dict(_st)), ['REC1-DUP'], ['H::H()'])
+os.environ.pop('FNVNX_RECON', None)
+prepare.__dict__['_fnvnx_recon'] = None
+_shutil.rmtree(_rc, ignore_errors=True)
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''

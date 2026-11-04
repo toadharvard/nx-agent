@@ -90,6 +90,7 @@ Result fsFileWrite(FsFile *f, s64 off, const void *buf, u64 n, u32 opt) {
 }
 void fsFileClose(FsFile *f) { (void)f; }
 Result fsFsCommit(FsFileSystem *fs) { (void)fs; return 0; }
+Result romfsMountFromFsdev(const char *path, u64 offset, const char *name) { (void)path; (void)offset; (void)name; return 0; }
 
 #include "../../toolchain/host/host_device.inc"
 
