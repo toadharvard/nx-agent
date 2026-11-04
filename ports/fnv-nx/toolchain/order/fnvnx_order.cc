@@ -24,7 +24,20 @@
 // of Interlocked* somewhere in the program; a plain x86 store to them is the release half of a lock (ATOMIC-PLAIN-
 // STORE), a plain load the acquire half.
 //
+// Interlocked operands of the unit itself are found without a key file: every field or variable whose address a
+// call of Interlocked* / _Interlocked* takes in any function of the unit is ordered in every function of the unit
+// (all bodies pass PLUGIN_PRE_GENERICIZE before the first one is lowered, so the order does not matter).
+//
 // Runs right after the CFG is built (before SSA, so no virtual operands to maintain), like fnvnx_ftoi.
+//
+// args=rtl (default) | ltr: call arguments in MSVC's order (ORDER-ARGS). MSVC x86 evaluates the arguments of every
+// call right to left (it pushes them); GCC evaluates them left to right on AArch64 (its gimplifier reverses only for
+// targets with push instructions, PUSH_ARGS_REVERSED, a compile-time 0 here). Before a function body is lowered
+// (PLUGIN_PRE_GENERICIZE), every call or constructor call with at least one side-effecting argument and another
+// non-constant one gets its scalar arguments wrapped in SAVE_EXPRs, and the first of them becomes the chain
+// (s_n, ..., s_2, s_1): GCC evaluates the first argument first, so all of them are evaluated last to first, while the
+// call itself (and so return slots and constructor calls) stays as it was. `this` and the callee stay first, as now
+// (ORDER-OBJECT is a separate class). A call with a side-effecting argument of class type is left alone.
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "context.h"
@@ -42,9 +55,10 @@
 #include "stringpool.h"
 #include "memmodel.h"
 #include "builtins.h"
+#include "cp/cp-tree.h"
+#include "diagnostic-core.h"
 #include "cfghooks.h"
 #include "tree-cfg.h"
-#include "diagnostic-core.h"
 #include <set>
 #include <string>
 #include <fstream>
@@ -55,8 +69,11 @@ enum order_mode { MODE_OFF, MODE_VOLATILE, MODE_TSO };
 static order_mode mode = MODE_VOLATILE;
 static bool verbose;
 static std::set<std::string> key_fields, key_vars;   // "Class::member", "name"
+static std::set<tree> interlocked_decls;             // FIELD_DECLs / VAR_DECLs this unit hands to Interlocked*
 struct counts { unsigned long ldar, stlr, fence_ld, fence_st; };
 static counts unit_total;
+static bool args_rtl = true;
+static unsigned long calls_reordered, calls_skipped;
 
 // ---- what counts as a shared volatile access
 
@@ -89,13 +106,16 @@ static std::string record_name(tree field) {
 }
 
 static bool keyed(tree t) {
-  if (key_fields.empty() && key_vars.empty()) return false;
+  if (key_fields.empty() && key_vars.empty() && interlocked_decls.empty()) return false;
   for (tree r = t; r; r = handled_component_p(r) ? TREE_OPERAND(r, 0) : NULL_TREE) {
     if (TREE_CODE(r) == COMPONENT_REF) {
       tree f = TREE_OPERAND(r, 1);
+      if (interlocked_decls.count(f)) return true;
       if (DECL_NAME(f) && key_fields.count(record_name(f) + "::" + IDENTIFIER_POINTER(DECL_NAME(f)))) return true;
     }
-    if (TREE_CODE(r) == VAR_DECL && DECL_NAME(r) && key_vars.count(IDENTIFIER_POINTER(DECL_NAME(r)))) return true;
+    if (TREE_CODE(r) == VAR_DECL && (interlocked_decls.count(r) ||
+                                     (DECL_NAME(r) && key_vars.count(IDENTIFIER_POINTER(DECL_NAME(r))))))
+      return true;
     if (!handled_component_p(r)) break;
   }
   return false;
@@ -167,7 +187,7 @@ struct order_pass : gimple_opt_pass {
         if (gimple_code(stmt) == GIMPLE_CALL) {
           // `ref = f()` storing into an ordered object: route the result through a temporary, and order that store
           tree lhs = gimple_call_lhs(stmt);
-          if (lhs && shared_ordered(lhs) && !stmt_ends_bb_p(stmt)) {
+          if (lhs && shared_ordered(lhs) && !stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
             tree tmp = create_tmp_var(TREE_TYPE(lhs), "order_r");
             gimple_call_set_lhs(stmt, tmp);
             gsi_insert_after(&gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
@@ -241,8 +261,94 @@ static const pass_data order_data = {
 
 static void finish(void *, void *) {
   if (verbose)
-    inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr, %lu fenced loads, %lu fenced stores",
-           unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st);
+    inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr, %lu fenced loads, %lu fenced stores; "
+           "%lu calls with arguments right to left, %lu left (class-type argument with side effects)",
+           unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st, calls_reordered, calls_skipped);
+}
+
+// ---- argument order (args=rtl)
+
+static bool scalar_arg(tree t) {
+  tree ty = TREE_TYPE(t);
+  return ty && (INTEGRAL_TYPE_P(ty) || POINTER_TYPE_P(ty) || SCALAR_FLOAT_TYPE_P(ty) || TREE_CODE(ty) == OFFSET_TYPE ||
+                TREE_CODE(ty) == VECTOR_TYPE || TREE_CODE(ty) == NULLPTR_TYPE);
+}
+
+static int arg_count(tree t) {
+  return TREE_CODE(t) == CALL_EXPR ? call_expr_nargs(t) : aggr_init_expr_nargs(t);
+}
+static tree *arg_slot(tree t, int i) {
+  return TREE_CODE(t) == CALL_EXPR ? &CALL_EXPR_ARG(t, i) : &AGGR_INIT_EXPR_ARG(t, i);
+}
+
+static void reorder_call(tree call) {
+  int n = arg_count(call);
+  int first = 0;
+  // `this` (first argument of a method call, and the object of a constructor call) stays first
+  tree fntype = NULL_TREE;
+  if (TREE_CODE(call) == CALL_EXPR) {
+    tree fn = CALL_EXPR_FN(call);
+    if (fn && POINTER_TYPE_P(TREE_TYPE(fn))) fntype = TREE_TYPE(TREE_TYPE(fn));
+    if (CALL_EXPR_ORDERED_ARGS(call) || CALL_EXPR_REVERSE_ARGS(call)) return;   // C++17 fixes this order
+  } else {
+    tree fn = AGGR_INIT_EXPR_FN(call);
+    if (fn && POINTER_TYPE_P(TREE_TYPE(fn))) fntype = TREE_TYPE(TREE_TYPE(fn));
+  }
+  if (fntype && TREE_CODE(fntype) == METHOD_TYPE) first = 1;
+  int effects = 0, live = 0;
+  for (int i = first; i < n; i++) {
+    tree a = *arg_slot(call, i);
+    if (TREE_SIDE_EFFECTS(a)) {
+      if (!scalar_arg(a)) { calls_skipped++; return; }
+      effects++;
+    }
+    if (!TREE_CONSTANT(a)) live++;
+  }
+  if (!effects || live < 2) return;
+  int lead = -1;
+  for (int i = first; i < n; i++) {
+    tree *slot = arg_slot(call, i);
+    if (TREE_CONSTANT(*slot) || !scalar_arg(*slot)) continue;
+    *slot = save_expr(*slot);
+    if (lead < 0) lead = i;
+  }
+  if (lead < 0) return;
+  tree *ls = arg_slot(call, lead);
+  tree chain = *ls;
+  for (int i = lead + 1; i < n; i++) {
+    tree a = *arg_slot(call, i);
+    if (TREE_CODE(a) == SAVE_EXPR) chain = build2(COMPOUND_EXPR, TREE_TYPE(chain), a, chain);
+  }
+  *ls = chain;
+  calls_reordered++;
+}
+
+// ---- Interlocked operands of this unit
+
+static void note_interlocked(tree call) {
+  tree fn = get_callee_fndecl(call);
+  if (!fn || !DECL_NAME(fn) || call_expr_nargs(call) < 1) return;
+  const char *n = IDENTIFIER_POINTER(DECL_NAME(fn));
+  if (strncmp(n, "Interlocked", 11) && strncmp(n, "_Interlocked", 12)) return;
+  tree a = CALL_EXPR_ARG(call, 0);
+  while (CONVERT_EXPR_P(a) || TREE_CODE(a) == NON_LVALUE_EXPR || TREE_CODE(a) == VIEW_CONVERT_EXPR) a = TREE_OPERAND(a, 0);
+  if (TREE_CODE(a) != ADDR_EXPR) return;
+  tree r = TREE_OPERAND(a, 0);
+  while (TREE_CODE(r) == ARRAY_REF || TREE_CODE(r) == VIEW_CONVERT_EXPR) r = TREE_OPERAND(r, 0);
+  if (TREE_CODE(r) == COMPONENT_REF) interlocked_decls.insert(TREE_OPERAND(r, 1));
+  else if (TREE_CODE(r) == VAR_DECL) interlocked_decls.insert(r);
+}
+
+static tree order_args_walk(tree *tp, int *, void *) {
+  if (TREE_CODE(*tp) == CALL_EXPR) note_interlocked(*tp);
+  if (args_rtl && (TREE_CODE(*tp) == CALL_EXPR || TREE_CODE(*tp) == AGGR_INIT_EXPR)) reorder_call(*tp);
+  return NULL_TREE;
+}
+
+static void pre_genericize(void *gcc_data, void *) {
+  tree fndecl = (tree)gcc_data;
+  if (!fndecl || TREE_CODE(fndecl) != FUNCTION_DECL || !DECL_SAVED_TREE(fndecl)) return;
+  walk_tree_without_duplicates(&DECL_SAVED_TREE(fndecl), order_args_walk, NULL);
 }
 
 static void read_keys(const char *path) {
@@ -279,6 +385,11 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
       else if (!strcmp(v, "off")) mode = MODE_OFF;
       else { error("%<fnvnx_order%>: unknown mode %s", v); return 1; }
     } else if (!strcmp(k, "keys") && v) read_keys(v);
+    else if (!strcmp(k, "args") && v) {
+      if (!strcmp(v, "rtl")) args_rtl = true;
+      else if (!strcmp(v, "ltr")) args_rtl = false;
+      else { error("%<fnvnx_order%>: unknown argument order %s", v); return 1; }
+    }
     else { error("%<fnvnx_order%>: unknown argument %s", k); return 1; }
   }
   struct register_pass_info pass;
@@ -288,5 +399,6 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
   pass.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pass);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish, NULL);
+  register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize, NULL);
   return 0;
 }

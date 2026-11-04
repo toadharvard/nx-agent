@@ -5,7 +5,9 @@
 
 1. units.cpp: the fnvnx_order plugin and fnvnx_compat.h's barriers give the expected AArch64 ILP32 code with the
    build's flags (tools/link/compile.sh), in the modes volatile (the build), keys, tso and off.
-2. litmus.cpp: multicore message-passing litmus tests with volatile flags (a reused result slot, a polled queue, a
+2. args.cpp: call arguments are evaluated right to left, as MSVC x86 does (args=rtl), ILP32 under qemu; the expected
+   order (args.expect) is checked against GCC x86-32, which pushes too, when the host has gcc -m32.
+3. litmus.cpp: multicore message-passing litmus tests with volatile flags (a reused result slot, a polled queue, a
    spin lock), freestanding ILP32 under qemu-aarch64 with 4 host threads. With the plugin no test may show a bad
    outcome; without it mp2 must (the test bites).
 
@@ -106,6 +108,56 @@ def codegen(scratch, plugin):
             check(hit == (kind == 'expect'), 'codegen %s: %s %s /%s/' % (mode, fn, kind, rx))
 
 
+X86_RT = r'''
+void v1_puts(const char *s) { int n = 0; while (s[n]) n++; int r;
+    __asm__ volatile("int $0x80" : "=a"(r) : "a"(4), "b"(1), "c"(s), "d"(n) : "memory"); }
+int main(void);
+void _start(void) { int r = main(); __asm__ volatile("int $0x80" :: "a"(1), "b"(r)); for (;;) {} }
+'''
+
+
+def args_order(scratch, plugin):
+    expect = open(os.path.join(HERE, 'args.expect')).read()
+    src = os.path.join(HERE, 'args.cpp')
+    # oracle: GCC x86-32 evaluates arguments right to left like MSVC (freestanding, Linux int 0x80)
+    rt = os.path.join(scratch, 'x86rt.c')
+    open(rt, 'w').write(X86_RT)
+    exe86 = os.path.join(scratch, 'args86')
+    common = ['-m32', '-O2', '-ffreestanding', '-fno-pic', '-fno-stack-protector']
+    ok86 = (subprocess.run(['gcc'] + common + ['-c', rt, '-o', rt + '.o'], capture_output=True).returncode == 0 and
+            subprocess.run(['g++'] + common + ['-std=gnu++17', '-fno-exceptions', '-fno-rtti', '-fno-threadsafe-statics',
+                                               '-c', src, '-o', exe86 + '.o'], capture_output=True).returncode == 0 and
+            subprocess.run(['ld', '-m', 'elf_i386', '-static', '-e', '_start', '-o', exe86, rt + '.o', exe86 + '.o'],
+                           capture_output=True).returncode == 0)
+    if ok86:
+        out86 = subprocess.run([exe86], capture_output=True, text=True).stdout
+        check(out86 == expect, 'args: GCC x86-32 (right to left) gives args.expect (%r)' % out86[:200])
+    else:
+        print('skip args x86-32 oracle: no gcc -m32')
+    if not shutil.which('qemu-aarch64'):
+        print('skip args: needs qemu-aarch64')
+        return
+    import qemu_ilp32 as q
+    base = list(q.CXXFLAGS)
+    for tag, extra, want in (('rtl', ['-fplugin=' + plugin], True),
+                             ('ltr', ['-fplugin=' + plugin, '-fplugin-arg-fnvnx_order-args=ltr'], False)):
+        q.CXXFLAGS = base + ['-fms-extensions', '-fno-strict-aliasing', '-fwrapv', '-mno-outline-atomics'] + extra
+        try:
+            exe = q.build([src], os.path.join(scratch, 'args_' + tag))
+        except RuntimeError as e:
+            check(False, 'args %s builds (%s)' % (tag, str(e)[-300:]))
+            continue
+        finally:
+            q.CXXFLAGS = base
+        rc, out = q.run(exe)
+        if want:
+            bad = [l for l, e in zip(out.splitlines(), expect.splitlines()) if l != e]
+            check(rc == 0 and out == expect, 'args ILP32 with the plugin: MSVC order in all %d cases (%s)'
+                  % (len(expect.splitlines()), bad[:3]))
+        else:
+            check(out != expect, 'args ILP32 with args=ltr: GCC\'s own order differs (the test bites)')
+
+
 def litmus(scratch, plugin):
     if not shutil.which('qemu-aarch64'):
         print('skip litmus: needs qemu-aarch64')
@@ -153,6 +205,7 @@ def main():
         return 1
     plugin = r.stdout.strip()
     codegen(scratch, plugin)
+    args_order(scratch, plugin)
     litmus(scratch, plugin)
     print('%d failed' % len(FAIL))
     return 1 if FAIL else 0

@@ -1,0 +1,9 @@
+call cba:123
+ctor ba:12
+member oba:12
+varargs ba:2
+postinc :100
+nested byax:121
+read s:557
+byvalue baT:12~
+retslot ba:123

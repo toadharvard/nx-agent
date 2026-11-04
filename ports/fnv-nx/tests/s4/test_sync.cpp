@@ -93,6 +93,17 @@ TEST(interlocked)
     CHECK_EQ(v, 12);
     CHECK_EQ(InterlockedCompareExchange(&v, 1, 12), 12);
     CHECK_EQ(v, 1);
+    /* a misaligned operand (packed field): x86's lock is atomic there; the split-lock path must give the same results */
+    static unsigned char raw[16];
+    volatile LONG *u = (volatile LONG *)(raw + 1);
+    *u = 5;
+    CHECK_EQ(InterlockedIncrement(u), 6);
+    CHECK_EQ(InterlockedDecrement(u), 5);
+    CHECK_EQ(InterlockedExchange(u, 9), 5);
+    CHECK_EQ(InterlockedExchangeAdd(u, 3), 9);
+    CHECK_EQ(InterlockedCompareExchange(u, 1, 7), 12);
+    CHECK_EQ(InterlockedCompareExchange(u, 1, 12), 12);
+    CHECK_EQ(*u, 1);
     void *volatile p = NULL;
     int x;
     CHECK(InterlockedCompareExchangePointer(&p, &x, NULL) == NULL);

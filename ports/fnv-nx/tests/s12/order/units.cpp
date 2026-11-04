@@ -75,6 +75,16 @@ void dse() { g_data = 1; g_flag = 1; g_data = 2; }
 // reject: ldar
 // reject: stlr
 int plain(Q *q) { q->plain = q->data[1]; return q->data[0]; }
+// a plain field this unit hands to an Interlocked function (NiRefObject::m_uiRefCount style): its plain accesses
+// are ordered too (ATOMIC-PLAIN-STORE: the x86 plain store is the release half)
+struct RC { long m_uiRefCount; long other; };
+extern "C" long InterlockedIncrement(volatile long *);
+void rc_inc(RC *r) { InterlockedIncrement((volatile long *)&r->m_uiRefCount); }
+// expect: stlr\tw
+// reject: ldar
+void rc_zero(RC *r) { r->m_uiRefCount = 0; r->other = r->other + 1; }
+// expect: ldar\tw
+long rc_get(RC *r) { return r->m_uiRefCount; }
 // the barrier intrinsics
 // expect: dmb[\t ]ish\n
 void rwb() { _ReadWriteBarrier(); }
