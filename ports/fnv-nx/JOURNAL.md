@@ -2792,3 +2792,23 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - Meanwhile, S1 on the compile tail (43 units).
   - Then a boot that also stubs image-vtable slots without a target, to see the frontier past them (S5's
     known_faults path).
+
+### J-0127 | 2026-11-04 | stream: S3-loader,S5-boot,data | status: wip | parent: J-0126
+
+* **correction** - J-0126 cites "the J-0118 decision" on binding vftable slots by analogy. That decision is J-0105.
+* **did** - The owner's game data is on the orchestrator's machine only, never committed.
+  - Source: the owner's GOG copy, via a browser login with lgogdownloader built from source. Ubuntu's 3.12 has no
+    `--browser-login`.
+  - Fallout: New Vegas Ultimate Edition 1.4.0.525(a), offline installer, unpacked with innoextract: 9.5 GB.
+  - `FalloutNV.exe` is 16,084,808 bytes, sha256 89e70204...d11dd0fe.
+* **measured** - The exe's layout is the one the decomp assumes.
+  - ImageBase 0x400000. `.text` 0x401000, `.rdata` 0x00fdf000, `.data` 0x01183000, `.tls` 0x01272000, then CONST,
+    `.rsrc`, `.reloc`. No `.bind` section, so no SteamStub.
+  - WinMain 0x0086a850 opens with `push ebp; mov ebp,esp; sub esp,0x378`, then the security cookie.
+* **found** - S3's loader refused the exe as "not a well-formed PE32": SizeOfImage is 0x010089e4, because .reloc ends
+  mid-page.
+* **did** - `8b24dc6`: loader/src/pe.c and loader/tools/fnvnx_pe.py round SizeOfImage up, as Windows does. Test:
+  tests/s3 test_unaligned_size_of_image (22 ok).
+* **next** - The first guest built at >= 8b24dc6 (full1), then the emulated boot on the real exe on this machine.
+  - Game data cannot reach the farms through git. The owner chooses agent-only storage: their HTTPS server on 443,
+    a private bucket with a read-only key in the environment, or the exe alone in the private artifacts repository.
