@@ -22,10 +22,16 @@
 # third-party checkouts (ext, tools/fetch.sh), the tree and the gate output (static-<commit>). JOBS (default nproc)
 # parallel compiles; every compiler runs under nice (NICE, default 19).
 # Needs: git, python3, network; ARTIFACTS (a clone of toadharvard/fnv-nx-build, as runner.sh exports) for the tree.
-# Installs (apt, sudo when not root) whatever is missing of: clang-18, libclang-18-dev, llvm-18-dev,
-# lib32stdc++-13-dev and libc6-dev-i386 (32-bit headers of the clang passes), g++-aarch64-linux-gnu, g++, jq, rsync.
-# Never g++-multilib: on Ubuntu it conflicts with the AArch64 cross compiler, and apt removes
+# Every file the gate needs is checked with the Ubuntu 24.04 package that ships it (REQ below); a missing file's
+# package is installed (apt, sudo when not root), or reinstalled when dpkg says it is installed. llvm-18-dev is one
+# of them on its own: clang-18 pulls in llvm-18 (llvm-config) and libclang-cpp18 but not llvm-18-dev, whose headers
+# (llvm/Frontend/OpenMP/OMP.inc) and libLLVM.so link fnvcheck needs (st1-4 at 7d1efb5: fnvcheck did not build, 0
+# sites). Never g++-multilib: on Ubuntu it conflicts with the AArch64 cross compiler, and apt removes
 # g++-aarch64-linux-gnu to install it (the first st1-4 runs compiled 0 units that way).
+#
+# Fails loudly (a FAILED report, its head on stderr for the runner's log, exit 2 or 3) when a tool is still missing,
+# fnvcheck does not build, GCC compiles no unit, clang gnu writes no rows, or a gate step fails. A class above
+# tools/static/baseline.tsv is a result (exit 0).
 #
 # Overrides for a machine that already has the inputs (e.g. a light test on a development machine, where a
 # full-tree prepare is not allowed): FARM_SRC=<checkout at <commit>> (no worktree), FARM_EXT=<dir> (used as it is,
@@ -44,30 +50,39 @@ WORK=$FARM_HOME/static-$C12
 mkdir -p "$WORK"
 san() { sed -e "s|$FARM_HOME|\$FARM_HOME|g" -e "s|$HOME|~|g"; }    # paths of this machine, not of the job
 
-# 1. Tools: clang/LLVM development packages for fnvcheck, the AArch64 cross compiler, 32-bit libstdc++/glibc headers.
-need=()
-command -v clang++-18 >/dev/null || need+=(clang-18)
-[ -f /usr/lib/llvm-18/include/clang/Tooling/Tooling.h ] || need+=(libclang-18-dev)
-[ -x /usr/lib/llvm-18/bin/llvm-config ] && ls /usr/lib/llvm-18/lib/libclang-cpp.so* >/dev/null 2>&1 || need+=(llvm-18-dev)
-[ -d /usr/include/x86_64-linux-gnu/c++/13/32 ] || need+=(lib32stdc++-13-dev)
-[ -f /usr/include/x86_64-linux-gnu/gnu/stubs-32.h ] || need+=(libc6-dev-i386)
-command -v aarch64-linux-gnu-g++ >/dev/null || need+=(g++-aarch64-linux-gnu)
-command -v g++ >/dev/null || need+=(g++)
-command -v jq >/dev/null || need+=(jq)
-command -v rsync >/dev/null || need+=(rsync)
-if [ ${#need[@]} -gt 0 ]; then
-  SUDO=; [ "$(id -u)" = 0 ] || SUDO=sudo
-  $SUDO apt-get update -q > "$WORK/apt.log" 2>&1
-  DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -q --no-install-recommends "${need[@]}" >> "$WORK/apt.log" 2>&1
-fi
-missing=()
-for t in clang++-18 aarch64-linux-gnu-g++ g++ jq rsync; do command -v "$t" >/dev/null || missing+=("$t"); done
-[ -x /usr/lib/llvm-18/bin/llvm-config ] || missing+=(llvm-config-18)
+fail() {  # fail <exit code> <file with the report body>: FAILED report, its head on stderr, exit
+  { echo "# static gate ${C12}, shard $K of $N FAILED"; echo; echo "- commit: \`$COMMIT\`"; cat "$2"; } > "$REPORT"
+  head -40 "$REPORT" >&2
+  echo "$REPORT"; exit "$1"
+}
+
+# 1. Tools: every file the gate needs, with the package that ships it on Ubuntu 24.04.
+LLVM=${LLVM:-/usr/lib/llvm-18}; export LLVM
+REQ=(/usr/bin/clang++-18:clang-18 "$LLVM/include/clang/Tooling/Tooling.h:libclang-18-dev"
+     "$LLVM/include/llvm/Frontend/OpenMP/OMP.inc:llvm-18-dev" "$LLVM/lib/libLLVM.so:llvm-18-dev"
+     "$LLVM/bin/llvm-config:llvm-18" "$LLVM/lib/libclang-cpp.so.18.1:libclang-cpp18"
+     /usr/include/x86_64-linux-gnu/c++/13/32:lib32stdc++-13-dev /usr/include/x86_64-linux-gnu/gnu/stubs-32.h:libc6-dev-i386
+     /usr/bin/aarch64-linux-gnu-g++:g++-aarch64-linux-gnu /usr/bin/g++:g++ /usr/bin/jq:jq /usr/bin/rsync:rsync)
+check_req() { missing=(); for r in "${REQ[@]}"; do [ -e "${r%:*}" ] || missing+=("$r"); done; }
+installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; }
+check_req
 if [ ${#missing[@]} -gt 0 ]; then
-  { echo "# static gate ${C12}, shard $K of $N FAILED"; echo; echo "- missing after apt: ${missing[*]}"
-    echo "- installed: ${need[*]:-nothing}"; echo; echo '```'; grep -iE "remov|conflict|error|unable" "$WORK/apt.log" | tail -15
-    echo '```'; } > "$REPORT"
-  echo "$REPORT"; exit 2
+  new=(); again=()
+  for p in $(printf '%s\n' "${missing[@]}" | sed 's/.*://' | sort -u); do
+    if installed "$p"; then again+=("$p"); else new+=("$p"); fi
+  done
+  SUDO=; [ "$(id -u)" = 0 ] || SUDO=sudo
+  APT=${APT:-apt-get}    # APT=true: a test that must not install anything
+  { $SUDO $APT update -q
+    [ ${#new[@]} -eq 0 ] || DEBIAN_FRONTEND=noninteractive $SUDO $APT install -y -q --no-install-recommends "${new[@]}"
+    [ ${#again[@]} -eq 0 ] || DEBIAN_FRONTEND=noninteractive $SUDO $APT install -y -q --no-install-recommends \
+                                --reinstall "${again[@]}"; } > "$WORK/apt.log" 2>&1 || true
+  check_req
+  if [ ${#missing[@]} -gt 0 ]; then
+    { echo "- missing after apt (file:package): ${missing[*]}"; echo "- installed: ${new[*]:-nothing}; reinstalled: ${again[*]:-nothing}"
+      echo; echo '```'; grep -iE "remov|conflict|error|unable|^E:" "$WORK/apt.log" | tail -15; echo '```'; } > "$WORK/fail.md"
+    fail 2 "$WORK/fail.md"
+  fi
 fi
 
 # 2. The port's tools at that commit, as a detached worktree outside the main checkout.
@@ -121,15 +136,30 @@ if aarch64-linux-gnu-g++ "${BUILD_FLAGS[@]}" -c -O2 -o /dev/null -include "$SHIM
      -I"$EXT/sse2neon" -I"$TREE/include" "$WORK/probe.cpp" > "$WORK/probe.log" 2>&1; then TC=ok
 else TC="FAILED: $(grep -m1 -E 'error|fatal' "$WORK/probe.log" | san | cut -c1-200)"; fi
 
-# 6. The gate on the shard.
+# 6. fnvcheck (the clang passes' checker), built before the gate so a failure is named, not counted as 0 sites.
 OUT=$WORK/out-$K-of-$N
 GLOG=$WORK/gate-$K-of-$N.log
+mkdir -p "$OUT"
+if ! bash "$P/tools/static/build.sh" "$OUT" > "$WORK/fnvcheck-build.log" 2>&1; then
+  { echo "- fnvcheck does not build (tools/static/build.sh), so the clang passes cannot run"
+    echo "- llvm: $("$LLVM/bin/llvm-config" --version 2>&1 | head -1), shared mode: $("$LLVM/bin/llvm-config" --shared-mode 2>&1 | head -1)"
+    echo; echo '```'; { grep -m8 -E 'missing|error|fatal|cannot|No such' "$WORK/fnvcheck-build.log" || true
+                        tail -5 "$WORK/fnvcheck-build.log"; } | san | cut -c1-240; echo '```'; } > "$WORK/fail.md"
+  fail 2 "$WORK/fail.md"
+fi
+
+# 7. The gate on the shard.
 rc=0
 UNITS=$LIST SSE2NEON=$EXT/sse2neon NICE=${NICE:-19} bash "$P/tools/static/run.sh" "$TREE" "$OUT" "$JOBS" > "$GLOG" 2>&1 || rc=$?
 t2=$(date +%s)
 compiled=$( (awk -F'\t' '$2=="0"' "$OUT/gcc/status.tsv" 2>/dev/null || true) | wc -l)
+gnu_rows=$( (find "$OUT/clang/gnu/rows" -name '*.tsv' -size +0 2>/dev/null || true) | wc -l)
+problems=()
+case " ${SKIP:-} " in *" gcc "*) ;; *) [ "$compiled" -gt 0 ] || problems+=("GCC compiled no unit") ;; esac
+case " ${SKIP:-} " in *" gnu "*) ;; *) [ "$gnu_rows" -gt 0 ] || problems+=("clang gnu wrote no rows") ;; esac
+if [ "$rc" -ne 0 ] && ! grep -q '^gate: FAIL' "$GLOG"; then problems+=("a gate step failed (exit $rc)"); fi
 
-# 7. Report: counts and sites (file, line, class) only; diagnostics when nothing compiled or the gate failed.
+# 8. Report: counts and sites (file, line, class) only; diagnostics when something failed.
 TSV=${REPORT%.md}.tsv
 : > "$TSV"
 for f in "$OUT"/sites/*.tsv; do
@@ -139,18 +169,19 @@ for f in "$OUT"/sites/*.tsv; do
 done
 sort -u -o "$TSV" "$TSV"
 {
-  echo "# static gate ${C12}, shard $K of $N"
-  echo
+  if [ ${#problems[@]} -gt 0 ]; then echo "# static gate ${C12}, shard $K of $N FAILED"; echo
+    echo "- **failed**: ${problems[*]}"; else echo "# static gate ${C12}, shard $K of $N"; echo; fi
   echo "- commit: \`$COMMIT\`"
   echo "- units in the shard: $(wc -l < "$LIST"); GCC compiled: $compiled"
   echo "- tree: $TREE_FROM, $((t1-t0)) s; gate: $((t2-t1)) s; jobs: $JOBS, host: $(nproc) CPUs"
   echo "- toolchain: $(aarch64-linux-gnu-g++ --version | head -1); $(clang++-18 --version | head -1); check: $TC"
   echo "- gate exit code: $rc (0 ok, 1 a class above tools/static/baseline.tsv or a failed step, 2 the gate could not run)"
+  echo "- clang gnu: $gnu_rows units with rows; fnvcheck: $(head -1 "$WORK/fnvcheck-build.log" 2>/dev/null | san | cut -c1-120)"
   echo "- steps:"
   echo; echo '```'
   grep -E '^(gcc|clang (gnu|msvc|atomic)|layouts|probe|report|gate|run\.sh)[: ]' "$GLOG" | san || true
   echo '```'
-  if [ "$compiled" = 0 ] || [ "$rc" != 0 ]; then
+  if [ ${#problems[@]} -gt 0 ] || [ "$rc" != 0 ]; then
     echo; echo "## Diagnostics"; echo
     if [ -f "$OUT/gcc/command.txt" ]; then
       echo "Command line of one unit:"; echo; echo '```'; san < "$OUT/gcc/command.txt" | cut -c1-2000; echo '```'
@@ -175,5 +206,8 @@ sort -u -o "$TSV" "$TSV"
   sort -t$'\t' -k2,2 -k3,3n -k1,1 "$TSV" | awk -F'\t' '{print $2" "$3" "$1}'
   echo '```'
 } > "$REPORT"
-echo "$REPORT"
-[ "$rc" -lt 2 ] || exit "$rc"     # the report says why; a class above the baseline is a result, not a job failure
+if [ ${#problems[@]} -gt 0 ]; then
+  head -60 "$REPORT" >&2     # the runner replaces the report of a failed job with its log's tail
+  echo "$REPORT"; exit 3
+fi
+echo "$REPORT"     # a class above the baseline (gate exit 1 with "gate: FAIL") is a result, not a job failure
