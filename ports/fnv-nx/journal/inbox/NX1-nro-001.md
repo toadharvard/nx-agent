@@ -42,13 +42,20 @@
   - Check 2 (memory) fails. The heap region (2 GiB), not the 3.2 GiB pool, is the limit, and GPU memory is process
     heap. With a 512 MiB GPU host that leaves 1,491 MiB of guest heap. The boot's peak is 4.8 MiB at WinMain, which
     is not representative: the check needs the first cell.
-  - Check 6 (gpu) fails: the package is HOST=plain with D3D9=null, and render/native's log path is outside the
-    layout.
+  - Check 6 (gpu, the native renderer only, owner decision) fails on three points:
+    - nxgpu_init uses 11 created objects without checking them (queue, swapchain, fbMem, cmdMem, codeMem,
+      descMem, ...);
+    - the native log is outside the layout;
+    - the package is HOST=plain, not the native host.
+    The native pools (249 MiB) fit the 512 MiB host heap.
 * **requests**
-  - Orchestrator: build the full1 package with a GPU host (NINE=1, or the native renderer when it links) so the
-    package draws. Add the D8 launcher sentence.
-  - Render machine: render/native/host/nxgpu_host.c should log to sdmc:/switch/fnv/nxgpu.log. Docked: either pick
-    1920x1080 from appletGetOperationMode or keep 720p and let VI scale (both work).
+  - Orchestrator: link the full1 package's host with render/native/host (nxgpu.c, nxgpu_host.c, deko3d) and
+    -DFNVNX_HOST_NO_CONSOLE, so the package draws. The Nine fallback is out (owner). Add the D8 launcher sentence.
+  - Render machine:
+    - nxgpu_init: check every create (queue, swapchain, every host_block, command buffers) and return NULL on
+      failure, so the host logs "deko3d init FAILED" instead of faulting;
+    - log to sdmc:/switch/fnv/nxgpu.log;
+    - docked output: either pick 1920x1080 from appletGetOperationMode or keep 720p and let VI scale.
   - S5: the emulator maps a 64 MiB guest heap (emu_guest.py HEAP_SIZE), so no boot can measure check 2's peak.
     The device gives 1,491 MiB.
   - R0: a gate on meta.json nx1_open (0 = device-ready).

@@ -39,7 +39,7 @@
  * tests/s5/datapath.py (S5-data) keeps these on the card, tests/nx1/check_fs.py checks the list covers every
  * FNVNX_SD_* above. drive_* = drive_<x> for any other Windows drive (path.cpp). */
 #define FNVNX_SD_PORT_NAMES "fnv.nro fnv-exefs.nsp guest.nso fnvnx.ini user drive_* host.log crash.log launcher.log " \
-                            "override.txt README.txt shaders.nvc0cache nxgpu.log"
+                            "override.txt README.txt nxgpu.log"
 
 /* Memory the game process needs from the application pool (docs/NRO.md, check 2): the 32BitNoReserved heap region
  * is 2 GiB, so the host takes at most that; below FNVNX_MIN_APP_MEMORY the launcher and the host refuse to start. */

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """NX1 check 2: memory. Everything the game process holds must fit what the console gives it, with margin.
 
-    check_mem.py --guest-elf fnvnx.elf --boot-json boot_summary.json [--backend plain|nine|native|all]
+    check_mem.py --guest-elf fnvnx.elf --boot-json boot_summary.json [--backend plain|native|all]
 
 The budget. Title takeover gives the application pool (about 3.2 GiB on retail), but the process runs in a
 32BitNoReserved address space (D1/D8), whose heap region is 2 GiB, and on the Switch the GPU's memory (deko3d
-blocks, Mesa's nouveau buffers) is process heap too. So the hard limit is the heap region:
+blocks) is process heap too. So the hard limit is the heap region:
     host heap (fnvnx_host_heap_size of the backend: GPU pools, Mesa, libnx)  + guest image (link span incl. bss)
   + S10's window backing (0x00fdf000..0x02100000, taken off the guest heap)  + guest heap peak  <=  2 GiB
   npdm      address space 32bit_no_reserved (2 GiB heap region, the figure above);
@@ -51,9 +51,6 @@ def host_heaps() -> dict[str, int]:
     out["plain"] = int(m.group(1)) * MIB if m else None
     m = re.search(r'#define\s+NXGPU_HOST_HEAP_MIB\s+(\d+)', read("render/native/host/nxgpu_host.c"))
     out["native"] = int(m.group(1)) * MIB if m else None
-    sh = open(os.path.join(ROOT, "render", "nine", "switch_host.sh"), errors="replace").read()
-    m = re.search(r'HOST_HEAP_MIB:-(\d+)', sh) or re.search(r'HOST_HEAP_MIB=(\d+)', sh)
-    out["nine"] = int(m.group(1)) * MIB if m else 512 * MIB   # render/nine/README.md: default 512 MiB
     return out
 
 
@@ -115,7 +112,7 @@ def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--guest-elf")
     ap.add_argument("--boot-json")
-    ap.add_argument("--backend", default="all", choices=["all", "plain", "nine", "native"])
+    ap.add_argument("--backend", default="all", choices=["all", "plain", "native"])
     a = ap.parse_args(argv)
     c = check(a.guest_elf, a.boot_json, a.backend)
     c.print()
