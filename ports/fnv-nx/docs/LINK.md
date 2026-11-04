@@ -405,6 +405,9 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   thread-local the source places at an address below it (outside `.tls`) gets a native TLS variable of its own. The block starts zeroed in each thread: S4 should point its per-thread template copy
   at it (`&__fnvnx_tls_image` of the current thread, `__fnvnx_tls_image_orig` / `_size`) and copy the image's
   template there at thread start, so `fs:[0x2c]` code and GCC's TLS accesses agree.
+* **Calls of an IAT slot's address**: a decomp `__declspec(dllimport)` function named after its slot
+  (`FUN_00fdf1c0(void *)`) is called directly by GCC (`bl`); when its name binds to an IAT slot as data, a call of it
+  binds to the slot's api (S4's implementation or the api name), never into the image's IAT words.
 * **GAME1 names** (S1, D13): prepare spells a Win32-looking name a unit binds to game code `fnvnx_game_<name>`
   (`GetCurrentThreadId` -> 0x00830470, `Sleep` -> the spin lock's acquire, `EnterCriticalSection` ->
   InterlockedIncrement's IAT slot in memorymanager.cpp); resolve looks such a reference up as `<name>` in the unit's
@@ -578,6 +581,34 @@ Same objects. Of 2,396 `unresolved-ctor-dtor` references (1,445 names), 75 bind 
 the deleting destructor and 1,500 to 1,018 trap stubs (655 reached only by exception cleanups, 363 called by emitted
 slot functions); 821 references on normal paths stay. Trial link: 8,709 -> **8,012 undefined names** (unresolved
 ctor/dtor names 1,442 -> 738), 0 multiple definitions.
+
+### Eighth round (full object set with today's rules, `-fPIC`; S2c)
+
+Tree prepared with the S1 round-6 rules (STATIC1 644 edits in 127 files, FALL1 12,004 in 462, GAME1, XINC1, XC1;
+prepare applies `units_renames.tsv` itself now), compiled with `compile.sh` (`-Werror=return-type -Wno-narrowing`,
+`-fPIC`): 2,738 objects of 2,978 units (240 fail), 16 minutes on 2 workers; probe 9 minutes. 279,507 references,
+234,079 resolved by address. Definitions: GCC's 423 `.localalias` symbols (178 objects, none branched to) are no
+candidates (with them 3,309 definitions had been ambiguous, 1 now). 247 variables defined natively at image addresses,
+62 of them STATIC1 copies in objects whose unit never names the address; `apply` retargets nothing (0 code
+references through a local symbol: every defined variable goes through the GOT); S13's `check_rebind.py`: 0; S5's
+`pcrel_abs.py`: 0 PC-relative references to image symbols (55 to `__dso_handle`, which only the trial link's
+`--defsym=__dso_handle=0` makes absolute). 2,074 operator new/delete references to the game's allocator, 6 GAME1
+references resolved, 1 call of an IAT slot address bound to its import, 376 TLS references, 1,810 bridges, 7,761 trap
+stubs for 16,563 virtual slots, ctors/dtors: 75 aliased, 1,508 to 1,023 traps, 854 left. Address map: F 52,580,
+C 1,793, X 1,017, G 88 (all with D1 and D0), V 1,965 (all checked in the linked image), E 4,449. Trial link of 3,477
+objects: 0 multiple definitions, **8,027 undefined names**:
+
+| Undefined names | Count | |
+|---|---:|---|
+| `__fnv_` | 4,790 | addresses of units not compiled yet |
+| C++ `unresolved` | 1,606 | no address, no definition |
+| C++ `unresolved-ctor-dtor` | 769 | ctors/dtors defined nowhere, called on normal paths |
+| C++ `extern-text` | 154 | `.text` addresses no unit defines and S4 has no provider for |
+| C++ `special-unresolved` | 111 | typeinfo 48, non-virtual thunks 31, vtables 29, virtual thunks 2, VTT 1 |
+| C++ runtime / other | 39 | libstdc++ names 23, names bound in one object and not in another 16 |
+| C `unresolved` | 202 | C names and decomp data no unit defines |
+| platform `provider` / `import` | 287 | defined by S4's platform objects (162) and the import layer (125), not in this link |
+| C runtime / other | 69 | `extern-text` data 28, GCC runtime 24, others 17 |
 
 ## Open problems
 
