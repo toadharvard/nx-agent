@@ -50,7 +50,7 @@ def main(argv):
         return 2
     ref = sh([os.path.join(work, 'ref')]).stdout.splitlines()
     s2n = os.environ.get('SSE2NEON')
-    extra = ['-DWITH_SSE2NEON', '-I' + s2n] if s2n and os.path.isfile(os.path.join(s2n, 'sse2neon.h')) else []
+    extra = ['-DWITH_SSE2NEON', '-I' + os.path.join(PORT, 'shim', 'include'), '-I' + s2n] if s2n and os.path.isfile(os.path.join(s2n, 'sse2neon.h')) else []
     if not extra:
         ref = [l for l in ref if not l.startswith('mm_')]
         print('note: SSE2NEON not set, the intrinsics are not checked')

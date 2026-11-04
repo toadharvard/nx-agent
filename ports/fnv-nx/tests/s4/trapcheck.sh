@@ -4,6 +4,10 @@
 # aarch64-linux-gnu-g++ (the full guest link is a farm job, D17).
 #
 #   tests/s4/trapcheck.sh <traps.txt> [addrmap.tsv]
+#   TRIAL=<undefined names of the trial link> tests/s4/trapcheck.sh <traps.txt> [addrmap.tsv]
+#
+# The second form measures the trial link's "runtime / C / platform" class (link summary.txt) as the guest sees it:
+# of that class, the names the guest still binds to traps, less what the current sources define.
 #
 # traps.txt: the guest's trap-stub names, one per line (undefined.txt of the guest link, or the names whose body
 # branches to __fnvnx_undef_trap in fnvnx.elf). S4-owned: tools/pipeline/undef.py categories win32_import,
@@ -30,8 +34,24 @@ for f in "$P"/win32/*.cpp "$P"/crt/*.c "$P"/crt/*.cpp "$ROOT"/render/nine/d3dx/*
 done
 aarch64-linux-gnu-nm --defined-only "$OUT"/obj/*.o | awk 'NF==3 && $2 ~ /[TtWwDdBbRrVv]/ {print $3}' | sort -u > "$OUT/defined.txt"
 python3 -I "$ROOT/tools/pipeline/undef.py" "$TRAPS" ${ADDRMAP:+--addrmap "$ADDRMAP"} -o "$OUT/bycat.tsv" > /dev/null
-awk -F'\t' '$2=="win32_import" || $2=="crt_msvc" || $2=="libc_glibc" || $1 ~ /^_?Bink/ {print $1}' "$OUT/bycat.tsv" \
-	| sort -u > "$OUT/owned.txt"
+if [ -n "${TRIAL:-}" ]; then
+	# TRIAL=<trial link undefined names>: the trial link's "runtime / C / platform" class (tools/link/fnvlink.py
+	# check(): not __fnv_ / bridge, and RUNTIME or not a C++ name) that the guest still binds to traps
+	python3 -I - "$ROOT/tools/link" "$TRIAL" "$TRAPS" > "$OUT/owned.txt" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import fnvlink
+traps = set(open(sys.argv[3]).read().split())
+for n in sorted(set(open(sys.argv[2]).read().split())):
+    if n.startswith(('__fnv_', '__fnvnx_br_')):
+        continue
+    if (fnvlink.RUNTIME.match(n) or not n.startswith('_Z')) and n in traps:
+        print(n)
+PY
+else
+	awk -F'\t' '$2=="win32_import" || $2=="crt_msvc" || $2=="libc_glibc" || $1 ~ /^_?Bink/ {print $1}' "$OUT/bycat.tsv" \
+		| sort -u > "$OUT/owned.txt"
+fi
 comm -23 "$OUT/owned.txt" "$OUT/defined.txt" > "$OUT/left.txt"
 sed 's/^/left\t/' "$OUT/left.txt"
-echo "trapcheck: $(wc -l < "$OUT/left.txt") of $(wc -l < "$OUT/owned.txt") S4 trap names still undefined"
+echo "trapcheck: $(wc -l < "$OUT/left.txt") of $(wc -l < "$OUT/owned.txt") ${TRIAL:+runtime-class }S4 trap names still undefined"
