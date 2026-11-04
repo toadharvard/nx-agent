@@ -195,6 +195,8 @@ def place(cpu, seq, prio, core3=False):
         role = cpu & 0xFF
     elif cpu >> 63 or cpu & ~0xFF:
         role = 0
+    elif cpu >= 32 or not ((0xF if core3 else 0x7) >> cpu & 1):
+        role = 0   # a core that is not ours: the default row (placement.h, NX1)
     else:
         return ("explicit", cpu, 1 << (cpu & 31), win32_to_horizon_prio(prio))
     name, ideal, mask, hp, mask3 = table[role]
@@ -208,10 +210,10 @@ def place(cpu, seq, prio, core3=False):
 def cpu_spec(spec, ideal, mask):
     """fnvnx_cpu_spec(): thread_set_cpu's spec applied to (ideal, mask)"""
     if not spec >> 63:
-        return spec & 31, 1 << (spec & 31)
+        return (spec, 1 << spec) if spec < 3 else (ideal, mask)   # not an application core: unchanged (NX1)
     m, want = (spec >> 8) & 7, spec & 0xFF
     mask = m or mask
-    if want != 0xFF and want < 32:
+    if want != 0xFF and want < 3:
         ideal = want
     elif not mask >> ideal & 1:
         ideal = next(c for c in range(32) if mask >> c & 1)

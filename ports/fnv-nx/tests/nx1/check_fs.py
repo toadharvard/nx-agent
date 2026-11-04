@@ -51,7 +51,9 @@ def strip_comments(src: str) -> str:
             i = n if j < 0 else j
         elif src.startswith("/*", i):
             j = src.find("*/", i + 2)
-            i = n if j < 0 else j + 2
+            j = n if j < 0 else j + 2
+            out.append("\n" * src.count("\n", i, j))   # line numbers stay right
+            i = j
         else:
             out.append(c)
             i += 1
