@@ -897,9 +897,20 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     stats['duplicate_strong_names'] = sum(1 for s in strong.values() if len(s) > 1)
     data_def_names = collections.defaultdict(dict)   # source -> {native name: address symbol it becomes}
     for a, name, src in data_defs:
+        if name in data_def_names[src]:
+            continue
         if ADDR_SYM % a not in data_def_names[src].values():  # objcopy allows one old name per new name
             data_def_names[src][name] = ADDR_SYM % a
             used_addr.add(a)
+        else:
+            # a second native definition of the same image variable in this object (tesform.cpp: `DAT_011c54cc`
+            # and `fnv_00485a70::DAT_011c54cc`, S13b split-global): it becomes its own weak symbol, which aliases.ld
+            # defines as the address symbol, so neither copy stays private (S2c-abi)
+            k = sum(1 for v in data_def_names[src].values() if v.startswith(ADDR_SYM % a + '_d')) + 1
+            dup = '%s_d%d' % (ADDR_SYM % a, k)
+            data_def_names[src][name] = dup
+            alias_lines.append('%s = %s;' % (dup, ADDR_SYM % a))
+            stats['data_defs_same_address'] += 1
     for a, name, src in tls_defs:   # thread-local definitions at an image .tls address: the native block's slot
         if TLS_SYM % a not in data_def_names[src].values():
             data_def_names[src][name] = TLS_SYM % a
@@ -1188,7 +1199,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     if stats_ov:
         lines += ['override rows: ' + ', '.join('%s %d' % kv for kv in sorted(stats_ov.items()))]
     lines += ['', 'variables defined natively at a data-image address: %d (%d copies in objects whose unit does not '
-              'name the address: STATIC1 header variables)' % (len(data_defs), stats['rebound_copies']),
+              'name the address: STATIC1 header variables; %d second definitions of an address in one object)'
+              % (len(data_defs), stats['rebound_copies'], stats['data_defs_same_address']),
               'address map entries by kind: %s' % ' '.join('%s=%d' % kv for kv in sorted(amap_kinds.items())),
               'deleting destructors (G) with both D1 and D0: %d of %d' % (n_deldtor, amap_kinds.get('G', 0)),
               'synthesized vtable objects linked: %d' % (len(have) - len(real)),
