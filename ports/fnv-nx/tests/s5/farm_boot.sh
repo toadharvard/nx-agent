@@ -175,6 +175,9 @@ done
   else
     echo "- image: none (the empty image)"
   fi
+  if [ -n "$GAME" ]; then
+    echo "- game install: $GAME$( [ -f "$GAME/SYNTHETIC" ] && echo ' (synthetic install, tests/s5/synth_install.py: not the game data)')"
+  fi
   echo "- undefined symbols: $UNDEF"
   [ -f "$LINK/boot/summary.txt" ] && echo "- the farm's raw boot: $(grep -h '^STOPPED' "$LINK/boot/summary.txt" | head -1)"
   for tag in $BOOTS; do

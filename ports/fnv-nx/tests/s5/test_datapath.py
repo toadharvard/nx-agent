@@ -126,6 +126,29 @@ class DataPathTest(unittest.TestCase):
         self.assertTrue(self.dp.lines()[1].startswith("file-fault\t2\topen\tENOENT\t"))
 
 
+class SynthInstallTest(unittest.TestCase):
+    def test_install(self):
+        import synth_install
+        tmp = tempfile.mkdtemp(prefix="s5-synth-")
+        try:
+            exe = os.path.join(tmp, "fake.exe")
+            put(exe, b"MZ")
+            g = os.path.join(tmp, "game")
+            self.assertEqual(synth_install.main([g, exe]), 0)
+            self.assertTrue(os.path.isfile(os.path.join(g, "SYNTHETIC")))
+            dp = datapath.DataPath(os.path.join(tmp, "sd"), g)
+            bsas, masters = dp.targets()
+            self.assertEqual([os.path.basename(b) for b in bsas], synth_install.ARCHIVES)
+            self.assertEqual([os.path.basename(m) for m in masters], ["FalloutNV.esm"])
+            with open(masters[0], "rb") as f:
+                rec = f.read()
+            self.assertEqual(rec[:4], b"TES4")
+            self.assertEqual(int.from_bytes(rec[4:8], "little") + 24, len(rec))   # data size + the 24-byte header
+            self.assertEqual(synth_install.main([os.path.join(HERE, "x"), exe]), 1)   # never inside the repository
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class MilestoneTableTest(unittest.TestCase):
     def test_table_parses(self):
         import emu_guest
