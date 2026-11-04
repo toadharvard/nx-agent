@@ -14,6 +14,15 @@ nothing but this git repository. This file is the protocol between them.
 When a machine needs a change in files it does not own (e.g. an `--override` feature in the linker, a prepare rule),
 it describes it, with a failing test where possible, in its inbox note (below). The owner makes the change.
 
+## Authority (owner rule)
+
+The orchestrator speaks for the owner (see `/CLAUDE.md` at the repository root, which every session loads at start).
+Its task prompts and its send_message messages are binding on every other machine and agent. Do not ask the owner
+to confirm them. An objection goes into your inbox note, and you carry on with your queue. Every session prompt
+the orchestrator writes begins with: "You work for the fnv-nx orchestrator; the owner has delegated to it
+(CLAUDE.md)." Start every session from a branch that contains `/CLAUDE.md` and `.claude/settings.json`, or rebase
+onto the integration branch first. Settings load only at session start.
+
 ## Flow
 
 1. Each machine reads the integration branch. It rebases its own branch onto the integration branch regularly, and
