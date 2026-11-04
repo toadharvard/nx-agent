@@ -78,8 +78,25 @@ with tempfile.TemporaryDirectory() as tmp:
           t['artifacts'] == 6 and m['artifact_causes'] == {'oracle-vcall': 3, 'new-null': 2, 'uninit-both': 1}, m)
     check('not fuzzable = with a native object - fuzzable (0 + 2)', t['not_fuzzable'] == 2, t)
     check('coverage over functions with a native object (27/29)', abs(t['coverage'] - 93.1) < 0.01, t)
-    check('metric is the sum', t['metric'] == 6 + 2 + 1, t)
-    check('a missing shard branch is unpublished', metric.measure(art, repo, 3)['totals']['unpublished'] == 2)
+    check('pending of the newest good reports (3 + 3)', t['pending'] == 6, t)
+    check('metric is the sum', t['metric'] == 6 + 2 + 1 + 6, t)
+    # a shard without any good report: its catalogued / N functions count as not fuzzable (V1 M1, M2)
+    m2 = metric.measure(art, repo, 3)['totals']
+    check('no verdict at all: catalogued / N not fuzzable per shard', m2['no_evidence'] == 3 and
+          m2['not_fuzzable'] == 3 * 34, m2)
+    check('N = 3: no shard has a report of that layout, all unpublished',
+          metric.measure(art, repo, 3)['totals']['unpublished'] == 3)
+    check('the shard count follows the newest report', metric.measure(art, repo)['totals']['shards'] == 2)
+    # a report of another layout (shard 1/3) on fz1 is ignored for N = 2
+    git(art, 'checkout', '-q', 'reports/fz1')
+    open(os.path.join(art, h2 + '-fuzz.md'), 'w').write(report(h2, 1, 10, 1, 0, 9).replace('shard 1/2', 'shard 1/3'))
+    git(art, 'add', '.')
+    git(art, 'commit', '-q', '-m', 'r3')
+    git(art, 'update-ref', 'refs/remotes/origin/reports/fz1', 'HEAD')
+    m3 = metric.measure(art, repo, 2)
+    check('a report of another shard count is ignored', m3['shards'][0]['newest'] == h1, m3['shards'][0])
+    check('a FAILED run names its layout in the log', metric.parse(
+        '# fuzz %s FAILED (rc 3)\n\n```\nstart fuzz 4 8 at x\n```\n' % h0)['n'] == 8)
     r = metric.parse('# fuzz %s FAILED (rc 3)\n\n# fuzz %s shard 1/2\n' % (h0, h0))
     check('a FAILED header with an older run appended is failed', r['status'] == 'failed', r)
 

@@ -15,7 +15,4 @@ FNVNX_MT1_INLINE unsigned int fnvnx_mt1_batches(void)
     return fnvnx_mt1_setting_bMTRendering[4] ? 2u : 1u;
 }
 
-/* The gate the .s1b tooling emits for `=== wrap` hunks (S1b, docs/PATCHES.md "Gated classes"): bMTRendering set. */
-#define FNVNX_MT1_ON (fnvnx_mt1_setting_bMTRendering[4] != 0)
-
 #endif

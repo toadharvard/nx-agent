@@ -786,6 +786,9 @@ class Emu:
             if "] .got " in line:
                 f = line.split("]", 1)[1].split()
                 self.got = (int(f[2], 16), int(f[4], 16))
+            m = re.search(r"\] (\.data\.rel\.ro|\.data|\.init_array)\s+PROGBITS\s+([0-9a-f]+) [0-9a-f]+ ([0-9a-f]+)", line)
+            if m:
+                self.__dict__.setdefault("data_sections", {})[m.group(1)] = (int(m.group(2), 16), int(m.group(3), 16))
         init = self.code_addr("__libc_init_array")
         self.uc.hook_add(UC_HOOK_CODE, self.on_exe_vtables, begin=init, end=init)
 
@@ -988,13 +991,13 @@ class Emu:
             got_at.setdefault(w, []).append(rt(g) + 4 * i)
         uc.mem_map(self.VT_EXT_BASE, self.VT_EXT_SIZE, UC_PROT_READ | UC_PROT_WRITE)
         at = self.VT_EXT_BASE
+        moved = {}   # runtime address point of a short native vtable -> its copy's address point
         for exe_vt, sym, off in V:
             a, size = objs[sym]
             point = rt(a + off) & 0xFFFFFFFF
             n_nat = max(0, (size - off) // 4)
             exe_slots = self.vt_bound[point][1]
-            refs = got_at.get(point, [])
-            if n_nat >= len(exe_slots) or not refs:
+            if n_nat >= len(exe_slots) or point in moved:
                 continue
             new = bytearray(uc.mem_read(rt(a), off + 4 * n_nat))
             for k in range(n_nat, len(exe_slots)):
@@ -1006,15 +1009,74 @@ class Emu:
                 continue
             uc.mem_write(at, bytes(new))
             self.vt_ext_copies = getattr(self, "vt_ext_copies", []) + [(at, at + len(new), sym)]
-            for r in refs:
-                uc.mem_write(r, struct.pack("<I", at + off))
+            moved[point] = at + off
             st["vtables extended"] += 1
-            st["GOT entries redirected"] += len(refs)
             self.vt_bound[at + off] = (exe_vt, exe_slots, at + len(new))
             at = (at + len(new) + 7) & ~7
-        print("   exe-vtables: %d short vtables extended to the exe's slot count (%d slots added, %d null), %d GOT "
-              "entries redirected to the copies" % (st["vtables extended"], st["slots added"],
-                                                     st["slots added as null"], st["GOT entries redirected"]))
+        # every reference to a moved address point: GOT entries, data words (statically built objects' vptrs, VTTs),
+        # and adrp/add pairs in the code (a constructor's own vptr store)
+        for w, places in got_at.items():
+            if w in moved:
+                for r in places:
+                    uc.mem_write(r, struct.pack("<I", moved[w]))
+                    st["GOT entries redirected"] += 1
+        for sname, (sa, ssz) in getattr(self, "data_sections", {}).items():
+            if sname == ".got":
+                continue
+            words = struct.unpack(f"<{ssz // 4}I", bytes(uc.mem_read(rt(sa), ssz - ssz % 4)))
+            for i, w in enumerate(words):
+                if w in moved:
+                    uc.mem_write(rt(sa) + 4 * i, struct.pack("<I", moved[w]))
+                    st["data words redirected"] += 1
+        text_lo, text_n = self.base, len(self.text_bytes) & ~3
+        code = struct.unpack(f"<{text_n // 4}I", self.text_bytes[:text_n])
+        for i, w in enumerate(code):
+            if w & 0x9F000000 != 0x90000000:
+                continue
+            rd = w & 31
+            imm = ((w >> 29) & 3) | (((w >> 5) & 0x7FFFF) << 2)
+            imm -= (1 << 21) if imm >> 20 else 0
+            pc = text_lo + 4 * i
+            page = ((pc & ~0xFFF) + (imm << 12)) & 0xFFFFFFFF
+            for j in range(i + 1, min(i + 5, len(code))):
+                v = code[j]
+                if v & 0x7FC00000 == 0x11000000 and (v >> 5) & 31 == rd:   # add Rd', Rd, #imm12 (no shift)
+                    tgt = page + ((v >> 10) & 0xFFF)
+                    if tgt in moved:
+                        T = moved[tgt]
+                        pg = ((T & ~0xFFF) - (pc & ~0xFFF)) >> 12
+                        uc.mem_write(pc, struct.pack("<I", (w & 0x9F00001F) | ((pg & 3) << 29) | (((pg >> 2) & 0x7FFFF) << 5)))
+                        uc.mem_write(text_lo + 4 * j, struct.pack("<I", (v & 0xFFC003FF) | ((T & 0xFFF) << 10)))
+                        st["adrp/add redirected"] += 1
+                    break
+                if v & 31 == rd and v & 0x1F000000 not in (0x39000000, 0xB9000000):   # rd overwritten
+                    break
+        print("   exe-vtables: %d short vtables extended to the exe's slot count (%d slots added, %d null); references "
+              "moved to the copies: %d GOT entries, %d data words, %d adrp/add pairs"
+              % (st["vtables extended"], st["slots added"], st["slots added as null"], st["GOT entries redirected"],
+                 st["data words redirected"], st["adrp/add redirected"]))
+
+    def collect_trap(self):
+        """--collect-traps (collect-all boot, as linhost --collect-traps): at fnvnx_vslot_trap (virtual function
+        defined nowhere) return 0 to the caller, at fnvnx_special_trap (constructor/destructor defined nowhere) return
+        this; print each distinct (kind, caller, text) once as 'linhost: collect<TAB>kind<TAB>caller<TAB>text'
+        (tests/s5/collect_traps.py reads both)."""
+        text = self.trap_text()
+        if not text:
+            return False
+        uc = self.uc
+        special = " fnvnx_special_trap+0x0" in self.sym(uc.reg_read(UC_ARM64_REG_PC))
+        lr = uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF
+        link = lr - self.base + self.link_base if self.relocatable and self.base <= lr < self.base + self.size else lr
+        seen = self.__dict__.setdefault("collect_seen", set())
+        key = (special, link, text)
+        if key not in seen:
+            seen.add(key)
+            print(f"linhost: collect\t{'special' if special else 'vslot'}\t{link:#x}\t{text}\t#{len(seen)}")
+        if not special:
+            uc.reg_write(UC_ARM64_REG_X0, 0)
+        uc.reg_write(UC_ARM64_REG_PC, lr)
+        return True
 
     def vslot_past_end(self, err):
         """exe-vtables, at a fetch fault: a virtual call through slot k of a native vtable bound to an exe vftable,
@@ -1025,9 +1087,30 @@ class Emu:
         if not getattr(self, "vt_bound", None) or "fetch" not in err.lower():
             return None
         m = re.search(r"\| vslot (\d+) of native vtable (0x[0-9a-f]+)$", self.null_call())
-        if not m:
-            return None
-        k, base = int(m.group(1)), int(m.group(2), 16)
+        if m:
+            k, base = int(m.group(1)), int(m.group(2), 16)
+        else:   # a tail call (br): a register holds the vptr whose slot past the end is the faulting pc
+            pc = self.uc.reg_read(UC_ARM64_REG_PC) & 0xFFFFFFFF
+            k = base = None
+            for i in range(18):
+                v = self.xreg(i) & 0xFFFFFFFF
+                b = self.vt_bound.get(v)
+                if b is None:
+                    continue
+                for j in range(max(0, (b[2] - v) // 4), len(b[1])):
+                    try:
+                        (w,) = struct.unpack("<I", self.uc.mem_read(v + 4 * j, 4))
+                    except UcError:
+                        break
+                    if w == pc:
+                        k, base = j, v
+                        break
+                if k is not None:
+                    break
+            if k is None:   # the vptr register was reused: the slot offset from the call site's ldr, the vptr from
+                k, base = self.vcall_by_object()   # a register holding an object of a bound vtable
+            if k is None:
+                return None
         b = self.vt_bound.get(base)
         if b is None or base + 4 * k < b[2] or k >= len(b[1]) or b[1][k] not in self.vt_F:
             return None
@@ -1041,6 +1124,41 @@ class Emu:
                   f"continued at {key[2]}")
         self.vt_past[key] += 1
         return rt & 0xFFFFFFFF
+
+    def vcall_by_object(self):
+        """(slot, vptr) for a blr whose register came from `ldr wN, [xM, #imm]` a few instructions back (xM may since
+        be reused): the slot is imm/4, the vptr that of the first register holding an object whose vptr is a bound
+        vtable shorter than slot; (None, None) otherwise"""
+        uc = self.uc
+        lr = uc.reg_read(UC_ARM64_REG_LR)
+        try:
+            (call,) = struct.unpack("<I", uc.mem_read(lr - 4, 4))
+        except UcError:
+            return None, None
+        if call & 0xFFFFFC1F != 0xD63F0000:
+            return None, None
+        n, imm = (call >> 5) & 31, None
+        for back in range(2, 16):
+            try:
+                (w,) = struct.unpack("<I", uc.mem_read(lr - 4 * back, 4))
+            except UcError:
+                break
+            if w & 0xFFC00000 == 0xB9400000 and w & 31 == n:
+                imm = ((w >> 10) & 0xFFF) * 4
+                break
+        if imm is None:
+            return None, None
+        k = imm // 4
+        for i in list(range(19, 29)) + list(range(0, 18)):
+            v = self.xreg(i) & 0xFFFFFFFF
+            try:
+                (vp,) = struct.unpack("<I", uc.mem_read(v, 4))
+            except UcError:
+                continue
+            b = self.vt_bound.get(vp)
+            if b is not None and vp + 4 * k >= b[2] and k < len(b[1]):
+                return k, vp
+        return None, None
 
     def vt_past_lines(self):
         return [f"vslot-past-end\t{n}\t{e:#010x}\t{k}\t{f}"
@@ -1557,6 +1675,11 @@ class Emu:
             try:
                 uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
             except UcError as e:
+                if getattr(self, "collect_traps", False) and self.collect_trap():
+                    t.result = uc.reg_read(UC_ARM64_REG_X0)
+                    t.ctx, t.state, t.resume_pc = uc.context_save(), "ready", uc.reg_read(UC_ARM64_REG_PC)
+                    self.cur = None
+                    continue
                 past = self.vslot_past_end(str(e))
                 if past is not None:   # exe-vtables: the exe's slot past the native vtable's end
                     t.result = uc.reg_read(UC_ARM64_REG_X0)
@@ -1627,6 +1750,8 @@ def main(argv):
     ap.add_argument("--inject", action="append", default=[], metavar="OBJ",
                     help="map an ILP32 object (a guest-side stand-in) after the guest; trap stubs of the functions it "
                     "defines branch to it (needs --elf)")
+    ap.add_argument("--collect-traps", action="store_true",
+                    help="collect-all boot: vslot/constructor traps return to their caller and are listed once each")
     ap.add_argument("--watch", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="log every guest write to ADDR..ADDR+SIZE (default 4) with pc, lr and the value")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
@@ -1649,6 +1774,8 @@ def main(argv):
             emu.install_fault_stubs(a.stub_faults)
         if a.exe_vtables or a.stub_faults and "exe-vtables" in fault_table_options(a.stub_faults):
             exe = [src for name, _, src in (f.partition("=") for f in a.file) if name.lower().endswith(".exe")]
+            exe += [p for p in (os.path.join(root, d, "FalloutNV.exe") for d in ("switch/fnv", "fnvnx/game"))
+                    if os.path.exists(p)]   # a game install mounted with --root
             if not a.addrmap or not exe:
                 print("   exe-vtables: off (needs --addrmap and the exe as --file)")
             else:
@@ -1658,6 +1785,7 @@ def main(argv):
     emu.miles = getattr(emu, "miles", {})
     if a.stub_faults and a.addrmap and "ctor-returns-this" in fault_table_options(a.stub_faults):
         emu.install_ctor_this(a.addrmap, a.elf)
+    emu.collect_traps = a.collect_traps
     for obj in a.inject:
         emu.install_inject(obj, a.elf)
     if getattr(emu, "standin_names", None):

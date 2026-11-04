@@ -3439,3 +3439,36 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - The R0 regression detector is merged: trend per head, regressions with their commit ranges, and stale passes no
     longer count.
   - Scorecard: 1 pass / 17 fail / 11 no-data / 4 stale.
+
+### J-0153 | 2026-11-04 | stream: orchestration | status: wip | parent: J-0152
+
+* **decided (owner)** - No settings presets (D20 revised): 60 fps at the exe's default settings, met in code (port
+  overhead, threading, algorithms). S15-simd audits the port's own overhead, by class and in M per frame.
+* **decided** - D20: bodies the decomp lacks may be reconstructed against the exe (byte match required). They live
+  on fnv-nx-build `recon/<unit>` only; nx-agent holds only the rule that applies them.
+* **landed** - LINK_OVERRIDES=auto: every full build links the native renderer. uam is built at its pin in the farms.
+  S5-boot gets past the memory manager to WinMain; the ini files are on gamedata/exe. S5-data publishes Data/ for
+  the main menu. NX1 closes V1's 7 device-check refutations. S12's P1/P2 are fixed (3 -> 0). S13b's cause audit:
+  692 functions move from artifact to real-bug or triage.
+* **allocation (owner)** - Closed work is put to sleep, and the critical path is parallelized.
+  - Archived: S11, S12, S1-STL, S2c-abi; farms keys1, try1of4, cmp1, perf1, eq4-eq6 (equivalence at 3/6 shards).
+  - Finishing their last merge: R0, P0, S1-fuzzB.
+  - New streams: S2c-vt2 (general slot fill), S1-layout (layout-offset, native-empty-body), render-lit,
+    render-land, G1-gpu (GPU 27.2 -> 16.7 ms), S15-scene (scene graph in parallel).
+  - New farms: full4 and full5, so a fresh NRO comes out more often.
+  - Every new stream starts from docs/STREAM_START.md.
+
+| metric | value |
+|---|---|
+| census errors | 0 / 2978 |
+| link undefined / trap stubs | 4279 / 2315 (last full1 link 06857911f5ab, before the S2c/S4/S5 merges) |
+| runtime traps up to the boot's stop | 2 names + 123 IAT slots -> 0 |
+| slot fill (trial link) | 1,295 -> 880 |
+| ABI open pairs (S1b) | 1,001 -> 867 |
+| fuzz (S13b) | 2,018 -> 2,927 functions with verdicts; artifact 2,321 -> 1,629 |
+| order divergences (S12) | 3 -> 0 |
+| boot | WinMain; stub boot initializer skips 767 -> 1; known_faults 22 -> 10 |
+| native render | UI only; Doc Mitchell frame black (S16 bisecting) |
+| CPU worst frame (model, defaults) | 34.3 ms placed; plan60 23.4 ms |
+| GPU real019 | 27.22 ms handheld |
+| gates1 | 1 pass / 17 fail / 11 no-data / 4 stale (last scorecard) |
