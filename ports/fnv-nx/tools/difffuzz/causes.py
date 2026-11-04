@@ -119,6 +119,9 @@ POLICY = {
                                                 'variable or table (or a literal: check the pointee)'),
     'vptr-unpaired':  ('real-bug', 'S2c', False, 'no kind-V row pairs the native vtable with the image vftable'),
     'falloff?':       ('real-bug', 'S1', True, 'the native runs off a function end (FALL1)'),
+    'after-native-undefined': ('real-bug', 'S1', True, 'the function calls a C++ name the link binds to nothing '
+                                                       '(native-undefined): the native side gets a canned result '
+                                                       'where the oracle runs the body; fix the name, then re-fuzz'),
     'native-trap':    ('real-bug', 'S1', True, 'the native executes a trap (FALL1 __builtin_trap or GCC '
                                                'unreachable) on a path where the exe returns'),
     'layout-offset':  ('real-bug', 'S1', True, 'a pointer into the same object at another offset (a few words): a '
@@ -447,11 +450,28 @@ def _scan_object(path):
         for spans in by_sec.values():
             for lo, hi, a in spans:
                 out.setdefault(a, set())
+        out['_defined'] = {sy.name for sy in syms if isinstance(sy['st_shndx'], int) and sy.name}
     return out
+
+
+def unbound_callees(source, addr):
+    """C++ names the native function calls that neither its object defines nor the link's address map binds
+    (declared-only members, inline functions never emitted): the native side calls a trap stub there. None
+    without the object or the map."""
+    cs = native_callees(source, addr)
+    if cs is None:
+        return None
+    _load_addrmap()
+    if not _LINKSYM:
+        return None
+    path = os.path.join(_obj_dir(), source.replace('/', '_') + '.o')
+    defined = (_OBJ_CACHE.get(path) or {}).get('_defined', set())
+    return sorted(n for n in cs if n.startswith('_Z') and n not in defined and n not in _BOUND)
 
 
 _VFT = None
 _LINKSYM = None
+_BOUND = set()           # every link_symbol / native_symbol the address map names
 
 
 def image_vftables():
@@ -491,6 +511,9 @@ def _load_addrmap():
                     _VFT.add(a)
                 elif f[2]:
                     _LINKSYM[a] = f[2]
+                _BOUND.add(f[2])
+                if len(f) > 3:
+                    _BOUND.add(f[3].split('\t', 1)[0])
 
 
 def _is_dtor(sym):
@@ -573,10 +596,17 @@ def refine(rec, cause=None):
 
 
 def _with_effects(rec, cause):
-    if cause not in TRIAGE_REFINABLE or not EFFECTS:
+    if cause not in TRIAGE_REFINABLE:
         return cause
-    e = EFFECTS.get(os.path.basename(rec.get('_file') or rec.get('_p') or ''))
-    return (_rule_effects(e) if e else None) or cause
+    e = EFFECTS.get(os.path.basename(rec.get('_file') or rec.get('_p') or '')) if EFFECTS else None
+    got = _rule_effects(e) if e else None
+    if got:
+        return got
+    try:
+        u = unbound_callees(rec.get('source'), int(rec.get('address') or '0', 16))
+    except (ValueError, TypeError):
+        u = None
+    return 'after-native-undefined' if u else cause
 
 
 # ------------------------------------------------------------------------------------------------------- summary
