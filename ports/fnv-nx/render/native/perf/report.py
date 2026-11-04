@@ -260,7 +260,7 @@ def build_report(spec, raw, prof, ovf, dk, work):
     commit = sh(["git", "-C", HERE, "rev-parse", "HEAD"]).stdout.strip()
     # the commit changes when the branch is rebased; the tree of render/native (+ dirty flag) identifies the code
     tree = sh(["git", "-C", HERE, "rev-parse", "HEAD:ports/fnv-nx/render/native"]).stdout.strip()
-    dirty = bool(sh(["git", "-C", HERE, "status", "--porcelain", "--", ".."]).stdout.strip())
+    dirty = bool(sh(["git", "-C", HERE, "status", "--porcelain", "--", "..", ":!report.json"]).stdout.strip())   # not itself
     gpu = json.load(open(os.path.join(work, "out", "gpu.json")))
     gpu_sum = {}
     for mix, lst in gpu["scenes"].items():
