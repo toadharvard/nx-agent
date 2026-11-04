@@ -2726,3 +2726,21 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **next** - S2c (stopped by the owner): recognise VLIT1's `m_p = &DAT_0101212c` store as a vptr store and map it to
   `_ZTV21GameSettingCollection`. S1: STL1 `_Container_base_aux_alloc_real` (blk_00b20000_od_ob1_rtm, 16),
   blk_00ac0000_od_ob1 (18), the rest of the census tail, then S13's FALL1/uninit/split-global classes.
+
+### J-0124 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0123
+
+* **measured** - Census at ea77051 (farm1, and try2of4 on S1's wip): **2,932 of 2,978 clean, 46 failing** (was 2,917/61).
+  TAIL1 typename (56ae24d) is not in it yet.
+* **found** - blk_00b20000_od_ob1_rtm (16 errors) is MSVC `vector<void*>`'s copy constructor (0x00b355d0), written
+  against `<vector>` internals.
+  - `_SECURE_SCL` = 1, by the unit's own hand-written vector copy (AsContainer/AsVector/AsIterBase):
+    `_Myownedaux`, `_Alaux`, then `_Alval`/`_Myfirst`/`_Mylast`/`_Myend`, and iterators carrying `_Myaux`.
+  - The unit needs `_Container_base_aux_alloc_real<A>` (with `_Container_base_aux`, `_Aux_cont`), `_Destroy_range`
+    and `stdext::unchecked_uninitialized_copy`. It also needs a two-argument vector const_iterator, which libstdc++
+    cannot give.
+* **decided** - Option (a): STL1 gets a checked-iterator shim type modelled on MSVC's `_Vector_const_iterator`
+  (`_Myaux`, `_Myptr`, two-argument constructor). It is used only in units that derive from
+  `_Container_base_aux_alloc_real`, and its layout is the one the unit's own copy proves.
+* **next** - A fresh S1 agent (the third ran out of context): STL1 per this decision; blk_00ac0000_od_ob1 (18); the
+  census tail, with the 114 TAIL1 units checked on the farm census of 446464b; then S13's FALL1 falloff, uninit and
+  split-global classes.
