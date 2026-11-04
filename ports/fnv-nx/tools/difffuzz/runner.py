@@ -525,6 +525,13 @@ class Pair:
                                 getattr(self.target, 'dummies', None),
                                 (world.garbage_words(case.seed, 'x86'), world.garbage_words(case.seed, 'a64')),
                                 self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()))
+        if d is not None:
+            # dynamic evidence for causes.py (S13b: oracle-callee-unloaded): the original addresses of the unit's
+            # functions the native actually entered in this run (their __fnv_<X> entry blocks were executed)
+            ent = getattr(self.target.image, 'entries', {}) or {}
+            got = sorted({o for a, o in ent.items() if a in ra.blocks})
+            if got:
+                d['arm_entered'] = ['%08x' % o for o in got[:64]]
         if d is not None and ra.private_reads:
             d['arm_private_reads'] = ra.private_reads
             names = self._private_names(ra.private_addrs)

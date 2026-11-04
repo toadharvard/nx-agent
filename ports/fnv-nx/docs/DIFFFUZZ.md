@@ -305,6 +305,9 @@ evidence in the record or a replay, else the record goes on to the other probes:
 - `call-order`, `bool-repr`, `uninit-*` and `array-new-check` rest on the record (two adjacent calls swapped in
   both traces; a replay; the native's own overflow throw), `msvc-inlined` on the oracle code (adaptive follow loads
   the callee whenever its oracle code exists; what stays is the case without it).
+Dynamic evidence for causes.py: every divergence carries `arm_entered`, the original addresses of the unit's
+functions whose native entry the run executed (up to 64; S13b's oracle-callee-unloaded can rest on it instead of a
+traced call the callee makes).
 Test: `tests/s13/test_audit.py`.
 
 Test: `tests/s13/test_d19.py`.

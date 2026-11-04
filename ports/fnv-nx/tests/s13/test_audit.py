@@ -58,6 +58,16 @@ def main():
     rx.ret = ra.ret = None
     d = runner.compare(cv, rx, ra, w, vcalls=({0x00401000}, set()))
     check(d is None, 'vcall-stub-alias: the same raw word on both machines is the same call (%s)' % d)
+    # dynamic evidence: a divergence carries the unit functions the native entered
+    sys.path.insert(0, HERE)
+    from test_d14 import build_image
+    cvi = conv.Conv('?f@@YAHH@Z', 'test')
+    with tempfile.TemporaryDirectory() as d:
+        img = build_image('\tadd w0, w0, #1\n\tret\n', d)
+        p = runner.Pair(runner.Target(cvi, 0x00401000, {0x00401000: bytes.fromhex('8b442404c3')}, img, {}), {})
+        _, _, dv = p.run(world.Case(seed=1, args={'p0': b'\x05\0\0\0'}))
+        check(dv is not None and dv.get('arm_entered') == ['00401000'], 'arm_entered names the entered functions (%s)'
+              % (dv and dv.get('arm_entered')))
     print('%d failures' % len(FAIL))
     return 1 if FAIL else 0
 
