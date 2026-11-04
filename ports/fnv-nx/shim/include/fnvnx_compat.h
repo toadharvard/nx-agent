@@ -82,9 +82,11 @@ inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volat
 #define _exception_code() 0UL
 #define GetExceptionCode() 0UL
 
-/* Every definition tagged `// @fnv 0x...` is emitted out of line even where it is inlined everywhere: the link step
- * (tools/link) binds references to it by address (prepare.py rule KEEP1). */
-#define FNVNX_KEEP __attribute__((used))
+/* Every definition tagged `// @fnv 0x...` is emitted out of line and never inlined (prepare.py rule KEEP1): it is a
+ * function of the original binary, the decomp's calls of it were real calls, and the link step (tools/link) binds
+ * each call by address - which may be another unit's definition when the decomp has several copies of that address
+ * (S13: an inlined local duplicate differs from the function the address binds to). */
+#define FNVNX_KEEP __attribute__((used, noinline))
 
 /* MSVC binds a C-style cast to a non-const reference to a temporary ((T&)Make(x)); prepare.py RCAST1 wraps the
  * temporary in fnvnx_lvalue, which hands back the same object (alive to the end of the full expression). */

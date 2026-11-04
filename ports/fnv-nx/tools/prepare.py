@@ -179,6 +179,9 @@ TEMPLATE_PREFIX = re.compile(r'^\s*template\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>
 def head_kind(head):
     """Kind of the brace that follows `head` (the text just before it) and the fragment that introduced it:
     namespace / extern / enum / class / init / function / other."""
+    close = head.find('*/')
+    if close >= 0 and not 0 <= head.find('/*') < close:  # the window began inside a /* comment
+        head = head[close + 2:]
     frag = re.split(r'[;{}]', HEAD_NOISE.sub('', head))[-1].strip()
     bare = HEAD_DECOR.sub(' ', TEMPLATE_PREFIX.sub('', frag)).strip()
     if re.match(r'(?:inline\s+)?namespace\b', bare): kind = 'namespace'
@@ -199,7 +202,8 @@ def scope_spans(text):
         c = m.group()
         if c == '{':
             i = m.start()
-            kind, h = head_kind(text[max(0, i - 300):i])
+            # the head window starts at a line start, so a `//` comment is never cut in half (its tail would count)
+            kind, h = head_kind(text[text.rfind('\n', 0, max(0, i - 300)) + 1:i])
             stack.append((i, kind, h))
         elif c == '}':
             if stack:

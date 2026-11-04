@@ -937,6 +937,59 @@ def r_image_statics(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- FALL1
+#
+# Some decomp functions return a value on every path but the last: the body was reconstructed without its final
+# return. MSVC then returned whatever eax held; GCC treats flowing off the end as unreachable and emits no epilogue,
+# so on AArch64 the code runs into the next function (S13: PathingLocation::HasValidTriangle 004ff7e0). FALL1 puts
+# `__builtin_trap()` at the end of every non-void function whose last statement is not a return / throw: where the
+# end is unreachable it is dead code, where it is reached the game stops there with a trap instead of executing the
+# next function. (What MSVC returned there has to be read from the x86 code per site; S1b patches can replace a trap.)
+
+FALL_SKIP_RET = re.compile(r'^(?:(?:FNVNX_KEEP|inline|static|virtual|explicit|extern|constexpr|__forceinline|'
+                           r'__inline|friend)\s+|extern\s+"C\+?\+?"\s*|template\s*<[^{};]*>\s*)+')
+FALL_DECLARATOR = re.compile(r'((?:::)?(?:[A-Za-z_]\w*(?:\s*<[^<>;{}()]*(?:<[^<>;{}()]*>)?[^<>;{}()]*>)?\s*::\s*)*'
+                             r'(?:~?[A-Za-z_]\w*|operator\s*(?:\(\)|[^\s(]+)))\s*\(')
+FALL_END = re.compile(r'(?:\breturn\b[^;]*;|\bthrow\b[^;]*;|__builtin_trap\s*\(\s*\)\s*;|__builtin_unreachable\s*\(\s*\)\s*;|'
+                      r'\b(?:abort|exit|_exit|ExitProcess|ExitThread|terminate|_CxxThrowException|__CxxThrowException|'
+                      r'FUN_00ec7894)\s*\([^;]*\)\s*;)\s*$')
+
+def r_falloff_traps(path, text, stats):
+    """FALL1: `__builtin_trap()` at the end of non-void functions that do not end in a return (see above)."""
+    if '{' not in text: return text
+    spans = prepare.scope_spans(text)
+    edits, func_end = [], -1
+    for o, c, k, h in spans:
+        if k != 'function' or o < func_end: continue        # only outermost function bodies
+        func_end = c
+        head = prepare.HEAD_DECOR.sub(' ', prepare.HEAD_NOISE.sub('', h)).strip()
+        head = re.sub(r'^(?:\s*(?:public|private|protected)\s*:(?!:))+', '', head).strip()   # access label
+        m = None
+        for mm in FALL_DECLARATOR.finditer(head):
+            m = mm                                          # the declarator is the first name followed by `(`
+            break
+        if not m: continue
+        ret = FALL_SKIP_RET.sub('', head[:m.start()]).strip()
+        ret = prepare.HEAD_DECOR.sub(' ', ret).strip()
+        name = m.group(1)
+        if not ret or re.search(r'(?:^|\W)(?:if|while|for|switch|catch|return|else|do|sizeof)$', ret): continue
+        ret = re.sub(r'\b(?:__thiscall|__cdecl|__stdcall|__fastcall|__clrcall|WINAPI|CALLBACK|APIENTRY|NTAPI|WINAPIV|'
+                     r'STDMETHODCALLTYPE|__declspec|FNV_\w+|FNVNX_\w+|FORCEINLINE|NOINLINE)\b', ' ', ret).strip()
+        if re.fullmatch(r'(?:const\s+|volatile\s+)*void', ret) or 'operator' in name and not ret: continue
+        if re.search(r'[=,(]$', ret) or ret.endswith(('return', 'new', 'delete')): continue   # an expression
+        if not re.search(r'[A-Za-z_]', ret): continue
+        if re.search(r'\\[ \t]*\n', text[o:c]): continue          # inside a #define (continued lines)
+        body = COMMENT.sub(' ', text[o + 1:c]).rstrip()
+        if not body or FALL_END.search(body): continue
+        edits.append((c, ' __builtin_trap(); /* fnv-nx FALL1 */ '))
+        stats['FALL1'] += 1
+    if not edits: return text
+    out, pos = [], 0
+    for at, s in edits:
+        out.append(text[pos:at]); out.append(s); pos = at
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -956,5 +1009,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_keep_definitions, r_if_exists, r_sal_attributes, r_cs28_members, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list, r_image_statics,
+RULES = [r_unit_renames, r_keep_definitions, r_if_exists, r_sal_attributes, r_cs28_members, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list, r_image_statics, r_falloff_traps,
          r_msvc_base_layout]
