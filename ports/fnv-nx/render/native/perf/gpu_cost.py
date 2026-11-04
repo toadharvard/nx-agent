@@ -76,7 +76,8 @@ LIT_PERMUTATION = {"lit.frag": "lit_d1p4.frag", "lit_spec.frag": "lit_spec_d1p4.
 # before shading where an earlier draw is in front: in the renderer's state-sorted order depths are random, so of k
 # layers the expected number shaded is the harmonic number H(k) (H(1) = 1, H(2) = 1.5, H(3) = 1.83; linear between).
 # A draw that discards (alpha test) loses early-z: all its layers are shaded (and it rejects nothing after it, which
-# the model ignores). Depth-only, test-only and blended families shade every layer. EARLY_Z = False: every layer
+# the model ignores). Depth-only passes (shadow maps) write depth too and are rejected the same way; test-only and
+# blended families shade every layer. EARLY_Z = False: every layer
 # shaded (the model before).
 EARLY_Z = True
 
@@ -90,7 +91,7 @@ def harmonic(k):
 
 def shaded_layers(m, alpha_share):
     k = m["overdraw"]
-    if not EARLY_Z or m.get("depth", 0) < 2 or m.get("depth_only") or m.get("blend"):
+    if not EARLY_Z or m.get("depth", 0) < 2 or m.get("blend"):
         return k
     return alpha_share * k + (1.0 - alpha_share) * harmonic(k)
 RS_ALPHATESTENABLE, RS_FOGENABLE = 15, 28
