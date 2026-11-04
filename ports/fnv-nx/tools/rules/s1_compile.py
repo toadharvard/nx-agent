@@ -1550,9 +1550,18 @@ def r_falloff_traps(path, text, stats):
 # the same name, arity and scope when they differ only in integer types and every decorated spelling of that name
 # in the unit's units.json symbols binds the same address: the calls reach the same function with the same bits.
 # (With C linkage the two are a conflict outright: `extern "C" void _delete(void*, unsigned int)` and `(void*, size_t)`.)
+# The two may also differ in the return type (`extern "C" int NiSprintf(char*, int, const char*, ...)` and
+# `char* NiSprintf(char*, unsigned int, const char*, ...)`, both bound to 0x00a305b0) when no call of that name in
+# the unit uses the returned value: every mention of the name outside its prototypes is a call that is a whole
+# expression statement (after `;`, `{`, `}`, `else` or the `)` of an if / while / for), and the parameters that differ
+# are 32-bit integers on both sides (int / unsigned int / size_t / long ...). The callee and the argument bits are the
+# same, and the return register is ignored either way (DUPINT1-RET).
 
 INT_TYPES = re.compile(r'^(?:(?:const|volatile|signed|unsigned|short|long|int|char|__int8|__int16|__int32|__int64|'
                        r'size_t|DWORD|UINT|INT|LONG|ULONG|WORD|BYTE|BOOL)\s*)+$')
+# the 32-bit ones (on MSVC x86 and AArch64 ILP32 alike): DUPINT1-RET takes only these, so the value is passed as is
+INT32_TYPES = re.compile(r'^(?:const\s+|volatile\s+)*(?:(?:signed|unsigned)(?:\s+(?:int|long(?:\s+int)?))?|int|long(?:\s+int)?|'
+                         r'unsigned\s+long\s+int|__int32|size_t|DWORD|UINT|INT|LONG|ULONG|BOOL)(?:\s+const)?$')
 _UNIT_SYMBOLS = None
 
 def _unit_symbols(path):
@@ -1574,9 +1583,48 @@ def _param_type(p):
         p = p[:p.rfind(ids[-1])]                          # drop the parameter name
     return re.sub(r'\s+', ' ', p).strip()
 
+DUPINT_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)', re.S)
+
+def _mask_code(text):
+    """text with string / character literals and comments blanked (same length, newlines kept)"""
+    return DUPINT_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+
+def _statement_start(masked, at):
+    """True when masked[at] begins a statement: after `;`, `{`, `}`, `else`, or the `)` of if / while / for."""
+    i = at - 1
+    while i >= 0 and masked[i].isspace(): i -= 1
+    if i < 0 or masked[i] in ';{}': return True
+    if masked[i] == 'e' and re.search(r'(?<![\w.])else$', masked[max(0, i - 5):i + 1]): return True
+    if masked[i] != ')': return False
+    depth = 0
+    for j in range(i, -1, -1):                          # the matching '('
+        if masked[j] == ')': depth += 1
+        elif masked[j] == '(':
+            depth -= 1
+            if depth == 0: break
+    else: return False
+    return bool(re.search(r'(?<![\w.>])(?:if|while|for)\s*$', masked[max(0, j - 12):j]))
+
+def _results_unused(text, name):
+    """True when every mention of `name` in text outside its prototypes is a call that is a whole expression
+    statement `name(...);` (its value is discarded)."""
+    masked = _mask_code(text)
+    protos = [(m.start(), m.end()) for m in prepare.PROTO.finditer(masked) if m.group(1) == name]
+    for m in re.finditer(r'(?<![\w.>:])%s\b' % re.escape(name), masked):
+        if any(a <= m.start() < b for a, b in protos): continue
+        k = m.end()
+        while k < len(masked) and masked[k].isspace(): k += 1
+        if k >= len(masked) or masked[k] != '(': return False
+        e = _call_end(masked, k)
+        if masked[e:].lstrip()[:1] != ';' or not _statement_start(masked, m.start()): return False
+    for m in re.finditer(r'(?:\.|->|::)\s*%s\b' % re.escape(name), masked):
+        return False                                    # a member or qualified name: not this simple case
+    return True
+
 def r_duplicate_int_overloads(path, text, stats):
     """DUPINT1: drop later integer-only-different duplicate prototypes bound to one address (see above). Only a pair
-    of signatures with the same return type is handled; anything else is left as it is."""
+    of signatures is handled, with the same return type or (DUPINT1-RET) with results that are never used; anything
+    else is left as it is."""
     syms = _unit_symbols(path)
     if not syms: return text
     groups, spans = {}, None
@@ -1598,12 +1646,16 @@ def r_duplicate_int_overloads(path, text, stats):
         sigs = []
         for types, ret, m in decls:
             if (types, ret) not in [(t, r) for t, r, _ in sigs]: sigs.append((types, ret, m))
-        if len(sigs) != 2 or sigs[0][1] != sigs[1][1]: continue
+        if len(sigs) != 2: continue
         a, b = sigs[0][0], sigs[1][0]
         if not all(x == y or (INT_TYPES.match(x) and INT_TYPES.match(y)) for x, y in zip(a, b)): continue
         addrs = {v for k, v in syms.items()                # C++ decorations, or the C name (_name, _name@N)
                  if re.match(r'^\?%s@@|^_%s(?:@\d+)?$' % (re.escape(name), re.escape(name)), k)}
         if len(addrs) != 1: continue
+        if sigs[0][1] != sigs[1][1]:
+            if a == b or not _results_unused(text, name): continue
+            if not all(x == y or (INT32_TYPES.match(x) and INT32_TYPES.match(y)) for x, y in zip(a, b)): continue
+            stats['DUPINT1-RET'] += 1
         drops += [m for types, ret, m in decls if types == b]
     if not drops: return text
     out, pos = [], 0
@@ -3932,6 +3984,78 @@ def r_placement_only_delete(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- NSCALL1
+#
+# A namespace N of a unit declares its own C++ prototype of a CRT name (`namespace fnv_005f3a20 { int strcpy_s(char*,
+# unsigned int, const char*); int _stricmp(const char*, const char*); }`), bound by the recipe to the game's wrapper
+# (`?strcpy_s@fnv_005f3a20@@YAHPADIPBD@Z` -> 0x00406d30). DECL1 keeps it (N::strcpy_s is not ::strcpy_s). The unit
+# saw no other declaration of the name on MSVC, so every unqualified call in N went to N::name. On the target the
+# shim (force-included fnvnx_crt.h) and the headers DECL1 adds declare ::name as well; ordinary lookup inside N still
+# stops at N::name, but a class-type argument (`strcpy_s(buf, 260, keyText)` with a NiFixedStringEx that converts to
+# const char*) brings in ::name by argument-dependent lookup, and GCC finds the call ambiguous (size_t is unsigned
+# long). NSCALL1 qualifies the unqualified calls of such a name inside N as `N::name(`: qualified lookup finds exactly
+# N::name, the function MSVC called. Only where the unit's units.json symbols bind the name only in N (no global
+# `?name@@...` / `_name`, no other scope): MSVC emitted no call to another function of that name from this unit; and
+# only where no class in the unit declares a member of that name (a member call would not be N::name). <math.h> names
+# are left to DECL1 (their arguments are arithmetic: no argument-dependent lookup).
+
+NSCALL_CALL = re.compile(r'(?<![\w.>:~])(\s*)([A-Za-z_]\w*)(\s*\()')
+
+def r_namespace_crt_calls(path, text, stats):
+    """NSCALL1: unqualified calls of a namespace's own C++ prototype of a CRT / Win32 name, bound only in that
+    namespace by the recipe -> `N::name(...)` (see above)."""
+    if 'namespace' not in text: return text
+    if prepare.PLATFORM is None: prepare.PLATFORM = prepare.platform_names()
+    platform = prepare.PLATFORM
+    if not any(n in text for n in platform): return text
+    syms = _unit_symbols(path)
+    if not syms: return text
+    masked = _mask_code(text)
+    spans = None
+    want = {}                                           # namespace head -> {name}
+    for m in prepare.PROTO.finditer(masked):
+        name = m.group(1)
+        if name not in platform or name in prepare.MACRO_NAMES or name in prepare.MATH_NAMES: continue
+        if spans is None: spans = prepare.scope_spans(text)
+        chain = prepare.scope_chain(spans, m.start())
+        if not chain or any(k != 'namespace' for k, _ in chain): continue
+        heads = [re.sub(r'^(?:inline\s+)?namespace\s+', '', h).strip() for _, h in chain]
+        if any(not re.fullmatch(r'[A-Za-z_]\w*', h) or h == 'std' for h in heads): continue
+        if re.search(r'\bextern\s*"C"', text[m.start():m.end()]): continue
+        scope = ''.join('%s@' % h for h in reversed(heads))
+        bound = [k for k in syms if re.match(r'^\?%s@|^_%s(?:@\d+)?$' % (re.escape(name), re.escape(name)), k)]
+        if not bound or any(not k.startswith('?%s@%s@' % (name, scope)) for k in bound): continue
+        want.setdefault('::'.join(heads), set()).add(name)
+    if not want: return text
+    # a class that declares a member of that name: leave the name alone
+    for o, c, k, h in spans:
+        if k != 'class': continue
+        for nm in [n for names in want.values() for n in names]:
+            if re.search(r'(?<![\w.>:])%s\s*\(' % re.escape(nm), masked[o:c]):
+                for names in want.values(): names.discard(nm)
+    edits = []
+    for o, c, k, h in spans:
+        if k != 'function': continue
+        chain = prepare.scope_chain(spans, o)
+        nss = [re.sub(r'^(?:inline\s+)?namespace\s+', '', hh).strip() for kk, hh in chain if kk == 'namespace']
+        names = want.get('::'.join(nss))
+        if not names or any(kk == 'function' for kk, _ in chain): continue   # only outermost function bodies
+        for m in NSCALL_CALL.finditer(masked, o + 1, c):
+            if m.group(2) not in names: continue
+            before = masked[max(0, m.start() - 40):m.start()].rstrip()
+            if re.search(r'(?:\boperator|::|\.|->)$', before): continue
+            if re.search(r'(?:(?<!\w)[A-Za-z_]\w*|(?<=[\w\s])[*&]|>)$', before) and \
+               not re.search(r'(?<![\w.>])(?:return|else|do|case|throw)$', before): continue   # a declaration
+            edits.append((m.start(2), '::'.join(nss) + '::'))
+    if not edits: return text
+    out, pos = [], 0
+    for at, q in sorted(set(edits)):
+        out.append(text[pos:at]); out.append(q); pos = at
+        stats['NSCALL1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
-              r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete]
+              r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
+              r_namespace_crt_calls]
 RULES += REFS_RULES
