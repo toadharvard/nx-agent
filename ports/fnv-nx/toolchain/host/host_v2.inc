@@ -48,7 +48,7 @@ static u64 h_thread_create(u64 entry, u64 arg, u64 stack, u64 prio, u64 cpu) {
 
 /* Host-side pthreads (libnx newlib: priority 0x3B, the process's ideal core, all cores) take the render-worker
  * row: in the Nine host the long-lived one is Gallium Nine's CSMT worker. Active when the host links with
- * -Wl,--wrap=__syscall_thread_create (toolchain/package/build.sh; render/nine/switch_host.sh should add it). */
+ * -Wl,--wrap=__syscall_thread_create (toolchain/package/build.sh and render/nine/switch_host.sh). */
 struct __pthread_t;
 int __real___syscall_thread_create(struct __pthread_t **t, void *(*fn)(void *), void *arg, void *stack, size_t size);
 int __wrap___syscall_thread_create(struct __pthread_t **t, void *(*fn)(void *), void *arg, void *stack, size_t size) {
