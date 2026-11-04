@@ -2011,6 +2011,39 @@ def r_opaque_enums(path, text, stats):
     text = OPAQUE_ENUM.sub(decl, text)
     return ENUM_DEF.sub(defn, text)
 
+# ---------------------------------------------------------------------------------------------------------- ENUM2
+#
+# An enum with an enumerator in [2^31, 2^32) (`CHANGE_SCRIPT_VARIABLES = 0x80000000` in TESObjectREFR.h, havok's
+# `MARKED_RO`, ExtendedColors 0xff800000, `ShaderParameter ... = 0xffffffff`): MSVC's underlying type is int and the
+# value is converted to int (0x80000000 is INT_MIN, 0xffffffff is -1), so it promotes, compares, divides, shifts and
+# widens as a negative int. GCC picks unsigned int (long long when the enum also has a negative value). ENUM2 writes
+# MSVC's type out, `enum E : int {`, with an (int) cast on each such literal (a fixed type does not take the value
+# otherwise). Only enums whose initializers are all integer literals in [-2^31, 2^32) and which have no base yet
+# (S12 f8 ENUM-UNSIGNED: 6 sites in the sample, 51 definitions in the tree). The enum bit-fields S12 lists as
+# ENUM-BITFIELD (signed in MSVC) would take the same base; the tree has none.
+
+ENUM_BODY = re.compile(r'\benum(\s+[A-Za-z_]\w*)?(\s*)\{([^{}]*)\}')
+ENUM_INIT = re.compile(r'(//[^\n]*|/\*.*?\*/)|(=\s*)(-\s*)?(0[xX][0-9a-fA-F]+|\d+)([uUlL]*)\b', re.S)
+
+def r_enum_int_values(path, text, stats):
+    """ENUM2: `enum E { A = 0x80000000 }` -> `enum E : int { A = (int)0x80000000 }` (see above). Same line count."""
+    if 'enum' not in text: return text
+    def body(m):
+        code = re.sub(r'//[^\n]*|/\*.*?\*/', ' ', m.group(3), flags=re.S)
+        inits = re.findall(r'=([^,]*)', code)
+        vals = []
+        for e in inits:
+            v = re.fullmatch(r'\s*(-\s*)?(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\s*', e)
+            if not v: return m.group(0)                   # an expression: left as it is
+            vals.append(-int(v.group(2), 0) if v.group(1) else int(v.group(2), 0))
+        if not any(v >= 2 ** 31 for v in vals) or not all(-2 ** 31 <= v < 2 ** 32 for v in vals): return m.group(0)
+        def lit(n):
+            if n.group(1) or n.group(3) or int(n.group(4), 0) < 2 ** 31: return n.group(0)
+            return n.group(2) + '(int)' + n.group(4) + n.group(5)
+        stats['ENUM2'] += 1
+        return 'enum%s : int%s{%s}' % (m.group(1) or '', m.group(2) or ' ', ENUM_INIT.sub(lit, m.group(3)))
+    return ENUM_BODY.sub(body, text)
+
 # ---------------------------------------------------------------------------------------------------------- ELAB1
 #
 # Some units name a class after a Win32 / CRT function (`struct HeapAlloc { ... }` in blk_00e60000: the decomp's
@@ -2429,5 +2462,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment]

@@ -154,6 +154,17 @@ check('ALIGN1 moves align behind the class key of definitions and forward declar
        'template <class T> __declspec(novtable) struct __declspec(align(16)) X { T a; };'])
 check('ALIGN1 keeps the line count', str(got.count('\n')), ['13'])
 
+# ---- ENUM2
+got = run(s1.r_enum_int_values, 'enum\n{\n    CHANGE_SCRIPT_VARIABLES = 0x80000000, // = 0x90000000\n    B = 4\n};\n'
+          'enum ShaderParameter { SP_NONE = 0xffffffff, SP_X = 0x80000000u, SP_Y = -1 };\n'
+          'enum Small { S0 = 1 };\nenum Expr { E0 = 0x80000000 | 1 };\nenum class Sc { Q = 0x80000000 };\n'
+          'enum Huge { H = 0x100000000 };\nenum Based : unsigned { U = 0x80000000 };\n')
+check('ENUM2 gives enums with values >= 2^31 MSVC\'s int', got,
+      ['enum : int\n{\n    CHANGE_SCRIPT_VARIABLES = (int)0x80000000, // = 0x90000000\n    B = 4\n};',
+       'enum ShaderParameter : int { SP_NONE = (int)0xffffffff, SP_X = (int)0x80000000u, SP_Y = -1 };',
+       'enum Small { S0 = 1 };', 'enum Expr { E0 = 0x80000000 | 1 };', 'enum class Sc { Q = 0x80000000 };',
+       'enum Huge { H = 0x100000000 };', 'enum Based : unsigned { U = 0x80000000 };'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

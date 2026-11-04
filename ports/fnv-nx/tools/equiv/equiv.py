@@ -75,6 +75,7 @@ CLASSES = {
     'DTOR1': 'neutral',         # declares NiPointer<T>::~NiPointer() specializations for pointees the unit never completes
     'VTBL1': 'platform',        # full MSVC-order virtual interface for listed stand-ins (BSNiAllocator), slots forward
     'ALIGN1': 'neutral',       # __declspec(align(n)) moved behind the class key: the type's alignment on both compilers
+    'ENUM2': 'neutral',        # enum with enumerators >= 2^31: MSVC's int base written out, (int) on those literals
     'CSX2': 'neutral',          # the decomp's 28-byte critical sections keep their 28 bytes (D15 reopened, J-0067)
     'STAND1': 'platform',       # drops untagged stand-ins bound to a tagged definition's address (one function per address)
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
