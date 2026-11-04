@@ -24,6 +24,7 @@
 #define __int64 long long
 #ifdef __cplusplus
 #include <sse2neon.h>
+#include "fnvnx_sse_fast.h"   /* shorter permutes than sse2neon's (S15-simd) */
 #include "fnvnx_mmx.h"   /* the MMX intrinsics sse2neon lacks */
 #endif
 
