@@ -1043,6 +1043,23 @@ def write_prepared_from(d, pf):
         json.dump(pf, f, indent=1, sort_keys=True)
 
 
+def recon_id():
+    """the recon directory REC1 reads (FNVNX_RECON, D20: tools/farm/recon.sh fills it from fnv-nx-build recon/*) as a
+    content hash: part of prepare's key, so a new or changed recon prepares again; '' without one"""
+    top = os.environ.get('FNVNX_RECON')
+    if not top or not os.path.isdir(top):
+        return ''
+    h = hashlib.sha256()
+    for dp, dns, fns in sorted(os.walk(top)):
+        dns.sort()
+        for f in sorted(fns):
+            p = os.path.join(dp, f)
+            h.update(os.path.relpath(p, top).encode() + b'\0')
+            with open(p, 'rb') as fh:
+                h.update(hashlib.sha256(fh.read()).digest())
+    return h.hexdigest()[:16]
+
+
 class Prepare(Stage):
     name = 'prepare'
     deps = ('fetch',)
@@ -1055,7 +1072,8 @@ class Prepare(Stage):
             return ['prepare-adopt-v1', t, st and (st.st_size, st.st_mtime_ns), read_prepared_from(t)]
         # the head is part of the key: a tree is always prepared from the commit the run's tools come from (J-0054);
         # an unchanged tree keeps its files' mtimes (sync_tree), so the stages after it stay cached
-        return ['prepare-v2', rules_hash(), up_id(b, 'fetch'), os.environ.get('FNVNX_PREPARE_SKIP', ''), b.head]
+        return ['prepare-v3', rules_hash(), up_id(b, 'fetch'), os.environ.get('FNVNX_PREPARE_SKIP', ''), b.head,
+                recon_id()]
 
     def outputs_present(self, b):
         t = os.path.abspath(b.cfg['PREPARED']) if b.cfg['PREPARED'] else os.path.join(b.out, 'prepare', 'tree')
@@ -1070,7 +1088,7 @@ class Prepare(Stage):
         shutil.rmtree(staging, ignore_errors=True)
         dirty = port_dirty(PREPARE_INPUTS)
         pf = {'port_commit': b.head, 'port_dirty': dirty, 'decomp_commit': read_git_head(decomp), 'decomp': decomp,
-              'mode': 'prepare.py', 'tree': tree, 'at': now_iso()}
+              'recon': recon_id(), 'mode': 'prepare.py', 'tree': tree, 'at': now_iso()}
         b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'prepare.py'), decomp, staging], r['log'], check=True)
         stats = os.path.join(staging, 'prepare_stats.tsv')
         rules = read_rule_stats(stats)
