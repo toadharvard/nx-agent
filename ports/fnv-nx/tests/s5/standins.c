@@ -55,3 +55,22 @@ void fnv_standin_00aa3cc0(void *self, uint32_t block, uint32_t pool, const char 
     }
     mm[0x129] = 1;
 }
+
+/* 0x00406d50 (dst, size, src): the exe's body is strcpy_s (0x00ec6bd2) of src into dst[size]. The decomp declares it
+ * `FUN_00406d50(...)` and defines it nowhere, so every call was a trap returning 0 and left dst as it was: WinMain
+ * builds the INI paths with it (the FalloutPrefs.ini load got an empty path, sD3DDevice stayed "" and the device
+ * check sent the game to the launcher: ShellExecute, WinMain returns 0). Variadic integer arguments come in x0..x2
+ * as fixed ones do (AAPCS64), so a three-argument definition serves every caller. S1-refs: declare and define it. */
+void fnv_standin_00406d50(char *dst, uint32_t size, const char *src) __asm__("_Z12FUN_00406d50z");
+void fnv_standin_00406d50(char *dst, uint32_t size, const char *src) {
+    uint32_t i = 0;
+    if (!dst || !size)
+        return;
+    if (!src) {
+        dst[0] = 0;
+        return;
+    }
+    for (; i + 1 < size && src[i]; i++)
+        dst[i] = src[i];
+    dst[src[i] && i + 1 >= size ? 0 : i] = 0;   /* strcpy_s on overflow empties dst */
+}

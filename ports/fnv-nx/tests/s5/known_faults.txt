@@ -45,3 +45,6 @@ _ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc standin  # 0x00aa3cc0: a pool wit
                       # reservation here) is freed through NiFree before Gamebryo's allocator exists, which skipped
                       # boot_banner (MemoryManager's constructor) once the game's heaps are used; the exe destroys it
                       # and calls MemoryManager::Deallocate (standins.c; S1)
+_Z12FUN_00406d50z standin  # 0x00406d50 strcpy_s(dst, size, src), declared `(...)` and defined nowhere: WinMain's INI paths
+                      # stayed empty, FalloutPrefs.ini was never read, sD3DDevice was "" and the device check sent the
+                      # game to the launcher (ShellExecute, WinMain returns 0) (standins.c; S1-refs)
