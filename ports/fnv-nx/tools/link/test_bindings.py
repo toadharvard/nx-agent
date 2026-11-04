@@ -13,8 +13,10 @@
   another): TLS references to slots of one native TLS block, never to an absolute image address;
 * image vftable addresses stored into vptrs by hand: V entries (named vftable; class of the storing constructor) and
   the data symbol bound to the native address point;
-* split globals (S13): a variable defined at an image address by the unit itself (-O2: section anchors) - its own
-  functions, its static initializer and a pointer in its data reach the rebound symbol, not `.data + off`;
+* split globals (S13): a variable defined at an image address by the unit itself - compiled like compile.sh
+  (-O2 -fPIC: through the GOT by symbol; plain -O2 uses section anchors, the control), its functions, its static
+  initializer and a pointer in its data reach the rebound symbol, and no PC-relative relocation names an absolute
+  image symbol (S5's relocatable guest);
 * GAME1 (fnvnx_game_<name>): looked up by the unit's own name (a game function, another import's slot);
 * GCC's global operator new/delete -> the game's, by the MSVC names the units bind (sized delete: the sized one);
 * S1b units_renames.tsv: applied to a unit whose source carries the patch, not to an unpatched one;
@@ -37,6 +39,8 @@ import vtables  # noqa: E402
 
 FNVLINK = os.path.join(HERE, 'fnvlink.py')
 CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
+READELF = os.environ.get('READELF', 'aarch64-linux-gnu-readelf')
+PIC = ['-O2', '-fPIC', '-fno-semantic-interposition']   # compile.sh's addressing of the variables a unit defines
 
 CRT = ('# address\tclass\tidentification\thow\tunits\tsrc_files\tprovider\n'
        '0x00ec1000\tcrt\tstrcpy_s\tn\t1\t1\tplatform/crt: strcpy_s\n'
@@ -213,8 +217,8 @@ def main():
             os.makedirs(os.path.dirname(p), exist_ok=True)
             open(p, 'w').write(text)
             objs[rel] = os.path.join(t, rel.replace('/', '_') + '.o')
-            run([CXX, '-mabi=ilp32', '-O2' if rel in ('src/r.cpp', 'src/s1.cpp', 'src/s2.cpp') else '-O1', '-c', p,
-                 '-o', objs[rel]])
+            opt = PIC if rel in ('src/r.cpp', 'src/s1.cpp', 'src/s2.cpp') else ['-O1']
+            run([CXX, '-mabi=ilp32', *opt, '-c', p, '-o', objs[rel]])
         units = os.path.join(tree, 'build', 'units.json')
         json.dump(UNITS, open(units, 'w'))
         with open(os.path.join(t, 'objects.tsv'), 'w') as f:
@@ -226,6 +230,9 @@ def main():
                            ('units_renames.tsv', RENAMES)):
             open(os.path.join(plat, name), 'w').write(text)
         r_before = local_refs_into(objs['src/r.cpp'], ('ms_kRTTI', 'g_count', 'g_pcount'))
+        anchored = os.path.join(t, 'r_anchor.o')     # the control: plain -O2 addresses them from a section anchor
+        run([CXX, '-mabi=ilp32', '-O2', '-c', os.path.join(tree, 'src/r.cpp'), '-o', anchored])
+        r_anchor = local_refs_into(anchored, ('ms_kRTTI', 'g_count', 'g_pcount'))
         out, fixed = os.path.join(t, 'out'), os.path.join(t, 'fixed')
         run([sys.executable, FNVLINK, 'resolve', units, os.path.join(t, 'objects.tsv'), out, '--crt-symbols',
              os.path.join(plat, 'crt_symbols.tsv'), '--imports', os.path.join(plat, 'imports.tsv'),
@@ -297,7 +304,12 @@ def main():
         check('FUN_00ee6df2' not in t_o.defs and 'D3DXVec3TransformNormal' in targets,
               'the thunk\'s own unit calls the import: %s' % sorted(targets))
         r_obj = os.path.join(fixed, os.path.basename(objs['src/r.cpp']))
-        check(r_before > 0, 'the -O2 unit reaches its variables through local symbols (%d relocations)' % r_before)
+        check(r_anchor > 0 and r_before == 0, 'plain -O2 reaches the variables through an anchor (%d), -fPIC by '
+              'symbol (%d)' % (r_anchor, r_before))
+        pcrel = [l for f_ in (r_obj, os.path.join(fixed, os.path.basename(objs['src/s2.cpp'])))
+                 for l in run([READELF, '-rW', f_]).split('\n') if '__fnv_0100' in l and
+                 any(k in l for k in ('ADR_PREL', 'ABS_LO12', 'LD_PREL', 'PREL32'))]
+        check(not pcrel, 'no PC-relative relocation against an image symbol: %s' % pcrel[:3])
         check(local_refs_into(r_obj, ('__fnv_01000a00', '__fnv_01000a10', '__fnv_01000a20')) == 0,
               'no local-symbol reference into a rebound variable after apply')
         s2_obj = os.path.join(fixed, os.path.basename(objs['src/s2.cpp']))

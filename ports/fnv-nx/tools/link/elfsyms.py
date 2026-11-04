@@ -137,19 +137,26 @@ def undefine_symbols(src, dst, names):
     return n
 
 
+ABS_RELOCS = (1, 2)   # R_AARCH64_P32_ABS32, _ABS16
+
+
 def retarget_local_relocs(src, dst, names):
-    """Copy ELF32 object src to dst with every relocation that reaches one of the defined symbols `names` through a
-    local symbol (GAS writes same-object references to a global as `.bss + off` / `.data + off`, or relative to a
-    local label) rewritten to name that symbol, addend adjusted: once the variable is rebound (apply renames and
-    weakens it, aliases.ld defines it), the defining object's own code and data follow it too. Relocations of
-    non-allocated sections (debug info) are left alone. Returns the number of relocations rewritten."""
+    """Copy ELF32 object src to dst with every absolute data relocation (ABS32 / ABS16) that reaches one of the
+    defined symbols `names` through a local symbol (a section or label plus offset) rewritten to name that symbol,
+    addend adjusted: once the variable is rebound (apply renames and weakens it, aliases.ld defines it), pointers to
+    it in the object's own data follow it too. Code relocations through a local symbol are never rewritten: GCC
+    addresses several variables from one section anchor with immediate offsets no relocation shows, so pointing
+    the anchor at one variable's image address would misplace the others, and a PC-relative reference to an
+    absolute address ties the guest to its link address; compile.sh's -fPIC addresses defined variables through
+    the GOT by symbol instead. Relocations of non-allocated sections (debug info) are left alone.
+    -> (relocations rewritten, code relocations through a local symbol left: should be 0)."""
     data = bytearray(open(src, 'rb').read())
     if data[4] != 1:
         raise ValueError('%s: ELF32 only' % src)
     shoff, = struct.unpack_from('<I', data, 0x20)
     shentsize, shnum, _ = struct.unpack_from('<HHH', data, 0x2e)
     secs = [struct.unpack_from('<IIIIIIIIII', data, shoff + i * shentsize) for i in range(shnum)]
-    n = 0
+    n = left = 0
     for si, s in enumerate(secs):
         if s[1] != SHT_SYMTAB:
             continue
@@ -180,11 +187,14 @@ def retarget_local_relocs(src, dst, names):
                 at = (value if typ != 3 else 0) + addend
                 for lo, hi, idx, vval in ranges[shndx]:
                     if lo <= at < hi:
-                        struct.pack_into('<Ii', data, o + 4, (idx << 8) | (info & 0xff), at - vval)
-                        n += 1
+                        if info & 0xff in ABS_RELOCS:
+                            struct.pack_into('<Ii', data, o + 4, (idx << 8) | (info & 0xff), at - vval)
+                            n += 1
+                        else:
+                            left += 1
                         break
     open(dst, 'wb').write(data)
-    return n
+    return n, left
 
 
 def vtable_slot_refs(path):

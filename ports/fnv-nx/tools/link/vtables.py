@@ -654,7 +654,7 @@ def demangle(names):
 
 LD = os.environ.get('LD', 'aarch64-linux-gnu-ld')
 OBJCOPY = os.environ.get('OBJCOPY', 'aarch64-linux-gnu-objcopy')
-EMIT_FLAGS = ('-O2', '-fkeep-inline-functions', '-ffunction-sections', '-fdata-sections')
+EMIT_FLAGS = ('-O2', '-fkeep-inline-functions', '-ffunction-sections', '-fdata-sections', *layout.PIC)
 INIT_SECTIONS = ('.init_array', '.fini_array', '.preinit_array', '.ctors', '.dtors')
 
 
@@ -709,7 +709,7 @@ def extract_host(tree, workdir, unit, classes, want):
         return None, set()
     inputs.append(clean)
     if items4:
-        obj4, _ = compile_probe(tree, workdir, unit, items4, 'vt4', ('-O2',))
+        obj4, _ = compile_probe(tree, workdir, unit, items4, 'vt4', ('-O2', *layout.PIC))
         clean4 = os.path.join(workdir, base + '.vt4s.o')
         if obj4 is not None and strip_init(obj4.path, clean4):
             have |= {n for n in obj4.defs if n.startswith('_Z') and obj4.bind(n) != 'local'}
@@ -966,7 +966,7 @@ def run(out, tree, jobs=4):
         if not want or not classes:
             return h, None, want, set(), None
         src = os.path.join(tree, h)
-        key = hashlib.sha1(('emit4|%s|%s|%s|%s|%s' % (' '.join(layout.flags(tree)), h,
+        key = hashlib.sha1(('emit4|%s|%s|%s|%s|%s' % (' '.join(layout.flags(tree) + list(EMIT_FLAGS)), h,
                                                 os.path.getmtime(src) if os.path.exists(src) else 0,
                                                 ' '.join(sorted(want)), '|'.join(sp for _, sp, _ in classes))
                             ).encode()).hexdigest()

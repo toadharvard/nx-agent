@@ -1422,7 +1422,7 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, pr
 def apply(out, fixed):
     os.makedirs(fixed, exist_ok=True)
     n = 0
-    retargeted, retarget_objs = 0, 0
+    retargeted, retarget_objs, left, left_objs = 0, 0, 0, 0
     for name in sorted(os.listdir(os.path.join(out, 'objcopy'))):
         if not name.endswith('.args'):
             continue
@@ -1452,9 +1452,14 @@ def apply(out, fixed):
         rebind = set(open(rb, encoding='utf-8', errors='surrogateescape').read().split()) if os.path.exists(rb) \
             else set()
         if rebind:
-            k = elfsyms.retarget_local_relocs(obj, dst + '.rb', rebind)
+            k, k_left = elfsyms.retarget_local_relocs(obj, dst + '.rb', rebind)
             retargeted += k
             retarget_objs += bool(k)
+            left += k_left
+            left_objs += bool(k_left)
+            if k_left:
+                log('%s: %d code references reach a rebound variable through a section anchor / local symbol (compiled '
+                    'without -fPIC?): they keep a private copy' % (base, k_left))
             obj = dst + '.rb'
             temps.append(obj)
         und = os.path.join(out, 'objcopy', base + '.undefine')
@@ -1482,8 +1487,9 @@ def apply(out, fixed):
     if r.returncode:
         log('cc addrmap.c failed: ' + r.stderr[:2000])
     print('objects rewritten: %d' % n)
-    print('own references to rebound variables retargeted: %d relocations in %d objects' % (retargeted,
-                                                                                            retarget_objs))
+    print('own data pointers to rebound variables retargeted: %d relocations in %d objects; code references '
+          'through a local symbol left (want 0, compile.sh -fPIC): %d in %d objects' % (retargeted, retarget_objs,
+                                                                                      left, left_objs))
 
 
 def check(out, fixed):
