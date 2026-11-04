@@ -11,9 +11,9 @@ decomp `87eb9373`. Tools: `tools/perf/` (section 10). Addresses are FalloutNV.ex
 The game will be **main-thread bound on the CPU**, as on PC. Two things decide whether 30 fps is reachable:
 
 1. **Parallelism.** FNV already runs its console threading on PC (AI linear task threads, tasklets, background
-   loading, a CSMT render worker on our side). On the Switch today **every game thread and Nine's CSMT worker
-   would run on core 0** (section 6.3) and none of that parallelism would exist. Fixing thread placement is the
-   largest and cheapest lever.
+   loading, a CSMT render worker on our side). Until S5's placement table (`31cdca3`) **every game thread and
+   Nine's CSMT worker ran on core 0** (section 6.3) and none of that parallelism existed. Thread placement was the
+   largest and cheapest lever; it is in, and the multicore check under QEMU (6.6) runs it, but hardware has not.
 2. **Draw submission.** The D3D9 path costs the main thread an estimated 2.6-7.5 k instructions per draw through
    the engine, the proxy boundary and Nine's front end, and costs Nine's CSMT worker an estimated 3-10 k per draw for
    state validation and nouveau. At 1,500-3,500 draws per exterior frame the worker, not the main thread, can
@@ -30,7 +30,7 @@ in hot units **[M]**).
 | # | item | cost | basis |
 |---|---|---|---|
 | 1 | Main-thread budget at 30 fps | 34.0 M cycles = **~27 M instructions** (IPC 0.8; 20-34 M for IPC 0.6-1.0) | [E] section 2 |
-| 2 | All game threads + Nine CSMT worker on core 0 | the 2 AI linear task threads, tasklets, Havok workers, IO, audio and the render worker share the main thread's core: frame time = sum of all threads' work instead of the max; the CSMT worker (a libnx pthread) also runs at priority 0x3B, below the main thread's 0x2C, so it only runs when the main thread blocks | read from our code, libnx and Mesosphère (section 6.3); effect [E] |
+| 2 | All game threads + Nine CSMT worker on core 0 (**fixed** by the placement table, S5 `31cdca3`; was:) | the 2 AI linear task threads, tasklets, Havok workers, IO, audio and the render worker share the main thread's core: frame time = sum of all threads' work instead of the max; the CSMT worker (a libnx pthread) also runs at priority 0x3B, below the main thread's 0x2C, so it only runs when the main thread blocks | read from our code, libnx and Mesosphère (section 6.3); effect [E] |
 | 3 | Draw submission, main thread (engine NiD3D + proxy + Nine front end) | 2.6-7.5 k instructions/draw (engine 1-3 k + proxy/Nine 1.6-4.5 k) -> 6.5-19 M per frame at 2,500 draws = **8-23 ms** | [E] section 5 |
 | 4 | Nine CSMT worker + nouveau per draw | 3-10 k instructions/draw -> 7.5-25 M per frame = **9-31 ms** on its core | [E] section 5 |
 | 5 | Scene graph update + cull (NiNode update, bounds, NiCullingProcess, BSShaderAccumulator) | 4-9 M instructions = 5-11 ms | [E] section 3 |
@@ -220,18 +220,21 @@ occlusion), not threading. The setting objects behind these names are not identi
 
 | primitive | implementation (`platform/win32`, `toolchain/guest`, `toolchain/host`) | verdict |
 |---|---|---|
-| CRITICAL_SECTION | 24-byte PC layout (D15), recursive, owner/recursion in place, futex word in `LockSemaphore`; **SpinCount ignored**, contention goes straight to `svcWaitForAddress` | works; add a bounded spin for short sections (S4) |
+| CRITICAL_SECTION | 24-byte PC layout (D15), recursive, owner/recursion in place, futex word in `LockSemaphore`; spins up to SpinCount (capped at 4,000, not on one core) before `svcWaitForAddress` (S5 `31cdca3`) | works |
 | Interlocked* | `ldaxr/stlxr` loops, full barrier; 6 instructions + call (fnvnx-a64, inline LL/SC; A57 has no LSE) | fine |
 | events, semaphores, mutexes, waits | one global lock `w32_wait_lock` for every waitable object, a condvar per waiting thread | fine for per-frame hand-offs (dozens to hundreds per frame); a hot spot if Havok's job queue signals per job |
-| TLS | `TlsAlloc` 1,088 slots, `TlsGetValue` ~15-20 instructions; image `__declspec(thread)` -> S2's native block `__fnvnx_tls_image` | **gap**: `__readfsdword(0x2c)` returns a different, separately allocated block (`implicit_tls[0]`), so a `fs:[0x2c]` access (13 sites, e.g. the Rendering Task Thread's write at +0x2bc) and a `__declspec(thread)` access to the same variable see two copies (LINK.md lists this as open). S4: point `fs:[0x2c][0]` at `&__fnvnx_tls_image` of the calling thread |
-| thread creation | `CreateThread` -> `os_thread_create(cpu -1)` -> host `threadCreate(..., cpuid -2)` | **gap**: -2 is the process's ideal core (NPDM `default_cpu_id` 0; Mesosphère `kern_svc_thread.cpp` takes `process.GetIdealCoreId()`), and the new thread's affinity mask is that one core (`kern_k_thread.cpp`: `m_virtual_affinity_mask = 1 << virt_core`): **every game thread runs on core 0**. Nine's CSMT worker (Mesa `u_thread_create` -> pthreads -> libnx `newlib.c` `threadCreate(..., 0x3B, -2)`) lands on core 0 too, at the lowest priority; `nine_present.c` creates its threads with -2 as well |
-| priority, affinity of another thread | `SetThreadPriority`/`SetThreadAffinityMask`/`SetThreadIdealProcessor` on a handle other than the caller's: `os_thread_set_*` returns -1 in the guest (host ids are private to `threads.c`) | **gap**: BSThread's `SetThreadPriority(-1)` after `CreateThread` is lost; the engine's own placement calls do nothing |
+| TLS | `TlsAlloc` 1,088 slots, `TlsGetValue` ~15-20 instructions; image `__declspec(thread)` -> S2's native block `__fnvnx_tls_image`; `fs:[0x2c][0]` is the calling thread's `__fnvnx_tls_image` (`fnvnx_image_tls_hook`, S5 `31cdca3`) | one block for both kinds of access; test: tests/s4 TLS identity |
+| thread creation | `CreateThread` -> `fnvnx_thread_role_hook` (boot.cpp: the AI linear task threads by RunThreadProc 0x00aa64d0 + vftable 0x01085688, the Serialized IO Thread, the LoadingMenuThread) -> `os_thread_create(role)` -> host `h_thread_create`: `toolchain/host/placement.h` gives the ideal core, mask and priority; `svcSetThreadCoreMask` before start. Host pthreads (Nine's CSMT worker, its present threads) take the render-worker row through `-Wl,--wrap=__syscall_thread_create` (package, hello and Nine's switch_host.sh link it) | **fixed** (S5 `31cdca3`, core 3 opt-in `33c0b1b`); not run on hardware (B2) |
+| thread end of a closed handle | `CloseHandle` of a running thread, or the thread dropping its object's last reference itself (thread.cpp `thread_trampoline`; the engine's CreateThread + CloseHandle pattern), reaches `thread_free` before the thread ended | **was broken, fixed (J-0129)**: host_v2.inc called libnx `threadClose` (which refuses a running thread: `tls_array` set) and freed the `Thread` that the running thread's `threadExit` still writes (heap corruption, leaked stack and handle); the mtqemu host self-joined (hang). Now a thread whose record was freed early queues itself as its last act, and the next `thread_create`/`thread_free` closes it. Test: mtqemu `detach` |
+| priority, affinity of another thread | `SetThreadPriority`/`SetThreadAffinityMask`/`SetThreadIdealProcessor` on any handle go to the host id (`fnvnx_thread_host_id`), also before start | **fixed** (S5 `31cdca3`); tests/s4 role hook + other-thread placement, tests/s5 rt placement |
 | GetSystemInfo | 3 processors | right for the policy below |
 
-Placement policy proposed (S5 host `h_thread_create` + guest `threads.c`; S6c for Nine's threads): main thread core 0;
-Nine CSMT worker core 1; AI linear task threads ideal cores 2 and 1; everything else (tasklets, Havok workers, IO,
-audio) ideal core 1 or 2 with core mask 0b110, so Mesosphère can move them to an idle core; game threads at the
-Win32-mapped priority (`win32_to_horizon_prio`), the CSMT worker one step above the game threads.
+Placement policy (implemented, `toolchain/host/placement.h`): main thread core 0; Nine CSMT worker core 1, one step
+above the game threads (0x2B); AI linear task threads ideal cores 2 and 1, mask 0b110; everything else (tasklets,
+Havok workers, IO, audio) mask 0b110 with the ideal core rotating, so Mesosphere can move them to an idle core; game
+threads at the Win32-mapped priority (`fnvnx_win32_to_horizon_prio`). Core 3 opt-in (`core3=1` in
+`sdmc:/fnvnx/fnvnx.ini`): the game/io/audio/tasklet rows take mask 0b1110; main, the render worker, the AI linear
+threads and the loading screen stay on cores 0-2.
 
 ### 6.4 Verdicts and proposed ini defaults for Switch
 
@@ -244,6 +247,60 @@ Win32-mapped priority (`win32_to_horizon_prio`), the CSMT worker one step above 
 | threaded morpher / particles / blood / temp effects (names hearsay) | **likely safe**: PC defaults on | 1 |
 | tasklets, background loading | **likely safe**: PC defaults | engine/ini defaults |
 | `bUseMultibounds` (hearsay name; culling) | likely safe, saves render work | 1 |
+
+### 6.5 Memory ordering: what x86 gave for free
+
+x86 is TSO: every store is a release and every load an acquire. AArch64 is not, so engine code that synchronises
+through plain loads and stores (no Interlocked*, no Win32 object) can see another core's stores out of order. Our
+Interlocked* and Win32 objects are full barriers, so every hand-off that goes through them is ordered as on PC; the
+hazard is code that relies on TSO alone.
+
+**The engine's RecursiveSpinLock** (32 bytes: owner thread id at +0, recursion count at +4). Lock (0x0040fbf0, TryLock
+0x0078d200) takes the owner word with InterlockedCompareExchange: an acquire on our side. Unlock (0x0040fba0)
+decrements the count and stores 0 to the owner word with a plain store; the empty call before it (0x0040fbe0) is the
+PC build's stand-in for the 360's barrier. Our build of 0x0040fba0 is `ldr/sub/str` of the count, then `str wzr`:
+stores made inside the section may become visible to the next owner after it has seen owner == 0. Users include the
+AI linear task threads' global lock 0x011f11a0, memory pools and the zero-overhead heap, the texture palette, the
+shader accumulator's list pools (0x011c5f80), Havok collision objects, fonts and the extra-data lists.
+
+* **Out-of-line Unlock: fixed** by the override `tools/link/overrides/spinlock_0040fba0.c` (row 0x0040fba0 of
+  `overrides.tsv`): the same layout and effect with `stlr` (`fnvnx_spin_unlock_0040fba0`, 8 instructions). 56
+  references by name in 21 files bind to it **[M]** (`tools/perf/tso_scan.py`, decomp 87eb9373).
+* **Inline copies: open.** Units wrote the release inline (`if (--lock.count == 0) lock.owner = 0;`): **43 sites in
+  24 files [M]** (tso_scan: memorypool.cpp 5, bstexturepalette.cpp 3, the 0x00c40000 staging blocks 9,
+  zerooverheadheap.cpp, bsshaderaccumulator.cpp, shadowscenenode.cpp, font.cpp, bhkcollisionobject, ...). The override
+  does not reach them. Fix: a prepare rule (S1) that turns that store into `FNVNX_STORE_RELEASE(owner, 0)`, a plain
+  store under MSVC (so S11's gate sees no change) and `__atomic_store_n(..., __ATOMIC_RELEASE)` under GCC. The
+  mtqemu checker reports exactly this pattern as a race (`spin-decomp`) and the override's form as race-free.
+* Other TSO reliance (flags polled in loops, publish-by-pointer without a lock) is not inventoried yet; the hb checker
+  of 6.6 finds it per test, not statically.
+
+### 6.6 Multicore under QEMU (`tests/s15/mtqemu`, `tests/s15/test_mtqemu.py`)
+
+There is no ILP32 TSan and no hardware. `linhost` is a freestanding LP64 Linux stand-in for the Switch host module:
+threads by `clone`, address wait/wake by futexes, `placement.h` applied with `sched_setaffinity` (Switch cores 0-3 ->
+host CPUs 0-3). `guest.elf` is ILP32 code over the real `platform/win32` (sync, thread, handles),
+`toolchain/guest/os_guest.c` and `threads.c`. The test is compiled with GCC's `-fsanitize=thread`, and `hb.c` is the
+runtime behind its hooks: a vector-clock happens-before checker with edges from C11 atomics by memory order and from
+the Win32 calls (wrapped at link time, like TSan's interceptors). Under `qemu-aarch64 -R 0xC0000000` every guest
+thread is a host thread, so the cases run in parallel on the container's cores. Build in seconds, run 2-6 s.
+
+| case | checks | result **[M]** (dev container, 4 CPUs, shared with other jobs) |
+|---|---|---|
+| parallel | 3 units of work on main alone vs 1 unit on each of main + 2 game threads (core 0, mask 0b110) | speedup **1.5-2.8** (best of 5 tries); 1.05-1.5 while other jobs load the CPUs, so test_mtqemu.py allows 3 runs |
+| cs | CRITICAL_SECTION with SpinCount 4,000, 4 threads x 2,000 | exact count, 0 races (16,009 checks) |
+| stages | Rendering Task Thread 2's protocol: 23 stage records a frame, stage and completion semaphores, 3 frames | 0 wrong, 0 races |
+| spin-decomp | RecursiveSpinLock as built (plain-store release) over a pool free list, 3 threads | **races reported** (10-750 per run) |
+| spin-override | the same with `fnvnx_spin_unlock_0040fba0` | 0 races |
+| unsync | a plain shared counter (checker sanity) | races reported |
+| detach | 3 x 40 threads whose handles are closed while they run (records freed by the threads themselves, slots reused) | 120 of 120 end; with the old `thread_free` it hangs |
+
+Why the first prototype "printed nothing in 300 s" (J-0125): two host bugs, not the guest. (1) Joins waited on the
+`CLONE_CHILD_CLEARTID` word with `FUTEX_WAIT_PRIVATE`, but the kernel's (and qemu-user's) wake at thread exit is a
+shared-key `FUTEX_WAKE`, which never reaches a private-key waiter: a join that slept before the thread ended slept
+forever. (2) `thread_free` joined the thread, so a thread that dropped its own last reference joined itself. Both
+depend on timing (about one run in three hung, at a different case each time; 0 hangs in 30 runs after the fix). The
+second bug is real on the Switch host too (section 6.3, "thread end of a closed handle").
 
 ## 7. Our own overhead, measured
 
@@ -281,7 +338,7 @@ Instruction mix of fresh8 (2.43 M static instructions) **[M]**: loads 22.2 %, st
 
 | lever | expected gain | effort | owner |
 |---|---|---|---|
-| thread placement (cores 0/1/2, masks) + priority/affinity on other threads' handles | the AI linear threads and Nine's worker leave the main core: 30-50 % of the frame **[E]** | small (host thread_create, guest threads.c, Nine thread hook) | S5, S4, S6c |
+| thread placement (cores 0/1/2, masks) + priority/affinity on other threads' handles | the AI linear threads and Nine's worker leave the main core: 30-50 % of the frame **[E]** | **done** (S5 `31cdca3`, `33c0b1b`); hardware check B2 | S5, S4, S6c |
 | `iNumHWThreads=3` defaults (section 6.4) | two AI linear threads instead of one | ini | S0 |
 | proxy batching + redundant-state filtering | 1.5-3 ms of main thread per frame at 2,500 draws, more with filtering **[E]** | medium (guest proxy ring, flush rules) | S6c |
 | drop `D3DCREATE_MULTITHREADED` if one thread owns the device | ~50 instructions per D3D call | small, needs a trace | S6c |
@@ -289,10 +346,11 @@ Instruction mix of fresh8 (2.43 M static instructions) **[M]**: loads 22.2 %, st
 | native renderer (S6n) | removes the worker's per-draw validation and most of the main thread's D3D cost: 10-30 ms per exterior frame **[E]** | large (in progress) | S6n |
 | GOT-to-movz/movk post-link pass for image symbols | 1-3 % **[E]** | medium | S2/S5 |
 | sse2neon overrides for the hot spots | < 1 % overall, more in Havok narrow phase | small | S1 |
-| bounded spin in EnterCriticalSection (honour SpinCount) | avoids kernel waits on short contended sections **[E]** | small | S4 |
+| bounded spin in EnterCriticalSection (honour SpinCount) | avoids kernel waits on short contended sections **[E]** | **done** (S5 `31cdca3`) | S4 |
 | S3 code-pointer scan index | ~0.9 s of boot | small | S3 |
 | slim bridges, `-fno-semantic-interposition` with alias rebinding | < 1 % **[E]** | medium | S2c |
-| `fs:[0x2c]` TLS unification | correctness first, enables MT rendering | small | S4 |
+| `fs:[0x2c]` TLS unification | correctness first, enables MT rendering | **done** (S5 `31cdca3`) | S4 |
+| release stores for the RecursiveSpinLock (6.5) | correctness on AArch64 | out-of-line Unlock **done** (override); 43 inline sites need an S1 rule | S15, S1 |
 
 ## 9. What needs hardware, and the first on-device benchmark set
 
@@ -323,5 +381,7 @@ Minimal set for the first run (each a guest under the S5 host, timed with `svcGe
 | `dyncount.py <source>:<addr>...` | dynamic instructions of a function on the x86 oracle and on our AArch64 code (S13 harness), ratio |
 | `frameprof.py <guest.nso> --elf ...` | dynamic instructions per subsystem per frame/phase, top functions, D3D9 calls by type (section 4) |
 | `setting_names.py <exe> <decomp>` | names of the setting objects from the player's exe (untested without the exe) |
+| `tso_scan.py <decomp> [--tsv]` | spin-lock releases by plain store (inline copies of 0x0040fba0) and references to the override (6.5) |
+| `tests/s15/test_mtqemu.py` | builds and runs the QEMU multicore check (6.6) |
 
 All of them print counts and names only; their outputs over decomp-derived objects stay in local scratch space.
