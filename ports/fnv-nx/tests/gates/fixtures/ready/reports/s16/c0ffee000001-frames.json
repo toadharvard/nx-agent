@@ -1,0 +1,12 @@
+{
+ "commit": "c0ffee000001",
+ "scenes": [
+  {
+   "name": "main_menu",
+   "metric": "ssim",
+   "value": 0.99,
+   "threshold": 0.98,
+   "pass": true
+  }
+ ]
+}
