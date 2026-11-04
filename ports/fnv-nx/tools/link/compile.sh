@@ -2,7 +2,12 @@
 # compile.sh - compile prepared units to AArch64 ILP32 ELF objects for the link step.
 #
 #   tools/link/compile.sh <prepared tree> <obj dir> [units.list] [jobs]
+#   tools/link/compile.sh --print-flags <prepared tree> <work dir>   # the flags, one per line, plugins built in
+#                                                                     # <work dir>; compiles nothing
 #
+# --print-flags is the one source of the game's compile flags: fnvlink's emitted code (vtables.py slot functions,
+# bodies.py synthesized bodies) compiles with exactly these (layout.game_flags), so no linked object misses a
+# semantics, code-generation or plugin flag (FTOI2, S12 order).
 # Same flag set as tools/census.sh, with -c instead of -fsyntax-only (plus $OPT, default -O2). One object per unit:
 # <obj dir>/<source with / -> _>.o, its compiler log next to it as .log. Up-to-date objects are kept, so the step
 # grows incrementally as more units compile. Writes <obj dir>/objects.tsv: source, object, status (ok/fail).
@@ -17,6 +22,8 @@
 # different machines from the same tree are byte-identical (tools/farm/).
 # Objects are derived from the decomp: local output only, never committed.
 set -euo pipefail
+PRINT_FLAGS=0
+if [ "${1:-}" = --print-flags ]; then PRINT_FLAGS=1; shift; fi
 TREE=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd)
 LIST=${3:-}; JOBS=${4:-$(nproc)}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
@@ -51,6 +58,7 @@ if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
 # ORDER_KEYS=<file>: the static gate's clang/atomic.keys (fields and variables some unit hands to Interlocked*); their
 # plain accesses are ordered in every unit, not only in the units that call Interlocked on them themselves.
 if [ -n "${ORDER_KEYS:-}" ]; then FLAGS+=(-fplugin-arg-fnvnx_order-keys="$ORDER_KEYS"); fi
+if [ "$PRINT_FLAGS" = 1 ]; then printf '%s\n' "${FLAGS[@]}"; exit 0; fi
 export CXX TREE OUT FLAGS_STR="${FLAGS[*]}"
 if [ -z "$LIST" ]; then LIST="$OUT/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
 

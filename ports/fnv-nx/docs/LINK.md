@@ -464,8 +464,10 @@ to 0. Report: `typeinfo_pairs.tsv`.
 **Slot functions no object defines.** Inline virtual functions and implicit destructors of a class that no unit
 constructs or destroys are emitted nowhere (GCC emits them with the vtable). For the synthesized vtables a compiled
 object references (`vtable-ref` requests: classes native code constructs), the slot symbols no compiled object
-defines (`rtti_defined.txt`) are emitted from the host unit itself: it is compiled again (`-O2
--fkeep-inline-functions -ffunction-sections -fdata-sections`) with a qualified destructor call per class
+defines (`rtti_defined.txt`) are emitted from the host unit itself: it is compiled again with compile.sh's own
+flags (`compile.sh --print-flags`, `layout.game_flags`: semantics, code generation, `-fPIC`, FTOI2 and the S12 order
+plugin; bodies.py's synthesized bodies use the same) plus `-fkeep-inline-functions -ffunction-sections
+-fdata-sections`, with a qualified destructor call per class
 (`p->E::~E()`: the implicit D1/D2, and with `-fkeep-inline-functions` D0 and the inline virtuals, are defined); a
 deleting destructor still missing (a destructor declared, defined in a unit that does not compile) is emulated
 under its mangled name: D1, then the deallocation a delete expression would pick (the class's `operator delete`,

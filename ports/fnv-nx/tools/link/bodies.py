@@ -330,29 +330,10 @@ def emit_empty(rows):
     return '\n'.join(out) + '\n'
 
 
-# compile.sh's code-generation flags (layout.flags has the semantics flags only): emitted bodies are game code
-CODEGEN = ('-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-fno-stack-protector', '-fno-stack-clash-protection',
-           '-mno-outline-atomics')
-
-
-def ftoi_plugin(bdir):
-    """compile.sh's FTOI2 plugin (MSVC's float -> integer conversions): built like compile.sh builds it, no silent
-    fallback (objects with and without it must never mix)."""
-    port = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    r = subprocess.run(['bash', os.path.join(port, 'toolchain', 'ftoi', 'build.sh'), os.path.join(bdir, '.ftoi')],
-                       capture_output=True, text=True)
-    so = r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ''
-    if not so or not os.path.exists(so):
-        raise SystemExit('bodies: the fnvnx_ftoi plugin does not build (%s); synthesis needs it, or --no-synth'
-                         % (r.stderr.strip().splitlines() or ['?'])[-1])
-    return so
-
-
-def synth_host(tree, work, host, rows, itanium, inline=False, codegen=CODEGEN):
+def synth_host(tree, work, host, rows, itanium, inline=False):
     """Compile the host unit again with the `= default` lines (special-default) or with -fkeep-inline-functions
     (msvc-inline); keep only the wanted symbols. -> (object path or None, {names defined}, {name: why failed})."""
     import vtables
-    import layout
     want = {r.name for r in rows}
     items, failed = [], {}
     if not inline:
@@ -363,9 +344,9 @@ def synth_host(tree, work, host, rows, itanium, inline=False, codegen=CODEGEN):
             items.append((k, 'bd', line))
     else:
         items.append((0, 'anchor', 'extern "C" void __fnvnx_bd_anchor() {}'))
-    flags = ('-O2', '-ffunction-sections', '-fdata-sections', *layout.PIC, *codegen) + (
-        ('-fkeep-inline-functions',) if inline else ())
-    obj, alive = vtables.compile_probe(tree, work, host, items, 'bdi' if inline else 'bd', flags)
+    # emitted bodies are game code: compile.sh's own flags (layout.game_flags: code generation, FTOI2, S12 order)
+    flags = ('-ffunction-sections', '-fdata-sections') + (('-fkeep-inline-functions',) if inline else ())
+    obj, alive = vtables.compile_probe(tree, work, host, items, 'bdi' if inline else 'bd', flags, game=True)
     if obj is None:
         return None, set(), {n: 'synth-failed (host does not compile)' for n in want}
     base = os.path.join(work, host.replace('/', '_') + ('.bdi' if inline else '.bd'))
@@ -736,7 +717,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     if synth:
         work = os.path.join(bdir, 'work')
         os.makedirs(work, exist_ok=True)
-        codegen = CODEGEN + ('-fplugin=' + ftoi_plugin(bdir),)
+        import layout
+        layout.game_flags(tree, work)   # compile.sh --print-flags (plugins built) once, before the threads; no fallback
         by_host = collections.defaultdict(lambda: collections.defaultdict(list))
         for r in rows:
             if r.cls in ('special-default', 'msvc-inline') and r.host:
@@ -746,7 +728,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         def one(job):
             h, inl, rs = job
             try:
-                return h, inl, synth_host(tree, work, h, rs, itanium, inl, codegen)
+                return h, inl, synth_host(tree, work, h, rs, itanium, inl)
             except Exception as e:   # one host must not stop the step
                 return h, inl, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
         with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
