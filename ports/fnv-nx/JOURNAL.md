@@ -1179,3 +1179,34 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - V1: adversarial verification of S2c's link claims C1-C5 (by-address binding, bridges, ecx-not-passed,
     vftables/D0/D1, -fPIC rebinding).
 * **next** - Merge each round with its verification. S2c f13 is the critical path, then the S5 boot.
+
+### J-0062 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0057
+
+* **did** - Triaged the initializer skips that are not the memory manager, on the f11 guest and S14 image (emulator
+  only; guest relinked from the same objects). `emu_guest.py` now records, for each null call, its call site and
+  where the null came from (the vtable slot, or the address it was loaded from). `mktraps.py`: an undefined name that
+  no object calls and that is not a function gets 4 KiB of zero-filled `.bss` instead of a code stub (7,065 trap
+  stubs, 242 data stubs on f11). Orchestrator re-ran `tests/s5/test_tools.py`: OK (4 skipped).
+* **found**:
+  - **767 null calls** are all `AddSetting` (vslot 1) on setting collections:
+    - 736 go through the image vftable 0x0101772c. `FUN_0044f600_class::InitializeVtbl` stores it by hand for the
+      INISettingCollection singleton 0x011f96a0. No native class exists and S14's image has zeros there. The same
+      pattern appears at 0x01082ed8 and 0x0104e6ac.
+    - 31 go through the one-slot native vtable of FUN_004de530 (a stand-in class with one virtual).
+  - **The 338 ".text writes" were our own code stubs** for undefined variables (g_apfnA26E20CurvesCopy,
+    FUN_00a28cb0_aTable*). With data stubs, skips go from 2,889 to 2,551. S2 leaves them unresolved although
+    units.json maps them to image `.bss` (array vs pointer declaration). 56 of the 242 data stubs have such an address.
+  - **105 null reads:**
+    - 43: the collection getter 0x0045d180 is untranslated (clean in c18, next S2 run);
+    - 60: an unannotated stand-in `FUN_00632ec0` with an empty constructor shadows the annotated
+      `fnv_00632ec0::FUN_00632ec0`;
+    - 2: memory manager.
+
+    None of them is an initialization-order dependency.
+* **metrics** - init_skips=2551 trap_stubs=7065 data_stubs=242 data_stubs_with_image_addr=56
+* **next** - S1:
+  - one class per address (stand-ins must not shadow annotated constructors);
+  - full virtual interface for stand-in polymorphic classes;
+  - native classes for the hand-stored vftables 0x0101772c, 0x01082ed8, 0x0104e6ac if the decomp knows their slots.
+
+  S2c: bind data references by identifier across array/pointer declarations.
