@@ -42,8 +42,11 @@ IMPORTS = ('# iat_slot\tdll\tapi\tunits\tother_decomp_names\tprovider\n'
            '0x00fdf004\tadvapi32\tRegCloseKey\t2\tEnterCriticalSection\tS4 platform/win32\n'
            '0x00fdf100\td3dx9_38\tD3DXMatrixRotationYawPitchRoll\t1\t-\tS6\n'
            '0x00fdf108\td3dx9_38\tD3DXVec3Normalize\t1\t-\tS6\n'   # 0x00fdf104: in the span, unlisted
-           '0x00fdf008\tkernel32\tInterlockedIncrement\t1\tEnterCriticalSection\tS4 platform/win32\n')
+           '0x00fdf008\tkernel32\tInterlockedIncrement\t1\tEnterCriticalSection\tS4 platform/win32\n'
+           '0x00fdf00c\tkernel32\tInterlockedDecrement\t1\tLeaveCriticalSection\tS4 platform/win32\n'
+           '0x00fdf010\tkernel32\tLeaveCriticalSection\t1\t-\tS4 platform/win32\n')
 EXPORTS = ('const exp g_exports[] = { E("advapi32", RegCloseKey), E("kernel32", InterlockedIncrement),\n'
+           '    E("kernel32", InterlockedDecrement), E("kernel32", LeaveCriticalSection),\n'
            '    { "ws2_32", "closesocket", (void *)&fnvnx_ws2_closesocket } };\n')
 SRC = {
     'src/a.cpp': 'extern "C" int FUN_00ec1000(char *, unsigned, const char *);\n'
@@ -76,8 +79,9 @@ SRC = {
                  'int g_count = 5;\nint *g_pcount = &g_count;\nint bump() { return ++g_count; }\n',
     'src/g.cpp': 'unsigned long fnvnx_game_GetCurrentThreadId();\n'                # GAME1 spellings
                  'extern "C" void fnvnx_game_EnterCriticalSection(void *);\nvoid fnvnx_game_Sleep(unsigned long);\n'
+                 'struct CS;\nvoid fnvnx_game_LeaveCriticalSection(CS *);\n'   # C++ linkage, C++-decorated import
                  'int game_calls(void *p) { fnvnx_game_EnterCriticalSection(p); fnvnx_game_Sleep(1); '
-                 'return (int)fnvnx_game_GetCurrentThreadId(); }\n',
+                 'fnvnx_game_LeaveCriticalSection((CS *)p); return (int)fnvnx_game_GetCurrentThreadId(); }\n',
     'src/h.cpp': 'unsigned long FUN_00830470() { return 7; }\nvoid FUN_00401410(unsigned long) {}\n'
                  'void *FUN_00402000(unsigned n) { return (void *)n; }\nvoid FUN_00402030(void *) {}\n'
                  'void FUN_00aa1460(void *, unsigned) {}\n',
@@ -87,6 +91,7 @@ SRC = {
                  'void FUN_00403000_s1b::FUN_00403000(int) {}\n'
                  'void call_x(FUN_00403000_s1b *p) { p->FUN_00403000(1); }\n',
     'src/z.cpp': 'void FUN_00404000(int) {}\n',                                   # not patched: keeps its name
+    'src/l.cpp': 'extern "C" void LeaveCriticalSection(void *);\nvoid plain_leave(void *p) { LeaveCriticalSection(p); }\n',
 }
 RENAMES = ('# source\tkind\taddress\told MSVC name\tnew MSVC name\n'
            'src/x.cpp\tdef\t0x00403000\t?FUN_00403000@@YGXH@Z\t?FUN_00403000@FUN_00403000_s1b@@QAEXH@Z\n'
@@ -119,7 +124,10 @@ UNITS = {'units': [
                  '?g_pcount@@3PAHA': '0x01000a20'}},
     {'source': 'src/g.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401400, '?game_calls@@YAHPAX@Z')],
      'symbols': {'?GetCurrentThreadId@@YGKXZ': '0x00830470', '__imp__EnterCriticalSection@4': '0x00fdf008',
-                 '?Sleep@@YGXK@Z': '0x00401410'}},
+                 '?Sleep@@YGXK@Z': '0x00401410',
+                 '__imp_?LeaveCriticalSection@@YGXPAUCS@@@Z': '0x00fdf00c'}},
+    {'source': 'src/l.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401600, '?plain_leave@@YAXPAX@Z')],
+     'symbols': {'__imp__LeaveCriticalSection@4': '0x00fdf010'}},     # the real slot, in another unit
     {'source': 'src/h.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x830470, '?FUN_00830470@@YAKXZ'), F(0x401410, '?FUN_00401410@@YAXK@Z'),
         F(0x402000, '?FUN_00402000@@YAPAXI@Z'), F(0x402030, '?FUN_00402030@@YAXPAX@Z'),
@@ -231,7 +239,8 @@ def main():
         g = 'src/g.cpp'
         for name, want in (('_Z29fnvnx_game_GetCurrentThreadIdv', '__fnv_00830470'),
                            ('fnvnx_game_EnterCriticalSection', 'InterlockedIncrement'),
-                           ('_Z16fnvnx_game_Sleepm', '__fnv_00401410')):
+                           ('_Z16fnvnx_game_Sleepm', '__fnv_00401410'),
+                           ('_Z31fnvnx_game_LeaveCriticalSectionP2CS', 'InterlockedDecrement')):
             check(refs.get((g, name), [''] * 6)[5] == want, 'GAME1 %s -> %s: %s' % (name, want, refs.get((g, name))))
         n_ = 'src/n.cpp'
         for name, want in (('_Znwm', '__fnv_00402000'), ('_ZdlPvm', '__fnv_00aa1460'), ('_Znam', '__fnv_00402000'),

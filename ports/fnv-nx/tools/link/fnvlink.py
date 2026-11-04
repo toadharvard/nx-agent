@@ -262,13 +262,18 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     allms = set()
     for u in units.values():
         allms.update(n for _, n in u.defs); allms.update(u.refs)
-    ms.need(n for n in allms if n.startswith('?'))
+    ms.need(n[6:] if n.startswith('__imp_?') else n for n in allms if n.startswith(('?', '__imp_?')))
     msig = {}
 
     def msvc(n):
         s = msig.get(n)
         if s is None:
-            s = msig[n] = sigs.parse_msvc(n, ms[n])
+            if n.startswith('__imp_?'):   # C++-decorated import (undname leaves these alone): the inner declaration,
+                s = copy.copy(sigs.parse_msvc(n[6:], ms[n[6:]]))   # reached through the slot
+                s.special = 'import'
+                msig[n] = s
+            else:
+                s = msig[n] = sigs.parse_msvc(n, ms[n])
         return s
 
     def_at = {}                    # address -> (unit, msvc name) (first definition wins)
