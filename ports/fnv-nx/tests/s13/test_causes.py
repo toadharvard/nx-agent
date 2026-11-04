@@ -728,6 +728,29 @@ def test_callflow():
         causes._VFT = causes._LINKSYM = None
 
 
+def test_fix_classes():
+    """D21: every real-bug cause is in exactly one fix class, whose owner is the cause's owner."""
+    real = {c for c, v in causes.POLICY.items() if v[0] == 'real-bug'}
+    listed = [c for v in causes.FIX_CLASSES.values() for c in v[2]]
+    check(sorted(listed) == sorted(set(listed)), 'no cause in two fix classes')
+    check(set(listed) == real, 'fix classes cover exactly the real-bug causes (missing %s, extra %s)' % (
+        sorted(real - set(listed)), sorted(set(listed) - real)))
+    bad = [c for c in listed if causes.policy(c)[1] != causes.FIX_CLASSES[causes.FIX_CLASS_OF[c]][0]]
+    check(not bad, 'cause owner = class owner (%s)' % bad)
+    rows = {'native-undefined': dict(divergences=3, functions=2, worst_of=2),
+            'after-native-undefined': dict(divergences=1, functions=1, worst_of=0),
+            'vptr-unpaired': dict(divergences=5, functions=4, worst_of=4)}
+    fc = causes.fix_classes(rows)
+    check(list(fc)[0] == 'vtables' and fc['vtables']['worst_of'] == 4, 'classes ordered by worst_of')
+    check(fc['callee-bodies']['divergences'] == 4 and fc['callee-bodies']['owner'] == 'S1', 'class sums its causes')
+    with tempfile.TemporaryDirectory() as d:
+        js = os.path.join(d, 'c.json'); out = os.path.join(d, 'classes.tsv')
+        json.dump(dict(causes=rows), open(js, 'w'))
+        causes.main(['classes', js, '--tsv', out])
+        t = [l.split('\t') for l in open(out).read().splitlines()]
+        check(t[0][0] == 'class' and t[1][:3] == ['vtables', 'S2c', '4'], 'classes.tsv: class, owner, worst_of')
+
+
 if __name__ == '__main__':
     test_rules()
     test_vcall_split()
@@ -738,5 +761,6 @@ if __name__ == '__main__':
     test_handoffs()
     test_cli_effects()
     test_unclassified_shapes()
+    test_fix_classes()
     print('%d failures' % len(FAIL))
     sys.exit(1 if FAIL else 0)

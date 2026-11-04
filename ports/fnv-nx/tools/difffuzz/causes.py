@@ -258,7 +258,7 @@ POLICY = {
     'native-empty-body': ('real-bug', 'S1', True, 'the native function, or a decomp-local stand-in it calls for an '
                                                   'original function defined elsewhere, is an empty body (ret / '
                                                   'return constant) where the exe runs code that makes calls'),
-    'native-calls-data': ('real-bug', 'S1', True, 'the native calls an image data address where the exe calls a '
+    'native-calls-data': ('real-bug', 'S2c', True, 'the native calls an image data address where the exe calls a '
                                                   'function: a virtual slot read past the end of a decomp class\'s '
                                                   'shorter vtable (or a data word called as code)'),
     'native-missing-free': ('real-bug', 'S1', True, 'the exe frees a block here (CRT free / operator delete / '
@@ -272,6 +272,53 @@ POLICY = {
 }
 
 CLASS_ORDER = ('real-bug', 'triage', 'artifact', 'by-design')
+
+# D21 (coverage first): every real-bug cause belongs to one fix class, a single general mechanism its owner closes
+# for all instances at once. class -> (owner, mechanism, causes).
+FIX_CLASSES = {
+    'callee-bodies': ('S1', 'every call from a prepared unit reaches the original function\'s real body: emit all '
+                            'inline/template/declared-only bodies, no decomp-local stand-in (empty or return-0) '
+                            'shadows an original function',
+                      ('native-undefined', 'after-native-undefined', 'native-empty-body', 'native-empty-callee',
+                       'native-zero-stub')),
+    'object-layout': ('S1', 'every field is read at the exe\'s offset, width and signedness (struct layouts and '
+                            'member types from the exe, base subobject placement)',
+                      ('native-null-read', 'layout-offset', 'field-width', 'signedness')),
+    'control-flow':  ('S1', 'no path the exe takes ends in a trap, a fall-off or a stack-protector abort (no UB '
+                            'GCC exploits: missing returns, unreachable, out-of-bounds locals)',
+                      ('native-trap', 'falloff?', 'stack-protector')),
+    'arithmetic':    ('S1', 'integer and float arithmetic as MSVC x86 computes it: 32-bit address wraparound '
+                            '(ilp32-wrap), float results beyond x87 tolerance',
+                      ('float', 'ilp32-wrap')),
+    'ownership':     ('S1', 'the native frees exactly what the exe frees',
+                      ('native-missing-free',)),
+    'static-init':   ('S10', 'every dynamic initializer registers its destructor as the exe does (atexit)',
+                      ('dyninit-no-atexit',)),
+    'call-abi':      ('S1b', 'every call passes and preserves registers by the callee\'s MSVC convention (argument '
+                             'slots written, results not reused, callee-saved kept, sret as MSVC)',
+                      ('uninit-arm', 'native-garbage-arg', 'native-stale-result', 'callee-saved', 'sret-mismatch')),
+    'data-binding':  ('S2c', 'every data symbol and import binds to the exe object (no stub as data, no unit copy, '
+                             'no native address where the exe has an image address, bridges deliver the bytes)',
+                      ('native-stub-data', 'native-address', 'split-global', 'import-slot-called', 'call-args')),
+    'vtables':       ('S2c', 'every image vftable pairs with a full native vtable of the static class (no short '
+                             'vtables, overrides bound to their this-adjusting thunks)',
+                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding')),
+}
+FIX_CLASS_OF = {c: k for k, v in FIX_CLASSES.items() for c in v[2]}
+
+
+def fix_classes(causes_rows):
+    """{class: owner, mechanism, causes, divergences, functions (sum over causes; a function in two causes counts
+    twice), worst_of} from a summary's per-cause rows, largest first."""
+    out = {}
+    for k, (owner, mech, cs) in FIX_CLASSES.items():
+        rows = [causes_rows.get(c) or {} for c in cs]
+        out[k] = dict(owner=owner, mechanism=mech,
+                      causes={c: (causes_rows.get(c) or {}).get('divergences', 0) for c in cs},
+                      divergences=sum(r.get('divergences', 0) for r in rows),
+                      functions=sum(r.get('functions', 0) for r in rows),
+                      worst_of=sum(r.get('worst_of', 0) for r in rows))
+    return dict(sorted(out.items(), key=lambda kv: (-kv[1]['worst_of'], kv[0])))
 
 
 def policy(cause):
@@ -1650,6 +1697,7 @@ def summarize(dirs, tag=''):
         'functions_by_class': {c: by_class.get(c, 0) for c in CLASS_ORDER},
         'native_objects': dict(OBJ_STATS, dir=_obj_dir()),
         'causes': causes,
+        'fix_classes': fix_classes(causes),
         'policy': {c: dict(verdict=v[0], owner=v[1], hard=v[2], why=v[3]) for c, v in sorted(POLICY.items())},
     }
 
@@ -1681,6 +1729,7 @@ def merge(paths):
             for k_, n in (r.get('kinds') or {}).items():
                 t['kinds'][k_] = t['kinds'].get(k_, 0) + n
     tot['causes'] = dict(sorted(tot['causes'].items(), key=lambda kv: (-kv[1]['divergences'], kv[0])))
+    tot['fix_classes'] = fix_classes(tot['causes'])
     return tot
 
 
@@ -1750,6 +1799,9 @@ def main(argv=None):
     m.add_argument('--out', default='')
     e = sub.add_parser('explain')
     e.add_argument('files', nargs='+')
+    fc = sub.add_parser('classes', help='the D21 fix classes of a causes.json (summary or merge output)')
+    fc.add_argument('file')
+    fc.add_argument('--tsv', default='')
     h = sub.add_parser('handoffs')
     h.add_argument('dirs', nargs='+')
     h.add_argument('--out-dir', required=True)
@@ -1761,6 +1813,17 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd in ('summary', 'handoffs') and a.effects:
         load_effects(a.effects)
+    if a.cmd == 'classes':
+        fcs = fix_classes(json.load(open(a.file)).get('causes') or {})
+        lines = ['class\towner\tworst_of\tfunctions\tdivergences\tcauses\tmechanism']
+        for k, v in fcs.items():
+            lines.append('\t'.join([k, v['owner'], str(v['worst_of']), str(v['functions']), str(v['divergences']),
+                                    ', '.join('%s %d' % kv for kv in v['causes'].items() if kv[1]), v['mechanism']]))
+        if a.tsv:
+            open(a.tsv, 'w').write('\n'.join(lines) + '\n')
+        for l in lines:
+            print('  '.join(l.split('\t')[:6]))
+        return 0
     if a.cmd == 'handoffs':
         for row in write_handoffs(a.dirs, a.out_dir, a.recheck_tag, a.ref_prefix, a.ref_by_head):
             print('%-22s %-9s %-5s rows %5d fn %5d  %s' % row)
