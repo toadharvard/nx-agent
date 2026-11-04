@@ -155,6 +155,27 @@ aliases past the by-address binding. Cost: one GOT load per global access (perfo
 Anything that can take more than about 10 minutes runs as a farm job (docs/MACHINES.md, tools/farm/). Development
 agents queue the next item instead of waiting, and verify their own change with small local checks.
 
+### D18. Targets: 60 fps, native renderer, parity before hardware (J-0150, owner)
+
+- Frame target: 60 fps, measured on the worst frame (at most 16.7 ms), at 720p handheld on the 1.02 GHz stock CPU
+  clock, with no resolution cuts.
+- The native renderer (nxgpu/deko3d) is the target. The Nine/D3D9 fallback gets no further work.
+- No hardware tests until the port matches the original in translation (difffuzz against the x86 oracle, MSVC
+  equivalence) and in rendering (S16 against the D3D9 reference). No Switch emulators.
+- Every stream has one metric, and every commit states `metric: before -> after`. Checks run in the background,
+  merges are fast, and verification (farms, V1, V2, the R0 regression detector) comes after the merge.
+
+### D19. Gated behaviour changes for performance: patch class MT1 (J-0152, owner)
+
+- Some speed-ups cannot keep MSVC byte parity. The first is multithreaded culling: accumulators with two batch
+  renderers, per-thread current-accumulator globals, BSFadeNode registered through its culler's accumulator.
+- Such changes ship as patch class MT1 (patches/mt1_*.s1b): Switch build only, behind a runtime feature flag
+  (bMTRendering), off by default until it is proven.
+- With the flag off, the build is byte-identical to the parity build, and fuzz/equivalence run in that mode.
+- MT1 patches skip the MSVC byte check. They need instead: a clean GCC census, mtqemu on the real objects, the race
+  checker, and a frame-equivalence test (same accumulators and draw list with the flag on and off).
+- S1b owns the mechanism; S15-threads writes the patches.
+
 ## Legal
 
 The decomp grants no licence. This directory contains only our own code: tools, shims, the platform layer and docs.

@@ -1151,13 +1151,19 @@ check('NEW1 plain unsigned size parameter -> size_t, unsigned long / short kept'
       ['operator delete[](void* p, size_t)', 'operator new(size_t n)', 'operator new(unsigned long n, unsigned short k)',
        'operator new(size_t n, unsigned& total)'])
 _n5 = ('struct Pm\n{\n    virtual ~Pm();\n    int m;\n    static void operator delete(void*, void*);\n'
-       '    static void* operator new(size_t n);\n};\nstruct Pd : Pm\n{\n    int k;\n};\n'
+       '    static void* operator new(size_t n) { return ::operator new(n); }\n};\nstruct Pd : Pm\n{\n    int k;\n};\n'
        'class Pc\n{\n    int h;\npublic:\n    virtual ~Pc() {}\n    static void* operator new(size_t, void* p) { return p; }\n'
        '    static void operator delete(void*, void*) {}\n};\n')
 _o5 = run(s1.r_placement_only_delete, _n5)
 check('NEW5 placement-only delete + virtual dtor: global delete member',
       _o5, ['struct Pm\n{ FNVNX_GLOBAL_DELETE /* fnv-nx NEW5 */\n',
             'class Pc\n{ public: FNVNX_GLOBAL_DELETE private: /* fnv-nx NEW5 */\n    int h;'], ['struct Pd : Pm\n{ F'])
+check('NEW5 the class\'s own inline operator new gets the tag (no delete on a throwing constructor, V1 N2)',
+      _o5, ['static void* operator new(size_t n FNVNX_NEW5_TAG) { return ::operator new(n); }'])
+check('NEW5 a class whose operator new has no body here: unchanged',
+      run(s1.r_placement_only_delete, _n5.replace('static void* operator new(size_t n) { return ::operator new(n); }',
+                                                  'static void* operator new(size_t n);')),
+      ['class Pc\n{ public: FNVNX_GLOBAL_DELETE'], ['struct Pm\n{ FNVNX'])
 check('NEW5 keeps the line count', str(_o5.count('\n') == _n5.count('\n')), ['True'])
 check('NEW5 a usual delete next to the placement form: unchanged',
       run(s1.r_placement_only_delete, _n5.replace('static void operator delete(void*, void*);',
@@ -1172,8 +1178,8 @@ check('NEW5 a placement form with another second parameter: unchanged',
 if _shutil.which('aarch64-linux-gnu-g++'):
     _c5 = os.path.join(tempfile.mkdtemp(), 'n5.cpp')
     _m5 = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
-           if l.startswith('#define FNVNX_GLOBAL_DELETE ')]          # the shim's own definition of the macro
-    open(_c5, 'w').write('#include <stddef.h>\n' + ''.join(_m5) + _o5 +
+           if l.startswith(('#define FNVNX_GLOBAL_DELETE ', '#define FNVNX_NEW5_TAG ', 'struct fnvnx_new_tag'))]  # the shim's own
+    open(_c5, 'w').write('#include <stddef.h>\n#include <new>\n' + ''.join(_m5) + _o5 +
                          'Pm::~Pm() {}\nvoid f(Pd* d, Pc* c) { delete d; delete c; }\n')
     _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror', _c5],
                          capture_output=True, text=True)
@@ -1254,6 +1260,33 @@ check('DUPINT1-RET a narrower integer parameter: untouched',
           'void h(void* p) { Pick(p, 1); }\n', os.path.join(_s3, 'src', 'd.cpp')), ['int Pick('], ['fnv-nx DUPINT1'])
 s1._UNIT_SYMBOLS = _saved
 _shutil.rmtree(_s3, ignore_errors=True)
+
+check('COND1 an explicit G(bool): the conditional is bool, untouched (V1 C2)',
+      run(s1.r_conditional_bool_gates, _G.replace('Gate(bool b)', 'explicit Gate(bool b)') +
+          'void f(N* n) { if (!n ? false : n->test(0.5f)) g(); }\n'), [], ['Gate(false)'])
+check('COND1 `!x.f(a)` is bool already: untouched (V1 C3)',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { bool r = !n ? false : !n->test(0.5f); }\n'),
+      [], ['Gate(false)'])
+
+# ---- S1-refs: FINL1 (`__forceinline` on a declaration whose body the unit does not have)
+_F = ('struct A {\n    __forceinline ~A();\n    __forceinline int get(int i);\n    __forceinline int get(int i) const;\n'
+      '    __forceinline int put(int i);\n    __forceinline int one();\n};\n'
+      'struct B { int one() { return 1; } };\n'
+      'struct T { template<class X> static __forceinline void d(X* x, int n, Pod); '
+      'template<class X> static __forceinline void d(X* x, int n, Cls); };\n'
+      'template<class X> __forceinline void T::d(X* x, int n, Pod) {}\n'
+      'struct H : A { H() : A() {} };\n'
+      'int A::get(int i) const { return i; }\n__forceinline int A::put(int i) { return i; }\n')
+_o = run(s1.r_forceinline_declarations, _F)
+check('FINL1 body-less declarations of functions the unit does not define lose __forceinline',
+      _o, ['/* fnv-nx FINL1: __forceinline */ ~A();', '/* fnv-nx FINL1: __forceinline */ int get(int i);',
+           '/* fnv-nx FINL1: __forceinline */ int one();',
+           '/* fnv-nx FINL1: __forceinline */ void d(X* x, int n, Cls);'])
+check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overload)',
+      _o, ['__forceinline int get(int i) const;', '__forceinline int put(int i);',
+           'static __forceinline void d(X* x, int n, Pod);'])
+check('FINL1 headers are left alone',
+      run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)

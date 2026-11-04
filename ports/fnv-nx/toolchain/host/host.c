@@ -166,6 +166,7 @@ static void load_config(void) {
         char key[64];
         if (sscanf(line, " %63s", key) != 1) continue;
         int v = atoi(eq + 1);
+        /* other keys are ignored: game_dir= is the guest's (S5-data: moves C:\FalloutNV off the default) */
         if (!strcmp(key, "core3")) g_cfg.core3 = v != 0;
         else if (!strcmp(key, "boost_loading")) g_cfg.boost_loading = v != 0;
     }
