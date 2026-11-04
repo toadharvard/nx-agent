@@ -627,6 +627,14 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   exactly one address carries it (tier `gref/ident`; several addresses: `ambiguous`, not guessed). On the
   ninth-round objects: (1)+(2) bind 52 names (101 references), (3) 7 names (12 references), 1 identifier stays
   ambiguous.
+* **Variables at a .text address nothing defines** (`text-addr`, S2c-abi): an array (`@@3Q`) or a char label
+  (`@@3D`, the `&FUN_00a00000` idiom) the decomp places at a .text address that is no function start. The code uses
+  only its address, and on x86 that address is the value. The generated initializers pass immediates this way
+  (`g_011c5a4c_arg1` at 0x00a00000, `g_011d3450_arg1` at 0x006e6e6e). The reference binds to the absolute symbol
+  `__fnvnx_textaddr_<addr> = 0x<addr>;` (aliases.ld), so the native code passes the same number. Before, these were
+  `extern-text` and reached a named stub (S13b native-stub-data: GlobalObject2 0x0045cfe0's second argument). On
+  link/c0d6c71516f6 this applies to 11 references in units, plus their copies in the vtable objects. Other variables
+  at such addresses (an `int` at 0x00000065) stay `extern-text`.
 * **Calls of an IAT slot's address**: a decomp `__declspec(dllimport)` function named after its slot
   (`FUN_00fdf1c0(void *)`) is called directly by GCC (`bl`); when its name binds to an IAT slot as data, a call of it
   binds to the slot's api (S4's implementation or the api name), never into the image's IAT words.
