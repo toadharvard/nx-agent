@@ -45,8 +45,10 @@ t0=$(date +%s)
 host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native)
 # NX1's package checks (tests/nx1): switch-tools elf2nro needs lz4.h, the host device test qemu-user, the libnx
 # syntax check newlib's headers. Libraries are not commands, so host_check cannot see them.
-if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/include/newlib ] || ! command -v qemu-aarch64 >/dev/null; }; then
-	apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends liblz4-dev libnewlib-dev qemu-user \
+# uam (toolchain/uam/build.sh, LINK_OVERRIDES=render without RENDER_LIB) needs the system python's mako.
+if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/include/newlib ] || ! command -v qemu-aarch64 >/dev/null \
+		|| ! /usr/bin/python3 -c 'import mako' 2>/dev/null; }; then
+	apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends liblz4-dev libnewlib-dev qemu-user python3-mako \
 		|| echo "full_job.sh: NX1 packages not installed; checks 1 and 7 report incomplete"
 fi
 job_sources "$REPO"
