@@ -1031,3 +1031,48 @@ with the cull reconciled and no override counted; 34.3 ms with the overrides (-7
 worker). Corrections move with the item they correct (`follows`): a lever that moves 70-90 % of the cull to cores
 1-2 moves the same share of the override's saving, and so does an A57 price. With that, plan45b is 22.4 ms without
 the overrides and 20.6 ms with them. A first version left the corrections on main and gave 16.0 ms, which was wrong.
+
+### 11.7 The content lever: Switch INI presets (stream S15-simd)
+
+Threading alone reaches 17.15 ms at best (S15-threads), above the 16.7 ms worst-frame target. The 360/PS3 versions
+cut content: fade distances, shadows, grass. `tools/perf/content_presets.py` models that with the game's own settings
+only (no code). The presets live in budget_model.json `content`. Each key is a static setting object of the exe
+(`setting_names.py`). The `base` values are the exe's own defaults, read from the settings' initializers [M]:
+uGridsToLoad 5, fLODFadeOutMultObjects 5.0, Items 3.0, Actors 2.5, iActorShadowCountExt 2 / Int 4, bShadowsOnGrass
+0, iMinGrassSize 80, fGrassMaxStartFadeDistance 7000, iMaxDecalsPerFrame 10 / Skin 3.
+
+| preset | changes from base |
+|---|---|
+| switch_a | fade x Objects 4 / Items 2 / Actors 2; actor shadows 1 ext / 2 int; iMinGrassSize 120; grass fade 4000; decals 5 / 2 |
+| switch_b | fade x 3 / 1.5 / 1.5; actor shadows 0 / 1; iMinGrassSize 160; grass fade 2500; decals 3 / 1 |
+| switch_b_g3 | switch_b with uGridsToLoad 3. It breaks scripted events and AI packages that expect loaded cells, so it is shown as the bound only, not proposed |
+
+**Scaling [E].**
+- Visible references of a class grow with the square of its fade multiplier, capped by the loaded area
+  ((uGridsToLoad'/5)^2).
+- Grass grows with (80 / iMinGrassSize)^2 x (fade'/7000)^2.
+- V weights the classes: objects 0.70, items 0.10, actors 0.10, grass 0.10.
+- Each shadowed actor is a shadow pass: 15 % of draws at base.
+- cull = 0.30 x loaded + 0.70 x V; accumulation and both renderer sides = draws; scene update = 0.5 x loaded +
+  0.5 x V.
+- Animation, AI and Havok are unchanged: high process is set by distance to the player, not by fade.
+- S15-simd's override corrections scale with their item.
+
+| preset | scale cull / accumulation + renderer / scene update | worst frame, ms at 1.02 GHz, mid (lo-hi): placed | plan45b | plan60 |
+|---|---|---|---|---|
+| base | 1.00 / 1.00 / 1.00 | 34.3 (6.1-97.4) | 20.6 (6.1-62.5) | 19.0 (6.1-59.3) |
+| switch_a | 0.70 / 0.53 / 0.79 | 27.3 (6.1-76.7) | 17.1 (6.1-51.5) | 16.2 (6.1-49.8) |
+| switch_b | 0.52 / 0.27 / 0.66 | 23.3 (6.1-64.9) | 15.2 (6.1-45.2) | 14.7 (6.1-44.3) |
+| switch_b_g3 | 0.33 / 0.27 / 0.34 | 20.9 (6.1-56.5) | 13.8 (6.1-40.6) | 13.4 (6.1-39.8) |
+
+(--render render/native/perf/report.json, --perf perf1 004d29413190; the lo end is the docked 720p GPU estimate.)
+
+**Reading it.** With the threading levers, switch_a meets 60 fps stable at plan60 (16.2 ms) and is just over it at
+plan45b (17.1 ms). switch_b meets it in both (15.2 / 14.7 ms) without touching uGridsToLoad. Every figure is the
+model's mid case. The hi end stays far above the target until frameprof measures a frame.
+
+**Open.**
+- The work items are taken to describe a frame at the base settings, i.e. the exe's defaults. A PC player's ini
+  (High/Ultra) has longer fades, so if the items were estimated for those, the presets save more.
+- The shares and the square law are estimates. frameprof per preset on one scene replaces them.
+- Applying a preset is ini.cpp's `port_default` table (S15-threads / S4): no game code.

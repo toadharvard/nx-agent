@@ -754,5 +754,70 @@
    "owner": "S3",
    "needs_hardware": false
   }
+ },
+ "content": {
+  "note": "content lever (S15-simd, PERF.md 11.7; tools/perf/content_presets.py): Switch INI presets of existing settings only. base = FalloutNV.exe 1.4.0.525's own defaults, read from the settings' static initializers [M]; the work items are taken to describe a frame at base [E: to verify with frameprof per preset]. Shares and the scaling rules are estimates [E].",
+  "shares": {
+   "visible": {
+    "objects": 0.7,
+    "items": 0.1,
+    "actors": 0.1,
+    "grass": 0.1
+   },
+   "shadow_of_draws": 0.15,
+   "grass_shadow_actor_equiv": 2.0,
+   "cull_traversal": 0.3,
+   "scene_loaded": 0.5
+  },
+  "presets": {
+   "base": {
+    "uGridsToLoad": 5,
+    "fLODFadeOutMultObjects": 5.0,
+    "fLODFadeOutMultItems": 3.0,
+    "fLODFadeOutMultActors": 2.5,
+    "iActorShadowCountExt": 2,
+    "iActorShadowCountInt": 4,
+    "bShadowsOnGrass": 0,
+    "iMinGrassSize": 80,
+    "fGrassMaxStartFadeDistance": 7000.0,
+    "iMaxDecalsPerFrame": 10,
+    "iMaxSkinDecalsPerFrame": 3
+   },
+   "switch_a": {
+    "fLODFadeOutMultObjects": 4.0,
+    "fLODFadeOutMultItems": 2.0,
+    "fLODFadeOutMultActors": 2.0,
+    "iActorShadowCountExt": 1,
+    "iActorShadowCountInt": 2,
+    "iMinGrassSize": 120,
+    "fGrassMaxStartFadeDistance": 4000.0,
+    "iMaxDecalsPerFrame": 5,
+    "iMaxSkinDecalsPerFrame": 2
+   },
+   "switch_b": {
+    "fLODFadeOutMultObjects": 3.0,
+    "fLODFadeOutMultItems": 1.5,
+    "fLODFadeOutMultActors": 1.5,
+    "iActorShadowCountExt": 0,
+    "iActorShadowCountInt": 1,
+    "iMinGrassSize": 160,
+    "fGrassMaxStartFadeDistance": 2500.0,
+    "iMaxDecalsPerFrame": 3,
+    "iMaxSkinDecalsPerFrame": 1
+   },
+   "switch_b_g3": {
+    "uGridsToLoad": 3,
+    "fLODFadeOutMultObjects": 3.0,
+    "fLODFadeOutMultItems": 1.5,
+    "fLODFadeOutMultActors": 1.5,
+    "iActorShadowCountExt": 0,
+    "iActorShadowCountInt": 1,
+    "iMinGrassSize": 160,
+    "fGrassMaxStartFadeDistance": 2500.0,
+    "iMaxDecalsPerFrame": 3,
+    "iMaxSkinDecalsPerFrame": 1,
+    "risk": "uGridsToLoad below 5 is known to break scripted events and AI packages that expect loaded cells; listed to show the bound, not as a proposal"
+   }
+  }
  }
 }
