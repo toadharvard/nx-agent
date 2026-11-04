@@ -35,7 +35,7 @@ FPR_CLASSES = ('F32', 'F64', 'F80')
 
 def classify(t):
     """Class of one MSVC type: I8/I16/I32/I64/P/F32/F64/F80/VOID/VARARGS/MP or AGG:<name> / ?:<text>."""
-    t = ' '.join(t.replace('__ptr64', '').split())
+    t = ' '.join(re.sub(r'\b(?:__ptr64|__ptr32|__restrict|__unaligned)\b', ' ', t).split())
     if t.endswith(('*', '&')) or re.search(r'\*\s*(?:const|volatile)?\s*$', t):
         return 'P'
     if re.search(r'\(\s*(?:__\w+\s+)?[\w:<>, ]*::\*\s*\)\s*\(', t):

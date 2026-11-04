@@ -78,6 +78,12 @@ CASES = [
      'extern "C" int g_c; int g_c; extern "C" void def_ints_vs_q(Q q) { g_c = q.a * 1000 + q.b * 100 + q.c * 10 + q.d; }',
      'extern "C" void br_ints_vs_q(int a, int b, int c, int d);\n'
      'static int t_ints_vs_q() { br_ints_vs_q(4, 3, 2, 1); return (g_c == 4321) - 1; }'),
+    # a __restrict pointer is a pointer (it was an unknown type: the pair stayed manual, 0x00a6dbd0 Negate)
+    ('restrict_out', '?n@A@@QBE?AUQ@@XZ', '?n@B@@QAEXPIAH@Z', 'bridge',
+     'extern "C" void def_restrict_out(Foo *self, int *__restrict o) { o[0] = -self->k; o[1] = 2; o[2] = 3; o[3] = 4; }',
+     'extern "C" Q br_restrict_out(Foo *self);\n'
+     'static int t_restrict_out() { Foo f{9}; Q q = br_restrict_out(&f);'
+     ' return (q.a == -9) + (q.b == 2) + (q.d == 4) - 3; }'),
     ('ptr_vs_holder', '?d@@YAHPAUFoo@@@Z', '?d@@YAHUHolder@@@Z', 'bridge',
      'extern "C" int def_ptr_vs_holder(Holder h) { return h.p->k; }',
      'extern "C" int br_ptr_vs_holder(Foo *f);\n'
