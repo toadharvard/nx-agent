@@ -153,6 +153,7 @@ def vs_scene(j, vbin, vglsl, combo, seed):
 
 COV_TIE = 2   # differing pixels tolerated per vertex-program seed (centres on an edge of VS-computed triangles: coverage,
               # or the neighbouring triangle's depth / attributes at a shared edge)
+EXTRA_PROBES = 2   # further perturbation patterns for a program that fails under the first (see main)
 SENS = 0.1    # a pixel may differ by SENS x the oracle's own change under the 1e-5 input perturbation (float32 rounding
               # is ~1e-7 relative, so a correct translation stays well inside; an ill-conditioned input is not a defect)
 def maxerr(a, b, q=None, f=None):
@@ -351,19 +352,28 @@ def main():
         for x in th: x.start()
         for x in th: x.join()
     print('ran in %.0f s' % (time.time() - t0), flush=True)
-    res = {}
-    for h, scs in byhash.items():
-        if scs is None: res[h] = {'status': 'not_run', 'detail': 'no drivable input' if target == 'gl' else 'vertex programs need --target gl'}; continue
+
+    def probe_max(A, Qs):
+        """one probe image holding, per pixel, the largest change of the oracle over every probe (stability widening)"""
+        Q = dict(Qs[0])
+        for Q2 in Qs[1:]:
+            Q['c'] = np.where(np.abs(np.nan_to_num(Q2['c'] - A['c'])) > np.abs(np.nan_to_num(Q['c'] - A['c'])), Q2['c'], Q['c'])
+            Q['d'] = np.where(np.abs(Q2['d'].astype(np.int64) - A['d']) > np.abs(Q['d'].astype(np.int64) - A['d']), Q2['d'], Q['d'])
+        return Q
+
+    def judge(h, scs, nextra):
+        """verdict of one program over its seeds; nextra = extra probes (q2..) rendered for it"""
         ce = 0.0; de = 0; bp = 0; det = ''; seeds_res = []; onan = False; nanpx = 0
-        err = None
         for sc in scs:
             base = os.path.basename(sc)[:-6]
             fa, fb = os.path.join(nd, base + '.v6nd'), os.path.join(gd, base + '.v6nd')
             fq, fn = os.path.join(nd, base + 'q.v6nd'), os.path.join(gd, base + 'n.v6nd')
             ff = os.path.join(nd, base + 'f.v6nd')
-            if not os.path.exists(fa): err = ('oracle_error', 'oracle could not run the bytecode'); break
-            if not os.path.exists(fb): err = ('target_error', 'target could not run the GLSL'); break
-            A = C.load(fa); Q = C.load(fq) if os.path.exists(fq) else None
+            if not os.path.exists(fa): return {'status': 'oracle_error', 'detail': 'oracle could not run the bytecode'}
+            if not os.path.exists(fb): return {'status': 'target_error', 'detail': 'target could not run the GLSL'}
+            A = C.load(fa); Qs = [C.load(fq)] if os.path.exists(fq) else []
+            Qs += [C.load(p) for p in (os.path.join(nd, base + 'q%d.v6nd' % (j + 2)) for j in range(nextra)) if os.path.exists(p)]
+            Q = probe_max(A, Qs) if Qs else None
             Fo = C.load(ff) if os.path.exists(ff) else None
             ok, c_, d_, n_, m_, k_ = maxerr(A, C.load(fb), Q, Fo)
             num_ok = os.path.exists(fn) and maxerr(A, C.load(fn), Q, Fo)[0]
@@ -371,15 +381,35 @@ def main():
             if not ok and k_: onan = True   # the oracle itself produced NaN on this input (pixels not compared)
             ce = max(ce, c_); de = max(de, d_); bp = max(bp, n_)
             if not ok and not det: det = m_
-        if err:
-            res[h] = {'status': err[0], 'detail': err[1]}; continue
         st = 'pass' if all(ok for ok, _ in seeds_res) else 'fail'
         nst = 'pass' if all(nok for _, nok in seeds_res) else 'fail'
-        res[h] = {'status': st, 'max_err_color': ce, 'max_err_depth_lsb': de, 'bad_px': bp, 'seeds': len(scs), 'detail': det[:200],
-                  'status_known_s6b': nst, 'oracle_nan': onan, 'oracle_nan_px': nanpx, 'undriven': undriven_of.get(h, [])}
+        r = {'status': st, 'max_err_color': ce, 'max_err_depth_lsb': de, 'bad_px': bp, 'seeds': len(scs), 'detail': det[:200],
+             'status_known_s6b': nst, 'oracle_nan': onan, 'oracle_nan_px': nanpx, 'undriven': undriven_of.get(h, []),
+             'probes': 1 + nextra}
         if st == 'fail':
-            res[h]['cause'] = ('known_s6b' if nst == 'pass' else 'undriven_input' if res[h]['undriven'] else
-                               'oracle_nan' if onan else 'open')
+            r['cause'] = ('known_s6b' if nst == 'pass' else 'undriven_input' if r['undriven'] else
+                          'oracle_nan' if onan else 'open')
+        return r
+
+    res = {}
+    for h, scs in byhash.items():
+        if scs is None: res[h] = {'status': 'not_run', 'detail': 'no drivable input' if target == 'gl' else 'vertex programs need --target gl'}; continue
+        res[h] = judge(h, scs, 0)
+    # a failing program is judged again against EXTRA_PROBES more perturbation sign patterns: one random pattern can
+    # miss an ill-conditioned input (measured: SpeedTree VS depth 10-44 LSB passes under 3 patterns, flips under 1);
+    # more probes only widen the tolerance, so probing the failures alone equals probing everything
+    again = [h for h, x in res.items() if x['status'] == 'fail']
+    p2 = []
+    for h in again:
+        for sc in byhash[h]:
+            for j in range(EXTRA_PROBES):
+                q = sc[:-6] + 'q%d.scene' % (j + 2)
+                open(q, 'w').write(perturb(open(sc).read(), random.Random(os.path.basename(sc) + '/%d' % (j + 2)))); p2.append(q)
+    p2 = [q for q in p2 if not (compare_only and os.path.exists(os.path.join(nd, os.path.basename(q)[:-6] + '.v6nd')))]
+    if p2: run_batches(os.path.join(bindir, 'v6n_nine'), nd, p2, max(1, jobs))
+    for h in again: res[h] = judge(h, byhash[h], EXTRA_PROBES)
+    print('re-judged %d failing programs with %d more probes: %d pass' % (len(again), EXTRA_PROBES,
+          sum(res[h]['status'] == 'pass' for h in again)), flush=True)
     for e in programs:
         if e['status'] is None: e.update(res[e['hash']])
     tot, per, uniq = summarize(programs)
