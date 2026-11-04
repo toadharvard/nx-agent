@@ -57,6 +57,7 @@ def fnvlink_demangle(name, _cache={}):
 
 
 TREE, DECLS = None, {}
+DEF_SYM = {}   # MSVC name of a definition -> its native (Itanium) symbol, from the link's addrmap.tsv
 VACALL_OUT, VACALL_REQ = None, set()   # --vacall: work dir of the recorded calls; (unit, undefined) requested
 import vacall  # noqa: E402
 
@@ -77,11 +78,18 @@ def replay(ref_m, def_m, ref_d, def_d, src, dunit, lay, un=None):
             ds = fnvlink.c_name_standin(ds, rs) or ds
     if rs.kind != 'func' or ds.kind != 'func':
         return None
-    v = abi.compare(rs, ds)
+    va_r = None
+    if VACALL_OUT and dunit and any(p.strip() == '...' for p in ds.raw_params or ()):
+        dsym = DEF_SYM.get(def_m)
+        if dsym:
+            VACALL_REQ.add((dunit, dsym))
+            defs = vacall.load_defs(VACALL_OUT, dunit)
+            va_r = defs.get(dsym) if defs else None
+    v = abi.compare(rs, ds, va_reads=va_r)
     if VACALL_OUT and vacall.needs(v):
         VACALL_REQ.add((src, un))
         calls = vacall.load(VACALL_OUT, src)
-        v2, fs, _, _ = vacall.decide(rs, ds, calls.get(un) if calls and un else None)
+        v2, fs, _, _ = vacall.decide(rs, ds, calls.get(un) if calls and un else None, va_r)
         if v2 is not None:
             v, rs = v2, fs
     if v.kind != 'same' and dunit is not None:
@@ -117,6 +125,17 @@ def main():
             if line.startswith('#') or len(f) < 4 or not f[3]:
                 continue
             over[int(f[0], 16)] = f[3]
+    am = os.path.join(a.out, 'addrmap.tsv')
+    by_addr_sym = {}
+    if os.path.exists(am):
+        for line in open(am, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if len(f) > 3 and not line.startswith('#'):
+                by_addr_sym[f[0]] = f[3]
+    for line in open(os.path.join(a.out, 'abi.tsv'), encoding='utf-8', errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if len(f) > 4 and f[2] in by_addr_sym:
+            DEF_SYM[f[4]] = by_addr_sym[f[2]]
     lay = {k: v for k, v in layout.load(os.path.join(a.out, 'layouts.tsv')).items() if v is not None}
     def passes():
         old, new, out = [], [], []
@@ -153,6 +172,7 @@ def main():
             fo.write(''.join('%s\t%s\n' % r for r in sorted(VACALL_REQ)))
         vacall.run(VACALL_OUT, TREE)
         vacall.load.__defaults__[0].clear()
+        vacall.load_defs.__defaults__[0].clear()
         old, new, out = passes()
     for name, rows in (('old', old), ('new', new)) if a.old else (('new', new),):
         n, cl = metric(rows)

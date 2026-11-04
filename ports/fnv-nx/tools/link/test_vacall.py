@@ -54,6 +54,26 @@ CASES = [
 ]
 
 
+# fixed references against variadic definitions whose bodies the plugin reads (VADEF, V2 VA2-VA4): (case,
+# reference MSVC, definition MSVC, wanted, C++ definition def_<case>, C++ check calling br_<case>)
+DEF_CASES = [
+    ('v2', '?l@@YAXHHH@Z', '?l@@YAXHZZ', 'manual',     # two words where the body reads a double
+     'extern "C" double g_v2; double g_v2; extern "C" void def_v2(int n, ...) { __builtin_va_list a;'
+     ' __builtin_va_start(a, n); g_v2 = __builtin_va_arg(a, double); __builtin_va_end(a); }', ''),
+    ('v4', '?r@@YAXHHH@Z', '?r@@YAXHZZ', 'manual',     # two words where the body reads a long long
+     'extern "C" long long g_v4; long long g_v4; extern "C" void def_v4(int n, ...) { __builtin_va_list a;'
+     ' __builtin_va_start(a, n); g_v4 = __builtin_va_arg(a, long long); __builtin_va_end(a); }', ''),
+    ('v5', '?d@@YAXHN@Z', '?d@@YAXHZZ', 'same',        # a double where the body reads a double
+     'extern "C" double g_v5; double g_v5; extern "C" void def_v5(int n, ...) { __builtin_va_list a;'
+     ' __builtin_va_start(a, n); g_v5 = n + __builtin_va_arg(a, double); __builtin_va_end(a); }',
+     'extern "C" void br_v5(int, double);\nstatic int t_v5() { g_v5 = 0; br_v5(1, 0.5); return g_v5 == 1.5 ? 0 : 1; }'),
+    ('v6', '?e@@YAXHH@Z', '?e@@YAXHZZ', 'manual',      # the va_list goes on to another function
+     'extern "C" int g_v6; int g_v6; extern "C" int sink6(int, __builtin_va_list);'
+     ' extern "C" void def_v6(int n, ...) { __builtin_va_list a; __builtin_va_start(a, n); g_v6 = sink6(n, a);'
+     ' __builtin_va_end(a); }', ''),
+]
+
+
 def main():
     fails = 0
     with tempfile.TemporaryDirectory() as t:
@@ -70,7 +90,17 @@ def main():
         for line in open(rec):
             f = line.rstrip('\n').split('\t')
             calls.setdefault(f[0], set()).add(tuple(f[3 + int(f[2]):]))
-        names = ['?p@@YAHZZ'] + [c[1] for c in CASES]
+        dsrc = os.path.join(t, 'defs.cpp')
+        open(dsrc, 'w').write('\n'.join(c[4] for c in DEF_CASES) + '\n')
+        drec = os.path.join(t, 'defs.tsv')
+        subprocess.run([layout.CXX, '-mabi=ilp32', '-fsyntax-only', '-fplugin=' + so,
+                        '-fplugin-arg-fnvnx_vacall-out=' + drec, dsrc], check=True)
+        va = {}
+        for line in open(drec):
+            f = line.rstrip('\n').split('\t')
+            if f[0] == 'VADEF':
+                va[f[1]] = (f[2], tuple(f[3:])) if f[2] == 'reads' else (f[2],)
+        names = ['?p@@YAHZZ'] + [c[1] for c in CASES] + [c[1] for c in DEF_CASES] + [c[2] for c in DEF_CASES]
         dem = fnvlink.batch_demangle(fnvlink.UNDNAME, names)
         ref = sigs.parse_msvc('?p@@YAHZZ', dem['?p@@YAHZZ'])
         asm, defs, checks, runs = ['    .text'], [], [], []
@@ -95,6 +125,16 @@ def main():
             else:
                 asm.append(abi.emit_bridge('br_' + case, 'def_' + case, v, case))
             defs.append(cdef); checks.append(ccheck); runs.append('t_%s()' % case)
+        for case, rm, dm, want, cdef, ccheck in DEF_CASES:
+            rs, dfn = sigs.parse_msvc(rm, dem[rm]), sigs.parse_msvc(dm, dem[dm])
+            reads = va.get('def_' + case)
+            v = abi.compare(rs, dfn, va_reads=reads)
+            if abi.compare(rs, dfn).kind != 'manual' or v.kind != want:
+                print('FAIL %s: %s with %s (want %s) %s' % (case, v.kind, reads, want, v.notes)); fails += 1
+                continue
+            if want == 'same':
+                asm.append('    .p2align 2\n    .globl br_%s\nbr_%s:\n    b def_%s\n' % (case, case, case))
+                defs.append(cdef); checks.append(ccheck); runs.append('t_%s()' % case)
         fails += test_bridges.execute(os.path.join(t, 'run'), TYPES, defs, checks, runs, asm) \
             if not os.makedirs(os.path.join(t, 'run')) else 0
     print('ok' if not fails else 'FAILED')

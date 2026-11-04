@@ -15,6 +15,10 @@
 //
 // classes: I8 I16 I32 I64 P F32 F64 F128 for scalars (after promotion), A<size>:<k> for an aggregate by value with
 // k = H<n>x<w> (a homogeneous float/double aggregate of n members) or G (anything else), ? otherwise.
+// For every variadic function the unit defines it also writes `VADEF TAB <name> TAB <state> TAB <va_arg class>...`:
+// state `none` (no va_start: the anonymous arguments are never read), `escape` (its va_list is passed to another
+// function, vsnprintf-like: the reads are elsewhere) or `reads` (the classes of its va_arg expressions; V2 VA2-VA4:
+// a fixed reference's tail must have their width).
 // Runs on each function body before it is lowered (PLUGIN_PRE_GENERICIZE), so -fsyntax-only suffices.
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -91,6 +95,17 @@ static std::string cls(tree t)
 }
 
 static tree current;
+static bool cur_va_start, cur_escape;
+static std::string cur_reads;
+
+static bool is_va_list(tree ty)
+{
+  if (!ty)
+    return false;
+  if (TREE_CODE(ty) == POINTER_TYPE || TREE_CODE(ty) == REFERENCE_TYPE)
+    ty = TREE_TYPE(ty);
+  return TYPE_MAIN_VARIANT(ty) == TYPE_MAIN_VARIANT(va_list_type_node);
+}
 
 static tree walk(tree *tp, int *walk_subtrees, void *)
 {
@@ -99,11 +114,21 @@ static tree walk(tree *tp, int *walk_subtrees, void *)
     *walk_subtrees = 0;
     return NULL_TREE;
   }
+  if (TREE_CODE(t) == VA_ARG_EXPR) {
+    cur_reads += '\t' + cls(TREE_TYPE(t));
+    return NULL_TREE;
+  }
   if (TREE_CODE(t) != CALL_EXPR)
     return NULL_TREE;
   tree fn = get_callee_fndecl(t);
+  if (fn && fndecl_built_in_p(fn, BUILT_IN_VA_START))
+    cur_va_start = true;
+  else if (!(fn && (fndecl_built_in_p(fn, BUILT_IN_VA_END) || fndecl_built_in_p(fn, BUILT_IN_VA_COPY))))
+    for (int i = 0; i < call_expr_nargs(t); i++)
+      if (is_va_list(TREE_TYPE(CALL_EXPR_ARG(t, i))))
+        cur_escape = true;   // the va_list goes on to another function (vsnprintf): its reads are not here
   // `f(...)` has no argument-type list at all (stdarg_p says no); in C++ every declaration is a prototype
-  if (!fn || !(stdarg_p(TREE_TYPE(fn)) || !TYPE_ARG_TYPES(TREE_TYPE(fn))))
+  if (!fn || fndecl_built_in_p(fn) || !(stdarg_p(TREE_TYPE(fn)) || !TYPE_ARG_TYPES(TREE_TYPE(fn))))
     return NULL_TREE;
   int named = 0;
   for (tree a = TYPE_ARG_TYPES(TREE_TYPE(fn)); a && TREE_VALUE(a) != void_type_node; a = TREE_CHAIN(a))
@@ -127,7 +152,13 @@ static void body(void *gcc_data, void *)
   if (!out || !fn || TREE_CODE(fn) != FUNCTION_DECL || !DECL_SAVED_TREE(fn))
     return;
   current = fn;
+  cur_va_start = cur_escape = false;
+  cur_reads.clear();
   walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk, NULL);
+  if (stdarg_p(TREE_TYPE(fn)) || !TYPE_ARG_TYPES(TREE_TYPE(fn)))
+    // VADEF <name> <state> <va_arg classes in source order>; state none (no va_start) / escape / reads
+    fprintf(out, "VADEF\t%s\t%s%s\n", IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn)),
+            !cur_va_start ? "none" : cur_escape ? "escape" : "reads", cur_reads.c_str());
   current = NULL_TREE;
 }
 

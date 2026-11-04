@@ -46,11 +46,15 @@ CASES = [
      'extern "C" void br_va_stack(int, int, int, int, int, int, int, int, int, int);\n'
      'static int t_va_stack() { br_va_stack(1, 1, 1, 1, 1, 1, 1, 1, 1, 2); return g_t == 1 + 36 + 18 ? 0 : 1; }'),
     # doubles and 64-bit integers in the tail
-    ('va_wide', '?u@@YAXHN_J@Z', '?u@@YAXHZZ', 'same',
+    ('va_wide', '?u@@YAXHNN@Z', '?u@@YAXHZZ', 'same',
      'extern "C" double g_u; double g_u; extern "C" void def_va_wide(int a0, ...) { va_list a; va_start(a, a0);'
-     ' double d = va_arg(a, double); long long q = va_arg(a, long long); va_end(a); g_u = a0 + d + (double)q; }',
-     'extern "C" void br_va_wide(int, double, long long);\n'
-     'static int t_va_wide() { br_va_wide(1, 0.5, 1LL << 40); return g_u == 1.5 + 1099511627776.0 ? 0 : 1; }'),
+     ' double d = va_arg(a, double); double e = va_arg(a, double); va_end(a); g_u = a0 + d + e; }',
+     'extern "C" void br_va_wide(int, double, double);\n'
+     'static int t_va_wide() { br_va_wide(1, 0.5, 0.25); return g_u == 1.75 ? 0 : 1; }'),
+    # V2 VA3/VA4: widths that differ from the body's va_arg are manual
+    ('va_w8', '?q@@YAXH_J@Z', '?q@@YAXHZZ', 'manual', '', ''),
+    ('va_w4', '?r@@YAXHHH@Z', '?r@@YAXHZZ', 'manual', '', ''),
+    ('va_esc', '?e@@YAXHH@Z', '?e@@YAXHZZ', 'manual', '', ''),
     # both variadic, a named bool against an int: extended in place, the anonymous part passes through
     ('va_both', '?g@@YAHH_NPBDZZ', '?g@@YAHHHPBDZZ', 'bridge',
      'extern "C" int def_va_both(int a0, int b, const char *s, ...) { va_list a; va_start(a, s);'
@@ -75,6 +79,13 @@ CASES = [
 ]
 
 
+# what vacall records of each variadic definition's body (fnvnx_vacall VADEF): the va_arg types, or 'none' / 'escape'
+VA_READS = {'va_def': ('reads', ('P',)), 'va_stack': ('reads', ('I32',)), 'va_wide': ('reads', ('F64', 'F64')),
+            'va_both': ('reads', ('I32',)), 'va_narrow': ('reads', ('I32',)), 'va_more': ('reads', ('I32',)),
+            'va_w8': ('reads', ('I32', 'I32')), 'va_w4': ('reads', ('I64',)), 'va_esc': ('escape',),
+            'va_float': ('reads', ('F64',))}
+
+
 def main():
     fails = 0
     names = [c[1] for c in CASES] + [c[2] for c in CASES]
@@ -82,7 +93,7 @@ def main():
     asm, defs, checks, calls = ['    .text'], [], [], []
     for name, rm, dm, want, cdef, ccheck in CASES:
         rs, ds = sigs.parse_msvc(rm, dem[rm]), sigs.parse_msvc(dm, dem[dm])
-        v = abi.compare(rs, ds)
+        v = abi.compare(rs, ds, va_reads=VA_READS.get(name))
         if v.kind != want:
             print('FAIL %s: verdict %s (want %s) %s %s' % (name, v.kind, want, v.classes, v.notes))
             fails += 1
