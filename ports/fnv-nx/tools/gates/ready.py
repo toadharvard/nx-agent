@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import re
+import statistics
 import subprocess
 import sys
 import time
@@ -32,6 +33,16 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, '..', '..'))
 PASS, FAIL, NODATA = 'pass', 'fail', 'no-data'
+
+
+def readf(p):
+    with open(p, errors='replace') as f:
+        return f.read()
+
+
+def writef(p, text):
+    with open(p, 'w') as f:
+        f.write(text)
 
 
 # ------------------------------------------------------------------------------------------------- stores
@@ -86,10 +97,13 @@ class GitStore:
 
 
 class DirStore:
-    """fixtures: <root>/<branch>/<path>; publish time = file mtime."""
+    """fixtures: <root>/<branch>/<path>; publish time from <root>/_published.json ({"<branch>/<path>": epoch}),
+    else the file's mtime (git does not keep mtimes, so committed fixtures list their order there)."""
 
     def __init__(self, root):
         self.root = root
+        pj = os.path.join(root, '_published.json')
+        self.published = json.loads(readf(pj)) if os.path.isfile(pj) else {}
 
     def fetch(self):
         pass
@@ -108,12 +122,13 @@ class DirStore:
         for dp, _, fn in os.walk(base):
             for n in fn:
                 p = os.path.join(dp, n)
-                res.append((os.path.relpath(p, base), int(os.path.getmtime(p))))
+                rel = os.path.relpath(p, base)
+                res.append((rel, int(self.published.get('%s/%s' % (branch, rel), os.path.getmtime(p)))))
         return sorted(res, key=lambda x: (-x[1], x[0]))
 
     def read(self, branch, path):
         p = os.path.join(self.root, branch, path)
-        return open(p, errors='replace').read() if os.path.isfile(p) else None
+        return readf(p) if os.path.isfile(p) else None
 
     def exists(self, branch, path):
         return os.path.isfile(os.path.join(self.root, branch, path))
@@ -226,6 +241,7 @@ def parse_full(text):
     d['guest_in_sd'] = {'yes': 1, 'no': 0}.get(first(r'guest\.nso in the SD tree: (yes|no)', text, str))
     d['program_id'] = first(r'for program id ([0-9a-f]{16})', text, str)
     d['pcrel_abs'] = first(r'PC-relative absolute references (\d[\d,]*)', text)
+    d['check_package_rc'] = first(r'check_package: exit (\d+)', text)
     d['v1'] = {m.group(1): int(m.group(2)) for m in re.finditer(r'^\| ([a-z0-9][\w-]*) \| (\d+) \| \d+ \|', text, re.M)}
     return d
 
@@ -323,11 +339,11 @@ def placement_check(port):
     npdm = os.path.join(port, 'toolchain', 'npdm', 'fnvnx-app.json')
     if not (os.path.isfile(ph) and os.path.isfile(npdm)):
         return None
-    t = open(ph).read()
+    t = readf(ph)
     rows = {m.group(1): (int(m.group(2)), int(m.group(3), 0), int(m.group(4), 0)) for m in re.finditer(
         r'=\s*\{"([\w-]+)",\s*(-?\d+),\s*(0x[0-9A-Fa-f]+|\d+),\s*(0x[0-9A-Fa-f]+|\d+),', t)}
     core3 = first(r'#define FNVNX_CORE3_DEFAULT (\d+)', t)
-    j = json.load(open(npdm))
+    j = json.loads(readf(npdm))
     caps = {c['type']: c['value'] for c in j.get('kernel_capabilities', [])}
     kf = caps.get('kernel_flags', {})
     problems = []
@@ -359,7 +375,7 @@ def by_design_patch_addrs(port):
     p = os.path.join(port, 'docs', 'PATCHES.md')
     if not os.path.isfile(p):
         return set()
-    t = open(p).read()
+    t = readf(p)
     m = re.search(r'^## By-design MSVC differences.*?(?=^## )', t, re.M | re.S)
     return set(re.findall(r'\| 0x([0-9a-f]{8}) \|', m.group(0))) if m else set()
 
@@ -416,14 +432,38 @@ class Card:
                 break
         return out
 
-    def gate(self, gid, group, title, value, threshold, status, sources, note='', rank=50):
+    def gate(self, gid, group, title, value, threshold, status, sources, note='', rank=50, **extra):
+        """extra: required=False marks an informative gate (shown, not counted for the verdict); levels=..."""
         srcs = sources if isinstance(sources, list) else [sources] if sources else []
         stale = any(s['stale'] for s in srcs) if srcs else False
+        note = re.sub(r':\s*(?=;|\)|$)', ': none', note or '')       # an empty "open: ..." list
         self.gates.append(dict(id=gid, group=group, title=title, value=value, threshold=threshold, status=status,
-                               stale=stale and status == PASS, sources=srcs, note=note, rank=rank))
+                               stale=stale and status == PASS, sources=srcs, note=note, rank=rank,
+                               required=extra.pop('required', True), **extra))
 
-    def nodata(self, gid, group, title, threshold, note, rank=50, sources=None):
-        self.gate(gid, group, title, None, threshold, NODATA, sources or [], note, rank)
+    def nodata(self, gid, group, title, threshold, note, rank=50, sources=None, **extra):
+        self.gate(gid, group, title, None, threshold, NODATA, sources or [], note, rank, **extra)
+
+    # ---- frame-rate levels (thresholds perf.fps, perf.clocks)
+    def fps_threshold(self):
+        f = self.th['perf']['fps']
+        return 'floor %d fps (%.1f ms); target %d fps stable (%.1f ms, worst frame); stretch %d fps (%.1f ms, median)' % (
+            f['floor'], 1000.0 / f['floor'], f['target'], 1000.0 / f['target'], f['stretch'], 1000.0 / f['stretch'])
+
+    def fps_levels(self, worst_ms, median_ms):
+        """{floor, target, stretch: bool}, the level name, and the status: pass only at the target"""
+        f = self.th['perf']['fps']
+        lv = dict(floor=worst_ms <= 1000.0 / f['floor'], target=worst_ms <= 1000.0 / f['target'],
+                  stretch=median_ms <= 1000.0 / f['stretch'])
+        name = ('fail' if not lv['floor'] else 'below target' if not lv['target'] else
+                'stretch' if lv['stretch'] else 'target')
+        return lv, name, PASS if lv['target'] else FAIL
+
+    def fps_note(self, lv, name):
+        f = self.th['perf']['fps']
+        return 'level %s: floor %d fps %s, target %d fps stable %s, stretch %d fps %s' % (
+            name, f['floor'], 'yes' if lv['floor'] else 'NO', f['target'], 'yes' if lv['target'] else 'no',
+            f['stretch'], 'yes' if lv['stretch'] else 'no')
 
     # ---- link branch helpers
     def link_branch(self, commit):
@@ -610,7 +650,7 @@ class Card:
             if cls.startswith('_'):
                 continue
             p = os.path.join(self.port, ev['file'])
-            if os.path.isfile(p) and re.search(ev['regex'], open(p).read(), re.S):
+            if os.path.isfile(p) and re.search(ev['regex'], readf(p), re.S):
                 closed[cls] = ev['why']
         sites = set().union(*(d['sites'] for d, _ in shards.values()))
         exits = [d['exit'] for d, _ in shards.values()]
@@ -754,7 +794,6 @@ class Card:
 
     def perf_gates(self):
         p = self.th['perf']
-        budget = p['cpu_hz'] / p['fps'] * p['ipc']
         hits = []
         for br in self.store.branches('reports/'):
             for path, t in self.store.files(br):
@@ -767,25 +806,32 @@ class Card:
             prof = parse_frameprof(self.store.read(br, path) or '')
             m = re.match(r'([0-9a-f]{12})-', os.path.basename(path))
             ps = self.src(br, path, m.group(1) if m else None, t)
-        if prof and prof['frames']:
-            worst = max(prof['frames'])
-            self.gate('perf.frame', 'Performance', 'main-thread instructions per frame (worst frame)',
-                      '{:,}'.format(worst), '<= {:,} ({} fps, IPC {}, {:.2f} GHz)'.format(int(budget), p['fps'], p['ipc'],
-                                                                                    p['cpu_hz'] / 1e9),
-                      PASS if worst <= budget else FAIL, ps, '%d frames profiled' % len(prof['frames']), rank=22)
-        else:
-            self.nodata('perf.frame', 'Performance', 'main-thread instructions per frame (worst frame)',
-                        '<= {:,}'.format(int(budget)), 'no frame reached in a profiled run' if prof else
-                        'no frameprof run published', rank=22, sources=[ps] if ps else None)
+        for clk in p['clocks']:
+            gid, req = 'perf.frame.' + clk['name'], clk.get('required', True)
+            title = 'main-thread frame time, worst / median (%s clock %.3f GHz)' % (clk['name'], clk['hz'] / 1e9)
+            if prof and prof['frames']:
+                ms = sorted(i / (p['ipc'] * clk['hz']) * 1000 for i in prof['frames'])
+                worst, med = ms[-1], statistics.median(ms)
+                lv, name, st = self.fps_levels(worst, med)
+                self.gate(gid, 'Performance', title, '%.1f / %.1f ms (%.0f fps worst)' % (worst, med, 1000 / worst),
+                          self.fps_threshold(), st, ps, '%s; %d frames profiled, worst %s instructions at IPC %s' % (
+                              self.fps_note(lv, name), len(ms), '{:,}'.format(max(prof['frames'])), p['ipc']),
+                          rank=22, required=req, levels=dict(lv, level=name))
+            else:
+                self.nodata(gid, 'Performance', title, self.fps_threshold(), 'no frame reached in a profiled run'
+                            if prof else 'no frameprof run published', rank=22, sources=[ps] if ps else None,
+                            required=req)
+        bc = next((c for c in p['clocks'] if c['name'] == p.get('boot_clock')), p['clocks'][0])
+        title = 'estimated device time from start to WinMain (%s clock)' % bc['name']
         if prof and prof['to_winmain'] is not None:
-            sec = prof['to_winmain'] / p['ipc'] / p['cpu_hz']
-            self.gate('perf.boot', 'Performance', 'estimated device time from start to WinMain', '%.2f s' % sec,
-                      '<= %.1f s' % p['boot_to_winmain_s'], PASS if sec <= p['boot_to_winmain_s'] else FAIL, ps,
-                      '{:,} instructions'.format(prof['to_winmain']), rank=21)
+            secs = [(c['name'], prof['to_winmain'] / p['ipc'] / c['hz']) for c in p['clocks']]
+            sec = dict(secs)[bc['name']]
+            self.gate('perf.boot', 'Performance', title, '%.2f s' % sec, '<= %.1f s' % p['boot_to_winmain_s'],
+                      PASS if sec <= p['boot_to_winmain_s'] else FAIL, ps, '%s instructions; %s' % (
+                          '{:,}'.format(prof['to_winmain']), ', '.join('%s %.2f s' % kv for kv in secs)), rank=21)
         else:
-            self.nodata('perf.boot', 'Performance', 'estimated device time from start to WinMain',
-                        '<= %.1f s' % p['boot_to_winmain_s'], 'no frameprof run reaching WinMain', rank=21,
-                        sources=[ps] if ps else None)
+            self.nodata('perf.boot', 'Performance', title, '<= %.1f s' % p['boot_to_winmain_s'],
+                        'no frameprof run reaching WinMain', rank=21, sources=[ps] if ps else None)
         mem = self.th['memory']
         avail = mem['heap_region_bytes'] - mem['host_heap_bytes']
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
@@ -813,11 +859,9 @@ class Card:
                       '; '.join(pc['problems']) or '%d roles checked' % pc['roles'], rank=24)
 
     def render_gate(self):
-        """the render machine's summary block: main and render thread frame times against one frame"""
-        rp = self.th.get('render_perf', {})
-        lim = rp.get('frame_ms', 1000.0 / self.th['perf']['fps'])
-        title = 'render perf: frame time, main / render thread (S6n render machine)'
-        thr = '<= %.1f ms each' % lim
+        """the render machine's summary block: the slower of the main and render threads, per clock, against the
+        frame-rate levels; times are scaled from the report's assumptions.clock_ghz (CPU-bound submission)"""
+        rp, p = self.th.get('render_perf', {}), self.th['perf']
         r = self.render
         where = 'nx-agent:%s' % (r.get('branch') or rp.get('branch', '?'))
         try:
@@ -826,28 +870,41 @@ class Card:
             j = None
         if isinstance(j, dict) and not isinstance(j.get('frame_ms'), dict) and isinstance(j.get('summary'), dict):
             j = j['summary']
-        if not isinstance(j, dict) or not isinstance(j.get('frame_ms'), dict):
-            self.nodata('perf.render', 'Performance', title, thr,
-                        'unreadable summary block in %s' % rp.get('path') if r.get('text') else
-                        'no render perf report (%s:%s) yet' % (where, rp.get('path')), rank=22)
-            return
-        c = str(j.get('commit') or '')
-        h = r.get('hist')
-        b = h.behind(c) if h and c else None
-        src = dict(branch=where, path=r.get('path') or rp.get('path'), commit=c[:12], behind=b, published=None,
-                   stale=b is None or b > self.maxb)
-        fm = j['frame_ms']
-        vals = [fm.get('main'), fm.get('render')]
-        if any(not isinstance(v, (int, float)) for v in vals):
-            self.gate('perf.render', 'Performance', title, None, thr, NODATA, src, 'frame_ms.main/render missing',
-                      rank=22)
-            return
-        pd = j.get('per_draw_us') or {}
-        asm = j.get('assumptions') or {}
-        note = 'per draw: native %s us, Nine %s us; assumes IPC %s at %s GHz' % (
-            pd.get('native', '?'), pd.get('nine', '?'), asm.get('ipc', '?'), asm.get('clock_ghz', '?'))
-        self.gate('perf.render', 'Performance', title, '%.1f / %.1f ms' % tuple(vals), thr,
-                  PASS if max(vals) <= lim else FAIL, src, note, rank=22)
+        fm = j.get('frame_ms') if isinstance(j, dict) else None
+        vals = [fm.get('main'), fm.get('render')] if isinstance(fm, dict) else [None]
+        ok = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in vals)
+        src, note0 = None, ''
+        if isinstance(j, dict):
+            c = str(j.get('commit') or '')
+            h = r.get('hist')
+            b = h.behind(c) if h and c else None
+            src = dict(branch=where, path=r.get('path') or rp.get('path'), commit=c[:12], behind=b, published=None,
+                       stale=b is None or b > self.maxb)
+            pd, asm = j.get('per_draw_us') or {}, j.get('assumptions') or {}
+            note0 = 'per draw: native %s us, Nine %s us; measured at IPC %s, %s GHz' % (
+                pd.get('native', '?'), pd.get('nine', '?'), asm.get('ipc', '?'), asm.get('clock_ghz', '?'))
+        for clk in p['clocks']:
+            gid, req = 'perf.render.' + clk['name'], clk.get('required', True)
+            title = 'render perf: frame time, main / render thread (%s clock %.3f GHz)' % (clk['name'], clk['hz'] / 1e9)
+            if not ok:
+                why = ('no render perf report (%s:%s) yet' % (where, rp.get('path')) if not r.get('text') else
+                       'unreadable summary block' if not isinstance(j, dict) else 'frame_ms.main/render missing')
+                self.nodata(gid, 'Performance', title, self.fps_threshold(), why, rank=22,
+                            sources=[src] if src else None, required=req)
+                continue
+            ghz = (j.get('assumptions') or {}).get('clock_ghz')
+            note = note0
+            if isinstance(ghz, (int, float)) and ghz > 0:
+                scale = float(ghz) * 1e9 / clk['hz']
+            else:
+                scale = p['clocks'][0]['hz'] / clk['hz']
+                note += '; no assumptions.clock_ghz: taken as measured at the %s clock' % p['clocks'][0]['name']
+            m, rr = vals[0] * scale, vals[1] * scale
+            worst = max(m, rr)
+            lv, name, st = self.fps_levels(worst, worst)
+            self.gate(gid, 'Performance', title, '%.1f / %.1f ms (%.0f fps)' % (m, rr, 1000 / worst),
+                      self.fps_threshold(), st, src, '%s; %s' % (self.fps_note(lv, name), note), rank=22,
+                      required=req, levels=dict(lv, level=name))
 
     def package_gates(self):
         fb = sorted(self.full.values(), key=lambda x: (x[1]['behind'] if x[1]['behind'] is not None else 1 << 30))
@@ -868,12 +925,20 @@ class Card:
         pid = d.get('program_id')
         self.gate('package.program_id', 'Packaging', 'program id of an installed title', pid or '-',
                   'not 0100000000000000', NODATA if not pid else FAIL if pid == '0100000000000000' else PASS, s,
-                  'set PROGRAM_ID=<the installed title the exefs overrides>', rank=20)
+                  'set PROGRAM_ID=<the installed title the exefs overrides>' if pid == '0100000000000000' else '',
+                  rank=20)
         pc = d.get('pcrel_abs')
         self.gate('package.pic', 'Packaging', 'guest PC-relative absolute references (D9 relocatable)', pc, '0',
                   NODATA if pc is None else PASS if pc == 0 else FAIL, s, rank=26)
-        self.nodata('package.check', 'Packaging', 'tests/s5/check_package.py on the published package', 'exit 0',
-                    'no farm runs check_package.py on the package yet (the package is not published)', rank=26)
+        meta = self.link_json(self.link_branch(d['_text_commit']), 'meta.json') or {}
+        rc = meta.get('check_package_rc', d.get('check_package_rc'))
+        if rc is None:
+            self.nodata('package.check', 'Packaging', 'tests/s5/check_package.py on the published package', 'exit 0',
+                        'no check_package_rc in meta.json and no `check_package: exit N` line in the full report yet',
+                        rank=26, sources=[s])
+        else:
+            self.gate('package.check', 'Packaging', 'tests/s5/check_package.py on the published package', 'exit %d' % rc,
+                      'exit 0', PASS if rc == 0 else FAIL, s, rank=26)
 
     def run(self):
         self.compile_gates()
@@ -897,8 +962,11 @@ ORDER = ['Compile', 'Link', 'ABI', 'Rule equivalence', 'Static target hazards', 
 
 
 def verdict(gates):
-    c = {PASS: 0, FAIL: 0, NODATA: 0, 'stale': 0}
+    c = {PASS: 0, FAIL: 0, NODATA: 0, 'stale': 0, 'informative': 0}
     for g in gates:
+        if not g.get('required', True):
+            c['informative'] += 1
+            continue
         c[g['status']] += 1
         c['stale'] += g['stale']
     ready = c[FAIL] == 0 and c[NODATA] == 0 and c['stale'] == 0
@@ -936,21 +1004,22 @@ def blockers(gates, n=5):
     """the failing gates (and stale passes) that matter most, one per group: the lowest rank of each group"""
     best = {}
     for g in sorted(gates, key=lambda g: (g['rank'], g['id'])):
-        if (g['status'] == FAIL or g['stale']) and g['group'] not in best:
+        if (g['status'] == FAIL or g['stale']) and g.get('required', True) and g['group'] not in best:
             best[g['group']] = g
     return sorted(best.values(), key=lambda g: (g['rank'], g['id']))[:n]
 
 
 def missing(gates):
-    return sorted((g for g in gates if g['status'] == NODATA), key=lambda g: (g['rank'], g['id']))
+    return sorted((g for g in gates if g['status'] == NODATA and g.get('required', True)),
+                  key=lambda g: (g['rank'], g['id']))
 
 
 def markdown(head, gates, risks, generated):
     v, c = verdict(gates)
     L = ['# fnv-nx first-launch readiness %s' % (head or '?')[:12], '',
          '- integration head: `%s`; generated %s' % (head or '?', generated),
-         '- verdict: **%s**: %d pass, %d fail, %d no-data, %d stale passes, of %d gates' % (
-             v, c[PASS], c[FAIL], c[NODATA], c['stale'], len(gates)),
+         '- verdict: **%s**: %d pass, %d fail, %d no-data, %d stale passes, of %d gates; %d more informative' % (
+             v, c[PASS], c[FAIL], c[NODATA], c['stale'], len(gates) - c['informative'], c['informative']),
          '- thresholds: tools/gates/thresholds.json; gates and why: docs/READINESS.md', '']
     for grp in ORDER:
         gs = [g for g in gates if g['group'] == grp]
@@ -958,7 +1027,7 @@ def markdown(head, gates, risks, generated):
             continue
         L += ['## %s' % grp, '', '| gate | value | threshold | status | source | note |', '|---|---|---|---|---|---|']
         for g in gs:
-            st = g['status'] + (' (stale)' if g['stale'] else '')
+            st = g['status'] + (' (stale)' if g['stale'] else '') + ('' if g.get('required', True) else ', informative')
             val = '-' if g['value'] is None else '{:,}'.format(g['value']) if isinstance(g['value'], int) else str(g['value'])
             L.append('| %s | %s | %s | **%s** | %s | %s |' % (g['title'], val, g['threshold'], st,
                                                             fmt_src(g['sources']), g['note'].replace('|', '/')))
@@ -986,7 +1055,7 @@ def load_render(th, port, fetch=False, fixtures=None, table=None):
     br, path = rp.get('branch', 'claude/port-nsw-render'), rp.get('path')
     if fixtures:
         f = os.path.join(fixtures, '_render', 'report.json')
-        return dict(text=open(f).read() if os.path.isfile(f) else None, branch=br, path=path,
+        return dict(text=readf(f) if os.path.isfile(f) else None, branch=br, path=path,
                     hist=History(head='fixture', table=table or {}))
     g = lambda *a: subprocess.run(['git', '-C', port, *a], capture_output=True, text=True)
     if fetch:
@@ -1010,11 +1079,11 @@ def main(argv):
     ap.add_argument('--md')
     ap.add_argument('--json')
     a = ap.parse_args(argv)
-    th = json.load(open(a.thresholds))
+    th = json.loads(readf(a.thresholds))
     if a.fixtures:
         store = DirStore(a.fixtures)
         cj = os.path.join(a.fixtures, '_commits.json')
-        hist = History(head=a.head or 'fixture', table=json.load(open(cj)) if os.path.isfile(cj) else {})
+        hist = History(head=a.head or 'fixture', table=json.loads(readf(cj)) if os.path.isfile(cj) else {})
     else:
         gd = a.artifacts or os.environ.get('ARTIFACTS') or '/home/user/fnv-nx-build'
         if os.path.isdir(os.path.join(gd, '.git')):
@@ -1025,19 +1094,18 @@ def main(argv):
         hist = History(head=a.head, repo=a.port)
     render = load_render(th, a.port, a.fetch, a.fixtures, hist.table)
     card = Card(store, hist, th, port=a.port, render=render).run()
-    risks = json.load(open(a.risks)) if os.path.isfile(a.risks) else []
+    risks = json.loads(readf(a.risks)) if os.path.isfile(a.risks) else []
     gen = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     md = markdown(hist.head, card.gates, risks, gen)
     v, c = verdict(card.gates)
     if a.md:
-        open(a.md, 'w').write(md)
+        writef(a.md, md)
     else:
         sys.stdout.write(md)
     if a.json:
-        json.dump(dict(head=hist.head, generated=gen, verdict=v, counts=c, max_commits_behind=card.maxb,
+        writef(a.json, json.dumps(dict(head=hist.head, generated=gen, verdict=v, counts=c, max_commits_behind=card.maxb,
                        gates=card.gates, blockers=[g['id'] for g in blockers(card.gates)],
-                       missing=[g['id'] for g in missing(card.gates)], hardware_risks=risks),
-                  open(a.json, 'w'), indent=1)
+                       missing=[g['id'] for g in missing(card.gates)], hardware_risks=risks), indent=1) + '\n')
     return 0
 
 

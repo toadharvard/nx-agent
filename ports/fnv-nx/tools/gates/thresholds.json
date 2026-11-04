@@ -57,10 +57,27 @@
   "first_cell"
  ],
  "perf": {
-  "cpu_hz": 1020000000,
+  "_doc": "frame-rate levels set by the owner (J-0132): below 30 fps fails; 45 fps stable is the target (worst frame); 60 fps is the stretch, even if unstable (median frame). Each frame gate is evaluated at every clock; only clocks with required=true count for the verdict, the others are reported as informative",
   "ipc": 0.8,
-  "fps": 30,
-  "boot_to_winmain_s": 3.0
+  "clocks": [
+   {
+    "name": "stock",
+    "hz": 1020000000,
+    "required": false
+   },
+   {
+    "name": "boost",
+    "hz": 1785000000,
+    "required": true
+   }
+  ],
+  "fps": {
+   "floor": 30,
+   "target": 45,
+   "stretch": 60
+  },
+  "boot_to_winmain_s": 3.0,
+  "boot_clock": "stock"
  },
  "memory": {
   "heap_region_bytes": 2147483648,
@@ -68,9 +85,8 @@
   "max_use_fraction": 0.75
  },
  "render_perf": {
-  "_doc": "render machine summary (docs/RENDER_PERF.md on that branch): {commit, per_draw_us: {native, nine}, frame_ms: {main, render}, assumptions: {ipc, clock_ghz}}; main and render thread each within one frame at perf.fps",
+  "_doc": "render machine summary (docs/RENDER_PERF.md on that branch): {commit, per_draw_us: {native, nine}, frame_ms: {main, render}, assumptions: {ipc, clock_ghz}}; the frame time is the slower of the main and render threads, scaled from assumptions.clock_ghz to each perf clock, against the perf.fps levels",
   "branch": "claude/port-nsw-render",
-  "path": "ports/fnv-nx/render/native/perf/report.json",
-  "frame_ms": 33.3
+  "path": "ports/fnv-nx/render/native/perf/report.json"
  }
 }
