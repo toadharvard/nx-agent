@@ -368,8 +368,10 @@ tsv `address<TAB>d`, stands in for tests).
 
 For each one whose native object defines the thunk, the address map's entry names `__fnvnx_msvc_<addr>`. aliases.ld
 defines that symbol as the thunk, so image code pointers rewritten through the map (vftable words, function tables)
-pass through the thunk, as do x86-convention callers. `__fnv_<addr>` stays the primary entry, because the units' own
-references pass the full object. On link/c0d6c71516f6 79 addresses have a thunk. 461 have none: the decomp defines
+pass through the thunk, as do x86-convention callers. `__fnv_<addr>` stays the primary entry for the units' own
+references to the definition's class, which pass the full object. A member reference through another class (a
+decomp shell declared at the subobject: 0x008d4870 calls 0x008805f0 with `this` at +0xa4) passes the subobject, as
+the x86 caller did, so it binds to the thunk too (V2 T1: 4 addresses, 7 references at link-head). On link/c0d6c71516f6 79 addresses have a thunk. 461 have none: the decomp defines
 them on a shell class that is the subobject itself, so `this` already agrees. 283 have no native definition.
 S13b's `thunk-binding` rows (11 on link/0bd144db1464, `this` off by 24, 60, 136, 164, 168) are this case. The
 harness has to enter through the map's link symbol to see the fix.

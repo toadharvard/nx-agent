@@ -110,6 +110,10 @@
   - test_vacall: %s, %lld and %f executed under qemu, a non-literal format and disagreeing sites manual. Without
     the bridges, 4 checks fail.
 
+* **V2 T1 (thisadj), fixed** - A member reference through another class than the definition's (a shell declared
+  at the subobject) now binds to `__fnvnx_msvc_<addr>`. At link-head that is 4 addresses and 7 references, e.g.
+  0x008d4870 -> 0x008805f0. V2's test_s2c_thisadj.py: ok; test_bindings has the same check.
+
 * **measured** - abireplay on link/c0d6c71516f6 with the override table: rows bridge 4,732, manual 79, same 1,995,
   x86-inconsistent 3,276 (before: bridge 4,183, manual 2,632, x86-inconsistent 3,267). The 9 new x86-inconsistent
   rows are pairs that were `manual` before and are now decided on bytes.

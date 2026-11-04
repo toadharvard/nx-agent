@@ -707,6 +707,15 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     stats['code_same_name' if natname == un else 'code_other_name'] += 1
                     # ABI: reference declaration vs definition
                     refdecl = note  # msvc name of the matched reference declaration
+                    if nd.get('msvc_entry') and refdecl and not isig.variant:
+                        # MSVC enters it with this at a secondary base (thisadj.py). A reference through another class
+                        # (a decomp shell declared at that subobject: 0x008d4870 calls 0x008805f0 with this at +0xa4)
+                        # passes the subobject, as the x86 caller did: it binds to the thunk (V2 T1)
+                        rq_, dq_ = msvc(refdecl), msvc(nd['msvc'] or '')
+                        if rq_.kind == 'func' and dq_.kind == 'func' and rq_.member and \
+                                rq_.qual[:-1] != dq_.qual[:-1]:
+                            target = MSVC_ENTRY_SYM % addr
+                            stats['msvc_entry_refs'] += 1
                     defdecl = nd['msvc']
                     cast = None
                     if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
@@ -1269,8 +1278,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                   stats['format_exact'], stats['format_bridged'], stats['format_unknown'],
                   stats['format_sites_disagree'], stats['format_not_bridgeable'])]
     lines += ['', 'MSVC entries at a secondary base (exe vftables, thisadj.py): %d addresses; the map names the '
-              '_ZThn thunk for %d, %d without a thunk' % (stats['msvc_entry_exe'], stats['msvc_entry_thunks'],
-                                                         stats['msvc_entry_no_thunk'])]
+              '_ZThn thunk for %d, %d without a thunk; references through another class bound to the thunk: %d'
+              % (stats['msvc_entry_exe'], stats['msvc_entry_thunks'], stats['msvc_entry_no_thunk'],
+                 stats['msvc_entry_refs'])]
     lines += ['', 'variables defined natively at a data-image address: %d (%d copies in objects whose unit does not '
               'name the address: STATIC1 header variables; %d second definitions of an address in one object)'
               % (len(data_defs), stats['rebound_copies'], stats['data_defs_same_address']),
