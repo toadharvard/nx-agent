@@ -7,6 +7,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <semaphore.h>
+#include <signal.h>
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -165,11 +167,44 @@ struct os_thread {
     int started, joined;
     os_lock_t lock;
     os_cond_t cond;
+    volatile int paused;           /* os_thread_suspend: the thread waits in its SIGUSR2 handler while set */
+    sem_t pause_ack;
 };
+
+/* Suspend for the host tests (Horizon: svcSetThreadActivity): SIGUSR2 makes the target wait in the handler while
+ * `paused` is set; os_thread_resume clears it and signals again. Synchronous: suspend returns once the target is
+ * in the handler. */
+static __thread os_thread *t_self;
+static void pause_handler(int sig)
+{
+    (void)sig;
+    os_thread *t = t_self;
+    if (!t || !t->paused)
+        return;
+    int e = errno;
+    sem_post(&t->pause_ack);
+    sigset_t m;
+    pthread_sigmask(SIG_SETMASK, NULL, &m);
+    sigdelset(&m, SIGUSR2);
+    while (__atomic_load_n(&t->paused, __ATOMIC_ACQUIRE))
+        sigsuspend(&m);
+    errno = e;
+}
+static pthread_once_t g_pause_once = PTHREAD_ONCE_INIT;
+static void pause_install(void)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = pause_handler;
+    sa.sa_flags = SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGUSR2, &sa, NULL);
+}
 
 static void *thread_entry(void *p)
 {
     os_thread *t = (os_thread *)p;
+    t_self = t;
     if (t->cpu >= 0)
         os_thread_set_cpu(NULL, t->cpu);
     t->fn(t->arg);
@@ -182,6 +217,8 @@ os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int p
     if (!t)
         return NULL;
     t->fn = fn; t->arg = arg; t->stack = stack_size; t->prio = prio; t->cpu = cpu;
+    sem_init(&t->pause_ack, 0, 0);
+    pthread_once(&g_pause_once, pause_install);
     return t;
 }
 
@@ -217,6 +254,7 @@ void os_thread_free(os_thread *t)
         return;
     if (t->started && !t->joined)
         pthread_detach(t->th);
+    sem_destroy(&t->pause_ack);
     free(t);
 }
 
@@ -269,8 +307,24 @@ int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask)
 #endif
 }
 
-int os_thread_suspend(os_thread *t) { (void)t; return -1; }
-int os_thread_resume(os_thread *t) { (void)t; return -1; }
+int os_thread_suspend(os_thread *t)
+{
+    if (!t || !t->started || t->joined || t == t_self || __atomic_exchange_n(&t->paused, 1, __ATOMIC_ACQ_REL))
+        return -1;
+    if (pthread_kill(t->th, SIGUSR2)) {
+        t->paused = 0;
+        return -1;
+    }
+    while (sem_wait(&t->pause_ack) && errno == EINTR) {
+    }
+    return 0;
+}
+int os_thread_resume(os_thread *t)
+{
+    if (!t || !__atomic_exchange_n(&t->paused, 0, __ATOMIC_ACQ_REL))
+        return -1;
+    return pthread_kill(t->th, SIGUSR2) ? -1 : 0;
+}
 void os_thread_exit(void) { pthread_exit(NULL); }
 void os_cpu_boost(int fast_load) { (void)fast_load; }   /* no CPU boost on a PC */
 void os_yield(void) { sched_yield(); }

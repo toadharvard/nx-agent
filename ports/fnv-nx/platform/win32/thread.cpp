@@ -196,6 +196,7 @@ struct w32_thread_obj {
     int prio;
     int cpu;
     int boost;                     /* OS_THREAD_BOOST from the role hook */
+    os_cond_t resumed;             /* a thread that suspended itself waits here until its count is 0 */
 };
 
 int w32_thread_signaled(struct w32_obj *o) { return ((struct w32_thread_obj *)o)->done; }
@@ -302,6 +303,8 @@ extern "C" DWORD ResumeThread(HANDLE h)
     int start = prev == 1 && !t->started;
     if (start)
         t->started = 1;
+    if (prev == 1)
+        os_cond_broadcast(&t->resumed);   /* a self-suspended thread goes on */
     os_unlock(&w32_wait_lock);
     if (start) {
         if (os_thread_start(t->os))
@@ -320,12 +323,19 @@ extern "C" DWORD SuspendThread(HANDLE h)
     os_lock(&w32_wait_lock);
     int prev = t->suspend_count++;
     int running = t->started && !t->done;
+    if (running && w32_self()->self_obj == &t->o) {
+        /* the calling thread: no kernel pauses itself (Horizon refuses), so it waits until ResumeThread from
+         * another thread brings the count back to 0, which is what the caller observes on Windows */
+        while (t->suspend_count > 0)
+            os_cond_wait(&t->resumed, &w32_wait_lock, OS_WAIT_FOREVER);
+        os_unlock(&w32_wait_lock);
+        return (DWORD)prev;
+    }
     os_unlock(&w32_wait_lock);
     if (prev == 0 && running && os_thread_suspend(t->os)) {
-        /* host backend cannot pause a running thread; report the count but say so once */
         static int warned;
         if (!warned++)
-            w32_log("SuspendThread on a running thread is not supported by this backend");
+            w32_log("SuspendThread: this backend cannot pause a running thread");
     }
     return (DWORD)prev;
 }
