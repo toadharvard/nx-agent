@@ -83,16 +83,17 @@ def main():
         targets = os.path.join(d, 't.jsonl')
         cat = os.path.join(d, 'cat.jsonl')
         with open(targets, 'w') as f, open(cat, 'w') as g:
-            for a, s in (('00eacd00', 'src/a/patched.cpp'), ('00401000', 'src/a/plain.cpp')):
+            for a, s, calls in (('00eacd00', 'src/a/patched.cpp', []), ('00401000', 'src/a/plain.cpp', []),
+                                ('00405000', 'src/b/caller.cpp', ['00eacd00'])):
                 f.write(json.dumps(dict(address=a, source=s)) + '\n')
-                g.write(json.dumps(dict(address=a, source=s, ohash='o' + a)) + '\n')
+                g.write(json.dumps(dict(address=a, source=s, ohash='o' + a, calls=calls)) + '\n')
         stub = os.path.join(d, 'stubkeys.py')
         open(stub, 'w').write(
             'import sys; sys.path.insert(0, %r)\n' % DF +
             'import fnkeys\n'
             'class N:\n'
             '    def __init__(self, *a): pass\n'
-            '    def keys(self, source): return {"00eacd00": "n1", "00401000": "n2"}\n'
+            '    def keys(self, source, refs_out=None): return {"00eacd00": "n1", "00401000": "n2", "00405000": "n3"}\n'
             'fnkeys.Native = N\n'
             'fnkeys.harness_tag = lambda: "H"\n'
             'sys.argv = ["fnkeys"] + sys.argv[1:]\n'
@@ -107,6 +108,8 @@ def main():
         plain = hashlib.sha1(b'H|o00401000|n2').hexdigest()[:20]
         check(on['00401000'] == off['00401000'] == plain, 'a unit without rows keeps its key')
         check(on['00eacd00'] != off['00eacd00'], 'a unit with rows gets a new key (fuzzed again)')
+        check(on['00405000'] != off['00405000'],
+              'a caller in another unit of a renamed definition gets a new key too (V1 R1)')
     print('%d failures' % len(FAIL))
     return 1 if FAIL else 0
 

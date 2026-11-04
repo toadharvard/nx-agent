@@ -49,10 +49,13 @@ ApmPerformanceMode appletGetPerformanceMode(void) { return ApmPerformanceMode_No
 void appletHook(AppletHookCookie *c, AppletHookFn fn, void *p) { (void)c; (void)fn; (void)p; }
 void appletUnhook(AppletHookCookie *c) { (void)c; }
 bool appletMainLoop(void) { return ++s_loops != s_exit_after; }
+static int s_locked, s_unlocked_before_exit;
+Result appletLockExit(void) { s_locked = 1; return 0; }
+Result appletUnlockExit(void) { s_locked = 0; s_unlocked_before_exit = 1; return 0; }
 Result appletSetCpuBoostMode(ApmCpuBoostMode m) { s_boost_normal += m == ApmCpuBoostMode_Normal; return 0; }
 Result threadCreate(Thread *t, ThreadFunc f, void *a, void *st, size_t sz, int prio, int cpu) {
     (void)t; (void)f; (void)a; (void)st; (void)sz; (void)prio; (void)cpu;
-    return 1;   /* the pump runs synchronously in the test instead */
+    return 0;   /* a thread that never runs: the test calls pump_main itself */
 }
 Result threadStart(Thread *t) { (void)t; return 0; }
 Result threadWaitForExit(Thread *t) { (void)t; return 0; }
@@ -87,6 +90,7 @@ Result fsFileWrite(FsFile *f, s64 off, const void *buf, u64 n, u32 opt) {
 }
 void fsFileClose(FsFile *f) { (void)f; }
 Result fsFsCommit(FsFileSystem *fs) { (void)fs; return 0; }
+Result romfsMountFromFsdev(const char *path, u64 offset, const char *name) { (void)path; (void)offset; (void)name; return 0; }
 
 #include "../../toolchain/host/host_device.inc"
 
@@ -94,6 +98,9 @@ Result fsFsCommit(FsFileSystem *fs) { (void)fs; return 0; }
 static int failures;
 #define CHECK(c, ...) do { if (!(c)) { failures++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } \
                            else printf("ok   " #c "\n"); } while (0)
+
+static void exit_check(void) { if (!s_unlocked_before_exit || s_locked) _exit(5); }   /* unlocked before exit */
+static void atexit_check_install(void) { atexit(exit_check); }
 
 static int exists(const char *p) { struct stat st; return stat(p, &st) == 0; }
 static void put(const char *p, const char *s) { FILE *f = fopen(p, "w"); fputs(s, f); fclose(f); }
@@ -166,15 +173,19 @@ int main(int argc, char **argv) {
     pid_t pid = fork();
     if (pid == 0) {
         s_exit_after = 3;
-        g_pump_run = 1;
         g_exiting = 0;
         setup_override("0100abcd12345678\n");
+        pump_start();   /* takes the exit lock (the stubbed thread never runs: the pump runs here) */
+        if (!s_locked) _exit(4);
+        g_pump_run = 1;
+        atexit_check_install();
         pump_main(NULL);
         _exit(3);   /* not reached: pump_main exits */
     }
     int st = 0;
     waitpid(pid, &st, 0);
-    CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0, "an exit request ends the process with exit(0) (status %#x)", st);
+    CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0, "an exit request ends the process with exit(0) after taking (4) and "
+          "releasing (5) the exit lock (status %#x)", st);
     CHECK(!exists("sdmc:/atmosphere/contents/0100abcd12345678/exefs.nsp"), "the exit cleanup removed the override");
 
     printf("host_device: %d failures\n", failures);

@@ -91,7 +91,10 @@ def ini_value(path, section, key):
 
 class DataPath:
     def __init__(self, root, game=None):
-        self.root, self.game = root, game or os.path.join(root, "fnvnx", "game")
+        # without --game: an install laid out on the card itself (<root>/switch/fnv, as boot_game.sh and S5-boot's
+        # farm boots make it), else <root>/fnvnx/game, where --file fnvnx/game/... and switch/fnv/... both land
+        sw = os.path.join(root, "switch", "fnv")
+        self.root, self.game = root, game or (sw if os.path.isdir(sw) else os.path.join(root, "fnvnx", "game"))
         self.listing = {}
         self.faults = {}                 # (call, errno name, sd path) -> count
         self.fd_path = {}                # fd -> (sd path lower-case, host path)

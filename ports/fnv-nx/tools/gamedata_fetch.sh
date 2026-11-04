@@ -8,6 +8,8 @@
 #
 # Env: ARTIFACTS (a clone of the artifacts repository to fetch into; default /home/user/fnv-nx-build if it exists),
 #      ARTIFACTS_URL (fetched over directly when there is no clone).
+# A finished fetch writes <out>/.gamedata_heads (the branch heads it took); when the heads have not moved, the next
+# run with the same items does nothing ("up to date"), so farms can call it before every boot.
 # Exit: 0 ok, 1 a missing branch or a checksum mismatch, 2 usage.
 set -euo pipefail
 OUT=${1:?usage: tools/gamedata_fetch.sh <out dir> [item...]}; shift || true
@@ -16,6 +18,11 @@ mkdir -p "$OUT/Data"; OUT=$(cd "$OUT" && pwd)
 if top=$(git -C "$OUT" rev-parse --show-toplevel 2>/dev/null); then
   echo "gamedata_fetch: $OUT is inside the git checkout $top; game data must stay out of git" >&2; exit 2
 fi
+heads=$(git ls-remote "$URL" refs/heads/gamedata/exe 'refs/heads/gamedata/data/*' | sort; echo "items: $*")
+if [ -f "$OUT/.gamedata_heads" ] && [ "$(cat "$OUT/.gamedata_heads")" = "$heads" ] && [ -f "$OUT/FalloutNV.exe" ]; then
+  echo "gamedata_fetch: $OUT up to date"; exit 0
+fi
+rm -f "$OUT/.gamedata_heads"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/gamedata-fetch.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 git -C "$TMP" init -q
@@ -49,4 +56,5 @@ for slug in "${slugs[@]}"; do
   echo "gamedata_fetch: $name ok ($kind, sha256 $got)"
 done
 [ $bad = 0 ] || exit 1
+printf '%s\n' "$heads" > "$OUT/.gamedata_heads"
 echo "gamedata_fetch: $OUT ready: FARM_GAME=$OUT tests/s5/farm_boot.sh <c12> <out>"

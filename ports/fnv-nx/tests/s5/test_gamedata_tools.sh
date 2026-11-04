@@ -36,6 +36,8 @@ check "fetch runs" "[ $rc = 0 ]"
 check "exe from gamedata/exe" "cmp -s '$W/exe/FalloutNV.exe' '$W/game/FalloutNV.exe'"
 check "file reassembled" "cmp -s '$W/inst/Data/Synth - Big.bsa' '$W/game/Data/Synth - Big.bsa'"
 check "directory restored" "cmp -s '$W/inst/Data/Music/Explore/a.mp3' '$W/game/Data/Music/Explore/a.mp3'"
+out=$(bash "$T/gamedata_fetch.sh" "$W/game" 2>&1)
+check "a second fetch with unmoved heads does nothing" "echo \"\$out\" | grep -q 'up to date'"
 # a corrupted part: publish a branch by hand whose part does not match its manifest
 git -C "$W/peek" checkout -q FETCH_HEAD; printf 'X' >> "$W/peek/Synth_-_Big.bsa.part01"
 git -C "$W/peek" -c user.name=t -c user.email=t@t commit -q -am corrupt

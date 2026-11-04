@@ -368,3 +368,39 @@ on the PC code, so cull and accumulation can leave the main thread. The changes:
    draw list.
 
 **Owners.** S1b owns patches/ and the tooling; S15-threads writes the MT1 patches and their tests.
+
+## Gated classes in the .s1b tooling (MT1)
+
+The tooling side of class MT1 (the section above). `tools/rules/s1b_patches.py`:
+
+* `MSVC_RULES` (XINC1, FTOL1, DBUG1, RET1) are the byte-parity classes. `GATED` (MT1) are exempt from the MSVC byte
+  check.
+  - `msvc_sites()` is what `msvc_check.py` checks, so MT1 sites are never compiled against the pristine objects.
+  - `tools/equiv/equiv.py` classifies MT1 as `platform`: no neutral MSVC build applies it.
+  - prepare (the Switch build) runs `r_mt1` after the other S1b rules.
+  - `gcc_check.py` and `test_patches.py` cover MT1 like any class.
+* Files: `patches/mt1_*.s1b`, sites `@@ MT1 <path> <0xaddr|file>`. The format and the evidence rule are the same as
+  for the other classes.
+* The gate header is `shim/include/fnvnx_mt1.h` (S15-threads, force-included through fnvnx_compat.h).
+  - `fnvnx_mt1_batches()` gives the batch-renderer count.
+  - `FNVNX_MT1_ON` is bMTRendering's setting byte (`DAT_011c710c` + 4).
+  - The engine's own copy of the flag is `DAT_011f94b4`.
+* Hunk modes (the `===` line), MT1 only:
+  | mode | emitted | parse check |
+  |---|---|---|
+  | `===` | the new text as written | it gates itself: it names `FNVNX_MT1_ON`, a `fnvnx_mt1_` helper or `DAT_011f94b4` |
+  | `=== wrap` | `if (FNVNX_MT1_ON) { new } else { <matched old> }`: with the gate off, the decomp's code | the old text is whole statements |
+  | `=== inert` | the new text as written | it only adds text: the old text occurs in it verbatim (declarations the gated code uses) |
+  A mode on a byte-parity class, an unknown mode, or a plain MT1 hunk that names no gate is a parse error.
+* Test: `tests/s1b/test_mt1.py`. It covers:
+  - parsing and emission, and the refusals;
+  - the MSVC exemption, the equiv class and prepare's rule list;
+  - a compile and run of wrapped code with the real gate header: the decomp's path with the setting byte 0, the MT1
+    path with it 1;
+  - with DECOMP set, every committed MT1 hunk applying exactly once.
+* Measured on `mt1_cull.s1b` (S15-threads, 2 sites), against prepare without `r_mt1` (base tree t/3e418b3aae4c,
+  census flags):
+  - both hunks apply exactly once;
+  - the census output of both units is identical (0 errors);
+  - in `-c -O2 -ffunction-sections` objects only the two site functions' sections differ: blk_00860000_od 1 of 205,
+    mtrenderingsystem_o2_variant 1 of 18.

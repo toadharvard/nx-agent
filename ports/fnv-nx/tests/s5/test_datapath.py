@@ -67,10 +67,18 @@ class DataPathTest(unittest.TestCase):
         self.assertEqual(dp.resolve("sdmc:/switch/fnv/../../../x"), os.path.join(self.root, "x"))
 
     def test_no_game_mount(self):
-        dp = datapath.DataPath(self.root)   # both prefixes are <root>/fnvnx/game: old and new guests find one exe
-        want = os.path.join(self.root, "fnvnx", "game", "FalloutNV.exe")
+        card = os.path.join(self.tmp, "emptycard"); os.makedirs(card)
+        dp = datapath.DataPath(card)   # both prefixes are <root>/fnvnx/game: old and new guests find one exe
+        want = os.path.join(card, "fnvnx", "game", "FalloutNV.exe")
         self.assertEqual(dp.resolve("sdmc:/switch/fnv/FalloutNV.exe"), want)
         self.assertEqual(dp.resolve("sdmc:/fnvnx/game/FalloutNV.exe"), want)
+
+    def test_install_on_the_card(self):
+        put(os.path.join(self.root, "switch", "fnv", "Data", "FalloutNV.esm"), b"TES4")   # no --game
+        dp = datapath.DataPath(self.root)
+        want = os.path.join(self.root, "switch", "fnv", "Data", "FalloutNV.esm")
+        self.assertEqual(dp.resolve("sdmc:/switch/fnv/DATA/falloutnv.esm"), want)
+        self.assertEqual(dp.resolve("sdmc:/fnvnx/game/Data/FalloutNV.esm"), want)
 
     def test_targets(self):
         bsas, masters = self.dp.targets()

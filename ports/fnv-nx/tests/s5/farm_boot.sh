@@ -63,6 +63,20 @@ BOOTS=${FARM_BOOTS:-raw slots stub}
 EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-6000000000}
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
+# The real install by default (orchestrator: every farm boots on the real Data/): when no FARM_GAME is given and the
+# image is none or the owner's exe, tools/gamedata_fetch.sh assembles it from the private repository into
+# FARM_GAMEDATA_DIR (default $FARM_HOME/gamedata; cached: nothing is fetched while the branches stay put).
+# FARM_GAMEDATA=0 turns it off; a failed fetch leaves the boot as it was (image only).
+OWNER_EXE_SHA=${FNVNX_EXE_SHA256:-89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe}
+if [ -z "$GAME" ] && [ "${FARM_GAMEDATA:-1}" != 0 ] &&
+   { [ -z "$IMAGE" ] || [ "$(sha256sum "$IMAGE" | cut -c1-64)" = "$OWNER_EXE_SHA" ]; }; then
+  GD=${FARM_GAMEDATA_DIR:-${FARM_HOME:-$HOME/fnvnx-farm}/gamedata}
+  if bash "$ROOT/tools/gamedata_fetch.sh" "$GD" > "$OUT/gamedata_fetch.log" 2>&1; then
+    GAME=$GD; IMAGE=$GD/FalloutNV.exe
+  else
+    echo "farm_boot: no real install (tools/gamedata_fetch.sh failed, see $OUT/gamedata_fetch.log): image only" >&2
+  fi
+fi
 if TOP=$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null); then
   case "$OUT/" in "$TOP"/*) echo "farm_boot: $OUT is inside the repository; the outputs are decomp-derived" >&2; exit 1 ;; esac
 fi
@@ -151,13 +165,24 @@ if command -v aarch64-linux-gnu-gcc > /dev/null \
 else
   log "heap_standin.c not compiled (aarch64-linux-gnu-gcc): slots and stub boot without it"
 fi
+# The exe's ini files next to it (fnv-nx-build gamedata/exe: Fallout_default.ini, low/medium/high/VeryHigh.ini; the
+# game copies Fallout_default.ini to My Games/FalloutNV/FALLOUT.INI and stops in WinMain without it). They go where
+# the exe goes. Nothing is placed for the synthesized image.
+GAMEFILES=()
+if [ -n "$IMAGE" ] && [ -z "$GAME" ]; then   # with FARM_GAME the install's own inis are mounted with it
+  for f in "$(dirname "$IMAGE")"/*.ini; do
+    [ -f "$f" ] || continue
+    b=$(basename "$f")
+    GAMEFILES+=(--file "switch/fnv/$b=$f" --file "fnvnx/game/$b=$f")
+  done
+fi
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift
   log "boot $tag"
   local rc=0 root=$OUT/sdmc-$tag
   rm -rf "$root"; mkdir -p "$root"
   timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" "${IMGARG[@]}" \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" "${IMGARG[@]}" "${GAMEFILES[@]}" \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"

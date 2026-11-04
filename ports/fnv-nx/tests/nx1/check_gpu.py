@@ -59,7 +59,7 @@ def body(text, fn):
 
 
 def cexpr(expr: str, defs: dict[str, int]) -> int | None:
-    e = re.sub(r'(\d+)u\b', r'\1', expr)
+    e = re.sub(r'\b(0[xX][0-9a-fA-F]+|\d+)[uU]?[lL]{0,2}\b', r'\1', expr)
     e = re.sub(r'\b[A-Z_][A-Z0-9_]*\b', lambda m: str(defs.get(m.group(0), "None")), e)
     if "None" in e or re.search(r'[^0-9xa-fA-F+\-*/()<>\s&~|]', e):
         return None
@@ -108,20 +108,31 @@ def check(host_elf, guest_elf=None, build=None) -> Checks:
     print(f"info native output {size}; docked: {'operation mode' if docked else 'VI scales the 720p images'}")
     c.ok("present.calls", "dkQueueAcquireImage" in gpu and "dkQueuePresentImage" in gpu, "no acquire/present pair")
 
-    defs = {k: int(v.replace("u", ""), 0) for k, v in re.findall(r'#define\s+(\w+)\s+\(?(\d+u?)\)?\s', gpu)}
-    for k, v in re.findall(r'#define\s+(\w+)\s+\((\d+u?\s*<<\s*\d+)\)', gpu):
-        defs[k] = cexpr(v, defs) or 0
+    # every object-like #define's whole body, evaluated in order (a later define may use an earlier one); a body that
+    # is not a constant expression stays out, and a pool that uses it is unknown (V1 NX1-G3: (600u * 1024 * 1024)
+    # was read as 600)
+    defs: dict[str, int] = {}
+    for k, v in re.findall(r'^#define[ \t]+([A-Z_][A-Z0-9_]*)[ \t]+([^\n]+)$', gpu, re.M):
+        val = cexpr(v.strip(), defs)
+        if val is not None:
+            defs[k] = val
     fb = cexpr("1280 * 720 * 4 * 3", {}) if size == (1280, 720) else (size[0] * size[1] * 4 * 3 if size else 0)
-    pool, parts = fb, [f"framebuffers {fb / MIB:.1f}"]
+    pool, parts, unknown = fb, [f"framebuffers {fb / MIB:.1f}"], []
+    desc = re.search(r'uint32_t\s+descSize\s*=\s*([^;]+);', init)
     for m in re.finditer(r'host_block\(([^,]+),', init):
         expr = m.group(1).strip()
         if "fbSize" in expr:
             continue
         v = cexpr(expr, defs)
-        if v is None and expr == "descSize":
+        if v is None and expr == "descSize" and desc:   # NX_MAX_IMAGES/SAMPLERS * descriptor sizes: bounded at 64 KiB
             v = 64 << 10
-        pool += v or 0
-        parts.append(f"{expr} {(v or 0) / MIB:.1f}")
+        if v is None:
+            unknown.append(expr)
+            continue
+        pool += v
+        parts.append(f"{expr} {v / MIB:.1f}")
+    c.ok("pools.known", not unknown, f"GPU pool sizes that cannot be evaluated: {unknown} (a pool of unknown size cannot "
+         "be shown to fit)")
     heap = re.search(r'#define\s+NXGPU_HOST_HEAP_MIB\s+(\d+)', host)
     heap = int(heap.group(1)) * MIB if heap else 0
     c.ok("pools.fit", heap and pool + 64 * MIB <= heap, f"GPU pools {pool / MIB:.0f} MiB + 64 MiB > host heap {heap >> 20} MiB")
@@ -134,13 +145,18 @@ def check(host_elf, guest_elf=None, build=None) -> Checks:
     bad = [f"{p}: {m.group(0)}" for p, s in files.items() for rx in DESKTOP for m in re.finditer(rx, s)]
     c.ok("console.only", not bad, "; ".join(bad[:4]))
     # the guest-to-host path
-    front = strip_comments(open(os.path.join(ROOT, "render", "native", "front", "front.cpp"), errors="replace").read())
+    def read_or_empty(*rel):   # a missing source is a failed item below, never a crash that hides the other results
+        try:
+            return open(os.path.join(ROOT, *rel), errors="replace").read()
+        except OSError:
+            return ""
+    front = strip_comments(read_or_empty("render", "native", "front", "front.cpp"))
     gb = body(front, "GpuBackend")
     c.ok("path.handshake", "NXGPU_MAGIC" in gb and "NXGPU_VERSION" in gb,
          "the guest front does not refuse a host with another nxgpu ABI (magic/version)")
-    abi = open(os.path.join(ROOT, "render", "native", "include", "nx", "gpu_abi.h"), errors="replace").read()
+    abi = read_or_empty("render", "native", "include", "nx", "gpu_abi.h")
     mod = re.search(r'#define\s+NXGPU_EXT_MODULE\s+(\d+)u', abi)
-    hostapi = open(os.path.join(ROOT, "toolchain", "include", "fnvnx", "hostapi.h"), errors="replace").read()
+    hostapi = read_or_empty("toolchain", "include", "fnvnx", "hostapi.h")
     others = {int(v) for v in re.findall(r'#define\s+FNVNX_EXT_\w+\s+(\d+)u', hostapi)} | {9}   # 9: Nine's module
     c.ok("path.module_id", mod is not None and int(mod.group(1)) not in others,
          f"NXGPU_EXT_MODULE {mod.group(1) if mod else None} collides with another ext module {sorted(others)}")

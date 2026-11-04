@@ -464,6 +464,35 @@ void linhost_sigreturn(void);
 __asm__(".text\n.global linhost_sigreturn\nlinhost_sigreturn:\n  mov x8, #139\n  svc #0\n");
 
 static int readable(u64 a) { return a >= 0x10000 && a < 0xC0000000ull; }   /* no probing: only the range check */
+
+/* ---- --collect-traps (S5's collect-all boot): a virtual function defined nowhere (fnvnx_vslot_trap) or a
+ * constructor/destructor defined nowhere (fnvnx_special_trap) returns to its caller instead of stopping the boot:
+ * 0, or this (x0 as it came) for a constructor/destructor. Each distinct (kind, caller, text) is printed once as
+ *   linhost: collect<TAB>vslot|special<TAB>caller<TAB>text
+ * so one boot lists every such trap up to the first real fault (tests/s5/collect_traps.py groups them). */
+static int g_collect;
+static u64 g_collect_seen[8192];
+static u64 g_collect_n;
+static int collect_trap(u64 *x, u64 *pc) {
+    int special = *pc == g_trap_special;
+    u64 text = readable(x[1]) ? x[1] : 0, key = (x[30] * 0x9E3779B97F4A7C15ull) ^ text ^ (u64)special;
+    key |= 1;
+    for (u64 h = key % 8192, k = 0; k < 8192; k++, h = (h + 1) % 8192) {
+        u64 cur = __atomic_load_n(&g_collect_seen[h], __ATOMIC_ACQUIRE);
+        if (cur == key) break;
+        if (!cur && __atomic_compare_exchange_n(&g_collect_seen[h], &cur, key, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            u64 n = __atomic_add_fetch(&g_collect_n, 1, __ATOMIC_RELAXED);
+            puts_(2, "linhost: collect\t"); puts_(2, special ? "special" : "vslot"); puts_(2, "\t");
+            put_hex(2, x[30]); puts_(2, "\t");
+            puts_(2, text ? (const char *)(uintptr_t)text : "?"); puts_(2, "\t#"); put_dec(2, n); puts_(2, "\n");
+            break;
+        }
+        if (cur == key) break;
+    }
+    if (!special) x[0] = 0;
+    *pc = x[30];
+    return 1;
+}
 static void on_fault(int sig, void *info, void *ucv) {
     (void)info;
     unsigned char *uc = ucv;            /* struct ucontext: uc_mcontext (struct sigcontext) at 176 */
@@ -471,6 +500,7 @@ static void on_fault(int sig, void *info, void *ucv) {
     int i = guard_slot(gettid_(), 0);
     GuardRec *r = i >= 0 ? g_guard[i].top : 0;
     int trap = *pc == g_trap_vslot || *pc == g_trap_special;
+    if (trap && g_collect && sig == 5 && collect_trap(x, pc)) return;
     if (r) {
         g_guard[i].top = r->prev;
         u64 n = __atomic_add_fetch(&g_skipped, 1, __ATOMIC_RELAXED);
@@ -628,10 +658,11 @@ __attribute__((used)) long hmain(long *sp) {
         else if (streq(argv[i], "--expect") && i + 1 < argc) g_expect = argv[++i];
         else if (streq(argv[i], "--heap") && i + 1 < argc) heap_mib = parse_u(argv[++i]);
         else if (streq(argv[i], "--skip-faulting-init")) skip_init = 1;
+        else if (streq(argv[i], "--collect-traps")) g_collect = 1;
         else if (!guest && argv[i][0] != '-') guest = argv[i];
-        else die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--heap MiB] guest.elf");
+        else die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] guest.elf");
     }
-    if (!guest) die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--heap MiB] guest.elf");
+    if (!guest) die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] guest.elf");
     if (g_expect) {
         g_expect_len = slen(g_expect);
         if (!g_expect_len || g_expect_len >= sizeof g_win / 2) die("--expect: 1..255 bytes");
@@ -672,6 +703,7 @@ __attribute__((used)) long hmain(long *sp) {
         g_api.heap_size = size;
         puts_(2, "linhost: guest heap "); put_hex(2, base); puts_(2, " ("); put_dec(2, heap_mib); puts_(2, " MiB)\n");
     }
+    if (g_collect && !skip_init) die("--collect-traps needs --skip-faulting-init (the trap symbols are found there)");
     if (skip_init) install_guards(fd);
     sc(SYS_close, fd, 0, 0, 0, 0, 0);
     install_fault_handler();

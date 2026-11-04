@@ -191,19 +191,32 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
 
 
 def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
-            garbage=None, codeptr=None, vcalls=None):
+            garbage=None, codeptr=None, vcalls=None, ignore=()):
     """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
     the planted vftables; a differing call to neither is an indirect call through memory the case did not plant
     (marked vcall='unplanted': an oracle-model gap, classify.py oracle-vcall)."""
     ex, ea = rx.error, ra.error
     if ex == 'timeout' or ea == 'timeout':
         return None
-    if (ex is None) != (ea is None):
-        return dict(kind='error', x86=ex, arm=ea)
+    # a fault on one machine is compared after the calls both made before it: a differing call earlier in the
+    # common prefix is what led there (difffuzz-19: a native call through a vtpad slot where the oracle called the
+    # exe's slot, then faulted on the canned result, was an oracle-side error, not vptr-unpaired)
+    one_error = (ex is None) != (ea is None)
     tx = [c.target for c in rx.calls]
     ta = [c.target for c in ra.calls]
     fam = libcalls.FAMILY
     for i in range(min(len(tx), len(ta))):
+        if tx[i] != ta[i] and vcalls is not None and tx[i] >= 0 and tx[i] not in vcalls[0] and \
+                tx[i] not in vcalls[1] and (ta[i] < 0 or ta[i] not in vcalls[0]):
+            # the oracle called through memory the case did not plant (an object's vptr or a function pointer
+            # filled with fuzz bytes): its callee is unknown, each machine reads its own slot layout from those
+            # bytes, and both get the same canned result. Not a divergence by itself; the calls after it and the
+            # rest are compared (difffuzz-15: `oracle-vcall`, 2,439 divergences, ended the comparison here)
+            continue
+        if tx[i] != ta[i] and tx[i] >= 0 and getattr(ra.calls[i], 'addr', None) == tx[i]:
+            # both machines branched to the same garbage word; on the native it lies in the stub range and traces by
+            # the stub's identity (S13b vcall-stub-alias: compare stopped here)
+            continue
         if tx[i] != ta[i] and not (tx[i] in fam and fam.get(tx[i]) == fam.get(ta[i])):
             d = dict(kind='call-target', index=i, x86=_hex(tx[i]), arm=_hex(ta[i]),
                      x86_trace=[_hex(t) for t in tx[:i + 1]], arm_trace=[_hex(t) for t in ta[:i + 1]],
@@ -212,9 +225,17 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             if vcalls is not None and tx[i] >= 0 and tx[i] not in vcalls[0]:
                 d['vcall'] = 'planted' if tx[i] in vcalls[1] else 'unplanted'
             return d
+    if one_error:
+        return dict(kind='error', x86=ex, arm=ea)
     if ex is not None:
         return None   # both faulted after the same calls
-    if len(tx) != len(ta):
+    dealloc = {a for a, f in fam.items() if f == 'delete'} | {0x00aa4060}
+    if len(tx) > len(ta) and all(t in dealloc for t in tx[len(ta):]) and \
+            any(str(getattr(v, 'cls', '')).startswith('AGG:') for v in conv.vals):
+        # MSVC destroys an aggregate passed by value in the callee (its buffer freed on the way out), Itanium in the
+        # caller: the trailing oracle-only frees are by design and the rest is compared (S13b byvalue-arg-dtor)
+        pass
+    elif len(tx) != len(ta):
         return dict(kind='call-count', x86=len(tx), arm=len(ta), x86_trace=[_hex(t) for t in tx],
                     arm_trace=[_hex(t) for t in ta])
     if callee_conv is not None:
@@ -232,6 +253,15 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             if d:
                 d.update(kind='call-args', index=i, target=_hex(cx.target), callee=cv.name)
                 return d
+    if (getattr(conv, 'name', '') or '').startswith(('??_G', '??_E')):
+        # MSVC's deleting destructor returns this, the Itanium D0 it stands for returns nothing (by design,
+        # causes.py deleting-dtor-ret): not compared, so the stores after it are (difffuzz-14)
+        rx.ret = ra.ret = None
+    nx, na = getattr(rx, 'noreturn', None), getattr(ra, 'noreturn', None)
+    if bool(nx) != bool(na):
+        # one machine ended at a call that never returns after the same calls, the other returned (difffuzz-14)
+        return dict(kind='return', x86=(rx.ret or b'').hex(), arm=(ra.ret or b'').hex(), noreturn_x86=nx,
+                    noreturn_arm=na)
     if rx.ret != ra.ret and conv.ret is not None and rx.ret and ra.ret and conv.ret.size == 4 and conv.ret.is_ptr:
         px, pa = struct.unpack('<I', rx.ret[:4])[0], struct.unpack('<I', ra.ret[:4])[0]
         if codeptr is not None and codeptr(pa) == px:
@@ -260,6 +290,9 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
                 return None
         return d
     wx, wa = world.effective(rx.writes, w), world.effective(ra.writes, w)
+    for k_ in ignore:                       # bytes neither machine's behaviour is judged by (local static guards)
+        wx.pop(k_, None)
+        wa.pop(k_, None)
     if sret is not None and conv.ret is not None:
         # the hidden result buffer is the result channel (compared as the return value), not a side effect
         for d_ in (wx, wa):
@@ -299,6 +332,19 @@ def _read(uc, w, a, n):
         return w.initial(a, n)
 
 
+def deleting_flags(conv, case):
+    """An MSVC deleting destructor `??_G` / `??_E` (this, flags) is the Itanium D0 natively (this only), which always
+    deletes; with flags bit 0 clear the oracle destroys without deleting, which only D1 (another function) does.
+    Every case of such a target therefore runs with flags = 1, the call D0 stands for (difffuzz-14; S1-fuzzq: the
+    41 `falloff?` records "x86 0 calls, native 1" were cases with flags 0). Applied to saved cases too, so a
+    recheck drops the old records."""
+    if not (getattr(conv, 'name', '') or '').startswith(('??_G', '??_E')):
+        return
+    flags = [v for v in conv.vals if v.label != 'this']
+    if flags:
+        case.args[flags[0].label] = (1).to_bytes(flags[0].size, 'little')
+
+
 class FunctionTimeout(Exception):
     """The function's hard wall-clock bound (Pair.deadline, set by fuzz.fuzz_one) ran out."""
 
@@ -312,6 +358,8 @@ class Pair:
         self.xe = self.ae = None
         self.adapted = 0
         self.deadline = None             # time.time() after which run() raises FunctionTimeout
+        self.pops = {}                   # learned `ret N` of intercepted x86 callees of unknown convention
+        self.pops_tried = set()
 
     def run(self, case, max_steps=200000):
         """One case on both machines. Adaptive follow: when the k-th call goes to oracle function X on x86 but
@@ -321,6 +369,10 @@ class Pair:
             if self.deadline is not None and time.time() > self.deadline:
                 raise FunctionTimeout()
             rx, ra, d = self._run(case, max_steps)
+            if rx.error and rx.error.startswith('fault:') and not (ra.error or '').startswith('fault:'):
+                got = self._learn_pop(case, max_steps, rx)
+                if got is not None:
+                    rx, ra, d = got
             if not d or d['kind'] not in ('call-target', 'call-count') or self.adapted >= 16:
                 return rx, ra, d
             if d['kind'] == 'call-count':
@@ -345,6 +397,75 @@ class Pair:
             self.adapted += 1
             self.xe = None              # rebuilt with the larger code set
         return rx, ra, d
+
+    def _pushes_before(self, retaddr):
+        """Pushes in the straight-line code before the call that returns to retaddr (back to the previous call,
+        branch, return or esp adjustment): an upper bound of the arguments the caller passed on the stack."""
+        import capstone
+        for a, code in self.target.x86_code.items():
+            if a < retaddr <= a + len(code):
+                break
+        else:
+            return 0
+        cs = getattr(Pair, '_cs', None) or capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        Pair._cs = cs
+        ins = list(cs.disasm(code, a))
+        i = next((k for k, x in enumerate(ins) if x.address + x.size == retaddr and x.mnemonic == 'call'), None)
+        n = 0
+        for x in reversed(ins[:i] if i is not None else []):
+            if x.mnemonic == 'push':
+                n += 1
+            elif x.mnemonic in ('call', 'ret', 'jmp', 'pop', 'leave') or x.mnemonic.startswith(('j', 'loop')) or \
+                    (x.op_str.startswith('esp,') and x.mnemonic in ('add', 'sub', 'mov', 'lea', 'and')):
+                break
+        return min(n, 8)
+
+    def _learn_pop(self, case, max_steps, rx):
+        """The oracle faulted after an intercepted call whose callee pops an unknown number of bytes (a call through
+        a pointer the case planted or filled: no oracle code, no declaration) and whose caller does not clean up
+        after it (callee-pops: stdcall/thiscall). With 0 popped, esp is off by the arguments and the oracle returns
+        to garbage (difffuzz-15: most `oracle-vcall` errors, fault:x:00000000). The counts for up to 3 such call
+        sites are searched jointly (each: the pushes before it, most first, then 0) for a clean run: no fault, a
+        balanced stack at the target's return (x86emu Result.esp_ok), and every intercepted call returning into
+        the loaded oracle code (a wrong count returns to an argument word, which then reads as a wild call).
+        Learned per call site for every later case. -> (rx, ra, d) of the clean run, or None."""
+        import itertools
+        sites = []
+        for c in rx.calls:
+            ra_ = getattr(c, 'ret_to', None)
+            if not getattr(c, 'pop_unknown', False) or ra_ is None or ra_ in sites or ra_ in self.pops_tried:
+                continue
+            try:
+                after = bytes(self.xe.uc.mem_read(ra_, 2))
+            except Exception:  # noqa: BLE001
+                after = b''
+            if after[:2] in (b'\x83\xc4', b'\x81\xc4') or after[:1] == b'\x59':
+                continue                                    # the caller cleans up: cdecl, nothing popped
+            sites.append(ra_)
+        sites = sites[:3]
+        if not sites:
+            return None
+        self.pops_tried.update(sites)
+        cands = [[4 * n for n in range(self._pushes_before(a), 0, -1)] + [0] for a in sites]
+
+        def clean(got):
+            x = got[0]
+            return not (x.error or '').startswith('fault:') and x.esp_ok and \
+                all(self.xe._in_loaded(c.ret_to) for c in x.calls if getattr(c, 'ret_to', None) is not None)
+        for combo in itertools.islice(itertools.product(*cands), 27):
+            if not any(combo):
+                continue
+            for a, n in zip(sites, combo):
+                self.pops[a] = n
+            got = self._run(case, max_steps)
+            if clean(got):
+                for a, n in zip(sites, combo):
+                    if not n:
+                        self.pops.pop(a, None)
+                return got
+        for a in sites:
+            self.pops.pop(a, None)
+        return None
 
     def _private_names(self, addrs):
         """Names of the native image's data symbols that hold these addresses."""
@@ -376,6 +497,7 @@ class Pair:
         return self._vc
 
     def _run(self, case, max_steps):
+        deleting_flags(self.target.conv, case)
         w = world.World(case, self.target.x86_code, self.pinned)
         ap = getattr(self.target, 'vt_ap', {})
         w.a64_vptrs = {a: ap[v] for a, v in case.vptrs.items() if v in ap}
@@ -388,6 +510,8 @@ class Pair:
         else:
             self.xe.reset(w)
             self.ae.reset(w)
+        self.xe.pop_override = self.pops
+        self.ae.static_pairs = getattr(self.target, 'static_pairs', ())
         self.ae.callee_conv = getattr(self.target.callee_info, 'conv', None)
         self.ae.iat_names = getattr(self.target, 'iat_names', {}) or {}
         self.ae.caller_conv = getattr(self.target.callee_info, 'caller_conv', None)
@@ -400,7 +524,14 @@ class Pair:
                                 (lambda a, n: _read(self.xe.uc, w, a, n), lambda a, n: _read(self.ae.uc, w, a, n)),
                                 getattr(self.target, 'dummies', None),
                                 (world.garbage_words(case.seed, 'x86'), world.garbage_words(case.seed, 'a64')),
-                                self.ae._codeptr, self._vcalls())
+                                self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()))
+        if d is not None:
+            # dynamic evidence for causes.py (S13b: oracle-callee-unloaded): the original addresses of the unit's
+            # functions the native actually entered in this run (their __fnv_<X> entry blocks were executed)
+            ent = getattr(self.target.image, 'entries', {}) or {}
+            got = sorted({o for a, o in ent.items() if a in ra.blocks})
+            if got:
+                d['arm_entered'] = ['%08x' % o for o in got[:64]]
         if d is not None and ra.private_reads:
             d['arm_private_reads'] = ra.private_reads
             names = self._private_names(ra.private_addrs)

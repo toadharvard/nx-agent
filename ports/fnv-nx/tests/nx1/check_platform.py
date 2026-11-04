@@ -9,7 +9,8 @@
   audio    audren: initialised, the renderer started, closed again, the pump on the audio role;
   applet   the applet pump (host_device.inc) starts with the guest, h_main_loop defers to it, its hook covers focus,
            resume, operation mode (docked 1080p / handheld 720p) and exit requests;
-  exit     every way out runs cleanup_for_exit (boost off, override removed, log flushed): the guest's exit(), the
+  exit     the pump takes appletLockExit (without it AM force-terminates on Close software and sends no exit request),
+           every way out runs cleanup_for_exit, which releases it (boost off, override removed, log flushed): the guest's exit(), the
            guest returning, a system exit request (then exit(0), so libnx ends with ISelfController::Exit), a refused
            start; svcExitProcess only in the crash handler. The process then returns to the HOME menu: hbmenu
            lives in hbloader's process, which the game process replaced (docs/NRO.md);
@@ -83,6 +84,11 @@ def check(run: bool) -> Checks:
     hook = body(dev, "applet_hook")
     for k in ("OnFocusState", "OnResume", "OnOperationMode", "OnExitRequest"):
         c.ok(f"applet.hook.{k}", f"AppletHookType_{k}" in hook, f"the applet hook ignores {k}")
+    ps = body(dev, "pump_start")
+    c.ok("exit.lock", "appletLockExit" in ps, "nothing calls appletLockExit: AM force-terminates the process on Close "
+         "software and the exit request (cleanup, exit(0)) never runs (V1 NX1-EXIT-P1)")
+    c.ok("exit.unlock", "appletUnlockExit" in body(dev, "cleanup_for_exit"),
+         "cleanup_for_exit does not appletUnlockExit before the process ends (libnx applet.h)")
     pump = body(dev, "pump_main")
     c.ok("exit.request", "cleanup_for_exit" in pump and "exit(0)" in pump and "svcExitProcess" not in pump,
          "the exit request path does not clean up and exit()")

@@ -278,6 +278,8 @@ not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B
   |---|---|---|
   | direct member call `obj()->f(a())`, `(*obj()).f`, `ref().f`, chains, member operators (`<<` `>>` `[]` `+` `==` `()`) | arguments, then the object | `ORDER_OBJECT=msvc` |
   | virtual call `obj()->vf(a())` | object first | `ORDER_OBJECT=msvc` (GCC's order) |
+  | virtual call on a prvalue `make().vf(a())` (GCC calls it directly) | object first (V2's P1) | `ORDER_OBJECT=msvc` (kept first) |
+  | call through a computed pointer `fp()(a())` | arguments, then the callee expression (V2's P2) | `ORDER_OBJECT=msvc` |
   | static member through an object | object first | GCC's order |
   | pointer to member `(obj()->*pmf())(a())` | arguments first (/O2: `aom`) | `ORDER_OBJECT=msvc` |
   | free overloaded operator `y << a()`, `y + a()`, `a() - y` | right to left, as any call | `ORDER_OPERATOR=rtl` |
