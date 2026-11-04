@@ -235,19 +235,20 @@ int os_vm_commit(void *addr, size_t size) { (void)addr; (void)size; return 0; }
 int os_vm_decommit(void *addr, size_t size) { memset(addr, 0, size); return 0; }
 int os_vm_release(void *addr, size_t size) { (void)size; free(addr); return 0; }
 
-/* The port's SD directory: guest.nso, host.log and fnvnx.ini (host.c), user/ (C:/Users/Player: My Games/FalloutNV,
- * saves), drive_<x>/. The game install (C:/FalloutNV: FalloutNV.exe, Data/, the INIs) is os_game_dir(). */
-const char *os_default_root(void) { return "sdmc:/fnvnx"; }
+/* One SD folder for the port and the game (NX1's toolchain/include/fnvnx/sdlayout.h FNVNX_SD_DIR): fnv.nro,
+ * fnv-exefs.nsp, guest.nso, fnvnx.ini, the logs (host.c), user/ (C:/Users/Player: My Games/FalloutNV, saves,
+ * AppData/Local/FalloutNV), drive_<x>/, and the player's install (C:/FalloutNV: FalloutNV.exe, Data/, the INIs). */
+#define FNVNX_SD_ROOT "sdmc:/switch/fnv"
+const char *os_default_root(void) { return FNVNX_SD_ROOT; }
 
-/* The game install on the SD card: sdmc:/switch/fnv (Data/ at sdmc:/switch/fnv/Data), or `game_dir=` in
- * sdmc:/fnvnx/fnvnx.ini (a path without "sdmc:" is taken on the SD card). Read once; the first caller is boot.cpp,
- * before any thread exists. */
-#define FNVNX_GAME_DIR_DEFAULT "sdmc:/switch/fnv"
+/* The game install: the same folder, or `game_dir=` in sdmc:/switch/fnv/fnvnx.ini (a path without "sdmc:" is taken
+ * on the SD card). Read once; the first caller is boot.cpp, before any thread exists. */
+#define FNVNX_GAME_DIR_DEFAULT FNVNX_SD_ROOT
 const char *os_game_dir(void) {
     static char dir[256];
     if (dir[0]) return dir;
     snprintf(dir, sizeof dir, "%s", FNVNX_GAME_DIR_DEFAULT);
-    int fd = os_file_open("sdmc:/fnvnx/fnvnx.ini", OS_O_READ);
+    int fd = os_file_open(FNVNX_SD_ROOT "/fnvnx.ini", OS_O_READ);
     if (fd < 0) return dir;
     char buf[2048];
     int64_t n = os_file_read(fd, buf, sizeof buf - 1);

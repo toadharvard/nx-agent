@@ -25,10 +25,15 @@ import errno as E
 import os
 
 GAME_MOUNTS = ("switch/fnv", "fnvnx/game")
+# the port's own entries of sdmc:/switch/fnv (NX1's fnvnx/sdlayout.h): they stay on the card (--root), never in --game
+PORT_NAMES = {"user", "drive_c", "fnvnx.ini", "guest.nso", "fnv.nro", "fnv-exefs.nsp", "host.log", "crash.log",
+              "launcher.log", "override.txt", "readme.txt"}
 DATA_MILESTONES = ("ini-read", "archive-list", "bsa-opened", "esm-header", "masters-loaded")
 INI_NAMES = {"fallout_default.ini", "fallout.ini", "falloutprefs.ini"}
-USER_INI = "fnvnx/user/Documents/My Games/FalloutNV/Fallout.ini"
-PLUGINS = "fnvnx/user/AppData/Local/FalloutNV/plugins.txt"
+# the profile: sdmc:/switch/fnv/user (the layout), sdmc:/fnvnx/user (guests built before it)
+USER_DIRS = ("switch/fnv/user", "fnvnx/user")
+USER_INI = "Documents/My Games/FalloutNV/Fallout.ini"
+PLUGINS = "AppData/Local/FalloutNV/plugins.txt"
 
 
 def _parts(p):
@@ -82,6 +87,9 @@ class DataPath:
         for m in GAME_MOUNTS:
             mp = m.split("/")
             if low[:len(mp)] == mp:
+                rest = low[len(mp):]
+                if m == "switch/fnv" and rest and (rest[0] in PORT_NAMES or rest[0].startswith("drive_")):
+                    break
                 return self.game, parts[len(mp):]
         return self.root, parts
 
@@ -164,7 +172,10 @@ class DataPath:
         if self._targets is None:
             data = self.data_dir()
             gdir = os.path.dirname(data)
-            lst = ini_value(self.resolve("/" + USER_INI), "Archive", "SArchiveList")
+            lst = None
+            for u in USER_DIRS:
+                lst = lst if lst is not None else ini_value(self.resolve(f"/{u}/{USER_INI}"), "Archive",
+                                                            "SArchiveList")
             if lst is None:
                 lst = ini_value(os.path.join(gdir, "Fallout_default.ini"), "Archive", "SArchiveList")
             names = ([n.strip() for n in lst.split(",") if n.strip()] if lst is not None else
@@ -173,7 +184,8 @@ class DataPath:
             bsas = [self.resolve_host(p) for p in bsas]
             masters = ["FalloutNV.esm"]
             try:
-                with open(self.resolve("/" + PLUGINS), encoding="latin-1") as f:
+                plug = [p for p in (self.resolve(f"/{u}/{PLUGINS}") for u in USER_DIRS) if os.path.isfile(p)]
+                with open(plug[0] if plug else "", encoding="latin-1") as f:
                     for line in f:
                         n = line.split("#", 1)[0].strip()
                         if n.lower().endswith(".esm") and n.lower() != "falloutnv.esm":

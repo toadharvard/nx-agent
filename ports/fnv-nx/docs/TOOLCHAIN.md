@@ -743,9 +743,10 @@ DEVKITPRO=<dkp> toolchain/package/build.sh <g>/guest.nso <pkg> <program id> <g>/
 3. Game files: the install folder of the player's game, as it is on the PC, goes to `sdmc:/switch/fnv/`:
    `FalloutNV.exe` (1.4.0.525, not SteamStub-wrapped: the boot says "SteamStub-wrapped" otherwise),
    `Fallout_default.ini` and `Data/` (the .esm/.bsa files). `C:\FalloutNV` is `sdmc:/switch/fnv`
-   (`os_game_dir()`; `game_dir=<path>` in `sdmc:/fnvnx/fnvnx.ini` moves it, section 20). The profile
-   (`My Games/FalloutNV`, Fallout.ini, saves) is `sdmc:/fnvnx/user`. Guests built before this layout read
-   `sdmc:/fnvnx/game`. Without the exe the guest boots in trace mode with an empty data image.
+   (`os_game_dir()`; `game_dir=<path>` in `sdmc:/switch/fnv/fnvnx.ini` moves it, section 20). The profile
+   (`My Games/FalloutNV`, Fallout.ini, saves) is `sdmc:/switch/fnv/user`. It is one folder for the port and the
+   game, as in NX1's `toolchain/include/fnvnx/sdlayout.h`. Guests built before this layout read
+   `sdmc:/fnvnx/game` and `sdmc:/fnvnx/user`. Without the exe the guest boots in trace mode with an empty data image.
 4. Launch the title from HOME without holding R. Clean up afterwards by deleting
    `atmosphere/contents/<program id>/exefs.nsp`.
 
@@ -1050,7 +1051,7 @@ lines (`#` or `;` starts a comment) and logs the values in effect. A missing fil
 |---|---|---|
 | `core3` | 0 (`FNVNX_CORE3_DEFAULT`) | the background roles may use core 3 |
 | `boost_loading` | 1 (`FNVNX_BOOST_LOADING_DEFAULT`) | `appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad)` while the loading screen runs |
-| `game_dir` | `sdmc:/switch/fnv` | the game install, `C:\FalloutNV` (FalloutNV.exe, Data/); read by the guest (`os_guest.c` `os_game_dir`), a path without `sdmc:` is on the card |
+| `game_dir` | `sdmc:/switch/fnv` | the game install, `C:\FalloutNV` (FalloutNV.exe, Data/); read by the guest (`os_guest.c` `os_game_dir`) from `sdmc:/switch/fnv/fnvnx.ini`, a path without `sdmc:` is on the card |
 
 **Core 3 opt-in.**
 - **NPDM:** `highest_cpu_id` is now 3, with `default_cpu_id` 0. `check_package.py` requires cores 0..3 and default 0;
@@ -1129,7 +1130,8 @@ python3 -I tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init 
 ```
 
 `--game` mounts the install (FalloutNV.exe, Fallout_default.ini, Data/) in place at the guest's `sdmc:/switch/fnv`
-and the older `sdmc:/fnvnx/game`; without it both are `<sdmc>/fnvnx/game`. Paths fold case as on the SD card
+and the older `sdmc:/fnvnx/game`. The port's own entries there (user/, fnvnx.ini, guest.nso, the logs) stay in
+`--root`; without it both are `<sdmc>/fnvnx/game`. Paths fold case as on the SD card
 (`tests/s5/datapath.py`). `farm_boot.sh` takes the same as `FARM_GAME=<game dir>`. The data milestones (`data` lines
 of `tests/s5/milestones.txt`: ini-read, archive-list, bsa-opened, esm-header, masters-loaded) and the file faults
 (`data-counts`, `file-fault` lines; `data` and `file_faults` in the summary JSON) come from the guest's host file

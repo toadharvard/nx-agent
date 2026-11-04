@@ -72,3 +72,12 @@ onto the integration branch.
   3. renderer-init: wait for S5-boot's D3D9.DLL fix, or boot a guest linked with D3D9=null, to reach archive-list.
   4. V1's new W9/W10/W13 (stlr, ldaxr/stlxr stores; integration e9e1981) pass on this branch as well, so there is
      nothing to do there.
+* **did (one SD layout, with NX1)** - At the orchestrator's request, S5-data owns the layout and NX1 checks it. I took
+  NX1's `fnvnx/sdlayout.h` as it is (branch claude/fnv-nx1-nro): one folder, `sdmc:/switch/fnv`.
+  - The guest's root and its game dir are both that folder. The profile is `sdmc:/switch/fnv/user`, and
+    `game_dir=` is read from `sdmc:/switch/fnv/fnvnx.ini`.
+  - The emulator keeps the port's own names (user, drive_*, fnvnx.ini, guest.nso, fnv.nro, the logs) on the card
+    and sends the rest to --game.
+  - I reverted my package/build.sh edit so NX1's rewrite applies cleanly. NX1 has the details by send_message.
+  - Once sdlayout.h is on the integration branch, os_guest.c should take FNVNX_SD_DIR from it.
+

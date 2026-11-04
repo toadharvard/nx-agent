@@ -38,7 +38,7 @@ class DataPathTest(unittest.TestCase):
         self.esm = b"TES4" + bytes(20) + b"GRUP" + bytes(100)
         put(os.path.join(self.game, "Data", "FalloutNV.esm"), self.esm)
         put(os.path.join(self.game, "Data", "Extra.esm"), b"TES4" + bytes(40))
-        put(os.path.join(self.root, datapath.PLUGINS), b"# synthetic\r\nFalloutNV.esm\r\nExtra.esm\r\nMissing.esm\r\n")
+        put(os.path.join(self.root, "switch", "fnv", "user", datapath.PLUGINS), b"# synthetic\r\nFalloutNV.esm\r\nExtra.esm\r\nMissing.esm\r\n")
         self.dp = datapath.DataPath(self.root, self.game)
         self.hits = []
         self.dp.notify = lambda n, how: self.hits.append(n)
@@ -55,6 +55,14 @@ class DataPathTest(unittest.TestCase):
         self.assertEqual(dp.resolve("sdmc:/fnvnx/game/Data/New File.txt"),
                          os.path.join(self.game, "Data", "New File.txt"))               # new files keep their name
         self.assertEqual(dp.resolve("sdmc:/fnvnx/fnvnx.ini"), os.path.join(self.root, "fnvnx", "fnvnx.ini"))
+        # the port's own entries of sdmc:/switch/fnv stay on the card, the rest is the install (sdlayout.h)
+        sw = os.path.join(self.root, "switch", "fnv")
+        self.assertEqual(dp.resolve("sdmc:/switch/fnv/fnvnx.ini"), os.path.join(sw, "fnvnx.ini"))
+        self.assertEqual(dp.resolve("sdmc:/switch/fnv/User/Documents"), os.path.join(sw, "user", "Documents"))   # folded
+        self.assertEqual(dp.resolve("sdmc:/switch/fnv/guest.nso"), os.path.join(sw, "guest.nso"))
+        self.assertEqual(dp.resolve("sdmc:/switch/fnv/drive_c/Windows"), os.path.join(sw, "drive_c", "Windows"))
+        self.assertEqual(dp.resolve("sdmc:/switch/fnv/Fallout_default.ini"),
+                         os.path.join(self.game, "Fallout_default.ini"))
         self.assertEqual(dp.resolve("sdmc:/../../etc/passwd"), os.path.join(self.root, "etc", "passwd"))
         self.assertEqual(dp.resolve("sdmc:/switch/fnv/../../../x"), os.path.join(self.root, "x"))
 
@@ -70,9 +78,15 @@ class DataPathTest(unittest.TestCase):
         self.assertEqual([os.path.basename(m) for m in masters], ["FalloutNV.esm", "Extra.esm"])   # Missing.esm: none
 
     def test_user_ini_overrides(self):
-        put(os.path.join(self.root, datapath.USER_INI), b"[Archive]\nSArchiveList=Synth - Two.bsa\n")
+        put(os.path.join(self.root, "switch", "fnv", "user", datapath.USER_INI), b"[Archive]\nSArchiveList=Synth - Two.bsa\n")
         bsas, _ = datapath.DataPath(self.root, self.game).targets()
         self.assertEqual([os.path.basename(b) for b in bsas], ["Synth - Two.bsa"])
+
+    def test_old_profile_layout(self):
+        os.remove(os.path.join(self.root, "switch", "fnv", "user", datapath.PLUGINS))
+        put(os.path.join(self.root, "fnvnx", "user", datapath.PLUGINS), b"Extra.esm\r\n")   # guests before sdlayout
+        _, masters = datapath.DataPath(self.root, self.game).targets()
+        self.assertEqual([os.path.basename(m) for m in masters], ["FalloutNV.esm", "Extra.esm"])
 
     def test_no_ini_takes_all_archives(self):
         os.remove(os.path.join(self.game, "Fallout_default.ini"))
