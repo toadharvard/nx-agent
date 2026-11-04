@@ -85,6 +85,20 @@ check('RCAST1 reference cast of a member call result',
 check('RCAST1 reference cast of a plain lvalue untouched',
       run(s1.r_ref_cast_temporaries, 'x = (const M&)a[i].b;\n'), (), ['fnvnx_lvalue'])
 
+check('RCAST1 reference cast of a parenthesized expression',
+      run(s1.r_ref_cast_temporaries, 'return ((const V&)(a - b)).Len();\n'), ['(const V&)fnvnx_lvalue((a - b))'])
+
+# ---- SPEC2 is limited to its files; TPL2
+got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> class A\n{\n  public:\n    void d(T* p)\n'
+          '    {\n        D(p);\n    }\n};\ntemplate <class T> inline void D(T* p)\n{\n    p->~T();\n}\n}\n')
+check('TPL2 forward-declares a namespace function template used earlier', got,
+      ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'])
+
+# ---- MATH1
+check('MATH1 drops a decomp copy of float sqrt(float)',
+      run(s1.r_math_overloads, 'inline float __cdecl sqrt(float _X)\n{\n    return sqrtf(_X);\n}\n'), ['#include <math.h>'],
+      ['return sqrtf'])
+
 # ---- CTOR1
 check('CTOR1 explicit constructor call of a template class',
       run(s1.r_ctor_calls, 'void f() { ((std::vector<char>*)this)->std::vector<char>::vector(); }\n'),

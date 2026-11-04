@@ -513,14 +513,17 @@ def r_win32_call_args(path, text, stats):
 # ---------------------------------------------------------------------------------------------------------- RCAST1
 
 REF_CAST_CALL = re.compile(r'\(\s*((?:const\s+)?(?:volatile\s+)?(?:::)?[A-Za-z_][\w:<>, \t\*]*?&)\s*\)\s*'
-                           r'(?=(?:::)?[A-Za-z_])')
+                           r'(?=(?:::)?[A-Za-z_]|\()')
 
 def _postfix_end(text, i):
     """End of the postfix expression starting at text[i] (a name, then (...), [...], .name, ->name), and whether its
     last part is a call."""
-    m = re.match(r'(?:::)?[A-Za-z_]\w*(?:\s*::\s*~?[A-Za-z_]\w*)*', text[i:])
-    if not m: return i, False
-    j, call = i + m.end(), False
+    if text[i:i + 1] == '(':                                          # a parenthesized operand: (a - b)
+        j, call = _call_end(text, i), True
+    else:
+        m = re.match(r'(?:::)?[A-Za-z_]\w*(?:\s*::\s*~?[A-Za-z_]\w*)*', text[i:])
+        if not m: return i, False
+        j, call = i + m.end(), False
     while True:
         k = j
         while k < len(text) and text[k] in ' \t': k += 1
@@ -695,7 +698,7 @@ def r_unit_renames(path, text, stats):
 
 SPEC_DEF = re.compile(r'^([ \t]*)(template\s*<\s*>\s*)?((?:FNVNX_KEEP\s+)?(?:(?:inline|static|virtual)\s+)*)'
                       r'((?:[\w:<>,\*& \t]+?[\s\*&])?)'                    # return type (none for constructors)
-                      r'(\b[A-Za-z_]\w*)\s*<([^<>;{}()]*(?:<[^<>;{}()]*(?:<[^<>;{}()]*>[^<>;{}()]*)*>[^<>;{}()]*)*)>'
+                      r'(\b(?:[A-Za-z_]\w*\s*::\s*)*[A-Za-z_]\w*)\s*<([^<>;{}()]*(?:<[^<>;{}()]*(?:<[^<>;{}()]*>[^<>;{}()]*)*>[^<>;{}()]*)*)>'
                       r'\s*::\s*(~?\w+)\s*'
                       r'\(([^;{}]*)\)\s*(const\s*)?(?=[{;:])', re.M)
 TEMPLATE_PARAM_LIKE = re.compile(r'^\s*(?:class|typename)\b|^\s*[A-Z]\s*$')
@@ -1342,6 +1345,43 @@ def r_math_overloads(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- SPEC2
+
+# Files where GCC reports "specializing member ... requires 'template<>' syntax" (census c16): definitions of members
+# of a class template specialization, which MSVC took without `template <>`.
+SPEC2_FILES = ('staging/blk_00440000_od.cpp', 'staging/blk_006e0000_od.cpp', 'staging/blk_00b40000_od_ob1_variant.cpp',
+               'staging/blk_00b40000_od_ob1_variant_rtm_variant.cpp', 'unmapped/bssimplearray.cpp')
+
+def r_specialization_prefix(path, text, stats):
+    """SPEC2: `template <>` in front of the decomp's definitions of members of class template specializations
+    (`void BSTFreeList<QueuedMessage>::f(...) {`) at file scope in SPEC2_FILES, as C++ requires and MSVC did not.
+    Members of an explicitly specialized class (`template <> class T<A> {...}`) take no prefix and are left alone."""
+    if '>::' not in text or not path.replace(os.sep, '/').endswith(tuple('/src/' + f for f in SPEC2_FILES)):
+        return text
+    spans, edits = None, []
+    squash = lambda x: re.sub(r'\s+', '', x)
+    explicit = [squash(c) for c in re.findall(r'\btemplate\s*<\s*>\s*(?:class|struct)\s+\w+\s*<([^{};]*)>\s*(?::[^{};]*)?\{',
+                                              text)]
+    for m in SPEC_DEF.finditer(text):
+        if m.group(2): continue
+        if not text[m.end():].lstrip().startswith(('{', ':')): continue          # a definition
+        tmpl, args = m.group(5), m.group(6).strip()
+        if tmpl in ('static_cast', 'reinterpret_cast', 'const_cast', 'dynamic_cast'): continue
+        if not args or any(TEMPLATE_PARAM_LIKE.match(a) for a in args.split(',')): continue
+        if squash(args) in explicit: continue
+        before = re.sub(r'(?://[^\n]*\n|/\*.*?\*/|\s)+$', '', text[max(0, m.start() - 400):m.start()], flags=re.S)
+        if re.search(r'\btemplate\s*<[^\n]*>$', before): continue                  # already a template head
+        if spans is None: spans = prepare.scope_spans(text)
+        if any(k != 'namespace' for k, _ in prepare.scope_chain(spans, m.start())): continue
+        edits.append(m.start(3))
+        stats['SPEC2'] += 1
+    if not edits: return text
+    out, pos = [], 0
+    for at in edits:
+        out.append(text[pos:at]); out.append('template <> '); pos = at
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -1361,5 +1401,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_math_overloads, r_falloff_traps,
+RULES = [r_unit_renames, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_math_overloads, r_falloff_traps,
          r_msvc_base_layout]
