@@ -436,8 +436,8 @@
    "subsystem": "scene-graph update",
    "role": "main",
    "per_call_insn": [
-    19,
-    19
+    46,
+    46
    ],
    "per_call_basis": "M",
    "calls": [
@@ -445,12 +445,12 @@
     24000
    ],
    "calls_note": "two per updated object [E]",
-   "per_call_note": "NEON override fnvnx_nibound_update_00a7fdd0 (S15-simd): 46 -> 19 A64 instructions per call (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 15 -> 15)",
+   "per_call_note": "46 A64 instructions on link 0bd144db1464 (dyncount); the NEON override (19 instructions) was dropped by S15-simd: 16 / 49 cycles against the decomp's 18 / 42 in the A57 model (PERF.md 11.6)",
    "per_call_cycles": [
-    16.1,
-    49.0
+    18.1,
+    42.0
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "decomp object, funcmodel.py: 46 x 0.393 (steady) / 0.913 (one call)"
   },
   {
    "id": "fn_node_update",
