@@ -43,6 +43,12 @@ a check-in every 30 min. Reports of
 runners are read from the artifacts repository:
 `git -C /home/user/fnv-nx-build fetch -q origin reports/<name> && git -C /home/user/fnv-nx-build show origin/reports/<name>:<file>`.
 
+**Try farms** check work before it is merged. The orchestrator runs `tools/farm/push_wip.sh 120`, which pushes every
+agent worktree head that is ahead of the integration branch to `wip/<agent>` of the artifacts repository. A try farm
+runs the census on those commits (`WATCH=wip TRY_K=k TRY_N=n runner.sh try<k> census`, started with
+`farm/start.sh`). It publishes `reports/try<k>/wip_<agent>-<commit12>-census.md`. An agent reads its own report
+there and sees the full-tree effect of its rule change in about 10 minutes, without a merge.
+
 Rules for every job:
 
 * Work trees live under `$FARM_HOME` (default `~/fnvnx-farm`), never inside the repository checkout.

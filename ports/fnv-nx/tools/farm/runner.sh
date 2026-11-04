@@ -4,6 +4,7 @@
 #   tools/farm/runner.sh <name> <job> [job args]          e.g.  runner.sh farm7 compile 3 8
 #
 # Jobs: prepare | census | compile <k> <N> | <any tools/farm/<job>_job.sh with args after <commit>>.
+# WATCH=wip TRY_K=k TRY_N=n: a try farm (below) - the job runs on unmerged agent work instead of the integration head.
 # Loop: wait for a new head of the integration branch of the public repository (read-only, no credentials), check out
 # the job scripts at that head, run the job, publish its report to branch `reports/<name>` of the private artifacts
 # repository, repeat. Several commits that land during one run collapse into the newest. The process exits by
@@ -43,12 +44,34 @@ publish_report() {  # publish_report <file>: commit it to reports/<NAME> of the 
   log "report push failed: $f"
 }
 
+# WATCH=wip (try farms): instead of the integration head, run the job on unmerged agent work. The orchestrator
+# pushes each agent's worktree head to branch wip/<agent> of the artifacts repository (tools/farm/push_wip.sh);
+# this farm takes the wip branches with crc32(name) mod TRY_N == TRY_K-1, newest change first. The job scripts and
+# the runner itself still come from the integration head; only the commit under test is the agent's.
+WATCH=${WATCH:-head}; TRY_K=${TRY_K:-1}; TRY_N=${TRY_N:-1}
+next_wip() {  # prints "<sha> <branch>" of a wip branch of this farm that has not been done yet, or nothing
+  git -C "$ARTIFACTS" ls-remote origin 'refs/heads/wip/*' 2>/dev/null | while read -r sha ref; do
+    b=${ref#refs/heads/}
+    python3 -c 'import sys,zlib; sys.exit(0 if zlib.crc32(sys.argv[1].encode()) % int(sys.argv[2]) == int(sys.argv[3]) - 1 else 1)' "$b" "$TRY_N" "$TRY_K" || continue
+    grep -qx "$sha" "$FARM_HOME/$NAME.done" 2>/dev/null && continue
+    echo "$sha $b"; break
+  done
+}
 t_end=$(( $(date +%s) + MAX ))
 while [ "$(date +%s)" -lt "$t_end" ]; do
-  H=$(git ls-remote "$PUBLIC" "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
-  if [ -z "$H" ] || [ "$H" = "$(cat "$LAST" 2>/dev/null)" ]; then sleep 60; continue; fi
-  git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "$H" || { sleep 60; continue; }
-  H12=${H:0:12}; R=$FARM_HOME/out/$H12-$JOB.md; mkdir -p "$FARM_HOME/out"
+  TAG=""
+  if [ "$WATCH" = wip ]; then
+    read -r H WB < <(next_wip) || true
+    if [ -z "${H:-}" ]; then sleep 60; continue; fi
+    git -C "$NX" fetch -q https://github.com/toadharvard/fnv-nx-build "+refs/heads/$WB:refs/remotes/wip/${WB#wip/}" || { sleep 60; continue; }
+    git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "origin/$BRANCH" || { sleep 60; continue; }
+    TAG="${WB//\//_}-"
+  else
+    H=$(git ls-remote "$PUBLIC" "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
+    if [ -z "$H" ] || [ "$H" = "$(cat "$LAST" 2>/dev/null)" ]; then sleep 60; continue; fi
+    git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "$H" || { sleep 60; continue; }
+  fi
+  H12=${H:0:12}; R=$FARM_HOME/out/$TAG$H12-$JOB.md; mkdir -p "$FARM_HOME/out"
   J=$NX/ports/fnv-nx/tools/farm
   log "start $JOB $* at $H12"
   case "$JOB" in
@@ -62,7 +85,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     { echo "# $JOB $H12 FAILED (rc $rc)"; echo; echo '```'; tail -40 "$LOG"; echo '```'; } > "$R"
   fi
   [ -f "$R" ] && publish_report "$R"
-  echo "$H" > "$LAST"
+  if [ "$WATCH" = wip ]; then echo "$H" >> "$FARM_HOME/$NAME.done"; else echo "$H" > "$LAST"; fi
   log "done $JOB at $H12 rc=$rc"
   # housekeeping: keep only the newest per-commit work dirs
   for pat in compile- prepare- census- src-; do
