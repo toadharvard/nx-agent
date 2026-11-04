@@ -136,7 +136,9 @@ def test_budget(tmp):
     check(cu['critical'] and abs(cu['share_45']['1020'] - want) < 2e-3 and cu['fix'] and cu['basis'] == 'E',
           'hotspots: share of 22.2 ms at the assumed IPC, fix attached (cull %.3f)' % cu['share_45']['1020'])
     sl = next(h for h in fns if h['id'] == 'fn_slerp')
-    check(abs(sl['minsn']['lo'] - 0.26) < 1e-6 and abs(sl['minsn']['hi'] - 1.3) < 1e-6 and sl['basis'] == 'E',
+    hs = next(h for h in model['hotspot_functions'] if h['id'] == 'fn_slerp')   # per call [M] x calls [E]
+    check(abs(sl['minsn']['lo'] - hs['per_call_insn'][0] * hs['calls'][0] / 1e6) < 1e-6 and
+          abs(sl['minsn']['hi'] - hs['per_call_insn'][1] * hs['calls'][1] / 1e6) < 1e-6 and sl['basis'] == 'E',
           'hotspots: function proxy = per-call A64 count x calls per frame')
     q = b['queue']
     check(q and q[0]['rank'] == 1 and all(q[i]['gain_main_minsn']['mid'] >= q[i + 1]['gain_main_minsn']['mid']

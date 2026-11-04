@@ -254,8 +254,8 @@ threads and the loading screen stay on cores 0-2.
 | AI linear task threads (`iNumHWThreads` > 1, two at > 2) | **likely safe**: the default on every PC (the engine forces >= 2) | `iNumHWThreads=3` (what GetSystemInfo gives; two linear threads), **after** the placement fix; until then 2 |
 | AI task threads (inferred `bUseThreadedAI`) | **known-crashy on PC (hearsay)**: community guides report instability with `bUseThreadedAI=1` in FO3/FNV; off on PC, on on 360 | `bUseThreadedAI=0`; revisit with hardware traces |
 | Rendering Task Thread 2 (`bMTRendering:Display`, 0x011c710c, named from the owner's exe) | **unsafe on the PC code, needs port work (6.8)**: every accumulator is built with one batch renderer, so the worker shares main's and indexes a NULL second one | 0 (ini.cpp leaves it out of the Switch defaults) |
-| Havok workers (`iNumThreads:HAVOK`) | **needs work**: verify whether the pool is used and how many threads it starts on 3 cores | 1 (engine default) |
-| threaded morpher / particles / blood / temp effects (names hearsay) | **likely safe**: PC defaults on | 1 |
+| Havok workers (`iNumThreads:HAVOK`, `iSimType:HAVOK` 0x011cc2e8) | **needs work (6.9)**: the multithreaded step is in the code (`bhkWorld::StepSimulation` 0x00c6ae70 -> stepMultithreaded over hkJobQueue + hkCpuJobThreadPool) and is selected by **`iSimType=4`** (FUN_00c661d0 maps 0/1/4 -> discrete/continuous/multithreaded, anything else, 3 included, -> continuous); the pool is created in the unreconstructed EnsureObjectsCreated | iSimType 1 (engine default, continuous) |
+| threaded morpher / particles / temp effects (`bUseThreadedMorpher` 0x011ded20, `bUseThreadedParticleSystem` 0x011deaec, `bUseThreadedTempEffects` 0x011decbc; named from the exe) | **unverified (6.9)**: PC defaults on, but their readers are not reconstructed and the AI-linear hand-off reads plain cross-thread fields | 1 (ini.cpp port default, = the PC default ini); not counted in the as-built scenario |
 | tasklets, background loading | **likely safe**: PC defaults | engine/ini defaults |
 | `bUseMultibounds` (hearsay name; culling) | likely safe, saves render work | 1 |
 
@@ -297,6 +297,34 @@ well.
 Then mtqemu on the real culling units (not the `stages` model) and a race checker run. The lever stays out of the
 as-built scenario, and its moves (cull 70-90 %) are too high for what the split does (the main scene is halved; the
 shadow lights move whole).
+
+### 6.9 Threaded effects and Havok MT (S15-threads, read from the decomp)
+
+**Threaded effects.** No reader of the three settings is reconstructed (only the initializers,
+global_object_initializers.cpp:8621-8627). The parts of the hand-off that are reconstructed:
+* The cell scene-graph pass (`TES::FUN_00453550`) runs on the AI linear threads (`FUN_008c7bd0` / `FUN_008c7f50`,
+  only when `iNumHWThreads` > 1). It queues controller updates (task 6, `UpdateControllersRecursive`).
+* Main joins with `0x008c7990` (a counting-semaphore wait) and then drains the packed queue itself (main.cpp
+  ~9077-9082). So the queued controller updates come **back to main**; what leaves main is the downward pass.
+* The ordering goes through semaphores and events (ordered in our build). Several cross-thread fields are plain,
+  though, and are ordered on ARM only by those waits:
+  - `aiCurrent[]` (ailineartaskthreadmanager.cpp:449 / 263-298);
+  - `m_uiTaskFlags` and `m_pTaskQueueProcessor` (taskqueueinterface.cpp:294-299);
+  - the bools `DAT_011dfa18/19`;
+  - the queue's `m_uiLockState` (body not reconstructed).
+
+  A litmus/mtqemu case of this protocol comes before the lever counts.
+
+**Havok.** The multithreaded simulation is present:
+* `bhkWorld::StepSimulation` (0x00c6ae70, hkpworld.cpp ~1377-1405) runs the stepMultithreaded shape on the world's
+  hkJobQueue and hkCpuJobThreadPool when the world's type is 3.
+* The job queue uses critical sections and semaphores (hkjobqueue.cpp), which are ordered.
+* The world's type comes from `iSimType:HAVOK` through `FUN_00c661d0`, which maps **4** to 3. A plain 3 gives
+  continuous.
+* The pool is created in `EnsureObjectsCreated` (not reconstructed; nothing calls the ctor 0x00d2d110 in the
+  decomp).
+
+Next: confirm that path builds and links in the port, then run it under mtqemu with `iSimType=4`.
 
 ### 6.5 Memory ordering: what x86 gave for free
 

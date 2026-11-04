@@ -1025,7 +1025,7 @@
   "thread placement and migration under Horizon (B2), hand-off latencies (B3)",
   "GPU time per frame (B7) and the native renderer per-draw cost on device (render machine)",
   "lever mt_cull: bMTRendering:Display (0x011c710c) is unsafe on the PC code: accumulators are built with one batch renderer, the worker indexes a NULL second one and shares main's; current-accumulator globals shared (PERF.md 6.8). Needs port code; TLS fix done (S5 31cdca3), stage protocol modelled (mtqemu stages)",
-  "lever havok_workers: not traced whether bhkWorld uses the MT simulation (PERF.md 6.4)",
+  "lever havok_workers: MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the pool is made in the unreconstructed EnsureObjectsCreated (PERF.md 6.9)",
   "lever core3: S5 33c0b1b, off by default; the system's own use of core 3 is unmeasured",
   "lever barrier_relax: in the build: S12 52cb478 ORDER_REFCOUNT=weak is compile.sh's default (ORDERING.md Refcounts; sample 110 increments relaxed, 220 decrements release, 201 sites full); race-checked by mtqemu litmus-order ref; B9 on an A57 confirms the stall saving"
  ],
