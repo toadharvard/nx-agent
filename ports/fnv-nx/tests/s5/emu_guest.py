@@ -623,8 +623,8 @@ class Emu:
                         (slot,) = struct.unpack("<I", uc.mem_read(vptr + imm, 4))
                     except UcError:
                         slot = None
-                    if slot == 0:
-                        base = vptr
+                    if slot == 0 or slot == uc.reg_read(UC_ARM64_REG_PC) & 0xFFFFFFFF:   # (xN now holds
+                        base = vptr                                                      # the loaded slot)
                 where = "image" if 0x00400000 <= base < 0x02100000 else "native"
                 if vptr == base:
                     return f"{caller} | vslot {imm // 4} of {where} vtable {base:#010x}"
@@ -883,6 +883,7 @@ class Emu:
             print(f"   call {self.null_call()}")
         print(f"   lr  {self.sym(lr)}")
         print("   " + " ".join(f"x{i} {self.xreg(i):#x}" for i in range(8)))
+        print("   " + " ".join(f"x{i} {self.xreg(i):#x}" for i in range(19, 29)))
         for i in range(40):
             if not fp or fp & 7:
                 break

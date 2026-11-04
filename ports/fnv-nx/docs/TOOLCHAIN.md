@@ -871,10 +871,14 @@ The log has a `stubbed fault:` line for each of the first 30. The summary lines 
 * `replaced-call <count> <function> use-malloc|return-this`.
 
 The trace now names the text of S2's vslot traps (`virtual function defined nowhere: <symbol> (slot k of <vtable>)`)
-and the source of a bad call. It also prints x0-x7.
+and the source of a bad call. It also prints x0-x7 and x19-x28. When a virtual call's `ldr wN, [xN, #8]` overwrote
+the vptr register, the call is now named by the vtable of the object in x0 (`vslot k of native vtable V`).
+Before, it was reported as "loaded from <pc + 8>". That error led to the "garbage vptr" reading of the
+memory-manager fault in an earlier draft of this section.
 
-**f13 guest (section 17) on S14's `r2/fix/synth.exe`.** The table has 19 functions and one call before WinMain.
-Each run takes about 40 s.
+**f13 guest (section 17) on S14's `r2/fix/synth.exe`.** The table has 20 functions and one call before WinMain.
+Each run takes about 40 s. Without the table the boot is unchanged from round 10: it stops at WinMain+0x1d0 in
+InitHolder.
 
 * **Memory manager**: the constructor 0x00aa3880 completes. The state before WinMain is the x86 path: options and
   holder set, run-once 0, default-options 0. `boot_banner` is no longer skipped (4,326 initializers are skipped,
@@ -892,9 +896,14 @@ The faults it runs past, and their causes:
   - `InitHolder` 0x00aa2020 makes the tail call through slot 7.
   - NiMalloc 0x00aa1070, the aligned allocations 0x00aa10b0 and 0x00aa1130, and `NiMemObject::operator new`
     0x00aa13e0 all call through the same allocator (`use-malloc`). Their frees return 0.
-* **MemoryManager::Allocate 0x00aa3e40 (S1).** Its main heap has a garbage vptr after the constructor: the layout of
-  0x00aa3880 does not match `MemoryManagerStandIn`. Calls that do not fault return garbage. For example, the global
-  string table came back misaligned. It is replaced on every call. Its frees, 0x00aa1460 and 0x00aa4060, return 0.
+* **The constructor's stand-in member `MemoryManagerAA3880::Allocate`** (f13 only) has no address, so it is a
+  trap returning 0. It is `use-malloc`. In the guest it is still a trap: a forwarder to 0x00aa3e40 in
+  `heap_standin.c` let the constructor reach the fault below, and the raw boot then stopped earlier, at WinMain+0xc0.
+* **MemoryManager::Allocate 0x00aa3e40 (S1).** At +0xa8 it calls slot 2 (Allocate) of its heap `m_heaps[0]`
+  (this+12). That heap is the `FUN_00aa7400` which `MemoryManager::InitializeHeaps` creates (the second heap, after
+  the `FUN_00aa78a0` main heap). The decomp's `FUN_00aa7400` declares one virtual (`HeapBlockBase::v00`), so its
+  native vtable `_ZTV12FUN_00aa7400` has one slot, a vslot trap. Slot 2 is `_ZTI12FUN_00aa7400`'s name pointer.
+  It is replaced on every call. Its frees, 0x00aa1460 and 0x00aa4060, return 0.
 * **No initializer calls the NiMainSDM constructor 0x00a8a5f0** (the decomp has no caller). So 0x011f6110 stays 0,
   NiInit skips NiMain's init, and the NiStream loader map 0x011f4784, its post-process array and the global string
   table stay NULL. Called before WinMain.
@@ -918,6 +927,24 @@ The initializer skips that remain:
   (`unmapped/nitmapbase.cpp`) stores the string literal `"@K@"` as its vptr. Those are the bytes 0x00404b40, which
   the decompiler read as text. Slot 1 of that "vtable" is 0 (S1).
 * **735: the image vftable 0x0101772c** (INISettingCollection).
+
+**The first farm link, `link/9a0243c7eabe`** (S9's full job; `tests/s5/farm_boot.sh 9a0243c7eabe <out> <image>`
+packs the farm's `guest/fnvnx.elf` to an NSO and boots it in about 30 s, with no relink):
+
+* Raw boot, the same as the farm's own: WinMain+0xa4 -> `FUN_00c3bd30` -> `FUN_00c3c460` -> `MemoryManager::Allocate`
+  +0xa8, slot 2 of `_ZTV12FUN_00aa7400` (the cause above).
+* The same fault happens first in the constructor. `boot_banner` is skipped, so the options, holder and run-once
+  stay 0 before WinMain.
+* 4,327 of the 4,343 initializer skips are this one fault. At 9a0243c7eabe the stand-in member is resolved, so
+  the constructor gets as far as the heaps.
+* **Fix (S1): one class shape.** Give `FUN_00aa7400` the heap's virtuals (the `AbstractHeap` slots that the same
+  unit declares), so that its vtable has the original slots.
+* With the table, the same frontier as f13 is reached:
+  - `memory manager after construction` holds the x86 path;
+  - 4,327 skips;
+  - stop at WinMain+0x3f8, `PathList::FUN_00afdda0` -> `FUN_00761540`, image vtable 0x010472d0.
+* InitHolder's slot-7 call now lands in a vslot trap: `FUN_00aa2230_BSNiAllocator::Slot7` is defined nowhere.
+* `FUN_00404b10_class::Initialize` still stores `"@K@"`.
 
 **The remaining class.** Most of what is left comes from image vtables used as vptrs. On f13, `hand_vptrs.tsv` lists
 750 hand-stored vptrs with no native vtable, and `*(int*)this = (int)&DAT_<vtable>` stores (0x010472d0) are not

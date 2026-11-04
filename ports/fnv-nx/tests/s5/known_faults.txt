@@ -2,10 +2,16 @@
 # below a listed function, the function returns and the boot goes on. One function per line, by link name or
 # original address (0x...), then the action: return0 (default) or malloc:xN (return malloc(size in xN) instead,
 # for allocators); use-malloc:xN replaces the function by malloc on every call, faulting or not; return-this makes
-# the function return its x0 (an MSVC constructor, which returns this, called as a function). 'before-winmain <function> [x0]' calls a function once right before WinMain, standing in for an
-# initializer the decomp lacks. The comment says why and who fixes it. Remove a line when its fix lands.
+# the function return its x0 (an MSVC constructor, which returns this, called as a function).
+# 'before-winmain <function> [x0]' calls a function once right before WinMain, standing in for an initializer the
+# decomp lacks. The comment says why and who fixes it. Remove a line when its fix lands. A name the link does not
+# have is reported and ignored (older and newer links share the table).
 
-InitHolder          # 0x00aa2020: tail call through slot 7 of the allocator's one-slot synthesized vtable (S1)
+_ZN19MemoryManagerAA38808AllocateEj use-malloc:x1  # the decomp's stand-in member for the first allocation of the
+                      # MemoryManager constructor 0x00aa3880 (TableBaseAA3880(37)): it has no address (units.json), so
+                      # it is a trap returning 0 and the constructor's memset faults (f13; resolved by 9a0243c7eabe)
+InitHolder          # 0x00aa2020: tail call through slot 7 of the allocator's vtable: one synthesized slot on f13; on
+                    # 9a0243c7eabe a vslot trap, FUN_00aa2230_BSNiAllocator::Slot7 is defined nowhere (S1)
 0x00aa1070 use-malloc:x0  # NiMalloc: calls the same allocator (Gamebryo's memory manager 0x011f6080) through a slot of
                       # that one-slot vtable (S1); without this the first setting initializers (0x00f35430..) and
                       # about 3,470 others fault here
@@ -19,11 +25,12 @@ InitHolder          # 0x00aa2020: tail call through slot 7 of the allocator's on
 0x00aa1190
 0x00866690          # InitializeGlobal, after InitHolder: std::_Immortalize<StandardLibrarySingletonObject>() has a null
                     # vptr at its vfn_04 call (+0x6c); the options are already stored (S1)
-0x00aa3e40 use-malloc:x1  # MemoryManager::Allocate: its main heap has a garbage vptr (0x....2f79) after the
-                      # constructor 0x00aa3880 (layout of FUN_00aa3880 vs MemoryManagerStandIn, S1). Replaced on every
-                      # call: on a fault only (malloc:x1), the calls that do not fault return garbage (the global
-                      # string table 0x011f42c0 came back misaligned, 0x....389e)
-0x00aa1460            # the sized free into the same heap (S13): reads the same garbage heap; the block leaks
+0x00aa3e40 use-malloc:x1  # MemoryManager::Allocate (+0xa8) calls slot 2 (Allocate) of its heap m_heaps[0] (this+12),
+                      # the FUN_00aa7400 that MemoryManager::InitializeHeaps makes; the decomp's FUN_00aa7400 declares
+                      # one virtual, so its native vtable has one slot and slot 2 is its typeinfo (S1). The farm
+                      # link 9a0243c7eabe stops here, first in the constructor (boot_banner skipped: 4,327 of its
+                      # 4,343 initializer skips), then at WinMain+0xa4. Replaced on every call
+0x00aa1460            # the sized free into the same heap (S13): faults the same way; the block leaks
 0x00aa4060            # MemoryManager::Deallocate: likewise
 0x00aa8a40            # IOQueue push (FUN_00aa7eb0, the IO task init in WinMain): NewItem through the hand-written vptr
                       # 0x010a2960, which has no native vtable (S2 hand_vptrs.tsv: IOQueue/IOFreeQueue 0x010a2960-b0, S1/S2)
