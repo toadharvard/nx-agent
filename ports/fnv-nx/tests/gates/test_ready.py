@@ -66,11 +66,11 @@ class World:
     def latest(self):
         return max(json.loads(self.read('_published.json')).values())
 
-    def run(self):
+    def run(self, *extra):
         out = os.path.join(self.tmp, 'card.json')
         md = os.path.join(self.tmp, 'card.md')
         rc = ready.main(['--fixtures', self.w, '--port', self.p, '--thresholds', self.path('thresholds.json', True),
-                         '--head', C, '--json', out, '--md', md])
+                         '--head', C, '--json', out, '--md', md, *extra])
         assert rc == 0
         card = json.loads(readf(out))
         card['by_id'] = {g['id']: g for g in card['gates']}
@@ -260,6 +260,64 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual(g['status'], 'pass')
         self.assertEqual(g['sources'][0]['branch'], 'link/' + C)
 
+    def abiclass_world(self):
+        """five open pairs, abiclass verdicts for four; S1b sites src/b.cpp 0x500000 (head only) and src/c.cpp
+        0x600000 (head and the link's commit)"""
+        rows = ''.join('%s\t0x0040%d000\tcallee%d\tref%d\t0\tx86-inconsistent\tpop-mismatch(4),ref-passes-fewer\n'
+                       % (u, i, i, i) for i, u in enumerate(('src/a.cpp', 'src/b.cpp#vtables', 'src/c.cpp', 'src/d.cpp',
+                                                             'src/e.cpp'), 3))
+        self.world.write('link/%s/out/abi.tsv' % C, self.world.read('link/%s/out/abi.tsv' % C) + rows)
+        tab = '#verdict\tboot\tsrc\tcaller\tcallee\tref_msvc\tabi_verdict\tclasses\n'
+        for v, u, i, caller in (('benign-more', 'src/a.cpp', 3, '00450000'), ('patched', 'src/b.cpp', 4, '00500000'),
+                                ('benign-unread', 'src/b.cpp', 4, '00510000'),
+                                ('patched', 'src/c.cpp', 5, '00600000'), ('fix-donor', 'src/d.cpp', 6, '00700000')):
+            tab += '%s\t2\t%s\t%s\tcallee%d\tref%d\tx86-inconsistent\tpop-mismatch,ref-passes-fewer\n' % (
+                v, u, caller, i, i)
+        self.world.write('link/%s/out/abiclass.tsv' % C, tab)
+        self.world.write('patches/x.s1b', '@@ XINC1 src/b.cpp 0x00500000\n+x\n@@ XINC1 src/c.cpp 0x00600000\n+y\n',
+                         port=True)
+        self.world.write('_patches/%s/x.s1b' % C, '@@ XINC1 src/c.cpp 0x00600000\n+y\n')
+
+    def test_abiclass_patched_and_benign_explain(self):
+        self.abiclass_world()
+        g = self.gate(self.world.run(), 'abi.x86_inconsistent')
+        self.assertEqual((g['status'], g['value']), ('fail', 3))        # c (patch already in the link), d, e
+        self.assertEqual(g['abiclass'], {'benign-more': 1, 'patched': 1, 'patched-in-link': 1, 'fix-donor': 1,
+                                         'no-verdict': 1})
+        self.assertIn('2 by S1b abiclass verdicts (benign-more 1, patched 1)', g['note'])
+        self.assertIn('open by abiclass verdict: fix-donor 1, no-verdict 1, patched-in-link 1', g['note'])
+        self.assertEqual(g['sources'][1]['path'], 'out/abiclass.tsv')
+        # the head dropped b's hunk: its verdict is stale; the link's patches unknown: unverified
+        self.world.write('patches/x.s1b', '@@ XINC1 src/c.cpp 0x00600000\n+y\n', port=True)
+        self.assertEqual(self.gate(self.world.run(), 'abi.x86_inconsistent')['abiclass'].get('patched-gone'), 1)
+        self.world.write('patches/x.s1b', '@@ XINC1 src/b.cpp 0x00500000\n+x\n', port=True)
+        shutil.rmtree(self.world.path('_patches'))
+        self.assertEqual(self.gate(self.world.run(), 'abi.x86_inconsistent')['abiclass'].get('patched-unverified'), 1)
+
+    def test_abiclass_all_explained_passes(self):
+        self.abiclass_world()
+        self.world.sub('link/%s/out/abi.tsv' % C, 'src/c.cpp', 'src/a.cpp')
+        t = self.world.read('link/%s/out/abi.tsv' % C)
+        self.world.write('link/%s/out/abi.tsv' % C, ''.join(l + '\n' for l in t.splitlines()
+                                                           if 'src/d.cpp' not in l and 'src/e.cpp' not in l))
+        self.world.sub('link/%s/out/abiclass.tsv' % C, 'patched\t2\tsrc/c.cpp\t00600000',
+                       'benign-conv\t2\tsrc/a.cpp\t00600000')
+        card = self.world.run()
+        g = self.gate(card, 'abi.x86_inconsistent')
+        self.assertEqual((g['status'], g['value']), ('pass', 0), g['note'])
+        self.assertEqual(card['verdict'], 'READY')
+
+    def test_abiclass_dir_of_the_gates_job(self):
+        self.abiclass_world()
+        d = os.path.join(self.world.tmp, 'abiclass')
+        os.makedirs(d)
+        writef(os.path.join(d, C + '.tsv'), '#verdict\tboot\tsrc\tcaller\tcallee\tref_msvc\tabi_verdict\tclasses\n')
+        g = self.gate(self.world.run('--abiclass', d), 'abi.x86_inconsistent')
+        self.assertEqual((g['value'], g['abiclass']), (5, {'no-verdict': 5}))
+        self.assertEqual(g['sources'][1]['branch'], 'gates job')
+        self.world.edit_json('thresholds.json', lambda t: t.pop('abi_explained_verdicts'), port=True)
+        self.assertIn('abi_explained_verdicts not set', self.gate(self.world.run(), 'abi.x86_inconsistent')['note'])
+
     # ---- S11 / S12
     def test_equiv_by_design_comes_from_patches(self):
         self.world.sub('docs/PATCHES.md', '| 0x00402000 |', '| 0x00409000 |', port=True)
@@ -357,8 +415,102 @@ class ReadyTest(unittest.TestCase):
         self.assertIn('S5 label', g['note'])
         self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d.update(image='synthesized'))
         card = self.world.run()
+        # the report still says the owner's exe: contradicting labels, none stands (V1 R13)
+        g = self.gate(card, 'boot.real_exe')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('contradict', g['note'])
+        self.assertEqual(self.gate(card, 'boot.main_menu')['status'], 'fail')
+        self.world.sub('reports/full1/%s-full.md' % C, "data image: the owner's FalloutNV.exe",
+                       'data image: build/boot/synth.exe')
+        card = self.world.run()
         self.assertEqual(self.gate(card, 'boot.real_exe')['status'], 'fail')
         self.assertEqual(self.gate(card, 'boot.main_menu')['status'], 'fail')
+        # an unknown label value contradicts a known one
+        self.world.sub('reports/full1/%s-full.md' % C, 'data image: build/boot/synth.exe',
+                       "data image: the owner's FalloutNV.exe")
+        self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d.update(image='player exe'))
+        self.world.edit_json('link/%s/meta.json' % C, lambda d: d.update(boot_image='patched exe'))
+        self.assertEqual(self.gate(self.world.run(), 'boot.real_exe')['status'], 'no-data')
+
+    def test_scorecard_one_number_per_stage(self):
+        card = self.world.run()
+        rows = {(r['stage'], r['what'].split(' (')[0]): r for r in card['scorecard']}
+        self.assertEqual([r['stage'] for r in card['scorecard']],
+                         ['compile', 'link', 'link', 'ABI', 'fuzz', 'fuzz', 'equivalence', 'boot', 'render parity',
+                          'frame budget', 'frame budget'])
+        for r in card['scorecard'][:9]:
+            self.assertEqual((r['gap'], r['status']), (0, 'done'), r)
+            self.assertTrue(r['sources'], r)
+        # the frame rows: 60 fps at 1.02 GHz (J-0150); the S15 budget fits (12.0 ms), the GPU model does not
+        fb, gpu = card['scorecard'][9], card['scorecard'][10]
+        self.assertEqual((fb['value'], fb['target'], fb['unit'], fb['gap'], fb['status']), (12.0, 16.7, 'ms', 0, 'done'))
+        self.assertEqual((gpu['value'], gpu['status']), (24.8, 'open'))
+        self.assertAlmostEqual(gpu['gap'], 24.8 - 16.7, places=1)
+        self.assertEqual(card['verdict'], 'READY')
+        # a census with errors, an S11 diff, a missing S16 file
+        self.world.sub('reports/farm1/%s-census.md' % C, 'errors total: 0', 'errors total: 3')
+        self.world.remove('reports/s16/%s-frames.json' % C)
+        card = self.world.run()
+        sc = {r['stage']: r for r in card['scorecard']}
+        self.assertEqual((sc['compile']['value'], sc['compile']['gap'], sc['compile']['status']), (3, 3, 'open'))
+        self.assertEqual((sc['render parity']['gap'], sc['render parity']['status']), (None, 'no-data'))
+        md = readf(os.path.join(self.world.tmp, 'card.md'))
+        self.assertIn('## Scorecard', md)
+        self.assertIn('| compile | census errors | 3 | 0 | 3 | **open** |', md)
+
+    def test_s13_metric_from_difffuzz_metric_py(self):
+        g = self.gate(self.world.run(), 'fuzz.s13_metric')
+        self.assertEqual((g['status'], g['value'], g['required']), ('pass', 0, False))
+        self.assertEqual([s['branch'] for s in g['sources']], ['reports/fz1', 'reports/fz2'])
+        self.world.edit_json('_s13_metric.json', lambda d: d['totals'].update(artifacts=7, metric=9, unpublished=2))
+        card = self.world.run()
+        g = self.gate(card, 'fuzz.s13_metric')
+        self.assertEqual((g['status'], g['terms']['artifacts']), ('fail', 7))
+        self.assertEqual(card['verdict'], 'READY')          # informative: fuzz.hard decides
+        self.assertEqual([r['gap'] for r in card['scorecard'] if r['gates'] == ['fuzz.s13_metric']], [9])
+        self.world.edit_json('thresholds.json', lambda d: d['fuzz_s13_metric'].update(trusted=False), port=True)
+        card = self.world.run()
+        g = self.gate(card, 'fuzz.s13_metric')
+        self.assertEqual((g['status'], g['value']), ('no-data', 9))
+        self.assertIn('not trusted: V1 refuted', g['note'])
+        r = [r for r in card['scorecard'] if r['gates'] == ['fuzz.s13_metric']][0]
+        self.assertEqual((r['value'], r['gap'], r['status']), (9, None, 'no-data'))
+        self.world.remove('_s13_metric.json')
+        self.assertEqual(self.gate(self.world.run(), 'fuzz.s13_metric')['status'], 'no-data')
+
+    def test_s13_metric_runs_metric_py_on_a_git_store(self):
+        """the real path: tools/difffuzz/metric.py of the checkout on a bare artifacts repository"""
+        import subprocess
+        mod = ready.load_module(PORT, os.path.join('tools', 'difffuzz', 'metric.py'), 'fnvnx_difffuzz_metric')
+        if mod is None:
+            self.skipTest('no tools/difffuzz/metric.py')
+        git = os.path.join(self.world.tmp, 'art')
+        run = lambda *a: subprocess.run(['git', '-C', git, *a], check=True, capture_output=True)
+        os.makedirs(git)
+        run('init', '-q')
+        run('checkout', '-q', '-b', 'fz1')
+        writef(os.path.join(git, C + '-fuzz.md'), '# fuzz %s shard 1/1\n- in this shard 10: no native object 2, '
+               'control flow not modelled (x) 1, fuzzable 7\n' % C)
+        run('add', '.')
+        run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'r')
+        run('update-ref', 'refs/remotes/origin/reports/fz1', 'HEAD')
+        card = ready.Card(ready.GitStore(os.path.join(git, '.git')), ready.History(head=C, table={}),
+                          json.loads(self.world.read('thresholds.json', True)) | {'fuzz_shards': 1}, port=PORT)
+        card.s13_metric_gate(1)
+        g = card.gates[-1]
+        self.assertEqual((g['id'], g['value'], g['terms']['not_fuzzable']), ('fuzz.s13_metric', 1, 1), g['note'])
+
+    def test_try_farms_never_count(self):
+        """frames, frameprof and the frame budget of a try farm (unmerged wip heads) are not evidence (V1 R14)"""
+        self.world.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'][0].update({'pass': False}))
+        self.world.write('reports/try1of4/aaaaaaaaaaaa-frames.json', {'commit': 'aaaaaaaaaaaa', 'scenes': [
+            {'name': 'main_menu', 'pass': True}]}, published=self.world.latest() + 60)
+        self.world.write('reports/try2of4/aaaaaaaaaaaa-frameprof.json', [{'label': 'frame 1', 'instructions': 0}],
+                         published=self.world.latest() + 60)
+        card = self.world.run()
+        g = self.gate(card, 'frames.compare')
+        self.assertEqual((g['status'], g['sources'][0]['branch']), ('fail', 'reports/s16'))
+        self.assertEqual(self.gate(card, 'perf.frame.boost')['sources'][0]['branch'], 'reports/prof1')
 
     def test_peak_heap_from_milestones(self):
         self.world.edit_json('link/%s/meta.json' % C, lambda d: d.pop('boot_peak_heap_bytes'))
@@ -381,104 +533,119 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual((g['status'], g['value'], g['note']), ('fail', '1/2', 'first_cell'))
 
     # ---- performance: three levels, two clocks
+
     def test_frame_levels_per_clock(self):
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.frame.stock'), self.gate(card, 'perf.frame.boost')
-        # 21 M instructions at IPC 0.8: 25.7 ms at 1.02 GHz, 14.7 ms at 1.785 GHz
-        self.assertEqual(stock['levels'], dict(floor=True, target=False, stretch=False, level='below target'))
-        self.assertEqual(boost['levels'], dict(floor=True, target=True, stretch=True, level='stretch'))
-        self.assertEqual((stock['status'], stock['required']), ('fail', False))
-        self.assertEqual((boost['status'], boost['required']), ('pass', True))
-        self.assertIn('fail, informative', card['md'])
-        self.assertNotIn('perf.frame.stock', card['blockers'])
+        # 11 M instructions at IPC 0.8: 13.5 ms at 1.02 GHz, 7.7 ms at 1.785 GHz; J-0150: 60 fps at the stock clock
+        self.assertEqual(stock['levels'], dict(floor=True, info=True, target=True, level='target'))
+        self.assertEqual(boost['levels'], dict(floor=True, info=True, target=True, level='target'))
+        self.assertEqual((stock['status'], stock['required']), ('pass', True))
+        self.assertEqual((boost['status'], boost['required']), ('pass', False))
+        self.assertEqual(card['verdict'], 'READY')
+        # 15 M: 18.4 ms at 1.02 GHz misses 60 fps there (counts), 10.5 ms at 1.785 GHz (informative)
+        self.world.write('reports/prof1/%s-frameprof.json' % C, [dict(label='frame 1', instructions=15000000)])
+        card = self.world.run()
+        stock, boost = self.gate(card, 'perf.frame.stock'), self.gate(card, 'perf.frame.boost')
+        self.assertEqual((stock['status'], stock['levels']['level']), ('fail', 'below target'))
+        self.assertEqual(boost['status'], 'pass')
+        self.assertIn('perf.frame.stock', card['blockers'])
+        self.assertNotIn('perf.frame.boost', card['blockers'])
 
     def test_frame_below_floor(self):
         self.world.write('reports/prof1/%s-frameprof.json' % C,
                          [dict(label='frame 1', instructions=20000000), dict(label='frame 2', instructions=60000000)])
         card = self.world.run()
-        boost = self.gate(card, 'perf.frame.boost')
-        self.assertEqual(boost['levels']['level'], 'fail')             # 42 ms worst at 1.785 GHz
-        self.assertEqual(boost['status'], 'fail')
-        self.assertIn('perf.frame.boost', card['blockers'])
+        stock = self.gate(card, 'perf.frame.stock')
+        self.assertEqual(stock['levels']['level'], 'fail')             # 73.5 ms worst at 1.02 GHz
+        self.assertEqual(stock['status'], 'fail')
+        self.assertIn('perf.frame.stock', card['blockers'])
         self.assertEqual(self.gate(card, 'perf.boot')['status'], 'no-data')
 
-    def test_stretch_on_median_even_if_unstable(self):
-        # worst frame 25.2 ms (below the 45 fps target), median 11.2 ms (60 fps reached)
-        frames = [dict(label='frame %d' % i, instructions=16000000) for i in range(9)]
-        frames.append(dict(label='frame 9', instructions=36000000))
+    def test_worst_frame_decides_not_the_median(self):
+        # J-0150: 60 fps on the worst frame; nine frames at 9.8 ms and one at 19.6 ms (1.02 GHz) miss it
+        frames = [dict(label='frame %d' % i, instructions=8000000) for i in range(9)]
+        frames.append(dict(label='frame 9', instructions=16000000))
         self.world.write('reports/prof1/%s-frameprof.json' % C, frames)
-        lv = self.gate(self.world.run(), 'perf.frame.boost')['levels']
-        self.assertEqual(lv, dict(floor=True, target=False, stretch=True, level='below target'))
+        g = self.gate(self.world.run(), 'perf.frame.stock')
+        self.assertEqual(g['levels'], dict(floor=True, info=True, target=False, level='below target'))
+        self.assertEqual(g['status'], 'fail')
 
     def test_render_share_per_clock(self):
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.render.stock'), self.gate(card, 'perf.render.boost')
-        # renderer share of the frame (max_budget_fraction 0.2): stock 18 / 27 / 36 %, boost 10 / 15.5 / 19 %
-        self.assertEqual(stock['levels'], dict(floor=True, target=False, stretch=False, level='below target'))
-        self.assertEqual(boost['levels'], dict(floor=True, target=True, stretch=True, level='stretch'))
-        self.assertTrue(boost['value'].startswith('16 % of the 45 fps frame (3.4 ms)'), boost['value'])
-        self.assertEqual((stock['required'], boost['required']), (False, True))
+        # renderer share of the frame (max_budget_fraction 0.2): stock 6 / 9 / 12 %, boost 3.5 / 5 / 7 %
+        self.assertEqual(stock['levels'], dict(floor=True, info=True, target=True, level='target'))
+        self.assertEqual(boost['levels'], dict(floor=True, info=True, target=True, level='target'))
+        self.assertTrue(stock['value'].startswith('12 % of the 60 fps frame (2.0 ms)'), stock['value'])
+        self.assertEqual((stock['required'], boost['required']), (True, False))
 
     def test_render_uses_budget_fraction_not_targets(self):
         # `targets` says pass (the renderer alone against the whole frame); the share of the frame decides
-        self.world.edit_json('_render/report.json', lambda d: d['summary']['targets_budget_fraction']['45'].update(
-            {'1.785': 0.273}))
+        self.world.edit_json('_render/report.json', lambda d: d['summary']['targets_budget_fraction']['60'].update(
+            {'1.02': 0.273}))
         card = self.world.run()
-        g = self.gate(card, 'perf.render.boost')
+        g = self.gate(card, 'perf.render.stock')
         self.assertEqual((g['status'], g['levels']['level']), ('fail', 'below target'))
-        self.assertIn('perf.render.boost', card['blockers'])
+        self.assertIn('perf.render.stock', card['blockers'])
 
     def test_render_fractions_from_frame_ms(self):
         # no targets_budget_fraction: the gate (hi) values, measured at the lowest clock of assumptions.clock_ghz
         self.world.edit_json('_render/report.json', lambda d: d['summary'].pop('targets_budget_fraction'))
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.render.stock'), self.gate(card, 'perf.render.boost')
-        self.assertEqual(stock['levels']['level'], 'below target')      # 6.0 ms: 18 % of 33.3, 27 % of 22.2
-        self.assertEqual(boost['levels']['level'], 'target')            # 3.4 ms: 15 % of 22.2, 21 % of 16.7
-        self.assertIn('frame_ms gate values', boost['note'])
+        self.assertEqual(stock['levels']['level'], 'target')            # 2.0 ms: 12 % of 16.7
+        self.assertEqual(boost['levels']['level'], 'target')            # 1.1 ms at 1.785 GHz
+        self.assertIn('frame_ms gate values', stock['note'])
+        self.world.edit_json('_render/report.json', lambda d: d['summary']['frame_ms'].update(main=4.0))
+        # 4.0 ms: 24 % of 16.7 (no), 18 % of 22.2, 12 % of 33.3
+        self.assertEqual(self.gate(self.world.run(), 'perf.render.stock')['levels']['level'], 'below target')
         self.world.edit_json('_render/report.json', lambda d: d['summary']['frame_ms'].update(main=40.0, render=20.0))
-        self.assertEqual(self.gate(self.world.run(), 'perf.render.boost')['levels']['level'], 'fail')
+        self.assertEqual(self.gate(self.world.run(), 'perf.render.stock')['levels']['level'], 'fail')
 
     def test_gpu_model_is_informative(self):
         card = self.world.run()
         dock, hh = self.gate(card, 'perf.gpu.docked_720p'), self.gate(card, 'perf.gpu.handheld_720p')
-        self.assertEqual((dock['value'], dock['levels']['level']), ('7.4 - 12.4 ms', 'stretch'))
-        self.assertEqual((hh['status'], hh['levels']['level'], hh['required']), ('fail', 'below target', False))
-        self.assertEqual(self.gate(card, 'perf.gpu.handheld_540p')['levels']['level'], 'stretch')
+        self.assertEqual((dock['value'], dock['levels']['level']), ('7.4 - 12.4 ms', 'target'))
+        # 24.8 ms: above 30 fps, below the informational 45 fps, far from 60
+        self.assertEqual((hh['status'], hh['levels']['level'], hh['required']), ('fail', 'below info', False))
+        self.assertEqual(self.gate(card, 'perf.gpu.handheld_540p')['levels']['level'], 'target')
         self.assertEqual(card['verdict'], 'READY')
         self.assertIn('model, not measured', hh['note'])
-
     def test_render_top_level_block_and_missing_file(self):
         s = json.loads(self.world.read('_render/report.json'))['summary']
         self.world.write('_render/report.json', s)
-        self.assertEqual(self.gate(self.world.run(), 'perf.render.boost')['status'], 'pass')
+        self.assertEqual(self.gate(self.world.run(), 'perf.render.stock')['status'], 'pass')
         self.world.remove('_render/report.json')
         card = self.world.run()
-        g = self.gate(card, 'perf.render.boost')
+        g = self.gate(card, 'perf.render.stock')
         self.assertEqual(g['status'], 'no-data')
         self.assertIn('no render perf report', g['note'])
-        self.assertIn('perf.render.boost', card['missing'])
+        self.assertIn('perf.render.stock', card['missing'])
 
     def test_frame_budget_per_clock(self):
         card = self.world.run()
         stock, boost = self.gate(card, 'perf.budget.stock'), self.gate(card, 'perf.budget.boost')
-        self.assertEqual((boost['status'], boost['level']), ('pass', 'stretch_60'))
-        self.assertEqual((stock['status'], stock['required']), ('no-data', False))   # uncertain at 1020 MHz
-        self.assertIn('needs a measured frame', stock['note'])
-        self.assertIn('plan45 stretch_60', boost['note'])
+        self.assertEqual((stock['status'], stock['level'], stock['required']), ('pass', 'stretch_60', True))
+        self.assertEqual((boost['status'], boost['required']), ('pass', False))
+        self.assertIn('plan45 stretch_60', stock['note'])
+        self.world.edit_json('reports/prof1/%s-frame-budget.json' % C, lambda d: d['scenarios'][0]['results'][
+            '1020']['verdicts'].update(stretch_60='uncertain'))
+        g = self.gate(self.world.run(), 'perf.budget.stock')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('needs a measured frame', g['note'])
 
     def test_frame_budget_fail_and_model_only(self):
         rel = 'reports/prof1/%s-frame-budget.json' % C
-        self.world.edit_json(rel, lambda d: d['scenarios'][0]['results']['1785']['verdicts'].update(pass_45='fail'))
+        self.world.edit_json(rel, lambda d: d['scenarios'][0]['results']['1020']['verdicts'].update(stretch_60='fail'))
         card = self.world.run()
-        self.assertEqual(self.gate(card, 'perf.budget.boost')['status'], 'fail')
+        self.assertEqual(self.gate(card, 'perf.budget.stock')['status'], 'fail')
         self.assertEqual(card['verdict'], 'NOT READY')
-        self.world.edit_json(rel, lambda d: (d['scenarios'][0]['results']['1785']['verdicts'].update(pass_45='pass'),
+        self.world.edit_json(rel, lambda d: (d['scenarios'][0]['results']['1020']['verdicts'].update(stretch_60='pass'),
                                              d['inputs'].update(frameprof=False)))
-        g = self.gate(self.world.run(), 'perf.budget.boost')
+        g = self.gate(self.world.run(), 'perf.budget.stock')
         self.assertEqual(g['status'], 'no-data')
         self.assertIn('model only', g['note'])
-
     def test_frame_budget_from_the_checkout_model(self):
         self.world.remove('reports/prof1/%s-frame-budget.json' % C)
         self.assertEqual(self.gate(self.world.run(), 'perf.budget.boost')['note'], 'no fnvnx-frame-budget/1 file')
@@ -519,6 +686,154 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual(self.gate(self.world.run(), 'package.check')['value'], 'exit 2')
         self.world.edit_json('link/%s/meta.json' % C, lambda d: d.pop('check_package_rc'))
         self.assertEqual(self.gate(self.world.run(), 'package.check')['status'], 'no-data')
+
+    # ---- evidence that does not show what the gate claims (V1's R1-R12, tests/v1/test_ready_adversarial.py)
+    def test_shard_beyond_the_count_is_no_shard(self):
+        self.world.sub('reports/farm3/%s-compile.md' % C, 'shard 2/2', 'shard 3/2')
+        g = self.gate(self.world.run(), 'compile.objects')
+        self.assertEqual((g['status'], g['note']), ('no-data', 'compile shards with a report: 1 of 2'))
+        self.world.sub('reports/eq1/%s-equiv.md' % C, 'shard 1/1', 'shard 0/1')
+        self.assertEqual(self.gate(self.world.run(), 'equiv.code')['status'], 'no-data')
+
+    def test_scene_pass_must_be_true(self):
+        self.world.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'][0].update({'pass': 'false'}))
+        self.assertEqual(self.gate(self.world.run(), 'frames.compare')['status'], 'fail')
+        self.world.edit_json('reports/s16/%s-frames.json' % C, lambda d: d['scenes'].append('main_menu'))
+        g = self.gate(self.world.run(), 'frames.compare')                # a malformed entry: no crash, no pass
+        self.assertEqual((g['status'], g['value']), ('fail', '0/2'))
+
+    def s16_gate(self, statuses, kind='port', top=None, commit=C):
+        sc = [dict(id='scene%d' % i, status=st, frames=[]) for i, st in enumerate(statuses)]
+        top = top or ('pass' if all(s == 'pass' for s in statuses) else 'fail')
+        self.world.write('reports/s16/%s-frames.json' % C, dict(
+            format='fnvnx-gate/1', gate='S16-compare', status=top, candidate=dict(kind=kind, commit=commit),
+            summary=dict(scenes=len(sc)), scenes=sc))
+
+    def test_s16_gate_file(self):
+        self.s16_gate(['pass', 'pass'])
+        g = self.gate(self.world.run(), 'frames.compare')
+        self.assertEqual((g['status'], g['value'], g['stale']), ('pass', '2/2', False))
+        self.s16_gate(['pass', 'unstable'], top='incomplete')
+        g = self.gate(self.world.run(), 'frames.compare')
+        self.assertEqual((g['status'], g['value']), ('fail', '1/2'))
+        self.assertIn('scene1 unstable', g['note'])
+        self.s16_gate(['pass'], top='fail')                              # scenes and the gate's status disagree
+        self.assertEqual(self.gate(self.world.run(), 'frames.compare')['status'], 'fail')
+        self.s16_gate(['pass'], kind='nine-replay')                      # not the port's own frames
+        g = self.gate(self.world.run(), 'frames.compare')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('not the port', g['note'])
+        self.s16_gate(['pass'], commit=None)                             # no candidate commit: stale
+        self.assertTrue(self.gate(self.world.run(), 'frames.compare')['stale'])
+
+    def test_broken_frameprof_is_no_measurement(self):
+        self.world.write('reports/prof1/%s-frameprof.json' % C, [
+            dict(label='boot until WinMain', instructions=800000000), dict(label='frame 1', instructions=0),
+            dict(label='frame 2', instructions='many'), 'junk'])
+        card = self.world.run()
+        for gid in ('perf.frame.stock', 'perf.frame.boost', 'perf.boot'):
+            g = self.gate(card, gid)
+            self.assertEqual(g['status'], 'no-data', gid)
+            self.assertIn('broken frameprof run', g['note'])
+
+    def test_render_report_must_be_plausible(self):
+        self.world.edit_json('_render/report.json', lambda d: d['summary'].update(frame_ms=dict(main=-1.0, render=-1.0)))
+        card = self.world.run()
+        g = self.gate(card, 'perf.render.boost')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('frame_ms.main.value -1.0', g['note'])
+        self.world.edit_json('_render/report.json', lambda d: d['summary'].update(
+            frame_ms=dict(main=dict(lo=7.0, hi=6.0, gate=6.0), render=0)))
+        g = self.gate(self.world.run(), 'perf.render.stock')
+        self.assertIn('frame_ms.main lo 7.0 > hi 6.0', g['note'])
+        self.assertIn('frame_ms.render.value 0', g['note'])
+        self.world.edit_json('_render/report.json', lambda d: (d['summary'].pop('frame_ms'),
+                                                                d['summary']['targets_budget_fraction']['45'].update(
+                                                                    {'1.785': -0.1})))
+        self.assertEqual(self.gate(self.world.run(), 'perf.render.boost')['status'], 'no-data')
+
+    def test_gpu_time_must_be_plausible(self):
+        self.world.edit_json('_render/report.json', lambda d: d['gpu']['summary_ms']['mix_hi']['docked_720p'].update(
+            {'eff_1.0': -3.0}))
+        g = self.gate(self.world.run(), 'perf.gpu.docked_720p')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('not a plausible time', g['note'])
+
+    def test_checksum_file_must_name_the_exe(self):
+        self.world.write('gamedata/exe/FalloutNV.exe.sha256', 'ab' * 32 + '  README\n')
+        g = self.gate(self.world.run(), 'boot.real_exe')
+        self.assertEqual(g['status'], 'no-data')                        # the image hash is not checked: no label pass
+        self.assertIn('no line for FalloutNV.exe', g['note'])
+        self.world.write('gamedata/exe/FalloutNV.exe.sha256', 'cd' * 32 + '  README\n' + 'AB' * 32 + ' *FalloutNV.exe\n')
+        self.assertEqual(self.gate(self.world.run(), 'boot.real_exe')['status'], 'pass')
+
+    def test_checksum_file_must_be_the_pinned_exe(self):
+        self.world.edit_json('thresholds.json', lambda d: d.update(player_exe_sha256='ef' * 32), port=True)
+        g = self.gate(self.world.run(), 'boot.real_exe')
+        self.assertEqual(g['status'], 'no-data')
+        self.assertIn('holds another exe', g['note'])
+
+    def test_failed_boot_stage_counts_nothing_of_the_link(self):
+        self.world.sub('reports/full1/%s-full.md' % C, '| boot | ok |', '| boot | fail |')
+        card = self.world.run()
+        for gid in ('boot.real_exe', 'boot.winmain', 'boot.first_cell'):
+            g = self.gate(card, gid)
+            self.assertEqual(g['status'], 'fail', gid)
+            self.assertIn('boot stage of this full build failed', g['note'])
+        self.world.sub('reports/full1/%s-full.md' % C, '| boot | fail |', '| boot | disabled |')
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'boot.real_exe')['status'], 'no-data')
+        self.assertIn('did not run the boot (stage disabled)', self.gate(card, 'boot.main_menu')['note'])
+
+    def test_milestones_json_decides_over_summary_and_meta(self):
+        self.world.edit_json('link/%s/boot/milestones.json' % C, lambda d: d.update(first_cell=0, first_frame=None))
+        self.world.edit_json('link/%s/meta.json' % C, lambda d: d.update(boot_first_frame=1))
+        self.world.write('link/%s/boot/summary.txt' % C, 'fnvnx milestone: first_cell\nfnvnx milestone: first_frame\n')
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'boot.first_cell')['status'], 'fail')
+        self.assertEqual(self.gate(card, 'boot.first_frame')['status'], 'no-data')       # null: not measured
+
+    def test_malformed_link_json_does_not_crash(self):
+        self.world.write('link/%s/meta.json' % C, [1, 2])
+        self.world.write('link/%s/boot/milestones.json' % C, 'null')
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'boot.real_exe')['status'], 'no-data')
+
+    # ---- fnvnx-fuzz-summary/1 (tools/farm/fuzz_job.sh)
+    def fuzz_summary(self, k, **kw):
+        rel = 'reports/fz%d/%s-fuzz.md' % (k, C)
+        s = dict(format='fnvnx-fuzz-summary/1', commit=C, shard=k, shards=2, status='complete',
+                 functions=dict(with_native_object=10, verdicts=10, not_modelled=0))
+        for key, v in kw.items():
+            if isinstance(v, dict) and isinstance(s.get(key), dict):
+                s[key].update(v)
+            else:
+                s[key] = v
+        self.world.write(rel, self.world.read(rel) + '\n```json fnvnx-fuzz-summary\n%s\n```\n' % json.dumps(s))
+
+    def test_fuzz_summary_counts(self):
+        self.fuzz_summary(1)
+        self.fuzz_summary(2, status='partial', functions=dict(with_native_object=20, verdicts=16))
+        g = self.gate(self.world.run(), 'fuzz.coverage')
+        self.assertEqual((g['status'], g['value']), ('fail', '86.7 % (26/30)'))
+        self.assertIn('fnvnx-fuzz-summary/1 from 2 shards, partial (pending functions): 2', g['note'])
+
+    def test_fuzz_summary_of_another_shard_or_broken_harness(self):
+        self.fuzz_summary(2, shard=1)
+        card = self.world.run()
+        self.assertEqual(self.gate(card, 'fuzz.coverage')['status'], 'fail')
+        self.assertIn('missing: 2', self.gate(card, 'fuzz.coverage')['note'])
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, '"shard": 1', '"shard": 2')
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, '"complete"', '"harness-broken"')
+        self.assertIn('missing: 2', self.gate(self.world.run(), 'fuzz.coverage')['note'])
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, '"harness-broken"', '"complete"')
+        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'shard 2/2', 'shard 2/2 - HARNESS BROKEN')
+        self.assertIn('missing: 2', self.gate(self.world.run(), 'fuzz.coverage')['note'])
+
+    def test_fuzz_more_verdicts_than_functions(self):
+        self.fuzz_summary(1, functions=dict(with_native_object=5, verdicts=10))
+        self.fuzz_summary(2, functions=dict(with_native_object=5, verdicts=10))
+        self.assertEqual(self.gate(self.world.run(), 'fuzz.coverage')['status'], 'fail')
 
     # ---- output helpers
     def test_blockers_one_per_group(self):

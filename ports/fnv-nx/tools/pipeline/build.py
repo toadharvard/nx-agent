@@ -71,7 +71,8 @@ CONFIG = [
     ('PORT_COMMIT', '', 'commit (40 hex digits) of ports/fnv-nx when it is a copy without git metadata (a git '
                         'archive snapshot); in a checkout it must equal HEAD'),
     ('CENSUS', '1', '0: skip the -fsyntax-only census'),
-    ('OVERRIDE', '', 'fnvlink resolve --override table (native replacements)'),
+    ('OVERRIDE', 'auto', 'fnvlink resolve --override table (native replacements): auto = the port\'s own, built by '
+                         'tools/link/overrides/build.sh in the link stage; none = off; or a table'),
     ('EXTERN_TEXT', 'auto', 'fnvlink resolve --extern-text list: auto = made from the tree\'s units.json by '
                             'tools/pipeline/extern_text.py (S4\'s addr_ids.txt), none = off, or a file'),
     ('MSVC_OBJS', '', 'fnvlink resolve --msvc-objs: pristine MSVC 2008 objects (S11) for S2b\'s vtable slots'),
@@ -1554,6 +1555,12 @@ def msvc_objs_id(b, key='MSVC_OBJS'):
     return sha(d, listing_id([os.path.join(d, n) for n in os.listdir(d)]) if os.path.isdir(d) else None)
 
 
+def link_exe(b):
+    """The player's exe fnvlink bodies reads (S2d exe-addr): FNVNX_EXE, else a BOOT_IMAGE file, else ''."""
+    exe = os.environ.get('FNVNX_EXE') or (b.cfg['BOOT_IMAGE'] if os.path.isfile(b.cfg['BOOT_IMAGE']) else '')
+    return os.path.abspath(exe) if exe and os.path.isfile(exe) else ''
+
+
 def objects_map(objects_tsv):
     """compile.sh / fetch_objs.sh objects.tsv -> {unit: object path or None when it failed}."""
     m = {}
@@ -1597,7 +1604,7 @@ class Link(Stage):
     def fingerprint(self, b):
         return ['link-v3', link_tool_inputs(b), up_id(b, 'compile'), up_id(b, 'prepare'),
                 file_hash(b.cfg['OVERRIDE']), extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
-                game_cxx_id(b)]
+                game_cxx_id(b), 'exe:%s' % file_hash(link_exe(b))]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'link', 'out', 'aliases.ld'))
@@ -1622,7 +1629,16 @@ class Link(Stage):
         else:
             r.note('EXTERN_TEXT=none: the referenced .text addresses without a definition get no E entries (the '
                    'hand flow passes S4\'s addr_ids.txt)')
-        for opt, key in (('--override', 'OVERRIDE'), ('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
+        if b.cfg['OVERRIDE'] == 'auto':
+            # the port's native replacements (tools/link/overrides: the variadic logger 0x00703c00, ...); their
+            # sources are in link_tool_inputs (tools/link)
+            ovd = os.path.join(d, 'overrides')
+            b.sh(['bash', os.path.join(ROOT, 'tools', 'link', 'overrides', 'build.sh'), ovd], r['log'],
+                 env=b.env(), check=True)
+            args += ['--override', os.path.join(ovd, 'override.tsv')]
+        elif b.cfg['OVERRIDE'] not in ('', 'none'):
+            args += ['--override', os.path.abspath(b.cfg['OVERRIDE'])]
+        for opt, key in (('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
                          ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:
                 args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
@@ -1679,10 +1695,10 @@ class Link(Stage):
             t = time.time()
             pr = b.cfg['MSVC_OBJS'] or b.cfg['MSVC_CODE']
             # the player's exe (FNVNX_EXE, else a BOOT_IMAGE file): addresses of the calls the pristine objects make
-            exe = os.environ.get('FNVNX_EXE') or (b.cfg['BOOT_IMAGE'] if os.path.isfile(b.cfg['BOOT_IMAGE']) else '')
+            exe = link_exe(b)
             brc = b.sh([PY, '-I', fl, 'bodies', out, tree, '--jobs', str(b.jobs)]
                        + (['--msvc-objs', os.path.abspath(pr)] if pr and pr != 'none' else [])
-                       + (['--exe', os.path.abspath(exe)] if exe else []), log, env=env)
+                       + (['--exe', exe] if exe else []), log, env=env)
             r.metric('link_bodies_s', round(time.time() - t, 1))
             bst = os.path.join(out, 'bodies', 'stats.txt')
             if brc:
@@ -2644,7 +2660,7 @@ def execute(b, targets):
 
 def parse_args(argv):
     cfg = {k: os.environ.get(k, d) or d for k, d, _ in CONFIG}
-    for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'OVERRIDE', 'NINE_SRC', 'FORCE'):
+    for k in ('EXT', 'FNVNX_TC', 'DEVKITPRO', 'NINE_SRC', 'FORCE'):
         cfg[k] = os.environ.get(k, '')
     targets = []
     for a in argv:

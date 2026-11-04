@@ -35,7 +35,7 @@ FPR_CLASSES = ('F32', 'F64', 'F80')
 
 def classify(t):
     """Class of one MSVC type: I8/I16/I32/I64/P/F32/F64/F80/VOID/VARARGS/MP or AGG:<name> / ?:<text>."""
-    t = ' '.join(t.replace('__ptr64', '').split())
+    t = ' '.join(re.sub(r'\b(?:__ptr64|__ptr32|__restrict|__unaligned)\b', ' ', t).split())
     if t.endswith(('*', '&')) or re.search(r'\*\s*(?:const|volatile)?\s*$', t):
         return 'P'
     if re.search(r'\(\s*(?:__\w+\s+)?[\w:<>, ]*::\*\s*\)\s*\(', t):
@@ -229,13 +229,28 @@ def compare(ref, dfn, ecx_unused=False):
     if shape:
         v.classes.append(shape)
     rx, dx = x86_locations(ref), x86_locations(dfn)
-    if any(c == 'VARARGS' for _, c, _ in rx + dx):
-        if [c for _, c, _ in rx] != [c for _, c, _ in dx]:
-            v.kind = 'manual'; v.classes.append('varargs')
-        return v
+    rvar = next((loc for _, c, loc in rx if c == 'VARARGS'), None)   # x86 offset of the anonymous arguments
+    dvar = next((loc for _, c, loc in dx if c == 'VARARGS'), None)
+    if rvar is not None or dvar is not None:
+        why, anon = varargs_check(ref, dfn, rx, dx, rvar, dvar)
+        if why is not None:
+            v.kind = 'manual'; v.classes.append('varargs'); v.notes.append(why)
+            return v
+        v.classes.append('varargs-tail')
+        rx = [x for x in rx if x[1] != 'VARARGS']
+        dx = [x for x in dx if x[1] != 'VARARGS' and x[0] not in anon]
     by_loc = {loc: (lab, cls) for lab, cls, loc in rx}
     ra = {lab: (cls, loc) for lab, cls, loc in a64_locations(ref)}
     da = {lab: (cls, loc) for lab, cls, loc in a64_locations(dfn)}
+    if dvar is not None:   # reference parameters the variadic definition reads with va_arg: extend narrow ones
+        for lab, cls, loc in rx:
+            if _at_or_after(loc, dvar) and cls in ('I8', 'I16') and ra[lab][1][0] == 'x':
+                raw = ref.raw_params[int(lab[1:])] if lab.startswith('p') and ref.raw_params else ''
+                v.moves.append((ra[lab][1], ra[lab][1], 'I32', ('s' if narrow_signed(raw) else 'u') +
+                                ('xtb' if cls == 'I8' else 'xth')))
+                v.notes.append('%s narrower than the int va_arg reads' % lab)
+                if 'narrow-extend' not in v.classes:
+                    v.classes.append('narrow-extend')
     x86_ok, sret_explicit = True, False
     for lab, cls, loc in dx:
         src = by_loc.get(loc)
@@ -344,6 +359,126 @@ def compare(ref, dfn, ecx_unused=False):
         if v.kind == 'manual':
             v.classes.append('stack-or-aggregate-move')
     return v
+
+
+def _words(loc):
+    """Known byte offset of an x86 stack location, None for registers or offsets behind an aggregate."""
+    if isinstance(loc, tuple) and loc[0] == 'stk' and not loc[1][1]:
+        return loc[1][0]
+    return None
+
+
+def _at_or_after(loc, var):
+    w, vw = _words(loc), _words(var)
+    return w is not None and vw is not None and w >= vw
+
+
+def _a64_used(locs):
+    """(general registers, vector registers, stack bytes) the parameters in locs take, None when one is an aggregate
+    of unknown size."""
+    g = vr = st = 0
+    for _, cls, loc in locs:
+        k = loc[0]
+        if k == 'x':
+            g = max(g, loc[1] + 1)
+        elif k == 'x2':
+            g = max(g, loc[1] + 2)
+        elif k == 'v':
+            vr = max(vr, loc[1] + 1)
+        elif k == 'stk':
+            st = max(st, loc[1] + (16 if cls == 'F80' else 8))
+        elif k == 'varargs':
+            break
+        else:
+            return None
+    return g, vr, st
+
+
+VA_TAIL = ('I8', 'I16', 'I32', 'I64', 'P', 'F64')
+
+
+def varargs_check(ref, dfn, rx, dx, rvar, dvar):
+    """None when a pair with a variadic side passes the same bytes on both machines, else why not (S2c-abi).
+
+    On AArch64 Linux (AAPCS64, unlike Apple's variant) anonymous arguments take the next registers and stack slots
+    exactly as named ones do, and va_arg walks them in that order; on x86 they follow the named ones on the stack.
+    * variadic reference, fixed definition: the definition may only read what the reference names (the debug loggers
+      the retail exe compiled to `return 0`, 0x005b5e40: `int Warning(const char *, ...)` -> `int f(void)`). A
+      definition parameter in the reference's anonymous part has a type only the call site knows: manual (a native
+      variadic replacement, tools/link/overrides);
+    * fixed reference, variadic definition: the reference's parameters behind the definition's named ones are what
+      va_arg reads. They must be integers, pointers or doubles (a float is promoted by a variadic caller, a fixed
+      one passes 4 bytes; aggregates are not followed) and start at the same x86 offset and AArch64 register counts;
+    * both variadic: the named parts are compared like fixed ones, the anonymous parts start at the same x86 offset
+      and the same AArch64 register counts. Named parameters of the reference beyond the definition's are checked
+      like a fixed reference's tail.
+    * definition parameters in the reference's anonymous part: only when the reference names nothing (`int f(...)`,
+      the decomp's unprototyped declaration) or the definition is variadic too (0x00406d00 `(char *, ...)` ->
+      `(char *, int, const char *, ...)`), and only 32-bit integers and pointers: x86 worked, so the call site pushed
+      a 4-byte word there, which is never a float (promoted to double); the call site's integer or pointer then
+      takes the AArch64 register the definition reads. A fixed definition behind named reference parameters is a
+      decompiled stack walk (0x00703c00): manual.
+    Who pops: a variadic function is cdecl; a callee-pop other side with stack arguments moved esp on x86.
+    -> (why not or None, labels of definition parameters the anonymous arguments supply)"""
+    for s, xs in ((ref, rx), (dfn, dx)):
+        if (s.cc or 'cdecl') in CALLEE_POP and any(isinstance(l, tuple) for _, c, l in xs if c != 'VARARGS'):
+            other = dfn if s is ref else ref
+            if (other.cc or 'cdecl') not in CALLEE_POP:
+                return 'one side pops its stack arguments (%s), the variadic side does not' % s.cc, ()
+    rnamed = [x for x in rx if x[1] != 'VARARGS']
+    dnamed = [x for x in dx if x[1] != 'VARARGS']
+    rlocs = {loc for _, _, loc in rnamed}
+    anon = []
+    if rvar is not None:
+        for lab, cls, loc in dnamed:
+            if lab != 'sret' and loc not in rlocs and _at_or_after(loc, rvar):
+                if not ((not [x for x in params_of(ref) if x[1] != 'VARARGS'] or dvar is not None)
+                        and cls in ('I8', 'I16', 'I32', 'P')):
+                    return '%s of the definition is an anonymous argument of the reference' % lab, ()
+                anon.append(lab)
+            elif lab != 'sret' and loc not in rlocs and _words(loc) is None and isinstance(loc, tuple):
+                return '%s of the definition: offset behind an aggregate' % lab, ()
+        if anon:
+            first = min(_words(loc) for lab, _, loc in dnamed if lab in anon)
+            if first != _words(rvar):
+                return 'the definition\'s parameters do not start where the anonymous arguments do', ()
+            ur = _a64_used([x for x in a64_locations(ref) if x[1] != 'VARARGS'])
+            ud = _a64_used([x for x in a64_locations(dfn) if x[0] not in anon and x[0] != 'sret'
+                            and _before_anon(x[0], dnamed, anon)])
+            if ur is None or ud is None or ur != ud:
+                return 'the anonymous arguments start in other AArch64 registers', ()
+    if dvar is not None:
+        if _words(dvar) is None:
+            return 'the definition\'s anonymous arguments follow an aggregate of unknown size', ()
+        tail = [x for x in rnamed if isinstance(x[2], tuple) and _at_or_after(x[2], dvar)]
+        if tail and _words(tail[0][2]) != _words(dvar):
+            return 'the reference\'s arguments do not start where the definition\'s anonymous ones do', ()
+        for lab, cls, loc in tail:
+            if cls not in VA_TAIL:
+                return '%s (%s) read with va_arg: not an integer, pointer or double' % (lab, cls), ()
+        if rvar is not None and _words(rvar) is not None and not tail and not anon and _words(rvar) != _words(dvar):
+            return 'the anonymous arguments start at other offsets', ()
+        # AArch64: where va_arg starts (the definition's named parameters) must be where the reference's tail starts
+        tl = {lab for lab, _, _ in tail}
+        ra = [x for x in a64_locations(ref) if x[0] not in tl and x[1] != 'VARARGS']
+        da = [x for x in a64_locations(dfn) if x[1] != 'VARARGS']
+        ur, ud = _a64_used(ra), _a64_used(da)
+        if ur is not None and anon:   # the anonymous words the definition names: one register or slot each
+            g, vr, st = ur
+            for _ in anon:
+                if g < 8:
+                    g += 1
+                else:
+                    st += 8
+            ur = (g, vr, st)
+        if ur is None or ud is None or ur != ud:
+            return 'the anonymous arguments start in other AArch64 registers', ()
+    return None, tuple(anon)
+
+
+def _before_anon(lab, dnamed, anon):
+    order = [x[0] for x in dnamed]
+    return lab in order and all(order.index(lab) < order.index(a) for a in anon)
 
 
 def describe_shape(ref, dfn):

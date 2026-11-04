@@ -30,5 +30,9 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
   There is no Claude-Session line, and no session URL or session id in any commit or file.
 - Push to your own branch after every finished item. Open no pull requests. Do not edit JOURNAL.md: write inbox
   notes (docs/MACHINES.md).
+- Every check runs in the background, never blocking work. This covers tests, censuses, builds, boots and fuzz
+  replays: start them with run_in_background, keep working, and read the result when it lands. Merges do not wait
+  for full test runs either. Farms and V1 verify after the merge, and a commit that a report shows broke something is
+  reverted.
 - The owner wants steady, unattended progress. Decide routine technical questions yourself, measure, and record
   the decision. Do not wait for permission on trivial edits or routine steps.
