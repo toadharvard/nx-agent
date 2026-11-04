@@ -561,6 +561,53 @@ Checks: of the slot symbols resolve bound strictly by name, 1,587 have the same 
 is known (74) it pops the declared bytes in 74; push counting matches the declaration at 114 of 184 (nested calls'
 arguments pushed earlier), and there all known targets (10) match the pushes.
 
+## Vftables from the player's exe (`exevft.py`, `resolve --exe`, S2c-vt)
+
+`resolve --exe <FalloutNV.exe|none>` (default `FNVNX_EXE`, then `PLAYER_EXE`; build.py passes `link_exe`: FNVNX_EXE,
+else a BOOT_IMAGE file, else `none`, and the exe's sha256 is part of the Link fingerprint; link_job.sh takes the
+owner's copy through `job_gamedata`). The exe is agent-only (D3): it is read, never copied; its scan is cached in
+`out/cache/exe_vftables.json`.
+
+**Scan.** Every MSVC vftable with RTTI follows a pointer to its complete object locator (COL: signature 0, the
+vfptr's offset in the complete object, the TypeDescriptor `.?AV<C>@@`, the class hierarchy). `exevft.scan` takes
+each (data word -> COL, next word in `.text`) pair as a vftable: class, COL offset, bases, slots (the `.text` words
+up to the next non-code word). On the GOG 1.4.0.525 exe: 3,269 vftables, 2,678 primary, in 0.8 s.
+
+**Pairing.** `exe_pair` gives each exe vftable its own class's native vtable (`_ZTV<C>` at the address point whose
+offset-to-top is minus the COL offset, the class named by llvm-undname of `??_7<td>6B@`). It replaces a pairing by
+decomp names or hand-stored vptrs that names another class, unless the own vtable is shorter than both (a unit's
+partial declaration), and adds V rows for vftables no unit names. `exe_vftables.tsv`: per exe vftable the class,
+its native vtable, the pairing before and the outcome. Classes with no native vtable are requested for synthesis
+(`vtable_requests.tsv`, why `exe-rtti`; hosts: units naming the address, then units naming a member).
+
+**Slot fill.** `exe_slot_fill`, after the pairing: a native vtable slot that calls a trap stub (`vslot-unresolved`,
+a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's
+vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the address map has one.
+* The native vtable (group, address point) stands for the exe vftables the address map pairs with it and those of
+  its own RTTI class at that offset.
+* GCC slot k is exe slot j = k up to the complete destructor D1; D0 shares D1's slot and every later slot is one
+  lower (`exevft.exe_slot_index`, "minus-one rule": MSVC has one deleting destructor). The pair is found by name
+  (`D1Ev`/`D0Ev`, their address-bound forms) or, in an abstract class, as two adjacent zero words.
+* One undefined symbol is renamed once per object: every vtable of the object naming it must agree on the address,
+  else the declaring class's vtable decides, else it stays a trap.
+* ABI (`slot_abi`): every argument the slot's declaration passes and the definition reads must arrive where the
+  definition reads it, in the same register file (abi.a64_locations; a free definition takes the object as its
+  first pointer parameter, a free definition without parameters reads nothing). A definition that reads more
+  arguments than the slot declares is bound and listed: callers reach a slot through their own class's
+  declaration, and the decomp's shells declare placeholders (`FUN_00aa7400`: `virtual void v2();` for
+  `ZeroOverheadHeap::Allocate(unsigned, unsigned)`, the boot's first trap). A destructor slot binds only to a
+  destructor variant at the address.
+* Outputs: `slot_fill.tsv` (object, symbol, address, target, how chosen, ABI verdict, the uses), `slot_gaps.tsv`
+  (trap slots left, per use, with the reason: no exe vftable, past the exe vftable's slots, not compiled, abi, kind
+  differs, vtables disagree). Trap stubs no object uses any more are dropped. Both files are published with the
+  link (`out/`).
+
+**Metric** (`vtmetric.py <link dir> <exe>`, read-only on a published link or a build's link stage): over the V rows,
+trap slots split by whether the address map has a native at the exe slot's address, primary vftables whose native
+vtable is shorter than the exe's (the destructor pair counted once), and mispairings (the native class is another
+RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
+`test_slotfill.py` (end to end: resolve, apply, trial link, vtmetric).
+
 ## Platform, imports, thread-locals and hand-written vptrs
 
 * **CRT and library code** (S4b, RUNTIME.md): a reference to a `.text` address no unit defines that S4's

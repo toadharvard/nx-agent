@@ -1048,8 +1048,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                         e[1].append(h_)
     # ---- S2c: the player's exe (RTTI): every image vftable with its class and offset (exevft.py)
     exe_path = exevft.exe_path(None if exe in (None, '') else exe) if exe != 'none' else None
-    exe_cls = exe_vftable_classes(exevft.load(exe_path, os.path.join(out, 'cache', 'exe_vftables.json')), ms,
-                                  canon_msvc) if exe_path else {}
+    exev = exevft.load(exe_path, os.path.join(out, 'cache', 'exe_vftables.json')) if exe_path else {}
+    exe_cls = exe_vftable_classes(exev, ms, canon_msvc) if exe_path else {}
     have_cls = {canon_it(n) for n in rtti.where if n.startswith('_ZTV')}
     exe_req = exe_requests(exe_cls, have_cls, units, msvc, canon_msvc, compiled_) if exe_cls else {}
     write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req, exe_req)
@@ -1120,6 +1120,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out)
         for a in rebind:
             rebind[a] = vmap[a][:2]
+        # the slots of virtual functions defined nowhere: the native definition at the exe slot's address
+        fill = exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
+                             canon_it, out)
+        for k_, n_ in fill.items():
+            stats['slot_fill_' + k_] = n_
+        byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
+        byclass['vslot-exe'] += fill.get('bound_refs', 0)
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
     # FUN_00404950's, ...): the map can give one native vtable; every class's own is listed, so a native vptr store
     # can be traced back to its image vftable (S13's vtable-store comparison)
@@ -1474,6 +1481,185 @@ def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out):
                 'slots\toutcome\tnative slots now\n')
         for r in rows:
             f.write('\t'.join(r) + '\n')
+
+
+def slot_abi(isig, ds):
+    """How a call through a vtable slot declared isig (Itanium, a virtual member: this in x0) reaches the definition
+    ds (MSVC): 'same' or 'the slot passes more' (the definition reads only registers the caller set) when every
+    argument the definition reads arrives where it reads it, in the same register file; else what differs. A free
+    definition whose first parameter is a pointer takes the object there (decomp stand-ins of thiscall code). The
+    slot's return type is not in its Itanium name, so results are not compared."""
+    sl = copy.copy(isig)
+    sl.member = True
+    sloc = abi.a64_locations(sl)
+    dd = ds
+    if not ds.member or ds.static:
+        if not ds.raw_params or ds.raw_params == ['void']:
+            return 'the slot passes more'   # reads no argument at all (a static getter: GetRTTI)
+        if abi.classify(ds.raw_params[0]) != 'P':
+            return 'the definition is not a member'
+        dd = copy.copy(ds)
+        dd.member = False
+    dloc = abi.a64_locations(dd)
+    for i, (_, c, loc) in enumerate(dloc):
+        if i >= len(sloc):
+            # the slot's own declaration is a placeholder or partial (`virtual void v2();`, the AbstractHeap slots
+            # of FUN_00aa7400): callers reach the slot through their own class's declaration, which passes them
+            return 'the definition reads more arguments (%d of %d)' % (len(dloc) - 1, len(sloc) - 1)
+        _, sc, sl_ = sloc[i]
+        if loc[0] in ('agg', 'sym', 'varargs') or sl_[0] in ('agg', 'sym', 'varargs'):
+            if c != sc or loc[0] != sl_[0]:
+                return 'aggregate or varargs argument %d differs (%s / %s)' % (i, sc, c)
+        elif loc != sl_ or abi._bucket(c) != abi._bucket(sc):
+            return 'argument %d differs (%s / %s)' % (i, sc, c)
+    return 'same' if len(dloc) == len(sloc) else 'the slot passes more'
+
+
+def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out):
+    """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
+    stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
+    holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
+    stands for the exe vftables the address map pairs with it (vmap) and those of its own RTTI class at that offset;
+    GCC slot k is exe slot exevft.exe_slot_index(k, D1's index). One undefined symbol is renamed once per object, so
+    every vtable of the object naming it must agree on the address (else the declaring class's vtable decides, else it
+    stays a trap). Every argument the slot's declaration passes and the definition reads must arrive where the
+    definition reads it (slot_abi; a free definition takes the object as its first pointer parameter). A definition
+    reading more arguments than the slot declares is bound too: callers reach a slot through their own class's
+    declaration (the decomp's shells declare placeholders, `virtual void v2();`), and slot_fill.tsv lists them.
+    Rewrites the objects' .redefine files and refs.tsv rows it changes, drops trap stubs no object uses any more, and
+    writes slot_fill.tsv (one row per (object, symbol)) and slot_gaps.tsv (trap slots left, with the reason).
+    Returns the counts."""
+    st = collections.Counter()
+    zmap = collections.defaultdict(set)   # (native vtable group, address point) -> exe vftable addresses
+    for v, e in vmap.items():
+        if v in exev:
+            zmap[(e[0], e[1])].add(v)
+    for v, (cls, _, off, _) in exe_cls.items():
+        for z in by_cls.get(cls, []):
+            for p, ott in vtables.address_points(rtti.ents(z) or []):
+                if ott == -off:
+                    zmap[(z, p)].add(v)
+    trap_set = set(traps)
+    rows, gaps, changed = [], [], {}
+
+    def target_for(un, a):
+        nd = native.get(a)
+        if nd is None:
+            return None, 'not compiled'
+        isig = itanium(un)
+        dsym = nd['sym'].name
+        dvar = sigs.itanium_variant(dsym)
+        if isig.variant or dvar:
+            if not isig.variant or not dvar or not dvar.startswith('D') or not isig.variant.startswith('D'):
+                return None, 'kind differs (%s at the exe slot, %s in the vtable)' % (dvar or 'function',
+                                                                                   isig.variant or 'function')
+            vs = nd['variants'].get(isig.variant)
+            if vs is None:
+                return None, 'no %s at the address' % isig.variant
+            return ADDR_SYM % a + ('' if vs is nd['sym'] else '_' + isig.variant), 'dtor'
+        ds = msvc(nd['msvc']) if nd.get('msvc') else None
+        if ds is None or ds.kind != 'func' or ds.raw_params is None or isig.raw_params is None:
+            return None, 'no declaration to compare'
+        how = slot_abi(isig, ds)
+        if how not in ('same', 'the slot passes more') and not how.startswith('the definition reads more'):
+            return None, 'abi: ' + how
+        return ADDR_SYM % a, how
+
+    for u in have:
+        ren = per_obj.get(u.source) or {}
+        tr = {un for un, t in ren.items() if t in trap_set}
+        if not tr:
+            continue
+        o = vtables.Obj(u.obj)
+        uses = collections.defaultdict(list)   # un -> [(z, p, k, j, {exe addresses})]
+        for z in sorted(n for n in o.defs if n.startswith('_ZTV')):
+            ents = o.ents(z)
+            for p, _ in vtables.address_points(ents):
+                n = vtables.slots_at(ents, p)
+                se = ents[p // 4:p // 4 + n]
+                names = [e.sym for e in se]
+                d = exevft.dtor_pos(names, [e.word for e in se])
+                vs = zmap.get((z, p), set())
+                for k, e in enumerate(se):
+                    if e.sym in tr:
+                        j = exevft.exe_slot_index(k, d)
+                        uses[e.sym].append((z, p, k, j, {exev[v].slots[j] for v in vs if j < len(exev[v].slots)},
+                                            bool(vs)))
+        for un in sorted(tr):
+            us = uses.get(un, [])
+            st['symbols'] += 1
+            addrs = set().union(*(x[4] for x in us)) if us else set()
+            how = None
+            if not us:
+                why = 'in no vtable of the object'
+            elif not addrs:
+                why = 'no exe vftable' if not any(x[5] for x in us) else 'past the exe vftable\'s slots'
+            elif len(addrs) == 1:
+                how = 'agree'
+            else:
+                isig = itanium(un)
+                own = '::'.join(isig.qual[:-1]) if isig.qual and len(isig.qual) > 1 else None
+                mine = set().union(*(x[4] for x in us if own and canon_it(x[0]) == own))
+                if len(mine) == 1:
+                    addrs, how = mine, 'declaring class'
+                else:
+                    why = 'vtables disagree (%s)' % ' '.join('%08x' % a for a in sorted(addrs))
+            if how:
+                a = next(iter(addrs))
+                tgt, why = target_for(un, a)
+                if tgt:
+                    changed.setdefault(u, {})[un] = tgt
+                    st['bound_symbols'] += 1
+                    st['bound_' + how.replace(' ', '_')] += 1
+                    rows.append((os.path.basename(u.obj), u.source, un, '%08x' % a, tgt, how, why,
+                                 ' '.join('%s+%d:%d' % (x[0], x[1], x[2]) for x in us)))
+                    continue
+            else:
+                a = None
+            st['left_' + why.split(' (')[0].replace(' ', '_').replace(':', '').replace('\'', '')] += 1
+            for x in us or [(None, 0, -1, -1, set(), False)]:
+                gaps.append((os.path.basename(u.obj), u.source, un, x[0] or '', str(x[2]), str(x[3]),
+                             ' '.join('%08x' % b for b in sorted(x[4])), why))
+    # apply the renames: the .redefine files and refs.tsv rows of the objects that changed
+    bound_refs = 0
+    by_src = {u.source: m for u, m in changed.items()}
+    for u, m in changed.items():
+        per_obj[u.source].update(m)
+        red = os.path.join(out, 'objcopy', os.path.basename(u.obj) + '.redefine')
+        with open(red, 'w', encoding='utf-8', errors='surrogateescape') as f:
+            for old, new in sorted(per_obj[u.source].items()):
+                f.write('%s %s\n' % (old, new))
+    if by_src:
+        src_of = {u.source: (u.host or u.source) for u in changed}
+        hosts = collections.defaultdict(dict)
+        for s_, m in by_src.items():
+            hosts[src_of[s_]].update(m)
+        path = os.path.join(out, 'refs.tsv')
+        with open(path, encoding='utf-8', errors='surrogateescape') as fi, \
+                open(path + '.tmp', 'w', encoding='utf-8', errors='surrogateescape') as fo:
+            for line in fi:
+                f = line.split('\t')
+                if len(f) >= 7 and f[2] == 'vslot-unresolved' and f[1] in hosts.get(f[0], {}):
+                    t = hosts[f[0]][f[1]]
+                    f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', t[len('__fnv_'):len('__fnv_') + 8], t
+                    line = '\t'.join(f)
+                    bound_refs += 1
+                fo.write(line)
+        os.replace(path + '.tmp', path)
+    used = {t for m in per_obj.values() for t in m.values()}
+    for t in [t for t in traps if t not in used]:
+        del traps[t]
+        st['trap_stubs_dropped'] += 1
+    st['bound_refs'] = bound_refs
+    with open(os.path.join(out, 'slot_fill.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#object\tunit\tslot symbol\texe address\ttarget\tchosen by\tabi\tuses (vtable+address point:slot)\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    with open(os.path.join(out, 'slot_gaps.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#object\tunit\tslot symbol\tvtable\tslot\texe slot\texe addresses\twhy still a trap\n')
+        for r in gaps:
+            f.write('\t'.join(r) + '\n')
+    return st
 
 
 def write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req=None, exe_req=None):
