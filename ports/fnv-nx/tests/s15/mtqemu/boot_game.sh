@@ -21,6 +21,13 @@ HEAP_MIB=${HEAP_MIB:-64}
 bash "$HERE/build.sh" "$WORK/build" > "$WORK/build.log" 2>&1 || { tail -20 "$WORK/build.log" >&2; exit 2; }
 mkdir -p "$WORK/sdmc/fnvnx/game"
 ln -sfn "$EXE" "$WORK/sdmc/fnvnx/game/FalloutNV.exe"
+mkdir -p "$WORK/sdmc/switch/fnv"
+ln -sfn "$EXE" "$WORK/sdmc/switch/fnv/FalloutNV.exe"   # NX1's SD layout; guests linked before NX1 read fnvnx/game
+for f in "$(dirname "$EXE")"/*.ini; do   # the exe's inis (Fallout_default.ini: WinMain stops without it)
+  [ -f "$f" ] || continue
+  ln -sfn "$(readlink -f "$f")" "$WORK/sdmc/fnvnx/game/$(basename "$f")"
+  ln -sfn "$(readlink -f "$f")" "$WORK/sdmc/switch/fnv/$(basename "$f")"
+done
 
 run=("$WORK/build/linhost" --root "$WORK/sdmc" --skip-faulting-init --heap "$HEAP_MIB" --expect "$EXPECT" "$ELF")
 [ -n "$QEMU" ] && run=("$QEMU" -R 0xC0000000 "${run[@]}")
