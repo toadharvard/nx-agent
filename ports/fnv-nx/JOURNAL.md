@@ -1830,3 +1830,46 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - v1_r3_fix_holds=1,2,4(partial),moves,cast v1_r3_fix_broken=3 v1_callee_pop_mismatch_pairs=1517
 * **next** - S2c: R3-1 and R3-2 (high), then the callee-pop flag, the typeinfo residuals and chain_x87. V1 audits
   run on the farm once link_job publishes `link/<commit12>`.
+
+### J-0090 | 2026-11-04 | stream: S9-build | status: wip | parent: J-0068,J-0082
+
+* **did** - New farm jobs, plus the pieces they need:
+  - **`link_job.sh`** (runner job `link`):
+    - takes the tree with fetch_tree;
+    - links the objects of the newest ancestor that has all 4 compile shards and the same compile inputs as the
+      head (named in meta.json as `objects_commit`);
+    - runs resolve, probe (-j$(nproc)), resolve, apply, trial link and check_rebind through the pipeline, with
+      `--msvc-code` from `msvc/pristine/<decomp12>`;
+    - publishes `link/<commit12>` (out/, fixed/, summary, report, meta), with rolling history on `link-head`;
+    - keeps one persistent build directory per farm, so the content-keyed caches carry over between commits.
+  - **`full_job.sh`** (runner job `full`): link_job plus guest, emulated boot on the synthesized image, and the
+    package; the boot reports go next to the link outputs.
+  - **`toolchain/cross/setup.sh`**: the pinned Ubuntu AArch64 cross packages, checked by SHA-256, no root needed.
+  - **`toolchain/sources.sh`**.
+  - **`tools/pipeline/extern_text.py`**: replaces S4's scratch-only addr_ids.txt.
+  - **Pipeline variables**: CROSS, TC_DL, VORBIS, EXTERN_TEXT, BOOT_IMAGE, PRISTINE_OBJS, OBJECTS, MSVC_CODE,
+    EMU_BUDGET.
+
+  Orchestrator re-ran tests/s9: OK.
+* **found**:
+  - s2c/xtc was Ubuntu's g++-13 cross compiler unpacked by hand.
+  - extern_text.py's output is byte-identical to addr_ids.txt (4,618 lines).
+  - Objects from the pinned packages are byte-identical to f11's (29/29), and the synthesized image is
+    byte-identical to S5's.
+  - An earlier "WinMain entered" was a false match on the echoed command line. The boot needs EMU_BUDGET=6e9.
+  - Subset probe: 119 s cold (vtable synthesis 109 s of that), 0.5 s warm.
+  - The branch `link` cannot coexist with `link/<commit12>`, so the rolling branch is `link-head`.
+
+### J-0091 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0088,J-0090
+
+* **found** - The first farm reports:
+  - census works: 2,908/2,978 units clean at cc57d3e.
+  - **compile farms** waited 15 min for a tree for their exact commit, because the prepare farm skips commits. Fixed:
+    fetch_tree now falls back to the rolling tree when the prepare inputs match.
+  - **static farms** compiled 0 units, because the job's own `apt install g++-multilib` removes the AArch64 cross
+    compiler on Ubuntu. Fixed by S12: lib32stdc++-13-dev + libc6-dev-i386, a tool check, a toolchain probe, and
+    the tree from fetch_tree.
+  - **eq farms** lost the 900 MB ISO download to cut transfers. Fixed by S11: resumable `curl -C -` loop with size
+    and SHA-256 checks. The first farm publishes the unpacked VC 2008 as `toolchain/msvc9` (54 MB packed) for the
+    others, with the Authenticode signatures always checked.
+* **did** - Merged all of these. Orchestrator re-ran tests/s11 and tests/s12: ok. Next: start the link farms.
