@@ -1581,45 +1581,6 @@
   },
   {
    "kind": "function",
-   "id": "fn_slerp",
-   "name": "NiQuaternion::Slerp 0x00a6e330 (keyframe blending)",
-   "subsystem": "animation",
-   "role": "main",
-   "critical": true,
-   "basis": "E",
-   "minsn": {
-    "lo": 0.26,
-    "mid": 0.78,
-    "hi": 1.3
-   },
-   "ms": {
-    "1020": {
-     "lo": 0.255,
-     "mid": 0.956,
-     "hi": 2.124
-    },
-    "1785": {
-     "lo": 0.146,
-     "mid": 0.546,
-     "hi": 1.214
-    }
-   },
-   "share_45": {
-    "1020": 0.043,
-    "1785": 0.025
-   },
-   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
-   "gain_main_minsn": [
-    0.5,
-    1.8
-   ],
-   "owner": "S15",
-   "needs_hardware": false,
-   "detail": "130-130 A64 instructions per call [M] x 2000-10000 calls per frame [E]: 10-40 animated actors x 60-80 bones x 1-3 sequences [E]",
-   "rank": 3
-  },
-  {
-   "kind": "function",
    "id": "fn_nibound_update",
    "name": "NiBound::Update 0x00a7fdd0 (an object's world bound, merged into its parent's)",
    "subsystem": "scene-graph update",
@@ -1655,7 +1616,7 @@
    "owner": "S15/S2",
    "needs_hardware": false,
    "detail": "45-45 A64 instructions per call [M] x 8000-24000 calls per frame [E]: two per updated object [E]",
-   "rank": 4
+   "rank": 3
   },
   {
    "kind": "function",
@@ -1694,7 +1655,7 @@
    "owner": "S15/S2",
    "needs_hardware": false,
    "detail": "70-100 A64 instructions per call [M] x 4000-12000 calls per frame [E]: objects whose world transform is recomputed per exterior frame [E]; 6 + 63 A64 instructions exclusive (dyncount, PERF.md 7) + 10-30 for translation and scale (not measured)",
-   "rank": 5
+   "rank": 4
   },
   {
    "kind": "function",
@@ -1733,6 +1694,45 @@
    "owner": "S15",
    "needs_hardware": true,
    "detail": "600-600 A64 instructions per call [M] x 200-2000 calls per frame [E]: convex pair queries per step: character controller casts, contact points [E]; 303 + 119 + 72 + 109 A64 instructions exclusive [M]",
+   "rank": 5
+  },
+  {
+   "kind": "function",
+   "id": "fn_slerp",
+   "name": "NiQuaternion::Slerp 0x00a6e330 (keyframe blending)",
+   "subsystem": "animation",
+   "role": "main",
+   "critical": true,
+   "basis": "E",
+   "minsn": {
+    "lo": 0.176,
+    "mid": 0.528,
+    "hi": 0.88
+   },
+   "ms": {
+    "1020": {
+     "lo": 0.173,
+     "mid": 0.647,
+     "hi": 1.438
+    },
+    "1785": {
+     "lo": 0.099,
+     "mid": 0.37,
+     "hi": 0.822
+    }
+   },
+   "share_45": {
+    "1020": 0.029,
+    "1785": 0.017
+   },
+   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "gain_main_minsn": [
+    0.5,
+    1.8
+   ],
+   "owner": "S15",
+   "needs_hardware": false,
+   "detail": "88-88 A64 instructions per call [M] x 2000-10000 calls per frame [E]: 10-40 animated actors x 60-80 bones x 1-3 sequences [E]; NEON override fnvnx_slerp_00a6e330 (tools/link/overrides, S15-simd): 134 -> 88 A64 instructions per call incl. the weight 0x00a6dc30 and the normalisation 0x00a4ff00 (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 9 -> 9)",
    "rank": 6
   },
   {

@@ -479,15 +479,16 @@
    "subsystem": "animation",
    "role": "main",
    "per_call_insn": [
-    130,
-    130
+    88,
+    88
    ],
    "per_call_basis": "M",
    "calls": [
     2000,
     10000
    ],
-   "calls_note": "10-40 animated actors x 60-80 bones x 1-3 sequences [E]"
+   "calls_note": "10-40 animated actors x 60-80 bones x 1-3 sequences [E]",
+   "per_call_note": "NEON override fnvnx_slerp_00a6e330 (tools/link/overrides, S15-simd): 134 -> 88 A64 instructions per call incl. the weight 0x00a6dc30 and the normalisation 0x00a4ff00 (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 9 -> 9)"
   },
   {
    "id": "fn_quat_from_matrix",

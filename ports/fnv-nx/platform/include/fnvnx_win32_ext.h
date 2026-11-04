@@ -62,6 +62,10 @@ typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
 void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
 /* Win32 export table: implementation of a DLL import by name (for IAT slots resolved from the exe) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
+/* An import slot of the exe, as the loader hands it over: by name (ordinal == FNVNX_IMPORT_BY_NAME, the loader's
+ * FNVNX_BY_NAME) or by ordinal (name NULL). NULL: no export (the slot stays 0). */
+#define FNVNX_IMPORT_BY_NAME 0xffffffffu
+void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordinal);
 /* window/input plumbing for S6/S7 */
 HWND fnvnx_main_window(void);
 void fnvnx_set_display_size(int w, int h);

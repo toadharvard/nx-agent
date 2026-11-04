@@ -5,10 +5,10 @@
  },
  {
   "label": "frame 1",
-  "instructions": 20000000
+  "instructions": 10000000
  },
  {
   "label": "frame 2",
-  "instructions": 21000000
+  "instructions": 11000000
  }
 ]

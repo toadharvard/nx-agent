@@ -485,14 +485,22 @@ def emit_vcalls(stubs):
     return '\n'.join(out) + '\n'
 
 
-def pristine_externs(objdir, i):
-    """MSVC names the pristine object of unit i references (undefined externals)."""
+def pristine_externs(objdir, i, code_only=False):
+    """MSVC names the pristine object of unit i references (undefined externals); code_only: only those a code
+    section's relocation names (a call or an address taken in code), not a vftable slot or another data word."""
     import vslots
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p):
         return set()
     c = vslots.Coff(p)
-    return {s.name for s in c.syms.values() if s.secnum == 0 and s.storage == 2 and s.name.startswith('?')}
+    ext = {s.name for s in c.syms.values() if s.secnum == 0 and s.storage == 2 and s.name.startswith('?')}
+    if not code_only:
+        return ext
+    code = set()
+    for k in range(1, len(c.secs)):
+        if c.secs[k].flags & IMAGE_SCN_CNT_CODE:
+            code |= {sn for sn, _ in c.relocs(k).values() if sn in ext}
+    return code
 
 
 # ---------------------------------------------------------------------------------------------------- exe calls
@@ -759,12 +767,13 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         # virtual functions GCC calls directly (an object member, `a->m.f()`) where MSVC called through the vptr
         cand = {r.name: r for r in rows if r.cls == 'missing' and r.note == 'no definition, address or body'
                 and r.units and vcall_line(0, itanium(r.name))}
-        if msvc_objs and cand:   # a direct reference in the pristine object is a real non-virtual call (B::f())
+        if msvc_objs and cand:   # a direct reference in the pristine object's code is a real non-virtual call
+            # (B::f()); a vftable slot of the same name is not (MSVC called it through the vptr)
             idx_of = collections.defaultdict(list)
             for i_, n_ in enumerate(unit_names):
                 idx_of[n_].append(i_)
             need = {i_ for r in cand.values() for u_ in r.units.split(',') for i_ in idx_of.get(u_, ())}
-            ext = {i_: pristine_externs(msvc_objs, i_) for i_ in need}
+            ext = {i_: pristine_externs(msvc_objs, i_, code_only=True) for i_ in need}
             ms.need({n_ for e_ in ext.values() for n_ in e_})
             for n, r in list(cand.items()):
                 keys = {k for _, k in relaxed_keys(itanium(n))}

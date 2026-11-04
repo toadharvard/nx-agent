@@ -826,7 +826,7 @@ static uint64_t api_readback(uint64_t a) {
     Image* im = &g.img[id];
     int depthFmt = r->format == NxRb_Depth32F || r->format == NxRb_Stencil8;
     if (depthFmt != im->isDepth || (r->format == NxRb_Stencil8 && !im->hasStencil)) return NXGPU_BAD_CALL;
-    if ((uint64_t)r->w * r->h * nx_readback_bpp(r->format) > r->dst_size || r->x + r->w > im->w || r->y + r->h > im->h)
+    if ((uint64_t)r->w * r->h * nx_readback_bpp(r->format) > r->dst_size || (uint64_t)r->x + r->w > im->w || (uint64_t)r->y + r->h > im->h)
         return NXGPU_BAD_CALL;
     if (!g.readFbo) p_glGenFramebuffers(1, &g.readFbo);
     p_glBindFramebuffer(GL_READ_FRAMEBUFFER, g.readFbo);

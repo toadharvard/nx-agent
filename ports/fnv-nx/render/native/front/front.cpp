@@ -169,9 +169,7 @@ void SortPackets(const Packet* p, uint32_t n, uint32_t* order, uint32_t* tmp, ui
     // LSD radix over the full 64-bit key in 8-bit digits: all 8 histograms in one pass over the keys (8 KiB, L1
     // resident), digits identical in every key skipped, ping-pong buffers. Stable. (P6n F2: the former 16-bit
     // digits cleared and prefix-summed a 256 KiB table per digit: ~1.9 M fixed instructions per frame.)
-    // The table is the caller's (8 KiB of its stack), not a static: two recording threads sort at once (S15-threads,
-    // render F2-F4 two-thread recording; V1 found the static one not reentrant).
-    uint32_t hist[8][256];
+    uint32_t hist[8][256];   // per call (8 KiB of stack): two threads sort their own frames at once (V1 T1)
     memset(hist, 0, sizeof hist);
     if (!n) return;
     const uint64_t k0 = p[0].key;

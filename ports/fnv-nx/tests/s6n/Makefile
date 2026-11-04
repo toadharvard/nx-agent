@@ -116,3 +116,19 @@ n1emu: $(OUT)/libnxgl.so
 	python3 emu_n0.py $(N1OUT)/n1_test.nso $(OUT)/libnxgl.so $(OUT)/emu_n1 fnvnx/n1/results.txt
 
 .PHONY: n1emu
+
+# ---- nx_render robustness: an ASan/UBSan build against malformed .nxd9/.nxcap (J-0147 V1 finding) -------------
+$(OUT)/nx_render_asan: $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp $(NATIVE)/capture/d3d9_exec.h \
+		$(NATIVE)/capture/d3d9cap.h $(NATIVE)/capture/png.h $(NATIVE)/capture/replay.cpp $(OUT)/run_gl
+	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-sanitize=vptr -Wall -Wextra -Werror \
+		$(CPPFLAGS) -I$(SHOUT) -o $@ $(NATIVE)/capture/nx_render.cpp $(NATIVE)/capture/d3d9_exec.cpp \
+		$(NATIVE)/capture/replay.cpp $(OUT)/front.o $(OUT)/scenes.o $(OUT)/nxgl.o $(OUT)/gpu_dispatch.o \
+		$(OUT)/d3d9_state_s.o $(OUT)/nx_shaders.o -lEGL -lm
+
+nx_render_robust: $(OUT)/nx_render_asan nx_render
+	python3 -I test_nx_render_bounds.py --bin $(OUT)/nx_render_asan --work $(OUT)/nxr_bounds
+	python3 -I ../v1/test_nx_render_robust.py --bin $(OUT)/nx_render_asan --work $(OUT)/nxr_v1 --iters $(ITERS) \
+		--seed $(OUT)/nx_render_test/t.nxd9 --seed $(OUT)/nx_render_test/n0.nxcap
+
+ITERS ?= 300
+.PHONY: nx_render_robust

@@ -672,3 +672,34 @@ stock clock (plan45b):
 Next for S15, in queue order among what needs no hardware: rows 5 and 7 (NEON overrides of the per-object math,
 first Slerp, NiBound::Update and the matrix product: override rows like `spinlock_0040fba0.c`, checked by S13's
 harness against the oracle) and row 6's per-site argument with S12.
+
+### 11.6 Per-instruction cost of the hot functions (stream S15-simd)
+
+**Metric** (`tools/perf/hotspot_metric.py`): cycles per frame of the top-20 rows of `hotspot_functions` in
+`budget_model.json` at 1.02 GHz: A64 instructions per call (dyncount [M]) x calls per frame [E] / IPC 0.8, or an A57
+model's cycles per call (`per_call_cycles`, P0-perfmodel) once one exists. The calls stay estimates until frameprof
+profiles frames, so the metric moves with the per-call cost, which is what this stream changes. Every commit states
+`metric: <before> -> <after>`.
+
+**Method.** A hot function is replaced at its address by a native override (`tools/link/overrides/`, a row of
+`overrides.tsv`, bound by `fnvlink.py resolve --override` like the spin lock's). The override does the decomp's
+arithmetic operation by operation, in the same order and precision (float stays float, double stays double, sums in
+the decomp's order, no fused multiply-add: `build.sh` compiles overrides with `-ffp-contract=off -frounding-math`
+like compile.sh). Only independent per-component operations share a NEON instruction, which is bit-identical lane
+by lane. In-unit callees are inlined into the override, so the frame, the call and the reloads go too. Two checks per
+override:
+
+* `tests/s15/simd/run.py`: the override against a scalar reference in the decomp's order, bit for bit (any NaN
+  matches any NaN: with two NaN operands the payload depends on operand order, which GCC commutes freely), on
+  random, unit-length and edge inputs, aliasing included, under qemu-aarch64; and the ILP32 object builds;
+* `tools/perf/override_ab.py <source>:<addr> --override <c> --native <sym>`: the same fuzzed cases of S13's harness
+  on the link and on a copy whose unit object binds the function to the override: A64 instructions per call, and
+  agreement with the MSVC oracle, which must not drop.
+
+| function | override | A64 per call before -> after [M] | oracle agreement | metric (M cycles/frame) |
+|---|---|---|---|---|
+| NiQuaternion::Slerp 0x00a6e330 (+ 0x00a6dc30, 0x00a4ff00 inlined) | `slerp_00a6e330.c` | 134 -> 88 | 9/16 -> 9/16 | 7.745 -> 7.430 |
+
+(Link 0bd144db1464, tree t/0bd144db1464, oracle msvc/pristine/87eb9373a0bb, 8 seeds x zero/random background.
+The agreement count is the same before and after; the per-case outputs are checked bit for bit by run.py.)
+The override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch of either must update it too.

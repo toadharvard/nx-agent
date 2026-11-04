@@ -253,13 +253,53 @@ NX86=$(ls "$ORACLE/obj" | grep -c '\.obj$' || true)
 if [ -n "${FUZZ_TREE:-}" ]; then TREE=$FUZZ_TREE; NOTE_TREE="local tree $TREE"
 else
   TREE=$FARM_HOME/tree-$L12
+  # The tree the link was made on. t/<L12> exists only when the prepare farm got to L itself; the link job may have
+  # taken the rolling `tree` (published for an earlier commit with the same prepare inputs), which has moved on
+  # since, so fetch_tree.sh on L alone waits 30 min and fails (link/c0d6c71516f6, 14:04, fz1 and fz25). Candidates,
+  # first hit wins: L; the commit the link's meta.json "tree" note says its tree was published for (checked
+  # against the tree hash it records); the link's objects commit (its objects were compiled from that tree). Only
+  # L is waited for, and only when no candidate exists yet.
   if [ ! -f "$TREE.done" ]; then
-    th=$(ARTIFACTS=$ARTIFACTS REPO=$REPO FARM_HOME=$FARM_HOME bash "$HERE/fetch_tree.sh" "$LCOMMIT" "$TREE" \
-         "${FUZZ_TREE_WAIT:-1800}" 2> "$RUN/fetch_tree.log") \
-      || fail_report 3 "no prepared tree for the link commit $L12 (see fetch_tree.log)"
-    echo "$th" > "$TREE.done"
+    mapfile -t LT < <(python3 -I - "$LINK/meta.json" <<'EOF'
+import json, re, sys
+try:
+    m = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    m = {}
+note = m.get('tree') or ''
+h = re.search(r'tree hash ([0-9a-f]{8,})', note)
+print(h.group(1) if h else '')
+c = re.search(r'published for ([0-9a-f]{7,40})', note)
+for x in (c.group(1) if c else '', m.get('objects_commit') or ''):
+    if x:
+        print(x)
+EOF
+)
+    want_th=${LT[0]:-}; th=""; TREE_FROM=""
+    cands=("$LCOMMIT")
+    for x in "${LT[@]:1}"; do
+      full=$(git -C "$REPO" rev-parse -q --verify "$x^{commit}" 2>/dev/null) || continue
+      [ "$full" = "$LCOMMIT" ] || cands+=("$full")
+    done
+    : > "$RUN/fetch_tree.log"
+    for c in "${cands[@]}"; do
+      t=$(ARTIFACTS=$ARTIFACTS REPO=$REPO FARM_HOME=$FARM_HOME bash "$HERE/fetch_tree.sh" "$c" "$TREE" 0 \
+          2>> "$RUN/fetch_tree.log") || continue
+      if [ -n "$want_th" ] && [ "${t:0:${#want_th}}" != "$want_th" ] && [ "${want_th:0:${#t}}" != "$t" ]; then
+        echo "tree of ${c:0:12}: hash $t, the link was made on $want_th" >> "$RUN/fetch_tree.log"; continue
+      fi
+      th=$t; TREE_FROM=$c; break
+    done
+    if [ -z "$th" ]; then
+      th=$(ARTIFACTS=$ARTIFACTS REPO=$REPO FARM_HOME=$FARM_HOME bash "$HERE/fetch_tree.sh" "$LCOMMIT" "$TREE" \
+           "${FUZZ_TREE_WAIT:-1800}" 2>> "$RUN/fetch_tree.log") \
+        || fail_report 3 "no prepared tree for the link commit $L12, the tree it records or its objects commit (see fetch_tree.log)"
+      TREE_FROM=$LCOMMIT
+    fi
+    echo "$th ${TREE_FROM:0:12}" > "$TREE.done"
   fi
-  NOTE_TREE="prepare farm tree of $L12 (tree hash $(cat "$TREE.done"))"
+  read -r th TREE_FROM < "$TREE.done"
+  NOTE_TREE="prepare farm tree of ${TREE_FROM:-$L12} (tree hash $th)"
 fi
 
 # --- the player's FalloutNV.exe (private branch gamedata/exe, sha256 pinned, lib_job.sh): its RTTI vftables are the
