@@ -114,6 +114,10 @@
   at the subobject) now binds to `__fnvnx_msvc_<addr>`. At link-head that is 4 addresses and 7 references, e.g.
   0x008d4870 -> 0x008805f0. V2's test_s2c_thisadj.py: ok; test_bindings has the same check.
 
+* **V2 X2 (text-addr), fixed** - A char label whose address the unit passes to a call stays extern-text (a trap),
+  never the raw x86 address. The case was 0x00c1d8b0 `_atexit(&UNK_00fdd3b0)`, the static's x86 exit thunk.
+  Arrays and labels stored as data keep the value. test_bindings has the case.
+
 * **measured** - abireplay on link/c0d6c71516f6 with the override table: rows bridge 4,732, manual 79, same 1,995,
   x86-inconsistent 3,276 (before: bridge 4,183, manual 2,632, x86-inconsistent 3,267). The 9 new x86-inconsistent
   rows are pairs that were `manual` before and are now decided on bytes.

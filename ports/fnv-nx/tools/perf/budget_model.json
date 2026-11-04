@@ -489,7 +489,7 @@
     20000
    ],
    "calls_note": "object tests over the main, 3 shadow and the reflection passes [E]",
-   "per_call_note": "before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]",
+   "per_call_note": "before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]; V1 (S15-simd PL1 notes): the classification override is 19 behind the plane, 21 in front or straddling (inside 49-67); the decomp before is 306-433 at 4-6 active planes, not 224-330 (understated)",
    "per_call_cycles": [
     52.4,
     148.0
@@ -524,7 +524,7 @@
    "subsystem": "animation",
    "role": "main",
    "per_call_insn": [
-    77,
+    34,
     77
    ],
    "per_call_basis": "M",
@@ -533,12 +533,12 @@
     3000
    ],
    "calls_note": "[E]",
-   "per_call_note": "override fnvnx_quat_from_matrix_00a6df40 (S15-simd: no frame, no volatile reload, no pointer array): 89 -> 77 A64 instructions per call (override_ab.py, link 0bd144db1464, 13 cases, agreement 13 -> 13); 103 was an older link",
+   "per_call_note": "override fnvnx_quat_from_matrix_00a6df40 (S15-simd): per path, 34 (trace > 0) to 77 (largest-diagonal path) A64 instructions (V1, tests/v1/test_s15simd_decomp.py); the harness median 89 -> 77 is the slow path; 103 was an older link",
    "per_call_cycles": [
-    59.5,
+    26.3,
     99.7
    ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "per_call_cycles_note": "funcmodel.py on the override: lo = 34 x 0.773 (steady), hi = 77 x 1.295 (one call)"
   },
   {
    "id": "fn_pass_bucket",

@@ -12,10 +12,11 @@
  *
  * Standalone (<switch.h>, malloc) so tests/s4/backends runs it under qemu with the svc and virtmem calls stubbed. */
 #define FNVNX_VM_RESV 256
-/* Kernel memory blocks: the process is 32BitNoReserved, so ldr allows it no private system resource and every
- * KMemoryBlock comes from Mesosphere's shared application slab (20,000). One extent costs at most 4 blocks (the
- * target in the stack region and the heap source each split in three): 3,072 x 4 + ~4,000 for the rest of the
- * process stays under it (NX1 check s4.vm_blocks). Past the limit a commit fails like an out-of-memory one. */
+/* Each extent is one svcMapMemory: in the worst case 4 kernel memory blocks (the stack-region target and the heap source
+ * each split in three). A 32BitNoReserved process cannot have its own system resource (ldr requires a 39-bit space
+ * for system_resource_size), so blocks come from Mesosphere's shared application slab of 20,000
+ * (ApplicationMemoryBlockSlabHeapSize). 3072 x 4 + ~4,000 for everything else stays under it. With 8192, heavy
+ * VirtualAlloc use could exhaust the slab, and then every mapping in the process fails (NX1 check 7). */
 #define FNVNX_VM_EXTENTS 3072
 #define FNVNX_VM_ALIGN 0x10000ull   /* Windows' allocation granularity */
 #define FNVNX_VM_NO_GO_LO 0x00400000ull   /* the original image and the data window (S10's fixed ranges) */
