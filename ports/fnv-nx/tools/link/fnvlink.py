@@ -1634,6 +1634,16 @@ def slot_msvc_sig(isig, ds):
 
 
 CONST_SYM = '__fnvnx_vconst_%08x'   # a trivial x86 leaf (exevft.leaf_constant) no unit compiles
+ADJ_SYM = '__fnvnx_vadj_%08x'       # an MSVC adjustor thunk no unit compiles: this -= n, then its target
+
+
+def emit_adj_stub(name, target, n):
+    op = ('    sub w0, w0, #%d' % n) if 0 < n < 4096 else ('    add w0, w0, #%d' % -n) if -4096 < n < 0 else None
+    if op is None:   # a larger adjustment: through w16
+        op = '    movz w16, #0x%x\n    movk w16, #0x%x, lsl #16\n    sub w0, w0, w16' % (n & 0xffff, (n >> 16) & 0xffff)
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name, op,
+                      '    b %s' % target, '    .size %s, .-%s' % (name, name), '    .text']) + '\n'
 
 
 def emit_const_stub(name, value):
@@ -1705,13 +1715,32 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     for k_, vs_ in own.items():   # a vtable the units also pair with another vftable: its own class's decides
         zmap[k_] = set(vs_)
     trap_set = set(traps)
+    ott_cache = {}
+
+    def ott_of(z, p):
+        if z not in ott_cache:
+            ott_cache[z] = dict(vtables.address_points(rtti.ents(z) or []))
+        return ott_cache[z].get(p, 0)
     rows, gaps, changed = [], [], {}
     addr_of = {}   # (source, symbol) -> the exe address it was bound to (refs.tsv)
     stubs = {} if stubs is None else stubs   # flag / deleting-destructor stubs -> their asm (bridges.S)
 
-    def target_for(un, a):
+    def target_for(un, a, otts=None, depth=0):
         nd = native.get(a)
         isig = itanium(un)
+        th = exevft.thunk(exe_path, a) if nd is None and exe_path and depth < 2 and a not in (providers or {}) else None
+        if th is not None:
+            # an MSVC thunk no unit compiles: its target's binding, with `this -= n` when the native vtable's
+            # offset-to-top says the same adjustment (otts: those of the vtables naming the slot)
+            n, t = th
+            if n and (not otts or any(-o != n for o in otts)):
+                return None, 'thunk: adjustment %d, the native vtable\'s offsets %s' % (n, sorted(set(otts or [])))
+            inner, why_ = target_for(un, t, None, depth + 1)
+            if inner is None or not n:
+                return inner, 'thunk -> ' + why_
+            name = ADJ_SYM % a
+            stubs.setdefault(name, emit_adj_stub(name, inner, n))
+            return name, 'adjustor thunk (%d) -> %s' % (n, why_)
         if nd is None and a in (providers or {}) and not isig.variant:
             return providers[a][0], 'provider (%s)' % providers[a][1]   # S4's CRT entry: _purecall's slots
         if nd is None:
@@ -1818,7 +1847,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                     why = 'vtables disagree (%s)' % ' '.join('%08x' % a for a in sorted(addrs))
             if how:
                 a = next(iter(addrs))
-                tgt, why = target_for(un, a)
+                tgt, why = target_for(un, a, [ott_of(x[0], x[1]) for x in us if a in x[4]])
                 if tgt:
                     changed.setdefault(u, {})[un] = tgt
                     addr_of[(u.source, un)] = a
@@ -1830,7 +1859,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                         # another vtable of the object holds another address there (a derived class's override
                         # the decomp does not declare): that slot gets its own word in the copy
                         b_ = next(iter(x[4])) if len(x[4]) == 1 else None
-                        t2 = target_for(un, b_)[0] if b_ is not None and b_ != a else None
+                        t2 = target_for(un, b_, [ott_of(x[0], x[1])])[0] if b_ is not None and b_ != a else None
                         if t2:
                             overrides[(u.obj, x[0], x[1] // 4 + x[2])] = t2
                             st['per_slot_uses'] += 1
@@ -1844,7 +1873,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 # one target per slot: exe_vtable_copies writes a strong copy of the kept vtable with these words
                 left = []
                 for x in us:
-                    tgt_ = target_for(un, next(iter(x[4])))[0] if len(x[4]) == 1 else None
+                    tgt_ = target_for(un, next(iter(x[4])), [ott_of(x[0], x[1])])[0] if len(x[4]) == 1 else None
                     if tgt_:
                         overrides[(u.obj, x[0], x[1] // 4 + x[2])] = tgt_
                         st['per_slot_uses'] += 1
@@ -2003,6 +2032,11 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
             elif nd is None and a in (providers or {}):
                 t = providers[a][0]
                 st['slots-provider'] += 1
+            elif nd is None and exe_path and (exevft.thunk(exe_path, a) or (1, 0))[0] == 0 and \
+                    native.get(exevft.thunk(exe_path, a)[1]) is not None and \
+                    sigs.itanium_variant(native[exevft.thunk(exe_path, a)[1]]['sym'].name) is None:
+                t = ADDR_SYM % exevft.thunk(exe_path, a)[1]   # a primary vtable: only `jmp f` (no adjustment)
+                st['slots-jump-thunk'] += 1
             elif nd is None and exe_path and exevft.leaf_constant(exe_path, a) is not None:
                 t = CONST_SYM % a
                 bridges.setdefault(t, emit_const_stub(t, exevft.leaf_constant(exe_path, a)))

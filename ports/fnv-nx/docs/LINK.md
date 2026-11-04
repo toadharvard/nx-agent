@@ -683,6 +683,10 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
 * An exe slot address with a provider in S4's `crt_symbols.tsv` (or an import thunk) binds to the provider:
   MSVC's `_purecall` at 0x00ec60fa (the pure virtual slots of 670 exe vftable slots) -> platform/crt's
   `_purecall`, the same fatal "pure virtual function call".
+* An exe slot address that no compiled unit defines but holds an MSVC thunk (`sub ecx, n` / `add ecx, n`, then
+  `jmp f`; or a bare `jmp f`, `exevft.thunk`) binds to f's binding, through `__fnvnx_vadj_<a>` (`sub w0, w0, #n;
+  b ...`) when the native vtable's offset-to-top is -n for every vtable naming the slot (else it stays a gap: the
+  native subobject layout differs). Extensions take only bare jumps (a primary vtable).
 * An exe slot address that no compiled unit defines but whose x86 body is a constant leaf (`ret`, `ret N`,
   `xor eax, eax` / `mov al|eax, imm`, then a return: `exevft.leaf_constant`) gets its exact native form,
   `__fnvnx_vconst_<a>` (`mov w0, #imm; ret`). MSVC folds identical functions, so one body stands in many slots:

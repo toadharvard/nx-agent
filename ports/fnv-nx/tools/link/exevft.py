@@ -230,3 +230,29 @@ def leaf_constant(path, addr):
                 if got is not None:
                     return got[0]
     return None
+
+
+def thunk(path, addr):
+    """(adjustment, target) of an MSVC thunk at addr: `sub ecx, imm8|imm32; jmp rel32` (an adjustor thunk of a
+    secondary vftable: this -= imm), `add ecx, imm8; jmp rel32` (this += imm: a negative adjustment) or a plain
+    `jmp rel32` (0); else None."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 12)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    b = data[off:off + 12]
+
+    def rel(i):
+        return (addr + i + 5 + int.from_bytes(b[i + 1:i + 5], 'little', signed=True)) & 0xffffffff
+    if b[:2] == b'\x83\xe9' and b[3:4] == b'\xe9':
+        return b[2], rel(3)
+    if b[:2] == b'\x83\xc1' and b[3:4] == b'\xe9':
+        return -b[2], rel(3)
+    if b[:2] == b'\x81\xe9' and b[6:7] == b'\xe9':
+        return int.from_bytes(b[2:6], 'little'), rel(6)
+    if b[:1] == b'\xe9':
+        return 0, rel(0)
+    return None
