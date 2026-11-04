@@ -35,7 +35,7 @@ Rules for family streams:
 | depth / shadow | ZONLY, DEPTHMAP, 3XDEPTH*, GRASS_SHADOW, shadow maps | depth, depth_at | skipped -> Translated | render-land | open |
 | image space: world chain | HDR, bloom/blur, DOF, radial blur, sunbeams, refraction, cinematic, VATS, night vision, ... | - | skipped -> Translated | render-land | open |
 | trees | SpeedTree branch/frond/leaf/billboard | tree* (planned) | skipped -> Translated | render-veg | open |
-| grass | GRASS* | grass* | skipped -> Translated | render-veg | open |
+| grass | GRASS* | grass, grass_vl, grass_slope, grass_vlslope (VS); grass, grass_tms (PS) | skipped -> Translated | render-veg | shaders + parity on the synthetic field done (veg.mk parity 6/6); PTLIGHT, PROJ_SHADOW, BILLBOARD, SHADOWMAP stay Translated; dispatch row pending (render machine) |
 | particles, precipitation, bolt, beam, decal, blood, vfog | per class | - (planned) | skipped -> Translated | render-veg | open |
 | GPU cost model and pass structure | render/native/perf (gpu_cost.py, gen_stream.py, report.*), pass order, early-z, sorting | - | - | G1-gpu (with the render machine's perf work) | open |
 
