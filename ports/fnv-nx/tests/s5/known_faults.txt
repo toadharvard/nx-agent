@@ -47,3 +47,7 @@ InitHolder          # 0x00aa2020: tail call through slot 7 of the allocator's vt
 0x00aa64d0            # RunThreadProc of the Serialized IO Thread (FUN_00aa7eb0): it tail-calls slot 2 of the IO thread's
                       # vtable _ZTV12FUN_00aa8410, BSThread::v2, a virtual defined nowhere (vslot trap; S1/S2). The
                       # thread ends at once
+0x007cb2e0            # BSSimpleArray<NavMeshInfo*>::Add in PathList FUN_00afdda0 (WinMain+0x3f8, J-0126): its grow,
+                      # FUN_00761540_cls::FUN_00761540 (+0x34), calls slot 1 (allocate) of the image vtable 0x010472d0,
+                      # stored by hand; on S14's synthesized image that slot is 0. Needs the exe's vftable (S3). The
+                      # element is not appended
