@@ -497,6 +497,7 @@ class Binder:
         self.rows, self.stats, self.checks = [], collections.Counter(), collections.Counter()
         self.pair_stats = collections.Counter()
         self.stubs = {}
+        self._slotfns = set()   # slot functions of the vtables of the object last read
 
     def view_for(self, src, cls, off):
         """MSVC view of class cls's vftable at vfptr offset off: the unit's own (same declarations) first, else the
@@ -534,10 +535,12 @@ class Binder:
             return self._obj[path]
         out = collections.defaultdict(list)
         self._obj = {path: out}
+        self._slotfns = set()
         try:
             groups = gcc_vtables(path)
         except (OSError, ValueError):
             return out
+        self._slotfns = {slot_function(s) for g in groups.values() for _, sl in g for s in sl}
         for z, group in groups.items():
             cls = self.itanium(z).name
             for ott, slots in group:
@@ -657,12 +660,15 @@ class Binder:
                                                                'check: no static vslot address')
                 self.checks[key] += 1
                 if a is not None and a != addr:
-                    self._out(src, un, 'check-differs (kept %s %08x)' % (tier, addr), c, cands)
+                    self._out(path, src, un, 'check-differs: kept %s %08x' % (tier, addr), c, cands,
+                              'check-differs (a declaration misses an override the image vftable has)')
             return current
         outcome, kind, c, cands = self.lookup(src, path, un, isig, def_at)
         before = cls if cls != 'addr' else 'loose ' + tier.split('/')[-1]
+        if un not in self._slotfns:   # D1/D2 GCC calls where MSVC did not: the class's own ??_G with flags 0
+            outcome, before = 'implicit dtor: ' + outcome, before
         if kind is None:
-            self._out(src, un, outcome + ' [kept %s]' % before, c, cands)
+            self._out(path, src, un, outcome + ' [kept %s]' % before, c, cands)
             return current
         var = isig.variant
         if kind == 'static' and var in ('D1', 'D2'):
@@ -670,13 +676,13 @@ class Binder:
             vv = next((x for x in ('D1', 'D2') if nd and nd['variants'].get(x) is not None), None)
             if nd is not None and vv is None:
                 if c.img is None:
-                    self._out(src, un, 'dtor-d1-not-emitted [kept %s]' % before, c, cands)
+                    self._out(path, src, un, 'dtor-d1-not-emitted [kept %s]' % before, c, cands)
                     return current
                 kind, outcome = 'image', outcome + '; D1 not emitted'
         if cls == 'addr':
             self.stats['(loose bindings: %s)' % ('same address' if kind == 'static' and addr == c.addr else
                                                  'REPLACED')] += 1
-        self._out(src, un, outcome + ' [was %s]' % before, c, cands)
+        self._out(path, src, un, outcome + ' [was %s]' % before, c, cands)
         if kind == 'image':
             flags = {'D0': 1, 'D1': 0, 'D2': 0}.get(var)
             name = STUB_SYM % (c.img, c.k) + ('_d%d' % (1 - flags) if flags is not None else '')
@@ -697,11 +703,11 @@ class Binder:
             return ('code' if a in native else 'code-pending'), 'vslot/' + c.how, a, target, c.msvc
         return 'addr', 'vslot/' + c.how, a, None, c.msvc
 
-    def _out(self, src, un, outcome, c, cands):
-        self.stats[outcome] += 1
+    def _out(self, path, src, un, outcome, c, cands, stat=None):
+        self.stats[stat or outcome] += 1
         c = c or (cands[0] if cands else None)
         v = self.ix.views[c.view] if c else None
-        self.rows.append((src, un, outcome, '%08x' % c.addr if c and c.addr is not None else '',
+        self.rows.append((os.path.basename(path), src, un, outcome, '%08x' % c.addr if c and c.addr is not None else '',
                           '%08x' % c.img if c and c.img is not None else '', c.how if c else '',
                           (c.vtable or '') if c else '', str(-c.ott) if c else '', str(c.j) if c else '',
                           str(c.k) if c else '', 'u%d' % v.unit if v else '', (c.msvc or '') if c else '',
@@ -710,7 +716,7 @@ class Binder:
     def write(self, out):
         """vslots.tsv (one row per undefined slot symbol looked at) and vslots_stats.txt."""
         with open(os.path.join(out, 'vslots.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-            f.write('#object\tsymbol\toutcome\taddress\timage_vftable\thow\tvtable\tvfptr_offset\titanium_slot\t'
+            f.write('#object\tunit\tsymbol\toutcome\taddress\timage_vftable\thow\tvtable\tvfptr_offset\titanium_slot\t'
                     'msvc_slot\tmsvc_view\tmsvc_declaration\tcandidate_addresses\n')
             for r in self.rows:
                 f.write('\t'.join(r) + '\n')

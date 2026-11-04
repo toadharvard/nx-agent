@@ -480,7 +480,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc)
             if cls != 'unresolved' and isig.qual and un.find(GAME_PREFIX) >= 0:
                 stats['game1_resolved'] += 1
-            if un in vslots and vsb is not None:
+            if vsb is not None and (un in vslots or (cls == 'unresolved' and isig.variant in ('D1', 'D2'))):
                 cls, tier, addr, target, note = vsb.classify(u.host or u.source, u.obj, un, isig, native, def_at,
                                                              (cls, tier, addr, target, note))
             if addr is not None and cls == 'addr':

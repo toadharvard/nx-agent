@@ -9,7 +9,8 @@ llvm-undname, SSE2NEON; prints SKIP without the MSVC environment. No decomp cont
 Unit a holds the "real" declarations: Ov (overloaded virtuals f(int), f(double), f(char *), a virtual destructor in
 the middle), OvD : Ov (overrides, new overloads k, an h(int) beside the inherited h()), A / B / M : A, B (multiple
 inheritance, an override reached through the secondary vtable), P (pure virtual) / Q : P, U (virtuals and a
-destructor defined nowhere under these names). Unit b reconstructs the same image vftables as local classes whose
+destructor defined nowhere under these names), W : V (W::~W makes GCC call V's base-object destructor, which no
+unit names: MSVC inlines it). Unit b reconstructs the same image vftables as local classes whose
 virtuals carry their addresses (`FUN_<addr>`), one name per slot in the image's slot order, and defines the bodies
 unit a never names; unit c is a third view of Ov's vftable that disagrees with b about one slot. units.json binds
 each unit's vftable names to the same image addresses.
@@ -54,6 +55,8 @@ struct M : A, B { virtual int b2(int); virtual int a1(); virtual int m(); ~M(); 
 struct P { virtual int p1() = 0; virtual int p2(); virtual ~P(); };
 struct Q : P { virtual int p1(); ~Q(); };
 struct U { virtual int key(); virtual int Unk_01(); virtual int Unk_02(int); virtual ~U(); };
+struct V { virtual ~V(); virtual int v1(); int q; };
+struct W : V { ~W(); int v1(); };
 '''
 SRC = {
     'src/a.cpp': '#include "h.h"\n'
@@ -62,8 +65,9 @@ SRC = {
                  'A::~A() {}\nint A::a1() { return 21; }\nint M::a1() { return 31; }\nint M::b2(int) { return 32; }\n'
                  'int M::m() { return 33; }\nM::~M() {}\nint P::p2() { return 41; }\nP::~P() {}\n'
                  'int Q::p1() { return 51; }\nQ::~Q() {}\nint U::key() { return 61; }\n'
-                 'void *mk(int i) { switch (i) { case 0: return new OvD; case 1: return new M; case 2: return new Q; }\n'
-                 '    return new U; }\n',
+                 'W::~W() {}\nint W::v1() { return 71; }\n'
+                 'void *mk(int i) { switch (i) { case 0: return new OvD; case 1: return new M; case 2: return new Q;\n'
+                 '    case 3: return new W; } return new U; }\n',
     'src/b.cpp': r'''struct FUN_00402000_Ov { virtual int FUN_00402040(char *); virtual int FUN_00402030(double);
     virtual int FUN_00402010(int); virtual int FUN_00402020(); virtual ~FUN_00402000_Ov(); virtual int FUN_00402050();
     int x; };
@@ -77,6 +81,8 @@ struct FUN_00403200_M : FUN_00403000_A, FUN_00403100_B { virtual int FUN_0040312
     virtual int FUN_00403230(); ~FUN_00403200_M(); int c; };
 struct FUN_00404000_U { virtual int FUN_00404000(); virtual int FUN_00404010(); virtual int FUN_00404020(int);
     virtual ~FUN_00404000_U(); };
+struct FUN_00405000_V { virtual ~FUN_00405000_V(); virtual int FUN_00405010(); int q; };
+FUN_00405000_V::~FUN_00405000_V() {}
 int FUN_00402000_Ov::FUN_00402040(char *) { return 4; }
 int FUN_00402000_Ov::FUN_00402050() { return 5; }
 int FUN_00402100_OvD::FUN_00402120() { return 12; }
@@ -88,7 +94,7 @@ int FUN_00404000_U::FUN_00404010() { return 62; }
 int FUN_00404000_U::FUN_00404020(int) { return 63; }
 FUN_00404000_U::~FUN_00404000_U() {}
 void *mkb(int i) { switch (i) { case 0: return new FUN_00402000_Ov; case 1: return new FUN_00402100_OvD;
-    case 2: return new FUN_00403200_M; } return new FUN_00404000_U; }
+    case 2: return new FUN_00403200_M; case 3: return new FUN_00405000_V; } return new FUN_00404000_U; }
 ''',
     'src/c.cpp': r'''struct FUN_00402900_Ov { virtual int FUN_00402040(char *); virtual int FUN_00402030(double);
     virtual int FUN_00402010(int); virtual int FUN_00402020(); virtual ~FUN_00402900_Ov(); virtual int FUN_00402990();
@@ -101,6 +107,7 @@ void *mkc() { return new FUN_00402900_Ov; }
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 16}   # noqa: E731
 OV, OVD, AV, MA, MB, PV, QV, UV, BV = 0x01000100, 0x01000120, 0x01000300, 0x01000320, 0x01000340, 0x01000400, \
     0x01000420, 0x01000500, 0x01000360
+VV, WV = 0x01000600, 0x01000620
 UNITS = {'units': [
     {'source': 'src/a.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x402010, '?f@Ov@@UAEHH@Z'), F(0x402020, '?g@Ov@@UAEHXZ'), F(0x402030, '?f@Ov@@UAEHN@Z'),
@@ -108,9 +115,11 @@ UNITS = {'units': [
         F(0x402140, '?k@OvD@@UAEHH@Z'), F(0x403000, '??1A@@UAE@XZ'), F(0x403010, '?a1@A@@UAEHXZ'),
         F(0x403210, '?a1@M@@UAEHXZ'), F(0x403220, '?b2@M@@UAEHH@Z'), F(0x403230, '?m@M@@UAEHXZ'),
         F(0x403240, '??1M@@UAE@XZ'), F(0x403310, '?p2@P@@UAEHXZ'), F(0x403320, '??1P@@UAE@XZ'),
-        F(0x403410, '?p1@Q@@UAEHXZ'), F(0x403420, '??1Q@@UAE@XZ'), F(0x404000, '?key@U@@UAEHXZ')],
+        F(0x403410, '?p1@Q@@UAEHXZ'), F(0x403420, '??1Q@@UAE@XZ'), F(0x404000, '?key@U@@UAEHXZ'),
+        F(0x405130, '??1W@@UAE@XZ'), F(0x405140, '?v1@W@@UAEHXZ')],
      'symbols': {'??_7Ov@@6B@': OV, '??_7OvD@@6B@': OVD, '??_7A@@6B@': AV, '??_7M@@6BA@@@': MA, '??_7M@@6BB@@@': MB,
-                 '??_7B@@6B@': BV, '??_7P@@6B@': PV, '??_7Q@@6B@': QV, '??_7U@@6B@': UV}},
+                 '??_7B@@6B@': BV, '??_7P@@6B@': PV, '??_7Q@@6B@': QV, '??_7U@@6B@': UV, '??_7V@@6B@': VV,
+                 '??_7W@@6B@': WV}},
     {'source': 'src/b.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x402040, '?FUN_00402040@FUN_00402000_Ov@@UAEHPAD@Z'), F(0x402050, '?FUN_00402050@FUN_00402000_Ov@@UAEHXZ'),
         F(0x402120, '?FUN_00402120@FUN_00402100_OvD@@UAEHXZ'),
@@ -118,10 +127,11 @@ UNITS = {'units': [
         F(0x402160, '?FUN_00402160@FUN_00402100_OvD@@UAEHH@Z'), F(0x403020, '?FUN_00403020@FUN_00403000_A@@UAEHXZ'),
         F(0x403110, '?FUN_00403110@FUN_00403100_B@@UAEHXZ'), F(0x404010, '?FUN_00404010@FUN_00404000_U@@UAEHXZ'),
         F(0x404020, '?FUN_00404020@FUN_00404000_U@@UAEHH@Z'), F(0x404030, '??1FUN_00404000_U@@UAE@XZ'),
-        F(0x404040, '??_GFUN_00404000_U@@UAEPAXI@Z')],
+        F(0x404040, '??_GFUN_00404000_U@@UAEPAXI@Z'), F(0x405030, '??1FUN_00405000_V@@UAE@XZ'),
+        F(0x405040, '??_GFUN_00405000_V@@UAEPAXI@Z')],
      'symbols': {'??_7FUN_00402000_Ov@@6B@': OV, '??_7FUN_00402100_OvD@@6B@': OVD,
                  '??_7FUN_00403200_M@@6BFUN_00403000_A@@@': MA, '??_7FUN_00403200_M@@6BFUN_00403100_B@@@': MB,
-                 '??_7FUN_00404000_U@@6B@': UV}},
+                 '??_7FUN_00404000_U@@6B@': UV, '??_7FUN_00405000_V@@6B@': VV}},
     {'source': 'src/c.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x402990, '?FUN_00402990@FUN_00402900_Ov@@UAEHXZ')],
      'symbols': {'??_7FUN_00402900_Ov@@6B@': OV}},
@@ -135,7 +145,9 @@ EXPECT = {'_ZN2Ov1fEPc': '__fnv_00402040', '_ZN2Ov1hEv': '__fnvnx_vslot_01000100
           # A::a2: a slot of A's vtable (target unknown statically) and of M's (known): A's image slot decides
           '_ZN1A2a2Ev': '__fnvnx_vslot_01000300_2',
           '_ZN1B2b1Ev': '__fnv_00403110', '_ZN1U6Unk_01Ev': '__fnv_00404010', '_ZN1U6Unk_02Ei': '__fnv_00404020',
-          '_ZN1UD0Ev': '__fnv_00404040', '_ZN1UD1Ev': '__fnv_00404040_D1'}
+          '_ZN1UD0Ev': '__fnv_00404040', '_ZN1UD1Ev': '__fnv_00404040_D1',
+          # not a slot: W::~W calls V's base-object destructor, which MSVC inlines; V's ??_G (unit b) with flags 0
+          '_ZN1VD2Ev': '__fnv_00405040_D1'}
 EXPECT_C = {'_ZN15FUN_00402900_OvD0Ev': '__fnv_00402070', '_ZN15FUN_00402900_OvD1Ev': '__fnv_00402070_D1'}
 ok = True
 
