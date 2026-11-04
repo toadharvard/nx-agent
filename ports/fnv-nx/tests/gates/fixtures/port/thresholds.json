@@ -145,5 +145,12 @@
   "_doc": "tools/difffuzz/metric.py as the scorecard's S13 row; trusted=false shows its value as no-data (set it to true once S13 fixes V1's findings)",
   "trusted": true,
   "why": "V1 refuted metric.py (M1-M3: a missing, FAILED-only or deadline-pending shard lowers the metric)"
+ },
+ "report_due_s": 43200,
+ "_report_due_s_doc": "a pass whose source is behind the head and older than this (s, against the newest publish time) is overdue: stale, not a pass",
+ "trend": {
+  "_doc": "fnvnx-trend/1: the gates job keeps the per-head scorecard history in its JSON sidecar (reports/<farm>/<c12>-gates.json, private repo); ready.py reads the newest one and appends",
+  "farm": "gates1",
+  "keep": 400
  }
 }
