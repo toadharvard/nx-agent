@@ -16,6 +16,8 @@ src/fallout/ai/combat/flameprojectile_o2_variant_od_oy_noo2_variant.cpp	ref	0x00
 src/fallout/ai/combat/flameprojectile_o2_variant_od_oy_noo2_variant.cpp	ref	0x00931ed0	?FUN_00931ed0@FireObject@@QAEPAUBoundForm@@XZ	?FUN_00931ed0@FireObject@@QAE?AUBoundForm@@XZ
 src/fallout/ai/middlehighprocess_gs_nogs_rtm_variant.cpp	ref	0x005723b0	?FUN_005723b0@Actor0091@@QAEXPAVTESObjectREFR@@HH@Z	?FUN_005723b0@Actor0091@@QAEMPAVTESObjectREFR@@HH@Z
 src/fallout/ai/playercharacter.cpp	ref	0x00406cc0	?FUN_00406cc0@@YAXM@Z	?FUN_00406cc0@@YAMM@Z
+src/fallout/ai/playercharacter.cpp	ref	0x00950110	?FUN_00950110@FUN_00950110_shell@@QAEX_N@Z	?FUN_00950110@FUN_00950110_shell@@QAE_N_N@Z
+src/fallout/ai/playercharacter.cpp	ref	0x00950110	?FUN_00950110@FUN_00950340_Class@@QAEX_N@Z	?FUN_00950110@FUN_00950340_Class@@QAE_N_N@Z
 src/fallout/interface/menus/caravanmenu.cpp	ref	0x00a011b0	?FUN_00a011b0@UIOptions@@QAEXH@Z	?FUN_00a011b0@UIOptions@@QAEMH@Z
 src/fallout/interface/menus/hackingmenu.cpp	ref	0x00a011b0	?FUN_00a011b0@Node@@QAEXH@Z	?FUN_00a011b0@Node@@QAEMH@Z
 src/fallout/interface/menus/inventorymenu.cpp	ref	0x00825c00	?FUN_00825c00@FUN_0077ffd0_list@@QAEPAXPAX@Z	?FUN_00825c00@FUN_0077ffd0_list@@QAEPAXXZ
@@ -26,6 +28,8 @@ src/fallout/interface/menus/sleepwaitmenu.cpp	ref	0x00a011b0	?FUN_00a011b0@DecTi
 src/fallout_shared/bgsautowater.cpp	ref	0x00535b30	?FUN_00535b30@BufObj@@QAEPAUFUN_00416870_t@@XZ	?FUN_00535b30@BufObj@@QAE?AUFUN_00416870_t@@H@Z
 src/fallout_shared/bgsautowater.cpp	ref	0x00546fb0	?FUN_00546fb0@ParamObj@@QAE?AUBufObj@@H@Z	?FUN_00546fb0@ParamObj@@QAEPAUBufObj@@XZ
 src/fallout_shared/pathfinding/navmesh.cpp	ref	0x00691ab0	?AddPoint@@YAXI@Z	?FUN_00691ab0@FUN_00690fe0_s1b@@QAEII@Z
+src/fallout_shared/tesscriptfunctions.cpp	ref	0x005a3b20	?FUN_005a3b20@@YAXPAVTESObjectREFR@@HHPAN@Z	?FUN_005a3b20@@YA_NPAVTESObjectREFR@@HHPAN@Z
+src/fallout_shared/tesscriptfunctions.cpp	ref	0x005a5720	?FUN_005a5720@@YAXHHHH@Z	?FUN_005a5720@@YA_NHHHH@Z
 src/gamebryo2.2/corelibs/nianimation/bsblendtreadtransfinterpolator.cpp	def	0x00a40a10	?FUN_00a40a10@@YAXXZ	?FUN_00a40a10@FUN_00a40a10_s1b@@QAEXAAUNiStream@@@Z
 src/gamebryo2.2/corelibs/nianimation/bsblendtreadtransfinterpolator.cpp	def	0x00a42fc0	?FUN_00a42fc0@@YAXXZ	?FUN_00a42fc0@FUN_00a42fc0_s1b@@QAEXAAUNiStream@@@Z
 src/gamebryo2.2/corelibs/nianimation/bsblendtreadtransfinterpolator.cpp	ref	0x00a37980	?FUN_00a37980@@YAXXZ	?FUN_00a37980@FUN_00a42fc0_s1b@@QAEXAAUNiStream@@@Z
@@ -108,6 +112,7 @@ src/staging/blk_00b40000_o2.cpp	ref	0x00b580a0	?FUN_00b580a0@@YAXXZ	?FUN_00b580a
 src/staging/blk_00b40000_o2.cpp	ref	0x00b581c0	?FUN_00b581c0@@YAXXZ	?FUN_00b581c0@BGSDecalNode_s1b@@QAEXXZ
 src/staging/blk_00b40000_o2.cpp	ref	0x00b59c20	?FUN_00b59c20@fnv_00b5a480@@YAXXZ	?FUN_00b59c20@FUN_00b5a480_s1b@fnv_00b5a480@@QAEXXZ
 src/staging/blk_00b40000_o2.cpp	ref	0x00b5f0c0	?VisitNodeChildren@@YGXPAXH@Z	?FUN_00b5f0c0@FunSceneManager_s1b@@QAEXPAXH@Z
+src/staging/blk_00b60000_o2.cpp	ref	0x00b64020	?ProcessCommands@@YAXPAX0000@Z	?ProcessCommands@@YA_NPAX0000@Z
 src/staging/blk_00e40000_o2.cpp	def	0x00e54ad0	?FUN_00e54ad0@FUN_00e54ad0_cls@@QAEXXZ	?FUN_00e54ad0@FUN_00e54ad0_cls@@QAEMXZ
 src/staging/blk_00e40000_o2.cpp	def	0x00e54ae0	?GetHelperValueAsFloat@@YAMXZ	?GetHelperValueAsFloat@FUN_00e54ae0_s1b@@QAEMXZ
 src/staging/blk_00e40000_o2.cpp	ref	0x00e535a0	?FUN_00e535a0@@YAXHH@Z	?FUN_00e535a0@@YAMHH@Z
