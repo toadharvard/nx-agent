@@ -9,16 +9,22 @@
  *   - the Win32 API the code under test calls, wrapped at link time (-Wl,--wrap=EnterCriticalSection, ...), like
  *     TSan's interceptors: critical sections, events, semaphores and Interlocked* (full barriers, as on x86) give
  *     edges, CreateThread forks a clock, a wait on a thread handle joins it.
+ * Fences (C11 rules, so S12's weakened refcounts can be checked): a relaxed atomic read takes the location's
+ * release clock as pending, and an acquire fence joins what is pending (fence-acquire after reading a release
+ * sequence); a release fence snapshots the thread's clock, and a later relaxed store / RMW publishes that snapshot.
  * The platform layer itself is not instrumented. Races are counted and the first ones printed with the code
  * address of the access (map it with nm). Not instrumented itself. docs/PERF.md section 6.6. */
 #include <stdint.h>
 #include <stddef.h>
 
+/* C: the plain Interlocked* prototypes (fnvnx_win32.h's inline bodies are C++ gnu_inline; in C they would be
+ * external definitions next to sync.cpp's) */
+#define FNVNX_W32_IMPL 1
 #include "fnvnx_win32_ext.h"
 
 int printf(const char *f, ...);
 
-#define MAXT 32
+#define MAXT 64   /* thread slots are never reused: every case of mt_test together creates ~40 */
 #define NSYNC 4096
 #define NSHADOW (1u << 17)
 
@@ -27,6 +33,8 @@ typedef struct { uint32_t key; uint8_t wt, used; uint32_t wc; uint32_t r[MAXT]; 
 typedef struct { uint32_t key; int used; VC vc; } Sync;
 
 static VC g_vc[MAXT];
+static VC g_pend[MAXT];               /* releases read by relaxed atomics since the last acquire fence */
+static VC g_relf[MAXT];               /* the clock at the last release fence */
 static int g_nthreads = 1;            /* slot 0: the main thread */
 static Sync g_sync[NSYNC];
 static Shadow g_shadow[NSHADOW];
@@ -111,8 +119,14 @@ void __tsan_write_range(void *p, size_t n) { for (size_t i = 0; i < n; i += 4) a
 /* memory orders as GCC passes them: 0 relaxed, 1 consume, 2 acquire, 3 release, 4 acq_rel, 5 seq_cst */
 static int is_acq(int mo) { mo &= 0xFFFF; return mo == 1 || mo == 2 || mo >= 4; }
 static int is_rel(int mo) { mo &= 0xFFFF; return mo >= 3; }
-static void pre(const volatile void *p, int mo) { if (is_rel(mo)) hb_release(p); }
-static void post(const volatile void *p, int mo) { if (is_acq(mo)) hb_acquire(p); }
+static void pre(const volatile void *p, int mo) {
+    if (is_rel(mo)) { hb_release(p); return; }
+    lk(); int t = me(); join(&sync_of((uint32_t)(uintptr_t)p)->vc, &g_relf[t]); ulk();   /* after a release fence */
+}
+static void post(const volatile void *p, int mo) {
+    if (is_acq(mo)) { hb_acquire(p); return; }
+    lk(); int t = me(); join(&g_pend[t], &sync_of((uint32_t)(uintptr_t)p)->vc); ulk();  /* for an acquire fence */
+}
 
 #define ATOMICS(n, T) \
     T __tsan_atomic##n##_load(const volatile T *a, int mo) { T v = __atomic_load_n(a, __ATOMIC_SEQ_CST); post(a, mo); return v; } \
@@ -130,7 +144,13 @@ static void post(const volatile void *p, int mo) { if (is_acq(mo)) hb_acquire(p)
     T __tsan_atomic##n##_compare_exchange_val(volatile T *a, T c, T v, int mo, int fmo) { \
         __tsan_atomic##n##_compare_exchange_strong(a, &c, v, mo, fmo); return c; }
 ATOMICS(8, uint8_t) ATOMICS(16, uint16_t) ATOMICS(32, uint32_t) ATOMICS(64, uint64_t)
-void __tsan_atomic_thread_fence(int mo) { (void)mo; }
+void __tsan_atomic_thread_fence(int mo) {
+    lk();
+    int t = me();
+    if (is_acq(mo)) join(&g_vc[t], &g_pend[t]);
+    if (is_rel(mo)) { g_relf[t] = g_vc[t]; g_vc[t].c[t]++; }
+    ulk();
+}
 void __tsan_atomic_signal_fence(int mo) { (void)mo; }
 
 /* ---- Win32 interceptors (the test links with -Wl,--wrap=<name> for each) */
@@ -185,6 +205,9 @@ ILK(InterlockedDecrement, (volatile LONG *p), __real_InterlockedDecrement(p))
 ILK(InterlockedExchange, (volatile LONG *p, LONG v), __real_InterlockedExchange(p, v))
 ILK(InterlockedExchangeAdd, (volatile LONG *p, LONG v), __real_InterlockedExchangeAdd(p, v))
 ILK(InterlockedCompareExchange, (volatile LONG *p, LONG x, LONG c), __real_InterlockedCompareExchange(p, x, c))
+/* the inline Interlocked* of fnvnx_win32.h hand a misaligned operand to sync.cpp's split lock */
+LONG __real_fnvnx_interlocked_slow(int op, volatile LONG *p, LONG a, LONG b);
+ILK(fnvnx_interlocked_slow, (int op, volatile LONG *p, LONG a, LONG b), __real_fnvnx_interlocked_slow(op, p, a, b))
 
 static DWORD hb_trampoline(LPVOID p) {
     HbThread *t = p;

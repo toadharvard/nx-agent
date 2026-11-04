@@ -7,10 +7,14 @@
 #
 #   tests/s5/farm_boot.sh <commit> <out dir> [image]
 #
-# image: the FalloutNV.exe the guest maps. Default: $FNVNX_IMAGE, else the link's boot/synth.exe (S14's synthesized
-# image as the farm made it), else none (the empty image). Boots ($FARM_BOOTS, default "raw stub"), all with
-# --skip-faulting-init: raw, and stub with the known-fault table (--stub-faults tests/s5/known_faults.txt,
-# docs/TOOLCHAIN.md section 18).
+# image: the FalloutNV.exe the guest maps (put at switch/fnv/, NX1's SD layout, and at fnvnx/game/, where guests
+# linked before NX1 look for it). Default: $FNVNX_IMAGE, else the link's boot/synth.exe (S14's synthesized
+# image as the farm made it), else none (the empty image). Boots ($FARM_BOOTS, default "raw slots stub"), all with
+# --skip-faulting-init: raw; slots, raw plus the exe's vftable slots in the native vtables' trap slots
+# (--exe-vtables, the stand-in for S2c's link fix; needs the image); and stub with the known-fault table
+# (--stub-faults tests/s5/known_faults.txt, docs/TOOLCHAIN.md section 18). slots and stub also map
+# toolchain/game/heap_standin.c, compiled here (--inject; aarch64-linux-gnu-gcc), so a guest linked before a weak
+# stand-in there was added boots as a new link would; a guest that has the function keeps its own.
 #
 # Output in <out dir>. It must be outside the repository, because everything there is derived from the decomp:
 #   link/              the fetched link outputs (not with FARM_LINK_DIR)
@@ -27,7 +31,7 @@
 #                   $FARM_HOME/artifacts, cloned on first use)
 #   FARM_LINK_DIR   a local link (a dir with out/ and fixed/, e.g. the pipeline's build/link) instead of the branch
 #   FARM_GUEST_DIR  a dir with guest.nso and fnvnx.elf (e.g. the pipeline's build/guest): boot that guest as it is
-#   FARM_BOOTS      the boots to run, from "raw stub" (default both)
+#   FARM_BOOTS      the boots to run, from "raw slots stub" (default all three)
 #   FARM_UNITS      a units.json instead of the one from t/<commit12>
 #   FARM_RELINK     1: link the guest here even when the link has one (about 1.5 minutes)
 #   FARM_PIN        1: pack the farm's guest pinned to its link base (elf2nso --pin; default relocatable, as the
@@ -47,7 +51,7 @@ if [ -z "${ARTIFACTS:-}" ]; then
 fi
 ARTIFACTS_URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
 C12=${COMMIT:0:12}
-BOOTS=${FARM_BOOTS:-raw stub}
+BOOTS=${FARM_BOOTS:-raw slots stub}
 EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-6000000000}
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
@@ -122,14 +126,35 @@ if [ -z "$UNITS" ] && git -C "$ARTIFACTS" fetch -q origin "+refs/heads/t/$C12:re
 fi
 
 # --- boots ----------------------------------------------------------------------------------------------------------
+ADDRMAP=""
+[ -f "$LINK/out/addrmap.tsv" ] && ADDRMAP=$LINK/out/addrmap.tsv
+INJECT=()
+if command -v aarch64-linux-gnu-gcc > /dev/null \
+    && aarch64-linux-gnu-gcc -mabi=ilp32 -O2 -fno-asynchronous-unwind-tables -c "$ROOT/toolchain/game/heap_standin.c" \
+       -o "$OUT/heap_standin.o" 2> "$OUT/heap_standin.log"; then
+  INJECT=(--inject "$OUT/heap_standin.o")
+else
+  log "heap_standin.c not compiled (aarch64-linux-gnu-gcc): slots and stub boot without it"
+fi
+# The exe's ini files next to it (fnv-nx-build gamedata/exe: Fallout_default.ini, low/medium/high/VeryHigh.ini; the
+# game copies Fallout_default.ini to My Games/FalloutNV/FALLOUT.INI and stops in WinMain without it). They go where
+# the exe goes. Nothing is placed for the synthesized image.
+GAMEFILES=()
+if [ -n "$IMAGE" ]; then
+  for f in "$(dirname "$IMAGE")"/*.ini; do
+    [ -f "$f" ] || continue
+    b=$(basename "$f")
+    GAMEFILES+=(--file "switch/fnv/$b=$f" --file "fnvnx/game/$b=$f")
+  done
+fi
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift
   log "boot $tag"
   local rc=0 root=$OUT/sdmc-$tag
   rm -rf "$root"; mkdir -p "$root"
   timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "fnvnx/game/FalloutNV.exe=$IMAGE"} \
-    --summary-json "$OUT/boot_summary_$tag.json" "$@" \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE" --file "fnvnx/game/FalloutNV.exe=$IMAGE"} "${GAMEFILES[@]}" \
+    ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"
   echo "$rc" > "$OUT/emu_$tag.rc"
@@ -143,8 +168,9 @@ boot() {   # boot <tag> [extra emu_guest.py args]
 for tag in $BOOTS; do
   case "$tag" in
     raw) boot raw ;;
-    stub) boot stub --stub-faults "$HERE/known_faults.txt" ;;
-    *) echo "farm_boot: unknown boot '$tag' (FARM_BOOTS: raw stub)" >&2; exit 1 ;;
+    slots) boot slots --exe-vtables "${INJECT[@]}" ;;
+    stub) boot stub --stub-faults "$HERE/known_faults.txt" "${INJECT[@]}" ;;
+    *) echo "farm_boot: unknown boot '$tag' (FARM_BOOTS: raw slots stub)" >&2; exit 1 ;;
   esac
 done
 
@@ -162,8 +188,8 @@ done
     L=$OUT/emu_$tag.log
     echo
     echo "## boot $tag (exit $(cat "$OUT/emu_$tag.rc"))"
-    grep -h "memory manager after construction\|memory manager before WinMain\|static initialisers done\|initializers skipped\|calling WinMain\|WinMain returned\|stub-faults:\|before-winmain:" "$L" || true
-    grep -h "^stubbed-fault\|^replaced-call" "$L" | cut -f1-4 | head -25 || true
+    grep -h "exe-vtables:\|inject:\|memory manager after construction\|memory manager before WinMain\|static initialisers done\|initializers skipped\|calling WinMain\|WinMain returned\|stub-faults:\|before-winmain:" "$L" || true
+    grep -h "^stubbed-fault\|^replaced-call\|^vslot-past-end" "$L" | cut -f1-5 | head -25 || true
     grep -h "^skip-summary" "$L" | cut -f1-4 | head -8 || true
     sed -n '/^== trace/,/^   #4 /p' "$L" | head -14
     grep -h "^STOPPED\|^deadlock" "$L" || echo "(no stop line: timeout or normal end, see emu_$tag.log)"

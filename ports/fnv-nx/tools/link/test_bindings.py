@@ -88,7 +88,20 @@ SRC = {
     'src/r.cpp': 'struct RTTI { const char *name; RTTI(const char *n); };\n'      # split globals (compiled -O2)
                  '__attribute__((noinline)) RTTI::RTTI(const char *n) : name(n) {}\n'
                  'RTTI ms_kRTTI("Seq");\nconst RTTI *GetRTTI() { return &ms_kRTTI; }\n'
-                 'int g_count = 5;\nint *g_pcount = &g_count;\nint bump() { return ++g_count; }\n',
+                 'int g_count = 5;\nint *g_pcount = &g_count;\nint bump() { return ++g_count; }\n'
+                 # a second definition of g_count's image address in the same object (tesform.cpp, S2c-abi)
+                 'namespace fnv_00401230 { int g_count; int bump2() { return ++g_count; } }\n',
+    # S2c-abi: an override of a secondary base's virtual, entered by MSVC with this at the base (thisadj.py)
+    'src/mi.cpp': 'struct A { virtual void fa(); int a; };\nstruct B { virtual int fb(int); int b; };\n'
+                  'struct D : A, B { void fa(); int fb(int); int d; };\n'
+                  'void A::fa() {}\nint B::fb(int x) { return x; }\nvoid D::fa() {}\nint D::fb(int x) { return d + x; }\n',
+    # V2 T1: a shell declared at D's B subobject calls D::fb's address directly, passing the subobject
+    'src/sub.cpp': 'struct Sub { int fb(int); int b; };\nint call_sub(Sub *s) { return s->fb(1); }\n',
+    # a variable placed at a .text address nothing defines: its address is the x86 value (S2c-abi)
+    'src/ta.cpp': 'extern const char g_011c5a4c_arg1[];\nconst char *ta_arg() { return g_011c5a4c_arg1; }\n'
+                  # V2 X2: a char label at a .text address passed to a call (atexit) may be code: no absolute value
+                  'extern char UNK_00fdd3b0;\nextern char FUN_00a00010;\nvoid reg_cb(void *);\nvoid *g_dat;\n'
+                  'void ta_reg() { reg_cb(&UNK_00fdd3b0); g_dat = &FUN_00a00010; }\n',
     'src/g.cpp': 'unsigned long fnvnx_game_GetCurrentThreadId();\n'                # GAME1 spellings
                  'extern "C" void fnvnx_game_EnterCriticalSection(void *);\nvoid fnvnx_game_Sleep(unsigned long);\n'
                  'struct CS;\nvoid fnvnx_game_LeaveCriticalSection(CS *);\n'   # C++ linkage, C++-decorated import
@@ -170,9 +183,18 @@ UNITS = {'units': [
                  '??_7Named@@6B@': '0x01000700', '_DAT_01000800': '0x01000800', '_DAT_01000810': '0x01000810',
                  '_FUN_00ee6df2': '0x00ee6df2'}},
     {'source': 'src/r.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
-        F(0x401200, '??0RTTI@@QAE@PBD@Z'), F(0x401210, '?GetRTTI@@YAPBURTTI@@XZ'), F(0x401220, '?bump@@YAHXZ')],
+        F(0x401200, '??0RTTI@@QAE@PBD@Z'), F(0x401210, '?GetRTTI@@YAPBURTTI@@XZ'), F(0x401220, '?bump@@YAHXZ'),
+        F(0x401230, '?bump2@fnv_00401230@@YAHXZ')],
      'symbols': {'?ms_kRTTI@@3URTTI@@A': '0x01000a00', '?g_count@@3HA': '0x01000a10',
+                 '?g_count@fnv_00401230@@3HA': '0x01000a10',
                  '?g_pcount@@3PAHA': '0x01000a20'}},
+    {'source': 'src/mi.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x401580, '?fb@D@@UAEHH@Z'), F(0x401590, '?fa@D@@UAEXXZ')], 'symbols': {}},
+    {'source': 'src/sub.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x4015a0, '?call_sub@@YAHPAUSub@@@Z')],
+     'symbols': {'?fb@Sub@@QAEHH@Z': '0x00401580'}},
+    {'source': 'src/ta.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401240, '?ta_arg@@YAPBDXZ'), F(0x401250, '?ta_reg@@YAXXZ')],
+     'symbols': {'?g_011c5a4c_arg1@@3QBDB': '0x00a00000', '?UNK_00fdd3b0@@3DA': '0x00fdd3b0',
+                 '?FUN_00a00010@@3DA': '0x00a00010'}},
     {'source': 'src/g.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401400, '?game_calls@@YAHPAX@Z')],
      'symbols': {'?GetCurrentThreadId@@YGKXZ': '0x00830470', '__imp__EnterCriticalSection@4': '0x00fdf008',
                  '?Sleep@@YGXK@Z': '0x00401410',
@@ -293,6 +315,9 @@ def main():
         run([CXX, '-mabi=ilp32', '-O2', '-c', os.path.join(tree, 'src/r.cpp'), '-o', anchored])
         r_anchor = local_refs_into(anchored, ('ms_kRTTI', 'g_count', 'g_pcount'))
         out, fixed = os.path.join(t, 'out'), os.path.join(t, 'fixed')
+        sec = os.path.join(t, 'secondary.tsv')   # what thisadj reads from the exe's vftables: D::fb only in B's
+        open(sec, 'w').write('00401580\t8\n')
+        os.environ['FNVNX_SECONDARY_ENTRIES'] = sec
         run([sys.executable, FNVLINK, 'resolve', units, os.path.join(t, 'objects.tsv'), out, '--crt-symbols',
              os.path.join(plat, 'crt_symbols.tsv'), '--imports', os.path.join(plat, 'imports.tsv'),
              '--units-renames', os.path.join(plat, 'units_renames.tsv')])
@@ -429,6 +454,27 @@ def main():
               'TLS slot offset in the block')
         check(sym.get('__fnv_01000600', (0, -1))[1] == sym.get('_ZTV4Poly', (0, 0))[1] + 8, 'linked vptr value')
         check(sym.get('__fnv_01000a00', (0, -1))[1] == 0x01000a00, 'rebound variable at its image address')
+        check(rows.get(0x401580, [''] * 4)[2:4] == ['__fnvnx_msvc_00401580', '_ZThn8_N1D2fbEi'] and
+              rows.get(0x401590, [''] * 3)[2] == '__fnv_00401590' and
+              sym.get('__fnvnx_msvc_00401580', (0, -1))[1] == sym.get('_ZThn8_N1D2fbEi', (0, -2))[1] and
+              sym.get('__fnv_00401580', (0, -1))[1] == sym.get('_ZN1D2fbEi', (0, -2))[1],
+              'secondary-base override: the map names the thunk, __fnv_ stays the primary entry: %s %s' % (
+                  rows.get(0x401580), rows.get(0x401590)))
+        r_ = refs.get(('src/sub.cpp', '_ZN3Sub2fbEi'), [''] * 6)
+        check(r_[5] == '__fnvnx_msvc_00401580', 'a call through a shell at the subobject reaches the thunk: %s' % r_)
+        r_ = refs.get(('src/ta.cpp', 'UNK_00fdd3b0'), [''] * 6)
+        r2_ = refs.get(('src/ta.cpp', 'FUN_00a00010'), [''] * 6)
+        check(r_[2] == 'extern-text' and r2_[2] == 'text-addr',
+              'a char label passed to a call stays extern-text, one stored as data is text-addr: %s %s' % (r_, r2_))
+        r_ = refs.get(('src/ta.cpp', 'g_011c5a4c_arg1'), [''] * 6)
+        check(r_[2] == 'text-addr' and sym.get('__fnvnx_textaddr_00a00000', (0, -1))[1] == 0x00a00000,
+              'a variable at an undefined .text address -> absolute symbol there: %s %s' % (
+                  r_, sym.get('__fnvnx_textaddr_00a00000')))
+        check(sym.get('__fnv_01000a10_d1', (0, -1))[1] == 0x01000a10 and
+              '__fnv_01000a10_d1 = __fnv_01000a10;' in ld_ and
+              '__fnv_01000a10_d1' in set().union(*(v for k, v in by.items() if k.startswith('.text'))),
+              'a second definition of the address in one object reaches the image too: %s' % (
+                  sym.get('__fnv_01000a10_d1'),))
     print('ok' if ok else 'FAILED')
     sys.exit(0 if ok else 1)
 

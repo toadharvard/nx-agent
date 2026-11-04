@@ -132,6 +132,13 @@ def address_points(ents):
     return pts
 
 
+def slots_at(ents, ap):
+    """Number of slots of the vtable at address point ap (byte offset in the group): up to the next vtable's
+    (offset-to-top, typeinfo) pair or the group's end."""
+    nxt = [p for p, _ in address_points(ents) if p > ap]
+    return ((nxt[0] - 8) if nxt else 4 * len(ents)) // 4 - ap // 4
+
+
 _slot_cache = {}
 
 
@@ -354,14 +361,19 @@ def spelling(text, canon_type, split_qual):
 
 
 def load_synth(out):
-    """synth.tsv -> [(host unit, object path)] for the objects that exist."""
+    """synth.tsv -> [(host unit, object path)] for the objects that exist. A path that does not exist is looked
+    for in this out dir's vtables/ under its own name: an out dir seeded from another machine's run (LINK_SEED, a
+    published link's out/vtables) lists that machine's absolute paths."""
     path = os.path.join(out, 'vtables', 'synth.tsv')
     res = []
     if os.path.exists(path):
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
             f = line.rstrip('\n').split('\t')
-            if not line.startswith('#') and len(f) >= 2 and os.path.exists(f[1]):
-                res.append((f[0], f[1]))
+            if line.startswith('#') or len(f) < 2:
+                continue
+            p = f[1] if os.path.exists(f[1]) else os.path.join(out, 'vtables', os.path.basename(f[1]))
+            if os.path.exists(p):
+                res.append((f[0], p))
     return res
 
 
@@ -416,19 +428,25 @@ def probe_items(k, t, phase, nd=0, na=0):
     return items
 
 
-def compile_probe(tree, workdir, unit, items, tag, extra=()):
+def compile_probe(tree, workdir, unit, items, tag, extra=(), prelude=None, game=False):
     """items: [(class k, item name, line)]. Drops the items GCC reports errors in (probe lines named by an error
-    or by its 'required from' notes; an 'info' failure drops the whole class) and recompiles.
+    or by its 'required from' notes; an 'info' failure drops the whole class) and recompiles. game: the object is
+    linked into the game (emitted slot functions, synthesized bodies), so it compiles with compile.sh's own flags
+    (layout.game_flags) plus extra; else with the probe flags (layout.flags at -O0: only read).
     -> (Obj or None, surviving items)."""
     base = unit.replace('/', '_') + '.' + tag
     src, obj = os.path.join(workdir, base + '.cpp'), os.path.join(workdir, base + '.o')
     alive = list(items)
-    fl = [f if f != '-O2' else '-O0' for f in layout.flags(tree)] + list(extra)
-    head = HEAD + '#include "%s"\n' % os.path.join(tree, unit)
+    fl = (layout.game_flags(tree, workdir) if game else
+          [f if f != '-O2' else '-O0' for f in layout.flags(tree)]) + list(extra)
+    # prelude: what goes before the unit (default HEAD; bodies.py passes '': <typeinfo> before a unit that defines
+    # its own std::exception does not compile)
+    head = (HEAD if prelude is None else prelude) + '#include "%s"\n' % os.path.join(tree, unit)
     first = head.count('\n') + 1
     srcfile = os.path.join(tree, unit)
     key = hashlib.sha1(('%s|%s|%s' % (' '.join(fl).replace(tree, '<tree>'), layout.unit_key(tree, unit),
-                                      '\n'.join(line for _, _, line in alive))).encode()).hexdigest()
+                                      '\n'.join(line for _, _, line in alive))
+                       + ('' if prelude is None else '|prelude:' + prelude)).encode()).hexdigest()
     done = os.path.join(workdir, base + '.done.json')
     try:
         d = json.load(open(done))
@@ -654,7 +672,7 @@ def demangle(names):
 
 LD = os.environ.get('LD', 'aarch64-linux-gnu-ld')
 OBJCOPY = os.environ.get('OBJCOPY', 'aarch64-linux-gnu-objcopy')
-EMIT_FLAGS = ('-O2', '-fkeep-inline-functions', '-ffunction-sections', '-fdata-sections', *layout.PIC)
+EMIT_FLAGS = ('-fkeep-inline-functions', '-ffunction-sections', '-fdata-sections')   # on top of compile.sh's flags
 INIT_SECTIONS = ('.init_array', '.fini_array', '.preinit_array', '.ctors', '.dtors')
 
 
@@ -692,7 +710,7 @@ def extract_host(tree, workdir, unit, classes, want):
     for k, sp, enc in classes:
         items.append((k, 'dtor', 'namespace __fnvnx_vt { typedef %s E%d; extern "C" void __fnvnx_vte_%d(E%d *p) '
                       '{ p->E%d::~E%d(); } }' % (sp, k, k, k, k, k)))
-    obj3, alive3 = compile_probe(tree, workdir, unit, items, 'vt3', EMIT_FLAGS)
+    obj3, alive3 = compile_probe(tree, workdir, unit, items, 'vt3', EMIT_FLAGS, game=True)
     if obj3 is None:
         return None, set()
     have = {n for n in obj3.defs if obj3.bind(n) != 'local'}
@@ -709,7 +727,7 @@ def extract_host(tree, workdir, unit, classes, want):
         return None, set()
     inputs.append(clean)
     if items4:
-        obj4, _ = compile_probe(tree, workdir, unit, items4, 'vt4', ('-O2', *layout.PIC))
+        obj4, _ = compile_probe(tree, workdir, unit, items4, 'vt4', game=True)
         clean4 = os.path.join(workdir, base + '.vt4s.o')
         if obj4 is not None and strip_init(obj4.path, clean4):
             have |= {n for n in obj4.defs if n.startswith('_Z') and obj4.bind(n) != 'local'}
@@ -971,7 +989,7 @@ def run(out, tree, jobs=4):
         if not want or not classes:
             return h, None, want, set(), None
         src = os.path.join(tree, h)
-        key = hashlib.sha1(('emit4|%s|%s|%s|%s|%s' % (' '.join(layout.flags(tree) + list(EMIT_FLAGS)).replace(tree, '<tree>'), h,
+        key = hashlib.sha1(('emit5|%s|%s|%s|%s|%s' % (layout.game_flags_id(tree, work) + ' ' + ' '.join(EMIT_FLAGS), h,
                                                 layout.unit_key(tree, h),
                                                 ' '.join(sorted(want)), '|'.join(sp for _, sp, _ in classes))
                             ).encode()).hexdigest()

@@ -9,6 +9,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 static int g_fail, g_checks;
 #define CHECK(c) do { g_checks++; if (!(c)) { g_fail++; printf("FAIL %s:%d: %s\n", __func__, __LINE__, #c); } } while (0)
@@ -220,6 +221,41 @@ static void test_sort_property() {
     CHECK(bad == 0);
 }
 
+// two recording threads sort at once (S15-threads, render F2-F4 two-thread recording): each thread's result must be
+// its own set's stable order on every round. With a shared (static) histogram the rounds go wrong.
+struct SortJob {
+    nx::Packet pk[3000];
+    uint32_t order[3000], tmp[3000], ref[3000];
+    uint64_t keys[3000], ktmp[3000];
+    uint32_t n;
+    int bad;
+};
+static void* sort_thread(void* arg) {
+    SortJob* j = (SortJob*)arg;
+    for (int round = 0; round < 400; round++) {
+        nx::SortPackets(j->pk, j->n, j->order, j->tmp, j->keys, j->ktmp);
+        if (memcmp(j->order, j->ref, j->n * 4)) j->bad++;
+    }
+    return nullptr;
+}
+static void test_sort_two_threads() {
+    static SortJob job[2];
+    uint64_t rng = 777;
+    auto rnd = [&]() { rng = rng * 6364136223846793005ull + 1442695040888963407ull; return rng >> 11; };
+    for (int t = 0; t < 2; t++) {
+        SortJob& j = job[t];
+        j.n = t ? 3000 : 2111;
+        for (uint32_t i = 0; i < j.n; i++) { j.pk[i].key = (rnd() % 64) * (t ? 0x0100010001000100ull : 0x0001000100010001ull) ^ (rnd() << 40); j.ref[i] = i; }
+        std::stable_sort(j.ref, j.ref + j.n, [&](uint32_t a, uint32_t b) { return j.pk[a].key < j.pk[b].key; });
+        j.bad = 0;
+    }
+    pthread_t th[2];
+    for (int t = 0; t < 2; t++) CHECK(pthread_create(&th[t], nullptr, sort_thread, &job[t]) == 0);
+    for (int t = 0; t < 2; t++) pthread_join(th[t], nullptr);
+    CHECK(job[0].bad == 0);
+    CHECK(job[1].bad == 0);
+}
+
 static void test_epilogue_binds() {
     // epilogue blocks: shared by SetEpilogue while equal, and bound only when the contents change
     static RecBe be;
@@ -251,6 +287,7 @@ static void test_epilogue_binds() {
 int main() {
     test_epilogue_binds();
     test_sort_property();
+    test_sort_two_threads();
     test_ubo_ring_capacity();
     test_skin_palette();
     test_dynres();

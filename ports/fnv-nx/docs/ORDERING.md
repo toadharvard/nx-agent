@@ -40,11 +40,17 @@ A plain store in unit B to a field that unit A hands to InterlockedCompareExchan
 (x86: every store is a release). B cannot see that from its own text, so the ordering needs the whole program:
 
 * **Discovery.** `-fplugin-arg-fnvnx_order-discover=<file>` writes the unit's keys: its Interlocked operands (also
-  through forwarders, resolved after the whole unit is parsed) and its polled fields and globals, as
-  `field Class::member` / `var name`, sorted. It runs at PLUGIN_FINISH, so it works under `-fsyntax-only`.
+  through forwarders, and through a local pointer set from `&obj.m`) and its polled fields and globals, as
+  `field Class::member` / `var name`, sorted. It also writes the facts another unit completes: `fwd <fn> <i>` (a
+  public or inline function that hands its parameter i to Interlocked*), `pcall` (passes a parameter on) and
+  `call <fn> <i> <key>` (binds a field to a parameter of a function defined elsewhere). It runs at PLUGIN_FINISH,
+  so it works under `-fsyntax-only`.
+* **Merge.** `toolchain/order/keys_merge.py` resolves forwarders over all units to a fixed point (a forwarder defined
+  in unit A and called in unit B makes B's operand a key) and writes the `field` / `var` lines.
 * **The list.** `tools/link/compile.sh` has `ORDER_KEYS=${ORDER_KEYS:-<obj dir>/order.keys}` and keeps that file
   current itself: a syntax-only discovery pass over **all** units of units.json, not only the units it is asked to
-  compile, cached per unit in `<obj dir>/.keys/` (invalidated by the plugin, the shim headers and the flags). So a
+  compile, cached per unit in `<obj dir>/.keys/`: a unit is discovered again when it, or any header it includes (its
+  `.d` file from the last discovery), is newer, and every unit when the plugin, the shim headers or the flags change. So a
   shard, or a one-unit compile, sees the same list as the full build. The file is replaced only when its content
   changes; objects older than it are rebuilt. A missing `ORDER_KEYS=<file>` is an error, never a silent fallback.
   `ORDER_KEYS=unit` (in-unit discovery only) is for A/B runs and quick checks, never a build that runs. `KEYS_ONLY=1`
@@ -57,6 +63,29 @@ A plain store in unit B to a field that unit A hands to InterlockedCompareExchan
 * **Matching.** By record name and member name (`Class::member`, unqualified) and by variable name, as the gate's
   `atomic.keys`, which the plugin also reads. A name shared by two records or two statics orders both: over-ordering
   costs a few `ldar`/`stlr`, it does not change meaning. Members of unnamed records are ordered only in-unit.
+* **Record copies.** A load or store of a whole record (or array of records) that contains a keyed field, such as
+  `*p = *n` over a polled flag, keeps its plain access with fences (`dmb ish` before the store, `dmb ishld` after
+  the load), like a packed field.
+* **Pointer aliases.** A local pointer set from the address of a field or variable (`int *q = &w->done;`, also
+  copied to another local) carries it: a store or load through it (`*q = 1`) is ordered when its target is keyed.
+* **Break-test polls.** An endless loop (`for (;;)`, `while (1)`, `do ... while (1)`) whose body is only
+  `if (flag) break;` tests and waits is a plain poll like `while (!flag) Sleep(0);`.
+* **Shapes from the adversarial review** (synthetic cases in tests/s12/order wholeprog_a/b.cpp):
+  * operands: pointer arithmetic (`o->cnt + i`, `&arr[i]` on a pointer parameter), a conditional
+    (`c ? &a->m : &b->m`), a pointer to another type (`(LONG *)this`: the record's first member), a pointer field's
+    value (`InterlockedIncrement(c->m_pRef)`: a `pfield Class::member` key orders `*c->m_pRef = 1` elsewhere);
+  * polls: through a volatile cast or volatile pointer (the reader was ordered, now its writer is keyed too), through a
+    local pointer or reference, a bit-field (`!f->done`, which the front end folds into a BIT_FIELD_REF mask test)
+    and adjacent narrow flags compared together (folded into one wider load): a BIT_FIELD_REF is ordered when its
+    bits cover a keyed field; a wait in the for-increment (`for (; !flag; Sleep(0));`);
+  * records: a union member is keyed with its siblings, a member of an anonymous union or struct is named by the
+    enclosing named record (`U::lk`), a copy the front end turned into bytes (`MEM <unsigned char[6]>`, a class with
+    a base) is fenced through its alias type.
+  * the per-unit cache is keyed by a hash of the unit's path (`src/a_b.cpp` and `src_a/b.cpp` are different) and
+    refreshed when the unit's content changes, whatever its mtime.
+* **Still open** (listed, rarer): an Interlocked operand through a pointer to member, through a virtual forwarder
+  called on a base pointer, or returned by an accessor; a poll whose condition calls an inline accessor; a keyed
+  record passed by value or copied with memcpy.
 * **Cost of the pass:** about 0.6 CPU seconds per unit, a census of the tree without code generation.
 
 Modes for A/B measurements only (compile.sh `ORDER_MODE=off|tso`, `ORDER_ARGS=ltr`); `off` also selects the
@@ -216,30 +245,52 @@ Hot units only (40): the build is -0.02 % (12 ldar, 14 stlr, 4 dmb), and full TS
 * `-ftrivial-auto-var-init=zero` is not adopted: it costs +1.2 % (memsets of local buffers on every call) and does not
   change the W-UNINIT folding.
 
+## Uninitialized locals (W-UNINIT): `uninit=zero`
+
+The decomp reads locals it never wrote: matching devices such as `unsigned char qq; f(qq);`, a struct copied from an
+unwritten one, a flag passed through. MSVC passed whatever the register or stack slot held. GCC treats the value as
+undefined and folds through it (`int x; if (c) x = 5; return x == 5;` becomes `return 1`).
+
+A second pass of fnvnx_order, `fnvnx_uninit`, runs right after SSA is built (before GCC's own early uninit
+warning and before every optimizer). It replaces each use of the default definition of a local scalar (a read
+before any write on some path) with the constant 0: one fixed value, a valid stand-in for the junk, and no
+undefined value left. Parameters, the result, memory (addressable) locals, virtual operands and asm operands are
+not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B only).
+
+* tests/s12/order uninit.cpp: the fold above is gone with the pass and present with `keep` (the test bites); no
+  `-Wuninitialized` warning is left.
+* On the 11 W-UNINIT sites of the newest static report (shard 3), GCC's own warnings go from 11 to 0. The static
+  gate loads the same plugin (gcc_warn.sh), so its W-UNINIT count follows.
+* Memory locals (V1's U1-U3): an aggregate, an address-taken scalar or a small array becomes a register only after
+  SRA or address-taken promotion, later than the SSA pass. Before SSA, every such local of at most 64 bytes that the
+  function reads gets `x = {}` at its entry (dead-store elimination removes it where a write always comes first),
+  and its end-of-scope clobbers are dropped, so a loop-body local keeps its value across iterations like MSVC's
+  stack slot (U5: 21, as MSVC).
+* One of them is a member call whose object pointer is assigned inside its own argument list
+  (`obj->f(..., obj = X, ...)`): the decomp compiles to the original only if MSVC evaluates the object after the
+  arguments. With `object=last` the read is initialized. That is evidence for ORDER-OBJECT (below), for S11.
+
 ## Open, not closed by this
 
-* **ORDER-OBJECT** (`get()->f(a())`): GCC evaluates the object expression first (C++17), MSVC 2008 probably last. Not
-  confirmed against MSVC here, so the plugin keeps GCC's order; S11's MSVC builds can decide it.
-* **ORDER-OPERATOR** (C++17 fixes `<<`, `>>`, `[]`, `->*` left to right and `=`, `@=` right to left for overloaded
-  operators; MSVC 2008 evaluates an overloaded operator like any call): the plugin leaves `CALL_EXPR_ORDERED_ARGS`
-  calls alone. `-fstrong-eval-order=some` is the candidate flag; it needs S11's gate.
-
-Both are switchable now, with defaults that keep the order above (the objects are byte-identical with and without
-the two arguments; run.py checks it on evalorder.cpp and units.cpp). `-fplugin-arg-fnvnx_order-object=last` (default
-`first`) evaluates a member call's arguments right to left, then its object, then the callee, where the object and
-an argument can see each other: a direct call's `this` becomes the last element of the argument chain (the call
-stays direct), a virtual call gets the chain in front of its `OBJ_TYPE_REF` object, so the vtable load comes after
-the arguments too. Constructors, destructors and calls through a pointer to member keep the object first.
-`-fplugin-arg-fnvnx_order-operator=rtl` (default `cpp17`) clears `CALL_EXPR_ORDERED_ARGS` and orders those calls
-like any other (a free operator's left operand included, a member operator's object as `object=` says);
-`=` and `@=` stay as they are, right operand first, which is MSVC's push order too. `tests/s12/order/evalorder.cpp`
-(11 cases: direct and virtual member calls, a slot return, `<<` / `>>` chains, `[]`, `=`, `+=`, `-=`) is plain
-C++03 and builds with `cl /O2 /EHsc evalorder.cpp`. `evalorder.gcc.expect` is the defaults' output,
-`evalorder.msvc-guess.expect` that of `object=last operator=rtl`; run.py checks both and that they differ. The
-defaults stay until S11 runs evalorder.cpp under MSVC 2008 x86: its output becomes `evalorder.msvc.expect` (run.py
-then says which of the two it matches), and the build (compile.sh) follows that.
+* **ORDER-OBJECT / ORDER-OPERATOR / ORDER-ASSIGN: per shape, from MSVC.** S11 recorded MSVC 2008 (SP1 and RTM, /O2,
+  /O2 /Ob1, /Od) on `tests/s11/order/order.cpp`; compile.sh follows every case the five configurations agree on:
+  | shape | MSVC 2008 | compile.sh |
+  |---|---|---|
+  | direct member call `obj()->f(a())`, `(*obj()).f`, `ref().f`, chains, member operators (`<<` `>>` `[]` `+` `==` `()`) | arguments, then the object | `ORDER_OBJECT=msvc` |
+  | virtual call `obj()->vf(a())` | object first | `ORDER_OBJECT=msvc` (GCC's order) |
+  | virtual call on a prvalue `make().vf(a())` (GCC calls it directly) | object first (V2's P1) | `ORDER_OBJECT=msvc` (kept first) |
+  | call through a computed pointer `fp()(a())` | arguments, then the callee expression (V2's P2) | `ORDER_OBJECT=msvc` |
+  | static member through an object | object first | GCC's order |
+  | pointer to member `(obj()->*pmf())(a())` | arguments first (/O2: `aom`) | `ORDER_OBJECT=msvc` |
+  | free overloaded operator `y << a()`, `y + a()`, `a() - y` | right to left, as any call | `ORDER_OPERATOR=rtl` |
+  | member / free `=`, `+=` (overloaded) | right operand, then the object | GCC's order already |
+  | built-in compound assignment `*p() += a()` | left operand first | `ORDER_ASSIGN=msvc` |
+  | built-in `*p() = a()`, `a[i()] = b()` | differs between /O2 and /Od | GCC's order (= /Od) |
+  `tests/s12/order/run.py` builds order.cpp with compile.sh's defaults under qemu and checks every agreed case. The
+  earlier blanket `object=last` was wrong for virtual calls (V1's C2v) and is now only an A/B mode; compile.sh rebuilds
+  its objects when any of these options changes (V1's C4).
 * **POLL-PLAIN** beyond the wait-only loop shape (closed above): a flag tested inside a loop that does other work, or
   a pointer published with a plain store and read without a poll, is still a data race the A57 can break; such a
   site needs its field made volatile or keyed (a `field Class::member` line in a key file passed as ORDER_KEYS).
-* **W-UNINIT**: per site. GCC 13's `-ftrivial-auto-var-init=zero` does not stop it from folding an uninitialized
-  scalar path away (re-checked here), and it memsets every large local buffer on every call.
+* **W-UNINIT** in memory locals above 64 bytes: a buffer read before it is written keeps whatever the stack held.
+  GCC does not scalarize such a buffer, so it does not fold its loads as undefined.
