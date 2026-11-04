@@ -168,6 +168,10 @@ before this patch. Option taken: the narrow one - the arg-less helper sites and 
 objects hold 1,253 compiler-made `__ftol2_sse` calls (228 units, inline copies counted) and 10 `__ftol2` (8 units);
 routing every int conversion (S12's F2S site list, 536 "runtime" sites) through this helper is S12's FTOI2 rule,
 which should use this helper verbatim (and the unsigned ones the int64 truncation of FTOI1).
+With FTOI2 global (S12's plugin in compile.sh, ca2dcce, J-0110: every int / short / signed char conversion as
+`__ftol2_sse` = cvttsd2si) the helper and the 5 casts of `ftol1_casts.s1b` are redundant and harmless: test_ftol.py
+passes with the plugin loaded (same 48 values, still inline, 15 instructions). The operand restoration of the 17
+arg-less sites stays needed: the plugin sees no conversion where the decomp calls the helper without its operand.
 
 **RET1.** Of the 861 FALL1 sites on decomp code (after S1's two FALL1 fixes): 419 end only in jumps (unreachable
 trap, fine), about 220 end in a switch / loop / if without else / try (the x86 return value is not evident from the
@@ -194,6 +198,33 @@ The other 5 functions of S12's list have no FALL1 trap: InitWinsock 0x00da2ff0, 
 whenever `count > 0`: GCC replaces `va_arg(args, Index)` (an enum, promoted through `...`) by a trap - for S1 (VA:
 `(Index)va_arg(args, int)`). QuadRenderer::UploadQuads 0x00e723a0 has a reachable `brk` (`cbnz w1` falls into it)
 of another origin - for S12 / S1.
+
+## By-design MSVC differences (S11 gate)
+
+Every S1b site whose MSVC code is not identical to the pristine build, and why. Each one keeps the x86 semantics;
+the bytes differ because a per-unit MSVC cannot reproduce the exe's whole-program register allocation, or because
+the patch gives a value explicitly that the exe left in a register. S11's gate (`tools/equiv`, J-0113) can mark
+these rows as expected; any other S1b difference is a regression.
+
+| Rule | Source | Function | Difference |
+|---|---|---|---|
+| XINC1 | `src/gamebryo2.2/corelibs/nimain/bssegmentedtrishape.cpp` | 0x00a87120 | `mov ecx,esi` before the second call (FinalizeEntries keeps ecx in the exe) |
+| XINC1 | `src/gamebryo2.2/corelibs/nimain/bssegmentedtrishape.cpp` | 0x00a87130 | as 0x00a87120 |
+| XINC1 | `src/gamebryo2.2/corelibs/niconsolerenderer/nivbset.cpp` | 0x00e94490 | ecx reload after RemoveNode |
+| XINC1 | `src/havok/physics/utilities/weapons/hkpprojectilegun.cpp` | 0x00e44f30 | ecx reload after ClearProjectileFlags |
+| XINC1 | `src/gamebryo2.2/corelibs/nianimation/nicontrollersequence.cpp` | 0x00a30c80 | this and arg kept in saved registers across IsNotInChain (the exe keeps them in ecx / edx) |
+| XINC1 | `src/gamebryo2.2/corelibs/nimain/nicamera.cpp` | 0x00a712f0 | `mov ecx,esi` before UpdateWorldBound (UpdateWorldFrustum keeps ecx) |
+| XINC1 | `src/havok/physics/vehicle/hkpvehicleinstance.cpp` | 0x00e385e0 | `mov ecx,esi` before 0x00e38080 (0x00e376e0 keeps ecx) |
+| XINC1 | `src/gamebryo2.2/corelibs/niparticle/nipsysmodifierctlr.cpp` | 0x00c315b0 | one register choice after the member call (`ebx` for `eax`), same value |
+| XINC1 | `src/havok/common/internal/collide/tree/aabbtree/hkaabbtree.cpp` | 0x00d9be50 | one `push` scheduled later, same values |
+| XINC1 | `src/staging/blk_00ba0000_o2.cpp` | 0x00bb7f90 | `enabledData` read again (3 bytes) for the DynamicCast member call |
+| XINC1 | `src/staging/blk_00c80000_o2.cpp` | 0x00c90030 | pattern (d): the copy reads the sum through `lea` instead of operator+'s returned pointer (the same buffer) |
+| RET1 | `src/bssystemutilities/console/bsdlcsystemutility_console.cpp` | 0x00af28f0 | `xor eax,eax` for the 0 that was already in eax |
+| RET1 | `src/bsshader/bsdistanttreeshader.cpp` | 0x00bb62b0 | `lea eax,[edx-0x237]` for the `a - 0x237` the switch arithmetic left in eax |
+
+FTOL1 has none: with `fnvnx_ftol2_sse(x)` = `(int)(x)` under MSVC (`msvc/s1b_check_fi.h`, `tools/equiv/msvc/fnvnx_equiv_fi.h`)
+the patched calls are `_ftol2_sse` calls as in the exe; the gate's 9 "other helper" FTOL1 functions came from the
+earlier `fnvnx_ftol2(x)` = `(__int64)(x)`, which calls `_ftol2`.
 
 ## CRITICAL_SECTION on PC (the CS28 question)
 
