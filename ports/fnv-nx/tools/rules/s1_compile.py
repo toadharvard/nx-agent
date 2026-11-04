@@ -3516,5 +3516,79 @@ def r_lane_array_address(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address]
+# ---------------------------------------------------------------------------------------------------------- STD2
+#
+# A unit defines a function of namespace std at file scope, qualified: guardpackage.cpp's `double std::abs(float)`
+# (0x00408840, `?abs@std@@YANM@Z`, a float -> double helper the game linked in). DECL1 drops the decomp's
+# `namespace std { double abs(float); }` (libstdc++ declares `float std::abs(float)`), so GCC refuses the definition
+# ("should have been declared inside 'std'", "ambiguating new declaration"). STD2 renames the definition to the file
+# scope name fnvnx_std_<name> and, in a POST hook, the unit's recipe symbol `?<name>@std@@<sig>` to
+# `?fnvnx_std_<name>@@<sig>` (the same signature, MSVC's decoration of the new name). Callers bind the address
+# (their own declarations, e.g. `float FUN_00408840(float)`, keep their names); equiv's Fingerprinter takes the
+# renamed definition from the prepared recipe. Only where the unit's recipe defines `?<name>@std@@...` at the
+# address of the definition's `// @fnv` tag.
+
+STD2_DEF = re.compile(r'//\s*@fnv\s+(0x[0-9a-fA-F]{8})[^\n]*\n((?:[A-Z_]+\s+)*[^\n;{}()]*?)\bstd::([A-Za-z_]\w*)\s*\(')
+STD2_RENAMES = set()      # (unit source, address, old symbol, new symbol), filled while the tree is prepared
+_STD2_FNS = None
+
+def _std2_functions(path):
+    """{absolute unit source: {address: symbol}} of the recipe's definitions in namespace std."""
+    global _STD2_FNS
+    if _STD2_FNS is not None: return _STD2_FNS
+    import json
+    _STD2_FNS = {}
+    root, uj = prepare._units_json(path)
+    if uj:
+        for u in json.load(open(uj))['units']:
+            fns = {f['address']: f['symbol'] for f in u.get('functions', []) if '@std@@' in f.get('symbol', '')}
+            if fns: _STD2_FNS[os.path.normpath(os.path.join(root, u['source']))] = (u['source'], fns)
+    return _STD2_FNS
+
+def r_std_definitions(path, text, stats):
+    """STD2: a file-scope `R std::f(...)` definition the recipe decorates `?f@std@@...` -> `R fnvnx_std_f(...)`
+    (and the recipe's symbol renamed by the POST hook rename_std_definitions; see above)."""
+    if 'std::' not in text or '@fnv' not in text or not path.endswith('.cpp'): return text
+    entry = _std2_functions(path).get(os.path.normpath(os.path.abspath(path)))
+    if not entry: return text
+    src, fns = entry
+    spans = None
+    out, pos = [], 0
+    for m in STD2_DEF.finditer(text):
+        addr, name = m.group(1).lower(), m.group(3)
+        sym = fns.get(addr)
+        if not sym or not sym.startswith('?%s@std@@' % name): continue
+        if spans is None: spans = prepare.scope_spans(text)
+        if prepare.scope_chain(spans, m.start(3)): continue              # not at file scope
+        a = m.start(3) - len('std::')
+        out.append(text[pos:a]); out.append('fnvnx_std_' + name); pos = m.end(3)
+        STD2_RENAMES.add((src, addr, sym, '?fnvnx_std_%s@@%s' % (name, sym[len('?%s@std@@' % name):])))
+        stats['STD2'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
+def rename_std_definitions(out_root, stats, files=None):
+    """POST hook: STD2's recipe renames in <out_root>/build/units.json."""
+    import json
+    if not STD2_RENAMES: return
+    p = os.path.join(out_root, 'build', 'units.json')
+    if not os.path.exists(p): return
+    data = json.load(open(p))
+    by_src = {}
+    for src, addr, old, new in STD2_RENAMES:
+        by_src.setdefault(src, {})[(addr, old)] = new
+    n = 0
+    for u in data['units']:
+        for fn in u.get('functions', []):
+            new = by_src.get(u['source'], {}).get((fn['address'], fn['symbol']))
+            if new: fn['symbol'] = new; n += 1
+    if n:
+        stats['STD2-DEF'] += n
+        json.dump(data, open(p, 'w'))
+        if files is not None: files['STD2-DEF'] += 1
+
+POST.append(rename_std_definitions)
+
+REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions]
 RULES += REFS_RULES
