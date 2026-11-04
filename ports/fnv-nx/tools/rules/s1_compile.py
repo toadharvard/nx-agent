@@ -2218,6 +2218,71 @@ def r_pointer_zero_compares(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- STAND1
+#
+# One function per address. Some units carry an untagged stand-in next to the tagged definition of the same address:
+# blk_00620000_od.cpp has a global `struct FUN_00632ec0 { char m_data[0x114]; FUN_00632ec0(); }` with an empty
+# constructor, while the tagged `fnv_00632ec0::FUN_00632ec0::FUN_00632ec0` (0x00632ec0) stores the vptr; the recipe
+# binds the stand-in's name ??0FUN_00632ec0@@QAE@XZ to 0x00632ec0 too. MSVC's /Od code called the stand-in by name
+# and the link took it to 0x00632ec0; GCC inlines the empty body and `new FUN_00632ec0` leaves the vptr 0 (S5 g4:
+# 60 null reads). STAND1 removes an untagged out-of-class or free definition whose MSVC name the unit's units.json
+# symbols bind to an address that a tagged definition in the same unit provides: the calls stay calls of that name,
+# which the link binds to the tagged function's address. A free function keeps its declaration.
+
+STAND_DEF = re.compile(r'^[ \t]*((?:[\w:<>,\*&]+[ \t\*&]+)*?)((?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*)\s*'
+                       r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?(?::[^;{}]*)?\{', re.M)
+FNV_TAG_ADDR = re.compile(r'//[ \t]*@fnv[ \t]+0x([0-9a-fA-F]+)')
+NOT_FUNCTIONS = set('if for while switch return sizeof catch do else'.split())
+
+def r_stand_in_definitions(path, text, stats):
+    """STAND1: drop untagged definitions bound to the address of a tagged definition in the same unit (see above)."""
+    if not path.endswith('.cpp') or '@fnv' not in text: return text
+    syms = _unit_symbols(path)
+    if not syms: return text
+    tagged = {int(a, 16) for a in FNV_TAG_ADDR.findall(text)}
+    spans, edits = None, []
+    for m in STAND_DEF.finditer(text):
+        q = re.sub(r'\s+', '', m.group(2))
+        parts = q.split('::')
+        if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS: continue
+        if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', m.group(1) or ''): continue
+        before = text[max(0, m.start() - 400):m.start()]
+        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if spans is None: spans = prepare.scope_spans(text)
+        chain = prepare.scope_chain(spans, m.start())
+        if any(k != 'namespace' for k, _ in chain): continue
+        ns = [h.split()[-1] for _, h in chain if h.split()[-1] != 'namespace']
+        scope = list(reversed(parts[:-1])) + list(reversed(ns))
+        name = parts[-1]
+        if len(parts) >= 2 and name == parts[-2]: prefix = '??0' + '@'.join(scope) + '@@'
+        elif name.startswith('~'): prefix = '??1' + '@'.join(scope) + '@@'
+        else: prefix = '?' + '@'.join([name] + scope) + '@@'
+        if not any(k.startswith(prefix) and int(a, 16) in tagged for k, a in syms.items()): continue
+        o = m.end() - 1
+        c = prepare.match_brace(text, o)
+        start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
+        for _ in range(3):                                 # the head may begin on the lines above
+            ls = text.rfind('\n', 0, start - 1) + 1 if start > 0 else 0
+            prev = text[ls:start].strip()
+            if not prev or prev.startswith(('#', '//')) or prev.endswith((';', '}', '{', '*/', ':', ')')): break
+            start = ls
+        nl = '\n' * text.count('\n', start, c)
+        if len(parts) == 1:                                # a free function keeps its declaration
+            if re.search(r'\bstatic\b', m.group(1) or ''): continue     # internal: the link cannot rebind it
+            head = text[start:o].rstrip()
+            head = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', head)
+            edits.append((start, c, head + '; /* fnv-nx STAND1 */' + nl[head.count('\n'):]))
+        else:
+            edits.append((start, c, '/* fnv-nx STAND1: %s is the function at the tagged address */%s' % (q, nl)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(r); pos = b
+        stats['STAND1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2242,5 +2307,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout]

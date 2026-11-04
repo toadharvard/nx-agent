@@ -354,6 +354,29 @@ check('PTR1 ordered compares of a function / pointer with 0',
           '    if (!(GetTime64 > 0)) return;\n    if (c > 0 && n > 0 && q <= 0) return;\n}\n'),
       ['!(GetTime64 != 0)', 'c != 0 && n > 0 && q == 0'])
 
+# ---- STAND1 (needs a units.json: a small tree of its own; the symbol cache is reset around it)
+import json as _json
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {'??0FUN_00632ec0@@QAE@XZ': '0x00632ec0',
+                                                                 '?Helper@@YAHXZ': '0x00401230', '?Copy@@YAPAHU?$It@H@ns@@0@Z': '0x00401230',
+                                                                 '?Make@V@@QAEPAU1@H@Z': '0x00401230'}}]},
+           open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+got = run(s1.r_stand_in_definitions,
+          'struct FUN_00632ec0\n{\n    unsigned char m_data[0x114];\n    FUN_00632ec0();\n};\nFUN_00632ec0::FUN_00632ec0()\n{}\n'
+          'inline int Helper()\n{\n    return 0;\n}\nvoid f() { new FUN_00632ec0; Helper(); }\n'
+          'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b)\n{\n    return 0;\n}\n__declspec(noinline) V*\nV::Make(int n)\n{\n    return 0;\n}\n'
+          'namespace fnv_00632ec0 {\nstruct FUN_00632ec0 { FUN_00632ec0(); };\n// @fnv 0x00632ec0\n'
+          'FUN_00632ec0::FUN_00632ec0()\n{\n    ((int*)this)[0] = 1;\n}\n}\n// @fnv 0x00401230\nint Other()\n{\n    return 1;\n}\n',
+          os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND1 drops the stand-ins of tagged addresses', got,
+      ['/* fnv-nx STAND1: FUN_00632ec0::FUN_00632ec0 is the function at the tagged address */\n',
+       'int Helper(); /* fnv-nx STAND1 */', '((int*)this)[0] = 1;', 'void f() { new FUN_00632ec0; Helper(); }',
+       'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b); /* fnv-nx STAND1 */', '/* fnv-nx STAND1: V::Make is'],
+      ['__declspec(noinline) V*\n/*', 'FUN_00632ec0::FUN_00632ec0()\n{}'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
