@@ -72,6 +72,10 @@ CONFIG = [
                         'archive snapshot); in a checkout it must equal HEAD'),
     ('CENSUS', '1', '0: skip the -fsyntax-only census'),
     ('OVERRIDE', '', 'fnvlink resolve --override table (native replacements)'),
+    ('LINK_OVERRIDES', '', 'native replacements by name: render = render/native/overrides.tsv with --override-lib '
+                           'libnxrender.a (RENDER_LIB; the guest links the archive); empty: OVERRIDE only'),
+    ('RENDER_LIB', '', 'libnxrender.a for LINK_OVERRIDES=render; empty: built by render/native/n1/build.sh in the link '
+                       'stage (needs the toolchain stage\'s DEVKITPRO and fnvnx-a64, and UAM in the environment)'),
     ('EXTERN_TEXT', 'auto', 'fnvlink resolve --extern-text list: auto = made from the tree\'s units.json by '
                             'tools/pipeline/extern_text.py (S4\'s addr_ids.txt), none = off, or a file'),
     ('MSVC_OBJS', '', 'fnvlink resolve --msvc-objs: pristine MSVC 2008 objects (S11) for S2b\'s vtable slots'),
@@ -1562,6 +1566,41 @@ def link_exe(b):
     return os.path.abspath(exe) if exe and os.path.isfile(exe) else ''
 
 
+RENDER_LIB_SOURCES = ('render/native/front', 'render/native/capture', 'render/native/n1', 'render/native/include',
+                      'render/native/shaders', 'toolchain/include', 'toolchain/guest')
+
+
+def link_overrides(b):
+    """(override table, override archive, id for the fingerprint) of the link: LINK_OVERRIDES=render -> S6n's
+    render/native/overrides.tsv and libnxrender.a (RENDER_LIB, else '' = built by the stage from
+    RENDER_LIB_SOURCES); otherwise OVERRIDE and no archive."""
+    lo = b.cfg['LINK_OVERRIDES']
+    if lo in ('', 'none'):
+        ov = b.cfg['OVERRIDE']
+        return (os.path.abspath(ov) if ov else '', '', file_hash(ov))
+    if lo != 'render':
+        raise StageError('LINK_OVERRIDES=%s: only render (or empty) is known' % lo)
+    tsv = os.path.join(ROOT, 'render', 'native', 'overrides.tsv')
+    lib = os.path.abspath(b.cfg['RENDER_LIB']) if b.cfg['RENDER_LIB'] else ''
+    return (tsv, lib, 'render:%s:%s' % (file_hash(tsv), file_hash(lib) if lib else
+                                       'built:' + tree_hash(*RENDER_LIB_SOURCES)))
+
+
+def build_render_lib(b, r, d):
+    """libnxrender.a for LINK_OVERRIDES=render without RENDER_LIB: render/native/n1/build.sh <d>/render-n1 with the
+    toolchain stage's DEVKITPRO and fnvnx-a64 and the environment's UAM (render/native/env.sh --print)."""
+    dkp, prefix, uam = b.art('toolchain', 'devkitpro'), b.art('toolchain', 'prefix'), os.environ.get('UAM', '')
+    if not dkp or not prefix or not uam or not os.access(uam, os.X_OK):
+        raise StageError('LINK_OVERRIDES=render needs RENDER_LIB=<libnxrender.a>, or the toolchain stage\'s DEVKITPRO '
+                         'and fnvnx-a64 plus UAM=<uam> (render/native/env.sh) to build it')
+    out = os.path.join(d, 'render-n1')
+    b.say('link: libnxrender.a (render/native/n1/build.sh)')
+    path = os.pathsep.join([os.path.join(dkp, 'tools', 'bin'), os.path.join(prefix, 'bin'), os.environ.get('PATH', '')])
+    b.sh(['bash', os.path.join(ROOT, 'render', 'native', 'n1', 'build.sh'), out], r['log'],
+         env=b.env({'DEVKITPRO': dkp, 'UAM': uam, 'PATH': path}), check=True, timeout=3600)
+    return os.path.join(out, 'libnxrender.a')
+
+
 def objects_map(objects_tsv):
     """compile.sh / fetch_objs.sh objects.tsv -> {unit: object path or None when it failed}."""
     m = {}
@@ -1604,7 +1643,7 @@ class Link(Stage):
 
     def fingerprint(self, b):
         return ['link-v3', link_tool_inputs(b), up_id(b, 'compile'), up_id(b, 'prepare'),
-                file_hash(b.cfg['OVERRIDE']), extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
+                link_overrides(b)[2], extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
                 game_cxx_id(b), 'exe:%s' % (file_hash(link_exe(b)) or 'none')]
 
     def outputs_present(self, b):
@@ -1630,7 +1669,19 @@ class Link(Stage):
         else:
             r.note('EXTERN_TEXT=none: the referenced .text addresses without a definition get no E entries (the '
                    'hand flow passes S4\'s addr_ids.txt)')
-        for opt, key in (('--override', 'OVERRIDE'), ('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
+        # native replacements: OVERRIDE, or LINK_OVERRIDES=render (S6n's table and libnxrender.a, which the guest
+        # stage links: apply copies only objects into fixed/)
+        ov_tsv, ov_lib, _ = link_overrides(b)
+        if b.cfg['LINK_OVERRIDES'] == 'render':
+            ov_lib = ov_lib or build_render_lib(b, r, d)
+            if not os.path.isfile(ov_lib):
+                raise StageError('LINK_OVERRIDES=render: no %s' % ov_lib)
+            r.artifact('override_lib', ov_lib)
+            args += ['--override', ov_tsv, '--override-lib', ov_lib]
+        elif ov_tsv:
+            args += ['--override', ov_tsv]
+        r['link_overrides'] = b.cfg['LINK_OVERRIDES'] or ('table' if ov_tsv else 'none')
+        for opt, key in (('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
                          ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:
                 args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
@@ -1819,6 +1870,7 @@ class Guest(Stage):
                           'toolchain/tools', 'platform', 'loader', 'startup', 'shim/include', 'tests/s5/dynbrk.py'),
                 tree_hash('render/nine') if b.cfg['NINE'] == '1' else '',
                 up_id(b, 'link'), up_id(b, 'toolchain'), b.cfg['NINE'], b.art('toolchain', 'vorbis'), b.cfg['GAME_NEW'],
+                file_hash(b.art('link', 'override_lib')),
                 b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
 
     def outputs_present(self, b):
@@ -1838,6 +1890,10 @@ class Guest(Stage):
         extra = {'FNVNX_TC': b.art('toolchain', 'prefix'), 'D3D9': 'external' if b.cfg['NINE'] == '1' else 'null',
                  'GAME_NEW': b.cfg['GAME_NEW']}
         r['d3d9'], r['game_new'] = extra['D3D9'], extra['GAME_NEW']
+        olib = b.art('link', 'override_lib')
+        if olib:   # LINK_OVERRIDES=render: the replacements' archive (the fixed objects reference its symbols)
+            extra['EXTRA_OBJS'] = (os.environ.get('EXTRA_OBJS', '') + ' ' + olib).strip()
+            r['override_lib'] = b.rel(olib)
         nine_game = scr == nine_game_script()
         prod = d                       # where the script leaves fnvnx.elf / guest.nso / undefined.txt
         if nine_game:
