@@ -2,6 +2,7 @@
 #include "renderer.h"
 #include "nx/families.h"
 #include "nx_shaders.h"
+#include <math.h>
 #include <string.h>
 #include <stdio.h>
 #include <new>
@@ -13,7 +14,10 @@ void StateTracker::Reset() {
     nx_d3d9_default_rs(rs_);
     memcpy(rsSaved_, rs_, sizeof rs_);
     for (int s = 0; s < kStages; s++) { nx_d3d9_default_samp(samp_[s]); image_[s] = 0; memset(&kind_[s], 0, sizeof kind_[s]); }
+    memset(srgbClass_, 0, sizeof srgbClass_);   // format 0: no sRGB
     memcpy(sampSaved_, samp_, sizeof samp_);
+    memset(stageSmp_, 0, sizeof stageSmp_);
+    texGen_++;
     psVersion_ = 0x0200;
     dirty_ = true;
 }
@@ -29,17 +33,25 @@ void StateTracker::RestoreRenderState(uint32_t state) {
 void StateTracker::SetSamplerState(uint32_t stage, uint32_t type, uint32_t value, bool save) {
     if (stage >= kStages || type >= NXD3D_SAMP_COUNT) return;
     if (save) sampSaved_[stage][type] = samp_[stage][type];
-    samp_[stage][type] = value;
+    if (samp_[stage][type] != value) { samp_[stage][type] = value; stageSmp_[stage] = 0; texGen_++; }
 }
 uint32_t StateTracker::GetSamplerState(uint32_t stage, uint32_t type) const {
     return stage < kStages && type < NXD3D_SAMP_COUNT ? samp_[stage][type] : 0;
 }
 void StateTracker::RestoreSamplerState(uint32_t stage, uint32_t type) {
-    if (stage < kStages && type < NXD3D_SAMP_COUNT) samp_[stage][type] = sampSaved_[stage][type];
+    if (stage < kStages && type < NXD3D_SAMP_COUNT) SetSamplerState(stage, type, sampSaved_[stage][type]);
 }
 void StateTracker::SetTexture(uint32_t stage, uint32_t image, const NxD3D9Texture& kind) {
     if (stage >= kStages) return;
-    image_[stage] = image; kind_[stage] = kind;
+    if (image_[stage] != image) { image_[stage] = image; texGen_++; }
+    NxD3D9Texture& k = kind_[stage];
+    if (k.cube != kind.cube || k.shadow != kind.shadow || k.managed_lod != kind.managed_lod) { stageSmp_[stage] = 0; texGen_++; }
+    if (k.format != kind.format) {   // the format matters to the sampler only through its sRGB capability
+        const NxFormatInfo fi = nx_d3d9_format(kind.format);
+        const uint8_t c = (uint8_t)((fi.flags & NXFMT_SRGB ? 1 : 0) | (nx_format_has_srgb(fi.format) ? 2 : 0));
+        if (c != srgbClass_[stage]) { srgbClass_[stage] = c; stageSmp_[stage] = 0; texGen_++; }
+    }
+    k = kind;
 }
 
 const StateTracker::Resolved& StateTracker::Resolve(const NxD3D9Viewport& vp, const NxD3D9Rect& sc, uint32_t depthFormat) {
@@ -56,17 +68,23 @@ const StateTracker::Resolved& StateTracker::Resolve(const NxD3D9Viewport& vp, co
 
 uint32_t StateTracker::Handles(Backend* be, uint32_t* out, uint32_t n) {
     if (n > kStages) n = kStages;
+    handlesComplete_ = true;
     for (uint32_t s = 0; s < n; s++) {
-        NxSamplerState ss;
-        nx_d3d9_sampler(samp_[s], &kind_[s], &ss);
-        uint32_t id = 0;
-        for (uint32_t i = 0; i < nSmp_; i++) if (!memcmp(&smpKey_[i], &ss, sizeof ss)) { id = smpId_[i]; break; }
-        if (!id) {
-            id = be->SamplerCreate(ss);
-            if (nSmp_ < kSamplerCache) { smpKey_[nSmp_] = ss; smpId_[nSmp_++] = id; }
+        uint32_t id = stageSmp_[s];
+        if (!id) {   // sampler states or texture kind changed since the last translation of this stage
+            NxSamplerState ss;
+            nx_d3d9_sampler(samp_[s], &kind_[s], &ss);
+            smpTranslations_++;
+            for (uint32_t i = 0; i < nSmp_; i++) if (!memcmp(&smpKey_[i], &ss, sizeof ss)) { id = smpId_[i]; break; }
+            if (!id) {
+                id = be->SamplerCreate(ss);
+                if (nSmp_ < kSamplerCache) { smpKey_[nSmp_] = ss; smpId_[nSmp_++] = id; }
+            }
+            stageSmp_[s] = id;   // a failed create (0) is retried on the next draw
+            if (!id) handlesComplete_ = false;
+            stageSrgb_[s] = (ss.filter & NXSMP_SRGB) && nx_format_has_srgb(nx_d3d9_format(kind_[s].format).format);
         }
-        bool srgb = (ss.filter & NXSMP_SRGB) && nx_format_has_srgb(nx_d3d9_format(kind_[s].format).format);
-        out[s] = image_[s] ? NX_TEX_HANDLE(image_[s] + (srgb ? 1 : 0), id) : NX_TEX_HANDLE(0, id);
+        out[s] = image_[s] ? NX_TEX_HANDLE(image_[s] + (stageSrgb_[s] ? 1 : 0), id) : NX_TEX_HANDLE(0, id);
     }
     return n;
 }
@@ -260,7 +278,7 @@ bool Renderer::Render(const Draw& d) {
     // compile-time epilogue permutation for this draw's alpha test / fog
     uint16_t ps = d.ps;
     bool needEpi = true;
-    if (d.ps && !EpiKnown(d.ps)) LearnEpilogueVariants(d.ps);
+    if (d.ps) EpiIndex(d.ps);   // learns litBase_ on a shader's first use
     // lit family: static light permutation (directional first, points padded to 1/2/4/8 with zero-colour lights)
     int litDir = -1, litPoints = 0, litPad = 0;
     if (permutations_ && d.ps && d.ubo && d.uboSize >= sizeof(NxLitDraw) && (d.ps == litBase_[0] || d.ps == litBase_[1])) {
@@ -278,20 +296,35 @@ bool Renderer::Render(const Draw& d) {
         }
     }
     const uint16_t epiBase = ps;
-    if (ps != d.ps && !EpiKnown(ps)) LearnEpilogueVariants(ps);
-    for (uint32_t i = 0; i < nEpi_; i++)
-        if (epi_[i].base == epiBase) {
-            const bool at = (r.shaderBits >> NXSB_ALPHATEST) & 1, fog = ((r.shaderBits >> NXSB_FOG) & 7) != 0;
-            const uint16_t v = !at && !fog ? epi_[i].e0 : at && !fog ? epi_[i].ea : !at && fog ? epi_[i].ef : 0;
-            if (v) { ps = v; needEpi = at || fog; }
-            break;
-        }
+    const int ei = epiBase ? EpiIndex(epiBase) : -1;
+    if (ei >= 0) {
+        const EpiSet& es = epi_[ei];
+        const bool at = (r.shaderBits >> NXSB_ALPHATEST) & 1, fog = ((r.shaderBits >> NXSB_FOG) & 7) != 0;
+        const uint16_t v = !at && !fog ? es.e0 : at && !fog ? es.ea : !at && fog ? es.ef : 0;
+        if (v) { ps = v; needEpi = at || fog; }
+    }
     lastPs_ = ps;
-    uint16_t st = sc_.State(d.vs, ps, d.layout, r.rs);
+    // the same shaders, layout and translated state as the previous draw: the same state id
+    uint16_t st;
+    if (state_.resolves() == lastResolve_ && d.vs == lastVs_ && ps == lastPsSt_ && d.layout == lastLayout_ && lastSt_) {
+        st = lastSt_;
+    } else {
+        st = sc_.State(d.vs, ps, d.layout, r.rs);
+        lastResolve_ = state_.resolves(); lastVs_ = d.vs; lastPsSt_ = ps; lastLayout_ = d.layout; lastSt_ = st;
+    }
     Packet* p = frame_.Emit();
     if (!st || !p) return false;
-    uint32_t h[StateTracker::kStages], n = d.textures ? state_.Handles(be_, h, d.textures) : 0;
-    uint32_t tb = n ? frame_.AddTextures(h, n) : 0;
+    // texture handles: the previous draw's block while no stage changed in this frame
+    uint32_t n = d.textures > StateTracker::kStages ? (uint32_t)StateTracker::kStages : d.textures, tb = 0;
+    if (n && n == lastTexN_ && state_.textureGeneration() == lastTexGen_ && frameNo_ == lastTexFrame_) {
+        tb = lastTb_;
+    } else if (n) {
+        uint32_t h[StateTracker::kStages];
+        n = state_.Handles(be_, h, n);
+        tb = frame_.AddTextures(h, n);
+        const bool ok = state_.lastHandlesComplete() && (tb || frame_.textureWords() == n);   // complete, no overflow (0)
+        lastTexN_ = ok ? n : 0; lastTexGen_ = state_.textureGeneration(); lastTexFrame_ = frameNo_; lastTb_ = tb;
+    }
     p->key = SortKey((uint8_t)pass_, d.layer, st, (uint16_t)tb, d.depthKey);
     p->state = st; p->texCount = (uint16_t)n; p->texBlock = (uint16_t)tb;
     p->vtxBlock = d.vtxBlock; p->vtxOffset = d.vtxOffset; p->vtxSize = d.vtxSize;
@@ -299,8 +332,9 @@ bool Renderer::Render(const Draw& d) {
     p->first = d.first; p->count = d.count; p->baseVertex = d.baseVertex; p->prim = d.prim; p->instances = 1;
     void* u = frame_.Constants(&p->uboOffset);
     if (!u) return false;
-    memset(u, 0, 512);
-    if (d.ubo) memcpy(u, d.ubo, d.uboSize > 512 ? 512 : d.uboSize);
+    const uint32_t used = d.ubo ? (d.uboSize > 512 ? 512 : d.uboSize) : 0;
+    if (used) memcpy(u, d.ubo, used);
+    memset((uint8_t*)u + used, 0, 512 - used);   // the rest of the slice reads as zero
     if (litDir >= 0) {   // the permutation's light order: [directional], points..., zero-colour padding
         NxLitDraw* lu = (NxLitDraw*)u;
         const NxLitDraw* L = (const NxLitDraw*)d.ubo;
@@ -309,17 +343,46 @@ bool Renderer::Render(const Draw& d) {
         for (uint32_t i = 0; i < n; i++) if (L->lights[i].color[3] > 0.5f) lu->lights[o++] = L->lights[i];
         for (uint32_t i = 0; i < n; i++) if (!(L->lights[i].color[3] > 0.5f)) lu->lights[o++] = L->lights[i];
         for (; o < (uint32_t)(litDir + litPad) && o < 8; o++) { memset(&lu->lights[o], 0, sizeof lu->lights[o]); lu->lights[o].posRange[3] = 1.0f; }
+        // per-draw values the permutations read prepared (lit.frag): the directional light as the unit vector
+        // towards it, each point light's 1 / range^2 (padding: range 1 -> 1)
+        if (litDir) {
+            float* p = lu->lights[0].posRange;
+            const float l2 = p[0] * p[0] + p[1] * p[1] + p[2] * p[2];
+            const float k = l2 > 0.0f ? -1.0f / sqrtf(l2) : 0.0f;
+            p[0] *= k; p[1] *= k; p[2] *= k;
+        }
+        for (uint32_t i = (uint32_t)litDir; i < o; i++) {
+            const float r = lu->lights[i].posRange[3];
+            lu->lights[i].posRange[3] = 1.0f / (r * r);
+        }
         (void)litPoints;
     }
+    // epilogue block and dynamic record depend only on the resolved state: while the tracker has not re-translated
+    // in this frame, the previous draw's block and record are this draw's
+    const bool sameResolve = state_.resolves() == lastEpiResolve_ && frameNo_ == lastEpiFrame_;
     if (needEpi) {
-        NxEpilogue e;
-        memset(&e, 0, sizeof e);
-        nx_epilogue_fill(&e, &r.dyn, r.shaderBits);
-        frame_.SetEpilogue(p, e);
+        if (sameResolve && lastEpiBlock_) {
+            p->epi = lastEpiBlock_;
+        } else {
+            NxEpilogue e;
+            memset(&e, 0, sizeof e);
+            nx_epilogue_fill(&e, &r.dyn, r.shaderBits);
+            frame_.SetEpilogue(p, e);
+            lastEpiBlock_ = p->epi;
+        }
     }
-    DynRec dr;
-    DynFromD3D9(&dr, r.dyn);
-    p->dyn = frame_.AddDyn(dr);
+    if (sameResolve && lastDynId_) {
+        p->dyn = lastDynId_;
+    } else {
+        DynRec dr;
+        DynFromD3D9(&dr, r.dyn);
+        p->dyn = frame_.AddDyn(dr);
+        lastDynId_ = p->dyn;
+    }
+    if (!sameResolve) {
+        lastEpiResolve_ = state_.resolves(); lastEpiFrame_ = frameNo_;
+        if (!needEpi) lastEpiBlock_ = 0;
+    }
     if (d.family) frame_.Tag(p, d.enginePass, d.family);
     else if (curFamily_) frame_.Tag(p, curPass_, curFamily_);
     return true;
@@ -334,6 +397,20 @@ static uint16_t BlobShader(Backend* be, const char* name, uint32_t stage) {
     d.stage = stage; d.dksh = FNVNX_ADDR_(nx_shader_blobs[i].dksh); d.dksh_size = nx_shader_blobs[i].dksh_size;
     d.glsl = FNVNX_ADDR_(nx_shader_blobs[i].glsl); d.glsl_size = nx_shader_blobs[i].glsl_size;
     return (uint16_t)be->ShaderCreate(d);
+}
+
+int Renderer::EpiIndex(uint16_t ps) {
+    if (ps < kEpiIds) {   // one table read per draw (P6n: the list scans below cost ~200 instructions per draw)
+        if (!epiOf_[ps]) { LearnEpilogueVariants(ps); if (!epiOf_[ps]) epiOf_[ps] = 1; }
+        return (int)epiOf_[ps] - 2;
+    }
+    if (!EpiKnown(ps)) LearnEpilogueVariants(ps);
+    for (uint32_t i = 0; i < nEpi_; i++) if (epi_[i].base == ps) return (int)i;
+    return -1;
+}
+
+void Renderer::NoteEpi(uint16_t ps, int index) {
+    if (ps < kEpiIds) epiOf_[ps] = (uint8_t)(index < 0 ? 1 : index + 2);
 }
 
 bool Renderer::EpiKnown(uint16_t ps) const {
@@ -355,8 +432,8 @@ void Renderer::LearnEpilogueVariants(uint16_t ps) {
         snprintf(n, sizeof n, "%s__ea", nx_shader_blobs[blob].name); e.ea = BlobShader(be_, n, NxStage_Fragment);
         snprintf(n, sizeof n, "%s__ef", nx_shader_blobs[blob].name); e.ef = BlobShader(be_, n, NxStage_Fragment);
     }
-    if (e.e0 || e.ea || e.ef) epi_[nEpi_++] = e;
-    else if (nNoEpi_ < sizeof noEpi_ / sizeof noEpi_[0]) noEpi_[nNoEpi_++] = ps;
+    if (e.e0 || e.ea || e.ef) { NoteEpi(ps, (int)nEpi_); epi_[nEpi_++] = e; }
+    else { NoteEpi(ps, -1); if (ps >= kEpiIds && nNoEpi_ < sizeof noEpi_ / sizeof noEpi_[0]) noEpi_[nNoEpi_++] = ps; }
     if (blob >= 0 && !strcmp(nx_shader_blobs[blob].name, "lit")) litBase_[0] = ps;
     if (blob >= 0 && !strcmp(nx_shader_blobs[blob].name, "lit_spec")) litBase_[1] = ps;
 }
@@ -383,7 +460,7 @@ uint16_t Renderer::FragmentShader(const char* name) {
     snprintf(n, sizeof n, "%s__e0", name); e.e0 = BlobShader(be_, n, NxStage_Fragment);
     snprintf(n, sizeof n, "%s__ea", name); e.ea = BlobShader(be_, n, NxStage_Fragment);
     snprintf(n, sizeof n, "%s__ef", name); e.ef = BlobShader(be_, n, NxStage_Fragment);
-    if (e.e0 || e.ea || e.ef) epi_[nEpi_++] = e;
+    if (e.e0 || e.ea || e.ef) { NoteEpi(base, (int)nEpi_); epi_[nEpi_++] = e; }
     return base;
 }
 

@@ -220,7 +220,13 @@ class/struct/union/enum tags, which Itanium names do not.
   * fixed reference, variadic definition (0x005accb0's extractor, 0x005e58f0 ApplyPerkModifiers): the reference's
     parameters behind the definition's named ones must be integers, pointers or doubles (a fixed float is 4 bytes,
     a variadic caller would have promoted it), start at the definition's anonymous x86 offset and leave the same
-    AArch64 register counts. A `char`/`short`/`bool` there is extended in place (`narrow-extend`);
+    AArch64 register counts. A `char`/`short`/`bool` there is extended in place (`narrow-extend`). The widths the
+    body reads with va_arg are in neither signature (V2 VA2-VA4), so the plugin also records every variadic
+    definition (`VADEF`): `none` (no va_start), `escape` (its va_list goes to another function, vsnprintf-like:
+    the format decides) or the va_arg classes. The tail must share one width class (4-byte words, 8-byte integers,
+    doubles) with every va_arg the body reads, or the body must never call va_start. Without a record, `escape`
+    or mixed widths, the pair is `manual`. On link/c0d6c71516f6 this sends the 0x00703c00 override's fixed-tail
+    callers and 0x00406d00's to `manual` (both format through vsnprintf);
   * both variadic: the named parts are compared like fixed ones and the anonymous parts must start at the same
     place;
   * definition parameters in the reference's anonymous part are decided **by the call sites** (`vacall.py`). Resolve 1
@@ -232,7 +238,7 @@ class/struct/union/enum tags, which Itanium names do not.
     aggregates by value and units not recorded yet stay `manual`. For a variadic definition only the words its
     named parameters read must agree; 0x00406d00's snprintf-like callers pass any number of arguments. Test:
     `test_vacall.py` covers V1's shapes end to end (plugin, decision, qemu run). On link/c0d6c71516f6, replayed with
-    its tree: 13 units recorded in 26 s, bridge-gap pairs 70 -> 35.
+    its tree: 32 units recorded, bridge-gap pairs 70 -> 35, then 75 once V2's va_arg widths are checked.
   * without the call sites, such pairs are `manual`. Their x86 words come from the call site's
     argument types. A long long or a double is two words on x86 and one register on AArch64. A struct by value is
     several words, or a pointer. A struct { float } goes in an s register. V1 refuted (VA-U1..U4) an earlier rule
@@ -985,8 +991,8 @@ guest link turns into trap stubs; `vslot-unresolved` stays S2c's). Every name ge
 | class | rule | fix |
 |---|---|---|
 | `addr` | class shells (`X_shell`) stripped, a unit-local copy (`fnv_<addr8>::X`) taken as the global `X` (never another unit's copy, never another namespace's class of the same name: `SaveManager::String` is not `ExtraSave::String`), the name and level-2 parameters match MSVC names of one address the native build defines (`addrmap.tsv` F; C for C1/C2, X for D1/D2; never G) | the next resolve binds it to `__fnv_<addr>` (`bodies/bind.tsv`, class `body-addr`); C2/D2 to the complete-object definition |
-| `exe-addr` | (with `--exe`, the player's FalloutNV.exe) a pristine object calls the MSVC counterpart: functions are placed at their units.json address, then at the address the exe's REL32 call to a COMDAT reaches, each only where its bytes equal the exe outside relocations; the exe's displacement at every call of the name, in every pristine object, gives one address the native build defines (F; C/X for ctors/dtors, or an F member function of the same shape; MSVC reference and definition with the same parameter count, member-ness and calling convention: no bridge is made) | bound to `__fnv_<addr>`, before any synthesized special member (an address beats `= default`) |
-| `vcall` | a virtual member function GCC calls directly (the object is a member or a local: `a->m.f()`; GCC's front end devirtualizes, MSVC 2008 called through the vptr) and the unit's pristine object does not reference it (a qualified `B::f()` call would) | a stub `__fnvnx_bdvc_<hash>`: `this` adjusted, the function loaded from the object's vtable at the byte offset of GCC's own pointer-to-member constant `&C::f` (probed in the referencing unit), tail call |
+| `exe-addr` | (with `--exe`, the player's FalloutNV.exe) a pristine object calls the MSVC counterpart: functions are placed at their units.json address, then at the address the exe's REL32 call to a COMDAT reaches, each only where its bytes equal the exe outside relocations; the exe's displacement at every call of the name (or the exe's word where a placed function takes its address, DIR32), in every pristine object, gives one address the native build defines (F; C/X for ctors/dtors, or an F member function of the same shape; MSVC reference and definition with the same parameter count, member-ness and calling convention: no bridge is made) | bound to `__fnv_<addr>`, before any synthesized special member (an address beats `= default`) |
+| `vcall` | a virtual member function GCC calls directly (the object is a member or a local: `a->m.f()`; GCC's front end devirtualizes, MSVC 2008 called through the vptr) and the unit's pristine object's code does not reference it (a qualified `B::f()` call would; a vftable slot of the name does not count) | a stub `__fnvnx_bdvc_<hash>`: `this` adjusted, the function loaded from the object's vtable at the byte offset of GCC's own pointer-to-member constant `&C::f` (probed in the referencing unit), tail call |
 | `msvc-empty` | a pristine object defines it (code COMDAT) as `ret`, `ret N` or `mov eax, ecx; ret[ N]` | weak AArch64 `ret` stub (`zz_bd_empty.o`) |
 | `msvc-inline` | a pristine object `u<i>.obj` defines a real body: unit *i*'s source has it | unit *i* compiled again with `-fkeep-inline-functions`, only the wanted symbols kept (`vtables.gc_weaken`); a body under a shell's name renamed when the relaxed key pairs one symbol |
 | `special-default` | default / copy constructor, destructor, copy assignment of a non-template class, no pristine body | out-of-line `= default` in the referencing unit (the implicit member's semantics; not a decomp body) |
@@ -994,7 +1000,13 @@ guest link turns into trap stubs; `vslot-unresolved` stays S2c's). Every name ge
 
 Output in `out/bodies/` (local): `bodies.tsv`, `bind.tsv`, `synth.tsv` (objects the next resolve links as extra
 objects of their host unit, like `vtables/synth.tsv`), `stats.txt`. The resolve hook is two marked blocks in
-`fnvlink.py` (`# ---- S2d`); without a `bodies/` directory resolve is unchanged. Tests: `tests/s2d/test_bodies.py`.
+`fnvlink.py` (`# ---- S2d`); without a `bodies/` directory resolve is unchanged. The synthesis and vcall probes compile
+the host unit with no prelude (`vtables.compile_probe(prelude='')`): `<typeinfo>` before a unit that defines its own
+`std::exception` does not compile. Tests: `tests/s2d/test_bodies.py`.
+
+The farm link gets the exe from `link_job.sh` (`job_gamedata` -> `FNVNX_EXE`); the link stage's fingerprint holds its
+sha256. On link c0d6c71516f6 (relink of its out/): 4,425 undefined without bodies, 2,474 with. The 1,002 names left
+`missing` are listed by gap class on the private branch `s2d/gaps/<link12>` (agent-only).
 
 ## Open problems
 

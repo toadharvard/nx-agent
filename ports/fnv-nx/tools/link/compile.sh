@@ -25,6 +25,7 @@ TREE=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd)
 LIST=${3:-}; JOBS=${4:-$(nproc)}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
 CXX=${CXX:-aarch64-linux-gnu-g++}
+CC=${CC:-aarch64-linux-gnu-gcc}
 SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
 OPT=${OPT:--O2}
 FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -ffp-contract=off -fPIC -fpermissive -Werror=return-type -Wno-narrowing -fmax-errors=20
@@ -117,6 +118,18 @@ elif [ "$ORDER_KEYS" != unit ] && [ ! -f "$ORDER_KEYS" ]; then
 fi
 if [ "${KEYS_ONLY:-0}" = 1 ]; then exit 0; fi
 
+# C units (third_party/zlib-1.2.1/*.c; MSVC compiled them as C: K&R definitions, C names such as `_adler32`) build
+# with the C compiler (tools/census.sh does the same): the same flags with C's -std, without the C++-only ones and
+# without the plugins (fnvnx_order is built against the C++ front end). The plugins have nothing to do there: the
+# zlib sources have no volatile access, no Interlocked call and no floating-point type, and their portable C does not
+# depend on argument evaluation order. Every unit gets its units.json /D defines (only zlib has any).
+CFLAGS=()
+for f in "${FLAGS[@]}"; do
+  case $f in -std=gnu++17) CFLAGS+=(-std=gnu99) ;; -fpermissive|-Wno-narrowing|-fplugin=*|-fplugin-arg-*) ;; *) CFLAGS+=("$f") ;; esac
+done
+export CC CFLAGS_STR="${CFLAGS[*]}"
+jq -r '.units[] | [.source, ([.flags[]? | select(startswith("/D")) | "-D" + .[2:]] | join(" "))] | @tsv' \
+  "$TREE/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
 # Objects are kept only while the flags (the order options included), the plugins and the shim headers stay the
 # same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
 objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
@@ -130,7 +143,11 @@ compile_one() {
     return
   fi
   # shellcheck disable=SC2086
-  if (cd "$TREE" && timeout 900 $CXX $FLAGS_STR "$src" -o "$base.o.tmp") > "$base.log" 2>&1; then
+  local cc=$CXX flags=$FLAGS_STR defs
+  case $src in *.c) cc=$CC; flags=$CFLAGS_STR ;; esac
+  defs=$(awk -F'\t' -v s="$src" '$1 == s {print $2; exit}' "$OUT/defines.tsv")
+  # shellcheck disable=SC2086
+  if (cd "$TREE" && timeout 900 $cc $flags $defs "$src" -o "$base.o.tmp") > "$base.log" 2>&1; then
     mv "$base.o.tmp" "$base.o"
   else
     rm -f "$base.o.tmp" "$base.o"

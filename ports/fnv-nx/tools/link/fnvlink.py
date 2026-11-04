@@ -753,7 +753,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 refdecl_key = '%s|cast %s(__%s*)(%s)' % (refdecl, ret_, cc_, params_)
                                 stats['cast_refs'] += 1
                         if rs.kind == 'func' and ds.kind == 'func':
-                            v = abi.compare(rs, ds)
+                            va_r = None   # what a variadic definition's body reads with va_arg (vacall VADEF, V2)
+                            if nd['unit'] is not None and any(p_.strip() == '...' for p_ in ds.raw_params or ()):
+                                vacall_req.add((nd['unit'], nd['sym'].name))
+                                defs_ = vacall.load_defs(out, nd['unit'])
+                                va_r = defs_.get(nd['sym'].name) if defs_ else None
+                            v = abi.compare(rs, ds, va_reads=va_r)
                             va_key = None
                             if vacall.needs(v):
                                 # the definition reads the reference's anonymous arguments: the call sites' own
@@ -761,7 +766,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 vhost = u.host or u.source
                                 vacall_req.add((vhost, un))
                                 calls_ = vacall.load(out, vhost)
-                                v2_, vs_, seq_, st_ = vacall.decide(rs, ds, calls_.get(un) if calls_ else None)
+                                v2_, vs_, seq_, st_ = vacall.decide(rs, ds, calls_.get(un) if calls_ else None, va_r)
                                 stats[st_] += 1
                                 if v2_ is not None:
                                     v, rs = v2_, vs_

@@ -42,7 +42,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 . "$HERE/lib_job.sh"
 t0=$(date +%s)
 
-host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools
+host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native)
 # NX1's package checks (tests/nx1): switch-tools elf2nro needs lz4.h, the host device test qemu-user, the libnx
 # syntax check newlib's headers. Libraries are not commands, so host_check cannot see them.
 if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/include/newlib ] || ! command -v qemu-aarch64 >/dev/null; }; then

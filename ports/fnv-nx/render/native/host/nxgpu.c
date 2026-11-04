@@ -828,6 +828,7 @@ const NxGpuApi* nxgpu_init(uint32_t width, uint32_t height) {
     uint32_t fbAlign = dkImageLayoutGetAlignment(&fbl);
     uint32_t fbSize = ((uint32_t)dkImageLayoutGetSize(&fbl) + fbAlign - 1) & ~(fbAlign - 1);
     g.fbMem = host_block(NXGPU_SWAP_IMAGES * fbSize, DkMemBlockFlags_GpuCached | DkMemBlockFlags_Image);
+    if (!g.fbMem) return NULL;   /* every created object is checked: nxgpu_host.c logs "deko3d init FAILED" (NX1 check 6) */
     DkImage const* fbs[NXGPU_SWAP_IMAGES];
     for (int i = 0; i < NXGPU_SWAP_IMAGES; i++) {
         dkImageInitialize(&g.fb[i], &fbl, g.fbMem, i * fbSize);
@@ -840,22 +841,28 @@ const NxGpuApi* nxgpu_init(uint32_t width, uint32_t height) {
     qm.commandMemorySize = 1u << 20;
     qm.flushThreshold = 128u << 10;
     g.queue = dkQueueCreate(&qm);
+    if (!g.queue) return NULL;
 
     DkSwapchainMaker sm;
     dkSwapchainMakerDefaults(&sm, g.dev, nwindowGetDefault(), fbs, NXGPU_SWAP_IMAGES);
     g.swapchain = dkSwapchainCreate(&sm);
+    if (!g.swapchain) return NULL;
 
     g.cmdMem = host_block(NXGPU_FRAMES * CMDMEM_PER_FRAME, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached);
+    if (!g.cmdMem) return NULL;
     DkCmdBufMaker cm;
     dkCmdBufMakerDefaults(&cm, g.dev);
-    for (int i = 0; i < NXGPU_FRAMES; i++) g.cmd[i] = dkCmdBufCreate(&cm);
+    for (int i = 0; i < NXGPU_FRAMES; i++) { g.cmd[i] = dkCmdBufCreate(&cm); if (!g.cmd[i]) return NULL; }
     g.upload = dkCmdBufCreate(&cm);
     g.capture = dkCmdBufCreate(&cm);
+    if (!g.upload || !g.capture) return NULL;
     DkMemBlock upMem = host_block(64u << 10, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached);
+    if (!upMem) return NULL;
     dkCmdBufAddMemory(g.upload, upMem, 0, 64u << 10);
 
     uint32_t descSize = NX_MAX_IMAGES * sizeof(DkImageDescriptor) + NX_MAX_SAMPLERS * sizeof(DkSamplerDescriptor);
     g.descMem = host_block(descSize, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached);
+    if (!g.descMem) return NULL;
     g.imageDesc = (DkImageDescriptor*)dkMemBlockGetCpuAddr(g.descMem);
     g.samplerDesc = (DkSamplerDescriptor*)(g.imageDesc + NX_MAX_IMAGES);
     DkSampler s0; dkSamplerDefaults(&s0);
@@ -865,7 +872,7 @@ const NxGpuApi* nxgpu_init(uint32_t width, uint32_t height) {
     g.imageMem = host_block(IMAGE_POOL, DkMemBlockFlags_GpuCached | DkMemBlockFlags_Image);
     g.readbackMem = host_block(READBACK_SIZE, DkMemBlockFlags_CpuCached | DkMemBlockFlags_GpuCached);
     g.tsMem = host_block(0x1000, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached);
-    if (!g.imageMem || !g.readbackMem || !g.stagingMem) return NULL;
+    if (!g.codeMem || !g.imageMem || !g.readbackMem || !g.stagingMem || !g.tsMem) return NULL;
     g.descDirty = true;
 
     mutexInit(&g.lock);
