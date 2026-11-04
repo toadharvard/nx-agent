@@ -1441,16 +1441,26 @@ LEX_TOKENS = re.compile(r'("(?:\\.|[^"\\\n])*")(?=[A-Za-z_])|"(?:\\.|[^"\\\n])*"
 
 # a functional cast to a multi-word type (`key = unsigned long(-1);`, `reinterpret_cast<void*>(unsigned int(id))`), which
 # MSVC takes and C++ does not: written as the C-style cast of the same type, `((unsigned long)(-1))`
-MULTIWORD_CAST = re.compile(r'(?:(?<=[=(,!?:<>+\-*/%&|^~\[{;])|(?<=\breturn))(\s*)'
+MULTIWORD_CAST = re.compile(r'(?:(?<=[=(,!?:>+\-*/%&|^~\[])|(?<=\breturn))(\s*)'
                             r'((?:unsigned|signed)\s+(?:long\s+long|long|int|short|char)(?:\s+int)?|long\s+(?:long|double|int)|'
                             r'short\s+int)\s*\((?!\s*[\*&])')
+# what a declarator or a function type has in those parentheses: `unsigned int (__cdecl* m_pfnRead)(...)`,
+# `Delegate<unsigned char(unsigned int)>`
+CAST_NOT_EXPR = re.compile(r'^(?:__\w+|(?:const|volatile|unsigned|signed|int|char|short|long|float|double|void|bool|struct|'
+                           r'class|enum|union)\b)')
 
 def _multiword_casts(text, stats):
     out, pos = [], 0
     for m in MULTIWORD_CAST.finditer(text):
         if m.start() < pos: continue
         close = _call_end(text, m.end() - 1)
-        arg = text[m.end():close - 1].strip() or '0'
+        inner = text[m.end():close - 1].strip()
+        if CAST_NOT_EXPR.match(inner) or len(_split_args(inner)) > 1 or re.search(r'::\s*\*|[\*&]$', inner): continue
+        lead = text[:m.start()].rstrip()
+        if re.match(r'^[A-Za-z_]\w*$', inner) and (lead.endswith(',') or (lead.endswith('(') and not re.search(
+                r'(?:>|\b(?:unsigned|signed|int|char|short|long|return))\s*\($', lead))):
+            continue                                       # `f(int a, unsigned long (b))` may be a declarator
+        arg = inner or '0'
         out.append(text[pos:m.start()]); out.append('%s((%s)(%s))' % (m.group(1), re.sub(r'\s+', ' ', m.group(2)), arg))
         pos = close
         stats['LEX1'] += 1

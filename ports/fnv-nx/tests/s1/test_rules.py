@@ -125,6 +125,11 @@ check('LEX1 functional casts to multi-word types',
           '    unsigned long (*fp)(int) = 0;\n}\n'),
       ['key = ((unsigned long)(-1));', 'key != ((unsigned long)(-1));', 'reinterpret_cast<void*>(((unsigned int)(id)))',
        'construct(n, ((unsigned int)(0)));', 'unsigned long (*fp)(int) = 0;'])
+check('LEX1 declarators and function types are not casts',
+      run(s1.r_msvc_tokens, 'struct S { unsigned int (__cdecl* m_pfnRead)(void*); };\nD<unsigned char(unsigned int)> d;\n'
+          'x = reinterpret_cast<unsigned int (T::*)()>(p);\nvoid f(int a, unsigned long (b));\n'),
+      ['unsigned int (__cdecl* m_pfnRead)(void*);', 'D<unsigned char(unsigned int)> d;',
+       'reinterpret_cast<unsigned int (T::*)()>(p);', 'unsigned long (b));'], ['((unsigned'])
 check('LEX1 strings and comments untouched', run(s1.r_msvc_tokens, 'const char* s = "0xae-1 5i64"; // 0x1e+2\n'),
       ['"0xae-1 5i64"', '// 0x1e+2'])
 
