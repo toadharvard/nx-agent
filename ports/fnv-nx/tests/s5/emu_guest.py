@@ -1016,6 +1016,28 @@ class Emu:
               "entries redirected to the copies" % (st["vtables extended"], st["slots added"],
                                                      st["slots added as null"], st["GOT entries redirected"]))
 
+    def collect_trap(self):
+        """--collect-traps (collect-all boot, as linhost --collect-traps): at fnvnx_vslot_trap (virtual function
+        defined nowhere) return 0 to the caller, at fnvnx_special_trap (constructor/destructor defined nowhere) return
+        this; print each distinct (kind, caller, text) once as 'linhost: collect<TAB>kind<TAB>caller<TAB>text'
+        (tests/s5/collect_traps.py reads both)."""
+        text = self.trap_text()
+        if not text:
+            return False
+        uc = self.uc
+        special = " fnvnx_special_trap+0x0" in self.sym(uc.reg_read(UC_ARM64_REG_PC))
+        lr = uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF
+        link = lr - self.base + self.link_base if self.relocatable and self.base <= lr < self.base + self.size else lr
+        seen = self.__dict__.setdefault("collect_seen", set())
+        key = (special, link, text)
+        if key not in seen:
+            seen.add(key)
+            print(f"linhost: collect\t{'special' if special else 'vslot'}\t{link:#x}\t{text}\t#{len(seen)}")
+        if not special:
+            uc.reg_write(UC_ARM64_REG_X0, 0)
+        uc.reg_write(UC_ARM64_REG_PC, lr)
+        return True
+
     def vslot_past_end(self, err):
         """exe-vtables, at a fetch fault: a virtual call through slot k of a native vtable bound to an exe vftable,
         where k is past the native vtable's end (the decomp declares fewer virtuals than the exe has: the word read
@@ -1576,6 +1598,11 @@ class Emu:
             try:
                 uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
             except UcError as e:
+                if getattr(self, "collect_traps", False) and self.collect_trap():
+                    t.result = uc.reg_read(UC_ARM64_REG_X0)
+                    t.ctx, t.state, t.resume_pc = uc.context_save(), "ready", uc.reg_read(UC_ARM64_REG_PC)
+                    self.cur = None
+                    continue
                 past = self.vslot_past_end(str(e))
                 if past is not None:   # exe-vtables: the exe's slot past the native vtable's end
                     t.result = uc.reg_read(UC_ARM64_REG_X0)
@@ -1646,6 +1673,8 @@ def main(argv):
     ap.add_argument("--inject", action="append", default=[], metavar="OBJ",
                     help="map an ILP32 object (a guest-side stand-in) after the guest; trap stubs of the functions it "
                     "defines branch to it (needs --elf)")
+    ap.add_argument("--collect-traps", action="store_true",
+                    help="collect-all boot: vslot/constructor traps return to their caller and are listed once each")
     ap.add_argument("--watch", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="log every guest write to ADDR..ADDR+SIZE (default 4) with pc, lr and the value")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
@@ -1677,6 +1706,7 @@ def main(argv):
     emu.miles = getattr(emu, "miles", {})
     if a.stub_faults and a.addrmap and "ctor-returns-this" in fault_table_options(a.stub_faults):
         emu.install_ctor_this(a.addrmap, a.elf)
+    emu.collect_traps = a.collect_traps
     for obj in a.inject:
         emu.install_inject(obj, a.elf)
     if getattr(emu, "standin_names", None):

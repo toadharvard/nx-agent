@@ -95,6 +95,13 @@ def parse(log, sym):
             seq += 1
             rows.append((seq, phase, kind, cause, owner, key, c, orig, note))
             continue
+        m = re.search(r"skipped initializer (0x[0-9a-f]+)\S* ?(.*?): (.*?) at (0x[0-9a-f]+)", line)
+        if m:   # an initializer that faulted (--skip-faulting-init): the fault, at its pc
+            c, orig = sym(int(m.group(4), 16))
+            seq += 1
+            rows.append((seq, phase, "init fault", "initializer fault (skipped)", "triage", m.group(3)[:120], c, orig,
+                         f"initializer {m.group(1)} {m.group(2)}".strip()))
+            continue
         m = re.search(r"fnvnx boot: trap #\d+: unresolved (\S+) \(caller (0x[0-9a-f]+)\)", line)
         if m:
             name, caller = m.group(1), int(m.group(2), 16)
