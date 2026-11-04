@@ -407,6 +407,21 @@ arguments pushed earlier), and there all known targets (10) match the pushes.
   Until prepare rewrites units.json itself, resolve applies the rows of every unit whose prepared source carries the
   patch marker (`fnv-nx XINC1`, FTOL1, DBUG1); an unpatched unit keeps its names. Idempotent. `resolve
   --units-renames <tsv|none>` (default: this tree's file).
+* **Constructors / destructors GCC needs where MSVC did not** (`unresolved-ctor-dtor`): user-declared members
+  that no unit defines. 1,413 of the 1,445 the trial link missed have no body in any pristine MSVC object either
+  (S11): MSVC reaches those classes through a deleting destructor `??_G` / `??_E` at an address (a delete
+  expression), or never, while GCC calls the member itself (delete expressions call D1, a constructor's landing pad
+  destroys the bases and members built so far, emitted slot functions call base destructors). Binding a D1 to the
+  `??_G` address is wrong (the decomp defines those addresses as `void f(T *p) { delete p; }`, which always
+  frees). Resolve instead binds, per object: a D1/D2 of a class whose deleting destructor address another class
+  shares (MSVC's identical-code folding) to that class's destructor when a compiled object defines it
+  (`ctor-dtor-alias`); a member that the object reaches only from exception cleanups (the call is followed by
+  `bl _Unwind_Resume` before any `ret` / `b` / `br`), or that an emitted slot function calls, to a trap stub
+  `__fnvnx_xtrap_<hash>` -> `fnvnx_special_trap(this, "constructor/destructor defined nowhere: ...")` (weak default
+  `brk`; `ctor-dtor-trap`). References on normal paths of compiled code stay `unresolved-ctor-dtor`: those members
+  need a body or an address (S1). Emitting them from a probe TU (as for slot functions) only works where some
+  unit has the body: 32 names, mostly generic shell names (`Base`, `Item`, `Holder`) whose definitions in other
+  units may be other classes, so they are left as they are.
 * **Hand-written vptr stores** (S4b, DATAIMAGE.md D7 point 2): the sources store image vftable addresses into
   objects by hand (`exception.vtable = (unsigned)&DAT_010176f8;`, `*(void **)this = kVtbl_X;`). Resolve scans the
   compiled units' sources for assignments whose right side is (after casts and `&`) a name the unit binds to a data
@@ -545,6 +560,13 @@ GAME1 / S1b units resolved alone: the 5 `fnvnx_game_` references bind as their u
 InterlockedDecrement slots; one `Sleep` -> the spin lock at 0x008691b0, another -> IAT slot 0x00fdf0d0, SetEvent's,
 as the pristine object calls it); `units_renames.tsv` renamed 35 definitions and added 72 reference names (989
 definitions matched exactly).
+
+### Seventh round (constructors / destructors; S2c)
+
+Same objects. Of 2,396 `unresolved-ctor-dtor` references (1,445 names), 75 bind to the destructor of a class sharing
+the deleting destructor and 1,500 to 1,018 trap stubs (655 reached only by exception cleanups, 363 called by emitted
+slot functions); 821 references on normal paths stay. Trial link: 8,709 -> **8,012 undefined names** (unresolved
+ctor/dtor names 1,442 -> 738), 0 multiple definitions.
 
 ## Open problems
 
