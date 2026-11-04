@@ -106,6 +106,8 @@ class Image:
         self.elf = ELFFile(self.f)
         self.segs = []
         for s in self.elf.iter_sections():
+            if s['sh_flags'] & 0x400:          # SHF_TLS: .tbss overlaps the next sections' addresses (no memory)
+                continue
             if s['sh_flags'] & 2 and s['sh_type'] != 'SHT_NOBITS' and s['sh_addr']:
                 self.segs.append((s['sh_addr'], s['sh_addr'] + s['sh_size'], s.name, s))
             elif s['sh_flags'] & 2 and s['sh_type'] == 'SHT_NOBITS':
