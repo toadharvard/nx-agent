@@ -554,3 +554,125 @@ NxRb_Stencil8, x, y, w, h, dst, size)`. ABI v3 adds `NxReadback.format` and `NxO
 Units: blend constant, fog colour and border are colour channels in [0,1] (byte / 255); `alphaRef` = ALPHAREF /
 255 unclamped; `depthBiasUnits` is in GL `glPolygonOffset` units (r = 2^-24 for D24); viewport in pixels for a
 +0.5-centre rasterizer; scissor in pixels, top-left origin; sampler `minLod`/`maxLod` in mip levels.
+
+## 8. nx_render: captures and scenes to PNG (the S16-compare entry point)
+
+S16-compare renders reference frames with the real exe under Wine and compares them (PSNR/SSIM/FLIP) with the
+native renderer. Its one entry point here is **`nx_render`**, a host program that renders a capture or a scene
+with the native renderer on the GL reference backend (`render/native/gl`, bit-exact to the goldens) and writes PNGs.
+
+### 8.1 Build, run, outputs, exit codes
+
+```sh
+source <(render/native/env.sh --print)
+make -C tests/s6n /tmp/fnvnx-s6n-tests/nx_render     # binary (OUT=<dir> to place it elsewhere)
+make -C tests/s6n nx_render                          # its test (tests/s6n/test_nx_render.py)
+
+nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--per-draw] [--until-draw N] [--frame F]
+nx_render nxcap <file.nxcap> -o <dir> [--per-draw] [--until-draw N] [--frame F]
+nx_render scene <name|all>   -o <dir> [--per-draw] [--until-draw N]
+```
+
+Needs a Mesa/EGL GL 4.5 context (surfaceless; llvmpipe is fine). `<dir>` is created (one level).
+
+| file | written for |
+|---|---|
+| `f<frame %05u>.png` | every frame: an NXD9 `PRES`, or an `.nxcap` `SUBM` with present = 1 (the swapchain image) |
+| `rb<index %04u>.png` | every `.nxcap` `RDBK` record, in file order (RGBA8 as is; RGBA32F clamped; depth and stencil as grey) |
+| `f<frame>_d<draw %05u>.png` | `--per-draw`: after each draw, the colour target of that draw's pass; draw = index of the draw in the frame's submit, counting backend draws (skipped NXD9 draws are not counted) |
+| `<scene>.png`, `<scene>_d<draw>.png` | scene mode (160x120; identical to `tests/s6n/golden/<scene>.png`) |
+| `summary.txt` | the counters line also printed on stdout; for NXD9 the first skipped draw and why |
+
+`--until-draw N` stops drawing after draw N of each frame (the frame image then holds draws 0..N; clears and later
+passes still run). `--frame F` restricts `--per-draw` and `--until-draw` to frame F. Together they localise a
+mismatch: bisect with `--until-draw`, then `--per-draw --frame F` around it.
+
+Exit codes: **0** rendered everything; **1** runtime failure (malformed input, missing shader GLSL, backend error;
+message on stderr); **2** usage or file I/O error; **3** rendered, but some draws were skipped as unsupported
+(counts and the first reason in `summary.txt`). Images are PNG RGBA8, row 0 at the top, D3D9 pixel coordinates.
+
+### 8.2 The `.nxcap` format (post-translation capture, `render/native/capture/capture.h`)
+
+Recorded by `nx::CaptureBackend` after the native front end (state words, GLSL families); replayable only into an
+NxGpuApi, not into D3D9. All integers little-endian; structs are those of `include/nx/gpu_abi.h` and
+`include/nx/state.h` (sizes static-asserted there).
+
+* Magic `"NXCAP\0\0\1"` (8 bytes), then records `u32 tag, u32 payload bytes, payload` (payloads are multiples of 4
+  bytes). Tags are four ASCII bytes read as a little-endian u32. Unknown tags must be skipped.
+
+| tag | payload |
+|---|---|
+| `INFO` | `NxGpuInfo` (32 B: magic `0x5550474e`, version 3, frames_in_flight, flags, width, height, backend, pad) |
+| `MEMC` | u32 id, u32 size, u32 kind (`NxMemKind`): a memory block; contents arrive with `SUBM` |
+| `IMGC` | u32 id, `NxImageDesc` (32 B; its `data` field 0), then `data_size` bytes of texels (mips 0..n-1 tightly packed, BCn by 4x4 blocks, padded to 4). An image whose format has an sRGB view also owns id + 1 |
+| `SMPC` | u32 id, `NxSamplerState` (16 B) |
+| `SHDC` | u32 id, u32 stage (0 vertex, 1 fragment), u32 dkshBytes, u32 glslBytes, DKSH, GLSL (each padded to 4) |
+| `SUBM` | u32 frame, u32 present, u32 words, the command words, u32 nranges, then per range u32 block, u32 offset, u32 size and `size` bytes (padded to 4): the bytes of every memory range the stream binds (UBO, vertex, index), as the GPU saw them |
+| `RDBK` | `NxReadback` (40 B; `dst` 0), u32 bytes, the pixels read at that point (row 0 at the top, format per `NxReadback.format`) |
+
+Command words: `[opcode | argument count << 16]` then the arguments; the opcodes and their arguments are the
+`NxOp` list in `gpu_abi.h` (End, DefineState, DefineLayout, BeginPass, EndPass, Barrier, BindState, BindUbo,
+BindVtx, BindIdx, BindTextures, Draw, DrawIndexed, Viewport, Scissor, StencilRef, BlendConst, DepthBias, Clear,
+Marker). A reader skips an unknown opcode by its count. `NxOp_Marker` with tag `PASS` names the engine pass id
+(§1.3) and family of the draws that follow (§6.1). Texture handles in `BindTextures` are `image | sampler << 20`.
+`render/verify/capture/nxcap.py` (V6n) is an independent reader.
+
+### 8.3 The `.nxd9` format (D3D9-level capture; what S16's converter writes)
+
+`.nxcap` cannot carry the exe's frames (it is recorded after translation), so S16 converts its D3D9 call stream to
+**NXD9** (`render/native/capture/d3d9cap.h`; Python reference writer `tests/s6n/nxd9.py`). `nx_render d3d9` runs it
+through the native D3D9 translator (`front/d3d9_state.h`, Nine 20.1 rules) and S6b's translated shaders into the GL
+backend. **Choice:** shader translation is S6b's (`render/shaders`, MojoShader `glsldk` profile, layout contract
+`render/shaders/include/fnvnx_dk_layout.h`); nx_render does not link it. The converter either embeds each shader's
+GLSL in its `VSH`/`PSH` record, or leaves it empty and passes `--shaders <dir>` holding `<hash %016llx>.glsl` as
+`sdp2dksh -o <dir> --glsl shaderpackage*.sdp` writes them (hash = `fnvnx_shader_hash`, FNV-1a 64 of the bytecode).
+
+File: magic `"NXD9\0\0\0\1"`, then records `u32 tag, u32 payload bytes, payload, zero padding to 4` (the length
+excludes the padding). Little-endian; ids are converter-chosen, nonzero, unique per kind; records apply in order,
+exactly like the D3D9 calls they stand for. Unknown tags are skipped.
+
+| tag | payload | D3D9 call |
+|---|---|---|
+| `DEV ` | u32 width, height, back-buffer D3DFORMAT, auto depth-stencil D3DFORMAT (0 none) | CreateDevice / Reset |
+| `TEX ` | u32 id, D3DFORMAT, width, height, levels, flags (1 render target, 2 cube), then per level u32 bytes + the level's texels, tightly packed rows (BCn: 4x4 blocks), padded to 4; render targets: levels with 0 bytes | CreateTexture (+ initial contents) |
+| `TEXU` | u32 id, level, bytes, texels | LockRect/UnlockRect, UpdateTexture, UpdateSurface |
+| `SURF` | u32 id, kind (1 colour, 2 depth-stencil), D3DFORMAT, width, height, texture id (render-target texture whose level 0 this is, else 0) | GetSurfaceLevel, CreateRenderTarget, CreateDepthStencilSurface |
+| `VB  ` / `IB  ` | u32 id, size; IB adds format (101 INDEX16, 102 INDEX32) | CreateVertexBuffer / CreateIndexBuffer |
+| `VBU ` / `IBU ` | u32 id, offset, bytes, data | Lock/Unlock (the bytes written; DISCARD needs no special record) |
+| `DECL` | u32 id, count, count x D3DVERTEXELEMENT9 (8 B: u16 stream, offset; u8 type, method, usage, usageIndex), no END element | CreateVertexDeclaration |
+| `VSH ` / `PSH ` | u32 id, hash lo, hash hi, bytecodeBytes, bytecode (padded), u32 glslBytes, GLSL | CreateVertexShader / CreatePixelShader |
+| `RS  ` | u32 D3DRENDERSTATETYPE, value (floats as their bits) | SetRenderState |
+| `SS  ` | u32 sampler 0-15, D3DSAMPLERSTATETYPE, value | SetSamplerState |
+| `TSS ` | u32 stage, type, value | SetTextureStageState (recorded; unused) |
+| `STEX` | u32 sampler 0-15, texture id (0 none) | SetTexture |
+| `SVS ` / `SPS ` | u32 shader id (0 = fixed function) | SetVertexShader / SetPixelShader |
+| `VSCF` / `PSCF` | u32 start register, count, count x 4 floats | Set*ShaderConstantF |
+| `VSCI` / `PSCI` | u32 start, count, count x 4 int32 | Set*ShaderConstantI |
+| `VSCB` / `PSCB` | u32 start, count, count x u32 | Set*ShaderConstantB |
+| `SDCL` | u32 declaration id | SetVertexDeclaration |
+| `STRM` | u32 stream, vb id, offset, stride | SetStreamSource |
+| `SIDX` | u32 ib id | SetIndices |
+| `SRT ` | u32 index, surface id (0 = back buffer); resets viewport and scissor to the target, as D3D9 does | SetRenderTarget |
+| `SDS ` | u32 surface id (0 none, 0xFFFFFFFF the auto depth-stencil) | SetDepthStencilSurface |
+| `VIEW` | D3DVIEWPORT9 (u32 x, y, w, h; f32 minZ, maxZ) | SetViewport |
+| `SCIS` | RECT (i32 left, top, right, bottom) | SetScissorRect |
+| `CLR ` | u32 flags (D3DCLEAR_*), D3DCOLOR, f32 z, u32 stencil, u32 rect count, rects | Clear (viewport, intersected with the scissor rect while SCISSORTESTENABLE, and with each rect; the colour through the sRGB view under SRGBWRITEENABLE) |
+| `DRAW` | u32 D3DPRIMITIVETYPE, startVertex, primitiveCount | DrawPrimitive |
+| `DRWI` | u32 type, i32 baseVertex, u32 minIndex, numVertices, startIndex, primitiveCount | DrawIndexedPrimitive |
+| `PRES` | (empty) | Present: the end of a frame, written as `f<frame>.png` |
+
+Executed (and claimed by the test): programmable draws from stream 0 with a declaration; every D3DDECLTYPE except
+UDEC3/DEC3N (decoded to float4 on the CPU, D3DCOLOR swizzled to RGBA); attribute locations by
+`fnvnx_dk_attrib_location`, remapped to the backend's 8 attribute slots; VS outputs added (as 0) for PS inputs the
+VS does not write (D3D9 allows it, GL refuses to link); per stage UBO 0 = `c[256]`, UBO 1 = `i[16]` + `b[16]`,
+UBO 2 = driver constants (VS posfix (0, 0, 1): the native viewport already carries D3D9's half pixel; PS fog mode
+from FOGENABLE / FOGTABLEMODE (vertex fog when the table mode is NONE; none for ps_3_0), FOGSTART/END/DENSITY,
+FOGCOLOR, alpha test = ALPHAFUNC when ALPHATESTENABLE, ALPHAREF / 255); all render states through
+`nx_d3d9_translate` (blend, depth, stencil, raster, sRGB write, bias, scissor); sampler states through
+`nx_d3d9_sampler` (sRGB view when SRGBTEXTURE); render-target textures and surfaces, the auto depth surface.
+
+Skipped and counted (exit code 3): fixed-function draws (no VS or no PS), FVF draws (no declaration), POSITIONT,
+streams other than 0 (instancing), cube textures (sampled as none), vertex textures. Varyings the VS writes beyond
+the PS are fine. A converter should still emit everything; nx_render reports what it skipped.
+
+Size limits: 4096x4096 images, 128 MiB of per-frame vertex/index/constant copies, 4 M command words per frame.
