@@ -7,7 +7,8 @@
 #
 #   tests/s5/farm_boot.sh <commit> <out dir> [image]
 #
-# image: the FalloutNV.exe the guest maps. Default: $FNVNX_IMAGE, else the link's boot/synth.exe (S14's synthesized
+# image: the FalloutNV.exe the guest maps (put at switch/fnv/, NX1's SD layout, and at fnvnx/game/, where guests
+# linked before NX1 look for it). Default: $FNVNX_IMAGE, else the link's boot/synth.exe (S14's synthesized
 # image as the farm made it), else none (the empty image). Boots ($FARM_BOOTS, default "raw slots stub"), all with
 # --skip-faulting-init: raw; slots, raw plus the exe's vftable slots in the native vtables' trap slots
 # (--exe-vtables, the stand-in for S2c's link fix; needs the image); and stub with the known-fault table
@@ -141,7 +142,7 @@ boot() {   # boot <tag> [extra emu_guest.py args]
   local rc=0 root=$OUT/sdmc-$tag
   rm -rf "$root"; mkdir -p "$root"
   timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE"} \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" ${IMAGE:+--file "switch/fnv/FalloutNV.exe=$IMAGE" --file "fnvnx/game/FalloutNV.exe=$IMAGE"} \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"
