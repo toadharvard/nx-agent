@@ -2181,3 +2181,27 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   BSNiAllocator::Slot7, and the va_arg-of-enum rule. S1/S2: hand-stored image vptrs (750 listed in f13
   hand_vptrs.tsv, plus `&DAT_` stores). V1: `tool_bridge` with POD layouts and pop-mismatch bridges. S13: oracle
   `___sse2_available` = 1.
+
+### J-0103 | 2026-11-04 | stream: S12-static,S13-difffuzz | status: wip | parent: J-0102
+
+* **found** - The st farms reported 0 sites because fnvcheck never built. clang-18 pulls in llvm-18 (which has
+  llvm-config) and libclang-cpp18, but not llvm-18-dev. That package holds OMP.inc, libLLVM.so and the `.a` archives.
+  The job checked only for llvm-config.
+* **did** - S12 (`6d5d88a`..`2a6cb01`):
+  - Every file the gate needs is checked against the Ubuntu 24.04 package that ships it, then installed or
+    reinstalled.
+  - fnvcheck links the shared libLLVM/libclang-cpp (`--link-shared`).
+  - A failed tool build, no compiled unit, no clang rows, or a failed gate step each give a FAILED report with the
+    reason, not a 0-sites pass. The failure head also goes to stderr.
+  - tests/s12 passes (0 failures, with SSE2NEON set).
+* **did** - S13 difffuzz-7 (`b63ddfd`):
+  - The oracle sets `___sse2_available` = 1, so `__ftol2_sse` takes the SSE2 path (cvttsd2si), while `__ftol2` (int64)
+    stays x87. 00691260 is gone; 00a1b450 is now a real difference for S1b FTOL1 (plain `fcvtzs` at that site).
+  - A setup race is fixed: 4 workers built the same unit image at once, which gave 1,072 `setup:error`/IndexError
+    rows. Unit images and the helper are now built under a lock and written atomically.
+  - Untouched result buffers are mapped before they are read (18 `run:UcError`).
+  - Setup errors other than unsupported signatures are re-fuzzed.
+  - Self-test: 0 failures.
+* **measured** - Early difffuzz-5 numbers from the 32-shard caches at aedcf24 (partial): 8,261 functions, 7,118 ok,
+  1,123 setup failures (1,072 of them the race). 1,553 functions diverge: call-flow 778, unclassified 757, bool-repr
+  126, uninit-both 122, split-global 106, uninit-arm 98.
