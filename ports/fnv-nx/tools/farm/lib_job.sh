@@ -81,6 +81,21 @@ job_inputs() {   # job_inputs <dir>: the prepare farm's tree and the compile far
 	fi
 }
 
+job_pristine() { # S11's MSVC 2008 objects of the pristine decomp (branch msvc/pristine/<decomp12>, fetched once) -> PR
+	PR=${PRISTINE_OBJS:-}
+	if [ -z "$PR" ] && [ -n "$D12" ]; then
+		local pd=$FARM_HOME/pristine-$D12
+		if [ ! -f "$pd/.done" ] && git -C "$ARTIFACTS" fetch -q origin \
+				"+refs/heads/msvc/pristine/$D12:refs/remotes/origin/msvc/pristine/$D12" 2>/dev/null; then
+			rm -rf "$pd"; mkdir -p "$pd"
+			git -C "$ARTIFACTS" archive "refs/remotes/origin/msvc/pristine/$D12" obj | tar -x -C "$pd" && touch "$pd/.done"
+		fi
+		[ -f "$pd/.done" ] && PR=$pd/obj
+	fi
+	NOTE_PR=${PR:+MSVC pristine objects ${PRISTINE_OBJS:-branch msvc/pristine/$D12}}
+	NOTE_PR=${NOTE_PR:-no MSVC pristine objects}
+}
+
 stage_ok() {     # stage_ok <build dir> <stage>: the stage ended ok or warn
 	python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status"))' "$1/$2/stage.json" 2>/dev/null \
 		| grep -qx 'ok\|warn'
@@ -114,6 +129,8 @@ EOF
 		rm -rf out fixed guest boot summary.txt report.md meta.json
 		mkdir -p out/cache fixed
 		for f in aliases.ld refs.tsv abi.tsv addrmap.tsv layouts.tsv; do cp "$bd/link/out/$f" out/; done
+		# apply's typeinfo pairs (fnvlink pair_typeinfo, in check's link order: sorted object names)
+		[ -f "$bd/link/out/typeinfo_pairs.tsv" ] && cp "$bd/link/out/typeinfo_pairs.tsv" out/
 		cp "$bd/link/out/cache/msvc.tsv" out/cache/
 		rsync -a --exclude probe/ "$bd/link/out/vtables/" out/vtables/   # the synthesized vtables, not the probe work dir
 		cp "$bd"/link/fixed/*.o fixed/

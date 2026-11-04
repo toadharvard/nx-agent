@@ -92,10 +92,9 @@ progress lines of all runs.
   * A unit that failed is retried only if its source or a dependency in its `.o.d` is newer than its log (GCC
     writes the `.d` when the error comes after preprocessing), if it has no `.d`, or if files were added to or
     removed from the prepared tree.
-  * fnvlink keeps its demangle cache, layouts and vtable caches in `build/link/out/`. Its layout cache has no
-    content key (one row per unit and type, kept forever) and its vtable caches are keyed on the host unit's
-    source mtime, not its headers, so the link stage drops the layouts of every unit whose object changed since
-    they were probed and the vtable caches when the tree changed (an S2 interface gap, see "Adapters").
+  * fnvlink keeps its demangle cache, layouts and vtable caches in `build/link/out/`; its probe caches are keyed
+    on each unit's content (`layout.unit_key`: prepared source and headers), so only units that changed are
+    probed again (subset: probe 119 s cold, 0.5 s warm).
   * Test suites are cached only when they passed; a failing suite runs again on every run.
 * Checkpoints (a killed run resumes; finished stages are skipped): a stage records `running` before it starts and
   its result only at the end, so an interrupted stage reruns and the finished ones stay cached. Inside the long
@@ -188,7 +187,7 @@ pipeline did before this round, and what it does now:
 | tools | from a snapshot copy `s2c/snap_<commit>` (no `.git`) or a worktree; the operator passes `COMMIT=` | from the checkout; no commit recorded | from the checkout, its HEAD recorded (`PORT_COMMIT` for a copy) |
 | prepare | `rm -rf tree; tools/prepare.py decomp tree`; `prepared_from.txt` = `$COMMIT` | staging + sync; fingerprint missed `patches/` and `shim/include/fnvnx_win32.h`, which prepare reads; no provenance | same tree content; full input fingerprint + head; provenance record; `PREPARED=` adopts another run's tree |
 | compile | `objcheck.py` (damaged objects), then `compile.sh tree obj "" 2` with `CXX` unset = `aarch64-linux-gnu-g++` (`s2c/xtc/bin` first on PATH), `-O2`, `SSE2NEON=$S/ext/sse2neon` | `GAME_CXX=auto`: fnvnx-a64 `aarch64-none-elf-g++` whenever the toolchain was there | `GAME_CXX=standin` default; `CROSS_BIN` for a private copy of the cross tools; damaged-object check; same compile.sh flags (`-fPIC`, J-0034 set) |
-| seed | copies `cache/`, `layouts.tsv`, `vtables/` of an earlier run into the new run dir | none (keeps `build/link/out/`) | `LINK_SEED` copies `cache/` only; layouts and vtable caches of another tree are not reused (see Findings) |
+| seed | copies `cache/`, `layouts.tsv`, `vtables/` of an earlier run into the new run dir | none (keeps `build/link/out/`) | `LINK_SEED` copies the same (without the probe work dir) into a new `build/link/out/`; the content-keyed caches make it safe across trees |
 | resolve 1 | `--extern-text $S/s4/addr_ids.txt`; default `--units-renames`; no `--override`, no `--msvc-objs` (f12) | `EXTERN_TEXT`, `OVERRIDE` | + `MSVC_OBJS`, `UNITS_RENAMES` (defaults = the hand flow) |
 | probe | `probe out tree 2`, `CXX` unset: `aarch64-linux-gnu-g++` + `layout.flags()` | through `cxx-probe` = game compiler + every compile.sh `-f` option (`-fPIC`, `-fpermissive`, ...) | the game compiler + `layout.flags()` (which carries J-0034's set since S2's fix) |
 | resolve 2 | always | only when `layouts.tsv` changed (missed new synthesized vtables) | always |
@@ -212,8 +211,6 @@ Still different (by design, or left for later):
 * `-MD` in the compile `CXX` (dependency files, no effect on the objects).
 * `--extern-text`: the hand flow passes `$S/s4/addr_ids.txt`, made by S4's scratch scripts; the link stage now
   makes the same file from the tree (`EXTERN_TEXT=auto`, byte-identical for the f11/f12 tree).
-* The seeded `layouts.tsv` and `vtables/` of the hand flow are not reused: a cold probe in a new `build/` costs
-  more than S2c's seeded runs, but every layout is measured on the current tree.
 * Not run in full since this alignment: the pipeline's own prepare of the whole tree, the full compile and link
   and the boot on them (this round ran a 31-unit subset on an adopted tree only, see "Subset run"). The next
   full run with `make` is that test; compare it with S2c's run of the same commit with `linkdiff.py`.
@@ -278,8 +275,9 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `OVERRIDE` | | fnvlink resolve `--override` file. |
 | `EXTERN_TEXT` | auto | fnvlink resolve `--extern-text`: `auto` = made from the tree's `units.json` (`tools/pipeline/extern_text.py`, S4's `addr_ids.txt`), `none` = off, or a file. |
 | `MSVC_OBJS` | | fnvlink resolve `--msvc-objs` (S11's pristine MSVC objects, S2b's vtable slots). Not used by f11/f12. |
+| `MSVC_CODE` | | fnvlink resolve `--msvc-code` (the same objects, only for the definitions' register reads: ecx-not-passed / this-not-passed judged on the MSVC code; needs python capstone). The link farm passes S11's pristine objects. |
 | `UNITS_RENAMES` | | fnvlink resolve `--units-renames`; empty: fnvlink's default (`patches/units_renames.tsv`), `none`: off. |
-| `LINK_SEED` | | fnvlink out dir of an earlier run; its demangle cache seeds a new `build/link/out/`. |
+| `LINK_SEED` | | fnvlink out dir of an earlier run; its demangle cache, `layouts.tsv` and `vtables/` seed a new `build/link/out/`. |
 | `GUEST_LINK` | auto | `auto`: S5's `toolchain/game/build.sh` when present, else the adapter. `adapter` forces the adapter. Any other value is a script with the same CLI. |
 | `GAME_NEW` | runtime | toolchain/game/build.sh `GAME_NEW`: `runtime` (the game objects' global new/delete weakened, malloc stand-ins) or `game`. |
 | `VORBIS` | auto | ILP32 libogg/libvorbis for S5's guest link script: `auto` = built by the toolchain stage, `none` = without, or a prefix. |
@@ -367,7 +365,6 @@ Undefined-symbol categories (`tools/pipeline/undef.py`, owners in brackets):
 | `tools/pipeline/guest_link.py` + `guest_stub.c` | Fallback only since S5's script landed (`GUEST_LINK=adapter`): the full guest link of S2 objects + platform + loader + runtime. It compiles the guest runtime, `platform/` (without the libnx-side files) and `loader/src` with fnvnx-a64. Sources that fail are listed and left out. It links the whole image (`--no-gc-sections`, since there is no boot code). Objects that binutils 2.45 refuses are left out and listed with the reason (`error adding symbols`; a relocation against a *defined* symbol that does not fit, mapped to the referencing object with nm), and the link is retried. Every undefined symbol is bound to a trap stub that reports it, and the result is packed as `guest.nso`. Its numbers count every compiled object; S5's script links from its boot code with gc. | S5's `toolchain/game/build.sh` is in the tree; `GUEST_LINK=auto` picks it automatically |
 | `build.py` link stage | Removes `build/link/out/objcopy/` before each `fnvlink.py resolve`. resolve writes one `.args`/`.redefine`/`.src` per object but never removes old ones, so `apply` would rewrite objects of units that no longer compile. | S2's resolve clears its per-object outputs |
 | `build.py` compile stage | Header dependencies: `-MD` in `CXX`, and objects deleted when a header changed. compile.sh compares the object with the unit's source only. | compile.sh tracks dependencies |
-| `build.py` link stage | Probe cache invalidation: `build/link/out/layouts.ids.json` holds the object identity (size, mtime) of every unit when its layouts were probed; rows of units whose object changed are dropped before resolve. `vtables.tree_id` holds the tree id the vtable caches were built for; `vtables/cache.json` and `emit_cache.json` are removed when it changes. | layout.py and vtables.py key their caches on the unit's content and headers (S2) |
 | `build.py` link stage | The `cxx-probe` wrapper of the first runs is gone: `layout.flags()` carries J-0034's semantics flags since S2's fix. A wrapper is written only when `GAME_CXX` is a command with arguments (probes take one executable in `CXX`). | - |
 
 ## Findings of the hand-flow alignment (2026-11-04)
@@ -376,7 +373,7 @@ Undefined-symbol categories (`tools/pipeline/undef.py`, owners in brackets):
   by prepare's POST hook) nor `shim/include/fnvnx_win32.h` (read by DECL1's platform names): a patch change left
   the tree stale. The link fingerprint missed S4's provider tables, the default `units_renames.tsv`, the shim and
   the sse2neon pin; resolve 2 was skipped when only the synthesized vtables changed.
-* **S2 (open)**: `layout.py` caches layouts per (unit, type) with no content key and never probes a cached row
+* **S2 (fixed since by S2c: content keys, column 8 of `layouts.tsv`; the pipeline's own invalidation is gone)**: `layout.py` cached layouts per (unit, type) with no content key and never probes a cached row
   again; `vtables.py` keys its probe and emit caches on the host unit's source mtime, not its headers. S2c's
   driver copies `layouts.tsv` and `vtables/` from an earlier run (`SEED`, e.g. r13 for f3): layouts measured on
   an older tree (before D15's 24-byte CRITICAL_SECTION, for instance) stay in every later run. The pipeline drops

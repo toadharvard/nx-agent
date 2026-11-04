@@ -75,6 +75,9 @@ CONFIG = [
     ('EXTERN_TEXT', 'auto', 'fnvlink resolve --extern-text list: auto = made from the tree\'s units.json by '
                             'tools/pipeline/extern_text.py (S4\'s addr_ids.txt), none = off, or a file'),
     ('MSVC_OBJS', '', 'fnvlink resolve --msvc-objs: pristine MSVC 2008 objects (S11) for S2b\'s vtable slots'),
+    ('MSVC_CODE', '', 'fnvlink resolve --msvc-code: the same objects, only for the definitions\' register reads '
+                      '(ecx-not-passed / this-not-passed judged on the MSVC code); without it the verdicts are as '
+                      'before'),
     ('UNITS_RENAMES', '', 'fnvlink resolve --units-renames table (empty: fnvlink\'s default, the port\'s '
                           'patches/units_renames.tsv; none: off)'),
     ('LINK_SEED', '', 'fnvlink out dir of an earlier run: its demangle cache (cache/) seeds build/link/out'),
@@ -1543,8 +1546,8 @@ def extern_text_id(b):
     return et if et in ('', 'none') else file_hash(os.path.abspath(et))
 
 
-def msvc_objs_id(b):
-    d = b.cfg['MSVC_OBJS']
+def msvc_objs_id(b, key='MSVC_OBJS'):
+    d = b.cfg[key]
     if not d:
         return ''
     d = os.path.abspath(d)
@@ -1561,82 +1564,28 @@ def objects_map(objects_tsv):
     return m
 
 
-def unit_identity(objs, tree, src):
-    """What a unit's layout probe depends on: its object's content (the object changes whenever its source or a
-    header changed), else its source file's content. Content, not mtime: objects fetched from the compile farms
-    carry the publishing commit's time."""
-    for p, tag in ((objs.get(src), 'o'), (os.path.join(tree, src), 's')):
-        if p and os.path.isfile(p):
-            return '%s:%d:%s' % (tag, os.path.getsize(p), file_hash(p))
-    return None
-
-
-def invalidate_link_caches(b, r, out, tree, obj, units):
-    """fnvlink keeps probe results across runs: layouts.tsv per (unit, type) with no content key, vtables/ keyed on
-    the host unit's source mtime (not its headers). Drop the layouts of units whose object changed since they were
-    probed, and the vtable caches when the tree changed (S2c's driver re-prepares into a fresh tree every run, so
-    its keys never hit a changed tree; the pipeline keeps unchanged files' mtimes). Returns the function that
-    records the current identities once the link succeeded."""
-    idf = os.path.join(out, 'layouts.ids.json')
-    try:
-        ids = json.load(open(idf))
-    except (OSError, ValueError):
-        ids = {}
-    lay = os.path.join(out, 'layouts.tsv')
-    dropped = kept = 0
-    if os.path.isfile(lay):
-        lines = open(lay, encoding='utf-8', errors='surrogateescape').read().splitlines()
-        keep = [lines[0]] if lines and lines[0].startswith('#') else []
-        cur = {}
-        for line in lines[len(keep):]:
-            u = line.split('\t', 1)[0]
-            if u not in cur:
-                cur[u] = unit_identity(obj, tree, u)
-            if cur[u] is not None and ids.get(u) == cur[u]:
-                keep.append(line)
-                kept += 1
-            else:
-                dropped += 1
-        if dropped:
-            with open(lay + '.tmp', 'w', encoding='utf-8', errors='surrogateescape') as f:
-                f.write(''.join(l + '\n' for l in keep))
-            os.replace(lay + '.tmp', lay)
-    r.metric('link_layouts_reused', kept)
-    r.metric('link_layouts_invalidated', dropped)
-    vt = os.path.join(out, 'vtables')
-    tid = os.path.join(out, 'vtables.tree_id')
-    tree_id = up_id(b, 'prepare') or ''
-    if os.path.isdir(vt) and (not os.path.isfile(tid) or open(tid).read().strip() != tree_id):
-        for n in ('cache.json', 'emit_cache.json'):
-            if os.path.exists(os.path.join(vt, n)):
-                os.remove(os.path.join(vt, n))
-        r.note('the tree changed since the vtable caches were built: vtables probed again')
-
-    def remember():
-        with open(idf, 'w') as f:
-            json.dump({u: unit_identity(obj, tree, u) for u in units}, f)
-        with open(tid, 'w') as f:
-            f.write(tree_id + '\n')
-    return remember
-
-
 def seed_link_out(b, r, out):
-    """LINK_SEED=<fnvlink out dir>: copy its demangle cache (cache/: name -> undname / c++filt text, valid for any
-    tree) into a fresh build/link/out, as S2c's driver seeds a new run. Its layouts.tsv and vtables/ are not
-    copied: they are probe results of another tree (see invalidate_link_caches)."""
+    """LINK_SEED=<fnvlink out dir of an earlier run>: what of its demangle cache (cache/), layouts.tsv and vtables/
+    (without the probe work dir) a fresh build/link/out lacks, as S2c's driver seeds a new run. fnvlink keys its
+    probe caches on each unit's content (layout.unit_key), so rows of another tree are probed again by fnvlink
+    itself; the seed only saves the probes whose units did not change."""
     seed = b.cfg['LINK_SEED']
     if not seed:
         return
-    src = os.path.join(os.path.abspath(seed), 'cache')
-    dst = os.path.join(out, 'cache')
-    if os.path.isdir(dst) and os.listdir(dst):
-        return
-    if not os.path.isdir(src):
-        r.note('LINK_SEED=%s has no cache/: nothing seeded' % seed)
-        return
-    shutil.rmtree(dst, ignore_errors=True)
-    shutil.copytree(src, dst)
-    r.note('demangle cache seeded from %s (%s)' % (src, human(du(dst))))
+    seed = os.path.abspath(seed)
+    got = []
+    for n in ('cache', 'layouts.tsv', 'vtables'):
+        src, dst = os.path.join(seed, n), os.path.join(out, n)
+        if not os.path.exists(src) or os.path.exists(dst):
+            continue
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, ignore=shutil.ignore_patterns('probe'))
+        else:
+            shutil.copyfile(src, dst)
+        got.append(n)
+    if got:
+        r.note('seeded from %s: %s' % (seed, ', '.join(got)))
+    r.metric('link_seeded', len(got))
 
 
 class Link(Stage):
@@ -1647,7 +1596,8 @@ class Link(Stage):
 
     def fingerprint(self, b):
         return ['link-v3', link_tool_inputs(b), up_id(b, 'compile'), up_id(b, 'prepare'),
-                file_hash(b.cfg['OVERRIDE']), extern_text_id(b), msvc_objs_id(b), game_cxx_id(b)]
+                file_hash(b.cfg['OVERRIDE']), extern_text_id(b), msvc_objs_id(b), msvc_objs_id(b, 'MSVC_CODE'),
+                game_cxx_id(b)]
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'link', 'out', 'aliases.ld'))
@@ -1672,13 +1622,12 @@ class Link(Stage):
         else:
             r.note('EXTERN_TEXT=none: the referenced .text addresses without a definition get no E entries (the '
                    'hand flow passes S4\'s addr_ids.txt)')
-        for opt, key in (('--override', 'OVERRIDE'), ('--msvc-objs', 'MSVC_OBJS'), ('--units-renames', 'UNITS_RENAMES')):
+        for opt, key in (('--override', 'OVERRIDE'), ('--msvc-objs', 'MSVC_OBJS'), ('--msvc-code', 'MSVC_CODE'),
+                         ('--units-renames', 'UNITS_RENAMES')):
             if b.cfg[key]:
                 args += [opt, b.cfg[key] if b.cfg[key] == 'none' else os.path.abspath(b.cfg[key])]
         r['resolve_options'] = [b.rel(a) for a in args[3:]]
         seed_link_out(b, r, out)
-        objs = objects_map(objects)
-        remember = invalidate_link_caches(b, r, out, tree, objs, sorted(objs))
         env = b.env({'CXX': probe_cxx(b, d)})
         log = r['log']
 
@@ -1695,15 +1644,32 @@ class Link(Stage):
         # S2c's order: resolve (asks for layouts and vtables), probe (layouts + synthesized vtables/typeinfo),
         # resolve again with both, apply, trial link
         resolve(1)
-        b.say('link: fnvlink probe (aggregate layouts, synthesized vtables; %d jobs)' % b.jobs)
+        # fnvlink probe = the layout probe, then the vtable synthesis; run as its two documented halves (probe with
+        # FNVNX_NO_VTABLES=1, then vtables) to time each
+        b.say('link: fnvlink probe (aggregate layouts; %d jobs)' % b.jobs)
         t = time.time()
-        rc = b.sh([PY, '-I', fl, 'probe', out, tree, b.jobs], log, env=env)
+        rc = b.sh([PY, '-I', fl, 'probe', out, tree, b.jobs], log, env=dict(env, FNVNX_NO_VTABLES='1'))
+        r.metric('link_probe_layouts_s', round(time.time() - t, 1))
+        if os.path.exists(os.path.join(out, 'vtable_requests.tsv')):
+            b.say('link: fnvlink vtables (synthesized vtables and typeinfo; %d jobs)' % b.jobs)
+            t2 = time.time()
+            rc = b.sh([PY, '-I', fl, 'vtables', out, tree, b.jobs], log, env=env) or rc
+            r.metric('link_probe_vtables_s', round(time.time() - t2, 1))
         r.metric('link_probe_s', round(time.time() - t, 1))
         r.metric('link_probe_jobs', b.jobs)
-        mm = re.findall(r'probe: (\d+) units, (\d+) types \((\d+) cached\)', open(log, errors='replace').read())
+        text = open(log, errors='replace').read()
+        mm = re.findall(r'probe: (\d+) units, (\d+) types \((\d+) cached\)', text)
         if mm:
             r.metric('link_probe_units', int(mm[-1][0]))
             r.metric('link_probe_types', int(mm[-1][1]))
+            r.metric('link_probe_cached', int(mm[-1][2]))
+        mm = re.findall(r'probe: (\d+) cached rows, (\d+) dropped', text)
+        if mm:
+            r.metric('link_layouts_dropped', int(mm[-1][1]))
+        mm = re.findall(r'vtables round (\d+): (\d+) classes, (\d+) host units', text)
+        if mm:
+            r.metric('link_vtable_rounds', len(mm))
+            r.metric('link_vtable_host_probes', sum(int(x[2]) for x in mm))
         if rc:
             r.note('probe exited %d; resolve 2 uses the layouts and vtables it left' % rc)
         resolve(2)
@@ -1722,7 +1688,6 @@ class Link(Stage):
         t = time.time()
         b.sh([PY, '-I', fl, 'check', out, fixed], clog, env=env, check=True)
         r.metric('link_check_s', round(time.time() - t, 1))
-        remember()
         # S13's split-global check on the rewritten objects (part of S2c's run summary): want 0
         rb = os.path.join(d, 'check_rebind.txt')
         open(rb, 'w').close()
@@ -1756,8 +1721,10 @@ class Link(Stage):
                 pf.get('decomp_commit') or 'unknown', pf.get('tree'), pf.get('mode'), b.head or 'unknown'))
             f.write(''.join(open(os.path.join(out, 'stats.txt')).readlines()[:3]))
             mt = r.get('metrics', {})
-            f.write('seconds: resolve 1 %s, probe %s (%s jobs), resolve 2 %s, apply %s, trial link %s\n' % tuple(
-                mt.get('link_%s' % k) for k in ('resolve1_s', 'probe_s', 'probe_jobs', 'resolve2_s', 'apply_s', 'check_s')))
+            f.write('seconds: resolve 1 %s, probe %s (layouts %s, vtables %s; %s jobs), resolve 2 %s, apply %s, trial link '
+                    '%s\n' % tuple(mt.get('link_%s' % k) for k in ('resolve1_s', 'probe_s', 'probe_layouts_s',
+                                                                  'probe_vtables_s', 'probe_jobs', 'resolve2_s',
+                                                                  'apply_s', 'check_s')))
             f.write(''.join(l + '\n' for l in ctext.splitlines() if l.strip() and not l.startswith(('$ ', '[exit'))))
             if mm:
                 f.write(mm.group(0) + '\n')

@@ -271,11 +271,12 @@ def render(b, stages, snap, prev):
                 '%s %s' % (k, fmt(v)) for k, v in sorted(rc.items(), key=lambda x: -x[1])) + '.')
             L.append('')
         L.append('resolve options: %s; S13 split-global check (`build/link/check_rebind.txt`): %s objects / %s '
-                 'relocations bypass the rebinding (want 0); layouts reused %s, invalidated %s. Run summary: '
+                 'relocations bypass the rebinding (want 0); probe %s s (layouts %s s, vtables %s s, %s jobs). Run summary: '
                  '`build/link/summary.txt` (first line: the commit the tree was prepared from).' % (
                      ' '.join('`%s`' % a for a in lk.get('resolve_options') or []) or 'none',
                      fmt(m.get('link_bypassing_objects')), fmt(m.get('link_bypassing_relocs')),
-                     fmt(m.get('link_layouts_reused')), fmt(m.get('link_layouts_invalidated'))))
+                     fmt(m.get('link_probe_s')), fmt(m.get('link_probe_layouts_s')), fmt(m.get('link_probe_vtables_s')),
+                     fmt(m.get('link_probe_jobs'))))
         L.append('')
         if lk.get('apply_failures'):
             L.append('apply could not rewrite %d objects (left out): %s' % (

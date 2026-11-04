@@ -16,13 +16,17 @@
 # directory link/build, so fnvlink's demangle, layout and vtable caches carry over between commits (each dropped
 # where its inputs changed). It needs only the AArch64 Linux cross tools (the host's when they are the pinned Ubuntu
 # build, else toolchain/cross/setup.sh unpacks them, no root): no fnvnx-a64, no MSVC. The probe runs with
-# JOBS (default nproc) parallel compiles; the report gives every step's time. The extern-text list is made from the
-# tree (tools/pipeline/extern_text.py).
+# JOBS (default nproc) parallel compiles; the report gives every step's time (layout probe and vtable synthesis
+# apart). The extern-text list is made from the tree (tools/pipeline/extern_text.py). S11's pristine MSVC objects
+# (branch msvc/pristine/<decomp12>, fetched once; PRISTINE_OBJS=<dir> instead) go to both resolves as
+# --msvc-code (S2c: ecx-not-passed / this-not-passed judged on the definitions' code; needs python capstone);
+# without them the verdicts are as before.
 #
 # Published when the link is complete and prepared from <commit> (FARM_PUBLISH=always also publishes a UNITS
 # subset, for tests against a local ARTIFACTS remote; 0 never), as branch link/<commit12> of the private artifacts
 # repository toadharvard/fnv-nx-build (branches only: the session proxy refuses tags and ref deletions):
-#   out/{aliases.ld,refs.tsv,abi.tsv,addrmap.tsv,layouts.tsv,cache/msvc.tsv,vtables/}   (vtables/ without probe/)
+#   out/{aliases.ld,refs.tsv,abi.tsv,addrmap.tsv,layouts.tsv,typeinfo_pairs.tsv,cache/msvc.tsv,vtables/}
+#   (vtables/ without the probe work dir; typeinfo_pairs.tsv from apply, in check's link order)
 #   fixed/*.o   summary.txt   report.md   meta.json
 # The rolling branch with the history of every publish is link-head: a branch named `link` cannot exist next to
 # link/<commit12> (git refs are paths). Each publish is a child of link-head's newest commit, so a push sends only
@@ -48,13 +52,17 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 t0=$(date +%s)
 
 host_check git python3 make curl jq rsync dpkg-deb gcc llvm-undname py:elftools
+python3 -I -c 'import capstone' 2>/dev/null || [ "${FARM_APT:-0}" != 1 ] || python3 -m pip install -q --break-system-packages capstone
 job_sources "$REPO"
 LB=${LINK_BUILD:-$FARM_HOME/link/build}
 job_inputs "$(dirname "$LB")"
-log "tree: $NOTE_TREE; objects: $NOTE_OBJS"
+job_pristine
+log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR"
 printf 'TREE=%q\nOBJS=%q\nNOTE_TREE=%q\nNOTE_OBJS=%q\n' "$TREE" "$OBJS" "$NOTE_TREE" "$NOTE_OBJS" \
 	> "$(dirname "$LB")/inputs-$C12.env"     # for full_job.sh, which builds on this link
 ARGS=(TC_DL=none VORBIS=none)          # the link needs only the cross tools, not fnvnx-a64
+# S2c's resolve --msvc-code: ecx-not-passed / this-not-passed judged on the definitions' MSVC code (capstone)
+[ -n "$PR" ] && ARGS+=(MSVC_CODE="$PR")
 [ -n "$TREE" ] && ARGS+=(PREPARED="$TREE")
 [ -n "$OBJS" ] && ARGS+=(OBJECTS="$OBJS")
 rc=0
@@ -70,16 +78,16 @@ fi
 t1=$(date +%s)
 
 # Report: the summary numbers.
-python3 -I - "$LB" "$COMMIT" "$rc" $((t1 - t0)) "$NOTE_TREE" "$NOTE_OBJS" "$NOTE_FAIL" > "$REPORT" <<'EOF'
+python3 -I - "$LB" "$COMMIT" "$rc" $((t1 - t0)) "$NOTE_TREE" "$NOTE_OBJS" "$NOTE_FAIL" "$NOTE_PR" > "$REPORT" <<'EOF'
 import json, os, sys
-bd, commit, rc, secs, tree, objs, fail = sys.argv[1:8]
+bd, commit, rc, secs, tree, objs, fail, pristine = sys.argv[1:9]
 def rec(s):
     try:
         return json.load(open(os.path.join(bd, s, 'stage.json')))
     except (OSError, ValueError):
         return {}
 L = ['# link %s' % commit[:12], '', '- commit: `%s`; make exit %s; %.0f min' % (commit, rc, int(secs) / 60.0),
-     '- tree: ' + tree, '- objects: ' + objs]
+     '- tree: ' + tree, '- objects: ' + objs, '- resolve --msvc-code: ' + pristine]
 if fail:
     L.append('- ' + fail)
 pf = rec('prepare').get('prepared_from') or {}
@@ -101,10 +109,12 @@ if m:
           'relocations (want 0); extern-text addresses %s; apply failures %s' % (
               g('check_objects'), g('check_undefined'), g('check_multidef'), g('bypassing_objects'),
               g('bypassing_relocs'), g('extern_text_addrs'), g('apply_failures')),
-          '- seconds: resolve 1 %s, probe %s (%s jobs, %s units / %s types probed), resolve 2 %s, apply %s, trial '
-          'link %s; layouts reused %s, invalidated %s' % (
-              g('resolve1_s'), g('probe_s'), g('probe_jobs'), g('probe_units'), g('probe_types'), g('resolve2_s'),
-              g('apply_s'), g('check_s'), g('layouts_reused'), g('layouts_invalidated'))]
+          '- seconds: resolve 1 %s, probe %s with %s jobs (layouts %s: %s units / %s types probed, %s rows cached, %s '
+          'dropped for changed units; vtables %s: %s rounds, %s host unit probes), resolve 2 %s, apply %s, trial '
+          'link %s' % (
+              g('resolve1_s'), g('probe_s'), g('probe_jobs'), g('probe_layouts_s'), g('probe_units'), g('probe_types'),
+              g('probe_cached'), g('layouts_dropped'), g('probe_vtables_s'), g('vtable_rounds'),
+              g('vtable_host_probes'), g('resolve2_s'), g('apply_s'), g('check_s'))]
     cc = rec('link').get('check_classes') or {}
     if cc:
         L += ['', '| trial link: undefined names by class | names |', '|---|---|']
