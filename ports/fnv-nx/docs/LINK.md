@@ -236,23 +236,35 @@ in ecx, usually its own `this`. `abi.compare` / `abi2` classify it `x86-inconsis
 bridge moves (the ecx parameter is often unused - a decompiler artefact: 0x00a75ec0, a stream factory, and
 0x00bbbe30 never read ecx - and a direct call would leave them in the wrong registers). A missing **edx** stays the `edx-dummy`
 bridge (the decomp's `__fastcall f(T*, int edx_dummy, ...)` for a member function: edx is the x86 caller's scratch).
-**The definition's register reads** (`resolve --msvc-code <dir>`, or with `--msvc-objs`; V1's `c3_ecx.py`): for an
-`ecx-not-passed` or `this-not-passed` pair resolve reads the definition's x86 code in S11's pristine MSVC object
-(`<dir>/u<index>.obj`, `vslots.Code.entry_use`). Every path from the entry is followed until ecx is written: an
-operand, address or sub-register read is `read`; a call or tail jump to a callee that takes ecx (its declaration),
-an indirect call or a jump it cannot follow is `pass`; a switch through the function's own jump table goes to every
-label of the function. Only `push ecx` (MSVC reserves a stack word that way) or no use at all: the x86 callee
-never looked at ecx, so the pair is compared again with that parameter dead (`ecx-unused`) and gets an ordinary
-bridge, or none. A definition S1b's patches renamed (`units_renames.tsv`) has no pristine code under its new name:
-the patch gave it the `this` the pristine code never declared, and its pairs stay flagged. On V1's c3 pairs
-(f12) the reader agrees with `c3_ecx.py` on 224 of 225 addresses. The exception is 0x00e3dfb0: c3 saw `jmp [eax*4 + table]`
-as a call, and every case of that switch reads `[ecx+n]`, so it stays flagged. Of V1's three FP-dead and eleven
-TP-this-dead addresses, these are bridged now:
-0x00a75ec0, 0x00bbbe30, 0x00e89ad0 (`push`), 0x00a5d450 (`push`), 0x00a8f730, 0x00b80e70, 0x00bc10e0, 0x00bc59b0,
-0x00e92e60. Still flagged: the four S1b-renamed ones (0x00a43330, 0x00a50b10, 0x00a8a9a0, 0x00a98eb0) and 0x00e3dfb0.
-On the 22 units that reference or define those addresses (f13's objects), resolve reports 13 pairs `ecx unused,
-bridged`, 10 `used, flagged` and 1 without code. Without the objects, nothing changes. The edx side keeps
-`edx-dummy`: c3 found no definition that reads an edx it was not passed; two pass it on (0x00a62130).
+**The definition's register reads** (`resolve --msvc-code <dir>`, or with `--msvc-objs`; V1's `c3_ecx.py`, S1b's
+corrections J-0102). For an `ecx-not-passed` or `this-not-passed` pair, resolve reads the definition's x86 code in
+S11's pristine MSVC object (`<dir>/u<index>.obj`, `vslots.Code.entry_use`). Every path from the entry is followed,
+and a switch through the function's own jump table goes to every label of the function. The register is used when:
+
+* `read`: an operand, an address or a sub-register reads it while it still holds the incoming value;
+* `pass`: it reaches a callee. It is still in the register at a call or tail jump to a callee that takes it, or it
+  was pushed to a stack word that lies inside the callee's stack arguments at a call (00e89ad0 `push ecx; call
+  h(int)`, 00a5d450's thiscall `Create(a, ecx)`). A callee takes a register when its own pristine code uses it,
+  followed recursively through `jmp` forwarders (00a50b10, 00a98eb0, 00a8a9a0). Without code, its declaration
+  decides. An indirect call or a jump the reader cannot follow takes both registers;
+* a definition S1b renamed (`units_renames.tsv`, 00a43330 ...) is judged by its patched declaration: the patch gave
+  it the register its unpatched, pristine code lacks. Renamed references are found under their old names.
+
+The stack is followed by depth: writes through `[esp+k]` / `[ebp+m]` overwrite a pushed word, reads read it, and
+`pop` restores it. A callee's argument bytes come from its declaration, else from the bytes pushed since the
+previous call. A `push ecx` whose word is overwritten before use is a reserved local (MSVC's SEH prologues in the
+bsshader `CreateShader`s): the register stays dead.
+
+When ecx is not used, the x86 callee never looked at it, so the pair is compared again with that parameter dead
+(`ecx-unused`) and gets an ordinary bridge, or none. Against the current prepared tree and S11's objects:
+
+* used: all seven S1b cases (00e89ad0 and 00a5d450 `pass`, 00e3dfb0 `read`, 00a43330 / 00a50b10 / 00a98eb0 /
+  00a8a9a0 `pass`), and all 211 of V1's TP addresses (196 read, 15 pass);
+* dead, and bridged: 0x00a75ec0, 0x00bbbe30, 0x00a8f730, 0x00e92e60, plus the reserved locals 0x00b80e70,
+  0x00bc10e0, 0x00bc59b0.
+
+Without the objects nothing changes. The edx side keeps `edx-dummy`: c3 found no definition that reads an edx it
+was not passed; two pass it on (0x00a62130).
 
 Sites on the ninth-round objects (callee address: referencing units):
 

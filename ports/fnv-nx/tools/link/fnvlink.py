@@ -560,7 +560,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                        for _, (si, typ, _) in o_.rel(i_).items() if typ in (21, 20)}   # P32
         return called_cache[u_.source]
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
-    ecx_use = msvc_code_use(units_json, ms, msvc)
+    ecx_use = msvc_code_use(units_json, ms, msvc, renames)
     for u in have:
         idx = KeyIndex()
         for n, a in u.refs.items():
@@ -1408,19 +1408,44 @@ def override_pending(path):
     return out
 
 
-def msvc_code_use(units_json, ms, msvc):
+def msvc_code_use(units_json, ms, msvc, renames=()):
     """f(original address) -> how the pristine MSVC code there uses the incoming ecx / edx (vslots.Code.entry_use),
     from FNVNX_MSVC_CODE or FNVNX_MSVC_OBJS (`--msvc-code` / `--msvc-objs`: S11's u<index>.obj); None without them.
-    A callee takes the registers its declaration puts there (abi.x86_locations); a call through a function-pointer
-    variable takes any."""
+    A callee takes the registers its own pristine code uses, else those its declaration puts there
+    (abi.x86_locations); a call through a function-pointer variable takes any. S1b's renamed references
+    (units_renames rows) are found under their old, pristine names; a renamed definition uses the registers of its
+    patched declaration."""
     d = os.environ.get('FNVNX_MSVC_CODE') or os.environ.get('FNVNX_MSVC_OBJS')
     if not d or not os.path.isdir(d):
         return None
     try:
         import types
-        code = msvc_vslots.Code(types.SimpleNamespace(units=json.load(open(units_json))['units']), d)
+        uu = json.load(open(units_json))['units']
+        code = msvc_vslots.Code(types.SimpleNamespace(units=uu), d)
     except ImportError as e:
         log('--msvc-code: %s (capstone): register reads not checked' % e)
+        return None
+    by_src = {u['source']: i for i, u in enumerate(uu)}
+    code.aliases = [(int(r[2], 16), r[3], by_src.get(r[0])) for r in renames if len(r) >= 5]
+    code.renamed = {int(r[2], 16) for r in renames if len(r) >= 5 and r[1] == 'def'}
+
+    def arg_bytes(n, slot=False):
+        """(stack argument bytes, bytes the callee pops) of a callee by its declaration, or None."""
+        if slot:
+            if not n.startswith('__imp_'):
+                return None
+            n = n[6:]
+        if n.startswith('?'):
+            s = msvc(n)
+            if not s or s.kind != 'func':
+                return None
+            nb = abi.x86_stack_bytes(s)
+            return None if nb is None else (nb, nb if (s.cc or 'cdecl') in abi.CALLEE_POP else 0)
+        m = re.match(r'^(@|_)[^@]+@(\d+)$', n)
+        if m:
+            nb = int(m.group(2))
+            nb = max(0, nb - 8) if m.group(1) == '@' else nb
+            return nb, nb
         return None
 
     def takes(n, slot=False):
@@ -1447,7 +1472,7 @@ def msvc_code_use(units_json, ms, msvc):
 
     def use(a):
         if a not in cache:
-            cache[a] = code.entry_use(a, takes, need)
+            cache[a] = code.entry_use(a, takes, need, arg_bytes)
         return cache[a]
     return use
 
